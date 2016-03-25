@@ -22,42 +22,63 @@ function quit() {
 }
 
 this.PositronAppRunner = function PositronAppRunner() {
+  this._packageJSON = null;
 }
 
 PositronAppRunner.prototype = {
-  _continueWithPackageJSON: function par_ContinueWithPackageJSON(aInputStream,
-  		                                                 aStatusCode,
-								 aRequest) {
+  _unboundLoadAndContinue: function par_unboundLoadAndContinue(aThenWhat,
+                                                               aInputStream,
+                                                               aStatusCode,
+                                                               aRequest) {
     if (aStatusCode != NS_OK) {
+      dump("A load failed!\n");
       // Load failed somehow.
       quit();
       return;
     }
 
-    let json = NetUtil.readInputStreamToString(aInputStream,
+    let data = NetUtil.readInputStreamToString(aInputStream,
     	                                       aInputStream.available());
-    dump("Package JSON: " + json + "\n");
+    return aThenWhat(data);
+  },
 
-    let parsedJSON;
+  _loadAndContinue: function par_LoadAndContinue(aThenWhat) {
+    return this._unboundLoadAndContinue.bind(this, aThenWhat.bind(this));
+  },
+
+  _executeMainScript: function par_ExecuteMainScript(aData) {
+    dump("Main script is " + aData + "\n");
+    quit();
+  },
+
+  _loadMainScript: function par_LoadMainScript(aScriptName) {
+    let mainScript = this._baseDir.clone();
+    mainScript.append(aScriptName);
+
+    NetUtil.asyncFetch(mainScript,
+	               this._loadAndContinue(this._executeMainScript));
+  },
+
+  _parsePackageJSON: function par_parsePackageJSON(aData) {
+    dump("Package JSON: " + aData + "\n");
+
     try {
-      parsedJSON = JSON.parse(json);
+      this._parsedJSON = JSON.parse(aData);
     } catch (e) {
       dump("package.json parse failed!\n");
       quit();
       return;
     }
 
-    let mainScript = parsedJSON["main"];
-    dump("main script is " + mainScript + "\n");
-    dump("One day I'll execute it!\n\n\n");
-    quit();
-    return;
+    let mainScript = this._parsedJSON["main"];
+    this._loadMainScript(mainScript);
   },
 
   run: function par_Run(appBaseDir, appPackageJSON) {
-    this.baseDir = appBaseDir;
-    this.packageJSON = appPackageJSON;
+    this._baseDir = appBaseDir;
+    this._packageJSON = appPackageJSON;
 
-    NetUtil.asyncFetch(appPackageJSON, this._continueWithPackageJSON.bind(this));
+    NetUtil.asyncFetch(appPackageJSON,
+	               this._loadAndContinue(this._parsePackageJSON));
   }
 }

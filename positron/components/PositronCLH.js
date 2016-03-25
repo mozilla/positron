@@ -4,7 +4,11 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 Components.utils.import("resource://gre/modules/XPCOMUtils.jsm");
-Components.utils.import("resource:///modules/PositronAppRunner.jsm");
+try {
+  Components.utils.import("resource:///modules/PositronAppRunner.jsm");
+}catch (e) {
+  dump("Exception: " + e + "\n");
+}
 
 const nsISupports              = Components.interfaces.nsISupports;
 
@@ -105,7 +109,11 @@ PositronCLH.prototype = {
     }
 
     let appRunner = new PositronAppRunner();
-    appRunner.run(appBaseDir, appPackageJSON);
+    try {
+      appRunner.run(appBaseDir, appPackageJSON);
+    } catch (e) {
+      dump("Exception: " + e + "\n");
+    }
   },
 
   helpInfo : "",
