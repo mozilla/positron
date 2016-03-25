@@ -8,3 +8,33 @@ NSDISTMODE = copy
 include $(topsrcdir)/config/rules.mk
 
 APP_BINARY = $(MOZ_APP_NAME)$(BIN_SUFFIX)
+
+ifeq (cocoa,$(MOZ_WIDGET_TOOLKIT))
+
+APP_NAME = $(MOZ_APP_BASENAME)
+APP_VERSION = $(MOZ_APP_VERSION)
+
+ifdef MOZ_DEBUG
+APP_NAME := $(APP_NAME)Debug
+endif
+
+clean clobber repackage::
+	rm -rf $(DIST)/$(APP_NAME).app
+
+libs-preqs = \
+	$(call mkdir_deps,$(DIST)/$(APP_NAME).app/Contents/MacOS) \
+	$(call mkdir_deps,$(DIST)/$(APP_NAME).app/Contents/Resources/en.lproj) \
+	$(NULL)
+
+.PHONY: repackage
+tools repackage:: $(libs-preqs)
+	rsync -a --exclude '*.in' $(srcdir)/macbuild/Contents $(DIST)/$(APP_NAME).app --exclude English.lproj
+	sed -e 's/%APP_NAME%/$(APP_NAME)/' -e 's/%APP_VERSION%/$(APP_VERSION)/' $(srcdir)/macbuild/Contents/Info.plist.in > $(DIST)/$(APP_NAME).app/Contents/Info.plist
+	sed -e 's/%APP_NAME%/$(APP_NAME)/' $(srcdir)/macbuild/Contents/Resources/English.lproj/InfoPlist.strings.in | iconv -f UTF-8 -t UTF-16 > $(DIST)/$(APP_NAME).app/Contents/Resources/en.lproj/InfoPlist.strings
+	rsync -a --exclude 'mangle' --exclude 'shlibsign' --exclude-from='$(srcdir)/macbuild/Contents/MacOS-files.in' $(DIST)/bin/ $(DIST)/$(APP_NAME).app/Contents/Resources
+	rsync -a --include-from='$(srcdir)/macbuild/Contents/MacOS-files.in' --exclude '*' $(DIST)/bin/ $(DIST)/$(APP_NAME).app/Contents/MacOS
+	$(RM) $(DIST)/$(APP_NAME).app/Contents/MacOS/$(PROGRAM)
+	rsync -aL $(PROGRAM) $(DIST)/$(APP_NAME).app/Contents/MacOS
+	printf APPLMOZB > $(DIST)/$(APP_NAME).app/Contents/PkgInfo
+
+endif # eq (cocoa,$(MOZ_WIDGET_TOOLKIT))
