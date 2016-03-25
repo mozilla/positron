@@ -1,0 +1,3 @@
+component {dd20d954-f2a9-11e5-aeae-782bcb9e2c3f} PositronCLH.js
+contract @mozilla.org/positron/clh;1 {dd20d954-f2a9-11e5-aeae-782bcb9e2c3f}
+category command-line-handler x-positron @mozilla.org/positron/clh;1
