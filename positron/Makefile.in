@@ -1,0 +1,15 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+include $(topsrcdir)/config/rules.mk
+
+NODE_PACKAGE_FILES = \
+  $(srcdir)/package.json \
+  $(srcdir)/cli.js \
+  $(NULL)
+
+# Node files, at least cli.js, have to be copied, not symlinked, so their
+# working directory is correct when they're invoked.
+tools:: $(NODE_PACKAGE_FILES)
+	cp -p $^ $(DIST)
