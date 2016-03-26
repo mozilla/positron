@@ -15,6 +15,8 @@ Cu.import("resource://gre/modules/NetUtil.jsm");
 
 this.EXPORTED_SYMBOLS = ["PositronAppRunner"];
 
+let sandbox;
+
 function quit() {
   let appStartup = Cc["@mozilla.org/toolkit/app-startup;1"]
                      .getService(nsIAppStartup);
@@ -48,12 +50,22 @@ PositronAppRunner.prototype = {
 
   _executeMainScript: function par_ExecuteMainScript(aData) {
     dump("Main script is " + aData + "\n");
-    quit();
+    try {
+      Cu.evalInSandbox(aData, sandbox);
+    } catch(e) {
+      dump("error evaluating main script: " + e);
+      quit();
+    }
   },
 
   _loadMainScript: function par_LoadMainScript(aScriptName) {
     let mainScript = this._baseDir.clone();
     mainScript.append(aScriptName);
+
+    sandbox = new Cu.Sandbox(null, {
+      sandboxName: aScriptName,
+      wantComponents: false
+    });
 
     NetUtil.asyncFetch(mainScript,
 	               this._loadAndContinue(this._executeMainScript));
