@@ -52,7 +52,7 @@ PositronAppRunner.prototype = {
     try {
       Cu.evalInSandbox(aData, this._sandbox);
     } catch(e) {
-      dump("error evaluating main script: " + e);
+      dump("Error evaluating main script: " + e + "\n");
       quit();
     }
   },
