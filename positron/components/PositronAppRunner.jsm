@@ -23,6 +23,7 @@ function quit() {
 
 this.PositronAppRunner = function PositronAppRunner() {
   this._packageJSON = null;
+  this._sandbox = null;
 }
 
 PositronAppRunner.prototype = {
@@ -48,12 +49,22 @@ PositronAppRunner.prototype = {
 
   _executeMainScript: function par_ExecuteMainScript(aData) {
     dump("Main script is " + aData + "\n");
-    quit();
+    try {
+      Cu.evalInSandbox(aData, this._sandbox);
+    } catch(e) {
+      dump("Error evaluating main script: " + e + "\n");
+      quit();
+    }
   },
 
   _loadMainScript: function par_LoadMainScript(aScriptName) {
     let mainScript = this._baseDir.clone();
     mainScript.append(aScriptName);
+
+    this._sandbox = new Cu.Sandbox(null, {
+      sandboxName: aScriptName,
+      wantComponents: false
+    });
 
     NetUtil.asyncFetch(mainScript,
 	               this._loadAndContinue(this._executeMainScript));
