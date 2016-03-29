@@ -621,9 +621,8 @@ JS_GetRuntime(JSContext* cx)
 }
 
 JS_PUBLIC_API(JSRuntime*)
-JS_GetParentRuntime(JSContext* cx)
+JS_GetParentRuntime(JSRuntime* rt)
 {
-    JSRuntime* rt = cx->runtime();
     return rt->parentRuntime ? rt->parentRuntime : rt;
 }
 
@@ -6455,8 +6454,11 @@ JS::SetOutOfMemoryCallback(JSRuntime* rt, OutOfMemoryCallback cb, void* data)
 JS_PUBLIC_API(bool)
 JS::CaptureCurrentStack(JSContext* cx, JS::MutableHandleObject stackp, unsigned maxFrameCount)
 {
+    AssertHeapIsIdle(cx);
+    CHECK_REQUEST(cx);
+    MOZ_RELEASE_ASSERT(cx->compartment());
+
     JSCompartment* compartment = cx->compartment();
-    MOZ_ASSERT(compartment);
     Rooted<SavedFrame*> frame(cx);
     if (!compartment->savedStacks().saveCurrentStack(cx, &frame, maxFrameCount))
         return false;
@@ -6469,9 +6471,12 @@ JS::CopyAsyncStack(JSContext* cx, JS::HandleObject asyncStack,
                    JS::HandleString asyncCause, JS::MutableHandleObject stackp,
                    unsigned maxFrameCount)
 {
+    AssertHeapIsIdle(cx);
+    CHECK_REQUEST(cx);
+    MOZ_RELEASE_ASSERT(cx->compartment());
+
     js::AssertObjectIsSavedFrameOrWrapper(cx, asyncStack);
     JSCompartment* compartment = cx->compartment();
-    MOZ_ASSERT(compartment);
     Rooted<SavedFrame*> frame(cx);
     if (!compartment->savedStacks().copyAsyncStack(cx, asyncStack, asyncCause,
                                                    &frame, maxFrameCount))

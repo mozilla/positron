@@ -952,11 +952,11 @@ pref("nglayout.debug.widget_update_flashing", false);
 // Enable/disable display list invalidation logging --- useful for debugging.
 pref("nglayout.debug.invalidation", false);
 
-// Whether image visibility is enabled globally (ie we will try to unlock images
-// that are not visible).
-pref("layout.imagevisibility.enabled", true);
-pref("layout.imagevisibility.numscrollportwidths", 0);
-pref("layout.imagevisibility.numscrollportheights", 1);
+// Whether frame visibility tracking is enabled globally.
+pref("layout.framevisibility.enabled", true);
+
+pref("layout.framevisibility.numscrollportwidths", 0);
+pref("layout.framevisibility.numscrollportheights", 1);
 
 // scrollbar snapping region
 // 0 - off
@@ -3770,6 +3770,10 @@ pref("layout.css.scroll-snap.enabled", false);
 pref("ui.panel.default_level_parent", true);
 
 pref("mousewheel.system_scroll_override_on_root_content.enabled", false);
+
+// Forward downloads with known OMA MIME types to Android's download manager
+// instead of downloading them in the browser.
+pref("browser.download.forward_oma_android_download_manager", false);
 
 # ANDROID
 #endif

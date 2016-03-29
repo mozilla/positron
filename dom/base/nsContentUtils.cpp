@@ -7699,7 +7699,7 @@ nsContentUtils::SendKeyEvent(nsIWidget* aWidget,
   }
 
   event.refPoint.x = event.refPoint.y = 0;
-  event.time = PR_IntervalNow();
+  event.mTime = PR_IntervalNow();
   if (!(aAdditionalFlags & nsIDOMWindowUtils::KEY_FLAG_NOT_SYNTHESIZED_FOR_TESTS)) {
     event.mFlags.mIsSynthesizedForTests = true;
   }
@@ -7774,7 +7774,7 @@ nsContentUtils::SendMouseEvent(nsCOMPtr<nsIPresShell> aPresShell,
   event.pressure = aPressure;
   event.inputSource = aInputSourceArg;
   event.clickCount = aClickCount;
-  event.time = PR_IntervalNow();
+  event.mTime = PR_IntervalNow();
   event.mFlags.mIsSynthesizedForTests = aIsSynthesized;
 
   nsPresContext* presContext = aPresShell->GetPresContext();
@@ -8139,7 +8139,7 @@ nsContentUtils::InternalStorageAllowedForPrincipal(nsIPrincipal* aPrincipal,
   nsresult rv = aPrincipal->GetURI(getter_AddRefs(uri));
   if (NS_SUCCEEDED(rv) && uri) {
     bool isAbout = false;
-    MOZ_ALWAYS_TRUE(NS_SUCCEEDED(uri->SchemeIs("about", &isAbout)));
+    MOZ_ALWAYS_SUCCEEDS(uri->SchemeIs("about", &isAbout));
     if (isAbout) {
       return access;
     }

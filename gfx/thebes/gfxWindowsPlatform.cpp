@@ -377,6 +377,7 @@ gfxWindowsPlatform::gfxWindowsPlatform()
   , mAcceleration(FeatureStatus::Unused)
   , mD3D11Status(FeatureStatus::Unused)
   , mD2D1Status(FeatureStatus::Unused)
+  , mHasD3D9DeviceReset(false)
 {
     mUseClearTypeForDownloadableFonts = UNINITIALIZED_VALUE;
     mUseClearTypeAlways = UNINITIALIZED_VALUE;
@@ -483,6 +484,7 @@ gfxWindowsPlatform::HandleDeviceReset()
   // will be recomputed by InitializeDevices().
   mHasDeviceReset = false;
   mHasFakeDeviceReset = false;
+  mHasD3D9DeviceReset = false;
   mCompositorD3D11TextureSharingWorks = false;
   mDeviceResetReason = DeviceResetReason::OK;
 
@@ -529,6 +531,16 @@ gfxWindowsPlatform::UpdateRenderMode()
   if (didReset) {
     mScreenReferenceDrawTarget =
       CreateOffscreenContentDrawTarget(IntSize(1, 1), SurfaceFormat::B8G8R8A8);
+    if (!mScreenReferenceDrawTarget) {
+      gfxCriticalNote << "Failed to update reference draw target after device reset"
+                      << ", D3D11 device:" << hexa(Factory::GetDirect3D11Device())
+                      << ", D3D11 status:" << FeatureStatusToString(GetD3D11Status())
+                      << ", D2D1 device:" << hexa(Factory::GetD2D1Device())
+                      << ", D2D1 status:" << FeatureStatusToString(GetD2D1Status())
+                      << ", content:" << int(GetDefaultContentBackend())
+                      << ", compositor:" << int(GetCompositorBackend());
+      MOZ_CRASH("GFX: Failed to update reference draw target after device reset");
+    }
   }
 }
 
@@ -986,6 +998,9 @@ gfxWindowsPlatform::DidRenderingDeviceReset(DeviceResetReason* aResetReason)
       return true;
     }
   }
+  if (mHasD3D9DeviceReset) {
+    return true;
+  }
   if (XRE_IsParentProcess() && gfxPrefs::DeviceResetForTesting()) {
     TestDeviceReset((DeviceResetReason)gfxPrefs::DeviceResetForTesting());
     if (aResetReason) {
@@ -1371,6 +1386,7 @@ void
 gfxWindowsPlatform::OnDeviceManagerDestroy(DeviceManagerD3D9* aDeviceManager)
 {
   if (aDeviceManager == mDeviceManager) {
+    MutexAutoLock lock(mDeviceLock);
     mDeviceManager = nullptr;
   }
 }
@@ -1378,15 +1394,21 @@ gfxWindowsPlatform::OnDeviceManagerDestroy(DeviceManagerD3D9* aDeviceManager)
 IDirect3DDevice9*
 gfxWindowsPlatform::GetD3D9Device()
 {
-  DeviceManagerD3D9* manager = GetD3D9DeviceManager();
+  RefPtr<DeviceManagerD3D9> manager = GetD3D9DeviceManager();
   return manager ? manager->device() : nullptr;
 }
 
-DeviceManagerD3D9*
+void
+gfxWindowsPlatform::D3D9DeviceReset() {
+  mHasD3D9DeviceReset = true;
+}
+
+already_AddRefed<DeviceManagerD3D9>
 gfxWindowsPlatform::GetD3D9DeviceManager()
 {
   // We should only create the d3d9 device on the compositor thread
   // or we don't have a compositor thread.
+  RefPtr<DeviceManagerD3D9> result;
   if (!mDeviceManager &&
       (!gfxPlatform::UsesOffMainThreadCompositing() ||
        CompositorBridgeParent::IsInCompositorThread())) {
@@ -1397,7 +1419,9 @@ gfxWindowsPlatform::GetD3D9DeviceManager()
     }
   }
 
-  return mDeviceManager;
+  MutexAutoLock lock(mDeviceLock);
+  result = mDeviceManager;
+  return result.forget();
 }
 
 bool
@@ -2507,8 +2531,11 @@ gfxWindowsPlatform::InitializeD2D()
     return;
   }
 
-  mD2D1Status = FeatureStatus::Available;
-  Factory::SetDirect3D11Device(mD3D11ContentDevice);
+  // Verify that Direct2D device creation succeeded.
+  if (!Factory::SetDirect3D11Device(mD3D11ContentDevice)) {
+    mD2D1Status = FeatureStatus::Failed;
+    return;
+  }
 
   d2d1_1.SetSuccessful();
 

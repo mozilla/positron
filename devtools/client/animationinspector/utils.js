@@ -199,20 +199,32 @@ var TimeScale = {
    * @param {Object} state A PlayerFront.state object.
    */
   addAnimation: function(state) {
-    let {previousStartTime, delay, duration,
+    let {previousStartTime, delay, duration, endDelay,
          iterationCount, playbackRate} = state;
 
+    endDelay = typeof endDelay === "undefined" ? 0 : endDelay;
+    let toRate = v => v / playbackRate;
+    let minZero = v => Math.max(v, 0);
+    let rateRelativeDuration =
+      toRate(duration * (!iterationCount ? 1 : iterationCount));
     // Negative-delayed animations have their startTimes set such that we would
     // be displaying the delay outside the time window if we didn't take it into
     // account here.
-    let relevantDelay = delay < 0 ? delay / playbackRate : 0;
+    let relevantDelay = delay < 0 ? toRate(delay) : 0;
     previousStartTime = previousStartTime || 0;
 
-    this.minStartTime = Math.min(this.minStartTime,
-                                 previousStartTime + relevantDelay);
-    let length = (delay / playbackRate) +
-                 ((duration / playbackRate) *
-                  (!iterationCount ? 1 : iterationCount));
+    let startTime = toRate(minZero(delay)) +
+                    rateRelativeDuration +
+                    endDelay;
+    this.minStartTime = Math.min(
+      this.minStartTime,
+      previousStartTime +
+      relevantDelay +
+      Math.min(startTime, 0)
+    );
+    let length = toRate(delay) +
+                 rateRelativeDuration +
+                 toRate(minZero(endDelay));
     let endTime = previousStartTime + length;
     this.maxEndTime = Math.max(this.maxEndTime, endTime);
   },
@@ -294,6 +306,7 @@ var TimeScale = {
     let rate = state.playbackRate;
     let count = state.iterationCount;
     let delay = state.delay || 0;
+    let endDelay = state.endDelay || 0;
 
     // The start position.
     let x = this.startTimeToDistance(start + (delay / rate));
@@ -307,8 +320,38 @@ var TimeScale = {
     let delayW = this.durationToDistance(Math.abs(delay) / rate);
     // The width of the delay if it is negative, 0 otherwise.
     let negativeDelayW = delay < 0 ? delayW : 0;
+    // The width of the endDelay.
+    let endDelayW = this.durationToDistance(Math.abs(endDelay) / rate);
+    // The start position of the endDelay.
+    let endDelayX = endDelay < 0 ? x + w - endDelayW : x + w;
 
-    return {x, w, iterationW, delayX, delayW, negativeDelayW};
+    return {x, w, iterationW, delayX, delayW, negativeDelayW,
+            endDelayX, endDelayW};
+  },
+
+  /**
+   * Given an animation, get the background data for .iterations element.
+   * This background represents iterationCount and iterationStart.
+   * Returns three properties.
+   * 1. size: x of background-size (%)
+   * 2. position: x of background-position (%)
+   * 3. repeat: background-repeat (string)
+   */
+  getIterationsBackgroundData: function({state}) {
+    let iterationCount = state.iterationCount || 1;
+    let iterationStartW = state.iterationStart % 1 * 100;
+    let background = {};
+    if (iterationCount == 1) {
+      background.size = 100 - iterationStartW;
+      background.position = 0;
+      background.repeat = "no-repeat";
+    } else {
+      background.size = 1 / iterationCount * 100;
+      background.position = -iterationStartW * background.size /
+                              (100 - background.size);
+      background.repeat = "repeat-x";
+    }
+    return background;
   }
 };
 

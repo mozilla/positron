@@ -476,6 +476,8 @@ this.BrowserTestUtils = {
    *        event is the expected one, or false if it should be ignored and
    *        listening should continue. If not specified, the first event with
    *        the specified name resolves the returned promise.
+   * @param {bool} wantsUntrusted [optional]
+   *        True to receive synthetic events dispatched by web content.
    *
    * @note Because this function is intended for testing, any error in checkFn
    *       will cause the returned promise to be rejected instead of waiting for
@@ -484,7 +486,7 @@ this.BrowserTestUtils = {
    * @returns {Promise}
    * @resolves The Event object.
    */
-  waitForEvent(subject, eventName, capture, checkFn) {
+  waitForEvent(subject, eventName, capture, checkFn, wantsUntrusted) {
     return new Promise((resolve, reject) => {
       subject.addEventListener(eventName, function listener(event) {
         try {
@@ -501,7 +503,7 @@ this.BrowserTestUtils = {
           }
           reject(ex);
         }
-      }, capture);
+      }, capture, wantsUntrusted);
     });
   },
 
@@ -969,7 +971,8 @@ this.BrowserTestUtils = {
    *
    * @param condition
    *        A condition function that must return true or false. If the
-   *        condition ever throws, this is also treated as a false.
+   *        condition ever throws, this is also treated as a false. The
+   *        function can be a generator.
    * @param interval
    *        The time interval to poll the condition function. Defaults
    *        to 100ms.
@@ -984,7 +987,7 @@ this.BrowserTestUtils = {
   waitForCondition(condition, msg, interval=100, maxTries=50) {
     return new Promise((resolve, reject) => {
       let tries = 0;
-      let intervalID = setInterval(() => {
+      let intervalID = setInterval(Task.async(function* () {
         if (tries >= maxTries) {
           clearInterval(intervalID);
           msg += ` - timed out after ${maxTries} tries.`;
@@ -994,7 +997,7 @@ this.BrowserTestUtils = {
 
         let conditionPassed = false;
         try {
-          conditionPassed = condition();
+          conditionPassed = yield condition();
         } catch(e) {
           msg += ` - threw exception: ${e}`;
           clearInterval(intervalID);
@@ -1007,7 +1010,7 @@ this.BrowserTestUtils = {
           resolve();
         }
         tries++;
-      }, interval);
+      }), interval);
     });
   },
 

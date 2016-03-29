@@ -1393,9 +1393,9 @@ case "$target" in
     fi
 
     MOZ_GFX_OPTIMIZE_MOBILE=1
-    MOZ_OPTIMIZE_FLAGS="-Os -fno-reorder-functions"
+    MOZ_OPTIMIZE_FLAGS="-Os"
     if test -z "$CLANG_CC"; then
-       MOZ_OPTIMIZE_FLAGS="-freorder-blocks $MOZ_OPTIMIZE_FLAGS"
+       MOZ_OPTIMIZE_FLAGS="-freorder-blocks -fno-reorder-functions $MOZ_OPTIMIZE_FLAGS"
     fi
     ;;
 
@@ -4147,7 +4147,7 @@ if test -n "$MOZ_SYSTEM_LIBVPX"; then
     dnl === libvpx Version check ===
     dnl ============================
     dnl Check to see if we have a system libvpx package.
-    PKG_CHECK_MODULES(MOZ_LIBVPX, vpx >= 1.3.0)
+    PKG_CHECK_MODULES(MOZ_LIBVPX, vpx >= 1.5.0)
 
     CFLAGS="$CFLAGS $MOZ_LIBVPX_CFLAGS"
     LIBS="$LIBS $MOZ_LIBVPX_LIBS"
