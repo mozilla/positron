@@ -2,12 +2,7 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-EXTRA_COMPONENTS += [
-    'PositronCLH.js',
-    'PositronCLH.manifest',
-]
-
-EXTRA_JS_MODULES += [
-    'PositronAppRunner.jsm',
-    'Require.jsm',
+EXTRA_JS_MODULES.node += [
+  'lib/events.js',
+  'lib/process.js',
 ]
