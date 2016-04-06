@@ -12,6 +12,8 @@ const nsIAppStartup            = Ci.nsIAppStartup;
 const NS_OK = Cr.NS_OK;
 
 Cu.import("resource://gre/modules/NetUtil.jsm");
+Cu.import("resource://gre/modules/Services.jsm");
+Cu.import("resource:///modules/Require.jsm");
 
 this.EXPORTED_SYMBOLS = ["PositronAppRunner"];
 
@@ -24,6 +26,7 @@ function quit() {
 this.PositronAppRunner = function PositronAppRunner() {
   this._packageJSON = null;
   this._sandbox = null;
+  this._mainScript = null;
 }
 
 PositronAppRunner.prototype = {
@@ -50,23 +53,28 @@ PositronAppRunner.prototype = {
   _executeMainScript: function par_ExecuteMainScript(aData) {
     dump("Main script is " + aData + "\n");
     try {
-      Cu.evalInSandbox(aData, this._sandbox);
+      Cu.evalInSandbox(aData, this._sandbox, "1.8", this._mainScript.path, 1);
     } catch(e) {
-      dump("Error evaluating main script: " + e + "\n");
+      dump("Error evaluating main script: " + e + "\n" + e.stack + "\n");
       quit();
     }
   },
 
   _loadMainScript: function par_LoadMainScript(aScriptName) {
-    let mainScript = this._baseDir.clone();
-    mainScript.append(aScriptName);
+    this._mainScript = this._baseDir.clone();
+    this._mainScript.append(aScriptName);
 
-    this._sandbox = new Cu.Sandbox(null, {
+    let systemPrincipal = Cc["@mozilla.org/systemprincipal;1"].
+                          createInstance(Ci.nsIPrincipal);
+
+    this._sandbox = new Cu.Sandbox(systemPrincipal, {
       sandboxName: aScriptName,
       wantComponents: false
     });
 
-    NetUtil.asyncFetch(mainScript,
+    this._sandbox.require = new Require({ id: Services.io.newFileURI(this._mainScript).spec });
+
+    NetUtil.asyncFetch(this._mainScript,
 	               this._loadAndContinue(this._executeMainScript));
   },
 
