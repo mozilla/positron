@@ -12,11 +12,10 @@ const nsIAppStartup            = Ci.nsIAppStartup;
 const NS_OK = Cr.NS_OK;
 
 Cu.import("resource://gre/modules/NetUtil.jsm");
-Cu.import('resource://gre/modules/Services.jsm');
+Cu.import("resource://gre/modules/Services.jsm");
+Cu.import("resource:///modules/Require.jsm");
 
 this.EXPORTED_SYMBOLS = ["PositronAppRunner"];
-
-Cu.import("resource:///modules/Require.jsm");
 
 function quit() {
   let appStartup = Cc["@mozilla.org/toolkit/app-startup;1"]
