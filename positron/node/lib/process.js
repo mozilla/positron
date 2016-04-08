@@ -5,6 +5,11 @@
 // expects, then construct the `process` global from it (instead of the other
 // way around).  We can presumably stop doing that once we're using real Node.
 
+// Because we construct the `process` global in this module, and we also inject
+// the global into this module, we don't actually have to export its symbols
+// here.  We just have to attach them to this module's own `process` global.
+// XXX Figure out if that's really the best way to implement this functionality.
+
 // Re-export process as a native module
 // module.exports = process;
 
@@ -29,7 +34,3 @@ process.atomBinding = function(name) {
 process.binding = function(name) {
   return require(name);
 }
-
-// This is an Electron extension to the Node process module.
-// XXX Make this return 'renderer' in a renderer "process."
-process.type = 'browser';

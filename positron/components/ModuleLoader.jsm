@@ -18,7 +18,7 @@ Cu.import('resource://gre/modules/Services.jsm');
 const subScriptLoader = Cc['@mozilla.org/moz/jssubscript-loader;1'].
                         getService(Ci.mozIJSSubScriptLoader);
 
-this.EXPORTED_SYMBOLS = ["Require"];
+this.EXPORTED_SYMBOLS = ["ModuleLoader"];
 
 const systemPrincipal = Cc["@mozilla.org/systemprincipal;1"].
                         createInstance(Ci.nsIPrincipal);
@@ -43,27 +43,29 @@ const globalPaths = [
 ];
 
 /**
- * Mapping from module IDs (resource: URLs) to module objects.
- *
- * @keys {string} The ID (resource: URL) for the module.
- * @values {object} An object representing the module.
- */
-let modules = new Map();
-
-/**
  * Construct a module importer (`require()` global function).
  *
  * @param requirer {Module} the module that will use the importer.
  * @return {Function} a module importer.
  */
-function Require(requirer) {
+
+function ModuleLoader(processType) {
+  /**
+   * Mapping from module IDs (resource: URLs) to module objects.
+   *
+   * @keys {string} The ID (resource: URL) for the module.
+   * @values {object} An object representing the module.
+   */
+  let modules = new Map();
+
   /**
    * Import a module.
    *
-   * @param path {string} the path to the module.
-   * @return {*} an `exports` object.
+   * @param  requirer {Object} the module importing this module.
+   * @param  path     {string} the path to the module being imported.
+   * @return          {Object} an `exports` object.
    */
-  return function require(path) {
+  let require = this.require = function(requirer, path) {
     let uri, file;
 
     // dump('require: ' + requirer.id + ' requires ' + path + '\n');
@@ -130,15 +132,11 @@ function Require(requirer) {
       wantComponents: wantComponents,
     });
 
-    sandbox.exports = exports;
-    sandbox.require = new Require(module);
-    sandbox.module = module;
+    injectGlobals(sandbox, module);
+
+    // XXX Move these into injectGlobals().
     sandbox.__filename = file.path;
     sandbox.__dirname = file.parent.path;
-
-    // Require `process` by absolute URL so the resolution algorithm doesn't try
-    // to resolve it relative to the requirer's URL.
-    sandbox.process = require('resource:///modules/node/process.js');
 
     try {
       // XXX evalInSandbox?
@@ -150,4 +148,14 @@ function Require(requirer) {
       throw ex;
     }
   };
-};
+
+  let injectGlobals = this.injectGlobals = function(globalObj, module) {
+    globalObj.exports = module.exports;
+    globalObj.module = module;
+    globalObj.require = require.bind(null, module);
+    // Require `process` by absolute URL so the resolution algorithm doesn't try
+    // to resolve it relative to the requirer's URL.
+    globalObj.process = require({}, 'resource:///modules/node/process.js');
+    globalObj.process.type = processType;
+  };
+}
