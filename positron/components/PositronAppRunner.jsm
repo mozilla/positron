@@ -17,6 +17,11 @@ Cu.import("resource:///modules/Require.jsm");
 
 this.EXPORTED_SYMBOLS = ["PositronAppRunner"];
 
+// Electron doesn't require apps to keep a window open, even on Windows/Linux.
+// Apps can run headlessly or only display a Tray.  And they don't open a window
+// by default on startup.  So we need to keep Gecko running regardless.
+Services.startup.enterLastWindowClosingSurvivalArea();
+
 function quit() {
   let appStartup = Cc["@mozilla.org/toolkit/app-startup;1"]
                      .getService(nsIAppStartup);
@@ -25,8 +30,6 @@ function quit() {
 
 this.PositronAppRunner = function PositronAppRunner() {
   this._packageJSON = null;
-  this._sandbox = null;
-  this._mainScript = null;
 }
 
 PositronAppRunner.prototype = {
@@ -50,32 +53,14 @@ PositronAppRunner.prototype = {
     return this._unboundLoadAndContinue.bind(this, aThenWhat.bind(this));
   },
 
-  _executeMainScript: function par_ExecuteMainScript(aData) {
-    dump("Main script is " + aData + "\n");
-    try {
-      Cu.evalInSandbox(aData, this._sandbox, "1.8", this._mainScript.path, 1);
-    } catch(e) {
-      dump("Error evaluating main script: " + e + "\n" + e.stack + "\n");
-      quit();
-    }
-  },
-
   _loadMainScript: function par_LoadMainScript(aScriptName) {
-    this._mainScript = this._baseDir.clone();
-    this._mainScript.append(aScriptName);
-
-    let systemPrincipal = Cc["@mozilla.org/systemprincipal;1"].
-                          createInstance(Ci.nsIPrincipal);
-
-    this._sandbox = new Cu.Sandbox(systemPrincipal, {
-      sandboxName: aScriptName,
-      wantComponents: false
-    });
-
-    this._sandbox.require = new Require({ id: Services.io.newFileURI(this._mainScript).spec });
-
-    NetUtil.asyncFetch(this._mainScript,
-	               this._loadAndContinue(this._executeMainScript));
+    let mainScript = this._baseDir.clone();
+    mainScript.append(aScriptName);
+    let requirer = {
+      id: "resource:///modules/PositronAppRunner.jsm",
+      exports: {},
+    };
+    (new Require(requirer))(Services.io.newFileURI(mainScript).spec);
   },
 
   _parsePackageJSON: function par_parsePackageJSON(aData) {
