@@ -74,6 +74,8 @@ function Require(requirer) {
       file = uri.QueryInterface(Ci.nsIFileURL).file;
     } else if (path.indexOf('/') === 0) {
       // An absolute path.
+      // XXX Figure out if this is a filesystem path rather than a package path
+      // and should be converted to a file: URL instead of a resource: URL.
       uri = Services.io.newURI('resource:///modules' + path + '.js', null, null);
       file = uri.QueryInterface(Ci.nsIFileURL).file;
     } else {
@@ -119,14 +121,20 @@ function Require(requirer) {
     }
     modules.set(module.id, module);
 
-    var sandbox = new Cu.Sandbox(systemPrincipal, {
+    // Provide the Components object to the "native binding modules" (the ones
+    // that implement APIs in JS that Electron implements with native bindings).
+    const wantComponents = uri.spec.startsWith('resource:///modules/atom/');
+
+    let sandbox = new Cu.Sandbox(systemPrincipal, {
       sandboxName: uri.spec,
-      wantComponents: false
+      wantComponents: wantComponents,
     });
 
     sandbox.exports = exports;
     sandbox.require = new Require(module);
     sandbox.module = module;
+    sandbox.__filename = file.path;
+    sandbox.__dirname = file.parent.path;
 
     // Require `process` by absolute URL so the resolution algorithm doesn't try
     // to resolve it relative to the requirer's URL.
