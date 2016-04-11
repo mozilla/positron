@@ -2590,6 +2590,51 @@
     "n_buckets": 1000,
     "description": "Time spent blocked in PR_Connect when the offline state has changed in the last 60s (ms)."
   },
+  "PRCONNECT_FAIL_BLOCKING_TIME_NORMAL": {
+    "bug_numbers": [1257809],
+    "alert_emails": ["ddamjanovic@mozilla.com"],
+    "expires_in_version": "never",
+    "kind": "exponential",
+    "high": 60000,
+    "n_buckets": 100,
+    "description": "Time spent blocked in a failed PR_Connect when we are not shutting down and there has been niether a network nor an offline state change in the last 60s (ms)."
+  },
+  "PRCONNECT_FAIL_BLOCKING_TIME_SHUTDOWN": {
+    "bug_numbers": [1257809],
+    "alert_emails": ["ddamjanovic@mozilla.com"],
+    "expires_in_version": "never",
+    "kind": "exponential",
+    "high": 60000,
+    "n_buckets": 100,
+    "description": "Time spent blocked in a failed PR_Connect during a shutdown (ms)."
+  },
+  "PRCONNECT_FAIL_BLOCKING_TIME_CONNECTIVITY_CHANGE": {
+    "bug_numbers": [1257809],
+    "alert_emails": ["ddamjanovic@mozilla.com"],
+    "expires_in_version": "never",
+    "kind": "exponential",
+    "high": 60000,
+    "n_buckets": 100,
+    "description": "Time spent blocked in a failed PR_Connect when there has been the connectiviy change in the last 60s (ms)."
+  },
+  "PRCONNECT_FAIL_BLOCKING_TIME_LINK_CHANGE": {
+    "bug_numbers": [1257809],
+    "alert_emails": ["ddamjanovic@mozilla.com"],
+    "expires_in_version": "never",
+    "kind": "exponential",
+    "high": 60000,
+    "n_buckets": 100,
+    "description": "Time spent blocked in a failed PR_Connect when there has been a link change in the last 60s (ms)."
+  },
+  "PRCONNECT_FAIL_BLOCKING_TIME_OFFLINE": {
+    "bug_numbers": [1257809],
+    "alert_emails": ["ddamjanovic@mozilla.com"],
+    "expires_in_version": "never",
+    "kind": "exponential",
+    "high": 60000,
+    "n_buckets": 100,
+    "description": "Time spent blocked in a failed PR_Connect when the offline state has changed in the last 60s (ms)."
+  },
   "PRCONNECTCONTINUE_BLOCKING_TIME_NORMAL": {
     "expires_in_version": "never",
     "kind": "exponential",
@@ -5542,11 +5587,12 @@
     "kind": "enumerated",
     "keyed": true,
     "n_values": 40,
-    "description": "Usage of popup notifications, keyed by ID (0 = Offered, 1..4 = Action, 5 = Click outside, 6 = Leave page, 7 = Use 'X', 8 = Not now, 10 = Open submenu, 11 = Learn more. Add 20 if happened after reopen.)"
+    "description": "(Bug 1207089) Usage of popup notifications, keyed by ID (0 = Offered, 1..4 = Action, 5 = Click outside, 6 = Leave page, 7 = Use 'X', 8 = Not now, 10 = Open submenu, 11 = Learn more. Add 20 if happened after reopen.)"
   },
   "POPUP_NOTIFICATION_MAIN_ACTION_MS": {
     "alert_emails": ["firefox-dev@mozilla.org"],
-    "expires_in_version": "48",
+    "bug_numbers": [1207089],
+    "expires_in_version": "52",
     "kind": "exponential",
     "keyed": true,
     "low": 100,
@@ -5556,7 +5602,8 @@
   },
   "POPUP_NOTIFICATION_DISMISSAL_MS": {
     "alert_emails": ["firefox-dev@mozilla.org"],
-    "expires_in_version": "48",
+    "bug_numbers": [1207089],
+    "expires_in_version": "52",
     "kind": "exponential",
     "keyed": true,
     "low": 200,
@@ -8503,6 +8550,15 @@
     "releaseChannelCollection": "opt-out",
     "description": "Number of sessions where at least one chat message was exchanged"
   },
+  "LOOP_COPY_PANEL_ACTIONS": {
+    "alert_emails": ["firefox-dev@mozilla.org", "edilee@mozilla.com"],
+    "expires_in_version": "51",
+    "kind": "enumerated",
+    "n_values": 5,
+    "releaseChannelCollection": "opt-out",
+    "bug_numbers": [1239965, 1259506],
+    "description": "Number of times each of the following copy panel actions are triggered: 0=SHOWN, 1=NO_AGAIN, 2=NO_NEVER, 3=YES_AGAIN, 4=YES_NEVER"
+  },
   "LOOP_INFOBAR_ACTION_BUTTONS": {
     "alert_emails": ["firefox-dev@mozilla.org", "mbanner@mozilla.com"],
     "expires_in_version": "51",
@@ -10324,16 +10380,18 @@
   },
   "YOUTUBE_REWRITABLE_EMBED_SEEN": {
     "alert_emails": ["cpeterson@mozilla.com"],
-    "expires_in_version": "48",
+    "expires_in_version": "53",
     "kind": "flag",
     "bug_numbers": [1229971],
+    "releaseChannelCollection": "opt-out",
     "description": "Flag activated whenever a rewritable youtube flash embed is seen during a session."
   },
   "YOUTUBE_NONREWRITABLE_EMBED_SEEN": {
     "alert_emails": ["cpeterson@mozilla.com"],
-    "expires_in_version": "48",
+    "expires_in_version": "53",
     "kind": "flag",
     "bug_numbers": [1237401],
+    "releaseChannelCollection": "opt-out",
     "description": "Flag activated whenever a non-rewritable (enablejsapi=1) youtube flash embed is seen during a session."
   },
   "PLUGIN_DRAWING_MODEL": {
@@ -10384,5 +10442,12 @@
     "high": 100,
     "n_buckets": 50,
     "description": "Position in (theoretical) tab cache of tab being switched to"
+  },
+  "REMOTE_JAR_PROTOCOL_USED": {
+    "alert_emails": ["dev-platform@lists.mozilla.org"],
+    "expires_in_version": "55",
+    "bug_numbers": [1255934],
+    "kind": "count",
+    "description": "Remote JAR protocol usage"
   }
 }

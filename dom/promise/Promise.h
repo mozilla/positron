@@ -62,7 +62,7 @@ public:
   }
 
   virtual bool
-  Notify(JSContext* aCx, workers::Status aStatus) override;
+  Notify(workers::Status aStatus) override;
 };
 #endif // defined(DOM_PROMISE_DEPRECATED_REPORTING)
 
@@ -165,6 +165,10 @@ public:
   // Called by DOM to let us execute our callbacks.  May be called recursively.
   // Returns true if at least one microtask was processed.
   static bool PerformMicroTaskCheckpoint();
+
+  static void PerformWorkerMicroTaskCheckpoint();
+
+  static void PerformWorkerDebuggerMicroTaskCheckpoint();
 
   // WebIDL
 
@@ -287,10 +291,6 @@ public:
   // Return a unique-to-the-process identifier for this Promise.
   uint64_t GetID();
 #endif // SPIDERMONKEY_PROMISE
-
-  // Queue an async microtask to current main or worker thread.
-  static void
-  DispatchToMicroTask(nsIRunnable* aRunnable);
 
 #ifndef SPIDERMONKEY_PROMISE
   enum JSCallbackSlots {

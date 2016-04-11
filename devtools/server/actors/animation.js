@@ -182,6 +182,14 @@ var AnimationPlayerActor = ActorClass({
   },
 
   /**
+   * Get the animation endDelay from this player, in milliseconds.
+   * @return {Number}
+   */
+  getEndDelay: function() {
+    return this.player.effect.getComputedTiming().endDelay;
+  },
+
+  /**
    * Get the animation iteration count for this player. That is, how many times
    * is the animation scheduled to run.
    * @return {Number} The number of iterations, or null if the animation repeats
@@ -190,6 +198,15 @@ var AnimationPlayerActor = ActorClass({
   getIterationCount: function() {
     let iterations = this.player.effect.getComputedTiming().iterations;
     return iterations === "Infinity" ? null : iterations;
+  },
+
+  /**
+   * Get the animation iterationStart from this player, in ratio.
+   * That is offset of starting position of the animation.
+   * @return {Number}
+   */
+  getIterationStart: function() {
+    return this.player.effect.getComputedTiming().iterationStart;
   },
 
   /**
@@ -220,7 +237,9 @@ var AnimationPlayerActor = ActorClass({
       name: this.getName(),
       duration: this.getDuration(),
       delay: this.getDelay(),
+      endDelay: this.getEndDelay(),
       iterationCount: this.getIterationCount(),
+      iterationStart: this.getIterationStart(),
       // animation is hitting the fast path or not. Returns false whenever the
       // animation is paused as it is taken off the compositor then.
       isRunningOnCompositor: this.player.isRunningOnCompositor,
@@ -286,13 +305,15 @@ var AnimationPlayerActor = ActorClass({
       }
 
       if (hasCurrentAnimation(changedAnimations)) {
-        // Only consider the state has having changed if any of delay, duration
-        // or iterationcount has changed (for now at least).
+        // Only consider the state has having changed if any of delay, duration,
+        // iterationcount or iterationStart has changed (for now at least).
         let newState = this.getState();
         let oldState = this.currentState;
         hasChanged = newState.delay !== oldState.delay ||
                      newState.iterationCount !== oldState.iterationCount ||
-                     newState.duration !== oldState.duration;
+                     newState.iterationStart !== oldState.iterationStart ||
+                     newState.duration !== oldState.duration ||
+                     newState.endDelay !== oldState.endDelay;
         break;
       }
     }
@@ -379,6 +400,20 @@ var AnimationPlayerActor = ActorClass({
     response: {
       frames: RetVal("json")
     }
+  }),
+
+  /**
+   * Get data about the animated properties of this animation player.
+   * @return {Object} Returns a list of animated properties.
+   * Each property contains a list of values and their offsets
+   */
+  getProperties: method(function() {
+    return this.player.effect.getProperties();
+  }, {
+    request: {},
+    response: {
+      frames: RetVal("json")
+    }
   })
 });
 
@@ -431,7 +466,9 @@ var AnimationPlayerFront = FrontClass(AnimationPlayerActor, {
       name: this._form.name,
       duration: this._form.duration,
       delay: this._form.delay,
+      endDelay: this._form.endDelay,
       iterationCount: this._form.iterationCount,
+      iterationStart: this._form.iterationStart,
       isRunningOnCompositor: this._form.isRunningOnCompositor,
       documentCurrentTime: this._form.documentCurrentTime
     };

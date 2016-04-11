@@ -142,6 +142,7 @@ using namespace mozilla::gfx;
 
 #define GRID_ENABLED_PREF_NAME "layout.css.grid.enabled"
 #define GRID_TEMPLATE_SUBGRID_ENABLED_PREF_NAME "layout.css.grid-template-subgrid-value.enabled"
+#define WEBKIT_PREFIXES_ENABLED_PREF_NAME "layout.css.prefixes.webkit"
 #define DISPLAY_CONTENTS_ENABLED_PREF_NAME "layout.css.display-contents.enabled"
 #define TEXT_ALIGN_UNSAFE_ENABLED_PREF_NAME "layout.css.text-align-unsafe-value.enabled"
 #define FLOAT_LOGICAL_VALUES_ENABLED_PREF_NAME "layout.css.float-logical-values.enabled"
@@ -219,6 +220,53 @@ GridEnabledPrefChangeCallback(const char* aPrefName, void* aClosure)
   if (sIndexOfInlineGridInDisplayTable >= 0) {
     nsCSSProps::kDisplayKTable[sIndexOfInlineGridInDisplayTable].mKeyword =
       isGridEnabled ? eCSSKeyword_inline_grid : eCSSKeyword_UNKNOWN;
+  }
+}
+
+// When the pref "layout.css.prefixes.webkit" changes, this function is invoked
+// to let us update kDisplayKTable, to selectively disable or restore the
+// entries for "-webkit-box" and "-webkit-inline-box" in that table.
+static void
+WebkitPrefixEnabledPrefChangeCallback(const char* aPrefName, void* aClosure)
+{
+  MOZ_ASSERT(strncmp(aPrefName, WEBKIT_PREFIXES_ENABLED_PREF_NAME,
+                     ArrayLength(WEBKIT_PREFIXES_ENABLED_PREF_NAME)) == 0,
+             "We only registered this callback for a single pref, so it "
+             "should only be called for that pref");
+
+  static int32_t sIndexOfWebkitBoxInDisplayTable;
+  static int32_t sIndexOfWebkitInlineBoxInDisplayTable;
+  static bool sAreWebkitBoxKeywordIndicesInitialized; // initialized to false
+
+  bool isWebkitPrefixSupportEnabled =
+    Preferences::GetBool(WEBKIT_PREFIXES_ENABLED_PREF_NAME, false);
+  if (!sAreWebkitBoxKeywordIndicesInitialized) {
+    // First run: find the position of "-webkit-box" and "-webkit-inline-box"
+    // in kDisplayKTable.
+    sIndexOfWebkitBoxInDisplayTable =
+      nsCSSProps::FindIndexOfKeyword(eCSSKeyword__webkit_box,
+                                     nsCSSProps::kDisplayKTable);
+    MOZ_ASSERT(sIndexOfWebkitBoxInDisplayTable >= 0,
+               "Couldn't find -webkit-box in kDisplayKTable");
+    sIndexOfWebkitInlineBoxInDisplayTable =
+      nsCSSProps::FindIndexOfKeyword(eCSSKeyword__webkit_inline_box,
+                                     nsCSSProps::kDisplayKTable);
+    MOZ_ASSERT(sIndexOfWebkitInlineBoxInDisplayTable >= 0,
+               "Couldn't find -webkit-inline-box in kDisplayKTable");
+    sAreWebkitBoxKeywordIndicesInitialized = true;
+  }
+
+  // OK -- now, stomp on or restore the "-webkit-box" entries in kDisplayKTable,
+  // depending on whether the webkit prefix pref is enabled vs. disabled.
+  if (sIndexOfWebkitBoxInDisplayTable >= 0) {
+    nsCSSProps::kDisplayKTable[sIndexOfWebkitBoxInDisplayTable].mKeyword =
+      isWebkitPrefixSupportEnabled ?
+      eCSSKeyword__webkit_box : eCSSKeyword_UNKNOWN;
+  }
+  if (sIndexOfWebkitInlineBoxInDisplayTable >= 0) {
+    nsCSSProps::kDisplayKTable[sIndexOfWebkitInlineBoxInDisplayTable].mKeyword =
+      isWebkitPrefixSupportEnabled ?
+      eCSSKeyword__webkit_inline_box : eCSSKeyword_UNKNOWN;
   }
 }
 
@@ -1166,35 +1214,35 @@ nsLayoutUtils::SetDisplayPortMargins(nsIContent* aContent,
 
   scrollableFrame->TriggerDisplayPortExpiration();
 
-  // Display port margins changing means that the set of visible images may
+  // Display port margins changing means that the set of visible frames may
   // have drastically changed. Check if we should schedule an update.
   hadDisplayPort =
-    scrollableFrame->GetDisplayPortAtLastImageVisibilityUpdate(&oldDisplayPort);
+    scrollableFrame->GetDisplayPortAtLastApproximateFrameVisibilityUpdate(&oldDisplayPort);
 
-  bool needImageVisibilityUpdate = !hadDisplayPort;
+  bool needVisibilityUpdate = !hadDisplayPort;
   // Check if the total size has changed by a large factor.
-  if (!needImageVisibilityUpdate) {
+  if (!needVisibilityUpdate) {
     if ((newDisplayPort.width > 2 * oldDisplayPort.width) ||
         (oldDisplayPort.width > 2 * newDisplayPort.width) ||
         (newDisplayPort.height > 2 * oldDisplayPort.height) ||
         (oldDisplayPort.height > 2 * newDisplayPort.height)) {
-      needImageVisibilityUpdate = true;
+      needVisibilityUpdate = true;
     }
   }
   // Check if it's moved by a significant amount.
-  if (!needImageVisibilityUpdate) {
+  if (!needVisibilityUpdate) {
     if (nsRect* baseData = static_cast<nsRect*>(aContent->GetProperty(nsGkAtoms::DisplayPortBase))) {
       nsRect base = *baseData;
       if ((std::abs(newDisplayPort.X() - oldDisplayPort.X()) > base.width) ||
           (std::abs(newDisplayPort.XMost() - oldDisplayPort.XMost()) > base.width) ||
           (std::abs(newDisplayPort.Y() - oldDisplayPort.Y()) > base.height) ||
           (std::abs(newDisplayPort.YMost() - oldDisplayPort.YMost()) > base.height)) {
-        needImageVisibilityUpdate = true;
+        needVisibilityUpdate = true;
       }
     }
   }
-  if (needImageVisibilityUpdate) {
-    aPresShell->ScheduleImageVisibilityUpdate();
+  if (needVisibilityUpdate) {
+    aPresShell->ScheduleApproximateFrameVisibilityUpdateNow();
   }
 
   return true;
@@ -7556,6 +7604,10 @@ nsLayoutUtils::Initialize()
   Preferences::RegisterCallback(GridEnabledPrefChangeCallback,
                                 GRID_ENABLED_PREF_NAME);
   GridEnabledPrefChangeCallback(GRID_ENABLED_PREF_NAME, nullptr);
+  Preferences::RegisterCallback(WebkitPrefixEnabledPrefChangeCallback,
+                                WEBKIT_PREFIXES_ENABLED_PREF_NAME);
+  WebkitPrefixEnabledPrefChangeCallback(WEBKIT_PREFIXES_ENABLED_PREF_NAME,
+                                        nullptr);
   Preferences::RegisterCallback(TextAlignUnsafeEnabledPrefChangeCallback,
                                 TEXT_ALIGN_UNSAFE_ENABLED_PREF_NAME);
   Preferences::RegisterCallback(DisplayContentsEnabledPrefChangeCallback,
@@ -7583,6 +7635,8 @@ nsLayoutUtils::Shutdown()
 
   Preferences::UnregisterCallback(GridEnabledPrefChangeCallback,
                                   GRID_ENABLED_PREF_NAME);
+  Preferences::UnregisterCallback(WebkitPrefixEnabledPrefChangeCallback,
+                                  WEBKIT_PREFIXES_ENABLED_PREF_NAME);
   nsComputedDOMStyle::UnregisterPrefChangeCallbacks();
 }
 
@@ -7998,77 +8052,6 @@ nsLayoutUtils::GetBoxShadowRectForFrame(nsIFrame* aFrame,
     shadows.UnionRect(shadows, tmpRect);
   }
   return shadows;
-}
-
-/* static */ void
-nsLayoutUtils::UpdateImageVisibilityForFrame(nsIFrame* aImageFrame)
-{
-#ifdef DEBUG
-  nsIAtom* type = aImageFrame->GetType();
-  MOZ_ASSERT(type == nsGkAtoms::imageFrame ||
-             type == nsGkAtoms::imageControlFrame ||
-             type == nsGkAtoms::svgImageFrame, "wrong type of frame");
-#endif
-
-  nsCOMPtr<nsIImageLoadingContent> content = do_QueryInterface(aImageFrame->GetContent());
-  if (!content) {
-    return;
-  }
-
-  nsIPresShell* presShell = aImageFrame->PresContext()->PresShell();
-  if (presShell->AssumeAllImagesVisible()) {
-    presShell->EnsureImageInVisibleList(content);
-    return;
-  }
-
-  bool visible = true;
-  nsIFrame* f = aImageFrame->GetParent();
-  nsRect rect = aImageFrame->GetContentRectRelativeToSelf();
-  nsIFrame* rectFrame = aImageFrame;
-  while (f) {
-    nsIScrollableFrame* sf = do_QueryFrame(f);
-    if (sf) {
-      nsRect transformedRect =
-        nsLayoutUtils::TransformFrameRectToAncestor(rectFrame, rect, f);
-      if (!sf->IsRectNearlyVisible(transformedRect)) {
-        visible = false;
-        break;
-      }
-      // Move transformedRect to be contained in the scrollport as best we can
-      // (it might not fit) to pretend that it was scrolled into view.
-      nsRect scrollPort = sf->GetScrollPortRect();
-      if (transformedRect.XMost() > scrollPort.XMost()) {
-        transformedRect.x -= transformedRect.XMost() - scrollPort.XMost();
-      }
-      if (transformedRect.x < scrollPort.x) {
-        transformedRect.x = scrollPort.x;
-      }
-      if (transformedRect.YMost() > scrollPort.YMost()) {
-        transformedRect.y -= transformedRect.YMost() - scrollPort.YMost();
-      }
-      if (transformedRect.y < scrollPort.y) {
-        transformedRect.y = scrollPort.y;
-      }
-      transformedRect.width = std::min(transformedRect.width, scrollPort.width);
-      transformedRect.height = std::min(transformedRect.height, scrollPort.height);
-      rect = transformedRect;
-      rectFrame = f;
-    }
-    nsIFrame* parent = f->GetParent();
-    if (!parent) {
-      parent = nsLayoutUtils::GetCrossDocParentFrame(f);
-      if (parent && parent->PresContext()->IsChrome()) {
-        break;
-      }
-    }
-    f = parent;
-  }
-
-  if (visible) {
-    presShell->EnsureImageInVisibleList(content);
-  } else {
-    presShell->RemoveImageFromVisibleList(content);
-  }
 }
 
 /* static */ bool
@@ -8962,9 +8945,7 @@ nsLayoutUtils::IsScrollFrameWithSnapping(nsIFrame* aFrame)
   if (!sf) {
     return false;
   }
-  ScrollbarStyles styles = sf->GetScrollbarStyles();
-  return styles.mScrollSnapTypeY != NS_STYLE_SCROLL_SNAP_TYPE_NONE ||
-         styles.mScrollSnapTypeX != NS_STYLE_SCROLL_SNAP_TYPE_NONE;
+  return sf->IsScrollFrameWithSnapping();
 }
 
 /* static */ nsBlockFrame*

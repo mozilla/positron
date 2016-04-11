@@ -333,8 +333,10 @@ nsPresContext::Destroy()
 
   // Disconnect the refresh driver *after* the transition manager, which
   // needs it.
-  if (mRefreshDriver && mRefreshDriver->PresContext() == this) {
-    mRefreshDriver->Disconnect();
+  if (mRefreshDriver) {
+    if (mRefreshDriver->PresContext() == this) {
+      mRefreshDriver->Disconnect();
+    }
     mRefreshDriver = nullptr;
   }
 }
@@ -2209,8 +2211,7 @@ nsPresContext::SizeModeChanged(nsSizeMode aSizeMode)
     nsContentUtils::CallOnAllRemoteChildren(mDocument->GetWindow(),
                                             NotifyTabSizeModeChanged,
                                             &aSizeMode);
-    MediaFeatureValuesChangedAllDocuments(eRestyle_Subtree,
-                                          NS_STYLE_HINT_REFLOW);
+    MediaFeatureValuesChangedAllDocuments(nsRestyleHint(0));
   }
 }
 

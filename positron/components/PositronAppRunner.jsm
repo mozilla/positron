@@ -12,8 +12,15 @@ const nsIAppStartup            = Ci.nsIAppStartup;
 const NS_OK = Cr.NS_OK;
 
 Cu.import("resource://gre/modules/NetUtil.jsm");
+Cu.import("resource://gre/modules/Services.jsm");
+Cu.import("resource:///modules/Require.jsm");
 
 this.EXPORTED_SYMBOLS = ["PositronAppRunner"];
+
+// Electron doesn't require apps to keep a window open, even on Windows/Linux.
+// Apps can run headlessly or only display a Tray.  And they don't open a window
+// by default on startup.  So we need to keep Gecko running regardless.
+Services.startup.enterLastWindowClosingSurvivalArea();
 
 function quit() {
   let appStartup = Cc["@mozilla.org/toolkit/app-startup;1"]
@@ -46,17 +53,14 @@ PositronAppRunner.prototype = {
     return this._unboundLoadAndContinue.bind(this, aThenWhat.bind(this));
   },
 
-  _executeMainScript: function par_ExecuteMainScript(aData) {
-    dump("Main script is " + aData + "\n");
-    quit();
-  },
-
   _loadMainScript: function par_LoadMainScript(aScriptName) {
     let mainScript = this._baseDir.clone();
     mainScript.append(aScriptName);
-
-    NetUtil.asyncFetch(mainScript,
-	               this._loadAndContinue(this._executeMainScript));
+    let requirer = {
+      id: "resource:///modules/PositronAppRunner.jsm",
+      exports: {},
+    };
+    (new Require(requirer))(Services.io.newFileURI(mainScript).spec);
   },
 
   _parsePackageJSON: function par_parsePackageJSON(aData) {

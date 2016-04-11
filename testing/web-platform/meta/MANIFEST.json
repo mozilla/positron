@@ -28406,8 +28406,16 @@
         "url": "/web-animations/animation-effect-timing/getComputedStyle.html"
       },
       {
+        "path": "web-animations/animation-effect-timing/iterations.html",
+        "url": "/web-animations/animation-effect-timing/iterations.html"
+      },
+      {
         "path": "web-animations/animation-effect-timing/iterationStart.html",
         "url": "/web-animations/animation-effect-timing/iterationStart.html"
+      },
+      {
+        "path": "web-animations/animation-effect-timing/direction.html",
+        "url": "/web-animations/animation-effect-timing/direction.html"
       },
       {
         "path": "web-animations/animation-node/animation-node-after.html",
@@ -34820,6 +34828,44 @@
           }
         ]
       },
+      "reftest": {
+        "compat/webkit-text-fill-color-property-001a.html": [
+          {
+            "path": "compat/webkit-text-fill-color-property-001a.html",
+            "references": [
+              [
+                "/compat/webkit-text-fill-color-property-001-ref.html",
+                "=="
+              ]
+            ],
+            "url": "/compat/webkit-text-fill-color-property-001a.html"
+          }
+        ],
+        "compat/webkit-text-fill-color-property-001b.html": [
+          {
+            "path": "compat/webkit-text-fill-color-property-001b.html",
+            "references": [
+              [
+                "/compat/webkit-text-fill-color-property-001-ref.html",
+                "=="
+              ]
+            ],
+            "url": "/compat/webkit-text-fill-color-property-001b.html"
+          }
+        ],
+        "compat/webkit-text-fill-color-property-001c.html": [
+          {
+            "path": "compat/webkit-text-fill-color-property-001c.html",
+            "references": [
+              [
+                "/compat/webkit-text-fill-color-property-001-ref.html",
+                "=="
+              ]
+            ],
+            "url": "/compat/webkit-text-fill-color-property-001c.html"
+          }
+        ]
+      },
       "testharness": {
         "js/builtins/Promise-incumbent-global.sub.html": [
           {
@@ -34836,7 +34882,44 @@
         ]
       }
     },
-    "reftest_nodes": {}
+    "reftest_nodes": {
+      "compat/webkit-text-fill-color-property-001a.html": [
+        {
+          "path": "compat/webkit-text-fill-color-property-001a.html",
+          "references": [
+            [
+              "/compat/webkit-text-fill-color-property-001-ref.html",
+              "=="
+            ]
+          ],
+          "url": "/compat/webkit-text-fill-color-property-001a.html"
+        }
+      ],
+      "compat/webkit-text-fill-color-property-001b.html": [
+        {
+          "path": "compat/webkit-text-fill-color-property-001b.html",
+          "references": [
+            [
+              "/compat/webkit-text-fill-color-property-001-ref.html",
+              "=="
+            ]
+          ],
+          "url": "/compat/webkit-text-fill-color-property-001b.html"
+        }
+      ],
+      "compat/webkit-text-fill-color-property-001c.html": [
+        {
+          "path": "compat/webkit-text-fill-color-property-001c.html",
+          "references": [
+            [
+              "/compat/webkit-text-fill-color-property-001-ref.html",
+              "=="
+            ]
+          ],
+          "url": "/compat/webkit-text-fill-color-property-001c.html"
+        }
+      ]
+    }
   },
   "reftest_nodes": {
     "2dcontext/building-paths/canvas_complexshapes_arcto_001.htm": [
