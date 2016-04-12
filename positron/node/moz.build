@@ -4,5 +4,4 @@
 
 EXTRA_JS_MODULES.node += [
   'lib/events.js',
-  'lib/process.js',
 ]
