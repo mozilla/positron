@@ -29,6 +29,10 @@ let WebContents_prototype = {
   loadURL: function(url) {
     this._browserWindow._domWindow.location = url;
   },
+
+  openDevTools: function() {
+    dump('WebContents.openDevTools is not yet implemented!\n');
+  },
 };
 
 function WebContents(options) {
@@ -40,6 +44,7 @@ function WebContents(options) {
   // it's an alias for getURL).
   this.getURL = this._getURL = WebContents_prototype.getURL;
   this.loadURL = WebContents_prototype.loadURL;
+  this.openDevTools = WebContents_prototype.openDevTools;
 }
 
 exports.create = function(options) {
