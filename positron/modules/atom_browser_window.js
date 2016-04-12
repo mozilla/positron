@@ -28,6 +28,7 @@ const windowWatcher = Cc['@mozilla.org/embedcomp/window-watcher;1'].
                       getService(Ci.nsIWindowWatcher);
 
 const WebContents = require('electron').webContents;
+const app = process.atomBinding('app').app;
 
 const DEFAULT_URL = 'chrome://positron/content/shell.html';
 const DEFAULT_WINDOW_FEATURES = [
@@ -38,6 +39,9 @@ const DEFAULT_WINDOW_FEATURES = [
   'resizable',
   'scrollbars',
 ];
+
+// Map from nsIDOMWindow instances to BrowserWindow instances.
+let browserWindows = new Map();
 
 function BrowserWindow(options) {
   var features = DEFAULT_WINDOW_FEATURES.slice();
@@ -55,7 +59,34 @@ function BrowserWindow(options) {
   });
 
   this._domWindow = windowWatcher.openWindow(null, DEFAULT_URL, '_blank', features.join(','), null);
+  browserWindows.set(this._domWindow, this);
 }
+
+windowWatcher.registerNotification(function observe(subject, topic, data) {
+  switch(topic) {
+    case 'domwindowopened':
+      break;
+    case 'domwindowclosed': {
+      let domWindow = subject.QueryInterface(Ci.nsIDOMWindow);
+      let browserWindow = browserWindows.get(domWindow);
+      browserWindow.emit('closed');
+      browserWindows.delete(domWindow);
+
+      // This assumes that the BrowserWindow module was loaded before any
+      // windows were opened.  That's a safe assumption while the module
+      // is available only to the browser process, since it needs to load
+      // this module to open the first window.  But once this module becomes
+      // available to renderer processes, it may no longer be safe
+      // (depending on whether this module is reused to implement BrowserWindow
+      // in those processes).
+      if (browserWindows.size === 0) {
+        app.emit('window-all-closed');
+      }
+
+      break;
+    }
+  }
+});
 
 exports.BrowserWindow = BrowserWindow;
 exports._setDeprecatedOptionsCheck = function() { /* stub */ };
