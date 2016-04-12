@@ -39,6 +39,13 @@ process.binding = function(name) {
   return require(name);
 }
 
+// Per <https://nodejs.org/api/process.html#process_process_platform>,
+// valid values for this property are darwin, freebsd, linux, sunos and win32;
+// so we convert winnt to win32.  We also lowercase the value, but otherwise
+// we don't modify it, so it *might* contain a value outside the Node set, per
+// <https://developer.mozilla.org/en-US/docs/Mozilla/Developer_guide/Build_Instructions/OS_TARGET>.
+process.platform = Services.appinfo.OS.toLowerCase().replace(/^winnt$/, 'win32');
+
 process.versions = {
   node: '0',
   chrome: Services.appinfo.platformVersion,
