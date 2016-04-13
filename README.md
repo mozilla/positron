@@ -38,6 +38,7 @@ positron positron/test/hello-world
 To start an Electron test run:
 
 ```bash
+(cd positron/electron/spec; npm install) # You only have to do this the first time.
 ./mach run positron/electron/spec
 ```
 
