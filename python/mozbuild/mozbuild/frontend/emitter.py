@@ -83,6 +83,7 @@ from ..testing import (
     TEST_MANIFESTS,
     REFTEST_FLAVORS,
     WEB_PLATFORM_TESTS_FLAVORS,
+    SupportFilesConverter,
 )
 
 from .context import (
@@ -139,6 +140,7 @@ class TreeMetadataEmitter(LoggingMixin):
 
         self._emitter_time = 0.0
         self._object_count = 0
+        self._test_files_converter = SupportFilesConverter()
 
     def summary(self):
         return ExecutionSummary(
@@ -369,7 +371,7 @@ class TreeMetadataEmitter(LoggingMixin):
         else:
             return ExternalSharedLibrary(context, name)
 
-    def _handle_linkables(self, context, passthru):
+    def _handle_linkables(self, context, passthru, generated_files):
         has_linkables = False
 
         for kind, cls in [('PROGRAM', Program), ('HOST_PROGRAM', HostProgram)]:
@@ -560,6 +562,7 @@ class TreeMetadataEmitter(LoggingMixin):
                 self._libs[libname].append(lib)
                 self._linkage.append((context, lib, 'USE_LIBS'))
                 has_linkables = True
+                generated_files.add(lib.lib_name)
                 if is_component and not context['NO_COMPONENTS_MANIFEST']:
                     yield ChromeManifestEntry(context,
                         'components/components.manifest',
@@ -782,7 +785,8 @@ class TreeMetadataEmitter(LoggingMixin):
 
         generated_files = set()
         for obj in self._process_generated_files(context):
-            generated_files.add(obj.output)
+            for f in obj.outputs:
+                generated_files.add(f)
             yield obj
 
         for path in context['CONFIGURE_SUBST_FILES']:
@@ -821,7 +825,7 @@ class TreeMetadataEmitter(LoggingMixin):
                     local_include.full_path), context)
             yield LocalInclude(context, local_include)
 
-        for obj in self._handle_linkables(context, passthru):
+        for obj in self._handle_linkables(context, passthru, generated_files):
             yield obj
 
         generated_files.update(['%s%s' % (k, self.config.substs.get('BIN_SUFFIX', '')) for k in self._binaries.keys()])
@@ -1002,7 +1006,7 @@ class TreeMetadataEmitter(LoggingMixin):
 
         for f in generated_files:
             flags = generated_files[f]
-            output = f
+            outputs = f
             inputs = []
             if flags.script:
                 method = "main"
@@ -1033,7 +1037,7 @@ class TreeMetadataEmitter(LoggingMixin):
             else:
                 script = None
                 method = None
-            yield GeneratedFile(context, script, method, output, inputs)
+            yield GeneratedFile(context, script, method, outputs, inputs)
 
     def _process_test_manifests(self, context):
         for prefix, info in TEST_MANIFESTS.items():
@@ -1095,63 +1099,24 @@ class TreeMetadataEmitter(LoggingMixin):
                                                         defaults['install-to-subdir'],
                                                         mozpath.basename(path))
 
-
-            # "head" and "tail" lists.
-            # All manifests support support-files.
-            #
-            # Keep a set of already seen support file patterns, because
-            # repeatedly processing the patterns from the default section
-            # for every test is quite costly (see bug 922517).
-            extras = (('head', set()),
-                      ('tail', set()),
-                      ('support-files', set()))
             def process_support_files(test):
-                for thing, seen in extras:
-                    value = test.get(thing, '')
-                    if value in seen:
-                        continue
-                    seen.add(value)
-                    for pattern in value.split():
-                        # We only support globbing on support-files because
-                        # the harness doesn't support * for head and tail.
-                        if '*' in pattern and thing == 'support-files':
-                            obj.pattern_installs.append(
-                                (manifest_dir, pattern, out_dir))
-                        # "absolute" paths identify files that are to be
-                        # placed in the install_root directory (no globs)
-                        elif pattern[0] == '/':
-                            full = mozpath.normpath(mozpath.join(manifest_dir,
-                                mozpath.basename(pattern)))
-                            obj.installs[full] = (mozpath.join(install_root,
-                                pattern[1:]), False)
-                        else:
-                            full = mozpath.normpath(mozpath.join(manifest_dir,
-                                pattern))
+                install_info = self._test_files_converter.convert_support_files(
+                    test, install_root, manifest_dir, out_dir)
 
-                            dest_path = mozpath.join(out_dir, pattern)
+                obj.pattern_installs.extend(install_info.pattern_installs)
+                for source, dest in install_info.installs:
+                    obj.installs[source] = (dest, False)
+                obj.external_installs |= install_info.external_installs
+                for install_path in install_info.deferred_installs:
+                    if all(['*' not in install_path,
+                            not os.path.isfile(mozpath.join(context.config.topsrcdir,
+                                                            install_path[2:])),
+                            install_path not in install_info.external_installs]):
+                        raise SandboxValidationError('Error processing test '
+                           'manifest %s: entry in support-files not present '
+                           'in the srcdir: %s' % (path, install_path), context)
 
-                            # If the path resolves to a different directory
-                            # tree, we take special behavior depending on the
-                            # entry type.
-                            if not full.startswith(manifest_dir):
-                                # If it's a support file, we install the file
-                                # into the current destination directory.
-                                # This implementation makes installing things
-                                # with custom prefixes impossible. If this is
-                                # needed, we can add support for that via a
-                                # special syntax later.
-                                if thing == 'support-files':
-                                    dest_path = mozpath.join(out_dir,
-                                        os.path.basename(pattern))
-                                # If it's not a support file, we ignore it.
-                                # This preserves old behavior so things like
-                                # head files doesn't get installed multiple
-                                # times.
-                                else:
-                                    continue
-
-                            obj.installs[full] = (mozpath.normpath(dest_path),
-                                False)
+                obj.deferred_installs |= install_info.deferred_installs
 
             for test in filtered:
                 obj.tests.append(test)
@@ -1184,10 +1149,8 @@ class TreeMetadataEmitter(LoggingMixin):
                     del obj.installs[mozpath.join(manifest_dir, f)]
                 except KeyError:
                     raise SandboxValidationError('Error processing test '
-                        'manifest %s: entry in generated-files not present '
-                        'elsewhere in manifest: %s' % (path, f), context)
-
-                obj.external_installs.add(mozpath.join(out_dir, f))
+                       'manifest %s: entry in generated-files not present '
+                       'elsewhere in manifest: %s' % (path, f), context)
 
             yield obj
         except (AssertionError, Exception):

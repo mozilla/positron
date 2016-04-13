@@ -612,7 +612,6 @@ class PushToTry(MachCommandBase):
         """
 
         from mozbuild.testing import TestResolver
-        from mozbuild.controller.building import BuildDriver
         from autotry import AutoTry
 
         print("mach try is under development, please file bugs blocking 1149670.")
@@ -645,9 +644,6 @@ class PushToTry(MachCommandBase):
         builds, platforms, tests, talos, paths, tags, extra = self.validate_args(**kwargs)
 
         if paths or tags:
-            driver = self._spawn(BuildDriver)
-            driver.install_tests(remove=False)
-
             paths = [os.path.relpath(os.path.normpath(os.path.abspath(item)), self.topsrcdir)
                      for item in paths]
             paths_by_flavor = at.paths_by_flavor(paths=paths, tags=tags)
@@ -718,11 +714,11 @@ def get_parser(argv=None):
                              'chunkByDir directories.',
                         default=None)
 
-    parser.add_argument('--e10s',
-                        action='store_true',
+    parser.add_argument('--disable-e10s',
+                        action='store_false',
                         dest='e10s',
-                        help='Find test on chunk with electrolysis preferences enabled.',
-                        default=False)
+                        help='Find test on chunk with electrolysis preferences disabled.',
+                        default=True)
 
     parser.add_argument('-p', '--platform',
                         choices=['linux', 'linux64', 'mac', 'macosx64', 'win32', 'win64'],

@@ -550,39 +550,44 @@ sandbox_addProperty(JSContext* cx, HandleObject obj, HandleId id, HandleValue v)
 
 #define XPCONNECT_SANDBOX_CLASS_METADATA_SLOT (XPCONNECT_GLOBAL_EXTRA_SLOT_OFFSET)
 
-static const js::Class SandboxClass = {
-    "Sandbox",
-    XPCONNECT_GLOBAL_FLAGS_WITH_EXTRA_SLOTS(1),
+static const js::ClassOps SandboxClassOps = {
     nullptr, nullptr, nullptr, nullptr,
     sandbox_enumerate, sandbox_resolve,
     nullptr,        /* mayResolve */
     sandbox_finalize,
     nullptr, nullptr, nullptr, JS_GlobalObjectTraceHook,
+};
+
+static const js::ClassExtension SandboxClassExtension = {
+    nullptr,      /* weakmapKeyDelegateOp */
+    sandbox_moved /* objectMovedOp */
+};
+
+static const js::Class SandboxClass = {
+    "Sandbox",
+    XPCONNECT_GLOBAL_FLAGS_WITH_EXTRA_SLOTS(1),
+    &SandboxClassOps,
     JS_NULL_CLASS_SPEC,
-    {
-      false,        /* isWrappedNative */
-      nullptr,      /* weakmapKeyDelegateOp */
-      sandbox_moved /* objectMovedOp */
-    },
+    &SandboxClassExtension,
     JS_NULL_OBJECT_OPS
 };
 
 // Note to whomever comes here to remove addProperty hooks: billm has promised
 // to do the work for this class.
-static const js::Class SandboxWriteToProtoClass = {
-    "Sandbox",
-    XPCONNECT_GLOBAL_FLAGS_WITH_EXTRA_SLOTS(1),
+static const js::ClassOps SandboxWriteToProtoClassOps = {
     sandbox_addProperty, nullptr, nullptr, nullptr,
     sandbox_enumerate, sandbox_resolve,
     nullptr,        /* mayResolve */
     sandbox_finalize,
     nullptr, nullptr, nullptr, JS_GlobalObjectTraceHook,
+};
+
+static const js::Class SandboxWriteToProtoClass = {
+    "Sandbox",
+    XPCONNECT_GLOBAL_FLAGS_WITH_EXTRA_SLOTS(1),
+    &SandboxWriteToProtoClassOps,
     JS_NULL_CLASS_SPEC,
-    {
-      false,        /* isWrappedNative */
-      nullptr,      /* weakmapKeyDelegateOp */
-      sandbox_moved /* objectMovedOp */
-    },
+    &SandboxClassExtension,
     JS_NULL_OBJECT_OPS
 };
 
@@ -941,11 +946,12 @@ xpc::GlobalProperties::Parse(JSContext* cx, JS::HandleObject obj)
 bool
 xpc::GlobalProperties::Define(JSContext* cx, JS::HandleObject obj)
 {
+    // Properties will be exposed to System automatically but not to Sandboxes
+    // if |[Exposed=System]| is specified.
+    // This function holds common properties not exposed automatically but able
+    // to be requested either in |Cu.importGlobalProperties| or
+    // |wantGlobalProperties| of a sandbox.
     if (CSS && !dom::CSSBinding::GetConstructorObject(cx, obj))
-        return false;
-
-    if (indexedDB &&
-        !IndexedDatabaseManager::DefineIndexedDB(cx, obj))
         return false;
 
     if (XMLHttpRequest &&
@@ -1002,6 +1008,29 @@ xpc::GlobalProperties::Define(JSContext* cx, JS::HandleObject obj)
         return false;
 
     return true;
+}
+
+bool
+xpc::GlobalProperties::DefineInXPCComponents(JSContext* cx, JS::HandleObject obj)
+{
+    if (indexedDB &&
+        !IndexedDatabaseManager::DefineIndexedDB(cx, obj))
+        return false;
+
+    return Define(cx, obj);
+}
+
+bool
+xpc::GlobalProperties::DefineInSandbox(JSContext* cx, JS::HandleObject obj)
+{
+    MOZ_ASSERT(IsSandbox(obj));
+
+    if (indexedDB &&
+        !(IndexedDatabaseManager::ResolveSandboxBinding(cx, obj) &&
+          IndexedDatabaseManager::DefineIndexedDB(cx, obj)))
+        return false;
+
+    return Define(cx, obj);
 }
 
 nsresult
@@ -1170,7 +1199,7 @@ xpc::CreateSandboxObject(JSContext* cx, MutableHandleValue vp, nsISupports* prin
              !JS_DefineFunction(cx, sandbox, "isProxy", SandboxIsProxy, 1, 0)))
             return NS_ERROR_XPC_UNEXPECTED;
 
-        if (!options.globalProperties.Define(cx, sandbox))
+        if (!options.globalProperties.DefineInSandbox(cx, sandbox))
             return NS_ERROR_XPC_UNEXPECTED;
 
 #ifndef SPIDERMONKEY_PROMISE

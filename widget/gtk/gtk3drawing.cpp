@@ -41,9 +41,9 @@ static GtkWidget* gComboBoxEntryArrowWidget;
 static GtkWidget* gHandleBoxWidget;
 static GtkWidget* gToolbarWidget;
 static GtkWidget* gFrameWidget;
-static GtkWidget* gStatusbarWidget;
 static GtkWidget* gProgressWidget;
 static GtkWidget* gTabWidget;
+static GtkWidget* gTextViewWidget;
 static GtkWidget* gTooltipWidget;
 static GtkWidget* gMenuBarWidget;
 static GtkWidget* gMenuBarItemWidget;
@@ -538,23 +538,11 @@ ensure_progress_widget()
 }
 
 static gint
-ensure_statusbar_widget()
-{
-    if (!gStatusbarWidget) {
-      gStatusbarWidget = gtk_statusbar_new();
-      setup_widget_prototype(gStatusbarWidget);
-    }
-    return MOZ_GTK_SUCCESS;
-}
-
-static gint
 ensure_frame_widget()
 {
     if (!gFrameWidget) {
-        ensure_statusbar_widget();
         gFrameWidget = gtk_frame_new(NULL);
-        gtk_container_add(GTK_CONTAINER(gStatusbarWidget), gFrameWidget);
-        gtk_widget_realize(gFrameWidget);
+        setup_widget_prototype(gFrameWidget);
     }
     return MOZ_GTK_SUCCESS;
 }
@@ -721,6 +709,17 @@ ensure_scrolled_window_widget()
     return MOZ_GTK_SUCCESS;
 }
 
+static void
+ensure_text_view_widget()
+{
+    if (gTextViewWidget)
+        return;
+
+    gTextViewWidget = gtk_text_view_new();
+    ensure_scrolled_window_widget();
+    gtk_container_add(GTK_CONTAINER(gScrolledWindowWidget), gTextViewWidget);
+}
+
 gint
 moz_gtk_init()
 {
@@ -738,7 +737,8 @@ moz_gtk_init()
 
     if(!gtk_check_version(3, 12, 0)) {
         ensure_tab_widget();
-        gtk_widget_style_get(gTabWidget, "has-tab-gap", &notebook_has_tab_gap, NULL);
+        gtk_style_context_get_style(gtk_widget_get_style_context(gTabWidget),
+                                    "has-tab-gap", &notebook_has_tab_gap, NULL);
     }
     else {
         notebook_has_tab_gap = TRUE;
@@ -752,10 +752,10 @@ moz_gtk_checkbox_get_metrics(gint* indicator_size, gint* indicator_spacing)
 {
     ensure_checkbox_widget();
 
-    gtk_widget_style_get (gCheckboxWidget,
-                          "indicator_size", indicator_size,
-                          "indicator_spacing", indicator_spacing,
-                          NULL);
+    gtk_style_context_get_style(gtk_widget_get_style_context(gCheckboxWidget),
+                                "indicator_size", indicator_size,
+                                "indicator_spacing", indicator_spacing,
+                                NULL);
 
     return MOZ_GTK_SUCCESS;
 }
@@ -765,10 +765,10 @@ moz_gtk_radio_get_metrics(gint* indicator_size, gint* indicator_spacing)
 {
     ensure_radiobutton_widget();
 
-    gtk_widget_style_get (gRadiobuttonWidget,
-                          "indicator_size", indicator_size,
-                          "indicator_spacing", indicator_spacing,
-                          NULL);
+    gtk_style_context_get_style(gtk_widget_get_style_context(gRadiobuttonWidget),
+                                "indicator_size", indicator_size,
+                                "indicator_spacing", indicator_spacing,
+                                NULL);
 
     return MOZ_GTK_SUCCESS;
 }
@@ -795,9 +795,9 @@ moz_gtk_menuitem_get_horizontal_padding(gint* horizontal_padding)
 {
     ensure_menu_item_widget();
 
-    gtk_widget_style_get (gMenuItemWidget,
-                          "horizontal-padding", horizontal_padding,
-                          NULL);
+    gtk_style_context_get_style(gtk_widget_get_style_context(gMenuItemWidget),
+                                "horizontal-padding", horizontal_padding,
+                                NULL);
 
     return MOZ_GTK_SUCCESS;
 }
@@ -807,9 +807,9 @@ moz_gtk_checkmenuitem_get_horizontal_padding(gint* horizontal_padding)
 {
     ensure_check_menu_item_widget();
 
-    gtk_widget_style_get (gCheckMenuItemWidget,
-                          "horizontal-padding", horizontal_padding,
-                          NULL);
+    gtk_style_context_get_style(gtk_widget_get_style_context(gCheckMenuItemWidget),
+                                "horizontal-padding", horizontal_padding,
+                                NULL);
 
     return MOZ_GTK_SUCCESS;
 }
@@ -821,9 +821,9 @@ moz_gtk_button_get_default_overflow(gint* border_top, gint* border_left,
     GtkBorder* default_outside_border;
 
     ensure_button_widget();
-    gtk_widget_style_get(gButtonWidget,
-                         "default-outside-border", &default_outside_border,
-                         NULL);
+    gtk_style_context_get_style(gtk_widget_get_style_context(gButtonWidget),
+                                "default-outside-border", &default_outside_border,
+                                NULL);
 
     if (default_outside_border) {
         *border_top = default_outside_border->top;
@@ -844,9 +844,9 @@ moz_gtk_button_get_default_border(gint* border_top, gint* border_left,
     GtkBorder* default_border;
 
     ensure_button_widget();
-    gtk_widget_style_get(gButtonWidget,
-                         "default-border", &default_border,
-                         NULL);
+    gtk_style_context_get_style(gtk_widget_get_style_context(gButtonWidget),
+                                "default-border", &default_border,
+                                NULL);
 
     if (default_border) {
         *border_top = default_border->top;
@@ -866,10 +866,12 @@ moz_gtk_splitter_get_metrics(gint orientation, gint* size)
 {
     if (orientation == GTK_ORIENTATION_HORIZONTAL) {
         ensure_hpaned_widget();
-        gtk_widget_style_get(gHPanedWidget, "handle_size", size, NULL);
+        gtk_style_context_get_style(gtk_widget_get_style_context(gHPanedWidget),
+                                    "handle_size", size, NULL);
     } else {
         ensure_vpaned_widget();
-        gtk_widget_style_get(gVPanedWidget, "handle_size", size, NULL);
+        gtk_style_context_get_style(gtk_widget_get_style_context(gVPanedWidget),
+                                    "handle_size", size, NULL);
     }
     return MOZ_GTK_SUCCESS;
 }
@@ -1062,7 +1064,8 @@ calculate_arrow_rect(GtkWidget* arrow, GdkRectangle* rect,
     GtkMisc* misc = GTK_MISC(arrow);
 
     if (have_arrow_scaling)
-        gtk_widget_style_get(arrow, "arrow_scaling", &arrow_scaling, NULL);
+        gtk_style_context_get_style(gtk_widget_get_style_context(arrow),
+                                    "arrow_scaling", &arrow_scaling, NULL);
 
     gtk_misc_get_padding(misc, &mxpad, &mypad); 
     extent = MIN((rect->width - mxpad * 2),
@@ -1147,17 +1150,17 @@ moz_gtk_scrollbar_button_paint(cairo_t *cr, GdkRectangle* rect,
     arrow_rect.height = rect->height / 2;
     
     gfloat arrow_scaling;
-    gtk_widget_style_get (scrollbar, "arrow-scaling", &arrow_scaling, NULL);
+    gtk_style_context_get_style(style, "arrow-scaling", &arrow_scaling, NULL);
 
     gdouble arrow_size = MIN(rect->width, rect->height) * arrow_scaling;
     arrow_rect.x = rect->x + (rect->width - arrow_size) / 2;
     arrow_rect.y = rect->y + (rect->height - arrow_size) / 2;
 
     if (state_flags & GTK_STATE_FLAG_ACTIVE) {
-        gtk_widget_style_get(scrollbar,
-                             "arrow-displacement-x", &arrow_displacement_x,
-                             "arrow-displacement-y", &arrow_displacement_y,
-                             NULL);
+        gtk_style_context_get_style(style,
+                                    "arrow-displacement-x", &arrow_displacement_x,
+                                    "arrow-displacement-y", &arrow_displacement_y,
+                                    NULL);
 
         arrow_rect.x += arrow_displacement_x;
         arrow_rect.y += arrow_displacement_y;
@@ -1686,10 +1689,10 @@ moz_gtk_combo_box_paint(cairo_t *cr, GdkRectangle* rect,
     if (!gComboBoxSeparatorWidget)
         return MOZ_GTK_SUCCESS;
     style = gtk_widget_get_style_context(gComboBoxSeparatorWidget);
-    gtk_widget_style_get(gComboBoxSeparatorWidget,
-                         "wide-separators", &wide_separators,
-                         "separator-width", &separator_width,
-                         NULL);
+    gtk_style_context_get_style(style,
+                                "wide-separators", &wide_separators,
+                                "separator-width", &separator_width,
+                                NULL);
 
     if (wide_separators) {
         if (direction == GTK_TEXT_DIR_LTR)
@@ -1778,10 +1781,10 @@ moz_gtk_combo_box_entry_button_paint(cairo_t *cr, GdkRectangle* rect,
     calculate_button_inner_rect(gComboBoxEntryButtonWidget,
                                 rect, &arrow_rect, direction);
     if (state_flags & GTK_STATE_FLAG_ACTIVE) {
-        gtk_widget_style_get(gComboBoxEntryButtonWidget,
-                             "child-displacement-x", &x_displacement,
-                             "child-displacement-y", &y_displacement,
-                             NULL);
+        gtk_style_context_get_style(gtk_widget_get_style_context(gComboBoxEntryButtonWidget),
+                                    "child-displacement-x", &x_displacement,
+                                    "child-displacement-y", &y_displacement,
+                                    NULL);
         arrow_rect.x += x_displacement;
         arrow_rect.y += y_displacement;
     }
@@ -1906,10 +1909,10 @@ moz_gtk_toolbar_separator_paint(cairo_t *cr, GdkRectangle* rect,
 
     style = gtk_widget_get_style_context(gToolbarSeparatorWidget);
 
-    gtk_widget_style_get(gToolbarWidget,
-                         "wide-separators", &wide_separators,
-                         "separator-width", &separator_width,
-                         NULL);
+    gtk_style_context_get_style(gtk_widget_get_style_context(gToolbarWidget),
+                                "wide-separators", &wide_separators,
+                                "separator-width", &separator_width,
+                                NULL);
 
     if (wide_separators) {
         if (separator_width > rect->width)
@@ -1960,11 +1963,16 @@ moz_gtk_resizer_paint(cairo_t *cr, GdkRectangle* rect,
 {
     GtkStyleContext* style;
 
-    ensure_frame_widget();
-    gtk_widget_set_direction(gStatusbarWidget, GTK_TEXT_DIR_LTR);
+    // gtk_render_handle() draws a background, so use GtkTextView and its
+    // GTK_STYLE_CLASS_VIEW to match the background with textarea elements.
+    // The resizer is drawn with shaded variants of the background color, and
+    // so a transparent background would lead to a transparent resizer.
+    ensure_text_view_widget();
+    gtk_widget_set_direction(gTextViewWidget, GTK_TEXT_DIR_LTR);
 
-    style = gtk_widget_get_style_context(gStatusbarWidget);
+    style = gtk_widget_get_style_context(gTextViewWidget);
     gtk_style_context_save(style);
+    gtk_style_context_add_class(style, GTK_STYLE_CLASS_VIEW);
     gtk_style_context_add_class(style, GTK_STYLE_CLASS_GRIP);
     gtk_style_context_set_state(style, GetStateFlagsFromGtkWidgetState(state));
 
@@ -2146,7 +2154,7 @@ moz_gtk_tab_paint(cairo_t *cr, GdkRectangle* rect,
     tabRect = *rect;
 
     if (flags & MOZ_GTK_TAB_FIRST) {
-        gtk_widget_style_get (gTabWidget, "initial-gap", &initial_gap, NULL);
+        gtk_style_context_get_style(style, "initial-gap", &initial_gap, NULL);
         tabRect.width -= initial_gap;
 
         if (direction != GTK_TEXT_DIR_RTL) {
@@ -2477,10 +2485,10 @@ moz_gtk_menu_separator_paint(cairo_t *cr, GdkRectangle* rect,
     gtk_style_context_save(style);
     gtk_style_context_add_class(style, GTK_STYLE_CLASS_SEPARATOR);
 
-    gtk_widget_style_get(gMenuSeparatorWidget,
-                         "wide-separators",    &wide_separators,
-                         "separator-height",   &separator_height,
-                         NULL);
+    gtk_style_context_get_style(style,
+                                "wide-separators",    &wide_separators,
+                                "separator-height",   &separator_height,
+                                NULL);
 
     if (wide_separators) {
       gtk_render_frame(style, cr,
@@ -2588,13 +2596,14 @@ moz_gtk_check_menu_item_paint(cairo_t *cr, GdkRectangle* rect,
     ensure_check_menu_item_widget();
     gtk_widget_set_direction(gCheckMenuItemWidget, direction);
 
-    gtk_widget_style_get (gCheckMenuItemWidget,
-                          "indicator-size", &indicator_size,
-                          "horizontal-padding", &horizontal_padding,
-                          NULL);
-
     style = gtk_widget_get_style_context(gCheckMenuItemWidget);
     gtk_style_context_save(style);
+
+    gtk_style_context_get_style(style,
+                                "indicator-size", &indicator_size,
+                                "horizontal-padding", &horizontal_padding,
+                                NULL);
+
     if (isradio) {
       gtk_style_context_add_class(style, GTK_STYLE_CLASS_RADIO);
     } else {
@@ -2788,13 +2797,13 @@ moz_gtk_get_widget_border(GtkThemeWidgetType widget, gint* left, gint* top,
             /* If there is no separator, don't try to count its width. */
             separator_width = 0;
             if (gComboBoxSeparatorWidget) {
-                gtk_widget_style_get(gComboBoxSeparatorWidget,
-                                     "wide-separators", &wide_separators,
-                                     "separator-width", &separator_width,
-                                     NULL);
+                style = gtk_widget_get_style_context(gComboBoxSeparatorWidget);
+                gtk_style_context_get_style(style,
+                                            "wide-separators", &wide_separators,
+                                            "separator-width", &separator_width,
+                                            NULL);
 
                 if (!wide_separators) {
-                    style = gtk_widget_get_style_context(gComboBoxSeparatorWidget);
                     gtk_style_context_get_border(style, GTK_STATE_FLAG_NORMAL, &border);
                     separator_width = border.left;
                 }
@@ -2941,13 +2950,13 @@ moz_gtk_get_tab_border(gint* left, gint* top, gint* right, gint* bottom,
     *left = *top = *right = *bottom = 0;
     moz_gtk_add_style_padding(style, left, top, right, bottom);
 
-    gtk_widget_style_get (gTabWidget, "tab-curvature", &tab_curvature, NULL);
+    gtk_style_context_get_style(style, "tab-curvature", &tab_curvature, NULL);
     *left += tab_curvature;
     *right += tab_curvature;
 
     if (flags & MOZ_GTK_TAB_FIRST) {
       int initial_gap;
-      gtk_widget_style_get (gTabWidget, "initial-gap", &initial_gap, NULL);
+      gtk_style_context_get_style(style, "initial-gap", &initial_gap, NULL);
       if (direction == GTK_TEXT_DIR_RTL)
         *right += initial_gap;
       else
@@ -2983,9 +2992,9 @@ moz_gtk_get_tab_scroll_arrow_size(gint* width, gint* height)
     gint arrow_size;
 
     ensure_tab_widget();
-    gtk_widget_style_get(gTabWidget,
-                         "scroll-arrow-hlength", &arrow_size,
-                         NULL);
+    gtk_style_context_get_style(gtk_widget_get_style_context(gTabWidget),
+                                "scroll-arrow-hlength", &arrow_size,
+                                NULL);
 
     *height = *width = arrow_size;
 
@@ -3023,12 +3032,11 @@ moz_gtk_get_toolbar_separator_width(gint* size)
 
     ensure_toolbar_widget();
     style = gtk_widget_get_style_context(gToolbarWidget);
-
-    gtk_widget_style_get(gToolbarWidget,
-                         "space-size", size,
-                         "wide-separators",  &wide_separators,
-                         "separator-width", &separator_width,
-                         NULL);
+    gtk_style_context_get_style(style,
+                                "space-size", size,
+                                "wide-separators",  &wide_separators,
+                                "separator-width", &separator_width,
+                                NULL);
     /* Just in case... */
     gtk_style_context_get_border(style, GTK_STATE_FLAG_NORMAL, &border);
     *size = MAX(*size, (wide_separators ? separator_width : border.left));
@@ -3039,9 +3047,9 @@ gint
 moz_gtk_get_expander_size(gint* size)
 {
     ensure_expander_widget();
-    gtk_widget_style_get(gExpanderWidget,
-                         "expander-size", size,
-                         NULL);
+    gtk_style_context_get_style(gtk_widget_get_style_context(gExpanderWidget),
+                                "expander-size", size,
+                                NULL);
 
     return MOZ_GTK_SUCCESS;
 }
@@ -3050,9 +3058,9 @@ gint
 moz_gtk_get_treeview_expander_size(gint* size)
 {
     ensure_tree_view_widget();
-    gtk_widget_style_get(gTreeViewWidget,
-                         "expander-size", size,
-                         NULL);
+    gtk_style_context_get_style(gtk_widget_get_style_context(gTreeViewWidget),
+                                "expander-size", size,
+                                NULL);
 
     return MOZ_GTK_SUCCESS;
 }
@@ -3077,10 +3085,10 @@ moz_gtk_get_menu_separator_height(gint *size)
     gtk_style_context_save(style);
     gtk_style_context_add_class(style, GTK_STYLE_CLASS_SEPARATOR);
 
-    gtk_widget_style_get(gMenuSeparatorWidget,
-                          "wide-separators",  &wide_separators,
-                          "separator-height", &separator_height,
-                          NULL);
+    gtk_style_context_get_style(style,
+                                "wide-separators",  &wide_separators,
+                                "separator-height", &separator_height,
+                                NULL);
 
     gtk_style_context_restore(style);
 
@@ -3091,6 +3099,27 @@ moz_gtk_get_menu_separator_height(gint *size)
 }
 
 void
+moz_gtk_get_entry_min_height(gint* height)
+{
+    ensure_entry_widget();
+    GtkStyleContext* style = gtk_widget_get_style_context(gEntryWidget);
+    if (!gtk_check_version(3, 20, 0)) {
+        gtk_style_context_get(style, gtk_style_context_get_state(style),
+                              "min-height", height,
+                              nullptr);
+    } else {
+        *height = 0;
+    }
+
+    GtkBorder border;
+    GtkBorder padding;
+    gtk_style_context_get_border(style, GTK_STATE_FLAG_NORMAL, &border);
+    gtk_style_context_get_padding(style, GTK_STATE_FLAG_NORMAL, &padding);
+
+    *height += (border.top + border.bottom + padding.top + padding.bottom);
+}
+
+void
 moz_gtk_get_scale_metrics(GtkOrientation orient, gint* scale_width,
                           gint* scale_height)
 {
@@ -3098,7 +3127,8 @@ moz_gtk_get_scale_metrics(GtkOrientation orient, gint* scale_width,
   GtkWidget* widget = orient == GTK_ORIENTATION_HORIZONTAL ?
                       gHScaleWidget : gVScaleWidget;
   moz_gtk_get_scalethumb_metrics(orient, &thumb_length, &thumb_height);
-  gtk_widget_style_get(widget, "trough-border", &trough_border, NULL);
+  gtk_style_context_get_style(gtk_widget_get_style_context(widget),
+                              "trough-border", &trough_border, NULL);
 
   if (orient == GTK_ORIENTATION_HORIZONTAL) {
       *scale_width = thumb_length + trough_border * 2;
@@ -3117,10 +3147,10 @@ moz_gtk_get_scalethumb_metrics(GtkOrientation orient, gint* thumb_length, gint* 
   ensure_scale_widget();
   widget = ((orient == GTK_ORIENTATION_HORIZONTAL) ? gHScaleWidget : gVScaleWidget);
 
-  gtk_widget_style_get (widget,
-                        "slider_length", thumb_length,
-                        "slider_width", thumb_height,
-                        NULL);
+  gtk_style_context_get_style(gtk_widget_get_style_context(widget),
+                              "slider_length", thumb_length,
+                              "slider_width", thumb_height,
+                              NULL);
 
   return MOZ_GTK_SUCCESS;
 }
@@ -3130,12 +3160,12 @@ moz_gtk_get_scrollbar_metrics(MozGtkScrollbarMetrics *metrics)
 {
     ensure_scrollbar_widget();
 
-    gtk_widget_style_get (gHorizScrollbarWidget,
-                          "slider_width", &metrics->slider_width,
-                          "trough_border", &metrics->trough_border,
-                          "stepper_size", &metrics->stepper_size,
-                          "stepper_spacing", &metrics->stepper_spacing,
-                          NULL);
+    gtk_style_context_get_style(gtk_widget_get_style_context(gHorizScrollbarWidget),
+                                "slider_width", &metrics->slider_width,
+                                "trough_border", &metrics->trough_border,
+                                "stepper_size", &metrics->stepper_size,
+                                "stepper_spacing", &metrics->stepper_spacing,
+                                NULL);
 
     metrics->min_slider_size = 
         gtk_range_get_min_slider_size(GTK_RANGE(gHorizScrollbarWidget));
@@ -3391,12 +3421,12 @@ gboolean moz_gtk_has_scrollbar_buttons(void)
     gboolean backward, forward, secondary_backward, secondary_forward;
     MOZ_ASSERT(is_initialized, "Forgot to call moz_gtk_init()");
     ensure_scrollbar_widget();
-    gtk_widget_style_get (gHorizScrollbarWidget,
-                          "has-backward-stepper", &backward,
-                          "has-forward-stepper", &forward,
-                          "has-secondary-backward-stepper", &secondary_backward,
-                          "has-secondary-forward-stepper", &secondary_forward,
-                          NULL);
+    gtk_style_context_get_style(gtk_widget_get_style_context(gHorizScrollbarWidget),
+                                "has-backward-stepper", &backward,
+                                "has-forward-stepper", &forward,
+                                "has-secondary-backward-stepper", &secondary_backward,
+                                "has-secondary-forward-stepper", &secondary_forward,
+                                NULL);
     return backward | forward | secondary_forward | secondary_forward;
 }
 
@@ -3436,10 +3466,10 @@ moz_gtk_shutdown()
     gComboBoxEntryTextareaWidget = NULL;
     gHandleBoxWidget = NULL;
     gToolbarWidget = NULL;
-    gStatusbarWidget = NULL;
     gFrameWidget = NULL;
     gProgressWidget = NULL;
     gTabWidget = NULL;
+    gTextViewWidget = nullptr;
     gTooltipWidget = NULL;
     gMenuBarWidget = NULL;
     gMenuBarItemWidget = NULL;

@@ -233,7 +233,9 @@ TextPropertyEditor.prototype = {
         advanceChars: advanceValidate,
         contentType: InplaceEditor.CONTENT_TYPES.CSS_VALUE,
         property: this.prop,
-        popup: this.popup
+        popup: this.popup,
+        multiline: true,
+        maxWidth: () => this.container.getBoundingClientRect().width
       });
     }
   },
@@ -249,6 +251,7 @@ TextPropertyEditor.prototype = {
     if (domRule) {
       return domRule.href || domRule.nodeHref;
     }
+    return undefined;
   },
 
   /**
@@ -370,6 +373,7 @@ TextPropertyEditor.prototype = {
           onCommit: this._onSwatchCommit,
           onRevert: this._onSwatchRevert
         });
+        span.on("unit-change", this._onSwatchCommit);
       }
     }
 
@@ -401,6 +405,14 @@ TextPropertyEditor.prototype = {
           onCommit: this._onSwatchCommit,
           onRevert: this._onSwatchRevert
         }, outputParser, parserOptions);
+      }
+    }
+
+    this.angleSwatchSpans =
+      this.valueSpan.querySelectorAll("." + angleSwatchClass);
+    if (this.ruleEditor.isEditable) {
+      for (let angleSpan of this.angleSwatchSpans) {
+        angleSpan.on("unit-change", this._onSwatchCommit);
       }
     }
 
@@ -611,6 +623,13 @@ TextPropertyEditor.prototype = {
     if (this._colorSwatchSpans && this._colorSwatchSpans.length) {
       for (let span of this._colorSwatchSpans) {
         this.ruleView.tooltips.colorPicker.removeSwatch(span);
+        span.off("unit-change", this._onSwatchCommit);
+      }
+    }
+
+    if (this.angleSwatchSpans && this.angleSwatchSpans.length) {
+      for (let span of this.angleSwatchSpans) {
+        span.off("unit-change", this._onSwatchCommit);
       }
     }
 

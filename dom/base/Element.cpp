@@ -201,7 +201,7 @@ Element::IntrinsicState() const
 void
 Element::NotifyStateChange(EventStates aStates)
 {
-  nsIDocument* doc = GetCrossShadowCurrentDoc();
+  nsIDocument* doc = GetComposedDoc();
   if (doc) {
     nsAutoScriptBlocker scriptBlocker;
     doc->ContentStateChanged(this, aStates);
@@ -227,7 +227,7 @@ Element::UpdateState(bool aNotify)
   if (aNotify) {
     EventStates changedStates = oldState ^ mState;
     if (!changedStates.IsEmpty()) {
-      nsIDocument* doc = GetCrossShadowCurrentDoc();
+      nsIDocument* doc = GetComposedDoc();
       if (doc) {
         nsAutoScriptBlocker scriptBlocker;
         doc->ContentStateChanged(this, changedStates);
@@ -1014,7 +1014,7 @@ Element::CreateShadowRoot(ErrorResult& aError)
     return nullptr;
   }
 
-  nsIDocument* doc = GetCrossShadowCurrentDoc();
+  nsIDocument* doc = GetComposedDoc();
   nsIContent* destroyedFramesFor = nullptr;
   if (doc) {
     nsIPresShell* shell = doc->GetShell();
@@ -1065,7 +1065,7 @@ Element::CreateShadowRoot(ErrorResult& aError)
   // Recreate the frame for the bound content because binding a ShadowRoot
   // changes how things are rendered.
   if (doc) {
-    MOZ_ASSERT(doc == GetCrossShadowCurrentDoc());
+    MOZ_ASSERT(doc == GetComposedDoc());
     nsIPresShell* shell = doc->GetShell();
     if (shell) {
       shell->CreateFramesFor(destroyedFramesFor);
@@ -1189,10 +1189,10 @@ Element::SetAttribute(const nsAString& aName,
     if (IsHTMLElement() && IsInHTMLDocument()) {
       nsAutoString lower;
       nsContentUtils::ASCIIToLower(aName, lower);
-      nameAtom = do_GetAtom(lower);
+      nameAtom = NS_Atomize(lower);
     }
     else {
-      nameAtom = do_GetAtom(aName);
+      nameAtom = NS_Atomize(aName);
     }
     if (!nameAtom) {
       aError.Throw(NS_ERROR_OUT_OF_MEMORY);
@@ -1274,7 +1274,7 @@ Element::GetAttributeNS(const nsAString& aNamespaceURI,
     return;
   }
 
-  nsCOMPtr<nsIAtom> name = do_GetAtom(aLocalName);
+  nsCOMPtr<nsIAtom> name = NS_Atomize(aLocalName);
   bool hasAttr = GetAttr(nsid, name, aReturn);
   if (!hasAttr) {
     SetDOMStringToNull(aReturn);
@@ -1306,7 +1306,7 @@ Element::RemoveAttributeNS(const nsAString& aNamespaceURI,
                            const nsAString& aLocalName,
                            ErrorResult& aError)
 {
-  nsCOMPtr<nsIAtom> name = do_GetAtom(aLocalName);
+  nsCOMPtr<nsIAtom> name = NS_Atomize(aLocalName);
   int32_t nsid =
     nsContentUtils::NameSpaceManager()->GetNameSpaceID(aNamespaceURI);
 
@@ -1392,7 +1392,7 @@ Element::HasAttributeNS(const nsAString& aNamespaceURI,
     return false;
   }
 
-  nsCOMPtr<nsIAtom> name = do_GetAtom(aLocalName);
+  nsCOMPtr<nsIAtom> name = NS_Atomize(aLocalName);
   return HasAttr(nsid, name);
 }
 
@@ -2100,7 +2100,7 @@ Element::DispatchClickEvent(nsPresContext* aPresContext,
   event.pressure = pressure;
   event.clickCount = clickCount;
   event.inputSource = inputSource;
-  event.modifiers = aSourceEvent->modifiers;
+  event.mModifiers = aSourceEvent->mModifiers;
   if (aExtraEventFlags) {
     // Be careful not to overwrite existing flags!
     event.mFlags.Union(*aExtraEventFlags);
@@ -2446,7 +2446,7 @@ Element::SetAttrAndNotify(int32_t aNamespaceID,
     nsAutoString newValue;
     GetAttr(aNamespaceID, aName, newValue);
     if (!newValue.IsEmpty()) {
-      mutation.mNewAttrValue = do_GetAtom(newValue);
+      mutation.mNewAttrValue = NS_Atomize(newValue);
     }
     if (!oldValue->IsEmptyString()) {
       mutation.mPrevAttrValue = oldValue->GetAsAtom();
@@ -2684,7 +2684,7 @@ Element::UnsetAttr(int32_t aNameSpaceID, nsIAtom* aName,
     nsAutoString value;
     oldValue.ToString(value);
     if (!value.IsEmpty())
-      mutation.mPrevAttrValue = do_GetAtom(value);
+      mutation.mPrevAttrValue = NS_Atomize(value);
     mutation.mAttrChange = nsIDOMMutationEvent::REMOVAL;
 
     mozAutoSubtreeModified subtree(OwnerDoc(), this);
@@ -3644,6 +3644,53 @@ Element::InsertAdjacentHTML(const nsAString& aPosition, const nsAString& aText,
       destination->InsertBefore(*fragment, GetNextSibling(), aError);
       break;
   }
+}
+
+nsINode*
+Element::InsertAdjacent(const nsAString& aWhere,
+                        nsINode* aNode,
+                        ErrorResult& aError)
+{
+  if (aWhere.LowerCaseEqualsLiteral("beforebegin")) {
+    nsCOMPtr<nsINode> parent = GetParentNode();
+    if (!parent) {
+      return nullptr;
+    }
+    parent->InsertBefore(*aNode, this, aError);
+  } else if (aWhere.LowerCaseEqualsLiteral("afterbegin")) {
+    static_cast<nsINode*>(this)->InsertBefore(*aNode, GetFirstChild(), aError);
+  } else if (aWhere.LowerCaseEqualsLiteral("beforeend")) {
+    static_cast<nsINode*>(this)->AppendChild(*aNode, aError);
+  } else if (aWhere.LowerCaseEqualsLiteral("afterend")) {
+    nsCOMPtr<nsINode> parent = GetParentNode();
+    if (!parent) {
+      return nullptr;
+    }
+    parent->InsertBefore(*aNode, GetNextSibling(), aError);
+  } else {
+    aError.Throw(NS_ERROR_DOM_SYNTAX_ERR);
+    return nullptr;
+  }
+
+  return aError.Failed() ? nullptr : aNode;
+}
+
+Element*
+Element::InsertAdjacentElement(const nsAString& aWhere,
+                               Element& aElement,
+                               ErrorResult& aError) {
+  nsINode* newNode = InsertAdjacent(aWhere, &aElement, aError);
+  MOZ_ASSERT(!newNode || newNode->IsElement());
+
+  return newNode ? newNode->AsElement() : nullptr;
+}
+
+void
+Element::InsertAdjacentText(
+  const nsAString& aWhere, const nsAString& aData, ErrorResult& aError)
+{
+  RefPtr<nsTextNode> textNode = OwnerDoc()->CreateTextNode(aData);
+  InsertAdjacent(aWhere, textNode, aError);
 }
 
 nsIEditor*

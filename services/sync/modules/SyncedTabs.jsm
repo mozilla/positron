@@ -73,7 +73,7 @@ let SyncedTabsInternal = {
       } catch (ex) { /* no favicon avaiable */ }
     }
     if (!icon) {
-      icon = PlacesUtils.favicons.defaultFavicon.spec;
+      icon = "";
     }
     return {
       type:  "tab",
@@ -121,6 +121,9 @@ let SyncedTabsInternal = {
     let ntabs = 0;
 
     for (let [guid, client] in Iterator(engine.getAllClients())) {
+      if (!Weave.Service.clientsEngine.remoteClientExists(client.id)) {
+        continue;
+      }
       let clientRepr = yield this._makeClient(client);
       log.debug("Processing client", clientRepr);
 

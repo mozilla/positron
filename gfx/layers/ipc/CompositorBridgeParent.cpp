@@ -402,6 +402,10 @@ CompositorVsyncScheduler::CancelSetDisplayTask()
 void
 CompositorVsyncScheduler::Destroy()
 {
+  if (!mVsyncObserver) {
+    // Destroy was already called on this object.
+    return;
+  }
   MOZ_ASSERT(CompositorBridgeParent::IsInCompositorThread());
   UnobserveVsync();
   mVsyncObserver->Destroy();
@@ -643,6 +647,9 @@ void CompositorBridgeParent::ShutDown()
   while (!sFinishedCompositorShutDown) {
     NS_ProcessNextEvent(nullptr, true);
   }
+
+  // TODO: this should be empty by now...
+  sIndirectLayerTrees.clear();
 }
 
 MessageLoop* CompositorBridgeParent::CompositorLoop()
@@ -693,7 +700,6 @@ CompositorBridgeParent::CompositorBridgeParent(nsIWidget* aWidget,
   , mCompositorScheduler(nullptr)
 #if defined(XP_WIN) || defined(MOZ_WIDGET_GTK)
   , mLastPluginUpdateLayerTreeId(0)
-  , mPluginUpdateResponsePending(false)
   , mDeferPluginWindows(false)
   , mPluginWindowsHidden(false)
 #endif
@@ -727,6 +733,9 @@ CompositorBridgeParent::CompositorBridgeParent(nsIWidget* aWidget,
 
   mCompositorScheduler = new CompositorVsyncScheduler(this, aWidget);
   LayerScope::SetPixelScale(mWidget->GetDefaultScale().scale);
+
+  // mSelfRef is cleared in DeferredDestroy.
+  mSelfRef = this;
 }
 
 bool
@@ -748,40 +757,13 @@ CompositorBridgeParent::~CompositorBridgeParent()
 }
 
 void
-CompositorBridgeParent::Destroy()
-{
-  MOZ_ASSERT(ManagedPLayerTransactionParent().Count() == 0,
-             "CompositorBridgeParent destroyed before managed PLayerTransactionParent");
-
-  MOZ_ASSERT(mPaused); // Ensure RecvWillStop was called
-  // Ensure that the layer manager is destructed on the compositor thread.
-  mLayerManager = nullptr;
-  if (mCompositor) {
-    mCompositor->Destroy();
-  }
-  mCompositor = nullptr;
-
-  mCompositionManager = nullptr;
-  if (mApzcTreeManager) {
-    mApzcTreeManager->ClearTree();
-    mApzcTreeManager = nullptr;
-  }
-  { // scope lock
-    MonitorAutoLock lock(*sIndirectLayerTreesLock);
-    sIndirectLayerTrees.erase(mRootLayerTreeID);
-  }
-
-  mCompositorScheduler->Destroy();
-}
-
-void
 CompositorBridgeParent::ForceIsFirstPaint()
 {
   mCompositionManager->ForceIsFirstPaint();
 }
 
 bool
-CompositorBridgeParent::RecvWillStop()
+CompositorBridgeParent::RecvWillClose()
 {
   mPaused = true;
   RemoveCompositor(mCompositorID);
@@ -799,6 +781,12 @@ CompositorBridgeParent::RecvWillStop()
     mCompositionManager = nullptr;
   }
 
+  if (mCompositor) {
+    mCompositor->DetachWidget();
+    mCompositor->Destroy();
+    mCompositor = nullptr;
+  }
+
   return true;
 }
 
@@ -807,22 +795,7 @@ void CompositorBridgeParent::DeferredDestroy()
   MOZ_ASSERT(!NS_IsMainThread());
   MOZ_ASSERT(mCompositorThreadHolder);
   mCompositorThreadHolder = nullptr;
-  Release();
-}
-
-bool
-CompositorBridgeParent::RecvStop()
-{
-  Destroy();
-  // There are chances that the ref count reaches zero on the main thread shortly
-  // after this function returns while some ipdl code still needs to run on
-  // this thread.
-  // We must keep the compositor parent alive untill the code handling message
-  // reception is finished on this thread.
-  this->AddRef(); // Corresponds to DeferredDestroy's Release
-  MessageLoop::current()->PostTask(FROM_HERE,
-                                   NewRunnableMethod(this,&CompositorBridgeParent::DeferredDestroy));
-  return true;
+  mSelfRef = nullptr;
 }
 
 bool
@@ -988,11 +961,32 @@ CompositorBridgeParent::ActorDestroy(ActorDestroyReason why)
     mLayerManager = nullptr;
     { // scope lock
       MonitorAutoLock lock(*sIndirectLayerTreesLock);
-      sIndirectLayerTrees[mRootLayerTreeID].mLayerManager = nullptr;
+      sIndirectLayerTrees.erase(mRootLayerTreeID);
     }
-    mCompositionManager = nullptr;
+  }
+
+  if (mCompositor) {
+    mCompositor->Destroy();
     mCompositor = nullptr;
   }
+
+  mCompositionManager = nullptr;
+
+  if (mApzcTreeManager) {
+    mApzcTreeManager->ClearTree();
+    mApzcTreeManager = nullptr;
+  }
+
+  mCompositorScheduler->Destroy();
+
+  // There are chances that the ref count reaches zero on the main thread shortly
+  // after this function returns while some ipdl code still needs to run on
+  // this thread.
+  // We must keep the compositor parent alive untill the code handling message
+  // reception is finished on this thread.
+  mSelfRef = this;
+  MessageLoop::current()->PostTask(FROM_HERE,
+                                   NewRunnableMethod(this,&CompositorBridgeParent::DeferredDestroy));
 }
 
 
@@ -1234,20 +1228,6 @@ CompositorBridgeParent::CompositeToTarget(DrawTarget* aTarget, const gfx::IntRec
     return;
   }
 
-#if defined(XP_WIN) || defined(MOZ_WIDGET_GTK)
-  // Still waiting on plugin update confirmation
-  if (mPluginUpdateResponsePending) {
-    return;
-  }
-#endif
-
-  bool hasRemoteContent = false;
-  bool pluginsUpdatedFlag = true;
-  AutoResolveRefLayers resolve(mCompositionManager, this,
-                               &hasRemoteContent,
-                               &pluginsUpdatedFlag);
-
-#if defined(XP_WIN) || defined(MOZ_WIDGET_GTK)
   /*
    * AutoResolveRefLayers handles two tasks related to Windows and Linux
    * plugin window management:
@@ -1260,27 +1240,20 @@ CompositorBridgeParent::CompositeToTarget(DrawTarget* aTarget, const gfx::IntRec
    * since plugin clipping can depend on chrome (for example, due to tab modal
    * prompts). Updates in step 2 are applied via an async ipc message sent
    * to the main thread.
-   * Windows specific: The compositor will wait for confirmation that plugin
-   * updates have been applied before painting. Deferment of painting is
-   * indicated by the mPluginUpdateResponsePending flag. The main thread
-   * messages back using the RemotePluginsReady async ipc message.
-   * This is neccessary since plugin windows can leave remnants of window
-   * content if moved after the underlying window paints.
    */
-  if (pluginsUpdatedFlag) {
-    mPluginUpdateResponsePending = true;
-    return;
-  }
+  bool hasRemoteContent = false;
+  bool updatePluginsFlag = true;
+  AutoResolveRefLayers resolve(mCompositionManager, this,
+                               &hasRemoteContent,
+                               &updatePluginsFlag);
 
+#if defined(XP_WIN) || defined(MOZ_WIDGET_GTK)
   // We do not support plugins in local content. When switching tabs
   // to local pages, hide every plugin associated with the window.
   if (!hasRemoteContent && BrowserTabsRemoteAutostart() &&
       mCachedPluginData.Length()) {
     Unused << SendHideAllPlugins((uintptr_t)GetWidget());
     mCachedPluginData.Clear();
-    // Wait for confirmation the hide operation is complete.
-    mPluginUpdateResponsePending = true;
-    return;
   }
 #endif
 
@@ -1364,7 +1337,6 @@ bool
 CompositorBridgeParent::RecvRemotePluginsReady()
 {
 #if defined(XP_WIN) || defined(MOZ_WIDGET_GTK)
-  mPluginUpdateResponsePending = false;
   ScheduleComposition();
   return true;
 #else
@@ -1942,6 +1914,7 @@ public:
   explicit CrossProcessCompositorBridgeParent(Transport* aTransport)
     : mTransport(aTransport)
     , mNotifyAfterRemotePaint(false)
+    , mDestroyCalled(false)
   {
     MOZ_ASSERT(NS_IsMainThread());
   }
@@ -1956,8 +1929,7 @@ public:
 
   // FIXME/bug 774388: work out what shutdown protocol we need.
   virtual bool RecvRequestOverfill() override { return true; }
-  virtual bool RecvWillStop() override { return true; }
-  virtual bool RecvStop() override { return true; }
+  virtual bool RecvWillClose() override { return true; }
   virtual bool RecvPause() override { return true; }
   virtual bool RecvResume() override { return true; }
   virtual bool RecvNotifyHidden(const uint64_t& id) override;
@@ -2080,6 +2052,7 @@ private:
   // If true, we should send a RemotePaintIsReady message when the layer transaction
   // is received
   bool mNotifyAfterRemotePaint;
+  bool mDestroyCalled;
 };
 
 PCompositorBridgeParent*
@@ -2296,10 +2269,10 @@ CrossProcessCompositorBridgeParent::ActorDestroy(ActorDestroyReason aWhy)
 {
   RefPtr<CompositorLRU> lru = CompositorLRU::GetSingleton();
   lru->Remove(this);
-
-  MessageLoop::current()->PostTask(
-    FROM_HERE,
-    NewRunnableMethod(this, &CrossProcessCompositorBridgeParent::DeferredDestroy));
+  // We must keep this object alive untill the code handling message
+  // reception is finished on this thread.
+  MessageLoop::current()->PostTask(FROM_HERE,
+      NewRunnableMethod(this, &CrossProcessCompositorBridgeParent::DeferredDestroy));
 }
 
 PLayerTransactionParent*
@@ -2576,7 +2549,6 @@ CompositorBridgeParent::HideAllPluginWindows()
     return;
   }
   mDeferPluginWindows = true;
-  mPluginUpdateResponsePending = true;
   mPluginWindowsHidden = true;
   Unused << SendHideAllPlugins((uintptr_t)GetWidget());
   ScheduleComposition();
@@ -2749,7 +2721,6 @@ CrossProcessCompositorBridgeParent::RecvAcknowledgeCompositorUpdate(const uint64
 void
 CrossProcessCompositorBridgeParent::DeferredDestroy()
 {
-  MOZ_ASSERT(mCompositorThreadHolder);
   mCompositorThreadHolder = nullptr;
   mSelfRef = nullptr;
 }

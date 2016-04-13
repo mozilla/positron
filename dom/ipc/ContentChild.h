@@ -191,12 +191,6 @@ public:
   virtual bool
   DeallocPDeviceStorageRequestChild(PDeviceStorageRequestChild*) override;
 
-  virtual PFileSystemRequestChild*
-  AllocPFileSystemRequestChild(const FileSystemParams&) override;
-
-  virtual bool
-  DeallocPFileSystemRequestChild(PFileSystemRequestChild*) override;
-
   virtual PBlobChild*
   AllocPBlobChild(const BlobConstructorParams& aParams) override;
 
@@ -429,9 +423,9 @@ public:
   virtual bool RecvLoadProcessScript(const nsString& aURL) override;
 
   virtual bool RecvAsyncMessage(const nsString& aMsg,
-                                const ClonedMessageData& aData,
                                 InfallibleTArray<CpowEntry>&& aCpows,
-                                const IPC::Principal& aPrincipal) override;
+                                const IPC::Principal& aPrincipal,
+                                const ClonedMessageData& aData) override;
 
   virtual bool RecvGeolocationUpdate(const GeoPosition& somewhere) override;
 
@@ -531,16 +525,22 @@ public:
 
   virtual bool
   RecvPush(const nsCString& aScope,
-           const IPC::Principal& aPrincipal) override;
+           const IPC::Principal& aPrincipal,
+           const nsString& aMessageId) override;
 
   virtual bool
   RecvPushWithData(const nsCString& aScope,
                    const IPC::Principal& aPrincipal,
+                   const nsString& aMessageId,
                    InfallibleTArray<uint8_t>&& aData) override;
 
   virtual bool
   RecvPushSubscriptionChange(const nsCString& aScope,
                              const IPC::Principal& aPrincipal) override;
+
+  virtual bool
+  RecvPushError(const nsCString& aScope, const nsString& aMessage,
+                const uint32_t& aFlags) override;
 
   // Get the directory for IndexedDB files. We query the parent for this and
   // cache the value
@@ -614,12 +614,6 @@ private:
   virtual void ActorDestroy(ActorDestroyReason why) override;
 
   virtual void ProcessingError(Result aCode, const char* aReason) override;
-
-  /**
-   * Exit *now*.  Do not shut down XPCOM, do not pass Go, do not run
-   * static destructors, do not collect $200.
-   */
-  MOZ_NORETURN void QuickExit();
 
   InfallibleTArray<nsAutoPtr<AlertObserver> > mAlertObservers;
   RefPtr<ConsoleListener> mConsoleListener;

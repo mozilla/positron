@@ -227,8 +227,7 @@ public:
 
   virtual bool RecvGetFrameUniformity(FrameUniformityData* aOutData) override;
   virtual bool RecvRequestOverfill() override;
-  virtual bool RecvWillStop() override;
-  virtual bool RecvStop() override;
+  virtual bool RecvWillClose() override;
   virtual bool RecvPause() override;
   virtual bool RecvResume() override;
   virtual bool RecvNotifyHidden(const uint64_t& id) override { return true; }
@@ -310,7 +309,6 @@ public:
    * SetFirstPaintViewport on the next frame of composition.
    */
   void ForceIsFirstPaint();
-  void Destroy();
 
   static void SetShadowProperties(Layer* aLayer);
 
@@ -587,6 +585,10 @@ protected:
 
   RefPtr<CompositorThreadHolder> mCompositorThreadHolder;
   RefPtr<CompositorVsyncScheduler> mCompositorScheduler;
+  // This makes sure the compositorParent is not destroyed before receiving
+  // confirmation that the channel is closed.
+  // mSelfRef is cleared in DeferredDestroy which is scheduled by ActorDestroy.
+  RefPtr<CompositorBridgeParent> mSelfRef;
 
 #if defined(XP_WIN) || defined(MOZ_WIDGET_GTK)
   // cached plugin data used to reduce the number of updates we request.
@@ -594,9 +596,6 @@ protected:
   nsIntPoint mPluginsLayerOffset;
   nsIntRegion mPluginsLayerVisibleRegion;
   nsTArray<PluginWindowData> mCachedPluginData;
-  // indicates if we are currently waiting on a plugin update confirmation.
-  // When this is true, composition is currently on hold.
-  bool mPluginUpdateResponsePending;
   // indicates if plugin window visibility and metric updates are currently
   // being defered due to a scroll operation.
   bool mDeferPluginWindows;

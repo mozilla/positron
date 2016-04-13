@@ -554,11 +554,17 @@ public:
    */
   static ProducerID AllocateProducerID();
 
+  /// ImageBridgeChild thread only.
+  static void AsyncDestroyActor(PImageContainerChild* aActor);
+
+  /// ImageBridgeChild thread only.
+  static void DeallocActor(PImageContainerChild* aActor);
+
 private:
   typedef mozilla::ReentrantMonitor ReentrantMonitor;
 
   // Private destructor, to discourage deletion outside of Release():
-  B2G_ACL_EXPORT ~ImageContainer();
+  ~ImageContainer();
 
   void SetCurrentImageInternal(const nsTArray<NonOwningImage>& aImages);
 

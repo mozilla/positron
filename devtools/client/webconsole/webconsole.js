@@ -16,6 +16,8 @@ Cu.import("resource://devtools/client/shared/browser-loader.js", BrowserLoaderMo
 
 const promise = require("promise");
 const Services = require("Services");
+const ErrorDocs = require("devtools/server/actors/errordocs");
+const Telemetry = require("devtools/client/shared/telemetry")
 
 loader.lazyServiceGetter(this, "clipboardHelper",
                          "@mozilla.org/widget/clipboardhelper;1",
@@ -240,6 +242,8 @@ function WebConsoleFrame(webConsoleOwner) {
   this.React = require("devtools/client/shared/vendor/react");
   this.ReactDOM = require("devtools/client/shared/vendor/react-dom");
   this.FrameView = this.React.createFactory(require("devtools/client/shared/components/frame"));
+
+  this._telemetry = new Telemetry();
 
   EventEmitter.decorate(this);
 }
@@ -574,15 +578,27 @@ WebConsoleFrame.prototype = {
     }
 
     /*
-     * Focus input line whenever the output area is clicked.
-     * Reusing _addMEssageLinkCallback since it correctly filters
-     * drag and select events.
+     * Focus the input line whenever the output area is clicked.
      */
-    this._addFocusCallback(this.outputNode, (evt) => {
-      if ((evt.target.nodeName.toLowerCase() != "a") &&
-          (evt.target.parentNode.nodeName.toLowerCase() != "a")) {
-        this.jsterm.focus();
+    this.outputWrapper.addEventListener("click", (event) => {
+      // Do not focus on middle/right-click or 2+ clicks.
+      if (event.detail !== 1 || event.button !== 0) {
+        return;
       }
+
+      // Do not focus if something is selected
+      let selection = this.window.getSelection();
+      if (selection && !selection.isCollapsed) {
+        return;
+      }
+
+      // Do not focus if a link was clicked
+      if (event.target.nodeName.toLowerCase() === "a" ||
+          event.target.parentNode.nodeName.toLowerCase() === "a") {
+        return;
+      }
+
+      this.jsterm.focus();
     });
 
     // Toggle the timestamp on preference change
@@ -1065,6 +1081,8 @@ WebConsoleFrame.prototype = {
         node.classList.add("filtered-by-string");
       }
     }
+
+    this.resize();
   },
 
   /**
@@ -1475,8 +1493,14 @@ WebConsoleFrame.prototype = {
 
     // Select the body of the message node that is displayed in the console
     let msgBody = node.getElementsByClassName("message-body")[0];
+
     // Add the more info link node to messages that belong to certain categories
     this.addMoreInfoLink(msgBody, scriptError);
+
+    // Collect telemetry data regarding JavaScript errors
+    this._telemetry.logKeyed("DEVTOOLS_JAVASCRIPT_ERROR_DISPLAYED",
+                             scriptError.errorMessageName,
+                             true);
 
     if (objectActors.size > 0) {
       node._objectActors = objectActors;
@@ -1613,6 +1637,15 @@ WebConsoleFrame.prototype = {
 
     this._updateNetMessage(actorId);
 
+    if (this.window.NetRequest) {
+      this.window.NetRequest.onNetworkEvent({
+        client: this.webConsoleClient,
+        response: networkInfo,
+        node: messageNode,
+        update: false
+      });
+    }
+
     return messageNode;
   },
 
@@ -1674,11 +1707,14 @@ WebConsoleFrame.prototype = {
         url = TRACKING_PROTECTION_LEARN_MORE;
         break;
       default:
-        // Unknown category. Return without adding more info node.
-        return;
+        // If all else fails check for an error doc URL.
+        url = ErrorDocs.GetURL(scriptError.errorMessageName);
+        break;
     }
 
-    this.addLearnMoreWarningNode(node, url);
+    if (url) {
+      this.addLearnMoreWarningNode(node, url);
+    }
   },
 
   /*
@@ -1813,6 +1849,15 @@ WebConsoleFrame.prototype = {
    */
   handleNetworkEventUpdate: function(networkInfo, packet) {
     if (networkInfo.node && this._updateNetMessage(packet.from)) {
+      if (this.window.NetRequest) {
+        this.window.NetRequest.onNetworkEvent({
+          client: this.webConsoleClient,
+          response: packet,
+          node: networkInfo.node,
+          update: true
+        });
+      }
+
       this.emit("new-messages", new Set([{
         update: true,
         node: networkInfo.node,
@@ -2624,39 +2669,6 @@ WebConsoleFrame.prototype = {
       if (mousedown &&
           (this._startX != event.clientX) &&
           (this._startY != event.clientY)) {
-        this._startX = this._startY = undefined;
-        return;
-      }
-
-      this._startX = this._startY = undefined;
-
-      callback.call(this, event);
-    }, false);
-  },
-
-  _addFocusCallback: function(node, callback) {
-    node.addEventListener("mousedown", (event) => {
-      this._mousedown = true;
-      this._startX = event.clientX;
-      this._startY = event.clientY;
-    }, false);
-
-    node.addEventListener("click", (event) => {
-      let mousedown = this._mousedown;
-      this._mousedown = false;
-
-      // Do not allow middle/right-click or 2+ clicks.
-      if (event.detail != 1 || event.button != 0) {
-        return;
-      }
-
-      // If this event started with a mousedown event and it ends at a different
-      // location, we consider this text selection.
-      // Add a fuzz modifier of two pixels in any direction to account for
-      // sloppy clicking.
-      if (mousedown &&
-          (Math.abs(event.clientX - this._startX) >= 2) &&
-          (Math.abs(event.clientY - this._startY) >= 1)) {
         this._startX = this._startY = undefined;
         return;
       }

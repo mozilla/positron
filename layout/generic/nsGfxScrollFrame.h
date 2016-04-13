@@ -49,6 +49,7 @@ public:
   typedef mozilla::CSSIntPoint CSSIntPoint;
   typedef mozilla::layout::ScrollbarActivity ScrollbarActivity;
   typedef mozilla::layers::FrameMetrics FrameMetrics;
+  typedef mozilla::layers::ScrollSnapInfo ScrollSnapInfo;
   typedef mozilla::layers::Layer Layer;
 
   class AsyncScroll;
@@ -57,7 +58,6 @@ public:
   ScrollFrameHelper(nsContainerFrame* aOuter, bool aIsRoot);
   ~ScrollFrameHelper();
 
-  bool IsScrollFrameWithSnapping() const;
   mozilla::ScrollbarStyles GetScrollbarStylesFromFrame() const;
 
   // If a child frame was added or removed on the scrollframe,
@@ -203,7 +203,6 @@ public:
   // Get the scroll range assuming the scrollport has size (aWidth, aHeight).
   nsRect GetScrollRange(nscoord aWidth, nscoord aHeight) const;
   nsSize GetScrollPositionClampingScrollPortSize() const;
-  void FlingSnap(const mozilla::CSSPoint& aDestination);
   void ScrollSnap(nsIScrollableFrame::ScrollMode aMode = nsIScrollableFrame::SMOOTH_MSD);
   void ScrollSnap(const nsPoint &aDestination,
                   nsIScrollableFrame::ScrollMode aMode = nsIScrollableFrame::SMOOTH_MSD);
@@ -390,6 +389,8 @@ public:
 
   bool UsesContainerScrolling() const;
 
+  ScrollSnapInfo GetScrollSnapInfo() const;
+
   bool DecideScrollableLayer(nsDisplayListBuilder* aBuilder,
                              nsRect* aDirtyRect,
                              bool aAllowCreateDisplayPort);
@@ -416,7 +417,7 @@ public:
     }
   }
   bool WantAsyncScroll() const;
-  Maybe<mozilla::layers::FrameMetrics> ComputeFrameMetrics(
+  Maybe<mozilla::layers::ScrollMetadata> ComputeScrollMetadata(
     Layer* aLayer, nsIFrame* aContainerReferenceFrame,
     const ContainerLayerParameters& aParameters,
     const mozilla::DisplayItemClip* aClip) const;
@@ -750,9 +751,6 @@ public:
   virtual nsIFrame* GetScrolledFrame() const override {
     return mHelper.GetScrolledFrame();
   }
-  virtual bool IsScrollFrameWithSnapping() const override {
-    return mHelper.IsScrollFrameWithSnapping();
-  }
   virtual mozilla::ScrollbarStyles GetScrollbarStyles() const override {
     return mHelper.GetScrollbarStylesFromFrame();
   }
@@ -838,9 +836,6 @@ public:
                         override {
     mHelper.ScrollBy(aDelta, aUnit, aMode, aOverflow, aOrigin, aMomentum, aSnap);
   }
-  virtual void FlingSnap(const mozilla::CSSPoint& aDestination) override {
-    mHelper.FlingSnap(aDestination);
-  }
   virtual void ScrollSnap() override {
     mHelper.ScrollSnap();
   }
@@ -905,12 +900,12 @@ public:
   virtual bool WantAsyncScroll() const override {
     return mHelper.WantAsyncScroll();
   }
-  virtual mozilla::Maybe<mozilla::layers::FrameMetrics> ComputeFrameMetrics(
+  virtual mozilla::Maybe<mozilla::layers::ScrollMetadata> ComputeScrollMetadata(
     Layer* aLayer, nsIFrame* aContainerReferenceFrame,
     const ContainerLayerParameters& aParameters,
     const mozilla::DisplayItemClip* aClip) const override
   {
-    return mHelper.ComputeFrameMetrics(aLayer, aContainerReferenceFrame, aParameters, aClip);
+    return mHelper.ComputeScrollMetadata(aLayer, aContainerReferenceFrame, aParameters, aClip);
   }
   virtual bool IsIgnoringViewportClipping() const override {
     return mHelper.IsIgnoringViewportClipping();
@@ -1010,6 +1005,10 @@ public:
     mHelper.SetZoomableByAPZ(aZoomable);
   }
   
+  ScrollSnapInfo GetScrollSnapInfo() const override {
+    return mHelper.GetScrollSnapInfo();
+  }
+
 #ifdef DEBUG_FRAME_DUMP
   virtual nsresult GetFrameName(nsAString& aResult) const override;
 #endif
@@ -1165,9 +1164,6 @@ public:
   virtual nsIFrame* GetScrolledFrame() const override {
     return mHelper.GetScrolledFrame();
   }
-  virtual bool IsScrollFrameWithSnapping() const override {
-    return mHelper.IsScrollFrameWithSnapping();
-  }
   virtual mozilla::ScrollbarStyles GetScrollbarStyles() const override {
     return mHelper.GetScrollbarStylesFromFrame();
   }
@@ -1249,9 +1245,6 @@ public:
                         override {
     mHelper.ScrollBy(aDelta, aUnit, aMode, aOverflow, aOrigin, aMomentum, aSnap);
   }
-  virtual void FlingSnap(const mozilla::CSSPoint& aDestination) override {
-    mHelper.FlingSnap(aDestination);
-  }
   virtual void ScrollSnap() override {
     mHelper.ScrollSnap();
   }
@@ -1316,12 +1309,12 @@ public:
   virtual bool WantAsyncScroll() const override {
     return mHelper.WantAsyncScroll();
   }
-  virtual mozilla::Maybe<mozilla::layers::FrameMetrics> ComputeFrameMetrics(
+  virtual mozilla::Maybe<mozilla::layers::ScrollMetadata> ComputeScrollMetadata(
     Layer* aLayer, nsIFrame* aContainerReferenceFrame,
     const ContainerLayerParameters& aParameters,
     const mozilla::DisplayItemClip* aClip) const override
   {
-    return mHelper.ComputeFrameMetrics(aLayer, aContainerReferenceFrame, aParameters, aClip);
+    return mHelper.ComputeScrollMetadata(aLayer, aContainerReferenceFrame, aParameters, aClip);
   }
   virtual bool IsIgnoringViewportClipping() const override {
     return mHelper.IsIgnoringViewportClipping();
@@ -1427,6 +1420,10 @@ public:
   }
   void TriggerDisplayPortExpiration() override {
     mHelper.TriggerDisplayPortExpiration();
+  }
+
+  ScrollSnapInfo GetScrollSnapInfo() const override {
+    return mHelper.GetScrollSnapInfo();
   }
 
 #ifdef DEBUG_FRAME_DUMP

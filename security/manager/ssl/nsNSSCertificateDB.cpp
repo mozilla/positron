@@ -2,11 +2,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-// XXX: This must be done prior to including cert.h (directly or indirectly).
-// CERT_AddTempCertToPerm is exposed as __CERT_AddTempCertToPerm, but it is
-// only exported so PSM can use it for this specific purpose.
-#define CERT_AddTempCertToPerm __CERT_AddTempCertToPerm
-
 #include "nsNSSCertificateDB.h"
 
 #include "CertVerifier.h"
@@ -128,10 +123,10 @@ nsNSSCertificateDB::FindCertByNickname(const nsAString& nickname,
 }
 
 NS_IMETHODIMP
-nsNSSCertificateDB::FindCertByDBKey(const char* aDBkey,nsIX509Cert** _cert)
+nsNSSCertificateDB::FindCertByDBKey(const char* aDBKey,nsIX509Cert** _cert)
 {
-  NS_ENSURE_ARG_POINTER(aDBkey);
-  NS_ENSURE_ARG(aDBkey[0]);
+  NS_ENSURE_ARG_POINTER(aDBKey);
+  NS_ENSURE_ARG(aDBKey[0]);
   NS_ENSURE_ARG_POINTER(_cert);
   *_cert = nullptr;
 
@@ -140,6 +135,27 @@ nsNSSCertificateDB::FindCertByDBKey(const char* aDBkey,nsIX509Cert** _cert)
     return NS_ERROR_NOT_AVAILABLE;
   }
 
+  UniqueCERTCertificate cert;
+  nsresult rv = FindCertByDBKey(aDBKey, cert);
+  if (NS_FAILED(rv)) {
+    return rv;
+  }
+  // If we can't find the certificate, that's not an error. Just return null.
+  if (!cert) {
+    return NS_OK;
+  }
+  nsCOMPtr<nsIX509Cert> nssCert = nsNSSCertificate::Create(cert.get());
+  if (!nssCert) {
+    return NS_ERROR_OUT_OF_MEMORY;
+  }
+  nssCert.forget(_cert);
+  return NS_OK;
+}
+
+nsresult
+nsNSSCertificateDB::FindCertByDBKey(const char* aDBKey,
+                                    UniqueCERTCertificate& cert)
+{
   static_assert(sizeof(uint64_t) == 8, "type size sanity check");
   static_assert(sizeof(uint32_t) == 4, "type size sanity check");
   // (From nsNSSCertificate::GetDbKey)
@@ -153,7 +169,7 @@ nsNSSCertificateDB::FindCertByDBKey(const char* aDBkey,nsIX509Cert** _cert)
   // n bytes: <bytes of serial number>
   // m bytes: <DER-encoded issuer distinguished name>
   nsAutoCString decoded;
-  nsAutoCString tmpDBKey(aDBkey);
+  nsAutoCString tmpDBKey(aDBKey);
   // Filter out any whitespace for backwards compatibility.
   tmpDBKey.StripWhitespace();
   nsresult rv = Base64Decode(tmpDBKey, decoded);
@@ -185,15 +201,7 @@ nsNSSCertificateDB::FindCertByDBKey(const char* aDBkey,nsIX509Cert** _cert)
   reader += issuerLen;
   MOZ_ASSERT(reader == decoded.EndReading());
 
-  ScopedCERTCertificate cert(
-    CERT_FindCertByIssuerAndSN(CERT_GetDefaultCertDB(), &issuerSN));
-  if (cert) {
-    nsCOMPtr<nsIX509Cert> nssCert = nsNSSCertificate::Create(cert.get());
-    if (!nssCert) {
-      return NS_ERROR_OUT_OF_MEMORY;
-    }
-    nssCert.forget(_cert);
-  }
+  cert.reset(CERT_FindCertByIssuerAndSN(CERT_GetDefaultCertDB(), &issuerSN));
   return NS_OK;
 }
 
@@ -1269,19 +1277,15 @@ nsNSSCertificateDB::get_default_nickname(CERTCertificate *cert,
     return;
 
   nsAutoCString username;
-  char *temp_un = CERT_GetCommonName(&cert->subject);
-  if (temp_un) {
-    username = temp_un;
-    PORT_Free(temp_un);
-    temp_un = nullptr;
+  UniquePORTString tempCN(CERT_GetCommonName(&cert->subject));
+  if (tempCN) {
+    username = tempCN.get();
   }
 
   nsAutoCString caname;
-  char *temp_ca = CERT_GetOrgName(&cert->issuer);
-  if (temp_ca) {
-    caname = temp_ca;
-    PORT_Free(temp_ca);
-    temp_ca = nullptr;
+  UniquePORTString tempIssuerOrg(CERT_GetOrgName(&cert->issuer));
+  if (tempIssuerOrg) {
+    caname = tempIssuerOrg.get();
   }
 
   nsAutoString tmpNickFmt;

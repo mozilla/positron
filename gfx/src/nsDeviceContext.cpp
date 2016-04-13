@@ -19,7 +19,7 @@
 #include "nsDebug.h"                    // for NS_NOTREACHED, NS_ASSERTION, etc
 #include "nsFont.h"                     // for nsFont
 #include "nsFontMetrics.h"              // for nsFontMetrics
-#include "nsIAtom.h"                    // for nsIAtom, do_GetAtom
+#include "nsIAtom.h"                    // for nsIAtom, NS_Atomize
 #include "nsID.h"
 #include "nsIDeviceContextSpec.h"       // for nsIDeviceContextSpec
 #include "nsILanguageAtomService.h"     // for nsILanguageAtomService, etc
@@ -100,7 +100,7 @@ nsFontCache::Init(nsDeviceContext* aContext)
         mLocaleLanguage = langService->GetLocaleLanguage();
     }
     if (!mLocaleLanguage) {
-        mLocaleLanguage = do_GetAtom("x-western");
+        mLocaleLanguage = NS_Atomize("x-western");
     }
 }
 
@@ -144,7 +144,7 @@ nsFontCache::GetMetricsFor(const nsFont& aFont,
                 mFontMetrics.AppendElement(fm);
             }
             fm->GetThebesFontGroup()->UpdateUserFonts();
-            return do_AddRef(Move(fm));
+            return do_AddRef(fm);
         }
     }
 
@@ -251,7 +251,7 @@ nsDeviceContext::IsPrinterSurface()
 }
 
 void
-nsDeviceContext::SetDPI()
+nsDeviceContext::SetDPI(double* aScale)
 {
     float dpi = -1.0f;
 
@@ -280,9 +280,21 @@ nsDeviceContext::SetDPI()
             dpi = 96.0f;
         }
 
-        CSSToLayoutDeviceScale scale = mWidget ? mWidget->GetDefaultScale()
-                                               : CSSToLayoutDeviceScale(1.0);
-        double devPixelsPerCSSPixel = scale.scale;
+        double devPixelsPerCSSPixel;
+        if (aScale && *aScale > 0.0) {
+            // if caller provided a scale, we just use it
+            devPixelsPerCSSPixel = *aScale;
+        } else {
+            // otherwise get from the widget, and return it in aScale for
+            // the caller to pass to child contexts if needed
+            CSSToLayoutDeviceScale scale =
+                mWidget ? mWidget->GetDefaultScale()
+                        : CSSToLayoutDeviceScale(1.0);
+            devPixelsPerCSSPixel = scale.scale;
+            if (aScale) {
+                *aScale = devPixelsPerCSSPixel;
+            }
+        }
 
         mAppUnitsPerDevPixelAtUnitFullZoom =
             std::max(1, NS_lround(AppUnitsPerCSSPixel() / devPixelsPerCSSPixel));
@@ -336,7 +348,7 @@ nsDeviceContext::CreateRenderingContext()
 
     // This can legitimately happen - CreateDrawTargetForSurface will fail
     // to create a draw target if the size is too large, for instance.
-    if (!dt) {
+    if (!dt || !dt->IsValid()) {
         gfxCriticalNote << "Failed to create draw target in device context sized " << mWidth << "x" << mHeight << " and pointers " << hexa(mPrintingSurface) << " and " << hexa(printingSurface);
         return nullptr;
     }
@@ -345,6 +357,10 @@ nsDeviceContext::CreateRenderingContext()
     nsresult rv = mDeviceContextSpec->GetDrawEventRecorder(getter_AddRefs(recorder));
     if (NS_SUCCEEDED(rv) && recorder) {
       dt = gfx::Factory::CreateRecordingDrawTarget(recorder, dt);
+      if (!dt || !dt->IsValid()) {
+          gfxCriticalNote << "Failed to create a recording draw target";
+          return nullptr;
+      }
     }
 
 #ifdef XP_MACOSX
@@ -352,7 +368,8 @@ nsDeviceContext::CreateRenderingContext()
 #endif
     dt->AddUserData(&sDisablePixelSnapping, (void*)0x1, nullptr);
 
-    RefPtr<gfxContext> pContext = new gfxContext(dt);
+    RefPtr<gfxContext> pContext = gfxContext::ForDrawTarget(dt);
+    MOZ_ASSERT(pContext); // already checked draw target above
 
     gfxMatrix transform;
     if (printingSurface->GetRotateForLandscape()) {
@@ -632,11 +649,12 @@ nsDeviceContext::CalcPrintingSize()
     return (mWidth > 0 && mHeight > 0);
 }
 
-bool nsDeviceContext::CheckDPIChange() {
+bool nsDeviceContext::CheckDPIChange(double* aScale)
+{
     int32_t oldDevPixels = mAppUnitsPerDevPixelAtUnitFullZoom;
     int32_t oldInches = mAppUnitsPerPhysicalInch;
 
-    SetDPI();
+    SetDPI(aScale);
 
     return oldDevPixels != mAppUnitsPerDevPixelAtUnitFullZoom ||
         oldInches != mAppUnitsPerPhysicalInch;

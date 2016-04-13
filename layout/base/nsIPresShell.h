@@ -49,6 +49,10 @@
 #include "nsMargin.h"
 #include "nsFrameState.h"
 
+#ifdef MOZ_B2G
+#include "nsIHardwareKeyHandler.h"
+#endif
+
 class nsDocShell;
 class nsIDocument;
 class nsIFrame;
@@ -492,15 +496,6 @@ public:
   virtual nsCanvasFrame* GetCanvasFrame() const = 0;
 
   /**
-   * Gets the real primary frame associated with the content object.
-   *
-   * In the case of absolutely positioned elements and floated elements,
-   * the real primary frame is the frame that is out of the flow and not the
-   * placeholder frame.
-   */
-  virtual nsIFrame* GetRealPrimaryFrameFor(nsIContent* aContent) const = 0;
-
-  /**
    * Gets the placeholder frame associated with the specified frame. This is
    * a helper frame that forwards the request to the frame manager.
    */
@@ -878,6 +873,12 @@ public:
   virtual void DispatchAfterKeyboardEvent(nsINode* aTarget,
                                           const mozilla::WidgetKeyboardEvent& aEvent,
                                           bool aEmbeddedCancelled) = 0;
+
+  /**
+   * Return whether or not the event is valid to be dispatched
+   */
+  virtual bool CanDispatchEvent(
+      const mozilla::WidgetGUIEvent* aEvent = nullptr) const = 0;
 
   /**
     * Gets the current target event frame from the PresShell
@@ -1728,6 +1729,11 @@ protected:
   // posted messages are processed before other messages when the modal
   // moving/sizing loop is running, see bug 491700 for details.
   nsCOMPtr<nsITimer>        mReflowContinueTimer;
+
+#ifdef MOZ_B2G
+  // Forward hardware key events to the input-method-app
+  nsCOMPtr<nsIHardwareKeyHandler> mHardwareKeyHandler;
+#endif // MOZ_B2G
 
 #ifdef DEBUG
   nsIFrame*                 mDrawEventTargetFrame;

@@ -180,7 +180,7 @@ var Service = {
   extensionURILoadableByAnyone(uri) {
     let uuid = uri.host;
     let extension = this.uuidMap.get(uuid);
-    if (!extension) {
+    if (!extension || !extension.webAccessibleResources) {
       return false;
     }
 
@@ -188,7 +188,7 @@ var Service = {
     if (path.length > 0 && path[0] == "/") {
       path = path.substr(1);
     }
-    return extension.webAccessibleResources.has(path);
+    return extension.webAccessibleResources.matches(path);
   },
 
   // Checks whether a given extension can load this URI (typically via
@@ -232,21 +232,36 @@ function getAPILevelForWindow(window, addonId) {
 
   // Non WebExtension URLs and WebExtension URLs from a different extension
   // has no access to APIs.
-  if (!addonId && getAddonIdForWindow(window) != addonId) {
+  if (!addonId || getAddonIdForWindow(window) != addonId) {
     return NO_PRIVILEGES;
   }
 
-  let docShell = window.QueryInterface(Ci.nsIInterfaceRequestor)
-        .getInterface(Ci.nsIDocShell);
-
-  // WebExtension URLs loaded into sub-frame UI have "content script API level privileges".
-  // (see Bug 1214658 for rationale)
-  if (docShell.sameTypeParent) {
+  // Extension pages running in the content process always defaults to
+  // "content script API level privileges".
+  if (Services.appinfo.processType == Services.appinfo.PROCESS_TYPE_CONTENT) {
     return CONTENTSCRIPT_PRIVILEGES;
   }
 
-  // Extension pages running in the content process defaults to "content script API level privileges".
-  if (Services.appinfo.processType == Services.appinfo.PROCESS_TYPE_CONTENT) {
+  let docShell = window.QueryInterface(Ci.nsIInterfaceRequestor)
+                       .getInterface(Ci.nsIDocShell);
+
+  // Handling of ExtensionPages running inside sub-frames.
+  if (docShell.sameTypeParent) {
+    let parentWindow = docShell.sameTypeParent.QueryInterface(Ci.nsIInterfaceRequestor)
+                               .getInterface(Ci.nsIDOMWindow);
+
+    // The option page iframe embedded in the about:addons tab should have
+    // full API level privileges. (see Bug 1256282 for rationale)
+    let parentDocument = parentWindow.document;
+    let parentIsSystemPrincipal = Services.scriptSecurityManager
+                                          .isSystemPrincipal(parentDocument.nodePrincipal);
+    if (parentDocument.location.href == "about:addons" && parentIsSystemPrincipal) {
+      return FULL_PRIVILEGES;
+    }
+
+    // In all the other cases, WebExtension URLs loaded into sub-frame UI
+    // will have "content script API level privileges".
+    // (see Bug 1214658 for rationale)
     return CONTENTSCRIPT_PRIVILEGES;
   }
 

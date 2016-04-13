@@ -134,7 +134,7 @@ GlobalObject::resolveConstructor(JSContext* cx, Handle<GlobalObject*> global, JS
     // need to observe lazily-constructed prototype objects coming into
     // existence. And assertions start to fail when the builder itself attempts
     // an allocation that re-entrantly tries to create the same prototype.
-    AutoSuppressObjectMetadataCallback suppressMetadata(cx);
+    AutoSuppressAllocationMetadataBuilder suppressMetadata(cx);
 
     // Constructor resolution may execute self-hosted scripts. These
     // self-hosted scripts do not call out to user code by construction. Allow
@@ -162,7 +162,7 @@ GlobalObject::resolveConstructor(JSContext* cx, Handle<GlobalObject*> global, JS
     // GlobalObject::initStandardClasses that want to just carpet-bomb-call
     // ensureConstructor with every JSProtoKey. So it's easier to just handle
     // it here.
-    bool haveSpec = clasp && clasp->spec.defined();
+    bool haveSpec = clasp && clasp->specDefined();
     if (!init && !haveSpec)
         return true;
 
@@ -195,8 +195,8 @@ GlobalObject::resolveConstructor(JSContext* cx, Handle<GlobalObject*> global, JS
     // |createPrototype|, |prototypeFunctions|, and |prototypeProperties|
     // should all be null.
     RootedObject proto(cx);
-    if (clasp->spec.createPrototypeHook()) {
-        proto = clasp->spec.createPrototypeHook()(cx, key);
+    if (ClassObjectCreationOp createPrototype = clasp->specCreatePrototypeHook()) {
+        proto = createPrototype(cx, key);
         if (!proto)
             return false;
 
@@ -211,12 +211,12 @@ GlobalObject::resolveConstructor(JSContext* cx, Handle<GlobalObject*> global, JS
     }
 
     // Create the constructor.
-    RootedObject ctor(cx, clasp->spec.createConstructorHook()(cx, key));
+    RootedObject ctor(cx, clasp->specCreateConstructorHook()(cx, key));
     if (!ctor)
         return false;
 
     RootedId id(cx, NameToId(ClassName(key, cx)));
-    if (clasp->spec.shouldDefineConstructor()) {
+    if (clasp->specShouldDefineConstructor()) {
         if (!global->addDataProperty(cx, id, constructorPropertySlot(key), 0))
             return false;
     }
@@ -229,19 +229,19 @@ GlobalObject::resolveConstructor(JSContext* cx, Handle<GlobalObject*> global, JS
     // operating on the self-hosting global, in which case we don't want any
     // functions and properties on the builtins and their prototypes.
     if (!StandardClassIsDependent(key) && !cx->runtime()->isSelfHostingGlobal(global)) {
-        if (const JSFunctionSpec* funs = clasp->spec.prototypeFunctions()) {
+        if (const JSFunctionSpec* funs = clasp->specPrototypeFunctions()) {
             if (!JS_DefineFunctions(cx, proto, funs))
                 return false;
         }
-        if (const JSPropertySpec* props = clasp->spec.prototypeProperties()) {
+        if (const JSPropertySpec* props = clasp->specPrototypeProperties()) {
             if (!JS_DefineProperties(cx, proto, props))
                 return false;
         }
-        if (const JSFunctionSpec* funs = clasp->spec.constructorFunctions()) {
+        if (const JSFunctionSpec* funs = clasp->specConstructorFunctions()) {
             if (!JS_DefineFunctions(cx, ctor, funs))
                 return false;
         }
-        if (const JSPropertySpec* props = clasp->spec.constructorProperties()) {
+        if (const JSPropertySpec* props = clasp->specConstructorProperties()) {
             if (!JS_DefineProperties(cx, ctor, props))
                 return false;
         }
@@ -252,10 +252,12 @@ GlobalObject::resolveConstructor(JSContext* cx, Handle<GlobalObject*> global, JS
         return false;
 
     // Call the post-initialization hook, if provided.
-    if (clasp->spec.finishInitHook() && !clasp->spec.finishInitHook()(cx, ctor, proto))
-        return false;
+    if (FinishClassInitOp finishInit = clasp->specFinishInitHook()) {
+        if (!finishInit(cx, ctor, proto))
+            return false;
+    }
 
-    if (clasp->spec.shouldDefineConstructor()) {
+    if (clasp->specShouldDefineConstructor()) {
         // Stash type information, so that what we do here is equivalent to
         // initBuiltinConstructor.
         AddTypePropertyId(cx, global, id, ObjectValue(*ctor));
@@ -291,7 +293,7 @@ GlobalObject*
 GlobalObject::createInternal(JSContext* cx, const Class* clasp)
 {
     MOZ_ASSERT(clasp->flags & JSCLASS_IS_GLOBAL);
-    MOZ_ASSERT(clasp->trace == JS_GlobalObjectTraceHook);
+    MOZ_ASSERT(clasp->isTrace(JS_GlobalObjectTraceHook));
 
     JSObject* obj = NewObjectWithGivenProto(cx, clasp, nullptr, SingletonObject);
     if (!obj)
@@ -416,11 +418,11 @@ InitBareBuiltinCtor(JSContext* cx, Handle<GlobalObject*> global, JSProtoKey prot
     MOZ_ASSERT(cx->runtime()->isSelfHostingGlobal(global));
     const Class* clasp = ProtoKeyToClass(protoKey);
     RootedObject proto(cx);
-    proto = clasp->spec.createPrototypeHook()(cx, protoKey);
+    proto = clasp->specCreatePrototypeHook()(cx, protoKey);
     if (!proto)
         return false;
 
-    RootedObject ctor(cx, clasp->spec.createConstructorHook()(cx, protoKey));
+    RootedObject ctor(cx, clasp->specCreateConstructorHook()(cx, protoKey));
     if (!ctor)
         return false;
 
@@ -453,9 +455,41 @@ GlobalObject::initSelfHostingBuiltins(JSContext* cx, Handle<GlobalObject*> globa
         return false;
     }
 
+    RootedValue std_match(cx);
+    std_match.setSymbol(cx->wellKnownSymbols().get(JS::SymbolCode::match));
+    if (!JS_DefineProperty(cx, global, "std_match", std_match,
+                           JSPROP_PERMANENT | JSPROP_READONLY))
+    {
+        return false;
+    }
+
+    RootedValue std_replace(cx);
+    std_replace.setSymbol(cx->wellKnownSymbols().get(JS::SymbolCode::replace));
+    if (!JS_DefineProperty(cx, global, "std_replace", std_replace,
+                           JSPROP_PERMANENT | JSPROP_READONLY))
+    {
+        return false;
+    }
+
+    RootedValue std_search(cx);
+    std_search.setSymbol(cx->wellKnownSymbols().get(JS::SymbolCode::search));
+    if (!JS_DefineProperty(cx, global, "std_search", std_search,
+                           JSPROP_PERMANENT | JSPROP_READONLY))
+    {
+        return false;
+    }
+
     RootedValue std_species(cx);
     std_species.setSymbol(cx->wellKnownSymbols().get(JS::SymbolCode::species));
     if (!JS_DefineProperty(cx, global, "std_species", std_species,
+                           JSPROP_PERMANENT | JSPROP_READONLY))
+    {
+        return false;
+    }
+
+    RootedValue std_split(cx);
+    std_split.setSymbol(cx->wellKnownSymbols().get(JS::SymbolCode::split));
+    if (!JS_DefineProperty(cx, global, "std_split", std_split,
                            JSPROP_PERMANENT | JSPROP_READONLY))
     {
         return false;
@@ -586,11 +620,22 @@ GlobalDebuggees_finalize(FreeOp* fop, JSObject* obj)
     fop->delete_((GlobalObject::DebuggerVector*) obj->as<NativeObject>().getPrivate());
 }
 
+static const ClassOps
+GlobalDebuggees_classOps = {
+    nullptr,
+    nullptr,
+    nullptr,
+    nullptr,
+    nullptr,
+    nullptr,
+    nullptr,
+    GlobalDebuggees_finalize
+};
+
 static const Class
 GlobalDebuggees_class = {
     "GlobalDebuggee", JSCLASS_HAS_PRIVATE,
-    nullptr, nullptr, nullptr, nullptr,
-    nullptr, nullptr, nullptr, GlobalDebuggees_finalize
+    &GlobalDebuggees_classOps
 };
 
 GlobalObject::DebuggerVector*

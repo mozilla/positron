@@ -43,7 +43,7 @@ MakeContext ()
     RefPtr<DrawTarget> drawTarget = gfxPlatform::GetPlatform()->
         CreateOffscreenContentDrawTarget(IntSize(size, size),
                                          SurfaceFormat::B8G8R8X8);
-    RefPtr<gfxContext> ctx = new gfxContext(drawTarget);
+    RefPtr<gfxContext> ctx = gfxContext::ForDrawTarget(drawTarget);
 
     return ctx.forget();
 }
@@ -58,7 +58,7 @@ RunTest (TestEntry *test, gfxContext *ctx) {
                                               400,
                                               0,
                                               16.0,
-                                              NS_NewAtom(NS_LITERAL_STRING("en")),
+                                              NS_Atomize(NS_LITERAL_STRING("en")),
                                               0.0,
                                               false, false,
                                               NS_LITERAL_STRING(""));

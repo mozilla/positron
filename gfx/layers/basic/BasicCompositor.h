@@ -50,7 +50,9 @@ protected:
 public:
   virtual bool Initialize() override;
 
-  virtual void Destroy() override;
+  virtual void Destroy() override {}
+
+  virtual void DetachWidget() override;
 
   virtual TextureFactoryIdentifier GetTextureFactoryIdentifier() override;
 
@@ -64,7 +66,7 @@ public:
 
   virtual already_AddRefed<CompositingRenderTarget>
   CreateRenderTargetForWindow(const LayoutDeviceIntRect& aRect,
-                              SurfaceInitMode aInit,
+                              const LayoutDeviceIntRect& aClearRect,
                               BufferMode aBufferMode);
 
   virtual already_AddRefed<DataTextureSource>
@@ -97,7 +99,7 @@ public:
   virtual void BeginFrame(const nsIntRegion& aInvalidRegion,
                           const gfx::Rect *aClipRectIn,
                           const gfx::Rect& aRenderBounds,
-                          bool aOpaque,
+                          const nsIntRegion& aOpaqueRegion,
                           gfx::Rect *aClipRectOut = nullptr,
                           gfx::Rect *aRenderBoundsOut = nullptr) override;
   virtual void EndFrame() override;

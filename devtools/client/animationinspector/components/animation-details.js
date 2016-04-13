@@ -62,7 +62,7 @@ AnimationDetails.prototype = {
    * @return {Object} A list of tracks, one per animated property, each
    * with a list of keyframes
    */
-  getTracks: Task.async(function*() {
+  getTracks: Task.async(function* () {
     let tracks = {};
 
     /*
@@ -80,14 +80,12 @@ AnimationDetails.prototype = {
      */
     if (this.serverTraits.hasGetProperties) {
       let properties = yield this.animation.getProperties();
-      for (let propertyObject of properties) {
-        let name = propertyObject.property;
-
+      for (let {name, values} of properties) {
         if (!tracks[name]) {
           tracks[name] = [];
         }
 
-        for (let {value, offset} of propertyObject.values) {
+        for (let {value, offset} of values) {
           tracks[name].push({value, offset});
         }
       }
@@ -114,7 +112,7 @@ AnimationDetails.prototype = {
     return tracks;
   }),
 
-  render: Task.async(function*(animation) {
+  render: Task.async(function* (animation) {
     this.unrender();
 
     if (!animation) {

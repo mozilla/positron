@@ -19,6 +19,7 @@ namespace dom {
 
 class AnyCallback;
 class Console;
+class Crypto;
 class Function;
 class IDBFactory;
 class Promise;
@@ -48,6 +49,7 @@ class WorkerGlobalScope : public DOMEventTargetHelper,
   typedef mozilla::dom::IDBFactory IDBFactory;
 
   RefPtr<Console> mConsole;
+  RefPtr<Crypto> mCrypto;
   RefPtr<WorkerLocation> mLocation;
   RefPtr<WorkerNavigator> mNavigator;
   RefPtr<Performance> mPerformance;
@@ -94,6 +96,9 @@ public:
     return mConsole;
   }
 
+  Crypto*
+  GetCrypto(ErrorResult& aError);
+
   already_AddRefed<WorkerLocation>
   Location();
 
@@ -118,9 +123,8 @@ public:
   SetTimeout(JSContext* aCx, Function& aHandler, const int32_t aTimeout,
              const Sequence<JS::Value>& aArguments, ErrorResult& aRv);
   int32_t
-  SetTimeout(JSContext* /* unused */, const nsAString& aHandler,
-             const int32_t aTimeout, const Sequence<JS::Value>& /* unused */,
-             ErrorResult& aRv);
+  SetTimeout(JSContext* aCx, const nsAString& aHandler, const int32_t aTimeout,
+             const Sequence<JS::Value>& /* unused */, ErrorResult& aRv);
   void
   ClearTimeout(int32_t aHandle);
   int32_t
@@ -128,7 +132,7 @@ public:
               const Optional<int32_t>& aTimeout,
               const Sequence<JS::Value>& aArguments, ErrorResult& aRv);
   int32_t
-  SetInterval(JSContext* /* unused */, const nsAString& aHandler,
+  SetInterval(JSContext* aCx, const nsAString& aHandler,
               const Optional<int32_t>& aTimeout,
               const Sequence<JS::Value>& /* unused */, ErrorResult& aRv);
   void
@@ -340,7 +344,7 @@ public:
                         ErrorResult& aRv);
 
   void
-  SetConsoleEventHandler(JSContext* aCx, AnyCallback& aHandler,
+  SetConsoleEventHandler(JSContext* aCx, AnyCallback* aHandler,
                          ErrorResult& aRv);
 
   Console*

@@ -979,6 +979,8 @@ nsStyleSet::GetContext(nsStyleContext* aParentContext,
       // Update CSS animations in case the animation-name has just changed.
       PresContext()->AnimationManager()->UpdateAnimations(result,
                                                           aElementForAnimation);
+      PresContext()->EffectCompositor()->UpdateEffectProperties(
+        result, aElementForAnimation, result->GetPseudoType());
 
       animRule = PresContext()->EffectCompositor()->
                    GetAnimationRule(aElementForAnimation,
@@ -1016,7 +1018,7 @@ nsStyleSet::GetContext(nsStyleContext* aParentContext,
       aElementForAnimation->IsHTMLElement(nsGkAtoms::body) &&
       aPseudoType == CSSPseudoElementType::NotPseudo &&
       PresContext()->CompatibilityMode() == eCompatibility_NavQuirks) {
-    nsIDocument* doc = aElementForAnimation->GetCurrentDoc();
+    nsIDocument* doc = aElementForAnimation->GetUncomposedDoc();
     if (doc && doc->GetBodyElement() == aElementForAnimation) {
       // Update the prescontext's body color
       PresContext()->SetBodyTextColor(result->StyleColor()->mColor);

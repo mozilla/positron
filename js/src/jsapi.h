@@ -1849,6 +1849,9 @@ typedef enum JSGCParamKey {
 
     /** Whether compacting GC is enabled. */
     JSGC_COMPACTING_ENABLED = 23,
+
+    /** If true, painting can trigger IGC slices. */
+    JSGC_REFRESH_FRAME_SLICES_ENABLED = 24,
 } JSGCParamKey;
 
 extern JS_PUBLIC_API(void)
@@ -4479,7 +4482,7 @@ class MOZ_STACK_CLASS JS_PUBLIC_API(AutoSetAsyncStackForNewCalls)
 {
     JSContext* cx;
     RootedObject oldAsyncStack;
-    RootedString oldAsyncCause;
+    const char* oldAsyncCause;
     bool oldAsyncCallIsExplicit;
 
   public:
@@ -4496,8 +4499,13 @@ class MOZ_STACK_CLASS JS_PUBLIC_API(AutoSetAsyncStackForNewCalls)
     // ambiguous whether that would clear any scheduled async stack and make the
     // normal stack reappear in the new call, or just keep the async stack
     // already scheduled for the new call, if any.
+    //
+    // asyncCause is owned by the caller and its lifetime must outlive the
+    // lifetime of the AutoSetAsyncStackForNewCalls object. It is strongly
+    // encouraged that asyncCause be a string constant or similar statically
+    // allocated string.
     AutoSetAsyncStackForNewCalls(JSContext* cx, HandleObject stack,
-                                 HandleString asyncCause,
+                                 const char* asyncCause,
                                  AsyncCallKind kind = AsyncCallKind::IMPLICIT);
     ~AutoSetAsyncStackForNewCalls();
 };
@@ -4866,7 +4874,10 @@ GetSymbolDescription(HandleSymbol symbol);
 #define JS_FOR_EACH_WELL_KNOWN_SYMBOL(macro) \
     macro(iterator) \
     macro(match) \
+    macro(replace) \
+    macro(search) \
     macro(species) \
+    macro(split) \
     macro(toPrimitive) \
     macro(unscopables)
 
@@ -5554,13 +5565,16 @@ JS_IsIdentifier(JSContext* cx, JS::HandleString str, bool* isIdentifier);
 extern JS_PUBLIC_API(bool)
 JS_IsIdentifier(const char16_t* chars, size_t length);
 
+namespace js {
+class ScriptSource;
+} // namespace js
+
 namespace JS {
 
 class MOZ_RAII JS_PUBLIC_API(AutoFilename)
 {
   private:
-    // Actually a ScriptSource, not put here to avoid including the world.
-    void* ss_;
+    js::ScriptSource* ss_;
     mozilla::Variant<const char*, UniqueChars> filename_;
 
     AutoFilename(const AutoFilename&) = delete;
@@ -5580,7 +5594,7 @@ class MOZ_RAII JS_PUBLIC_API(AutoFilename)
 
     void setOwned(UniqueChars&& filename);
     void setUnowned(const char* filename);
-    void setScriptSource(void* ss);
+    void setScriptSource(js::ScriptSource* ss);
 
     const char* get() const;
 };
@@ -5984,6 +5998,13 @@ GetSavedFrameParent(JSContext* cx, HandleObject savedFrame, MutableHandleObject 
  */
 extern JS_PUBLIC_API(bool)
 BuildStackString(JSContext* cx, HandleObject stack, MutableHandleString stringp, size_t indent = 0);
+
+/**
+ * Return true iff the given object is either a SavedFrame object or wrapper
+ * around a SavedFrame object, and it is not the SavedFrame.prototype object.
+ */
+extern JS_PUBLIC_API(bool)
+IsSavedFrame(JSObject* obj);
 
 } /* namespace JS */
 

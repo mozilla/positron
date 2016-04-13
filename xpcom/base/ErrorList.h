@@ -717,6 +717,7 @@
   ERROR(NS_ERROR_TRACKING_URI,          FAILURE(34)),
   ERROR(NS_ERROR_UNWANTED_URI,          FAILURE(35)),
   ERROR(NS_ERROR_FORBIDDEN_URI,         FAILURE(36)),
+  ERROR(NS_ERROR_BLOCKED_URI,           FAILURE(37)),
   /* Used when "Save Link As..." doesn't see the headers quickly enough to
    * choose a filename.  See nsContextMenu.js. */
   ERROR(NS_ERROR_SAVE_LINK_AS_TIMEOUT,  FAILURE(32)),
@@ -943,7 +944,6 @@
 #define MODULE NS_ERROR_MODULE_DOM_ANIM
   ERROR(NS_ERROR_DOM_ANIM_MISSING_PROPS_ERR,              FAILURE(1)),
   ERROR(NS_ERROR_DOM_ANIM_NO_TARGET_ERR,                  FAILURE(2)),
-  ERROR(NS_ERROR_DOM_ANIM_TARGET_NOT_IN_DOC_ERR,          FAILURE(3)),
 #undef MODULE
 
   /* ======================================================================= */

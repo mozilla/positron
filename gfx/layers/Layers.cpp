@@ -538,14 +538,14 @@ Layer::StartPendingAnimations(const TimeStamp& aReadyTime)
 void
 Layer::SetAsyncPanZoomController(uint32_t aIndex, AsyncPanZoomController *controller)
 {
-  MOZ_ASSERT(aIndex < GetFrameMetricsCount());
+  MOZ_ASSERT(aIndex < GetScrollMetadataCount());
   mApzcs[aIndex] = controller;
 }
 
 AsyncPanZoomController*
 Layer::GetAsyncPanZoomController(uint32_t aIndex) const
 {
-  MOZ_ASSERT(aIndex < GetFrameMetricsCount());
+  MOZ_ASSERT(aIndex < GetScrollMetadataCount());
 #ifdef DEBUG
   if (mApzcs[aIndex]) {
     MOZ_ASSERT(GetFrameMetrics(aIndex).IsScrollable());
@@ -555,9 +555,9 @@ Layer::GetAsyncPanZoomController(uint32_t aIndex) const
 }
 
 void
-Layer::FrameMetricsChanged()
+Layer::ScrollMetadataChanged()
 {
-  mApzcs.SetLength(GetFrameMetricsCount());
+  mApzcs.SetLength(GetScrollMetadataCount());
 }
 
 void
@@ -626,7 +626,7 @@ Layer::SnapTransformTranslation(const Matrix4x4& aTransform,
 
   Matrix matrix2D;
   Matrix4x4 result;
-  if (aTransform.Is2D(&matrix2D) &&
+  if (aTransform.CanDraw2D(&matrix2D) &&
       !matrix2D.HasNonTranslation() &&
       matrix2D.HasNonIntegerTranslation()) {
     IntPoint snappedTranslation = RoundedToInt(matrix2D.GetTranslation());
@@ -846,17 +846,23 @@ Layer::CalculateScissorRect(const RenderTargetIntRect& aCurrentScissorRect)
   return currentClip.Intersect(scissor);
 }
 
+const ScrollMetadata&
+Layer::GetScrollMetadata(uint32_t aIndex) const
+{
+  MOZ_ASSERT(aIndex < GetScrollMetadataCount());
+  return mScrollMetadata[aIndex];
+}
+
 const FrameMetrics&
 Layer::GetFrameMetrics(uint32_t aIndex) const
 {
-  MOZ_ASSERT(aIndex < GetFrameMetricsCount());
-  return mFrameMetrics[aIndex];
+  return GetScrollMetadata(aIndex).GetMetrics();
 }
 
 bool
 Layer::HasScrollableFrameMetrics() const
 {
-  for (uint32_t i = 0; i < GetFrameMetricsCount(); i++) {
+  for (uint32_t i = 0; i < GetScrollMetadataCount(); i++) {
     if (GetFrameMetrics(i).IsScrollable()) {
       return true;
     }
@@ -1088,12 +1094,12 @@ Layer::GetCombinedClipRect() const
 {
   Maybe<ParentLayerIntRect> clip = GetClipRect();
 
-  for (size_t i = 0; i < mFrameMetrics.Length(); i++) {
-    if (!mFrameMetrics[i].HasClipRect()) {
+  for (size_t i = 0; i < mScrollMetadata.Length(); i++) {
+    if (!mScrollMetadata[i].HasClipRect()) {
       continue;
     }
 
-    const ParentLayerIntRect& other = mFrameMetrics[i].ClipRect();
+    const ParentLayerIntRect& other = mScrollMetadata[i].ClipRect();
     if (clip) {
       clip = Some(clip.value().Intersect(other));
     } else {
@@ -1925,7 +1931,7 @@ Layer::PrintInfo(std::stringstream& aStream, const char* aPrefix)
   if (1.0 != mOpacity) {
     aStream << nsPrintfCString(" [opacity=%g]", mOpacity).get();
   }
-  if (GetContentFlags() & CONTENT_OPAQUE) {
+  if (IsOpaque()) {
     aStream << " [opaqueContent]";
   }
   if (GetContentFlags() & CONTENT_COMPONENT_ALPHA) {
@@ -1968,10 +1974,10 @@ Layer::PrintInfo(std::stringstream& aStream, const char* aPrefix)
   if (mMaskLayer) {
     aStream << nsPrintfCString(" [mMaskLayer=%p]", mMaskLayer.get()).get();
   }
-  for (uint32_t i = 0; i < mFrameMetrics.Length(); i++) {
-    if (!mFrameMetrics[i].IsDefault()) {
+  for (uint32_t i = 0; i < mScrollMetadata.Length(); i++) {
+    if (!mScrollMetadata[i].IsDefault()) {
       aStream << nsPrintfCString(" [metrics%d=", i).get();
-      AppendToString(aStream, mFrameMetrics[i], "", "]");
+      AppendToString(aStream, mScrollMetadata[i], "", "]");
     }
   }
 }

@@ -104,6 +104,7 @@ devtools/client/shared/**
 devtools/client/sourceeditor/**
 devtools/client/webaudioeditor/**
 devtools/client/webconsole/**
+!devtools/client/webconsole/panel.js
 devtools/client/webide/**
 devtools/server/**
 devtools/shared/*.js
@@ -193,6 +194,7 @@ toolkit/modules/tests/xpcshell/test_task.js
 toolkit/components/osfile/**
 
 # External code:
+toolkit/components/microformats/test/**
 toolkit/components/reader/Readability.js
 toolkit/components/reader/JSDOMParser.js
 
@@ -209,3 +211,6 @@ toolkit/mozapps/downloads/nsHelperAppDlg.js
 toolkit/mozapps/extensions/internal/AddonConstants.jsm
 toolkit/mozapps/update/tests/data/xpcshellConstantsPP.js
 toolkit/webapps/**
+
+# Third party
+toolkit/modules/third_party/**

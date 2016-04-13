@@ -49,6 +49,7 @@ nsTArray<int>* AudioInputCubeb::mDeviceIndexes;
 nsTArray<nsCString>* AudioInputCubeb::mDeviceNames;
 cubeb_device_collection* AudioInputCubeb::mDevices = nullptr;
 bool AudioInputCubeb::mAnyInUse = false;
+StaticMutex AudioInputCubeb::sMutex;
 
 // AudioDeviceID is an annoying opaque value that's really a string
 // pointer, and is freed when the cubeb_device_collection is destroyed
@@ -78,6 +79,7 @@ void AudioInputCubeb::UpdateDeviceList()
         (devices->device[i]->state == CUBEB_DEVICE_STATE_ENABLED ||
          devices->device[i]->state == CUBEB_DEVICE_STATE_UNPLUGGED ||
          (devices->device[i]->state == CUBEB_DEVICE_STATE_DISABLED &&
+          devices->device[i]->friendly_name &&
           strcmp(devices->device[i]->friendly_name, "Sine source at 440 Hz") == 0)))
     {
       auto j = mDeviceNames->IndexOf(devices->device[i]->device_id);
@@ -91,6 +93,7 @@ void AudioInputCubeb::UpdateDeviceList()
       }
     }
   }
+  StaticMutexAutoLock lock(sMutex);
   // swap state
   if (mDevices) {
     cubeb_device_collection_destroy(mDevices);

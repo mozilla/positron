@@ -106,12 +106,6 @@ using namespace mozilla::services;
 using namespace mozilla::widget;
 using namespace mozilla::jsipc;
 
-#if DEUBG
-  #define LOG(args...) printf_stderr(args)
-#else
-  #define LOG(...)
-#endif
-
 // The flags passed by the webProgress notifications are 16 bits shifted
 // from the ones registered by webProgressListeners.
 #define NOTIFY_FLAG_SHIFT 16
@@ -460,121 +454,6 @@ TabParent::IsVisible() const
   return visible;
 }
 
-static void LogChannelRelevantInfo(nsIURI* aURI,
-                                   nsIPrincipal* aLoadingPrincipal,
-                                   nsIPrincipal* aChannelResultPrincipal,
-                                   nsContentPolicyType aContentPolicyType) {
-  nsCString loadingOrigin;
-  aLoadingPrincipal->GetOrigin(loadingOrigin);
-
-  nsCString uriString;
-  aURI->GetAsciiSpec(uriString);
-  LOG("Loading %s from origin %s (type: %d)\n", uriString.get(),
-                                                loadingOrigin.get(),
-                                                aContentPolicyType);
-
-  nsCString resultPrincipalOrigin;
-  aChannelResultPrincipal->GetOrigin(resultPrincipalOrigin);
-  LOG("Result principal origin: %s\n", resultPrincipalOrigin.get());
-}
-
-// This is similar to nsIScriptSecurityManager.getChannelResultPrincipal
-// but taking signedPkg into account. The reason we can't rely on channel
-// loadContext/loadInfo is it's dangerous to mutate them on parent process.
-static already_AddRefed<nsIPrincipal>
-GetChannelPrincipalWithSingedPkg(nsIChannel* aChannel, const nsACString& aSignedPkg)
-{
-  NeckoOriginAttributes neckoAttrs;
-  NS_GetOriginAttributes(aChannel, neckoAttrs);
-
-  PrincipalOriginAttributes attrs;
-  attrs.InheritFromNecko(neckoAttrs);
-  attrs.mSignedPkg = NS_ConvertUTF8toUTF16(aSignedPkg);
-
-  nsCOMPtr<nsIURI> uri;
-  nsresult rv = NS_GetFinalChannelURI(aChannel, getter_AddRefs(uri));
-  NS_ENSURE_SUCCESS(rv, nullptr);
-
-  nsCOMPtr<nsIPrincipal> principal =
-    BasePrincipal::CreateCodebasePrincipal(uri, attrs);
-
-  return principal.forget();
-}
-
-bool
-TabParent::ShouldSwitchProcess(nsIChannel* aChannel, const nsACString& aSignedPkg)
-{
-  // If we lack of any information which is required to decide the need of
-  // process switch, consider that we should switch process.
-
-  // Prepare the channel loading principal.
-  nsCOMPtr<nsILoadInfo> loadInfo;
-  aChannel->GetLoadInfo(getter_AddRefs(loadInfo));
-  NS_ENSURE_TRUE(loadInfo, true);
-  nsCOMPtr<nsIPrincipal> loadingPrincipal;
-  loadInfo->GetLoadingPrincipal(getter_AddRefs(loadingPrincipal));
-  NS_ENSURE_TRUE(loadingPrincipal, true);
-
-  // Prepare the channel result principal.
-  nsCOMPtr<nsIPrincipal> channelPrincipal =
-    GetChannelPrincipalWithSingedPkg(aChannel, aSignedPkg);
-
-  // Log the debug info which is used to decide the need of proces switch.
-  nsCOMPtr<nsIURI> uri;
-  aChannel->GetURI(getter_AddRefs(uri));
-  LogChannelRelevantInfo(uri, loadingPrincipal, channelPrincipal,
-                         loadInfo->InternalContentPolicyType());
-
-  // Check if the signed package is loaded from the same origin.
-  bool sameOrigin = false;
-  loadingPrincipal->Equals(channelPrincipal, &sameOrigin);
-  if (sameOrigin) {
-    LOG("Loading singed package from the same origin. Don't switch process.\n");
-    return false;
-  }
-
-  // If this is not a top level document, there's no need to switch process.
-  if (nsIContentPolicy::TYPE_DOCUMENT != loadInfo->InternalContentPolicyType()) {
-    LOG("Subresource of a document. No need to switch process.\n");
-    return false;
-  }
-
-  DocShellOriginAttributes attrs = OriginAttributesRef();
-  if (attrs.mSignedPkg == NS_ConvertUTF8toUTF16(aSignedPkg)) {
-    // This tab is made for the incoming signed content.
-    return false;
-  }
-
-  return true;
-}
-
-void
-TabParent::OnStartSignedPackageRequest(nsIChannel* aChannel,
-                                       const nsACString& aPackageId)
-{
-  if (!ShouldSwitchProcess(aChannel, aPackageId)) {
-    return;
-  }
-
-  nsCOMPtr<nsIURI> uri;
-  aChannel->GetURI(getter_AddRefs(uri));
-
-  aChannel->Cancel(NS_BINDING_FAILED);
-
-  nsCString uriString;
-  uri->GetAsciiSpec(uriString);
-  LOG("We decide to switch process. Call nsFrameLoader::SwitchProcessAndLoadURIs: %s\n",
-       uriString.get());
-
-  RefPtr<nsFrameLoader> frameLoader = GetFrameLoader();
-  NS_ENSURE_TRUE_VOID(frameLoader);
-
-  nsresult rv = frameLoader->SwitchProcessAndLoadURI(uri, aPackageId);
-  if (NS_FAILED(rv)) {
-    NS_WARNING("Failed to switch process.");
-  }
-}
-
 void
 TabParent::DestroyInternal()
 {
@@ -606,6 +485,10 @@ TabParent::DestroyInternal()
 void
 TabParent::Destroy()
 {
+  // Aggressively release the window to avoid leaking the world in shutdown
+  // corner cases.
+  mBrowserDOMWindow = nullptr;
+
   if (mIsDestroyed) {
     return;
   }
@@ -885,22 +768,24 @@ TabParent::Show(const ScreenIntSize& size, bool aParentIsActive)
     uint64_t layersId = 0;
     bool success = false;
     RenderFrameParent* renderFrame = nullptr;
-    // If TabParent is initialized by parent side then the RenderFrame must also
-    // be created here. If TabParent is initialized by child side,
-    // child side will create RenderFrame.
-    MOZ_ASSERT(!GetRenderFrame());
     if (IsInitedByParent()) {
+        // If TabParent is initialized by parent side then the RenderFrame must also
+        // be created here. If TabParent is initialized by child side,
+        // child side will create RenderFrame.
+        MOZ_ASSERT(!GetRenderFrame());
         RefPtr<nsFrameLoader> frameLoader = GetFrameLoader();
         if (frameLoader) {
-          renderFrame =
-              new RenderFrameParent(frameLoader,
-                                    &textureFactoryIdentifier,
-                                    &layersId,
-                                    &success);
+          renderFrame = new RenderFrameParent(frameLoader, &success);
           MOZ_ASSERT(success);
+          layersId = renderFrame->GetLayersId();
+          renderFrame->GetTextureFactoryIdentifier(&textureFactoryIdentifier);
           AddTabParentToTable(layersId, this);
           Unused << SendPRenderFrameConstructor(renderFrame);
         }
+    } else {
+      // Otherwise, the child should have constructed the RenderFrame,
+      // and we should already know about it.
+      MOZ_ASSERT(GetRenderFrame());
     }
 
     nsCOMPtr<nsISupports> container = mFrameElement->OwnerDoc()->GetContainer();
@@ -1658,9 +1543,9 @@ bool TabParent::SendRealTouchEvent(WidgetTouchEvent& event)
   // that the added touches are part of the touchend/cancel, when actually
   // they're not.
   if (event.mMessage == eTouchEnd || event.mMessage == eTouchCancel) {
-    for (int i = event.touches.Length() - 1; i >= 0; i--) {
-      if (!event.touches[i]->mChanged) {
-        event.touches.RemoveElementAt(i);
+    for (int i = event.mTouches.Length() - 1; i >= 0; i--) {
+      if (!event.mTouches[i]->mChanged) {
+        event.mTouches.RemoveElementAt(i);
       }
     }
   }
@@ -1675,8 +1560,8 @@ bool TabParent::SendRealTouchEvent(WidgetTouchEvent& event)
   }
 
   LayoutDeviceIntPoint offset = GetChildProcessOffset();
-  for (uint32_t i = 0; i < event.touches.Length(); i++) {
-    event.touches[i]->mRefPoint += offset;
+  for (uint32_t i = 0; i < event.mTouches.Length(); i++) {
+    event.mTouches[i]->mRefPoint += offset;
   }
 
   return (event.mMessage == eTouchMove) ?
@@ -1734,9 +1619,9 @@ TabParent::RecvRpcMessage(const nsString& aMessage,
 
 bool
 TabParent::RecvAsyncMessage(const nsString& aMessage,
-                            const ClonedMessageData& aData,
                             InfallibleTArray<CpowEntry>&& aCpows,
-                            const IPC::Principal& aPrincipal)
+                            const IPC::Principal& aPrincipal,
+                            const ClonedMessageData& aData)
 {
   // FIXME Permission check for TabParent in Content process
   nsIPrincipal* principal = aPrincipal;
@@ -2555,16 +2440,14 @@ TabParent::AllocPRenderFrameParent()
 {
   MOZ_ASSERT(ManagedPRenderFrameParent().IsEmpty());
   RefPtr<nsFrameLoader> frameLoader = GetFrameLoader();
-  TextureFactoryIdentifier textureFactoryIdentifier;
   uint64_t layersId = 0;
   bool success = false;
 
   PRenderFrameParent* renderFrame =
-    new RenderFrameParent(frameLoader,
-                          &textureFactoryIdentifier,
-                          &layersId,
-                          &success);
+    new RenderFrameParent(frameLoader, &success);
   if (success) {
+    RenderFrameParent* rfp = static_cast<RenderFrameParent*>(renderFrame);
+    layersId = rfp->GetLayersId();
     AddTabParentToTable(layersId, this);
   }
   return renderFrame;
@@ -2578,19 +2461,46 @@ TabParent::DeallocPRenderFrameParent(PRenderFrameParent* aFrame)
 }
 
 bool
-TabParent::RecvGetRenderFrameInfo(PRenderFrameParent* aRenderFrame,
-                                  TextureFactoryIdentifier* aTextureFactoryIdentifier,
-                                  uint64_t* aLayersId)
+TabParent::SetRenderFrame(PRenderFrameParent* aRFParent)
 {
-  RenderFrameParent* renderFrame = static_cast<RenderFrameParent*>(aRenderFrame);
-  renderFrame->GetTextureFactoryIdentifier(aTextureFactoryIdentifier);
-  *aLayersId = renderFrame->GetLayersId();
+  if (IsInitedByParent()) {
+    return false;
+  }
+
+  RefPtr<nsFrameLoader> frameLoader = GetFrameLoader();
+
+  if (!frameLoader) {
+    return false;
+  }
+
+  RenderFrameParent* renderFrame = static_cast<RenderFrameParent*>(aRFParent);
+  bool success = renderFrame->Init(frameLoader);
+  if (!success) {
+    return false;
+  }
+
+  uint64_t layersId = renderFrame->GetLayersId();
+  AddTabParentToTable(layersId, this);
 
   if (mNeedLayerTreeReadyNotification) {
     RequestNotifyLayerTreeReady();
     mNeedLayerTreeReadyNotification = false;
   }
 
+  return true;
+}
+
+bool
+TabParent::GetRenderFrameInfo(TextureFactoryIdentifier* aTextureFactoryIdentifier,
+                              uint64_t* aLayersId)
+{
+  RenderFrameParent* rfp = GetRenderFrame();
+  if (!rfp) {
+    return false;
+  }
+
+  *aLayersId = rfp->GetLayersId();
+  rfp->GetTextureFactoryIdentifier(aTextureFactoryIdentifier);
   return true;
 }
 
@@ -2700,14 +2610,18 @@ TabParent::ApzAwareEventRoutingToChild(ScrollableLayerGuid* aOutTargetGuid,
 
 bool
 TabParent::RecvBrowserFrameOpenWindow(PBrowserParent* aOpener,
+                                      PRenderFrameParent* aRenderFrame,
                                       const nsString& aURL,
                                       const nsString& aName,
                                       const nsString& aFeatures,
-                                      bool* aOutWindowOpened)
+                                      bool* aOutWindowOpened,
+                                      TextureFactoryIdentifier* aTextureFactoryIdentifier,
+                                      uint64_t* aLayersId)
 {
   BrowserElementParent::OpenWindowResult opened =
     BrowserElementParent::OpenWindowOOP(TabParent::GetFrom(aOpener),
-                                        this, aURL, aName, aFeatures);
+                                        this, aRenderFrame, aURL, aName, aFeatures,
+                                        aTextureFactoryIdentifier, aLayersId);
   *aOutWindowOpened = (opened == BrowserElementParent::OPEN_WINDOW_ADDED);
   return true;
 }
@@ -2764,7 +2678,7 @@ TabParent::InjectTouchEvent(const nsAString& aType,
   }
 
   WidgetTouchEvent event(true, msg, widget);
-  event.modifiers = aModifiers;
+  event.mModifiers = aModifiers;
   event.mTime = PR_IntervalNow();
 
   nsCOMPtr<nsIContent> content = do_QueryInterface(mFrameElement);
@@ -2778,7 +2692,7 @@ TabParent::InjectTouchEvent(const nsAString& aType,
   }
   nsPresContext* presContext = doc->GetShell()->GetPresContext();
 
-  event.touches.SetCapacity(aCount);
+  event.mTouches.SetCapacity(aCount);
   for (uint32_t i = 0; i < aCount; ++i) {
     LayoutDeviceIntPoint pt =
       LayoutDeviceIntPoint::FromAppUnitsRounded(
@@ -2797,7 +2711,7 @@ TabParent::InjectTouchEvent(const nsAString& aType,
     // about the meaning of changedTouches for each event, see
     // https://developer.mozilla.org/docs/Web/API/TouchEvent.changedTouches
     t->mChanged = true;
-    event.touches.AppendElement(t);
+    event.mTouches.AppendElement(t);
   }
 
   SendRealTouchEvent(event);
@@ -2917,7 +2831,7 @@ bool
 TabParent::RequestNotifyLayerTreeReady()
 {
   RenderFrameParent* frame = GetRenderFrame();
-  if (!frame) {
+  if (!frame || !frame->IsInitted()) {
     mNeedLayerTreeReadyNotification = true;
   } else {
     CompositorBridgeParent::RequestNotifyLayerTreeReady(

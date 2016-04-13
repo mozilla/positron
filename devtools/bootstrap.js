@@ -112,24 +112,6 @@ function reload(event) {
           }
         }, false);
       }
-
-      // Manually reload gcli if it has been used
-      // Bug 1248348: Inject the developer toolbar dynamically within browser/
-      // so that we can easily remove/reinject it
-      const desc = Object.getOwnPropertyDescriptor(window, "DeveloperToolbar");
-      if (desc && !desc.get) {
-        let wasVisible = window.DeveloperToolbar.visible;
-        window.DeveloperToolbar.hide()
-          .then(() => {
-            window.DeveloperToolbar.destroy();
-
-            let { DeveloperToolbar } = devtools.require("devtools/client/shared/developer-toolbar");
-            window.DeveloperToolbar = new DeveloperToolbar(window, window.document.getElementById("developer-toolbar"));
-            if (wasVisible) {
-              window.DeveloperToolbar.show();
-            }
-          });
-      }
     } else if (windowtype === "devtools:webide") {
       window.location.reload();
     } else if (windowtype === "devtools:webconsole") {
@@ -161,6 +143,17 @@ function reload(event) {
   actionOccurred("reloadAddonReload");
 }
 
+let prefs = {
+  // Enable dump as some errors are only printed on the stdout
+  "browser.dom.window.dump.enabled": true,
+  // Enable the browser toolbox and various chrome-only features
+  "devtools.chrome.enabled": true,
+  "devtools.debugger.remote-enabled": true,
+  // Disable the prompt to ease usage of the browser toolbox
+  "devtools.debugger.prompt-connection": false,
+};
+let originalPrefValues = {};
+
 let listener;
 function startup() {
   dump("DevTools addon started.\n");
@@ -169,10 +162,31 @@ function startup() {
     callback: reload
   });
   listener.start();
+
+  // Toggle development prefs and save original values
+  originalPrefValues = {};
+  for (let name in prefs) {
+    let value = prefs[name];
+    let userValue = Services.prefs.getBoolPref(name);
+    // Only toggle if the pref isn't already set to the right value
+    if (userValue != value) {
+      Services.prefs.setBoolPref(name, value);
+      originalPrefValues[name] = userValue;
+    }
+  }
 }
 function shutdown() {
   listener.stop();
   listener = null;
+
+  // Restore preferences that used to be before the addon was installed
+  for (let name in originalPrefValues) {
+    let userValue = Services.prefs.getBoolPref(name);
+    // Only reset the pref if it hasn't changed
+    if (userValue == prefs[name]) {
+      Services.prefs.setBoolPref(name, originalPrefValues[name]);
+    }
+  }
 }
 function install() {
   actionOccurred("reloadAddonInstalled");

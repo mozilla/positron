@@ -21,7 +21,6 @@
 
 <resources>
   <string name="moz_app_displayname">@MOZ_APP_DISPLAYNAME@</string>
-  <string name="android_package_name">@ANDROID_PACKAGE_NAME@</string>
   <string name="content_authority_db_browser">@ANDROID_PACKAGE_NAME@.db.browser</string>
   <string name="moz_android_shared_fxaccount_type">@ANDROID_PACKAGE_NAME@_fxaccount</string>
   <string name="android_package_name_for_ui">@ANDROID_PACKAGE_NAME@</string>
@@ -56,6 +55,9 @@
   <string name="history_title">&history_title;</string>
   <string name="reading_list_title">&reading_list_title;</string>
   <string name="recent_tabs_title">&recent_tabs_title;</string>
+
+  <!-- https://support.mozilla.org/1/mobile/%VERSION%/%OS%/%LOCALE%/reading-list -->
+  <string name="migrated_reading_list_url">https://support.mozilla.org/1/mobile/&formatS1;/&formatS2;/&formatS3;/reading-list</string>
 
   <string name="switch_to_tab">&switch_to_tab;</string>
 
@@ -95,6 +97,7 @@
   <string name="bookmark_options">&bookmark_options;</string>
   <string name="screenshot_added_to_bookmarks">&screenshot_added_to_bookmarks;</string>
   <string name="screenshot_folder_label_in_bookmarks">&screenshot_folder_label_in_bookmarks;</string>
+  <string name="readinglist_smartfolder_label_in_bookmarks">&readinglist_smartfolder_label_in_bookmarks;</string>
 
   <string name="history_today_section">&history_today_section;</string>
   <string name="history_yesterday_section">&history_yesterday_section;</string>
@@ -124,9 +127,7 @@
   <string name="overlay_share_send_other">&overlay_share_send_other;</string>
   <string name="overlay_share_label">&overlay_share_label;</string>
   <string name="overlay_share_bookmark_btn_label">&overlay_share_bookmark_btn_label;</string>
-  <string name="overlay_share_reading_list_btn_label">&overlay_share_reading_list_btn_label;</string>
   <string name="overlay_share_bookmark_btn_label_already">&overlay_share_bookmark_btn_label_already;</string>
-  <string name="overlay_share_reading_list_btn_label_already">&overlay_share_reading_list_btn_label_already;</string>
   <string name="overlay_share_send_tab_btn_label">&overlay_share_send_tab_btn_label;</string>
   <string name="overlay_share_no_url">&overlay_share_no_url;</string>
   <string name="overlay_share_select_device">&overlay_share_select_device;</string>
@@ -146,6 +147,7 @@
   <string name="pref_category_vendor">&pref_category_vendor2;</string>
   <string name="pref_category_vendor_summary">&pref_category_vendor_summary2;</string>
   <string name="pref_category_datareporting">&pref_category_datareporting;</string>
+  <string name="pref_category_logins">&pref_category_logins;</string>
   <string name="pref_category_installed_search_engines">&pref_category_installed_search_engines;</string>
   <string name="pref_category_add_search_providers">&pref_category_add_search_providers;</string>
   <string name="pref_category_search_restore_defaults">&pref_category_search_restore_defaults;</string>
@@ -165,8 +167,9 @@
   <string name="pref_developer_remotedebugging_wifi_disabled_summary">&pref_developer_remotedebugging_wifi_disabled_summary;</string>
 
   <string name="pref_category_notifications">&pref_category_notifications;</string>
+  <string name="pref_category_notifications_summary">&pref_category_notifications_summary;</string>
   <string name="pref_content_notifications">&pref_content_notifications;</string>
-  <string name="pref_content_notifications_summary">&pref_content_notifications_summary;</string>
+  <string name="pref_content_notifications_summary">&pref_content_notifications_summary2;</string>
 
   <string name="pref_category_home">&pref_category_home;</string>
   <string name="pref_category_home_summary">&pref_category_home_summary;</string>
@@ -206,6 +209,7 @@
   <string name="pref_tap_to_load_images_disabled2">&pref_tap_to_load_images_disabled2;</string>
 
   <string name="pref_show_web_fonts">&pref_show_web_fonts;</string>
+  <string name="pref_show_web_fonts_summary">&pref_show_web_fonts_summary;</string>
 
   <string name="pref_tracking_protection_title">&pref_tracking_protection_title2;</string>
   <string name="pref_tracking_protection_summary">&pref_tracking_protection_summary3;</string>
@@ -215,6 +219,9 @@
   <string name="pref_tracking_protection_enabled">&pref_tracking_protection_enabled;</string>
   <string name="pref_tracking_protection_enabled_pb">&pref_tracking_protection_enabled_pb;</string>
   <string name="pref_tracking_protection_disabled">&pref_tracking_protection_disabled;</string>
+
+  <string name="pref_whats_new_notification">&pref_whats_new_notification;</string>
+  <string name="pref_whats_new_notification_summary">&pref_whats_new_notification_summary;</string>
 
   <string name="pref_char_encoding">&pref_char_encoding;</string>
   <string name="pref_char_encoding_on">&pref_char_encoding_on;</string>
@@ -356,10 +363,10 @@
   <string name="site_settings_cancel">&site_settings_cancel;</string>
   <string name="site_settings_clear">&site_settings_clear;</string>
 
-  <string name="reading_list_added">&reading_list_added3;</string>
-  <string name="reading_list_removed">&reading_list_removed;</string>
-  <string name="reading_list_remove">&reading_list_remove;</string>
-  <string name="reading_list_duplicate">&reading_list_duplicate;</string>
+  <string name="reading_list_migration_title">&reading_list_migration_title;</string>
+  <string name="reading_list_migration_subtext">&reading_list_migration_subtext;</string>
+  <string name="reading_list_migration_goto_bookmarks">&reading_list_migration_goto_bookmarks;</string>
+  <string name="reading_list_migration_bookmarks_hidden">&reading_list_migration_bookmarks_hidden;</string>
 
   <string name="page_action_dropmarker_description">&page_action_dropmarker_description;</string>
 
@@ -378,8 +385,6 @@
   <string name="contextmenu_top_sites_pin">&contextmenu_top_sites_pin;</string>
   <string name="contextmenu_top_sites_unpin">&contextmenu_top_sites_unpin;</string>
   <string name="contextmenu_add_search_engine">&contextmenu_add_search_engine;</string>
-  <string name="contextmenu_mark_read">&contextmenu_mark_read;</string>
-  <string name="contextmenu_mark_unread">&contextmenu_mark_unread;</string>
 
   <string name="doorhanger_login_no_username">&doorhanger_login_no_username;</string>
   <string name="doorhanger_login_edit_title">&doorhanger_login_edit_title;</string>
@@ -425,6 +430,7 @@
   <string name="home_top_sites_title">&home_top_sites_title;</string>
   <string name="home_top_sites_add">&home_top_sites_add;</string>
   <string name="home_history_title">&home_history_title;</string>
+  <string name="home_history_back_to">&home_history_back_to;</string>
   <string name="home_clear_history_button">&home_clear_history_button;</string>
   <string name="home_clear_history_confirm">&home_clear_history_confirm;</string>
   <string name="home_bookmarks_empty">&home_bookmarks_empty;</string>
@@ -435,7 +441,6 @@
   <string name="home_most_recent_empty">&home_most_recent_empty;</string>
   <string name="home_selected_empty">&home_selected_empty;</string>
   <string name="home_most_recent_emptyhint">&home_most_recent_emptyhint2;</string>
-  <string name="home_reading_list_empty">&home_reading_list_empty;</string>
   <string name="home_default_empty">&home_default_empty;</string>
   <string name="home_move_back_to_filter">&home_move_back_to_filter;</string>
   <string name="home_remote_tabs_title">&home_remote_tabs_title;</string>
@@ -465,17 +470,17 @@
 
   <!-- Icon is automatically generated from R.drawable.bookmarkdefaults_favicon_addons -->
   <string name="bookmarkdefaults_title_addons">&bookmarks_addons;</string>
-  <string name="bookmarkdefaults_url_addons">https://addons.mozilla.org/android/</string>
+  <string name="bookmarkdefaults_url_addons">https://addons.mozilla.org/android?utm_source=inproduct&amp;utm_medium=default-bookmarks&amp;utm_campaign=mobileandroid</string>
 
   <!-- Icon is automatically generated from R.drawable.bookmarkdefaults_favicon_support -->
   <string name="bookmarkdefaults_title_support">&bookmarks_support;</string>
-  <string name="bookmarkdefaults_url_support">https://support.mozilla.org/products/mobile</string>
+  <string name="bookmarkdefaults_url_support">https://support.mozilla.org/products/mobile?utm_source=inproduct&amp;utm_medium=default-bookmarks&amp;utm_campaign=mobileandroid</string>
 
   <string name="bookmarkdefaults_title_restricted_webmaker">&bookmarks_restricted_webmaker;</string>
   <string name="bookmarkdefaults_url_restricted_webmaker">https://webmaker.org/</string>
 
   <string name="bookmarkdefaults_title_restricted_support">&bookmarks_restricted_support2;</string>
-  <string name="bookmarkdefaults_url_restricted_support">https://support.mozilla.org/kb/controlledaccess</string>
+  <string name="bookmarkdefaults_url_restricted_support">https://support.mozilla.org/kb/controlledaccess?utm_source=inproduct&amp;utm_medium=default-bookmarks&amp;utm_campaign=mobileandroid</string>
 
   <!-- Site identity popup -->
   <string name="identity_connection_secure">&identity_connection_secure;</string>
@@ -599,4 +604,6 @@
   <string name="whatsnew_notification_summary">&whatsnew_notification_summary;</string>
   <!-- https://support.mozilla.org/1/mobile/%VERSION%/%OS%/%LOCALE%/new-android -->
   <string name="whatsnew_notification_url">https://support.mozilla.org/1/mobile/&formatS1;/&formatS2;/&formatS3;/new-android</string>
+
+  <string name="promotion_add_to_homescreen">&promotion_add_to_homescreen;</string>
 </resources>

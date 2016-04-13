@@ -208,6 +208,8 @@ public:
 
   virtual void Destroy() override;
 
+  virtual void DetachWidget() override { mWidget = nullptr; }
+
   virtual TextureFactoryIdentifier GetTextureFactoryIdentifier() override
   {
     TextureFactoryIdentifier result =
@@ -402,7 +404,7 @@ private:
   virtual void BeginFrame(const nsIntRegion& aInvalidRegion,
                           const gfx::Rect *aClipRectIn,
                           const gfx::Rect& aRenderBounds,
-                          bool aOpaque,
+                          const nsIntRegion& aOpaqueRegion,
                           gfx::Rect *aClipRectOut = nullptr,
                           gfx::Rect *aRenderBoundsOut = nullptr) override;
 

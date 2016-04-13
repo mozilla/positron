@@ -108,7 +108,7 @@ add_task(function* test_notification_ack_data_setup() {
         },
         onACK(request) {
           if (ackDone) {
-            ackDone(request.updates);
+            ackDone(request);
           }
         }
       });
@@ -131,6 +131,7 @@ add_task(function* test_notification_ack_data() {
         data: 'NwrrOWPxLE8Sv5Rr0Kep7n0-r_j3rsYrUw_CXPo',
         version: 'v1',
       },
+      ackCode: 100,
       receive: {
         scope: 'https://example.com/page/1',
         data: 'Some message'
@@ -147,6 +148,7 @@ add_task(function* test_notification_ack_data() {
         },
         data: 'Zt9dEdqgHlyAL_l83385aEtb98ZBilz5tgnGgmwEsl5AOCNgesUUJ4p9qUU',
       },
+      ackCode: 100,
       receive: {
         scope: 'https://example.com/page/2',
         data: 'Some message'
@@ -163,41 +165,25 @@ add_task(function* test_notification_ack_data() {
         },
         data: 'LKru3ZzxBZuAxYtsaCfaj_fehkrIvqbVd1iSwnwAUgnL-cTeDD-83blxHXTq7r0z9ydTdMtC3UjAcWi8LMnfY-BFzi0qJAjGYIikDA',
       },
+      ackCode: 100,
       receive: {
         scope: 'https://example.com/page/3',
         data: 'Some message'
       }
     },
-    // This message uses the newer, authenticated form based on the crypto-key
-    // header field.  No padding or record size changes.
-    {
-      channelID: 'subscription1',
-      version: 'v4',
-      send: {
-        headers: {
-          crypto_key: 'keyid=v4;dh="BHqG01j7rOfp12BEDzxWXxlCaU4cdOx2DZAwCt3QuzEsnXN9lCna9QmZCkVpXsx7sAlaEmtl_VfF1lHlFS7XWcA"',
-          encryption: 'keyid="v4";salt="X5-iy5rzhm4naNmMHdSYJw"',
-          encoding: 'aesgcm128',
-        },
-        data: '7YlxyNlZsNX4UNknHxzTqFrcrzz58W95uXBa0iY',
-      },
-      receive: {
-        scope: 'https://example.com/page/1',
-        data: 'Some message'
-      }
-    },
-    // A message encoded with `aesgcm` (2 bytes of padding).
+    // A message encoded with `aesgcm` (2 bytes of padding, authenticated).
     {
       channelID: 'subscription1',
       version: 'v5',
       send: {
         headers: {
-          crypto_key: 'dh="BMh_vsnqu79ZZkMTYkxl4gWDLdPSGE72Lr4w2hksSFW398xCMJszjzdblAWXyhSwakRNEU_GopAm4UGzyMVR83w"',
-          encryption: 'salt="C14Wb7rQTlXzrgcPHtaUzw"',
+          crypto_key: 'keyid=v4;dh="BMh_vsnqu79ZZkMTYkxl4gWDLdPSGE72Lr4w2hksSFW398xCMJszjzdblAWXyhSwakRNEU_GopAm4UGzyMVR83w"',
+          encryption: 'keyid="v4";salt="C14Wb7rQTlXzrgcPHtaUzw"',
           encoding: 'aesgcm',
         },
         data: 'pus4kUaBWzraH34M-d_oN8e0LPpF_X6acx695AMXovDe',
       },
+      ackCode: 100,
       receive: {
         scope: 'https://example.com/page/1',
         data: 'Another message'
@@ -209,12 +195,13 @@ add_task(function* test_notification_ack_data() {
       version: 'v5',
       send: {
         headers: {
-          crypto_key: 'keyid="v5"; dh="BJhyKIH5P30YUKn1bolj_LMnael1-KZT_aGXgD2CRspBfv9gcUhVAmpxToZrw7QQEKl9K83b3zcqNY6G_dFhEsI"',
-          encryption: 'keyid=v5;salt="bLmqCy550eK1Ao41tD7orA";rs=24',
-          encoding: 'aesgcm128',
+          crypto_key: 'keyid="v5"; dh="BOp-DpyR9eLY5Ci11_loIFqeHzWfc_0evJmq7N8NKzgp60UAMMM06XIi2VZp2_TSdw1omk7E19SyeCCwRp76E-U"',
+          encryption: 'keyid=v5;salt="TvjOou1TqJOQY_ZsOYV3Ww";rs=24',
+          encoding: 'aesgcm',
         },
-        data: 'SQDlDg1ftLkM_ruZlmyB2bk9L78HYtkcbA-y4-uAxwL-G4KtOA-J-A_rJ007Vi6NUkQe9K4kSZeIBrIUpmGv',
+        data: 'rG9WYQ2ZwUgfj_tMlZ0vcIaNpBN05FW-9RUBZAM-UUZf0_9eGpuENBpUDAw3mFmd2XJpmvPvAtLVs54l3rGwg1o',
       },
+      ackCode: 100,
       receive: {
         scope: 'https://example.com/page/2',
         data: 'Some message'
@@ -226,35 +213,54 @@ add_task(function* test_notification_ack_data() {
       version: 'v6',
       send: {
         headers: {
-          crypto_key: 'dh="BEgnDmVw9Gcn1fWA5t53Jtpsgfewk_pzsjSc_PBPpPmROWGQA2v8ESrSsQgosNXx0o-uMMhi9tDAUeks3380kd8"',
-          encryption: 'salt=T9DM8bNxuMHRVTn4LzkJDQ',
-          encoding: 'aesgcm128',
+          crypto_key: 'dh="BEEjwWbF5jZKCgW0kmUWgG-wNcRvaa9_3zZElHAF8przHwd4cp5_kQsc-IMNZcVA0iUix31jxuMOytU-5DwWtyQ"',
+          encryption: 'salt=aAQcr2khAksgNspPiFEqiQ',
+          encoding: 'aesgcm',
         },
-        data: '7KUCi0dBBJbWmsYTqEqhFrgTv4ZOo_BmQRQ_2kY',
+        data: 'pEYgefdI-7L46CYn5dR9TIy2AXGxe07zxclbhstY',
       },
+      ackCode: 100,
       receive: {
         scope: 'https://example.com/page/3',
         data: 'Some message'
       }
     },
+    // A malformed encrypted message.
+    {
+      channelID: 'subscription3',
+      version: 'v7',
+      send: {
+        headers: {
+          crypto_key: 'dh=AAAAAAAA',
+          encryption: 'salt=AAAAAAAA',
+        },
+        data: 'AAAAAAAA',
+      },
+      ackCode: 101,
+      receive: null,
+    },
   ];
 
   let sendAndReceive = testData => {
-    let messageReceived = promiseObserverNotification(PushServiceComponent.pushTopic, (subject, data) => {
+    let messageReceived = testData.receive ? promiseObserverNotification(PushServiceComponent.pushTopic, (subject, data) => {
       let notification = subject.QueryInterface(Ci.nsIPushMessage);
       equal(notification.text(), testData.receive.data,
             'Check data for notification ' + testData.version);
       equal(data, testData.receive.scope,
             'Check scope for notification ' + testData.version);
       return true;
-    });
+    }) : Promise.resolve();
 
     let ackReceived = new Promise(resolve => ackDone = resolve)
         .then(ackData => {
-          deepEqual([{
-            channelID: testData.channelID,
-            version: testData.version
-          }], ackData, 'Check updates for acknowledgment ' + testData.version);
+          deepEqual({
+            messageType: 'ack',
+            updates: [{
+              channelID: testData.channelID,
+              version: testData.version,
+              code: testData.ackCode,
+            }],
+          }, ackData, 'Check updates for acknowledgment ' + testData.version);
         });
 
     let msg = JSON.parse(JSON.stringify(testData.send));

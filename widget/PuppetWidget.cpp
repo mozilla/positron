@@ -274,8 +274,7 @@ NS_IMETHODIMP
 PuppetWidget::Invalidate(const LayoutDeviceIntRect& aRect)
 {
 #ifdef DEBUG
-  debug_DumpInvalidate(stderr, this, &aRect,
-                       nsAutoCString("PuppetWidget"), 0);
+  debug_DumpInvalidate(stderr, this, &aRect, "PuppetWidget", 0);
 #endif
 
   if (mChild) {
@@ -309,8 +308,7 @@ NS_IMETHODIMP
 PuppetWidget::DispatchEvent(WidgetGUIEvent* event, nsEventStatus& aStatus)
 {
 #ifdef DEBUG
-  debug_DumpEvent(stdout, event->widget, event,
-                  nsAutoCString("PuppetWidget"), 0);
+  debug_DumpEvent(stdout, event->widget, event, "PuppetWidget", 0);
 #endif
 
   MOZ_ASSERT(!mChild || mChild->mWindowType == eWindowType_popup,
@@ -1034,7 +1032,7 @@ PuppetWidget::Paint()
   if (GetCurrentWidgetListener()) {
 #ifdef DEBUG
     debug_DumpPaintEvent(stderr, this, region.ToUnknownRegion(),
-                         nsAutoCString("PuppetWidget"), 0);
+                         "PuppetWidget", 0);
 #endif
 
     if (mozilla::layers::LayersBackend::LAYERS_CLIENT == mLayerManager->GetBackendType()) {
@@ -1043,7 +1041,11 @@ PuppetWidget::Paint()
         mTabChild->NotifyPainted();
       }
     } else {
-      RefPtr<gfxContext> ctx = new gfxContext(mDrawTarget);
+      RefPtr<gfxContext> ctx = gfxContext::ForDrawTarget(mDrawTarget);
+      if (!ctx) {
+        gfxDevCrash(LogReason::InvalidContext) << "PuppetWidget context problem " << gfx::hexa(mDrawTarget);
+        return NS_ERROR_FAILURE;
+      }
       ctx->Rectangle(gfxRect(0,0,0,0));
       ctx->Clip();
       AutoLayerManagerSetup setupLayerManager(this, ctx,
@@ -1420,6 +1422,44 @@ PuppetWidget::ZoomToRect(const uint32_t& aPresShellId,
   }
 
   mTabChild->ZoomToRect(aPresShellId, aViewId, aRect, aFlags);
+}
+
+bool
+PuppetWidget::HasPendingInputEvent()
+{
+  if (!mTabChild) {
+    return false;
+  }
+
+  static const IPC::Message::msgid_t kInputEvents[] = {
+    mozilla::dom::PBrowser::Msg_RealMouseMoveEvent__ID,
+    mozilla::dom::PBrowser::Msg_SynthMouseMoveEvent__ID,
+    mozilla::dom::PBrowser::Msg_RealMouseButtonEvent__ID,
+    mozilla::dom::PBrowser::Msg_RealKeyEvent__ID,
+    mozilla::dom::PBrowser::Msg_MouseWheelEvent__ID,
+    mozilla::dom::PBrowser::Msg_RealTouchEvent__ID,
+    mozilla::dom::PBrowser::Msg_RealTouchMoveEvent__ID,
+    mozilla::dom::PBrowser::Msg_RealDragEvent__ID,
+    mozilla::dom::PBrowser::Msg_UpdateDimensions__ID,
+    mozilla::dom::PBrowser::Msg_MouseEvent__ID,
+    mozilla::dom::PBrowser::Msg_KeyEvent__ID
+  };
+  bool ret = false;
+
+  for (IPC::Message::msgid_t e: kInputEvents) {
+    mTabChild->GetIPCChannel()->PeekMessages(
+      e,
+      [&ret](const IPC::Message& aMsg) -> bool {
+        ret = true;
+        return false;  // Stop peeking.
+      }
+    );
+    if (ret) {
+      break;
+    }
+  }
+
+  return ret;
 }
 
 } // namespace widget

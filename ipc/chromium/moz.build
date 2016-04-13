@@ -9,6 +9,7 @@ include(libevent_path_prefix + '/libeventcommon.mozbuild')
 
 UNIFIED_SOURCES += [
     'src/base/at_exit.cc',
+    'src/base/buffer.cc',
     'src/base/command_line.cc',
     'src/base/file_path.cc',
     'src/base/file_util.cc',
@@ -17,7 +18,6 @@ UNIFIED_SOURCES += [
     'src/base/logging.cc',
     'src/base/message_loop.cc',
     'src/base/message_pump_default.cc',
-    'src/base/non_thread_safe.cc',
     'src/base/pickle.cc',
     'src/base/rand_util.cc',
     'src/base/revocable_store.cc',
@@ -34,11 +34,7 @@ UNIFIED_SOURCES += [
     'src/chrome/common/child_thread.cc',
     'src/chrome/common/chrome_switches.cc',
     'src/chrome/common/ipc_channel.cc',
-    'src/chrome/common/ipc_channel_proxy.cc',
     'src/chrome/common/ipc_message.cc',
-    'src/chrome/common/ipc_sync_channel.cc',
-    'src/chrome/common/ipc_sync_message.cc',
-    'src/chrome/common/message_router.cc',
     'src/chrome/common/notification_service.cc',
 ]
 
@@ -165,3 +161,7 @@ CXXFLAGS += CONFIG['TK_CFLAGS']
 include('/ipc/chromium/chromium-config.mozbuild')
 
 FINAL_LIBRARY = 'xul'
+
+DIRS += [
+    'atomics',
+]

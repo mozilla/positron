@@ -6,7 +6,7 @@ package org.mozilla.gecko.tests;
 
 import org.mozilla.gecko.Actions;
 
-import com.jayway.android.robotium.solo.Condition;
+import com.robotium.solo.Condition;
 
 
 public class testBookmarklets extends BaseTest {
@@ -40,7 +40,7 @@ public class testBookmarklets extends BaseTest {
             public boolean isSatisfied() {
                 return mSolo.searchButton("OK", true) && mSolo.searchText(expected, true);
             }
-        }, 3000);
+        }, 10000);
         mAsserter.is(alerted, true, "Alert was shown for bookmarklet");
     }
 }

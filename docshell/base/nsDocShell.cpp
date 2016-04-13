@@ -350,7 +350,7 @@ ForEachPing(nsIContent* aContent, ForEachPingCallback aCallback, void* aClosure)
     return;
   }
 
-  nsCOMPtr<nsIAtom> pingAtom = do_GetAtom("ping");
+  nsCOMPtr<nsIAtom> pingAtom = NS_Atomize("ping");
   if (!pingAtom) {
     return;
   }
@@ -524,8 +524,9 @@ SendPing(void* aClosure, nsIContent* aContent, nsIURI* aURI,
     return;
   }
 
-  // Don't bother caching the result of this URI load.
-  chan->SetLoadFlags(nsIRequest::INHIBIT_CACHING);
+  // Don't bother caching the result of this URI load, but do not exempt
+  // it from Safe Browsing.
+  chan->SetLoadFlags(nsIRequest::INHIBIT_CACHING | nsIChannel::LOAD_CLASSIFY_URI);
 
   nsCOMPtr<nsIHttpChannel> httpChan = do_QueryInterface(chan);
   if (!httpChan) {
@@ -4796,6 +4797,9 @@ nsDocShell::DisplayLoadError(nsresult aError, nsIURI* aURI,
   } else if (NS_ERROR_FILE_NOT_FOUND == aError) {
     NS_ENSURE_ARG_POINTER(aURI);
     error.AssignLiteral("fileNotFound");
+  } else if (NS_ERROR_FILE_ACCESS_DENIED == aError) {
+    NS_ENSURE_ARG_POINTER(aURI);
+    error.AssignLiteral("fileAccessDenied");
   } else if (NS_ERROR_UNKNOWN_HOST == aError) {
     NS_ENSURE_ARG_POINTER(aURI);
     // Get the host
@@ -7567,6 +7571,7 @@ nsDocShell::EndPageLoad(nsIWebProgress* aProgress,
   //
   if (url && NS_FAILED(aStatus)) {
     if (aStatus == NS_ERROR_FILE_NOT_FOUND ||
+        aStatus == NS_ERROR_FILE_ACCESS_DENIED ||
         aStatus == NS_ERROR_CORRUPTED_CONTENT ||
         aStatus == NS_ERROR_INVALID_CONTENT_ENCODING) {
       DisplayLoadError(aStatus, url, nullptr, aChannel);
@@ -9979,31 +9984,44 @@ nsDocShell::InternalLoad(nsIURI* aURI,
       aLoadType == LOAD_HISTORY ||
       aLoadType == LOAD_LINK) {
     nsCOMPtr<nsIURI> currentURI = mCurrentURI;
-    // Split currentURI and aURI on the '#' character.  Make sure we read
-    // the return values of SplitURIAtHash; if it fails, we don't want to
-    // allow a short-circuited navigation.
-    nsAutoCString curBeforeHash, curHash, newBeforeHash, newHash;
-    nsresult splitRv1, splitRv2;
-    splitRv1 = currentURI ?
-      nsContentUtils::SplitURIAtHash(currentURI, curBeforeHash, curHash) :
-      NS_ERROR_FAILURE;
-    splitRv2 = nsContentUtils::SplitURIAtHash(aURI, newBeforeHash, newHash);
 
-    bool sameExceptHashes = NS_SUCCEEDED(splitRv1) &&
-                            NS_SUCCEEDED(splitRv2) &&
-                            curBeforeHash.Equals(newBeforeHash);
+    nsAutoCString curHash, newHash;
+    bool curURIHasRef = false, newURIHasRef = false;
+
+    nsresult rvURINew = aURI->GetRef(newHash);
+    if (NS_SUCCEEDED(rvURINew)) {
+      rvURINew = aURI->GetHasRef(&newURIHasRef);
+    }
+
+    bool sameExceptHashes = false;
+    if (currentURI && NS_SUCCEEDED(rvURINew)) {
+      nsresult rvURIOld = currentURI->GetRef(curHash);
+      if (NS_SUCCEEDED(rvURIOld)) {
+        rvURIOld = currentURI->GetHasRef(&curURIHasRef);
+      }
+      if (NS_SUCCEEDED(rvURIOld)) {
+        if (NS_FAILED(currentURI->EqualsExceptRef(aURI, &sameExceptHashes))) {
+          sameExceptHashes = false;
+        }
+      }
+    }
 
     if (!sameExceptHashes && sURIFixup && currentURI &&
-        NS_SUCCEEDED(splitRv2)) {
+        NS_SUCCEEDED(rvURINew)) {
       // Maybe aURI came from the exposable form of currentURI?
       nsCOMPtr<nsIURI> currentExposableURI;
       rv = sURIFixup->CreateExposableURI(currentURI,
                                          getter_AddRefs(currentExposableURI));
       NS_ENSURE_SUCCESS(rv, rv);
-      splitRv1 = nsContentUtils::SplitURIAtHash(currentExposableURI,
-                                                curBeforeHash, curHash);
-      sameExceptHashes =
-        NS_SUCCEEDED(splitRv1) && curBeforeHash.Equals(newBeforeHash);
+      nsresult rvURIOld = currentExposableURI->GetRef(curHash);
+      if (NS_SUCCEEDED(rvURIOld)) {
+        rvURIOld = currentExposableURI->GetHasRef(&curURIHasRef);
+      }
+      if (NS_SUCCEEDED(rvURIOld)) {
+        if (NS_FAILED(currentExposableURI->EqualsExceptRef(aURI, &sameExceptHashes))) {
+          sameExceptHashes = false;
+        }
+      }
     }
 
     bool historyNavBetweenSameDoc = false;
@@ -10039,7 +10057,7 @@ nsDocShell::InternalLoad(nsIURI* aURI,
     bool doShortCircuitedLoad =
       (historyNavBetweenSameDoc && mOSHE != aSHEntry) ||
       (!aSHEntry && !aPostData &&
-       sameExceptHashes && !newHash.IsEmpty());
+       sameExceptHashes && newURIHasRef);
 
     if (doShortCircuitedLoad) {
       // Save the position of the scrollers.
@@ -10194,7 +10212,7 @@ nsDocShell::InternalLoad(nsIURI* aURI,
       // arguments it receives.  But even if we don't end up scrolling,
       // ScrollToAnchor performs other important tasks, such as informing
       // the presShell that we have a new hash.  See bug 680257.
-      rv = ScrollToAnchor(curHash, newHash, aLoadType);
+      rv = ScrollToAnchor(curURIHasRef, newURIHasRef, newHash, aLoadType);
       NS_ENSURE_SUCCESS(rv, rv);
 
       /* restore previous position of scroller(s), if we're moving
@@ -10217,7 +10235,8 @@ nsDocShell::InternalLoad(nsIURI* aURI,
       // reference to avoid null derefs. See bug 914521.
       if (win) {
         // Fire a hashchange event URIs differ, and only in their hashes.
-        bool doHashchange = sameExceptHashes && !curHash.Equals(newHash);
+        bool doHashchange = sameExceptHashes &&
+                            (curURIHasRef != newURIHasRef || !curHash.Equals(newHash));
 
         if (historyNavBetweenSameDoc || doHashchange) {
           win->DispatchSyncPopState();
@@ -10929,8 +10948,13 @@ nsDocShell::DoURILoad(nsIURI* aURI,
   nsCOMPtr<nsITimedChannel> timedChannel(do_QueryInterface(channel));
   if (timedChannel) {
     timedChannel->SetTimingEnabled(true);
-    if (IsFrame()) {
-      timedChannel->SetInitiatorType(NS_LITERAL_STRING("subdocument"));
+
+    nsCOMPtr<nsPIDOMWindowOuter> win = GetWindow();
+    if (IsFrame() && win) {
+      nsCOMPtr<Element> frameElement = win->GetFrameElementInternal();
+      if (frameElement) {
+        timedChannel->SetInitiatorType(frameElement->LocalName());
+      }
     }
   }
 
@@ -11127,8 +11151,8 @@ nsDocShell::DoChannelLoad(nsIChannel* aChannel,
 }
 
 nsresult
-nsDocShell::ScrollToAnchor(nsACString& aCurHash, nsACString& aNewHash,
-                           uint32_t aLoadType)
+nsDocShell::ScrollToAnchor(bool aCurHasRef, bool aNewHasRef,
+                           nsACString& aNewHash, uint32_t aLoadType)
 {
   if (!mCurrentURI) {
     return NS_OK;
@@ -11150,25 +11174,20 @@ nsDocShell::ScrollToAnchor(nsACString& aCurHash, nsACString& aNewHash,
   // current anchor and we are doing a history load.  So return if we have no
   // new anchor, and there is no current anchor or the load is not a history
   // load.
-  if ((aCurHash.IsEmpty() || aLoadType != LOAD_HISTORY) &&
-      aNewHash.IsEmpty()) {
+  if ((!aCurHasRef || aLoadType != LOAD_HISTORY) && !aNewHasRef) {
     return NS_OK;
   }
-
-  // Take the '#' off aNewHash to get the ref name.  (aNewHash might be empty,
-  // but that's fine.)
-  nsDependentCSubstring newHashName(aNewHash, 1);
 
   // Both the new and current URIs refer to the same page. We can now
   // browse to the hash stored in the new URI.
 
-  if (!newHashName.IsEmpty()) {
+  if (!aNewHash.IsEmpty()) {
     // anchor is there, but if it's a load from history,
     // we don't have any anchor jumping to do
     bool scroll = aLoadType != LOAD_HISTORY &&
                   aLoadType != LOAD_RELOAD_NORMAL;
 
-    char* str = ToNewCString(newHashName);
+    char* str = ToNewCString(aNewHash);
     if (!str) {
       return NS_ERROR_OUT_OF_MEMORY;
     }
@@ -11210,7 +11229,7 @@ nsDocShell::ScrollToAnchor(nsACString& aCurHash, nsACString& aNewHash,
       nsXPIDLString uStr;
 
       rv = textToSubURI->UnEscapeAndConvert(PromiseFlatCString(aCharset).get(),
-                                            PromiseFlatCString(newHashName).get(),
+                                            PromiseFlatCString(aNewHash).get(),
                                             getter_Copies(uStr));
       NS_ENSURE_SUCCESS(rv, rv);
 
@@ -11220,7 +11239,7 @@ nsDocShell::ScrollToAnchor(nsACString& aCurHash, nsACString& aNewHash,
       // with the new URI no matter whether we actually scrolled
       // somewhere).
       //
-      // When newHashName contains "%00", unescaped string may be empty.
+      // When aNewHash contains "%00", unescaped string may be empty.
       // And GoToAnchor asserts if we ask it to scroll to an empty ref.
       shell->GoToAnchor(uStr, scroll && !uStr.IsEmpty(),
                         nsIPresShell::SCROLL_SMOOTH_AUTO);
@@ -14108,13 +14127,14 @@ nsDocShell::GetOpener()
   return opener;
 }
 
+// The caller owns |aAsyncCause| here.
 void
 nsDocShell::NotifyJSRunToCompletionStart(const char* aReason,
                                          const char16_t* aFunctionName,
                                          const char16_t* aFilename,
                                          const uint32_t aLineNumber,
                                          JS::Handle<JS::Value> aAsyncStack,
-                                         JS::Handle<JS::Value> aAsyncCause)
+                                         const char* aAsyncCause)
 {
   // If first start, mark interval start.
   if (mJSRunToCompletionDepth == 0) {

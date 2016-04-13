@@ -8,7 +8,7 @@
  * should be computed.
  */
 
-let { snapshotState, dominatorTreeState, viewState, } =
+let { snapshotState, dominatorTreeState, viewState, treeMapState } =
   require("devtools/client/memory/constants");
 let { importSnapshotAndCensus } = require("devtools/client/memory/actions/io");
 let { changeViewAndRefresh } = require("devtools/client/memory/actions/view");
@@ -25,7 +25,7 @@ add_task(function* () {
   let { subscribe, dispatch, getState } = store;
 
   dispatch(changeViewAndRefresh(viewState.DOMINATOR_TREE, heapWorker));
-  equal(getState().view, viewState.DOMINATOR_TREE,
+  equal(getState().view.state, viewState.DOMINATOR_TREE,
         "We should now be in the DOMINATOR_TREE view");
 
   let i = 0;
@@ -33,8 +33,8 @@ add_task(function* () {
     "IMPORTING",
     "READING",
     "READ",
-    "SAVING_CENSUS",
-    "SAVED_CENSUS",
+    "treeMap:SAVING",
+    "treeMap:SAVED",
     "dominatorTree:COMPUTING",
     "dominatorTree:FETCHING",
     "dominatorTree:LOADED",
@@ -71,6 +71,12 @@ function hasExpectedState(snapshot, expectedState) {
   if (isDominatorState) {
     let state = dominatorTreeState[expectedState.replace("dominatorTree:", "")];
     return snapshot.dominatorTree && snapshot.dominatorTree.state === state;
+  }
+
+  let isTreeMapState = expectedState.indexOf("treeMap:") === 0;
+  if (isTreeMapState) {
+    let state = treeMapState[expectedState.replace("treeMap:", "")];
+    return snapshot.treeMap && snapshot.treeMap.state === state;
   }
 
   let state = snapshotState[expectedState];

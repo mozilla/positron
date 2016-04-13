@@ -1211,30 +1211,21 @@ FinishObjectClassInit(JSContext* cx, JS::HandleObject ctor, JS::HandleObject pro
     return true;
 }
 
+static const ClassSpec PlainObjectClassSpec = {
+    CreateObjectConstructor,
+    CreateObjectPrototype,
+    object_static_methods,
+    nullptr,
+    object_methods,
+    object_properties,
+    FinishObjectClassInit
+};
+
 const Class PlainObject::class_ = {
     js_Object_str,
     JSCLASS_HAS_CACHED_PROTO(JSProto_Object),
-    nullptr,  /* addProperty */
-    nullptr,  /* delProperty */
-    nullptr,  /* getProperty */
-    nullptr,  /* setProperty */
-    nullptr,  /* enumerate */
-    nullptr,  /* resolve */
-    nullptr,  /* mayResolve */
-    nullptr,  /* finalize */
-    nullptr,  /* call */
-    nullptr,  /* hasInstance */
-    nullptr,  /* construct */
-    nullptr,  /* trace */
-    {
-        CreateObjectConstructor,
-        CreateObjectPrototype,
-        object_static_methods,
-        nullptr,
-        object_methods,
-        object_properties,
-        FinishObjectClassInit
-    }
+    JS_NULL_CLASS_OPS,
+    &PlainObjectClassSpec
 };
 
 const Class* const js::ObjectClassPtr = &PlainObject::class_;

@@ -205,7 +205,8 @@ nsSVGMaskFrame::GetMaskForMaskedFrame(gfxContext* aContext,
                                       nsIFrame* aMaskedFrame,
                                       const gfxMatrix &aMatrix,
                                       float aOpacity,
-                                      Matrix* aMaskTransform)
+                                      Matrix* aMaskTransform,
+                                      uint8_t aMaskOp)
 {
   // If the flag is set when we get here, it means this mask frame
   // has already been used painting the current mask, and the document
@@ -252,14 +253,15 @@ nsSVGMaskFrame::GetMaskForMaskedFrame(gfxContext* aContext,
   RefPtr<DrawTarget> maskDT =
     Factory::CreateDrawTarget(BackendType::CAIRO, maskSurfaceSize,
                               SurfaceFormat::B8G8R8A8);
-  if (!maskDT) {
+  if (!maskDT || !maskDT->IsValid()) {
     return nullptr;
   }
 
   gfxMatrix maskSurfaceMatrix =
     aContext->CurrentMatrix() * gfxMatrix::Translation(-maskSurfaceRect.TopLeft());
 
-  RefPtr<gfxContext> tmpCtx = new gfxContext(maskDT);
+  RefPtr<gfxContext> tmpCtx = gfxContext::ForDrawTarget(maskDT);
+  MOZ_ASSERT(tmpCtx); // already checked the draw target above
   tmpCtx->SetMatrix(maskSurfaceMatrix);
 
   mMatrixForChildren = GetMaskTransform(aMaskedFrame) * aMatrix;
@@ -306,7 +308,15 @@ nsSVGMaskFrame::GetMaskForMaskedFrame(gfxContext* aContext,
     return nullptr;
   }
 
-  if (StyleSVGReset()->mMaskType == NS_STYLE_MASK_TYPE_LUMINANCE) {
+  uint8_t maskType;
+  if (aMaskOp == NS_STYLE_MASK_MODE_MATCH_SOURCE) {
+    maskType = StyleSVGReset()->mMaskType;
+  } else {
+    maskType = aMaskOp == NS_STYLE_MASK_MODE_LUMINANCE ?
+                 NS_STYLE_MASK_TYPE_LUMINANCE : NS_STYLE_MASK_TYPE_ALPHA;
+  }
+
+  if (maskType == NS_STYLE_MASK_TYPE_LUMINANCE) {
     if (StyleSVG()->mColorInterpolation ==
         NS_STYLE_COLOR_INTERPOLATION_LINEARRGB) {
       ComputeLinearRGBLuminanceMask(map.mData, map.mStride,

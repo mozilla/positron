@@ -183,9 +183,9 @@ ContentEventHandler::InitCommon()
   NS_ENSURE_TRUE(endNode, NS_ERROR_FAILURE);
 
   // See bug 537041 comment 5, the range could have removed node.
-  NS_ENSURE_TRUE(startNode->GetCurrentDoc() == mPresShell->GetDocument(),
+  NS_ENSURE_TRUE(startNode->GetUncomposedDoc() == mPresShell->GetDocument(),
                  NS_ERROR_NOT_AVAILABLE);
-  NS_ASSERTION(startNode->GetCurrentDoc() == endNode->GetCurrentDoc(),
+  NS_ASSERTION(startNode->GetUncomposedDoc() == endNode->GetUncomposedDoc(),
                "mFirstSelectedRange crosses the document boundary");
 
   mRootContent = startNode->GetSelectionRootContent(mPresShell);
@@ -1909,16 +1909,24 @@ ContentEventHandler::ConvertToRootRelativeOffset(nsIFrame* aFrame,
 {
   NS_ASSERTION(aFrame, "aFrame must not be null");
 
-  nsPresContext* rootPresContext = aFrame->PresContext()->GetRootPresContext();
-  if (NS_WARN_IF(!rootPresContext)) {
+  nsPresContext* thisPC = aFrame->PresContext();
+  nsPresContext* rootPC = thisPC->GetRootPresContext();
+  if (NS_WARN_IF(!rootPC)) {
     return NS_ERROR_FAILURE;
   }
-  nsIFrame* rootFrame = rootPresContext->PresShell()->GetRootFrame();
+  nsIFrame* rootFrame = rootPC->PresShell()->GetRootFrame();
   if (NS_WARN_IF(!rootFrame)) {
     return NS_ERROR_FAILURE;
   }
 
   aRect = nsLayoutUtils::TransformFrameRectToAncestor(aFrame, aRect, rootFrame);
+
+  // TransformFrameRectToAncestor returned the rect in the ancestor's appUnits,
+  // but we want it in aFrame's units (in case of different full-zoom factors),
+  // so convert back.
+  aRect = aRect.ScaleToOtherAppUnitsRoundOut(rootPC->AppUnitsPerDevPixel(),
+                                             thisPC->AppUnitsPerDevPixel());
+
   return NS_OK;
 }
 

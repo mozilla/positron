@@ -6,45 +6,40 @@
 
 #include "nsNSSIOLayer.h"
 
-#include "pkix/pkixtypes.h"
-#include "nsNSSComponent.h"
-#include "mozilla/Casting.h"
-#include "mozilla/DebugOnly.h"
-#include "mozilla/UniquePtr.h"
-#include "mozilla/Telemetry.h"
+#include <algorithm>
 
-#include "mozilla/Logging.h"
-#include "prmem.h"
-#include "prnetdb.h"
-#include "nsIPrefService.h"
-#include "nsIClientAuthDialogs.h"
-#include "nsIWebProgressListener.h"
-#include "nsClientAuthRemember.h"
-#include "nsServiceManagerUtils.h"
-
-#include "nsISocketProvider.h"
-#include "nsPrintfCString.h"
-#include "SSLServerCertVerification.h"
-#include "nsNSSCertHelper.h"
-
-#include "nsCharSeparatedTokenizer.h"
-#include "nsIConsoleService.h"
-#include "PSMRunnable.h"
-#include "ScopedNSSTypes.h"
-#include "SharedSSLState.h"
-#include "mozilla/Preferences.h"
-#include "nsContentUtils.h"
 #include "NSSCertDBTrustDomain.h"
 #include "NSSErrorsService.h"
-
-#include "ssl.h"
-#include "sslproto.h"
-#include "secerr.h"
-#include "sslerr.h"
-#include "secder.h"
+#include "PSMRunnable.h"
+#include "SSLServerCertVerification.h"
+#include "ScopedNSSTypes.h"
+#include "SharedSSLState.h"
 #include "keyhi.h"
-
-#include <algorithm>
+#include "mozilla/Casting.h"
+#include "mozilla/DebugOnly.h"
+#include "mozilla/Logging.h"
+#include "mozilla/Preferences.h"
+#include "mozilla/Telemetry.h"
+#include "nsCharSeparatedTokenizer.h"
+#include "nsClientAuthRemember.h"
+#include "nsContentUtils.h"
+#include "nsIClientAuthDialogs.h"
+#include "nsIConsoleService.h"
+#include "nsIPrefService.h"
+#include "nsISocketProvider.h"
+#include "nsIWebProgressListener.h"
+#include "nsNSSCertHelper.h"
+#include "nsNSSComponent.h"
+#include "nsPrintfCString.h"
+#include "nsServiceManagerUtils.h"
+#include "pkix/pkixtypes.h"
+#include "prmem.h"
+#include "prnetdb.h"
+#include "secder.h"
+#include "secerr.h"
+#include "ssl.h"
+#include "sslerr.h"
+#include "sslproto.h"
 
 using namespace mozilla;
 using namespace mozilla::psm;
@@ -1852,9 +1847,17 @@ nsSSLIOLayerNewSocket(int32_t family,
 //
 // Note: copied in its entirety from Nova code
 static SECStatus
-nsConvertCANamesToStrings(PLArenaPool* arena, char** caNameStrings,
+nsConvertCANamesToStrings(const UniquePLArenaPool& arena, char** caNameStrings,
                           CERTDistNames* caNames)
 {
+    MOZ_ASSERT(arena.get());
+    MOZ_ASSERT(caNameStrings);
+    MOZ_ASSERT(caNames);
+    if (!arena.get() || !caNameStrings || !caNames) {
+        PR_SetError(SEC_ERROR_INVALID_ARGS, 0);
+        return SECFailure;
+    }
+
     SECItem* dername;
     SECStatus rv;
     int headerlen;
@@ -1914,7 +1917,7 @@ nsConvertCANamesToStrings(PLArenaPool* arena, char** caNameStrings,
             // XXX - keep going until we fail to convert the name
             caNameStrings[n] = const_cast<char*>("");
         } else {
-            caNameStrings[n] = PORT_ArenaStrdup(arena, namestring);
+            caNameStrings[n] = PORT_ArenaStrdup(arena.get(), namestring);
             PR_Free(namestring);
             if (!caNameStrings[n]) {
                 goto loser;
@@ -2091,7 +2094,7 @@ nsNSS_SSLGetClientAuthData(void* arg, PRFileDesc* socket,
 void
 ClientAuthDataRunnable::RunOnTargetThread()
 {
-  PLArenaPool* arena = nullptr;
+  UniquePLArenaPool arena;
   char** caNameStrings;
   ScopedCERTCertificate cert;
   UniqueSECKEYPrivateKey privKey;
@@ -2128,13 +2131,13 @@ ClientAuthDataRunnable::RunOnTargetThread()
   }
 
   // create caNameStrings
-  arena = PORT_NewArena(DER_DEFAULT_CHUNKSIZE);
+  arena.reset(PORT_NewArena(DER_DEFAULT_CHUNKSIZE));
   if (!arena) {
     goto loser;
   }
 
-  caNameStrings = (char**) PORT_ArenaAlloc(arena,
-                                           sizeof(char*) * (mCANames->nnames));
+  caNameStrings = static_cast<char**>(
+    PORT_ArenaAlloc(arena.get(), sizeof(char*) * mCANames->nnames));
   if (!caNameStrings) {
     goto loser;
   }
@@ -2310,8 +2313,7 @@ ClientAuthDataRunnable::RunOnTargetThread()
       NS_ASSERTION(nicknames->numnicknames == NumberOfCerts, "nicknames->numnicknames != NumberOfCerts");
 
       // Get CN and O of the subject and O of the issuer
-      UniquePtr<char, void(&)(void*)>
-        ccn(CERT_GetCommonName(&mServerCert->subject), PORT_Free);
+      UniquePORTString ccn(CERT_GetCommonName(&mServerCert->subject));
       NS_ConvertUTF8toUTF16 cn(ccn.get());
 
       int32_t port;
@@ -2330,13 +2332,11 @@ ClientAuthDataRunnable::RunOnTargetThread()
         cn_host_port.Append(')');
       }
 
-      char* corg = CERT_GetOrgName(&mServerCert->subject);
-      NS_ConvertUTF8toUTF16 org(corg);
-      if (corg) PORT_Free(corg);
+      UniquePORTString corg(CERT_GetOrgName(&mServerCert->subject));
+      NS_ConvertUTF8toUTF16 org(corg.get());
 
-      char* cissuer = CERT_GetOrgName(&mServerCert->issuer);
-      NS_ConvertUTF8toUTF16 issuer(cissuer);
-      if (cissuer) PORT_Free(cissuer);
+      UniquePORTString cissuer(CERT_GetOrgName(&mServerCert->issuer));
+      NS_ConvertUTF8toUTF16 issuer(cissuer.get());
 
       certNicknameList =
         (char16_t**)moz_xmalloc(sizeof(char16_t*)* nicknames->numnicknames);
@@ -2449,10 +2449,6 @@ loser:
   }
 done:
   int error = PR_GetError();
-
-  if (arena) {
-    PORT_FreeArena(arena, false);
-  }
 
   *mPRetCert = cert.forget();
   *mPRetKey = privKey.release();

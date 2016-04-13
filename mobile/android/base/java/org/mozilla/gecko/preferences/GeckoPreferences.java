@@ -5,6 +5,7 @@
 
 package org.mozilla.gecko.preferences;
 
+import org.json.JSONArray;
 import org.mozilla.gecko.AboutPages;
 import org.mozilla.gecko.AdjustConstants;
 import org.mozilla.gecko.AppConstants;
@@ -17,14 +18,12 @@ import org.mozilla.gecko.EventDispatcher;
 import org.mozilla.gecko.GeckoActivityStatus;
 import org.mozilla.gecko.GeckoAppShell;
 import org.mozilla.gecko.GeckoApplication;
-import org.mozilla.gecko.GeckoEvent;
 import org.mozilla.gecko.GeckoProfile;
 import org.mozilla.gecko.GeckoSharedPrefs;
 import org.mozilla.gecko.LocaleManager;
 import org.mozilla.gecko.Locales;
 import org.mozilla.gecko.PrefsHelper;
 import org.mozilla.gecko.R;
-import org.mozilla.gecko.Restrictions;
 import org.mozilla.gecko.SnackbarHelper;
 import org.mozilla.gecko.Telemetry;
 import org.mozilla.gecko.TelemetryContract;
@@ -35,12 +34,12 @@ import org.mozilla.gecko.feeds.FeedService;
 import org.mozilla.gecko.feeds.action.CheckForUpdatesAction;
 import org.mozilla.gecko.permissions.Permissions;
 import org.mozilla.gecko.restrictions.Restrictable;
+import org.mozilla.gecko.restrictions.Restrictions;
 import org.mozilla.gecko.tabqueue.TabQueueHelper;
 import org.mozilla.gecko.tabqueue.TabQueuePrompt;
 import org.mozilla.gecko.updater.UpdateService;
 import org.mozilla.gecko.updater.UpdateServiceHelper;
 import org.mozilla.gecko.util.EventCallback;
-import org.mozilla.gecko.util.Experiments;
 import org.mozilla.gecko.util.GeckoEventListener;
 import org.mozilla.gecko.util.HardwareUtils;
 import org.mozilla.gecko.util.InputOptionsUtils;
@@ -49,7 +48,6 @@ import org.mozilla.gecko.util.NativeJSObject;
 import org.mozilla.gecko.util.ThreadUtils;
 
 import android.annotation.TargetApi;
-import android.app.ActionBar;
 import android.app.AlertDialog;
 import android.app.Dialog;
 import android.app.Fragment;
@@ -73,9 +71,11 @@ import android.preference.Preference.OnPreferenceChangeListener;
 import android.preference.Preference.OnPreferenceClickListener;
 import android.preference.PreferenceActivity;
 import android.preference.PreferenceGroup;
+import android.preference.SwitchPreference;
 import android.preference.TwoStatePreference;
 import android.support.design.widget.Snackbar;
 import android.support.design.widget.TextInputLayout;
+import android.support.v7.app.ActionBar;
 import android.text.Editable;
 import android.text.InputType;
 import android.text.TextUtils;
@@ -89,8 +89,6 @@ import android.widget.LinearLayout;
 import android.widget.ListAdapter;
 import android.widget.ListView;
 
-import com.keepsafe.switchboard.SwitchBoard;
-
 import org.json.JSONObject;
 
 import java.util.ArrayList;
@@ -101,7 +99,7 @@ import java.util.Locale;
 import java.util.Map;
 
 public class GeckoPreferences
-extends PreferenceActivity
+extends AppCompatPreferenceActivity
 implements
 GeckoActivityStatus,
 GeckoEventListener,
@@ -157,6 +155,7 @@ OnSharedPreferenceChangeListener
     private static final String PREFS_FAQ_LINK = NON_PREF_PREFIX + "faq.link";
     private static final String PREFS_FEEDBACK_LINK = NON_PREF_PREFIX + "feedback.link";
     public static final String PREFS_NOTIFICATIONS_CONTENT = NON_PREF_PREFIX + "notifications.content";
+    public static final String PREFS_NOTIFICATIONS_WHATS_NEW = NON_PREF_PREFIX + "notifications.whats_new";
 
     private static final String ACTION_STUMBLER_UPLOAD_PREF = AppConstants.ANDROID_PACKAGE_NAME + ".STUMBLER_PREF";
 
@@ -182,7 +181,7 @@ OnSharedPreferenceChangeListener
 
     private static final int REQUEST_CODE_TAB_QUEUE = 8;
 
-    private CheckBoxPreference tabQueuePreference;
+    private SwitchPreference tabQueuePreference;
 
     /**
      * Track the last locale so we know whether to redisplay.
@@ -209,10 +208,7 @@ OnSharedPreferenceChangeListener
             if (newTitle != null) {
                 Log.v(LOGTAG, "Setting action bar title to " + newTitle);
 
-                final ActionBar actionBar = getActionBar();
-                if (actionBar != null) {
-                    actionBar.setTitle(newTitle);
-                }
+                setTitle(newTitle);
             }
         }
     }
@@ -246,7 +242,7 @@ OnSharedPreferenceChangeListener
         BrowserLocaleManager.getInstance().updateConfiguration(getApplicationContext(), newLocale);
         this.lastLocale = newLocale;
 
-        if (Versions.feature11Plus && isMultiPane()) {
+        if (isMultiPane()) {
             // This takes care of the left pane.
             invalidateHeaders();
 
@@ -319,32 +315,35 @@ OnSharedPreferenceChangeListener
         // check that PreferenceActivity.EXTRA_SHOW_FRAGMENT has been set
         // (or set it) before super.onCreate() is called so Android can display
         // the correct Fragment resource.
-
+        // Note: this seems to only be required for non-multipane devices, multipane
+        // manages to automatically select the correct fragments.
         if (Versions.feature11Plus) {
             if (!getIntent().hasExtra(PreferenceActivity.EXTRA_SHOW_FRAGMENT)) {
                 // Set up the default fragment if there is no explicit fragment to show.
                 setupTopLevelFragmentIntent();
-
-                // This is the default header, because it's the first one.
-                // I know, this is an affront to all human decency. And yet.
-                setTitle(R.string.pref_header_general);
-            }
-
-            if (onIsMultiPane()) {
-                // So that Android doesn't put the fragment title (or nothing at
-                // all) in the action bar.
-                updateActionBarTitle(R.string.settings_title);
-
-                if (Build.VERSION.SDK_INT < 13) {
-                    // Affected by Bug 1015209 -- no detach/attach.
-                    // If we try rejigging fragments, we'll crash, so don't
-                    // enable locale switching at all.
-                    localeSwitchingIsEnabled = false;
-                }
             }
         }
 
+        // We must call this before setTitle to avoid crashes. Most devices don't seem to care
+        // (we used to call onCreate later), however the ASUS TF300T (running 4.2) crashes
+        // with an NPE in android.support.v7.app.AppCompatDelegateImplV7.ensureSubDecor(), and it's
+        // likely other strange devices (other Asus devices, some Samsungs) could do the same.
         super.onCreate(savedInstanceState);
+
+        if (Versions.feature11Plus && onIsMultiPane()) {
+            // So that Android doesn't put the fragment title (or nothing at
+            // all) in the action bar.
+            updateActionBarTitle(R.string.settings_title);
+
+            if (Build.VERSION.SDK_INT < 13) {
+                // Affected by Bug 1015209 -- no detach/attach.
+                // If we try rejigging fragments, we'll crash, so don't
+                // enable locale switching at all.
+                localeSwitchingIsEnabled = false;
+                throw new IllegalStateException("foobar");
+            }
+        }
+
         initActionBar();
 
         // Use setResourceToOpen to specify these extras.
@@ -388,7 +387,9 @@ OnSharedPreferenceChangeListener
 
         // Launched from "Notifications settings" action button in a notification.
         if (intentExtras != null && intentExtras.containsKey(CheckForUpdatesAction.EXTRA_CONTENT_NOTIFICATION)) {
+            Telemetry.startUISession(TelemetryContract.Session.EXPERIMENT, FeedService.getEnabledExperiment(this));
             Telemetry.sendUIEvent(TelemetryContract.Event.ACTION, Method.BUTTON, "notification-settings");
+            Telemetry.stopUISession(TelemetryContract.Session.EXPERIMENT, FeedService.getEnabledExperiment(this));
         }
     }
 
@@ -403,7 +404,7 @@ OnSharedPreferenceChangeListener
      */
     private void initActionBar() {
         if (Versions.feature14Plus) {
-            final ActionBar actionBar = getActionBar();
+            final ActionBar actionBar = getSupportActionBar();
             if (actionBar != null) {
                 actionBar.setHomeButtonEnabled(true);
                 actionBar.setDisplayHomeAsUpEnabled(true);
@@ -797,7 +798,7 @@ OnSharedPreferenceChangeListener
                         }
                     });
                 } else if (PREFS_TAB_QUEUE.equals(key)) {
-                    tabQueuePreference = (CheckBoxPreference) pref;
+                    tabQueuePreference = (SwitchPreference) pref;
                     // Only show tab queue pref on nightly builds with the tab queue build flag.
                     if (!TabQueueHelper.TAB_QUEUE_ENABLED) {
                         preferences.removePreference(pref);
@@ -872,7 +873,7 @@ OnSharedPreferenceChangeListener
                         continue;
                     }
                 } else if (PREFS_NOTIFICATIONS_CONTENT.equals(key)) {
-                    if (!SwitchBoard.isInExperiment(this, Experiments.CONTENT_NOTIFICATIONS)) {
+                    if (!FeedService.isInExperiment(this)) {
                         preferences.removePreference(pref);
                         i--;
                         continue;
@@ -959,25 +960,6 @@ OnSharedPreferenceChangeListener
     public static void broadcastAction(final Context context, final Intent intent) {
         fillIntentWithProfileInfo(context, intent);
         context.sendBroadcast(intent, GlobalConstants.PER_ANDROID_PACKAGE_PERMISSION);
-    }
-
-    /**
-     * Broadcast an intent with <code>pref</code>, <code>branch</code>, and
-     * <code>enabled</code> extras. This is intended to represent the
-     * notification of a preference value to observers.
-     *
-     * The broadcast will be sent only to receivers registered with the
-     * (Fennec-specific) per-Android package permission.
-     */
-    public static void broadcastPrefAction(final Context context,
-                                           final String action,
-                                           final String pref,
-                                           final boolean value) {
-        final Intent intent = new Intent(action)
-                .putExtra("pref", pref)
-                .putExtra("branch", GeckoSharedPrefs.APP_PREFS_NAME)
-                .putExtra("enabled", value);
-        broadcastAction(context, intent);
     }
 
     private static void fillIntentWithProfileInfo(final Context context, final Intent intent) {
@@ -1171,12 +1153,28 @@ OnSharedPreferenceChangeListener
         put(AndroidImportPreference.PREF_KEY, new AndroidImportPreference.Handler());
     }};
 
+    private void recordSettingChangeTelemetry(String prefName, Object newValue) {
+        final String value;
+        if (newValue instanceof Boolean) {
+            value = (Boolean) newValue ? "1" : "0";
+        } else if (prefName.equals(PREFS_HOMEPAGE)) {
+            // Don't record the user's homepage preference.
+            value = "*";
+        } else {
+            value = newValue.toString();
+        }
+
+        final JSONArray extras = new JSONArray();
+        extras.put(prefName);
+        extras.put(value);
+        Telemetry.sendUIEvent(TelemetryContract.Event.EDIT, Method.SETTINGS, extras.toString());
+    }
+
     @Override
     public boolean onPreferenceChange(Preference preference, Object newValue) {
         final String prefName = preference.getKey();
         Log.i(LOGTAG, "Changed " + prefName + " = " + newValue);
-
-        Telemetry.sendUIEvent(TelemetryContract.Event.EDIT, Method.SETTINGS, prefName);
+        recordSettingChangeTelemetry(prefName, newValue);
 
         if (PREFS_MP_ENABLED.equals(prefName)) {
             showDialog((Boolean) newValue ? DIALOG_CREATE_MASTER_PASSWORD : DIALOG_REMOVE_MASTER_PASSWORD);

@@ -127,9 +127,20 @@ class JSObject : public js::gc::Cell
     bool hasClass(const js::Class* c) const {
         return getClass() == c;
     }
-    const js::ObjectOps* getOps() const {
-        return &getClass()->ops;
-    }
+
+    js::LookupPropertyOp getOpsLookupProperty() const { return getClass()->getOpsLookupProperty(); }
+    js::DefinePropertyOp getOpsDefineProperty() const { return getClass()->getOpsDefineProperty(); }
+    js::HasPropertyOp    getOpsHasProperty()    const { return getClass()->getOpsHasProperty(); }
+    js::GetPropertyOp    getOpsGetProperty()    const { return getClass()->getOpsGetProperty(); }
+    js::SetPropertyOp    getOpsSetProperty()    const { return getClass()->getOpsSetProperty(); }
+    js::GetOwnPropertyOp getOpsGetOwnPropertyDescriptor()
+                                                const { return getClass()->getOpsGetOwnPropertyDescriptor(); }
+    js::DeletePropertyOp getOpsDeleteProperty() const { return getClass()->getOpsDeleteProperty(); }
+    js::WatchOp          getOpsWatch()          const { return getClass()->getOpsWatch(); }
+    js::UnwatchOp        getOpsUnwatch()        const { return getClass()->getOpsUnwatch(); }
+    js::GetElementsOp    getOpsGetElements()    const { return getClass()->getOpsGetElements(); }
+    JSNewEnumerateOp     getOpsEnumerate()      const { return getClass()->getOpsEnumerate(); }
+    JSFunToStringOp      getOpsFunToString()    const { return getClass()->getOpsFunToString(); }
 
     js::ObjectGroup* group() const {
         MOZ_ASSERT(!hasLazyGroup());
@@ -490,15 +501,6 @@ class JSObject : public js::gc::Cell
     static bool reportReadOnly(JSContext* cx, jsid id, unsigned report = JSREPORT_ERROR);
     bool reportNotConfigurable(JSContext* cx, jsid id, unsigned report = JSREPORT_ERROR);
     bool reportNotExtensible(JSContext* cx, unsigned report = JSREPORT_ERROR);
-
-    /*
-     * Get the property with the given id, then call it as a function with the
-     * given arguments, providing this object as |this|. If the property isn't
-     * callable a TypeError will be thrown. On success the value returned by
-     * the call is stored in *vp.
-     */
-    bool callMethod(JSContext* cx, js::HandleId id, unsigned argc, js::Value* argv,
-                    js::MutableHandleValue vp);
 
     static bool nonNativeSetProperty(JSContext* cx, js::HandleObject obj, js::HandleId id,
                                      js::HandleValue v, js::HandleValue receiver,
@@ -1096,7 +1098,7 @@ GetInitialHeap(NewObjectKind newKind, const Class* clasp)
 {
     if (newKind != GenericObject)
         return gc::TenuredHeap;
-    if (clasp->finalize && !(clasp->flags & JSCLASS_SKIP_NURSERY_FINALIZE))
+    if (clasp->hasFinalize() && !(clasp->flags & JSCLASS_SKIP_NURSERY_FINALIZE))
         return gc::TenuredHeap;
     return gc::DefaultHeap;
 }
@@ -1216,7 +1218,20 @@ LookupPropertyPure(ExclusiveContext* cx, JSObject* obj, jsid id, JSObject** objp
                    Shape** propp);
 
 bool
+LookupOwnPropertyPure(ExclusiveContext* cx, JSObject* obj, jsid id, Shape** propp,
+                      bool* isTypedArrayOutOfRange = nullptr);
+
+bool
 GetPropertyPure(ExclusiveContext* cx, JSObject* obj, jsid id, Value* vp);
+
+bool
+GetGetterPure(ExclusiveContext* cx, JSObject* obj, jsid id, JSFunction** fp);
+
+bool
+GetOwnNativeGetterPure(JSContext* cx, JSObject* obj, jsid id, JSNative* native);
+
+bool
+HasOwnDataPropertyPure(JSContext* cx, JSObject* obj, jsid id, bool* result);
 
 bool
 GetOwnPropertyDescriptor(JSContext* cx, HandleObject obj, HandleId id,
@@ -1333,6 +1348,9 @@ FreezeObject(JSContext* cx, HandleObject obj)
  */
 extern bool
 TestIntegrityLevel(JSContext* cx, HandleObject obj, IntegrityLevel level, bool* resultp);
+
+extern bool
+SpeciesConstructor(JSContext* cx, HandleObject obj, HandleValue defaultCtor, MutableHandleValue pctor);
 
 }  /* namespace js */
 

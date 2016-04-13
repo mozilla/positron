@@ -561,6 +561,10 @@ class TestManifest(ContextDerived):
         # Set of files provided by an external mechanism.
         'external_installs',
 
+        # Set of files required by multiple test directories, whose installation
+        # will be resolved when running tests.
+        'deferred_installs',
+
         # The full path of this manifest file.
         'path',
 
@@ -602,6 +606,7 @@ class TestManifest(ContextDerived):
         self.pattern_installs = []
         self.tests = []
         self.external_installs = set()
+        self.deferred_installs = set()
 
 
 class LocalInclude(ContextDerived):
@@ -907,16 +912,16 @@ class GeneratedFile(ContextDerived):
     __slots__ = (
         'script',
         'method',
-        'output',
+        'outputs',
         'inputs',
         'flags',
     )
 
-    def __init__(self, context, script, method, output, inputs, flags=()):
+    def __init__(self, context, script, method, outputs, inputs, flags=()):
         ContextDerived.__init__(self, context)
         self.script = script
         self.method = method
-        self.output = output
+        self.outputs = outputs if isinstance(outputs, tuple) else (outputs,)
         self.inputs = inputs
         self.flags = flags
 

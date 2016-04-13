@@ -330,7 +330,7 @@ IntervalOverlap(gfxFloat aTranslation, gfxFloat aMin, gfxFloat aMax)
 static LayerMetricsWrapper
 FindMetricsWithScrollId(Layer* aLayer, FrameMetrics::ViewID aScrollId)
 {
-  for (uint64_t i = 0; i < aLayer->GetFrameMetricsCount(); ++i) {
+  for (uint64_t i = 0; i < aLayer->GetScrollMetadataCount(); ++i) {
     if (aLayer->GetFrameMetrics(i).GetScrollId() == aScrollId) {
       return LayerMetricsWrapper(aLayer, i);
     }
@@ -622,7 +622,8 @@ SampleAnimations(Layer* aLayer, TimeStamp aPoint)
 
     double portion =
       ComputedTimingFunction::GetPortion(animData.mFunctions[segmentIndex],
-                                         positionInSegment);
+                                         positionInSegment,
+                                         computedTiming.mBeforeFlag);
 
     // interpolate the property
     Animatable interpolatedValue;
@@ -686,7 +687,7 @@ AsyncCompositionManager::RecordShadowTransforms(Layer* aLayer)
       RecordShadowTransforms(child);
   }
 
-  for (uint32_t i = 0; i < aLayer->GetFrameMetricsCount(); i++) {
+  for (uint32_t i = 0; i < aLayer->GetScrollMetadataCount(); i++) {
     AsyncPanZoomController* apzc = aLayer->GetAsyncPanZoomController(i);
     if (!apzc) {
       continue;
@@ -824,6 +825,11 @@ AsyncCompositionManager::ApplyAsyncContentTransformToTree(Layer *aLayer,
   // The final clip for the layer is the intersection of these clips.
   Maybe<ParentLayerIntRect> asyncClip = aLayer->GetClipRect();
 
+  // If we are a perspective transform ContainerLayer, apply the clip deferred
+  // from our child (if there is any) before we iterate over our frame metrics,
+  // because this clip is subject to all async transforms of this layer.
+  asyncClip = IntersectMaybeRects(asyncClip, clipDeferredFromChildren);
+
   // The transform of a mask layer is relative to the masked layer's parent
   // layer. So whenever we apply an async transform to a layer, we need to
   // apply that same transform to the layer's own mask layer.
@@ -836,7 +842,7 @@ AsyncCompositionManager::ApplyAsyncContentTransformToTree(Layer *aLayer,
   // of all scroll frames inside the current one.
   nsTArray<Layer*> ancestorMaskLayers;
 
-  for (uint32_t i = 0; i < aLayer->GetFrameMetricsCount(); i++) {
+  for (uint32_t i = 0; i < aLayer->GetScrollMetadataCount(); i++) {
     AsyncPanZoomController* controller = aLayer->GetAsyncPanZoomController(i);
     if (!controller) {
       continue;
@@ -844,11 +850,10 @@ AsyncCompositionManager::ApplyAsyncContentTransformToTree(Layer *aLayer,
 
     hasAsyncTransform = true;
 
-    AsyncTransform asyncTransformWithoutOverscroll;
-    ParentLayerPoint scrollOffset;
-    controller->SampleContentTransformForFrame(&asyncTransformWithoutOverscroll,
-                                               scrollOffset);
-    AsyncTransformComponentMatrix overscrollTransform = controller->GetOverscrollTransform();
+    AsyncTransform asyncTransformWithoutOverscroll =
+        controller->GetCurrentAsyncTransform(AsyncPanZoomController::RESPECT_FORCE_DISABLE);
+    AsyncTransformComponentMatrix overscrollTransform =
+        controller->GetOverscrollTransform(AsyncPanZoomController::RESPECT_FORCE_DISABLE);
     AsyncTransformComponentMatrix asyncTransform =
         AsyncTransformComponentMatrix(asyncTransformWithoutOverscroll)
       * overscrollTransform;
@@ -857,7 +862,8 @@ AsyncCompositionManager::ApplyAsyncContentTransformToTree(Layer *aLayer,
       controller->MarkAsyncTransformAppliedToContent();
     }
 
-    const FrameMetrics& metrics = aLayer->GetFrameMetrics(i);
+    const ScrollMetadata& scrollMetadata = aLayer->GetScrollMetadata(i);
+    const FrameMetrics& metrics = scrollMetadata.GetMetrics();
 
 #if defined(MOZ_ANDROID_APZ)
     // If we find a metrics which is the root content doc, use that. If not, use
@@ -869,7 +875,7 @@ AsyncCompositionManager::ApplyAsyncContentTransformToTree(Layer *aLayer,
     if (!(*aOutFoundRoot)) {
       *aOutFoundRoot = metrics.IsRootContent() ||       /* RCD */
             (aLayer->GetParent() == nullptr &&          /* rootmost metrics */
-             i + 1 >= aLayer->GetFrameMetricsCount());
+             i + 1 >= aLayer->GetScrollMetadataCount());
       if (*aOutFoundRoot) {
         mRootScrollableId = metrics.GetScrollId();
         CSSToLayerScale geckoZoom = metrics.LayersPixelsPerCSSPixel().ToScaleFactor();
@@ -880,6 +886,8 @@ AsyncCompositionManager::ApplyAsyncContentTransformToTree(Layer *aLayer,
                                 geckoZoom,
                                 mContentRect);
         } else {
+          ParentLayerPoint scrollOffset = controller->GetCurrentAsyncScrollOffset(
+              AsyncPanZoomController::RESPECT_FORCE_DISABLE);
           // Compute the painted displayport in document-relative CSS pixels.
           CSSRect displayPort(metrics.GetCriticalDisplayPort().IsEmpty() ?
               metrics.GetDisplayPort() :
@@ -938,13 +946,19 @@ AsyncCompositionManager::ApplyAsyncContentTransformToTree(Layer *aLayer,
     // Combine the local clip with the ancestor scrollframe clip. This is not
     // included in the async transform above, since the ancestor clip should not
     // move with this APZC.
-    if (metrics.HasClipRect()) {
-      ParentLayerIntRect clip = metrics.ClipRect();
+    if (scrollMetadata.HasClipRect()) {
+      ParentLayerIntRect clip = scrollMetadata.ClipRect();
       if (aLayer->GetParent() && aLayer->GetParent()->GetTransformIsPerspective()) {
         // If our parent layer has a perspective transform, we want to apply
         // our scroll clip to it instead of to this layer (see bug 1168263).
         // A layer with a perspective transform shouldn't have multiple
         // children with FrameMetrics, nor a child with multiple FrameMetrics.
+        // (A child with multiple FrameMetrics would mean that there's *another*
+        // scrollable element between the one with the CSS perspective and the
+        // transformed element. But you'd have to use preserve-3d on the inner
+        // scrollable element in order to have the perspective apply to the
+        // transformed child, and preserve-3d is not supported on scrollable
+        // elements, so this case can't occur.)
         MOZ_ASSERT(!aClipDeferredToParent);
         aClipDeferredToParent = Some(clip);
       } else {
@@ -961,16 +975,15 @@ AsyncCompositionManager::ApplyAsyncContentTransformToTree(Layer *aLayer,
     }
 
     // Append the ancestor mask layer for this scroll frame to ancestorMaskLayers.
-    if (metrics.GetMaskLayerIndex()) {
-      size_t maskLayerIndex = metrics.GetMaskLayerIndex().value();
+    if (scrollMetadata.GetMaskLayerIndex()) {
+      size_t maskLayerIndex = scrollMetadata.GetMaskLayerIndex().value();
       Layer* ancestorMaskLayer = aLayer->GetAncestorMaskLayerAt(maskLayerIndex);
       ancestorMaskLayers.AppendElement(ancestorMaskLayer);
     }
   }
 
   if (hasAsyncTransform || clipDeferredFromChildren) {
-    aLayer->AsLayerComposite()->SetShadowClipRect(
-        IntersectMaybeRects(asyncClip, clipDeferredFromChildren));
+    aLayer->AsLayerComposite()->SetShadowClipRect(asyncClip);
   }
 
   if (hasAsyncTransform) {
@@ -1030,7 +1043,8 @@ ApplyAsyncTransformToScrollbarForContent(Layer* aScrollbar,
   const FrameMetrics& metrics = aContent.Metrics();
   AsyncPanZoomController* apzc = aContent.GetApzc();
 
-  AsyncTransformComponentMatrix asyncTransform = apzc->GetCurrentAsyncTransform();
+  AsyncTransformComponentMatrix asyncTransform =
+    apzc->GetCurrentAsyncTransform(AsyncPanZoomController::RESPECT_FORCE_DISABLE);
 
   // |asyncTransform| represents the amount by which we have scrolled and
   // zoomed since the last paint. Because the scrollbar was sized and positioned based
@@ -1145,7 +1159,9 @@ ApplyAsyncTransformToScrollbarForContent(Layer* aScrollbar,
   // the same coordinate space. This requires applying the content transform
   // and then unapplying it after unapplying the async transform.
   if (aScrollbarIsDescendant) {
-    Matrix4x4 asyncUntransform = (asyncTransform * apzc->GetOverscrollTransform()).Inverse().ToUnknownMatrix();
+    AsyncTransformComponentMatrix overscroll =
+        apzc->GetOverscrollTransform(AsyncPanZoomController::RESPECT_FORCE_DISABLE);
+    Matrix4x4 asyncUntransform = (asyncTransform * overscroll).Inverse().ToUnknownMatrix();
     Matrix4x4 contentTransform = aContent.GetTransform();
     Matrix4x4 contentUntransform = contentTransform.Inverse();
 

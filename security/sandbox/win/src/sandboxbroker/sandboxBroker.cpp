@@ -313,7 +313,7 @@ SandboxBroker::SetSecurityLevelForIPDLUnitTestProcess()
 }
 
 bool
-SandboxBroker::SetSecurityLevelForGMPlugin()
+SandboxBroker::SetSecurityLevelForGMPlugin(SandboxLevel aLevel)
 {
   if (!mPolicy) {
     return false;
@@ -322,8 +322,9 @@ SandboxBroker::SetSecurityLevelForGMPlugin()
   auto result = mPolicy->SetJobLevel(sandbox::JOB_LOCKDOWN, 0);
   bool ret = (sandbox::SBOX_ALL_OK == result);
 
-  result = mPolicy->SetTokenLevel(sandbox::USER_RESTRICTED_SAME_ACCESS,
-                                  sandbox::USER_LOCKDOWN);
+  auto level = (aLevel == Restricted) ?
+    sandbox::USER_RESTRICTED : sandbox::USER_LOCKDOWN;
+  result = mPolicy->SetTokenLevel(sandbox::USER_RESTRICTED_SAME_ACCESS, level);
   ret = ret && (sandbox::SBOX_ALL_OK == result);
 
   result = mPolicy->SetAlternateDesktop(true);
@@ -434,6 +435,10 @@ SandboxBroker::SetSecurityLevelForGMPlugin()
 bool
 SandboxBroker::AllowReadFile(wchar_t const *file)
 {
+  if (!mPolicy) {
+    return false;
+  }
+
   auto result =
     mPolicy->AddRule(sandbox::TargetPolicy::SUBSYS_FILES,
                      sandbox::TargetPolicy::FILES_ALLOW_READONLY,
@@ -444,6 +449,10 @@ SandboxBroker::AllowReadFile(wchar_t const *file)
 bool
 SandboxBroker::AllowReadWriteFile(wchar_t const *file)
 {
+  if (!mPolicy) {
+    return false;
+  }
+
   auto result =
     mPolicy->AddRule(sandbox::TargetPolicy::SUBSYS_FILES,
                      sandbox::TargetPolicy::FILES_ALLOW_ANY,
@@ -454,6 +463,10 @@ SandboxBroker::AllowReadWriteFile(wchar_t const *file)
 bool
 SandboxBroker::AllowDirectory(wchar_t const *dir)
 {
+  if (!mPolicy) {
+    return false;
+  }
+
   auto result =
     mPolicy->AddRule(sandbox::TargetPolicy::SUBSYS_FILES,
                      sandbox::TargetPolicy::FILES_ALLOW_DIR_ANY,
@@ -464,6 +477,10 @@ SandboxBroker::AllowDirectory(wchar_t const *dir)
 bool
 SandboxBroker::AddTargetPeer(HANDLE aPeerProcess)
 {
+  if (!sBrokerService) {
+    return false;
+  }
+
   sandbox::ResultCode result = sBrokerService->AddTargetPeer(aPeerProcess);
   return (sandbox::SBOX_ALL_OK == result);
 }

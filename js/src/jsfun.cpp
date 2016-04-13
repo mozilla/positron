@@ -834,9 +834,7 @@ CreateFunctionPrototype(JSContext* cx, JSProtoKey key)
     return functionProto;
 }
 
-const Class JSFunction::class_ = {
-    js_Function_str,
-    JSCLASS_HAS_CACHED_PROTO(JSProto_Function),
+static const ClassOps JSFunctionClassOps = {
     nullptr,                 /* addProperty */
     nullptr,                 /* delProperty */
     nullptr,                 /* getProperty */
@@ -849,14 +847,22 @@ const Class JSFunction::class_ = {
     fun_hasInstance,
     nullptr,                 /* construct   */
     fun_trace,
-    {
-        CreateFunctionConstructor,
-        CreateFunctionPrototype,
-        nullptr,
-        nullptr,
-        function_methods,
-        function_properties
-    }
+};
+
+static const ClassSpec JSFunctionClassSpec = {
+    CreateFunctionConstructor,
+    CreateFunctionPrototype,
+    nullptr,
+    nullptr,
+    function_methods,
+    function_properties
+};
+
+const Class JSFunction::class_ = {
+    js_Function_str,
+    JSCLASS_HAS_CACHED_PROTO(JSProto_Function),
+    &JSFunctionClassOps,
+    &JSFunctionClassSpec
 };
 
 const Class* const js::FunctionClassPtr = &JSFunction::class_;
@@ -1076,7 +1082,7 @@ JSString*
 fun_toStringHelper(JSContext* cx, HandleObject obj, unsigned indent)
 {
     if (!obj->is<JSFunction>()) {
-        if (JSFunToStringOp op = obj->getOps()->funToString)
+        if (JSFunToStringOp op = obj->getOpsFunToString())
             return op(cx, obj, indent);
 
         JS_ReportErrorNumber(cx, GetErrorMessage, nullptr,
@@ -2108,8 +2114,8 @@ js::DefineFunction(JSContext* cx, HandleObject obj, HandleId id, Native native,
         gop = nullptr;
         sop = nullptr;
     } else {
-        gop = obj->getClass()->getProperty;
-        sop = obj->getClass()->setProperty;
+        gop = obj->getClass()->getGetProperty();
+        sop = obj->getClass()->getSetProperty();
         MOZ_ASSERT(gop != JS_PropertyStub);
         MOZ_ASSERT(sop != JS_StrictPropertyStub);
     }

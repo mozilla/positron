@@ -14,6 +14,8 @@
   <script type="application/javascript"
           src="../common.js"></script>
   <script type="application/javascript"
+          src="../states.js"></script>
+  <script type="application/javascript"
           src="../events.js"></script>
 
   <script type="application/javascript">
@@ -323,13 +325,109 @@
       this.initSequence();
     }
 
+    /**
+     * Remove children and parent
+     */
+    function removeGrandChildrenNHideParent(aChild1Id, aChild2Id, aParentId)
+    {
+      this.child1 = getNode(aChild1Id);
+      this.child2 = getNode(aChild2Id);
+      this.parent = getNode(aParentId);
+
+      this.eventSeq = [
+        new invokerChecker(EVENT_HIDE, getAccessible(aParentId)),
+        new invokerChecker(EVENT_REORDER, getNode(aParentId).parentNode)
+      ];
+
+      this.invoke = function removeGrandChildrenNHideParent_invoke()
+      {
+        this.child1.parentNode.removeChild(this.child1);
+        this.child2.parentNode.removeChild(this.child2);
+        this.parent.hidden = true;
+      }
+
+      this.getID = function removeGrandChildrenNHideParent_getID() {
+        return "remove grand children of different parents and then hide their grand parent";
+      }
+    }
+
+    /**
+     * Remove a child, and then its parent.
+     */
+    function test3()
+    {
+      this.o = getAccessible("t3_o");
+      this.ofc = getAccessible("t3_o").firstChild;
+
+      this.eventSeq = [
+        new invokerChecker(EVENT_HIDE, this.o),
+        new invokerChecker(EVENT_REORDER, "t3_lb"),
+        new unexpectedInvokerChecker(EVENT_HIDE, this.ofc),
+        new unexpectedInvokerChecker(EVENT_REORDER, this.o)
+      ];
+
+      this.invoke = function test3_invoke()
+      {
+        getNode("t3_o").textContent = "";
+        getNode("t3_lb").removeChild(getNode("t3_o"));
+      }
+
+      this.finalCheck = function test3_finalCheck()
+      {
+        testIsDefunct(this.o);
+        testIsDefunct(this.ofc);
+      }
+
+      this.getID = function test3_getID() {
+        return "remove a child, and then its parent";
+      }
+    }
+
+    /**
+     * Remove children, and then a parent of 2nd child.
+     */
+    function test4()
+    {
+      this.o1 = getAccessible("t4_o1");
+      this.o1fc = this.o1.firstChild;
+      this.o2 = getAccessible("t4_o2");
+      this.o2fc = this.o2.firstChild;
+
+      this.eventSeq = [
+        new invokerChecker(EVENT_HIDE, this.o1fc),
+        new invokerChecker(EVENT_HIDE, this.o2),
+        new invokerChecker(EVENT_REORDER, "t4_lb"),
+        new unexpectedInvokerChecker(EVENT_HIDE, this.o2fc),
+        new unexpectedInvokerChecker(EVENT_REORDER, this.o1),
+        new unexpectedInvokerChecker(EVENT_REORDER, this.o2)
+      ];
+
+      this.invoke = function test4_invoke()
+      {
+        getNode("t4_o1").textContent = "";
+        getNode("t4_o2").textContent = "";
+        getNode("t4_lb").removeChild(getNode("t4_o2"));
+      }
+
+      this.finalCheck = function test4_finalCheck()
+      {
+        testIsDefunct(this.o1fc);
+        testIsDefunct(this.o2);
+        testIsDefunct(this.o2fc);
+      }
+
+      this.getID = function test4_getID() {
+        return "remove children, and then a parent of 2nd child";
+      }
+    }
+
     ////////////////////////////////////////////////////////////////////////////
     // Do tests.
 
-    var gQueue = null;
     //gA11yEventDumpToConsole = true; // debug stuff
-    //enableLogging("tree");
+    //enableLogging("tree,eventTree,verbose");
 
+    var gQueue = null;
     function doTests()
     {
       gQueue = new eventQueue();
@@ -349,6 +447,10 @@
       gQueue.push(new showParentNChild("select10", "option10", true));
       gQueue.push(new showParentNAddChild("select11", false));
       gQueue.push(new showParentNAddChild("select12", true));
+
+      gQueue.push(new removeGrandChildrenNHideParent("t1_child1", "t1_child2", "t1_parent"));
+      gQueue.push(new test3());
+      gQueue.push(new test4());
 
       gQueue.invoke(); // Will call SimpleTest.finish();
     }
@@ -411,6 +513,26 @@
     </select>
     <select id="select11" style="display: none"></select>
     <select id="select12" style="display: none"></select>
+  </div>
+
+  <div id="testContainer2">
+    <div id="t1_parent">
+      <div id="t1_mid1"><div id="t1_child1"></div></div>
+      <div id="t1_mid2"><div id="t1_child2"></div></div>
+    </div>
+  </div>
+
+  <div id="t3">
+    <div role="listbox" id="t3_lb">
+      <div role="option" id="t3_o">opt</div>
+    </div>
+  </div>
+
+  <div id="t4">
+    <div role="listbox" id="t4_lb">
+      <div role="option" id="t4_o1">opt1</div>
+      <div role="option" id="t4_o2">opt2</div>
+    </div>
   </div>
 </body>
 </html>

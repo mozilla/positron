@@ -162,7 +162,7 @@ DataTransfer::Constructor(const GlobalObject& aGlobal,
 {
   nsAutoCString onEventType("on");
   AppendUTF16toUTF8(aEventType, onEventType);
-  nsCOMPtr<nsIAtom> eventTypeAtom = do_GetAtom(onEventType);
+  nsCOMPtr<nsIAtom> eventTypeAtom = NS_Atomize(onEventType);
   if (!eventTypeAtom) {
     aRv.Throw(NS_ERROR_OUT_OF_MEMORY);
     return nullptr;
@@ -320,13 +320,19 @@ DataTransfer::GetFileListInternal(ErrorResult& aRv,
 
       RefPtr<File> domFile;
       if (file) {
-#ifdef DEBUG
-        if (XRE_GetProcessType() == GeckoProcessType_Default) {
-          bool isDir;
-          file->IsDirectory(&isDir);
-          MOZ_ASSERT(!isDir, "How did we get here?");
+        MOZ_ASSERT(XRE_GetProcessType() == GeckoProcessType_Default,
+                   "nsIFile objects are not expected on the content process");
+
+        bool isDir;
+        aRv = file->IsDirectory(&isDir);
+        if (NS_WARN_IF(aRv.Failed())) {
+          return nullptr;
         }
-#endif
+
+        if (isDir) {
+          continue;
+        }
+
         domFile = File::CreateFromFile(GetParentObject(), file);
       } else {
         nsCOMPtr<BlobImpl> blobImpl = do_QueryInterface(supports);
@@ -860,13 +866,13 @@ DataTransfer::GetFilesAndDirectories(ErrorResult& aRv)
     }
   }
 
-  Sequence<OwningFileOrDirectory> filesAndDirsSeq;
-  mFileList->ToSequence(filesAndDirsSeq, aRv);
+  Sequence<RefPtr<File>> filesSeq;
+  mFileList->ToSequence(filesSeq, aRv);
   if (NS_WARN_IF(aRv.Failed())) {
     return nullptr;
   }
 
-  p->MaybeResolve(filesAndDirsSeq);
+  p->MaybeResolve(filesSeq);
 
   return p.forget();
 }
@@ -920,8 +926,8 @@ DataTransfer::GetTransferables(nsIDOMNode* aDragTarget)
   if (!dragNode) {
     return nullptr;
   }
-    
-  nsIDocument* doc = dragNode->GetCurrentDoc();
+
+  nsIDocument* doc = dragNode->GetUncomposedDoc();
   if (!doc) {
     return nullptr;
   }
@@ -1032,7 +1038,7 @@ DataTransfer::ConvertFromVariant(nsIVariant* aVariant,
     nsCOMPtr<nsISupports> data;
     if (NS_FAILED(aVariant->GetAsISupports(getter_AddRefs(data))))
        return false;
- 
+
     nsCOMPtr<nsIFlavorDataProvider> fdp = do_QueryInterface(data);
     if (fdp) {
       // for flavour data providers, use kFlavorHasDataProvider (which has the

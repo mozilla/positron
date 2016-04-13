@@ -3,15 +3,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-
-:root[platform="mac"] #inspector-toolbar:-moz-locale-dir(ltr) {
-  padding-left: 2px;
-}
-
-:root[platform="mac"] #inspector-toolbar:-moz-locale-dir(rtl) {
-  padding-left: 4px;
-}
-
 #inspector-searchlabel {
   overflow: hidden;
 }
@@ -36,6 +27,12 @@
   #inspector-pane-toggle > .toolbarbutton-icon {
     transform: rotate(90deg);
   }
+}
+
+/* Add element toolbar button */
+
+#inspector-element-add-button {
+  list-style-image: url("chrome://devtools/skin/images/add.svg");
 }
 
 /* Tooltip: Events */

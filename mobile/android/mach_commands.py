@@ -103,8 +103,8 @@ class AndroidEmulatorCommands(MachCommandBase):
     @Command('android-emulator', category='devenv',
         conditions=[],
         description='Run the Android emulator with an AVD from test automation.')
-    @CommandArgument('--version', metavar='VERSION', choices=['2.3', '4.3', 'x86'],
-        help='Specify Android version to run in emulator. One of "2.3", "4.3", or "x86".',
+    @CommandArgument('--version', metavar='VERSION', choices=['4.3', 'x86'],
+        help='Specify Android version to run in emulator. One of "4.3", or "x86".',
         default='4.3')
     @CommandArgument('--wait', action='store_true',
         help='Wait for emulator to be closed.')
@@ -170,4 +170,47 @@ class AndroidEmulatorCommands(MachCommandBase):
             else:
                 self.log(logging.WARN, "emulator", {},
                          "Unable to retrieve Android emulator return code.")
+        return 0
+
+
+@CommandProvider
+class AutophoneCommands(MachCommandBase):
+    """
+       Run autophone, https://wiki.mozilla.org/Auto-tools/Projects/Autophone.
+
+       If necessary, autophone is cloned from github, installed, and configured.
+    """
+    @Command('autophone', category='devenv',
+        conditions=[],
+        description='Run autophone.')
+    @CommandArgument('--clean', action='store_true',
+        help='Delete an existing autophone installation.')
+    @CommandArgument('--verbose', action='store_true',
+        help='Log informative status messages.')
+    def autophone(self, clean=False, verbose=False):
+        import platform
+        from mozrunner.devices.autophone import AutophoneRunner
+
+        if platform.system() == "Windows":
+            # Autophone is normally run on Linux or OSX.
+            self.log(logging.ERROR, "autophone", {},
+                "This mach command is not supported on Windows!")
+            return -1
+
+        runner = AutophoneRunner(self, verbose)
+        runner.load_config()
+        if clean:
+            runner.reset_to_clean()
+            return 0
+        if not runner.setup_directory():
+            return 1
+        if not runner.install_requirements():
+            runner.save_config()
+            return 2
+        if not runner.configure():
+            runner.save_config()
+            return 3
+        runner.save_config()
+        runner.launch_autophone()
+        runner.command_prompts()
         return 0

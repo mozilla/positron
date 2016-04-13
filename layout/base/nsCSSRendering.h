@@ -251,22 +251,13 @@ public:
   bool IsRasterImage();
   bool IsAnimatedImage();
 
-  /**
-   * @return true if this nsImageRenderer wraps an image which has an
-   * ImageContainer available.
-   *
-   * If IsContainerAvailable() returns true, GetImage() will return a non-null
-   * imgIContainer which callers can use to retrieve the ImageContainer.
-   */
-  bool IsContainerAvailable(LayerManager* aManager,
-                            nsDisplayListBuilder* aBuilder);
-
   /// Retrieves the image associated with this nsImageRenderer, if there is one.
   already_AddRefed<imgIContainer> GetImage();
 
   bool IsReady() const { return mPrepareResult == DrawResult::SUCCESS; }
   DrawResult PrepareResult() const { return mPrepareResult; }
   void SetExtendMode(mozilla::gfx::ExtendMode aMode) { mExtendMode = aMode; }
+  void SetMaskOp(uint8_t aMaskOp) { mMaskOp = aMaskOp; }
 
 private:
   /**
@@ -304,6 +295,7 @@ private:
   nsSize                    mSize; // unscaled size of the image, in app units
   uint32_t                  mFlags;
   mozilla::gfx::ExtendMode  mExtendMode;
+  uint8_t                   mMaskOp;
 };
 
 /**

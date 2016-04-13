@@ -708,7 +708,7 @@ struct JSRuntime : public JS::shadow::Runtime,
     /*
      * Value of asyncCause to be attached to asyncStackForNewActivations.
      */
-    JS::PersistentRooted<JSString*> asyncCauseForNewActivations;
+    const char* asyncCauseForNewActivations;
 
     /*
      * True if the async call was explicitly requested, e.g. via
@@ -961,7 +961,7 @@ struct JSRuntime : public JS::shadow::Runtime,
     /* Default JSVersion. */
     JSVersion defaultVersion_;
 
-    /* Futex state, used by futexWait and futexWake on the Atomics object */
+    /* Futex state, used by Atomics.wait() and Atomics.wake() on the Atomics object */
     js::FutexRuntime fx;
 
   private:

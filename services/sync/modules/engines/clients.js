@@ -25,6 +25,14 @@ const CLIENTS_TTL_REFRESH = 604800; // 7 days
 
 const SUPPORTED_PROTOCOL_VERSIONS = ["1.1", "1.5"];
 
+function hasDupeCommand(commands, action) {
+  if (!commands) {
+    return false;
+  }
+  return commands.some(other => other.command == action.command &&
+    Utils.deepEquals(other.args, action.args));
+}
+
 this.ClientsRec = function ClientsRec(collection, id) {
   CryptoWrapper.call(this, collection, id);
 }
@@ -121,11 +129,19 @@ ClientEngine.prototype = {
   },
 
   get localName() {
-    return this.localName = Utils.getDeviceName();
+    let name = Utils.getDeviceName();
+    // If `getDeviceName` returns the default name, set the pref. FxA registers
+    // the device before syncing, so we don't need to update the registration
+    // in this case.
+    Svc.Prefs.set("client.name", name);
+    return name;
   },
   set localName(value) {
     Svc.Prefs.set("client.name", value);
-    fxAccounts.updateDeviceRegistration();
+    // Update the registration in the background.
+    fxAccounts.updateDeviceRegistration().catch(error => {
+      this._log.warn("failed to update fxa device registration", error);
+    });
   },
 
   get localType() {
@@ -133,6 +149,10 @@ ClientEngine.prototype = {
   },
   set localType(value) {
     Svc.Prefs.set("client.type", value);
+  },
+
+  remoteClientExists(id) {
+    return !!this._store._remoteClients[id];
   },
 
   isMobile: function isMobile(id) {
@@ -148,6 +168,32 @@ ClientEngine.prototype = {
       this.lastRecordUpload = Date.now() / 1000;
     }
     SyncEngine.prototype._syncStartup.call(this);
+  },
+
+  _processIncoming() {
+    // Fetch all records from the server.
+    this.lastSync = 0;
+    this._incomingClients = [];
+    try {
+      SyncEngine.prototype._processIncoming.call(this);
+      // Since clients are synced unconditionally, any records in the local store
+      // that don't exist on the server must be for disconnected clients. Remove
+      // them, so that we don't upload records with commands for clients that will
+      // never see them. We also do this to filter out stale clients from the
+      // tabs collection, since showing their list of tabs is confusing.
+      let remoteClientIDs = Object.keys(this._store._remoteClients);
+      let staleIDs = Utils.arraySub(remoteClientIDs, this._incomingClients);
+      for (let staleID of staleIDs) {
+        this._removeRemoteClient(staleID);
+      }
+    } finally {
+      this._incomingClients = null;
+    }
+  },
+
+  _uploadOutgoing() {
+    this._clearedCommands = null;
+    SyncEngine.prototype._uploadOutgoing.call(this);
   },
 
   _syncFinish() {
@@ -170,9 +216,22 @@ ClientEngine.prototype = {
     SyncEngine.prototype._syncFinish.call(this);
   },
 
-  // Always process incoming items because they might have commands
-  _reconcile: function _reconcile() {
-    return true;
+  _reconcile: function _reconcile(item) {
+    // Every incoming record is reconciled, so we use this to track the
+    // contents of the collection on the server.
+    this._incomingClients.push(item.id);
+
+    if (!this._store.itemExists(item.id)) {
+      return true;
+    }
+    // Clients are synced unconditionally, so we'll always have new records.
+    // Unfortunately, this will cause the scheduler to use the immediate sync
+    // interval for the multi-device case, instead of the active interval. We
+    // work around this by updating the record during reconciliation, and
+    // returning false to indicate that the record doesn't need to be applied
+    // later.
+    this._store.update(item);
+    return false;
   },
 
   // Treat reset the same as wiping for locally cached clients
@@ -182,6 +241,7 @@ ClientEngine.prototype = {
 
   _wipeClient: function _wipeClient() {
     SyncEngine.prototype._resetClient.call(this);
+    delete this.localCommands;
     this._store.wipe();
   },
 
@@ -224,6 +284,12 @@ ClientEngine.prototype = {
    * Remove any commands for the local client and mark it for upload.
    */
   clearCommands: function clearCommands() {
+    if (!this._clearedCommands) {
+      this._clearedCommands = [];
+    }
+    // Keep track of cleared local commands until the next sync, so that we
+    // don't reupload them.
+    this._clearedCommands = this._clearedCommands.concat(this.localCommands);
     delete this.localCommands;
     this._tracker.addChangedID(this.localID);
   },
@@ -243,11 +309,6 @@ ClientEngine.prototype = {
       throw new Error("Unknown remote client ID: '" + clientId + "'.");
     }
 
-    // notDupe compares two commands and returns if they are not equal.
-    let notDupe = function(other) {
-      return other.command != command || !Utils.deepEquals(other.args, args);
-    };
-
     let action = {
       command: command,
       args: args,
@@ -257,7 +318,7 @@ ClientEngine.prototype = {
       client.commands = [action];
     }
     // Add the new action if there are no duplicates.
-    else if (client.commands.every(notDupe)) {
+    else if (!hasDupeCommand(client.commands, action)) {
       client.commands.push(action);
     }
     // It must be a dupe. Skip.
@@ -409,7 +470,12 @@ ClientEngine.prototype = {
 
     let subject = {uri: uri, client: clientId, title: title};
     Svc.Obs.notify("weave:engine:clients:display-uri", subject);
-  }
+  },
+
+  _removeRemoteClient(id) {
+    delete this._store._remoteClients[id];
+    this._tracker.removeChangedID(id);
+  },
 };
 
 function ClientStore(name, engine) {
@@ -423,11 +489,56 @@ ClientStore.prototype = {
   },
 
   update: function update(record) {
+    if (record.id == this.engine.localID) {
+      this._updateLocalRecord(record);
+    } else {
+      this._updateRemoteRecord(record);
+    }
+  },
+
+  _updateLocalRecord(record) {
+    // Local changes for our client means we're clearing commands or
+    // uploading a new record.
+    let incomingCommands = record.commands;
+    if (incomingCommands) {
+      // Filter out incoming commands that we've cleared.
+      incomingCommands = incomingCommands.filter(action =>
+        !hasDupeCommand(this.engine._clearedCommands, action));
+      if (!incomingCommands.length) {
+        // Use `undefined` instead of `null` to avoid creating a null field
+        // in the uploaded record.
+        incomingCommands = undefined;
+      }
+    }
     // Only grab commands from the server; local name/type always wins
-    if (record.id == this.engine.localID)
-      this.engine.localCommands = record.commands;
-    else
+    this.engine.localCommands = incomingCommands;
+  },
+
+  _updateRemoteRecord(record) {
+    let currentRecord = this._remoteClients[record.id];
+    if (!currentRecord || !currentRecord.commands ||
+        !(record.id in this.engine._modified)) {
+
+      // If we have a new incoming record or no outgoing commands, use the
+      // full incoming record from the server.
       this._remoteClients[record.id] = record.cleartext;
+      return;
+    }
+
+    // Otherwise, we have outgoing commands for a client, so merge them
+    // with the commands that we downloaded from the server.
+    for (let action of currentRecord.commands) {
+      if (hasDupeCommand(record.cleartext.commands, action)) {
+        // Ignore commands the server already knows about.
+        continue;
+      }
+      if (record.cleartext.commands) {
+        record.cleartext.commands.push(action);
+      } else {
+        record.cleartext.commands = [action];
+      }
+    }
+    this._remoteClients[record.id] = record.cleartext;
   },
 
   createRecord: function createRecord(id, collection) {

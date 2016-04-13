@@ -56,8 +56,10 @@
 #include "nsIOService.h"
 
 #include "mozilla/net/NeckoChild.h"
+#include "mozilla/net/NeckoParent.h"
 #include "mozilla/ipc/URIUtils.h"
 #include "mozilla/Telemetry.h"
+#include "mozilla/unused.h"
 
 #if defined(XP_UNIX)
 #include <sys/utsname.h>
@@ -123,6 +125,20 @@ NewURI(const nsACString &aSpec,
     url.forget(aURI);
     return NS_OK;
 }
+
+#ifdef ANDROID
+static nsCString
+GetDeviceModelId() {
+    nsCOMPtr<nsIPropertyBag2> infoService = do_GetService("@mozilla.org/system-info;1");
+    MOZ_ASSERT(infoService, "Could not find a system info service");
+    nsAutoString androidDevice;
+    nsresult rv = infoService->GetPropertyAsAString(NS_LITERAL_STRING("device"), androidDevice);
+    if (NS_SUCCEEDED(rv)) {
+        return NS_LossyConvertUTF16toASCII(androidDevice);
+    }
+    return EmptyCString();
+}
+#endif
 
 //-----------------------------------------------------------------------------
 // nsHttpHandler <public>
@@ -777,6 +793,10 @@ nsHttpHandler::InitUserAgentComponents()
             mCompatDevice.AssignLiteral("Mobile");
         }
     }
+
+    if (Preferences::GetBool(UA_PREF("use_device"), false)) {
+        mDeviceModelId = mozilla::net::GetDeviceModelId();
+    }
 #endif // ANDROID
 
 #ifdef MOZ_MULET
@@ -954,6 +974,18 @@ nsHttpHandler::PrefsChanged(nsIPrefBranch *prefs, const char *pref)
                             getter_Copies(mUserAgentOverride));
         mUserAgentIsDirty = true;
     }
+
+#ifdef ANDROID
+    // general.useragent.use_device
+    if (PREF_CHANGED(UA_PREF("use_device"))) {
+        if (Preferences::GetBool(UA_PREF("use_device"), false)) {
+            mDeviceModelId = mozilla::net::GetDeviceModelId();
+        } else {
+            mDeviceModelId = EmptyCString();
+        }
+        mUserAgentIsDirty = true;
+    }
+#endif
 
     //
     // HTTP options
@@ -2175,6 +2207,9 @@ nsHttpHandler::SpeculativeConnectInternal(nsIURI *aURI,
         obsService->NotifyObservers(nullptr,
                                     "speculative-connect-request",
                                     NS_ConvertUTF8toUTF16(spec).get());
+        if (!IsNeckoChild() && gNeckoParent) {
+            Unused << gNeckoParent->SendSpeculativeConnectRequest(spec);
+        }
     }
 
     nsISiteSecurityService* sss = gHttpHandler->GetSSService();

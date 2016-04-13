@@ -155,9 +155,9 @@ nsSVGIntegrationUtils::UsingEffectsForFrame(const nsIFrame* aFrame)
   // checking the SDL prefs here, since we don't know if we're being called for
   // painting or hit-testing anyway.
   const nsStyleSVGReset *style = aFrame->StyleSVGReset();
-  bool hasValidLayers = style->mMask.HasLayerWithImage();
-
-  return (style->HasFilters() || style->HasClipPath() || hasValidLayers);
+  return aFrame->StyleEffects()->HasFilters() ||
+         style->HasClipPath() ||
+         style->mMask.HasLayerWithImage();
 }
 
 // For non-SVG frames, this gives the offset to the frame's "user space".
@@ -451,7 +451,7 @@ nsSVGIntegrationUtils::PaintFramesWithEffects(gfxContext& aContext,
     }
   }
 
-  float opacity = aFrame->StyleDisplay()->mOpacity;
+  float opacity = aFrame->StyleEffects()->mOpacity;
   if (opacity == 0.0f) {
     return;
   }
@@ -536,7 +536,7 @@ nsSVGIntegrationUtils::PaintFramesWithEffects(gfxContext& aContext,
   /* Check if we need to do additional operations on this child's
    * rendering, which necessitates rendering into another surface. */
   if (opacity != 1.0f ||  (clipPathFrame && !isTrivialClip)
-      || aFrame->StyleDisplay()->mMixBlendMode != NS_STYLE_BLEND_NORMAL
+      || aFrame->StyleEffects()->mMixBlendMode != NS_STYLE_BLEND_NORMAL
       || hasMaskToDraw) {
     complexEffects = true;
 
@@ -552,10 +552,11 @@ nsSVGIntegrationUtils::PaintFramesWithEffects(gfxContext& aContext,
     if (svgMaskFrame) {
       // Generate maskSurface from a SVG mask.
       maskSurface = svgMaskFrame->GetMaskForMaskedFrame(&aContext,
-                                                     aFrame,
-                                                     cssPxToDevPxMatrix,
-                                                     opacity,
-                                                     &maskTransform);
+                                                        aFrame,
+                                                        cssPxToDevPxMatrix,
+                                                        opacity,
+                                                        &maskTransform,
+                                                        svgReset->mMask.mLayers[0].mMaskMode);
     } else if (hasMaskToDraw) {
       // Create maskSuface.
       gfxRect clipRect = aContext.GetClipExtents();
@@ -567,12 +568,13 @@ nsSVGIntegrationUtils::PaintFramesWithEffects(gfxContext& aContext,
       }
       IntRect drawRect = RoundedOut(ToRect(clipRect));
       RefPtr<DrawTarget> targetDT = aContext.GetDrawTarget()->CreateSimilarDrawTarget(drawRect.Size(), SurfaceFormat::A8);
-      if (!targetDT) {
+      if (!targetDT || !targetDT->IsValid()) {
         aContext.Restore();
         return;
       }
 
-      RefPtr<gfxContext> target = new gfxContext(targetDT);
+      RefPtr<gfxContext> target = gfxContext::ForDrawTarget(targetDT);
+      MOZ_ASSERT(target); // alrady checked the draw target above
       target->SetMatrix(matrixAutoSaveRestore.Matrix() * gfxMatrix::Translation(-drawRect.TopLeft()));
 
       // Compose all mask-images onto maskSurface.
@@ -602,7 +604,7 @@ nsSVGIntegrationUtils::PaintFramesWithEffects(gfxContext& aContext,
       return;
     }
 
-    if (aFrame->StyleDisplay()->mMixBlendMode != NS_STYLE_BLEND_NORMAL) {
+    if (aFrame->StyleEffects()->mMixBlendMode != NS_STYLE_BLEND_NORMAL) {
       // Create a temporary context to draw to so we can blend it back with
       // another operator.
       gfxRect clipRect;
@@ -616,11 +618,12 @@ nsSVGIntegrationUtils::PaintFramesWithEffects(gfxContext& aContext,
       IntRect drawRect = RoundedOut(ToRect(clipRect));
 
       RefPtr<DrawTarget> targetDT = aContext.GetDrawTarget()->CreateSimilarDrawTarget(drawRect.Size(), SurfaceFormat::B8G8R8A8);
-      if (!targetDT) {
+      if (!targetDT || !targetDT->IsValid()) {
         aContext.Restore();
         return;
       }
-      target = new gfxContext(targetDT);
+      target = gfxContext::ForDrawTarget(targetDT);
+      MOZ_ASSERT(target); // already checked the draw target above
       target->SetMatrix(aContext.CurrentMatrix() * gfxMatrix::Translation(-drawRect.TopLeft()));
       targetOffset = drawRect.TopLeft();
     }
@@ -684,7 +687,7 @@ nsSVGIntegrationUtils::PaintFramesWithEffects(gfxContext& aContext,
     target->PopGroupAndBlend();
   }
 
-  if (aFrame->StyleDisplay()->mMixBlendMode != NS_STYLE_BLEND_NORMAL) {
+  if (aFrame->StyleEffects()->mMixBlendMode != NS_STYLE_BLEND_NORMAL) {
     RefPtr<DrawTarget> targetDT = target->GetDrawTarget();
     target = nullptr;
     RefPtr<SourceSurface> targetSurf = targetDT->Snapshot();

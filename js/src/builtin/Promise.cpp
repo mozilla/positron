@@ -397,54 +397,36 @@ CreatePromisePrototype(JSContext* cx, JSProtoKey key)
     return cx->global()->createBlankPrototype(cx, &PromiseObject::protoClass_);
 }
 
+static const ClassSpec PromiseObjectClassSpec = {
+    GenericCreateConstructor<PromiseConstructor, 1, gc::AllocKind::FUNCTION>,
+    CreatePromisePrototype,
+    promise_static_methods,
+    promise_static_properties,
+    promise_methods
+};
+
 const Class PromiseObject::class_ = {
     "Promise",
     JSCLASS_HAS_RESERVED_SLOTS(RESERVED_SLOTS) | JSCLASS_HAS_CACHED_PROTO(JSProto_Promise) |
     JSCLASS_HAS_XRAYED_CONSTRUCTOR,
-    nullptr, /* addProperty */
-    nullptr, /* delProperty */
-    nullptr, /* getProperty */
-    nullptr, /* setProperty */
-    nullptr, /* enumerate */
-    nullptr, /* resolve */
-    nullptr, /* mayResolve */
-    nullptr, /* finalize */
-    nullptr, /* call */
-    nullptr, /* hasInstance */
-    nullptr, /* construct */
-    nullptr, /* trace */
-    {
-        GenericCreateConstructor<PromiseConstructor, 1, gc::AllocKind::FUNCTION>,
-        CreatePromisePrototype,
-        promise_static_methods,
-        promise_static_properties,
-        promise_methods
-    }
+    JS_NULL_CLASS_OPS,
+    &PromiseObjectClassSpec
+};
+
+static const ClassSpec PromiseObjectProtoClassSpec = {
+    DELEGATED_CLASSSPEC(PromiseObject::class_.spec),
+    nullptr,
+    nullptr,
+    nullptr,
+    nullptr,
+    nullptr,
+    nullptr,
+    ClassSpec::IsDelegated
 };
 
 const Class PromiseObject::protoClass_ = {
     "PromiseProto",
     JSCLASS_HAS_CACHED_PROTO(JSProto_Promise),
-    nullptr, /* addProperty */
-    nullptr, /* delProperty */
-    nullptr, /* getProperty */
-    nullptr, /* setProperty */
-    nullptr, /* enumerate */
-    nullptr, /* resolve */
-    nullptr, /* mayResolve */
-    nullptr, /* finalize */
-    nullptr, /* call */
-    nullptr, /* hasInstance */
-    nullptr, /* construct */
-    nullptr, /* trace  */
-    {
-        DELEGATED_CLASSSPEC(&PromiseObject::class_.spec),
-        nullptr,
-        nullptr,
-        nullptr,
-        nullptr,
-        nullptr,
-        nullptr,
-        ClassSpec::IsDelegated
-    }
+    JS_NULL_CLASS_OPS,
+    &PromiseObjectProtoClassSpec
 };

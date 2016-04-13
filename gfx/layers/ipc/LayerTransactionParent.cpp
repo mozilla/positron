@@ -179,6 +179,8 @@ LayerTransactionParent::Destroy()
   }
   InfallibleTArray<PTextureParent*> textures;
   ManagedPTextureParent(textures);
+  // We expect all textures to be destroyed by now.
+  MOZ_DIAGNOSTIC_ASSERT(textures.Length() == 0);
   for (unsigned int i = 0; i < textures.Length(); ++i) {
     RefPtr<TextureHost> tex = TextureHost::AsTextureHost(textures[i]);
     tex->DeallocateDeviceData();
@@ -367,7 +369,7 @@ LayerTransactionParent::RecvUpdate(InfallibleTArray<Edit>&& cset,
         layer->SetMaskLayer(nullptr);
       }
       layer->SetAnimations(common.animations());
-      layer->SetFrameMetrics(common.metrics());
+      layer->SetScrollMetadata(common.scrollMetadata());
       layer->SetDisplayListLog(common.displayListLog().get());
 
       // The updated invalid region is added to the existing one, since we can
@@ -792,7 +794,7 @@ LayerTransactionParent::RecvGetAnimationTransform(PLayerParent* aParent,
 static AsyncPanZoomController*
 GetAPZCForViewID(Layer* aLayer, FrameMetrics::ViewID aScrollID)
 {
-  for (uint32_t i = 0; i < aLayer->GetFrameMetricsCount(); i++) {
+  for (uint32_t i = 0; i < aLayer->GetScrollMetadataCount(); i++) {
     if (aLayer->GetFrameMetrics(i).GetScrollId() == aScrollID) {
       return aLayer->GetAsyncPanZoomController(i);
     }
@@ -1010,8 +1012,16 @@ LayerTransactionParent::RecvChildAsyncMessages(InfallibleTArray<AsyncChildMessag
     const AsyncChildMessageData& message = aMessages[i];
 
     switch (message.type()) {
-      case AsyncChildMessageData::TOpRemoveTextureAsync: {
-        const OpRemoveTextureAsync& op = message.get_OpRemoveTextureAsync();
+      case AsyncChildMessageData::TCompositableOperation: {
+
+        const CompositableOperation& compositable_op =
+          message.get_CompositableOperation();
+        MOZ_ASSERT(compositable_op.detail().type() ==
+          CompositableOperationDetail::TOpRemoveTextureAsync);
+
+        const OpRemoveTextureAsync& op =
+          compositable_op.detail().get_OpRemoveTextureAsync();
+
         CompositableHost* compositable = CompositableHost::FromIPDLActor(op.compositableParent());
         RefPtr<TextureHost> tex = TextureHost::AsTextureHost(op.textureParent());
 

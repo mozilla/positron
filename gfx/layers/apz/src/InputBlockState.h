@@ -11,6 +11,7 @@
 #include "mozilla/gfx/Matrix.h"             // for Matrix4x4
 #include "mozilla/layers/APZUtils.h"        // for TouchBehaviorFlags
 #include "mozilla/layers/AsyncDragMetrics.h"
+#include "mozilla/TimeStamp.h"              // for TimeStamp
 #include "nsAutoPtr.h"                      // for nsRefPtr
 #include "nsTArray.h"                       // for nsTArray
 #include "TouchCounter.h"
@@ -52,6 +53,7 @@ public:
 
   void SetScrolledApzc(AsyncPanZoomController* aApzc);
   AsyncPanZoomController* GetScrolledApzc() const;
+  bool IsDownchainOfScrolledApzc(AsyncPanZoomController* aApzc) const;
 
 protected:
   virtual void UpdateTargetApzc(const RefPtr<AsyncPanZoomController>& aTargetApzc);
@@ -59,7 +61,7 @@ protected:
 private:
   // Checks whether |aA| is an ancestor of |aB| (or the same as |aB|) in
   // |mOverscrollHandoffChain|.
-  bool IsAncestorOf(AsyncPanZoomController* aA, AsyncPanZoomController* aB);
+  bool IsDownchainOf(AsyncPanZoomController* aA, AsyncPanZoomController* aB) const;
 
 private:
   RefPtr<AsyncPanZoomController> mTargetApzc;
@@ -121,6 +123,20 @@ public:
   virtual bool SetContentResponse(bool aPreventDefault);
 
   /**
+   * This should be called when this block is starting to wait for the
+   * necessary content response notifications. It is used to gather data
+   * on how long the content response notifications take.
+   */
+  void StartContentResponseTimer();
+
+  /**
+   * This should be called when a content response notification has been
+   * delivered to this block. If all the notifications have arrived, this
+   * will report the total time take to telemetry.
+   */
+  void RecordContentResponseTime();
+
+  /**
    * Record that content didn't respond in time.
    * @return false if this block already timed out, true if not.
    */
@@ -148,6 +164,12 @@ public:
    * subclasses to do any per-event processing they need to.
    */
   virtual void DispatchEvent(const InputData& aEvent) const;
+
+  /**
+   * @return true iff this block has received all the information it could
+   *         have gotten from the content thread.
+   */
+  virtual bool HasReceivedAllContentNotifications() const;
 
   /**
    * @return true iff this block has received all the information needed
@@ -183,6 +205,7 @@ public:
   virtual const char* Type() = 0;
 
 private:
+  TimeStamp mContentResponseTimer;
   bool mPreventDefault;
   bool mContentResponded;
   bool mContentResponseTimerExpired;
@@ -199,7 +222,6 @@ public:
                   const ScrollWheelInput& aEvent);
 
   bool SetContentResponse(bool aPreventDefault) override;
-  bool IsReadyForHandling() const override;
   bool HasEvents() const override;
   void DropEvents() override;
   void HandleEvents() override;
@@ -319,6 +341,7 @@ public:
                        const PanGestureInput& aEvent);
 
   bool SetContentResponse(bool aPreventDefault) override;
+  bool HasReceivedAllContentNotifications() const override;
   bool IsReadyForHandling() const override;
   bool HasEvents() const override;
   void DropEvents() override;
@@ -396,6 +419,12 @@ public:
    * Copy various properties from another block.
    */
   void CopyPropertiesFrom(const TouchBlockState& aOther);
+
+  /*
+   * @return true iff this block has received all the information it could
+   *         have gotten from the content thread.
+   */
+  bool HasReceivedAllContentNotifications() const override;
 
   /**
    * @return true iff this block has received all the information needed

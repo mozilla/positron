@@ -39,6 +39,7 @@ import org.mozilla.gecko.util.INISection;
 import android.app.Activity;
 import android.content.ContentResolver;
 import android.content.Context;
+import android.content.pm.PackageManager;
 import android.content.SharedPreferences;
 import android.support.annotation.WorkerThread;
 import android.text.TextUtils;
@@ -69,6 +70,8 @@ public final class GeckoProfile {
     // Used to "lock" the guest profile, so that we'll always restart in it
     private static final String LOCK_FILE_NAME = ".active_lock";
     public static final String DEFAULT_PROFILE = "default";
+    // Profile is using a custom directory outside of the Mozilla directory.
+    public static final String CUSTOM_PROFILE = "";
     public static final String GUEST_PROFILE = "guest";
 
     private static final HashMap<String, GeckoProfile> sProfileCache = new HashMap<String, GeckoProfile>();
@@ -78,8 +81,6 @@ public final class GeckoProfile {
     private static File sGuestDir;
     private static GeckoProfile sGuestProfile;
     private static boolean sShouldCheckForGuestProfile = true;
-
-    public static boolean sIsUsingCustomProfile;
 
     private final String mName;
     private final File mMozillaDir;
@@ -91,7 +92,7 @@ public final class GeckoProfile {
      * Access to this member should be synchronized to avoid
      * races during creation -- particularly between getDir and GeckoView#init.
      *
-     * Not final because this is lazily computed. 
+     * Not final because this is lazily computed.
      */
     private File mProfileDir;
 
@@ -111,12 +112,15 @@ public final class GeckoProfile {
     };
 
     /**
-     * Warning: has a side-effect of setting sIsUsingCustomProfile.
      * Can return null.
      */
     public static GeckoProfile getFromArgs(final Context context, final String args) {
         if (args == null) {
             return null;
+        }
+
+        if (GuestSession.shouldUse(context, args)) {
+            return GeckoProfile.getOrCreateGuestProfile(context);
         }
 
         String profileName = null;
@@ -135,12 +139,6 @@ public final class GeckoProfile {
             if (m.find()) {
                 profilePath =  m.group(1);
             }
-
-            if (profileName == null) {
-                profileName = GeckoProfile.DEFAULT_PROFILE;
-            }
-
-            GeckoProfile.sIsUsingCustomProfile = true;
         }
 
         if (profileName == null && profilePath == null) {
@@ -150,60 +148,19 @@ public final class GeckoProfile {
         return GeckoProfile.get(context, profileName, profilePath);
     }
 
-    public static GeckoProfile get(Context context) {
-        boolean isGeckoApp = false;
+    public static GeckoProfile getDefaultProfile(Context context) {
         try {
-            isGeckoApp = context instanceof GeckoApp;
-        } catch (NoClassDefFoundError ex) {}
+            return get(context, getDefaultProfileName(context));
 
-        if (isGeckoApp) {
-            // Check for a cached profile on this context already
-            // TODO: We should not be caching profile information on the Activity context
-            final GeckoApp geckoApp = (GeckoApp) context;
-            if (geckoApp.mProfile != null) {
-                return geckoApp.mProfile;
-            }
+        } catch (final NoMozillaDirectoryException e) {
+            // If this failed, we're screwed.
+            Log.wtf(LOGTAG, "Unable to get default profile name.", e);
+            throw new RuntimeException(e);
         }
+    }
 
-        final String args;
-        if (context instanceof Activity) {
-            args = ContextUtils.getStringExtra(((Activity) context).getIntent(), "args");
-        } else {
-            args = null;
-        }
-
-        if (GuestSession.shouldUse(context, args)) {
-            final GeckoProfile p = GeckoProfile.getOrCreateGuestProfile(context);
-            if (isGeckoApp) {
-                ((GeckoApp) context).mProfile = p;
-            }
-            return p;
-        }
-
-        final GeckoProfile fromArgs = GeckoProfile.getFromArgs(context, args);
-        if (fromArgs != null) {
-            if (isGeckoApp) {
-                ((GeckoApp) context).mProfile = fromArgs;
-            }
-            return fromArgs;
-        }
-
-        if (isGeckoApp) {
-            final GeckoApp geckoApp = (GeckoApp) context;
-            String defaultProfileName;
-            try {
-                defaultProfileName = geckoApp.getDefaultProfileName();
-            } catch (NoMozillaDirectoryException e) {
-                // If this failed, we're screwed. But there are so many callers that
-                // we'll just throw a RuntimeException.
-                Log.wtf(LOGTAG, "Unable to get default profile name.", e);
-                throw new RuntimeException(e);
-            }
-            // Otherwise, get the default profile for the Activity.
-            return get(context, defaultProfileName);
-        }
-
-        return get(context, "");
+    public static GeckoProfile get(Context context) {
+        return get(context, null, null, null);
     }
 
     public static GeckoProfile get(Context context, String profileName) {
@@ -256,15 +213,39 @@ public final class GeckoProfile {
             throw new IllegalArgumentException("context must be non-null");
         }
 
-        // If no profile was passed in, look for the default profile listed in profiles.ini.
-        // If that doesn't exist, look for a profile called 'default'.
-        if (TextUtils.isEmpty(profileName) && profileDir == null) {
-            try {
-                profileName = GeckoProfile.getDefaultProfileName(context);
-            } catch (NoMozillaDirectoryException e) {
-                // We're unable to do anything sane here.
-                throw new RuntimeException(e);
+        // Null name? | Null dir? | Returned profile
+        // ------------------------------------------
+        //     Yes    |    Yes    | Active profile or default profile.
+        //     No     |    Yes    | Profile with specified name at default dir.
+        //     Yes    |    No     | Custom (anonymous) profile with specified dir.
+        //     No     |    No     | Profile with specified name at specified dir.
+
+        if (profileName == null && profileDir == null) {
+            // If no profile info was passed in, look for the active profile or a default profile.
+            final GeckoProfile profile = GeckoThread.getActiveProfile();
+            if (profile != null) {
+                return profile;
             }
+
+            final String args;
+            if (context instanceof Activity) {
+                args = ContextUtils.getStringExtra(((Activity) context).getIntent(), "args");
+            } else {
+                args = null;
+            }
+
+            final GeckoProfile fromArgs = GeckoProfile.getFromArgs(context, args);
+            if (fromArgs != null) {
+                return fromArgs;
+            }
+
+            // Otherwise, get the default profile for the Activity.
+            return getDefaultProfile(context);
+
+        } else if (profileName == null) {
+            // If only profile dir was passed in, use custom (anonymous) profile.
+            profileName = CUSTOM_PROFILE;
+
         } else if (AppConstants.DEBUG_BUILD) {
             Log.v(LOGTAG, "Fetching profile: '" + profileName + "', '" + profileDir + "'");
         }
@@ -279,6 +260,7 @@ public final class GeckoProfile {
                     // We're unable to do anything sane here.
                     throw new RuntimeException(e);
                 }
+
                 sProfileCache.put(profileName, profile);
                 return profile;
             }
@@ -288,12 +270,15 @@ public final class GeckoProfile {
                 return profile;
             }
 
-            if (profile.getDir().equals(profileDir)) {
-                // Great! We're consistent.
-                return profile;
+            try {
+                if (profile.getDir().getCanonicalPath().equals(profileDir.getCanonicalPath())) {
+                    // Great! We're consistent.
+                    return profile;
+                }
+            } catch (final IOException e) {
             }
 
-            if (sAcceptDirectoryChanges) {
+            if (sAcceptDirectoryChanges && profileDir.isDirectory()) {
                 if (AppConstants.RELEASE_BUILD) {
                     Log.e(LOGTAG, "Release build trying to switch out profile dir. This is an error, but let's do what we can.");
                 }
@@ -452,27 +437,29 @@ public final class GeckoProfile {
     }
 
     private GeckoProfile(Context context, String profileName, File profileDir, BrowserDB.Factory dbFactory) throws NoMozillaDirectoryException {
-        if (TextUtils.isEmpty(profileName)) {
+        if (profileName == null) {
             throw new IllegalArgumentException("Unable to create GeckoProfile for empty profile name.");
+        } else if (CUSTOM_PROFILE.equals(profileName) && profileDir == null) {
+            throw new IllegalArgumentException("Custom profile must have a directory");
         }
 
         mApplicationContext = context.getApplicationContext();
         mName = profileName;
         mMozillaDir = GeckoProfileDirectories.getMozillaDirectory(context);
 
-        // This apes the behavior of setDir.
-        if (profileDir != null && profileDir.exists() && profileDir.isDirectory()) {
-            mProfileDir = profileDir;
+        mProfileDir = profileDir;
+        if (profileDir != null && !profileDir.isDirectory()) {
+            throw new IllegalArgumentException("Profile directory must exist if specified.");
         }
 
         // N.B., mProfileDir can be null at this point.
         mDB = dbFactory.get(profileName, mProfileDir);
     }
 
+    @RobocopTarget
     public BrowserDB getDB() {
         return mDB;
     }
-
 
     // Warning, Changing the lock file state from outside apis will cause this to become out of sync
     public boolean locked() {
@@ -548,6 +535,7 @@ public final class GeckoProfile {
         return false;
     }
 
+    @RobocopTarget
     public boolean inGuestMode() {
         return mInGuestMode;
     }
@@ -560,10 +548,16 @@ public final class GeckoProfile {
         }
     }
 
+    @RobocopTarget
     public String getName() {
         return mName;
     }
 
+    public boolean isCustomProfile() {
+        return CUSTOM_PROFILE.equals(mName);
+    }
+
+    @RobocopTarget
     public synchronized File getDir() {
         forceCreate();
         return mProfileDir;
@@ -689,15 +683,38 @@ public final class GeckoProfile {
     }
 
     /**
-     * @return the profile creation date in the format returned by {@link System#currentTimeMillis()} or -1 if the value
-     *         was not found.
+     * Gets the profile creation date and persists it if it had to be generated.
+     *
+     * To get this value, we first look in times.json. If that could not be accessed, we
+     * return the package's first install date. This is not a perfect solution because a
+     * user may have large gap between install time and first use.
+     *
+     * A more correct algorithm could be the one performed by the JS code in ProfileAge.jsm
+     * getOldestProfileTimestamp: walk the tree and return the oldest timestamp on the files
+     * within the profile. However, since times.json will only not exist for the small
+     * number of really old profiles, we're okay with the package install date compromise for
+     * simplicity.
+     *
+     * @return the profile creation date in the format returned by {@link System#currentTimeMillis()}
+     *         or -1 if the value could not be persisted.
      */
     @WorkerThread
-    public long getProfileCreationDate() {
+    public long getAndPersistProfileCreationDate(final Context context) {
         try {
             return getProfileCreationDateFromTimesFile();
         } catch (final IOException e) {
-            return getAndPersistProfileCreationDateFromFilesystem();
+            Log.d(LOGTAG, "Unable to retrieve profile creation date from times.json. Getting from system...");
+            final long packageInstallMillis = org.mozilla.gecko.util.ContextUtils.getPackageInstallTime(context);
+            try {
+                persistProfileCreationDateToTimesFile(packageInstallMillis);
+            } catch (final IOException ioEx) {
+                // We return -1 to ensure the profileCreationDate
+                // will either be an error (-1) or a consistent value.
+                Log.w(LOGTAG, "Unable to persist profile creation date - returning -1");
+                return -1;
+            }
+
+            return packageInstallMillis;
         }
     }
 
@@ -712,14 +729,17 @@ public final class GeckoProfile {
         }
     }
 
-    /**
-     * TODO (bug 1246816): Implement ProfileAge.jsm - getOldestProfileTimestamp. Persist results to times.json.
-     * Update comment in getProfileCreationDate too.
-     * @return -1 until implemented.
-     */
     @WorkerThread
-    private long getAndPersistProfileCreationDateFromFilesystem() {
-        return -1;
+    private void persistProfileCreationDateToTimesFile(final long profileCreationMillis) throws IOException {
+        final JSONObject obj = new JSONObject();
+        try {
+            obj.put(PROFILE_CREATION_DATE_JSON_ATTR, profileCreationMillis);
+        } catch (final JSONException e) {
+            // Don't log to avoid leaking data in JSONObject.
+            throw new IOException("Unable to persist profile creation date to times file");
+        }
+        Log.d(LOGTAG, "Attempting to write new profile creation date");
+        writeFile(TIMES_PATH, obj.toString()); // Ideally we'd throw here too.
     }
 
     /**
@@ -957,10 +977,18 @@ public final class GeckoProfile {
     }
 
     private File findProfileDir() throws NoSuchProfileException {
+        if (isCustomProfile()) {
+            return mProfileDir;
+        }
         return GeckoProfileDirectories.findProfileDir(mMozillaDir, mName);
     }
 
     private File createProfileDir() throws IOException {
+        if (isCustomProfile()) {
+            // Custom profiles must already exist.
+            return mProfileDir;
+        }
+
         INIParser parser = GeckoProfileDirectories.getProfilesINI(mMozillaDir);
 
         // Salt the name of our requested profile
@@ -1018,7 +1046,7 @@ public final class GeckoProfile {
 
         // Write out profile creation time, mirroring the logic in nsToolkitProfileService.
         try {
-            FileOutputStream stream = new FileOutputStream(profileDir.getAbsolutePath() + File.separator + "times.json");
+            FileOutputStream stream = new FileOutputStream(profileDir.getAbsolutePath() + File.separator + TIMES_PATH);
             OutputStreamWriter writer = new OutputStreamWriter(stream, Charset.forName("UTF-8"));
             try {
                 writer.append("{\"created\": " + System.currentTimeMillis() + "}\n");
@@ -1027,7 +1055,7 @@ public final class GeckoProfile {
             }
         } catch (Exception e) {
             // Best-effort.
-            Log.w(LOGTAG, "Couldn't write times.json.", e);
+            Log.w(LOGTAG, "Couldn't write " + TIMES_PATH, e);
         }
 
         // Initialize pref flag for displaying the start pane for a new profile.

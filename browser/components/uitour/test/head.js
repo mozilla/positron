@@ -27,6 +27,7 @@ function waitForConditionPromise(condition, timeoutMsg, tryCount=NUMBER_OF_TRIES
     }
     tries++;
     setTimeout(checkCondition, SINGLE_TRY_TIMEOUT);
+    return undefined;
   }
   setTimeout(checkCondition, SINGLE_TRY_TIMEOUT);
   return defer.promise;
@@ -287,6 +288,9 @@ function loadUITourTestPage(callback, host = "https://example.org/") {
                 callbackMap.set(index, arg);
                 fnIndices.push(index);
                 let handler = function(msg) {
+                  // Please note that this handler assumes that the callback is used only once.
+                  // That means that a single gContentAPI.observer() call can't be used to observe
+                  // multiple events.
                   browser.messageManager.removeMessageListener(proxyFunctionName + index, handler);
                   callbackMap.get(index).apply(null, msg.data);
                 };

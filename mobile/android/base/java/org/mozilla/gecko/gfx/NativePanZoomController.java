@@ -51,6 +51,9 @@ class NativePanZoomController extends JNIObject implements PanZoomController {
             int action, long time, int metaState,
             float x, float y, int buttons);
 
+    @WrapForJNI
+    private native void handleMotionEventVelocity(long time, float ySpeed);
+
     private boolean handleMotionEvent(MotionEvent event) {
         if (mDestroyed) {
             return false;
@@ -195,6 +198,11 @@ class NativePanZoomController extends JNIObject implements PanZoomController {
     }
 
     @Override
+    public void onMotionEventVelocity(final long aEventTime, final float aSpeedY) {
+        handleMotionEventVelocity(aEventTime, aSpeedY);
+    }
+
+    @Override
     public PointF getVelocityVector() {
         // FIXME implement this
         return new PointF(0, 0);
@@ -322,6 +330,11 @@ class NativePanZoomController extends JNIObject implements PanZoomController {
                 });
             }
         }
+    }
+
+    @WrapForJNI
+    private void setScrollingRootContent(final boolean isRootContent) {
+        mTarget.setScrollingRootContent(isRootContent);
     }
 
     /**
