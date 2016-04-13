@@ -56,7 +56,7 @@ function ModuleLoader(processType) {
    * @keys {string} The ID (resource: URL) for the module.
    * @values {object} An object representing the module.
    */
-  let modules = new Map();
+  const modules = new Map();
 
   /**
    * Import a module.
