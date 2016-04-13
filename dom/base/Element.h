@@ -679,6 +679,26 @@ public:
                            ErrorResult& aError);
   already_AddRefed<nsIHTMLCollection>
     GetElementsByClassName(const nsAString& aClassNames);
+
+private:
+  /**
+   * Implement the algorithm specified at
+   * https://dom.spec.whatwg.org/#insert-adjacent for both
+   * |insertAdjacentElement()| and |insertAdjacentText()| APIs.
+   */
+  nsINode* InsertAdjacent(const nsAString& aWhere,
+                          nsINode* aNode,
+                          ErrorResult& aError);
+
+public:
+  Element* InsertAdjacentElement(const nsAString& aWhere,
+                                 Element& aElement,
+                                 ErrorResult& aError);
+
+  void InsertAdjacentText(const nsAString& aWhere,
+                          const nsAString& aData,
+                          ErrorResult& aError);
+
   void SetPointerCapture(int32_t aPointerId, ErrorResult& aError)
   {
     bool activeState = false;
@@ -686,7 +706,7 @@ public:
       aError.Throw(NS_ERROR_DOM_INVALID_POINTER_ERR);
       return;
     }
-    if (!IsInDoc()) {
+    if (!IsInUncomposedDoc()) {
       aError.Throw(NS_ERROR_DOM_INVALID_STATE_ERR);
       return;
     }

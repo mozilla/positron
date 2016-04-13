@@ -132,7 +132,11 @@ nsSVGClipPathFrame::GetClipMask(gfxContext& aReferenceContext,
 
   // Paint this clipPath's contents into maskDT:
   {
-    RefPtr<gfxContext> ctx = new gfxContext(maskDT);
+    RefPtr<gfxContext> ctx = gfxContext::ForDrawTarget(maskDT);
+    if (!ctx) {
+      gfxCriticalError() << "SVGClipPath context problem " << gfx::hexa(maskDT);
+      return nullptr;
+    }
     ctx->SetMatrix(mat);
 
     // We need to set mMatrixForChildren here so that under the PaintSVG calls
@@ -232,16 +236,20 @@ nsSVGClipPathFrame::GetClipMask(gfxContext& aReferenceContext,
   mat.Invert();
 
   if (aExtraMask) {
-    MOZ_ASSERT(!aExtraMasksTransform.HasNonTranslation());
-
+    // We could potentially due this more efficiently with OPERATOR_IN
+    // but that operator does not work well on CG or D2D
     RefPtr<SourceSurface> currentMask = maskDT->Snapshot();
+    Matrix transform = maskDT->GetTransform();
     maskDT->SetTransform(Matrix());
     maskDT->ClearRect(Rect(0, 0,
                            devSpaceClipExtents.width,
                            devSpaceClipExtents.height));
-    maskDT->MaskSurface(SurfacePattern(currentMask, ExtendMode::CLAMP),
+    maskDT->SetTransform(aExtraMasksTransform * transform);
+    // draw currentMask with the inverse of the transform that we just so that
+    // it ends up in the same spot with aExtraMask transformed by aExtraMasksTransform
+    maskDT->MaskSurface(SurfacePattern(currentMask, ExtendMode::CLAMP, aExtraMasksTransform.Inverse() * ToMatrix(mat)),
                         aExtraMask,
-                        Point(aExtraMasksTransform._31, aExtraMasksTransform._32));
+                        Point(0, 0));
   }
 
   *aMaskTransform = ToMatrix(mat);

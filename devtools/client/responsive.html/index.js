@@ -15,6 +15,7 @@ const { require } = BrowserLoader({
 });
 const { GetDevices } = require("devtools/client/shared/devices");
 const Telemetry = require("devtools/client/shared/telemetry");
+const { loadSheet } = require("sdk/stylesheet/utils");
 
 const { createFactory, createElement } =
   require("devtools/client/shared/vendor/react");
@@ -25,8 +26,7 @@ const App = createFactory(require("./app"));
 const Store = require("./store");
 const { addDevice, addDeviceType } = require("./actions/devices");
 const { changeLocation } = require("./actions/location");
-const { addViewport } = require("./actions/viewports");
-const { loadSheet } = require("sdk/stylesheet/utils");
+const { addViewport, resizeViewport } = require("./actions/viewports");
 
 let bootstrap = {
 
@@ -42,11 +42,10 @@ let bootstrap = {
               "agent");
     this.telemetry.toolOpened("responsive");
     let store = this.store = Store();
-    let app = App({
-      onExit: () => window.postMessage({type: "exit"}, "*"),
-    });
-    let provider = createElement(Provider, { store }, app);
+    let provider = createElement(Provider, { store }, App());
     ReactDOM.render(provider, document.querySelector("#root"));
+    this.initDevices();
+    window.postMessage({ type: "init" }, "*");
   },
 
   destroy() {
@@ -61,7 +60,26 @@ let bootstrap = {
    * to dispatch.  They can do so here.
    */
   dispatch(action) {
+    if (!this.store) {
+      // If actions are dispatched after store is destroyed, ignore them.  This
+      // can happen in tests that close the tool quickly while async tasks like
+      // initDevices() below are still pending.
+      return;
+    }
     this.store.dispatch(action);
+  },
+
+  initDevices() {
+    GetDevices().then(devices => {
+      for (let type of devices.TYPES) {
+        this.dispatch(addDeviceType(type));
+        for (let device of devices[type]) {
+          if (device.os != "fxos") {
+            this.dispatch(addDevice(device, type));
+          }
+        }
+      }
+    });
   },
 
 };
@@ -91,20 +109,37 @@ Object.defineProperty(window, "store", {
 window.addInitialViewport = contentURI => {
   try {
     bootstrap.dispatch(changeLocation(contentURI));
-
-    GetDevices().then(devices => {
-      for (let type of devices.TYPES) {
-        bootstrap.dispatch(addDeviceType(type));
-        for (let device of devices[type]) {
-          if (device.os != "fxos") {
-            bootstrap.dispatch(addDevice(device, type));
-          }
-        }
-      }
-    });
-
     bootstrap.dispatch(addViewport());
   } catch (e) {
     console.error(e);
   }
+};
+
+/**
+ * Called by manager.js when tests want to check the viewport size.
+ */
+window.getViewportSize = () => {
+  let { width, height } = bootstrap.store.getState().viewports[0];
+  return { width, height };
+};
+
+/**
+ * Called by manager.js to set viewport size from GCLI.
+ */
+window.setViewportSize = (width, height) => {
+  try {
+    bootstrap.dispatch(resizeViewport(0, width, height));
+  } catch (e) {
+    console.error(e);
+  }
+};
+
+/**
+ * Called by manager.js when tests want to use the viewport's message manager.
+ * It is packed into an object because this is the format most easily usable
+ * with ContentTask.spawn().
+ */
+window.getViewportMessageManager = () => {
+  let { messageManager } = document.querySelector("iframe.browser").frameLoader;
+  return { messageManager };
 };

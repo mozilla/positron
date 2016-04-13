@@ -1016,17 +1016,19 @@ GetDisplayPortFromMarginsData(nsIContent* aContent,
     const ScreenMargin& margins = aMarginsData->mMargins;
     if (screenRect.height < maxHeightScreenPx) {
       int32_t budget = maxHeightScreenPx - screenRect.height;
-
-      float top = std::min(margins.top, float(budget));
-      float bottom = std::min(margins.bottom, budget - top);
+      // Scale the margins down to fit into the budget if necessary, maintaining
+      // their relative ratio.
+      float scale = std::min(1.0f, float(budget) / margins.TopBottom());
+      float top = margins.top * scale;
+      float bottom = margins.bottom * scale;
       screenRect.y -= top;
       screenRect.height += top + bottom;
     }
     if (screenRect.width < maxWidthScreenPx) {
       int32_t budget = maxWidthScreenPx - screenRect.width;
-
-      float left = std::min(margins.left, float(budget));
-      float right = std::min(margins.right, budget - left);
+      float scale = std::min(1.0f, float(budget) / margins.LeftRight());
+      float left = margins.left * scale;
+      float right = margins.right * scale;
       screenRect.x -= left;
       screenRect.width += left + right;
     }
@@ -1056,6 +1058,16 @@ GetDisplayPortFromMarginsData(nsIContent* aContent,
   result = result.MoveInsideAndClamp(expandedScrollableRect - scrollPos);
 
   return result;
+}
+
+static bool
+ShouldDisableApzForElement(nsIContent* aContent)
+{
+  if (gfxPrefs::APZDisableForScrollLinkedEffects() && aContent) {
+    nsIDocument* doc = aContent->GetComposedDoc();
+    return (doc && doc->HasScrollLinkedEffect());
+  }
+  return false;
 }
 
 static bool
@@ -1092,7 +1104,7 @@ GetDisplayPortImpl(nsIContent* aContent, nsRect *aResult, float aMultiplier)
   nsRect result;
   if (rectData) {
     result = GetDisplayPortFromRectData(aContent, rectData, aMultiplier);
-  } else if (APZCCallbackHelper::IsDisplayportSuppressed()) {
+  } else if (APZCCallbackHelper::IsDisplayportSuppressed() || ShouldDisableApzForElement(aContent)) {
     DisplayPortMarginsPropertyData noMargins(ScreenMargin(), 1);
     result = GetDisplayPortFromMarginsData(aContent, &noMargins, aMultiplier);
   } else {
@@ -1519,6 +1531,17 @@ nsLayoutUtils::GetStyleFrame(const nsIContent* aContent)
   }
 
   return nsLayoutUtils::GetStyleFrame(frame);
+}
+
+/* static */ nsIFrame*
+nsLayoutUtils::GetRealPrimaryFrameFor(const nsIContent* aContent)
+{
+  nsIFrame *frame = aContent->GetPrimaryFrame();
+  if (!frame) {
+    return nullptr;
+  }
+
+  return nsPlaceholderFrame::GetRealFrameFor(frame);
 }
 
 nsIFrame*
@@ -6143,7 +6166,7 @@ nsLayoutUtils::GetGraphicsFilterForFrame(nsIFrame* aForFrame)
     sc = aForFrame->StyleContext();
   }
 
-  switch (sc->StyleSVG()->mImageRendering) {
+  switch (sc->StyleVisibility()->mImageRendering) {
   case NS_STYLE_IMAGE_RENDERING_OPTIMIZESPEED:
     return Filter::POINT;
   case NS_STYLE_IMAGE_RENDERING_OPTIMIZEQUALITY:
@@ -6525,7 +6548,11 @@ DrawImageInternal(gfxContext&            aContext,
       imageRect.ToIntRect(&tmpDTRect);
 
       RefPtr<DrawTarget> tempDT = destCtx->GetDrawTarget()->CreateSimilarDrawTarget(tmpDTRect.Size(), SurfaceFormat::B8G8R8A8);
-      destCtx = new gfxContext(tempDT, imageRect.TopLeft());
+      destCtx = gfxContext::ForDrawTarget(tempDT, imageRect.TopLeft());
+      if (!destCtx) {
+        gfxDevCrash(LogReason::InvalidContext) << "NonOP_OVER context problem " << gfx::hexa(tempDT);
+        return result;
+      }
     }
     destCtx->SetMatrix(params.imageSpaceToDeviceSpace);
 
@@ -6846,7 +6873,7 @@ nsLayoutUtils::HasNonZeroCornerOnSide(const nsStyleCorners& aCorners,
 /* static */ nsTransparencyMode
 nsLayoutUtils::GetFrameTransparency(nsIFrame* aBackgroundFrame,
                                     nsIFrame* aCSSRootFrame) {
-  if (aCSSRootFrame->StyleDisplay()->mOpacity < 1.0f)
+  if (aCSSRootFrame->StyleEffects()->mOpacity < 1.0f)
     return eTransparencyTransparent;
 
   if (HasNonZeroCorner(aCSSRootFrame->StyleBorder()->mBorderRadius))
@@ -6956,7 +6983,7 @@ nsLayoutUtils::GetTextRunFlagsForStyle(nsStyleContext* aStyleContext,
   if (aStyleText->mControlCharacterVisibility == NS_STYLE_CONTROL_CHARACTER_VISIBILITY_HIDDEN) {
     result |= gfxTextRunFactory::TEXT_HIDE_CONTROL_CHARACTERS;
   }
-  switch (aStyleContext->StyleSVG()->mTextRendering) {
+  switch (aStyleContext->StyleText()->mTextRendering) {
   case NS_STYLE_TEXT_RENDERING_OPTIMIZESPEED:
     result |= gfxTextRunFactory::TEXT_OPTIMIZE_SPEED;
     break;
@@ -7291,7 +7318,7 @@ nsLayoutUtils::SurfaceFromElement(HTMLVideoElement* aElement,
   }
 
   // If it doesn't have a principal, just bail
-  nsCOMPtr<nsIPrincipal> principal = aElement->GetCurrentPrincipal();
+  nsCOMPtr<nsIPrincipal> principal = aElement->GetCurrentVideoPrincipal();
   if (!principal)
     return result;
 
@@ -7638,6 +7665,9 @@ nsLayoutUtils::Shutdown()
   Preferences::UnregisterCallback(WebkitPrefixEnabledPrefChangeCallback,
                                   WEBKIT_PREFIXES_ENABLED_PREF_NAME);
   nsComputedDOMStyle::UnregisterPrefChangeCallbacks();
+
+  // so the cached initial quotes array doesn't appear to be a leak
+  nsStyleList::Shutdown();
 }
 
 /* static */
@@ -8015,7 +8045,7 @@ nsLayoutUtils::FontSizeInflationEnabled(nsPresContext *aPresContext)
 nsLayoutUtils::GetBoxShadowRectForFrame(nsIFrame* aFrame,
                                         const nsSize& aFrameSize)
 {
-  nsCSSShadowArray* boxShadows = aFrame->StyleBorder()->mBoxShadow;
+  nsCSSShadowArray* boxShadows = aFrame->StyleEffects()->mBoxShadow;
   if (!boxShadows) {
     return nsRect();
   }
@@ -8581,23 +8611,24 @@ nsLayoutUtils::CanScrollOriginClobberApz(nsIAtom* aScrollOrigin)
       && aScrollOrigin != nsGkAtoms::restore;
 }
 
-/* static */ FrameMetrics
-nsLayoutUtils::ComputeFrameMetrics(nsIFrame* aForFrame,
-                                   nsIFrame* aScrollFrame,
-                                   nsIContent* aContent,
-                                   const nsIFrame* aReferenceFrame,
-                                   Layer* aLayer,
-                                   ViewID aScrollParentId,
-                                   const nsRect& aViewport,
-                                   const Maybe<nsRect>& aClipRect,
-                                   bool aIsRootContent,
-                                   const ContainerLayerParameters& aContainerParameters)
+/* static */ ScrollMetadata
+nsLayoutUtils::ComputeScrollMetadata(nsIFrame* aForFrame,
+                                     nsIFrame* aScrollFrame,
+                                     nsIContent* aContent,
+                                     const nsIFrame* aReferenceFrame,
+                                     Layer* aLayer,
+                                     ViewID aScrollParentId,
+                                     const nsRect& aViewport,
+                                     const Maybe<nsRect>& aClipRect,
+                                     bool aIsRootContent,
+                                     const ContainerLayerParameters& aContainerParameters)
 {
   nsPresContext* presContext = aForFrame->PresContext();
   int32_t auPerDevPixel = presContext->AppUnitsPerDevPixel();
 
   nsIPresShell* presShell = presContext->GetPresShell();
-  FrameMetrics metrics;
+  ScrollMetadata metadata;
+  FrameMetrics& metrics = metadata.GetMetrics();
   metrics.SetViewport(CSSRect::FromAppUnits(aViewport));
 
   ViewID scrollId = FrameMetrics::NULL_SCROLL_ID;
@@ -8665,6 +8696,8 @@ nsLayoutUtils::ComputeFrameMetrics(nsIFrame* aForFrame,
     }
 
     metrics.SetUsesContainerScrolling(scrollableFrame->UsesContainerScrolling());
+
+    metadata.SetSnapInfo(scrollableFrame->GetScrollSnapInfo());
   }
 
   // If we have the scrollparent being the same as the scroll id, the
@@ -8732,7 +8765,7 @@ nsLayoutUtils::ComputeFrameMetrics(nsIFrame* aForFrame,
     ParentLayerRect rect = LayoutDeviceRect::FromAppUnits(*aClipRect, auPerDevPixel)
                          * metrics.GetCumulativeResolution()
                          * layerToParentLayerScale;
-    metrics.SetClipRect(Some(RoundedToInt(rect)));
+    metadata.SetClipRect(Some(RoundedToInt(rect)));
   }
 
   // For the root scroll frame of the root content document (RCD-RSF), the above calculation
@@ -8796,13 +8829,17 @@ nsLayoutUtils::ComputeFrameMetrics(nsIFrame* aForFrame,
     }
   }
 
-  return metrics;
+  if (ShouldDisableApzForElement(aContent)) {
+    metrics.SetForceDisableApz(true);
+  }
+
+  return metadata;
 }
 
 /* static */ bool
 nsLayoutUtils::ContainsMetricsWithId(const Layer* aLayer, const ViewID& aScrollId)
 {
-  for (uint32_t i = aLayer->GetFrameMetricsCount(); i > 0; i--) {
+  for (uint32_t i = aLayer->GetScrollMetadataCount(); i > 0; i--) {
     if (aLayer->GetFrameMetrics(i-1).GetScrollId() == aScrollId) {
       return true;
     }
@@ -8938,16 +8975,6 @@ nsLayoutUtils::GetSelectionBoundingRect(Selection* aSel)
   return res;
 }
 
-/* static */ bool
-nsLayoutUtils::IsScrollFrameWithSnapping(nsIFrame* aFrame)
-{
-  nsIScrollableFrame* sf = do_QueryFrame(aFrame);
-  if (!sf) {
-    return false;
-  }
-  return sf->IsScrollFrameWithSnapping();
-}
-
 /* static */ nsBlockFrame*
 nsLayoutUtils::GetFloatContainingBlock(nsIFrame* aFrame)
 {
@@ -9058,15 +9085,16 @@ nsLayoutUtils::UpdateDisplayPortMarginsFromPendingMessages() {
       mozilla::dom::ContentChild::GetSingleton()->GetIPCChannel()) {
     mozilla::dom::ContentChild::GetSingleton()->GetIPCChannel()->PeekMessages(
       mozilla::layers::PAPZ::Msg_UpdateFrame__ID,
-      [](const IPC::Message& aMsg) {
+      [](const IPC::Message& aMsg) -> bool {
         void* iter = nullptr;
         FrameMetrics frame;
         if (!IPC::ReadParam(&aMsg, &iter, &frame)) {
           MOZ_ASSERT(false);
-          return;
+          return true;
         }
 
         UpdateDisplayPortMarginsForPendingMetrics(frame);
+        return true;
       });
   }
 }

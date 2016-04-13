@@ -573,11 +573,11 @@ JSXrayTraits::resolveOwnProperty(JSContext* cx, const Wrapper& jsWrapper,
 
                     if (ShouldResolveStaticProperties(standardConstructor)) {
                         const js::Class* clasp = js::ProtoKeyToClass(standardConstructor);
-                        MOZ_ASSERT(clasp->spec.defined());
+                        MOZ_ASSERT(clasp->specDefined());
 
                         if (!TryResolvePropertyFromSpecs(cx, id, holder,
-                               clasp->spec.constructorFunctions(),
-                               clasp->spec.constructorProperties(), desc)) {
+                               clasp->specConstructorFunctions(),
+                               clasp->specConstructorProperties(), desc)) {
                             return false;
                         }
 
@@ -656,13 +656,13 @@ JSXrayTraits::resolveOwnProperty(JSContext* cx, const Wrapper& jsWrapper,
 
     // Grab the JSClass. We require all Xrayable classes to have a ClassSpec.
     const js::Class* clasp = js::GetObjectClass(target);
-    MOZ_ASSERT(clasp->spec.defined());
+    MOZ_ASSERT(clasp->specDefined());
 
     // Indexed array properties are handled above, so we can just work with the
     // class spec here.
     if (!TryResolvePropertyFromSpecs(cx, id, holder,
-                                     clasp->spec.prototypeFunctions(),
-                                     clasp->spec.prototypeProperties(),
+                                     clasp->specPrototypeFunctions(),
+                                     clasp->specPrototypeProperties(),
                                      desc)) {
         return false;
     }
@@ -864,11 +864,11 @@ JSXrayTraits::enumerateNames(JSContext* cx, HandleObject wrapper, unsigned flags
 
                 if (ShouldResolveStaticProperties(standardConstructor)) {
                     const js::Class* clasp = js::ProtoKeyToClass(standardConstructor);
-                    MOZ_ASSERT(clasp->spec.defined());
+                    MOZ_ASSERT(clasp->specDefined());
 
                     if (!AppendNamesFromFunctionAndPropertySpecs(
-                           cx, clasp->spec.constructorFunctions(),
-                           clasp->spec.constructorProperties(), flags, props)) {
+                           cx, clasp->specConstructorFunctions(),
+                           clasp->specConstructorProperties(), flags, props)) {
                         return false;
                     }
                 }
@@ -905,11 +905,11 @@ JSXrayTraits::enumerateNames(JSContext* cx, HandleObject wrapper, unsigned flags
 
     // Grab the JSClass. We require all Xrayable classes to have a ClassSpec.
     const js::Class* clasp = js::GetObjectClass(target);
-    MOZ_ASSERT(clasp->spec.defined());
+    MOZ_ASSERT(clasp->specDefined());
 
     return AppendNamesFromFunctionAndPropertySpecs(
-        cx, clasp->spec.prototypeFunctions(),
-        clasp->spec.prototypeProperties(), flags, props);
+        cx, clasp->specPrototypeFunctions(),
+        clasp->specPrototypeProperties(), flags, props);
 }
 
 bool
@@ -1055,11 +1055,15 @@ ExpandoObjectFinalize(JSFreeOp* fop, JSObject* obj)
     NS_RELEASE(principal);
 }
 
+static const JSClassOps ExpandoObjectClassOps = {
+    nullptr, nullptr, nullptr, nullptr,
+    nullptr, nullptr, nullptr, ExpandoObjectFinalize
+};
+
 const JSClass ExpandoObjectClass = {
     "XrayExpandoObject",
     JSCLASS_HAS_RESERVED_SLOTS(JSSLOT_EXPANDO_COUNT),
-    nullptr, nullptr, nullptr, nullptr,
-    nullptr, nullptr, nullptr, ExpandoObjectFinalize
+    &ExpandoObjectClassOps
 };
 
 bool
@@ -1706,14 +1710,15 @@ DOMXrayTraits::call(JSContext* cx, HandleObject wrapper,
     // are using "legacycaller", which basically means plug-ins.  We want to
     // call those on the content compartment.
     if (clasp->flags & JSCLASS_IS_DOMIFACEANDPROTOJSCLASS) {
-        if (!clasp->call) {
+        if (JSNative call = clasp->getCall()) {
+            // call it on the Xray compartment
+            if (!call(cx, args.length(), args.base()))
+                return false;
+        } else {
             RootedValue v(cx, ObjectValue(*wrapper));
             js::ReportIsNotFunction(cx, v);
             return false;
         }
-        // call it on the Xray compartment
-        if (!clasp->call(cx, args.length(), args.base()))
-            return false;
     } else {
         // This is only reached for WebIDL instance objects, and in practice
         // only for plugins.  Just call them on the content compartment.
@@ -1732,13 +1737,14 @@ DOMXrayTraits::construct(JSContext* cx, HandleObject wrapper,
     const js::Class* clasp = js::GetObjectClass(obj);
     // See comments in DOMXrayTraits::call() explaining what's going on here.
     if (clasp->flags & JSCLASS_IS_DOMIFACEANDPROTOJSCLASS) {
-        if (!clasp->construct) {
+        if (JSNative construct = clasp->getConstruct()) {
+            if (!construct(cx, args.length(), args.base()))
+                return false;
+        } else {
             RootedValue v(cx, ObjectValue(*wrapper));
             js::ReportIsNotFunction(cx, v);
             return false;
         }
-        if (!clasp->construct(cx, args.length(), args.base()))
-            return false;
     } else {
         if (!baseInstance.construct(cx, wrapper, args))
             return false;

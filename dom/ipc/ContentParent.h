@@ -63,7 +63,12 @@ class PJavaScriptParent;
 namespace layers {
 class PCompositorBridgeParent;
 class PSharedBufferManagerParent;
+struct TextureFactoryIdentifier;
 } // namespace layers
+
+namespace layout {
+class PRenderFrameParent;
+} // namespace layout
 
 namespace dom {
 
@@ -497,6 +502,7 @@ public:
 
   virtual bool RecvCreateWindow(PBrowserParent* aThisTabParent,
                                 PBrowserParent* aOpener,
+                                layout::PRenderFrameParent* aRenderFrame,
                                 const uint32_t& aChromeFlags,
                                 const bool& aCalledFromJS,
                                 const bool& aPositionSpecified,
@@ -510,7 +516,9 @@ public:
                                 nsresult* aResult,
                                 bool* aWindowIsNew,
                                 InfallibleTArray<FrameScriptInfo>* aFrameScripts,
-                                nsCString* aURLToLoad) override;
+                                nsCString* aURLToLoad,
+                                layers::TextureFactoryIdentifier* aTextureFactoryIdentifier,
+                                uint64_t* aLayersId) override;
 
   static bool AllocateLayerTreeId(TabParent* aTabParent, uint64_t* aId);
 
@@ -729,12 +737,6 @@ private:
   virtual bool
   DeallocPDeviceStorageRequestParent(PDeviceStorageRequestParent*) override;
 
-  virtual PFileSystemRequestParent*
-  AllocPFileSystemRequestParent(const FileSystemParams&) override;
-
-  virtual bool
-  DeallocPFileSystemRequestParent(PFileSystemRequestParent*) override;
-
   virtual PBlobParent*
   AllocPBlobParent(const BlobConstructorParams& aParams) override;
 
@@ -746,9 +748,6 @@ private:
 
   virtual bool
   DeallocPCrashReporterParent(PCrashReporterParent* crashreporter) override;
-
-  virtual bool RecvGetRandomValues(const uint32_t& length,
-                                   InfallibleTArray<uint8_t>* randomValues) override;
 
   virtual bool RecvIsSecureURI(const uint32_t& aType, const URIParams& aURI,
                                const uint32_t& aFlags, bool* aIsSecureURI) override;
@@ -941,9 +940,9 @@ private:
                               nsTArray<StructuredCloneData>* aRetvals) override;
 
   virtual bool RecvAsyncMessage(const nsString& aMsg,
-                                const ClonedMessageData& aData,
                                 InfallibleTArray<CpowEntry>&& aCpows,
-                                const IPC::Principal& aPrincipal) override;
+                                const IPC::Principal& aPrincipal,
+                                const ClonedMessageData& aData) override;
 
   virtual bool RecvFilePathUpdateNotify(const nsString& aType,
                                         const nsString& aStorageName,

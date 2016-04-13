@@ -3366,6 +3366,24 @@ XREMain::XRE_mainInit(bool* aExitFlag)
   }
 #endif
 
+#if defined(MOZ_SANDBOX) && defined(XP_WIN)
+  bool brokerInitialized = SandboxBroker::Initialize();
+  Telemetry::Accumulate(Telemetry::SANDBOX_BROKER_INITIALIZED,
+                        brokerInitialized);
+  if (!brokerInitialized) {
+#if defined(MOZ_CONTENT_SANDBOX)
+    // If we're sandboxing content and we fail to initialize, then crashing here
+    // seems like the sensible option.
+    if (BrowserTabsRemoteAutostart()) {
+      MOZ_CRASH("Failed to initialize broker services, can't continue.");
+    }
+#endif
+    // Otherwise just warn for the moment, as most things will work.
+    NS_WARNING("Failed to initialize broker services, sandboxed processes will "
+               "fail to start.");
+  }
+#endif
+
 #ifdef XP_MACOSX
   if (EnvHasValue("MOZ_LAUNCHED_CHILD")) {
     // This is needed, on relaunch, to force the OS to use the "Cocoa Dock
@@ -3729,12 +3747,6 @@ XREMain::XRE_mainStartup(bool* aExitFlag)
     int result;
 #ifdef XP_WIN
     UseParentConsole();
-#if defined(MOZ_SANDBOX)
-    if (!SandboxBroker::Initialize()) {
-      NS_WARNING("Failed to initialize broker services, sandboxed processes "
-                 "will fail to start.");
-    }
-#endif
 #endif
     // RunGTest will only be set if we're in xul-unit
     if (mozilla::RunGTest) {
@@ -4320,20 +4332,6 @@ XREMain::XRE_mainRun()
   }
 #endif /* MOZ_INSTRUMENT_EVENT_LOOP */
 
-#if defined(MOZ_SANDBOX) && defined(XP_WIN)
-  if (!SandboxBroker::Initialize()) {
-#if defined(MOZ_CONTENT_SANDBOX)
-    // If we're sandboxing content and we fail to initialize, then crashing here
-    // seems like the sensible option.
-    if (BrowserTabsRemoteAutostart()) {
-      MOZ_CRASH("Failed to initialize broker services, can't continue.");
-    }
-#endif
-    // Otherwise just warn for the moment, as most things will work.
-    NS_WARNING("Failed to initialize broker services, sandboxed processes will "
-               "fail to start.");
-  }
-#endif
 #if (defined(XP_WIN) || defined(XP_MACOSX)) && defined(MOZ_CONTENT_SANDBOX)
   SetUpSandboxEnvironment();
 #endif
@@ -4661,23 +4659,24 @@ enum {
   kE10sDisabledForBidi = 6,
   kE10sDisabledForAddons = 7,
   kE10sForceDisabled = 8,
+  kE10sDisabledForXPAcceleration = 9,
 };
 
-#ifdef XP_WIN
+#if defined(XP_WIN) || defined(XP_MACOSX)
 const char* kAccessibilityLastRunDatePref = "accessibility.lastLoadDate";
 const char* kAccessibilityLoadedLastSessionPref = "accessibility.loadedInLastSession";
-#endif // XP_WIN
-const char* kForceEnableE10sPref = "browser.tabs.remote.force-enable";
-const char* kForceDisableE10sPref = "browser.tabs.remote.force-disable";
 
-#ifdef XP_WIN
 static inline uint32_t
 PRTimeToSeconds(PRTime t_usec)
 {
   PRTime usec_per_sec = PR_USEC_PER_SEC;
   return uint32_t(t_usec /= usec_per_sec);
 }
-#endif // XP_WIN
+#endif // XP_WIN || XP_MACOSX
+
+const char* kForceEnableE10sPref = "browser.tabs.remote.force-enable";
+const char* kForceDisableE10sPref = "browser.tabs.remote.force-disable";
+
 
 uint32_t
 MultiprocessBlockPolicy() {
@@ -4704,7 +4703,7 @@ MultiprocessBlockPolicy() {
   }
 
   bool disabledForA11y = false;
-#ifdef XP_WIN
+#if defined(XP_WIN) || defined(XP_MACOSX)
   /**
    * Avoids enabling e10s if accessibility has recently loaded. Performs the
    * following checks:
@@ -4730,6 +4729,20 @@ MultiprocessBlockPolicy() {
     } else {
       disabledForA11y = true;
     }
+  }
+#endif // XP_WIN || XP_MACOSX
+
+#if defined(XP_WIN)
+  /**
+   * We block on Windows XP if layers acceleration is requested. This is due to
+   * bug 1237769 where D3D9 and e10s behave badly together on XP.
+   */
+  bool layersAccelerationRequested = !Preferences::GetBool("layers.acceleration.disabled") ||
+                                      Preferences::GetBool("layers.acceleration.force-enabled");
+
+  if (layersAccelerationRequested && !IsVistaOrLater()) {
+    gMultiprocessBlockPolicy = kE10sDisabledForXPAcceleration;
+    return gMultiprocessBlockPolicy;
   }
 #endif // XP_WIN
 

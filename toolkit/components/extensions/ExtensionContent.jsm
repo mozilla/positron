@@ -120,7 +120,7 @@ var api = context => {
 
     i18n: {
       getMessage: function(messageName, substitutions) {
-        return context.extension.localizeMessage(messageName, substitutions);
+        return context.extension.localizeMessage(messageName, substitutions, {cloneScope: context.cloneScope});
       },
 
       getAcceptLanguages: function(callback) {
@@ -170,12 +170,12 @@ Script.prototype = {
     }
 
     if (this.options.include_globs != null) {
-      if (!this.include_globs_.matches(uri)) {
+      if (!this.include_globs_.matches(uri.spec)) {
         return false;
       }
     }
 
-    if (this.exclude_globs_.matches(uri)) {
+    if (this.exclude_globs_.matches(uri.spec)) {
       return false;
     }
 
@@ -296,13 +296,18 @@ class ExtensionContext extends BaseContext {
     let contentPrincipal = contentWindow.document.nodePrincipal;
     let ssm = Services.scriptSecurityManager;
 
-    let extensionPrincipal = ssm.createCodebasePrincipal(this.extension.baseURI, {addonId: extensionId});
+    // copy origin attributes from the content window origin attributes to
+    // preserve the user context id. overwrite the addonId.
+    let attrs = contentPrincipal.originAttributes;
+    attrs.addonId = extensionId;
+    let extensionPrincipal = ssm.createCodebasePrincipal(this.extension.baseURI, attrs);
     Object.defineProperty(this, "principal",
                           {value: extensionPrincipal, enumerable: true, configurable: true});
 
     if (ssm.isSystemPrincipal(contentPrincipal)) {
       // Make sure we don't hand out the system principal by accident.
-      prin = Cc["@mozilla.org/nullprincipal;1"].createInstance(Ci.nsIPrincipal);
+      // also make sure that the null principal has the right origin attributes
+      prin = ssm.createNullPrincipal(attrs);
     } else {
       prin = [contentPrincipal, extensionPrincipal];
     }
@@ -541,7 +546,7 @@ DocumentManager = {
     return promises[0];
   },
 
-  enumerateWindows: function*(docShell) {
+  enumerateWindows: function* (docShell) {
     let window = docShell.QueryInterface(Ci.nsIInterfaceRequestor)
                          .getInterface(Ci.nsIDOMWindow);
     yield window;
@@ -654,7 +659,7 @@ function BrowserExtensionContent(data) {
   this.uuid = data.uuid;
   this.data = data;
   this.scripts = data.content_scripts.map(scriptData => new Script(scriptData));
-  this.webAccessibleResources = data.webAccessibleResources;
+  this.webAccessibleResources = new MatchGlobs(data.webAccessibleResources);
   this.whiteListedHosts = new MatchPattern(data.whiteListedHosts);
 
   this.localeData = new LocaleData(data.localeData);

@@ -486,15 +486,20 @@ nsresult nsCocoaUtils::CreateNSImageFromImageContainer(imgIContainer *aImage, ui
       return NS_ERROR_FAILURE;
     }
 
-    RefPtr<gfxContext> context = new gfxContext(drawTarget);
+    RefPtr<gfxContext> context = gfxContext::ForDrawTarget(drawTarget);
     if (!context) {
       NS_ERROR("Failed to create gfxContext");
       return NS_ERROR_FAILURE;
     }
 
-    aImage->Draw(context, scaledSize, ImageRegion::Create(scaledSize),
-                 aWhichFrame, Filter::POINT, Nothing(),
-                 imgIContainer::FLAG_SYNC_DECODE);
+    mozilla::image::DrawResult res =
+      aImage->Draw(context, scaledSize, ImageRegion::Create(scaledSize),
+                   aWhichFrame, Filter::POINT, Nothing(),
+                   imgIContainer::FLAG_SYNC_DECODE);
+
+    if (res != mozilla::image::DrawResult::SUCCESS) {
+      return NS_ERROR_FAILURE;
+    }
 
     surface = drawTarget->Snapshot();
   } else {
@@ -608,7 +613,7 @@ nsCocoaUtils::InitInputEvent(WidgetInputEvent& aInputEvent,
 {
   NS_OBJC_BEGIN_TRY_ABORT_BLOCK;
 
-  aInputEvent.modifiers = ModifiersForEvent(aNativeEvent);
+  aInputEvent.mModifiers = ModifiersForEvent(aNativeEvent);
   aInputEvent.mTime = PR_IntervalNow();
 
   NS_OBJC_END_TRY_ABORT_BLOCK;

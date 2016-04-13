@@ -310,6 +310,9 @@ interface Element : Node {
   HTMLCollection getElementsByTagName(DOMString localName);
   HTMLCollection getElementsByTagNameNS(DOMString? namespace, DOMString localName);
   HTMLCollection getElementsByClassName(DOMString classNames);
+
+  Element? insertAdjacentElement(DOMString where, Element element); // historical
+  void insertAdjacentText(DOMString where, DOMString data); // historical
 };
 
 interface NamedNodeMap {
@@ -485,6 +488,7 @@ setup(function() {
   idlArray.add_objects({
     Event: ['document.createEvent("Event")', 'new Event("foo")'],
     CustomEvent: ['new CustomEvent("foo")'],
+    Document: ['new Document()'],
     XMLDocument: ['xmlDoc'],
     DOMImplementation: ['document.implementation'],
     DocumentFragment: ['document.createDocumentFragment()'],

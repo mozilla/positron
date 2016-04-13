@@ -159,6 +159,10 @@
                   android:launchMode="singleTop"
                   android:theme="@style/OverlayActivity" />
 
+        <activity android:name="org.mozilla.gecko.promotion.HomeScreenPrompt"
+                  android:launchMode="singleTop"
+                  android:theme="@style/OverlayActivity" />
+
         <!-- The main reason for the Tab Queue build flag is to not mess with the VIEW intent filter
              before the rest of the plumbing is in place -->
 
@@ -326,11 +330,6 @@
 
         <provider android:name="org.mozilla.gecko.db.HomeProvider"
                   android:authorities="@ANDROID_PACKAGE_NAME@.db.home"
-                  android:exported="false"/>
-
-        <provider android:name="org.mozilla.gecko.db.ReadingListProvider"
-                  android:authorities="@ANDROID_PACKAGE_NAME@.db.readinglist"
-                  android:label="@string/reading_list_title"
                   android:exported="false"/>
 
         <provider android:name="org.mozilla.gecko.db.SearchHistoryProvider"

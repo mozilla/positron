@@ -25,9 +25,6 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=933681
   const Cu = Components.utils;
   let global = Cu.getGlobalForObject.bind(Cu);
 
-  /** Needed for AppConstants.RELEASE_BUILD usage further down **/
-  Cu.import("resource://gre/modules/AppConstants.jsm")
-
   function checkThrows(f, rgxp, msg) {
     try {
       f();
@@ -173,19 +170,13 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=933681
      "unwatch", "hasOwnProperty", "isPrototypeOf", "propertyIsEnumerable",
      "__defineGetter__", "__defineSetter__", "__lookupGetter__", "__lookupSetter__",
      "__proto__"];
-
-  /** Bug 1251855 - "entries" and "values" are not exposed to release builds **/
   gConstructorProperties['Object'] =
     constructorProps(["setPrototypeOf", "getOwnPropertyDescriptor", "keys",
                       "is", "defineProperty", "defineProperties", "create",
                       "getOwnPropertyNames", "getOwnPropertySymbols",
                       "preventExtensions", "freeze", "isFrozen", "seal",
-                      "isSealed", "assign", "getPrototypeOf", "isExtensible"])
-  if (!AppConstants.RELEASE_BUILD) {
-    gConstructorProperties['Object'] = 
-      gConstructorProperties['Object'].concat(["values", "entries"]);
-  }
-
+                      "isSealed", "assign", "getPrototypeOf", "values",
+                      "entries", "isExtensible"])
   gPrototypeProperties['Array'] =
     ["length", "toSource", "toString", "toLocaleString", "join", "reverse", "sort", "push",
       "pop", "shift", "unshift", "splice", "concat", "slice", "lastIndexOf", "indexOf",
@@ -196,7 +187,8 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=933681
     constructorProps(["join", "reverse", "sort", "push", "pop", "shift",
                       "unshift", "splice", "concat", "slice", "isArray",
                       "lastIndexOf", "indexOf", "forEach", "map", "filter",
-                      "every", "some", "reduce", "reduceRight", "from", "of"]);
+                      "every", "some", "reduce", "reduceRight", "from", "of",
+                      Symbol.species]);
   for (var c of typedArrayClasses) {
     gPrototypeProperties[c] = ["constructor", "BYTES_PER_ELEMENT"];
     gConstructorProperties[c] = constructorProps(["BYTES_PER_ELEMENT"]);
@@ -227,13 +219,14 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=933681
 
   gPrototypeProperties['RegExp'] =
     ["constructor", "toSource", "toString", "compile", "exec", "test",
+     Symbol.match, Symbol.replace, Symbol.search, Symbol.split,
      "flags", "global", "ignoreCase", "multiline", "source", "sticky", "unicode",
      "lastIndex"];
   gConstructorProperties['RegExp'] =
     constructorProps(["input", "lastMatch", "lastParen",
                       "leftContext", "rightContext", "$1", "$2", "$3", "$4",
                       "$5", "$6", "$7", "$8", "$9", "$_", "$&", "$+",
-                      "$`", "$'"])
+                      "$`", "$'", Symbol.species])
 
   // Sort an array that may contain symbols as well as strings.
   function sortProperties(arr) {
@@ -400,20 +393,22 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=933681
        gConstructorProperties[classname].filter(id => typeof id === "string").toSource(),
        "A property on the " + classname +
        " constructor has changed! You need a security audit from an XPConnect peer");
-    is(Object.getOwnPropertySymbols(localCtor).map(uneval).sort().toSource(),
+    let desiredCtorSymbols =
+        Object.getOwnPropertySymbols(localCtor).map(uneval).sort()
+    is(desiredCtorSymbols.toSource(),
        gConstructorProperties[classname].filter(id => typeof id !== "string").map(uneval).sort().toSource(),
        "A symbol-keyed property on the " + classname +
        " constructor has been changed! You need a security audit from an XPConnect peer");
 
     let ctorProps = filterOut(desiredCtorProps, ctorPropsToSkip);
+    let ctorSymbols = filterOut(desiredCtorSymbols, ctorPropsToSkip.map(uneval));
     let ctorCallables = ctorProps.filter(name => propertyIsGetter(localCtor, name, classname) ||
                                          typeof localCtor[name] == 'function');
     testCtorCallables(ctorCallables, xrayCtor, localCtor);
     is(Object.getOwnPropertyNames(xrayCtor).sort().toSource(),
        ctorProps.toSource(), "getOwnPropertyNames works on Xrayed ctors");
     is(Object.getOwnPropertySymbols(xrayCtor).map(uneval).sort().toSource(),
-       gConstructorProperties[classname].filter(id => typeof id !== "string").map(uneval).sort().toSource(),
-       "getOwnPropertySymbols works on Xrayed ctors");
+       ctorSymbols.toSource(), "getOwnPropertySymbols works on Xrayed ctors");
   }
 
   // We will need arraysEqual and testArrayIterators both in this global scope
@@ -441,6 +436,47 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=933681
       arraysEqual([...arrayLike.values()], equivalentArray,
                   \`\${reason}; values\`);
     }
+
+    var forEachCopy = [];
+    arrayLike.forEach(function(arg) { forEachCopy.push(arg); });
+    arraysEqual(forEachCopy, equivalentArray, \`\${reason}; forEach copy\`);
+
+    var everyCopy = [];
+    arrayLike.every(function(arg) { everyCopy.push(arg); return true; });
+    arraysEqual(everyCopy, equivalentArray, \`\${reason}; every() copy\`);
+
+    var filterCopy = [];
+    var filterResult = arrayLike.filter(function(arg) {
+      filterCopy.push(arg);
+      return true;
+    });
+    arraysEqual(filterCopy, equivalentArray, \`\${reason}; filter copy\`);
+    arraysEqual([...filterResult], equivalentArray, \`\${reason}; filter result\`);
+
+    var findCopy = [];
+    arrayLike.find(function(arg) { findCopy.push(arg); return false; });
+    arraysEqual(findCopy, equivalentArray, \`\${reason}; find() copy\`);
+
+    var findIndexCopy = [];
+    arrayLike.findIndex(function(arg) { findIndexCopy.push(arg); return false; });
+    arraysEqual(findIndexCopy, equivalentArray, \`\${reason}; findIndex() copy\`);
+
+    var mapCopy = [];
+    var mapResult = arrayLike.map(function(arg) { mapCopy.push(arg); return arg});
+    arraysEqual(mapCopy, equivalentArray, \`\${reason}; map() copy\`);
+    arraysEqual([...mapResult], equivalentArray, \`\${reason}; map() result\`);
+
+    var reduceCopy = [];
+    arrayLike.reduce(function(_, arg) { reduceCopy.push(arg); }, 0);
+    arraysEqual(reduceCopy, equivalentArray, \`\${reason}; reduce() copy\`);
+
+    var reduceRightCopy = [];
+    arrayLike.reduceRight(function(_, arg) { reduceRightCopy.unshift(arg); }, 0);
+    arraysEqual(reduceRightCopy, equivalentArray, \`\${reason}; reduceRight() copy\`);
+
+    var someCopy = [];
+    arrayLike.some(function(arg) { someCopy.push(arg); return false; });
+    arraysEqual(someCopy, equivalentArray, \`\${reason}; some() copy\`);
   }`;
   eval(testArrayIteratorsSource);
 
@@ -507,7 +543,7 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=933681
     // functions.  We're trying to remove them anyway; no point doing extra work
     // to expose them over Xrays.
     let ctorPropsToSkip = ["join", "reverse", "sort", "push", "pop", "shift",
-                           "unshift", "splice", "concat", "slice"];
+                           "unshift", "splice", "slice"];
     testXray('Array', new iwin.Array(20), new iwin.Array(), propsToSkip,
              ctorPropsToSkip);
 
@@ -764,10 +800,13 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=933681
     // properties that have to do with the last regexp execution in the global.
     // Xraying those makes no sense, so we just skip constructor properties for
     // RegExp xrays.
+    // RegExp[@@species] is affected by above skip, but we don't fix it until
+    // compelling use-case appears, as supporting RegExp[@@species] while
+    // skipping other static properties makes things complicated.
     let ctorPropsToSkip = ["input", "lastMatch", "lastParen",
                            "leftContext", "rightContext", "$1", "$2", "$3",
                            "$4", "$5", "$6", "$7", "$8", "$9", "$_", "$&",
-                           "$+", "$`", "$'"];
+                           "$+", "$`", "$'", Symbol.species];
     testXray('RegExp', new iwin.RegExp('foo'), new iwin.RegExp(), [],
              ctorPropsToSkip);
 

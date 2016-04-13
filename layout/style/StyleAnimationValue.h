@@ -9,6 +9,7 @@
 #define mozilla_StyleAnimationValue_h_
 
 #include "mozilla/gfx/MatrixFwd.h"
+#include "mozilla/UniquePtr.h"
 #include "nsStringFwd.h"
 #include "nsStringBuffer.h"
 #include "nsCoord.h"
@@ -197,10 +198,14 @@ public:
   /**
    * Creates a specified value for the given computed value.
    *
-   * The first overload fills in an nsCSSValue object; the second
-   * produces a string.  The nsCSSValue result may depend on objects
-   * owned by the |aComputedValue| object, so users of that variant
+   * The first two overloads fill in an nsCSSValue object; the third
+   * produces a string.  For the overload that takes a const
+   * StyleAnimationValue& reference, the nsCSSValue result may depend on
+   * objects owned by the |aComputedValue| object, so users of that variant
    * must keep |aComputedValue| alive longer than |aSpecifiedValue|.
+   * The overload that takes an rvalue StyleAnimationValue reference
+   * transfers ownership for some resources such that the |aComputedValue|
+   * does not depend on the lifetime of |aSpecifiedValue|.
    *
    * @param aProperty      The property whose value we're uncomputing.
    * @param aComputedValue The computed value to be converted.
@@ -211,12 +216,20 @@ public:
                              const StyleAnimationValue& aComputedValue,
                              nsCSSValue& aSpecifiedValue);
   static bool UncomputeValue(nsCSSProperty aProperty,
+                             StyleAnimationValue&& aComputedValue,
+                             nsCSSValue& aSpecifiedValue);
+  static bool UncomputeValue(nsCSSProperty aProperty,
                              const StyleAnimationValue& aComputedValue,
                              nsAString& aSpecifiedValue);
 
   /**
    * Gets the computed value for the given property from the given style
    * context.
+   *
+   * Obtaining the computed value allows us to animate properties when the
+   * content author has specified a value like "inherit" or "initial" or some
+   * other keyword that isn't directly interpolatable, but which *computes* to
+   * something interpolatable.
    *
    * @param aProperty     The property whose value we're looking up.
    * @param aStyleContext The style context to check for the computed value.
@@ -262,6 +275,7 @@ public:
                 // calc() expression that's either length or length+percent
     eUnit_ObjectPosition, // nsCSSValue* (never null), always with a
                           // 4-entry nsCSSValue::Array
+    eUnit_URL, // nsCSSValue* (never null), always with a css::URLValue
     eUnit_CSSValuePair, // nsCSSValuePair* (never null)
     eUnit_CSSValueTriplet, // nsCSSValueTriplet* (never null)
     eUnit_CSSRect, // nsCSSRect* (never null)
@@ -366,6 +380,19 @@ public:
   /// @return the scale for this value, calculated with reference to @aForFrame.
   gfxSize GetScaleValue(const nsIFrame* aForFrame) const;
 
+  UniquePtr<nsCSSValueList> TakeCSSValueListValue() {
+    nsCSSValueList* list = GetCSSValueListValue();
+    mValue.mCSSValueList = nullptr;
+    mUnit = eUnit_Null;
+    return UniquePtr<nsCSSValueList>(list);
+  }
+  UniquePtr<nsCSSValuePairList> TakeCSSValuePairListValue() {
+    nsCSSValuePairList* list = GetCSSValuePairListValue();
+    mValue.mCSSValuePairList = nullptr;
+    mUnit = eUnit_Null;
+    return UniquePtr<nsCSSValuePairList>(list);
+  }
+
   explicit StyleAnimationValue(Unit aUnit = eUnit_Null) : mUnit(aUnit) {
     NS_ASSERTION(aUnit == eUnit_Null || aUnit == eUnit_Normal ||
                  aUnit == eUnit_Auto || aUnit == eUnit_None,
@@ -373,6 +400,12 @@ public:
   }
   StyleAnimationValue(const StyleAnimationValue& aOther)
     : mUnit(eUnit_Null) { *this = aOther; }
+  StyleAnimationValue(StyleAnimationValue&& aOther)
+    : mUnit(aOther.mUnit)
+    , mValue(aOther.mValue)
+  {
+    aOther.mUnit = eUnit_Null;
+  }
   enum IntegerConstructorType { IntegerConstructor };
   StyleAnimationValue(int32_t aInt, Unit aUnit, IntegerConstructorType);
   enum CoordConstructorType { CoordConstructor };
@@ -426,7 +459,8 @@ private:
   }
   static bool IsCSSValueUnit(Unit aUnit) {
     return aUnit == eUnit_Calc ||
-           aUnit == eUnit_ObjectPosition;
+           aUnit == eUnit_ObjectPosition ||
+           aUnit == eUnit_URL;
   }
   static bool IsCSSValuePairUnit(Unit aUnit) {
     return aUnit == eUnit_CSSValuePair;

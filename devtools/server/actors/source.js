@@ -13,7 +13,7 @@ const { createValueGrip } = require("devtools/server/actors/object");
 const { ActorClass, Arg, RetVal, method } = require("devtools/server/protocol");
 const DevToolsUtils = require("devtools/shared/DevToolsUtils");
 const { assert, fetch } = DevToolsUtils;
-const { dirname, joinURI } = require("devtools/shared/path");
+const { joinURI } = require("devtools/shared/path");
 const promise = require("promise");
 const { defer, resolve, reject, all } = promise;
 
@@ -52,8 +52,7 @@ function getSourceURL(source, window) {
         }
       }
       else {
-        return joinURI(dirname(source.introductionScript.source.url),
-                       source.displayURL);
+        return joinURI(source.introductionScript.source.url, source.displayURL);
       }
     }
 
@@ -608,7 +607,10 @@ let SourceActor = ActorClass({
    */
   setBreakpoint: method(function (line, column, condition) {
     if (this.threadActor.state !== "paused") {
-      throw new Error("Cannot set breakpoint while debuggee is running.");
+      throw {
+        error: "wrongState",
+        message: "Cannot set breakpoint while debuggee is running."
+      };
     }
 
     let location = new OriginalLocation(this, line, column);
@@ -858,4 +860,3 @@ let SourceActor = ActorClass({
 });
 
 exports.SourceActor = SourceActor;
-

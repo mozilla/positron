@@ -23,6 +23,7 @@ from mozpack.manifests import (
 import mozpack.path as mozpath
 
 from mozbuild.frontend.context import (
+    AbsolutePath,
     Path,
     RenamedSourcePath,
     SourcePath,
@@ -509,16 +510,20 @@ class RecursiveMakeBackend(CommonBackend):
         elif isinstance(obj, GeneratedFile):
             tier = 'misc' if any(isinstance(f, ObjDirPath) for f in obj.inputs) else 'export'
             self._no_skip[tier].add(backend_file.relobjdir)
-            dep_file = "%s.pp" % obj.output
-            backend_file.write('%s:: %s\n' % (tier, obj.output))
-            backend_file.write('GARBAGE += %s\n' % obj.output)
+            first_output = obj.outputs[0]
+            dep_file = "%s.pp" % first_output
+            backend_file.write('%s:: %s\n' % (tier, first_output))
+            for output in obj.outputs:
+                if output != first_output:
+                    backend_file.write('%s: %s ;\n' % (output, first_output))
+                backend_file.write('GARBAGE += %s\n' % output)
             backend_file.write('EXTRA_MDDEPEND_FILES += %s\n' % dep_file)
             if obj.script:
                 backend_file.write("""{output}: {script}{inputs}{backend}
 \t$(REPORT_BUILD)
 \t$(call py_action,file_generate,{script} {method} {output} $(MDDEPDIR)/{dep_file}{inputs}{flags})
 
-""".format(output=obj.output,
+""".format(output=first_output,
            dep_file=dep_file,
            inputs=' ' + ' '.join([f.full_path for f in obj.inputs]) if obj.inputs else '',
            flags=' ' + ' '.join(obj.flags) if obj.flags else '',
@@ -1042,14 +1047,14 @@ class RecursiveMakeBackend(CommonBackend):
         # the manifest is listed as a duplicate.
         for source, (dest, is_test) in obj.installs.items():
             try:
-                self._install_manifests['_tests'].add_symlink(source, dest)
+                self._install_manifests['_test_files'].add_symlink(source, dest)
             except ValueError:
                 if not obj.dupe_manifest and is_test:
                     raise
 
         for base, pattern, dest in obj.pattern_installs:
             try:
-                self._install_manifests['_tests'].add_pattern_symlink(base,
+                self._install_manifests['_test_files'].add_pattern_symlink(base,
                     pattern, dest)
             except ValueError:
                 if not obj.dupe_manifest:
@@ -1057,7 +1062,7 @@ class RecursiveMakeBackend(CommonBackend):
 
         for dest in obj.external_installs:
             try:
-                self._install_manifests['_tests'].add_optional_exists(dest)
+                self._install_manifests['_test_files'].add_optional_exists(dest)
             except ValueError:
                 if not obj.dupe_manifest:
                     raise
@@ -1249,14 +1254,13 @@ class RecursiveMakeBackend(CommonBackend):
                 dest = mozpath.join(reltarget, path, f.target_basename)
                 if not isinstance(f, ObjDirPath):
                     if '*' in f:
-                        if not isinstance(f, SourcePath):
-                            raise Exception("Wildcards are only supported in "
-                                            "SourcePath objects in %s. Path is: %s" % (
-                                                type(obj), f
-                                            ))
-                        if f.startswith('/'):
-                            basepath = f.full_path.rstrip('*')
-                            install_manifest.add_pattern_symlink(basepath, '*', path)
+                        if f.startswith('/') or isinstance(f, AbsolutePath):
+                            basepath, wild = os.path.split(f.full_path)
+                            if '*' in basepath:
+                                raise Exception("Wildcards are only supported in the filename part of "
+                                                "srcdir-relative or absolute paths.")
+
+                            install_manifest.add_pattern_symlink(basepath, wild, path)
                         else:
                             install_manifest.add_pattern_symlink(f.srcdir, f, path)
                     else:

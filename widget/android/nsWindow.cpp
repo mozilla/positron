@@ -807,6 +807,14 @@ public:
         return true;
     }
 
+    void HandleMotionEventVelocity(int64_t aTime, float aSpeedY)
+    {
+        RefPtr<APZCTreeManager> controller = mWindow->mAPZC;
+        if (controller) {
+            controller->ProcessTouchVelocity((uint32_t)aTime, aSpeedY);
+        }
+    }
+
     void UpdateOverscrollVelocity(const float x, const float y)
     {
         mNPZC->UpdateOverscrollVelocity(x, y);
@@ -815,6 +823,11 @@ public:
     void UpdateOverscrollOffset(const float x, const float y)
     {
         mNPZC->UpdateOverscrollOffset(x, y);
+    }
+
+    void SetScrollingRootContent(const bool isRootContent)
+    {
+        mNPZC->SetScrollingRootContent(isRootContent);
     }
 
     void SetSelectionDragState(const bool aState)
@@ -1877,6 +1890,17 @@ nsWindow::UpdateOverscrollOffset(const float aX, const float aY)
 }
 
 void
+nsWindow::SetScrollingRootContent(const bool isRootContent)
+{
+    // On Android, the Controller thread and UI thread are the same.
+    MOZ_ASSERT(APZThreadUtils::IsControllerThread(), "nsWindow::SetScrollingRootContent must be called from the controller thread");
+
+    if (mNPZCSupport) {
+        mNPZCSupport->SetScrollingRootContent(isRootContent);
+    }
+}
+
+void
 nsWindow::SetSelectionDragState(bool aState)
 {
     if (mNPZCSupport) {
@@ -1991,14 +2015,14 @@ nsWindow::OnLongTapEvent(AndroidGeckoEvent *ae)
 void
 nsWindow::DispatchHitTest(const WidgetTouchEvent& aEvent)
 {
-    if (aEvent.mMessage == eTouchStart && aEvent.touches.Length() == 1) {
+    if (aEvent.mMessage == eTouchStart && aEvent.mTouches.Length() == 1) {
         // Since touch events don't get retargeted by PositionedEventTargeting.cpp
         // code on Fennec, we dispatch a dummy mouse event that *does* get
         // retargeted. The Fennec browser.js code can use this to activate the
         // highlight element in case the this touchstart is the start of a tap.
         WidgetMouseEvent hittest(true, eMouseHitTest, this,
                                  WidgetMouseEvent::eReal);
-        hittest.refPoint = aEvent.touches[0]->mRefPoint;
+        hittest.refPoint = aEvent.mTouches[0]->mRefPoint;
         hittest.ignoreRootScrollFrame = true;
         hittest.inputSource = nsIDOMMouseEvent::MOZ_SOURCE_TOUCH;
         nsEventStatus status;
@@ -2116,7 +2140,7 @@ nsWindow::OnNativeGestureEvent(AndroidGeckoEvent *ae)
 
     event.direction = 0;
     event.delta = delta;
-    event.modifiers = 0;
+    event.mModifiers = 0;
     event.mTime = ae->Time();
     event.refPoint = pt;
 
@@ -2431,7 +2455,7 @@ InitKeyEvent(WidgetKeyboardEvent& event,
     const uint32_t domKeyCode = ConvertAndroidKeyCodeToDOMKeyCode(keyCode);
     const int32_t charCode = unicodeChar ? unicodeChar : baseUnicodeChar;
 
-    event.modifiers = GetModifiers(metaState);
+    event.mModifiers = GetModifiers(metaState);
 
     if (event.mMessage == eKeyPress) {
         // Android gives us \n, so filter out some control characters.
@@ -2447,8 +2471,8 @@ InitKeyEvent(WidgetKeyboardEvent& event,
         // causes text input even while right Alt key is pressed.  However,
         // this is necessary for Android 2.3 compatibility.
         if (unicodeChar && unicodeChar != baseUnicodeChar) {
-            event.modifiers &= ~(MODIFIER_ALT | MODIFIER_CONTROL
-                                              | MODIFIER_META);
+            event.mModifiers &= ~(MODIFIER_ALT | MODIFIER_CONTROL
+                                               | MODIFIER_META);
         }
 
     } else {

@@ -2366,6 +2366,12 @@ const KTableEntry nsCSSProps::kVectorEffectKTable[] = {
   { eCSSKeyword_UNKNOWN, -1 }
 };
 
+const KTableEntry nsCSSProps::kColorAdjustKTable[] = {
+  { eCSSKeyword_economy, NS_STYLE_COLOR_ADJUST_ECONOMY },
+  { eCSSKeyword_exact, NS_STYLE_COLOR_ADJUST_EXACT },
+  { eCSSKeyword_UNKNOWN, -1 }
+};
+
 const KTableEntry nsCSSProps::kColorInterpolationKTable[] = {
   { eCSSKeyword_auto, NS_STYLE_COLOR_INTERPOLATION_AUTO },
   { eCSSKeyword_srgb, NS_STYLE_COLOR_INTERPOLATION_SRGB },
@@ -3139,13 +3145,6 @@ enum ContentCheckCounter {
   ePropertyCount_for_Content
 };
 
-enum QuotesCheckCounter {
-  #define CSS_PROP_QUOTES ENUM_DATA_FOR_PROPERTY
-  #include "nsCSSPropList.h"
-  #undef CSS_PROP_QUOTES
-  ePropertyCount_for_Quotes
-};
-
 enum TextCheckCounter {
   #define CSS_PROP_TEXT ENUM_DATA_FOR_PROPERTY
   #include "nsCSSPropList.h"
@@ -3207,6 +3206,13 @@ enum VariablesCheckCounter {
   #include "nsCSSPropList.h"
   #undef CSS_PROP_VARIABLES
   ePropertyCount_for_Variables
+};
+
+enum EffectsCheckCounter {
+  #define CSS_PROP_EFFECTS ENUM_DATA_FOR_PROPERTY
+  #include "nsCSSPropList.h"
+  #undef CSS_PROP_EFFECTS
+  ePropertyCount_for_Effects
 };
 
 #undef ENUM_DATA_FOR_PROPERTY

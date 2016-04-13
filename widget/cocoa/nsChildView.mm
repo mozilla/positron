@@ -1436,7 +1436,7 @@ NS_IMETHODIMP nsChildView::DispatchEvent(WidgetGUIEvent* event,
                                          nsEventStatus& aStatus)
 {
 #ifdef DEBUG
-  debug_DumpEvent(stdout, event->widget, event, nsAutoCString("something"), 0);
+  debug_DumpEvent(stdout, event->widget, event, "something", 0);
 #endif
 
   NS_ASSERTION(!(mTextInputHandler && mTextInputHandler->IsIMEComposing() &&
@@ -2790,7 +2790,8 @@ nsChildView::DispatchAPZWheelInputEvent(InputData& aEvent, bool aCanTriggerSwipe
         MOZ_CRASH("unsupported event type");
         return;
     }
-    if (event.mMessage == eWheel && (event.deltaX != 0 || event.deltaY != 0)) {
+    if (event.mMessage == eWheel &&
+        (event.mDeltaX != 0 || event.mDeltaY != 0)) {
       ProcessUntransformedAPZEvent(&event, guid, inputBlockId, result);
     }
     return;
@@ -2850,7 +2851,8 @@ nsChildView::DispatchAPZWheelInputEvent(InputData& aEvent, bool aCanTriggerSwipe
       MOZ_CRASH("unexpected event type");
       return;
   }
-  if (event.mMessage == eWheel && (event.deltaX != 0 || event.deltaY != 0)) {
+  if (event.mMessage == eWheel &&
+      (event.mDeltaX != 0 || event.mDeltaY != 0)) {
     DispatchEvent(&event, status);
   }
 }
@@ -3732,9 +3734,14 @@ NSEvent* gLastDragMouseDownEvent = nil;
     gfx::Factory::CreateDrawTargetForCairoCGContext(aContext,
                                                     gfx::IntSize(backingSize.width,
                                                                  backingSize.height));
-  MOZ_ASSERT(dt); // see implementation
+  if (!dt || !dt->IsValid()) {
+    // This used to be an assertion, so keep crashing in nightly+aurora
+    gfxDevCrash(mozilla::gfx::LogReason::InvalidContext) << "Cannot create target with CreateDrawTargetForCairoCGContext " << backingSize;
+    return;
+  }
   dt->AddUserData(&gfxContext::sDontUseAsSourceKey, dt, nullptr);
-  RefPtr<gfxContext> targetContext = new gfxContext(dt);
+  RefPtr<gfxContext> targetContext = gfxContext::ForDrawTarget(dt);
+  MOZ_ASSERT(targetContext); // already checked the draw target above
 
   // Set up the clip region.
   targetContext->NewPath();
@@ -5149,9 +5156,10 @@ PanGestureTypeForEvent(NSEvent* aEvent)
   bool usePreciseDeltas = nsCocoaUtils::HasPreciseScrollingDeltas(aMouseEvent) &&
     Preferences::GetBool("mousewheel.enable_pixel_scrolling", true);
 
-  outWheelEvent->deltaMode = usePreciseDeltas ? nsIDOMWheelEvent::DOM_DELTA_PIXEL
-                                              : nsIDOMWheelEvent::DOM_DELTA_LINE;
-  outWheelEvent->isMomentum = nsCocoaUtils::IsMomentumScrollEvent(aMouseEvent);
+  outWheelEvent->mDeltaMode =
+    usePreciseDeltas ? nsIDOMWheelEvent::DOM_DELTA_PIXEL
+                     : nsIDOMWheelEvent::DOM_DELTA_LINE;
+  outWheelEvent->mIsMomentum = nsCocoaUtils::IsMomentumScrollEvent(aMouseEvent);
 }
 
 - (void) convertCocoaMouseEvent:(NSEvent*)aMouseEvent

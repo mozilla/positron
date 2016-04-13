@@ -43,7 +43,6 @@ public interface BrowserDB {
     public abstract Searches getSearches();
     public abstract TabsAccessor getTabsAccessor();
     public abstract URLMetadata getURLMetadata();
-    public abstract ReadingListAccessor getReadingListAccessor();
     @RobocopTarget UrlAnnotations getUrlAnnotations();
 
     /**
@@ -93,6 +92,8 @@ public interface BrowserDB {
      * Can return <code>null</code>.
      */
     public abstract Cursor getRecentHistory(ContentResolver cr, int limit);
+
+    public abstract Cursor getHistoryForURL(ContentResolver cr, String uri);
 
     public abstract Cursor getRecentHistoryBetweenTime(ContentResolver cr, int historyLimit, long start, long end);
 

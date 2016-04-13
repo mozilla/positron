@@ -1538,7 +1538,7 @@ WebGLContext::RunContextLossTimer()
     mContextLossHandler->RunTimer();
 }
 
-class UpdateContextLossStatusTask : public nsCancelableRunnable
+class UpdateContextLossStatusTask : public CancelableRunnable
 {
     RefPtr<WebGLContext> mWebGL;
 
@@ -1548,14 +1548,14 @@ public:
     {
     }
 
-    NS_IMETHOD Run() {
+    NS_IMETHOD Run() override {
         if (mWebGL)
             mWebGL->UpdateContextLossStatus();
 
         return NS_OK;
     }
 
-    NS_IMETHOD Cancel() {
+    nsresult Cancel() override {
         mWebGL = nullptr;
         return NS_OK;
     }
@@ -1803,7 +1803,8 @@ WebGLContext::DidRefresh()
 bool
 WebGLContext::ValidateCurFBForRead(const char* funcName,
                                    const webgl::FormatUsageInfo** const out_format,
-                                   uint32_t* const out_width, uint32_t* const out_height)
+                                   uint32_t* const out_width, uint32_t* const out_height,
+                                   GLenum* const out_mode)
 {
     if (!mBoundReadFramebuffer) {
         ClearBackbufferIfNeeded();
@@ -1819,11 +1820,12 @@ WebGLContext::ValidateCurFBForRead(const char* funcName,
 
         *out_width = mWidth;
         *out_height = mHeight;
+        *out_mode = gl->Screen()->GetReadBufferMode();
         return true;
     }
 
     return mBoundReadFramebuffer->ValidateForRead(funcName, out_format, out_width,
-                                                  out_height);
+                                                  out_height, out_mode);
 }
 
 ////////////////////////////////////////////////////////////////////////////////

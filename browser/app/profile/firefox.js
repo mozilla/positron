@@ -304,7 +304,7 @@ pref("browser.urlbar.matchBehavior", 1);
 pref("browser.urlbar.filter.javascript", true);
 
 // the maximum number of results to show in autocomplete when doing richResults
-pref("browser.urlbar.maxRichResults", 12);
+pref("browser.urlbar.maxRichResults", 10);
 // The amount of time (ms) to wait after the user has stopped typing
 // before starting to perform autocomplete.  50 is the default set in
 // autocomplete.xml.
@@ -666,187 +666,6 @@ pref("plugin.defaultXpi.state", 2);
 // all channels.
 pref("plugin.state.flash", 2);
 pref("plugin.state.java", 1);
-
-// Whitelist Requests
-
-// Unity player, bug 979849
-#ifdef XP_WIN
-pref("plugin.state.npunity3d", 2);
-#endif
-#ifdef XP_MACOSX
-pref("plugin.state.unity web player", 2);
-#endif
-
-// Cisco Jabber SDK, bug 980133
-#ifdef XP_WIN
-pref("plugin.state.npciscowebcommunicator", 2);
-#endif
-#ifdef XP_MACOSX
-pref("plugin.state.ciscowebcommunicator", 2);
-#endif
-
-// McAfee Security Scanner detection plugin, bug 980772
-#ifdef XP_WIN
-pref("plugin.state.npmcafeemss", 2);
-#endif
-
-// Cisco VGConnect for directv.com, bug 981403 & bug 1051772
-#ifdef XP_WIN
-pref("plugin.state.npplayerplugin", 2);
-#endif
-#ifdef XP_MACOSX
-pref("plugin.state.playerplugin", 2);
-pref("plugin.state.playerplugin.dtv", 2);
-pref("plugin.state.playerplugin.ciscodrm", 2);
-pref("plugin.state.playerplugin.charter", 2);
-#endif
-
-// Cisco Jabber Client, bug 981905
-#ifdef XP_WIN
-pref("plugin.state.npchip", 2);
-#endif
-#ifdef XP_MACOSX
-pref("plugin.state.cisco jabber guest plug-in", 2);
-#endif
-
-// Estonian ID-card plugin, bug 982045
-#ifdef XP_WIN
-pref("plugin.state.npesteid-firefox-plugin", 2);
-#endif
-#ifdef XP_MACOSX
-pref("plugin.state.esteidfirefoxplugin", 2);
-#endif
-#ifdef UNIX_BUT_NOT_MAC
-pref("plugin.state.npesteid-firefox-plugin", 2);
-#endif
-
-// coupons.com, bug 984441
-#ifdef XP_WIN
-pref("plugin.state.npmozcouponprinter", 2);
-#endif
-#ifdef XP_MACOSX
-pref("plugin.state.couponprinter-firefox_v", 2);
-#endif
-
-// Nexus Personal BankID, bug 987056
-pref("plugin.state.npbispbrowser", 2);
-
-// Gradecam, bug 988119
-#ifdef XP_WIN
-pref("plugin.state.npgcplugin", 2);
-#endif
-#ifdef XP_MACOSX
-pref("plugin.state.gcplugin", 2);
-#endif
-
-// Smart Card Plugin, bug 988781
-#ifdef XP_WIN
-pref("plugin.state.npwebcard", 2);
-#endif
-
-// Cisco WebEx, bug 989096
-#ifdef XP_WIN
-pref("plugin.state.npatgpc", 2);
-#endif
-#ifdef XP_MACOSX
-pref("plugin.state.webex", 2);
-#endif
-#ifdef UNIX_BUT_NOT_MAC
-pref("plugin.state.npatgpc", 2);
-#endif
-
-// Skype, bug 990067
-#ifdef XP_WIN
-pref("plugin.state.npskypewebplugin", 2);
-#endif
-#ifdef XP_MACOSX
-pref("plugin.state.skypewebplugin", 2);
-#endif
-
-// Facebook video calling, bug 990068
-#ifdef XP_WIN
-pref("plugin.state.npfacebookvideocalling", 2);
-#endif
-#ifdef XP_MACOSX
-pref("plugin.state.facebookvideocalling", 2);
-#endif
-
-// MS Office Lync plugin, bug 990069
-#ifdef XP_WIN
-pref("plugin.state.npmeetingjoinpluginoc", 2);
-#endif
-#ifdef XP_MACOSX
-pref("plugin.state.lwaplugin", 2);
-#endif
-
-// VidyoWeb, bug 990286
-#ifdef XP_WIN
-pref("plugin.state.npvidyoweb", 2);
-#endif
-#ifdef XP_MACOSX
-pref("plugin.state.npvidyoweb", 2);
-pref("plugin.state.vidyoweb", 2);
-#endif
-
-// McAfee Virtual Technician, bug 981503
-#ifdef XP_WIN
-pref("plugin.state.npmvtplugin", 2);
-#endif
-
-// Verimatrix ViewRightWeb, bug 989872
-#ifdef XP_WIN
-pref("plugin.state.npviewright", 2);
-#endif
-#ifdef XP_MACOSX
-pref("plugin.state.viewrightwebplayer", 2);
-#endif
-
-// McAfee SiteAdvisor Enterprise, bug 987057
-#ifdef XP_WIN
-pref("plugin.state.npmcffplg", 2);
-#endif
-
-// F5 Networks SSLVPN plugin, bug 985640
-#ifdef XP_MACOSX
-pref("plugin.state.f5 ssl vpn plugin", 2);
-pref("plugin.state.f5 sam inspection host plugin", 2);
-#endif
-
-// Roblox Launcher Plugin, bug 1024073
-#ifdef XP_WIN
-pref("plugin.state.nprobloxproxy", 2);
-#endif
-#ifdef XP_MACOSX
-pref("plugin.state.nproblox", 2);
-#endif
-
-// Box Edit, bug 1029654
-#ifdef XP_WIN
-pref("plugin.state.npboxedit", 2);
-#endif
-#ifdef XP_MACOSX
-pref("plugin.state.box edit", 2);
-#endif
-
-// Nexus Personal, bug 1024965
-#ifdef XP_WIN
-pref("plugin.state.np_prsnl", 2);
-#endif
-#ifdef XP_MACOSX
-pref("plugin.state.personalplugin", 2);
-#endif
-#ifdef UNIX_BUT_NOT_MAC
-pref("plugin.state.libplugins", 2);
-#endif
-
-// Novell iPrint Client, bug 1036693
-#ifdef XP_WIN
-pref("plugin.state.npnipp", 2);
-pref("plugin.state.npnisp", 2);
-#endif
-#ifdef XP_MACOSX
-pref("plugin.state.iprint", 2);
-#endif
 
 #ifdef XP_MACOSX
 pref("browser.preferences.animateFadeIn", true);
@@ -1443,11 +1262,6 @@ pref("security.insecure_password.ui.enabled", false);
 // 1 = allow MITM for certificate pinning checks.
 pref("security.cert_pinning.enforcement_level", 1);
 
-// NB: Changes to this pref affect CERT_CHAIN_SHA1_POLICY_STATUS telemetry.
-// See the comment in CertVerifier.cpp.
-// 0 = allow SHA-1
-pref("security.pki.sha1_enforcement_level", 0);
-
 // Required blocklist freshness for OneCRL OCSP bypass
 // (default is 1.25x extensions.blocklist.interval, or 30 hours)
 pref("security.onecrl.maximum_staleness_in_seconds", 108000);
@@ -1554,9 +1368,16 @@ pref("media.gmp.decoder.h264", 2);
 // decode H.264.
 pref("media.gmp.trial-create.enabled", true);
 
-#ifdef MOZ_ADOBE_EME
+#if defined(MOZ_ADOBE_EME) || defined(MOZ_WIDEVINE_EME)
 pref("browser.eme.ui.enabled", true);
+#endif
+
+#ifdef MOZ_ADOBE_EME
 pref("media.gmp-eme-adobe.enabled", true);
+#endif
+
+#ifdef MOZ_WIDEVINE_EME
+pref("media.gmp-widevinecdm.enabled", true);
 #endif
 
 // Play with different values of the decay time and get telemetry,

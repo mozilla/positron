@@ -96,16 +96,11 @@ protected:
     }
 
     JS::Rooted<JSObject*> asyncStack(cx, mPromise->mAllocationStack);
-    JS::Rooted<JSString*> asyncCause(cx, JS_NewStringCopyZ(cx, "Promise"));
-    if (!asyncCause) {
-      JS_ClearPendingException(cx);
-      return NS_ERROR_OUT_OF_MEMORY;
-    }
 
     {
       Maybe<JS::AutoSetAsyncStackForNewCalls> sas;
       if (asyncStack) {
-        sas.emplace(cx, asyncStack, asyncCause);
+        sas.emplace(cx, asyncStack, "Promise");
       }
       mCallback->Call(cx, value);
     }
@@ -616,6 +611,8 @@ Promise::Then(JSContext* aCx,
               JS::MutableHandle<JS::Value> aRetval,
               ErrorResult& aRv)
 {
+  NS_ASSERT_OWNINGTHREAD(Promise);
+
   // Let's hope this does the right thing with Xrays...  Ensure everything is
   // just in the caller compartment; that ought to do the trick.  In theory we
   // should consider aCalleeGlobal, but in practice our only caller is
@@ -697,6 +694,8 @@ void
 Promise::MaybeResolve(JSContext* aCx,
                       JS::Handle<JS::Value> aValue)
 {
+  NS_ASSERT_OWNINGTHREAD(Promise);
+
   JS::Rooted<JSObject*> p(aCx, PromiseObj());
   if (!JS::ResolvePromise(aCx, p, aValue)) {
     // Now what?  There's nothing sane to do here.
@@ -708,6 +707,8 @@ void
 Promise::MaybeReject(JSContext* aCx,
                      JS::Handle<JS::Value> aValue)
 {
+  NS_ASSERT_OWNINGTHREAD(Promise);
+
   JS::Rooted<JSObject*> p(aCx, PromiseObj());
   if (!JS::RejectPromise(aCx, p, aValue)) {
     // Now what?  There's nothing sane to do here.
@@ -777,6 +778,8 @@ CreateNativeHandlerFunction(JSContext* aCx, JS::Handle<JSObject*> aHolder,
 void
 Promise::AppendNativeHandler(PromiseNativeHandler* aRunnable)
 {
+  NS_ASSERT_OWNINGTHREAD(Promise);
+
   AutoJSAPI jsapi;
   if (NS_WARN_IF(!jsapi.Init(mGlobal))) {
     // Our API doesn't allow us to return a useful error.  Not like this should
@@ -896,6 +899,8 @@ void
 Promise::MaybeResolve(JSContext* aCx,
                       JS::Handle<JS::Value> aValue)
 {
+  NS_ASSERT_OWNINGTHREAD(Promise);
+
   MaybeResolveInternal(aCx, aValue);
 }
 
@@ -903,6 +908,8 @@ void
 Promise::MaybeReject(JSContext* aCx,
                      JS::Handle<JS::Value> aValue)
 {
+  NS_ASSERT_OWNINGTHREAD(Promise);
+
   MaybeRejectInternal(aCx, aValue);
 }
 
@@ -910,12 +917,16 @@ Promise::MaybeReject(JSContext* aCx,
 
 void
 Promise::MaybeReject(const RefPtr<MediaStreamError>& aArg) {
+  NS_ASSERT_OWNINGTHREAD(Promise);
+
   MaybeSomething(aArg, &Promise::MaybeReject);
 }
 
 void
 Promise::MaybeRejectWithNull()
 {
+  NS_ASSERT_OWNINGTHREAD(Promise);
+
   MaybeSomething(JS::NullHandleValue, &Promise::MaybeReject);
 }
 
@@ -1629,6 +1640,8 @@ Promise::Then(JSContext* aCx, JS::Handle<JSObject*> aCalleeGlobal,
               AnyCallback* aResolveCallback, AnyCallback* aRejectCallback,
               JS::MutableHandle<JS::Value> aRetval, ErrorResult& aRv)
 {
+  NS_ASSERT_OWNINGTHREAD(Promise);
+
   // Implements
   // http://www.ecma-international.org/ecma-262/6.0/#sec-promise.prototype.then
 
@@ -1765,6 +1778,8 @@ Promise::Catch(JSContext* aCx, AnyCallback* aRejectCallback,
                JS::MutableHandle<JS::Value> aRetval,
                ErrorResult& aRv)
 {
+  NS_ASSERT_OWNINGTHREAD(Promise);
+
   // Implements
   // http://www.ecma-international.org/ecma-262/6.0/#sec-promise.prototype.catch
 
@@ -2416,6 +2431,8 @@ Promise::PromiseSpecies(JSContext* aCx, unsigned aArgc, JS::Value* aVp)
 void
 Promise::AppendNativeHandler(PromiseNativeHandler* aRunnable)
 {
+  NS_ASSERT_OWNINGTHREAD(Promise);
+
   RefPtr<PromiseCallback> resolveCb =
     new NativePromiseCallback(aRunnable, Resolved);
 
@@ -2483,6 +2500,8 @@ Promise::AppendCallbacks(PromiseCallback* aResolveCallback,
 void
 Promise::MaybeReportRejected()
 {
+  NS_ASSERT_OWNINGTHREAD(Promise);
+
   if (mState != Rejected || mHadRejectCallback || mResult.isUndefined()) {
     return;
   }
@@ -2536,6 +2555,8 @@ void
 Promise::MaybeResolveInternal(JSContext* aCx,
                               JS::Handle<JS::Value> aValue)
 {
+  NS_ASSERT_OWNINGTHREAD(Promise);
+
   if (mResolvePending) {
     return;
   }
@@ -2547,6 +2568,8 @@ void
 Promise::MaybeRejectInternal(JSContext* aCx,
                              JS::Handle<JS::Value> aValue)
 {
+  NS_ASSERT_OWNINGTHREAD(Promise);
+
   if (mResolvePending) {
     return;
   }
@@ -2557,6 +2580,8 @@ Promise::MaybeRejectInternal(JSContext* aCx,
 void
 Promise::HandleException(JSContext* aCx)
 {
+  NS_ASSERT_OWNINGTHREAD(Promise);
+
   JS::Rooted<JS::Value> exn(aCx);
   if (JS_GetPendingException(aCx, &exn)) {
     JS_ClearPendingException(aCx);
@@ -2568,6 +2593,8 @@ void
 Promise::ResolveInternal(JSContext* aCx,
                          JS::Handle<JS::Value> aValue)
 {
+  NS_ASSERT_OWNINGTHREAD(Promise);
+
   CycleCollectedJSRuntime* runtime = CycleCollectedJSRuntime::Get();
 
   mResolvePending = true;
@@ -2623,6 +2650,8 @@ void
 Promise::RejectInternal(JSContext* aCx,
                         JS::Handle<JS::Value> aValue)
 {
+  NS_ASSERT_OWNINGTHREAD(Promise);
+
   mResolvePending = true;
 
   MaybeSettle(aValue, Rejected);
@@ -2634,14 +2663,13 @@ Promise::Settle(JS::Handle<JS::Value> aValue, PromiseState aState)
   MOZ_ASSERT(mGlobal,
              "We really should have a global here.  Except we sometimes don't "
              "in the wild for some odd reason");
+  NS_ASSERT_OWNINGTHREAD(Promise);
+
   if (!mGlobal || mGlobal->IsDying()) {
     return;
   }
 
   mSettlementTimestamp = TimeStamp::Now();
-
-  SetResult(aValue);
-  SetState(aState);
 
   AutoJSAPI jsapi;
   jsapi.Init();
@@ -2649,6 +2677,16 @@ Promise::Settle(JS::Handle<JS::Value> aValue, PromiseState aState)
   JS::RootedObject wrapper(cx, GetWrapper());
   MOZ_ASSERT(wrapper); // We preserved it
   JSAutoCompartment ac(cx, wrapper);
+
+  JS::Rooted<JS::Value> value(cx, aValue);
+
+  if (!JS_WrapValue(cx, &value)) {
+    JS_ClearPendingException(cx);
+    value = JS::UndefinedValue();
+  }
+  SetResult(value);
+  SetState(aState);
+
   JS::dbg::onPromiseSettled(cx, wrapper);
 
   if (aState == PromiseState::Rejected &&
@@ -2688,6 +2726,8 @@ void
 Promise::MaybeSettle(JS::Handle<JS::Value> aValue,
                      PromiseState aState)
 {
+  NS_ASSERT_OWNINGTHREAD(Promise);
+
   // Promise.all() or Promise.race() implementations will repeatedly call
   // Resolve/RejectInternal rather than using the Maybe... forms. Stop SetState
   // from asserting.
@@ -2701,6 +2741,8 @@ Promise::MaybeSettle(JS::Handle<JS::Value> aValue,
 void
 Promise::TriggerPromiseReactions()
 {
+  NS_ASSERT_OWNINGTHREAD(Promise);
+
   CycleCollectedJSRuntime* runtime = CycleCollectedJSRuntime::Get();
 
   nsTArray<RefPtr<PromiseCallback>> callbacks;
@@ -2720,6 +2762,8 @@ Promise::TriggerPromiseReactions()
 void
 Promise::RemoveFeature()
 {
+  NS_ASSERT_OWNINGTHREAD(Promise);
+
   if (mFeature) {
     workers::WorkerPrivate* worker = GetCurrentThreadWorkerPrivate();
     MOZ_ASSERT(worker);
@@ -2741,6 +2785,8 @@ PromiseReportRejectFeature::Notify(workers::Status aStatus)
 bool
 Promise::CaptureStack(JSContext* aCx, JS::Heap<JSObject*>& aTarget)
 {
+  NS_ASSERT_OWNINGTHREAD(Promise);
+
   JS::Rooted<JSObject*> stack(aCx);
   if (!JS::CaptureCurrentStack(aCx, &stack)) {
     return false;
@@ -2752,6 +2798,8 @@ Promise::CaptureStack(JSContext* aCx, JS::Heap<JSObject*>& aTarget)
 void
 Promise::GetDependentPromises(nsTArray<RefPtr<Promise>>& aPromises)
 {
+  NS_ASSERT_OWNINGTHREAD(Promise);
+
   // We want to return promises that correspond to then() calls, Promise.all()
   // calls, and Promise.race() calls.
   //

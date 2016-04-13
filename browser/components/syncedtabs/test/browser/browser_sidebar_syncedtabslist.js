@@ -157,7 +157,7 @@ add_task(function* testSyncedTabsSidebarFilteredList() {
   // in updatePanel) resolves, so we wait for it here as well
   yield syncedTabsDeckComponent.tabListComponent._store.getData();
 
-  let filterInput = syncedTabsDeckComponent.container.querySelector(".tabsFilter");
+  let filterInput = syncedTabsDeckComponent._window.document.querySelector(".tabsFilter");
   filterInput.value = "filter text";
   filterInput.blur();
 
@@ -303,7 +303,12 @@ add_task(function* testSyncedTabsSidebarContextMenu() {
   info("Right-clicking a tab should show additional actions");
   let tabMenuItems = [
     ["menuitem#syncedTabsOpenSelected", { hidden: false }],
+    ["menuitem#syncedTabsOpenSelectedInTab", { hidden: false }],
+    ["menuitem#syncedTabsOpenSelectedInWindow", { hidden: false }],
+    ["menuitem#syncedTabsOpenSelectedInPrivateWindow", { hidden: false }],
+    ["menuseparator", { hidden: false }],
     ["menuitem#syncedTabsBookmarkSelected", { hidden: false }],
+    ["menuitem#syncedTabsCopySelected", { hidden: false }],
     ["menuseparator", { hidden: false }],
     ["menuitem#syncedTabsRefresh", { hidden: false }],
   ];
@@ -315,7 +320,12 @@ add_task(function* testSyncedTabsSidebarContextMenu() {
   info("Right-clicking a client shouldn't show any actions");
   let sidebarMenuItems = [
     ["menuitem#syncedTabsOpenSelected", { hidden: true }],
+    ["menuitem#syncedTabsOpenSelectedInTab", { hidden: true }],
+    ["menuitem#syncedTabsOpenSelectedInWindow", { hidden: true }],
+    ["menuitem#syncedTabsOpenSelectedInPrivateWindow", { hidden: true }],
+    ["menuseparator", { hidden: true }],
     ["menuitem#syncedTabsBookmarkSelected", { hidden: true }],
+    ["menuitem#syncedTabsCopySelected", { hidden: true }],
     ["menuseparator", { hidden: true }],
     ["menuitem#syncedTabsRefresh", { hidden: false }],
   ];
@@ -353,7 +363,8 @@ function checkItem(node, item) {
 
 function* testContextMenu(syncedTabsDeckComponent, contextSelector, triggerSelector, menuSelectors) {
   let contextMenu = document.querySelector(contextSelector);
-  let triggerElement = syncedTabsDeckComponent.container.querySelector(triggerSelector);
+  let triggerElement = syncedTabsDeckComponent._window.document.querySelector(triggerSelector);
+  let isClosed = triggerElement.classList.contains("closed");
 
   let promisePopupShown = BrowserTestUtils.waitForEvent(contextMenu, "popupshown");
 
@@ -373,6 +384,8 @@ function* testContextMenu(syncedTabsDeckComponent, contextSelector, triggerSelec
     button: 2,
   }, chromeWindow);
   yield promisePopupShown;
+  is(triggerElement.classList.contains("closed"), isClosed,
+    "Showing the context menu shouldn't toggle the tab list");
   checkChildren(contextMenu, menuSelectors);
 
   let promisePopupHidden = BrowserTestUtils.waitForEvent(contextMenu, "popuphidden");

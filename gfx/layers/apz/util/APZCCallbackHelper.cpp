@@ -256,7 +256,6 @@ APZCCallbackHelper::UpdateRootFrame(FrameMetrics& aMetrics)
   // adjusts the display port margins, so do it before we set those.
   ScrollFrame(content, aMetrics);
 
-  MOZ_ASSERT(nsLayoutUtils::HasDisplayPort(content));
   SetDisplayPortMargins(shell, content, aMetrics);
   SetPaintRequestTime(content, aMetrics.GetPaintRequestTime());
 }
@@ -329,46 +328,6 @@ APZCCallbackHelper::InitializeRootDisplayport(nsIPresShell* aPresShell)
     nsLayoutUtils::SetZeroMarginDisplayPortOnAsyncScrollableAncestors(
         content->GetPrimaryFrame(), nsLayoutUtils::RepaintMode::DoNotRepaint);
   }
-}
-
-class FlingSnapEvent : public nsRunnable
-{
-    typedef mozilla::layers::FrameMetrics::ViewID ViewID;
-
-public:
-    FlingSnapEvent(const ViewID& aScrollId,
-                   const mozilla::CSSPoint& aDestination)
-        : mScrollId(aScrollId)
-        , mDestination(aDestination)
-    {
-    }
-
-    NS_IMETHOD Run() {
-        MOZ_ASSERT(NS_IsMainThread());
-
-        nsIScrollableFrame* sf = nsLayoutUtils::FindScrollableFrameFor(mScrollId);
-        if (sf) {
-            sf->FlingSnap(mDestination);
-        }
-
-        return NS_OK;
-    }
-
-protected:
-    ViewID mScrollId;
-    mozilla::CSSPoint mDestination;
-};
-
-void
-APZCCallbackHelper::RequestFlingSnap(const FrameMetrics::ViewID& aScrollId,
-                                     const mozilla::CSSPoint& aDestination)
-{
-    nsCOMPtr<nsIRunnable> r1 = new FlingSnapEvent(aScrollId, aDestination);
-    if (!NS_IsMainThread()) {
-        NS_DispatchToMainThread(r1);
-    } else {
-        r1->Run();
-    }
 }
 
 class AcknowledgeScrollUpdateEvent : public nsRunnable
@@ -541,9 +500,9 @@ APZCCallbackHelper::ApplyCallbackTransform(WidgetEvent& aEvent,
 {
   if (aEvent.AsTouchEvent()) {
     WidgetTouchEvent& event = *(aEvent.AsTouchEvent());
-    for (size_t i = 0; i < event.touches.Length(); i++) {
-      event.touches[i]->mRefPoint = ApplyCallbackTransform(
-          event.touches[i]->mRefPoint, aGuid, aScale);
+    for (size_t i = 0; i < event.mTouches.Length(); i++) {
+      event.mTouches[i]->mRefPoint = ApplyCallbackTransform(
+          event.mTouches[i]->mRefPoint, aGuid, aScale);
     }
   } else {
     aEvent.refPoint = ApplyCallbackTransform(
@@ -581,7 +540,7 @@ APZCCallbackHelper::DispatchSynthesizedMouseEvent(EventMessage aMsg,
   if (aMsg != eMouseMove) {
     event.clickCount = 1;
   }
-  event.modifiers = aModifiers;
+  event.mModifiers = aModifiers;
   event.widget = aWidget;
 
   return DispatchWidgetEvent(event);
@@ -846,9 +805,9 @@ APZCCallbackHelper::SendSetTargetAPZCNotification(nsIWidget* aWidget,
       nsTArray<ScrollableLayerGuid> targets;
 
       if (const WidgetTouchEvent* touchEvent = aEvent.AsTouchEvent()) {
-        for (size_t i = 0; i < touchEvent->touches.Length(); i++) {
+        for (size_t i = 0; i < touchEvent->mTouches.Length(); i++) {
           waitForRefresh |= PrepareForSetTargetAPZCNotification(aWidget, aGuid,
-              rootFrame, touchEvent->touches[i]->mRefPoint, &targets);
+              rootFrame, touchEvent->mTouches[i]->mRefPoint, &targets);
         }
       } else if (const WidgetWheelEvent* wheelEvent = aEvent.AsWheelEvent()) {
         waitForRefresh = PrepareForSetTargetAPZCNotification(aWidget, aGuid,
@@ -876,8 +835,10 @@ APZCCallbackHelper::SendSetAllowedTouchBehaviorNotification(
         const SetAllowedTouchBehaviorCallback& aCallback)
 {
   nsTArray<TouchBehaviorFlags> flags;
-  for (uint32_t i = 0; i < aEvent.touches.Length(); i++) {
-    flags.AppendElement(widget::ContentHelper::GetAllowedTouchBehavior(aWidget, aEvent.touches[i]->mRefPoint));
+  for (uint32_t i = 0; i < aEvent.mTouches.Length(); i++) {
+    flags.AppendElement(
+      widget::ContentHelper::GetAllowedTouchBehavior(
+                               aWidget, aEvent.mTouches[i]->mRefPoint));
   }
   aCallback(aInputBlockId, flags);
 }

@@ -28,7 +28,6 @@ user_pref("javascript.options.showInConsole", true);
 user_pref("devtools.browsertoolbox.panel", "jsdebugger");
 user_pref("devtools.debugger.remote-port", 6023);
 user_pref("devtools.devedition.promo.enabled", false);
-user_pref("devtools.errorconsole.enabled", true);
 user_pref("browser.EULA.override", true);
 user_pref("gfx.color_management.force_srgb", true);
 user_pref("network.manage-offline-status", false);
@@ -99,8 +98,6 @@ user_pref("extensions.hotfix.url", "http://%(server)s/extensions-dummy/hotfixURL
 user_pref("extensions.systemAddon.update.url", "http://%(server)s/dummy-system-addons.xml");
 // Turn off extension updates so they don't bother tests
 user_pref("extensions.update.enabled", false);
-// Bug 1235627 Turn off pocket add-on so it doesn't bother tests
-user_pref("extensions.pocket.enabled", false);
 // Make sure opening about:addons won't hit the network
 user_pref("extensions.webservice.discoverURL", "http://%(server)s/extensions-dummy/discoveryURL");
 // Make sure AddonRepository won't hit the network

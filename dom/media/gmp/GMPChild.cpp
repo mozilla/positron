@@ -19,9 +19,14 @@
 #include "gmp-video-encode.h"
 #include "GMPPlatform.h"
 #include "mozilla/dom/CrashReporterChild.h"
+#include "mozilla/ipc/ProcessChild.h"
 #include "GMPUtils.h"
 #include "prio.h"
+#ifdef MOZ_WIDEVINE_EME
+#include "widevine-adapter/WidevineAdapter.h"
+#endif
 
+using namespace mozilla::ipc;
 using mozilla::dom::CrashReporterChild;
 
 static const int MAX_VOUCHER_LENGTH = 500000;
@@ -345,7 +350,7 @@ GMPChild::GetUTF8LibPath(nsACString& aOutLibPath)
 }
 
 bool
-GMPChild::AnswerStartPlugin()
+GMPChild::AnswerStartPlugin(const nsString& aAdapter)
 {
   LOGD("%s", __FUNCTION__);
 
@@ -378,11 +383,18 @@ GMPChild::AnswerStartPlugin()
   }
 #endif
 
+  GMPAdapter* adapter = nullptr;
+#ifdef MOZ_WIDEVINE_EME
+  if (aAdapter.EqualsLiteral("widevine")) {
+    adapter = new WidevineAdapter();
+  }
+#endif
   if (!mGMPLoader->Load(libPath.get(),
                         libPath.Length(),
                         mNodeId.BeginWriting(),
                         mNodeId.Length(),
-                        platformAPI)) {
+                        platformAPI,
+                        adapter)) {
     NS_WARNING("Failed to load GMP");
     delete platformAPI;
     return false;
@@ -420,7 +432,7 @@ GMPChild::ActorDestroy(ActorDestroyReason aWhy)
   }
   if (AbnormalShutdown == aWhy) {
     NS_WARNING("Abnormal shutdown of GMP process!");
-    _exit(0);
+    ProcessChild::QuickExit();
   }
 
   XRE_ShutdownChildProcess();

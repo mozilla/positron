@@ -1247,8 +1247,7 @@ nsCSSRendering::PaintBoxShadowOuter(nsPresContext* aPresContext,
                                     float aOpacity)
 {
   DrawTarget& aDrawTarget = *aRenderingContext.GetDrawTarget();
-  const nsStyleBorder* styleBorder = aForFrame->StyleBorder();
-  nsCSSShadowArray* shadows = styleBorder->mBoxShadow;
+  nsCSSShadowArray* shadows = aForFrame->StyleEffects()->mBoxShadow;
   if (!shadows)
     return;
 
@@ -1484,12 +1483,11 @@ nsCSSRendering::PaintBoxShadowInner(nsPresContext* aPresContext,
                                     nsIFrame* aForFrame,
                                     const nsRect& aFrameArea)
 {
-  const nsStyleBorder* styleBorder = aForFrame->StyleBorder();
-  nsCSSShadowArray* shadows = styleBorder->mBoxShadow;
+  nsCSSShadowArray* shadows = aForFrame->StyleEffects()->mBoxShadow;
   if (!shadows)
     return;
   if (aForFrame->IsThemed() && aForFrame->GetContent() &&
-      !nsContentUtils::IsChromeDoc(aForFrame->GetContent()->GetCurrentDoc())) {
+      !nsContentUtils::IsChromeDoc(aForFrame->GetContent()->GetUncomposedDoc())) {
     // There's no way of getting hold of a shape corresponding to a
     // "padding-box" for native-themed widgets, so just don't draw
     // inner box-shadows for them. But we allow chrome to paint inner
@@ -1985,7 +1983,10 @@ nsCSSRendering::DetermineBackgroundColor(nsPresContext* aPresContext,
   aDrawBackgroundImage = true;
   aDrawBackgroundColor = true;
 
-  if (aFrame->HonorPrintBackgroundSettings()) {
+  const nsStyleVisibility* visibility = aStyleContext->StyleVisibility();
+
+  if (visibility->mColorAdjust != NS_STYLE_COLOR_ADJUST_EXACT &&
+      aFrame->HonorPrintBackgroundSettings()) {
     aDrawBackgroundImage = aPresContext->GetBackgroundImageDraw();
     aDrawBackgroundColor = aPresContext->GetBackgroundColorDraw();
   }
@@ -3392,6 +3393,7 @@ nsCSSRendering::PrepareImageLayer(nsPresContext* aPresContext,
     }
   }
   state.mImageRenderer.SetExtendMode(repeatMode);
+  state.mImageRenderer.SetMaskOp(aLayer.mMaskMode);
 
   state.mFillArea.IntersectRect(state.mFillArea, bgClipRect);
 
@@ -4674,6 +4676,7 @@ nsImageRenderer::nsImageRenderer(nsIFrame* aForFrame,
   , mSize(0, 0)
   , mFlags(aFlags)
   , mExtendMode(ExtendMode::CLAMP)
+  , mMaskOp(NS_STYLE_MASK_MODE_MATCH_SOURCE)
 {
 }
 
@@ -4785,7 +4788,7 @@ nsImageRenderer::PrepareImage()
       nsCOMPtr<nsIURI> targetURI;
       nsCOMPtr<nsIURI> base = mForFrame->GetContent()->GetBaseURI();
       nsContentUtils::NewURIWithDocumentCharset(getter_AddRefs(targetURI), elementId,
-                                                mForFrame->GetContent()->GetCurrentDoc(), base);
+                                                mForFrame->GetContent()->GetUncomposedDoc(), base);
       nsSVGPaintingProperty* property = nsSVGEffects::GetPaintingPropertyForURI(
           targetURI, mForFrame->FirstContinuation(),
           nsSVGEffects::BackgroundImageProperty());
@@ -5035,6 +5038,35 @@ ConvertImageRendererToDrawFlags(uint32_t aImageRendererFlags)
   return drawFlags;
 }
 
+/*
+ *  SVG11: A luminanceToAlpha operation is equivalent to the following matrix operation:                                                   |
+ *  | R' |     |      0        0        0  0  0 |   | R |
+ *  | G' |     |      0        0        0  0  0 |   | G |
+ *  | B' |  =  |      0        0        0  0  0 | * | B |
+ *  | A' |     | 0.2125   0.7154   0.0721  0  0 |   | A |
+ *  | 1  |     |      0        0        0  0  1 |   | 1 |
+ */
+static void
+RGBALuminanceOperation(uint8_t *aData,
+                       int32_t aStride,
+                       const IntSize &aSize)
+{
+  int32_t redFactor = 55;    // 256 * 0.2125
+  int32_t greenFactor = 183; // 256 * 0.7154
+  int32_t blueFactor = 18;   // 256 * 0.0721
+
+  for (int32_t y = 0; y < aSize.height; y++) {
+    uint32_t *pixel = (uint32_t*)(aData + aStride * y);
+    for (int32_t x = 0; x < aSize.width; x++) {
+      *pixel = (((((*pixel & 0x00FF0000) >> 16) * redFactor) +
+                 (((*pixel & 0x0000FF00) >>  8) * greenFactor) +
+                  ((*pixel & 0x000000FF)        * blueFactor)) >> 8) << 24;
+      pixel++;
+    }
+  }
+}
+
+
 DrawResult
 nsImageRenderer::Draw(nsPresContext*       aPresContext,
                       nsRenderingContext&  aRenderingContext,
@@ -5054,26 +5086,41 @@ nsImageRenderer::Draw(nsPresContext*       aPresContext,
   }
 
   Filter filter = nsLayoutUtils::GetGraphicsFilterForFrame(mForFrame);
+  DrawResult result = DrawResult::SUCCESS;
+  RefPtr<gfxContext> ctx = aRenderingContext.ThebesContext();
+  IntRect tmpDTRect;
+
+  if (ctx->CurrentOp() != CompositionOp::OP_OVER || mMaskOp == NS_STYLE_MASK_MODE_LUMINANCE) {
+    gfxRect clipRect = ctx->GetClipExtents();
+    tmpDTRect = RoundedOut(ToRect(clipRect));
+    RefPtr<DrawTarget> tempDT = ctx->GetDrawTarget()->CreateSimilarDrawTarget(tmpDTRect.Size(), SurfaceFormat::B8G8R8A8);
+    ctx = gfxContext::ForDrawTarget(tempDT, tmpDTRect.TopLeft());
+    if (!ctx) {
+      gfxDevCrash(LogReason::InvalidContext) << "ImageRenderer::Draw problem " << gfx::hexa(tempDT);
+      return DrawResult::TEMPORARY_ERROR;
+    }
+  }
 
   switch (mType) {
     case eStyleImageType_Image:
     {
       CSSIntSize imageSize(nsPresContext::AppUnitsToIntCSSPixels(mSize.width),
                            nsPresContext::AppUnitsToIntCSSPixels(mSize.height));
-      return
-        nsLayoutUtils::DrawBackgroundImage(*aRenderingContext.ThebesContext(),
+      result =
+        nsLayoutUtils::DrawBackgroundImage(*ctx,
                                            aPresContext,
                                            mImageContainer, imageSize, filter,
                                            aDest, aFill, aAnchor, aDirtyRect,
                                            ConvertImageRendererToDrawFlags(mFlags),
                                            mExtendMode);
+      break;
     }
     case eStyleImageType_Gradient:
     {
       nsCSSRendering::PaintGradient(aPresContext, aRenderingContext,
                                     mGradientData, aDirtyRect,
                                     aDest, aFill, aSrc, mSize);
-      return DrawResult::SUCCESS;
+      break;
     }
     case eStyleImageType_Element:
     {
@@ -5085,18 +5132,40 @@ nsImageRenderer::Draw(nsPresContext*       aPresContext,
       }
 
       nsCOMPtr<imgIContainer> image(ImageOps::CreateFromDrawable(drawable));
-      DrawResult result =
-        nsLayoutUtils::DrawImage(*aRenderingContext.ThebesContext(),
+      result =
+        nsLayoutUtils::DrawImage(*ctx,
                                  aPresContext, image,
                                  filter, aDest, aFill, aAnchor, aDirtyRect,
                                  ConvertImageRendererToDrawFlags(mFlags));
-
-      return result;
+      break;
     }
     case eStyleImageType_Null:
     default:
-      return DrawResult::SUCCESS;
+      break;
   }
+
+  if (!tmpDTRect.IsEmpty()) {
+    RefPtr<SourceSurface> surf = ctx->GetDrawTarget()->Snapshot();
+    if (mMaskOp == NS_STYLE_MASK_MODE_LUMINANCE) {
+      RefPtr<DataSourceSurface> maskData = surf->GetDataSurface();
+      DataSourceSurface::MappedSurface map;
+      if (!maskData->Map(DataSourceSurface::MapType::WRITE, &map)) {
+        return result;
+      }
+
+      RGBALuminanceOperation(map.mData, map.mStride, maskData->GetSize());
+      maskData->Unmap();
+      surf = maskData;
+    }
+
+    DrawTarget* dt = aRenderingContext.ThebesContext()->GetDrawTarget();
+    dt->DrawSurface(surf, Rect(tmpDTRect.x, tmpDTRect.y, tmpDTRect.width, tmpDTRect.height),
+                    Rect(0, 0, tmpDTRect.width, tmpDTRect.height),
+                    DrawSurfaceOptions(Filter::POINT),
+                    DrawOptions(1.0f, aRenderingContext.ThebesContext()->CurrentOp()));
+  }
+
+  return result;
 }
 
 already_AddRefed<gfxDrawable>
@@ -5335,21 +5404,6 @@ nsImageRenderer::IsAnimatedImage()
     return true;
 
   return false;
-}
-
-bool
-nsImageRenderer::IsContainerAvailable(LayerManager* aManager,
-                                      nsDisplayListBuilder* aBuilder)
-{
-  if (mType != eStyleImageType_Image || !mImageContainer) {
-    return false;
-  }
-
-  uint32_t flags = aBuilder->ShouldSyncDecodeImages()
-                 ? imgIContainer::FLAG_SYNC_DECODE
-                 : imgIContainer::FLAG_NONE;
-
-  return mImageContainer->IsImageContainerAvailable(aManager, flags);
 }
 
 already_AddRefed<imgIContainer>

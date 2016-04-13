@@ -1889,11 +1889,10 @@ HyperTextAccessible::NativeName(nsString& aName)
 }
 
 void
-HyperTextAccessible::InvalidateChildren()
+HyperTextAccessible::Shutdown()
 {
   mOffsets.Clear();
-
-  AccessibleWrap::InvalidateChildren();
+  AccessibleWrap::Shutdown();
 }
 
 bool
@@ -1905,6 +1904,16 @@ HyperTextAccessible::RemoveChild(Accessible* aAccessible)
     mOffsets.RemoveElementsAt(childIndex, count);
 
   return Accessible::RemoveChild(aAccessible);
+}
+
+bool
+HyperTextAccessible::InsertChildAt(uint32_t aIndex, Accessible* aChild)
+{
+  int32_t count = mOffsets.Length() - aIndex;
+  if (count > 0 ) {
+    mOffsets.RemoveElementsAt(aIndex, count);
+  }
+  return Accessible::InsertChildAt(aIndex, aChild);
 }
 
 Relation

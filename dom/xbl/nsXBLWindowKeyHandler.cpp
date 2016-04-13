@@ -393,7 +393,7 @@ nsXBLWindowKeyHandler::HandleEvent(nsIDOMEvent* aEvent)
 
   nsAutoString eventType;
   aEvent->GetType(eventType);
-  nsCOMPtr<nsIAtom> eventTypeAtom = do_GetAtom(eventType);
+  nsCOMPtr<nsIAtom> eventTypeAtom = NS_Atomize(eventType);
   NS_ENSURE_TRUE(eventTypeAtom, NS_ERROR_OUT_OF_MEMORY);
 
   return WalkHandlers(keyEvent, eventTypeAtom);
@@ -695,7 +695,7 @@ nsXBLWindowKeyHandler::HasHandlerForEvent(nsIDOMKeyEvent* aEvent,
 
   nsAutoString eventType;
   aEvent->AsEvent()->GetType(eventType);
-  nsCOMPtr<nsIAtom> eventTypeAtom = do_GetAtom(eventType);
+  nsCOMPtr<nsIAtom> eventTypeAtom = NS_Atomize(eventType);
   NS_ENSURE_TRUE(eventTypeAtom, false);
 
   return WalkHandlersInternal(aEvent, eventTypeAtom, mHandler, false,
@@ -727,7 +727,7 @@ nsXBLWindowKeyHandler::GetElementForHandler(nsXBLPrototypeHandler* aHandler,
 
   nsCOMPtr<Element> chromeHandlerElement = GetElement();
   if (!chromeHandlerElement) {
-    NS_WARN_IF(!keyContent->IsInDoc());
+    NS_WARN_IF(!keyContent->IsInUncomposedDoc());
     nsCOMPtr<Element> keyElement = do_QueryInterface(keyContent);
     keyElement.swap(*aElementForHandler);
     return true;
@@ -738,14 +738,14 @@ nsXBLWindowKeyHandler::GetElementForHandler(nsXBLPrototypeHandler* aHandler,
   keyContent->GetAttr(kNameSpaceID_None, nsGkAtoms::command, command);
   if (command.IsEmpty()) {
     // There is no command element associated with the key element.
-    NS_WARN_IF(!keyContent->IsInDoc());
+    NS_WARN_IF(!keyContent->IsInUncomposedDoc());
     nsCOMPtr<Element> keyElement = do_QueryInterface(keyContent);
     keyElement.swap(*aElementForHandler);
     return true;
   }
 
   // XXX Shouldn't we check this earlier?
-  nsIDocument* doc = keyContent->GetCurrentDoc();
+  nsIDocument* doc = keyContent->GetUncomposedDoc();
   if (NS_WARN_IF(!doc)) {
     return false;
   }

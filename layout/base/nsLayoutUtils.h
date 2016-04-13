@@ -143,6 +143,7 @@ class nsLayoutUtils
 
 public:
   typedef mozilla::layers::FrameMetrics FrameMetrics;
+  typedef mozilla::layers::ScrollMetadata ScrollMetadata;
   typedef FrameMetrics::ViewID ViewID;
   typedef mozilla::CSSPoint CSSPoint;
   typedef mozilla::CSSSize CSSSize;
@@ -355,6 +356,15 @@ public:
    * This is aContent->GetPrimaryFrame() except for tableOuter frames.
    */
   static nsIFrame* GetStyleFrame(const nsIContent* aContent);
+
+  /**
+   * Gets the real primary frame associated with the content object.
+   *
+   * In the case of absolutely positioned elements and floated elements,
+   * the real primary frame is the frame that is out of the flow and not the
+   * placeholder frame.
+   */
+  static nsIFrame* GetRealPrimaryFrameFor(const nsIContent* aContent);
 
   /**
    * IsGeneratedContentFor returns true if aFrame is the outermost
@@ -2721,16 +2731,16 @@ public:
    */
   static bool CanScrollOriginClobberApz(nsIAtom* aScrollOrigin);
 
-  static FrameMetrics ComputeFrameMetrics(nsIFrame* aForFrame,
-                                          nsIFrame* aScrollFrame,
-                                          nsIContent* aContent,
-                                          const nsIFrame* aReferenceFrame,
-                                          Layer* aLayer,
-                                          ViewID aScrollParentId,
-                                          const nsRect& aViewport,
-                                          const mozilla::Maybe<nsRect>& aClipRect,
-                                          bool aIsRoot,
-                                          const ContainerLayerParameters& aContainerParameters);
+  static ScrollMetadata ComputeScrollMetadata(nsIFrame* aForFrame,
+                                              nsIFrame* aScrollFrame,
+                                              nsIContent* aContent,
+                                              const nsIFrame* aReferenceFrame,
+                                              Layer* aLayer,
+                                              ViewID aScrollParentId,
+                                              const nsRect& aViewport,
+                                              const mozilla::Maybe<nsRect>& aClipRect,
+                                              bool aIsRoot,
+                                              const ContainerLayerParameters& aContainerParameters);
 
   /**
    * If the given scroll frame needs an area excluded from its composition
@@ -2782,10 +2792,6 @@ public:
    */
   static nsRect GetSelectionBoundingRect(mozilla::dom::Selection* aSel);
 
-  /**
-   * Returns true if the given frame is a scrollframe and it has snap points.
-   */
-  static bool IsScrollFrameWithSnapping(nsIFrame* aFrame);
   /**
    * Calculate the bounding rect of |aContent|, relative to the origin
    * of the scrolled content of |aRootScrollFrame|.

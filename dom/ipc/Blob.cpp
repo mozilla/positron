@@ -212,7 +212,7 @@ EventTargetIsOnCurrentThread(nsIEventTarget* aEventTarget)
 }
 
 class CancelableRunnableWrapper final
-  : public nsCancelableRunnable
+  : public CancelableRunnable
 {
   nsCOMPtr<nsIRunnable> mRunnable;
 #ifdef DEBUG
@@ -238,10 +238,10 @@ private:
   { }
 
   NS_DECL_NSIRUNNABLE
-  NS_DECL_NSICANCELABLERUNNABLE
+  nsresult Cancel() override;
 };
 
-NS_IMPL_ISUPPORTS_INHERITED0(CancelableRunnableWrapper, nsCancelableRunnable)
+NS_IMPL_ISUPPORTS_INHERITED0(CancelableRunnableWrapper, CancelableRunnable)
 
 NS_IMETHODIMP
 CancelableRunnableWrapper::Run()
@@ -261,7 +261,7 @@ CancelableRunnableWrapper::Run()
   return NS_OK;
 }
 
-NS_IMETHODIMP
+nsresult
 CancelableRunnableWrapper::Cancel()
 {
   DebugOnly<bool> onTarget;
@@ -654,58 +654,6 @@ private:
   ActorDestroy(ActorDestroyReason aWhy) override
   {
     // Nothing needs to be done here.
-  }
-};
-
-class EmptyBlobImpl final
-  : public BlobImplBase
-{
-public:
-  explicit EmptyBlobImpl(const nsAString& aContentType)
-    : BlobImplBase(aContentType, 0)
-  {
-    mImmutable = true;
-  }
-
-  EmptyBlobImpl(const nsAString& aName,
-                const nsAString& aContentType,
-                int64_t aLastModifiedDate)
-    : BlobImplBase(aName, aContentType, 0, aLastModifiedDate)
-  {
-    mImmutable = true;
-  }
-
-private:
-  virtual already_AddRefed<BlobImpl>
-  CreateSlice(uint64_t /* aStart */,
-              uint64_t aLength,
-              const nsAString& aContentType,
-              ErrorResult& /* aRv */) override
-  {
-    MOZ_ASSERT(!aLength);
-
-    RefPtr<BlobImpl> sliceImpl = new EmptyBlobImpl(aContentType);
-
-    DebugOnly<bool> isMutable;
-    MOZ_ASSERT(NS_SUCCEEDED(sliceImpl->GetMutable(&isMutable)));
-    MOZ_ASSERT(!isMutable);
-
-    return sliceImpl.forget();
-  }
-
-  virtual void
-  GetInternalStream(nsIInputStream** aStream, ErrorResult& aRv) override
-  {
-    if (NS_WARN_IF(!aStream)) {
-      aRv.Throw(NS_ERROR_FAILURE);
-      return;
-    }
-
-    nsString emptyString;
-    aRv = NS_NewStringInputStream(aStream, emptyString);
-    if (NS_WARN_IF(aRv.Failed())) {
-      return;
-    }
   }
 };
 
@@ -1977,7 +1925,7 @@ public:
   NS_DECL_ISUPPORTS_INHERITED
 
   virtual void
-  GetName(nsAString& aName) override;
+  GetName(nsAString& aName) const override;
 
   virtual void
   GetPath(nsAString& aPath, ErrorResult& aRv) override;
@@ -2639,7 +2587,7 @@ NS_IMPL_QUERY_INTERFACE_INHERITED(BlobParent::RemoteBlobImpl,
 
 void
 BlobParent::
-RemoteBlobImpl::GetName(nsAString& aName)
+RemoteBlobImpl::GetName(nsAString& aName) const
 {
   mBlobImpl->GetName(aName);
 }

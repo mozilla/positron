@@ -329,13 +329,16 @@ ShapeTable::grow(ExclusiveContext* cx)
 }
 
 void
-ShapeTable::fixupAfterMovingGC()
+ShapeTable::trace(JSTracer* trc)
 {
     for (size_t i = 0; i < capacity(); i++) {
         Entry& entry = getEntry(i);
         Shape* shape = entry.shape();
-        if (shape && IsForwarded(shape))
-            entry.setPreservingCollision(Forwarded(shape));
+        if (shape) {
+            TraceManuallyBarrieredEdge(trc, &shape, "ShapeTable shape");
+            if (shape != entry.shape())
+                entry.setPreservingCollision(shape);
+        }
     }
 }
 
@@ -1329,6 +1332,13 @@ BaseShape::assertConsistency()
 void
 BaseShape::traceChildren(JSTracer* trc)
 {
+    traceChildrenSkipShapeTable(trc);
+    traceShapeTable(trc);
+}
+
+void
+BaseShape::traceChildrenSkipShapeTable(JSTracer* trc)
+{
     assertConsistency();
 
     if (trc->isMarkingTracer())
@@ -1340,6 +1350,13 @@ BaseShape::traceChildren(JSTracer* trc)
     JSObject* global = compartment()->unsafeUnbarrieredMaybeGlobal();
     if (global)
         TraceManuallyBarrieredEdge(trc, &global, "global");
+}
+
+void
+BaseShape::traceShapeTable(JSTracer* trc)
+{
+    if (hasTable())
+        table().trace(trc);
 }
 
 void

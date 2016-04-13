@@ -457,7 +457,7 @@ APZCTreeManager::PrepareNodeForLayer(const LayerMetricsWrapper& aLayer,
 
     APZCTM_LOG("Using APZC %p for layer %p with identifiers %" PRId64 " %" PRId64 "\n", apzc, aLayer.GetLayer(), aLayersId, aMetrics.GetScrollId());
 
-    apzc->NotifyLayersUpdated(aMetrics, aState.mIsFirstPaint,
+    apzc->NotifyLayersUpdated(aLayer.Metadata(), aState.mIsFirstPaint,
         aLayersId == aState.mOriginatingLayersId);
 
     // Since this is the first time we are encountering an APZC with this guid,
@@ -611,9 +611,9 @@ static bool
 WillHandleWheelEvent(WidgetWheelEvent* aEvent)
 {
   return EventStateManager::WheelEventIsScrollAction(aEvent) &&
-         (aEvent->deltaMode == nsIDOMWheelEvent::DOM_DELTA_LINE ||
-          aEvent->deltaMode == nsIDOMWheelEvent::DOM_DELTA_PIXEL ||
-          aEvent->deltaMode == nsIDOMWheelEvent::DOM_DELTA_PAGE);
+         (aEvent->mDeltaMode == nsIDOMWheelEvent::DOM_DELTA_LINE ||
+          aEvent->mDeltaMode == nsIDOMWheelEvent::DOM_DELTA_PIXEL ||
+          aEvent->mDeltaMode == nsIDOMWheelEvent::DOM_DELTA_PAGE);
 }
 
 static bool
@@ -1077,6 +1077,14 @@ APZCTreeManager::ProcessMouseEvent(WidgetMouseEventBase& aEvent,
   return status;
 }
 
+void
+APZCTreeManager::ProcessTouchVelocity(uint32_t aTimestampMs, float aSpeedY)
+{
+  if (mApzcForInputBlock) {
+    mApzcForInputBlock->HandleTouchVelocity(aTimestampMs, aSpeedY);
+  }
+}
+
 nsEventStatus
 APZCTreeManager::ProcessWheelEvent(WidgetWheelEvent& aEvent,
                                    ScrollableLayerGuid* aOutTargetGuid,
@@ -1084,9 +1092,9 @@ APZCTreeManager::ProcessWheelEvent(WidgetWheelEvent& aEvent,
 {
   ScrollWheelInput::ScrollMode scrollMode = ScrollWheelInput::SCROLLMODE_INSTANT;
   if (gfxPrefs::SmoothScrollEnabled() &&
-      ((aEvent.deltaMode == nsIDOMWheelEvent::DOM_DELTA_LINE &&
+      ((aEvent.mDeltaMode == nsIDOMWheelEvent::DOM_DELTA_LINE &&
         gfxPrefs::WheelSmoothScrollEnabled()) ||
-       (aEvent.deltaMode == nsIDOMWheelEvent::DOM_DELTA_PAGE &&
+       (aEvent.mDeltaMode == nsIDOMWheelEvent::DOM_DELTA_PAGE &&
         gfxPrefs::PageSmoothScrollEnabled())))
   {
     scrollMode = ScrollWheelInput::SCROLLMODE_SMOOTH;
@@ -1095,16 +1103,17 @@ APZCTreeManager::ProcessWheelEvent(WidgetWheelEvent& aEvent,
   ScreenPoint origin(aEvent.refPoint.x, aEvent.refPoint.y);
   ScrollWheelInput input(aEvent.mTime, aEvent.mTimeStamp, 0,
                          scrollMode,
-                         ScrollWheelInput::DeltaTypeForDeltaMode(aEvent.deltaMode),
+                         ScrollWheelInput::DeltaTypeForDeltaMode(
+                                             aEvent.mDeltaMode),
                          origin,
-                         aEvent.deltaX, aEvent.deltaY,
+                         aEvent.mDeltaX, aEvent.mDeltaY,
                          aEvent.mAllowToOverrideSystemScrollSpeed);
 
   // We add the user multiplier as a separate field, rather than premultiplying
   // it, because if the input is converted back to a WidgetWheelEvent, then
   // EventStateManager would apply the delta a second time. We could in theory
   // work around this by asking ESM to customize the event much sooner, and
-  // then save the "customizedByUserPrefs" bit on ScrollWheelInput - but for
+  // then save the "mCustomizedByUserPrefs" bit on ScrollWheelInput - but for
   // now, this seems easier.
   EventStateManager::GetUserPrefsForWheelEvent(&aEvent,
     &input.mUserDeltaMultiplierX,
@@ -1151,10 +1160,11 @@ APZCTreeManager::ReceiveInputEvent(WidgetInputEvent& aEvent,
       // touch points (if we are overscrolled), and the coordinates were
       // modified using the APZ untransform. We need to copy these changes
       // back into the WidgetInputEvent.
-      touchEvent.touches.Clear();
-      touchEvent.touches.SetCapacity(touchInput.mTouches.Length());
+      touchEvent.mTouches.Clear();
+      touchEvent.mTouches.SetCapacity(touchInput.mTouches.Length());
       for (size_t i = 0; i < touchInput.mTouches.Length(); i++) {
-        *touchEvent.touches.AppendElement() = touchInput.mTouches[i].ToNewDOMTouch();
+        *touchEvent.mTouches.AppendElement() =
+          touchInput.mTouches[i].ToNewDOMTouch();
       }
       touchEvent.mFlags.mHandledByAPZ = touchInput.mHandledByAPZ;
       return result;
@@ -1933,7 +1943,7 @@ APZCTreeManager::GetScreenToApzcTransform(const AsyncPanZoomController *aApzc) c
     // ancestorUntransform is updated to RC.Inverse() * QC.Inverse() when parent == P
     ancestorUntransform = parent->GetAncestorTransform().Inverse();
     // asyncUntransform is updated to PA.Inverse() when parent == P
-    Matrix4x4 asyncUntransform = parent->GetCurrentAsyncTransformWithOverscroll().Inverse().ToUnknownMatrix();
+    Matrix4x4 asyncUntransform = parent->GetCurrentAsyncTransformWithOverscroll(AsyncPanZoomController::NORMAL).Inverse().ToUnknownMatrix();
     // untransformSinceLastApzc is RC.Inverse() * QC.Inverse() * PA.Inverse()
     Matrix4x4 untransformSinceLastApzc = ancestorUntransform * asyncUntransform;
 
@@ -1965,7 +1975,7 @@ APZCTreeManager::GetApzcToGeckoTransform(const AsyncPanZoomController *aApzc) co
   // leftmost matrix in a multiplication is applied first.
 
   // asyncUntransform is LA.Inverse()
-  Matrix4x4 asyncUntransform = aApzc->GetCurrentAsyncTransformWithOverscroll().Inverse().ToUnknownMatrix();
+  Matrix4x4 asyncUntransform = aApzc->GetCurrentAsyncTransformWithOverscroll(AsyncPanZoomController::NORMAL).Inverse().ToUnknownMatrix();
 
   // aTransformToGeckoOut is initialized to LA.Inverse() * LD * MC * NC * OC * PC
   result = asyncUntransform * aApzc->GetTransformToLastDispatchedPaint() * aApzc->GetAncestorTransform();

@@ -1524,6 +1524,9 @@ GCSchedulingTunables::setParameter(JSGCParamKey key, uint32_t value, const AutoL
             minEmptyChunkCount_ = maxEmptyChunkCount_;
         MOZ_ASSERT(maxEmptyChunkCount_ >= minEmptyChunkCount_);
         break;
+      case JSGC_REFRESH_FRAME_SLICES_ENABLED:
+        refreshFrameSlicesEnabled_ = value != 0;
+        break;
       default:
         MOZ_CRASH("Unknown GC parameter.");
     }
@@ -1585,6 +1588,8 @@ GCRuntime::getParameter(JSGCParamKey key, const AutoLockGC& lock)
         return tunables.maxEmptyChunkCount();
       case JSGC_COMPACTING_ENABLED:
         return compactingEnabled;
+      case JSGC_REFRESH_FRAME_SLICES_ENABLED:
+        return tunables.areRefreshFrameSlicesEnabled();
       default:
         MOZ_ASSERT(key == JSGC_NUMBER);
         return uint32_t(number);
@@ -2194,7 +2199,7 @@ RelocateCell(Zone* zone, TenuredCell* src, AllocKind thingKind, size_t thingSize
         }
 
         // Call object moved hook if present.
-        if (JSObjectMovedOp op = srcObj->getClass()->ext.objectMovedOp)
+        if (JSObjectMovedOp op = srcObj->getClass()->extObjectMovedOp())
             op(dstObj, srcObj);
 
         MOZ_ASSERT_IF(dstObj->isNative(),
@@ -2413,12 +2418,12 @@ GCRuntime::sweepTypesAfterCompacting(Zone* zone)
 
     AutoClearTypeInferenceStateOnOOM oom(zone);
 
-    for (ZoneCellIter i(zone, AllocKind::SCRIPT); !i.done(); i.next()) {
+    for (ZoneCellIterUnderGC i(zone, AllocKind::SCRIPT); !i.done(); i.next()) {
         JSScript* script = i.get<JSScript>();
         script->maybeSweepTypes(&oom);
     }
 
-    for (ZoneCellIter i(zone, AllocKind::OBJECT_GROUP); !i.done(); i.next()) {
+    for (ZoneCellIterUnderGC i(zone, AllocKind::OBJECT_GROUP); !i.done(); i.next()) {
         ObjectGroup* group = i.get<ObjectGroup>();
         group->maybeSweep(&oom);
     }
@@ -2800,6 +2805,8 @@ GCRuntime::updatePointersToRelocatedCells(Zone* zone)
     callWeakPointerZoneGroupCallbacks();
     for (CompartmentsInZoneIter comp(zone); !comp.done(); comp.next())
         callWeakPointerCompartmentCallbacks(comp);
+    if (rt->sweepZoneCallback)
+        rt->sweepZoneCallback(zone);
 }
 
 void
@@ -3934,15 +3941,11 @@ GCRuntime::checkForCompartmentMismatches()
     if (disableStrictProxyCheckingCount)
         return;
 
-    // ZoneCellIter could GC were this not called under GC.
-    MOZ_ASSERT(rt->isHeapBusy());
-    JS::AutoSuppressGCAnalysis noAnalysis;
-
     CompartmentCheckTracer trc(rt);
     for (ZonesIter zone(rt, SkipAtoms); !zone.done(); zone.next()) {
         trc.zone = zone;
         for (auto thingKind : AllAllocKinds()) {
-            for (ZoneCellIter i(zone, thingKind); !i.done(); i.next()) {
+            for (ZoneCellIterUnderGC i(zone, thingKind); !i.done(); i.next()) {
                 trc.src = i.getCell();
                 trc.srcKind = MapAllocToTraceKind(thingKind);
                 trc.compartment = DispatchTraceKindTyped(MaybeCompartmentFunctor(),
@@ -3962,7 +3965,7 @@ RelazifyFunctions(Zone* zone, AllocKind kind)
 
     JSRuntime* rt = zone->runtimeFromMainThread();
 
-    for (ZoneCellIter i(zone, kind); !i.done(); i.next()) {
+    for (ZoneCellIterUnderGC i(zone, kind); !i.done(); i.next()) {
         JSFunction* fun = &i.get<JSObject>()->as<JSFunction>();
         if (fun->hasScript())
             fun->maybeRelazify(rt);
@@ -6591,7 +6594,7 @@ GCRuntime::notifyDidPaint()
     }
 #endif
 
-    if (isIncrementalGCInProgress() && !interFrameGC) {
+    if (isIncrementalGCInProgress() && !interFrameGC && tunables.areRefreshFrameSlicesEnabled()) {
         JS::PrepareForIncrementalGC(rt);
         gcSlice(JS::gcreason::REFRESH_FRAME);
     }
@@ -7197,7 +7200,8 @@ JS_FRIEND_API(void)
 JS::AssertGCThingMustBeTenured(JSObject* obj)
 {
     MOZ_ASSERT(obj->isTenured() &&
-               (!IsNurseryAllocable(obj->asTenured().getAllocKind()) || obj->getClass()->finalize));
+               (!IsNurseryAllocable(obj->asTenured().getAllocKind()) ||
+                obj->getClass()->hasFinalize()));
 }
 
 JS_FRIEND_API(void)
@@ -7362,11 +7366,7 @@ js::gc::CheckHashTablesAfterMovingGC(JSRuntime* rt)
     for (ZonesIter zone(rt, SkipAtoms); !zone.done(); zone.next()) {
         zone->checkUniqueIdTableAfterMovingGC();
 
-        // ZoneCellIter could GC were this not called under GC.
-        MOZ_ASSERT(rt->isHeapBusy());
-        JS::AutoSuppressGCAnalysis noAnalysis;
-
-        for (ZoneCellIter i(zone, AllocKind::BASE_SHAPE); !i.done(); i.next()) {
+        for (ZoneCellIterUnderGC i(zone, AllocKind::BASE_SHAPE); !i.done(); i.next()) {
             BaseShape* baseShape = i.get<BaseShape>();
             if (baseShape->hasTable())
                 baseShape->table().checkAfterMovingGC();

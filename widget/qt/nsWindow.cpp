@@ -682,7 +682,7 @@ nsWindow::DispatchEvent(WidgetGUIEvent* aEvent, nsEventStatus& aStatus)
 {
 #ifdef DEBUG
     debug_DumpEvent(stdout, aEvent->widget, aEvent,
-                    nsAutoCString("something"), 0);
+                    "something", 0);
 #endif
 
     aStatus = nsEventStatus_eIgnore;
@@ -1109,7 +1109,7 @@ InitKeyEvent(WidgetKeyboardEvent& aEvent, QKeyEvent* aQEvent)
     aEvent.mTime = 0;
 
     if (sAltGrModifier) {
-        aEvent.modifiers |= (MODIFIER_CONTROL | MODIFIER_ALT);
+        aEvent.mModifiers |= (MODIFIER_CONTROL | MODIFIER_ALT);
     }
 
     if (aQEvent->text().length() && aQEvent->text()[0].isPrint()) {
@@ -1266,7 +1266,7 @@ nsWindow::wheelEvent(QWheelEvent* aEvent)
 {
     // check to see if we should rollup
     WidgetWheelEvent wheelEvent(true, eWheel, this);
-    wheelEvent.deltaMode = nsIDOMWheelEvent::DOM_DELTA_LINE;
+    wheelEvent.mDeltaMode = nsIDOMWheelEvent::DOM_DELTA_LINE;
 
     // negative values for aEvent->delta indicate downward scrolling;
     // this is opposite Gecko usage.
@@ -1277,10 +1277,10 @@ nsWindow::wheelEvent(QWheelEvent* aEvent)
 
     switch (aEvent->orientation()) {
     case Qt::Vertical:
-        wheelEvent.deltaY = wheelEvent.lineOrPageDeltaY = delta;
+        wheelEvent.mDeltaY = wheelEvent.mLineOrPageDeltaY = delta;
         break;
     case Qt::Horizontal:
-        wheelEvent.deltaX = wheelEvent.lineOrPageDeltaX = delta;
+        wheelEvent.mDeltaX = wheelEvent.mLineOrPageDeltaX = delta;
         break;
     default:
         Q_ASSERT(0);

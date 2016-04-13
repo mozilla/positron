@@ -200,9 +200,15 @@ function loadView(aViewId) {
 }
 
 function isCorrectlySigned(aAddon) {
-  // temporary add-ons do not require signing
+  // Temporary add-ons do not require signing.
   if (aAddon.scope == AddonManager.SCOPE_TEMPORARY)
       return true;
+  // On UNIX platforms except OSX, an additional location for system add-ons
+  // exists in /usr/{lib,share}/mozilla/extensions. Add-ons installed there
+  // do not require signing either.
+  if (aAddon.scope == AddonManager.SCOPE_SYSTEM &&
+      Services.appinfo.OS != "Darwin")
+    return true;
   if (aAddon.signedState <= AddonManager.SIGNEDSTATE_MISSING)
     return false;
   return true;
@@ -2249,7 +2255,7 @@ var gDiscoverView = {
                         Ci.nsIWebProgressListener.STATE_IS_REQUEST |
                         Ci.nsIWebProgressListener.STATE_TRANSFERRING;
     // Once transferring begins show the content
-    if (aStateFlags & transferStart)
+    if ((aStateFlags & transferStart) === transferStart)
       this.node.selectedPanel = this._browser;
 
     // Only care about the network events

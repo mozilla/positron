@@ -10,6 +10,9 @@
   <!ENTITY % globalDTD
     SYSTEM "chrome://global/locale/global.dtd">
   %globalDTD;
+  <!ENTITY % syncBrandDTD
+    SYSTEM "chrome://browser/locale/syncBrand.dtd">
+  %syncBrandDTD;
 ]>
 <html xmlns="http://www.w3.org/1999/xhtml"
       xmlns:xul="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul">
@@ -63,7 +66,35 @@
 
     <template id="tabs-container-template">
       <div class="tabs-container">
-        <div class="sidebar-search-container">
+        <div class="list" role="listbox" tabindex="1"></div>
+      </div>
+    </template>
+
+    <template id="deck-template">
+      <div class="deck">
+        <div class="tabs-fetching sync-state">
+          <!-- Show intentionally blank panel, see bug 1239845 -->
+        </div>
+        <div class="notAuthedInfo sync-state">
+          <p>&syncedTabs.sidebar.notsignedin.label;</p>
+          <p><a href="#" class="sync-prefs text-link">&fxaSignIn.label;</a></p>
+        </div>
+        <div class="singleDeviceInfo sync-state">
+          <p>&syncedTabs.sidebar.noclients.title;</p>
+          <p>&syncedTabs.sidebar.noclients.subtitle;</p>
+          <p class="device-promo" fxAccountsBrand="&syncBrand.fxAccount.label;"></p>
+        </div>
+        <div class="tabs-disabled sync-state">
+          <p>&syncedTabs.sidebar.tabsnotsyncing.label;</p>
+          <p><a href="#" class="sync-prefs text-link">&syncedTabs.sidebar.openprefs.label;</a></p>
+        </div>
+      </div>
+    </template>
+
+    <div class="content-container">
+      <!-- the non-scrollable header -->
+      <div class="content-header">
+        <div class="sidebar-search-container tabs-container sync-state">
           <div class="search-box compact">
             <div class="textbox-input-box">
               <input type="text" class="tabsFilter textbox-input"/>
@@ -74,29 +105,10 @@
             </div>
           </div>
         </div>
-        <div class="list" role="listbox" tabindex="1"></div>
       </div>
-    </template>
-
-    <template id="deck-template">
-      <div class="deck">
-        <div class="tabs-fetching sync-state">
-          <p>&syncedTabs.sidebar.fetching.label;</p>
-        </div>
-        <div class="notAuthedInfo sync-state">
-          <p>&syncedTabs.sidebar.notsignedin.label;</p>
-          <p><a href="#" class="sync-prefs text-link">&fxaSignIn.label;</a></p>
-        </div>
-        <div class="singleDeviceInfo sync-state">
-          <p>&syncedTabs.sidebar.noclients.label;</p>
-          <p class="device-promo"></p>
-        </div>
-        <div class="tabs-disabled sync-state">
-          <p>&syncedTabs.sidebar.tabsnotsyncing.label;</p>
-          <p><a href="#" class="sync-prefs text-link">&syncedTabs.sidebar.openprefs.label;</a></p>
-        </div>
+      <!-- the scrollable content area where our templates are inserted -->
+      <div id="template-container" class="content-scrollable">
       </div>
-    </template>
-
+    </div>
   </body>
 </html>

@@ -8,6 +8,7 @@
 #include "mozilla/ClearOnShutdown.h"
 #include "mozilla/Move.h"
 #include "mozilla/Preferences.h"
+ #include "mozilla/ChaosMode.h"
 
 #include "ImageLogging.h"
 #include "nsPrintfCString.h"
@@ -1328,11 +1329,12 @@ imgLoader::ClearCache(bool chrome)
 
 NS_IMETHODIMP
 imgLoader::FindEntryProperties(nsIURI* uri,
-                               nsIDOMDocument* doc,
+                               nsIDOMDocument* aDOMDoc,
                                nsIProperties** _retval)
 {
   *_retval = nullptr;
 
+  nsCOMPtr<nsIDocument> doc = do_QueryInterface(aDOMDoc);
   ImageCacheKey key(uri, doc);
   imgCacheTable& cache = GetCache(key);
 
@@ -1772,6 +1774,12 @@ imgLoader::ValidateEntry(imgCacheEntry* aEntry,
       return false;
     }
 
+    if (MOZ_UNLIKELY(ChaosMode::isActive(ChaosFeature::ImageCache))) {
+      if (ChaosMode::randomUint32LessThan(4) < 1) {
+        return false;
+      }
+    }
+
     // Determine whether the cache aEntry must be revalidated...
     validateRequest = ShouldRevalidateEntry(aEntry, aLoadFlags, hasExpired);
 
@@ -1984,6 +1992,8 @@ imgLoader::LoadImageXPCOM(nsIURI* aURI,
     }
     imgRequestProxy* proxy;
     ReferrerPolicy refpol = ReferrerPolicyFromString(aReferrerPolicy);
+    nsCOMPtr<nsINode> node = do_QueryInterface(aCX);
+    nsCOMPtr<nsIDocument> doc = do_QueryInterface(aCX);
     nsresult rv = LoadImage(aURI,
                             aInitialDocumentURI,
                             aReferrerURI,
@@ -1991,7 +2001,8 @@ imgLoader::LoadImageXPCOM(nsIURI* aURI,
                             aLoadingPrincipal,
                             aLoadGroup,
                             aObserver,
-                            aCX,
+                            node,
+                            doc,
                             aLoadFlags,
                             aCacheKey,
                             aContentPolicyType,
@@ -2009,7 +2020,8 @@ imgLoader::LoadImage(nsIURI* aURI,
                      nsIPrincipal* aLoadingPrincipal,
                      nsILoadGroup* aLoadGroup,
                      imgINotificationObserver* aObserver,
-                     nsISupports* aCX,
+                     nsINode *aContext,
+                     nsIDocument* aLoadingDocument,
                      nsLoadFlags aLoadFlags,
                      nsISupports* aCacheKey,
                      nsContentPolicyType aContentPolicyType,
@@ -2088,13 +2100,12 @@ imgLoader::LoadImage(nsIURI* aURI,
   // XXX For now ignore aCacheKey. We will need it in the future
   // for correctly dealing with image load requests that are a result
   // of post data.
-  nsCOMPtr<nsIDOMDocument> doc = do_QueryInterface(aCX);
-  ImageCacheKey key(aURI, doc);
+  ImageCacheKey key(aURI, aLoadingDocument);
   imgCacheTable& cache = GetCache(key);
 
   if (cache.Get(key, getter_AddRefs(entry)) && entry) {
     if (ValidateEntry(entry, aURI, aInitialDocumentURI, aReferrerURI,
-                      aReferrerPolicy, aLoadGroup, aObserver, aCX,
+                      aReferrerPolicy, aLoadGroup, aObserver, aLoadingDocument,
                       requestFlags, aContentPolicyType, true, _retval,
                       aLoadingPrincipal, corsmode)) {
       request = entry->GetRequest();
@@ -2145,7 +2156,7 @@ imgLoader::LoadImage(nsIURI* aURI,
                          requestFlags,
                          aContentPolicyType,
                          aLoadingPrincipal,
-                         aCX);
+                         aContext);
     if (NS_FAILED(rv)) {
       return NS_ERROR_FAILURE;
     }
@@ -2163,7 +2174,7 @@ imgLoader::LoadImage(nsIURI* aURI,
     nsCOMPtr<nsILoadGroup> channelLoadGroup;
     newChannel->GetLoadGroup(getter_AddRefs(channelLoadGroup));
     request->Init(aURI, aURI, /* aHadInsecureRedirect = */ false,
-                  channelLoadGroup, newChannel, entry, aCX,
+                  channelLoadGroup, newChannel, entry, aLoadingDocument,
                   aLoadingPrincipal, corsmode, aReferrerPolicy);
 
     // Add the initiator type for this image load
@@ -2235,7 +2246,7 @@ imgLoader::LoadImage(nsIURI* aURI,
     // URL maps to the same image on a page) if we load the same image in a
     // different tab (see bug 528003), because its load id will get re-set, and
     // that'll cause us to validate over the network.
-    request->SetLoadId(aCX);
+    request->SetLoadId(aLoadingDocument);
 
     LOG_MSG(gImgLog, "imgLoader::LoadImage", "creating proxy request.");
     rv = CreateNewProxyForRequest(request, aLoadGroup, aObserver,
@@ -2313,7 +2324,7 @@ imgLoader::LoadImageWithChannel(nsIChannel* channel,
 
   nsCOMPtr<nsIURI> uri;
   channel->GetURI(getter_AddRefs(uri));
-  nsCOMPtr<nsIDOMDocument> doc = do_QueryInterface(aCX);
+  nsCOMPtr<nsIDocument> doc = do_QueryInterface(aCX);
   ImageCacheKey key(uri, doc);
 
   nsLoadFlags requestFlags = nsIRequest::LOAD_NORMAL;

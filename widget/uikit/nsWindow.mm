@@ -170,7 +170,7 @@ private:
     //XXX: I think nativeEvent.timestamp * 1000 is probably usable here but
     // I don't care that much right now.
     event.mTime = PR_IntervalNow();
-    event.touches.SetCapacity(aTouches.count);
+    event.mTouches.SetCapacity(aTouches.count);
     for (UITouch* touch in aTouches) {
         LayoutDeviceIntPoint loc = UIKitPointsToDevPixels([touch locationInView:self], [self contentScaleFactor]);
         LayoutDeviceIntPoint radius = UIKitPointsToDevPixels([touch majorRadius], [touch majorRadius]);
@@ -183,7 +183,7 @@ private:
         int id = reinterpret_cast<int>(value);
         RefPtr<Touch> t = new Touch(id, loc, radius, 0.0f, 1.0f);
         event.refPoint = loc;
-        event.touches.AppendElement(t);
+        event.mTouches.AppendElement(t);
     }
     aWindow->DispatchInputEvent(&event);
 }
@@ -359,8 +359,12 @@ private:
       gfx::Factory::CreateDrawTargetForCairoCGContext(aContext,
                                                       gfx::IntSize(backingSize.width,
                                                                    backingSize.height));
+    if (!dt || !dt->IsValid()) {
+        gfxDevCrash(mozilla::gfx::LogReason::InvalidContext) << "Window context problem 1 " << backingSize;
+        return;
+    }
     dt->AddUserData(&gfxContext::sDontUseAsSourceKey, dt, nullptr);
-    targetContext = new gfxContext(dt);
+    targetContext = gfxContext::ForDrawTarget(dt);
   } else if (gfxPlatform::GetPlatform()->SupportsAzureContentForType(gfx::BackendType::CAIRO)) {
     // This is dead code unless you mess with prefs, but keep it around for
     // debugging.
@@ -370,11 +374,16 @@ private:
       gfxPlatform::GetPlatform()->CreateDrawTargetForSurface(targetSurface,
                                                              gfx::IntSize(backingSize.width,
                                                                           backingSize.height));
+    if (!dt || !dt->IsValid()) {
+        gfxDevCrash(mozilla::gfx::LogReason::InvalidContext) << "Window context problem 2 " << backingSize;
+        return;
+    }
     dt->AddUserData(&gfxContext::sDontUseAsSourceKey, dt, nullptr);
-    targetContext = new gfxContext(dt);
+    targetContext = gfxContext::ForDrawTarget(dt);
   } else {
-    MOZ_ASSERT_UNREACHABLE("COREGRAPHICS is the only supported backed");
+    MOZ_ASSERT_UNREACHABLE("COREGRAPHICS is the only supported backend");
   }
+  MOZ_ASSERT(targetContext); // already checked for valid draw targets above
 
   // Set up the clip region.
   targetContext->NewPath();

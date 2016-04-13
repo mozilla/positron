@@ -1524,7 +1524,7 @@ TreatAsOpaque(nsDisplayItem* aItem, nsDisplayListBuilder* aBuilder)
     // children, which might be a large area their contents don't really cover).
     nsIFrame* f = aItem->Frame();
     if (f->PresContext()->IsChrome() && !aItem->GetChildren() &&
-        f->StyleDisplay()->mOpacity != 0.0) {
+        f->StyleEffects()->mOpacity != 0.0) {
       opaque = aItem->GetBounds(aBuilder, &snap);
     }
   }
@@ -1691,11 +1691,11 @@ already_AddRefed<LayerManager> nsDisplayList::PaintRoot(nsDisplayListBuilder* aB
     props = Move(LayerProperties::CloneFrom(layerManager->GetRoot()));
   }
 
-  // Clear any FrameMetrics that may have been set on the root layer on a
+  // Clear any ScrollMetadata that may have been set on the root layer on a
   // previous paint. This paint will set new metrics if necessary, and if we
   // don't clear the old one here, we may be left with extra metrics.
   if (Layer* root = layerManager->GetRoot()) {
-      root->SetFrameMetrics(nsTArray<FrameMetrics>());
+      root->SetScrollMetadata(nsTArray<ScrollMetadata>());
   }
 
   ContainerLayerParameters containerParameters
@@ -1767,8 +1767,8 @@ already_AddRefed<LayerManager> nsDisplayList::PaintRoot(nsDisplayListBuilder* aB
 
     nsRect viewport(aBuilder->ToReferenceFrame(frame), frame->GetSize());
 
-    root->SetFrameMetrics(
-      nsLayoutUtils::ComputeFrameMetrics(frame,
+    root->SetScrollMetadata(
+      nsLayoutUtils::ComputeScrollMetadata(frame,
                          rootScrollFrame, content,
                          aBuilder->FindReferenceFrameFor(frame),
                          root, FrameMetrics::NULL_SCROLL_ID, viewport, Nothing(),
@@ -1925,7 +1925,7 @@ IsFrameReceivingPointerEvents(nsIFrame* aFrame)
     return true;
   }
   return NS_STYLE_POINTER_EVENTS_NONE !=
-    aFrame->StyleVisibility()->GetEffectivePointerEvents(aFrame);
+    aFrame->StyleUserInterface()->GetEffectivePointerEvents(aFrame);
 }
 
 // A list of frames, and their z depth. Used for sorting
@@ -2309,32 +2309,33 @@ nsDisplayBackgroundImage::nsDisplayBackgroundImage(nsDisplayListBuilder* aBuilde
   : nsDisplayImageContainer(aBuilder, aFrame)
   , mBackgroundStyle(aBackgroundStyle)
   , mLayer(aLayer)
+  , mIsRasterImage(false)
 {
   MOZ_COUNT_CTOR(nsDisplayBackgroundImage);
 
   mBounds = GetBoundsInternal(aBuilder);
-  mDestArea = GetDestAreaInternal(aBuilder);
   if (ShouldFixToViewport(aBuilder)) {
     mAnimatedGeometryRoot = aBuilder->FindAnimatedGeometryRootFor(this);
   }
-}
-
-nsRect
-nsDisplayBackgroundImage::GetDestAreaInternal(nsDisplayListBuilder* aBuilder)
-{
-  if (!mBackgroundStyle) {
-    return nsRect();
-  }
-
+  
   nsPresContext* presContext = mFrame->PresContext();
   uint32_t flags = aBuilder->GetBackgroundPaintFlags();
   nsRect borderArea = nsRect(ToReferenceFrame(), mFrame->GetSize());
-  const nsStyleImageLayers::Layer& layer = mBackgroundStyle->mImage.mLayers[mLayer];
+  const nsStyleImageLayers::Layer &layer = mBackgroundStyle->mImage.mLayers[mLayer];
 
   nsBackgroundLayerState state =
     nsCSSRendering::PrepareImageLayer(presContext, mFrame, flags,
                                       borderArea, borderArea, layer);
-  return state.mDestArea;
+
+  mFillRect = state.mFillArea;
+  mDestRect = state.mDestArea;
+
+  nsImageRenderer* imageRenderer = &state.mImageRenderer;
+  // We only care about images here, not gradients.
+  if (imageRenderer->IsRasterImage()) {
+    mIsRasterImage = true;
+    mImage = imageRenderer->GetImage();
+  }
 }
 
 nsDisplayBackgroundImage::~nsDisplayBackgroundImage()
@@ -2418,8 +2419,9 @@ nsDisplayBackgroundImage::AppendBackgroundItemsToTop(nsDisplayListBuilder* aBuil
   }
 
   const nsStyleBorder* borderStyle = aFrame->StyleBorder();
-  bool hasInsetShadow = borderStyle->mBoxShadow &&
-                        borderStyle->mBoxShadow->HasShadowWithInset(true);
+  const nsStyleEffects* effectsStyle = aFrame->StyleEffects();
+  bool hasInsetShadow = effectsStyle->mBoxShadow &&
+                        effectsStyle->mBoxShadow->HasShadowWithInset(true);
   bool willPaintBorder = !isThemed && !hasInsetShadow &&
                          borderStyle->HasBorder();
 
@@ -2566,24 +2568,16 @@ nsDisplayBackgroundImage::IsSingleFixedPositionImage(nsDisplayListBuilder* aBuil
   if (mBackgroundStyle->mImage.mLayers.Length() != 1)
     return false;
 
-  nsPresContext* presContext = mFrame->PresContext();
-  uint32_t flags = aBuilder->GetBackgroundPaintFlags();
-  nsRect borderArea = nsRect(ToReferenceFrame(), mFrame->GetSize());
   const nsStyleImageLayers::Layer &layer = mBackgroundStyle->mImage.mLayers[mLayer];
-
   if (layer.mAttachment != NS_STYLE_IMAGELAYER_ATTACHMENT_FIXED)
     return false;
 
-  nsBackgroundLayerState state =
-    nsCSSRendering::PrepareImageLayer(presContext, mFrame, flags,
-                                           borderArea, aClipRect, layer);
-  nsImageRenderer* imageRenderer = &state.mImageRenderer;
   // We only care about images here, not gradients.
-  if (!imageRenderer->IsRasterImage())
+  if (!mIsRasterImage)
     return false;
 
-  int32_t appUnitsPerDevPixel = presContext->AppUnitsPerDevPixel();
-  *aDestRect = nsLayoutUtils::RectToGfxRect(state.mFillArea, appUnitsPerDevPixel);
+  int32_t appUnitsPerDevPixel = mFrame->PresContext()->AppUnitsPerDevPixel();
+  *aDestRect = nsLayoutUtils::RectToGfxRect(mFillRect, appUnitsPerDevPixel);
 
   return true;
 }
@@ -2618,75 +2612,35 @@ nsDisplayBackgroundImage::CanOptimizeToImageLayer(LayerManager* aManager,
     return false;
   }
 
-  nsPresContext* presContext = mFrame->PresContext();
-  uint32_t flags = aBuilder->GetBackgroundPaintFlags();
-  nsRect borderArea = nsRect(ToReferenceFrame(), mFrame->GetSize());
-  const nsStyleImageLayers::Layer &layer = mBackgroundStyle->mImage.mLayers[mLayer];
-
-  nsBackgroundLayerState state =
-    nsCSSRendering::PrepareImageLayer(presContext, mFrame, flags,
-                                           borderArea, borderArea, layer);
-  nsImageRenderer* imageRenderer = &state.mImageRenderer;
-  // We only care about images here, not gradients.
-  if (!imageRenderer->IsRasterImage()) {
-    return false;
-  }
-
-  if (!imageRenderer->IsContainerAvailable(aManager, aBuilder)) {
-    // The image is not ready to be made into a layer yet.
-    return false;
-  }
-
   // We currently can't handle tiled backgrounds.
-  if (!state.mDestArea.Contains(state.mFillArea)) {
+  if (!mDestRect.Contains(mFillRect)) {
     return false;
   }
 
   // For 'contain' and 'cover', we allow any pixel of the image to be sampled
   // because there isn't going to be any spriting/atlasing going on.
+  const nsStyleImageLayers::Layer &layer = mBackgroundStyle->mImage.mLayers[mLayer];
   bool allowPartialImages =
     (layer.mSize.mWidthType == nsStyleImageLayers::Size::eContain ||
      layer.mSize.mWidthType == nsStyleImageLayers::Size::eCover);
-  if (!allowPartialImages && !state.mFillArea.Contains(state.mDestArea)) {
+  if (!allowPartialImages && !mFillRect.Contains(mDestRect)) {
     return false;
   }
 
-  // XXX Ignoring state.mAnchor. ImageLayer drawing snaps mDestArea edges to
-  // layer pixel boundaries. This should be OK for now.
-
-  int32_t appUnitsPerDevPixel = presContext->AppUnitsPerDevPixel();
-  mImageLayerDestRect =
-    LayoutDeviceRect::FromAppUnits(state.mDestArea, appUnitsPerDevPixel);
-
-  // Ok, we can turn this into a layer if needed.
-  mImage = imageRenderer->GetImage();
-  MOZ_ASSERT(mImage);
-
-  return true;
+  return nsDisplayImageContainer::CanOptimizeToImageLayer(aManager, aBuilder);
 }
 
-already_AddRefed<ImageContainer>
-nsDisplayBackgroundImage::GetContainer(LayerManager* aManager,
-                                       nsDisplayListBuilder *aBuilder)
+nsRect
+nsDisplayBackgroundImage::GetDestRect()
 {
-  if (!mImage) {
-    MOZ_ASSERT_UNREACHABLE("Must call CanOptimizeToImage() and get true "
-                           "before calling GetContainer()");
-    return nullptr;
-  }
+  return mDestRect;
+}
 
-  if (!mImageContainer) {
-    // We don't have an ImageContainer yet; get it from mImage.
-
-    uint32_t flags = aBuilder->ShouldSyncDecodeImages()
-                   ? imgIContainer::FLAG_SYNC_DECODE
-                   : imgIContainer::FLAG_NONE;
-
-    mImageContainer = mImage->GetImageContainer(aManager, flags);
-  }
-
-  RefPtr<ImageContainer> container = mImageContainer;
-  return container.forget();
+already_AddRefed<imgIContainer>
+nsDisplayBackgroundImage::GetImage()
+{
+  nsCOMPtr<imgIContainer> image = mImage;
+  return image.forget();
 }
 
 nsDisplayBackgroundImage::ImageLayerization
@@ -2747,8 +2701,11 @@ nsDisplayBackgroundImage::GetLayerState(nsDisplayListBuilder* aBuilder,
     mImage->GetWidth(&imageWidth);
     mImage->GetHeight(&imageHeight);
     NS_ASSERTION(imageWidth != 0 && imageHeight != 0, "Invalid image size!");
+  
+    int32_t appUnitsPerDevPixel = mFrame->PresContext()->AppUnitsPerDevPixel();
+    LayoutDeviceRect destRect = LayoutDeviceRect::FromAppUnits(GetDestRect(), appUnitsPerDevPixel);
 
-    const LayerRect destLayerRect = mImageLayerDestRect * aParameters.Scale();
+    const LayerRect destLayerRect = destRect * aParameters.Scale();
 
     // Calculate the scaling factor for the frame.
     const gfxSize scale = gfxSize(destLayerRect.width / imageWidth,
@@ -2782,51 +2739,6 @@ nsDisplayBackgroundImage::BuildLayer(nsDisplayListBuilder* aBuilder,
   layer->SetContainer(imageContainer);
   ConfigureLayer(layer, aParameters);
   return layer.forget();
-}
-
-void
-nsDisplayBackgroundImage::ConfigureLayer(ImageLayer* aLayer,
-                                         const ContainerLayerParameters& aParameters)
-{
-  aLayer->SetFilter(nsLayoutUtils::GetGraphicsFilterForFrame(mFrame));
-
-  MOZ_ASSERT(mImage);
-  int32_t imageWidth;
-  int32_t imageHeight;
-  mImage->GetWidth(&imageWidth);
-  mImage->GetHeight(&imageHeight);
-  NS_ASSERTION(imageWidth != 0 && imageHeight != 0, "Invalid image size!");
-
-  if (imageWidth > 0 && imageHeight > 0) {
-    // We're actually using the ImageContainer. Let our frame know that it
-    // should consider itself to have painted successfully.
-    nsDisplayBackgroundGeometry::UpdateDrawResult(this,
-                                                  image::DrawResult::SUCCESS);
-  }
-
-  // XXX(seth): Right now we ignore aParameters.Scale() and
-  // aParameters.Offset(), because FrameLayerBuilder already applies
-  // aParameters.Scale() via the layer's post-transform, and
-  // aParameters.Offset() is always zero.
-  MOZ_ASSERT(aParameters.Offset() == LayerIntPoint(0,0));
-
-  // It's possible (for example, due to downscale-during-decode) that the
-  // ImageContainer this ImageLayer is holding has a different size from the
-  // intrinsic size of the image. For this reason we compute the transform using
-  // the ImageContainer's size rather than the image's intrinsic size.
-  // XXX(seth): In reality, since the size of the ImageContainer may change
-  // asynchronously, this is not enough. Bug 1183378 will provide a more
-  // complete fix, but this solution is safe in more cases than simply relying
-  // on the intrinsic size.
-  IntSize containerSize = aLayer->GetContainer()
-                        ? aLayer->GetContainer()->GetCurrentSize()
-                        : IntSize(imageWidth, imageHeight);
-
-  const LayoutDevicePoint p = mImageLayerDestRect.TopLeft();
-  Matrix transform = Matrix::Translation(p.x, p.y);
-  transform.PreScale(mImageLayerDestRect.width / containerSize.width,
-                     mImageLayerDestRect.height / containerSize.height);
-  aLayer->SetBaseTransform(gfx::Matrix4x4::From2D(transform));
 }
 
 void
@@ -3022,7 +2934,7 @@ void nsDisplayBackgroundImage::ComputeInvalidationRegion(nsDisplayListBuilder* a
     }
     return;
   }
-  if (!mDestArea.IsEqualInterior(geometry->mDestArea)) {
+  if (!mDestRect.IsEqualInterior(geometry->mDestRect)) {
     // Dest area changed in a way that could cause everything to change,
     // so invalidate everything (both old and new painting areas).
     aInvalidRegion->Or(bounds, geometry->mBounds);
@@ -3249,6 +3161,118 @@ nsDisplayThemedBackground::GetBoundsInternal() {
 }
 
 void
+nsDisplayImageContainer::ConfigureLayer(ImageLayer* aLayer,
+                                        const ContainerLayerParameters& aParameters)
+{
+  aLayer->SetFilter(nsLayoutUtils::GetGraphicsFilterForFrame(mFrame));
+
+  nsCOMPtr<imgIContainer> image = GetImage();
+  MOZ_ASSERT(image);
+  int32_t imageWidth;
+  int32_t imageHeight;
+  image->GetWidth(&imageWidth);
+  image->GetHeight(&imageHeight);
+  NS_ASSERTION(imageWidth != 0 && imageHeight != 0, "Invalid image size!");
+
+  if (imageWidth > 0 && imageHeight > 0) {
+    // We're actually using the ImageContainer. Let our frame know that it
+    // should consider itself to have painted successfully.
+    nsDisplayBackgroundGeometry::UpdateDrawResult(this,
+                                                  image::DrawResult::SUCCESS);
+  }
+
+  // XXX(seth): Right now we ignore aParameters.Scale() and
+  // aParameters.Offset(), because FrameLayerBuilder already applies
+  // aParameters.Scale() via the layer's post-transform, and
+  // aParameters.Offset() is always zero.
+  MOZ_ASSERT(aParameters.Offset() == LayerIntPoint(0,0));
+
+  // It's possible (for example, due to downscale-during-decode) that the
+  // ImageContainer this ImageLayer is holding has a different size from the
+  // intrinsic size of the image. For this reason we compute the transform using
+  // the ImageContainer's size rather than the image's intrinsic size.
+  // XXX(seth): In reality, since the size of the ImageContainer may change
+  // asynchronously, this is not enough. Bug 1183378 will provide a more
+  // complete fix, but this solution is safe in more cases than simply relying
+  // on the intrinsic size.
+  IntSize containerSize = aLayer->GetContainer()
+                        ? aLayer->GetContainer()->GetCurrentSize()
+                        : IntSize(imageWidth, imageHeight);
+  
+  const int32_t factor = mFrame->PresContext()->AppUnitsPerDevPixel();
+  const LayoutDeviceRect destRect =
+    LayoutDeviceRect::FromAppUnits(GetDestRect(), factor);
+
+  const LayoutDevicePoint p = destRect.TopLeft();
+  Matrix transform = Matrix::Translation(p.x, p.y);
+  transform.PreScale(destRect.width / containerSize.width,
+                     destRect.height / containerSize.height);
+  aLayer->SetBaseTransform(gfx::Matrix4x4::From2D(transform));
+}
+
+already_AddRefed<ImageContainer>
+nsDisplayImageContainer::GetContainer(LayerManager* aManager,
+                                      nsDisplayListBuilder *aBuilder)
+{
+  nsCOMPtr<imgIContainer> image = GetImage();
+  if (!image) {
+    MOZ_ASSERT_UNREACHABLE("Must call CanOptimizeToImage() and get true "
+                           "before calling GetContainer()");
+    return nullptr;
+  }
+
+  uint32_t flags = aBuilder->ShouldSyncDecodeImages()
+                 ? imgIContainer::FLAG_SYNC_DECODE
+                 : imgIContainer::FLAG_NONE;
+
+  return image->GetImageContainer(aManager, flags);
+}
+
+bool
+nsDisplayImageContainer::CanOptimizeToImageLayer(LayerManager* aManager,
+                                                 nsDisplayListBuilder* aBuilder)
+{
+  uint32_t flags = aBuilder->ShouldSyncDecodeImages()
+                 ? imgIContainer::FLAG_SYNC_DECODE
+                 : imgIContainer::FLAG_NONE;
+
+  nsCOMPtr<imgIContainer> image = GetImage();
+  if (!image) {
+    return false;
+  }
+
+  if (!image->IsImageContainerAvailable(aManager, flags)) {
+    return false;
+  }
+
+  int32_t imageWidth;
+  int32_t imageHeight;
+  image->GetWidth(&imageWidth);
+  image->GetHeight(&imageHeight);
+
+  if (imageWidth == 0 || imageHeight == 0) {
+    NS_ASSERTION(false, "invalid image size");
+    return false;
+  }
+
+  const int32_t factor = mFrame->PresContext()->AppUnitsPerDevPixel();
+  const LayoutDeviceRect destRect =
+    LayoutDeviceRect::FromAppUnits(GetDestRect(), factor);
+
+  // Calculate the scaling factor for the frame.
+  const gfxSize scale = gfxSize(destRect.width / imageWidth,
+                                destRect.height / imageHeight);
+
+  if (scale.width < 0.34 || scale.height < 0.34) {
+    // This would look awful as long as we can't use high-quality downscaling
+    // for image layers (bug 803703), so don't turn this into an image layer.
+    return false;
+  }
+
+  return true;
+}
+
+void
 nsDisplayBackgroundColor::ApplyOpacity(nsDisplayListBuilder* aBuilder,
                                        float aOpacity,
                                        const DisplayItemClip* aClip)
@@ -3440,7 +3464,8 @@ nsDisplayLayerEventRegions::AddFrame(nsDisplayListBuilder* aBuilder,
     return;
   }
 
-  uint8_t pointerEvents = aFrame->StyleVisibility()->GetEffectivePointerEvents(aFrame);
+  uint8_t pointerEvents =
+    aFrame->StyleUserInterface()->GetEffectivePointerEvents(aFrame);
   if (pointerEvents == NS_STYLE_POINTER_EVENTS_NONE) {
     return;
   }
@@ -3507,12 +3532,6 @@ nsDisplayLayerEventRegions::AddFrame(nsDisplayListBuilder* aBuilder,
     if (pluginFrame && pluginFrame->WantsToHandleWheelEventAsDefaultAction()) {
       mDispatchToContentHitRegion.Or(mDispatchToContentHitRegion, borderBox);
     }
-  } else if (gfxPlatform::GetPlatform()->SupportsApzWheelInput() &&
-             nsLayoutUtils::IsScrollFrameWithSnapping(aFrame->GetParent())) {
-    // If the frame is the inner content of a scrollable frame with snap-points
-    // then we want to handle wheel events for it on the main thread. Add it to
-    // the d-t-c region so that APZ waits for the main thread.
-    mDispatchToContentHitRegion.Or(mDispatchToContentHitRegion, borderBox);
   }
 
   // Touch action region
@@ -4151,7 +4170,7 @@ nsDisplayOpacity::nsDisplayOpacity(nsDisplayListBuilder* aBuilder,
                                    const DisplayItemScrollClip* aScrollClip,
                                    bool aForEventsOnly)
     : nsDisplayWrapList(aBuilder, aFrame, aList, aScrollClip)
-    , mOpacity(aFrame->StyleDisplay()->mOpacity)
+    , mOpacity(aFrame->StyleEffects()->mOpacity)
     , mForEventsOnly(aForEventsOnly)
     , mParticipatesInPreserve3D(false)
 {
@@ -4580,12 +4599,12 @@ nsDisplaySubDocument::BuildLayer(nsDisplayListBuilder* aBuilder,
   return layer.forget();
 }
 
-UniquePtr<FrameMetrics>
-nsDisplaySubDocument::ComputeFrameMetrics(Layer* aLayer,
-                                          const ContainerLayerParameters& aContainerParameters)
+UniquePtr<ScrollMetadata>
+nsDisplaySubDocument::ComputeScrollMetadata(Layer* aLayer,
+                                            const ContainerLayerParameters& aContainerParameters)
 {
   if (!(mFlags & GENERATE_SCROLLABLE_LAYER)) {
-    return UniquePtr<FrameMetrics>(nullptr);
+    return UniquePtr<ScrollMetadata>(nullptr);
   }
 
   nsPresContext* presContext = mFrame->PresContext();
@@ -4606,8 +4625,8 @@ nsDisplaySubDocument::ComputeFrameMetrics(Layer* aLayer,
                     mFrame->GetPosition() +
                     mFrame->GetOffsetToCrossDoc(ReferenceFrame());
 
-  return MakeUnique<FrameMetrics>(
-    nsLayoutUtils::ComputeFrameMetrics(
+  return MakeUnique<ScrollMetadata>(
+    nsLayoutUtils::ComputeScrollMetadata(
       mFrame, rootScrollFrame, rootScrollFrame->GetContent(), ReferenceFrame(),
       aLayer, mScrollParentId, viewport, Nothing(),
       isRootContentDocument, params));
@@ -4989,9 +5008,9 @@ nsDisplayScrollInfoLayer::GetLayerState(nsDisplayListBuilder* aBuilder,
   return LAYER_ACTIVE_EMPTY;
 }
 
-UniquePtr<FrameMetrics>
-nsDisplayScrollInfoLayer::ComputeFrameMetrics(Layer* aLayer,
-                                              const ContainerLayerParameters& aContainerParameters)
+UniquePtr<ScrollMetadata>
+nsDisplayScrollInfoLayer::ComputeScrollMetadata(Layer* aLayer,
+                                                const ContainerLayerParameters& aContainerParameters)
 {
   ContainerLayerParameters params = aContainerParameters;
   if (mScrolledFrame->GetContent() &&
@@ -5003,13 +5022,13 @@ nsDisplayScrollInfoLayer::ComputeFrameMetrics(Layer* aLayer,
                     mScrollFrame->GetPosition() +
                     mScrollFrame->GetOffsetToCrossDoc(ReferenceFrame());
 
-  FrameMetrics metrics = nsLayoutUtils::ComputeFrameMetrics(
+  ScrollMetadata metadata = nsLayoutUtils::ComputeScrollMetadata(
       mScrolledFrame, mScrollFrame, mScrollFrame->GetContent(),
       ReferenceFrame(), aLayer,
       mScrollParentId, viewport, Nothing(), false, params);
-  metrics.SetIsScrollInfoLayer(true);
+  metadata.GetMetrics().SetIsScrollInfoLayer(true);
 
-  return UniquePtr<FrameMetrics>(new FrameMetrics(metrics));
+  return UniquePtr<ScrollMetadata>(new ScrollMetadata(metadata));
 }
 
 
@@ -6374,6 +6393,13 @@ nsDisplayPerspective::BuildLayer(nsDisplayListBuilder *aBuilder,
   MOZ_ASSERT(hasPerspective, "Why did we create nsDisplayPerspective?");
 
   /*
+   * ClipListToRange can remove our child after we were created.
+   */
+  if (!mList.GetChildren()->GetTop()) {
+    return nullptr;
+  }
+
+  /*
    * The resulting matrix is still in the coordinate space of the transformed
    * frame. Append a translation to the reference frame coordinates.
    */
@@ -6542,7 +6568,7 @@ nsDisplaySVGEffects::BuildLayer(nsDisplayListBuilder* aBuilder,
     }
   }
 
-  float opacity = mFrame->StyleDisplay()->mOpacity;
+  float opacity = mFrame->StyleEffects()->mOpacity;
   if (opacity == 0.0f)
     return nullptr;
 
@@ -6652,9 +6678,9 @@ nsDisplaySVGEffects::PrintEffects(nsACString& aTo)
   nsSVGClipPathFrame *clipPathFrame = effectProperties.GetClipPathFrame(&isOK);
   bool first = true;
   aTo += " effects=(";
-  if (mFrame->StyleDisplay()->mOpacity != 1.0f) {
+  if (mFrame->StyleEffects()->mOpacity != 1.0f) {
     first = false;
-    aTo += nsPrintfCString("opacity(%f)", mFrame->StyleDisplay()->mOpacity);
+    aTo += nsPrintfCString("opacity(%f)", mFrame->StyleEffects()->mOpacity);
   }
   if (clipPathFrame) {
     if (!first) {

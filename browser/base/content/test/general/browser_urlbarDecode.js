@@ -93,5 +93,6 @@ function* checkInput(inputStr) {
                ["action", "heuristic", "visiturl"].toString(),
                "type");
 
-  Assert.equal(item._title.textContent, "Visit " + inputStr.replace("\\","/"), "Visible title");
+  Assert.equal(item._titleText.textContent, inputStr.replace("\\","/"), "Visible title");
+  Assert.equal(item._actionText.textContent, "Visit", "Visible action");
 }

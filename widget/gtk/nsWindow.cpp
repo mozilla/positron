@@ -556,7 +556,7 @@ nsWindow::DispatchEvent(WidgetGUIEvent* aEvent, nsEventStatus& aStatus)
 {
 #ifdef DEBUG
     debug_DumpEvent(stdout, aEvent->widget, aEvent,
-                    nsAutoCString("something"), 0);
+                    "something", 0);
 #endif
     aStatus = nsEventStatus_eIgnore;
     nsIWidgetListener* listener =
@@ -2230,7 +2230,7 @@ nsWindow::OnExposeEvent(cairo_t *cr)
 
     BufferMode layerBuffering = BufferMode::BUFFERED;
     RefPtr<DrawTarget> dt = GetDrawTarget(region, &layerBuffering);
-    if (!dt) {
+    if (!dt || !dt->IsValid()) {
         return FALSE;
     }
     RefPtr<gfxContext> ctx;
@@ -2254,12 +2254,16 @@ nsWindow::OnExposeEvent(cairo_t *cr)
         // channel is used on compositing window managers.)
         layerBuffering = BufferMode::BUFFER_NONE;
         RefPtr<DrawTarget> destDT = dt->CreateSimilarDrawTarget(boundsRect.Size(), SurfaceFormat::B8G8R8A8);
-        ctx = new gfxContext(destDT, boundsRect.TopLeft());
+        if (!destDT || !destDT->IsValid()) {
+            return FALSE;
+        }
+        ctx = gfxContext::ForDrawTarget(destDT, boundsRect.TopLeft());
     } else {
         gfxUtils::ClipToRegion(dt, region.ToUnknownRegion());
 
-        ctx = new gfxContext(dt, offset);
+        ctx = gfxContext::ForDrawTarget(dt, offset);
     }
+    MOZ_ASSERT(ctx); // checked both dt and destDT valid draw target above
 
 #if 0
     // NOTE: Paint flashing region would be wrong for cairo, since
@@ -3179,7 +3183,7 @@ nsWindow::OnScrollEvent(GdkEventScroll *aEvent)
         return; 
 #endif
     WidgetWheelEvent wheelEvent(true, eWheel, this);
-    wheelEvent.deltaMode = nsIDOMWheelEvent::DOM_DELTA_LINE;
+    wheelEvent.mDeltaMode = nsIDOMWheelEvent::DOM_DELTA_LINE;
     switch (aEvent->direction) {
 #if GTK_CHECK_VERSION(3,4,0)
     case GDK_SCROLL_SMOOTH:
@@ -3189,8 +3193,8 @@ nsWindow::OnScrollEvent(GdkEventScroll *aEvent)
         mLastScrollEventTime = aEvent->time;
         // TODO - use a more appropriate scrolling unit than lines.
         // Multiply event deltas by 3 to emulate legacy behaviour.
-        wheelEvent.deltaX = aEvent->delta_x * 3;
-        wheelEvent.deltaY = aEvent->delta_y * 3;
+        wheelEvent.mDeltaX = aEvent->delta_x * 3;
+        wheelEvent.mDeltaY = aEvent->delta_y * 3;
         wheelEvent.mIsNoLineOrPageDelta = true;
         // This next step manually unsets smooth scrolling for touch devices 
         // that trigger GDK_SCROLL_SMOOTH. We use the slave device, which 
@@ -3199,22 +3203,22 @@ nsWindow::OnScrollEvent(GdkEventScroll *aEvent)
         GdkInputSource source = gdk_device_get_source(device);
         if (source == GDK_SOURCE_TOUCHSCREEN ||
             source == GDK_SOURCE_TOUCHPAD) {
-            wheelEvent.scrollType = WidgetWheelEvent::SCROLL_ASYNCHRONOUSELY;
+            wheelEvent.mScrollType = WidgetWheelEvent::SCROLL_ASYNCHRONOUSELY;
         }
         break;
     }
 #endif
     case GDK_SCROLL_UP:
-        wheelEvent.deltaY = wheelEvent.lineOrPageDeltaY = -3;
+        wheelEvent.mDeltaY = wheelEvent.mLineOrPageDeltaY = -3;
         break;
     case GDK_SCROLL_DOWN:
-        wheelEvent.deltaY = wheelEvent.lineOrPageDeltaY = 3;
+        wheelEvent.mDeltaY = wheelEvent.mLineOrPageDeltaY = 3;
         break;
     case GDK_SCROLL_LEFT:
-        wheelEvent.deltaX = wheelEvent.lineOrPageDeltaX = -1;
+        wheelEvent.mDeltaX = wheelEvent.mLineOrPageDeltaX = -1;
         break;
     case GDK_SCROLL_RIGHT:
-        wheelEvent.deltaX = wheelEvent.lineOrPageDeltaX = 1;
+        wheelEvent.mDeltaX = wheelEvent.mLineOrPageDeltaX = 1;
         break;
     }
 
@@ -3446,11 +3450,11 @@ nsWindow::OnTouchEvent(GdkEventTouch* aEvent)
         mTouches.Put(aEvent->sequence, touch.forget());
         // add all touch points to event object
         for (auto iter = mTouches.Iter(); !iter.Done(); iter.Next()) {
-            event.touches.AppendElement(new dom::Touch(*iter.UserData()));
+            event.mTouches.AppendElement(new dom::Touch(*iter.UserData()));
         }
     } else if (aEvent->type == GDK_TOUCH_END ||
                aEvent->type == GDK_TOUCH_CANCEL) {
-        *event.touches.AppendElement() = touch.forget();
+        *event.mTouches.AppendElement() = touch.forget();
     }
 
     DispatchInputEvent(&event);

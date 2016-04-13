@@ -102,13 +102,10 @@
 #include "SharedWorker.h"
 #include "WorkerDebuggerManager.h"
 #include "WorkerFeature.h"
+#include "WorkerNavigator.h"
 #include "WorkerRunnable.h"
 #include "WorkerScope.h"
 #include "WorkerThread.h"
-
-#ifdef XP_WIN
-#undef PostMessage
-#endif
 
 // JS_MaybeGC will run once every second during normal execution.
 #define PERIODIC_GC_TIMER_DELAY_SEC 1
@@ -216,11 +213,11 @@ SwapToISupportsArray(SmartPtr<T>& aSrc,
 // from the worker's EventTarget).
 class ExternalRunnableWrapper final : public WorkerRunnable
 {
-  nsCOMPtr<nsICancelableRunnable> mWrappedRunnable;
+  nsCOMPtr<nsIRunnable> mWrappedRunnable;
 
 public:
   ExternalRunnableWrapper(WorkerPrivate* aWorkerPrivate,
-                          nsICancelableRunnable* aWrappedRunnable)
+                          nsIRunnable* aWrappedRunnable)
   : WorkerRunnable(aWorkerPrivate, WorkerThreadUnchangedBusyCount),
     mWrappedRunnable(aWrappedRunnable)
   {
@@ -247,10 +244,14 @@ private:
     return true;
   }
 
-  NS_IMETHOD
+  nsresult
   Cancel() override
   {
-    nsresult rv = mWrappedRunnable->Cancel();
+    nsresult rv;
+    nsCOMPtr<nsICancelableRunnable> cancelable =
+      do_QueryInterface(mWrappedRunnable);
+    MOZ_ASSERT(cancelable); // We checked this earlier!
+    rv = cancelable->Cancel();
     nsresult rv2 = WorkerRunnable::Cancel();
     return NS_FAILED(rv) ? rv : rv2;
   }
@@ -627,7 +628,7 @@ private:
     return true;
   }
 
-  NS_IMETHOD Cancel() override
+  nsresult Cancel() override
   {
     // We need to run regardless.
     Run();
@@ -1348,7 +1349,7 @@ private:
     return true;
   }
 
-  NS_IMETHOD Cancel() override
+  nsresult Cancel() override
   {
     // We need to run regardless.
     Run();
@@ -1658,7 +1659,7 @@ private:
     return aWorkerPrivate->ConnectMessagePort(aCx, mPortIdentifier);
   }
 
-  NS_IMETHOD
+  nsresult
   Cancel() override
   {
     MessagePort::ForceClose(mPortIdentifier);
@@ -2475,7 +2476,7 @@ WorkerPrivateParent<Derived>::MaybeWrapAsWorkerRunnable(already_AddRefed<nsIRunn
   }
 
   workerRunnable =
-    new ExternalRunnableWrapper(ParentAsWorkerPrivate(), cancelable);
+    new ExternalRunnableWrapper(ParentAsWorkerPrivate(), runnable);
   return workerRunnable.forget();
 }
 
@@ -5702,7 +5703,7 @@ WorkerPrivate::NotifyInternal(JSContext* aCx, Status aStatus)
 
   // If the worker script never ran, or failed to compile, we don't need to do
   // anything else, except pretend that we ran the close handler.
-  if (!JS::CurrentGlobalOrNull(aCx)) {
+  if (!GlobalScope()) {
     mCloseHandlerStarted = true;
     mCloseHandlerFinished = true;
     return true;
@@ -5898,8 +5899,10 @@ WorkerPrivate::SetTimeout(JSContext* aCx,
     newInfo->mTimeoutString = aStringHandler;
   }
   else {
-    JS_ReportError(aCx, "Useless %s call (missing quotes around argument?)",
-                   aIsInterval ? "setInterval" : "setTimeout");
+    NS_NAMED_LITERAL_STRING(kSetInterval, "setInterval");
+    NS_NAMED_LITERAL_STRING(kSetTimeout, "setTimeout");
+    aRv.ThrowTypeError<MSG_USELESS_SETTIMEOUT>(aIsInterval ? kSetInterval
+                                                           : kSetTimeout);
     return 0;
   }
 

@@ -11,9 +11,12 @@ import android.content.Intent;
 import android.database.Cursor;
 
 import org.json.JSONException;
+import org.mozilla.gecko.Telemetry;
+import org.mozilla.gecko.TelemetryContract;
 import org.mozilla.gecko.db.BrowserContract;
 import org.mozilla.gecko.db.BrowserDB;
 import org.mozilla.gecko.db.UrlAnnotations;
+import org.mozilla.gecko.feeds.FeedService;
 import org.mozilla.gecko.feeds.subscriptions.FeedSubscription;
 
 /**
@@ -81,6 +84,10 @@ public class WithdrawSubscriptionsAction extends FeedAction {
                     log("Removing subscription for feed: " + subscription.getFeedUrl());
 
                     urlAnnotations.deleteFeedSubscription(resolver, subscription);
+
+                    Telemetry.startUISession(TelemetryContract.Session.EXPERIMENT, FeedService.getEnabledExperiment(context));
+                    Telemetry.sendUIEvent(TelemetryContract.Event.UNSAVE, TelemetryContract.Method.SERVICE, "content_update");
+                    Telemetry.stopUISession(TelemetryContract.Session.EXPERIMENT, FeedService.getEnabledExperiment(context));
                 }
             }
         } catch (JSONException e) {

@@ -139,7 +139,8 @@ BaseProxyHandler::get(JSContext* cx, HandleObject proxy, HandleValue receiver,
     }
 
     // Step 7.
-    return InvokeGetter(cx, receiver, ObjectValue(*getter), vp);
+    RootedValue getterFunc(cx, ObjectValue(*getter));
+    return CallGetter(cx, receiver, getterFunc, vp);
 }
 
 bool
@@ -227,10 +228,10 @@ js::SetPropertyIgnoringNamedGetter(JSContext* cx, HandleObject obj, HandleId id,
         // A very old nonstandard SpiderMonkey extension: default to the Class
         // getter and setter ops.
         const Class* clasp = receiverObj->getClass();
-        MOZ_ASSERT(clasp->getProperty != JS_PropertyStub);
-        MOZ_ASSERT(clasp->setProperty != JS_StrictPropertyStub);
-        return DefineProperty(cx, receiverObj, id, v, clasp->getProperty, clasp->setProperty,
-                              attrs, result);
+        MOZ_ASSERT(clasp->getGetProperty() != JS_PropertyStub);
+        MOZ_ASSERT(clasp->getSetProperty() != JS_StrictPropertyStub);
+        return DefineProperty(cx, receiverObj, id, v,
+                              clasp->getGetProperty(), clasp->getSetProperty(), attrs, result);
     }
 
     // Step 6.
@@ -241,7 +242,7 @@ js::SetPropertyIgnoringNamedGetter(JSContext* cx, HandleObject obj, HandleId id,
     if (!setter)
         return result.fail(JSMSG_GETTER_ONLY);
     RootedValue setterValue(cx, ObjectValue(*setter));
-    if (!InvokeSetter(cx, receiver, setterValue, v))
+    if (!CallSetter(cx, receiver, setterValue, v))
         return false;
     return result.succeed();
 }

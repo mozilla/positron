@@ -1528,23 +1528,32 @@ nsContentUtils::CopyNewlineNormalizedUnicodeTo(nsReadingIterator<char16_t>& aSrc
 }
 
 /**
- * This is used to determine whether a character is in one of the punctuation
- * mark classes which CSS says should be part of the first-letter.
- * See http://www.w3.org/TR/CSS2/selector.html#first-letter and
- *     http://www.w3.org/TR/selectors/#first-letter
+ * This is used to determine whether a character is in one of the classes
+ * which CSS says should be part of the first-letter.  Currently, that is
+ * all punctuation classes (P*).  Note that this is a change from CSS2
+ * which excluded Pc and Pd.
+ *
+ * https://www.w3.org/TR/css-pseudo-4/#first-letter-pseudo
+ * "Punctuation (i.e, characters that belong to the Punctuation (P*) Unicode
+ *  general category [UAX44]) [...]"
  */
 
 // static
 bool
 nsContentUtils::IsFirstLetterPunctuation(uint32_t aChar)
 {
-  uint8_t cat = mozilla::unicode::GetGeneralCategory(aChar);
-
-  return (cat == HB_UNICODE_GENERAL_CATEGORY_OPEN_PUNCTUATION ||     // Ps
-          cat == HB_UNICODE_GENERAL_CATEGORY_CLOSE_PUNCTUATION ||    // Pe
-          cat == HB_UNICODE_GENERAL_CATEGORY_INITIAL_PUNCTUATION ||  // Pi
-          cat == HB_UNICODE_GENERAL_CATEGORY_FINAL_PUNCTUATION ||    // Pf
-          cat == HB_UNICODE_GENERAL_CATEGORY_OTHER_PUNCTUATION);     // Po
+  switch (mozilla::unicode::GetGeneralCategory(aChar)) {
+    case HB_UNICODE_GENERAL_CATEGORY_CONNECT_PUNCTUATION: /* Pc */
+    case HB_UNICODE_GENERAL_CATEGORY_DASH_PUNCTUATION:    /* Pd */
+    case HB_UNICODE_GENERAL_CATEGORY_CLOSE_PUNCTUATION:   /* Pe */
+    case HB_UNICODE_GENERAL_CATEGORY_FINAL_PUNCTUATION:   /* Pf */
+    case HB_UNICODE_GENERAL_CATEGORY_INITIAL_PUNCTUATION: /* Pi */
+    case HB_UNICODE_GENERAL_CATEGORY_OTHER_PUNCTUATION:   /* Po */
+    case HB_UNICODE_GENERAL_CATEGORY_OPEN_PUNCTUATION:    /* Ps */
+      return true;
+    default:
+      return false;
+  }
 }
 
 // static
@@ -2850,11 +2859,11 @@ nsContentUtils::SplitQName(const nsIContent* aNamespaceResolver,
     if (*aNamespace == kNameSpaceID_Unknown)
       return NS_ERROR_FAILURE;
 
-    *aLocalName = NS_NewAtom(Substring(colon + 1, end)).take();
+    *aLocalName = NS_Atomize(Substring(colon + 1, end)).take();
   }
   else {
     *aNamespace = kNameSpaceID_None;
-    *aLocalName = NS_NewAtom(aQName).take();
+    *aLocalName = NS_Atomize(aQName).take();
   }
   NS_ENSURE_TRUE(aLocalName, NS_ERROR_OUT_OF_MEMORY);
   return NS_OK;
@@ -2879,7 +2888,7 @@ nsContentUtils::GetNodeInfoFromQName(const nsAString& aNamespaceURI,
     const char16_t* end;
     qName.EndReading(end);
 
-    nsCOMPtr<nsIAtom> prefix = do_GetAtom(Substring(qName.get(), colon));
+    nsCOMPtr<nsIAtom> prefix = NS_Atomize(Substring(qName.get(), colon));
 
     rv = aNodeInfoManager->GetNodeInfo(Substring(colon + 1, end), prefix,
                                        nsID, aNodeType, aNodeInfo);
@@ -2939,7 +2948,7 @@ nsContentUtils::SplitExpatName(const char16_t *aExpatName, nsIAtom **aPrefix,
     nameStart = (uriEnd + 1);
     if (nameEnd)  {
       const char16_t *prefixStart = nameEnd + 1;
-      *aPrefix = NS_NewAtom(Substring(prefixStart, pos)).take();
+      *aPrefix = NS_Atomize(Substring(prefixStart, pos)).take();
     }
     else {
       nameEnd = pos;
@@ -2952,7 +2961,7 @@ nsContentUtils::SplitExpatName(const char16_t *aExpatName, nsIAtom **aPrefix,
     nameEnd = pos;
     *aPrefix = nullptr;
   }
-  *aLocalName = NS_NewAtom(Substring(nameStart, nameEnd)).take();
+  *aLocalName = NS_Atomize(Substring(nameStart, nameEnd)).take();
 }
 
 // static
@@ -3123,7 +3132,8 @@ nsContentUtils::IsImageInCache(nsIURI* aURI, nsIDocument* aDocument)
 
 // static
 nsresult
-nsContentUtils::LoadImage(nsIURI* aURI, nsIDocument* aLoadingDocument,
+nsContentUtils::LoadImage(nsIURI* aURI, nsINode* aContext,
+                          nsIDocument* aLoadingDocument,
                           nsIPrincipal* aLoadingPrincipal, nsIURI* aReferrer,
                           net::ReferrerPolicy aReferrerPolicy,
                           imgINotificationObserver* aObserver, int32_t aLoadFlags,
@@ -3132,6 +3142,7 @@ nsContentUtils::LoadImage(nsIURI* aURI, nsIDocument* aLoadingDocument,
                           uint32_t aContentPolicyType)
 {
   NS_PRECONDITION(aURI, "Must have a URI");
+  NS_PRECONDITION(aContext, "Must have a context");
   NS_PRECONDITION(aLoadingDocument, "Must have a document");
   NS_PRECONDITION(aLoadingPrincipal, "Must have a principal");
   NS_PRECONDITION(aRequest, "Null out param");
@@ -3161,6 +3172,7 @@ nsContentUtils::LoadImage(nsIURI* aURI, nsIDocument* aLoadingDocument,
                               aLoadingPrincipal,    /* loading principal */
                               loadGroup,            /* loadgroup */
                               aObserver,            /* imgINotificationObserver */
+                              aContext,             /* loading context */
                               aLoadingDocument,     /* uniquification key */
                               aLoadFlags,           /* load flags */
                               nullptr,              /* cache key */
@@ -3477,7 +3489,8 @@ nsContentUtils::ReportToConsoleNonLocalized(const nsAString& aErrorText,
                                             nsIURI* aURI,
                                             const nsAFlatString& aSourceLine,
                                             uint32_t aLineNumber,
-                                            uint32_t aColumnNumber)
+                                            uint32_t aColumnNumber,
+                                            MissingErrorLocationMode aLocationMode)
 {
   uint64_t innerWindowID = 0;
   if (aDocument) {
@@ -3494,14 +3507,15 @@ nsContentUtils::ReportToConsoleNonLocalized(const nsAString& aErrorText,
   }
 
   nsAutoCString spec;
-  if (!aLineNumber) {
+  if (!aLineNumber && aLocationMode == eUSE_CALLING_LOCATION) {
     JSContext *cx = GetCurrentJSContext();
     if (cx) {
       nsJSUtils::GetCallingLocation(cx, spec, &aLineNumber, &aColumnNumber);
     }
   }
-  if (spec.IsEmpty() && aURI)
+  if (spec.IsEmpty() && aURI) {
     aURI->GetSpec(spec);
+  }
 
   nsCOMPtr<nsIScriptError> errorObject =
       do_CreateInstance(NS_SCRIPTERROR_CONTRACTID, &rv);
@@ -3708,7 +3722,7 @@ nsContentUtils::GetEventMessageAndAtom(const nsAString& aName,
   }
 
   *aEventMessage = eUnidentifiedEvent;
-  nsCOMPtr<nsIAtom> atom = do_GetAtom(NS_LITERAL_STRING("on") + aName);
+  nsCOMPtr<nsIAtom> atom = NS_Atomize(NS_LITERAL_STRING("on") + aName);
   sUserDefinedEvents->AppendObject(atom);
   mapping.mAtom = atom;
   mapping.mMessage = eUnidentifiedEvent;
@@ -3818,6 +3832,22 @@ nsContentUtils::DispatchChromeEvent(nsIDocument *aDoc,
   return rv;
 }
 
+/* static */
+nsresult
+nsContentUtils::DispatchFocusChromeEvent(nsPIDOMWindowOuter* aWindow)
+{
+  MOZ_ASSERT(aWindow);
+
+  nsCOMPtr<nsIDocument> doc = aWindow->GetExtantDoc();
+  if (!doc) {
+    return NS_ERROR_FAILURE;
+  }
+
+  return DispatchChromeEvent(doc, aWindow,
+                             NS_LITERAL_STRING("DOMServiceWorkerFocusClient"),
+                             true, true);
+}
+
 nsresult
 nsContentUtils::DispatchEventOnlyToChrome(nsIDocument* aDoc,
                                           nsISupports* aTarget,
@@ -3851,7 +3881,7 @@ nsContentUtils::MatchElementId(nsIContent *aContent, const nsAString& aId)
   NS_PRECONDITION(!aId.IsEmpty(), "Will match random elements");
   
   // ID attrs are generally stored as atoms, so just atomize this up front
-  nsCOMPtr<nsIAtom> id(do_GetAtom(aId));
+  nsCOMPtr<nsIAtom> id(NS_Atomize(aId));
   if (!id) {
     // OOM, so just bail
     return nullptr;
@@ -3992,7 +4022,7 @@ nsContentUtils::HasMutationListeners(nsINode* aNode,
   doc->MayDispatchMutationEvent(aTargetForSubtreeModified);
 
   // If we have a window, we can check it for mutation listeners now.
-  if (aNode->IsInDoc()) {
+  if (aNode->IsInUncomposedDoc()) {
     nsCOMPtr<EventTarget> piTarget(do_QueryInterface(window));
     if (piTarget) {
       EventListenerManager* manager = piTarget->GetExistingListenerManager();
@@ -4090,7 +4120,7 @@ nsContentUtils::UnmarkGrayJSListenersInCCGenerationDocuments()
   for (auto i = sEventListenerManagersHash->Iter(); !i.Done(); i.Next()) {
     auto entry = static_cast<EventListenerManagerMapEntry*>(i.Get());
     nsINode* n = static_cast<nsINode*>(entry->mListenerManager->GetTarget());
-    if (n && n->IsInDoc() &&
+    if (n && n->IsInUncomposedDoc() &&
         nsCCUncollectableMarker::InGeneration(n->OwnerDoc()->GetMarkedCCGeneration())) {
       entry->mListenerManager->MarkForCC();
     }
@@ -5124,7 +5154,7 @@ static void ProcessViewportToken(nsIDocument *aDocument,
 
   /* Check for known keys. If we find a match, insert the appropriate
    * information into the document header. */
-  nsCOMPtr<nsIAtom> key_atom = do_GetAtom(key);
+  nsCOMPtr<nsIAtom> key_atom = NS_Atomize(key);
   if (key_atom == nsGkAtoms::height)
     aDocument->SetHeaderData(nsGkAtoms::viewport_height, value);
   else if (key_atom == nsGkAtoms::width)
@@ -5227,7 +5257,7 @@ nsContentUtils::GetDragSession()
 nsresult
 nsContentUtils::SetDataTransferInEvent(WidgetDragEvent* aDragEvent)
 {
-  if (aDragEvent->dataTransfer || !aDragEvent->IsTrusted()) {
+  if (aDragEvent->mDataTransfer || !aDragEvent->IsTrusted()) {
     return NS_OK;
   }
 
@@ -5269,10 +5299,12 @@ nsContentUtils::SetDataTransferInEvent(WidgetDragEvent* aDragEvent)
 
   // each event should use a clone of the original dataTransfer.
   initialDataTransfer->Clone(aDragEvent->target, aDragEvent->mMessage,
-                             aDragEvent->userCancelled,
+                             aDragEvent->mUserCancelled,
                              isCrossDomainSubFrameDrop,
-                             getter_AddRefs(aDragEvent->dataTransfer));
-  NS_ENSURE_TRUE(aDragEvent->dataTransfer, NS_ERROR_OUT_OF_MEMORY);
+                             getter_AddRefs(aDragEvent->mDataTransfer));
+  if (NS_WARN_IF(!aDragEvent->mDataTransfer)) {
+    return NS_ERROR_OUT_OF_MEMORY;
+  }
 
   // for the dragenter and dragover events, initialize the drop effect
   // from the drop action, which platform specific widget code sets before
@@ -5280,8 +5312,9 @@ nsContentUtils::SetDataTransferInEvent(WidgetDragEvent* aDragEvent)
   if (aDragEvent->mMessage == eDragEnter || aDragEvent->mMessage == eDragOver) {
     uint32_t action, effectAllowed;
     dragSession->GetDragAction(&action);
-    aDragEvent->dataTransfer->GetEffectAllowedInt(&effectAllowed);
-    aDragEvent->dataTransfer->SetDropEffectInt(FilterDropEffect(action, effectAllowed));
+    aDragEvent->mDataTransfer->GetEffectAllowedInt(&effectAllowed);
+    aDragEvent->mDataTransfer->SetDropEffectInt(
+                                 FilterDropEffect(action, effectAllowed));
   }
   else if (aDragEvent->mMessage == eDrop ||
            aDragEvent->mMessage == eLegacyDragDrop ||
@@ -5292,7 +5325,7 @@ nsContentUtils::SetDataTransferInEvent(WidgetDragEvent* aDragEvent)
     // dragover event.
     uint32_t dropEffect;
     initialDataTransfer->GetDropEffectInt(&dropEffect);
-    aDragEvent->dataTransfer->SetDropEffectInt(dropEffect);
+    aDragEvent->mDataTransfer->SetDropEffectInt(dropEffect);
   }
 
   return NS_OK;
@@ -5389,32 +5422,6 @@ nsContentUtils::URIIsLocalFile(nsIURI *aURI)
                                 nsIProtocolHandler::URI_IS_LOCAL_FILE,
                                 &isFile)) &&
          isFile;
-}
-
-nsresult
-nsContentUtils::SplitURIAtHash(nsIURI *aURI,
-                               nsACString &aBeforeHash,
-                               nsACString &aAfterHash)
-{
-  // See bug 225910 for why we can't do this using nsIURL.
-
-  aBeforeHash.Truncate();
-  aAfterHash.Truncate();
-
-  NS_ENSURE_ARG_POINTER(aURI);
-
-  nsAutoCString spec;
-  nsresult rv = aURI->GetSpec(spec);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  int32_t index = spec.FindChar('#');
-  if (index == -1) {
-    index = spec.Length();
-  }
-
-  aBeforeHash.Assign(Substring(spec, 0, index));
-  aAfterHash.Assign(Substring(spec, index));
-  return NS_OK;
 }
 
 /* static */
@@ -6631,7 +6638,7 @@ nsContentUtils::HasPluginWithUncontrolledEventDispatch(nsIContent* aContent)
   // We control dispatch to all mac plugins.
   return false;
 #else
-  if (!aContent || !aContent->IsInDoc()) {
+  if (!aContent || !aContent->IsInUncomposedDoc()) {
     return false;
   }
 
@@ -7448,17 +7455,32 @@ nsContentUtils::TransferableToIPCTransferable(nsITransferable* aTransferable,
             blobImpl = do_QueryInterface(data);
           }
           if (blobImpl) {
+            IPCDataTransferData data;
+
+            // If we failed to create the blob actor, then this blob probably
+            // can't get the file size for the underlying file, ignore it for
+            // now. TODO pass this through anyway.
+            if (aChild) {
+              auto* child = mozilla::dom::BlobChild::GetOrCreate(aChild,
+                              static_cast<BlobImpl*>(blobImpl.get()));
+              if (!child) {
+                continue;
+              }
+
+              data = child;
+            } else if (aParent) {
+              auto* parent = mozilla::dom::BlobParent::GetOrCreate(aParent,
+                               static_cast<BlobImpl*>(blobImpl.get()));
+              if (!parent) {
+                continue;
+              }
+
+              data = parent;
+            }
+
             IPCDataTransferItem* item = aIPCDataTransfer->items().AppendElement();
             item->flavor() = nsCString(flavorStr);
-            if (aChild) {
-              item->data() =
-                mozilla::dom::BlobChild::GetOrCreate(aChild,
-                  static_cast<BlobImpl*>(blobImpl.get()));
-            } else if (aParent) {
-              item->data() =
-                mozilla::dom::BlobParent::GetOrCreate(aParent,
-                  static_cast<BlobImpl*>(blobImpl.get()));
-            }
+            item->data() = data;
           } else {
             // This is a hack to support kFilePromiseMime.
             // On Windows there just needs to be an entry for it, 
@@ -7468,6 +7490,12 @@ nsContentUtils::TransferableToIPCTransferable(nsITransferable* aTransferable,
               IPCDataTransferItem* item = aIPCDataTransfer->items().AppendElement();
               item->flavor() = nsCString(flavorStr);
               item->data() = NS_ConvertUTF8toUTF16(flavorStr);
+            } else if (!data) {
+              // Empty element, transfer only the flavor
+              IPCDataTransferItem* item = aIPCDataTransfer->items().AppendElement();
+              item->flavor() = nsCString(flavorStr);
+              item->data() = EmptyCString();
+              continue;
             }
           }
         }
@@ -7635,7 +7663,7 @@ nsContentUtils::SendKeyEvent(nsIWidget* aWidget,
     return NS_ERROR_FAILURE;
 
   WidgetKeyboardEvent event(true, msg, aWidget);
-  event.modifiers = GetWidgetModifiers(aModifiers);
+  event.mModifiers = GetWidgetModifiers(aModifiers);
 
   if (msg == eKeyPress) {
     event.keyCode = aCharCode ? 0 : aKeyCode;
@@ -7767,7 +7795,7 @@ nsContentUtils::SendMouseEvent(nsCOMPtr<nsIPresShell> aPresShell,
   WidgetMouseEvent event(true, msg, widget, WidgetMouseEvent::eReal,
                          contextMenuKey ? WidgetMouseEvent::eContextMenuKey :
                                           WidgetMouseEvent::eNormal);
-  event.modifiers = GetWidgetModifiers(aModifiers);
+  event.mModifiers = GetWidgetModifiers(aModifiers);
   event.button = aButton;
   event.buttons = GetButtonsFlagForButton(aButton);
   event.widget = widget;

@@ -6,13 +6,16 @@ const { assert } = require("devtools/shared/DevToolsUtils");
 const { appinfo } = require("Services");
 const { DOM: dom, createClass, createFactory, PropTypes } = require("devtools/client/shared/vendor/react");
 const { connect } = require("devtools/client/shared/vendor/react-redux");
-const { censusDisplays, dominatorTreeDisplays, diffingState, viewState } = require("./constants");
+const { censusDisplays, labelDisplays, treeMapDisplays, diffingState, viewState } = require("./constants");
 const { toggleRecordingAllocationStacks } = require("./actions/allocations");
 const { setCensusDisplayAndRefresh } = require("./actions/census-display");
-const { setDominatorTreeDisplayAndRefresh } = require("./actions/dominator-tree-display");
+const { setLabelDisplayAndRefresh } = require("./actions/label-display");
+const { setTreeMapDisplayAndRefresh } = require("./actions/tree-map-display");
+
 const {
   getCustomCensusDisplays,
-  getCustomDominatorTreeDisplays,
+  getCustomLabelDisplays,
+  getCustomTreeMapDisplays,
 } = require("devtools/client/memory/utils");
 const {
   selectSnapshotForDiffingAndRefresh,
@@ -34,8 +37,10 @@ const {
   expandDominatorTreeNode,
   collapseDominatorTreeNode,
   focusDominatorTreeNode,
+  fetchIndividuals,
+  focusIndividual,
 } = require("./actions/snapshot");
-const { changeViewAndRefresh } = require("./actions/view");
+const { changeViewAndRefresh, popViewAndRefresh } = require("./actions/view");
 const { resizeShortestPaths } = require("./actions/sizes");
 const Toolbar = createFactory(require("./components/toolbar"));
 const List = createFactory(require("./components/list"));
@@ -114,16 +119,28 @@ const MemoryApp = createClass({
     ].concat(custom);
   },
 
-  _getDominatorTreeDisplays() {
-    const customDisplays = getCustomDominatorTreeDisplays();
+  _getLabelDisplays() {
+    const customDisplays = getCustomLabelDisplays();
     const custom = Object.keys(customDisplays).reduce((arr, key) => {
       arr.push(customDisplays[key]);
       return arr;
     }, []);
 
     return [
-      dominatorTreeDisplays.coarseType,
-      dominatorTreeDisplays.allocationStack,
+      labelDisplays.coarseType,
+      labelDisplays.allocationStack,
+    ].concat(custom);
+  },
+
+  _getTreeMapDisplays() {
+    const customDisplays = getCustomTreeMapDisplays();
+    const custom = Object.keys(customDisplays).reduce((arr, key) => {
+      arr.push(customDisplays[key]);
+      return arr;
+    }, []);
+
+    return [
+      treeMapDisplays.coarseType
     ].concat(custom);
   },
 
@@ -139,6 +156,9 @@ const MemoryApp = createClass({
       diffing,
       view,
       sizes,
+      censusDisplay,
+      labelDisplay,
+      individuals,
     } = this.props;
 
     const selectedSnapshot = snapshots.find(s => s.selected);
@@ -156,6 +176,7 @@ const MemoryApp = createClass({
         Toolbar({
           snapshots,
           censusDisplays: this._getCensusDisplays(),
+          censusDisplay,
           onCensusDisplayChange: newDisplay =>
             dispatch(setCensusDisplayAndRefresh(heapWorker, newDisplay)),
           onImportClick: () => dispatch(pickFileAndImportSnapshotAndCensus(heapWorker)),
@@ -170,9 +191,13 @@ const MemoryApp = createClass({
           diffing,
           onToggleDiffing: () => dispatch(toggleDiffing()),
           view,
-          dominatorTreeDisplays: this._getDominatorTreeDisplays(),
-          onDominatorTreeDisplayChange: newDisplay =>
-            dispatch(setDominatorTreeDisplayAndRefresh(heapWorker, newDisplay)),
+          labelDisplays: this._getLabelDisplays(),
+          labelDisplay,
+          onLabelDisplayChange: newDisplay =>
+            dispatch(setLabelDisplayAndRefresh(heapWorker, newDisplay)),
+          treeMapDisplays: this._getTreeMapDisplays(),
+          onTreeMapDisplayChange: newDisplay =>
+            dispatch(setTreeMapDisplayAndRefresh(heapWorker, newDisplay)),
           onViewChange: v => dispatch(changeViewAndRefresh(v, heapWorker)),
         }),
 
@@ -199,6 +224,22 @@ const MemoryApp = createClass({
               dispatch(fetchImmediatelyDominated(heapWorker,
                                                  selectedSnapshot.id,
                                                  lazyChildren)),
+            onPopView: () => dispatch(popViewAndRefresh(heapWorker)),
+            individuals,
+            onViewIndividuals: node => {
+              const snapshotId = diffing
+                ? diffing.secondSnapshotId
+                : selectedSnapshot.id;
+              dispatch(fetchIndividuals(heapWorker,
+                                        snapshotId,
+                                        censusDisplay.breakdown,
+                                        node.reportLeafIndex));
+            },
+            onFocusIndividual: node => {
+              assert(view.state === viewState.INDIVIDUALS,
+                     "Should be in the individuals view");
+              dispatch(focusIndividual(node));
+            },
             onCensusExpand: (census, node) => {
               if (diffing) {
                 assert(diffing.census === census,
@@ -233,7 +274,7 @@ const MemoryApp = createClass({
               }
             },
             onDominatorTreeExpand: node => {
-              assert(view === viewState.DOMINATOR_TREE,
+              assert(view.state === viewState.DOMINATOR_TREE,
                      "If expanding dominator tree nodes, should be in dominator tree view");
               assert(selectedSnapshot, "...and we should have a selected snapshot");
               assert(selectedSnapshot.dominatorTree,
@@ -241,7 +282,7 @@ const MemoryApp = createClass({
               dispatch(expandDominatorTreeNode(selectedSnapshot.id, node));
             },
             onDominatorTreeCollapse: node => {
-              assert(view === viewState.DOMINATOR_TREE,
+              assert(view.state === viewState.DOMINATOR_TREE,
                      "If collapsing dominator tree nodes, should be in dominator tree view");
               assert(selectedSnapshot, "...and we should have a selected snapshot");
               assert(selectedSnapshot.dominatorTree,
@@ -249,7 +290,7 @@ const MemoryApp = createClass({
               dispatch(collapseDominatorTreeNode(selectedSnapshot.id, node));
             },
             onDominatorTreeFocus: node => {
-              assert(view === viewState.DOMINATOR_TREE,
+              assert(view.state === viewState.DOMINATOR_TREE,
                      "If focusing dominator tree nodes, should be in dominator tree view");
               assert(selectedSnapshot, "...and we should have a selected snapshot");
               assert(selectedSnapshot.dominatorTree,

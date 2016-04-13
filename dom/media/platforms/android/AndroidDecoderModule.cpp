@@ -9,10 +9,12 @@
 
 #include "MediaData.h"
 #include "MediaInfo.h"
+#include "VPXDecoder.h"
 
 #include "nsThreadUtils.h"
 #include "nsAutoPtr.h"
 #include "nsPromiseFlatString.h"
+#include "nsIGfxInfo.h"
 
 #include "prlog.h"
 
@@ -49,9 +51,9 @@ namespace mozilla {
 static const char*
 TranslateMimeType(const nsACString& aMimeType)
 {
-  if (aMimeType.EqualsLiteral("video/webm; codecs=vp8")) {
+  if (VPXDecoder::IsVPX(aMimeType, VPXDecoder::VP8)) {
     return "video/x-vnd.on2.vp8";
-  } else if (aMimeType.EqualsLiteral("video/webm; codecs=vp9")) {
+  } else if (VPXDecoder::IsVPX(aMimeType, VPXDecoder::VP9)) {
     return "video/x-vnd.on2.vp9";
   }
   return PromiseFlatCString(aMimeType).get();
@@ -65,6 +67,17 @@ CreateDecoder(const nsACString& aMimeType)
                     &codec), nullptr);
   return codec;
 }
+
+static bool
+GetFeatureStatus(int32_t aFeature)
+{
+  nsCOMPtr<nsIGfxInfo> gfxInfo = services::GetGfxInfo();
+  int32_t status = nsIGfxInfo::FEATURE_STATUS_UNKNOWN;
+  if (!gfxInfo || NS_FAILED(gfxInfo->GetFeatureStatus(aFeature, &status))) {
+    return false;
+  }
+  return status == nsIGfxInfo::FEATURE_STATUS_OK;
+};
 
 class VideoDataDecoder : public MediaCodecDataDecoder
 {
@@ -205,7 +218,10 @@ public:
 #endif
 
     const int32_t numFrames = numSamples / numChannels;
-    auto audio = MakeUnique<AudioDataValue[]>(numSamples);
+    AlignedAudioBuffer audio(numSamples);
+    if (!audio) {
+      return NS_ERROR_OUT_OF_MEMORY;
+    }
 
     const uint8_t* bufferStart = static_cast<uint8_t*>(aBuffer) + offset;
     PodCopy(audio.get(), reinterpret_cast<const AudioDataValue*>(bufferStart),
@@ -248,6 +264,13 @@ AndroidDecoderModule::SupportsMimeType(const nsACString& aMimeType) const
       aMimeType.EqualsLiteral("audio/wave; codecs=65534")) {
     return false;
   }  
+
+  if ((VPXDecoder::IsVPX(aMimeType, VPXDecoder::VP8) &&
+       !GetFeatureStatus(nsIGfxInfo::FEATURE_VP8_HW_DECODE)) ||
+      (VPXDecoder::IsVPX(aMimeType, VPXDecoder::VP9) &&
+       !GetFeatureStatus(nsIGfxInfo::FEATURE_VP9_HW_DECODE))) {
+    return false;
+  }
 
   return widget::HardwareCodecCapabilityUtils::FindDecoderCodecInfoForMimeType(
       nsCString(TranslateMimeType(aMimeType)));
@@ -355,10 +378,11 @@ MediaCodecDataDecoder::InitDecoder(Surface::Param aSurface)
   NS_ENSURE_SUCCESS(rv = ResetInputBuffers(), rv);
   NS_ENSURE_SUCCESS(rv = ResetOutputBuffers(), rv);
 
-  NS_NewNamedThread("MC Decoder", getter_AddRefs(mThread),
-                    NS_NewRunnableMethod(this, &MediaCodecDataDecoder::DecoderLoop));
+  rv = NS_NewNamedThread(
+      "MC Decoder", getter_AddRefs(mThread),
+      NS_NewRunnableMethod(this, &MediaCodecDataDecoder::DecoderLoop));
 
-  return NS_OK;
+  return rv;
 }
 
 // This is in usec, so that's 10ms.
@@ -648,18 +672,27 @@ MediaCodecDataDecoder::State() const
   return mState;
 }
 
-void
+bool
 MediaCodecDataDecoder::State(ModuleState aState)
 {
-  LOG("%s -> %s", ModuleStateStr(mState), ModuleStateStr(aState));
+  bool ok = true;
 
-  if (aState == kDrainDecoder) {
-    MOZ_ASSERT(mState == kDrainQueue);
+  if (mState == kShutdown) {
+    ok = false;
+  } else if (mState == kStopping) {
+    ok = aState == kShutdown;
+  } else if (aState == kDrainDecoder) {
+    ok = mState == kDrainQueue;
   } else if (aState == kDrainWaitEOS) {
-    MOZ_ASSERT(mState == kDrainDecoder);
+    ok = mState == kDrainDecoder;
   }
 
-  mState = aState;
+  if (ok) {
+    LOG("%s -> %s", ModuleStateStr(mState), ModuleStateStr(aState));
+    mState = aState;
+  }
+
+  return ok;
 }
 
 template<typename T>
@@ -705,7 +738,9 @@ nsresult
 MediaCodecDataDecoder::Flush()
 {
   MonitorAutoLock lock(mMonitor);
-  State(kFlushing);
+  if (!State(kFlushing)) {
+    return NS_OK;
+  }
   lock.Notify();
 
   while (State() == kFlushing) {
@@ -735,15 +770,10 @@ MediaCodecDataDecoder::Shutdown()
 {
   MonitorAutoLock lock(mMonitor);
 
-  if (State() == kStopping) {
-    // Already shutdown or in the process of doing so
-    return NS_OK;
-  }
-
   State(kStopping);
   lock.Notify();
 
-  while (mThread && State() == kStopping) {
+  while (mThread && State() != kShutdown) {
     lock.Wait();
   }
 

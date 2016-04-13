@@ -23,6 +23,7 @@ class nsCSSPropertySet;
 
 namespace mozilla {
 enum class CSSPseudoElementType : uint8_t;
+struct Keyframe;
 struct StyleTransition;
 } // namespace mozilla
 
@@ -147,6 +148,7 @@ public:
   void Tick() override;
 
   nsCSSProperty TransitionProperty() const;
+  StyleAnimationValue ToValue() const;
 
   bool HasLowerCompositeOrderThan(const CSSTransition& aOther) const;
   EffectCompositor::CascadeLevel CascadeLevel() const override
@@ -339,11 +341,28 @@ public:
   void SortEvents()      { mEventDispatcher.SortEvents(); }
   void ClearEventQueue() { mEventDispatcher.ClearEventQueue(); }
 
+  // Stop transitions on the element. This method takes the real element
+  // rather than the element for the generated content for transitions on
+  // ::before and ::after.
+  void StopTransitionsForElement(mozilla::dom::Element* aElement,
+                                 mozilla::CSSPseudoElementType aPseudoType);
+
 protected:
   virtual ~nsTransitionManager() {}
 
   typedef nsTArray<RefPtr<mozilla::dom::CSSTransition>>
     OwningCSSTransitionPtrArray;
+
+  // Update the transitions. It'd start new, replace, or stop current
+  // transitions if need. aDisp and aElement shouldn't be nullptr.
+  // aElementTransitions is the collection of current transitions, and it
+  // could be a nullptr if we don't have any transitions.
+  bool
+  UpdateTransitions(const nsStyleDisplay* aDisp,
+                    mozilla::dom::Element* aElement,
+                    CSSTransitionCollection*& aElementTransitions,
+                    nsStyleContext* aOldStyleContext,
+                    nsStyleContext* aNewStyleContext);
 
   void
   ConsiderStartingTransition(nsCSSProperty aProperty,
@@ -354,6 +373,13 @@ protected:
                              nsStyleContext* aNewStyleContext,
                              bool* aStartedAny,
                              nsCSSPropertySet* aWhichStarted);
+
+  nsTArray<mozilla::Keyframe> GetTransitionKeyframes(
+    nsStyleContext* aStyleContext,
+    nsCSSProperty aProperty,
+    mozilla::StyleAnimationValue&& aStartValue,
+    mozilla::StyleAnimationValue&& aEndValue,
+    const nsTimingFunction& aTimingFunction);
 
   bool mInAnimationOnlyStyleUpdate;
 

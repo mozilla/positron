@@ -108,6 +108,10 @@ public:
                            nsIFrame* aTargetFrame,
                            nsEventStatus* aStatus);
 
+  void PostHandleKeyboardEvent(WidgetKeyboardEvent* aKeyboardEvent,
+                               nsEventStatus& aStatus,
+                               bool dispatchedToContentProcess);
+
   /**
    * DispatchLegacyMouseScrollEvents() dispatches eLegacyMouseLineOrPageScroll
    * event and eLegacyMousePixelScroll event for compatibility with old Gecko.
@@ -289,6 +293,15 @@ public:
   static bool sIsPointerLocked;
   static nsWeakPtr sPointerLockedElement;
   static nsWeakPtr sPointerLockedDoc;
+
+  /**
+   * If the absolute values of mMultiplierX and/or mMultiplierY are equal or
+   * larger than this value, the computed scroll amount isn't rounded down to
+   * the page width or height.
+   */
+  enum {
+    MIN_MULTIPLIER_VALUE_ALLOWING_OVER_ONE_PAGE_SCROLL = 1000
+  };
 
 protected:
   /**
@@ -555,15 +568,6 @@ protected:
     void Init(Index aIndex);
 
     void Reset();
-
-    /**
-     * If the abosolute values of mMultiplierX and/or mMultiplierY are equals or
-     * larger than this value, the computed scroll amount isn't rounded down to
-     * the page width or height.
-     */
-    enum {
-      MIN_MULTIPLIER_VALUE_ALLOWING_OVER_ONE_PAGE_SCROLL = 1000
-    };
 
     bool mInit[COUNT_OF_MULTIPLIERS];
     double mMultiplierX[COUNT_OF_MULTIPLIERS];
@@ -899,9 +903,6 @@ private:
   static void ResetLastOverForContent(const uint32_t& aIdx,
                                       RefPtr<OverOutElementsWrapper>& aChunk,
                                       nsIContent* aClosure);
-  void PostHandleKeyboardEvent(WidgetKeyboardEvent* aKeyboardEvent,
-                               nsEventStatus& aStatus,
-                               bool dispatchedToContentProcess);
 
   int32_t     mLockCursor;
   bool mLastFrameConsumedSetCursor;

@@ -153,9 +153,9 @@ nsSVGPathGeometryFrame::DidSetStyleContext(nsStyleContext* aOldStyleContext)
   nsSVGPathGeometryFrameBase::DidSetStyleContext(aOldStyleContext);
 
   if (aOldStyleContext) {
-    auto oldStyleDisplay = aOldStyleContext->PeekStyleDisplay();
-    if (oldStyleDisplay &&
-        StyleDisplay()->mOpacity != oldStyleDisplay->mOpacity &&
+    auto oldStyleEffects = aOldStyleContext->PeekStyleEffects();
+    if (oldStyleEffects &&
+        StyleEffects()->mOpacity != oldStyleEffects->mOpacity &&
         nsSVGUtils::CanOptimizeOpacity(this)) {
       // nsIFrame::BuildDisplayListForStackingContext() is not going to create an
       // nsDisplayOpacity display list item, so DLBI won't invalidate for us.
@@ -231,7 +231,8 @@ nsSVGPathGeometryFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
                                          const nsRect&           aDirtyRect,
                                          const nsDisplayListSet& aLists)
 {
-  if (!static_cast<const nsSVGElement*>(mContent)->HasValidDimensions()) {
+  if (!static_cast<const nsSVGElement*>(mContent)->HasValidDimensions() ||
+      (!IsVisibleForPainting(aBuilder) && aBuilder->IsForPainting())) {
     return;
   }
   aLists.Content()->AppendNewToTop(

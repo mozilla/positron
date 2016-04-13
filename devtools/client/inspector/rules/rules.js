@@ -261,7 +261,7 @@ CssRuleView.prototype = {
    *
    * @return {Promise} Resolves to the instance of the highlighter.
    */
-  getSelectorHighlighter: Task.async(function*() {
+  getSelectorHighlighter: Task.async(function* () {
     let utils = this.inspector.toolbox.highlighterUtils;
     if (!utils.supportsCustomHighlighters()) {
       return null;
@@ -319,7 +319,7 @@ CssRuleView.prototype = {
     }, Cu.reportError);
   },
 
-  highlightSelector: Task.async(function*(selector) {
+  highlightSelector: Task.async(function* (selector) {
     let node = this.inspector.selection.nodeFront;
 
     let highlighter = yield this.getSelectorHighlighter();
@@ -334,7 +334,7 @@ CssRuleView.prototype = {
     });
   }),
 
-  unhighlightSelector: Task.async(function*() {
+  unhighlightSelector: Task.async(function* () {
     let highlighter = yield this.getSelectorHighlighter();
     if (!highlighter) {
       return;
@@ -462,7 +462,8 @@ CssRuleView.prototype = {
     try {
       let text = "";
 
-      if (target && target.nodeName === "input") {
+      let nodeName = target && target.nodeName;
+      if (nodeName === "input" || nodeName == "textarea") {
         let start = Math.min(target.selectionStart, target.selectionEnd);
         let end = Math.max(target.selectionStart, target.selectionEnd);
         let count = end - start;
@@ -873,6 +874,7 @@ CssRuleView.prototype = {
       if (this._elementStyle === elementStyle) {
         return this._populate();
       }
+      return undefined;
     }).then(() => {
       if (this._elementStyle === elementStyle) {
         if (!refresh) {
@@ -1499,11 +1501,15 @@ CssRuleView.prototype = {
    * Handle the keypress event in the rule view.
    */
   _onKeypress: function(event) {
+    if (!event.target.closest("#sidebar-panel-ruleview")) {
+      return;
+    }
+
     let isOSX = Services.appinfo.OS === "Darwin";
 
     if (((isOSX && event.metaKey && !event.ctrlKey && !event.altKey) ||
         (!isOSX && event.ctrlKey && !event.metaKey && !event.altKey)) &&
-        event.code === "KeyF") {
+        event.key === "f") {
       this.searchField.focus();
       event.preventDefault();
     }

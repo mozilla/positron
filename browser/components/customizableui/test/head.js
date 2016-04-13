@@ -8,7 +8,8 @@
 var tmp = {};
 Cu.import("resource://gre/modules/Promise.jsm", tmp);
 Cu.import("resource:///modules/CustomizableUI.jsm", tmp);
-var {Promise, CustomizableUI} = tmp;
+Cu.import("resource://gre/modules/AppConstants.jsm", tmp);
+var {Promise, CustomizableUI, AppConstants} = tmp;
 
 var ChromeUtils = {};
 Services.scriptloader.loadSubScript("chrome://mochikit/content/tests/SimpleTest/ChromeUtils.js", ChromeUtils);
@@ -113,12 +114,8 @@ function resetCustomization() {
   return CustomizableUI.reset();
 }
 
-XPCOMUtils.defineLazyGetter(this, 'gDeveloperButtonInNavbar', function() {
-  return getAreaWidgetIds(CustomizableUI.AREA_NAVBAR).indexOf("developer-button") != -1;
-});
-
 function isInDevEdition() {
-  return gDeveloperButtonInNavbar;
+  return AppConstants.MOZ_DEV_EDITION;
 }
 
 function removeDeveloperButtonIfDevEdition(areaPanelPlacements) {
@@ -191,27 +188,7 @@ function endCustomizing(aWindow=window) {
   aWindow.gNavToolbox.addEventListener("aftercustomization", onCustomizationEnds);
   aWindow.gCustomizeMode.exit();
 
-  return deferredEndCustomizing.promise.then(function() {
-    let deferredLoadNewTab = Promise.defer();
-
-    //XXXgijs so some tests depend on this tab being about:blank. Make it so.
-    let newTabBrowser = aWindow.gBrowser.selectedBrowser;
-    newTabBrowser.stop();
-
-    // If we stop early enough, this might actually be about:blank.
-    if (newTabBrowser.currentURI.spec == "about:blank") {
-      return null;
-    }
-
-    // Otherwise, make it be about:blank, and wait for that to be done.
-    function onNewTabLoaded(e) {
-      newTabBrowser.removeEventListener("load", onNewTabLoaded, true);
-      deferredLoadNewTab.resolve();
-    }
-    newTabBrowser.addEventListener("load", onNewTabLoaded, true);
-    newTabBrowser.loadURI("about:blank");
-    return deferredLoadNewTab.promise;
-  });
+  return deferredEndCustomizing.promise;
 }
 
 function startCustomizing(aWindow=window) {

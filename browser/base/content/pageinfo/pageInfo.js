@@ -268,6 +268,7 @@ function getClipboardHelper() {
         return Components.classes["@mozilla.org/widget/clipboardhelper;1"].getService(Components.interfaces.nsIClipboardHelper);
     } catch(e) {
         // do nothing, later code will handle the error
+        return null;
     }
 }
 const gClipboardHelper = getClipboardHelper();
@@ -405,7 +406,10 @@ function loadPageInfo(frameOuterWindowID, imageElement)
       return;
     }
 
-    addImage(message.data.imageViewRow);
+    for (let item of message.data.mediaItems) {
+      addImage(item);
+    }
+
     selectImage();
   });
 

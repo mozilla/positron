@@ -758,14 +758,14 @@ protected:
                                   JS::AutoIdVector &props) const;
 };
 
-const js::Class OuterWindowProxyClass =
-    PROXY_CLASS_WITH_EXT(
-        "Proxy",
-        0, /* additional class flags */
-        PROXY_MAKE_EXT(
-            false,   /* isWrappedNative */
-            nsOuterWindowProxy::ObjectMoved
-        ));
+static const js::ClassExtension OuterWindowProxyClassExtension = PROXY_MAKE_EXT(
+    nsOuterWindowProxy::ObjectMoved
+);
+
+const js::Class OuterWindowProxyClass = PROXY_CLASS_WITH_EXT(
+    "Proxy",
+    0, /* additional class flags */
+    &OuterWindowProxyClassExtension);
 
 const char *
 nsOuterWindowProxy::className(JSContext *cx, JS::Handle<JSObject*> proxy) const
@@ -4239,13 +4239,7 @@ nsGlobalWindow::MayResolve(jsid aId)
   nsAutoString name;
   AssignJSFlatString(name, JSID_TO_FLAT_STRING(aId));
 
-  const nsGlobalNameStruct *name_struct =
-    nameSpaceManager->LookupName(name);
-
-  // LookupName only returns structs for the global.
-  MOZ_ASSERT_IF(name_struct,
-                name_struct->mType != nsGlobalNameStruct::eTypeNavigatorProperty);
-  return name_struct;
+  return nameSpaceManager->LookupName(name);
 }
 
 void
@@ -6450,10 +6444,7 @@ nsGlobalWindow::CanMoveResizeWindows(bool aCallerIsChrome)
     }
   }
 
-  // The preference is useful for the webapp runtime. Webapps should be able
-  // to resize or move their window.
-  if (mDocShell && !Preferences::GetBool("dom.always_allow_move_resize_window",
-                                         false)) {
+  if (mDocShell) {
     bool allow;
     nsresult rv = mDocShell->GetAllowWindowControl(&allow);
     if (NS_SUCCEEDED(rv) && !allow)
@@ -9874,12 +9865,15 @@ nsGlobalWindow::DispatchAsyncHashchange(nsIURI *aOldURI, nsIURI *aNewURI)
 
   // Make sure that aOldURI and aNewURI are identical up to the '#', and that
   // their hashes are different.
-  nsAutoCString oldBeforeHash, oldHash, newBeforeHash, newHash;
-  nsContentUtils::SplitURIAtHash(aOldURI, oldBeforeHash, oldHash);
-  nsContentUtils::SplitURIAtHash(aNewURI, newBeforeHash, newHash);
-
-  NS_ENSURE_STATE(oldBeforeHash.Equals(newBeforeHash));
-  NS_ENSURE_STATE(!oldHash.Equals(newHash));
+  bool equal = false;
+  NS_ENSURE_STATE(NS_SUCCEEDED(aOldURI->EqualsExceptRef(aNewURI, &equal)) && equal);
+  nsAutoCString oldHash, newHash;
+  bool oldHasHash, newHasHash;
+  NS_ENSURE_STATE(NS_SUCCEEDED(aOldURI->GetRef(oldHash)) &&
+                  NS_SUCCEEDED(aNewURI->GetRef(newHash)) &&
+                  NS_SUCCEEDED(aOldURI->GetHasRef(&oldHasHash)) &&
+                  NS_SUCCEEDED(aNewURI->GetHasRef(&newHasHash)) &&
+                  (oldHasHash != newHasHash || !oldHash.Equals(newHash)));
 
   nsAutoCString oldSpec, newSpec;
   aOldURI->GetSpec(oldSpec);
@@ -10291,14 +10285,7 @@ nsGlobalWindow::GetInterface(const nsIID & aIID, void **aSink)
   NS_ENSURE_ARG_POINTER(aSink);
   *aSink = nullptr;
 
-  if (aIID.Equals(NS_GET_IID(mozIDOMWindowProxy))) {
-    MOZ_ASSERT(IsInnerWindow());
-    nsGlobalWindow* outer = GetOuterWindowInternal();
-    NS_ENSURE_TRUE(outer, NS_ERROR_NOT_INITIALIZED);
-
-    nsCOMPtr<mozIDOMWindowProxy> proxy = outer->AsOuter();
-    proxy.forget(aSink);
-  } else if (aIID.Equals(NS_GET_IID(nsIDocCharset))) {
+  if (aIID.Equals(NS_GET_IID(nsIDocCharset))) {
     nsGlobalWindow* outer = GetOuterWindowInternal();
     NS_ENSURE_TRUE(outer, NS_ERROR_NOT_INITIALIZED);
 

@@ -120,6 +120,12 @@ FlagPhiInputsAsHavingRemovedUses(MBasicBlock* block, MBasicBlock* succ, MPhiVect
         bool isUsed = false;
         for (size_t idx = 0; !isUsed && idx < worklist.length(); idx++) {
             phi = worklist[idx];
+            if (phi->isUseRemoved() || phi->isImplicitlyUsed()) {
+                // The phi is implicitly used.
+                isUsed = true;
+                break;
+            }
+
             MUseIterator usesEnd(phi->usesEnd());
             for (MUseIterator use(phi->usesBegin()); use != usesEnd; use++) {
                 MNode* consumer = (*use)->consumer();
@@ -143,12 +149,6 @@ FlagPhiInputsAsHavingRemovedUses(MBasicBlock* block, MBasicBlock* succ, MPhiVect
                 phi = cdef->toPhi();
                 if (phi->isInWorklist())
                     continue;
-
-                if (phi->isUseRemoved() || phi->isImplicitlyUsed()) {
-                    // The phi is implicitly used.
-                    isUsed = true;
-                    break;
-                }
 
                 phi->setInWorklist();
                 if (!worklist.append(phi))
@@ -1848,7 +1848,7 @@ jit::MakeMRegExpHoistable(MIRGraph& graph)
 
                 // All MRegExp* MIR's don't adjust the regexp.
                 MDefinition* use = i->consumer()->toDefinition();
-                if (use->isRegExpReplace())
+                if (use->isRegExpMatcher() || use->isRegExpTester() || use->isRegExpSearcher())
                     continue;
 
                 hoistable = false;
@@ -2268,6 +2268,32 @@ CheckUse(const MDefinition* producer, const MUse* use, int32_t* usesBalance)
 #endif
     ++*usesBalance;
 }
+
+// To properly encode entry resume points, we have to ensure that all the
+// operands of the entry resume point are located before the safeInsertTop
+// location.
+static void
+AssertOperandsBeforeSafeInsertTop(MResumePoint* resume)
+{
+    MBasicBlock* block = resume->block();
+    if (block == block->graph().osrBlock())
+        return;
+    MInstruction* stop = block->safeInsertTop();
+    for (size_t i = 0, e = resume->numOperands(); i < e; ++i) {
+        MDefinition* def = resume->getOperand(i);
+        if (def->block() != block)
+            continue;
+        if (def->isPhi())
+            continue;
+
+        for (MInstructionIterator ins = block->begin(); true; ins++) {
+            if (*ins == def)
+                break;
+            MOZ_ASSERT(*ins != stop,
+                       "Resume point operand located after the safeInsertTop location");
+        }
+    }
+}
 #endif // DEBUG
 
 void
@@ -2305,13 +2331,14 @@ jit::AssertBasicGraphCoherency(MIRGraph& graph)
         for (size_t i = 0; i < block->numPredecessors(); i++)
             MOZ_ASSERT(CheckPredecessorImpliesSuccessor(*block, block->getPredecessor(i)));
 
-        if (block->entryResumePoint()) {
-            MOZ_ASSERT(!block->entryResumePoint()->instruction());
-            MOZ_ASSERT(block->entryResumePoint()->block() == *block);
+        if (MResumePoint* resume = block->entryResumePoint()) {
+            MOZ_ASSERT(!resume->instruction());
+            MOZ_ASSERT(resume->block() == *block);
+            AssertOperandsBeforeSafeInsertTop(resume);
         }
-        if (block->outerResumePoint()) {
-            MOZ_ASSERT(!block->outerResumePoint()->instruction());
-            MOZ_ASSERT(block->outerResumePoint()->block() == *block);
+        if (MResumePoint* resume = block->outerResumePoint()) {
+            MOZ_ASSERT(!resume->instruction());
+            MOZ_ASSERT(resume->block() == *block);
         }
         for (MResumePointIterator iter(block->resumePointsBegin()); iter != block->resumePointsEnd(); iter++) {
             // We cannot yet assert that is there is no instruction then this is

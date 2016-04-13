@@ -224,9 +224,10 @@ function toLocalTimeISOString(date) {
  */
 function annotateCrashReport(sessionId) {
   try {
-    const cr = Cc["@mozilla.org/toolkit/crash-reporter;1"]
-            .getService(Ci.nsICrashReporter);
-    cr.setTelemetrySessionId(sessionId);
+    const cr = Cc["@mozilla.org/toolkit/crash-reporter;1"];
+    if (cr) {
+      cr.getService(Ci.nsICrashReporter).setTelemetrySessionId(sessionId);
+    }
   } catch (e) {
     // Ignore errors when crash reporting is disabled
   }
@@ -411,6 +412,7 @@ var TelemetryScheduler = {
         return this._onSchedulerTick();
         break;
     }
+    return undefined;
   },
 
   /**
@@ -1097,7 +1099,6 @@ var Impl = {
     b("MEMORY_HEAP_ALLOCATED", "heapAllocated");
     p("MEMORY_HEAP_OVERHEAD_FRACTION", "heapOverheadFraction");
     b("MEMORY_JS_GC_HEAP", "JSMainRuntimeGCHeap");
-    b("MEMORY_JS_MAIN_RUNTIME_TEMPORARY_PEAK", "JSMainRuntimeTemporaryPeak");
     c("MEMORY_JS_COMPARTMENTS_SYSTEM", "JSMainRuntimeCompartmentsSystem");
     c("MEMORY_JS_COMPARTMENTS_USER", "JSMainRuntimeCompartmentsUser");
     b("MEMORY_IMAGES_CONTENT_USED_UNCOMPRESSED", "imagesContentUsedUncompressed");
@@ -1884,6 +1885,7 @@ var Impl = {
       TelemetryController.addPendingPing(getPingType(payload), payload, options);
       break;
     }
+    return undefined;
   },
 
   /**

@@ -7792,7 +7792,7 @@ class NormalJSRuntime
 {
   friend class nsAutoPtr<NormalJSRuntime>;
 
-  static const JSClass kGlobalClass;
+  static const JSClass sGlobalClass;
   static const uint32_t kRuntimeHeapSize = 768 * 1024;
 
   JSRuntime* mRuntime;
@@ -10453,7 +10453,7 @@ DatabaseConnection::Close()
   AssertIsOnConnectionThread();
   MOZ_ASSERT(mStorageConnection);
   MOZ_ASSERT(!mDEBUGSavepointCount);
-  MOZ_RELEASE_ASSERT(!mInWriteTransaction);
+  MOZ_ASSERT(!mInWriteTransaction);
 
   PROFILER_LABEL("IndexedDB",
                  "DatabaseConnection::Close",
@@ -11550,7 +11550,9 @@ ConnectionPool::Start(const nsID& aBackgroundChildLoggingId,
                                   /* aFromQueuedTransactions */ false);
   }
 
-  if (!databaseInfoIsNew && mIdleDatabases.RemoveElement(dbInfo)) {
+  if (!databaseInfoIsNew &&
+      (mIdleDatabases.RemoveElement(dbInfo) ||
+       mDatabasesPerformingIdleMaintenance.RemoveElement(dbInfo))) {
     AdjustIdleTimer();
   }
 
@@ -12137,7 +12139,7 @@ ConnectionPool::NoteIdleDatabase(DatabaseInfo* aDatabaseInfo)
 {
   AssertIsOnOwningThread();
   MOZ_ASSERT(aDatabaseInfo);
-  MOZ_RELEASE_ASSERT(!aDatabaseInfo->TotalTransactionCount());
+  MOZ_ASSERT(!aDatabaseInfo->TotalTransactionCount());
   MOZ_ASSERT(aDatabaseInfo->mThreadInfo.mThread);
   MOZ_ASSERT(aDatabaseInfo->mThreadInfo.mRunnable);
   MOZ_ASSERT(!mIdleDatabases.Contains(aDatabaseInfo));
@@ -12311,7 +12313,7 @@ ConnectionPool::PerformIdleDatabaseMaintenance(DatabaseInfo* aDatabaseInfo)
 {
   AssertIsOnOwningThread();
   MOZ_ASSERT(aDatabaseInfo);
-  MOZ_RELEASE_ASSERT(!aDatabaseInfo->TotalTransactionCount());
+  MOZ_ASSERT(!aDatabaseInfo->TotalTransactionCount());
   MOZ_ASSERT(aDatabaseInfo->mThreadInfo.mThread);
   MOZ_ASSERT(aDatabaseInfo->mThreadInfo.mRunnable);
   MOZ_ASSERT(aDatabaseInfo->mIdle);
@@ -12338,7 +12340,7 @@ ConnectionPool::CloseDatabase(DatabaseInfo* aDatabaseInfo)
 {
   AssertIsOnOwningThread();
   MOZ_ASSERT(aDatabaseInfo);
-  MOZ_RELEASE_ASSERT(!aDatabaseInfo->TotalTransactionCount());
+  MOZ_ASSERT(!aDatabaseInfo->TotalTransactionCount());
   MOZ_ASSERT(aDatabaseInfo->mThreadInfo.mThread);
   MOZ_ASSERT(aDatabaseInfo->mThreadInfo.mRunnable);
   MOZ_ASSERT(!aDatabaseInfo->mClosing);
@@ -12417,7 +12419,7 @@ IdleConnectionRunnable::Run()
   RefPtr<ConnectionPool> connectionPool = mDatabaseInfo->mConnectionPool;
   MOZ_ASSERT(connectionPool);
 
-  if (mDatabaseInfo->mClosing) {
+  if (mDatabaseInfo->mClosing || mDatabaseInfo->TotalTransactionCount()) {
     MOZ_ASSERT(!connectionPool->
                  mDatabasesPerformingIdleMaintenance.Contains(mDatabaseInfo));
   } else {
@@ -12425,9 +12427,7 @@ IdleConnectionRunnable::Run()
       connectionPool->
         mDatabasesPerformingIdleMaintenance.RemoveElement(mDatabaseInfo));
 
-    if (!mDatabaseInfo->TotalTransactionCount()) {
-      connectionPool->NoteIdleDatabase(mDatabaseInfo);
-    }
+    connectionPool->NoteIdleDatabase(mDatabaseInfo);
   }
 
   return NS_OK;
@@ -13965,7 +13965,7 @@ Database::RecvPBackgroundIDBTransactionConstructor(
              aMode == IDBTransaction::READ_WRITE ||
              aMode == IDBTransaction::READ_WRITE_FLUSH ||
              aMode == IDBTransaction::CLEANUP);
-  MOZ_RELEASE_ASSERT(!mClosed);
+  MOZ_ASSERT(!mClosed);
 
   if (IsInvalidated()) {
     // This is an expected race. We don't want the child to die here, just don't
@@ -23761,9 +23761,7 @@ CreateIndexOp::DoDatabaseWork(DatabaseConnection* aConnection)
   return NS_OK;
 }
 
-const JSClass NormalJSRuntime::kGlobalClass = {
-  "IndexedDBTransactionThreadGlobal",
-  JSCLASS_GLOBAL_FLAGS,
+static const JSClassOps sNormalJSRuntimeGlobalClassOps = {
   /* addProperty */ nullptr,
   /* delProperty */ nullptr,
   /* getProperty */ nullptr,
@@ -23776,6 +23774,12 @@ const JSClass NormalJSRuntime::kGlobalClass = {
   /* hasInstance */ nullptr,
   /* construct */ nullptr,
   /* trace */ JS_GlobalObjectTraceHook
+};
+
+const JSClass NormalJSRuntime::sGlobalClass = {
+  "IndexedDBTransactionThreadGlobal",
+  JSCLASS_GLOBAL_FLAGS,
+  &sNormalJSRuntimeGlobalClassOps
 };
 
 bool
@@ -23799,7 +23803,7 @@ NormalJSRuntime::Init()
   JSAutoRequest ar(mContext);
 
   JS::CompartmentOptions options;
-  mGlobal = JS_NewGlobalObject(mContext, &kGlobalClass, nullptr,
+  mGlobal = JS_NewGlobalObject(mContext, &sGlobalClass, nullptr,
                                JS::FireOnNewGlobalHook, options);
   if (NS_WARN_IF(!mGlobal)) {
     return false;

@@ -14,7 +14,6 @@
     _(ArrayPop)                     \
     _(ArrayShift)                   \
     _(ArrayPush)                    \
-    _(ArrayConcat)                  \
     _(ArraySlice)                   \
     _(ArraySplice)                  \
                                     \
@@ -22,7 +21,6 @@
     _(AtomicsExchange)              \
     _(AtomicsLoad)                  \
     _(AtomicsStore)                 \
-    _(AtomicsFence)                 \
     _(AtomicsAdd)                   \
     _(AtomicsSub)                   \
     _(AtomicsAnd)                   \
@@ -67,15 +65,19 @@
     _(MathCbrt)                     \
                                     \
     _(RegExpMatcher)                \
+    _(RegExpSearcher)               \
     _(RegExpTester)                 \
     _(IsRegExpObject)               \
+    _(RegExpPrototypeOptimizable)   \
+    _(RegExpInstanceOptimizable)    \
                                     \
     _(String)                       \
-    _(StringSplit)                  \
     _(StringCharCodeAt)             \
     _(StringFromCharCode)           \
     _(StringCharAt)                 \
-    _(StringReplace)                \
+                                    \
+    _(IntrinsicStringReplaceString) \
+    _(IntrinsicStringSplitString)   \
                                     \
     _(ObjectCreate)                 \
                                     \
@@ -96,13 +98,16 @@
     _(IntrinsicUnsafeGetBooleanFromReservedSlot) \
                                     \
     _(IntrinsicIsCallable)          \
+    _(IntrinsicIsConstructor)       \
     _(IntrinsicToObject)            \
     _(IntrinsicIsObject)            \
+    _(IntrinsicIsWrappedArrayConstructor) \
     _(IntrinsicToInteger)           \
     _(IntrinsicToString)            \
     _(IntrinsicIsConstructing)      \
     _(IntrinsicSubstringKernel)     \
     _(IntrinsicDefineDataProperty)  \
+    _(IntrinsicObjectHasPrototype)  \
                                     \
     _(IntrinsicIsArrayIterator)     \
     _(IntrinsicIsMapIterator)       \
@@ -110,6 +115,9 @@
     _(IntrinsicIsListIterator)      \
                                     \
     _(IntrinsicGetNextMapEntryForIterator) \
+                                    \
+    _(IntrinsicArrayBufferByteLength) \
+    _(IntrinsicPossiblyWrappedArrayBufferByteLength) \
                                     \
     _(IntrinsicIsTypedArray)        \
     _(IntrinsicIsPossiblyWrappedTypedArray) \

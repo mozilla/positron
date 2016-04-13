@@ -594,6 +594,8 @@ struct NamedConstructor
  *                false in situations where we want the properties to only
  *                appear on privileged Xrays but not on the unprivileged
  *                underlying global.
+ * unscopableNames if not null it points to a null-terminated list of const
+ *                 char* names of the unscopable properties for this interface.
  *
  * At least one of protoClass, constructorClass or constructor should be
  * non-null. If constructorClass or constructor are non-null, the resulting
@@ -610,7 +612,8 @@ CreateInterfaceObjects(JSContext* cx, JS::Handle<JSObject*> global,
                        JS::Heap<JSObject*>* constructorCache,
                        const NativeProperties* regularProperties,
                        const NativeProperties* chromeOnlyProperties,
-                       const char* name, bool defineOnGlobal);
+                       const char* name, bool defineOnGlobal,
+                       const char* const* unscopableNames);
 
 /**
  * Define the properties (regular and chrome-only) on obj.
@@ -2505,6 +2508,10 @@ XrayGetNativeProto(JSContext* cx, JS::Handle<JSObject*> obj,
 
 extern NativePropertyHooks sEmptyNativePropertyHooks;
 
+extern const js::ClassOps sBoringInterfaceObjectClassClassOps;
+
+extern const js::ObjectOps sInterfaceObjectClassObjectOps;
+
 // We use one constructor JSNative to represent all DOM interface objects (so
 // we can easily detect when we need to wrap them in an Xray wrapper). We store
 // the real JSNative in the mNative member of a JSNativeHolder in the
@@ -2535,7 +2542,7 @@ inline bool
 HasConstructor(JSObject* obj)
 {
   return JS_IsNativeFunction(obj, Constructor) ||
-         js::GetObjectClass(obj)->construct;
+         js::GetObjectClass(obj)->getConstruct();
 }
  #endif
 
@@ -2998,9 +3005,6 @@ struct CreateGlobalOptions
 {
   static MOZ_CONSTEXPR_VAR ProtoAndIfaceCache::Kind ProtoAndIfaceCacheKind =
     ProtoAndIfaceCache::NonWindowLike;
-  // Intl API is broken and makes JS_InitStandardClasses fail intermittently,
-  // see bug 934889.
-  static MOZ_CONSTEXPR_VAR bool ForceInitStandardClassesToFalse = true;
   static void TraceGlobal(JSTracer* aTrc, JSObject* aObj)
   {
     mozilla::dom::TraceProtoAndIfaceCache(aTrc, aObj);
@@ -3018,7 +3022,6 @@ struct CreateGlobalOptions<nsGlobalWindow>
 {
   static MOZ_CONSTEXPR_VAR ProtoAndIfaceCache::Kind ProtoAndIfaceCacheKind =
     ProtoAndIfaceCache::WindowLike;
-  static MOZ_CONSTEXPR_VAR bool ForceInitStandardClassesToFalse = false;
   static void TraceGlobal(JSTracer* aTrc, JSObject* aObj);
   static bool PostCreateGlobal(JSContext* aCx, JS::Handle<JSObject*> aGlobal);
 };
@@ -3069,7 +3072,6 @@ CreateGlobal(JSContext* aCx, T* aNative, nsWrapperCache* aCache,
   }
 
   if (aInitStandardClasses &&
-      !CreateGlobalOptions<T>::ForceInitStandardClassesToFalse &&
       !JS_InitStandardClasses(aCx, aGlobal)) {
     NS_WARNING("Failed to init standard classes");
     return nullptr;

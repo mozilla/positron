@@ -12,11 +12,13 @@
 #include "mozilla/net/NeckoCommon.h"
 
 #include "nsCookieService.h"
+#include "nsContentUtils.h"
 #include "nsIServiceManager.h"
 
 #include "nsIIOService.h"
 #include "nsIPrefBranch.h"
 #include "nsIPrefService.h"
+#include "nsIScriptError.h"
 #include "nsICookiePermission.h"
 #include "nsIURI.h"
 #include "nsIURL.h"
@@ -2366,21 +2368,35 @@ NS_IMETHODIMP
 nsCookieService::Remove(const nsACString &aHost,
                         const nsACString &aName,
                         const nsACString &aPath,
-                        JS::HandleValue  aOriginAttributes,
                         bool             aBlocked,
-                        JSContext*       aCx)
+                        JS::HandleValue  aOriginAttributes,
+                        JSContext*       aCx,
+                        uint8_t          aArgc)
 {
+  MOZ_ASSERT(aArgc == 0 || aArgc == 1);
+  if (aArgc == 0) {
+    // This is supposed to be temporary and in 1 or 2 releases we want to
+    // have originAttributes param as mandatory. But for now, we don't want to
+    // break existing addons, so we write a console message to inform the addon
+    // developers about it.
+    nsContentUtils::ReportToConsole(nsIScriptError::warningFlag,
+                                    NS_LITERAL_CSTRING("Cookie Manager"),
+                                    nullptr,
+                                    nsContentUtils::eNECKO_PROPERTIES,
+                                    "nsICookieManagerRemoveDeprecated");
+  }
+
   NeckoOriginAttributes attrs;
   MOZ_ASSERT(attrs.Init(aCx, aOriginAttributes));
-  return RemoveNative(aHost, aName, aPath, &attrs, aBlocked);
+  return RemoveNative(aHost, aName, aPath, aBlocked, &attrs);
 }
 
 NS_IMETHODIMP_(nsresult)
 nsCookieService::RemoveNative(const nsACString &aHost,
                               const nsACString &aName,
                               const nsACString &aPath,
-                              NeckoOriginAttributes* aOriginAttributes,
-                              bool aBlocked)
+                              bool aBlocked,
+                              NeckoOriginAttributes* aOriginAttributes)
 {
   if (NS_WARN_IF(!aOriginAttributes)) {
     return NS_ERROR_FAILURE;
@@ -2697,7 +2713,7 @@ nsCookieService::EnsureReadComplete()
 
   nsCString baseDomain, name, value, host, path;
   bool hasResult;
-  AutoTArray<CookieDomainTuple, kMaxNumberOfCookies> array;
+  nsTArray<CookieDomainTuple> array(kMaxNumberOfCookies);
   while (1) {
     rv = stmt->ExecuteStep(&hasResult);
     if (NS_FAILED(rv)) {
@@ -4087,8 +4103,8 @@ nsCookieService::PurgeCookies(int64_t aCurrentTimeInUsec)
     ("PurgeCookies(): beginning purge with %ld cookies and %lld oldest age",
      mDBState->cookieCount, aCurrentTimeInUsec - mDBState->cookieOldestTime));
 
-  typedef AutoTArray<nsListIter, kMaxNumberOfCookies> PurgeList;
-  PurgeList purgeList;
+  typedef nsTArray<nsListIter> PurgeList;
+  PurgeList purgeList(kMaxNumberOfCookies);
 
   nsCOMPtr<nsIMutableArray> removedList = do_CreateInstance(NS_ARRAY_CONTRACTID);
 

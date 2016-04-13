@@ -108,9 +108,6 @@ public:
   virtual nsresult SetFormProperty(nsIAtom* aName, const nsAString& aValue) override;
   virtual void SetFocus(bool aOn = true, bool aRepaint = false) override;
 
-  virtual bool IsScrollFrameWithSnapping() const override {
-    return false;
-  }
   virtual mozilla::ScrollbarStyles GetScrollbarStyles() const override;
   virtual bool ShouldPropagateComputedBSizeToScrolledContent() const override;
 
@@ -455,7 +452,7 @@ private:
   static nsAString& GetIncrementalString ();
   static DOMTimeStamp gLastKeyTime;
 
-  class MOZ_STACK_CLASS AutoIncrementalSearchResetter
+  class MOZ_RAII AutoIncrementalSearchResetter
   {
   public:
     AutoIncrementalSearchResetter() :

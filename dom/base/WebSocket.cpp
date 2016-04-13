@@ -253,7 +253,7 @@ NS_IMPL_ISUPPORTS(WebSocketImpl,
                   nsIRequest,
                   nsIEventTarget)
 
-class CallDispatchConnectionCloseEvents final : public nsCancelableRunnable
+class CallDispatchConnectionCloseEvents final : public CancelableRunnable
 {
 public:
   explicit CallDispatchConnectionCloseEvents(WebSocketImpl* aWebSocketImpl)
@@ -2630,8 +2630,6 @@ WebSocketImpl::CancelInternal()
   if (readyState == WebSocket::CLOSING || readyState == WebSocket::CLOSED) {
     return NS_OK;
   }
-
-  ConsoleError();
 
   return CloseConnection(nsIWebSocketChannel::CLOSE_GOING_AWAY);
 }

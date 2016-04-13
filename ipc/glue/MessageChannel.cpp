@@ -14,11 +14,12 @@
 #include "mozilla/DebugOnly.h"
 #include "mozilla/Move.h"
 #include "mozilla/SizePrintfMacros.h"
+#include "mozilla/Snprintf.h"
 #include "mozilla/Telemetry.h"
+#include "mozilla/Logging.h"
 #include "nsDebug.h"
 #include "nsISupportsImpl.h"
 #include "nsContentUtils.h"
-#include "mozilla/Snprintf.h"
 
 // Undo the damage done by mozzconf.h
 #undef compress
@@ -117,6 +118,8 @@ static MessageChannel* gParentProcessBlocker;
 
 namespace mozilla {
 namespace ipc {
+
+static const int kMinTelemetryMessageSize = 8192;
 
 const int32_t MessageChannel::kNoTimeout = INT32_MIN;
 
@@ -519,6 +522,11 @@ MessageChannel::~MessageChannel()
     IPC_ASSERT(mCxxStackFrames.empty(), "mismatched CxxStackFrame ctor/dtors");
 #ifdef OS_WIN
     BOOL ok = CloseHandle(mEvent);
+    if (!ok) {
+        gfxDevCrash(mozilla::gfx::LogReason::MessageChannelCloseFailure) <<
+            "MessageChannel failed to close. GetLastError: " <<
+            GetLastError();
+    }
     MOZ_RELEASE_ASSERT(ok);
 #endif
     Clear();
@@ -749,6 +757,10 @@ MessageChannel::Echo(Message* aMsg)
 bool
 MessageChannel::Send(Message* aMsg)
 {
+    if (aMsg->size() >= kMinTelemetryMessageSize) {
+        Telemetry::Accumulate(Telemetry::IPC_MESSAGE_SIZE, nsCString(aMsg->name()), aMsg->size());
+    }
+
     CxxStackFrame frame(*this, OUT_MESSAGE, aMsg);
 
     nsAutoPtr<Message> msg(aMsg);
@@ -863,7 +875,7 @@ public:
 };
 
 void
-MessageChannel::OnMessageReceivedFromLink(const Message& aMsg)
+MessageChannel::OnMessageReceivedFromLink(Message&& aMsg)
 {
     AssertLinkThread();
     mMonitor->AssertCurrentThreadOwns();
@@ -960,7 +972,7 @@ MessageChannel::OnMessageReceivedFromLink(const Message& aMsg)
     // blocked. This is okay, since we always check for pending events before
     // blocking again.
 
-    mPending.push_back(aMsg);
+    mPending.push_back(Move(aMsg));
 
     if (shouldWakeUp) {
         NotifyWorkerThread();
@@ -976,15 +988,15 @@ MessageChannel::OnMessageReceivedFromLink(const Message& aMsg)
 }
 
 void
-MessageChannel::PeekMessages(msgid_t aMsgId, mozilla::function<void(const Message& aMsg)> aInvoke)
+MessageChannel::PeekMessages(msgid_t aMsgId, mozilla::function<bool(const Message& aMsg)> aInvoke)
 {
     MonitorAutoLock lock(*mMonitor);
 
     for (MessageQueue::iterator it = mPending.begin(); it != mPending.end(); it++) {
         Message &msg = *it;
 
-        if (msg.type() == aMsgId) {
-          aInvoke(msg);
+        if (msg.type() == aMsgId && !aInvoke(msg)) {
+            break;
         }
     }
 }
@@ -1045,6 +1057,10 @@ MessageChannel::ProcessPendingRequests(AutoEnterTransaction& aTransaction)
 bool
 MessageChannel::Send(Message* aMsg, Message* aReply)
 {
+    if (aMsg->size() >= kMinTelemetryMessageSize) {
+        Telemetry::Accumulate(Telemetry::IPC_MESSAGE_SIZE, nsCString(aMsg->name()), aMsg->size());
+    }
+
     nsAutoPtr<Message> msg(aMsg);
 
     // Sanity checks.
@@ -1728,7 +1744,7 @@ MessageChannel::MaybeUndeferIncall()
                "fatal logic error");
 
     // maybe time to process this message
-    Message call = mDeferred.top();
+    Message call(Move(mDeferred.top()));
     mDeferred.pop();
 
     // fix up fudge factor we added to account for race
@@ -1736,7 +1752,7 @@ MessageChannel::MaybeUndeferIncall()
     --mRemoteStackDepthGuess;
 
     MOZ_RELEASE_ASSERT(call.priority() == IPC::Message::PRIORITY_NORMAL);
-    mPending.push_back(call);
+    mPending.push_back(Move(call));
 }
 
 void

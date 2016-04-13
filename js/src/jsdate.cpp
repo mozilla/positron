@@ -3272,58 +3272,40 @@ FinishDateClassInit(JSContext* cx, HandleObject ctor, HandleObject proto)
                                 nullptr, nullptr, 0);
 }
 
+static const ClassSpec DateObjectClassSpec = {
+    GenericCreateConstructor<DateConstructor, 7, gc::AllocKind::FUNCTION>,
+    CreateDatePrototype,
+    date_static_methods,
+    nullptr,
+    date_methods,
+    nullptr,
+    FinishDateClassInit
+};
+
 const Class DateObject::class_ = {
     js_Date_str,
     JSCLASS_HAS_RESERVED_SLOTS(RESERVED_SLOTS) |
     JSCLASS_HAS_CACHED_PROTO(JSProto_Date),
-    nullptr, /* addProperty */
-    nullptr, /* delProperty */
-    nullptr, /* getProperty */
-    nullptr, /* setProperty */
-    nullptr, /* enumerate */
-    nullptr, /* resolve */
-    nullptr, /* mayResolve */
-    nullptr, /* finalize */
-    nullptr, /* call */
-    nullptr, /* hasInstance */
-    nullptr, /* construct */
-    nullptr, /* trace */
-    {
-        GenericCreateConstructor<DateConstructor, 7, gc::AllocKind::FUNCTION>,
-        CreateDatePrototype,
-        date_static_methods,
-        nullptr,
-        date_methods,
-        nullptr,
-        FinishDateClassInit
-    }
+    JS_NULL_CLASS_OPS,
+    &DateObjectClassSpec
+};
+
+static const ClassSpec DateObjectProtoClassSpec = {
+    DELEGATED_CLASSSPEC(DateObject::class_.spec),
+    nullptr,
+    nullptr,
+    nullptr,
+    nullptr,
+    nullptr,
+    nullptr,
+    ClassSpec::IsDelegated
 };
 
 const Class DateObject::protoClass_ = {
     js_Object_str,
     JSCLASS_HAS_CACHED_PROTO(JSProto_Date),
-    nullptr, /* addProperty */
-    nullptr, /* delProperty */
-    nullptr, /* getProperty */
-    nullptr, /* setProperty */
-    nullptr, /* enumerate */
-    nullptr, /* resolve */
-    nullptr, /* mayResolve */
-    nullptr, /* finalize */
-    nullptr, /* call */
-    nullptr, /* hasInstance */
-    nullptr, /* construct */
-    nullptr, /* trace  */
-    {
-        DELEGATED_CLASSSPEC(&DateObject::class_.spec),
-        nullptr,
-        nullptr,
-        nullptr,
-        nullptr,
-        nullptr,
-        nullptr,
-        ClassSpec::IsDelegated
-    }
+    JS_NULL_CLASS_OPS,
+    &DateObjectProtoClassSpec
 };
 
 JSObject*

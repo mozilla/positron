@@ -9,6 +9,7 @@
 #include "mozilla/layers/ImageBridgeChild.h"
 #include "mozilla/layers/SharedBufferManagerChild.h"
 #include "mozilla/layers/ISurfaceAllocator.h"     // for GfxMemoryImageReporter
+#include "mozilla/ClearOnShutdown.h"
 #include "mozilla/Telemetry.h"
 #include "mozilla/TimeStamp.h"
 
@@ -67,6 +68,7 @@
 #include "nsILocaleService.h"
 #include "nsIObserverService.h"
 #include "nsIScreenManager.h"
+#include "FrameMetrics.h"
 #include "MainThreadUtils.h"
 #ifdef MOZ_CRASHREPORTER
 #include "nsExceptionHandler.h"
@@ -597,13 +599,12 @@ gfxPlatform::Init()
                                gfxPrefs::Direct2DForceEnabled(),
                                gfxPrefs::DirectWriteFontRenderingForceEnabled());
       // Layers prefs
-      forcedPrefs.AppendPrintf("-L%d%d%d%d%d%d",
+      forcedPrefs.AppendPrintf("-L%d%d%d%d%d",
                                gfxPrefs::LayersAMDSwitchableGfxEnabled(),
                                gfxPrefs::LayersAccelerationDisabled(),
                                gfxPrefs::LayersAccelerationForceEnabled(),
                                gfxPrefs::LayersD3D11DisableWARP(),
-                               gfxPrefs::LayersD3D11ForceWARP(),
-                               gfxPrefs::LayersOffMainThreadCompositionForceEnabled());
+                               gfxPrefs::LayersD3D11ForceWARP());
       // WebGL prefs
       forcedPrefs.AppendPrintf("-W%d%d%d%d%d%d%d%d",
                                gfxPrefs::WebGLANGLEForceD3D11(),
@@ -757,6 +758,9 @@ gfxPlatform::Init()
       SkGraphics::SetFontCacheLimit(skiaCacheSize);
     }
 #endif
+
+    ScrollMetadata::sNullMetadata = new ScrollMetadata();
+    ClearOnShutdown(&ScrollMetadata::sNullMetadata);
 }
 
 static bool sLayersIPCIsUp = false;
@@ -870,20 +874,31 @@ gfxPlatform::ShutdownLayersIPC()
     }
     sLayersIPCIsUp = false;
 
-    if (XRE_IsParentProcess())
-    {
-      // This must happen after the shutdown of media and widgets, which
-      // are triggered by the NS_XPCOM_SHUTDOWN_OBSERVER_ID notification.
-      gfx::VRManagerChild::ShutDown();
-      layers::ImageBridgeChild::ShutDown();
+    if (XRE_IsContentProcess()) {
+
+        gfx::VRManagerChild::ShutDown();
+        // cf bug 1215265.
+        if (gfxPrefs::ChildProcessShutdown()) {
+          layers::ImageBridgeChild::ShutDown();
+          layers::CompositorBridgeChild::ShutDown();
+        }
+
+    } else if (XRE_IsParentProcess()) {
+
+        gfx::VRManagerChild::ShutDown();
+        layers::ImageBridgeChild::ShutDown();
+        layers::CompositorBridgeChild::ShutDown();
+
 #ifdef MOZ_WIDGET_GONK
-      layers::SharedBufferManagerChild::ShutDown();
+        layers::SharedBufferManagerChild::ShutDown();
 #endif
 
-      layers::CompositorBridgeParent::ShutDown();
-	} else if (XRE_GetProcessType() == GeckoProcessType_Content) {
-		gfx::VRManagerChild::ShutDown();
-	}
+        // This has to happen after shutting down the child protocols.
+        layers::CompositorBridgeParent::ShutDown();
+    } else {
+      // TODO: There are other kind of processes and we should make sure gfx
+      // stuff is either not created there or shut down properly.
+    }
 }
 
 gfxPlatform::~gfxPlatform()
@@ -2067,11 +2082,8 @@ InitLayersAccelerationPrefs()
     } else if (gfxInfo) {
       if (NS_SUCCEEDED(gfxInfo->GetFeatureStatus(nsIGfxInfo::FEATURE_DIRECT3D_9_LAYERS, &status))) {
         if (status == nsIGfxInfo::FEATURE_STATUS_OK) {
-          if (sPrefBrowserTabsRemoteAutostart && !IsVistaOrLater()) {
-            gfxWarning() << "Disallowing D3D9 on Windows XP with E10S - see bug 1237770";
-          } else {
-            sLayersSupportsD3D9 = true;
-          }
+          MOZ_ASSERT(!sPrefBrowserTabsRemoteAutostart || IsVistaOrLater());
+          sLayersSupportsD3D9 = true;
         }
       }
       if (NS_SUCCEEDED(gfxInfo->GetFeatureStatus(nsIGfxInfo::FEATURE_DIRECT3D_11_LAYERS, &status))) {
@@ -2208,15 +2220,14 @@ gfxPlatform::GetScaledFontForFontWithCairoSkia(DrawTarget* aTarget, gfxFont* aFo
 /* static */ bool
 gfxPlatform::UsesOffMainThreadCompositing()
 {
-  InitLayersAccelerationPrefs();
   static bool firstTime = true;
   static bool result = false;
 
   if (firstTime) {
+    InitLayersAccelerationPrefs();
     result =
       sPrefBrowserTabsRemoteAutostart ||
-      gfxPrefs::LayersOffMainThreadCompositionEnabled() ||
-      gfxPrefs::LayersOffMainThreadCompositionForceEnabled();
+      !gfxPrefs::LayersOffMainThreadCompositionForceDisabled();
 #if defined(MOZ_WIDGET_GTK)
     // Linux users who chose OpenGL are being grandfathered in to OMTC
     result |= gfxPrefs::LayersAccelerationForceEnabled();

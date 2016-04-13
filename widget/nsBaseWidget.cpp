@@ -169,7 +169,7 @@ nsBaseWidget::nsBaseWidget()
 , mUpdateCursor(true)
 , mUseAttachedEvents(false)
 , mIMEHasFocus(false)
-#ifdef XP_WIN
+#if defined(XP_WIN) || defined(XP_MACOSX)
 , mAccessibilityInUseFlag(false)
 #endif
 {
@@ -237,7 +237,7 @@ WidgetShutdownObserver::Unregister()
   }
 }
 
-#ifdef XP_WIN
+#if defined(XP_WIN) || defined(XP_MACOSX)
 // defined in nsAppRunner.cpp
 extern const char* kAccessibilityLastRunDatePref;
 
@@ -259,12 +259,6 @@ nsBaseWidget::Shutdown()
     delete sPluginWidgetList;
     sPluginWidgetList = nullptr;
   }
-#if defined(XP_WIN)
-  if (mAccessibilityInUseFlag) {
-    uint32_t now = PRTimeToSeconds(PR_Now());
-    Preferences::SetInt(kAccessibilityLastRunDatePref, now);
-  }
-#endif
 #endif
 }
 
@@ -276,12 +270,14 @@ void nsBaseWidget::DestroyCompositor()
     RefPtr<CompositorBridgeChild> compositorChild = mCompositorBridgeChild;
     RefPtr<CompositorBridgeParent> compositorParent = mCompositorBridgeParent;
     mCompositorBridgeChild->Destroy();
+    mCompositorBridgeChild = nullptr;
   }
 
   // Can have base widgets that are things like tooltips
   // which don't have CompositorVsyncDispatchers
   if (mCompositorVsyncDispatcher) {
     mCompositorVsyncDispatcher->Shutdown();
+    mCompositorVsyncDispatcher = nullptr;
   }
 }
 
@@ -592,15 +588,15 @@ double nsIWidget::DefaultScaleOverride()
 //-------------------------------------------------------------------------
 void nsBaseWidget::AddChild(nsIWidget* aChild)
 {
-  NS_PRECONDITION(!aChild->GetNextSibling() && !aChild->GetPrevSibling(),
-                  "aChild not properly removed from its old child list");
+  MOZ_RELEASE_ASSERT(!aChild->GetNextSibling() && !aChild->GetPrevSibling(),
+                     "aChild not properly removed from its old child list");
 
   if (!mFirstChild) {
     mFirstChild = mLastChild = aChild;
   } else {
     // append to the list
-    NS_ASSERTION(mLastChild, "Bogus state");
-    NS_ASSERTION(!mLastChild->GetNextSibling(), "Bogus state");
+    MOZ_RELEASE_ASSERT(mLastChild);
+    MOZ_RELEASE_ASSERT(!mLastChild->GetNextSibling());
     mLastChild->SetNextSibling(aChild);
     aChild->SetPrevSibling(mLastChild);
     mLastChild = aChild;
@@ -622,7 +618,7 @@ void nsBaseWidget::RemoveChild(nsIWidget* aChild)
   nsIWidget* parent = aChild->GetParent();
   NS_ASSERTION(!parent || parent == this, "Not one of our kids!");
 #else
-  NS_ASSERTION(aChild->GetParent() == this, "Not one of our kids!");
+  MOZ_RELEASE_ASSERT(aChild->GetParent() == this, "Not one of our kids!");
 #endif
 #endif
 
@@ -1370,7 +1366,7 @@ nsBaseWidget::CleanupRemoteDrawing()
 already_AddRefed<mozilla::gfx::DrawTarget>
 nsBaseWidget::CreateBackBufferDrawTarget(mozilla::gfx::DrawTarget* aScreenTarget,
                                          const LayoutDeviceIntRect& aRect,
-                                         const bool aInitModeClear)
+                                         const LayoutDeviceIntRect& aClearRect)
 {
   MOZ_ASSERT(aScreenTarget);
   gfx::SurfaceFormat format = gfx::SurfaceFormat::B8G8R8A8;
@@ -1386,8 +1382,9 @@ nsBaseWidget::CreateBackBufferDrawTarget(mozilla::gfx::DrawTarget* aScreenTarget
       mLastBackBuffer->GetSize() <= clientSize) {
     target = mLastBackBuffer;
     target->SetTransform(gfx::Matrix());
-    if (aInitModeClear) {
-      target->ClearRect(gfx::Rect(0, 0, size.width, size.height));
+    if (!aClearRect.IsEmpty()) {
+      gfx::IntRect clearRect = aClearRect.ToUnknownRect() - aRect.ToUnknownRect().TopLeft();
+      target->ClearRect(gfx::Rect(clearRect.x, clearRect.y, clearRect.width, clearRect.height));
     }
   } else {
     target = aScreenTarget->CreateSimilarDrawTarget(size, format);
@@ -1875,8 +1872,12 @@ nsBaseWidget::GetRootAccessible()
   nsCOMPtr<nsIAccessibilityService> accService =
     services::GetAccessibilityService();
   if (accService) {
-#ifdef XP_WIN
-    mAccessibilityInUseFlag = true;
+#if defined(XP_WIN) || defined(XP_MACOSX)
+    if (!mAccessibilityInUseFlag) {
+      mAccessibilityInUseFlag = true;
+      uint32_t now = PRTimeToSeconds(PR_Now());
+      Preferences::SetInt(kAccessibilityLastRunDatePref, now);
+    }
 #endif
     return accService->GetRootDocumentAccessible(presShell, nsContentUtils::IsSafeToRunScript());
   }
@@ -3063,7 +3064,7 @@ nsBaseWidget::debug_WantPaintFlashing()
 nsBaseWidget::debug_DumpEvent(FILE *                aFileOut,
                               nsIWidget *           aWidget,
                               WidgetGUIEvent*       aGuiEvent,
-                              const nsAutoCString & aWidgetName,
+                              const char*           aWidgetName,
                               int32_t               aWindowID)
 {
   if (aGuiEvent->mMessage == eMouseMove) {
@@ -3087,7 +3088,7 @@ nsBaseWidget::debug_DumpEvent(FILE *                aFileOut,
           _GetPrintCount(),
           tempString.get(),
           (void *) aWidget,
-          aWidgetName.get(),
+          aWidgetName,
           aWindowID,
           aGuiEvent->refPoint.x,
           aGuiEvent->refPoint.y);
@@ -3097,7 +3098,7 @@ nsBaseWidget::debug_DumpEvent(FILE *                aFileOut,
 nsBaseWidget::debug_DumpPaintEvent(FILE *                aFileOut,
                                    nsIWidget *           aWidget,
                                    const nsIntRegion &   aRegion,
-                                   const nsAutoCString & aWidgetName,
+                                   const char *          aWidgetName,
                                    int32_t               aWindowID)
 {
   NS_ASSERTION(nullptr != aFileOut,"cmon, null output FILE");
@@ -3111,7 +3112,7 @@ nsBaseWidget::debug_DumpPaintEvent(FILE *                aFileOut,
           "%4d PAINT      widget=%p name=%-12s id=0x%-6x bounds-rect=%3d,%-3d %3d,%-3d",
           _GetPrintCount(),
           (void *) aWidget,
-          aWidgetName.get(),
+          aWidgetName,
           aWindowID,
           rect.x, rect.y, rect.width, rect.height
     );
@@ -3123,7 +3124,7 @@ nsBaseWidget::debug_DumpPaintEvent(FILE *                aFileOut,
 nsBaseWidget::debug_DumpInvalidate(FILE* aFileOut,
                                    nsIWidget* aWidget,
                                    const LayoutDeviceIntRect* aRect,
-                                   const nsAutoCString& aWidgetName,
+                                   const char* aWidgetName,
                                    int32_t aWindowID)
 {
   if (!debug_GetCachedBoolPref("nglayout.debug.invalidate_dumping"))
@@ -3136,7 +3137,7 @@ nsBaseWidget::debug_DumpInvalidate(FILE* aFileOut,
           "%4d Invalidate widget=%p name=%-12s id=0x%-6x",
           _GetPrintCount(),
           (void *) aWidget,
-          aWidgetName.get(),
+          aWidgetName,
           aWindowID);
 
   if (aRect) {

@@ -17,6 +17,7 @@
  */
 
 #include "asmjs/WasmIonCompile.h"
+
 #include "asmjs/WasmGenerator.h"
 
 #include "jit/CodeGenerator.h"
@@ -48,6 +49,12 @@ class FunctionCompiler
     typedef Vector<ControlFlowPatch, 0, SystemAllocPolicy> ControlFlowPatchVector;
     typedef Vector<ControlFlowPatchVector, 0, SystemAllocPolicy> ControlFlowPatchsVector;
 
+  public:
+    class Call;
+
+  private:
+    typedef Vector<Call*, 0, SystemAllocPolicy> CallVector;
+
     ModuleGeneratorThreadView& mg_;
     Decoder&                   decoder_;
     const FuncBytes&           func_;
@@ -60,6 +67,8 @@ class FunctionCompiler
     MIRGenerator&              mirGen_;
 
     MBasicBlock*               curBlock_;
+    CallVector                 callStack_;
+    uint32_t                   maxStackArgBytes_;
 
     uint32_t                   loopDepth_;
     uint32_t                   blockDepth_;
@@ -84,6 +93,7 @@ class FunctionCompiler
         info_(mirGen.info()),
         mirGen_(mirGen),
         curBlock_(nullptr),
+        maxStackArgBytes_(0),
         loopDepth_(0),
         blockDepth_(0),
         compileResults_(compileResults)
@@ -153,8 +163,11 @@ class FunctionCompiler
         return true;
     }
 
-    void checkPostconditions()
+    void finish()
     {
+        mirGen().initWasmMaxStackArgBytes(maxStackArgBytes_);
+
+        MOZ_ASSERT(callStack_.empty());
         MOZ_ASSERT(loopDepth_ == 0);
         MOZ_ASSERT(blockDepth_ == 0);
 #ifdef DEBUG
@@ -495,6 +508,15 @@ class FunctionCompiler
         return ins;
     }
 
+    MDefinition* reinterpret(MDefinition* op, MIRType to)
+    {
+        if (inDeadCode())
+            return nullptr;
+        auto* ins = MAsmReinterpret::New(alloc(), op, to);
+        curBlock_->add(ins);
+        return ins;
+    }
+
     template <class T>
     MDefinition* truncate(MDefinition* op, bool isUnsigned)
     {
@@ -565,14 +587,6 @@ class FunctionCompiler
                    "storeSimdHeap can only load from a SIMD view");
         MAsmJSStoreHeap* store = MAsmJSStoreHeap::New(alloc(), base, access, v);
         curBlock_->add(store);
-    }
-
-    void memoryBarrier(MemoryBarrierBits type)
-    {
-        if (inDeadCode())
-            return;
-        MMemoryBarrier* ins = MMemoryBarrier::New(alloc(), type);
-        curBlock_->add(ins);
     }
 
     MDefinition* atomicLoadHeap(MDefinition* base, const MAsmJSHeapAccess& access)
@@ -661,8 +675,8 @@ class FunctionCompiler
         // always ABIStackAlignment-aligned, but don't forget to account for
         // ShadowStackSpace and any other ABI warts.
         ABIArgGenerator abi;
-        if (abi.stackBytesConsumedSoFar() > mirGen_.maxAsmJSStackArgBytes())
-            mirGen_.setAsmJSMaxStackArgBytes(abi.stackBytesConsumedSoFar());
+
+        propagateMaxStackArgBytes(abi.stackBytesConsumedSoFar());
 
         CallSiteDesc callDesc(0, CallSiteDesc::Relative);
         curBlock_->add(MAsmJSInterruptCheck::New(alloc()));
@@ -716,7 +730,6 @@ class FunctionCompiler
     {
         uint32_t lineOrBytecode_;
         ABIArgGenerator abi_;
-        uint32_t prevMaxStackBytes_;
         uint32_t maxChildStackBytes_;
         uint32_t spIncrement_;
         MAsmJSCall::Args regArgs_;
@@ -728,18 +741,17 @@ class FunctionCompiler
       public:
         Call(FunctionCompiler& f, uint32_t lineOrBytecode)
           : lineOrBytecode_(lineOrBytecode),
-            prevMaxStackBytes_(0),
             maxChildStackBytes_(0),
             spIncrement_(0),
             childClobbers_(false)
         { }
     };
 
-    void startCallArgs(Call* call)
+    bool startCallArgs(Call* call)
     {
-        if (inDeadCode())
-            return;
-        call->prevMaxStackBytes_ = mirGen().resetAsmJSMaxStackArgBytes();
+        // Always push calls to maintain the invariant that if we're inDeadCode
+        // in finishCallArgs, we have something to pop.
+        return callStack_.append(call);
     }
 
     bool passArg(MDefinition* argDef, ValType type, Call* call)
@@ -747,43 +759,52 @@ class FunctionCompiler
         if (inDeadCode())
             return true;
 
-        uint32_t childStackBytes = mirGen().resetAsmJSMaxStackArgBytes();
-        call->maxChildStackBytes_ = Max(call->maxChildStackBytes_, childStackBytes);
-        if (childStackBytes > 0 && !call->stackArgs_.empty())
-            call->childClobbers_ = true;
-
         ABIArg arg = call->abi_.next(ToMIRType(type));
-        if (arg.kind() == ABIArg::Stack) {
-            MAsmJSPassStackArg* mir = MAsmJSPassStackArg::New(alloc(), arg.offsetFromArgBase(),
-                                                              argDef);
-            curBlock_->add(mir);
-            if (!call->stackArgs_.append(mir))
-                return false;
-        } else {
-            if (!call->regArgs_.append(MAsmJSCall::Arg(arg.reg(), argDef)))
-                return false;
+        if (arg.kind() != ABIArg::Stack)
+            return call->regArgs_.append(MAsmJSCall::Arg(arg.reg(), argDef));
+
+        auto* mir = MAsmJSPassStackArg::New(alloc(), arg.offsetFromArgBase(), argDef);
+        curBlock_->add(mir);
+        return call->stackArgs_.append(mir);
+    }
+
+    void propagateMaxStackArgBytes(uint32_t stackBytes)
+    {
+        if (callStack_.empty()) {
+            // Outermost call
+            maxStackArgBytes_ = Max(maxStackArgBytes_, stackBytes);
+            return;
         }
-        return true;
+
+        // Non-outermost call
+        Call* outer = callStack_.back();
+        outer->maxChildStackBytes_ = Max(outer->maxChildStackBytes_, stackBytes);
+        if (stackBytes && !outer->stackArgs_.empty())
+            outer->childClobbers_ = true;
     }
 
     void finishCallArgs(Call* call)
     {
-        if (inDeadCode())
+        MOZ_ALWAYS_TRUE(callStack_.popCopy() == call);
+
+        if (inDeadCode()) {
+            propagateMaxStackArgBytes(call->maxChildStackBytes_);
             return;
-        uint32_t parentStackBytes = call->abi_.stackBytesConsumedSoFar();
-        uint32_t newStackBytes;
+        }
+
+        uint32_t stackBytes = call->abi_.stackBytesConsumedSoFar();
+
         if (call->childClobbers_) {
             call->spIncrement_ = AlignBytes(call->maxChildStackBytes_, AsmJSStackAlignment);
-            for (unsigned i = 0; i < call->stackArgs_.length(); i++)
-                call->stackArgs_[i]->incrementOffset(call->spIncrement_);
-            newStackBytes = Max(call->prevMaxStackBytes_,
-                                call->spIncrement_ + parentStackBytes);
+            for (MAsmJSPassStackArg* stackArg : call->stackArgs_)
+                stackArg->incrementOffset(call->spIncrement_);
+            stackBytes += call->spIncrement_;
         } else {
             call->spIncrement_ = 0;
-            newStackBytes = Max(call->prevMaxStackBytes_,
-                                Max(call->maxChildStackBytes_, parentStackBytes));
+            stackBytes = Max(stackBytes, call->maxChildStackBytes_);
         }
-        mirGen_.setAsmJSMaxStackArgBytes(newStackBytes);
+
+        propagateMaxStackArgBytes(stackBytes);
     }
 
   private:
@@ -893,15 +914,14 @@ class FunctionCompiler
         curBlock_ = nullptr;
     }
 
-    bool unreachableTrap()
+    void unreachableTrap()
     {
         if (inDeadCode())
-            return true;
+            return;
 
         auto* ins = MAsmThrowUnreachable::New(alloc());
         curBlock_->end(ins);
         curBlock_ = nullptr;
-        return true;
     }
 
     bool branchAndStartThen(MDefinition* cond, MBasicBlock** thenBlock, MBasicBlock** elseBlock)
@@ -938,46 +958,35 @@ class FunctionCompiler
         return numPushed;
     }
 
-    static void push(MBasicBlock* block, MDefinition* def)
-    {
-        MOZ_ASSERT(!hasPushed(block));
-        block->push(def);
-    }
-
-    static void popAll(BlockVector* blocks)
-    {
-        for (MBasicBlock* block : *blocks)
-            block->pop();
-    }
-
   public:
-    bool addJoinPredecessor(MDefinition* def, BlockVector* blocks)
+    void pushDef(MDefinition* def)
     {
         if (inDeadCode())
-            return true;
+            return;
+        MOZ_ASSERT(!hasPushed(curBlock_));
+        if (def && def->type() != MIRType_None)
+            curBlock_->push(def);
+    }
 
-        // Preserve the invariant that, for every MBasicBlock in 'blocks',
+    template <typename GetBlock>
+    void ensurePushInvariants(const GetBlock& getBlock, size_t numBlocks)
+    {
+        // Preserve the invariant that, for every iterated MBasicBlock,
         // either: every MBasicBlock has a non-void pushed expression OR no
         // MBasicBlock has any pushed expression. This is required by
         // MBasicBlock::addPredecessor.
-        if (def) {
-            if (blocks->empty()) {
-                if (def->type() != MIRType_None)
-                    push(curBlock_, def);
-            } else {
-                if (hasPushed((*blocks)[0])) {
-                    if (def->type() == MIRType_None)
-                        popAll(blocks);
-                    else
-                        push(curBlock_, def);
-                }
-            }
-        } else {
-            if (!blocks->empty() && hasPushed((*blocks)[0]))
-                popAll(blocks);
-        }
+        bool allPushed = true;
 
-        return blocks->append(curBlock_);
+        for (size_t i = 0; allPushed && i < numBlocks; i++)
+            allPushed = hasPushed(getBlock(i));
+
+        if (!allPushed) {
+            for (size_t i = 0; i < numBlocks; i++) {
+                MBasicBlock* block = getBlock(i);
+                if (hasPushed(block))
+                    block->pop();
+            }
+        }
     }
 
     bool joinIf(MBasicBlock* joinBlock, BlockVector* blocks, MDefinition** def)
@@ -995,10 +1004,21 @@ class FunctionCompiler
         mirGraph().moveBlockToEnd(curBlock_);
     }
 
+    bool addJoinPredecessor(MDefinition* def, BlockVector* blocks)
+    {
+        if (inDeadCode())
+            return true;
+        pushDef(def);
+        return blocks->append(curBlock_);
+    }
+
     bool joinIfElse(MDefinition* elseDef, BlockVector* blocks, MDefinition** def)
     {
         if (!addJoinPredecessor(elseDef, blocks))
             return false;
+
+        auto getBlock = [&](size_t i) -> MBasicBlock* { return (*blocks)[i]; };
+        ensurePushInvariants(getBlock, blocks->length());
 
         if (blocks->empty()) {
             *def = nullptr;
@@ -1028,11 +1048,11 @@ class FunctionCompiler
         return true;
     }
 
-    bool finishBlock()
+    bool finishBlock(MDefinition** def)
     {
         MOZ_ASSERT(blockDepth_);
         uint32_t topLabel = --blockDepth_;
-        return bindBranches(topLabel);
+        return bindBranches(topLabel, def);
     }
 
     bool startLoop(MBasicBlock** loopHeader)
@@ -1073,8 +1093,7 @@ class FunctionCompiler
         }
     }
 
-    bool setLoopBackedge(MBasicBlock* loopEntry, MBasicBlock* loopBody, MBasicBlock* backedge,
-                         MDefinition** loopResult)
+    bool setLoopBackedge(MBasicBlock* loopEntry, MBasicBlock* loopBody, MBasicBlock* backedge)
     {
         if (!loopEntry->setBackedgeAsmJS(backedge))
             return false;
@@ -1085,10 +1104,6 @@ class FunctionCompiler
             if (phi->getOperand(0) == phi->getOperand(1))
                 phi->setUnused();
         }
-
-        // The loop result may also be referencing a recycled phi.
-        if (*loopResult && (*loopResult)->isUnused())
-            *loopResult = (*loopResult)->toPhi()->getOperand(0);
 
         // Fix up phis stored in the slots Vector of pending blocks.
         for (ControlFlowPatchVector& patches : blockPatches_) {
@@ -1130,6 +1145,7 @@ class FunctionCompiler
             MOZ_ASSERT(inDeadCode());
             MOZ_ASSERT(afterLabel >= blockPatches_.length() || blockPatches_[afterLabel].empty());
             MOZ_ASSERT(headerLabel >= blockPatches_.length() || blockPatches_[headerLabel].empty());
+            *loopResult = nullptr;
             blockDepth_ -= 2;
             loopDepth_--;
             return true;
@@ -1143,23 +1159,27 @@ class FunctionCompiler
         // TODO (bug 1253544): blocks branching to the top join to a single
         // backedge block. Could they directly be set as backedges of the loop
         // instead?
-        if (!bindBranches(headerLabel))
+        MDefinition* _;
+        if (!bindBranches(headerLabel, &_))
             return false;
 
         MOZ_ASSERT(loopHeader->loopDepth() == loopDepth_);
 
         if (curBlock_) {
             // We're on the loop backedge block, created by bindBranches.
+            if (hasPushed(curBlock_))
+                curBlock_->pop();
+
             MOZ_ASSERT(curBlock_->loopDepth() == loopDepth_);
             curBlock_->end(MGoto::New(alloc(), loopHeader));
-            if (!setLoopBackedge(loopHeader, loopBody, curBlock_, loopResult))
+            if (!setLoopBackedge(loopHeader, loopBody, curBlock_))
                 return false;
         }
 
         curBlock_ = loopBody;
 
         loopDepth_--;
-        if (!bindBranches(afterLabel))
+        if (!bindBranches(afterLabel, loopResult))
             return false;
 
         // If we have not created a new block in bindBranches, we're still on
@@ -1185,7 +1205,7 @@ class FunctionCompiler
         return blockPatches_[absolute].append(ControlFlowPatch(ins, index));
     }
 
-    bool br(uint32_t relativeDepth)
+    bool br(uint32_t relativeDepth, MDefinition* maybeValue)
     {
         if (inDeadCode())
             return true;
@@ -1194,12 +1214,14 @@ class FunctionCompiler
         if (!addControlFlowPatch(jump, relativeDepth, MGoto::TargetIndex))
             return false;
 
+        pushDef(maybeValue);
+
         curBlock_->end(jump);
         curBlock_ = nullptr;
         return true;
     }
 
-    bool brIf(uint32_t relativeDepth, MDefinition* condition)
+    bool brIf(uint32_t relativeDepth, MDefinition* maybeValue, MDefinition* condition)
     {
         if (inDeadCode())
             return true;
@@ -1211,6 +1233,8 @@ class FunctionCompiler
         MTest* test = MTest::NewAsm(alloc(), condition, joinBlock);
         if (!addControlFlowPatch(test, relativeDepth, MTest::TrueBranchIndex))
             return false;
+
+        pushDef(maybeValue);
 
         curBlock_->end(test);
         curBlock_ = joinBlock;
@@ -1234,20 +1258,30 @@ class FunctionCompiler
         if (!addControlFlowPatch(table, defaultDepth, defaultIndex))
             return false;
 
+        typedef HashMap<uint32_t, uint32_t, DefaultHasher<uint32_t>, SystemAllocPolicy>
+            IndexToCaseMap;
+
+        IndexToCaseMap indexToCase;
+        if (!indexToCase.init() || !indexToCase.put(defaultDepth, defaultIndex))
+            return false;
+
         for (size_t i = 0; i < numCases; i++) {
             uint32_t depth = depths[i];
-            if (depth == defaultDepth) {
-                if (!table->addCase(defaultIndex))
-                    return false;
-                continue;
-            }
 
             size_t caseIndex;
-            if (!table->addSuccessor(nullptr, &caseIndex))
-                return false;
+            IndexToCaseMap::AddPtr p = indexToCase.lookupForAdd(depth);
+            if (!p) {
+                if (!table->addSuccessor(nullptr, &caseIndex))
+                    return false;
+                if (!addControlFlowPatch(table, depth, caseIndex))
+                    return false;
+                if (!indexToCase.add(p, depth, caseIndex))
+                    return false;
+            } else {
+                caseIndex = p->value();
+            }
+
             if (!table->addCase(caseIndex))
-                return false;
-            if (!addControlFlowPatch(table, depth, caseIndex))
                 return false;
         }
 
@@ -1320,32 +1354,53 @@ class FunctionCompiler
         return next->addPredecessor(alloc(), prev);
     }
 
-    bool bindBranches(uint32_t absolute)
+    bool bindBranches(uint32_t absolute, MDefinition** def)
     {
-        if (absolute >= blockPatches_.length())
+        if (absolute >= blockPatches_.length() || blockPatches_[absolute].empty()) {
+            *def = !inDeadCode() && hasPushed(curBlock_) ? curBlock_->pop() : nullptr;
             return true;
+        }
 
         ControlFlowPatchVector& patches = blockPatches_[absolute];
-        if (patches.empty())
-            return true;
+
+        auto getBlock = [&](size_t i) -> MBasicBlock* {
+            if (i < patches.length())
+                return patches[i].ins->block();
+            return curBlock_;
+        };
+        ensurePushInvariants(getBlock, patches.length() + !!curBlock_);
 
         MBasicBlock* join = nullptr;
         MControlInstruction* ins = patches[0].ins;
-        if (!newBlock(ins->block(), &join))
+        MBasicBlock* pred = ins->block();
+        if (!newBlock(pred, &join))
             return false;
 
+        pred->mark();
         ins->replaceSuccessor(patches[0].index, join);
 
         for (size_t i = 1; i < patches.length(); i++) {
             ins = patches[i].ins;
-            if (!join->addPredecessor(alloc(), ins->block()))
-                return false;
+
+            pred = ins->block();
+            if (!pred->isMarked()) {
+                if (!join->addPredecessor(alloc(), pred))
+                    return false;
+                pred->mark();
+            }
+
             ins->replaceSuccessor(patches[i].index, join);
         }
+
+        MOZ_ASSERT_IF(curBlock_, !curBlock_->isMarked());
+        for (uint32_t i = 0; i < join->numPredecessors(); i++)
+            join->getPredecessor(i)->unmark();
 
         if (curBlock_ && !goToExistingBlock(curBlock_, join))
             return false;
         curBlock_ = join;
+
+        *def = hasPushed(curBlock_) ? curBlock_->pop() : nullptr;
 
         patches.clear();
         return true;
@@ -1653,7 +1708,8 @@ EmitAtomicsExchange(FunctionCompiler& f, MDefinition** def)
 static bool
 EmitCallArgs(FunctionCompiler& f, const Sig& sig, FunctionCompiler::Call* call)
 {
-    f.startCallArgs(call);
+    if (!f.startCallArgs(call))
+        return false;
     for (ValType argType : sig.args()) {
         MDefinition* arg;
         if (!EmitExpr(f, &arg))
@@ -1724,7 +1780,8 @@ EmitF32MathBuiltinCall(FunctionCompiler& f, uint32_t callOffset, Expr f32, MDefi
     uint32_t lineOrBytecode = f.readCallSiteLineOrBytecode(callOffset);
 
     FunctionCompiler::Call call(f, lineOrBytecode);
-    f.startCallArgs(&call);
+    if (!f.startCallArgs(&call))
+        return false;
 
     MDefinition* firstArg;
     if (!EmitExpr(f, &firstArg) || !f.passArg(firstArg, ValType::F32, &call))
@@ -1742,7 +1799,8 @@ EmitF64MathBuiltinCall(FunctionCompiler& f, uint32_t callOffset, Expr f64, MDefi
     uint32_t lineOrBytecode = f.readCallSiteLineOrBytecode(callOffset);
 
     FunctionCompiler::Call call(f, lineOrBytecode);
-    f.startCallArgs(&call);
+    if (!f.startCallArgs(&call))
+        return false;
 
     MDefinition* firstArg;
     if (!EmitExpr(f, &firstArg) || !f.passArg(firstArg, ValType::F64, &call))
@@ -2187,7 +2245,15 @@ EmitSelect(FunctionCompiler& f, MDefinition** def)
     if (!EmitExpr(f, &condExpr))
         return false;
 
-    *def = f.select(trueExpr, falseExpr, condExpr);
+    if (trueExpr && falseExpr &&
+        trueExpr->type() == falseExpr->type() &&
+        trueExpr->type() != MIRType_None)
+    {
+        *def = f.select(trueExpr, falseExpr, condExpr);
+    } else {
+        *def = nullptr;
+    }
+
     return true;
 }
 
@@ -2419,6 +2485,16 @@ EmitConvertI64ToFloatingPoint(FunctionCompiler& f, ValType type, bool isUnsigned
 }
 
 static bool
+EmitReinterpret(FunctionCompiler& f, ValType to, MDefinition** def)
+{
+    MDefinition* in;
+    if (!EmitExpr(f, &in))
+        return false;
+    *def = f.reinterpret(in, ToMIRType(to));
+    return true;
+}
+
+static bool
 EmitSimdOp(FunctionCompiler& f, ValType type, SimdOperation op, SimdSign sign, MDefinition** def)
 {
     switch (op) {
@@ -2522,10 +2598,10 @@ EmitLoop(FunctionCompiler& f, MDefinition** def)
             if (!EmitExpr(f, &_))
                 return false;
         }
-        if (!EmitExpr(f, def))
+        MDefinition* last = nullptr;
+        if (!EmitExpr(f, &last))
             return false;
-    } else {
-        *def = nullptr;
+        f.pushDef(last);
     }
 
     return f.closeLoop(loopHeader, def);
@@ -2600,7 +2676,7 @@ EmitBrTable(FunctionCompiler& f, MDefinition** def)
 
     // Empty table
     if (!numCases)
-        return f.br(defaultDepth);
+        return f.br(defaultDepth, nullptr);
 
     return f.brTable(index, defaultDepth, depths);
 }
@@ -2630,7 +2706,8 @@ static bool
 EmitUnreachable(FunctionCompiler& f, MDefinition** def)
 {
     *def = nullptr;
-    return f.unreachableTrap();
+    f.unreachableTrap();
+    return true;
 }
 
 static bool
@@ -2640,16 +2717,16 @@ EmitBlock(FunctionCompiler& f, MDefinition** def)
         return false;
     if (uint32_t numStmts = f.readVarU32()) {
         for (uint32_t i = 0; i < numStmts - 1; i++) {
-            MDefinition* _;
+            MDefinition* _ = nullptr;
             if (!EmitExpr(f, &_))
                 return false;
         }
-        if (!EmitExpr(f, def))
+        MDefinition* last = nullptr;
+        if (!EmitExpr(f, &last))
             return false;
-    } else {
-        *def = nullptr;
+        f.pushDef(last);
     }
-    return f.finishBlock();
+    return f.finishBlock(def);
 }
 
 static bool
@@ -2659,17 +2736,19 @@ EmitBranch(FunctionCompiler& f, Expr op, MDefinition** def)
 
     uint32_t relativeDepth = f.readVarU32();
 
-    MOZ_ALWAYS_TRUE(f.readExpr() == Expr::Nop);
+    MDefinition* maybeValue = nullptr;
+    if (!EmitExpr(f, &maybeValue))
+        return false;
 
     if (op == Expr::Br) {
-        if (!f.br(relativeDepth))
+        if (!f.br(relativeDepth, maybeValue))
             return false;
     } else {
         MDefinition* condition;
         if (!EmitExpr(f, &condition))
             return false;
 
-        if (!f.brIf(relativeDepth, condition))
+        if (!f.brIf(relativeDepth, maybeValue, condition))
             return false;
     }
 
@@ -2833,6 +2912,8 @@ EmitExpr(FunctionCompiler& f, MDefinition** def)
       case Expr::F64Gt:
       case Expr::F64Ge:
         return EmitComparison(f, op, def);
+      case Expr::I32ReinterpretF32:
+        return EmitReinterpret(f, ValType::I32, def);
 
       // I64
       case Expr::I64Const:
@@ -2870,6 +2951,8 @@ EmitExpr(FunctionCompiler& f, MDefinition** def)
       case Expr::I64RemS:
       case Expr::I64RemU:
         return EmitDivOrMod(f, ValType::I64, IsDiv(false), IsUnsigned(op == Expr::I64RemU), def);
+      case Expr::I64ReinterpretF64:
+        return EmitReinterpret(f, ValType::I64, def);
 
       // F32
       case Expr::F32Const:
@@ -2905,12 +2988,15 @@ EmitExpr(FunctionCompiler& f, MDefinition** def)
       case Expr::F32ConvertUI64:
         return EmitConvertI64ToFloatingPoint(f, ValType::F32,
                                              IsUnsigned(op == Expr::F32ConvertUI64), def);
+
       case Expr::F32Load:
         return EmitLoad(f, Scalar::Float32, def);
       case Expr::F32Store:
         return EmitStore(f, Scalar::Float32, def);
       case Expr::F32StoreF64:
         return EmitStoreWithCoercion(f, Scalar::Float32, Scalar::Float64, def);
+      case Expr::F32ReinterpretI32:
+        return EmitReinterpret(f, ValType::F32, def);
 
       // F64
       case Expr::F64Const:
@@ -2964,6 +3050,8 @@ EmitExpr(FunctionCompiler& f, MDefinition** def)
         return EmitStore(f, Scalar::Float64, def);
       case Expr::F64StoreF32:
         return EmitStoreWithCoercion(f, Scalar::Float64, Scalar::Float32, def);
+      case Expr::F64ReinterpretI64:
+        return EmitReinterpret(f, ValType::F64, def);
 
       // SIMD
 #define CASE(TYPE, OP, SIGN)                                                    \
@@ -3010,10 +3098,6 @@ EmitExpr(FunctionCompiler& f, MDefinition** def)
                           SimdSign::Unsigned, def);
 
       // Atomics
-      case Expr::AtomicsFence:
-        *def = nullptr;
-        f.memoryBarrier(MembarFull);
-        return true;
       case Expr::I32AtomicsCompareExchange:
         return EmitAtomicsCompareExchange(f, def);
       case Expr::I32AtomicsExchange:
@@ -3032,10 +3116,6 @@ EmitExpr(FunctionCompiler& f, MDefinition** def)
       case Expr::F64CopySign:
       case Expr::F64Nearest:
       case Expr::F64Trunc:
-      case Expr::I64ReinterpretF64:
-      case Expr::F64ReinterpretI64:
-      case Expr::I32ReinterpretF32:
-      case Expr::F32ReinterpretI32:
       case Expr::I64Load8S:
       case Expr::I64Load16S:
       case Expr::I64Load32S:
@@ -3111,7 +3191,7 @@ wasm::IonCompileFunction(IonCompileTask* task)
         else
             f.returnExpr(last);
 
-        f.checkPostconditions();
+        f.finish();
     }
 
     // Compile MIR graph

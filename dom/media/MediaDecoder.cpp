@@ -556,6 +556,8 @@ MediaDecoder::MediaDecoder(MediaDecoderOwner* aOwner)
                       "MediaDecoder::mLogicallySeeking (Canonical)")
   , mSameOriginMedia(AbstractThread::MainThread(), false,
                      "MediaDecoder::mSameOriginMedia (Canonical)")
+  , mMediaPrincipalHandle(AbstractThread::MainThread(), PRINCIPAL_HANDLE_NONE,
+                          "MediaDecoder::mMediaPrincipalHandle (Canonical)")
   , mPlaybackBytesPerSecond(AbstractThread::MainThread(), 0.0,
                             "MediaDecoder::mPlaybackBytesPerSecond (Canonical)")
   , mPlaybackRateReliable(AbstractThread::MainThread(), true,
@@ -734,7 +736,7 @@ MediaDecoder::InitializeStateMachine()
   MOZ_ASSERT(NS_IsMainThread());
   NS_ASSERTION(mDecoderStateMachine, "Cannot initialize null state machine!");
 
-  nsresult rv = mDecoderStateMachine->Init();
+  nsresult rv = mDecoderStateMachine->Init(this);
   NS_ENSURE_SUCCESS(rv, rv);
 
   // If some parameters got set before the state machine got created,
@@ -1195,6 +1197,8 @@ MediaDecoder::NotifyPrincipalChanged()
 {
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(!mShuttingDown);
+  nsCOMPtr<nsIPrincipal> newPrincipal = GetCurrentPrincipal();
+  mMediaPrincipalHandle = MakePrincipalHandle(newPrincipal);
   mOwner->NotifyDecoderPrincipalChanged();
 }
 

@@ -35,6 +35,7 @@
 #include "vm/ArrayBufferObject.h"
 #include "vm/GlobalObject.h"
 #include "vm/Interpreter.h"
+#include "vm/SelfHosting.h"
 #include "vm/TypedArrayCommon.h"
 #include "vm/WrapperObject.h"
 
@@ -635,12 +636,13 @@ class TypedArrayObjectTemplate : public TypedArrayObject
     }
 
     static bool
-    maybeCreateArrayBuffer(JSContext* cx, uint32_t nelements, MutableHandle<ArrayBufferObject*> buffer)
+    maybeCreateArrayBuffer(JSContext* cx, uint32_t nelements, HandleObject nonDefaultProto,
+                           MutableHandle<ArrayBufferObject*> buffer)
     {
         static_assert(INLINE_BUFFER_LIMIT % sizeof(NativeType) == 0,
                       "ArrayBuffer inline storage shouldn't waste any space");
 
-        if (nelements <= INLINE_BUFFER_LIMIT / sizeof(NativeType)) {
+        if (!nonDefaultProto && nelements <= INLINE_BUFFER_LIMIT / sizeof(NativeType)) {
             // The array's data can be inline, and the buffer created lazily.
             return true;
         }
@@ -651,7 +653,8 @@ class TypedArrayObjectTemplate : public TypedArrayObject
             return false;
         }
 
-        ArrayBufferObject* buf = ArrayBufferObject::create(cx, nelements * sizeof(NativeType));
+        ArrayBufferObject* buf = ArrayBufferObject::create(cx, nelements * sizeof(NativeType),
+                                                           nonDefaultProto);
         if (!buf)
             return false;
 
@@ -667,14 +670,29 @@ class TypedArrayObjectTemplate : public TypedArrayObject
             return nullptr;
 
         Rooted<ArrayBufferObject*> buffer(cx);
-        if (!maybeCreateArrayBuffer(cx, nelements, &buffer))
+        if (!maybeCreateArrayBuffer(cx, nelements, nullptr, &buffer))
             return nullptr;
 
         return makeInstance(cx, buffer, 0, nelements, proto);
     }
 
+    static bool
+    AllocateArrayBuffer(JSContext* cx, HandleValue ctor, uint32_t elementLength,
+                        MutableHandle<ArrayBufferObject*> buffer);
+
+    static bool
+    CloneArrayBufferNoCopy(JSContext* cx, Handle<ArrayBufferObjectMaybeShared*> srcBuffer,
+                           bool isWrapped, uint32_t srcByteOffset,
+                           MutableHandle<ArrayBufferObject*> buffer);
+
     static JSObject*
     fromArray(JSContext* cx, HandleObject other, HandleObject newTarget = nullptr);
+
+    static JSObject*
+    fromTypedArray(JSContext* cx, HandleObject other, bool isWrapped, HandleObject newTarget);
+
+    static JSObject*
+    fromObject(JSContext* cx, HandleObject other, HandleObject newTarget);
 
     static const NativeType
     getIndex(JSObject* obj, uint32_t index)
@@ -712,6 +730,139 @@ struct TypedArrayObject::OfType
     typedef TypedArrayObjectTemplate<T> Type;
 };
 
+// ES 2016 draft Mar 25, 2016 24.1.1.1.
+template<typename T>
+/* static */ bool
+TypedArrayObjectTemplate<T>::AllocateArrayBuffer(JSContext* cx, HandleValue ctor,
+                                                 uint32_t elementLength,
+                                                 MutableHandle<ArrayBufferObject*> buffer)
+{
+    // ES 2016 draft Mar 25, 2016 24.1.1.1 step 1 (partially).
+    // ES 2016 draft Mar 25, 2016 9.1.14 steps 1-2.
+    MOZ_ASSERT(ctor.isObject());
+    RootedObject proto(cx);
+    RootedObject ctorObj(cx, &ctor.toObject());
+    if (!GetPrototypeFromConstructor(cx, ctorObj, &proto))
+        return false;
+    JSObject* arrayBufferProto = GlobalObject::getOrCreateArrayBufferPrototype(cx, cx->global());
+    if (!arrayBufferProto)
+        return false;
+    if (proto == arrayBufferProto)
+        proto = nullptr;
+
+    // ES 2016 draft Mar 25, 2016 24.1.1.1 steps 1 (remaining part), 2-6.
+    if (!maybeCreateArrayBuffer(cx, elementLength, proto, buffer))
+        return false;
+
+    return true;
+}
+
+static bool
+IsArrayBufferConstructor(const Value& v)
+{
+    return v.isObject() &&
+           v.toObject().is<JSFunction>() &&
+           v.toObject().as<JSFunction>().isNative() &&
+           v.toObject().as<JSFunction>().native() == ArrayBufferObject::class_constructor;
+}
+
+static bool
+IsArrayBufferSpecies(JSContext* cx, HandleObject origBuffer)
+{
+    RootedValue ctor(cx);
+    if (!GetPropertyPure(cx, origBuffer, NameToId(cx->names().constructor), ctor.address()))
+        return false;
+
+    if (!IsArrayBufferConstructor(ctor))
+        return false;
+
+    RootedObject ctorObj(cx, &ctor.toObject());
+    RootedId speciesId(cx, SYMBOL_TO_JSID(cx->wellKnownSymbols().species));
+    JSFunction* getter;
+    if (!GetGetterPure(cx, ctorObj, speciesId, &getter))
+        return false;
+
+    return IsSelfHostedFunctionWithName(getter, cx->names().ArrayBufferSpecies);
+}
+
+static bool
+GetSpeciesConstructor(JSContext* cx, HandleObject obj, bool isWrapped, MutableHandleValue ctor)
+{
+    if (!isWrapped) {
+        if (!GlobalObject::ensureConstructor(cx, cx->global(), JSProto_ArrayBuffer))
+            return false;
+        RootedValue defaultCtor(cx, cx->global()->getConstructor(JSProto_ArrayBuffer));
+        if (IsArrayBufferSpecies(cx, obj)) {
+            ctor.set(defaultCtor);
+            return true;
+        }
+        if (!SpeciesConstructor(cx, obj, defaultCtor, ctor))
+            return false;
+
+        return true;
+    }
+
+    {
+        JSAutoCompartment ac(cx, obj);
+        if (!GlobalObject::ensureConstructor(cx, cx->global(), JSProto_ArrayBuffer))
+            return false;
+        RootedValue defaultCtor(cx, cx->global()->getConstructor(JSProto_ArrayBuffer));
+        if (!SpeciesConstructor(cx, obj, defaultCtor, ctor))
+            return false;
+    }
+
+    return JS_WrapValue(cx, ctor);
+}
+
+// ES 2016 draft Mar 25, 2016 24.1.1.4.
+template<typename T>
+/* static */ bool
+TypedArrayObjectTemplate<T>::CloneArrayBufferNoCopy(JSContext* cx,
+                                                    Handle<ArrayBufferObjectMaybeShared*> srcBuffer,
+                                                    bool isWrapped, uint32_t srcByteOffset,
+                                                    MutableHandle<ArrayBufferObject*> buffer)
+{
+    // Step 1 (skipped).
+
+    // Step 2.a.
+    RootedValue cloneCtor(cx);
+    if (!GetSpeciesConstructor(cx, srcBuffer, isWrapped, &cloneCtor))
+        return false;
+
+    // Step 2.b.
+    if (srcBuffer->isDetached()) {
+        JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_TYPED_ARRAY_DETACHED);
+        return false;
+    }
+
+    // Step 3 (skipped).
+
+    // Steps 4-5.
+    uint32_t srcLength = srcBuffer->byteLength();
+    MOZ_ASSERT(srcByteOffset <= srcLength);
+
+    // Step 6.
+    uint32_t cloneLength = srcLength - srcByteOffset;
+
+    // Step 7 (skipped).
+
+    // Steps 8.
+    MOZ_ASSERT(cloneLength % BYTES_PER_ELEMENT == 0);
+    if (!AllocateArrayBuffer(cx, cloneCtor, cloneLength / BYTES_PER_ELEMENT, buffer))
+        return false;
+
+    // Step 9.
+    if (srcBuffer->isDetached()) {
+        JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_TYPED_ARRAY_DETACHED);
+        return false;
+    }
+
+    // Steps 10-11 (done in caller).
+
+    // Step 12.
+    return true;
+}
+
 template<typename T>
 /* static */ JSObject*
 TypedArrayObjectTemplate<T>::fromArray(JSContext* cx, HandleObject other,
@@ -719,31 +870,135 @@ TypedArrayObjectTemplate<T>::fromArray(JSContext* cx, HandleObject other,
 {
     // Allow nullptr newTarget for FriendAPI methods, which don't care about
     // subclassing.
+    if (other->is<TypedArrayObject>())
+        return fromTypedArray(cx, other, /* wrapped= */ false, newTarget);
+
+    if (other->is<WrapperObject>() && UncheckedUnwrap(other)->is<TypedArrayObject>())
+        return fromTypedArray(cx, other, /* wrapped= */ true, newTarget);
+
+    return fromObject(cx, other, newTarget);
+}
+
+// ES 2016 draft Mar 25, 2016 22.2.4.3.
+template<typename T>
+/* static */ JSObject*
+TypedArrayObjectTemplate<T>::fromTypedArray(JSContext* cx, HandleObject other, bool isWrapped,
+                                            HandleObject newTarget)
+{
+    // Step 1.
+    MOZ_ASSERT_IF(!isWrapped, other->is<TypedArrayObject>());
+    MOZ_ASSERT_IF(isWrapped,
+                  other->is<WrapperObject>() &&
+                  UncheckedUnwrap(other)->is<TypedArrayObject>());
+
+    // Step 2 (done in caller).
+
+    // Step 4 (partially).
     RootedObject proto(cx);
+    if (!GetPrototypeForInstance(cx, newTarget, &proto))
+        return nullptr;
 
-    uint32_t len;
-    if (other->is<TypedArrayObject>()) {
-        if (!GetPrototypeForInstance(cx, newTarget, &proto))
+    // Step 5.
+    Rooted<TypedArrayObject*> srcArray(cx);
+    if (!isWrapped) {
+        srcArray = &other->as<TypedArrayObject>();
+        if (!TypedArrayObject::ensureHasBuffer(cx, srcArray))
             return nullptr;
-
-        if (other->as<TypedArrayObject>().hasDetachedBuffer()) {
-            JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_TYPED_ARRAY_DETACHED);
+    } else {
+        RootedObject unwrapped(cx, CheckedUnwrap(other));
+        if (!unwrapped) {
+            JS_ReportError(cx, "Permission denied to access object");
             return nullptr;
         }
-        len = other->as<TypedArrayObject>().length();
-    } else {
-        if (!GetLengthProperty(cx, other, &len))
-            return nullptr;
-        if (!GetPrototypeForInstance(cx, newTarget, &proto))
+
+        JSAutoCompartment ac(cx, unwrapped);
+
+        srcArray = &unwrapped->as<TypedArrayObject>();
+        if (!TypedArrayObject::ensureHasBuffer(cx, srcArray))
             return nullptr;
     }
 
+    // Step 6.
+    Rooted<ArrayBufferObjectMaybeShared*> srcData(cx, srcArray->bufferEither());
+
+    // Step 7.
+    if (srcData->isDetached()) {
+        JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_TYPED_ARRAY_DETACHED);
+        return nullptr;
+    }
+
+    // Steps 10.
+    uint32_t elementLength = srcArray->length();
+
+    // Steps 11-12.
+    Scalar::Type srcType = srcArray->type();
+
+    // Step 13 (skipped).
+
+    // Step 14.
+    uint32_t srcByteOffset = srcArray->byteOffset();
+
+    // Steps 15-16 (skipped).
+    // Our AllocateArrayBuffer receives elementLength instead of byteLength.
+
+    // Steps 8-9, 17.
     Rooted<ArrayBufferObject*> buffer(cx);
-    if (!maybeCreateArrayBuffer(cx, len, &buffer))
+    if (ArrayTypeID() == srcType) {
+        // Step 17.a.
+        if (!CloneArrayBufferNoCopy(cx, srcData, isWrapped, srcByteOffset, &buffer))
+            return nullptr;
+    } else {
+        // Step 18.a.
+        RootedValue bufferCtor(cx);
+        if (!GetSpeciesConstructor(cx, srcData, isWrapped, &bufferCtor))
+            return nullptr;
+
+        // Step 18.b.
+        if (!AllocateArrayBuffer(cx, bufferCtor, elementLength, &buffer))
+            return nullptr;
+
+        // Step 18.c.
+        if (srcArray->hasDetachedBuffer()) {
+            JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_TYPED_ARRAY_DETACHED);
+            return nullptr;
+        }
+    }
+
+    // Steps 3, 4 (remaining part), 19-22.
+    Rooted<TypedArrayObject*> obj(cx, makeInstance(cx, buffer, 0, elementLength, proto));
+    if (!obj)
+        return nullptr;
+
+    // Step 18.d-g or 24.1.1.4 step 11.
+    if (!TypedArrayMethods<TypedArrayObject>::setFromTypedArray(cx, obj, srcArray))
+        return nullptr;
+
+    // Step 23.
+    return obj;
+}
+
+// FIXME: This is not compatible with TypedArrayFrom in the spec
+// (ES 2016 draft Mar 25, 2016 22.2.4.4 and 22.2.2.1.1)
+// We should handle iterator protocol (bug 1232266).
+template<typename T>
+/* static */ JSObject*
+TypedArrayObjectTemplate<T>::fromObject(JSContext* cx, HandleObject other, HandleObject newTarget)
+{
+    RootedObject proto(cx);
+    Rooted<ArrayBufferObject*> buffer(cx);
+    uint32_t len;
+    if (!GetLengthProperty(cx, other, &len))
+        return nullptr;
+    if (!GetPrototypeForInstance(cx, newTarget, &proto))
+        return nullptr;
+    if (!maybeCreateArrayBuffer(cx, len, nullptr, &buffer))
         return nullptr;
 
     Rooted<TypedArrayObject*> obj(cx, makeInstance(cx, buffer, 0, len, proto));
-    if (!obj || !TypedArrayMethods<TypedArrayObject>::setFromArrayLike(cx, obj, other, len))
+    if (!obj)
+        return nullptr;
+
+    if (!TypedArrayMethods<TypedArrayObject>::setFromNonTypedArray(cx, obj, other, len))
         return nullptr;
     return obj;
 }
@@ -861,6 +1116,24 @@ TypedArrayObject::staticFunctions[] = {
     JS_FS_END
 };
 
+/* static */ const JSPropertySpec
+TypedArrayObject::staticProperties[] = {
+    JS_SELF_HOSTED_SYM_GET(species, "TypedArraySpecies", 0),
+    JS_PS_END
+};
+
+static const ClassSpec
+TypedArrayObjectSharedTypedArrayPrototypeClassSpec = {
+    GenericCreateConstructor<TypedArrayConstructor, 3, gc::AllocKind::FUNCTION>,
+    GenericCreatePrototype,
+    TypedArrayObject::staticFunctions,
+    TypedArrayObject::staticProperties,
+    TypedArrayObject::protoFunctions,
+    TypedArrayObject::protoAccessors,
+    nullptr,
+    ClassSpec::DontDefineConstructor
+};
+
 /* static */ const Class
 TypedArrayObject::sharedTypedArrayPrototypeClass = {
     // Actually ({}).toString.call(%TypedArray%.prototype) should throw,
@@ -871,28 +1144,8 @@ TypedArrayObject::sharedTypedArrayPrototypeClass = {
     // until we implement @@toStringTag.
     "???",
     JSCLASS_HAS_CACHED_PROTO(JSProto_TypedArray),
-    nullptr,                /* addProperty */
-    nullptr,                /* delProperty */
-    nullptr,                /* getProperty */
-    nullptr,                /* setProperty */
-    nullptr,                /* enumerate */
-    nullptr,                /* resolve */
-    nullptr,                /* mayResolve */
-    nullptr,                /* finalize */
-    nullptr,                /* call */
-    nullptr,                /* hasInstance */
-    nullptr,                /* construct */
-    nullptr,                /* trace */
-    {
-        GenericCreateConstructor<TypedArrayConstructor, 3, gc::AllocKind::FUNCTION>,
-        GenericCreatePrototype,
-        TypedArrayObject::staticFunctions,
-        nullptr,
-        TypedArrayObject::protoFunctions,
-        TypedArrayObject::protoAccessors,
-        nullptr,
-        ClassSpec::DontDefineConstructor
-    }
+    JS_NULL_CLASS_OPS,
+    &TypedArrayObjectSharedTypedArrayPrototypeClassSpec
 };
 
 template<typename T>
@@ -1905,50 +2158,90 @@ IMPL_TYPED_ARRAY_COMBINED_UNWRAPPERS(Uint32, uint32_t, uint32_t)
 IMPL_TYPED_ARRAY_COMBINED_UNWRAPPERS(Float32, float, float)
 IMPL_TYPED_ARRAY_COMBINED_UNWRAPPERS(Float64, double, double)
 
-#define TYPED_ARRAY_CLASS_SPEC(_typedArray)                                    \
+static const ClassOps TypedArrayClassOps = {
+    nullptr,                 /* addProperty */
+    nullptr,                 /* delProperty */
+    nullptr,                 /* getProperty */
+    nullptr,                 /* setProperty */
+    nullptr,                 /* enumerate   */
+    nullptr,                 /* resolve     */
+    nullptr,                 /* mayResolve  */
+    nullptr,                 /* finalize    */
+    nullptr,                 /* call        */
+    nullptr,                 /* hasInstance */
+    nullptr,                 /* construct   */
+    TypedArrayObject::trace, /* trace  */
+};
+
+#define IMPL_TYPED_ARRAY_CLASS_SPEC(_type)                                     \
 {                                                                              \
-    _typedArray::createConstructor,                                            \
-    _typedArray::createPrototype,                                              \
+    _type##Array::createConstructor,                                           \
+    _type##Array::createPrototype,                                             \
     nullptr,                                                                   \
     nullptr,                                                                   \
     nullptr,                                                                   \
     nullptr,                                                                   \
-    _typedArray::finishClassInit,                                              \
+    _type##Array::finishClassInit,                                             \
     JSProto_TypedArray                                                         \
 }
 
-#define IMPL_TYPED_ARRAY_CLASS(_typedArray)                                    \
+static const ClassSpec TypedArrayObjectClassSpecs[Scalar::MaxTypedArrayViewType] = {
+    IMPL_TYPED_ARRAY_CLASS_SPEC(Int8),
+    IMPL_TYPED_ARRAY_CLASS_SPEC(Uint8),
+    IMPL_TYPED_ARRAY_CLASS_SPEC(Int16),
+    IMPL_TYPED_ARRAY_CLASS_SPEC(Uint16),
+    IMPL_TYPED_ARRAY_CLASS_SPEC(Int32),
+    IMPL_TYPED_ARRAY_CLASS_SPEC(Uint32),
+    IMPL_TYPED_ARRAY_CLASS_SPEC(Float32),
+    IMPL_TYPED_ARRAY_CLASS_SPEC(Float64),
+    IMPL_TYPED_ARRAY_CLASS_SPEC(Uint8Clamped)
+};
+
+#define IMPL_TYPED_ARRAY_CLASS(_type)                                          \
 {                                                                              \
-    #_typedArray,                                                              \
+    #_type "Array",                                                            \
     JSCLASS_HAS_RESERVED_SLOTS(TypedArrayObject::RESERVED_SLOTS) |             \
     JSCLASS_HAS_PRIVATE |                                                      \
-    JSCLASS_HAS_CACHED_PROTO(JSProto_##_typedArray) |                          \
-    JSCLASS_DELAY_METADATA_CALLBACK,                                           \
-    nullptr,                 /* addProperty */                                 \
-    nullptr,                 /* delProperty */                                 \
-    nullptr,                 /* getProperty */                                 \
-    nullptr,                 /* setProperty */                                 \
-    nullptr,                 /* enumerate   */                                 \
-    nullptr,                 /* resolve     */                                 \
-    nullptr,                 /* mayResolve  */                                 \
-    nullptr,                 /* finalize    */                                 \
-    nullptr,                 /* call        */                                 \
-    nullptr,                 /* hasInstance */                                 \
-    nullptr,                 /* construct   */                                 \
-    TypedArrayObject::trace, /* trace  */                                      \
-    TYPED_ARRAY_CLASS_SPEC(_typedArray)                                        \
+    JSCLASS_HAS_CACHED_PROTO(JSProto_##_type##Array) |                         \
+    JSCLASS_DELAY_METADATA_BUILDER,                                            \
+    &TypedArrayClassOps,                                                       \
+    &TypedArrayObjectClassSpecs[Scalar::Type::_type]                           \
 }
 
 const Class TypedArrayObject::classes[Scalar::MaxTypedArrayViewType] = {
-    IMPL_TYPED_ARRAY_CLASS(Int8Array),
-    IMPL_TYPED_ARRAY_CLASS(Uint8Array),
-    IMPL_TYPED_ARRAY_CLASS(Int16Array),
-    IMPL_TYPED_ARRAY_CLASS(Uint16Array),
-    IMPL_TYPED_ARRAY_CLASS(Int32Array),
-    IMPL_TYPED_ARRAY_CLASS(Uint32Array),
-    IMPL_TYPED_ARRAY_CLASS(Float32Array),
-    IMPL_TYPED_ARRAY_CLASS(Float64Array),
-    IMPL_TYPED_ARRAY_CLASS(Uint8ClampedArray)
+    IMPL_TYPED_ARRAY_CLASS(Int8),
+    IMPL_TYPED_ARRAY_CLASS(Uint8),
+    IMPL_TYPED_ARRAY_CLASS(Int16),
+    IMPL_TYPED_ARRAY_CLASS(Uint16),
+    IMPL_TYPED_ARRAY_CLASS(Int32),
+    IMPL_TYPED_ARRAY_CLASS(Uint32),
+    IMPL_TYPED_ARRAY_CLASS(Float32),
+    IMPL_TYPED_ARRAY_CLASS(Float64),
+    IMPL_TYPED_ARRAY_CLASS(Uint8Clamped)
+};
+
+#define IMPL_TYPED_ARRAY_PROTO_CLASS_SPEC(_type) \
+{ \
+    DELEGATED_CLASSSPEC(TypedArrayObject::classes[Scalar::Type::_type].spec), \
+    nullptr, \
+    nullptr, \
+    nullptr, \
+    nullptr, \
+    nullptr, \
+    nullptr, \
+    JSProto_TypedArray | ClassSpec::IsDelegated \
+}
+
+static const ClassSpec TypedArrayObjectProtoClassSpecs[Scalar::MaxTypedArrayViewType] = {
+    IMPL_TYPED_ARRAY_PROTO_CLASS_SPEC(Int8),
+    IMPL_TYPED_ARRAY_PROTO_CLASS_SPEC(Uint8),
+    IMPL_TYPED_ARRAY_PROTO_CLASS_SPEC(Int16),
+    IMPL_TYPED_ARRAY_PROTO_CLASS_SPEC(Uint16),
+    IMPL_TYPED_ARRAY_PROTO_CLASS_SPEC(Int32),
+    IMPL_TYPED_ARRAY_PROTO_CLASS_SPEC(Uint32),
+    IMPL_TYPED_ARRAY_PROTO_CLASS_SPEC(Float32),
+    IMPL_TYPED_ARRAY_PROTO_CLASS_SPEC(Float64),
+    IMPL_TYPED_ARRAY_PROTO_CLASS_SPEC(Uint8Clamped)
 };
 
 // The various typed array prototypes are supposed to 1) be normal objects,
@@ -1958,7 +2251,7 @@ const Class TypedArrayObject::classes[Scalar::MaxTypedArrayViewType] = {
 // prototype's class have the relevant typed array's cached JSProtoKey in them.
 // Thus we need one class with cached prototype per kind of typed array, with a
 // delegated ClassSpec.
-#define IMPL_TYPED_ARRAY_PROTO_CLASS(typedArray, i) \
+#define IMPL_TYPED_ARRAY_PROTO_CLASS(_type) \
 { \
     /*
      * Actually ({}).toString.call(Uint8Array.prototype) should throw, because
@@ -1967,42 +2260,22 @@ const Class TypedArrayObject::classes[Scalar::MaxTypedArrayViewType] = {
      * above), but it's what we've always done, so keep doing it till we
      * implement @@toStringTag or ES6 changes.
      */ \
-    #typedArray "Prototype", \
-    JSCLASS_HAS_CACHED_PROTO(JSProto_##typedArray), \
-    nullptr, /* addProperty */ \
-    nullptr, /* delProperty */ \
-    nullptr, /* getProperty */ \
-    nullptr, /* setProperty */ \
-    nullptr, /* enumerate */ \
-    nullptr, /* resolve */ \
-    nullptr, /* mayResolve */ \
-    nullptr, /* finalize */ \
-    nullptr, /* call */ \
-    nullptr, /* hasInstance */ \
-    nullptr, /* construct */ \
-    nullptr, /* trace  */ \
-    { \
-        DELEGATED_CLASSSPEC(&TypedArrayObject::classes[i].spec), \
-        nullptr, \
-        nullptr, \
-        nullptr, \
-        nullptr, \
-        nullptr, \
-        nullptr, \
-        JSProto_TypedArray | ClassSpec::IsDelegated \
-    } \
+    #_type "ArrayPrototype", \
+    JSCLASS_HAS_CACHED_PROTO(JSProto_##_type##Array), \
+    JS_NULL_CLASS_OPS, \
+    &TypedArrayObjectProtoClassSpecs[Scalar::Type::_type] \
 }
 
 const Class TypedArrayObject::protoClasses[Scalar::MaxTypedArrayViewType] = {
-    IMPL_TYPED_ARRAY_PROTO_CLASS(Int8Array, 0),
-    IMPL_TYPED_ARRAY_PROTO_CLASS(Uint8Array, 1),
-    IMPL_TYPED_ARRAY_PROTO_CLASS(Int16Array, 2),
-    IMPL_TYPED_ARRAY_PROTO_CLASS(Uint16Array, 3),
-    IMPL_TYPED_ARRAY_PROTO_CLASS(Int32Array, 4),
-    IMPL_TYPED_ARRAY_PROTO_CLASS(Uint32Array, 5),
-    IMPL_TYPED_ARRAY_PROTO_CLASS(Float32Array, 6),
-    IMPL_TYPED_ARRAY_PROTO_CLASS(Float64Array, 7),
-    IMPL_TYPED_ARRAY_PROTO_CLASS(Uint8ClampedArray, 8)
+    IMPL_TYPED_ARRAY_PROTO_CLASS(Int8),
+    IMPL_TYPED_ARRAY_PROTO_CLASS(Uint8),
+    IMPL_TYPED_ARRAY_PROTO_CLASS(Int16),
+    IMPL_TYPED_ARRAY_PROTO_CLASS(Uint16),
+    IMPL_TYPED_ARRAY_PROTO_CLASS(Int32),
+    IMPL_TYPED_ARRAY_PROTO_CLASS(Uint32),
+    IMPL_TYPED_ARRAY_PROTO_CLASS(Float32),
+    IMPL_TYPED_ARRAY_PROTO_CLASS(Float64),
+    IMPL_TYPED_ARRAY_PROTO_CLASS(Uint8Clamped)
 };
 
 /* static */ bool
@@ -2018,11 +2291,7 @@ const Class DataViewObject::protoClass = {
     JSCLASS_HAS_CACHED_PROTO(JSProto_DataView)
 };
 
-const Class DataViewObject::class_ = {
-    "DataView",
-    JSCLASS_HAS_PRIVATE |
-    JSCLASS_HAS_RESERVED_SLOTS(TypedArrayObject::RESERVED_SLOTS) |
-    JSCLASS_HAS_CACHED_PROTO(JSProto_DataView),
+static const ClassOps DataViewObjectClassOps = {
     nullptr, /* addProperty */
     nullptr, /* delProperty */
     nullptr, /* getProperty */
@@ -2035,6 +2304,14 @@ const Class DataViewObject::class_ = {
     nullptr, /* hasInstance */
     nullptr, /* construct */
     ArrayBufferViewObject::trace
+};
+
+const Class DataViewObject::class_ = {
+    "DataView",
+    JSCLASS_HAS_PRIVATE |
+    JSCLASS_HAS_RESERVED_SLOTS(TypedArrayObject::RESERVED_SLOTS) |
+    JSCLASS_HAS_CACHED_PROTO(JSProto_DataView),
+    &DataViewObjectClassOps
 };
 
 const JSFunctionSpec DataViewObject::jsfuncs[] = {

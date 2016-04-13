@@ -36,8 +36,8 @@ html, body, #app, #memory-tool {
    * If --heap-tree-row-height changes, be sure to change HEAP_TREE_ROW_HEIGHT
    * in `devtools/client/memory/components/heap.js`.
    */
-  --heap-tree-row-height: 14px;
-  --heap-tree-header-height: 17px;
+  --heap-tree-row-height: 18px;
+  --heap-tree-header-height: 18px;
 }
 
 /**
@@ -104,7 +104,7 @@ html, body, #app, #memory-tool {
 }
 
 #take-snapshot::before {
-  background-image: url(images/command-screenshot.png);
+  background-image: url(images/command-screenshot.svg);
 }
 
 #clear-snapshots::before {
@@ -115,23 +115,16 @@ html, body, #app, #memory-tool {
   background-image: url(chrome://devtools/skin/images/diff.svg);
 }
 
-@media (min-resolution: 1.1dppx) {
-  #take-snapshot::before {
-    background-image: url(images/command-screenshot@2x.png);
-  }
+#record-allocation-stacks-label,
+#pop-view-button-label {
+  border-inline-end: 1px solid var(--theme-splitter-color);
+  padding-inline-end: 5px;
 }
 
-/**
- * Due to toolbar styles of `.devtools-toolbarbutton:not([label])` which overrides
- * .devtools-toolbarbutton's min-width of 78px, reset the min-width.
- */
 #import-snapshot,
 #clear-snapshots {
   -moz-box-align: center;
   flex-grow: 1;
-  padding: 1px;
-  margin: 2px 1px;
-  min-width: unset;
 }
 
 .spacer {
@@ -414,6 +407,7 @@ html, body, #app, #memory-tool {
   color: var(--theme-selection-background);
 }
 
+.heap-tree-item-individuals,
 .heap-tree-item-bytes,
 .heap-tree-item-count,
 .heap-tree-item-total-bytes,
@@ -500,6 +494,31 @@ html, body, #app, #memory-tool {
   color: inherit;
 }
 
+.heap-tree-item-individuals {
+  width: 38px;
+  min-width: 20px;
+  overflow: hidden;
+  margin: 0;
+}
+
+.heap-tree-item-individuals > button {
+  height: 10px;
+  width: 32px;
+  margin: 0 auto;
+  padding: 0;
+}
+
+/**
+ * Tree map
+ */
+
+.tree-map-container {
+  width: 100%;
+  height: 100%;
+  position: relative;
+  overflow: hidden;
+}
+
 /**
  * Heap tree errors.
  */
@@ -533,6 +552,10 @@ html, body, #app, #memory-tool {
   opacity: .5;
   margin-left: .5em;
   margin-right: .5em;
+}
+
+.heap-tree-item-address {
+  font-family: monospace;
 }
 
 .no-allocation-stacks {

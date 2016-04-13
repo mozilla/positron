@@ -871,6 +871,35 @@ private:
   CanvasRenderingContext2D *mContext;
 };
 
+class CanvasFilterChainObserver : public nsSVGFilterChainObserver
+{
+public:
+  CanvasFilterChainObserver(nsTArray<nsStyleFilter>& aFilters,
+                            Element* aCanvasElement,
+                            CanvasRenderingContext2D* aContext)
+    : nsSVGFilterChainObserver(aFilters, aCanvasElement)
+    , mContext(aContext)
+  {
+  }
+
+  virtual void DoUpdate() override
+  {
+    if (!mContext) {
+      MOZ_CRASH("This should never be called without a context");
+    }
+    // Refresh the cached FilterDescription in mContext->CurrentState().filter.
+    // If this filter is not at the top of the state stack, we'll refresh the
+    // wrong filter, but that's ok, because we'll refresh the right filter
+    // when we pop the state stack in CanvasRenderingContext2D::Restore().
+    mContext->UpdateFilter();
+  }
+
+  void DetachFromContext() { mContext = nullptr; }
+
+private:
+  CanvasRenderingContext2D *mContext;
+};
+
 NS_IMPL_CYCLE_COLLECTING_ADDREF(CanvasRenderingContext2D)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(CanvasRenderingContext2D)
 
@@ -886,6 +915,12 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(CanvasRenderingContext2D)
     ImplCycleCollectionUnlink(tmp->mStyleStack[i].patternStyles[Style::FILL]);
     ImplCycleCollectionUnlink(tmp->mStyleStack[i].gradientStyles[Style::STROKE]);
     ImplCycleCollectionUnlink(tmp->mStyleStack[i].gradientStyles[Style::FILL]);
+    CanvasFilterChainObserver *filterChainObserver =
+      static_cast<CanvasFilterChainObserver*>(tmp->mStyleStack[i].filterChainObserver.get());
+    if (filterChainObserver) {
+      filterChainObserver->DetachFromContext();
+    }
+    ImplCycleCollectionUnlink(tmp->mStyleStack[i].filterChainObserver);
   }
   for (size_t x = 0 ; x < tmp->mHitRegionsOptions.Length(); x++) {
     RegionInfo& info = tmp->mHitRegionsOptions[x];
@@ -903,6 +938,7 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(CanvasRenderingContext2D)
     ImplCycleCollectionTraverse(cb, tmp->mStyleStack[i].patternStyles[Style::FILL], "Fill CanvasPattern");
     ImplCycleCollectionTraverse(cb, tmp->mStyleStack[i].gradientStyles[Style::STROKE], "Stroke CanvasGradient");
     ImplCycleCollectionTraverse(cb, tmp->mStyleStack[i].gradientStyles[Style::FILL], "Fill CanvasGradient");
+    ImplCycleCollectionTraverse(cb, tmp->mStyleStack[i].filterChainObserver, "Filter Chain Observer");
   }
   for (size_t x = 0 ; x < tmp->mHitRegionsOptions.Length(); x++) {
     RegionInfo& info = tmp->mHitRegionsOptions[x];
@@ -1035,7 +1071,7 @@ CanvasRenderingContext2D::ParseColor(const nsAString& aString,
     // otherwise resolve it
     nsCOMPtr<nsIPresShell> presShell = GetPresShell();
     RefPtr<nsStyleContext> parentContext;
-    if (mCanvasElement && mCanvasElement->IsInDoc()) {
+    if (mCanvasElement && mCanvasElement->IsInUncomposedDoc()) {
       // Inherit from the canvas element.
       parentContext = nsComputedDOMStyle::GetStyleContextForElement(
         mCanvasElement, nullptr, presShell);
@@ -1181,7 +1217,7 @@ CanvasRenderingContext2D::Redraw(const gfx::Rect& aR)
 void
 CanvasRenderingContext2D::DidRefresh()
 {
-  if (IsTargetValid() && SkiaGLTex()) {
+  if (IsTargetValid() && mIsSkiaGL) {
     SkiaGLGlue* glue = gfxPlatform::GetPlatform()->GetSkiaGLGlue();
     MOZ_ASSERT(glue);
 
@@ -1554,7 +1590,7 @@ CanvasRenderingContext2D::ClearTarget()
   // For vertical writing-mode, unless text-orientation is sideways,
   // we'll modify the initial value of textBaseline to 'middle'.
   RefPtr<nsStyleContext> canvasStyle;
-  if (mCanvasElement && mCanvasElement->IsInDoc()) {
+  if (mCanvasElement && mCanvasElement->IsInUncomposedDoc()) {
     nsCOMPtr<nsIPresShell> presShell = GetPresShell();
     if (presShell) {
       canvasStyle =
@@ -2200,7 +2236,7 @@ static already_AddRefed<nsStyleContext>
 GetFontParentStyleContext(Element* aElement, nsIPresShell* aPresShell,
                           ErrorResult& aError)
 {
-  if (aElement && aElement->IsInDoc()) {
+  if (aElement && aElement->IsInUncomposedDoc()) {
     // Inherit from the canvas element.
     RefPtr<nsStyleContext> result =
       nsComputedDOMStyle::GetStyleContextForElement(aElement, nullptr,
@@ -2402,33 +2438,9 @@ CanvasRenderingContext2D::ParseFilter(const nsAString& aString,
     return false;
   }
 
-  aFilterChain = sc->StyleSVGReset()->mFilters;
+  aFilterChain = sc->StyleEffects()->mFilters;
   return true;
 }
-
-class CanvasFilterChainObserver : public nsSVGFilterChainObserver
-{
-public:
-  CanvasFilterChainObserver(nsTArray<nsStyleFilter>& aFilters,
-                            Element* aCanvasElement,
-                            CanvasRenderingContext2D* aContext)
-    : nsSVGFilterChainObserver(aFilters, aCanvasElement)
-    , mContext(aContext)
-  {
-  }
-
-  virtual void DoUpdate() override
-  {
-    // Refresh the cached FilterDescription in mContext->CurrentState().filter.
-    // If this filter is not at the top of the state stack, we'll refresh the
-    // wrong filter, but that's ok, because we'll refresh the right filter
-    // when we pop the state stack in CanvasRenderingContext2D::Restore().
-    mContext->UpdateFilter();
-  }
-
-private:
-  CanvasRenderingContext2D *mContext;
-};
 
 void
 CanvasRenderingContext2D::SetFilter(const nsAString& aFilter, ErrorResult& aError)
@@ -3818,7 +3830,7 @@ CanvasRenderingContext2D::DrawOrMeasureText(const nsAString& aRawText,
   bool isRTL = false;
 
   RefPtr<nsStyleContext> canvasStyle;
-  if (mCanvasElement && mCanvasElement->IsInDoc()) {
+  if (mCanvasElement && mCanvasElement->IsInUncomposedDoc()) {
     // try to find the closest context
     canvasStyle =
       nsComputedDOMStyle::GetStyleContextForElement(mCanvasElement,
@@ -4514,7 +4526,7 @@ CanvasRenderingContext2D::DrawImage(const CanvasImageSource& aImage,
     }
 
     // If it doesn't have a principal, just bail
-    nsCOMPtr<nsIPrincipal> principal = video->GetCurrentPrincipal();
+    nsCOMPtr<nsIPrincipal> principal = video->GetCurrentVideoPrincipal();
     if (!principal) {
       aError.Throw(NS_ERROR_NOT_AVAILABLE);
       return;
@@ -4739,7 +4751,11 @@ CanvasRenderingContext2D::DrawDirectlyToCanvas(
   // the matrix even though this is a temp gfxContext.
   AutoRestoreTransform autoRestoreTransform(mTarget);
 
-  RefPtr<gfxContext> context = new gfxContext(tempTarget);
+  RefPtr<gfxContext> context = gfxContext::ForDrawTarget(tempTarget);
+  if (!context) {
+    gfxDevCrash(LogReason::InvalidContext) << "Canvas context problem";
+    return;
+  }
   context->SetMatrix(contextMatrix.
                        Scale(1.0 / contextScale.width,
                              1.0 / contextScale.height).
@@ -4938,19 +4954,21 @@ CanvasRenderingContext2D::DrawWindow(nsGlobalWindow& aWindow, double aX,
       GlobalAlpha() == 1.0f &&
       UsedOperation() == CompositionOp::OP_OVER)
   {
-    thebes = new gfxContext(mTarget);
+    thebes = gfxContext::ForDrawTarget(mTarget);
+    MOZ_ASSERT(thebes); // alrady checked the draw target above
     thebes->SetMatrix(gfxMatrix(matrix._11, matrix._12, matrix._21,
                                 matrix._22, matrix._31, matrix._32));
   } else {
     drawDT =
       gfxPlatform::GetPlatform()->CreateOffscreenContentDrawTarget(IntSize(ceil(sw), ceil(sh)),
                                                                    SurfaceFormat::B8G8R8A8);
-    if (!drawDT) {
+    if (!drawDT || !drawDT->IsValid()) {
       aError.Throw(NS_ERROR_FAILURE);
       return;
     }
 
-    thebes = new gfxContext(drawDT);
+    thebes = gfxContext::ForDrawTarget(drawDT);
+    MOZ_ASSERT(thebes); // alrady checked the draw target above
     thebes->SetMatrix(gfxMatrix::Scaling(matrix._11, matrix._22));
   }
 
@@ -5666,19 +5684,18 @@ CanvasRenderingContext2D::GetCanvasLayer(nsDisplayListBuilder* aBuilder,
 
     CanvasLayer::Data data;
 
-    GLuint skiaGLTex = SkiaGLTex();
-    if (mIsSkiaGL && skiaGLTex) {
-      SkiaGLGlue* glue = gfxPlatform::GetPlatform()->GetSkiaGLGlue();
-      MOZ_ASSERT(glue);
-
-      data.mGLContext = glue->GetGLContext();
-      data.mFrontbufferGLTex = skiaGLTex;
-      PersistentBufferProvider *provider = GetBufferProvider(aManager);
-      data.mBufferProvider = provider;
-    } else {
-      PersistentBufferProvider *provider = GetBufferProvider(aManager);
-      data.mBufferProvider = provider;
+    if (mIsSkiaGL) {
+      GLuint skiaGLTex = SkiaGLTex();
+      if (skiaGLTex) {
+        SkiaGLGlue* glue = gfxPlatform::GetPlatform()->GetSkiaGLGlue();
+        MOZ_ASSERT(glue);
+        data.mGLContext = glue->GetGLContext();
+        data.mFrontbufferGLTex = skiaGLTex;
+      }
     }
+
+    PersistentBufferProvider *provider = GetBufferProvider(aManager);
+    data.mBufferProvider = provider;
 
     if (userData &&
         userData->IsForContext(this) &&
@@ -5720,19 +5737,19 @@ CanvasRenderingContext2D::GetCanvasLayer(nsDisplayListBuilder* aBuilder,
   canvasLayer->SetPreTransactionCallback(
           CanvasRenderingContext2DUserData::PreTransactionCallback, userData);
 
-  GLuint skiaGLTex = SkiaGLTex();
-  if (mIsSkiaGL && skiaGLTex) {
-    SkiaGLGlue* glue = gfxPlatform::GetPlatform()->GetSkiaGLGlue();
-    MOZ_ASSERT(glue);
 
-    data.mGLContext = glue->GetGLContext();
-    data.mFrontbufferGLTex = skiaGLTex;
-    PersistentBufferProvider *provider = GetBufferProvider(aManager);
-    data.mBufferProvider = provider;
-  } else {
-    PersistentBufferProvider *provider = GetBufferProvider(aManager);
-    data.mBufferProvider = provider;
+  if (mIsSkiaGL) {
+      GLuint skiaGLTex = SkiaGLTex();
+      if (skiaGLTex) {
+        SkiaGLGlue* glue = gfxPlatform::GetPlatform()->GetSkiaGLGlue();
+        MOZ_ASSERT(glue);
+        data.mGLContext = glue->GetGLContext();
+        data.mFrontbufferGLTex = skiaGLTex;
+      }
   }
+
+  PersistentBufferProvider *provider = GetBufferProvider(aManager);
+  data.mBufferProvider = provider;
 
   canvasLayer->Initialize(data);
   uint32_t flags = mOpaque ? Layer::CONTENT_OPAQUE : 0;

@@ -16,7 +16,6 @@ import java.util.Map;
 
 import org.mozilla.gecko.GeckoProfile;
 import org.mozilla.gecko.R;
-import org.mozilla.gecko.Restrictions;
 import org.mozilla.gecko.Tab;
 import org.mozilla.gecko.Tabs;
 import org.mozilla.gecko.Telemetry;
@@ -33,6 +32,7 @@ import org.mozilla.gecko.home.PinSiteDialog.OnSiteSelectedListener;
 import org.mozilla.gecko.home.TopSitesGridView.OnEditPinnedSiteListener;
 import org.mozilla.gecko.home.TopSitesGridView.TopSitesGridContextMenuInfo;
 import org.mozilla.gecko.restrictions.Restrictable;
+import org.mozilla.gecko.restrictions.Restrictions;
 import org.mozilla.gecko.util.StringUtils;
 import org.mozilla.gecko.util.ThreadUtils;
 
@@ -351,10 +351,6 @@ public class TopSitesPanel extends HomeFragment {
         if (!Restrictions.isAllowed(context, Restrictable.PRIVATE_BROWSING)) {
             menu.findItem(R.id.home_open_private_tab).setVisible(false);
         }
-
-        // We only show these menu items on the reading list panel:
-        menu.findItem(R.id.mark_read).setVisible(false);
-        menu.findItem(R.id.mark_unread).setVisible(false);
     }
 
     @Override

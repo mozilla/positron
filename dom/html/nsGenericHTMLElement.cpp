@@ -573,7 +573,7 @@ nsGenericHTMLElement::BindToTree(nsIDocument* aDocument, nsIContent* aParent,
 void
 nsGenericHTMLElement::UnbindFromTree(bool aDeep, bool aNullParent)
 {
-  if (IsInDoc()) {
+  if (IsInUncomposedDoc()) {
     UnregAccessKey();
   }
   
@@ -1431,32 +1431,27 @@ void
 nsGenericHTMLElement::MapImageAlignAttributeInto(const nsMappedAttributes* aAttributes,
                                                  nsRuleData* aRuleData)
 {
-  if (aRuleData->mSIDs & (NS_STYLE_INHERIT_BIT(Display) |
-                          NS_STYLE_INHERIT_BIT(TextReset))) {
+  if (aRuleData->mSIDs & NS_STYLE_INHERIT_BIT(Display)) {
     const nsAttrValue* value = aAttributes->GetAttr(nsGkAtoms::align);
     if (value && value->Type() == nsAttrValue::eEnum) {
       int32_t align = value->GetEnumValue();
-      if (aRuleData->mSIDs & NS_STYLE_INHERIT_BIT(Display)) {
-        nsCSSValue* cssFloat = aRuleData->ValueForFloat();
-        if (cssFloat->GetUnit() == eCSSUnit_Null) {
-          if (align == NS_STYLE_TEXT_ALIGN_LEFT) {
-            cssFloat->SetIntValue(NS_STYLE_FLOAT_LEFT, eCSSUnit_Enumerated);
-          } else if (align == NS_STYLE_TEXT_ALIGN_RIGHT) {
-            cssFloat->SetIntValue(NS_STYLE_FLOAT_RIGHT, eCSSUnit_Enumerated);
-          }
+      nsCSSValue* cssFloat = aRuleData->ValueForFloat();
+      if (cssFloat->GetUnit() == eCSSUnit_Null) {
+        if (align == NS_STYLE_TEXT_ALIGN_LEFT) {
+          cssFloat->SetIntValue(NS_STYLE_FLOAT_LEFT, eCSSUnit_Enumerated);
+        } else if (align == NS_STYLE_TEXT_ALIGN_RIGHT) {
+          cssFloat->SetIntValue(NS_STYLE_FLOAT_RIGHT, eCSSUnit_Enumerated);
         }
       }
-      if (aRuleData->mSIDs & NS_STYLE_INHERIT_BIT(TextReset)) {
-        nsCSSValue* verticalAlign = aRuleData->ValueForVerticalAlign();
-        if (verticalAlign->GetUnit() == eCSSUnit_Null) {
-          switch (align) {
-          case NS_STYLE_TEXT_ALIGN_LEFT:
-          case NS_STYLE_TEXT_ALIGN_RIGHT:
-            break;
-          default:
-            verticalAlign->SetIntValue(align, eCSSUnit_Enumerated);
-            break;
-          }
+      nsCSSValue* verticalAlign = aRuleData->ValueForVerticalAlign();
+      if (verticalAlign->GetUnit() == eCSSUnit_Null) {
+        switch (align) {
+        case NS_STYLE_TEXT_ALIGN_LEFT:
+        case NS_STYLE_TEXT_ALIGN_RIGHT:
+          break;
+        default:
+          verticalAlign->SetIntValue(align, eCSSUnit_Enumerated);
+          break;
         }
       }
     }
@@ -2426,7 +2421,7 @@ nsGenericHTMLFormElement::AddFormIdObserver()
   GetAttr(kNameSpaceID_None, nsGkAtoms::form, formId);
   NS_ASSERTION(!formId.IsEmpty(),
                "@form value should not be the empty string!");
-  nsCOMPtr<nsIAtom> atom = do_GetAtom(formId);
+  nsCOMPtr<nsIAtom> atom = NS_Atomize(formId);
 
   return doc->AddIDTargetObserver(atom, FormIdUpdated, this, false);
 }
@@ -2455,7 +2450,7 @@ nsGenericHTMLFormElement::RemoveFormIdObserver()
   GetAttr(kNameSpaceID_None, nsGkAtoms::form, formId);
   NS_ASSERTION(!formId.IsEmpty(),
                "@form value should not be the empty string!");
-  nsCOMPtr<nsIAtom> atom = do_GetAtom(formId);
+  nsCOMPtr<nsIAtom> atom = NS_Atomize(formId);
 
   doc->RemoveIDTargetObserver(atom, FormIdUpdated, this, false);
 }

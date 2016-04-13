@@ -131,21 +131,6 @@ class GeckoAppShell : public mozilla::jni::ObjectBase<GeckoAppShell, jobject>
 public:
     explicit GeckoAppShell(const Context& ctx) : ObjectBase<GeckoAppShell, jobject>(ctx) {}
 
-    struct AcknowledgeEvent_t {
-        typedef GeckoAppShell Owner;
-        typedef void ReturnType;
-        typedef void SetterType;
-        typedef mozilla::jni::Args<> Args;
-        static constexpr char name[] = "acknowledgeEvent";
-        static constexpr char signature[] =
-                "()V";
-        static const bool isStatic = true;
-        static const mozilla::jni::ExceptionMode exceptionMode =
-                mozilla::jni::ExceptionMode::ABORT;
-    };
-
-    static auto AcknowledgeEvent() -> void;
-
     struct AddPluginViewWrapper_t {
         typedef GeckoAppShell Owner;
         typedef void ReturnType;
@@ -1430,21 +1415,6 @@ public:
 
     static auto ShowAlertNotificationWrapper(mozilla::jni::String::Param, mozilla::jni::String::Param, mozilla::jni::String::Param, mozilla::jni::String::Param, mozilla::jni::String::Param, mozilla::jni::String::Param) -> void;
 
-    struct ShowInputMethodPicker_t {
-        typedef GeckoAppShell Owner;
-        typedef void ReturnType;
-        typedef void SetterType;
-        typedef mozilla::jni::Args<> Args;
-        static constexpr char name[] = "showInputMethodPicker";
-        static constexpr char signature[] =
-                "()V";
-        static const bool isStatic = true;
-        static const mozilla::jni::ExceptionMode exceptionMode =
-                mozilla::jni::ExceptionMode::ABORT;
-    };
-
-    static auto ShowInputMethodPicker() -> void;
-
     struct StartMonitoringGamepad_t {
         typedef GeckoAppShell Owner;
         typedef void ReturnType;
@@ -2249,6 +2219,32 @@ public:
 
     static auto CheckAndSetState(mozilla::jni::Object::Param, mozilla::jni::Object::Param) -> bool;
 
+    struct OnPause_t {
+        typedef GeckoThread Owner;
+        typedef void ReturnType;
+        typedef void SetterType;
+        typedef mozilla::jni::Args<> Args;
+        static constexpr char name[] = "nativeOnPause";
+        static constexpr char signature[] =
+                "()V";
+        static const bool isStatic = true;
+        static const mozilla::jni::ExceptionMode exceptionMode =
+                mozilla::jni::ExceptionMode::ABORT;
+    };
+
+    struct OnResume_t {
+        typedef GeckoThread Owner;
+        typedef void ReturnType;
+        typedef void SetterType;
+        typedef mozilla::jni::Args<> Args;
+        static constexpr char name[] = "nativeOnResume";
+        static constexpr char signature[] =
+                "()V";
+        static const bool isStatic = true;
+        static const mozilla::jni::ExceptionMode exceptionMode =
+                mozilla::jni::ExceptionMode::ABORT;
+    };
+
     struct PumpMessageLoop_t {
         typedef GeckoThread Owner;
         typedef bool ReturnType;
@@ -2290,6 +2286,19 @@ public:
         static constexpr char name[] = "speculativeConnectNative";
         static constexpr char signature[] =
                 "(Ljava/lang/String;)V";
+        static const bool isStatic = true;
+        static const mozilla::jni::ExceptionMode exceptionMode =
+                mozilla::jni::ExceptionMode::ABORT;
+    };
+
+    struct WaitOnGecko_t {
+        typedef GeckoThread Owner;
+        typedef void ReturnType;
+        typedef void SetterType;
+        typedef mozilla::jni::Args<> Args;
+        static constexpr char name[] = "waitOnGecko";
+        static constexpr char signature[] =
+                "()V";
         static const bool isStatic = true;
         static const mozilla::jni::ExceptionMode exceptionMode =
                 mozilla::jni::ExceptionMode::ABORT;
@@ -2821,47 +2830,6 @@ public:
     static const bool isMultithreaded = false;
 
     template<class Impl> class Natives;
-};
-
-class Restrictions : public mozilla::jni::ObjectBase<Restrictions, jobject>
-{
-public:
-    explicit Restrictions(const Context& ctx) : ObjectBase<Restrictions, jobject>(ctx) {}
-
-    struct IsAllowed_t {
-        typedef Restrictions Owner;
-        typedef bool ReturnType;
-        typedef bool SetterType;
-        typedef mozilla::jni::Args<
-                int32_t,
-                mozilla::jni::String::Param> Args;
-        static constexpr char name[] = "isAllowed";
-        static constexpr char signature[] =
-                "(ILjava/lang/String;)Z";
-        static const bool isStatic = true;
-        static const mozilla::jni::ExceptionMode exceptionMode =
-                mozilla::jni::ExceptionMode::ABORT;
-    };
-
-    static auto IsAllowed(int32_t, mozilla::jni::String::Param) -> bool;
-
-    struct IsUserRestricted_t {
-        typedef Restrictions Owner;
-        typedef bool ReturnType;
-        typedef bool SetterType;
-        typedef mozilla::jni::Args<> Args;
-        static constexpr char name[] = "isUserRestricted";
-        static constexpr char signature[] =
-                "()Z";
-        static const bool isStatic = true;
-        static const mozilla::jni::ExceptionMode exceptionMode =
-                mozilla::jni::ExceptionMode::ABORT;
-    };
-
-    static auto IsUserRestricted() -> bool;
-
-    static const bool isMultithreaded = false;
-
 };
 
 class SurfaceBits : public mozilla::jni::ObjectBase<SurfaceBits, jobject>
@@ -3680,6 +3648,21 @@ public:
                 mozilla::jni::ExceptionMode::ABORT;
     };
 
+    struct HandleMotionEventVelocity_t {
+        typedef NativePanZoomController Owner;
+        typedef void ReturnType;
+        typedef void SetterType;
+        typedef mozilla::jni::Args<
+                int64_t,
+                float> Args;
+        static constexpr char name[] = "handleMotionEventVelocity";
+        static constexpr char signature[] =
+                "(JF)V";
+        static const bool isStatic = false;
+        static const mozilla::jni::ExceptionMode exceptionMode =
+                mozilla::jni::ExceptionMode::ABORT;
+    };
+
     struct HandleMouseEvent_t {
         typedef NativePanZoomController Owner;
         typedef bool ReturnType;
@@ -3780,6 +3763,22 @@ public:
     };
 
     auto RequestContentRepaintWrapper(float, float, float, float, float) const -> void;
+
+    struct SetScrollingRootContent_t {
+        typedef NativePanZoomController Owner;
+        typedef void ReturnType;
+        typedef void SetterType;
+        typedef mozilla::jni::Args<
+                bool> Args;
+        static constexpr char name[] = "setScrollingRootContent";
+        static constexpr char signature[] =
+                "(Z)V";
+        static const bool isStatic = false;
+        static const mozilla::jni::ExceptionMode exceptionMode =
+                mozilla::jni::ExceptionMode::ABORT;
+    };
+
+    auto SetScrollingRootContent(bool) const -> void;
 
     struct UpdateOverscrollOffset_t {
         typedef NativePanZoomController Owner;
@@ -4105,6 +4104,47 @@ public:
     auto Y(float) const -> void;
 
     static const bool isMultithreaded = true;
+
+};
+
+class Restrictions : public mozilla::jni::ObjectBase<Restrictions, jobject>
+{
+public:
+    explicit Restrictions(const Context& ctx) : ObjectBase<Restrictions, jobject>(ctx) {}
+
+    struct IsAllowed_t {
+        typedef Restrictions Owner;
+        typedef bool ReturnType;
+        typedef bool SetterType;
+        typedef mozilla::jni::Args<
+                int32_t,
+                mozilla::jni::String::Param> Args;
+        static constexpr char name[] = "isAllowed";
+        static constexpr char signature[] =
+                "(ILjava/lang/String;)Z";
+        static const bool isStatic = true;
+        static const mozilla::jni::ExceptionMode exceptionMode =
+                mozilla::jni::ExceptionMode::ABORT;
+    };
+
+    static auto IsAllowed(int32_t, mozilla::jni::String::Param) -> bool;
+
+    struct IsUserRestricted_t {
+        typedef Restrictions Owner;
+        typedef bool ReturnType;
+        typedef bool SetterType;
+        typedef mozilla::jni::Args<> Args;
+        static constexpr char name[] = "isUserRestricted";
+        static constexpr char signature[] =
+                "()Z";
+        static const bool isStatic = true;
+        static const mozilla::jni::ExceptionMode exceptionMode =
+                mozilla::jni::ExceptionMode::ABORT;
+    };
+
+    static auto IsUserRestricted() -> bool;
+
+    static const bool isMultithreaded = false;
 
 };
 

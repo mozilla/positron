@@ -149,6 +149,12 @@ public:
     mIDType = eString;
   }
 
+  void
+  SetOriginAttributes(const PrincipalOriginAttributes& aOriginAttributes)
+  {
+    mOriginAttributes = aOriginAttributes;
+  }
+
   bool
   PopulateArgumentsSequence(Sequence<JS::Value>& aSequence) const
   {
@@ -240,6 +246,8 @@ public:
 
   uint64_t mInnerIDNumber;
   nsString mInnerIDString;
+
+  PrincipalOriginAttributes mOriginAttributes;
 
   nsString mMethodString;
 
@@ -399,14 +407,23 @@ private:
         MOZ_ASSERT(aRunnable);
       }
 
+      // If something goes wrong, we still need to release the ConsoleCallData
+      // object. For this reason we have a custom Cancel method.
+      nsresult
+      Cancel() override
+      {
+        mRunnable->ReleaseData();
+        mRunnable->mConsole = nullptr;
+        return NS_OK;
+      }
+
       virtual bool
       WorkerRun(JSContext* aCx, workers::WorkerPrivate* aWorkerPrivate) override
       {
         MOZ_ASSERT(aWorkerPrivate);
         aWorkerPrivate->AssertIsOnWorkerThread();
 
-        mRunnable->ReleaseData();
-        mRunnable->mConsole = nullptr;
+        Cancel();
 
         aWorkerPrivate->RemoveFeature(mRunnable);
         return true;
@@ -614,6 +631,20 @@ private:
 
     if (aOuterWindow) {
       mCallData->SetIDs(aOuterWindow->WindowID(), aInnerWindow->WindowID());
+
+      // Save the principal's OriginAttributes in the console event data
+      // so that we will be able to filter messages by origin attributes.
+      nsCOMPtr<nsIScriptObjectPrincipal> sop = do_QueryInterface(aInnerWindow);
+      if (NS_WARN_IF(!sop)) {
+        return;
+      }
+
+      nsCOMPtr<nsIPrincipal> principal = sop->GetPrincipal();
+      if (NS_WARN_IF(!principal)) {
+        return;
+      }
+
+      mCallData->SetOriginAttributes(BasePrincipal::Cast(principal)->OriginAttributesRef());
     } else {
       ConsoleStackEntry frame;
       if (mCallData->mTopStackFrame) {
@@ -634,6 +665,15 @@ private:
       }
 
       mCallData->SetIDs(id, innerID);
+
+      // Save the principal's OriginAttributes in the console event data
+      // so that we will be able to filter messages by origin attributes.
+      nsCOMPtr<nsIPrincipal> principal = mWorkerPrivate->GetPrincipal();
+      if (NS_WARN_IF(!principal)) {
+        return;
+      }
+
+      mCallData->SetOriginAttributes(BasePrincipal::Cast(principal)->OriginAttributesRef());
     }
 
     // Now we could have the correct window (if we are not window-less).
@@ -846,6 +886,8 @@ NS_INTERFACE_MAP_END
 /* static */ already_AddRefed<Console>
 Console::Create(nsPIDOMWindowInner* aWindow, ErrorResult& aRv)
 {
+  MOZ_ASSERT_IF(NS_IsMainThread(), aWindow);
+
   RefPtr<Console> console = new Console(aWindow);
   console->Initialize(aRv);
   if (NS_WARN_IF(aRv.Failed())) {
@@ -864,6 +906,8 @@ Console::Console(nsPIDOMWindowInner* aWindow)
   , mInnerID(0)
   , mStatus(eUnknown)
 {
+  MOZ_ASSERT_IF(NS_IsMainThread(), aWindow);
+
   if (mWindow) {
     MOZ_ASSERT(mWindow->IsInnerWindow());
     mInnerID = mWindow->WindowID();
@@ -1253,6 +1297,20 @@ Console::Method(JSContext* aCx, MethodName aMethodName,
     MOZ_ASSERT(loadContext);
 
     loadContext->GetUsePrivateBrowsing(&callData->mPrivate);
+
+    // Save the principal's OriginAttributes in the console event data
+    // so that we will be able to filter messages by origin attributes.
+    nsCOMPtr<nsIScriptObjectPrincipal> sop = do_QueryInterface(mWindow);
+    if (NS_WARN_IF(!sop)) {
+      return;
+    }
+
+    nsCOMPtr<nsIPrincipal> principal = sop->GetPrincipal();
+    if (NS_WARN_IF(!principal)) {
+      return;
+    }
+
+    callData->SetOriginAttributes(BasePrincipal::Cast(principal)->OriginAttributesRef());
   }
 
   uint32_t maxDepth = ShouldIncludeStackTrace(aMethodName) ?
@@ -1504,6 +1562,13 @@ Console::PopulateConsoleNotificationInTheTargetScope(JSContext* aCx,
 
   ClearException ce(aCx);
   RootedDictionary<ConsoleEvent> event(aCx);
+
+  // Save the principal's OriginAttributes in the console event data
+  // so that we will be able to filter messages by origin attributes.
+  JS::Rooted<JS::Value> originAttributesValue(aCx);
+  if (ToJSValue(aCx, aData->mOriginAttributes, &originAttributesValue)) {
+    event.mOriginAttributes = originAttributesValue;
+  }
 
   event.mID.Construct();
   event.mInnerID.Construct();
@@ -2322,14 +2387,14 @@ Console::RetrieveConsoleEvents(JSContext* aCx, nsTArray<JS::Value>& aEvents,
 }
 
 void
-Console::SetConsoleEventHandler(AnyCallback& aHandler)
+Console::SetConsoleEventHandler(AnyCallback* aHandler)
 {
   AssertIsOnOwningThread();
 
   // We don't want to expose this functionality to main-thread yet.
   MOZ_ASSERT(!NS_IsMainThread());
 
-  mConsoleEventNotifier = &aHandler;
+  mConsoleEventNotifier = aHandler;
 }
 
 void

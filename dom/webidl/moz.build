@@ -20,7 +20,6 @@ PREPROCESSED_WEBIDL_FILES = [
 WEBIDL_FILES = [
     'AbstractWorker.webidl',
     'ActivityRequestHandler.webidl',
-    'AlarmsManager.webidl',
     'AnalyserNode.webidl',
     'Animatable.webidl',
     'Animation.webidl',
@@ -197,7 +196,6 @@ WEBIDL_FILES = [
     'HTMLDocument.webidl',
     'HTMLElement.webidl',
     'HTMLEmbedElement.webidl',
-    'HTMLExtAppElement.webidl',
     'HTMLFieldSetElement.webidl',
     'HTMLFontElement.webidl',
     'HTMLFormControlsCollection.webidl',
@@ -791,7 +789,6 @@ GENERATED_EVENTS_WEBIDL_FILES = [
     'DOMTransactionEvent.webidl',
     'DownloadEvent.webidl',
     'ErrorEvent.webidl',
-    'ExternalAppEvent.webidl',
     'FontFaceSetLoadEvent.webidl',
     'HashChangeEvent.webidl',
     'IccChangeEvent.webidl',
@@ -911,6 +908,7 @@ if CONFIG['MOZ_EME']:
         'MediaKeysRequestStatus.webidl',
         'MediaKeyStatusMap.webidl',
         'MediaKeySystemAccess.webidl',
+        'WidevineCDMManifest.webidl',
     ]
 
 if CONFIG['MOZ_PAY']:
@@ -926,4 +924,9 @@ if CONFIG['MOZ_B2G']:
     ]
     GENERATED_EVENTS_WEBIDL_FILES += [
         'MozApplicationEvent.webidl'
+    ]
+
+if CONFIG['MOZ_WIDGET_TOOLKIT'] != 'android':
+    WEBIDL_FILES += [
+        'AlarmsManager.webidl',
     ]

@@ -2746,14 +2746,18 @@ sandbox_resolve(JSContext* cx, HandleObject obj, HandleId id, bool* resolvedp)
     return true;
 }
 
-static const JSClass sandbox_class = {
-    "sandbox",
-    JSCLASS_GLOBAL_FLAGS,
+static const JSClassOps sandbox_classOps = {
     nullptr, nullptr, nullptr, nullptr,
     sandbox_enumerate, sandbox_resolve,
     nullptr, nullptr,
     nullptr, nullptr, nullptr,
     JS_GlobalObjectTraceHook
+};
+
+static const JSClass sandbox_class = {
+    "sandbox",
+    JSCLASS_GLOBAL_FLAGS,
+    &sandbox_classOps
 };
 
 static void
@@ -4959,7 +4963,7 @@ class ShellAutoEntryMonitor : JS::dbg::AutoEntryMonitor {
     }
 
     void Entry(JSContext* cx, JSFunction* function, JS::HandleValue asyncStack,
-               JS::HandleString asyncCause) override {
+               const char* asyncCause) override {
         MOZ_ASSERT(!enteredWithoutExit);
         enteredWithoutExit = true;
 
@@ -4974,7 +4978,7 @@ class ShellAutoEntryMonitor : JS::dbg::AutoEntryMonitor {
     }
 
     void Entry(JSContext* cx, JSScript* script, JS::HandleValue asyncStack,
-               JS::HandleString asyncCause) override {
+               const char* asyncCause) override {
         MOZ_ASSERT(!enteredWithoutExit);
         enteredWithoutExit = true;
 
@@ -6026,13 +6030,17 @@ global_mayResolve(const JSAtomState& names, jsid id, JSObject* maybeObj)
     return JS_MayResolveStandardClass(names, id, maybeObj);
 }
 
-static const JSClass global_class = {
-    "global", JSCLASS_GLOBAL_FLAGS,
+static const JSClassOps global_classOps = {
     nullptr, nullptr, nullptr, nullptr,
     global_enumerate, global_resolve, global_mayResolve,
     nullptr,
     nullptr, nullptr, nullptr,
     JS_GlobalObjectTraceHook
+};
+
+static const JSClass global_class = {
+    "global", JSCLASS_GLOBAL_FLAGS,
+    &global_classOps
 };
 
 /*

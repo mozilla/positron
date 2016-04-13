@@ -402,6 +402,7 @@ JitCompartment::JitCompartment()
     baselineSetPropReturnAddr_(nullptr),
     stringConcatStub_(nullptr),
     regExpMatcherStub_(nullptr),
+    regExpSearcherStub_(nullptr),
     regExpTesterStub_(nullptr)
 {
     baselineCallReturnAddrs_[0] = baselineCallReturnAddrs_[1] = nullptr;
@@ -589,7 +590,7 @@ JitRuntime::Mark(JSTracer* trc)
 {
     MOZ_ASSERT(!trc->runtime()->isHeapMinorCollecting());
     Zone* zone = trc->runtime()->atomsCompartment()->zone();
-    for (gc::ZoneCellIter i(zone, gc::AllocKind::JITCODE); !i.done(); i.next()) {
+    for (gc::ZoneCellIterUnderGC i(zone, gc::AllocKind::JITCODE); !i.done(); i.next()) {
         JitCode* code = i.get<JitCode>();
         TraceRoot(trc, &code, "wrapper");
     }
@@ -663,6 +664,9 @@ JitCompartment::sweep(FreeOp* fop, JSCompartment* compartment)
     if (regExpMatcherStub_ && !IsMarkedUnbarriered(&regExpMatcherStub_))
         regExpMatcherStub_ = nullptr;
 
+    if (regExpSearcherStub_ && !IsMarkedUnbarriered(&regExpSearcherStub_))
+        regExpSearcherStub_ = nullptr;
+
     if (regExpTesterStub_ && !IsMarkedUnbarriered(&regExpTesterStub_))
         regExpTesterStub_ = nullptr;
 
@@ -678,6 +682,8 @@ JitCompartment::toggleBarriers(bool enabled)
     // Toggle barriers in compartment wide stubs that have patchable pre barriers.
     if (regExpMatcherStub_)
         regExpMatcherStub_->togglePreBarriers(enabled, Reprotect);
+    if (regExpSearcherStub_)
+        regExpSearcherStub_->togglePreBarriers(enabled, Reprotect);
     if (regExpTesterStub_)
         regExpTesterStub_->togglePreBarriers(enabled, Reprotect);
 
@@ -1323,7 +1329,7 @@ jit::ToggleBarriers(JS::Zone* zone, bool needs)
     if (!rt->hasJitRuntime())
         return;
 
-    for (gc::ZoneCellIter i(zone, gc::AllocKind::SCRIPT); !i.done(); i.next()) {
+    for (gc::ZoneCellIterUnderGC i(zone, gc::AllocKind::SCRIPT); !i.done(); i.next()) {
         JSScript* script = i.get<JSScript>();
         if (script->hasIonScript())
             script->ionScript()->toggleBarriers(needs);
@@ -1651,9 +1657,9 @@ OptimizeMIR(MIRGenerator* mir)
         }
     }
 
+    RangeAnalysis r(mir, graph);
     if (mir->optimizationInfo().rangeAnalysisEnabled()) {
         AutoTraceLog log(logger, TraceLogger_RangeAnalysis);
-        RangeAnalysis r(mir, graph);
         if (!r.addBetaNodes())
             return false;
         gs.spewPass("Beta");
@@ -1720,6 +1726,28 @@ OptimizeMIR(MIRGenerator* mir)
         }
     }
 
+    {
+        AutoTraceLog log(logger, TraceLogger_Sink);
+        if (!Sink(mir, graph))
+            return false;
+        gs.spewPass("Sink");
+        AssertExtendedGraphCoherency(graph);
+
+        if (mir->shouldCancel("Sink"))
+            return false;
+    }
+
+    if (mir->optimizationInfo().rangeAnalysisEnabled()) {
+        AutoTraceLog log(logger, TraceLogger_RemoveUnnecessaryBitops);
+        if (!r.removeUnnecessaryBitops())
+            return false;
+        gs.spewPass("Remove Unnecessary Bitops");
+        AssertExtendedGraphCoherency(graph);
+
+        if (mir->shouldCancel("Remove Unnecessary Bitops"))
+            return false;
+    }
+
     if (mir->optimizationInfo().eaaEnabled()) {
         AutoTraceLog log(logger, TraceLogger_EffectiveAddressAnalysis);
         EffectiveAddressAnalysis eaa(mir, graph);
@@ -1750,17 +1778,6 @@ OptimizeMIR(MIRGenerator* mir)
         AssertExtendedGraphCoherency(graph);
 
         if (mir->shouldCancel("DCE"))
-            return false;
-    }
-
-    {
-        AutoTraceLog log(logger, TraceLogger_EliminateDeadCode);
-        if (!Sink(mir, graph))
-            return false;
-        gs.spewPass("Sink");
-        AssertExtendedGraphCoherency(graph);
-
-        if (mir->shouldCancel("Sink"))
             return false;
     }
 

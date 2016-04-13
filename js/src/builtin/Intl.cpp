@@ -540,30 +540,30 @@ intl_availableLocales(JSContext* cx, CountAvailable countAvailable,
 /**
  * Returns the object holding the internal properties for obj.
  */
-static bool
-GetInternals(JSContext* cx, HandleObject obj, MutableHandleObject internals)
+static JSObject*
+GetInternals(JSContext* cx, HandleObject obj)
 {
     RootedValue getInternalsValue(cx);
     if (!GlobalObject::getIntrinsicValue(cx, cx->global(), cx->names().getInternals,
                                          &getInternalsValue))
     {
-        return false;
+        return nullptr;
     }
     MOZ_ASSERT(getInternalsValue.isObject());
     MOZ_ASSERT(getInternalsValue.toObject().is<JSFunction>());
 
     InvokeArgs args(cx);
     if (!args.init(1))
-        return false;
+        return nullptr;
 
     args.setCallee(getInternalsValue);
     args.setThis(NullValue());
     args[0].setObject(*obj);
 
     if (!Invoke(cx, args))
-        return false;
-    internals.set(&args.rval().toObject());
-    return true;
+        return nullptr;
+
+    return &args.rval().toObject();
 }
 
 static bool
@@ -628,9 +628,7 @@ static void collator_finalize(FreeOp* fop, JSObject* obj);
 static const uint32_t UCOLLATOR_SLOT = 0;
 static const uint32_t COLLATOR_SLOTS_COUNT = 1;
 
-static const Class CollatorClass = {
-    js_Object_str,
-    JSCLASS_HAS_RESERVED_SLOTS(COLLATOR_SLOTS_COUNT),
+static const ClassOps CollatorClassOps = {
     nullptr, /* addProperty */
     nullptr, /* delProperty */
     nullptr, /* getProperty */
@@ -639,6 +637,12 @@ static const Class CollatorClass = {
     nullptr, /* resolve */
     nullptr, /* mayResolve */
     collator_finalize
+};
+
+static const Class CollatorClass = {
+    js_Object_str,
+    JSCLASS_HAS_RESERVED_SLOTS(COLLATOR_SLOTS_COUNT),
+    &CollatorClassOps
 };
 
 #if JS_HAS_TOSOURCE
@@ -903,8 +907,8 @@ NewUCollator(JSContext* cx, HandleObject collator)
 {
     RootedValue value(cx);
 
-    RootedObject internals(cx);
-    if (!GetInternals(cx, collator, &internals))
+    RootedObject internals(cx, GetInternals(cx, collator));
+    if (!internals)
         return nullptr;
 
     if (!GetProperty(cx, internals, internals, cx->names().locale, &value))
@@ -1122,9 +1126,7 @@ static void numberFormat_finalize(FreeOp* fop, JSObject* obj);
 static const uint32_t UNUMBER_FORMAT_SLOT = 0;
 static const uint32_t NUMBER_FORMAT_SLOTS_COUNT = 1;
 
-static const Class NumberFormatClass = {
-    js_Object_str,
-    JSCLASS_HAS_RESERVED_SLOTS(NUMBER_FORMAT_SLOTS_COUNT),
+static const ClassOps NumberFormatClassOps = {
     nullptr, /* addProperty */
     nullptr, /* delProperty */
     nullptr, /* getProperty */
@@ -1133,6 +1135,12 @@ static const Class NumberFormatClass = {
     nullptr, /* resolve */
     nullptr, /* mayResolve */
     numberFormat_finalize
+};
+
+static const Class NumberFormatClass = {
+    js_Object_str,
+    JSCLASS_HAS_RESERVED_SLOTS(NUMBER_FORMAT_SLOTS_COUNT),
+    &NumberFormatClassOps
 };
 
 #if JS_HAS_TOSOURCE
@@ -1368,8 +1376,8 @@ NewUNumberFormat(JSContext* cx, HandleObject numberFormat)
 {
     RootedValue value(cx);
 
-    RootedObject internals(cx);
-    if (!GetInternals(cx, numberFormat, &internals))
+    RootedObject internals(cx, GetInternals(cx, numberFormat));
+    if (!internals)
        return nullptr;
 
     if (!GetProperty(cx, internals, internals, cx->names().locale, &value))
@@ -1591,9 +1599,7 @@ static void dateTimeFormat_finalize(FreeOp* fop, JSObject* obj);
 static const uint32_t UDATE_FORMAT_SLOT = 0;
 static const uint32_t DATE_TIME_FORMAT_SLOTS_COUNT = 1;
 
-static const Class DateTimeFormatClass = {
-    js_Object_str,
-    JSCLASS_HAS_RESERVED_SLOTS(DATE_TIME_FORMAT_SLOTS_COUNT),
+static const ClassOps DateTimeFormatClassOps = {
     nullptr, /* addProperty */
     nullptr, /* delProperty */
     nullptr, /* getProperty */
@@ -1602,6 +1608,12 @@ static const Class DateTimeFormatClass = {
     nullptr, /* resolve */
     nullptr, /* mayResolve */
     dateTimeFormat_finalize
+};
+
+static const Class DateTimeFormatClass = {
+    js_Object_str,
+    JSCLASS_HAS_RESERVED_SLOTS(DATE_TIME_FORMAT_SLOTS_COUNT),
+    &DateTimeFormatClassOps
 };
 
 #if JS_HAS_TOSOURCE
@@ -1957,8 +1969,8 @@ NewUDateFormat(JSContext* cx, HandleObject dateTimeFormat)
 {
     RootedValue value(cx);
 
-    RootedObject internals(cx);
-    if (!GetInternals(cx, dateTimeFormat, &internals))
+    RootedObject internals(cx, GetInternals(cx, dateTimeFormat));
+    if (!internals)
        return nullptr;
 
     if (!GetProperty(cx, internals, internals, cx->names().locale, &value))

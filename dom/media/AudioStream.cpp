@@ -18,6 +18,7 @@
 #include "CubebUtils.h"
 #include "nsPrintfCString.h"
 #include "gfxPrefs.h"
+#include "AudioConverter.h"
 
 namespace mozilla {
 
@@ -339,10 +340,8 @@ AudioStream::Init(uint32_t aNumChannels, uint32_t aRate,
   params.channels = mOutChannels;
 #if defined(__ANDROID__)
 #if defined(MOZ_B2G)
-  mAudioChannel = aAudioChannel;
   params.stream_type = CubebUtils::ConvertChannelToCubebType(aAudioChannel);
 #else
-  mAudioChannel = dom::AudioChannel::Content;
   params.stream_type = CUBEB_STREAM_TYPE_MUSIC;
 #endif
 
@@ -354,6 +353,9 @@ AudioStream::Init(uint32_t aNumChannels, uint32_t aRate,
   params.format = ToCubebFormat<AUDIO_OUTPUT_FORMAT>::value;
   mAudioClock.Init();
 
+  AudioConfig inConfig(mChannels, mInRate);
+  AudioConfig outConfig(mOutChannels, mOutRate);
+  mAudioConverter = MakeUnique<AudioConverter>(inConfig, outConfig);
   return OpenCubeb(params);
 }
 
@@ -559,10 +561,10 @@ AudioStream::Downmix(Chunk* aChunk)
     return false;
   }
 
-  if (aChunk->Channels() > 2 && aChunk->Channels() <= 8) {
-    DownmixAudioToStereo(aChunk->GetWritable(),
-                         aChunk->Channels(),
-                         aChunk->Frames());
+  if (aChunk->Channels() > 2) {
+    MOZ_ASSERT(mAudioConverter);
+    mAudioConverter->Process(aChunk->GetWritable(),
+                             aChunk->Channels() * aChunk->Frames());
   }
 
   if (aChunk->Channels() >= 2 && mIsMonoAudioEnabled) {

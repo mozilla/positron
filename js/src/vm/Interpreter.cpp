@@ -537,7 +537,7 @@ InternalConstruct(JSContext* cx, const AnyConstructArgs& args)
 {
     MOZ_ASSERT(args.array() + args.length() + 1 == args.end(),
                "must pass constructing arguments to a construction attempt");
-    MOZ_ASSERT(!JSFunction::class_.construct);
+    MOZ_ASSERT(!JSFunction::class_.getConstruct());
 
     // Callers are responsible for enforcing these preconditions.
     MOZ_ASSERT(IsConstructor(args.calleev()),
@@ -629,24 +629,22 @@ js::InternalConstructWithProvidedThis(JSContext* cx, HandleValue fval, HandleVal
 }
 
 bool
-js::InvokeGetter(JSContext* cx, const Value& thisv, Value fval, MutableHandleValue rval)
+js::CallGetter(JSContext* cx, HandleValue thisv, HandleValue getter, MutableHandleValue rval)
 {
-    /*
-     * Invoke could result in another try to get or set the same id again, see
-     * bug 355497.
-     */
+    // Invoke could result in another try to get or set the same id again, see
+    // bug 355497.
     JS_CHECK_RECURSION(cx, return false);
 
-    return Invoke(cx, thisv, fval, 0, nullptr, rval);
+    return Invoke(cx, thisv, getter, 0, nullptr, rval);
 }
 
 bool
-js::InvokeSetter(JSContext* cx, const Value& thisv, Value fval, HandleValue v)
+js::CallSetter(JSContext* cx, HandleValue thisv, HandleValue setter, HandleValue v)
 {
     JS_CHECK_RECURSION(cx, return false);
 
     RootedValue ignored(cx);
-    return Invoke(cx, thisv, fval, 1, v.address(), &ignored);
+    return Invoke(cx, thisv, setter, 1, v.address(), &ignored);
 }
 
 bool
@@ -722,8 +720,8 @@ js::HasInstance(JSContext* cx, HandleObject obj, HandleValue v, bool* bp)
 {
     const Class* clasp = obj->getClass();
     RootedValue local(cx, v);
-    if (clasp->hasInstance)
-        return clasp->hasInstance(cx, obj, &local, bp);
+    if (JSHasInstanceOp hasInstance = clasp->getHasInstance())
+        return hasInstance(cx, obj, &local, bp);
 
     RootedValue val(cx, ObjectValue(*obj));
     ReportValueError(cx, JSMSG_BAD_INSTANCEOF_RHS,

@@ -6,7 +6,6 @@ dnl file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 dnl Process this file with autoconf to produce a configure script.
 dnl ========================================================
-
 AC_PREREQ(2.13)
 AC_INIT(config/config.mk)
 AC_CONFIG_AUX_DIR(${srcdir}/build/autoconf)
@@ -71,7 +70,7 @@ GNOMEUI_VERSION=2.2.0
 GCONF_VERSION=1.2.1
 STARTUP_NOTIFICATION_VERSION=0.8
 DBUS_VERSION=0.60
-SQLITE_VERSION=3.11.0
+SQLITE_VERSION=3.12.1
 FONTCONFIG_VERSION=2.7.0
 
 MSMANIFEST_TOOL=
@@ -96,11 +95,6 @@ DIST="$MOZ_BUILD_ROOT/dist"
 
 MOZ_DEFAULT_COMPILER
 
-MOZ_ARG_WITH_STRING(gonk-toolchain-prefix,
-[  --with-gonk-toolchain-prefix=DIR
-                          prefix to gonk toolchain commands],
-    gonk_toolchain_prefix=$withval)
-
 if test -n "$gonkdir" ; then
     dnl export for js/src/configure. We can't pass the option down normally,
     dnl because it's a `--enable-project=b2g`-only option.
@@ -108,24 +102,11 @@ if test -n "$gonkdir" ; then
     kernel_name=`uname -s | tr "[[:upper:]]" "[[:lower:]]"`
     android_source="$gonkdir"
     ANDROID_SOURCE="$android_source"
-    ANDROID_NDK="${ANDROID_SOURCE}/ndk"
     dnl Default to ICS
     ANDROID_VERSION=15
     if test -n "${PLATFORM_SDK_VERSION}"; then
         ANDROID_VERSION="${PLATFORM_SDK_VERSION}"
     fi
-
-    dnl set up compilers
-    TOOLCHAIN_PREFIX="$gonk_toolchain_prefix"
-    AS="$gonk_toolchain_prefix"as
-    CC="$gonk_toolchain_prefix"gcc
-    CXX="$gonk_toolchain_prefix"g++
-    CPP="$gonk_toolchain_prefix"cpp
-    LD="$gonk_toolchain_prefix"ld
-    AR="$gonk_toolchain_prefix"ar
-    RANLIB="$gonk_toolchain_prefix"ranlib
-    STRIP="$gonk_toolchain_prefix"strip
-    OBJCOPY="$gonk_toolchain_prefix"objcopy
 
     if ! test -e "$gonkdir/ndk/sources/cxx-stl/stlport/src/iostream.cpp"; then
         AC_MSG_ERROR([Couldn't find path to stlport sources in the gonk tree])
@@ -210,20 +191,6 @@ if test -n "$gonkdir" ; then
 
     LDFLAGS="-mandroid -L$gonkdir/out/target/product/$GONK_PRODUCT/obj/lib -Wl,-rpath-link=$gonkdir/out/target/product/$GONK_PRODUCT/obj/lib --sysroot=$gonkdir/out/target/product/$GONK_PRODUCT/obj/ $LDFLAGS"
 
-    dnl prevent cross compile section from using these flags as host flags
-    if test -z "$HOST_CPPFLAGS" ; then
-        HOST_CPPFLAGS=" "
-    fi
-    if test -z "$HOST_CFLAGS" ; then
-        HOST_CFLAGS=" "
-    fi
-    if test -z "$HOST_CXXFLAGS" ; then
-        HOST_CXXFLAGS=" "
-    fi
-    if test -z "$HOST_LDFLAGS" ; then
-        HOST_LDFLAGS=" "
-    fi
-
     AC_DEFINE(ANDROID)
     AC_DEFINE_UNQUOTED(ANDROID_VERSION, $ANDROID_VERSION)
     AC_SUBST(ANDROID_VERSION)
@@ -266,15 +233,6 @@ dnl ========================================================
 dnl AR_FLAGS set here so HOST_AR_FLAGS can be set correctly (see bug 538269)
 AR_FLAGS='crs $@'
 
-if test -z "$COMPILE_ENVIRONMENT"; then
-if test "$target" != "$host"; then
-# Assert that we're cross compiling, but don't require a compile toolchain (as
-# MOZ_CROSS_COMPILER does below).
-CROSS_COMPILE=1
-AC_DEFINE(CROSS_COMPILE)
-fi
-fi # !COMPILE_ENVIRONMENT
-
 if test "$COMPILE_ENVIRONMENT"; then
 
 if test "$target" != "$host"; then
@@ -297,17 +255,8 @@ else
     if test -z "$HOST_CC"; then
         HOST_CC="$CC"
     fi
-    if test -z "$HOST_CFLAGS"; then
-        HOST_CFLAGS="$CFLAGS"
-    fi
     if test -z "$HOST_CXX"; then
         HOST_CXX="$CXX"
-    fi
-    if test -z "$HOST_CXXFLAGS"; then
-        HOST_CXXFLAGS="$CXXFLAGS"
-    fi
-    if test -z "$HOST_LDFLAGS"; then
-        HOST_LDFLAGS="$LDFLAGS"
     fi
     if test -z "$HOST_RANLIB"; then
         HOST_RANLIB="$RANLIB"
@@ -463,7 +412,7 @@ case "$target" in
               if test ! -d "$WIN_UCRT_REDIST_DIR"; then
                 AC_MSG_ERROR([Invalid Windows UCRT Redist directory: ${WIN_UCRT_REDIST_DIR}])
               fi
-              WIN_UCRT_REDIST_DIR=`cd "$WIN_UCRT_REDIST_DIR" && pwd`
+              WIN_UCRT_REDIST_DIR=`cd "$WIN_UCRT_REDIST_DIR" && pwd -W`
             fi
         else
             AC_MSG_ERROR([This version (${_CC_MAJOR_VERSION}.${_CC_MINOR_VERSION}.${_CC_BUILD_VERSION}) of the MSVC compiler is unsupported.
@@ -481,7 +430,7 @@ See https://developer.mozilla.org/en/Windows_Build_Prerequisites.])
           if test ! -d "$WIN32_REDIST_DIR"; then
             AC_MSG_ERROR([Invalid Win32 Redist directory: ${WIN32_REDIST_DIR}])
           fi
-          WIN32_REDIST_DIR=`cd "$WIN32_REDIST_DIR" && pwd`
+          WIN32_REDIST_DIR=`cd "$WIN32_REDIST_DIR" && pwd -W`
         fi
 
         dnl Ensure that mt.exe is 'Microsoft (R) Manifest Tool',
@@ -637,7 +586,6 @@ if test -n "$_WIN32_MSVC"; then
     # Since we're skipping compiler and library checks, hard-code
     # some facts here.
     AC_DEFINE(HAVE_IO_H)
-    AC_DEFINE(HAVE_SETBUF)
     AC_DEFINE(HAVE_ISATTY)
 fi
 
@@ -650,8 +598,6 @@ AC_SUBST(GNU_AS)
 AC_SUBST(GNU_LD)
 AC_SUBST(GNU_CC)
 AC_SUBST(GNU_CXX)
-AC_SUBST(INTEL_CC)
-AC_SUBST(INTEL_CXX)
 
 AC_SUBST(STL_FLAGS)
 AC_SUBST(WRAP_STL_INCLUDES)
@@ -672,10 +618,8 @@ dnl = Mac OS X toolchain support
 dnl ========================================================
 
 dnl The universal machinery sets UNIVERSAL_BINARY to inform packager.mk
-dnl that a universal binary is being produced and MOZ_CAN_RUN_PROGRAMS
-dnl when we can run target binaries.
+dnl that a universal binary is being produced.
 AC_SUBST(UNIVERSAL_BINARY)
-AC_SUBST(MOZ_CAN_RUN_PROGRAMS)
 
 MOZ_ARG_WITH_STRING(unify-dist,
 [  --with-unify-dist=dir   Location of the dist directory to unify with at packaging time (Mac OS X universal build only)],
@@ -791,9 +735,7 @@ dnl ========================================================
 dnl set the defaults first
 dnl ========================================================
 AS_BIN=$AS
-AR_LIST='$(AR) t'
 AR_EXTRACT='$(AR) x'
-AR_DELETE='$(AR) d'
 AS='$(CC)'
 AS_DASH_C_FLAG='-c'
 DLL_PREFIX=lib
@@ -968,14 +910,8 @@ if test "$GNU_CC"; then
     MMX_FLAGS="-mmmx"
     SSE_FLAGS="-msse"
     SSE2_FLAGS="-msse2"
-    # Per bug 719659 comment 2, some of the headers on ancient build machines
-    # may require gnu89 inline semantics.  But otherwise, we use C99.
-    # But on OS X we just use C99 plus GNU extensions, in order to fix
-    # bug 917526.
+    # We use C99.
     CFLAGS="$CFLAGS -std=gnu99"
-    if test "${OS_ARCH}" != Darwin; then
-        CFLAGS="$CFLAGS -fgnu89-inline"
-    fi
     # FIXME: Let us build with strict aliasing. bug 414641.
     CFLAGS="$CFLAGS -fno-strict-aliasing"
     MKSHLIB='$(CXX) $(CXXFLAGS) $(DSO_PIC_CFLAGS) $(DSO_LDOPTS) -Wl,-h,$(DSO_SONAME) -o $@'
@@ -1531,8 +1467,10 @@ case "$target" in
         # that behavior) that it's better to turn it off.
         # MSVC warning C4819 warns some UTF-8 characters (e.g. copyright sign)
         # on non-Western system locales even if it is in a comment.
+        # MSVC warning wd4595 warns non-member operator new or delete functions
+        # may not be declared inline, as of VS2015 Update 2.
         CFLAGS="$CFLAGS -wd4244 -wd4267 -wd4819"
-        CXXFLAGS="$CXXFLAGS -wd4251 -wd4244 -wd4267 -wd4345 -wd4351 -wd4800 -wd4819"
+        CXXFLAGS="$CXXFLAGS -wd4251 -wd4244 -wd4267 -wd4345 -wd4351 -wd4800 -wd4819 -wd4595"
         if test -n "$CLANG_CL"; then
             # XXX We should combine some of these with our generic GCC-style
             # warning checks.
@@ -1603,7 +1541,6 @@ case "$target" in
         WARNINGS_AS_ERRORS='-WX'
         MOZ_OPTIMIZE_FLAGS='-O1 -Oi'
         MOZ_FIX_LINK_PATHS=
-        MOZ_COMPONENT_NSPR_LIBS='$(NSPR_LIBS)'
         LDFLAGS="$LDFLAGS -LARGEADDRESSAWARE -NXCOMPAT"
         if test -z "$DEVELOPER_OPTIONS"; then
             LDFLAGS="$LDFLAGS -RELEASE"
@@ -1639,8 +1576,6 @@ case "$target" in
         HAVE_X86_AVX2=1
         MOZ_MEMORY=1
     fi
-    AC_DEFINE(HAVE_SNPRINTF)
-    AC_DEFINE(HW_THREADS)
     AC_DEFINE(STDC_HEADERS)
     AC_DEFINE(WIN32_LEAN_AND_MEAN)
     dnl See http://support.microsoft.com/kb/143208 to use STL
@@ -2722,7 +2657,6 @@ if test "${PNG_DIR}" -a -d "${PNG_DIR}" -a "$MOZ_SYSTEM_PNG" = 1; then
     MOZ_PNG_LIBS="-L${PNG_DIR}/lib ${MOZ_PNG_LIBS}"
 fi
 
-MOZ_PNG_ARM_NEON_CHECK=
 if test "$MOZ_SYSTEM_PNG" != 1 -a "$CPU_ARCH" = "arm" ; then
     MOZ_ARG_ENABLE_STRING(png-arm-neon-support,
         [  --enable-png-arm-neon-support=TYPE
@@ -2741,12 +2675,9 @@ if test "$MOZ_SYSTEM_PNG" != 1 -a "$CPU_ARCH" = "arm" ; then
             ;;
         *)
             MOZ_PNG_ARM_NEON=1
-            MOZ_PNG_ARM_NEON_CHECK=1
             ;;
     esac
 fi
-
-AC_SUBST(MOZ_PNG_ARM_NEON_CHECK)
 
 fi # SKIP_LIBRARY_CHECKS
 
@@ -2829,7 +2760,6 @@ MOZ_PERMISSIONS=1
 MOZ_PLACES=1
 MOZ_SOCIAL=1
 MOZ_PREF_EXTENSIONS=1
-MOZ_PROFILELOCKING=1
 MOZ_REFLOW_PERF=
 MOZ_SAFE_BROWSING=
 MOZ_HELP_VIEWER=
@@ -2852,7 +2782,6 @@ NECKO_PROTOCOLS_DEFAULT="about app data file ftp http res viewsource websocket w
 if test -n "$MOZ_RTSP"; then
   NECKO_PROTOCOLS_DEFAULT="$NECKO_PROTOCOLS_DEFAULT rtsp"
 fi
-USE_ARM_KUSER=
 BUILD_CTYPES=1
 MOZ_USE_NATIVE_POPUP_WINDOWS=
 MOZ_ANDROID_HISTORY=
@@ -2887,10 +2816,6 @@ esac
 
 case "${target}" in
     *-android*|*-linuxandroid*)
-        if test "$CPU_ARCH" = "arm" ; then
-          USE_ARM_KUSER=1
-        fi
-
         NSS_DISABLE_DBM=1
         MOZ_THEME_FASTSTRIPE=1
         MOZ_TREE_FREETYPE=1
@@ -2901,15 +2826,6 @@ case "${target}" in
         ;;
 
 esac
-
-MOZ_ARG_WITH_STRING(xulrunner-stub-name,
-[  --with-xulrunner-stub-name=appname   Create the xulrunner stub with the given name],
-  XULRUNNER_STUB_NAME=$withval)
-
-if test -z "$XULRUNNER_STUB_NAME"; then
-  XULRUNNER_STUB_NAME=xulrunner-stub
-fi
-AC_SUBST(XULRUNNER_STUB_NAME)
 
 # The app update channel is 'default' when not supplied. The value is used in
 # the application's confvars.sh so it must be set before confvars.sh is called.
@@ -3106,16 +3022,6 @@ dnl ========================================================
 if test -z "$gonkdir" ; then
     case "$MOZ_BUILD_APP" in
     mobile/android)
-        case "$target" in
-        *-android*|*-linuxandroid*)
-            :
-            ;;
-        *)
-            AC_MSG_ERROR([You must specify --target=arm-linux-androideabi (or some other valid android target) when building with --enable-application=mobile/android.
-             See https://wiki.mozilla.org/Mobile/Fennec/Android#Setup_Fennec_mozconfig for more information about the necessary options])
-            ;;
-        esac
-
         MOZ_ANDROID_SDK(23, 23.0.1)
         ;;
     esac
@@ -3202,17 +3108,6 @@ if test "$COMPILE_ENVIRONMENT"; then
 fi # COMPILE_ENVIRONMENT
 
 AC_SUBST(MOZ_FS_LAYOUT)
-
-dnl ========================================================
-dnl Use ARM userspace kernel helpers; tell NSPR to enable
-dnl their usage and use them in spidermonkey.
-dnl ========================================================
-MOZ_ARG_WITH_BOOL(arm-kuser,
-[  --with-arm-kuser         Use kuser helpers (Linux/ARM only -- requires kernel 2.6.13 or later)],
-    USE_ARM_KUSER=1,)
-if test -n "$USE_ARM_KUSER"; then
-   AC_DEFINE(USE_ARM_KUSER)
-fi
 
 dnl ========================================================
 dnl = startup-notification support module
@@ -3370,14 +3265,10 @@ then
                       MOZ_ENABLE_QTMOBILITY=1,
                       MOZ_ENABLE_QTMOBILITY=)
     if test "$MOZ_ENABLE_QTMOBILITY"; then
-       MOZ_ENABLE_QTMOBILITY=1
        MOZ_QT_CFLAGS="$MOZ_QT_CFLAGS $_QTMOBILITY_CFLAGS"
        MOZ_QT_LIBS="$MOZ_QT_LIBS $_QTMOBILITY_LIBS"
-       AC_DEFINE(MOZ_ENABLE_QTMOBILITY)
-       AC_SUBST(MOZ_ENABLE_QTMOBILITY)
     else
        AC_CHECK_LIB(QtSensors, main, [
-          MOZ_ENABLE_QTMOBILITY=1
           MOZ_QT_CFLAGS="$MOZ_QT_CFLAGS -I$QTDIR/include/QtMobility"
           MOZ_QT_CFLAGS="$MOZ_QT_CFLAGS -I$QTDIR/include/QtSensors"
           MOZ_QT_CFLAGS="$MOZ_QT_CFLAGS -I$QTDIR/include/QtFeedback"
@@ -3428,14 +3319,12 @@ then
     TK_LIBS=$MOZ_QT_LIBS
 fi
 
-AC_SUBST(GTK_CONFIG)
 AC_SUBST_LIST(TK_CFLAGS)
 AC_SUBST_LIST(TK_LIBS)
 
 AC_SUBST(MOZ_ENABLE_QT)
 AC_SUBST(MOZ_ENABLE_QTNETWORK)
 AC_SUBST(MOZ_ENABLE_QMSYSTEM2)
-AC_SUBST(MOZ_ENABLE_QTMOBILITY)
 AC_SUBST_LIST(MOZ_QT_CFLAGS)
 AC_SUBST_LIST(MOZ_QT_LIBS)
 
@@ -3931,7 +3820,6 @@ if test -n "$MOZ_WEBRTC_HARDWARE_AEC_NS"; then
 fi
 
 AC_SUBST(MOZ_WEBRTC)
-AC_SUBST(MOZ_WEBRTC_LEAKING_TESTS)
 AC_SUBST(MOZ_WEBRTC_SIGNALING)
 AC_SUBST(MOZ_PEERCONNECTION)
 AC_SUBST(MOZ_WEBRTC_ASSERT_ALWAYS)
@@ -4183,7 +4071,6 @@ if test -z "$MOZ_SYSTEM_LIBVPX"; then
     dnl Detect if we can use an assembler to compile optimized assembly for libvpx.
     dnl We currently require yasm on all x86 platforms and require yasm 1.1.0 on Win32.
     dnl We currently require gcc on all arm platforms.
-    VPX_NEED_OBJ_INT_EXTRACT=
 
     dnl See if we have assembly on this platform.
     case "$OS_ARCH:$CPU_ARCH" in
@@ -4259,15 +4146,6 @@ if test -z "$MOZ_SYSTEM_LIBVPX"; then
       VPX_ASFLAGS="-DPIC"
     fi
 
-    if test -z "$GNU_CC" -a -z "$INTEL_CC" -a -z "$CLANG_CC" ; then
-      dnl We prefer to get asm offsets using inline assembler, which the above
-      dnl compilers can do. When we're not using one of those, we have to fall
-      dnl back to obj_int_extract, which reads them from a compiled object
-      dnl file. Unfortunately, that only works if we're compiling on a system
-      dnl with the header files for the appropriate object file format.
-      VPX_NEED_OBJ_INT_EXTRACT=1
-    fi
-
     if test -n "$VPX_X86_ASM"; then
       AC_DEFINE(VPX_X86_ASM)
     elif test -n "$VPX_ARM_ASM"; then
@@ -4294,13 +4172,10 @@ fi
 
 if test -n "$MOZ_TREMOR"; then
     AC_DEFINE(MOZ_TREMOR)
-    # Tremor doesn't have an encoder.
-    MOZ_WEBM_ENCODER=
 fi
 
-if test -n "$MOZ_WEBM_ENCODER"; then
-    AC_DEFINE(MOZ_WEBM_ENCODER)
-fi
+MOZ_WEBM_ENCODER=1
+AC_DEFINE(MOZ_WEBM_ENCODER)
 AC_SUBST(MOZ_WEBM_ENCODER)
 
 dnl ==================================
@@ -4329,14 +4204,12 @@ dnl ========================================================
 dnl = Disable PulseAudio
 dnl ========================================================
 
-dnl If using Linux, ensure that the PA library is available
+dnl If using Desktop Linux, ensure that the PA library is available
 case "$OS_TARGET" in
 WINNT|Darwin|Android|OpenBSD)
     ;;
 *)
-    if test -z "$MOZ_B2G"; then
-        MOZ_PULSEAUDIO=1
-    fi
+    MOZ_PULSEAUDIO=1
     ;;
 esac
 
@@ -5891,9 +5764,6 @@ else
   *-android*|*-linuxandroid*)
     AC_DEFINE(MOZ_MEMORY_LINUX)
     AC_DEFINE(MOZ_MEMORY_ANDROID)
-    if test -n "$gonkdir"; then
-      AC_DEFINE(MOZ_MEMORY_GONK)
-    fi
     ;;
   *-*linux*)
     AC_DEFINE(MOZ_MEMORY_LINUX)
@@ -6536,25 +6406,6 @@ AC_SUBST(PROFILE_GEN_LDFLAGS)
 AC_SUBST(PROFILE_USE_CFLAGS)
 AC_SUBST(PROFILE_USE_LDFLAGS)
 
-dnl =============================================
-dnl Support for -fno-integrated-as (recent clang)
-dnl =============================================
-dnl Under clang 3.4+, use -fno-integrated-as to
-dnl build libvpx's vp8_asm_enc_offsets.c
-
-_SAVE_CFLAGS="$CFLAGS"
-CFLAGS="$CFLAGS -fno-integrated-as -S"
-
-AC_MSG_CHECKING([whether C compiler supports -fno-integrated-as])
-AC_TRY_COMPILE([], [return 0;],
-               [ NO_INTEGRATED_AS_CFLAGS="-fno-integrated-as"
-                 result="yes" ], result="no")
-AC_MSG_RESULT([$result])
-
-CFLAGS="$_SAVE_CFLAGS"
-
-AC_SUBST(NO_INTEGRATED_AS_CFLAGS)
-
 fi # ! SKIP_COMPILER_CHECKS
 
 AC_DEFINE(CPP_THROW_NEW, [throw()])
@@ -6913,7 +6764,7 @@ if test "$MOZ_ENABLE_SKIA"; then
     AC_DEFINE(SK_BUILD_FOR_ANDROID_NDK)
   fi
 
-  if test "${CPU_ARCH}" != "ppc" -a "${CPU_ARCH}" != "ppc64" -a "${CPU_ARCH}" != "sparc" -a -z "$MOZ_DISABLE_SKIA_GPU" ; then
+  if test "${CPU_ARCH}" != "ppc" -a "${CPU_ARCH}" != "ppc64" -a "${CPU_ARCH}" != "sparc" -a "${CPU_ARCH}" != "sparc64" -a -z "$MOZ_DISABLE_SKIA_GPU" ; then
     SKIA_INCLUDES="$SKIA_INCLUDES /gfx/skia/skia/include/gpu /gfx/skia/skia/include/utils"
     MOZ_ENABLE_SKIA_GPU=1
     AC_DEFINE(USE_SKIA_GPU)
@@ -6937,20 +6788,6 @@ else
 fi
 
 AC_SUBST(MOZ_XUL)
-
-dnl ========================================================
-dnl disable profile locking
-dnl   do no use this in applications that can have more than
-dnl   one process accessing the profile directory.
-dnl ========================================================
-MOZ_ARG_DISABLE_BOOL(profilelocking,
-[  --disable-profilelocking
-                          Disable profile locking],
-    MOZ_PROFILELOCKING=,
-    MOZ_PROFILELOCKING=1 )
-if test "$MOZ_PROFILELOCKING"; then
-  AC_DEFINE(MOZ_PROFILELOCKING)
-fi
 
 dnl ========================================================
 dnl necko configuration options
@@ -7117,9 +6954,7 @@ dnl ========================================================
 
 AC_SUBST(AR)
 AC_SUBST(AR_FLAGS)
-AC_SUBST(AR_LIST)
 AC_SUBST(AR_EXTRACT)
-AC_SUBST(AR_DELETE)
 AC_SUBST(AS)
 AC_SUBST(ASFLAGS)
 AC_SUBST(AS_DASH_C_FLAG)
@@ -7145,7 +6980,6 @@ AC_SUBST(MOZ_TOOLKIT_SEARCH)
 AC_SUBST(MOZ_FEEDS)
 AC_SUBST(NS_PRINTING)
 AC_SUBST(MOZ_HELP_VIEWER)
-AC_SUBST(TOOLCHAIN_PREFIX)
 
 AC_SUBST(JAVA)
 AC_SUBST(JAVAC)
@@ -7153,8 +6987,6 @@ AC_SUBST(JAVAH)
 AC_SUBST(JAR)
 AC_SUBST(JARSIGNER)
 AC_SUBST(KEYTOOL)
-
-AC_SUBST(MOZ_PROFILELOCKING)
 
 AC_SUBST(ENABLE_TESTS)
 AC_SUBST(MOZ_UNIVERSALCHARDET)
@@ -7205,7 +7037,6 @@ AC_SUBST(STRIP_FLAGS)
 AC_SUBST(USE_ELF_HACK)
 AC_SUBST(INCREMENTAL_LINKER)
 AC_SUBST(MOZ_COMPONENTS_VERSION_SCRIPT_LDFLAGS)
-AC_SUBST(MOZ_COMPONENT_NSPR_LIBS)
 
 AC_SUBST(MOZ_FIX_LINK_PATHS)
 
@@ -7417,6 +7248,7 @@ fi
 
 dnl win32 options
 AC_SUBST(WIN32_REDIST_DIR)
+AC_SUBST(WIN_UCRT_REDIST_DIR)
 AC_SUBST(MAKENSISU)
 
 dnl Echo the CFLAGS to remove extra whitespace.
@@ -7500,12 +7332,11 @@ AC_SUBST(OS_COMPILE_CFLAGS)
 AC_SUBST(OS_COMPILE_CXXFLAGS)
 AC_SUBST(OS_LDFLAGS)
 AC_SUBST(OS_LIBS)
-AC_SUBST(CROSS_COMPILE)
-AC_SUBST(WCHAR_CFLAGS)
 
 AC_SUBST(HOST_CC)
 AC_SUBST(HOST_CXX)
 AC_SUBST(HOST_CFLAGS)
+AC_SUBST(HOST_CPPFLAGS)
 AC_SUBST(HOST_CXXFLAGS)
 AC_SUBST(HOST_LDFLAGS)
 AC_SUBST(HOST_OPTIMIZE_FLAGS)
@@ -7560,7 +7391,6 @@ AC_SUBST_LIST(VPX_ASFLAGS)
 AC_SUBST(VPX_AS_CONVERSION)
 AC_SUBST(VPX_X86_ASM)
 AC_SUBST(VPX_ARM_ASM)
-AC_SUBST(VPX_NEED_OBJ_INT_EXTRACT)
 AC_SUBST(MOZ_CODE_COVERAGE)
 AC_SUBST(LIBJPEG_TURBO_USE_YASM)
 AC_SUBST_LIST(LIBJPEG_TURBO_ASFLAGS)
@@ -7731,7 +7561,6 @@ AC_DEFINE(NO_NSPR_10_SUPPORT)
 MOZ_CREATE_CONFIG_STATUS()
 
 if test "$COMPILE_ENVIRONMENT"; then
-  MOZ_SUBCONFIGURE_ICU()
   MOZ_SUBCONFIGURE_FFI()
   MOZ_SUBCONFIGURE_JEMALLOC()
 fi
@@ -7875,6 +7704,7 @@ export RUSTFLAGS
 export HOST_CC
 export HOST_CXX
 export HOST_CFLAGS
+export HOST_CPPFLAGS
 export HOST_CXXFLAGS
 export HOST_LDFLAGS
 

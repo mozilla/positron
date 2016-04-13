@@ -32,13 +32,21 @@ public class Experiments {
     public static final String WHATSNEW_NOTIFICATION = "whatsnew-notification";
 
     // Subscribe to known, bookmarked sites and show a notification if new content is available.
-    public static final String CONTENT_NOTIFICATIONS = "content-notifications";
+    public static final String CONTENT_NOTIFICATIONS_12HRS = "content-notifications-12hrs";
+    public static final String CONTENT_NOTIFICATIONS_8AM = "content-notifications-8am";
+    public static final String CONTENT_NOTIFICATIONS_5PM = "content-notifications-5pm";
 
     // Onboarding: "Features and Story". These experiments are determined
     // on the client, they are not part of the server config.
     public static final String ONBOARDING2_A = "onboarding2-a"; // Control: Single (blue) welcome screen
     public static final String ONBOARDING2_B = "onboarding2-b"; // 4 static Feature slides
     public static final String ONBOARDING2_C = "onboarding2-c"; // 4 static + 1 clickable (Data saving) Feature slides
+
+    // Synchronizing the catalog of downloadable content from Kinto
+    public static final String DOWNLOAD_CONTENT_CATALOG_SYNC = "download-content-catalog-sync";
+
+    // Promotion for "Add to homescreen"
+    public static final String PROMOTE_ADD_TO_HOMESCREEN = "promote-add-to-homescreen";
 
     public static final String PREF_ONBOARDING_VERSION = "onboarding_version";
 

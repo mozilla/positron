@@ -2466,9 +2466,9 @@ js::ClassCanHaveExtraProperties(const Class* clasp)
 {
     if (clasp == &UnboxedPlainObject::class_ || clasp == &UnboxedArrayObject::class_)
         return false;
-    return clasp->resolve
-        || clasp->ops.lookupProperty
-        || clasp->ops.getProperty
+    return clasp->getResolve()
+        || clasp->getOpsLookupProperty()
+        || clasp->getOpsGetProperty()
         || IsTypedArrayClass(clasp);
 }
 
@@ -3409,7 +3409,7 @@ PreliminaryObjectArray::sweep()
                 obj->setGroup(objectProto->groupRaw());
                 MOZ_ASSERT(obj->is<NativeObject>());
                 MOZ_ASSERT(obj->getClass() == objectProto->getClass());
-                MOZ_ASSERT(!obj->getClass()->finalize);
+                MOZ_ASSERT(!obj->getClass()->hasFinalize());
             }
 
             *ptr = nullptr;

@@ -1084,7 +1084,7 @@ DefaultTooltipTextProvider::DefaultTooltipTextProvider()
 {
   // There are certain element types which we don't want to use
   // as tool tip text.
-  mTag_dialogHeader = do_GetAtom("dialogheader");
+  mTag_dialogHeader = NS_Atomize("dialogheader");
 }
 
 // A helper routine that determines whether we're still interested in SVG
@@ -1121,13 +1121,13 @@ DefaultTooltipTextProvider::GetNodeText(nsIDOMNode* aNode, char16_t** aText,
   nsCOMPtr<nsIConstraintValidation> cvElement = do_QueryInterface(current);
   if (cvElement) {
     nsCOMPtr<nsIContent> content = do_QueryInterface(cvElement);
-    nsCOMPtr<nsIAtom> titleAtom = do_GetAtom("title");
+    nsCOMPtr<nsIAtom> titleAtom = NS_Atomize("title");
 
     nsCOMPtr<nsIFormControl> formControl = do_QueryInterface(content);
     bool formHasNoValidate = false;
     mozilla::dom::Element* form = formControl->GetFormElement();
     if (form) {
-      nsCOMPtr<nsIAtom> noValidateAtom = do_GetAtom("novalidate");
+      nsCOMPtr<nsIAtom> noValidateAtom = NS_Atomize("novalidate");
       formHasNoValidate = form->HasAttr(kNameSpaceID_None, noValidateAtom);
     }
 
@@ -1186,7 +1186,7 @@ DefaultTooltipTextProvider::GetNodeText(nsIDOMNode* aNode, char16_t** aText,
                 NS_ENSURE_SUCCESS(rv, rv);
               } else {
                 FileList* fl = static_cast<FileList*>(fileList.get());
-                fl->UnsafeItem(0).GetAsFile()->GetName(outText);
+                fl->Item(0)->GetName(outText);
 
                 // For UX and performance (jank) reasons we cap the number of
                 // files that we list in the tooltip to 20 plus a "and xxx more"
@@ -1195,7 +1195,7 @@ DefaultTooltipTextProvider::GetNodeText(nsIDOMNode* aNode, char16_t** aText,
                 uint32_t count = std::min(listLength, TRUNCATED_FILE_COUNT);
                 for (uint32_t i = 1; i < count; ++i) {
                   nsString fileName;
-                  fl->UnsafeItem(i).GetAsFile()->GetName(fileName);
+                  fl->Item(i)->GetName(fileName);
                   outText.Append(NS_LITERAL_STRING("\n"));
                   outText.Append(fileName);
                 }

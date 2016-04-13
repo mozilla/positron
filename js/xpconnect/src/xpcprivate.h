@@ -219,7 +219,7 @@ extern const char XPC_XPCONNECT_CONTRACTID[];
 // wrappednative wrapper, holding the XPCWrappedNative in its private slot.
 static inline bool IS_WN_CLASS(const js::Class* clazz)
 {
-    return clazz->ext.isWrappedNative;
+    return clazz->isWrappedNative();
 }
 
 static inline bool IS_WN_REFLECTOR(JSObject* obj)
@@ -942,33 +942,8 @@ extern bool
 XPC_WN_GetterSetter(JSContext* cx, unsigned argc, JS::Value* vp);
 
 // Macros to initialize Object or Function like XPC_WN classes
-#define XPC_WN_WithCall_ObjectOps                                             \
-    {                                                                         \
-        nullptr, /* lookupProperty */                                         \
-        nullptr, /* defineProperty */                                         \
-        nullptr, /* hasProperty */                                            \
-        nullptr, /* getProperty    */                                         \
-        nullptr, /* setProperty    */                                         \
-        nullptr, /* getOwnPropertyDescriptor */                               \
-        nullptr, /* deleteProperty */                                         \
-        nullptr, nullptr, /* watch/unwatch */                                 \
-        nullptr, /* getElements */                                            \
-        nullptr, /* enumerate */                                              \
-    }
-
-#define XPC_WN_NoCall_ObjectOps                                               \
-    {                                                                         \
-        nullptr, /* lookupProperty */                                         \
-        nullptr, /* defineProperty */                                         \
-        nullptr, /* hasProperty */                                            \
-        nullptr, /* getProperty    */                                         \
-        nullptr, /* setProperty    */                                         \
-        nullptr, /* getOwnPropertyDescriptor */                               \
-        nullptr, /* deleteProperty */                                         \
-        nullptr, nullptr, /* watch/unwatch */                                 \
-        nullptr, /* getElements */                                            \
-        nullptr, /* enumerate */                                              \
-    }
+#define XPC_WN_WithCall_ObjectOps JS_NULL_OBJECT_OPS
+#define XPC_WN_NoCall_ObjectOps   JS_NULL_OBJECT_OPS
 
 // Maybe this macro should check for class->enumerate ==
 // XPC_WN_Shared_Proto_Enumerate or something rather than checking for
@@ -1675,8 +1650,8 @@ public:
     XPCNativeScriptableShared(uint32_t aFlags, char* aName, bool aPopulate);
 
     ~XPCNativeScriptableShared() {
-        if (mJSClass.name)
-            free((void*)mJSClass.name);
+        free((void*)mJSClass.name);
+        free((void*)mJSClass.cOps);
         MOZ_COUNT_DTOR(XPCNativeScriptableShared);
     }
 
@@ -1692,6 +1667,10 @@ public:
 
 private:
     XPCNativeScriptableFlags mFlags;
+
+    // This is an unusual js::Class instance: its name and cOps members are
+    // heap-allocated, unlike all other instances for which they are statically
+    // allocated. So we must free them in the destructor.
     js::Class mJSClass;
 };
 
@@ -2968,6 +2947,7 @@ protected:
     InitializeOnMainThread();
 
     nsString mMessage;
+    nsString mMessageName;
     nsString mSourceName;
     uint32_t mLineNumber;
     nsString mSourceLine;
@@ -3384,7 +3364,8 @@ struct GlobalProperties {
 
     }
     bool Parse(JSContext* cx, JS::HandleObject obj);
-    bool Define(JSContext* cx, JS::HandleObject obj);
+    bool DefineInXPCComponents(JSContext* cx, JS::HandleObject obj);
+    bool DefineInSandbox(JSContext* cx, JS::HandleObject obj);
     bool CSS : 1;
     bool indexedDB : 1;
     bool XMLHttpRequest : 1;
@@ -3401,6 +3382,8 @@ struct GlobalProperties {
     bool fetch : 1;
     bool caches : 1;
     bool fileReader: 1;
+private:
+    bool Define(JSContext* cx, JS::HandleObject obj);
 };
 
 // Infallible.

@@ -13,6 +13,7 @@
 
 #include "mozilla/dom/File.h"
 #include "mozilla/Mutex.h"
+#include "mozilla/StaticMutex.h"
 #include "mozilla/Monitor.h"
 #include "mozilla/UniquePtr.h"
 #include "nsCOMPtr.h"
@@ -88,7 +89,9 @@ public:
   {
     // Nothing to do here, everything is managed in MediaManager.cpp
   }
-  nsresult Start(SourceMediaStream* aMediaStream, TrackID aId) override;
+  nsresult Start(SourceMediaStream* aMediaStream,
+                 TrackID aId,
+                 const PrincipalHandle& aPrincipalHandle) override;
   nsresult Stop(SourceMediaStream* aMediaStream, TrackID aId) override;
   nsresult Restart(const dom::MediaTrackConstraints& aConstraints,
                    const MediaEnginePrefs &aPrefs,
@@ -103,8 +106,11 @@ public:
                        const AudioDataValue* aBuffer, size_t aFrames,
                        TrackRate aRate, uint32_t aChannels) override
   {}
-  void NotifyPull(MediaStreamGraph* aGraph, SourceMediaStream* aSource,
-                  TrackID aID, StreamTime aDesiredTime) override
+  void NotifyPull(MediaStreamGraph* aGraph,
+                  SourceMediaStream* aSource,
+                  TrackID aID,
+                  StreamTime aDesiredTime,
+                  const PrincipalHandle& aPrincipalHandle) override
   {}
   dom::MediaSourceEnum GetMediaSource() const override
   {
@@ -114,7 +120,7 @@ public:
   {
     return false;
   }
-  nsresult TakePhoto(PhotoCallback* aCallback) override
+  nsresult TakePhoto(MediaEnginePhotoCallback* aCallback) override
   {
     return NS_ERROR_NOT_IMPLEMENTED;
   }
@@ -195,8 +201,15 @@ public:
     return (*mDeviceIndexes)[aIndex]; // translate to mDevices index
   }
 
+  static StaticMutex& Mutex()
+  {
+    return sMutex;
+  }
+
   static bool GetDeviceID(int aDeviceIndex, CubebUtils::AudioDeviceID &aID)
   {
+    // Assert sMutex is held
+    sMutex.AssertCurrentThreadOwns();
     int dev_index = DeviceIndex(aDeviceIndex);
     if (dev_index != -1) {
       aID = mDevices->device[dev_index]->devid;
@@ -280,6 +293,7 @@ private:
   static nsTArray<nsCString>* mDeviceNames;
   static cubeb_device_collection *mDevices;
   static bool mAnyInUse;
+  static StaticMutex sMutex;
 };
 
 class AudioInputWebRTC final : public AudioInput
@@ -426,7 +440,9 @@ public:
                     const nsString& aDeviceId,
                     const nsACString& aOrigin) override;
   nsresult Deallocate() override;
-  nsresult Start(SourceMediaStream* aStream, TrackID aID) override;
+  nsresult Start(SourceMediaStream* aStream,
+                 TrackID aID,
+                 const PrincipalHandle& aPrincipalHandle) override;
   nsresult Stop(SourceMediaStream* aSource, TrackID aID) override;
   nsresult Restart(const dom::MediaTrackConstraints& aConstraints,
                    const MediaEnginePrefs &aPrefs,
@@ -436,7 +452,8 @@ public:
   void NotifyPull(MediaStreamGraph* aGraph,
                   SourceMediaStream* aSource,
                   TrackID aId,
-                  StreamTime aDesiredTime) override;
+                  StreamTime aDesiredTime,
+                  const PrincipalHandle& aPrincipalHandle) override;
 
   // AudioDataListenerInterface methods
   void NotifyOutputData(MediaStreamGraph* aGraph,
@@ -454,7 +471,7 @@ public:
     return dom::MediaSourceEnum::Microphone;
   }
 
-  nsresult TakePhoto(PhotoCallback* aCallback) override
+  nsresult TakePhoto(MediaEnginePhotoCallback* aCallback) override
   {
     return NS_ERROR_NOT_IMPLEMENTED;
   }
@@ -493,11 +510,13 @@ private:
   nsAutoPtr<AudioPacketizer<AudioDataValue, int16_t>> mPacketizer;
   ScopedCustomReleasePtr<webrtc::VoEExternalMedia> mVoERenderListener;
 
-  // mMonitor protects mSources[] access/changes, and transitions of mState
-  // from kStarted to kStopped (which are combined with EndTrack()).
-  // mSources[] is accessed from webrtc threads.
+  // mMonitor protects mSources[] and mPrinicpalIds[] access/changes, and
+  // transitions of mState from kStarted to kStopped (which are combined with
+  // EndTrack()). mSources[] and mPrincipalHandles[] are accessed from webrtc
+  // threads.
   Monitor mMonitor;
   nsTArray<RefPtr<SourceMediaStream>> mSources;
+  nsTArray<PrincipalHandle> mPrincipalHandles; // Maps to mSources.
   nsCOMPtr<nsIThread> mThread;
   int mCapIndex;
   int mChannel;

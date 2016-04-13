@@ -1018,6 +1018,11 @@
         </body>
       </method>
 
+      <!-- Holds a unique ID for the tab change that's currently being timed.
+           Used to make sure that multiple, rapid tab switches do not try to
+           create overlapping timers. -->
+      <field name="_tabSwitchID">null</field>
+
       <method name="updateCurrentBrowser">
         <parameter name="aForceUpdate"/>
         <body>
@@ -1033,11 +1038,23 @@
                 // Waiting until the next MozAfterPaint ensures that we capture
                 // the time it takes to paint, upload the textures to the compositor,
                 // and then composite.
+                if (this._tabSwitchID) {
+                  TelemetryStopwatch.cancel("FX_TAB_SWITCH_TOTAL_MS");
+                }
+
+                let tabSwitchID = Symbol();
+
                 TelemetryStopwatch.start("FX_TAB_SWITCH_TOTAL_MS");
-                window.addEventListener("MozAfterPaint", function onMozAfterPaint() {
-                  TelemetryStopwatch.finish("FX_TAB_SWITCH_TOTAL_MS");
+                this._tabSwitchID = tabSwitchID;
+
+                let onMozAfterPaint = () => {
+                  if (this._tabSwitchID === tabSwitchID) {
+                    TelemetryStopwatch.finish("FX_TAB_SWITCH_TOTAL_MS");
+                    this._tabSwitchID = null;
+                  }
                   window.removeEventListener("MozAfterPaint", onMozAfterPaint);
-                });
+                }
+                window.addEventListener("MozAfterPaint", onMozAfterPaint);
               }
             }
 
@@ -1807,6 +1824,99 @@
         </body>
       </method>
 
+      <method name="_linkBrowserToTab">
+        <parameter name="aTab"/>
+        <parameter name="aURI"/>
+        <parameter name="aParams"/>
+        <body>
+          <![CDATA[
+            "use strict";
+
+            let aReferrerURI          = aParams.referrerURI;
+            let aReferrerPolicy       = aParams.referrerPolicy;
+            let aCharset              = aParams.charset;
+            let aPostData             = aParams.postData;
+            let aAllowThirdPartyFixup = aParams.allowThirdPartyFixup;
+            let aFromExternal         = aParams.fromExternal;
+            let aAllowMixedContent    = aParams.allowMixedContent;
+            let aForceNotRemote       = aParams.forceNotRemote;
+            let aNoReferrer           = aParams.noReferrer;
+            let aUserContextId        = aParams.userContextId;
+
+            let uriIsAboutBlank = !aURI || aURI == "about:blank";
+
+            // The new browser should be remote if this is an e10s window and
+            // the uri to load can be loaded remotely.
+            let remote = gMultiProcessBrowser &&
+                         !aForceNotRemote &&
+                         E10SUtils.canLoadURIInProcess(aURI, Ci.nsIXULRuntime.PROCESS_TYPE_CONTENT);
+
+            let browser;
+            let usingPreloadedContent = false;
+
+            // If we open a new tab with the newtab URL in the default
+            // userContext, check if there is a preloaded browser ready.
+            // Private windows are not included because both the label and the
+            // icon for the tab would be set incorrectly (see bug 1195981).
+            if (aURI == BROWSER_NEW_TAB_URL && !aUserContextId &&
+                !PrivateBrowsingUtils.isWindowPrivate(window)) {
+              browser = this._getPreloadedBrowser();
+              usingPreloadedContent = !!browser;
+            }
+
+            if (!browser) {
+              // No preloaded browser found, create one.
+              browser = this._createBrowser({remote: remote,
+                                             uriIsAboutBlank: uriIsAboutBlank,
+                                             userContextId: aUserContextId});
+            }
+
+            let notificationbox = this.getNotificationBox(browser);
+            let uniqueId = this._generateUniquePanelID();
+            notificationbox.id = uniqueId;
+            aTab.linkedPanel = uniqueId;
+            aTab.linkedBrowser = browser;
+            this._tabForBrowser.set(browser, aTab);
+
+            // Inject the <browser> into the DOM if necessary.
+            if (!notificationbox.parentNode) {
+              // NB: this appendChild call causes us to run constructors for the
+              // browser element, which fires off a bunch of notifications. Some
+              // of those notifications can cause code to run that inspects our
+              // state, so it is important that the tab element is fully
+              // initialized by this point.
+              this.mPanelContainer.appendChild(notificationbox);
+            }
+
+            // wire up a progress listener for the new browser object.
+            let tabListener = this.mTabProgressListener(aTab, browser, uriIsAboutBlank, usingPreloadedContent);
+            const filter = Cc["@mozilla.org/appshell/component/browser-status-filter;1"]
+                                     .createInstance(Ci.nsIWebProgress);
+            filter.addProgressListener(tabListener, Ci.nsIWebProgress.NOTIFY_ALL);
+            browser.webProgress.addProgressListener(filter, Ci.nsIWebProgress.NOTIFY_ALL);
+            this._tabListeners.set(aTab, tabListener);
+            this._tabFilters.set(aTab, filter);
+
+            browser.droppedLinkHandler = handleDroppedLink;
+
+            // We start our browsers out as inactive, and then maintain
+            // activeness in the tab switcher.
+            browser.docShellIsActive = false;
+
+            // When addTab() is called with an URL that is not "about:blank" we
+            // set the "nodefaultsrc" attribute that prevents a frameLoader
+            // from being created as soon as the linked <browser> is inserted
+            // into the DOM. We thus have to register the new outerWindowID
+            // for non-remote browsers after we have called browser.loadURI().
+            if (!remote) {
+              this._outerWindowIDBrowserMap.set(browser.outerWindowID, browser);
+            }
+
+            return { usingPreloadedContent: usingPreloadedContent };
+          ]]>
+        </body>
+      </method>
+
       <method name="addTab">
         <parameter name="aURI"/>
         <parameter name="aReferrerURI"/>
@@ -1816,6 +1926,8 @@
         <parameter name="aAllowThirdPartyFixup"/>
         <body>
           <![CDATA[
+            "use strict";
+
             const NS_XUL = "http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul";
             var aReferrerPolicy;
             var aFromExternal;
@@ -1867,12 +1979,6 @@
             t.setAttribute("onerror", "this.removeAttribute('image');");
             t.className = "tabbrowser-tab";
 
-            // The new browser should be remote if this is an e10s window and
-            // the uri to load can be loaded remotely.
-            let remote = gMultiProcessBrowser &&
-                         !aForceNotRemote &&
-                         E10SUtils.canLoadURIInProcess(aURI, Ci.nsIXULRuntime.PROCESS_TYPE_CONTENT);
-
             this.tabContainer._unlockTabSizing();
 
             // When overflowing, new tabs are scrolled into view smoothly, which
@@ -1897,59 +2003,35 @@
             if (aOwner)
               t.owner = aOwner;
 
-            let b;
-            let usingPreloadedContent = false;
-
-            // If we open a new tab with the newtab URL in the default
-            // userContext, check if there is a preloaded browser ready.
-            // Private windows are not included because both the label and the
-            // icon for the tab would be set incorrectly (see bug 1195981).
-            if (aURI == BROWSER_NEW_TAB_URL && !aUserContextId &&
-                !PrivateBrowsingUtils.isWindowPrivate(window)) {
-              b = this._getPreloadedBrowser();
-              usingPreloadedContent = !!b;
-            }
-
-            if (!b) {
-              // No preloaded browser found, create one.
-              b = this._createBrowser({remote: remote,
-                                       uriIsAboutBlank: uriIsAboutBlank,
-                                       userContextId: aUserContextId});
-            }
-
-            let notificationbox = this.getNotificationBox(b);
             var position = this.tabs.length - 1;
-            var uniqueId = this._generateUniquePanelID();
-            notificationbox.id = uniqueId;
-            t.linkedPanel = uniqueId;
-            t.linkedBrowser = b;
-            this._tabForBrowser.set(b, t);
             t._tPos = position;
             t.lastAccessed = Date.now();
             this.tabContainer._setPositionalAttributes();
 
-            // Inject the <browser> into the DOM if necessary.
-            if (!notificationbox.parentNode) {
-              // NB: this appendChild call causes us to run constructors for the
-              // browser element, which fires off a bunch of notifications. Some
-              // of those notifications can cause code to run that inspects our
-              // state, so it is important that the tab element is fully
-              // initialized by this point.
-              this.mPanelContainer.appendChild(notificationbox);
-            }
-
             this.tabContainer.updateVisibility();
 
-            // wire up a progress listener for the new browser object.
-            var tabListener = this.mTabProgressListener(t, b, uriIsAboutBlank, usingPreloadedContent);
-            const filter = Components.classes["@mozilla.org/appshell/component/browser-status-filter;1"]
-                                     .createInstance(Components.interfaces.nsIWebProgress);
-            filter.addProgressListener(tabListener, Components.interfaces.nsIWebProgress.NOTIFY_ALL);
-            b.webProgress.addProgressListener(filter, Components.interfaces.nsIWebProgress.NOTIFY_ALL);
-            this._tabListeners.set(t, tabListener);
-            this._tabFilters.set(t, filter);
+            let options = {
+              referrerURI          : aReferrerURI,
+              referrerPolicy       : aReferrerPolicy,
+              charset              : aCharset,
+              postData             : aPostData,
+              allowThirdPartyFixup : aAllowThirdPartyFixup,
+              fromExternal         : aFromExternal,
+              allowMixedContent    : aAllowMixedContent,
+              forceNotRemote       : aForceNotRemote,
+              noReferrer           : aNoReferrer,
+              userContextId        : aUserContextId
+            };
 
-            b.droppedLinkHandler = handleDroppedLink;
+            // Currently in this incarnation of bug 906076, we are forcing the
+            // browser to immediately be linked.  In future incarnations of this
+            // bug this will be removed so we can leave the tab in its "lazy"
+            // state to be exploited for startup optimization.  Note that for
+            // now this must occur before "TabOpen" event is fired, as that will
+            // trigger SessionStore.jsm to run code that expects the existence
+            // of tab.linkedBrowser.
+            let { usingPreloadedContent } = this._linkBrowserToTab(t, aURI, options);
+            let b = t.linkedBrowser;
 
             // Dispatch a new tab notification.  We do this once we're
             // entirely done, so that things are in a consistent state
@@ -1986,23 +2068,6 @@
               } catch (ex) {
                 Cu.reportError(ex);
               }
-            }
-
-            // We start our browsers out as inactive, and then maintain
-            // activeness in the tab switcher.
-            b.docShellIsActive = false;
-
-            // When addTab() is called with an URL that is not "about:blank" we
-            // set the "nodefaultsrc" attribute that prevents a frameLoader
-            // from being created as soon as the linked <browser> is inserted
-            // into the DOM. We thus have to register the new outerWindowID
-            // for non-remote browsers after we have called browser.loadURI().
-            //
-            // Note: Only do this of we still have a docShell. The TabOpen
-            // event was dispatched above and a gBrowser.removeTab() call from
-            // one of its listeners could cause us to fail here.
-            if (!remote && b.docShell) {
-              this._outerWindowIDBrowserMap.set(b.outerWindowID, b);
             }
 
             // Check if we're opening a tab related to the current tab and
@@ -2246,28 +2311,6 @@
 
             var browser = this.getBrowserForTab(aTab);
 
-            var closeWindow = false;
-            var newTab = false;
-            if (this.tabs.length - this._removingTabs.length == 1) {
-              closeWindow = aCloseWindowWithLastTab != null ? aCloseWindowWithLastTab :
-                            !window.toolbar.visible ||
-                              Services.prefs.getBoolPref("browser.tabs.closeWindowWithLastTab");
-
-              // Closing the tab and replacing it with a blank one is notably slower
-              // than closing the window right away. If the caller opts in, take
-              // the fast path.
-              if (closeWindow &&
-                  aCloseWindowFastpath &&
-                  this._removingTabs.length == 0) {
-                // This call actually closes the window, unless the user
-                // cancels the operation.  We are finished here in both cases.
-                this._windowIsClosing = window.closeWindow(true, window.warnAboutClosingWindow);
-                return null;
-              }
-
-              newTab = true;
-            }
-
             if (!aTab._pendingPermitUnload && !aAdoptedByTab && !aSkipPermitUnload) {
               // We need to block while calling permitUnload() because it
               // processes the event queue and may lead to another removeTab()
@@ -2283,6 +2326,35 @@
                 // true so we keep exiting early in case of multiple calls.
                 return false;
               }
+            }
+
+
+            var closeWindow = false;
+            var newTab = false;
+            if (this.tabs.length - this._removingTabs.length == 1) {
+              closeWindow = aCloseWindowWithLastTab != null ? aCloseWindowWithLastTab :
+                            !window.toolbar.visible ||
+                              Services.prefs.getBoolPref("browser.tabs.closeWindowWithLastTab");
+
+              if (closeWindow) {
+                // We've already called beforeunload on all the relevant tabs if we get here,
+                // so avoid calling it again:
+                window.skipNextCanClose = true;
+              }
+
+              // Closing the tab and replacing it with a blank one is notably slower
+              // than closing the window right away. If the caller opts in, take
+              // the fast path.
+              if (closeWindow &&
+                  aCloseWindowFastpath &&
+                  this._removingTabs.length == 0) {
+                // This call actually closes the window, unless the user
+                // cancels the operation.  We are finished here in both cases.
+                this._windowIsClosing = window.closeWindow(true, window.warnAboutClosingWindow);
+                return null;
+              }
+
+              newTab = true;
             }
 
             aTab.closing = true;
@@ -3760,13 +3832,13 @@
                 let state = this.getTabState(tab);
 
                 accum += i + ":";
-                if (tab === this.lastVisibleTab) dump("V");
-                if (tab === this.loadingTab) dump("L");
-                if (tab === this.requestedTab) dump("R");
-                if (state == this.STATE_LOADED) dump("(+)");
-                if (state == this.STATE_LOADING) dump("(+?)");
-                if (state == this.STATE_UNLOADED) dump("(-)");
-                if (state == this.STATE_UNLOADING) dump("(-?)");
+                if (tab === this.lastVisibleTab) accum += "V";
+                if (tab === this.loadingTab) accum += "L";
+                if (tab === this.requestedTab) accum += "R";
+                if (state == this.STATE_LOADED) accum += "(+)";
+                if (state == this.STATE_LOADING) accum += "(+?)";
+                if (state == this.STATE_UNLOADED) accum += "(-)";
+                if (state == this.STATE_UNLOADING) accum += "(-?)";
                 accum += " ";
               }
               if (this._useDumpForLogging) {
@@ -4249,6 +4321,7 @@
             }
 
           }
+          return undefined;
         ]]></body>
       </method>
 

@@ -91,15 +91,11 @@ public class GeckoAccessibility {
 
                 @Override
                 public void onPostExecute(Void args) {
-                    boolean isGeckoApp = false;
-                    try {
-                        isGeckoApp = context instanceof GeckoApp;
-                    } catch (NoClassDefFoundError ex) {}
-                    if (isGeckoApp) {
-                        // Disable the dynamic toolbar when enabling accessibility.
-                        // These features tend not to interact well.
-                        ((GeckoApp) context).setAccessibilityEnabled(sEnabled);
+                    final GeckoAppShell.GeckoInterface geckoInterface = GeckoAppShell.getGeckoInterface();
+                    if (geckoInterface == null) {
+                        return;
                     }
+                    geckoInterface.setAccessibilityEnabled(sEnabled);
                 }
             }.execute();
     }
@@ -208,8 +204,8 @@ public class GeckoAccessibility {
                 for (int i = 1; i < textArray.length(); i++) {
                     sb.append(" ").append(textArray.optString(i));
                 }
+                sVirtualCursorNode.setText(sb.toString());
             }
-            sVirtualCursorNode.setText(sb.toString());
             sVirtualCursorNode.setContentDescription(message.optString("description"));
 
             JSONObject bounds = message.optJSONObject("bounds");

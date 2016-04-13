@@ -298,7 +298,6 @@ pref("ui.dragThresholdY", 25);
 
 // Layers Acceleration.  We can only have nice things on gonk, because
 // they're not maintained anywhere else.
-pref("layers.offmainthreadcomposition.enabled", true);
 #ifndef MOZ_WIDGET_GONK
 pref("dom.ipc.tabs.disabled", true);
 #else
@@ -1059,6 +1058,9 @@ pref("layout.accessiblecaret.bar.enabled", true);
 #ifdef MOZ_WIDGET_GONK
 pref("layout.accessiblecaret.use_long_tap_injector", false);
 #endif
+
+// The active caret is disallow to be dragged across the other (inactive) caret.
+pref("layout.accessiblecaret.allow_dragging_across_other_caret", false);
 
 // Enable sync and mozId with Firefox Accounts.
 pref("services.sync.fxaccounts.enabled", true);

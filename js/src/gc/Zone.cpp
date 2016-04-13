@@ -25,7 +25,7 @@ Zone * const Zone::NotOnList = reinterpret_cast<Zone*>(1);
 JS::Zone::Zone(JSRuntime* rt)
   : JS::shadow::Zone(rt, &rt->gc.marker),
     debuggers(nullptr),
-    suppressObjectMetadataCallback(false),
+    suppressAllocationMetadataBuilder(false),
     arenas(rt),
     types(this),
     compartments(),
@@ -146,7 +146,7 @@ Zone::sweepBreakpoints(FreeOp* fop)
      */
 
     MOZ_ASSERT(isGCSweepingOrCompacting());
-    for (ZoneCellIter i(this, AllocKind::SCRIPT); !i.done(); i.next()) {
+    for (ZoneCellIterUnderGC i(this, AllocKind::SCRIPT); !i.done(); i.next()) {
         JSScript* script = i.get<JSScript>();
         if (!script->hasAnyBreakpointsOrStepMode())
             continue;

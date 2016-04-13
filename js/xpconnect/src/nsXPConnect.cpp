@@ -31,6 +31,8 @@
 #include "nsIObjectOutputStream.h"
 #include "nsScriptSecurityManager.h"
 
+#include "jsfriendapi.h"
+
 using namespace mozilla;
 using namespace mozilla::dom;
 using namespace xpc;
@@ -178,7 +180,6 @@ xpc::ErrorReport::Init(JSErrorReport* aReport, const char* aFallbackMessage,
     mWindowID = aWindowID;
 
     ErrorReportToMessageString(aReport, mErrorMsg);
-
     if (mErrorMsg.IsEmpty() && aFallbackMessage) {
         mErrorMsg.AssignWithConversion(aFallbackMessage);
     }
@@ -190,6 +191,13 @@ xpc::ErrorReport::Init(JSErrorReport* aReport, const char* aFallbackMessage,
     }
 
     mSourceLine.Assign(aReport->linebuf(), aReport->linebufLength());
+    const JSErrorFormatString* efs = js::GetErrorMessage(nullptr, aReport->errorNumber);
+
+    if (efs == nullptr) {
+        mErrorMsgName.AssignASCII("");
+    } else {
+        mErrorMsgName.AssignASCII(efs->name);
+    }
 
     mLineNumber = aReport->lineno;
     mColumn = aReport->column;
@@ -248,6 +256,7 @@ xpc::ErrorReport::LogToConsoleWithStack(JS::HandleObject aStack)
     } else {
       errorObject = new nsScriptError();
     }
+    errorObject->SetErrorMessageName(mErrorMsgName);
     NS_ENSURE_TRUE_VOID(consoleService && errorObject);
 
     nsresult rv = errorObject->InitWithWindowID(mErrorMsg, mFileName, mSourceLine,
@@ -376,7 +385,7 @@ CreateGlobalObject(JSContext* cx, const JSClass* clasp, nsIPrincipal* principal,
     // Verify that the right trace hook is called. Note that this doesn't
     // work right for wrapped globals, since the tracing situation there is
     // more complicated. Manual inspection shows that they do the right thing.
-    if (!((const js::Class*)clasp)->ext.isWrappedNative)
+    if (!((const js::Class*)clasp)->isWrappedNative())
     {
         VerifyTraceProtoAndIfaceCacheCalledTracer trc(JS_GetRuntime(cx));
         TraceChildren(&trc, GCCellPtr(global.get()));

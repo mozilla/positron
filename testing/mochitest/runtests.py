@@ -22,6 +22,7 @@ import mozinfo
 import mozprocess
 import mozrunner
 import numbers
+import platform
 import re
 import shutil
 import signal
@@ -1632,6 +1633,11 @@ class MochitestDesktop(MochitestBase):
 
         prefs.update(self.extraPrefs(options.extraPrefs))
 
+        # Bug 1262954: For windows XP + e10s disable acceleration
+        if platform.system() in ("Windows", "Microsoft") and \
+           '5.1' in platform.version() and options.e10s:
+            prefs['layers.acceleration.disabled'] = True
+
         # interpolate preferences
         interpolation = {
             "server": "%s:%s" %
@@ -2336,6 +2342,7 @@ class MochitestDesktop(MochitestBase):
                 marionette_args['host'] = host
                 marionette_args['port'] = int(port)
 
+            self.log.info("runtests.py | Running with e10s: {}".format(options.e10s))
             self.log.info("runtests.py | Running tests: start.\n")
             try:
                 status = self.runApp(testURL,

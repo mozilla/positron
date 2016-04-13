@@ -679,6 +679,8 @@ public:
    * keep a mutable version around should pass in a clone.
    *
    * @param aURI uri of the image to be loaded
+   * @param aContext element of document where the result of this request
+   *                 will be used.
    * @param aLoadingDocument the document we belong to
    * @param aLoadingPrincipal the principal doing the load
    * @param aReferrer the referrer URI
@@ -691,6 +693,7 @@ public:
    * @return the imgIRequest for the image load
    */
   static nsresult LoadImage(nsIURI* aURI,
+                            nsINode* aContext,
                             nsIDocument* aLoadingDocument,
                             nsIPrincipal* aLoadingPrincipal,
                             nsIURI* aReferrer,
@@ -825,7 +828,15 @@ public:
    *   @param [aColumnNumber=0] (Optional) Column number within resource
               containing error.
               If aURI is null, then aDocument->GetDocumentURI() is used.
+   *   @param [aLocationMode] (Optional) Specifies the behavior if
+              error location information is omitted.
    */
+  enum MissingErrorLocationMode {
+    // Don't show location information in the error console.
+    eOMIT_LOCATION,
+    // Get location information from the currently executing script.
+    eUSE_CALLING_LOCATION
+  };
   static nsresult ReportToConsoleNonLocalized(const nsAString& aErrorText,
                                               uint32_t aErrorFlags,
                                               const nsACString& aCategory,
@@ -834,7 +845,9 @@ public:
                                               const nsAFlatString& aSourceLine
                                                 = EmptyString(),
                                               uint32_t aLineNumber = 0,
-                                              uint32_t aColumnNumber = 0);
+                                              uint32_t aColumnNumber = 0,
+                                              MissingErrorLocationMode aLocationMode
+                                                = eUSE_CALLING_LOCATION);
 
   /**
    * Report a localized error message to the error console.
@@ -1115,6 +1128,13 @@ public:
                                       bool aCancelable,
                                       bool *aDefaultAction = nullptr);
 
+  /**
+   * Helper function for dispatching a "DOMServiceWorkerFocusClient" event to
+   * the chrome event handler of the given DOM Window. This has the effect
+   * of focusing the corresponding tab and bringing the browser window
+   * to the foreground.
+   */
+  static nsresult DispatchFocusChromeEvent(nsPIDOMWindowOuter* aWindow);
 
   /**
    * This method creates and dispatches a trusted event.
@@ -1533,14 +1553,6 @@ public:
    * Return true if aURI is a local file URI (i.e. file://).
    */
   static bool URIIsLocalFile(nsIURI *aURI);
-
-  /**
-   * Given a URI, return set beforeHash to the part before the '#', and
-   * afterHash to the remainder of the URI, including the '#'.
-   */
-  static nsresult SplitURIAtHash(nsIURI *aURI,
-                                 nsACString &aBeforeHash,
-                                 nsACString &aAfterHash);
 
   /**
    * Get the application manifest URI for this document.  The manifest URI

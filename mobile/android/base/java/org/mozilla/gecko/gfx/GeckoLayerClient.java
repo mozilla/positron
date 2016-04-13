@@ -614,7 +614,6 @@ class GeckoLayerClient implements LayerView.Listener, PanZoomTarget
 
             // Indicate that the document is about to be composited so the
             // LayerView background can be removed.
-            Log.i("GeckoBug1151102", "Done first paint; state " + mView.getPaintState());
             if (mView.getPaintState() == LayerView.PAINT_START) {
                 mView.setPaintState(LayerView.PAINT_BEFORE_FIRST);
             }
@@ -1084,6 +1083,11 @@ class GeckoLayerClient implements LayerView.Listener, PanZoomTarget
                 ((viewPoint.y + origin.y) / zoom) - (geckoOrigin.y / geckoZoom));
 
         return layerPoint;
+    }
+
+    @Override
+    public void setScrollingRootContent(boolean isRootContent) {
+        mToolbarAnimator.setScrollingRootContent(isRootContent);
     }
 
     public void addDrawListener(DrawListener listener) {

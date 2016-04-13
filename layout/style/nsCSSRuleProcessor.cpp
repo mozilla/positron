@@ -2037,7 +2037,7 @@ static bool SelectorMatches(Element* aElement,
 
       case nsCSSPseudoClasses::ePseudoClass_mozSystemMetric:
         {
-          nsCOMPtr<nsIAtom> metric = do_GetAtom(pseudoClass->u.mString);
+          nsCOMPtr<nsIAtom> metric = NS_Atomize(pseudoClass->u.mString);
           if (!nsCSSRuleProcessor::HasSystemMetric(metric)) {
             return false;
           }
@@ -3980,7 +3980,7 @@ TreeMatchContext::InitAncestors(Element *aElement)
   mAncestorFilter.mFilter = new AncestorFilter::Filter();
 
   if (MOZ_LIKELY(aElement)) {
-    MOZ_ASSERT(aElement->GetCurrentDoc() ||
+    MOZ_ASSERT(aElement->GetUncomposedDoc() ||
                aElement->HasFlag(NODE_IS_IN_SHADOW_TREE),
                "aElement must be in the document or in shadow tree "
                "for the assumption that GetParentNode() is non-null "

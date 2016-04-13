@@ -140,7 +140,7 @@
     <panel type="autocomplete" id="PopupSearchAutoComplete" noautofocus="true" hidden="true"/>
 
     <!-- for url bar autocomplete -->
-    <panel type="autocomplete-richlistbox" id="PopupAutoCompleteRichResult" noautofocus="true" hidden="true">
+    <panel type="autocomplete-richlistbox" id="PopupAutoCompleteRichResult" noautofocus="true" hidden="true" flip="none">
 #ifdef NIGHTLY_BUILD
       <hbox id="urlbar-search-footer" flex="1" align="stretch" pack="end">
         <button id="urlbar-search-settings" label="&changeSearchSettings.button;"
@@ -461,12 +461,25 @@
              onpopupshowing="UpdateDynamicShortcutTooltipText(this);"/>
 
     <menupopup id="SyncedTabsSidebarContext">
-      <menuitem label="&syncedTabs.context.openTab.label;"
-                accesskey="&syncedTabs.context.openTab.accesskey;"
-                id="syncedTabsOpenSelected"/>
+      <menuitem label="&syncedTabs.context.open.label;"
+                accesskey="&syncedTabs.context.open.accesskey;"
+                id="syncedTabsOpenSelected" where="current"/>
+      <menuitem label="&syncedTabs.context.openInNewTab.label;"
+                accesskey="&syncedTabs.context.openInNewTab.accesskey;"
+                id="syncedTabsOpenSelectedInTab" where="tab"/>
+      <menuitem label="&syncedTabs.context.openInNewWindow.label;"
+                accesskey="&syncedTabs.context.openInNewWindow.accesskey;"
+                id="syncedTabsOpenSelectedInWindow" where="window"/>
+      <menuitem label="&syncedTabs.context.openInNewPrivateWindow.label;"
+                accesskey="&syncedTabs.context.openInNewPrivateWindow.accesskey;"
+                id="syncedTabsOpenSelectedInPrivateWindow" where="window" private="true"/>
+      <menuseparator/>
       <menuitem label="&syncedTabs.context.bookmarkSingleTab.label;"
                 accesskey="&syncedTabs.context.bookmarkSingleTab.accesskey;"
                 id="syncedTabsBookmarkSelected"/>
+      <menuitem label="&syncedTabs.context.copy.label;"
+                accesskey="&syncedTabs.context.copy.accesskey;"
+                id="syncedTabsCopySelected"/>
       <menuseparator/>
       <menuitem label="&syncSyncNowItem.label;"
                 accesskey="&syncSyncNowItem.accesskey;"
@@ -685,7 +698,7 @@
                      showcommentcolumn="true"
                      showimagecolumn="true"
                      enablehistory="true"
-                     maxrows="6"
+                     maxrows="10"
                      newlines="stripsurroundingwhitespace"
                      ontextentered="this.handleCommand(param);"
                      ontextreverted="return this.handleRevert();"
@@ -860,7 +873,7 @@
             </menu>
             <menu id="BMB_unsortedBookmarks"
                   class="menu-iconic bookmark-item subviewbutton"
-                  label="&bookmarksMenuButton.unsorted.label;"
+                  label="&bookmarksMenuButton.other.label;"
                   container="true">
               <menupopup id="BMB_unsortedBookmarksPopup"
                          placespopup="true"
@@ -1035,6 +1048,8 @@
     </toolbarpalette>
   </toolbox>
 
+  <hbox id="fullscr-toggler" hidden="true"/>
+
   <deck id="content-deck" flex="1">
     <hbox flex="1" id="browser">
       <vbox id="browser-border-start" hidden="true" layer="true"/>
@@ -1157,8 +1172,5 @@
 #     Introducing the iframe dynamically, as needed, was found to be better than
 #     starting with an empty iframe here in browser.xul from a Ts standpoint.
 </deck>
-
-# Put it at the very end to make sure it is not covered by anything.
-<hbox id="fullscr-toggler" hidden="true"/>
 
 </window>

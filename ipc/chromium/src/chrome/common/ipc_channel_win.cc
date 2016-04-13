@@ -12,10 +12,21 @@
 #include "base/process_util.h"
 #include "base/rand_util.h"
 #include "base/string_util.h"
-#include "base/non_thread_safe.h"
 #include "base/win_util.h"
 #include "chrome/common/ipc_message_utils.h"
 #include "mozilla/ipc/ProtocolUtils.h"
+
+// ChannelImpl is used on the IPC thread, but constructed on a different thread,
+// so it has to hold the nsAutoOwningThread as a pointer, and we need a slightly
+// different macro.
+#ifdef DEBUG
+#define ASSERT_OWNINGTHREAD(_class) \
+  if (nsAutoOwningThread* owningThread = _mOwningThread.get()) {               \
+    NS_CheckThreadSafe(owningThread->GetThread(), #_class " not thread-safe"); \
+  }
+#else
+#define ASSERT_OWNINGTHREAD(_class) ((void)0)
+#endif
 
 namespace IPC {
 //------------------------------------------------------------------------------
@@ -94,9 +105,7 @@ HANDLE Channel::ChannelImpl::GetServerPipeHandle() const {
 }
 
 void Channel::ChannelImpl::Close() {
-  if (thread_check_.get()) {
-    DCHECK(thread_check_->CalledOnValidThread());
-  }
+  ASSERT_OWNINGTHREAD(ChannelImpl);
 
   bool waited = false;
   if (input_state_.is_pending || output_state_.is_pending) {
@@ -121,16 +130,14 @@ void Channel::ChannelImpl::Close() {
     delete m;
   }
 
-  if (thread_check_.get())
-    thread_check_.reset();
-
+#ifdef DEBUG
+  _mOwningThread = nullptr;
+#endif
   closed_ = true;
 }
 
 bool Channel::ChannelImpl::Send(Message* message) {
-  if (thread_check_.get()) {
-    DCHECK(thread_check_->CalledOnValidThread());
-  }
+  ASSERT_OWNINGTHREAD(ChannelImpl);
 #ifdef IPC_MESSAGE_DEBUG_EXTRA
   DLOG(INFO) << "sending message @" << message << " on channel @" << this
              << " with type " << message->type()
@@ -239,8 +246,11 @@ bool Channel::ChannelImpl::EnqueueHelloMessage() {
 }
 
 bool Channel::ChannelImpl::Connect() {
-  if (!thread_check_.get())
-    thread_check_.reset(new NonThreadSafe());
+#ifdef DEBUG
+  if (!_mOwningThread) {
+    _mOwningThread = mozilla::MakeUnique<nsAutoOwningThread>();
+  }
+#endif
 
   if (pipe_ == INVALID_HANDLE_VALUE)
     return false;
@@ -265,7 +275,7 @@ bool Channel::ChannelImpl::Connect() {
 }
 
 bool Channel::ChannelImpl::ProcessConnection() {
-  DCHECK(thread_check_->CalledOnValidThread());
+  ASSERT_OWNINGTHREAD(ChannelImpl);
   if (input_state_.is_pending)
     input_state_.is_pending = false;
 
@@ -301,7 +311,7 @@ bool Channel::ChannelImpl::ProcessConnection() {
 bool Channel::ChannelImpl::ProcessIncomingMessages(
     MessageLoopForIO::IOContext* context,
     DWORD bytes_read) {
-  DCHECK(thread_check_->CalledOnValidThread());
+  ASSERT_OWNINGTHREAD(ChannelImpl);
   if (input_state_.is_pending) {
     input_state_.is_pending = false;
     DCHECK(context);
@@ -350,16 +360,53 @@ bool Channel::ChannelImpl::ProcessIncomingMessages(
         CHROMIUM_LOG(ERROR) << "IPC message is too big";
         return false;
       }
+
       input_overflow_buf_.append(input_buf_, bytes_read);
       p = input_overflow_buf_.data();
       end = p + input_overflow_buf_.size();
+
+      // If we've received the entire header, then we know the message
+      // length. In that case, reserve enough space to hold the entire
+      // message. This is more efficient than repeatedly enlarging the buffer as
+      // more data comes in.
+      uint32_t length = Message::GetLength(p, end);
+      if (length) {
+        input_overflow_buf_.reserve(length + kReadBufferSize);
+
+        // Recompute these pointers in case the buffer moved.
+        p = input_overflow_buf_.data();
+        end = p + input_overflow_buf_.size();
+      }
     }
 
     while (p < end) {
       const char* message_tail = Message::FindNext(p, end);
       if (message_tail) {
         int len = static_cast<int>(message_tail - p);
-        const Message m(p, len);
+        char* buf;
+
+        // The Message |m| allocated below needs to own its data. We can either
+        // copy the data out of the buffer or else steal the buffer and move the
+        // remaining data elsewhere. If len is large enough, we steal. Otherwise
+        // we copy.
+        if (len > kMaxCopySize) {
+          // Since len > kMaxCopySize > kReadBufferSize, we know that we must be
+          // using the overflow buffer. And since we always shift everything to
+          // the left at the end of a read, we must be at the start of the
+          // overflow buffer.
+          buf = input_overflow_buf_.trade_bytes(len);
+
+          // At this point the remaining data is at the front of
+          // input_overflow_buf_. p will get fixed up at the end of the
+          // loop. Set it to null here to make sure no one uses it.
+          p = nullptr;
+          message_tail = input_overflow_buf_.data();
+          end = message_tail + input_overflow_buf_.size();
+        } else {
+          buf = (char*)malloc(len);
+          memcpy(buf, p, len);
+        }
+        Message m(buf, len, Message::OWNS);
 #ifdef IPC_MESSAGE_DEBUG_EXTRA
         DLOG(INFO) << "received message on channel @" << this <<
                       " with type " << m.type();
@@ -380,7 +427,7 @@ bool Channel::ChannelImpl::ProcessIncomingMessages(
           waiting_for_shared_secret_ = false;
           listener_->OnChannelConnected(claimed_pid);
         } else {
-          listener_->OnMessageReceived(m);
+          listener_->OnMessageReceived(mozilla::Move(m));
         }
         p = message_tail;
       } else {
@@ -401,7 +448,7 @@ bool Channel::ChannelImpl::ProcessOutgoingMessages(
     DWORD bytes_written) {
   DCHECK(!waiting_connect_);  // Why are we trying to send messages if there's
                               // no connection?
-  DCHECK(thread_check_->CalledOnValidThread());
+  ASSERT_OWNINGTHREAD(ChannelImpl);
 
   if (output_state_.is_pending) {
     DCHECK(context);
@@ -459,7 +506,7 @@ bool Channel::ChannelImpl::ProcessOutgoingMessages(
 void Channel::ChannelImpl::OnIOCompleted(MessageLoopForIO::IOContext* context,
                             DWORD bytes_transfered, DWORD error) {
   bool ok;
-  DCHECK(thread_check_->CalledOnValidThread());
+  ASSERT_OWNINGTHREAD(ChannelImpl);
   if (context == &input_state_.context) {
     if (waiting_connect_) {
       if (!ProcessConnection())

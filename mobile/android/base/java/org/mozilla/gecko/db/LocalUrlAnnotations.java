@@ -45,6 +45,18 @@ public class LocalUrlAnnotations implements UrlAnnotations {
         insertAnnotation(cr, originUrl, Key.FEED, feedUrl);
     }
 
+    @Override
+    public boolean hasAcceptedOrDeclinedHomeScreenShortcut(ContentResolver cr, String url) {
+        return hasResultsForSelection(cr,
+                BrowserContract.UrlAnnotations.URL + " = ?",
+                new String[]{url});
+    }
+
+    @Override
+    public void insertHomeScreenShortcut(ContentResolver cr, String url, boolean hasCreatedShortCut) {
+        insertAnnotation(cr, url, Key.HOME_SCREEN_SHORTCUT, String.valueOf(hasCreatedShortCut));
+    }
+
     /**
      * Returns true if there's a mapping from the given website URL to a feed URL. False otherwise.
      */
@@ -205,5 +217,15 @@ public class LocalUrlAnnotations implements UrlAnnotations {
 
     public void insertScreenshot(final ContentResolver cr, final String pageUrl, final String screenshotPath) {
         insertAnnotation(cr, pageUrl, Key.SCREENSHOT.getDbValue(), screenshotPath);
+    }
+
+    @Override
+    public void insertReaderViewUrl(final ContentResolver cr, final String pageUrl) {
+        insertAnnotation(cr, pageUrl, Key.READER_VIEW.getDbValue(), BrowserContract.UrlAnnotations.READER_VIEW_SAVED_VALUE);
+    }
+
+    @Override
+    public void deleteReaderViewUrl(ContentResolver cr, String pageURL) {
+        deleteAnnotation(cr, pageURL, Key.READER_VIEW);
     }
 }

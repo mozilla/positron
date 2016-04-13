@@ -179,7 +179,7 @@ public:
   virtual void            CleanupRemoteDrawing() override;
   virtual already_AddRefed<mozilla::gfx::DrawTarget> CreateBackBufferDrawTarget(mozilla::gfx::DrawTarget* aScreenTarget,
                                                                                 const LayoutDeviceIntRect& aRect,
-                                                                                const bool aInitModeClear) override;
+                                                                                const LayoutDeviceIntRect& aClearRect) override;
   virtual void            UpdateThemeGeometries(const nsTArray<ThemeGeometry>& aThemeGeometries) override {}
   NS_IMETHOD              SetModal(bool aModal) override;
   virtual uint32_t        GetMaxTouchPoints() const override;
@@ -548,7 +548,7 @@ protected:
   bool              mUpdateCursor;
   bool              mUseAttachedEvents;
   bool              mIMEHasFocus;
-#ifdef XP_WIN
+#if defined(XP_WIN) || defined(XP_MACOSX)
   bool              mAccessibilityInUseFlag;
 #endif
   static nsIRollupListener* gRollupListener;
@@ -580,19 +580,19 @@ protected:
   static void debug_DumpInvalidate(FILE* aFileOut,
                                    nsIWidget* aWidget,
                                    const LayoutDeviceIntRect* aRect,
-                                   const nsAutoCString& aWidgetName,
+                                   const char* aWidgetName,
                                    int32_t aWindowID);
 
   static void debug_DumpEvent(FILE* aFileOut,
                               nsIWidget* aWidget,
                               mozilla::WidgetGUIEvent* aGuiEvent,
-                              const nsAutoCString& aWidgetName,
+                              const char* aWidgetName,
                               int32_t aWindowID);
 
   static void debug_DumpPaintEvent(FILE *                aFileOut,
                                    nsIWidget *           aWidget,
                                    const nsIntRegion &   aPaintEvent,
-                                   const nsAutoCString & aWidgetName,
+                                   const char *          aWidgetName,
                                    int32_t               aWindowID);
 
   static bool debug_GetCachedBoolPref(const char* aPrefName);

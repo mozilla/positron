@@ -148,6 +148,11 @@ class GCSchedulingTunables
     bool dynamicMarkSliceEnabled_;
 
     /*
+     * Controls whether painting can trigger IGC slices.
+     */
+    bool refreshFrameSlicesEnabled_;
+
+    /*
      * Controls the number of empty chunks reserved for future allocation.
      */
     uint32_t minEmptyChunkCount_;
@@ -167,6 +172,7 @@ class GCSchedulingTunables
         highFrequencyHeapGrowthMin_(1.5),
         lowFrequencyHeapGrowth_(1.5),
         dynamicMarkSliceEnabled_(false),
+        refreshFrameSlicesEnabled_(true),
         minEmptyChunkCount_(1),
         maxEmptyChunkCount_(30)
     {}
@@ -183,6 +189,7 @@ class GCSchedulingTunables
     double highFrequencyHeapGrowthMin() const { return highFrequencyHeapGrowthMin_; }
     double lowFrequencyHeapGrowth() const { return lowFrequencyHeapGrowth_; }
     bool isDynamicMarkSliceEnabled() const { return dynamicMarkSliceEnabled_; }
+    bool areRefreshFrameSlicesEnabled() const { return refreshFrameSlicesEnabled_; }
     unsigned minEmptyChunkCount(const AutoLockGC&) const { return minEmptyChunkCount_; }
     unsigned maxEmptyChunkCount() const { return maxEmptyChunkCount_; }
 
@@ -1031,7 +1038,7 @@ class GCRuntime
     size_t maxMallocBytes;
 
     // An incrementing id used to assign unique ids to cells that require one.
-    mozilla::Atomic<uint64_t, mozilla::SequentiallyConsistent> nextCellUniqueId_;
+    mozilla::Atomic<uint64_t, mozilla::ReleaseAcquire> nextCellUniqueId_;
 
     /*
      * Number of the committed arenas in all GC chunks including empty chunks.

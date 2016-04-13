@@ -494,6 +494,23 @@ RestyleManager::RecomputePosition(nsIFrame* aFrame)
   parentFrame->RemoveStateBits(~nsFrameState(0));
   parentFrame->AddStateBits(savedState);
 
+  // The bogus parent state here was created with no parent state of its own,
+  // and therefore it won't have an mCBReflowState set up.
+  // But we may need one (for InitCBReflowState in a child state), so let's
+  // try to create one here for the cases where it will be needed.
+  Maybe<nsHTMLReflowState> cbReflowState;
+  nsIFrame* cbFrame = parentFrame->GetContainingBlock();
+  if (cbFrame && (aFrame->GetContainingBlock() != parentFrame ||
+                  parentFrame->GetType() == nsGkAtoms::tableFrame)) {
+    LogicalSize cbSize = cbFrame->GetLogicalSize();
+    cbReflowState.emplace(cbFrame->PresContext(), cbFrame, &rc, cbSize);
+    cbReflowState->ComputedPhysicalMargin() = cbFrame->GetUsedMargin();
+    cbReflowState->ComputedPhysicalPadding() = cbFrame->GetUsedPadding();
+    cbReflowState->ComputedPhysicalBorderPadding() =
+      cbFrame->GetUsedBorderAndPadding();
+    parentReflowState.mCBReflowState = cbReflowState.ptr();
+  }
+
   NS_WARN_IF_FALSE(parentSize.ISize(parentWM) != NS_INTRINSICSIZE &&
                    parentSize.BSize(parentWM) != NS_INTRINSICSIZE,
                    "parentSize should be valid");
@@ -1115,6 +1132,8 @@ RestyleManager::AnimationsWithDestroyedFrame::StopAnimationsWithoutFrame(
 {
   nsAnimationManager* animationManager =
     mRestyleManager->PresContext()->AnimationManager();
+  nsTransitionManager* transitionManager =
+    mRestyleManager->PresContext()->TransitionManager();
   for (nsIContent* content : aArray) {
     if (content->GetPrimaryFrame()) {
       continue;
@@ -1122,6 +1141,7 @@ RestyleManager::AnimationsWithDestroyedFrame::StopAnimationsWithoutFrame(
     dom::Element* element = content->AsElement();
 
     animationManager->StopAnimationsForElement(element, aPseudoType);
+    transitionManager->StopTransitionsForElement(element, aPseudoType);
   }
 }
 
@@ -2771,7 +2791,7 @@ ElementRestyler::CaptureChange(nsStyleContext* aOldContext,
               RestyleManager::ChangeHintToString(mHintsNotHandledForDescendants).get());
 }
 
-class MOZ_STACK_CLASS AutoSelectorArrayTruncater final
+class MOZ_RAII AutoSelectorArrayTruncater final
 {
 public:
   explicit AutoSelectorArrayTruncater(

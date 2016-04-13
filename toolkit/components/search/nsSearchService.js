@@ -2739,6 +2739,7 @@ SearchService.prototype = {
 
     Services.obs.notifyObservers(null, SEARCH_SERVICE_TOPIC, "init-complete");
     Services.telemetry.getHistogramById("SEARCH_SERVICE_INIT_SYNC").add(true);
+    this._recordEnginesWithUpdate();
 
     LOG("_syncInit end");
   },
@@ -2781,6 +2782,7 @@ SearchService.prototype = {
       this._initObservers.resolve(this._initRV);
       Services.obs.notifyObservers(null, SEARCH_SERVICE_TOPIC, "init-complete");
       Services.telemetry.getHistogramById("SEARCH_SERVICE_INIT_SYNC").add(false);
+      this._recordEnginesWithUpdate();
 
       LOG("_asyncInit: Completed _asyncInit");
     }.bind(this));
@@ -3149,6 +3151,7 @@ SearchService.prototype = {
         // Typically we'll re-init as a result of a pref observer,
         // so signal to 'callers' that we're done.
         Services.obs.notifyObservers(null, SEARCH_SERVICE_TOPIC, "init-complete");
+        this._recordEnginesWithUpdate();
         gInitialized = true;
       } catch (err) {
         LOG("Reinit failed: " + err);
@@ -4148,6 +4151,17 @@ SearchService.prototype = {
     if (!newCurrentEngine)
       FAIL("Can't find engine in store!", Cr.NS_ERROR_UNEXPECTED);
 
+    if (!newCurrentEngine._isDefault && newCurrentEngine._loadPath) {
+      // If a non default engine is being set as the current engine, ensure
+      // its loadPath has a verification hash.
+      let loadPathHash = getVerificationHash(newCurrentEngine._loadPath);
+      let currentHash = newCurrentEngine.getAttr("loadPathHash");
+      if (!currentHash || currentHash != loadPathHash) {
+        newCurrentEngine.setAttr("loadPathHash", loadPathHash);
+        notifyAction(newCurrentEngine, SEARCH_ENGINE_CHANGED);
+      }
+    }
+
     if (newCurrentEngine == this._currentEngine)
       return;
 
@@ -4191,6 +4205,20 @@ SearchService.prototype = {
 
       result.loadPath = engine._loadPath;
 
+      let origin;
+      if (engine._isDefault)
+        origin = "default";
+      else {
+        let currentHash = engine.getAttr("loadPathHash");
+        if (!currentHash)
+          origin = "unverified";
+        else {
+          let loadPathHash = getVerificationHash(engine._loadPath);
+          origin = currentHash == loadPathHash ? "verified" : "invalid";
+        }
+      }
+      result.origin = origin;
+
       // For privacy, we only collect the submission URL for default engines...
       let sendSubmissionURL = engine._isDefault;
 
@@ -4231,6 +4259,23 @@ SearchService.prototype = {
     }
 
     return result;
+  },
+
+  _recordEnginesWithUpdate: function() {
+    let hasUpdates = false;
+    let hasIconUpdates = false;
+    for (let name in this._engines) {
+      let engine = this._engines[name];
+      if (engine._hasUpdates) {
+        hasUpdates = true;
+        if (engine._iconUpdateURL) {
+          hasIconUpdates = true;
+          break;
+        }
+      }
+    }
+    Services.telemetry.getHistogramById("SEARCH_SERVICE_HAS_UPDATES").add(hasUpdates);
+    Services.telemetry.getHistogramById("SEARCH_SERVICE_HAS_ICON_UPDATES").add(hasIconUpdates);
   },
 
   /**

@@ -686,9 +686,9 @@ struct NewLayerEntry {
   RefPtr<Layer> mLayer;
   AnimatedGeometryRoot* mAnimatedGeometryRoot;
   const DisplayItemScrollClip* mScrollClip;
-  // If non-null, this FrameMetrics is set to the be the first FrameMetrics
+  // If non-null, this ScrollMetadata is set to the be the first ScrollMetadata
   // on the layer.
-  UniquePtr<FrameMetrics> mBaseFrameMetrics;
+  UniquePtr<ScrollMetadata> mBaseScrollMetadata;
   // The following are only used for retained layers (for occlusion
   // culling of those layers). These regions are all relative to the
   // container reference frame.
@@ -3581,7 +3581,12 @@ PaintInactiveLayer(nsDisplayListBuilder* aBuilder,
                                       itemVisibleRect.Size(),
                                       SurfaceFormat::B8G8R8A8);
     if (tempDT) {
-      context = new gfxContext(tempDT);
+      context = gfxContext::ForDrawTarget(tempDT);
+      if (!context) {
+        // Leave this as crash, it's in the debugging code, we want to know
+        gfxDevCrash(LogReason::InvalidContext) << "PaintInactive context problem " << gfx::hexa(tempDT);
+        return;
+      }
       context->SetMatrix(gfxMatrix::Translation(-itemVisibleRect.x,
                                                 -itemVisibleRect.y));
     }
@@ -4160,15 +4165,15 @@ ContainerState::ProcessDisplayItems(nsDisplayList* aList)
       if (itemType == nsDisplayItem::TYPE_SCROLL_INFO_LAYER) {
         nsDisplayScrollInfoLayer* scrollItem = static_cast<nsDisplayScrollInfoLayer*>(item);
         newLayerEntry->mOpaqueForAnimatedGeometryRootParent = false;
-        newLayerEntry->mBaseFrameMetrics =
-            scrollItem->ComputeFrameMetrics(ownLayer, mParameters);
+        newLayerEntry->mBaseScrollMetadata =
+            scrollItem->ComputeScrollMetadata(ownLayer, mParameters);
       } else if ((itemType == nsDisplayItem::TYPE_SUBDOCUMENT ||
                   itemType == nsDisplayItem::TYPE_ZOOM ||
                   itemType == nsDisplayItem::TYPE_RESOLUTION) &&
                  gfxPrefs::LayoutUseContainersForRootFrames())
       {
-        newLayerEntry->mBaseFrameMetrics =
-          static_cast<nsDisplaySubDocument*>(item)->ComputeFrameMetrics(ownLayer, mParameters);
+        newLayerEntry->mBaseScrollMetadata =
+          static_cast<nsDisplaySubDocument*>(item)->ComputeScrollMetadata(ownLayer, mParameters);
       }
 
       /**
@@ -4714,13 +4719,13 @@ ContainerState::SetupScrollingMetadata(NewLayerEntry* aEntry)
     return;
   }
 
-  AutoTArray<FrameMetrics,2> metricsArray;
-  if (aEntry->mBaseFrameMetrics) {
-    metricsArray.AppendElement(*aEntry->mBaseFrameMetrics);
+  AutoTArray<ScrollMetadata,2> metricsArray;
+  if (aEntry->mBaseScrollMetadata) {
+    metricsArray.AppendElement(*aEntry->mBaseScrollMetadata);
 
     // The base FrameMetrics was not computed by the nsIScrollableframe, so it
     // should not have a mask layer.
-    MOZ_ASSERT(!aEntry->mBaseFrameMetrics->GetMaskLayerIndex());
+    MOZ_ASSERT(!aEntry->mBaseScrollMetadata->GetMaskLayerIndex());
   }
 
   // Any extra mask layers we need to attach to FrameMetrics.
@@ -4739,9 +4744,9 @@ ContainerState::SetupScrollingMetadata(NewLayerEntry* aEntry)
     nsIScrollableFrame* scrollFrame = scrollClip->mScrollableFrame;
     const DisplayItemClip* clip = scrollClip->mClip;
 
-    Maybe<FrameMetrics> metrics =
-      scrollFrame->ComputeFrameMetrics(aEntry->mLayer, mContainerReferenceFrame, mParameters, clip);
-    if (!metrics) {
+    Maybe<ScrollMetadata> metadata =
+      scrollFrame->ComputeScrollMetadata(aEntry->mLayer, mContainerReferenceFrame, mParameters, clip);
+    if (!metadata) {
       continue;
     }
 
@@ -4757,16 +4762,16 @@ ContainerState::SetupScrollingMetadata(NewLayerEntry* aEntry)
       RefPtr<Layer> maskLayer =
         CreateMaskLayer(aEntry->mLayer, *clip, nextIndex, clip->GetRoundedRectCount());
       if (maskLayer) {
-        metrics->SetMaskLayerIndex(nextIndex);
+        metadata->SetMaskLayerIndex(nextIndex);
         maskLayers.AppendElement(maskLayer);
       }
     }
 
-    metricsArray.AppendElement(*metrics);
+    metricsArray.AppendElement(*metadata);
   }
 
   // Watch out for FrameMetrics copies in profiles
-  aEntry->mLayer->SetFrameMetrics(metricsArray);
+  aEntry->mLayer->SetScrollMetadata(metricsArray);
   aEntry->mLayer->SetAncestorMaskLayers(maskLayers);
 }
 
@@ -4806,8 +4811,8 @@ InvalidateVisibleBoundsChangesForScrolledLayer(PaintedLayer* aLayer)
 static inline const Maybe<ParentLayerIntRect>&
 GetStationaryClipInContainer(Layer* aLayer)
 {
-  if (size_t metricsCount = aLayer->GetFrameMetricsCount()) {
-    return aLayer->GetFrameMetrics(metricsCount - 1).GetClipRect();
+  if (size_t metricsCount = aLayer->GetScrollMetadataCount()) {
+    return aLayer->GetScrollMetadata(metricsCount - 1).GetClipRect();
   }
   return aLayer->GetClipRect();
 }
@@ -5548,7 +5553,12 @@ static void DebugPaintItem(DrawTarget& aDrawTarget,
   RefPtr<DrawTarget> tempDT =
     aDrawTarget.CreateSimilarDrawTarget(IntSize(bounds.width, bounds.height),
                                         SurfaceFormat::B8G8R8A8);
-  RefPtr<gfxContext> context = new gfxContext(tempDT);
+  RefPtr<gfxContext> context = gfxContext::ForDrawTarget(tempDT);
+  if (!context) {
+    // Leave this as crash, it's in the debugging code, we want to know
+    gfxDevCrash(LogReason::InvalidContext) << "DebugPaintItem context problem " << gfx::hexa(tempDT);
+    return;
+  }
   context->SetMatrix(gfxMatrix::Translation(-bounds.x, -bounds.y));
   nsRenderingContext ctx(context);
 
@@ -6077,12 +6087,13 @@ ContainerState::CreateMaskLayer(Layer *aLayer,
       aLayer->Manager()->CreateOptimalMaskDrawTarget(surfaceSizeInt);
 
     // fail if we can't get the right surface
-    if (!dt) {
+    if (!dt || !dt->IsValid()) {
       NS_WARNING("Could not create DrawTarget for mask layer.");
       return nullptr;
     }
 
-    RefPtr<gfxContext> context = new gfxContext(dt);
+    RefPtr<gfxContext> context = gfxContext::ForDrawTarget(dt);
+    MOZ_ASSERT(context); // already checked the draw target above
     context->Multiply(ThebesMatrix(imageTransform));
 
     // paint the clipping rects with alpha to create the mask

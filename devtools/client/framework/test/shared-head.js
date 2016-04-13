@@ -37,6 +37,15 @@ const URL_ROOT_SSL = CHROME_URL_ROOT.replace("chrome://mochitests/content/",
 // All test are asynchronous
 waitForExplicitFinish();
 
+var EXPECTED_DTU_ASSERT_FAILURE_COUNT = 0;
+
+registerCleanupFunction(function() {
+  if (DevToolsUtils.assertionFailureCount !== EXPECTED_DTU_ASSERT_FAILURE_COUNT) {
+    ok(false, "Should have had the expected number of DevToolsUtils.assert() failures. Expected " +
+      EXPECTED_DTU_ASSERT_FAILURE_COUNT + ", got " + DevToolsUtils.assertionFailureCount);
+  }
+});
+
 // Uncomment this pref to dump all devtools emitted events to the console.
 // Services.prefs.setBoolPref("devtools.dump.emit", true);
 
@@ -59,6 +68,8 @@ Services.obs.addObserver(ConsoleObserver, "console-api-log-event", false);
 registerCleanupFunction(() => {
   Services.obs.removeObserver(ConsoleObserver, "console-api-log-event");
 });
+
+var waitForTime = DevToolsUtils.waitForTime;
 
 function getFrameScript() {
   let mm = gBrowser.selectedBrowser.messageManager;
