@@ -42,4 +42,4 @@ To start an Electron test run:
 ./mach run positron/electron/spec
 ```
 
-'''Note: these tests don't yet run.'''
+*Note: these tests don't yet run.*
