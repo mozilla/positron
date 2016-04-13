@@ -58,7 +58,7 @@ function ModuleLoader(processType) {
    * @keys {string} The ID (resource: URL) for the module.
    * @values {object} An object representing the module.
    */
-  let modules = new Map();
+  const modules = new Map();
 
   /**
    * Import a module.
@@ -67,7 +67,7 @@ function ModuleLoader(processType) {
    * @param  path     {string} the path to the module being imported.
    * @return          {Object} an `exports` object.
    */
-  let require = this.require = function(requirer, path) {
+  this.require = function(requirer, path) {
     let uri, file;
 
     // dump('require: ' + requirer.id + ' requires ' + path + '\n');
@@ -134,7 +134,7 @@ function ModuleLoader(processType) {
       wantComponents: wantComponents,
     });
 
-    injectGlobals(sandbox, module);
+    this.injectGlobals(sandbox, module);
 
     // XXX Move these into injectGlobals().
     sandbox.__filename = file.path;
@@ -151,13 +151,13 @@ function ModuleLoader(processType) {
     }
   };
 
-  let injectGlobals = this.injectGlobals = function(globalObj, module) {
+  this.injectGlobals = function(globalObj, module) {
     globalObj.exports = module.exports;
     globalObj.module = module;
-    globalObj.require = require.bind(null, module);
+    globalObj.require = this.require.bind(this, module);
     // Require `process` by absolute URL so the resolution algorithm doesn't try
     // to resolve it relative to the requirer's URL.
-    globalObj.process = require({}, 'resource:///modules/gecko/process.js');
+    globalObj.process = this.require({}, 'resource:///modules/gecko/process.js');
     globalObj.process.type = processType;
   };
 }
