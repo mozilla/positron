@@ -14,6 +14,8 @@ const { DebuggerServer } = require("devtools/server/main");
 loader.lazyGetter(this, "ppmm", () => {
   return Cc["@mozilla.org/parentprocessmessagemanager;1"].getService(Ci.nsIMessageBroadcaster);
 });
+loader.lazyRequireGetter(this, "WindowActor",
+  "devtools/server/actors/window", true);
 
 /* Root actor for the remote debugging protocol. */
 
@@ -163,12 +165,15 @@ RootActor.prototype = {
     // Added in Firefox 40. Indicates that the backend supports registering custom
     // commands through the WebConsoleCommands API.
     webConsoleCommands: true,
-    // Whether root actor exposes tab actors
-    // if allowChromeProcess is true, you can fetch a ChromeActor instance
-    // to debug chrome and any non-content ressource via getProcess request
-    // if allocChromeProcess is defined, but not true, it means that root actor
-    // no longer expose tab actors, but also that getProcess forbids
-    // exposing actors for security reasons
+    // Whether root actor exposes tab actors and access to any window.
+    // If allowChromeProcess is true, you can:
+    // * get a ChromeActor instance to debug chrome and any non-content
+    //   resource via getProcess requests
+    // * get a WindowActor instance to debug windows which could be chrome,
+    //   like browser windows via getWindow requests
+    // If allowChromeProcess is defined, but not true, it means that root actor
+    // no longer expose tab actors, but also that the above requests are
+    // forbidden for security reasons.
     get allowChromeProcess() {
       return DebuggerServer.allowChromeProcess;
     },
@@ -220,6 +225,7 @@ RootActor.prototype = {
     this.conn = null;
     this._tabActorPool = null;
     this._globalActorPool = null;
+    this._windowActorPool = null;
     this._parameters = null;
     this._chromeActor = null;
   },
@@ -322,6 +328,38 @@ RootActor.prototype = {
                  message: "Unexpected error while calling getTab(): " + error };
       }
     });
+  },
+
+  onGetWindow: function ({ outerWindowID }) {
+    if (!DebuggerServer.allowChromeProcess) {
+      return {
+        from: this.actorID,
+        error: "forbidden",
+        message: "You are not allowed to debug windows."
+      };
+    }
+    let window = Services.wm.getOuterWindowWithId(outerWindowID);
+    if (!window) {
+      return {
+        from: this.actorID,
+        error: "notFound",
+        message: `No window found with outerWindowID ${outerWindowID}`,
+      };
+    }
+
+    if (!this._windowActorPool) {
+      this._windowActorPool = new ActorPool(this.conn);
+      this.conn.addActorPool(this._windowActorPool);
+    }
+
+    let actor = new WindowActor(this.conn, window);
+    actor.parentID = this.actorID;
+    this._windowActorPool.addActor(actor);
+
+    return {
+      from: this.actorID,
+      window: actor.form(),
+    };
   },
 
   onTabListChanged: function () {
@@ -515,6 +553,7 @@ RootActor.prototype = {
 RootActor.prototype.requestTypes = {
   "listTabs": RootActor.prototype.onListTabs,
   "getTab": RootActor.prototype.onGetTab,
+  "getWindow": RootActor.prototype.onGetWindow,
   "listAddons": RootActor.prototype.onListAddons,
   "listWorkers": RootActor.prototype.onListWorkers,
   "listServiceWorkerRegistrations": RootActor.prototype.onListServiceWorkerRegistrations,

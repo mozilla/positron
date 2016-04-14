@@ -62,5 +62,6 @@ DevToolsModules(
     'webbrowser.js',
     'webconsole.js',
     'webgl.js',
+    'window.js',
     'worker.js',
 )
