@@ -26,6 +26,19 @@ if (url.search.length > 1) {
                    .getInterface(Ci.nsIDOMWindowUtils)
                    .containerElement;
 
+  // If there's no containerElement, use the current window.
+  if (!host) {
+    host = {
+      contentWindow: window,
+      contentDocument: document,
+      // toolbox.js wants to set attributes on the frame that contains it, but
+      // that is fine to skip and doesn't make sense when using the current
+      // window.
+      setAttribute() {},
+      ownerDocument: document,
+    };
+  }
+
   // Specify the default tool to open
   let tool = url.searchParams.get("tool");
 
