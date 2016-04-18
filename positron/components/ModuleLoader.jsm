@@ -23,16 +23,13 @@ this.EXPORTED_SYMBOLS = ["ModuleLoader"];
 const systemPrincipal = Cc["@mozilla.org/systemprincipal;1"].
                         createInstance(Ci.nsIPrincipal);
 
-// An (incomplete) list of "global paths" (i.e. search paths for modules
-// specified by name rather than path).  Currently this is a single list,
-// but it needs to vary by process type, as the browser and renderer processes
-// have their own sets of standard modules (in addition to the shared set).
-const globalPaths = [
-  // Browser standard modules.
-  'browser/api/exports/',
-
-  // Common standard modules.
-  'common/api/',
+// The default list of "global paths" (i.e. search paths for modules
+// specified by name rather than path).  The list of global paths for a given
+// ModuleLoader depends on the process type, so the ModuleLoader constructor
+// clones this list and prepends a process-type-specific path to the clone.
+const DEFAULT_GLOBAL_PATHS = [
+  // Electron standard modules that are common to both process types.
+  'common/api/exports/',
 
   // Modules that are imported via process.atomBinding().  In Electron,
   // these are all natives; in Positron, they're currently all JavaScript.
@@ -52,6 +49,10 @@ const windowLoaders = new WeakMap();
  */
 
 function ModuleLoader(processType) {
+  const globalPaths = DEFAULT_GLOBAL_PATHS.slice();
+  // Prepend a process-type-specific path to the global paths for this loader.
+  globalPaths.unshift(processType + '/api/exports/');
+
   /**
    * Mapping from module IDs (resource: URLs) to module objects.
    *
