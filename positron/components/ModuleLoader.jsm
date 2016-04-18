@@ -62,6 +62,35 @@ function ModuleLoader(processType) {
   const modules = new Map();
 
   /**
+   * The module-wide global object, which is available via a reference
+   * to the `global` symbol as well as implicitly via the sandbox prototype.
+   * This object is shared across all modules loaded by this loader.
+   */
+  const global = {
+    // Start defining the `process` property.  We finish defining it below,
+    // after defining this.require().
+    process: {
+      type: processType,
+    },
+    // XXX Also define setImmediate and clearImmediate.
+  };
+
+  /**
+   * Add default properties to the module-specific global object.
+   *
+   * @param  moduleGlobalObj {Object} the module-specific global object
+   *                                  to which we add default properties
+   * @param  module          {Object} the object that identifies the module
+   *                                  and caches its exported symbols
+   */
+  this.injectModuleGlobals = function(moduleGlobalObj, module) {
+    moduleGlobalObj.exports = module.exports;
+    moduleGlobalObj.module = module;
+    moduleGlobalObj.require = this.require.bind(this, module);
+    moduleGlobalObj.global = global;
+  };
+
+  /**
    * Import a module.
    *
    * @param  requirer {Object} the module importing this module.
@@ -133,11 +162,12 @@ function ModuleLoader(processType) {
     let sandbox = new Cu.Sandbox(systemPrincipal, {
       sandboxName: uri.spec,
       wantComponents: wantComponents,
+      sandboxPrototype: global,
     });
 
-    this.injectGlobals(sandbox, module);
+    this.injectModuleGlobals(sandbox, module);
 
-    // XXX Move these into injectGlobals().
+    // XXX Move these into injectModuleGlobals().
     sandbox.__filename = file.path;
     sandbox.__dirname = file.parent.path;
 
@@ -152,15 +182,12 @@ function ModuleLoader(processType) {
     }
   };
 
-  this.injectGlobals = function(globalObj, module) {
-    globalObj.exports = module.exports;
-    globalObj.module = module;
-    globalObj.require = this.require.bind(this, module);
-    // Require `process` by absolute URL so the resolution algorithm doesn't try
-    // to resolve it relative to the requirer's URL.
-    globalObj.process = this.require({}, 'resource:///modules/gecko/process.js');
-    globalObj.process.type = processType;
-  };
+  // Finish defining the properties of the global.process object.
+  // We do this by importing a module with our own require() function,
+  // which gives it access to that require() function, so it can use it
+  // to load native bindings.  Perhaps it would be better to populate
+  // the process object entirely within this ModuleLoader constructor.
+  this.require({}, 'resource:///modules/gecko/process.js');
 }
 
 ModuleLoader.getLoaderForWindow = function(window) {
