@@ -67,10 +67,9 @@ windowWatcher.registerNotification(function observe(subject, topic, data) {
     case 'domwindowopened':
       break;
     case 'domwindowclosed': {
-      let domWindow = subject.QueryInterface(Ci.nsIDOMWindow);
-      let browserWindow = browserWindows.get(domWindow);
+      let browserWindow = browserWindows.get(subject);
       browserWindow.emit('closed');
-      browserWindows.delete(domWindow);
+      browserWindows.delete(subject);
 
       // This assumes that the BrowserWindow module was loaded before any
       // windows were opened.  That's a safe assumption while the module
