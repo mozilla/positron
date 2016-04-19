@@ -28,6 +28,15 @@ process.atomBinding = function(name) {
     if (/No such module/.test(error.message)) {
       return process.binding("atom_common_" + name);
     }
+
+    // Note: when atomBinding fails here, it'll always report an error loading
+    // atom_common_${name}, but that doesn't mean that we should stub/implement
+    // a module with that name.  The equivalent in Electron might be specific
+    // to "browser" or "renderer" processes.
+    //
+    // To determine which Electron module to stub/implement, search Electron
+    // for atom_browser_${name}, atom_renderer_${name}, or atom_common_${name}.
+    //
     throw error;
   }
 };
