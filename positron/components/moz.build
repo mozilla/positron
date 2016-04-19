@@ -8,6 +8,6 @@ EXTRA_COMPONENTS += [
 ]
 
 EXTRA_JS_MODULES += [
+    'ModuleLoader.jsm',
     'PositronAppRunner.jsm',
-    'Require.jsm',
 ]
