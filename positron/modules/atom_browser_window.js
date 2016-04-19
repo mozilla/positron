@@ -40,7 +40,7 @@ const DEFAULT_WINDOW_FEATURES = [
   'scrollbars',
 ];
 
-// Map from nsIDOMWindow instances to BrowserWindow instances.
+// Map of DOM window instances to BrowserWindow instances.
 let browserWindows = new Map();
 
 function BrowserWindow(options) {
