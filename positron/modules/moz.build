@@ -2,7 +2,7 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-EXTRA_JS_MODULES.atom += [
+EXTRA_JS_MODULES.gecko += [
   'atom_browser_app.js',
   'atom_browser_debugger.js',
   'atom_browser_download_item.js',
@@ -11,4 +11,5 @@ EXTRA_JS_MODULES.atom += [
   'atom_browser_web_contents.js',
   'atom_browser_window.js',
   'atom_common_v8_util.js',
+  'process.js',
 ]

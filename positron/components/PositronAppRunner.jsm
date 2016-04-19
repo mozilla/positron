@@ -14,7 +14,7 @@ const NS_OK = Cr.NS_OK;
 Cu.import("resource://gre/modules/NetUtil.jsm");
 Cu.import("resource://gre/modules/osfile.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
-Cu.import("resource:///modules/Require.jsm");
+Cu.import("resource:///modules/ModuleLoader.jsm");
 
 this.EXPORTED_SYMBOLS = ["PositronAppRunner"];
 
@@ -61,7 +61,7 @@ PositronAppRunner.prototype = {
       id: "resource:///modules/PositronAppRunner.jsm",
       exports: {},
     };
-    (new Require(requirer))(mainScriptURI);
+    (new ModuleLoader("browser")).require(requirer, mainScriptURI);
   },
 
   _parsePackageJSON: function par_parsePackageJSON(aData) {
