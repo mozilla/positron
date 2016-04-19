@@ -39,6 +39,8 @@ const DEFAULT_GLOBAL_PATHS = [
   'node/',
 ];
 
+const windowLoaders = new WeakMap();
+
 /**
  * Construct a module importer (`require()` global function).
  *
@@ -124,9 +126,9 @@ function ModuleLoader(processType) {
     }
     modules.set(module.id, module);
 
-    // Provide the Components object to the "native binding modules" (the ones
-    // that implement APIs in JS that Electron implements with native bindings).
-    const wantComponents = uri.spec.startsWith('resource:///modules/atom/');
+    // Provide the Components object to the "native binding modules" (which
+    // implement APIs in JS that Node/Electron implement with native bindings).
+    const wantComponents = uri.spec.startsWith('resource:///modules/gecko/');
 
     let sandbox = new Cu.Sandbox(systemPrincipal, {
       sandboxName: uri.spec,
@@ -156,7 +158,16 @@ function ModuleLoader(processType) {
     globalObj.require = this.require.bind(this, module);
     // Require `process` by absolute URL so the resolution algorithm doesn't try
     // to resolve it relative to the requirer's URL.
-    globalObj.process = this.require({}, 'resource:///modules/node/process.js');
+    globalObj.process = this.require({}, 'resource:///modules/gecko/process.js');
     globalObj.process.type = processType;
   };
 }
+
+ModuleLoader.getLoaderForWindow = function(window) {
+  let loader = windowLoaders.get(window);
+  if (!loader) {
+    loader = new ModuleLoader('renderer');
+    windowLoaders.set(window, loader);
+  }
+  return loader;
+};

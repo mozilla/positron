@@ -1,17 +1,22 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 'use strict';
 
+const { classes: Cc, interfaces: Ci, results: Cr, utils: Cu } = Components;
+
+Cu.import('resource://gre/modules/Services.jsm');
+
 // In Node, process.js is basically a noop, as it just re-exports the existing
-// `process` global.  We use it to implement some bits and pieces that Electron
-// expects, then construct the `process` global from it (instead of the other
-// way around).  We can presumably stop doing that once we're using real Node.
+// `process` global.  But in Positron, we implement the `process` global via
+// this module, so we construct the `process` global by importing this module
+// rather than the other way around.
 
 // Because we construct the `process` global in this module, and we also inject
 // the global into this module, we don't actually have to export its symbols
 // here.  We just have to attach them to this module's own `process` global.
 // XXX Figure out if that's really the best way to implement this functionality.
-
-// Re-export process as a native module
-// module.exports = process;
 
 // This comes from Electron, where it's defined by common/init.js, which we
 // currently don't load.  Once we enable loading of init.js modules, we should
@@ -22,9 +27,8 @@ process.atomBinding = function(name) {
   } catch (error) {
     if (/No such module/.test(error.message)) {
       return process.binding("atom_common_" + name);
-    } else {
-      throw error;
     }
+    throw error;
   }
 };
 
@@ -34,3 +38,9 @@ process.atomBinding = function(name) {
 process.binding = function(name) {
   return require(name);
 }
+
+process.versions = {
+  node: '0',
+  chrome: Services.appinfo.platformVersion,
+  electron: Services.appinfo.version,
+};
