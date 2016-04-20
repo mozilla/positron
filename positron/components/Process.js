@@ -20,7 +20,7 @@ Cu.import('resource:///modules/ModuleLoader.jsm');
 function Process() {}
 
 Process.prototype = {
-  _processModule: null,
+  _processGlobal: null,
 
   classID: Components.ID('{3c81d709-5fb4-4144-9612-9ecc1be4e7b1}'),
   contractID: '@mozilla.org/positron/process;1',
@@ -38,14 +38,14 @@ Process.prototype = {
    */
   init: function(window) {
     let loader = ModuleLoader.getLoaderForWindow(window);
-    this._processModule = loader.require({}, 'resource:///modules/gecko/process.js');
+    this._processGlobal = loader.global.process;
     return window.processImpl._create(window, this);
   },
 
   /* Node `process` interface */
 
   get versions() {
-    return this._processModule.versions;
+    return this._processGlobal.versions;
   },
 
 };
