@@ -22,6 +22,18 @@ exports._setWrapWebContents = function(aWrapWebContents) {
 // to collect the set of properties that should be assigned to the instance.
 //
 let WebContents_prototype = {
+  // In Electron, this is implemented via GetRenderProcessHost()->GetID(),
+  // which appears to return the process ID of the renderer process.  We don't
+  // actually create a unique process for each renderer, so we simply give
+  // each WebContents instance an arbitrary unique ID.
+  getId() {
+    return this._id;
+  },
+
+  getOwnerBrowserWindow() {
+    return this._browserWindow;
+  },
+
   getURL: function() {
     if (this._browserWindow._domWindow) {
       return this._browserWindow._domWindow.location;
@@ -31,6 +43,10 @@ let WebContents_prototype = {
 
   loadURL: function(url) {
     this._browserWindow._domWindow.location = url;
+  },
+
+  getTitle: function() {
+    return "/* stub */";
   },
 
   openDevTools() {
@@ -90,16 +106,17 @@ let WebContents_prototype = {
   },
 };
 
+let lastWebContentsID = 0;
+
 function WebContents(options) {
   // XXX Consider using WeakMap to hide private properties from consumers.
   this._browserWindow = options.browserWindow;
+  this._id = ++lastWebContentsID;
 
-  // XXX Iterate WebContents_prototype and automagically assign each property
-  // to the instance (after which we'll need to assign _getURL specially, since
-  // it's an alias for getURL).
-  this.getURL = this._getURL = WebContents_prototype.getURL;
-  this.loadURL = WebContents_prototype.loadURL;
-  this.openDevTools = WebContents_prototype.openDevTools;
+  for (let prop in WebContents_prototype) {
+    this[prop] = WebContents_prototype[prop];
+  }
+  this._getURL = this.getURL;
 }
 
 exports.create = function(options) {
