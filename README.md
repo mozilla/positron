@@ -19,3 +19,27 @@ Build Command:
 ```bash
 ./mach build
 ```
+
+### How to run
+To run an app on Positron, invoke `./mach run` with the path to the app's directory. For example, to run a sample app:
+
+```bash
+./mach run positron/test/hello-world
+```
+
+You can also `npm link` the build directory and then run the app via the *positron* command:
+
+```bash
+(cd obj-x86_64-apple-darwin14.5.0/dist/; npm link) # Build dir name will vary.
+positron positron/test/hello-world
+```
+
+### How to test
+To start an Electron test run:
+
+```bash
+(cd positron/electron/spec; npm install) # You only have to do this the first time.
+./mach run positron/electron/spec
+```
+
+*Note: these tests don't yet run.*

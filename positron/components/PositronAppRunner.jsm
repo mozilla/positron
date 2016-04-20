@@ -12,6 +12,7 @@ const nsIAppStartup            = Ci.nsIAppStartup;
 const NS_OK = Cr.NS_OK;
 
 Cu.import("resource://gre/modules/NetUtil.jsm");
+Cu.import("resource://gre/modules/osfile.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource:///modules/ModuleLoader.jsm");
 
@@ -53,15 +54,14 @@ PositronAppRunner.prototype = {
     return this._unboundLoadAndContinue.bind(this, aThenWhat.bind(this));
   },
 
-  _loadMainScript: function par_LoadMainScript(aScriptName) {
-    let mainScript = this._baseDir.clone();
-    mainScript.append(aScriptName);
+  _loadMainScript: function par_LoadMainScript(aScriptPath) {
+    let mainScriptPath = OS.Path.join(this._baseDir.path, aScriptPath);
+    let mainScriptURI = OS.Path.toFileURI(mainScriptPath);
     let requirer = {
       id: "resource:///modules/PositronAppRunner.jsm",
       exports: {},
     };
-    let loader = new ModuleLoader("browser" /* processType */);
-    loader.require(requirer, Services.io.newFileURI(mainScript).spec);
+    (new ModuleLoader("browser")).require(requirer, mainScriptURI);
   },
 
   _parsePackageJSON: function par_parsePackageJSON(aData) {
