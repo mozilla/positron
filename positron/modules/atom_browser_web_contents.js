@@ -4,6 +4,9 @@
 
 "use strict";
 
+const { classes: Cc, interfaces: Ci, results: Cr, utils: Cu } = Components;
+const { Services } = Cu.import("resource://gre/modules/Services.jsm", {});
+
 let wrapWebContents = null;
 
 exports._setWrapWebContents = function(aWrapWebContents) {
@@ -30,8 +33,54 @@ let WebContents_prototype = {
     this._browserWindow._domWindow.location = url;
   },
 
-  openDevTools: function() {
-    dump('WebContents.openDevTools is not yet implemented!\n');
+  openDevTools() {
+    // TODO: When tools can be opened inside the content window, support
+    // `detach` option to force into a new window instead.
+
+    // Ensure DevTools core modules are loaded, including support for the about
+    // URL below which is registered dynamically.
+    const { loader } = Cu.import("resource://devtools/shared/Loader.jsm", {});
+    loader.require("devtools/client/main");
+
+    // The current approach below avoids the need for a container window
+    // wrapping a tools frame, but it does replicate close handling, etc.
+    // Historically we would have used toolbox-hosts.js to handle this, but
+    // DevTools will be moving away from that, and so it seems fine to
+    // experiment with toolbox management here.
+    let window = this._browserWindow._domWindow;
+    let id = window.QueryInterface(Ci.nsIInterfaceRequestor)
+                   .getInterface(Ci.nsIDOMWindowUtils)
+                   .outerWindowID;
+    let url = `about:devtools-toolbox?type=window&id=${id}`;
+    let features = "chrome,resizable,centerscreen," +
+                   "width=1024,height=768";
+    let toolsWindow = Services.ww.openWindow(null, url, null, features, null);
+
+    // Emit DevTools events that are in the webContents API
+    let onLoad = () => {
+      toolsWindow.removeEventListener("load", onLoad);
+      toolsWindow.addEventListener("unload", onUnload);
+      this.emit("devtools-opened");
+    }
+    let onUnload = () => {
+      toolsWindow.removeEventListener("unload", onUnload);
+      toolsWindow.removeEventListener("message", onMessage);
+      this.emit("devtools-closed");
+    }
+
+    // Listen for the toolbox's built-in close button, which sends a message
+    // asking the toolbox's opener how to handle things.  In this case, just
+    // close the toolbox.
+    let onMessage = ({ data }) => {
+      data = JSON.parse(data);
+      if (data.name !== "toolbox-close") {
+        return;
+      }
+      toolsWindow.close();
+    };
+
+    toolsWindow.addEventListener("message", onMessage);
+    toolsWindow.addEventListener("load", onLoad);
   },
 };
 
