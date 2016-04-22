@@ -68,6 +68,15 @@ windowWatcher.registerNotification(function observe(subject, topic, data) {
       break;
     case 'domwindowclosed': {
       let browserWindow = browserWindows.get(subject);
+      if (!browserWindow) {
+        // The window might be a devtools windows, in which case it won't be
+        // in our list of browser windows.
+        // TODO: figure out if window-all-closed respects devtools windows,
+        // in which case the conditional that determines whether or not to emit
+        // that event will need to change.
+        return;
+      }
+
       browserWindow.emit('closed');
       browserWindows.delete(subject);
 
