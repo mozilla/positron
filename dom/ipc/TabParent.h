@@ -22,6 +22,7 @@
 #include "nsIAuthPromptProvider.h"
 #include "nsIBrowserDOMWindow.h"
 #include "nsIDOMEventListener.h"
+#include "nsIKeyEventInPluginCallback.h"
 #include "nsISecureBrowserUI.h"
 #include "nsITabParent.h"
 #include "nsIWebBrowserPersistable.h"
@@ -82,6 +83,7 @@ class TabParent final : public PBrowserParent
                       , public nsITabParent
                       , public nsIAuthPromptProvider
                       , public nsISecureBrowserUI
+                      , public nsIKeyEventInPluginCallback
                       , public nsSupportsWeakReference
                       , public TabContext
                       , public nsAPostRefreshObserver
@@ -255,6 +257,15 @@ public:
                                    const int32_t& aCause,
                                    const int32_t& aFocusChange) override;
 
+
+  // See nsIKeyEventInPluginCallback
+  virtual void HandledWindowedPluginKeyEvent(
+                 const NativeEventData& aKeyEventData,
+                 bool aIsConsumed) override;
+
+  virtual bool RecvOnWindowedPluginKeyEvent(
+                 const NativeEventData& aKeyEventData) override;
+
   virtual bool RecvRequestFocus(const bool& aCanRaise) override;
 
   virtual bool
@@ -281,7 +292,8 @@ public:
 
   virtual bool RecvShowTooltip(const uint32_t& aX,
                                const uint32_t& aY,
-                               const nsString& aTooltip) override;
+                               const nsString& aTooltip,
+                               const nsString& aDirection) override;
 
   virtual bool RecvHideTooltip() override;
 
@@ -396,13 +408,13 @@ public:
   virtual bool
   RecvSynthesizeNativeTouchPoint(const uint32_t& aPointerId,
                                  const TouchPointerState& aPointerState,
-                                 const ScreenIntPoint& aPointerScreenPoint,
+                                 const LayoutDeviceIntPoint& aPoint,
                                  const double& aPointerPressure,
                                  const uint32_t& aPointerOrientation,
                                  const uint64_t& aObserverId) override;
 
   virtual bool
-  RecvSynthesizeNativeTouchTap(const ScreenIntPoint& aPointerScreenPoint,
+  RecvSynthesizeNativeTouchTap(const LayoutDeviceIntPoint& aPoint,
                                const bool& aLongTap,
                                const uint64_t& aObserverId) override;
 
@@ -580,6 +592,8 @@ protected:
   virtual bool RecvSetDimensions(const uint32_t& aFlags,
                                  const int32_t& aX, const int32_t& aY,
                                  const int32_t& aCx, const int32_t& aCy) override;
+
+  virtual bool RecvGetTabCount(uint32_t* aValue) override;
 
   virtual bool RecvAudioChannelActivityNotification(const uint32_t& aAudioChannel,
                                                     const bool& aActive) override;

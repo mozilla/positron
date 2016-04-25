@@ -31,12 +31,14 @@ XPCOMUtils.defineLazyModuleGetter(this, "MatchPattern",
                                   "resource://gre/modules/MatchPattern.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "MatchGlobs",
                                   "resource://gre/modules/MatchPattern.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "MessageChannel",
+                                  "resource://gre/modules/MessageChannel.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "PrivateBrowsingUtils",
                                   "resource://gre/modules/PrivateBrowsingUtils.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "PromiseUtils",
                                   "resource://gre/modules/PromiseUtils.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "MessageChannel",
-                                  "resource://gre/modules/MessageChannel.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "Schemas",
+                                  "resource://gre/modules/Schemas.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "WebNavigationFrames",
                                   "resource://gre/modules/WebNavigationFrames.jsm");
 
@@ -50,6 +52,7 @@ var {
   flushJarCache,
   detectLanguage,
   promiseDocumentReady,
+  ChildAPIManager,
 } = ExtensionUtils;
 
 function isWhenBeforeOrSame(when1, when2) {
@@ -57,6 +60,12 @@ function isWhenBeforeOrSame(when1, when2) {
                "document_end": 1,
                "document_idle": 2};
   return table[when1] <= table[when2];
+}
+
+function getInnerWindowID(window) {
+  return window.QueryInterface(Ci.nsIInterfaceRequestor)
+    .getInterface(Ci.nsIDOMWindowUtils)
+    .currentInnerWindowID;
 }
 
 // This is the fairly simple API that we inject into content
@@ -275,7 +284,7 @@ var ExtensionManager;
 // frame.
 class ExtensionContext extends BaseContext {
   constructor(extensionId, contentWindow, contextOptions = {}) {
-    super();
+    super(extensionId);
 
     let {isExtensionPage} = contextOptions;
 
@@ -326,7 +335,15 @@ class ExtensionContext extends BaseContext {
         isWebExtensionContentScript: true,
       });
     } else {
+      // sandbox metadata is needed to be recognized and supported in
+      // the Developer Tools of the tab where the content script is running.
+      let metadata = {
+        "inner-window-id": getInnerWindowID(contentWindow),
+        addonId: attrs.addonId,
+      };
+
       this.sandbox = Cu.Sandbox(prin, {
+        metadata,
         sandboxPrototype: contentWindow,
         wantXrays: true,
         isWebExtensionContentScript: true,
@@ -353,6 +370,23 @@ class ExtensionContext extends BaseContext {
     // Sandboxes don't get Xrays for some weird compatibility
     // reason. However, we waive here anyway in case that changes.
     Cu.waiveXrays(this.sandbox).chrome = this.chromeObj;
+
+    let apis = {
+      "storage": "chrome://extensions/content/schemas/storage.json",
+      "test": "chrome://extensions/content/schemas/test.json",
+    };
+
+    let incognito = PrivateBrowsingUtils.isContentWindowPrivate(this.contentWindow);
+    this.childManager = new ChildAPIManager(this, mm, Object.keys(apis), {
+      type: "content_script",
+      url,
+      incognito,
+    });
+
+    for (let api in apis) {
+      Schemas.load(apis[api]);
+    }
+    Schemas.inject(this.chromeObj, this.childManager);
 
     injectAPI(api(this), this.chromeObj);
 
@@ -395,6 +429,8 @@ class ExtensionContext extends BaseContext {
   close() {
     super.unload();
 
+    this.childManager.close();
+
     // Overwrite the content script APIs with an empty object if the APIs objects are still
     // defined in the content window (See Bug 1214658 for rationale).
     if (this.isExtensionPage && !Cu.isDeadWrapper(this.contentWindow) &&
@@ -405,12 +441,6 @@ class ExtensionContext extends BaseContext {
     Cu.nukeSandbox(this.sandbox);
     this.sandbox = null;
   }
-}
-
-function windowId(window) {
-  return window.QueryInterface(Ci.nsIInterfaceRequestor)
-               .getInterface(Ci.nsIDOMWindowUtils)
-               .currentInnerWindowID;
 }
 
 // Responsible for creating ExtensionContexts and injecting content
@@ -557,8 +587,19 @@ DocumentManager = {
     }
   },
 
+  getContentScriptGlobalsForWindow(window) {
+    let winId = getInnerWindowID(window);
+    let extensions = this.contentScriptWindows.get(winId);
+
+    if (extensions) {
+      return Array.from(extensions.values(), ctx => ctx.sandbox);
+    }
+
+    return [];
+  },
+
   getContentScriptContext(extensionId, window) {
-    let winId = windowId(window);
+    let winId = getInnerWindowID(window);
     if (!this.contentScriptWindows.has(winId)) {
       this.contentScriptWindows.set(winId, new Map());
     }
@@ -573,7 +614,7 @@ DocumentManager = {
   },
 
   getExtensionPageContext(extensionId, window) {
-    let winId = windowId(window);
+    let winId = getInnerWindowID(window);
 
     let context = this.extensionPageWindows.get(winId);
     if (!context) {
@@ -645,7 +686,7 @@ DocumentManager = {
         }
       }
     } else {
-      let contexts = this.contentScriptWindows.get(windowId(window)) || new Map();
+      let contexts = this.contentScriptWindows.get(getInnerWindowID(window)) || new Map();
       for (let context of contexts.values()) {
         context.triggerScripts(state);
       }
@@ -696,6 +737,8 @@ ExtensionManager = {
   extensions: new Map(),
 
   init() {
+    Schemas.init();
+
     Services.cpmm.addMessageListener("Extension:Startup", this);
     Services.cpmm.addMessageListener("Extension:Shutdown", this);
     Services.cpmm.addMessageListener("Extension:FlushJarCache", this);
@@ -768,7 +811,7 @@ class ExtensionGlobal {
 
   get messageFilterStrict() {
     return {
-      innerWindowID: windowId(this.global.content),
+      innerWindowID: getInnerWindowID(this.global.content),
     };
   }
 
@@ -870,6 +913,14 @@ this.ExtensionContent = {
   uninit(global) {
     this.globals.get(global).uninit();
     this.globals.delete(global);
+  },
+
+  // This helper is exported to be integrated in the devtools RDP actors,
+  // that can use it to retrieve the existent WebExtensions ContentScripts
+  // of a target window and be able to show the ContentScripts source in the
+  // DevTools Debugger panel.
+  getContentScriptGlobalsForWindow(window) {
+    return DocumentManager.getContentScriptGlobalsForWindow(window);
   },
 };
 

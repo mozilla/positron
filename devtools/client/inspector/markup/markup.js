@@ -130,7 +130,7 @@ function MarkupView(inspector, frame, controllerWindow) {
   this._elt.addEventListener("click", this._onMouseClick, false);
   this._elt.addEventListener("mousemove", this._onMouseMove, false);
   this._elt.addEventListener("mouseleave", this._onMouseLeave, false);
-  this.doc.body.addEventListener("mouseup", this._onMouseUp);
+  this.win.addEventListener("mouseup", this._onMouseUp);
   this.win.addEventListener("keydown", this._onKeyDown, false);
   this.win.addEventListener("copy", this._onCopy);
   this._frame.addEventListener("focus", this._onFocus, false);
@@ -550,19 +550,25 @@ MarkupView.prototype = {
   },
 
   /**
-   * Focus the current node selection's MarkupContainer if the selection
-   * happened because the user picked an element using the element picker or
-   * browser context menu.
+   * Maybe focus the current node selection's MarkupContainer depending on why
+   * the current node got selected.
    */
   maybeFocusNewSelection: function() {
     let {reason, nodeFront} = this._inspector.selection;
 
-    if (reason !== "browser-context-menu" &&
-        reason !== "picker-node-picked") {
-      return;
-    }
+    // The list of reasons that should lead to focusing the node.
+    let reasonsToFocus = [
+      // If the user picked an element with the element picker.
+      "picker-node-picked",
+      // If the user selected an element with the browser context menu.
+      "browser-context-menu",
+      // If the user added a new node by clicking in the inspector toolbar.
+      "node-inserted"
+    ];
 
-    this.getContainer(nodeFront).focus();
+    if (reasonsToFocus.includes(reason)) {
+      this.getContainer(nodeFront).focus();
+    }
   },
 
   /**
@@ -1615,7 +1621,7 @@ MarkupView.prototype = {
     this._elt.removeEventListener("click", this._onMouseClick, false);
     this._elt.removeEventListener("mousemove", this._onMouseMove, false);
     this._elt.removeEventListener("mouseleave", this._onMouseLeave, false);
-    this.doc.body.removeEventListener("mouseup", this._onMouseUp);
+    this.win.removeEventListener("mouseup", this._onMouseUp);
     this.win.removeEventListener("keydown", this._onKeyDown, false);
     this.win.removeEventListener("copy", this._onCopy);
     this._frame.removeEventListener("focus", this._onFocus, false);
@@ -1787,8 +1793,8 @@ MarkupContainer.prototype = {
 
     // Binding event listeners
     this.elt.addEventListener("mousedown", this._onMouseDown, false);
-    this.markup.doc.body.addEventListener("mouseup", this._onMouseUp, true);
-    this.markup.doc.body.addEventListener("mousemove", this._onMouseMove, true);
+    this.win.addEventListener("mouseup", this._onMouseUp, true);
+    this.win.addEventListener("mousemove", this._onMouseMove, true);
     this.elt.addEventListener("dblclick", this._onToggle, false);
     if (this.expander) {
       this.expander.addEventListener("click", this._onToggle, false);
@@ -2051,11 +2057,20 @@ MarkupContainer.prototype = {
     }
 
     if (this.isDragging) {
-      let diff = event.pageY - this._dragStartY;
+      let x = 0;
+      let y = event.pageY - this.win.scrollY;
+
+      // Ensure we keep the dragged element within the markup view.
+      if (y < 0) {
+        y = 0;
+      } else if (y >= this.markup.doc.body.offsetHeight - this.win.scrollY) {
+        y = this.markup.doc.body.offsetHeight - this.win.scrollY - 1;
+      }
+
+      let diff = y - this._dragStartY + this.win.scrollY;
       this.elt.style.top = diff + "px";
 
-      let el = this.markup.doc.elementFromPoint(event.pageX - this.win.scrollX,
-                                                event.pageY - this.win.scrollY);
+      let el = this.markup.doc.elementFromPoint(x, y);
       this.markup.indicateDropTarget(el);
     }
   },
@@ -2184,9 +2199,10 @@ MarkupContainer.prototype = {
     // Remove event listeners
     this.elt.removeEventListener("mousedown", this._onMouseDown, false);
     this.elt.removeEventListener("dblclick", this._onToggle, false);
-    this.markup.doc.body.removeEventListener("mouseup", this._onMouseUp, true);
-    this.markup.doc.body.removeEventListener("mousemove",
-      this._onMouseMove, true);
+    if (this.win) {
+      this.win.removeEventListener("mouseup", this._onMouseUp, true);
+      this.win.removeEventListener("mousemove", this._onMouseMove, true);
+    }
 
     this.win = null;
 

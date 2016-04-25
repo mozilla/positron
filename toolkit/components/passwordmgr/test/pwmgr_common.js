@@ -302,6 +302,24 @@ function resetRecipes() {
   });
 }
 
+function promiseStorageChanged(expectedChangeTypes) {
+  return new Promise((resolve, reject) => {
+    function onStorageChanged({ topic, data }) {
+      let changeType = expectedChangeTypes.shift();
+      is(data, changeType, "Check expected passwordmgr-storage-changed type");
+      if (expectedChangeTypes.length === 0) {
+        chromeScript.removeMessageListener("storageChanged", onStorageChanged);
+        resolve();
+      }
+    }
+    chromeScript.addMessageListener("storageChanged", onStorageChanged);
+  });
+}
+
+function countLogins(chromeScript, formOrigin, submitOrigin, httpRealm) {
+  return chromeScript.sendSyncMessage("countLogins", {formOrigin, submitOrigin, httpRealm})[0][0];
+}
+
 /**
  * Run a function synchronously in the parent process and destroy it in the test cleanup function.
  * @param {Function|String} aFunctionOrURL - either a function that will be stringified and run
@@ -341,7 +359,16 @@ if (this.addMessageListener) {
   // Ignore ok/is in commonInit since they aren't defined in a chrome script.
   ok = is = () => {}; // eslint-disable-line no-native-reassign
 
+  Cu.import("resource://gre/modules/Services.jsm");
   Cu.import("resource://gre/modules/Task.jsm");
+
+  function onStorageChanged(subject, topic, data) {
+    sendAsyncMessage("storageChanged", {
+      topic,
+      data,
+    });
+  }
+  Services.obs.addObserver(onStorageChanged, "passwordmgr-storage-changed", false);
 
   addMessageListener("setupParent", ({selfFilling = false} = {selfFilling: false}) => {
     commonInit(selfFilling);
@@ -361,6 +388,10 @@ if (this.addMessageListener) {
     yield recipeParent.reset();
     sendAsyncMessage("recipesReset");
   }));
+
+  addMessageListener("countLogins", ({formOrigin, submitOrigin, httpRealm}) => {
+    return Services.logins.countLogins(formOrigin, submitOrigin, httpRealm);
+  });
 
   var globalMM = Cc["@mozilla.org/globalmessagemanager;1"].getService(Ci.nsIMessageListenerManager);
   globalMM.addMessageListener("RemoteLogins:onFormSubmit", function onFormSubmit(message) {

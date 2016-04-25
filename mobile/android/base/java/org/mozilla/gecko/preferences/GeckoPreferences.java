@@ -92,6 +92,7 @@ import android.widget.ListView;
 import org.json.JSONObject;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
@@ -155,6 +156,7 @@ OnSharedPreferenceChangeListener
     private static final String PREFS_FAQ_LINK = NON_PREF_PREFIX + "faq.link";
     private static final String PREFS_FEEDBACK_LINK = NON_PREF_PREFIX + "feedback.link";
     public static final String PREFS_NOTIFICATIONS_CONTENT = NON_PREF_PREFIX + "notifications.content";
+    public static final String PREFS_NOTIFICATIONS_CONTENT_LEARN_MORE = NON_PREF_PREFIX + "notifications.content.learn_more";
     public static final String PREFS_NOTIFICATIONS_WHATS_NEW = NON_PREF_PREFIX + "notifications.whats_new";
 
     private static final String ACTION_STUMBLER_UPLOAD_PREF = AppConstants.ANDROID_PACKAGE_NAME + ".STUMBLER_PREF";
@@ -180,6 +182,14 @@ OnSharedPreferenceChangeListener
     public static final int RESULT_CODE_LOCALE_DID_CHANGE = 7;
 
     private static final int REQUEST_CODE_TAB_QUEUE = 8;
+
+    private final Map<String, PrefHandler> HANDLERS;
+    {
+        final HashMap<String, PrefHandler> tempHandlers = new HashMap<>(2);
+        tempHandlers.put(ClearOnShutdownPref.PREF, new ClearOnShutdownPref());
+        tempHandlers.put(AndroidImportPreference.PREF_KEY, new AndroidImportPreference.Handler());
+        HANDLERS = Collections.unmodifiableMap(tempHandlers);
+    }
 
     private SwitchPreference tabQueuePreference;
 
@@ -690,8 +700,8 @@ OnSharedPreferenceChangeListener
                 }
                 setupPreferences((PreferenceGroup) pref, prefs);
             } else {
-                if (handlers.containsKey(key)) {
-                    PrefHandler handler = handlers.get(key);
+                if (HANDLERS.containsKey(key)) {
+                    PrefHandler handler = HANDLERS.get(key);
                     if (!handler.setupPref(this, pref)) {
                         preferences.removePreference(pref);
                         i--;
@@ -872,7 +882,8 @@ OnSharedPreferenceChangeListener
                         i--;
                         continue;
                     }
-                } else if (PREFS_NOTIFICATIONS_CONTENT.equals(key)) {
+                } else if (PREFS_NOTIFICATIONS_CONTENT.equals(key) ||
+                        PREFS_NOTIFICATIONS_CONTENT_LEARN_MORE.equals(key)) {
                     if (!FeedService.isInExperiment(this)) {
                         preferences.removePreference(pref);
                         i--;
@@ -1147,12 +1158,6 @@ OnSharedPreferenceChangeListener
         public void onChange(Context context, Preference pref, Object newValue);
     }
 
-    @SuppressWarnings("serial")
-    private final Map<String, PrefHandler> handlers = new HashMap<String, PrefHandler>() {{
-        put(ClearOnShutdownPref.PREF, new ClearOnShutdownPref());
-        put(AndroidImportPreference.PREF_KEY, new AndroidImportPreference.Handler());
-    }};
-
     private void recordSettingChangeTelemetry(String prefName, Object newValue) {
         final String value;
         if (newValue instanceof Boolean) {
@@ -1224,8 +1229,8 @@ OnSharedPreferenceChangeListener
             }
         } else if (PREFS_NOTIFICATIONS_CONTENT.equals(prefName)) {
             FeedService.setup(this);
-        } else if (handlers.containsKey(prefName)) {
-            PrefHandler handler = handlers.get(prefName);
+        } else if (HANDLERS.containsKey(prefName)) {
+            PrefHandler handler = HANDLERS.get(prefName);
             handler.onChange(this, preference, newValue);
         }
 
@@ -1343,7 +1348,7 @@ OnSharedPreferenceChangeListener
         LinearLayout linearLayout = new LinearLayout(this);
         linearLayout.setOrientation(LinearLayout.VERTICAL);
         AlertDialog dialog;
-        switch(id) {
+        switch (id) {
             case DIALOG_CREATE_MASTER_PASSWORD:
                 final TextInputLayout inputLayout1 = getTextBox(R.string.masterpassword_password);
                 final TextInputLayout inputLayout2 = getTextBox(R.string.masterpassword_confirm);
@@ -1460,12 +1465,7 @@ OnSharedPreferenceChangeListener
         @Override
         public void prefValue(String prefName, final boolean value) {
             final Preference pref = getField(prefName);
-            final CheckBoxPrefSetter prefSetter;
-            if (Versions.preICS) {
-                prefSetter = new CheckBoxPrefSetter();
-            } else {
-                prefSetter = new TwoStatePrefSetter();
-            }
+            final CheckBoxPrefSetter prefSetter = new TwoStatePrefSetter();
             ThreadUtils.postToUiThread(new Runnable() {
                 @Override
                 public void run() {

@@ -8,10 +8,9 @@
 #ifndef __nsWindow_h__
 #define __nsWindow_h__
 
-#include "nsAutoPtr.h"
-
 #include "mozcontainer.h"
-
+#include "mozilla/RefPtr.h"
+#include "mozilla/UniquePtr.h"
 #include "nsIDragService.h"
 #include "nsITimer.h"
 #include "nsGkAtoms.h"
@@ -347,7 +346,7 @@ public:
 #if GTK_CHECK_VERSION(3,4,0)
     virtual nsresult SynthesizeNativeTouchPoint(uint32_t aPointerId,
                                                 TouchPointerState aPointerState,
-                                                ScreenIntPoint aPointerScreenPoint,
+                                                LayoutDeviceIntPoint aPoint,
                                                 double aPointerPressure,
                                                 uint32_t aPointerOrientation,
                                                 nsIObserver* aObserver) override;
@@ -563,7 +562,7 @@ private:
      */
     RefPtr<mozilla::widget::IMContextWrapper> mIMContext;
 
-    nsAutoPtr<mozilla::CurrentX11TimeGetter> mCurrentTimeGetter;
+    mozilla::UniquePtr<mozilla::CurrentX11TimeGetter> mCurrentTimeGetter;
 };
 
 class nsChildWindow : public nsWindow {

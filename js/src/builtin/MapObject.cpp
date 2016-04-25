@@ -200,18 +200,6 @@ MapIteratorObject::next(JSContext* cx, Handle<MapIteratorObject*> mapIterator,
     MOZ_ASSERT(resultPairObj->getDenseInitializedLength() == 2);
     MOZ_ASSERT(resultPairObj->getDenseCapacity() >= 2);
 
-#ifdef DEBUG
-    // The array elements should be null, so that inlined
-    // _GetNextMapEntryForIterator doesn't have to perform pre-barrier.
-    RootedValue val(cx);
-    if (!GetElement(cx, resultPairObj, resultPairObj, 0, &val))
-        return false;
-    MOZ_ASSERT(val.isNull());
-    if (!GetElement(cx, resultPairObj, resultPairObj, 1, &val))
-        return false;
-    MOZ_ASSERT(val.isNull());
-#endif
-
     ValueMap::Range* range = MapIteratorObjectRange(mapIterator);
     if (!range || range->empty()) {
         js_delete(range);
@@ -510,14 +498,16 @@ MapObject::construct(JSContext* cx, unsigned argc, Value* vp)
 
         bool isOriginalAdder = IsNativeFunction(adderVal, MapObject::set);
         RootedValue mapVal(cx, ObjectValue(*obj));
-        FastInvokeGuard fig(cx, adderVal);
+        FastCallGuard fig(cx, adderVal);
         InvokeArgs& args2 = fig.args();
 
         ForOfIterator iter(cx);
         if (!iter.init(args[0]))
             return false;
+
         RootedValue pairVal(cx);
         RootedObject pairObj(cx);
+        RootedValue dummy(cx);
         Rooted<HashableValue> hkey(cx);
         ValueMap* map = obj->getData();
         while (true) {
@@ -558,12 +548,10 @@ MapObject::construct(JSContext* cx, unsigned argc, Value* vp)
                 if (!args2.init(2))
                     return false;
 
-                args2.setCallee(adderVal);
-                args2.setThis(mapVal);
                 args2[0].set(key);
                 args2[1].set(val);
 
-                if (!fig.invoke(cx))
+                if (!fig.call(cx, adderVal, mapVal, &dummy))
                     return false;
             }
         }
@@ -1182,7 +1170,7 @@ SetObject::construct(JSContext* cx, unsigned argc, Value* vp)
 
         bool isOriginalAdder = IsNativeFunction(adderVal, SetObject::add);
         RootedValue setVal(cx, ObjectValue(*obj));
-        FastInvokeGuard fig(cx, adderVal);
+        FastCallGuard fig(cx, adderVal);
         InvokeArgs& args2 = fig.args();
 
         RootedValue keyVal(cx);
@@ -1190,6 +1178,7 @@ SetObject::construct(JSContext* cx, unsigned argc, Value* vp)
         if (!iter.init(args[0]))
             return false;
         Rooted<HashableValue> key(cx);
+        RootedValue dummy(cx);
         ValueSet* set = obj->getData();
         while (true) {
             bool done;
@@ -1210,11 +1199,9 @@ SetObject::construct(JSContext* cx, unsigned argc, Value* vp)
                 if (!args2.init(1))
                     return false;
 
-                args2.setCallee(adderVal);
-                args2.setThis(setVal);
                 args2[0].set(keyVal);
 
-                if (!fig.invoke(cx))
+                if (!fig.call(cx, adderVal, setVal, &dummy))
                     return false;
             }
         }
@@ -1475,23 +1462,18 @@ js::InitSelfHostingCollectionIteratorFunctions(JSContext* cx, HandleObject obj)
 
 /*** JS static utility functions *********************************************/
 
-static
-bool
+static bool
 forEach(const char* funcName, JSContext *cx, HandleObject obj, HandleValue callbackFn, HandleValue thisArg)
 {
     CHECK_REQUEST(cx);
+
     RootedId forEachId(cx, NameToId(cx->names().forEach));
     RootedFunction forEachFunc(cx, JS::GetSelfHostedFunction(cx, funcName, forEachId, 2));
     if (!forEachFunc)
         return false;
-    InvokeArgs args(cx);
-    if (!args.init(2))
-        return false;
-    args.setCallee(JS::ObjectValue(*forEachFunc));
-    args.setThis(JS::ObjectValue(*obj));
-    args[0].set(callbackFn);
-    args[1].set(thisArg);
-    return Invoke(cx, args);
+
+    RootedValue fval(cx, ObjectValue(*forEachFunc));
+    return Call(cx, fval, obj, callbackFn, thisArg, &fval);
 }
 
 // Handles Clear/Size for public jsapi map/set access

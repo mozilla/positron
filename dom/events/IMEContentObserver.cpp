@@ -758,7 +758,7 @@ IMEContentObserver::OnMouseButtonEvent(nsPresContext* aPresContext,
   }
   if (!aMouseEvent->IsTrusted() ||
       aMouseEvent->DefaultPrevented() ||
-      !aMouseEvent->widget) {
+      !aMouseEvent->mWidget) {
     return false;
   }
   // Now, we need to notify only mouse down and mouse up event.
@@ -776,8 +776,8 @@ IMEContentObserver::OnMouseButtonEvent(nsPresContext* aPresContext,
   RefPtr<IMEContentObserver> kungFuDeathGrip(this);
 
   WidgetQueryContentEvent charAtPt(true, eQueryCharacterAtPoint,
-                                   aMouseEvent->widget);
-  charAtPt.refPoint = aMouseEvent->refPoint;
+                                   aMouseEvent->mWidget);
+  charAtPt.mRefPoint = aMouseEvent->mRefPoint;
   ContentEventHandler handler(aPresContext);
   handler.OnQueryCharacterAtPoint(&charAtPt);
   if (NS_WARN_IF(!charAtPt.mSucceeded) ||
@@ -801,8 +801,8 @@ IMEContentObserver::OnMouseButtonEvent(nsPresContext* aPresContext,
   }
   // The refPt is relative to its widget.
   // We should notify it with offset in the widget.
-  if (aMouseEvent->widget != mWidget) {
-    charAtPt.refPoint += aMouseEvent->widget->WidgetToScreenOffset() -
+  if (aMouseEvent->mWidget != mWidget) {
+    charAtPt.mRefPoint += aMouseEvent->mWidget->WidgetToScreenOffset() -
       mWidget->WidgetToScreenOffset();
   }
 
@@ -810,7 +810,7 @@ IMEContentObserver::OnMouseButtonEvent(nsPresContext* aPresContext,
   notification.mMouseButtonEventData.mEventMessage = aMouseEvent->mMessage;
   notification.mMouseButtonEventData.mOffset = charAtPt.mReply.mOffset;
   notification.mMouseButtonEventData.mCursorPos.Set(
-    charAtPt.refPoint.ToUnknownPoint());
+    charAtPt.mRefPoint.ToUnknownPoint());
   notification.mMouseButtonEventData.mCharRect.Set(
     charAtPt.mReply.mRect.ToUnknownRect());
   notification.mMouseButtonEventData.mButton = aMouseEvent->button;
@@ -1552,12 +1552,18 @@ IMEContentObserver::IMENotificationSender::Run()
 
   // If notifications caused some new change, we should notify them now.
   if (mIMEContentObserver->NeedsToNotifyIMEOfSomething()) {
-    MOZ_LOG(sIMECOLog, LogLevel::Debug,
-      ("IMECO: 0x%p IMEContentObserver::IMENotificationSender::Run(), "
-       "posting IMENotificationSender to current thread", this));
-    mIMEContentObserver->mQueuedSender =
-      new IMENotificationSender(mIMEContentObserver);
-    NS_DispatchToCurrentThread(mIMEContentObserver->mQueuedSender);
+    if (mIMEContentObserver->GetState() == eState_StoppedObserving) {
+      MOZ_LOG(sIMECOLog, LogLevel::Debug,
+        ("IMECO: 0x%p IMEContentObserver::IMENotificationSender::Run(), "
+         "waiting IMENotificationSender to be reinitialized", this));
+    } else {
+      MOZ_LOG(sIMECOLog, LogLevel::Debug,
+        ("IMECO: 0x%p IMEContentObserver::IMENotificationSender::Run(), "
+         "posting IMENotificationSender to current thread", this));
+      mIMEContentObserver->mQueuedSender =
+        new IMENotificationSender(mIMEContentObserver);
+      NS_DispatchToCurrentThread(mIMEContentObserver->mQueuedSender);
+    }
   }
   return NS_OK;
 }

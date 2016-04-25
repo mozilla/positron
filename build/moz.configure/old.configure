@@ -58,26 +58,6 @@ def autoconf(mozconfig, autoconf):
 set_config('AUTOCONF', autoconf)
 
 
-# See comment in mozconfig_options() from build/moz.configure/init.configure
-@template
-# This gives access to the sandbox. Don't copy this blindly.
-@imports('__sandbox__')
-def check_mozconfig_variables():
-    # This escapes the sandbox. Don't copy this. This is only here because it
-    # is a one off until old-configure is gone.
-    all_options = __sandbox__._options.itervalues()
-
-    @depends(early_options, wanted_mozconfig_variables)
-    def check_mozconfig_variables(early_options, wanted_mozconfig_variables):
-        for option in all_options:
-            if (option.env and option.env not in early_options and
-                    option.env not in wanted_mozconfig_variables):
-                die('You need to add `%s` to the `wanted_mozconfig_variables` '
-                    'list in build/moz.configure/init.configure.', option.env)
-
-check_mozconfig_variables()
-
-
 @depends('OLD_CONFIGURE', mozconfig, autoconf, check_build_environment, shell,
          old_configure_assignments, build_project)
 @imports(_from='__builtin__', _import='open')
@@ -178,7 +158,6 @@ def old_configure_options(*options):
     '--enable-accessibility',
     '--enable-address-sanitizer',
     '--enable-alsa',
-    '--enable-android-apz',
     '--enable-android-omx',
     '--enable-android-resource-constrained',
     '--enable-approximate-location',
@@ -186,7 +165,6 @@ def old_configure_options(*options):
     '--enable-b2g-camera',
     '--enable-b2g-ril',
     '--enable-bundled-fonts',
-    '--enable-chrome-format',
     '--enable-clang-plugin',
     '--enable-content-sandbox',
     '--enable-cookies',
@@ -219,13 +197,11 @@ def old_configure_options(*options):
     '--enable-ion',
     '--enable-ios-target',
     '--enable-ipdl-tests',
-    '--enable-jemalloc',
     '--enable-jitspew',
     '--enable-libjpeg-turbo',
     '--enable-libproxy',
     '--enable-llvm-hacks',
     '--enable-logrefcnt',
-    '--enable-macos-target',
     '--enable-maintenance-service',
     '--enable-media-navigator',
     '--enable-memory-sanitizer',
@@ -254,7 +230,6 @@ def old_configure_options(*options):
     '--enable-readline',
     '--enable-reflow-perf',
     '--enable-release',
-    '--enable-replace-malloc',
     '--enable-require-all-d3dc-versions',
     '--enable-rust',
     '--enable-safe-browsing',
@@ -369,7 +344,6 @@ def old_configure_options(*options):
 )
 @imports(_from='__builtin__', _import='compile')
 @imports(_from='__builtin__', _import='open')
-@imports(_from='__builtin__', _import='zip')
 @imports('logging')
 @imports('os')
 @imports('subprocess')
@@ -396,7 +370,7 @@ def old_configure(prepare_configure, extra_old_configure_args, all_options,
         cmd += extra_old_configure_args
 
     # For debugging purpose, in case it's not what we'd expect.
-    log.debug('Running %s', ' '.join(quote(a) for a in cmd))
+    log.debug('Running %s', quote(*cmd))
 
     # Our logging goes to config.log, the same file old.configure uses.
     # We can't share the handle on the file, so close it. We assume nothing
@@ -467,3 +441,25 @@ def post_old_configure(raw_config):
 
     set_old_configure_config('non_global_defines',
                              raw_config['non_global_defines'])
+
+
+# Assuming no other option is declared after this function, handle the
+# env options that were injected by mozconfig_options by creating dummy
+# Option instances and having the sandbox's CommandLineHelper handle
+# them. We only do so for options that haven't been declared so far,
+# which should be a proxy for the options that old-configure handles
+# and that we don't know anything about.
+@depends('--help')
+@imports('__sandbox__')
+@imports(_from='mozbuild.configure.options', _import='Option')
+def remaining_mozconfig_options(_):
+    helper = __sandbox__._helper
+    for arg in helper:
+        if helper._origins[arg] != 'mozconfig':
+            continue
+        name = arg.split('=', 1)[0]
+        if name.isupper() and name not in __sandbox__._options:
+            option = Option(env=name, nargs='*', help=name)
+            helper.handle(option)
+
+# Please do not add anything after remaining_mozconfig_options()

@@ -35,6 +35,7 @@
 #include "mozilla/MouseEvents.h"        // for WidgetWheelEvent
 #include "mozilla/Preferences.h"        // for Preferences
 #include "mozilla/ReentrantMonitor.h"   // for ReentrantMonitorAutoEnter, etc
+#include "mozilla/RefPtr.h"             // for RefPtr
 #include "mozilla/StaticPtr.h"          // for StaticAutoPtr
 #include "mozilla/Telemetry.h"          // for Telemetry
 #include "mozilla/TimeStamp.h"          // for TimeDuration, TimeStamp
@@ -58,7 +59,6 @@
 #include "mozilla/unused.h"             // for unused
 #include "mozilla/FloatingPoint.h"      // for FuzzyEquals*
 #include "nsAlgorithm.h"                // for clamped
-#include "nsAutoPtr.h"                  // for nsRefPtr
 #include "nsCOMPtr.h"                   // for already_AddRefed
 #include "nsDebug.h"                    // for NS_WARNING
 #include "nsIDOMWindowUtils.h"          // for nsIDOMWindowUtils
@@ -516,11 +516,10 @@ public:
       //   while holding mMonitor, because otherwise, if the overscrolled APZC
       //   is this one, then the SetState(NOTHING) in UpdateAnimation will
       //   stomp on the SetState(SNAP_BACK) it does.
-      if (!mDeferredTasks.append(NewRunnableMethod(mOverscrollHandoffChain.get(),
-                                                   &OverscrollHandoffChain::SnapBackOverscrolledApzc,
-                                                   &mApzc))) {
-        MOZ_CRASH();
-      }
+      mDeferredTasks.AppendElement(
+            NewRunnableMethod(mOverscrollHandoffChain.get(),
+                              &OverscrollHandoffChain::SnapBackOverscrolledApzc,
+                              &mApzc));
       return false;
     }
 
@@ -569,13 +568,12 @@ public:
       // the lock ordering. Instead we schedule HandleFlingOverscroll() to be
       // called after mMonitor is released.
       APZC_LOG("%p fling went into overscroll, handing off with velocity %s\n", &mApzc, Stringify(velocity).c_str());
-      if (!mDeferredTasks.append(NewRunnableMethod(&mApzc,
-                                                   &AsyncPanZoomController::HandleFlingOverscroll,
-                                                   velocity,
-                                                   mOverscrollHandoffChain,
-                                                   mScrolledApzc))) {
-        MOZ_CRASH();
-      }
+      mDeferredTasks.AppendElement(
+            NewRunnableMethod(&mApzc,
+                              &AsyncPanZoomController::HandleFlingOverscroll,
+                              velocity,
+                              mOverscrollHandoffChain,
+                              mScrolledApzc));
 
       // If there is a remaining velocity on this APZC, continue this fling
       // as well. (This fling and the handed-off fling will run concurrently.)
@@ -703,10 +701,9 @@ public:
       // The scroll snapping is done in a deferred task, otherwise the state
       // change to NOTHING caused by the overscroll animation ending would
       // clobber a possible state change to SMOOTH_SCROLL in ScrollSnap().
-      if (!mDeferredTasks.append(NewRunnableMethod(&mApzc,
-                                                   &AsyncPanZoomController::ScrollSnap))) {
-        MOZ_CRASH();
-      }
+      mDeferredTasks.AppendElement(
+            NewRunnableMethod(&mApzc,
+            &AsyncPanZoomController::ScrollSnap));
       return false;
     }
     return true;
@@ -822,12 +819,10 @@ public:
       // HandleSmoothScrollOverscroll() (which acquires the tree lock) would violate
       // the lock ordering. Instead we schedule HandleSmoothScrollOverscroll() to be
       // called after mMonitor is released.
-      if (!mDeferredTasks.append(NewRunnableMethod(&mApzc,
-                                                   &AsyncPanZoomController::HandleSmoothScrollOverscroll,
-                                                   velocity))) {
-        MOZ_CRASH();
-      }
-
+      mDeferredTasks.AppendElement(
+            NewRunnableMethod(&mApzc,
+                              &AsyncPanZoomController::HandleSmoothScrollOverscroll,
+                              velocity));
       return false;
     }
 
@@ -3065,7 +3060,7 @@ AsyncPanZoomController::RequestContentRepaint(const FrameMetrics& aFrameMetrics,
 }
 
 bool AsyncPanZoomController::UpdateAnimation(const TimeStamp& aSampleTime,
-                                             Vector<Task*>* aOutDeferredTasks)
+                                             nsTArray<Task*>* aOutDeferredTasks)
 {
   APZThreadUtils::AssertOnCompositorThread();
 
@@ -3166,7 +3161,7 @@ bool AsyncPanZoomController::AdvanceAnimations(const TimeStamp& aSampleTime)
   // responsibility to schedule a composite.
   mAsyncTransformAppliedToContent = false;
   bool requestAnimationFrame = false;
-  Vector<Task*> deferredTasks;
+  nsTArray<Task*> deferredTasks;
 
   {
     ReentrantMonitorAutoEnter lock(mMonitor);
@@ -3188,7 +3183,7 @@ bool AsyncPanZoomController::AdvanceAnimations(const TimeStamp& aSampleTime)
   // UpdateAnimation()). This needs to be done after the monitor is released
   // since the tasks are allowed to call APZCTreeManager methods which can grab
   // the tree lock.
-  for (uint32_t i = 0; i < deferredTasks.length(); ++i) {
+  for (uint32_t i = 0; i < deferredTasks.Length(); ++i) {
     deferredTasks[i]->Run();
     delete deferredTasks[i];
   }
@@ -3380,15 +3375,13 @@ void AsyncPanZoomController::NotifyLayersUpdated(const ScrollMetadata& aScrollMe
   const FrameMetrics& aLayerMetrics = aScrollMetadata.GetMetrics();
 
   if ((aLayerMetrics == mLastContentPaintMetrics) && !isDefault) {
-    // No new information here, skip it. Note that this is not just an
-    // optimization; it's correctness too. In the case where we get one of these
-    // stale aLayerMetrics *after* a call to NotifyScrollUpdated, processing the
-    // stale aLayerMetrics would clobber the more up-to-date information from
-    // NotifyScrollUpdated.
+    // No new information here, skip it.
     APZC_LOG("%p NotifyLayersUpdated short-circuit\n", this);
     return;
   }
-  mLastContentPaintMetrics = aLayerMetrics;
+  if (aLayerMetrics.GetScrollUpdateType() != FrameMetrics::ScrollOffsetUpdateType::ePending) {
+    mLastContentPaintMetrics = aLayerMetrics;
+  }
 
   mFrameMetrics.SetScrollParentId(aLayerMetrics.GetScrollParentId());
   APZC_LOG_FM(aLayerMetrics, "%p got a NotifyLayersUpdated with aIsFirstPaint=%d, aThisLayerTreeUpdated=%d",
@@ -3581,35 +3574,6 @@ void AsyncPanZoomController::NotifyLayersUpdated(const ScrollMetadata& aScrollMe
     RequestContentRepaint();
   }
   UpdateSharedCompositorFrameMetrics();
-}
-
-void
-AsyncPanZoomController::NotifyScrollUpdated(uint32_t aScrollGeneration,
-                                            const CSSPoint& aScrollOffset)
-{
-  APZThreadUtils::AssertOnCompositorThread();
-  ReentrantMonitorAutoEnter lock(mMonitor);
-
-  APZC_LOG("%p NotifyScrollUpdated(%d, %s)\n", this, aScrollGeneration,
-      Stringify(aScrollOffset).c_str());
-
-  bool scrollOffsetUpdated = aScrollGeneration != mFrameMetrics.GetScrollGeneration();
-  if (!scrollOffsetUpdated) {
-    return;
-  }
-  APZC_LOG("%p updating scroll offset from %s to %s\n", this,
-      Stringify(mFrameMetrics.GetScrollOffset()).c_str(),
-      Stringify(aScrollOffset).c_str());
-
-  mFrameMetrics.UpdateScrollInfo(aScrollGeneration, aScrollOffset);
-  AcknowledgeScrollUpdate();
-  mExpectedGeckoMetrics.UpdateScrollInfo(aScrollGeneration, aScrollOffset);
-  CancelAnimation();
-  RequestContentRepaint();
-  UpdateSharedCompositorFrameMetrics();
-  // We don't call ScheduleComposite() here because that happens higher up
-  // in the call stack, when LayerTransactionParent handles this message.
-  // If we did it here it would incur an extra message posting unnecessarily.
 }
 
 void
@@ -4018,7 +3982,9 @@ Maybe<CSSPoint> AsyncPanZoomController::FindSnapPointNear(
 void AsyncPanZoomController::ScrollSnapNear(const CSSPoint& aDestination) {
   if (Maybe<CSSPoint> snapPoint =
         FindSnapPointNear(aDestination, nsIScrollableFrame::DEVICE_PIXELS)) {
-    SmoothScrollTo(*snapPoint);
+    if (*snapPoint != mFrameMetrics.GetScrollOffset()) {
+      SmoothScrollTo(*snapPoint);
+    }
   }
 }
 

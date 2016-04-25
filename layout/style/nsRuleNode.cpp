@@ -4717,6 +4717,47 @@ nsRuleNode::ComputeTextData(void* aStartStruct,
              text->mWebkitTextFillColor, conditions);
   }
 
+  // -webkit-text-stroke-color: color, string, inherit, initial
+  const nsCSSValue* webkitTextStrokeColorValue =
+    aRuleData->ValueForWebkitTextStrokeColor();
+  if (webkitTextStrokeColorValue->GetUnit() == eCSSUnit_Null) {
+    // We don't want to change anything in this case.
+  } else if (webkitTextStrokeColorValue->GetUnit() == eCSSUnit_Inherit ||
+             webkitTextStrokeColorValue->GetUnit() == eCSSUnit_Unset) {
+    conditions.SetUncacheable();
+    text->mWebkitTextStrokeColorForeground =
+      parentText->mWebkitTextStrokeColorForeground;
+    text->mWebkitTextStrokeColor = parentText->mWebkitTextStrokeColor;
+  } else if ((webkitTextStrokeColorValue->GetUnit() == eCSSUnit_EnumColor &&
+              webkitTextStrokeColorValue->GetIntValue() == NS_COLOR_CURRENTCOLOR) ||
+             webkitTextStrokeColorValue->GetUnit() == eCSSUnit_Initial) {
+    text->mWebkitTextStrokeColorForeground = true;
+    text->mWebkitTextStrokeColor = mPresContext->DefaultColor();
+  } else {
+    text->mWebkitTextStrokeColorForeground = false;
+    SetColor(*webkitTextStrokeColorValue, 0, mPresContext, aContext,
+             text->mWebkitTextStrokeColor, conditions);
+  }
+
+  // -webkit-text-stroke-width: length, inherit, initial, enum
+  const nsCSSValue*
+    webkitTextStrokeWidthValue = aRuleData->ValueForWebkitTextStrokeWidth();
+  if (webkitTextStrokeWidthValue->GetUnit() == eCSSUnit_Enumerated) {
+    NS_ASSERTION(webkitTextStrokeWidthValue->GetIntValue() == NS_STYLE_BORDER_WIDTH_THIN ||
+                 webkitTextStrokeWidthValue->GetIntValue() == NS_STYLE_BORDER_WIDTH_MEDIUM ||
+                 webkitTextStrokeWidthValue->GetIntValue() == NS_STYLE_BORDER_WIDTH_THICK,
+                 "Unexpected enum value");
+    text->mWebkitTextStrokeWidth.SetCoordValue(
+      mPresContext->GetBorderWidthTable()[webkitTextStrokeWidthValue->GetIntValue()]);
+  } else {
+    SetCoord(*webkitTextStrokeWidthValue, text->mWebkitTextStrokeWidth,
+             parentText->mWebkitTextStrokeWidth,
+             SETCOORD_LH | SETCOORD_CALC_LENGTH_ONLY |
+               SETCOORD_CALC_CLAMP_NONNEGATIVE |
+               SETCOORD_INITIAL_ZERO | SETCOORD_UNSET_INHERIT,
+             aContext, mPresContext, conditions);
+  }
+
   // -moz-control-character-visibility: enum, inherit, initial
   SetDiscrete(*aRuleData->ValueForControlCharacterVisibility(),
               text->mControlCharacterVisibility,
@@ -4772,7 +4813,7 @@ nsRuleNode::ComputeTextResetData(void* aStartStruct,
       bool isForeground;
       parentText->GetDecorationColor(decorationColor, isForeground);
       if (isForeground) {
-        text->SetDecorationColor(parentContext->StyleColor()->mColor);
+        text->SetDecorationColor(parentContext->GetTextFillColor());
       } else {
         text->SetDecorationColor(decorationColor);
       }
@@ -5261,7 +5302,7 @@ nsRuleNode::ComputeDisplayData(void* aStartStruct,
                          display, parentDisplay, aRuleData,
                          conditions);
 
-  display->mTransitions.SetLength(numTransitions);
+  display->mTransitions.SetLengthNonZero(numTransitions);
 
   FOR_ALL_TRANSITION_PROPS(p) {
     const TransitionPropInfo& i = transitionPropInfo[p];
@@ -5418,7 +5459,7 @@ nsRuleNode::ComputeDisplayData(void* aStartStruct,
                          display, parentDisplay, aRuleData,
                          conditions);
 
-  display->mAnimations.SetLength(numAnimations);
+  display->mAnimations.SetLengthNonZero(numAnimations);
 
   FOR_ALL_ANIMATION_PROPS(p) {
     const TransitionPropInfo& i = animationPropInfo[p];
@@ -6725,8 +6766,8 @@ template <class ComputedValueItem>
 static void
 SetImageLayerList(nsStyleContext* aStyleContext,
                   const nsCSSValue& aValue,
-                  AutoTArray< nsStyleImageLayers::Layer, 1> &aLayers,
-                  const AutoTArray<nsStyleImageLayers::Layer, 1> &aParentLayers,
+                  nsStyleAutoArray<nsStyleImageLayers::Layer>& aLayers,
+                  const nsStyleAutoArray<nsStyleImageLayers::Layer>& aParentLayers,
                   ComputedValueItem nsStyleImageLayers::Layer::* aResultLocation,
                   ComputedValueItem aInitialValue,
                   uint32_t aParentItemCount,
@@ -6790,9 +6831,8 @@ template <class ComputedValueItem>
 static void
 SetImageLayerPairList(nsStyleContext* aStyleContext,
                       const nsCSSValue& aValue,
-                      AutoTArray< nsStyleImageLayers::Layer, 1> &aLayers,
-                      const AutoTArray<nsStyleImageLayers::Layer, 1>
-                                                                 &aParentLayers,
+                      nsStyleAutoArray<nsStyleImageLayers::Layer>& aLayers,
+                      const nsStyleAutoArray<nsStyleImageLayers::Layer>& aParentLayers,
                       ComputedValueItem nsStyleImageLayers::Layer::*
                                                                 aResultLocation,
                       ComputedValueItem aInitialValue,
@@ -6857,7 +6897,8 @@ SetImageLayerPairList(nsStyleContext* aStyleContext,
 
 template <class ComputedValueItem>
 static void
-FillBackgroundList(AutoTArray< nsStyleImageLayers::Layer, 1> &aLayers,
+FillBackgroundList(
+    nsStyleAutoArray<nsStyleImageLayers::Layer>& aLayers,
     ComputedValueItem nsStyleImageLayers::Layer::* aResultLocation,
     uint32_t aItemCount, uint32_t aFillCount)
 {
@@ -6979,7 +7020,7 @@ nsRuleNode::ComputeBackgroundData(void* aStartStruct,
   if (rebuild) {
     // Delete any extra items.  We need to keep layers in which any
     // property was specified.
-    bg->mImage.mLayers.TruncateLength(maxItemCount);
+    bg->mImage.mLayers.TruncateLengthNonZero(maxItemCount);
 
     uint32_t fillCount = bg->mImage.mImageCount;
     FillBackgroundList(bg->mImage.mLayers,
@@ -9359,20 +9400,26 @@ nsRuleNode::SetStyleClipPathToCSSValue(nsStyleClipPath* aStyleClipPath,
                                        nsPresContext* aPresContext,
                                        RuleNodeCacheConditions& aConditions)
 {
-  MOZ_ASSERT(aValue->GetUnit() != eCSSUnit_ListDep ||
-             aValue->GetUnit() != eCSSUnit_List,
+  MOZ_ASSERT(aValue->GetUnit() == eCSSUnit_Array,
              "expected a basic shape or reference box");
 
-  const nsCSSValueList* cur = aValue->GetListValue();
+  const nsCSSValue::Array* array = aValue->GetArrayValue();
+  MOZ_ASSERT(array->Count() == 1 || array->Count() == 2,
+             "Expect one or both of a shape function and geometry-box");
 
   uint8_t sizingBox = NS_STYLE_CLIP_SHAPE_SIZING_NOBOX;
   RefPtr<nsStyleBasicShape> basicShape;
-  for (unsigned i = 0; i < 2; ++i) {
-    if (!cur) {
-      break;
-    }
-    if (cur->mValue.GetUnit() == eCSSUnit_Function) {
-      nsCSSValue::Array* shapeFunction = cur->mValue.GetArrayValue();
+  for (size_t i = 0; i < array->Count(); ++i) {
+    if (array->Item(i).GetUnit() == eCSSUnit_Enumerated) {
+      int32_t type = array->Item(i).GetIntValue();
+      if (type > NS_STYLE_CLIP_SHAPE_SIZING_VIEW ||
+          type < NS_STYLE_CLIP_SHAPE_SIZING_NOBOX) {
+        NS_NOTREACHED("unexpected reference box");
+        return;
+      }
+      sizingBox = (uint8_t)type;
+    } else if (array->Item(i).GetUnit() == eCSSUnit_Function) {
+      nsCSSValue::Array* shapeFunction = array->Item(i).GetArrayValue();
       nsCSSKeyword functionName =
         (nsCSSKeyword)shapeFunction->Item(0).GetIntValue();
       if (functionName == eCSSKeyword_polygon) {
@@ -9509,19 +9556,10 @@ nsRuleNode::SetStyleClipPathToCSSValue(nsStyleClipPath* aStyleClipPath,
         NS_NOTREACHED("unexpected basic shape function");
         return;
       }
-    } else if (cur->mValue.GetUnit() == eCSSUnit_Enumerated) {
-      int32_t type = cur->mValue.GetIntValue();
-      if (type > NS_STYLE_CLIP_SHAPE_SIZING_VIEW ||
-          type < NS_STYLE_CLIP_SHAPE_SIZING_NOBOX) {
-        NS_NOTREACHED("unexpected reference box");
-        return;
-      }
-      sizingBox = (uint8_t)type;
     } else {
       NS_NOTREACHED("unexpected value");
       return;
     }
-    cur = cur->mNext;
   }
 
   if (basicShape) {
@@ -9656,8 +9694,7 @@ nsRuleNode::ComputeSVGResetData(void* aStartStruct,
       }
       break;
     }
-    case eCSSUnit_List:
-    case eCSSUnit_ListDep: {
+    case eCSSUnit_Array: {
       svgReset->mClipPath = nsStyleClipPath();
       SetStyleClipPathToCSSValue(&svgReset->mClipPath, clipPathValue, aContext,
                                  mPresContext, conditions);
@@ -9798,7 +9835,7 @@ nsRuleNode::ComputeSVGResetData(void* aStartStruct,
   if (rebuild) {
     // Delete any extra items.  We need to keep layers in which any
     // property was specified.
-    svgReset->mMask.mLayers.TruncateLength(maxItemCount);
+    svgReset->mMask.mLayers.TruncateLengthNonZero(maxItemCount);
 
     uint32_t fillCount = svgReset->mMask.mImageCount;
 

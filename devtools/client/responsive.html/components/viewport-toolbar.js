@@ -11,18 +11,18 @@ const Types = require("../types");
 const DeviceSelector = createFactory(require("./device-selector"));
 
 module.exports = createClass({
-
-  displayName: "ViewportToolbar",
-
-  mixins: [ addons.PureRenderMixin ],
-
   propTypes: {
     devices: PropTypes.shape(Types.devices).isRequired,
     selectedDevice: PropTypes.string.isRequired,
     onChangeViewportDevice: PropTypes.func.isRequired,
     onResizeViewport: PropTypes.func.isRequired,
     onRotateViewport: PropTypes.func.isRequired,
+    onUpdateDeviceModalOpen: PropTypes.func.isRequired,
   },
+
+  displayName: "ViewportToolbar",
+
+  mixins: [ addons.PureRenderMixin ],
 
   render() {
     let {
@@ -31,17 +31,19 @@ module.exports = createClass({
       onChangeViewportDevice,
       onResizeViewport,
       onRotateViewport,
+      onUpdateDeviceModalOpen,
     } = this.props;
 
     return dom.div(
       {
-        className: "toolbar viewport-toolbar",
+        className: "viewport-toolbar container",
       },
       DeviceSelector({
         devices,
         selectedDevice,
         onChangeViewportDevice,
         onResizeViewport,
+        onUpdateDeviceModalOpen,
       }),
       dom.button({
         className: "viewport-rotate-button toolbar-button devtools-button",

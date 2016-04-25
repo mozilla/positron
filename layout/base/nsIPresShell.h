@@ -45,7 +45,6 @@
 #include "nsRefPtrHashtable.h"
 #include "nsClassHashtable.h"
 #include "nsPresArena.h"
-#include "nsIImageLoadingContent.h"
 #include "nsMargin.h"
 #include "nsFrameState.h"
 
@@ -358,22 +357,25 @@ public:
   bool GetAuthorStyleDisabled() const;
 
   /*
-   * Called when stylesheets are added/removed/enabled/disabled to rebuild
-   * all style data for a given pres shell without necessarily reconstructing
-   * all of the frames.  This will not reconstruct style synchronously; if
-   * you need to do that, call FlushPendingNotifications to flush out style
-   * reresolves.
+   * Called when stylesheets are added/removed/enabled/disabled to
+   * recompute style and clear other cached data as needed.  This will
+   * not reconstruct style synchronously; if you need to do that, call
+   * FlushPendingNotifications to flush out style reresolves.
+   *
+   * This handles the the addition and removal of the various types of
+   * style rules that can be in CSS style sheets, such as @font-face
+   * rules and @counter-style rules.
+   *
+   * It requires that StyleSheetAdded, StyleSheetRemoved,
+   * StyleSheetApplicableStateChanged, StyleRuleAdded, StyleRuleRemoved,
+   * or StyleRuleChanged has been called on the style sheets that have
+   * changed.
+   *
    * // XXXbz why do we have this on the interface anyway?  The only consumer
    * is calling AddOverrideStyleSheet/RemoveOverrideStyleSheet, and I think
    * those should just handle reconstructing style data...
    */
-  virtual void ReconstructStyleDataExternal();
-  void ReconstructStyleDataInternal();
-#ifdef MOZILLA_INTERNAL_API
-  void ReconstructStyleData() { ReconstructStyleDataInternal(); }
-#else
-  void ReconstructStyleData() { ReconstructStyleDataExternal(); }
-#endif
+  void RestyleForCSSRuleChanges();
 
   /**
    * Update the style set somehow to take into account changed prefs which
@@ -1588,11 +1590,12 @@ public:
   virtual void RebuildApproximateFrameVisibility(nsRect* aRect = nullptr,
                                                  bool aRemoveOnly = false) = 0;
 
-  /// Ensures @aFrame is in the list of approximately visible frames.
-  virtual void EnsureFrameInApproximatelyVisibleList(nsIFrame* aFrame) = 0;
+  /// Adds @aFrame to the list of frames which were visible within the
+  /// displayport during the last paint.
+  virtual void MarkFrameVisibleInDisplayPort(nsIFrame* aFrame) = 0;
 
-  /// Removes @aFrame from the list of approximately visible frames if present.
-  virtual void RemoveFrameFromApproximatelyVisibleList(nsIFrame* aFrame) = 0;
+  /// Marks @aFrame nonvisible and removes it from all lists of visible frames.
+  virtual void MarkFrameNonvisible(nsIFrame* aFrame) = 0;
 
   /// Whether we should assume all frames are visible.
   virtual bool AssumeAllFramesVisible() = 0;

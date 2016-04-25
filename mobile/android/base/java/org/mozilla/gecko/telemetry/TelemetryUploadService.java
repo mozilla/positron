@@ -10,16 +10,20 @@ import android.content.SharedPreferences;
 import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
 import android.support.annotation.WorkerThread;
+import android.text.TextUtils;
 import android.util.Log;
 import ch.boye.httpclientandroidlib.HttpResponse;
 import ch.boye.httpclientandroidlib.client.ClientProtocolException;
 import org.mozilla.gecko.GeckoProfile;
 import org.mozilla.gecko.GeckoSharedPrefs;
 import org.mozilla.gecko.background.BackgroundService;
+import org.mozilla.gecko.distribution.DistributionStoreCallback;
 import org.mozilla.gecko.preferences.GeckoPreferences;
 import org.mozilla.gecko.sync.net.BaseResource;
 import org.mozilla.gecko.sync.net.BaseResourceDelegate;
 import org.mozilla.gecko.sync.net.Resource;
+import org.mozilla.gecko.telemetry.pings.TelemetryCorePingBuilder;
+import org.mozilla.gecko.telemetry.pings.TelemetryPing;
 import org.mozilla.gecko.util.StringUtils;
 
 import java.io.IOException;
@@ -169,7 +173,6 @@ public class TelemetryUploadService extends BackgroundService {
     private void uploadCorePing(@NonNull final String docId, final int seq, @NonNull final String profileName,
                 @NonNull final String profilePath, @Nullable final String defaultSearchEngine) {
         final GeckoProfile profile = GeckoProfile.get(this, profileName, profilePath);
-        final long profileCreationDate = getProfileCreationDate(profile);
         final String clientId;
         try {
             clientId = profile.getClientId();
@@ -184,8 +187,19 @@ public class TelemetryUploadService extends BackgroundService {
         final String serverURLSchemeHostPort =
                 sharedPrefs.getString(TelemetryConstants.PREF_SERVER_URL, TelemetryConstants.DEFAULT_SERVER_URL);
 
-        final TelemetryPing corePing = TelemetryPingGenerator.createCorePing(this, docId, clientId,
-                serverURLSchemeHostPort, seq, profileCreationDate, defaultSearchEngine);
+        final long profileCreationDate = getProfileCreationDate(profile);
+        final TelemetryCorePingBuilder builder = new TelemetryCorePingBuilder(this, serverURLSchemeHostPort)
+                .setClientID(clientId)
+                .setDefaultSearchEngine(TextUtils.isEmpty(defaultSearchEngine) ? null : defaultSearchEngine)
+                .setProfileCreationDate(profileCreationDate < 0 ? null : profileCreationDate)
+                .setSequenceNumber(seq);
+
+        final String distributionId = sharedPrefs.getString(DistributionStoreCallback.PREF_DISTRIBUTION_ID, null);
+        if (distributionId != null) {
+            builder.setOptDistributionID(distributionId);
+        }
+
+        final TelemetryPing corePing = builder.build();
         final CorePingResultDelegate resultDelegate = new CorePingResultDelegate();
         uploadPing(corePing, resultDelegate);
     }

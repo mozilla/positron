@@ -140,6 +140,11 @@ PrefObserver.register({
  * and provides shared methods for all the instances of the user interface.
  */
 this.DownloadsCommon = {
+  ATTENTION_NONE: "",
+  ATTENTION_SUCCESS: "success",
+  ATTENTION_WARNING: "warning",
+  ATTENTION_SEVERE: "severe",
+
   /**
    * Returns an object whose keys are the string names from the downloads string
    * bundle, and whose values are either the translated strings or functions
@@ -462,7 +467,7 @@ this.DownloadsCommon = {
       if (!shouldLaunch) {
         return;
       }
-  
+
       // Actually open the file.
       try {
         if (aMimeInfo && aMimeInfo.preferredAction == aMimeInfo.useHelperApp) {
@@ -470,7 +475,7 @@ this.DownloadsCommon = {
           return;
         }
       } catch (ex) { }
-  
+
       // If either we don't have the mime info, or the preferred action failed,
       // attempt to launch the file directly.
       try {
@@ -521,42 +526,83 @@ this.DownloadsCommon = {
    * Displays an alert message box which asks the user if they want to
    * unblock the downloaded file or not.
    *
-   * @param aVerdict
-   *        The detailed reason why the download was blocked, according to the
-   *        "Downloads.Error.BLOCK_VERDICT_" constants. If an unknown reason is
-   *        specified, "Downloads.Error.BLOCK_VERDICT_MALWARE" is assumed.
-   * @param aOwnerWindow
-   *        The window with which this action is associated.
+   * @param options
+   *        An object with the following properties:
+   *        {
+   *          verdict:
+   *            The detailed reason why the download was blocked, according to
+   *            the "Downloads.Error.BLOCK_VERDICT_" constants. If an unknown
+   *            reason is specified, "Downloads.Error.BLOCK_VERDICT_MALWARE" is
+   *            assumed.
+   *          window:
+   *            The window with which this action is associated.
+   *          dialogType:
+   *            String that determines which actions are available:
+   *             - "unblock" to offer just "unblock".
+   *             - "chooseUnblock" to offer "unblock" and "confirmBlock".
+   *             - "chooseOpen" to offer "open" and "confirmBlock".
+   *        }
    *
-   * @return True to unblock the file, false to keep the user safe and
-   *         cancel the operation.
+   * @return {Promise}
+   * @resolves String representing the action that should be executed:
+   *            - "open" to allow the download and open the file.
+   *            - "unblock" to allow the download without opening the file.
+   *            - "confirmBlock" to delete the blocked data permanently.
+   *            - "cancel" to do nothing and cancel the operation.
    */
-  confirmUnblockDownload: Task.async(function* (aVerdict, aOwnerWindow) {
+  confirmUnblockDownload: Task.async(function* ({ verdict, window,
+                                                  dialogType }) {
     let s = DownloadsCommon.strings;
-    let title = s.unblockHeader;
-    let buttonFlags = (Ci.nsIPrompt.BUTTON_TITLE_IS_STRING * Ci.nsIPrompt.BUTTON_POS_0) +
-                      (Ci.nsIPrompt.BUTTON_TITLE_IS_STRING * Ci.nsIPrompt.BUTTON_POS_1) +
-                      Ci.nsIPrompt.BUTTON_POS_1_DEFAULT;
-    let type = "";
-    let message = s.unblockTip;
-    let okButton = s.unblockButtonContinue;
-    let cancelButton = s.unblockButtonCancel;
 
-    switch (aVerdict) {
+    // All the dialogs have an action button and a cancel button, while only
+    // some of them have an additonal button to remove the file. The cancel
+    // button must always be the one at BUTTON_POS_1 because this is the value
+    // returned by confirmEx when using ESC or closing the dialog (bug 345067).
+    let title = s.unblockHeaderUnblock;
+    let firstButtonText = s.unblockButtonUnblock;
+    let firstButtonAction = "unblock";
+    let buttonFlags =
+        (Ci.nsIPrompt.BUTTON_TITLE_IS_STRING * Ci.nsIPrompt.BUTTON_POS_0) +
+        (Ci.nsIPrompt.BUTTON_TITLE_CANCEL * Ci.nsIPrompt.BUTTON_POS_1);
+
+    switch (dialogType) {
+      case "unblock":
+        // Use only the unblock action. The default is to cancel.
+        buttonFlags += Ci.nsIPrompt.BUTTON_POS_1_DEFAULT;
+        break;
+      case "chooseUnblock":
+        // Use the unblock and remove file actions. The default is remove file.
+        buttonFlags +=
+          (Ci.nsIPrompt.BUTTON_TITLE_IS_STRING * Ci.nsIPrompt.BUTTON_POS_2) +
+          Ci.nsIPrompt.BUTTON_POS_2_DEFAULT;
+        break;
+      case "chooseOpen":
+        // Use the unblock and open file actions. The default is open file.
+        title = s.unblockHeaderOpen;
+        firstButtonText = s.unblockButtonOpen;
+        firstButtonAction = "open";
+        buttonFlags +=
+          (Ci.nsIPrompt.BUTTON_TITLE_IS_STRING * Ci.nsIPrompt.BUTTON_POS_2) +
+          Ci.nsIPrompt.BUTTON_POS_0_DEFAULT;
+        break;
+      default:
+        Cu.reportError("Unexpected dialog type: " + dialogType);
+        return "cancel";
+    }
+
+    let message;
+    switch (verdict) {
       case Downloads.Error.BLOCK_VERDICT_UNCOMMON:
-        type = s.unblockTypeUncommon;
+        message = s.unblockTypeUncommon2;
         break;
       case Downloads.Error.BLOCK_VERDICT_POTENTIALLY_UNWANTED:
-        type = s.unblockTypePotentiallyUnwanted;
+        message = s.unblockTypePotentiallyUnwanted2;
         break;
       default: // Assume Downloads.Error.BLOCK_VERDICT_MALWARE
-        type = s.unblockTypeMalware;
+        message = s.unblockTypeMalware;
         break;
     }
-
-    if (type) {
-      message = type + "\n\n" + message;
-    }
+    message += "\n\n" + s.unblockTip2;
 
     Services.ww.registerNotification(function onOpen(subj, topic) {
       if (topic == "domwindowopened" && subj instanceof Ci.nsIDOMWindow) {
@@ -577,11 +623,10 @@ this.DownloadsCommon = {
       }
     });
 
-    // The ordering of the ok/cancel buttons is used this way to allow "cancel"
-    // to have the same result as hitting the ESC or Close button (see bug 345067).
-    let rv = Services.prompt.confirmEx(aOwnerWindow, title, message, buttonFlags,
-                                       okButton, cancelButton, null, null, {});
-    return (rv == 0);
+    let rv = Services.prompt.confirmEx(window, title, message, buttonFlags,
+                                       firstButtonText, null,
+                                       s.unblockButtonConfirmBlock, null, {});
+    return [firstButtonAction, "cancel", "confirmBlock"][rv];
   }),
 };
 
@@ -682,7 +727,7 @@ DownloadsDataCtor.prototype = {
                .then(null, Cu.reportError);
     let indicatorData = this._isPrivate ? PrivateDownloadsIndicatorData
                                         : DownloadsIndicatorData;
-    indicatorData.attention = false;
+    indicatorData.attention = DownloadsCommon.ATTENTION_NONE;
   },
 
   //////////////////////////////////////////////////////////////////////////////
@@ -1113,8 +1158,29 @@ DownloadsIndicatorDataCtor.prototype = {
   },
 
   onDownloadStateChanged(download) {
-    if (download.succeeded || download.error) {
-      this.attention = true;
+    if (!download.succeeded && download.error && download.error.reputationCheckVerdict) {
+      switch (download.error.reputationCheckVerdict) {
+        case Downloads.Error.BLOCK_VERDICT_UNCOMMON: // fall-through
+        case Downloads.Error.BLOCK_VERDICT_POTENTIALLY_UNWANTED:
+          // Existing higher level attention indication trumps ATTENTION_WARNING.
+          if (this._attention != DownloadsCommon.ATTENTION_SEVERE) {
+            this.attention = DownloadsCommon.ATTENTION_WARNING;
+          }
+          break;
+        case Downloads.Error.BLOCK_VERDICT_MALWARE:
+          this.attention = DownloadsCommon.ATTENTION_SEVERE;
+          break;
+        default:
+          this.attention = DownloadsCommon.ATTENTION_SEVERE;
+          Cu.reportError("Unknown reputation verdict: " +
+                         download.error.reputationCheckVerdict);
+      }
+    } else if (download.succeeded || download.error) {
+      // Existing higher level attention indication trumps ATTENTION_SUCCESS.
+      if (this._attention != DownloadsCommon.ATTENTION_SEVERE &&
+          this._attention != DownloadsCommon.ATTENTION_WARNING) {
+        this.attention = DownloadsCommon.ATTENTION_SUCCESS;
+      }
     }
 
     // Since the state of a download changed, reset the estimated time left.
@@ -1149,7 +1215,7 @@ DownloadsIndicatorDataCtor.prototype = {
     this._updateViews();
     return aValue;
   },
-  _attention: false,
+  _attention: DownloadsCommon.ATTENTION_NONE,
 
   /**
    * Indicates whether the user is interacting with downloads, thus the
@@ -1157,7 +1223,7 @@ DownloadsIndicatorDataCtor.prototype = {
    */
   set attentionSuppressed(aValue) {
     this._attentionSuppressed = aValue;
-    this._attention = false;
+    this._attention = DownloadsCommon.ATTENTION_NONE;
     this._updateViews();
     return aValue;
   },
@@ -1187,7 +1253,8 @@ DownloadsIndicatorDataCtor.prototype = {
     aView.counter = this._counter;
     aView.percentComplete = this._percentComplete;
     aView.paused = this._paused;
-    aView.attention = this._attention && !this._attentionSuppressed;
+    aView.attention = this._attentionSuppressed ? DownloadsCommon.ATTENTION_NONE
+                                                : this._attention;
   },
 
   //////////////////////////////////////////////////////////////////////////////

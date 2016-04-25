@@ -51,28 +51,6 @@ module.exports = createClass({
       this.updateDebugStatus);
   },
 
-  render() {
-    let { client } = this.props;
-    let { debugDisabled, extensions: targets } = this.state;
-    let name = Strings.GetStringFromName("extensions");
-    let targetClass = AddonTarget;
-
-    return dom.div({
-      id: "tab-addons",
-      className: "tab",
-      role: "tabpanel",
-      "aria-labelledby": "tab-addons-header-name"
-    },
-    TabHeader({
-      id: "tab-addons-header-name",
-      name: Strings.GetStringFromName("addons")
-    }),
-    AddonsControls({ debugDisabled }),
-    dom.div({ id: "addons" },
-      TargetList({ name, targets, client, debugDisabled, targetClass })
-    ));
-  },
-
   updateDebugStatus() {
     let debugDisabled =
       !Services.prefs.getBoolPref(CHROME_ENABLED_PREF) ||
@@ -82,17 +60,21 @@ module.exports = createClass({
   },
 
   updateAddonsList() {
-    AddonManager.getAllAddons(addons => {
-      let extensions = addons.filter(addon => addon.isDebuggable).map(addon => {
-        return {
-          name: addon.name,
-          icon: addon.iconURL || ExtensionIcon,
-          addonID: addon.id
-        };
-      });
+    this.props.client.listAddons()
+      .then(({addons}) => {
+        let extensions = addons.filter(addon => addon.debuggable).map(addon => {
+          return {
+            name: addon.name,
+            icon: addon.iconURL || ExtensionIcon,
+            addonID: addon.id,
+            addonActor: addon.actor
+          };
+        });
 
-      this.setState({ extensions });
-    });
+        this.setState({ extensions });
+      }, error => {
+        throw new Error("Client error while listing addons: " + error);
+      });
   },
 
   /**
@@ -122,4 +104,26 @@ module.exports = createClass({
   onDisabled() {
     this.updateAddonsList();
   },
+
+  render() {
+    let { client, id } = this.props;
+    let { debugDisabled, extensions: targets } = this.state;
+    let name = Strings.GetStringFromName("extensions");
+    let targetClass = AddonTarget;
+
+    return dom.div({
+      id: id,
+      className: "tab",
+      role: "tabpanel",
+      "aria-labelledby": "tab-addons-header-name"
+    },
+    TabHeader({
+      id: "tab-addons-header-name",
+      name: Strings.GetStringFromName("addons")
+    }),
+    AddonsControls({ debugDisabled }),
+    dom.div({ id: "addons" },
+      TargetList({ name, targets, client, debugDisabled, targetClass })
+    ));
+  }
 });

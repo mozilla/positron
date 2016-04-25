@@ -25,8 +25,6 @@ fi
 
 case "$target" in
 *-android*|*-linuxandroid*)
-    NSPR_CONFIGURE_ARGS="$NSPR_CONFIGURE_ARGS --with-android-version=$android_version"
-
     AC_MSG_CHECKING([for android platform directory])
 
     case "$target_cpu" in
@@ -227,8 +225,6 @@ AC_DEFUN([MOZ_ANDROID_GOOGLE_CLOUD_MESSAGING],
 [
 
 if test -n "$MOZ_ANDROID_GCM" ; then
-    AC_SUBST(MOZ_ANDROID_GCM)
-
     MOZ_ANDROID_AAR(play-services-base, 8.1.0, google, com/google/android/gms)
     MOZ_ANDROID_AAR(play-services-basement, 8.1.0, google, com/google/android/gms)
     MOZ_ANDROID_AAR(play-services-gcm, 8.1.0, google, com/google/android/gms)

@@ -86,6 +86,7 @@
 #include "mozilla/dom/TextTrack.h"
 #include "nsIContentPolicy.h"
 #include "mozilla/Telemetry.h"
+#include "DecoderDoctorDiagnostics.h"
 
 #include "ImageContainer.h"
 #include "nsRange.h"
@@ -560,6 +561,14 @@ HTMLMediaElement::GetMozDebugReaderData(nsAString& aString)
 {
   if (mDecoder && !mSrcStream) {
     mDecoder->GetMozDebugReaderData(aString);
+  }
+}
+
+void
+HTMLMediaElement::MozDumpDebugInfo()
+{
+  if (mDecoder) {
+    mDecoder->DumpDebugInfo();
   }
 }
 
@@ -1061,12 +1070,17 @@ void HTMLMediaElement::LoadFromSourceChildren()
 
     // If we have a type attribute, it must be a supported type.
     nsAutoString type;
-    if (child->GetAttr(kNameSpaceID_None, nsGkAtoms::type, type) &&
-        GetCanPlay(type) == CANPLAY_NO) {
-      DispatchAsyncSourceError(child);
-      const char16_t* params[] = { type.get(), src.get() };
-      ReportLoadError("MediaLoadUnsupportedTypeAttribute", params, ArrayLength(params));
-      continue;
+    if (child->GetAttr(kNameSpaceID_None, nsGkAtoms::type, type)) {
+      DecoderDoctorDiagnostics diagnostics;
+      CanPlayStatus canPlay = GetCanPlay(type, &diagnostics);
+      diagnostics.StoreFormatDiagnostics(
+        OwnerDoc(), type, canPlay != CANPLAY_NO, __func__);
+      if (canPlay == CANPLAY_NO) {
+        DispatchAsyncSourceError(child);
+        const char16_t* params[] = { type.get(), src.get() };
+        ReportLoadError("MediaLoadUnsupportedTypeAttribute", params, ArrayLength(params));
+        continue;
+      }
     }
     nsAutoString media;
     HTMLSourceElement *childSrc = HTMLSourceElement::FromContent(child);
@@ -1307,6 +1321,16 @@ nsresult HTMLMediaElement::LoadResource()
   nsContentPolicyType contentPolicyType = IsHTMLElement(nsGkAtoms::audio) ?
     nsIContentPolicy::TYPE_INTERNAL_AUDIO : nsIContentPolicy::TYPE_INTERNAL_VIDEO;
 
+  nsDocShell* docShellPtr;
+  if (docShell) {
+    docShellPtr = nsDocShell::Cast(docShell);
+    bool privateBrowsing;
+    docShellPtr->GetUsePrivateBrowsing(&privateBrowsing);
+    if (privateBrowsing) {
+      securityFlags |= nsILoadInfo::SEC_FORCE_PRIVATE_BROWSING;
+    }
+  }
+
   nsCOMPtr<nsILoadGroup> loadGroup = GetDocumentLoadGroup();
   nsCOMPtr<nsIChannel> channel;
   nsresult rv = NS_NewChannel(getter_AddRefs(channel),
@@ -1322,6 +1346,14 @@ nsresult HTMLMediaElement::LoadResource()
                               nsIChannel::LOAD_CALL_CONTENT_SNIFFERS);
 
   NS_ENSURE_SUCCESS(rv,rv);
+
+  // This is a workaround and it will be fix in bug 1264230.
+  nsCOMPtr<nsILoadInfo> loadInfo = channel->GetLoadInfo();
+  if (loadInfo) {
+    NeckoOriginAttributes originAttrs;
+    NS_GetOriginAttributes(channel, originAttrs);
+    loadInfo->SetOriginAttributes(originAttrs);
+  }
 
   // The listener holds a strong reference to us.  This creates a
   // reference cycle, once we've set mChannel, which is manually broken
@@ -2866,7 +2898,8 @@ void HTMLMediaElement::UnbindFromTree(bool aDeep,
 
 /* static */
 CanPlayStatus
-HTMLMediaElement::GetCanPlay(const nsAString& aType)
+HTMLMediaElement::GetCanPlay(const nsAString& aType,
+                             DecoderDoctorDiagnostics* aDiagnostics)
 {
   nsContentTypeParser parser(aType);
   nsAutoString mimeType;
@@ -2880,13 +2913,18 @@ HTMLMediaElement::GetCanPlay(const nsAString& aType)
   NS_ConvertUTF16toUTF8 mimeTypeUTF8(mimeType);
   return DecoderTraits::CanHandleMediaType(mimeTypeUTF8.get(),
                                            NS_SUCCEEDED(rv),
-                                           codecs);
+                                           codecs,
+                                           aDiagnostics);
 }
 
 NS_IMETHODIMP
 HTMLMediaElement::CanPlayType(const nsAString& aType, nsAString& aResult)
 {
-  switch (GetCanPlay(aType)) {
+  DecoderDoctorDiagnostics diagnostics;
+  CanPlayStatus canPlay = GetCanPlay(aType, &diagnostics);
+  diagnostics.StoreFormatDiagnostics(
+    OwnerDoc(), aType, canPlay != CANPLAY_NO, __func__);
+  switch (canPlay) {
   case CANPLAY_NO:
     aResult.Truncate();
     break;
@@ -2946,7 +2984,13 @@ nsresult HTMLMediaElement::InitializeDecoderForChannel(nsIChannel* aChannel,
   aChannel->GetContentType(mimeType);
   NS_ASSERTION(!mimeType.IsEmpty(), "We should have the Content-Type.");
 
-  RefPtr<MediaDecoder> decoder = DecoderTraits::CreateDecoder(mimeType, this);
+  DecoderDoctorDiagnostics diagnostics;
+  RefPtr<MediaDecoder> decoder =
+    DecoderTraits::CreateDecoder(mimeType, this, &diagnostics);
+  diagnostics.StoreFormatDiagnostics(OwnerDoc(),
+                                     NS_ConvertASCIItoUTF16(mimeType),
+                                     decoder != nullptr,
+                                     __func__);
   if (!decoder) {
     nsAutoString src;
     GetCurrentSrc(src);
@@ -5105,6 +5149,9 @@ already_AddRefed<Promise>
 HTMLMediaElement::SetMediaKeys(mozilla::dom::MediaKeys* aMediaKeys,
                                ErrorResult& aRv)
 {
+  LOG(LogLevel::Debug, ("%p SetMediaKeys(%p) mMediaKeys=%p mDecoder=%p",
+    this, aMediaKeys, mMediaKeys.get(), mDecoder.get()));
+
   if (MozAudioCaptured()) {
     aRv.Throw(NS_ERROR_DOM_NOT_SUPPORTED_ERR);
     return nullptr;

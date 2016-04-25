@@ -361,6 +361,9 @@ LayerTransactionParent::RecvUpdate(InfallibleTArray<Edit>&& cset,
       layer->SetScrollbarData(common.scrollbarTargetContainerId(),
         static_cast<Layer::ScrollDirection>(common.scrollbarDirection()),
         common.scrollbarThumbRatio());
+      if (common.isScrollbarContainer()) {
+        layer->SetIsScrollbarContainer();
+      }
       layer->SetMixBlendMode((gfx::CompositionOp)common.mixBlendMode());
       layer->SetForceIsolatedGroup(common.forceIsolatedGroup());
       if (PLayerParent* maskLayer = common.maskLayerParent()) {
@@ -809,25 +812,6 @@ GetAPZCForViewID(Layer* aLayer, FrameMetrics::ViewID aScrollID)
     }
   }
   return nullptr;
-}
-
-bool
-LayerTransactionParent::RecvUpdateScrollOffset(
-    const FrameMetrics::ViewID& aScrollID,
-    const uint32_t& aScrollGeneration,
-    const CSSPoint& aScrollOffset)
-{
-  if (mDestroyed || !layer_manager() || layer_manager()->IsDestroyed()) {
-    return false;
-  }
-
-  AsyncPanZoomController* controller = GetAPZCForViewID(mRoot, aScrollID);
-  if (!controller) {
-    return false;
-  }
-  controller->NotifyScrollUpdated(aScrollGeneration, aScrollOffset);
-  mShadowLayersManager->ForceComposite(this);
-  return true;
 }
 
 bool

@@ -185,59 +185,67 @@ EventTree::Process()
 {
   EventTree* node = mFirst;
   while (node) {
-    node->Process();
+    // Skip a node and its subtree if its container is not in the document.
+    if (node->mContainer->IsInDocument()) {
+      node->Process();
+    }
     node = node->mNext;
   }
 
+  MOZ_ASSERT(mContainer || mDependentEvents.IsEmpty(),
+             "No container, no events");
+  MOZ_ASSERT(!mContainer || !mContainer->IsDefunct(),
+             "Processing events for defunct container");
+
   // Fire mutation events.
-  if (mContainer) {
-    uint32_t eventsCount = mDependentEvents.Length();
-    for (uint32_t jdx = 0; jdx < eventsCount; jdx++) {
-      AccMutationEvent* mtEvent = mDependentEvents[jdx];
-      MOZ_ASSERT(mtEvent->mEventRule != AccEvent::eDoNotEmit,
-                 "The event shouldn't be presented in the tree");
+  uint32_t eventsCount = mDependentEvents.Length();
+  for (uint32_t jdx = 0; jdx < eventsCount; jdx++) {
+    AccMutationEvent* mtEvent = mDependentEvents[jdx];
+    MOZ_ASSERT(mtEvent->mEventRule != AccEvent::eDoNotEmit,
+               "The event shouldn't be presented in the tree");
 
-      nsEventShell::FireEvent(mtEvent);
-      if (mtEvent->mTextChangeEvent) {
-        nsEventShell::FireEvent(mtEvent->mTextChangeEvent);
-      }
-
-      if (mtEvent->IsHide()) {
-        // Fire menupopup end event before a hide event if a menu goes away.
-
-        // XXX: We don't look into children of hidden subtree to find hiding
-        // menupopup (as we did prior bug 570275) because we don't do that when
-        // menu is showing (and that's impossible until bug 606924 is fixed).
-        // Nevertheless we should do this at least because layout coalesces
-        // the changes before our processing and we may miss some menupopup
-        // events. Now we just want to be consistent in content insertion/removal
-        // handling.
-        if (mtEvent->mAccessible->ARIARole() == roles::MENUPOPUP) {
-          nsEventShell::FireEvent(nsIAccessibleEvent::EVENT_MENUPOPUP_END,
-                                  mtEvent->mAccessible);
-        }
-
-        AccHideEvent* hideEvent = downcast_accEvent(mtEvent);
-        if (hideEvent->NeedsShutdown()) {
-          mtEvent->GetDocAccessible()->ShutdownChildrenInSubtree(mtEvent->mAccessible);
-        }
-      }
+    nsEventShell::FireEvent(mtEvent);
+    if (mtEvent->mTextChangeEvent) {
+      nsEventShell::FireEvent(mtEvent->mTextChangeEvent);
     }
 
-    // Fire reorder event at last.
-    if (mFireReorder) {
-      nsEventShell::FireEvent(nsIAccessibleEvent::EVENT_REORDER, mContainer);
-    }
+    if (mtEvent->IsHide()) {
+      // Fire menupopup end event before a hide event if a menu goes away.
 
-    mDependentEvents.Clear();
+      // XXX: We don't look into children of hidden subtree to find hiding
+      // menupopup (as we did prior bug 570275) because we don't do that when
+      // menu is showing (and that's impossible until bug 606924 is fixed).
+      // Nevertheless we should do this at least because layout coalesces
+      // the changes before our processing and we may miss some menupopup
+      // events. Now we just want to be consistent in content insertion/removal
+      // handling.
+      if (mtEvent->mAccessible->ARIARole() == roles::MENUPOPUP) {
+        nsEventShell::FireEvent(nsIAccessibleEvent::EVENT_MENUPOPUP_END,
+                                mtEvent->mAccessible);
+      }
+
+      AccHideEvent* hideEvent = downcast_accEvent(mtEvent);
+      if (hideEvent->NeedsShutdown()) {
+        mtEvent->GetDocAccessible()->ShutdownChildrenInSubtree(mtEvent->mAccessible);
+      }
+    }
   }
+
+  // Fire reorder event at last.
+  if (mFireReorder) {
+    MOZ_ASSERT(mContainer);
+    nsEventShell::FireEvent(nsIAccessibleEvent::EVENT_REORDER, mContainer);
+    mContainer->Document()->MaybeNotifyOfValueChange(mContainer);
+  }
+
+  mDependentEvents.Clear();
 }
 
 EventTree*
 EventTree::FindOrInsert(Accessible* aContainer)
 {
   if (!mFirst) {
-    return mFirst = new EventTree(aContainer);
+    return mFirst = new EventTree(aContainer, true);
   }
 
   EventTree* prevNode = nullptr;
@@ -253,79 +261,24 @@ EventTree::FindOrInsert(Accessible* aContainer)
     }
 
     // Check if the given container is contained by a current node
-    Accessible* tailRoot = aContainer->Document();
-    Accessible* tailParent = aContainer;
-
-    EventTree* matchNode = nullptr;
-    Accessible* matchParent = nullptr;
-    while (true) {
+    Accessible* top = mContainer ? mContainer : aContainer->Document();
+    Accessible* parent = aContainer;
+    while (parent) {
       // Reached a top, no match for a current event.
-      if (tailParent == tailRoot) {
-        // If we have a match in parents then continue to look in siblings.
-        if (matchNode && node->mNext) {
-          node = node->mNext;
-          if (node->mContainer == aContainer) {
-            return node; // case of same target
-          }
-          tailParent = aContainer;
-          continue;
-        }
+      if (parent == top) {
         break;
       }
 
       // We got a match.
-      if (tailParent->Parent() == node->mContainer) {
-        matchNode = node;
-        matchParent = tailParent;
-
-        // Search the subtree for a better match.
-        if (node->mFirst) {
-          tailRoot = node->mContainer;
-          node = node->mFirst;
-          if (node->mContainer == aContainer) {
-            return node; // case of same target
-          }
-          tailParent = aContainer;
-          continue;
-        }
-        break;
+      if (parent->Parent() == node->mContainer) {
+        return node->FindOrInsert(aContainer);
       }
 
-      tailParent = tailParent->Parent();
-      MOZ_ASSERT(tailParent, "Wrong tree");
-      if (!tailParent) {
-        break;
-      }
+      parent = parent->Parent();
+      MOZ_ASSERT(parent, "Wrong tree");
     }
 
-    // The given node is contained by a current node
-    //   if hide of a current node contains the given node
-    //   then assert
-    //   if show of a current node contains the given node
-    //   then ignore the given node
-    //   otherwise ignore the given node, but not its show and hide events
-    if (matchNode) {
-      uint32_t eventType = 0;
-      uint32_t count = matchNode->mDependentEvents.Length();
-      for (uint32_t idx = count - 1; idx < count; idx--) {
-        if (matchNode->mDependentEvents[idx]->mAccessible == matchParent) {
-          eventType = matchNode->mDependentEvents[idx]->mEventType;
-        }
-      }
-      MOZ_ASSERT(eventType != nsIAccessibleEvent::EVENT_HIDE,
-                 "Accessible tree was modified after it was removed");
-
-      // If contained by show event target then no events are required.
-      if (eventType == nsIAccessibleEvent::EVENT_SHOW) {
-        return nullptr;
-      }
-
-      node->mFirst = new EventTree(aContainer);
-      node->mFirst->mFireReorder = false;
-      return node->mFirst;
-    }
-
-    // If the given node contains a current node
+    // If the given container contains a current node
     // then
     //   if show or hide of the given node contains a grand parent of the current node
     //   then ignore the current node and its show and hide events
@@ -341,7 +294,7 @@ EventTree::FindOrInsert(Accessible* aContainer)
       // its parent.
       node->mFireReorder = false;
       nsAutoPtr<EventTree>& nodeOwnerRef = prevNode ? prevNode->mNext : mFirst;
-      nsAutoPtr<EventTree> newNode(new EventTree(aContainer));
+      nsAutoPtr<EventTree> newNode(new EventTree(aContainer, mDependentEvents.IsEmpty()));
       newNode->mFirst = Move(nodeOwnerRef);
       nodeOwnerRef = Move(newNode);
       nodeOwnerRef->mNext = Move(node->mNext);
@@ -383,7 +336,14 @@ EventTree::FindOrInsert(Accessible* aContainer)
   } while ((node = node->mNext));
 
   MOZ_ASSERT(prevNode, "Nowhere to insert");
-  return prevNode->mNext = new EventTree(aContainer);
+  MOZ_ASSERT(!prevNode->mNext, "Taken by another node");
+
+  // If 'this' node contains the given container accessible, then
+  //   do not emit a reorder event for the container
+  //   if a dependent show event target contains the given container then do not
+  //   emit show / hide events (see Process() method)
+
+  return prevNode->mNext = new EventTree(aContainer, mDependentEvents.IsEmpty());
 }
 
 void

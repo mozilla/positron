@@ -637,7 +637,9 @@ class WasmAstModule : public WasmAstNode
             return true;
         }
         *sigIndex = sigs_.length();
-        return sigs_.append(new (lifo_) WasmAstSig(WasmName(), Move(sig))) &&
+        auto* lifoSig = new (lifo_) WasmAstSig(WasmName(), Move(sig));
+        return lifoSig &&
+               sigs_.append(lifoSig) &&
                sigMap_.add(p, sigs_.back(), *sigIndex);
     }
     bool append(WasmAstSig* sig) {
@@ -1170,6 +1172,7 @@ class WasmTokenStream
     WasmToken nan(const char16_t* begin);
     WasmToken literal(const char16_t* begin);
     WasmToken next();
+    void skipSpaces();
 
   public:
     WasmTokenStream(const char16_t* text, UniqueChars* error)
@@ -1348,15 +1351,48 @@ WasmTokenStream::literal(const char16_t* begin)
     return WasmToken(u.value(), begin, cur_);
 }
 
+void
+WasmTokenStream::skipSpaces()
+{
+    while (cur_ != end_) {
+        char16_t ch = *cur_;
+        if (ch == ';' && consume(MOZ_UTF16(";;"))) {
+            // Skipping single line comment.
+            while (cur_ != end_ && !IsWasmNewLine(*cur_))
+                cur_++;
+        } else if (ch == '(' && consume(MOZ_UTF16("(;"))) {
+            // Skipping multi-line and possibly nested comments.
+            size_t level = 1;
+            while (cur_ != end_) {
+                char16_t ch = *cur_;
+                if (ch == '(' && consume(MOZ_UTF16("(;"))) {
+                    level++;
+                } else if (ch == ';' && consume(MOZ_UTF16(";)"))) {
+                    if (--level == 0)
+                        break;
+                } else {
+                    cur_++;
+                    if (IsWasmNewLine(ch)) {
+                        lineStart_ = cur_;
+                        line_++;
+                    }
+                }
+            }
+        } else if (IsWasmSpace(ch)) {
+            cur_++;
+            if (IsWasmNewLine(ch)) {
+                lineStart_ = cur_;
+                line_++;
+            }
+        } else
+            break; // non-whitespace found
+    }
+}
+
 WasmToken
 WasmTokenStream::next()
 {
-    while (cur_ != end_ && IsWasmSpace(*cur_)) {
-        if (IsWasmNewLine(*cur_++)) {
-            lineStart_ = cur_;
-            line_++;
-        }
-    }
+    skipSpaces();
 
     if (cur_ == end_)
         return WasmToken(WasmToken::EndOfFile, cur_, cur_);
@@ -2461,7 +2497,7 @@ ParseConst(WasmParseContext& c, WasmToken constToken)
           case WasmToken::SignedInteger:
             return new(c.lifo) WasmAstConst(Val(uint64_t(val.sint())));
           case WasmToken::NegativeZero:
-            return new(c.lifo) WasmAstConst(Val(uint32_t(0)));
+            return new(c.lifo) WasmAstConst(Val(uint64_t(0)));
           default:
             break;
         }

@@ -14,7 +14,6 @@
 #include "gfxMatrix.h"
 #include "gfxPattern.h"
 #include "nsTArray.h"
-#include "nsAutoPtr.h"
 
 #include "mozilla/gfx/2D.h"
 
@@ -642,6 +641,8 @@ public:
         MOZ_ASSERT(mContext, "mMatrix doesn't contain a useful matrix");
         return mMatrix;
     }
+
+    bool HasMatrix() const { return !!mContext; }
 
 private:
     gfxContext *mContext;

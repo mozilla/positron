@@ -10,14 +10,13 @@ const { DOM: dom, createClass, PropTypes, addons } =
 const Types = require("../types");
 
 module.exports = createClass({
-
-  displayName: "GlobalToolbar",
-
   propTypes: {
     onExit: PropTypes.func.isRequired,
     onScreenshot: PropTypes.func.isRequired,
     screenshot: PropTypes.shape(Types.screenshot).isRequired,
   },
+
+  displayName: "GlobalToolbar",
 
   mixins: [ addons.PureRenderMixin ],
 
@@ -31,7 +30,7 @@ module.exports = createClass({
     return dom.header(
       {
         id: "global-toolbar",
-        className: "toolbar",
+        className: "container",
       },
       dom.span(
         {

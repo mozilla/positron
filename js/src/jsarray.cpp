@@ -931,19 +931,21 @@ ArraySpeciesCreate(JSContext* cx, HandleObject origArray, uint32_t length, Mutab
 {
     RootedId createId(cx, NameToId(cx->names().ArraySpeciesCreate));
     RootedFunction create(cx, JS::GetSelfHostedFunction(cx, "ArraySpeciesCreate", createId, 2));
+    if (!create)
+        return false;
 
     FixedInvokeArgs<2> args(cx);
 
-    args.setCallee(ObjectValue(*create));
-    args.setThis(UndefinedValue());
     args[0].setObject(*origArray);
     args[1].set(NumberValue(length));
 
-    if (!Invoke(cx, args))
+    RootedValue callee(cx, ObjectValue(*create));
+    RootedValue rval(cx);
+    if (!Call(cx, callee, UndefinedHandleValue, args, &rval))
         return false;
 
-    MOZ_ASSERT(args.rval().isObject());
-    arr.set(&args.rval().toObject());
+    MOZ_ASSERT(rval.isObject());
+    arr.set(&rval.toObject());
     return true;
 }
 
@@ -1144,7 +1146,8 @@ ArrayJoinKernel(JSContext* cx, SeparatorOp sepOp, HandleObject obj, uint32_t len
                     RootedValue fun(cx);
                     if (!GetProperty(cx, v, cx->names().toLocaleString, &fun))
                         return false;
-                    if (!Invoke(cx, v, fun, 0, nullptr, &v))
+
+                    if (!Call(cx, fun, v, &v))
                         return false;
                 }
                 if (!ValueToStringBuffer(cx, v, sb))
@@ -1389,8 +1392,8 @@ ArrayReverseDenseKernel(JSContext* cx, HandleObject obj, uint32_t length)
 DefineBoxedOrUnboxedFunctor3(ArrayReverseDenseKernel,
                              JSContext*, HandleObject, uint32_t);
 
-static bool
-array_reverse(JSContext* cx, unsigned argc, Value* vp)
+bool
+js::array_reverse(JSContext* cx, unsigned argc, Value* vp)
 {
     AutoSPSEntry pseudoFrame(cx->runtime(), "Array.prototype.reverse");
     CallArgs args = CallArgsFromVp(argc, vp);
@@ -1833,8 +1836,7 @@ js::array_sort(JSContext* cx, unsigned argc, Value* vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
 
-    RootedValue fvalRoot(cx);
-    Value& fval = fvalRoot.get();
+    RootedValue fval(cx);
 
     if (args.hasDefined(0)) {
         if (args[0].isPrimitive()) {
@@ -1871,20 +1873,7 @@ js::array_sort(JSContext* cx, unsigned argc, Value* vp)
         MOZ_ASSERT(selfHostedSortValue.isObject());
         MOZ_ASSERT(selfHostedSortValue.toObject().is<JSFunction>());
 
-        InvokeArgs iargs(cx);
-
-        if (!iargs.init(1))
-            return false;
-
-        iargs.setCallee(selfHostedSortValue);
-        iargs.setThis(args.thisv());
-        iargs[0].set(fval);
-
-        if (!Invoke(cx, iargs))
-            return false;
-
-        args.rval().set(iargs.rval());
-        return true;
+        return Call(cx, selfHostedSortValue, args.thisv(), fval, args.rval());
     }
 
     uint32_t len;
@@ -2394,8 +2383,8 @@ CanOptimizeForDenseStorage(HandleObject arr, uint32_t startingIndex, uint32_t co
 }
 
 /* ES 2016 draft Mar 25, 2016 22.1.3.26. */
-static bool
-array_splice(JSContext* cx, unsigned argc, Value* vp)
+bool
+js::array_splice(JSContext* cx, unsigned argc, Value* vp)
 {
     return array_splice_impl(cx, argc, vp, true);
 }
@@ -3095,8 +3084,6 @@ array_of(JSContext* cx, unsigned argc, Value* vp)
     return true;
 }
 
-#define GENERIC JSFUN_GENERIC_NATIVE
-
 static const JSFunctionSpec array_methods[] = {
 #if JS_HAS_TOSOURCE
     JS_FN(js_toSource_str,      array_toSource,     0,0),
@@ -3105,18 +3092,18 @@ static const JSFunctionSpec array_methods[] = {
     JS_FN(js_toLocaleString_str,       array_toLocaleString, 0,0),
 
     /* Perl-ish methods. */
-    JS_INLINABLE_FN("join",     array_join,         1,JSFUN_GENERIC_NATIVE, ArrayJoin),
-    JS_FN("reverse",            array_reverse,      0,JSFUN_GENERIC_NATIVE),
-    JS_FN("sort",               array_sort,         1,JSFUN_GENERIC_NATIVE),
-    JS_INLINABLE_FN("push",     array_push,         1,JSFUN_GENERIC_NATIVE, ArrayPush),
-    JS_INLINABLE_FN("pop",      array_pop,          0,JSFUN_GENERIC_NATIVE, ArrayPop),
-    JS_INLINABLE_FN("shift",    array_shift,        0,JSFUN_GENERIC_NATIVE, ArrayShift),
-    JS_FN("unshift",            array_unshift,      1,JSFUN_GENERIC_NATIVE),
-    JS_INLINABLE_FN("splice",   array_splice,       2,JSFUN_GENERIC_NATIVE, ArraySplice),
+    JS_INLINABLE_FN("join",     array_join,         1,0, ArrayJoin),
+    JS_FN("reverse",            array_reverse,      0,0),
+    JS_FN("sort",               array_sort,         1,0),
+    JS_INLINABLE_FN("push",     array_push,         1,0, ArrayPush),
+    JS_INLINABLE_FN("pop",      array_pop,          0,0, ArrayPop),
+    JS_INLINABLE_FN("shift",    array_shift,        0,0, ArrayShift),
+    JS_FN("unshift",            array_unshift,      1,0),
+    JS_INLINABLE_FN("splice",   array_splice,       2,0, ArraySplice),
 
     /* Pythonic sequence methods. */
     JS_SELF_HOSTED_FN("concat",      "ArrayConcat",      1,0),
-    JS_INLINABLE_FN("slice",    array_slice,        2,JSFUN_GENERIC_NATIVE, ArraySlice),
+    JS_INLINABLE_FN("slice",    array_slice,        2,0, ArraySlice),
 
     JS_SELF_HOSTED_FN("lastIndexOf", "ArrayLastIndexOf", 1,0),
     JS_SELF_HOSTED_FN("indexOf",     "ArrayIndexOf",     1,0),
@@ -3157,6 +3144,15 @@ static const JSFunctionSpec array_static_methods[] = {
     JS_SELF_HOSTED_FN("some",        "ArrayStaticSome",  2,0),
     JS_SELF_HOSTED_FN("reduce",      "ArrayStaticReduce", 2,0),
     JS_SELF_HOSTED_FN("reduceRight", "ArrayStaticReduceRight", 2,0),
+    JS_SELF_HOSTED_FN("join",        "ArrayStaticJoin", 2,0),
+    JS_SELF_HOSTED_FN("reverse",     "ArrayStaticReverse", 1,0),
+    JS_SELF_HOSTED_FN("sort",        "ArrayStaticSort", 2,0),
+    JS_SELF_HOSTED_FN("push",        "ArrayStaticPush", 2,0),
+    JS_SELF_HOSTED_FN("pop",         "ArrayStaticPop", 1,0),
+    JS_SELF_HOSTED_FN("shift",       "ArrayStaticShift", 1,0),
+    JS_SELF_HOSTED_FN("unshift",     "ArrayStaticUnshift", 2,0),
+    JS_SELF_HOSTED_FN("splice",      "ArrayStaticSplice", 3,0),
+    JS_SELF_HOSTED_FN("slice",       "ArrayStaticSlice", 3,0),
     JS_SELF_HOSTED_FN("from",        "ArrayFrom", 3,0),
     JS_FN("of",                 array_of,           0,0),
 

@@ -31,12 +31,6 @@ class nsTextFragment;
 class nsDisplayTextGeometry;
 class nsDisplayText;
 
-class nsTextFrameTextRunCache {
-public:
-  static void Init();
-  static void Shutdown();
-};
-
 class nsTextFrame : public nsFrame {
   typedef mozilla::LayoutDeviceRect LayoutDeviceRect;
   typedef mozilla::TextRangeStyle TextRangeStyle;
@@ -198,7 +192,7 @@ public:
   
   virtual bool IsEmpty() override;
   virtual bool IsSelfEmpty() override { return IsEmpty(); }
-  virtual nscoord GetLogicalBaseline(mozilla::WritingMode aWritingMode) const override;
+  nscoord GetLogicalBaseline(mozilla::WritingMode aWritingMode) const final;
   
   virtual bool HasSignificantTerminalNewline() const override;
 
@@ -349,7 +343,7 @@ public:
      */
     virtual void NotifySelectionBackgroundNeedsFill(const Rect& aBackgroundRect,
                                                     nscolor aColor,
-                                                    DrawTarget& aDrawTarget) { }
+                                                    DrawTarget& aDrawTarget);
 
     /**
      * Called before (for under/over-line) or after (for line-through) the text
@@ -387,6 +381,8 @@ public:
      * has been emitted to the gfxContext.
      */
     virtual void NotifySelectionDecorationLinePathEmitted() { }
+
+    virtual void NotifyGlyphPathEmitted() override {}
   };
 
   struct PaintTextParams
@@ -417,6 +413,8 @@ public:
     gfxTextContextPaint* contextPaint = nullptr;
     DrawPathCallbacks* callbacks = nullptr;
     nscolor textColor = NS_RGBA(0, 0, 0, 0);
+    nscolor textStrokeColor = NS_RGBA(0, 0, 0, 0);
+    float textStrokeWidth = 0.0f;
     bool drawSoftHyphen = false;
     explicit DrawTextRunParams(gfxContext* aContext)
       : context(aContext) {}
@@ -462,7 +460,7 @@ public:
   void DrawEmphasisMarks(gfxContext* aContext,
                          mozilla::WritingMode aWM,
                          const gfxPoint& aTextBaselinePt,
-                         Range aRange,
+                         const gfxPoint& aFramePt, Range aRange,
                          const nscolor* aDecorationOverrideColor,
                          PropertyProvider* aProvider);
 
@@ -571,6 +569,8 @@ public:
 
   void AssignJustificationGaps(const mozilla::JustificationAssignment& aAssign);
   mozilla::JustificationAssignment GetJustificationAssignment() const;
+
+  uint32_t CountGraphemeClusters() const;
 
 protected:
   virtual ~nsTextFrame();

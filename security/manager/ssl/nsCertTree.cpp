@@ -4,6 +4,7 @@
 
 #include "nsCertTree.h"
 
+#include "ScopedNSSTypes.h"
 #include "mozilla/Logging.h"
 #include "nsArray.h"
 #include "nsArrayUtils.h"
@@ -16,6 +17,7 @@
 #include "nsNSSCertHelper.h"
 #include "nsNSSCertificate.h"
 #include "nsNSSComponent.h" // for PIPNSS string bundle calls.
+#include "nsNSSHelper.h"
 #include "nsReadableUtils.h"
 #include "nsTHashtable.h"
 #include "nsUnicharUtils.h"
@@ -790,12 +792,12 @@ nsCertTree::DeleteEntryObject(uint32_t index)
             // although there are still overrides stored,
             // so, we keep the cert, but remove the trust
 
-            ScopedCERTCertificate nsscert(cert->GetCert());
+            UniqueCERTCertificate nsscert(cert->GetCert());
 
             if (nsscert) {
               CERTCertTrust trust;
               memset((void*)&trust, 0, sizeof(trust));
-            
+
               SECStatus srv = CERT_DecodeTrustString(&trust, ""); // no override 
               if (srv == SECSuccess) {
                 CERT_ChangeCertTrust(CERT_GetDefaultCertDB(), nsscert.get(),

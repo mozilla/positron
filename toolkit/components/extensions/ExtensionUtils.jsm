@@ -24,6 +24,8 @@ XPCOMUtils.defineLazyModuleGetter(this, "MessageChannel",
                                   "resource://gre/modules/MessageChannel.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "Preferences",
                                   "resource://gre/modules/Preferences.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "PromiseUtils",
+                                  "resource://gre/modules/PromiseUtils.jsm");
 
 function filterStack(error) {
   return String(error.stack).replace(/(^.*(Task\.jsm|Promise-backend\.js).*\n)+/gm, "<Promise Chain>\n");
@@ -54,6 +56,11 @@ function runSafeWithoutClone(f, ...args) {
 // Run a function, cloning arguments into context.cloneScope, and
 // report exceptions. |f| is expected to be in context.cloneScope.
 function runSafeSync(context, f, ...args) {
+  if (context.unloaded) {
+    Cu.reportError("runSafeSync called after context unloaded");
+    return;
+  }
+
   try {
     args = Cu.cloneInto(args, context.cloneScope);
   } catch (e) {
@@ -71,6 +78,10 @@ function runSafe(context, f, ...args) {
   } catch (e) {
     Cu.reportError(e);
     dump(`runSafe failure: cloning into ${context.cloneScope}: ${e}\n\n${filterStack(Error())}`);
+  }
+  if (context.unloaded) {
+    dump(`runSafe failure: context is already unloaded ${filterStack(new Error())}\n`);
+    return undefined;
   }
   return runSafeWithoutClone(f, ...args);
 }
@@ -130,11 +141,13 @@ class SpreadArgs extends Array {
 let gContextId = 0;
 
 class BaseContext {
-  constructor() {
+  constructor(extensionId) {
     this.onClose = new Set();
     this.checkedLastError = false;
     this._lastError = null;
     this.contextId = ++gContextId;
+    this.unloaded = false;
+    this.extensionId = extensionId;
   }
 
   get cloneScope() {
@@ -143,6 +156,22 @@ class BaseContext {
 
   get principal() {
     throw new Error("Not implemented");
+  }
+
+  runSafe(...args) {
+    if (this.unloaded) {
+      Cu.reportError("context.runSafe called after context unloaded");
+    } else {
+      return runSafeSync(this, ...args);
+    }
+  }
+
+  runSafeWithoutClone(...args) {
+    if (this.unloaded) {
+      Cu.reportError("context.runSafeWithoutClone called after context unloaded");
+    } else {
+      return runSafeSyncWithoutClone(...args);
+    }
   }
 
   checkLoadURL(url, options = {}) {
@@ -271,15 +300,17 @@ class BaseContext {
   wrapPromise(promise, callback = null) {
     // Note: `promise instanceof this.cloneScope.Promise` returns true
     // here even for promises that do not belong to the content scope.
-    let runSafe = runSafeSync.bind(null, this);
+    let runSafe = this.runSafe.bind(this);
     if (promise.constructor === this.cloneScope.Promise) {
-      runSafe = runSafeSyncWithoutClone;
+      runSafe = this.runSafeWithoutClone.bind(this);
     }
 
     if (callback) {
       promise.then(
         args => {
-          if (args instanceof SpreadArgs) {
+          if (this.unloaded) {
+            dump(`Promise resolved after context unloaded\n`);
+          } else if (args instanceof SpreadArgs) {
             runSafe(callback, ...args);
           } else {
             runSafe(callback, args);
@@ -287,23 +318,39 @@ class BaseContext {
         },
         error => {
           this.withLastError(error, () => {
-            runSafeSyncWithoutClone(callback);
+            if (this.unloaded) {
+              dump(`Promise rejected after context unloaded\n`);
+            } else {
+              this.runSafeWithoutClone(callback);
+            }
           });
         });
     } else {
       return new this.cloneScope.Promise((resolve, reject) => {
         promise.then(
-          value => { runSafe(resolve, value); },
           value => {
-            runSafeSyncWithoutClone(reject, this.normalizeError(value));
+            if (this.unloaded) {
+              dump(`Promise resolved after context unloaded\n`);
+            } else {
+              runSafe(resolve, value);
+            }
+          },
+          value => {
+            if (this.unloaded) {
+              dump(`Promise rejected after context unloaded\n`);
+            } else {
+              this.runSafeWithoutClone(reject, this.normalizeError(value));
+            }
           });
       });
     }
   }
 
   unload() {
+    this.unloaded = true;
+
     MessageChannel.abortResponses({
-      extensionId: this.extension.id,
+      extensionId: this.extensionId,
       contextId: this.contextId,
     });
 
@@ -520,7 +567,7 @@ LocaleData.prototype = {
 //
 // The result is an object with addListener, removeListener, and
 // hasListener methods. |context| is an add-on scope (either an
-// ExtensionPage in the chrome process or ExtensionContext in a
+// ExtensionContext in the chrome process or ExtensionContext in a
 // content process). |name| is for debugging. |register| is a function
 // to register the listener. |register| is only called once, event if
 // multiple listeners are registered. |register| should return an
@@ -570,13 +617,19 @@ EventManager.prototype = {
 
   fire(...args) {
     for (let callback of this.callbacks) {
-      runSafe(this.context, callback, ...args);
+      Promise.resolve(callback).then(callback => {
+        if (this.context.unloaded) {
+          dump(`${this.name} event fired after context unloaded.\n`);
+        } else if (this.callbacks.has(callback)) {
+          this.context.runSafe(callback, ...args);
+        }
+      });
     }
   },
 
   fireWithoutClone(...args) {
     for (let callback of this.callbacks) {
-      runSafeSyncWithoutClone(callback, ...args);
+      this.context.runSafeWithoutClone(callback, ...args);
     }
   },
 
@@ -584,7 +637,7 @@ EventManager.prototype = {
     if (this.callbacks.size) {
       this.unregister();
     }
-    this.callbacks = null;
+    this.callbacks = Object.freeze([]);
   },
 
   api() {
@@ -609,7 +662,15 @@ function SingletonEventManager(context, name, register) {
 
 SingletonEventManager.prototype = {
   addListener(callback, ...args) {
-    let unregister = this.register(callback, ...args);
+    let wrappedCallback = (...args) => {
+      if (this.context.unloaded) {
+        dump(`${this.name} event fired after context unloaded.\n`);
+      } else if (this.unregister.has(callback)) {
+        return callback(...args);
+      }
+    };
+
+    let unregister = this.register(wrappedCallback, ...args);
     this.unregister.set(callback, unregister);
   },
 
@@ -933,7 +994,7 @@ Messenger.prototype = {
             this.delegate.getSender(this.context, target, sender);
           }
           let port = new Port(this.context, mm, name, portId, sender);
-          runSafeSyncWithoutClone(callback, port.api());
+          this.context.runSafeWithoutClone(callback, port.api());
           return true;
         },
       };
@@ -982,6 +1043,150 @@ function detectLanguage(text) {
   }));
 }
 
+let nextId = 1;
+
+// We create one instance of this class for every extension context
+// that needs to use remote APIs. It uses the message manager to
+// communicate with the ParentAPIManager singleton in
+// Extension.jsm. It handles asynchronous function calls as well as
+// event listeners.
+class ChildAPIManager {
+  constructor(context, messageManager, namespaces, contextData) {
+    this.context = context;
+    this.messageManager = messageManager;
+    this.namespaces = namespaces;
+
+    let id = String(context.extension.id) + "." + String(context.contextId);
+    this.id = id;
+
+    let data = {childId: id, extensionId: context.extension.id, principal: context.principal};
+    Object.assign(data, contextData);
+    messageManager.sendAsyncMessage("API:CreateProxyContext", data);
+
+    messageManager.addMessageListener("API:RunListener", this);
+    messageManager.addMessageListener("API:CallResult", this);
+
+    // Map[path -> Set[listener]]
+    // path is, e.g., "runtime.onMessage".
+    this.listeners = new Map();
+
+    // Map[callId -> Deferred]
+    this.callPromises = new Map();
+  }
+
+  receiveMessage({name, data}) {
+    if (data.childId != this.id) {
+      return;
+    }
+
+    switch (name) {
+      case "API:RunListener":
+        let ref = data.path.concat(data.name).join(".");
+        let listeners = this.listeners.get(ref);
+        for (let callback of listeners) {
+          runSafe(this.context, callback, ...data.args);
+        }
+        break;
+
+      case "API:CallResult":
+        let deferred = this.callPromises.get(data.callId);
+        if (data.lastError) {
+          deferred.reject({message: data.lastError});
+        } else {
+          deferred.resolve(new SpreadArgs(data.args));
+        }
+        this.callPromises.delete(data.callId);
+        break;
+    }
+  }
+
+  close() {
+    this.messageManager.sendAsyncMessage("Extension:CloseProxyContext", {childId: this.id});
+  }
+
+  get cloneScope() {
+    return this.context.cloneScope;
+  }
+
+  callFunction(path, name, args) {
+    throw new Error("Not implemented");
+  }
+
+  callFunctionNoReturn(path, name, args) {
+    this.messageManager.sendAsyncMessage("API:Call", {
+      childId: this.id,
+      path, name, args,
+    });
+  }
+
+  callAsyncFunction(path, name, args, callback) {
+    let callId = nextId++;
+    let deferred = PromiseUtils.defer();
+    this.callPromises.set(callId, deferred);
+
+    this.messageManager.sendAsyncMessage("API:Call", {
+      childId: this.id,
+      callId,
+      path, name, args,
+    });
+
+    return this.context.wrapPromise(deferred.promise, callback);
+  }
+
+  shouldInject(namespace, name) {
+    return this.namespaces.includes(namespace);
+  }
+
+  getProperty(path, name) {
+    throw new Error("Not implemented");
+  }
+
+  setProperty(path, name, value) {
+    throw new Error("Not implemented");
+  }
+
+  addListener(path, name, listener, args) {
+    let ref = path.concat(name).join(".");
+    let set;
+    if (this.listeners.has(ref)) {
+      set = this.listeners.get(ref);
+    } else {
+      set = new Set();
+      this.listeners.set(ref, set);
+    }
+
+    set.add(listener);
+
+    if (set.size == 1) {
+      args = args.slice(1);
+
+      this.messageManager.sendAsyncMessage("API:AddListener", {
+        childId: this.id,
+        path, name, args,
+      });
+    }
+  }
+
+  removeListener(path, name, listener) {
+    let ref = path.concat(name).join(".");
+    let set = this.listeners.get(ref) || new Set();
+    set.remove(listener);
+
+    if (set.size == 0) {
+      this.messageManager.sendAsyncMessage("Extension:RemoveListener", {
+        childId: this.id,
+        path, name,
+      });
+    }
+  }
+
+  hasListener(path, name, listener) {
+    let ref = path.concat(name).join(".");
+    let set = this.listeners.get(ref) || new Set();
+    return set.has(listener);
+  }
+}
+
 this.ExtensionUtils = {
   detectLanguage,
   extend,
@@ -1002,4 +1207,5 @@ this.ExtensionUtils = {
   PlatformInfo,
   SingletonEventManager,
   SpreadArgs,
+  ChildAPIManager,
 };

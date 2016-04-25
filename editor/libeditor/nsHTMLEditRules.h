@@ -106,6 +106,7 @@ public:
   NS_IMETHOD DidDeleteText(nsIDOMCharacterData *aTextNode, int32_t aOffset, int32_t aLength, nsresult aResult) override;
   NS_IMETHOD WillDeleteSelection(nsISelection *aSelection) override;
   NS_IMETHOD DidDeleteSelection(nsISelection *aSelection) override;
+  void DeleteNodeIfCollapsedText(nsINode& aNode);
 
 protected:
   virtual ~nsHTMLEditRules();
@@ -125,7 +126,7 @@ protected:
   void InitFields();
 
   // nsHTMLEditRules implementation methods
-  nsresult WillInsert(mozilla::dom::Selection* aSelection, bool* aCancel);
+  void WillInsert(mozilla::dom::Selection& aSelection, bool* aCancel);
   nsresult WillInsertText(  EditAction aAction,
                             mozilla::dom::Selection* aSelection,
                             bool            *aCancel,
@@ -134,10 +135,10 @@ protected:
                             nsAString       *outString,
                             int32_t          aMaxLength);
   nsresult WillLoadHTML(mozilla::dom::Selection* aSelection, bool* aCancel);
-  nsresult WillInsertBreak(mozilla::dom::Selection* aSelection,
+  nsresult WillInsertBreak(mozilla::dom::Selection& aSelection,
                            bool* aCancel, bool* aHandled);
-  nsresult StandardBreakImpl(nsIDOMNode* aNode, int32_t aOffset,
-                             mozilla::dom::Selection* aSelection);
+  nsresult StandardBreakImpl(nsINode& aNode, int32_t aOffset,
+                             mozilla::dom::Selection& aSelection);
   nsresult DidInsertBreak(mozilla::dom::Selection* aSelection,
                           nsresult aResult);
   nsresult SplitMailCites(mozilla::dom::Selection* aSelection, bool* aHandled);
@@ -151,7 +152,8 @@ protected:
   nsresult InsertBRIfNeeded(mozilla::dom::Selection* aSelection);
   ::DOMPoint GetGoodSelPointForNode(nsINode& aNode,
                                     nsIEditor::EDirection aAction);
-  nsresult JoinBlocks(nsIDOMNode *aLeftNode, nsIDOMNode *aRightNode, bool *aCanceled);
+  nsresult JoinBlocks(nsIContent& aLeftNode, nsIContent& aRightNode,
+                      bool* aCanceled);
   nsresult MoveBlock(nsIDOMNode *aLeft, nsIDOMNode *aRight, int32_t aLeftOffset, int32_t aRightOffset);
   nsresult MoveNodeSmart(nsIDOMNode *aSource, nsIDOMNode *aDest, int32_t *aOffset);
   nsresult MoveContents(nsIDOMNode *aSource, nsIDOMNode *aDest, int32_t *aOffset);
@@ -202,7 +204,6 @@ protected:
                        nsTArray<mozilla::OwningNonNull<nsINode>>& aOutArrayOfNodes,
                        int32_t* aIndex, Lists aLists = Lists::yes,
                        Tables aTables = Tables::yes);
-  already_AddRefed<nsIDOMNode> IsInListItem(nsIDOMNode* aNode);
   mozilla::dom::Element* IsInListItem(nsINode* aNode);
   nsresult ReturnInHeader(mozilla::dom::Selection* aSelection,
                           nsIDOMNode* aHeader, nsIDOMNode* aTextNode,

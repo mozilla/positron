@@ -13,6 +13,8 @@
  * limitations under the License.
  */
 
+#include "nsWindow.h"
+
 #include "mozilla/DebugOnly.h"
 
 #include <fcntl.h>
@@ -20,6 +22,7 @@
 #include "android/log.h"
 #include "mozilla/dom/TabParent.h"
 #include "mozilla/Preferences.h"
+#include "mozilla/RefPtr.h"
 #include "mozilla/Services.h"
 #include "mozilla/FileUtils.h"
 #include "mozilla/ClearOnShutdown.h"
@@ -28,11 +31,9 @@
 #include "GLContextProvider.h"
 #include "GLContext.h"
 #include "GLContextEGL.h"
-#include "nsAutoPtr.h"
 #include "nsAppShell.h"
 #include "nsScreenManagerGonk.h"
 #include "nsTArray.h"
-#include "nsWindow.h"
 #include "nsIWidgetListener.h"
 #include "ClientLayerManager.h"
 #include "BasicLayers.h"
@@ -143,7 +144,7 @@ nsWindow::DispatchKeyInput(WidgetKeyboardEvent& aEvent)
     gFocusedWindow->UserActivity();
 
     nsEventStatus status;
-    aEvent.widget = gFocusedWindow;
+    aEvent.mWidget = gFocusedWindow;
     gFocusedWindow->DispatchEvent(&aEvent, status);
     return status;
 }
@@ -255,7 +256,7 @@ private:
 nsresult
 nsWindow::SynthesizeNativeTouchPoint(uint32_t aPointerId,
                                      TouchPointerState aPointerState,
-                                     ScreenIntPoint aPointerScreenPoint,
+                                     LayoutDeviceIntPoint aPoint,
                                      double aPointerPressure,
                                      uint32_t aPointerOrientation,
                                      nsIObserver* aObserver)
@@ -267,8 +268,11 @@ nsWindow::SynthesizeNativeTouchPoint(uint32_t aPointerId,
     }
 
     if (!mSynthesizedTouchInput) {
-        mSynthesizedTouchInput = new MultiTouchInput();
+        mSynthesizedTouchInput = MakeUnique<MultiTouchInput>();
     }
+
+    ScreenIntPoint pointerScreenPoint = ViewAs<ScreenPixel>(aPoint,
+        PixelCastJustification::LayoutDeviceIsScreenForBounds);
 
     // We can't dispatch mSynthesizedTouchInput directly because (a) dispatching
     // it might inadvertently modify it and (b) in the case of touchend or
@@ -283,7 +287,7 @@ nsWindow::SynthesizeNativeTouchPoint(uint32_t aPointerId,
         if (index >= 0) {
             // found an existing touch point, update it
             SingleTouchData& point = mSynthesizedTouchInput->mTouches[index];
-            point.mScreenPoint = aPointerScreenPoint;
+            point.mScreenPoint = pointerScreenPoint;
             point.mRotationAngle = (float)aPointerOrientation;
             point.mForce = (float)aPointerPressure;
             inputToDispatch.mType = MultiTouchInput::MULTITOUCH_MOVE;
@@ -291,7 +295,7 @@ nsWindow::SynthesizeNativeTouchPoint(uint32_t aPointerId,
             // new touch point, add it
             mSynthesizedTouchInput->mTouches.AppendElement(SingleTouchData(
                 (int32_t)aPointerId,
-                aPointerScreenPoint,
+                pointerScreenPoint,
                 ScreenSize(0, 0),
                 (float)aPointerOrientation,
                 (float)aPointerPressure));
@@ -309,7 +313,7 @@ nsWindow::SynthesizeNativeTouchPoint(uint32_t aPointerId,
             : MultiTouchInput::MULTITOUCH_CANCEL);
         inputToDispatch.mTouches.AppendElement(SingleTouchData(
             (int32_t)aPointerId,
-            aPointerScreenPoint,
+            pointerScreenPoint,
             ScreenSize(0, 0),
             (float)aPointerOrientation,
             (float)aPointerPressure));

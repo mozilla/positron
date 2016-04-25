@@ -151,7 +151,7 @@ DocAccessibleChild::ShowEvent(AccShowEvent* aShowEvent)
   nsTArray<AccessibleData> shownTree;
   ShowEventData data(parentID, idxInParent, shownTree);
   SerializeTree(aShowEvent->GetAccessible(), data.NewTree());
-  SendShowEvent(data);
+  SendShowEvent(data, aShowEvent->IsFromUserInput());
 }
 
 bool
@@ -1842,53 +1842,6 @@ DocAccessibleChild::RecvTakeFocus(const uint64_t& aID)
     acc->TakeFocus();
   }
 
-  return true;
-}
-
-bool
-DocAccessibleChild::RecvEmbeddedChildCount(const uint64_t& aID,
-                                           uint32_t* aCount)
-{
-  *aCount = 0;
-
-  Accessible* acc = IdToAccessible(aID);
-  if (!acc) {
-    return true;
-  }
-
-  *aCount = acc->EmbeddedChildCount();
-
-  return true;
-}
-
-bool
-DocAccessibleChild::RecvIndexOfEmbeddedChild(const uint64_t& aID,
-                                             const uint64_t& aChildID,
-                                             uint32_t* aChildIdx)
-{
-  *aChildIdx = 0;
-
-  Accessible* parent = IdToAccessible(aID);
-  Accessible* child = IdToAccessible(aChildID);
-  if (!parent || !child)
-    return true;
-
-  *aChildIdx = parent->GetIndexOfEmbeddedChild(child);
-  return true;
-}
-
-bool
-DocAccessibleChild::RecvEmbeddedChildAt(const uint64_t& aID,
-                                        const uint32_t& aIdx,
-                                        uint64_t* aChildID)
-{
-  *aChildID = 0;
-
-  Accessible* acc = IdToAccessible(aID);
-  if (!acc)
-    return true;
-
-  *aChildID = reinterpret_cast<uintptr_t>(acc->GetEmbeddedChildAt(aIdx));
   return true;
 }
 

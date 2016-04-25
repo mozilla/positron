@@ -716,43 +716,61 @@ function CreateArrayIterator(obj, kind) {
     return CreateArrayIteratorAt(obj, kind, 0);
 }
 
-
+// ES6, 22.1.5.2.1
+// http://www.ecma-international.org/ecma-262/6.0/index.html#sec-%arrayiteratorprototype%.next
 function ArrayIteratorNext() {
+    // Step 1-3.
     if (!IsObject(this) || !IsArrayIterator(this)) {
         return callFunction(CallArrayIteratorMethodIfWrapped, this,
                             "ArrayIteratorNext");
     }
-    var a = UnsafeGetObjectFromReservedSlot(this, ITERATOR_SLOT_TARGET);
+
+    // Step 4.
+    var a = UnsafeGetReservedSlot(this, ITERATOR_SLOT_TARGET);
+    var result = { value: undefined, done: false };
+
+    // Step 5.
+    if (a === null) {
+      result.done = true;
+      return result;
+    }
+
+    // Step 6.
     // The index might not be an integer, so we have to do a generic get here.
     var index = UnsafeGetReservedSlot(this, ITERATOR_SLOT_NEXT_INDEX);
+
+    // Step 7.
     var itemKind = UnsafeGetInt32FromReservedSlot(this, ITERATOR_SLOT_ITEM_KIND);
-    var result = { value: undefined, done: false };
+
+    // Step 8-9.
     var len = IsPossiblyWrappedTypedArray(a)
               ? PossiblyWrappedTypedArrayLength(a)
               : TO_UINT32(a.length);
 
-    // FIXME: This should be ToLength, which clamps at 2**53.  Bug 924058.
+    // Step 10.
     if (index >= len) {
-        // When the above is changed to ToLength, use +1/0 here instead
-        // of MAX_UINT32.
-        UnsafeSetReservedSlot(this, ITERATOR_SLOT_NEXT_INDEX, 0xffffffff);
+        UnsafeSetReservedSlot(this, ITERATOR_SLOT_TARGET, null);
         result.done = true;
         return result;
     }
 
+    // Step 11.
     UnsafeSetReservedSlot(this, ITERATOR_SLOT_NEXT_INDEX, index + 1);
 
+    // Step 16.
     if (itemKind === ITEM_KIND_VALUE) {
         result.value = a[index];
         return result;
     }
 
+    // Step 13.
     if (itemKind === ITEM_KIND_KEY_AND_VALUE) {
         var pair = [index, a[index]];
         result.value = pair;
         return result;
     }
 
+    // Step 12.
     assert(itemKind === ITEM_KIND_KEY, itemKind);
     result.value = index;
     return result;
@@ -924,6 +942,23 @@ function ArraySpeciesCreate(originalArray, length) {
     return new C(length);
 }
 
+// ES 2017 draft (April 8, 2016) 22.1.3.1.1
+function IsConcatSpreadable(O) {
+    // Step 1.
+    if (!IsObject(O))
+        return false;
+
+    // Step 2.
+    var spreadable = O[std_isConcatSpreadable];
+
+    // Step 3.
+    if (spreadable !== undefined)
+        return ToBoolean(spreadable);
+
+    // Step 4.
+    return IsArray(O);
+}
+
 // ES 2016 draft Mar 25, 2016 22.1.3.1.
 // Note: Array.prototype.concat.length is 1.
 function ArrayConcat(arg1) {
@@ -947,8 +982,7 @@ function ArrayConcat(arg1) {
     var k, len;
     while (true) {
         // Steps 5.b-c.
-        // IsArray should be replaced with IsConcatSpreadable (bug 1041586).
-        if (IsArray(E)) {
+        if (IsConcatSpreadable(E)) {
             // Step 5.c.ii.
             len = ToLength(E.length);
 
@@ -1008,4 +1042,61 @@ function ArrayStaticConcat(arr, arg1) {
         ThrowTypeError(JSMSG_MISSING_FUN_ARG, 0, 'Array.concat');
     var args = callFunction(std_Array_slice, arguments, 1);
     return callFunction(std_Function_apply, ArrayConcat, arr, args);
+}
+
+function ArrayStaticJoin(arr, separator) {
+    if (arguments.length < 1)
+        ThrowTypeError(JSMSG_MISSING_FUN_ARG, 0, 'Array.join');
+    return callFunction(std_Array_join, arr, separator);
+}
+
+function ArrayStaticReverse(arr) {
+    if (arguments.length < 1)
+        ThrowTypeError(JSMSG_MISSING_FUN_ARG, 0, 'Array.reverse');
+    return callFunction(std_Array_reverse, arr);
+}
+
+function ArrayStaticSort(arr, comparefn) {
+    if (arguments.length < 1)
+        ThrowTypeError(JSMSG_MISSING_FUN_ARG, 0, 'Array.sort');
+    return callFunction(std_Array_sort, arr, comparefn);
+}
+
+function ArrayStaticPush(arr, arg1) {
+    if (arguments.length < 1)
+        ThrowTypeError(JSMSG_MISSING_FUN_ARG, 0, 'Array.push');
+    var args = callFunction(std_Array_slice, arguments, 1);
+    return callFunction(std_Function_apply, std_Array_push, arr, args);
+}
+
+function ArrayStaticPop(arr) {
+    if (arguments.length < 1)
+        ThrowTypeError(JSMSG_MISSING_FUN_ARG, 0, 'Array.pop');
+    return callFunction(std_Array_pop, arr);
+}
+
+function ArrayStaticShift(arr) {
+    if (arguments.length < 1)
+        ThrowTypeError(JSMSG_MISSING_FUN_ARG, 0, 'Array.shift');
+    return callFunction(std_Array_shift, arr);
+}
+
+function ArrayStaticUnshift(arr, arg1) {
+    if (arguments.length < 1)
+        ThrowTypeError(JSMSG_MISSING_FUN_ARG, 0, 'Array.unshift');
+    var args = callFunction(std_Array_slice, arguments, 1);
+    return callFunction(std_Function_apply, std_Array_unshift, arr, args);
+}
+
+function ArrayStaticSplice(arr, start, deleteCount) {
+    if (arguments.length < 1)
+        ThrowTypeError(JSMSG_MISSING_FUN_ARG, 0, 'Array.splice');
+    var args = callFunction(std_Array_slice, arguments, 1);
+    return callFunction(std_Function_apply, std_Array_splice, arr, args);
+}
+
+function ArrayStaticSlice(arr, start, end) {
+    if (arguments.length < 1)
+        ThrowTypeError(JSMSG_MISSING_FUN_ARG, 0, 'Array.slice');
+    return callFunction(std_Array_slice, arr, start, end);
 }

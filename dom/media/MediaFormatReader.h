@@ -37,10 +37,10 @@ public:
   size_t SizeOfVideoQueueInFrames() override;
   size_t SizeOfAudioQueueInFrames() override;
 
-  RefPtr<VideoDataPromise>
+  RefPtr<MediaDataPromise>
   RequestVideoData(bool aSkipToNextKeyframe, int64_t aTimeThreshold) override;
 
-  RefPtr<AudioDataPromise> RequestAudioData() override;
+  RefPtr<MediaDataPromise> RequestAudioData() override;
 
   RefPtr<MetadataPromise> AsyncReadMetadata() override;
 
@@ -70,7 +70,7 @@ public:
 
   bool VideoIsHardwareAccelerated() const override;
 
-  bool IsWaitForDataSupported() override { return true; }
+  bool IsWaitForDataSupported() const override { return true; }
   RefPtr<WaitForDataPromise> WaitForData(MediaData::Type aType) override;
 
   // MediaFormatReader supports demuxed-only mode.
@@ -87,7 +87,7 @@ public:
     OwnerThread()->Dispatch(r.forget());
   }
 
-  bool UseBufferingHeuristics() override
+  bool UseBufferingHeuristics() const override
   {
     return mTrackDemuxersMayBlock;
   }
@@ -366,7 +366,6 @@ private:
     RefPtr<SharedTrackInfo> mInfo;
   };
 
-  template<typename PromiseType>
   struct DecoderDataWithPromise : public DecoderData {
     DecoderDataWithPromise(MediaFormatReader* aOwner,
                            MediaData::Type aType,
@@ -374,7 +373,7 @@ private:
       DecoderData(aOwner, aType, aDecodeAhead)
     {}
 
-    MozPromiseHolder<PromiseType> mPromise;
+    MozPromiseHolder<MediaDataPromise> mPromise;
 
     bool HasPromise() override
     {
@@ -391,8 +390,8 @@ private:
     }
   };
 
-  DecoderDataWithPromise<AudioDataPromise> mAudio;
-  DecoderDataWithPromise<VideoDataPromise> mVideo;
+  DecoderDataWithPromise mAudio;
+  DecoderDataWithPromise mVideo;
 
   // Returns true when the decoder for this track needs input.
   bool NeedInput(DecoderData& aDecoder);

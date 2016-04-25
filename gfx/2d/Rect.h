@@ -11,6 +11,7 @@
 #include "NumericTools.h"
 #include "Point.h"
 #include "Tools.h"
+#include "mozilla/Maybe.h"
 
 #include <cmath>
 
@@ -123,6 +124,10 @@ struct IntRectTyped :
 
     void InflateToMultiple(const IntSizeTyped<units>& aTileSize)
     {
+      if (this->IsEmpty()) {
+        return;
+      }
+
       int32_t yMost = this->YMost();
       int32_t xMost = this->XMost();
 
@@ -238,6 +243,21 @@ template<class units>
 RectTyped<units> IntRectToRect(const IntRectTyped<units>& aRect)
 {
   return RectTyped<units>(aRect.x, aRect.y, aRect.width, aRect.height);
+}
+
+// Convenience function for intersecting two IntRects wrapped in Maybes.
+template <typename Units>
+Maybe<IntRectTyped<Units>>
+IntersectMaybeRects(const Maybe<IntRectTyped<Units>>& a,
+                    const Maybe<IntRectTyped<Units>>& b)
+{
+  if (!a) {
+    return b;
+  } else if (!b) {
+    return a;
+  } else {
+    return Some(a->Intersect(*b));
+  }
 }
 
 } // namespace gfx

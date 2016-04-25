@@ -12,6 +12,7 @@
 
 #include "ds/IdValuePair.h"
 #include "gc/Barrier.h"
+#include "js/GCHashTable.h"
 #include "vm/TaggedProto.h"
 #include "vm/TypeInference.h"
 
@@ -539,7 +540,7 @@ class ObjectGroupCompartment
     friend class ObjectGroup;
 
     struct NewEntry;
-    using NewTable = js::GCHashSet<NewEntry, NewEntry, SystemAllocPolicy>;
+    class NewTable;
 
     // Set of default 'new' or lazy groups in the compartment.
     NewTable* defaultNewTable;

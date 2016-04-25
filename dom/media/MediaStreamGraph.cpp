@@ -138,7 +138,7 @@ MediaStreamGraphImpl::RemoveStreamGraphThread(MediaStream* aStream)
   }
 
   STREAM_LOG(LogLevel::Debug, ("Removed media stream %p from graph %p, count %lu",
-                               aStream, this, mStreams.Length()))
+                               aStream, this, mStreams.Length()));
   LIFECYCLE_LOG("Removed media stream %p from graph %p, count %lu",
                 aStream, this, mStreams.Length());
 
@@ -420,6 +420,8 @@ namespace {
 bool
 MediaStreamGraphImpl::AudioTrackPresent(bool& aNeedsAEC)
 {
+  AssertOnGraphThreadOrNotRunning();
+
   bool audioTrackPresent = false;
   for (uint32_t i = 0; i < mStreams.Length() && audioTrackPresent == false; ++i) {
     MediaStream* stream = mStreams[i];
@@ -501,13 +503,21 @@ MediaStreamGraphImpl::UpdateStreamOrder()
   }
 
 #ifdef MOZ_WEBRTC
+  // Whenever we change AEC state, notify the current driver, which also
+  // will sample the state when the driver inits
   if (shouldAEC && !mFarendObserverRef && gFarendObserver) {
     mFarendObserverRef = gFarendObserver;
     mMixer.AddCallback(mFarendObserverRef);
+    if (CurrentDriver()->AsAudioCallbackDriver()) {
+      CurrentDriver()->AsAudioCallbackDriver()->SetMicrophoneActive(true);
+    }
   } else if (!shouldAEC && mFarendObserverRef){
     if (mMixer.FindCallback(mFarendObserverRef)) {
       mMixer.RemoveCallback(mFarendObserverRef);
       mFarendObserverRef = nullptr;
+      if (CurrentDriver()->AsAudioCallbackDriver()) {
+        CurrentDriver()->AsAudioCallbackDriver()->SetMicrophoneActive(false);
+      }
     }
   }
 #endif
@@ -880,7 +890,7 @@ SetImageToBlackPixel(PlanarYCbCrImage* aImage)
   data.mCrChannel = blackPixel + 2;
   data.mYStride = data.mCbCrStride = 1;
   data.mPicSize = data.mYSize = data.mCbCrSize = IntSize(1, 1);
-  aImage->SetData(data);
+  aImage->CopyData(data);
 }
 
 class VideoFrameContainerInvalidateRunnable : public nsRunnable {
@@ -2657,6 +2667,7 @@ SourceMediaStream::AddTrackInternal(TrackID aID, TrackRate aRate, StreamTime aSt
   data->mEndOfFlushedData = aStart;
   data->mCommands = TRACK_CREATE;
   data->mData = aSegment;
+  ResampleAudioToGraphSampleRate(data, aSegment);
   if (!(aFlags & ADDTRACK_QUEUED) && GraphImpl()) {
     GraphImpl()->EnsureNextIteration();
   }
@@ -3056,13 +3067,13 @@ MediaInputPort::SetGraphImpl(MediaStreamGraphImpl* aGraph)
 }
 
 void
-MediaInputPort::BlockTrackIdImpl(TrackID aTrackId)
+MediaInputPort::BlockSourceTrackIdImpl(TrackID aTrackId)
 {
   mBlockedTracks.AppendElement(aTrackId);
 }
 
 already_AddRefed<Pledge<bool>>
-MediaInputPort::BlockTrackId(TrackID aTrackId)
+MediaInputPort::BlockSourceTrackId(TrackID aTrackId)
 {
   class Message : public ControlMessage {
   public:
@@ -3073,7 +3084,7 @@ MediaInputPort::BlockTrackId(TrackID aTrackId)
         mPort(aPort), mTrackId(aTrackId), mRunnable(aRunnable) {}
     void Run() override
     {
-      mPort->BlockTrackIdImpl(mTrackId);
+      mPort->BlockSourceTrackIdImpl(mTrackId);
       if (mRunnable) {
         mStream->Graph()->DispatchToMainThreadAfterStreamStateUpdate(mRunnable.forget());
       }
@@ -3139,7 +3150,7 @@ ProcessedMediaStream::AllocateInputPort(MediaStream* aStream, TrackID aTrackID,
                        aInputNumber, aOutputNumber);
   if (aBlockedTracks) {
     for (TrackID trackID : *aBlockedTracks) {
-      port->BlockTrackIdImpl(trackID);
+      port->BlockSourceTrackIdImpl(trackID);
     }
   }
   port->SetGraphImpl(GraphImpl());

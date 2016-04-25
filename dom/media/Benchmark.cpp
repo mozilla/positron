@@ -16,17 +16,24 @@
 
 namespace mozilla {
 
+// Update this version number to force re-running the benchmark. Such as when
+// an improvement to FFVP9 or LIBVPX is deemed worthwhile.
+const uint32_t VP9Benchmark::sBenchmarkVersionID = 1;
+
 const char* VP9Benchmark::sBenchmarkFpsPref = "media.benchmark.vp9.fps";
+const char* VP9Benchmark::sBenchmarkFpsVersionCheck = "media.benchmark.vp9.versioncheck";
 bool VP9Benchmark::sHasRunTest = false;
 
+// static
 bool
 VP9Benchmark::IsVP9DecodeFast()
 {
   MOZ_ASSERT(NS_IsMainThread());
 
   bool hasPref = Preferences::HasUserValue(sBenchmarkFpsPref);
+  uint32_t hadRecentUpdate = Preferences::GetUint(sBenchmarkFpsVersionCheck, 0U);
 
-  if (!sHasRunTest && !hasPref) {
+  if (!sHasRunTest && (!hasPref || hadRecentUpdate != sBenchmarkVersionID)) {
     sHasRunTest = true;
 
     RefPtr<WebMDemuxer> demuxer =
@@ -54,6 +61,7 @@ VP9Benchmark::IsVP9DecodeFast()
           }
         } else {
           Preferences::SetUint(sBenchmarkFpsPref, aDecodeFps);
+          Preferences::SetUint(sBenchmarkFpsVersionCheck, sBenchmarkVersionID);
         }
         Telemetry::Accumulate(Telemetry::ID::VIDEO_VP9_BENCHMARK_FPS, aDecodeFps);
       },
@@ -193,7 +201,8 @@ BenchmarkPlayback::InitDecoder(TrackInfo&& aInfo)
   MOZ_ASSERT(OnThread());
 
   RefPtr<PDMFactory> platform = new PDMFactory();
-  mDecoder = platform->CreateDecoder(aInfo, mDecoderTaskQueue, this);
+  mDecoder = platform->CreateDecoder(aInfo, mDecoderTaskQueue, this,
+     /* DecoderDoctorDiagnostics* */ nullptr);
   if (!mDecoder) {
     MainThreadShutdown();
     return;

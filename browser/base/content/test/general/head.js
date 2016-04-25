@@ -556,7 +556,7 @@ var FullZoomHelper = {
   },
 
   reset: function reset() {
-    return new Promise(resolve => FullZoom.reset(resolve));
+    return FullZoom.reset();
   },
 
   BACK: 0,
@@ -602,40 +602,45 @@ var FullZoomHelper = {
  *        The tab to load into.
  * @param [optional] url
  *        The url to load, or the current url.
- * @param [optional] event
- *        The load event type to wait for.  Defaults to "load".
  * @return {Promise} resolved when the event is handled.
  * @resolves to the received event
  * @rejects if a valid load event is not received within a meaningful interval
  */
-function promiseTabLoadEvent(tab, url, eventType="load")
+function promiseTabLoadEvent(tab, url)
 {
   let deferred = Promise.defer();
-  info("Wait tab event: " + eventType);
+  info("Wait tab event: load");
 
-  function handle(event) {
-    if (event.originalTarget != tab.linkedBrowser.contentDocument ||
-        event.target.location.href == "about:blank" ||
-        (url && event.target.location.href != url)) {
-      info("Skipping spurious '" + eventType + "'' event" +
-           " for " + event.target.location.href);
-      return;
+  function handle(loadedUrl) {
+    if (loadedUrl === "about:blank" || (url && loadedUrl !== url)) {
+      info(`Skipping spurious load event for ${loadedUrl}`);
+      return false;
     }
-    clearTimeout(timeout);
-    tab.linkedBrowser.removeEventListener(eventType, handle, true);
-    info("Tab event received: " + eventType);
-    deferred.resolve(event);
+
+    info("Tab event received: load");
+    return true;
   }
 
+  // Create two promises: one resolved from the content process when the page
+  // loads and one that is rejected if we take too long to load the url.
+  let loaded = BrowserTestUtils.browserLoaded(tab.linkedBrowser, false, handle);
+
   let timeout = setTimeout(() => {
-    tab.linkedBrowser.removeEventListener(eventType, handle, true);
-    deferred.reject(new Error("Timed out while waiting for a '" + eventType + "'' event"));
+    deferred.reject(new Error("Timed out while waiting for a 'load' event"));
   }, 30000);
 
-  tab.linkedBrowser.addEventListener(eventType, handle, true, true);
+  loaded.then(() => {
+    clearTimeout(timeout);
+    deferred.resolve()
+  });
+
   if (url)
-    tab.linkedBrowser.loadURI(url);
-  return deferred.promise;
+    BrowserTestUtils.loadURI(tab.linkedBrowser, url);
+
+  // Promise.all rejects if either promise rejects (i.e. if we time out) and
+  // if our loaded promise resolves before the timeout, then we resolve the
+  // timeout promise as well, causing the all promise to resolve.
+  return Promise.all([deferred.promise, loaded]);
 }
 
 /**
@@ -931,15 +936,6 @@ function assertMixedContentBlockingState(tabbrowser, states = {}) {
   return new Promise(resolve => executeSoon(resolve));
 }
 
-function makeActionURI(action, params) {
-  let encodedParams = {};
-  for (let key in params) {
-    encodedParams[key] = encodeURIComponent(params[key]);
-  }
-  let url = "moz-action:" + action + "," + JSON.stringify(encodedParams);
-  return NetUtil.newURI(url);
-}
-
 function is_hidden(element) {
   var style = element.ownerDocument.defaultView.getComputedStyle(element, "");
   if (style.display == "none")
@@ -1014,28 +1010,6 @@ function promiseNotificationShown(notification) {
   let panelPromise = promisePopupShown(win.PopupNotifications.panel);
   notification.reshow();
   return panelPromise;
-}
-
-function promiseSearchComplete(win = window) {
-  return promisePopupShown(win.gURLBar.popup).then(() => {
-    function searchIsComplete() {
-      return win.gURLBar.controller.searchStatus >=
-        Ci.nsIAutoCompleteController.STATUS_COMPLETE_NO_MATCH;
-    }
-
-    // Wait until there are at least two matches.
-    return new Promise(resolve => waitForCondition(searchIsComplete, resolve));
-  });
-}
-
-function promiseAutocompleteResultPopup(inputText, win = window) {
-  waitForFocus(() => {
-    win.gURLBar.focus();
-    win.gURLBar.value = inputText;
-    win.gURLBar.controller.startSearch(inputText);
-  }, win);
-
-  return promiseSearchComplete(win);
 }
 
 /**

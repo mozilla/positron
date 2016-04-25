@@ -1166,11 +1166,6 @@ toolbar[brighttext] .toolbarbutton-1 > .toolbarbutton-menubutton-dropmarker {
     .searchbar-textbox:not(:-moz-lwtheme)[focused] {
       box-shadow: 0 0 0 1px Highlight inset;
     }
-
-    /* overlap the urlbar's border and inset box-shadow */
-    #PopupAutoCompleteRichResult:not(:-moz-lwtheme) {
-      margin-top: -2px;
-    }
   }
 
   @media not all and (-moz-os-version: windows-xp) {
@@ -1578,11 +1573,13 @@ html|span.ac-emphasize-text-url {
   height: 16px;
 }
 
-.ac-type-icon[type=switchtab] {
+.ac-type-icon[type=switchtab],
+.ac-type-icon[type=remotetab] {
   list-style-image: url("chrome://browser/skin/urlbar-tab.svg#tab");
 }
 
-.ac-type-icon[type=switchtab][selected] {
+.ac-type-icon[type=switchtab][selected],
+.ac-type-icon[type=remotetab][selected] {
   list-style-image: url("chrome://browser/skin/urlbar-tab.svg#tab-inverted");
 }
 

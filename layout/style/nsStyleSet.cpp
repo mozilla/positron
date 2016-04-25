@@ -510,7 +510,7 @@ nsStyleSet::GatherRuleProcessors(SheetType aType)
         sheetsForScope.AppendElements(sheets.Elements() + start, end - start);
         nsCSSRuleProcessor* oldRP = oldScopedRuleProcessorHash.Get(scope);
         mScopedDocSheetRuleProcessors.AppendElement
-          (new nsCSSRuleProcessor(sheetsForScope, aType, scope, oldRP));
+          (new nsCSSRuleProcessor(Move(sheetsForScope), aType, scope, oldRP));
 
         start = end;
       } while (start < count);
@@ -1781,12 +1781,12 @@ nsStyleSet::ResolveStyleWithoutAnimation(dom::Element* aTarget,
 }
 
 already_AddRefed<nsStyleContext>
-nsStyleSet::ResolveStyleForNonElement(nsStyleContext* aParentContext)
+nsStyleSet::ResolveStyleForNonElement(nsStyleContext* aParentContext,
+                                      nsIAtom* aPseudoTag)
 {
-  return GetContext(aParentContext, mRuleTree, nullptr,
-                    nsCSSAnonBoxes::mozNonElement,
-                    CSSPseudoElementType::AnonBox, nullptr,
-                    eNoFlags);
+  MOZ_ASSERT(nsCSSAnonBoxes::IsNonElement(aPseudoTag));
+  return GetContext(aParentContext, mRuleTree, nullptr, aPseudoTag,
+                    CSSPseudoElementType::AnonBox, nullptr, eNoFlags);
 }
 
 void
@@ -2210,7 +2210,10 @@ nsStyleSet::GCRuleTrees()
     node->Destroy();
   }
 
-  MOZ_ASSERT(!mOldRootNode, "Should have GCed old root node");
+#ifdef DEBUG
+  NS_ASSERTION(!mOldRootNode, "Should have GCed old root node");
+  mOldRootNode = nullptr;
+#endif
   mUnusedRuleNodeCount = 0;
   mInGC = false;
 }

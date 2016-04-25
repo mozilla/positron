@@ -130,17 +130,10 @@ public class GeckoThread extends Thread {
         return false;
     }
 
-    public static boolean initWithProfile(String profileName, File profileDir) {
-        if (profileName == null) {
-            throw new IllegalArgumentException("Null profile name");
-        }
-
-        final GeckoProfile profile = getActiveProfile();
+    private static boolean canUseProfile(final GeckoProfile profile, final String profileName,
+                                         final File profileDir) {
         if (profile == null) {
-            // We haven't initialized yet; okay to initialize now.
-            final Context context = GeckoAppShell.getApplicationContext();
-            return init(GeckoProfile.get(context, profileName, profileDir),
-                        /* args */ null, /* action */ null, /* debugging */ false);
+            return true;
         }
 
         // We already initialized and have a profile; see if it matches ours.
@@ -151,6 +144,29 @@ public class GeckoThread extends Thread {
             Log.e(LOGTAG, "Cannot compare profile " + profileName);
             return false;
         }
+    }
+
+    public static boolean canUseProfile(final String profileName, final File profileDir) {
+        if (profileName == null) {
+            throw new IllegalArgumentException("Null profile name");
+        }
+        return canUseProfile(getActiveProfile(), profileName, profileDir);
+    }
+
+    public static boolean initWithProfile(final String profileName, final File profileDir) {
+        if (profileName == null) {
+            throw new IllegalArgumentException("Null profile name");
+        }
+
+        final GeckoProfile profile = getActiveProfile();
+        if (profile != null) {
+            return canUseProfile(profile, profileName, profileDir);
+        }
+
+        // We haven't initialized yet; okay to initialize now.
+        final Context context = GeckoAppShell.getApplicationContext();
+        return init(GeckoProfile.get(context, profileName, profileDir),
+                    /* args */ null, /* action */ null, /* debugging */ false);
     }
 
     public static boolean launch() {
@@ -377,7 +393,7 @@ public class GeckoThread extends Thread {
         } else {
             // Make sure a profile exists.
             final GeckoProfile profile = getProfile();
-            profile.forceCreate();
+            profile.getDir(); // call the lazy initializer
 
             // If args don't include the profile, make sure it's included.
             if (args == null || !args.matches(".*\\B-(P|profile)\\s+\\S+.*")) {
@@ -637,6 +653,18 @@ public class GeckoThread extends Thread {
         } else {
             queueNativeCallUntil(State.PROFILE_READY, GeckoThread.class,
                                  "nativeOnResume");
+        }
+    }
+
+    @WrapForJNI(stubName = "CreateServices")
+    private static native void nativeCreateServices(String category);
+
+    public static void createServices(final String category) {
+        if (isStateAtLeast(State.PROFILE_READY)) {
+            nativeCreateServices(category);
+        } else {
+            queueNativeCallUntil(State.PROFILE_READY, GeckoThread.class, "nativeCreateServices",
+                                 String.class, category);
         }
     }
 }

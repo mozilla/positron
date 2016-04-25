@@ -309,6 +309,12 @@ struct Zone : public JS::shadow::Zone,
     using WeakEdges = js::Vector<js::gc::TenuredCell**, 0, js::SystemAllocPolicy>;
     WeakEdges gcWeakRefs;
 
+    // List of non-ephemeron weak containers to sweep during beginSweepingZoneGroup.
+    mozilla::LinkedList<WeakCache<void*>> weakCaches_;
+    void registerWeakCache(WeakCache<void*>* cachep) {
+        weakCaches_.insertBack(cachep);
+    }
+
     /*
      * Mapping from not yet marked keys to a vector of all values that the key
      * maps to in any live weak map.
@@ -320,6 +326,15 @@ struct Zone : public JS::shadow::Zone,
     // This is used during GC while calculating zone groups to record edges that
     // can't be determined by examining this zone by itself.
     ZoneSet gcZoneGroupEdges;
+
+    // Keep track of all TypeDescr and related objects in this compartment.
+    // This is used by the GC to trace them all first when compacting, since the
+    // TypedObject trace hook may access these objects.
+    using TypeDescrObjectSet = js::GCHashSet<js::RelocatablePtrObject,
+                                             js::MovableCellHasher<js::RelocatablePtrObject>,
+                                             js::SystemAllocPolicy>;
+    JS::WeakCache<TypeDescrObjectSet> typeDescrObjects;
+
 
     // Malloc counter to measure memory pressure for GC scheduling. It runs from
     // gcMaxMallocBytes down to zero. This counter should be used only when it's

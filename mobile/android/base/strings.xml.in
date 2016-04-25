@@ -76,13 +76,6 @@
 
   <string name="url_bar_default_text">&url_bar_default_text2;</string>
 
-  <!-- https://input.mozilla.org/feedback/android/%VERSION%/%CHANNEL%/?utm_source=feedback-settings
-       This should be kept in sync with the "app.feedbackURL" pref defined in mobile.js -->
-  <string name="feedback_link">https://input.mozilla.org/feedback/android/&formatS1;/&formatS2;/?utm_source=feedback-settings</string>
-
-  <!-- https://support.mozilla.org/1/mobile/%VERSION%/%OS%/%LOCALE%/faq -->
-  <string name="faq_link">https://support.mozilla.org/1/mobile/&formatS1;/&formatS2;/&formatS3;/faq</string>
-
   <!-- https://support.mozilla.org/1/mobile/%VERSION%/%OS%/%LOCALE%/ -->
   <string name="help_link">https://support.mozilla.org/1/mobile/&formatS1;/&formatS2;/&formatS3;/</string>
   <string name="help_menu">&help_menu;</string>
@@ -98,6 +91,9 @@
   <string name="screenshot_added_to_bookmarks">&screenshot_added_to_bookmarks;</string>
   <string name="screenshot_folder_label_in_bookmarks">&screenshot_folder_label_in_bookmarks;</string>
   <string name="readinglist_smartfolder_label_in_bookmarks">&readinglist_smartfolder_label_in_bookmarks;</string>
+
+  <string name="reader_saved_offline">&reader_saved_offline;</string>
+  <string name="reader_switch_to_bookmarks">&reader_switch_to_bookmarks;</string>
 
   <string name="history_today_section">&history_today_section;</string>
   <string name="history_yesterday_section">&history_yesterday_section;</string>
@@ -136,14 +132,14 @@
   <string name="settings">&settings;</string>
   <string name="settings_title">&settings_title;</string>
   <string name="pref_category_general">&pref_category_general;</string>
-  <string name="pref_category_general_summary">&pref_category_general_summary2;</string>
+  <string name="pref_category_general_summary">&pref_category_general_summary3;</string>
 
   <string name="pref_category_search">&pref_category_search3;</string>
-  <string name="pref_category_search_summary">&pref_category_search_summary;</string>
+  <string name="pref_category_search_summary">&pref_category_search_summary2;</string>
   <string name="pref_category_accessibility">&pref_category_accessibility;</string>
   <string name="pref_category_accessibility_summary">&pref_category_accessibility_summary2;</string>
   <string name="pref_category_privacy_short">&pref_category_privacy_short;</string>
-  <string name="pref_category_privacy_summary">&pref_category_privacy_summary3;</string>
+  <string name="pref_category_privacy_summary">&pref_category_privacy_summary4;</string>
   <string name="pref_category_vendor">&pref_category_vendor2;</string>
   <string name="pref_category_vendor_summary">&pref_category_vendor_summary2;</string>
   <string name="pref_category_datareporting">&pref_category_datareporting;</string>
@@ -161,7 +157,7 @@
   <string name="locale_system_default">&locale_system_default;</string>
 
   <string name="pref_category_advanced">&pref_category_advanced;</string>
-  <string name="pref_category_advanced_summary">&pref_category_advanced_summary2;</string>
+  <string name="pref_category_advanced_summary">&pref_category_advanced_summary3;</string>
   <string name="pref_developer_remotedebugging_usb">&pref_developer_remotedebugging_usb;</string>
   <string name="pref_developer_remotedebugging_wifi">&pref_developer_remotedebugging_wifi;</string>
   <string name="pref_developer_remotedebugging_wifi_disabled_summary">&pref_developer_remotedebugging_wifi_disabled_summary;</string>
@@ -203,13 +199,17 @@
   <string name="pref_cookies_not_accept_foreign">&pref_cookies_not_accept_foreign;</string>
   <string name="pref_cookies_disabled">&pref_cookies_disabled;</string>
 
+  <string name="pref_category_data_saver">&pref_category_data_saver;</string>
+  <string name="pref_category_media">&pref_category_media;</string>
+  <string name="pref_category_developer_tools">&pref_category_developer_tools;</string>
+
   <string name="pref_tap_to_load_images_title2">&pref_tap_to_load_images_title2;</string>
   <string name="pref_tap_to_load_images_enabled">&pref_tap_to_load_images_enabled;</string>
   <string name="pref_tap_to_load_images_data">&pref_tap_to_load_images_data;</string>
   <string name="pref_tap_to_load_images_disabled2">&pref_tap_to_load_images_disabled2;</string>
 
   <string name="pref_show_web_fonts">&pref_show_web_fonts;</string>
-  <string name="pref_show_web_fonts_summary">&pref_show_web_fonts_summary;</string>
+  <string name="pref_show_web_fonts_summary">&pref_show_web_fonts_summary2;</string>
 
   <string name="pref_tracking_protection_title">&pref_tracking_protection_title2;</string>
   <string name="pref_tracking_protection_summary">&pref_tracking_protection_summary3;</string>
@@ -302,9 +302,18 @@
   <string name="content_notification_action_settings">&content_notification_action_settings;</string>
   <string name="content_notification_updated_on">&content_notification_updated_on;</string>
 
+  <string name="pref_default_browser">&pref_default_browser;</string>
+
   <string name="pref_about_firefox">&pref_about_firefox;</string>
+
   <string name="pref_vendor_faqs">&pref_vendor_faqs;</string>
+  <!-- https://support.mozilla.org/1/mobile/%VERSION%/%OS%/%LOCALE%/faq -->
+  <string name="faq_link">https://support.mozilla.org/1/mobile/&formatS1;/&formatS2;/&formatS3;/faq</string>
+
   <string name="pref_vendor_feedback">&pref_vendor_feedback;</string>
+  <!-- https://input.mozilla.org/feedback/android/%VERSION%/%CHANNEL%/?utm_source=feedback-settings
+       This should be kept in sync with the "app.feedbackURL" pref defined in mobile.js -->
+  <string name="feedback_link">https://input.mozilla.org/feedback/android/&formatS1;/&formatS2;/?utm_source=feedback-settings</string>
 
   <string name="pref_dialog_set_default">&pref_dialog_set_default;</string>
   <string name="pref_default">&pref_dialog_default;</string>
@@ -439,18 +448,9 @@
   <string name="home_last_tabs_empty">&home_last_tabs_empty;</string>
   <string name="home_open_all">&home_open_all;</string>
   <string name="home_most_recent_empty">&home_most_recent_empty;</string>
-  <string name="home_selected_empty">&home_selected_empty;</string>
   <string name="home_most_recent_emptyhint">&home_most_recent_emptyhint2;</string>
   <string name="home_default_empty">&home_default_empty;</string>
   <string name="home_move_back_to_filter">&home_move_back_to_filter;</string>
-  <string name="home_remote_tabs_title">&home_remote_tabs_title;</string>
-  <string name="home_remote_tabs_empty">&home_remote_tabs_empty;</string>
-  <string name="home_remote_tabs_unable_to_connect">&home_remote_tabs_unable_to_connect;</string>
-  <string name="home_remote_tabs_need_to_sign_in">&home_remote_tabs_need_to_sign_in;</string>
-  <string name="home_remote_tabs_need_to_finish_migrating">&home_remote_tabs_need_to_finish_migrating;</string>
-  <string name="home_remote_tabs_trouble_verifying">&home_remote_tabs_trouble_verifying;</string>
-  <string name="home_remote_tabs_need_to_verify">&home_remote_tabs_need_to_verify;</string>
-  <string name="home_remote_tabs_one_hidden_device">&home_remote_tabs_one_hidden_device;</string>
   <string name="home_remote_tabs_many_hidden_devices">&home_remote_tabs_many_hidden_devices;</string>
   <string name="home_remote_tabs_hidden_devices_title">&home_remote_tabs_hidden_devices_title;</string>
   <string name="home_remote_tabs_unhide_selected_devices">&home_remote_tabs_unhide_selected_devices;</string>
@@ -606,4 +606,9 @@
   <string name="whatsnew_notification_url">https://support.mozilla.org/1/mobile/&formatS1;/&formatS2;/&formatS3;/new-android</string>
 
   <string name="promotion_add_to_homescreen">&promotion_add_to_homescreen;</string>
+
+  <string name="helper_first_offline_bookmark_title">&helper_first_offline_bookmark_title;</string>
+  <string name="helper_first_offline_bookmark_message">&helper_first_offline_bookmark_message;</string>
+  <string name="helper_first_offline_bookmark_button">&helper_first_offline_bookmark_button;</string>
+
 </resources>

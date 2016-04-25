@@ -10,7 +10,7 @@
 loader.lazyImporter(this, "AddonManager",
   "resource://gre/modules/AddonManager.jsm");
 
-const { Cc, Ci } = require("chrome");
+const { Cc, Ci, Cu } = require("chrome");
 const { createFactory, createClass, DOM: dom } =
   require("devtools/client/shared/vendor/react");
 const Services = require("Services");
@@ -30,6 +30,36 @@ module.exports = createClass({
     return {
       installError: null,
     };
+  },
+
+  onEnableAddonDebuggingChange(event) {
+    let enabled = event.target.checked;
+    Services.prefs.setBoolPref("devtools.chrome.enabled", enabled);
+    Services.prefs.setBoolPref("devtools.debugger.remote-enabled", enabled);
+  },
+
+  loadAddonFromFile() {
+    this.setState({ installError: null });
+    let fp = Cc["@mozilla.org/filepicker;1"].createInstance(Ci.nsIFilePicker);
+    fp.init(window,
+      Strings.GetStringFromName("selectAddonFromFile2"),
+      Ci.nsIFilePicker.modeOpen);
+    let res = fp.show();
+    if (res == Ci.nsIFilePicker.returnCancel || !fp.file) {
+      return;
+    }
+    let file = fp.file;
+    // AddonManager.installTemporaryAddon accepts either
+    // addon directory or final xpi file.
+    if (!file.isDirectory() && !file.leafName.endsWith(".xpi")) {
+      file = file.parent;
+    }
+
+    AddonManager.installTemporaryAddon(file)
+      .catch(e => {
+        Cu.reportError(e);
+        this.setState({ installError: e.message });
+      });
   },
 
   render() {
@@ -60,34 +90,5 @@ module.exports = createClass({
         }, Strings.GetStringFromName("loadTemporaryAddon"))
       ),
       AddonsInstallError({ error: this.state.installError }));
-  },
-
-  onEnableAddonDebuggingChange(event) {
-    let enabled = event.target.checked;
-    Services.prefs.setBoolPref("devtools.chrome.enabled", enabled);
-    Services.prefs.setBoolPref("devtools.debugger.remote-enabled", enabled);
-  },
-
-  loadAddonFromFile() {
-    this.setState({ installError: null });
-    let fp = Cc["@mozilla.org/filepicker;1"].createInstance(Ci.nsIFilePicker);
-    fp.init(window,
-      Strings.GetStringFromName("selectAddonFromFile2"),
-      Ci.nsIFilePicker.modeOpen);
-    let res = fp.show();
-    if (res == Ci.nsIFilePicker.returnCancel || !fp.file) {
-      return;
-    }
-    let file = fp.file;
-    // AddonManager.installTemporaryAddon accepts either
-    // addon directory or final xpi file.
-    if (!file.isDirectory() && !file.leafName.endsWith(".xpi")) {
-      file = file.parent;
-    }
-
-    AddonManager.installTemporaryAddon(file)
-      .catch(e => {
-        this.setState({ installError: e.message });
-      });
-  },
+  }
 });

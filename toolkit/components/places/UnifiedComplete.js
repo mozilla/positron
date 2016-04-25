@@ -1256,7 +1256,7 @@ Search.prototype = {
         // the URLBar.
         value: makeActionURL("remotetab", { url, deviceName }),
         comment: title || url,
-        style: "action",
+        style: "action remotetab",
         // we want frecency > FRECENCY_DEFAULT so it doesn't get pushed out
         // by "remote" matches.
         frecency: FRECENCY_DEFAULT + 1,
@@ -1427,7 +1427,7 @@ Search.prototype = {
       match.style += " heuristic";
     }
 
-    match.icon = match.icon || PlacesUtils.favicons.defaultFavicon.spec;
+    match.icon = match.icon || "";
     match.finalCompleteValue = match.finalCompleteValue || "";
 
     this._result.insertMatchAt(this._getInsertIndexForMatch(match),
