@@ -2219,6 +2219,20 @@ public:
 
     static auto CheckAndSetState(mozilla::jni::Object::Param, mozilla::jni::Object::Param) -> bool;
 
+    struct CreateServices_t {
+        typedef GeckoThread Owner;
+        typedef void ReturnType;
+        typedef void SetterType;
+        typedef mozilla::jni::Args<
+                mozilla::jni::String::Param> Args;
+        static constexpr char name[] = "nativeCreateServices";
+        static constexpr char signature[] =
+                "(Ljava/lang/String;)V";
+        static const bool isStatic = true;
+        static const mozilla::jni::ExceptionMode exceptionMode =
+                mozilla::jni::ExceptionMode::ABORT;
+    };
+
     struct OnPause_t {
         typedef GeckoThread Owner;
         typedef void ReturnType;
@@ -4104,6 +4118,45 @@ public:
     auto Y(float) const -> void;
 
     static const bool isMultithreaded = true;
+
+};
+
+class AudioFocusAgent : public mozilla::jni::ObjectBase<AudioFocusAgent, jobject>
+{
+public:
+    explicit AudioFocusAgent(const Context& ctx) : ObjectBase<AudioFocusAgent, jobject>(ctx) {}
+
+    struct NotifyStartedPlaying_t {
+        typedef AudioFocusAgent Owner;
+        typedef void ReturnType;
+        typedef void SetterType;
+        typedef mozilla::jni::Args<> Args;
+        static constexpr char name[] = "notifyStartedPlaying";
+        static constexpr char signature[] =
+                "()V";
+        static const bool isStatic = true;
+        static const mozilla::jni::ExceptionMode exceptionMode =
+                mozilla::jni::ExceptionMode::ABORT;
+    };
+
+    static auto NotifyStartedPlaying() -> void;
+
+    struct NotifyStoppedPlaying_t {
+        typedef AudioFocusAgent Owner;
+        typedef void ReturnType;
+        typedef void SetterType;
+        typedef mozilla::jni::Args<> Args;
+        static constexpr char name[] = "notifyStoppedPlaying";
+        static constexpr char signature[] =
+                "()V";
+        static const bool isStatic = true;
+        static const mozilla::jni::ExceptionMode exceptionMode =
+                mozilla::jni::ExceptionMode::ABORT;
+    };
+
+    static auto NotifyStoppedPlaying() -> void;
+
+    static const bool isMultithreaded = false;
 
 };
 

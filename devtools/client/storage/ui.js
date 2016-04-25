@@ -194,15 +194,12 @@ StorageUI.prototype = {
     return this.storageTypes[type];
   },
 
-  makeFieldsEditable: function() {
+  makeFieldsEditable: function* () {
     let actor = this.getCurrentActor();
 
     if (typeof actor.getEditableFields !== "undefined") {
-      actor.getEditableFields().then(fields => {
-        this.table.makeFieldsEditable(fields);
-      }).catch(() => {
-        // Do nothing
-      });
+      let fields = yield actor.getEditableFields();
+      this.table.makeFieldsEditable(fields);
     } else if (this.table._editableFieldsEngine) {
       this.table._editableFieldsEngine.destroy();
     }
@@ -404,7 +401,7 @@ StorageUI.prototype = {
    * @param {Constant} reason
    *        See REASON constant at top of file.
    */
-  fetchStorageObjects: function(type, host, names, reason) {
+  fetchStorageObjects: Task.async(function* (type, host, names, reason) {
     let fetchOpts = reason === REASON.NEXT_50_ITEMS ? {offset: this.itemOffset}
                                                     : {};
     let storageType = this.storageTypes[type];
@@ -416,21 +413,19 @@ StorageUI.prototype = {
       throw new Error("Invalid reason specified");
     }
 
-    storageType.getStoreObjects(host, names, fetchOpts).then(({data}) => {
-      if (!data.length) {
-        this.emit("store-objects-updated");
-        return;
+    try {
+      let {data} = yield storageType.getStoreObjects(host, names, fetchOpts);
+      if (data.length) {
+        if (reason === REASON.POPULATE) {
+          yield this.resetColumns(data[0], type, host);
+        }
+        this.populateTable(data, reason);
       }
-      if (reason === REASON.POPULATE) {
-        this.resetColumns(data[0], type);
-        this.table.host = host;
-      }
-      this.populateTable(data, reason);
       this.emit("store-objects-updated");
-
-      this.makeFieldsEditable();
-    }, Cu.reportError);
-  },
+    } catch (ex) {
+      Cu.reportError(ex);
+    }
+  }),
 
   /**
    * Populates the storage tree which displays the list of storages present for
@@ -483,61 +478,61 @@ StorageUI.prototype = {
    * Populates the selected entry from teh table in the sidebar for a more
    * detailed view.
    */
-  displayObjectSidebar: function() {
+  displayObjectSidebar: Task.async(function* () {
     let item = this.table.selectedRow;
     if (!item) {
       // Make sure that sidebar is hidden and return
       this.sidebar.hidden = true;
       return;
     }
+
+    // Get the string value (async action) and the update the UI synchronously.
+    let value;
+    if (item.name && item.valueActor) {
+      value = yield item.valueActor.string();
+    }
+
+    // Start updating the UI. Everything is sync beyond this point.
     this.sidebar.hidden = false;
     this.view.empty();
     let mainScope = this.view.addScope(L10N.getStr("storage.data.label"));
     mainScope.expanded = true;
 
-    if (item.name && item.valueActor) {
+    if (value) {
       let itemVar = mainScope.addItem(item.name + "", {}, {relaxed: true});
 
-      item.valueActor.string().then(value => {
-        // The main area where the value will be displayed
-        itemVar.setGrip(value);
+      // The main area where the value will be displayed
+      itemVar.setGrip(value);
 
-        // May be the item value is a json or a key value pair itself
-        this.parseItemValue(item.name, value);
+      // May be the item value is a json or a key value pair itself
+      this.parseItemValue(item.name, value);
 
-        // By default the item name and value are shown. If this is the only
-        // information available, then nothing else is to be displayed.
-        let itemProps = Object.keys(item);
-        if (itemProps.length == 3) {
-          this.emit("sidebar-updated");
-          return;
-        }
-
+      // By default the item name and value are shown. If this is the only
+      // information available, then nothing else is to be displayed.
+      let itemProps = Object.keys(item);
+      if (itemProps.length > 3) {
         // Display any other information other than the item name and value
         // which may be available.
         let rawObject = Object.create(null);
-        let otherProps =
-          itemProps.filter(e => e != "name" &&
-                                e != "value" &&
-                                e != "valueActor");
+        let otherProps = itemProps.filter(
+          e => !["name", "value", "valueActor"].includes(e));
         for (let prop of otherProps) {
           rawObject[prop] = item[prop];
         }
         itemVar.populate(rawObject, {sorted: true});
         itemVar.twisty = true;
         itemVar.expanded = true;
-        this.emit("sidebar-updated");
-      });
-      return;
+      }
+    } else {
+      // Case when displaying IndexedDB db/object store properties.
+      for (let key in item) {
+        mainScope.addItem(key, {}, true).setGrip(item[key]);
+        this.parseItemValue(key, item[key]);
+      }
     }
 
-    // Case when displaying IndexedDB db/object store properties.
-    for (let key in item) {
-      mainScope.addItem(key, {}, true).setGrip(item[key]);
-      this.parseItemValue(key, item[key]);
-    }
     this.emit("sidebar-updated");
-  },
+  }),
 
   /**
    * Tries to parse a string value into either a json or a key-value separated
@@ -612,8 +607,10 @@ StorageUI.prototype = {
           continue;
         }
         let p = separators[j];
-        let regex = new RegExp("^([^" + kv + p + "]*" + kv + "+[^" + kv + p +
-                               "]*" + p + "*)+$", "g");
+        let word = `[^${kv}${p}]*`;
+        let keyValue = `${word}${kv}${word}`;
+        let keyValueList = `${keyValue}(${p}${keyValue})*`;
+        let regex = new RegExp(`^${keyValueList}$`);
         if (value.match && value.match(regex) && value.includes(kv) &&
             (value.includes(p) || value.split(kv).length == 2)) {
           return makeObject(kv, p);
@@ -622,7 +619,9 @@ StorageUI.prototype = {
     }
     // Testing for array
     for (let p of separators) {
-      let regex = new RegExp("^[^" + p + "]+(" + p + "+[^" + p + "]*)+$", "g");
+      let word = `[^${p}]*`;
+      let wordList = `(${word}${p})+${word}`;
+      let regex = new RegExp(`^${wordList}$`);
       if (value.match && value.match(regex)) {
         return value.split(p.replace(/\\*/g, ""));
       }
@@ -666,8 +665,10 @@ StorageUI.prototype = {
    * @param {string} type
    *        The type of storage corresponding to the after-reset columns in the
    *        table.
+   * @param {string} host
+   *        The host name corresponding to the table after reset.
    */
-  resetColumns: function(data, type) {
+  resetColumns: function* (data, type, host) {
     let columns = {};
     let uniqueKey = null;
     for (let key in data) {
@@ -684,7 +685,10 @@ StorageUI.prototype = {
     }
     this.table.setColumns(columns, null, HIDDEN_COLUMNS);
     this.table.datatype = type;
+    this.table.host = host;
     this.hideSidebar();
+
+    yield this.makeFieldsEditable();
   },
 
   /**

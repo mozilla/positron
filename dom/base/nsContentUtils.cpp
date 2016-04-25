@@ -5285,7 +5285,7 @@ nsContentUtils::SetDataTransferInEvent(WidgetDragEvent* aDragEvent)
     // from another application. In either case, a new dataTransfer should
     // be created that reflects the data.
     initialDataTransfer =
-      new DataTransfer(aDragEvent->target, aDragEvent->mMessage, true, -1);
+      new DataTransfer(aDragEvent->mTarget, aDragEvent->mMessage, true, -1);
 
     // now set it in the drag session so we don't need to create it again
     dragSession->SetDataTransfer(initialDataTransfer);
@@ -5298,7 +5298,7 @@ nsContentUtils::SetDataTransferInEvent(WidgetDragEvent* aDragEvent)
   }
 
   // each event should use a clone of the original dataTransfer.
-  initialDataTransfer->Clone(aDragEvent->target, aDragEvent->mMessage,
+  initialDataTransfer->Clone(aDragEvent->mTarget, aDragEvent->mMessage,
                              aDragEvent->mUserCancelled,
                              isCrossDomainSubFrameDrop,
                              getter_AddRefs(aDragEvent->mDataTransfer));
@@ -5369,7 +5369,7 @@ bool
 nsContentUtils::CheckForSubFrameDrop(nsIDragSession* aDragSession,
                                      WidgetDragEvent* aDropEvent)
 {
-  nsCOMPtr<nsIContent> target = do_QueryInterface(aDropEvent->originalTarget);
+  nsCOMPtr<nsIContent> target = do_QueryInterface(aDropEvent->mOriginalTarget);
   if (!target) {
     return true;
   }
@@ -5840,23 +5840,6 @@ nsContentUtils::GetUTFOrigin(nsIURI* aURI, nsAString& aOrigin)
   }
   
   return NS_OK;
-}
-
-/* static */
-nsIDocument*
-nsContentUtils::GetDocumentFromScriptContext(nsIScriptContext *aScriptContext)
-{
-  if (!aScriptContext) {
-    return nullptr;
-  }
-
-  nsCOMPtr<nsPIDOMWindowOuter> window =
-    do_QueryInterface(aScriptContext->GetGlobalObject());
-  if (!window) {
-    return nullptr;
-  }
-
-  return window->GetDoc();
 }
 
 /* static */
@@ -7363,14 +7346,14 @@ nsContentUtils::TransferableToIPCTransferable(nsITransferable* aTransferable,
           nsAutoString dataAsString;
           text->GetData(dataAsString);
           IPCDataTransferItem* item = aIPCDataTransfer->items().AppendElement();
-          item->flavor() = nsCString(flavorStr);
-          item->data() = nsString(dataAsString);
+          item->flavor() = flavorStr;
+          item->data() = dataAsString;
         } else if (ctext) {
           nsAutoCString dataAsString;
           ctext->GetData(dataAsString);
           IPCDataTransferItem* item = aIPCDataTransfer->items().AppendElement();
-          item->flavor() = nsCString(flavorStr);
-          item->data() = nsCString(dataAsString);
+          item->flavor() = flavorStr;
+          item->data() = dataAsString;
         } else {
           nsCOMPtr<nsISupportsInterfacePointer> sip =
             do_QueryInterface(data);
@@ -7382,7 +7365,7 @@ nsContentUtils::TransferableToIPCTransferable(nsITransferable* aTransferable,
           nsCOMPtr<nsIInputStream> stream(do_QueryInterface(data));
           if (stream) {
             IPCDataTransferItem* item = aIPCDataTransfer->items().AppendElement();
-            item->flavor() = nsCString(flavorStr);
+            item->flavor() = flavorStr;
 
             nsCString imageData;
             NS_ConsumeStream(stream, UINT32_MAX, imageData);
@@ -7405,8 +7388,10 @@ nsContentUtils::TransferableToIPCTransferable(nsITransferable* aTransferable,
                 nsContentUtils::GetSurfaceData(dataSurface, &length, &stride);
 
               IPCDataTransferItem* item = aIPCDataTransfer->items().AppendElement();
-              item->flavor() = nsCString(flavorStr);
-              item->data() = nsCString(surfaceData.get(), length);
+              item->flavor() = flavorStr;
+              // Turn item->data() into an nsCString prior to accessing it.
+              item->data() = EmptyCString();
+              item->data().get_nsCString().Adopt(surfaceData.release(), length);
 
               IPCDataTransferImage& imageDetails = item->imageDetails();
               mozilla::gfx::IntSize size = dataSurface->GetSize();
@@ -7479,7 +7464,7 @@ nsContentUtils::TransferableToIPCTransferable(nsITransferable* aTransferable,
             }
 
             IPCDataTransferItem* item = aIPCDataTransfer->items().AppendElement();
-            item->flavor() = nsCString(flavorStr);
+            item->flavor() = flavorStr;
             item->data() = data;
           } else {
             // This is a hack to support kFilePromiseMime.
@@ -7488,12 +7473,12 @@ nsContentUtils::TransferableToIPCTransferable(nsITransferable* aTransferable,
             // nsContentAreaDragDropDataProvider as nsIFlavorDataProvider.
             if (flavorStr.EqualsLiteral(kFilePromiseMime)) {
               IPCDataTransferItem* item = aIPCDataTransfer->items().AppendElement();
-              item->flavor() = nsCString(flavorStr);
+              item->flavor() = flavorStr;
               item->data() = NS_ConvertUTF8toUTF16(flavorStr);
             } else if (!data) {
               // Empty element, transfer only the flavor
               IPCDataTransferItem* item = aIPCDataTransfer->items().AppendElement();
-              item->flavor() = nsCString(flavorStr);
+              item->flavor() = flavorStr;
               item->data() = EmptyCString();
               continue;
             }
@@ -7594,6 +7579,8 @@ int16_t
 nsContentUtils::GetButtonsFlagForButton(int32_t aButton)
 {
   switch (aButton) {
+    case -1:
+      return WidgetMouseEvent::eNoButtonFlag;
     case WidgetMouseEvent::eLeftButton:
       return WidgetMouseEvent::eLeftButtonFlag;
     case WidgetMouseEvent::eMiddleButton:
@@ -7726,7 +7713,7 @@ nsContentUtils::SendKeyEvent(nsIWidget* aWidget,
       break;
   }
 
-  event.refPoint.x = event.refPoint.y = 0;
+  event.mRefPoint = LayoutDeviceIntPoint(0, 0);
   event.mTime = PR_IntervalNow();
   if (!(aAdditionalFlags & nsIDOMWindowUtils::KEY_FLAG_NOT_SYNTHESIZED_FOR_TESTS)) {
     event.mFlags.mIsSynthesizedForTests = true;
@@ -7798,7 +7785,6 @@ nsContentUtils::SendMouseEvent(nsCOMPtr<nsIPresShell> aPresShell,
   event.mModifiers = GetWidgetModifiers(aModifiers);
   event.button = aButton;
   event.buttons = GetButtonsFlagForButton(aButton);
-  event.widget = widget;
   event.pressure = aPressure;
   event.inputSource = aInputSourceArg;
   event.clickCount = aClickCount;
@@ -7809,7 +7795,7 @@ nsContentUtils::SendMouseEvent(nsCOMPtr<nsIPresShell> aPresShell,
   if (!presContext)
     return NS_ERROR_FAILURE;
 
-  event.refPoint = ToWidgetPoint(CSSPoint(aX, aY), offset, presContext);
+  event.mRefPoint = ToWidgetPoint(CSSPoint(aX, aY), offset, presContext);
   event.ignoreRootScrollFrame = aIgnoreRootScrollFrame;
 
   nsEventStatus status = nsEventStatus_eIgnore;

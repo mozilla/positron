@@ -2508,10 +2508,10 @@ DisassWithSrc(JSContext* cx, unsigned argc, Value* vp)
         return false;
     }
 
-#define LINE_BUF_LEN 512
+    const size_t lineBufLen = 512;
     unsigned len, line1, line2, bupline;
     FILE* file;
-    char linebuf[LINE_BUF_LEN];
+    char linebuf[lineBufLen];
     static const char sep[] = ";-------------------------";
 
     bool ok = true;
@@ -2547,7 +2547,7 @@ DisassWithSrc(JSContext* cx, unsigned argc, Value* vp)
         /* burn the leading lines */
         line2 = PCToLineNumber(script, pc);
         for (line1 = 0; line1 < line2 - 1; line1++) {
-            char* tmp = fgets(linebuf, LINE_BUF_LEN, file);
+            char* tmp = fgets(linebuf, lineBufLen, file);
             if (!tmp) {
                 JS_ReportError(cx, "failed to read %s fully", script->filename());
                 ok = false;
@@ -2562,14 +2562,20 @@ DisassWithSrc(JSContext* cx, unsigned argc, Value* vp)
             if (line2 < line1) {
                 if (bupline != line2) {
                     bupline = line2;
-                    Sprint(&sprinter, "%s %3u: BACKUP\n", sep, line2);
+                    if (Sprint(&sprinter, "%s %3u: BACKUP\n", sep, line2) == -1) {
+                        ok = false;
+                        goto bail;
+                    }
                 }
             } else {
                 if (bupline && line1 == line2)
-                    Sprint(&sprinter, "%s %3u: RESTORE\n", sep, line2);
+                    if (Sprint(&sprinter, "%s %3u: RESTORE\n", sep, line2) == -1) {
+                        ok = false;
+                        goto bail;
+                    }
                 bupline = 0;
                 while (line1 < line2) {
-                    if (!fgets(linebuf, LINE_BUF_LEN, file)) {
+                    if (!fgets(linebuf, lineBufLen, file)) {
                         JS_ReportErrorNumber(cx, my_GetErrorMessage, nullptr,
                                              JSSMSG_UNEXPECTED_EOF,
                                              script->filename());
@@ -2577,7 +2583,10 @@ DisassWithSrc(JSContext* cx, unsigned argc, Value* vp)
                         goto bail;
                     }
                     line1++;
-                    Sprint(&sprinter, "%s %3u: %s", sep, line1, linebuf);
+                    if (Sprint(&sprinter, "%s %3u: %s", sep, line1, linebuf) == -1) {
+                        ok = false;
+                        goto bail;
+                    }
                 }
             }
 
@@ -2596,7 +2605,6 @@ DisassWithSrc(JSContext* cx, unsigned argc, Value* vp)
     }
     args.rval().setUndefined();
     return ok;
-#undef LINE_BUF_LEN
 }
 
 #endif /* DEBUG */
@@ -3364,9 +3372,13 @@ InvokeInterruptCallbackWrapper(JSContext* cx, unsigned argc, Value* vp)
         return false;
 
     JS::AutoSaveExceptionState savedExc(cx);
-    Value argv[1] = { BooleanValue(interruptRv) };
+
+    FixedInvokeArgs<1> iargs(cx);
+
+    iargs[0].setBoolean(interruptRv);
+
     RootedValue rv(cx);
-    if (!Invoke(cx, UndefinedValue(), args[0], 1, argv, &rv))
+    if (!js::Call(cx, args[0], UndefinedHandleValue, iargs, &rv))
         return false;
 
     args.rval().setUndefined();
@@ -4970,7 +4982,13 @@ class ShellAutoEntryMonitor : JS::dbg::AutoEntryMonitor {
         RootedString displayId(cx, JS_GetFunctionDisplayId(function));
         if (displayId) {
             UniqueChars displayIdStr(JS_EncodeStringToUTF8(cx, displayId));
-            oom = !displayIdStr || !log.append(mozilla::Move(displayIdStr));
+            if (!displayIdStr) {
+                // We report OOM in buildResult.
+                cx->recoverFromOutOfMemory();
+                oom = true;
+                return;
+            }
+            oom = !log.append(mozilla::Move(displayIdStr));
             return;
         }
 
@@ -6993,6 +7011,8 @@ SetRuntimeOptions(JSRuntime* rt, const OptionParser& op)
             jsCacheDir = JS_smprintf("%s/%u", jsCacheDir, (unsigned)getpid());
         else
             jsCacheDir = JS_strdup(rt, jsCacheDir);
+        if (!jsCacheDir)
+            return false;
         jsCacheAsmJSPath = JS_smprintf("%s/asmjs.cache", jsCacheDir);
     }
 

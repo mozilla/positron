@@ -94,7 +94,9 @@ template <>
 bool
 ParseContext<FullParseHandler>::checkLocalsOverflow(TokenStream& ts)
 {
-    if (vars_.length() + bodyLevelLexicals_.length() >= LOCALNO_LIMIT) {
+    if (vars_.length() + bodyLevelLexicals_.length() >= LOCALNO_LIMIT ||
+        bodyLevelLexicals_.length() >= Bindings::BODY_LEVEL_LEXICAL_LIMIT)
+    {
         ts.reportError(JSMSG_TOO_MANY_LOCALS);
         return false;
     }
@@ -2749,7 +2751,10 @@ Parser<ParseHandler>::templateLiteral(YieldHandling yieldHandling)
     Node pn = noSubstitutionTemplate();
     if (!pn)
         return null();
+
     Node nodeList = handler.newList(PNK_TEMPLATE_STRING_LIST, pn);
+    if (!nodeList)
+        return null();
 
     TokenKind tt;
     do {
@@ -4017,7 +4022,7 @@ HasOuterLexicalBinding(ParseContext<ParseHandler>* pc, StmtInfoPC* stmt, HandleA
     while (stmt->enclosingScope) {
         stmt = LexicalLookup(pc, atom, stmt->enclosingScope);
         if (!stmt)
-            return false;
+            break;
         if (stmt->type == StmtType::BLOCK)
             return true;
     }

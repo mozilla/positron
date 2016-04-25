@@ -10,6 +10,7 @@ import org.mozilla.gecko.gfx.ImmutableViewportMetrics;
 import org.mozilla.gecko.gfx.Layer;
 import org.mozilla.gecko.gfx.LayerView;
 import org.mozilla.gecko.gfx.LayerView.DrawListener;
+import org.mozilla.gecko.menu.GeckoMenu;
 import org.mozilla.gecko.menu.GeckoMenuItem;
 import org.mozilla.gecko.text.TextSelection;
 import org.mozilla.gecko.util.FloatUtils;
@@ -17,6 +18,8 @@ import org.mozilla.gecko.util.GeckoEventListener;
 import org.mozilla.gecko.util.ThreadUtils;
 import org.mozilla.gecko.ActionModeCompat.Callback;
 import org.mozilla.gecko.AppConstants.Versions;
+import org.mozilla.gecko.Telemetry;
+import org.mozilla.gecko.TelemetryContract;
 
 import android.content.Context;
 import android.graphics.drawable.Drawable;
@@ -152,7 +155,7 @@ class ActionBarTextSelection extends Layer implements TextSelection, GeckoEventL
                     if (event.equals("TextSelection:ShowHandles")) {
                         selectionID = message.getString("selectionID");
                         final JSONArray handles = message.getJSONArray("handles");
-                        for (int i=0; i < handles.length(); i++) {
+                        for (int i = 0; i < handles.length(); i++) {
                             String handle = handles.getString(i);
                             getHandle(handle).setVisibility(View.VISIBLE);
                         }
@@ -193,7 +196,7 @@ class ActionBarTextSelection extends Layer implements TextSelection, GeckoEventL
 
                     } else if (event.equals("TextSelection:PositionHandles")) {
                         final JSONArray positions = message.getJSONArray("positions");
-                        for (int i=0; i < positions.length(); i++) {
+                        for (int i = 0; i < positions.length(); i++) {
                             JSONObject position = positions.getJSONObject(i);
                             final int left = position.getInt("left");
                             final int top = position.getInt("top");
@@ -207,6 +210,9 @@ class ActionBarTextSelection extends Layer implements TextSelection, GeckoEventL
                     } else if (event.equals("TextSelection:ActionbarInit")) {
                         // Init / Open the action bar. Note the current selectionID,
                         // cancel any pending actionBar close.
+                        Telemetry.sendUIEvent(TelemetryContract.Event.SHOW,
+                            TelemetryContract.Method.CONTENT, "text_selection");
+
                         selectionID = message.getString("selectionID");
                         mCurrentItems = null;
                         if (mActionModeTimerTask != null) {
@@ -249,6 +255,7 @@ class ActionBarTextSelection extends Layer implements TextSelection, GeckoEventL
             final ActionModeCompat.Presenter presenter = (ActionModeCompat.Presenter) context;
             mCallback = new TextSelectionActionModeCallback(items);
             presenter.startActionModeCompat(mCallback);
+            mCallback.animateIn();
         }
     }
 
@@ -321,8 +328,14 @@ class ActionBarTextSelection extends Layer implements TextSelection, GeckoEventL
             }
         }
 
+        public void animateIn() {
+            if (mActionMode != null) {
+                mActionMode.animateIn();
+            }
+        }
+
         @Override
-        public boolean onPrepareActionMode(final ActionModeCompat mode, final Menu menu) {
+        public boolean onPrepareActionMode(final ActionModeCompat mode, final GeckoMenu menu) {
             // Android would normally expect us to only update the state of menu items here
             // To make the js-java interaction a bit simpler, we just wipe out the menu here and recreate all
             // the javascript menu items in onPrepare instead. This will be called any time invalidate() is called on the
@@ -346,7 +359,7 @@ class ActionBarTextSelection extends Layer implements TextSelection, GeckoEventL
                             }
                         }
                     });
-                } catch(Exception ex) {
+                } catch (Exception ex) {
                     Log.i(LOGTAG, "Exception building menu", ex);
                 }
             }
@@ -354,7 +367,7 @@ class ActionBarTextSelection extends Layer implements TextSelection, GeckoEventL
         }
 
         @Override
-        public boolean onCreateActionMode(ActionModeCompat mode, Menu menu) {
+        public boolean onCreateActionMode(ActionModeCompat mode, GeckoMenu unused) {
             mActionMode = mode;
             return true;
         }
@@ -365,7 +378,7 @@ class ActionBarTextSelection extends Layer implements TextSelection, GeckoEventL
                 final JSONObject obj = mItems.getJSONObject(item.getItemId());
                 GeckoAppShell.notifyObservers("TextSelection:Action", obj.optString("id"));
                 return true;
-            } catch(Exception ex) {
+            } catch (Exception ex) {
                 Log.i(LOGTAG, "Exception calling action", ex);
             }
             return false;

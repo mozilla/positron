@@ -181,6 +181,7 @@ EXPORTS.mozilla.net += [
     'DashboardTypes.h',
     'MemoryDownloader.h',
     'OfflineObserver.h',
+    'Predictor.h',
     'ReferrerPolicy.h',
 ]
 
@@ -295,6 +296,7 @@ include('/ipc/chromium/chromium-config.mozbuild')
 FINAL_LIBRARY = 'xul'
 
 LOCAL_INCLUDES += [
+    '/docshell/base',
     '/dom/base',
     '/netwerk/protocol/http'
 ]

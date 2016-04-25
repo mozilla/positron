@@ -1113,7 +1113,6 @@ class Watchdog
 #include "ipc/Nuwa.h"
 #endif
 
-#define PREF_MAX_SCRIPT_RUN_TIME_CHILD "dom.max_child_script_run_time"
 #define PREF_MAX_SCRIPT_RUN_TIME_CONTENT "dom.max_script_run_time"
 #define PREF_MAX_SCRIPT_RUN_TIME_CHROME "dom.max_chrome_script_run_time"
 
@@ -1136,7 +1135,6 @@ class WatchdogManager : public nsIObserver
         mozilla::Preferences::AddStrongObserver(this, "dom.use_watchdog");
         mozilla::Preferences::AddStrongObserver(this, PREF_MAX_SCRIPT_RUN_TIME_CONTENT);
         mozilla::Preferences::AddStrongObserver(this, PREF_MAX_SCRIPT_RUN_TIME_CHROME);
-        mozilla::Preferences::AddStrongObserver(this, PREF_MAX_SCRIPT_RUN_TIME_CHILD);
     }
 
   protected:
@@ -1150,7 +1148,6 @@ class WatchdogManager : public nsIObserver
         mozilla::Preferences::RemoveObserver(this, "dom.use_watchdog");
         mozilla::Preferences::RemoveObserver(this, PREF_MAX_SCRIPT_RUN_TIME_CONTENT);
         mozilla::Preferences::RemoveObserver(this, PREF_MAX_SCRIPT_RUN_TIME_CHROME);
-        mozilla::Preferences::RemoveObserver(this, PREF_MAX_SCRIPT_RUN_TIME_CHILD);
     }
 
   public:
@@ -1228,10 +1225,7 @@ class WatchdogManager : public nsIObserver
             int32_t chromeTime = Preferences::GetInt(PREF_MAX_SCRIPT_RUN_TIME_CHROME, 20);
             if (chromeTime <= 0)
                 chromeTime = INT32_MAX;
-            int32_t childTime = Preferences::GetInt(PREF_MAX_SCRIPT_RUN_TIME_CHILD, 3);
-            if (childTime <= 0)
-                childTime = INT32_MAX;
-            mWatchdog->SetMinScriptRunTimeSeconds(std::min(std::min(contentTime, chromeTime), childTime));
+            mWatchdog->SetMinScriptRunTimeSeconds(std::min(contentTime, chromeTime));
         }
     }
 
@@ -1379,16 +1373,13 @@ XPCJSRuntime::InterruptCallback(JSContext* cx)
     if (!nsContentUtils::IsInitialized())
         return true;
 
-    bool contentProcess = XRE_IsContentProcess();
-
     // This is at least the second interrupt callback we've received since
     // returning to the event loop. See how long it's been, and what the limit
     // is.
     TimeDuration duration = TimeStamp::NowLoRes() - self->mSlowScriptCheckpoint;
     bool chrome = nsContentUtils::IsCallerChrome();
-    const char* prefName = contentProcess ? PREF_MAX_SCRIPT_RUN_TIME_CHILD
-                                 : chrome ? PREF_MAX_SCRIPT_RUN_TIME_CHROME
-                                          : PREF_MAX_SCRIPT_RUN_TIME_CONTENT;
+    const char* prefName = chrome ? PREF_MAX_SCRIPT_RUN_TIME_CHROME
+                                  : PREF_MAX_SCRIPT_RUN_TIME_CONTENT;
     int32_t limit = Preferences::GetInt(prefName, chrome ? 20 : 10);
 
     // If there's no limit, or we're within the limit, let it go.
@@ -1600,6 +1591,10 @@ ReloadPrefsCallback(const char* pref, void* data)
 
 XPCJSRuntime::~XPCJSRuntime()
 {
+    // Elsewhere we abort immediately if XPCJSRuntime initialization fails.
+    // Therefore the runtime must be non-null.
+    MOZ_ASSERT(MaybeRuntime());
+
     // This destructor runs before ~CycleCollectedJSRuntime, which does the
     // actual JS_DestroyRuntime() call. But destroying the runtime triggers
     // one final GC, which can call back into the runtime with various
@@ -2135,8 +2130,8 @@ ReportZoneStats(const JS::ZoneStats& zStats,
 
 static nsresult
 ReportClassStats(const ClassInfo& classInfo, const nsACString& path,
-                 nsIHandleReportCallback* cb, nsISupports* closure,
-                 size_t& gcTotal)
+                 const nsACString& shapesPath, nsIHandleReportCallback* cb,
+                 nsISupports* closure, size_t& gcTotal)
 {
     // We deliberately don't use ZCREPORT_BYTES, so that these per-class values
     // don't go into sundries.
@@ -2206,37 +2201,37 @@ ReportClassStats(const ClassInfo& classInfo, const nsACString& path,
     }
 
     if (classInfo.shapesGCHeapTree > 0) {
-        REPORT_GC_BYTES(path + NS_LITERAL_CSTRING("shapes/gc-heap/tree"),
+        REPORT_GC_BYTES(shapesPath + NS_LITERAL_CSTRING("shapes/gc-heap/tree"),
             classInfo.shapesGCHeapTree,
         "Shapes in a property tree.");
     }
 
     if (classInfo.shapesGCHeapDict > 0) {
-        REPORT_GC_BYTES(path + NS_LITERAL_CSTRING("shapes/gc-heap/dict"),
+        REPORT_GC_BYTES(shapesPath + NS_LITERAL_CSTRING("shapes/gc-heap/dict"),
             classInfo.shapesGCHeapDict,
         "Shapes in dictionary mode.");
     }
 
     if (classInfo.shapesGCHeapBase > 0) {
-        REPORT_GC_BYTES(path + NS_LITERAL_CSTRING("shapes/gc-heap/base"),
+        REPORT_GC_BYTES(shapesPath + NS_LITERAL_CSTRING("shapes/gc-heap/base"),
             classInfo.shapesGCHeapBase,
             "Base shapes, which collate data common to many shapes.");
     }
 
     if (classInfo.shapesMallocHeapTreeTables > 0) {
-        REPORT_BYTES(path + NS_LITERAL_CSTRING("shapes/malloc-heap/tree-tables"),
+        REPORT_BYTES(shapesPath + NS_LITERAL_CSTRING("shapes/malloc-heap/tree-tables"),
             KIND_HEAP, classInfo.shapesMallocHeapTreeTables,
             "Property tables of shapes in a property tree.");
     }
 
     if (classInfo.shapesMallocHeapDictTables > 0) {
-        REPORT_BYTES(path + NS_LITERAL_CSTRING("shapes/malloc-heap/dict-tables"),
+        REPORT_BYTES(shapesPath + NS_LITERAL_CSTRING("shapes/malloc-heap/dict-tables"),
             KIND_HEAP, classInfo.shapesMallocHeapDictTables,
             "Property tables of shapes in dictionary mode.");
     }
 
     if (classInfo.shapesMallocHeapTreeKids > 0) {
-        REPORT_BYTES(path + NS_LITERAL_CSTRING("shapes/malloc-heap/tree-kids"),
+        REPORT_BYTES(shapesPath + NS_LITERAL_CSTRING("shapes/malloc-heap/tree-kids"),
             KIND_HEAP, classInfo.shapesMallocHeapTreeKids,
             "Kid hashes of shapes in a property tree.");
     }
@@ -2284,8 +2279,12 @@ ReportCompartmentStats(const JS::CompartmentStats& cStats,
                     ? NS_LITERAL_CSTRING("classes/")
                     : NS_LITERAL_CSTRING("classes/class(<non-notable classes>)/");
 
-    rv = ReportClassStats(cStats.classInfo, nonNotablePath, cb, closure,
-                          gcTotal);
+    // XXX: shapes need special treatment until bug 1265271 is fixed.
+    nsCString shapesPath = cJSPathPrefix;
+    shapesPath += NS_LITERAL_CSTRING("classes/");
+
+    rv = ReportClassStats(cStats.classInfo, nonNotablePath, shapesPath, cb,
+                          closure, gcTotal);
     NS_ENSURE_SUCCESS(rv, rv);
 
     for (size_t i = 0; i < cStats.notableClasses.length(); i++) {
@@ -2295,7 +2294,8 @@ ReportCompartmentStats(const JS::CompartmentStats& cStats,
         nsCString classPath = cJSPathPrefix +
             nsPrintfCString("classes/class(%s)/", classInfo.className_);
 
-        rv = ReportClassStats(classInfo, classPath, cb, closure, gcTotal);
+        rv = ReportClassStats(classInfo, classPath, shapesPath, cb, closure,
+                              gcTotal);
         NS_ENSURE_SUCCESS(rv, rv);
     }
 
@@ -2741,8 +2741,12 @@ class OrphanReporter : public JS::ObjectPrivateVisitor
             // and then record its root so we don't measure it again.
             nsCOMPtr<nsINode> orphanTree = node->SubtreeRoot();
             if (!mAlreadyMeasuredOrphanTrees.Contains(orphanTree)) {
-                n += SizeOfTreeIncludingThis(orphanTree);
-                mAlreadyMeasuredOrphanTrees.PutEntry(orphanTree);
+                // If PutEntry() fails we don't measure this tree, which could
+                // lead to under-measurement. But that's better than the
+                // alternatives, which are over-measurement or an OOM abort.
+                if (mAlreadyMeasuredOrphanTrees.PutEntry(orphanTree, fallible)) {
+                    n += SizeOfTreeIncludingThis(orphanTree);
+                }
             }
         }
         return n;

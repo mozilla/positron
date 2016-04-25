@@ -403,7 +403,7 @@ bool Channel::ChannelImpl::ProcessIncomingMessages(
           message_tail = input_overflow_buf_.data();
           end = message_tail + input_overflow_buf_.size();
         } else {
-          buf = (char*)malloc(len);
+          buf = (char*)moz_xmalloc(len);
           memcpy(buf, p, len);
         }
         Message m(buf, len, Message::OWNS);
@@ -435,7 +435,11 @@ bool Channel::ChannelImpl::ProcessIncomingMessages(
         break;
       }
     }
-    input_overflow_buf_.assign(p, end - p);
+    if (p != input_overflow_buf_.data()) {
+      // Don't assign unless we have to since this will throw away any memory we
+      // might have reserved.
+      input_overflow_buf_.assign(p, end - p);
+    }
 
     bytes_read = 0;  // Get more data.
   }

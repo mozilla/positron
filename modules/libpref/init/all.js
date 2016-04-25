@@ -197,12 +197,6 @@ pref("dom.url.getters_decode_hash", false);
 // significantly increase the number of compartments in the system.
 pref("dom.compartment_per_addon", true);
 
-#ifdef NIGHTLY_BUILD
-pref("dom.document.scrollingElement.enabled", true);
-#else
-pref("dom.document.scrollingElement.enabled", false);
-#endif
-
 // Fastback caching - if this pref is negative, then we calculate the number
 // of content viewers to cache based on the amount of available memory.
 pref("browser.sessionhistory.max_total_viewers", -1);
@@ -357,6 +351,13 @@ pref("media.mp3.enabled", true);
 pref("media.apple.mp3.enabled", true);
 pref("media.apple.mp4.enabled", true);
 #endif
+
+// Filter what triggers user notifications.
+// See DecoderDoctorDocumentWatcher::ReportAnalysis for details.
+pref("media.decoder-doctor.notifications-allowed", "MediaWidevineNoWMFNoSilverlight");
+// Whether we report partial failures.
+pref("media.decoder-doctor.verbose", false);
+
 #ifdef MOZ_WEBRTC
 pref("media.navigator.enabled", true);
 pref("media.navigator.video.enabled", true);
@@ -448,7 +449,7 @@ pref("media.getusermedia.agc", 1);
 #if defined(XP_MACOSX)
 pref("media.peerconnection.capture_delay", 50);
 pref("media.getusermedia.playout_delay", 10);
-pref("media.navigator.audio.full_duplex", false);
+pref("media.navigator.audio.full_duplex", true);
 #elif defined(XP_WIN)
 pref("media.peerconnection.capture_delay", 50);
 pref("media.getusermedia.playout_delay", 40);
@@ -477,10 +478,10 @@ pref("media.getusermedia.screensharing.enabled", true);
 #endif
 
 #ifdef RELEASE_BUILD
-pref("media.getusermedia.screensharing.allowed_domains", "webex.com,*.webex.com,ciscospark.com,*.ciscospark.com,projectsquared.com,*.projectsquared.com,*.room.co,room.co,beta.talky.io,talky.io,*.clearslide.com,appear.in,*.appear.in,tokbox.com,*.tokbox.com,*.sso.francetelecom.fr,*.si.francetelecom.fr,*.sso.infra.ftgroup,*.multimedia-conference.orange-business.com,*.espacecollaboration.orange-business.com,free.gotomeeting.com,g2m.me,*.g2m.me,example.com,*.mypurecloud.com,*.mypurecloud.com.au,spreed.me,*.spreed.me,*.spreed.com,air.mozilla.org,*.circuit.com,*.yourcircuit.com,circuit.siemens.com,yourcircuit.siemens.com,circuitsandbox.net,*.unify.com,tandi.circuitsandbox.net,*.ericsson.net,*.cct.ericsson.net,*.opentok.com,*.conf.meetecho.com,meet.jit.si,*.meet.jit.si,web.stage.speakeasyapp.net,web.speakeasyapp.net,*.hipchat.me,*.beta-wspbx.com,*.wspbx.com,*.unifiedcloudit.com,*.smartboxuc.com,*.smartbox-uc.com,*.panterranetworks.com,pexipdemo.com,*.pexipdemo.com,pex.me,*.pex.me,*.rd.pexip.com,1click.io,*.1click.io,*.fuze.com,*.fuzemeeting.com,*.thinkingphones.com,gotomeeting.com,*.gotomeeting.com,gotowebinar.com,*.gotowebinar.com,gototraining.com,*.gototraining.com,citrix.com,*.citrix.com,expertcity.com,*.expertcity.com,citrixonline.com,*.citrixonline.com,g2m.me,*.g2m.me,gotomeet.me,*.gotomeet.me,gotomeet.at,*.gotomeet.at");
+pref("media.getusermedia.screensharing.allowed_domains", "webex.com,*.webex.com,ciscospark.com,*.ciscospark.com,projectsquared.com,*.projectsquared.com,*.room.co,room.co,beta.talky.io,talky.io,*.clearslide.com,appear.in,*.appear.in,tokbox.com,*.tokbox.com,*.sso.francetelecom.fr,*.si.francetelecom.fr,*.sso.infra.ftgroup,*.multimedia-conference.orange-business.com,*.espacecollaboration.orange-business.com,free.gotomeeting.com,g2m.me,*.g2m.me,*.mypurecloud.com,*.mypurecloud.com.au,spreed.me,*.spreed.me,*.spreed.com,air.mozilla.org,*.circuit.com,*.yourcircuit.com,circuit.siemens.com,yourcircuit.siemens.com,circuitsandbox.net,*.unify.com,tandi.circuitsandbox.net,*.ericsson.net,*.cct.ericsson.net,*.opentok.com,*.conf.meetecho.com,meet.jit.si,*.meet.jit.si,web.stage.speakeasyapp.net,web.speakeasyapp.net,*.hipchat.me,*.beta-wspbx.com,*.wspbx.com,*.unifiedcloudit.com,*.smartboxuc.com,*.smartbox-uc.com,*.panterranetworks.com,pexipdemo.com,*.pexipdemo.com,pex.me,*.pex.me,*.rd.pexip.com,1click.io,*.1click.io,*.fuze.com,*.fuzemeeting.com,*.thinkingphones.com,gotomeeting.com,*.gotomeeting.com,gotowebinar.com,*.gotowebinar.com,gototraining.com,*.gototraining.com,citrix.com,*.citrix.com,expertcity.com,*.expertcity.com,citrixonline.com,*.citrixonline.com,g2m.me,*.g2m.me,gotomeet.me,*.gotomeet.me,gotomeet.at,*.gotomeet.at,miriadaxdes.miriadax.net,certificacion.miriadax.net,miriadax.net");
 #else
- // temporary value, not intended for release - bug 1049087
-pref("media.getusermedia.screensharing.allowed_domains", "mozilla.github.io,webex.com,*.webex.com,ciscospark.com,*.ciscospark.com,projectsquared.com,*.projectsquared.com,*.room.co,room.co,beta.talky.io,talky.io,*.clearslide.com,appear.in,*.appear.in,tokbox.com,*.tokbox.com,*.sso.francetelecom.fr,*.si.francetelecom.fr,*.sso.infra.ftgroup,*.multimedia-conference.orange-business.com,*.espacecollaboration.orange-business.com,free.gotomeeting.com,g2m.me,*.g2m.me,example.com,*.mypurecloud.com,*.mypurecloud.com.au,spreed.me,*.spreed.me,*.spreed.com,air.mozilla.org,*.circuit.com,*.yourcircuit.com,circuit.siemens.com,yourcircuit.siemens.com,circuitsandbox.net,*.unify.com,tandi.circuitsandbox.net,*.ericsson.net,*.cct.ericsson.net,*.opentok.com,*.conf.meetecho.com,meet.jit.si,*.meet.jit.si,web.stage.speakeasyapp.net,web.speakeasyapp.net,*.hipchat.me,*.beta-wspbx.com,*.wspbx.com,*.unifiedcloudit.com,*.smartboxuc.com,*.smartbox-uc.com,*.panterranetworks.com,pexipdemo.com,*.pexipdemo.com,pex.me,*.pex.me,*.rd.pexip.com,1click.io,*.1click.io,*.fuze.com,*.fuzemeeting.com,*.thinkingphones.com,gotomeeting.com,*.gotomeeting.com,gotowebinar.com,*.gotowebinar.com,gototraining.com,*.gototraining.com,citrix.com,*.citrix.com,expertcity.com,*.expertcity.com,citrixonline.com,*.citrixonline.com,g2m.me,*.g2m.me,gotomeet.me,*.gotomeet.me,gotomeet.at,*.gotomeet.at");
+ // includes Mozilla's test domain: mozilla.github.io (not intended for release)
+pref("media.getusermedia.screensharing.allowed_domains", "mozilla.github.io,webex.com,*.webex.com,ciscospark.com,*.ciscospark.com,projectsquared.com,*.projectsquared.com,*.room.co,room.co,beta.talky.io,talky.io,*.clearslide.com,appear.in,*.appear.in,tokbox.com,*.tokbox.com,*.sso.francetelecom.fr,*.si.francetelecom.fr,*.sso.infra.ftgroup,*.multimedia-conference.orange-business.com,*.espacecollaboration.orange-business.com,free.gotomeeting.com,g2m.me,*.g2m.me,*.mypurecloud.com,*.mypurecloud.com.au,spreed.me,*.spreed.me,*.spreed.com,air.mozilla.org,*.circuit.com,*.yourcircuit.com,circuit.siemens.com,yourcircuit.siemens.com,circuitsandbox.net,*.unify.com,tandi.circuitsandbox.net,*.ericsson.net,*.cct.ericsson.net,*.opentok.com,*.conf.meetecho.com,meet.jit.si,*.meet.jit.si,web.stage.speakeasyapp.net,web.speakeasyapp.net,*.hipchat.me,*.beta-wspbx.com,*.wspbx.com,*.unifiedcloudit.com,*.smartboxuc.com,*.smartbox-uc.com,*.panterranetworks.com,pexipdemo.com,*.pexipdemo.com,pex.me,*.pex.me,*.rd.pexip.com,1click.io,*.1click.io,*.fuze.com,*.fuzemeeting.com,*.thinkingphones.com,gotomeeting.com,*.gotomeeting.com,gotowebinar.com,*.gotowebinar.com,gototraining.com,*.gototraining.com,citrix.com,*.citrix.com,expertcity.com,*.expertcity.com,citrixonline.com,*.citrixonline.com,g2m.me,*.g2m.me,gotomeet.me,*.gotomeet.me,gotomeet.at,*.gotomeet.at,miriadaxdes.miriadax.net,certificacion.miriadax.net,miriadax.net");
 #endif
 // OS/X 10.6 and XP have screen/window sharing off by default due to various issues - Caveat emptor
 pref("media.getusermedia.screensharing.allow_on_old_platforms", false);
@@ -730,6 +731,7 @@ pref("gfx.prefer-mesa-llvmpipe", false);
 
 pref("gfx.draw-color-bars", false);
 
+pref("gfx.logging.painted-pixel-count.enabled", false);
 pref("gfx.logging.texture-usage.enabled", false);
 pref("gfx.logging.peak-texture-usage.enabled", false);
 
@@ -1779,6 +1781,7 @@ pref("network.prefetch-next", true);
 // enables the predictive service
 pref("network.predictor.enabled", true);
 pref("network.predictor.enable-hover-on-ssl", false);
+pref("network.predictor.enable-prefetch", true);
 pref("network.predictor.page-degradation.day", 0);
 pref("network.predictor.page-degradation.week", 5);
 pref("network.predictor.page-degradation.month", 10);
@@ -1789,9 +1792,12 @@ pref("network.predictor.subresource-degradation.week", 10);
 pref("network.predictor.subresource-degradation.month", 25);
 pref("network.predictor.subresource-degradation.year", 50);
 pref("network.predictor.subresource-degradation.max", 100);
+pref("network.predictor.prefetch-rolling-load-count", 10);
+pref("network.predictor.prefetch-min-confidence", 100);
 pref("network.predictor.preconnect-min-confidence", 90);
 pref("network.predictor.preresolve-min-confidence", 60);
 pref("network.predictor.redirect-likely-confidence", 75);
+pref("network.predictor.prefetch-force-valid-for", 10);
 pref("network.predictor.max-resources-per-entry", 100);
 pref("network.predictor.max-uri-length", 500);
 pref("network.predictor.cleaned-up", false);
@@ -2029,7 +2035,6 @@ pref("security.dialog_enable_delay", 1000);
 pref("security.notification_enable_delay", 500);
 
 pref("security.csp.enable", true);
-pref("security.csp.debug", false);
 pref("security.csp.experimentalEnabled", false);
 
 // Default Content Security Policy to apply to privileged apps.
@@ -2422,11 +2427,20 @@ pref("layout.css.scope-pseudo.enabled", true);
 // Is support for background-blend-mode enabled?
 pref("layout.css.background-blend-mode.enabled", true);
 
+// Is support for background-clip:text enabled? (bug 1264905)
+#ifdef RELEASE_BUILD
+pref("layout.css.background-clip-text.enabled", false);
+#else
+pref("layout.css.background-clip-text.enabled", true);
+#endif
+
 // Is support for CSS vertical text enabled?
 pref("layout.css.vertical-text.enabled", true);
 
 // Is support for CSS text-combine-upright (tate-chu-yoko) enabled?
-pref("layout.css.text-combine-upright.enabled", false);
+pref("layout.css.text-combine-upright.enabled", true);
+// Is support for CSS text-combine-upright: digits 2-4 enabled?
+pref("layout.css.text-combine-upright-digits.enabled", false);
 
 // Is support for object-fit and object-position enabled?
 pref("layout.css.object-fit-and-position.enabled", true);
@@ -2563,6 +2577,12 @@ pref("dom.animations-api.core.enabled", false);
 pref("dom.animations-api.core.enabled", true);
 #endif
 
+// Is support for the Element.animate() function (a subset of the Web Animations
+// API) enabled?
+// Note that if dom.animations-api.core.enabled is true, this preference is
+// ignored.
+pref("dom.animations-api.element-animate.enabled", true);
+
 // pref to permit users to make verified SOAP calls by default
 pref("capability.policy.default.SOAPCall.invokeVerifySourceHeader", "allAccess");
 
@@ -2585,7 +2605,6 @@ pref("editor.positioning.offset",            0);
 
 pref("dom.use_watchdog", true);
 pref("dom.max_chrome_script_run_time", 20);
-pref("dom.max_child_script_run_time", 10);
 pref("dom.max_script_run_time", 10);
 
 // If true, ArchiveReader will be enabled
@@ -4486,8 +4505,6 @@ pref("layers.prefer-d3d9", false);
 pref("layers.d3d11.force-warp", false);
 pref("layers.d3d11.disable-warp", true);
 
-// cf. Bug 1215265
-pref("layers.child-process-shutdown", false);
 #endif
 
 // Force all possible layers to be always active layers
@@ -4612,7 +4629,7 @@ pref("dom.mozAlarms.enabled", false);
 
 pref("dom.push.enabled", false);
 
-pref("dom.push.loglevel", "off");
+pref("dom.push.loglevel", "error");
 
 pref("dom.push.serverURL", "wss://push.services.mozilla.com/");
 pref("dom.push.userAgentID", "");
@@ -5008,11 +5025,12 @@ pref("layout.accessiblecaret.timeout_ms", 3000);
 // or long tap events does not fired by APZ.
 pref("layout.accessiblecaret.use_long_tap_injector", true);
 
-// Use AccessibleCaret default behaviours.
-pref("layout.accessiblecaret.extendedvisibility", false);
-
 // By default, carets become tilt only when they are overlapping.
 pref("layout.accessiblecaret.always_tilt", false);
+
+// By default, carets always show when scrolling (either panning for zooming)
+// the page.
+pref("layout.accessiblecaret.always_show_when_scrolling", true);
 
 // Selection change notifications generated by Javascript hide
 // AccessibleCarets and close UI interaction by default.

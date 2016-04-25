@@ -83,6 +83,7 @@ struct ScratchRegisterScope : public AutoRegisterScope
 
 static MOZ_CONSTEXPR_VAR Register ReturnReg = rax;
 static MOZ_CONSTEXPR_VAR Register HeapReg = r15;
+static MOZ_CONSTEXPR_VAR Register64 ReturnReg64(rax);
 static MOZ_CONSTEXPR_VAR FloatRegister ReturnFloat32Reg = FloatRegister(X86Encoding::xmm0, FloatRegisters::Single);
 static MOZ_CONSTEXPR_VAR FloatRegister ReturnDoubleReg = FloatRegister(X86Encoding::xmm0, FloatRegisters::Double);
 static MOZ_CONSTEXPR_VAR FloatRegister ReturnSimd128Reg = FloatRegister(X86Encoding::xmm0, FloatRegisters::Simd128);
@@ -166,13 +167,11 @@ static MOZ_CONSTEXPR_VAR Register AsmJSIonExitRegD2 = rbx;
 static MOZ_CONSTEXPR_VAR Register RegExpMatcherRegExpReg = CallTempReg0;
 static MOZ_CONSTEXPR_VAR Register RegExpMatcherStringReg = CallTempReg1;
 static MOZ_CONSTEXPR_VAR Register RegExpMatcherLastIndexReg = CallTempReg2;
-static MOZ_CONSTEXPR_VAR Register RegExpMatcherStickyReg = CallTempReg4;
 
 // Registerd used in RegExpTester instruction (do not use ReturnReg).
 static MOZ_CONSTEXPR_VAR Register RegExpTesterRegExpReg = CallTempReg1;
 static MOZ_CONSTEXPR_VAR Register RegExpTesterStringReg = CallTempReg2;
 static MOZ_CONSTEXPR_VAR Register RegExpTesterLastIndexReg = CallTempReg3;
-static MOZ_CONSTEXPR_VAR Register RegExpTesterStickyReg = CallTempReg4;
 
 class ABIArgGenerator
 {

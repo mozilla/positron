@@ -1328,11 +1328,16 @@ nsWindow::Destroy(void)
         mGeckoViewSupport = nullptr;
     }
 
+    // Stuff below may release the last ref to this
+    nsCOMPtr<nsIWidget> kungFuDeathGrip(this);
+
     while (mChildren.Length()) {
         // why do we still have children?
         ALOG("### Warning: Destroying window %p and reparenting child %p to null!", (void*)this, (void*)mChildren[0]);
         mChildren[0]->SetParent(nullptr);
     }
+
+    nsBaseWidget::Destroy();
 
     if (IsTopLevel())
         gTopLevelWindows.RemoveElement(this);
@@ -1864,10 +1869,9 @@ void
 nsWindow::InitEvent(WidgetGUIEvent& event, LayoutDeviceIntPoint* aPoint)
 {
     if (aPoint) {
-        event.refPoint = *aPoint;
+        event.mRefPoint = *aPoint;
     } else {
-        event.refPoint.x = 0;
-        event.refPoint.y = 0;
+        event.mRefPoint = LayoutDeviceIntPoint(0, 0);
     }
 
     event.mTime = PR_Now() / 1000;
@@ -1966,7 +1970,7 @@ nsWindow::OnContextmenuEvent(AndroidGeckoEvent *ae)
     // Send the contextmenu event.
     WidgetMouseEvent contextMenuEvent(true, eContextMenu, this,
                                       WidgetMouseEvent::eReal, WidgetMouseEvent::eNormal);
-    contextMenuEvent.refPoint =
+    contextMenuEvent.mRefPoint =
         RoundedToInt(pt * GetDefaultScale()) - WidgetToScreenOffset();
     contextMenuEvent.ignoreRootScrollFrame = true;
     contextMenuEvent.inputSource = nsIDOMMouseEvent::MOZ_SOURCE_TOUCH;
@@ -2002,7 +2006,7 @@ nsWindow::OnLongTapEvent(AndroidGeckoEvent *ae)
     WidgetMouseEvent event(true, eMouseLongTap, this,
         WidgetMouseEvent::eReal, WidgetMouseEvent::eNormal);
     event.button = WidgetMouseEvent::eLeftButton;
-    event.refPoint =
+    event.mRefPoint =
         RoundedToInt(pt * GetDefaultScale()) - WidgetToScreenOffset();
     event.clickCount = 1;
     event.mTime = ae->Time();
@@ -2022,7 +2026,7 @@ nsWindow::DispatchHitTest(const WidgetTouchEvent& aEvent)
         // highlight element in case the this touchstart is the start of a tap.
         WidgetMouseEvent hittest(true, eMouseHitTest, this,
                                  WidgetMouseEvent::eReal);
-        hittest.refPoint = aEvent.mTouches[0]->mRefPoint;
+        hittest.mRefPoint = aEvent.mTouches[0]->mRefPoint;
         hittest.ignoreRootScrollFrame = true;
         hittest.inputSource = nsIDOMMouseEvent::MOZ_SOURCE_TOUCH;
         nsEventStatus status;
@@ -2142,7 +2146,7 @@ nsWindow::OnNativeGestureEvent(AndroidGeckoEvent *ae)
     event.delta = delta;
     event.mModifiers = 0;
     event.mTime = ae->Time();
-    event.refPoint = pt;
+    event.mRefPoint = pt;
 
     DispatchEvent(&event);
 }
@@ -3101,7 +3105,7 @@ nsWindow::GeckoViewSupport::OnImeReplaceText(int32_t aStart, int32_t aEnd,
                     continue;
                 }
                 // widget for duplicated events is initially nullptr.
-                event->widget = &window;
+                event->mWidget = &window;
                 window.DispatchEvent(event, status);
             }
             mIMEKeyEvents.Clear();
@@ -3369,7 +3373,7 @@ nsWindow::GetIMEUpdatePreference()
 nsresult
 nsWindow::SynthesizeNativeTouchPoint(uint32_t aPointerId,
                                      TouchPointerState aPointerState,
-                                     ScreenIntPoint aPointerScreenPoint,
+                                     LayoutDeviceIntPoint aPoint,
                                      double aPointerPressure,
                                      uint32_t aPointerOrientation,
                                      nsIObserver* aObserver)
@@ -3398,8 +3402,7 @@ nsWindow::SynthesizeNativeTouchPoint(uint32_t aPointerId,
     MOZ_ASSERT(mGLControllerSupport);
     GeckoLayerClient::LocalRef client = mGLControllerSupport->GetLayerClient();
     client->SynthesizeNativeTouchPoint(aPointerId, eventType,
-        aPointerScreenPoint.x, aPointerScreenPoint.y, aPointerPressure,
-        aPointerOrientation);
+        aPoint.x, aPoint.y, aPointerPressure, aPointerOrientation);
 
     return NS_OK;
 }

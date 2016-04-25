@@ -537,21 +537,23 @@ BrowserGlue.prototype = {
       os.addObserver(this, AddonWatcher.TOPIC_SLOW_ADDON_DETECTED, false);
     }
 
-    ExtensionManagement.registerScript("chrome://browser/content/ext-utils.js");
+    ExtensionManagement.registerScript("chrome://browser/content/ext-bookmarks.js");
     ExtensionManagement.registerScript("chrome://browser/content/ext-browserAction.js");
-    ExtensionManagement.registerScript("chrome://browser/content/ext-pageAction.js");
     ExtensionManagement.registerScript("chrome://browser/content/ext-commands.js");
     ExtensionManagement.registerScript("chrome://browser/content/ext-contextMenus.js");
     ExtensionManagement.registerScript("chrome://browser/content/ext-desktop-runtime.js");
+    ExtensionManagement.registerScript("chrome://browser/content/ext-history.js");
+    ExtensionManagement.registerScript("chrome://browser/content/ext-pageAction.js");
     ExtensionManagement.registerScript("chrome://browser/content/ext-tabs.js");
+    ExtensionManagement.registerScript("chrome://browser/content/ext-utils.js");
     ExtensionManagement.registerScript("chrome://browser/content/ext-windows.js");
-    ExtensionManagement.registerScript("chrome://browser/content/ext-bookmarks.js");
 
     ExtensionManagement.registerSchema("chrome://browser/content/schemas/bookmarks.json");
     ExtensionManagement.registerSchema("chrome://browser/content/schemas/browser_action.json");
     ExtensionManagement.registerSchema("chrome://browser/content/schemas/commands.json");
     ExtensionManagement.registerSchema("chrome://browser/content/schemas/context_menus.json");
     ExtensionManagement.registerSchema("chrome://browser/content/schemas/context_menus_internal.json");
+    ExtensionManagement.registerSchema("chrome://browser/content/schemas/history.json");
     ExtensionManagement.registerSchema("chrome://browser/content/schemas/page_action.json");
     ExtensionManagement.registerSchema("chrome://browser/content/schemas/tabs.json");
     ExtensionManagement.registerSchema("chrome://browser/content/schemas/windows.json");
@@ -2223,7 +2225,7 @@ BrowserGlue.prototype = {
     // be set to the version it has been added in.  We will compare its value
     // to users' smartBookmarksVersion and add new smart bookmarks without
     // recreating old deleted ones.
-    const SMART_BOOKMARKS_VERSION = 7;
+    const SMART_BOOKMARKS_VERSION = 8;
     const SMART_BOOKMARKS_ANNO = "Places/SmartBookmark";
     const SMART_BOOKMARKS_PREF = "browser.places.smartBookmarksVersion";
 
@@ -2254,18 +2256,6 @@ BrowserGlue.prototype = {
           url: "place:sort=" + queryOptions.SORT_BY_VISITCOUNT_DESCENDING +
                     "&maxResults=" + MAX_RESULTS,
           parentGuid: PlacesUtils.bookmarks.toolbarGuid,
-          newInVersion: 1
-        },
-        RecentlyBookmarked: {
-          title: bundle.GetStringFromName("recentlyBookmarkedTitle"),
-          url: "place:folder=BOOKMARKS_MENU" +
-                    "&folder=UNFILED_BOOKMARKS" +
-                    "&folder=TOOLBAR" +
-                    "&queryType=" + queryOptions.QUERY_TYPE_BOOKMARKS +
-                    "&sort=" + queryOptions.SORT_BY_DATEADDED_DESCENDING +
-                    "&maxResults=" + MAX_RESULTS +
-                    "&excludeQueries=1",
-          parentGuid: PlacesUtils.bookmarks.menuGuid,
           newInVersion: 1
         },
         RecentTags: {
@@ -2630,6 +2620,16 @@ ContentPermissionPrompt.prototype = {
     var options = {
       learnMoreURL:
         Services.urlFormatter.formatURLPref("app.support.baseURL") + "push",
+      eventCallback(type) {
+        if (type == "dismissed") {
+          // Bug 1259148: Hide the doorhanger icon. Unlike other permission
+          // doorhangers, the user can't restore the doorhanger using the icon
+          // in the location bar. Instead, the site will be notified that the
+          // doorhanger was dismissed.
+          this.remove();
+          aRequest.cancel();
+        }
+      },
     };
 
     this._showPrompt(aRequest, message, "desktop-notification", actions,

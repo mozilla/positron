@@ -473,17 +473,15 @@ IntlInitialize(JSContext* cx, HandleObject obj, Handle<PropertyName*> initialize
     MOZ_ASSERT(initializerValue.isObject());
     MOZ_ASSERT(initializerValue.toObject().is<JSFunction>());
 
-    InvokeArgs args(cx);
-    if (!args.init(3))
-        return false;
+    FixedInvokeArgs<3> args(cx);
 
-    args.setCallee(initializerValue);
-    args.setThis(NullValue());
     args[0].setObject(*obj);
     args[1].set(locales);
     args[2].set(options);
 
-    return Invoke(cx, args);
+    RootedValue thisv(cx, NullValue());
+    RootedValue ignored(cx);
+    return js::Call(cx, initializerValue, thisv, args, &ignored);
 }
 
 static bool
@@ -552,18 +550,15 @@ GetInternals(JSContext* cx, HandleObject obj)
     MOZ_ASSERT(getInternalsValue.isObject());
     MOZ_ASSERT(getInternalsValue.toObject().is<JSFunction>());
 
-    InvokeArgs args(cx);
-    if (!args.init(1))
-        return nullptr;
+    FixedInvokeArgs<1> args(cx);
 
-    args.setCallee(getInternalsValue);
-    args.setThis(NullValue());
     args[0].setObject(*obj);
 
-    if (!Invoke(cx, args))
+    RootedValue v(cx, NullValue());
+    if (!js::Call(cx, getInternalsValue, v, args, &v))
         return nullptr;
 
-    return &args.rval().toObject();
+    return &v.toObject();
 }
 
 static bool
@@ -2358,6 +2353,7 @@ static const JSFunctionSpec intl_static_methods[] = {
 #if JS_HAS_TOSOURCE
     JS_FN(js_toSource_str,  intl_toSource,        0, 0),
 #endif
+    JS_SELF_HOSTED_FN("getCanonicalLocales", "Intl_getCanonicalLocales", 1, 0),
     JS_FS_END
 };
 

@@ -277,7 +277,9 @@ ResponsiveImageSelector::AppendCandidateIfUnique(const ResponsiveImageCandidate 
 void
 ResponsiveImageSelector::MaybeAppendDefaultCandidate()
 {
-  NS_ENSURE_TRUE(!mDefaultSourceURL.IsEmpty(), /* void */);
+  if (mDefaultSourceURL.IsEmpty()) {
+    return;
+  }
 
   int numCandidates = mCandidates.Length();
 
@@ -429,7 +431,6 @@ ResponsiveImageSelector::ComputeFinalWidthForCurrentViewport(double *aWidth)
   nsPresContext *pctx = presShell ? presShell->GetPresContext() : nullptr;
 
   if (!pctx) {
-    MOZ_ASSERT(false, "Unable to find presContext for this content");
     return false;
   }
 

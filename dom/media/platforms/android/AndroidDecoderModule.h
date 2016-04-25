@@ -12,11 +12,11 @@
 #include "TimeUnits.h"
 #include "mozilla/Monitor.h"
 
-#include <queue>
+#include <deque>
 
 namespace mozilla {
 
-typedef std::queue<RefPtr<MediaRawData>> SampleQueue;
+typedef std::deque<RefPtr<MediaRawData>> SampleQueue;
 
 class AndroidDecoderModule : public PlatformDecoderModule {
 public:
@@ -25,18 +25,21 @@ public:
                      layers::LayersBackend aLayersBackend,
                      layers::ImageContainer* aImageContainer,
                      FlushableTaskQueue* aVideoTaskQueue,
-                     MediaDataDecoderCallback* aCallback) override;
+                     MediaDataDecoderCallback* aCallback,
+                     DecoderDoctorDiagnostics* aDiagnostics) override;
 
   already_AddRefed<MediaDataDecoder>
   CreateAudioDecoder(const AudioInfo& aConfig,
                      FlushableTaskQueue* aAudioTaskQueue,
-                     MediaDataDecoderCallback* aCallback) override;
+                     MediaDataDecoderCallback* aCallback,
+                     DecoderDoctorDiagnostics* aDiagnostics) override;
 
 
   AndroidDecoderModule() {}
   virtual ~AndroidDecoderModule() {}
 
-  bool SupportsMimeType(const nsACString& aMimeType) const override;
+  bool SupportsMimeType(const nsACString& aMimeType,
+                        DecoderDoctorDiagnostics* aDiagnostics) const override;
 
   ConversionRequired
   DecoderNeedsConversion(const TrackInfo& aConfig) const override;
@@ -134,7 +137,7 @@ protected:
 
   SampleQueue mQueue;
   // Durations are stored in microseconds.
-  std::queue<media::TimeUnit> mDurations;
+  std::deque<media::TimeUnit> mDurations;
 };
 
 } // namespace mozilla

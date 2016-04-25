@@ -10,7 +10,7 @@ var { classes: Cc, interfaces: Ci, utils: Cu } = Components;
 
 var { loader, require } = Cu.import("resource://devtools/shared/Loader.jsm", {});
 // Require this module to setup core modules
-loader.main("devtools/client/main");
+loader.require("devtools/client/framework/devtools-browser");
 
 var { gDevTools } = require("devtools/client/framework/devtools");
 var { TargetFactory } = require("devtools/client/framework/target");
@@ -62,6 +62,8 @@ function setPrefDefaults() {
   Services.prefs.setBoolPref("browser.dom.window.dump.enabled", true);
   Services.prefs.setBoolPref("devtools.command-button-noautohide.enabled", true);
   Services.prefs.setBoolPref("devtools.scratchpad.enabled", true);
+  // Bug 1225160 - Using source maps with browser debugging can lead to a crash
+  Services.prefs.setBoolPref("devtools.debugger.source-maps-enabled", false);
 }
 
 window.addEventListener("load", function() {

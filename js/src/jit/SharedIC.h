@@ -2724,73 +2724,6 @@ class ICGetProp_TypedObject : public ICMonitoredStub
     };
 };
 
-class ICGetProp_ModuleNamespace : public ICMonitoredStub
-{
-    friend class ICStubSpace;
-
-    HeapPtrModuleNamespaceObject namespace_;
-    HeapPtrModuleEnvironmentObject environment_;
-    uint32_t offset_;
-
-    ICGetProp_ModuleNamespace(JitCode* stubCode, ICStub* firstMonitorStub,
-                              HandleModuleNamespaceObject ns, HandleModuleEnvironmentObject env,
-                              uint32_t offset)
-      : ICMonitoredStub(ICStub::GetProp_ModuleNamespace, stubCode, firstMonitorStub),
-        namespace_(ns), environment_(env), offset_(offset)
-    {
-        (void) offset_; // Silence clang warning.
-    }
-
-  public:
-    HeapPtrModuleNamespaceObject& getNamespace() {
-        return namespace_;
-    }
-    HeapPtrModuleEnvironmentObject& environment() {
-        return environment_;
-    }
-
-    static size_t offsetOfNamespace() {
-        return offsetof(ICGetProp_ModuleNamespace, namespace_);
-    }
-    static size_t offsetOfEnvironment() {
-        return offsetof(ICGetProp_ModuleNamespace, environment_);
-    }
-    static size_t offsetOfOffset() {
-        return offsetof(ICGetProp_ModuleNamespace, offset_);
-    }
-
-    class Compiler : public ICStubCompiler {
-      protected:
-        ICStub* firstMonitorStub_;
-        RootedModuleNamespaceObject namespace_;
-        RootedModuleEnvironmentObject environment_;
-        bool isFixedSlot_;
-        uint32_t offset_;
-
-        bool generateStubCode(MacroAssembler& masm);
-
-        virtual int32_t getKey() const {
-            return static_cast<int32_t>(engine_) |
-                  (static_cast<int32_t>(kind) << 1) |
-                  (static_cast<int32_t>(isFixedSlot_) << 17);
-        }
-
-      public:
-        Compiler(JSContext* cx, Engine engine, ICStub* firstMonitorStub,
-                 HandleModuleNamespaceObject ns, HandleModuleEnvironmentObject env, bool isFixedSlot,
-                 uint32_t offset)
-          : ICStubCompiler(cx, ICStub::GetProp_ModuleNamespace, engine),
-            firstMonitorStub_(firstMonitorStub),
-            namespace_(cx, ns), environment_(cx, env), isFixedSlot_(isFixedSlot), offset_(offset)
-        {}
-
-        ICStub* getStub(ICStubSpace* space) {
-            return newStub<ICGetProp_ModuleNamespace>(space, getStubCode(), firstMonitorStub_,
-                                                      namespace_, environment_, offset_);
-        }
-    };
-};
-
 class ICGetPropCallGetter : public ICMonitoredStub
 {
     friend class ICStubSpace;
@@ -3235,6 +3168,103 @@ class ICGetProp_ArgumentsCallee : public ICMonitoredStub
             return newStub<ICGetProp_ArgumentsCallee>(space, getStubCode(), firstMonitorStub_);
         }
     };
+};
+
+// JSOP_NEWARRAY
+// JSOP_NEWINIT
+
+class ICNewArray_Fallback : public ICFallbackStub
+{
+    friend class ICStubSpace;
+
+    HeapPtrObject templateObject_;
+
+    // The group used for objects created here is always available, even if the
+    // template object itself is not.
+    HeapPtrObjectGroup templateGroup_;
+
+    ICNewArray_Fallback(JitCode* stubCode, ObjectGroup* templateGroup)
+      : ICFallbackStub(ICStub::NewArray_Fallback, stubCode),
+        templateObject_(nullptr), templateGroup_(templateGroup)
+    {}
+
+  public:
+    class Compiler : public ICStubCompiler {
+        RootedObjectGroup templateGroup;
+        bool generateStubCode(MacroAssembler& masm);
+
+      public:
+        Compiler(JSContext* cx, ObjectGroup* templateGroup, Engine engine)
+          : ICStubCompiler(cx, ICStub::NewArray_Fallback, engine),
+            templateGroup(cx, templateGroup)
+        {}
+
+        ICStub* getStub(ICStubSpace* space) {
+            return newStub<ICNewArray_Fallback>(space, getStubCode(), templateGroup);
+        }
+    };
+
+    HeapPtrObject& templateObject() {
+        return templateObject_;
+    }
+
+    void setTemplateObject(JSObject* obj) {
+        MOZ_ASSERT(obj->group() == templateGroup());
+        templateObject_ = obj;
+    }
+
+    HeapPtrObjectGroup& templateGroup() {
+        return templateGroup_;
+    }
+
+    void setTemplateGroup(ObjectGroup* group) {
+        templateObject_ = nullptr;
+        templateGroup_ = group;
+    }
+};
+
+// JSOP_NEWOBJECT
+
+class ICNewObject_Fallback : public ICFallbackStub
+{
+    friend class ICStubSpace;
+
+    HeapPtrObject templateObject_;
+
+    explicit ICNewObject_Fallback(JitCode* stubCode)
+      : ICFallbackStub(ICStub::NewObject_Fallback, stubCode), templateObject_(nullptr)
+    {}
+
+  public:
+    class Compiler : public ICStubCompiler {
+        bool generateStubCode(MacroAssembler& masm);
+
+      public:
+        explicit Compiler(JSContext* cx, Engine engine)
+          : ICStubCompiler(cx, ICStub::NewObject_Fallback, engine)
+        {}
+
+        ICStub* getStub(ICStubSpace* space) {
+            return newStub<ICNewObject_Fallback>(space, getStubCode());
+        }
+    };
+
+    HeapPtrObject& templateObject() {
+        return templateObject_;
+    }
+
+    void setTemplateObject(JSObject* obj) {
+        templateObject_ = obj;
+    }
+};
+
+class ICNewObject_WithTemplate : public ICStub
+{
+    friend class ICStubSpace;
+
+    explicit ICNewObject_WithTemplate(JitCode* stubCode)
+      : ICStub(ICStub::NewObject_WithTemplate, stubCode)
+    {}
 };
 
 } // namespace jit

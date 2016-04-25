@@ -19,6 +19,7 @@
 #include "DrawMode.h"
 #include "harfbuzz/hb.h"
 #include "nsUnicodeScriptCodes.h"
+#include "nsColor.h"
 
 #ifdef DEBUG
 #include <stdio.h>
@@ -236,6 +237,8 @@ public:
     {
         gfxContext* context;
         DrawMode drawMode = DrawMode::GLYPH_FILL;
+        nscolor textStrokeColor = 0;
+        float textStrokeWidth = 0.0f;
         PropertyProvider* provider = nullptr;
         // If non-null, the advance width of the substring is set.
         gfxFloat* advanceWidth = nullptr;
@@ -434,9 +437,10 @@ public:
 
     // Call this, don't call "new gfxTextRun" directly. This does custom
     // allocation and initialization
-    static gfxTextRun *Create(const gfxTextRunFactory::Parameters *aParams,
-                              uint32_t aLength, gfxFontGroup *aFontGroup,
-                              uint32_t aFlags);
+    static mozilla::UniquePtr<gfxTextRun>
+    Create(const gfxTextRunFactory::Parameters *aParams,
+           uint32_t aLength, gfxFontGroup *aFontGroup,
+           uint32_t aFlags);
 
     // The text is divided into GlyphRuns as necessary
     struct GlyphRun {
@@ -574,8 +578,6 @@ public:
     // Copy glyph data for a range of characters from aSource to this
     // textrun.
     void CopyGlyphDataFrom(gfxTextRun *aSource, Range aRange, uint32_t aDest);
-
-    nsExpirationState *GetExpirationState() { return &mExpirationState; }
 
     // Tell the textrun to release its reference to its creating gfxFontGroup
     // immediately, rather than on destruction. This is used for textruns
@@ -746,7 +748,6 @@ private:
     gfxFontGroup     *mFontGroup; // addrefed on creation, but our reference
                                   // may be released by ReleaseFontGroup()
     gfxSkipChars      mSkipChars;
-    nsExpirationState mExpirationState;
 
     bool              mSkipDrawing; // true if the font group we used had a user font
                                     // download that's in progress, so we should hide text
@@ -761,6 +762,8 @@ private:
 
 class gfxFontGroup : public gfxTextRunFactory {
 public:
+    typedef mozilla::unicode::Script Script;
+
     static void Shutdown(); // platform must call this to release the languageAtomService
 
     gfxFontGroup(const mozilla::FontFamilyList& aFontFamilyList,
@@ -797,29 +800,32 @@ public:
      * textrun will copy it.
      * This calls FetchGlyphExtents on the textrun.
      */
-    virtual gfxTextRun *MakeTextRun(const char16_t *aString, uint32_t aLength,
-                                    const Parameters *aParams, uint32_t aFlags,
-                                    gfxMissingFontRecorder *aMFR);
+    virtual mozilla::UniquePtr<gfxTextRun>
+    MakeTextRun(const char16_t *aString, uint32_t aLength,
+                const Parameters *aParams, uint32_t aFlags,
+                gfxMissingFontRecorder *aMFR);
     /**
      * Make a textrun for a given string.
      * If aText is not persistent (aFlags & TEXT_IS_PERSISTENT), the
      * textrun will copy it.
      * This calls FetchGlyphExtents on the textrun.
      */
-    virtual gfxTextRun *MakeTextRun(const uint8_t *aString, uint32_t aLength,
-                                    const Parameters *aParams, uint32_t aFlags,
-                                    gfxMissingFontRecorder *aMFR);
+    virtual mozilla::UniquePtr<gfxTextRun>
+    MakeTextRun(const uint8_t *aString, uint32_t aLength,
+                const Parameters *aParams, uint32_t aFlags,
+                gfxMissingFontRecorder *aMFR);
 
     /**
      * Textrun creation helper for clients that don't want to pass
      * a full Parameters record.
      */
     template<typename T>
-    gfxTextRun* MakeTextRun(const T* aString, uint32_t aLength,
-                            DrawTarget* aRefDrawTarget,
-                            int32_t aAppUnitsPerDevUnit,
-                            uint32_t aFlags,
-                            gfxMissingFontRecorder *aMFR)
+    mozilla::UniquePtr<gfxTextRun>
+    MakeTextRun(const T* aString, uint32_t aLength,
+                DrawTarget* aRefDrawTarget,
+                int32_t aAppUnitsPerDevUnit,
+                uint32_t aFlags,
+                gfxMissingFontRecorder *aMFR)
     {
         gfxTextRunFactory::Parameters params = {
             aRefDrawTarget, nullptr, nullptr, nullptr, 0, aAppUnitsPerDevUnit
@@ -842,8 +848,8 @@ public:
      * The caller is responsible for deleting the returned text run
      * when no longer required.
      */
-    gfxTextRun* MakeHyphenTextRun(DrawTarget* aDrawTarget,
-                                  uint32_t aAppUnitsPerDevUnit);
+    mozilla::UniquePtr<gfxTextRun>
+    MakeHyphenTextRun(DrawTarget* aDrawTarget, uint32_t aAppUnitsPerDevUnit);
 
     /**
      * Check whether a given font (specified by its gfxFontEntry)
@@ -862,7 +868,7 @@ public:
 
     virtual already_AddRefed<gfxFont>
         FindFontForChar(uint32_t ch, uint32_t prevCh, uint32_t aNextCh,
-                        int32_t aRunScript, gfxFont *aPrevMatchedFont,
+                        Script aRunScript, gfxFont *aPrevMatchedFont,
                         uint8_t *aMatchType);
 
     gfxUserFontSet* GetUserFontSet();
@@ -911,12 +917,12 @@ protected:
 
     already_AddRefed<gfxFont>
         WhichSystemFontSupportsChar(uint32_t aCh, uint32_t aNextCh,
-                                    int32_t aRunScript);
+                                    Script aRunScript);
 
     template<typename T>
     void ComputeRanges(nsTArray<gfxTextRange>& mRanges,
                        const T *aString, uint32_t aLength,
-                       int32_t aRunScript, uint16_t aOrientation);
+                       Script aRunScript, uint16_t aOrientation);
 
     class FamilyFace {
     public:
@@ -1076,7 +1082,7 @@ protected:
 
     // Cache a textrun representing an ellipsis (useful for CSS text-overflow)
     // at a specific appUnitsPerDevPixel size and orientation
-    nsAutoPtr<gfxTextRun>   mCachedEllipsisTextRun;
+    mozilla::UniquePtr<gfxTextRun>   mCachedEllipsisTextRun;
 
     // cache the most recent pref font to avoid general pref font lookup
     RefPtr<gfxFontFamily> mLastPrefFamily;
@@ -1096,10 +1102,15 @@ protected:
      * Textrun creation short-cuts for special cases where we don't need to
      * call a font shaper to generate glyphs.
      */
-    gfxTextRun *MakeEmptyTextRun(const Parameters *aParams, uint32_t aFlags);
-    gfxTextRun *MakeSpaceTextRun(const Parameters *aParams, uint32_t aFlags);
-    gfxTextRun *MakeBlankTextRun(uint32_t aLength,
-                                 const Parameters *aParams, uint32_t aFlags);
+    mozilla::UniquePtr<gfxTextRun>
+    MakeEmptyTextRun(const Parameters *aParams, uint32_t aFlags);
+
+    mozilla::UniquePtr<gfxTextRun>
+    MakeSpaceTextRun(const Parameters *aParams, uint32_t aFlags);
+
+    mozilla::UniquePtr<gfxTextRun>
+    MakeBlankTextRun(uint32_t aLength, const Parameters *aParams,
+                     uint32_t aFlags);
 
     // Initialize the list of fonts
     void BuildFontList();
@@ -1138,21 +1149,15 @@ protected:
                        const T *aString,
                        uint32_t aScriptRunStart,
                        uint32_t aScriptRunEnd,
-                       int32_t aRunScript,
+                       Script aRunScript,
                        gfxMissingFontRecorder *aMFR);
 
     // Helper for font-matching:
-    // When matching the italic case, allow use of the regular face
-    // if it supports a character but the italic one doesn't.
-    // Return null if regular face doesn't support aCh
-    already_AddRefed<gfxFont>
-    FindNonItalicFaceForChar(gfxFontFamily* aFamily, uint32_t aCh);
-
     // search all faces in a family for a fallback in cases where it's unclear
     // whether the family might have a font for a given character
     already_AddRefed<gfxFont>
     FindFallbackFaceForChar(gfxFontFamily* aFamily, uint32_t aCh,
-                            int32_t aRunScript);
+                            Script aRunScript);
 
    // helper methods for looking up fonts
 
@@ -1193,10 +1198,10 @@ public:
     }
 
     // record this script code in our mMissingFonts bitset
-    void RecordScript(int32_t aScriptCode)
+    void RecordScript(mozilla::unicode::Script aScriptCode)
     {
-        mMissingFonts[uint32_t(aScriptCode) >> 5] |=
-            (1 << (uint32_t(aScriptCode) & 0x1f));
+        mMissingFonts[static_cast<uint32_t>(aScriptCode) >> 5] |=
+            (1 << (static_cast<uint32_t>(aScriptCode) & 0x1f));
     }
 
     // send a notification of any missing-scripts that have been
@@ -1213,7 +1218,7 @@ public:
 private:
     // Number of 32-bit words needed for the missing-script flags
     static const uint32_t kNumScriptBitsWords =
-        ((MOZ_NUM_SCRIPT_CODES + 31) / 32);
+        ((static_cast<int>(mozilla::unicode::Script::NUM_SCRIPT_CODES) + 31) / 32);
     uint32_t mMissingFonts[kNumScriptBitsWords];
 };
 

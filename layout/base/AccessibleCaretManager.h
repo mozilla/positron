@@ -135,10 +135,6 @@ protected:
   // Force hiding all carets regardless of the current selection status.
   void HideCarets();
 
-  // Force carets to be "present" logically, but not visible. Allows ActionBar
-  // to stay open when carets visibility is supressed during scroll.
-  void DoNotShowCarets();
-
   void UpdateCaretsForCursorMode(UpdateCaretsHint aHint);
   void UpdateCaretsForSelectionMode(UpdateCaretsHint aHint);
 
@@ -155,6 +151,12 @@ protected:
 
   nsresult SelectWord(nsIFrame* aFrame, const nsPoint& aPoint) const;
   void SetSelectionDragState(bool aState) const;
+
+  // Called to extend a selection if possible that it's a phone number.
+  void SelectMoreIfPhoneNumber() const;
+  // Extend the current phone number selection in the requested direction.
+  void ExtendPhoneNumberSelection(const nsAString& aDirection) const;
+
   void SetSelectionDirection(nsDirection aDir) const;
 
   // If aDirection is eDirNext, get the frame for the range start in the first
@@ -282,19 +284,24 @@ protected:
   // selection bar is always disabled in cursor mode.
   static bool sSelectionBarEnabled;
 
+  // Preference to allow smarter selection of phone numbers,
+  // when user long presses text to start.
+  static bool sExtendSelectionForPhoneNumber;
+
   // Preference to show caret in cursor mode when long tapping on an empty
   // content. This also changes the default update behavior in cursor mode,
   // which is based on the emptiness of the content, into something more
   // heuristic. See UpdateCaretsForCursorMode() for the details.
   static bool sCaretShownWhenLongTappingOnEmptyContent;
 
-  // Android specific visibility extensions correct compatibility issues
-  // with ActionBar visibility during page scroll.
-  static bool sCaretsExtendedVisibility;
-
   // Preference to make carets always tilt in selection mode. By default, the
   // carets become tilt only when they are overlapping.
   static bool sCaretsAlwaysTilt;
+
+  // Preference to allow carets always show when scrolling (either panning or
+  // zooming) the page. When set to false, carets will hide during scrolling,
+  // and show again after the user lifts the finger off the screen.
+  static bool sCaretsAlwaysShowWhenScrolling;
 
   // By default, javascript content selection changes closes AccessibleCarets and
   // UI interactions. Optionally, we can try to maintain the active UI, keeping

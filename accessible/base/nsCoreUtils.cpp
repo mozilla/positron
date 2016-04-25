@@ -113,7 +113,7 @@ nsCoreUtils::DispatchClickEvent(nsITreeBoxObject *aTreeBoxObj,
 
   nsPoint offset;
   nsIWidget *rootWidget =
-    rootFrame->GetViewExternal()->GetNearestWidget(&offset);
+    rootFrame->GetView()->GetNearestWidget(&offset);
 
   RefPtr<nsPresContext> presContext = presShell->GetPresContext();
 
@@ -138,7 +138,7 @@ nsCoreUtils::DispatchMouseEvent(EventMessage aMessage, int32_t aX, int32_t aY,
   WidgetMouseEvent event(true, aMessage, aRootWidget,
                          WidgetMouseEvent::eReal, WidgetMouseEvent::eNormal);
 
-  event.refPoint = LayoutDeviceIntPoint(aX, aY);
+  event.mRefPoint = LayoutDeviceIntPoint(aX, aY);
 
   event.clickCount = 1;
   event.button = WidgetMouseEvent::eLeftButton;

@@ -58,10 +58,8 @@ private:
   nsImageFrame *mFrame;
 };
 
-typedef nsAtomicContainerFrame ImageFrameSuper;
-
-class nsImageFrame : public ImageFrameSuper,
-                     public nsIReflowCallback {
+class nsImageFrame : public nsAtomicContainerFrame
+                   , public nsIReflowCallback {
 public:
   template <typename T> using Maybe = mozilla::Maybe<T>;
   using Nothing = mozilla::Nothing;
@@ -119,7 +117,7 @@ public:
 
   virtual bool IsFrameOfType(uint32_t aFlags) const override
   {
-    return ImageFrameSuper::IsFrameOfType(aFlags &
+    return nsAtomicContainerFrame::IsFrameOfType(aFlags &
       ~(nsIFrame::eReplaced | nsIFrame::eReplacedSizing));
   }
 
@@ -333,6 +331,7 @@ private:
   nsCOMPtr<imgINotificationObserver> mListener;
 
   nsCOMPtr<imgIContainer> mImage;
+  nsCOMPtr<imgIContainer> mPrevImage;
   nsSize mComputedSize;
   mozilla::IntrinsicSize mIntrinsicSize;
   nsSize mIntrinsicRatio;
@@ -413,8 +412,11 @@ public:
   typedef mozilla::layers::LayerManager LayerManager;
 
   nsDisplayImage(nsDisplayListBuilder* aBuilder, nsImageFrame* aFrame,
-                 imgIContainer* aImage)
-    : nsDisplayImageContainer(aBuilder, aFrame), mImage(aImage) {
+                 imgIContainer* aImage, imgIContainer* aPrevImage)
+    : nsDisplayImageContainer(aBuilder, aFrame)
+    , mImage(aImage)
+    , mPrevImage(aPrevImage)
+  {
     MOZ_COUNT_CTOR(nsDisplayImage);
   }
   virtual ~nsDisplayImage() {
@@ -463,6 +465,7 @@ public:
   NS_DISPLAY_DECL_NAME("Image", TYPE_IMAGE)
 private:
   nsCOMPtr<imgIContainer> mImage;
+  nsCOMPtr<imgIContainer> mPrevImage;
 };
 
 #endif /* nsImageFrame_h___ */

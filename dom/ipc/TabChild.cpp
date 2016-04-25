@@ -1655,13 +1655,15 @@ bool
 TabChild::RecvSizeModeChanged(const nsSizeMode& aSizeMode)
 {
   mPuppetWidget->SetSizeMode(aSizeMode);
+  if (!mPuppetWidget->IsVisible()) {
+    return true;
+  }
   nsCOMPtr<nsIDocument> document(GetDocument());
   nsCOMPtr<nsIPresShell> presShell = document->GetShell();
   if (presShell) {
     nsPresContext* presContext = presShell->GetPresContext();
     if (presContext) {
-      presContext->MediaFeatureValuesChangedAllDocuments(eRestyle_Subtree,
-                                                         NS_STYLE_HINT_REFLOW);
+      presContext->SizeModeChanged(aSizeMode);
     }
   }
   return true;
@@ -1856,7 +1858,7 @@ TabChild::RecvRealMouseButtonEvent(const WidgetMouseEvent& aEvent,
   InputAPZContext context(aGuid, aInputBlockId, unused);
 
   WidgetMouseEvent localEvent(aEvent);
-  localEvent.widget = mPuppetWidget;
+  localEvent.mWidget = mPuppetWidget;
   APZCCallbackHelper::ApplyCallbackTransform(localEvent, aGuid,
       mPuppetWidget->GetDefaultScale());
   APZCCallbackHelper::DispatchWidgetEvent(localEvent);
@@ -1879,7 +1881,7 @@ TabChild::RecvMouseWheelEvent(const WidgetWheelEvent& aEvent,
   }
 
   WidgetWheelEvent localEvent(aEvent);
-  localEvent.widget = mPuppetWidget;
+  localEvent.mWidget = mPuppetWidget;
   APZCCallbackHelper::ApplyCallbackTransform(localEvent, aGuid,
       mPuppetWidget->GetDefaultScale());
   APZCCallbackHelper::DispatchWidgetEvent(localEvent);
@@ -1923,7 +1925,7 @@ TabChild::RecvRealTouchEvent(const WidgetTouchEvent& aEvent,
   TABC_LOG("Receiving touch event of type %d\n", aEvent.mMessage);
 
   WidgetTouchEvent localEvent(aEvent);
-  localEvent.widget = mPuppetWidget;
+  localEvent.mWidget = mPuppetWidget;
 
   APZCCallbackHelper::ApplyCallbackTransform(localEvent, aGuid,
       mPuppetWidget->GetDefaultScale());
@@ -1968,7 +1970,7 @@ TabChild::RecvRealDragEvent(const WidgetDragEvent& aEvent,
                             const uint32_t& aDropEffect)
 {
   WidgetDragEvent localEvent(aEvent);
-  localEvent.widget = mPuppetWidget;
+  localEvent.mWidget = mPuppetWidget;
 
   nsCOMPtr<nsIDragSession> dragSession = nsContentUtils::GetDragSession();
   if (dragSession) {
@@ -2004,7 +2006,7 @@ bool
 TabChild::RecvPluginEvent(const WidgetPluginEvent& aEvent)
 {
   WidgetPluginEvent localEvent(aEvent);
-  localEvent.widget = mPuppetWidget;
+  localEvent.mWidget = mPuppetWidget;
   nsEventStatus status = APZCCallbackHelper::DispatchWidgetEvent(localEvent);
   if (status != nsEventStatus_eConsumeNoDefault) {
     // If not consumed, we should call default action
@@ -2063,7 +2065,7 @@ TabChild::RecvRealKeyEvent(const WidgetKeyboardEvent& event,
   }
 
   WidgetKeyboardEvent localEvent(event);
-  localEvent.widget = mPuppetWidget;
+  localEvent.mWidget = mPuppetWidget;
   nsEventStatus status = APZCCallbackHelper::DispatchWidgetEvent(localEvent);
 
   if (event.mMessage == eKeyDown) {
@@ -2098,7 +2100,7 @@ bool
 TabChild::RecvCompositionEvent(const WidgetCompositionEvent& event)
 {
   WidgetCompositionEvent localEvent(event);
-  localEvent.widget = mPuppetWidget;
+  localEvent.mWidget = mPuppetWidget;
   APZCCallbackHelper::DispatchWidgetEvent(localEvent);
   Unused << SendOnEventNeedingAckHandled(event.mMessage);
   return true;
@@ -2108,7 +2110,7 @@ bool
 TabChild::RecvSelectionEvent(const WidgetSelectionEvent& event)
 {
   WidgetSelectionEvent localEvent(event);
-  localEvent.widget = mPuppetWidget;
+  localEvent.mWidget = mPuppetWidget;
   APZCCallbackHelper::DispatchWidgetEvent(localEvent);
   Unused << SendOnEventNeedingAckHandled(event.mMessage);
   return true;
@@ -2483,6 +2485,18 @@ TabChild::RecvNavigateByKey(const bool& aForward, const bool& aForDocumentNaviga
   return true;
 }
 
+bool
+TabChild::RecvHandledWindowedPluginKeyEvent(
+            const NativeEventData& aKeyEventData,
+            const bool& aIsConsumed)
+{
+  if (NS_WARN_IF(!mPuppetWidget)) {
+    return true;
+  }
+  mPuppetWidget->HandledWindowedPluginKeyEvent(aKeyEventData, aIsConsumed);
+  return true;
+}
+
 PRenderFrameChild*
 TabChild::AllocPRenderFrameChild()
 {
@@ -2728,6 +2742,12 @@ TabChild::SendRequestFocus(bool aCanFocus)
 }
 
 void
+TabChild::SendGetTabCount(uint32_t* tabCount)
+{
+  PBrowserChild::SendGetTabCount(tabCount);
+}
+
+void
 TabChild::EnableDisableCommands(const nsAString& aAction,
                                 nsTArray<nsCString>& aEnabledCommands,
                                 nsTArray<nsCString>& aDisabledCommands)
@@ -2894,10 +2914,12 @@ TabChild::CompositorUpdated(const TextureFactoryIdentifier& aNewIdentifier)
 }
 
 NS_IMETHODIMP
-TabChild::OnShowTooltip(int32_t aXCoords, int32_t aYCoords, const char16_t *aTipText)
+TabChild::OnShowTooltip(int32_t aXCoords, int32_t aYCoords, const char16_t *aTipText,
+                        const char16_t *aTipDir)
 {
     nsString str(aTipText);
-    SendShowTooltip(aXCoords, aYCoords, str);
+    nsString dir(aTipDir);
+    SendShowTooltip(aXCoords, aYCoords, str, dir);
     return NS_OK;
 }
 

@@ -2376,25 +2376,36 @@ function URLBarSetURI(aURI) {
 }
 
 function losslessDecodeURI(aURI) {
-  if (aURI.schemeIs("moz-action"))
+  let scheme = aURI.scheme;
+  if (scheme == "moz-action")
     throw new Error("losslessDecodeURI should never get a moz-action URI");
 
   var value = aURI.spec;
 
+  let decodeASCIIOnly = !["https", "http", "file", "ftp"].includes(scheme);
   // Try to decode as UTF-8 if there's no encoding sequence that we would break.
-  if (!/%25(?:3B|2F|3F|3A|40|26|3D|2B|24|2C|23)/i.test(value))
-    try {
-      value = decodeURI(value)
-                // 1. decodeURI decodes %25 to %, which creates unintended
-                //    encoding sequences. Re-encode it, unless it's part of
-                //    a sequence that survived decodeURI, i.e. one for:
-                //    ';', '/', '?', ':', '@', '&', '=', '+', '$', ',', '#'
-                //    (RFC 3987 section 3.2)
-                // 2. Re-encode whitespace so that it doesn't get eaten away
-                //    by the location bar (bug 410726).
-                .replace(/%(?!3B|2F|3F|3A|40|26|3D|2B|24|2C|23)|[\r\n\t]/ig,
-                         encodeURIComponent);
-    } catch (e) {}
+  if (!/%25(?:3B|2F|3F|3A|40|26|3D|2B|24|2C|23)/i.test(value)) {
+    if (decodeASCIIOnly) {
+      // This only decodes ascii characters (hex) 20-7e, except 25 (%).
+      // This avoids both cases stipulated below (%-related issues, and \r, \n
+      // and \t, which would be %0d, %0a and %09, respectively) as well as any
+      // non-US-ascii characters.
+      value = value.replace(/%(2[0-4]|2[6-9a-f]|[3-6][0-9a-f]|7[0-9a-e])/g, decodeURI);
+    } else {
+      try {
+        value = decodeURI(value)
+                  // 1. decodeURI decodes %25 to %, which creates unintended
+                  //    encoding sequences. Re-encode it, unless it's part of
+                  //    a sequence that survived decodeURI, i.e. one for:
+                  //    ';', '/', '?', ':', '@', '&', '=', '+', '$', ',', '#'
+                  //    (RFC 3987 section 3.2)
+                  // 2. Re-encode whitespace so that it doesn't get eaten away
+                  //    by the location bar (bug 410726).
+                  .replace(/%(?!3B|2F|3F|3A|40|26|3D|2B|24|2C|23)|[\r\n\t]/ig,
+                           encodeURIComponent);
+      } catch (e) {}
+    }
+  }
 
   // Encode invisible characters (C0/C1 control characters, U+007F [DEL],
   // U+00A0 [no-break space], line and paragraph separator,
@@ -2486,9 +2497,11 @@ function PageProxyClickHandler(aEvent)
 
 var gMenuButtonBadgeManager = {
   BADGEID_APPUPDATE: "update",
+  BADGEID_DOWNLOAD: "download",
   BADGEID_FXA: "fxa",
 
   fxaBadge: null,
+  downloadBadge: null,
   appUpdateBadge: null,
 
   init: function () {
@@ -2506,7 +2519,7 @@ var gMenuButtonBadgeManager = {
   },
 
   _showBadge: function () {
-    let badgeToShow = this.appUpdateBadge || this.fxaBadge;
+    let badgeToShow = this.downloadBadge || this.appUpdateBadge || this.fxaBadge;
 
     if (badgeToShow) {
       PanelUI.menuButton.setAttribute("badge-status", badgeToShow);
@@ -2518,10 +2531,12 @@ var gMenuButtonBadgeManager = {
   _changeBadge: function (badgeId, badgeStatus = null) {
     if (badgeId == this.BADGEID_APPUPDATE) {
       this.appUpdateBadge = badgeStatus;
+    } else if (badgeId == this.BADGEID_DOWNLOAD) {
+      this.downloadBadge = badgeStatus;
     } else if (badgeId == this.BADGEID_FXA) {
       this.fxaBadge = badgeStatus;
     } else {
-      Cu.reportError("This badge ID is unknown!");
+      Cu.reportError("The badge ID '" + badgeId + "' is unknown!");
     }
     this._showBadge();
   },
@@ -2540,6 +2555,7 @@ var gMenuButtonBadgeManager = {
 
   clearBadges: function () {
     this.appUpdateBadge = null;
+    this.downloadBadge = null;
     this.fxaBadge = null;
     this._showBadge();
   }
@@ -2764,6 +2780,7 @@ var BrowserOnClick = {
 
   onCertError: function (browser, elementId, isTopFrame, location, securityInfoAsString) {
     let secHistogram = Services.telemetry.getHistogramById("SECURITY_UI");
+    let securityInfo;
 
     switch (elementId) {
       case "exceptionDialogButton":
@@ -2771,9 +2788,7 @@ var BrowserOnClick = {
           secHistogram.add(Ci.nsISecurityUITelemetry.WARNING_BAD_CERT_TOP_CLICK_ADD_EXCEPTION);
         }
 
-        let serhelper = Cc["@mozilla.org/network/serialization-helper;1"]
-                           .getService(Ci.nsISerializationHelper);
-        let securityInfo = serhelper.deserializeObject(securityInfoAsString);
+        securityInfo = getSecurityInfo(securityInfoAsString);
         let sslStatus = securityInfo.QueryInterface(Ci.nsISSLStatusProvider)
                                     .SSLStatus;
         let params = { exceptionAdded : false,
@@ -2811,17 +2826,21 @@ var BrowserOnClick = {
           secHistogram.add(Ci.nsISecurityUITelemetry.WARNING_BAD_CERT_TOP_UNDERSTAND_RISKS);
         }
 
+        securityInfo = getSecurityInfo(securityInfoAsString);
         let errorInfo = getDetailedCertErrorInfo(location,
-                                                 securityInfoAsString);
-        browser.messageManager.sendAsyncMessage("CertErrorDetails",
-                                                { info: errorInfo });
+                                                 securityInfo);
+        browser.messageManager.sendAsyncMessage( "CertErrorDetails", {
+            code: securityInfo.errorCode,
+            info: errorInfo
+        });
         break;
 
       case "copyToClipboard":
         const gClipboardHelper = Cc["@mozilla.org/widget/clipboardhelper;1"]
                                     .getService(Ci.nsIClipboardHelper);
+        securityInfo = getSecurityInfo(securityInfoAsString);
         let detailedInfo = getDetailedCertErrorInfo(location,
-                                                    securityInfoAsString);
+                                                    securityInfo);
         gClipboardHelper.copyString(detailedInfo);
         break;
 
@@ -3083,24 +3102,31 @@ function BrowserReloadWithFlags(reloadFlags) {
                               handlingUserInput: windowUtils.isHandlingUserInput });
 }
 
-/**
- * Returns a string with detailed information about the certificate validation
- * failure from the specified URI that can be used to send a report.
- */
-function getDetailedCertErrorInfo(location, securityInfoAsString) {
+function getSecurityInfo(securityInfoAsString) {
   if (!securityInfoAsString)
-    return "";
-
-  let certErrorDetails = location;
+    return null;
 
   const serhelper = Cc["@mozilla.org/network/serialization-helper;1"]
                        .getService(Ci.nsISerializationHelper);
   let securityInfo = serhelper.deserializeObject(securityInfoAsString);
   securityInfo.QueryInterface(Ci.nsITransportSecurityInfo);
 
+  return securityInfo;
+}
+
+/**
+ * Returns a string with detailed information about the certificate validation
+ * failure from the specified URI that can be used to send a report.
+ */
+function getDetailedCertErrorInfo(location, securityInfo) {
+  if (!securityInfo)
+    return "";
+
+  let certErrorDetails = location;
+  let code = securityInfo.errorCode;
   let errors = Cc["@mozilla.org/nss_errors_service;1"]
                   .getService(Ci.nsINSSErrorsService);
-  let code = securityInfo.errorCode;
+
   certErrorDetails += "\r\n\r\n" + errors.getErrorMessage(errors.getXPCOMFromNSSError(code));
 
   const sss = Cc["@mozilla.org/ssservice;1"]
@@ -3409,9 +3435,6 @@ const DOMLinkHandler = {
 
 const BrowserSearch = {
   addEngine: function(browser, engine, uri) {
-    if (!this.searchBar)
-      return;
-
     // Check to see whether we've already added an engine with this title
     if (browser.engines) {
       if (browser.engines.some(e => e.title == engine.title))
@@ -3449,11 +3472,7 @@ const BrowserSearch = {
    */
   updateOpenSearchBadge: function() {
     var searchBar = this.searchBar;
-
-    // The search bar binding might not be applied even though the element is
-    // in the document (e.g. when the navigation toolbar is hidden), so check
-    // for .textbox specifically.
-    if (!searchBar || !searchBar.textbox)
+    if (!searchBar)
       return;
 
     var engines = gBrowser.selectedBrowser.engines;
@@ -3727,9 +3746,12 @@ function FillHistoryMenu(aParent) {
         // if there is only one entry now, close the popup.
         aParent.hidePopup();
         return;
-      } else if (!aParent.parentNode.open) {
+      } else if (aParent.id != "backForwardMenu" && !aParent.parentNode.open) {
         // if the popup wasn't open before, but now needs to be, reopen the menu.
-        // It should trigger FillHistoryMenu again.
+        // It should trigger FillHistoryMenu again. This might happen with the
+        // delay from click-and-hold menus but skip this for the context menu
+        // (backForwardMenu) rather than figuring out how the menu should be
+        // positioned and opened as it is an extreme edgecase.
         aParent.parentNode.open = true;
         return;
       }
@@ -4119,7 +4141,7 @@ var XULBrowserWindow = {
     LinkTargetDisplay.update();
   },
 
-  showTooltip: function (x, y, tooltip) {
+  showTooltip: function (x, y, tooltip, direction) {
     if (Cc["@mozilla.org/widget/dragservice;1"].getService(Ci.nsIDragService).
         getCurrentSession()) {
       return;
@@ -4129,6 +4151,7 @@ var XULBrowserWindow = {
     // the chrome zoom level.
     let elt = document.getElementById("remoteBrowserTooltip");
     elt.label = tooltip;
+    elt.style.direction = direction;
 
     let anchor = gBrowser.selectedBrowser;
     elt.openPopupAtScreen(anchor.boxObject.screenX + x, anchor.boxObject.screenY + y, false, null);
@@ -4137,6 +4160,10 @@ var XULBrowserWindow = {
   hideTooltip: function () {
     let elt = document.getElementById("remoteBrowserTooltip");
     elt.hidePopup();
+  },
+
+  getTabCount: function () {
+    return gBrowser.tabs.length;
   },
 
   updateStatusField: function () {
@@ -6418,11 +6445,19 @@ var gIdentityHandler = {
   },
 
   get _isSecure() {
-    return this._state & Ci.nsIWebProgressListener.STATE_IS_SECURE;
+    // If a <browser> is included within a chrome document, then this._state
+    // will refer to the security state for the <browser> and not the top level
+    // document. In this case, don't upgrade the security state in the UI
+    // with the secure state of the embedded <browser>.
+    return !this._isURILoadedFromFile && this._state & Ci.nsIWebProgressListener.STATE_IS_SECURE;
   },
 
   get _isEV() {
-    return this._state & Ci.nsIWebProgressListener.STATE_IDENTITY_EV_TOPLEVEL;
+    // If a <browser> is included within a chrome document, then this._state
+    // will refer to the security state for the <browser> and not the top level
+    // document. In this case, don't upgrade the security state in the UI
+    // with the EV state of the embedded <browser>.
+    return !this._isURILoadedFromFile && this._state & Ci.nsIWebProgressListener.STATE_IDENTITY_EV_TOPLEVEL;
   },
 
   get _isMixedActiveContentLoaded() {
@@ -6457,10 +6492,13 @@ var gIdentityHandler = {
     delete this._identityBox;
     return this._identityBox = document.getElementById("identity-box");
   },
-  get _identityPopupContentHost () {
-    delete this._identityPopupContentHost;
-    return this._identityPopupContentHost =
-      document.getElementById("identity-popup-content-host");
+  get _identityPopupContentHosts () {
+    delete this._identityPopupContentHosts;
+    return this._identityPopupContentHosts = [...document.querySelectorAll(".identity-popup-headline.host")];
+  },
+  get _identityPopupContentHostless () {
+    delete this._identityPopupContentHostless;
+    return this._identityPopupContentHostless = [...document.querySelectorAll(".identity-popup-headline.hostless")];
   },
   get _identityPopupContentOwner () {
     delete this._identityPopupContentOwner;
@@ -6614,21 +6652,10 @@ var gIdentityHandler = {
   updateIdentity(state, uri) {
     let shouldHidePopup = this._uri && (this._uri.spec != uri.spec);
     this._state = state;
-    this._uri = uri;
 
     // Firstly, populate the state properties required to display the UI. See
     // the documentation of the individual properties for details.
-
-    try {
-      this._uri.host;
-      this._uriHasHost = true;
-    } catch (ex) {
-      this._uriHasHost = false;
-    }
-
-    let whitelist = /^(?:accounts|addons|cache|config|crashes|customizing|downloads|healthreport|home|license|newaddon|permissions|preferences|privatebrowsing|rights|sessionrestore|support|welcomeback)(?:[?#]|$)/i;
-    this._isSecureInternalUI = uri.schemeIs("about") && whitelist.test(uri.path);
-
+    this.setURI(uri);
     this._sslStatus = gBrowser.securityUI
                               .QueryInterface(Ci.nsISSLStatusProvider)
                               .SSLStatus;
@@ -6914,7 +6941,7 @@ var gIdentityHandler = {
     let verifier = "";
     let host = "";
     let owner = "";
-    let crop = "start";
+    let hostless = false;
 
     try {
       host = this.getEffectiveHost();
@@ -6927,7 +6954,7 @@ var gIdentityHandler = {
       host = this._uri.specIgnoringRef;
       // Special URIs without a host (eg, about:) should crop the end so
       // the protocol can be seen.
-      crop = "end";
+      hostless = true;
     }
 
     // Fill in the CA name if we have a valid TLS certificate.
@@ -6937,8 +6964,6 @@ var gIdentityHandler = {
 
     // Fill in organization information if we have a valid EV certificate.
     if (this._isEV) {
-      crop = "end";
-
       let iData = this.getIdentityData();
       host = owner = iData.subjectOrg;
       verifier = this._identityBox.tooltipText;
@@ -6955,11 +6980,15 @@ var gIdentityHandler = {
         supplemental += iData.country;
     }
 
-    // Push the appropriate strings out to the UI. Need to use |value| for the
-    // host as it's a <label> that will be cropped if too long. Using
-    // |textContent| would simply wrap the value.
-    this._identityPopupContentHost.setAttribute("crop", crop);
-    this._identityPopupContentHost.setAttribute("value", host);
+    // Push the appropriate strings out to the UI.
+    this._identityPopupContentHosts.forEach((el) => {
+      el.textContent = host;
+      el.hidden = hostless;
+    });
+    this._identityPopupContentHostless.forEach((el) => {
+      el.setAttribute("value", host);
+      el.hidden = !hostless;
+    });
     this._identityPopupContentOwner.textContent = owner;
     this._identityPopupContentSupp.textContent = supplemental;
     this._identityPopupContentVerif.textContent = verifier;
@@ -6968,9 +6997,22 @@ var gIdentityHandler = {
     this.updateSitePermissions();
   },
 
-  get _isURILoadedFromFile() {
+  setURI(uri) {
+    this._uri = uri;
+
+    try {
+      this._uri.host;
+      this._uriHasHost = true;
+    } catch (ex) {
+      this._uriHasHost = false;
+    }
+
+    let whitelist = /^(?:accounts|addons|cache|config|crashes|customizing|downloads|healthreport|home|license|newaddon|permissions|preferences|privatebrowsing|rights|sessionrestore|support|welcomeback)(?:[?#]|$)/i;
+    this._isSecureInternalUI = uri.schemeIs("about") && whitelist.test(uri.path);
+
     // Create a channel for the sole purpose of getting the resolved URI
     // of the request to determine if it's loaded from the file system.
+    this._isURILoadedFromFile = false;
     let chanOptions = {uri: this._uri, loadUsingSystemPrincipal: true};
     let resolvedURI;
     try {
@@ -6980,13 +7022,11 @@ var gIdentityHandler = {
         // create a new URI using <jar-file-uri>!/<jar-entry>
         resolvedURI = NetUtil.newURI(resolvedURI.path);
       }
+      // Check the URI again after resolving.
+      this._isURILoadedFromFile = resolvedURI.schemeIs("file");
     } catch (ex) {
       // NetUtil's methods will throw for malformed URIs and the like
-      return false;
     }
-
-    // Check the URI again after resolving.
-    return resolvedURI.schemeIs("file");
   },
 
   /**

@@ -2257,12 +2257,10 @@ LIRGenerator::visitRegExpMatcher(MRegExpMatcher* ins)
     MOZ_ASSERT(ins->regexp()->type() == MIRType_Object);
     MOZ_ASSERT(ins->string()->type() == MIRType_String);
     MOZ_ASSERT(ins->lastIndex()->type() == MIRType_Int32);
-    MOZ_ASSERT(ins->sticky()->type() == MIRType_Boolean);
 
     LRegExpMatcher* lir = new(alloc()) LRegExpMatcher(useFixedAtStart(ins->regexp(), RegExpMatcherRegExpReg),
                                                       useFixedAtStart(ins->string(), RegExpMatcherStringReg),
-                                                      useFixedAtStart(ins->lastIndex(), RegExpMatcherLastIndexReg),
-                                                      useFixedAtStart(ins->sticky(), RegExpMatcherStickyReg));
+                                                      useFixedAtStart(ins->lastIndex(), RegExpMatcherLastIndexReg));
     defineReturn(lir, ins);
     assignSafepoint(lir, ins);
 }
@@ -2273,12 +2271,10 @@ LIRGenerator::visitRegExpSearcher(MRegExpSearcher* ins)
     MOZ_ASSERT(ins->regexp()->type() == MIRType_Object);
     MOZ_ASSERT(ins->string()->type() == MIRType_String);
     MOZ_ASSERT(ins->lastIndex()->type() == MIRType_Int32);
-    MOZ_ASSERT(ins->sticky()->type() == MIRType_Boolean);
 
     LRegExpSearcher* lir = new(alloc()) LRegExpSearcher(useFixedAtStart(ins->regexp(), RegExpTesterRegExpReg),
                                                         useFixedAtStart(ins->string(), RegExpTesterStringReg),
-                                                        useFixedAtStart(ins->lastIndex(), RegExpTesterLastIndexReg),
-                                                        useFixedAtStart(ins->sticky(), RegExpTesterStickyReg));
+                                                        useFixedAtStart(ins->lastIndex(), RegExpTesterLastIndexReg));
     defineReturn(lir, ins);
     assignSafepoint(lir, ins);
 }
@@ -2289,12 +2285,10 @@ LIRGenerator::visitRegExpTester(MRegExpTester* ins)
     MOZ_ASSERT(ins->regexp()->type() == MIRType_Object);
     MOZ_ASSERT(ins->string()->type() == MIRType_String);
     MOZ_ASSERT(ins->lastIndex()->type() == MIRType_Int32);
-    MOZ_ASSERT(ins->sticky()->type() == MIRType_Boolean);
 
     LRegExpTester* lir = new(alloc()) LRegExpTester(useFixedAtStart(ins->regexp(), RegExpTesterRegExpReg),
                                                     useFixedAtStart(ins->string(), RegExpTesterStringReg),
-                                                    useFixedAtStart(ins->lastIndex(), RegExpTesterLastIndexReg),
-                                                    useFixedAtStart(ins->sticky(), RegExpTesterStickyReg));
+                                                    useFixedAtStart(ins->lastIndex(), RegExpTesterLastIndexReg));
     defineReturn(lir, ins);
     assignSafepoint(lir, ins);
 }
@@ -2357,6 +2351,17 @@ LIRGenerator::visitUnarySharedStub(MUnarySharedStub* ins)
     MOZ_ASSERT(ins->type() == MIRType_Value);
 
     LUnarySharedStub* lir = new(alloc()) LUnarySharedStub(useBoxFixedAtStart(input, R0));
+    defineSharedStubReturn(lir, ins);
+    assignSafepoint(lir, ins);
+}
+
+void
+LIRGenerator::visitNullarySharedStub(MNullarySharedStub* ins)
+{
+    MOZ_ASSERT(ins->type() == MIRType_Value);
+
+    LNullarySharedStub* lir = new(alloc()) LNullarySharedStub();
+
     defineSharedStubReturn(lir, ins);
     assignSafepoint(lir, ins);
 }

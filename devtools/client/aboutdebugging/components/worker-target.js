@@ -17,10 +17,15 @@ const Strings = Services.strings.createBundle(
 module.exports = createClass({
   displayName: "WorkerTarget",
 
+  debug() {
+    let { client, target } = this.props;
+    debugWorker(client, target.workerActor);
+  },
+
   render() {
     let { target, debugDisabled } = this.props;
 
-    return dom.div({ className: "target-container" },
+    return dom.li({ className: "target-container" },
       dom.img({
         className: "target-icon",
         role: "presentation",
@@ -35,10 +40,5 @@ module.exports = createClass({
         disabled: debugDisabled
       }, Strings.GetStringFromName("debug"))
     );
-  },
-
-  debug() {
-    let { client, target } = this.props;
-    debugWorker(client, target.workerActor);
   }
 });

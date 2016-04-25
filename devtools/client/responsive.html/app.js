@@ -11,25 +11,30 @@ const { createClass, createFactory, PropTypes, DOM: dom } =
 const { connect } = require("devtools/client/shared/vendor/react-redux");
 
 const {
+  updateDeviceDisplayed,
+  updateDeviceModalOpen,
+} = require("./actions/devices");
+const {
   changeDevice,
   resizeViewport,
   rotateViewport
 } = require("./actions/viewports");
 const { takeScreenshot } = require("./actions/screenshot");
-const Types = require("./types");
-const Viewports = createFactory(require("./components/viewports"));
+const DeviceModal = createFactory(require("./components/device-modal"));
 const GlobalToolbar = createFactory(require("./components/global-toolbar"));
+const Viewports = createFactory(require("./components/viewports"));
+const { updateDeviceList } = require("./devices");
+const Types = require("./types");
 
 let App = createClass({
-
-  displayName: "App",
-
   propTypes: {
     devices: PropTypes.shape(Types.devices).isRequired,
     location: Types.location.isRequired,
     viewports: PropTypes.arrayOf(PropTypes.shape(Types.viewport)).isRequired,
     screenshot: PropTypes.shape(Types.screenshot).isRequired,
   },
+
+  displayName: "App",
 
   onBrowserMounted() {
     window.postMessage({ type: "browser-mounted" }, "*");
@@ -45,6 +50,10 @@ let App = createClass({
       width,
       height,
     }, "*");
+  },
+
+  onDeviceListUpdate(devices) {
+    updateDeviceList(devices);
   },
 
   onExit() {
@@ -63,6 +72,14 @@ let App = createClass({
     this.props.dispatch(takeScreenshot());
   },
 
+  onUpdateDeviceDisplayed(device, deviceType, displayed) {
+    this.props.dispatch(updateDeviceDisplayed(device, deviceType, displayed));
+  },
+
+  onUpdateDeviceModalOpen(isOpen) {
+    this.props.dispatch(updateDeviceModalOpen(isOpen));
+  },
+
   render() {
     let {
       devices,
@@ -75,10 +92,13 @@ let App = createClass({
       onBrowserMounted,
       onChangeViewportDevice,
       onContentResize,
+      onDeviceListUpdate,
       onExit,
       onResizeViewport,
       onRotateViewport,
       onScreenshot,
+      onUpdateDeviceDisplayed,
+      onUpdateDeviceModalOpen,
     } = this;
 
     return dom.div(
@@ -100,6 +120,13 @@ let App = createClass({
         onContentResize,
         onRotateViewport,
         onResizeViewport,
+        onUpdateDeviceModalOpen,
+      }),
+      DeviceModal({
+        devices,
+        onDeviceListUpdate,
+        onUpdateDeviceDisplayed,
+        onUpdateDeviceModalOpen,
       })
     );
   },

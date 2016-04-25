@@ -505,8 +505,7 @@ APZCCallbackHelper::ApplyCallbackTransform(WidgetEvent& aEvent,
           event.mTouches[i]->mRefPoint, aGuid, aScale);
     }
   } else {
-    aEvent.refPoint = ApplyCallbackTransform(
-        aEvent.refPoint, aGuid, aScale);
+    aEvent.mRefPoint = ApplyCallbackTransform(aEvent.mRefPoint, aGuid, aScale);
   }
 }
 
@@ -514,8 +513,8 @@ nsEventStatus
 APZCCallbackHelper::DispatchWidgetEvent(WidgetGUIEvent& aEvent)
 {
   nsEventStatus status = nsEventStatus_eConsumeNoDefault;
-  if (aEvent.widget) {
-    aEvent.widget->DispatchEvent(&aEvent, status);
+  if (aEvent.mWidget) {
+    aEvent.mWidget->DispatchEvent(&aEvent, status);
   }
   return status;
 }
@@ -530,9 +529,9 @@ APZCCallbackHelper::DispatchSynthesizedMouseEvent(EventMessage aMsg,
   MOZ_ASSERT(aMsg == eMouseMove || aMsg == eMouseDown ||
              aMsg == eMouseUp || aMsg == eMouseLongTap);
 
-  WidgetMouseEvent event(true, aMsg, nullptr,
+  WidgetMouseEvent event(true, aMsg, aWidget,
                          WidgetMouseEvent::eReal, WidgetMouseEvent::eNormal);
-  event.refPoint = LayoutDeviceIntPoint(aRefPoint.x, aRefPoint.y);
+  event.mRefPoint = LayoutDeviceIntPoint(aRefPoint.x, aRefPoint.y);
   event.mTime = aTime;
   event.button = WidgetMouseEvent::eLeftButton;
   event.inputSource = nsIDOMMouseEvent::MOZ_SOURCE_TOUCH;
@@ -541,7 +540,6 @@ APZCCallbackHelper::DispatchSynthesizedMouseEvent(EventMessage aMsg,
     event.clickCount = 1;
   }
   event.mModifiers = aModifiers;
-  event.widget = aWidget;
 
   return DispatchWidgetEvent(event);
 }
@@ -811,7 +809,7 @@ APZCCallbackHelper::SendSetTargetAPZCNotification(nsIWidget* aWidget,
         }
       } else if (const WidgetWheelEvent* wheelEvent = aEvent.AsWheelEvent()) {
         waitForRefresh = PrepareForSetTargetAPZCNotification(aWidget, aGuid,
-            rootFrame, wheelEvent->refPoint, &targets);
+            rootFrame, wheelEvent->mRefPoint, &targets);
       }
       // TODO: Do other types of events need to be handled?
 
@@ -881,6 +879,7 @@ APZCCallbackHelper::NotifyFlushComplete(nsIPresShell* aShell)
 }
 
 static int32_t sActiveSuppressDisplayport = 0;
+static bool sDisplayPortSuppressionRespected = true;
 
 void
 APZCCallbackHelper::SuppressDisplayport(const bool& aEnabled,
@@ -889,8 +888,11 @@ APZCCallbackHelper::SuppressDisplayport(const bool& aEnabled,
   if (aEnabled) {
     sActiveSuppressDisplayport++;
   } else {
+    bool isSuppressed = IsDisplayportSuppressed();
     sActiveSuppressDisplayport--;
-    if (sActiveSuppressDisplayport == 0 && aShell && aShell->GetRootFrame()) {
+    if (isSuppressed && !IsDisplayportSuppressed() &&
+        aShell && aShell->GetRootFrame()) {
+      // We unsuppressed the displayport, trigger a paint
       aShell->GetRootFrame()->SchedulePaint();
     }
   }
@@ -898,10 +900,24 @@ APZCCallbackHelper::SuppressDisplayport(const bool& aEnabled,
   MOZ_ASSERT(sActiveSuppressDisplayport >= 0);
 }
 
+void
+APZCCallbackHelper::RespectDisplayPortSuppression(bool aEnabled,
+                                                  const nsCOMPtr<nsIPresShell>& aShell)
+{
+  bool isSuppressed = IsDisplayportSuppressed();
+  sDisplayPortSuppressionRespected = aEnabled;
+  if (isSuppressed && !IsDisplayportSuppressed() &&
+      aShell && aShell->GetRootFrame()) {
+    // We unsuppressed the displayport, trigger a paint
+    aShell->GetRootFrame()->SchedulePaint();
+  }
+}
+
 bool
 APZCCallbackHelper::IsDisplayportSuppressed()
 {
-  return sActiveSuppressDisplayport > 0;
+  return sDisplayPortSuppressionRespected
+      && sActiveSuppressDisplayport > 0;
 }
 
 /* static */ bool

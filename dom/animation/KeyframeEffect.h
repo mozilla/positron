@@ -274,12 +274,6 @@ public:
   void
   GetComputedTimingAsDict(ComputedTimingProperties& aRetVal) const override;
 
-  // Return the duration of the active interval for the given duration and
-  // iteration count.
-  static StickyTimeDuration
-  ActiveDuration(const StickyTimeDuration& aIterationDuration,
-                 double aIterationCount);
-
   bool IsInPlay() const;
   bool IsCurrent() const;
   bool IsInEffect() const;
@@ -287,6 +281,8 @@ public:
   void SetAnimation(Animation* aAnimation);
   Animation* GetAnimation() const { return mAnimation; }
 
+  void SetFrames(JSContext* aContext, JS::Handle<JSObject*> aFrames,
+                 ErrorResult& aRv);
   void SetFrames(nsTArray<Keyframe>&& aFrames, nsStyleContext* aStyleContext);
   const AnimationProperty*
   GetAnimationOfProperty(nsCSSProperty aProperty) const;
@@ -372,7 +368,7 @@ protected:
   nsCOMPtr<Element> mTarget;
   RefPtr<Animation> mAnimation;
 
-  OwningNonNull<AnimationEffectTimingReadOnly> mTiming;
+  RefPtr<AnimationEffectTimingReadOnly> mTiming;
   CSSPseudoElementType mPseudoType;
 
   // The specified keyframes.

@@ -3091,10 +3091,6 @@ class MNewArray
         return convertDoubleElements_;
     }
 
-    // Returns true if the code generator should call through to the
-    // VM rather than the fast path.
-    bool shouldUseVM() const;
-
     // NewArray is marked as non-effectful because all our allocations are
     // either lazy when we are using "new Array(length)" or bounded by the
     // script or the stack size when we are using "new Array(...)" or "[...]"
@@ -3213,7 +3209,7 @@ class MNewObject
         initialHeap_(initialHeap),
         mode_(mode)
     {
-        MOZ_ASSERT_IF(mode != ObjectLiteral, !shouldUseVM());
+        MOZ_ASSERT_IF(mode != ObjectLiteral, templateObject());
         setResultType(MIRType_Object);
 
         if (JSObject* obj = templateObject())
@@ -3237,10 +3233,6 @@ class MNewObject
     {
         return new(alloc) MNewObject(constraints, templateConst, initialHeap, mode);
     }
-
-    // Returns true if the code generator should call through to the
-    // VM rather than the fast path.
-    bool shouldUseVM() const;
 
     Mode mode() const {
         return mode_;
@@ -6421,6 +6413,8 @@ class MPow
         return false;
     }
 
+    MDefinition* foldsTo(TempAllocator& alloc) override;
+
     ALLOW_CLONE(MPow)
 };
 
@@ -7248,7 +7242,8 @@ class MPhi final
     public InlineListNode<MPhi>,
     public NoTypePolicy::Data
 {
-    js::Vector<MUse, 2, JitAllocPolicy> inputs_;
+    using InputVector = js::Vector<MUse, 2, JitAllocPolicy>;
+    InputVector inputs_;
 
     TruncateKind truncateKind_;
     bool hasBackedgeType_;
@@ -7354,29 +7349,30 @@ class MPhi final
 
     // Add types for this phi which speculate about new inputs that may come in
     // via a loop backedge.
-    bool addBackedgeType(MIRType type, TemporaryTypeSet* typeSet);
+    MOZ_WARN_UNUSED_RESULT bool addBackedgeType(MIRType type, TemporaryTypeSet* typeSet);
 
     // Initializes the operands vector to the given capacity,
     // permitting use of addInput() instead of addInputSlow().
-    bool reserveLength(size_t length) {
+    MOZ_WARN_UNUSED_RESULT bool reserveLength(size_t length) {
         return inputs_.reserve(length);
     }
 
     // Use only if capacity has been reserved by reserveLength
     void addInput(MDefinition* ins) {
-        // Use infallibleGrowByUninitialized and placement-new instead of just
-        // infallibleAppend to avoid creating a temporary MUse which will get
-        // linked into |ins|'s use list and then unlinked in favor of the
-        // MUse in the Vector. We'd ideally like to use an emplace method here,
-        // once Vector supports that.
-        inputs_.infallibleGrowByUninitialized(1);
-        new (&inputs_.back()) MUse(ins, this);
+        inputs_.infallibleEmplaceBack(ins, this);
     }
 
     // Appends a new input to the input vector. May perform reallocation.
     // Prefer reserveLength() and addInput() instead, where possible.
-    bool addInputSlow(MDefinition* ins) {
+    MOZ_WARN_UNUSED_RESULT bool addInputSlow(MDefinition* ins) {
         return inputs_.emplaceBack(ins, this);
+    }
+
+    // Appends a new input to the input vector. Infallible because
+    // we know the inputs fits in the vector's inline storage.
+    void addInlineInput(MDefinition* ins) {
+        MOZ_ASSERT(inputs_.length() < InputVector::InlineLength);
+        MOZ_ALWAYS_TRUE(addInputSlow(ins));
     }
 
     // Update the type of this phi after adding |ins| as an input. Set
@@ -7604,6 +7600,24 @@ class MUnarySharedStub
     static MUnarySharedStub* New(TempAllocator& alloc, MDefinition* input)
     {
         return new(alloc) MUnarySharedStub(input);
+    }
+};
+
+class MNullarySharedStub
+  : public MNullaryInstruction
+{
+    explicit MNullarySharedStub()
+      : MNullaryInstruction()
+    {
+        setResultType(MIRType_Value);
+    }
+
+  public:
+    INSTRUCTION_HEADER(NullarySharedStub)
+
+    static MNullarySharedStub* New(TempAllocator& alloc)
+    {
+        return new(alloc) MNullarySharedStub();
     }
 };
 
@@ -7887,22 +7901,19 @@ class MRegExp : public MNullaryInstruction
 };
 
 class MRegExpMatcher
-  : public MAryInstruction<4>,
-    public Mix4Policy<ObjectPolicy<0>,
+  : public MAryInstruction<3>,
+    public Mix3Policy<ObjectPolicy<0>,
                       StringPolicy<1>,
-                      IntPolicy<2>,
-                      BooleanPolicy<3> >::Data
+                      IntPolicy<2> >::Data
 {
   private:
 
-    MRegExpMatcher(MDefinition* regexp, MDefinition* string, MDefinition* lastIndex,
-                   MDefinition* sticky)
-      : MAryInstruction<4>()
+    MRegExpMatcher(MDefinition* regexp, MDefinition* string, MDefinition* lastIndex)
+      : MAryInstruction<3>()
     {
         initOperand(0, regexp);
         initOperand(1, string);
         initOperand(2, lastIndex);
-        initOperand(3, sticky);
 
         setMovable();
         // May be object or null.
@@ -7913,9 +7924,9 @@ class MRegExpMatcher
     INSTRUCTION_HEADER(RegExpMatcher)
 
     static MRegExpMatcher* New(TempAllocator& alloc, MDefinition* regexp, MDefinition* string,
-                               MDefinition* lastIndex, MDefinition* sticky)
+                               MDefinition* lastIndex)
     {
-        return new(alloc) MRegExpMatcher(regexp, string, lastIndex, sticky);
+        return new(alloc) MRegExpMatcher(regexp, string, lastIndex);
     }
 
     MDefinition* regexp() const {
@@ -7926,9 +7937,6 @@ class MRegExpMatcher
     }
     MDefinition* lastIndex() const {
         return getOperand(2);
-    }
-    MDefinition* sticky() const {
-        return getOperand(3);
     }
 
     bool writeRecoverData(CompactBufferWriter& writer) const override;
@@ -7943,22 +7951,19 @@ class MRegExpMatcher
 };
 
 class MRegExpSearcher
-  : public MAryInstruction<4>,
-    public Mix4Policy<ObjectPolicy<0>,
+  : public MAryInstruction<3>,
+    public Mix3Policy<ObjectPolicy<0>,
                       StringPolicy<1>,
-                      IntPolicy<2>,
-                      BooleanPolicy<3> >::Data
+                      IntPolicy<2> >::Data
 {
   private:
 
-    MRegExpSearcher(MDefinition* regexp, MDefinition* string, MDefinition* lastIndex,
-                    MDefinition* sticky)
-      : MAryInstruction<4>()
+    MRegExpSearcher(MDefinition* regexp, MDefinition* string, MDefinition* lastIndex)
+      : MAryInstruction<3>()
     {
         initOperand(0, regexp);
         initOperand(1, string);
         initOperand(2, lastIndex);
-        initOperand(3, sticky);
 
         setMovable();
         setResultType(MIRType_Int32);
@@ -7968,9 +7973,9 @@ class MRegExpSearcher
     INSTRUCTION_HEADER(RegExpSearcher)
 
     static MRegExpSearcher* New(TempAllocator& alloc, MDefinition* regexp, MDefinition* string,
-                                MDefinition* lastIndex, MDefinition* sticky)
+                                MDefinition* lastIndex)
     {
-        return new(alloc) MRegExpSearcher(regexp, string, lastIndex, sticky);
+        return new(alloc) MRegExpSearcher(regexp, string, lastIndex);
     }
 
     MDefinition* regexp() const {
@@ -7981,9 +7986,6 @@ class MRegExpSearcher
     }
     MDefinition* lastIndex() const {
         return getOperand(2);
-    }
-    MDefinition* sticky() const {
-        return getOperand(3);
     }
 
     bool writeRecoverData(CompactBufferWriter& writer) const override;
@@ -7998,22 +8000,19 @@ class MRegExpSearcher
 };
 
 class MRegExpTester
-  : public MAryInstruction<4>,
-    public Mix4Policy<ObjectPolicy<0>,
+  : public MAryInstruction<3>,
+    public Mix3Policy<ObjectPolicy<0>,
                       StringPolicy<1>,
-                      IntPolicy<2>,
-                      BooleanPolicy<3> >::Data
+                      IntPolicy<2> >::Data
 {
   private:
 
-    MRegExpTester(MDefinition* regexp, MDefinition* string, MDefinition* lastIndex,
-                  MDefinition* sticky)
-      : MAryInstruction<4>()
+    MRegExpTester(MDefinition* regexp, MDefinition* string, MDefinition* lastIndex)
+      : MAryInstruction<3>()
     {
         initOperand(0, regexp);
         initOperand(1, string);
         initOperand(2, lastIndex);
-        initOperand(3, sticky);
 
         setMovable();
         setResultType(MIRType_Int32);
@@ -8023,9 +8022,9 @@ class MRegExpTester
     INSTRUCTION_HEADER(RegExpTester)
 
     static MRegExpTester* New(TempAllocator& alloc, MDefinition* regexp, MDefinition* string,
-                              MDefinition* lastIndex, MDefinition* sticky)
+                              MDefinition* lastIndex)
     {
-        return new(alloc) MRegExpTester(regexp, string, lastIndex, sticky);
+        return new(alloc) MRegExpTester(regexp, string, lastIndex);
     }
 
     MDefinition* regexp() const {
@@ -8036,9 +8035,6 @@ class MRegExpTester
     }
     MDefinition* lastIndex() const {
         return getOperand(2);
-    }
-    MDefinition* sticky() const {
-        return getOperand(3);
     }
 
     bool possiblyCalls() const override {
@@ -9923,7 +9919,6 @@ class MArraySlice
         unboxedType_(unboxedType)
     {
         setResultType(MIRType_Object);
-        setResultTypeSet(obj->resultTypeSet());
     }
 
   public:

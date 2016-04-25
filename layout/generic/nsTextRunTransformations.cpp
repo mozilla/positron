@@ -32,7 +32,7 @@ using namespace mozilla;
 #define GREEK_SMALL_LETTER_FINAL_SIGMA         0x03C2
 #define GREEK_SMALL_LETTER_SIGMA               0x03C3
 
-nsTransformedTextRun *
+UniquePtr<nsTransformedTextRun>
 nsTransformedTextRun::Create(const gfxTextRunFactory::Parameters* aParams,
                              nsTransformingTextRunFactory* aFactory,
                              gfxFontGroup* aFontGroup,
@@ -49,10 +49,10 @@ nsTransformedTextRun::Create(const gfxTextRunFactory::Parameters* aParams,
     return nullptr;
   }
 
-  return new (storage) nsTransformedTextRun(aParams, aFactory, aFontGroup,
-                                            aString, aLength,
-                                            aFlags, Move(aStyles),
-                                            aOwnsFactory);
+  return UniquePtr<nsTransformedTextRun>(
+    new (storage) nsTransformedTextRun(aParams, aFactory, aFontGroup,
+                                       aString, aLength, aFlags,
+                                       Move(aStyles), aOwnsFactory));
 }
 
 void
@@ -98,7 +98,7 @@ nsTransformedTextRun::SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf)
   return aMallocSizeOf(this) + SizeOfExcludingThis(aMallocSizeOf);
 }
 
-nsTransformedTextRun*
+UniquePtr<nsTransformedTextRun>
 nsTransformingTextRunFactory::MakeTextRun(const char16_t* aString, uint32_t aLength,
                                           const gfxTextRunFactory::Parameters* aParams,
                                           gfxFontGroup* aFontGroup, uint32_t aFlags,
@@ -110,7 +110,7 @@ nsTransformingTextRunFactory::MakeTextRun(const char16_t* aString, uint32_t aLen
                                       aOwnsFactory);
 }
 
-nsTransformedTextRun*
+UniquePtr<nsTransformedTextRun>
 nsTransformingTextRunFactory::MakeTextRun(const uint8_t* aString, uint32_t aLength,
                                           const gfxTextRunFactory::Parameters* aParams,
                                           gfxFontGroup* aFontGroup, uint32_t aFlags,
@@ -299,6 +299,7 @@ nsCaseTransformTextRunFactory::TransformString(
   nsIUGenCategory::nsUGenCategory cat;
 
   uint8_t style = aAllUppercase ? NS_STYLE_TEXT_TRANSFORM_UPPERCASE : 0;
+  bool forceNonFullWidth = false;
   const nsIAtom* lang = aLanguage;
 
   LanguageSpecificCasingBehavior languageSpecificCasing = GetCasingFor(lang);
@@ -314,6 +315,7 @@ nsCaseTransformTextRunFactory::TransformString(
       charStyle = aTextRun->mStyles[i];
       style = aAllUppercase ? NS_STYLE_TEXT_TRANSFORM_UPPERCASE :
         charStyle->mTextTransform;
+      forceNonFullWidth = charStyle->mForceNonFullWidth;
 
       nsIAtom* newLang = charStyle->mExplicitLanguage
                          ? charStyle->mLanguage : nullptr;
@@ -560,6 +562,10 @@ nsCaseTransformTextRunFactory::TransformString(
       break;
     }
 
+    if (forceNonFullWidth) {
+      ch = mozilla::unicode::GetFullWidthInverse(ch);
+    }
+
     if (ch == uint32_t(-1)) {
       aDeletedCharsArray.AppendElement(true);
       mergeNeeded = true;
@@ -625,8 +631,8 @@ nsCaseTransformTextRunFactory::RebuildTextRun(nsTransformedTextRun* aTextRun,
     GetParametersForInner(aTextRun, &flags, aRefDrawTarget);
   gfxFontGroup* fontGroup = aTextRun->GetFontGroup();
 
-  nsAutoPtr<nsTransformedTextRun> transformedChild;
-  nsAutoPtr<gfxTextRun> cachedChild;
+  UniquePtr<nsTransformedTextRun> transformedChild;
+  UniquePtr<gfxTextRun> cachedChild;
   gfxTextRun* child;
 
   if (mInnerTransformingTextRunFactory) {

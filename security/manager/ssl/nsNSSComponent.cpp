@@ -58,9 +58,9 @@
 #include "nsILocalFileWin.h"
 
 #include "windows.h" // this needs to be before the following includes
-#include "Lmcons.h"
-#include "Sddl.h"
-#include "Wincrypt.h"
+#include "lmcons.h"
+#include "sddl.h"
+#include "wincrypt.h"
 #include "nsIWindowsRegKey.h"
 #endif
 
@@ -259,7 +259,6 @@ nsNSSComponent::nsNSSComponent()
 
   NS_ASSERTION( (0 == mInstanceCount), "nsNSSComponent is a singleton, but instantiated multiple times!");
   ++mInstanceCount;
-  mShutdownObjectList = nsNSSShutDownList::construct();
 }
 
 void
@@ -303,7 +302,7 @@ nsNSSComponent::~nsNSSComponent()
   SharedSSLState::GlobalCleanup();
   RememberCertErrorsTable::Cleanup();
   --mInstanceCount;
-  delete mShutdownObjectList;
+  nsNSSShutDownList::shutdown();
 
   // We are being freed, drop the haveLoaded flag to re-enable
   // potential nss initialization later.
@@ -701,7 +700,7 @@ MaybeImportFamilySafetyRoot(PCCERT_CONTEXT certificate,
       return NS_ERROR_FAILURE;
     }
     nsAutoCString dbKey;
-    nsresult rv = nsNSSCertificate::GetDbKey(nssCertificate.get(), dbKey);
+    nsresult rv = nsNSSCertificate::GetDbKey(nssCertificate, dbKey);
     if (NS_FAILED(rv)) {
       MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("GetDbKey failed"));
       return rv;
@@ -1636,7 +1635,7 @@ nsNSSComponent::ShutdownNSS()
     CleanupIdentityInfo();
 #endif
     MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("evaporating psm resources\n"));
-    mShutdownObjectList->evaporateAllNSSResources();
+    nsNSSShutDownList::evaporateAllNSSResources();
     EnsureNSSInitialized(nssShutdown);
     if (SECSuccess != ::NSS_Shutdown()) {
       MOZ_LOG(gPIPNSSLog, LogLevel::Error, ("NSS SHUTDOWN FAILURE\n"));
@@ -1656,12 +1655,6 @@ nsNSSComponent::Init()
   nsresult rv = NS_OK;
 
   MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("Beginning NSS initialization\n"));
-
-  if (!mShutdownObjectList)
-  {
-    MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("NSS init, out of memory in constructor\n"));
-    return NS_ERROR_OUT_OF_MEMORY;
-  }
 
   rv = InitializePIPNSSBundle();
   if (NS_FAILED(rv)) {
@@ -1809,6 +1802,10 @@ nsNSSComponent::Observe(nsISupports* aSubject, const char* aTopic,
 #endif // DEBUG
     } else if (prefName.Equals(kFamilySafetyModePref)) {
       MaybeEnableFamilySafetyCompatibility();
+    } else if (prefName.EqualsLiteral("security.content.signature.root_hash")) {
+      MutexAutoLock lock(mutex);
+      mContentSigningRootHash =
+        Preferences::GetString("security.content.signature.root_hash");
     } else {
       clearSessionCache = false;
     }
@@ -1878,7 +1875,7 @@ nsresult nsNSSComponent::LogoutAuthenticatedPK11()
 
   nsClientAuthRememberService::ClearAllRememberedDecisions();
 
-  return mShutdownObjectList->doPK11Logout();
+  return nsNSSShutDownList::doPK11Logout();
 }
 
 nsresult
@@ -1960,6 +1957,32 @@ nsNSSComponent::IsCertTestBuiltInRoot(CERTCertificate* cert, bool& result)
   return NS_OK;
 }
 #endif // DEBUG
+
+NS_IMETHODIMP
+nsNSSComponent::IsCertContentSigningRoot(CERTCertificate* cert, bool& result)
+{
+  MutexAutoLock lock(mutex);
+  MOZ_ASSERT(mNSSInitialized);
+
+  result = false;
+
+  if (mContentSigningRootHash.IsEmpty()) {
+    return NS_OK;
+  }
+
+  RefPtr<nsNSSCertificate> nsc = nsNSSCertificate::Create(cert);
+  if (!nsc) {
+    return NS_ERROR_FAILURE;
+  }
+  nsAutoString certHash;
+  nsresult rv = nsc->GetSha256Fingerprint(certHash);
+  if (NS_FAILED(rv)) {
+    return rv;
+  }
+
+  result = mContentSigningRootHash.Equals(certHash);
+  return NS_OK;
+}
 
 SharedCertVerifier::~SharedCertVerifier() { }
 
@@ -2113,6 +2136,13 @@ InitializeCipherSuite()
   SEC_PKCS12EnableCipher(PKCS12_DES_EDE3_168, 1);
   SEC_PKCS12SetPreferredCipher(PKCS12_DES_EDE3_168, 1);
   PORT_SetUCS2_ASCIIConversionFunction(pip_ucs2_ascii_conversion_fn);
+
+  // PSM enforces a minimum RSA key size of 1024 bits, which is overridable.
+  // NSS has its own minimum, which is not overridable (the default is 1023
+  // bits). This sets the NSS minimum to 512 bits so users can still connect to
+  // devices like wifi routers with woefully small keys (they would have to add
+  // an override to do so, but they already do for such devices).
+  NSS_OptionSet(NSS_RSA_MIN_KEY_SIZE, 512);
 
   // Observe preference change around cipher suite setting.
   return CipherSuiteChangeObserver::StartObserve();

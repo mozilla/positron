@@ -1111,7 +1111,7 @@ nsComputedDOMStyle::DoGetContent()
     switch (data.mType) {
       case eStyleContentType_String:
         {
-          nsString str;
+          nsAutoString str;
           nsStyleUtil::AppendEscapedCSSString(
             nsDependentString(data.mContent.mString), str);
           val->SetString(str);
@@ -1485,7 +1485,7 @@ nsComputedDOMStyle::DoGetQuotes()
     RefPtr<nsROCSSPrimitiveValue> openVal = new nsROCSSPrimitiveValue;
     RefPtr<nsROCSSPrimitiveValue> closeVal = new nsROCSSPrimitiveValue;
 
-    nsString s;
+    nsAutoString s;
     nsStyleUtil::AppendEscapedCSSString(quotePair.first, s);
     openVal->SetString(s);
     s.Truncate();
@@ -1622,7 +1622,7 @@ nsComputedDOMStyle::DoGetFontLanguageOverride()
   if (font->mFont.languageOverride.IsEmpty()) {
     val->SetIdent(eCSSKeyword_normal);
   } else {
-    nsString str;
+    nsAutoString str;
     nsStyleUtil::AppendEscapedCSSString(font->mFont.languageOverride, str);
     val->SetString(str);
   }
@@ -1845,7 +1845,7 @@ nsComputedDOMStyle::DoGetBackgroundClip()
   return GetBackgroundList(&nsStyleImageLayers::Layer::mClip,
                            &nsStyleImageLayers::mClipCount,
                            StyleBackground()->mImage,
-                           nsCSSProps::kImageLayerOriginKTable);
+                           nsCSSProps::kBackgroundClipKTable);
 }
 
 already_AddRefed<CSSValue>
@@ -3165,15 +3165,10 @@ nsComputedDOMStyle::DoGetOutlineWidth()
 
   nscoord width;
   if (outline->GetOutlineStyle() == NS_STYLE_BORDER_STYLE_NONE) {
-    NS_ASSERTION(outline->GetOutlineWidth(width) && width == 0,
-                 "unexpected width");
+    NS_ASSERTION(outline->GetOutlineWidth() == 0, "unexpected width");
     width = 0;
   } else {
-#ifdef DEBUG
-    bool res =
-#endif
-      outline->GetOutlineWidth(width);
-    NS_ASSERTION(res, "percent outline doesn't exist");
+    width = outline->GetOutlineWidth();
   }
   val->SetAppUnits(width);
 
@@ -3429,7 +3424,7 @@ nsComputedDOMStyle::DoGetListStyleType()
   RefPtr<nsROCSSPrimitiveValue> val = new nsROCSSPrimitiveValue;
   CounterStyle* style = StyleList()->GetCounterStyle();
   AnonymousCounterStyle* anonymous = style->AsAnonymous();
-  nsString tmp;
+  nsAutoString tmp;
   if (!anonymous) {
     // want SetIdent
     nsString type;
@@ -3632,7 +3627,7 @@ nsComputedDOMStyle::DoGetTextDecorationColor()
   bool isForeground;
   StyleTextReset()->GetDecorationColor(color, isForeground);
   if (isForeground) {
-    color = StyleColor()->mColor;
+    color = mStyleContext->GetTextFillColor();
   }
 
   SetToRGBAColor(val, color);
@@ -3721,7 +3716,7 @@ nsComputedDOMStyle::DoGetTextEmphasisStyle()
   }
   if (style == NS_STYLE_TEXT_EMPHASIS_STYLE_STRING) {
     RefPtr<nsROCSSPrimitiveValue> val = new nsROCSSPrimitiveValue;
-    nsString tmp;
+    nsAutoString tmp;
     nsStyleUtil::AppendEscapedCSSString(
       StyleText()->mTextEmphasisStyleString, tmp);
     val->SetString(tmp);
@@ -3775,7 +3770,7 @@ nsComputedDOMStyle::DoGetTextOverflow()
   RefPtr<nsROCSSPrimitiveValue> first = new nsROCSSPrimitiveValue;
   const nsStyleTextOverflowSide *side = style->mTextOverflow.GetFirstValue();
   if (side->mType == NS_STYLE_TEXT_OVERFLOW_STRING) {
-    nsString str;
+    nsAutoString str;
     nsStyleUtil::AppendEscapedCSSString(side->mString, str);
     first->SetString(str);
   } else {
@@ -3789,7 +3784,7 @@ nsComputedDOMStyle::DoGetTextOverflow()
   }
   RefPtr<nsROCSSPrimitiveValue> second = new nsROCSSPrimitiveValue;
   if (side->mType == NS_STYLE_TEXT_OVERFLOW_STRING) {
-    nsString str;
+    nsAutoString str;
     nsStyleUtil::AppendEscapedCSSString(side->mString, str);
     second->SetString(str);
   } else {
@@ -3929,6 +3924,22 @@ nsComputedDOMStyle::DoGetWebkitTextFillColor()
 {
   RefPtr<nsROCSSPrimitiveValue> val = new nsROCSSPrimitiveValue;
   SetToRGBAColor(val, mStyleContext->GetTextFillColor());
+  return val.forget();
+}
+
+already_AddRefed<CSSValue>
+nsComputedDOMStyle::DoGetWebkitTextStrokeColor()
+{
+  RefPtr<nsROCSSPrimitiveValue> val = new nsROCSSPrimitiveValue;
+  SetToRGBAColor(val, mStyleContext->GetTextStrokeColor());
+  return val.forget();
+}
+
+already_AddRefed<CSSValue>
+nsComputedDOMStyle::DoGetWebkitTextStrokeWidth()
+{
+  RefPtr<nsROCSSPrimitiveValue> val = new nsROCSSPrimitiveValue;
+  val->SetAppUnits(StyleText()->mWebkitTextStrokeWidth.GetCoordValue());
   return val.forget();
 }
 

@@ -237,6 +237,8 @@ char **gRestartArgv;
 
 bool gIsGtest = false;
 
+nsString gAbsoluteArgv0Path;
+
 #ifdef MOZ_WIDGET_QT
 static int    gQtOnlyArgc;
 static char **gQtOnlyArgv;
@@ -621,8 +623,12 @@ GetAndCleanTempDir()
     return nullptr;
   }
 
+  // Don't return an error if the directory doesn't exist.
+  // Windows Remove() returns NS_ERROR_FILE_NOT_FOUND while
+  // OS X returns NS_ERROR_FILE_TARGET_DOES_NOT_EXIST.
   rv = tempDir->Remove(/* aRecursive */ true);
-  if (NS_FAILED(rv) && rv != NS_ERROR_FILE_NOT_FOUND) {
+  if (NS_FAILED(rv) && rv != NS_ERROR_FILE_NOT_FOUND &&
+      rv != NS_ERROR_FILE_TARGET_DOES_NOT_EXIST) {
     NS_WARNING("Failed to delete temp directory.");
     return nullptr;
   }
@@ -3385,6 +3391,11 @@ XREMain::XRE_mainInit(bool* aExitFlag)
 #endif
 
 #ifdef XP_MACOSX
+  // Set up ability to respond to system (Apple) events. This must occur before
+  // ProcessUpdates to ensure that links clicked in external applications aren't
+  // lost when updates are pending.
+  SetupMacApplicationDelegate();
+
   if (EnvHasValue("MOZ_LAUNCHED_CHILD")) {
     // This is needed, on relaunch, to force the OS to use the "Cocoa Dock
     // API".  Otherwise the call to ReceiveNextEvent() below will make it
@@ -4280,10 +4291,6 @@ XREMain::XRE_mainRun()
 #endif
 
 #ifdef XP_MACOSX
-    // Set up ability to respond to system (Apple) events. This must be
-    // done before setting up the command line service.
-    SetupMacApplicationDelegate();
-
     // we re-initialize the command-line service and do appleevents munging
     // after we are sure that we're not restarting
     cmdLine = do_CreateInstance("@mozilla.org/toolkit/command-line;1");
@@ -4406,6 +4413,13 @@ XREMain::XRE_main(int argc, char* argv[], const nsXREAppData* aAppData)
   // used throughout this file
   gAppData = mAppData;
 
+  nsCOMPtr<nsIFile> binFile;
+  rv = XRE_GetBinaryPath(argv[0], getter_AddRefs(binFile));
+  NS_ENSURE_SUCCESS(rv, 1);
+
+  rv = binFile->GetPath(gAbsoluteArgv0Path);
+  NS_ENSURE_SUCCESS(rv, 1);
+
   mozilla::IOInterposerInit ioInterposerGuard;
 
 #if MOZ_WIDGET_GTK == 2
@@ -4439,6 +4453,8 @@ XREMain::XRE_main(int argc, char* argv[], const nsXREAppData* aAppData)
 #ifdef MOZ_INSTRUMENT_EVENT_LOOP
   mozilla::ShutdownEventTracing();
 #endif
+
+  gAbsoluteArgv0Path.Truncate();
 
   // Check for an application initiated restart.  This is one that
   // corresponds to nsIAppStartup.quit(eRestart)
@@ -4660,6 +4676,7 @@ enum {
   kE10sDisabledForAddons = 7,
   kE10sForceDisabled = 8,
   kE10sDisabledForXPAcceleration = 9,
+  kE10sDisabledForGTK320 = 10,
 };
 
 #if defined(XP_WIN) || defined(XP_MACOSX)
@@ -4745,6 +4762,15 @@ MultiprocessBlockPolicy() {
     return gMultiprocessBlockPolicy;
   }
 #endif // XP_WIN
+
+#if defined(MOZ_WIDGET_GTK) && defined(RELEASE_BUILD)
+  // Bug 1266213 - Workaround for bug 1264454
+  // Disable for users of 3.20 or higher
+  if (gtk_check_version(3, 20, 0) == nullptr) {
+    gMultiprocessBlockPolicy = kE10sDisabledForGTK320;
+    return gMultiprocessBlockPolicy;
+  }
+#endif
 
   if (disabledForA11y) {
     gMultiprocessBlockPolicy = kE10sDisabledForAccessibility;

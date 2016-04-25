@@ -15,21 +15,25 @@ import java.util.List;
 import java.util.Map;
 
 import org.mozilla.apache.commons.codec.binary.Base32;
+import org.json.simple.JSONArray;
+import org.json.simple.JSONObject;
 import org.mozilla.gecko.GeckoProfile;
 import org.mozilla.gecko.R;
-import org.mozilla.gecko.Telemetry;
 import org.mozilla.gecko.annotation.RobocopTarget;
 import org.mozilla.gecko.db.BrowserContract.Bookmarks;
 import org.mozilla.gecko.db.BrowserContract.Combined;
 import org.mozilla.gecko.db.BrowserContract.Favicons;
 import org.mozilla.gecko.db.BrowserContract.History;
+import org.mozilla.gecko.db.BrowserContract.Visits;
 import org.mozilla.gecko.db.BrowserContract.Numbers;
 import org.mozilla.gecko.db.BrowserContract.ReadingListItems;
 import org.mozilla.gecko.db.BrowserContract.SearchHistory;
 import org.mozilla.gecko.db.BrowserContract.Thumbnails;
 import org.mozilla.gecko.db.BrowserContract.UrlAnnotations;
+import org.mozilla.gecko.fxa.FirefoxAccounts;
 import org.mozilla.gecko.reader.SavedReaderViewHelper;
 import org.mozilla.gecko.sync.Utils;
+import org.mozilla.gecko.sync.repositories.android.RepoUtils;
 import org.mozilla.gecko.util.FileUtils;
 
 import static org.mozilla.gecko.db.DBUtils.qualifyColumn;
@@ -54,13 +58,14 @@ public final class BrowserDatabaseHelper extends SQLiteOpenHelper {
 
     // Replace the Bug number below with your Bug that is conducting a DB upgrade, as to force a merge conflict with any
     // other patches that require a DB upgrade.
-    public static final int DATABASE_VERSION = 31; // Bug 1234315
+    public static final int DATABASE_VERSION = 32; // Bug 1046709
     public static final String DATABASE_NAME = "browser.db";
 
     final protected Context mContext;
 
     static final String TABLE_BOOKMARKS = Bookmarks.TABLE_NAME;
     static final String TABLE_HISTORY = History.TABLE_NAME;
+    static final String TABLE_VISITS = Visits.TABLE_NAME;
     static final String TABLE_FAVICONS = Favicons.TABLE_NAME;
     static final String TABLE_THUMBNAILS = Thumbnails.TABLE_NAME;
     static final String TABLE_READING_LIST = ReadingListItems.TABLE_NAME;
@@ -158,6 +163,24 @@ public final class BrowserDatabaseHelper extends SQLiteOpenHelper {
                 + History.DATE_MODIFIED + ')');
         db.execSQL("CREATE INDEX history_visited_index ON " + TABLE_HISTORY + '('
                 + History.DATE_LAST_VISITED + ')');
+    }
+
+    private void createVisitsTable(SQLiteDatabase db) {
+        debug("Creating " + TABLE_VISITS + " table");
+        db.execSQL("CREATE TABLE " + TABLE_VISITS + "(" +
+                Visits._ID + " INTEGER PRIMARY KEY AUTOINCREMENT," +
+                Visits.HISTORY_GUID + " TEXT NOT NULL," +
+                Visits.VISIT_TYPE + " TINYINT NOT NULL DEFAULT 1," +
+                Visits.DATE_VISITED + " INTEGER NOT NULL, " +
+                Visits.IS_LOCAL + " TINYINT NOT NULL DEFAULT 1, " +
+
+                "FOREIGN KEY (" + Visits.HISTORY_GUID + ") REFERENCES " +
+                TABLE_HISTORY + "(" + History.GUID + ") ON DELETE CASCADE ON UPDATE CASCADE" +
+                ");");
+
+        db.execSQL("CREATE UNIQUE INDEX visits_history_guid_and_date_visited_index ON " + TABLE_VISITS + "("
+            + Visits.HISTORY_GUID + "," + Visits.DATE_VISITED + ")");
+        db.execSQL("CREATE INDEX visits_history_guid_index ON " + TABLE_VISITS + "(" + Visits.HISTORY_GUID + ")");
     }
 
     private void createFaviconsTable(SQLiteDatabase db) {
@@ -455,6 +478,8 @@ public final class BrowserDatabaseHelper extends SQLiteOpenHelper {
         createLoginsTableIndices(db, TABLE_LOGINS);
 
         createBookmarksWithAnnotationsView(db);
+
+        createVisitsTable(db);
     }
 
     /**
@@ -486,6 +511,133 @@ public final class BrowserDatabaseHelper extends SQLiteOpenHelper {
                 oldTabsDB.close();
             }
         }
+    }
+
+    /**
+     * We used to have a separate history extensions database which was used by Sync to store arrays
+     * of visits for individual History GUIDs. It was only used by Sync.
+     * This function migrates contents of that database over to the Visits table.
+     *
+     * @param historyExtensionDb Source History Extensions database
+     * @param db Destination database
+     */
+    private void copyHistoryExtensionDataToVisitsTable(final SQLiteDatabase historyExtensionDb, final SQLiteDatabase db) {
+        final String historyExtensionTable = "HistoryExtension";
+        final String columnGuid = "guid";
+        final String columnVisits = "visits";
+
+        final Cursor historyExtensionCursor = historyExtensionDb.query(historyExtensionTable,
+                new String[] {columnGuid, columnVisits},
+                null, null, null, null, null);
+        // Ignore null or empty cursor, we can't (or have nothing to) copy at this point.
+        if (historyExtensionCursor == null) {
+            return;
+        }
+        try {
+            if (!historyExtensionCursor.moveToFirst()) {
+                return;
+            }
+
+            final int guidCol = historyExtensionCursor.getColumnIndexOrThrow(columnGuid);
+
+            // Use prepared (aka "compiled") SQL statements because they are much faster when we're inserting
+            // lots of data. We avoid GC churn and recompilation of SQL statements on every insert.
+            // NB #1: OR IGNORE clause applies to UNIQUE, NOT NULL, CHECK, and PRIMARY KEY constraints.
+            // It does not apply to Foreign Key constraints, but in our case, at this point in time, foreign key
+            // constraints are disabled anyway.
+            // We care about OR IGNORE because we want to ensure that in case of (GUID,DATE)
+            // clash (the UNIQUE constraint), we will not fail the transaction, and just skip conflicting row.
+            // Clash might occur if visits array we got from Sync has duplicate (guid,date) records.
+            // NB #2: IS_LOCAL is always 0, since we consider all visits coming from Sync to be remote.
+            final String insertSqlStatement = "INSERT OR IGNORE INTO " + Visits.TABLE_NAME + " (" +
+                    Visits.DATE_VISITED + "," +
+                    Visits.VISIT_TYPE + "," +
+                    Visits.HISTORY_GUID + "," +
+                    Visits.IS_LOCAL + ") VALUES (?, ?, ?, " + Visits.VISIT_IS_REMOTE + ")";
+            final SQLiteStatement compiledInsertStatement = db.compileStatement(insertSqlStatement);
+
+            do {
+                final String guid = historyExtensionCursor.getString(guidCol);
+
+                // Sanity check, let's not risk a bad incoming GUID.
+                if (guid == null || guid.isEmpty()) {
+                    continue;
+                }
+
+                // First, check if history with given GUID exists in the History table.
+                // We might have a lot of entries in the HistoryExtensionDatabase whose GUID doesn't
+                // match one in the History table. Let's avoid doing unnecessary work by first checking if
+                // GUID exists locally.
+                // Note that we don't have foreign key constraints enabled at this point.
+                // See Bug 1266232 for details.
+                if (!isGUIDPresentInHistoryTable(db, guid)) {
+                    continue;
+                }
+
+                final JSONArray visitsInHistoryExtensionDB = RepoUtils.getJSONArrayFromCursor(historyExtensionCursor, columnVisits);
+
+                if (visitsInHistoryExtensionDB == null) {
+                    continue;
+                }
+
+                final int histExtVisitCount = visitsInHistoryExtensionDB.size();
+
+                debug("Inserting " + histExtVisitCount + " visits from history extension db for GUID: " + guid);
+                for (int i = 0; i < histExtVisitCount; i++) {
+                    final JSONObject visit = (JSONObject) visitsInHistoryExtensionDB.get(i);
+
+                    // Sanity check.
+                    if (visit == null) {
+                        continue;
+                    }
+
+                    // Let's not rely on underlying data being correct, and guard against casting failures.
+                    // Since we can't recover from this (other than ignoring this visit), let's not fail user's migration.
+                    final Long date;
+                    final Long visitType;
+                    try {
+                        date = (Long) visit.get("date");
+                        visitType = (Long) visit.get("type");
+                    } catch (ClassCastException e) {
+                        continue;
+                    }
+                    // Sanity check our incoming data.
+                    if (date == null || visitType == null) {
+                        continue;
+                    }
+
+                    // Bind parameters use a 1-based index.
+                    compiledInsertStatement.clearBindings();
+                    compiledInsertStatement.bindLong(1, date);
+                    compiledInsertStatement.bindLong(2, visitType);
+                    compiledInsertStatement.bindString(3, guid);
+                    compiledInsertStatement.executeInsert();
+                }
+            } while (historyExtensionCursor.moveToNext());
+        } finally {
+            // We return on a null cursor, so don't have to check it here.
+            historyExtensionCursor.close();
+        }
+    }
+
+    private boolean isGUIDPresentInHistoryTable(final SQLiteDatabase db, String guid) {
+        final Cursor historyCursor = db.query(
+                History.TABLE_NAME,
+                new String[] {History.GUID}, History.GUID + " = ?", new String[] {guid},
+                null, null, null);
+        if (historyCursor == null) {
+            return false;
+        }
+        try {
+            // No history record found for given GUID
+            if (!historyCursor.moveToFirst()) {
+                return false;
+            }
+        } finally {
+            historyCursor.close();
+        }
+
+        return true;
     }
 
     private void createSearchHistoryTable(SQLiteDatabase db) {
@@ -1354,6 +1506,130 @@ public final class BrowserDatabaseHelper extends SQLiteOpenHelper {
         }
     }
 
+    private void upgradeDatabaseFrom31to32(final SQLiteDatabase db) {
+        debug("Adding visits table");
+        createVisitsTable(db);
+
+        debug("Migrating visits from history extension db into visits table");
+        String historyExtensionDbName = "history_extension_database";
+
+        SQLiteDatabase historyExtensionDb = null;
+        final File historyExtensionsDatabase = mContext.getDatabasePath(historyExtensionDbName);
+
+        // Primary goal of this migration is to improve Top Sites experience by distinguishing between
+        // local and remote visits. If Sync is enabled, we rely on visit data from Sync and treat it as remote.
+        // However, if Sync is disabled but we detect evidence that it was enabled at some point (HistoryExtensionsDB is present)
+        // then we synthesize visits from the History table, but we mark them all as "remote". This will ensure
+        // that once user starts browsing around, their Top Sites will reflect their local browsing history.
+        // Otherwise, we risk overwhelming their Top Sites with remote history, just as we did before this migration.
+        try {
+            // If FxAccount exists (Sync is enabled) then port data over to the Visits table.
+            if (FirefoxAccounts.firefoxAccountsExist(mContext)) {
+                try {
+                    historyExtensionDb = SQLiteDatabase.openDatabase(historyExtensionsDatabase.getPath(), null,
+                            SQLiteDatabase.OPEN_READONLY);
+
+                // If we fail to open HistoryExtensionDatabase, then synthesize visits marking them as remote
+                } catch (SQLiteException e) {
+                    Log.w(LOGTAG, "Couldn't open history extension database; synthesizing visits instead", e);
+                    synthesizeAndInsertVisits(db, false);
+                }
+
+                if (historyExtensionDb != null) {
+                    copyHistoryExtensionDataToVisitsTable(historyExtensionDb, db);
+                }
+
+            // FxAccount doesn't exist, but there's evidence Sync was enabled at some point.
+            // Synthesize visits from History table marking them all as remote.
+            } else if (historyExtensionsDatabase.exists()) {
+                synthesizeAndInsertVisits(db, false);
+
+            // FxAccount doesn't exist and there's no evidence sync was ever enabled.
+            // Synthesize visits from History table marking them all as local.
+            } else {
+                synthesizeAndInsertVisits(db, true);
+            }
+        } finally {
+            if (historyExtensionDb != null) {
+                historyExtensionDb.close();
+            }
+        }
+
+        // Delete history extensions database if it's present.
+        if (historyExtensionsDatabase.exists()) {
+            if (!mContext.deleteDatabase(historyExtensionDbName)) {
+                Log.e(LOGTAG, "Couldn't remove history extension database");
+            }
+        }
+    }
+
+    private void synthesizeAndInsertVisits(final SQLiteDatabase db, boolean markAsLocal) {
+        final Cursor cursor = db.query(
+                History.TABLE_NAME,
+                new String[] {History.GUID, History.VISITS, History.DATE_LAST_VISITED},
+                null, null, null, null, null);
+        if (cursor == null) {
+            Log.e(LOGTAG, "Null cursor while selecting all history records");
+            return;
+        }
+
+        try {
+            if (!cursor.moveToFirst()) {
+                Log.e(LOGTAG, "No history records to synthesize visits for.");
+                return;
+            }
+
+            int guidCol = cursor.getColumnIndexOrThrow(History.GUID);
+            int visitsCol = cursor.getColumnIndexOrThrow(History.VISITS);
+            int dateCol = cursor.getColumnIndexOrThrow(History.DATE_LAST_VISITED);
+
+            // Re-use compiled SQL statements for faster inserts.
+            // Visit Type is going to be 1, which is the column's default value.
+            final String insertSqlStatement = "INSERT OR IGNORE INTO " + Visits.TABLE_NAME + "(" +
+                    Visits.DATE_VISITED + "," +
+                    Visits.HISTORY_GUID + "," +
+                    Visits.IS_LOCAL +
+                    ") VALUES (?, ?, ?)";
+            final SQLiteStatement compiledInsertStatement = db.compileStatement(insertSqlStatement);
+
+            // For each history record, insert as many visits as there are recorded in the VISITS column.
+            do {
+                final int numberOfVisits = cursor.getInt(visitsCol);
+                final String guid = cursor.getString(guidCol);
+                final long lastVisitedDate = cursor.getLong(dateCol);
+
+                // Sanity check.
+                if (guid == null) {
+                    continue;
+                }
+
+                // In a strange case that lastVisitedDate is a very low number, let's not introduce
+                // negative timestamps into our data.
+                if (lastVisitedDate - numberOfVisits < 0) {
+                    continue;
+                }
+
+                for (int i = 0; i < numberOfVisits; i++) {
+                    final long offsetVisitedDate = lastVisitedDate - i;
+                    compiledInsertStatement.clearBindings();
+                    compiledInsertStatement.bindLong(1, offsetVisitedDate);
+                    compiledInsertStatement.bindString(2, guid);
+                    // Very old school, 1 is true and 0 is false :)
+                    if (markAsLocal) {
+                        compiledInsertStatement.bindLong(3, Visits.VISIT_IS_LOCAL);
+                    } else {
+                        compiledInsertStatement.bindLong(3, Visits.VISIT_IS_REMOTE);
+                    }
+                    compiledInsertStatement.executeInsert();
+                }
+            } while (cursor.moveToNext());
+        } catch (Exception e) {
+            Log.e(LOGTAG, "Error while synthesizing visits for history record", e);
+        } finally {
+            cursor.close();
+        }
+    }
+
     private void createV19CombinedView(SQLiteDatabase db) {
         db.execSQL("DROP VIEW IF EXISTS " + VIEW_COMBINED);
         db.execSQL("DROP VIEW IF EXISTS " + VIEW_COMBINED_WITH_FAVICONS);
@@ -1369,7 +1645,7 @@ public final class BrowserDatabaseHelper extends SQLiteOpenHelper {
         // We have to do incremental upgrades until we reach the current
         // database schema version.
         for (int v = oldVersion + 1; v <= newVersion; v++) {
-            switch(v) {
+            switch (v) {
                 case 4:
                     upgradeDatabaseFrom3to4(db);
                     break;
@@ -1454,6 +1730,10 @@ public final class BrowserDatabaseHelper extends SQLiteOpenHelper {
 
                 case 31:
                     upgradeDatabaseFrom30to31(db);
+                    break;
+
+                case 32:
+                    upgradeDatabaseFrom31to32(db);
                     break;
             }
         }

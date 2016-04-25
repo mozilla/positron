@@ -70,6 +70,12 @@
 <!ENTITY screenshot_folder_label_in_bookmarks "Screenshots">
 <!ENTITY readinglist_smartfolder_label_in_bookmarks "Reading List">
 
+<!ENTITY reader_saved_offline "Saved offline">
+<!-- Localization note (reader_switch_to_bookmarks) : This
+     string is used as an action in a snackbar - it lets you
+     "switch" to the bookmarks (saved items) panel. -->
+<!ENTITY reader_switch_to_bookmarks "Switch">
+
 <!ENTITY history_today_section "Today">
 <!ENTITY history_yesterday_section "Yesterday">
 <!ENTITY history_week_section3 "Last 7 days">
@@ -107,7 +113,7 @@
 <!ENTITY settings "Settings">
 <!ENTITY settings_title "Settings">
 <!ENTITY pref_category_general "General">
-<!ENTITY pref_category_general_summary2 "Home, language, URL bar">
+<!ENTITY pref_category_general_summary3 "Home, language, tab queue">
 
 <!-- Localization note (pref_category_language) : This is the preferences
      section in which the user picks the locale in which to display Firefox
@@ -146,11 +152,11 @@
 <!ENTITY overlay_no_synced_devices "No Firefox Account connected devices found">
 
 <!ENTITY pref_category_search3 "Search">
-<!ENTITY pref_category_search_summary "Customize your search providers">
+<!ENTITY pref_category_search_summary2 "Add, set default, show suggestions">
 <!ENTITY pref_category_accessibility "Accessibility">
 <!ENTITY pref_category_accessibility_summary2 "Text size, zoom, voice input">
 <!ENTITY pref_category_privacy_short "Privacy">
-<!ENTITY pref_category_privacy_summary3 "Tracking, cookies, data choices">
+<!ENTITY pref_category_privacy_summary4 "Tracking, logins, data choices">
 <!ENTITY pref_category_vendor2 "&vendorShortName; &brandShortName;">
 <!ENTITY pref_category_vendor_summary2 "About &brandShortName;, FAQs, feedback">
 <!ENTITY pref_category_datareporting "Data choices">
@@ -168,7 +174,7 @@
      it is applicable. -->
 <!ENTITY pref_search_hint2 "TIP: Add any website to your list of search providers by long-pressing on its search field and then touching the &formatI; icon.">
 <!ENTITY pref_category_advanced "Advanced">
-<!ENTITY pref_category_advanced_summary2 "Restore tabs, plugins, developer tools">
+<!ENTITY pref_category_advanced_summary3 "Restore tabs, data saver, developer tools">
 <!ENTITY pref_category_notifications "Notifications">
 <!ENTITY pref_category_notifications_summary "New features, website updates">
 <!ENTITY pref_content_notifications "Website updates">
@@ -219,13 +225,17 @@
 <!ENTITY pref_cookies_not_accept_foreign "Enabled, excluding 3rd party">
 <!ENTITY pref_cookies_disabled "Disabled">
 
+<!ENTITY pref_category_data_saver "Data saver">
+<!ENTITY pref_category_media "Media">
+<!ENTITY pref_category_developer_tools "Developer tools">
+
 <!ENTITY pref_tap_to_load_images_title2 "Show images">
 <!ENTITY pref_tap_to_load_images_enabled "Always">
 <!ENTITY pref_tap_to_load_images_data "Only over Wi-Fi">
 <!ENTITY pref_tap_to_load_images_disabled2 "Blocked">
 
-<!ENTITY pref_show_web_fonts "Show Web fonts">
-<!ENTITY pref_show_web_fonts_summary "Hide to use default fonts and reduce website load times">
+<!ENTITY pref_show_web_fonts "Show web fonts">
+<!ENTITY pref_show_web_fonts_summary2 "Download remote fonts when loading a page">
 
 <!ENTITY pref_tracking_protection_title2 "Tracking Protection">
 <!ENTITY pref_tracking_protection_summary3 "Enabled in Private Browsing">
@@ -345,7 +355,7 @@ size. -->
 <!ENTITY pref_private_data_downloadFiles2 "Downloads">
 <!ENTITY pref_private_data_syncedTabs "Synced tabs">
 
-
+<!ENTITY pref_default_browser "Make default browser">
 <!ENTITY pref_about_firefox "About &brandShortName;">
 <!ENTITY pref_vendor_faqs "FAQs">
 <!ENTITY pref_vendor_feedback "Give feedback">
@@ -535,7 +545,6 @@ size. -->
 <!ENTITY home_last_tabs_empty "Your recent tabs show up here.">
 <!ENTITY home_open_all "Open all">
 <!ENTITY home_most_recent_empty "Websites you visited most recently show up here.">
-<!ENTITY home_selected_empty "Websites you visited in the selected timeframe show up here.">
 <!-- Localization note (home_most_recent_emptyhint2): "Psst" is a sound that might be used to attract someone's attention unobtrusively, and intended to hint at Private Browsing to the user.
      The placeholders &formatS1; and &formatS2; are used to mark the location of text underlining. -->
 <!ENTITY home_most_recent_emptyhint2 "Psst: using a &formatS1;New Private Tab&formatS2; won\'t save your history.">
@@ -548,16 +557,6 @@ size. -->
      previous location in the navigation, such as the previous folder -->
 <!ENTITY home_move_back_to_filter "Back to &formatS;">
 
-<!ENTITY home_remote_tabs_title "Synced Tabs">
-<!ENTITY home_remote_tabs_empty "Your tabs from other devices show up here.">
-<!ENTITY home_remote_tabs_unable_to_connect "Unable to connect">
-<!ENTITY home_remote_tabs_need_to_sign_in "Please sign in to reconnect your Firefox Account and continue syncing.">
-<!ENTITY home_remote_tabs_need_to_finish_migrating "Your new Firefox Account is ready!">
-
-<!ENTITY home_remote_tabs_trouble_verifying "Trouble verifying your account?">
-<!ENTITY home_remote_tabs_need_to_verify "Please verify your Firefox Account to start syncing.">
-
-<!ENTITY home_remote_tabs_one_hidden_device "1 device hidden">
 <!-- Localization note (home_remote_tabs_many_hidden_devices) : The
      formatD is replaced with the number of hidden devices.  The
      number of hidden devices is always more than one.  We can't use
@@ -775,3 +774,7 @@ just addresses the organization to follow, e.g. "This site is run by " -->
 <!ENTITY whatsnew_notification_summary "Find out what\'s new in this version">
 
 <!ENTITY promotion_add_to_homescreen "Add to home screen">
+
+<!ENTITY helper_first_offline_bookmark_title "Read offline">
+<!ENTITY helper_first_offline_bookmark_message "Find your Reader View items in Bookmarks, even offline.">
+<!ENTITY helper_first_offline_bookmark_button "Go to Bookmarks">

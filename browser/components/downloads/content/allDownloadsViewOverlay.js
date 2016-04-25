@@ -298,9 +298,7 @@ HistoryDownloadElementShell.prototype = {
   },
 
   onStateChanged() {
-    this.element.setAttribute("image", this.image);
-    this.element.setAttribute("state",
-                              DownloadsCommon.stateOfDownload(this.download));
+    this._updateState();
 
     if (this.element.selected) {
       goUpdateDownloadCommands();
@@ -379,12 +377,15 @@ HistoryDownloadElementShell.prototype = {
   },
 
   downloadsCmd_unblock() {
-    let verdict = this.download.error.reputationCheckVerdict;
-    DownloadsCommon.confirmUnblockDownload(verdict, window).then(confirmed => {
-      if (confirmed) {
-        return this.download.unblock();
-      }
-    }).catch(Cu.reportError);
+    this.confirmUnblock(window, "unblock");
+  },
+
+  downloadsCmd_chooseUnblock() {
+    this.confirmUnblock(window, "chooseUnblock");
+  },
+
+  downloadsCmd_chooseOpen() {
+    this.confirmUnblock(window, "chooseOpen");
   },
 
   // Returns whether or not the download handled by this shell should
@@ -501,7 +502,7 @@ function DownloadsPlacesView(aRichListBox, aActive = true) {
 
   // Get the Download button out of the attention state since we're about to
   // view all downloads.
-  DownloadsCommon.getIndicatorData(window).attention = false;
+  DownloadsCommon.getIndicatorData(window).attention = DownloadsCommon.ATTENTION_NONE;
 
   // Make sure to unregister the view if the window is closed.
   window.addEventListener("unload", () => {

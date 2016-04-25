@@ -226,7 +226,8 @@ public:
     EVENT_DELIVERY,
     PLUGIN_GEOMETRY,
     FRAME_VISIBILITY,
-    TRANSFORM_COMPUTATION
+    TRANSFORM_COMPUTATION,
+    GENERATE_GLYPH
   };
   nsDisplayListBuilder(nsIFrame* aReferenceFrame, Mode aMode, bool aBuildCaret);
   ~nsDisplayListBuilder();
@@ -267,6 +268,14 @@ public:
    * visibility.
    */
   bool IsForFrameVisibility() { return mMode == FRAME_VISIBILITY; }
+
+  /**
+   * @return true if the display list is being built for creating the glyph
+   * path from text items. While painting the display list, all text display
+   * items should only create glyph paths in target context, instead of
+   * drawing text into it.
+   */
+  bool IsForGenerateGlyphPath() { return mMode == GENERATE_GLYPH; }
 
   bool WillComputePluginGeometry() { return mWillComputePluginGeometry; }
   /**
@@ -1061,22 +1070,6 @@ public:
   void AppendNewScrollInfoItemForHoisting(nsDisplayScrollInfoLayer* aScrollInfoItem);
 
   /**
-   * Store the dirty rect of the scrolled contents of aScrollableFrame. This
-   * is a bound for the extents of the new visible region of the scrolled
-   * layer.
-   * @param aScrollableFrame the scrollable frame
-   * @param aDirty           the dirty rect, relative to aScrollableFrame
-   */
-  void StoreDirtyRectForScrolledContents(const nsIFrame* aScrollableFrame, const nsRect& aDirty);
-
-  /**
-   * Retrieve the stored dirty rect for the scrolled contents of aScrollableFrame.
-   * @param  aScrollableFrame the scroll frame
-   * @return                  the dirty rect, relative to aScrollableFrame's *reference frame*
-   */
-  nsRect GetDirtyRectForScrolledContents(const nsIFrame* aScrollableFrame) const;
-
-  /**
    * A helper class to install/restore nsDisplayListBuilder::mPreserves3DCtx.
    *
    * mPreserves3DCtx is used by class AutoAccumulateTransform &
@@ -1211,9 +1204,6 @@ private:
   uint32_t mUsedAGRBudget;
   // Set of frames already counted in budget
   nsTHashtable<nsPtrHashKey<nsIFrame> > mAGRBudgetSet;
-
-  // rects are relative to the frame's reference frame
-  nsDataHashtable<nsPtrHashKey<nsIFrame>, nsRect> mDirtyRectForScrolledContents;
 
   // Relative to mCurrentFrame.
   nsRect                         mDirtyRect;
@@ -2177,8 +2167,6 @@ private:
   nsDisplayItemLink  mSentinel;
   nsDisplayItemLink* mTop;
 
-  // This is set by ComputeVisibility
-  nsRect mVisibleRect;
   // This is set to true by FrameLayerBuilder if the final visible region
   // is empty (i.e. everything that was visible is covered by some
   // opaque content in this list).

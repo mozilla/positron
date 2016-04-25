@@ -834,6 +834,7 @@ ShadowLayerForwarder::EndTransaction(InfallibleTArray<EditReply>* aReplies,
     common.scrollbarTargetContainerId() = mutant->GetScrollbarTargetContainerId();
     common.scrollbarDirection() = mutant->GetScrollbarDirection();
     common.scrollbarThumbRatio() = mutant->GetScrollbarThumbRatio();
+    common.isScrollbarContainer() = mutant->IsScrollbarContainer();
     common.mixBlendMode() = (int8_t)mutant->GetMixBlendMode();
     common.forceIsolatedGroup() = mutant->GetForceIsolatedGroup();
     if (Layer* maskLayer = mutant->GetMaskLayer()) {
@@ -843,7 +844,7 @@ ShadowLayerForwarder::EndTransaction(InfallibleTArray<EditReply>* aReplies,
     }
     common.maskLayerParent() = nullptr;
     common.animations() = mutant->GetAnimations();
-    common.invalidRegion() = mutant->GetInvalidRegion();
+    common.invalidRegion() = mutant->GetInvalidRegion().GetRegion();
     common.scrollMetadata() = mutant->GetAllScrollMetadata();
     for (size_t i = 0; i < mutant->GetAncestorMaskLayerCount(); i++) {
       auto layer = Shadow(mutant->GetAncestorMaskLayerAt(i)->AsShadowableLayer());

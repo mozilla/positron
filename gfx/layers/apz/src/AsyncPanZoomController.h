@@ -27,6 +27,7 @@
 #include "mozilla/gfx/Matrix.h"
 #include "nsIScrollableFrame.h"
 #include "nsRegion.h"
+#include "nsTArray.h"
 #include "PotentialCheckerboardDurationTracker.h"
 
 #include "base/message_loop.h"
@@ -161,7 +162,7 @@ public:
   bool AdvanceAnimations(const TimeStamp& aSampleTime);
 
   bool UpdateAnimation(const TimeStamp& aSampleTime,
-                       Vector<Task*>* aOutDeferredTasks);
+                       nsTArray<Task*>* aOutDeferredTasks);
 
   /**
    * A shadow layer update has arrived. |aScrollMetdata| is the new ScrollMetadata
@@ -172,13 +173,6 @@ public:
    */
   void NotifyLayersUpdated(const ScrollMetadata& aScrollMetadata, bool aIsFirstPaint,
                            bool aThisLayerTreeUpdated);
-
-  /**
-   * A lightweight version of NotifyLayersUpdated that allows just the scroll
-   * offset and scroll generation from the main thread to be propagated to APZ.
-   */
-  void NotifyScrollUpdated(uint32_t aScrollGeneration,
-                           const CSSPoint& aScrollOffset);
 
   /**
    * The platform implementation must set the compositor parent so that we can

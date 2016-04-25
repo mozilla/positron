@@ -129,6 +129,17 @@ public:
 
   void QueueVideoChunk(VideoChunk& aChunk, bool aForceBlack)
   {
+    if (aChunk.IsNull()) {
+      return;
+    }
+
+    // We get passed duplicate frames every ~10ms even with no frame change.
+    int32_t serial = aChunk.mFrame.GetImage()->GetSerial();
+    if (serial == last_img_) {
+      return;
+    }
+    last_img_ = serial;
+
     // A throttling limit of 1 allows us to convert 2 frames concurrently.
     // It's short enough to not build up too significant a delay, while
     // giving us a margin to not cause some machines to drop every other frame.
@@ -158,10 +169,6 @@ public:
     }
 #endif
 
-    if (aChunk.IsNull()) {
-      return;
-    }
-
     bool forceBlack = aForceBlack || aChunk.mFrame.GetForceBlack();
 
     if (forceBlack) {
@@ -180,13 +187,6 @@ public:
       disabled_frame_sent_ = true;
     } else {
       disabled_frame_sent_ = false;
-
-      // We get passed duplicate frames every ~10ms even with no frame change.
-      int32_t serial = aChunk.mFrame.GetImage()->GetSerial();
-      if (serial == last_img_) {
-        return;
-      }
-      last_img_ = serial;
     }
 
     ++mLength; // Atomic
@@ -1801,13 +1801,11 @@ static void AddTrackAndListener(MediaStream* source,
       // to the "start" time for the track
       segment_->AppendNullData(current_ticks);
       if (segment_->GetType() == MediaSegment::AUDIO) {
-        mStream->AsSourceStream()->AddAudioTrack(track_id_, track_rate_,
-                                                 current_ticks,
+        mStream->AsSourceStream()->AddAudioTrack(track_id_, track_rate_, 0,
                                                  static_cast<AudioSegment*>(segment_.forget()));
       } else {
         NS_ASSERTION(mStream->GraphRate() == track_rate_, "Rate mismatch");
-        mStream->AsSourceStream()->AddTrack(track_id_,
-                                            current_ticks, segment_.forget());
+        mStream->AsSourceStream()->AddTrack(track_id_, 0, segment_.forget());
       }
 
       // We need to know how much has been "inserted" because we're given absolute
@@ -2234,7 +2232,7 @@ public:
       yuvData.mPicSize = IntSize(width_, height_);
       yuvData.mStereoMode = StereoMode::MONO;
 
-      if (!yuvImage->SetData(yuvData)) {
+      if (!yuvImage->CopyData(yuvData)) {
         MOZ_ASSERT(false);
         return;
       }

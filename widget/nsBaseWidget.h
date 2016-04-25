@@ -6,6 +6,8 @@
 #define nsBaseWidget_h__
 
 #include "mozilla/EventForwards.h"
+#include "mozilla/RefPtr.h"
+#include "mozilla/UniquePtr.h"
 #include "mozilla/WidgetUtils.h"
 #include "mozilla/layers/APZCCallbackHelper.h"
 #include "nsRect.h"
@@ -14,7 +16,6 @@
 #include "nsIFile.h"
 #include "nsString.h"
 #include "nsCOMPtr.h"
-#include "nsAutoPtr.h"
 #include "nsIRollupListener.h"
 #include "nsIObserver.h"
 #include "nsIWidgetListener.h"
@@ -265,6 +266,7 @@ public:
                           const uint32_t& aFlags) override;
   // Dispatch an event that must be first be routed through APZ.
   nsEventStatus DispatchInputEvent(mozilla::WidgetInputEvent* aEvent) override;
+  void DispatchEventToAPZOnly(mozilla::WidgetInputEvent* aEvent) override;
 
   void SetConfirmedTargetAPZC(uint64_t aInputBlockId,
                               const nsTArray<ScrollableLayerGuid>& aTargets) const override;
@@ -322,10 +324,6 @@ public:
 
   virtual const SizeConstraints GetSizeConstraints() override;
   virtual void SetSizeConstraints(const SizeConstraints& aConstraints) override;
-
-  virtual bool CaptureWidgetOnScreen(RefPtr<mozilla::gfx::DrawTarget> aDT) override {
-    return false;
-  }
 
   virtual void StartAsyncScrollbarDrag(const AsyncDragMetrics& aDragMetrics) override;
 
@@ -427,7 +425,7 @@ protected:
 
   virtual nsresult SynthesizeNativeTouchPoint(uint32_t aPointerId,
                                               TouchPointerState aPointerState,
-                                              ScreenIntPoint aPointerScreenPoint,
+                                              LayoutDeviceIntPoint aPoint,
                                               double aPointerPressure,
                                               uint32_t aPointerOrientation,
                                               nsIObserver* aObserver) override
@@ -527,6 +525,7 @@ protected:
   RefPtr<CompositorBridgeParent> mCompositorBridgeParent;
   RefPtr<mozilla::CompositorVsyncDispatcher> mCompositorVsyncDispatcher;
   RefPtr<APZCTreeManager> mAPZC;
+  RefPtr<GeckoContentController> mRootContentController;
   RefPtr<APZEventState> mAPZEventState;
   // Back buffer of BasicCompositor
   RefPtr<DrawTarget> mLastBackBuffer;

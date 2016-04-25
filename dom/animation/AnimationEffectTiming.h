@@ -17,8 +17,10 @@ namespace dom {
 class AnimationEffectTiming : public AnimationEffectTimingReadOnly
 {
 public:
-  AnimationEffectTiming(const TimingParams& aTiming, KeyframeEffect* aEffect)
-    : AnimationEffectTimingReadOnly(aTiming)
+  AnimationEffectTiming(nsISupports* aParent,
+                        const TimingParams& aTiming,
+                        KeyframeEffect* aEffect)
+    : AnimationEffectTimingReadOnly(aParent, aTiming)
     , mEffect(aEffect) { }
 
   JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
@@ -33,7 +35,7 @@ public:
   void SetDuration(const UnrestrictedDoubleOrString& aDuration,
                    ErrorResult& aRv);
   void SetDirection(const PlaybackDirection& aDirection);
-  void SetEasing(const nsAString& aEasing, ErrorResult& aRv);
+  void SetEasing(JSContext* aCx, const nsAString& aEasing, ErrorResult& aRv);
 
 private:
   KeyframeEffect* MOZ_NON_OWNING_REF mEffect;

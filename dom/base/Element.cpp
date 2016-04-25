@@ -1177,14 +1177,12 @@ Element::SetAttribute(const nsAString& aName,
                       const nsAString& aValue,
                       ErrorResult& aError)
 {
+  aError = nsContentUtils::CheckQName(aName, false);
+  if (aError.Failed()) {
+    return;
+  }
   const nsAttrName* name = InternalGetExistingAttrNameFromQName(aName);
-
   if (!name) {
-    aError = nsContentUtils::CheckQName(aName, false);
-    if (aError.Failed()) {
-      return;
-    }
-
     nsCOMPtr<nsIAtom> nameAtom;
     if (IsHTMLElement() && IsInHTMLDocument()) {
       nsAutoString lower;
@@ -2084,8 +2082,8 @@ Element::DispatchClickEvent(nsPresContext* aPresContext,
   NS_PRECONDITION(aStatus, "Null out param?");
 
   WidgetMouseEvent event(aSourceEvent->IsTrusted(), eMouseClick,
-                         aSourceEvent->widget, WidgetMouseEvent::eReal);
-  event.refPoint = aSourceEvent->refPoint;
+                         aSourceEvent->mWidget, WidgetMouseEvent::eReal);
+  event.mRefPoint = aSourceEvent->mRefPoint;
   uint32_t clickCount = 1;
   float pressure = 0;
   uint16_t inputSource = 0;
@@ -3027,7 +3025,7 @@ Element::PostHandleEventForLinks(EventChainPostVisitor& aVisitor)
   }
   case eLegacyDOMActivate:
     {
-      if (aVisitor.mEvent->originalTarget == this) {
+      if (aVisitor.mEvent->mOriginalTarget == this) {
         nsAutoString target;
         GetLinkTarget(target);
         const InternalUIEvent* activeEvent = aVisitor.mEvent->AsUIEvent();

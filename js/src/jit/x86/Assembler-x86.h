@@ -44,6 +44,7 @@ static MOZ_CONSTEXPR_VAR Register JSReturnReg_Data = edx;
 static MOZ_CONSTEXPR_VAR Register StackPointer = esp;
 static MOZ_CONSTEXPR_VAR Register FramePointer = ebp;
 static MOZ_CONSTEXPR_VAR Register ReturnReg = eax;
+static MOZ_CONSTEXPR_VAR Register64 ReturnReg64(InvalidReg, InvalidReg);
 static MOZ_CONSTEXPR_VAR FloatRegister ReturnFloat32Reg = FloatRegister(X86Encoding::xmm0, FloatRegisters::Single);
 static MOZ_CONSTEXPR_VAR FloatRegister ReturnDoubleReg = FloatRegister(X86Encoding::xmm0, FloatRegisters::Double);
 static MOZ_CONSTEXPR_VAR FloatRegister ReturnSimd128Reg = FloatRegister(X86Encoding::xmm0, FloatRegisters::Simd128);
@@ -107,13 +108,11 @@ static MOZ_CONSTEXPR_VAR Register AsmJSIonExitRegD2 = esi;
 static MOZ_CONSTEXPR_VAR Register RegExpMatcherRegExpReg = CallTempReg0;
 static MOZ_CONSTEXPR_VAR Register RegExpMatcherStringReg = CallTempReg1;
 static MOZ_CONSTEXPR_VAR Register RegExpMatcherLastIndexReg = CallTempReg2;
-static MOZ_CONSTEXPR_VAR Register RegExpMatcherStickyReg = CallTempReg4;
 
 // Registerd used in RegExpTester instruction (do not use ReturnReg).
 static MOZ_CONSTEXPR_VAR Register RegExpTesterRegExpReg = CallTempReg0;
 static MOZ_CONSTEXPR_VAR Register RegExpTesterStringReg = CallTempReg2;
 static MOZ_CONSTEXPR_VAR Register RegExpTesterLastIndexReg = CallTempReg3;
-static MOZ_CONSTEXPR_VAR Register RegExpTesterStickyReg = CallTempReg4;
 
 // GCC stack is aligned on 16 bytes. Ion does not maintain this for internal
 // calls. asm.js code does.

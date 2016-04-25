@@ -19,7 +19,6 @@
 #undef GetBinaryType
 #undef RemoveDirectory
 
-#include "nsAutoPtr.h"
 #include "nsString.h"
 #include "nsRegion.h"
 #include "nsRect.h"
@@ -145,7 +144,10 @@ public:
    */
   static double LogToPhysFactor(HMONITOR aMonitor);
   static double LogToPhysFactor(HWND aWnd) {
-    return LogToPhysFactor(::MonitorFromWindow(aWnd, MONITOR_DEFAULTTOPRIMARY));
+    // if there's an ancestor window, we want to share its DPI setting
+    HWND ancestor = ::GetAncestor(aWnd, GA_ROOTOWNER);
+    return LogToPhysFactor(::MonitorFromWindow(ancestor ? ancestor : aWnd,
+                                               MONITOR_DEFAULTTOPRIMARY));
   }
   static double LogToPhysFactor(HDC aDC) {
     return LogToPhysFactor(::WindowFromDC(aDC));

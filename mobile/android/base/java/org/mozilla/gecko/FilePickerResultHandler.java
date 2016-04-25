@@ -235,7 +235,7 @@ class FilePickerResultHandler implements ActivityResultHandler {
                     if (tabId > -1 && !TextUtils.isEmpty(tempFile)) {
                         Tabs.registerOnTabsChangedListener(this);
                     }
-                } catch(IOException ex) {
+                } catch (IOException ex) {
                     Log.i(LOGTAG, "Error writing file", ex);
                 } finally {
                     if (fos != null) {
@@ -256,7 +256,7 @@ class FilePickerResultHandler implements ActivityResultHandler {
         // This cleans up our temp file. If it doesn't run, we just hope that Android
         // will eventually does the cleanup for us.
         @Override
-        public void onTabChanged(Tab tab, Tabs.TabEvents msg, Object data) {
+        public void onTabChanged(Tab tab, Tabs.TabEvents msg, String data) {
             if ((tab == null) || (tab.getId() != tabId)) {
                 return;
             }

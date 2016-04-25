@@ -223,7 +223,6 @@ pref("dom.use_watchdog", false);
 // ensure that those calls don't accidentally trigger the dialog.
 pref("dom.max_script_run_time", 0);
 pref("dom.max_chrome_script_run_time", 0);
-pref("dom.max_child_script_run_time", 0);
 
 // plugins
 pref("plugin.disable", true);
@@ -1059,8 +1058,8 @@ pref("layout.accessiblecaret.bar.enabled", true);
 pref("layout.accessiblecaret.use_long_tap_injector", false);
 #endif
 
-// The active caret is disallow to be dragged across the other (inactive) caret.
-pref("layout.accessiblecaret.allow_dragging_across_other_caret", false);
+// Hide carets and text selection dialog during scrolling.
+pref("layout.accessiblecaret.always_show_when_scrolling", false);
 
 // Enable sync and mozId with Firefox Accounts.
 pref("services.sync.fxaccounts.enabled", true);

@@ -8,6 +8,7 @@
 
 #include "jsgc.h"
 
+#include "gc/Policy.h"
 #include "jit/BaselineJIT.h"
 #include "jit/Ion.h"
 #include "jit/JitCompartment.h"
@@ -30,6 +31,7 @@ JS::Zone::Zone(JSRuntime* rt)
     types(this),
     compartments(),
     gcGrayRoots(),
+    typeDescrObjects(this, SystemAllocPolicy()),
     gcMallocBytes(0),
     gcMallocGCTriggered(false),
     usage(&rt->gc.usage),
@@ -56,6 +58,8 @@ JS::Zone::Zone(JSRuntime* rt)
 
 Zone::~Zone()
 {
+    MOZ_ASSERT_IF(typeDescrObjects.initialized(), typeDescrObjects.empty());
+
     JSRuntime* rt = runtimeFromMainThread();
     if (this == rt->gc.systemZone)
         rt->gc.systemZone = nullptr;
@@ -67,7 +71,10 @@ Zone::~Zone()
 bool Zone::init(bool isSystemArg)
 {
     isSystem = isSystemArg;
-    return uniqueIds_.init() && gcZoneGroupEdges.init() && gcWeakKeys.init();
+    return uniqueIds_.init() &&
+           gcZoneGroupEdges.init() &&
+           gcWeakKeys.init() &&
+           typeDescrObjects.init();
 }
 
 void
@@ -422,4 +429,10 @@ ZoneList::clear()
 {
     while (!isEmpty())
         removeFront();
+}
+
+JS_PUBLIC_API(void)
+JS::shadow::RegisterWeakCache(JS::Zone* zone, WeakCache<void*>* cachep)
+{
+    zone->registerWeakCache(cachep);
 }

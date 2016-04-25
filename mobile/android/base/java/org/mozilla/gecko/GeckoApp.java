@@ -6,7 +6,6 @@
 package org.mozilla.gecko;
 
 import org.mozilla.gecko.AppConstants.Versions;
-import org.mozilla.gecko.GeckoProfileDirectories.NoMozillaDirectoryException;
 import org.mozilla.gecko.db.BrowserDB;
 import org.mozilla.gecko.db.URLMetadataTable;
 import org.mozilla.gecko.db.UrlAnnotations;
@@ -141,7 +140,7 @@ public abstract class GeckoApp
     ViewTreeObserver.OnGlobalLayoutListener {
 
     private static final String LOGTAG = "GeckoApp";
-    private static final int ONE_DAY_MS = 1000*60*60*24;
+    private static final int ONE_DAY_MS = 1000 * 60 * 60 * 24;
 
     public static final String ACTION_ALERT_CALLBACK       = "org.mozilla.gecko.ACTION_ALERT_CALLBACK";
     public static final String ACTION_HOMESCREEN_SHORTCUT  = "org.mozilla.gecko.BOOKMARK";
@@ -275,10 +274,10 @@ public abstract class GeckoApp
     }
 
     @Override
-    public void onTabChanged(Tab tab, Tabs.TabEvents msg, Object data) {
+    public void onTabChanged(Tab tab, Tabs.TabEvents msg, String data) {
         // When a tab is closed, it is always unselected first.
         // When a tab is unselected, another tab is always selected first.
-        switch(msg) {
+        switch (msg) {
             case UNSELECTED:
                 hidePlugins(tab);
                 break;
@@ -466,7 +465,7 @@ public abstract class GeckoApp
             for (String clear : clearSet) {
                 try {
                     clearObj.put(clear, true);
-                } catch(JSONException ex) {
+                } catch (JSONException ex) {
                     Log.e(LOGTAG, "Error adding clear object " + clear, ex);
                 }
             }
@@ -474,7 +473,7 @@ public abstract class GeckoApp
             final JSONObject res = new JSONObject();
             try {
                 res.put("sanitize", clearObj);
-            } catch(JSONException ex) {
+            } catch (JSONException ex) {
                 Log.e(LOGTAG, "Error adding sanitize object", ex);
             }
 
@@ -484,7 +483,7 @@ public abstract class GeckoApp
                 final String sessionRestore = getSessionRestorePreference();
                 try {
                     res.put("dontSaveSession", "quit".equals(sessionRestore));
-                } catch(JSONException ex) {
+                } catch (JSONException ex) {
                     Log.e(LOGTAG, "Error adding session restore data", ex);
                 }
             }
@@ -771,7 +770,7 @@ public abstract class GeckoApp
             }
         });
 
-        builder.setNegativeButton(R.string.site_settings_cancel, new DialogInterface.OnClickListener(){
+        builder.setNegativeButton(R.string.site_settings_cancel, new DialogInterface.OnClickListener() {
             @Override
             public void onClick(DialogInterface dialog, int id) {
                 dialog.cancel();
@@ -936,7 +935,7 @@ public abstract class GeckoApp
         try {
             if (isDataURI) {
                 int dataStart = aSrc.indexOf(",");
-                byte[] buf = Base64.decode(aSrc.substring(dataStart+1), Base64.DEFAULT);
+                byte[] buf = Base64.decode(aSrc.substring(dataStart + 1), Base64.DEFAULT);
                 image = BitmapUtils.decodeByteArray(buf);
             } else {
                 int byteRead;
@@ -948,7 +947,7 @@ public abstract class GeckoApp
                 // Cannot read from same stream twice. Also, InputStream from
                 // URL does not support reset. So converting to byte array.
 
-                while((byteRead = is.read(buf)) != -1) {
+                while ((byteRead = is.read(buf)) != -1) {
                     os.write(buf, 0, byteRead);
                 }
                 byte[] imgBuffer = os.toByteArray();
@@ -983,22 +982,22 @@ public abstract class GeckoApp
             } else {
                 SnackbarHelper.showSnackbar(this, getString(R.string.set_image_fail), Snackbar.LENGTH_LONG);
             }
-        } catch(OutOfMemoryError ome) {
+        } catch (OutOfMemoryError ome) {
             Log.e(LOGTAG, "Out of Memory when converting to byte array", ome);
-        } catch(IOException ioe) {
+        } catch (IOException ioe) {
             Log.e(LOGTAG, "I/O Exception while setting wallpaper", ioe);
         } finally {
             if (is != null) {
                 try {
                     is.close();
-                } catch(IOException ioe) {
+                } catch (IOException ioe) {
                     Log.w(LOGTAG, "I/O Exception while closing stream", ioe);
                 }
             }
             if (os != null) {
                 try {
                     os.close();
-                } catch(IOException ioe) {
+                } catch (IOException ioe) {
                     Log.w(LOGTAG, "I/O Exception while closing stream", ioe);
                 }
             }
@@ -1132,7 +1131,7 @@ public abstract class GeckoApp
         // Workaround for <http://code.google.com/p/android/issues/detail?id=20915>.
         try {
             Class.forName("android.os.AsyncTask");
-        } catch (ClassNotFoundException e) {}
+        } catch (ClassNotFoundException e) { }
 
         MemoryMonitor.getInstance().init(getApplicationContext());
 
@@ -1270,7 +1269,7 @@ public abstract class GeckoApp
         // Use global layout state change to kick off additional initialization
         mMainLayout.getViewTreeObserver().addOnGlobalLayoutListener(this);
 
-        if (Versions.preMarshmallow || !AppConstants.NIGHTLY_BUILD) {
+        if (Versions.preMarshmallow) {
             mTextSelection = new ActionBarTextSelection(
                     (TextSelectionHandle) findViewById(R.id.anchor_handle),
                     (TextSelectionHandle) findViewById(R.id.caret_handle),
@@ -1409,14 +1408,6 @@ public abstract class GeckoApp
         mDoorHangerPopup = new DoorHangerPopup(this);
         mPluginContainer = (AbsoluteLayout) findViewById(R.id.plugin_container);
         mFormAssistPopup = (FormAssistPopup) findViewById(R.id.form_assist_popup);
-
-        if (mCameraView == null) {
-            // Pre-ICS devices need the camera surface in a visible layout.
-            if (Versions.preICS) {
-                mCameraView = new SurfaceView(this);
-                ((SurfaceView)mCameraView).getHolder().setType(SurfaceHolder.SURFACE_TYPE_PUSH_BUFFERS);
-            }
-        }
     }
 
     /**
@@ -2700,10 +2691,6 @@ public abstract class GeckoApp
     }
 
     private void setSystemUiVisible(final boolean visible) {
-        if (Versions.preICS) {
-            return;
-        }
-
         ThreadUtils.postToUiThread(new Runnable() {
             @Override
             public void run() {

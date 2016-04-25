@@ -108,9 +108,13 @@ js::InformalValueTypeName(const Value& v)
 }
 
 // ES6 draft rev37 6.2.4.4 FromPropertyDescriptor
-bool
-js::FromPropertyDescriptor(JSContext* cx, Handle<PropertyDescriptor> desc, MutableHandleValue vp)
+JS_PUBLIC_API(bool)
+JS::FromPropertyDescriptor(JSContext* cx, Handle<PropertyDescriptor> desc, MutableHandleValue vp)
 {
+    AssertHeapIsIdle(cx);
+    CHECK_REQUEST(cx);
+    assertSameCompartment(cx, desc);
+
     // Step 1.
     if (!desc.object()) {
         vp.setUndefined();
@@ -2899,34 +2903,6 @@ js::HasDataProperty(JSContext* cx, NativeObject* obj, jsid id, Value* vp)
     return false;
 }
 
-static bool
-GenericNativeMethodDispatcher(JSContext* cx, unsigned argc, Value* vp)
-{
-    CallArgs args = CallArgsFromVp(argc, vp);
-
-    const JSFunctionSpec* fs = (JSFunctionSpec*)
-        args.callee().as<JSFunction>().getExtendedSlot(0).toPrivate();
-    MOZ_ASSERT((fs->flags & JSFUN_GENERIC_NATIVE) != 0);
-
-    if (argc < 1) {
-        ReportMissingArg(cx, args.calleev(), 0);
-        return false;
-    }
-
-    /*
-     * Copy all actual (argc) arguments down over our |this| parameter, vp[1],
-     * which is almost always the class constructor object, e.g. Array.  Then
-     * call the corresponding prototype native method with our first argument
-     * passed as |this|.
-     */
-    memmove(vp + 1, vp + 2, argc * sizeof(Value));
-
-    /* Clear the last parameter in case too few arguments were passed. */
-    vp[2 + --argc].setUndefined();
-
-    return fs->call.op(cx, argc, vp);
-}
-
 extern bool
 PropertySpecNameToId(JSContext* cx, const char* name, MutableHandleId id,
                      js::PinningBehavior pin = js::DoNotPinAtom);
@@ -2953,27 +2929,6 @@ DefineFunctionFromSpec(JSContext* cx, HandleObject obj, const JSFunctionSpec* fs
     RootedId id(cx);
     if (!PropertySpecNameToId(cx, fs->name, &id))
         return false;
-
-    // Define a generic arity N+1 static method for the arity N prototype
-    // method if flags contains JSFUN_GENERIC_NATIVE.
-    if (flags & JSFUN_GENERIC_NATIVE) {
-        // We require that any consumers using JSFUN_GENERIC_NATIVE stash
-        // the prototype and constructor in the global slots before invoking
-        // JS_DefineFunctions on the proto.
-        JSProtoKey key = JSCLASS_CACHED_PROTO_KEY(obj->getClass());
-        MOZ_ASSERT(obj == &obj->global().getPrototype(key).toObject());
-        RootedObject ctor(cx, &obj->global().getConstructor(key).toObject());
-
-        flags &= ~JSFUN_GENERIC_NATIVE;
-        JSFunction* fun = DefineFunction(cx, ctor, id,
-                                         GenericNativeMethodDispatcher,
-                                         fs->nargs + 1, flags,
-                                         gc::AllocKind::FUNCTION_EXTENDED);
-        if (!fun)
-            return false;
-
-        fun->setExtendedSlot(0, PrivateValue(const_cast<JSFunctionSpec*>(fs)));
-    }
 
     JSFunction* fun = NewFunctionFromSpec(cx, fs, id);
     if (!fun)
@@ -3017,7 +2972,8 @@ MaybeCallMethod(JSContext* cx, HandleObject obj, HandleId id, MutableHandleValue
         vp.setObject(*obj);
         return true;
     }
-    return Invoke(cx, ObjectValue(*obj), vp, 0, nullptr, vp);
+
+    return js::Call(cx, vp, obj, vp);
 }
 
 static bool
@@ -3127,18 +3083,19 @@ js::ToPrimitiveSlow(JSContext* cx, JSType preferredType, MutableHandleValue vp)
 
     // Step 6.
     if (!method.isUndefined()) {
-        // Step 6 of GetMethod. Invoke() below would do this check and throw a
+        // Step 6 of GetMethod. js::Call() below would do this check and throw a
         // TypeError anyway, but this produces a better error message.
         if (!IsCallable(method))
             return ReportCantConvert(cx, JSMSG_TOPRIMITIVE_NOT_CALLABLE, obj, preferredType);
 
-        // Steps 1-3.
-        RootedValue hint(cx, StringValue(preferredType == JSTYPE_STRING ? cx->names().string :
-                                         preferredType == JSTYPE_NUMBER ? cx->names().number :
-                                         cx->names().default_));
+        // Steps 1-3, 6.a-b.
+        RootedValue arg0(cx, StringValue(preferredType == JSTYPE_STRING
+                                         ? cx->names().string
+                                         : preferredType == JSTYPE_NUMBER
+                                         ? cx->names().number
+                                         : cx->names().default_));
 
-        // Steps 6.a-b.
-        if (!Invoke(cx, vp, method, 1, hint.address(), vp))
+        if (!js::Call(cx, method, vp, arg0, vp))
             return false;
 
         // Steps 6.c-d.
@@ -3949,14 +3906,13 @@ js::SpeciesConstructor(JSContext* cx, HandleObject obj, HandleValue defaultCtor,
     RootedValue func(cx);
     if (!GlobalObject::getSelfHostedFunction(cx, cx->global(), shName, shName, 2, &func))
         return false;
-    InvokeArgs args(cx);
-    if (!args.init(2))
-        return false;
-    args.setCallee(func);
-    args.setThis(UndefinedValue());
+
+    FixedInvokeArgs<2> args(cx);
+
     args[0].setObject(*obj);
     args[1].set(defaultCtor);
-    if (!Invoke(cx, args))
+
+    if (!Call(cx, func, UndefinedHandleValue, args, pctor))
         return false;
 
     pctor.set(args.rval());

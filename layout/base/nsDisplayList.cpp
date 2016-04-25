@@ -491,6 +491,52 @@ AddAnimationsForProperty(nsIFrame* aFrame, nsCSSProperty aProperty,
   }
 }
 
+static void
+ClipBackgroundByText(nsIFrame* aFrame, nsRenderingContext* aContext,
+                     const gfxRect& aFillRect)
+{
+  // The main function of enabling background-clip:text property value.
+  // When a nsDisplayBackgroundImage detects "text" bg-clip style, it will call
+  // this function to
+  // 1. Ask every text frame objects in aFrame puts glyph paths into aContext.
+  // 2. Then, clip aContext.
+  //
+  // Then, nsDisplayBackgroundImage paints bg-images into this clipped region,
+  // so we get images embedded in text shape!
+
+  nsDisplayListBuilder builder(aFrame, nsDisplayListBuilder::GENERATE_GLYPH, false);
+
+  builder.EnterPresShell(aFrame);
+  nsDisplayList list;
+  aFrame->BuildDisplayListForStackingContext(&builder,
+                                      nsRect(nsPoint(0, 0), aFrame->GetSize()),
+                                      &list);
+  builder.LeavePresShell(aFrame);
+
+#ifdef DEBUG
+  // ClipBackgroundByText is called by nsDisplayBackgroundImage::Paint or
+  // nsDisplayBackgroundColor::Paint.
+  // Assert that we do not generate and put nsDisplayBackgroundImage or
+  // nsDisplayBackgroundColor into the list again, which would lead to
+  // infinite recursion.
+  for (nsDisplayItem* i = list.GetBottom(); i; i = i->GetAbove()) {
+    MOZ_ASSERT(nsDisplayItem::TYPE_BACKGROUND != i->GetType() &&
+               nsDisplayItem::TYPE_BACKGROUND_COLOR != i->GetType());
+  }
+#endif
+
+  gfxContext* ctx = aContext->ThebesContext();
+  gfxContextMatrixAutoSaveRestore save(ctx);
+  ctx->SetMatrix(ctx->CurrentMatrix().Translate(aFillRect.TopLeft()));
+  ctx->NewPath();
+
+  RefPtr<LayerManager> layerManager =
+    list.PaintRoot(&builder, aContext, nsDisplayList::PAINT_DEFAULT);
+
+  ctx->Clip();
+  list.DeleteAll();
+}
+
 /* static */ void
 nsDisplayListBuilder::AddAnimationsAndTransitionsToLayer(Layer* aLayer,
                                                          nsDisplayListBuilder* aBuilder,
@@ -1393,24 +1439,6 @@ nsDisplayListBuilder::AppendNewScrollInfoItemForHoisting(nsDisplayScrollInfoLaye
   mScrollInfoItemsForHoisting->AppendNewToTop(aScrollInfoItem);
 }
 
-void
-nsDisplayListBuilder::StoreDirtyRectForScrolledContents(const nsIFrame* aScrollableFrame,
-                                                        const nsRect& aDirty)
-{
-  mDirtyRectForScrolledContents.Put(const_cast<nsIFrame*>(aScrollableFrame),
-                                    aDirty + ToReferenceFrame(aScrollableFrame));
-}
-
-nsRect
-nsDisplayListBuilder::GetDirtyRectForScrolledContents(const nsIFrame* aScrollableFrame) const
-{
-  nsRect result;
-  if (!mDirtyRectForScrolledContents.Get(const_cast<nsIFrame*>(aScrollableFrame), &result)) {
-    return nsRect();
-  }
-  return result;
-}
-
 bool
 nsDisplayListBuilder::IsBuildingLayerEventRegions()
 {
@@ -1902,7 +1930,7 @@ void nsDisplayList::DeleteAll() {
 static bool
 GetMouseThrough(const nsIFrame* aFrame)
 {
-  if (!aFrame->IsBoxFrame())
+  if (!aFrame->IsXULBoxFrame())
     return false;
 
   const nsIFrame* frame = aFrame;
@@ -1912,7 +1940,7 @@ GetMouseThrough(const nsIFrame* aFrame)
     } else if (frame->GetStateBits() & NS_FRAME_MOUSE_THROUGH_NEVER) {
       return false;
     }
-    frame = nsBox::GetParentBox(frame);
+    frame = nsBox::GetParentXULBox(frame);
   }
   return false;
 }
@@ -2140,6 +2168,14 @@ static bool IsCSSOrderLEQ(nsDisplayItem* aItem1, nsDisplayItem* aItem2, void*) {
 
 static bool IsZOrderLEQ(nsDisplayItem* aItem1, nsDisplayItem* aItem2,
                         void* aClosure) {
+  {
+    // TEMPORARY debugging code for bug 1265280
+    nsIFrame* f2 = aItem2->Frame();
+    if (!f2 || !f2->StyleContext()) {
+      NS_RUNTIMEABORT(nsPrintfCString("bad display item %p type %s frame %p",
+                                      aItem2, aItem2->Name(), f2).get());
+    }
+  }
   // Note that we can't just take the difference of the two
   // z-indices here, because that might overflow a 32-bit int.
   return aItem1->ZIndex() <= aItem2->ZIndex();
@@ -2784,6 +2820,7 @@ nsDisplayBackgroundImage::GetInsideClipRegion(nsDisplayItem* aItem,
   } else {
     switch (aClip) {
     case NS_STYLE_IMAGELAYER_CLIP_BORDER:
+    case NS_STYLE_IMAGELAYER_CLIP_TEXT:
       clipRect = nsRect(aItem->ToReferenceFrame(), frame->GetSize());
       break;
     case NS_STYLE_IMAGELAYER_CLIP_PADDING:
@@ -2821,7 +2858,8 @@ nsDisplayBackgroundImage::GetOpaqueRegion(nsDisplayListBuilder* aBuilder,
         NS_STYLE_BOX_DECORATION_BREAK_CLONE ||
       (!mFrame->GetPrevContinuation() && !mFrame->GetNextContinuation())) {
     const nsStyleImageLayers::Layer& layer = mBackgroundStyle->mImage.mLayers[mLayer];
-    if (layer.mImage.IsOpaque() && layer.mBlendMode == NS_STYLE_BLEND_NORMAL) {
+    if (layer.mImage.IsOpaque() && layer.mBlendMode == NS_STYLE_BLEND_NORMAL &&
+        layer.mClip != NS_STYLE_IMAGELAYER_CLIP_TEXT) {
       result = GetInsideClipRegion(this, layer.mClip, mBounds);
     }
   }
@@ -2895,16 +2933,29 @@ void
 nsDisplayBackgroundImage::PaintInternal(nsDisplayListBuilder* aBuilder,
                                         nsRenderingContext* aCtx, const nsRect& aBounds,
                                         nsRect* aClipRect) {
-  nsPoint offset = ToReferenceFrame();
   uint32_t flags = aBuilder->GetBackgroundPaintFlags();
   CheckForBorderItem(this, flags);
+
+  nsRect borderBox = nsRect(ToReferenceFrame(), mFrame->GetSize());
+  gfxContext* ctx = aCtx->ThebesContext();
+  uint8_t clip = mBackgroundStyle->mImage.mLayers[mLayer].mClip;
+
+  if (clip == NS_STYLE_IMAGELAYER_CLIP_TEXT) {
+    gfxRect bounds = nsLayoutUtils::RectToGfxRect(borderBox, mFrame->PresContext()->AppUnitsPerDevPixel());
+    ctx->Save();
+    ClipBackgroundByText(mFrame, aCtx, bounds);
+  }
 
   image::DrawResult result =
     nsCSSRendering::PaintBackground(mFrame->PresContext(), *aCtx, mFrame,
                                     aBounds,
-                                    nsRect(offset, mFrame->GetSize()),
+                                    borderBox,
                                     flags, aClipRect, mLayer,
                                     CompositionOp::OP_OVER);
+
+  if (clip == NS_STYLE_IMAGELAYER_CLIP_TEXT) {
+    ctx->Restore();
+  }
 
   nsDisplayBackgroundGeometry::UpdateDrawResult(this, result);
 }
@@ -3306,6 +3357,11 @@ nsDisplayBackgroundColor::Paint(nsDisplayListBuilder* aBuilder,
   // pixel shorter in rare cases. Disabled in favor of the old code for now.
   // Note that the pref layout.css.devPixelsPerPx needs to be set to 1 to
   // reproduce the bug.
+  //
+  // TODO:
+  // This new path does not include support for background-clip:text; need to
+  // be fixed if/when we switch to this new code path.
+
   DrawTarget& aDrawTarget = *aCtx->GetDrawTarget();
 
   Rect rect = NSRectToSnappedRect(borderBox,
@@ -3318,6 +3374,17 @@ nsDisplayBackgroundColor::Paint(nsDisplayListBuilder* aBuilder,
 
   gfxRect bounds =
     nsLayoutUtils::RectToGfxRect(borderBox, mFrame->PresContext()->AppUnitsPerDevPixel());
+
+  uint8_t clip = mBackgroundStyle->mImage.mLayers[0].mClip;
+  if (clip == NS_STYLE_IMAGELAYER_CLIP_TEXT) {
+    gfxContextAutoSaveRestore save(ctx);
+
+    ClipBackgroundByText(mFrame, aCtx, bounds);
+    ctx->SetColor(mColor);
+    ctx->Fill();
+
+    return;
+  }
 
   ctx->SetColor(mColor);
   ctx->NewPath();

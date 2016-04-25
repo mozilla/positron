@@ -111,18 +111,28 @@
   height: 13px;
 }
 
+#PanelUI-menu-button[badge-status="download-severe"] > .toolbarbutton-badge-stack > .toolbarbutton-badge,
 #PanelUI-menu-button[badge-status="update-failed"] > .toolbarbutton-badge-stack > .toolbarbutton-badge {
   background: #D90000 url(chrome://browser/skin/update-badge-failed.svg) no-repeat center;
   height: 13px;
 }
 
+#PanelUI-menu-button[badge-status="download-warning"] > .toolbarbutton-badge-stack > .toolbarbutton-badge,
 #PanelUI-menu-button[badge-status="fxa-needs-authentication"] > .toolbarbutton-badge-stack > .toolbarbutton-badge {
-  background: transparent url(chrome://browser/skin/warning.svg) no-repeat center;
   height: 13px;
   box-shadow: none;
   filter: drop-shadow(0 1px 0 hsla(206, 50%, 10%, .15));
 }
 
+#PanelUI-menu-button[badge-status="download-warning"] > .toolbarbutton-badge-stack > .toolbarbutton-badge {
+  background: #FFBF00 url(chrome://browser/skin/update-badge-failed.svg) no-repeat center;
+}
+
+#PanelUI-menu-button[badge-status="fxa-needs-authentication"] > .toolbarbutton-badge-stack > .toolbarbutton-badge {
+  background: transparent url(chrome://browser/skin/warning.svg) no-repeat center;
+}
+
+#PanelUI-menu-button[badge-status="download-warning"] > .toolbarbutton-badge-stack > .toolbarbutton-badge:-moz-window-inactive,
 #PanelUI-menu-button[badge-status="fxa-needs-authentication"] > .toolbarbutton-badge-stack > .toolbarbutton-badge:-moz-window-inactive {
   filter: none;
 }
@@ -1057,7 +1067,8 @@ panelview .toolbarbutton-1,
 }
 
 panelview .toolbarbutton-1,
-.widget-overflow-list .toolbarbutton-1 {
+.widget-overflow-list .toolbarbutton-1:not(:first-child),
+.widget-overflow-list .toolbaritem-combined-buttons:not(:first-child) {
   margin-top: 6px;
 }
 
@@ -1153,7 +1164,8 @@ menuitem.panel-subview-footer@menuStateActive@,
 .cui-widget-panelview menuseparator {
   -moz-appearance: none;
   min-height: 0;
-  border-top: 1px solid hsla(210,4%,10%,.15);
+  border-top: 1px solid var(--panel-separator-color);
+  border-bottom: none;
   margin: 6px 0;
   padding: 0;
 }
@@ -1346,7 +1358,7 @@ toolbarpaletteitem[haswideitem][place="panel"] + toolbarpaletteitem[haswideitem]
   margin: .5em 0;
   width: 1px;
   height: auto;
-  background: hsla(210,4%,10%,.15);
+  background: var(--panel-separator-color);
   transition-property: margin;
   transition-duration: 10ms;
   transition-timing-function: ease;

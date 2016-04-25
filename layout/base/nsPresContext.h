@@ -642,6 +642,9 @@ public:
   { return NSAppUnitsToIntPixels(aAppUnits,
              float(AppUnitsPerDevPixel())); }
 
+  float AppUnitsToFloatDevPixels(nscoord aAppUnits)
+  { return aAppUnits / float(AppUnitsPerDevPixel()); }
+
   int32_t CSSPixelsToDevPixels(int32_t aPixels)
   { return AppUnitsToDevPixels(CSSPixelsToAppUnits(aPixels)); }
 
@@ -926,8 +929,9 @@ public:
   // aRect is in device pixels
   void NotifyInvalidation(const nsIntRect& aRect, uint32_t aFlags);
   // aFlags are nsIPresShell::PAINT_ flags
-  void NotifyDidPaintForSubtree(uint32_t aFlags);
-  void FireDOMPaintEvent(nsInvalidateRequestList* aList);
+  void NotifyDidPaintForSubtree(uint32_t aFlags, uint64_t aTransactionId = 0,
+                                const mozilla::TimeStamp& aTimeStamp = mozilla::TimeStamp());
+  void FireDOMPaintEvent(nsInvalidateRequestList* aList, uint64_t aTransactionId);
 
   // Callback for catching invalidations in ContainerLayers
   // Passed to LayerProperties::ComputeDifference

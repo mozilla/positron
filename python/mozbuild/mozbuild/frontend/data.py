@@ -445,6 +445,16 @@ class Library(BaseLibrary):
         self.is_sdk = is_sdk
 
 
+class RustRlibLibrary(Library):
+    """Context derived container object for a Rust rlib"""
+
+    def __init__(self, context, basename, crate_name, rlib_filename, link_into):
+        Library.__init__(self, context, basename)
+        self.crate_name = crate_name
+        self.rlib_filename = rlib_filename
+        self.link_into = link_into
+
+
 class StaticLibrary(Library):
     """Context derived container object for a static library"""
     __slots__ = (
@@ -586,6 +596,11 @@ class TestManifest(ContextDerived):
         # If this manifest is a duplicate of another one, this is the
         # manifestparser.TestManifest of the other one.
         'dupe_manifest',
+
+        # The support files appearing in the DEFAULT section of this
+        # manifest. This enables a space optimization in all-tests.json,
+        # see the comment in mozbuild/backend/common.py.
+        'default_support_files',
     )
 
     def __init__(self, context, path, manifest, flavor=None,
@@ -607,6 +622,7 @@ class TestManifest(ContextDerived):
         self.tests = []
         self.external_installs = set()
         self.deferred_installs = set()
+        self.default_support_files = None
 
 
 class LocalInclude(ContextDerived):

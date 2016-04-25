@@ -65,7 +65,8 @@ var ActionBarHandler = {
     if (this._selectionID) {
       let [element, win] = this._getSelectionTargets();
       if (this._targetElement === element && this._contentWindow === win) {
-        if (e.reason == 'visibilitychange' || e.reason == 'presscaret') {
+        if (e.reason == 'visibilitychange' || e.reason == 'presscaret' ||
+            e.reason == 'scroll' ) {
           this._updateVisibility();
         } else {
           let forceUpdate = e.reason == 'updateposition' || e.reason == 'releasecaret';
@@ -509,7 +510,7 @@ var ActionBarHandler = {
 
     SEARCH_ADD: {
       id: "search_add_action",
-      label: Strings.browser.GetStringFromName("contextmenu.addSearchEngine2"),
+      label: Strings.browser.GetStringFromName("contextmenu.addSearchEngine3"),
       icon: "drawable://ab_add_search_engine",
       order: 0,
       floatingOrder: 8,
@@ -622,8 +623,8 @@ var ActionBarHandler = {
         toStringWithFormat("text/plain", flags, 0);
     }
 
-    // Selection text gets trimmed up.
-    return selection.toString().trim();
+    // Return explicitly selected text.
+    return selection.toString();
   },
 
   /**

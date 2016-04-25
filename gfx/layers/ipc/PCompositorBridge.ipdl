@@ -25,6 +25,7 @@ using mozilla::ipc::SharedMemoryBasic::Handle from "mozilla/ipc/SharedMemoryBasi
 using mozilla::CSSIntRegion from "Units.h";
 using mozilla::LayoutDeviceIntPoint from "Units.h";
 using mozilla::LayoutDeviceIntRegion from "Units.h";
+using mozilla::VisibilityCounter from "VisibilityIPC.h";
 using class mozilla::TimeStamp from "mozilla/TimeStamp.h";
 using class mozilla::layers::FrameUniformityData from "mozilla/layers/FrameUniformityData.h";
 
@@ -138,14 +139,6 @@ parent:
   // and so forth being interpolated.  That's what we want to happen.
   sync MakeSnapshot(SurfaceDescriptor inSnapshot, IntRect dirtyRect);
 
-  // Same as Makesnapshot(), except the snapshot is read from the underlying
-  // operating system desktop rather than the compositor's backbuffer. This
-  // is intended for testing whether hardware acceleration works.
-  //
-  // This call is part of IPDL, even though it simply wraps an nsIWidget
-  // call, to make sure it does not occur in the middle of a composite.
-  sync MakeWidgetSnapshot(SurfaceDescriptor inSnapshot);
-
   // Make sure any pending composites are started immediately and
   // block until they are completed.
   sync FlushRendering();
@@ -181,15 +174,18 @@ parent:
    */
   async RequestNotifyAfterRemotePaint();
 
-  // The child clears the 'approximately visible' regions associated with the
-  // provided layers ID and pres shell ID (i.e., the regions for all view IDs
-  // associated with those IDs).
-  async ClearApproximatelyVisibleRegions(uint64_t layersId, uint32_t presShellId);
+  // The child sends a request to clear the visible regions (approximate,
+  // in-displayport, etc.) associated with the provided layers ID and pres shell
+  // ID (i.e., the regions for all view IDs associated with those IDs).
+  async ClearVisibleRegions(uint64_t layersId, uint32_t presShellId);
 
   // The child sends a region containing rects associated with the provided
-  // scrollable layer GUID that the child considers 'approximately visible'.
+  // scrollable layer GUID that the child considers visible in the sense
+  // specified by |counter|.
   // We visualize this information in the APZ minimap.
-  async NotifyApproximatelyVisibleRegion(ScrollableLayerGuid guid, CSSIntRegion region);
+  async UpdateVisibleRegion(VisibilityCounter counter,
+                            ScrollableLayerGuid guid,
+                            CSSIntRegion region);
 
 child:
   // Send back Compositor Frame Metrics from APZCs so tiled layers can

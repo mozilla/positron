@@ -56,21 +56,18 @@ function defineCohort() {
 
   let userOptedOut = optedOut();
   let userOptedIn = optedIn();
-  let disqualified = (Services.appinfo.multiprocessBlockPolicy != 0) ||
-                     isThereAnActiveExperiment();
+  let disqualified = (Services.appinfo.multiprocessBlockPolicy != 0);
   let testGroup = (getUserSample() < TEST_THRESHOLD[updateChannel]);
 
   if (userOptedOut) {
     setCohort("optedOut");
   } else if (userOptedIn) {
     setCohort("optedIn");
-  } else if (disqualified) {
-    setCohort("disqualified");
   } else if (testGroup) {
-    setCohort("test");
+    setCohort(disqualified ? "disqualified-test" : "test");
     Preferences.set(PREF_TOGGLE_E10S, true);
   } else {
-    setCohort("control");
+    setCohort(disqualified ? "disqualified-control" : "control");
     Preferences.reset(PREF_TOGGLE_E10S);
   }
 }
@@ -113,9 +110,4 @@ function optedOut() {
   return Preferences.get(PREF_E10S_FORCE_DISABLED, false) ||
          (Preferences.isSet(PREF_TOGGLE_E10S) &&
           Preferences.get(PREF_TOGGLE_E10S) == false);
-}
-
-function isThereAnActiveExperiment() {
-  let { Experiments } = Cu.import("resource:///modules/experiments/Experiments.jsm", {});
-  return (Experiments.instance().getActiveExperimentID() !== null);
 }

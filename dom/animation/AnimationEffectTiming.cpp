@@ -55,7 +55,12 @@ AnimationEffectTiming::SetEndDelay(double aEndDelay)
 void
 AnimationEffectTiming::SetFill(const FillMode& aFill)
 {
-  // TODO: Bug 1244637 - implement AnimationEffectTiming fill
+  if (mTiming.mFill == aFill) {
+    return;
+  }
+  mTiming.mFill = aFill;
+
+  PostSpecifiedTimingUpdated(mEffect);
 }
 
 void
@@ -125,9 +130,25 @@ AnimationEffectTiming::SetDirection(const PlaybackDirection& aDirection)
 }
 
 void
-AnimationEffectTiming::SetEasing(const nsAString& aEasing, ErrorResult& aRv)
+AnimationEffectTiming::SetEasing(JSContext* aCx,
+                                 const nsAString& aEasing,
+                                 ErrorResult& aRv)
 {
-  // TODO: Bug 1244643 - implement AnimationEffectTiming easing
+  Maybe<ComputedTimingFunction> newFunction =
+    TimingParams::ParseEasing(aEasing,
+                              AnimationUtils::GetCurrentRealmDocument(aCx),
+                              aRv);
+  if (aRv.Failed()) {
+    return;
+  }
+
+  if (mTiming.mFunction == newFunction) {
+    return;
+  }
+
+  mTiming.mFunction = newFunction;
+
+  PostSpecifiedTimingUpdated(mEffect);
 }
 
 } // namespace dom

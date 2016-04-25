@@ -11,7 +11,7 @@
 #include "nsTArray.h"
 #include "nsString.h"
 #include "nsCOMPtr.h"
-#include "nsAutoPtr.h"
+#include "nsUnicodeScriptCodes.h"
 
 #include "gfxTypes.h"
 #include "gfxFontFamilyList.h"
@@ -150,6 +150,7 @@ public:
     typedef mozilla::gfx::DrawTarget DrawTarget;
     typedef mozilla::gfx::IntSize IntSize;
     typedef mozilla::gfx::SourceSurface SourceSurface;
+    typedef mozilla::unicode::Script Script;
 
     /**
      * Return a pointer to the current active platform.
@@ -398,6 +399,12 @@ public:
     virtual bool RequiresLinearZoom() { return false; }
 
     /**
+     * Whether the frame->StyleFont().mFont.smoothing field is respected by
+     * text rendering on this platform.
+     */
+    virtual bool RespectsFontStyleSmoothing() const { return false; }
+
+    /**
      * Whether to check all font cmaps during system font fallback
      */
     bool UseCmapsDuringSystemFallback();
@@ -431,7 +438,7 @@ public:
     // returns a list of commonly used fonts for a given character
     // these are *possible* matches, no cmap-checking is done at this level
     virtual void GetCommonFallbackFonts(uint32_t /*aCh*/, uint32_t /*aNextCh*/,
-                                        int32_t /*aRunScript*/,
+                                        Script /*aRunScript*/,
                                         nsTArray<const char*>& /*aFontList*/)
     {
         // platform-specific override, by default do nothing

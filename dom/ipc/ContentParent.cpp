@@ -139,6 +139,7 @@
 #include "nsIMemoryReporter.h"
 #include "nsIMozBrowserFrame.h"
 #include "nsIMutable.h"
+#include "nsINSSU2FToken.h"
 #include "nsIObserverService.h"
 #include "nsIPresShell.h"
 #include "nsIRemoteWindowContext.h"
@@ -1998,14 +1999,6 @@ ContentParent::RecvDeallocateLayerTreeId(const uint64_t& aId)
 
 namespace {
 
-void
-DelayedDeleteSubprocess(GeckoChildProcessHost* aSubprocess)
-{
-  XRE_GetIOMessageLoop()
-    ->PostTask(FROM_HERE,
-           new DeleteTask<GeckoChildProcessHost>(aSubprocess));
-}
-
 // This runnable only exists to delegate ownership of the
 // ContentParent to this runnable, until it's deleted by the event
 // system.
@@ -2137,10 +2130,10 @@ ContentParent::ActorDestroy(ActorDestroyReason why)
   }
   mIdleListeners.Clear();
 
-  MessageLoop::current()->
-    PostTask(FROM_HERE,
-             NewRunnableFunction(DelayedDeleteSubprocess, mSubprocess));
-  mSubprocess = nullptr;
+  if (mSubprocess) {
+    mSubprocess->DissociateActor();
+    mSubprocess = nullptr;
+  }
 
   // IPDL rules require actors to live on past ActorDestroy, but it
   // may be that the kungFuDeathGrip above is the last reference to
@@ -3352,7 +3345,7 @@ PCompositorBridgeParent*
 ContentParent::AllocPCompositorBridgeParent(mozilla::ipc::Transport* aTransport,
                                             base::ProcessId aOtherProcess)
 {
-  return CompositorBridgeParent::Create(aTransport, aOtherProcess);
+  return CompositorBridgeParent::Create(aTransport, aOtherProcess, mSubprocess);
 }
 
 gfx::PVRManagerParent*
@@ -3366,7 +3359,7 @@ PImageBridgeParent*
 ContentParent::AllocPImageBridgeParent(mozilla::ipc::Transport* aTransport,
                                        base::ProcessId aOtherProcess)
 {
-  return ImageBridgeParent::Create(aTransport, aOtherProcess);
+  return ImageBridgeParent::Create(aTransport, aOtherProcess, mSubprocess);
 }
 
 PBackgroundParent*
@@ -4247,6 +4240,91 @@ ContentParent::RecvSetURITitle(const URIParams& uri,
 }
 
 bool
+ContentParent::RecvNSSU2FTokenIsCompatibleVersion(const nsString& aVersion,
+                                                  bool* aIsCompatible)
+{
+  MOZ_ASSERT(aIsCompatible);
+
+  nsCOMPtr<nsINSSU2FToken> nssToken(do_GetService(NS_NSSU2FTOKEN_CONTRACTID));
+  if (NS_WARN_IF(!nssToken)) {
+    return false;
+  }
+
+  nsresult rv = nssToken->IsCompatibleVersion(aVersion, aIsCompatible);
+  return NS_SUCCEEDED(rv);
+}
+
+bool
+ContentParent::RecvNSSU2FTokenIsRegistered(nsTArray<uint8_t>&& aKeyHandle,
+                                           bool* aIsValidKeyHandle)
+{
+  MOZ_ASSERT(aIsValidKeyHandle);
+
+  nsCOMPtr<nsINSSU2FToken> nssToken(do_GetService(NS_NSSU2FTOKEN_CONTRACTID));
+  if (NS_WARN_IF(!nssToken)) {
+    return false;
+  }
+
+  nsresult rv = nssToken->IsRegistered(aKeyHandle.Elements(), aKeyHandle.Length(),
+                                       aIsValidKeyHandle);
+  return  NS_SUCCEEDED(rv);
+}
+
+bool
+ContentParent::RecvNSSU2FTokenRegister(nsTArray<uint8_t>&& aApplication,
+                                       nsTArray<uint8_t>&& aChallenge,
+                                       nsTArray<uint8_t>* aRegistration)
+{
+  MOZ_ASSERT(aRegistration);
+
+  nsCOMPtr<nsINSSU2FToken> nssToken(do_GetService(NS_NSSU2FTOKEN_CONTRACTID));
+  if (NS_WARN_IF(!nssToken)) {
+    return false;
+  }
+  uint8_t* buffer;
+  uint32_t bufferlen;
+  nsresult rv = nssToken->Register(aApplication.Elements(), aApplication.Length(),
+                                   aChallenge.Elements(), aChallenge.Length(),
+                                   &buffer, &bufferlen);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return false;
+  }
+
+  MOZ_ASSERT(buffer);
+  aRegistration->ReplaceElementsAt(0, aRegistration->Length(), buffer, bufferlen);
+  free(buffer);
+  return NS_SUCCEEDED(rv);
+}
+
+bool
+ContentParent::RecvNSSU2FTokenSign(nsTArray<uint8_t>&& aApplication,
+                                   nsTArray<uint8_t>&& aChallenge,
+                                   nsTArray<uint8_t>&& aKeyHandle,
+                                   nsTArray<uint8_t>* aSignature)
+{
+  MOZ_ASSERT(aSignature);
+
+  nsCOMPtr<nsINSSU2FToken> nssToken(do_GetService(NS_NSSU2FTOKEN_CONTRACTID));
+  if (NS_WARN_IF(!nssToken)) {
+    return false;
+  }
+  uint8_t* buffer;
+  uint32_t bufferlen;
+  nsresult rv = nssToken->Sign(aApplication.Elements(), aApplication.Length(),
+                               aChallenge.Elements(), aChallenge.Length(),
+                               aKeyHandle.Elements(), aKeyHandle.Length(),
+                               &buffer, &bufferlen);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return false;
+  }
+
+  MOZ_ASSERT(buffer);
+  aSignature->ReplaceElementsAt(0, aSignature->Length(), buffer, bufferlen);
+  free(buffer);
+  return NS_SUCCEEDED(rv);
+}
+
+bool
 ContentParent::RecvGetSystemMemory(const uint64_t& aGetterId)
 {
   uint32_t memoryTotal = 0;
@@ -4885,6 +4963,7 @@ ContentParent::RecvRecordingDeviceEvents(const nsString& aRecordingStatus,
 bool
 ContentParent::RecvGetGraphicsFeatureStatus(const int32_t& aFeature,
                                             int32_t* aStatus,
+                                            nsCString* aFailureId,
                                             bool* aSuccess)
 {
   nsCOMPtr<nsIGfxInfo> gfxInfo = services::GetGfxInfo();
@@ -4893,7 +4972,7 @@ ContentParent::RecvGetGraphicsFeatureStatus(const int32_t& aFeature,
     return true;
   }
 
-  *aSuccess = NS_SUCCEEDED(gfxInfo->GetFeatureStatus(aFeature, aStatus));
+  *aSuccess = NS_SUCCEEDED(gfxInfo->GetFeatureStatus(aFeature, *aFailureId, aStatus));
   return true;
 }
 
@@ -5657,14 +5736,17 @@ ContentParent::RecvBeginDriverCrashGuard(const uint32_t& aGuardType, bool* aOutC
   case gfx::CrashGuardType::GLContext:
     guard = MakeUnique<gfx::GLContextCrashGuard>(this);
     break;
+  case gfx::CrashGuardType::D3D11Video:
+    guard = MakeUnique<gfx::D3D11VideoCrashGuard>(this);
+    break;
   default:
     MOZ_ASSERT_UNREACHABLE("unknown crash guard type");
     return false;
   }
 
   if (guard->Crashed()) {
-  *aOutCrashed = true;
-  return true;
+    *aOutCrashed = true;
+    return true;
   }
 
   *aOutCrashed = false;
@@ -5717,6 +5799,8 @@ ContentParent::RecvNotifyBenchmarkResult(const nsString& aCodecName,
 {
   if (aCodecName.EqualsLiteral("VP9")) {
     Preferences::SetUint(VP9Benchmark::sBenchmarkFpsPref, aDecodeFPS);
+    Preferences::SetUint(VP9Benchmark::sBenchmarkFpsVersionCheck,
+                         VP9Benchmark::sBenchmarkVersionID);
   }
   return true;
 }

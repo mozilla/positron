@@ -40,7 +40,7 @@ let WebContents_prototype = {
     // Ensure DevTools core modules are loaded, including support for the about
     // URL below which is registered dynamically.
     const { loader } = Cu.import("resource://devtools/shared/Loader.jsm", {});
-    loader.require("devtools/client/main");
+    loader.require("devtools/client/framework/devtools-browser");
 
     // The current approach below avoids the need for a container window
     // wrapping a tools frame, but it does replicate close handling, etc.

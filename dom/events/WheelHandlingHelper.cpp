@@ -235,7 +235,7 @@ WheelTransaction::OnEvent(WidgetEvent* aEvent)
         // If the cursor is moving to be outside the frame,
         // terminate the scrollwheel transaction.
         nsIntPoint pt = GetScreenPoint(mouseEvent);
-        nsIntRect r = sTargetFrame->GetScreenRectExternal();
+        nsIntRect r = sTargetFrame->GetScreenRect();
         if (!r.Contains(pt)) {
           EndTransaction();
           return;
@@ -338,8 +338,8 @@ WheelTransaction::SetTimeout()
 WheelTransaction::GetScreenPoint(WidgetGUIEvent* aEvent)
 {
   NS_ASSERTION(aEvent, "aEvent is null");
-  NS_ASSERTION(aEvent->widget, "aEvent-widget is null");
-  return (aEvent->refPoint + aEvent->widget->WidgetToScreenOffset())
+  NS_ASSERTION(aEvent->mWidget, "aEvent-mWidget is null");
+  return (aEvent->mRefPoint + aEvent->mWidget->WidgetToScreenOffset())
       .ToUnknownPoint();
 }
 

@@ -1712,38 +1712,33 @@ CallSelfHostedNonGenericMethod(JSContext* cx, const CallArgs& args)
     if (!args2.init(args.length() - 1))
         return false;
 
-    args2.setCallee(selfHostedFun);
-    args2.setThis(args.thisv());
-
     for (size_t i = 0; i < args.length() - 1; i++)
         args2[i].set(args[i]);
 
-    if (!Invoke(cx, args2))
-        return false;
-
-    args.rval().set(args2.rval());
-    return true;
+    return js::Call(cx, selfHostedFun, args.thisv(), args2, args.rval());
 }
 
 bool
-js::CallSelfHostedFunction(JSContext* cx, const char* name, InvokeArgs& args)
+js::CallSelfHostedFunction(JSContext* cx, const char* name, HandleValue thisv,
+                           const AnyInvokeArgs& args, MutableHandleValue rval)
 {
     RootedAtom funAtom(cx, Atomize(cx, name, strlen(name)));
     if (!funAtom)
         return false;
     RootedPropertyName funName(cx, funAtom->asPropertyName());
-    return CallSelfHostedFunction(cx, funName, args);
+    return CallSelfHostedFunction(cx, funName, thisv, args, rval);
 }
 
 bool
-js::CallSelfHostedFunction(JSContext* cx, HandlePropertyName name, InvokeArgs& args)
+js::CallSelfHostedFunction(JSContext* cx, HandlePropertyName name, HandleValue thisv,
+                           const AnyInvokeArgs& args, MutableHandleValue rval)
 {
     RootedValue fun(cx);
     if (!GlobalObject::getIntrinsicValue(cx, cx->global(), name, &fun))
         return false;
     MOZ_ASSERT(fun.toObject().is<JSFunction>());
-    args.setCallee(fun);
-    return Invoke(cx, args);
+
+    return Call(cx, fun, thisv, args, rval);
 }
 
 template<typename T>
@@ -1984,17 +1979,12 @@ intrinsic_RejectUnwrappedPromise(JSContext* cx, unsigned argc, Value* vp)
         return false;
     RootedPropertyName name(cx, atom->asPropertyName());
 
-    InvokeArgs args2(cx);
-    if (!args2.init(2))
-        return false;
+    FixedInvokeArgs<2> args2(cx);
+
     args2[0].setObject(*promise);
     args2[1].set(reasonVal);
 
-    if (!CallSelfHostedFunction(cx, name, args2))
-        return false;
-
-    args.rval().set(args2.rval());
-    return true;
+    return CallSelfHostedFunction(cx, name, UndefinedHandleValue, args2, args.rval());
 }
 
 static bool
@@ -2258,6 +2248,8 @@ static const JSFunctionSpec intrinsic_functions[] = {
     JS_FN("std_Array_unshift",                   array_unshift,                1,0),
     JS_INLINABLE_FN("std_Array_slice",           array_slice,                  2,0, ArraySlice),
     JS_FN("std_Array_sort",                      array_sort,                   1,0),
+    JS_FN("std_Array_reverse",                   array_reverse,                0,0),
+    JS_INLINABLE_FN("std_Array_splice",          array_splice,                 2,0, ArraySplice),
 
     JS_FN("std_Date_now",                        date_now,                     0,0),
     JS_FN("std_Date_valueOf",                    date_valueOf,                 0,0),
@@ -2299,6 +2291,21 @@ static const JSFunctionSpec intrinsic_functions[] = {
     JS_FN("std_String_startsWith",               str_startsWith,               1,0),
     JS_FN("std_String_toLowerCase",              str_toLowerCase,              0,0),
     JS_FN("std_String_toUpperCase",              str_toUpperCase,              0,0),
+
+    JS_INLINABLE_FN("std_String_charAt",         str_charAt,                   1,0, StringCharAt),
+    JS_FN("std_String_endsWith",                 str_endsWith,                 1,0),
+    JS_FN("std_String_trim",                     str_trim,                     0,0),
+    JS_FN("std_String_trimLeft",                 str_trimLeft,                 0,0),
+    JS_FN("std_String_trimRight",                str_trimRight,                0,0),
+    JS_FN("std_String_toLocaleLowerCase",        str_toLocaleLowerCase,        0,0),
+    JS_FN("std_String_toLocaleUpperCase",        str_toLocaleUpperCase,        0,0),
+#if !EXPOSE_INTL_API
+    JS_FN("std_String_localeCompare",            str_localeCompare,            1,0),
+#else
+    JS_FN("std_String_normalize",                str_normalize,                0,0),
+#endif
+    JS_FN("std_String_concat",                   str_concat,                   1,0),
+
 
     JS_FN("std_WeakMap_has",                     WeakMap_has,                  1,0),
     JS_FN("std_WeakMap_get",                     WeakMap_get,                  2,0),
@@ -2559,6 +2566,8 @@ static const JSFunctionSpec intrinsic_functions[] = {
                     RegExpInstanceOptimizable),
     JS_FN("RegExpGetSubstitution", intrinsic_RegExpGetSubstitution, 6,0),
     JS_FN("RegExpEscapeMetaChars", intrinsic_RegExpEscapeMetaChars, 1,0),
+    JS_FN("GetElemBaseForLambda", intrinsic_GetElemBaseForLambda, 1,0),
+    JS_FN("GetStringDataProperty", intrinsic_GetStringDataProperty, 2,0),
 
     JS_FN("FlatStringMatch", FlatStringMatch, 2,0),
     JS_FN("FlatStringSearch", FlatStringSearch, 2,0),
@@ -2572,6 +2581,7 @@ static const JSFunctionSpec intrinsic_functions[] = {
     JS_FN("regexp_exec_no_statics", regexp_exec_no_statics, 2,0),
     JS_FN("regexp_test_no_statics", regexp_test_no_statics, 2,0),
     JS_FN("regexp_construct", regexp_construct_self_hosting, 2,0),
+    JS_FN("regexp_construct_no_sticky", regexp_construct_no_sticky, 2,0),
 
     JS_FN("IsMatchFlagsArgumentEnabled", IsMatchFlagsArgumentEnabled, 0,0),
     JS_FN("WarnOnceAboutFlagsArgument", WarnOnceAboutFlagsArgument, 0,0),
