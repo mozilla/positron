@@ -68,6 +68,11 @@ let WebContents_prototype = {
       this.emit("devtools-closed");
     }
 
+    // Close the DevTools window if the browser window closes
+    let onBrowserClosed = () => {
+      toolsWindow.close();
+    };
+
     // Listen for the toolbox's built-in close button, which sends a message
     // asking the toolbox's opener how to handle things.  In this case, just
     // close the toolbox.
@@ -81,6 +86,7 @@ let WebContents_prototype = {
 
     toolsWindow.addEventListener("message", onMessage);
     toolsWindow.addEventListener("load", onLoad);
+    this._browserWindow.on("closed", onBrowserClosed);
   },
 };
 
