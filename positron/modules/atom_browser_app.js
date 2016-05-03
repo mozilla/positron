@@ -11,7 +11,13 @@ Cu.import('resource://gre/modules/Services.jsm');
 exports.app = {
   quit() {
     // XXX Emit the before-quit and will-quit events.
-    Services.startup.quit(Services.startup.eAttemptQuit);
+    // Wait one turn of the event loop for ancillary windows like DevTools to
+    // close first.
+    Services.tm.mainThread.dispatch({
+      run() {
+        Services.startup.quit(Services.startup.eAttemptQuit);
+      }
+    }, Ci.nsIThread.DISPATCH_NORMAL);
   },
 };
 
