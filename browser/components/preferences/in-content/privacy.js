@@ -49,19 +49,8 @@ var gPrivacyPane = {
    * Initialize autocomplete to ensure prefs are in sync.
    */
   _initAutocomplete: function () {
-    let unifiedCompletePref = false;
-    try {
-      unifiedCompletePref =
-        Services.prefs.getBoolPref("browser.urlbar.unifiedcomplete");
-    } catch (ex) {}
-
-    if (unifiedCompletePref) {
-      Components.classes["@mozilla.org/autocomplete/search;1?name=unifiedcomplete"]
-                .getService(Components.interfaces.mozIPlacesAutoComplete);
-    } else {
-      Components.classes["@mozilla.org/autocomplete/search;1?name=history"]
-                .getService(Components.interfaces.mozIPlacesAutoComplete);
-    }
+    Components.classes["@mozilla.org/autocomplete/search;1?name=unifiedcomplete"]
+              .getService(Components.interfaces.mozIPlacesAutoComplete);
   },
 
   /**
@@ -387,9 +376,20 @@ var gPrivacyPane = {
       let msg = bundle.getFormattedString(autoStart.checked ?
                                           "featureEnableRequiresRestart" : "featureDisableRequiresRestart",
                                           [brandName]);
+      let restartText = bundle.getFormattedString("okToRestartButton", [brandName]);
+      let revertText = bundle.getString("revertNoRestartButton");
+
       let title = bundle.getFormattedString("shouldRestartTitle", [brandName]);
       let prompts = Cc["@mozilla.org/embedcomp/prompt-service;1"].getService(Ci.nsIPromptService);
-      let shouldProceed = prompts.confirm(window, title, msg)
+      let buttonFlags = (Services.prompt.BUTTON_POS_0 *
+			 Services.prompt.BUTTON_TITLE_IS_STRING) +
+                        (Services.prompt.BUTTON_POS_1 *
+			 Services.prompt.BUTTON_TITLE_IS_STRING) +
+                        Services.prompt.BUTTON_POS_0_DEFAULT;
+
+      let shouldProceed = prompts.confirmEx(window, title, msg,
+					    buttonFlags, revertText, restartText,
+					    null, null, {});
       if (shouldProceed) {
         let cancelQuit = Cc["@mozilla.org/supports-PRBool;1"]
                            .createInstance(Ci.nsISupportsPRBool);

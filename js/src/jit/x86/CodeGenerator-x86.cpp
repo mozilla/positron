@@ -115,7 +115,7 @@ CodeGeneratorX86::visitBoxFloatingPoint(LBoxFloatingPoint* box)
     const ValueOperand out = ToOutValue(box);
 
     FloatRegister reg = ToFloatRegister(in);
-    if (box->type() == MIRType_Float32) {
+    if (box->type() == MIRType::Float32) {
         masm.convertFloat32ToDouble(reg, ScratchFloat32Reg);
         reg = ScratchFloat32Reg;
     }
@@ -280,7 +280,7 @@ CodeGeneratorX86::visitLoadTypedArrayElementStatic(LLoadTypedArrayElementStatic*
 {
     const MLoadTypedArrayElementStatic* mir = ins->mir();
     Scalar::Type accessType = mir->accessType();
-    MOZ_ASSERT_IF(accessType == Scalar::Float32, mir->type() == MIRType_Float32);
+    MOZ_ASSERT_IF(accessType == Scalar::Float32, mir->type() == MIRType::Float32);
 
     Register ptr = ToRegister(ins->ptr());
     const LDefinition* out = ins->output();
@@ -319,14 +319,14 @@ CodeGeneratorX86::visitAsmJSCall(LAsmJSCall* ins)
     emitAsmJSCall(ins);
 
     if (IsFloatingPointType(mir->type()) && mir->callee().which() == MAsmJSCall::Callee::Builtin) {
-        if (mir->type() == MIRType_Float32) {
+        if (mir->type() == MIRType::Float32) {
             masm.reserveStack(sizeof(float));
             Operand op(esp, 0);
             masm.fstp32(op);
             masm.loadFloat32(op, ReturnFloat32Reg);
             masm.freeStack(sizeof(float));
         } else {
-            MOZ_ASSERT(mir->type() == MIRType_Double);
+            MOZ_ASSERT(mir->type() == MIRType::Double);
             masm.reserveStack(sizeof(double));
             Operand op(esp, 0);
             masm.fstp(op);
@@ -763,22 +763,22 @@ CodeGeneratorX86::visitAsmJSLoadGlobalVar(LAsmJSLoadGlobalVar* ins)
 
     CodeOffset label;
     switch (type) {
-      case MIRType_Int32:
+      case MIRType::Int32:
         label = masm.movlWithPatch(PatchedAbsoluteAddress(), ToRegister(ins->output()));
         break;
-      case MIRType_Float32:
+      case MIRType::Float32:
         label = masm.vmovssWithPatch(PatchedAbsoluteAddress(), ToFloatRegister(ins->output()));
         break;
-      case MIRType_Double:
+      case MIRType::Double:
         label = masm.vmovsdWithPatch(PatchedAbsoluteAddress(), ToFloatRegister(ins->output()));
         break;
       // Aligned access: code is aligned on PageSize + there is padding
       // before the global data section.
-      case MIRType_Int32x4:
-      case MIRType_Bool32x4:
+      case MIRType::Int32x4:
+      case MIRType::Bool32x4:
         label = masm.vmovdqaWithPatch(PatchedAbsoluteAddress(), ToFloatRegister(ins->output()));
         break;
-      case MIRType_Float32x4:
+      case MIRType::Float32x4:
         label = masm.vmovapsWithPatch(PatchedAbsoluteAddress(), ToFloatRegister(ins->output()));
         break;
       default:
@@ -797,22 +797,22 @@ CodeGeneratorX86::visitAsmJSStoreGlobalVar(LAsmJSStoreGlobalVar* ins)
 
     CodeOffset label;
     switch (type) {
-      case MIRType_Int32:
+      case MIRType::Int32:
         label = masm.movlWithPatch(ToRegister(ins->value()), PatchedAbsoluteAddress());
         break;
-      case MIRType_Float32:
+      case MIRType::Float32:
         label = masm.vmovssWithPatch(ToFloatRegister(ins->value()), PatchedAbsoluteAddress());
         break;
-      case MIRType_Double:
+      case MIRType::Double:
         label = masm.vmovsdWithPatch(ToFloatRegister(ins->value()), PatchedAbsoluteAddress());
         break;
       // Aligned access: code is aligned on PageSize + there is padding
       // before the global data section.
-      case MIRType_Int32x4:
-      case MIRType_Bool32x4:
+      case MIRType::Int32x4:
+      case MIRType::Bool32x4:
         label = masm.vmovdqaWithPatch(ToFloatRegister(ins->value()), PatchedAbsoluteAddress());
         break;
-      case MIRType_Float32x4:
+      case MIRType::Float32x4:
         label = masm.vmovapsWithPatch(ToFloatRegister(ins->value()), PatchedAbsoluteAddress());
         break;
       default:
@@ -1098,4 +1098,44 @@ CodeGeneratorX86::visitOutOfLineTruncateFloat32(OutOfLineTruncateFloat32* ool)
     }
 
     masm.jump(ool->rejoin());
+}
+
+void
+CodeGeneratorX86::visitWasmTruncateToInt32(LWasmTruncateToInt32* lir)
+{
+    auto input = ToFloatRegister(lir->input());
+    auto output = ToRegister(lir->output());
+
+    MWasmTruncateToInt32* mir = lir->mir();
+    MIRType fromType = mir->input()->type();
+
+    auto* ool = new (alloc()) OutOfLineWasmTruncateCheck(mir, input);
+    addOutOfLineCode(ool, mir);
+
+    if (mir->isUnsigned()) {
+        Label done;
+        if (fromType == MIRType::Double) {
+            masm.vcvttsd2si(input, output);
+            masm.branch32(Assembler::Condition::NotSigned, output, Imm32(0), &done);
+            masm.loadConstantDouble(double(int32_t(0x80000000)), ScratchDoubleReg);
+            masm.addDouble(input, ScratchDoubleReg);
+            masm.vcvttsd2si(ScratchDoubleReg, output);
+        } else {
+            MOZ_ASSERT(fromType == MIRType::Float32);
+            masm.vcvttss2si(input, output);
+            masm.branch32(Assembler::Condition::NotSigned, output, Imm32(0), &done);
+            masm.loadConstantFloat32(float(int32_t(0x80000000)), ScratchFloat32Reg);
+            masm.addFloat32(input, ScratchFloat32Reg);
+            masm.vcvttss2si(ScratchFloat32Reg, output);
+        }
+
+        masm.branch32(Assembler::Condition::Signed, output, Imm32(0), ool->entry());
+        masm.or32(Imm32(0x80000000), output);
+        masm.bind(&done);
+        return;
+    }
+
+    emitWasmSignedTruncateToInt32(ool, output);
+
+    masm.bind(ool->rejoin());
 }

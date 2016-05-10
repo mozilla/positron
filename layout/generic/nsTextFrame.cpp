@@ -430,18 +430,6 @@ DestroyUserData(void* aUserData)
   }
 }
 
-static nsCSSProperty
-GetTextDecorationColorProp(nsStyleContext* aCtx)
-{
-  nscolor textColor;
-  bool foreground;
-  aCtx->StyleTextReset()->GetDecorationColor(textColor, foreground);
-
-  return (foreground && !aCtx->StyleText()->mWebkitTextFillColorForeground)
-         ? eCSSProperty__webkit_text_fill_color
-         : eCSSProperty_text_decoration_color;
-}
-
 /**
  * Remove |aTextRun| from the frame continuation chain starting at
  * |aStartContinuation| if non-null, otherwise starting at |aFrame|.
@@ -2393,7 +2381,7 @@ BuildTextRunsScanner::SetupBreakSinksForTextRun(gfxTextRun* aTextRun,
   // We should only use a language for hyphenation if it was specified
   // explicitly.
   nsIAtom* hyphenationLanguage =
-    styleFont->mExplicitLanguage ? styleFont->mLanguage : nullptr;
+    styleFont->mExplicitLanguage ? styleFont->mLanguage.get() : nullptr;
   // We keep this pointed at the skip-chars data for the current mappedFlow.
   // This lets us cheaply check whether the flow has compressed initial
   // whitespace...
@@ -5009,7 +4997,7 @@ nsTextFrame::GetTextDecorations(
       // la la</font></a> case. The link underline should be green.
       useOverride = true;
       overrideColor =
-        nsLayoutUtils::GetColor(f, GetTextDecorationColorProp(context));
+        nsLayoutUtils::GetColor(f, eCSSProperty_text_decoration_color);
     }
 
     nsBlockFrame* fBlock = nsLayoutUtils::GetAsBlock(f);
@@ -5066,7 +5054,7 @@ nsTextFrame::GetTextDecorations(
                   nsLayoutUtils::GetColor(f, eCSSProperty_fill) :
                   NS_SAME_AS_FOREGROUND_COLOR;
       } else {
-        color = nsLayoutUtils::GetColor(f, GetTextDecorationColorProp(context));
+        color = nsLayoutUtils::GetColor(f, eCSSProperty_text_decoration_color);
       }
 
       bool swapUnderlineAndOverline = vertical && IsUnderlineRight(f);
@@ -9648,10 +9636,10 @@ nsTextFrame::HasAnyNoncollapsedCharacters()
 }
 
 bool
-nsTextFrame::UpdateOverflow()
+nsTextFrame::ComputeCustomOverflow(nsOverflowAreas& aOverflowAreas)
 {
   if (GetStateBits() & NS_FRAME_FIRST_REFLOW) {
-    return false;
+    return true;
   }
 
   nsIFrame* decorationsBlock;
@@ -9669,14 +9657,13 @@ nsTextFrame::UpdateOverflow()
       f = f->GetParent();
       if (!f) {
         NS_ERROR("Couldn't find any block ancestor (for text decorations)");
-        return false;
+        return nsFrame::ComputeCustomOverflow(aOverflowAreas);
       }
     }
   }
 
-  nsOverflowAreas overflowAreas = RecomputeOverflow(decorationsBlock);
-
-  return FinishAndStoreOverflow(overflowAreas, GetSize());
+  aOverflowAreas = RecomputeOverflow(decorationsBlock);
+  return nsFrame::ComputeCustomOverflow(aOverflowAreas);
 }
 
 NS_DECLARE_FRAME_PROPERTY_SMALL_VALUE(JustificationAssignmentProperty, int32_t)

@@ -32,8 +32,7 @@ namespace mozilla {
     }
 }
 
-class nsWindow :
-    public nsBaseWidget
+class nsWindow : public nsBaseWidget
 {
 private:
     virtual ~nsWindow();
@@ -48,6 +47,13 @@ public:
     static void InitNatives();
 
 private:
+    // An Event subclass that guards against stale events.
+    template<typename Lambda,
+             bool IsStatic = Lambda::isStatic,
+             typename InstanceType = typename Lambda::ThisArgType,
+             class Impl = typename Lambda::TargetClass>
+    class WindowEvent;
+
     class GeckoViewSupport;
     // Object that implements native GeckoView calls and associated states.
     // nullptr for nsWindows that were not opened from GeckoView.

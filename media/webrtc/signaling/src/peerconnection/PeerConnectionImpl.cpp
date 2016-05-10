@@ -9,7 +9,6 @@
 #include <sstream>
 #include <vector>
 
-#include "base/histogram.h"
 #include "CSFLog.h"
 #include "timecard.h"
 
@@ -493,7 +492,7 @@ PeerConnectionImpl::MakeMediaStream()
                                   AudioChannel::Normal);
 
   RefPtr<DOMMediaStream> stream =
-    DOMMediaStream::CreateSourceStream(GetWindow(), graph);
+    DOMMediaStream::CreateSourceStreamAsInput(GetWindow(), graph);
 
   CSFLogDebug(logTag, "Created media stream %p, inner: %p", stream.get(), stream->GetInputStream());
 
@@ -1897,16 +1896,14 @@ PeerConnectionImpl::CreateNewRemoteTracks(RefPtr<PeerConnectionObserver>& aPco)
       // data (audio/video samples) accessible to the receiving page. We're
       // only certain that privacy hasn't been requested if we're connected.
       nsCOMPtr<nsIPrincipal> principal;
+      nsIDocument* doc = GetWindow()->GetExtantDoc();
+      MOZ_ASSERT(doc);
       if (mDtlsConnected && !PrivacyRequested()) {
-        nsIDocument* doc = GetWindow()->GetExtantDoc();
-        MOZ_ASSERT(doc);
-        if (doc) {
-          principal = doc->NodePrincipal();
-        }
+        principal = doc->NodePrincipal();
       } else {
         // we're either certain that we need isolation for the streams, OR
         // we're not sure and we can fix the stream in SetDtlsConnected
-        principal = do_CreateInstance(NS_NULLPRINCIPAL_CONTRACTID);
+        principal =  nsNullPrincipal::CreateWithInheritedAttributes(doc->NodePrincipal());
       }
 #endif
 
@@ -3902,13 +3899,8 @@ PeerConnectionImpl::startCallTelem() {
   mStartTime = TimeStamp::Now();
 
   // Increment session call counter
-  // If we want to track Loop calls independently here, we need two mConnectionCounters
-  int &cnt = PeerConnectionCtx::GetInstance()->mConnectionCounter;
-  if (cnt > 0) {
-    Telemetry::GetHistogramById(Telemetry::WEBRTC_CALL_COUNT)->Subtract(cnt);
-  }
-  cnt++;
-  Telemetry::GetHistogramById(Telemetry::WEBRTC_CALL_COUNT)->Add(cnt);
+  // If we want to track Loop calls independently here, we need two histograms.
+  Telemetry::Accumulate(Telemetry::WEBRTC_CALL_COUNT_2, 1);
 }
 #endif
 

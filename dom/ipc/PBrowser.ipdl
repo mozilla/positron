@@ -19,6 +19,7 @@ include DOMTypes;
 include JavaScriptTypes;
 include URIParams;
 include BrowserConfiguration;
+include PTabContext;
 
 
 using class IPC::Principal from "mozilla/dom/PermissionMessageUtils.h";
@@ -482,7 +483,14 @@ parent:
                                    uint64_t aObserverId);
     async ClearNativeTouchSequence(uint64_t aObserverId);
 
+    /**
+     * Returns the number of tabs in the window via the out parameter.
+     * If the number of tabs can't be determined, returns 0.
+     *
+     * @param aValue where to store the tab count
+     */
     sync GetTabCount() returns (uint32_t value);
+
 child:
     async NativeSynthesisResponse(uint64_t aObserverId, nsCString aResponse);
 
@@ -717,7 +725,7 @@ child:
      * Tell the browser that its frame loader has been swapped
      * with another.
      */
-    async SwappedWithOtherRemoteLoader();
+    async SwappedWithOtherRemoteLoader(IPCTabContext context);
 
     /**
      * A potential accesskey was just pressed. Look for accesskey targets

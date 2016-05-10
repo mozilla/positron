@@ -152,6 +152,15 @@ struct AnimatedGeometryRoot
   AnimatedGeometryRoot* mParentAGR;
 };
 
+enum class nsDisplayListBuilderMode : uint8_t {
+  PAINTING,
+  EVENT_DELIVERY,
+  PLUGIN_GEOMETRY,
+  FRAME_VISIBILITY,
+  TRANSFORM_COMPUTATION,
+  GENERATE_GLYPH
+};
+
 /**
  * This manages a display list and is passed as a parameter to
  * nsIFrame::BuildDisplayList.
@@ -221,15 +230,9 @@ public:
    * @param aBuildCaret whether or not we should include the caret in any
    * display lists that we make.
    */
-  enum Mode {
-    PAINTING,
-    EVENT_DELIVERY,
-    PLUGIN_GEOMETRY,
-    FRAME_VISIBILITY,
-    TRANSFORM_COMPUTATION,
-    GENERATE_GLYPH
-  };
-  nsDisplayListBuilder(nsIFrame* aReferenceFrame, Mode aMode, bool aBuildCaret);
+  nsDisplayListBuilder(nsIFrame* aReferenceFrame,
+                       nsDisplayListBuilderMode aMode,
+                       bool aBuildCaret);
   ~nsDisplayListBuilder();
 
   void SetWillComputePluginGeometry(bool aWillComputePluginGeometry)
@@ -238,9 +241,9 @@ public:
   }
   void SetForPluginGeometry()
   {
-    NS_ASSERTION(mMode == PAINTING, "Can only switch from PAINTING to PLUGIN_GEOMETRY");
+    NS_ASSERTION(mMode == nsDisplayListBuilderMode::PAINTING, "Can only switch from PAINTING to PLUGIN_GEOMETRY");
     NS_ASSERTION(mWillComputePluginGeometry, "Should have signalled this in advance");
-    mMode = PLUGIN_GEOMETRY;
+    mMode = nsDisplayListBuilderMode::PLUGIN_GEOMETRY;
   }
 
   mozilla::layers::LayerManager* GetWidgetLayerManager(nsView** aView = nullptr, bool* aAllowRetaining = nullptr);
@@ -249,7 +252,11 @@ public:
    * @return true if the display is being built in order to determine which
    * frame is under the mouse position.
    */
-  bool IsForEventDelivery() { return mMode == EVENT_DELIVERY; }
+  bool IsForEventDelivery()
+  {
+    return mMode == nsDisplayListBuilderMode::EVENT_DELIVERY;
+  }
+
   /**
    * Be careful with this. The display list will be built in PAINTING mode
    * first and then switched to PLUGIN_GEOMETRY before a second call to
@@ -257,17 +264,27 @@ public:
    * @return true if the display list is being built to compute geometry
    * for plugins.
    */
-  bool IsForPluginGeometry() { return mMode == PLUGIN_GEOMETRY; }
+  bool IsForPluginGeometry()
+  {
+    return mMode == nsDisplayListBuilderMode::PLUGIN_GEOMETRY;
+  }
+
   /**
    * @return true if the display list is being built for painting.
    */
-  bool IsForPainting() { return mMode == PAINTING; }
+  bool IsForPainting()
+  {
+    return mMode == nsDisplayListBuilderMode::PAINTING;
+  }
 
   /**
    * @return true if the display list is being built for determining frame
    * visibility.
    */
-  bool IsForFrameVisibility() { return mMode == FRAME_VISIBILITY; }
+  bool IsForFrameVisibility()
+  {
+    return mMode == nsDisplayListBuilderMode::FRAME_VISIBILITY;
+  }
 
   /**
    * @return true if the display list is being built for creating the glyph
@@ -275,7 +292,10 @@ public:
    * items should only create glyph paths in target context, instead of
    * drawing text into it.
    */
-  bool IsForGenerateGlyphPath() { return mMode == GENERATE_GLYPH; }
+  bool IsForGenerateGlyphPath()
+  {
+    return mMode == nsDisplayListBuilderMode::GENERATE_GLYPH;
+  }
 
   bool WillComputePluginGeometry() { return mWillComputePluginGeometry; }
   /**
@@ -1221,7 +1241,7 @@ private:
   nsDisplayList*                 mScrollInfoItemsForHoisting;
   nsTArray<DisplayItemScrollClip*> mScrollClipsToDestroy;
   nsTArray<DisplayItemClip*>     mDisplayItemClipsToDestroy;
-  Mode                           mMode;
+  nsDisplayListBuilderMode       mMode;
   ViewID                         mCurrentScrollParentId;
   ViewID                         mCurrentScrollbarTarget;
   uint32_t                       mCurrentScrollbarFlags;
@@ -2017,13 +2037,6 @@ public:
    * ancestor of some elements, then we lose performance but not correctness
    */
   void SortByContentOrder(nsIContent* aCommonAncestor);
-  /**
-   * Stable sort this list by CSS 'order' property order.
-   * http://dev.w3.org/csswg/css-flexbox-1/#order-property
-   * (also applies to CSS Grid although it's in the Flexbox spec ATM)
-   * It is assumed that the list is already in document content order.
-   */
-  void SortByCSSOrder();
 
   /**
    * Generic stable sort. Take care, because some of the items might be nsDisplayLists
@@ -2648,17 +2661,23 @@ public:
    * aIsThemed should be the value of aFrame->IsThemed.
    * aBackgroundStyle should be the result of
    * nsCSSRendering::FindBackground, or null if FindBackground returned false.
+   * aBackgroundRect is relative to aFrame.
    */
   nsDisplayBackgroundImage(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame,
-                           uint32_t aLayer,
+                           uint32_t aLayer, const nsRect& aBackgroundRect,
                            const nsStyleBackground* aBackgroundStyle);
   virtual ~nsDisplayBackgroundImage();
 
   // This will create and append new items for all the layers of the
   // background. Returns whether we appended a themed background.
+  // aAllowWillPaintBorderOptimization should usually be left at true, unless
+  // aFrame has special border drawing that causes opaque borders to not
+  // actually be opaque.
   static bool AppendBackgroundItemsToTop(nsDisplayListBuilder* aBuilder,
                                          nsIFrame* aFrame,
-                                         nsDisplayList* aList);
+                                         const nsRect& aBackgroundRect,
+                                         nsDisplayList* aList,
+                                         bool aAllowWillPaintBorderOptimization = true);
 
   virtual LayerState GetLayerState(nsDisplayListBuilder* aBuilder,
                                    LayerManager* aManager,
@@ -2714,7 +2733,7 @@ public:
   virtual nsRect GetDestRect() override;
 
   static nsRegion GetInsideClipRegion(nsDisplayItem* aItem, uint8_t aClip,
-                                      const nsRect& aRect);
+                                      const nsRect& aRect, const nsRect& aBackgroundRect);
 
   virtual bool ShouldFixToViewport(nsDisplayListBuilder* aBuilder) override;
 
@@ -2723,11 +2742,10 @@ protected:
   typedef class mozilla::layers::ImageLayer ImageLayer;
 
   bool TryOptimizeToImageLayer(LayerManager* aManager, nsDisplayListBuilder* aBuilder);
-  bool IsSingleFixedPositionImage(nsDisplayListBuilder* aBuilder,
-                                  const nsRect& aClipRect,
-                                  gfxRect* aDestRect);
   bool IsNonEmptyFixedImage() const;
   nsRect GetBoundsInternal(nsDisplayListBuilder* aBuilder);
+  bool ShouldTreatAsFixed() const;
+  bool ComputeShouldTreatAsFixed(bool isTransformedFixed) const;
 
   void PaintInternal(nsDisplayListBuilder* aBuilder, nsRenderingContext* aCtx,
                      const nsRect& aBounds, nsRect* aClipRect);
@@ -2746,12 +2764,15 @@ protected:
   // mIsThemed is true or if FindBackground returned false.
   const nsStyleBackground* mBackgroundStyle;
   nsCOMPtr<imgIContainer> mImage;
+  nsRect mBackgroundRect; // relative to the reference frame
   nsRect mFillRect;
   nsRect mDestRect;
   /* Bounds of this display item */
   nsRect mBounds;
   uint32_t mLayer;
   bool mIsRasterImage;
+  /* Whether the image should be treated as fixed to the viewport. */
+  bool mShouldTreatAsFixed;
 };
 
 
@@ -2760,7 +2781,8 @@ protected:
  */
 class nsDisplayThemedBackground : public nsDisplayItem {
 public:
-  nsDisplayThemedBackground(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame);
+  nsDisplayThemedBackground(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame,
+                            const nsRect& aBackgroundRect);
   virtual ~nsDisplayThemedBackground();
 
   virtual void HitTest(nsDisplayListBuilder* aBuilder, const nsRect& aRect,
@@ -2806,6 +2828,7 @@ protected:
   void PaintInternal(nsDisplayListBuilder* aBuilder, nsRenderingContext* aCtx,
                      const nsRect& aBounds, nsRect* aClipRect);
 
+  nsRect mBackgroundRect;
   nsRect mBounds;
   nsITheme::Transparency mThemeTransparency;
   uint8_t mAppearance;
@@ -2817,9 +2840,11 @@ class nsDisplayBackgroundColor : public nsDisplayItem
 
 public:
   nsDisplayBackgroundColor(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame,
+                           const nsRect& aBackgroundRect,
                            const nsStyleBackground* aBackgroundStyle,
                            nscolor aColor)
     : nsDisplayItem(aBuilder, aFrame)
+    , mBackgroundRect(aBackgroundRect)
     , mBackgroundStyle(aBackgroundStyle)
     , mColor(Color::FromABGR(aColor))
   { }
@@ -2840,7 +2865,7 @@ public:
   virtual nsRect GetBounds(nsDisplayListBuilder* aBuilder, bool* aSnap) override
   {
     *aSnap = true;
-    return nsRect(ToReferenceFrame(), Frame()->GetSize());
+    return mBackgroundRect;
   }
 
   virtual nsDisplayItemGeometry* AllocateGeometry(nsDisplayListBuilder* aBuilder) override
@@ -2865,6 +2890,7 @@ public:
   virtual void WriteDebugInfo(std::stringstream& aStream) override;
 
 protected:
+  const nsRect mBackgroundRect;
   const nsStyleBackground* mBackgroundStyle;
   mozilla::gfx::Color mColor;
 };
@@ -3416,9 +3442,14 @@ private:
 
 class nsDisplayBlendContainer : public nsDisplayWrapList {
 public:
-    nsDisplayBlendContainer(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame,
-                            nsDisplayList* aList,
-                            const DisplayItemScrollClip* aScrollClip);
+    static nsDisplayBlendContainer*
+    CreateForMixBlendMode(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame,
+                          nsDisplayList* aList, const DisplayItemScrollClip* aScrollClip);
+
+    static nsDisplayBlendContainer*
+    CreateForBackgroundBlendMode(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame,
+                                 nsDisplayList* aList, const DisplayItemScrollClip* aScrollClip);
+
 #ifdef NS_BUILD_REFCNT_LOGGING
     virtual ~nsDisplayBlendContainer();
 #endif
@@ -3434,15 +3465,20 @@ public:
       return false;
     }
     virtual uint32_t GetPerFrameKey() override {
-      return (mIndex << nsDisplayItem::TYPE_BITS) |
+      return (mIsForBackground ? 1 << nsDisplayItem::TYPE_BITS : 0) |
         nsDisplayItem::GetPerFrameKey();
     }
     NS_DISPLAY_DECL_NAME("BlendContainer", TYPE_BLEND_CONTAINER)
 
 private:
+    nsDisplayBlendContainer(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame,
+                            nsDisplayList* aList,
+                            const DisplayItemScrollClip* aScrollClip,
+                            bool aIsForBackground);
+
     // Used to distinguish containers created at building stacking
     // context or appending background.
-    uint32_t mIndex;
+    bool mIsForBackground;
 };
 
 /**

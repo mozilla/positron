@@ -304,7 +304,7 @@ private:
 
 class QuotaManager::CreateRunnable final
   : public BackgroundThreadObject
-  , public nsRunnable
+  , public Runnable
 {
   nsTArray<nsCOMPtr<nsIRunnable>> mCallbacks;
   nsString mBaseDirPath;
@@ -362,7 +362,7 @@ private:
 };
 
 class QuotaManager::ShutdownRunnable final
-  : public nsRunnable
+  : public Runnable
 {
   // Only touched on the main thread.
   bool& mDone;
@@ -603,7 +603,7 @@ private:
 namespace {
 
 class CollectOriginsHelper final
-  : public nsRunnable
+  : public Runnable
 {
   uint64_t mMinSizeToBeFreed;
 
@@ -635,7 +635,7 @@ private:
 
 class OriginOperationBase
   : public BackgroundThreadObject
-  , public nsRunnable
+  , public Runnable
 {
 protected:
   nsresult mResultCode;
@@ -1237,7 +1237,7 @@ uint32_t gChunkSizeKB = kDefaultChunkSizeKB;
 bool gTestingEnabled = false;
 
 class StorageDirectoryHelper final
-  : public nsRunnable
+  : public Runnable
 {
   struct OriginProps;
 
@@ -3084,13 +3084,15 @@ QuotaManager::Shutdown()
     NS_WARNING("Failed to cancel shutdown timer!");
   }
 
-  // Give clients a chance to cleanup IO thread only objects.
-  nsCOMPtr<nsIRunnable> runnable =
-    NS_NewRunnableMethod(this, &QuotaManager::ReleaseIOThreadObjects);
-  if (!runnable) {
-    NS_WARNING("Failed to create runnable!");
-  }
+  // NB: It's very important that runnable is destroyed on this thread
+  // (i.e. after we join the IO thread) because we can't release the
+  // QuotaManager on the IO thread. This should probably use
+  // NewNonOwningRunnableMethod ...
+  RefPtr<Runnable> runnable =
+    NewRunnableMethod(this, &QuotaManager::ReleaseIOThreadObjects);
+  MOZ_ASSERT(runnable);
 
+  // Give clients a chance to cleanup IO thread only objects.
   if (NS_FAILED(mIOThread->Dispatch(runnable, NS_DISPATCH_NORMAL))) {
     NS_WARNING("Failed to dispatch runnable!");
   }
@@ -5040,7 +5042,7 @@ FinalizeOriginEvictionOp::UnblockOpen()
   AdvanceState();
 }
 
-NS_IMPL_ISUPPORTS_INHERITED0(NormalOriginOperationBase, nsRunnable)
+NS_IMPL_ISUPPORTS_INHERITED0(NormalOriginOperationBase, Runnable)
 
 void
 NormalOriginOperationBase::Open()
@@ -5313,7 +5315,7 @@ Quota::RecvStartIdleMaintenance()
   QuotaManager* quotaManager = QuotaManager::Get();
   if (!quotaManager) {
     nsCOMPtr<nsIRunnable> callback =
-      NS_NewRunnableMethod(this, &Quota::StartIdleMaintenance);
+      NewRunnableMethod(this, &Quota::StartIdleMaintenance);
 
     QuotaManager::GetOrCreate(callback);
     return true;

@@ -7,6 +7,7 @@
 
 #include <windows.h>
 #include <setupapi.h>
+#include "gfxConfig.h"
 #include "gfxWindowsPlatform.h"
 #include "GfxInfo.h"
 #include "GfxInfoWebGL.h"
@@ -26,6 +27,7 @@
 #endif
 
 using namespace mozilla;
+using namespace mozilla::gfx;
 using namespace mozilla::widget;
 
 #ifdef DEBUG
@@ -46,7 +48,7 @@ GfxInfo::GfxInfo()
 nsresult
 GfxInfo::GetD2DEnabled(bool *aEnabled)
 {
-  *aEnabled = gfxWindowsPlatform::GetPlatform()->GetRenderMode() == gfxWindowsPlatform::RENDER_DIRECT2D;
+  *aEnabled = gfxWindowsPlatform::GetPlatform()->IsDirect2DBackend();
   return NS_OK;
 }
 
@@ -1256,12 +1258,16 @@ GfxInfo::FindMonitors(JSContext* aCx, JS::HandleObject aOutArray)
 void
 GfxInfo::DescribeFeatures(JSContext* aCx, JS::Handle<JSObject*> aObj)
 {
+  // Add the platform neutral features
+  GfxInfoBase::DescribeFeatures(aCx, aObj);
+
   JS::Rooted<JSObject*> obj(aCx);
 
   gfxWindowsPlatform* platform = gfxWindowsPlatform::GetPlatform();
 
-  gfx::FeatureStatus d3d11 = platform->GetD3D11Status();
-  if (!InitFeatureObject(aCx, aObj, "d3d11", d3d11, &obj)) {
+  gfx::FeatureStatus d3d11 = gfxConfig::GetValue(Feature::D3D11_COMPOSITING);
+  if (!InitFeatureObject(aCx, aObj, "d3d11", FEATURE_DIRECT3D_11_ANGLE,
+                         Some(d3d11), &obj)) {
     return;
   }
   if (d3d11 == gfx::FeatureStatus::Available) {
@@ -1274,12 +1280,22 @@ GfxInfo::DescribeFeatures(JSContext* aCx, JS::Handle<JSObject*> aObj)
     val = JS::BooleanValue(platform->CompositorD3D11TextureSharingWorks());
     JS_SetProperty(aCx, obj, "textureSharing", val);
 
-    val = JS::BooleanValue(!platform->CanUseDirect3D11());
+    bool blacklisted = false;
+    if (nsCOMPtr<nsIGfxInfo> gfxInfo = services::GetGfxInfo()) {
+      int32_t status;
+      nsCString discardFailureId;
+      if (SUCCEEDED(gfxInfo->GetFeatureStatus(nsIGfxInfo::FEATURE_DIRECT3D_11_LAYERS, discardFailureId, &status))) {
+        blacklisted = (status != nsIGfxInfo::FEATURE_STATUS_OK);
+      }
+    }
+
+    val = JS::BooleanValue(blacklisted);
     JS_SetProperty(aCx, obj, "blacklisted", val);
   }
 
-  gfx::FeatureStatus d2d = platform->GetD2D1Status();
-  if (!InitFeatureObject(aCx, aObj, "d2d", d2d, &obj)) {
+  gfx::FeatureStatus d2d = gfxConfig::GetValue(Feature::DIRECT2D);
+  if (!InitFeatureObject(aCx, aObj, "d2d", nsIGfxInfo::FEATURE_DIRECT2D,
+                         Some(d2d), &obj)) {
     return;
   }
   {

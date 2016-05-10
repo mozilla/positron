@@ -501,7 +501,7 @@ js::SetIntegrityLevel(JSContext* cx, HandleObject obj, IntegrityLevel level)
         // generic path below then any non-empty object will be converted to
         // dictionary mode.
         RootedShape last(cx, EmptyShape::getInitialShape(cx, nobj->getClass(),
-                                                         nobj->getTaggedProto(),
+                                                         nobj->taggedProto(),
                                                          nobj->numFixedSlots(),
                                                          nobj->lastProperty()->getObjectFlags()));
         if (!last)
@@ -689,7 +689,7 @@ NewObjectCache::fillProto(EntryIndex entry, const Class* clasp, js::TaggedProto 
                           gc::AllocKind kind, NativeObject* obj)
 {
     MOZ_ASSERT_IF(proto.isObject(), !proto.toObject()->is<GlobalObject>());
-    MOZ_ASSERT(obj->getTaggedProto() == proto);
+    MOZ_ASSERT(obj->taggedProto() == proto);
     return fill(entry, clasp, proto.raw(), kind, obj);
 }
 
@@ -914,7 +914,7 @@ CreateThisForFunctionWithGroup(JSContext* cx, HandleObjectGroup group,
                 return nullptr;
 
             if (newKind == SingletonObject) {
-                Rooted<TaggedProto> proto(cx, TaggedProto(templateObject->getProto()));
+                Rooted<TaggedProto> proto(cx, TaggedProto(templateObject->staticPrototype()));
                 if (!res->splicePrototype(cx, &PlainObject::class_, proto))
                     return nullptr;
             } else {
@@ -1176,7 +1176,7 @@ js::CloneObject(JSContext* cx, HandleObject obj, Handle<js::TaggedProto> proto)
 }
 
 static bool
-GetScriptArrayObjectElements(JSContext* cx, HandleObject obj, AutoValueVector& values)
+GetScriptArrayObjectElements(JSContext* cx, HandleObject obj, MutableHandle<GCVector<Value>> values)
 {
     MOZ_ASSERT(!obj->isSingleton());
     MOZ_ASSERT(obj->is<ArrayObject>() || obj->is<UnboxedArrayObject>());
@@ -1286,8 +1286,8 @@ js::DeepCloneObjectLiteral(JSContext* cx, HandleObject obj, NewObjectKind newKin
     MOZ_ASSERT(newKind != SingletonObject);
 
     if (obj->is<ArrayObject>() || obj->is<UnboxedArrayObject>()) {
-        AutoValueVector values(cx);
-        if (!GetScriptArrayObjectElements(cx, obj, values))
+        Rooted<GCVector<Value>> values(cx, GCVector<Value>(cx));
+        if (!GetScriptArrayObjectElements(cx, obj, &values))
             return nullptr;
 
         // Deep clone any elements.
@@ -1341,13 +1341,13 @@ InitializePropertiesFromCompatibleNativeObject(JSContext* cx,
 
     MOZ_ASSERT(!src->hasPrivate());
     RootedShape shape(cx);
-    if (src->getProto() == dst->getProto()) {
+    if (src->staticPrototype() == dst->staticPrototype()) {
         shape = src->lastProperty();
     } else {
         // We need to generate a new shape for dst that has dst's proto but all
         // the property information from src.  Note that we asserted above that
         // dst's object flags are 0.
-        shape = EmptyShape::getInitialShape(cx, dst->getClass(), dst->getTaggedProto(),
+        shape = EmptyShape::getInitialShape(cx, dst->getClass(), dst->taggedProto(),
                                             dst->numFixedSlots(), 0);
         if (!shape)
             return false;
@@ -1415,8 +1415,8 @@ js::XDRObjectLiteral(XDRState<mode>* xdr, MutableHandleObject obj)
     RootedId tmpId(cx);
 
     if (isArray) {
-        AutoValueVector values(cx);
-        if (mode == XDR_ENCODE && !GetScriptArrayObjectElements(cx, obj, values))
+        Rooted<GCVector<Value>> values(cx, GCVector<Value>(cx));
+        if (mode == XDR_ENCODE && !GetScriptArrayObjectElements(cx, obj, &values))
             return false;
 
         uint32_t initialized;
@@ -1943,7 +1943,7 @@ js::SetClassAndProto(JSContext* cx, HandleObject obj,
             MOZ_ASSERT(obj == oldproto);
             break;
         }
-        oldproto = oldproto->getProto();
+        oldproto = oldproto->staticPrototype();
     }
 
     if (proto.isObject() && !proto.toObject()->setDelegate(cx))
@@ -1993,7 +1993,7 @@ JSObject::changeToSingleton(JSContext* cx, HandleObject obj)
     MarkObjectGroupUnknownProperties(cx, obj->group());
 
     ObjectGroup* group = ObjectGroup::lazySingletonGroup(cx, obj->getClass(),
-                                                         obj->getTaggedProto());
+                                                         obj->taggedProto());
     if (!group)
         return false;
 
@@ -2295,7 +2295,7 @@ js::LookupPropertyPure(ExclusiveContext* cx, JSObject* obj, jsid id, JSObject** 
             return true;
         }
 
-        obj = obj->getProto();
+        obj = obj->staticPrototype();
     } while (obj);
 
     *objp = nullptr;
@@ -2494,6 +2494,18 @@ JSObject::reportNotExtensible(JSContext* cx, unsigned report)
                                  nullptr, nullptr);
 }
 
+bool
+js::GetPrototypeIfOrdinary(JSContext* cx, HandleObject obj, bool* isOrdinary,
+                           MutableHandleObject protop)
+{
+    if (obj->is<js::ProxyObject>())
+        return js::Proxy::getPrototypeIfOrdinary(cx, obj, isOrdinary, protop);
+
+    *isOrdinary = true;
+    protop.set(obj->staticPrototype());
+    return true;
+}
+
 // Our immutable-prototype behavior is non-standard, and it's unclear whether
 // it's shippable.  (Or at least it's unclear whether it's shippable with any
 // provided-by-default uses exposed to script.)  If this bool is true,
@@ -2513,19 +2525,15 @@ JS_ImmutablePrototypesEnabled()
 bool
 js::SetPrototype(JSContext* cx, HandleObject obj, HandleObject proto, JS::ObjectOpResult& result)
 {
-    /*
-     * If |obj| has a "lazy" [[Prototype]], it is 1) a proxy 2) whose handler's
-     * {get,set}Prototype and setImmutablePrototype methods mediate access to
-     * |obj.[[Prototype]]|.  The Proxy subsystem is responsible for responding
-     * to such attempts.
-     */
-    if (obj->hasLazyPrototype()) {
+    // The proxy trap subsystem fully handles prototype-setting for proxies
+    // with dynamic [[Prototype]]s.
+    if (obj->hasDynamicPrototype()) {
         MOZ_ASSERT(obj->is<ProxyObject>());
         return Proxy::setPrototype(cx, obj, proto, result);
     }
 
     /* Disallow mutation of immutable [[Prototype]]s. */
-    if (obj->nonLazyPrototypeIsImmutable() && ImmutablePrototypesEnabled)
+    if (obj->staticPrototypeIsImmutable() && ImmutablePrototypesEnabled)
         return result.fail(JSMSG_CANT_SET_PROTO);
 
     /*
@@ -2562,7 +2570,7 @@ js::SetPrototype(JSContext* cx, HandleObject obj, HandleObject proto, JS::Object
      * ES6 9.1.2 step 3-4 if |obj.[[Prototype]]| has SameValue as |proto| return true.
      * Since the values in question are objects, we can just compare pointers.
      */
-    if (proto == obj->getProto())
+    if (proto == obj->staticPrototype())
         return result.succeed();
 
     /* ES6 9.1.2 step 5 forbids changing [[Prototype]] if not [[Extensible]]. */
@@ -2587,14 +2595,17 @@ js::SetPrototype(JSContext* cx, HandleObject obj, HandleObject proto, JS::Object
      * possibly-Window object we're setting the proto on.
      */
     RootedObject objMaybeWindowProxy(cx, ToWindowProxyIfWindow(obj));
-    RootedObject obj2(cx);
-    for (obj2 = proto; obj2; ) {
+    RootedObject obj2(cx, proto);
+    while (obj2) {
         MOZ_ASSERT(!IsWindow(obj2));
         if (obj2 == objMaybeWindowProxy)
             return result.fail(JSMSG_CANT_SET_PROTO_CYCLE);
 
-        if (!GetPrototype(cx, obj2, &obj2))
+        bool isOrdinary;
+        if (!GetPrototypeIfOrdinary(cx, obj2, &isOrdinary, &obj2))
             return false;
+        if (!isOrdinary)
+            break;
     }
 
     // Convert unboxed objects to their native representations before changing
@@ -2769,7 +2780,7 @@ js::DefineElement(ExclusiveContext* cx, HandleObject obj, uint32_t index, Handle
 bool
 js::SetImmutablePrototype(ExclusiveContext* cx, HandleObject obj, bool* succeeded)
 {
-    if (obj->hasLazyPrototype()) {
+    if (obj->hasDynamicPrototype()) {
         if (!cx->shouldBeJSContext())
             return false;
         return Proxy::setImmutablePrototype(cx->asJSContext(), obj, succeeded);
@@ -3454,7 +3465,8 @@ JSObject::dump()
     if (obj->hasUncacheableProto()) fprintf(stderr, " has_uncacheable_proto");
     if (obj->hadElementsAccess()) fprintf(stderr, " had_elements_access");
     if (obj->wasNewScriptCleared()) fprintf(stderr, " new_script_cleared");
-    if (!obj->hasLazyPrototype() && obj->nonLazyPrototypeIsImmutable()) fprintf(stderr, " immutable_prototype");
+    if (obj->hasStaticPrototype() && obj->staticPrototypeIsImmutable())
+        fprintf(stderr, " immutable_prototype");
 
     if (obj->isNative()) {
         NativeObject* nobj = &obj->as<NativeObject>();
@@ -3480,9 +3492,9 @@ JSObject::dump()
     }
 
     fprintf(stderr, "proto ");
-    TaggedProto proto = obj->getTaggedProto();
-    if (proto.isLazy())
-        fprintf(stderr, "<lazy>");
+    TaggedProto proto = obj->taggedProto();
+    if (proto.isDynamic())
+        fprintf(stderr, "<dynamic>");
     else
         dumpValue(ObjectOrNullValue(proto.toObjectOrNull()));
     fputc('\n', stderr);
@@ -3916,5 +3928,25 @@ js::SpeciesConstructor(JSContext* cx, HandleObject obj, HandleValue defaultCtor,
         return false;
 
     pctor.set(args.rval());
+    return true;
+}
+
+bool
+js::Unbox(JSContext* cx, HandleObject obj, MutableHandleValue vp)
+{
+    if (MOZ_UNLIKELY(obj->is<ProxyObject>()))
+        return Proxy::boxedValue_unbox(cx, obj, vp);
+
+    if (obj->is<BooleanObject>())
+        vp.setBoolean(obj->as<BooleanObject>().unbox());
+    else if (obj->is<NumberObject>())
+        vp.setNumber(obj->as<NumberObject>().unbox());
+    else if (obj->is<StringObject>())
+        vp.setString(obj->as<StringObject>().unbox());
+    else if (obj->is<DateObject>())
+        vp.set(obj->as<DateObject>().UTCTime());
+    else
+        vp.setUndefined();
+
     return true;
 }

@@ -81,12 +81,12 @@ InterpreterFrame::isNonGlobalEvalFrame() const
 }
 
 bool
-InterpreterFrame::copyRawFrameSlots(AutoValueVector* vec)
+InterpreterFrame::copyRawFrameSlots(MutableHandle<GCVector<Value>> vec)
 {
-    if (!vec->resize(numFormalArgs() + script()->nfixed()))
+    if (!vec.resize(numFormalArgs() + script()->nfixed()))
         return false;
-    PodCopy(vec->begin(), argv(), numFormalArgs());
-    PodCopy(vec->begin() + numFormalArgs(), slots(), script()->nfixed());
+    PodCopy(vec.begin(), argv(), numFormalArgs());
+    PodCopy(vec.begin() + numFormalArgs(), slots(), script()->nfixed());
     return true;
 }
 
@@ -1938,9 +1938,9 @@ JS::ProfilingFrameIterator::getPhysicalFrameAndEntry(jit::JitcodeGlobalEntry* en
     void* returnAddr = jitIter().returnAddressToFp();
     jit::JitcodeGlobalTable* table = rt_->jitRuntime()->getJitcodeGlobalTable();
     if (hasSampleBufferGen())
-        table->lookupForSampler(returnAddr, entry, rt_, sampleBufferGen_);
+        *entry = table->lookupForSamplerInfallible(returnAddr, rt_, sampleBufferGen_);
     else
-        table->lookupInfallible(returnAddr, entry, rt_);
+        *entry = table->lookupInfallible(returnAddr);
 
     MOZ_ASSERT(entry->isIon() || entry->isIonCache() || entry->isBaseline() || entry->isDummy());
 

@@ -107,7 +107,7 @@ AppleVTDecoder::Input(MediaRawData* aSample)
   mInputIncoming++;
 
   nsCOMPtr<nsIRunnable> runnable =
-      NS_NewRunnableMethodWithArg<RefPtr<MediaRawData>>(
+      NewRunnableMethod<RefPtr<MediaRawData>>(
           this, &AppleVTDecoder::SubmitFrame, aSample);
   mTaskQueue->Dispatch(runnable.forget());
   return NS_OK;
@@ -123,9 +123,6 @@ AppleVTDecoder::ProcessFlush()
         "with error:%d.", rv);
   }
   ClearReorderedFrames();
-  MonitorAutoLock mon(mMonitor);
-  mIsFlushing = false;
-  mon.NotifyAll();
 }
 
 void

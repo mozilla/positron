@@ -286,17 +286,17 @@ class MacroAssemblerCompat : public vixl::MacroAssembler
 
     template <typename T>
     void storeUnboxedValue(ConstantOrRegister value, MIRType valueType, const T& dest, MIRType slotType) {
-        if (valueType == MIRType_Double) {
+        if (valueType == MIRType::Double) {
             storeDouble(value.reg().typedReg().fpu(), dest);
             return;
         }
 
         // For known integers and booleans, we can just store the unboxed value if
         // the slot has the same type.
-        if ((valueType == MIRType_Int32 || valueType == MIRType_Boolean) && slotType == valueType) {
+        if ((valueType == MIRType::Int32 || valueType == MIRType::Boolean) && slotType == valueType) {
             if (value.constant()) {
                 Value val = value.value();
-                if (valueType == MIRType_Int32)
+                if (valueType == MIRType::Int32)
                     store32(Imm32(val.toInt32()), dest);
                 else
                     store32(Imm32(val.toBoolean() ? 1 : 0), dest);
@@ -959,27 +959,27 @@ class MacroAssemblerCompat : public vixl::MacroAssembler
     void storeInt32x2(FloatRegister src, const BaseIndex& dest) { MOZ_CRASH("NYI"); }
     void storeInt32x3(FloatRegister src, const Address& dest) { MOZ_CRASH("NYI"); }
     void storeInt32x3(FloatRegister src, const BaseIndex& dest) { MOZ_CRASH("NYI"); }
-    void loadAlignedInt32x4(const Address& addr, FloatRegister dest) { MOZ_CRASH("NYI"); }
-    void loadAlignedInt32x4(const BaseIndex& addr, FloatRegister dest) { MOZ_CRASH("NYI"); }
-    void storeAlignedInt32x4(FloatRegister src, const Address& addr) { MOZ_CRASH("NYI"); }
-    void storeAlignedInt32x4(FloatRegister src, const BaseIndex& addr) { MOZ_CRASH("NYI"); }
-    void loadUnalignedInt32x4(const Address& addr, FloatRegister dest) { MOZ_CRASH("NYI"); }
-    void loadUnalignedInt32x4(const BaseIndex& addr, FloatRegister dest) { MOZ_CRASH("NYI"); }
-    void storeUnalignedInt32x4(FloatRegister dest, const Address& addr) { MOZ_CRASH("NYI"); }
-    void storeUnalignedInt32x4(FloatRegister dest, const BaseIndex& addr) { MOZ_CRASH("NYI"); }
+    void loadAlignedSimd128Int(const Address& addr, FloatRegister dest) { MOZ_CRASH("NYI"); }
+    void loadAlignedSimd128Int(const BaseIndex& addr, FloatRegister dest) { MOZ_CRASH("NYI"); }
+    void storeAlignedSimd128Int(FloatRegister src, const Address& addr) { MOZ_CRASH("NYI"); }
+    void storeAlignedSimd128Int(FloatRegister src, const BaseIndex& addr) { MOZ_CRASH("NYI"); }
+    void loadUnalignedSimd128Int(const Address& addr, FloatRegister dest) { MOZ_CRASH("NYI"); }
+    void loadUnalignedSimd128Int(const BaseIndex& addr, FloatRegister dest) { MOZ_CRASH("NYI"); }
+    void storeUnalignedSimd128Int(FloatRegister dest, const Address& addr) { MOZ_CRASH("NYI"); }
+    void storeUnalignedSimd128Int(FloatRegister dest, const BaseIndex& addr) { MOZ_CRASH("NYI"); }
 
     void loadFloat32x3(const Address& src, FloatRegister dest) { MOZ_CRASH("NYI"); }
     void loadFloat32x3(const BaseIndex& src, FloatRegister dest) { MOZ_CRASH("NYI"); }
     void storeFloat32x3(FloatRegister src, const Address& dest) { MOZ_CRASH("NYI"); }
     void storeFloat32x3(FloatRegister src, const BaseIndex& dest) { MOZ_CRASH("NYI"); }
-    void loadAlignedFloat32x4(const Address& addr, FloatRegister dest) { MOZ_CRASH("NYI"); }
-    void loadAlignedFloat32x4(const BaseIndex& addr, FloatRegister dest) { MOZ_CRASH("NYI"); }
-    void storeAlignedFloat32x4(FloatRegister src, const Address& addr) { MOZ_CRASH("NYI"); }
-    void storeAlignedFloat32x4(FloatRegister src, const BaseIndex& addr) { MOZ_CRASH("NYI"); }
-    void loadUnalignedFloat32x4(const Address& addr, FloatRegister dest) { MOZ_CRASH("NYI"); }
-    void loadUnalignedFloat32x4(const BaseIndex& addr, FloatRegister dest) { MOZ_CRASH("NYI"); }
-    void storeUnalignedFloat32x4(FloatRegister dest, const Address& addr) { MOZ_CRASH("NYI"); }
-    void storeUnalignedFloat32x4(FloatRegister dest, const BaseIndex& addr) { MOZ_CRASH("NYI"); }
+    void loadAlignedSimd128Float(const Address& addr, FloatRegister dest) { MOZ_CRASH("NYI"); }
+    void loadAlignedSimd128Float(const BaseIndex& addr, FloatRegister dest) { MOZ_CRASH("NYI"); }
+    void storeAlignedSimd128Float(FloatRegister src, const Address& addr) { MOZ_CRASH("NYI"); }
+    void storeAlignedSimd128Float(FloatRegister src, const BaseIndex& addr) { MOZ_CRASH("NYI"); }
+    void loadUnalignedSimd128Float(const Address& addr, FloatRegister dest) { MOZ_CRASH("NYI"); }
+    void loadUnalignedSimd128Float(const BaseIndex& addr, FloatRegister dest) { MOZ_CRASH("NYI"); }
+    void storeUnalignedSimd128Float(FloatRegister dest, const Address& addr) { MOZ_CRASH("NYI"); }
+    void storeUnalignedSimd128Float(FloatRegister dest, const BaseIndex& addr) { MOZ_CRASH("NYI"); }
 
     // StackPointer manipulation.
     template <typename T> void addToStackPtr(T t);
@@ -1842,7 +1842,7 @@ class MacroAssemblerCompat : public vixl::MacroAssembler
             MOZ_ASSERT(scratch64.asUnsized() != address.base);
             Ldr(scratch64, toMemOperand(address));
             int32OrDouble(scratch64.asUnsized(), ARMFPRegister(dest.fpu(), 64));
-        } else if (type == MIRType_Int32 || type == MIRType_Boolean) {
+        } else if (type == MIRType::Int32 || type == MIRType::Boolean) {
             load32(address, dest.gpr());
         } else {
             loadPtr(address, dest.gpr());
@@ -1858,7 +1858,7 @@ class MacroAssemblerCompat : public vixl::MacroAssembler
             MOZ_ASSERT(scratch64.asUnsized() != address.index);
             doBaseIndex(scratch64, address, vixl::LDR_x);
             int32OrDouble(scratch64.asUnsized(), ARMFPRegister(dest.fpu(), 64));
-        }  else if (type == MIRType_Int32 || type == MIRType_Boolean) {
+        }  else if (type == MIRType::Int32 || type == MIRType::Boolean) {
             load32(address, dest.gpr());
         } else {
             loadPtr(address, dest.gpr());

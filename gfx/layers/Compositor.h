@@ -21,6 +21,7 @@
 #include "nsRegion.h"
 #include <vector>
 #include "mozilla/WidgetUtils.h"
+#include "CompositorWidgetProxy.h"
 
 /**
  * Different elements of a web pages are rendered into separate "layers" before
@@ -189,11 +190,13 @@ protected:
 public:
   NS_INLINE_DECL_REFCOUNTING(Compositor)
 
-  explicit Compositor(CompositorBridgeParent* aParent = nullptr)
+  explicit Compositor(widget::CompositorWidgetProxy* aWidget,
+                      CompositorBridgeParent* aParent = nullptr)
     : mCompositorID(0)
     , mDiagnosticTypes(DiagnosticTypes::NO_DIAGNOSTIC)
     , mParent(aParent)
     , mScreenRotation(ROTATION_0)
+    , mWidget(aWidget)
   {
   }
 
@@ -204,7 +207,8 @@ public:
 
   virtual bool Initialize() = 0;
   virtual void Destroy() = 0;
-  virtual void DetachWidget() {}
+
+  virtual void DetachWidget() { mWidget = nullptr; }
 
   /**
    * Return true if the effect type is supported.
@@ -385,7 +389,7 @@ public:
    */
   virtual void EndFrame() = 0;
 
-  virtual void SetDispAcquireFence(Layer* aLayer, nsIWidget* aWidget);
+  virtual void SetDispAcquireFence(Layer* aLayer);
 
   virtual FenceHandle GetReleaseFence();
 
@@ -472,9 +476,7 @@ public:
 
   virtual void ForcePresent() { }
 
-  // XXX I expect we will want to move mWidget into this class and implement
-  // these methods properly.
-  virtual nsIWidget* GetWidget() const { return nullptr; }
+  widget::CompositorWidgetProxy* GetWidget() const { return mWidget; }
 
   virtual bool HasImageHostOverlays() { return false; }
 
@@ -531,6 +533,9 @@ public:
   // frames and should not be used.
   void SetInvalid();
   bool IsValid() const;
+  CompositorBridgeParent* GetCompositorBridgeParent() const {
+    return mParent;
+  }
 
 protected:
   void DrawDiagnosticsInternal(DiagnosticFlags aFlags,
@@ -583,6 +588,8 @@ protected:
 
   RefPtr<gfx::DrawTarget> mTarget;
   gfx::IntRect mTargetBounds;
+
+  widget::CompositorWidgetProxy* mWidget;
 
 #if defined(MOZ_WIDGET_GONK) && ANDROID_VERSION >= 17
   FenceHandle mReleaseFenceHandle;

@@ -9,6 +9,8 @@ import android.content.Context;
 import android.util.Log;
 import org.mozilla.gecko.mozglue.ContextUtils.SafeIntent;
 import android.text.TextUtils;
+
+import com.keepsafe.switchboard.Preferences;
 import com.keepsafe.switchboard.SwitchBoard;
 import org.mozilla.gecko.GeckoSharedPrefs;
 
@@ -46,6 +48,9 @@ public class Experiments {
     public static final String PROMOTE_ADD_TO_HOMESCREEN = "promote-add-to-homescreen";
 
     public static final String PREF_ONBOARDING_VERSION = "onboarding_version";
+
+    // Promotion to bookmark reader-view items after entering reader view three times (Bug 1247689)
+    public static final String TRIPLE_READERVIEW_BOOKMARK_PROMPT = "triple-readerview-bookmark-prompt";
 
     private static volatile Boolean disabled = null;
 
@@ -110,5 +115,29 @@ public class Experiments {
         }
 
         return experiments;
+    }
+
+    /**
+     * Sets an override to force an experiment to be enabled or disabled. This value
+     * will be read and used before reading the switchboard server configuration.
+     *
+     * @param c Context
+     * @param experimentName Experiment name
+     * @param isEnabled Whether or not the experiment should be enabled
+     */
+    public static void setOverride(Context c, String experimentName, boolean isEnabled) {
+        Log.d(LOGTAG, "setOverride: " + experimentName + " = " + isEnabled);
+        Preferences.setOverrideValue(c, experimentName, isEnabled);
+    }
+
+    /**
+     * Clears the override value for an experiment.
+     *
+     * @param c Context
+     * @param experimentName Experiment name
+     */
+    public static void clearOverride(Context c, String experimentName) {
+        Log.d(LOGTAG, "clearOverride: " + experimentName);
+        Preferences.clearOverrideValue(c, experimentName);
     }
 }

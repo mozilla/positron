@@ -2577,12 +2577,12 @@ nsChildView::SendMayStartSwipe(const mozilla::PanGestureInput& aSwipeStartEvent)
   WidgetSimpleGestureEvent geckoEvent =
     SwipeTracker::CreateSwipeGestureEvent(eSwipeGestureMayStart, this,
                                           position);
-  geckoEvent.direction = direction;
-  geckoEvent.delta = 0.0;
-  geckoEvent.allowedDirections = 0;
+  geckoEvent.mDirection = direction;
+  geckoEvent.mDelta = 0.0;
+  geckoEvent.mAllowedDirections = 0;
   bool shouldStartSwipe = DispatchWindowEvent(geckoEvent); // event cancelled == swipe should start
 
-  SwipeInfo result = { shouldStartSwipe, geckoEvent.allowedDirections };
+  SwipeInfo result = { shouldStartSwipe, geckoEvent.mAllowedDirections };
   return result;
 }
 
@@ -2662,7 +2662,6 @@ nsChildView::EndRemoteDrawing()
 void
 nsChildView::CleanupRemoteDrawing()
 {
-  nsBaseWidget::CleanupRemoteDrawing();
   mBasicCompositorImage = nullptr;
   mCornerMaskImage = nullptr;
   mResizerImage = nullptr;
@@ -4189,15 +4188,15 @@ NSEvent* gLastDragMouseDownEvent = nil;
 
   // Record the left/right direction.
   if (deltaX > 0.0)
-    geckoEvent.direction |= nsIDOMSimpleGestureEvent::DIRECTION_LEFT;
+    geckoEvent.mDirection |= nsIDOMSimpleGestureEvent::DIRECTION_LEFT;
   else if (deltaX < 0.0)
-    geckoEvent.direction |= nsIDOMSimpleGestureEvent::DIRECTION_RIGHT;
+    geckoEvent.mDirection |= nsIDOMSimpleGestureEvent::DIRECTION_RIGHT;
 
   // Record the up/down direction.
   if (deltaY > 0.0)
-    geckoEvent.direction |= nsIDOMSimpleGestureEvent::DIRECTION_UP;
+    geckoEvent.mDirection |= nsIDOMSimpleGestureEvent::DIRECTION_UP;
   else if (deltaY < 0.0)
-    geckoEvent.direction |= nsIDOMSimpleGestureEvent::DIRECTION_DOWN;
+    geckoEvent.mDirection |= nsIDOMSimpleGestureEvent::DIRECTION_DOWN;
 
   // Send the event.
   mGeckoChild->DispatchWindowEvent(geckoEvent);
@@ -4254,7 +4253,7 @@ NSEvent* gLastDragMouseDownEvent = nil;
 
   // Setup the event.
   WidgetSimpleGestureEvent geckoEvent(true, msg, mGeckoChild);
-  geckoEvent.delta = deltaZ;
+  geckoEvent.mDelta = deltaZ;
   [self convertCocoaMouseEvent:anEvent toGeckoEvent:&geckoEvent];
 
   // Send the event.
@@ -4279,7 +4278,7 @@ NSEvent* gLastDragMouseDownEvent = nil;
   // Setup the "double tap" event.
   WidgetSimpleGestureEvent geckoEvent(true, eTapGesture, mGeckoChild);
   [self convertCocoaMouseEvent:anEvent toGeckoEvent:&geckoEvent];
-  geckoEvent.clickCount = 1;
+  geckoEvent.mClickCount = 1;
 
   // Send the event.
   mGeckoChild->DispatchWindowEvent(geckoEvent);
@@ -4321,11 +4320,11 @@ NSEvent* gLastDragMouseDownEvent = nil;
   // Setup the event.
   WidgetSimpleGestureEvent geckoEvent(true, msg, mGeckoChild);
   [self convertCocoaMouseEvent:anEvent toGeckoEvent:&geckoEvent];
-  geckoEvent.delta = -rotation;
+  geckoEvent.mDelta = -rotation;
   if (rotation > 0.0) {
-    geckoEvent.direction = nsIDOMSimpleGestureEvent::ROTATION_COUNTERCLOCKWISE;
+    geckoEvent.mDirection = nsIDOMSimpleGestureEvent::ROTATION_COUNTERCLOCKWISE;
   } else {
-    geckoEvent.direction = nsIDOMSimpleGestureEvent::ROTATION_CLOCKWISE;
+    geckoEvent.mDirection = nsIDOMSimpleGestureEvent::ROTATION_CLOCKWISE;
   }
 
   // Send the event.
@@ -4356,7 +4355,7 @@ NSEvent* gLastDragMouseDownEvent = nil;
     {
       // Setup the "magnify" event.
       WidgetSimpleGestureEvent geckoEvent(true, eMagnifyGesture, mGeckoChild);
-      geckoEvent.delta = mCumulativeMagnification;
+      geckoEvent.mDelta = mCumulativeMagnification;
       [self convertCocoaMouseEvent:anEvent toGeckoEvent:&geckoEvent];
 
       // Send the event.
@@ -4369,11 +4368,11 @@ NSEvent* gLastDragMouseDownEvent = nil;
       // Setup the "rotate" event.
       WidgetSimpleGestureEvent geckoEvent(true, eRotateGesture, mGeckoChild);
       [self convertCocoaMouseEvent:anEvent toGeckoEvent:&geckoEvent];
-      geckoEvent.delta = -mCumulativeRotation;
+      geckoEvent.mDelta = -mCumulativeRotation;
       if (mCumulativeRotation > 0.0) {
-        geckoEvent.direction = nsIDOMSimpleGestureEvent::ROTATION_COUNTERCLOCKWISE;
+        geckoEvent.mDirection = nsIDOMSimpleGestureEvent::ROTATION_COUNTERCLOCKWISE;
       } else {
-        geckoEvent.direction = nsIDOMSimpleGestureEvent::ROTATION_CLOCKWISE;
+        geckoEvent.mDirection = nsIDOMSimpleGestureEvent::ROTATION_CLOCKWISE;
       }
 
       // Send the event.
@@ -4513,6 +4512,9 @@ NSEvent* gLastDragMouseDownEvent = nil;
   // in order to send gecko events we'll need a gecko widget
   if (!mGeckoChild)
     return;
+  if (mTextInputHandler->OnHandleEvent(theEvent)) {
+    return;
+  }
 
   NSUInteger modifierFlags = [theEvent modifierFlags];
 
@@ -4547,6 +4549,9 @@ NSEvent* gLastDragMouseDownEvent = nil;
 
   if (!mGeckoChild || mBlockedLastMouseDown)
     return;
+  if (mTextInputHandler->OnHandleEvent(theEvent)) {
+    return;
+  }
 
   nsAutoRetainCocoaObject kungFuDeathGrip(self);
 
@@ -4676,6 +4681,9 @@ NewCGSRegionFromRegion(const LayoutDeviceIntRegion& aRegion,
 
   if (!mGeckoChild)
     return;
+  if (mTextInputHandler->OnHandleEvent(theEvent)) {
+    return;
+  }
 
   WidgetMouseEvent geckoEvent(true, eMouseMove, mGeckoChild,
                               WidgetMouseEvent::eReal);
@@ -4692,6 +4700,9 @@ NewCGSRegionFromRegion(const LayoutDeviceIntRegion& aRegion,
 
   if (!mGeckoChild)
     return;
+  if (mTextInputHandler->OnHandleEvent(theEvent)) {
+    return;
+  }
 
   gLastDragView = self;
 
@@ -4719,6 +4730,9 @@ NewCGSRegionFromRegion(const LayoutDeviceIntRegion& aRegion,
   [self maybeRollup:theEvent];
   if (!mGeckoChild)
     return;
+  if (mTextInputHandler->OnHandleEvent(theEvent)) {
+    return;
+  }
 
   // The right mouse went down, fire off a right mouse down event to gecko
   WidgetMouseEvent geckoEvent(true, eMouseDown, mGeckoChild,
@@ -4743,6 +4757,9 @@ NewCGSRegionFromRegion(const LayoutDeviceIntRegion& aRegion,
 
   if (!mGeckoChild)
     return;
+  if (mTextInputHandler->OnHandleEvent(theEvent)) {
+    return;
+  }
 
   WidgetMouseEvent geckoEvent(true, eMouseUp, mGeckoChild,
                               WidgetMouseEvent::eReal);
@@ -4760,6 +4777,9 @@ NewCGSRegionFromRegion(const LayoutDeviceIntRegion& aRegion,
 {
   if (!mGeckoChild)
     return;
+  if (mTextInputHandler->OnHandleEvent(theEvent)) {
+    return;
+  }
 
   WidgetMouseEvent geckoEvent(true, eMouseMove, mGeckoChild,
                               WidgetMouseEvent::eReal);
@@ -4783,6 +4803,9 @@ NewCGSRegionFromRegion(const LayoutDeviceIntRegion& aRegion,
 
   if (!mGeckoChild)
     return;
+  if (mTextInputHandler->OnHandleEvent(theEvent)) {
+    return;
+  }
 
   WidgetMouseEvent geckoEvent(true, eMouseDown, mGeckoChild,
                               WidgetMouseEvent::eReal);
@@ -4799,6 +4822,9 @@ NewCGSRegionFromRegion(const LayoutDeviceIntRegion& aRegion,
 {
   if (!mGeckoChild)
     return;
+  if (mTextInputHandler->OnHandleEvent(theEvent)) {
+    return;
+  }
 
   WidgetMouseEvent geckoEvent(true, eMouseUp, mGeckoChild,
                               WidgetMouseEvent::eReal);
@@ -4813,6 +4839,9 @@ NewCGSRegionFromRegion(const LayoutDeviceIntRegion& aRegion,
 {
   if (!mGeckoChild)
     return;
+  if (mTextInputHandler->OnHandleEvent(theEvent)) {
+    return;
+  }
 
   WidgetMouseEvent geckoEvent(true, eMouseMove, mGeckoChild,
                               WidgetMouseEvent::eReal);

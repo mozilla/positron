@@ -1657,6 +1657,19 @@ class AssemblerX86Shared : public AssemblerShared
         masm.sarl_CLr(dest.encoding());
     }
 
+    void roll(const Imm32 imm, Register dest) {
+        masm.roll_ir(imm.value, dest.encoding());
+    }
+    void roll_cl(Register dest) {
+        masm.roll_CLr(dest.encoding());
+    }
+    void rorl(const Imm32 imm, Register dest) {
+        masm.rorl_ir(imm.value, dest.encoding());
+    }
+    void rorl_cl(Register dest) {
+        masm.rorl_CLr(dest.encoding());
+    }
+
     void incl(const Operand& op) {
         switch (op.kind()) {
           case Operand::MEM_REG_DISP:
@@ -3000,14 +3013,14 @@ class AssemblerX86Shared : public AssemblerShared
         MOZ_ASSERT(HasSSE41());
         masm.vroundss_irr(mode, src1.encoding(), src0.encoding(), dest.encoding());
     }
-    unsigned vinsertpsMask(SimdLane sourceLane, SimdLane destLane, unsigned zeroMask = 0)
+    unsigned vinsertpsMask(unsigned sourceLane, unsigned destLane, unsigned zeroMask = 0)
     {
         // Note that the sourceLane bits are ignored in the case of a source
         // memory operand, and the source is the given 32-bits memory location.
         MOZ_ASSERT(zeroMask < 16);
         unsigned ret = zeroMask ;
-        ret |= unsigned(destLane) << 4;
-        ret |= unsigned(sourceLane) << 6;
+        ret |= destLane << 4;
+        ret |= sourceLane << 6;
         MOZ_ASSERT(ret < 256);
         return ret;
     }

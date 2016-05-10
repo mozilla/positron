@@ -50,6 +50,7 @@
 
     <!-- Dimensions used by Favicons and FaviconView -->
     <dimen name="favicon_bg">32dp</dimen>
+    <dimen name="favicon_corner_radius">4dp</dimen>
     <!-- Set the upper limit on the size of favicon that will be processed. Favicons larger than
          this will be downscaled to this value. If you need to use larger Favicons (Due to a UI
          redesign sometime after this is written) you should increase this value to the largest
@@ -78,6 +79,10 @@
     <dimen name="browser_toolbar_site_security_margin_bottom">.5dp</dimen>
     <dimen name="site_security_unknown_inset_top">1dp</dimen>
     <dimen name="site_security_unknown_inset_bottom">-1dp</dimen>
+
+    <dimen name="home_folder_title_oneline_textsize">16sp</dimen>
+    <dimen name="home_folder_title_twoline_textsize">14sp</dimen>
+    <dimen name="home_twolinepagerow_title_textsize">16sp</dimen>
 
     <dimen name="page_row_edge_padding">16dp</dimen>
 

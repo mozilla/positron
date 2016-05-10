@@ -8,10 +8,10 @@
 #include "AnimationUtils.h"
 #include "mozilla/dom/AnimationBinding.h"
 #include "mozilla/dom/AnimationPlaybackEvent.h"
+#include "mozilla/AnimationTarget.h"
 #include "mozilla/AutoRestore.h"
 #include "mozilla/AsyncEventDispatcher.h" // For AsyncEventDispatcher
 #include "mozilla/Maybe.h" // For Maybe
-#include "mozilla/NonOwningAnimationTarget.h"
 #include "nsAnimationManager.h" // For CSSAnimation
 #include "nsDOMMutationObserver.h" // For nsAutoAnimationMutationBatch
 #include "nsIDocument.h" // For nsIDocument
@@ -199,7 +199,7 @@ Animation::SetStartTime(const Nullable<TimeDuration>& aNewStartTime)
     mReady->MaybeResolve(this);
   }
 
-  UpdateTiming(SeekFlag::NoSeek, SyncNotifyFlag::Async);
+  UpdateTiming(SeekFlag::DidSeek, SyncNotifyFlag::Async);
   if (IsRelevant()) {
     nsNodeUtils::AnimationChanged(this);
   }
@@ -1236,7 +1236,7 @@ Animation::DoFinishNotification(SyncNotifyFlag aSyncNotifyFlag)
     DoFinishNotificationImmediately();
   } else if (!mFinishNotificationTask.IsPending()) {
     RefPtr<nsRunnableMethod<Animation>> runnable =
-      NS_NewRunnableMethod(this, &Animation::DoFinishNotificationImmediately);
+      NewRunnableMethod(this, &Animation::DoFinishNotificationImmediately);
     runtime->DispatchToMicroTask(runnable);
     mFinishNotificationTask = runnable;
   }

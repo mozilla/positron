@@ -884,6 +884,15 @@ Accessible::HandleAccEvent(AccEvent* aEvent)
                                       event->IsFromUserInput());
           break;
                                                      }
+        case nsIAccessibleEvent::EVENT_SELECTION:
+        case nsIAccessibleEvent::EVENT_SELECTION_ADD:
+        case nsIAccessibleEvent::EVENT_SELECTION_REMOVE: {
+          AccSelChangeEvent* selEvent = downcast_accEvent(aEvent);
+          uint64_t widgetID = selEvent->Widget()->IsDoc() ? 0 :
+            reinterpret_cast<uintptr_t>(selEvent->Widget());
+          ipcDoc->SendSelectionEvent(id, widgetID, aEvent->GetEventType());
+          break;
+                                                         }
         default:
                                                          ipcDoc->SendEvent(id, aEvent->GetEventType());
       }
@@ -1759,7 +1768,7 @@ Accessible::GetNativeInterface(void** aNativeAccessible)
 void
 Accessible::DoCommand(nsIContent *aContent, uint32_t aActionIndex)
 {
-  class Runnable final : public nsRunnable
+  class Runnable final : public mozilla::Runnable
   {
   public:
     Runnable(Accessible* aAcc, nsIContent* aContent, uint32_t aIdx) :
@@ -2072,6 +2081,10 @@ Accessible::InsertChildAt(uint32_t aIndex, Accessible* aChild)
       return false;
 
     MOZ_ASSERT(mStateFlags & eKidsMutating, "Illicit children change");
+
+    for (uint32_t idx = aIndex + 1; idx < mChildren.Length(); idx++) {
+      mChildren[idx]->mIndexInParent = idx;
+    }
   }
 
   if (aChild->IsText()) {
@@ -2095,17 +2108,16 @@ Accessible::RemoveChild(Accessible* aChild)
              "Illicit children change");
 
   int32_t index = static_cast<uint32_t>(aChild->mIndexInParent);
-
-  // If we adopt a child during a tree construction, then indexes might be not
-  // rebuilt yet.
-  if (mChildren.SafeElementAt(index) != aChild) {
-    index = mChildren.IndexOf(aChild);
-    MOZ_ASSERT(index != -1,
-               "Child is bound to parent but parent hasn't this child at its index.");
-  }
+  MOZ_ASSERT(mChildren.SafeElementAt(index) == aChild,
+             "A wrong child index");
 
   aChild->UnbindFromParent();
   mChildren.RemoveElementAt(index);
+
+  for (uint32_t idx = index; idx < mChildren.Length(); idx++) {
+    mChildren[idx]->mIndexInParent = idx;
+  }
+
   return true;
 }
 

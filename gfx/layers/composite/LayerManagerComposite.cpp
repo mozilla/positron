@@ -68,6 +68,7 @@
 #endif
 #include "GeckoProfiler.h"
 #include "TextRenderer.h"               // for TextRenderer
+#include "mozilla/layers/CompositorBridgeParent.h"
 
 class gfxContext;
 
@@ -164,11 +165,11 @@ void
 LayerManagerComposite::BeginTransaction()
 {
   mInTransaction = true;
-  
+
   if (!mCompositor->Ready()) {
     return;
   }
-  
+
   mIsCompositorReady = true;
 }
 
@@ -176,7 +177,7 @@ void
 LayerManagerComposite::BeginTransactionWithDrawTarget(DrawTarget* aTarget, const IntRect& aRect)
 {
   mInTransaction = true;
-  
+
   if (!mCompositor->Ready()) {
     return;
   }
@@ -257,7 +258,7 @@ LayerManagerComposite::PostProcessLayers(Layer* aLayer,
       localOpaque.MoveBy(-*integerTranslation);
     }
   }
- 
+
   // Compute a clip that's the combination of our layer clip with the clip
   // from our ancestors.
   LayerComposite* composite = aLayer->AsLayerComposite();
@@ -853,7 +854,7 @@ LayerManagerComposite::Render(const nsIntRegion& aInvalidRegion, const nsIntRegi
   if (!mTarget && !haveLayerEffects &&
       gfxPrefs::Composer2DCompositionEnabled() &&
       composer2D && composer2D->HasHwc() && composer2D->TryRenderWithHwc(mRoot,
-          mCompositor->GetWidget(),
+          mCompositor->GetWidget()->RealWidget(),
           mGeometryChanged,
           mCompositor->HasImageHostOverlays()))
   {
@@ -942,12 +943,13 @@ LayerManagerComposite::Render(const nsIntRegion& aInvalidRegion, const nsIntRegi
       js::ProfileEntry::Category::GRAPHICS);
 
     mCompositor->EndFrame();
-    mCompositor->SetDispAcquireFence(mRoot,
-                                     mCompositor->GetWidget()); // Call after EndFrame()
+
+    // Call after EndFrame()
+    mCompositor->SetDispAcquireFence(mRoot);
   }
 
   if (composer2D) {
-    composer2D->Render(mCompositor->GetWidget());
+    composer2D->Render(mCompositor->GetWidget()->RealWidget());
   }
 
   mCompositor->GetWidget()->PostRender(this);
@@ -1064,7 +1066,7 @@ LayerManagerComposite::RenderToPresentationSurface()
 
 #elif defined(MOZ_WIDGET_GONK)
   CompositorOGL* compositor = mCompositor->AsCompositorOGL();
-  nsScreenGonk* screen = static_cast<nsWindow*>(mCompositor->GetWidget())->GetScreen();
+  nsScreenGonk* screen = static_cast<nsWindow*>(mCompositor->GetWidget()->RealWidget())->GetScreen();
   if (!screen->IsPrimaryScreen()) {
     // Only primary screen support mirroring
     return;
@@ -1546,7 +1548,10 @@ LayerComposite::SetLayerManager(LayerManagerComposite* aManager)
 bool
 LayerManagerComposite::AsyncPanZoomEnabled() const
 {
-  return mCompositor->GetWidget()->AsyncPanZoomEnabled();
+  if (CompositorBridgeParent* bridge = mCompositor->GetCompositorBridgeParent()) {
+    return bridge->AsyncPanZoomEnabled();
+  }
+  return false;
 }
 
 nsIntRegion
@@ -1562,6 +1567,19 @@ LayerComposite::GetFullyRenderedRegion() {
   } else {
     return GetShadowVisibleRegion().ToUnknownRegion();
   }
+}
+
+Matrix4x4
+LayerComposite::GetShadowTransform() {
+  Matrix4x4 transform = mShadowTransform;
+  Layer* layer = GetLayer();
+
+  transform.PostScale(layer->GetPostXScale(), layer->GetPostYScale(), 1.0f);
+  if (const ContainerLayer* c = layer->AsContainerLayer()) {
+    transform.PreScale(c->GetPreXScale(), c->GetPreYScale(), 1.0f);
+  }
+
+  return transform;
 }
 
 bool

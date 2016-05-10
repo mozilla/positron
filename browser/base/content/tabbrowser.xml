@@ -67,10 +67,6 @@
         Components.classes["@mozilla.org/browser/favicon-service;1"]
                   .getService(Components.interfaces.nsIFaviconService);
       </field>
-      <field name="_placesAutocomplete" readonly="true">
-         Components.classes["@mozilla.org/autocomplete/search;1?name=history"]
-                   .getService(Components.interfaces.mozIPlacesAutoComplete);
-      </field>
       <field name="_unifiedComplete" readonly="true">
          Components.classes["@mozilla.org/autocomplete/search;1?name=unifiedcomplete"]
                    .getService(Components.interfaces.mozIPlacesAutoComplete);
@@ -796,10 +792,8 @@
                   this.mBrowser.mIconURL = null;
                 }
 
-                let autocomplete = this.mTabBrowser._placesAutocomplete;
                 let unifiedComplete = this.mTabBrowser._unifiedComplete;
                 if (this.mBrowser.registeredOpenURI) {
-                  autocomplete.unregisterOpenPage(this.mBrowser.registeredOpenURI);
                   unifiedComplete.unregisterOpenPage(this.mBrowser.registeredOpenURI);
                   delete this.mBrowser.registeredOpenURI;
                 }
@@ -808,7 +802,6 @@
                 if (!isBlankPageURL(aLocation.spec) &&
                     (!PrivateBrowsingUtils.isWindowPrivate(window) ||
                     PrivateBrowsingUtils.permanentPrivateBrowsing)) {
-                  autocomplete.registerOpenPage(aLocation);
                   unifiedComplete.registerOpenPage(aLocation);
                   this.mBrowser.registeredOpenURI = aLocation;
                 }
@@ -2394,7 +2387,6 @@
             listener.destroy();
 
             if (browser.registeredOpenURI && !aAdoptedByTab) {
-              this._placesAutocomplete.unregisterOpenPage(browser.registeredOpenURI);
               this._unifiedComplete.unregisterOpenPage(browser.registeredOpenURI);
               delete browser.registeredOpenURI;
             }
@@ -2499,6 +2491,16 @@
             // steps.
 
             var panel = this.getNotificationBox(browser);
+
+            // In the multi-process case, it's possible an asynchronous tab switch
+            // is still underway. If so, then it's possible that the last visible
+            // browser is the one we're in the process of removing. There's the
+            // risk of displaying preloaded browsers that are at the end of the
+            // deck if we remove the browser before the switch is complete, so
+            // we alert the switcher in order to show a spinner instead.
+            if (this._switcher) {
+              this._switcher.onTabRemoved(aTab);
+            }
 
             // This will unload the document. An unload handler could remove
             // dependant tabs, so it's important that the tabbrowser is now in
@@ -2733,7 +2735,6 @@
           <![CDATA[
             // If the current URI is registered as open remove it from the list.
             if (aOurBrowser.registeredOpenURI) {
-              this._placesAutocomplete.unregisterOpenPage(aOurBrowser.registeredOpenURI);
               this._unifiedComplete.unregisterOpenPage(aOurBrowser.registeredOpenURI);
               delete aOurBrowser.registeredOpenURI;
             }
@@ -3648,6 +3649,19 @@
               }
             },
 
+            // Called when a tab has been removed, and the browser node is
+            // about to be removed from the DOM.
+            onTabRemoved: function(tab) {
+              if (this.lastVisibleTab == tab) {
+                // The browser that was being presented to the user is
+                // going to be removed during this tick of the event loop.
+                // This will cause us to show a tab spinner instead.
+                this.preActions();
+                this.lastVisibleTab = null;
+                this.postActions();
+              }
+            },
+
             // Called when the user asks to switch to a given tab.
             requestTab: function(tab) {
               if (tab === this.requestedTab) {
@@ -4502,7 +4516,6 @@
           for (let tab of this.tabs) {
             let browser = tab.linkedBrowser;
             if (browser.registeredOpenURI) {
-              this._placesAutocomplete.unregisterOpenPage(browser.registeredOpenURI);
               this._unifiedComplete.unregisterOpenPage(browser.registeredOpenURI);
               delete browser.registeredOpenURI;
             }
@@ -6023,8 +6036,11 @@
           let tab = this._getDragTargetTab(event, true);
           if (!tab) {
             // We're adding a new tab.
+            let userContextId = this.selectedItem.getAttribute("usercontextid");
             let newIndex = this._getDropIndex(event, true);
-            let newTab = this.tabbrowser.loadOneTab(url, {inBackground: bgLoad, allowThirdPartyFixup: true});
+            let newTab = this.tabbrowser.loadOneTab(url, {inBackground: bgLoad,
+                                                          allowThirdPartyFixup: true,
+                                                          userContextId});
             this.tabbrowser.moveTabTo(newTab, newIndex);
           } else {
             // Load in an existing tab.

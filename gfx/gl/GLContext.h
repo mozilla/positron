@@ -95,6 +95,7 @@ enum class GLFeature {
     element_index_uint,
     ES2_compatibility,
     ES3_compatibility,
+    EXT_color_buffer_float,
     frag_color_float,
     frag_depth,
     framebuffer_blit,
@@ -478,6 +479,7 @@ public:
         NV_geometry_program4,
         NV_half_float,
         NV_instanced_arrays,
+        NV_texture_barrier,
         NV_transform_feedback,
         NV_transform_feedback2,
         OES_EGL_image,
@@ -2879,6 +2881,17 @@ public:
         AFTER_GL_CALL;
     }
 
+// -----------------------------------------------------------------------------
+// Extension NV_texture_barrier
+public:
+    void fTextureBarrier()
+    {
+        ASSERT_SYMBOL_PRESENT(fTextureBarrier);
+        BEFORE_GL_CALL;
+        mSymbols.fTextureBarrier();
+        AFTER_GL_CALL;
+    }
+
 // Core GL & Extension ARB_copy_buffer
 public:
     void fCopyBufferSubData(GLenum readtarget, GLenum writetarget,
@@ -3412,7 +3425,6 @@ public:
 
 protected:
     SurfaceCaps mCaps;
-    nsAutoPtr<GLFormats> mGLFormats;
 
 public:
     const SurfaceCaps& Caps() const {
@@ -3421,14 +3433,6 @@ public:
 
     // Only varies based on bpp16 and alpha.
     GLFormats ChooseGLFormats(const SurfaceCaps& caps) const;
-    void UpdateGLFormats(const SurfaceCaps& caps) {
-        mGLFormats = new GLFormats(ChooseGLFormats(caps));
-    }
-
-    const GLFormats& GetGLFormats() const {
-        MOZ_ASSERT(mGLFormats);
-        return *mGLFormats;
-    }
 
     bool IsFramebufferComplete(GLuint fb, GLenum* status = nullptr);
 

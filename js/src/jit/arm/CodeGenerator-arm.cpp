@@ -1133,7 +1133,7 @@ CodeGeneratorARM::emitTableSwitchDispatch(MTableSwitch* mir, Register index, Reg
     for (int32_t i = 0; i < cases; i++) {
         CodeLabel cl;
         masm.writeCodePointer(cl.patchAt());
-        ool->addCodeLabel(cl);
+        masm.propagateOOM(ool->addCodeLabel(cl));
     }
     addOutOfLineCode(ool, mir);
 }
@@ -1141,22 +1141,22 @@ CodeGeneratorARM::emitTableSwitchDispatch(MTableSwitch* mir, Register index, Reg
 void
 CodeGeneratorARM::visitMathD(LMathD* math)
 {
-    const LAllocation* src1 = math->getOperand(0);
-    const LAllocation* src2 = math->getOperand(1);
-    const LDefinition* output = math->getDef(0);
+    FloatRegister src1 = ToFloatRegister(math->getOperand(0));
+    FloatRegister src2 = ToFloatRegister(math->getOperand(1));
+    FloatRegister output = ToFloatRegister(math->getDef(0));
 
     switch (math->jsop()) {
       case JSOP_ADD:
-        masm.ma_vadd(ToFloatRegister(src1), ToFloatRegister(src2), ToFloatRegister(output));
+        masm.ma_vadd(src1, src2, output);
         break;
       case JSOP_SUB:
-        masm.ma_vsub(ToFloatRegister(src1), ToFloatRegister(src2), ToFloatRegister(output));
+        masm.ma_vsub(src1, src2, output);
         break;
       case JSOP_MUL:
-        masm.ma_vmul(ToFloatRegister(src1), ToFloatRegister(src2), ToFloatRegister(output));
+        masm.ma_vmul(src1, src2, output);
         break;
       case JSOP_DIV:
-        masm.ma_vdiv(ToFloatRegister(src1), ToFloatRegister(src2), ToFloatRegister(output));
+        masm.ma_vdiv(src1, src2, output);
         break;
       default:
         MOZ_CRASH("unexpected opcode");
@@ -1166,22 +1166,22 @@ CodeGeneratorARM::visitMathD(LMathD* math)
 void
 CodeGeneratorARM::visitMathF(LMathF* math)
 {
-    const LAllocation* src1 = math->getOperand(0);
-    const LAllocation* src2 = math->getOperand(1);
-    const LDefinition* output = math->getDef(0);
+    FloatRegister src1 = ToFloatRegister(math->getOperand(0));
+    FloatRegister src2 = ToFloatRegister(math->getOperand(1));
+    FloatRegister output = ToFloatRegister(math->getDef(0));
 
     switch (math->jsop()) {
       case JSOP_ADD:
-        masm.ma_vadd_f32(ToFloatRegister(src1), ToFloatRegister(src2), ToFloatRegister(output));
+        masm.ma_vadd_f32(src1, src2, output);
         break;
       case JSOP_SUB:
-        masm.ma_vsub_f32(ToFloatRegister(src1), ToFloatRegister(src2), ToFloatRegister(output));
+        masm.ma_vsub_f32(src1, src2, output);
         break;
       case JSOP_MUL:
-        masm.ma_vmul_f32(ToFloatRegister(src1), ToFloatRegister(src2), ToFloatRegister(output));
+        masm.ma_vmul_f32(src1, src2, output);
         break;
       case JSOP_DIV:
-        masm.ma_vdiv_f32(ToFloatRegister(src1), ToFloatRegister(src2), ToFloatRegister(output));
+        masm.ma_vdiv_f32(src1, src2, output);
         break;
       default:
         MOZ_CRASH("unexpected opcode");
@@ -1359,7 +1359,7 @@ CodeGeneratorARM::visitBoxFloatingPoint(LBoxFloatingPoint* box)
     const LAllocation* in = box->getOperand(0);
     FloatRegister reg = ToFloatRegister(in);
 
-    if (box->type() == MIRType_Float32) {
+    if (box->type() == MIRType::Float32) {
         ScratchFloat32Scope scratch(masm);
         masm.convertFloat32ToDouble(reg, scratch);
         masm.ma_vxfer(VFPRegister(scratch), ToRegister(payload), ToRegister(type));
@@ -2118,7 +2118,7 @@ CodeGeneratorARM::visitAsmSelect(LAsmSelect* ins)
     Register cond = ToRegister(ins->condExpr());
     masm.ma_cmp(cond, Imm32(0));
 
-    if (mirType == MIRType_Int32) {
+    if (mirType == MIRType::Int32) {
         Register falseExpr = ToRegister(ins->falseExpr());
         Register out = ToRegister(ins->output());
         MOZ_ASSERT(ToRegister(ins->trueExpr()) == out, "true expr input is reused for output");
@@ -2131,9 +2131,9 @@ CodeGeneratorARM::visitAsmSelect(LAsmSelect* ins)
 
     FloatRegister falseExpr = ToFloatRegister(ins->falseExpr());
 
-    if (mirType == MIRType_Double)
+    if (mirType == MIRType::Double)
         masm.moveDouble(falseExpr, out, Assembler::Zero);
-    else if (mirType == MIRType_Float32)
+    else if (mirType == MIRType::Float32)
         masm.moveFloat32(falseExpr, out, Assembler::Zero);
     else
         MOZ_CRASH("unhandled type in visitAsmSelect!");
@@ -2149,16 +2149,16 @@ CodeGeneratorARM::visitAsmReinterpret(LAsmReinterpret* lir)
     DebugOnly<MIRType> from = ins->input()->type();
 
     switch (to) {
-      case MIRType_Int32:
-        MOZ_ASSERT(from == MIRType_Float32);
+      case MIRType::Int32:
+        MOZ_ASSERT(from == MIRType::Float32);
         masm.ma_vxfer(ToFloatRegister(lir->input()), ToRegister(lir->output()));
         break;
-      case MIRType_Float32:
-        MOZ_ASSERT(from == MIRType_Int32);
+      case MIRType::Float32:
+        MOZ_ASSERT(from == MIRType::Int32);
         masm.ma_vxfer(ToRegister(lir->input()), ToFloatRegister(lir->output()));
         break;
-      case MIRType_Double:
-      case MIRType_Int64:
+      case MIRType::Double:
+      case MIRType::Int64:
         MOZ_CRASH("not handled by this LIR opcode");
       default:
         MOZ_CRASH("unexpected AsmReinterpret");
@@ -2198,10 +2198,10 @@ CodeGeneratorARM::visitAsmJSCall(LAsmJSCall* ins)
     emitAsmJSCall(ins);
 
     switch (mir->type()) {
-      case MIRType_Double:
+      case MIRType::Double:
         masm.ma_vxfer(r0, r1, d0);
         break;
-      case MIRType_Float32:
+      case MIRType::Float32:
         masm.as_vxfer(r0, InvalidReg, VFPRegister(d0).singleOverlay(), Assembler::CoreToFloat);
         break;
       default:
@@ -2318,10 +2318,11 @@ CodeGeneratorARM::visitAsmJSStoreHeap(LAsmJSStoreHeap* ins)
         MOZ_ASSERT(ptrImm >= 0);
         if (isFloat) {
             VFPRegister vd(ToFloatRegister(ins->value()));
+            Address addr(HeapReg, ptrImm);
             if (size == 32)
-                masm.ma_vstr(vd.singleOverlay(), Address(HeapReg, ptrImm), Assembler::Always);
+                masm.ma_vstr(vd.singleOverlay(), addr, Assembler::Always);
             else
-                masm.ma_vstr(vd, Address(HeapReg, ptrImm), Assembler::Always);
+                masm.ma_vstr(vd, addr, Assembler::Always);
         } else {
             masm.ma_dataTransferN(IsStore, size, isSigned, HeapReg, Imm32(ptrImm),
                                   ToRegister(ins->value()), Offset, Assembler::Always);
@@ -2723,9 +2724,9 @@ CodeGeneratorARM::visitAsmJSLoadGlobalVar(LAsmJSLoadGlobalVar* ins)
 {
     const MAsmJSLoadGlobalVar* mir = ins->mir();
     unsigned addr = mir->globalDataOffset() - AsmJSGlobalRegBias;
-    if (mir->type() == MIRType_Int32) {
+    if (mir->type() == MIRType::Int32) {
         masm.ma_dtr(IsLoad, GlobalReg, Imm32(addr), ToRegister(ins->output()));
-    } else if (mir->type() == MIRType_Float32) {
+    } else if (mir->type() == MIRType::Float32) {
         VFPRegister vd(ToFloatRegister(ins->output()));
         masm.ma_vldr(Address(GlobalReg, addr), vd.singleOverlay());
     } else {
@@ -2742,9 +2743,9 @@ CodeGeneratorARM::visitAsmJSStoreGlobalVar(LAsmJSStoreGlobalVar* ins)
     MOZ_ASSERT(IsNumberType(type));
 
     unsigned addr = mir->globalDataOffset() - AsmJSGlobalRegBias;
-    if (type == MIRType_Int32) {
+    if (type == MIRType::Int32) {
         masm.ma_dtr(IsStore, GlobalReg, Imm32(addr), ToRegister(ins->value()));
-    } else if (type == MIRType_Float32) {
+    } else if (type == MIRType::Float32) {
         VFPRegister vd(ToFloatRegister(ins->value()));
         masm.ma_vstr(vd.singleOverlay(), Address(GlobalReg, addr));
     } else {
@@ -2835,4 +2836,137 @@ CodeGeneratorARM::setReturnDoubleRegs(LiveRegisterSet* regs)
     regs->add(ReturnFloat32Reg);
     regs->add(s1);
     regs->add(ReturnDoubleReg);
+}
+
+void
+CodeGeneratorARM::visitWasmTruncateToInt32(LWasmTruncateToInt32* lir)
+{
+    auto input = ToFloatRegister(lir->input());
+    auto output = ToRegister(lir->output());
+
+    MWasmTruncateToInt32* mir = lir->mir();
+    MIRType fromType = mir->input()->type();
+
+    auto* ool = new(alloc()) OutOfLineWasmTruncateCheck(mir, input);
+    addOutOfLineCode(ool, mir);
+
+    // vcvt* converts NaN into 0, so check for NaNs here.
+    {
+        if (fromType == MIRType::Double)
+            masm.compareDouble(input, input);
+        else if (fromType == MIRType::Float32)
+            masm.compareFloat(input, input);
+        else
+            MOZ_CRASH("unexpected type in visitWasmTruncateToInt32");
+
+        masm.ma_b(ool->entry(), Assembler::VFP_Unordered);
+    }
+
+    ScratchDoubleScope scratchScope(masm);
+    FloatRegister scratch = scratchScope.uintOverlay();
+
+    // ARM conversion instructions clamp the value to ensure it fits within the
+    // target's type bounds, so every time we see those, we need to check the
+    // input.
+    if (mir->isUnsigned()) {
+        if (fromType == MIRType::Double)
+            masm.ma_vcvt_F64_U32(input, scratch);
+        else if (fromType == MIRType::Float32)
+            masm.ma_vcvt_F32_U32(input, scratch);
+        else
+            MOZ_CRASH("unexpected type in visitWasmTruncateToInt32");
+
+        masm.ma_vxfer(scratch, output);
+
+        // int32_t(UINT32_MAX) == -1.
+        masm.ma_cmp(output, Imm32(-1));
+        masm.ma_cmp(output, Imm32(0), Assembler::NotEqual);
+        masm.ma_b(ool->entry(), Assembler::Equal);
+
+        masm.bind(ool->rejoin());
+        return;
+    }
+
+    scratch = scratchScope.sintOverlay();
+
+    if (fromType == MIRType::Double)
+        masm.ma_vcvt_F64_I32(input, scratch);
+    else if (fromType == MIRType::Float32)
+        masm.ma_vcvt_F32_I32(input, scratch);
+    else
+        MOZ_CRASH("unexpected type in visitWasmTruncateToInt32");
+
+    masm.ma_vxfer(scratch, output);
+    masm.ma_cmp(output, Imm32(INT32_MAX));
+    masm.ma_cmp(output, Imm32(INT32_MIN), Assembler::NotEqual);
+    masm.ma_b(ool->entry(), Assembler::Equal);
+
+    masm.bind(ool->rejoin());
+}
+
+void
+CodeGeneratorARM::visitOutOfLineWasmTruncateCheck(OutOfLineWasmTruncateCheck* ool)
+{
+    MIRType fromType = ool->fromType();
+    FloatRegister input = ool->input();
+
+    ScratchDoubleScope scratchScope(masm);
+    FloatRegister scratch;
+
+    // Eagerly take care of NaNs.
+    Label inputIsNaN;
+    if (fromType == MIRType::Double)
+        masm.branchDouble(Assembler::DoubleUnordered, input, input, &inputIsNaN);
+    else if (fromType == MIRType::Float32)
+        masm.branchFloat(Assembler::DoubleUnordered, input, input, &inputIsNaN);
+    else
+        MOZ_CRASH("unexpected type in visitOutOfLineWasmTruncateCheck");
+
+    // Handle special values.
+    Label fail;
+
+    double minValue, maxValue;
+    if (ool->isUnsigned()) {
+        minValue = -1;
+        maxValue = double(UINT32_MAX) + 1.0;
+    } else {
+        minValue = double(INT32_MIN) - 1.0;
+        maxValue = double(INT32_MAX) + 1.0;
+    }
+
+    if (fromType == MIRType::Double) {
+        scratch = scratchScope.doubleOverlay();
+        masm.loadConstantDouble(minValue, scratch);
+        masm.branchDouble(Assembler::DoubleLessThanOrEqual, input, scratch, &fail);
+
+        masm.loadConstantDouble(maxValue, scratch);
+        masm.branchDouble(Assembler::DoubleGreaterThanOrEqual, input, scratch, &fail);
+    } else {
+        MOZ_ASSERT(fromType == MIRType::Float32);
+        scratch = scratchScope.singleOverlay();
+
+        // For int32, float(minValue) rounds to INT32_MIN, we want to fail when
+        // input < float(minValue).
+        // For uint32, float(minValue) == -1, we want to fail when input <= -1.
+        auto condition = minValue == -1.0
+                         ? Assembler::DoubleLessThanOrEqual
+                         : Assembler::DoubleLessThan;
+
+        masm.loadConstantFloat32(float(minValue), scratch);
+        masm.branchFloat(condition, input, scratch, &fail);
+
+        // maxValue is exactly represented in both cases.
+        masm.loadConstantFloat32(float(maxValue), scratch);
+        masm.branchFloat(Assembler::DoubleGreaterThanOrEqual, input, scratch, &fail);
+    }
+
+    // We had an actual correct value, get back to where we were.
+    masm.ma_b(ool->rejoin());
+
+    // Handle errors.
+    masm.bind(&fail);
+    masm.jump(wasm::JumpTarget::IntegerOverflowTrap);
+
+    masm.bind(&inputIsNaN);
+    masm.jump(wasm::JumpTarget::InvalidConversionToIntegerTrap);
 }

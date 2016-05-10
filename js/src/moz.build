@@ -156,6 +156,7 @@ UNIFIED_SOURCES += [
     'asmjs/AsmJS.cpp',
     'asmjs/Wasm.cpp',
     'asmjs/WasmBinary.cpp',
+    'asmjs/WasmBinaryIterator.cpp',
     'asmjs/WasmBinaryToText.cpp',
     'asmjs/WasmFrameIterator.cpp',
     'asmjs/WasmGenerator.cpp',
@@ -211,6 +212,7 @@ UNIFIED_SOURCES += [
     'irregexp/RegExpParser.cpp',
     'irregexp/RegExpStack.cpp',
     'jit/AliasAnalysis.cpp',
+    'jit/AliasAnalysisShared.cpp',
     'jit/AlignmentMaskAnalysis.cpp',
     'jit/BacktrackingAllocator.cpp',
     'jit/Bailouts.cpp',
@@ -234,6 +236,7 @@ UNIFIED_SOURCES += [
     'jit/EdgeCaseAnalysis.cpp',
     'jit/EffectiveAddressAnalysis.cpp',
     'jit/ExecutableAllocator.cpp',
+    'jit/FlowAliasAnalysis.cpp',
     'jit/InstructionReordering.cpp',
     'jit/Ion.cpp',
     'jit/IonAnalysis.cpp',
@@ -246,6 +249,7 @@ UNIFIED_SOURCES += [
     'jit/JitSpewer.cpp',
     'jit/JSONSpewer.cpp',
     'jit/LICM.cpp',
+    'jit/Linker.cpp',
     'jit/LIR.cpp',
     'jit/LoopUnroller.cpp',
     'jit/Lowering.cpp',
@@ -299,10 +303,9 @@ UNIFIED_SOURCES += [
     'proxy/BaseProxyHandler.cpp',
     'proxy/CrossCompartmentWrapper.cpp',
     'proxy/DeadObjectProxy.cpp',
-    'proxy/DirectProxyHandler.cpp',
     'proxy/OpaqueCrossCompartmentWrapper.cpp',
     'proxy/Proxy.cpp',
-    'proxy/ScriptedDirectProxyHandler.cpp',
+    'proxy/ScriptedProxyHandler.cpp',
     'proxy/SecurityWrapper.cpp',
     'proxy/Wrapper.cpp',
     'vm/ArgumentsObject.cpp',
@@ -339,6 +342,7 @@ UNIFIED_SOURCES += [
     'vm/SelfHosting.cpp',
     'vm/Shape.cpp',
     'vm/SharedArrayObject.cpp',
+    'vm/SharedImmutableStringsCache.cpp',
     'vm/SPSProfiler.cpp',
     'vm/Stack.cpp',
     'vm/Stopwatch.cpp',
@@ -554,14 +558,18 @@ elif CONFIG['JS_CODEGEN_MIPS32'] or CONFIG['JS_CODEGEN_MIPS64']:
 if CONFIG['OS_ARCH'] == 'WINNT':
     SOURCES += [
         'jit/ExecutableAllocatorWin.cpp',
+        'threading/windows/ConditionVariable.cpp',
         'threading/windows/Mutex.cpp',
+        'threading/windows/Thread.cpp',
     ]
     # _CRT_RAND_S must be #defined before #including stdlib.h to get rand_s()
     DEFINES['_CRT_RAND_S'] = True
 else:
     SOURCES += [
         'jit/ExecutableAllocatorPosix.cpp',
+        'threading/posix/ConditionVariable.cpp',
         'threading/posix/Mutex.cpp',
+        'threading/posix/Thread.cpp',
     ]
 
 if CONFIG['JS_HAS_CTYPES']:
@@ -635,13 +643,6 @@ USE_LIBS += [
     'zlib',
 ]
 
-if CONFIG['MOZ_ETW']:
-    GENERATED_FILES = [
-        'ETWProvider.h',
-    ]
-    # This will get the ETW provider resources into the library mozjs.dll
-    RESFILE = 'ETWProvider.res'
-
 if CONFIG['NIGHTLY_BUILD']:
     DEFINES['ENABLE_BINARYDATA'] = True
 
@@ -709,6 +710,8 @@ if CONFIG['OS_ARCH'] == 'SunOS':
         'nsl',
         'socket',
     ]
+
+OS_LIBS += CONFIG['REALTIME_LIBS']
 
 CFLAGS += CONFIG['MOZ_ICU_CFLAGS']
 CXXFLAGS += CONFIG['MOZ_ICU_CFLAGS']

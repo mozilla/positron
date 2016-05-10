@@ -59,7 +59,7 @@ AppendStateToStr(SourceBufferAttributes::AppendState aState)
 static Atomic<uint32_t> sStreamSourceID(0u);
 
 #ifdef MOZ_EME
-class DispatchKeyNeededEvent : public nsRunnable {
+class DispatchKeyNeededEvent : public Runnable {
 public:
   DispatchKeyNeededEvent(AbstractMediaDecoder* aDecoder,
                          nsTArray<uint8_t>& aInitData,
@@ -201,9 +201,7 @@ TrackBuffersManager::ProcessTasks()
         NS_WARNING("Invalid Task");
     }
   }
-  nsCOMPtr<nsIRunnable> task =
-    NS_NewRunnableMethod(this, &TrackBuffersManager::ProcessTasks);
-  GetTaskQueue()->Dispatch(task.forget());
+  GetTaskQueue()->Dispatch(NewRunnableMethod(this, &TrackBuffersManager::ProcessTasks));
 }
 
 // A PromiseHolder will assert upon destruction if it has a pending promise
@@ -793,9 +791,7 @@ TrackBuffersManager::ScheduleSegmentParserLoop()
   if (mDetached) {
     return;
   }
-  nsCOMPtr<nsIRunnable> task =
-    NS_NewRunnableMethod(this, &TrackBuffersManager::SegmentParserLoop);
-  GetTaskQueue()->Dispatch(task.forget());
+  GetTaskQueue()->Dispatch(NewRunnableMethod(this, &TrackBuffersManager::SegmentParserLoop));
 }
 
 void
@@ -971,11 +967,10 @@ TrackBuffersManager::OnDemuxerInitDone(nsresult)
   int64_t duration = std::max(videoDuration, audioDuration);
   // 1. Update the duration attribute if it currently equals NaN.
   // Those steps are performed by the MediaSourceDecoder::SetInitialDuration
-  nsCOMPtr<nsIRunnable> task =
-    NS_NewRunnableMethodWithArg<int64_t>(mParentDecoder,
-                                         &MediaSourceDecoder::SetInitialDuration,
-                                         duration ? duration : -1);
-  AbstractThread::MainThread()->Dispatch(task.forget());
+  AbstractThread::MainThread()->Dispatch(NewRunnableMethod<int64_t>
+                                         (mParentDecoder,
+                                          &MediaSourceDecoder::SetInitialDuration,
+                                          duration ? duration : -1));
 
   // 2. If the initialization segment has no audio, video, or text tracks, then
   // run the append error algorithm with the decode error parameter set to true
@@ -1003,9 +998,6 @@ TrackBuffersManager::OnDemuxerInitDone(nsresult)
     // 3. Set the need random access point flag on all track buffers to true.
     mVideoTracks.mNeedRandomAccessPoint = true;
     mAudioTracks.mNeedRandomAccessPoint = true;
-
-    mVideoTracks.mLongestFrameDuration = mVideoTracks.mLastFrameDuration;
-    mAudioTracks.mLongestFrameDuration = mAudioTracks.mLastFrameDuration;
   }
 
   // 4. Let active track flag equal false.
@@ -1094,14 +1086,6 @@ TrackBuffersManager::OnDemuxerInitDone(nsresult)
     // 6. Set first initialization segment received flag to true.
     mFirstInitializationSegmentReceived = true;
   } else {
-    // Check that audio configuration hasn't changed as this is something
-    // we do not support yet (bug 1185827).
-    if (mAudioTracks.mNumTracks &&
-        (info.mAudio.mChannels != mAudioTracks.mInfo->GetAsAudioInfo()->mChannels ||
-         info.mAudio.mRate != mAudioTracks.mInfo->GetAsAudioInfo()->mRate)) {
-      RejectAppend(NS_ERROR_FAILURE, __func__);
-      return;
-    }
     mAudioTracks.mLastInfo = new SharedTrackInfo(info.mAudio, streamID);
     mVideoTracks.mLastInfo = new SharedTrackInfo(info.mVideo, streamID);
   }
@@ -1399,7 +1383,9 @@ TrackBuffersManager::ProcessFrames(TrackBuffer& aSamples, TrackData& aTrackData)
   TimeInterval targetWindow = mAppendWindow.mStart != TimeUnit::FromSeconds(0)
     ? mAppendWindow
     : TimeInterval(mAppendWindow.mStart, mAppendWindow.mEnd,
-                   trackBuffer.mLongestFrameDuration.refOr(TimeUnit::FromMicroseconds(aSamples[0]->mDuration)));
+                   trackBuffer.mLastFrameDuration.isSome()
+                     ? trackBuffer.mLongestFrameDuration
+                     : TimeUnit::FromMicroseconds(aSamples[0]->mDuration));
 
   TimeIntervals samplesRange;
   uint32_t sizeNewSamples = 0;
@@ -1456,16 +1442,20 @@ TrackBuffersManager::ProcessFrames(TrackBuffer& aSamples, TrackData& aTrackData)
     // Step 3 is performed earlier or when a discontinuity has been detected.
     // 4. If timestampOffset is not 0, then run the following steps:
 
+    TimeUnit sampleTime = TimeUnit::FromMicroseconds(sample->mTime);
+    TimeUnit sampleTimecode = TimeUnit::FromMicroseconds(sample->mTimecode);
+    TimeUnit sampleDuration = TimeUnit::FromMicroseconds(sample->mDuration);
+    TimeUnit timestampOffset = mSourceBufferAttributes->GetTimestampOffset();
+
     TimeInterval sampleInterval =
       mSourceBufferAttributes->mGenerateTimestamps
-        ? TimeInterval(mSourceBufferAttributes->GetTimestampOffset(),
-                       mSourceBufferAttributes->GetTimestampOffset() + TimeUnit::FromMicroseconds(sample->mDuration))
-        : TimeInterval(TimeUnit::FromMicroseconds(sample->mTime) + mSourceBufferAttributes->GetTimestampOffset(),
-                       TimeUnit::FromMicroseconds(sample->GetEndTime()) + mSourceBufferAttributes->GetTimestampOffset());
+        ? TimeInterval(timestampOffset, timestampOffset + sampleDuration)
+        : TimeInterval(timestampOffset + sampleTime,
+                       timestampOffset + sampleTime + sampleDuration);
     TimeUnit decodeTimestamp =
       mSourceBufferAttributes->mGenerateTimestamps
-        ? mSourceBufferAttributes->GetTimestampOffset()
-        : TimeUnit::FromMicroseconds(sample->mTimecode) + mSourceBufferAttributes->GetTimestampOffset();
+        ? timestampOffset
+        : timestampOffset + sampleTimecode;
 
     // 6. If last decode timestamp for track buffer is set and decode timestamp is less than last decode timestamp:
     // OR
@@ -1473,7 +1463,8 @@ TrackBuffersManager::ProcessFrames(TrackBuffer& aSamples, TrackData& aTrackData)
 
     if (needDiscontinuityCheck && trackBuffer.mLastDecodeTimestamp.isSome() &&
         (decodeTimestamp < trackBuffer.mLastDecodeTimestamp.ref() ||
-         decodeTimestamp - trackBuffer.mLastDecodeTimestamp.ref() > 2*trackBuffer.mLongestFrameDuration.ref())) {
+         (decodeTimestamp - trackBuffer.mLastDecodeTimestamp.ref()
+          > 2 * trackBuffer.mLongestFrameDuration))) {
       MSE_DEBUG("Discontinuity detected.");
       SourceBufferAppendMode appendMode = mSourceBufferAttributes->GetAppendMode();
 
@@ -1500,7 +1491,7 @@ TrackBuffersManager::ProcessFrames(TrackBuffer& aSamples, TrackData& aTrackData)
       // steps again instead.
       // 3. If mode equals "sequence" and group start timestamp is set, then run the following steps:
       TimeUnit presentationTimestamp = mSourceBufferAttributes->mGenerateTimestamps
-        ? TimeUnit() : TimeUnit::FromMicroseconds(sample->mTime);
+        ? TimeUnit() : sampleTime;
       CheckSequenceDiscontinuity(presentationTimestamp);
 
       if (!sample->mKeyframe) {
@@ -1509,16 +1500,16 @@ TrackBuffersManager::ProcessFrames(TrackBuffer& aSamples, TrackData& aTrackData)
       if (appendMode == SourceBufferAppendMode::Sequence) {
         // mSourceBufferAttributes->GetTimestampOffset() was modified during CheckSequenceDiscontinuity.
         // We need to update our variables.
+        timestampOffset = mSourceBufferAttributes->GetTimestampOffset();
         sampleInterval =
           mSourceBufferAttributes->mGenerateTimestamps
-            ? TimeInterval(mSourceBufferAttributes->GetTimestampOffset(),
-                           mSourceBufferAttributes->GetTimestampOffset() + TimeUnit::FromMicroseconds(sample->mDuration))
-            : TimeInterval(TimeUnit::FromMicroseconds(sample->mTime) + mSourceBufferAttributes->GetTimestampOffset(),
-                           TimeUnit::FromMicroseconds(sample->GetEndTime()) + mSourceBufferAttributes->GetTimestampOffset());
+            ? TimeInterval(timestampOffset, timestampOffset + sampleDuration)
+            : TimeInterval(timestampOffset + sampleTime,
+                           timestampOffset + sampleTime + sampleDuration);
         decodeTimestamp =
           mSourceBufferAttributes->mGenerateTimestamps
-            ? mSourceBufferAttributes->GetTimestampOffset()
-            : TimeUnit::FromMicroseconds(sample->mTimecode) + mSourceBufferAttributes->GetTimestampOffset();
+            ? timestampOffset
+            : timestampOffset + sampleTimecode;
       }
       trackBuffer.mNeedRandomAccessPoint = false;
       needDiscontinuityCheck = false;
@@ -1553,18 +1544,17 @@ TrackBuffersManager::ProcessFrames(TrackBuffer& aSamples, TrackData& aTrackData)
 
     // Steps 11,12,13,14, 15 and 16 will be done in one block in InsertFrames.
 
-    // 17. Set last decode timestamp for track buffer to decode timestamp.
-    trackBuffer.mLastDecodeTimestamp =
-      Some(TimeUnit::FromMicroseconds(sample->mTimecode));
-    // 18. Set last frame duration for track buffer to frame duration.
-    trackBuffer.mLastFrameDuration =
-      Some(TimeUnit::FromMicroseconds(sample->mDuration));
-
     trackBuffer.mLongestFrameDuration =
-      Some(trackBuffer.mLongestFrameDuration.isNothing()
-           ? trackBuffer.mLastFrameDuration.ref()
-           : std::max(trackBuffer.mLastFrameDuration.ref(),
-                      trackBuffer.mLongestFrameDuration.ref()));
+      trackBuffer.mLastFrameDuration.isSome()
+      ? sample->mKeyframe
+        ? sampleDuration
+        : std::max(sampleDuration, trackBuffer.mLongestFrameDuration)
+      : sampleDuration;
+
+    // 17. Set last decode timestamp for track buffer to decode timestamp.
+    trackBuffer.mLastDecodeTimestamp = Some(decodeTimestamp);
+    // 18. Set last frame duration for track buffer to frame duration.
+    trackBuffer.mLastFrameDuration = Some(sampleDuration);
 
     // 19. If highest end timestamp for track buffer is unset or frame end timestamp is greater than highest end timestamp, then set highest end timestamp for track buffer to frame end timestamp.
     if (trackBuffer.mHighestEndTimestamp.isNothing() ||
@@ -1699,7 +1689,7 @@ TrackBuffersManager::InsertFrames(TrackBuffer& aSamples,
   // as fuzz is +/- value, giving an effective leeway of a full frame
   // length.
   TimeIntervals range(aIntervals);
-  range.SetFuzz(trackBuffer.mLongestFrameDuration.ref() / 2);
+  range.SetFuzz(trackBuffer.mLongestFrameDuration / 2);
   trackBuffer.mSanitizedBufferedRanges += range;
 }
 
@@ -1958,6 +1948,7 @@ TrackBuffersManager::SkipToNextRandomAccessPoint(TrackInfo::TrackType aTrack,
   uint32_t parsed = 0;
   auto& trackData = GetTracksData(aTrack);
   const TrackBuffer& track = GetTrackBuffer(aTrack);
+  aFound = false;
 
   uint32_t nextSampleIndex = trackData.mNextGetSampleIndex.valueOr(0);
   for (uint32_t i = nextSampleIndex; i < track.Length(); i++) {
@@ -2078,20 +2069,29 @@ TrackBuffersManager::GetSample(TrackInfo::TrackType aTrack,
 }
 
 TimeUnit
-TrackBuffersManager::GetNextRandomAccessPoint(TrackInfo::TrackType aTrack)
+TrackBuffersManager::GetNextRandomAccessPoint(TrackInfo::TrackType aTrack,
+                                              const TimeUnit& aFuzz)
 {
   auto& trackData = GetTracksData(aTrack);
   MOZ_ASSERT(trackData.mNextGetSampleIndex.isSome());
   const TrackBuffersManager::TrackBuffer& track = GetTrackBuffer(aTrack);
 
   uint32_t i = trackData.mNextGetSampleIndex.ref();
+  TimeUnit nextSampleTimecode = trackData.mNextSampleTimecode;
+
   for (; i < track.Length(); i++) {
     const RefPtr<MediaRawData>& sample = track[i];
+    if (sample->mTimecode > (nextSampleTimecode + aFuzz).ToMicroseconds()) {
+      // Gap is too big. End of Stream or Waiting for Data.
+      break;
+    }
     if (sample->mKeyframe) {
       return TimeUnit::FromMicroseconds(sample->mTime);
     }
+    nextSampleTimecode =
+      TimeUnit::FromMicroseconds(sample->mTimecode + sample->mDuration);
   }
-  return media::TimeUnit::FromInfinity();
+  return TimeUnit::FromInfinity();
 }
 
 void

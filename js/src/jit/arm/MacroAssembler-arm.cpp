@@ -2443,7 +2443,6 @@ void
 MacroAssemblerARMCompat::setStackArg(Register reg, uint32_t arg)
 {
     ma_dataTransferN(IsStore, 32, true, sp, Imm32(arg * sizeof(intptr_t)), reg);
-
 }
 
 void
@@ -3073,7 +3072,7 @@ void
 MacroAssemblerARMCompat::storeUnboxedValue(ConstantOrRegister value, MIRType valueType,
                                            const T& dest, MIRType slotType)
 {
-    if (valueType == MIRType_Double) {
+    if (valueType == MIRType::Double) {
         storeDouble(value.reg().typedReg().fpu(), dest);
         return;
     }

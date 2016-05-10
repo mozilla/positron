@@ -221,10 +221,10 @@ class MachCommands(MachCommandBase):
                         try:
                             output = subprocess.check_output([npmPath, "bin", "-g"],
                                                              stderr=subprocess.STDOUT)
-                            if minversion:
-                                base = output.split("\n").strip()
+                            if output:
+                                base = output.split("\n")[0].strip()
                                 binary = os.path.join(base, "eslint")
-                                if not os.path.is_file(binary):
+                                if not os.path.isfile(binary):
                                     binary = None
                         except (subprocess.CalledProcessError, WindowsError):
                             pass
@@ -270,11 +270,11 @@ class MachCommands(MachCommandBase):
         if not npmPath:
             return 1
 
-        # Install eslint 1.10.3.
+        # Install eslint.
         # Note that that's the version currently compatible with the mozilla
         # eslint plugin.
         success = self.callProcess("eslint",
-                                   [npmPath, "install", "eslint@2.8.0", "-g"])
+                                   [npmPath, "install", "eslint@2.9.0", "-g"])
         if not success:
             return 1
 

@@ -146,7 +146,7 @@ XPCJSRuntime::CustomContextCallback(JSContext* cx, unsigned operation)
     return true;
 }
 
-class AsyncFreeSnowWhite : public nsRunnable
+class AsyncFreeSnowWhite : public Runnable
 {
 public:
   NS_IMETHOD Run()
@@ -2417,18 +2417,6 @@ ReportScriptSourceStats(const ScriptSourceInfo& scriptSourceInfo,
                         nsIHandleReportCallback* cb, nsISupports* closure,
                         size_t& rtTotal)
 {
-    if (scriptSourceInfo.compressed > 0) {
-        RREPORT_BYTES(path + NS_LITERAL_CSTRING("compressed"),
-            KIND_HEAP, scriptSourceInfo.compressed,
-            "Compressed JavaScript source code.");
-    }
-
-    if (scriptSourceInfo.uncompressed > 0) {
-        RREPORT_BYTES(path + NS_LITERAL_CSTRING("uncompressed"),
-            KIND_HEAP, scriptSourceInfo.uncompressed,
-            "Uncompressed JavaScript source code.");
-    }
-
     if (scriptSourceInfo.misc > 0) {
         RREPORT_BYTES(path + NS_LITERAL_CSTRING("misc"),
             KIND_HEAP, scriptSourceInfo.misc,
@@ -2499,13 +2487,13 @@ ReportJSRuntimeExplicitTreeStats(const JS::RuntimeStats& rtStats,
         KIND_HEAP, rtStats.runtime.mathCache,
         "The math cache.");
 
+    RREPORT_BYTES(rtPath + NS_LITERAL_CSTRING("runtime/shared-immutable-strings-cache"),
+        KIND_HEAP, rtStats.runtime.sharedImmutableStringsCache,
+        "Immutable strings (such as JS scripts' source text) shared across all JSRuntimes.");
+
     RREPORT_BYTES(rtPath + NS_LITERAL_CSTRING("runtime/uncompressed-source-cache"),
         KIND_HEAP, rtStats.runtime.uncompressedSourceCache,
         "The uncompressed source code cache.");
-
-    RREPORT_BYTES(rtPath + NS_LITERAL_CSTRING("runtime/compressed-source-sets"),
-        KIND_HEAP, rtStats.runtime.compressedSourceSet,
-        "The table indexing compressed source code in the runtime.");
 
     RREPORT_BYTES(rtPath + NS_LITERAL_CSTRING("runtime/script-data"),
         KIND_HEAP, rtStats.runtime.scriptData,
@@ -3694,12 +3682,7 @@ XPCJSRuntime::BeforeProcessTask(bool aMightBlock)
             // "while (condition) thread.processNextEvent(true)", in case the
             // condition is triggered here by a Promise "then" callback.
 
-            class DummyRunnable : public nsRunnable {
-            public:
-                NS_IMETHOD Run() { return NS_OK; }
-            };
-
-            NS_DispatchToMainThread(new DummyRunnable());
+            NS_DispatchToMainThread(new Runnable());
         }
     }
 

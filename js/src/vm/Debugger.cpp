@@ -398,6 +398,14 @@ Debugger::slowPathCheckNoExecute(JSContext* cx, HandleScript script)
     return EnterDebuggeeNoExecute::reportIfFoundInStack(cx, script);
 }
 
+static inline void
+NukeDebuggerWrapper(NativeObject *wrapper)
+{
+    // In some OOM failure cases, we need to destroy the edge to the referent,
+    // to avoid trying to trace it during untimely collections.
+    wrapper->setPrivate(nullptr);
+}
+
 
 /*** Breakpoints *********************************************************************************/
 
@@ -934,14 +942,19 @@ Debugger::wrapEnvironment(JSContext* cx, Handle<Env*> env, MutableHandleValue rv
             return false;
         envobj->setPrivateGCThing(env);
         envobj->setReservedSlot(JSSLOT_DEBUGENV_OWNER, ObjectValue(*object));
-        if (!p.add(cx, environments, env, envobj))
+
+        if (!p.add(cx, environments, env, envobj)) {
+            NukeDebuggerWrapper(envobj);
             return false;
+        }
 
         CrossCompartmentKey key(CrossCompartmentKey::DebuggerEnvironment, object, env);
         if (!object->compartment()->putWrapper(cx, key, ObjectValue(*envobj))) {
+            NukeDebuggerWrapper(envobj);
             environments.remove(env);
             return false;
         }
+
     }
     rval.setObject(*envobj);
     return true;
@@ -976,12 +989,15 @@ Debugger::wrapDebuggeeValue(JSContext* cx, MutableHandleValue vp)
             dobj->setPrivateGCThing(obj);
             dobj->setReservedSlot(JSSLOT_DEBUGOBJECT_OWNER, ObjectValue(*object));
 
-            if (!p.add(cx, objects, obj, dobj))
+            if (!p.add(cx, objects, obj, dobj)) {
+                NukeDebuggerWrapper(dobj);
                 return false;
+            }
 
             if (obj->compartment() != object->compartment()) {
                 CrossCompartmentKey key(CrossCompartmentKey::DebuggerObject, object, obj);
                 if (!object->compartment()->putWrapper(cx, key, ObjectValue(*dobj))) {
+                    NukeDebuggerWrapper(dobj);
                     objects.remove(obj);
                     ReportOutOfMemory(cx);
                     return false;
@@ -3856,7 +3872,8 @@ class MOZ_STACK_CLASS Debugger::ScriptQuery
         if (!GetProperty(cx, query, query, cx->names().global, &global))
             return false;
         if (global.isUndefined()) {
-            matchAllDebuggeeGlobals();
+            if (!matchAllDebuggeeGlobals())
+                return false;
         } else {
             GlobalObject* globalObject = debugger->unwrapDebuggeeArgument(cx, global);
             if (!globalObject)
@@ -3973,7 +3990,7 @@ class MOZ_STACK_CLASS Debugger::ScriptQuery
      * this query, and append the matching scripts to |vector|.
      */
     bool findScripts() {
-        if (!prepareQuery())
+        if (!prepareQuery() || !delazifyScripts())
             return false;
 
         JSCompartment* singletonComp = nullptr;
@@ -4099,13 +4116,6 @@ class MOZ_STACK_CLASS Debugger::ScriptQuery
     bool oom;
 
     bool addCompartment(JSCompartment* comp) {
-        {
-            // All scripts in the debuggee compartment must be visible, so
-            // delazify everything.
-            AutoCompartment ac(cx, comp);
-            if (!comp->ensureDelazifyScriptsForDebugger(cx))
-                return false;
-        }
         return compartments.put(comp);
     }
 
@@ -4147,6 +4157,18 @@ class MOZ_STACK_CLASS Debugger::ScriptQuery
                 return false;
         }
 
+        return true;
+    }
+
+    bool delazifyScripts() {
+        // All scripts in debuggee compartments must be visible, so delazify
+        // everything.
+        for (auto r = compartments.all(); !r.empty(); r.popFront()) {
+            JSCompartment* comp = r.front();
+            AutoCompartment ac(cx, comp);
+            if (!comp->ensureDelazifyScriptsForDebugger(cx))
+                return false;
+        }
         return true;
     }
 
@@ -5023,7 +5045,7 @@ class DebuggerScriptSetPrivateMatcher
     ReturnType match(Handle<WasmModuleObject*> module) { obj_->setPrivateGCThing(module); }
 };
 
-JSObject*
+NativeObject*
 Debugger::newDebuggerScript(JSContext* cx, Handle<DebuggerScriptReferent> referent)
 {
     assertSameCompartment(cx, object.get());
@@ -5053,19 +5075,23 @@ Debugger::wrapVariantReferent(JSContext* cx, Map& map, CrossCompartmentKey::Kind
 
     DependentAddPtr<Map> p(cx, map, untaggedReferent);
     if (!p) {
-        JSObject* wrapper = newVariantWrapper(cx, referent);
+        NativeObject* wrapper = newVariantWrapper(cx, referent);
         if (!wrapper)
             return nullptr;
 
-        if (!p.add(cx, map, untaggedReferent, wrapper))
+        if (!p.add(cx, map, untaggedReferent, wrapper)) {
+            NukeDebuggerWrapper(wrapper);
             return nullptr;
+        }
 
         CrossCompartmentKey key(keyKind, object, untaggedReferent);
         if (!object->compartment()->putWrapper(cx, key, ObjectValue(*wrapper))) {
+            NukeDebuggerWrapper(wrapper);
             map.remove(untaggedReferent);
             ReportOutOfMemory(cx);
             return nullptr;
         }
+
     }
 
     return p->value();
@@ -6295,7 +6321,7 @@ class SetDebuggerSourcePrivateMatcher
     ReturnType match(Handle<WasmModuleObject*> module) { obj_->setPrivateGCThing(module); }
 };
 
-JSObject*
+NativeObject*
 Debugger::newDebuggerSource(JSContext* cx, Handle<DebuggerSourceReferent> referent)
 {
     assertSameCompartment(cx, object.get());
@@ -7716,7 +7742,7 @@ DebuggerObject_getName(JSContext* cx, unsigned argc, Value* vp)
         return true;
     }
 
-    JSString* name = obj->as<JSFunction>().atom();
+    JSString* name = obj->as<JSFunction>().name();
     if (!name) {
         args.rval().setUndefined();
         return true;
@@ -8065,7 +8091,7 @@ DebuggerObject_getPromiseDependentPromises(JSContext* cx, unsigned argc, Value* 
 {
     THIS_DEBUGOBJECT_OWNER_PROMISE(cx, argc, vp, "get promiseDependentPromises", args, dbg, refobj);
 
-    AutoValueVector values(cx);
+    Rooted<GCVector<Value>> values(cx, GCVector<Value>());
     {
         JSAutoCompartment ac(cx, promise);
         if (!promise->dependentPromises(cx, values))
@@ -8149,14 +8175,16 @@ DebuggerObject_getErrorMessageName(JSContext *cx, unsigned argc, Value* vp)
 
     if (report) {
         const JSErrorFormatString* efs = GetErrorMessage(nullptr, report->errorNumber);
-        RootedString str(cx, JS_NewStringCopyZ(cx, efs->name));
-        if (!cx->compartment()->wrap(cx, &str))
-            return false;
-        args.rval().setString(str);
-    } else {
-        args.rval().setUndefined();
+        if (efs) {
+            RootedString str(cx, JS_NewStringCopyZ(cx, efs->name));
+            if (!cx->compartment()->wrap(cx, &str))
+                return false;
+            args.rval().setString(str);
+            return true;
+        }
     }
 
+    args.rval().setUndefined();
     return true;
 }
 
@@ -8890,11 +8918,12 @@ IsDeclarative(Env* env)
     return env->is<DebugScopeObject>() && env->as<DebugScopeObject>().isForDeclarative();
 }
 
+template <typename T>
 static bool
-IsWith(Env* env)
+IsDebugScopeWrapper(Env* env)
 {
     return env->is<DebugScopeObject>() &&
-           env->as<DebugScopeObject>().scope().is<DynamicWithObject>();
+           env->as<DebugScopeObject>().scope().is<T>();
 }
 
 static bool
@@ -8906,7 +8935,7 @@ DebuggerEnv_getType(JSContext* cx, unsigned argc, Value* vp)
     const char* s;
     if (IsDeclarative(env))
         s = "declarative";
-    else if (IsWith(env))
+    else if (IsDebugScopeWrapper<DynamicWithObject>(env))
         s = "with";
     else
         s = "object";
@@ -8943,8 +8972,10 @@ DebuggerEnv_getObject(JSContext* cx, unsigned argc, Value* vp)
     }
 
     JSObject* obj;
-    if (IsWith(env)) {
+    if (IsDebugScopeWrapper<DynamicWithObject>(env)) {
         obj = &env->as<DebugScopeObject>().scope().as<DynamicWithObject>().object();
+    } else if (IsDebugScopeWrapper<NonSyntacticVariablesObject>(env)) {
+        obj = &env->as<DebugScopeObject>().scope().as<NonSyntacticVariablesObject>();
     } else {
         obj = env;
         MOZ_ASSERT(!obj->is<DebugScopeObject>());

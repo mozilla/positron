@@ -163,7 +163,7 @@ DataStorage::Init(bool& aDataWillPersist)
   return NS_OK;
 }
 
-class DataStorage::Reader : public nsRunnable
+class DataStorage::Reader : public Runnable
 {
 public:
   explicit Reader(DataStorage* aDataStorage)
@@ -193,9 +193,9 @@ DataStorage::Reader::~Reader()
 
   // This is for tests.
   nsCOMPtr<nsIRunnable> job =
-    NS_NewRunnableMethodWithArg<const char*>(mDataStorage,
-                                             &DataStorage::NotifyObservers,
-                                             "data-storage-ready");
+    NewRunnableMethod<const char*>(mDataStorage,
+                                   &DataStorage::NotifyObservers,
+                                   "data-storage-ready");
   nsresult rv = NS_DispatchToMainThread(job, NS_DISPATCH_NORMAL);
   Unused << NS_WARN_IF(NS_FAILED(rv));
 }
@@ -629,7 +629,7 @@ DataStorage::Remove(const nsCString& aKey, DataStorageType aType)
   });
 }
 
-class DataStorage::Writer : public nsRunnable
+class DataStorage::Writer : public Runnable
 {
 public:
   Writer(nsCString& aData, DataStorage* aDataStorage)
@@ -686,9 +686,9 @@ DataStorage::Writer::Run()
 
   // Observed by tests.
   nsCOMPtr<nsIRunnable> job =
-    NS_NewRunnableMethodWithArg<const char*>(mDataStorage,
-                                             &DataStorage::NotifyObservers,
-                                             "data-storage-written");
+    NewRunnableMethod<const char*>(mDataStorage,
+                                   &DataStorage::NotifyObservers,
+                                   "data-storage-written");
   rv = NS_DispatchToMainThread(job, NS_DISPATCH_NORMAL);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
@@ -777,7 +777,7 @@ DataStorage::AsyncSetTimer(const MutexAutoLock& /*aProofOfLock*/)
 
   mPendingWrite = true;
   nsCOMPtr<nsIRunnable> job =
-    NS_NewRunnableMethod(this, &DataStorage::SetTimer);
+    NewRunnableMethod(this, &DataStorage::SetTimer);
   nsresult rv = mWorkerThread->Dispatch(job, NS_DISPATCH_NORMAL);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
@@ -827,7 +827,7 @@ DataStorage::DispatchShutdownTimer(const MutexAutoLock& /*aProofOfLock*/)
   MOZ_ASSERT(XRE_IsParentProcess());
 
   nsCOMPtr<nsIRunnable> job =
-    NS_NewRunnableMethod(this, &DataStorage::ShutdownTimer);
+    NewRunnableMethod(this, &DataStorage::ShutdownTimer);
   nsresult rv = mWorkerThread->Dispatch(job, NS_DISPATCH_NORMAL);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;

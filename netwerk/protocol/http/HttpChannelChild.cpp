@@ -451,7 +451,7 @@ HttpChannelChild::OnStartRequest(const nsresult& channelStatus,
   mCacheKey = container;
 
   // replace our request headers with what actually got sent in the parent
-  mRequestHead.Headers() = requestHeaders;
+  mRequestHead.SetHeaders(requestHeaders);
 
   // Note: this is where we would notify "http-on-examine-response" observers.
   // We have deliberately disabled this for child processes (see bug 806753)
@@ -1500,7 +1500,7 @@ HttpChannelChild::CompleteRedirectSetup(nsIStreamListener *listener,
 // HttpChannelChild::nsIAsyncVerifyRedirectCallback
 //-----------------------------------------------------------------------------
 
-class OverrideRunnable : public nsRunnable {
+class OverrideRunnable : public Runnable {
   RefPtr<HttpChannelChild> mChannel;
   RefPtr<HttpChannelChild> mNewChannel;
   RefPtr<InterceptStreamListener> mListener;
@@ -1741,9 +1741,9 @@ HttpChannelChild::AsyncOpen(nsIStreamListener *listener, nsISupports *aContext)
   if (NS_FAILED(rv))
     return rv;
 
-  const char *cookieHeader = mRequestHead.PeekHeader(nsHttp::Cookie);
-  if (cookieHeader) {
-    mUserSetCookieHeader = cookieHeader;
+  nsAutoCString cookie;
+  if (NS_SUCCEEDED(mRequestHead.GetHeader(nsHttp::Cookie, cookie))) {
+    mUserSetCookieHeader = cookie;
   }
 
   AddCookiesToRequest();
@@ -1778,9 +1778,6 @@ HttpChannelChild::AsyncOpen(nsIStreamListener *listener, nsISupports *aContext)
 
   // Set user agent override from docshell
   HttpBaseChannel::SetDocshellUserAgentOverride();
-
-  // Set user agent override from loadgroup
-  HttpBaseChannel::SetLoadGroupUserAgentOverride();
 
   MOZ_ASSERT_IF(mPostRedirectChannelShouldUpgrade,
                 mPostRedirectChannelShouldIntercept);
@@ -1857,7 +1854,7 @@ HttpChannelChild::ContinueAsyncOpen()
   SerializeURI(mAPIRedirectToURI, openArgs.apiRedirectTo());
   openArgs.loadFlags() = mLoadFlags;
   openArgs.requestHeaders() = mClientSetRequestHeaders;
-  openArgs.requestMethod() = mRequestHead.Method();
+  mRequestHead.Method(openArgs.requestMethod());
 
   nsTArray<mozilla::ipc::FileDescriptor> fds;
   SerializeInputStream(mUploadStream, openArgs.uploadStream(), fds);
@@ -1947,10 +1944,10 @@ HttpChannelChild::ContinueAsyncOpen()
   nsresult rv = mozilla::ipc::LoadInfoToLoadInfoArgs(mLoadInfo, &openArgs.loadInfo());
   NS_ENSURE_SUCCESS(rv, rv);
 
-  EnsureSchedulingContextID();
-  char scid[NSID_LENGTH];
-  mSchedulingContextID.ToProvidedString(scid);
-  openArgs.schedulingContextID().AssignASCII(scid);
+  EnsureRequestContextID();
+  char rcid[NSID_LENGTH];
+  mRequestContextID.ToProvidedString(rcid);
+  openArgs.requestContextID().AssignASCII(rcid);
 
   // The socket transport in the chrome process now holds a logical ref to us
   // until OnStopRequest, or we do a redirect, or we hit an IPDL error.

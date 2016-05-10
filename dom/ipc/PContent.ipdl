@@ -289,14 +289,6 @@ struct DataStorageItem {
   DataStorageType type;
 };
 
-struct DataStoreSetting {
-  nsString name;
-  nsString originURL;
-  nsString manifestURL;
-  bool readOnly;
-  bool enabled;
-};
-
 // Note: Any changes to this structure should also be changed in
 // FileSystemUpdate below.
 struct VolumeInfo {
@@ -497,9 +489,6 @@ child:
      * BidiKeyboard hosted by the parent
      */
     async BidiKeyboardNotify(bool isLangRTL);
-
-    async DataStoreNotify(uint32_t aAppId, nsString aName,
-                          nsString aManifestURL);
 
     /**
      * Dump this process's GC and CC logs to the provided files.
@@ -953,9 +942,6 @@ parent:
 
     async AudioChannelChangeDefVolChannel(int32_t aChannel, bool aHidden);
 
-    sync DataStoreGetStores(nsString aName, nsString aOwner, Principal aPrincipal)
-        returns (DataStoreSetting[] dataStores);
-
     async FilePathUpdateNotify(nsString aType,
                                nsString aStorageName,
                                nsString aFilepath,
@@ -1151,7 +1137,6 @@ parent:
                       bool aCalledFromJS,
                       bool aPositionSpecified,
                       bool aSizeSpecified,
-                      nsCString aURI,
                       nsString aName,
                       nsCString aFeatures,
                       nsCString aBaseURI,
@@ -1188,6 +1173,27 @@ parent:
      * The result can then be stored in permanent storage.
      */
     async NotifyBenchmarkResult(nsString aCodecName, uint32_t aDecodeFPS);
+
+    /**
+     * Notify `push-message` observers without data in the parent.
+     */
+    async NotifyPushObservers(nsCString scope, nsString messageId);
+
+    /**
+     * Notify `push-message` observers with data in the parent.
+     */
+    async NotifyPushObserversWithData(nsCString scope, nsString messageId,
+                                      uint8_t[] data);
+
+    /**
+     * Notify `push-subscription-change` observers in the parent.
+     */
+    async NotifyPushSubscriptionChangeObservers(nsCString scope);
+
+    /**
+     * Notify `push-subscription-lost` observers in the parent.
+     */
+    async NotifyPushSubscriptionLostObservers(nsCString scope, uint16_t reason);
 
 both:
      async AsyncMessage(nsString aMessage, CpowEntry[] aCpows,

@@ -358,7 +358,8 @@ gfxMemorySharedReadLock::gfxMemorySharedReadLock()
 
 gfxMemorySharedReadLock::~gfxMemorySharedReadLock()
 {
-  MOZ_ASSERT(mReadCount == 0);
+  // One read count that is added in constructor.
+  MOZ_ASSERT(mReadCount == 1);
   MOZ_COUNT_DTOR(gfxMemorySharedReadLock);
 }
 
@@ -405,6 +406,12 @@ gfxShmSharedReadLock::gfxShmSharedReadLock(ClientIPCAllocator* aAllocator)
 
 gfxShmSharedReadLock::~gfxShmSharedReadLock()
 {
+  auto fwd = mAllocator->AsLayerForwarder();
+  if (fwd) {
+    // Release one read count that is added in constructor.
+    // The count is kept for calling GetReadCount() by TextureClientPool.
+    ReadUnlock();
+  }
   MOZ_COUNT_DTOR(gfxShmSharedReadLock);
 }
 
@@ -506,7 +513,7 @@ TileClient::PrivateProtector::Set(TileClient * const aContainer, TextureClient* 
 
 // Placeholder
 TileClient::TileClient()
-  : mCompositableClient(nullptr)
+  : mCompositableClient(nullptr), mWasPlaceholder(false)
 {
 }
 
@@ -527,6 +534,7 @@ TileClient::TileClient(const TileClient& o)
   mBackLock = o.mBackLock;
   mFrontLock = o.mFrontLock;
   mCompositableClient = o.mCompositableClient;
+  mWasPlaceholder = o.mWasPlaceholder;
   mUpdateRect = o.mUpdateRect;
 #ifdef GFX_TILEDLAYER_DEBUG_OVERLAY
   mLastUpdate = o.mLastUpdate;
@@ -548,6 +556,7 @@ TileClient::operator=(const TileClient& o)
   mBackLock = o.mBackLock;
   mFrontLock = o.mFrontLock;
   mCompositableClient = o.mCompositableClient;
+  mWasPlaceholder = o.mWasPlaceholder;
   mUpdateRect = o.mUpdateRect;
 #ifdef GFX_TILEDLAYER_DEBUG_OVERLAY
   mLastUpdate = o.mLastUpdate;
@@ -671,12 +680,11 @@ TileClient::DiscardFrontBuffer()
       mFrontBuffer->RemoveFromCompositable(mCompositableClient);
     }
 
-    mAllocator->ReturnTextureClientDeferred(mFrontBuffer);
+    mAllocator->ReturnTextureClientDeferred(mFrontBuffer, mFrontLock);
     if (mFrontBufferOnWhite) {
       mFrontBufferOnWhite->RemoveFromCompositable(mCompositableClient);
-      mAllocator->ReturnTextureClientDeferred(mFrontBufferOnWhite);
+      mAllocator->ReturnTextureClientDeferred(mFrontBufferOnWhite, mFrontLock);
     }
-    mFrontLock->ReadUnlock();
     if (mFrontBuffer->IsLocked()) {
       mFrontBuffer->Unlock();
     }
@@ -703,12 +711,11 @@ TileClient::DiscardBackBuffer()
        mAllocator->ReportClientLost();
      }
     } else {
-      mAllocator->ReturnTextureClientDeferred(mBackBuffer);
+      mAllocator->ReturnTextureClientDeferred(mBackBuffer, mBackLock);
       if (mBackBufferOnWhite) {
-        mAllocator->ReturnTextureClientDeferred(mBackBufferOnWhite);
+        mAllocator->ReturnTextureClientDeferred(mBackBufferOnWhite, mBackLock);
       }
     }
-    mBackLock->ReadUnlock();
     if (mBackBuffer->IsLocked()) {
       mBackBuffer->Unlock();
     }
@@ -741,11 +748,6 @@ TileClient::GetBackBuffer(const nsIntRegion& aDirtyRegion,
   } else {
     if (!mBackBuffer ||
         mBackLock->GetReadCount() > 1) {
-
-      if (mBackLock) {
-        // Before we Replacing the lock by another one we need to unlock it!
-        mBackLock->ReadUnlock();
-      }
 
       if (mBackBuffer) {
         // Our current back-buffer is still locked by the compositor. This can occur
@@ -832,9 +834,12 @@ TileDescriptor
 TileClient::GetTileDescriptor()
 {
   if (IsPlaceholderTile()) {
+    mWasPlaceholder = true;
     return PlaceholderTileDescriptor();
   }
   MOZ_ASSERT(mFrontLock);
+  bool wasPlaceholder = mWasPlaceholder;
+  mWasPlaceholder = false;
   if (mFrontLock->GetType() == gfxSharedReadLock::TYPE_MEMORY) {
     // AddRef here and Release when receiving on the host side to make sure the
     // reference count doesn't go to zero before the host receives the message.
@@ -846,13 +851,15 @@ TileClient::GetTileDescriptor()
     return TexturedTileDescriptor(nullptr, mFrontBuffer->GetIPDLActor(),
                                   mFrontBufferOnWhite ? MaybeTexture(mFrontBufferOnWhite->GetIPDLActor()) : MaybeTexture(null_t()),
                                   mUpdateRect,
-                                  TileLock(uintptr_t(mFrontLock.get())));
+                                  TileLock(uintptr_t(mFrontLock.get())),
+                                  wasPlaceholder);
   } else {
     gfxShmSharedReadLock *lock = static_cast<gfxShmSharedReadLock*>(mFrontLock.get());
     return TexturedTileDescriptor(nullptr, mFrontBuffer->GetIPDLActor(),
                                   mFrontBufferOnWhite ? MaybeTexture(mFrontBufferOnWhite->GetIPDLActor()) : MaybeTexture(null_t()),
                                   mUpdateRect,
-                                  TileLock(lock->GetShmemSection()));
+                                  TileLock(lock->GetShmemSection()),
+                                  wasPlaceholder);
   }
 }
 
@@ -879,12 +886,7 @@ ClientMultiTiledLayerBuffer::GetSurfaceDescriptorTiles()
   InfallibleTArray<TileDescriptor> tiles;
 
   for (TileClient& tile : mRetainedTiles) {
-    TileDescriptor tileDesc;
-    if (tile.IsPlaceholderTile()) {
-      tileDesc = PlaceholderTileDescriptor();
-    } else {
-      tileDesc = tile.GetTileDescriptor();
-    }
+    TileDescriptor tileDesc = tile.GetTileDescriptor();
     tiles.AppendElement(tileDesc);
     // Reset the update rect
     tile.mUpdateRect = IntRect();
@@ -895,7 +897,8 @@ ClientMultiTiledLayerBuffer::GetSurfaceDescriptorTiles()
                                 mTiles.mFirst.x, mTiles.mFirst.y,
                                 mTiles.mSize.width, mTiles.mSize.height,
                                 mResolution, mFrameResolution.xScale,
-                                mFrameResolution.yScale);
+                                mFrameResolution.yScale,
+                                mWasLastPaintProgressive);
 }
 
 void
@@ -903,13 +906,15 @@ ClientMultiTiledLayerBuffer::PaintThebes(const nsIntRegion& aNewValidRegion,
                                          const nsIntRegion& aPaintRegion,
                                          const nsIntRegion& aDirtyRegion,
                                          LayerManager::DrawPaintedLayerCallback aCallback,
-                                         void* aCallbackData)
+                                         void* aCallbackData,
+                                         bool aIsProgressive)
 {
   TILING_LOG("TILING %p: PaintThebes painting region %s\n", mPaintedLayer, Stringify(aPaintRegion).c_str());
   TILING_LOG("TILING %p: PaintThebes new valid region %s\n", mPaintedLayer, Stringify(aNewValidRegion).c_str());
 
   mCallback = aCallback;
   mCallbackData = aCallbackData;
+  mWasLastPaintProgressive = aIsProgressive;
 
 #ifdef GFX_TILEDLAYER_PREF_WARNINGS
   long start = PR_IntervalNow();
@@ -1651,7 +1656,7 @@ ClientMultiTiledLayerBuffer::ProgressiveUpdate(nsIntRegion& aValidRegion,
 
     // Paint the computed region and subtract it from the invalid region.
     PaintThebes(validOrStale, regionToPaint, aInvalidRegion,
-                aCallback, aCallbackData);
+                aCallback, aCallbackData, true);
     aInvalidRegion.Sub(aInvalidRegion, regionToPaint);
   } while (repeat);
 
@@ -1691,6 +1696,7 @@ BasicTiledLayerPaintData::ResetPaintData()
 {
   mLowPrecisionPaintCount = 0;
   mPaintFinished = false;
+  mHasTransformAnimation = false;
   mCompositionBounds.SetEmpty();
   mCriticalDisplayPort = Nothing();
 }

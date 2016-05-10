@@ -126,7 +126,7 @@ SensorseventStatus(const sensors_event_t& data)
   return SENSOR_STATUS_UNRELIABLE;
 }
 
-class SensorRunnable : public nsRunnable
+class SensorRunnable : public Runnable
 {
 public:
   SensorRunnable(const sensors_event_t& data, const sensor_t* sensors, ssize_t size)
@@ -323,8 +323,8 @@ EnableSensorNotificationsInternal(SensorType aSensor)
     MOZ_ASSERT(sPollingThread);
     // sPollingThread never terminates because poll may never return
     sPollingThread->Start();
-    sPollingThread->message_loop()->PostTask(FROM_HERE,
-                                     NewRunnableFunction(PollSensors));
+    sPollingThread->message_loop()->PostTask(
+      NewRunnableFunction(PollSensors));
   }
 
   SetSensorState(aSensor, true);

@@ -85,8 +85,7 @@ MediaDecoderReader::MediaDecoderReader(AbstractMediaDecoder* aDecoder)
   }
 
   // Dispatch initialization that needs to happen on that task queue.
-  nsCOMPtr<nsIRunnable> r = NS_NewRunnableMethod(this, &MediaDecoderReader::InitializationTask);
-  mTaskQueue->Dispatch(r.forget());
+  mTaskQueue->Dispatch(NewRunnableMethod(this, &MediaDecoderReader::InitializationTask));
 }
 
 void
@@ -224,7 +223,7 @@ MediaDecoderReader::AsyncReadMetadata()
   return MetadataPromise::CreateAndResolve(metadata, __func__);
 }
 
-class ReRequestVideoWithSkipTask : public nsRunnable
+class ReRequestVideoWithSkipTask : public Runnable
 {
 public:
   ReRequestVideoWithSkipTask(MediaDecoderReader* aReader,
@@ -251,7 +250,7 @@ private:
   const int64_t mTimeThreshold;
 };
 
-class ReRequestAudioTask : public nsRunnable
+class ReRequestAudioTask : public Runnable
 {
 public:
   explicit ReRequestAudioTask(MediaDecoderReader* aReader)

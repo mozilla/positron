@@ -195,6 +195,7 @@ public:
     bool mListenerIsHandler : 1;
     bool mHandlerIsString : 1;
     bool mAllEvents : 1;
+    bool mIsChrome : 1;
 
     EventListenerFlags mFlags;
 
@@ -248,11 +249,11 @@ public:
   }
   void AddEventListener(const nsAString& aType,
                         dom::EventListener* aListener,
-                        bool aUseCapture,
+                        const dom::AddEventListenerOptionsOrBoolean& aOptions,
                         bool aWantsUntrusted)
   {
     EventListenerHolder holder(aListener);
-    AddEventListener(aType, holder, aUseCapture, aWantsUntrusted);
+    AddEventListener(aType, holder, aOptions, aWantsUntrusted);
   }
   void RemoveEventListener(const nsAString& aType,
                            nsIDOMEventListener* aListener,
@@ -263,10 +264,10 @@ public:
   }
   void RemoveEventListener(const nsAString& aType,
                            dom::EventListener* aListener,
-                           bool aUseCapture)
+                           const dom::EventListenerOptionsOrBoolean& aOptions)
   {
     EventListenerHolder holder(aListener);
-    RemoveEventListener(aType, holder, aUseCapture);
+    RemoveEventListener(aType, holder, aOptions);
   }
 
   void AddListenerForAllEvents(nsIDOMEventListener* aListener,
@@ -555,8 +556,15 @@ protected:
 
   void AddEventListener(const nsAString& aType,
                         const EventListenerHolder& aListener,
+                        const dom::AddEventListenerOptionsOrBoolean& aOptions,
+                        bool aWantsUntrusted);
+  void AddEventListener(const nsAString& aType,
+                        const EventListenerHolder& aListener,
                         bool aUseCapture,
                         bool aWantsUntrusted);
+  void RemoveEventListener(const nsAString& aType,
+                           const EventListenerHolder& aListener,
+                           const dom::EventListenerOptionsOrBoolean& aOptions);
   void RemoveEventListener(const nsAString& aType,
                            const EventListenerHolder& aListener,
                            bool aUseCapture);

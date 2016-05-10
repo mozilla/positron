@@ -10,7 +10,7 @@
 #include "nsError.h"
 #include "nsID.h"
 #include "nsIPrincipal.h"
-#include "StreamBuffer.h"
+#include "StreamTracks.h"
 #include "MediaTrackConstraints.h"
 #include "mozilla/CORSMode.h"
 #include "PrincipalChangeObserver.h"
@@ -65,6 +65,13 @@ public:
   {
     MOZ_COUNT_CTOR(MediaStreamTrackSource);
   }
+
+  /**
+   * Use to clean up any resources that have to be cleaned before the
+   * destructor is called. It is often too late in the destructor because
+   * of garbage collection having removed the members already.
+   */
+  virtual void Destroy() {}
 
   /**
    * Gets the source's MediaSourceEnum for usage by PeerConnections.

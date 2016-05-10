@@ -4813,7 +4813,7 @@ nsRuleNode::ComputeTextResetData(void* aStartStruct,
       bool isForeground;
       parentText->GetDecorationColor(decorationColor, isForeground);
       if (isForeground) {
-        text->SetDecorationColor(parentContext->GetTextFillColor());
+        text->SetDecorationColor(parentContext->StyleColor()->mColor);
       } else {
         text->SetDecorationColor(decorationColor);
       }
@@ -5316,6 +5316,7 @@ nsRuleNode::ComputeDisplayData(void* aStartStruct,
     StyleTransition *transition = &display->mTransitions[i];
 
     if (i >= delay.num) {
+      MOZ_ASSERT(delay.num, "delay.num must be greater than 0");
       transition->SetDelay(display->mTransitions[i % delay.num].GetDelay());
     } else if (delay.unit == eCSSUnit_Inherit) {
       // FIXME (Bug 522599) (for all transition properties): write a test that
@@ -5344,6 +5345,7 @@ nsRuleNode::ComputeDisplayData(void* aStartStruct,
     }
 
     if (i >= duration.num) {
+      MOZ_ASSERT(duration.num, "duration.num must be greater than 0");
       transition->SetDuration(
         display->mTransitions[i % duration.num].GetDuration());
     } else if (duration.unit == eCSSUnit_Inherit) {
@@ -5370,6 +5372,7 @@ nsRuleNode::ComputeDisplayData(void* aStartStruct,
     }
 
     if (i >= property.num) {
+      MOZ_ASSERT(property.num, "property.num must be greater than 0");
       transition->CopyPropertyFrom(display->mTransitions[i % property.num]);
     } else if (property.unit == eCSSUnit_Inherit) {
       MOZ_ASSERT(i < parentDisplay->mTransitionPropertyCount,
@@ -5405,6 +5408,8 @@ nsRuleNode::ComputeDisplayData(void* aStartStruct,
     }
 
     if (i >= timingFunction.num) {
+      MOZ_ASSERT(timingFunction.num,
+        "timingFunction.num must be greater than 0");
       transition->SetTimingFunction(
         display->mTransitions[i % timingFunction.num].GetTimingFunction());
     } else if (timingFunction.unit == eCSSUnit_Inherit) {
@@ -5473,6 +5478,7 @@ nsRuleNode::ComputeDisplayData(void* aStartStruct,
     StyleAnimation *animation = &display->mAnimations[i];
 
     if (i >= animDelay.num) {
+      MOZ_ASSERT(animDelay.num, "animDelay.num must be greater than 0");
       animation->SetDelay(display->mAnimations[i % animDelay.num].GetDelay());
     } else if (animDelay.unit == eCSSUnit_Inherit) {
       // FIXME (Bug 522599) (for all animation properties): write a test that
@@ -5501,6 +5507,7 @@ nsRuleNode::ComputeDisplayData(void* aStartStruct,
     }
 
     if (i >= animDuration.num) {
+      MOZ_ASSERT(animDuration.num, "animDuration.num must be greater than 0");
       animation->SetDuration(
         display->mAnimations[i % animDuration.num].GetDuration());
     } else if (animDuration.unit == eCSSUnit_Inherit) {
@@ -5527,6 +5534,7 @@ nsRuleNode::ComputeDisplayData(void* aStartStruct,
     }
 
     if (i >= animName.num) {
+      MOZ_ASSERT(animName.num, "animName.num must be greater than 0");
       animation->SetName(display->mAnimations[i % animName.num].GetName());
     } else if (animName.unit == eCSSUnit_Inherit) {
       MOZ_ASSERT(i < parentDisplay->mAnimationNameCount,
@@ -5555,6 +5563,8 @@ nsRuleNode::ComputeDisplayData(void* aStartStruct,
     }
 
     if (i >= animTimingFunction.num) {
+      MOZ_ASSERT(animTimingFunction.num,
+        "animTimingFunction.num must be greater than 0");
       animation->SetTimingFunction(
         display->mAnimations[i % animTimingFunction.num].GetTimingFunction());
     } else if (animTimingFunction.unit == eCSSUnit_Inherit) {
@@ -5574,6 +5584,8 @@ nsRuleNode::ComputeDisplayData(void* aStartStruct,
     }
 
     if (i >= animDirection.num) {
+      MOZ_ASSERT(animDirection.num,
+        "animDirection.num must be greater than 0");
       animation->SetDirection(display->mAnimations[i % animDirection.num].GetDirection());
     } else if (animDirection.unit == eCSSUnit_Inherit) {
       MOZ_ASSERT(i < parentDisplay->mAnimationDirectionCount,
@@ -5593,6 +5605,7 @@ nsRuleNode::ComputeDisplayData(void* aStartStruct,
     }
 
     if (i >= animFillMode.num) {
+      MOZ_ASSERT(animFillMode.num, "animFillMode.num must be greater than 0");
       animation->SetFillMode(display->mAnimations[i % animFillMode.num].GetFillMode());
     } else if (animFillMode.unit == eCSSUnit_Inherit) {
       MOZ_ASSERT(i < parentDisplay->mAnimationFillModeCount,
@@ -5612,6 +5625,8 @@ nsRuleNode::ComputeDisplayData(void* aStartStruct,
     }
 
     if (i >= animPlayState.num) {
+      MOZ_ASSERT(animPlayState.num,
+        "animPlayState.num must be greater than 0");
       animation->SetPlayState(display->mAnimations[i % animPlayState.num].GetPlayState());
     } else if (animPlayState.unit == eCSSUnit_Inherit) {
       MOZ_ASSERT(i < parentDisplay->mAnimationPlayStateCount,
@@ -5630,6 +5645,8 @@ nsRuleNode::ComputeDisplayData(void* aStartStruct,
     }
 
     if (i >= animIterationCount.num) {
+      MOZ_ASSERT(animIterationCount.num,
+        "animIterationCount.num must be greater than 0");
       animation->SetIterationCount(display->mAnimations[i % animIterationCount.num].GetIterationCount());
     } else if (animIterationCount.unit == eCSSUnit_Inherit) {
       MOZ_ASSERT(i < parentDisplay->mAnimationIterationCountCount,
@@ -6627,6 +6644,9 @@ ComputePositionValue(nsStyleContext* aStyleContext,
                "unexpected unit for CSS <position> value");
 
   RefPtr<nsCSSValue::Array> positionArray = aValue.GetArrayValue();
+  NS_ASSERTION(positionArray->Count() == 4,
+               "unexpected number of values in CSS <position> value");
+
   const nsCSSValue &xEdge   = positionArray->Item(0);
   const nsCSSValue &xOffset = positionArray->Item(1);
   const nsCSSValue &yEdge   = positionArray->Item(2);
@@ -6649,19 +6669,33 @@ ComputePositionValue(nsStyleContext* aStyleContext,
                        aConditions);
 }
 
-template <>
-struct BackgroundItemComputer<nsCSSValueList, nsStyleImageLayers::Position>
+/* Helper function to convert the -x or -y part of a CSS <position> specified
+ * value into its computed-style form. */
+static void
+ComputePositionCoordValue(nsStyleContext* aStyleContext,
+                          const nsCSSValue& aValue,
+                          nsStyleImageLayers::Position::PositionCoord& aComputedValue,
+                          RuleNodeCacheConditions& aConditions)
 {
-  static void ComputeValue(nsStyleContext* aStyleContext,
-                           const nsCSSValueList* aSpecifiedValue,
-                           nsStyleImageLayers::Position& aComputedValue,
-                           RuleNodeCacheConditions& aConditions)
-  {
-    ComputePositionValue(aStyleContext, aSpecifiedValue->mValue,
-                         aComputedValue, aConditions);
-  }
-};
+  NS_ASSERTION(aValue.GetUnit() == eCSSUnit_Array,
+               "unexpected unit for position coord value");
 
+  RefPtr<nsCSSValue::Array> positionArray = aValue.GetArrayValue();
+  NS_ASSERTION(positionArray->Count() == 2,
+               "unexpected number of values, expecting one edge and one offset");
+
+  const nsCSSValue &edge   = positionArray->Item(0);
+  const nsCSSValue &offset = positionArray->Item(1);
+
+  NS_ASSERTION((eCSSUnit_Enumerated == edge.GetUnit() ||
+                eCSSUnit_Null       == edge.GetUnit()) &&
+               eCSSUnit_Enumerated != offset.GetUnit(),
+               "Invalid background position");
+
+  ComputePositionCoord(aStyleContext, edge, offset,
+                       &aComputedValue,
+                       aConditions);
+}
 
 struct BackgroundSizeAxis {
   nsCSSValue nsCSSValuePairList::* specified;
@@ -6827,6 +6861,76 @@ SetImageLayerList(nsStyleContext* aStyleContext,
     aMaxItemCount = aItemCount;
 }
 
+// The same as SetImageLayerList, but for values stored in
+// layer.mPosition.*aResultLocation instead of layer.*aResultLocation.
+// This code is duplicated because it would be annoying to make
+// SetImageLayerList generic enough to handle both cases.
+static void
+SetImageLayerPositionCoordList(
+                  nsStyleContext* aStyleContext,
+                  const nsCSSValue& aValue,
+                  nsStyleAutoArray<nsStyleImageLayers::Layer>& aLayers,
+                  const nsStyleAutoArray<nsStyleImageLayers::Layer>& aParentLayers,
+                  nsStyleImageLayers::Position::PositionCoord
+                      nsStyleImageLayers::Position::* aResultLocation,
+                  nsStyleImageLayers::Position::PositionCoord aInitialValue,
+                  uint32_t aParentItemCount,
+                  uint32_t& aItemCount,
+                  uint32_t& aMaxItemCount,
+                  bool& aRebuild,
+                  RuleNodeCacheConditions& aConditions)
+{
+  switch (aValue.GetUnit()) {
+  case eCSSUnit_Null:
+    break;
+
+  case eCSSUnit_Inherit:
+    aRebuild = true;
+    aConditions.SetUncacheable();
+    aLayers.EnsureLengthAtLeast(aParentItemCount);
+    aItemCount = aParentItemCount;
+    for (uint32_t i = 0; i < aParentItemCount; ++i) {
+      aLayers[i].mPosition.*aResultLocation = aParentLayers[i].mPosition.*aResultLocation;
+    }
+    break;
+
+  case eCSSUnit_Initial:
+  case eCSSUnit_Unset:
+    aRebuild = true;
+    aItemCount = 1;
+    aLayers[0].mPosition.*aResultLocation = aInitialValue;
+    break;
+
+  case eCSSUnit_List:
+  case eCSSUnit_ListDep: {
+    aRebuild = true;
+    aItemCount = 0;
+    const nsCSSValueList* item = aValue.GetListValue();
+    do {
+      NS_ASSERTION(item->mValue.GetUnit() != eCSSUnit_Null &&
+                   item->mValue.GetUnit() != eCSSUnit_Inherit &&
+                   item->mValue.GetUnit() != eCSSUnit_Initial &&
+                   item->mValue.GetUnit() != eCSSUnit_Unset,
+                   "unexpected unit");
+      ++aItemCount;
+      aLayers.EnsureLengthAtLeast(aItemCount);
+
+      ComputePositionCoordValue(aStyleContext, item->mValue,
+                                aLayers[aItemCount-1].mPosition.*aResultLocation,
+                                aConditions);
+      item = item->mNext;
+    } while (item);
+    break;
+  }
+
+  default:
+    MOZ_ASSERT(false, "unexpected unit");
+  }
+
+  if (aItemCount > aMaxItemCount)
+    aMaxItemCount = aItemCount;
+}
+
 template <class ComputedValueItem>
 static void
 SetImageLayerPairList(nsStyleContext* aStyleContext,
@@ -6908,6 +7012,24 @@ FillBackgroundList(
        ++sourceLayer, ++destLayer) {
     aLayers[destLayer].*aResultLocation =
       aLayers[sourceLayer].*aResultLocation;
+  }
+}
+
+// The same as FillBackgroundList, but for values stored in
+// layer.mPosition.*aResultLocation instead of layer.*aResultLocation.
+static void
+FillBackgroundPositionCoordList(
+    nsStyleAutoArray<nsStyleImageLayers::Layer>& aLayers,
+    nsStyleImageLayers::Position::PositionCoord
+        nsStyleImageLayers::Position::* aResultLocation,
+    uint32_t aItemCount, uint32_t aFillCount)
+{
+  NS_PRECONDITION(aFillCount <= aLayers.Length(), "unexpected array length");
+  for (uint32_t sourceLayer = 0, destLayer = aItemCount;
+       destLayer < aFillCount;
+       ++sourceLayer, ++destLayer) {
+    aLayers[destLayer].mPosition.*aResultLocation =
+      aLayers[sourceLayer].mPosition.*aResultLocation;
   }
 }
 
@@ -6995,15 +7117,27 @@ nsRuleNode::ComputeBackgroundData(void* aStartStruct,
                     bg->mImage.mOriginCount, maxItemCount, rebuild,
                     conditions);
 
-  // background-position: enum, length, percent (flags), inherit [pair list]
-  nsStyleImageLayers::Position initialPosition;
-  initialPosition.SetInitialPercentValues(0.0f);
-  SetImageLayerList(aContext, *aRuleData->ValueForBackgroundPosition(),
+  // background-position-x/y: enum, length, percent (flags), inherit [list]
+  nsStyleImageLayers::Position::PositionCoord initialPositionCoord;
+  initialPositionCoord.mPercent = 0.0f;
+  initialPositionCoord.mLength = 0;
+  initialPositionCoord.mHasPercent = true;
+
+  SetImageLayerPositionCoordList(
+                    aContext, *aRuleData->ValueForBackgroundPositionX(),
                     bg->mImage.mLayers,
                     parentBG->mImage.mLayers,
-                    &nsStyleImageLayers::Layer::mPosition,
-                    initialPosition, parentBG->mImage.mPositionCount,
-                    bg->mImage.mPositionCount, maxItemCount, rebuild,
+                    &nsStyleImageLayers::Position::mXPosition,
+                    initialPositionCoord, parentBG->mImage.mPositionXCount,
+                    bg->mImage.mPositionXCount, maxItemCount, rebuild,
+                    conditions);
+  SetImageLayerPositionCoordList(
+                    aContext, *aRuleData->ValueForBackgroundPositionY(),
+                    bg->mImage.mLayers,
+                    parentBG->mImage.mLayers,
+                    &nsStyleImageLayers::Position::mYPosition,
+                    initialPositionCoord, parentBG->mImage.mPositionYCount,
+                    bg->mImage.mPositionYCount, maxItemCount, rebuild,
                     conditions);
 
   // background-size: enum, length, auto, inherit, initial [pair list]
@@ -7041,9 +7175,12 @@ nsRuleNode::ComputeBackgroundData(void* aStartStruct,
     FillBackgroundList(bg->mImage.mLayers,
                        &nsStyleImageLayers::Layer::mOrigin,
                        bg->mImage.mOriginCount, fillCount);
-    FillBackgroundList(bg->mImage.mLayers,
-                       &nsStyleImageLayers::Layer::mPosition,
-                       bg->mImage.mPositionCount, fillCount);
+    FillBackgroundPositionCoordList(bg->mImage.mLayers,
+                                    &nsStyleImageLayers::Position::mXPosition,
+                                    bg->mImage.mPositionXCount, fillCount);
+    FillBackgroundPositionCoordList(bg->mImage.mLayers,
+                                    &nsStyleImageLayers::Position::mYPosition,
+                                    bg->mImage.mPositionYCount, fillCount);
     FillBackgroundList(bg->mImage.mLayers,
                        &nsStyleImageLayers::Layer::mSize,
                        bg->mImage.mSizeCount, fillCount);
@@ -7080,7 +7217,6 @@ nsRuleNode::ComputeMarginData(void* aStartStruct,
     }
   }
 
-  margin->RecalcData();
   COMPUTE_END_RESET(Margin, margin)
 }
 
@@ -7502,7 +7638,6 @@ nsRuleNode::ComputePaddingData(void* aStartStruct,
     }
   }
 
-  padding->RecalcData();
   COMPUTE_END_RESET(Padding, padding)
 }
 
@@ -7674,9 +7809,7 @@ nsRuleNode::ComputeListData(void* aStartStruct,
     case eCSSUnit_Unset:
     case eCSSUnit_Inherit: {
       conditions.SetUncacheable();
-      nsString type;
-      parentList->GetListStyleType(type);
-      list->SetListStyleType(type, parentList->GetCounterStyle());
+      list->SetCounterStyle(parentList->GetCounterStyle());
       break;
     }
     case eCSSUnit_Initial:
@@ -7691,8 +7824,7 @@ nsRuleNode::ComputeListData(void* aStartStruct,
     case eCSSUnit_String: {
       nsString str;
       typeValue->GetStringValue(str);
-      list->SetListStyleType(NS_LITERAL_STRING(""),
-                             new AnonymousCounterStyle(str));
+      list->SetCounterStyle(new AnonymousCounterStyle(str));
       break;
     }
     case eCSSUnit_Enumerated: {
@@ -7722,9 +7854,7 @@ nsRuleNode::ComputeListData(void* aStartStruct,
       break;
     }
     case eCSSUnit_Symbols:
-      list->SetListStyleType(
-        NS_LITERAL_STRING(""),
-        new AnonymousCounterStyle(typeValue->GetArrayValue()));
+      list->SetCounterStyle(new AnonymousCounterStyle(typeValue->GetArrayValue()));
       break;
     case eCSSUnit_Null:
       break;
@@ -9792,15 +9922,27 @@ nsRuleNode::ComputeSVGResetData(void* aStartStruct,
                     svgReset->mMask.mOriginCount, maxItemCount, rebuild,
                     conditions);
 
-  // mask-position: enum, length, percent (flags), inherit [pair list]
-  nsStyleImageLayers::Position initialPosition;
-  initialPosition.SetInitialPercentValues(0.0f);
-  SetImageLayerList(aContext, *aRuleData->ValueForMaskPosition(),
+  // mask-position-x/y: enum, length, percent (flags), inherit [list]
+  nsStyleImageLayers::Position::PositionCoord initialPositionCoord;
+  initialPositionCoord.mPercent = 0.0f;
+  initialPositionCoord.mLength = 0;
+  initialPositionCoord.mHasPercent = true;
+
+  SetImageLayerPositionCoordList(
+                    aContext, *aRuleData->ValueForMaskPositionX(),
                     svgReset->mMask.mLayers,
                     parentSVGReset->mMask.mLayers,
-                    &nsStyleImageLayers::Layer::mPosition,
-                    initialPosition, parentSVGReset->mMask.mPositionCount,
-                    svgReset->mMask.mPositionCount, maxItemCount, rebuild,
+                    &nsStyleImageLayers::Position::mXPosition,
+                    initialPositionCoord, parentSVGReset->mMask.mPositionXCount,
+                    svgReset->mMask.mPositionXCount, maxItemCount, rebuild,
+                    conditions);
+  SetImageLayerPositionCoordList(
+                    aContext, *aRuleData->ValueForMaskPositionY(),
+                    svgReset->mMask.mLayers,
+                    parentSVGReset->mMask.mLayers,
+                    &nsStyleImageLayers::Position::mYPosition,
+                    initialPositionCoord, parentSVGReset->mMask.mPositionYCount,
+                    svgReset->mMask.mPositionYCount, maxItemCount, rebuild,
                     conditions);
 
   // mask-size: enum, length, auto, inherit, initial [pair list]
@@ -9854,9 +9996,12 @@ nsRuleNode::ComputeSVGResetData(void* aStartStruct,
     FillBackgroundList(svgReset->mMask.mLayers,
                        &nsStyleImageLayers::Layer::mOrigin,
                        svgReset->mMask.mOriginCount, fillCount);
-    FillBackgroundList(svgReset->mMask.mLayers,
-                       &nsStyleImageLayers::Layer::mPosition,
-                       svgReset->mMask.mPositionCount, fillCount);
+    FillBackgroundPositionCoordList(svgReset->mMask.mLayers,
+                                    &nsStyleImageLayers::Position::mXPosition,
+                                    svgReset->mMask.mPositionXCount, fillCount);
+    FillBackgroundPositionCoordList(svgReset->mMask.mLayers,
+                                    &nsStyleImageLayers::Position::mYPosition,
+                                    svgReset->mMask.mPositionYCount, fillCount);
     FillBackgroundList(svgReset->mMask.mLayers,
                        &nsStyleImageLayers::Layer::mSize,
                        svgReset->mMask.mSizeCount, fillCount);

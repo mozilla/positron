@@ -35,22 +35,6 @@ namespace mozilla {}
 /* The private JS engine namespace. */
 namespace js {}
 
-/*
- * Patterns used by SpiderMonkey to overwrite unused memory. If you are
- * accessing an object with one of these pattern, you probably have a dangling
- * pointer.
- */
-#define JS_FRESH_NURSERY_PATTERN 0x2F
-#define JS_SWEPT_NURSERY_PATTERN 0x2B
-#define JS_ALLOCATED_NURSERY_PATTERN 0x2D
-#define JS_FRESH_TENURED_PATTERN 0x4F
-#define JS_MOVED_TENURED_PATTERN 0x49
-#define JS_SWEPT_TENURED_PATTERN 0x4B
-#define JS_ALLOCATED_TENURED_PATTERN 0x4D
-#define JS_EMPTY_STOREBUFFER_PATTERN 0x1B
-#define JS_SWEPT_CODE_PATTERN 0x3B
-#define JS_SWEPT_FRAME_PATTERN 0x5B
-
 #define JS_STATIC_ASSERT(cond)           static_assert(cond, "JS_STATIC_ASSERT")
 #define JS_STATIC_ASSERT_IF(cond, expr)  MOZ_STATIC_ASSERT_IF(cond, expr, "JS_STATIC_ASSERT_IF")
 
@@ -360,7 +344,7 @@ namespace js {
  * instances of type |T|.  Return false if the calculation overflowed.
  */
 template <typename T>
-MOZ_WARN_UNUSED_RESULT inline bool
+MOZ_MUST_USE inline bool
 CalculateAllocSize(size_t numElems, size_t* bytesOut)
 {
     *bytesOut = numElems * sizeof(T);
@@ -373,7 +357,7 @@ CalculateAllocSize(size_t numElems, size_t* bytesOut)
  * false if the calculation overflowed.
  */
 template <typename T, typename Extra>
-MOZ_WARN_UNUSED_RESULT inline bool
+MOZ_MUST_USE inline bool
 CalculateAllocSizeWithExtra(size_t numExtra, size_t* bytesOut)
 {
     *bytesOut = sizeof(T) + numExtra * sizeof(Extra);

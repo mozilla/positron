@@ -15,7 +15,7 @@ const { FrameActor } = require("devtools/server/actors/frame");
 const { ObjectActor, createValueGrip, longStringGrip } = require("devtools/server/actors/object");
 const { SourceActor, getSourceURL } = require("devtools/server/actors/source");
 const { DebuggerServer } = require("devtools/server/main");
-const { ActorClass } = require("devtools/server/protocol");
+const { ActorClass } = require("devtools/shared/protocol");
 const DevToolsUtils = require("devtools/shared/DevToolsUtils");
 const { assert, dumpn, update, fetch } = DevToolsUtils;
 const promise = require("promise");
@@ -35,7 +35,6 @@ loader.lazyGetter(this, "Debugger", () => {
 loader.lazyRequireGetter(this, "CssLogic", "devtools/shared/inspector/css-logic", true);
 loader.lazyRequireGetter(this, "events", "sdk/event/core");
 loader.lazyRequireGetter(this, "mapURIToAddonID", "devtools/server/actors/utils/map-uri-to-addon-id");
-loader.lazyRequireGetter(this, "setTimeout", "sdk/timers", true);
 
 /**
  * A BreakpointActorMap is a map from locations to instances of BreakpointActor.

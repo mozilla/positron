@@ -106,6 +106,10 @@
   border: none;
 }
 
+#PanelUI-menu-button[badge-status="download-success"] > .toolbarbutton-badge-stack > .toolbarbutton-badge {
+  display: none;
+}
+
 #PanelUI-menu-button[badge-status="update-succeeded"] > .toolbarbutton-badge-stack > .toolbarbutton-badge {
   background: #74BF43 url(chrome://browser/skin/update-badge.svg) no-repeat center;
   height: 13px;
@@ -1067,8 +1071,8 @@ panelview .toolbarbutton-1,
 }
 
 panelview .toolbarbutton-1,
-.widget-overflow-list .toolbarbutton-1:not(:first-child),
-.widget-overflow-list .toolbaritem-combined-buttons:not(:first-child) {
+.widget-overflow-list > .toolbarbutton-1:not(:first-child),
+.widget-overflow-list > toolbaritem:not(:first-child) {
   margin-top: 6px;
 }
 

@@ -43,11 +43,11 @@ GMPContentParent::GMPContentParent(GMPParent* aParent)
 
 GMPContentParent::~GMPContentParent()
 {
-  XRE_GetIOMessageLoop()->PostTask(FROM_HERE,
-                                   new DeleteTask<Transport>(GetTransport()));
+  RefPtr<DeleteTask<Transport>> task = new DeleteTask<Transport>(GetTransport());
+  XRE_GetIOMessageLoop()->PostTask(task.forget());
 }
 
-class ReleaseGMPContentParent : public nsRunnable
+class ReleaseGMPContentParent : public Runnable
 {
 public:
   explicit ReleaseGMPContentParent(GMPContentParent* aToRelease)
@@ -134,8 +134,8 @@ GMPContentParent::CloseIfUnused()
         GeckoMediaPluginServiceChild::GetSingleton());
       gmp->RemoveGMPContentParent(toClose);
     }
-    NS_DispatchToCurrentThread(NS_NewRunnableMethod(toClose,
-                                                    &GMPContentParent::Close));
+    NS_DispatchToCurrentThread(NewRunnableMethod(toClose,
+                                                 &GMPContentParent::Close));
   }
 }
 

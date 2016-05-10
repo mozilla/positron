@@ -6,15 +6,11 @@
 
 "use strict";
 
-const {Ci, Cu} = require("chrome");
-const {setTimeout, clearTimeout} =
-      Cu.import("resource://gre/modules/Timer.jsm", {});
+const {Ci} = require("chrome");
 const {parseDeclarations} =
       require("devtools/client/shared/css-parsing-utils");
 const promise = require("promise");
-
-loader.lazyServiceGetter(this, "domUtils",
-  "@mozilla.org/inspector/dom-utils;1", "inIDOMUtils");
+const {getCSSLexer} = require("devtools/shared/css-lexer");
 
 const HTML_NS = "http://www.w3.org/1999/xhtml";
 
@@ -87,7 +83,7 @@ function advanceValidate(keyCode, value, insertionPoint) {
   // value.  Otherwise it's been inserted in some spot where it has a
   // valid meaning, like a comment or string.
   value = value.slice(0, insertionPoint) + ";" + value.slice(insertionPoint);
-  let lexer = domUtils.getCSSLexer(value);
+  let lexer = getCSSLexer(value);
   while (true) {
     let token = lexer.nextToken();
     if (token.endOffset > insertionPoint) {
@@ -118,13 +114,13 @@ exports.advanceValidate = advanceValidate;
 function throttle(func, wait, scope) {
   let timer = null;
 
-  return function() {
+  return function () {
     if (timer) {
       clearTimeout(timer);
     }
 
     let args = arguments;
-    timer = setTimeout(function() {
+    timer = setTimeout(function () {
       timer = null;
       func.apply(scope, args);
     }, wait);

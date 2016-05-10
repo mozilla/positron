@@ -130,7 +130,7 @@ HttpChannelParent::Init(const HttpChannelCreationArgs& aArgs)
                        a.appCacheClientID(), a.allowSpdy(), a.allowAltSvc(), a.fds(),
                        a.loadInfo(), a.synthesizedResponseHead(),
                        a.synthesizedSecurityInfoSerialization(),
-                       a.cacheKey(), a.schedulingContextID(), a.preflightArgs(),
+                       a.cacheKey(), a.requestContextID(), a.preflightArgs(),
                        a.initialRwin(), a.blockAuthPrompt(),
                        a.suspendAfterSynthesizeResponse(),
                        a.allowStaleCacheContent(), a.contentTypeHint());
@@ -258,7 +258,7 @@ HttpChannelParent::DoAsyncOpen(  const URIParams&           aURI,
                                  const OptionalHttpResponseHead& aSynthesizedResponseHead,
                                  const nsCString&           aSecurityInfoSerialization,
                                  const uint32_t&            aCacheKey,
-                                 const nsCString&           aSchedulingContextID,
+                                 const nsCString&           aRequestContextID,
                                  const OptionalCorsPreflightArgs& aCorsPreflightArgs,
                                  const uint32_t&            aInitialRwin,
                                  const bool&                aBlockAuthPrompt,
@@ -478,9 +478,9 @@ HttpChannelParent::DoAsyncOpen(  const URIParams&           aURI,
     }
   }
 
-  nsID schedulingContextID;
-  schedulingContextID.Parse(aSchedulingContextID.BeginReading());
-  mChannel->SetSchedulingContextID(schedulingContextID);
+  nsID requestContextID;
+  requestContextID.Parse(aRequestContextID.BeginReading());
+  mChannel->SetRequestContextID(requestContextID);
 
   mSuspendAfterSynthesizeResponse = aSuspendAfterSynthesizeResponse;
 
@@ -1057,6 +1057,9 @@ HttpChannelParent::OnStartRequest(nsIRequest *aRequest, nsISupports *aContext)
     }
   }
 
+  // !!! We need to lock headers and please don't forget to unlock them !!!
+  requestHead->Lock();
+  nsresult rv = NS_OK;
   if (mIPCClosed ||
       !SendOnStartRequest(channelStatus,
                           responseHead ? *responseHead : nsHttpResponseHead(),
@@ -1069,9 +1072,10 @@ HttpChannelParent::OnStartRequest(nsIRequest *aRequest, nsISupports *aContext)
                           redirectCount,
                           cacheKeyValue))
   {
-    return NS_ERROR_UNEXPECTED;
+    rv = NS_ERROR_UNEXPECTED;
   }
-  return NS_OK;
+  requestHead->Unlock();
+  return rv;
 }
 
 NS_IMETHODIMP
@@ -1433,7 +1437,7 @@ HttpChannelParent::DivertTo(nsIStreamListener *aListener)
   // Call OnStartRequest and SendDivertMessages asynchronously to avoid
   // reentering client context.
   NS_DispatchToCurrentThread(
-    NS_NewRunnableMethod(this, &HttpChannelParent::StartDiversion));
+    NewRunnableMethod(this, &HttpChannelParent::StartDiversion));
   return;
 }
 
@@ -1495,7 +1499,7 @@ HttpChannelParent::StartDiversion()
   }
 }
 
-class HTTPFailDiversionEvent : public nsRunnable
+class HTTPFailDiversionEvent : public Runnable
 {
 public:
   HTTPFailDiversionEvent(HttpChannelParent *aChannelParent,

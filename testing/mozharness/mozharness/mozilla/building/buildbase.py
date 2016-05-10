@@ -356,7 +356,6 @@ class BuildOptionParser(object):
         'source': 'builds/releng_sub_%s_configs/%s_source.py',
         'api-9': 'builds/releng_sub_%s_configs/%s_api_9.py',
         'api-11': 'builds/releng_sub_%s_configs/%s_api_11.py',
-        'api-15-frontend': 'builds/releng_sub_%s_configs/%s_api_15_frontend.py',
         'api-15-gradle-dependencies': 'builds/releng_sub_%s_configs/%s_api_15_gradle_dependencies.py',
         'api-15': 'builds/releng_sub_%s_configs/%s_api_15.py',
         'api-9-debug': 'builds/releng_sub_%s_configs/%s_api_9_debug.py',
@@ -365,6 +364,7 @@ class BuildOptionParser(object):
         'x86': 'builds/releng_sub_%s_configs/%s_x86.py',
         'api-11-partner-sample1': 'builds/releng_sub_%s_configs/%s_api_11_partner_sample1.py',
         'api-15-partner-sample1': 'builds/releng_sub_%s_configs/%s_api_15_partner_sample1.py',
+        'android-test': 'builds/releng_sub_%s_configs/%s_test.py',
         'android-checkstyle': 'builds/releng_sub_%s_configs/%s_checkstyle.py',
         'android-lint': 'builds/releng_sub_%s_configs/%s_lint.py',
     }
@@ -943,35 +943,13 @@ or run without that action (ie: --no-{action})"
                 check_test_env[env_var] = env_value % dirs
         return check_test_env
 
-    def _query_who(self):
-        """ looks for who triggered the build with a change.
-
-        This is used for things like try builds where the upload dir is
-        associated with who pushed to try. First it will look in self.config
-        and failing that, will poll buildbot_config
-        If nothing is found, it will default to returning "nobody@example.com"
-        """
-        _who = "nobody@example.com"
-        if self.config.get('who'):
-            _who = self.config['who']
-        else:
-            try:
-                if self.buildbot_config:
-                    _who = self.buildbot_config['sourcestamp']['changes'][0]['who']
-            except (KeyError, IndexError):
-                # KeyError: "sourcestamp" or "changes" or "who" not in buildbot_config
-                # IndexError: buildbot_config['sourcestamp']['changes'] is empty
-                # "who" is not available, using the default value
-                pass
-        return _who
-
     def _query_post_upload_cmd(self, multiLocale):
         c = self.config
         post_upload_cmd = ["post_upload.py"]
         buildid = self.query_buildid()
         revision = self.query_revision()
         platform = self.stage_platform
-        who = self._query_who()
+        who = self.query_who()
         if c.get('pgo_build'):
             platform += '-pgo'
 

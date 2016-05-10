@@ -2473,7 +2473,6 @@ function UpdatePageProxyState()
 
 function SetPageProxyState(aState)
 {
-  BookmarkingUI.onPageProxyStateChanged(aState);
   if (!gURLBar)
     return;
 
@@ -5440,7 +5439,7 @@ function handleLinkClick(event, href, linkNode) {
       linkNode) {
     let referrerAttrValue = Services.netUtils.parseAttributePolicyString(linkNode.
                             getAttribute("referrerpolicy"));
-    if (referrerAttrValue != Ci.nsIHttpChannel.REFERRER_POLICY_DEFAULT) {
+    if (referrerAttrValue != Ci.nsIHttpChannel.REFERRER_POLICY_UNSET) {
       referrerPolicy = referrerAttrValue;
     }
   }
@@ -6364,13 +6363,6 @@ function checkEmptyPageOrigin(browser = gBrowser.selectedBrowser,
     return false;
   }
   let contentPrincipal = browser.contentPrincipal;
-  if (gMultiProcessBrowser && browser.isRemoteBrowser &&
-      !contentPrincipal && uri.spec == "about:blank") {
-    // Need to specialcase this because of how stopping an about:blank
-    // load from chrome on e10s causes a permanently null contentPrincipal,
-    // see bug 1249362.
-    return true;
-  }
   // Not all principals have URIs...
   if (contentPrincipal.URI) {
     // A manually entered about:blank URI is slightly magical:

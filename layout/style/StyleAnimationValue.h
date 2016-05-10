@@ -285,7 +285,7 @@ public:
     eUnit_Shape,  // nsCSSValue::Array* (never null)
     eUnit_Filter, // nsCSSValueList* (may be null)
     eUnit_Transform, // nsCSSValueList* (never null)
-    eUnit_BackgroundPosition, // nsCSSValueList* (never null)
+    eUnit_BackgroundPositionCoord, // nsCSSValueList* (never null)
     eUnit_CSSValuePairList, // nsCSSValuePairList* (never null)
     eUnit_UnparsedString // nsStringBuffer* (never null)
   };
@@ -436,6 +436,7 @@ public:
   void SetColorValue(nscolor aColor);
   void SetCurrentColorValue();
   void SetUnparsedStringValue(const nsString& aString);
+  void SetCSSValueArrayValue(nsCSSValue::Array* aValue, Unit aUnit);
 
   // These setters take ownership of |aValue|, and are therefore named
   // "SetAndAdopt*".
@@ -443,7 +444,6 @@ public:
   void SetAndAdoptCSSValuePairValue(nsCSSValuePair *aValue, Unit aUnit);
   void SetAndAdoptCSSValueTripletValue(nsCSSValueTriplet *aValue, Unit aUnit);
   void SetAndAdoptCSSRectValue(nsCSSRect *aValue, Unit aUnit);
-  void SetAndAdoptCSSValueArrayValue(nsCSSValue::Array* aValue, Unit aUnit);
   void SetAndAdoptCSSValueListValue(nsCSSValueList *aValue, Unit aUnit);
   void SetAndAdoptCSSValuePairListValue(nsCSSValuePairList *aValue);
 
@@ -486,7 +486,7 @@ private:
   static bool IsCSSValueListUnit(Unit aUnit) {
     return aUnit == eUnit_Dasharray || aUnit == eUnit_Filter ||
            aUnit == eUnit_Shadow ||
-           aUnit == eUnit_BackgroundPosition;
+           aUnit == eUnit_BackgroundPositionCoord;
   }
   static bool IsCSSValueSharedListValue(Unit aUnit) {
     return aUnit == eUnit_Transform;

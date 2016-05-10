@@ -400,7 +400,7 @@ InputQueue::CancelAnimationsForNewBlock(CancelableBlockState* aBlock)
   // being processed) we only do this animation-cancellation if there are no older
   // touch blocks still in the queue.
   if (aBlock == CurrentBlock()) {
-    aBlock->GetOverscrollHandoffChain()->CancelAnimations(ExcludeOverscroll);
+    aBlock->GetOverscrollHandoffChain()->CancelAnimations(ExcludeOverscroll | ScrollSnap);
   }
 }
 
@@ -570,9 +570,10 @@ InputQueue::ScheduleMainThreadTimeout(const RefPtr<AsyncPanZoomController>& aTar
                                       CancelableBlockState* aBlock) {
   INPQ_LOG("scheduling main thread timeout for target %p\n", aTarget.get());
   aBlock->StartContentResponseTimer();
-  aTarget->PostDelayedTask(
-    NewRunnableMethod(this, &InputQueue::MainThreadTimeout, aBlock->GetBlockId()),
-    gfxPrefs::APZContentResponseTimeout());
+  aTarget->PostDelayedTask(NewRunnableMethod<uint64_t>(this,
+                                                       &InputQueue::MainThreadTimeout,
+                                                       aBlock->GetBlockId()),
+                           gfxPrefs::APZContentResponseTimeout());
 }
 
 void

@@ -966,8 +966,7 @@ nsIFrame::GetUsedMargin() const
   if (m) {
     margin = *m;
   } else {
-    DebugOnly<bool> hasMargin = StyleMargin()->GetMargin(margin);
-    NS_ASSERTION(hasMargin, "We should have a margin here! (out of memory?)");
+    StyleMargin()->GetMarginNoPercentage(margin);
   }
   return margin;
 }
@@ -1041,8 +1040,7 @@ nsIFrame::GetUsedPadding() const
   if (p) {
     padding = *p;
   } else {
-    DebugOnly<bool> hasPadding = StylePadding()->GetPadding(padding);
-    NS_ASSERTION(hasPadding, "We should have padding here! (out of memory?)");
+    StylePadding()->GetPaddingNoPercentage(padding);
   }
   return padding;
 }
@@ -1875,7 +1873,7 @@ nsFrame::DisplayBackgroundUnconditional(nsDisplayListBuilder* aBuilder,
   if (aBuilder->IsForEventDelivery() || aForceBackground ||
       !StyleBackground()->IsTransparent() || StyleDisplay()->mAppearance) {
     return nsDisplayBackgroundImage::AppendBackgroundItemsToTop(
-        aBuilder, this, aLists.BorderBackground());
+        aBuilder, this, GetRectRelativeToSelf(), aLists.BorderBackground());
   }
   return false;
 }
@@ -1889,10 +1887,6 @@ nsFrame::DisplayBorderBackgroundOutline(nsDisplayListBuilder*   aBuilder,
   // opportunity to override the visibility property and display even if
   // their parent is hidden.
   if (!IsVisibleForPainting(aBuilder)) {
-    return;
-  }
-
-  if (aBuilder->IsForGenerateGlyphPath()) {
     return;
   }
 
@@ -2412,8 +2406,8 @@ nsIFrame::BuildDisplayListForStackingContext(nsDisplayListBuilder* aBuilder,
     DisplayListClipState::AutoSaveRestore blendContainerClipState(aBuilder);
     blendContainerClipState.Clear();
     resultList.AppendNewToTop(
-      new (aBuilder) nsDisplayBlendContainer(aBuilder, this, &resultList,
-                                             containerItemScrollClip));
+      nsDisplayBlendContainer::CreateForMixBlendMode(aBuilder, this, &resultList,
+                                                     containerItemScrollClip));
   }
 
   if (!isTransformed && !useFixedPosition && !useStickyPosition) {
@@ -2511,9 +2505,11 @@ nsIFrame::BuildDisplayListForStackingContext(nsDisplayListBuilder* aBuilder,
     buildingDisplayList.SetReferenceFrameAndCurrentOffset(outerReferenceFrame,
       GetOffsetToCrossDoc(outerReferenceFrame));
 
-    nsDisplayTransform *transformItem =
-      new (aBuilder) nsDisplayTransform(aBuilder, this, &resultList, dirtyRect);
-    resultList.AppendNewToTop(transformItem);
+    if (!aBuilder->IsForGenerateGlyphPath()) {
+      nsDisplayTransform *transformItem =
+        new (aBuilder) nsDisplayTransform(aBuilder, this, &resultList, dirtyRect);
+      resultList.AppendNewToTop(transformItem);
+    }
 
     if (HasPerspective()) {
       if (!useFixedPosition && !useStickyPosition) {
@@ -2571,8 +2567,21 @@ WrapInWrapList(nsDisplayListBuilder* aBuilder,
                nsIFrame* aFrame, nsDisplayList* aList)
 {
   nsDisplayItem* item = aList->GetBottom();
-  if (!item || item->GetAbove() ||
-      (item->Frame() != aFrame && item->GetType() != nsDisplayItem::TYPE_PERSPECTIVE)) {
+  if (!item) {
+    return nullptr;
+  }
+
+  // For perspective items we want to treat the 'frame' as being the transform
+  // frame that created it. This stops the transform frame from wrapping another
+  // nsDisplayWrapList around it (with mismatching reference frames), but still
+  // makes the perspective frame create one (so we have an atomic entry for z-index
+  // sorting).
+  nsIFrame *itemFrame = item->Frame();
+  if (item->GetType() == nsDisplayItem::TYPE_PERSPECTIVE) {
+    itemFrame = static_cast<nsDisplayPerspective*>(item)->TransformFrame();
+  }
+
+  if (item->GetAbove() || itemFrame != aFrame) {
     return new (aBuilder) nsDisplayWrapList(aBuilder, aFrame, aList);
   }
   aList->RemoveBottom();
@@ -2619,7 +2628,9 @@ nsIFrame::BuildDisplayListForChild(nsDisplayListBuilder*   aBuilder,
 
   nsIAtom* childType = child->GetType();
   nsDisplayListBuilder::OutOfFlowDisplayData* savedOutOfFlowData = nullptr;
+  bool isPlaceholder = false;
   if (childType == nsGkAtoms::placeholderFrame) {
+    isPlaceholder = true;
     nsPlaceholderFrame* placeholder = static_cast<nsPlaceholderFrame*>(child);
     child = placeholder->GetOutOfFlowFrame();
     NS_ASSERTION(child, "No out of flow frame?");
@@ -2756,6 +2767,13 @@ nsIFrame::BuildDisplayListForChild(nsDisplayListBuilder*   aBuilder,
       &savedOutOfFlowData->mContainingBlockClip);
     clipState.SetScrollClipForContainingBlockDescendants(
       savedOutOfFlowData->mContainingBlockScrollClip);
+  } else if (GetStateBits() & NS_FRAME_FORCE_DISPLAY_LIST_DESCEND_INTO &&
+             isPlaceholder) {
+    // If we have nested out-of-flow frames and the outer one isn't visible
+    // then we won't have stored clip data for it. We can just clear the clip
+    // instead since we know we won't render anything, and the inner out-of-flow
+    // frame will setup the correct clip for itself.
+    clipState.Clear();
   }
 
   // Setup clipping for the parent's overflow:-moz-hidden-unscrollable,
@@ -3551,23 +3569,23 @@ NS_IMETHODIMP nsFrame::HandleDrag(nsPresContext* aPresContext,
   MOZ_ASSERT(aEvent->mClass == eMouseEventClass,
              "HandleDrag can only handle mouse event");
 
-  bool selectable;
-  IsSelectable(&selectable, nullptr);
-
-  // XXX Do we really need to exclude non-selectable content here?
-  // GetContentOffsetsFromPoint can handle it just fine, although some
-  // other stuff might not like it.
-  if (!selectable)
-    return NS_OK;
-  if (DisplaySelection(aPresContext) == nsISelectionController::SELECTION_OFF) {
-    return NS_OK;
-  }
-  nsIPresShell *presShell = aPresContext->PresShell();
-
   RefPtr<nsFrameSelection> frameselection = GetFrameSelection();
   bool mouseDown = frameselection->GetDragState();
-  if (!mouseDown)
+  if (!mouseDown) {
     return NS_OK;
+  }
+
+  nsIFrame* scrollbar =
+    nsLayoutUtils::GetClosestFrameOfType(this, nsGkAtoms::scrollbarFrame);
+  if (!scrollbar) {
+    // XXX Do we really need to exclude non-selectable content here?
+    // GetContentOffsetsFromPoint can handle it just fine, although some
+    // other stuff might not like it.
+    // NOTE: DisplaySelection() returns SELECTION_OFF for non-selectable frames.
+    if (DisplaySelection(aPresContext) == nsISelectionController::SELECTION_OFF) {
+      return NS_OK;
+    }
+  }
 
   frameselection->StopAutoScrollTimer();
 
@@ -3576,6 +3594,7 @@ NS_IMETHODIMP nsFrame::HandleDrag(nsPresContext* aPresContext,
   int32_t contentOffset;
   int32_t target;
   WidgetMouseEvent* mouseEvent = aEvent->AsMouseEvent();
+  nsCOMPtr<nsIPresShell> presShell = aPresContext->PresShell();
   nsresult result;
   result = GetDataForTableSelection(frameselection, presShell, mouseEvent,
                                     getter_AddRefs(parentContent),
@@ -5910,8 +5929,8 @@ nsIFrame::GetPreEffectsVisualOverflowRect() const
   return r ? *r : GetVisualOverflowRectRelativeToSelf();
 }
 
-/* virtual */ bool
-nsFrame::UpdateOverflow()
+bool
+nsIFrame::UpdateOverflow()
 {
   MOZ_ASSERT(FrameMaintainsOverflow(),
              "Non-display SVG do not maintain visual overflow rects");
@@ -5919,16 +5938,16 @@ nsFrame::UpdateOverflow()
   nsRect rect(nsPoint(0, 0), GetSize());
   nsOverflowAreas overflowAreas(rect, rect);
 
-  if (!DoesClipChildren() &&
-      !(IsXULCollapsed() && (IsXULBoxFrame() || ::IsXULBoxWrapped(this)))) {
-    nsLayoutUtils::UnionChildOverflow(this, overflowAreas);
+  if (!ComputeCustomOverflow(overflowAreas)) {
+    return false;
   }
+
+  UnionChildOverflow(overflowAreas);
 
   if (FinishAndStoreOverflow(overflowAreas, GetSize())) {
     nsView* view = GetView();
     if (view) {
-      uint32_t flags = 0;
-      GetLayoutFlags(flags);
+      uint32_t flags = GetXULLayoutFlags();
 
       if ((flags & NS_FRAME_NO_SIZE_VIEW) == 0) {
         // Make sure the frame's view is properly sized.
@@ -5942,6 +5961,22 @@ nsFrame::UpdateOverflow()
 
   return false;
 }
+
+/* virtual */ bool
+nsFrame::ComputeCustomOverflow(nsOverflowAreas& aOverflowAreas)
+{
+  return true;
+}
+
+/* virtual */ void
+nsFrame::UnionChildOverflow(nsOverflowAreas& aOverflowAreas)
+{
+  if (!DoesClipChildren() &&
+      !(IsXULCollapsed() && (IsXULBoxFrame() || ::IsXULBoxWrapped(this)))) {
+    nsLayoutUtils::UnionChildOverflow(this, aOverflowAreas);
+  }
+}
+
 
 // Define the MAX_FRAME_DEPTH to be the ContentSink's MAX_REFLOW_DEPTH plus
 // 4 for the frames above the document's frames: 

@@ -76,7 +76,7 @@ CodeGeneratorX64::visitBox(LBox* box)
     if (IsFloatingPointType(box->type())) {
         ScratchDoubleScope scratch(masm);
         FloatRegister reg = ToFloatRegister(in);
-        if (box->type() == MIRType_Float32) {
+        if (box->type() == MIRType::Float32) {
             masm.convertFloat32ToDouble(reg, scratch);
             reg = scratch;
         }
@@ -95,19 +95,19 @@ CodeGeneratorX64::visitUnbox(LUnbox* unbox)
         const ValueOperand value = ToValue(unbox, LUnbox::Input);
         Assembler::Condition cond;
         switch (mir->type()) {
-          case MIRType_Int32:
+          case MIRType::Int32:
             cond = masm.testInt32(Assembler::NotEqual, value);
             break;
-          case MIRType_Boolean:
+          case MIRType::Boolean:
             cond = masm.testBoolean(Assembler::NotEqual, value);
             break;
-          case MIRType_Object:
+          case MIRType::Object:
             cond = masm.testObject(Assembler::NotEqual, value);
             break;
-          case MIRType_String:
+          case MIRType::String:
             cond = masm.testString(Assembler::NotEqual, value);
             break;
-          case MIRType_Symbol:
+          case MIRType::Symbol:
             cond = masm.testSymbol(Assembler::NotEqual, value);
             break;
           default:
@@ -119,19 +119,19 @@ CodeGeneratorX64::visitUnbox(LUnbox* unbox)
     Operand input = ToOperand(unbox->getOperand(LUnbox::Input));
     Register result = ToRegister(unbox->output());
     switch (mir->type()) {
-      case MIRType_Int32:
+      case MIRType::Int32:
         masm.unboxInt32(input, result);
         break;
-      case MIRType_Boolean:
+      case MIRType::Boolean:
         masm.unboxBoolean(input, result);
         break;
-      case MIRType_Object:
+      case MIRType::Object:
         masm.unboxObject(input, result);
         break;
-      case MIRType_String:
+      case MIRType::String:
         masm.unboxString(input, result);
         break;
-      case MIRType_Symbol:
+      case MIRType::Symbol:
         masm.unboxSymbol(input, result);
         break;
       default:
@@ -324,6 +324,30 @@ CodeGeneratorX64::visitShiftI64(LShiftI64* lir)
 }
 
 void
+CodeGeneratorX64::visitRotate64(LRotate64* lir)
+{
+    MRotate* mir = lir->mir();
+    Register input = ToRegister(lir->input());
+    const LAllocation* count = lir->count();
+
+    if (count->isConstant()) {
+        int32_t c = int32_t(ToInt64(count) & 0x3F);
+        if (!c)
+            return;
+        if (mir->isLeftRotate())
+            masm.rolq(Imm32(c), input);
+        else
+            masm.rorq(Imm32(c), input);
+    } else {
+        MOZ_ASSERT(ToRegister(count) == ecx);
+        if (mir->isLeftRotate())
+            masm.rolq_cl(input);
+        else
+            masm.rorq_cl(input);
+    }
+}
+
+void
 CodeGeneratorX64::visitAddI64(LAddI64* lir)
 {
     Register lhs = ToRegister(lir->getOperand(0));
@@ -480,7 +504,7 @@ CodeGeneratorX64::visitUDivOrMod64(LUDivOrMod64* lir)
 void
 CodeGeneratorX64::visitAsmSelectI64(LAsmSelectI64* lir)
 {
-    MOZ_ASSERT(lir->mir()->type() == MIRType_Int64);
+    MOZ_ASSERT(lir->mir()->type() == MIRType::Int64);
 
     Register cond = ToRegister(lir->condExpr());
     Operand falseExpr = ToOperand(lir->falseExpr());
@@ -495,16 +519,16 @@ CodeGeneratorX64::visitAsmSelectI64(LAsmSelectI64* lir)
 void
 CodeGeneratorX64::visitAsmReinterpretFromI64(LAsmReinterpretFromI64* lir)
 {
-    MOZ_ASSERT(lir->mir()->type() == MIRType_Double);
-    MOZ_ASSERT(lir->mir()->input()->type() == MIRType_Int64);
+    MOZ_ASSERT(lir->mir()->type() == MIRType::Double);
+    MOZ_ASSERT(lir->mir()->input()->type() == MIRType::Int64);
     masm.vmovq(ToRegister(lir->input()), ToFloatRegister(lir->output()));
 }
 
 void
 CodeGeneratorX64::visitAsmReinterpretToI64(LAsmReinterpretToI64* lir)
 {
-    MOZ_ASSERT(lir->mir()->type() == MIRType_Int64);
-    MOZ_ASSERT(lir->mir()->input()->type() == MIRType_Double);
+    MOZ_ASSERT(lir->mir()->type() == MIRType::Int64);
+    MOZ_ASSERT(lir->mir()->input()->type() == MIRType::Double);
     masm.vmovq(ToFloatRegister(lir->input()), ToRegister(lir->output()));
 }
 
@@ -556,7 +580,7 @@ CodeGeneratorX64::loadSimd(Scalar::Type type, unsigned numElems, const Operand& 
           case 1: masm.loadFloat32(srcAddr, out); break;
           // See comment above, which also applies to movsd.
           case 2: masm.loadDouble(srcAddr, out); break;
-          case 4: masm.loadUnalignedFloat32x4(srcAddr, out); break;
+          case 4: masm.loadUnalignedSimd128Float(srcAddr, out); break;
           default: MOZ_CRASH("unexpected size for partial load");
         }
         break;
@@ -567,7 +591,7 @@ CodeGeneratorX64::loadSimd(Scalar::Type type, unsigned numElems, const Operand& 
           case 1: masm.vmovd(srcAddr, out); break;
           // See comment above, which also applies to movq.
           case 2: masm.vmovq(srcAddr, out); break;
-          case 4: masm.loadUnalignedInt32x4(srcAddr, out); break;
+          case 4: masm.loadUnalignedSimd128Int(srcAddr, out); break;
           default: MOZ_CRASH("unexpected size for partial load");
         }
         break;
@@ -702,7 +726,7 @@ CodeGeneratorX64::storeSimd(Scalar::Type type, unsigned numElems, FloatRegister 
           case 1: masm.storeFloat32(in, dstAddr); break;
           // See comment above, which also applies to movsd.
           case 2: masm.storeDouble(in, dstAddr); break;
-          case 4: masm.storeUnalignedFloat32x4(in, dstAddr); break;
+          case 4: masm.storeUnalignedSimd128Float(in, dstAddr); break;
           default: MOZ_CRASH("unexpected size for partial load");
         }
         break;
@@ -713,7 +737,7 @@ CodeGeneratorX64::storeSimd(Scalar::Type type, unsigned numElems, FloatRegister 
           case 1: masm.vmovd(in, dstAddr); break;
           // See comment above, which also applies to movq.
           case 2: masm.vmovq(in, dstAddr); break;
-          case 4: masm.storeUnalignedInt32x4(in, dstAddr); break;
+          case 4: masm.storeUnalignedSimd128Int(in, dstAddr); break;
           default: MOZ_CRASH("unexpected size for partial load");
         }
         break;
@@ -1007,22 +1031,22 @@ CodeGeneratorX64::visitAsmJSLoadGlobalVar(LAsmJSLoadGlobalVar* ins)
 
     CodeOffset label;
     switch (type) {
-      case MIRType_Int32:
+      case MIRType::Int32:
         label = masm.loadRipRelativeInt32(ToRegister(ins->output()));
         break;
-      case MIRType_Float32:
+      case MIRType::Float32:
         label = masm.loadRipRelativeFloat32(ToFloatRegister(ins->output()));
         break;
-      case MIRType_Double:
+      case MIRType::Double:
         label = masm.loadRipRelativeDouble(ToFloatRegister(ins->output()));
         break;
       // Aligned access: code is aligned on PageSize + there is padding
       // before the global data section.
-      case MIRType_Int32x4:
-      case MIRType_Bool32x4:
+      case MIRType::Int32x4:
+      case MIRType::Bool32x4:
         label = masm.loadRipRelativeInt32x4(ToFloatRegister(ins->output()));
         break;
-      case MIRType_Float32x4:
+      case MIRType::Float32x4:
         label = masm.loadRipRelativeFloat32x4(ToFloatRegister(ins->output()));
         break;
       default:
@@ -1042,22 +1066,22 @@ CodeGeneratorX64::visitAsmJSStoreGlobalVar(LAsmJSStoreGlobalVar* ins)
 
     CodeOffset label;
     switch (type) {
-      case MIRType_Int32:
+      case MIRType::Int32:
         label = masm.storeRipRelativeInt32(ToRegister(ins->value()));
         break;
-      case MIRType_Float32:
+      case MIRType::Float32:
         label = masm.storeRipRelativeFloat32(ToFloatRegister(ins->value()));
         break;
-      case MIRType_Double:
+      case MIRType::Double:
         label = masm.storeRipRelativeDouble(ToFloatRegister(ins->value()));
         break;
       // Aligned access: code is aligned on PageSize + there is padding
       // before the global data section.
-      case MIRType_Int32x4:
-      case MIRType_Bool32x4:
+      case MIRType::Int32x4:
+      case MIRType::Bool32x4:
         label = masm.storeRipRelativeInt32x4(ToFloatRegister(ins->value()));
         break;
-      case MIRType_Float32x4:
+      case MIRType::Float32x4:
         label = masm.storeRipRelativeFloat32x4(ToFloatRegister(ins->value()));
         break;
       default:
@@ -1145,77 +1169,101 @@ CodeGeneratorX64::visitExtendInt32ToInt64(LExtendInt32ToInt64* lir)
 }
 
 void
-CodeGeneratorX64::visitTruncateToInt64(LTruncateToInt64* lir)
+CodeGeneratorX64::visitWasmTruncateToInt64(LWasmTruncateToInt64* lir)
 {
     FloatRegister input = ToFloatRegister(lir->input());
     Register output = ToRegister(lir->output());
 
-    MIRType inputType = lir->mir()->input()->type();
+    MWasmTruncateToInt64* mir = lir->mir();
+    MIRType inputType = mir->input()->type();
 
-    // We should trap on invalid inputs, but for now we just return
-    // 0x8000000000000000. Note that we can remove some unnecessary jumps
-    // once we get rid of this trap Label.
-    Label trap;
+    auto* ool = new(alloc()) OutOfLineWasmTruncateCheck(mir, input);
+    addOutOfLineCode(ool, mir);
 
-    Label done;
-    if (lir->mir()->isUnsigned()) {
+    if (mir->isUnsigned()) {
         FloatRegister tempDouble = ToFloatRegister(lir->temp());
 
         // If the input < INT64_MAX, vcvttsd2sq will do the right thing, so
         // we use it directly. Else, we subtract INT64_MAX, convert to int64,
         // and then add INT64_MAX to the result.
-        if (inputType == MIRType_Double) {
+        if (inputType == MIRType::Double) {
             Label isLarge;
             masm.loadConstantDouble(double(0x8000000000000000), ScratchDoubleReg);
             masm.branchDouble(Assembler::DoubleGreaterThanOrEqual, input, ScratchDoubleReg, &isLarge);
             masm.vcvttsd2sq(input, output);
-            masm.branchTestPtr(Assembler::Signed, output, output, &trap);
-            masm.jump(&done);
+            masm.branchTestPtr(Assembler::Signed, output, output, ool->entry());
+            masm.jump(ool->rejoin());
 
             masm.bind(&isLarge);
             masm.moveDouble(input, tempDouble);
             masm.subDouble(ScratchDoubleReg, tempDouble);
             masm.vcvttsd2sq(tempDouble, output);
-            masm.branchTestPtr(Assembler::Signed, output, output, &trap);
+            masm.branchTestPtr(Assembler::Signed, output, output, ool->entry());
             masm.or64(Imm64(0x8000000000000000), Register64(output));
-            masm.jump(&done);
         } else {
-            MOZ_ASSERT(inputType == MIRType_Float32);
+            MOZ_ASSERT(inputType == MIRType::Float32);
 
             Label isLarge;
             masm.loadConstantFloat32(float(0x8000000000000000), ScratchDoubleReg);
             masm.branchFloat(Assembler::DoubleGreaterThanOrEqual, input, ScratchDoubleReg, &isLarge);
             masm.vcvttss2sq(input, output);
-            masm.branchTestPtr(Assembler::Signed, output, output, &trap);
-            masm.jump(&done);
+            masm.branchTestPtr(Assembler::Signed, output, output, ool->entry());
+            masm.jump(ool->rejoin());
 
             masm.bind(&isLarge);
             masm.moveFloat32(input, tempDouble);
             masm.vsubss(ScratchDoubleReg, tempDouble, tempDouble);
             masm.vcvttss2sq(tempDouble, output);
-            masm.branchTestPtr(Assembler::Signed, output, output, &trap);
+            masm.branchTestPtr(Assembler::Signed, output, output, ool->entry());
             masm.or64(Imm64(0x8000000000000000), Register64(output));
-            masm.jump(&done);
         }
     } else {
-        if (inputType == MIRType_Double) {
+        if (inputType == MIRType::Double) {
             masm.vcvttsd2sq(input, output);
             masm.cmpq(Imm32(1), output);
-            masm.j(Assembler::Overflow, &trap);
-            masm.jump(&done);
+            masm.j(Assembler::Overflow, ool->entry());
         } else {
-            MOZ_ASSERT(inputType == MIRType_Float32);
+            MOZ_ASSERT(inputType == MIRType::Float32);
             masm.vcvttss2sq(input, output);
             masm.cmpq(Imm32(1), output);
-            masm.j(Assembler::Overflow, &trap);
-            masm.jump(&done);
+            masm.j(Assembler::Overflow, ool->entry());
         }
     }
 
-    masm.bind(&trap);
-    masm.movePtr(ImmWord(0x8000000000000000), output);
+    masm.bind(ool->rejoin());
+}
 
-    masm.bind(&done);
+void
+CodeGeneratorX64::visitWasmTruncateToInt32(LWasmTruncateToInt32* lir)
+{
+    auto input = ToFloatRegister(lir->input());
+    auto output = ToRegister(lir->output());
+
+    MWasmTruncateToInt32* mir = lir->mir();
+    MIRType fromType = mir->input()->type();
+
+    auto* ool = new (alloc()) OutOfLineWasmTruncateCheck(mir, input);
+    addOutOfLineCode(ool, mir);
+
+    if (mir->isUnsigned()) {
+        if (fromType == MIRType::Double)
+            masm.vcvttsd2sq(input, output);
+        else if (fromType == MIRType::Float32)
+            masm.vcvttss2sq(input, output);
+        else
+            MOZ_CRASH("unexpected type in visitWasmTruncateToInt32");
+
+        // Check that the result is in the uint32_t range.
+        ScratchRegisterScope scratch(masm);
+        masm.move32(Imm32(0xffffffff), scratch);
+        masm.cmpq(scratch, output);
+        masm.j(Assembler::Above, ool->entry());
+        return;
+    }
+
+    emitWasmSignedTruncateToInt32(ool, output);
+
+    masm.bind(ool->rejoin());
 }
 
 void
@@ -1225,10 +1273,10 @@ CodeGeneratorX64::visitInt64ToFloatingPoint(LInt64ToFloatingPoint* lir)
     FloatRegister output = ToFloatRegister(lir->output());
 
     MIRType outputType = lir->mir()->type();
-    MOZ_ASSERT(outputType == MIRType_Double || outputType == MIRType_Float32);
+    MOZ_ASSERT(outputType == MIRType::Double || outputType == MIRType::Float32);
 
     // Zero the output register to break dependencies, see convertInt32ToDouble.
-    if (outputType == MIRType_Double)
+    if (outputType == MIRType::Double)
         masm.zeroDouble(output);
     else
         masm.zeroFloat32(output);
@@ -1238,7 +1286,7 @@ CodeGeneratorX64::visitInt64ToFloatingPoint(LInt64ToFloatingPoint* lir)
         // If the input is unsigned, we use cvtsq2sd or vcvtsq2ss directly.
         // Else, we divide by 2, convert to double or float, and multiply the
         // result by 2.
-        if (outputType == MIRType_Double) {
+        if (outputType == MIRType::Double) {
             Label isSigned;
             masm.branchTestPtr(Assembler::Signed, input, input, &isSigned);
             masm.vcvtsq2sd(input, output, output);
@@ -1264,7 +1312,7 @@ CodeGeneratorX64::visitInt64ToFloatingPoint(LInt64ToFloatingPoint* lir)
             masm.vaddss(output, output, output);
         }
     } else {
-        if (outputType == MIRType_Double)
+        if (outputType == MIRType::Double)
             masm.vcvtsq2sd(input, output, output);
         else
             masm.vcvtsq2ss(input, output, output);

@@ -56,7 +56,7 @@ using namespace mozilla::dom;
 
 namespace {
 
-class ScreenOnOffEvent : public nsRunnable {
+class ScreenOnOffEvent : public mozilla::Runnable {
 public:
     ScreenOnOffEvent(bool on)
         : mIsOn(on)
@@ -162,7 +162,6 @@ nsScreenGonk::~nsScreenGonk()
     // Release GLContext on compositor thread
     if (mGLContext) {
         CompositorBridgeParent::CompositorLoop()->PostTask(
-            FROM_HERE,
             NewRunnableFunction(&ReleaseGLContextSync,
                                 mGLContext.forget().take()));
         mGLContext = nullptr;
@@ -669,7 +668,6 @@ nsScreenGonk::EnableMirroring()
     nsMainThreadPtrHandle<nsScreenGonk> primary =
       nsMainThreadPtrHandle<nsScreenGonk>(new nsMainThreadPtrHolder<nsScreenGonk>(primaryScreen, false));
     CompositorBridgeParent::CompositorLoop()->PostTask(
-        FROM_HERE,
         NewRunnableFunction(&UpdateMirroringWidgetSync,
                             primary,
                             window.forget().take()));
@@ -695,7 +693,6 @@ nsScreenGonk::DisableMirroring()
     nsMainThreadPtrHandle<nsScreenGonk> primary =
       nsMainThreadPtrHandle<nsScreenGonk>(new nsMainThreadPtrHolder<nsScreenGonk>(primaryScreen, false));
     CompositorBridgeParent::CompositorLoop()->PostTask(
-        FROM_HERE,
         NewRunnableFunction(&UpdateMirroringWidgetSync,
                             primary,
                             nullptr));
@@ -974,7 +971,7 @@ private:
 
 NS_IMPL_ISUPPORTS(DisplayInfo, nsIDisplayInfo, nsISupports)
 
-class NotifyTask : public nsRunnable {
+class NotifyTask : public mozilla::Runnable {
 public:
     NotifyTask(uint32_t aId, bool aConnected)
         : mDisplayInfo(new DisplayInfo(aId, aConnected))

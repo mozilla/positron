@@ -63,6 +63,7 @@ public class PushService implements BundleEventListener {
             "PushServiceAndroidGCM:UnregisterUserAgent",
             "PushServiceAndroidGCM:SubscribeChannel",
             "PushServiceAndroidGCM:UnsubscribeChannel",
+            "History:GetPrePathLastVisitedTimeMilliseconds",
     };
 
     public static synchronized PushService getInstance() {
@@ -182,6 +183,7 @@ public class PushService implements BundleEventListener {
             final JSONObject data = new JSONObject();
             try {
                 data.put("channelID", chid);
+                data.put("con", bundle.getString("con"));
                 data.put("enc", bundle.getString("enc"));
                 // Only one of cryptokey (newer) and enckey (deprecated) should be set, but the
                 // Gecko handler will verify this.
@@ -229,9 +231,10 @@ public class PushService implements BundleEventListener {
         Log.i(LOG_TAG, "Handling event: " + event);
         ThreadUtils.assertOnBackgroundThread();
 
+        final Context context = GeckoAppShell.getApplicationContext();
         // We're invoked in response to a Gecko message on a background thread.  We should always
         // be able to safely retrieve the current Gecko profile.
-        final GeckoProfile geckoProfile = GeckoProfile.get(GeckoAppShell.getApplicationContext());
+        final GeckoProfile geckoProfile = GeckoProfile.get(context);
 
         if (callback == null) {
             Log.e(LOG_TAG, "callback must not be null in " + event);
@@ -358,6 +361,22 @@ public class PushService implements BundleEventListener {
                 }
 
                 callback.sendError("Could not unsubscribe from channel: " + channelID);
+                return;
+            }
+            if ("History:GetPrePathLastVisitedTimeMilliseconds".equals(event)) {
+                if (callback == null) {
+                    Log.e(LOG_TAG, "callback must not be null in " + event);
+                    return;
+                }
+                final String prePath = message.getString("prePath");
+                if (prePath == null) {
+                    callback.sendError("prePath must not be null in " + event);
+                    return;
+                }
+                // We're on a background thread, so we can be synchronous.
+                final long millis = geckoProfile.getDB().getPrePathLastVisitedTimeMilliseconds(
+                        context.getContentResolver(), prePath);
+                callback.sendSuccess(millis);
                 return;
             }
         } catch (GcmTokenClient.NeedsGooglePlayServicesException e) {

@@ -423,7 +423,7 @@ CancelVibrate(const hal::WindowIdentifier &)
 
 namespace {
 
-class BatteryUpdater : public nsRunnable {
+class BatteryUpdater : public Runnable {
 public:
   NS_IMETHOD Run()
   {
@@ -525,7 +525,6 @@ void
 EnableBatteryNotifications()
 {
   XRE_GetIOMessageLoop()->PostTask(
-      FROM_HERE,
       NewRunnableFunction(RegisterBatteryObserverIOThread));
 }
 
@@ -543,7 +542,6 @@ void
 DisableBatteryNotifications()
 {
   XRE_GetIOMessageLoop()->PostTask(
-      FROM_HERE,
       NewRunnableFunction(UnregisterBatteryObserverIOThread));
 }
 
@@ -1043,7 +1041,7 @@ int AlarmData::sNextGeneration = 0;
 
 AlarmData* sAlarmData = nullptr;
 
-class AlarmFiredEvent : public nsRunnable {
+class AlarmFiredEvent : public Runnable {
 public:
   AlarmFiredEvent(int aGeneration) : mGeneration(aGeneration) {}
 
@@ -1976,7 +1974,7 @@ namespace {
  * We have to run this from the main thread since preferences can only be read on
  * main thread.
  */
-class SetThreadPriorityRunnable : public nsRunnable
+class SetThreadPriorityRunnable : public Runnable
 {
 public:
   SetThreadPriorityRunnable(pid_t aThreadId, hal::ThreadPriority aThreadPriority)

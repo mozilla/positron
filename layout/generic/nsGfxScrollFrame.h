@@ -39,9 +39,6 @@ class Layer;
 namespace layout {
 class ScrollbarActivity;
 } // namespace layout
-} // namespace mozilla
-
-namespace mozilla {
 
 class ScrollFrameHelper : public nsIReflowCallback {
 public:
@@ -137,7 +134,7 @@ public:
     RefPtr<nsRefreshDriver> mDriver;
   };
 
-  class AsyncScrollPortEvent : public nsRunnable {
+  class AsyncScrollPortEvent : public Runnable {
   public:
     NS_DECL_NSIRUNNABLE
     explicit AsyncScrollPortEvent(ScrollFrameHelper *helper) : mHelper(helper) {}
@@ -146,7 +143,7 @@ public:
     ScrollFrameHelper *mHelper;
   };
 
-  class ScrolledAreaEvent : public nsRunnable {
+  class ScrolledAreaEvent : public Runnable {
   public:
     NS_DECL_NSIRUNNABLE
     explicit ScrolledAreaEvent(ScrollFrameHelper *helper) : mHelper(helper) {}
@@ -259,6 +256,9 @@ public:
    * @note This method might destroy the frame, pres shell and other objects.
    */
   void ScrollToRestoredPosition();
+
+  bool PageIsStillLoading();
+
   /**
    * GetSnapPointForDestination determines which point to snap to after
    * scrolling. aStartPos gives the position before scrolling and aDestination
@@ -341,7 +341,7 @@ public:
     mScrollPosForLayerPixelAlignment = GetScrollPosition();
   }
 
-  bool UpdateOverflow();
+  bool ComputeCustomOverflow(nsOverflowAreas& aOverflowAreas);
 
   void UpdateSticky();
 
@@ -707,8 +707,8 @@ public:
                       const nsHTMLReflowState& aReflowState,
                       nsReflowStatus&          aStatus) override;
 
-  virtual bool UpdateOverflow() override {
-    return mHelper.UpdateOverflow();
+  virtual bool ComputeCustomOverflow(nsOverflowAreas& aOverflowAreas) override {
+    return mHelper.ComputeCustomOverflow(aOverflowAreas);
   }
 
   // Called to set the child frames. We typically have three: the scroll area,
@@ -1082,8 +1082,8 @@ public:
   virtual nscoord GetMinISize(nsRenderingContext *aRenderingContext) override;
 #endif
 
-  virtual bool UpdateOverflow() override {
-    return mHelper.UpdateOverflow();
+  virtual bool ComputeCustomOverflow(nsOverflowAreas& aOverflowAreas) override {
+    return mHelper.ComputeCustomOverflow(aOverflowAreas);
   }
 
   // Called to set the child frames. We typically have three: the scroll area,

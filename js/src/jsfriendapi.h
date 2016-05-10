@@ -9,6 +9,7 @@
 
 #include "mozilla/Atomics.h"
 #include "mozilla/Casting.h"
+#include "mozilla/Maybe.h"
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/UniquePtr.h"
 
@@ -145,6 +146,9 @@ typedef void
 
 extern JS_FRIEND_API(void)
 JS_SetAccumulateTelemetryCallback(JSRuntime* rt, JSAccumulateTelemetryDataCallback callback);
+
+extern JS_FRIEND_API(bool)
+JS_GetIsSecureContext(JSCompartment* compartment);
 
 extern JS_FRIEND_API(JSPrincipals*)
 JS_GetCompartmentPrincipals(JSCompartment* compartment);
@@ -506,9 +510,6 @@ VisitGrayWrapperTargets(JS::Zone* zone, GCThingCallback callback, void* closure)
 extern JS_FRIEND_API(JSObject*)
 GetWeakmapKeyDelegate(JSObject* key);
 
-JS_FRIEND_API(JS::TraceKind)
-GCThingTraceKind(void* thing);
-
 /**
  * Invoke cellCallback on every gray JS_OBJECT in the given zone.
  */
@@ -718,6 +719,9 @@ FunctionHasNativeReserved(JSObject* fun);
 
 JS_FRIEND_API(bool)
 GetObjectProto(JSContext* cx, JS::HandleObject obj, JS::MutableHandleObject proto);
+
+extern JS_FRIEND_API(JSObject*)
+GetStaticPrototype(JSObject* obj);
 
 JS_FRIEND_API(bool)
 GetOriginalEval(JSContext* cx, JS::HandleObject scope,
@@ -1295,27 +1299,33 @@ GetErrorMessage(void* userRef, const unsigned errorNumber);
  */
 class MOZ_STACK_CLASS AutoStableStringChars
 {
+    /*
+     * When copying string char, use this many bytes of inline storage.  This is
+     * chosen to allow the inline string types to be copied without allocating.
+     * This is asserted in AutoStableStringChars::allocOwnChars.
+     */
+    static const size_t InlineCapacity = 24;
+
     /* Ensure the string is kept alive while we're using its chars. */
     JS::RootedString s_;
     union {
         const char16_t* twoByteChars_;
         const JS::Latin1Char* latin1Chars_;
     };
+    mozilla::Maybe<Vector<uint8_t, InlineCapacity>> ownChars_;
     enum State { Uninitialized, Latin1, TwoByte };
     State state_;
-    bool ownsChars_;
 
   public:
     explicit AutoStableStringChars(JSContext* cx)
-      : s_(cx), state_(Uninitialized), ownsChars_(false)
+      : s_(cx), state_(Uninitialized)
     {}
-    ~AutoStableStringChars();
 
-    MOZ_WARN_UNUSED_RESULT
+    MOZ_MUST_USE
     bool init(JSContext* cx, JSString* s);
 
     /* Like init(), but Latin1 chars are inflated to TwoByte. */
-    MOZ_WARN_UNUSED_RESULT
+    MOZ_MUST_USE
     bool initTwoByte(JSContext* cx, JSString* s);
 
     bool isLatin1() const { return state_ == Latin1; }
@@ -1335,16 +1345,16 @@ class MOZ_STACK_CLASS AutoStableStringChars
     mozilla::Range<const char16_t> twoByteRange() const {
         MOZ_ASSERT(state_ == TwoByte);
         return mozilla::Range<const char16_t>(twoByteChars_,
-                                            GetStringLength(s_));
+                                              GetStringLength(s_));
     }
 
     /* If we own the chars, transfer ownership to the caller. */
     bool maybeGiveOwnershipToCaller() {
         MOZ_ASSERT(state_ != Uninitialized);
-        if (!ownsChars_)
+        if (!ownChars_.isSome() || !ownChars_->extractRawBuffer())
             return false;
         state_ = Uninitialized;
-        ownsChars_ = false;
+        ownChars_.reset();
         return true;
     }
 
@@ -1353,8 +1363,9 @@ class MOZ_STACK_CLASS AutoStableStringChars
     void operator=(const AutoStableStringChars& other) = delete;
 
     bool baseIsInline(JS::Handle<JSLinearString*> linearString);
-    bool copyLatin1Chars(JSContext*, JS::Handle<JSLinearString*> linearString);
-    bool copyTwoByteChars(JSContext*, JS::Handle<JSLinearString*> linearString);
+    template <typename T> T* allocOwnChars(JSContext* cx, size_t count);
+    bool copyLatin1Chars(JSContext* cx, JS::Handle<JSLinearString*> linearString);
+    bool copyTwoByteChars(JSContext* cx, JS::Handle<JSLinearString*> linearString);
     bool copyAndInflateLatin1Chars(JSContext*, JS::Handle<JSLinearString*> linearString);
 };
 
@@ -2884,26 +2895,6 @@ extern JS_FRIEND_API(JSObject*)
 ToWindowIfWindowProxy(JSObject* obj);
 
 } /* namespace js */
-
-extern JS_FRIEND_API(void)
-JS_StoreObjectPostBarrierCallback(JSContext* cx,
-                                  void (*callback)(JSTracer* trc, JSObject* key, void* data),
-                                  JSObject* key, void* data);
-
-extern JS_FRIEND_API(void)
-JS_StoreStringPostBarrierCallback(JSContext* cx,
-                                  void (*callback)(JSTracer* trc, JSString* key, void* data),
-                                  JSString* key, void* data);
-
-/**
- * Forcibly clear postbarrier callbacks queued by the previous two methods.
- * This should be used when the object owning the postbarriered pointers is
- * being destroyed outside of a garbage collection.
- *
- * This currently works by performing a minor GC.
- */
-extern JS_FRIEND_API(void)
-JS_ClearAllPostBarrierCallbacks(JSRuntime *rt);
 
 class NativeProfiler
 {

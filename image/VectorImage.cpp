@@ -686,6 +686,10 @@ VectorImage::IsOpaque()
 NS_IMETHODIMP_(already_AddRefed<SourceSurface>)
 VectorImage::GetFrame(uint32_t aWhichFrame, uint32_t aFlags)
 {
+  if (mError) {
+    return nullptr;
+  }
+
   // Look up height & width
   // ----------------------
   SVGSVGElement* svgElem = mSVGDocumentWrapper->GetRootSVGElem();
@@ -1063,9 +1067,7 @@ VectorImage::OnSurfaceDiscarded()
 {
   MOZ_ASSERT(mProgressTracker);
 
-  nsCOMPtr<nsIRunnable> runnable =
-    NS_NewRunnableMethod(mProgressTracker, &ProgressTracker::OnDiscard);
-  NS_DispatchToMainThread(runnable);
+  NS_DispatchToMainThread(NewRunnableMethod(mProgressTracker, &ProgressTracker::OnDiscard));
 }
 
 //******************************************************************************

@@ -1016,7 +1016,7 @@ var gCSSProperties = {
     get_computed: logical_box_prop_get_computed,
     initial_values: [ "currentColor" ],
     other_values: [ "green", "rgba(255,128,0,0.5)", "transparent" ],
-    invalid_values: [ "#0", "#00", "#0000", "#00000", "#0000000", "#00000000", "#000000000", "000000" ]
+    invalid_values: [ "#0", "#00", "#00000", "#0000000", "#000000000", "000000" ]
   },
   "border-inline-end-style": {
     domProp: "borderInlineEndStyle",
@@ -1264,7 +1264,7 @@ var gCSSProperties = {
     get_computed: logical_box_prop_get_computed,
     initial_values: [ "currentColor" ],
     other_values: [ "green", "rgba(255,128,0,0.5)", "transparent" ],
-    invalid_values: [ "#0", "#00", "#0000", "#00000", "#0000000", "#00000000", "#000000000", "000000" ]
+    invalid_values: [ "#0", "#00", "#00000", "#0000000", "#000000000", "000000" ]
   },
   "border-inline-start-style": {
     domProp: "borderInlineStartStyle",
@@ -2140,7 +2140,7 @@ var gCSSProperties = {
     domProp: "background",
     inherited: false,
     type: CSS_TYPE_TRUE_SHORTHAND,
-    subproperties: [ "background-attachment", "background-color", "background-image", "background-position", "background-repeat", "background-clip", "background-origin", "background-size" ],
+    subproperties: [ "background-attachment", "background-color", "background-image", "background-position-x", "background-position-y", "background-repeat", "background-clip", "background-origin", "background-size" ],
     initial_values: [ "transparent", "none", "repeat", "scroll", "0% 0%", "top left", "left top", "0% 0% / auto", "top left / auto", "left top / auto", "0% 0% / auto auto",
       "transparent none", "top left none", "left top none", "none left top", "none top left", "none 0% 0%", "left top / auto none", "left top / auto auto none",
       "transparent none repeat scroll top left", "left top repeat none scroll transparent", "transparent none repeat scroll top left / auto", "left top / auto repeat none scroll transparent", "none repeat scroll 0% 0% / auto auto transparent" ],
@@ -2261,7 +2261,7 @@ var gCSSProperties = {
     type: CSS_TYPE_LONGHAND,
     initial_values: [ "transparent", "rgba(255, 127, 15, 0)", "hsla(240, 97%, 50%, 0.0)", "rgba(0, 0, 0, 0)", "rgba(255,255,255,-3.7)" ],
     other_values: [ "green", "rgb(255, 0, 128)", "#fc2", "#96ed2a", "black", "rgba(255,255,0,3)", "hsl(240, 50%, 50%)", "rgb(50%, 50%, 50%)", "-moz-default-background-color" ],
-    invalid_values: [ "#0", "#00", "#0000", "#00000", "#0000000", "#00000000", "#000000000", "rgb(100, 100.0, 100)" ],
+    invalid_values: [ "#0", "#00", "#00000", "#0000000", "#000000000", "rgb(100, 100.0, 100)" ],
     quirks_values: { "000000": "#000000", "96ed2a": "#96ed2a" },
   },
   "background-image": {
@@ -2293,7 +2293,7 @@ var gCSSProperties = {
   "background-position": {
     domProp: "backgroundPosition",
     inherited: false,
-    type: CSS_TYPE_LONGHAND,
+    type: CSS_TYPE_SHORTHAND_AND_LONGHAND,
     initial_values: [ "top 0% left 0%", "top 0% left", "top left", "left top", "0% 0%", "0% top", "left 0%" ],
     other_values: [ "top", "left", "right", "bottom", "center", "center bottom", "bottom center", "center right", "right center", "center top", "top center", "center left", "left center", "right bottom", "bottom right", "50%", "top left, top left", "top left, top right", "top right, top left", "left top, 0% 0%", "10% 20%, 30%, 40%", "top left, bottom right", "right bottom, left top", "0%", "0px", "30px", "0%, 10%, 20%, 30%", "top, top, top, top, top",
       "calc(20px)",
@@ -2325,6 +2325,7 @@ var gCSSProperties = {
       "left 20%",
       "right 20%"
     ],
+    subproperties: [ "background-position-x", "background-position-y" ],
     invalid_values: [ "center 10px center 4px", "center 10px center",
                       "top 20%", "bottom 20%", "50% left", "top 50%",
                       "50% bottom 10%", "right 10% 50%", "left right",
@@ -2336,6 +2337,58 @@ var gCSSProperties = {
       "10 5px": "10px 5px",
       "7px 2": "7px 2px",
     },
+  },
+  "background-position-x": {
+    domProp: "backgroundPositionX",
+    inherited: false,
+    type: CSS_TYPE_LONGHAND,
+    initial_values: [ "left 0%", "left", "0%" ],
+    other_values: [ "right", "center", "50%", "left, left", "left, right", "right, left", "left, 0%", "10%, 20%, 40%", "0px", "30px", "0%, 10%, 20%, 30%", "left, left, left, left, left",
+      "calc(20px)",
+      "calc(20px + 1em)",
+      "calc(20px / 2)",
+      "calc(20px + 50%)",
+      "calc(50% - 10px)",
+      "calc(-20px)",
+      "calc(-50%)",
+      "calc(-20%)",
+      "right 20px",
+      "left 20px",
+      "right -50px",
+      "left -50px",
+      "right 20px",
+      "right 3em",
+    ],
+    invalid_values: [ "center 10px", "right 10% 50%", "left right", "left left",
+                      "bottom 20px", "top 10%", "bottom 3em",
+                      "top", "bottom", "top, top", "top, bottom", "bottom, top", "top, 0%", "top, top, top, top, top",
+                      "calc(0px + rubbish)"],
+  },
+  "background-position-y": {
+    domProp: "backgroundPositionY",
+    inherited: false,
+    type: CSS_TYPE_LONGHAND,
+    initial_values: [ "top 0%", "top", "0%" ],
+    other_values: [ "bottom", "center", "50%", "top, top", "top, bottom", "bottom, top", "top, 0%", "10%, 20%, 40%", "0px", "30px", "0%, 10%, 20%, 30%", "top, top, top, top, top",
+      "calc(20px)",
+      "calc(20px + 1em)",
+      "calc(20px / 2)",
+      "calc(20px + 50%)",
+      "calc(50% - 10px)",
+      "calc(-20px)",
+      "calc(-50%)",
+      "calc(-20%)",
+      "bottom 20px",
+      "top 20px",
+      "bottom -50px",
+      "top -50px",
+      "bottom 20px",
+      "bottom 3em",
+    ],
+    invalid_values: [ "center 10px", "bottom 10% 50%", "top bottom", "top top",
+                      "right 20px", "left 10%", "right 3em",
+                      "left", "right", "left, left", "left, right", "right, left", "left, 0%", "left, left, left, left, left",
+                      "calc(0px + rubbish)"],
   },
   "background-repeat": {
     domProp: "backgroundRepeat",
@@ -2403,7 +2456,7 @@ var gCSSProperties = {
     prerequisites: { "color": "black" },
     initial_values: [ "currentColor", "-moz-use-text-color" ],
     other_values: [ "green", "rgba(255,128,0,0.5)", "transparent" ],
-    invalid_values: [ "#0", "#00", "#0000", "#00000", "#0000000", "#00000000", "#000000000" ],
+    invalid_values: [ "#0", "#00", "#00000", "#0000000", "#000000000" ],
     quirks_values: { "000000": "#000000", "96ed2a": "#96ed2a" },
   },
   "border-bottom-style": {
@@ -2449,7 +2502,7 @@ var gCSSProperties = {
     subproperties: [ "border-top-color", "border-right-color", "border-bottom-color", "border-left-color" ],
     initial_values: [ "currentColor", "currentColor currentColor", "currentColor currentColor currentColor", "currentColor currentColor currentcolor CURRENTcolor" ],
     other_values: [ "green", "currentColor green", "currentColor currentColor green", "currentColor currentColor currentColor green", "rgba(255,128,0,0.5)", "transparent" ],
-    invalid_values: [ "#0", "#00", "#0000", "#00000", "#0000000", "#00000000", "#000000000", "red rgb(nonsense)", "red 1px" ],
+    invalid_values: [ "#0", "#00", "#00000", "#0000000", "#000000000", "red rgb(nonsense)", "red 1px" ],
     unbalanced_values: [ "red rgb(" ],
     quirks_values: { "000000": "#000000", "96ed2a": "#96ed2a" },
   },
@@ -2469,7 +2522,7 @@ var gCSSProperties = {
     prerequisites: { "color": "black" },
     initial_values: [ "currentColor", "-moz-use-text-color" ],
     other_values: [ "green", "rgba(255,128,0,0.5)", "transparent" ],
-    invalid_values: [ "#0", "#00", "#0000", "#00000", "#0000000", "#00000000", "#000000000" ],
+    invalid_values: [ "#0", "#00", "#00000", "#0000000", "#000000000" ],
     quirks_values: { "000000": "#000000", "96ed2a": "#96ed2a" },
   },
   "border-left-style": {
@@ -2516,7 +2569,7 @@ var gCSSProperties = {
     prerequisites: { "color": "black" },
     initial_values: [ "currentColor", "-moz-use-text-color" ],
     other_values: [ "green", "rgba(255,128,0,0.5)", "transparent" ],
-    invalid_values: [ "#0", "#00", "#0000", "#00000", "#0000000", "#00000000", "#000000000" ],
+    invalid_values: [ "#0", "#00", "#00000", "#0000000", "#000000000" ],
     quirks_values: { "000000": "#000000", "96ed2a": "#96ed2a" },
   },
   "border-right-style": {
@@ -2586,7 +2639,7 @@ var gCSSProperties = {
     prerequisites: { "color": "black" },
     initial_values: [ "currentColor", "-moz-use-text-color" ],
     other_values: [ "green", "rgba(255,128,0,0.5)", "transparent" ],
-    invalid_values: [ "#0", "#00", "#0000", "#00000", "#0000000", "#00000000", "#000000000" ],
+    invalid_values: [ "#0", "#00", "#00000", "#0000000", "#000000000" ],
     quirks_values: { "000000": "#000000", "96ed2a": "#96ed2a" },
   },
   "border-top-style": {
@@ -2700,9 +2753,9 @@ var gCSSProperties = {
     inherited: true,
     type: CSS_TYPE_LONGHAND,
     /* XXX should test currentColor, but may or may not be initial */
-    initial_values: [ "black", "#000", "-moz-default-color" ],
-    other_values: [ "green", "#f3c", "#fed292", "rgba(45,300,12,2)", "transparent", "-moz-nativehyperlinktext", "rgba(255,128,0,0.5)" ],
-    invalid_values: [ "#f", "#ff", "#ffff", "#fffff", "#fffffff", "#ffffffff", "#fffffffff" ],
+    initial_values: [ "black", "#000", "#000f", "#000000ff", "rgb(0, 0, 0)", "rgba(0, 0, 0, 1.0)", "-moz-default-color" ],
+    other_values: [ "green", "#f3c", "#fed292", "rgba(45,300,12,2)", "transparent", "-moz-nativehyperlinktext", "rgba(255,128,0,0.5)", "#e0fc", "#10fcee72" ],
+    invalid_values: [ "#f", "#ff", "#fffff", "#fffffff", "#fffffffff" ],
     quirks_values: { "000000": "#000000", "96ed2a": "#96ed2a", "fff": "#ffffff", "ffffff": "#ffffff", },
   },
   "content": {
@@ -3386,7 +3439,7 @@ var gCSSProperties = {
     prerequisites: { "color": "black" },
     initial_values: [ "currentColor", "-moz-use-text-color" ], // XXX should be invert
     other_values: [ "green", "rgba(255,128,0,0.5)", "transparent" ],
-    invalid_values: [ "#0", "#00", "#0000", "#00000", "#0000000", "#00000000", "#000000000", "000000", "cc00ff" ]
+    invalid_values: [ "#0", "#00", "#00000", "#0000000", "#000000000", "000000", "cc00ff" ]
   },
   "outline-offset": {
     domProp: "outlineOffset",
@@ -3654,7 +3707,7 @@ var gCSSProperties = {
     prerequisites: { "color": "black" },
     initial_values: [ "currentColor", "-moz-use-text-color" ],
     other_values: [ "green", "rgba(255,128,0,0.5)", "transparent" ],
-    invalid_values: [ "#0", "#00", "#0000", "#00000", "#0000000", "#00000000", "#000000000", "000000", "ff00ff" ]
+    invalid_values: [ "#0", "#00", "#00000", "#0000000", "#000000000", "000000", "ff00ff" ]
   },
   "text-decoration-line": {
     domProp: "textDecorationLine",
@@ -4969,7 +5022,7 @@ if (IsCSSPropertyPrefEnabled("layout.css.vertical-text.enabled")) {
       get_computed: logical_box_prop_get_computed,
       initial_values: [ "currentColor" ],
       other_values: [ "green", "rgba(255,128,0,0.5)", "transparent" ],
-      invalid_values: [ "#0", "#00", "#0000", "#00000", "#0000000", "#00000000", "#000000000", "000000" ]
+      invalid_values: [ "#0", "#00", "#00000", "#0000000", "#000000000", "000000" ]
     },
     "border-block-end-style": {
       domProp: "borderBlockEndStyle",
@@ -5019,7 +5072,7 @@ if (IsCSSPropertyPrefEnabled("layout.css.vertical-text.enabled")) {
       get_computed: logical_box_prop_get_computed,
       initial_values: [ "currentColor" ],
       other_values: [ "green", "rgba(255,128,0,0.5)", "transparent" ],
-      invalid_values: [ "#0", "#00", "#0000", "#00000", "#0000000", "#00000000", "#000000000", "000000" ]
+      invalid_values: [ "#0", "#00", "#00000", "#0000000", "#000000000", "000000" ]
     },
     "border-block-start-style": {
       domProp: "borderBlockStartStyle",
@@ -5996,7 +6049,6 @@ if (IsCSSPropertyPrefEnabled("layout.css.grid.enabled")) {
       "[a] calc(1%) [b] repeat(auto-fit,[a b] minmax(1mm, 1%) [c]) [c]",
       "repeat(auto-fill,minmax(1%,auto))",
       "repeat(auto-fill,minmax(1em,min-content)) minmax(min-content,0)",
-      "repeat(auto-fill,minmax(1fr,1em)) [a] minmax(0, max-content)",
       "repeat(auto-fill,minmax(max-content,1mm))",
     ],
     invalid_values: [
@@ -6051,6 +6103,7 @@ if (IsCSSPropertyPrefEnabled("layout.css.grid.enabled")) {
       "repeat(auto-fit,minmax(auto,auto))",
       "repeat(auto-fit,minmax(min-content,1fr))",
       "repeat(auto-fit,minmax(1fr,auto))",
+      "repeat(auto-fill,minmax(1fr,1em))",
       "repeat(auto-fill, 10px) auto",
       "auto repeat(auto-fit, 10px)",
       "minmax(min-content,max-content) repeat(auto-fit, 0)",
@@ -6745,7 +6798,7 @@ if (SupportsMaskShorthand()) {
     inherited: false,
     type: CSS_TYPE_SHORTHAND_AND_LONGHAND,
     /* FIXME: All mask-border-* should be added when we implement them. */
-    subproperties: ["mask-clip", "mask-image", "mask-mode", "mask-origin", "mask-position", "mask-repeat", "mask-size" , "mask-composite"],
+    subproperties: ["mask-clip", "mask-image", "mask-mode", "mask-origin", "mask-position-x", "mask-position-y", "mask-repeat", "mask-size" , "mask-composite"],
     initial_values: [ "match-source", "none", "repeat", "add", "0% 0%", "top left", "left top", "0% 0% / auto", "top left / auto", "left top / auto", "0% 0% / auto auto",
       "top left none", "left top none", "none left top", "none top left", "none 0% 0%", "left top / auto none", "left top / auto auto none",
       "match-source none repeat add top left", "left top repeat none add", "none repeat add top left / auto", "left top / auto repeat none add match-source", "none repeat add 0% 0% / auto auto match-source" ],
@@ -6869,7 +6922,7 @@ if (SupportsMaskShorthand()) {
   gCSSProperties["mask-position"] = {
     domProp: "maskPosition",
     inherited: false,
-    type: CSS_TYPE_LONGHAND,
+    type: CSS_TYPE_SHORTHAND_AND_LONGHAND,
     initial_values: [ "top 0% left 0%", "top 0% left", "top left", "left top", "0% 0%", "0% top", "left 0%" ],
     other_values: [ "top", "left", "right", "bottom", "center", "center bottom", "bottom center", "center right", "right center", "center top", "top center", "center left", "left center", "right bottom", "bottom right", "50%", "top left, top left", "top left, top right", "top right, top left", "left top, 0% 0%", "10% 20%, 30%, 40%", "top left, bottom right", "right bottom, left top", "0%", "0px", "30px", "0%, 10%, 20%, 30%", "top, top, top, top, top",
       "calc(20px)",
@@ -6901,12 +6954,65 @@ if (SupportsMaskShorthand()) {
       "left 20%",
       "right 20%"
     ],
+    subproperties: [ "mask-position-x", "mask-position-y" ],
     invalid_values: [ "center 10px center 4px", "center 10px center",
                       "top 20%", "bottom 20%", "50% left", "top 50%",
                       "50% bottom 10%", "right 10% 50%", "left right",
                       "top bottom", "left 10% right",
                       "top 20px bottom 20px", "left left",
                       "0px calc(0px + rubbish)"],
+  };
+  gCSSProperties["mask-position-x"] = {
+    domProp: "maskPositionX",
+    inherited: false,
+    type: CSS_TYPE_LONGHAND,
+    initial_values: [ "left 0%", "left", "0%" ],
+    other_values: [ "right", "center", "50%", "left, left", "left, right", "right, left", "left, 0%", "10%, 20%, 40%", "0px", "30px", "0%, 10%, 20%, 30%", "left, left, left, left, left",
+      "calc(20px)",
+      "calc(20px + 1em)",
+      "calc(20px / 2)",
+      "calc(20px + 50%)",
+      "calc(50% - 10px)",
+      "calc(-20px)",
+      "calc(-50%)",
+      "calc(-20%)",
+      "right 20px",
+      "left 20px",
+      "right -50px",
+      "left -50px",
+      "right 20px",
+      "right 3em",
+    ],
+    invalid_values: [ "center 10px", "right 10% 50%", "left right", "left left",
+                      "bottom 20px", "top 10%", "bottom 3em",
+                      "top", "bottom", "top, top", "top, bottom", "bottom, top", "top, 0%", "top, top, top, top, top",
+                      "calc(0px + rubbish)"],
+  };
+  gCSSProperties["mask-position-y"] = {
+    domProp: "maskPositionY",
+    inherited: false,
+    type: CSS_TYPE_LONGHAND,
+    initial_values: [ "top 0%", "top", "0%" ],
+    other_values: [ "bottom", "center", "50%", "top, top", "top, bottom", "bottom, top", "top, 0%", "10%, 20%, 40%", "0px", "30px", "0%, 10%, 20%, 30%", "top, top, top, top, top",
+      "calc(20px)",
+      "calc(20px + 1em)",
+      "calc(20px / 2)",
+      "calc(20px + 50%)",
+      "calc(50% - 10px)",
+      "calc(-20px)",
+      "calc(-50%)",
+      "calc(-20%)",
+      "bottom 20px",
+      "top 20px",
+      "bottom -50px",
+      "top -50px",
+      "bottom 20px",
+      "bottom 3em",
+    ],
+    invalid_values: [ "center 10px", "bottom 10% 50%", "top bottom", "top top",
+                      "right 20px", "left 10%", "right 3em",
+                      "left", "right", "left, left", "left, right", "right, left", "left, 0%", "left, left, left, left, left",
+                      "calc(0px + rubbish)"],
   };
   gCSSProperties["mask-repeat"] = {
     domProp: "maskRepeat",
@@ -7038,7 +7144,7 @@ if (IsCSSPropertyPrefEnabled("layout.css.prefixes.webkit")) {
     prerequisites: { "color": "black" },
     initial_values: [ "currentColor", "black", "#000", "#000000", "rgb(0,0,0)" ],
     other_values: [ "red", "rgba(255,255,255,0.5)", "transparent" ],
-    invalid_values: [ "#0", "#00", "#0000", "#00000", "#0000000", "#00000000", "#000000000", "000000", "ff00ff", "rgb(255,xxx,255)" ]
+    invalid_values: [ "#0", "#00", "#00000", "#0000000", "#000000000", "000000", "ff00ff", "rgb(255,xxx,255)" ]
   };
   gCSSProperties["-webkit-text-stroke"] = {
     domProp: "webkitTextStroke",
@@ -7057,7 +7163,7 @@ if (IsCSSPropertyPrefEnabled("layout.css.prefixes.webkit")) {
     prerequisites: { "color": "black" },
     initial_values: [ "currentColor", "black", "#000", "#000000", "rgb(0,0,0)" ],
     other_values: [ "red", "rgba(255,255,255,0.5)", "transparent" ],
-    invalid_values: [ "#0", "#00", "#0000", "#00000", "#0000000", "#00000000", "#000000000", "000000", "ff00ff", "rgb(255,xxx,255)" ]
+    invalid_values: [ "#0", "#00", "#00000", "#0000000", "#000000000", "000000", "ff00ff", "rgb(255,xxx,255)" ]
   };
   gCSSProperties["-webkit-text-stroke-width"] = {
     domProp: "webkitTextStrokeWidth",
@@ -7323,6 +7429,20 @@ if (IsCSSPropertyPrefEnabled("layout.css.prefixes.webkit")) {
       alias_for: "mask-position",
       subproperties: [ "mask-position" ],
     };
+    gCSSProperties["-webkit-mask-position-x"] = {
+      domProp: "webkitMaskPositionX",
+      inherited: false,
+      type: CSS_TYPE_SHORTHAND_AND_LONGHAND,
+      alias_for: "mask-position-x",
+      subproperties: [ "mask-position-x" ],
+    };
+    gCSSProperties["-webkit-mask-position-y"] = {
+      domProp: "webkitMaskPositionY",
+      inherited: false,
+      type: CSS_TYPE_SHORTHAND_AND_LONGHAND,
+      alias_for: "mask-position-y",
+      subproperties: [ "mask-position-y" ],
+    };
     gCSSProperties["-webkit-mask-repeat"] = {
       domProp: "webkitMaskRepeat",
       inherited: false,
@@ -7404,7 +7524,7 @@ if (IsCSSPropertyPrefEnabled("layout.css.text-emphasis.enabled")) {
     prerequisites: { "color": "black" },
     initial_values: [ "currentColor", "black", "rgb(0,0,0)" ],
     other_values: [ "red", "rgba(255,255,255,0.5)", "transparent" ],
-    invalid_values: [ "#0", "#00", "#0000", "#00000", "#0000000", "#00000000", "#000000000", "000000", "ff00ff", "rgb(255,xxx,255)" ]
+    invalid_values: [ "#0", "#00", "#00000", "#0000000", "#000000000", "000000", "ff00ff", "rgb(255,xxx,255)" ]
   };
   gCSSProperties["text-emphasis-position"] = {
     domProp: "textEmphasisPosition",

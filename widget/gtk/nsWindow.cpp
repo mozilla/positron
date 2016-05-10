@@ -1705,12 +1705,10 @@ nsWindow::GetNativeData(uint32_t aDataType)
             return nullptr;
 
         return mGdkWindow;
-        break;
     }
 
     case NS_NATIVE_PLUGIN_PORT:
         return SetupPluginPort();
-        break;
 
     case NS_NATIVE_PLUGIN_ID:
         if (!mPluginNativeWindow) {
@@ -1719,16 +1717,16 @@ nsWindow::GetNativeData(uint32_t aDataType)
         }
         // Return the socket widget XID
         return (void*)mPluginNativeWindow->window;
-        break;
 
-    case NS_NATIVE_DISPLAY:
+    case NS_NATIVE_DISPLAY: {
 #ifdef MOZ_X11
-        return GDK_DISPLAY_XDISPLAY(gdk_display_get_default());
-#else
-        return nullptr;
+        GdkDisplay* gdkDisplay = gdk_display_get_default();
+        if (GDK_IS_X11_DISPLAY(gdkDisplay)) {
+          return GDK_DISPLAY_XDISPLAY(gdkDisplay);
+        }
 #endif /* MOZ_X11 */
-        break;
-
+        return nullptr;
+    }
     case NS_NATIVE_SHELLWIDGET:
         return GetToplevelWidget();
 
@@ -2282,6 +2280,17 @@ nsWindow::OnExposeEvent(cairo_t *cr)
     bool painted = false;
     {
       if (GetLayerManager()->GetBackendType() == LayersBackend::LAYERS_BASIC) {
+        GdkScreen *screen = gdk_window_get_screen(mGdkWindow);
+        if (GetTransparencyMode() == eTransparencyTransparent &&
+            layerBuffering == BufferMode::BUFFER_NONE &&
+            gdk_screen_is_composited(screen) &&
+            gdk_window_get_visual(mGdkWindow) ==
+            gdk_screen_get_rgba_visual(screen)) {
+          // If our draw target is unbuffered and we use an alpha channel,
+          // clear the image beforehand to ensure we don't get artifacts from a
+          // reused SHM image. See bug 1258086.
+          dt->ClearRect(Rect(boundsRect));
+        }
         AutoLayerManagerSetup setupLayerManager(this, ctx, layerBuffering);
         painted = listener->PaintWindow(this, region);
       }
@@ -2473,9 +2482,7 @@ nsWindow::OnSizeAllocate(GtkAllocation *aAllocation)
     // GtkWindow callers of gtk_widget_size_allocate expect the signal
     // handlers to return sometime in the near future.
     mNeedsDispatchResized = true;
-    nsCOMPtr<nsIRunnable> r =
-        NS_NewRunnableMethod(this, &nsWindow::MaybeDispatchResized);
-    NS_DispatchToCurrentThread(r.forget());
+    NS_DispatchToCurrentThread(NewRunnableMethod(this, &nsWindow::MaybeDispatchResized));
 }
 
 void
@@ -4628,8 +4635,12 @@ nsWindow::GrabPointer(guint32 aTime)
         LOG(("GrabPointer: pointer grab failed: %i\n", retval));
         // A failed grab indicates that another app has grabbed the pointer.
         // Check for rollup now, because, without the grab, we likely won't
-        // get subsequent button press events.
-        CheckForRollup(0, 0, false, true);
+        // get subsequent button press events. Do this with an event so that
+        // popups don't rollup while potentially adjusting the grab for
+        // this popup.
+        nsCOMPtr<nsIRunnable> event =
+            NewRunnableMethod(this, &nsWindow::CheckForRollupDuringGrab);
+        NS_DispatchToCurrentThread(event.forget());
     }
 }
 

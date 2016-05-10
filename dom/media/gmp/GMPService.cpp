@@ -65,7 +65,7 @@ namespace gmp {
 
 static StaticRefPtr<GeckoMediaPluginService> sSingletonService;
 
-class GMPServiceCreateHelper final : public nsRunnable
+class GMPServiceCreateHelper final : public mozilla::Runnable
 {
   RefPtr<GeckoMediaPluginService> mService;
 
@@ -272,8 +272,8 @@ GeckoMediaPluginService::AddPluginCrashedEventTarget(const uint32_t aPluginId,
   mPluginCrashCallbacks.AppendElement(callback);
 }
 
-void
-GeckoMediaPluginService::RunPluginCrashCallbacks(const uint32_t aPluginId,
+NS_IMETHODIMP
+GeckoMediaPluginService::RunPluginCrashCallbacks(uint32_t aPluginId,
                                                  const nsACString& aPluginName)
 {
   MOZ_ASSERT(NS_IsMainThread());
@@ -293,6 +293,8 @@ GeckoMediaPluginService::RunPluginCrashCallbacks(const uint32_t aPluginId,
   if (mPluginCrashes.Length() > MAX_PLUGIN_CRASHES) {
     mPluginCrashes.RemoveElementAt(0);
   }
+
+  return NS_OK;
 }
 
 nsresult
@@ -318,6 +320,7 @@ GeckoMediaPluginService::ShutdownGMPThread()
     MutexAutoLock lock(mMutex);
     mGMPThreadShutdown = true;
     mGMPThread.swap(gmpThread);
+    mAbstractGMPThread = nullptr;
   }
 
   if (gmpThread) {
@@ -326,7 +329,16 @@ GeckoMediaPluginService::ShutdownGMPThread()
 }
 
 nsresult
-GeckoMediaPluginService::GMPDispatch(nsIRunnable* event, uint32_t flags)
+GeckoMediaPluginService::GMPDispatch(nsIRunnable* event,
+                                     uint32_t flags)
+{
+  nsCOMPtr<nsIRunnable> r(event);
+  return GMPDispatch(r.forget());
+}
+
+nsresult
+GeckoMediaPluginService::GMPDispatch(already_AddRefed<nsIRunnable> event,
+                                     uint32_t flags)
 {
   nsCOMPtr<nsIRunnable> r(event);
   nsCOMPtr<nsIThread> thread;
@@ -360,7 +372,7 @@ GeckoMediaPluginService::GetThread(nsIThread** aThread)
     mAbstractGMPThread = AbstractThread::CreateXPCOMThreadWrapper(mGMPThread, false);
 
     // Tell the thread to initialize plugins
-    InitializePlugins();
+    InitializePlugins(mAbstractGMPThread.get());
   }
 
   nsCOMPtr<nsIThread> copy = mGMPThread;
@@ -372,6 +384,7 @@ GeckoMediaPluginService::GetThread(nsIThread** aThread)
 RefPtr<AbstractThread>
 GeckoMediaPluginService::GetAbstractGMPThread()
 {
+  MutexAutoLock lock(mMutex);
   return mAbstractGMPThread;
 }
 

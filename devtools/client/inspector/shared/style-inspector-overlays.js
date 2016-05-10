@@ -77,7 +77,7 @@ HighlightersOverlay.prototype = {
    * Add the highlighters overlay to the view. This will start tracking mouse
    * movements and display highlighters when needed
    */
-  addToView: function() {
+  addToView: function () {
     if (!this.supportsHighlighters || this._isStarted || this._isDestroyed) {
       return;
     }
@@ -93,7 +93,7 @@ HighlightersOverlay.prototype = {
    * Remove the overlay from the current view. This will stop tracking mouse
    * movement and showing highlighters
    */
-  removeFromView: function() {
+  removeFromView: function () {
     if (!this.supportsHighlighters || !this._isStarted || this._isDestroyed) {
       return;
     }
@@ -107,7 +107,7 @@ HighlightersOverlay.prototype = {
     this._isStarted = false;
   },
 
-  _onMouseMove: function(event) {
+  _onMouseMove: function (event) {
     // Bail out if the target is the same as for the last mousemove
     if (event.target === this._lastHovered) {
       return;
@@ -143,7 +143,7 @@ HighlightersOverlay.prototype = {
     }
   },
 
-  _onMouseLeave: function() {
+  _onMouseLeave: function () {
     this._lastHovered = null;
     this._hideCurrent();
   },
@@ -154,7 +154,7 @@ HighlightersOverlay.prototype = {
    * @param {Object} nodeInfo
    * @return {Boolean}
    */
-  _isRuleViewTransform: function(nodeInfo) {
+  _isRuleViewTransform: function (nodeInfo) {
     let isTransform = nodeInfo.type === VIEW_NODE_VALUE_TYPE &&
                       nodeInfo.value.property === "transform";
     let isEnabled = nodeInfo.value.enabled &&
@@ -170,7 +170,7 @@ HighlightersOverlay.prototype = {
    * @param {Object} nodeInfo
    * @return {Boolean}
    */
-  _isComputedViewTransform: function(nodeInfo) {
+  _isComputedViewTransform: function (nodeInfo) {
     let isTransform = nodeInfo.type === VIEW_NODE_VALUE_TYPE &&
                       nodeInfo.value.property === "transform";
     return !this.isRuleView && isTransform;
@@ -179,7 +179,7 @@ HighlightersOverlay.prototype = {
   /**
    * Hide the currently shown highlighter
    */
-  _hideCurrent: function() {
+  _hideCurrent: function () {
     if (!this.highlighterShown || !this.highlighters[this.highlighterShown]) {
       return;
     }
@@ -202,7 +202,7 @@ HighlightersOverlay.prototype = {
    * @param {String} type The highlighter type. One of this.highlighters
    * @return a promise that resolves to the highlighter
    */
-  _getHighlighter: function(type) {
+  _getHighlighter: function (type) {
     let utils = this.highlighterUtils;
 
     if (this.highlighters[type]) {
@@ -219,7 +219,7 @@ HighlightersOverlay.prototype = {
    * Destroy this overlay instance, removing it from the view and destroying
    * all initialized highlighters
    */
-  destroy: function() {
+  destroy: function () {
     this.removeFromView();
 
     for (let type in this.highlighters) {
@@ -266,7 +266,7 @@ TooltipsOverlay.prototype = {
    * Add the tooltips overlay to the view. This will start tracking mouse
    * movements and display tooltips when needed
    */
-  addToView: function() {
+  addToView: function () {
     if (this._isStarted || this._isDestroyed) {
       return;
     }
@@ -297,7 +297,7 @@ TooltipsOverlay.prototype = {
    * Remove the tooltips overlay from the view. This will stop tracking mouse
    * movements and displaying tooltips
    */
-  removeFromView: function() {
+  removeFromView: function () {
     if (!this._isStarted || this._isDestroyed) {
       return;
     }
@@ -331,7 +331,7 @@ TooltipsOverlay.prototype = {
    * @param {Object} nodeInfo
    * @return {String} The tooltip type to be shown, or null
    */
-  _getTooltipType: function({type, value: prop}) {
+  _getTooltipType: function ({type, value: prop}) {
     let tooltipType = null;
     let inspector = this.view.inspector;
 
@@ -359,18 +359,19 @@ TooltipsOverlay.prototype = {
    * Checks if the hovered target is a css value we support tooltips for.
    *
    * @param {DOMNode} target The currently hovered node
+   * @return {Promise}
    */
-  _onPreviewTooltipTargetHover: function(target) {
+  _onPreviewTooltipTargetHover: Task.async(function* (target) {
     let nodeInfo = this.view.getNodeInfo(target);
     if (!nodeInfo) {
       // The hovered node isn't something we care about
-      return promise.reject(false);
+      return false;
     }
 
     let type = this._getTooltipType(nodeInfo);
     if (!type) {
       // There is no tooltip type defined for the hovered node
-      return promise.reject(false);
+      return false;
     }
 
     if (this.isRuleView && this.colorPicker.tooltip.isShown()) {
@@ -398,19 +399,21 @@ TooltipsOverlay.prototype = {
       let dim = Services.prefs.getIntPref(PREF_IMAGE_TOOLTIP_SIZE);
       // nodeInfo contains an absolute uri
       let uri = nodeInfo.value.url;
-      return this.previewTooltip.setRelativeImageContent(uri,
+      yield this.previewTooltip.setRelativeImageContent(uri,
         inspector.inspector, dim);
+      return true;
     }
 
     if (type === TOOLTIP_FONTFAMILY_TYPE) {
-      return this.previewTooltip.setFontFamilyContent(nodeInfo.value.value,
+      yield this.previewTooltip.setFontFamilyContent(nodeInfo.value.value,
         inspector.selection.nodeFront);
+      return true;
     }
 
-    return undefined;
-  },
+    return false;
+  }),
 
-  _onNewSelection: function() {
+  _onNewSelection: function () {
     if (this.previewTooltip) {
       this.previewTooltip.hide();
     }
@@ -435,7 +438,7 @@ TooltipsOverlay.prototype = {
   /**
    * Destroy this overlay instance, removing it from the view
    */
-  destroy: function() {
+  destroy: function () {
     this.removeFromView();
 
     this.view.inspector.selection.off("new-node-front", this._onNewSelection);

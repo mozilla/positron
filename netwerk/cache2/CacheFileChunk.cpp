@@ -13,7 +13,7 @@ namespace net {
 
 #define kMinBufSize        512
 
-class NotifyUpdateListenerEvent : public nsRunnable {
+class NotifyUpdateListenerEvent : public Runnable {
 public:
   NotifyUpdateListenerEvent(CacheFileChunkListener *aCallback,
                             CacheFileChunk *aChunk)
@@ -54,9 +54,7 @@ CacheFileChunk::DispatchRelease()
     return false;
   }
 
-  RefPtr<nsRunnableMethod<CacheFileChunk, MozExternalRefCountType, false> > event =
-    NS_NewNonOwningRunnableMethod(this, &CacheFileChunk::Release);
-  NS_DispatchToMainThread(event);
+  NS_DispatchToMainThread(NewNonOwningRunnableMethod(this, &CacheFileChunk::Release));
 
   return true;
 }
@@ -663,7 +661,7 @@ CacheFileChunk::BufForReading() const
   return mBuf ? mBuf : mRWBuf;
 }
 
-MOZ_WARN_UNUSED_RESULT nsresult
+MOZ_MUST_USE nsresult
 CacheFileChunk::EnsureBufSize(uint32_t aBufSize)
 {
   mFile->AssertOwnsLock();

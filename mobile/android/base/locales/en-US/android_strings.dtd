@@ -70,6 +70,11 @@
 <!ENTITY screenshot_folder_label_in_bookmarks "Screenshots">
 <!ENTITY readinglist_smartfolder_label_in_bookmarks "Reading List">
 
+<!-- Localization note (bookmark_folder_items): The variable is replaced by the number of items
+     in the folder. -->
+<!ENTITY bookmark_folder_items "&formatD; items">
+<!ENTITY bookmark_folder_one_item "1 item">
+
 <!ENTITY reader_saved_offline "Saved offline">
 <!-- Localization note (reader_switch_to_bookmarks) : This
      string is used as an action in a snackbar - it lets you
@@ -287,7 +292,12 @@
      update the website title is used instead of this string.
      We can't use Android plural forms, sadly. See Bug #753859. -->
 <!ENTITY content_notification_title_plural "&formatD; websites updated">
-<!ENTITY content_notification_action_settings "Notifications Setting">
+<!-- Localization note (content_notification_action_settings2): This label will be shown as an action in a content notification.
+     Clicking the action will jump to the notification settings of the app. -->
+<!ENTITY content_notification_action_settings2 "Settings">
+<!-- Localization note(content_notification_action_read_now): This label will be shown as an action in a content notification.
+     Clicking the action will open all new content in the browser. -->
+<!ENTITY content_notification_action_read_now "Read now">
 <!-- Localization note (content_notification_updated_on): &formatS; will be replaced with a medium sized version of the
      date, depending on locale. For en_US this is for example: Feb 24, 2016. For more details see the Android developer
      documentation for DateFormat.getMediumDateFormat(). -->
@@ -536,7 +546,11 @@ size. -->
      with the page title defined in aboutHome.dtd -->
 <!ENTITY home_title "&brandShortName; Home">
 <!ENTITY home_history_title "History">
-<!ENTITY home_history_back_to "Go back to all history">
+<!ENTITY home_synced_devices_smartfolder "Synced devices">
+<!ENTITY home_synced_devices_number "&formatD; devices">
+<!-- Localization note (home_synced_devices_one_device): This is the singular version of home_synced_devices_number, referring to the number of devices a user has synced. -->
+<!ENTITY home_synced_devices_one "1 device">
+<!ENTITY home_history_back_to2 "Back to full History">
 <!ENTITY home_clear_history_button "Clear browsing history">
 <!ENTITY home_clear_history_confirm "Are you sure you want to clear your history?">
 <!ENTITY home_bookmarks_empty "Bookmarks you save show up here.">
@@ -778,3 +792,8 @@ just addresses the organization to follow, e.g. "This site is run by " -->
 <!ENTITY helper_first_offline_bookmark_title "Read offline">
 <!ENTITY helper_first_offline_bookmark_message "Find your Reader View items in Bookmarks, even offline.">
 <!ENTITY helper_first_offline_bookmark_button "Go to Bookmarks">
+
+<!ENTITY helper_triple_readerview_open_title "Available offline">
+<!ENTITY helper_triple_readerview_open_message "Bookmark Reader View items to read them offline.">
+<!ENTITY helper_triple_readerview_open_button "Add to Bookmarks">
+

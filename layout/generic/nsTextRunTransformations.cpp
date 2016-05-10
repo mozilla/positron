@@ -318,7 +318,7 @@ nsCaseTransformTextRunFactory::TransformString(
       forceNonFullWidth = charStyle->mForceNonFullWidth;
 
       nsIAtom* newLang = charStyle->mExplicitLanguage
-                         ? charStyle->mLanguage : nullptr;
+                         ? charStyle->mLanguage.get() : nullptr;
       if (lang != newLang) {
         lang = newLang;
         languageSpecificCasing = GetCasingFor(lang);
@@ -554,7 +554,7 @@ nsCaseTransformTextRunFactory::TransformString(
       }
       break;
 
-    case NS_STYLE_TEXT_TRANSFORM_FULLWIDTH:
+    case NS_STYLE_TEXT_TRANSFORM_FULL_WIDTH:
       ch = mozilla::unicode::GetFullWidth(ch);
       break;
 

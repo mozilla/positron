@@ -15,7 +15,6 @@ const {CssLogic} = require("devtools/shared/inspector/css-logic");
 const {ELEMENT_STYLE} = require("devtools/server/actors/styles");
 const promise = require("promise");
 const Services = require("Services");
-const {setTimeout, clearTimeout} = Cu.import("resource://gre/modules/Timer.jsm", {});
 const {OutputParser} = require("devtools/client/shared/output-parser");
 const {PrefObserver, PREF_ORIG_SOURCES} = require("devtools/client/styleeditor/utils");
 const {createChild} = require("devtools/client/inspector/shared/utils");
@@ -228,7 +227,7 @@ CssComputedView.l10n = function(name) {
   try {
     return CssComputedView._strings.GetStringFromName(name);
   } catch (ex) {
-    Services.console.logStringMessage("Error reading '" + name + "'");
+    console.log("Error reading '" + name + "'");
     throw new Error("l10n error with " + name);
   }
 };

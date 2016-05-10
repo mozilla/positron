@@ -269,7 +269,8 @@ CreateBackendIndependentTextureHost(const SurfaceDescriptor& aDesc,
           break;
         }
         default:
-          MOZ_CRASH();
+          gfxCriticalError() << "Failed texture host for backend " << (int)data.type();
+          MOZ_CRASH("GFX: No texture host for backend");
       }
       break;
     }
@@ -377,7 +378,7 @@ TextureSource::~TextureSource()
 const char*
 TextureSource::Name() const
 {
-  MOZ_CRASH("TextureSource without class name");
+  MOZ_CRASH("GFX: TextureSource without class name");
   return "TextureSource";
 }
   
@@ -405,7 +406,9 @@ BufferTextureHost::BufferTextureHost(const BufferDescriptor& aDesc,
       mHasIntermediateBuffer = rgb.hasIntermediateBuffer();
       break;
     }
-    default: MOZ_CRASH();
+    default:
+      gfxCriticalError() << "Bad buffer host descriptor " << (int)mDescriptor.type();
+      MOZ_CRASH("GFX: Bad descriptor");
   }
   if (aFlags & TextureFlags::COMPONENT_ALPHA) {
     // One texture of a component alpha texture pair will start out all white.
@@ -558,7 +561,8 @@ BufferTextureHost::PrepareTextureSource(CompositableTextureSourceRef& aTexture)
                              || (mFormat == gfx::SurfaceFormat::YUV
                                  && mCompositor
                                  && mCompositor->SupportsEffect(EffectTypes::YCBCR)
-                                 && texture->GetNextSibling())
+                                 && texture->GetNextSibling()
+                                 && texture->GetNextSibling()->GetNextSibling())
                              || (mFormat == gfx::SurfaceFormat::YUV
                                  && mCompositor
                                  && !mCompositor->SupportsEffect(EffectTypes::YCBCR)
@@ -573,6 +577,15 @@ BufferTextureHost::PrepareTextureSource(CompositableTextureSourceRef& aTexture)
     mFirstSource = texture;
     mFirstSource->SetOwner(this);
     mNeedsFullUpdate = true;
+
+    // It's possible that texture belonged to a different compositor,
+    // so make sure we update it (and all of its siblings) to the
+    // current one.
+    RefPtr<TextureSource> it = mFirstSource;
+    while (it) {
+      it->SetCompositor(mCompositor);
+      it = it->GetNextSibling();
+    }
   }
 }
 

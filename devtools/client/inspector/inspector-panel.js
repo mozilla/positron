@@ -13,6 +13,7 @@ var promise = require("promise");
 var EventEmitter = require("devtools/shared/event-emitter");
 var clipboard = require("sdk/clipboard");
 var {HostType} = require("devtools/client/framework/toolbox").Toolbox;
+const {executeSoon} = require("devtools/shared/DevToolsUtils");
 
 loader.lazyRequireGetter(this, "CSS", "CSS");
 
@@ -511,13 +512,13 @@ InspectorPanel.prototype = {
     }
 
     let selfUpdate = this.updating("inspector-panel");
-    Services.tm.mainThread.dispatch(() => {
+    executeSoon(() => {
       try {
         selfUpdate(selection);
-      } catch(ex) {
+      } catch (ex) {
         console.error(ex);
       }
-    }, Ci.nsIThread.DISPATCH_NORMAL);
+    });
   },
 
   /**
@@ -987,8 +988,7 @@ InspectorPanel.prototype = {
 
     this._markupBox.removeAttribute("collapsed");
 
-    let controllerWindow = this._toolbox.doc.defaultView;
-    this.markup = new MarkupView(this, this._markupFrame, controllerWindow);
+    this.markup = new MarkupView(this, this._markupFrame, this._toolbox.win);
 
     this.emit("markuploaded");
   },
@@ -1248,7 +1248,7 @@ InspectorPanel.prototype = {
   _copyLongString: function(longStringActorPromise) {
     return this._getLongString(longStringActorPromise).then(string => {
       clipboardHelper.copyString(string);
-    }).catch(Cu.reportError);
+    }).catch(e => console.error(e));
   },
 
   /**
@@ -1259,10 +1259,10 @@ InspectorPanel.prototype = {
   _getLongString: function(longStringActorPromise) {
     return longStringActorPromise.then(longStringActor => {
       return longStringActor.string().then(string => {
-        longStringActor.release().catch(Cu.reportError);
+        longStringActor.release().catch(e => console.error(e));
         return string;
       });
-    }).catch(Cu.reportError);
+    }).catch(e => console.error(e));
   },
 
   /**

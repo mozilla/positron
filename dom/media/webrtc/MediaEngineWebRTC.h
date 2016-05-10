@@ -27,7 +27,7 @@
 #include "MediaEngineCameraVideoSource.h"
 #include "VideoSegment.h"
 #include "AudioSegment.h"
-#include "StreamBuffer.h"
+#include "StreamTracks.h"
 #include "MediaStreamGraph.h"
 #include "cubeb/cubeb.h"
 #include "CubebUtils.h"
@@ -515,6 +515,8 @@ protected:
 private:
   void Init();
 
+  void AppendSamplesToTrack(int16_t *audio10ms, int length);
+
   webrtc::VoiceEngine* mVoiceEngine;
   RefPtr<mozilla::AudioInput> mAudioInput;
   RefPtr<WebRTCAudioDataListener> mListener;
@@ -568,6 +570,9 @@ public:
   // Clients should ensure to clean-up sources video/audio sources
   // before invoking Shutdown on this class.
   void Shutdown() override;
+
+  // Returns whether the host supports duplex audio stream.
+  bool SupportsDuplex();
 
   void EnumerateVideoDevices(dom::MediaSourceEnum,
                              nsTArray<RefPtr<MediaEngineVideoSource>>*) override;

@@ -1133,7 +1133,7 @@ JS_MayResolveStandardClass(const JSAtomState& names, jsid id, JSObject* maybeObj
     // The global object's resolve hook is special: JS_ResolveStandardClass
     // initializes the prototype chain lazily. Only attempt to optimize here
     // if we know the prototype chain has been initialized.
-    if (!maybeObj || !maybeObj->getProto())
+    if (!maybeObj || !maybeObj->staticPrototype())
         return true;
 
     if (!JSID_IS_ATOM(id))
@@ -2012,6 +2012,13 @@ JS_SetPrototype(JSContext* cx, HandleObject obj, HandleObject proto)
     assertSameCompartment(cx, obj, proto);
 
     return SetPrototype(cx, obj, proto);
+}
+
+JS_PUBLIC_API(bool)
+JS_GetPrototypeIfOrdinary(JSContext* cx, HandleObject obj, bool* isOrdinary,
+                          MutableHandleObject result)
+{
+    return GetPrototypeIfOrdinary(cx, obj, isOrdinary, result);
 }
 
 JS_PUBLIC_API(bool)
@@ -3659,7 +3666,7 @@ JS_GetFunctionObject(JSFunction* fun)
 JS_PUBLIC_API(JSString*)
 JS_GetFunctionId(JSFunction* fun)
 {
-    return fun->atom();
+    return fun->name();
 }
 
 JS_PUBLIC_API(JSString*)
@@ -4168,6 +4175,32 @@ JS::FinishOffThreadScript(JSContext* maybecx, JSRuntime* rt, void* token)
 }
 
 JS_PUBLIC_API(bool)
+JS::CompileOffThreadModule(JSContext* cx, const ReadOnlyCompileOptions& options,
+                           const char16_t* chars, size_t length,
+                           OffThreadCompileCallback callback, void* callbackData)
+{
+    MOZ_ASSERT(CanCompileOffThread(cx, options, length));
+    return StartOffThreadParseModule(cx, options, chars, length, callback, callbackData);
+}
+
+JS_PUBLIC_API(JSObject*)
+JS::FinishOffThreadModule(JSContext* maybecx, JSRuntime* rt, void* token)
+{
+    MOZ_ASSERT(CurrentThreadCanAccessRuntime(rt));
+
+    if (maybecx) {
+        RootedObject module(maybecx);
+        {
+            AutoLastFrameCheck lfc(maybecx);
+            module = HelperThreadState().finishModuleParseTask(maybecx, rt, token);
+        }
+        return module;
+    } else {
+        return HelperThreadState().finishModuleParseTask(maybecx, rt, token);
+    }
+}
+
+JS_PUBLIC_API(bool)
 JS_CompileScript(JSContext* cx, const char* ascii, size_t length,
                  const JS::CompileOptions& options, MutableHandleScript script)
 {
@@ -4594,6 +4627,85 @@ JS::Evaluate(JSContext* cx, const ReadOnlyCompileOptions& optionsArg,
              const char* filename, MutableHandleValue rval)
 {
     return ::Evaluate(cx, optionsArg, filename, rval);
+}
+
+JS_PUBLIC_API(JSFunction*)
+JS::GetModuleResolveHook(JSContext* cx)
+{
+    AssertHeapIsIdle(cx);
+    CHECK_REQUEST(cx);
+    return cx->global()->moduleResolveHook();
+}
+
+JS_PUBLIC_API(void)
+JS::SetModuleResolveHook(JSContext* cx, HandleFunction func)
+{
+    AssertHeapIsIdle(cx);
+    CHECK_REQUEST(cx);
+    assertSameCompartment(cx, func);
+    cx->global()->setModuleResolveHook(func);
+}
+
+JS_PUBLIC_API(bool)
+JS::CompileModule(JSContext* cx, const ReadOnlyCompileOptions& options,
+                  SourceBufferHolder& srcBuf, JS::MutableHandleObject module)
+{
+    MOZ_ASSERT(!cx->runtime()->isAtomsCompartment(cx->compartment()));
+    AssertHeapIsIdle(cx);
+    CHECK_REQUEST(cx);
+
+    AutoLastFrameCheck lfc(cx);
+
+    module.set(frontend::CompileModule(cx, options, srcBuf));
+    return !!module;
+}
+
+JS_PUBLIC_API(void)
+JS::SetModuleHostDefinedField(JSObject* module, JS::Value value)
+{
+    module->as<ModuleObject>().setHostDefinedField(value);
+}
+
+JS_PUBLIC_API(JS::Value)
+JS::GetModuleHostDefinedField(JSObject* module)
+{
+    return module->as<ModuleObject>().hostDefinedField();
+}
+
+JS_PUBLIC_API(bool)
+JS::ModuleDeclarationInstantiation(JSContext* cx, JS::HandleObject moduleArg)
+{
+    AssertHeapIsIdle(cx);
+    CHECK_REQUEST(cx);
+    assertSameCompartment(cx, moduleArg);
+    return ModuleObject::DeclarationInstantiation(cx, moduleArg.as<ModuleObject>());
+}
+
+JS_PUBLIC_API(bool)
+JS::ModuleEvaluation(JSContext* cx, JS::HandleObject moduleArg)
+{
+    AssertHeapIsIdle(cx);
+    CHECK_REQUEST(cx);
+    assertSameCompartment(cx, moduleArg);
+    return ModuleObject::Evaluation(cx, moduleArg.as<ModuleObject>());
+}
+
+JS_PUBLIC_API(JSObject*)
+JS::GetRequestedModules(JSContext* cx, JS::HandleObject moduleArg)
+{
+    AssertHeapIsIdle(cx);
+    CHECK_REQUEST(cx);
+    assertSameCompartment(cx, moduleArg);
+    return &moduleArg->as<ModuleObject>().requestedModules();
+}
+
+JS_PUBLIC_API(JSScript*)
+JS::GetModuleScript(JSContext* cx, JS::HandleObject moduleArg)
+{
+    AssertHeapIsIdle(cx);
+    CHECK_REQUEST(cx);
+    assertSameCompartment(cx, moduleArg);
+    return moduleArg->as<ModuleObject>().script();
 }
 
 static JSObject*
@@ -6534,4 +6646,11 @@ JS_PUBLIC_API(Zone*)
 JS::GetObjectZone(JSObject* obj)
 {
     return obj->zone();
+}
+
+JS_PUBLIC_API(JS::TraceKind)
+JS::GCThingTraceKind(void* thing)
+{
+    MOZ_ASSERT(thing);
+    return static_cast<js::gc::Cell*>(thing)->getTraceKind();
 }

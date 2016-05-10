@@ -101,7 +101,7 @@ struct DeferredFinalizeFunctionHolder
   void* data;
 };
 
-class IncrementalFinalizeRunnable : public nsRunnable
+class IncrementalFinalizeRunnable : public Runnable
 {
   typedef AutoTArray<DeferredFinalizeFunctionHolder, 16> DeferredFinalizeArray;
   typedef CycleCollectedJSRuntime::DeferredFinalizerTable DeferredFinalizerTable;
@@ -299,7 +299,7 @@ JSGCThingParticipant::Traverse(void* aPtr,
     reinterpret_cast<char*>(this) - offsetof(CycleCollectedJSRuntime,
                                              mGCThingCycleCollectorGlobal));
 
-  JS::GCCellPtr cellPtr(aPtr, js::GCThingTraceKind(aPtr));
+  JS::GCCellPtr cellPtr(aPtr, JS::GCThingTraceKind(aPtr));
   runtime->TraverseGCThing(CycleCollectedJSRuntime::TRAVERSE_FULL, cellPtr, aCb);
   return NS_OK;
 }
@@ -467,6 +467,9 @@ CycleCollectedJSRuntime::~CycleCollectedJSRuntime()
 
   // Clear mPendingException first, since it might be cycle collected.
   mPendingException = nullptr;
+
+  MOZ_ASSERT(mDebuggerPromiseMicroTaskQueue.empty());
+  MOZ_ASSERT(mPromiseMicroTaskQueue.empty());
 
   JS_DestroyRuntime(mJSRuntime);
   mJSRuntime = nullptr;
@@ -915,7 +918,7 @@ CycleCollectedJSRuntime::ContextCallback(JSContext* aContext,
   return self->CustomContextCallback(aContext, aOperation);
 }
 
-class PromiseJobRunnable final : public nsRunnable
+class PromiseJobRunnable final : public Runnable
 {
 public:
   PromiseJobRunnable(JSContext* aCx, JS::HandleObject aCallback)

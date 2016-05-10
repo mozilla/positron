@@ -68,7 +68,6 @@ nsViewSourceChannel::Init(nsIURI* uri)
     // nullPrincipal as the loadingPrincipal and the least permissive
     // securityflag.
     nsCOMPtr<nsIPrincipal> nullPrincipal = nsNullPrincipal::Create();
-    NS_ENSURE_TRUE(nullPrincipal, NS_ERROR_FAILURE);
 
     rv = pService->NewChannel2(path,
                                nullptr, // aOriginCharset
@@ -935,17 +934,17 @@ nsViewSourceChannel::RedirectTo(nsIURI *uri)
 }
 
 NS_IMETHODIMP
-nsViewSourceChannel::GetSchedulingContextID(nsID *_retval)
+nsViewSourceChannel::GetRequestContextID(nsID *_retval)
 {
     return !mHttpChannel ? NS_ERROR_NULL_POINTER :
-        mHttpChannel->GetSchedulingContextID(_retval);
+        mHttpChannel->GetRequestContextID(_retval);
 }
 
 NS_IMETHODIMP
-nsViewSourceChannel::SetSchedulingContextID(const nsID scid)
+nsViewSourceChannel::SetRequestContextID(const nsID rcid)
 {
     return !mHttpChannel ? NS_ERROR_NULL_POINTER :
-        mHttpChannel->SetSchedulingContextID(scid);
+        mHttpChannel->SetRequestContextID(rcid);
 }
 
 NS_IMETHODIMP

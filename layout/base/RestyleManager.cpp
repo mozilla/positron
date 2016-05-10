@@ -886,6 +886,19 @@ RestyleManager::ProcessRestyledFrames(nsStyleChangeList& aChangeList)
         hint |= nsChangeHint_RepaintFrame;
       }
 
+      if (hint & nsChangeHint_UpdateBackgroundPosition) {
+        // For most frame types, DLBI can detect background position changes,
+        // so we only need to schedule a paint.
+        hint |= nsChangeHint_SchedulePaint;
+        if (frame->IsFrameOfType(nsIFrame::eTablePart) ||
+            frame->IsFrameOfType(nsIFrame::eMathML)) {
+          // Table parts and MathML frames don't build display items for their
+          // backgrounds, so DLBI can't detect background-position changes for
+          // these frames. Repaint the whole frame.
+          hint |= nsChangeHint_RepaintFrame;
+        }
+      }
+
       if (hint & (nsChangeHint_RepaintFrame | nsChangeHint_SyncFrameView |
                   nsChangeHint_UpdateOpacityLayer | nsChangeHint_UpdateTransformLayer |
                   nsChangeHint_ChildrenOnlyTransform | nsChangeHint_SchedulePaint)) {
@@ -3210,6 +3223,7 @@ ElementRestyler::Restyle(nsRestyleHint aRestyleHint)
   NS_ASSERTION(mFrame->GetContent() || !mParentContent ||
                !mParentContent->GetParent(),
                "frame must have content (unless at the top of the tree)");
+  MOZ_ASSERT(mPresContext == mFrame->PresContext(), "pres contexts match");
 
   NS_ASSERTION(!GetPrevContinuationWithSameStyle(mFrame),
                "should not be trying to restyle this frame separately");
@@ -3217,7 +3231,9 @@ ElementRestyler::Restyle(nsRestyleHint aRestyleHint)
   MOZ_ASSERT(!(aRestyleHint & eRestyle_LaterSiblings),
              "eRestyle_LaterSiblings must not be part of aRestyleHint");
 
-  AutoDisplayContentsAncestorPusher adcp(mTreeMatchContext, mFrame->PresContext(),
+  mPresContext->RestyledElement();
+
+  AutoDisplayContentsAncestorPusher adcp(mTreeMatchContext, mPresContext,
       mFrame->GetContent() ? mFrame->GetContent()->GetParent() : nullptr);
 
   AutoSelectorArrayTruncater asat(mSelectorsForDescendants);
@@ -3934,10 +3950,12 @@ ElementRestyler::RestyleSelf(nsIFrame* aSelf,
     // continuation.
     LOG_RESTYLE("using previous continuation's context");
     newContext = prevContinuationContext;
+  } else if (pseudoTag == nsCSSAnonBoxes::mozText) {
+    MOZ_ASSERT(aSelf->GetType() == nsGkAtoms::textFrame);
+    newContext =
+      styleSet->ResolveStyleForText(aSelf->GetContent(), parentContext);
   } else if (nsCSSAnonBoxes::IsNonElement(pseudoTag)) {
-    NS_ASSERTION(aSelf->GetContent(),
-                 "non pseudo-element frame without content node");
-    newContext = styleSet->ResolveStyleForNonElement(parentContext, pseudoTag);
+    newContext = styleSet->ResolveStyleForOtherNonElement(parentContext);
   }
   else {
     Element* element = ElementForStyleContext(mParentContent, aSelf, pseudoType);

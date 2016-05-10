@@ -161,7 +161,7 @@ nsWindow::DispatchTouchInput(MultiTouchInput& aInput)
     gFocusedWindow->DispatchTouchInputViaAPZ(aInput);
 }
 
-class DispatchTouchInputOnMainThread : public nsRunnable
+class DispatchTouchInputOnMainThread : public mozilla::Runnable
 {
 public:
     DispatchTouchInputOnMainThread(const MultiTouchInput& aInput,
@@ -235,18 +235,18 @@ nsWindow::DispatchTouchEventForAPZ(const MultiTouchInput& aInput,
     ProcessUntransformedAPZEvent(&event, aGuid, aInputBlockId, aApzResponse);
 }
 
-class DispatchTouchInputOnControllerThread : public Task
+class DispatchTouchInputOnControllerThread : public Runnable
 {
 public:
     DispatchTouchInputOnControllerThread(const MultiTouchInput& aInput)
-      : Task()
-      , mInput(aInput)
+      : mInput(aInput)
     {}
 
-    virtual void Run() override {
+    NS_IMETHOD Run() override {
         if (gFocusedWindow) {
             gFocusedWindow->DispatchTouchInputViaAPZ(mInput);
         }
+        return NS_OK;
     }
 
 private:
@@ -325,7 +325,8 @@ nsWindow::SynthesizeNativeTouchPoint(uint32_t aPointerId,
     // the function performs so this is fine. Also we can't pass |this| to the
     // task because nsWindow refcounting is not threadsafe. Instead we just use
     // the gFocusedWindow static ptr instead the task.
-    APZThreadUtils::RunOnControllerThread(new DispatchTouchInputOnControllerThread(inputToDispatch));
+    APZThreadUtils::RunOnControllerThread(
+      MakeAndAddRef<DispatchTouchInputOnControllerThread>(inputToDispatch));
 
     return NS_OK;
 }
@@ -722,7 +723,13 @@ nsWindow::DestroyCompositor()
 CompositorBridgeParent*
 nsWindow::NewCompositorBridgeParent(int aSurfaceWidth, int aSurfaceHeight)
 {
-    return new CompositorBridgeParent(this, true, aSurfaceWidth, aSurfaceHeight);
+    if (!mCompositorWidgetProxy) {
+        mCompositorWidgetProxy = NewCompositorWidgetProxy();
+    }
+    return new CompositorBridgeParent(mCompositorWidgetProxy,
+                                      GetDefaultScale(),
+                                      UseAPZ(),
+                                      true, aSurfaceWidth, aSurfaceHeight);
 }
 
 void

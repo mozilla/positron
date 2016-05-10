@@ -1372,7 +1372,7 @@ class StringSegmentRange
       : stack(cx, StringVector(cx)), cur(cx)
     {}
 
-    MOZ_WARN_UNUSED_RESULT bool init(JSString* str) {
+    MOZ_MUST_USE bool init(JSString* str) {
         MOZ_ASSERT(stack.empty());
         return settle(str);
     }
@@ -1386,7 +1386,7 @@ class StringSegmentRange
         return cur;
     }
 
-    MOZ_WARN_UNUSED_RESULT bool popFront() {
+    MOZ_MUST_USE bool popFront() {
         MOZ_ASSERT(!empty());
         if (stack.empty()) {
             cur = nullptr;
@@ -3091,6 +3091,7 @@ js_fputs(const char16_t* s, FILE* f)
     while (*s != 0) {
         if (fputwc(wchar_t(*s), f) == WEOF)
             return WEOF;
+        s++;
     }
     return 1;
 }
@@ -3123,14 +3124,31 @@ js::DuplicateString(const char* s)
     return UniqueChars(js_strdup(s));
 }
 
-UniqueTwoByteChars
-js::DuplicateString(const char16_t* s)
+UniqueChars
+js::DuplicateString(const char* s, size_t n)
 {
-    size_t n = js_strlen(s) + 1;
-    UniqueTwoByteChars ret(js_pod_malloc<char16_t>(n));
+    UniqueChars ret(js_pod_malloc<char>(n + 1));
     if (!ret)
         return nullptr;
     PodCopy(ret.get(), s, n);
+    ret[n] = 0;
+    return ret;
+}
+
+UniqueTwoByteChars
+js::DuplicateString(const char16_t* s)
+{
+    return DuplicateString(s, js_strlen(s));
+}
+
+UniqueTwoByteChars
+js::DuplicateString(const char16_t* s, size_t n)
+{
+    UniqueTwoByteChars ret(js_pod_malloc<char16_t>(n + 1));
+    if (!ret)
+        return nullptr;
+    PodCopy(ret.get(), s, n);
+    ret[n] = 0;
     return ret;
 }
 

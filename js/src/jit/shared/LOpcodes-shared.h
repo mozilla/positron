@@ -21,8 +21,8 @@
     _(SimdBox)                      \
     _(SimdUnbox)                    \
     _(SimdSplatX4)                  \
-    _(Int32x4)                      \
-    _(Float32x4)                    \
+    _(Simd128Int)                   \
+    _(Simd128Float)                 \
     _(SimdAllTrue)                  \
     _(SimdAnyTrue)                  \
     _(SimdReinterpretCast)          \
@@ -189,6 +189,7 @@
     _(Float32ToInt32)               \
     _(TruncateDToInt32)             \
     _(TruncateFToInt32)             \
+    _(WasmTruncateToInt32)          \
     _(WrapInt64ToInt32)             \
     _(ExtendInt32ToInt64)           \
     _(BooleanToString)              \
@@ -211,6 +212,7 @@
     _(RegExpTester)                 \
     _(RegExpPrototypeOptimizable)   \
     _(RegExpInstanceOptimizable)    \
+    _(GetFirstDollarIndex)          \
     _(StringReplace)                \
     _(Substr)                       \
     _(BinarySharedStub)             \
@@ -351,6 +353,8 @@
     _(AsmReinterpret)               \
     _(AsmReinterpretToI64)          \
     _(AsmReinterpretFromI64)        \
+    _(Rotate)                       \
+    _(Rotate64)                     \
     _(GetDOMProperty)               \
     _(GetDOMMemberV)                \
     _(GetDOMMemberT)                \

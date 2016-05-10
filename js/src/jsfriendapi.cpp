@@ -143,6 +143,12 @@ JS_NewObjectWithoutMetadata(JSContext* cx, const JSClass* clasp, JS::Handle<JSOb
     return JS_NewObjectWithGivenProto(cx, clasp, proto);
 }
 
+JS_FRIEND_API(bool)
+JS_GetIsSecureContext(JSCompartment* compartment)
+{
+    return compartment->creationOptions().secureContext();
+}
+
 JS_FRIEND_API(JSPrincipals*)
 JS_GetCompartmentPrincipals(JSCompartment* compartment)
 {
@@ -289,6 +295,10 @@ js::GetBuiltinClass(JSContext* cx, HandleObject obj, ESClassValue* classValue)
         *classValue = ESClass_Map;
     else if (obj->is<PromiseObject>())
         *classValue = ESClass_Promise;
+    else if (obj->is<MapIteratorObject>())
+        *classValue = ESClass_MapIterator;
+    else if (obj->is<SetIteratorObject>())
+        *classValue = ESClass_SetIterator;
     else
         *classValue = ESClass_Other;
 
@@ -347,8 +357,7 @@ JS_FRIEND_API(JSObject*)
 js::GetPrototypeNoProxy(JSObject* obj)
 {
     MOZ_ASSERT(!obj->is<js::ProxyObject>());
-    MOZ_ASSERT(!obj->getTaggedProto().isLazy());
-    return obj->getTaggedProto().toObjectOrNull();
+    return obj->staticPrototype();
 }
 
 JS_FRIEND_API(void)
@@ -495,6 +504,13 @@ js::GetObjectProto(JSContext* cx, JS::Handle<JSObject*> obj, JS::MutableHandle<J
     return true;
 }
 
+JS_FRIEND_API(JSObject*)
+js::GetStaticPrototype(JSObject* obj)
+{
+    MOZ_ASSERT(obj->hasStaticPrototype());
+    return obj->staticPrototype();
+}
+
 JS_FRIEND_API(bool)
 js::GetOriginalEval(JSContext* cx, HandleObject scope, MutableHandleObject eval)
 {
@@ -579,13 +595,6 @@ js::ZoneGlobalsAreAllGray(JS::Zone* zone)
             return false;
     }
     return true;
-}
-
-JS_FRIEND_API(JS::TraceKind)
-js::GCThingTraceKind(void* thing)
-{
-    MOZ_ASSERT(thing);
-    return static_cast<js::gc::Cell*>(thing)->getTraceKind();
 }
 
 JS_FRIEND_API(void)
@@ -1275,32 +1284,6 @@ js::HasObjectMovedOp(JSObject* obj) {
     return !!GetObjectClass(obj)->extObjectMovedOp();
 }
 #endif
-
-JS_FRIEND_API(void)
-JS_StoreObjectPostBarrierCallback(JSContext* cx,
-                                  void (*callback)(JSTracer* trc, JSObject* key, void* data),
-                                  JSObject* key, void* data)
-{
-    JSRuntime* rt = cx->runtime();
-    if (IsInsideNursery(key))
-        rt->gc.storeBuffer.putCallback(callback, key, data);
-}
-
-extern JS_FRIEND_API(void)
-JS_StoreStringPostBarrierCallback(JSContext* cx,
-                                  void (*callback)(JSTracer* trc, JSString* key, void* data),
-                                  JSString* key, void* data)
-{
-    JSRuntime* rt = cx->runtime();
-    if (IsInsideNursery(key))
-        rt->gc.storeBuffer.putCallback(callback, key, data);
-}
-
-extern JS_FRIEND_API(void)
-JS_ClearAllPostBarrierCallbacks(JSRuntime* rt)
-{
-    rt->gc.clearPostBarrierCallbacks();
-}
 
 JS_FRIEND_API(bool)
 js::ForwardToNative(JSContext* cx, JSNative native, const CallArgs& args)

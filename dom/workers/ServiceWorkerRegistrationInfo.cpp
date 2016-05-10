@@ -8,6 +8,39 @@
 
 BEGIN_WORKERS_NAMESPACE
 
+namespace {
+
+class ContinueActivateRunnable final : public LifeCycleEventCallback
+{
+  nsMainThreadPtrHandle<ServiceWorkerRegistrationInfo> mRegistration;
+  bool mSuccess;
+
+public:
+  explicit ContinueActivateRunnable(const nsMainThreadPtrHandle<ServiceWorkerRegistrationInfo>& aRegistration)
+    : mRegistration(aRegistration)
+    , mSuccess(false)
+  {
+    AssertIsOnMainThread();
+  }
+
+  void
+  SetResult(bool aResult) override
+  {
+    mSuccess = aResult;
+  }
+
+  NS_IMETHOD
+  Run() override
+  {
+    AssertIsOnMainThread();
+    mRegistration->FinishActivate(mSuccess);
+    mRegistration = nullptr;
+    return NS_OK;
+  }
+};
+
+} // anonymous namespace
+
 void
 ServiceWorkerRegistrationInfo::Clear()
 {
@@ -168,10 +201,9 @@ ServiceWorkerRegistrationInfo::GetServiceWorkerInfoById(uint64_t aId)
 void
 ServiceWorkerRegistrationInfo::TryToActivateAsync()
 {
-  nsCOMPtr<nsIRunnable> r =
-  NS_NewRunnableMethod(this,
-                       &ServiceWorkerRegistrationInfo::TryToActivate);
-  MOZ_ALWAYS_SUCCEEDS(NS_DispatchToMainThread(r));
+  MOZ_ALWAYS_SUCCEEDS(
+    NS_DispatchToMainThread(NewRunnableMethod(this,
+                                              &ServiceWorkerRegistrationInfo::TryToActivate)));
 }
 
 /*
@@ -203,14 +235,14 @@ ServiceWorkerRegistrationInfo::Activate()
 
   // "Queue a task to fire a simple event named controllerchange..."
   nsCOMPtr<nsIRunnable> controllerChangeRunnable =
-    NS_NewRunnableMethodWithArg<RefPtr<ServiceWorkerRegistrationInfo>>(
+    NewRunnableMethod<RefPtr<ServiceWorkerRegistrationInfo>>(
       swm, &ServiceWorkerManager::FireControllerChange, this);
   NS_DispatchToMainThread(controllerChangeRunnable);
 
   nsCOMPtr<nsIRunnable> failRunnable =
-    NS_NewRunnableMethodWithArg<bool>(this,
-                                      &ServiceWorkerRegistrationInfo::FinishActivate,
-                                      false /* success */);
+    NewRunnableMethod<bool>(this,
+                            &ServiceWorkerRegistrationInfo::FinishActivate,
+                            false /* success */);
 
   nsMainThreadPtrHandle<ServiceWorkerRegistrationInfo> handle(
     new nsMainThreadPtrHolder<ServiceWorkerRegistrationInfo>(this));
@@ -260,8 +292,7 @@ ServiceWorkerRegistrationInfo::IsLastUpdateCheckTimeOverOneDay() const
   const uint64_t kSecondsPerDay = 86400;
   const uint64_t now = PR_IntervalNow() / PR_MSEC_PER_SEC;
 
-  if ((mLastUpdateCheckTime != 0) &&
-      (now - mLastUpdateCheckTime > kSecondsPerDay)) {
+  if ((now - mLastUpdateCheckTime) > kSecondsPerDay) {
     return true;
   }
   return false;

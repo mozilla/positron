@@ -550,11 +550,14 @@ var PlacesCommandHook = {
   get uniqueCurrentPages() {
     let uniquePages = {};
     let URIs = [];
-    gBrowser.visibleTabs.forEach(function (tab) {
-      let spec = tab.linkedBrowser.currentURI.spec;
+
+    gBrowser.visibleTabs.forEach(tab => {
+      let browser = tab.linkedBrowser;
+      let uri = browser.currentURI;
+      let spec = uri.spec;
       if (!tab.pinned && !(spec in uniquePages)) {
         uniquePages[spec] = null;
-        URIs.push(tab.linkedBrowser.currentURI);
+        URIs.push({ uri, title: browser.contentTitle });
       }
     });
     return URIs;
@@ -1326,8 +1329,8 @@ var BookmarkingUI = {
       return;
     }
 
-    this._updateRecentBookmarks(document.getElementById("BMB_recentBookmarks"),
-                                "subviewbutton");
+    this._initRecentBookmarks(document.getElementById("BMB_recentBookmarks"),
+                              "subviewbutton");
 
     if (!this._popupNeedsUpdate)
       return;
@@ -1362,7 +1365,84 @@ var BookmarkingUI = {
     });
   },
 
-  _updateRecentBookmarks: function(aHeaderItem, extraCSSClass = "") {
+  RECENTLY_BOOKMARKED_PREF: "browser.bookmarks.showRecentlyBookmarked",
+
+  _initRecentBookmarks(aHeaderItem, aExtraCSSClass) {
+    this._populateRecentBookmarks(aHeaderItem, aExtraCSSClass);
+
+    // Add observers and listeners and remove them again when the menupopup closes.
+
+    let bookmarksMenu = aHeaderItem.parentNode;
+    let placesContextMenu = document.getElementById("placesContext");
+
+    let prefObserver = () => {
+      this._populateRecentBookmarks(aHeaderItem, aExtraCSSClass);
+    };
+
+    this._recentlyBookmarkedObserver = {
+      QueryInterface: XPCOMUtils.generateQI([
+        Ci.nsINavBookmarkObserver,
+        Ci.nsISupportsWeakReference
+      ])
+    };
+    this._recentlyBookmarkedObserver.onItemRemoved = () => {
+      // Update the menu when a bookmark has been removed.
+      // The native menubar on Mac doesn't support live update, so this won't
+      // work there.
+      this._populateRecentBookmarks(aHeaderItem, aExtraCSSClass);
+    };
+
+    let updatePlacesContextMenu = (shouldHidePrefUI = false) => {
+      let prefEnabled = !shouldHidePrefUI && Services.prefs.getBoolPref(this.RECENTLY_BOOKMARKED_PREF);
+      document.getElementById("placesContext_showRecentlyBookmarked").hidden = shouldHidePrefUI || prefEnabled;
+      document.getElementById("placesContext_hideRecentlyBookmarked").hidden = shouldHidePrefUI || !prefEnabled;
+      document.getElementById("placesContext_recentlyBookmarkedSeparator").hidden = shouldHidePrefUI;
+    };
+
+    let onPlacesContextMenuShowing = event => {
+      if (event.target == event.currentTarget) {
+        let triggerPopup = event.target.triggerNode;
+        while (triggerPopup && triggerPopup.localName != "menupopup") {
+          triggerPopup = triggerPopup.parentNode;
+        }
+        let shouldHidePrefUI = triggerPopup != bookmarksMenu;
+        updatePlacesContextMenu(shouldHidePrefUI);
+      }
+    };
+
+    let onBookmarksMenuHidden = event => {
+      if (event.target == event.currentTarget) {
+        updatePlacesContextMenu(true);
+
+        Services.prefs.removeObserver(this.RECENTLY_BOOKMARKED_PREF, prefObserver, false);
+        PlacesUtils.bookmarks.removeObserver(this._recentlyBookmarkedObserver);
+        this._recentlyBookmarkedObserver = null;
+        placesContextMenu.removeEventListener("popupshowing", onPlacesContextMenuShowing);
+        bookmarksMenu.removeEventListener("popuphidden", onBookmarksMenuHidden);
+      }
+    };
+
+    Services.prefs.addObserver(this.RECENTLY_BOOKMARKED_PREF, prefObserver, false);
+    PlacesUtils.bookmarks.addObserver(this._recentlyBookmarkedObserver, true);
+    placesContextMenu.addEventListener("popupshowing", onPlacesContextMenuShowing);
+    bookmarksMenu.addEventListener("popuphidden", onBookmarksMenuHidden);
+  },
+
+  _populateRecentBookmarks(aHeaderItem, aExtraCSSClass = "") {
+    while (aHeaderItem.nextSibling &&
+           aHeaderItem.nextSibling.localName == "menuitem") {
+      aHeaderItem.nextSibling.remove();
+    }
+
+    let shouldShow = Services.prefs.getBoolPref(this.RECENTLY_BOOKMARKED_PREF);
+    let separator = aHeaderItem.previousSibling;
+    aHeaderItem.hidden = !shouldShow;
+    separator.hidden = !shouldShow;
+
+    if (!shouldShow) {
+      return;
+    }
+
     const kMaxResults = 5;
 
     let options = PlacesUtils.history.getNewQueryOptions();
@@ -1371,11 +1451,6 @@ var BookmarkingUI = {
     options.sortingMode = options.SORT_BY_DATEADDED_DESCENDING;
     options.maxResults = kMaxResults;
     let query = PlacesUtils.history.getNewQuery();
-
-    while (aHeaderItem.nextSibling &&
-           aHeaderItem.nextSibling.localName == "menuitem") {
-      aHeaderItem.nextSibling.remove();
-    }
 
     let onItemCommand = function (aEvent) {
       let item = aEvent.target;
@@ -1397,8 +1472,9 @@ var BookmarkingUI = {
                                  "menuitem");
       item.setAttribute("label", title || uri);
       item.setAttribute("targetURI", uri);
+      item.setAttribute("context", "hideRecentlyBookmarked");
       item.setAttribute("class", "menuitem-iconic menuitem-with-favicon bookmark-item " +
-                                 extraCSSClass);
+                                 aExtraCSSClass);
       item.addEventListener("command", onItemCommand);
       if (icon) {
         item.setAttribute("image", icon);
@@ -1407,27 +1483,15 @@ var BookmarkingUI = {
     }
     root.containerOpen = false;
     aHeaderItem.parentNode.insertBefore(fragment, aHeaderItem.nextSibling);
+    aHeaderItem.setAttribute("context", "hideRecentlyBookmarked");
   },
 
-  /**
-   * Handles star styling based on page proxy state changes.
-   */
-  onPageProxyStateChanged: function BUI_onPageProxyStateChanged(aState) {
-    if (!this._shouldUpdateStarState() || !this.star) {
-      return;
-    }
+  showRecentlyBookmarked() {
+    Services.prefs.setBoolPref(this.RECENTLY_BOOKMARKED_PREF, true);
+  },
 
-    if (aState == "invalid") {
-      this.star.setAttribute("disabled", "true");
-      this.broadcaster.setAttribute("stardisabled", "true");
-      this.broadcaster.removeAttribute("starred");
-      this.broadcaster.setAttribute("buttontooltiptext", "");
-    }
-    else {
-      this.star.removeAttribute("disabled");
-      this.broadcaster.removeAttribute("stardisabled");
-      this._updateStar();
-    }
+  hideRecentlyBookmarked() {
+    Services.prefs.setBoolPref(this.RECENTLY_BOOKMARKED_PREF, false);
   },
 
   _updateCustomizationState: function BUI__updateCustomizationState() {
@@ -1546,11 +1610,6 @@ var BookmarkingUI = {
       delete this._pendingStmt;
     }
 
-    // We can load about:blank before the actual page, but there is no point in handling that page.
-    if (isBlankPageURL(this._uri.spec)) {
-      return;
-    }
-
     this._pendingStmt = PlacesUtils.asyncGetBookmarkIds(this._uri, (aItemIds, aURI) => {
       // Safety check that the bookmarked URI equals the tracked one.
       if (!aURI.equals(this._uri)) {
@@ -1625,7 +1684,7 @@ var BookmarkingUI = {
 
     this._updateBookmarkPageMenuItem();
     PlacesCommandHook.updateBookmarkAllTabsCommand();
-    this._updateRecentBookmarks(document.getElementById("menu_recentBookmarks"));
+    this._initRecentBookmarks(document.getElementById("menu_recentBookmarks"));
   },
 
   _showBookmarkedNotification: function BUI_showBookmarkedNotification() {

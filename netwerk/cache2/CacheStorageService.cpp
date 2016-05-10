@@ -143,7 +143,7 @@ void CacheStorageService::Shutdown()
   mShutdown = true;
 
   nsCOMPtr<nsIRunnable> event =
-    NS_NewRunnableMethod(this, &CacheStorageService::ShutdownBackground);
+    NewRunnableMethod(this, &CacheStorageService::ShutdownBackground);
   Dispatch(event);
 
   mozilla::MutexAutoLock lock(mLock);
@@ -175,7 +175,7 @@ namespace {
 
 // WalkCacheRunnable
 // Base class for particular storage entries visiting
-class WalkCacheRunnable : public nsRunnable
+class WalkCacheRunnable : public Runnable
                         , public CacheStorageService::EntryInfoCallback
 {
 protected:
@@ -357,7 +357,7 @@ public:
 private:
   // Invokes OnCacheEntryInfo callback for each single found entry.
   // There is one instance of this class per one entry.
-  class OnCacheEntryInfoRunnable : public nsRunnable
+  class OnCacheEntryInfoRunnable : public Runnable
   {
   public:
     explicit OnCacheEntryInfoRunnable(WalkDiskCacheRunnable* aWalker)
@@ -526,7 +526,7 @@ void CacheStorageService::DropPrivateBrowsingEntries()
 
 namespace {
 
-class CleaupCacheDirectoriesRunnable : public nsRunnable
+class CleaupCacheDirectoriesRunnable : public Runnable
 {
 public:
   NS_DECL_NSIRUNNABLE
@@ -1212,7 +1212,7 @@ CacheStorageService::OnMemoryConsumptionChange(CacheMemoryConsumer* aConsumer,
   // Dispatch as a priority task, we want to set the purge timer
   // ASAP to prevent vain redispatch of this event.
   nsCOMPtr<nsIRunnable> event =
-    NS_NewRunnableMethod(this, &CacheStorageService::SchedulePurgeOverMemoryLimit);
+    NewRunnableMethod(this, &CacheStorageService::SchedulePurgeOverMemoryLimit);
   cacheIOTarget->Dispatch(event, nsIEventTarget::DISPATCH_NORMAL);
 }
 
@@ -1252,7 +1252,7 @@ CacheStorageService::Notify(nsITimer* aTimer)
     mPurgeTimer = nullptr;
 
     nsCOMPtr<nsIRunnable> event =
-      NS_NewRunnableMethod(this, &CacheStorageService::PurgeOverMemoryLimit);
+      NewRunnableMethod(this, &CacheStorageService::PurgeOverMemoryLimit);
     Dispatch(event);
   }
 
@@ -1704,7 +1704,7 @@ CacheStorageService::DoomStorageEntry(CacheStorage const* aStorage,
     return NS_OK;
   }
 
-  class Callback : public nsRunnable
+  class Callback : public Runnable
   {
   public:
     explicit Callback(nsICacheEntryDoomCallback* aCallback) : mCallback(aCallback) { }
@@ -1717,7 +1717,7 @@ CacheStorageService::DoomStorageEntry(CacheStorage const* aStorage,
   };
 
   if (aCallback) {
-    RefPtr<nsRunnable> callback = new Callback(aCallback);
+    RefPtr<Runnable> callback = new Callback(aCallback);
     return NS_DispatchToMainThread(callback);
   }
 
@@ -1828,7 +1828,7 @@ CacheStorageService::DoomStorageEntries(nsCSubstring const& aContextKey,
   // probably no need for a callback - has no meaning.  But for compatibility
   // with the old cache that is still in the tree we keep the API similar to be
   // able to make tests as well as other consumers work for now.
-  class Callback : public nsRunnable
+  class Callback : public Runnable
   {
   public:
     explicit Callback(nsICacheEntryDoomCallback* aCallback) : mCallback(aCallback) { }
@@ -1841,7 +1841,7 @@ CacheStorageService::DoomStorageEntries(nsCSubstring const& aContextKey,
   };
 
   if (aCallback) {
-    RefPtr<nsRunnable> callback = new Callback(aCallback);
+    RefPtr<Runnable> callback = new Callback(aCallback);
     return NS_DispatchToMainThread(callback);
   }
 

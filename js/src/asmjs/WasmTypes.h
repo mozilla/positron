@@ -39,6 +39,7 @@ class PropertyName;
 
 namespace wasm {
 
+using mozilla::DebugOnly;
 using mozilla::EnumeratedArray;
 using mozilla::Maybe;
 using mozilla::Move;
@@ -47,6 +48,24 @@ using mozilla::MallocSizeOf;
 typedef Vector<uint32_t, 0, SystemAllocPolicy> Uint32Vector;
 
 // ValType/ExprType utilities
+
+// ExprType::Limit is an out-of-band value and has no wasm-semantic meaning. For
+// the purpose of recursive validation, we use this value to represent the type
+// of branch/return instructions that don't actually return to the parent
+// expression and can thus be used in any context.
+const ExprType AnyType = ExprType::Limit;
+
+inline ExprType
+Unify(ExprType a, ExprType b)
+{
+    if (a == AnyType)
+        return b;
+    if (b == AnyType)
+        return a;
+    if (a == b)
+        return a;
+    return ExprType::Void;
+}
 
 static inline bool
 IsVoid(ExprType et)
@@ -73,6 +92,50 @@ IsSimdType(ValType vt)
     return vt == ValType::I32x4 || vt == ValType::F32x4 || vt == ValType::B32x4;
 }
 
+static inline uint32_t
+NumSimdElements(ValType vt)
+{
+    MOZ_ASSERT(IsSimdType(vt));
+    switch (vt) {
+      case ValType::I32x4:
+      case ValType::F32x4:
+      case ValType::B32x4:
+        return 4;
+     default:
+        MOZ_CRASH("Unhandled SIMD type");
+    }
+}
+
+static inline ValType
+SimdElementType(ValType vt)
+{
+    MOZ_ASSERT(IsSimdType(vt));
+    switch (vt) {
+      case ValType::I32x4:
+        return ValType::I32;
+      case ValType::F32x4:
+        return ValType::F32;
+      case ValType::B32x4:
+        return ValType::I32;
+     default:
+        MOZ_CRASH("Unhandled SIMD type");
+    }
+}
+
+static inline ValType
+SimdBoolType(ValType vt)
+{
+    MOZ_ASSERT(IsSimdType(vt));
+    switch (vt) {
+      case ValType::I32x4:
+      case ValType::F32x4:
+      case ValType::B32x4:
+        return ValType::B32x4;
+     default:
+        MOZ_CRASH("Unhandled SIMD type");
+    }
+}
+
 static inline bool
 IsSimdType(ExprType et)
 {
@@ -89,13 +152,13 @@ static inline jit::MIRType
 ToMIRType(ValType vt)
 {
     switch (vt) {
-      case ValType::I32: return jit::MIRType_Int32;
-      case ValType::I64: return jit::MIRType_Int64;
-      case ValType::F32: return jit::MIRType_Float32;
-      case ValType::F64: return jit::MIRType_Double;
-      case ValType::I32x4: return jit::MIRType_Int32x4;
-      case ValType::F32x4: return jit::MIRType_Float32x4;
-      case ValType::B32x4: return jit::MIRType_Bool32x4;
+      case ValType::I32: return jit::MIRType::Int32;
+      case ValType::I64: return jit::MIRType::Int64;
+      case ValType::F32: return jit::MIRType::Float32;
+      case ValType::F64: return jit::MIRType::Double;
+      case ValType::I32x4: return jit::MIRType::Int32x4;
+      case ValType::F32x4: return jit::MIRType::Float32x4;
+      case ValType::B32x4: return jit::MIRType::Bool32x4;
       case ValType::Limit: break;
     }
     MOZ_MAKE_COMPILER_ASSUME_IS_UNREACHABLE("bad type");
@@ -104,7 +167,7 @@ ToMIRType(ValType vt)
 static inline jit::MIRType
 ToMIRType(ExprType et)
 {
-    return IsVoid(et) ? jit::MIRType_None : ToMIRType(ValType(et));
+    return IsVoid(et) ? jit::MIRType::None : ToMIRType(ValType(et));
 }
 
 static inline const char*
@@ -200,7 +263,7 @@ class Sig
     Sig(Sig&& rhs) : args_(Move(rhs.args_)), ret_(rhs.ret_) {}
     Sig(ValTypeVector&& args, ExprType ret) : args_(Move(args)), ret_(ret) {}
 
-    bool clone(const Sig& rhs) {
+    MOZ_MUST_USE bool clone(const Sig& rhs) {
         ret_ = rhs.ret_;
         MOZ_ASSERT(args_.empty());
         return args_.appendAll(rhs.args_);
@@ -232,6 +295,21 @@ struct SigHashPolicy
     static HashNumber hash(Lookup sig) { return sig.hash(); }
     static bool match(const Sig* lhs, Lookup rhs) { return *lhs == rhs; }
 };
+
+// A GlobalDesc describes a single global variable. Currently, globals are only
+// exposed through asm.js.
+
+struct GlobalDesc
+{
+    ValType type;
+    unsigned globalDataOffset;
+    bool isConst;
+    GlobalDesc(ValType type, unsigned offset, bool isConst)
+      : type(type), globalDataOffset(offset), isConst(isConst)
+    {}
+};
+
+typedef Vector<GlobalDesc, 0, SystemAllocPolicy> GlobalDescVector;
 
 // A "declared" signature is a Sig object that is created and owned by the
 // ModuleGenerator. These signature objects are read-only and have the same
@@ -388,6 +466,15 @@ class CallSiteAndTarget : public CallSite
     uint32_t targetIndex() const { MOZ_ASSERT(isInternal()); return targetIndex_; }
 };
 
+} // namespace wasm
+} // namespace js
+namespace mozilla {
+template <> struct IsPod<js::wasm::CallSite>          : TrueType {};
+template <> struct IsPod<js::wasm::CallSiteAndTarget> : TrueType {};
+}
+namespace js {
+namespace wasm {
+
 typedef Vector<CallSite, 0, SystemAllocPolicy> CallSiteVector;
 typedef Vector<CallSiteAndTarget, 0, SystemAllocPolicy> CallSiteAndTargetVector;
 
@@ -490,6 +577,14 @@ class HeapAccess {
 };
 #endif
 
+} // namespace wasm
+} // namespace js
+namespace mozilla {
+template <> struct IsPod<js::wasm::HeapAccess> : TrueType {};
+}
+namespace js {
+namespace wasm {
+
 typedef Vector<HeapAccess, 0, SystemAllocPolicy> HeapAccessVector;
 
 // A wasm::SymbolicAddress represents a pointer to a well-known function or
@@ -536,6 +631,8 @@ enum class SymbolicAddress
     OnImpreciseConversion,
     BadIndirectCall,
     UnreachableTrap,
+    IntegerOverflowTrap,
+    InvalidConversionToIntegerTrap,
     HandleExecutionInterrupt,
     InvokeImport_Void,
     InvokeImport_I32,
@@ -551,7 +648,7 @@ AddressOf(SymbolicAddress imm, ExclusiveContext* cx);
 
 // Extracts low and high from an int64 object {low: int32, high: int32}, for
 // testing purposes mainly.
-bool ReadI64Object(JSContext* cx, HandleValue v, int64_t* val);
+MOZ_MUST_USE bool ReadI64Object(JSContext* cx, HandleValue v, int64_t* val);
 
 // A wasm::JumpTarget represents one of a special set of stubs that can be
 // jumped to from any function. Because wasm modules can be larger than the
@@ -565,6 +662,8 @@ enum class JumpTarget
     ConversionError,
     BadIndirectCall,
     UnreachableTrap,
+    IntegerOverflowTrap,
+    InvalidConversionToIntegerTrap,
     Throw,
     Limit
 };

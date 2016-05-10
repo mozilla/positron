@@ -2511,7 +2511,7 @@ struct FindPathHandler {
     typedef JS::ubi::BreadthFirst<FindPathHandler> Traversal;
 
     FindPathHandler(JSContext*cx, JS::ubi::Node start, JS::ubi::Node target,
-                    AutoValueVector& nodes, Vector<EdgeName>& edges)
+                    MutableHandle<GCVector<Value>> nodes, Vector<EdgeName>& edges)
       : cx(cx), start(start), target(target), foundPath(false),
         nodes(nodes), edges(edges) { }
 
@@ -2580,7 +2580,7 @@ struct FindPathHandler {
     // - edges[i] is the name of the edge from nodes[i] to nodes[i-1].
     // - edges[0] is the name of the edge from nodes[0] to the target.
     // - The last node, nodes[n-1], is the start node.
-    AutoValueVector& nodes;
+    MutableHandle<GCVector<Value>> nodes;
     Vector<EdgeName>& edges;
 };
 
@@ -2613,7 +2613,7 @@ FindPath(JSContext* cx, unsigned argc, Value* vp)
         return false;
     }
 
-    AutoValueVector nodes(cx);
+    Rooted<GCVector<Value>> nodes(cx, GCVector<Value>(cx));
     Vector<heaptools::EdgeName> edges(cx);
 
     {
@@ -2623,7 +2623,7 @@ FindPath(JSContext* cx, unsigned argc, Value* vp)
 
         JS::ubi::Node start(args[0]), target(args[1]);
 
-        heaptools::FindPathHandler handler(cx, start, target, nodes, edges);
+        heaptools::FindPathHandler handler(cx, start, target, &nodes, edges);
         heaptools::FindPathHandler::Traversal traversal(cx->runtime(), handler, autoCannotGC);
         if (!traversal.init() || !traversal.addStart(start))
             return false;
@@ -3497,15 +3497,6 @@ GetModuleEnvironmentValue(JSContext* cx, unsigned argc, Value* vp)
     return GetProperty(cx, env, env, id, args.rval());
 }
 
-static bool
-EnableMatchFlagArgument(JSContext* cx, unsigned argc, Value* vp)
-{
-    CallArgs args = CallArgsFromVp(argc, vp);
-    cx->runtime()->options().setMatchFlagArgument(true);
-    args.rval().setUndefined();
-    return true;
-}
-
 static const JSFunctionSpecWithHelp TestingFunctions[] = {
     JS_FN_HELP("gc", ::GC, 0, 0,
 "gc([obj] | 'compartment' [, 'shrinking'])",
@@ -4022,11 +4013,6 @@ gc::ZealModeHelpText),
     JS_FN_HELP("getModuleEnvironmentValue", GetModuleEnvironmentValue, 2, 0,
 "getModuleEnvironmentValue(module, name)",
 "  Get the value of a bound name in a module environment.\n"),
-
-    JS_FN_HELP("enableMatchFlagArgument", EnableMatchFlagArgument, 0, 0,
-"enableMatchFlagArgument()",
-"  Enables the deprecated, non-standard flag argument of\n"
-"  String.prototype.{match,search,replace}.\n"),
 
     JS_FS_HELP_END
 };

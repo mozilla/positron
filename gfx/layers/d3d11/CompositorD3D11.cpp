@@ -17,10 +17,12 @@
 #include "mozilla/layers/Effects.h"
 #include "nsWindowsHelpers.h"
 #include "gfxPrefs.h"
+#include "gfxConfig.h"
 #include "gfxCrashReporterUtils.h"
 #include "gfxVR.h"
 #include "mozilla/gfx/StackArray.h"
 #include "mozilla/Services.h"
+#include "mozilla/widget/WinCompositorWidgetProxy.h"
 
 #include "mozilla/EnumeratedArray.h"
 #include "mozilla/Telemetry.h"
@@ -158,10 +160,9 @@ private:
   bool mInitOkay;
 };
 
-CompositorD3D11::CompositorD3D11(CompositorBridgeParent* aParent, nsIWidget* aWidget)
-  : Compositor(aParent)
+CompositorD3D11::CompositorD3D11(CompositorBridgeParent* aParent, widget::CompositorWidgetProxy* aWidget)
+  : Compositor(aWidget, aParent)
   , mAttachments(nullptr)
-  , mWidget(aWidget)
   , mHwnd(nullptr)
   , mDisableSequenceForNextFrame(false)
   , mVerifyBuffersFailed(false)
@@ -196,11 +197,9 @@ CompositorD3D11::~CompositorD3D11()
 bool
 CompositorD3D11::Initialize()
 {
-  bool force = gfxPrefs::LayersAccelerationForceEnabled();
+  ScopedGfxFeatureReporter reporter("D3D11 Layers");
 
-  ScopedGfxFeatureReporter reporter("D3D11 Layers", force);
-
-  MOZ_ASSERT(gfxPlatform::CanUseDirect3D11());
+  MOZ_ASSERT(gfxConfig::IsEnabled(Feature::D3D11_COMPOSITING));
 
   HRESULT hr;
 
@@ -217,7 +216,7 @@ CompositorD3D11::Initialize()
 
   mFeatureLevel = mDevice->GetFeatureLevel();
 
-  mHwnd = (HWND)mWidget->GetNativeData(NS_NATIVE_WINDOW);
+  mHwnd = mWidget->AsWindowsProxy()->GetHwnd();
 
   memset(&mVSConstants, 0, sizeof(VertexShaderConstants));
 
@@ -1290,13 +1289,12 @@ CompositorD3D11::PrepareViewport(const gfx::IntSize& aSize)
 void
 CompositorD3D11::ForcePresent()
 {
-  LayoutDeviceIntRect rect;
-  mWidget->GetClientBounds(rect);
+  LayoutDeviceIntSize size = mWidget->GetClientSize();
 
   DXGI_SWAP_CHAIN_DESC desc;
   mSwapChain->GetDesc(&desc);
 
-  if (desc.BufferDesc.Width == rect.width && desc.BufferDesc.Height == rect.height) {
+  if (desc.BufferDesc.Width == size.width && desc.BufferDesc.Height == size.height) {
     mSwapChain->Present(0, 0);
   }
 }
@@ -1322,10 +1320,7 @@ CompositorD3D11::PrepareViewport(const gfx::IntSize& aSize,
 void
 CompositorD3D11::EnsureSize()
 {
-  LayoutDeviceIntRect rect;
-  mWidget->GetClientBounds(rect);
-
-  mSize = rect.Size();
+  mSize = mWidget->GetClientSize();
 }
 
 bool

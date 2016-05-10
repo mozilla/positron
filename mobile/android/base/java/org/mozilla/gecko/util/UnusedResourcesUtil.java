@@ -8,6 +8,15 @@ import org.mozilla.gecko.R;
  */
 @SuppressWarnings("unused")
 final class UnusedResourcesUtil {
+    /**
+     * Bug 1269001 prelands some strings for localisation for Aurora (before landing the commits
+     * actually making use of these strings), hence we need to reference them here temporarily.
+     */
+    public static final int[] TEMPORARY_PRELANDED_BOOKMARK_ITEMS = {
+        R.string.bookmark_folder_items,
+        R.string.bookmark_folder_one_item,
+    };
+
     public static final int[] CONSTANTS = {
             R.dimen.match_parent,
             R.dimen.wrap_content,
@@ -87,5 +96,32 @@ final class UnusedResourcesUtil {
             R.xml.preferences_home,
             R.xml.preferences_privacy,
             R.xml.preferences_privacy_clear_tablet,
+    };
+
+    // We are migrating to Gradle 2.10 and the Android Gradle plugin 2.0. The new plugin does find
+    // more unused resources but we are not ready to remove them yet. Some of the resources are going
+    // to be reused soon. This is a temporary solution so that the gradle migration is not blocked.
+    // See bug 1263390 / bug 1268414.
+    public static final int[] TEMPORARY_UNUSED_WHILE_MIGRATING_GRADLE = {
+            R.color.remote_tabs_setup_button_background_hit,
+
+            R.drawable.remote_tabs_setup_button_background,
+
+            R.style.ActionBarThemeGeckoPreferences,
+            R.style.TabsPanelSectionBase,
+            R.style.TabsPanelSection,
+            R.style.TabsPanelItemBase,
+            R.style.TabsPanelItem,
+            R.style.TabsPanelItem_TextAppearance,
+            R.style.TabsPanelItem_TextAppearance_Header,
+            R.style.TabsPanelItem_TextAppearance_Linkified,
+            R.style.TabWidget,
+            R.style.GeckoDialogTitle,
+            R.style.GeckoDialogTitle_SubTitle,
+            R.style.RemoteTabsPanelItem,
+            R.style.RemoteTabsPanelItem_TextAppearance,
+            R.style.RemoteTabsPanelItem_TextAppearance_Header,
+            R.style.RemoteTabsPanelItem_TextAppearance_Linkified,
+            R.style.RemoteTabsPanelItem_Button,
     };
 }

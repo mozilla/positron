@@ -217,6 +217,7 @@ using namespace mozilla::gfx;
 using namespace mozilla::layers;
 using namespace mozilla::gfx;
 using namespace mozilla::layout;
+using PaintFrameFlags = nsLayoutUtils::PaintFrameFlags;
 
 CapturingContentInfo nsIPresShell::gCaptureInfo =
   { false /* mAllowed */, false /* mPointerLock */, false /* mRetargetToElement */,
@@ -235,7 +236,7 @@ struct RangePaintInfo {
   nsPoint mRootOffset;
 
   RangePaintInfo(nsRange* aRange, nsIFrame* aFrame)
-    : mRange(aRange), mBuilder(aFrame, nsDisplayListBuilder::PAINTING, false)
+    : mRange(aRange), mBuilder(aFrame, nsDisplayListBuilderMode::PAINTING, false)
   {
     MOZ_COUNT_CTOR(RangePaintInfo);
   }
@@ -526,7 +527,7 @@ public:
   RefPtr<PresShell> mPresShell;
 };
 
-class nsBeforeFirstPaintDispatcher : public nsRunnable
+class nsBeforeFirstPaintDispatcher : public Runnable
 {
 public:
   explicit nsBeforeFirstPaintDispatcher(nsIDocument* aDocument)
@@ -1339,6 +1340,12 @@ PresShell::MakeZombie()
   CancelAllPendingReflows();
 }
 
+nsRefreshDriver*
+nsIPresShell::GetRefreshDriver() const
+{
+  return mPresContext ? mPresContext->RefreshDriver() : nullptr;
+}
+
 void
 nsIPresShell::SetAuthorStyleDisabled(bool aStyleDisabled)
 {
@@ -1903,7 +1910,7 @@ PresShell::ResizeReflowIgnoreOverride(nscoord aWidth, nscoord aHeight)
       }
     } else {
       RefPtr<nsRunnableMethod<PresShell> > resizeEvent =
-        NS_NewRunnableMethod(this, &PresShell::FireResizeEvent);
+        NewRunnableMethod(this, &PresShell::FireResizeEvent);
       if (NS_SUCCEEDED(NS_DispatchToCurrentThread(resizeEvent))) {
         mResizeEvent = resizeEvent;
         mDocument->SetNeedStyleFlush();
@@ -4059,12 +4066,6 @@ PresShell::FlushPendingNotifications(mozilla::ChangesToFlush aFlush)
       }
     }
 
-    // Dispatch any 'animationstart' events those (or earlier) restyles
-    // queued up.
-    if (!mIsDestroying) {
-      mPresContext->AnimationManager()->DispatchEvents();
-    }
-
     // Process whatever XBL constructors those restyles queued up.  This
     // ensures that onload doesn't fire too early and that we won't do extra
     // reflows after those constructors run.
@@ -4684,12 +4685,12 @@ PresShell::RenderDocument(const nsRect& aRect, uint32_t aFlags,
   nsRenderingContext rc(aThebesContext);
 
   bool wouldFlushRetainedLayers = false;
-  uint32_t flags = nsLayoutUtils::PAINT_IGNORE_SUPPRESSION;
+  PaintFrameFlags flags = PaintFrameFlags::PAINT_IGNORE_SUPPRESSION;
   if (aThebesContext->CurrentMatrix().HasNonIntegerTranslation()) {
-    flags |= nsLayoutUtils::PAINT_IN_TRANSFORM;
+    flags |= PaintFrameFlags::PAINT_IN_TRANSFORM;
   }
   if (!(aFlags & RENDER_ASYNC_DECODE_IMAGES)) {
-    flags |= nsLayoutUtils::PAINT_SYNC_DECODE_IMAGES;
+    flags |= PaintFrameFlags::PAINT_SYNC_DECODE_IMAGES;
   }
   if (aFlags & RENDER_USE_WIDGET_LAYERS) {
     // We only support using widget layers on display root's with widgets.
@@ -4702,13 +4703,13 @@ PresShell::RenderDocument(const nsRect& aRect, uint32_t aFlags,
       if (layerManager &&
           (!layerManager->AsClientLayerManager() ||
            XRE_IsParentProcess())) {
-        flags |= nsLayoutUtils::PAINT_WIDGET_LAYERS;
+        flags |= PaintFrameFlags::PAINT_WIDGET_LAYERS;
       }
     }
   }
   if (!(aFlags & RENDER_CARET)) {
     wouldFlushRetainedLayers = true;
-    flags |= nsLayoutUtils::PAINT_HIDE_CARET;
+    flags |= PaintFrameFlags::PAINT_HIDE_CARET;
   }
   if (aFlags & RENDER_IGNORE_VIEWPORT_SCROLLING) {
     wouldFlushRetainedLayers = !IgnoringViewportScrolling();
@@ -4723,16 +4724,18 @@ PresShell::RenderDocument(const nsRect& aRect, uint32_t aFlags,
     // In that case, it wouldn't disturb normal rendering too much,
     // and we should allow it.
     wouldFlushRetainedLayers = true;
-    flags |= nsLayoutUtils::PAINT_DOCUMENT_RELATIVE;
+    flags |= PaintFrameFlags::PAINT_DOCUMENT_RELATIVE;
   }
 
   // Don't let drawWindow blow away our retained layer tree
-  if ((flags & nsLayoutUtils::PAINT_WIDGET_LAYERS) && wouldFlushRetainedLayers) {
-    flags &= ~nsLayoutUtils::PAINT_WIDGET_LAYERS;
+  if ((flags & PaintFrameFlags::PAINT_WIDGET_LAYERS) && wouldFlushRetainedLayers) {
+    flags &= ~PaintFrameFlags::PAINT_WIDGET_LAYERS;
   }
 
   nsLayoutUtils::PaintFrame(&rc, rootFrame, nsRegion(aRect),
-                            aBackgroundColor, flags);
+                            aBackgroundColor,
+                            nsDisplayListBuilderMode::PAINTING,
+                            flags);
 
   // We don't call NotifyCompositorOfVisibleRegionsChange here because we're
   // not painting to the window, and hence there should be no change.
@@ -5968,7 +5971,7 @@ PresShell::DoUpdateApproximateFrameVisibility(bool aRemoveOnly)
   // they produce the same results (mApproximatelyVisibleFrames holds the frames the
   // display list thinks are visible, beforeFrameList holds the frames the
   // frame walker thinks are visible).
-  nsDisplayListBuilder builder(rootFrame, nsDisplayListBuilder::FRAME_VISIBILITY, false);
+  nsDisplayListBuilder builder(rootFrame, nsDisplayListBuilderMode::FRAME_VISIBILITY, false);
   nsRect updateRect(nsPoint(0, 0), rootFrame->GetSize());
   nsIFrame* rootScroll = GetRootScrollFrame();
   if (rootScroll) {
@@ -6088,7 +6091,7 @@ PresShell::ScheduleApproximateFrameVisibilityUpdateNow()
   }
 
   RefPtr<nsRunnableMethod<PresShell> > ev =
-    NS_NewRunnableMethod(this, &PresShell::UpdateApproximateFrameVisibility);
+    NewRunnableMethod(this, &PresShell::UpdateApproximateFrameVisibility);
   if (NS_SUCCEEDED(NS_DispatchToCurrentThread(ev))) {
     mUpdateApproximateFrameVisibilityEvent = ev;
   }
@@ -6202,7 +6205,7 @@ public:
     }
     nsRegion region;
     nsDisplayListBuilder builder(mFrame,
-                                 nsDisplayListBuilder::EVENT_DELIVERY,
+                                 nsDisplayListBuilderMode::EVENT_DELIVERY,
                                  /* aBuildCert= */ false);
     nsDisplayList list;
     AutoTArray<nsIFrame*, 100> outFrames;
@@ -6338,15 +6341,16 @@ PresShell::Paint(nsView*        aViewToPaint,
   }
 
   nscolor bgcolor = ComputeBackstopColor(aViewToPaint);
-  uint32_t flags = nsLayoutUtils::PAINT_WIDGET_LAYERS | nsLayoutUtils::PAINT_EXISTING_TRANSACTION;
+  PaintFrameFlags flags = PaintFrameFlags::PAINT_WIDGET_LAYERS |
+                          PaintFrameFlags::PAINT_EXISTING_TRANSACTION;
   if (!(aFlags & PAINT_COMPOSITE)) {
-    flags |= nsLayoutUtils::PAINT_NO_COMPOSITE;
+    flags |= PaintFrameFlags::PAINT_NO_COMPOSITE;
   }
   if (aFlags & PAINT_SYNC_DECODE_IMAGES) {
-    flags |= nsLayoutUtils::PAINT_SYNC_DECODE_IMAGES;
+    flags |= PaintFrameFlags::PAINT_SYNC_DECODE_IMAGES;
   }
   if (mNextPaintCompressed) {
-    flags |= nsLayoutUtils::PAINT_COMPRESSED;
+    flags |= PaintFrameFlags::PAINT_COMPRESSED;
     mNextPaintCompressed = false;
   }
 
@@ -6359,7 +6363,8 @@ PresShell::Paint(nsView*        aViewToPaint,
     InitVisibleRegionsIfVisualizationEnabled(VisibilityCounter::IN_DISPLAYPORT);
 
     // We can paint directly into the widget using its layer manager.
-    nsLayoutUtils::PaintFrame(nullptr, frame, aDirtyRegion, bgcolor, flags);
+    nsLayoutUtils::PaintFrame(nullptr, frame, aDirtyRegion, bgcolor,
+                              nsDisplayListBuilderMode::PAINTING, flags);
 
     DecVisibleCount(oldInDisplayPortFrames, VisibilityCounter::IN_DISPLAYPORT);
 
@@ -6369,7 +6374,7 @@ PresShell::Paint(nsView*        aViewToPaint,
       // since this is happening during a paint and updating the visible
       // regions triggers a recomposite.
       RefPtr<nsRunnableMethod<PresShell>> event =
-        NS_NewRunnableMethod(this, &PresShell::NotifyCompositorOfVisibleRegionsChange);
+        NewRunnableMethod(this, &PresShell::NotifyCompositorOfVisibleRegionsChange);
       if (NS_SUCCEEDED(NS_DispatchToMainThread(event))) {
         mNotifyCompositorOfVisibleRegionsChangeEvent = event;
       }
@@ -6421,7 +6426,7 @@ nsIPresShell::SetCapturingContent(nsIContent* aContent, uint8_t aFlags)
   }
 }
 
-class AsyncCheckPointerCaptureStateCaller : public nsRunnable
+class AsyncCheckPointerCaptureStateCaller : public Runnable
 {
 public:
   explicit AsyncCheckPointerCaptureStateCaller(int32_t aPointerId)
@@ -6442,7 +6447,8 @@ nsIPresShell::SetPointerCapturingContent(uint32_t aPointerId, nsIContent* aConte
 {
   PointerCaptureInfo* pointerCaptureInfo = nullptr;
   gPointerCaptureList->Get(aPointerId, &pointerCaptureInfo);
-  nsIContent* content = pointerCaptureInfo ? pointerCaptureInfo->mOverrideContent : nullptr;
+  nsIContent* content = pointerCaptureInfo ?
+    pointerCaptureInfo->mOverrideContent.get() : nullptr;
 
   if (!content && (nsIDOMMouseEvent::MOZ_SOURCE_MOUSE == GetPointerType(aPointerId))) {
     SetCapturingContent(aContent, CAPTURE_PREVENTDRAG);
@@ -11287,22 +11293,4 @@ nsIPresShell::HasRuleProcessorUsedByMultipleStyleSets(uint32_t aSheetType,
     *aRetVal = styleSet->HasRuleProcessorUsedByMultipleStyleSets(type);
   }
   return NS_OK;
-}
-
-void
-nsIPresShell::SetIsInFullscreenChange(bool aValue)
-{
-  if (mIsInFullscreenChange == aValue) {
-    NS_WARNING(aValue ? "Pres shell has been in fullscreen change?" :
-               "Pres shell is not in fullscreen change?");
-    return;
-  }
-  mIsInFullscreenChange = aValue;
-  if (nsRefreshDriver* rd = mPresContext->RefreshDriver()) {
-    if (aValue) {
-      rd->Freeze();
-    } else {
-      rd->Thaw();
-    }
-  }
 }

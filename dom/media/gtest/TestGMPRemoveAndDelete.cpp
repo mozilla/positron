@@ -235,6 +235,7 @@ GMPRemoveTest::Setup()
   // below may complete before we're finished adding GMPs from MOZ_GMP_PATH,
   // and we'll end up not removing the GMP, and the test will fail.
   RefPtr<AbstractThread> thread(GetServiceParent()->GetAbstractGMPThread());
+  EXPECT_TRUE(thread);
   GMPTestMonitor* mon = &mTestMonitor;
   GetServiceParent()->EnsureInitialized()->Then(thread, __func__,
     [mon]() { mon->SetFinished(); },
@@ -260,7 +261,7 @@ GMPRemoveTest::CreateVideoDecoder(nsCString aNodeId)
   GMPVideoDecoderProxy* decoder = nullptr;
 
   mGMPThread->Dispatch(
-    NS_NewNonOwningRunnableMethodWithArgs<nsCString, GMPVideoDecoderProxy**, GMPVideoHost**>(
+    NewNonOwningRunnableMethod<nsCString, GMPVideoDecoderProxy**, GMPVideoHost**>(
       this, &GMPRemoveTest::gmp_GetVideoDecoder, aNodeId, &decoder, &host),
     NS_DISPATCH_NORMAL);
 
@@ -276,7 +277,7 @@ GMPRemoveTest::CreateVideoDecoder(nsCString aNodeId)
 
   nsTArray<uint8_t> empty;
   mGMPThread->Dispatch(
-    NS_NewNonOwningRunnableMethodWithArgs<const GMPVideoCodec&, const nsTArray<uint8_t>&, GMPVideoDecoderCallbackProxy*, int32_t>(
+    NewNonOwningRunnableMethod<const GMPVideoCodec&, const nsTArray<uint8_t>&, GMPVideoDecoderCallbackProxy*, int32_t>(
       decoder, &GMPVideoDecoderProxy::InitDecode,
       codec, empty, this, 1 /* core count */),
     NS_DISPATCH_SYNC);
@@ -328,7 +329,7 @@ void
 GMPRemoveTest::CloseVideoDecoder()
 {
   mGMPThread->Dispatch(
-    NS_NewNonOwningRunnableMethod(mDecoder, &GMPVideoDecoderProxy::Close),
+    NewNonOwningRunnableMethod(mDecoder, &GMPVideoDecoderProxy::Close),
     NS_DISPATCH_SYNC);
 
   mDecoder = nullptr;
@@ -345,7 +346,7 @@ GMPErr
 GMPRemoveTest::Decode()
 {
   mGMPThread->Dispatch(
-    NS_NewNonOwningRunnableMethod(this, &GMPRemoveTest::gmp_Decode),
+    NewNonOwningRunnableMethod(this, &GMPRemoveTest::gmp_Decode),
     NS_DISPATCH_NORMAL);
 
   mTestMonitor.AwaitFinished();

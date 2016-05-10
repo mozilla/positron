@@ -585,10 +585,8 @@ InterruptCallback(JSContext* aCx)
   return worker->InterruptCallback(aCx);
 }
 
-class LogViolationDetailsRunnable final : public nsRunnable
+class LogViolationDetailsRunnable final : public WorkerMainThreadRunnable
 {
-  WorkerPrivate* mWorkerPrivate;
-  nsCOMPtr<nsIEventTarget> mSyncLoopTarget;
   nsString mFileName;
   uint32_t mLineNum;
 
@@ -596,32 +594,17 @@ public:
   LogViolationDetailsRunnable(WorkerPrivate* aWorker,
                               const nsString& aFileName,
                               uint32_t aLineNum)
-  : mWorkerPrivate(aWorker), mFileName(aFileName), mLineNum(aLineNum)
+    : WorkerMainThreadRunnable(aWorker,
+                               NS_LITERAL_CSTRING("RuntimeService :: LogViolationDetails"))
+    , mFileName(aFileName), mLineNum(aLineNum)
   {
     MOZ_ASSERT(aWorker);
   }
 
-  NS_DECL_ISUPPORTS_INHERITED
-
-  bool
-  Dispatch()
-  {
-    AutoSyncLoopHolder syncLoop(mWorkerPrivate);
-
-    mSyncLoopTarget = syncLoop.EventTarget();
-    MOZ_ASSERT(mSyncLoopTarget);
-
-    if (NS_FAILED(NS_DispatchToMainThread(this))) {
-      return false;
-    }
-
-    return syncLoop.Run();
-  }
+  virtual bool MainThreadRun() override;
 
 private:
   ~LogViolationDetailsRunnable() {}
-
-  NS_DECL_NSIRUNNABLE
 };
 
 bool
@@ -644,7 +627,11 @@ ContentSecurityPolicyAllows(JSContext* aCx)
     RefPtr<LogViolationDetailsRunnable> runnable =
         new LogViolationDetailsRunnable(worker, fileName, lineNum);
 
-    runnable->Dispatch();
+    ErrorResult rv;
+    runnable->Dispatch(rv);
+    if (NS_WARN_IF(rv.Failed())) {
+      rv.SuppressException();
+    }
   }
 
   return worker->IsEvalAllowed();
@@ -1035,13 +1022,13 @@ private:
   }
 };
 
-class WorkerThreadPrimaryRunnable final : public nsRunnable
+class WorkerThreadPrimaryRunnable final : public Runnable
 {
   WorkerPrivate* mWorkerPrivate;
   RefPtr<WorkerThread> mThread;
   JSRuntime* mParentRuntime;
 
-  class FinishedRunnable final : public nsRunnable
+  class FinishedRunnable final : public Runnable
   {
     RefPtr<WorkerThread> mThread;
 
@@ -2591,10 +2578,8 @@ RuntimeService::JSVersionChanged(const char* /* aPrefName */, void* /* aClosure 
   options.behaviors().setVersion(useLatest ? JSVERSION_LATEST : JSVERSION_DEFAULT);
 }
 
-NS_IMPL_ISUPPORTS_INHERITED0(LogViolationDetailsRunnable, nsRunnable)
-
-NS_IMETHODIMP
-LogViolationDetailsRunnable::Run()
+bool
+LogViolationDetailsRunnable::MainThreadRun()
 {
   AssertIsOnMainThread();
 
@@ -2609,17 +2594,12 @@ LogViolationDetailsRunnable::Run()
     }
   }
 
-  RefPtr<MainThreadStopSyncLoopRunnable> response =
-    new MainThreadStopSyncLoopRunnable(mWorkerPrivate, mSyncLoopTarget.forget(),
-                                       true);
-  MOZ_ALWAYS_TRUE(response->Dispatch());
-
-  return NS_OK;
+  return true;
 }
 
 NS_IMPL_ISUPPORTS(WorkerBackgroundChildCallback, nsIIPCBackgroundChildCreateCallback)
 
-NS_IMPL_ISUPPORTS_INHERITED0(WorkerThreadPrimaryRunnable, nsRunnable)
+NS_IMPL_ISUPPORTS_INHERITED0(WorkerThreadPrimaryRunnable, Runnable)
 
 NS_IMETHODIMP
 WorkerThreadPrimaryRunnable::Run()
@@ -2772,7 +2752,7 @@ WorkerThreadPrimaryRunnable::SynchronouslyCreatePBackground()
 }
 
 NS_IMPL_ISUPPORTS_INHERITED0(WorkerThreadPrimaryRunnable::FinishedRunnable,
-                             nsRunnable)
+                             Runnable)
 
 NS_IMETHODIMP
 WorkerThreadPrimaryRunnable::FinishedRunnable::Run()

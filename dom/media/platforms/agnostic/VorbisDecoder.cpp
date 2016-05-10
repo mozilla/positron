@@ -105,6 +105,11 @@ VorbisDataDecoder::Init()
         ("Invalid Vorbis header: container and codec channels do not match!"));
   }
 
+  AudioConfig::ChannelLayout layout(mVorbisDsp.vi->channels);
+  if (!layout.IsValid()) {
+    return InitPromise::CreateAndReject(DecoderFailureReason::INIT_ERROR, __func__);
+  }
+
   return InitPromise::CreateAndResolve(TrackInfo::kAudioTrack, __func__);
 }
 
@@ -124,11 +129,9 @@ VorbisDataDecoder::DecodeHeader(const unsigned char* aData, size_t aLength)
 nsresult
 VorbisDataDecoder::Input(MediaRawData* aSample)
 {
-  nsCOMPtr<nsIRunnable> runnable(
-    NS_NewRunnableMethodWithArg<RefPtr<MediaRawData>>(
-      this, &VorbisDataDecoder::Decode,
-      RefPtr<MediaRawData>(aSample)));
-  mTaskQueue->Dispatch(runnable.forget());
+  mTaskQueue->Dispatch(NewRunnableMethod<RefPtr<MediaRawData>>(
+                         this, &VorbisDataDecoder::Decode,
+                         RefPtr<MediaRawData>(aSample)));
 
   return NS_OK;
 }
@@ -223,6 +226,9 @@ VorbisDataDecoder::DoDecode(MediaRawData* aSample)
       AudioConfig in(AudioConfig::ChannelLayout(channels, VorbisLayout(channels)),
                      rate);
       AudioConfig out(channels, rate);
+      if (!in.IsValid() || !out.IsValid()) {
+       return -1;
+      }
       mAudioConverter = MakeUnique<AudioConverter>(in, out);
     }
     MOZ_ASSERT(mAudioConverter->CanWorkInPlace());
@@ -257,9 +263,7 @@ VorbisDataDecoder::DoDrain()
 nsresult
 VorbisDataDecoder::Drain()
 {
-  nsCOMPtr<nsIRunnable> runnable(
-    NS_NewRunnableMethod(this, &VorbisDataDecoder::DoDrain));
-  mTaskQueue->Dispatch(runnable.forget());
+  mTaskQueue->Dispatch(NewRunnableMethod(this, &VorbisDataDecoder::DoDrain));
   return NS_OK;
 }
 

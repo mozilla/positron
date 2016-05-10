@@ -611,14 +611,15 @@ MediaDecoder::MediaDecoder(MediaDecoderOwner* aOwner)
   MediaShutdownManager::Instance().Register(this);
 }
 
-RefPtr<ShutdownPromise>
+void
 MediaDecoder::Shutdown()
 {
   MOZ_ASSERT(NS_IsMainThread());
 
   if (mShuttingDown) {
-    return ShutdownPromise::CreateAndResolve(true, __func__);
+    return;
   }
+
   mShuttingDown = true;
 
   mResourceCallback->Disconnect();
@@ -630,7 +631,6 @@ MediaDecoder::Shutdown()
   // This changes the decoder state to SHUTDOWN and does other things
   // necessary to unblock the state machine thread if it's blocked, so
   // the asynchronous shutdown in nsDestroyStateMachine won't deadlock.
-  RefPtr<ShutdownPromise> shutdown;
   if (mDecoderStateMachine) {
     mTimedMetadataListener.Disconnect();
     mMetadataLoadedListener.Disconnect();
@@ -641,11 +641,18 @@ MediaDecoder::Shutdown()
 
     mWatchManager.Unwatch(mIsAudioDataAudible, &MediaDecoder::NotifyAudibleStateChanged);
 
-    shutdown = mDecoderStateMachine->BeginShutdown()
-        ->Then(AbstractThread::MainThread(), __func__, this,
-               &MediaDecoder::FinishShutdown,
-               &MediaDecoder::FinishShutdown)
-        ->CompletionPromise();
+    mDecoderStateMachine->BeginShutdown()
+      ->Then(AbstractThread::MainThread(), __func__, this,
+             &MediaDecoder::FinishShutdown,
+             &MediaDecoder::FinishShutdown);
+  } else {
+    // Ensure we always unregister asynchronously in order not to disrupt
+    // the hashtable iterating in MediaShutdownManager::Shutdown().
+    RefPtr<MediaDecoder> self = this;
+    nsCOMPtr<nsIRunnable> r = NS_NewRunnableFunction([self] () {
+      MediaShutdownManager::Instance().Unregister(self);
+    });
+    AbstractThread::MainThread()->Dispatch(r.forget());
   }
 
   // Force any outstanding seek and byterange requests to complete
@@ -657,10 +664,6 @@ MediaDecoder::Shutdown()
   CancelDormantTimer();
 
   ChangeState(PLAY_STATE_SHUTDOWN);
-
-  MediaShutdownManager::Instance().Unregister(this);
-
-  return shutdown ? shutdown : ShutdownPromise::CreateAndResolve(true, __func__);
 }
 
 MediaDecoder::~MediaDecoder()
@@ -694,13 +697,13 @@ MediaDecoder::OnPlaybackEvent(MediaEventType aEvent)
   }
 }
 
-RefPtr<ShutdownPromise>
+void
 MediaDecoder::FinishShutdown()
 {
   MOZ_ASSERT(NS_IsMainThread());
   mDecoderStateMachine->BreakCycles();
   SetStateMachine(nullptr);
-  return ShutdownPromise::CreateAndResolve(true, __func__);
+  MediaShutdownManager::Instance().Unregister(this);
 }
 
 MediaResourceCallback*
@@ -1654,19 +1657,7 @@ MediaDecoder::SetCDMProxy(CDMProxy* aProxy)
 {
   MOZ_ASSERT(NS_IsMainThread());
 
-  RefPtr<CDMProxy> proxy = aProxy;
-  {
-    CDMCaps::AutoLock caps(aProxy->Capabilites());
-    if (!caps.AreCapsKnown()) {
-      RefPtr<MediaDecoder> self = this;
-      nsCOMPtr<nsIRunnable> r = NS_NewRunnableFunction([=] () {
-        self->mCDMProxyPromiseHolder.ResolveIfExists(proxy, __func__);
-      });
-      caps.CallOnMainThreadWhenCapsAvailable(r);
-      return;
-    }
-  }
-  mCDMProxyPromiseHolder.ResolveIfExists(proxy, __func__);
+  mCDMProxyPromiseHolder.ResolveIfExists(aProxy, __func__);
 }
 #endif
 
@@ -1881,7 +1872,8 @@ MediaDecoder::DumpDebugInfo()
 {
   DUMP_LOG("metadata: channels=%u rate=%u hasAudio=%d hasVideo=%d, "
            "state: mPlayState=%s mIsDormant=%d, mShuttingDown=%d",
-           mInfo->mAudio.mChannels, mInfo->mAudio.mRate, mInfo->HasAudio(), mInfo->HasVideo(),
+           mInfo ? mInfo->mAudio.mChannels : 0, mInfo ? mInfo->mAudio.mRate : 0,
+           mInfo ? mInfo->HasAudio() : 0, mInfo ? mInfo->HasVideo() : 0,
            PlayStateStr(), mIsDormant, mShuttingDown);
 
   nsString str;
@@ -1897,7 +1889,7 @@ void
 MediaDecoder::NotifyAudibleStateChanged()
 {
   MOZ_ASSERT(!mShuttingDown);
-  mOwner->NotifyAudibleStateChanged(mIsAudioDataAudible);
+  mOwner->SetAudibleState(mIsAudioDataAudible);
 }
 
 MediaMemoryTracker::MediaMemoryTracker()

@@ -270,7 +270,7 @@ private:
     nsresult Connect();
     void     SpeculativeConnect();
     nsresult SetupTransaction();
-    void     SetupTransactionSchedulingContext();
+    void     SetupTransactionRequestContext();
     nsresult CallOnStartRequest();
     nsresult ProcessResponse();
     nsresult ContinueProcessResponse1(nsresult);
@@ -418,7 +418,7 @@ private:
     void UpdateAggregateCallbacks();
 
     static bool HasQueryString(nsHttpRequestHead::ParsedMethodType method, nsIURI * uri);
-    bool ResponseWouldVary(nsICacheEntry* entry) const;
+    bool ResponseWouldVary(nsICacheEntry* entry);
     bool IsResumable(int64_t partialLen, int64_t contentLength,
                      bool ignoreMissingPartialLen = false) const;
     nsresult MaybeSetupByteRangeRequest(int64_t partialLen, int64_t contentLength,
@@ -432,6 +432,8 @@ private:
     void SetPushedStream(Http2PushedStream *stream);
 
     void MaybeWarnAboutAppCache();
+
+    void SetLoadGroupUserAgentOverride();
 
 private:
     nsCOMPtr<nsICancelable>           mProxyRequest;

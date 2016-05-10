@@ -10975,15 +10975,11 @@ class CGDOMJSProxyHandler_getOwnPropDescriptor(ClassMethod):
         if self.descriptor.supportsNamedProperties():
             operations = self.descriptor.operations
             readonly = toStringBool(operations['NamedSetter'] is None)
-            enumerable = (
-                "self->NameIsEnumerable(Constify(%s))" %
-                # First [0] means first (and only) signature, [1] means
-                # "arguments" as opposed to return type, [0] means first (and
-                # only) argument.
-                operations['NamedGetter'].signatures()[0][1][0].identifier.name)
             fillDescriptor = (
                 "FillPropertyDescriptor(desc, proxy, %s, %s);\n"
-                "return true;\n" % (readonly, enumerable))
+                "return true;\n" %
+                (readonly,
+                 toStringBool(self.descriptor.namedPropertiesEnumerable)))
             templateValues = {'jsvalRef': 'desc.value()', 'jsvalHandle': 'desc.value()',
                               'obj': 'proxy', 'successCode': fillDescriptor}
 
@@ -11299,14 +11295,17 @@ class CGDOMJSProxyHandler_ownPropNames(ClassMethod):
                 shadow = "false"
             addNames = fill(
                 """
-
                 nsTArray<nsString> names;
-                UnwrapProxy(proxy)->GetSupportedNames(flags, names);
+                UnwrapProxy(proxy)->GetSupportedNames(names);
                 if (!AppendNamedPropertyIds(cx, proxy, names, ${shadow}, props)) {
                   return false;
                 }
                 """,
                 shadow=shadow)
+            if not self.descriptor.namedPropertiesEnumerable:
+                addNames = CGIfWrapper(CGGeneric(addNames),
+                                       "flags & JSITER_HIDDEN").define()
+            addNames = "\n" + addNames
         else:
             addNames = ""
 
@@ -11666,6 +11665,23 @@ class CGDOMJSProxyHandler_getInstance(ClassMethod):
             """)
 
 
+class CGDOMJSProxyHandler_getPrototypeIfOrdinary(ClassMethod):
+    def __init__(self):
+        args = [Argument('JSContext*', 'cx'),
+                Argument('JS::Handle<JSObject*>', 'proxy'),
+                Argument('bool*', 'isOrdinary'),
+                Argument('JS::MutableHandle<JSObject*>', 'proto')]
+
+        ClassMethod.__init__(self, "getPrototypeIfOrdinary", "bool", args,
+                             virtual=True, override=True, const=True)
+
+    def getBody(self):
+        return dedent("""
+            *isOrdinary = false;
+            return true;
+            """)
+
+
 class CGDOMJSProxyHandler_call(ClassMethod):
     def __init__(self):
         args = [Argument('JSContext*', 'cx'),
@@ -11697,7 +11713,8 @@ class CGDOMJSProxyHandler_isCallable(ClassMethod):
 class CGDOMJSProxyHandler(CGClass):
     def __init__(self, descriptor):
         assert (descriptor.supportsIndexedProperties() or
-                descriptor.supportsNamedProperties())
+                descriptor.supportsNamedProperties() or
+                descriptor.hasNonOrdinaryGetPrototypeOf())
         methods = [CGDOMJSProxyHandler_getOwnPropDescriptor(descriptor),
                    CGDOMJSProxyHandler_defineProperty(descriptor),
                    ClassUsingDeclaration("mozilla::dom::DOMProxyHandler",
@@ -11724,6 +11741,8 @@ class CGDOMJSProxyHandler(CGClass):
             (descriptor.operations['NamedSetter'] is not None and
              descriptor.interface.getExtendedAttribute('OverrideBuiltins'))):
             methods.append(CGDOMJSProxyHandler_setCustom(descriptor))
+        if descriptor.hasNonOrdinaryGetPrototypeOf():
+            methods.append(CGDOMJSProxyHandler_getPrototypeIfOrdinary())
         if descriptor.operations['LegacyCaller']:
             methods.append(CGDOMJSProxyHandler_call())
             methods.append(CGDOMJSProxyHandler_isCallable())
@@ -14107,7 +14126,7 @@ class CGBindingImplClass(CGClass):
                                     []),
                                    {"infallible": True}))
         # And if we support named properties we need to be able to
-        # enumerate the supported names and test whether they're enumerable.
+        # enumerate the supported names.
         if descriptor.supportsNamedProperties():
             self.methodDecls.append(
                 CGNativeMember(
@@ -14115,20 +14134,7 @@ class CGBindingImplClass(CGClass):
                     "GetSupportedNames",
                     (IDLSequenceType(None,
                                      BuiltinTypes[IDLBuiltinType.Types.domstring]),
-                     # Let's use unsigned long for the type here, though really
-                     # it's just a C++ "unsigned"...
-                     [FakeArgument(BuiltinTypes[IDLBuiltinType.Types.unsigned_long],
-                                   FakeMember(),
-                                   name="aFlags")]),
-                    {"infallible": True}))
-            self.methodDecls.append(
-                CGNativeMember(
-                    descriptor, FakeMember(),
-                    "NameIsEnumerable",
-                    (BuiltinTypes[IDLBuiltinType.Types.boolean],
-                     [FakeArgument(BuiltinTypes[IDLBuiltinType.Types.domstring],
-                                   FakeMember(),
-                                   name="aName")]),
+                     []),
                     {"infallible": True}))
 
         wrapArgs = [Argument('JSContext*', 'aCx'),
@@ -14859,7 +14865,7 @@ class CGCallback(CGClass):
             }
             CallSetup s(this, aRv, aExecutionReason, aExceptionHandling, aCompartment);
             if (!s.GetContext()) {
-              aRv.Throw(NS_ERROR_UNEXPECTED);
+              MOZ_ASSERT(aRv.Failed());
               return${errorReturn};
             }
             """,
@@ -15224,7 +15230,7 @@ class CallbackMember(CGNativeMember):
             $*{callSetup}
             JSContext* cx = s.GetContext();
             if (!cx) {
-              aRv.Throw(NS_ERROR_UNEXPECTED);
+              MOZ_ASSERT(aRv.Failed());
               return${errorReturn};
             }
             """,

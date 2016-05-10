@@ -735,7 +735,7 @@ public:
    */
   virtual void SetContentType(const nsAString& aContentType) override;
 
-  virtual nsresult SetBaseURI(nsIURI* aURI) override;
+  virtual void SetBaseURI(nsIURI* aURI) override;
 
   /**
    * Get/Set the base target of a link in a document.
@@ -1235,6 +1235,8 @@ public:
   // canceled by the URL classifier (Safebrowsing).
   //
   already_AddRefed<nsSimpleContentList> BlockedTrackingNodes() const;
+
+  static bool IsUnprefixedFullscreenEnabled(JSContext* aCx, JSObject* aObject);
 
   // Do the "fullscreen element ready check" from the fullscreen spec.
   // It returns true if the given element is allowed to go into fullscreen.

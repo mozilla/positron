@@ -274,6 +274,12 @@ protected:
   virtual nsresult NotifyIMEInternal(
                      const IMENotification& aIMENotification) override;
 
+  // PuppetWidgets do not create compositors.
+  widget::CompositorWidgetProxy* NewCompositorWidgetProxy() override {
+    MOZ_ASSERT_UNREACHABLE("PuppetWidgets should not have widget proxies");
+    return nullptr;
+  }
+
 private:
   nsresult Paint();
 
@@ -296,7 +302,7 @@ private:
 
   nsIWidgetListener* GetCurrentWidgetListener();
 
-  class PaintTask : public nsRunnable {
+  class PaintTask : public Runnable {
   public:
     NS_DECL_NSIRUNNABLE
     explicit PaintTask(PuppetWidget* widget) : mWidget(widget) {}
