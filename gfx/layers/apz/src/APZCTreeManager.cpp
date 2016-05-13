@@ -30,7 +30,7 @@
 #include "nsPoint.h"                    // for nsIntPoint
 #include "nsThreadUtils.h"              // for NS_IsMainThread
 #include "OverscrollHandoffState.h"     // for OverscrollHandoffState
-#include "TreeTraversal.h"              // for generic tree traveral algorithms
+#include "TreeTraversal.h"              // for ForEachNode, BreadthFirstSearch, etc
 #include "LayersLogging.h"              // for Stringify
 #include "Units.h"                      // for ParentlayerPixel
 #include "GestureEventListener.h"       // for GestureEventListener::setLongTapEnabled
@@ -166,7 +166,7 @@ APZCTreeManager::UpdateHitTestingTree(CompositorBridgeParent* aCompositor,
   // we are sure that the layer was removed and not just transplanted elsewhere. Doing that
   // as part of a recursive tree walk is hard and so maintaining a list and removing
   // APZCs that are still alive is much simpler.
-  ForEachNode(mRootNode.get(),
+  ForEachNode<ReverseIterator>(mRootNode.get(),
       [&state] (HitTestingTreeNode* aNode)
       {
         state.mNodesToDestroy.AppendElement(aNode);
@@ -369,6 +369,7 @@ APZCTreeManager::PrepareNodeForLayer(const LayerMetricsWrapper& aLayer,
                            aLayer.GetScrollbarDirection(),
                            aLayer.GetScrollbarSize(),
                            aLayer.IsScrollbarContainer());
+    node->SetFixedPosData(aLayer.GetFixedPositionScrollContainerId());
     return node;
   }
 
@@ -549,6 +550,7 @@ APZCTreeManager::PrepareNodeForLayer(const LayerMetricsWrapper& aLayer,
                          aLayer.GetScrollbarDirection(),
                          aLayer.GetScrollbarSize(),
                          aLayer.IsScrollbarContainer());
+  node->SetFixedPosData(aLayer.GetFixedPositionScrollContainerId());
   return node;
 }
 
@@ -1263,7 +1265,7 @@ APZCTreeManager::UpdateZoomConstraints(const ScrollableLayerGuid& aGuid,
     mZoomConstraints.erase(aGuid);
   }
   if (node && aConstraints) {
-    ForEachNode(node.get(),
+    ForEachNode<ReverseIterator>(node.get(),
         [&aConstraints, &node, this](HitTestingTreeNode* aNode)
         {
           if (aNode != node) {
@@ -1310,7 +1312,7 @@ APZCTreeManager::FlushRepaintsToClearScreenToGeckoTransform()
   MutexAutoLock lock(mTreeLock);
   mTreeLock.AssertCurrentThreadOwns();
 
-  ForEachNode(mRootNode.get(),
+  ForEachNode<ReverseIterator>(mRootNode.get(),
       [](HitTestingTreeNode* aNode)
       {
         if (aNode->IsPrimaryHolder()) {
@@ -1354,7 +1356,7 @@ APZCTreeManager::ClearTree()
   // does a pre-order traversal of the tree, and Destroy() nulls out
   // the fields needed to reach the children of the node.
   nsTArray<RefPtr<HitTestingTreeNode>> nodesToDestroy;
-  ForEachNode(mRootNode.get(),
+  ForEachNode<ReverseIterator>(mRootNode.get(),
       [&nodesToDestroy](HitTestingTreeNode* aNode)
       {
         nodesToDestroy.AppendElement(aNode);
@@ -1573,7 +1575,7 @@ APZCTreeManager::GetTargetNode(const ScrollableLayerGuid& aGuid,
                                GuidComparator aComparator)
 {
   mTreeLock.AssertCurrentThreadOwns();
-  RefPtr<HitTestingTreeNode> target = DepthFirstSearchPostOrder(mRootNode.get(),
+  RefPtr<HitTestingTreeNode> target = DepthFirstSearchPostOrder<ReverseIterator>(mRootNode.get(),
       [&aGuid, &aComparator](HitTestingTreeNode* node)
       {
         bool matches = false;
@@ -1704,7 +1706,7 @@ APZCTreeManager::FindScrollNode(const AsyncDragMetrics& aDragMetrics)
 {
   MutexAutoLock lock(mTreeLock);
 
-  return DepthFirstSearch(mRootNode.get(),
+  return DepthFirstSearch<ReverseIterator>(mRootNode.get(),
       [&aDragMetrics](HitTestingTreeNode* aNode) {
         return aNode->MatchesScrollDragMetrics(aDragMetrics);
       });
@@ -1725,7 +1727,7 @@ APZCTreeManager::GetAPZCAtPoint(HitTestingTreeNode* aNode,
   std::stack<ParentLayerPoint> hitTestPoints;
   hitTestPoints.push(aHitTestPoint);
 
-  ForEachNode(root,
+  ForEachNode<ReverseIterator>(root,
       [&hitTestPoints](HitTestingTreeNode* aNode) {
         if (aNode->IsOutsideClip(hitTestPoints.top())) {
           // If the point being tested is outside the clip region for this node
@@ -1773,10 +1775,25 @@ APZCTreeManager::GetAPZCAtPoint(HitTestingTreeNode* aNode,
           }
         }
       }
-      AsyncPanZoomController* result = resultNode->GetNearestContainingApzcWithSameLayersId();
+
+      AsyncPanZoomController* result = nullptr;
+
+      FrameMetrics::ViewID fpTarget =
+          resultNode->GetNearestAncestorFixedPosTargetWithSameLayersId();
+      if (fpTarget != FrameMetrics::NULL_SCROLL_ID) {
+        ScrollableLayerGuid guid(resultNode->GetLayersId(), 0, fpTarget);
+        RefPtr<HitTestingTreeNode> hitNode = GetTargetNode(guid, &GuidComparatorIgnoringPresShell);
+        result = hitNode ? hitNode->GetApzc() : nullptr;
+        APZCTM_LOG("Found target %p using fixed-pos lookup on %" PRIu64 "\n", result, fpTarget);
+      }
+      if (!result) {
+        result = resultNode->GetNearestContainingApzcWithSameLayersId();
+        APZCTM_LOG("Found target %p using ancestor lookup\n", result);
+      }
       if (!result) {
         result = FindRootApzcForLayersId(resultNode->GetLayersId());
         MOZ_ASSERT(result);
+        APZCTM_LOG("Found target %p using root lookup\n", result);
       }
       APZCTM_LOG("Successfully matched APZC %p via node %p (hit result %d)\n",
           result, resultNode, *aOutHitResult);
@@ -1791,7 +1808,7 @@ APZCTreeManager::FindRootApzcForLayersId(uint64_t aLayersId) const
 {
   mTreeLock.AssertCurrentThreadOwns();
 
-  HitTestingTreeNode* resultNode = BreadthFirstSearch(mRootNode.get(),
+  HitTestingTreeNode* resultNode = BreadthFirstSearch<ReverseIterator>(mRootNode.get(),
       [aLayersId](HitTestingTreeNode* aNode) {
         AsyncPanZoomController* apzc = aNode->GetApzc();
         return apzc
@@ -1806,7 +1823,7 @@ APZCTreeManager::FindRootContentApzcForLayersId(uint64_t aLayersId) const
 {
   mTreeLock.AssertCurrentThreadOwns();
 
-  HitTestingTreeNode* resultNode = BreadthFirstSearch(mRootNode.get(),
+  HitTestingTreeNode* resultNode = BreadthFirstSearch<ReverseIterator>(mRootNode.get(),
       [aLayersId](HitTestingTreeNode* aNode) {
         AsyncPanZoomController* apzc = aNode->GetApzc();
         return apzc
@@ -1827,7 +1844,7 @@ APZCTreeManager::FindRootContentOrRootApzc() const
   // is one, or the root APZC if there is not.
   // Since BreadthFirstSearch is a pre-order search, we first do a search for
   // the RCD, and then if we don't find one, we do a search for the root APZC.
-  HitTestingTreeNode* resultNode = BreadthFirstSearch(mRootNode.get(),
+  HitTestingTreeNode* resultNode = BreadthFirstSearch<ReverseIterator>(mRootNode.get(),
       [](HitTestingTreeNode* aNode) {
         AsyncPanZoomController* apzc = aNode->GetApzc();
         return apzc && apzc->IsRootContent();
@@ -1835,7 +1852,7 @@ APZCTreeManager::FindRootContentOrRootApzc() const
   if (resultNode) {
     return resultNode->GetApzc();
   }
-  resultNode = BreadthFirstSearch(mRootNode.get(),
+  resultNode = BreadthFirstSearch<ReverseIterator>(mRootNode.get(),
       [](HitTestingTreeNode* aNode) {
         AsyncPanZoomController* apzc = aNode->GetApzc();
         return (apzc != nullptr);

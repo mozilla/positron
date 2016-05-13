@@ -423,7 +423,6 @@ WEBIDL_FILES = [
     'StyleSheetList.webidl',
     'SubtleCrypto.webidl',
     'SVGAElement.webidl',
-    'SVGAltGlyphElement.webidl',
     'SVGAngle.webidl',
     'SVGAnimatedAngle.webidl',
     'SVGAnimatedBoolean.webidl',
@@ -823,6 +822,7 @@ GENERATED_EVENTS_WEBIDL_FILES = [
     'UDPMessageEvent.webidl',
     'UserProximityEvent.webidl',
     'USSDReceivedEvent.webidl',
+    'WebGLContextEvent.webidl',
 ]
 
 if CONFIG['MOZ_WEBRTC']:

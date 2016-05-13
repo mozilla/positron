@@ -861,17 +861,27 @@ nsWindow::SetTitle(const nsAString& aTitle)
 
 // EVENTS
 
+nsIWidgetListener*
+nsWindow::GetPaintListener()
+{
+    return mAttachedWidgetListener ? mAttachedWidgetListener : mWidgetListener;
+}
+
 void
 nsWindow::OnPaint()
 {
     LOGDRAW(("nsWindow::%s [%p]\n", __FUNCTION__, (void *)this));
-    nsIWidgetListener* listener =
-        mAttachedWidgetListener ? mAttachedWidgetListener : mWidgetListener;
+    nsIWidgetListener* listener = GetPaintListener();
     if (!listener) {
         return;
     }
 
     listener->WillPaintWindow(this);
+
+    nsIWidgetListener* listener = GetPaintListener();
+    if (!listener) {
+        return;
+    }
 
     switch (GetLayerManager()->GetBackendType()) {
         case mozilla::layers::LayersBackend::LAYERS_CLIENT: {
@@ -882,6 +892,11 @@ nsWindow::OnPaint()
         }
         default:
             NS_ERROR("Invalid layer manager");
+    }
+
+    nsIWidgetListener* listener = GetPaintListener();
+    if (!listener) {
+        return;
     }
 
     listener->DidPaintWindow();
@@ -950,7 +965,7 @@ InitMouseEvent(WidgetMouseEvent& aMouseEvent, QMouseEvent* aEvent,
                                    aEvent->modifiers() & Qt::AltModifier,
                                    aEvent->modifiers() & Qt::ShiftModifier,
                                    aEvent->modifiers() & Qt::MetaModifier);
-    aMouseEvent.clickCount = aClickCount;
+    aMouseEvent.mClickCount = aClickCount;
 
     switch (aEvent->button()) {
     case Qt::LeftButton:
@@ -1976,7 +1991,7 @@ nsWindow::ProcessMotionEvent()
                                  mMoveEvent.modifiers & Qt::AltModifier,
                                  mMoveEvent.modifiers & Qt::ShiftModifier,
                                  mMoveEvent.modifiers & Qt::MetaModifier);
-        event.clickCount      = 0;
+        event.mClickCount = 0;
 
         DispatchEvent(&event);
         mMoveEvent.needDispatch = false;

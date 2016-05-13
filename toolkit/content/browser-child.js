@@ -277,19 +277,30 @@ var WebNavigation =  {
     }
   },
 
+  _wrapURIChangeCall(fn) {
+    this._inLoadURI = true;
+    try {
+      fn();
+    } finally {
+      this._inLoadURI = false;
+      WebProgressListener.sendLoadCallResult();
+    }
+  },
+
   goBack: function() {
     if (this.webNavigation.canGoBack) {
-      this.webNavigation.goBack();
+      this._wrapURIChangeCall(() => this.webNavigation.goBack());
     }
   },
 
   goForward: function() {
-    if (this.webNavigation.canGoForward)
-      this.webNavigation.goForward();
+    if (this.webNavigation.canGoForward) {
+      this._wrapURIChangeCall(() => this.webNavigation.goForward());
+    }
   },
 
   gotoIndex: function(index) {
-    this.webNavigation.gotoIndex(index);
+    this._wrapURIChangeCall(() => this.webNavigation.gotoIndex(index));
   },
 
   loadURI: function(uri, flags, referrer, referrerPolicy, postData, headers, baseURI) {
@@ -312,14 +323,10 @@ var WebNavigation =  {
       headers = makeInputStream(headers);
     if (baseURI)
       baseURI = Services.io.newURI(baseURI, null, null);
-    this._inLoadURI = true;
-    try {
-      this.webNavigation.loadURIWithOptions(uri, flags, referrer, referrerPolicy,
-                                            postData, headers, baseURI);
-    } finally {
-      this._inLoadURI = false;
-      WebProgressListener.sendLoadCallResult();
-    }
+    this._wrapURIChangeCall(() => {
+      return this.webNavigation.loadURIWithOptions(uri, flags, referrer, referrerPolicy,
+                                                   postData, headers, baseURI);
+    });
   },
 
   reload: function(flags) {
@@ -547,7 +554,6 @@ var AutoCompletePopup = {
     controller.attachToBrowser(docShell, this.QueryInterface(Ci.nsIAutoCompletePopup));
 
     this._input = null;
-    this._element = null;
     this._popupOpen = false;
 
     addMessageListener("FormAutoComplete:HandleEnter", message => {
@@ -586,14 +592,6 @@ var AutoCompletePopup = {
     return this._popupOpen;
   },
 
-  _attachClickListener(element) {
-    element.addEventListener("click", this);
-  },
-
-  _detachClickListener(element) {
-    element.removeEventListener("click", this);
-  },
-
   openAutocompletePopup: function (input, element) {
     if (!this._popupOpen) {
       // The search itself normally opens the popup itself, but in some cases,
@@ -601,23 +599,12 @@ var AutoCompletePopup = {
       // popup to reuse the last results.
       sendAsyncMessage("FormAutoComplete:MaybeOpenPopup", {});
     }
-    if (this._element !== element) {
-      if (this._element) {
-        this._detachClickListener(this._element);
-      }
-      this._attachClickListener(element);
-    }
     this._input = input;
-    this._element = element;
     this._popupOpen = true;
   },
 
   closePopup: function () {
     this._popupOpen = false;
-    if (this._element) {
-      this._detachClickListener(this._element);
-      this._element = null;
-    }
     sendAsyncMessage("FormAutoComplete:ClosePopup", {});
   },
 
@@ -629,11 +616,7 @@ var AutoCompletePopup = {
       reverse: reverse,
       page: page
     });
-  },
-
-  handleEvent(event) {
-    this._popupOpen = false;
-  },
+  }
 }
 
 addMessageListener("InPermitUnload", msg => {

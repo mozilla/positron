@@ -40,6 +40,7 @@
 #include "nsMathUtils.h"                // for NS_round
 #include "nsPoint.h"                    // for nsPoint
 #include "nsTArray.h"                   // for nsTArray, nsTArray_Impl, etc
+#include "TreeTraversal.h"              // for ForEachNode
 #include "GeckoProfiler.h"
 #include "mozilla/layers/TextureHost.h"
 #include "mozilla/layers/AsyncCompositionManager.h"
@@ -343,6 +344,7 @@ LayerTransactionParent::RecvUpdate(InfallibleTArray<Edit>&& cset,
       layer->SetContentFlags(common.contentFlags());
       layer->SetOpacity(common.opacity());
       layer->SetClipRect(common.useClipRect() ? Some(common.clipRect()) : Nothing());
+      layer->SetScrolledClip(common.scrolledClip());
       layer->SetBaseTransform(common.transform().value());
       layer->SetTransformIsPerspective(common.transformIsPerspective());
       layer->SetPostScale(common.postXScale(), common.postYScale());
@@ -350,8 +352,7 @@ LayerTransactionParent::RecvUpdate(InfallibleTArray<Edit>&& cset,
       if (common.isFixedPosition()) {
         layer->SetFixedPositionData(common.fixedPositionScrollContainerId(),
                                     common.fixedPositionAnchor(),
-                                    common.fixedPositionSides(),
-                                    common.isClipFixed());
+                                    common.fixedPositionSides());
       }
       if (common.isStickyPosition()) {
         layer->SetStickyPositionData(common.stickyScrollContainerId(),
@@ -797,21 +798,20 @@ LayerTransactionParent::RecvGetAnimationTransform(PLayerParent* aParent,
 static AsyncPanZoomController*
 GetAPZCForViewID(Layer* aLayer, FrameMetrics::ViewID aScrollID)
 {
-  for (uint32_t i = 0; i < aLayer->GetScrollMetadataCount(); i++) {
-    if (aLayer->GetFrameMetrics(i).GetScrollId() == aScrollID) {
-      return aLayer->GetAsyncPanZoomController(i);
-    }
-  }
-  ContainerLayer* container = aLayer->AsContainerLayer();
-  if (container) {
-    for (Layer* l = container->GetFirstChild(); l; l = l->GetNextSibling()) {
-      AsyncPanZoomController* c = GetAPZCForViewID(l, aScrollID);
-      if (c) {
-        return c;
-      }
-    }
-  }
-  return nullptr;
+  AsyncPanZoomController* resultApzc = nullptr;
+  ForEachNode<ForwardIterator>(
+      aLayer,
+      [aScrollID, &resultApzc] (Layer* layer)
+      {
+        for (uint32_t i = 0; i < layer->GetScrollMetadataCount(); i++) {
+          if (layer->GetFrameMetrics(i).GetScrollId() == aScrollID) {
+            resultApzc = layer->GetAsyncPanZoomController(i);
+            return TraversalFlag::Abort;
+          }
+        }
+        return TraversalFlag::Continue;
+      });
+  return resultApzc;
 }
 
 bool

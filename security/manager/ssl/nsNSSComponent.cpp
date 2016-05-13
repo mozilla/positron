@@ -24,7 +24,6 @@
 #include "nsClientAuthRemember.h"
 #include "nsComponentManagerUtils.h"
 #include "nsDirectoryServiceDefs.h"
-#include "nsIBufEntropyCollector.h"
 #include "nsICertOverrideService.h"
 #include "nsIFile.h"
 #include "nsIObserverService.h"
@@ -998,8 +997,8 @@ nsNSSComponent::ConfigureInternalPKCS11Token()
   nsAutoString privateTokenDescription;
   nsAutoString slotDescription;
   nsAutoString privateSlotDescription;
-  nsAutoString fips140TokenDescription;
   nsAutoString fips140SlotDescription;
+  nsAutoString fips140TokenDescription;
 
   nsresult rv;
   rv = GetPIPNSSBundleString("ManufacturerID", manufacturerID);
@@ -1020,10 +1019,10 @@ nsNSSComponent::ConfigureInternalPKCS11Token()
   rv = GetPIPNSSBundleString("PrivateSlotDescription", privateSlotDescription);
   if (NS_FAILED(rv)) return rv;
 
-  rv = GetPIPNSSBundleString("Fips140TokenDescription", fips140TokenDescription);
+  rv = GetPIPNSSBundleString("Fips140SlotDescription", fips140SlotDescription);
   if (NS_FAILED(rv)) return rv;
 
-  rv = GetPIPNSSBundleString("Fips140SlotDescription", fips140SlotDescription);
+  rv = GetPIPNSSBundleString("Fips140TokenDescription", fips140TokenDescription);
   if (NS_FAILED(rv)) return rv;
 
   PK11_ConfigurePKCS11(NS_ConvertUTF16toUTF8(manufacturerID).get(),
@@ -1032,8 +1031,8 @@ nsNSSComponent::ConfigureInternalPKCS11Token()
                        NS_ConvertUTF16toUTF8(privateTokenDescription).get(),
                        NS_ConvertUTF16toUTF8(slotDescription).get(),
                        NS_ConvertUTF16toUTF8(privateSlotDescription).get(),
-                       NS_ConvertUTF16toUTF8(fips140TokenDescription).get(),
                        NS_ConvertUTF16toUTF8(fips140SlotDescription).get(),
+                       NS_ConvertUTF16toUTF8(fips140TokenDescription).get(),
                        0, 0);
   return NS_OK;
 }
@@ -1349,6 +1348,21 @@ void nsNSSComponent::setValidationOptions(bool isInitialSetting,
       break;
   }
 
+  NetscapeStepUpPolicy netscapeStepUpPolicy =
+    static_cast<NetscapeStepUpPolicy>
+      (Preferences::GetUint("security.pki.netscape_step_up_policy",
+                            static_cast<uint32_t>(NetscapeStepUpPolicy::AlwaysMatch)));
+  switch (netscapeStepUpPolicy) {
+    case NetscapeStepUpPolicy::AlwaysMatch:
+    case NetscapeStepUpPolicy::MatchBefore23August2016:
+    case NetscapeStepUpPolicy::MatchBefore23August2015:
+    case NetscapeStepUpPolicy::NeverMatch:
+      break;
+    default:
+      netscapeStepUpPolicy = NetscapeStepUpPolicy::AlwaysMatch;
+      break;
+  }
+
   CertVerifier::OcspDownloadConfig odc;
   CertVerifier::OcspStrictConfig osc;
   CertVerifier::OcspGetConfig ogc;
@@ -1359,7 +1373,8 @@ void nsNSSComponent::setValidationOptions(bool isInitialSetting,
   mDefaultCertVerifier = new SharedCertVerifier(odc, osc, ogc,
                                                 certShortLifetimeInDays,
                                                 pinningMode, sha1Mode,
-                                                nameMatchingMode);
+                                                nameMatchingMode,
+                                                netscapeStepUpPolicy);
 }
 
 // Enable the TLS versions given in the prefs, defaulting to TLS 1.0 (min) and
@@ -1693,42 +1708,13 @@ nsNSSComponent::Init()
     return NS_ERROR_OUT_OF_MEMORY;
   }
 
-  nsCOMPtr<nsIEntropyCollector> ec(
-    do_GetService(NS_ENTROPYCOLLECTOR_CONTRACTID));
-  if (!ec) {
-    return NS_ERROR_FAILURE;
-  }
-  nsCOMPtr<nsIBufEntropyCollector> bec(do_QueryInterface(ec));
-  if (!bec) {
-    return NS_ERROR_FAILURE;
-  }
-  bec->ForwardTo(this);
-
   return RegisterObservers();
 }
 
 // nsISupports Implementation for the class
 NS_IMPL_ISUPPORTS(nsNSSComponent,
-                  nsIEntropyCollector,
                   nsINSSComponent,
                   nsIObserver)
-
-NS_IMETHODIMP
-nsNSSComponent::RandomUpdate(void* entropy, int32_t bufLen)
-{
-  nsNSSShutDownPreventionLock locker;
-
-  // Asynchronous event happening often,
-  // must not interfere with initialization or profile switch.
-
-  MutexAutoLock lock(mutex);
-
-  if (!mNSSInitialized)
-      return NS_ERROR_NOT_INITIALIZED;
-
-  PK11_RandomUpdate(entropy, bufLen);
-  return NS_OK;
-}
 
 static const char* const PROFILE_BEFORE_CHANGE_TOPIC = "profile-before-change";
 
@@ -1744,18 +1730,6 @@ nsNSSComponent::Observe(nsISupports* aSubject, const char* aTopic,
     MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("nsNSSComponent: XPCom shutdown observed\n"));
 
     // Cleanup code that requires services, it's too late in destructor.
-
-    nsCOMPtr<nsIEntropyCollector> ec
-        = do_GetService(NS_ENTROPYCOLLECTOR_CONTRACTID);
-
-    if (ec) {
-      nsCOMPtr<nsIBufEntropyCollector> bec
-        = do_QueryInterface(ec);
-      if (bec) {
-        bec->DontForward();
-      }
-    }
-
     deleteBackgroundThreads();
   }
   else if (nsCRT::strcmp(aTopic, NS_PREFBRANCH_PREFCHANGE_TOPIC_ID) == 0) {
@@ -1793,7 +1767,8 @@ nsNSSComponent::Observe(nsISupports* aSubject, const char* aTopic,
                prefName.EqualsLiteral("security.ssl.enable_ocsp_must_staple") ||
                prefName.EqualsLiteral("security.cert_pinning.enforcement_level") ||
                prefName.EqualsLiteral("security.pki.sha1_enforcement_level") ||
-               prefName.EqualsLiteral("security.pki.name_matching_mode")) {
+               prefName.EqualsLiteral("security.pki.name_matching_mode") ||
+               prefName.EqualsLiteral("security.pki.netscape_step_up_policy")) {
       MutexAutoLock lock(mutex);
       setValidationOptions(false, lock);
 #ifdef DEBUG

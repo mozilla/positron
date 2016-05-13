@@ -165,12 +165,12 @@ var commandsPeerConnectionInitial = [
     test.pcRemote.logSignalingState();
   },
 
-  function PC_LOCAL_SETUP_ADDSTREAM_HANDLER(test) {
-    test.pcLocal.setupAddStreamEventHandler();
+  function PC_LOCAL_SETUP_TRACK_HANDLER(test) {
+    test.pcLocal.setupTrackEventHandler();
   },
 
-  function PC_REMOTE_SETUP_ADDSTREAM_HANDLER(test) {
-    test.pcRemote.setupAddStreamEventHandler();
+  function PC_REMOTE_SETUP_TRACK_HANDLER(test) {
+    test.pcRemote.setupTrackEventHandler();
   },
 
   function PC_LOCAL_CHECK_INITIAL_SIGNALINGSTATE(test) {
@@ -353,7 +353,8 @@ var commandsPeerConnectionOfferAnswer = [
       .then(() => {
         is(test.pcRemote.signalingState, STABLE,
            "signalingState after remote setLocalDescription is 'stable'");
-      });
+      })
+      .then(() => test.pcRemote.markRemoteTracksAsNegotiated());
   },
 
   function PC_LOCAL_GET_ANSWER(test) {
@@ -375,8 +376,10 @@ var commandsPeerConnectionOfferAnswer = [
       .then(() => {
         is(test.pcLocal.signalingState, STABLE,
            "signalingState after local setRemoteDescription is 'stable'");
-      });
+      })
+      .then(() => test.pcLocal.markRemoteTracksAsNegotiated());
   },
+
   function PC_REMOTE_SANE_LOCAL_SDP(test) {
     test.pcRemote.localRequiresTrickleIce =
       sdputils.verifySdp(test._remote_answer, "answer",
@@ -409,14 +412,6 @@ var commandsPeerConnectionOfferAnswer = [
 
   function PC_REMOTE_VERIFY_ICE_GATHERING(test) {
     return waitForAnIceCandidate(test.pcRemote);
-  },
-
-  function PC_LOCAL_CHECK_MEDIA_TRACKS(test) {
-    return test.pcLocal.checkMediaTracks();
-  },
-
-  function PC_REMOTE_CHECK_MEDIA_TRACKS(test) {
-    return test.pcRemote.checkMediaTracks();
   },
 
   function PC_LOCAL_WAIT_FOR_MEDIA_FLOW(test) {

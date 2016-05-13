@@ -778,20 +778,9 @@ CodeGeneratorX86Shared::visitClzI(LClzI* ins)
 {
     Register input = ToRegister(ins->input());
     Register output = ToRegister(ins->output());
+    bool knownNotZero = ins->mir()->operandIsNeverZero();
 
-    // bsr is undefined on 0
-    Label done, nonzero;
-    if (!ins->mir()->operandIsNeverZero()) {
-        masm.test32(input, input);
-        masm.j(Assembler::NonZero, &nonzero);
-        masm.move32(Imm32(32), output);
-        masm.jump(&done);
-    }
-
-    masm.bind(&nonzero);
-    masm.bsr(input, output);
-    masm.xor32(Imm32(0x1F), output);
-    masm.bind(&done);
+    masm.clz32(input, output, knownNotZero);
 }
 
 void
@@ -799,19 +788,9 @@ CodeGeneratorX86Shared::visitCtzI(LCtzI* ins)
 {
     Register input = ToRegister(ins->input());
     Register output = ToRegister(ins->output());
+    bool knownNotZero = ins->mir()->operandIsNeverZero();
 
-    // bsf is undefined on 0
-    Label done, nonzero;
-    if (!ins->mir()->operandIsNeverZero()) {
-        masm.test32(input, input);
-        masm.j(Assembler::NonZero, &nonzero);
-        masm.move32(Imm32(32), output);
-        masm.jump(&done);
-    }
-
-    masm.bind(&nonzero);
-    masm.bsf(input, output);
-    masm.bind(&done);
+    masm.ctz32(input, output, knownNotZero);
 }
 
 void
@@ -819,31 +798,9 @@ CodeGeneratorX86Shared::visitPopcntI(LPopcntI* ins)
 {
     Register input = ToRegister(ins->input());
     Register output = ToRegister(ins->output());
+    Register temp = ins->temp()->isBogusTemp() ? InvalidReg : ToRegister(ins->temp());
 
-    if (AssemblerX86Shared::HasPOPCNT()) {
-        masm.popcnt(input, output);
-        return;
-    }
-
-    // Equivalent to mozilla::CountPopulation32()
-    Register tmp = ToRegister(ins->temp());
-
-    masm.movl(input, output);
-    masm.movl(input, tmp);
-    masm.shrl(Imm32(1), output);
-    masm.andl(Imm32(0x55555555), output);
-    masm.subl(output, tmp);
-    masm.movl(tmp, output);
-    masm.andl(Imm32(0x33333333), output);
-    masm.shrl(Imm32(2), tmp);
-    masm.andl(Imm32(0x33333333), tmp);
-    masm.addl(output, tmp);
-    masm.movl(tmp, output);
-    masm.shrl(Imm32(4), output);
-    masm.addl(tmp, output);
-    masm.andl(Imm32(0xF0F0F0F), output);
-    masm.imull(Imm32(0x1010101), output, output);
-    masm.shrl(Imm32(24), output);
+    masm.popcnt32(input, output, temp);
 }
 
 void
@@ -1115,9 +1072,13 @@ CodeGeneratorX86Shared::visitUDivOrMod(LUDivOrMod* ins)
     if (ins->canBeDivideByZero()) {
         masm.test32(rhs, rhs);
         if (ins->mir()->isTruncated()) {
-            if (!ool)
-                ool = new(alloc()) ReturnZero(output);
-            masm.j(Assembler::Zero, ool->entry());
+            if (ins->trapOnError()) {
+                masm.j(Assembler::Zero, wasm::JumpTarget::IntegerDivideByZero);
+            } else {
+                if (!ool)
+                    ool = new(alloc()) ReturnZero(output);
+                masm.j(Assembler::Zero, ool->entry());
+            }
         } else {
             bailoutIf(Assembler::Zero, ins->snapshot());
         }
@@ -1159,11 +1120,14 @@ CodeGeneratorX86Shared::visitUDivOrModConstant(LUDivOrModConstant *ins) {
     bool isDiv = (output == edx);
 
     if (d == 0) {
-        if (ins->mir()->isTruncated())
-            masm.xorl(output, output);
-        else
+        if (ins->mir()->isTruncated()) {
+            if (ins->trapOnError())
+                masm.jump(wasm::JumpTarget::IntegerDivideByZero);
+            else
+                masm.xorl(output, output);
+        } else {
             bailout(ins->snapshot());
-
+        }
         return;
     }
 
@@ -1261,7 +1225,7 @@ CodeGeneratorX86Shared::visitDivPowTwoI(LDivPowTwoI* ins)
         bailoutIf(Assembler::Zero, ins->snapshot());
     }
 
-    if (shift != 0) {
+    if (shift) {
         if (!mir->isTruncated()) {
             // If the remainder is != 0, bailout since this must be a double.
             masm.test32(lhs, Imm32(UINT32_MAX >> (32 - shift)));
@@ -1288,20 +1252,19 @@ CodeGeneratorX86Shared::visitDivPowTwoI(LDivPowTwoI* ins)
             if (negativeDivisor)
                 masm.negl(lhs);
         }
-    } else if (shift == 0) {
-        if (negativeDivisor) {
-            // INT32_MIN / -1 overflows.
-            masm.negl(lhs);
-            if (!mir->isTruncated())
-                bailoutIf(Assembler::Overflow, ins->snapshot());
-        }
+        return;
+    }
 
-        else if (mir->isUnsigned() && !mir->isTruncated()) {
-            // Unsigned division by 1 can overflow if output is not
-            // truncated.
-            masm.test32(lhs, lhs);
-            bailoutIf(Assembler::Signed, ins->snapshot());
-        }
+    if (negativeDivisor) {
+        // INT32_MIN / -1 overflows.
+        masm.negl(lhs);
+        if (!mir->isTruncated())
+            bailoutIf(Assembler::Overflow, ins->snapshot());
+    } else if (mir->isUnsigned() && !mir->isTruncated()) {
+        // Unsigned division by 1 can overflow if output is not
+        // truncated.
+        masm.test32(lhs, lhs);
+        bailoutIf(Assembler::Signed, ins->snapshot());
     }
 }
 
@@ -1414,7 +1377,9 @@ CodeGeneratorX86Shared::visitDivI(LDivI* ins)
     // Handle divide by zero.
     if (mir->canBeDivideByZero()) {
         masm.test32(rhs, rhs);
-        if (mir->canTruncateInfinities()) {
+        if (mir->trapOnError()) {
+            masm.j(Assembler::Zero, wasm::JumpTarget::IntegerDivideByZero);
+        } else if (mir->canTruncateInfinities()) {
             // Truncated division by zero is zero (Infinity|0 == 0)
             if (!ool)
                 ool = new(alloc()) ReturnZero(output);
@@ -1431,7 +1396,9 @@ CodeGeneratorX86Shared::visitDivI(LDivI* ins)
         masm.cmp32(lhs, Imm32(INT32_MIN));
         masm.j(Assembler::NotEqual, &notmin);
         masm.cmp32(rhs, Imm32(-1));
-        if (mir->canTruncateOverflow()) {
+        if (mir->trapOnError()) {
+            masm.j(Assembler::Equal, wasm::JumpTarget::IntegerOverflow);
+        } else if (mir->canTruncateOverflow()) {
             // (-INT32_MIN)|0 == INT32_MIN and INT32_MIN is already in the
             // output register (lhs == eax).
             masm.j(Assembler::Equal, &done);
@@ -1577,9 +1544,13 @@ CodeGeneratorX86Shared::visitModI(LModI* ins)
     if (ins->mir()->canBeDivideByZero()) {
         masm.test32(rhs, rhs);
         if (ins->mir()->isTruncated()) {
-            if (!ool)
-                ool = new(alloc()) ReturnZero(edx);
-            masm.j(Assembler::Zero, ool->entry());
+            if (ins->mir()->trapOnError()) {
+                masm.j(Assembler::Zero, wasm::JumpTarget::IntegerDivideByZero);
+            } else {
+                if (!ool)
+                    ool = new(alloc()) ReturnZero(edx);
+                masm.j(Assembler::Zero, ool->entry());
+            }
         } else {
             bailoutIf(Assembler::Zero, ins->snapshot());
         }
@@ -2498,7 +2469,7 @@ CodeGeneratorX86Shared::visitOutOfLineSimdFloatToIntCheck(OutOfLineSimdFloatToIn
     masm.jump(ool->rejoin());
 
     if (gen->compilingAsmJS()) {
-        masm.bindLater(&onConversionError, wasm::JumpTarget::ConversionError);
+        masm.bindLater(&onConversionError, wasm::JumpTarget::ImpreciseSimdConversion);
     } else {
         masm.bind(&onConversionError);
         bailout(ool->ins()->snapshot());
@@ -2577,7 +2548,7 @@ CodeGeneratorX86Shared::visitFloat32x4ToUint32x4(LFloat32x4ToUint32x4* ins)
     masm.cmp32(temp, Imm32(0));
 
     if (gen->compilingAsmJS())
-        masm.j(Assembler::NotEqual, wasm::JumpTarget::ConversionError);
+        masm.j(Assembler::NotEqual, wasm::JumpTarget::ImpreciseSimdConversion);
     else
         bailoutIf(Assembler::NotEqual, ins->snapshot());
 }
@@ -4071,10 +4042,10 @@ CodeGeneratorX86Shared::visitOutOfLineWasmTruncateCheck(OutOfLineWasmTruncateChe
 
     // Handle errors.
     masm.bind(&fail);
-    masm.jump(wasm::JumpTarget::IntegerOverflowTrap);
+    masm.jump(wasm::JumpTarget::IntegerOverflow);
 
     masm.bind(&inputIsNaN);
-    masm.jump(wasm::JumpTarget::InvalidConversionToIntegerTrap);
+    masm.jump(wasm::JumpTarget::InvalidConversionToInteger);
 }
 
 void
