@@ -23,7 +23,7 @@ const TEST_DATA = [
   },
   {
     input: "testBodyNode()",
-    output: '<body id="body-id" class="body-class">',
+    output: '<body class="body-class" id="body-id">',
     tagName: "BODY",
     attrs: [
       {
@@ -42,7 +42,7 @@ const TEST_DATA = [
   },
   {
     input: "testDocumentElement()",
-    output: '<html lang="en-US" dir="ltr">',
+    output: '<html dir="ltr" lang="en-US">',
     tagName: "HTML",
     attrs: [
       {
@@ -107,7 +107,7 @@ function test() {
       let onNodeUnhighlight = toolbox.once("node-unhighlight");
       let btn = inspector.toolbox.doc.querySelector(".toolbox-dock-button");
       EventUtils.synthesizeMouseAtCenter(btn, {type: "mousemove"},
-        inspector.toolbox.doc.defaultView);
+        inspector.toolbox.win);
       yield onNodeUnhighlight;
 
       info("Switching back to the console");

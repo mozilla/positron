@@ -20,13 +20,15 @@ function scopedCuImport(path) {
 
 const {console} = scopedCuImport("resource://gre/modules/Console.jsm");
 const {ScratchpadManager} = scopedCuImport("resource://devtools/client/scratchpad/scratchpad-manager.jsm");
-const {require} = scopedCuImport("resource://devtools/shared/Loader.jsm");
+const {loader, require} = scopedCuImport("resource://devtools/shared/Loader.jsm");
 
 const {gDevTools} = require("devtools/client/framework/devtools");
 const {TargetFactory} = require("devtools/client/framework/target");
 const DevToolsUtils = require("devtools/shared/DevToolsUtils");
 let promise = require("promise");
 const Services = require("Services");
+const {Task} = require("resource://gre/modules/Task.jsm");
+const {KeyShortcuts} = require("devtools/client/shared/key-shortcuts");
 
 const TEST_DIR = gTestPath.substr(0, gTestPath.lastIndexOf("/"));
 const CHROME_URL_ROOT = TEST_DIR + "/";
@@ -165,6 +167,27 @@ function synthesizeKeyFromKeyTag(key) {
 }
 
 /**
+ * Simulate a key event from an electron key shortcut string:
+ * https://github.com/electron/electron/blob/master/docs/api/accelerator.md
+ *
+ * @param {String} key
+ */
+function synthesizeKeyShortcut(key) {
+  // parseElectronKey requires any window, just to access `KeyboardEvent`
+  let window = Services.appShell.hiddenDOMWindow;
+  let shortcut = KeyShortcuts.parseElectronKey(window, key);
+
+  info("Synthesizing key shortcut: " + key);
+  EventUtils.synthesizeKey(shortcut.key || "", {
+    keyCode: shortcut.keyCode,
+    altKey: shortcut.alt,
+    ctrlKey: shortcut.ctrl,
+    metaKey: shortcut.meta,
+    shiftKey: shortcut.shift
+  });
+}
+
+/**
  * Wait for eventName on target to be delivered a number of times.
  *
  * @param {Object} target
@@ -285,8 +308,7 @@ var openToolboxForTab = Task.async(function* (tab, toolId, hostType) {
   toolbox = yield gDevTools.showToolbox(target, toolId, hostType);
 
   // Make sure that the toolbox frame is focused.
-  yield new Promise(resolve => waitForFocus(resolve,
-    toolbox.frame.contentWindow));
+  yield new Promise(resolve => waitForFocus(resolve, toolbox.win));
 
   info("Toolbox opened and focused");
 
@@ -420,4 +442,22 @@ function waitForContextMenu(popup, button, onShown, onHidden) {
   EventUtils.synthesizeMouse(button, 5, 2, eventDetails,
                              button.ownerDocument.defaultView);
   return deferred.promise;
+}
+
+/**
+ * Simple helper to push a temporary preference. Wrapper on SpecialPowers
+ * pushPrefEnv that returns a promise resolving when the preferences have been
+ * updated.
+ *
+ * @param {String} preferenceName
+ *        The name of the preference to updated
+ * @param {} value
+ *        The preference value, type can vary
+ * @return {Promise} resolves when the preferences have been updated
+ */
+function pushPref(preferenceName, value) {
+  return new Promise(resolve => {
+    let options = {"set": [[preferenceName, value]]};
+    SpecialPowers.pushPrefEnv(options, resolve);
+  });
 }

@@ -417,7 +417,8 @@ public:
   virtual bool RecvAppOfflineStatus(const uint32_t& aId,
                                     const bool& aOffline) override;
 
-  virtual bool RecvSwappedWithOtherRemoteLoader() override;
+  virtual bool
+  RecvSwappedWithOtherRemoteLoader(const IPCTabContext& aContext) override;
 
   virtual PDocAccessibleChild*
   AllocPDocAccessibleChild(PDocAccessibleChild*, const uint64_t&) override;
@@ -565,8 +566,8 @@ public:
   virtual bool
   RecvThemeChanged(nsTArray<LookAndFeelInt>&& aLookAndFeelIntCache) override;
 
-  virtual bool RecvHandleAccessKey(nsTArray<uint32_t>&& aCharCodes,
-                                   const bool& aIsTrusted,
+  virtual bool RecvHandleAccessKey(const WidgetKeyboardEvent& aEvent,
+                                   nsTArray<uint32_t>&& aCharCodes,
                                    const int32_t& aModifierMask) override;
 
   virtual bool RecvAudioChannelChangeNotification(const uint32_t& aAudioChannel,

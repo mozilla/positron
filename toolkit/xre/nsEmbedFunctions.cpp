@@ -660,7 +660,7 @@ XRE_GetIOMessageLoop()
 
 namespace {
 
-class MainFunctionRunnable : public nsRunnable
+class MainFunctionRunnable : public Runnable
 {
 public:
   NS_DECL_NSIRUNNABLE
@@ -792,7 +792,8 @@ XRE_RunAppShell()
       bool couldNest = loop->NestableTasksAllowed();
 
       loop->SetNestableTasksAllowed(true);
-      loop->PostTask(FROM_HERE, new MessageLoop::QuitTask());
+      RefPtr<Runnable> task = new MessageLoop::QuitTask();
+      loop->PostTask(task.forget());
       loop->Run();
 
       loop->SetNestableTasksAllowed(couldNest);
@@ -800,13 +801,6 @@ XRE_RunAppShell()
 #endif  // XP_MACOSX
     return appShell->Run();
 }
-
-template<>
-struct RunnableMethodTraits<ContentChild>
-{
-    static void RetainCallee(ContentChild* obj) { }
-    static void ReleaseCallee(ContentChild* obj) { }
-};
 
 void
 XRE_ShutdownChildProcess()

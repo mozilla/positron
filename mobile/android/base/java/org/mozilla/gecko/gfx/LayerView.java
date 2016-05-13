@@ -132,7 +132,7 @@ public class LayerView extends ScrollView implements Tabs.OnTabsChangedListener 
         setFocusableInTouchMode(true);
 
         GeckoAccessibility.setDelegate(this);
-        GeckoAccessibility.setAccessibilityStateChangeListener(getContext());
+        GeckoAccessibility.setAccessibilityManagerListeners(getContext());
     }
 
     /**
@@ -517,6 +517,13 @@ public class LayerView extends ScrollView implements Tabs.OnTabsChangedListener 
             return mSurfaceView.getHolder();
 
         return mTextureView.getSurfaceTexture();
+    }
+
+    public Object getSurface() {
+      if (mSurfaceView != null) {
+        return mSurfaceView.getHolder().getSurface();
+      }
+      return null;
     }
 
     //This method is called on the Gecko main thread.

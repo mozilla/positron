@@ -61,8 +61,8 @@ nsHttpConnectionMgr::OnMsgPrintDiagnostics(int32_t, ARefBase *)
                           ent->mHalfOpens.Length());
     mLogData.AppendPrintf("   Coalescing Keys Length = %u\n",
                           ent->mCoalescingKeys.Length());
-    mLogData.AppendPrintf("   Spdy using = %d, tested = %d, preferred = %d\n",
-                          ent->mUsingSpdy, ent->mTestedSpdy, ent->mInPreferredHash);
+    mLogData.AppendPrintf("   Spdy using = %d, preferred = %d\n",
+                          ent->mUsingSpdy, ent->mInPreferredHash);
     mLogData.AppendPrintf("   pipelinestate = %d penalty = %d\n",
                           ent->mPipelineState, ent->mPipeliningPenalty);
 
@@ -236,8 +236,9 @@ nsHttpTransaction::PrintDiagnostics(nsCString &log)
   if (!mRequestHead)
     return;
 
-  log.AppendPrintf("     ::: uri = %s\n",
-                   nsAutoCString(mRequestHead->RequestURI()).get());
+  nsAutoCString requestURI;
+  mRequestHead->RequestURI(requestURI);
+  log.AppendPrintf("     ::: uri = %s\n", requestURI.get());
   log.AppendPrintf("     caps = 0x%x\n", mCaps);
   log.AppendPrintf("     priority = %d\n", mPriority);
   log.AppendPrintf("     restart count = %u\n", mRestartCount);

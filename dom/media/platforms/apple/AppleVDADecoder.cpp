@@ -15,6 +15,7 @@
 #include "MP4Decoder.h"
 #include "MediaData.h"
 #include "mozilla/ArrayUtils.h"
+#include "mozilla/SyncRunnable.h"
 #include "nsAutoPtr.h"
 #include "nsThreadUtils.h"
 #include "mozilla/Logging.h"
@@ -100,7 +101,7 @@ AppleVDADecoder::Shutdown()
   mIsShutDown = true;
   if (mTaskQueue) {
     nsCOMPtr<nsIRunnable> runnable =
-      NS_NewRunnableMethod(this, &AppleVDADecoder::ProcessShutdown);
+      NewRunnableMethod(this, &AppleVDADecoder::ProcessShutdown);
     mTaskQueue->Dispatch(runnable.forget());
   } else {
     ProcessShutdown();
@@ -133,7 +134,7 @@ AppleVDADecoder::Input(MediaRawData* aSample)
   mInputIncoming++;
 
   nsCOMPtr<nsIRunnable> runnable =
-      NS_NewRunnableMethodWithArg<RefPtr<MediaRawData>>(
+      NewRunnableMethod<RefPtr<MediaRawData>>(
           this,
           &AppleVDADecoder::SubmitFrame,
           RefPtr<MediaRawData>(aSample));
@@ -148,12 +149,9 @@ AppleVDADecoder::Flush()
   mIsFlushing = true;
   mTaskQueue->Flush();
   nsCOMPtr<nsIRunnable> runnable =
-    NS_NewRunnableMethod(this, &AppleVDADecoder::ProcessFlush);
-  MonitorAutoLock mon(mMonitor);
-  mTaskQueue->Dispatch(runnable.forget());
-  while (mIsFlushing) {
-    mon.Wait();
-  }
+    NewRunnableMethod(this, &AppleVDADecoder::ProcessFlush);
+  SyncRunnable::DispatchToThread(mTaskQueue, runnable);
+  mIsFlushing = false;
   mInputIncoming = 0;
   return NS_OK;
 }
@@ -163,7 +161,7 @@ AppleVDADecoder::Drain()
 {
   MOZ_ASSERT(mCallback->OnReaderTaskQueue());
   nsCOMPtr<nsIRunnable> runnable =
-    NS_NewRunnableMethod(this, &AppleVDADecoder::ProcessDrain);
+    NewRunnableMethod(this, &AppleVDADecoder::ProcessDrain);
   mTaskQueue->Dispatch(runnable.forget());
   return NS_OK;
 }
@@ -179,9 +177,6 @@ AppleVDADecoder::ProcessFlush()
         "with error:%d.", rv);
   }
   ClearReorderedFrames();
-  MonitorAutoLock mon(mMonitor);
-  mIsFlushing = false;
-  mon.NotifyAll();
 }
 
 void

@@ -227,8 +227,10 @@ class UpdateTestCase(FirefoxTestCase):
                     dialog.select_next_page()
 
                 # If incompatible add-on are installed, skip over the wizard page
-                if dialog.wizard.selected_panel == dialog.wizard.incompatible_list:
-                    dialog.select_next_page()
+                # TODO: Remove once we no longer support version Firefox 45.0ESR
+                if self.utils.compare_version(self.appinfo.version, '49.0a1') == -1:
+                    if dialog.wizard.selected_panel == dialog.wizard.incompatible_list:
+                        dialog.select_next_page()
 
                 # Updates were stored in the cache, so no download is necessary
                 if dialog.wizard.selected_panel in [dialog.wizard.finished,
@@ -267,17 +269,19 @@ class UpdateTestCase(FirefoxTestCase):
 
             # Wait for the download to start
             Wait(self.marionette).until(lambda _: (
-                window.deck.selected_panel != window.deck.download_and_install))
+                window.deck.selected_panel != window.deck.download_and_install),
+                message='Download of the update has been started.')
 
-        # If there are incompatible addons, handle the update via the old software update dialog
+        # In case of update failures, clicking the update button will open the
+        # old update wizard dialog.
         if window.deck.selected_panel == window.deck.apply_billboard:
-            # Clicking the update button will open the old update wizard dialog
             dialog = self.browser.open_window(
                 callback=lambda _: window.deck.update_button.click(),
                 expected_window_class=UpdateWizardDialog
             )
             Wait(self.marionette).until(
-                lambda _: dialog.wizard.selected_panel == dialog.wizard.updates_found_basic)
+                lambda _: dialog.wizard.selected_panel == dialog.wizard.updates_found_basic,
+                message='An update has been found.')
 
             download_via_update_wizard(dialog)
             dialog.close()

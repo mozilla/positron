@@ -102,16 +102,25 @@
 
       function toggleDisplay(node) {
         toggle = {
-          '': 'block',
-          'none': 'block',
-          'block': 'none'
+          "": "block",
+          "none": "block",
+          "block": "none"
         };
         return (node.style.display = toggle[node.style.display]);
       }
 
       function showCertificateErrorReporting() {
         // Display error reporting UI
-        document.getElementById('certificateErrorReporting').style.display = 'block';
+        document.getElementById("certificateErrorReporting").style.display = "block";
+      }
+
+      function showPrefChangeContainer() {
+        const panel = document.getElementById("prefChangeContainer");
+        panel.style.display = "block";
+        document.getElementById("prefResetButton").addEventListener("click", function resetPreferences(e) {
+          const event = new CustomEvent("AboutNetErrorResetPreferences", {bubbles:true});
+          document.dispatchEvent(event);
+        });
       }
 
       function showAdvancedButton(allowOverride) {
@@ -217,15 +226,15 @@
 
         // if it's an unknown error or there's no title or description
         // defined, get the generic message
-        var errTitle = document.getElementById("et_" + err).innerHTML;
-        var errDesc  = document.getElementById("ed_" + err).innerHTML;
+        var errTitle = document.getElementById("et_" + err);
+        var errDesc  = document.getElementById("ed_" + err);
         if (!errTitle || !errDesc)
         {
-          errTitle = document.getElementById("et_generic").innerHTML;
-          errDesc  = document.getElementById("ed_generic").innerHTML;
+          errTitle = document.getElementById("et_generic");
+          errDesc  = document.getElementById("ed_generic");
         }
 
-        document.querySelector(".title-text").innerHTML = errTitle;
+        document.querySelector(".title-text").innerHTML = errTitle.innerHTML;
 
         var sd = document.getElementById("errorShortDescText");
         if (sd) {
@@ -244,7 +253,7 @@
         var ld = document.getElementById("errorLongDesc");
         if (ld)
         {
-          ld.innerHTML = errDesc;
+          ld.innerHTML = errDesc.innerHTML;
         }
 
         if (err == "sslv3Used") {
@@ -307,18 +316,29 @@
 
             var options = JSON.parse(evt.detail);
             if (options && options.enabled) {
-              var checkbox = document.getElementById('automaticallyReportInFuture');
+              var checkbox = document.getElementById("automaticallyReportInFuture");
               showCertificateErrorReporting();
               if (options.automatic) {
                 // set the checkbox
                 checkbox.checked = true;
               }
 
-              checkbox.addEventListener('change', function(evt) {
+              checkbox.addEventListener("change", function(evt) {
                   var event = new CustomEvent("AboutNetErrorSetAutomatic",
                     {bubbles:true, detail:evt.target.checked});
                   document.dispatchEvent(event);
                 }, false);
+            }
+            const hasPrefStyleError = [
+              "interrupted", // This happens with subresources that are above the max tls
+              "SSL_ERROR_PROTOCOL_VERSION_ALERT",
+              "SSL_ERROR_UNSUPPORTED_VERSION",
+              "SSL_ERROR_NO_CYPHER_OVERLAP",
+              "SSL_ERROR_NO_CIPHERS_SUPPORTED"
+            ].some((substring) => getDescription().includes(substring));
+            // If it looks like an error that is user config based
+            if (getErrorCode() == "nssFailure2" && hasPrefStyleError && options && options.changedCertPrefs) {
+              showPrefChangeContainer();
             }
           }
           if (getErrorCode() == "weakCryptoUsed" || getErrorCode() == "sslv3Used") {
@@ -409,7 +429,7 @@
         }
 
         // Initialize the cert domain link.
-        var link = document.getElementById('cert_domain_link');
+        var link = document.getElementById("cert_domain_link");
         if (!link)
           return;
 
@@ -554,8 +574,17 @@
         </div>
         <p id="badStsCertExplanation" hidden="true">&certerror.whatShouldIDo.badStsCertExplanation;</p>
 
+        <div id="wrongSystemTimePanel" style="display: none;">
+          &certerror.wrongSystemTime;
+        </div>
+
         <!-- Long Description (Note: See netError.dtd for used XHTML tags) -->
         <div id="errorLongDesc" />
+
+        <div id="prefChangeContainer">
+          <p>&prefReset.longDesc;</p>
+          <button id="prefResetButton" autocomplete="off">&prefReset.label;</button>
+        </div>
 
         <div id="learnMoreContainer">
           <p><a href="https://support.mozilla.org/kb/what-does-your-connection-is-not-secure-mean" id="learnMoreLink" target="new">&errorReporting.learnMore;</a></p>
@@ -596,19 +625,21 @@
         </p>
       </div>
 
-      <div id="weakCryptoAdvancedPanel" class="advanced-panel">
-        <div id="weakCryptoAdvancedDescription">
-          <p>&weakCryptoAdvanced.longDesc;</p>
+      <div id="advancedPanelContainer">
+        <div id="weakCryptoAdvancedPanel" class="advanced-panel">
+          <div id="weakCryptoAdvancedDescription">
+            <p>&weakCryptoAdvanced.longDesc;</p>
+          </div>
+          <div id="advancedLongDesc" />
+          <div id="overrideWeakCryptoPanel">
+            <a id="overrideWeakCrypto" href="#">&weakCryptoAdvanced.override;</a>
+          </div>
         </div>
-        <div id="advancedLongDesc" />
-        <div id="overrideWeakCryptoPanel">
-          <a id="overrideWeakCrypto" href="#">&weakCryptoAdvanced.override;</a>
-        </div>
-      </div>
 
-      <div id="badCertAdvancedPanel" class="advanced-panel">
-        <p id="badCertTechnicalInfo"/>
-        <button id="exceptionDialogButton">&securityOverride.exceptionButtonLabel;</button>
+        <div id="badCertAdvancedPanel" class="advanced-panel">
+          <p id="badCertTechnicalInfo"/>
+          <button id="exceptionDialogButton">&securityOverride.exceptionButtonLabel;</button>
+        </div>
       </div>
 
     </div>

@@ -554,6 +554,9 @@ public:
     return mFlexShrink * mFlexBaseSize;
   }
 
+  const nsSize& IntrinsicRatio() const { return mIntrinsicRatio; }
+  bool HasIntrinsicRatio() const { return mIntrinsicRatio != nsSize(); }
+
   // Getters for margin:
   // ===================
   const nsMargin& GetMargin() const { return mMargin; }
@@ -734,6 +737,10 @@ public:
 
   uint32_t GetNumAutoMarginsInAxis(AxisOrientationType aAxis) const;
 
+  // Once the main size has been resolved, should we bother doing layout to
+  // establish the cross size?
+  bool CanMainSizeInfluenceCrossSize(const FlexboxAxisTracker& aAxisTracker) const;
+
 protected:
   // Helper called by the constructor, to set mNeedsMinSizeAutoResolution:
   void CheckForMinSizeAuto(const nsHTMLReflowState& aFlexItemReflowState,
@@ -745,6 +752,8 @@ protected:
   // Values that we already know in constructor: (and are hence mostly 'const')
   const float mFlexGrow;
   const float mFlexShrink;
+
+  const nsSize mIntrinsicRatio;
 
   const nsMargin mBorderPadding;
   nsMargin mMargin; // non-const because we need to resolve auto margins
@@ -1389,7 +1398,6 @@ MainSizeFromAspectRatio(nscoord aCrossSize,
 static nscoord
 PartiallyResolveAutoMinSize(const FlexItem& aFlexItem,
                             const nsHTMLReflowState& aItemReflowState,
-                            const nsSize& aIntrinsicRatio,
                             const FlexboxAxisTracker& aAxisTracker)
 {
   MOZ_ASSERT(aFlexItem.NeedsMinSizeAutoResolution(),
@@ -1426,7 +1434,7 @@ PartiallyResolveAutoMinSize(const FlexItem& aFlexItem,
   // * if the item has an intrinsic aspect ratio, the width (height) calculated
   //   from the aspect ratio and any definite size constraints in the opposite
   //   dimension.
-  if (aAxisTracker.GetCrossComponent(aIntrinsicRatio) != 0) {
+  if (aAxisTracker.GetCrossComponent(aFlexItem.IntrinsicRatio()) != 0) {
     // We have a usable aspect ratio. (not going to divide by 0)
     const bool useMinSizeIfCrossSizeIsIndefinite = true;
     nscoord crossSizeToUseWithRatio =
@@ -1435,7 +1443,7 @@ PartiallyResolveAutoMinSize(const FlexItem& aFlexItem,
                               aAxisTracker);
     nscoord minMainSizeFromRatio =
       MainSizeFromAspectRatio(crossSizeToUseWithRatio,
-                              aIntrinsicRatio, aAxisTracker);
+                              aFlexItem.IntrinsicRatio(), aAxisTracker);
     minMainSize = std::min(minMainSize, minMainSizeFromRatio);
   }
 
@@ -1449,7 +1457,6 @@ PartiallyResolveAutoMinSize(const FlexItem& aFlexItem,
 static bool
 ResolveAutoFlexBasisFromRatio(FlexItem& aFlexItem,
                               const nsHTMLReflowState& aItemReflowState,
-                              const nsSize& aIntrinsicRatio,
                               const FlexboxAxisTracker& aAxisTracker)
 {
   MOZ_ASSERT(NS_AUTOHEIGHT == aFlexItem.GetFlexBaseSize(),
@@ -1460,7 +1467,7 @@ ResolveAutoFlexBasisFromRatio(FlexItem& aFlexItem,
   //  - a definite cross size
   // then the flex base size is calculated from its inner cross size and the
   // flex item’s intrinsic aspect ratio.
-  if (aAxisTracker.GetCrossComponent(aIntrinsicRatio) != 0) {
+  if (aAxisTracker.GetCrossComponent(aFlexItem.IntrinsicRatio()) != 0) {
     // We have a usable aspect ratio. (not going to divide by 0)
     const bool useMinSizeIfCrossSizeIsIndefinite = false;
     nscoord crossSizeToUseWithRatio =
@@ -1471,7 +1478,7 @@ ResolveAutoFlexBasisFromRatio(FlexItem& aFlexItem,
       // We have a definite cross-size
       nscoord mainSizeFromRatio =
         MainSizeFromAspectRatio(crossSizeToUseWithRatio,
-                                aIntrinsicRatio, aAxisTracker);
+                                aFlexItem.IntrinsicRatio(), aAxisTracker);
       aFlexItem.SetFlexBaseSizeAndMainSize(mainSizeFromRatio);
       return true;
     }
@@ -1529,19 +1536,15 @@ nsFlexContainerFrame::
     }
   }
 
-  // We'll need the intrinsic ratio (if there is one), regardless of whether
-  // we're resolving min-[width|height]:auto or flex-basis:auto.
-  const nsSize ratio = aFlexItem.Frame()->GetIntrinsicRatio();
-
   nscoord resolvedMinSize; // (only set/used if isMainMinSizeAuto==true)
   bool minSizeNeedsToMeasureContent = false; // assume the best
   if (isMainMinSizeAuto) {
     // Resolve the min-size, except for considering the min-content size.
     // (We'll consider that later, if we need to.)
     resolvedMinSize = PartiallyResolveAutoMinSize(aFlexItem, aItemReflowState,
-                                                  ratio, aAxisTracker);
+                                                  aAxisTracker);
     if (resolvedMinSize > 0 &&
-        aAxisTracker.GetCrossComponent(ratio) == 0) {
+        aAxisTracker.GetCrossComponent(aFlexItem.IntrinsicRatio()) == 0) {
       // We don't have a usable aspect ratio, so we need to consider our
       // min-content size as another candidate min-size, which we'll have to
       // min() with the current resolvedMinSize.
@@ -1554,7 +1557,7 @@ nsFlexContainerFrame::
   bool flexBasisNeedsToMeasureContent = false; // assume the best
   if (isMainSizeAuto) {
     if (!ResolveAutoFlexBasisFromRatio(aFlexItem, aItemReflowState,
-                                       ratio, aAxisTracker)) {
+                                       aAxisTracker)) {
       flexBasisNeedsToMeasureContent = true;
     }
   }
@@ -1674,6 +1677,7 @@ FlexItem::FlexItem(nsHTMLReflowState& aFlexItemReflowState,
   : mFrame(aFlexItemReflowState.frame),
     mFlexGrow(aFlexGrow),
     mFlexShrink(aFlexShrink),
+    mIntrinsicRatio(mFrame->GetIntrinsicRatio()),
     mBorderPadding(aFlexItemReflowState.ComputedPhysicalBorderPadding()),
     mMargin(aFlexItemReflowState.ComputedPhysicalMargin()),
     mMainMinSize(aMainMinSize),
@@ -1766,6 +1770,7 @@ FlexItem::FlexItem(nsIFrame* aChildFrame, nscoord aCrossSize,
   : mFrame(aChildFrame),
     mFlexGrow(0.0f),
     mFlexShrink(0.0f),
+    mIntrinsicRatio(),
     // mBorderPadding uses default constructor,
     // mMargin uses default constructor,
     mFlexBaseSize(0),
@@ -1876,6 +1881,45 @@ FlexItem::GetNumAutoMarginsInAxis(AxisOrientationType aAxis) const
              "should only have examined 2 margins");
 
   return numAutoMargins;
+}
+
+bool
+FlexItem::CanMainSizeInfluenceCrossSize(
+  const FlexboxAxisTracker& aAxisTracker) const
+{
+  if (mIsStretched) {
+    // We've already had our cross-size stretched for "align-self:stretch").
+    // The container is imposing its cross size on us.
+    return false;
+  }
+
+  if (mIsStrut) {
+    // Struts (for visibility:collapse items) have a predetermined size;
+    // no need to measure anything.
+    return false;
+  }
+
+  if (HasIntrinsicRatio()) {
+    // For flex items that have an intrinsic ratio (and maintain it, i.e. are
+    // not stretched, which we already checked above): changes to main-size
+    // *do* influence the cross size.
+    return true;
+  }
+
+  if (aAxisTracker.IsCrossAxisHorizontal()) {
+    // If the cross axis is horizontal, then changes to the item's main size
+    // (height) can't influence its cross size (width), if the item is a block
+    // with a horizontal writing-mode.
+    // XXXdholbert This doesn't account for vertical writing-modes, items with
+    // aspect ratios, items that are multicol elements, & items that are
+    // multi-line vertical flex containers. In all of those cases, a change to
+    // the height could influence the width.
+    return false;
+  }
+
+  // Default assumption, if we haven't proven otherwise: the resolved main size
+  // *can* change the cross size.
+  return true;
 }
 
 // Keeps track of our position along a particular axis (where a '0' position
@@ -3650,16 +3694,17 @@ nsFlexContainerFrame::SizeItemInCrossAxis(
   FlexItem& aItem)
 {
   if (aAxisTracker.IsCrossAxisHorizontal()) {
-    // XXXdholbert NOTE: For now, we should never hit this case, due to a
-    // !aAxisTracker.IsCrossAxisHorizontal() check that guards this
-    // call in the caller. BUT, when we add support for vertical writing-modes,
-    // (in bug 1079155 or a dependency), we'll relax that check, and we'll need
-    // to be able to measure the baseline & width (given our resolved height)
+    MOZ_ASSERT(aItem.HasIntrinsicRatio(),
+               "For now, caller's CanMainSizeInfluenceCrossSize check should "
+               "only allow us to get here for items with intrinsic ratio");
+    // XXXdholbert When we finish support for vertical writing-modes,
+    // (in bug 1079155 or a dependency), we'll relax the horizontal check in
+    // CanMainSizeInfluenceCrossSize, and this function will need to be able
+    // to measure the baseline & width (given our resolved height)
     // of vertical-writing-mode flex items here.
-    MOZ_ASSERT_UNREACHABLE("Caller should use tentative cross size instead "
-                           "of calling SizeItemInCrossAxis");
-    // (But if we do happen to get here, just trust the passed-in reflow state
-    // for our cross size [width].)
+    // For now, we only expect to get here for items with an intrinsic aspect
+    // ratio; and for those items, we can just read the size off of the reflow
+    // state, without performing reflow.
     aItem.SetCrossSize(aChildReflowState.ComputedWidth());
     return;
   }
@@ -3866,6 +3911,40 @@ private:
   MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
 };
 
+// Class to let us temporarily provide an override value for the the main-size
+// CSS property ('width' or 'height') on a flex item, for use in
+// nsLayoutUtils::ComputeSizeWithIntrinsicDimensions.
+// (We could use this overridden size more broadly, too, but it's probably
+// better to avoid property-table accesses.  So, where possible, we communicate
+// the resolved main-size to the child via modifying its reflow state directly,
+// instead of using this class.)
+class MOZ_RAII AutoFlexItemMainSizeOverride final
+{
+public:
+  explicit AutoFlexItemMainSizeOverride(FlexItem& aItem
+                                        MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
+    : mItemProps(aItem.Frame()->Properties())
+  {
+    MOZ_GUARD_OBJECT_NOTIFIER_INIT;
+
+    MOZ_ASSERT(!mItemProps.Has(nsIFrame::FlexItemMainSizeOverride()),
+               "FlexItemMainSizeOverride prop shouldn't be set already; "
+               "it should only be set temporarily (& not recursively)");
+    NS_ASSERTION(aItem.HasIntrinsicRatio(),
+                 "This should only be needed for items with an aspect ratio");
+
+    mItemProps.Set(nsIFrame::FlexItemMainSizeOverride(), aItem.GetMainSize());
+  }
+
+  ~AutoFlexItemMainSizeOverride() {
+    mItemProps.Remove(nsIFrame::FlexItemMainSizeOverride());
+  }
+
+private:
+  const FrameProperties mItemProps;
+  MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
+};
+
 void
 nsFlexContainerFrame::DoFlexLayout(nsPresContext*           aPresContext,
                                    nsHTMLReflowMetrics&     aDesiredSize,
@@ -3901,41 +3980,35 @@ nsFlexContainerFrame::DoFlexLayout(nsPresContext*           aPresContext,
   nscoord sumLineCrossSizes = 0;
   for (FlexLine* line = lines.getFirst(); line; line = line->getNext()) {
     for (FlexItem* item = line->GetFirstItem(); item; item = item->getNext()) {
-      // Note that we may already have the correct cross size. (We guess at it
-      // in GenerateFlexItemForChild(), and we also may resolve it early for
-      // stretched flex items.)
-      //
-      // We can skip measuring an item's cross size here in a few scenarios:
-      // (A) If the flex item has already been stretched, then we're imposing
-      //     the container's cross size on it; no need to measure.
-      // (B) If the flex item is a "strut", then it's just a placeholder with a
-      //     predetermined cross size; no need to measure.
-      // (C) If the item's main-size can't affect its cross-size, then the
-      //     item's tentative cross size (which we got from the reflow state in
-      //     GenerateFlexItemForChild()) is correct. So, no need to re-measure.
-      //     (For now, this is equivalent to checking if the cross-axis is
-      //     horizontal, because until we enable vertical writing-modes, an
-      //     element's computed width can't be influenced by its computed
-      //     height.)
-      if (!item->IsStretched() && // !A
-          !item->IsStrut() &&     // !B
-          !aAxisTracker.IsCrossAxisHorizontal()) { // !C
+      // The item may already have the correct cross-size; only recalculate
+      // if the item's main size resolution (flexing) could have influenced it:
+      if (item->CanMainSizeInfluenceCrossSize(aAxisTracker)) {
+        Maybe<AutoFlexItemMainSizeOverride> sizeOverride;
+        if (item->HasIntrinsicRatio()) {
+          // For flex items with an aspect ratio, we have to impose an override
+          // for the main-size property *before* we even instantiate the reflow
+          // state, in order for aspect ratio calculations to produce the right
+          // cross size in the reflow state. (For other flex items, it's OK
+          // (and cheaper) to impose our main size *after* the reflow state has
+          // been constructed, since the main size shouldn't influence anything
+          // about cross-size measurement until we actually reflow the child.)
+          sizeOverride.emplace(*item);
+        }
+
         WritingMode wm = item->Frame()->GetWritingMode();
         LogicalSize availSize = aReflowState.ComputedSize(wm);
         availSize.BSize(wm) = NS_UNCONSTRAINEDSIZE;
         nsHTMLReflowState childReflowState(aPresContext, aReflowState,
                                            item->Frame(), availSize);
-        // Override computed main-size
-        if (aAxisTracker.IsMainAxisHorizontal()) {
-          childReflowState.SetComputedWidth(item->GetMainSize());
-        } else {
-          // XXXdholbert NOTE: For now, we'll never hit this case, due to the
-          // !aAxisTracker.IsCrossAxisHorizontal() check above. But
-          // when we add support for vertical writing modes, we'll relax that
-          // check and be able to hit this code.
-          childReflowState.SetComputedHeight(item->GetMainSize());
+        if (!sizeOverride) {
+          // Directly override the computed main-size, by tweaking reflow state:
+          if (aAxisTracker.IsMainAxisHorizontal()) {
+            childReflowState.SetComputedWidth(item->GetMainSize());
+          } else {
+            childReflowState.SetComputedHeight(item->GetMainSize());
+          }
         }
-        
+
         SizeItemInCrossAxis(aPresContext, aAxisTracker,
                             childReflowState, *item);
       }
@@ -4236,19 +4309,28 @@ nsFlexContainerFrame::ReflowFlexItem(nsPresContext* aPresContext,
     didOverrideComputedHeight = true;
   }
 
-  // Override reflow state's computed cross-size, for stretched items.
-  if (aItem.IsStretched()) {
-    MOZ_ASSERT(aItem.GetAlignSelf() == NS_STYLE_ALIGN_STRETCH,
-               "stretched item w/o 'align-self: stretch'?");
+  // Override reflow state's computed cross-size if either:
+  // - the item was stretched (in which case we're imposing a cross size)
+  // ...or...
+  // - the item it has an aspect ratio (in which case the cross-size that's
+  // currently in the reflow state is based on arithmetic involving a stale
+  // main-size value that we just stomped on above). (Note that we could handle
+  // this case using an AutoFlexItemMainSizeOverride, as we do elsewhere; but
+  // given that we *already know* the correct cross size to use here, it's
+  // cheaper to just directly set it instead of setting a frame property.)
+  if (aItem.IsStretched() ||
+      aItem.HasIntrinsicRatio()) {
     if (aAxisTracker.IsCrossAxisHorizontal()) {
       childReflowState.SetComputedWidth(aItem.GetCrossSize());
       didOverrideComputedWidth = true;
     } else {
-      // If this item's height is stretched, it's a relative height.
-      aItem.Frame()->AddStateBits(NS_FRAME_CONTAINS_RELATIVE_BSIZE);
       childReflowState.SetComputedHeight(aItem.GetCrossSize());
       didOverrideComputedHeight = true;
     }
+  }
+  if (aItem.IsStretched() && !aAxisTracker.IsCrossAxisHorizontal()) {
+    // If this item's height is stretched, it's a relative height.
+    aItem.Frame()->AddStateBits(NS_FRAME_CONTAINS_RELATIVE_BSIZE);
   }
 
   // XXXdholbert Might need to actually set the correct margins in the

@@ -538,13 +538,14 @@ nsCSSProps::LookupProperty(const nsACString& aProperty,
   }
   MOZ_ASSERT(eCSSAliasCount != 0,
              "'res' must be an alias at this point so we better have some!");
-  // We intentionally don't support eEnabledInUASheets or eEnabledInChrome
-  // for aliases yet because it's unlikely there will be a need for it.
-  if (IsEnabled(res) || aEnabled == eIgnoreEnabledState) {
+  // We intentionally don't support CSSEnabledState::eInUASheets or
+  // CSSEnabledState::eInChrome for aliases yet because it's unlikely
+  // there will be a need for it.
+  if (IsEnabled(res) || aEnabled == CSSEnabledState::eIgnoreEnabledState) {
     res = gAliases[res - eCSSProperty_COUNT];
     MOZ_ASSERT(0 <= res && res < eCSSProperty_COUNT,
                "aliases must not point to other aliases");
-    if (IsEnabled(res) || aEnabled == eIgnoreEnabledState) {
+    if (IsEnabled(res) || aEnabled == CSSEnabledState::eIgnoreEnabledState) {
       return res;
     }
   }
@@ -572,13 +573,14 @@ nsCSSProps::LookupProperty(const nsAString& aProperty, EnabledState aEnabled)
   }
   MOZ_ASSERT(eCSSAliasCount != 0,
              "'res' must be an alias at this point so we better have some!");
-  // We intentionally don't support eEnabledInUASheets or eEnabledInChrome
-  // for aliases yet because it's unlikely there will be a need for it.
-  if (IsEnabled(res) || aEnabled == eIgnoreEnabledState) {
+  // We intentionally don't support CSSEnabledState::eInUASheets or
+  // CSSEnabledState::eInChrome for aliases yet because it's unlikely
+  // there will be a need for it.
+  if (IsEnabled(res) || aEnabled == CSSEnabledState::eIgnoreEnabledState) {
     res = gAliases[res - eCSSProperty_COUNT];
     MOZ_ASSERT(0 <= res && res < eCSSProperty_COUNT,
                "aliases must not point to other aliases");
-    if (IsEnabled(res) || aEnabled == eIgnoreEnabledState) {
+    if (IsEnabled(res) || aEnabled == CSSEnabledState::eIgnoreEnabledState) {
       return res;
     }
   }
@@ -1973,7 +1975,7 @@ KTableEntry nsCSSProps::kTextAlignKTable[] = {
   { eCSSKeyword__moz_center, NS_STYLE_TEXT_ALIGN_MOZ_CENTER },
   { eCSSKeyword__moz_right, NS_STYLE_TEXT_ALIGN_MOZ_RIGHT },
   { eCSSKeyword__moz_left, NS_STYLE_TEXT_ALIGN_MOZ_LEFT },
-  { eCSSKeyword_start, NS_STYLE_TEXT_ALIGN_DEFAULT },
+  { eCSSKeyword_start, NS_STYLE_TEXT_ALIGN_START },
   { eCSSKeyword_end, NS_STYLE_TEXT_ALIGN_END },
   { eCSSKeyword_unsafe, NS_STYLE_TEXT_ALIGN_UNSAFE },
   { eCSSKeyword_match_parent, NS_STYLE_TEXT_ALIGN_MATCH_PARENT },
@@ -1986,7 +1988,7 @@ KTableEntry nsCSSProps::kTextAlignLastKTable[] = {
   { eCSSKeyword_right, NS_STYLE_TEXT_ALIGN_RIGHT },
   { eCSSKeyword_center, NS_STYLE_TEXT_ALIGN_CENTER },
   { eCSSKeyword_justify, NS_STYLE_TEXT_ALIGN_JUSTIFY },
-  { eCSSKeyword_start, NS_STYLE_TEXT_ALIGN_DEFAULT },
+  { eCSSKeyword_start, NS_STYLE_TEXT_ALIGN_START },
   { eCSSKeyword_end, NS_STYLE_TEXT_ALIGN_END },
   { eCSSKeyword_unsafe, NS_STYLE_TEXT_ALIGN_UNSAFE },
   { eCSSKeyword_UNKNOWN, -1 }
@@ -2061,7 +2063,7 @@ const KTableEntry nsCSSProps::kTextTransformKTable[] = {
   { eCSSKeyword_capitalize, NS_STYLE_TEXT_TRANSFORM_CAPITALIZE },
   { eCSSKeyword_lowercase, NS_STYLE_TEXT_TRANSFORM_LOWERCASE },
   { eCSSKeyword_uppercase, NS_STYLE_TEXT_TRANSFORM_UPPERCASE },
-  { eCSSKeyword_full_width, NS_STYLE_TEXT_TRANSFORM_FULLWIDTH },
+  { eCSSKeyword_full_width, NS_STYLE_TEXT_TRANSFORM_FULL_WIDTH },
   { eCSSKeyword_UNKNOWN, -1 }
 };
 
@@ -2625,10 +2627,17 @@ static const nsCSSProperty gBackgroundSubpropTable[] = {
   eCSSProperty_background_image,
   eCSSProperty_background_repeat,
   eCSSProperty_background_attachment,
-  eCSSProperty_background_position,
   eCSSProperty_background_clip,
   eCSSProperty_background_origin,
+  eCSSProperty_background_position_x,
+  eCSSProperty_background_position_y,
   eCSSProperty_background_size,
+  eCSSProperty_UNKNOWN
+};
+
+static const nsCSSProperty gBackgroundPositionSubpropTable[] = {
+  eCSSProperty_background_position_x,
+  eCSSProperty_background_position_y,
   eCSSProperty_UNKNOWN
 };
 
@@ -2965,12 +2974,18 @@ static const nsCSSProperty gScrollSnapTypeSubpropTable[] = {
 static const nsCSSProperty gMaskSubpropTable[] = {
   eCSSProperty_mask_image,
   eCSSProperty_mask_repeat,
-  eCSSProperty_mask_position,
+  eCSSProperty_mask_position_x,
+  eCSSProperty_mask_position_y,
   eCSSProperty_mask_clip,
   eCSSProperty_mask_origin,
   eCSSProperty_mask_size,
   eCSSProperty_mask_composite,
   eCSSProperty_mask_mode,
+  eCSSProperty_UNKNOWN
+};
+static const nsCSSProperty gMaskPositionSubpropTable[] = {
+  eCSSProperty_mask_position_x,
+  eCSSProperty_mask_position_y,
   eCSSProperty_UNKNOWN
 };
 #endif

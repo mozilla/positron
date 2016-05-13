@@ -46,7 +46,6 @@ DIRS += [
     'bluetooth',
     'activities',
     'archivereader',
-    'requestsync',
     'bindings',
     'battery',
     'browser-element',
@@ -57,7 +56,6 @@ DIRS += [
     'crypto',
     'phonenumberutils',
     'alarm',
-    'datastore',
     'devicestorage',
     'encoding',
     'events',
@@ -153,8 +151,7 @@ if CONFIG['MOZ_B2G']:
     DIRS += [
         'downloads',
         'identity',
-        'mobileid',
-        'engineeringmode'
+        'mobileid'
     ]
 
 DIRS += ['presentation']

@@ -2495,7 +2495,7 @@ BaselineCompiler::emit_JSOP_SETALIASEDVAR()
 
     getScopeCoordinateObject(objReg);
     Address address = getScopeCoordinateAddressFromObject(objReg, R1.scratchReg());
-    masm.patchableCallPreBarrier(address, MIRType_Value);
+    masm.patchableCallPreBarrier(address, MIRType::Value);
     masm.storeValue(R0, address);
     frame.push(R0);
 
@@ -2599,7 +2599,8 @@ BaselineCompiler::emit_JSOP_GETIMPORT()
     // Imports are initialized by this point except in rare circumstances, so
     // don't emit a check unless we have to.
     if (targetEnv->getSlot(shape->slot()).isMagic(JS_UNINITIALIZED_LEXICAL))
-        emitUninitializedLexicalCheck(R0);
+        if (!emitUninitializedLexicalCheck(R0))
+            return false;
 
     if (ionCompileable_) {
         // No need to monitor types if we know Ion can't compile this script.
@@ -2905,7 +2906,7 @@ BaselineCompiler::emitFormalArgAccess(uint32_t arg, bool get)
         masm.loadValue(argAddr, R0);
         frame.push(R0);
     } else {
-        masm.patchableCallPreBarrier(argAddr, MIRType_Value);
+        masm.patchableCallPreBarrier(argAddr, MIRType::Value);
         masm.loadValue(frame.addressOfStackValue(frame.peek(-1)), R0);
         masm.storeValue(R0, argAddr);
 
@@ -3941,7 +3942,7 @@ BaselineCompiler::emit_JSOP_INITIALYIELD()
     Register scopeObj = R0.scratchReg();
     Address scopeChainSlot(genObj, GeneratorObject::offsetOfScopeChainSlot());
     masm.loadPtr(frame.addressOfScopeChain(), scopeObj);
-    masm.patchableCallPreBarrier(scopeChainSlot, MIRType_Value);
+    masm.patchableCallPreBarrier(scopeChainSlot, MIRType::Value);
     masm.storeValue(JSVAL_TYPE_OBJECT, scopeObj, scopeChainSlot);
 
     Register temp = R1.scratchReg();
@@ -3986,7 +3987,7 @@ BaselineCompiler::emit_JSOP_YIELD()
         Register scopeObj = R0.scratchReg();
         Address scopeChainSlot(genObj, GeneratorObject::offsetOfScopeChainSlot());
         masm.loadPtr(frame.addressOfScopeChain(), scopeObj);
-        masm.patchableCallPreBarrier(scopeChainSlot, MIRType_Value);
+        masm.patchableCallPreBarrier(scopeChainSlot, MIRType::Value);
         masm.storeValue(JSVAL_TYPE_OBJECT, scopeObj, scopeChainSlot);
 
         Register temp = R1.scratchReg();
@@ -4214,7 +4215,7 @@ BaselineCompiler::emit_JSOP_RESUME()
         }
         masm.bind(&loopDone);
 
-        masm.patchableCallPreBarrier(exprStackSlot, MIRType_Value);
+        masm.patchableCallPreBarrier(exprStackSlot, MIRType::Value);
         masm.storeValue(NullValue(), exprStackSlot);
         regs.add(initLength);
     }

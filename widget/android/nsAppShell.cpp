@@ -78,7 +78,7 @@ StaticAutoPtr<Mutex> nsAppShell::sAppShellLock;
 
 NS_IMPL_ISUPPORTS_INHERITED(nsAppShell, nsBaseAppShell, nsIObserver)
 
-class ThumbnailRunnable : public nsRunnable {
+class ThumbnailRunnable : public Runnable {
 public:
     ThumbnailRunnable(nsIAndroidBrowserApp* aBrowserApp, int aTabId,
                        const nsTArray<nsIntPoint>& aPoints, RefCountedJavaObject* aBuffer):
@@ -233,12 +233,6 @@ public:
         // of flushing data
         nsIPrefService* prefs = Preferences::GetService();
         if (prefs) {
-            // reset the crash loop state
-            nsCOMPtr<nsIPrefBranch> prefBranch;
-            prefs->GetBranch("browser.sessionstore.", getter_AddRefs(prefBranch));
-            if (prefBranch)
-                prefBranch->SetIntPref("recent_crashes", 0);
-
             prefs->SavePrefFile(nullptr);
         }
     }
@@ -691,7 +685,7 @@ nsAppShell::LegacyGeckoEvent::Run()
         const nsTArray<nsIntPoint>& points = curEvent->Points();
         RefCountedJavaObject* buffer = curEvent->ByteBuffer();
         RefPtr<ThumbnailRunnable> sr = new ThumbnailRunnable(nsAppShell::Get()->mBrowserApp, tabId, points, buffer);
-        MessageLoop::current()->PostIdleTask(FROM_HERE, NewRunnableMethod(sr.get(), &ThumbnailRunnable::Run));
+        MessageLoop::current()->PostIdleTask(NewRunnableMethod(sr.get(), &ThumbnailRunnable::Run));
         break;
     }
 

@@ -287,7 +287,8 @@ public:
                               const char16_t* aError,
                               const char16_t** aFormatStrings,
                               uint32_t aFormatStringsLen)
-    : WorkerMainThreadRunnable(aImpl->mWorkerPrivate)
+    : WorkerMainThreadRunnable(aImpl->mWorkerPrivate,
+                               NS_LITERAL_CSTRING("WebSocket :: print error on console"))
     , mImpl(aImpl)
     , mBundleURI(aBundleURI)
     , mError(aError)
@@ -389,7 +390,7 @@ WebSocketImpl::PrintErrorOnConsole(const char *aBundleURI,
 
 namespace {
 
-class CancelWebSocketRunnable final : public nsRunnable
+class CancelWebSocketRunnable final : public Runnable
 {
 public:
   CancelWebSocketRunnable(nsIWebSocketChannel* aChannel, uint16_t aReasonCode,
@@ -437,7 +438,7 @@ private:
   WebSocketImpl* mImpl;
 };
 
-class CloseConnectionRunnable final : public nsRunnable
+class CloseConnectionRunnable final : public Runnable
 {
 public:
   CloseConnectionRunnable(WebSocketImpl* aImpl,
@@ -466,9 +467,9 @@ WebSocketImpl::CloseConnection(uint16_t aReasonCode,
                                const nsACString& aReasonString)
 {
   if (!IsTargetThread()) {
-    RefPtr<nsRunnable> runnable =
+    nsCOMPtr<nsIRunnable> runnable =
       new CloseConnectionRunnable(this, aReasonCode, aReasonString);
-    return Dispatch(runnable, NS_DISPATCH_NORMAL);
+    return Dispatch(runnable.forget(), NS_DISPATCH_NORMAL);
   }
 
   AssertIsOnTargetThread();
@@ -572,7 +573,8 @@ class DisconnectInternalRunnable final : public WorkerMainThreadRunnable
 {
 public:
   explicit DisconnectInternalRunnable(WebSocketImpl* aImpl)
-    : WorkerMainThreadRunnable(aImpl->mWorkerPrivate)
+    : WorkerMainThreadRunnable(aImpl->mWorkerPrivate,
+                               NS_LITERAL_CSTRING("WebSocket :: disconnect"))
     , mImpl(aImpl)
   { }
 
@@ -990,8 +992,9 @@ private:
 class WebSocketMainThreadRunnable : public WorkerMainThreadRunnable
 {
 public:
-  WebSocketMainThreadRunnable(WorkerPrivate* aWorkerPrivate)
-    : WorkerMainThreadRunnable(aWorkerPrivate)
+  WebSocketMainThreadRunnable(WorkerPrivate* aWorkerPrivate,
+                              const nsACString& aTelemetryKey)
+    : WorkerMainThreadRunnable(aWorkerPrivate, aTelemetryKey)
   {
     MOZ_ASSERT(aWorkerPrivate);
     aWorkerPrivate->AssertIsOnWorkerThread();
@@ -1029,7 +1032,8 @@ public:
                const nsACString& aScriptFile, uint32_t aScriptLine,
                uint32_t aScriptColumn,
                ErrorResult& aRv, bool* aConnectionFailed)
-    : WebSocketMainThreadRunnable(aImpl->mWorkerPrivate)
+    : WebSocketMainThreadRunnable(aImpl->mWorkerPrivate,
+                                  NS_LITERAL_CSTRING("WebSocket :: init"))
     , mImpl(aImpl)
     , mURL(aURL)
     , mProtocolArray(aProtocolArray)
@@ -1098,7 +1102,8 @@ class AsyncOpenRunnable final : public WebSocketMainThreadRunnable
 {
 public:
   AsyncOpenRunnable(WebSocketImpl* aImpl, ErrorResult& aRv)
-    : WebSocketMainThreadRunnable(aImpl->mWorkerPrivate)
+    : WebSocketMainThreadRunnable(aImpl->mWorkerPrivate,
+                                  NS_LITERAL_CSTRING("WebSocket :: AsyncOpen"))
     , mImpl(aImpl)
     , mRv(aRv)
   {
@@ -2803,6 +2808,12 @@ WebSocketImpl::Dispatch(already_AddRefed<nsIRunnable>&& aEvent, uint32_t aFlags)
   }
 
   return NS_OK;
+}
+
+NS_IMETHODIMP
+WebSocketImpl::DelayedDispatch(already_AddRefed<nsIRunnable>&&, uint32_t)
+{
+  return NS_ERROR_NOT_IMPLEMENTED;
 }
 
 NS_IMETHODIMP

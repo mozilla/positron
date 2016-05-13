@@ -31,10 +31,6 @@ const CONNECTION_PROTOCOLS = (function() {
   }
 })();
 
-XPCOMUtils.defineLazyServiceGetter(this, "gContentSecurityManager",
-                                   "@mozilla.org/contentsecuritymanager;1",
-                                   "nsIContentSecurityManager");
-
 XPCOMUtils.defineLazyServiceGetter(this, "gPushNotifier",
                                    "@mozilla.org/push/Notifier;1",
                                    "nsIPushNotifier");
@@ -360,7 +356,9 @@ this.PushService = {
     }
 
     console.debug("backgroundUnregister: Notifying server", record);
-    this._sendUnregister(record, reason).catch(e => {
+    this._sendUnregister(record, reason).then(() => {
+      gPushNotifier.notifySubscriptionModified(record.scope, record.principal);
+    }).catch(e => {
       console.error("backgroundUnregister: Error notifying server", e);
     });
   },
@@ -394,11 +392,6 @@ this.PushService = {
     } catch (e) {
       console.warn("findService: Error creating valid URI from",
         "dom.push.serverURL", serverURL);
-      return [];
-    }
-
-    if (!gContentSecurityManager.isURIPotentiallyTrustworthy(uri)) {
-      console.warn("findService: Untrusted server URI", uri.spec);
       return [];
     }
 
@@ -854,6 +847,9 @@ this.PushService = {
           return newRecord;
         });
       });
+    }).then(record => {
+      gPushNotifier.notifySubscriptionModified(record.scope, record.principal);
+      return record;
     });
   },
 
@@ -905,13 +901,18 @@ this.PushService = {
       }
       return record;
     }).then(record => {
-      if (record && record.isExpired()) {
-        this._recordDidNotNotify(kDROP_NOTIFICATION_REASON_EXPIRED);
-        // Drop the registration in the background. If the user returns to the
-        // site, the service worker will be notified on the next `idle-daily`
-        // event.
-        this._backgroundUnregister(record,
-          Ci.nsIPushErrorReporter.UNSUBSCRIBE_QUOTA_EXCEEDED);
+      if (record) {
+        if (record.isExpired()) {
+          this._recordDidNotNotify(kDROP_NOTIFICATION_REASON_EXPIRED);
+          // Drop the registration in the background. If the user returns to the
+          // site, the service worker will be notified on the next `idle-daily`
+          // event.
+          this._backgroundUnregister(record,
+            Ci.nsIPushErrorReporter.UNSUBSCRIBE_QUOTA_EXCEEDED);
+        } else {
+          gPushNotifier.notifySubscriptionModified(record.scope,
+                                                   record.principal);
+        }
       }
       if (this._updateQuotaTestCallback) {
         // Callback so that test may be notified when the quota update is complete.
@@ -1038,6 +1039,8 @@ this.PushService = {
             err => this._onRegisterError(err))
       .then(record => {
         this._deletePendingRequest(aPageRecord);
+        gPushNotifier.notifySubscriptionModified(record.scope,
+                                                 record.principal);
         return record.toSubscription();
       }, err => {
         this._deletePendingRequest(aPageRecord);
@@ -1180,11 +1183,15 @@ this.PushService = {
           return false;
         }
 
+        let reason = Ci.nsIPushErrorReporter.UNSUBSCRIBE_MANUAL;
         return Promise.all([
-          this._sendUnregister(record,
-                               Ci.nsIPushErrorReporter.UNSUBSCRIBE_MANUAL),
+          this._sendUnregister(record, reason),
           this._db.delete(record.keyID),
-        ]).then(() => true);
+        ]).then(() => {
+          gPushNotifier.notifySubscriptionModified(record.scope,
+                                                   record.principal);
+          return true;
+        });
       });
   },
 
@@ -1286,19 +1293,7 @@ this.PushService = {
     console.debug("onPermissionChange()");
 
     if (data == "cleared") {
-      // If the permission list was cleared, drop all registrations
-      // that are subject to quota.
-      return this._db.clearIf(record => {
-        if (record.quotaApplies()) {
-          if (!record.isExpired()) {
-            // Drop the registration in the background.
-            this._backgroundUnregister(record,
-              Ci.nsIPushErrorReporter.UNSUBSCRIBE_PERMISSION_REVOKED);
-          }
-          return true;
-        }
-        return false;
-      });
+      return this._clearPermissions();
     }
 
     let permission = subject.QueryInterface(Ci.nsIPermission);
@@ -1307,6 +1302,32 @@ this.PushService = {
     }
 
     return this._updatePermission(permission, data);
+  },
+
+  _clearPermissions() {
+    console.debug("clearPermissions()");
+
+    let subscriptionModifications = [];
+    return this._db.clearIf(record => {
+      if (!record.quotaApplies()) {
+        // Only drop registrations that are subject to quota.
+        return false;
+      }
+      if (record.isExpired()) {
+        // Fire subscription modified notifications for expired
+        // records after the IndexedDB transaction has committed.
+        subscriptionModifications.push(record);
+      } else {
+        // Drop unexpired registrations in the background.
+        this._backgroundUnregister(record,
+          Ci.nsIPushErrorReporter.UNSUBSCRIBE_PERMISSION_REVOKED);
+      }
+      return true;
+    }).then(() => {
+      subscriptionModifications.forEach(record =>
+        gPushNotifier.notifySubscriptionModified(record.scope, record.principal)
+      );
+    });
   },
 
   _updatePermission: function(permission, type) {

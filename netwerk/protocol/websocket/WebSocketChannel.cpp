@@ -1248,7 +1248,7 @@ WebSocketChannel::Observe(nsISupports *subject,
         // Next we check mDataStarted, which we need to do on mTargetThread.
         if (!IsOnTargetThread()) {
           mTargetThread->Dispatch(
-            NS_NewRunnableMethod(this, &WebSocketChannel::OnNetworkChanged),
+            NewRunnableMethod(this, &WebSocketChannel::OnNetworkChanged),
             NS_DISPATCH_NORMAL);
         } else {
           OnNetworkChanged();
@@ -1272,7 +1272,7 @@ WebSocketChannel::OnNetworkChanged()
     }
 
     return mSocketThread->Dispatch(
-      NS_NewRunnableMethod(this, &WebSocketChannel::OnNetworkChanged),
+      NewRunnableMethod(this, &WebSocketChannel::OnNetworkChanged),
       NS_DISPATCH_NORMAL);
   }
 
@@ -1359,7 +1359,7 @@ WebSocketChannel::BeginOpen(bool aCalledFromAdmissionManager)
     // When called from nsWSAdmissionManager post an event to avoid potential
     // re-entering of nsWSAdmissionManager and its lock.
     NS_DispatchToMainThread(
-      NS_NewRunnableMethod(this, &WebSocketChannel::BeginOpenInternal),
+      NewRunnableMethod(this, &WebSocketChannel::BeginOpenInternal),
                            NS_DISPATCH_NORMAL);
   } else {
     BeginOpenInternal();
@@ -1758,6 +1758,7 @@ WebSocketChannel::ProcessInput(uint8_t *buffer, uint32_t count)
           // We send the frame immediately becuase we want to have it dispatched
           // before the CallOnServerClose.
           mService->FrameReceived(mSerial, mInnerWindowID, frame.forget());
+          frame = nullptr;
         }
 
         if (mListenerMT) {
@@ -2237,7 +2238,7 @@ WebSocketChannel::EnsureHdrOut(uint32_t size)
 
 namespace {
 
-class RemoveObserverRunnable : public nsRunnable
+class RemoveObserverRunnable : public Runnable
 {
   RefPtr<WebSocketChannel> mChannel;
 
@@ -2795,7 +2796,7 @@ WebSocketChannel::StartWebsocketData()
 
   if (!IsOnTargetThread()) {
     return mTargetThread->Dispatch(
-      NS_NewRunnableMethod(this, &WebSocketChannel::StartWebsocketData),
+      NewRunnableMethod(this, &WebSocketChannel::StartWebsocketData),
       NS_DISPATCH_NORMAL);
   }
 
@@ -2808,15 +2809,15 @@ WebSocketChannel::StartWebsocketData()
     LOG(("WebSocketChannel::StartWebsocketData mSocketIn->AsyncWait() failed "
          "with error 0x%08x", rv));
     return mSocketThread->Dispatch(
-      NS_NewRunnableMethodWithArgs<nsresult>(this,
-                                             &WebSocketChannel::AbortSession,
-                                             rv),
+      NewRunnableMethod<nsresult>(this,
+                                  &WebSocketChannel::AbortSession,
+                                  rv),
       NS_DISPATCH_NORMAL);
   }
 
   if (mPingInterval) {
     rv = mSocketThread->Dispatch(
-      NS_NewRunnableMethod(this, &WebSocketChannel::StartPinging),
+      NewRunnableMethod(this, &WebSocketChannel::StartPinging),
       NS_DISPATCH_NORMAL);
     if (NS_FAILED(rv)) {
       LOG(("WebSocketChannel::StartWebsocketData Could not start pinging, "
@@ -3132,9 +3133,9 @@ WebSocketChannel::Notify(nsITimer *timer)
       LOG(("nsWebSocketChannel:: Generating Ping\n"));
       mPingOutstanding = 1;
       mPingForced = 0;
-      GeneratePing();
       mPingTimer->InitWithCallback(this, mPingResponseTimeout,
                                    nsITimer::TYPE_ONE_SHOT);
+      GeneratePing();
     } else {
       LOG(("nsWebSocketChannel:: Timed out Ping\n"));
       mPingTimer = nullptr;
@@ -3916,7 +3917,7 @@ WebSocketChannel::SaveNetworkStats(bool enforce)
 
   // Create the event to save the network statistics.
   // the event is then dispatched to the main thread.
-  RefPtr<nsRunnable> event =
+  RefPtr<Runnable> event =
     new SaveNetworkStatsEvent(mAppId, mIsInIsolatedMozBrowser, mActiveNetworkInfo,
                               countRecv, countSent, false);
   NS_DispatchToMainThread(event);

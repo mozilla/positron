@@ -80,7 +80,6 @@ nsVolumeService::Shutdown()
   }
 
   XRE_GetIOMessageLoop()->PostTask(
-      FROM_HERE,
       NewRunnableFunction(ShutdownVolumeServiceIOThread));
 
   sSingleton = nullptr;
@@ -101,7 +100,6 @@ nsVolumeService::nsVolumeService()
   // Startup the IOThread side of things. The actual volume changes
   // are captured by the IOThread and forwarded to main thread.
   XRE_GetIOMessageLoop()->PostTask(
-      FROM_HERE,
       NewRunnableFunction(InitVolumeServiceIOThread, this));
 
   nsCOMPtr<nsIPowerManagerService> pmService =
@@ -505,7 +503,7 @@ nsVolumeService::RemoveVolumeByName(const nsAString& aName)
 * The UpdateVolumeRunnable creates an nsVolume and updates the main thread
 * data structure while running on the main thread.
 */
-class UpdateVolumeRunnable : public nsRunnable
+class UpdateVolumeRunnable : public Runnable
 {
 public:
   UpdateVolumeRunnable(nsVolumeService* aVolumeService, const Volume* aVolume)

@@ -31,7 +31,7 @@ class StaticBlockScope;
 class ClonedBlockObject;
 
 class SimdTypeDescr;
-enum class SimdType : uint8_t;
+enum class SimdType;
 
 /*
  * Global object slots are reserved as follows:
@@ -241,6 +241,12 @@ class GlobalObject : public NativeObject
     }
 
   private:
+    static bool defineConstructorPropertiesAndLinkPrototype(JSContext* cx,
+                                                            Handle<GlobalObject*> global,
+                                                            JSProtoKey key, const Class* clasp,
+                                                            HandleId id, HandleObject ctor,
+                                                            HandleObject proto);
+
     bool arrayClassInitialized() const {
         return classIsInitialized(JSProto_Array);
     }

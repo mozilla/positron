@@ -14,7 +14,7 @@
 #include "nsTArray.h"
 #include "ImageTypes.h"
 #include "MediaData.h"
-#include "StreamBuffer.h" // for TrackID
+#include "StreamTracks.h" // for TrackID
 #include "TimeUnits.h"
 
 namespace mozilla {
@@ -33,6 +33,9 @@ public:
   nsCString mKey;
   nsCString mValue;
 };
+
+  // Maximum channel number we can currently handle (7.1)
+#define MAX_AUDIO_CHANNELS 8
 
 class TrackInfo {
 public:
@@ -302,9 +305,12 @@ public:
   {
   }
 
+  static const uint32_t MAX_RATE = 640000;
+
   bool IsValid() const override
   {
-    return mChannels > 0 && mRate > 0;
+    return mChannels > 0 && mChannels <= MAX_AUDIO_CHANNELS
+           && mRate > 0 && mRate <= MAX_RATE;
   }
 
   AudioInfo* GetAsAudioInfo() override
@@ -516,9 +522,6 @@ public:
   const nsCString& mMimeType;
 };
 
-// Maximum channel number we can currently handle (7.1)
-#define MAX_AUDIO_CHANNELS 8
-
 class AudioConfig {
 public:
   enum Channel {
@@ -656,6 +659,11 @@ public:
   bool operator!=(const AudioConfig& aOther) const
   {
     return !(*this == aOther);
+  }
+
+  bool IsValid() const
+  {
+    return mChannelLayout.IsValid() && Format() != FORMAT_NONE && Rate() > 0;
   }
 
   static const char* FormatToString(SampleFormat aFormat);

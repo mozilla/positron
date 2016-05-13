@@ -139,16 +139,6 @@ partial interface Navigator {
   readonly attribute BatteryManager? battery;
 };
 
-// https://wiki.mozilla.org/WebAPI/DataStore
-[NoInterfaceObject,
- Exposed=(Window,Worker)]
-interface NavigatorDataStore {
-    [NewObject, Func="Navigator::HasDataStoreSupport"]
-    Promise<sequence<DataStore>> getDataStores(DOMString name,
-                                               optional DOMString? owner = null);
-};
-Navigator implements NavigatorDataStore;
-
 // http://www.w3.org/TR/vibration/#vibration-interface
 partial interface Navigator {
     // We don't support sequences in unions yet
@@ -164,6 +154,17 @@ partial interface Navigator {
 };
 
 // Mozilla-specific extensions
+
+// Chrome-only interface for Vibration API permission handling.
+partial interface Navigator {
+    /* Set permission state to device vibration.
+     * @param permitted permission state (true for allowing vibration)
+     * @param persistent make the permission session-persistent
+     */
+    [ChromeOnly]
+    void setVibrationPermission(boolean permitted,
+                                optional boolean persistent = true);
+};
 
 callback interface MozIdleObserver {
   // Time is in seconds and is read only when idle observers are added

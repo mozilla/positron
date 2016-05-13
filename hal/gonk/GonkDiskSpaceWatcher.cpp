@@ -119,7 +119,7 @@ static GonkDiskSpaceWatcher* gHalDiskSpaceWatcher = nullptr;
 static const char kWatchedPath[] = "/data";
 
 // Helper class to dispatch calls to xpcom on the main thread.
-class DiskSpaceNotifier : public nsRunnable
+class DiskSpaceNotifier : public Runnable
 {
 public:
   DiskSpaceNotifier(const bool aIsDiskFull, const uint64_t aFreeSpace) :
@@ -139,7 +139,7 @@ private:
 };
 
 // Helper runnable to delete the watcher on the main thread.
-class DiskSpaceCleaner : public nsRunnable
+class DiskSpaceCleaner : public Runnable
 {
 public:
   NS_IMETHOD Run()
@@ -311,7 +311,6 @@ StartDiskSpaceWatcher()
   gHalDiskSpaceWatcher = new GonkDiskSpaceWatcher();
 
   XRE_GetIOMessageLoop()->PostTask(
-    FROM_HERE,
     NewRunnableMethod(gHalDiskSpaceWatcher, &GonkDiskSpaceWatcher::DoStart));
 }
 
@@ -324,7 +323,6 @@ StopDiskSpaceWatcher()
   }
 
   XRE_GetIOMessageLoop()->PostTask(
-    FROM_HERE,
     NewRunnableMethod(gHalDiskSpaceWatcher, &GonkDiskSpaceWatcher::DoStop));
 }
 

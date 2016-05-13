@@ -589,6 +589,18 @@ class Assembler : public AssemblerX86Shared
     void sarq_cl(Register dest) {
         masm.sarq_CLr(dest.encoding());
     }
+    void rolq(Imm32 imm, Register dest) {
+        masm.rolq_ir(imm.value, dest.encoding());
+    }
+    void rolq_cl(Register dest) {
+        masm.rolq_CLr(dest.encoding());
+    }
+    void rorq(Imm32 imm, Register dest) {
+        masm.rorq_ir(imm.value, dest.encoding());
+    }
+    void rorq_cl(Register dest) {
+        masm.rorq_CLr(dest.encoding());
+    }
     void orq(Imm32 imm, Register dest) {
         masm.orq_ir(imm.value, dest.encoding());
     }
@@ -630,6 +642,16 @@ class Assembler : public AssemblerX86Shared
           default:
             MOZ_CRASH("unexpected operand kind");
         }
+    }
+
+    void bsrq(const Register& src, const Register& dest) {
+        masm.bsrq_rr(src.encoding(), dest.encoding());
+    }
+    void bsfq(const Register& src, const Register& dest) {
+        masm.bsfq_rr(src.encoding(), dest.encoding());
+    }
+    void popcntq(const Register& src, const Register& dest) {
+        masm.popcntq_rr(src.encoding(), dest.encoding());
     }
 
     void imulq(Register src, Register dest) {
@@ -739,6 +761,9 @@ class Assembler : public AssemblerX86Shared
     }
     CodeOffset storeRipRelativeInt32(Register dest) {
         return CodeOffset(masm.movl_rrip(dest.encoding()).offset());
+    }
+    CodeOffset storeRipRelativeInt64(Register dest) {
+        return CodeOffset(masm.movq_rrip(dest.encoding()).offset());
     }
     CodeOffset storeRipRelativeDouble(FloatRegister dest) {
         return CodeOffset(masm.vmovsd_rrip(dest.encoding()).offset());

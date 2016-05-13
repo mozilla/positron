@@ -1616,18 +1616,16 @@ CanvasRenderingContext2D::ReturnTarget()
 }
 
 NS_IMETHODIMP
-CanvasRenderingContext2D::InitializeWithSurface(nsIDocShell* aShell,
-                                                gfxASurface* aSurface,
-                                                int32_t aWidth,
-                                                int32_t aHeight)
+CanvasRenderingContext2D::InitializeWithDrawTarget(nsIDocShell* aShell,
+                                                   gfx::DrawTarget* aTarget)
 {
   RemovePostRefreshObserver();
   mDocShell = aShell;
   AddPostRefreshObserverIfNecessary();
 
-  SetDimensions(aWidth, aHeight);
-  mTarget = gfxPlatform::GetPlatform()->
-    CreateDrawTargetForSurface(aSurface, IntSize(aWidth, aHeight));
+  IntSize size = aTarget->GetSize();
+  SetDimensions(size.width, size.height);
+  mTarget = aTarget;
 
   if (!mTarget) {
     EnsureErrorTarget();
@@ -2176,7 +2174,6 @@ CanvasRenderingContext2D::CreatePattern(const CanvasImageSource& aSource,
       nsLayoutUtils::SFE_WANT_FIRST_FRAME, mTarget);
 
   if (!res.GetSourceSurface()) {
-    aError.Throw(NS_ERROR_NOT_AVAILABLE);
     return nullptr;
   }
 
@@ -4364,57 +4361,6 @@ ExtractSubrect(SourceSurface* aSurface, gfx::Rect* aSourceRect, DrawTarget* aTar
   return subrectDT->Snapshot();
 }
 
-// Acts like nsLayoutUtils::SurfaceFromElement, but it'll attempt
-// to pull a SourceSurface from our cache. This allows us to avoid
-// reoptimizing surfaces if content and canvas backends are different.
-nsLayoutUtils::SurfaceFromElementResult
-CanvasRenderingContext2D::CachedSurfaceFromElement(Element* aElement)
-{
-  nsLayoutUtils::SurfaceFromElementResult res;
-
-  nsCOMPtr<nsIImageLoadingContent> imageLoader = do_QueryInterface(aElement);
-  if (!imageLoader) {
-    return res;
-  }
-
-  nsCOMPtr<imgIRequest> imgRequest;
-  imageLoader->GetRequest(nsIImageLoadingContent::CURRENT_REQUEST,
-                          getter_AddRefs(imgRequest));
-  if (!imgRequest) {
-    return res;
-  }
-
-  uint32_t status;
-  if (NS_FAILED(imgRequest->GetImageStatus(&status)) ||
-      !(status & imgIRequest::STATUS_LOAD_COMPLETE)) {
-    return res;
-  }
-
-  nsCOMPtr<nsIPrincipal> principal;
-  if (NS_FAILED(imgRequest->GetImagePrincipal(getter_AddRefs(principal))) ||
-      !principal) {
-    return res;
-  }
-
-  res.mSourceSurface =
-    CanvasImageCache::SimpleLookup(aElement, mIsSkiaGL);
-  if (!res.mSourceSurface) {
-    return res;
-  }
-
-  int32_t corsmode = imgIRequest::CORS_NONE;
-  if (NS_SUCCEEDED(imgRequest->GetCORSMode(&corsmode))) {
-    res.mCORSUsed = corsmode != imgIRequest::CORS_NONE;
-  }
-
-  res.mSize = res.mSourceSurface->GetSize();
-  res.mPrincipal = principal.forget();
-  res.mIsWriteOnly = false;
-  res.mImageRequest = imgRequest.forget();
-
-  return res;
-}
-
 //
 // image
 //
@@ -4436,6 +4382,56 @@ ClipImageDimension(double& aSourceCoord, double& aSourceSize, int32_t aImageSize
     aDestSize += delta * scale;
     aSourceSize = aImageSize - aSourceCoord;
   }
+}
+
+// Acts like nsLayoutUtils::SurfaceFromElement, but it'll attempt
+// to pull a SourceSurface from our cache. This allows us to avoid
+// reoptimizing surfaces if content and canvas backends are different.
+nsLayoutUtils::SurfaceFromElementResult
+CanvasRenderingContext2D::CachedSurfaceFromElement(Element* aElement)
+{
+  nsLayoutUtils::SurfaceFromElementResult res;
+  nsCOMPtr<nsIImageLoadingContent> imageLoader = do_QueryInterface(aElement);
+  if (!imageLoader) {
+    return res;
+  }
+
+  nsCOMPtr<imgIRequest> imgRequest;
+  imageLoader->GetRequest(nsIImageLoadingContent::CURRENT_REQUEST,
+                          getter_AddRefs(imgRequest));
+  if (!imgRequest) {
+    return res;
+  }
+
+  uint32_t status = 0;
+  if (NS_FAILED(imgRequest->GetImageStatus(&status)) ||
+      !(status & imgIRequest::STATUS_LOAD_COMPLETE)) {
+    return res;
+  }
+
+  nsCOMPtr<nsIPrincipal> principal;
+  if (NS_FAILED(imgRequest->GetImagePrincipal(getter_AddRefs(principal))) ||
+      !principal) {
+    return res;
+  }
+
+  res.mSourceSurface =
+    CanvasImageCache::LookupAllCanvas(aElement, mIsSkiaGL);
+  if (!res.mSourceSurface) {
+    return res;
+  }
+
+  int32_t corsmode = imgIRequest::CORS_NONE;
+  if (NS_SUCCEEDED(imgRequest->GetCORSMode(&corsmode))) {
+    res.mCORSUsed = corsmode != imgIRequest::CORS_NONE;
+  }
+
+  res.mSize = res.mSourceSurface->GetSize();
+  res.mPrincipal = principal.forget();
+  res.mIsWriteOnly = false;
+  res.mImageRequest = imgRequest.forget();
+
+  return res;
 }
 
 // drawImage(in HTMLImageElement image, in float dx, in float dy);
@@ -4507,7 +4503,7 @@ CanvasRenderingContext2D::DrawImage(const CanvasImageSource& aImage,
     }
 
     srcSurf =
-      CanvasImageCache::Lookup(element, mCanvasElement, &imgSize, mIsSkiaGL);
+     CanvasImageCache::LookupCanvas(element, mCanvasElement, &imgSize, mIsSkiaGL);
   }
 
   nsLayoutUtils::DirectDrawInfo drawInfo;
@@ -4616,15 +4612,13 @@ CanvasRenderingContext2D::DrawImage(const CanvasImageSource& aImage,
     // of animated images. We also don't want to rasterize vector images.
     uint32_t sfeFlags = nsLayoutUtils::SFE_WANT_FIRST_FRAME |
                         nsLayoutUtils::SFE_NO_RASTERIZING_VECTORS;
-    // The cache lookup can miss even if the image is already in the cache
-    // if the image is coming from a different element or cached for a
-    // different canvas. This covers the case when we miss due to caching
-    // for a different canvas, but CanvasImageCache should be fixed if we
-    // see misses due to different elements drawing the same image.
+
     nsLayoutUtils::SurfaceFromElementResult res =
-      CachedSurfaceFromElement(element);
-    if (!res.mSourceSurface)
+      CanvasRenderingContext2D::CachedSurfaceFromElement(element);
+
+    if (!res.mSourceSurface) {
       res = nsLayoutUtils::SurfaceFromElement(element, sfeFlags, mTarget);
+    }
 
     if (!res.mSourceSurface && !res.mDrawInfo.mImgContainer) {
       // The spec says to silently do nothing in the following cases:
@@ -4656,10 +4650,8 @@ CanvasRenderingContext2D::DrawImage(const CanvasImageSource& aImage,
 
     if (res.mSourceSurface) {
       if (res.mImageRequest) {
-        CanvasImageCache::NotifyDrawImage(element, mCanvasElement, res.mImageRequest,
-                                          res.mSourceSurface, imgSize, mIsSkiaGL);
+        CanvasImageCache::NotifyDrawImage(element, mCanvasElement, res.mSourceSurface, imgSize, mIsSkiaGL);
       }
-
       srcSurf = res.mSourceSurface;
     } else {
       drawInfo = res.mDrawInfo;

@@ -846,7 +846,7 @@ function intendOpenVarPopup(aPanel, aPosition, aButtonPushed) {
         deferred.resolve(true);
       }
     },
-    tooltip.defaultShowDelay + 1000
+    bubble.TOOLTIP_SHOW_DELAY + 1000
   );
 
   return deferred.promise;
@@ -1158,7 +1158,7 @@ function getSplitConsole(toolbox, win) {
   });
 
   if (!win) {
-    win = toolbox.doc.defaultView;
+    win = toolbox.win;
   }
 
   if (!toolbox.splitConsole) {

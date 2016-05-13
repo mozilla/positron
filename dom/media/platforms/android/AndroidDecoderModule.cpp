@@ -201,6 +201,10 @@ public:
     int32_t numChannels;
     NS_ENSURE_SUCCESS(rv =
         aFormat->GetInteger(NS_LITERAL_STRING("channel-count"), &numChannels), rv);
+    AudioConfig::ChannelLayout layout(numChannels);
+    if (!layout.IsValid()) {
+      return NS_ERROR_FAILURE;
+    }
 
     int32_t sampleRate;
     NS_ENSURE_SUCCESS(rv =
@@ -385,9 +389,8 @@ MediaCodecDataDecoder::InitDecoder(Surface::Param aSurface)
   NS_ENSURE_SUCCESS(rv = ResetInputBuffers(), rv);
   NS_ENSURE_SUCCESS(rv = ResetOutputBuffers(), rv);
 
-  rv = NS_NewNamedThread(
-      "MC Decoder", getter_AddRefs(mThread),
-      NS_NewRunnableMethod(this, &MediaCodecDataDecoder::DecoderLoop));
+  nsCOMPtr<nsIRunnable> r = NewRunnableMethod(this, &MediaCodecDataDecoder::DecoderLoop);
+  rv = NS_NewNamedThread("MC Decoder", getter_AddRefs(mThread), r);
 
   return rv;
 }

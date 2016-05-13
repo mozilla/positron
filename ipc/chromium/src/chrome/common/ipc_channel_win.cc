@@ -265,7 +265,7 @@ bool Channel::ChannelImpl::Connect() {
     // Complete setup asynchronously. By not setting input_state_.is_pending
     // to true, we indicate to OnIOCompleted that this is the special
     // initialization signal.
-    MessageLoopForIO::current()->PostTask(FROM_HERE, factory_.NewRunnableMethod(
+    MessageLoopForIO::current()->PostTask(factory_.NewRunnableMethod(
         &Channel::ChannelImpl::OnIOCompleted, &input_state_.context, 0, 0));
   }
 
@@ -371,6 +371,12 @@ bool Channel::ChannelImpl::ProcessIncomingMessages(
       // more data comes in.
       uint32_t length = Message::GetLength(p, end);
       if (length) {
+        if (length > kMaximumMessageSize) {
+          input_overflow_buf_.clear();
+          CHROMIUM_LOG(ERROR) << "IPC message is too big";
+          return false;
+        }
+
         input_overflow_buf_.reserve(length + kReadBufferSize);
 
         // Recompute these pointers in case the buffer moved.

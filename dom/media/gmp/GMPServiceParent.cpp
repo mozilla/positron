@@ -6,6 +6,7 @@
 #include "GMPServiceParent.h"
 #include "GMPService.h"
 #include "prio.h"
+#include "base/task.h"
 #include "mozilla/Logging.h"
 #include "GMPParent.h"
 #include "GMPVideoDecoderParent.h"
@@ -22,7 +23,6 @@
 #include "GMPDecryptorParent.h"
 #include "GMPAudioDecoderParent.h"
 #include "nsComponentManagerUtils.h"
-#include "mozilla/Preferences.h"
 #include "runnable_utils.h"
 #include "VideoUtils.h"
 #if defined(XP_LINUX) && defined(MOZ_GMP_SANDBOX)
@@ -41,6 +41,7 @@
 #include "nsIXULRuntime.h"
 #include "GMPDecoderModule.h"
 #include <limits>
+#include "MediaPrefs.h"
 
 namespace mozilla {
 
@@ -80,10 +81,6 @@ NS_IMPL_ISUPPORTS_INHERITED(GeckoMediaPluginServiceParent,
                             GeckoMediaPluginService,
                             mozIGeckoMediaPluginChromeService)
 
-static int32_t sMaxAsyncShutdownWaitMs = 0;
-static bool sAllowInsecureGMP = false;
-static bool sHaveSetGMPServiceParentPrefCaches = false;
-
 GeckoMediaPluginServiceParent::GeckoMediaPluginServiceParent()
   : mShuttingDown(false)
 #ifdef MOZ_CRASHREPORTER
@@ -95,14 +92,6 @@ GeckoMediaPluginServiceParent::GeckoMediaPluginServiceParent()
   , mLoadPluginsFromDiskComplete(false)
 {
   MOZ_ASSERT(NS_IsMainThread());
-  if (!sHaveSetGMPServiceParentPrefCaches) {
-    sHaveSetGMPServiceParentPrefCaches = true;
-    Preferences::AddIntVarCache(&sMaxAsyncShutdownWaitMs,
-                                "media.gmp.async-shutdown-timeout",
-                                GMP_DEFAULT_ASYNC_SHUTDONW_TIMEOUT);
-    Preferences::AddBoolVarCache(&sAllowInsecureGMP,
-                                 "media.gmp.insecure.allow", false);
-  }
   mInitPromise.SetMonitor(&mInitPromiseMonitor);
 }
 
@@ -115,8 +104,7 @@ GeckoMediaPluginServiceParent::~GeckoMediaPluginServiceParent()
 int32_t
 GeckoMediaPluginServiceParent::AsyncShutdownTimeoutMs()
 {
-  MOZ_ASSERT(sHaveSetGMPServiceParentPrefCaches);
-  return sMaxAsyncShutdownWaitMs;
+  return MediaPrefs::GMPAsyncShutdownTimeout();
 }
 
 nsresult
@@ -146,7 +134,20 @@ GeckoMediaPluginServiceParent::Init()
 
   // Kick off scanning for plugins
   nsCOMPtr<nsIThread> thread;
-  return GetThread(getter_AddRefs(thread));
+  rv = GetThread(getter_AddRefs(thread));
+  if (NS_FAILED(rv)) {
+    return rv;
+  }
+
+  // Detect if GMP storage has an incompatible version, and if so nuke it.
+  int32_t version = Preferences::GetInt("media.gmp.storage.version.observed", 0);
+  int32_t expected = Preferences::GetInt("media.gmp.storage.version.expected", 0);
+  if (version != expected) {
+    Preferences::SetInt("media.gmp.storage.version.observed", expected);
+    return GMPDispatch(NewRunnableMethod(
+      this, &GeckoMediaPluginServiceParent::ClearStorage));
+  }
+  return NS_OK;
 }
 
 already_AddRefed<nsIFile>
@@ -419,8 +420,8 @@ GeckoMediaPluginServiceParent::Observe(nsISupports* aSubject,
         NS_LITERAL_CSTRING("Dispatching UnloadPlugins"));
 #endif
       gmpThread->Dispatch(
-        NS_NewRunnableMethod(this,
-                             &GeckoMediaPluginServiceParent::UnloadPlugins),
+        NewRunnableMethod(this,
+                          &GeckoMediaPluginServiceParent::UnloadPlugins),
         NS_DISPATCH_NORMAL);
 
 #ifdef MOZ_CRASHREPORTER
@@ -493,7 +494,7 @@ GeckoMediaPluginServiceParent::Observe(nsISupports* aSubject,
   } else if (!strcmp("browser:purge-session-history", aTopic)) {
     // Clear everything!
     if (!aSomeData || nsDependentString(aSomeData).IsEmpty()) {
-      return GMPDispatch(NS_NewRunnableMethod(
+      return GMPDispatch(NewRunnableMethod(
           this, &GeckoMediaPluginServiceParent::ClearStorage));
     }
 
@@ -503,7 +504,7 @@ GeckoMediaPluginServiceParent::Observe(nsISupports* aSubject,
     if (NS_FAILED(rv)) {
       return rv;
     }
-    return GMPDispatch(NS_NewRunnableMethodWithArg<PRTime>(
+    return GMPDispatch(NewRunnableMethod<PRTime>(
         this, &GeckoMediaPluginServiceParent::ClearRecentHistoryOnGMPThread,
         t));
   }
@@ -528,8 +529,12 @@ GeckoMediaPluginServiceParent::GetContentParentFrom(const nsACString& aNodeId,
                                                     const nsTArray<nsCString>& aTags,
                                                     UniquePtr<GetGMPContentParentCallback>&& aCallback)
 {
-  RefPtr<GeckoMediaPluginServiceParent> self(this);
   RefPtr<AbstractThread> thread(GetAbstractGMPThread());
+  if (!thread) {
+    return false;
+  }
+
+  RefPtr<GeckoMediaPluginServiceParent> self(this);
   nsCString nodeId(aNodeId);
   nsTArray<nsCString> tags(aTags);
   nsCString api(aAPI);
@@ -555,8 +560,10 @@ GeckoMediaPluginServiceParent::GetContentParentFrom(const nsACString& aNodeId,
 }
 
 void
-GeckoMediaPluginServiceParent::InitializePlugins()
+GeckoMediaPluginServiceParent::InitializePlugins(
+  AbstractThread* aAbstractGMPThread)
 {
+  MOZ_ASSERT(aAbstractGMPThread);
   MonitorAutoLock lock(mInitPromiseMonitor);
   if (mLoadPluginsFromDiskComplete) {
     return;
@@ -564,9 +571,9 @@ GeckoMediaPluginServiceParent::InitializePlugins()
 
   RefPtr<GeckoMediaPluginServiceParent> self(this);
   RefPtr<GenericPromise> p = mInitPromise.Ensure(__func__);
-  RefPtr<AbstractThread> thread(GetAbstractGMPThread());
-  InvokeAsync(thread, this, __func__, &GeckoMediaPluginServiceParent::LoadFromEnvironment)
-    ->Then(thread, __func__,
+  InvokeAsync(aAbstractGMPThread, this, __func__,
+              &GeckoMediaPluginServiceParent::LoadFromEnvironment)
+    ->Then(aAbstractGMPThread, __func__,
       [self]() -> void {
         MonitorAutoLock lock(self->mInitPromiseMonitor);
         self->mLoadPluginsFromDiskComplete = true;
@@ -605,7 +612,7 @@ GeckoMediaPluginServiceParent::AsyncShutdownComplete(GMPParent* aParent)
   if (mShuttingDownOnGMPThread) {
     // The main thread may be waiting for async shutdown of plugins,
     // one of which has completed. Wake up the main thread by sending a task.
-    nsCOMPtr<nsIRunnable> task(NS_NewRunnableMethod(
+    nsCOMPtr<nsIRunnable> task(NewRunnableMethod(
       this, &GeckoMediaPluginServiceParent::NotifyAsyncShutdownComplete));
     NS_DispatchToMainThread(task);
   }
@@ -685,6 +692,13 @@ GeckoMediaPluginServiceParent::NotifySyncShutdownComplete()
   mWaitingForPluginsSyncShutdown = false;
 }
 
+bool
+GeckoMediaPluginServiceParent::IsShuttingDown()
+{
+  MOZ_ASSERT(NS_GetCurrentThread() == mGMPThread);
+  return mShuttingDownOnGMPThread;
+}
+
 void
 GeckoMediaPluginServiceParent::UnloadPlugins()
 {
@@ -730,7 +744,7 @@ GeckoMediaPluginServiceParent::UnloadPlugins()
       SetAsyncShutdownPluginState(nullptr, '3',
         NS_LITERAL_CSTRING("Dispatching sync-shutdown-complete"));
 #endif
-  nsCOMPtr<nsIRunnable> task(NS_NewRunnableMethod(
+  nsCOMPtr<nsIRunnable> task(NewRunnableMethod(
     this, &GeckoMediaPluginServiceParent::NotifySyncShutdownComplete));
   NS_DispatchToMainThread(task);
 }
@@ -751,6 +765,10 @@ RefPtr<GenericPromise::AllPromiseType>
 GeckoMediaPluginServiceParent::LoadFromEnvironment()
 {
   MOZ_ASSERT(NS_GetCurrentThread() == mGMPThread);
+  RefPtr<AbstractThread> thread(GetAbstractGMPThread());
+  if (!thread) {
+    return GenericPromise::AllPromiseType::CreateAndReject(NS_ERROR_FAILURE, __func__);
+  }
 
   const char* env = PR_GetEnv("MOZ_GMP_PATH");
   if (!env || !*env) {
@@ -778,11 +796,10 @@ GeckoMediaPluginServiceParent::LoadFromEnvironment()
   }
 
   mScannedPluginOnDisk = true;
-  RefPtr<AbstractThread> thread(GetAbstractGMPThread());
   return GenericPromise::All(thread, promises);
 }
 
-class NotifyObserversTask final : public nsRunnable {
+class NotifyObserversTask final : public mozilla::Runnable {
 public:
   explicit NotifyObserversTask(const char* aTopic, nsString aData = EmptyString())
     : mTopic(aTopic)
@@ -826,6 +843,10 @@ RefPtr<GenericPromise>
 GeckoMediaPluginServiceParent::AsyncAddPluginDirectory(const nsAString& aDirectory)
 {
   RefPtr<AbstractThread> thread(GetAbstractGMPThread());
+  if (!thread) {
+    return GenericPromise::CreateAndReject(NS_ERROR_FAILURE, __func__);
+  }
+
   nsString dir(aDirectory);
   return InvokeAsync(thread, this, __func__, &GeckoMediaPluginServiceParent::AddOnGMPThread, dir)
     ->Then(AbstractThread::MainThread(), __func__,
@@ -878,11 +899,6 @@ GeckoMediaPluginServiceParent::RemoveAndDeletePluginDirectory(
                      aDefer));
 }
 
-class DummyRunnable : public nsRunnable {
-public:
-  NS_IMETHOD Run() { return NS_OK; }
-};
-
 NS_IMETHODIMP
 GeckoMediaPluginServiceParent::GetPluginVersionForAPI(const nsACString& aAPI,
                                                       nsTArray<nsCString>* aTags,
@@ -908,7 +924,7 @@ GeckoMediaPluginServiceParent::GetPluginVersionForAPI(const nsACString& aAPI,
     double maxParsedVersion = -1.;
 
     *aHasPlugin = false;
-    while (GMPParent* gmp = FindPluginForAPIFrom(index, api, *aTags, &index)) {
+    while (RefPtr<GMPParent> gmp = FindPluginForAPIFrom(index, api, *aTags, &index)) {
       *aHasPlugin = true;
       double parsedVersion = atof(gmp->GetVersion().get());
       if (maxParsedVersion < 0 || parsedVersion > maxParsedVersion) {
@@ -933,7 +949,7 @@ GeckoMediaPluginServiceParent::EnsurePluginsOnDiskScanned()
     // cause an event to be dispatched to which scans for plugins. We
     // dispatch a sync event to the GMP thread here in order to wait until
     // after the GMP thread has scanned any paths in MOZ_GMP_PATH.
-    nsresult rv = GMPDispatch(new DummyRunnable(), NS_DISPATCH_SYNC);
+    nsresult rv = GMPDispatch(new mozilla::Runnable(), NS_DISPATCH_SYNC);
     NS_ENSURE_SUCCESS(rv, rv);
     MOZ_ASSERT(mScannedPluginOnDisk, "Should have scanned MOZ_GMP_PATH by now");
   }
@@ -941,7 +957,7 @@ GeckoMediaPluginServiceParent::EnsurePluginsOnDiskScanned()
   return NS_OK;
 }
 
-GMPParent*
+already_AddRefed<GMPParent>
 GeckoMediaPluginServiceParent::FindPluginForAPIFrom(size_t aSearchStartIndex,
                                                     const nsCString& aAPI,
                                                     const nsTArray<nsCString>& aTags,
@@ -949,7 +965,7 @@ GeckoMediaPluginServiceParent::FindPluginForAPIFrom(size_t aSearchStartIndex,
 {
   mMutex.AssertCurrentThreadOwns();
   for (size_t i = aSearchStartIndex; i < mPlugins.Length(); i++) {
-    GMPParent* gmp = mPlugins[i];
+    RefPtr<GMPParent> gmp = mPlugins[i];
     bool supportsAllTags = true;
     for (size_t t = 0; t < aTags.Length(); t++) {
       const nsCString& tag = aTags.ElementAt(t);
@@ -964,12 +980,12 @@ GeckoMediaPluginServiceParent::FindPluginForAPIFrom(size_t aSearchStartIndex,
     if (aOutPluginIndex) {
       *aOutPluginIndex = i;
     }
-    return gmp;
+    return gmp.forget();
   }
   return nullptr;
 }
 
-GMPParent*
+already_AddRefed<GMPParent>
 GeckoMediaPluginServiceParent::SelectPluginForAPI(const nsACString& aNodeId,
                                                   const nsCString& aAPI,
                                                   const nsTArray<nsCString>& aTags)
@@ -981,16 +997,14 @@ GeckoMediaPluginServiceParent::SelectPluginForAPI(const nsACString& aNodeId,
   {
     MutexAutoLock lock(mMutex);
     size_t index = 0;
-    GMPParent* gmp = nullptr;
+    RefPtr<GMPParent> gmp;
     while ((gmp = FindPluginForAPIFrom(index, aAPI, aTags, &index))) {
       if (aNodeId.IsEmpty()) {
         if (gmp->CanBeSharedCrossNodeIds()) {
-          return gmp;
+          return gmp.forget();
         }
       } else if (gmp->CanBeUsedFrom(aNodeId)) {
-        MOZ_ASSERT(!aNodeId.IsEmpty());
-        gmp->SetNodeId(aNodeId);
-        return gmp;
+        return gmp.forget();
       }
 
       if (!gmpToClone ||
@@ -1012,11 +1026,15 @@ GeckoMediaPluginServiceParent::SelectPluginForAPI(const nsACString& aNodeId,
   // Plugin exists, but we can't use it due to cross-origin separation. Create a
   // new one.
   if (gmpToClone) {
-    GMPParent* clone = ClonePlugin(gmpToClone);
+    RefPtr<GMPParent> clone = ClonePlugin(gmpToClone);
+    {
+      MutexAutoLock lock(mMutex);
+      mPlugins.AppendElement(clone);
+    }
     if (!aNodeId.IsEmpty()) {
       clone->SetNodeId(aNodeId);
     }
-    return clone;
+    return clone.forget();
   }
 
   return nullptr;
@@ -1027,7 +1045,7 @@ CreateGMPParent()
 {
 #if defined(XP_LINUX) && defined(MOZ_GMP_SANDBOX)
   if (!SandboxInfo::Get().CanSandboxMedia()) {
-    if (!sAllowInsecureGMP) {
+    if (!MediaPrefs::GMPAllowInsecure()) {
       NS_WARNING("Denying media plugin load due to lack of sandboxing.");
       return nullptr;
     }
@@ -1037,7 +1055,7 @@ CreateGMPParent()
   return new GMPParent();
 }
 
-GMPParent*
+already_AddRefed<GMPParent>
 GeckoMediaPluginServiceParent::ClonePlugin(const GMPParent* aOriginal)
 {
   MOZ_ASSERT(aOriginal);
@@ -1050,17 +1068,20 @@ GeckoMediaPluginServiceParent::ClonePlugin(const GMPParent* aOriginal)
     return nullptr;
   }
 
-  MutexAutoLock lock(mMutex);
-  mPlugins.AppendElement(gmp);
-
-  return gmp.get();
+  return gmp.forget();
 }
 
 RefPtr<GenericPromise>
 GeckoMediaPluginServiceParent::AddOnGMPThread(nsString aDirectory)
 {
   MOZ_ASSERT(NS_GetCurrentThread() == mGMPThread);
-  LOGD(("%s::%s: %s", __CLASS__, __FUNCTION__, NS_LossyConvertUTF16toASCII(aDirectory).get()));
+  nsCString dir = NS_ConvertUTF16toUTF8(aDirectory);
+  RefPtr<AbstractThread> thread(GetAbstractGMPThread());
+  if (!thread) {
+    LOGD(("%s::%s: %s No GMP Thread", __CLASS__, __FUNCTION__, dir.get()));
+    return GenericPromise::CreateAndReject(NS_ERROR_FAILURE, __func__);
+  }
+  LOGD(("%s::%s: %s", __CLASS__, __FUNCTION__, dir.get()));
 
   nsCOMPtr<nsIFile> directory;
   nsresult rv = NS_NewLocalFile(aDirectory, false, getter_AddRefs(directory));
@@ -1075,8 +1096,6 @@ GeckoMediaPluginServiceParent::AddOnGMPThread(nsString aDirectory)
   }
 
   RefPtr<GeckoMediaPluginServiceParent> self(this);
-  RefPtr<AbstractThread> thread(GetAbstractGMPThread());
-  nsCString dir = NS_ConvertUTF16toUTF8(aDirectory);
   return gmp->Init(this, directory)->Then(thread, __func__,
     [gmp, self, dir]() -> void {
       LOGD(("%s::%s: %s Succeeded", __CLASS__, __FUNCTION__, dir.get()));
@@ -1196,15 +1215,21 @@ GeckoMediaPluginServiceParent::ReAddOnGMPThread(const RefPtr<GMPParent>& aOld)
 
   RefPtr<GMPParent> gmp;
   if (!mShuttingDownOnGMPThread) {
-    // Don't re-add plugin if we're shutting down. Let the old plugin die.
+    // We're not shutting down, so replace the old plugin in the list with a
+    // clone which is in a pristine state. Note: We place the plugin in
+    // the same slot in the array as a hack to ensure if we re-request with
+    // the same capabilities we get an instance of the same plugin.
     gmp = ClonePlugin(aOld);
+    MutexAutoLock lock(mMutex);
+    MOZ_ASSERT(mPlugins.Contains(aOld));
+    if (mPlugins.Contains(aOld)) {
+      mPlugins[mPlugins.IndexOf(aOld)] = gmp;
+    }
+  } else {
+    // We're shutting down; don't re-add plugin, let the old plugin die.
+    MutexAutoLock lock(mMutex);
+    mPlugins.RemoveElement(aOld);
   }
-  // Note: both are now in the list
-  // Until we give up the GMPThread, we're safe even if we unlock temporarily
-  // since off-main-thread users just test for existance; they don't modify the list.
-  MutexAutoLock lock(mMutex);
-  mPlugins.RemoveElement(aOld);
-
   // Schedule aOld to be destroyed.  We can't destroy it from here since we
   // may be inside ActorDestroyed() for it.
   NS_DispatchToCurrentThread(WrapRunnableNM(&Dummy, aOld));
@@ -1296,6 +1321,17 @@ ReadSalt(nsIFile* aPath, nsACString& aOutData)
   return ReadFromFile(aPath, NS_LITERAL_CSTRING("salt"),
                       aOutData, NodeIdSaltLength);
 
+}
+
+already_AddRefed<GMPStorage>
+GeckoMediaPluginServiceParent::GetMemoryStorageFor(const nsACString& aNodeId)
+{
+  RefPtr<GMPStorage> s;
+  if (!mTempGMPStorage.Get(aNodeId, getter_AddRefs(s))) {
+    s = CreateGMPMemoryStorage();
+    mTempGMPStorage.Put(aNodeId, s);
+  }
+  return s.forget();
 }
 
 NS_IMETHODIMP
@@ -1747,7 +1783,7 @@ NS_IMETHODIMP
 GeckoMediaPluginServiceParent::ForgetThisSite(const nsAString& aSite)
 {
   MOZ_ASSERT(NS_IsMainThread());
-  return GMPDispatch(NS_NewRunnableMethodWithArg<nsCString>(
+  return GMPDispatch(NewRunnableMethod<nsCString>(
       this, &GeckoMediaPluginServiceParent::ForgetThisSiteOnGMPThread,
       NS_ConvertUTF16toUTF8(aSite)));
 }
@@ -1774,13 +1810,17 @@ GeckoMediaPluginServiceParent::ClearStorage()
   if (NS_FAILED(DeleteDir(path))) {
     NS_WARNING("Failed to delete GMP storage directory");
   }
+
+  // Clear private-browsing storage.
+  mTempGMPStorage.Clear();
+
   NS_DispatchToMainThread(new NotifyObserversTask("gmp-clear-storage-complete"), NS_DISPATCH_NORMAL);
 }
 
 GMPServiceParent::~GMPServiceParent()
 {
-  XRE_GetIOMessageLoop()->PostTask(FROM_HERE,
-                                   new DeleteTask<Transport>(GetTransport()));
+  RefPtr<DeleteTask<Transport>> task = new DeleteTask<Transport>(GetTransport());
+  XRE_GetIOMessageLoop()->PostTask(task.forget());
 }
 
 bool
@@ -1790,8 +1830,15 @@ GMPServiceParent::RecvLoadGMP(const nsCString& aNodeId,
                               nsTArray<ProcessId>&& aAlreadyBridgedTo,
                               ProcessId* aId,
                               nsCString* aDisplayName,
-                              uint32_t* aPluginId)
+                              uint32_t* aPluginId,
+                              nsresult* aRv)
 {
+  *aRv = NS_OK;
+  if (mService->IsShuttingDown()) {
+    *aRv = NS_ERROR_ILLEGAL_DURING_SHUTDOWN;
+    return true;
+  }
+
   RefPtr<GMPParent> gmp = mService->SelectPluginForAPI(aNodeId, aAPI, aTags);
 
   nsCString api = aTags[0];
@@ -1833,7 +1880,7 @@ GMPServiceParent::RecvGetGMPPluginVersionForAPI(const nsCString& aAPI,
                                                       *aVersion));
 }
 
-class DeleteGMPServiceParent : public nsRunnable
+class DeleteGMPServiceParent : public mozilla::Runnable
 {
 public:
   explicit DeleteGMPServiceParent(GMPServiceParent* aToDelete)
@@ -1856,7 +1903,7 @@ GMPServiceParent::ActorDestroy(ActorDestroyReason aWhy)
   NS_DispatchToCurrentThread(new DeleteGMPServiceParent(this));
 }
 
-class OpenPGMPServiceParent : public nsRunnable
+class OpenPGMPServiceParent : public mozilla::Runnable
 {
 public:
   OpenPGMPServiceParent(GMPServiceParent* aGMPServiceParent,

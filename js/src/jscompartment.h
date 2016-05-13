@@ -195,7 +195,7 @@ using WrapperMap = GCRekeyableHashMap<CrossCompartmentKey, ReadBarrieredValue,
 
 struct ImmediateMetadata { };
 struct DelayMetadata { };
-using PendingMetadata = ReadBarrieredObject;
+using PendingMetadata = JSObject*;
 
 using NewObjectMetadataState = mozilla::Variant<ImmediateMetadata,
                                                 DelayMetadata,
@@ -215,7 +215,7 @@ class MOZ_RAII AutoSetNewObjectMetadata : private JS::CustomAutoRooter
     virtual void trace(JSTracer* trc) override {
         if (prevState_.is<PendingMetadata>()) {
             TraceRoot(trc,
-                      prevState_.as<PendingMetadata>().unsafeUnbarrieredForTracing(),
+                      &prevState_.as<PendingMetadata>(),
                       "Object pending metadata");
         }
     }
@@ -298,7 +298,6 @@ struct JSCompartment
   public:
     bool                         isSelfHosting;
     bool                         marked;
-    bool                         warnedAboutFlagsArgument;
     bool                         warnedAboutExprClosure;
 
 #ifdef DEBUG
@@ -521,27 +520,19 @@ struct JSCompartment
     JSCompartment(JS::Zone* zone, const JS::CompartmentOptions& options);
     ~JSCompartment();
 
-    MOZ_WARN_UNUSED_RESULT bool init(JSContext* maybecx);
+    MOZ_MUST_USE bool init(JSContext* maybecx);
 
-    MOZ_WARN_UNUSED_RESULT inline bool wrap(JSContext* cx, JS::MutableHandleValue vp,
+    MOZ_MUST_USE inline bool wrap(JSContext* cx, JS::MutableHandleValue vp,
                                             JS::HandleObject existing = nullptr);
 
-    MOZ_WARN_UNUSED_RESULT bool wrap(JSContext* cx, js::MutableHandleString strp);
-    MOZ_WARN_UNUSED_RESULT bool wrap(JSContext* cx, JS::MutableHandleObject obj,
+    MOZ_MUST_USE bool wrap(JSContext* cx, js::MutableHandleString strp);
+    MOZ_MUST_USE bool wrap(JSContext* cx, JS::MutableHandleObject obj,
                                      JS::HandleObject existingArg = nullptr);
-    MOZ_WARN_UNUSED_RESULT bool wrap(JSContext* cx, JS::MutableHandle<js::PropertyDescriptor> desc);
+    MOZ_MUST_USE bool wrap(JSContext* cx, JS::MutableHandle<js::PropertyDescriptor> desc);
+    MOZ_MUST_USE bool wrap(JSContext* cx, JS::MutableHandle<JS::GCVector<JS::Value>> vec);
 
-    template<typename T> MOZ_WARN_UNUSED_RESULT bool wrap(JSContext* cx,
-                                                          JS::AutoVectorRooter<T>& vec) {
-        for (size_t i = 0; i < vec.length(); ++i) {
-            if (!wrap(cx, vec[i]))
-                return false;
-        }
-        return true;
-    };
-
-    MOZ_WARN_UNUSED_RESULT bool putWrapper(JSContext* cx, const js::CrossCompartmentKey& wrapped,
-                                           const js::Value& wrapper);
+    MOZ_MUST_USE bool putWrapper(JSContext* cx, const js::CrossCompartmentKey& wrapped,
+                                 const js::Value& wrapper);
 
     js::WrapperMap::Ptr lookupWrapper(const js::Value& wrapped) const {
         return crossCompartmentWrappers.lookup(js::CrossCompartmentKey(wrapped));
@@ -588,7 +579,6 @@ struct JSCompartment
     void sweepCrossCompartmentWrappers();
     void sweepSavedStacks();
     void sweepGlobalObject(js::FreeOp* fop);
-    void sweepObjectPendingMetadata();
     void sweepSelfHostingScriptSource();
     void sweepJitCompartment(js::FreeOp* fop);
     void sweepRegExps();
@@ -804,7 +794,7 @@ struct JSCompartment
         // NO LONGER USING 4
         // NO LONGER USING 5
         // NO LONGER USING 6
-        DeprecatedFlagsArgument = 7,        // JS 1.3 or older
+        // NO LONGER USING 7
         // NO LONGER USING 8
         // NO LONGER USING 9
         DeprecatedBlockScopeFunRedecl = 10,

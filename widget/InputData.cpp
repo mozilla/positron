@@ -161,9 +161,9 @@ MouseInput::ToWidgetMouseEvent(nsIWidget* aWidget) const
   event.mRefPoint =
     RoundedToInt(ViewAs<LayoutDevicePixel>(mOrigin,
       PixelCastJustification::LayoutDeviceIsScreenForUntransformedEvent));
-  event.clickCount = clickCount;
+  event.mClickCount = clickCount;
   event.inputSource = mInputSource;
-  event.ignoreRootScrollFrame = true;
+  event.mIgnoreRootScrollFrame = true;
 
   return event;
 }
@@ -294,7 +294,7 @@ MultiTouchInput::ToWidgetMouseEvent(nsIWidget* aWidget) const
   event.mFlags.mHandledByAPZ = mHandledByAPZ;
 
   if (mouseEventMessage != eMouseMove) {
-    event.clickCount = 1;
+    event.mClickCount = 1;
   }
 
   return event;
@@ -417,6 +417,20 @@ PanGestureInput::TransformToLocal(const ScreenToParentLayerMatrix4x4& aTransform
   }
   mLocalPanDisplacement = *panDisplacement;
   return true;
+}
+
+ScreenPoint
+PanGestureInput::UserMultipliedPanDisplacement() const
+{
+  return ScreenPoint(mPanDisplacement.x * mUserDeltaMultiplierX,
+                     mPanDisplacement.y * mUserDeltaMultiplierY);
+}
+
+ParentLayerPoint
+PanGestureInput::UserMultipliedLocalPanDisplacement() const
+{
+  return ParentLayerPoint(mLocalPanDisplacement.x * mUserDeltaMultiplierX,
+                          mLocalPanDisplacement.y * mUserDeltaMultiplierY);
 }
 
 bool

@@ -10,7 +10,6 @@
 #include "base/message_loop.h"          // for MessageLoop
 #include "base/process.h"               // for ProcessId
 #include "base/task.h"                  // for CancelableTask, DeleteTask, etc
-#include "base/tracked.h"               // for FROM_HERE
 #include "mozilla/gfx/Point.h"                   // for IntSize
 #include "mozilla/Hal.h"                // for hal::SetCurrentThreadPriority()
 #include "mozilla/HalTypes.h"           // for hal::THREAD_PRIORITY_COMPOSITOR
@@ -83,8 +82,8 @@ ImageBridgeParent::~ImageBridgeParent()
 
   if (mTransport) {
     MOZ_ASSERT(XRE_GetIOMessageLoop());
-    XRE_GetIOMessageLoop()->PostTask(FROM_HERE,
-                                     new DeleteTask<Transport>(mTransport));
+    RefPtr<DeleteTask<Transport>> task(new DeleteTask<Transport>(mTransport));
+    XRE_GetIOMessageLoop()->PostTask(task.forget());
   }
 
   nsTArray<PImageContainerParent*> parents;
@@ -107,9 +106,7 @@ ImageBridgeParent::ActorDestroy(ActorDestroyReason aWhy)
     mSubprocess = nullptr;
   }
 
-  MessageLoop::current()->PostTask(
-    FROM_HERE,
-    NewRunnableMethod(this, &ImageBridgeParent::DeferredDestroy));
+  MessageLoop::current()->PostTask(NewRunnableMethod(this, &ImageBridgeParent::DeferredDestroy));
 
   // It is very important that this method gets called at shutdown (be it a clean
   // or an abnormal shutdown), because DeferredDestroy is what clears mSelfRef.
@@ -211,8 +208,7 @@ ImageBridgeParent::Create(Transport* aTransport, ProcessId aChildProcessId, Geck
     aProcessHost->AssociateActor();
   }
 
-  loop->PostTask(FROM_HERE,
-                 NewRunnableFunction(ConnectImageBridgeInParentProcess,
+  loop->PostTask(NewRunnableFunction(ConnectImageBridgeInParentProcess,
                                      bridge.get(), aTransport, aChildProcessId));
   return bridge.get();
 }

@@ -8,9 +8,11 @@ const { Ci } = require("chrome");
 
 const EventEmitter = require("devtools/shared/event-emitter");
 const events = require("sdk/event/core");
-const protocol = require("devtools/server/protocol");
+const { HighlighterFront, CustomHighlighterFront } = require("devtools/client/fronts/highlighters");
+const protocol = require("devtools/shared/protocol");
 const { Arg, Option, method, RetVal } = protocol;
 const { isWindowIncluded } = require("devtools/shared/layout/utils");
+const { highlighterSpec, customHighlighterSpec } = require("devtools/shared/specs/highlighters");
 const { isXUL, isNodeValid } = require("./highlighters/utils/markup");
 const { SimpleOutlineHighlighter } = require("./highlighters/simple-outline");
 
@@ -79,9 +81,7 @@ exports.register = register;
 /**
  * The HighlighterActor class
  */
-var HighlighterActor = exports.HighlighterActor = protocol.ActorClass({
-  typeName: "highlighter",
-
+var HighlighterActor = exports.HighlighterActor = protocol.ActorClassWithSpec(highlighterSpec, {
   initialize: function(inspector, autohide) {
     protocol.Actor.prototype.initialize.call(this, null);
 
@@ -180,31 +180,20 @@ var HighlighterActor = exports.HighlighterActor = protocol.ActorClass({
    * @param Options See the request part for existing options. Note that not
    * all options may be supported by all types of highlighters.
    */
-  showBoxModel: method(function(node, options = {}) {
+  showBoxModel: function(node, options = {}) {
     if (node && isNodeValid(node.rawNode)) {
       this._highlighter.show(node.rawNode, options);
     } else {
       this._highlighter.hide();
     }
-  }, {
-    request: {
-      node: Arg(0, "domnode"),
-      region: Option(1),
-      hideInfoBar: Option(1),
-      hideGuides: Option(1),
-      showOnly: Option(1),
-      onlyRegionArea: Option(1)
-    }
-  }),
+  },
 
   /**
    * Hide the box model highlighting if it was shown before
    */
-  hideBoxModel: method(function() {
+  hideBoxModel: function() {
     this._highlighter.hide();
-  }, {
-    request: {}
-  }),
+  },
 
   /**
    * Returns `true` if the event was dispatched from a window included in
@@ -239,7 +228,7 @@ var HighlighterActor = exports.HighlighterActor = protocol.ActorClass({
   _hoveredNode: null,
   _currentNode: null,
 
-  pick: method(function() {
+  pick: function() {
     if (this._isPicking) {
       return null;
     }
@@ -357,7 +346,7 @@ var HighlighterActor = exports.HighlighterActor = protocol.ActorClass({
     this._startPickerListeners();
 
     return null;
-  }),
+  },
 
   _findAndAttachElement: function(event) {
     // originalTarget allows access to the "real" element before any retargeting
@@ -397,22 +386,13 @@ var HighlighterActor = exports.HighlighterActor = protocol.ActorClass({
     events.emit(this._inspector.walker, "highlighter-hide");
   },
 
-  cancelPick: method(function() {
+  cancelPick: function() {
     if (this._isPicking) {
       this._highlighter.hide();
       this._stopPickerListeners();
       this._isPicking = false;
       this._hoveredNode = null;
     }
-  })
-});
-
-var HighlighterFront = protocol.FrontClass(HighlighterActor, {
-  // Update the object given a form representation off the wire.
-  form: function(json) {
-    this.actorID = json.actor;
-    // FF42+ HighlighterActors starts exposing custom form, with traits object
-    this.traits = json.traits || {};
   }
 });
 
@@ -420,9 +400,7 @@ var HighlighterFront = protocol.FrontClass(HighlighterActor, {
  * A generic highlighter actor class that instantiate a highlighter given its
  * type name and allows to show/hide it.
  */
-var CustomHighlighterActor = exports.CustomHighlighterActor = protocol.ActorClass({
-  typeName: "customhighlighter",
-
+var CustomHighlighterActor = exports.CustomHighlighterActor = protocol.ActorClassWithSpec(customHighlighterSpec, {
   /**
    * Create a highlighter instance given its typename
    * The typename must be one of HIGHLIGHTER_CLASSES and the class must
@@ -462,7 +440,7 @@ var CustomHighlighterActor = exports.CustomHighlighterActor = protocol.ActorClas
     this._inspector = null;
   },
 
-  release: method(function() {}, { release: true }),
+  release: function() {},
 
   /**
    * Show the highlighter.
@@ -482,38 +460,28 @@ var CustomHighlighterActor = exports.CustomHighlighterActor = protocol.ActorClas
    * @return {Boolean} True, if the highlighter has been successfully shown
    * (FF41+)
    */
-  show: method(function(node, options) {
+  show: function(node, options) {
     if (!node || !isNodeValid(node.rawNode) || !this._highlighter) {
       return false;
     }
 
     return this._highlighter.show(node.rawNode, options);
-  }, {
-    request: {
-      node: Arg(0, "domnode"),
-      options: Arg(1, "nullable:json")
-    },
-    response: {
-      value: RetVal("nullable:boolean")
-    }
-  }),
+  },
 
   /**
    * Hide the highlighter if it was shown before
    */
-  hide: method(function() {
+  hide: function() {
     if (this._highlighter) {
       this._highlighter.hide();
     }
-  }, {
-    request: {}
-  }),
+  },
 
   /**
    * Kill this actor. This method is called automatically just before the actor
    * is destroyed.
    */
-  finalize: method(function() {
+  finalize: function() {
     if (this._highlighter) {
       this._highlighter.destroy();
       this._highlighter = null;
@@ -523,12 +491,8 @@ var CustomHighlighterActor = exports.CustomHighlighterActor = protocol.ActorClas
       this._highlighterEnv.destroy();
       this._highlighterEnv = null;
     }
-  }, {
-    oneway: true
-  })
+  }
 });
-
-var CustomHighlighterFront = protocol.FrontClass(CustomHighlighterActor, {});
 
 /**
  * The HighlighterEnvironment is an object that holds all the required data for

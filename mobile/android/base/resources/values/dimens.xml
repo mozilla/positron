@@ -50,6 +50,7 @@
 
     <!-- Dimensions used by Favicons and FaviconView -->
     <dimen name="favicon_bg">32dp</dimen>
+    <dimen name="favicon_corner_radius">4dp</dimen>
     <!-- Set the upper limit on the size of favicon that will be processed. Favicons larger than
          this will be downscaled to this value. If you need to use larger Favicons (Due to a UI
          redesign sometime after this is written) you should increase this value to the largest
@@ -78,6 +79,10 @@
     <dimen name="browser_toolbar_site_security_margin_bottom">.5dp</dimen>
     <dimen name="site_security_unknown_inset_top">1dp</dimen>
     <dimen name="site_security_unknown_inset_bottom">-1dp</dimen>
+
+    <dimen name="home_folder_title_oneline_textsize">16sp</dimen>
+    <dimen name="home_folder_title_twoline_textsize">14sp</dimen>
+    <dimen name="home_twolinepagerow_title_textsize">16sp</dimen>
 
     <dimen name="page_row_edge_padding">16dp</dimen>
 
@@ -121,7 +126,6 @@
          http://androidxref.com/4.2.2_r1/xref/frameworks/base/core/res/res/values/themes.xml#123 -->
     <dimen name="menu_item_row_height">64dip</dimen>
     <dimen name="menu_item_row_width">240dp</dimen>
-    <dimen name="menu_popup_offset">12dp</dimen>
     <dimen name="menu_popup_width">256dp</dimen>
     <dimen name="nav_button_border_width">1dp</dimen>
     <dimen name="prompt_service_group_padding_size">32dp</dimen>

@@ -20,6 +20,7 @@
 
 #include "mozilla/EnumeratedRange.h"
 
+#include "asmjs/WasmIonCompile.h"
 #include "asmjs/WasmStubs.h"
 
 #include "jit/MacroAssembler-inl.h"
@@ -54,7 +55,8 @@ ModuleGenerator::ModuleGenerator(ExclusiveContext* cx)
     tasks_(cx),
     freeTasks_(cx),
     activeFunc_(nullptr),
-    finishedFuncs_(false)
+    startedFuncDefs_(false),
+    finishedFuncDefs_(false)
 {
     MOZ_ASSERT(IsCompilingAsmJS());
 }
@@ -362,7 +364,6 @@ ModuleGenerator::finishCodegen(StaticLinkData* link)
     Vector<ProfilingOffsets> interpExits(cx_);
     Vector<ProfilingOffsets> jitExits(cx_);
     EnumeratedArray<JumpTarget, JumpTarget::Limit, Offsets> jumpTargets;
-    ProfilingOffsets badIndirectCallExit;
     Offsets interruptExit;
 
     {
@@ -389,7 +390,6 @@ ModuleGenerator::finishCodegen(StaticLinkData* link)
         for (JumpTarget target : MakeEnumeratedRange(JumpTarget::Limit))
             jumpTargets[target] = GenerateJumpTarget(masm, target);
 
-        badIndirectCallExit = GenerateBadIndirectCallExit(masm);
         interruptExit = GenerateInterruptStub(masm);
 
         if (masm.oom() || !masm_.asmMergeWith(masm))
@@ -424,10 +424,6 @@ ModuleGenerator::finishCodegen(StaticLinkData* link)
             return false;
     }
 
-    badIndirectCallExit.offsetBy(offsetInWhole);
-    if (!module_->codeRanges.emplaceBack(CodeRange::ErrorExit, badIndirectCallExit))
-        return false;
-
     interruptExit.offsetBy(offsetInWhole);
     if (!module_->codeRanges.emplaceBack(CodeRange::Inline, interruptExit))
         return false;
@@ -436,6 +432,8 @@ ModuleGenerator::finishCodegen(StaticLinkData* link)
 
     link->pod.outOfBoundsOffset = jumpTargets[JumpTarget::OutOfBounds].begin;
     link->pod.interruptOffset = interruptExit.begin;
+
+    Offsets badIndirectCallExit = jumpTargets[JumpTarget::BadIndirectCall];
 
     for (uint32_t sigIndex = 0; sigIndex < numSigs_; sigIndex++) {
         const TableModuleGeneratorData& table = shared_->sigToTable[sigIndex];
@@ -563,9 +561,9 @@ ModuleGenerator::allocateGlobalBytes(uint32_t bytes, uint32_t align, uint32_t* g
 }
 
 bool
-ModuleGenerator::allocateGlobalVar(ValType type, bool isConst, uint32_t* index)
+ModuleGenerator::allocateGlobal(ValType type, bool isConst, uint32_t* index)
 {
-    MOZ_ASSERT(!startedFuncDefs());
+    MOZ_ASSERT(!startedFuncDefs_);
     unsigned width = 0;
     switch (type) {
       case ValType::I32:
@@ -591,14 +589,15 @@ ModuleGenerator::allocateGlobalVar(ValType type, bool isConst, uint32_t* index)
         return false;
 
     *index = shared_->globals.length();
-    return shared_->globals.append(AsmJSGlobalVariable(ToExprType(type), offset, isConst));
+    return shared_->globals.append(GlobalDesc(type, offset, isConst));
 }
 
 void
-ModuleGenerator::initHeapUsage(HeapUsage heapUsage)
+ModuleGenerator::initHeapUsage(HeapUsage heapUsage, uint32_t minHeapLength)
 {
     MOZ_ASSERT(module_->heapUsage == HeapUsage::None);
     module_->heapUsage = heapUsage;
+    shared_->minHeapLength = minHeapLength;
 }
 
 bool
@@ -625,7 +624,7 @@ ModuleGenerator::sig(uint32_t index) const
     return shared_->sigs[index];
 }
 
-bool
+void
 ModuleGenerator::initFuncSig(uint32_t funcIndex, uint32_t sigIndex)
 {
     MOZ_ASSERT(isAsmJS());
@@ -634,7 +633,6 @@ ModuleGenerator::initFuncSig(uint32_t funcIndex, uint32_t sigIndex)
 
     module_->numFuncs++;
     shared_->funcSigs[funcIndex] = &shared_->sigs[sigIndex];
-    return true;
 }
 
 void
@@ -731,10 +729,8 @@ ModuleGenerator::addMemoryExport(UniqueChars fieldName)
 bool
 ModuleGenerator::startFuncDefs()
 {
-    MOZ_ASSERT(!startedFuncDefs());
-    threadView_ = MakeUnique<ModuleGeneratorThreadView>(*shared_);
-    if (!threadView_)
-        return false;
+    MOZ_ASSERT(!startedFuncDefs_);
+    MOZ_ASSERT(!finishedFuncDefs_);
 
     uint32_t numTasks;
     if (ParallelCompilationEnabled(cx_) &&
@@ -759,23 +755,24 @@ ModuleGenerator::startFuncDefs()
         return false;
     JSRuntime* rt = cx_->compartment()->runtimeFromAnyThread();
     for (size_t i = 0; i < numTasks; i++)
-        tasks_.infallibleEmplaceBack(rt, *threadView_, COMPILATION_LIFO_DEFAULT_CHUNK_SIZE);
+        tasks_.infallibleEmplaceBack(rt, *shared_, COMPILATION_LIFO_DEFAULT_CHUNK_SIZE);
 
     if (!freeTasks_.reserve(numTasks))
         return false;
     for (size_t i = 0; i < numTasks; i++)
         freeTasks_.infallibleAppend(&tasks_[i]);
 
-    MOZ_ASSERT(startedFuncDefs());
+    startedFuncDefs_ = true;
+    MOZ_ASSERT(!finishedFuncDefs_);
     return true;
 }
 
 bool
 ModuleGenerator::startFuncDef(uint32_t lineOrBytecode, FunctionGenerator* fg)
 {
-    MOZ_ASSERT(startedFuncDefs());
+    MOZ_ASSERT(startedFuncDefs_);
     MOZ_ASSERT(!activeFunc_);
-    MOZ_ASSERT(!finishedFuncs_);
+    MOZ_ASSERT(!finishedFuncDefs_);
 
     if (freeTasks_.empty() && !finishOutstandingTask())
         return false;
@@ -827,9 +824,9 @@ ModuleGenerator::finishFuncDef(uint32_t funcIndex, unsigned generateTime, Functi
 bool
 ModuleGenerator::finishFuncDefs()
 {
-    MOZ_ASSERT(startedFuncDefs());
+    MOZ_ASSERT(startedFuncDefs_);
     MOZ_ASSERT(!activeFunc_);
-    MOZ_ASSERT(!finishedFuncs_);
+    MOZ_ASSERT(!finishedFuncDefs_);
 
     while (outstanding_ > 0) {
         if (!finishOutstandingTask())
@@ -840,7 +837,7 @@ ModuleGenerator::finishFuncDefs()
         MOZ_ASSERT(funcIsDefined(funcIndex));
 
     module_->functionBytes = masm_.size();
-    finishedFuncs_ = true;
+    finishedFuncDefs_ = true;
     return true;
 }
 
@@ -883,7 +880,7 @@ ModuleGenerator::finish(CacheableCharsVector&& prettyFuncNames,
                         SlowFunctionVector* slowFuncs)
 {
     MOZ_ASSERT(!activeFunc_);
-    MOZ_ASSERT(finishedFuncs_);
+    MOZ_ASSERT(finishedFuncDefs_);
 
     UniqueStaticLinkData link = MakeUnique<StaticLinkData>();
     if (!link)
@@ -929,6 +926,13 @@ ModuleGenerator::finish(CacheableCharsVector&& prettyFuncNames,
 
     if (!finishStaticLinkData(module_->code.get(), module_->codeBytes, link.get()))
         return false;
+
+    // These Vectors can get large and the excess capacity can be significant,
+    // so realloc them down to size.
+    module_->heapAccesses.podResizeToFit();
+    module_->codeRanges.podResizeToFit();
+    module_->callSites.podResizeToFit();
+    module_->callThunks.podResizeToFit();
 
     *module = Move(module_);
     *linkData = Move(link);

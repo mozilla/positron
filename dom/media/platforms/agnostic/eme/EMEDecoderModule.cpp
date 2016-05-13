@@ -44,7 +44,10 @@ public:
 
   nsresult Input(MediaRawData* aSample) override {
     MOZ_ASSERT(mTaskQueue->IsCurrentThreadIn());
-    MOZ_ASSERT(!mIsShutdown);
+    if (mIsShutdown) {
+      NS_WARNING("EME encrypted sample arrived after shutdown");
+      return NS_OK;
+    }
     if (mSamplesWaitingForKey->WaitIfKeyNotUsable(aSample)) {
       return NS_OK;
     }
@@ -205,14 +208,9 @@ EMEMediaDataDecoderProxy::Shutdown()
   return rv;
 }
 
-EMEDecoderModule::EMEDecoderModule(CDMProxy* aProxy,
-                                   PDMFactory* aPDM,
-                                   bool aCDMDecodesAudio,
-                                   bool aCDMDecodesVideo)
+EMEDecoderModule::EMEDecoderModule(CDMProxy* aProxy, PDMFactory* aPDM)
   : mProxy(aProxy)
   , mPDM(aPDM)
-  , mCDMDecodesAudio(aCDMDecodesAudio)
-  , mCDMDecodesVideo(aCDMDecodesVideo)
 {
 }
 
@@ -246,7 +244,8 @@ EMEDecoderModule::CreateVideoDecoder(const VideoInfo& aConfig,
 {
   MOZ_ASSERT(aConfig.mCrypto.mValid);
 
-  if (mCDMDecodesVideo) {
+  if (SupportsMimeType(aConfig.mMimeType, nullptr)) {
+    // GMP decodes. Assume that means it can decrypt too.
     RefPtr<MediaDataDecoderProxy> wrapper = CreateDecoderWrapper(aCallback, mProxy, aVideoTaskQueue);
     wrapper->SetProxyTarget(new EMEVideoDecoder(mProxy,
                                                 aConfig,
@@ -284,7 +283,8 @@ EMEDecoderModule::CreateAudioDecoder(const AudioInfo& aConfig,
 {
   MOZ_ASSERT(aConfig.mCrypto.mValid);
 
-  if (mCDMDecodesAudio) {
+  if (SupportsMimeType(aConfig.mMimeType, nullptr)) {
+    // GMP decodes. Assume that means it can decrypt too.
     RefPtr<MediaDataDecoderProxy> wrapper = CreateDecoderWrapper(aCallback, mProxy, aAudioTaskQueue);
     wrapper->SetProxyTarget(new EMEAudioDecoder(mProxy,
                                                 aConfig,

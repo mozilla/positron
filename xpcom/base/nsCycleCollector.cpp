@@ -188,6 +188,10 @@
 #include "mozilla/Telemetry.h"
 #include "mozilla/ThreadLocal.h"
 
+#ifdef MOZ_CRASHREPORTER
+#include "nsExceptionHandler.h"
+#endif
+
 using namespace mozilla;
 
 //#define COLLECT_TIME_DEBUG
@@ -704,7 +708,11 @@ public:
     PtrInfo* Add(void* aPointer, nsCycleCollectionParticipant* aParticipant)
     {
       if (mNext == mBlockEnd) {
-        Block* block = static_cast<Block*>(moz_xmalloc(sizeof(Block)));
+        Block* block = static_cast<Block*>(malloc(sizeof(Block)));
+        if (!block) {
+          return nullptr;
+        }
+
         *mNextBlock = block;
         mNext = block->mEntries;
         mBlockEnd = block->mEntries + BlockSize;
@@ -2216,6 +2224,10 @@ CCGraphBuilder::AddNode(void* aPtr, nsCycleCollectionParticipant* aParticipant)
   if (!e->mNode) {
     // New entry.
     result = mNodeBuilder.Add(aPtr, aParticipant);
+    if (!result) {
+      return nullptr;
+    }
+
     e->mNode = result;
     NS_ASSERTION(result, "mNodeBuilder.Add returned null");
   } else {
@@ -3076,7 +3088,7 @@ nsCycleCollector::ScanIncrementalRoots()
       // If the object is still marked gray by the GC, nothing could have gotten
       // hold of it, so it isn't an incremental root.
       if (pi->mParticipant == jsParticipant) {
-        JS::GCCellPtr ptr(pi->mPointer, js::GCThingTraceKind(pi->mPointer));
+        JS::GCCellPtr ptr(pi->mPointer, JS::GCThingTraceKind(pi->mPointer));
         if (GCThingIsGrayCCThing(ptr)) {
           continue;
         }
@@ -3156,8 +3168,17 @@ nsCycleCollector::ScanWhiteNodes(bool aFullySynchGraphBuild)
       continue;
     }
 
-    MOZ_RELEASE_ASSERT(pi->mInternalRefs < pi->mRefCount,
-                       "Cycle collector found more references to an object than its refcount");
+    if (pi->mInternalRefs > pi->mRefCount) {
+#ifdef MOZ_CRASHREPORTER
+      const char* piName = "Unknown";
+      if (pi->mParticipant) {
+        piName = pi->mParticipant->ClassName();
+      }
+      nsPrintfCString msg("More references to an object than its refcount, for class %s", piName);
+      CrashReporter::AnnotateCrashReport(NS_LITERAL_CSTRING("CycleCollector"), msg);
+#endif
+      MOZ_CRASH();
+    }
 
     // This node will get marked black in the next pass.
   }
@@ -3291,7 +3312,7 @@ nsCycleCollector::CollectWhite()
           ++numWhiteJSZones;
           zone = static_cast<JS::Zone*>(pinfo->mPointer);
         } else {
-          JS::GCCellPtr ptr(pinfo->mPointer, js::GCThingTraceKind(pinfo->mPointer));
+          JS::GCCellPtr ptr(pinfo->mPointer, JS::GCThingTraceKind(pinfo->mPointer));
           zone = JS::GetTenuredGCThingZone(ptr);
         }
         mJSRuntime->AddZoneWaitingForGC(zone);

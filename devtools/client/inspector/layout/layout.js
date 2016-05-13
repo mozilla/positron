@@ -7,13 +7,12 @@
 "use strict";
 
 const {Cc, Ci, Cu} = require("chrome");
+const {Task} = require("resource://gre/modules/Task.jsm");
 const {InplaceEditor, editableItem} =
       require("devtools/client/shared/inplace-editor");
 const {ReflowFront} = require("devtools/server/actors/layout");
 const {LocalizationHelper} = require("devtools/client/shared/l10n");
 
-Cu.import("resource://gre/modules/Task.jsm");
-Cu.import("resource://gre/modules/Console.jsm");
 Cu.import("resource://devtools/client/shared/widgets/ViewHelpers.jsm");
 
 const STRINGS_URI = "chrome://devtools/locale/shared.properties";
@@ -40,12 +39,19 @@ EditingSession.prototype = {
   /**
    * Gets the value of a single property from the CSS rule.
    *
-   * @param rule      The CSS rule
-   * @param property  The name of the property
+   * @param {StyleRuleFront} rule The CSS rule.
+   * @param {String} property The name of the property.
+   * @return {String} The value.
    */
-  getPropertyFromRule: function(rule, property) {
-    let dummyStyle = this._element.style;
+  getPropertyFromRule: function (rule, property) {
+    // Use the parsed declarations in the StyleRuleFront object if available.
+    let index = this.getPropertyIndex(property, rule);
+    if (index !== -1) {
+      return rule.declarations[index].value;
+    }
 
+    // Fallback to parsing the cssText locally otherwise.
+    let dummyStyle = this._element.style;
     dummyStyle.cssText = rule.cssText;
     return dummyStyle.getPropertyValue(property);
   },
@@ -56,7 +62,7 @@ EditingSession.prototype = {
    *
    * @param property  The name of the property as a string
    */
-  getProperty: function(property) {
+  getProperty: function (property) {
     // Create a hidden element for getPropertyFromRule to use
     let div = this._doc.createElement("div");
     div.setAttribute("style", "display: none");
@@ -78,51 +84,93 @@ EditingSession.prototype = {
   },
 
   /**
-   * Sets a number of properties on the node. Returns a promise that will be
-   * resolved when the modifications are complete.
-   *
+   * Get the index of a given css property name in a CSS rule.
+   * Or -1, if there are no properties in the rule yet.
+   * @param {String} name The property name.
+   * @param {StyleRuleFront} rule Optional, defaults to the element style rule.
+   * @return {Number} The property index in the rule.
+   */
+  getPropertyIndex: function (name, rule = this._rules[0]) {
+    let elementStyleRule = this._rules[0];
+    if (!elementStyleRule.declarations.length) {
+      return -1;
+    }
+
+    return elementStyleRule.declarations.findIndex(p => p.name === name);
+  },
+
+  /**
+   * Sets a number of properties on the node.
    * @param properties  An array of properties, each is an object with name and
    *                    value properties. If the value is "" then the property
    *                    is removed.
+   * @return {Promise} Resolves when the modifications are complete.
    */
-  setProperties: function(properties) {
-    let modifications = this._rules[0].startModifyingProperties();
-
+  setProperties: Task.async(function* (properties) {
     for (let property of properties) {
+      // Get a RuleModificationList or RuleRewriter helper object from the
+      // StyleRuleActor to make changes to CSS properties.
+      // Note that RuleRewriter doesn't support modifying several properties at
+      // once, so we do this in a sequence here.
+      let modifications = this._rules[0].startModifyingProperties();
+
+      // Remember the property so it can be reverted.
       if (!this._modifications.has(property.name)) {
         this._modifications.set(property.name,
           this.getPropertyFromRule(this._rules[0], property.name));
       }
 
-      if (property.value == "") {
-        modifications.removeProperty(-1, property.name);
-      } else {
-        modifications.setProperty(-1, property.name, property.value, "");
+      // Find the index of the property to be changed, or get the next index to
+      // insert the new property at.
+      let index = this.getPropertyIndex(property.name);
+      if (index === -1) {
+        index = this._rules[0].declarations.length;
       }
-    }
 
-    return modifications.apply().then(null, console.error);
-  },
+      if (property.value == "") {
+        modifications.removeProperty(index, property.name);
+      } else {
+        modifications.setProperty(index, property.name, property.value, "");
+      }
+
+      yield modifications.apply();
+    }
+  }),
 
   /**
-   * Reverts all of the property changes made by this instance. Returns a
-   * promise that will be resolved when complete.
+   * Reverts all of the property changes made by this instance.
+   * @return {Promise} Resolves when all properties have been reverted.
    */
-  revert: function() {
-    let modifications = this._rules[0].startModifyingProperties();
-
+  revert: Task.async(function* () {
+    // Revert each property that we modified previously, one by one. See
+    // setProperties for information about why.
     for (let [property, value] of this._modifications) {
+      let modifications = this._rules[0].startModifyingProperties();
+
+      // Find the index of the property to be reverted.
+      let index = this.getPropertyIndex(property);
+
       if (value != "") {
-        modifications.setProperty(-1, property, value, "");
+        // If the property doesn't exist anymore, insert at the beginning of the
+        // rule.
+        if (index === -1) {
+          index = 0;
+        }
+        modifications.setProperty(index, property, value, "");
       } else {
-        modifications.removeProperty(-1, property);
+        // If the property doesn't exist anymore, no need to remove it. It had
+        // not been added after all.
+        if (index === -1) {
+          continue;
+        }
+        modifications.removeProperty(index, property);
       }
+
+      yield modifications.apply();
     }
+  }),
 
-    return modifications.apply().then(null, console.error);
-  },
-
-  destroy: function() {
+  destroy: function () {
     this._doc = null;
     this._rules = null;
     this._modifications.clear();
@@ -146,7 +194,7 @@ function LayoutView(inspector, win) {
 }
 
 LayoutView.prototype = {
-  init: function() {
+  init: function () {
     this.update = this.update.bind(this);
 
     this.onNewSelection = this.onNewSelection.bind(this);
@@ -266,7 +314,7 @@ LayoutView.prototype = {
     nodeGeometry.addEventListener("click", this.onGeometryButtonClick);
   },
 
-  initBoxModelHighlighter: function() {
+  initBoxModelHighlighter: function () {
     let highlightElts = this.doc.querySelectorAll("#layout-container *[title]");
     this.onHighlightMouseOver = this.onHighlightMouseOver.bind(this);
     this.onHighlightMouseOut = this.onHighlightMouseOut.bind(this);
@@ -280,7 +328,7 @@ LayoutView.prototype = {
   /**
    * Start listening to reflows in the current tab.
    */
-  trackReflows: function() {
+  trackReflows: function () {
     if (!this.reflowFront) {
       let toolbox = this.inspector.toolbox;
       if (toolbox.target.form.reflowActor) {
@@ -298,7 +346,7 @@ LayoutView.prototype = {
   /**
    * Stop listening to reflows in the current tab.
    */
-  untrackReflows: function() {
+  untrackReflows: function () {
     if (!this.reflowFront) {
       return;
     }
@@ -310,7 +358,7 @@ LayoutView.prototype = {
   /**
    * Called when the user clicks on one of the editable values in the layoutview
    */
-  initEditor: function(element, event, dimension) {
+  initEditor: function (element, event, dimension) {
     let { property } = dimension;
     let session = new EditingSession(this.doc, this.elementRules);
     let initialValue = session.getProperty(property);
@@ -343,14 +391,15 @@ LayoutView.prototype = {
           }
         }
 
-        session.setProperties(properties);
+        session.setProperties(properties).catch(e => console.error(e));
       },
 
       done: (value, commit) => {
         editor.elt.parentNode.classList.remove("layout-editing");
         if (!commit) {
-          session.revert();
-          session.destroy();
+          session.revert().then(() => {
+            session.destroy();
+          }, e => console.error(e));
         }
       }
     }, event);
@@ -360,7 +409,7 @@ LayoutView.prototype = {
    * Is the layoutview visible in the sidebar.
    * @return {Boolean}
    */
-  isViewVisible: function() {
+  isViewVisible: function () {
     return this.inspector &&
            this.inspector.sidebar.getCurrentTabID() == "layoutview";
   },
@@ -370,7 +419,7 @@ LayoutView.prototype = {
    * be displayed in the view.
    * @return {Boolean}
    */
-  isViewVisibleAndNodeValid: function() {
+  isViewVisibleAndNodeValid: function () {
     return this.isViewVisible() &&
            this.inspector.selection.isConnected() &&
            this.inspector.selection.isElementNode();
@@ -379,7 +428,7 @@ LayoutView.prototype = {
   /**
    * Destroy the nodes. Remove listeners.
    */
-  destroy: function() {
+  destroy: function () {
     let highlightElts = this.doc.querySelectorAll("#layout-container *[title]");
 
     for (let element of highlightElts) {
@@ -417,14 +466,14 @@ LayoutView.prototype = {
     }
   },
 
-  onSidebarSelect: function(e, sidebar) {
+  onSidebarSelect: function (e, sidebar) {
     this.setActive(sidebar === "layoutview");
   },
 
   /**
    * Selection 'new-node-front' event handler.
    */
-  onNewSelection: function() {
+  onNewSelection: function () {
     let done = this.inspector.updating("layoutview");
     this.onNewNode()
       .then(() => this.hideGeometryEditor())
@@ -437,12 +486,12 @@ LayoutView.prototype = {
   /**
    * @return a promise that resolves when the view has been updated
    */
-  onNewNode: function() {
+  onNewNode: function () {
     this.setActive(this.isViewVisibleAndNodeValid());
     return this.update();
   },
 
-  onHighlightMouseOver: function(e) {
+  onHighlightMouseOver: function (e) {
     let region = e.target.getAttribute("data-box");
     if (!region) {
       return;
@@ -455,11 +504,11 @@ LayoutView.prototype = {
     });
   },
 
-  onHighlightMouseOut: function() {
+  onHighlightMouseOut: function () {
     this.hideBoxModel();
   },
 
-  onGeometryButtonClick: function({target}) {
+  onGeometryButtonClick: function ({target}) {
     if (target.hasAttribute("checked")) {
       target.removeAttribute("checked");
       this.hideGeometryEditor();
@@ -469,19 +518,19 @@ LayoutView.prototype = {
     }
   },
 
-  onPickerStarted: function() {
+  onPickerStarted: function () {
     this.hideGeometryEditor();
   },
 
-  onMarkupViewLeave: function() {
+  onMarkupViewLeave: function () {
     this.showGeometryEditor(true);
   },
 
-  onMarkupViewNodeHover: function() {
+  onMarkupViewNodeHover: function () {
     this.hideGeometryEditor(false);
   },
 
-  onWillNavigate: function() {
+  onWillNavigate: function () {
     this._geometryEditorHighlighter.release().catch(console.error);
     this._geometryEditorHighlighter = null;
   },
@@ -491,7 +540,7 @@ LayoutView.prototype = {
    * layout-view is hidden, otherwise track reflows and show values.
    * @param {Boolean} isActive
    */
-  setActive: function(isActive) {
+  setActive: function (isActive) {
     if (isActive === this.isActive) {
       return;
     }
@@ -512,7 +561,7 @@ LayoutView.prototype = {
    * the layoutview/view.xhtml document.
    * @return a promise that will be resolved when complete.
    */
-  update: function() {
+  update: function () {
     let lastRequest = Task.spawn((function* () {
       if (!this.isViewVisibleAndNodeValid()) {
         return null;
@@ -619,7 +668,7 @@ LayoutView.prototype = {
    * @param {Array} rules An array of applied rules retrieved by
    * styleActor.getApplied.
    */
-  updateSourceRuleTooltip: function(el, property, rules) {
+  updateSourceRuleTooltip: function (el, property, rules) {
     // Dummy element used to parse the cssText of applied rules.
     let dummyEl = this.doc.createElement("div");
 
@@ -649,7 +698,7 @@ LayoutView.prototype = {
    * Show the box-model highlighter on the currently selected element
    * @param {Object} options Options passed to the highlighter actor
    */
-  showBoxModel: function(options = {}) {
+  showBoxModel: function (options = {}) {
     let toolbox = this.inspector.toolbox;
     let nodeFront = this.inspector.selection.nodeFront;
 
@@ -659,7 +708,7 @@ LayoutView.prototype = {
   /**
    * Hide the box-model highlighter on the currently selected element
    */
-  hideBoxModel: function() {
+  hideBoxModel: function () {
     let toolbox = this.inspector.toolbox;
 
     toolbox.highlighterUtils.unhighlight();
@@ -671,7 +720,7 @@ LayoutView.prototype = {
    *   Indicates if the Geometry Editor should be shown only if it's active but
    *   hidden.
    */
-  showGeometryEditor: function(showOnlyIfActive = false) {
+  showGeometryEditor: function (showOnlyIfActive = false) {
     let toolbox = this.inspector.toolbox;
     let nodeFront = this.inspector.selection.nodeFront;
     let nodeGeometry = this.doc.getElementById("layout-geometry-editor");
@@ -709,7 +758,7 @@ LayoutView.prototype = {
    * @param {Boolean} [updateButton=true]
    *   Indicates if the Geometry Editor's button needs to be unchecked too
    */
-  hideGeometryEditor: function(updateButton = true) {
+  hideGeometryEditor: function (updateButton = true) {
     if (this._geometryEditorHighlighter) {
       this._geometryEditorHighlighter.hide().catch(console.error);
     }
@@ -736,7 +785,7 @@ LayoutView.prototype = {
     nodeGeometry.style.visibility = isEditable ? "visible" : "hidden";
   }),
 
-  manageOverflowingText: function(span) {
+  manageOverflowingText: function (span) {
     let classList = span.parentNode.classList;
 
     if (classList.contains("layout-left") ||

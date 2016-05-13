@@ -44,8 +44,8 @@ function setFavIcon(url) {
 
 document.addEventListener("DOMContentLoaded", function () {
  if (!PrivateBrowsingUtils.isContentWindowPrivate(window)) {
-   document.body.classList.remove("private");
-   document.body.classList.add("normal");
+   document.documentElement.classList.remove("private");
+   document.documentElement.classList.add("normal");
    document.title = stringBundle.GetStringFromName("title.normal");
    document.getElementById("favicon")
            .setAttribute("href", FAVICON_QUESTION);
@@ -56,14 +56,13 @@ document.addEventListener("DOMContentLoaded", function () {
 
  let tpToggle = document.getElementById("tpToggle");
  document.getElementById("tpButton").addEventListener('click', () => {
-   tpToggle.checked = !tpToggle.checked;
+   tpToggle.click();
  });
 
  document.title = stringBundle.GetStringFromName("title.head");
  document.getElementById("favicon")
          .setAttribute("href", FAVICON_PRIVACY);
- document.getElementById("tpButton")
-         .addEventListener("click", toggleTrackingProtection);
+ tpToggle.addEventListener("change", toggleTrackingProtection);
  document.getElementById("startTour")
          .addEventListener("click", dontShowIntroPanelAgain);
 

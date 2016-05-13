@@ -421,10 +421,19 @@ struct ParamTraits<nsLiteralString> : ParamTraits<nsAString>
   typedef nsLiteralString paramType;
 };
 
+// Pickle::ReadBytes and ::WriteBytes take the length in ints, so we must
+// ensure there is no overflow. This returns |false| if it would overflow.
+// Otherwise, it returns |true| and places the byte length in |aByteLength|.
+bool ByteLengthIsValid(uint32_t aNumElements, size_t aElementSize, int* aByteLength);
+
+// Note: IPDL will sometimes codegen specialized implementations of
+// nsTArray serialization and deserialization code in
+// implementSpecialArrayPickling(). This is needed when ParamTraits<E>
+// is not defined.
 template <typename E>
-struct ParamTraits<FallibleTArray<E> >
+struct ParamTraits<nsTArray<E>>
 {
-  typedef FallibleTArray<E> paramType;
+  typedef nsTArray<E> paramType;
 
   // We write arrays of integer or floating-point data using a single pickling
   // call, rather than writing each element individually.  We deliberately do
@@ -434,29 +443,6 @@ struct ParamTraits<FallibleTArray<E> >
   static const bool sUseWriteBytes = (mozilla::IsIntegral<E>::value ||
                                       mozilla::IsFloatingPoint<E>::value);
 
-  // Compute the byte length for |aNumElements| of type E.  If that length
-  // would overflow an int, return false.  Otherwise, return true and place
-  // the byte length in |aTotalLength|.
-  //
-  // Pickle's ReadBytes/WriteBytes interface takes lengths in ints, hence this
-  // dance.
-  static bool ByteLengthIsValid(size_t aNumElements, int* aTotalLength) {
-    static_assert(sizeof(int) == sizeof(int32_t), "int is an unexpected size!");
-
-    // nsTArray only handles sizes up to INT32_MAX.
-    if (aNumElements > size_t(INT32_MAX)) {
-      return false;
-    }
-
-    int64_t numBytes = static_cast<int64_t>(aNumElements) * sizeof(E);
-    if (numBytes > int64_t(INT32_MAX)) {
-      return false;
-    }
-
-    *aTotalLength = static_cast<int>(numBytes);
-    return true;
-  }
-
   static void Write(Message* aMsg, const paramType& aParam)
   {
     uint32_t length = aParam.Length();
@@ -464,8 +450,7 @@ struct ParamTraits<FallibleTArray<E> >
 
     if (sUseWriteBytes) {
       int pickledLength = 0;
-      mozilla::DebugOnly<bool> valid = ByteLengthIsValid(length, &pickledLength);
-      MOZ_ASSERT(valid);
+      MOZ_RELEASE_ASSERT(ByteLengthIsValid(length, sizeof(E), &pickledLength));
       aMsg->WriteBytes(aParam.Elements(), pickledLength);
     } else {
       for (uint32_t index = 0; index < length; index++) {
@@ -474,6 +459,8 @@ struct ParamTraits<FallibleTArray<E> >
     }
   }
 
+  // This method uses infallible allocation so that an OOM failure will
+  // show up as an OOM crash rather than an IPC FatalError.
   static bool Read(const Message* aMsg, void** aIter, paramType* aResult)
   {
     uint32_t length;
@@ -483,7 +470,7 @@ struct ParamTraits<FallibleTArray<E> >
 
     if (sUseWriteBytes) {
       int pickledLength = 0;
-      if (!ByteLengthIsValid(length, &pickledLength)) {
+      if (!ByteLengthIsValid(length, sizeof(E), &pickledLength)) {
         return false;
       }
 
@@ -492,20 +479,14 @@ struct ParamTraits<FallibleTArray<E> >
         return false;
       }
 
-      E* elements = aResult->AppendElements(length, mozilla::fallible);
-      if (!elements) {
-        return false;
-      }
+      E* elements = aResult->AppendElements(length);
 
       memcpy(elements, outdata, pickledLength);
     } else {
-      if (!aResult->SetCapacity(length, mozilla::fallible)) {
-        return false;
-      }
+      aResult->SetCapacity(length);
 
       for (uint32_t index = 0; index < length; index++) {
-        E* element = aResult->AppendElement(mozilla::fallible);
-        MOZ_ASSERT(element);
+        E* element = aResult->AppendElement();
         if (!ReadParam(aMsg, aIter, element)) {
           return false;
         }
@@ -527,19 +508,19 @@ struct ParamTraits<FallibleTArray<E> >
 };
 
 template<typename E>
-struct ParamTraits<InfallibleTArray<E> >
+struct ParamTraits<FallibleTArray<E>>
 {
-  typedef InfallibleTArray<E> paramType;
+  typedef FallibleTArray<E> paramType;
 
   static void Write(Message* aMsg, const paramType& aParam)
   {
-    WriteParam(aMsg, static_cast<const FallibleTArray<E>&>(aParam));
+    WriteParam(aMsg, static_cast<const nsTArray<E>&>(aParam));
   }
 
-  // deserialize the array fallibly, but return an InfallibleTArray
+  // Deserialize the array infallibly, but return a FallibleTArray.
   static bool Read(const Message* aMsg, void** aIter, paramType* aResult)
   {
-    FallibleTArray<E> temp;
+    nsTArray<E> temp;
     if (!ReadParam(aMsg, aIter, &temp))
       return false;
 
@@ -549,7 +530,7 @@ struct ParamTraits<InfallibleTArray<E> >
 
   static void Log(const paramType& aParam, std::wstring* aLog)
   {
-    LogParam(static_cast<const FallibleTArray<E>&>(aParam), aLog);
+    LogParam(static_cast<const nsTArray<E>&>(aParam), aLog);
   }
 };
 
@@ -797,7 +778,7 @@ struct ParamTraits<nsIWidget::TouchPointerState>
 };
 
 template<class T>
-struct ParamTraits< mozilla::Maybe<T> >
+struct ParamTraits<mozilla::Maybe<T>>
 {
   typedef mozilla::Maybe<T> paramType;
 

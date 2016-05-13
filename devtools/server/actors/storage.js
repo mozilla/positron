@@ -6,14 +6,13 @@
 
 const {Cc, Ci} = require("chrome");
 const events = require("sdk/event/core");
-const protocol = require("devtools/server/protocol");
-const {Arg, method, RetVal, types} = protocol;
+const protocol = require("devtools/shared/protocol");
 const {LongStringActor} = require("devtools/server/actors/string");
 const {DebuggerServer} = require("devtools/server/main");
 const Services = require("Services");
 const promise = require("promise");
 const {isWindowIncluded} = require("devtools/shared/layout/utils");
-const {setTimeout, clearTimeout} = require("sdk/timers");
+const specs = require("devtools/shared/specs/storage");
 
 loader.lazyImporter(this, "OS", "resource://gre/modules/osfile.jsm");
 loader.lazyImporter(this, "Sqlite", "resource://gre/modules/Sqlite.jsm");
@@ -49,18 +48,6 @@ var ILLEGAL_CHAR_REGEX = new RegExp(illegalFileNameCharacters, "g");
 var storageTypePool = new Map();
 
 /**
- * Gets an accumulated list of all storage actors registered to be used to
- * create a RetVal to define the return type of StorageActor.listStores method.
- */
-function getRegisteredTypes() {
-  let registeredTypes = {};
-  for (let store of storageTypePool.keys()) {
-    registeredTypes[store] = store;
-  }
-  return registeredTypes;
-}
-
-/**
  * An async method equivalent to setTimeout but using Promises
  *
  * @param {number} time
@@ -75,70 +62,6 @@ function sleep(time) {
 
   return deferred.promise;
 }
-
-// Cookies store object
-types.addDictType("cookieobject", {
-  name: "string",
-  value: "longstring",
-  path: "nullable:string",
-  host: "string",
-  isDomain: "boolean",
-  isSecure: "boolean",
-  isHttpOnly: "boolean",
-  creationTime: "number",
-  lastAccessed: "number",
-  expires: "number"
-});
-
-// Array of cookie store objects
-types.addDictType("cookiestoreobject", {
-  total: "number",
-  offset: "number",
-  data: "array:nullable:cookieobject"
-});
-
-// Local Storage / Session Storage store object
-types.addDictType("storageobject", {
-  name: "string",
-  value: "longstring"
-});
-
-// Array of Local Storage / Session Storage store objects
-types.addDictType("storagestoreobject", {
-  total: "number",
-  offset: "number",
-  data: "array:nullable:storageobject"
-});
-
-// Indexed DB store object
-// This is a union on idb object, db metadata object and object store metadata
-// object
-types.addDictType("idbobject", {
-  name: "nullable:string",
-  db: "nullable:string",
-  objectStore: "nullable:string",
-  origin: "nullable:string",
-  version: "nullable:number",
-  objectStores: "nullable:number",
-  keyPath: "nullable:string",
-  autoIncrement: "nullable:boolean",
-  indexes: "nullable:string",
-  value: "nullable:longstring"
-});
-
-// Array of Indexed DB store objects
-types.addDictType("idbstoreobject", {
-  total: "number",
-  offset: "number",
-  data: "array:nullable:idbobject"
-});
-
-// Update notification object
-types.addDictType("storeUpdateObject", {
-  changed: "nullable:json",
-  deleted: "nullable:json",
-  added: "nullable:json"
-});
 
 // Helper methods to create a storage actor.
 var StorageActors = {};
@@ -163,10 +86,8 @@ var StorageActors = {};
  *        The typeName of the actor.
  * @param {string} observationTopic
  *        The topic which this actor listens to via Notification Observers.
- * @param {string} storeObjectType
- *        The RetVal type of the store object of this actor.
  */
-StorageActors.defaults = function(typeName, observationTopic, storeObjectType) {
+StorageActors.defaults = function(typeName, observationTopic) {
   return {
     typeName: typeName,
 
@@ -333,7 +254,7 @@ StorageActors.defaults = function(typeName, observationTopic, storeObjectType) {
      *          - total - The total number of entries possible.
      *          - data - The requested values.
      */
-    getStoreObjects: method(Task.async(function* (host, names, options = {}) {
+    getStoreObjects: Task.async(function* (host, names, options = {}) {
       let offset = options.offset || 0;
       let size = options.size || MAX_STORE_OBJECT_COUNT;
       if (size > MAX_STORE_OBJECT_COUNT) {
@@ -409,13 +330,6 @@ StorageActors.defaults = function(typeName, observationTopic, storeObjectType) {
       }
 
       return toReturn;
-    }), {
-      request: {
-        host: Arg(0),
-        names: Arg(1, "nullable:array:string"),
-        options: Arg(2, "nullable:json")
-      },
-      response: RetVal(storeObjectType)
     })
   };
 };
@@ -433,8 +347,6 @@ StorageActors.defaults = function(typeName, observationTopic, storeObjectType) {
  *         - observationTopic {string}
  *                            The topic which this actor listens to via
  *                            Notification Observers.
- *         - storeObjectType {string}
- *                           The RetVal type of the store object of this actor.
  * @param {object} overrides
  *        All the methods which you want to be different from the ones in
  *        StorageActors.defaults method plus the required ones described there.
@@ -442,26 +354,14 @@ StorageActors.defaults = function(typeName, observationTopic, storeObjectType) {
 StorageActors.createActor = function(options = {}, overrides = {}) {
   let actorObject = StorageActors.defaults(
     options.typeName,
-    options.observationTopic || null,
-    options.storeObjectType
+    options.observationTopic || null
   );
   for (let key in overrides) {
     actorObject[key] = overrides[key];
   }
 
-  let actor = protocol.ActorClass(actorObject);
-  protocol.FrontClass(actor, {
-    form: function(form, detail) {
-      if (detail === "actorid") {
-        this.actorID = form;
-        return null;
-      }
-
-      this.actorID = form.actor;
-      this.hosts = form.hosts;
-      return null;
-    }
-  });
+  let actorSpec = specs.childSpecs[options.typeName];
+  let actor = protocol.ActorClassWithSpec(actorSpec, actorObject);
   storageTypePool.set(actorObject.typeName, actor);
 };
 
@@ -469,8 +369,7 @@ StorageActors.createActor = function(options = {}, overrides = {}) {
  * The Cookies actor and front.
  */
 StorageActors.createActor({
-  typeName: "cookies",
-  storeObjectType: "cookiestoreobject"
+  typeName: "cookies"
 }, {
   initialize: function(storageActor) {
     protocol.Actor.prototype.initialize.call(this, null);
@@ -652,7 +551,7 @@ StorageActors.createActor({
    * @return {Array}
    *         An array of column header ids.
    */
-  getEditableFields: method(Task.async(function* () {
+  getEditableFields: Task.async(function* () {
     return [
       "name",
       "path",
@@ -662,11 +561,6 @@ StorageActors.createActor({
       "isSecure",
       "isHttpOnly"
     ];
-  }), {
-    request: {},
-    response: {
-      value: RetVal("json")
-    }
   }),
 
   /**
@@ -675,33 +569,16 @@ StorageActors.createActor({
    * @param {Object} data
    *        See editCookie() for format details.
    */
-  editItem: method(Task.async(function* (data) {
+  editItem: Task.async(function* (data) {
     this.editCookie(data);
-  }), {
-    request: {
-      data: Arg(0, "json"),
-    },
-    response: {}
   }),
 
-  removeItem: method(Task.async(function* (host, name) {
+  removeItem: Task.async(function* (host, name) {
     this.removeCookie(host, name);
-  }), {
-    request: {
-      host: Arg(0, "string"),
-      name: Arg(1, "string"),
-    },
-    response: {}
   }),
 
-  removeAll: method(Task.async(function* (host, domain) {
+  removeAll: Task.async(function* (host, domain) {
     this.removeAllCookies(host, domain);
-  }), {
-    request: {
-      host: Arg(0, "string"),
-      domain: Arg(1, "nullable:string")
-    },
-    response: {}
   }),
 
   maybeSetupChildProcess: function() {
@@ -1129,16 +1006,11 @@ function getObjectForLocalOrSessionStorage(type) {
      * @return {Array}
      *         An array of field ids.
      */
-    getEditableFields: method(Task.async(function* () {
+    getEditableFields: Task.async(function* () {
       return [
         "name",
         "value"
       ];
-    }), {
-      request: {},
-      response: {
-        value: RetVal("json")
-      }
     }),
 
     /**
@@ -1147,7 +1019,7 @@ function getObjectForLocalOrSessionStorage(type) {
      * @param {Object} data
      *        See editCookie() for format details.
      */
-    editItem: method(Task.async(function* ({host, field, oldValue, items}) {
+    editItem: Task.async(function* ({host, field, oldValue, items}) {
       let storage = this.hostVsStores.get(host);
 
       if (field === "name") {
@@ -1155,11 +1027,16 @@ function getObjectForLocalOrSessionStorage(type) {
       }
 
       storage.setItem(items.name, items.value);
-    }), {
-      request: {
-        data: Arg(0, "json"),
-      },
-      response: {}
+    }),
+
+    removeItem: Task.async(function* (host, name) {
+      let storage = this.hostVsStores.get(host);
+      storage.removeItem(name);
+    }),
+
+    removeAll: Task.async(function* (host) {
+      let storage = this.hostVsStores.get(host);
+      storage.clear();
     }),
 
     observe: function(subject, topic, data) {
@@ -1207,27 +1084,6 @@ function getObjectForLocalOrSessionStorage(type) {
         value: new LongStringActor(this.conn, item.value || "")
       };
     },
-
-    removeItem: method(Task.async(function* (host, name) {
-      let storage = this.hostVsStores.get(host);
-      storage.removeItem(name);
-    }), {
-      request: {
-        host: Arg(0),
-        name: Arg(1),
-      },
-      response: {}
-    }),
-
-    removeAll: method(Task.async(function* (host) {
-      let storage = this.hostVsStores.get(host);
-      storage.clear();
-    }), {
-      request: {
-        host: Arg(0)
-      },
-      response: {}
-    }),
   };
 }
 
@@ -1236,8 +1092,7 @@ function getObjectForLocalOrSessionStorage(type) {
  */
 StorageActors.createActor({
   typeName: "localStorage",
-  observationTopic: "dom-storage2-changed",
-  storeObjectType: "storagestoreobject"
+  observationTopic: "dom-storage2-changed"
 }, getObjectForLocalOrSessionStorage("localStorage"));
 
 /**
@@ -1245,25 +1100,11 @@ StorageActors.createActor({
  */
 StorageActors.createActor({
   typeName: "sessionStorage",
-  observationTopic: "dom-storage2-changed",
-  storeObjectType: "storagestoreobject"
+  observationTopic: "dom-storage2-changed"
 }, getObjectForLocalOrSessionStorage("sessionStorage"));
 
-types.addDictType("cacheobject", {
-  "url": "string",
-  "status": "string"
-});
-
-// Array of Cache store objects
-types.addDictType("cachestoreobject", {
-  total: "number",
-  offset: "number",
-  data: "array:nullable:cacheobject"
-});
-
 StorageActors.createActor({
-  typeName: "Cache",
-  storeObjectType: "cachestoreobject"
+  typeName: "Cache"
 }, {
   getCachesForHost: Task.async(function* (host) {
     let uri = Services.io.newURI(host, null, null);
@@ -1492,8 +1333,7 @@ DatabaseMetadata.prototype = {
 };
 
 StorageActors.createActor({
-  typeName: "indexedDB",
-  storeObjectType: "idbstoreobject"
+  typeName: "indexedDB"
 }, {
   initialize: function(storageActor) {
     protocol.Actor.prototype.initialize.call(this, null);
@@ -1518,6 +1358,25 @@ StorageActors.createActor({
     events.off(this.storageActor, "window-ready", this.onWindowReady);
     events.off(this.storageActor, "window-destroyed", this.onWindowDestroyed);
   },
+
+  /**
+   * Remove an indexedDB database from given host with a given name.
+   */
+  removeDatabase: Task.async(function* (host, name) {
+    let win = this.storageActor.getWindowFromHost(host);
+    if (win) {
+      let principal = win.document.nodePrincipal;
+      let result = yield this.removeDB(host, principal, name);
+      if (!result.error) {
+        if (this.hostVsStores.has(host)) {
+          this.hostVsStores.get(host).delete(name);
+        }
+        this.storageActor.update("deleted", "indexedDB", {
+          [host]: [ JSON.stringify([name]) ]
+        });
+      }
+    }
+  }),
 
   getHostName: function(location) {
     if (!location.host) {
@@ -1691,8 +1550,7 @@ StorageActors.createActor({
       this.getNameFromDatabaseFile = indexedDBHelpers.getNameFromDatabaseFile;
       this.getValuesForHost = indexedDBHelpers.getValuesForHost;
       this.getObjectStoreData = indexedDBHelpers.getObjectStoreData;
-      this.patchMetadataMapsAndProtos =
-        indexedDBHelpers.patchMetadataMapsAndProtos;
+      this.removeDB = indexedDBHelpers.removeDB;
       return;
     }
 
@@ -1710,13 +1568,14 @@ StorageActors.createActor({
       callParentProcessAsync.bind(null, "getDBNamesForHost");
     this.getValuesForHost =
       callParentProcessAsync.bind(null, "getValuesForHost");
+    this.removeDB =
+      callParentProcessAsync.bind(null, "removeDB");
 
     addMessageListener("storage:storage-indexedDB-request-child", msg => {
       switch (msg.json.method) {
         case "backToChild":
           let func = msg.json.args.shift();
           let deferred = unresolvedPromises.get(func);
-
           if (deferred) {
             unresolvedPromises.delete(func);
             deferred.resolve(msg.json.args[0]);
@@ -1767,14 +1626,12 @@ var indexedDBHelpers = {
       let dbData = new DatabaseMetadata(host, db);
       db.close();
 
-      this.backToChild("getDBMetaData", dbData);
-      success.resolve(dbData);
+      success.resolve(this.backToChild("getDBMetaData", dbData));
     };
     request.onerror = () => {
-      console.error("Error opening indexeddb database " + name + " for host " +
-                    host);
-      this.backToChild("getDBMetaData", null);
-      success.resolve(null);
+      console.error(
+        `Error opening indexeddb database ${name} for host ${host}`);
+      success.resolve(this.backToChild("getDBMetaData", null));
     };
     return success.promise;
   }),
@@ -1787,7 +1644,31 @@ var indexedDBHelpers = {
     return require("indexedDB").openForPrincipal(principal, name);
   },
 
-    /**
+  removeDB: Task.async(function* (host, principal, name) {
+    let request = require("indexedDB").deleteForPrincipal(principal, name);
+
+    let result = new promise(resolve => {
+      request.onsuccess = () => {
+        resolve({});
+      };
+
+      request.onblocked = () => {
+        console.error(
+          `Deleting indexedDB database ${name} for host ${host} is blocked`);
+        resolve({ error: "blocked" });
+      };
+
+      request.onerror = () => {
+        console.error(
+          `Error deleting indexedDB database ${name} for host ${host}`);
+        resolve({ error: request.error });
+      };
+    });
+
+    return this.backToChild("removeDB", yield result);
+  }),
+
+  /**
    * Fetches all the databases and their metadata for the given `host`.
    */
   getDBNamesForHost: Task.async(function* (host) {
@@ -2042,28 +1923,25 @@ var indexedDBHelpers = {
   },
 
   handleChildRequest: function(msg) {
-    let host;
-    let name;
     let args = msg.data.args;
 
     switch (msg.json.method) {
       case "getDBMetaData": {
-        host = args[0];
-        let principal = args[1];
-        name = args[2];
+        let [host, principal, name] = args;
         return indexedDBHelpers.getDBMetaData(host, principal, name);
       }
-      case "getDBNamesForHost":
-        host = args[0];
+      case "getDBNamesForHost": {
+        let [host] = args;
         return indexedDBHelpers.getDBNamesForHost(host);
+      }
       case "getValuesForHost": {
-        host = args[0];
-        name = args[1];
-        let options = args[2];
-        let hostVsStores = args[3];
-        let principal = args[4];
+        let [host, name, options, hostVsStores, principal] = args;
         return indexedDBHelpers.getValuesForHost(host, name, options,
                                                  hostVsStores, principal);
+      }
+      case "removeDB": {
+        let [host, principal, name] = args;
+        return indexedDBHelpers.removeDB(host, principal, name);
       }
       default:
         console.error("ERR_DIRECTOR_PARENT_UNKNOWN_METHOD", msg.json.method);
@@ -2104,7 +1982,7 @@ exports.setupParentProcessForIndexedDB = function({mm, prefix}) {
 /**
  * The main Storage Actor.
  */
-var StorageActor = exports.StorageActor = protocol.ActorClass({
+let StorageActor = protocol.ActorClassWithSpec(specs.storageSpec, {
   typeName: "storage",
 
   get window() {
@@ -2117,29 +1995,6 @@ var StorageActor = exports.StorageActor = protocol.ActorClass({
 
   get windows() {
     return this.childWindowPool;
-  },
-
-  /**
-   * List of event notifications that the server can send to the client.
-   *
-   *  - stores-update : When any store object in any storage type changes.
-   *  - stores-cleared : When all the store objects are removed.
-   *  - stores-reloaded : When all stores are reloaded. This generally mean that
-   *                      we should refetch everything again.
-   */
-  events: {
-    "stores-update": {
-      type: "storesUpdate",
-      data: Arg(0, "storeUpdateObject")
-    },
-    "stores-cleared": {
-      type: "storesCleared",
-      data: Arg(0, "json")
-    },
-    "stores-reloaded": {
-      type: "storesReloaded",
-      data: Arg(0, "json")
-    }
   },
 
   initialize: function(conn, tabActor) {
@@ -2315,7 +2170,7 @@ var StorageActor = exports.StorageActor = protocol.ActorClass({
    *      host: <hostname>
    *    }]
    */
-  listStores: method(Task.async(function* () {
+  listStores: Task.async(function* () {
     let toReturn = {};
 
     for (let [name, value] of this.childActorPool) {
@@ -2326,8 +2181,6 @@ var StorageActor = exports.StorageActor = protocol.ActorClass({
     }
 
     return toReturn;
-  }), {
-    response: RetVal(types.addDictType("storelist", getRegisteredTypes()))
   }),
 
   /**
@@ -2454,13 +2307,4 @@ var StorageActor = exports.StorageActor = protocol.ActorClass({
   }
 });
 
-/**
- * Front for the Storage Actor.
- */
-exports.StorageFront = protocol.FrontClass(StorageActor, {
-  initialize: function(client, tabForm) {
-    protocol.Front.prototype.initialize.call(this, client);
-    this.actorID = tabForm.storageActor;
-    this.manage(this);
-  }
-});
+exports.StorageActor = StorageActor;

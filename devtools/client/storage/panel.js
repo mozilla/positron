@@ -9,7 +9,7 @@
 const EventEmitter = require("devtools/shared/event-emitter");
 
 loader.lazyRequireGetter(this, "StorageFront",
-                        "devtools/server/actors/storage", true);
+                         "devtools/client/fronts/storage", true);
 loader.lazyRequireGetter(this, "StorageUI",
                          "devtools/client/storage/ui", true);
 
@@ -38,7 +38,7 @@ StoragePanel.prototype = {
   /**
    * open is effectively an asynchronous constructor
    */
-  open: function() {
+  open: function () {
     let targetPromise;
     // We always interact with the target as if it were remote
     if (!this.target.isRemote) {
@@ -65,7 +65,7 @@ StoragePanel.prototype = {
   /**
    * Destroy the storage inspector.
    */
-  destroy: function() {
+  destroy: function () {
     if (!this._destroyed) {
       this.UI.destroy();
       this.UI = null;

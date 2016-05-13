@@ -7,7 +7,6 @@ obj*/**
 # We ignore all these directories by default, until we get them enabled.
 # If you are enabling a directory, please add directory specific exclusions
 # below.
-accessible/**
 addon-sdk/**
 build/**
 caps/**
@@ -77,7 +76,6 @@ browser/locales/**
 browser/extensions/loop/**
 
 # devtools/ exclusions
-devtools/*.js
 devtools/client/canvasdebugger/**
 devtools/client/commandline/**
 devtools/client/debugger/**
@@ -90,6 +88,7 @@ devtools/client/inspector/fonts/**
 devtools/client/inspector/shared/test/**
 devtools/client/inspector/test/**
 devtools/client/inspector/*.js
+!devtools/client/inspector/breadcrumbs.js
 devtools/client/jsonview/lib/**
 devtools/client/memory/**
 devtools/client/netmonitor/test/**
@@ -100,19 +99,34 @@ devtools/client/promisedebugger/**
 devtools/client/responsivedesign/**
 devtools/client/scratchpad/**
 devtools/client/shadereditor/**
-devtools/client/shared/**
+devtools/client/shared/*.js
+devtools/client/shared/*.jsm
+!devtools/client/shared/css-angle.js
+!devtools/client/shared/css-color.js
+!devtools/client/shared/css-color-db.js
+!devtools/client/shared/css-parsing-utils.js
+devtools/client/shared/components/**
+devtools/client/shared/redux/**
+devtools/client/shared/test/**
+devtools/client/shared/vendor/**
+devtools/client/shared/widgets/**
 devtools/client/sourceeditor/**
 devtools/client/webaudioeditor/**
 devtools/client/webconsole/**
 !devtools/client/webconsole/panel.js
+!devtools/client/webconsole/jsterm.js
 devtools/client/webide/**
 devtools/server/**
+!devtools/server/actors/webbrowser.js
+!devtools/server/actors/styles.js
 devtools/shared/*.js
+!devtools/shared/css-lexer.js
 devtools/shared/*.jsm
 devtools/shared/apps/**
 devtools/shared/client/**
 devtools/shared/discovery/**
 devtools/shared/gcli/**
+!devtools/shared/gcli/templater.js
 devtools/shared/heapsnapshot/**
 devtools/shared/inspector/**
 devtools/shared/layout/**
@@ -122,6 +136,7 @@ devtools/shared/qrcode/**
 devtools/shared/security/**
 devtools/shared/shims/**
 devtools/shared/tests/**
+!devtools/shared/tests/unit/test_csslexer.js
 devtools/shared/touch/**
 devtools/shared/transport/**
 devtools/shared/webconsole/test/**

@@ -983,6 +983,10 @@ PuppetWidget::SetCursor(imgIContainer* aCursor,
 
   RefPtr<mozilla::gfx::DataSourceSurface> dataSurface =
     surface->GetDataSurface();
+  if (!dataSurface) {
+    return NS_ERROR_FAILURE;
+  }
+
   size_t length;
   int32_t stride;
   mozilla::UniquePtr<char[]> surfaceData =
@@ -1025,6 +1029,8 @@ PuppetWidget::Paint()
   // reset repaint tracking
   mDirtyRegion.SetEmpty();
   mPaintTask.Revoke();
+
+  RefPtr<PuppetWidget> strongThis(this);
 
   GetCurrentWidgetListener()->WillPaintWindow(this);
 

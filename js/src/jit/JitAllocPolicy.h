@@ -65,7 +65,7 @@ class TempAllocator
         return &lifoScope_.alloc();
     }
 
-    bool ensureBallast() {
+    MOZ_MUST_USE bool ensureBallast() {
         return lifoScope_.alloc().ensureUnusedApproximate(BallastSize);
     }
 };
@@ -117,32 +117,7 @@ class JitAllocPolicy
     }
     void reportAllocOverflow() const {
     }
-    bool checkSimulatedOOM() const {
-        return !js::oom::ShouldFailWithOOM();
-    }
-};
-
-class OldJitAllocPolicy
-{
-  public:
-    OldJitAllocPolicy()
-    {}
-    template <typename T>
-    T* maybe_pod_malloc(size_t numElems) {
-        size_t bytes;
-        if (MOZ_UNLIKELY(!CalculateAllocSize<T>(numElems, &bytes)))
-            return nullptr;
-        return static_cast<T*>(GetJitContext()->temp->allocate(bytes));
-    }
-    template <typename T>
-    T* pod_malloc(size_t numElems) {
-        return maybe_pod_malloc<T>(numElems);
-    }
-    void free_(void* p) {
-    }
-    void reportAllocOverflow() const {
-    }
-    bool checkSimulatedOOM() const {
+    MOZ_MUST_USE bool checkSimulatedOOM() const {
         return !js::oom::ShouldFailWithOOM();
     }
 };

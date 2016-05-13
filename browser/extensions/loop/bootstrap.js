@@ -193,16 +193,27 @@ var WindowListener = {
        * @return {Promise}
        */
       openPanel: function(event) {
+        if (PrivateBrowsingUtils.isWindowPrivate(window)) {
+          return Promise.reject();
+        }
+
         return new Promise((resolve) => {
           let callback = iframe => {
             let mm = iframe.QueryInterface(Ci.nsIFrameLoaderOwner).frameLoader.messageManager;
             if (!("messageManager" in iframe)) {
               iframe.messageManager = mm;
             }
-            this.hookWindowCloseForPanelClose(iframe);
+
+            if (!this._panelInitialized) {
+              this.hookWindowCloseForPanelClose(iframe);
+              this._panelInitialized = true;
+            }
 
             mm.sendAsyncMessage("Social:WaitForDocumentVisible");
-            mm.addMessageListener("Social:DocumentVisible", () => resolve(mm));
+            mm.addMessageListener("Social:DocumentVisible", function onDocumentVisible() {
+              mm.removeMessageListener("Social:DocumentVisible", onDocumentVisible);
+              resolve(mm);
+            });
 
             let buckets = this.constants.LOOP_MAU_TYPE;
             this.LoopAPI.sendMessageToHandler({
@@ -380,9 +391,10 @@ var WindowListener = {
        */
       maybeAddCopyPanel() {
         // Don't bother adding the copy panel if we're in private browsing or
-        // we've already shown it.
+        // the user wants to never see it again or we've shown it enough times.
         if (PrivateBrowsingUtils.isWindowPrivate(window) ||
-            Services.prefs.getBoolPref("loop.copy.shown")) {
+            Services.prefs.getBoolPref("loop.copy.shown") ||
+            Services.prefs.getIntPref("loop.copy.showLimit") <= 0) {
           return Promise.resolve();
         }
 
@@ -458,8 +470,23 @@ var WindowListener = {
           // Do the normal behavior first.
           controller._doCommand.apply(controller, arguments);
 
-          // Open up the copy panel at the loop button.
+          // Remove the panel if the user has seen it enough times.
+          let showLimit = Services.prefs.getIntPref("loop.copy.showLimit");
+          if (showLimit <= 0) {
+            LoopUI.removeCopyPanel();
+            return;
+          }
+
+          // Don't bother prompting the user if already sharing.
+          if (this.MozLoopService.screenShareActive) {
+            return;
+          }
+
+          // Update various counters.
+          Services.prefs.setIntPref("loop.copy.showLimit", showLimit - 1);
           addTelemetry("SHOWN");
+
+          // Open up the copy panel at the loop button.
           LoopUI.PanelFrame.showPopup(window, LoopUI.toolbarButton.anchor, "loop-copy",
             null, "chrome://loop/content/panels/copy.html", null, onIframe);
         };
@@ -1226,6 +1253,19 @@ let Throttler = {
 
       // Handle responses from the DNS resolution service request.
       let onDNS = (request, record) => {
+        // Failed to get A-record, so skip for now.
+        if (record === null) {
+          reject();
+          return;
+        }
+
+        // Ensure we have a special loopback value before checking other blocks.
+        let ipBlocks = record.getNextAddrAsString().split(".");
+        if (ipBlocks[0] !== "127") {
+          reject();
+          return;
+        }
+
         // Use a specific part of the A-record IP address depending on the
         // channel. I.e., 127.[release/other].[beta].[aurora/nightly].
         let index = 1;
@@ -1241,8 +1281,7 @@ let Throttler = {
 
         // Select the 1 out of 4 parts of the "."-separated IP address to check
         // if the 8-bit threshold (0-255) exceeds the ticket (0-254).
-        let threshold = record && record.getNextAddrAsString().split(".")[index];
-        if (threshold && ticket < threshold) {
+        if (ticket < ipBlocks[index]) {
           // Remember that we're good to go to avoid future DNS checks.
           Services.prefs.setIntPref(prefTicket, this.TICKET_LIMIT);
           resolve();

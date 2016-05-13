@@ -6,13 +6,15 @@
 
 TEST_DIRS += ['compiledtest']
 
-# Number changes to this file to avoid bug 1081323 (clobber after changing a manifest):
-# 12
+# Change the following line to avoid bug 1081323 (clobber after changing a manifest):
+# Add test for webglcontextcreationerror.
 
 MOCHITEST_MANIFESTS += [
+    'test/crash/mochitest.ini',
     'test/crossorigin/mochitest.ini',
-    'test/mochitest-subsuite-webgl.ini',
     'test/mochitest.ini',
+    'test/webgl-conf/generated-mochitest.ini',
+    'test/webgl-mochitest/mochitest.ini',
 ]
 
 MOCHITEST_CHROME_MANIFESTS += ['test/chrome/chrome.ini']
@@ -110,6 +112,7 @@ UNIFIED_SOURCES += [
     'WebGLExtensionDisjointTimerQuery.cpp',
     'WebGLExtensionDrawBuffers.cpp',
     'WebGLExtensionElementIndexUint.cpp',
+    'WebGLExtensionEXTColorBufferFloat.cpp',
     'WebGLExtensionFragDepth.cpp',
     'WebGLExtensionInstancedArrays.cpp',
     'WebGLExtensionLoseContext.cpp',

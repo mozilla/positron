@@ -478,7 +478,7 @@ ScreenOrientation::GetLockOrientationPermission(bool aCheckSandbox) const
   }
 
   // Other content must be full-screen in order to lock orientation.
-  return doc->MozFullScreen() ? FULLSCREEN_LOCK_ALLOWED : LOCK_DENIED;
+  return doc->Fullscreen() ? FULLSCREEN_LOCK_ALLOWED : LOCK_DENIED;
 }
 
 nsIDocument*
@@ -540,7 +540,7 @@ ScreenOrientation::Notify(const hal::ScreenConfiguration& aConfiguration)
       doc->SetOrientationPendingPromise(nullptr);
     }
 
-    nsCOMPtr<nsIRunnable> runnable = NS_NewRunnableMethod(this,
+    nsCOMPtr<nsIRunnable> runnable = NewRunnableMethod(this,
       &ScreenOrientation::DispatchChangeEvent);
     rv = NS_DispatchToMainThread(runnable);
     NS_WARN_IF(NS_FAILED(rv));
@@ -615,7 +615,7 @@ ScreenOrientation::VisibleEventListener::HandleEvent(nsIDOMEvent* aEvent)
       doc->SetOrientationPendingPromise(nullptr);
     }
 
-    nsCOMPtr<nsIRunnable> runnable = NS_NewRunnableMethod(orientation,
+    nsCOMPtr<nsIRunnable> runnable = NewRunnableMethod(orientation,
       &ScreenOrientation::DispatchChangeEvent);
     rv = NS_DispatchToMainThread(runnable);
     if (NS_WARN_IF(rv.Failed())) {
@@ -647,7 +647,7 @@ ScreenOrientation::FullScreenEventListener::HandleEvent(nsIDOMEvent* aEvent)
   // We have to make sure that the event we got is the event sent when
   // fullscreen is disabled because we could get one when fullscreen
   // got enabled if the lock call is done at the same moment.
-  if (doc->MozFullScreen()) {
+  if (doc->Fullscreen()) {
     return NS_OK;
   }
 

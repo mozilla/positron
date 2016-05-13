@@ -25,6 +25,7 @@
 #include "mozilla/dom/BindingUtils.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/Event.h"
+#include "mozilla/dom/EventTargetBinding.h"
 #include "mozilla/TimelineConsumers.h"
 #include "mozilla/EventTimelineMarker.h"
 
@@ -263,7 +264,7 @@ EventListenerManager::AddEventListenerInternal(
     listener = &mListeners.ElementAt(i);
     // mListener == aListenerHolder is the last one, since it can be a bit slow.
     if (listener->mListenerIsHandler == aHandler &&
-        listener->mFlags == aFlags &&
+        listener->mFlags.EqualsForAddition(aFlags) &&
         EVENT_TYPE_EQUALS(listener, aEventMessage, aTypeAtom, aTypeString,
                           aAllEvents) &&
         listener->mListener == aListenerHolder) {
@@ -284,6 +285,8 @@ EventListenerManager::AddEventListenerInternal(
   listener->mListenerIsHandler = aHandler;
   listener->mHandlerIsString = false;
   listener->mAllEvents = aAllEvents;
+  listener->mIsChrome = mIsMainThreadELM &&
+    nsContentUtils::LegacyIsCallerChromeOrNativeCode();
 
   // Detect the type of event listener.
   nsCOMPtr<nsIXPConnectWrappedJS> wjs;
@@ -417,7 +420,7 @@ EventListenerManager::AddEventListenerInternal(
     }
   }
 
-  if (IsApzAwareEvent(aTypeAtom)) {
+  if (IsApzAwareListener(listener)) {
     ProcessApzAwareEventListenerAdd();
   }
 
@@ -614,7 +617,7 @@ EventListenerManager::RemoveEventListenerInternal(
                           aAllEvents)) {
       ++typeCount;
       if (listener->mListener == aListenerHolder &&
-          listener->mFlags.EqualsIgnoringTrustness(aFlags)) {
+          listener->mFlags.EqualsForRemoval(aFlags)) {
         RefPtr<EventListenerManager> kungFuDeathGrip(this);
         mListeners.RemoveElementAt(i);
         --count;
@@ -677,6 +680,15 @@ EventListenerManager::ListenerCanHandle(const Listener* aListener,
       return aListener->mTypeAtom == aEvent->mSpecifiedEventType;
     }
     return aListener->mTypeString.Equals(aEvent->mSpecifiedEventTypeString);
+  }
+  if (!nsContentUtils::IsUnprefixedFullscreenApiEnabled() &&
+      aEvent->IsTrusted() && (aEventMessage == eFullscreenChange ||
+                              aEventMessage == eFullscreenError)) {
+    // If unprefixed Fullscreen API is not enabled, don't dispatch it
+    // to the content.
+    if (!aEvent->mFlags.mInSystemGroup && !aListener->mIsChrome) {
+      return false;
+    }
   }
   MOZ_ASSERT(mIsMainThreadELM);
   return aListener->mEventMessage == aEventMessage;
@@ -1267,9 +1279,11 @@ EventListenerManager::HandleEventInternal(nsPresContext* aPresContext,
               }
             }
 
+            aEvent->mFlags.mInPassiveListener = listener->mFlags.mPassive;
             if (NS_FAILED(HandleEventSubType(listener, *aDOMEvent, aCurrentTarget))) {
-              aEvent->mFlags.mExceptionHasBeenRisen = true;
+              aEvent->mFlags.mExceptionWasRaised = true;
             }
+            aEvent->mFlags.mInPassiveListener = false;
 
             if (needsEndEventMarker) {
               timelines->AddMarkerForDocShell(
@@ -1333,6 +1347,24 @@ EventListenerManager::AddEventListener(
 }
 
 void
+EventListenerManager::AddEventListener(
+                        const nsAString& aType,
+                        const EventListenerHolder& aListenerHolder,
+                        const dom::AddEventListenerOptionsOrBoolean& aOptions,
+                        bool aWantsUntrusted)
+{
+  EventListenerFlags flags;
+  if (aOptions.IsBoolean()) {
+    flags.mCapture = aOptions.GetAsBoolean();
+  } else {
+    flags.mCapture = aOptions.GetAsAddEventListenerOptions().mCapture;
+    flags.mPassive = aOptions.GetAsAddEventListenerOptions().mPassive;
+  }
+  flags.mAllowUntrustedEvents = aWantsUntrusted;
+  return AddEventListenerByType(aListenerHolder, aType, flags);
+}
+
+void
 EventListenerManager::RemoveEventListener(
                         const nsAString& aType,
                         const EventListenerHolder& aListenerHolder,
@@ -1340,6 +1372,19 @@ EventListenerManager::RemoveEventListener(
 {
   EventListenerFlags flags;
   flags.mCapture = aUseCapture;
+  RemoveEventListenerByType(aListenerHolder, aType, flags);
+}
+
+void
+EventListenerManager::RemoveEventListener(
+                        const nsAString& aType,
+                        const EventListenerHolder& aListenerHolder,
+                        const dom::EventListenerOptionsOrBoolean& aOptions)
+{
+  EventListenerFlags flags;
+  flags.mCapture =
+    aOptions.IsBoolean() ? aOptions.GetAsBoolean()
+                         : aOptions.GetAsEventListenerOptions().mCapture;
   RemoveEventListenerByType(aListenerHolder, aType, flags);
 }
 
@@ -1649,11 +1694,17 @@ EventListenerManager::HasApzAwareListeners()
   uint32_t count = mListeners.Length();
   for (uint32_t i = 0; i < count; ++i) {
     Listener* listener = &mListeners.ElementAt(i);
-    if (IsApzAwareEvent(listener->mTypeAtom)) {
+    if (IsApzAwareListener(listener)) {
       return true;
     }
   }
   return false;
+}
+
+bool
+EventListenerManager::IsApzAwareListener(Listener* aListener)
+{
+  return !aListener->mFlags.mPassive && IsApzAwareEvent(aListener->mTypeAtom);
 }
 
 bool

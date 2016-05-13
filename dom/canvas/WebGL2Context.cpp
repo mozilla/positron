@@ -71,7 +71,7 @@ static const gl::GLFeature kRequiredFeatures[] = {
     gl::GLFeature::gpu_shader4,
     gl::GLFeature::instanced_arrays,
     gl::GLFeature::instanced_non_arrays,
-    gl::GLFeature::map_buffer_range,
+    gl::GLFeature::map_buffer_range, // Used by GetBufferSubData.
     gl::GLFeature::occlusion_query2,
     gl::GLFeature::packed_depth_stencil,
     gl::GLFeature::query_objects,
@@ -85,7 +85,6 @@ static const gl::GLFeature kRequiredFeatures[] = {
     gl::GLFeature::texture_3D_compressed,
     gl::GLFeature::texture_3D_copy,
     gl::GLFeature::texture_float,
-    gl::GLFeature::texture_float_linear,
     gl::GLFeature::texture_half_float,
     gl::GLFeature::texture_half_float_linear,
     gl::GLFeature::texture_non_power_of_two,
@@ -97,7 +96,7 @@ static const gl::GLFeature kRequiredFeatures[] = {
 };
 
 bool
-WebGLContext::InitWebGL2()
+WebGLContext::InitWebGL2(nsACString* const out_failReason)
 {
     MOZ_ASSERT(IsWebGL2(), "WebGLContext is not a WebGL 2 context!");
 
@@ -107,23 +106,25 @@ WebGLContext::InitWebGL2()
     {
         // On desktop, we fake occlusion_query_boolean with occlusion_query if
         // necessary. (See WebGL2ContextQueries.cpp)
-        GenerateWarning("WebGL 2 unavailable. Requires occlusion queries.");
+        out_failReason->AssignASCII("WebGL 2 requires occlusion query support.");
         return false;
     }
 
     std::vector<gl::GLFeature> missingList;
 
     for (size_t i = 0; i < ArrayLength(kRequiredFeatures); i++) {
-        if (!gl->IsSupported(kRequiredFeatures[i]))
+        if (!gl->IsSupported(kRequiredFeatures[i])) {
             missingList.push_back(kRequiredFeatures[i]);
+        }
     }
 
 #ifdef XP_MACOSX
     // On OSX, GL core profile is used. This requires texture swizzle
     // support to emulate legacy texture formats: ALPHA, LUMINANCE,
     // and LUMINANCE_ALPHA.
-    if (!gl->IsSupported(gl::GLFeature::texture_swizzle))
+    if (!gl->IsSupported(gl::GLFeature::texture_swizzle)) {
         missingList.push_back(gl::GLFeature::texture_swizzle);
+    }
 #endif
 
     if (missingList.size()) {
@@ -132,8 +133,11 @@ WebGLContext::InitWebGL2()
             exts.AppendLiteral("\n  ");
             exts.Append(gl::GLContext::GetFeatureName(*itr));
         }
-        GenerateWarning("WebGL 2 unavailable. The following required features are"
-                        " unavailible: %s", exts.BeginReading());
+
+        const nsPrintfCString reason("WebGL 2 requires support for the following"
+                                     " features: %s",
+                                     exts.BeginReading());
+        out_failReason->Assign(reason);
         return false;
     }
 

@@ -159,6 +159,7 @@ nsHttpConnection::StartSpdy(uint8_t spdyVersion)
 
     mUsingSpdyVersion = spdyVersion;
     mEverUsedSpdy = true;
+    mSpdySession = ASpdySession::NewSpdySession(spdyVersion, mSocketTransport);
 
     if (!mReportedSpdy) {
         mReportedSpdy = true;
@@ -209,7 +210,6 @@ nsHttpConnection::StartSpdy(uint8_t spdyVersion)
         mProxyConnectInProgress = false;
     }
 
-    mSpdySession = ASpdySession::NewSpdySession(spdyVersion, mSocketTransport);
     bool spdyProxy = mConnInfo->UsingHttpsProxy() && !mTLSFilter;
     if (spdyProxy) {
         RefPtr<nsHttpConnectionInfo> wildCardProxyCi;
@@ -1035,21 +1035,25 @@ nsHttpConnection::OnHeadersAvailable(nsAHttpTransaction *trans,
         }
     }
 
-    const char *upgradeReq = requestHead->PeekHeader(nsHttp::Upgrade);
+    nsAutoCString upgradeReq;
+    bool hasUpgradeReq = NS_SUCCEEDED(requestHead->GetHeader(nsHttp::Upgrade,
+                                                             upgradeReq));
     // Don't use persistent connection for Upgrade unless there's an auth failure:
     // some proxies expect to see auth response on persistent connection.
-    if (upgradeReq && responseStatus != 401 && responseStatus != 407) {
+    if (hasUpgradeReq && responseStatus != 401 && responseStatus != 407) {
         LOG(("HTTP Upgrade in play - disable keepalive\n"));
         DontReuse();
     }
 
     if (responseStatus == 101) {
         const char *upgradeResp = responseHead->PeekHeader(nsHttp::Upgrade);
-        if (!upgradeReq || !upgradeResp ||
-            !nsHttp::FindToken(upgradeResp, upgradeReq,
+        if (!hasUpgradeReq || !upgradeResp ||
+            !nsHttp::FindToken(upgradeResp, upgradeReq.get(),
                                HTTP_HEADER_VALUE_SEPS)) {
             LOG(("HTTP 101 Upgrade header mismatch req = %s, resp = %s\n",
-                 upgradeReq, upgradeResp));
+                 upgradeReq.get(),
+                 upgradeResp ? upgradeResp :
+                               "RESPONSE's nsHttp::Upgrade is empty"));
             Close(NS_ERROR_ABORT);
         }
         else {
@@ -1349,7 +1353,7 @@ nsHttpConnection::ResumeRecv()
 }
 
 
-class HttpConnectionForceIO : public nsRunnable
+class HttpConnectionForceIO : public Runnable
 {
 public:
   HttpConnectionForceIO(nsHttpConnection *aConn, bool doRecv)
@@ -1865,11 +1869,13 @@ nsHttpConnection::MakeConnectString(nsAHttpTransaction *trans,
     // may seem redundant in this case; see bug 82388).
     request->SetHeader(nsHttp::Host, result);
 
-    const char *val = trans->RequestHead()->PeekHeader(nsHttp::Proxy_Authorization);
-    if (val) {
+    nsAutoCString val;
+    if (NS_SUCCEEDED(trans->RequestHead()->GetHeader(
+                         nsHttp::Proxy_Authorization,
+                         val))) {
         // we don't know for sure if this authorization is intended for the
         // SSL proxy, so we add it just in case.
-        request->SetHeader(nsHttp::Proxy_Authorization, nsDependentCString(val));
+        request->SetHeader(nsHttp::Proxy_Authorization, val);
     }
 
     result.Truncate();

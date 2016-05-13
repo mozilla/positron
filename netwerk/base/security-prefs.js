@@ -59,11 +59,25 @@ pref("security.pki.sha1_enforcement_level", 3);
 //    contain any DNS names or IP addresses)
 // 1: fall back to the subject common name for certificates valid before 23
 //    August 2016 if necessary
-// 2: only use name information from the subject alternative name extension
+// 2: fall back to the subject common name for certificates valid before 23
+//    August 2015 if necessary
+// 3: only use name information from the subject alternative name extension
 #ifdef RELEASE_BUILD
 pref("security.pki.name_matching_mode", 1);
 #else
 pref("security.pki.name_matching_mode", 2);
+#endif
+
+// security.pki.netscape_step_up_policy controls how the platform handles the
+// id-Netscape-stepUp OID in extended key usage extensions of CA certificates.
+// 0: id-Netscape-stepUp is always considered equivalent to id-kp-serverAuth
+// 1: it is considered equivalent when the notBefore is before 23 August 2016
+// 2: similarly, but for 23 August 2015
+// 3: it is never considered equivalent
+#ifdef RELEASE_BUILD
+pref("security.pki.netscape_step_up_policy", 1);
+#else
+pref("security.pki.netscape_step_up_policy", 2);
 #endif
 
 pref("security.webauth.u2f", false);

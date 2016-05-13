@@ -20,7 +20,7 @@ namespace mozilla { namespace psm {
 static LazyLogModule gTrustDomainPRLog("CSTrustDomain");
 #define CSTrust_LOG(args) MOZ_LOG(gTrustDomainPRLog, LogLevel::Debug, args)
 
-CSTrustDomain::CSTrustDomain(ScopedCERTCertList& certChain)
+CSTrustDomain::CSTrustDomain(UniqueCERTCertList& certChain)
   : mCertChain(certChain)
   , mCertBlocklist(do_GetService(NS_CERTBLOCKLIST_CONTRACTID))
 {
@@ -204,6 +204,14 @@ CSTrustDomain::CheckValidityIsAcceptable(Time notBefore, Time notAfter,
                                          EndEntityOrCA endEntityOrCA,
                                          KeyPurposeId keyPurpose)
 {
+  return Success;
+}
+
+Result
+CSTrustDomain::NetscapeStepUpMatchesServerAuth(Time notBefore,
+                                               /*out*/ bool& matches)
+{
+  matches = false;
   return Success;
 }
 

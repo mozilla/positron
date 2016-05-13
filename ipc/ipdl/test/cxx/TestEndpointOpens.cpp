@@ -7,20 +7,6 @@
 
 #include "IPDLUnitTests.h"      // fail etc.
 
-template<>
-struct RunnableMethodTraits<mozilla::_ipdltest::TestEndpointOpensChild>
-{
-  static void RetainCallee(mozilla::_ipdltest::TestEndpointOpensChild* obj) { }
-  static void ReleaseCallee(mozilla::_ipdltest::TestEndpointOpensChild* obj) { }
-};
-
-template<>
-struct RunnableMethodTraits<mozilla::_ipdltest2::TestEndpointOpensOpenedChild>
-{
-  static void RetainCallee(mozilla::_ipdltest2::TestEndpointOpensOpenedChild* obj) { }
-  static void ReleaseCallee(mozilla::_ipdltest2::TestEndpointOpensOpenedChild* obj) { }
-};
-
 using namespace mozilla::ipc;
 
 using base::ProcessHandle;
@@ -85,7 +71,6 @@ TestEndpointOpensParent::RecvStartSubprotocol(
 
   TestEndpointOpensOpenedParent* a = new TestEndpointOpensOpenedParent();
   gParentThread->message_loop()->PostTask(
-    FROM_HERE,
     NewRunnableFunction(OpenParent, a, mozilla::Move(endpoint)));
 
   return true;
@@ -134,8 +119,7 @@ ShutdownTestEndpointOpensOpenedParent(TestEndpointOpensOpenedParent* parent,
   // Now delete the transport, which has to happen after the
   // top-level actor is deleted.
   XRE_GetIOMessageLoop()->PostTask(
-    FROM_HERE,
-    new DeleteTask<Transport>(transport));
+    do_AddRef(new DeleteTask<Transport>(transport)));
 }
 
 void
@@ -151,7 +135,6 @@ TestEndpointOpensOpenedParent::ActorDestroy(ActorDestroyReason why)
   // which needs the top-level actor (this) to stay alive a little
   // longer so other things can be cleaned up.
   gParentThread->message_loop()->PostTask(
-    FROM_HERE,
     NewRunnableFunction(ShutdownTestEndpointOpensOpenedParent,
                         this, GetTransport()));
 }
@@ -208,7 +191,6 @@ TestEndpointOpensChild::RecvStart()
 
   TestEndpointOpensOpenedChild* a = new TestEndpointOpensOpenedChild();
   gChildThread->message_loop()->PostTask(
-    FROM_HERE,
     NewRunnableFunction(OpenChild, a, mozilla::Move(child)));
 
   if (!SendStartSubprotocol(parent)) {
@@ -248,8 +230,7 @@ TestEndpointOpensOpenedChild::RecvHi()
   // Need to close the channel without message-processing frames on
   // the C++ stack
   MessageLoop::current()->PostTask(
-    FROM_HERE,
-    NewRunnableMethod(this, &TestEndpointOpensOpenedChild::Close));
+    NewNonOwningRunnableMethod(this, &TestEndpointOpensOpenedChild::Close));
   return true;
 }
 
@@ -271,13 +252,11 @@ ShutdownTestEndpointOpensOpenedChild(TestEndpointOpensOpenedChild* child,
   // Now delete the transport, which has to happen after the
   // top-level actor is deleted.
   XRE_GetIOMessageLoop()->PostTask(
-    FROM_HERE,
-    new DeleteTask<Transport>(transport));
+    do_AddRef(new DeleteTask<Transport>(transport)));
 
   // Kick off main-thread shutdown.
   gMainThread->PostTask(
-    FROM_HERE,
-    NewRunnableMethod(gOpensChild, &TestEndpointOpensChild::Close));
+    NewNonOwningRunnableMethod(gOpensChild, &TestEndpointOpensChild::Close));
 }
 
 void
@@ -294,7 +273,6 @@ TestEndpointOpensOpenedChild::ActorDestroy(ActorDestroyReason why)
   // longer so other things can be cleaned up.  Defer shutdown to
   // let cleanup finish.
   gChildThread->message_loop()->PostTask(
-    FROM_HERE,
     NewRunnableFunction(ShutdownTestEndpointOpensOpenedChild,
                         this, GetTransport()));
 }

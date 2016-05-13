@@ -186,7 +186,7 @@ UnboxedLayout::makeConstructorCode(JSContext* cx, HandleObjectGroup group)
 
             Label notObject;
             masm.branchTestObject(Assembler::NotEqual, valueOperand,
-                                  types->mightBeMIRType(MIRType_Null) ? &notObject : &failureStoreObject);
+                                  types->mightBeMIRType(MIRType::Null) ? &notObject : &failureStoreObject);
 
             Register payloadReg = masm.extractObject(valueOperand, scratch1);
 
@@ -196,7 +196,7 @@ UnboxedLayout::makeConstructorCode(JSContext* cx, HandleObjectGroup group)
             }
 
             masm.storeUnboxedProperty(targetAddress, JSVAL_TYPE_OBJECT,
-                                      TypedOrValueRegister(MIRType_Object,
+                                      TypedOrValueRegister(MIRType::Object,
                                                            AnyRegister(payloadReg)), nullptr);
 
             if (notObject.used()) {
@@ -509,25 +509,31 @@ UnboxedLayout::makeNativeGroup(JSContext* cx, ObjectGroup* group)
     if (!nativeGroup)
         return false;
 
-    // Propagate all property types from the old group to the new group.
-    if (layout.isArray()) {
-        if (!PropagatePropertyTypes(cx, JSID_VOID, group, nativeGroup))
-            return false;
-    } else {
-        for (size_t i = 0; i < layout.properties().length(); i++) {
-            const UnboxedLayout::Property& property = layout.properties()[i];
-            jsid id = NameToId(property.name);
-            if (!PropagatePropertyTypes(cx, id, group, nativeGroup))
+    // No sense propagating if we don't know what we started with.
+    if (!group->unknownProperties()) {
+        // Propagate all property types from the old group to the new group.
+        if (layout.isArray()) {
+            if (!PropagatePropertyTypes(cx, JSID_VOID, group, nativeGroup))
                 return false;
+        } else {
+            for (size_t i = 0; i < layout.properties().length(); i++) {
+                const UnboxedLayout::Property& property = layout.properties()[i];
+                jsid id = NameToId(property.name);
+                if (!PropagatePropertyTypes(cx, id, group, nativeGroup))
+                    return false;
 
-            // If we are OOM we may not be able to propagate properties.
-            if (nativeGroup->unknownProperties())
-                break;
+                // If we are OOM we may not be able to propagate properties.
+                if (nativeGroup->unknownProperties())
+                    break;
 
-            HeapTypeSet* nativeProperty = nativeGroup->maybeGetProperty(id);
-            if (nativeProperty && nativeProperty->canSetDefinite(i))
-                nativeProperty->setDefinite(i);
+                HeapTypeSet* nativeProperty = nativeGroup->maybeGetProperty(id);
+                if (nativeProperty && nativeProperty->canSetDefinite(i))
+                    nativeProperty->setDefinite(i);
+            }
         }
+    } else {
+        // If we skip, though, the new group had better agree.
+        MOZ_ASSERT(nativeGroup->unknownProperties());
     }
 
     layout.nativeGroup_ = nativeGroup;
@@ -721,7 +727,7 @@ UnboxedPlainObject::obj_lookupProperty(JSContext* cx, HandleObject obj,
         return true;
     }
 
-    RootedObject proto(cx, obj->getProto());
+    RootedObject proto(cx, obj->staticPrototype());
     if (!proto) {
         objp.set(nullptr);
         propp.set(nullptr);
@@ -772,7 +778,7 @@ UnboxedPlainObject::obj_hasProperty(JSContext* cx, HandleObject obj, HandleId id
         return true;
     }
 
-    RootedObject proto(cx, obj->getProto());
+    RootedObject proto(cx, obj->staticPrototype());
     if (!proto) {
         *foundp = false;
         return true;
@@ -799,7 +805,7 @@ UnboxedPlainObject::obj_getProperty(JSContext* cx, HandleObject obj, HandleValue
         }
     }
 
-    RootedObject proto(cx, obj->getProto());
+    RootedObject proto(cx, obj->staticPrototype());
     if (!proto) {
         vp.setUndefined();
         return true;
@@ -953,15 +959,16 @@ const Class UnboxedPlainObject::class_ = {
 
 template <JSValueType Type>
 DenseElementResult
-AppendUnboxedDenseElements(UnboxedArrayObject* obj, uint32_t initlen, AutoValueVector* values)
+AppendUnboxedDenseElements(UnboxedArrayObject* obj, uint32_t initlen,
+                           MutableHandle<GCVector<Value>> values)
 {
     for (size_t i = 0; i < initlen; i++)
-        values->infallibleAppend(obj->getElementSpecific<Type>(i));
+        values.infallibleAppend(obj->getElementSpecific<Type>(i));
     return DenseElementResult::Success;
 }
 
 DefineBoxedOrUnboxedFunctor3(AppendUnboxedDenseElements,
-                             UnboxedArrayObject*, uint32_t, AutoValueVector*);
+                             UnboxedArrayObject*, uint32_t, MutableHandle<GCVector<Value>>);
 
 /* static */ bool
 UnboxedArrayObject::convertToNativeWithGroup(ExclusiveContext* cx, JSObject* obj,
@@ -970,7 +977,7 @@ UnboxedArrayObject::convertToNativeWithGroup(ExclusiveContext* cx, JSObject* obj
     size_t length = obj->as<UnboxedArrayObject>().length();
     size_t initlen = obj->as<UnboxedArrayObject>().initializedLength();
 
-    AutoValueVector values(cx);
+    Rooted<GCVector<Value>> values(cx, GCVector<Value>(cx));
     if (!values.reserve(initlen))
         return false;
 
@@ -1421,7 +1428,7 @@ UnboxedArrayObject::obj_lookupProperty(JSContext* cx, HandleObject obj,
         return true;
     }
 
-    RootedObject proto(cx, obj->getProto());
+    RootedObject proto(cx, obj->staticPrototype());
     if (!proto) {
         objp.set(nullptr);
         propp.set(nullptr);
@@ -1472,7 +1479,7 @@ UnboxedArrayObject::obj_hasProperty(JSContext* cx, HandleObject obj, HandleId id
         return true;
     }
 
-    RootedObject proto(cx, obj->getProto());
+    RootedObject proto(cx, obj->staticPrototype());
     if (!proto) {
         *foundp = false;
         return true;
@@ -1493,7 +1500,7 @@ UnboxedArrayObject::obj_getProperty(JSContext* cx, HandleObject obj, HandleValue
         return true;
     }
 
-    RootedObject proto(cx, obj->getProto());
+    RootedObject proto(cx, obj->staticPrototype());
     if (!proto) {
         vp.setUndefined();
         return true;
@@ -1848,13 +1855,13 @@ SetLayoutTraceList(ExclusiveContext* cx, UnboxedLayout* layout)
 }
 
 static inline Value
-NextValue(const AutoValueVector& values, size_t* valueCursor)
+NextValue(Handle<GCVector<Value>> values, size_t* valueCursor)
 {
     return values[(*valueCursor)++];
 }
 
 static bool
-GetValuesFromPreliminaryArrayObject(ArrayObject* obj, AutoValueVector& values)
+GetValuesFromPreliminaryArrayObject(ArrayObject* obj, MutableHandle<GCVector<Value>> values)
 {
     if (!values.append(Int32Value(obj->length())))
         return false;
@@ -1869,7 +1876,7 @@ GetValuesFromPreliminaryArrayObject(ArrayObject* obj, AutoValueVector& values)
 
 void
 UnboxedArrayObject::fillAfterConvert(ExclusiveContext* cx,
-                                     const AutoValueVector& values, size_t* valueCursor)
+                                     Handle<GCVector<Value>> values, size_t* valueCursor)
 {
     MOZ_ASSERT(CapacityArray[1] == 0);
     setCapacityIndex(1);
@@ -1893,7 +1900,7 @@ UnboxedArrayObject::fillAfterConvert(ExclusiveContext* cx,
 }
 
 static bool
-GetValuesFromPreliminaryPlainObject(PlainObject* obj, AutoValueVector& values)
+GetValuesFromPreliminaryPlainObject(PlainObject* obj, MutableHandle<GCVector<Value>> values)
 {
     for (size_t i = 0; i < obj->slotSpan(); i++) {
         if (!values.append(obj->getSlot(i)))
@@ -1904,7 +1911,7 @@ GetValuesFromPreliminaryPlainObject(PlainObject* obj, AutoValueVector& values)
 
 void
 UnboxedPlainObject::fillAfterConvert(ExclusiveContext* cx,
-                                     const AutoValueVector& values, size_t* valueCursor)
+                                     Handle<GCVector<Value>> values, size_t* valueCursor)
 {
     initExpando();
     memset(data(), 0, layout().size());
@@ -2040,7 +2047,7 @@ js::TryConvertToUnboxedLayout(ExclusiveContext* cx, Shape* templateShape,
 
     // Accumulate a list of all the values in each preliminary object, and
     // update their shapes.
-    AutoValueVector values(cx);
+    Rooted<GCVector<Value>> values(cx, GCVector<Value>(cx));
     for (size_t i = 0; i < PreliminaryObjectArray::COUNT; i++) {
         JSObject* obj = objects->get(i);
         if (!obj)
@@ -2048,9 +2055,9 @@ js::TryConvertToUnboxedLayout(ExclusiveContext* cx, Shape* templateShape,
 
         bool ok;
         if (isArray)
-            ok = GetValuesFromPreliminaryArrayObject(&obj->as<ArrayObject>(), values);
+            ok = GetValuesFromPreliminaryArrayObject(&obj->as<ArrayObject>(), &values);
         else
-            ok = GetValuesFromPreliminaryPlainObject(&obj->as<PlainObject>(), values);
+            ok = GetValuesFromPreliminaryPlainObject(&obj->as<PlainObject>(), &values);
 
         if (!ok) {
             cx->recoverFromOutOfMemory();

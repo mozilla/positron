@@ -98,16 +98,6 @@ using namespace mozilla;
 using namespace mozilla::dom;
 using namespace mozilla::gfx;
 
-void
-nsTextFrame::DrawPathCallbacks::NotifySelectionBackgroundNeedsFill(
-                                                    const Rect& aBackgroundRect,
-                                                    nscolor aColor,
-                                                    DrawTarget& aDrawTarget)
-{
-  ColorPattern color(ToDeviceColor(aColor));
-  aDrawTarget.FillRect(aBackgroundRect, color);
-}
-
 struct TabWidth {
   TabWidth(uint32_t aOffset, uint32_t aWidth)
     : mOffset(aOffset), mWidth(float(aWidth))
@@ -428,18 +418,6 @@ DestroyUserData(void* aUserData)
   if (userData) {
     free(userData);
   }
-}
-
-static nsCSSProperty
-GetTextDecorationColorProp(nsStyleContext* aCtx)
-{
-  nscolor textColor;
-  bool foreground;
-  aCtx->StyleTextReset()->GetDecorationColor(textColor, foreground);
-
-  return (foreground && !aCtx->StyleText()->mWebkitTextFillColorForeground)
-         ? eCSSProperty__webkit_text_fill_color
-         : eCSSProperty_text_decoration_color;
 }
 
 /**
@@ -2393,7 +2371,7 @@ BuildTextRunsScanner::SetupBreakSinksForTextRun(gfxTextRun* aTextRun,
   // We should only use a language for hyphenation if it was specified
   // explicitly.
   nsIAtom* hyphenationLanguage =
-    styleFont->mExplicitLanguage ? styleFont->mLanguage : nullptr;
+    styleFont->mExplicitLanguage ? styleFont->mLanguage.get() : nullptr;
   // We keep this pointed at the skip-chars data for the current mappedFlow.
   // This lets us cheaply check whether the flow has compressed initial
   // whitespace...
@@ -4783,7 +4761,8 @@ nsDisplayText::Paint(nsDisplayListBuilder* aBuilder,
   pixelVisible.Inflate(2);
   pixelVisible.RoundOut();
 
-  if (!aBuilder->IsForGenerateGlyphPath()) {
+  if (!aBuilder->IsForGenerateGlyphMask() &&
+      !aBuilder->IsForPaintingSelectionBG()) {
     ctx->NewPath();
     ctx->Rectangle(pixelVisible);
     ctx->Clip();
@@ -4807,13 +4786,9 @@ nsDisplayText::Paint(nsDisplayListBuilder* aBuilder,
   }
   nsTextFrame::PaintTextParams params(aCtx->ThebesContext());
   params.framePt = gfxPoint(framePt.x, framePt.y);
-
   params.dirtyRect = extraVisible;
-  nsTextFrame::DrawPathCallbacks callbacks;
-  if (aBuilder->IsForGenerateGlyphPath()) {
-    params.callbacks = &callbacks;
-  }
-
+  params.generateTextMask = aBuilder->IsForGenerateGlyphMask();
+  params.paintSelectionBackground = aBuilder->IsForPaintingSelectionBG();
   f->PaintText(params, *this, mOpacity);
 }
 
@@ -5009,7 +4984,7 @@ nsTextFrame::GetTextDecorations(
       // la la</font></a> case. The link underline should be green.
       useOverride = true;
       overrideColor =
-        nsLayoutUtils::GetColor(f, GetTextDecorationColorProp(context));
+        nsLayoutUtils::GetColor(f, eCSSProperty_text_decoration_color);
     }
 
     nsBlockFrame* fBlock = nsLayoutUtils::GetAsBlock(f);
@@ -5066,7 +5041,7 @@ nsTextFrame::GetTextDecorations(
                   nsLayoutUtils::GetColor(f, eCSSProperty_fill) :
                   NS_SAME_AS_FOREGROUND_COLOR;
       } else {
-        color = nsLayoutUtils::GetColor(f, GetTextDecorationColorProp(context));
+        color = nsLayoutUtils::GetColor(f, eCSSProperty_text_decoration_color);
       }
 
       bool swapUnderlineAndOverline = vertical && IsUnderlineRight(f);
@@ -6007,7 +5982,8 @@ nsTextFrame::PaintTextWithSelectionColors(
   SelectionType type;
   TextRangeStyle rangeStyle;
   // Draw background colors
-  if (anyBackgrounds) {
+  if (anyBackgrounds && (!aParams.generateTextMask ||
+                         aParams.paintSelectionBackground)) {
     int32_t appUnitsPerDevPixel =
       aParams.textPaintStyle->PresContext()->AppUnitsPerDevPixel();
     SelectionIterator iterator(prevailingSelections, contentRange,
@@ -6039,6 +6015,10 @@ nsTextFrame::PaintTextWithSelectionColors(
     }
   }
 
+  if (aParams.paintSelectionBackground) {
+    return true;
+  }
+
   gfxFloat advance;
   DrawTextParams params(aParams.context);
   params.dirtyRect = aParams.dirtyRect;
@@ -6060,8 +6040,13 @@ nsTextFrame::PaintTextWithSelectionColors(
   while (iterator.GetNextSegment(&iOffset, &range, &hyphenWidth,
                                  &type, &rangeStyle)) {
     nscolor foreground, background;
-    GetSelectionTextColors(type, *aParams.textPaintStyle, rangeStyle,
-                           &foreground, &background);
+    if (aParams.generateTextMask) {
+      foreground = NS_RGBA(0, 0, 0, 255);
+    } else {
+      GetSelectionTextColors(type, *aParams.textPaintStyle, rangeStyle,
+                             &foreground, &background);
+    }
+
     gfxPoint textBaselinePt = vertical ?
       gfxPoint(aParams.textBaselinePt.x, aParams.framePt.y + iOffset) :
       gfxPoint(aParams.framePt.x + iOffset, aParams.textBaselinePt.y);
@@ -6070,7 +6055,7 @@ nsTextFrame::PaintTextWithSelectionColors(
     // or from the ::-moz-selection pseudo-class if specified there
     nsCSSShadowArray* shadow = textStyle->GetTextShadow();
     GetSelectionTextShadow(this, type, *aParams.textPaintStyle, &shadow);
-    if (shadow && !aParams.callbacks) {
+    if (shadow) {
       nscoord startEdge = iOffset;
       if (mTextRun->IsInlineReversed()) {
         startEdge -= hyphenWidth +
@@ -6495,8 +6480,7 @@ nsTextFrame::PaintShadows(nsCSSShadowArray* aShadow,
 }
 
 static bool
-ShouldDrawSelection(const nsIFrame* aFrame,
-                    const nsTextFrame::PaintTextParams& aParams)
+ShouldDrawSelection(const nsIFrame* aFrame)
 {
   // Normal text-with-selection rendering sequence is:
   //   * Paint background > Paint text-selection-color > Paint text
@@ -6507,12 +6491,8 @@ ShouldDrawSelection(const nsIFrame* aFrame,
   // If there is a parent frame has background-clip:text style,
   // text-selection-color should be drawn with the background of that parent
   // frame, so we should not draw it again while painting text frames.
-  //
-  // "aParams.callbacks != nullptr": it means we are currently painting
-  // background. We should paint text-selection-color.
-  // "aParams.callbacks == nullptr": it means we are currently painting text
-  // frame itself. We should not paint text-selection-color.
-  if (!aFrame || aParams.callbacks) {
+
+  if (!aFrame) {
     return true;
   }
 
@@ -6524,7 +6504,7 @@ ShouldDrawSelection(const nsIFrame* aFrame,
     }
   }
 
-  return ShouldDrawSelection(aFrame->GetParent(), aParams);
+  return ShouldDrawSelection(aFrame->GetParent());
 }
 
 void
@@ -6591,7 +6571,8 @@ nsTextFrame::PaintText(const PaintTextParams& aParams,
 
   // Fork off to the (slower) paint-with-selection path if necessary.
   if (aItem.mIsFrameSelected.value() &&
-      ShouldDrawSelection(this->GetParent(), aParams)) {
+      (aParams.paintSelectionBackground ||
+       ShouldDrawSelection(this->GetParent()))) {
     MOZ_ASSERT(aOpacity == 1.0f, "We don't support opacity with selections!");
     gfxSkipCharsIterator tmp(provider.GetStart());
     Range contentRange(
@@ -6607,14 +6588,22 @@ nsTextFrame::PaintText(const PaintTextParams& aParams,
     }
   }
 
-  nscolor foregroundColor = textPaintStyle.GetTextColor();
+  if (aParams.paintSelectionBackground) {
+    return;
+  }
+
+  nscolor foregroundColor = aParams.generateTextMask
+                            ? NS_RGBA(0, 0, 0, 255)
+                            : textPaintStyle.GetTextColor();
   if (aOpacity != 1.0f) {
     gfx::Color gfxColor = gfx::Color::FromABGR(foregroundColor);
     gfxColor.a *= aOpacity;
     foregroundColor = gfxColor.ToABGR();
   }
 
-  nscolor textStrokeColor = textPaintStyle.GetWebkitTextStrokeColor();
+  nscolor textStrokeColor = aParams.generateTextMask
+                            ? NS_RGBA(0, 0, 0, 255)
+                            : textPaintStyle.GetWebkitTextStrokeColor();
   if (aOpacity != 1.0f) {
     gfx::Color gfxColor = gfx::Color::FromABGR(textStrokeColor);
     gfxColor.a *= aOpacity;
@@ -9648,10 +9637,10 @@ nsTextFrame::HasAnyNoncollapsedCharacters()
 }
 
 bool
-nsTextFrame::UpdateOverflow()
+nsTextFrame::ComputeCustomOverflow(nsOverflowAreas& aOverflowAreas)
 {
   if (GetStateBits() & NS_FRAME_FIRST_REFLOW) {
-    return false;
+    return true;
   }
 
   nsIFrame* decorationsBlock;
@@ -9669,14 +9658,13 @@ nsTextFrame::UpdateOverflow()
       f = f->GetParent();
       if (!f) {
         NS_ERROR("Couldn't find any block ancestor (for text decorations)");
-        return false;
+        return nsFrame::ComputeCustomOverflow(aOverflowAreas);
       }
     }
   }
 
-  nsOverflowAreas overflowAreas = RecomputeOverflow(decorationsBlock);
-
-  return FinishAndStoreOverflow(overflowAreas, GetSize());
+  aOverflowAreas = RecomputeOverflow(decorationsBlock);
+  return nsFrame::ComputeCustomOverflow(aOverflowAreas);
 }
 
 NS_DECLARE_FRAME_PROPERTY_SMALL_VALUE(JustificationAssignmentProperty, int32_t)

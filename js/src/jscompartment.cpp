@@ -50,7 +50,6 @@ JSCompartment::JSCompartment(Zone* zone, const JS::CompartmentOptions& options =
     isSystem_(false),
     isSelfHosting(false),
     marked(true),
-    warnedAboutFlagsArgument(false),
     warnedAboutExprClosure(false),
 #ifdef DEBUG
     firedOnNewGlobalObject(false),
@@ -456,7 +455,7 @@ JSCompartment::wrap(JSContext* cx, MutableHandleObject obj, HandleObject existin
     RootedObject existing(cx, existingArg);
     if (existing) {
         // Is it possible to reuse |existing|?
-        if (!existing->getTaggedProto().isLazy() ||
+        if (existing->hasStaticPrototype() ||
             // Note: Class asserted above, so all that's left to check is callability
             existing->isCallable() ||
             obj->isCallable())
@@ -504,6 +503,16 @@ JSCompartment::wrap(JSContext* cx, MutableHandle<PropertyDescriptor> desc)
     }
 
     return wrap(cx, desc.value());
+}
+
+bool
+JSCompartment::wrap(JSContext* cx, MutableHandle<GCVector<Value>> vec)
+{
+    for (size_t i = 0; i < vec.length(); ++i) {
+        if (!wrap(cx, vec[i]))
+            return false;
+    }
+    return true;
 }
 
 ClonedBlockObject*
@@ -590,7 +599,7 @@ JSCompartment::traceRoots(JSTracer* trc, js::gc::GCRuntime::TraceOrMarkRuntime t
 {
     if (objectMetadataState.is<PendingMetadata>()) {
         TraceRoot(trc,
-                  objectMetadataState.as<PendingMetadata>().unsafeUnbarrieredForTracing(),
+                  &objectMetadataState.as<PendingMetadata>(),
                   "on-stack object pending metadata");
     }
 
@@ -685,17 +694,6 @@ JSCompartment::sweepGlobalObject(FreeOp* fop)
         if (isDebuggee())
             Debugger::detachAllDebuggersFromGlobal(fop, global_.unbarrieredGet());
         global_.set(nullptr);
-    }
-}
-
-void
-JSCompartment::sweepObjectPendingMetadata()
-{
-    if (objectMetadataState.is<PendingMetadata>()) {
-        // We should never finalize an object before it gets its metadata! That
-        // would mean we aren't calling the object metadata callback for every
-        // object!
-        MOZ_ALWAYS_TRUE(!IsAboutToBeFinalized(&objectMetadataState.as<PendingMetadata>()));
     }
 }
 

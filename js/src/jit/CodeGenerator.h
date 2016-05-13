@@ -56,7 +56,7 @@ class OutOfLineLambdaArrow;
 class CodeGenerator : public CodeGeneratorSpecific
 {
     void generateArgumentsChecks(bool bailout = true);
-    bool generateBody();
+    MOZ_MUST_USE bool generateBody();
 
     ConstantOrRegister toConstantOrRegister(LInstruction* lir, size_t n, MIRType type);
 
@@ -65,10 +65,10 @@ class CodeGenerator : public CodeGeneratorSpecific
     ~CodeGenerator();
 
   public:
-    bool generate();
-    bool generateAsmJS(wasm::FuncOffsets *offsets);
-    bool link(JSContext* cx, CompilerConstraintList* constraints);
-    bool linkSharedStubs(JSContext* cx);
+    MOZ_MUST_USE bool generate();
+    MOZ_MUST_USE bool generateAsmJS(wasm::FuncOffsets *offsets);
+    MOZ_MUST_USE bool link(JSContext* cx, CompilerConstraintList* constraints);
+    MOZ_MUST_USE bool linkSharedStubs(JSContext* cx);
 
     void visitOsiPoint(LOsiPoint* lir);
     void visitGoto(LGoto* lir);
@@ -122,6 +122,7 @@ class CodeGenerator : public CodeGeneratorSpecific
     void visitOutOfLineRegExpPrototypeOptimizable(OutOfLineRegExpPrototypeOptimizable* ool);
     void visitRegExpInstanceOptimizable(LRegExpInstanceOptimizable* lir);
     void visitOutOfLineRegExpInstanceOptimizable(OutOfLineRegExpInstanceOptimizable* ool);
+    void visitGetFirstDollarIndex(LGetFirstDollarIndex* lir);
     void visitStringReplace(LStringReplace* lir);
     void emitSharedStub(ICStub::Kind kind, LInstruction* lir);
     void visitBinarySharedStub(LBinarySharedStub* lir);
@@ -411,6 +412,7 @@ class CodeGenerator : public CodeGeneratorSpecific
     void visitAsmJSInterruptCheck(LAsmJSInterruptCheck* lir);
     void visitAsmThrowUnreachable(LAsmThrowUnreachable* lir);
     void visitRecompileCheck(LRecompileCheck* ins);
+    void visitRotate(LRotate* ins);
 
     void visitRandom(LRandom* ins);
 
@@ -431,7 +433,8 @@ class CodeGenerator : public CodeGeneratorSpecific
                              bool strict, bool needsTypeBarrier, bool guardHoles,
                              jsbytecode* profilerLeavePc);
 
-    bool generateBranchV(const ValueOperand& value, Label* ifTrue, Label* ifFalse, FloatRegister fr);
+    MOZ_MUST_USE bool generateBranchV(const ValueOperand& value, Label* ifTrue, Label* ifFalse,
+                                      FloatRegister fr);
 
     void emitLambdaInit(Register resultReg, Register scopeChainReg,
                         const LambdaFunctionInfo& info);

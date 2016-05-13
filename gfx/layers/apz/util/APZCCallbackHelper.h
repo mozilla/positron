@@ -66,11 +66,6 @@ public:
        given presShell. */
     static void InitializeRootDisplayport(nsIPresShell* aPresShell);
 
-    /* Tell layout that we received the scroll offset update for the given view ID, so
-       that it accepts future scroll offset updates from APZ. */
-    static void AcknowledgeScrollUpdate(const FrameMetrics::ViewID& aScrollId,
-                                        const uint32_t& aScrollGeneration);
-
     /* Get the pres shell associated with the root content document enclosing |aContent|. */
     static nsIPresShell* GetRootContentDocumentPresShellForContent(nsIContent* aContent);
 
@@ -146,9 +141,9 @@ public:
     /* Figure out the allowed touch behaviors of each touch point in |aEvent|
      * and send that information to the provided callback. */
     static void SendSetAllowedTouchBehaviorNotification(nsIWidget* aWidget,
-                                                         const WidgetTouchEvent& aEvent,
-                                                         uint64_t aInputBlockId,
-                                                         const SetAllowedTouchBehaviorCallback& aCallback);
+                                                        const WidgetTouchEvent& aEvent,
+                                                        uint64_t aInputBlockId,
+                                                        const SetAllowedTouchBehaviorCallback& aCallback);
 
     /* Notify content of a mouse scroll testing event. */
     static void NotifyMozMouseScrollEvent(const FrameMetrics::ViewID& aScrollId, const nsString& aEvent);

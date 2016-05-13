@@ -8,6 +8,7 @@
 
 #include "base/command_line.h"
 #include "base/string_util.h"
+#include "base/task.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/process_watcher.h"
 #ifdef MOZ_WIDGET_COCOA
@@ -80,13 +81,6 @@ ShouldHaveDirectoryService()
 {
   return GeckoProcessType_Default == XRE_GetProcessType();
 }
-
-template<>
-struct RunnableMethodTraits<GeckoChildProcessHost>
-{
-    static void RetainCallee(GeckoChildProcessHost* obj) { }
-    static void ReleaseCallee(GeckoChildProcessHost* obj) { }
-};
 
 /*static*/
 base::ChildPrivileges
@@ -351,10 +345,10 @@ GeckoChildProcessHost::SyncLaunch(std::vector<std::string> aExtraOpts, int aTime
   MessageLoop* ioLoop = XRE_GetIOMessageLoop();
   NS_ASSERTION(MessageLoop::current() != ioLoop, "sync launch from the IO thread NYI");
 
-  ioLoop->PostTask(FROM_HERE,
-                   NewRunnableMethod(this,
-                                     &GeckoChildProcessHost::RunPerformAsyncLaunch,
-                                     aExtraOpts, arch));
+  ioLoop->PostTask(NewNonOwningRunnableMethod
+                   <std::vector<std::string>, base::ProcessArchitecture>
+                   (this, &GeckoChildProcessHost::RunPerformAsyncLaunch,
+                    aExtraOpts, arch));
 
   return WaitUntilConnected(aTimeoutMs);
 }
@@ -366,10 +360,11 @@ GeckoChildProcessHost::AsyncLaunch(std::vector<std::string> aExtraOpts,
   PrepareLaunch();
 
   MessageLoop* ioLoop = XRE_GetIOMessageLoop();
-  ioLoop->PostTask(FROM_HERE,
-                   NewRunnableMethod(this,
-                                     &GeckoChildProcessHost::RunPerformAsyncLaunch,
-                                     aExtraOpts, arch));
+
+  ioLoop->PostTask(NewNonOwningRunnableMethod
+                   <std::vector<std::string>, base::ProcessArchitecture>
+                   (this, &GeckoChildProcessHost::RunPerformAsyncLaunch,
+                    aExtraOpts, arch));
 
   // This may look like the sync launch wait, but we only delay as
   // long as it takes to create the channel.
@@ -425,10 +420,10 @@ GeckoChildProcessHost::LaunchAndWaitForProcessHandle(StringVector aExtraOpts)
   PrepareLaunch();
 
   MessageLoop* ioLoop = XRE_GetIOMessageLoop();
-  ioLoop->PostTask(FROM_HERE,
-                   NewRunnableMethod(this,
-                                     &GeckoChildProcessHost::RunPerformAsyncLaunch,
-                                     aExtraOpts, base::GetCurrentProcessArchitecture()));
+  ioLoop->PostTask(NewNonOwningRunnableMethod
+                   <std::vector<std::string>, base::ProcessArchitecture>
+                   (this, &GeckoChildProcessHost::RunPerformAsyncLaunch,
+                    aExtraOpts, base::GetCurrentProcessArchitecture()));
 
   MonitorAutoLock lock(mMonitor);
   while (mProcessState < PROCESS_CREATED) {
@@ -480,8 +475,7 @@ void
 DelayedDeleteSubprocess(GeckoChildProcessHost* aSubprocess)
 {
   XRE_GetIOMessageLoop()
-    ->PostTask(FROM_HERE,
-       new DeleteTask<GeckoChildProcessHost>(aSubprocess));
+    ->PostTask(mozilla::MakeAndAddRef<DeleteTask<GeckoChildProcessHost>>(aSubprocess));
 }
 
 }
@@ -491,8 +485,7 @@ GeckoChildProcessHost::DissociateActor()
 {
   if (!--mAssociatedActors) {
     MessageLoop::current()->
-      PostTask(FROM_HERE,
-        NewRunnableFunction(DelayedDeleteSubprocess, this));
+      PostTask(NewRunnableFunction(DelayedDeleteSubprocess, this));
   }
 }
 

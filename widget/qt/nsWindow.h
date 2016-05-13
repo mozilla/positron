@@ -253,6 +253,7 @@ private:
         bool needDispatch;
     } MozCachedMoveEvent;
 
+    nsIWidgetListener* GetPaintListener();
     bool               CheckForRollup(double aMouseX, double aMouseY, bool aIsWheel);
     void*              SetupPluginPort(void);
     nsresult           SetWindowIconList(const nsTArray<nsCString> &aIconList);
@@ -312,7 +313,7 @@ private:
     void DispatchMotionToMainThread() {
         if (!mTimerStarted) {
             nsCOMPtr<nsIRunnable> event =
-                NS_NewRunnableMethod(this, &nsWindow::ProcessMotionEvent);
+                mozilla::NewRunnableMethod(this, &nsWindow::ProcessMotionEvent);
             NS_DispatchToMainThread(event);
             mTimerStarted = true;
         }

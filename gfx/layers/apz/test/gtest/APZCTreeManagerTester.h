@@ -15,7 +15,7 @@
 #include "APZTestCommon.h"
 #include "gfxPlatform.h"
 
-class APZCTreeManagerTester : public ::testing::Test {
+class APZCTreeManagerTester : public APZCTesterBase {
 protected:
   virtual void SetUp() {
     gfxPrefs::GetSingleton();
@@ -23,7 +23,6 @@ protected:
     APZThreadUtils::SetThreadAssertionsEnabled(false);
     APZThreadUtils::SetControllerThread(MessageLoop::current());
 
-    mcc = new NiceMock<MockContentControllerDelayed>();
     manager = new TestAPZCTreeManager(mcc);
   }
 
@@ -48,8 +47,6 @@ protected:
     }
   }
 
-  RefPtr<MockContentControllerDelayed> mcc;
-
   nsTArray<RefPtr<Layer> > layers;
   RefPtr<LayerManager> lm;
   RefPtr<Layer> root;
@@ -66,13 +63,14 @@ protected:
     metrics.SetScrollId(aScrollId);
     // By convention in this test file, START_SCROLL_ID is the root, so mark it as such.
     if (aScrollId == FrameMetrics::START_SCROLL_ID) {
-      metrics.SetIsLayersIdRoot(true);
+      metadata.SetIsLayersIdRoot(true);
     }
     metrics.SetCompositionBounds(aCompositionBounds);
     metrics.SetScrollableRect(aScrollableRect);
     metrics.SetScrollOffset(CSSPoint(0, 0));
-    metrics.SetPageScrollAmount(LayoutDeviceIntSize(50, 100));
-    metrics.SetAllowVerticalScrollWithWheel(true);
+    metadata.SetPageScrollAmount(LayoutDeviceIntSize(50, 100));
+    metadata.SetLineScrollAmount(LayoutDeviceIntSize(5, 10));
+    metadata.SetAllowVerticalScrollWithWheel(true);
     return metadata;
   }
 
@@ -107,7 +105,7 @@ protected:
 
   void SetScrollHandoff(Layer* aChild, Layer* aParent) {
     ScrollMetadata metadata = aChild->GetScrollMetadata(0);
-    metadata.GetMetrics().SetScrollParentId(aParent->GetFrameMetrics(0).GetScrollId());
+    metadata.SetScrollParentId(aParent->GetFrameMetrics(0).GetScrollId());
     aChild->SetScrollMetadata(metadata);
   }
 

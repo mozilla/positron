@@ -8,6 +8,7 @@
 #define mozilla_ServoBindings_h
 
 #include "stdint.h"
+#include "mozilla/css/SheetParsingMode.h"
 
 /*
  * API for Servo to access Gecko data structures. This file must compile as valid
@@ -61,28 +62,47 @@ ServoNodeData* Gecko_GetNodeData(RawGeckoNode* node);
 void Gecko_SetNodeData(RawGeckoNode* node, ServoNodeData* data);
 void Servo_DropNodeData(ServoNodeData* data);
 
+// Counter style.
+struct nsStyleList;
+void Gecko_SetListStyleType(nsStyleList* style_struct, uint32_t type);
+void Gecko_CopyListStyleTypeFrom(nsStyleList* dst, const nsStyleList* src);
+
 // Styleset and Stylesheet management.
 //
 // TODO: Make these return already_AddRefed and UniquePtr when the binding
 // generator is smart enough to handle them.
-RawServoStyleSheet* Servo_StylesheetFromUTF8Bytes(const uint8_t* bytes, uint32_t length);
+RawServoStyleSheet* Servo_StylesheetFromUTF8Bytes(const uint8_t* bytes, uint32_t length,
+                                                  mozilla::css::SheetParsingMode parsing_mode);
 void Servo_AddRefStyleSheet(RawServoStyleSheet* sheet);
 void Servo_ReleaseStyleSheet(RawServoStyleSheet* sheet);
 void Servo_AppendStyleSheet(RawServoStyleSheet* sheet, RawServoStyleSet* set);
 void Servo_PrependStyleSheet(RawServoStyleSheet* sheet, RawServoStyleSet* set);
 void Servo_RemoveStyleSheet(RawServoStyleSheet* sheet, RawServoStyleSet* set);
+void Servo_InsertStyleSheetBefore(RawServoStyleSheet* sheet,
+                                  RawServoStyleSheet* reference,
+                                  RawServoStyleSet* set);
 bool Servo_StyleSheetHasRules(RawServoStyleSheet* sheet);
 RawServoStyleSet* Servo_InitStyleSet();
 void Servo_DropStyleSet(RawServoStyleSet* set);
 
 // Computed style data.
-ServoComputedValues* Servo_GetComputedValues(RawGeckoElement* element);
+ServoComputedValues* Servo_GetComputedValues(RawGeckoNode* node);
 ServoComputedValues* Servo_GetComputedValuesForAnonymousBox(ServoComputedValues* parentStyleOrNull,
-                                                            nsIAtom* pseudoTag);
+                                                            nsIAtom* pseudoTag,
+                                                            RawServoStyleSet* set);
+ServoComputedValues* Servo_GetComputedValuesForPseudoElement(ServoComputedValues* parent_style,
+                                                             RawGeckoElement* match_element,
+                                                             nsIAtom* pseudo_tag,
+                                                             RawServoStyleSet* set,
+                                                             bool is_probe);
+ServoComputedValues* Servo_InheritComputedValues(ServoComputedValues* parent_style);
 void Servo_AddRefComputedValues(ServoComputedValues*);
 void Servo_ReleaseComputedValues(ServoComputedValues*);
 
-// Servo API.
+// Initialize Servo components. Should be called exactly once at startup.
+void Servo_Initialize();
+
+// Restyle the given document.
 void Servo_RestyleDocument(RawGeckoDocument* doc, RawServoStyleSet* set);
 
 // Style-struct management.
@@ -90,7 +110,8 @@ void Servo_RestyleDocument(RawGeckoDocument* doc, RawServoStyleSet* set);
 struct nsStyle##name; \
 void Gecko_Construct_nsStyle##name(nsStyle##name* ptr); \
 void Gecko_CopyConstruct_nsStyle##name(nsStyle##name* ptr, const nsStyle##name* other); \
-void Gecko_Destroy_nsStyle##name(nsStyle##name* ptr);
+void Gecko_Destroy_nsStyle##name(nsStyle##name* ptr); \
+const nsStyle##name* Servo_GetStyle##name(ServoComputedValues* computedValues);
 #include "nsStyleStructList.h"
 #undef STYLE_STRUCT
 

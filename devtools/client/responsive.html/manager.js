@@ -9,6 +9,11 @@ const promise = require("promise");
 const { Task } = require("resource://gre/modules/Task.jsm");
 const { XPCOMUtils } = require("resource://gre/modules/XPCOMUtils.jsm");
 const EventEmitter = require("devtools/shared/event-emitter");
+const { TouchEventSimulator } = require("devtools/shared/touch/simulator");
+const { getOwnerWindow } = require("sdk/tabs/utils");
+const { on, off } = require("sdk/event/core");
+const { startup } = require("sdk/window/helpers");
+const events = require("./events");
 
 const TOOL_URL = "chrome://devtools/content/responsive.html/index.xhtml";
 
@@ -53,8 +58,13 @@ const ResponsiveUIManager = exports.ResponsiveUIManager = {
    */
   openIfNeeded: Task.async(function* (window, tab) {
     if (!this.isActiveForTab(tab)) {
+      if (!this.activeTabs.size) {
+        on(events.activate, "data", onActivate);
+        on(events.close, "data", onClose);
+      }
       let ui = new ResponsiveUI(window, tab);
       this.activeTabs.set(tab, ui);
+      yield setMenuCheckFor(tab, window);
       yield ui.inited;
       this.emit("on", { tab });
     }
@@ -73,9 +83,18 @@ const ResponsiveUIManager = exports.ResponsiveUIManager = {
    */
   closeIfNeeded: Task.async(function* (window, tab) {
     if (this.isActiveForTab(tab)) {
-      yield this.activeTabs.get(tab).destroy();
+      let ui = this.activeTabs.get(tab);
       this.activeTabs.delete(tab);
+
+      if (!this.activeTabs.size) {
+        off(events.activate, "data", onActivate);
+        off(events.close, "data", onClose);
+      }
+
+      yield ui.destroy();
       this.emit("off", { tab });
+
+      yield setMenuCheckFor(tab, window);
     }
     return promise.resolve();
   }),
@@ -115,7 +134,7 @@ const ResponsiveUIManager = exports.ResponsiveUIManager = {
    * @param args
    *        The GCLI command arguments.
    */
-  handleGcliCommand: function(window, tab, command, args) {
+  handleGcliCommand: function (window, tab, command, args) {
     let completed;
     switch (command) {
       case "resize to":
@@ -140,6 +159,7 @@ const ResponsiveUIManager = exports.ResponsiveUIManager = {
 // GCLI commands in ../responsivedesign/resize-commands.js listen for events
 // from this object to know when the UI for a tab has opened or closed.
 EventEmitter.decorate(ResponsiveUIManager);
+
 /**
  * ResponsiveUI manages the responsive design tool for a specific tab.  The
  * actual tool itself lives in a separate chrome:// document that is loaded into
@@ -179,6 +199,11 @@ ResponsiveUI.prototype = {
   toolWindow: null,
 
   /**
+   * Touch event simulator.
+   */
+  touchEventSimulator: null,
+
+  /**
    * For the moment, we open the tool by:
    * 1. Recording the tab's URL
    * 2. Navigating the tab to the tool
@@ -201,18 +226,28 @@ ResponsiveUI.prototype = {
     yield waitForMessage(toolWindow, "init");
     toolWindow.addInitialViewport(contentURI);
     yield waitForMessage(toolWindow, "browser-mounted");
+
+    let browser = toolWindow.document.querySelector("iframe.browser");
+    this.touchEventSimulator = new TouchEventSimulator(browser);
   }),
 
   destroy: Task.async(function* () {
     let tabBrowser = this.tab.linkedBrowser;
     let browserWindow = this.browserWindow;
+
     this.browserWindow = null;
     this.tab = null;
     this.inited = null;
     this.toolWindow = null;
-    let loaded = waitForDocLoadComplete(browserWindow.gBrowser);
-    tabBrowser.goBack();
-    yield loaded;
+
+    yield this.touchEventSimulator.stop();
+    this.touchEventSimulator = null;
+
+    if (tabBrowser.goBack) {
+      let loaded = waitForDocLoadComplete(browserWindow.gBrowser);
+      tabBrowser.goBack();
+      yield loaded;
+    }
   }),
 
   handleEvent(event) {
@@ -235,8 +270,20 @@ ResponsiveUI.prototype = {
         toolWindow.removeEventListener(event.type, this);
         ResponsiveUIManager.closeIfNeeded(window, tab);
         break;
+      case "update-touch-simulation":
+        let { enabled } = event.data;
+        this.updateTouchSimulation(enabled);
+        break;
     }
   },
+
+  updateTouchSimulation: Task.async(function* (enabled) {
+    if (enabled) {
+      this.touchEventSimulator.start();
+    } else {
+      this.touchEventSimulator.stop();
+    }
+  }),
 
   getViewportSize() {
     return this.toolWindow.getViewportSize();
@@ -292,7 +339,7 @@ function tabLoaded(tab) {
 function waitForDocLoadComplete(gBrowser) {
   let deferred = promise.defer();
   let progressListener = {
-    onStateChange: function(webProgress, req, flags, status) {
+    onStateChange: function (webProgress, req, flags, status) {
       let docStop = Ci.nsIWebProgressListener.STATE_IS_NETWORK |
                     Ci.nsIWebProgressListener.STATE_STOP;
 
@@ -306,6 +353,26 @@ function waitForDocLoadComplete(gBrowser) {
     QueryInterface: XPCOMUtils.generateQI([Ci.nsIWebProgressListener,
                                            Ci.nsISupportsWeakReference])
   };
+
   gBrowser.addProgressListener(progressListener);
   return deferred.promise;
 }
+
+const onActivate = (tab) => setMenuCheckFor(tab);
+
+const onClose = ({ window, tabs }) => {
+  for (let tab of tabs) {
+    ResponsiveUIManager.closeIfNeeded(window, tab);
+  }
+};
+
+const setMenuCheckFor = Task.async(
+  function* (tab, window = getOwnerWindow(tab)) {
+    yield startup(window);
+
+    let menu = window.document.getElementById("menu_responsiveUI");
+    if (menu) {
+      menu.setAttribute("checked", ResponsiveUIManager.isActiveForTab(tab));
+    }
+  }
+);

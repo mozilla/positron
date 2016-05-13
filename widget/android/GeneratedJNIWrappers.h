@@ -527,6 +527,21 @@ public:
 
     static auto GamepadAdded(int32_t, int32_t) -> void;
 
+    struct GetApplicationContext_t {
+        typedef GeckoAppShell Owner;
+        typedef mozilla::jni::Object::LocalRef ReturnType;
+        typedef mozilla::jni::Object::Param SetterType;
+        typedef mozilla::jni::Args<> Args;
+        static constexpr char name[] = "getApplicationContext";
+        static constexpr char signature[] =
+                "()Landroid/content/Context;";
+        static const bool isStatic = true;
+        static const mozilla::jni::ExceptionMode exceptionMode =
+                mozilla::jni::ExceptionMode::ABORT;
+    };
+
+    static auto GetApplicationContext() -> mozilla::jni::Object::LocalRef;
+
     struct GetConnection_t {
         typedef GeckoAppShell Owner;
         typedef mozilla::jni::Object::LocalRef ReturnType;
@@ -3084,21 +3099,6 @@ public:
                 mozilla::jni::ExceptionMode::ABORT;
     };
 
-    struct CreateEGLSurface_t {
-        typedef GLController Owner;
-        typedef mozilla::jni::Object::LocalRef ReturnType;
-        typedef mozilla::jni::Object::Param SetterType;
-        typedef mozilla::jni::Args<> Args;
-        static constexpr char name[] = "createEGLSurface";
-        static constexpr char signature[] =
-                "()Ljavax/microedition/khronos/egl/EGLSurface;";
-        static const bool isStatic = false;
-        static const mozilla::jni::ExceptionMode exceptionMode =
-                mozilla::jni::ExceptionMode::ABORT;
-    };
-
-    auto CreateEGLSurface() const -> mozilla::jni::Object::LocalRef;
-
     struct Destroy_t {
         typedef GLController Owner;
         typedef void ReturnType;
@@ -3126,6 +3126,21 @@ public:
         static const mozilla::jni::ExceptionMode exceptionMode =
                 mozilla::jni::ExceptionMode::ABORT;
     };
+
+    struct GetSurface_t {
+        typedef GLController Owner;
+        typedef mozilla::jni::Object::LocalRef ReturnType;
+        typedef mozilla::jni::Object::Param SetterType;
+        typedef mozilla::jni::Args<> Args;
+        static constexpr char name[] = "getSurface";
+        static constexpr char signature[] =
+                "()Ljava/lang/Object;";
+        static const bool isStatic = false;
+        static const mozilla::jni::ExceptionMode exceptionMode =
+                mozilla::jni::ExceptionMode::ABORT;
+    };
+
+    auto GetSurface() const -> mozilla::jni::Object::LocalRef;
 
     struct OnSizeChanged_t {
         typedef GLController Owner;

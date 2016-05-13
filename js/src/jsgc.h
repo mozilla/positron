@@ -739,9 +739,18 @@ class ArenaLists
 #endif
     }
 
+    void checkEmptyArenaLists() {
+#ifdef DEBUG
+        for (auto i : AllAllocKinds())
+            checkEmptyArenaList(i);
+#endif
+    }
+
     void checkEmptyFreeList(AllocKind kind) {
         MOZ_ASSERT(freeLists[kind]->isEmpty());
     }
+
+    void checkEmptyArenaList(AllocKind kind);
 
     bool relocateArenas(Zone* zone, Arena*& relocatedListOut, JS::gcreason::Reason reason,
                         SliceBudget& sliceBudget, gcstats::Statistics& stats);
@@ -1105,6 +1114,7 @@ struct MightBeForwarded
 
     static const bool value = mozilla::IsBaseOf<JSObject, T>::value ||
                               mozilla::IsBaseOf<Shape, T>::value ||
+                              mozilla::IsBaseOf<BaseShape, T>::value ||
                               mozilla::IsBaseOf<JSString, T>::value ||
                               mozilla::IsBaseOf<JSScript, T>::value ||
                               mozilla::IsBaseOf<js::LazyScript, T>::value;
@@ -1144,7 +1154,7 @@ Forwarded(T* t)
 
 struct ForwardedFunctor : public IdentityDefaultAdaptor<Value> {
     template <typename T> inline Value operator()(T* t) {
-        return js::gc::RewrapTaggedPointer<Value, T*>::wrap(Forwarded(t));
+        return js::gc::RewrapTaggedPointer<Value, T>::wrap(Forwarded(t));
     }
 };
 

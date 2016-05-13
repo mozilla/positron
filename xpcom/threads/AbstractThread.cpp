@@ -88,7 +88,7 @@ public:
     if (!mTailDispatcher.isSome()) {
       mTailDispatcher.emplace(/* aIsTailDispatcher = */ true);
 
-      nsCOMPtr<nsIRunnable> event = NS_NewRunnableMethod(this, &XPCOMThreadWrapper::FireTailDispatcher);
+      nsCOMPtr<nsIRunnable> event = NewRunnableMethod(this, &XPCOMThreadWrapper::FireTailDispatcher);
       nsContentUtils::RunInStableState(event.forget());
     }
 
@@ -105,9 +105,17 @@ private:
 bool
 AbstractThread::RequiresTailDispatch(AbstractThread* aThread) const
 {
+  MOZ_ASSERT(aThread);
   // We require tail dispatch if both the source and destination
   // threads support it.
   return SupportsTailDispatch() && aThread->SupportsTailDispatch();
+}
+
+bool
+AbstractThread::RequiresTailDispatchFromCurrentThread() const
+{
+  AbstractThread* current = GetCurrent();
+  return current && RequiresTailDispatch(current);
 }
 
 AbstractThread*

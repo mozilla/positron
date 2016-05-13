@@ -316,6 +316,12 @@ private:
   void InitWithAppCommand();
 
   /**
+   * Returns true if aChar is a control character which shouldn't be inputted
+   * into focused text editor.
+   */
+  bool IsControlChar(char16_t aChar) const;
+
+  /**
    * Returns true if the key event is caused by auto repeat.
    */
   bool IsRepeat() const
@@ -420,8 +426,11 @@ private:
    *
    * WARNING: Even if this returns true, aCharMsg may be WM_NULL or its
    *          hwnd may be different window.
+   *
+   * @param aRemove     true if the found message should be removed from the
+   *                    queue.  Otherwise, false.
    */
-  bool GetFollowingCharMessage(MSG& aCharMsg) const;
+  bool GetFollowingCharMessage(MSG& aCharMsg, bool aRemove = true) const;
 
   /**
    * Whether the key event can compute virtual keycode from the scancode value.

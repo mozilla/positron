@@ -19,6 +19,7 @@ const SCREENSIZE_HISTOGRAM = "DEVTOOLS_SCREEN_RESOLUTION_ENUMERATED_PER_USER";
 var {Cc, Ci, Cu} = require("chrome");
 var promise = require("promise");
 var Services = require("Services");
+var {Task} = require("resource://gre/modules/Task.jsm");
 var {gDevTools} = require("devtools/client/framework/devtools");
 var EventEmitter = require("devtools/shared/event-emitter");
 var Telemetry = require("devtools/client/shared/telemetry");
@@ -28,7 +29,9 @@ var { attachThread, detachThread } = require("./attach-thread");
 
 Cu.import("resource://devtools/client/scratchpad/scratchpad-manager.jsm");
 Cu.import("resource://devtools/client/shared/DOMHelpers.jsm");
-Cu.import("resource://gre/modules/Task.jsm");
+
+const { BrowserLoader } =
+  Cu.import("resource://devtools/client/shared/browser-loader.js", {});
 
 loader.lazyGetter(this, "toolboxStrings", () => {
   const properties = "chrome://devtools/locale/toolbox.properties";
@@ -40,7 +43,7 @@ loader.lazyGetter(this, "toolboxStrings", () => {
       }
       return bundle.formatStringFromName(name, args, args.length);
     } catch (ex) {
-      Services.console.logStringMessage("Error reading '" + name + "'");
+      console.log("Error reading '" + name + "'");
       return null;
     }
   };
@@ -277,6 +280,13 @@ Toolbox.prototype = {
   },
 
   /**
+   * Shortcut to the window containing the toolbox UI
+   */
+  get win() {
+    return this.frame.contentWindow;
+  },
+
+  /**
    * Shortcut to the document containing the toolbox UI
    */
   get doc() {
@@ -366,9 +376,25 @@ Toolbox.prototype = {
         // Update the URL so that onceDOMReady watch for the right url.
         this._URL = location;
       }
+
+      this.browserRequire = BrowserLoader({
+        window: this.doc.defaultView,
+        useOnlyShared: true
+      }).require;
+
+      this.React = this.browserRequire(
+        "devtools/client/shared/vendor/react");
+      this.ReactDOM = this.browserRequire(
+        "devtools/client/shared/vendor/react-dom");
+
       iframe.setAttribute("aria-label", toolboxStrings("toolbox.label"));
       let domHelper = new DOMHelpers(iframe.contentWindow);
-      domHelper.onceDOMReady(() => domReady.resolve(), this._URL);
+      domHelper.onceDOMReady(() => {
+        // Build the Notification box as soon as the DOM is ready.
+        this._buildNotificationBox();
+        domReady.resolve();
+      }, this._URL);
+
       // Optimization: fire up a few other things before waiting on
       // the iframe being ready (makes startup faster)
 
@@ -707,7 +733,7 @@ Toolbox.prototype = {
     zoomValue = Math.max(zoomValue, MIN_ZOOM);
     zoomValue = Math.min(zoomValue, MAX_ZOOM);
 
-    let docShell = this.frame.contentWindow.QueryInterface(Ci.nsIInterfaceRequestor)
+    let docShell = this.win.QueryInterface(Ci.nsIInterfaceRequestor)
       .getInterface(Ci.nsIWebNavigation)
       .QueryInterface(Ci.nsIDocShell);
     let contViewer = docShell.contentViewer;
@@ -725,7 +751,7 @@ Toolbox.prototype = {
       return;
     }
 
-    let doc = this.doc.defaultView.parent.document;
+    let doc = this.win.parent.document;
 
     for (let [id, toolDefinition] of gDevTools.getToolDefinitionMap()) {
       // Prevent multiple entries for the same tool.
@@ -783,6 +809,22 @@ Toolbox.prototype = {
           (toolId == "webconsole" && this.splitConsole))) {
       toolDefinition.onkey(this.getCurrentPanel(), this);
     }
+  },
+
+  /**
+   * Build the notification box. Called every time the host changes.
+   */
+  _buildNotificationBox: function() {
+    let { NotificationBox, PriorityLevels } =
+      this.browserRequire("devtools/client/shared/components/notification-box");
+
+    NotificationBox = this.React.createFactory(NotificationBox);
+
+    // Render NotificationBox and assign priority levels to it.
+    let box = this.doc.getElementById("toolbox-notificationbox");
+    this.notificationBox = Object.assign(
+      this.ReactDOM.render(NotificationBox({}), box),
+      PriorityLevels);
   },
 
   /**
@@ -936,7 +978,7 @@ Toolbox.prototype = {
 
     toolbar.addEventListener("keypress", event => {
       let { key, target } = event;
-      let win = this.doc.defaultView;
+      let win = this.win;
       let elm, type;
       if (key === "Tab") {
         // Tabbing when toolbar or its contents are focused should move focus to
@@ -1602,17 +1644,13 @@ Toolbox.prototype = {
    * Refresh the host's title.
    */
   _refreshHostTitle: function() {
-    let toolName;
-    let toolDef = gDevTools.getToolDefinition(this.currentToolId);
-    if (toolDef) {
-      toolName = toolDef.label;
+    let title;
+    if (this.target.name && this.target.name != this.target.url) {
+      title = toolboxStrings("toolbox.titleTemplate2",
+                             this.target.name, this.target.url);
     } else {
-      // no tool is selected
-      toolName = toolboxStrings("toolbox.defaultTitle");
+      title = toolboxStrings("toolbox.titleTemplate1", this.target.url);
     }
-    let title = toolboxStrings("toolbox.titleTemplate",
-                               toolName, this.target.name ||
-                                         this.target.url);
     this._host.setTitle(title);
   },
 
@@ -1808,7 +1846,7 @@ Toolbox.prototype = {
       // See bug 1022726, most probably because of swapFrameLoaders we need to
       // first focus the window here, and then once again further below to make
       // sure focus actually happens.
-      this.frame.contentWindow.focus();
+      this.win.focus();
 
       this._host.off("window-closed", this.destroy);
       this.destroyHost();
@@ -1826,7 +1864,7 @@ Toolbox.prototype = {
 
       // Focus the contentWindow to make sure keyboard shortcuts work straight
       // away.
-      this.frame.contentWindow.focus();
+      this.win.focus();
 
       this.emit("host-changed");
     });
@@ -1900,7 +1938,7 @@ Toolbox.prototype = {
     }
 
     if (this.hostType == Toolbox.HostType.WINDOW) {
-      let doc = this.doc.defaultView.parent.document;
+      let doc = this.win.parent.document;
       let key = doc.getElementById("key_" + toolId);
       if (key) {
         key.parentNode.removeChild(key);
@@ -1990,12 +2028,12 @@ Toolbox.prototype = {
   },
 
   /**
-   * Get the toolbox's notification box
+   * Get the toolbox's notification component
    *
-   * @return The notification box element.
+   * @return The notification box component.
    */
   getNotificationBox: function() {
-    return this.doc.getElementById("toolbox-notificationbox");
+    return this.notificationBox;
   },
 
   /**
@@ -2059,6 +2097,8 @@ Toolbox.prototype = {
         console.error("Panel " + id + ":", e);
       }
     }
+
+    this.React = this.ReactDOM = this.browserRequire = null;
 
     // Now that we are closing the toolbox we can re-enable the cache settings
     // and disable the service workers testing settings for the current tab.
@@ -2164,15 +2204,14 @@ Toolbox.prototype = {
     if (this.target.chrome) {
       return;
     }
-    let window = this.frame.contentWindow;
-    showDoorhanger({ window, type: "deveditionpromo" });
+    showDoorhanger({ window: this.win, type: "deveditionpromo" });
   },
 
   /**
    * Enable / disable necessary textbox menu items using globalOverlay.js.
    */
   _updateTextboxMenuItems: function() {
-    let window = this.doc.defaultView;
+    let window = this.win;
     ["cmd_undo", "cmd_delete", "cmd_cut",
      "cmd_copy", "cmd_paste", "cmd_selectAll"].forEach(window.goUpdateCommand);
   },
@@ -2262,7 +2301,7 @@ Toolbox.prototype = {
    * Returns gViewSourceUtils for viewing source.
    */
   get gViewSourceUtils() {
-    return this.frame.contentWindow.gViewSourceUtils;
+    return this.win.gViewSourceUtils;
   },
 
   /**

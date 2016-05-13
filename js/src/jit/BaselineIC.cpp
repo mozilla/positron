@@ -785,11 +785,13 @@ IsCacheableSetPropAddSlot(JSContext* cx, JSObject* obj, Shape* oldShape,
     size_t chainDepth = 0;
     // Walk up the object prototype chain and ensure that all prototypes are
     // native, and that all prototypes have no setter defined on the property.
-    for (JSObject* proto = obj->getProto(); proto; proto = proto->getProto()) {
+    for (JSObject* proto = obj->staticPrototype(); proto; proto = proto->staticPrototype()) {
         chainDepth++;
         // if prototype is non-native, don't optimize
         if (!proto->isNative())
             return false;
+
+        MOZ_ASSERT(proto->hasStaticPrototype());
 
         // if prototype defines this property in a non-plain way, don't optimize
         Shape* protoShape = proto->as<NativeObject>().lookup(cx, id);
@@ -1402,7 +1404,9 @@ TryAttachGetElemStub(JSContext* cx, JSScript* script, jsbytecode* pc, ICGetElem_
     RootedObject obj(cx, &lhs.toObject());
 
     // Check for ArgumentsObj[int] accesses
-    if (obj->is<ArgumentsObject>() && rhs.isInt32()) {
+    if (obj->is<ArgumentsObject>() && rhs.isInt32() &&
+        !obj->as<ArgumentsObject>().hasOverriddenElement())
+    {
         ICGetElem_Arguments::Which which = ICGetElem_Arguments::Mapped;
         if (obj->is<UnmappedArgumentsObject>())
             which = ICGetElem_Arguments::Unmapped;
@@ -1939,7 +1943,8 @@ ICGetElemNativeCompiler<T>::generateStubCode(MacroAssembler& masm)
             if (popR1)
                 masm.addToStackPtr(ImmWord(sizeof(size_t)));
 
-            emitCallNative(masm, objReg);
+            if (!emitCallNative(masm, objReg))
+                return false;
 
         } else {
             MOZ_ASSERT(acctype_ == ICGetElemNativeStub::ScriptedGetter);
@@ -1955,7 +1960,8 @@ ICGetElemNativeCompiler<T>::generateStubCode(MacroAssembler& masm)
             if (popR1)
                 masm.addToStackPtr(Imm32(sizeof(size_t)));
 
-            emitCallScripted(masm, objReg);
+            if (!emitCallScripted(masm, objReg))
+                return false;
         }
     }
 
@@ -2272,10 +2278,11 @@ ICGetElem_Arguments::Compiler::generateStubCode(MacroAssembler& masm)
     // Get initial ArgsObj length value.
     masm.unboxInt32(Address(objReg, ArgumentsObject::getInitialLengthSlotOffset()), scratchReg);
 
-    // Test if length has been overridden.
+    // Test if length or any element have been overridden.
     masm.branchTest32(Assembler::NonZero,
                       scratchReg,
-                      Imm32(ArgumentsObject::LENGTH_OVERRIDDEN_BIT),
+                      Imm32(ArgumentsObject::LENGTH_OVERRIDDEN_BIT |
+                            ArgumentsObject::ELEMENT_OVERRIDDEN_BIT),
                       &failure);
 
     // Length has not been overridden, ensure that R1 is an integer and is <= length.
@@ -2349,13 +2356,13 @@ SetElemAddHasSameShapes(ICSetElem_DenseOrUnboxedArrayAdd* stub, JSObject* obj)
     if (obj->maybeShape() != nstub->shape(0))
         return false;
 
-    JSObject* proto = obj->getProto();
+    JSObject* proto = obj->staticPrototype();
     for (size_t i = 0; i < stub->protoChainDepth(); i++) {
         if (!proto->isNative())
             return false;
         if (proto->as<NativeObject>().lastProperty() != nstub->shape(i + 1))
             return false;
-        proto = obj->getProto();
+        proto = obj->staticPrototype();
         if (!proto) {
             if (i != stub->protoChainDepth() - 1)
                 return false;
@@ -2476,12 +2483,12 @@ CanOptimizeDenseOrUnboxedArraySetElem(JSObject* obj, uint32_t index,
     // Scan the prototype and shape chain to make sure that this is not the case.
     if (obj->isIndexed())
         return false;
-    JSObject* curObj = obj->getProto();
+    JSObject* curObj = obj->staticPrototype();
     while (curObj) {
         ++*protoDepthOut;
         if (!curObj->isNative() || curObj->isIndexed())
             return false;
-        curObj = curObj->getProto();
+        curObj = curObj->staticPrototype();
     }
 
     if (*protoDepthOut > ICSetElem_DenseOrUnboxedArrayAdd::MAX_PROTO_CHAIN_DEPTH)
@@ -2734,9 +2741,9 @@ void
 EmitUnboxedPreBarrierForBaseline(MacroAssembler &masm, T address, JSValueType type)
 {
     if (type == JSVAL_TYPE_OBJECT)
-        EmitPreBarrier(masm, address, MIRType_Object);
+        EmitPreBarrier(masm, address, MIRType::Object);
     else if (type == JSVAL_TYPE_STRING)
-        EmitPreBarrier(masm, address, MIRType_String);
+        EmitPreBarrier(masm, address, MIRType::String);
     else
         MOZ_ASSERT(!UnboxedTypeNeedsPreBarrier(type));
 }
@@ -2853,7 +2860,7 @@ ICSetElem_DenseOrUnboxedArray::Compiler::generateStubCode(MacroAssembler& masm)
 
         ValueOperand tmpVal = regs.takeAnyValue();
         masm.loadValue(valueAddr, tmpVal);
-        EmitPreBarrier(masm, element, MIRType_Value);
+        EmitPreBarrier(masm, element, MIRType::Value);
         masm.storeValue(tmpVal, element);
     } else {
         // Set element on an unboxed array.
@@ -3695,7 +3702,7 @@ TryAttachGlobalNameValueStub(JSContext* cx, HandleScript script, jsbytecode* pc,
         if (current == globalLexical) {
             current = &globalLexical->global();
         } else {
-            JSObject* proto = current->getProto();
+            JSObject* proto = current->staticPrototype();
             if (!proto || !proto->is<NativeObject>())
                 return true;
             current = &proto->as<NativeObject>();
@@ -3770,7 +3777,7 @@ TryAttachGlobalNameAccessorStub(JSContext* cx, HandleScript script, jsbytecode* 
         shape = current->lookup(cx, id);
         if (shape)
             break;
-        JSObject* proto = current->getProto();
+        JSObject* proto = current->staticPrototype();
         if (!proto || !proto->is<NativeObject>())
             return true;
         current = &proto->as<NativeObject>();
@@ -4746,7 +4753,7 @@ ICSetProp_Native::Compiler::generateStubCode(MacroAssembler& masm)
 
     // Perform the store.
     masm.load32(Address(ICStubReg, ICSetProp_Native::offsetOfOffset()), scratch);
-    EmitPreBarrier(masm, BaseIndex(holderReg, scratch, TimesOne), MIRType_Value);
+    EmitPreBarrier(masm, BaseIndex(holderReg, scratch, TimesOne), MIRType::Value);
     masm.storeValue(R1, BaseIndex(holderReg, scratch, TimesOne));
     if (holderReg != objReg)
         regs.add(holderReg);
@@ -4864,7 +4871,7 @@ ICSetPropNativeAddCompiler::generateStubCode(MacroAssembler& masm)
 
         // Change the object's group.
         Address groupAddr(objReg, JSObject::offsetOfGroup());
-        EmitPreBarrier(masm, groupAddr, MIRType_ObjectGroup);
+        EmitPreBarrier(masm, groupAddr, MIRType::ObjectGroup);
         masm.storePtr(scratch, groupAddr);
 
         masm.bind(&noGroupChange);
@@ -4880,7 +4887,7 @@ ICSetPropNativeAddCompiler::generateStubCode(MacroAssembler& masm)
 
         // Write the expando object's new shape.
         Address shapeAddr(holderReg, JSObject::offsetOfShape());
-        EmitPreBarrier(masm, shapeAddr, MIRType_Shape);
+        EmitPreBarrier(masm, shapeAddr, MIRType::Shape);
         masm.loadPtr(Address(ICStubReg, ICSetProp_NativeAdd::offsetOfNewShape()), scratch);
         masm.storePtr(scratch, shapeAddr);
 
@@ -4889,7 +4896,7 @@ ICSetPropNativeAddCompiler::generateStubCode(MacroAssembler& masm)
     } else {
         // Write the object's new shape.
         Address shapeAddr(objReg, JSObject::offsetOfShape());
-        EmitPreBarrier(masm, shapeAddr, MIRType_Shape);
+        EmitPreBarrier(masm, shapeAddr, MIRType::Shape);
         masm.loadPtr(Address(ICStubReg, ICSetProp_NativeAdd::offsetOfNewShape()), scratch);
         masm.storePtr(scratch, shapeAddr);
 
@@ -5075,12 +5082,12 @@ ICSetProp_TypedObject::Compiler::generateStubCode(MacroAssembler& masm)
 
         switch (type) {
           case ReferenceTypeDescr::TYPE_ANY:
-            EmitPreBarrier(masm, dest, MIRType_Value);
+            EmitPreBarrier(masm, dest, MIRType::Value);
             masm.storeValue(R1, dest);
             break;
 
           case ReferenceTypeDescr::TYPE_OBJECT: {
-            EmitPreBarrier(masm, dest, MIRType_Object);
+            EmitPreBarrier(masm, dest, MIRType::Object);
             Label notObject;
             masm.branchTestObject(Assembler::NotEqual, R1, &notObject);
             Register rhsObject = masm.extractObject(R1, ExtractTemp0);
@@ -5093,7 +5100,7 @@ ICSetProp_TypedObject::Compiler::generateStubCode(MacroAssembler& masm)
           }
 
           case ReferenceTypeDescr::TYPE_STRING: {
-            EmitPreBarrier(masm, dest, MIRType_String);
+            EmitPreBarrier(masm, dest, MIRType::String);
             masm.branchTestString(Assembler::NotEqual, R1, &failure);
             Register rhsString = masm.extractString(R1, ExtractTemp0);
             masm.storePtr(rhsString, dest);
@@ -5469,7 +5476,7 @@ GetTemplateObjectForNative(JSContext* cx, JSFunction* target, const CallArgs& ar
     // Check for natives to which template objects can be attached. This is
     // done to provide templates to Ion for inlining these natives later on.
 
-    if (native == ArrayConstructor) {
+    if (native == ArrayConstructor || native == array_construct) {
         // Note: the template array won't be used if its length is inaccurately
         // computed here.  (We allocate here because compilation may occur on a
         // separate thread where allocation is impossible.)

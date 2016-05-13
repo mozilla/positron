@@ -21,7 +21,7 @@
 #include "runnable_utils.h"
 #include "transportflow.h"
 #include "AudioPacketizer.h"
-#include "StreamBuffer.h"
+#include "StreamTracks.h"
 
 #include "webrtc/modules/rtp_rtcp/interface/rtp_header_parser.h"
 
@@ -278,7 +278,7 @@ class MediaPipeline : public sigslot::has_slots<> {
   bool IsRtp(const unsigned char *data, size_t len);
 };
 
-class ConduitDeleteEvent: public nsRunnable
+class ConduitDeleteEvent: public Runnable
 {
 public:
   explicit ConduitDeleteEvent(already_AddRefed<MediaSessionConduit> aConduit) :

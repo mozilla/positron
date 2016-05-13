@@ -74,7 +74,7 @@ AppleATDecoder::Input(MediaRawData* aSample)
 
   // Queue a task to perform the actual decoding on a separate thread.
   nsCOMPtr<nsIRunnable> runnable =
-      NS_NewRunnableMethodWithArg<RefPtr<MediaRawData>>(
+      NewRunnableMethod<RefPtr<MediaRawData>>(
         this,
         &AppleATDecoder::SubmitSample,
         RefPtr<MediaRawData>(aSample));
@@ -283,6 +283,9 @@ AppleATDecoder::DecodeSample(MediaRawData* aSample)
   if (mChannelLayout && !mAudioConverter) {
     AudioConfig in(*mChannelLayout.get(), rate);
     AudioConfig out(channels, rate);
+    if (!in.IsValid() || !out.IsValid()) {
+      return NS_ERROR_FAILURE;
+    }
     mAudioConverter = MakeUnique<AudioConverter>(in, out);
   }
   if (mAudioConverter) {

@@ -49,6 +49,8 @@ const { getRootBindingParent } = require("devtools/shared/layout/utils");
 // on the worker thread, where Cu is not available.
 loader.lazyRequireGetter(this, "CSS", "CSS");
 
+loader.lazyRequireGetter(this, "CSSLexer", "devtools/shared/css-lexer");
+
 function CssLogic() {
   // The cache of examined CSS properties.
   this._propertyInfos = {};
@@ -610,7 +612,7 @@ CssLogic.prototype = {
             CssLogic.getBindingElementAndPseudo(element);
         domRules = domUtils.getCSSStyleRules(bindingElement, pseudo);
       } catch (ex) {
-        Services.console.logStringMessage("CL__buildMatchedRules error: " + ex);
+        console.log("CL__buildMatchedRules error: " + ex);
         continue;
       }
 
@@ -992,7 +994,7 @@ CssLogic.prettifyCSS = function(text, ruleCount) {
   // minified file.
   let indent = "";
   let indentLevel = 0;
-  let tokens = domUtils.getCSSLexer(text);
+  let tokens = CSSLexer.getCSSLexer(text);
   let result = "";
   let pushbackToken = undefined;
 
@@ -1676,9 +1678,8 @@ CssPropertyInfo.prototype = {
         this._value =
           this._cssLogic.computedStyle.getPropertyValue(this.property);
       } catch (ex) {
-        Services.console.logStringMessage("Error reading computed style for " +
-                                          this.property);
-        Services.console.logStringMessage(ex);
+        console.log("Error reading computed style for " + this.property);
+        console.log(ex);
       }
     }
     return this._value;

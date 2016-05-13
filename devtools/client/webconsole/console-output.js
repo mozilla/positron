@@ -2981,7 +2981,7 @@ Widgets.ObjectRenderers.add({
 
     if (!this.options.concise) {
       this._text(" ");
-      this.element.appendChild(this.el("span.console-string",
+      this.element.appendChild(this.el("span.theme-fg-color6",
                                        VariablesView.getString(preview.text)));
     }
   },
@@ -3125,9 +3125,9 @@ Widgets.ObjectRenderers.add({
       fragment.appendChild(this.el("span.cm-attribute", nodeName));
     }
 
-    this._text("=", fragment);
-    fragment.appendChild(this.el("span.console-string",
-                                 '"' + escapeHTML(value) + '"'));
+    this._text("=\"", fragment);
+    fragment.appendChild(this.el("span.theme-fg-color6", escapeHTML(value)));
+    this._text("\"", fragment);
 
     return fragment;
   },
@@ -3203,8 +3203,8 @@ Widgets.ObjectRenderers.add({
 
     this.element = this.el("span." + "kind-" + this.objectActor.preview.kind + ".elementNode");
 
+    this._text("<");
     let openTag = this.el("span.cm-tag");
-    openTag.textContent = "<";
     this.element.appendChild(openTag);
 
     let tagName = this._anchor(nodeName, {
@@ -3226,15 +3226,13 @@ Widgets.ObjectRenderers.add({
       }
     }
 
-    let closeTag = this.el("span.cm-tag");
-    closeTag.textContent = ">";
-    this.element.appendChild(closeTag);
+    this._text(">");
 
     // Register this widget in the owner message so that it gets destroyed when
     // the message is destroyed.
     this.message.widgets.add(this);
 
-    this.linkToInspector().then(null, Cu.reportError);
+    this.linkToInspector().then(null, e => console.error(e));
   },
 
   /**
@@ -3324,7 +3322,7 @@ Widgets.ObjectRenderers.add({
   {
     return this.linkToInspector().then(() => {
       return this.toolbox.highlighterUtils.unhighlight();
-    }).then(null, Cu.reportError);
+    }).then(null, e => console.error(e));
   },
 
   /**
@@ -3356,8 +3354,16 @@ Widgets.ObjectRenderers.add({
       this.element.removeEventListener("mouseover", this.highlightDomNode, false);
       this.element.removeEventListener("mouseout", this.unhighlightDomNode, false);
       this._openInspectorNode.removeEventListener("mousedown", this.openNodeInInspector, true);
-      this.toolbox = null;
-      this._nodeFront = null;
+
+      if (this._linkedToInspector) {
+        this.unhighlightDomNode().then(() => {
+          this.toolbox = null;
+          this._nodeFront = null;
+        });
+      } else {
+        this.toolbox = null;
+        this._nodeFront = null;
+      }
     }
   },
 }); // Widgets.ObjectRenderers.byKind.DOMNode
@@ -3565,7 +3571,7 @@ Widgets.LongString.prototype = Heritage.extend(Widgets.BaseWidget.prototype,
   _onSubstring: function(response)
   {
     if (response.error) {
-      Cu.reportError("LongString substring failure: " + response.error);
+      console.error("LongString substring failure: " + response.error);
       return;
     }
 

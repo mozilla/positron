@@ -1281,21 +1281,55 @@ public:
         m_formatter.oneByteOp(OP_GROUP2_EvCL, dst, GROUP2_OP_SHL);
     }
 
-    void bsr_rr(RegisterID src, RegisterID dst)
+    void roll_ir(int32_t imm, RegisterID dst)
     {
-        spew("bsr        %s, %s", GPReg32Name(src), GPReg32Name(dst));
+        MOZ_ASSERT(imm < 32);
+        spew("roll       $%d, %s", imm, GPReg32Name(dst));
+        if (imm == 1)
+            m_formatter.oneByteOp(OP_GROUP2_Ev1, dst, GROUP2_OP_ROL);
+        else {
+            m_formatter.oneByteOp(OP_GROUP2_EvIb, dst, GROUP2_OP_ROL);
+            m_formatter.immediate8u(imm);
+        }
+    }
+    void roll_CLr(RegisterID dst)
+    {
+        spew("roll       %%cl, %s", GPReg32Name(dst));
+        m_formatter.oneByteOp(OP_GROUP2_EvCL, dst, GROUP2_OP_ROL);
+    }
+
+    void rorl_ir(int32_t imm, RegisterID dst)
+    {
+        MOZ_ASSERT(imm < 32);
+        spew("rorl       $%d, %s", imm, GPReg32Name(dst));
+        if (imm == 1)
+            m_formatter.oneByteOp(OP_GROUP2_Ev1, dst, GROUP2_OP_ROR);
+        else {
+            m_formatter.oneByteOp(OP_GROUP2_EvIb, dst, GROUP2_OP_ROR);
+            m_formatter.immediate8u(imm);
+        }
+    }
+    void rorl_CLr(RegisterID dst)
+    {
+        spew("rorl       %%cl, %s", GPReg32Name(dst));
+        m_formatter.oneByteOp(OP_GROUP2_EvCL, dst, GROUP2_OP_ROR);
+    }
+
+    void bsrl_rr(RegisterID src, RegisterID dst)
+    {
+        spew("bsrl       %s, %s", GPReg32Name(src), GPReg32Name(dst));
         m_formatter.twoByteOp(OP2_BSR_GvEv, src, dst);
     }
 
-    void bsf_rr(RegisterID src, RegisterID dst)
+    void bsfl_rr(RegisterID src, RegisterID dst)
     {
-        spew("bsf        %s, %s", GPReg32Name(src), GPReg32Name(dst));
+        spew("bsfl       %s, %s", GPReg32Name(src), GPReg32Name(dst));
         m_formatter.twoByteOp(OP2_BSF_GvEv, src, dst);
     }
 
-    void popcnt_rr(RegisterID src, RegisterID dst)
+    void popcntl_rr(RegisterID src, RegisterID dst)
     {
-        spew("popcnt     %s, %s", GPReg32Name(src), GPReg32Name(dst));
+        spew("popcntl    %s, %s", GPReg32Name(src), GPReg32Name(dst));
         m_formatter.legacySSEPrefix(VEX_SS);
         m_formatter.twoByteOp(OP2_POPCNT_GvEv, src, dst);
     }
@@ -1504,7 +1538,7 @@ public:
         }
     }
 
-    MOZ_WARN_UNUSED_RESULT JmpSrc
+    MOZ_MUST_USE JmpSrc
     cmpl_im_disp32(int32_t rhs, int32_t offset, RegisterID base)
     {
         spew("cmpl       $0x%x, " MEM_o32b, rhs, ADDR_o32b(offset, base));
@@ -1521,7 +1555,7 @@ public:
         return r;
     }
 
-    MOZ_WARN_UNUSED_RESULT JmpSrc
+    MOZ_MUST_USE JmpSrc
     cmpl_im_disp32(int32_t rhs, const void* addr)
     {
         spew("cmpl       $0x%x, %p", rhs, addr);
@@ -2236,7 +2270,7 @@ public:
 
     // Flow control:
 
-    MOZ_WARN_UNUSED_RESULT JmpSrc
+    MOZ_MUST_USE JmpSrc
     call()
     {
         m_formatter.oneByteOp(OP_CALL_rel32);
@@ -2260,7 +2294,7 @@ public:
     // Comparison of EAX against a 32-bit immediate. The immediate is patched
     // in as if it were a jump target. The intention is to toggle the first
     // byte of the instruction between a CMP and a JMP to produce a pseudo-NOP.
-    MOZ_WARN_UNUSED_RESULT JmpSrc
+    MOZ_MUST_USE JmpSrc
     cmp_eax()
     {
         m_formatter.oneByteOp(OP_CMP_EAXIv);
@@ -2285,7 +2319,7 @@ public:
             m_formatter.immediate32(diff - 5);
         }
     }
-    MOZ_WARN_UNUSED_RESULT JmpSrc
+    MOZ_MUST_USE JmpSrc
     jmp()
     {
         m_formatter.oneByteOp(OP_JMP_rel32);
@@ -2328,7 +2362,7 @@ public:
         }
     }
 
-    MOZ_WARN_UNUSED_RESULT JmpSrc
+    MOZ_MUST_USE JmpSrc
     jCC(Condition cond)
     {
         m_formatter.twoByteOp(jccRel32(cond));
@@ -3361,17 +3395,12 @@ threeByteOpImmSimd("vblendps", VEX_PD, OP3_BLENDPS_VpsWpsIb, ESCAPE_3A, imm, off
         m_formatter.floatConstant(f);
     }
 
-    void int32x4Constant(const int32_t s[4])
+    void simd128Constant(const void* data)
     {
-        spew(".int %d,%d,%d,%d", s[0], s[1], s[2], s[3]);
+        const uint32_t* dw = reinterpret_cast<const uint32_t*>(data);
+        spew(".int 0x%08x,0x%08x,0x%08x,0x%08x", dw[0], dw[1], dw[2], dw[3]);
         MOZ_ASSERT(m_formatter.isAligned(16));
-        m_formatter.int32x4Constant(s);
-    }
-    void float32x4Constant(const float f[4])
-    {
-        spew(".float %g,%g,%g,%g", f[0], f[1], f[2], f[3]);
-        MOZ_ASSERT(m_formatter.isAligned(16));
-        m_formatter.float32x4Constant(f);
+        m_formatter.simd128Constant(data);
     }
 
     void int64Constant(int64_t i)
@@ -4669,7 +4698,7 @@ threeByteOpImmSimd("vblendps", VEX_PD, OP3_BLENDPS_VpsWpsIb, ESCAPE_3A, imm, off
             m_buffer.putInt64Unchecked(imm);
         }
 
-        MOZ_WARN_UNUSED_RESULT JmpSrc
+        MOZ_MUST_USE JmpSrc
         immediateRel32()
         {
             m_buffer.putIntUnchecked(0);
@@ -4700,16 +4729,12 @@ threeByteOpImmSimd("vblendps", VEX_PD, OP3_BLENDPS_VpsWpsIb, ESCAPE_3A, imm, off
             m_buffer.putIntUnchecked(mozilla::BitwiseCast<uint32_t>(f));
         }
 
-        void int32x4Constant(const int32_t s[4])
+        void simd128Constant(const void* data)
         {
-            for (size_t i = 0; i < 4; ++i)
-                int32Constant(s[i]);
-        }
-
-        void float32x4Constant(const float s[4])
-        {
-            for (size_t i = 0; i < 4; ++i)
-                floatConstant(s[i]);
+            const uint8_t* bytes = reinterpret_cast<const uint8_t*>(data);
+            m_buffer.ensureSpace(16);
+            for (size_t i = 0; i < 16; ++i)
+                m_buffer.putByteUnchecked(bytes[i]);
         }
 
         void int64Constant(int64_t i)

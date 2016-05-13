@@ -337,6 +337,10 @@ public:
 
   void ForcePresent() { mCompositor->ForcePresent(); }
 
+  void HoldTextureUntilNextComposite(TextureHost* aTextureHost) {
+    mCurrentHeldTextureHosts.AppendElement(aTextureHost);
+  }
+
 private:
   /** Region we're clipping our current drawing to. */
   nsIntRegion mClippingRegion;
@@ -396,6 +400,9 @@ private:
   UniquePtr<LayerProperties> mClonedLayerTreeProperties;
 
   nsTArray<ImageCompositeNotification> mImageCompositeNotifications;
+
+  nsTArray<RefPtr<TextureHost>> mCurrentHeldTextureHosts;
+  nsTArray<RefPtr<TextureHost>> mPreviousHeldTextureHosts;
 
   /**
    * Context target, nullptr when drawing directly to our swap chain.
@@ -541,6 +548,7 @@ public:
   const Maybe<ParentLayerIntRect>& GetShadowClipRect() { return mShadowClipRect; }
   const LayerIntRegion& GetShadowVisibleRegion() { return mShadowVisibleRegion; }
   const gfx::Matrix4x4& GetShadowBaseTransform() { return mShadowTransform; }
+  gfx::Matrix4x4 GetShadowTransform();
   bool GetShadowTransformSetByAnimation() { return mShadowTransformSetByAnimation; }
   bool HasLayerBeenComposited() { return mLayerComposited; }
   gfx::IntRect GetClearRect() { return mClearRect; }

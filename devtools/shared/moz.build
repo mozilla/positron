@@ -23,6 +23,7 @@ DIRS += [
     'security',
     'sourcemap',
     'shims',
+    'specs',
     'touch',
     'transport',
     'webconsole',
@@ -38,9 +39,9 @@ JAR_MANIFESTS += ['jar.mn']
 DevToolsModules(
     'async-storage.js',
     'async-utils.js',
+    'builtin-modules.js',
     'content-observer.js',
-    'css-angle.js',
-    'css-color.js',
+    'css-lexer.js',
     'deprecated-sync-thenables.js',
     'DevToolsUtils.js',
     'event-emitter.js',
@@ -49,6 +50,7 @@ DevToolsModules(
     'Loader.jsm',
     'Parser.jsm',
     'path.js',
+    'protocol.js',
     'system.js',
     'ThreadSafeDevToolsUtils.js',
 )

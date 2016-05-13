@@ -161,7 +161,7 @@ DrawTargetSkia::LockBits(uint8_t** aData, IntSize* aSize,
   /* Test if the canvas' device has accessible pixels first, as actually
    * accessing the pixels may trigger side-effects, even if it fails.
    */
-  if (!mCanvas->peekPixels(nullptr, nullptr)) {
+  if (!mCanvas->peekPixels(nullptr)) {
     return false;
   }
 
@@ -210,12 +210,12 @@ SetPaintPattern(SkPaint& aPaint, const Pattern& aPattern, Float aAlpha = 1.0)
 
         SkMatrix mat;
         GfxMatrixToSkiaMatrix(pat.mMatrix, mat);
-        SkShader* shader = SkGradientShader::CreateLinear(points,
-                                                          &stops->mColors.front(),
-                                                          &stops->mPositions.front(),
-                                                          stops->mCount,
-                                                          mode, 0, &mat);
-        SkSafeUnref(aPaint.setShader(shader));
+        sk_sp<SkShader> shader = SkGradientShader::MakeLinear(points,
+                                                              &stops->mColors.front(),
+                                                              &stops->mPositions.front(),
+                                                              stops->mCount,
+                                                              mode, 0, &mat);
+        aPaint.setShader(shader);
       } else {
         aPaint.setColor(SK_ColorTRANSPARENT);
       }
@@ -233,15 +233,15 @@ SetPaintPattern(SkPaint& aPaint, const Pattern& aPattern, Float aAlpha = 1.0)
 
         SkMatrix mat;
         GfxMatrixToSkiaMatrix(pat.mMatrix, mat);
-        SkShader* shader = SkGradientShader::CreateTwoPointConical(points[0],
-                                                                   SkFloatToScalar(pat.mRadius1),
-                                                                   points[1],
-                                                                   SkFloatToScalar(pat.mRadius2),
-                                                                   &stops->mColors.front(),
-                                                                   &stops->mPositions.front(),
-                                                                   stops->mCount,
-                                                                   mode, 0, &mat);
-        SkSafeUnref(aPaint.setShader(shader));
+        sk_sp<SkShader> shader = SkGradientShader::MakeTwoPointConical(points[0],
+                                                                       SkFloatToScalar(pat.mRadius1),
+                                                                       points[1],
+                                                                       SkFloatToScalar(pat.mRadius2),
+                                                                       &stops->mColors.front(),
+                                                                       &stops->mPositions.front(),
+                                                                       stops->mCount,
+                                                                       mode, 0, &mat);
+        aPaint.setShader(shader);
       } else {
         aPaint.setColor(SK_ColorTRANSPARENT);
       }
@@ -263,8 +263,8 @@ SetPaintPattern(SkPaint& aPaint, const Pattern& aPattern, Float aAlpha = 1.0)
       SkShader::TileMode xTileMode = ExtendModeToTileMode(pat.mExtendMode, Axis::X_AXIS);
       SkShader::TileMode yTileMode = ExtendModeToTileMode(pat.mExtendMode, Axis::Y_AXIS);
 
-      SkShader* shader = SkShader::CreateBitmapShader(bitmap, xTileMode, yTileMode, &mat);
-      SkSafeUnref(aPaint.setShader(shader));
+      sk_sp<SkShader> shader = SkShader::MakeBitmapShader(bitmap, xTileMode, yTileMode, &mat);
+      aPaint.setShader(shader);
       if (pat.mFilter == Filter::POINT) {
         aPaint.setFilterQuality(kNone_SkFilterQuality);
       }
@@ -416,7 +416,8 @@ DrawTargetSkia::DrawSurfaceWithShadow(SourceSurface *aSurface,
                                       Float aSigma,
                                       CompositionOp aOperator)
 {
-  if (!(aSurface->GetType() == SurfaceType::SKIA || aSurface->GetType() == SurfaceType::DATA)) {
+  if (!(aSurface->GetType() == SurfaceType::SKIA || aSurface->GetType() == SurfaceType::DATA) ||
+      aSurface->GetSize().IsEmpty()) {
     return;
   }
 
@@ -439,7 +440,7 @@ DrawTargetSkia::DrawSurfaceWithShadow(SourceSurface *aSurface,
   // to blur the image ourselves.
 
   SkPaint shadowPaint;
-  shadowPaint.setXfermode(paint.getXfermode());
+  shadowPaint.setXfermodeMode(GfxOpToSkiaOp(aOperator));
 
   IntPoint shadowDest = RoundedToInt(aDest + aOffset);
 
@@ -461,12 +462,12 @@ DrawTargetSkia::DrawSurfaceWithShadow(SourceSurface *aSurface,
 
     mCanvas->drawBitmap(blurMask, shadowDest.x, shadowDest.y, &shadowPaint);
   } else {
-    SkAutoTUnref<SkImageFilter> blurFilter(SkBlurImageFilter::Create(aSigma, aSigma));
-    SkAutoTUnref<SkColorFilter> colorFilter(
-      SkColorFilter::CreateModeFilter(ColorToSkColor(aColor, 1.0f), SkXfermode::kSrcIn_Mode));
+    sk_sp<SkImageFilter> blurFilter(SkBlurImageFilter::Make(aSigma, aSigma, nullptr));
+    sk_sp<SkColorFilter> colorFilter(
+      SkColorFilter::MakeModeFilter(ColorToSkColor(aColor, 1.0f), SkXfermode::kSrcIn_Mode));
 
-    shadowPaint.setImageFilter(blurFilter.get());
-    shadowPaint.setColorFilter(colorFilter.get());
+    shadowPaint.setImageFilter(blurFilter);
+    shadowPaint.setColorFilter(colorFilter);
 
     mCanvas->drawBitmap(bitmap, shadowDest.x, shadowDest.y, &shadowPaint);
   }
@@ -633,13 +634,27 @@ DrawTargetSkia::FillGlyphs(ScaledFont *aFont,
       paint.mPaint.setAntiAlias(false);
     }
   } else {
-    // SkFontHost_cairo does not support subpixel text, so only enable it for other font hosts.
+    // SkFontHost_cairo does not support subpixel text positioning,
+    // so only enable it for other font hosts.
     paint.mPaint.setSubpixelText(true);
 
-    if (aFont->GetType() == FontType::MAC) {
-      // SkFontHost_mac only supports subpixel antialiasing when hinting is turned off.
-      // For grayscale AA, we want to disable font smoothing as the only time we should
-      // use grayscale AA is with explicit -moz-osx-font-smoothing
+    if (aFont->GetType() == FontType::MAC &&
+       aOptions.mAntialiasMode == AntialiasMode::GRAY) {
+      // Normally, Skia enables LCD FontSmoothing which creates thicker fonts
+      // and also enables subpixel AA. CoreGraphics without font smoothing
+      // explicitly creates thinner fonts and grayscale AA.
+      // CoreGraphics doesn't support a configuration that produces thicker
+      // fonts with grayscale AA as LCD Font Smoothing enables or disables both.
+      // However, Skia supports it by enabling font smoothing (producing subpixel AA)
+      // and converts it to grayscale AA. Since Skia doesn't support subpixel AA on
+      // transparent backgrounds, we still want font smoothing for the thicker fonts,
+      // even if it is grayscale AA.
+      //
+      // With explicit Grayscale AA (from -moz-osx-font-smoothing:grayscale),
+      // we want to have grayscale AA with no smoothing at all. This means
+      // disabling the LCD font smoothing behaviour.
+      // To accomplish this we have to explicitly disable hinting,
+      // and disable LCDRenderText.
       paint.mPaint.setHinting(SkPaint::kNo_Hinting);
     } else {
       paint.mPaint.setHinting(SkPaint::kNormal_Hinting);
@@ -673,8 +688,8 @@ DrawTargetSkia::Mask(const Pattern &aSource,
 
   SkLayerRasterizer::Builder builder;
   builder.addLayer(maskPaint);
-  SkAutoTUnref<SkRasterizer> raster(builder.detachRasterizer());
-  paint.mPaint.setRasterizer(raster.get());
+  sk_sp<SkLayerRasterizer> raster(builder.detach());
+  paint.mPaint.setRasterizer(raster);
 
   mCanvas->drawPaint(paint.mPaint);
 }
@@ -699,8 +714,8 @@ DrawTargetSkia::MaskSurface(const Pattern &aSource,
       paint.mPaint.getShader()) {
     SkMatrix transform;
     transform.setTranslate(PointToSkPoint(-aOffset));
-    SkShader* matrixShader = paint.mPaint.getShader()->newWithLocalMatrix(transform);
-    SkSafeUnref(paint.mPaint.setShader(matrixShader));
+    sk_sp<SkShader> matrixShader = paint.mPaint.getShader()->makeWithLocalMatrix(transform);
+    paint.mPaint.setShader(matrixShader);
   }
 
   mCanvas->drawBitmap(bitmap, aOffset.x, aOffset.y, &paint.mPaint);
@@ -1023,10 +1038,10 @@ DrawTargetSkia::InitWithGrContext(GrContext* aGrContext,
 
   // Create a GPU rendertarget/texture using the supplied GrContext.
   // NewRenderTarget also implicitly clears the underlying texture on creation.
-  SkAutoTUnref<SkSurface> gpuSurface(
-    SkSurface::NewRenderTarget(aGrContext,
-                               SkSurface::Budgeted(aCached),
-                               MakeSkiaImageInfo(aSize, aFormat)));
+  sk_sp<SkSurface> gpuSurface =
+    SkSurface::MakeRenderTarget(aGrContext,
+                                SkBudgeted(aCached),
+                                MakeSkiaImageInfo(aSize, aFormat));
   if (!gpuSurface) {
     return false;
   }
@@ -1162,8 +1177,8 @@ public:
     : SkImageFilter(0, nullptr)
   {}
 
-  virtual bool onFilterImage(Proxy*, const SkBitmap& src, const Context&,
-                             SkBitmap* result, SkIPoint* offset) const override {
+  virtual bool onFilterImageDeprecated(Proxy*, const SkBitmap& src, const Context&,
+                                       SkBitmap* result, SkIPoint* offset) const override {
     *result = src;
     offset->set(0, 0);
     return true;
@@ -1173,11 +1188,11 @@ public:
   SK_DECLARE_PUBLIC_FLATTENABLE_DESERIALIZATION_PROCS(CopyLayerImageFilter)
 };
 
-SkFlattenable*
+sk_sp<SkFlattenable>
 CopyLayerImageFilter::CreateProc(SkReadBuffer& buffer)
 {
   SK_IMAGEFILTER_UNFLATTEN_COMMON(common, 0);
-  return new CopyLayerImageFilter;
+  return sk_make_sp<CopyLayerImageFilter>();
 }
 
 #ifndef SK_IGNORE_TO_STRING
@@ -1250,11 +1265,11 @@ DrawTargetSkia::PopLayer()
       // even though the mask is. So first we use the inverse of the transform
       // affecting the mask, then add back on the layer's origin.
       layerMat.preTranslate(layerBounds.x(), layerBounds.y());
-      SkShader* shader = SkShader::CreateBitmapShader(layerBitmap,
-                                                      SkShader::kClamp_TileMode,
-                                                      SkShader::kClamp_TileMode,
-                                                      &layerMat);
-      SkSafeUnref(paint.setShader(shader));
+      sk_sp<SkShader> shader = SkShader::MakeBitmapShader(layerBitmap,
+                                                          SkShader::kClamp_TileMode,
+                                                          SkShader::kClamp_TileMode,
+                                                          &layerMat);
+      paint.setShader(shader);
 
       SkBitmap mask = GetBitmapForSurface(layer.mMask);
       if (mask.colorType() != kAlpha_8_SkColorType &&

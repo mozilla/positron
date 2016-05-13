@@ -672,7 +672,7 @@ nsWebBrowserPersist::SerializeNextFile()
         // Finish and clean things up.  Defer this because the caller
         // may have been expecting to use the listeners that that
         // method will clear.
-        NS_DispatchToCurrentThread(NS_NewRunnableMethod(this,
+        NS_DispatchToCurrentThread(NewRunnableMethod(this,
             &nsWebBrowserPersist::FinishDownload));
         return;
     }
@@ -784,7 +784,7 @@ nsWebBrowserPersist::OnWrite::OnFinish(nsIWebBrowserPersistDocument* aDoc,
             return NS_OK;
         }
     }
-    NS_DispatchToCurrentThread(NS_NewRunnableMethod(mParent,
+    NS_DispatchToCurrentThread(NewRunnableMethod(mParent,
         &nsWebBrowserPersist::SerializeNextFile));
     return NS_OK;
 }
@@ -1794,8 +1794,8 @@ nsWebBrowserPersist::FinishSaveDocumentInternal(nsIURI* aFile,
         typedef StoreCopyPassByRRef<decltype(toWalk)> WalkStorage;
         auto saveMethod = &nsWebBrowserPersist::SaveDocumentDeferred;
         nsCOMPtr<nsIRunnable> saveLater =
-            NS_NewRunnableMethodWithArg<WalkStorage>(this, saveMethod,
-                                                     mozilla::Move(toWalk));
+            NewRunnableMethod<WalkStorage>(this, saveMethod,
+                                           mozilla::Move(toWalk));
         NS_DispatchToCurrentThread(saveLater);
     } else {
         // Done walking DOMs; on to the serialization phase.
@@ -2360,6 +2360,9 @@ nsWebBrowserPersist::EndDownload(nsresult aResult)
         mPersistResult = aResult;
     }
 
+    // mCompleted needs to be set before issuing the stop notification.
+    // (Bug 1224437)
+    mCompleted = true;
     // State stop notification
     if (mProgressListener) {
         mProgressListener->OnStateChange(nullptr, nullptr,
@@ -2374,7 +2377,6 @@ nsWebBrowserPersist::EndDownload(nsresult aResult)
     }
 
     // Cleanup the channels
-    mCompleted = true;
     Cleanup();
 
     mProgressListener = nullptr;

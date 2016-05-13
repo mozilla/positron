@@ -356,6 +356,7 @@ struct JSStructuredCloneWriter {
 
     friend bool JS_WriteString(JSStructuredCloneWriter* w, HandleString str);
     friend bool JS_WriteTypedArray(JSStructuredCloneWriter* w, HandleValue v);
+    friend bool JS_ObjectNotWritten(JSStructuredCloneWriter* w, HandleObject obj);
 };
 
 JS_FRIEND_API(uint64_t)
@@ -742,7 +743,7 @@ bool
 SCOutput::extractBuffer(uint64_t** datap, size_t* sizep)
 {
     *sizep = buf.length() * sizeof(uint64_t);
-    return (*datap = buf.extractRawBuffer()) != nullptr;
+    return (*datap = buf.extractOrCopyRawBuffer()) != nullptr;
 }
 
 } /* namespace js */
@@ -994,7 +995,7 @@ JSStructuredCloneWriter::traverseObject(HandleObject obj)
 bool
 JSStructuredCloneWriter::traverseMap(HandleObject obj)
 {
-    AutoValueVector newEntries(context());
+    Rooted<GCVector<Value>> newEntries(context(), GCVector<Value>(context()));
     {
         // If there is no wrapper, the compartment munging is a no-op.
         RootedObject unwrapped(context(), CheckedUnwrap(obj));
@@ -1003,7 +1004,7 @@ JSStructuredCloneWriter::traverseMap(HandleObject obj)
         if (!MapObject::getKeysAndValuesInterleaved(context(), unwrapped, &newEntries))
             return false;
     }
-    if (!context()->compartment()->wrap(context(), newEntries))
+    if (!context()->compartment()->wrap(context(), &newEntries))
         return false;
 
     for (size_t i = newEntries.length(); i > 0; --i) {
@@ -1024,7 +1025,7 @@ JSStructuredCloneWriter::traverseMap(HandleObject obj)
 bool
 JSStructuredCloneWriter::traverseSet(HandleObject obj)
 {
-    AutoValueVector keys(context());
+    Rooted<GCVector<Value>> keys(context(), GCVector<Value>(context()));
     {
         // If there is no wrapper, the compartment munging is a no-op.
         RootedObject unwrapped(context(), CheckedUnwrap(obj));
@@ -1033,7 +1034,7 @@ JSStructuredCloneWriter::traverseSet(HandleObject obj)
         if (!SetObject::keys(context(), unwrapped, &keys))
             return false;
     }
-    if (!context()->compartment()->wrap(context(), keys))
+    if (!context()->compartment()->wrap(context(), &keys))
         return false;
 
     for (size_t i = keys.length(); i > 0; --i) {
@@ -1763,7 +1764,7 @@ JSStructuredCloneReader::startRead(MutableHandleValue vp)
       }
 
       case SCTAG_BACK_REFERENCE_OBJECT: {
-        if (data >= allObjs.length()) {
+        if (data >= allObjs.length() || !allObjs[data].isObject()) {
             JS_ReportErrorNumber(context(), GetErrorMessage, nullptr,
                                  JSMSG_SC_BAD_SERIALIZED_DATA,
                                  "invalid back reference in input");
@@ -2421,4 +2422,12 @@ JS_WriteTypedArray(JSStructuredCloneWriter* w, HandleValue v)
     assertSameCompartment(w->context(), v);
     RootedObject obj(w->context(), &v.toObject());
     return w->writeTypedArray(obj);
+}
+
+JS_PUBLIC_API(bool)
+JS_ObjectNotWritten(JSStructuredCloneWriter* w, HandleObject obj)
+{
+    w->memory.remove(w->memory.lookup(obj));
+
+    return true;
 }

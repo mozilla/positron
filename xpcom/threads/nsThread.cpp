@@ -190,7 +190,7 @@ NS_IMPL_CI_INTERFACE_GETTER(nsThread, nsIThread, nsIThreadInternal,
 
 //-----------------------------------------------------------------------------
 
-class nsThreadStartupEvent : public nsRunnable
+class nsThreadStartupEvent : public Runnable
 {
 public:
   nsThreadStartupEvent()
@@ -230,12 +230,86 @@ private:
   ReentrantMonitor mMon;
   bool mInitialized;
 };
+//-----------------------------------------------------------------------------
+
+namespace {
+class DelayedRunnable : public Runnable,
+                        public nsITimerCallback
+{
+public:
+  DelayedRunnable(already_AddRefed<nsIRunnable> aRunnable,
+                  uint32_t aDelay)
+    : mWrappedRunnable(aRunnable),
+      mDelayedFrom(TimeStamp::NowLoRes()),
+      mDelay(aDelay)
+  { }
+
+  NS_DECL_ISUPPORTS_INHERITED
+
+  nsresult Init()
+  {
+    nsresult rv;
+    mTimer = do_CreateInstance(NS_TIMER_CONTRACTID, &rv);
+    NS_ENSURE_SUCCESS(rv, rv);
+
+    MOZ_ASSERT(mTimer);
+    return mTimer->InitWithCallback(this, mDelay, nsITimer::TYPE_ONE_SHOT);
+  }
+
+  nsresult DoRun()
+  {
+    nsCOMPtr<nsIRunnable> r = mWrappedRunnable.forget();
+    return r->Run();
+  }
+
+  NS_IMETHOD Run() override
+  {
+    // Already ran?
+    if (!mWrappedRunnable) {
+      return NS_OK;
+    }
+
+    // Are we too early?
+    if ((TimeStamp::NowLoRes() - mDelayedFrom).ToMilliseconds() < mDelay) {
+      return NS_OK; // Let the nsITimer run us.
+    }
+
+    mTimer->Cancel();
+    return DoRun();
+  }
+
+  NS_IMETHOD Notify(nsITimer* aTimer) override
+  {
+    // If we already ran, the timer should have been canceled.
+    MOZ_ASSERT(mWrappedRunnable);
+    MOZ_ASSERT(aTimer == mTimer);
+
+    return DoRun();
+  }
+
+private:
+  ~DelayedRunnable() {}
+
+  nsCOMPtr<nsIRunnable> mWrappedRunnable;
+  nsCOMPtr<nsITimer> mTimer;
+  TimeStamp mDelayedFrom;
+  uint32_t mDelay;
+};
+
+NS_IMPL_ISUPPORTS_INHERITED(DelayedRunnable, Runnable, nsITimerCallback)
+
+} // anonymous namespace
 
 //-----------------------------------------------------------------------------
 
 struct nsThreadShutdownContext
 {
-  nsThreadShutdownContext()
+  nsThreadShutdownContext(nsThread* aTerminatingThread,
+                          nsThread* aJoiningThread,
+                          bool      aAwaitingShutdownAck)
+    : mTerminatingThread(aTerminatingThread)
+    , mJoiningThread(aJoiningThread)
+    , mAwaitingShutdownAck(aAwaitingShutdownAck)
   {
     MOZ_COUNT_CTOR(nsThreadShutdownContext);
   }
@@ -245,27 +319,25 @@ struct nsThreadShutdownContext
   }
 
   // NB: This will be the last reference.
-  RefPtr<nsThread> terminatingThread;
-  nsThread* joiningThread;
-  bool      awaitingShutdownAck;
+  RefPtr<nsThread> mTerminatingThread;
+  nsThread* mJoiningThread;
+  bool      mAwaitingShutdownAck;
 };
 
 // This event is responsible for notifying nsThread::Shutdown that it is time
 // to call PR_JoinThread. It implements nsICancelableRunnable so that it can
 // run on a DOM Worker thread (where all events must implement
 // nsICancelableRunnable.)
-class nsThreadShutdownAckEvent : public nsRunnable,
-                                 public nsICancelableRunnable
+class nsThreadShutdownAckEvent : public CancelableRunnable
 {
 public:
   explicit nsThreadShutdownAckEvent(nsThreadShutdownContext* aCtx)
     : mShutdownContext(aCtx)
   {
   }
-  NS_DECL_ISUPPORTS_INHERITED
   NS_IMETHOD Run() override
   {
-    mShutdownContext->terminatingThread->ShutdownComplete(mShutdownContext);
+    mShutdownContext->mTerminatingThread->ShutdownComplete(mShutdownContext);
     return NS_OK;
   }
   nsresult Cancel() override
@@ -278,11 +350,8 @@ private:
   nsThreadShutdownContext* mShutdownContext;
 };
 
-NS_IMPL_ISUPPORTS_INHERITED(nsThreadShutdownAckEvent, nsRunnable,
-                            nsICancelableRunnable)
-
 // This event is responsible for setting mShutdownContext
-class nsThreadShutdownEvent : public nsRunnable
+class nsThreadShutdownEvent : public Runnable
 {
 public:
   nsThreadShutdownEvent(nsThread* aThr, nsThreadShutdownContext* aCtx)
@@ -431,9 +500,9 @@ nsThread::ThreadFunc(void* aArg)
   nsThreadManager::get()->UnregisterCurrentThread(self);
 
   // Dispatch shutdown ACK
-  MOZ_ASSERT(self->mShutdownContext->terminatingThread == self);
+  MOZ_ASSERT(self->mShutdownContext->mTerminatingThread == self);
   event = do_QueryObject(new nsThreadShutdownAckEvent(self->mShutdownContext));
-  self->mShutdownContext->joiningThread->Dispatch(event, NS_DISPATCH_NORMAL);
+  self->mShutdownContext->mJoiningThread->Dispatch(event, NS_DISPATCH_NORMAL);
 
   // Release any observer of the thread here.
   self->SetObserver(nullptr);
@@ -468,7 +537,9 @@ static bool SaveMemoryReportNearOOM()
   if (needMemoryReport) {
     nsCOMPtr<nsICrashReporter> cr =
       do_GetService("@mozilla.org/toolkit/crash-reporter;1");
-    cr->SaveMemoryReport();
+    if (cr) {
+      cr->SaveMemoryReport();
+    }
   }
 
   return needMemoryReport;
@@ -674,6 +745,18 @@ nsThread::Dispatch(already_AddRefed<nsIRunnable>&& aEvent, uint32_t aFlags)
 }
 
 NS_IMETHODIMP
+nsThread::DelayedDispatch(already_AddRefed<nsIRunnable>&& aEvent, uint32_t aDelayMs)
+{
+  NS_ENSURE_TRUE(!!aDelayMs, NS_ERROR_UNEXPECTED);
+
+  RefPtr<DelayedRunnable> r = new DelayedRunnable(Move(aEvent), aDelayMs);
+  nsresult rv = r->Init();
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  return DispatchInternal(r.forget(), 0, nullptr);
+}
+
+NS_IMETHODIMP
 nsThread::IsOnCurrentThread(bool* aResult)
 {
   *aResult = (PR_GetCurrentThread() == mThread);
@@ -709,7 +792,7 @@ nsThreadShutdownContext*
 nsThread::ShutdownInternal(bool aSync)
 {
   MOZ_ASSERT(mThread);
-
+  MOZ_ASSERT(mThread != PR_GetCurrentThread());
   if (NS_WARN_IF(mThread == PR_GetCurrentThread())) {
     return nullptr;
   }
@@ -728,11 +811,7 @@ nsThread::ShutdownInternal(bool aSync)
 
   nsAutoPtr<nsThreadShutdownContext>& context =
     *currentThread->mRequestedShutdownContexts.AppendElement();
-  context = new nsThreadShutdownContext();
-
-  context->terminatingThread = this;
-  context->joiningThread = currentThread;
-  context->awaitingShutdownAck = aSync;
+  context = new nsThreadShutdownContext(this, currentThread, aSync);
 
   // Set mShutdownContext and wake up the thread in case it is waiting for
   // events to process.
@@ -750,12 +829,12 @@ void
 nsThread::ShutdownComplete(nsThreadShutdownContext* aContext)
 {
   MOZ_ASSERT(mThread);
-  MOZ_ASSERT(aContext->terminatingThread == this);
+  MOZ_ASSERT(aContext->mTerminatingThread == this);
 
-  if (aContext->awaitingShutdownAck) {
+  if (aContext->mAwaitingShutdownAck) {
     // We're in a synchronous shutdown, so tell whatever is up the stack that
     // we're done and unwind the stack so it can call us again.
-    aContext->awaitingShutdownAck = false;
+    aContext->mAwaitingShutdownAck = false;
     return;
   }
 
@@ -778,7 +857,7 @@ nsThread::ShutdownComplete(nsThreadShutdownContext* aContext)
 
   // Delete aContext.
   MOZ_ALWAYS_TRUE(
-    aContext->joiningThread->mRequestedShutdownContexts.RemoveElement(aContext));
+    aContext->mJoiningThread->mRequestedShutdownContexts.RemoveElement(aContext));
 }
 
 void
@@ -806,8 +885,8 @@ nsThread::Shutdown()
 
   // Process events on the current thread until we receive a shutdown ACK.
   // Allows waiting; ensure no locks are held that would deadlock us!
-  while (context->awaitingShutdownAck) {
-    NS_ProcessNextEvent(context->joiningThread, true);
+  while (context->mAwaitingShutdownAck) {
+    NS_ProcessNextEvent(context->mJoiningThread, true);
   }
 
   ShutdownComplete(context);
@@ -1220,6 +1299,12 @@ nsThread::nsNestedEventTarget::Dispatch(already_AddRefed<nsIRunnable>&& aEvent, 
        aFlags, this));
 
   return mThread->DispatchInternal(Move(aEvent), aFlags, this);
+}
+
+NS_IMETHODIMP
+nsThread::nsNestedEventTarget::DelayedDispatch(already_AddRefed<nsIRunnable>&&, uint32_t)
+{
+  return NS_ERROR_NOT_IMPLEMENTED;
 }
 
 NS_IMETHODIMP

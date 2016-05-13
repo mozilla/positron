@@ -690,10 +690,10 @@ class Debugger : private mozilla::LinkedListElement<Debugger>
     JSTrapStatus fireNewGlobalObject(JSContext* cx, Handle<GlobalObject*> global, MutableHandleValue vp);
     JSTrapStatus firePromiseHook(JSContext* cx, Hook hook, HandleObject promise, MutableHandleValue vp);
 
-    JSObject* newVariantWrapper(JSContext* cx, Handle<DebuggerScriptReferent> referent) {
+    NativeObject* newVariantWrapper(JSContext* cx, Handle<DebuggerScriptReferent> referent) {
         return newDebuggerScript(cx, referent);
     }
-    JSObject* newVariantWrapper(JSContext* cx, Handle<DebuggerSourceReferent> referent) {
+    NativeObject* newVariantWrapper(JSContext* cx, Handle<DebuggerSourceReferent> referent) {
         return newDebuggerSource(cx, referent);
     }
 
@@ -715,13 +715,13 @@ class Debugger : private mozilla::LinkedListElement<Debugger>
      * Allocate and initialize a Debugger.Script instance whose referent is
      * |referent|.
      */
-    JSObject* newDebuggerScript(JSContext* cx, Handle<DebuggerScriptReferent> referent);
+    NativeObject* newDebuggerScript(JSContext* cx, Handle<DebuggerScriptReferent> referent);
 
     /*
      * Allocate and initialize a Debugger.Source instance whose referent is
      * |referent|.
      */
-    JSObject* newDebuggerSource(JSContext* cx, Handle<DebuggerSourceReferent> referent);
+    NativeObject* newDebuggerSource(JSContext* cx, Handle<DebuggerSourceReferent> referent);
 
     /*
      * Receive a "new script" event from the engine. A new script was compiled
@@ -1026,6 +1026,46 @@ class Debugger : private mozilla::LinkedListElement<Debugger>
   private:
     Debugger(const Debugger&) = delete;
     Debugger & operator=(const Debugger&) = delete;
+};
+
+class DebuggerObject : public NativeObject
+{
+  public:
+    static const Class class_;
+
+    static NativeObject* initClass(JSContext* cx, HandleObject obj, HandleObject debuggerCtor);
+
+    static DebuggerObject* create(JSContext* cx, HandleObject proto, HandleObject obj,
+                                  HandleNativeObject debugger);
+
+    bool isExtensible(JSContext* cx, bool* result) const;
+
+    bool isSealed(JSContext* cx, bool* result) const {
+        return isSealedHelper(cx, OpSeal, "isSealed", result);
+    }
+
+    bool isFrozen(JSContext* cx, bool* result) const {
+        return isSealedHelper(cx, OpFreeze, "isFrozen", result);
+    }
+
+  private:
+    static const unsigned RESERVED_SLOTS = 1;
+
+    static const JSPropertySpec properties_[];
+#ifdef SPIDERMONKEY_PROMISE
+    static const JSPropertySpec promiseProperties_[];
+#endif // SPIDERMONKEY_PROMISE
+    static const JSFunctionSpec methods_[];
+
+    JSObject* referent() const {
+        JSObject* obj = (JSObject*) getPrivate();
+        MOZ_ASSERT(obj);
+        return obj;
+    }
+
+    enum SealHelperOp { OpSeal, OpFreeze };
+
+    bool isSealedHelper(JSContext* cx, SealHelperOp op, const char* name, bool* result) const;
 };
 
 class BreakpointSite {

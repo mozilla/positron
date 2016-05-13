@@ -14,9 +14,10 @@
 #include "nsISupportsImpl.h"
 #include "ThreadSafeRefcountingWithMainThreadDestruction.h"
 
-class Task;
-
 namespace mozilla {
+
+class Runnable;
+
 namespace layers {
 
 class GeckoContentController
@@ -35,14 +36,6 @@ public:
    * This method will always be called on the Gecko main thread.
    */
   virtual void RequestContentRepaint(const FrameMetrics& aFrameMetrics) = 0;
-
-  /**
-   * Acknowledges the recipt of a scroll offset update for the scrollable
-   * frame with the given scroll id. This is used to maintain consistency
-   * between APZ and other sources of scroll changes.
-   */
-  virtual void AcknowledgeScrollUpdate(const FrameMetrics::ViewID& aScrollId,
-                                       const uint32_t& aScrollGeneration) = 0;
 
   /**
    * Requests handling of a double tap. |aPoint| is in CSS pixels, relative to
@@ -77,7 +70,7 @@ public:
    * in the future.
    * This method must always be called on the controller thread.
    */
-  virtual void PostDelayedTask(Task* aTask, int aDelayMs) = 0;
+  virtual void PostDelayedTask(already_AddRefed<Runnable> aRunnable, int aDelayMs) = 0;
 
   /**
    * APZ uses |FrameMetrics::mCompositionBounds| for hit testing. Sometimes,

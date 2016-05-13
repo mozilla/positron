@@ -232,7 +232,7 @@ MapIteratorObject::createResultPair(JSContext* cx)
     if (!resultPairObj)
         return nullptr;
 
-    Rooted<TaggedProto> proto(cx, resultPairObj->getTaggedProto());
+    Rooted<TaggedProto> proto(cx, resultPairObj->taggedProto());
     ObjectGroup* group = ObjectGroupCompartment::makeGroup(cx, resultPairObj->getClass(), proto);
     if (!group)
         return nullptr;
@@ -410,15 +410,15 @@ WriteBarrierPost(JSRuntime* rt, ValueSet* set, const Value& key)
 
 bool
 MapObject::getKeysAndValuesInterleaved(JSContext* cx, HandleObject obj,
-                                       JS::AutoValueVector* entries)
+                                       JS::MutableHandle<GCVector<JS::Value>> entries)
 {
     ValueMap* map = obj->as<MapObject>().getData();
     if (!map)
         return false;
 
     for (ValueMap::Range r = map->all(); !r.empty(); r.popFront()) {
-        if (!entries->append(r.front().key.get()) ||
-            !entries->append(r.front().value))
+        if (!entries.append(r.front().key.get()) ||
+            !entries.append(r.front().value))
         {
             return false;
         }
@@ -843,29 +843,6 @@ js::InitMapClass(JSContext* cx, HandleObject obj)
 
 /*** SetIterator *********************************************************************************/
 
-namespace {
-
-class SetIteratorObject : public NativeObject
-{
-  public:
-    static const Class class_;
-
-    enum { TargetSlot, KindSlot, RangeSlot, SlotCount };
-    static const JSFunctionSpec methods[];
-    static SetIteratorObject* create(JSContext* cx, HandleObject setobj, ValueSet* data,
-                                     SetObject::IteratorKind kind);
-    static bool next(JSContext* cx, unsigned argc, Value* vp);
-    static void finalize(FreeOp* fop, JSObject* obj);
-
-  private:
-    static inline bool is(HandleValue v);
-    inline ValueSet::Range* range();
-    inline SetObject::IteratorKind kind() const;
-    static bool next_impl(JSContext* cx, const CallArgs& args);
-};
-
-} /* anonymous namespace */
-
 static const ClassOps SetIteratorObjectClassOps = {
     nullptr, /* addProperty */
     nullptr, /* delProperty */
@@ -1075,14 +1052,14 @@ SetObject::initClass(JSContext* cx, JSObject* obj)
 
 
 bool
-SetObject::keys(JSContext* cx, HandleObject obj, JS::AutoValueVector* keys)
+SetObject::keys(JSContext* cx, HandleObject obj, JS::MutableHandle<GCVector<JS::Value>> keys)
 {
     ValueSet* set = obj->as<SetObject>().getData();
     if (!set)
         return false;
 
     for (ValueSet::Range r = set->all(); !r.empty(); r.popFront()) {
-        if (!keys->append(r.front().get()))
+        if (!keys.append(r.front().get()))
             return false;
     }
 

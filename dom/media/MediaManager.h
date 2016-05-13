@@ -277,11 +277,11 @@ public:
     switch (aEvent) {
       case EVENT_FINISHED:
         NS_DispatchToMainThread(
-          NS_NewRunnableMethod(this, &GetUserMediaCallbackMediaStreamListener::NotifyFinished));
+          NewRunnableMethod(this, &GetUserMediaCallbackMediaStreamListener::NotifyFinished));
         break;
       case EVENT_REMOVED:
         NS_DispatchToMainThread(
-          NS_NewRunnableMethod(this, &GetUserMediaCallbackMediaStreamListener::NotifyRemoved));
+          NewRunnableMethod(this, &GetUserMediaCallbackMediaStreamListener::NotifyRemoved));
         break;
       case EVENT_HAS_DIRECT_LISTENERS:
         NotifyDirectListeners(aGraph, true);
@@ -339,7 +339,7 @@ private:
   RefPtr<SourceMediaStream> mStream; // threadsafe refcnt
 };
 
-class GetUserMediaNotificationEvent: public nsRunnable
+class GetUserMediaNotificationEvent: public Runnable
 {
   public:
     enum GetUserMediaStatus {
@@ -389,7 +389,7 @@ typedef enum {
 class MediaManager;
 class GetUserMediaTask;
 
-class ReleaseMediaOperationResource : public nsRunnable
+class ReleaseMediaOperationResource : public Runnable
 {
 public:
   ReleaseMediaOperationResource(already_AddRefed<DOMMediaStream> aStream,
@@ -424,7 +424,7 @@ public:
   static MediaManager* Get();
   static MediaManager* GetIfExists();
   static void StartupInit();
-  static void PostTask(const tracked_objects::Location& from_here, Task* task);
+  static void PostTask(already_AddRefed<Runnable> task);
 #ifdef DEBUG
   static bool IsInMediaThread();
 #endif
@@ -536,7 +536,7 @@ private:
 
   // ONLY access from MainThread so we don't need to lock
   WindowTable mActiveWindows;
-  nsClassHashtable<nsStringHashKey, GetUserMediaTask> mActiveCallbacks;
+  nsRefPtrHashtable<nsStringHashKey, GetUserMediaTask> mActiveCallbacks;
   nsClassHashtable<nsUint64HashKey, nsTArray<nsString>> mCallIds;
 
   // Always exists

@@ -293,7 +293,7 @@ ReleaseOnTarget(SmartPtr<T>& aDoomed, nsIEventTarget* aTarget)
   auto* doomedSupports = static_cast<nsISupports*>(doomedRaw);
 
   nsCOMPtr<nsIRunnable> releaseRunnable =
-    NS_NewNonOwningRunnableMethod(doomedSupports, &nsISupports::Release);
+    NewNonOwningRunnableMethod(doomedSupports, &nsISupports::Release);
   MOZ_ASSERT(releaseRunnable);
 
   if (aTarget) {
@@ -1456,7 +1456,7 @@ private:
 // dispatch itself to the thread pool again in order to close the file input
 // stream.
 class BlobParent::OpenStreamRunnable final
-  : public nsRunnable
+  : public Runnable
 {
   friend class nsRevocableEventPtr<OpenStreamRunnable>;
 
@@ -1600,11 +1600,7 @@ private:
 
     NS_WARN_IF_FALSE(NS_SUCCEEDED(stream->Close()), "Failed to close stream!");
 
-    nsCOMPtr<nsIRunnable> shutdownRunnable =
-      NS_NewRunnableMethod(ioTarget, &nsIThread::Shutdown);
-    MOZ_ASSERT(shutdownRunnable);
-
-    MOZ_ALWAYS_SUCCEEDS(NS_DispatchToMainThread(shutdownRunnable));
+    MOZ_ALWAYS_SUCCEEDS(NS_DispatchToMainThread(NewRunnableMethod(ioTarget, &nsIThread::Shutdown)));
 
     return NS_OK;
   }
@@ -1685,7 +1681,7 @@ private:
   }
 };
 
-NS_IMPL_ISUPPORTS_INHERITED0(BlobParent::OpenStreamRunnable, nsRunnable)
+NS_IMPL_ISUPPORTS_INHERITED0(BlobParent::OpenStreamRunnable, Runnable)
 
 /*******************************************************************************
  * BlobChild::RemoteBlobImpl Declaration
@@ -1824,7 +1820,7 @@ protected:
 };
 
 class BlobChild::RemoteBlobImpl::CreateStreamHelper final
-  : public nsRunnable
+  : public Runnable
 {
   Monitor mMonitor;
   RefPtr<RemoteBlobImpl> mRemoteBlobImpl;
@@ -2138,7 +2134,7 @@ RemoteBlobImpl::Destroy()
   }
 
   nsCOMPtr<nsIRunnable> destroyRunnable =
-    NS_NewNonOwningRunnableMethod(this, &RemoteBlobImpl::Destroy);
+    NewNonOwningRunnableMethod(this, &RemoteBlobImpl::Destroy);
 
   if (mActorTarget) {
     destroyRunnable =
@@ -2428,7 +2424,7 @@ CreateStreamHelper::RunInternal(RemoteBlobImpl* aBaseRemoteBlobImpl,
 }
 
 NS_IMPL_ISUPPORTS_INHERITED0(BlobChild::RemoteBlobImpl::CreateStreamHelper,
-                             nsRunnable)
+                             Runnable)
 
 NS_IMETHODIMP
 BlobChild::RemoteBlobImpl::
@@ -2566,7 +2562,7 @@ RemoteBlobImpl::Destroy()
   }
 
   nsCOMPtr<nsIRunnable> destroyRunnable =
-    NS_NewNonOwningRunnableMethod(this, &RemoteBlobImpl::Destroy);
+    NewNonOwningRunnableMethod(this, &RemoteBlobImpl::Destroy);
 
   if (mActorTarget) {
     destroyRunnable =
@@ -3422,7 +3418,7 @@ BlobChild::NoteDyingRemoteBlobImpl()
   // on the owning thread, so we proxy here if necessary.
   if (!IsOnOwningThread()) {
     nsCOMPtr<nsIRunnable> runnable =
-      NS_NewNonOwningRunnableMethod(this, &BlobChild::NoteDyingRemoteBlobImpl);
+      NewNonOwningRunnableMethod(this, &BlobChild::NoteDyingRemoteBlobImpl);
 
     if (mEventTarget) {
       runnable = new CancelableRunnableWrapper(runnable, mEventTarget);
@@ -4001,7 +3997,7 @@ BlobParent::NoteDyingRemoteBlobImpl()
   // on the main thread, so we proxy here if necessary.
   if (!IsOnOwningThread()) {
     nsCOMPtr<nsIRunnable> runnable =
-      NS_NewNonOwningRunnableMethod(this, &BlobParent::NoteDyingRemoteBlobImpl);
+      NewNonOwningRunnableMethod(this, &BlobParent::NoteDyingRemoteBlobImpl);
 
     if (mEventTarget) {
       runnable = new CancelableRunnableWrapper(runnable, mEventTarget);

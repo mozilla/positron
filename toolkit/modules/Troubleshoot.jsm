@@ -185,7 +185,6 @@ var dataProviders = {
     let data = {
       name: Services.appinfo.name,
       osVersion: sysInfo.getProperty("name") + " " + sysInfo.getProperty("version"),
-      arch: sysInfo.getProperty("arch"),
       version: AppConstants.MOZ_APP_VERSION_DISPLAY,
       buildID: Services.appinfo.appBuildID,
       userAgent: Cc["@mozilla.org/network/protocol;1?name=http"].
@@ -473,6 +472,9 @@ var dataProviders = {
         data.indices = failureIndices.value;
       }
     }
+
+    data.featureLog = gfxInfo.getFeatureLog();
+    data.crashGuards = gfxInfo.getActiveCrashGuards();
 
     completed();
   },

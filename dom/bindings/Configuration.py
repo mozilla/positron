@@ -515,7 +515,8 @@ class Descriptor(DescriptorProvider):
 
             self.proxy = (self.supportsIndexedProperties() or
                           (self.supportsNamedProperties() and
-                           not self.hasNamedPropertiesObject))
+                           not self.hasNamedPropertiesObject) or
+                          self.hasNonOrdinaryGetPrototypeOf())
 
             if self.proxy:
                 if (not self.operations['IndexedGetter'] and
@@ -747,6 +748,9 @@ class Descriptor(DescriptorProvider):
     def supportsNamedProperties(self):
         return self.operations['NamedGetter'] is not None
 
+    def hasNonOrdinaryGetPrototypeOf(self):
+        return self.interface.getExtendedAttribute("NonOrdinaryGetPrototypeOf")
+
     def needsConstructHookHolder(self):
         assert self.interface.hasInterfaceObject()
         return False
@@ -805,6 +809,28 @@ class Descriptor(DescriptorProvider):
         """
         return (self.interface.getExtendedAttribute("Global") or
                 self.interface.getExtendedAttribute("PrimaryGlobal"))
+
+    @property
+    def namedPropertiesEnumerable(self):
+        """
+        Returns whether this interface should have enumerable named properties
+        """
+        assert self.proxy
+        assert self.supportsNamedProperties()
+        iface = self.interface
+        while iface:
+            if iface.getExtendedAttribute("LegacyUnenumerableNamedProperties"):
+                return False
+            iface = iface.parent
+        return True
+
+    @property
+    def registersGlobalNamesOnWindow(self):
+        return (not self.interface.isExternal() and
+                self.interface.hasInterfaceObject() and
+                not self.workers and
+                self.interface.isExposedInWindow() and
+                self.register)
 
 
 # Some utility methods

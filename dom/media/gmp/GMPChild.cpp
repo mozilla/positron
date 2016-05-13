@@ -22,6 +22,7 @@
 #include "mozilla/ipc/ProcessChild.h"
 #include "GMPUtils.h"
 #include "prio.h"
+#include "base/task.h"
 #ifdef MOZ_WIDEVINE_EME
 #include "widevine-adapter/WidevineAdapter.h"
 #endif
@@ -215,7 +216,7 @@ GetAppPaths(nsCString &aAppPath, nsCString &aAppBinaryPath)
 }
 
 bool
-GMPChild::SetMacSandboxInfo()
+GMPChild::SetMacSandboxInfo(MacSandboxPluginType aPluginType)
 {
   if (!mGMPLoader) {
     return false;
@@ -231,7 +232,7 @@ GMPChild::SetMacSandboxInfo()
 
   MacSandboxInfo info;
   info.type = MacSandboxType_Plugin;
-  info.pluginInfo.type = MacSandboxPluginType_GMPlugin_Default;
+  info.pluginInfo.type = aPluginType;
   info.pluginInfo.pluginPath.assign(pluginDirectoryPath.get());
   info.pluginInfo.pluginBinaryPath.assign(pluginFilePath.get());
   info.appPath.assign(appPath.get());
@@ -375,8 +376,18 @@ GMPChild::AnswerStartPlugin(const nsString& aAdapter)
     return false;
   }
 
+#ifdef MOZ_WIDEVINE_EME
+  bool isWidevine = aAdapter.EqualsLiteral("widevine");
+#endif
+
 #if defined(MOZ_GMP_SANDBOX) && defined(XP_MACOSX)
-  if (!SetMacSandboxInfo()) {
+  MacSandboxPluginType pluginType = MacSandboxPluginType_GMPlugin_Default;
+#ifdef MOZ_WIDEVINE_EME
+  if (isWidevine) {
+      pluginType = MacSandboxPluginType_GMPlugin_EME_Widevine;
+  }
+#endif
+  if (!SetMacSandboxInfo(pluginType)) {
     NS_WARNING("Failed to set Mac GMP sandbox info");
     delete platformAPI;
     return false;
@@ -385,7 +396,7 @@ GMPChild::AnswerStartPlugin(const nsString& aAdapter)
 
   GMPAdapter* adapter = nullptr;
 #ifdef MOZ_WIDEVINE_EME
-  if (aAdapter.EqualsLiteral("widevine")) {
+  if (isWidevine) {
     adapter = new WidevineAdapter();
   }
 #endif
@@ -625,8 +636,9 @@ GMPChild::GMPContentChildActorDestroy(GMPContentChild* aGMPContentChild)
     UniquePtr<GMPContentChild>& toDestroy = mGMPContentChildren[i - 1];
     if (toDestroy.get() == aGMPContentChild) {
       SendPGMPContentChildDestroyed();
-      MessageLoop::current()->PostTask(FROM_HERE,
-                                       new DeleteTask<GMPContentChild>(toDestroy.release()));
+      RefPtr<DeleteTask<GMPContentChild>> task =
+        new DeleteTask<GMPContentChild>(toDestroy.release());
+      MessageLoop::current()->PostTask(task.forget());
       mGMPContentChildren.RemoveElementAt(i - 1);
       break;
     }

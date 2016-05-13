@@ -68,6 +68,8 @@
 #endif
 #include "GeckoProfiler.h"
 #include "TextRenderer.h"               // for TextRenderer
+#include "mozilla/layers/CompositorBridgeParent.h"
+#include "TreeTraversal.h"              // for ForEachNode
 
 class gfxContext;
 
@@ -87,11 +89,12 @@ ToLayerComposite(Layer* aLayer)
 
 static void ClearSubtree(Layer* aLayer)
 {
-  ToLayerComposite(aLayer)->CleanupResources();
-  for (Layer* child = aLayer->GetFirstChild(); child;
-       child = child->GetNextSibling()) {
-    ClearSubtree(child);
-  }
+  ForEachNode<ForwardIterator>(
+      aLayer,
+      [] (Layer* layer)
+      {
+        ToLayerComposite(layer)->CleanupResources();
+      });
 }
 
 void
@@ -164,11 +167,11 @@ void
 LayerManagerComposite::BeginTransaction()
 {
   mInTransaction = true;
-  
+
   if (!mCompositor->Ready()) {
     return;
   }
-  
+
   mIsCompositorReady = true;
 }
 
@@ -176,7 +179,7 @@ void
 LayerManagerComposite::BeginTransactionWithDrawTarget(DrawTarget* aTarget, const IntRect& aRect)
 {
   mInTransaction = true;
-  
+
   if (!mCompositor->Ready()) {
     return;
   }
@@ -257,7 +260,7 @@ LayerManagerComposite::PostProcessLayers(Layer* aLayer,
       localOpaque.MoveBy(-*integerTranslation);
     }
   }
- 
+
   // Compute a clip that's the combination of our layer clip with the clip
   // from our ancestors.
   LayerComposite* composite = aLayer->AsLayerComposite();
@@ -392,6 +395,9 @@ LayerManagerComposite::EndTransaction(const TimeStamp& aTimeStamp,
   if (mRoot && !(aFlags & END_NO_IMMEDIATE_REDRAW)) {
     MOZ_ASSERT(!aTimeStamp.IsNull());
     UpdateAndRender();
+
+    mPreviousHeldTextureHosts.Clear();
+    mPreviousHeldTextureHosts.SwapElements(mCurrentHeldTextureHosts);
   } else {
     // Modified the layer tree.
     mGeometryChanged = true;
@@ -788,16 +794,14 @@ LayerManagerComposite::PopGroupForLayerEffects(RefPtr<CompositingRenderTarget> a
 // Used to clear the 'mLayerComposited' flag at the beginning of each Render().
 static void
 ClearLayerFlags(Layer* aLayer) {
-  if (!aLayer) {
-    return;
-  }
-  if (aLayer->AsLayerComposite()) {
-    aLayer->AsLayerComposite()->SetLayerComposited(false);
-  }
-  for (Layer* child = aLayer->GetFirstChild(); child;
-       child = child->GetNextSibling()) {
-    ClearLayerFlags(child);
-  }
+  ForEachNode<ForwardIterator>(
+      aLayer,
+      [] (Layer* layer)
+      {
+        if (layer->AsLayerComposite()) {
+          layer->AsLayerComposite()->SetLayerComposited(false);
+        }
+      });
 }
 
 void
@@ -853,7 +857,7 @@ LayerManagerComposite::Render(const nsIntRegion& aInvalidRegion, const nsIntRegi
   if (!mTarget && !haveLayerEffects &&
       gfxPrefs::Composer2DCompositionEnabled() &&
       composer2D && composer2D->HasHwc() && composer2D->TryRenderWithHwc(mRoot,
-          mCompositor->GetWidget(),
+          mCompositor->GetWidget()->RealWidget(),
           mGeometryChanged,
           mCompositor->HasImageHostOverlays()))
   {
@@ -942,12 +946,13 @@ LayerManagerComposite::Render(const nsIntRegion& aInvalidRegion, const nsIntRegi
       js::ProfileEntry::Category::GRAPHICS);
 
     mCompositor->EndFrame();
-    mCompositor->SetDispAcquireFence(mRoot,
-                                     mCompositor->GetWidget()); // Call after EndFrame()
+
+    // Call after EndFrame()
+    mCompositor->SetDispAcquireFence(mRoot);
   }
 
   if (composer2D) {
-    composer2D->Render(mCompositor->GetWidget());
+    composer2D->Render(mCompositor->GetWidget()->RealWidget());
   }
 
   mCompositor->GetWidget()->PostRender(this);
@@ -1064,7 +1069,7 @@ LayerManagerComposite::RenderToPresentationSurface()
 
 #elif defined(MOZ_WIDGET_GONK)
   CompositorOGL* compositor = mCompositor->AsCompositorOGL();
-  nsScreenGonk* screen = static_cast<nsWindow*>(mCompositor->GetWidget())->GetScreen();
+  nsScreenGonk* screen = static_cast<nsWindow*>(mCompositor->GetWidget()->RealWidget())->GetScreen();
   if (!screen->IsPrimaryScreen()) {
     // Only primary screen support mirroring
     return;
@@ -1163,8 +1168,7 @@ LayerManagerComposite::RenderToPresentationSurface()
 
   mCompositor->EndFrame();
 #ifdef MOZ_WIDGET_GONK
-  mCompositor->SetDispAcquireFence(mRoot,
-                                   mirrorScreenWidget); // Call after EndFrame()
+  mCompositor->SetDispAcquireFence(mRoot); // Call after EndFrame()
 
   RefPtr<Composer2D> composer2D;
   composer2D = mCompositor->GetWidget()->GetComposer2D();
@@ -1203,63 +1207,64 @@ LayerManagerComposite::ComputeRenderIntegrityInternal(Layer* aLayer,
                                                       nsIntRegion& aLowPrecisionScreenRegion,
                                                       const Matrix4x4& aTransform)
 {
-  if (aLayer->GetOpacity() <= 0.f ||
-      (aScreenRegion.IsEmpty() && aLowPrecisionScreenRegion.IsEmpty())) {
-    return;
-  }
-
-  // If the layer's a container, recurse into all of its children
-  ContainerLayer* container = aLayer->AsContainerLayer();
-  if (container) {
-    // Accumulate the transform of intermediate surfaces
-    Matrix4x4 transform = aTransform;
-    if (container->UseIntermediateSurface()) {
-      transform = aLayer->GetEffectiveTransform();
-      transform = aTransform * transform;
-    }
-    for (Layer* child = aLayer->GetFirstChild(); child;
-         child = child->GetNextSibling()) {
-      ComputeRenderIntegrityInternal(child, aScreenRegion, aLowPrecisionScreenRegion, transform);
-    }
-    return;
-  }
-
-  // Only painted layers can be incomplete
-  PaintedLayer* paintedLayer = aLayer->AsPaintedLayer();
-  if (!paintedLayer) {
-    return;
-  }
-
-  // See if there's any incomplete rendering
-  nsIntRegion incompleteRegion = aLayer->GetLocalVisibleRegion().ToUnknownRegion();
-  incompleteRegion.Sub(incompleteRegion, paintedLayer->GetValidRegion());
-
-  if (!incompleteRegion.IsEmpty()) {
-    // Calculate the transform to get between screen and layer space
-    Matrix4x4 transformToScreen = aLayer->GetEffectiveTransform();
-    transformToScreen = aTransform * transformToScreen;
-
-    SubtractTransformedRegion(aScreenRegion, incompleteRegion, transformToScreen);
-
-    // See if there's any incomplete low-precision rendering
-    TiledContentHost* composer = nullptr;
-    LayerComposite* shadow = aLayer->AsLayerComposite();
-    if (shadow) {
-      composer = shadow->GetCompositableHost()->AsTiledContentHost();
-      if (composer) {
-        incompleteRegion.Sub(incompleteRegion, composer->GetValidLowPrecisionRegion());
-        if (!incompleteRegion.IsEmpty()) {
-          SubtractTransformedRegion(aLowPrecisionScreenRegion, incompleteRegion, transformToScreen);
+  ForEachNode<ForwardIterator>(
+      aLayer,
+      [&aScreenRegion, &aLowPrecisionScreenRegion, &aTransform] (Layer* layer)
+      {
+        if (layer->GetOpacity() <= 0.f ||
+            (aScreenRegion.IsEmpty() && aLowPrecisionScreenRegion.IsEmpty())) {
+          return TraversalFlag::Skip;
         }
-      }
-    }
 
-    // If we can't get a valid low precision region, assume it's the same as
-    // the high precision region.
-    if (!composer) {
-      SubtractTransformedRegion(aLowPrecisionScreenRegion, incompleteRegion, transformToScreen);
-    }
-  }
+        // If the layer's a container, recurse into all of its children
+        ContainerLayer* container = layer->AsContainerLayer();
+        if (container) {
+          // Accumulate the transform of intermediate surfaces
+          Matrix4x4 transform = aTransform;
+          if (container->UseIntermediateSurface()) {
+            transform = layer->GetEffectiveTransform();
+            transform = aTransform * transform;
+          }
+          return TraversalFlag::Continue;
+        }
+
+        // Only painted layers can be incomplete
+        PaintedLayer* paintedLayer = layer->AsPaintedLayer();
+        if (!paintedLayer || !container) {
+          return TraversalFlag::Skip;
+        }
+        // See if there's any incomplete rendering
+        nsIntRegion incompleteRegion = layer->GetLocalVisibleRegion().ToUnknownRegion();
+        incompleteRegion.Sub(incompleteRegion, paintedLayer->GetValidRegion());
+
+        if (!incompleteRegion.IsEmpty()) {
+          // Calculate the transform to get between screen and layer space
+          Matrix4x4 transformToScreen = layer->GetEffectiveTransform();
+          transformToScreen = aTransform * transformToScreen;
+
+          SubtractTransformedRegion(aScreenRegion, incompleteRegion, transformToScreen);
+
+          // See if there's any incomplete low-precision rendering
+          TiledContentHost* composer = nullptr;
+          LayerComposite* shadow = layer->AsLayerComposite();
+          if (shadow) {
+            composer = shadow->GetCompositableHost()->AsTiledContentHost();
+            if (composer) {
+              incompleteRegion.Sub(incompleteRegion, composer->GetValidLowPrecisionRegion());
+              if (!incompleteRegion.IsEmpty()) {
+                SubtractTransformedRegion(aLowPrecisionScreenRegion, incompleteRegion, transformToScreen);
+              }
+            }
+          }
+
+          // If we can't get a valid low precision region, assume it's the same as
+          // the high precision region.
+          if (!composer) {
+            SubtractTransformedRegion(aLowPrecisionScreenRegion, incompleteRegion, transformToScreen);
+          }
+        }
+        return TraversalFlag::Skip;
+      });
 }
 
 #ifdef MOZ_WIDGET_ANDROID
@@ -1546,7 +1551,10 @@ LayerComposite::SetLayerManager(LayerManagerComposite* aManager)
 bool
 LayerManagerComposite::AsyncPanZoomEnabled() const
 {
-  return mCompositor->GetWidget()->AsyncPanZoomEnabled();
+  if (CompositorBridgeParent* bridge = mCompositor->GetCompositorBridgeParent()) {
+    return bridge->AsyncPanZoomEnabled();
+  }
+  return false;
 }
 
 nsIntRegion
@@ -1562,6 +1570,19 @@ LayerComposite::GetFullyRenderedRegion() {
   } else {
     return GetShadowVisibleRegion().ToUnknownRegion();
   }
+}
+
+Matrix4x4
+LayerComposite::GetShadowTransform() {
+  Matrix4x4 transform = mShadowTransform;
+  Layer* layer = GetLayer();
+
+  transform.PostScale(layer->GetPostXScale(), layer->GetPostYScale(), 1.0f);
+  if (const ContainerLayer* c = layer->AsContainerLayer()) {
+    transform.PreScale(c->GetPreXScale(), c->GetPreYScale(), 1.0f);
+  }
+
+  return transform;
 }
 
 bool

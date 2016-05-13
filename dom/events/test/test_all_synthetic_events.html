@@ -188,10 +188,6 @@ const kEventConstructors = {
                                                          return e;
                                                        },
                                              },
-  DataStoreChangeEvent:                      { create: function (aName, aProps) {
-                                                         return new DataStoreChangeEvent(aProps);
-                                                       },
-                                             },
   DeviceLightEvent:                          { create: function (aName, aProps) {
                                                          return new DeviceLightEvent(aName, aProps);
                                                        },
@@ -607,6 +603,10 @@ const kEventConstructors = {
                                              },
   WheelEvent:                                { create: function (aName, aProps) {
                                                          return new WheelEvent(aName, aProps);
+                                                       },
+                                             },
+  WebGLContextEvent:                         { create: function (aName, aProps) {
+                                                         return new WebGLContextEvent(aName, aProps);
                                                        },
                                              },
 };

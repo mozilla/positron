@@ -10,7 +10,7 @@ const { Cc, Ci } = require("chrome");
 const { BreakpointActor, setBreakpointAtEntryPoints } = require("devtools/server/actors/breakpoint");
 const { OriginalLocation, GeneratedLocation } = require("devtools/server/actors/common");
 const { createValueGrip } = require("devtools/server/actors/object");
-const { ActorClass, Arg, RetVal, method } = require("devtools/server/protocol");
+const { ActorClass, Arg, RetVal, method } = require("devtools/shared/protocol");
 const DevToolsUtils = require("devtools/shared/DevToolsUtils");
 const { assert, fetch } = DevToolsUtils;
 const { joinURI } = require("devtools/shared/path");
@@ -134,6 +134,8 @@ function resolveURIToLocalPath(aURI) {
  * @param Debugger.Source generatedSource
  *        Optional, passed in when aSourceMap is also passed in. The generated
  *        source object that introduced this source.
+ * @param Boolean isInlineSource
+ *        Optional. True if this is an inline source from a HTML or XUL page.
  * @param String contentType
  *        Optional. The content type of this source, if immediately available.
  */
@@ -238,39 +240,43 @@ let SourceActor = ActorClass({
     }
 
     let localURI = resolveURIToLocalPath(nsuri);
+    if (!localURI) {
+      return;
+    }
 
-    let id = {};
-    if (localURI && mapURIToAddonID(localURI, id)) {
-      this._addonID = id.value;
+    let id = mapURIToAddonID(localURI);
+    if (!id) {
+      return;
+    }
+    this._addonID = id;
 
-      if (localURI instanceof Ci.nsIJARURI) {
-        // The path in the add-on is easy for jar: uris
-        this._addonPath = localURI.JAREntry;
+    if (localURI instanceof Ci.nsIJARURI) {
+      // The path in the add-on is easy for jar: uris
+      this._addonPath = localURI.JAREntry;
+    }
+    else if (localURI instanceof Ci.nsIFileURL) {
+      // For file: uris walk up to find the last directory that is part of the
+      // add-on
+      let target = localURI.file;
+      let path = target.leafName;
+
+      // We can assume that the directory containing the source file is part
+      // of the add-on
+      let root = target.parent;
+      let file = root.parent;
+      while (file && mapURIToAddonID(Services.io.newFileURI(file))) {
+        path = root.leafName + "/" + path;
+        root = file;
+        file = file.parent;
       }
-      else if (localURI instanceof Ci.nsIFileURL) {
-        // For file: uris walk up to find the last directory that is part of the
-        // add-on
-        let target = localURI.file;
-        let path = target.leafName;
 
-        // We can assume that the directory containing the source file is part
-        // of the add-on
-        let root = target.parent;
-        let file = root.parent;
-        while (file && mapURIToAddonID(Services.io.newFileURI(file), {})) {
-          path = root.leafName + "/" + path;
-          root = file;
-          file = file.parent;
-        }
-
-        if (!file) {
-          const error = new Error("Could not find the root of the add-on for " + this.url);
-          DevToolsUtils.reportException("SourceActor.prototype._mapSourceToAddon", error)
-          return;
-        }
-
-        this._addonPath = path;
+      if (!file) {
+        const error = new Error("Could not find the root of the add-on for " + this.url);
+        DevToolsUtils.reportException("SourceActor.prototype._mapSourceToAddon", error)
+        return;
       }
+
+      this._addonPath = path;
     }
   },
 
@@ -345,7 +351,35 @@ let SourceActor = ActorClass({
         // fetching the original text for sourcemapped code, and the
         // page hasn't requested it before (if it has, it was a
         // previous debugging session).
-        let sourceFetched = fetch(this.url, { loadFromCache: this.isInlineSource });
+        let loadFromCache = this.isInlineSource;
+
+        // Fetch the sources with the same principal as the original document
+        let win = this.threadActor._parent.window;
+        let principal, cacheKey;
+        // On xpcshell, we don't have a window but a Sandbox
+        if (!isWorker && win instanceof Ci.nsIDOMWindow) {
+          let webNav = win.QueryInterface(Ci.nsIInterfaceRequestor)
+                          .getInterface(Ci.nsIWebNavigation);
+          let channel = webNav.currentDocumentChannel;
+          principal = channel.loadInfo.loadingPrincipal;
+
+          // Retrieve the cacheKey in order to load POST requests from cache
+          // Note that chrome:// URLs don't support this interface.
+          if (loadFromCache &&
+            webNav.currentDocumentChannel instanceof Ci.nsICacheInfoChannel) {
+            cacheKey = webNav.currentDocumentChannel.cacheKey;
+            assert(
+              cacheKey,
+              "Could not fetch the cacheKey from the related document."
+            );
+          }
+        }
+
+        let sourceFetched = fetch(this.url, {
+          principal,
+          cacheKey,
+          loadFromCache
+        });
 
         // Record the contentType we just learned during fetching
         return sourceFetched

@@ -53,14 +53,6 @@ let log = Log.repository.getLogger("Sync.RemoteTabs");
 
 // A private singleton that does the work.
 let SyncedTabsInternal = {
-  _getClientIcon(id) {
-    let isMobile = Weave.Service.clientsEngine.isMobile(id);
-    if (isMobile) {
-      return "chrome://browser/skin/sync-mobileIcon.png";
-    }
-    return "chrome://browser/skin/sync-desktopIcon.png";
-  },
-
   /* Make a "tab" record. Returns a promise */
   _makeTab: Task.async(function* (client, tab, url, showRemoteIcons) {
     let icon;
@@ -90,8 +82,8 @@ let SyncedTabsInternal = {
     return {
       id: client.id,
       type: "client",
-      name: client.clientName,
-      icon:  this._getClientIcon(client.id),
+      name: Weave.Service.clientsEngine.getClientName(client.id),
+      isMobile: Weave.Service.clientsEngine.isMobile(client.id),
       tabs: []
     };
   }),

@@ -64,7 +64,7 @@ body.dragging .tag-line {
   flex: 1 1 auto;
 
   /* Keep the editor away from the markup view floating scrollbars */
-  -moz-margin-end: 12px;
+  margin-inline-end: 12px;
 }
 
 .html-editor iframe {
@@ -193,6 +193,12 @@ ul.children + .tag-line::before {
   display: inline;
 }
 
+/* Hide HTML void elements (img, hr, br, …) closing tag when the element is not
+ * expanded (it can be if it has pseudo-elements attached) */
+.child.collapsed > .tag-line .void-element .close {
+  display: none;
+}
+
 .closing-bracket {
   pointer-events: none;
 }
@@ -259,42 +265,6 @@ ul.children + .tag-line::before {
   z-index: 1;
 }
 
-/* Selected nodes in the tree should have light selected text.
-   theme-selected doesn't work in this case since the text is a
-   sibling of the class, not a child. */
-.theme-selected ~ .editor,
-.theme-selected ~ .editor .theme-fg-color1,
-.theme-selected ~ .editor .theme-fg-color2,
-.theme-selected ~ .editor .theme-fg-color3,
-.theme-selected ~ .editor .theme-fg-color4,
-.theme-selected ~ .editor .theme-fg-color5,
-.theme-selected ~ .editor .theme-fg-color6,
-.theme-selected ~ .editor .theme-fg-color7 {
-  color: var(--theme-selection-color);
-}
-
-/* In case a node isn't displayed in the page, we fade the syntax highlighting */
-.not-displayed .open,
-.not-displayed .close {
-  opacity: .7;
-}
-
-/* Events */
-.markupview-events {
-  font-size: 8px;
-  font-weight: bold;
-  line-height: 10px;
-  border-radius: 3px;
-  padding: 0px 2px;
-  -moz-margin-start: 5px;
-  -moz-user-select: none;
-}
-
-.markupview-events {
-  background-color: var(--theme-body-color-alt);
-  color: var(--theme-body-background);
-}
-
 /* Firebug Theme */
 
 .theme-firebug .theme-fg-color3 {
@@ -313,4 +283,46 @@ ul.children + .tag-line::before {
 
 .theme-firebug .markupview-events {
   font-size: var(--theme-toolbar-font-size);
+}
+
+/* Selected nodes in the tree should have light selected text.
+   theme-selected doesn't work in this case since the text is a
+   sibling of the class, not a child. */
+.theme-selected ~ .editor,
+.theme-selected ~ .editor .theme-fg-color1,
+.theme-selected ~ .editor .theme-fg-color2,
+.theme-selected ~ .editor .theme-fg-color3,
+.theme-selected ~ .editor .theme-fg-color4,
+.theme-selected ~ .editor .theme-fg-color5,
+.theme-selected ~ .editor .theme-fg-color6,
+.theme-selected ~ .editor .theme-fg-color7 {
+  color: var(--theme-selection-color);
+}
+
+/* Make sure even text nodes are white when selected in the Inspector panel. */
+.theme-firebug .theme-selected ~ .editor .open,
+.theme-firebug .theme-selected ~ .editor .close {
+  color: var(--theme-selection-color);
+}
+
+/* In case a node isn't displayed in the page, we fade the syntax highlighting */
+.not-displayed .open,
+.not-displayed .close {
+  opacity: .7;
+}
+
+/* Events */
+.markupview-events {
+  font-size: 8px;
+  font-weight: bold;
+  line-height: 10px;
+  border-radius: 3px;
+  padding: 0px 2px;
+  margin-inline-start: 5px;
+  -moz-user-select: none;
+}
+
+.markupview-events {
+  background-color: var(--theme-body-color-alt);
+  color: var(--theme-body-background);
 }

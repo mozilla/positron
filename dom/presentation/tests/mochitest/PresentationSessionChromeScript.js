@@ -9,6 +9,9 @@ Cu.import('resource://gre/modules/XPCOMUtils.jsm');
 Cu.import('resource://gre/modules/Services.jsm');
 Cu.import('resource://gre/modules/Timer.jsm');
 
+const uuidGenerator = Cc["@mozilla.org/uuid-generator;1"]
+                      .getService(Ci.nsIUUIDGenerator);
+
 function registerMockedFactory(contractId, mockedClassId, mockedFactory) {
   var originalClassId, originalFactory;
 
@@ -41,7 +44,7 @@ function registerOriginalFactory(contractId, mockedClassId, mockedFactory, origi
   }
 }
 
-const sessionId = 'test-session-id';
+const sessionId = 'test-session-id-' + uuidGenerator.generateUUID().toString();
 
 const address = Cc["@mozilla.org/supports-cstring;1"]
                   .createInstance(Ci.nsISupportsCString);
@@ -227,7 +230,7 @@ const mockedSessionTransport = {
   buildTCPSenderTransport: function(transport, listener) {
     sendAsyncMessage('data-transport-initialized');
     this._listener = listener;
-    this._type = Ci.nsIPresentationSessionTransportBuilder.TYPE_SENDER;
+    this._role = Ci.nsIPresentationService.ROLE_CONTROLLER;
 
     setTimeout(()=>{
       this._listener.onSessionTransport(this);
@@ -237,7 +240,7 @@ const mockedSessionTransport = {
   },
   buildTCPReceiverTransport: function(description, listener) {
     this._listener = listener;
-    this._type = Ci.nsIPresentationSessionTransportBuilder.TYPE_RECEIVER;
+    this._role = Ci.nsIPresentationService.ROLE_CONTROLLER;
 
     var addresses = description.QueryInterface(Ci.nsIPresentationChannelDescription).tcpAddress;
     this._selfAddress = {
@@ -253,10 +256,10 @@ const mockedSessionTransport = {
     }, 0);
   },
   // in-process case
-  buildDataChannelTransport: function(type, window, controlChannel, listener) {
+  buildDataChannelTransport: function(role, window, controlChannel, listener) {
     dump("build data channel transport\n");
     this._listener = listener;
-    this._type = type;
+    this._role = role;
 
     var hasNavigator = window ? (typeof window.navigator != "undefined") : false;
     sendAsyncMessage('check-navigator', hasNavigator);
@@ -330,8 +333,6 @@ const mockedRequestUIGlue = {
 };
 
 // Register mocked factories.
-const uuidGenerator = Cc["@mozilla.org/uuid-generator;1"]
-                      .getService(Ci.nsIUUIDGenerator);
 const originalFactoryData = [];
 originalFactoryData.push(registerMockedFactory("@mozilla.org/presentation-device/prompt;1",
                                                uuidGenerator.generateUUID(),

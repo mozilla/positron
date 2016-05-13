@@ -30,10 +30,7 @@ typedef void (nsServerSocket:: *nsServerSocketFunc)(void);
 static nsresult
 PostEvent(nsServerSocket *s, nsServerSocketFunc func)
 {
-  nsCOMPtr<nsIRunnable> ev = NS_NewRunnableMethod(s, func);
-  if (!ev)
-    return NS_ERROR_OUT_OF_MEMORY;
-
+  nsCOMPtr<nsIRunnable> ev = NewRunnableMethod(s, func);
   if (!gSocketTransportService)
     return NS_ERROR_FAILURE;
 
@@ -129,7 +126,7 @@ nsServerSocket::TryAttach()
   if (!gSocketTransportService->CanAttachSocket())
   {
     nsCOMPtr<nsIRunnable> event =
-      NS_NewRunnableMethod(this, &nsServerSocket::OnMsgAttach);
+      NewRunnableMethod(this, &nsServerSocket::OnMsgAttach);
     if (!event)
       return NS_ERROR_OUT_OF_MEMORY;
 
@@ -435,7 +432,7 @@ public:
   NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSISERVERSOCKETLISTENER
 
-  class OnSocketAcceptedRunnable : public nsRunnable
+  class OnSocketAcceptedRunnable : public Runnable
   {
   public:
     OnSocketAcceptedRunnable(const nsMainThreadPtrHandle<nsIServerSocketListener>& aListener,
@@ -454,7 +451,7 @@ public:
     nsCOMPtr<nsISocketTransport> mTransport;
   };
 
-  class OnStopListeningRunnable : public nsRunnable
+  class OnStopListeningRunnable : public Runnable
   {
   public:
     OnStopListeningRunnable(const nsMainThreadPtrHandle<nsIServerSocketListener>& aListener,

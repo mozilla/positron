@@ -3987,7 +3987,7 @@ UpgradeIndexDataValuesFunction::OnFunctionCall(mozIStorageValueArray* aArguments
   rv = MakeCompressedIndexDataValues(oldIdv, newIdv, &newIdvLength);
 
   std::pair<uint8_t*, int> data(newIdv.release(), newIdvLength);
-  
+
   nsCOMPtr<nsIVariant> result = new storage::AdoptedBlobVariant(data);
 
   result.forget(aResult);
@@ -5364,7 +5364,7 @@ private:
 };
 
 class ConnectionPool::ConnectionRunnable
-  : public nsRunnable
+  : public Runnable
 {
 protected:
   DatabaseInfo* mDatabaseInfo;
@@ -5512,7 +5512,7 @@ protected:
 };
 
 class ConnectionPool::FinishCallbackWrapper final
-  : public nsRunnable
+  : public Runnable
 {
   RefPtr<ConnectionPool> mConnectionPool;
   RefPtr<FinishCallback> mCallback;
@@ -5605,7 +5605,7 @@ public:
 };
 
 class ConnectionPool::ThreadRunnable final
-  : public nsRunnable
+  : public Runnable
 {
   // Only touched on the background thread.
   static uint32_t sNextSerialNumber;
@@ -5690,7 +5690,7 @@ private:
  ******************************************************************************/
 
 class DatabaseOperationBase
-  : public nsRunnable
+  : public Runnable
   , public mozIStorageProgressHandler
 {
   friend class UpgradeFileIdsFunction;
@@ -6079,7 +6079,7 @@ private:
 };
 
 class WaitForTransactionsHelper final
-  : public nsRunnable
+  : public Runnable
 {
   nsCOMPtr<nsIEventTarget> mOwningThread;
   const nsCString mDatabaseId;
@@ -6991,12 +6991,21 @@ private:
   RecvDeleteObjectStore(const int64_t& aObjectStoreId) override;
 
   virtual bool
+  RecvRenameObjectStore(const int64_t& aObjectStoreId,
+                        const nsString& aName) override;
+
+  virtual bool
   RecvCreateIndex(const int64_t& aObjectStoreId,
                   const IndexMetadata& aMetadata) override;
 
   virtual bool
   RecvDeleteIndex(const int64_t& aObjectStoreId,
                   const int64_t& aIndexId) override;
+
+  virtual bool
+  RecvRenameIndex(const int64_t& aObjectStoreId,
+                  const int64_t& aIndexId,
+                  const nsString& aName) override;
 
   virtual PBackgroundIDBRequestParent*
   AllocPBackgroundIDBRequestParent(const RequestParams& aParams) override;
@@ -7747,6 +7756,30 @@ private:
   DoDatabaseWork(DatabaseConnection* aConnection) override;
 };
 
+class RenameObjectStoreOp final
+  : public VersionChangeTransactionOp
+{
+  friend class VersionChangeTransaction;
+
+  const RefPtr<FullObjectStoreMetadata> mMetadata;
+
+private:
+  // Only created by VersionChangeTransaction.
+  RenameObjectStoreOp(VersionChangeTransaction* aTransaction,
+                      FullObjectStoreMetadata* const aMetadata)
+    : VersionChangeTransactionOp(aTransaction)
+    , mMetadata(aMetadata)
+  {
+    MOZ_ASSERT(aMetadata->mCommonMetadata.id());
+  }
+
+  ~RenameObjectStoreOp()
+  { }
+
+  virtual nsresult
+  DoDatabaseWork(DatabaseConnection* aConnection) override;
+};
+
 class CreateIndexOp final
   : public VersionChangeTransactionOp
 {
@@ -7918,6 +7951,33 @@ private:
   RemoveReferencesToIndex(DatabaseConnection* aConnection,
                           const Key& aObjectDataKey,
                           nsTArray<IndexDataValue>& aIndexValues);
+
+  virtual nsresult
+  DoDatabaseWork(DatabaseConnection* aConnection) override;
+};
+
+class RenameIndexOp final
+  : public VersionChangeTransactionOp
+{
+  friend class VersionChangeTransaction;
+
+  const RefPtr<FullIndexMetadata> mMetadata;
+  const int64_t mObjectStoreId;
+
+private:
+  // Only created by VersionChangeTransaction.
+  RenameIndexOp(VersionChangeTransaction* aTransaction,
+                FullIndexMetadata* const aMetadata,
+                int64_t aObjectStoreId)
+    : VersionChangeTransactionOp(aTransaction)
+    , mMetadata(aMetadata)
+    , mObjectStoreId(aObjectStoreId)
+  {
+    MOZ_ASSERT(aMetadata->mCommonMetadata.id());
+  }
+
+  ~RenameIndexOp()
+  { }
 
   virtual nsresult
   DoDatabaseWork(DatabaseConnection* aConnection) override;
@@ -8537,7 +8597,7 @@ private:
 };
 
 class GetFileReferencesHelper final
-  : public nsRunnable
+  : public Runnable
 {
   PersistenceType mPersistenceType;
   nsCString mOrigin;
@@ -8583,7 +8643,7 @@ private:
 };
 
 class FlushPendingFileDeletionsRunnable final
-  : public nsRunnable
+  : public Runnable
 {
 private:
   ~FlushPendingFileDeletionsRunnable()
@@ -8912,7 +8972,7 @@ private:
 };
 
 class Maintenance final
-  : public nsRunnable
+  : public Runnable
   , public OpenDirectoryListener
 {
   struct DirectoryInfo;
@@ -9140,7 +9200,7 @@ struct Maintenance::DirectoryInfo final
 };
 
 class DatabaseMaintenance final
-  : public nsRunnable
+  : public Runnable
 {
   // The minimum amount of time that has passed since the last vacuum before we
   // will attempt to analyze the database for fragmentation.
@@ -11823,7 +11883,7 @@ ConnectionPool::ShutdownThread(ThreadInfo& aThreadInfo)
   MOZ_ALWAYS_SUCCEEDS(thread->Dispatch(runnable, NS_DISPATCH_NORMAL));
 
   nsCOMPtr<nsIRunnable> shutdownRunnable =
-    NS_NewRunnableMethod(thread, &nsIThread::Shutdown);
+    NewRunnableMethod(thread, &nsIThread::Shutdown);
   MOZ_ALWAYS_SUCCEEDS(NS_DispatchToMainThread(shutdownRunnable));
 
   mTotalThreadCount--;
@@ -11929,7 +11989,7 @@ ConnectionPool::ScheduleTransaction(TransactionInfo* aTransactionInfo,
         // We need a thread right now so force all idle processing to stop by
         // posting a dummy runnable to each thread that might be doing idle
         // maintenance.
-        nsCOMPtr<nsIRunnable> runnable = new nsRunnable();
+        nsCOMPtr<nsIRunnable> runnable = new Runnable();
 
         for (uint32_t index = mDatabasesPerformingIdleMaintenance.Length();
              index > 0;
@@ -12562,7 +12622,7 @@ FinishCallbackWrapper::~FinishCallbackWrapper()
   MOZ_ASSERT(!mCallback);
 }
 
-NS_IMPL_ISUPPORTS_INHERITED0(ConnectionPool::FinishCallbackWrapper, nsRunnable)
+NS_IMPL_ISUPPORTS_INHERITED0(ConnectionPool::FinishCallbackWrapper, Runnable)
 
 nsresult
 ConnectionPool::
@@ -12622,7 +12682,7 @@ ThreadRunnable::~ThreadRunnable()
   MOZ_ASSERT(!mContinueRunning);
 }
 
-NS_IMPL_ISUPPORTS_INHERITED0(ConnectionPool::ThreadRunnable, nsRunnable)
+NS_IMPL_ISUPPORTS_INHERITED0(ConnectionPool::ThreadRunnable, Runnable)
 
 nsresult
 ConnectionPool::
@@ -13335,8 +13395,7 @@ WaitForTransactionsHelper::CallCallback()
   mState = State::Complete;
 }
 
-NS_IMPL_ISUPPORTS_INHERITED0(WaitForTransactionsHelper,
-                             nsRunnable)
+NS_IMPL_ISUPPORTS_INHERITED0(WaitForTransactionsHelper, Runnable)
 
 NS_IMETHODIMP
 WaitForTransactionsHelper::Run()
@@ -13669,7 +13728,7 @@ Database::MaybeCloseConnection()
       IsClosed() &&
       mDirectoryLock) {
     nsCOMPtr<nsIRunnable> callback =
-      NS_NewRunnableMethod(this, &Database::ConnectionClosedCallback);
+      NewRunnableMethod(this, &Database::ConnectionClosedCallback);
 
     RefPtr<WaitForTransactionsHelper> helper =
       new WaitForTransactionsHelper(Id(), callback);
@@ -15564,6 +15623,54 @@ VersionChangeTransaction::RecvDeleteObjectStore(const int64_t& aObjectStoreId)
 }
 
 bool
+VersionChangeTransaction::RecvRenameObjectStore(const int64_t& aObjectStoreId,
+                                                const nsString& aName)
+{
+  AssertIsOnBackgroundThread();
+
+  if (NS_WARN_IF(!aObjectStoreId)) {
+    ASSERT_UNLESS_FUZZING();
+    return false;
+  }
+
+  const RefPtr<FullDatabaseMetadata> dbMetadata = GetDatabase()->Metadata();
+  MOZ_ASSERT(dbMetadata);
+  MOZ_ASSERT(dbMetadata->mNextObjectStoreId > 0);
+
+  if (NS_WARN_IF(aObjectStoreId >= dbMetadata->mNextObjectStoreId)) {
+    ASSERT_UNLESS_FUZZING();
+    return false;
+  }
+
+  RefPtr<FullObjectStoreMetadata> foundMetadata =
+    GetMetadataForObjectStoreId(aObjectStoreId);
+
+  if (NS_WARN_IF(!foundMetadata)) {
+    ASSERT_UNLESS_FUZZING();
+    return false;
+  }
+
+  if (NS_WARN_IF(mCommitOrAbortReceived)) {
+    ASSERT_UNLESS_FUZZING();
+    return false;
+  }
+
+  foundMetadata->mCommonMetadata.name() = aName;
+
+  RefPtr<RenameObjectStoreOp> renameOp =
+    new RenameObjectStoreOp(this, foundMetadata);
+
+  if (NS_WARN_IF(!renameOp->Init(this))) {
+    renameOp->Cleanup();
+    return false;
+  }
+
+  renameOp->DispatchToConnectionPool();
+
+  return true;
+}
+
+bool
 VersionChangeTransaction::RecvCreateIndex(const int64_t& aObjectStoreId,
                                           const IndexMetadata& aMetadata)
 {
@@ -15714,6 +15821,74 @@ VersionChangeTransaction::RecvDeleteIndex(const int64_t& aObjectStoreId,
   }
 
   op->DispatchToConnectionPool();
+
+  return true;
+}
+
+bool
+VersionChangeTransaction::RecvRenameIndex(const int64_t& aObjectStoreId,
+                                          const int64_t& aIndexId,
+                                          const nsString& aName)
+{
+  AssertIsOnBackgroundThread();
+
+  if (NS_WARN_IF(!aObjectStoreId)) {
+    ASSERT_UNLESS_FUZZING();
+    return false;
+  }
+
+  if (NS_WARN_IF(!aIndexId)) {
+    ASSERT_UNLESS_FUZZING();
+    return false;
+  }
+
+  const RefPtr<FullDatabaseMetadata> dbMetadata = GetDatabase()->Metadata();
+  MOZ_ASSERT(dbMetadata);
+  MOZ_ASSERT(dbMetadata->mNextObjectStoreId > 0);
+  MOZ_ASSERT(dbMetadata->mNextIndexId > 0);
+
+  if (NS_WARN_IF(aObjectStoreId >= dbMetadata->mNextObjectStoreId)) {
+    ASSERT_UNLESS_FUZZING();
+    return false;
+  }
+
+  if (NS_WARN_IF(aIndexId >= dbMetadata->mNextIndexId)) {
+    ASSERT_UNLESS_FUZZING();
+    return false;
+  }
+
+  RefPtr<FullObjectStoreMetadata> foundObjectStoreMetadata =
+    GetMetadataForObjectStoreId(aObjectStoreId);
+
+  if (NS_WARN_IF(!foundObjectStoreMetadata)) {
+    ASSERT_UNLESS_FUZZING();
+    return false;
+  }
+
+  RefPtr<FullIndexMetadata> foundIndexMetadata =
+    GetMetadataForIndexId(foundObjectStoreMetadata, aIndexId);
+
+  if (NS_WARN_IF(!foundIndexMetadata)) {
+    ASSERT_UNLESS_FUZZING();
+    return false;
+  }
+
+  if (NS_WARN_IF(mCommitOrAbortReceived)) {
+    ASSERT_UNLESS_FUZZING();
+    return false;
+  }
+
+  foundIndexMetadata->mCommonMetadata.name() = aName;
+
+  RefPtr<RenameIndexOp> renameOp =
+    new RenameIndexOp(this, foundIndexMetadata, aObjectStoreId);
+
+  if (NS_WARN_IF(!renameOp->Init(this))) {
+    renameOp->Cleanup();
+    return false;
+  }
+
+  renameOp->DispatchToConnectionPool();
 
   return true;
 }
@@ -17747,7 +17922,7 @@ Maintenance::Finish()
   mState = State::Complete;
 }
 
-NS_IMPL_ISUPPORTS_INHERITED0(Maintenance, nsRunnable)
+NS_IMPL_ISUPPORTS_INHERITED0(Maintenance, Runnable)
 
 NS_IMETHODIMP
 Maintenance::Run()
@@ -19392,7 +19567,7 @@ DatabaseOperationBase::ObjectStoreHasIndexes(DatabaseConnection* aConnection,
 }
 
 NS_IMPL_ISUPPORTS_INHERITED(DatabaseOperationBase,
-                            nsRunnable,
+                            Runnable,
                             mozIStorageProgressHandler)
 
 NS_IMETHODIMP
@@ -21415,7 +21590,7 @@ OpenDatabaseOp::SendResults()
     mDatabase = nullptr;
   } else if (mDirectoryLock) {
     nsCOMPtr<nsIRunnable> callback =
-      NS_NewRunnableMethod(this, &OpenDatabaseOp::ConnectionClosedCallback);
+      NewRunnableMethod(this, &OpenDatabaseOp::ConnectionClosedCallback);
 
     RefPtr<WaitForTransactionsHelper> helper =
       new WaitForTransactionsHelper(mDatabaseId, callback);
@@ -23485,6 +23660,91 @@ DeleteObjectStoreOp::DoDatabaseWork(DatabaseConnection* aConnection)
   return NS_OK;
 }
 
+nsresult
+RenameObjectStoreOp::DoDatabaseWork(DatabaseConnection* aConnection)
+{
+  MOZ_ASSERT(aConnection);
+  aConnection->AssertIsOnConnectionThread();
+
+  PROFILER_LABEL("IndexedDB",
+                 "RenameObjectStoreOp::DoDatabaseWork",
+                 js::ProfileEntry::Category::STORAGE);
+
+  if (NS_WARN_IF(IndexedDatabaseManager::InLowDiskSpaceMode())) {
+    return NS_ERROR_DOM_INDEXEDDB_QUOTA_ERR;
+  }
+
+#ifdef DEBUG
+  {
+    // Make sure that we're not renaming an object store with the same name as
+    // another that already exists. This should be impossible because we should
+    // have thrown an error long before now...
+    DatabaseConnection::CachedStatement stmt;
+    MOZ_ALWAYS_SUCCEEDS(
+      aConnection->GetCachedStatement(NS_LITERAL_CSTRING(
+        "SELECT name "
+          "FROM object_store "
+          "WHERE name = :name "
+          "AND id != :id;"),
+        &stmt));
+
+    MOZ_ALWAYS_SUCCEEDS(
+      stmt->BindStringByName(NS_LITERAL_CSTRING("name"),
+                             mMetadata->mCommonMetadata.name()));
+
+    MOZ_ALWAYS_SUCCEEDS(
+      stmt->BindInt64ByName(NS_LITERAL_CSTRING("id"),
+                            mMetadata->mCommonMetadata.id()));
+
+    bool hasResult;
+    MOZ_ALWAYS_SUCCEEDS(stmt->ExecuteStep(&hasResult));
+    MOZ_ASSERT(!hasResult);
+  }
+#endif
+
+  DatabaseConnection::AutoSavepoint autoSave;
+  nsresult rv = autoSave.Start(Transaction());
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  DatabaseConnection::CachedStatement stmt;
+  rv = aConnection->GetCachedStatement(NS_LITERAL_CSTRING(
+    "UPDATE object_store "
+      "SET name = :name "
+      "WHERE id = :id;"),
+    &stmt);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  rv = stmt->BindStringByName(NS_LITERAL_CSTRING("name"),
+                              mMetadata->mCommonMetadata.name());
+
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  rv = stmt->BindInt64ByName(NS_LITERAL_CSTRING("id"),
+                             mMetadata->mCommonMetadata.id());
+
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  rv = stmt->Execute();
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  rv = autoSave.Commit();
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  return NS_OK;
+}
+
 CreateIndexOp::CreateIndexOp(VersionChangeTransaction* aTransaction,
                              const int64_t aObjectStoreId,
                              const IndexMetadata& aMetadata)
@@ -23793,7 +24053,7 @@ NormalJSRuntime::Init()
   }
 
   // Not setting this will cause JS_CHECK_RECURSION to report false positives.
-  JS_SetNativeStackQuota(mRuntime, 128 * sizeof(size_t) * 1024); 
+  JS_SetNativeStackQuota(mRuntime, 128 * sizeof(size_t) * 1024);
 
   mContext = JS_NewContext(mRuntime, 0);
   if (NS_WARN_IF(!mContext)) {
@@ -24498,6 +24758,99 @@ DeleteIndexOp::DoDatabaseWork(DatabaseConnection* aConnection)
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }
+
+  return NS_OK;
+}
+
+nsresult
+RenameIndexOp::DoDatabaseWork(DatabaseConnection* aConnection)
+{
+  MOZ_ASSERT(aConnection);
+  aConnection->AssertIsOnConnectionThread();
+
+  PROFILER_LABEL("IndexedDB",
+                 "RenameIndexOp::DoDatabaseWork",
+                 js::ProfileEntry::Category::STORAGE);
+
+  if (NS_WARN_IF(IndexedDatabaseManager::InLowDiskSpaceMode())) {
+    return NS_ERROR_DOM_INDEXEDDB_QUOTA_ERR;
+  }
+
+#ifdef DEBUG
+  {
+    // Make sure that we're not renaming an index with the same name as another
+    // that already exists. This should be impossible because we should have
+    // thrown an error long before now...
+    DatabaseConnection::CachedStatement stmt;
+    MOZ_ALWAYS_SUCCEEDS(
+      aConnection->GetCachedStatement(NS_LITERAL_CSTRING(
+        "SELECT name "
+          "FROM object_store_index "
+          "WHERE object_store_id = :object_store_id "
+           "AND name = :name "
+           "AND id != :id;"),
+        &stmt));
+
+    MOZ_ALWAYS_SUCCEEDS(
+      stmt->BindInt64ByName(NS_LITERAL_CSTRING("object_store_id"),
+                            mObjectStoreId));
+
+    MOZ_ALWAYS_SUCCEEDS(
+      stmt->BindStringByName(NS_LITERAL_CSTRING("name"),
+                             mMetadata->mCommonMetadata.name()));
+
+    MOZ_ALWAYS_SUCCEEDS(
+      stmt->BindInt64ByName(NS_LITERAL_CSTRING("id"),
+                            mMetadata->mCommonMetadata.id()));
+
+    bool hasResult;
+    MOZ_ALWAYS_SUCCEEDS(stmt->ExecuteStep(&hasResult));
+    MOZ_ASSERT(!hasResult);
+  }
+#else
+  Unused << mObjectStoreId;
+#endif
+
+  DatabaseConnection::AutoSavepoint autoSave;
+  nsresult rv = autoSave.Start(Transaction());
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  DatabaseConnection::CachedStatement stmt;
+  rv = aConnection->GetCachedStatement(NS_LITERAL_CSTRING(
+    "UPDATE object_store_index "
+      "SET name = :name "
+      "WHERE id = :id;"),
+    &stmt);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  rv = stmt->BindStringByName(NS_LITERAL_CSTRING("name"),
+                              mMetadata->mCommonMetadata.name());
+
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  rv = stmt->BindInt64ByName(NS_LITERAL_CSTRING("id"),
+                             mMetadata->mCommonMetadata.id());
+
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  rv = stmt->Execute();
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  rv = autoSave.Commit();
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
 
   return NS_OK;
 }

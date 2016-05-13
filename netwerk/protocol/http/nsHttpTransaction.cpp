@@ -35,7 +35,7 @@
 #include "nsIInputStream.h"
 #include "nsITransport.h"
 #include "nsIOService.h"
-#include "nsISchedulingContext.h"
+#include "nsIRequestContext.h"
 #include <algorithm>
 
 #ifdef MOZ_WIDGET_GONK
@@ -101,15 +101,15 @@ nsHttpTransaction::nsHttpTransaction()
     , mCaps(0)
     , mClassification(CLASS_GENERAL)
     , mPipelinePosition(0)
-    , mCapsToClear(0)
     , mHttpVersion(NS_HTTP_VERSION_UNKNOWN)
     , mHttpResponseCode(0)
+    , mCapsToClear(0)
+    , mResponseIsComplete(false)
     , mClosed(false)
     , mConnected(false)
     , mHaveStatusLine(false)
     , mHaveAllHeaders(false)
     , mTransactionDone(false)
-    , mResponseIsComplete(false)
     , mDidContentStart(false)
     , mNoContent(false)
     , mSentData(false)
@@ -181,27 +181,32 @@ nsHttpTransaction::Classify()
     if (!(mCaps & NS_HTTP_ALLOW_PIPELINING))
         return (mClassification = CLASS_SOLO);
 
-    if (mRequestHead->PeekHeader(nsHttp::If_Modified_Since) ||
-        mRequestHead->PeekHeader(nsHttp::If_None_Match))
+    if (mRequestHead->HasHeader(nsHttp::If_Modified_Since) ||
+        mRequestHead->HasHeader(nsHttp::If_None_Match))
         return (mClassification = CLASS_REVALIDATION);
 
-    const char *accept = mRequestHead->PeekHeader(nsHttp::Accept);
-    if (accept && !PL_strncmp(accept, "image/", 6))
+    nsAutoCString accept;
+    bool hasAccept = NS_SUCCEEDED(mRequestHead->GetHeader(nsHttp::Accept, accept));
+    if (hasAccept && StringBeginsWith(accept, NS_LITERAL_CSTRING("image/"))) {
         return (mClassification = CLASS_IMAGE);
+    }
 
-    if (accept && !PL_strncmp(accept, "text/css", 8))
+    if (hasAccept && StringBeginsWith(accept, NS_LITERAL_CSTRING("text/css"))) {
         return (mClassification = CLASS_SCRIPT);
+    }
 
     mClassification = CLASS_GENERAL;
 
-    int32_t queryPos = mRequestHead->RequestURI().FindChar('?');
+    nsAutoCString requestURI;
+    mRequestHead->RequestURI(requestURI);
+    int32_t queryPos = requestURI.FindChar('?');
     if (queryPos == kNotFound) {
-        if (StringEndsWith(mRequestHead->RequestURI(),
+        if (StringEndsWith(requestURI,
                            NS_LITERAL_CSTRING(".js")))
             mClassification = CLASS_SCRIPT;
     }
     else if (queryPos >= 3 &&
-             Substring(mRequestHead->RequestURI(), queryPos - 3, 3).
+             Substring(requestURI, queryPos - 3, 3).
              EqualsLiteral(".js")) {
         mClassification = CLASS_SCRIPT;
     }
@@ -299,7 +304,7 @@ nsHttpTransaction::Init(uint32_t caps,
     //   containing a message-body MUST include a valid Content-Length header
     //   field unless the server is known to be HTTP/1.1 compliant.
     if ((requestHead->IsPost() || requestHead->IsPut()) &&
-        !requestBody && !requestHead->PeekHeader(nsHttp::Transfer_Encoding)) {
+        !requestBody && !requestHead->HasHeader(nsHttp::Transfer_Encoding)) {
         requestHead->SetHeader(nsHttp::Content_Length, NS_LITERAL_CSTRING("0"));
     }
 
@@ -869,7 +874,7 @@ nsHttpTransaction::SaveNetworkStats(bool enforce)
 
     // Create the event to save the network statistics.
     // the event is then dispatched to the main thread.
-    RefPtr<nsRunnable> event =
+    RefPtr<Runnable> event =
         new SaveNetworkStatsEvent(mAppId, mIsInIsolatedMozBrowser, mActiveNetworkInfo,
                                   mCountRecv, mCountSent, false);
     NS_DispatchToMainThread(event);
@@ -924,6 +929,12 @@ nsHttpTransaction::Close(nsresult reason)
             PR_Now(), 0, EmptyCString());
     }
 
+    // we must no longer reference the connection!  find out if the
+    // connection was being reused before letting it go.
+    bool connReused = false;
+    if (mConnection) {
+        connReused = mConnection->IsReused();
+    }
     mConnected = false;
     mTunnelProvider = nullptr;
 
@@ -977,7 +988,7 @@ nsHttpTransaction::Close(nsresult reason)
 
         if (!mReceivedData &&
             ((mRequestHead && mRequestHead->IsSafeMethod()) ||
-             !reallySentData)) {
+             !reallySentData || connReused)) {
             // if restarting fails, then we must proceed to close the pipe,
             // which will notify the channel that the transaction failed.
 
@@ -1553,6 +1564,7 @@ nsHttpTransaction::HandleContentStart()
             LOG3(("http response [\n"));
             nsAutoCString headers;
             mResponseHead->Flatten(headers, false);
+            mResponseHead->FlattenOriginalHeader(headers);
             LogHeaders(headers.get());
             LOG3(("]\n"));
         }
@@ -1880,10 +1892,10 @@ nsHttpTransaction::CancelPipeline(uint32_t reason)
 
 
 void
-nsHttpTransaction::SetSchedulingContext(nsISchedulingContext *aSchedulingContext)
+nsHttpTransaction::SetRequestContext(nsIRequestContext *aRequestContext)
 {
-    LOG(("nsHttpTransaction %p SetSchedulingContext %p\n", this, aSchedulingContext));
-    mSchedulingContext = aSchedulingContext;
+    LOG(("nsHttpTransaction %p SetRequestContext %p\n", this, aRequestContext));
+    mRequestContext = aRequestContext;
 }
 
 // Called when the transaction marked for blocking is associated with a connection
@@ -1898,32 +1910,32 @@ nsHttpTransaction::DispatchedAsBlocking()
 
     LOG(("nsHttpTransaction %p dispatched as blocking\n", this));
 
-    if (!mSchedulingContext)
+    if (!mRequestContext)
         return;
 
     LOG(("nsHttpTransaction adding blocking transaction %p from "
-         "scheduling context %p\n", this, mSchedulingContext.get()));
+         "request context %p\n", this, mRequestContext.get()));
 
-    mSchedulingContext->AddBlockingTransaction();
+    mRequestContext->AddBlockingTransaction();
     mDispatchedAsBlocking = true;
 }
 
 void
 nsHttpTransaction::RemoveDispatchedAsBlocking()
 {
-    if (!mSchedulingContext || !mDispatchedAsBlocking)
+    if (!mRequestContext || !mDispatchedAsBlocking)
         return;
 
     uint32_t blockers = 0;
-    nsresult rv = mSchedulingContext->RemoveBlockingTransaction(&blockers);
+    nsresult rv = mRequestContext->RemoveBlockingTransaction(&blockers);
 
     LOG(("nsHttpTransaction removing blocking transaction %p from "
-         "scheduling context %p. %d blockers remain.\n", this,
-         mSchedulingContext.get(), blockers));
+         "request context %p. %d blockers remain.\n", this,
+         mRequestContext.get(), blockers));
 
     if (NS_SUCCEEDED(rv) && !blockers) {
         LOG(("nsHttpTransaction %p triggering release of blocked channels "
-             " with scheduling context=%p\n", this, mSchedulingContext.get()));
+             " with request context=%p\n", this, mRequestContext.get()));
         gHttpHandler->ConnMgr()->ProcessPendingQ();
     }
 
@@ -1934,9 +1946,9 @@ void
 nsHttpTransaction::ReleaseBlockingTransaction()
 {
     RemoveDispatchedAsBlocking();
-    LOG(("nsHttpTransaction %p scheduling context set to null "
-         "in ReleaseBlockingTransaction() - was %p\n", this, mSchedulingContext.get()));
-    mSchedulingContext = nullptr;
+    LOG(("nsHttpTransaction %p request context set to null "
+         "in ReleaseBlockingTransaction() - was %p\n", this, mRequestContext.get()));
+    mRequestContext = nullptr;
 }
 
 void
@@ -2081,7 +2093,7 @@ nsHttpTransaction::GetResponseEnd()
 // nsHttpTransaction deletion event
 //-----------------------------------------------------------------------------
 
-class DeleteHttpTransaction : public nsRunnable {
+class DeleteHttpTransaction : public Runnable {
 public:
     explicit DeleteHttpTransaction(nsHttpTransaction *trans)
         : mTrans(trans)

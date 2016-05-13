@@ -216,7 +216,13 @@ public class TopSitesPanel extends HomeFragment {
                         } else {
                             method = TelemetryContract.Method.GRID_ITEM;
                         }
-                        Telemetry.sendUIEvent(TelemetryContract.Event.LOAD_URL, method, Integer.toString(position));
+
+                        String extra = Integer.toString(position);
+                        if (type == TopSites.TYPE_PINNED) {
+                            extra += "-pinned";
+                        }
+
+                        Telemetry.sendUIEvent(TelemetryContract.Event.LOAD_URL, method, extra);
 
                         mUrlOpenListener.onUrlOpen(url, EnumSet.noneOf(OnUrlOpenListener.Flags.class));
                     }
@@ -635,9 +641,6 @@ public class TopSitesPanel extends HomeFragment {
                 // Great!
                 return;
             }
-
-            // Otherwise, do this until the async lookup returns.
-            view.displayThumbnail(R.drawable.favicon_globe);
 
             // Give each side enough information to shake hands later.
             listener.setLoadId(loadId);

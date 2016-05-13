@@ -14,7 +14,6 @@ const NS_XHTML = "http://www.w3.org/1999/xhtml";
 const XUL_NS = "http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul";
 const Node = Ci.nsIDOMNode;
 
-loader.lazyImporter(this, "console", "resource://gre/modules/Console.jsm");
 loader.lazyImporter(this, "PluralForm", "resource://gre/modules/PluralForm.jsm");
 loader.lazyImporter(this, "EventEmitter", "resource://devtools/shared/event-emitter.js");
 
@@ -29,6 +28,7 @@ loader.lazyGetter(this, "toolboxStrings", function () {
 loader.lazyRequireGetter(this, "gcliInit", "devtools/shared/gcli/commands/index");
 loader.lazyRequireGetter(this, "util", "gcli/util/util");
 loader.lazyRequireGetter(this, "ConsoleServiceListener", "devtools/shared/webconsole/utils", true);
+loader.lazyRequireGetter(this, "gDevTools", "devtools/client/framework/devtools", true);
 loader.lazyRequireGetter(this, "gDevToolsBrowser", "devtools/client/framework/devtools-browser", true);
 
 /**
@@ -240,6 +240,9 @@ function DeveloperToolbar(aChromeWindow)
   this._errorsCount = {};
   this._warningsCount = {};
   this._errorListeners = {};
+
+  this._onToolboxReady = this._onToolboxReady.bind(this);
+  this._onToolboxDestroyed = this._onToolboxDestroyed.bind(this);
 
   EventEmitter.decorate(this);
 }
@@ -497,6 +500,9 @@ DeveloperToolbar.prototype.show = function(focus) {
           tabbrowser.addEventListener("load", this, true);
           tabbrowser.addEventListener("beforeunload", this, true);
 
+          gDevTools.on("toolbox-ready", this._onToolboxReady);
+          gDevTools.on("toolbox-destroyed", this._onToolboxDestroyed);
+
           this._initErrorsCount(tabbrowser.selectedTab);
 
           this._element.hidden = false;
@@ -635,6 +641,9 @@ DeveloperToolbar.prototype.destroy = function() {
   tabbrowser.removeEventListener("load", this, true);
   tabbrowser.removeEventListener("beforeunload", this, true);
 
+  gDevTools.off("toolbox-ready", this._onToolboxReady);
+  gDevTools.off("toolbox-destroyed", this._onToolboxDestroyed);
+
   Array.prototype.forEach.call(tabbrowser.tabs, this._stopErrorsCount, this);
 
   this.focusManager.removeMonitoredElement(this.outputPanel._frame);
@@ -708,6 +717,16 @@ DeveloperToolbar.prototype.handleEvent = function(ev) {
     this._onPageBeforeUnload(ev);
   }
 };
+
+/**
+ * Update toolbox toggle button when toolbox goes on and off
+ */
+DeveloperToolbar.prototype._onToolboxReady = function() {
+  this._errorCounterButton.setAttribute("checked", "true");
+}
+DeveloperToolbar.prototype._onToolboxDestroyed = function() {
+  this._errorCounterButton.setAttribute("checked", "false");
+}
 
 /**
  * Count a page error received for the currently selected tab. This

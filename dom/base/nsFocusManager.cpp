@@ -1110,11 +1110,12 @@ nsFocusManager::EnsureCurrentWidgetFocused()
   }
 }
 
-void
+bool
 ActivateOrDeactivateChild(TabParent* aParent, void* aArg)
 {
   bool active = static_cast<bool>(aArg);
   Unused << aParent->SendParentActivated(active);
+  return false;
 }
 
 void
@@ -1958,7 +1959,7 @@ nsFocusManager::Focus(nsPIDOMWindowOuter* aWindow,
     mFirstFocusEvent = nullptr;
 }
 
-class FocusBlurEvent : public nsRunnable
+class FocusBlurEvent : public Runnable
 {
 public:
   FocusBlurEvent(nsISupports* aTarget, EventMessage aEventMessage,
@@ -3453,7 +3454,7 @@ nsFocusManager::GetFocusInSelection(nsPIDOMWindowOuter* aWindow,
   while (selectionNode && selectionNode != endSelectionNode);
 }
 
-class PointerUnlocker : public nsRunnable
+class PointerUnlocker : public Runnable
 {
 public:
   PointerUnlocker()

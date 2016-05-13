@@ -224,20 +224,23 @@ partial interface Document {
 partial interface Document {
   // Note: Per spec the 'S' in these two is lowercase, but the "Moz"
   // versions hve it uppercase.
+  [LenientSetter, Func="nsDocument::IsUnprefixedFullscreenEnabled"]
+  readonly attribute boolean fullscreen;
+  [BinaryName="fullscreen", Deprecated="PrefixedFullscreenAPI"]
+  readonly attribute boolean mozFullScreen;
+  [LenientSetter, Func="nsDocument::IsUnprefixedFullscreenEnabled"]
   readonly attribute boolean fullscreenEnabled;
   [BinaryName="fullscreenEnabled", Deprecated="PrefixedFullscreenAPI"]
   readonly attribute boolean mozFullScreenEnabled;
+  [LenientSetter, Func="nsDocument::IsUnprefixedFullscreenEnabled"]
   readonly attribute Element? fullscreenElement;
   [BinaryName="fullscreenElement", Deprecated="PrefixedFullscreenAPI"]
   readonly attribute Element? mozFullScreenElement;
 
+  [Func="nsDocument::IsUnprefixedFullscreenEnabled"]
   void exitFullscreen();
   [BinaryName="exitFullscreen", Deprecated="PrefixedFullscreenAPI"]
   void mozCancelFullScreen();
-
-  // Gecko-specific fullscreen bits
-  [Deprecated="PrefixedFullscreenAPI"]
-  readonly attribute boolean mozFullScreen;
 };
 
 // http://dvcs.w3.org/hg/pointerlock/raw-file/default/index.html#extensions-to-the-document-interface

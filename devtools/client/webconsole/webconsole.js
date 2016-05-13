@@ -30,7 +30,6 @@ loader.lazyRequireGetter(this, "Messages", "devtools/client/webconsole/console-o
 loader.lazyRequireGetter(this, "EnvironmentClient", "devtools/shared/client/main", true);
 loader.lazyRequireGetter(this, "ObjectClient", "devtools/shared/client/main", true);
 loader.lazyRequireGetter(this, "system", "devtools/shared/system");
-loader.lazyRequireGetter(this, "Timers", "sdk/timers");
 loader.lazyRequireGetter(this, "JSTerm", "devtools/client/webconsole/jsterm", true);
 loader.lazyRequireGetter(this, "gSequenceId", "devtools/client/webconsole/jsterm", true);
 loader.lazyImporter(this, "VariablesView", "resource://devtools/client/shared/widgets/VariablesView.jsm");
@@ -198,6 +197,7 @@ const MIN_FONT_SIZE = 10;
 const PREF_CONNECTION_TIMEOUT = "devtools.debugger.remote-timeout";
 const PREF_PERSISTLOG = "devtools.webconsole.persistlog";
 const PREF_MESSAGE_TIMESTAMP = "devtools.webconsole.timestampMessages";
+const PREF_NEW_FRONTEND_ENABLED = "devtools.webconsole.new-frontend-enabled";
 
 /**
  * A WebConsoleFrame instance is an interactive console initialized *per target*
@@ -508,6 +508,8 @@ WebConsoleFrame.prototype = {
   _initUI: function() {
     this.document = this.window.document;
     this.rootElement = this.document.documentElement;
+    this.NEW_CONSOLE_OUTPUT_ENABLED = !this.owner._browserConsole &&
+      Services.prefs.getBoolPref(PREF_NEW_FRONTEND_ENABLED);
 
     this._initDefaultFilterPrefs();
 
@@ -567,6 +569,22 @@ WebConsoleFrame.prototype = {
 
     this.jsterm = new JSTerm(this);
     this.jsterm.init();
+
+    if (this.NEW_CONSOLE_OUTPUT_ENABLED) {
+      // @TODO Remove this once JSTerm is handled with React/Redux.
+      this.window.jsterm = this.jsterm;
+      console.log("Entering experimental mode for console frontend");
+
+      // XXX: We should actually stop output from happening on old output
+      // panel, but for now let's just hide it.
+      this.experimentalOutputNode = this.outputNode.cloneNode();
+      this.outputNode.hidden = true;
+      this.outputNode.parentNode.appendChild(this.experimentalOutputNode);
+      // @TODO Once the toolbox has been converted to React, see if passing
+      // in JSTerm is still necessary.
+      this.newConsoleOutput = new this.window.NewConsoleOutput(this.experimentalOutputNode, this.jsterm);
+      console.log("Created newConsoleOutput", this.newConsoleOutput);
+    }
 
     this.resize();
     this.window.addEventListener("resize", this.resize, true);
@@ -977,10 +995,10 @@ WebConsoleFrame.prototype = {
     Services.prefs.setBoolPref(this._filterPrefsPrefix + toggleType, state);
 
     if (this._updateListenersTimeout) {
-      Timers.clearTimeout(this._updateListenersTimeout);
+      clearTimeout(this._updateListenersTimeout);
     }
 
-    this._updateListenersTimeout = Timers.setTimeout(
+    this._updateListenersTimeout = setTimeout(
       this._onUpdateListeners, 200);
   },
 
@@ -1323,7 +1341,7 @@ WebConsoleFrame.prototype = {
           return null;
         }
         if (timer.error) {
-          Cu.reportError(l10n.getStr(timer.error));
+          console.error(new Error(l10n.getStr(timer.error)));
           return null;
         }
         body = l10n.getFormatStr("timerStarted", [timer.name]);
@@ -1348,7 +1366,7 @@ WebConsoleFrame.prototype = {
           return null;
         }
         if (counter.error) {
-          Cu.reportError(l10n.getStr(counter.error));
+          console.error(l10n.getStr(counter.error));
           return null;
         }
         let msg = new Messages.ConsoleGeneric(message);
@@ -1362,7 +1380,7 @@ WebConsoleFrame.prototype = {
       }
 
       default:
-        Cu.reportError("Unknown Console API log level: " + level);
+        console.error(new Error("Unknown Console API log level: " + level));
         return null;
     }
 
@@ -2764,8 +2782,8 @@ WebConsoleFrame.prototype = {
     this.webConsoleClient.inspectObjectProperties(actor,
       function(response) {
         if (response.error) {
-          Cu.reportError("Failed to retrieve the object properties from the " +
-                         "server. Error: " + response.error);
+          console.error("Failed to retrieve the object properties from the " +
+                        "server. Error: " + response.error);
           return;
         }
         callback(response.properties);
@@ -3262,8 +3280,8 @@ WebConsoleConnectionProxy.prototype = {
    */
   _onAttachConsole: function(response, webConsoleClient) {
     if (response.error) {
-      Cu.reportError("attachConsole failed: " + response.error + " " +
-                     response.message);
+      console.error("attachConsole failed: " + response.error + " " +
+                    response.message);
       this._connectDefer.reject(response);
       return;
     }
@@ -3294,8 +3312,8 @@ WebConsoleConnectionProxy.prototype = {
    */
   _onCachedMessages: function(response) {
     if (response.error) {
-      Cu.reportError("Web Console getCachedMessages error: " + response.error +
-                     " " + response.message);
+      console.error("Web Console getCachedMessages error: " + response.error +
+                    " " + response.message);
       this._connectDefer.reject(response);
       return;
     }
@@ -3303,7 +3321,7 @@ WebConsoleConnectionProxy.prototype = {
     if (!this._connectTimer) {
       // This happens if the promise is rejected (eg. a timeout), but the
       // connection attempt is successful, nonetheless.
-      Cu.reportError("Web Console getCachedMessages error: invalid state.");
+      console.error("Web Console getCachedMessages error: invalid state.");
     }
 
     let messages =
@@ -3332,6 +3350,10 @@ WebConsoleConnectionProxy.prototype = {
    */
   _onPageError: function(type, packet) {
     if (this.webConsoleFrame && packet.from == this._consoleActor) {
+      if (this.webConsoleFrame.NEW_CONSOLE_OUTPUT_ENABLED) {
+        this.webConsoleFrame.newConsoleOutput.dispatchMessageAdd(packet);
+        return;
+      }
       this.webConsoleFrame.handlePageError(packet.pageError);
     }
   },
@@ -3364,7 +3386,11 @@ WebConsoleConnectionProxy.prototype = {
    */
   _onConsoleAPICall: function(type, packet) {
     if (this.webConsoleFrame && packet.from == this._consoleActor) {
-      this.webConsoleFrame.handleConsoleAPICall(packet.message);
+      if (this.webConsoleFrame.NEW_CONSOLE_OUTPUT_ENABLED) {
+        this.webConsoleFrame.newConsoleOutput.dispatchMessageAdd(packet);
+      } else {
+        this.webConsoleFrame.handleConsoleAPICall(packet.message);
+      }
     }
   },
 

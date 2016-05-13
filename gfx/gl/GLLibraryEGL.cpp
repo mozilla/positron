@@ -4,6 +4,7 @@
 
 #include "GLLibraryEGL.h"
 
+#include "gfxConfig.h"
 #include "gfxCrashReporterUtils.h"
 #include "gfxUtils.h"
 #include "mozilla/Preferences.h"
@@ -127,8 +128,8 @@ GetAndInitWARPDisplay(GLLibraryEGL& egl, void* displayType)
     if (display == EGL_NO_DISPLAY) {
         const EGLint err = egl.fGetError();
         if (err != LOCAL_EGL_SUCCESS) {
-            printf_stderr("Unexpected error: 0x%04x", err);
-            MOZ_CRASH("Unexpected error.");
+	    gfxCriticalError() << "Unexpected GL error: " << gfx::hexa(err);
+            MOZ_CRASH("GFX: Unexpected GL error.");
         }
         return EGL_NO_DISPLAY;
     }
@@ -169,20 +170,19 @@ GetAndInitDisplayForAccelANGLE(GLLibraryEGL& egl)
 {
     EGLDisplay ret = 0;
 
-    // D3D11 ANGLE only works with OMTC; there's a bug in the non-OMTC layer
-    // manager, and it's pointless to try to fix it.  We also don't try
-    // D3D11 ANGLE if the layer manager is prefering D3D9 (hrm, do we care?)
-    if (!gfxPrefs::LayersOffMainThreadCompositionForceDisabled() &&
-        !gfxPrefs::LayersPreferD3D9())
-    {
-        if (gfxPrefs::WebGLANGLEForceD3D11())
-            return GetAndInitDisplay(egl, LOCAL_EGL_D3D11_ONLY_DISPLAY_ANGLE);
+    FeatureState& d3d11ANGLE = gfxConfig::GetFeature(Feature::D3D11_ANGLE);
 
-        if (gfxPrefs::WebGLANGLETryD3D11() &&
-            gfxPlatform::CanUseDirect3D11ANGLE())
-        {
-            ret = GetAndInitDisplay(egl, LOCAL_EGL_D3D11_ELSE_D3D9_DISPLAY_ANGLE);
-        }
+    if (!gfxPrefs::WebGLANGLETryD3D11())
+        d3d11ANGLE.UserDisable("User disabled D3D11 ANGLE by pref");
+
+    if (gfxPrefs::WebGLANGLEForceD3D11())
+        d3d11ANGLE.UserForceEnable("User force-enabled D3D11 ANGLE on disabled hardware");
+
+    if (gfxConfig::IsForcedOnByUser(Feature::D3D11_ANGLE))
+        return GetAndInitDisplay(egl, LOCAL_EGL_D3D11_ONLY_DISPLAY_ANGLE);
+
+    if (d3d11ANGLE.IsEnabled()) {
+        ret = GetAndInitDisplay(egl, LOCAL_EGL_D3D11_ELSE_D3D9_DISPLAY_ANGLE);
     }
 
     if (!ret) {

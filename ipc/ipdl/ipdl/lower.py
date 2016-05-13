@@ -327,18 +327,12 @@ def _cxxManagedContainerType(basetype, const=0, ref=0):
     return Type('ManagedContainer', T=basetype,
                 const=const, ref=ref, hasimplicitcopyctor=False)
 
-def _cxxFallibleArrayType(basetype, const=0, ref=0):
-    return Type('FallibleTArray', T=basetype, const=const, ref=ref)
-
 def _callCxxArrayLength(arr):
     return ExprCall(ExprSelect(arr, '.', 'Length'))
 
-def _callCxxCheckedArraySetLength(arr, lenexpr, sel='.'):
-    ifbad = StmtIf(ExprNot(ExprCall(ExprSelect(arr, sel, 'SetLength'),
-                                    args=[ lenexpr, ExprVar('mozilla::fallible') ])))
-    ifbad.addifstmt(_fatalError('Error setting the array length'))
-    ifbad.addifstmt(StmtReturn.FALSE)
-    return ifbad
+def _callCxxArraySetLength(arr, lenexpr, sel='.'):
+    return ExprCall(ExprSelect(arr, sel, 'SetLength'),
+                    args=[ lenexpr ])
 
 def _callCxxSwapArrayElements(arr1, arr2, sel='.'):
     return ExprCall(ExprSelect(arr1, sel, 'SwapElements'),
@@ -962,14 +956,17 @@ class MessageDecl(ipdl.ast.MessageDecl):
 
         return cxxparams
 
-    def makeCxxArgs(self, params=1, retsems='out', retcallsems='out',
+    def makeCxxArgs(self, paramsems='in', retsems='out', retcallsems='out',
                     implicit=1):
-        assert not implicit or params     # implicit => params
         assert not retcallsems or retsems # retcallsems => returnsems
         cxxargs = [ ]
 
-        if params:
+        if paramsems is 'move':
             cxxargs.extend([ ExprMove(p.var()) for p in self.params ])
+        elif paramsems is 'in':
+            cxxargs.extend([ p.var() for p in self.params ])
+        else:
+            assert False
 
         for ret in self.returns:
             if retsems is 'in':
@@ -4449,14 +4446,14 @@ class _GenerateProtocolActorCode(ipdl.ast.Visitor):
                              msgvar, itervar, errfnRead,
                              eltipdltype.name() + '[i]'))
         read.addstmts([
-            StmtDecl(Decl(_cxxFallibleArrayType(_cxxBareType(arraytype.basetype, self.side)), favar.name)),
+            StmtDecl(Decl(_cxxArrayType(_cxxBareType(arraytype.basetype, self.side)), favar.name)),
             StmtDecl(Decl(Type.UINT32, lenvar.name)),
             self.checkedRead(None, ExprAddrOf(lenvar),
                              msgvar, itervar, errfnRead,
                              'length\' (' + Type.UINT32.name + ') of \'' +
                              arraytype.name()),
             Whitespace.NL,
-            _callCxxCheckedArraySetLength(favar, lenvar),
+            StmtExpr(_callCxxArraySetLength(favar, lenvar)),
             forread,
             StmtExpr(_callCxxSwapArrayElements(var, favar, '->')),
             StmtReturn.TRUE
@@ -5253,7 +5250,7 @@ class _GenerateProtocolActorCode(ipdl.ast.Visitor):
     def callAllocActor(self, md, retsems, side):
         return ExprCall(
             _allocMethod(md.decl.type.constructedType(), side),
-            args=md.makeCxxArgs(params=1, retsems=retsems, retcallsems='out',
+            args=md.makeCxxArgs(retsems=retsems, retcallsems='out',
                                 implicit=0))
 
     def callActorDestroy(self, actorexpr, why=_DestroyReason.Deletion):
@@ -5280,8 +5277,8 @@ class _GenerateProtocolActorCode(ipdl.ast.Visitor):
     def invokeRecvHandler(self, md, implicit=1):
         failif = StmtIf(ExprNot(
             ExprCall(md.recvMethod(),
-                     args=md.makeCxxArgs(params=1,
-                                         retsems='in', retcallsems='out',
+                     args=md.makeCxxArgs(paramsems='move', retsems='in',
+                                         retcallsems='out',
                                          implicit=implicit))))
         failif.addifstmts([
             _protocolErrorBreakpoint('Handler for '+ md.name +' returned error code'),

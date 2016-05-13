@@ -24,6 +24,7 @@
 #include "jit/EagerSimdUnbox.h"
 #include "jit/EdgeCaseAnalysis.h"
 #include "jit/EffectiveAddressAnalysis.h"
+#include "jit/FlowAliasAnalysis.h"
 #include "jit/InstructionReordering.h"
 #include "jit/IonAnalysis.h"
 #include "jit/IonBuilder.h"
@@ -275,27 +276,27 @@ JitRuntime::initialize(JSContext* cx)
         return false;
 
     JitSpew(JitSpew_Codegen, "# Emitting Pre Barrier for Value");
-    valuePreBarrier_ = generatePreBarrier(cx, MIRType_Value);
+    valuePreBarrier_ = generatePreBarrier(cx, MIRType::Value);
     if (!valuePreBarrier_)
         return false;
 
     JitSpew(JitSpew_Codegen, "# Emitting Pre Barrier for String");
-    stringPreBarrier_ = generatePreBarrier(cx, MIRType_String);
+    stringPreBarrier_ = generatePreBarrier(cx, MIRType::String);
     if (!stringPreBarrier_)
         return false;
 
     JitSpew(JitSpew_Codegen, "# Emitting Pre Barrier for Object");
-    objectPreBarrier_ = generatePreBarrier(cx, MIRType_Object);
+    objectPreBarrier_ = generatePreBarrier(cx, MIRType::Object);
     if (!objectPreBarrier_)
         return false;
 
     JitSpew(JitSpew_Codegen, "# Emitting Pre Barrier for Shape");
-    shapePreBarrier_ = generatePreBarrier(cx, MIRType_Shape);
+    shapePreBarrier_ = generatePreBarrier(cx, MIRType::Shape);
     if (!shapePreBarrier_)
         return false;
 
     JitSpew(JitSpew_Codegen, "# Emitting Pre Barrier for ObjectGroup");
-    objectGroupPreBarrier_ = generatePreBarrier(cx, MIRType_ObjectGroup);
+    objectGroupPreBarrier_ = generatePreBarrier(cx, MIRType::ObjectGroup);
     if (!objectGroupPreBarrier_)
         return false;
 
@@ -804,9 +805,8 @@ JitCode::finalize(FreeOp* fop)
 #ifdef DEBUG
     JSRuntime* rt = fop->runtime();
     if (hasBytecodeMap_) {
-        JitcodeGlobalEntry result;
         MOZ_ASSERT(rt->jitRuntime()->hasJitcodeGlobalTable());
-        MOZ_ASSERT(!rt->jitRuntime()->getJitcodeGlobalTable()->lookup(raw(), &result, rt));
+        MOZ_ASSERT(!rt->jitRuntime()->getJitcodeGlobalTable()->lookup(raw()));
     }
 #endif
 
@@ -815,8 +815,11 @@ JitCode::finalize(FreeOp* fop)
     // With W^X JIT code, reprotecting memory for each JitCode instance is
     // slow, so we record the ranges and poison them later all at once. It's
     // safe to ignore OOM here, it just means we won't poison the code.
-    if (fop->appendJitPoisonRange(JitPoisonRange(pool_, code_, bufferSize_)))
+    if (fop->appendJitPoisonRange(JitPoisonRange(pool_, code_ - headerSize_,
+                                                 headerSize_ + bufferSize_)))
+    {
         pool_->addRef();
+    }
     code_ = nullptr;
 
     // Code buffers are stored inside ExecutablePools. Pools are refcounted.
@@ -1376,7 +1379,7 @@ OptimizeSinCos(MIRGenerator *mir, MIRGraph &graph)
                 continue;
 
             // Check if sin/cos is already optimized.
-            if (insFunc->getOperand(0)->type() == MIRType_SinCosDouble)
+            if (insFunc->getOperand(0)->type() == MIRType::SinCosDouble)
                 continue;
 
             // insFunc is either a |sin(x)| or |cos(x)| instruction. The
@@ -1556,7 +1559,7 @@ OptimizeMIR(MIRGenerator* mir)
             return false;
     }
 
-    if (mir->optimizationInfo().scalarReplacementEnabled()) {
+    if (!JitOptions.disableRecoverIns && mir->optimizationInfo().scalarReplacementEnabled()) {
         AutoTraceLog log(logger, TraceLogger_ScalarReplacement);
         if (!ScalarReplacement(mir, graph))
             return false;
@@ -1578,7 +1581,7 @@ OptimizeMIR(MIRGenerator* mir)
             return false;
     }
 
-    if (mir->optimizationInfo().eagerSimdUnboxEnabled()) {
+    if (!JitOptions.disableRecoverIns && mir->optimizationInfo().eagerSimdUnboxEnabled()) {
         AutoTraceLog log(logger, TraceLogger_EagerSimdUnbox);
         if (!EagerSimdUnbox(mir, graph))
             return false;
@@ -1610,15 +1613,24 @@ OptimizeMIR(MIRGenerator* mir)
     if (mir->optimizationInfo().licmEnabled() ||
         mir->optimizationInfo().gvnEnabled())
     {
-        AutoTraceLog log(logger, TraceLogger_AliasAnalysis);
-        AliasAnalysis analysis(mir, graph);
-        if (!analysis.analyze())
-            return false;
-        gs.spewPass("Alias analysis");
-        AssertExtendedGraphCoherency(graph);
+        {
+            AutoTraceLog log(logger, TraceLogger_AliasAnalysis);
+            if (JitOptions.disableFlowAA) {
+                AliasAnalysis analysis(mir, graph);
+                if (!analysis.analyze())
+                    return false;
+            } else {
+                FlowAliasAnalysis analysis(mir, graph);
+                if (!analysis.analyze())
+                    return false;
+            }
 
-        if (mir->shouldCancel("Alias analysis"))
-            return false;
+            gs.spewPass("Alias analysis");
+            AssertExtendedGraphCoherency(graph);
+
+            if (mir->shouldCancel("Alias analysis"))
+                return false;
+        }
 
         if (!mir->compilingAsmJS()) {
             // Eliminating dead resume point operands requires basic block
@@ -1729,7 +1741,7 @@ OptimizeMIR(MIRGenerator* mir)
         }
     }
 
-    {
+    if (!JitOptions.disableRecoverIns) {
         AutoTraceLog log(logger, TraceLogger_Sink);
         if (!Sink(mir, graph))
             return false;
@@ -1740,7 +1752,7 @@ OptimizeMIR(MIRGenerator* mir)
             return false;
     }
 
-    if (mir->optimizationInfo().rangeAnalysisEnabled()) {
+    if (!JitOptions.disableRecoverIns && mir->optimizationInfo().rangeAnalysisEnabled()) {
         AutoTraceLog log(logger, TraceLogger_RemoveUnnecessaryBitops);
         if (!r.removeUnnecessaryBitops())
             return false;
@@ -2058,8 +2070,8 @@ TrackIonAbort(JSContext* cx, JSScript* script, jsbytecode* pc, const char* messa
         return;
 
     JitcodeGlobalTable* table = cx->runtime()->jitRuntime()->getJitcodeGlobalTable();
-    JitcodeGlobalEntry entry;
-    table->lookupInfallible(script->baselineScript()->method()->raw(), &entry, cx->runtime());
+    void* ptr = script->baselineScript()->method()->raw();
+    JitcodeGlobalEntry& entry = table->lookupInfallible(ptr);
     entry.baselineEntry().trackIonAbort(pc, message);
 }
 
@@ -2772,7 +2784,8 @@ EnterIon(JSContext* cx, EnterJitData& data)
 }
 
 bool
-jit::SetEnterJitData(JSContext* cx, EnterJitData& data, RunState& state, AutoValueVector& vals)
+jit::SetEnterJitData(JSContext* cx, EnterJitData& data, RunState& state,
+                     MutableHandle<GCVector<Value>> vals)
 {
     data.osrFrame = nullptr;
 
@@ -2842,8 +2855,8 @@ jit::IonCannon(JSContext* cx, RunState& state)
     EnterJitData data(cx);
     data.jitcode = ion->method()->raw();
 
-    AutoValueVector vals(cx);
-    if (!SetEnterJitData(cx, data, state, vals))
+    Rooted<GCVector<Value>> vals(cx, GCVector<Value>(cx));
+    if (!SetEnterJitData(cx, data, state, &vals))
         return JitExec_Error;
 
     JitExecStatus status = EnterIon(cx, data);

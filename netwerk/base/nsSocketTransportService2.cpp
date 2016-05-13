@@ -177,6 +177,12 @@ nsSocketTransportService::Dispatch(already_AddRefed<nsIRunnable>&& event, uint32
 }
 
 NS_IMETHODIMP
+nsSocketTransportService::DelayedDispatch(already_AddRefed<nsIRunnable>&&, uint32_t)
+{
+    return NS_ERROR_NOT_IMPLEMENTED;
+}
+
+NS_IMETHODIMP
 nsSocketTransportService::IsOnCurrentThread(bool *result)
 {
     nsCOMPtr<nsIThread> thread = GetThreadSafely();
@@ -550,7 +556,7 @@ nsSocketTransportService::Init()
         return NS_ERROR_UNEXPECTED;
 
     nsCOMPtr<nsIThread> thread;
-    nsresult rv = NS_NewThread(getter_AddRefs(thread), this);
+    nsresult rv = NS_NewNamedThread("Socket Thread", getter_AddRefs(thread), this);
     if (NS_FAILED(rv)) return rv;
     
     {
@@ -820,8 +826,6 @@ nsSocketTransportService::MarkTheLastElementOfPendingQueue()
 NS_IMETHODIMP
 nsSocketTransportService::Run()
 {
-    PR_SetCurrentThreadName("Socket Thread");
-
 #ifdef MOZ_NUWA_PROCESS
     if (IsNuwaProcess()) {
         NuwaMarkCurrentThread(nullptr, nullptr);
@@ -919,7 +923,7 @@ nsSocketTransportService::Run()
             mRawThread->HasPendingEvents(&pendingEvents);
             if (pendingEvents) {
                 if (!mServingPendingQueue) {
-                    nsresult rv = Dispatch(NS_NewRunnableMethod(this,
+                    nsresult rv = Dispatch(NewRunnableMethod(this,
                         &nsSocketTransportService::MarkTheLastElementOfPendingQueue),
                         nsIEventTarget::DISPATCH_NORMAL);
                     if (NS_FAILED(rv)) {
@@ -1261,7 +1265,7 @@ nsSocketTransportService::OnKeepaliveEnabledPrefChange()
     // Dispatch to socket thread if we're not executing there.
     if (PR_GetCurrentThread() != gSocketThread) {
         gSocketTransportService->Dispatch(
-            NS_NewRunnableMethod(
+            NewRunnableMethod(
                 this, &nsSocketTransportService::OnKeepaliveEnabledPrefChange),
             NS_DISPATCH_NORMAL);
         return;
@@ -1313,8 +1317,8 @@ nsSocketTransportService::Observe(nsISupports *subject,
 
     if (!strcmp(topic, "last-pb-context-exited")) {
         nsCOMPtr<nsIRunnable> ev =
-          NS_NewRunnableMethod(this,
-                               &nsSocketTransportService::ClosePrivateConnections);
+          NewRunnableMethod(this,
+			    &nsSocketTransportService::ClosePrivateConnections);
         nsresult rv = Dispatch(ev, nsIEventTarget::DISPATCH_NORMAL);
         NS_ENSURE_SUCCESS(rv, rv);
     }

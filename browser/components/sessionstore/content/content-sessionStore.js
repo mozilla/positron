@@ -83,6 +83,18 @@ var EventListener = {
       return;
     }
 
+    if (content.document.documentURI.startsWith("about:reader")) {
+      if (event.type == "load" &&
+          !content.document.body.classList.contains("loaded")) {
+        // Don't restore the scroll position of an about:reader page at this
+        // point; listen for the custom event dispatched from AboutReader.jsm.
+        content.addEventListener("AboutReaderContentReady", this);
+        return;
+      }
+
+      content.removeEventListener("AboutReaderContentReady", this);
+    }
+
     // Restore the form data and scroll position. If we're not currently
     // restoring a tab state then this call will simply be a noop.
     gContentRestore.restoreDocument();
@@ -177,7 +189,7 @@ var MessageListener = {
       sendAsyncMessage("SessionStore:restoreTabContentComplete", {epoch, isRemotenessUpdate});
     });
 
-    sendAsyncMessage("SessionStore:restoreTabContentStarted", {epoch});
+    sendAsyncMessage("SessionStore:restoreTabContentStarted", {epoch, didStartLoad});
 
     if (!didStartLoad) {
       // Pretend that the load succeeded so that event handlers fire correctly.
@@ -219,6 +231,13 @@ var SessionHistoryListener = {
     // Collect data if we start with a non-empty shistory.
     if (!SessionHistory.isEmpty(docShell)) {
       this.collect();
+      // When a tab is detached from the window, for the new window there is a
+      // new SessionHistoryListener created. Normally it is empty at this point
+      // but in a test env. the initial about:blank might have a children in which
+      // case we fire off a history message here with about:blank in it. If we
+      // don't do it ASAP then there is going to be a browser swap and the parent
+      // will be all confused by that message.
+      MessageQueue.send();
     }
 
     // Listen for page title changes.
@@ -712,6 +731,8 @@ var MessageQueue = {
         data[key] = value;
       }
     }
+
+    this._data.clear();
 
     durationMs = Date.now() - durationMs;
     telemetry.FX_SESSION_RESTORE_CONTENT_COLLECT_DATA_LONGEST_OP_MS = durationMs;

@@ -991,6 +991,10 @@ private:
   uint32_t                  mRWBufPos;
   RefPtr<CacheHash>         mRWHash;
 
+  // True if read or write operation is pending. It is used to ensure that
+  // mRWBuf is not freed until OnDataRead or OnDataWritten is called.
+  bool                      mRWPending;
+
   // Reading of journal succeeded if true.
   bool                      mJournalReadSuccessfully;
 
@@ -1038,7 +1042,7 @@ private:
   // any intermediate cache size.
   bool mAsyncGetDiskConsumptionBlocked;
 
-  class DiskConsumptionObserver : public nsRunnable
+  class DiskConsumptionObserver : public Runnable
   {
   public:
     static DiskConsumptionObserver* Init(nsICacheStorageConsumptionObserver* aObserver)
