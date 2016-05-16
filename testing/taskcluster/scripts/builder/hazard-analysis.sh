@@ -21,7 +21,7 @@ function check_commit_msg () {
     if [[ -n "$AUTOMATION" ]]; then
         hg --cwd "$GECKO_DIR" log -r. --template '{desc}\n' | grep -F -q -- "$1"
     else
-        echo -- "$SCRIPT_FLAGS" | grep -f -q -- "$1"
+        echo -- "$SCRIPT_FLAGS" | grep -F -q -- "$1"
     fi
 }
 
@@ -125,9 +125,9 @@ function check_hazards () {
     NUM_UNSAFE=$(grep -c '^Function.*takes unsafe address of unrooted' "$1"/refs.txt)
     NUM_UNNECESSARY=$(grep -c '^Function.* has unnecessary root' "$1"/unnecessary.txt)
 
-    echo "TinderboxPrint: $NUM_HAZARDS rooting hazards"
-    echo "TinderboxPrint: $NUM_UNSAFE unsafe references to unrooted GC pointers"
-    echo "TinderboxPrint: $NUM_UNSAFE unnecessary roots"
+    echo "TinderboxPrint: rooting hazards<br/>$NUM_HAZARDS"
+    echo "TinderboxPrint: unsafe references to unrooted GC pointers<br/>$NUM_UNSAFE"
+    echo "TinderboxPrint: unnecessary roots<br/>$NUM_UNSAFE"
 
     if [ $NUM_HAZARDS -gt 0 ]; then
         echo "TEST-UNEXPECTED-FAIL $NUM_HAZARDS hazards detected" >&2
