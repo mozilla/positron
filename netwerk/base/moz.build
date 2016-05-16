@@ -263,8 +263,6 @@ UNIFIED_SOURCES += [
 
 if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'windows':
     SOURCES += [
-        'nsAutodialWin.cpp',
-        'nsNativeConnectionHelper.cpp',
         'nsURLHelperWin.cpp',
         'ShutdownLayer.cpp',
     ]
@@ -279,7 +277,6 @@ else:
 
 if CONFIG['MOZ_ENABLE_QTNETWORK']:
     SOURCES += [
-        'nsAutodialQt.cpp',
     ]
 
 EXTRA_COMPONENTS += [
@@ -314,3 +311,6 @@ if CONFIG['MOZ_ENABLE_QTNETWORK']:
 
 if CONFIG['MOZ_ENABLE_QTNETWORK']:
     CXXFLAGS += CONFIG['MOZ_QT_CFLAGS']
+
+if CONFIG['GNU_CXX']:
+    CXXFLAGS += ['-Wno-error=shadow']

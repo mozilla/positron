@@ -38,8 +38,7 @@ AppleVDADecoder::AppleVDADecoder(const VideoInfo& aConfig,
                                FlushableTaskQueue* aVideoTaskQueue,
                                MediaDataDecoderCallback* aCallback,
                                layers::ImageContainer* aImageContainer)
-  : mTaskQueue(aVideoTaskQueue)
-  , mCallback(aCallback)
+  : mCallback(aCallback)
   , mImageContainer(aImageContainer)
   , mPictureWidth(aConfig.mImage.width)
   , mPictureHeight(aConfig.mImage.height)
@@ -57,6 +56,7 @@ AppleVDADecoder::AppleVDADecoder(const VideoInfo& aConfig,
   , mQueuedSamples(0)
   , mMonitor("AppleVideoDecoder")
   , mIsFlushing(false)
+  , mTaskQueue(aVideoTaskQueue)
   , mDecoder(nullptr)
 {
   MOZ_COUNT_CTOR(AppleVDADecoder);
@@ -133,12 +133,8 @@ AppleVDADecoder::Input(MediaRawData* aSample)
 
   mInputIncoming++;
 
-  nsCOMPtr<nsIRunnable> runnable =
-      NewRunnableMethod<RefPtr<MediaRawData>>(
-          this,
-          &AppleVDADecoder::SubmitFrame,
-          RefPtr<MediaRawData>(aSample));
-  mTaskQueue->Dispatch(runnable.forget());
+  mTaskQueue->Dispatch(NewRunnableMethod<RefPtr<MediaRawData>>(
+    this, &AppleVDADecoder::ProcessDecode, aSample));
   return NS_OK;
 }
 
@@ -169,7 +165,7 @@ AppleVDADecoder::Drain()
 void
 AppleVDADecoder::ProcessFlush()
 {
-  MOZ_ASSERT(mTaskQueue->IsCurrentThreadIn());
+  AssertOnTaskQueueThread();
 
   OSStatus rv = VDADecoderFlush(mDecoder, 0 /*dont emit*/);
   if (rv != noErr) {
@@ -182,7 +178,7 @@ AppleVDADecoder::ProcessFlush()
 void
 AppleVDADecoder::ProcessDrain()
 {
-  MOZ_ASSERT(mTaskQueue->IsCurrentThreadIn());
+  AssertOnTaskQueueThread();
 
   OSStatus rv = VDADecoderFlush(mDecoder, kVDADecoderFlush_EmitFrames);
   if (rv != noErr) {
@@ -429,9 +425,9 @@ AppleVDADecoder::OutputFrame(CVPixelBufferRef aImage,
 }
 
 nsresult
-AppleVDADecoder::SubmitFrame(MediaRawData* aSample)
+AppleVDADecoder::ProcessDecode(MediaRawData* aSample)
 {
-  MOZ_ASSERT(mTaskQueue->IsCurrentThreadIn());
+  AssertOnTaskQueueThread();
 
   mInputIncoming--;
 

@@ -22,11 +22,6 @@
 
 extern mozilla::LogModule* GetPDMLog();
 #define LOG(...) MOZ_LOG(GetPDMLog(), mozilla::LogLevel::Debug, (__VA_ARGS__))
-//#define LOG_MEDIA_SHA1
-
-#ifdef LOG_MEDIA_SHA1
-#include "mozilla/SHA1.h"
-#endif
 
 namespace mozilla {
 
@@ -80,43 +75,10 @@ AppleVTDecoder::ProcessShutdown()
   }
 }
 
-nsresult
-AppleVTDecoder::Input(MediaRawData* aSample)
-{
-  MOZ_ASSERT(mCallback->OnReaderTaskQueue());
-
-  LOG("mp4 input sample %p pts %lld duration %lld us%s %d bytes",
-      aSample,
-      aSample->mTime,
-      aSample->mDuration,
-      aSample->mKeyframe ? " keyframe" : "",
-      aSample->Size());
-
-#ifdef LOG_MEDIA_SHA1
-  SHA1Sum hash;
-  hash.update(aSample->data, aSample->size);
-  uint8_t digest_buf[SHA1Sum::kHashSize];
-  hash.finish(digest_buf);
-  nsAutoCString digest;
-  for (size_t i = 0; i < sizeof(digest_buf); i++) {
-    digest.AppendPrintf("%02x", digest_buf[i]);
-  }
-  LOG("    sha1 %s", digest.get());
-#endif // LOG_MEDIA_SHA1
-
-  mInputIncoming++;
-
-  nsCOMPtr<nsIRunnable> runnable =
-      NewRunnableMethod<RefPtr<MediaRawData>>(
-          this, &AppleVTDecoder::SubmitFrame, aSample);
-  mTaskQueue->Dispatch(runnable.forget());
-  return NS_OK;
-}
-
 void
 AppleVTDecoder::ProcessFlush()
 {
-  MOZ_ASSERT(mTaskQueue->IsCurrentThreadIn());
+  AssertOnTaskQueueThread();
   nsresult rv = WaitForAsynchronousFrames();
   if (NS_FAILED(rv)) {
     LOG("AppleVTDecoder::Flush failed waiting for platform decoder "
@@ -128,7 +90,7 @@ AppleVTDecoder::ProcessFlush()
 void
 AppleVTDecoder::ProcessDrain()
 {
-  MOZ_ASSERT(mTaskQueue->IsCurrentThreadIn());
+  AssertOnTaskQueueThread();
   nsresult rv = WaitForAsynchronousFrames();
   if (NS_FAILED(rv)) {
     LOG("AppleVTDecoder::Drain failed waiting for platform decoder "
@@ -202,9 +164,10 @@ TimingInfoFromSample(MediaRawData* aSample)
 }
 
 nsresult
-AppleVTDecoder::SubmitFrame(MediaRawData* aSample)
+AppleVTDecoder::ProcessDecode(MediaRawData* aSample)
 {
-  MOZ_ASSERT(mTaskQueue->IsCurrentThreadIn());
+  AssertOnTaskQueueThread();
+
   mInputIncoming--;
   // For some reason this gives me a double-free error with stagefright.
   AutoCFRelease<CMBlockBufferRef> block = nullptr;
@@ -265,19 +228,6 @@ nsresult
 AppleVTDecoder::InitializeSession()
 {
   OSStatus rv;
-
-#ifdef LOG_MEDIA_SHA1
-  SHA1Sum avc_hash;
-  avc_hash.update(mExtraData->Elements(),mExtraData->Length());
-  uint8_t digest_buf[SHA1Sum::kHashSize];
-  avc_hash.finish(digest_buf);
-  nsAutoCString avc_digest;
-  for (size_t i = 0; i < sizeof(digest_buf); i++) {
-    avc_digest.AppendPrintf("%02x", digest_buf[i]);
-  }
-  LOG("AVCDecoderConfig %ld bytes sha1 %s",
-      mExtraData->Length(), avc_digest.get());
-#endif // LOG_MEDIA_SHA1
 
   AutoCFRelease<CFDictionaryRef> extensions = CreateDecoderExtensions();
 

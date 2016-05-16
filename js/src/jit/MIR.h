@@ -3113,8 +3113,10 @@ class MNewArray
 
     jsbytecode* pc_;
 
+    bool vmCall_;
+
     MNewArray(CompilerConstraintList* constraints, uint32_t length, MConstant* templateConst,
-              gc::InitialHeap initialHeap, jsbytecode* pc);
+              gc::InitialHeap initialHeap, jsbytecode* pc, bool vmCall);
 
   public:
     INSTRUCTION_HEADER(NewArray)
@@ -3123,7 +3125,14 @@ class MNewArray
                           uint32_t length, MConstant* templateConst,
                           gc::InitialHeap initialHeap, jsbytecode* pc)
     {
-        return new(alloc) MNewArray(constraints, length, templateConst, initialHeap, pc);
+        return new(alloc) MNewArray(constraints, length, templateConst, initialHeap, pc, false);
+    }
+
+    static MNewArray* NewVM(TempAllocator& alloc, CompilerConstraintList* constraints,
+                            uint32_t length, MConstant* templateConst,
+                            gc::InitialHeap initialHeap, jsbytecode* pc)
+    {
+        return new(alloc) MNewArray(constraints, length, templateConst, initialHeap, pc, true);
     }
 
     uint32_t length() const {
@@ -3140,6 +3149,10 @@ class MNewArray
 
     jsbytecode* pc() const {
         return pc_;
+    }
+
+    bool isVMCall() const {
+        return vmCall_;
     }
 
     bool convertDoubleElements() const {
@@ -3257,12 +3270,14 @@ class MNewObject
   private:
     gc::InitialHeap initialHeap_;
     Mode mode_;
+    bool vmCall_;
 
     MNewObject(CompilerConstraintList* constraints, MConstant* templateConst,
-               gc::InitialHeap initialHeap, Mode mode)
+               gc::InitialHeap initialHeap, Mode mode, bool vmCall)
       : MUnaryInstruction(templateConst),
         initialHeap_(initialHeap),
-        mode_(mode)
+        mode_(mode),
+        vmCall_(vmCall)
     {
         MOZ_ASSERT_IF(mode != ObjectLiteral, templateObject());
         setResultType(MIRType::Object);
@@ -3286,7 +3301,14 @@ class MNewObject
                            MConstant* templateConst, gc::InitialHeap initialHeap,
                            Mode mode)
     {
-        return new(alloc) MNewObject(constraints, templateConst, initialHeap, mode);
+        return new(alloc) MNewObject(constraints, templateConst, initialHeap, mode, false);
+    }
+
+    static MNewObject* NewVM(TempAllocator& alloc, CompilerConstraintList* constraints,
+                             MConstant* templateConst, gc::InitialHeap initialHeap,
+                             Mode mode)
+    {
+        return new(alloc) MNewObject(constraints, templateConst, initialHeap, mode, true);
     }
 
     Mode mode() const {
@@ -3299,6 +3321,10 @@ class MNewObject
 
     gc::InitialHeap initialHeap() const {
         return initialHeap_;
+    }
+
+    bool isVMCall() const {
+        return vmCall_;
     }
 
     bool writeRecoverData(CompactBufferWriter& writer) const override;
@@ -6212,23 +6238,24 @@ class MClz
 {
     bool operandIsNeverZero_;
 
-    explicit MClz(MDefinition* num)
+    explicit MClz(MDefinition* num, MIRType type)
       : MUnaryInstruction(num),
         operandIsNeverZero_(false)
     {
+        MOZ_ASSERT(IsIntType(type));
         MOZ_ASSERT(IsNumberType(num->type()));
-        specialization_ = MIRType::Int32;
-        setResultType(MIRType::Int32);
+        specialization_ = type;
+        setResultType(type);
         setMovable();
     }
 
   public:
     INSTRUCTION_HEADER(Clz)
     static MClz* New(TempAllocator& alloc, MDefinition* num) {
-        return new(alloc) MClz(num);
+        return new(alloc) MClz(num, MIRType::Int32);
     }
     static MClz* NewAsmJS(TempAllocator& alloc, MDefinition* num) {
-        return new(alloc) MClz(num);
+        return new(alloc) MClz(num, num->type());
     }
     MDefinition* num() const {
         return getOperand(0);
@@ -6256,23 +6283,24 @@ class MCtz
 {
     bool operandIsNeverZero_;
 
-    explicit MCtz(MDefinition* num)
+    explicit MCtz(MDefinition* num, MIRType type)
       : MUnaryInstruction(num),
         operandIsNeverZero_(false)
     {
+        MOZ_ASSERT(IsIntType(type));
         MOZ_ASSERT(IsNumberType(num->type()));
-        specialization_ = MIRType::Int32;
-        setResultType(MIRType::Int32);
+        specialization_ = type;
+        setResultType(type);
         setMovable();
     }
 
   public:
     INSTRUCTION_HEADER(Ctz)
     static MCtz* New(TempAllocator& alloc, MDefinition* num) {
-        return new(alloc) MCtz(num);
+        return new(alloc) MCtz(num, MIRType::Int32);
     }
     static MCtz* NewAsmJS(TempAllocator& alloc, MDefinition* num) {
-        return new(alloc) MCtz(num);
+        return new(alloc) MCtz(num, num->type());
     }
     MDefinition* num() const {
         return getOperand(0);
@@ -6298,22 +6326,23 @@ class MPopcnt
   : public MUnaryInstruction
   , public BitwisePolicy::Data
 {
-    explicit MPopcnt(MDefinition* num)
+    explicit MPopcnt(MDefinition* num, MIRType type)
       : MUnaryInstruction(num)
     {
         MOZ_ASSERT(IsNumberType(num->type()));
-        specialization_ = MIRType::Int32;
-        setResultType(MIRType::Int32);
+        MOZ_ASSERT(IsIntType(type));
+        specialization_ = type;
+        setResultType(type);
         setMovable();
     }
 
   public:
     INSTRUCTION_HEADER(Popcnt)
     static MPopcnt* New(TempAllocator& alloc, MDefinition* num) {
-        return new(alloc) MPopcnt(num);
+        return new(alloc) MPopcnt(num, MIRType::Int32);
     }
     static MPopcnt* NewAsmJS(TempAllocator& alloc, MDefinition* num) {
-        return new(alloc) MPopcnt(num);
+        return new(alloc) MPopcnt(num, num->type());
     }
     MDefinition* num() const {
         return getOperand(0);
@@ -9185,13 +9214,15 @@ class MNot
     void cacheOperandMightEmulateUndefined(CompilerConstraintList* constraints);
 
   public:
-    static MNot* New(TempAllocator& alloc, MDefinition* elements,
+    static MNot* New(TempAllocator& alloc, MDefinition* input,
                      CompilerConstraintList* constraints = nullptr)
     {
-        return new(alloc) MNot(elements, constraints);
+        return new(alloc) MNot(input, constraints);
     }
-    static MNot* NewAsmJS(TempAllocator& alloc, MDefinition* elements) {
-        MNot* ins = new(alloc) MNot(elements);
+
+    static MNot* NewAsmJS(TempAllocator& alloc, MDefinition* input) {
+        MOZ_ASSERT(input->type() == MIRType::Int32 || input->type() == MIRType::Int64);
+        MNot* ins = new(alloc) MNot(input);
         ins->setResultType(MIRType::Int32);
         return ins;
     }
