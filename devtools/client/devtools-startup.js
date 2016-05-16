@@ -17,7 +17,7 @@
 
 "use strict";
 
-const { interfaces: Ci, utils: Cu } = Components;
+const { classes: Cc, interfaces: Ci, utils: Cu } = Components;
 const kDebuggerPrefs = [
   "devtools.debugger.remote-enabled",
   "devtools.chrome.enabled"
@@ -126,8 +126,23 @@ DevToolsStartup.prototype = {
     if (!this._isRemoteDebuggingEnabled()) {
       return;
     }
+
+    // TODO: upstream this to mozilla-central so it isn't Positron-specific.
+    let devtoolsThreadResumed = false;
+    let observe = function(subject, topic, data) {
+      devtoolsThreadResumed = true;
+      Services.obs.removeObserver(observe, "devtools-thread-resumed");
+    };
+    Services.obs.addObserver(observe, "devtools-thread-resumed", false);
+
     Cu.import("resource://devtools/client/framework/ToolboxProcess.jsm");
     BrowserToolboxProcess.init();
+
+    // Spin the event loop until the debugger connects.
+    let thread = Cc["@mozilla.org/thread-manager;1"].getService().currentThread;
+    while (!devtoolsThreadResumed) {
+      thread.processNextEvent(true);
+    }
 
     if (cmdLine.state == Ci.nsICommandLine.STATE_REMOTE_AUTO) {
       cmdLine.preventDefault = true;
