@@ -3,6 +3,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+Components.utils.import("resource://gre/modules/Services.jsm");
 Components.utils.import("resource://gre/modules/XPCOMUtils.jsm");
 try {
   Components.utils.import("resource:///modules/PositronAppRunner.jsm");
@@ -76,6 +77,38 @@ PositronCLH.prototype = {
 
       dump(out + "\n");
       Components.utils.reportError(out);
+    }
+
+    // Firefox, in nsBrowserContentHandler, has a more robust handler
+    // for the --chrome flag, which tries to correct typos in the URL
+    // being loaded.  But we only need to handle loading devtools in a separate
+    // process to debug Positron itself, so our implementation is simpler.
+    var chromeParam = cmdLine.handleFlagWithParam("chrome", false);
+    if (chromeParam) {
+      try {
+        let resolvedURI = cmdLine.resolveURI(chromeParam);
+
+        let isLocal = uri => {
+          let localSchemes = new Set(["chrome", "file", "resource"]);
+          if (uri instanceof Components.interfaces.nsINestedURI) {
+            uri = uri.QueryInterface(Components.interfaces.nsINestedURI).innerMostURI;
+          }
+          return localSchemes.has(uri.scheme);
+        };
+        if (isLocal(resolvedURI)) {
+          // If the URI is local, we are sure it won't wrongly inherit chrome privs
+          var features = "chrome,dialog=no,all";
+          Services.ww.openWindow(null, resolvedURI.spec, "_blank", features, null);
+          cmdLine.preventDefault = true;
+          return;
+        } else {
+          dump("*** Preventing load of web URI as chrome\n");
+          dump("    If you're trying to load a webpage, do not pass --chrome.\n");
+        }
+      }
+      catch (e) {
+        dump(e + '\n');
+      }
     }
 
     let appPath;
