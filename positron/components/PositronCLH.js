@@ -29,6 +29,15 @@ function getDirectoryService()
                    .getService(nsIProperties);
 }
 
+function loadApp(appBaseDir, appPackageJSON) {
+  let appRunner = new PositronAppRunner();
+  try {
+    appRunner.run(appBaseDir, appPackageJSON);
+  } catch (e) {
+    dump("Exception: " + e + "\n");
+  }
+}
+
 function quit()
 {
   let appStartup = Components.classes["@mozilla.org/toolkit/app-startup;1"]
@@ -141,11 +150,17 @@ PositronCLH.prototype = {
       return;
     }
 
-    let appRunner = new PositronAppRunner();
-    try {
-      appRunner.run(appBaseDir, appPackageJSON);
-    } catch (e) {
-      dump("Exception: " + e + "\n");
+    if (cmdLine.findFlag("jsdebugger", false) === -1) {
+      loadApp(appBaseDir, appPackageJSON);
+    } else {
+      // The command line includes --jsdebugger, which means devtools-startup
+      // will start a toolbox process.  So we wait for that to finish starting
+      // up before continuing, to enable Positron developers to debug startup.
+      let observe = function(subject, topic, data) {
+        Services.obs.removeObserver(observe, "devtools-thread-resumed");
+        loadApp(appBaseDir, appPackageJSON);
+      };
+      Services.obs.addObserver(observe, "devtools-thread-resumed", false);
     }
   },
 
