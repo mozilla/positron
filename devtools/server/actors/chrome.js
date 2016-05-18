@@ -123,7 +123,9 @@ ChromeActor.prototype._attach = function() {
     if (docShell == this.docShell) {
       continue;
     }
-    this._progressListener.watch(docShell);
+    if (this._progressListener) {
+      this._progressListener.watch(docShell);
+    }
   }
 };
 
@@ -146,7 +148,9 @@ ChromeActor.prototype._detach = function() {
     if (docShell == this.docShell) {
       continue;
     }
-    this._progressListener.unwatch(docShell);
+    if (this._progressListener) {
+      this._progressListener.unwatch(docShell);
+    }
   }
 
   TabActor.prototype._detach.call(this);
