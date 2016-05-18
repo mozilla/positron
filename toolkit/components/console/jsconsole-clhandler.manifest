@@ -1,13 +1,3 @@
-# Disable jsconsole-clhandler so it doesn't override devtools-startup.
-# Firefox depends on devtools-startup overriding jsconsole-clhandler because
-# it puts it into the components/browser/ subdirectory, which is apparently
-# registered after the top-level components directory.  But Positron puts
-# devtools-startup into the top-level directory, so jsconsole-clhandler
-# overrides it.  This hack prevents it from doing so.
-#
-# XXX Figure out a better way to prevent jsconsole-clhandler from overriding
-# devtools-startup.
-#
-# component {2cd0c310-e127-44d0-88fc-4435c9ab4d4b} jsconsole-clhandler.js
-# contract @mozilla.org/toolkit/console-clh;1 {2cd0c310-e127-44d0-88fc-4435c9ab4d4b}
+component {2cd0c310-e127-44d0-88fc-4435c9ab4d4b} jsconsole-clhandler.js
+contract @mozilla.org/toolkit/console-clh;1 {2cd0c310-e127-44d0-88fc-4435c9ab4d4b}
 category command-line-handler b-jsconsole @mozilla.org/toolkit/console-clh;1
