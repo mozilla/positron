@@ -1316,7 +1316,12 @@ TabActor.prototype = {
       // In child processes, we have new root docshells,
       // let's watch them and all their child docshells.
       if (this._isRootDocShell(docShell)) {
-        this._progressListener.watch(docShell);
+        // Don't assume there's a progress listener, since Positron starts
+        // without a window, so this._progressListener never gets created.
+        // TODO: ensure there's a listener for apps without an initial window.
+        if (this._progressListener) {
+          this._progressListener.watch(docShell);
+        }
       }
       this._notifyDocShellsUpdate([docShell]);
     });
