@@ -1399,7 +1399,9 @@ TabActor.prototype = {
     // Stop watching this docshell (the unwatch() method will check if we
     // started watching it before).
     webProgress.QueryInterface(Ci.nsIDocShell);
-    this._progressListener.unwatch(webProgress);
+    if (this._progressListener) {
+      this._progressListener.unwatch(webProgress);
+    }
 
     if (webProgress.DOMWindow == this._originalWindow) {
       // If the original top level document we connected to is removed,
@@ -1480,7 +1482,9 @@ TabActor.prototype = {
     // Check for docShell availability, as it can be already gone
     // during Firefox shutdown.
     if (this.docShell) {
-      this._progressListener.unwatch(this.docShell);
+      if (this._progressListener) {
+        this._progressListener.unwatch(this.docShell);
+      }
       this._restoreDocumentSettings();
     }
     if (this._progressListener) {
