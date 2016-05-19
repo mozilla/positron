@@ -11,7 +11,7 @@ const cpmm = Cc["@mozilla.org/childprocessmessagemanager;1"].
 
 exports.send = function(name, args) {
   // XXX Figure out what the caller in ipc-renderer.js expects us to return.
-  return cpmm.sendAsyncMessage(name, args, { window: window });
+  return cpmm.sendAsyncMessage(name, args, { window });
 };
 
 exports.sendSync = function(name, args) {
@@ -20,5 +20,5 @@ exports.sendSync = function(name, args) {
   // <http://electron.atom.io/docs/api/ipc-renderer/#ipcrenderersendsyncchannel-arg1-arg2->
   // expects to receive a single return value.  So this function returns
   // the first item in the array.
-  return cpmm.sendSyncMessage(name, args, { window: window })[0];
+  return cpmm.sendSyncMessage(name, args, { window })[0];
 };
