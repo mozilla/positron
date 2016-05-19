@@ -7,7 +7,7 @@
 const { classes: Cc, interfaces: Ci, results: Cr, utils: Cu } = Components;
 
 // The Node version of this module only re-exports the `process` global,
-// because the global is implemented in natively.  But we implement the global
+// because the global is implemented natively.  But we implement the global
 // in this file, which is the first module required by the ModuleLoader.
 // Because `process` is already defined, we don't need to construct it, so we
 // simply populate it.
