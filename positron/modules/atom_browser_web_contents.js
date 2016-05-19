@@ -114,9 +114,7 @@ function WebContents(options) {
   this._browserWindow = options.browserWindow;
   this._id = ++lastWebContentsID;
 
-  for (let prop in WebContents_prototype) {
-    this[prop] = WebContents_prototype[prop];
-  }
+  Object.assign(this, WebContents_prototype);
   this._getURL = this.getURL;
 }
 
