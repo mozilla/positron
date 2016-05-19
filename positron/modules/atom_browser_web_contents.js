@@ -46,7 +46,8 @@ let WebContents_prototype = {
   },
 
   getTitle: function() {
-    return "/* stub */";
+    /* stub */
+    return "";
   },
 
   openDevTools() {
