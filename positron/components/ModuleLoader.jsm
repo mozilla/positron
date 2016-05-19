@@ -225,9 +225,9 @@ function ModuleLoader(processType, window) {
   // at which point it'll require browser/rpc-server.js for us.
   //
   if (processType === 'renderer') {
-    this.require({}, `resource:///modules/${processType}/init.js`);
+    this.require({}, 'resource:///modules/renderer/init.js');
   } else {
-    this.require({}, `resource:///modules/${processType}/rpc-server.js`);
+    this.require({}, 'resource:///modules/browser/rpc-server.js');
   }
 }
 
