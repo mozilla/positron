@@ -155,15 +155,12 @@ function ModuleLoader(processType, window) {
 
     // dump('require: module found at ' + uri.spec + '\n');
 
-    // Exports provided by the module.
-    let exports = Object.create({});
-
     // The module object.  This gets exposed to the module itself,
     // and it also gets cached for reuse, so multiple `require(module)` calls
     // return a single instance of the module.
     let module = {
       id: uri.spec,
-      exports: exports,
+      exports: {},
       paths: globalPaths.slice(),
       parent: requirer,
     };
