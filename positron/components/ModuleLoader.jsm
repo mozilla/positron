@@ -39,10 +39,16 @@ const DEFAULT_GLOBAL_PATHS = [
 const windowLoaders = new WeakMap();
 
 /**
- * Construct a module importer (`require()` global function).
+ * Construct a module loader (`require()` global function).
  *
- * @param requirer {Module} the module that will use the importer.
- * @return {Function} a module importer.
+ * @param processType {String}
+ *        the type of Electron process for which to construct the loader,
+ *        either "browser" (i.e. the main process) or "renderer"
+ *
+ * @param window {DOMWindow}
+ *        for a renderer process loader, the window associated with the process
+ *
+ * @return {ModuleLoader} the module loader
  */
 
 function ModuleLoader(processType, window) {
