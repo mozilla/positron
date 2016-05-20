@@ -19,10 +19,10 @@
 // and hold a weak reference to it that we periodically poll to determine
 // when it's been GCed.
 
-const Cc = Components.classes;
-const Ci = Components.interfaces;
-const Cr = Components.results;
-const Cu = Components.utils;
+const { classes: Cc, interfaces: Ci, results: Cr, utils: Cu } = Components;
+
+const ppmm = Cc['@mozilla.org/parentprocessmessagemanager;1'].
+             getService(Ci.nsIMessageBroadcaster);
 
 const windowWatcher = Cc['@mozilla.org/embedcomp/window-watcher;1'].
                       getService(Ci.nsIWindowWatcher);
@@ -58,9 +58,59 @@ function BrowserWindow(options) {
     browserWindow: this,
   });
 
+  ppmm.addMessageListener('ipc-message', this);
+  ppmm.addMessageListener('ipc-message-sync', this);
+
   this._domWindow = windowWatcher.openWindow(null, DEFAULT_URL, '_blank', features.join(','), null);
   browserWindows.set(this._domWindow, this);
 }
+
+BrowserWindow.prototype = {
+  isVisible() {
+    /* stub */
+    return true;
+  },
+
+  isMinimized() {
+    /* stub */
+    return false;
+  },
+};
+
+// nsIMessageListener
+BrowserWindow.prototype.receiveMessage = function(message) {
+  // All our windows are in the same process, so we can't listen to a process-
+  // specific message manager to receive messages from only our window.
+  // Nor do frame message managers meet our needs (among other reasons, they
+  // don't provide sendSyncMessage).
+  //
+  // So we listen to the global parent-process message manager and identify
+  // messages from our window by making the window pass a reference to itself
+  // in the message.objects argument.
+  //
+  if (message.objects.window !== this._domWindow) {
+    return;
+  }
+
+  // For synchronous messages, the value to return.
+  let returnValue;
+
+  let event = {
+    sender: this.webContents,
+
+    // The Electron API tells recipients to set the returnValue property
+    // of the event object, and the web-contents module defines that property
+    // as a setter that calls event.sendReply; so we implement sendReply
+    // to capture the value.
+    sendReply: function(reply) {
+      returnValue = reply;
+    }
+  };
+
+  this.webContents.emit.apply(this.webContents, [message.name, event, message.data]);
+
+  return returnValue;
+};
 
 windowWatcher.registerNotification(function observe(subject, topic, data) {
   switch(topic) {
@@ -79,6 +129,8 @@ windowWatcher.registerNotification(function observe(subject, topic, data) {
 
       browserWindow.emit('closed');
       browserWindows.delete(subject);
+      ppmm.removeMessageListener('ipc-message', browserWindow);
+      ppmm.removeMessageListener('ipc-message-sync', browserWindow);
 
       // This assumes that the BrowserWindow module was loaded before any
       // windows were opened.  That's a safe assumption while the module

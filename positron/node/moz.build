@@ -3,5 +3,26 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 EXTRA_JS_MODULES.node += [
+  'lib/_stream_duplex.js',
+  'lib/_stream_passthrough.js',
+  'lib/_stream_readable.js',
+  'lib/_stream_transform.js',
+  'lib/_stream_writable.js',
+  'lib/assert.js',
+  'lib/buffer.js',
+  'lib/constants.js',
   'lib/events.js',
+  'lib/fs.js',
+  'lib/module.js',
+  'lib/path.js',
+  'lib/stream.js',
+  'lib/timers.js',
+  'lib/util.js',
+  'lib/vm.js',
+]
+
+EXTRA_JS_MODULES.node.internal += [
+  'lib/internal/linkedlist.js',
+  'lib/internal/module.js',
+  'lib/internal/util.js',
 ]

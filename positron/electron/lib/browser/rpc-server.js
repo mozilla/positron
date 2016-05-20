@@ -45,6 +45,13 @@ let getObjectPrototype = function(object) {
   let proto = Object.getPrototypeOf(object);
   if (proto === null || proto === Object.prototype)
     return null;
+
+  // This hack employs duck typing to compare `proto` to `Object.prototype`
+  // to work around cases in which the objects are from different sandboxes.
+  // XXX Implement a real fix for that issue and remove this hack.
+  if (Object.keys(proto).sort().join('') === Object.keys(Object.prototype).sort().join(''))
+    return null;
+
   return {
     members: getObjectMembers(proto),
     proto: getObjectPrototype(proto),

@@ -6,7 +6,23 @@
 
 const { classes: Cc, interfaces: Ci, results: Cr, utils: Cu } = Components;
 
+// The Node version of this module only re-exports the `process` global,
+// because the global is implemented natively.  But we implement the global
+// in this file, which is the first module required by the ModuleLoader.
+// Because `process` is already defined, we don't need to construct it, so we
+// simply populate it.
+
 Cu.import('resource://gre/modules/Services.jsm');
+
+const exeFile = Services.dirsvc.get("XREExeF", Ci.nsIFile);
+
+// Re-export `process` as a native module.  I dunno why this matters, since all
+// modules already have access to the global.  But Node does it, so we do too.
+module.exports = process;
+
+// This is a stub with a placeholder that browser/init.js and renderer/init.js
+// both remove.
+process.argv = [exeFile.leafName, "placeholder that init.js removes"];
 
 // In Node, process.js is basically a noop, as it just re-exports the existing
 // `process` global.  But in Positron, we implement the `process` global via
@@ -42,11 +58,20 @@ process.atomBinding = function(name) {
 };
 
 // This loads a native binding in Node, but we aren't using real Node yet,
-// so we simply require the module with the same name, so we can implement
-// bindings in JavaScript.
+// and instead we're emulating native bindings via JavaScript modules, so we
+// load the "native binding module" corresponding to the native binding name.
+//
+// All such modules are in the modules/gecko/ subdirectory, and some of them
+// have the same names as modules provided by Node itself (f.e. the 'buffer'
+// module, which calls process.binding to import the 'buffer' native binding),
+// so we specify the absolute URL to the module to avoid name resolution,
+// which might find a different module.
+//
 process.binding = function(name) {
-  return require(name);
+  return require(`resource:///modules/gecko/${name}.js`);
 }
+
+process.execPath = exeFile.path;
 
 // Per <https://nodejs.org/api/process.html#process_process_platform>,
 // valid values for this property are darwin, freebsd, linux, sunos and win32;
@@ -60,3 +85,25 @@ process.versions = {
   chrome: Services.appinfo.platformVersion,
   electron: Services.appinfo.version,
 };
+
+process.release = {
+  name: 'node',
+};
+
+Object.defineProperty(process, 'pid', {
+  get() { return Services.appinfo.processID },
+});
+
+// We might be able to implement this by using nsIEnvironment, although that API
+// doesn't provide enumeration, whereas this one presumably does.
+process.env = {
+  /* stub */
+};
+
+// Make the `process` global into an EventEmitter.  We do this at the end
+// of this script on the off chance that the "events" module ever depends on
+// a property of the `process` global that we define earlier in the script
+// (although it doesn't appear to do so at the moment).
+process.__proto__ = require('events').EventEmitter.prototype;
+
+// ¡¡¡Don't put anything after this line before reading the comment above!!!

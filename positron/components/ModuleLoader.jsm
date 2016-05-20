@@ -13,6 +13,7 @@ const Ci = Components.interfaces;
 const Cr = Components.results;
 const Cu = Components.utils;
 
+Cu.import('resource://gre/modules/Console.jsm');
 Cu.import('resource://gre/modules/Services.jsm');
 
 const subScriptLoader = Cc['@mozilla.org/moz/jssubscript-loader;1'].
@@ -31,10 +32,6 @@ const DEFAULT_GLOBAL_PATHS = [
   // Electron standard modules that are common to both process types.
   'common/api/exports/',
 
-  // Modules that are imported via process.atomBinding().  In Electron,
-  // these are all natives; in Positron, they're currently all JavaScript.
-  'atom/',
-
   // Node standard modules, which are copied directly from Node where possible.
   'node/',
 ];
@@ -42,13 +39,19 @@ const DEFAULT_GLOBAL_PATHS = [
 const windowLoaders = new WeakMap();
 
 /**
- * Construct a module importer (`require()` global function).
+ * Construct a module loader (`require()` global function).
  *
- * @param requirer {Module} the module that will use the importer.
- * @return {Function} a module importer.
+ * @param processType {String}
+ *        the type of Electron process for which to construct the loader,
+ *        either "browser" (i.e. the main process) or "renderer"
+ *
+ * @param window {DOMWindow}
+ *        for a renderer process loader, the window associated with the process
+ *
+ * @return {ModuleLoader} the module loader
  */
 
-function ModuleLoader(processType) {
+function ModuleLoader(processType, window) {
   const globalPaths = DEFAULT_GLOBAL_PATHS.slice();
   // Prepend a process-type-specific path to the global paths for this loader.
   globalPaths.unshift(processType + '/api/exports/');
@@ -67,11 +70,23 @@ function ModuleLoader(processType) {
    * This object is shared across all modules loaded by this loader.
    */
   this.global = {
-    // Start defining the `process` property.  We finish defining it below,
-    // after defining this.require().
-    process: {
-      type: processType,
-    },
+    // Electron assumes these exist on the global object, so we define them.
+    // I wonder if it assumes that all window.* properties will exist, in which
+    // case we should instead make the window be the global's prototype.
+    window: processType === 'renderer' ? window : undefined,
+    location: processType === 'renderer' ? window.location : undefined,
+    document: processType === 'renderer' ? window.document : undefined,
+
+    // This comes from Console.jsm, and I don't think it's exactly the same
+    // as the Console Web API.
+    // XXX Replace this with the real Console Web API (or at least ensure
+    // that the current version is compatible with it).
+    console: console,
+
+    // Other global properties, like `process` and `Buffer`, are defined
+    // after we define the require() function, so we can use that function
+    // to implement them.
+
     // XXX Also define setImmediate and clearImmediate.
   };
 
@@ -98,9 +113,13 @@ function ModuleLoader(processType) {
    * @return          {Object} an `exports` object.
    */
   this.require = function(requirer, path) {
-    let uri, file;
-
     // dump('require: ' + requirer.id + ' requires ' + path + '\n');
+
+    if (path === 'native_module') {
+      return this;
+    }
+
+    let uri, file;
 
     if (path.indexOf("://") !== -1) {
       // A URL.
@@ -131,20 +150,19 @@ function ModuleLoader(processType) {
     }
 
     if (!file.exists()) {
-      throw new Error('No such module: ' + path);
+      throw new Error(`No such module: ${path} (required by ${requirer.id})`);
     }
 
     // dump('require: module found at ' + uri.spec + '\n');
-
-    // Exports provided by the module.
-    let exports = Object.create(null);
 
     // The module object.  This gets exposed to the module itself,
     // and it also gets cached for reuse, so multiple `require(module)` calls
     // return a single instance of the module.
     let module = {
       id: uri.spec,
-      exports: exports,
+      exports: {},
+      paths: globalPaths.slice(),
+      parent: requirer,
     };
 
     // Return module immediately if it's already started loading.  Note that
@@ -182,18 +200,41 @@ function ModuleLoader(processType) {
     }
   };
 
-  // Finish defining the properties of the global.process object.
-  // We do this by importing a module with our own require() function,
-  // which gives it access to that require() function, so it can use it
-  // to load native bindings.  Perhaps it would be better to populate
-  // the process object entirely within this ModuleLoader constructor.
+  // The `process` global is complicated.  It's implemented as a module
+  // that uses `require` to import other modules, but it also needs to exist
+  // before those modules are evaluated, since it's a global that's supposed
+  // to be available in them.
+  //
+  // So we declare it first here as a stub, then require the module to finish
+  // initializing it.
+  //
+  this.global.process = {
+    type: processType,
+  };
   this.require({}, 'resource:///modules/gecko/process.js');
+
+  this.global.Buffer = this.require({}, 'resource:///modules/node/buffer.js').Buffer;
+
+  // Require the Electron init.js script for the given process type.
+  //
+  // We only do this for renderer processes for now.  For browser processes,
+  // we instead require the one browser process module that renderer/init.js
+  // depends on having already been required, browser/rpc-server.js.
+  //
+  // Eventually, we should get browser/init.js working and require it here,
+  // at which point it'll require browser/rpc-server.js for us.
+  //
+  if (processType === 'renderer') {
+    this.require({}, 'resource:///modules/renderer/init.js');
+  } else {
+    this.require({}, 'resource:///modules/browser/rpc-server.js');
+  }
 }
 
 ModuleLoader.getLoaderForWindow = function(window) {
   let loader = windowLoaders.get(window);
   if (!loader) {
-    loader = new ModuleLoader('renderer');
+    loader = new ModuleLoader('renderer', window);
     windowLoaders.set(window, loader);
   }
   return loader;

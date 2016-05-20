@@ -4,9 +4,6 @@
 
 'use strict';
 
-const util = process.binding('util');
+const { classes: Cc, interfaces: Ci, results: Cr, utils: Cu } = Components;
 
-exports.getHiddenValue = util.getHiddenValue;
-exports.setHiddenValue = util.setHiddenValue;
-
-exports.setDestructor = function(object, callback) { /* stub */ };
+exports.FSEvent = function() { /* stub */ };
