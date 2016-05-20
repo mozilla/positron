@@ -9,16 +9,25 @@ const { classes: Cc, interfaces: Ci, results: Cr, utils: Cu } = Components;
 // Described In Electron's id_weak_map.h as:
 // "Like ES6's WeakMap, but the key is Integer and the value is Weak Pointer."
 
+const instances = new WeakMap();
+
 function IDWeakMap() {
-  const map = new Map();
-  this.set = function(key, value) {
-    map.set(key, Cu.getWeakReference(value));
-  };
-  this.get = function(key) {
-    return map.get(key).get();
-  }
-  this.has = map.has.bind(map);
-  this.clear = map.clear.bind(map);
+  instances.set(this, new Map());
 }
+
+IDWeakMap.prototype = {
+  set(key, value) {
+    instances.get(this).set(key, Cu.getWeakReference(value));
+  },
+  get(key) {
+    return instances.get(this).get(key).get();
+  },
+  has(value) {
+    return instances.get(this).has(value);
+  },
+  clear() {
+    instances.get(this).clear();
+  },
+};
 
 exports.IDWeakMap = IDWeakMap;
