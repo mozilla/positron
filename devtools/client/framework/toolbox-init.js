@@ -50,12 +50,12 @@ if (url.search.length > 1) {
     // `iframe` is the targeted document to debug
     let iframe = host.wrappedJSObject ? host.wrappedJSObject.target
                                       : host.target;
-    // Need to use a xray and query some interfaces to have
-    // attributes and behavior expected by devtools codebase
-    iframe = XPCNativeWrapper(iframe);
-    iframe.QueryInterface(Ci.nsIFrameLoaderOwner);
-
     if (iframe) {
+      // Need to use a xray and query some interfaces to have
+      // attributes and behavior expected by devtools codebase
+      iframe = XPCNativeWrapper(iframe);
+      iframe.QueryInterface(Ci.nsIFrameLoaderOwner);
+
       // Fake a xul:tab object as we don't have one.
       // linkedBrowser is the only one attribute being queried by client.getTab
       let tab = { linkedBrowser: iframe };
@@ -79,6 +79,8 @@ if (url.search.length > 1) {
         return gDevTools.showToolbox(target, tool, Toolbox.HostType.CUSTOM,
                                      options);
       });
+    } else {
+      toolboxOpened = Promise.reject(new Error("toolbox target is undefined"));
     }
   } else {
     toolboxOpened = Task.spawn(function*() {
@@ -89,10 +91,6 @@ if (url.search.length > 1) {
     });
   }
 
-  toolboxOpened.catch(e => {
-    window.alert("Unable to start the toolbox: " + e.message);
-  });
-
   // Ensure the toolbox gets destroyed if the host unloads
   toolboxOpened.then(toolbox => {
     let hostUnload = () => {
@@ -100,5 +98,9 @@ if (url.search.length > 1) {
       toolbox.destroy();
     };
     host.contentWindow.addEventListener("unload", hostUnload);
+  });
+
+  toolboxOpened.catch(e => {
+    window.alert("Unable to start the toolbox: " + e.message);
   });
 }
