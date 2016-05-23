@@ -97,7 +97,7 @@ PositronCLH.prototype = {
         };
         if (isLocal(resolvedURI)) {
           // If the URI is local, we are sure it won't wrongly inherit chrome privs
-          var features = "chrome,dialog=no,all";
+          var features = "chrome,dialog=no,all,resizable";
           Services.ww.openWindow(null, resolvedURI.spec, "_blank", features, null);
           cmdLine.preventDefault = true;
           return;
