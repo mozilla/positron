@@ -37,7 +37,7 @@
 #include "gfxGDIFontList.h"
 #include "gfxGDIFont.h"
 
-#include "mozilla/layers/CompositorBridgeParent.h"   // for CompositorBridgeParent::IsInCompositorThread
+#include "mozilla/layers/CompositorThread.h"
 #include "DeviceManagerD3D9.h"
 #include "mozilla/layers/ReadbackManagerD3D11.h"
 
@@ -67,10 +67,10 @@
 #include <winternl.h>
 #include "d3dkmtQueryStatistics.h"
 
+#include "base/thread.h"
 #include "SurfaceCache.h"
 #include "gfxPrefs.h"
 #include "gfxConfig.h"
-
 #include "VsyncSource.h"
 #include "DriverCrashGuard.h"
 #include "mozilla/dom/ContentParent.h"
@@ -499,11 +499,7 @@ gfxWindowsPlatform::UpdateBackendPrefs()
   uint32_t canvasMask = BackendTypeBit(SOFTWARE_BACKEND);
   uint32_t contentMask = BackendTypeBit(SOFTWARE_BACKEND);
   BackendType defaultBackend = SOFTWARE_BACKEND;
-  if (gfxConfig::IsEnabled(Feature::DIRECT2D)) {
-    MOZ_RELEASE_ASSERT(Factory::GetDirect3D11Device());
-    MOZ_RELEASE_ASSERT(Factory::GetD2D1Device());
-    MOZ_RELEASE_ASSERT(Factory::SupportsD2D1());
-
+  if (gfxConfig::IsEnabled(Feature::DIRECT2D) && Factory::GetD2D1Device()) {
     contentMask |= BackendTypeBit(BackendType::DIRECT2D1_1);
     canvasMask |= BackendTypeBit(BackendType::DIRECT2D1_1);
     defaultBackend = BackendType::DIRECT2D1_1;
@@ -945,6 +941,13 @@ static DeviceResetReason HResultToResetReason(HRESULT hr)
     MOZ_ASSERT(false);
   }
   return DeviceResetReason::UNKNOWN;
+}
+
+void
+gfxWindowsPlatform::CompositorUpdated()
+{
+  ForceDeviceReset(ForcedDeviceResetReason::COMPOSITOR_UPDATED);
+  UpdateRenderMode();
 }
 
 bool
@@ -1410,7 +1413,7 @@ gfxWindowsPlatform::GetD3D9DeviceManager()
   RefPtr<DeviceManagerD3D9> result;
   if (!mDeviceManager &&
       (!gfxPlatform::UsesOffMainThreadCompositing() ||
-       CompositorBridgeParent::IsInCompositorThread())) {
+       CompositorThreadHolder::IsInCompositorThread())) {
     mDeviceManager = new DeviceManagerD3D9();
     if (!mDeviceManager->Init()) {
       gfxCriticalError() << "[D3D9] Could not Initialize the DeviceManagerD3D9";
@@ -1963,6 +1966,11 @@ gfxWindowsPlatform::InitializeD3D9Config()
   MOZ_ASSERT(XRE_IsParentProcess());
 
   FeatureState& d3d9 = gfxConfig::GetFeature(Feature::D3D9_COMPOSITING);
+
+  if (!gfxConfig::IsEnabled(Feature::HW_COMPOSITING)) {
+    d3d9.DisableByDefault(FeatureStatus::Unavailable, "Hardware compositing is disabled");
+    return;
+  }
 
   if (!IsVistaOrLater()) {
     d3d9.EnableByDefault();
@@ -2521,14 +2529,17 @@ gfxWindowsPlatform::InitializeD2DConfig()
 
   if (!gfxConfig::IsEnabled(Feature::D3D11_COMPOSITING)) {
     d2d1.DisableByDefault(FeatureStatus::Unavailable, "Direct2D requires Direct3D 11 compositing");
-  } else if (!IsVistaOrLater()) {
-    d2d1.DisableByDefault(FeatureStatus::Unavailable, "Direct2D is not available on Windows XP");
-  } else {
-    d2d1.SetDefaultFromPref(
-      gfxPrefs::GetDirect2DDisabledPrefName(),
-      false,
-      gfxPrefs::GetDirect2DDisabledPrefDefault());
+    return;
   }
+  if (!IsVistaOrLater()) {
+    d2d1.DisableByDefault(FeatureStatus::Unavailable, "Direct2D is not available on Windows XP");
+    return;
+  }
+
+  d2d1.SetDefaultFromPref(
+    gfxPrefs::GetDirect2DDisabledPrefName(),
+    false,
+    gfxPrefs::GetDirect2DDisabledPrefDefault());
 
   nsCString message;
   if (!IsGfxInfoStatusOkay(nsIGfxInfo::FEATURE_DIRECT2D, &message)) {

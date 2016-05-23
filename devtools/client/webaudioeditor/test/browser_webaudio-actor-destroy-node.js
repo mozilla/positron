@@ -5,7 +5,7 @@
  * Test `destroy-node` event on WebAudioActor.
  */
 
-add_task(function*() {
+add_task(function* () {
   let { target, front } = yield initBackend(DESTROY_NODES_URL);
 
   let waitUntilDestroyed = getN(front, "destroy-node", 10);
@@ -15,6 +15,10 @@ add_task(function*() {
     // Should create 1 destination node and 10 disposable buffer nodes
     getN(front, "create-node", 13)
   ]);
+
+  // Wait for a tick before gc to prevent this test from intermittent timeout
+  // where the node never get collected.
+  yield DevToolsUtils.waitForTick();
 
   // Force CC so we can ensure it's run to clear out dead AudioNodes
   forceCC();
@@ -30,7 +34,7 @@ add_task(function*() {
   yield removeTab(target.tab);
 });
 
-function actorIsInList (list, actor) {
+function actorIsInList(list, actor) {
   for (let i = 0; i < list.length; i++) {
     if (list[i].actorID === actor.actorID)
       return list[i];

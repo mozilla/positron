@@ -948,7 +948,7 @@ Debugger::wrapEnvironment(JSContext* cx, Handle<Env*> env, MutableHandleValue rv
             return false;
         }
 
-        CrossCompartmentKey key(CrossCompartmentKey::DebuggerEnvironment, object, env);
+        CrossCompartmentKey key(object, env, CrossCompartmentKey::DebuggerEnvironment);
         if (!object->compartment()->putWrapper(cx, key, ObjectValue(*envobj))) {
             NukeDebuggerWrapper(envobj);
             environments.remove(env);
@@ -992,7 +992,7 @@ Debugger::wrapDebuggeeValue(JSContext* cx, MutableHandleValue vp)
             }
 
             if (obj->compartment() != object->compartment()) {
-                CrossCompartmentKey key(CrossCompartmentKey::DebuggerObject, object, obj);
+                CrossCompartmentKey key(object, obj, CrossCompartmentKey::DebuggerObject);
                 if (!object->compartment()->putWrapper(cx, key, ObjectValue(*dobj))) {
                     NukeDebuggerWrapper(dobj);
                     objects.remove(obj);
@@ -5063,7 +5063,7 @@ Debugger::newDebuggerScript(JSContext* cx, Handle<DebuggerScriptReferent> refere
 
 template <typename ReferentVariant, typename Referent, typename Map>
 JSObject*
-Debugger::wrapVariantReferent(JSContext* cx, Map& map, CrossCompartmentKey::Kind keyKind,
+Debugger::wrapVariantReferent(JSContext* cx, Map& map, Handle<CrossCompartmentKey> key,
                               Handle<ReferentVariant> referent)
 {
     assertSameCompartment(cx, object);
@@ -5082,7 +5082,6 @@ Debugger::wrapVariantReferent(JSContext* cx, Map& map, CrossCompartmentKey::Kind
             return nullptr;
         }
 
-        CrossCompartmentKey key(keyKind, object, untaggedReferent);
         if (!object->compartment()->putWrapper(cx, key, ObjectValue(*wrapper))) {
             NukeDebuggerWrapper(wrapper);
             map.remove(untaggedReferent);
@@ -5100,11 +5099,16 @@ Debugger::wrapVariantReferent(JSContext* cx, Handle<DebuggerScriptReferent> refe
 {
     JSObject* obj;
     if (referent.is<JSScript*>()) {
+        Handle<JSScript*> untaggedReferent = referent.template as<JSScript*>();
+        Rooted<CrossCompartmentKey> key(cx, CrossCompartmentKey(object, untaggedReferent));
         obj = wrapVariantReferent<DebuggerScriptReferent, JSScript*, ScriptWeakMap>(
-            cx, scripts, CrossCompartmentKey::DebuggerScript, referent);
+            cx, scripts, key, referent);
     } else {
+        Handle<WasmModuleObject*> untaggedReferent = referent.template as<WasmModuleObject*>();
+        Rooted<CrossCompartmentKey> key(cx, CrossCompartmentKey(object, untaggedReferent,
+                                        CrossCompartmentKey::DebuggerObjectKind::DebuggerWasmScript));
         obj = wrapVariantReferent<DebuggerScriptReferent, WasmModuleObject*, WasmModuleWeakMap>(
-            cx, wasmModuleScripts, CrossCompartmentKey::DebuggerWasmScript, referent);
+            cx, wasmModuleScripts, key, referent);
     }
     MOZ_ASSERT_IF(obj, GetScriptReferent(obj) == referent);
     return obj;
@@ -5398,14 +5402,19 @@ class BytecodeRangeWithPosition : private BytecodeRange
 
     BytecodeRangeWithPosition(JSContext* cx, JSScript* script)
       : BytecodeRange(cx, script), lineno(script->lineno()), column(0),
-        sn(script->notes()), snpc(script->code()), isEntryPoint(false)
+        sn(script->notes()), snpc(script->code()), isEntryPoint(false),
+        wasArtifactEntryPoint(false)
     {
         if (!SN_IS_TERMINATOR(sn))
             snpc += SN_DELTA(sn);
         updatePosition();
         while (frontPC() != script->main())
             popFront();
-        isEntryPoint = true;
+
+        if (frontOpcode() != JSOP_JUMPTARGET)
+            isEntryPoint = true;
+        else
+            wasArtifactEntryPoint =  true;
     }
 
     void popFront() {
@@ -5414,6 +5423,19 @@ class BytecodeRangeWithPosition : private BytecodeRange
             isEntryPoint = false;
         else
             updatePosition();
+
+        // The following conditions are handling artifacts introduced by the
+        // bytecode emitter, such that we do not add breakpoints on empty
+        // statements of the source code of the user.
+        if (wasArtifactEntryPoint) {
+            wasArtifactEntryPoint = false;
+            isEntryPoint = true;
+        }
+
+        if (isEntryPoint && frontOpcode() == JSOP_JUMPTARGET) {
+            wasArtifactEntryPoint = isEntryPoint;
+            isEntryPoint = false;
+        }
     }
 
     size_t frontLineNumber() const { return lineno; }
@@ -5463,6 +5485,7 @@ class BytecodeRangeWithPosition : private BytecodeRange
     jssrcnote* sn;
     jsbytecode* snpc;
     bool isEntryPoint;
+    bool wasArtifactEntryPoint;
 };
 
 /*
@@ -5522,7 +5545,7 @@ class FlowGraphSummary {
             return Entry(SIZE_MAX, SIZE_MAX);
         }
 
-        Entry() {}
+        Entry() : lineno_(SIZE_MAX), column_(0) {}
 
         bool hasNoEdges() const {
             return lineno_ == SIZE_MAX && column_ != SIZE_MAX;
@@ -5574,19 +5597,27 @@ class FlowGraphSummary {
             return false;
         unsigned mainOffset = script->pcToOffset(script->main());
         entries_[mainOffset] = Entry::createWithMultipleEdgesFromMultipleLines();
-        for (size_t i = mainOffset + 1; i < script->length(); i++)
-            entries_[i] = Entry::createWithNoEdges();
 
         size_t prevLineno = script->lineno();
         size_t prevColumn = 0;
         JSOp prevOp = JSOP_NOP;
         for (BytecodeRangeWithPosition r(cx, script); !r.empty(); r.popFront()) {
-            size_t lineno = r.frontLineNumber();
-            size_t column = r.frontColumnNumber();
+            size_t lineno = prevLineno;
+            size_t column = prevColumn;
             JSOp op = r.frontOpcode();
 
             if (FlowsIntoNext(prevOp))
                 addEdge(prevLineno, prevColumn, r.frontOffset());
+
+            if (BytecodeIsJumpTarget(op)) {
+                lineno = entries_[r.frontOffset()].lineno();
+                column = entries_[r.frontOffset()].column();
+            }
+
+            if (r.frontIsEntryPoint()) {
+                lineno = r.frontLineNumber();
+                column = r.frontColumnNumber();
+            }
 
             if (CodeSpec[op].type() == JOF_JUMP) {
                 addEdge(lineno, column, r.frontOffset() + GET_JUMP_OFFSET(r.frontPC()));
@@ -5607,6 +5638,22 @@ class FlowGraphSummary {
                     size_t target = offset + GET_JUMP_OFFSET(pc);
                     addEdge(lineno, column, target);
                     pc += step;
+                }
+            } else if (op == JSOP_TRY) {
+                // As there is no literal incoming edge into the catch block, we
+                // make a fake one by copying the JSOP_TRY location, as-if this
+                // was an incoming edge of the catch block. This is needed
+                // because we only report offsets of entry points which have
+                // valid incoming edges.
+                JSTryNote* tn = script->trynotes()->vector;
+                JSTryNote* tnlimit = tn + script->trynotes()->length;
+                for (; tn < tnlimit; tn++) {
+                    uint32_t startOffset = script->mainOffset() + tn->start;
+                    if (startOffset == r.frontOffset() + 1) {
+                        uint32_t catchOffset = startOffset + tn->length;
+                        if (tn->kind == JSTRY_CATCH || tn->kind == JSTRY_FINALLY)
+                            addEdge(lineno, column, catchOffset);
+                    }
                 }
             }
 
@@ -5655,20 +5702,45 @@ DebuggerScript_getOffsetLocation(JSContext* cx, unsigned argc, Value* vp)
     while (!r.empty() && r.frontOffset() < offset)
         r.popFront();
 
+    offset = r.frontOffset();
+    bool isEntryPoint = r.frontIsEntryPoint();
+
+    // Line numbers are only correctly defined on entry points. Thus looks
+    // either for the next valid offset in the flowData, being the last entry
+    // point flowing into the current offset, or for the next valid entry point.
+    while (!r.frontIsEntryPoint() && !flowData[r.frontOffset()].hasSingleEdge()) {
+        r.popFront();
+        MOZ_ASSERT(!r.empty());
+    }
+
+    // If this is an entry point, take the line number associated with the entry
+    // point, otherwise settle on the next instruction and take the incoming
+    // edge position.
+    size_t lineno;
+    size_t column;
+    if (r.frontIsEntryPoint()) {
+        lineno = r.frontLineNumber();
+        column = r.frontColumnNumber();
+    } else {
+        MOZ_ASSERT(flowData[r.frontOffset()].hasSingleEdge());
+        lineno = flowData[r.frontOffset()].lineno();
+        column = flowData[r.frontOffset()].column();
+    }
+
     RootedId id(cx, NameToId(cx->names().lineNumber));
-    RootedValue value(cx, NumberValue(r.frontLineNumber()));
+    RootedValue value(cx, NumberValue(lineno));
     if (!DefineProperty(cx, result, id, value))
         return false;
 
-    value = NumberValue(r.frontColumnNumber());
+    value = NumberValue(column);
     if (!DefineProperty(cx, result, cx->names().columnNumber, value))
         return false;
 
     // The same entry point test that is used by getAllColumnOffsets.
-    bool isEntryPoint = (r.frontIsEntryPoint() &&
-                         !flowData[offset].hasNoEdges() &&
-                         (flowData[offset].lineno() != r.frontLineNumber() ||
-                          flowData[offset].column() != r.frontColumnNumber()));
+    isEntryPoint = (isEntryPoint &&
+                    !flowData[offset].hasNoEdges() &&
+                    (flowData[offset].lineno() != r.frontLineNumber() ||
+                     flowData[offset].column() != r.frontColumnNumber()));
     value.setBoolean(isEntryPoint);
     if (!DefineProperty(cx, result, cx->names().isEntryPoint, value))
         return false;
@@ -6342,11 +6414,17 @@ Debugger::wrapVariantReferent(JSContext* cx, Handle<DebuggerSourceReferent> refe
 {
     JSObject* obj;
     if (referent.is<ScriptSourceObject*>()) {
+        Handle<ScriptSourceObject*> untaggedReferent = referent.template as<ScriptSourceObject*>();
+        Rooted<CrossCompartmentKey> key(cx, CrossCompartmentKey(object, untaggedReferent,
+                                    CrossCompartmentKey::DebuggerObjectKind::DebuggerSource));
         obj = wrapVariantReferent<DebuggerSourceReferent, ScriptSourceObject*, SourceWeakMap>(
-            cx, sources, CrossCompartmentKey::DebuggerSource, referent);
+            cx, sources, key, referent);
     } else {
+        Handle<WasmModuleObject*> untaggedReferent = referent.template as<WasmModuleObject*>();
+        Rooted<CrossCompartmentKey> key(cx, CrossCompartmentKey(object, untaggedReferent,
+                                    CrossCompartmentKey::DebuggerObjectKind::DebuggerWasmSource));
         obj = wrapVariantReferent<DebuggerSourceReferent, WasmModuleObject*, WasmModuleWeakMap>(
-            cx, wasmModuleSources, CrossCompartmentKey::DebuggerWasmSource, referent);
+            cx, wasmModuleSources, key, referent);
     }
     MOZ_ASSERT_IF(obj, GetSourceReferent(obj) == referent);
     return obj;
@@ -7647,12 +7725,11 @@ DebuggerObject_checkThis(JSContext* cx, const CallArgs& args, const char* fnname
     return nthisobj;
 }
 
-#define THIS_DEBUGOBJECT(cx, argc, vp, fnname, args, obj, object)     \
-    CallArgs args = CallArgsFromVp(argc, vp);                         \
-    RootedObject obj(cx, DebuggerObject_checkThis(cx, args, fnname)); \
-    if (!obj)                                                         \
-        return false;                                                 \
-    DebuggerObject& object = obj->as<DebuggerObject>();               \
+#define THIS_DEBUGOBJECT(cx, argc, vp, fnname, object)                              \
+    CallArgs args = CallArgsFromVp(argc, vp);                                       \
+    Rooted<DebuggerObject*> object(cx, DebuggerObject_checkThis(cx, args, fnname)); \
+    if (!object)                                                                    \
+        return false;                                                               \
 
 #define THIS_DEBUGOBJECT_REFERENT(cx, argc, vp, fnname, args, obj)            \
     CallArgs args = CallArgsFromVp(argc, vp);                                 \
@@ -8437,13 +8514,27 @@ DebuggerObject_preventExtensions(JSContext* cx, unsigned argc, Value* vp)
 }
 
 static bool
-DebuggerObject_isSealed(JSContext* cx, unsigned argc, Value* vp)
+DebuggerObject_isExtensible(JSContext* cx, unsigned argc, Value* vp)
 {
-    THIS_DEBUGOBJECT(cx, argc, vp, "isSealed", args, obj, object);
+    THIS_DEBUGOBJECT(cx, argc, vp, "isExtensible", object)
 
     bool result;
-    if (!object.isSealed(cx, &result))
-      return false;
+    if (!DebuggerObject::isExtensible(cx, object, result))
+        return false;
+
+    args.rval().setBoolean(result);
+    return true;
+}
+
+static bool
+DebuggerObject_isSealed(JSContext* cx, unsigned argc, Value* vp)
+{
+    THIS_DEBUGOBJECT(cx, argc, vp, "isSealed", object)
+
+    bool result;
+    if (!DebuggerObject::isSealed(cx, object, result))
+        return false;
+
     args.rval().setBoolean(result);
     return true;
 }
@@ -8451,23 +8542,12 @@ DebuggerObject_isSealed(JSContext* cx, unsigned argc, Value* vp)
 static bool
 DebuggerObject_isFrozen(JSContext* cx, unsigned argc, Value* vp)
 {
-    THIS_DEBUGOBJECT(cx, argc, vp, "isFrozen", args, obj, object);
+    THIS_DEBUGOBJECT(cx, argc, vp, "isFrozen", object)
 
     bool result;
-    if (!object.isFrozen(cx, &result))
-      return false;
-    args.rval().setBoolean(result);
-    return true;
-}
+    if (!DebuggerObject::isFrozen(cx, object, result))
+        return false;
 
-static bool
-DebuggerObject_isExtensible(JSContext* cx, unsigned argc, Value* vp)
-{
-    THIS_DEBUGOBJECT(cx, argc, vp, "isExtensible", args, obj, object);
-
-    bool result;
-    if (!object.isExtensible(cx, &result))
-      return false;
     args.rval().setBoolean(result);
     return true;
 }
@@ -8817,10 +8897,10 @@ const JSFunctionSpec DebuggerObject::methods_[] = {
     JS_FN("seal", DebuggerObject_seal, 0, 0),
     JS_FN("freeze", DebuggerObject_freeze, 0, 0),
     JS_FN("preventExtensions", DebuggerObject_preventExtensions, 0, 0),
-    JS_FN("isSealed", DebuggerObject_isSealed, 0, 0),
     JS_FN("forceLexicalInitializationByName", DebuggerObject_forceLexicalInitializationByName, 1, 0),
-    JS_FN("isFrozen", DebuggerObject_isFrozen, 0, 0),
     JS_FN("isExtensible", DebuggerObject_isExtensible, 0, 0),
+    JS_FN("isSealed", DebuggerObject_isSealed, 0, 0),
+    JS_FN("isFrozen", DebuggerObject_isFrozen, 0, 0),
     JS_FN("apply", DebuggerObject_apply, 0, 0),
     JS_FN("call", DebuggerObject_call, 0, 0),
     JS_FN("makeDebuggeeValue", DebuggerObject_makeDebuggeeValue, 1, 0),
@@ -8865,34 +8945,37 @@ DebuggerObject::create(JSContext* cx, HandleObject proto, HandleObject referent,
   return &object;
 }
 
-bool
-DebuggerObject::isExtensible(JSContext* cx, bool* result) const
+/* static */ bool
+DebuggerObject::isExtensible(JSContext* cx, Handle<DebuggerObject*> object, bool& result)
 {
-  RootedObject obj(cx, referent());
-
-  Maybe<AutoCompartment> ac;
-  ac.emplace(cx, obj);
-  ErrorCopier ec(ac);
-  return IsExtensible(cx, obj, result);
-}
-
-bool
-DebuggerObject::isSealedHelper(JSContext* cx, SealHelperOp op, const char* name,
-                               bool* result) const
-{
-    RootedObject obj(cx, referent());
+    RootedObject referent(cx, object->referent());
 
     Maybe<AutoCompartment> ac;
-    ac.emplace(cx, obj);
+    ac.emplace(cx, referent);
     ErrorCopier ec(ac);
-    if (op == OpSeal) {
-        if (!TestIntegrityLevel(cx, obj, IntegrityLevel::Sealed, result))
-            return false;
-    } else {
-        if (!TestIntegrityLevel(cx, obj, IntegrityLevel::Frozen, result))
-            return false;
-    }
-    return true;
+    return IsExtensible(cx, referent, &result);
+}
+
+/* static */ bool
+DebuggerObject::isSealed(JSContext* cx, Handle<DebuggerObject*> object, bool& result)
+{
+    RootedObject referent(cx, object->referent());
+
+    Maybe<AutoCompartment> ac;
+    ac.emplace(cx, referent);
+    ErrorCopier ec(ac);
+    return TestIntegrityLevel(cx, referent, IntegrityLevel::Sealed, &result);
+}
+
+/* static */ bool
+DebuggerObject::isFrozen(JSContext* cx, Handle<DebuggerObject*> object, bool& result)
+{
+    RootedObject referent(cx, object->referent());
+
+    Maybe<AutoCompartment> ac;
+    ac.emplace(cx, referent);
+    ErrorCopier ec(ac);
+    return TestIntegrityLevel(cx, referent, IntegrityLevel::Frozen, &result);
 }
 
 

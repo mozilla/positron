@@ -143,11 +143,11 @@ void nsNotifyAddrListener::calculateNetworkId(void)
         if (gw) {
             /* create a string to search for in the arp table */
             char searchfor[16];
-            sprintf(searchfor, "%d.%d.%d.%d",
-                    gw & 0xff,
-                    (gw >> 8) & 0xff,
-                    (gw >> 16) & 0xff,
-                    gw >> 24);
+            snprintf(searchfor, sizeof(searchfor), "%d.%d.%d.%d",
+                     gw & 0xff,
+                     (gw >> 8) & 0xff,
+                     (gw >> 16) & 0xff,
+                     gw >> 24);
 
             FILE *farp = fopen(kProcArp, "r");
             if (farp) {
@@ -360,7 +360,6 @@ void nsNotifyAddrListener::OnNetlinkMessage(int aNetlinkSocket)
 
     if (networkChange) {
         checkLink();
-        calculateNetworkId();
     }
 }
 
@@ -423,6 +422,7 @@ nsNotifyAddrListener::Run()
             double period = (TimeStamp::Now() - mChangeTime).ToMilliseconds();
             if (period >= kNetworkChangeCoalescingPeriod) {
                 SendEvent(NS_NETWORK_LINK_DATA_CHANGED);
+                calculateNetworkId();
                 mCoalescingActive = false;
                 pollWait = -1; // restore to default
             } else {

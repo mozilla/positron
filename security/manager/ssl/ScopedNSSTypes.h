@@ -7,8 +7,8 @@
 // This header provides smart pointers and various helpers for code that needs
 // to interact with NSS.
 
-#ifndef mozilla_ScopedNSSTypes_h
-#define mozilla_ScopedNSSTypes_h
+#ifndef ScopedNSSTypes_h
+#define ScopedNSSTypes_h
 
 #include <limits>
 
@@ -16,6 +16,7 @@
 #include "cms.h"
 #include "cryptohi.h"
 #include "keyhi.h"
+#include "mozilla/Casting.h"
 #include "mozilla/Likely.h"
 #include "mozilla/Scoped.h"
 #include "mozilla/UniquePtr.h"
@@ -37,21 +38,23 @@
 
 namespace mozilla {
 
+// Deprecated: Use something like |mozilla::BitwiseCast<char*, uint8_t*>(p)|
+//             instead.
 // It is very common to cast between char* and uint8_t* when doing crypto stuff.
 // Here, we provide more type-safe wrappers around reinterpret_cast so you don't
 // shoot yourself in the foot by reinterpret_casting completely unrelated types.
 
-inline char *
-char_ptr_cast(uint8_t * p) { return reinterpret_cast<char *>(p); }
+inline char*
+char_ptr_cast(uint8_t* p) { return BitwiseCast<char*>(p); }
 
-inline const char *
-char_ptr_cast(const uint8_t * p) { return reinterpret_cast<const char *>(p); }
+inline const char*
+char_ptr_cast(const uint8_t* p) { return BitwiseCast<const char*>(p); }
 
-inline uint8_t *
-uint8_t_ptr_cast(char * p) { return reinterpret_cast<uint8_t*>(p); }
+inline uint8_t*
+uint8_t_ptr_cast(char* p) { return BitwiseCast<uint8_t*>(p); }
 
-inline const uint8_t *
-uint8_t_ptr_cast(const char * p) { return reinterpret_cast<const uint8_t*>(p); }
+inline const uint8_t*
+uint8_t_ptr_cast(const char* p) { return BitwiseCast<const uint8_t*>(p); }
 
 // NSPR APIs use PRStatus/PR_GetError and NSS APIs use SECStatus/PR_GetError to
 // report success/failure. This function makes it more convenient and *safer*
@@ -107,12 +110,21 @@ PK11_DestroyContext_true(PK11Context * ctx) {
 } // namespace mozilla::psm
 
 // Deprecated: use the equivalent UniquePtr templates instead.
-MOZ_TYPE_SPECIFIC_SCOPED_POINTER_TEMPLATE(ScopedPK11Context,
-                                          PK11Context,
-                                          mozilla::psm::PK11_DestroyContext_true)
 MOZ_TYPE_SPECIFIC_SCOPED_POINTER_TEMPLATE(ScopedSGNDigestInfo,
                                           SGNDigestInfo,
                                           SGN_DestroyDigestInfo)
+
+// Emulates MOZ_TYPE_SPECIFIC_SCOPED_POINTER_TEMPLATE, but for UniquePtrs.
+#define MOZ_TYPE_SPECIFIC_UNIQUE_PTR_TEMPLATE(name, Type, Deleter) \
+struct name##DeletePolicy \
+{ \
+  void operator()(Type* aValue) { Deleter(aValue); } \
+}; \
+typedef UniquePtr<Type, name##DeletePolicy> name;
+
+MOZ_TYPE_SPECIFIC_UNIQUE_PTR_TEMPLATE(UniquePK11Context,
+                                      PK11Context,
+                                      mozilla::psm::PK11_DestroyContext_true)
 
 /** A more convenient way of dealing with digests calculated into
  *  stack-allocated buffers. NSS must be initialized on the main thread before
@@ -130,15 +142,15 @@ MOZ_TYPE_SPECIFIC_SCOPED_POINTER_TEMPLATE(ScopedSGNDigestInfo,
  * Less typical usage, for digesting while doing streaming I/O and similar:
  *
  *   Digest digest;
- *   ScopedPK11Context digestContext(PK11_CreateDigestContext(SEC_OID_SHA1));
+ *   UniquePK11Context digestContext(PK11_CreateDigestContext(SEC_OID_SHA256));
  *   NS_ENSURE_TRUE(digestContext, NS_ERROR_OUT_OF_MEMORY);
- *   rv = MapSECStatus(PK11_DigestBegin(digestContext));
+ *   rv = MapSECStatus(PK11_DigestBegin(digestContext.get()));
  *   NS_ENSURE_SUCCESS(rv, rv);
  *   for (...) {
- *      rv = MapSECStatus(PK11_DigestOp(digestContext, ...));
+ *      rv = MapSECStatus(PK11_DigestOp(digestContext.get(), ...));
  *      NS_ENSURE_SUCCESS(rv, rv);
  *   }
- *   rv = digest.End(SEC_OID_SHA1, digestContext);
+ *   rv = digest.End(SEC_OID_SHA256, digestContext);
  *   NS_ENSURE_SUCCESS(rv, rv)
  */
 class Digest
@@ -162,12 +174,13 @@ public:
                                      static_cast<int32_t>(len)));
   }
 
-  nsresult End(SECOidTag hashAlg, ScopedPK11Context & context)
+  nsresult End(SECOidTag hashAlg, UniquePK11Context& context)
   {
     nsresult rv = SetLength(hashAlg);
     NS_ENSURE_SUCCESS(rv, rv);
     uint32_t len;
-    rv = MapSECStatus(PK11_DigestFinal(context, mItem.data, &len, mItem.len));
+    rv = MapSECStatus(PK11_DigestFinal(context.get(), mItem.data, &len,
+                                       mItem.len));
     NS_ENSURE_SUCCESS(rv, rv);
     context = nullptr;
     NS_ENSURE_TRUE(len == mItem.len, NS_ERROR_UNEXPECTED);
@@ -315,14 +328,6 @@ MOZ_TYPE_SPECIFIC_SCOPED_POINTER_TEMPLATE(ScopedSECAlgorithmID,
                                           SECAlgorithmID,
                                           internal::SECOID_DestroyAlgorithmID_true)
 
-// Emulates MOZ_TYPE_SPECIFIC_SCOPED_POINTER_TEMPLATE, but for UniquePtrs.
-#define MOZ_TYPE_SPECIFIC_UNIQUE_PTR_TEMPLATE(name, Type, Deleter) \
-struct name##DeletePolicy \
-{ \
-  void operator()(Type* aValue) { Deleter(aValue); } \
-}; \
-typedef UniquePtr<Type, name##DeletePolicy> name;
-
 MOZ_TYPE_SPECIFIC_UNIQUE_PTR_TEMPLATE(UniqueCERTCertificate,
                                       CERTCertificate,
                                       CERT_DestroyCertificate)
@@ -393,4 +398,4 @@ MOZ_TYPE_SPECIFIC_UNIQUE_PTR_TEMPLATE(UniqueVFYContext,
                                       internal::VFY_DestroyContext_true)
 } // namespace mozilla
 
-#endif // mozilla_ScopedNSSTypes_h
+#endif // ScopedNSSTypes_h

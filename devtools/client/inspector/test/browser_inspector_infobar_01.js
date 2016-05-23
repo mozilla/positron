@@ -8,14 +8,14 @@
 
 const TEST_URI = URL_ROOT + "doc_inspector_infobar_01.html";
 
-add_task(function*() {
+add_task(function* () {
   let {inspector, testActor} = yield openInspectorForURL(TEST_URI);
 
   let testData = [
     {
       selector: "#top",
       position: "bottom",
-      tag: "DIV",
+      tag: "div",
       id: "top",
       classes: ".class1.class2",
       dims: "500" + " \u00D7 " + "100"
@@ -23,7 +23,7 @@ add_task(function*() {
     {
       selector: "#vertical",
       position: "overlap",
-      tag: "DIV",
+      tag: "div",
       id: "vertical",
       classes: ""
       // No dims as they will vary between computers
@@ -31,7 +31,7 @@ add_task(function*() {
     {
       selector: "#bottom",
       position: "top",
-      tag: "DIV",
+      tag: "div",
       id: "bottom",
       classes: "",
       dims: "500" + " \u00D7 " + "100"
@@ -39,9 +39,17 @@ add_task(function*() {
     {
       selector: "body",
       position: "bottom",
-      tag: "BODY",
+      tag: "body",
       classes: ""
       // No dims as they will vary between computers
+    },
+    {
+      selector: "clipPath",
+      position: "bottom",
+      tag: "clipPath",
+      id: "clip",
+      classes: ""
+      // No dims as element is not displayed and we just want to test tag name
     },
   ];
 
@@ -63,14 +71,14 @@ function* testPosition(test, inspector, testActor) {
 
   if (test.id) {
     let id = yield testActor.getHighlighterNodeTextContent("box-model-nodeinfobar-id");
-    is(id, "#" + test.id, "node " + test.selector  + ": id matches.");
+    is(id, "#" + test.id, "node " + test.selector + ": id matches.");
   }
 
   let classes = yield testActor.getHighlighterNodeTextContent("box-model-nodeinfobar-classes");
-  is(classes, test.classes, "node " + test.selector  + ": classes match.");
+  is(classes, test.classes, "node " + test.selector + ": classes match.");
 
   if (test.dims) {
     let dims = yield testActor.getHighlighterNodeTextContent("box-model-nodeinfobar-dimensions");
-    is(dims, test.dims, "node " + test.selector  + ": dims match.");
+    is(dims, test.dims, "node " + test.selector + ": dims match.");
   }
 }

@@ -7,7 +7,7 @@
 const { TargetFactory } = require("devtools/client/framework/target");
 const { DebuggerServer } = require("devtools/server/main");
 const { DebuggerClient } = require("devtools/shared/client/main");
-const { Task } = require("resource://gre/modules/Task.jsm");
+const { Task } = require("devtools/shared/task");
 
 /**
  * Construct a Target for a given URL object having various query parameters:
@@ -62,11 +62,11 @@ exports.targetFromURL = Task.async(function* (url) {
       throw new Error("targetFromURL, wrong tab id:'" + id + "', should be a number");
     }
     try {
-      let response = yield client.getTab({ outerWindowID: id })
+      let response = yield client.getTab({ outerWindowID: id });
       form = response.tab;
-    } catch(ex) {
+    } catch (ex) {
       if (ex.error == "noTab") {
-        throw new Error("targetFromURL, tab with outerWindowID:'" + id+ "' doesn't exist");
+        throw new Error("targetFromURL, tab with outerWindowID:'" + id + "' doesn't exist");
       }
       throw ex;
     }
@@ -85,9 +85,9 @@ exports.targetFromURL = Task.async(function* (url) {
         // Child process are not exposing tab actors and only support debugger+console
         isTabActor = false;
       }
-    } catch(ex) {
+    } catch (ex) {
       if (ex.error == "noProcess") {
-        throw new Error("targetFromURL, process with id:'" + id+ "' doesn't exist");
+        throw new Error("targetFromURL, process with id:'" + id + "' doesn't exist");
       }
       throw ex;
     }

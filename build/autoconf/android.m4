@@ -9,7 +9,7 @@ MOZ_ARG_WITH_STRING(android-cxx-stl,
 [  --with-android-cxx-stl=VALUE
                           use the specified C++ STL (stlport, libstdc++, libc++)],
     android_cxx_stl=$withval,
-    android_cxx_stl=mozstlport)
+    android_cxx_stl=libc++)
 
 define([MIN_ANDROID_VERSION], [9])
 android_version=MIN_ANDROID_VERSION
@@ -341,6 +341,7 @@ case "$target" in
     AC_SUBST(ANDROID_TOOLS)
 
     MOZ_ANDROID_AAR(appcompat-v7, 23.0.1, android, com/android/support)
+    MOZ_ANDROID_AAR(cardview-v7, 23.0.1, android, com/android/support)
     MOZ_ANDROID_AAR(design, 23.0.1, android, com/android/support)
     MOZ_ANDROID_AAR(recyclerview-v7, 23.0.1, android, com/android/support)
     MOZ_ANDROID_AAR(support-v4, 23.0.1, android, com/android/support, REQUIRED_INTERNAL_IMPL)

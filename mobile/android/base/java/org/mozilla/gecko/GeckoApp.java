@@ -24,8 +24,8 @@ import org.mozilla.gecko.home.HomeConfig.PanelType;
 import org.mozilla.gecko.menu.GeckoMenu;
 import org.mozilla.gecko.menu.GeckoMenuInflater;
 import org.mozilla.gecko.menu.MenuPanel;
-import org.mozilla.gecko.mozglue.ContextUtils;
-import org.mozilla.gecko.mozglue.ContextUtils.SafeIntent;
+import org.mozilla.gecko.mozglue.SafeIntentUtils;
+import org.mozilla.gecko.mozglue.SafeIntentUtils.SafeIntent;
 import org.mozilla.gecko.mozglue.GeckoLoader;
 import org.mozilla.gecko.permissions.Permissions;
 import org.mozilla.gecko.preferences.ClearOnShutdownPref;
@@ -1224,7 +1224,7 @@ public abstract class GeckoApp
 
         GeckoThread.launch();
 
-        Bundle stateBundle = ContextUtils.getBundleExtra(getIntent(), EXTRA_STATE_BUNDLE);
+        Bundle stateBundle = SafeIntentUtils.getBundleExtra(getIntent(), EXTRA_STATE_BUNDLE);
         if (stateBundle != null) {
             // Use the state bundle if it was given as an intent extra. This is
             // only intended to be used internally via Robocop, so a boolean
@@ -1536,11 +1536,8 @@ public abstract class GeckoApp
             processTabQueue();
         }
 
-        // If we're not restoring, move the session file so it can be read for
-        // the last tabs section.
-        if (!mShouldRestore) {
-            getProfile().moveSessionFile();
-        }
+        // Make sure sessionstore.bak is either updated or deleted as necessary.
+        getProfile().updateSessionFile(mShouldRestore);
 
         recordStartupActionTelemetry(passedUri, action);
 
@@ -1794,7 +1791,7 @@ public abstract class GeckoApp
     }
 
     private boolean getRestartFromIntent() {
-        return ContextUtils.getBooleanExtra(getIntent(), "didRestart", false);
+        return SafeIntentUtils.getBooleanExtra(getIntent(), "didRestart", false);
     }
 
     /**

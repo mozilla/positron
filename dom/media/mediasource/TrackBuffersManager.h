@@ -35,6 +35,10 @@ public:
   SourceBufferTaskQueue()
   : mMonitor("SourceBufferTaskQueue")
   {}
+  ~SourceBufferTaskQueue()
+  {
+    MOZ_ASSERT(mQueue.IsEmpty(), "All tasks must have been processed");
+  }
 
   void Push(SourceBufferTask* aTask)
   {
@@ -340,6 +344,11 @@ private:
   // Find index of sample. Return a negative value if not found.
   uint32_t FindSampleIndex(const TrackBuffer& aTrackBuffer,
                            const media::TimeInterval& aInterval);
+  const MediaRawData* GetSample(TrackInfo::TrackType aTrack,
+                                size_t aIndex,
+                                const media::TimeUnit& aExpectedDts,
+                                const media::TimeUnit& aExpectedPts,
+                                const media::TimeUnit& aFuzz);
   void UpdateBufferedRanges();
   void RejectProcessing(nsresult aRejectValue, const char* aName);
   void ResolveProcessing(bool aResolveValue, const char* aName);
@@ -373,8 +382,8 @@ private:
 
   // SourceBuffer Queues and running context.
   SourceBufferTaskQueue mQueue;
+  void QueueTask(SourceBufferTask* aTask);
   void ProcessTasks();
-  void CancelAllTasks();
   // Set if the TrackBuffersManager is currently processing a task.
   // At this stage, this task is always a AppendBufferTask.
   RefPtr<SourceBufferTask> mCurrentTask;
@@ -391,9 +400,6 @@ private:
 
   // Set to true if mediasource state changed to ended.
   Atomic<bool> mEnded;
-  // Set to true if the parent SourceBuffer has shutdown.
-  // We will not reschedule or process new task once mDetached is set.
-  Atomic<bool> mDetached;
 
   // Global size of this source buffer content.
   Atomic<int64_t> mSizeSourceBuffer;

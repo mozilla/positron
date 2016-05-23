@@ -64,7 +64,6 @@
       },
       {
         "name": "hide",
-        "unsupported": true,
         "type": "function",
         "description": "Hides the page action.",
         "parameters": [
@@ -212,7 +211,6 @@
     "events": [
       {
         "name": "onClicked",
-        "unsupported": true,
         "type": "function",
         "description": "Fired when a page action icon is clicked.  This event will not fire if the page action has a popup.",
         "parameters": [

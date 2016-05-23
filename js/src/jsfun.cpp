@@ -1543,8 +1543,8 @@ UnescapeSubstr(TextChar* text, size_t start, size_t length, StringBuffer& buf)
                     if (code < 0x10000) {
                         status = buf.append((char16_t)code);
                     } else {
-                        status = status && buf.append((char16_t)((code - 0x10000) / 1024 + 0xD800));
-                        status = status && buf.append((char16_t)(((code - 0x10000) % 1024) + 0xDC00));
+                        status = buf.append((char16_t)((code - 0x10000) / 1024 + 0xD800)) &&
+                            buf.append((char16_t)(((code - 0x10000) % 1024) + 0xDC00));
                     }
                     break;
                 }
@@ -1677,6 +1677,11 @@ JSFunction::maybeRelazify(JSRuntime* rt)
     // Don't relazify if the compartment is being debugged or is the
     // self-hosting compartment.
     if (comp->isDebuggee() || comp->isSelfHosting)
+        return;
+
+    // Don't relazify if the compartment and/or runtime is instrumented to
+    // collect code coverage for analysis.
+    if (comp->collectCoverageForDebug())
         return;
 
     // Don't relazify functions with JIT code.

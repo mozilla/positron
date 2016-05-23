@@ -194,11 +194,11 @@ public:
   // Get the Document for the top-level window in this tab.
   already_AddRefed<nsIDocument> GetDocument() const;
 
-protected:
-  virtual ~TabChildBase();
-
   // Get the pres-shell of the document for the top-level window in this tab.
   already_AddRefed<nsIPresShell> GetPresShell() const;
+
+protected:
+  virtual ~TabChildBase();
 
   // Wraps up a JSON object as a structured clone and sends it to the browser
   // chrome script.
@@ -264,8 +264,6 @@ public:
   static already_AddRefed<TabChild>
   Create(nsIContentChild* aManager, const TabId& aTabId,
          const TabContext& aContext, uint32_t aChromeFlags);
-
-  bool IsRootContentDocument() const;
 
   // Let managees query if it is safe to send messages.
   bool IsDestroyed() const{ return mDestroyed; }
@@ -476,6 +474,8 @@ public:
 
   void GetDefaultScale(double *aScale);
 
+  bool IsTransparent() const { return mIsTransparent; }
+
   void GetMaxTouchPoints(uint32_t* aTouchPoints);
 
   ScreenOrientationInternal GetOrientation() const { return mOrientation; }
@@ -580,6 +580,8 @@ public:
                  const mozilla::NativeEventData& aKeyEventData,
                  const bool& aIsConsumed) override;
 
+  virtual bool RecvPrint(const PrintData& aPrintData) override;
+
   /**
    * Native widget remoting protocol for use with windowed plugins with e10s.
    */
@@ -677,11 +679,14 @@ protected:
 
 private:
   // Notify others that our TabContext has been updated.  (At the moment, this
-  // sets the appropriate app-id and is-browser flags on our docshell.)
+  // sets the appropriate origin attributes on our docshell.)
   //
   // You should call this after calling TabContext::SetTabContext().  We also
   // call this during Init().
   void NotifyTabContextUpdated();
+
+  // Update the frameType on our docshell.
+  void UpdateFrameType();
 
   void ActorDestroy(ActorDestroyReason why) override;
 
@@ -750,6 +755,8 @@ private:
   friend class ContentChild;
   float mDPI;
   double mDefaultScale;
+
+  bool mIsTransparent;
 
   bool mIPCOpen;
   bool mParentIsActive;

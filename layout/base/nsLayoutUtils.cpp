@@ -2848,13 +2848,26 @@ static Rect
 TransformGfxRectToAncestor(nsIFrame *aFrame,
                            const Rect &aRect,
                            const nsIFrame *aAncestor,
-                           bool* aPreservesAxisAlignedRectangles = nullptr)
+                           bool* aPreservesAxisAlignedRectangles = nullptr,
+                           Maybe<Matrix4x4>* aMatrixCache = nullptr)
 {
-  Matrix4x4 ctm = nsLayoutUtils::GetTransformToAncestor(aFrame, aAncestor);
-  if (aPreservesAxisAlignedRectangles) {
-    Matrix matrix2d;
-    *aPreservesAxisAlignedRectangles =
-      ctm.Is2D(&matrix2d) && matrix2d.PreservesAxisAlignedRectangles();
+  Matrix4x4 ctm;
+  if (aMatrixCache && *aMatrixCache) {
+    // We are given a matrix to use, so use it
+    ctm = aMatrixCache->value();
+  } else {
+    // Else, compute it
+    ctm = nsLayoutUtils::GetTransformToAncestor(aFrame, aAncestor);
+    if (aMatrixCache) {
+      // and put it in the cache, if provided
+      *aMatrixCache = Some(ctm);
+    }
+    // If we computed it, also fill out the axis-alignment flag
+    if (aPreservesAxisAlignedRectangles) {
+      Matrix matrix2d;
+      *aPreservesAxisAlignedRectangles =
+        ctm.Is2D(&matrix2d) && matrix2d.PreservesAxisAlignedRectangles();
+    }
   }
   Rect maxBounds = Rect(-std::numeric_limits<float>::max() * 0.5,
                         -std::numeric_limits<float>::max() * 0.5,
@@ -2905,7 +2918,8 @@ nsRect
 nsLayoutUtils::TransformFrameRectToAncestor(nsIFrame* aFrame,
                                             const nsRect& aRect,
                                             const nsIFrame* aAncestor,
-                                            bool* aPreservesAxisAlignedRectangles /* = nullptr */)
+                                            bool* aPreservesAxisAlignedRectangles /* = nullptr */,
+                                            Maybe<Matrix4x4>* aMatrixCache /* = nullptr */)
 {
   SVGTextFrame* text = GetContainingSVGTextFrame(aFrame);
 
@@ -2914,7 +2928,7 @@ nsLayoutUtils::TransformFrameRectToAncestor(nsIFrame* aFrame,
 
   if (text) {
     result = ToRect(text->TransformFrameRectFromTextChild(aRect, aFrame));
-    result = TransformGfxRectToAncestor(text, result, aAncestor);
+    result = TransformGfxRectToAncestor(text, result, aAncestor, nullptr, aMatrixCache);
     // TransformFrameRectFromTextChild could involve any kind of transform, we
     // could drill down into it to get an answer out of it but we don't yet.
     if (aPreservesAxisAlignedRectangles)
@@ -2924,7 +2938,7 @@ nsLayoutUtils::TransformFrameRectToAncestor(nsIFrame* aFrame,
                   NSAppUnitsToFloatPixels(aRect.y, srcAppUnitsPerDevPixel),
                   NSAppUnitsToFloatPixels(aRect.width, srcAppUnitsPerDevPixel),
                   NSAppUnitsToFloatPixels(aRect.height, srcAppUnitsPerDevPixel));
-    result = TransformGfxRectToAncestor(aFrame, result, aAncestor, aPreservesAxisAlignedRectangles);
+    result = TransformGfxRectToAncestor(aFrame, result, aAncestor, aPreservesAxisAlignedRectangles, aMatrixCache);
   }
 
   float destAppUnitsPerDevPixel = aAncestor->PresContext()->AppUnitsPerDevPixel();
@@ -5335,7 +5349,12 @@ nsLayoutUtils::ComputeSizeWithIntrinsicDimensions(WritingMode aWM,
   const nsStyleCoord* inlineStyleCoord = &stylePos->ISize(aWM);
   const nsStyleCoord* blockStyleCoord = &stylePos->BSize(aWM);
 
-  bool isFlexItem = aFrame->IsFlexItem();
+  nsIAtom* parentFrameType =
+    aFrame->GetParent() ? aFrame->GetParent()->GetType() : nullptr;
+  const bool isGridItem = (parentFrameType == nsGkAtoms::gridContainerFrame &&
+                           !(aFrame->GetStateBits() & NS_FRAME_OUT_OF_FLOW));
+  const bool isFlexItem = (parentFrameType == nsGkAtoms::flexContainerFrame &&
+                           !(aFrame->GetStateBits() & NS_FRAME_OUT_OF_FLOW));
   bool isInlineFlexItem = false;
 
   Maybe<nsStyleCoord> imposedMainSizeStyleCoord;
@@ -5404,7 +5423,7 @@ nsLayoutUtils::ComputeSizeWithIntrinsicDimensions(WritingMode aWM,
   // or (a * b) / c (which are equivalent).
 
   const bool isAutoISize = inlineStyleCoord->GetUnit() == eStyleUnit_Auto;
-  const bool isAutoBSize = IsAutoBSize(*blockStyleCoord, aCBSize.BSize(aWM));
+  bool isAutoBSize = IsAutoBSize(*blockStyleCoord, aCBSize.BSize(aWM));
 
   LogicalSize boxSizingAdjust(aWM);
   switch (stylePos->mBoxSizing) {
@@ -5465,6 +5484,25 @@ nsLayoutUtils::ComputeSizeWithIntrinsicDimensions(WritingMode aWM,
     bSize = nsLayoutUtils::ComputeBSizeValue(aCBSize.BSize(aWM),
                 boxSizingAdjust.BSize(aWM),
                 *blockStyleCoord);
+  } else if (MOZ_UNLIKELY(isGridItem)) {
+    MOZ_ASSERT(!IS_TRUE_OVERFLOW_CONTAINER(aFrame));
+    // 'auto' block-size for grid-level box - apply 'stretch' as needed:
+    auto cbSize = aCBSize.BSize(aWM);
+    if (cbSize != NS_AUTOHEIGHT &&
+        !aFrame->StyleMargin()->HasBlockAxisAuto(aWM)) {
+      auto blockAxisAlignment =
+        !aWM.IsOrthogonalTo(aFrame->GetParent()->GetWritingMode()) ?
+          stylePos->ComputedAlignSelf(aFrame->StyleContext()->GetParent()) :
+          stylePos->ComputedJustifySelf(aFrame->StyleContext()->GetParent());
+      if (blockAxisAlignment == NS_STYLE_ALIGN_NORMAL ||
+          blockAxisAlignment == NS_STYLE_ALIGN_STRETCH) {
+        bSize = std::max(nscoord(0), cbSize -
+                                     aPadding.BSize(aWM) -
+                                     aBorder.BSize(aWM) -
+                                     aMargin.BSize(aWM));
+        isAutoBSize = false;
+      }
+    }
   }
 
   const nsStyleCoord& maxBSizeCoord = stylePos->MaxBSize(aWM);
@@ -9015,23 +9053,25 @@ nsLayoutUtils::GetTouchActionFromFrame(nsIFrame* aFrame)
 
 /* static */  void
 nsLayoutUtils::TransformToAncestorAndCombineRegions(
-  const nsRect& aBounds,
+  const nsRegion& aRegion,
   nsIFrame* aFrame,
   const nsIFrame* aAncestorFrame,
   nsRegion* aPreciseTargetDest,
-  nsRegion* aImpreciseTargetDest)
+  nsRegion* aImpreciseTargetDest,
+  Maybe<Matrix4x4>* aMatrixCache)
 {
-  if (aBounds.IsEmpty()) {
+  if (aRegion.IsEmpty()) {
     return;
   }
-  Matrix4x4 matrix = GetTransformToAncestor(aFrame, aAncestorFrame);
-  Matrix matrix2D;
-  bool isPrecise = (matrix.Is2D(&matrix2D)
-    && !matrix2D.HasNonAxisAlignedTransform());
-  nsRect transformed = TransformFrameRectToAncestor(
-    aFrame, aBounds, aAncestorFrame);
+  bool isPrecise;
+  nsRegion transformedRegion;
+  for (nsRegion::RectIterator it = aRegion.RectIter(); !it.Done(); it.Next()) {
+    nsRect transformed = TransformFrameRectToAncestor(
+      aFrame, it.Get(), aAncestorFrame, &isPrecise, aMatrixCache);
+    transformedRegion.OrWith(transformed);
+  }
   nsRegion* dest = isPrecise ? aPreciseTargetDest : aImpreciseTargetDest;
-  dest->OrWith(transformed);
+  dest->OrWith(transformedRegion);
 }
 
 /* static */ bool

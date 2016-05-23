@@ -2,9 +2,18 @@
 /* vim: set sts=2 sw=2 et tw=80: */
 "use strict";
 
+XPCOMUtils.defineLazyModuleGetter(this, "EventEmitter",
+                                  "resource://devtools/shared/event-emitter.js");
+
 // Import the android PageActions module.
 XPCOMUtils.defineLazyModuleGetter(this, "PageActions",
                                   "resource://gre/modules/PageActions.jsm");
+
+Cu.import("resource://gre/modules/ExtensionUtils.jsm");
+
+var {
+  SingletonEventManager,
+} = ExtensionUtils;
 
 // WeakMap[Extension -> PageAction]
 var pageActionMap = new WeakMap();
@@ -18,7 +27,12 @@ function PageAction(options, extension) {
     title: options.default_title || extension.name,
     icon: DEFAULT_ICON,
     id: extension.id,
+    clickCallback: () => {
+      this.emit("click");
+    },
   };
+
+  EventEmitter.decorate(this);
 }
 
 PageAction.prototype = {
@@ -29,11 +43,15 @@ PageAction.prototype = {
     }
   },
 
-  shutdown() {
+  hide(tabId) {
     if (this.id) {
       PageActions.remove(this.id);
       this.id = null;
     }
+  },
+
+  shutdown() {
+    this.hide();
   },
 };
 
@@ -54,8 +72,21 @@ extensions.on("shutdown", (type, extension) => {
 extensions.registerSchemaAPI("pageAction", null, (extension, context) => {
   return {
     pageAction: {
+      onClicked: new SingletonEventManager(context, "pageAction.onClicked", fire => {
+        let listener = (event) => {
+          fire();
+        };
+        pageActionMap.get(extension).on("click", listener);
+        return () => {
+          pageActionMap.get(extension).off("click", listener);
+        };
+      }).api(),
+
       show(tabId) {
         pageActionMap.get(extension).show(tabId);
+      },
+      hide(tabId) {
+        pageActionMap.get(extension).hide(tabId);
       },
     },
   };

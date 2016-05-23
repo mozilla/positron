@@ -91,6 +91,7 @@ NS_IMPL_ISUPPORTS_INHERITED0(nsWindow, nsBaseWidget)
 
 #include "mozilla/layers/CompositorBridgeChild.h"
 #include "mozilla/layers/CompositorBridgeParent.h"
+#include "mozilla/layers/CompositorSession.h"
 #include "mozilla/layers/LayerTransactionParent.h"
 #include "mozilla/Mutex.h"
 #include "mozilla/Services.h"
@@ -465,7 +466,7 @@ public:
         }
 
         RefPtr<APZCTreeManager> controller = mWindow->mAPZC;
-        RefPtr<CompositorBridgeParent> compositor = mWindow->mCompositorBridgeParent;
+        RefPtr<CompositorBridgeParent> compositor = mWindow->GetCompositorBridgeParent();
         if (controller && compositor) {
             // TODO: Pass in correct values for presShellId and viewId.
             controller->CancelAnimation(ScrollableLayerGuid(
@@ -1016,8 +1017,8 @@ public:
             // Since we are re-linking the new java objects to Gecko, we need
             // to get the viewport from the compositor (since the Java copy was
             // thrown away) and we do that by setting the first-paint flag.
-            if (window.mCompositorBridgeParent) {
-                window.mCompositorBridgeParent->ForceIsFirstPaint();
+            if (RefPtr<CompositorBridgeParent> bridge = window.GetCompositorBridgeParent()) {
+                bridge->ForceIsFirstPaint();
             }
         }
 
@@ -1062,33 +1063,35 @@ public:
 
     void SyncPauseCompositor()
     {
-        if (window.mCompositorBridgeParent) {
-            window.mCompositorBridgeParent->SchedulePauseOnCompositorThread();
+        if (RefPtr<CompositorBridgeParent> bridge = window.GetCompositorBridgeParent()) {
+            bridge->SchedulePauseOnCompositorThread();
             mCompositorPaused = true;
         }
     }
 
     void SyncResumeCompositor()
     {
-        if (window.mCompositorBridgeParent &&
-                window.mCompositorBridgeParent->ScheduleResumeOnCompositorThread()) {
-            mCompositorPaused = false;
+        if (RefPtr<CompositorBridgeParent> bridge = window.GetCompositorBridgeParent()) {
+            if (bridge->ScheduleResumeOnCompositorThread()) {
+                mCompositorPaused = false;
+            }
         }
     }
 
     void SyncResumeResizeCompositor(int32_t aWidth, int32_t aHeight)
     {
-        if (window.mCompositorBridgeParent && window.mCompositorBridgeParent->
-                ScheduleResumeOnCompositorThread(aWidth, aHeight)) {
-            mCompositorPaused = false;
+        if (RefPtr<CompositorBridgeParent> bridge = window.GetCompositorBridgeParent()) {
+            if (bridge->ScheduleResumeOnCompositorThread(aWidth, aHeight)) {
+                mCompositorPaused = false;
+            }
         }
     }
 
     void SyncInvalidateAndScheduleComposite()
     {
-        if (window.mCompositorBridgeParent) {
-            window.mCompositorBridgeParent->InvalidateOnCompositorThread();
-            window.mCompositorBridgeParent->ScheduleRenderOnCompositorThread();
+        if (RefPtr<CompositorBridgeParent> bridge = window.GetCompositorBridgeParent()) {
+            bridge->InvalidateOnCompositorThread();
+            bridge->ScheduleRenderOnCompositorThread();
         }
     }
 };
@@ -2461,9 +2464,9 @@ InitKeyEvent(WidgetKeyboardEvent& event,
 
     if (event.mMessage == eKeyPress) {
         // Android gives us \n, so filter out some control characters.
-        event.isChar = (charCode >= ' ');
-        event.charCode = event.isChar ? charCode : 0;
-        event.keyCode = event.isChar ? 0 : domKeyCode;
+        event.mIsChar = (charCode >= ' ');
+        event.mCharCode = event.mIsChar ? charCode : 0;
+        event.mKeyCode = event.mIsChar ? 0 : domKeyCode;
         event.mPluginEvent.Clear();
 
         // For keypress, if the unicode char already has modifiers applied, we
@@ -2478,9 +2481,9 @@ InitKeyEvent(WidgetKeyboardEvent& event,
         }
 
     } else {
-        event.isChar = false;
-        event.charCode = 0;
-        event.keyCode = domKeyCode;
+        event.mIsChar = false;
+        event.mCharCode = 0;
+        event.mKeyCode = domKeyCode;
 
         ANPEvent pluginEvent;
         pluginEvent.inSize = sizeof(pluginEvent);
@@ -2512,7 +2515,7 @@ InitKeyEvent(WidgetKeyboardEvent& event,
         event.mKeyValue = char16_t(domPrintableKeyValue);
     }
 
-    event.location =
+    event.mLocation =
         WidgetKeyboardEvent::ComputeLocationFromCodeValue(event.mCodeNameIndex);
     event.mTime = time;
 }
@@ -2648,12 +2651,12 @@ nsWindow::GeckoViewSupport::SendIMEDummyKeyEvents()
 {
     WidgetKeyboardEvent downEvent(true, eKeyDown, &window);
     window.InitEvent(downEvent, nullptr);
-    MOZ_ASSERT(downEvent.keyCode == 0);
+    MOZ_ASSERT(downEvent.mKeyCode == 0);
     window.DispatchEvent(&downEvent);
 
     WidgetKeyboardEvent upEvent(true, eKeyUp, &window);
     window.InitEvent(upEvent, nullptr);
-    MOZ_ASSERT(upEvent.keyCode == 0);
+    MOZ_ASSERT(upEvent.mKeyCode == 0);
     window.DispatchEvent(&upEvent);
 }
 
@@ -3405,6 +3408,33 @@ nsWindow::SynthesizeNativeTouchPoint(uint32_t aPointerId,
     return NS_OK;
 }
 
+nsresult
+nsWindow::SynthesizeNativeMouseEvent(LayoutDeviceIntPoint aPoint,
+                                     uint32_t aNativeMessage,
+                                     uint32_t aModifierFlags,
+                                     nsIObserver* aObserver)
+{
+    mozilla::widget::AutoObserverNotifier notifier(aObserver, "mouseevent");
+
+    MOZ_ASSERT(mGLControllerSupport);
+    GeckoLayerClient::LocalRef client = mGLControllerSupport->GetLayerClient();
+    client->SynthesizeNativeMouseEvent(aNativeMessage, aPoint.x, aPoint.y);
+
+    return NS_OK;
+}
+
+nsresult
+nsWindow::SynthesizeNativeMouseMove(LayoutDeviceIntPoint aPoint,
+                                    nsIObserver* aObserver)
+{
+    mozilla::widget::AutoObserverNotifier notifier(aObserver, "mouseevent");
+
+    MOZ_ASSERT(mGLControllerSupport);
+    GeckoLayerClient::LocalRef client = mGLControllerSupport->GetLayerClient();
+    client->SynthesizeNativeMouseEvent(sdk::MotionEvent::ACTION_HOVER_MOVE, aPoint.x, aPoint.y);
+
+    return NS_OK;
+}
 
 void
 nsWindow::DrawWindowUnderlay(LayerManagerComposite* aManager,
@@ -3508,8 +3538,10 @@ nsWindow::ScheduleResumeComposition()
 float
 nsWindow::ComputeRenderIntegrity()
 {
-    if (gGeckoViewWindow && gGeckoViewWindow->mCompositorBridgeParent) {
-        return gGeckoViewWindow->mCompositorBridgeParent->ComputeRenderIntegrity();
+    if (gGeckoViewWindow) {
+        if (RefPtr<CompositorBridgeParent> bridge = gGeckoViewWindow->GetCompositorBridgeParent()) {
+            return bridge->ComputeRenderIntegrity();
+        }
     }
 
     return 1.f;
@@ -3540,19 +3572,6 @@ nsWindow::NeedsPaint()
         return false;
     }
     return nsIWidget::NeedsPaint();
-}
-
-CompositorBridgeParent*
-nsWindow::NewCompositorBridgeParent(int aSurfaceWidth, int aSurfaceHeight)
-{
-    if (!mCompositorWidgetProxy) {
-      mCompositorWidgetProxy = NewCompositorWidgetProxy();
-    }
-    return new CompositorBridgeParent(mCompositorWidgetProxy,
-                                      GetDefaultScale(),
-                                      UseAPZ(),
-                                      true,
-                                      aSurfaceWidth, aSurfaceHeight);
 }
 
 void
@@ -3603,4 +3622,10 @@ nsWindow::UpdateZoomConstraints(const uint32_t& aPresShellId,
     obsServ->NotifyObservers(doc, "zoom-constraints-updated",
         NS_ConvertASCIItoUTF16(json.get()).get());
 #endif
+}
+
+CompositorBridgeParent*
+nsWindow::GetCompositorBridgeParent() const
+{
+  return mCompositorSession ? mCompositorSession->GetInProcessBridge() : nullptr;
 }

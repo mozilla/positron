@@ -7,12 +7,11 @@
 const {Cc, Ci} = require("chrome");
 const promise = require("promise");
 const protocol = require("devtools/shared/protocol");
-const events = require("sdk/event/core");
-const {PageStyleFront, StyleRuleFront} = require("devtools/client/fronts/styles"); // eslint-disable-line
 const {LongStringActor} = require("devtools/server/actors/string");
 const {getDefinedGeometryProperties} = require("devtools/server/actors/highlighters/geometry-editor");
 const {parseDeclarations} = require("devtools/client/shared/css-parsing-utils");
-const {Task} = require("resource://gre/modules/Task.jsm");
+const {Task} = require("devtools/shared/task");
+const events = require("sdk/event/core");
 
 // This will also add the "stylesheet" actor type for protocol.js to recognize
 const {UPDATE_PRESERVING_RULES, UPDATE_GENERAL} = require("devtools/server/actors/stylesheets");
@@ -892,7 +891,7 @@ var PageStyleActor = protocol.ActorClassWithSpec(pageStyleSpec, {
     } else if (rawNode.className) {
       selector = "." + [...rawNode.classList].map(c => CSS.escape(c)).join(".");
     } else {
-      selector = rawNode.tagName.toLowerCase();
+      selector = rawNode.localName;
     }
 
     if (pseudoClasses && pseudoClasses.length > 0) {

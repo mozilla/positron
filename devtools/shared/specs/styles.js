@@ -9,8 +9,8 @@ const {
   RetVal,
   generateActorSpec,
   types
-} = require("devtools/shared/protocol.js");
-require("devtools/shared/specs/stylesheets.js");
+} = require("devtools/shared/protocol");
+require("devtools/shared/specs/stylesheets");
 
 // Predeclare the domnode actor type for use in requests.
 types.addActorType("domnode");

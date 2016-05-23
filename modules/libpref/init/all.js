@@ -318,6 +318,7 @@ pref("media.wmf.decoder.thread-count", -1);
 pref("media.wmf.low-latency.enabled", false);
 pref("media.wmf.skip-blacklist", false);
 pref("media.windows-media-foundation.allow-d3d11-dxva", true);
+pref("media.wmf.disable-d3d11-for-dlls", "igd10iumd32.dll: 20.19.15.4444, 20.19.15.4424, 20.19.15.4409, 20.19.15.4380, 20.19.15.4360, 20.19.15.4390, 20.19.15.4331, 10.18.15.4281, 10.18.15.4279, 10.18.15.4256, 10.18.10.4358, 10.18.10.4276, 10.18.10.4252, 10.18.14.4112, 10.18.10.3496, 10.18.10.3308; igd10umd32.dll: 9.17.10.4229, 9.17.10.2857; igd10umd64.dll: 9.17.10.4229; isonyvideoprocessor.dll: 4.1.2247.8090, 4.1.2153.6200; tosqep.dll: 1.2.15.526, 1.1.12.201, 1.0.11.318, 1.0.11.215, 1.0.10.1224; tosqep64.dll: 1.1.12.201, 1.0.11.215");
 #endif
 #if defined(MOZ_FFMPEG)
 #if defined(XP_MACOSX)
@@ -361,7 +362,7 @@ pref("media.gmp.storage.version.expected", 1);
 
 // Filter what triggers user notifications.
 // See DecoderDoctorDocumentWatcher::ReportAnalysis for details.
-pref("media.decoder-doctor.notifications-allowed", "MediaWidevineNoWMFNoSilverlight");
+pref("media.decoder-doctor.notifications-allowed", "MediaWMFNeeded,MediaWidevineNoWMFNoSilverlight");
 // Whether we report partial failures.
 pref("media.decoder-doctor.verbose", false);
 
@@ -3292,10 +3293,6 @@ pref("intl.keyboard.per_window_layout", false);
 // Enable/Disable TSF support on Vista or later.
 pref("intl.tsf.enable", true);
 
-// Force enable TSF even on WinXP or WinServer 2003.
-// Be aware, TSF framework on prior to Vista is not enough stable.
-pref("intl.tsf.force_enable", false);
-
 // Support IMEs implemented with IMM in TSF mode.
 pref("intl.tsf.support_imm", true);
 
@@ -4365,10 +4362,11 @@ pref("gfx.gralloc.fence-with-readpixels", false);
 pref("stagefright.force-enabled", false);
 pref("stagefright.disabled", false);
 
-#ifdef XP_WIN
-// The default TCP send window on Windows is too small, and autotuning only occurs on receive
-pref("network.tcp.sendbuffer", 131072);
-#endif
+// sendbuffer of 0 means use OS default, sendbuffer unset means use
+// gecko default which varies depending on windows version and is OS
+// default on non windows
+// pref("network.tcp.sendbuffer", 0);
+
 // TCP Keepalive
 pref("network.tcp.keepalive.enabled", true);
 // Default idle time before first TCP keepalive probe; same time for interval

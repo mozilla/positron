@@ -82,6 +82,9 @@ nsHTMLReflowState::nsHTMLReflowState(nsPresContext*       aPresContext,
   if (aFlags & COMPUTE_SIZE_SHRINK_WRAP) {
     mFlags.mShrinkWrap = true;
   }
+  if (aFlags & COMPUTE_SIZE_USE_AUTO_BSIZE) {
+    mFlags.mUseAutoBSize = true;
+  }
   if (aFlags & STATIC_POS_IS_CB_ORIGIN) {
     mFlags.mStaticPosIsCBOrigin = true;
   }
@@ -226,6 +229,7 @@ nsHTMLReflowState::nsHTMLReflowState(
   mFlags.mIsFlexContainerMeasuringHeight = false;
   mFlags.mDummyParentReflowState = false;
   mFlags.mShrinkWrap = !!(aFlags & COMPUTE_SIZE_SHRINK_WRAP);
+  mFlags.mUseAutoBSize = !!(aFlags & COMPUTE_SIZE_USE_AUTO_BSIZE);
   mFlags.mStaticPosIsCBOrigin = !!(aFlags & STATIC_POS_IS_CB_ORIGIN);
 
   mDiscoveredClearance = nullptr;
@@ -325,7 +329,8 @@ nsHTMLReflowState::SetComputedWidth(nscoord aComputedWidth)
   if (ComputedWidth() != aComputedWidth) {
     ComputedWidth() = aComputedWidth;
     nsIAtom* frameType = frame->GetType();
-    if (frameType != nsGkAtoms::viewportFrame) { // Or check GetParent()?
+    if (frameType != nsGkAtoms::viewportFrame || // Or check GetParent()?
+        mWritingMode.IsVertical()) {
       InitResizeFlags(frame->PresContext(), frameType);
     }
   }
@@ -347,7 +352,10 @@ nsHTMLReflowState::SetComputedHeight(nscoord aComputedHeight)
   NS_PRECONDITION(aComputedHeight >= 0, "Invalid computed height");
   if (ComputedHeight() != aComputedHeight) {
     ComputedHeight() = aComputedHeight;
-    InitResizeFlags(frame->PresContext(), frame->GetType());
+    nsIAtom* frameType = frame->GetType();
+    if (frameType != nsGkAtoms::viewportFrame || !mWritingMode.IsVertical()) {
+      InitResizeFlags(frame->PresContext(), frameType);
+    }
   }
 }
 
@@ -637,7 +645,7 @@ nsHTMLReflowState::InitResizeFlags(nsPresContext* aPresContext, nsIAtom* aFrameT
     // as containing block for absolutely positioned elements?
     // Possibly; in that case we should at least be checking
     // NS_SUBTREE_DIRTY, I'd think.
-    SetBResize(mCBReflowState->IsBResize());
+    SetBResize(mCBReflowState->IsBResizeForWM(wm));
   } else if (mCBReflowState && !nsLayoutUtils::GetAsBlock(frame)) {
     // Some non-block frames (e.g. table frames) aggressively optimize out their
     // BSize recomputation when they don't have the BResize flag set.  This
@@ -657,14 +665,14 @@ nsHTMLReflowState::InitResizeFlags(nsPresContext* aPresContext, nsIAtom* aFrameT
     // Note that we _also_ need to set the BResize flag if we have auto
     // ComputedBSize() and a dirty subtree, since that might require us to
     // change BSize due to kids having been added or removed.
-    SetBResize(mCBReflowState->IsBResize());
+    SetBResize(mCBReflowState->IsBResizeForWM(wm));
     if (ComputedBSize() == NS_AUTOHEIGHT) {
       SetBResize(IsBResize() || NS_SUBTREE_DIRTY(frame));
     }
   } else if (ComputedBSize() == NS_AUTOHEIGHT) {
     if (eCompatibility_NavQuirks == aPresContext->CompatibilityMode() &&
         mCBReflowState) {
-      SetBResize(mCBReflowState->IsBResize());
+      SetBResize(mCBReflowState->IsBResizeForWM(wm));
     } else {
       SetBResize(IsIResize());
     }
@@ -1618,6 +1626,10 @@ nsHTMLReflowState::InitAbsoluteConstraints(nsPresContext* aPresContext,
     computeSizeFlags =
       ComputeSizeFlags(computeSizeFlags | ComputeSizeFlags::eShrinkWrap);
   }
+  if (mFlags.mUseAutoBSize) {
+    computeSizeFlags =
+      ComputeSizeFlags(computeSizeFlags | ComputeSizeFlags::eUseAutoBSize);
+  }
   if (wm.IsOrthogonalTo(cbwm)) {
     if (bStartIsAuto || bEndIsAuto) {
       computeSizeFlags =
@@ -2319,6 +2331,10 @@ nsHTMLReflowState::InitConstraints(nsPresContext*     aPresContext,
         computeSizeFlags =
           ComputeSizeFlags(computeSizeFlags | ComputeSizeFlags::eShrinkWrap);
       }
+      if (mFlags.mUseAutoBSize) {
+        computeSizeFlags =
+          ComputeSizeFlags(computeSizeFlags | ComputeSizeFlags::eUseAutoBSize);
+      }
 
       nsIFrame* parent = frame->GetParent();
       nsIAtom* parentFrameType = parent ? parent->GetType() : nullptr;
@@ -2358,7 +2374,7 @@ nsHTMLReflowState::InitConstraints(nsPresContext*     aPresContext,
           // auto height, pass that information along to ComputeSize().
           if (mFlags.mIsFlexContainerMeasuringHeight) {
             computeSizeFlags =
-              ComputeSizeFlags(computeSizeFlags | ComputeSizeFlags::eUseAutoHeight);
+              ComputeSizeFlags(computeSizeFlags | ComputeSizeFlags::eUseAutoBSize);
           }
         } else {
           MOZ_ASSERT(!mFlags.mIsFlexContainerMeasuringHeight,

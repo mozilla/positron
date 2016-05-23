@@ -9,7 +9,7 @@
  * All done in one test since this test takes a few seconds to clear GC.
  */
 
-add_task(function*() {
+add_task(function* () {
   // Use a longer timeout as garbage collection event
   // can be unpredictable.
   requestLongerTimeout(2);
@@ -38,6 +38,9 @@ add_task(function*() {
   // Click a soon-to-be dead buffer node
   yield clickGraphNode(panelWin, actorIDs[5]);
 
+  // Wait for a tick before gc to prevent this test from intermittent timeout
+  // where the node never get collected.
+  yield DevToolsUtils.waitForTick();
   forceCC();
 
   // Wait for destruction and graph to re-render

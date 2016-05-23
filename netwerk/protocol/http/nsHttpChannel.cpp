@@ -6084,6 +6084,13 @@ nsHttpChannel::OnStopRequest(nsIRequest *request, nsISupports *ctxt, nsresult st
         ProcessSecurityReport(status);
     }
 
+    // If this load failed because of a security error, it may be because we
+    // are in a captive portal - trigger an async check to make sure.
+    int32_t nsprError = -1 * NS_ERROR_GET_CODE(status);
+    if (mozilla::psm::IsNSSErrorCode(nsprError)) {
+        gIOService->RecheckCaptivePortal();
+    }
+
     if (mTimingEnabled && request == mCachePump) {
         mCacheReadEnd = TimeStamp::Now();
     }
@@ -6207,6 +6214,7 @@ nsHttpChannel::OnStopRequest(nsIRequest *request, nsISupports *ctxt, nsresult st
             mResponseHead && mResponseHead->Status() == 101) {
             gHttpHandler->ConnMgr()->CompleteUpgrade(stickyConn,
                                                      mUpgradeProtocolCallback);
+            mUpgradeProtocolCallback = nullptr;
         }
     }
 

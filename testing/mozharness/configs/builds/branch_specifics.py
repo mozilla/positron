@@ -184,6 +184,81 @@ config = {
             },
         },
     },
+    'mozilla-esr45': {
+        'enable_release_promotion': True,
+        'repo_path': 'releases/mozilla-esr45',
+        'update_channel': 'esr',
+        'branch_uses_per_checkin_strategy': True,
+        'use_branch_in_symbols_extra_buildid': False,
+        'stage_server': 'upload.ffxbld.productdelivery.prod.mozaws.net',
+        'platform_overrides': {
+            'linux': {
+                'src_mozconfig': 'browser/config/mozconfigs/linux32/release',
+                'force_clobber': True,
+            },
+            'linux64': {
+                'src_mozconfig': 'browser/config/mozconfigs/linux64/release',
+                'force_clobber': True,
+            },
+            'macosx64': {
+                'src_mozconfig': 'browser/config/mozconfigs/macosx-universal/release',
+                'force_clobber': True,
+            },
+            'win32': {
+                'src_mozconfig': 'browser/config/mozconfigs/win32/release',
+                'force_clobber': True,
+            },
+            'win64': {
+                'src_mozconfig': 'browser/config/mozconfigs/win64/release',
+                'force_clobber': True,
+            },
+            'linux-debug': {
+                'update_channel': 'default',
+            },
+            'linux64-debug': {
+                'update_channel': 'default',
+            },
+            'linux64-asan-debug': {
+                'update_channel': 'default',
+            },
+            'linux64-asan': {
+                'update_channel': 'default',
+            },
+            'linux64-cc': {
+                'update_channel': 'default',
+            },
+            'linux64-st-an-debug': {
+                'update_channel': 'default',
+            },
+            'linux64-st-an': {
+                'update_channel': 'default',
+            },
+            'linux64-tsan': {
+                'update_channel': 'default',
+            },
+            'macosx64-debug': {
+                'update_channel': 'default',
+            },
+            'macosx64-st-an': {
+                'update_channel': 'default',
+            },
+            'macosx64-mulet': {
+                'update_channel': 'default',
+            },
+            'macosx64-st-an-debug': {
+                'update_channel': 'default',
+            },
+            'win32-debug': {
+                'update_channel': 'default',
+            },
+            'win32-mulet': {
+                'update_channel': 'default',
+            },
+            'win64-debug': {
+                'update_channel': 'default',
+            },
+        },
+    },
     'mozilla-aurora': {
         'repo_path': 'releases/mozilla-aurora',
         'update_channel': 'aurora',
@@ -194,6 +269,9 @@ config = {
         'repo_path': 'try',
         'clone_by_revision': True,
         'clone_with_purge': True,
+        # FUTURE this should be a unified repo because Try pushes may e.g.
+        # be on Aurora or Beta revisions.
+        'clone_upstream_url': 'https://hg.mozilla.org/mozilla-central',
         'tinderbox_build_dir': '%(who)s-%(got_revision)s',
         'to_tinderbox_dated': False,
         'include_post_upload_builddir': True,

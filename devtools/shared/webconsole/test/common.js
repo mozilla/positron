@@ -10,14 +10,13 @@ var {classes: Cc, interfaces: Ci, utils: Cu} = Components;
 
 const XHTML_NS = "http://www.w3.org/1999/xhtml";
 
-const {Task} = Cu.import("resource://gre/modules/Task.jsm", {});
-
 // This gives logging to stdout for tests
 var {console} = Cu.import("resource://gre/modules/Console.jsm", {});
 
 var {require} = Cu.import("resource://devtools/shared/Loader.jsm", {});
 var Services = require("Services");
 var WebConsoleUtils = require("devtools/shared/webconsole/utils").Utils;
+var {Task} = require("devtools/shared/task");
 
 var ConsoleAPIStorage = Cc["@mozilla.org/consoleAPI-storage;1"]
                           .getService(Ci.nsIConsoleAPIStorage);
@@ -29,7 +28,7 @@ var {ConsoleServiceListener, ConsoleAPIListener} =
 
 function initCommon()
 {
-  //Services.prefs.setBoolPref("devtools.debugger.log", true);
+  // Services.prefs.setBoolPref("devtools.debugger.log", true);
 }
 
 function initDebuggerServer()
@@ -101,7 +100,7 @@ function _attachConsole(aListeners, aCallback, aAttachToTab, aAttachToWorker)
               worker.removeEventListener("message", listener);
               tabClient.listWorkers(function (response) {
                 tabClient.attachWorker(response.workers[0].actor, function (response, workerClient) {
-                  workerClient.attachThread({}, function(aResponse) {
+                  workerClient.attachThread({}, function (aResponse) {
                     aState.actor = workerClient.consoleActor;
                     aState.dbgClient.attachConsole(workerClient.consoleActor, aListeners,
                                                    _onAttachConsole.bind(null, aState));
@@ -139,8 +138,8 @@ function closeDebugger(aState, aCallback)
 function checkConsoleAPICalls(consoleCalls, expectedConsoleCalls)
 {
   is(consoleCalls.length, expectedConsoleCalls.length,
-    'received correct number of console calls');
-  expectedConsoleCalls.forEach(function(aMessage, aIndex) {
+    "received correct number of console calls");
+  expectedConsoleCalls.forEach(function (aMessage, aIndex) {
     info("checking received console call #" + aIndex);
     checkConsoleAPICall(consoleCalls[aIndex], expectedConsoleCalls[aIndex]);
   });
@@ -260,7 +259,7 @@ function nextTest(aMessage)
 function withFrame(url) {
   return new Promise(resolve => {
     let iframe = document.createElement("iframe");
-    iframe.onload = function() {
+    iframe.onload = function () {
       resolve(iframe);
     };
     iframe.src = url;
@@ -270,7 +269,7 @@ function withFrame(url) {
 
 function navigateFrame(iframe, url) {
   return new Promise(resolve => {
-    iframe.onload = function() {
+    iframe.onload = function () {
       resolve(iframe);
     };
     iframe.src = url;
@@ -279,7 +278,7 @@ function navigateFrame(iframe, url) {
 
 function forceReloadFrame(iframe) {
   return new Promise(resolve => {
-    iframe.onload = function() {
+    iframe.onload = function () {
       resolve(iframe);
     };
     iframe.contentWindow.location.reload(true);
@@ -302,9 +301,9 @@ function withActiveServiceWorker(win, url, scope) {
     // workers state change events to determine when its activated.
     return new Promise(resolve => {
       let sw = swr.waiting || swr.installing;
-      sw.addEventListener('statechange', function stateHandler(evt) {
-        if (sw.state === 'activated') {
-          sw.removeEventListener('statechange', stateHandler);
+      sw.addEventListener("statechange", function stateHandler(evt) {
+        if (sw.state === "activated") {
+          sw.removeEventListener("statechange", stateHandler);
           resolve(swr);
         }
       });
@@ -319,9 +318,9 @@ function messageServiceWorker(win, scope, message) {
         resolve();
       };
       let sw = swr.active || swr.waiting || swr.installing;
-      sw.postMessage({ type: 'PING', message: message });
+      sw.postMessage({ type: "PING", message: message });
     });
-  })
+  });
 }
 
 function unregisterServiceWorker(win) {

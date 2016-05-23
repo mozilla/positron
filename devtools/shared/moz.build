@@ -11,6 +11,7 @@ DIRS += [
     'apps',
     'client',
     'discovery',
+    'fronts',
     'gcli',
     'heapsnapshot',
     'inspector',
@@ -52,5 +53,6 @@ DevToolsModules(
     'path.js',
     'protocol.js',
     'system.js',
+    'task.js',
     'ThreadSafeDevToolsUtils.js',
 )

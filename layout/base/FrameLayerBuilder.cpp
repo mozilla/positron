@@ -2512,9 +2512,9 @@ ContainerState::FindOpaqueBackgroundColorInLayer(const PaintedLayerData* aData,
       return NS_RGBA(0,0,0,0);
     }
 
-    nscolor color;
-    if (item->IsUniform(mBuilder, &color) && NS_GET_A(color) == 255)
-      return color;
+    Maybe<nscolor> color = item->IsUniform(mBuilder);
+    if (color && NS_GET_A(*color) == 255)
+      return *color;
 
     return NS_RGBA(0,0,0,0);
   }
@@ -3281,30 +3281,35 @@ void ContainerState::FinishPaintedLayerData(PaintedLayerData& aData, FindOpaqueB
         containingPaintedLayerData->mMaybeHitRegion, rect);
       containingPaintedLayerData->mMaybeHitRegion.SimplifyOutward(8);
     }
+    Maybe<Matrix4x4> matrixCache;
     nsLayoutUtils::TransformToAncestorAndCombineRegions(
-      data->mHitRegion.GetBounds(),
+      data->mHitRegion,
       mContainerReferenceFrame,
       containingPaintedLayerData->mReferenceFrame,
       &containingPaintedLayerData->mHitRegion,
-      &containingPaintedLayerData->mMaybeHitRegion);
+      &containingPaintedLayerData->mMaybeHitRegion,
+      &matrixCache);
     nsLayoutUtils::TransformToAncestorAndCombineRegions(
-      data->mNoActionRegion.GetBounds(),
+      data->mNoActionRegion,
       mContainerReferenceFrame,
       containingPaintedLayerData->mReferenceFrame,
       &containingPaintedLayerData->mNoActionRegion,
-      &containingPaintedLayerData->mDispatchToContentHitRegion);
+      &containingPaintedLayerData->mDispatchToContentHitRegion,
+      &matrixCache);
     nsLayoutUtils::TransformToAncestorAndCombineRegions(
-      data->mHorizontalPanRegion.GetBounds(),
+      data->mHorizontalPanRegion,
       mContainerReferenceFrame,
       containingPaintedLayerData->mReferenceFrame,
       &containingPaintedLayerData->mHorizontalPanRegion,
-      &containingPaintedLayerData->mDispatchToContentHitRegion);
+      &containingPaintedLayerData->mDispatchToContentHitRegion,
+      &matrixCache);
     nsLayoutUtils::TransformToAncestorAndCombineRegions(
-      data->mVerticalPanRegion.GetBounds(),
+      data->mVerticalPanRegion,
       mContainerReferenceFrame,
       containingPaintedLayerData->mReferenceFrame,
       &containingPaintedLayerData->mVerticalPanRegion,
-      &containingPaintedLayerData->mDispatchToContentHitRegion);
+      &containingPaintedLayerData->mDispatchToContentHitRegion,
+      &matrixCache);
 
   } else {
     EventRegions regions;
@@ -3417,34 +3422,33 @@ PaintedLayerData::Accumulate(ContainerState* aState,
     }
   }
 
-  nscolor uniformColor;
-  bool isUniform = aItem->IsUniform(aState->mBuilder, &uniformColor);
+  Maybe<nscolor> uniformColor = aItem->IsUniform(aState->mBuilder);
 
   // Some display items have to exist (so they can set forceTransparentSurface
   // below) but don't draw anything. They'll return true for isUniform but
   // a color with opacity 0.
-  if (!isUniform || NS_GET_A(uniformColor) > 0) {
+  if (!uniformColor || NS_GET_A(*uniformColor) > 0) {
     // Make sure that the visible area is covered by uniform pixels. In
     // particular this excludes cases where the edges of the item are not
     // pixel-aligned (thus the item will not be truly uniform).
-    if (isUniform) {
+    if (uniformColor) {
       bool snap;
       nsRect bounds = aItem->GetBounds(aState->mBuilder, &snap);
       if (!aState->ScaleToInsidePixels(bounds, snap).Contains(aVisibleRect)) {
-        isUniform = false;
+        uniformColor = Nothing();
         FLB_LOG_PAINTED_LAYER_DECISION(this, "  Display item does not cover the visible rect\n");
       }
     }
-    if (isUniform) {
+    if (uniformColor) {
       if (isFirstVisibleItem) {
         // This color is all we have
-        mSolidColor = uniformColor;
+        mSolidColor = *uniformColor;
         mIsSolidColorInVisibleRegion = true;
       } else if (mIsSolidColorInVisibleRegion &&
                  mVisibleRegion.IsEqual(nsIntRegion(aVisibleRect)) &&
                  clipMatches) {
         // we can just blend the colors together
-        mSolidColor = NS_ComposeColors(mSolidColor, uniformColor);
+        mSolidColor = NS_ComposeColors(mSolidColor, *uniformColor);
       } else {
         FLB_LOG_PAINTED_LAYER_DECISION(this, "  Layer not a solid color: Can't blend colors togethers\n");
         mIsSolidColorInVisibleRegion = false;
@@ -3898,7 +3902,7 @@ ContainerState::ProcessDisplayItems(nsDisplayList* aList)
     }
     nsIntRect itemDrawRect = ScaleToOutsidePixels(itemContent, snap);
     bool prerenderedTransform = itemType == nsDisplayItem::TYPE_TRANSFORM &&
-        static_cast<nsDisplayTransform*>(item)->ShouldPrerender(mBuilder);
+        static_cast<nsDisplayTransform*>(item)->MayBeAnimated(mBuilder);
     ParentLayerIntRect clipRect;
     const DisplayItemClip& itemClip = item->GetClip();
     if (itemClip.HasClip()) {
@@ -4116,9 +4120,12 @@ ContainerState::ProcessDisplayItems(nsDisplayList* aList)
       ownLayer->SetClipRect(Nothing());
       ownLayer->SetScrolledClip(Nothing());
       if (layerClip.HasClip()) {
-        if (shouldFixToViewport) {
-          // For layers fixed to the viewport, the clip becomes part of the
-          // layer's scrolled clip.
+        // For layers fixed to the viewport, the clip becomes part of the
+        // layer's scrolled clip. However, BasicLayerManager doesn't support
+        // scrolled clips, and doesn't care about the distinction anyways
+        // (it only matters for async scrolling), so only set a scrolled clip
+        // if we have a widget layer manager.
+        if (shouldFixToViewport && mManager->IsWidgetLayerManager()) {
           LayerClip scrolledClip;
           scrolledClip.SetClipRect(layerClipRect);
           if (layerClip.IsRectClippedByRoundedCorner(itemContent)) {

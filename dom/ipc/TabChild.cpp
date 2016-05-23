@@ -112,6 +112,13 @@
 #include "nsDeviceContext.h"
 #include "FrameLayerBuilder.h"
 
+#ifdef NS_PRINTING
+#include "nsIPrintSession.h"
+#include "nsIPrintSettings.h"
+#include "nsIPrintSettingsService.h"
+#include "nsIWebBrowserPrint.h"
+#endif
+
 #define BROWSER_ELEMENT_CHILD_SCRIPT \
     NS_LITERAL_STRING("chrome://global/content/BrowserElementChild.js")
 
@@ -591,6 +598,7 @@ TabChild::TabChild(nsIContentChild* aManager,
   , mUniqueId(aTabId)
   , mDPI(0)
   , mDefaultScale(0)
+  , mIsTransparent(false)
   , mIPCOpen(true)
   , mParentIsActive(false)
   , mDidSetRealShowInfo(false)
@@ -871,12 +879,20 @@ TabChild::NotifyTabContextUpdated()
     return;
   }
 
-  docShell->SetFrameType(IsMozBrowserElement() ?
-                           nsIDocShell::FRAME_TYPE_BROWSER :
-                           HasOwnApp() ?
-                             nsIDocShell::FRAME_TYPE_APP :
-                             nsIDocShell::FRAME_TYPE_REGULAR);
+  UpdateFrameType();
   nsDocShell::Cast(docShell)->SetOriginAttributes(OriginAttributesRef());
+}
+
+void
+TabChild::UpdateFrameType()
+{
+  nsCOMPtr<nsIDocShell> docShell = do_GetInterface(WebNavigation());
+  MOZ_ASSERT(docShell);
+
+  // TODO: Bug 1252794 - remove frameType from nsIDocShell.idl
+  docShell->SetFrameType(IsMozBrowserElement() ? nsIDocShell::FRAME_TYPE_BROWSER :
+                           HasOwnApp() ? nsIDocShell::FRAME_TYPE_APP :
+                             nsIDocShell::FRAME_TYPE_REGULAR);
 }
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(TabChild)
@@ -1303,30 +1319,6 @@ TabChild::SetProcessNameToAppName()
 }
 
 bool
-TabChild::IsRootContentDocument() const
-{
-    // A TabChild is a "root content document" if it's
-    //
-    //  - <iframe mozapp> not inside another <iframe mozapp>,
-    //  - <iframe mozbrowser> (not mozapp), or
-    //  - a vanilla remote frame (<html:iframe remote=true> or <xul:browser
-    //    remote=true>).
-    //
-    // Put another way, an iframe is /not/ a "root content document" iff it's a
-    // mozapp inside a mozapp.  (This corresponds exactly to !HasAppOwnerApp.)
-    //
-    // Note that we're lying through our teeth here (thus the scare quotes).
-    // <html:iframe remote=true> or <xul:browser remote=true> inside another
-    // content iframe is not actually a root content document, but we say it is.
-    //
-    // We do this because we make a remote frame opaque iff
-    // IsRootContentDocument(), and making vanilla remote frames transparent
-    // breaks our remote reftests.
-
-    return !HasAppOwnerApp();
-}
-
-bool
 TabChild::RecvLoadURL(const nsCString& aURI,
                       const BrowserConfiguration& aConfiguration,
                       const ShowInfo& aInfo)
@@ -1564,6 +1556,7 @@ TabChild::ApplyShowInfo(const ShowInfo& aInfo)
   }
   mDPI = aInfo.dpi();
   mDefaultScale = aInfo.defaultScale();
+  mIsTransparent = aInfo.isTransparent();
 }
 
 #ifdef MOZ_WIDGET_GONK
@@ -2380,7 +2373,11 @@ TabChild::RecvSwappedWithOtherRemoteLoader(const IPCTabContext& aContext)
   if (!UpdateTabContextAfterSwap(maybeContext.GetTabContext())) {
     MOZ_CRASH("Update to TabContext after swap was denied.");
   }
-  NotifyTabContextUpdated();
+
+  // Since mIsMozBrowserElement may change in UpdateTabContextAfterSwap, so we
+  // call UpdateFrameType here to make sure the frameType on the docshell is
+  // correct.
+  UpdateFrameType();
 
   // Ignore previous value of mTriedBrowserInit since owner content has changed.
   mTriedBrowserInit = true;
@@ -2454,6 +2451,45 @@ TabChild::RecvSetUseGlobalHistory(const bool& aUse)
     NS_WARNING("Failed to set UseGlobalHistory on TabChild docShell");
   }
 
+  return true;
+}
+
+bool
+TabChild::RecvPrint(const PrintData& aPrintData)
+{
+#ifdef NS_PRINTING
+  nsCOMPtr<nsIWebBrowserPrint> webBrowserPrint = do_GetInterface(mWebNav);
+  if (NS_WARN_IF(!webBrowserPrint)) {
+    return true;
+  }
+
+  nsCOMPtr<nsIPrintSettingsService> printSettingsSvc =
+    do_GetService("@mozilla.org/gfx/printsettings-service;1");
+  if (NS_WARN_IF(!printSettingsSvc)) {
+    return true;
+  }
+
+  nsCOMPtr<nsIPrintSettings> printSettings;
+  nsresult rv =
+    printSettingsSvc->GetNewPrintSettings(getter_AddRefs(printSettings));
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return true;
+  }
+
+  nsCOMPtr<nsIPrintSession>  printSession =
+    do_CreateInstance("@mozilla.org/gfx/printsession;1", &rv);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return true;
+  }
+
+  printSettings->SetPrintSession(printSession);
+  printSettingsSvc->DeserializeToPrintSettings(aPrintData, printSettings);
+  rv = webBrowserPrint->Print(printSettings, nullptr);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return true;
+  }
+
+#endif
   return true;
 }
 
@@ -2994,7 +3030,7 @@ TabChild::InvalidateLayers()
 void
 TabChild::CompositorUpdated(const TextureFactoryIdentifier& aNewIdentifier)
 {
-  gfxPlatform::GetPlatform()->UpdateRenderModeIfDeviceReset();
+  gfxPlatform::GetPlatform()->CompositorUpdated();
 
   RefPtr<LayerManager> lm = mPuppetWidget->GetLayerManager();
   ClientLayerManager* clm = lm->AsClientLayerManager();

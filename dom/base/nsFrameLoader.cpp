@@ -103,6 +103,11 @@
 #include "nsXULPopupManager.h"
 #endif
 
+#ifdef NS_PRINTING
+#include "mozilla/embedding/printingui/PrintingParent.h"
+#include "nsIWebBrowserPrint.h"
+#endif
+
 using namespace mozilla;
 using namespace mozilla::hal;
 using namespace mozilla::dom;
@@ -177,9 +182,30 @@ nsFrameLoader::Create(Element* aOwner, bool aNetworkCreated)
 {
   NS_ENSURE_TRUE(aOwner, nullptr);
   nsIDocument* doc = aOwner->OwnerDoc();
+
+  // We never create nsFrameLoaders for elements in resource documents.
+  //
+  // We never create nsFrameLoaders for elements in data documents, unless the
+  // document is a static document.
+  // Static documents are an exception because any sub-documents need an
+  // nsFrameLoader to keep the relevant docShell alive, even though the
+  // nsFrameLoader isn't used to load anything (the sub-document is created by
+  // the static clone process).
+  //
+  // We never create nsFrameLoaders for elements that are not
+  // in-composed-document, unless the element belongs to a static document.
+  // Static documents are an exception because this method is called at a point
+  // in the static clone process before aOwner has been inserted into its
+  // document.  For other types of documents this wouldn't be a problem since
+  // we'd create the nsFrameLoader as necessary after aOwner is inserted into a
+  // document, but the mechanisms that take care of that don't apply for static
+  // documents so we need to create the nsFrameLoader now. (This isn't wasteful
+  // since for a static document we know aOwner will end up in a document and
+  // the nsFrameLoader will be used for its docShell.)
+  //
   NS_ENSURE_TRUE(!doc->IsResourceDoc() &&
-                 ((!doc->IsLoadedAsData() && aOwner->GetComposedDoc()) ||
-                   doc->IsStaticDocument()),
+                 ((!doc->IsLoadedAsData() && aOwner->IsInComposedDoc()) ||
+                  doc->IsStaticDocument()),
                  nullptr);
 
   return new nsFrameLoader(aOwner, aNetworkCreated);
@@ -217,6 +243,11 @@ nsFrameLoader::LoadFrame()
 
   nsIDocument* doc = mOwnerContent->OwnerDoc();
   if (doc->IsStaticDocument()) {
+    return NS_OK;
+  }
+
+  if (doc->IsLoadedAsInteractiveData()) {
+    // XBL bindings doc shouldn't load sub-documents.
     return NS_OK;
   }
 
@@ -1913,13 +1944,16 @@ nsFrameLoader::MaybeCreateDocShell()
   // XXXbz this is such a total hack.... We really need to have a
   // better setup for doing this.
   nsIDocument* doc = mOwnerContent->OwnerDoc();
+
+  MOZ_RELEASE_ASSERT(!doc->IsResourceDoc(), "We shouldn't even exist");
+
   if (!(doc->IsStaticDocument() || mOwnerContent->IsInComposedDoc())) {
     return NS_ERROR_UNEXPECTED;
   }
 
-  if (doc->IsResourceDoc() || !doc->IsActive()) {
-    // Don't allow subframe loads in resource documents, nor
-    // in non-active documents.
+  if (!doc->IsActive()) {
+    // Don't allow subframe loads in non-active documents.
+    // (See bug 610571 comment 5.)
     return NS_ERROR_NOT_AVAILABLE;
   }
 
@@ -2090,10 +2124,9 @@ nsFrameLoader::MaybeCreateDocShell()
 
   if (OwnerIsMozBrowserOrAppFrame()) {
     // For inproc frames, set the docshell properties.
-    nsCOMPtr<nsIDocShellTreeItem> item = do_GetInterface(docShell);
     nsAutoString name;
     if (mOwnerContent->GetAttr(kNameSpaceID_None, nsGkAtoms::name, name)) {
-      item->SetName(name);
+      docShell->SetName(name);
     }
     mDocShell->SetFullscreenAllowed(
       mOwnerContent->HasAttr(kNameSpaceID_None, nsGkAtoms::allowfullscreen) ||
@@ -2246,9 +2279,7 @@ nsFrameLoader::GetWindowDimensions(nsIntRect& aRect)
     return NS_ERROR_FAILURE;
   }
 
-  if (doc->IsResourceDoc()) {
-    return NS_ERROR_FAILURE;
-  }
+  MOZ_RELEASE_ASSERT(!doc->IsResourceDoc(), "We shouldn't even exist");
 
   nsCOMPtr<nsPIDOMWindowOuter> win = doc->GetWindow();
   if (!win) {
@@ -2404,8 +2435,11 @@ nsFrameLoader::TryRemoteBrowser()
     return false;
   }
 
-  if (doc->IsResourceDoc()) {
-    // Don't allow subframe loads in external reference documents
+  MOZ_RELEASE_ASSERT(!doc->IsResourceDoc(), "We shouldn't even exist");
+
+  if (!doc->IsActive()) {
+    // Don't allow subframe loads in non-active documents.
+    // (See bug 610571 comment 5.)
     return false;
   }
 
@@ -3102,6 +3136,46 @@ nsFrameLoader::RequestNotifyLayerTreeCleared()
   return NS_OK;
 }
 
+NS_IMETHODIMP
+nsFrameLoader::Print(nsIPrintSettings* aPrintSettings,
+                     nsIWebProgressListener* aProgressListener)
+{
+#if defined(NS_PRINTING)
+  if (mRemoteBrowser) {
+    RefPtr<embedding::PrintingParent> printingParent =
+      mRemoteBrowser->Manager()->AsContentParent()->GetPrintingParent();
+
+    embedding::PrintData printData;
+    nsresult rv = printingParent->SerializeAndEnsureRemotePrintJob(
+      aPrintSettings, aProgressListener, nullptr, &printData);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return rv;
+    }
+
+    bool success = mRemoteBrowser->SendPrint(printData);
+    return success ? NS_OK : NS_ERROR_FAILURE;
+  }
+
+  if (mDocShell) {
+    nsCOMPtr<nsIContentViewer> viewer;
+    mDocShell->GetContentViewer(getter_AddRefs(viewer));
+    if (!viewer) {
+      return NS_ERROR_FAILURE;
+    }
+
+    nsCOMPtr<nsIWebBrowserPrint> webBrowserPrint = do_QueryInterface(viewer);
+    if (!webBrowserPrint) {
+      return NS_ERROR_FAILURE;
+    }
+
+    return webBrowserPrint->Print(aPrintSettings, aProgressListener);
+  }
+
+  return NS_ERROR_FAILURE;
+#endif
+  return NS_OK;
+}
+
 /* [infallible] */ NS_IMETHODIMP
 nsFrameLoader::SetVisible(bool aVisible)
 {
@@ -3183,7 +3257,8 @@ nsFrameLoader::StartPersistence(uint64_t aOuterWindowID,
     return mRemoteBrowser->StartPersistence(aOuterWindowID, aRecv);
   }
 
-  nsCOMPtr<nsIDocument> rootDoc = do_GetInterface(mDocShell);
+  nsCOMPtr<nsIDocument> rootDoc =
+    mDocShell ? mDocShell->GetDocument() : nullptr;
   nsCOMPtr<nsIDocument> foundDoc;
   if (aOuterWindowID) {
     foundDoc = nsContentUtils::GetSubdocumentWithOuterWindowId(rootDoc, aOuterWindowID);

@@ -857,6 +857,13 @@ public:
                          mozilla::ErrorResult& aError);
   void RemoveAnonymousContent(mozilla::dom::AnonymousContent& aContent,
                               mozilla::ErrorResult& aError);
+  /**
+   * If aNode is a descendant of anonymous content inserted by
+   * InsertAnonymousContent, this method returns the root element of the
+   * inserted anonymous content (in other words, the clone of the aElement
+   * that was passed to InsertAnonymousContent).
+   */
+  Element* GetAnonRootIfInAnonymousContentContainer(nsINode* aNode) const;
   nsTArray<RefPtr<mozilla::dom::AnonymousContent>>& GetAnonymousContents() {
     return mAnonymousContents;
   }
@@ -2056,13 +2063,25 @@ public:
   virtual nsIDocument* GetTemplateContentsOwner() = 0;
 
   /**
-   * true when this document is a static clone of a normal document.
-   * For example print preview and printing use static documents.
+   * Returns true if this document is a static clone of a normal document.
+   *
+   * We create static clones for print preview and printing (possibly other
+   * things in future).
+   *
+   * Note that static documents are also "loaded as data" (if this method
+   * returns true, IsLoadedAsData() will also return true).
    */
   bool IsStaticDocument() { return mIsStaticDocument; }
 
   /**
-   * Clones the document and subdocuments and stylesheet etc.
+   * Clones the document along with any subdocuments, stylesheet, etc.
+   *
+   * The resulting document and everything it contains (including any
+   * sub-documents) are created purely via cloning.  The returned documents and
+   * any sub-documents are "loaded as data" documents to preserve the state as
+   * it was during the clone process (we don't want external resources to load
+   * and replace the cloned resources).
+   *
    * @param aCloneContainer The container for the clone document.
    */
   virtual already_AddRefed<nsIDocument>
@@ -2565,6 +2584,11 @@ public:
     return !!GetFullscreenElement();
   }
   void ExitFullscreen();
+  bool FullscreenEnabledInternal() const { return mFullscreenEnabled; }
+  void SetFullscreenEnabled(bool aEnabled)
+  {
+    mFullscreenEnabled = aEnabled;
+  }
   Element* GetMozPointerLockElement();
   void MozExitPointerLock()
   {
@@ -3023,6 +3047,10 @@ protected:
 
   // Do we currently have an event posted to call FlushUserFontSet?
   bool mPostedFlushUserFontSet : 1;
+
+  // Whether fullscreen is enabled for this document. This corresponds
+  // to the "fullscreen enabled flag" in the HTML spec.
+  bool mFullscreenEnabled : 1;
 
   enum Type {
     eUnknown, // should never be used

@@ -3669,6 +3669,13 @@ nsTreeBodyFrame::PaintImage(int32_t              aRowIndex,
   return result;
 }
 
+// Disable PGO for PaintText because MSVC 2015 seems to have decided
+// that it can null out the alreadyAddRefed<nsFontMetrics> used to
+// initialize fontMet after storing fontMet on the stack in the same
+// space, overwriting fontMet's stack storage with null.
+#ifdef _MSC_VER
+# pragma optimize("g", off)
+#endif
 DrawResult
 nsTreeBodyFrame::PaintText(int32_t              aRowIndex,
                            nsTreeColumn*        aColumn,
@@ -3801,6 +3808,9 @@ nsTreeBodyFrame::PaintText(int32_t              aRowIndex,
 
   return result;
 }
+#ifdef _MSC_VER
+# pragma optimize("", on)
+#endif
 
 DrawResult
 nsTreeBodyFrame::PaintCheckbox(int32_t              aRowIndex,
@@ -4087,12 +4097,12 @@ nsTreeBodyFrame::PaintBackgroundLayer(nsStyleContext*      aStyleContext,
                                       const nsRect&        aDirtyRect)
 {
   const nsStyleBorder* myBorder = aStyleContext->StyleBorder();
-
+  nsCSSRendering::PaintBGParams params =
+    nsCSSRendering::PaintBGParams::ForAllLayers(*aPresContext, aRenderingContext,
+                                                aDirtyRect, aRect, this,
+                                                nsCSSRendering::PAINTBG_SYNC_DECODE_IMAGES);
   DrawResult result =
-    nsCSSRendering::PaintBackgroundWithSC(aPresContext, aRenderingContext,
-                                          this, aDirtyRect, aRect,
-                                          aStyleContext, *myBorder,
-                                          nsCSSRendering::PAINTBG_SYNC_DECODE_IMAGES);
+    nsCSSRendering::PaintBackgroundWithSC(params, aStyleContext, *myBorder);
 
   result &=
     nsCSSRendering::PaintBorderWithStyleBorder(aPresContext, aRenderingContext,

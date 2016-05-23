@@ -1214,16 +1214,13 @@ nsContentUtils::GetPseudoAttributeValue(const nsString& aSource, nsIAtom *aName,
         if (*chunkEnd == kAmpersand) {
           aValue.Append(start, chunkEnd - start);
 
-          // Point to first character after the ampersand.
-          ++chunkEnd;
-
           const char16_t *afterEntity = nullptr;
           char16_t result[2];
           uint32_t count =
             MOZ_XMLTranslateEntity(reinterpret_cast<const char*>(chunkEnd),
-                                  reinterpret_cast<const char*>(iter),
-                                  reinterpret_cast<const char**>(&afterEntity),
-                                  result);
+                                   reinterpret_cast<const char*>(iter),
+                                   reinterpret_cast<const char**>(&afterEntity),
+                                   result);
           if (count == 0) {
             aValue.Truncate();
 
@@ -1344,32 +1341,6 @@ nsContentUtils::GetParserService()
   }
 
   return sParserService;
-}
-
-/**
- * A helper function that parses a sandbox attribute (of an <iframe> or
- * a CSP directive) and converts it to the set of flags used internally.
- *
- * @param sandboxAttr   the sandbox attribute
- * @return              the set of flags (0 if sandboxAttr is null)
- */
-uint32_t
-nsContentUtils::ParseSandboxAttributeToFlags(const nsAttrValue* sandboxAttr)
-{
-  // No sandbox attribute, no sandbox flags.
-  if (!sandboxAttr) { return 0; }
-
-  //  Start off by setting all the restriction flags.
-  uint32_t out = SANDBOX_ALL_FLAGS;
-
-// Macro for updating the flag according to the keywords
-#define SANDBOX_KEYWORD(string, atom, flags)                             \
-  if (sandboxAttr->Contains(nsGkAtoms::atom, eIgnoreCase)) { out &= ~(flags); }
-
-#include "IframeSandboxKeywordList.h"
-
-  return out;
-#undef SANDBOX_KEYWORD
 }
 
 nsIBidiKeyboard*
@@ -7673,11 +7644,11 @@ nsContentUtils::SendKeyEvent(nsIWidget* aWidget,
   event.mModifiers = GetWidgetModifiers(aModifiers);
 
   if (msg == eKeyPress) {
-    event.keyCode = aCharCode ? 0 : aKeyCode;
-    event.charCode = aCharCode;
+    event.mKeyCode = aCharCode ? 0 : aKeyCode;
+    event.mCharCode = aCharCode;
   } else {
-    event.keyCode = aKeyCode;
-    event.charCode = 0;
+    event.mKeyCode = aKeyCode;
+    event.mCharCode = 0;
   }
 
   uint32_t locationFlag = (aAdditionalFlags &
@@ -7685,16 +7656,16 @@ nsContentUtils::SendKeyEvent(nsIWidget* aWidget,
      nsIDOMWindowUtils::KEY_FLAG_LOCATION_RIGHT | nsIDOMWindowUtils::KEY_FLAG_LOCATION_NUMPAD));
   switch (locationFlag) {
     case nsIDOMWindowUtils::KEY_FLAG_LOCATION_STANDARD:
-      event.location = nsIDOMKeyEvent::DOM_KEY_LOCATION_STANDARD;
+      event.mLocation = nsIDOMKeyEvent::DOM_KEY_LOCATION_STANDARD;
       break;
     case nsIDOMWindowUtils::KEY_FLAG_LOCATION_LEFT:
-      event.location = nsIDOMKeyEvent::DOM_KEY_LOCATION_LEFT;
+      event.mLocation = nsIDOMKeyEvent::DOM_KEY_LOCATION_LEFT;
       break;
     case nsIDOMWindowUtils::KEY_FLAG_LOCATION_RIGHT:
-      event.location = nsIDOMKeyEvent::DOM_KEY_LOCATION_RIGHT;
+      event.mLocation = nsIDOMKeyEvent::DOM_KEY_LOCATION_RIGHT;
       break;
     case nsIDOMWindowUtils::KEY_FLAG_LOCATION_NUMPAD:
-      event.location = nsIDOMKeyEvent::DOM_KEY_LOCATION_NUMPAD;
+      event.mLocation = nsIDOMKeyEvent::DOM_KEY_LOCATION_NUMPAD;
       break;
     default:
       if (locationFlag != 0) {
@@ -7718,16 +7689,16 @@ nsContentUtils::SendKeyEvent(nsIWidget* aWidget,
         case nsIDOMKeyEvent::DOM_VK_SUBTRACT:
         case nsIDOMKeyEvent::DOM_VK_DECIMAL:
         case nsIDOMKeyEvent::DOM_VK_DIVIDE:
-          event.location = nsIDOMKeyEvent::DOM_KEY_LOCATION_NUMPAD;
+          event.mLocation = nsIDOMKeyEvent::DOM_KEY_LOCATION_NUMPAD;
           break;
         case nsIDOMKeyEvent::DOM_VK_SHIFT:
         case nsIDOMKeyEvent::DOM_VK_CONTROL:
         case nsIDOMKeyEvent::DOM_VK_ALT:
         case nsIDOMKeyEvent::DOM_VK_META:
-          event.location = nsIDOMKeyEvent::DOM_KEY_LOCATION_LEFT;
+          event.mLocation = nsIDOMKeyEvent::DOM_KEY_LOCATION_LEFT;
           break;
         default:
-          event.location = nsIDOMKeyEvent::DOM_KEY_LOCATION_STANDARD;
+          event.mLocation = nsIDOMKeyEvent::DOM_KEY_LOCATION_STANDARD;
           break;
       }
       break;
