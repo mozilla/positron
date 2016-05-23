@@ -13,7 +13,6 @@ const Ci = Components.interfaces;
 const Cr = Components.results;
 const Cu = Components.utils;
 
-Cu.import('resource://gre/modules/Console.jsm');
 Cu.import('resource://gre/modules/Services.jsm');
 
 const subScriptLoader = Cc['@mozilla.org/moz/jssubscript-loader;1'].
@@ -52,6 +51,14 @@ const windowLoaders = new WeakMap();
  */
 
 function ModuleLoader(processType, window) {
+  // Register this loader for the given window early, so modules that we require
+  // during loader construction can access window.process without causing
+  // the `process` WebIDL binding to create a new module loader (and thus enter
+  // an infinite loop).
+  if (window) {
+    windowLoaders.set(window, this);
+  }
+
   const globalPaths = DEFAULT_GLOBAL_PATHS.slice();
   // Prepend a process-type-specific path to the global paths for this loader.
   globalPaths.unshift(processType + '/api/exports/');
@@ -69,26 +76,18 @@ function ModuleLoader(processType, window) {
    * to the `global` symbol as well as implicitly via the sandbox prototype.
    * This object is shared across all modules loaded by this loader.
    */
-  this.global = {
-    // Electron assumes these exist on the global object, so we define them.
-    // I wonder if it assumes that all window.* properties will exist, in which
-    // case we should instead make the window be the global's prototype.
-    window: processType === 'renderer' ? window : undefined,
-    location: processType === 'renderer' ? window.location : undefined,
-    document: processType === 'renderer' ? window.document : undefined,
-
-    // This comes from Console.jsm, and I don't think it's exactly the same
-    // as the Console Web API.
-    // XXX Replace this with the real Console Web API (or at least ensure
-    // that the current version is compatible with it).
-    console: console,
-
-    // Other global properties, like `process` and `Buffer`, are defined
-    // after we define the require() function, so we can use that function
-    // to implement them.
-
-    // XXX Also define setImmediate and clearImmediate.
-  };
+  if (processType === 'browser') {
+    this.global = {
+      // I don't think this is exactly the same as the Console Web API.
+      // XXX Replace this with the real Console Web API (or at least ensure
+      // that the current version is compatible with it).
+      console: Cu.import('resource://gre/modules/Console.jsm', {}).console,
+    };
+  } else {
+    // For renderer processes, the global object is the window object
+    // of the renderer window, so modules have access to all its globals.
+    this.global = window;
+  }
 
   /**
    * Add default properties to the module-specific global object.
@@ -200,20 +199,28 @@ function ModuleLoader(processType, window) {
     }
   };
 
-  // The `process` global is complicated.  It's implemented as a module
-  // that uses `require` to import other modules, but it also needs to exist
-  // before those modules are evaluated, since it's a global that's supposed
-  // to be available in them.
+  // The `process` global is complicated.  It's implemented by a module,
+  // process.js, that we require.  But it's also supposed to exist before any
+  // modules are required, since it's a global that's supposed to be available
+  // in all of them.
   //
-  // So we declare it first here as a stub, then require the module to finish
-  // initializing it.
+  // At the moment, we avoid any issue by ensuring that neither process.js
+  // nor any module in its dependency chain accesses the `process` global
+  // at evaluation time.  In the future, however, we may want (or need)
+  // to implement process.js such that it creates the global before any module
+  // can possibly access it.
   //
-  this.global.process = {
-    type: processType,
-  };
-  this.require({}, 'resource:///modules/gecko/process.js');
+  this.process = this.require({}, 'resource:///modules/gecko/process.js');
+
+  // In the browser process, assign global.process to this.process directly.
+  // In a renderer process, the WebIDL binding sets global.process.
+  if (processType === 'browser') {
+    this.global.process = this.process;
+  }
 
   this.global.Buffer = this.require({}, 'resource:///modules/node/buffer.js').Buffer;
+
+  // XXX Also define setImmediate, clearImmediate, and other Node globals.
 
   // Require the Electron init.js script for the given process type.
   //
@@ -235,7 +242,6 @@ ModuleLoader.getLoaderForWindow = function(window) {
   let loader = windowLoaders.get(window);
   if (!loader) {
     loader = new ModuleLoader('renderer', window);
-    windowLoaders.set(window, loader);
   }
   return loader;
 };

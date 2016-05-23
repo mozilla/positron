@@ -16,8 +16,15 @@ Cu.import('resource://gre/modules/Services.jsm');
 
 const exeFile = Services.dirsvc.get("XREExeF", Ci.nsIFile);
 
-// Re-export `process` as a native module.  I dunno why this matters, since all
-// modules already have access to the global.  But Node does it, so we do too.
+// This file is a special kind of module, as the module loader requires it
+// during loader construction and uses it to define the `process` global.
+// Thus that global is not available at evaluation time, neither for this module
+// nor for any other modules it requires upon evaluation.
+
+const EventEmitter = require('events').EventEmitter;
+const process = new EventEmitter();
+
+
 module.exports = process;
 
 // This is a stub with a placeholder that browser/init.js and renderer/init.js
@@ -100,10 +107,4 @@ process.env = {
   /* stub */
 };
 
-// Make the `process` global into an EventEmitter.  We do this at the end
-// of this script on the off chance that the "events" module ever depends on
-// a property of the `process` global that we define earlier in the script
-// (although it doesn't appear to do so at the moment).
-process.__proto__ = require('events').EventEmitter.prototype;
-
-// ¡¡¡Don't put anything after this line before reading the comment above!!!
+process.type = 'window' in global ? 'renderer' : 'browser';

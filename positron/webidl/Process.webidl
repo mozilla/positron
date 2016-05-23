@@ -3,14 +3,36 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/.
  */
 
+dictionary ReleaseDictionary {
+  DOMString name;
+};
+
 dictionary VersionDictionary {
   DOMString node;
   DOMString chrome;
   DOMString electron;
 };
 
+// EventEmitter isn't instantiated, its methods are just accessed
+// on processImpl.  So it doesn't need a real contract ID.
+[ChromeOnly,
+ JSImplementation="dummy"]
+interface EventEmitter {
+  [Throws]
+  EventEmitter once(DOMString name, Function listener);
+  // TODO: specify the rest of the interface.
+};
+
 [ChromeOnly,
  JSImplementation="@mozilla.org/positron/process;1"]
-interface processImpl {
+interface processImpl : EventEmitter {
+  [Cached, Pure] readonly attribute sequence<DOMString> argv;
+  [Cached, Pure] readonly attribute object env;
+  [Cached, Pure] readonly attribute DOMString execPath;
+  [Cached, Pure] readonly attribute long pid;
+  [Cached, Pure] readonly attribute DOMString platform;
+  [Cached, Pure] readonly attribute ReleaseDictionary release;
   [Cached, Pure] readonly attribute VersionDictionary versions;
+  [Throws] any atomBinding(DOMString name);
+  [Throws] any binding(DOMString name);
 };
