@@ -21,7 +21,7 @@ const exeFile = Services.dirsvc.get("XREExeF", Ci.nsIFile);
 // Thus that global is not available at evaluation time, neither for this module
 // nor for any other modules it requires upon evaluation.
 
-const EventEmitter = require('events').EventEmitter;
+const { EventEmitter } = require('events');
 const process = new EventEmitter();
 
 
