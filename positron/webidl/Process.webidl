@@ -5,6 +5,10 @@
 
 dictionary ReleaseDictionary {
   DOMString name;
+  // Unimplemented keys that are part of the Node specification:
+  // DOMString sourceUrl;
+  // DOMString headersUrl;
+  // DOMString libUrl; // Windows-only
 };
 
 dictionary VersionDictionary {
@@ -23,6 +27,8 @@ interface EventEmitter {
   // TODO: specify the rest of the interface.
 };
 
+// This currently specifies only a subset of the attributes and operations
+// of the process global as specified by Node.
 [ChromeOnly,
  JSImplementation="@mozilla.org/positron/process;1"]
 interface processImpl : EventEmitter {
