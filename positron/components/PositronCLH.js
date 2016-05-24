@@ -98,7 +98,12 @@ PositronCLH.prototype = {
         if (isLocal(resolvedURI)) {
           // If the URI is local, we are sure it won't wrongly inherit chrome privs
           var features = "chrome,dialog=no,all";
-          Services.ww.openWindow(null, resolvedURI.spec, "_blank", features, null);
+          // For the "all" feature to be applied correctly, you must pass an
+          // args array with at least one element.
+          var args = Components.classes["@mozilla.org/supports-array;1"]
+                               .createInstance(Components.interfaces.nsISupportsArray);
+          args.AppendElement(null);
+          Services.ww.openWindow(null, resolvedURI.spec, "_blank", features, args);
           cmdLine.preventDefault = true;
           return;
         } else {
