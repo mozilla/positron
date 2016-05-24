@@ -202,7 +202,7 @@ function ModuleLoader(processType, window) {
   // The `process` global is complicated.  It's implemented by a module,
   // process.js, that we require.  But it's also supposed to exist before any
   // modules are required, since it's a global that's supposed to be available
-  // in all of them.
+  // in all modules.
   //
   // At the moment, we avoid any issue by ensuring that neither process.js
   // nor any module in its dependency chain accesses the `process` global
