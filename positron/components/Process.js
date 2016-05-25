@@ -38,14 +38,52 @@ Process.prototype = {
    */
   init: function(window) {
     let loader = ModuleLoader.getLoaderForWindow(window);
-    this._processGlobal = loader.global.process;
+    this._processGlobal = loader.process;
     return window.processImpl._create(window, this);
   },
 
   /* Node `process` interface */
 
+  get argv() {
+    return this._processGlobal.argv;
+  },
+
+  get env() {
+    return this._processGlobal.env;
+  },
+
+  get execPath() {
+    return this._processGlobal.execPath;
+  },
+
+  get pid() {
+    return this._processGlobal.pid;
+  },
+
+  get platform() {
+    return this._processGlobal.platform;
+  },
+
+  get release() {
+    return this._processGlobal.release;
+  },
+
   get versions() {
     return this._processGlobal.versions;
+  },
+
+  atomBinding(name) {
+    return this._processGlobal.atomBinding(name);
+  },
+
+  binding(name) {
+    return this._processGlobal.binding(name);
+  },
+
+  /* Node `EventEmitter` interface */
+
+  once(name, listener) {
+    return this._processGlobal.once(name, listener);
   },
 
 };
