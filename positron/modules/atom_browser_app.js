@@ -23,7 +23,7 @@ exports.app = {
 };
 
 exports.appendSwitch = positronUtil.makeStub('atom_browser_app.appendSwitch');
-exports.appendArgument = positronUtil.makeStub('atom_browser_app.');
+exports.appendArgument = positronUtil.makeStub('atom_browser_app.appendArgument');
 exports.dockBounce = positronUtil.makeStub('atom_browser_app.dockBounce');
 exports.cancelBounce = positronUtil.makeStub('atom_browser_app.cancelBounce');
 exports.setBadge = positronUtil.makeStub('atom_browser_app.setBadge');
