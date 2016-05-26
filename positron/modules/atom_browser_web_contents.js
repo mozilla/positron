@@ -46,7 +46,7 @@ let WebContents_prototype = {
     this._browserWindow._domWindow.location = url;
   },
 
-  getTitle: positronUtil.makeStub('WebContents.getTitle', ''),
+  getTitle: positronUtil.makeStub('WebContents.getTitle', { returnValue: '' }),
 
   openDevTools() {
     // TODO: When tools can be opened inside the content window, support

@@ -67,8 +67,8 @@ function BrowserWindow(options) {
 }
 
 BrowserWindow.prototype = {
-  isVisible: positronUtil.makeStub('BrowserWindow.isVisible', true),
-  isMinimized: positronUtil.makeStub('BrowserWindow.isMinimized', false),
+  isVisible: positronUtil.makeStub('BrowserWindow.isVisible', { returnValue: true }),
+  isMinimized: positronUtil.makeStub('BrowserWindow.isMinimized', { returnValue: false }),
 };
 
 // nsIMessageListener

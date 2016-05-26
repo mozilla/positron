@@ -8,6 +8,8 @@ const { classes: Cc, interfaces: Ci, results: Cr, utils: Cu } = Components;
 
 const positronUtil = process.binding('positron_util');
 
-exports.setupBufferJS = positronUtil.makeStub('buffer.setupBufferJS', function(bufferPrototype, bindingObj) {
-  bindingObj.flags = [];
+exports.setupBufferJS = positronUtil.makeStub('buffer.setupBufferJS', { 
+  returnValue: function(bufferPrototype, bindingObj) {
+    bindingObj.flags = [];
+  },
 });

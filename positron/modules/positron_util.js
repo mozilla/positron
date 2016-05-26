@@ -6,7 +6,7 @@
 
 const { classes: Cc, interfaces: Ci, results: Cr, utils: Cu } = Components;
 
-exports.makeStub = function(signature, returnValue) {
+exports.makeStub = function(signature, { returnValue } = {}) {
   let doNotWarn;
 
   if (typeof returnValue === "function") {
