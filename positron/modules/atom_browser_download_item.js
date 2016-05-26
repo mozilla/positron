@@ -4,4 +4,6 @@
 
 "use strict";
 
-exports._setWrapDownloadItem = function() { /* stub */ };
+const positronUtil = process.binding('positron_util');
+
+exports._setWrapDownloadItem = positronUtil.makeStub('atom_browser_download_item._setWrapDownloadItem');

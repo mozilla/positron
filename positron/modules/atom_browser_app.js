@@ -7,6 +7,7 @@
 const { classes: Cc, interfaces: Ci, results: Cr, utils: Cu } = Components;
 
 Cu.import('resource://gre/modules/Services.jsm');
+const positronUtil = process.binding('positron_util');
 
 exports.app = {
   quit() {
@@ -21,16 +22,16 @@ exports.app = {
   },
 };
 
-exports.appendSwitch = function() { /* stub */ };
-exports.appendArgument = function() { /* stub */ };
-exports.dockBounce = function() { /* stub */ };
-exports.cancelBounce = function() { /* stub */ };
-exports.setBadge = function() { /* stub */ };
-exports.getBadge = function() { /* stub */ };
-exports.hide = function() { /* stub */ };
-exports.show = function() { /* stub */ };
-exports.setMenu = function() { /* stub */ };
-exports.setIcon = function() { /* stub */ };
+exports.appendSwitch = positronUtil.makeStub('atom_browser_app.appendSwitch');
+exports.appendArgument = positronUtil.makeStub('atom_browser_app.');
+exports.dockBounce = positronUtil.makeStub('atom_browser_app.dockBounce');
+exports.cancelBounce = positronUtil.makeStub('atom_browser_app.cancelBounce');
+exports.setBadge = positronUtil.makeStub('atom_browser_app.setBadge');
+exports.getBadge = positronUtil.makeStub('atom_browser_app.getBadge');
+exports.hide = positronUtil.makeStub('atom_browser_app.hide');
+exports.show = positronUtil.makeStub('atom_browser_app.show');
+exports.setMenu = positronUtil.makeStub('atom_browser_app.setMenu');
+exports.setIcon = positronUtil.makeStub('atom_browser_app.setIcon');
 
 // There isn't currently anything we need to do before emitting app.ready,
 // but apps will expect it to happen after a tick, so emit it in a timeout.

@@ -6,6 +6,7 @@
 
 const { classes: Cc, interfaces: Ci, results: Cr, utils: Cu } = Components;
 const { Services } = Cu.import("resource://gre/modules/Services.jsm", {});
+const positronUtil = process.binding('positron_util');
 
 let wrapWebContents = null;
 
@@ -45,10 +46,7 @@ let WebContents_prototype = {
     this._browserWindow._domWindow.location = url;
   },
 
-  getTitle: function() {
-    /* stub */
-    return "";
-  },
+  getTitle: positronUtil.makeStub('WebContents.getTitle', ''),
 
   openDevTools() {
     // TODO: When tools can be opened inside the content window, support

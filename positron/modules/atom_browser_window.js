@@ -29,6 +29,7 @@ const windowWatcher = Cc['@mozilla.org/embedcomp/window-watcher;1'].
 
 const WebContents = require('electron').webContents;
 const app = process.atomBinding('app').app;
+const positronUtil = process.binding('positron_util');
 
 const DEFAULT_URL = 'chrome://positron/content/shell.html';
 const DEFAULT_WINDOW_FEATURES = [
@@ -66,15 +67,8 @@ function BrowserWindow(options) {
 }
 
 BrowserWindow.prototype = {
-  isVisible() {
-    /* stub */
-    return true;
-  },
-
-  isMinimized() {
-    /* stub */
-    return false;
-  },
+  isVisible: positronUtil.makeStub('BrowserWindow.isVisible', true),
+  isMinimized: positronUtil.makeStub('BrowserWindow.isMinimized', false),
 };
 
 // nsIMessageListener
@@ -149,4 +143,4 @@ windowWatcher.registerNotification(function observe(subject, topic, data) {
 });
 
 exports.BrowserWindow = BrowserWindow;
-exports._setDeprecatedOptionsCheck = function() { /* stub */ };
+exports._setDeprecatedOptionsCheck = positronUtil.makeStub('atom_browser_window._setDeprecatedOptionsCheck');

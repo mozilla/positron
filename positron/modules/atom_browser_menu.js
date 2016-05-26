@@ -4,6 +4,8 @@
 
 "use strict";
 
-exports.Menu = function() { /* stub */ };
-exports.setApplicationMenu = function() { /* stub */ };
-exports.sendActionToFirstResponder = function() { /* stub */ };
+const positronUtil = process.binding('positron_util');
+
+exports.Menu = positronUtil.makeStub('atom_browser_menu.Menu');
+exports.setApplicationMenu = positronUtil.makeStub('atom_browser_menu.setApplicationMenu');
+exports.sendActionToFirstResponder = positronUtil.makeStub('atom_browser_menu.sendActionToFirstResponder');
