@@ -1316,12 +1316,7 @@ TabActor.prototype = {
       // In child processes, we have new root docshells,
       // let's watch them and all their child docshells.
       if (this._isRootDocShell(docShell)) {
-        // Don't assume there's a progress listener, since Positron starts
-        // without a window, so this._progressListener never gets created.
-        // TODO: ensure there's a listener for apps without an initial window.
-        if (this._progressListener) {
-          this._progressListener.watch(docShell);
-        }
+        this._progressListener.watch(docShell);
       }
       this._notifyDocShellsUpdate([docShell]);
     });
@@ -1399,9 +1394,7 @@ TabActor.prototype = {
     // Stop watching this docshell (the unwatch() method will check if we
     // started watching it before).
     webProgress.QueryInterface(Ci.nsIDocShell);
-    if (this._progressListener) {
-      this._progressListener.unwatch(webProgress);
-    }
+    this._progressListener.unwatch(webProgress);
 
     if (webProgress.DOMWindow == this._originalWindow) {
       // If the original top level document we connected to is removed,
@@ -1482,9 +1475,7 @@ TabActor.prototype = {
     // Check for docShell availability, as it can be already gone
     // during Firefox shutdown.
     if (this.docShell) {
-      if (this._progressListener) {
-        this._progressListener.unwatch(this.docShell);
-      }
+      this._progressListener.unwatch(this.docShell);
       this._restoreDocumentSettings();
     }
     if (this._progressListener) {

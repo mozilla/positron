@@ -20,5 +20,15 @@ exports.sendSync = function(name, args) {
   // <http://electron.atom.io/docs/api/ipc-renderer/#ipcrenderersendsyncchannel-arg1-arg2->
   // expects to receive a single return value.  So this function returns
   // the first item in the array.
-  return cpmm.sendSyncMessage(name, args, { window })[0];
+  let result = cpmm.sendSyncMessage(name, args, { window })[0];
+  // If no one was listening for the message, wrap up the falsy result in the
+  // meta protocol used by Electron's RPC server.  This increases the chances we
+  // log an error specific to problem site, instead of here at this IPC code.
+  if (!result) {
+    return JSON.stringify({
+      type: 'value',
+      value: result,
+    });
+  }
+  return result;
 };

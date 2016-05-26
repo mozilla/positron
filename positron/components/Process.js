@@ -37,6 +37,23 @@ Process.prototype = {
    * for an explanation of the behavior of this method.
    */
   init: function(window) {
+    // The WebIDL binding applies to the hidden window too, but we don't want
+    // to initialize the Electron environment for that window, so return early
+    // if we've been called to initialize `process` for that window.
+    //
+    // TODO: restrict the WebIDL binding to windows opened by the Electron app
+    // using the Func extended attribute
+    // <https://developer.mozilla.org/en-US/docs/Mozilla/WebIDL_bindings#Func>.
+    //
+    if (window.location.toString() === 'resource://gre-resources/hiddenWindow.html') {
+      this._processGlobal = new Proxy({}, {
+        get: function(target, name) {
+          window.console.error("'process' not defined in hidden window");
+        }
+      });
+      return window.processImpl._create(window, this);
+    }
+
     let loader = ModuleLoader.getLoaderForWindow(window);
     this._processGlobal = loader.process;
     return window.processImpl._create(window, this);

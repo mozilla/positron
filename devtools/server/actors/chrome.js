@@ -50,6 +50,13 @@ function ChromeActor(aConnection) {
   if (!window) {
     window = Services.wm.getMostRecentWindow(null);
   }
+
+  // We really want _some_ window at least, so fallback to the hidden window if
+  // there's nothing else (such as during early startup).
+  if (!window) {
+    window = Services.appShell.hiddenDOMWindow;
+  }
+
   // On xpcshell, there is no window/docshell
   let docShell = window ? window.QueryInterface(Ci.nsIInterfaceRequestor)
                                 .getInterface(Ci.nsIDocShell)
@@ -123,9 +130,7 @@ ChromeActor.prototype._attach = function () {
     if (docShell == this.docShell) {
       continue;
     }
-    if (this._progressListener) {
-      this._progressListener.watch(docShell);
-    }
+    this._progressListener.watch(docShell);
   }
 };
 
@@ -148,9 +153,7 @@ ChromeActor.prototype._detach = function () {
     if (docShell == this.docShell) {
       continue;
     }
-    if (this._progressListener) {
-      this._progressListener.unwatch(docShell);
-    }
+    this._progressListener.unwatch(docShell);
   }
 
   TabActor.prototype._detach.call(this);
