@@ -25,7 +25,7 @@ exports.sendSync = function(name, args) {
   // meta protocol used by Electron's RPC server.  This increases the chances we
   // log an error specific to problem site, instead of here at this IPC code.
   if (!result) {
-    result = JSON.stringify({
+    return JSON.stringify({
       type: 'value',
       value: result,
     });
