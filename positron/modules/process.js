@@ -78,6 +78,8 @@ process.binding = function(name) {
   return require(`resource:///modules/gecko/${name}.js`);
 }
 
+const positronUtil = process.binding('positron_util');
+
 process.execPath = exeFile.path;
 
 // Per <https://nodejs.org/api/process.html#process_process_platform>,
@@ -103,8 +105,7 @@ Object.defineProperty(process, 'pid', {
 
 // We might be able to implement this by using nsIEnvironment, although that API
 // doesn't provide enumeration, whereas this one presumably does.
-process.env = {
-  /* stub */
-};
+process.env = {};
+positronUtil.makeStub('process.env')();
 
 process.type = 'window' in global ? 'renderer' : 'browser';

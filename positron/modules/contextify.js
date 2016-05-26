@@ -6,4 +6,6 @@
 
 const { classes: Cc, interfaces: Ci, results: Cr, utils: Cu } = Components;
 
-exports.ContextifyScript = function() { /* stub */ };
+const positronUtil = process.binding('positron_util');
+
+exports.ContextifyScript = positronUtil.makeStub('contextify.ContextifyScript');

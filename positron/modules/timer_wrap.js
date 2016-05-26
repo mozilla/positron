@@ -6,4 +6,6 @@
 
 const { classes: Cc, interfaces: Ci, results: Cr, utils: Cu } = Components;
 
-exports.Timer = function() { /* stub */ };
+const positronUtil = process.binding('positron_util');
+
+exports.Timer = positronUtil.makeStub('timer_wrap.Timer');

@@ -6,4 +6,6 @@
 
 const { classes: Cc, interfaces: Ci, results: Cr, utils: Cu } = Components;
 
-exports.FSInitialize = function() { /* stub */ };
+const positronUtil = process.binding('positron_util');
+
+exports.FSInitialize = positronUtil.makeStub('fs.FSInitialize');

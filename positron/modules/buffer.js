@@ -6,7 +6,10 @@
 
 const { classes: Cc, interfaces: Ci, results: Cr, utils: Cu } = Components;
 
-exports.setupBufferJS = function(bufferPrototype, bindingObj) {
-  /* stub */
-  bindingObj.flags = [];
-};
+const positronUtil = process.binding('positron_util');
+
+exports.setupBufferJS = positronUtil.makeStub('buffer.setupBufferJS', { 
+  returnValue: function(bufferPrototype, bindingObj) {
+    bindingObj.flags = [];
+  },
+});

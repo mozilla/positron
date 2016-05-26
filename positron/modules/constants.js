@@ -6,6 +6,7 @@
 
 const { classes: Cc, interfaces: Ci, results: Cr, utils: Cu } = Components;
 
-module.exports = {
-  /* stub */
-};
+const positronUtil = process.binding('positron_util');
+
+module.exports = {};
+positronUtil.makeStub('constants')();

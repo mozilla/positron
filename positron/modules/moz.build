@@ -19,6 +19,7 @@ EXTRA_JS_MODULES.gecko += [
   'contextify.js',
   'fs.js',
   'fs_event_wrap.js',
+  'positron_util.js',
   'process.js',
   'timer_wrap.js',
   'util.js',

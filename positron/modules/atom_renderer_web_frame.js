@@ -4,4 +4,7 @@
 
 "use strict";
 
-exports.webFrame = { /* stub */ };
+const positronUtil = process.binding('positron_util');
+
+exports.webFrame = {};
+positronUtil.makeStub('atom_renderer_web_frame.webFrame')();

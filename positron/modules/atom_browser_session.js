@@ -4,4 +4,6 @@
 
 "use strict";
 
-exports._setWrapSession = function() { /* stub */ };
+const positronUtil = process.binding('positron_util');
+
+exports._setWrapSession = positronUtil.makeStub('atom_browser_session._setWrapSession');

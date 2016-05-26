@@ -5,8 +5,9 @@
 'use strict';
 
 const util = process.binding('util');
+const positronUtil = process.binding('positron_util');
 
 exports.getHiddenValue = util.getHiddenValue;
 exports.setHiddenValue = util.setHiddenValue;
 
-exports.setDestructor = function(object, callback) { /* stub */ };
+exports.setDestructor = positronUtil.makeStub('atom_common_v8_util.setDestructor');
