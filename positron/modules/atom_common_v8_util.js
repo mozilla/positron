@@ -11,3 +11,8 @@ exports.getHiddenValue = util.getHiddenValue;
 exports.setHiddenValue = util.setHiddenValue;
 
 exports.setDestructor = positronUtil.makeStub('atom_common_v8_util.setDestructor');
+
+exports.createDoubleIDWeakMap = function() {
+  // TODO: Properly implment this.
+  return new WeakMap();
+};
