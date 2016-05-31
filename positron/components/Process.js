@@ -85,6 +85,10 @@ Process.prototype = {
     return this._processGlobal.release;
   },
 
+  get type() {
+    return this._processGlobal.type;
+  },
+
   get versions() {
     return this._processGlobal.versions;
   },
