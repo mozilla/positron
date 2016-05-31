@@ -43,7 +43,7 @@ let WebContents_prototype = {
   },
 
   loadURL: function(url) {
-    this._browserWindow._domWindow.location = url;
+    this._browserWindow._loadURL(url);
   },
 
   getTitle: positronUtil.makeStub('WebContents.getTitle', { returnValue: '' }),
