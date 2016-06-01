@@ -7,6 +7,12 @@ This is a _work in progress_, and doesn't run Electron based apps yet.  Part of 
 
 We're actively working on this, so if you're interested in the status of this project, please check here again soon.
 
+### How to download the source
+To clone Positron and its submodules:
+```
+git clone --recursive https://github.com/mozilla/positron.git
+```
+
 ### How to build
 Before building please make sure you have the prerequisites for building Firefox as documented [here](https://developer.mozilla.org/en-US/docs/Mozilla/Developer_guide/Build_Instructions/Simple_Firefox_build#Build_prerequisites).
 
