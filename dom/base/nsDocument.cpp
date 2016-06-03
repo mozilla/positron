@@ -2137,8 +2137,16 @@ nsDocument::Reset(nsIChannel* aChannel, nsILoadGroup* aLoadGroup)
     nsIScriptSecurityManager *securityManager =
       nsContentUtils::GetSecurityManager();
     if (securityManager) {
-      securityManager->GetChannelResultPrincipal(aChannel,
-                                                 getter_AddRefs(principal));
+      nsCOMPtr<nsIDocShell> docShell(mDocumentContainer);
+      nsCOMPtr<nsIDocShellTreeItem> parentDocShellTreeItem;
+      if (docShell && NS_SUCCEEDED(docShell->GetParent(getter_AddRefs(parentDocShellTreeItem))) &&
+          !parentDocShellTreeItem)
+      {
+        securityManager->GetSystemPrincipal(getter_AddRefs(principal));
+      } else {
+        securityManager->GetChannelResultPrincipal(aChannel,
+                                                   getter_AddRefs(principal));
+      }
     }
   }
 
