@@ -3,6 +3,8 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 pref("browser.dom.window.dump.enabled", true);
+pref("dom.mozBrowserFramesEnabled", true);
+pref("dom.webcomponents.enabled", true);
 pref("javascript.options.showInConsole", true);
 pref("devtools.selfxss.count", 5);
 pref("devtools.debugger.remote-enabled", true);

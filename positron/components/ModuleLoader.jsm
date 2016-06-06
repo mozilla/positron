@@ -220,21 +220,25 @@ function ModuleLoader(processType, window) {
 
   this.global.Buffer = this.require({}, 'resource:///modules/node/buffer.js').Buffer;
 
-  // XXX Also define setImmediate, clearImmediate, and other Node globals.
+  // XXX Also define clearImmediate, and other Node globals.
+  const timers = this.require({}, 'resource:///modules/node/timers.js');
+  this.global.setImmediate = timers.setImmediate;
 
   // Require the Electron init.js script for the given process type.
   //
   // We only do this for renderer processes for now.  For browser processes,
-  // we instead require the one browser process module that renderer/init.js
-  // depends on having already been required, browser/rpc-server.js.
+  // we instead require the browser process modules that renderer/init.js
+  // depends on having already been required.
   //
   // Eventually, we should get browser/init.js working and require it here,
-  // at which point it'll require browser/rpc-server.js for us.
+  // at which point it'll require those modules for us.
   //
   if (processType === 'renderer') {
     this.require({}, 'resource:///modules/renderer/init.js');
   } else {
     this.require({}, 'resource:///modules/browser/rpc-server.js');
+    this.require({}, 'resource:///modules/browser/guest-view-manager.js');
+    this.require({}, 'resource:///modules/browser/guest-window-manager.js');
   }
 }
 

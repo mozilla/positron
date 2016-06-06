@@ -2740,6 +2740,10 @@ nsContentUtils::IsCustomElementName(nsIAtom* aName)
   // return before doing the more expensive (and generally passing) CheckQName
   // check.
   nsDependentAtomString str(aName);
+  if (aName == nsGkAtoms::browserplugin ||
+      aName == nsGkAtoms::webview) {
+    return true;
+  }
   const char16_t* colon;
   if (str.FindChar('-') == -1 ||
       NS_FAILED(nsContentUtils::CheckQName(str, false, &colon)) || colon) {

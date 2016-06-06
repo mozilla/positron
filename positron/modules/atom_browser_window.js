@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-"use strict";
+'use strict';
 
 // According to Electron's Quick Start tutorial
 // <http://electron.atom.io/docs/latest/tutorial/quick-start/>,
@@ -33,6 +33,7 @@ Cu.import('resource:///modules/ModuleLoader.jsm');
 const WebContents = require('electron').webContents;
 const app = process.atomBinding('app').app;
 const positronUtil = process.binding('positron_util');
+const webViewManager = process.atomBinding('web_view_manager');
 
 const DEFAULT_URL = 'chrome://positron/content/shell.html';
 const DEFAULT_WINDOW_FEATURES = [
@@ -72,6 +73,10 @@ function BrowserWindow(options) {
 BrowserWindow.prototype = {
   isVisible: positronUtil.makeStub('BrowserWindow.isVisible', { returnValue: true }),
   isMinimized: positronUtil.makeStub('BrowserWindow.isMinimized', { returnValue: false }),
+
+  _send: function(channel, args) {
+    ppmm.broadcastAsyncMessage('ipc-message', [channel].concat(args), { window: this._domWindow });
+  },
 
   _loadURL: function(url) {
     // Observe document-element-inserted and eagerly create the module loader,
@@ -168,6 +173,12 @@ windowWatcher.registerNotification(function observe(subject, topic, data) {
 
       break;
     }
+  }
+});
+
+ppmm.addMessageListener('positron-register-web-view', {
+  receiveMessage(message) {
+    webViewManager.attachWebViewToGuest(message.objects.webView);
   }
 });
 
