@@ -26,6 +26,8 @@
 #include "nsIPrincipal.h"
 #include "nsIXPConnect.h"
 #include "nsUTF8Utils.h"
+#include "WorkerPrivate.h"
+#include "WorkerRunnable.h"
 #include "WrapperFactory.h"
 #include "xpcprivate.h"
 #include "XrayWrapper.h"
@@ -55,6 +57,8 @@
 
 namespace mozilla {
 namespace dom {
+
+using namespace workers;
 
 const JSErrorFormatString ErrorFormatString[] = {
 #define MSG_DEF(_name, _argc, _exn, _str) \
@@ -173,7 +177,7 @@ ErrorResult::SerializeMessage(IPC::Message* aMsg) const
 }
 
 bool
-ErrorResult::DeserializeMessage(const IPC::Message* aMsg, void** aIter)
+ErrorResult::DeserializeMessage(const IPC::Message* aMsg, PickleIterator* aIter)
 {
   using namespace IPC;
   nsAutoPtr<Message> readMessage(new Message());
@@ -295,7 +299,7 @@ ErrorResult::SerializeDOMExceptionInfo(IPC::Message* aMsg) const
 }
 
 bool
-ErrorResult::DeserializeDOMExceptionInfo(const IPC::Message* aMsg, void** aIter)
+ErrorResult::DeserializeDOMExceptionInfo(const IPC::Message* aMsg, PickleIterator* aIter)
 {
   using namespace IPC;
   nsCString message;
@@ -2182,7 +2186,7 @@ InterfaceHasInstance(JSContext* cx, JS::Handle<JSObject*> obj,
 
   if (jsipc::IsWrappedCPOW(instance)) {
     bool boolp = false;
-    if (!jsipc::DOMInstanceOf(cx, js::CheckedUnwrap(instance), clasp->mPrototypeID,
+    if (!jsipc::DOMInstanceOf(cx, js::UncheckedUnwrap(instance), clasp->mPrototypeID,
                               clasp->mDepth, &boolp)) {
       return false;
     }
@@ -2501,7 +2505,6 @@ ConvertJSValueToByteString(JSContext* cx, JS::Handle<JS::Value> v,
 bool
 IsInPrivilegedApp(JSContext* aCx, JSObject* aObj)
 {
-  using mozilla::dom::workers::GetWorkerPrivateFromContext;
   if (!NS_IsMainThread()) {
     return GetWorkerPrivateFromContext(aCx)->IsInPrivilegedApp();
   }
@@ -2516,7 +2519,6 @@ IsInPrivilegedApp(JSContext* aCx, JSObject* aObj)
 bool
 IsInCertifiedApp(JSContext* aCx, JSObject* aObj)
 {
-  using mozilla::dom::workers::GetWorkerPrivateFromContext;
   if (!NS_IsMainThread()) {
     return GetWorkerPrivateFromContext(aCx)->IsInCertifiedApp();
   }
@@ -3157,9 +3159,15 @@ ForEachHandler(JSContext* aCx, unsigned aArgc, JS::Value* aVp)
   JS::AutoValueVector newArgs(aCx);
   // Arguments are passed in as value, key, object. Keep value and key, replace
   // object with the maplike/setlike object.
-  newArgs.append(args.get(0));
-  newArgs.append(args.get(1));
-  newArgs.append(maplikeOrSetlikeObj);
+  if (!newArgs.append(args.get(0))) {
+    return false;
+  }
+  if (!newArgs.append(args.get(1))) {
+    return false;
+  }
+  if (!newArgs.append(maplikeOrSetlikeObj)) {
+    return false;
+  }
   JS::Rooted<JS::Value> rval(aCx, JS::UndefinedValue());
   // Now actually call the user specified callback
   return JS::Call(aCx, args.thisv(), callbackFn, newArgs, &rval);
@@ -3285,6 +3293,114 @@ SetDocumentAndPageUseCounter(JSContext* aCx, JSObject* aObject,
   }
 }
 
+namespace {
+
+// This runnable is used to write a deprecation message from a worker to the
+// console running on the main-thread.
+class DeprecationWarningRunnable final : public Runnable
+                                       , public WorkerFeature
+{
+  WorkerPrivate* mWorkerPrivate;
+  nsIDocument::DeprecatedOperations mOperation;
+
+public:
+  DeprecationWarningRunnable(WorkerPrivate* aWorkerPrivate,
+                             nsIDocument::DeprecatedOperations aOperation)
+    : mWorkerPrivate(aWorkerPrivate)
+    , mOperation(aOperation)
+  {
+    MOZ_ASSERT(aWorkerPrivate);
+  }
+
+  void
+  Dispatch()
+  {
+    if (NS_WARN_IF(!mWorkerPrivate->AddFeature(this))) {
+      return;
+    }
+
+    if (NS_WARN_IF(NS_FAILED(NS_DispatchToMainThread(this)))) {
+      mWorkerPrivate->RemoveFeature(this);
+      return;
+    }
+  }
+
+  virtual bool
+  Notify(Status aStatus) override
+  {
+    // We don't care about the notification. We just want to keep the
+    // mWorkerPrivate alive.
+    return true;
+  }
+
+private:
+
+  NS_IMETHOD
+  Run() override
+  {
+    MOZ_ASSERT(NS_IsMainThread());
+
+    // Walk up to our containing page
+    WorkerPrivate* wp = mWorkerPrivate;
+    while (wp->GetParent()) {
+      wp = wp->GetParent();
+    }
+
+    nsPIDOMWindowInner* window = wp->GetWindow();
+    if (window && window->GetExtantDoc()) {
+      window->GetExtantDoc()->WarnOnceAbout(mOperation);
+    }
+
+    ReleaseWorker();
+    return NS_OK;
+  }
+
+  void
+  ReleaseWorker()
+  {
+    class ReleaseRunnable final : public WorkerRunnable
+    {
+      RefPtr<DeprecationWarningRunnable> mRunnable;
+
+    public:
+      ReleaseRunnable(WorkerPrivate* aWorkerPrivate,
+                      DeprecationWarningRunnable* aRunnable)
+        : WorkerRunnable(aWorkerPrivate, WorkerThreadUnchangedBusyCount)
+        , mRunnable(aRunnable)
+      {}
+
+      virtual bool
+      WorkerRun(JSContext* aCx, WorkerPrivate* aWorkerPrivate) override
+      {
+        MOZ_ASSERT(aWorkerPrivate);
+        aWorkerPrivate->AssertIsOnWorkerThread();
+
+        aWorkerPrivate->RemoveFeature(mRunnable);
+        return true;
+      }
+
+      virtual bool
+      PreDispatch(WorkerPrivate* aWorkerPrivate) override
+      {
+        AssertIsOnMainThread();
+        return true;
+      }
+
+      virtual void
+      PostDispatch(WorkerPrivate* aWorkerPrivate,
+                   bool aDispatchResult) override
+      {
+      }
+    };
+
+    RefPtr<ReleaseRunnable> runnable =
+      new ReleaseRunnable(mWorkerPrivate, this);
+    NS_WARN_IF(!runnable->Dispatch());
+  }
+};
+
+} // anonymous namespace
+
 void
 DeprecationWarning(JSContext* aCx, JSObject* aObject,
                    nsIDocument::DeprecatedOperations aOperation)
@@ -3295,10 +3411,23 @@ DeprecationWarning(JSContext* aCx, JSObject* aObject,
     return;
   }
 
-  nsCOMPtr<nsPIDOMWindowInner> window = do_QueryInterface(global.GetAsSupports());
-  if (window && window->GetExtantDoc()) {
-    window->GetExtantDoc()->WarnOnceAbout(aOperation);
+  if (NS_IsMainThread()) {
+    nsCOMPtr<nsPIDOMWindowInner> window = do_QueryInterface(global.GetAsSupports());
+    if (window && window->GetExtantDoc()) {
+      window->GetExtantDoc()->WarnOnceAbout(aOperation);
+    }
+
+    return;
   }
+
+  WorkerPrivate* workerPrivate = GetWorkerPrivateFromContext(aCx);
+  if (!workerPrivate) {
+    return;
+  }
+
+  RefPtr<DeprecationWarningRunnable> runnable =
+    new DeprecationWarningRunnable(workerPrivate, aOperation);
+  runnable->Dispatch();
 }
 
 namespace binding_detail {
@@ -3309,7 +3438,7 @@ UnprivilegedJunkScopeOrWorkerGlobal()
     return xpc::UnprivilegedJunkScope();
   }
 
-  return workers::GetCurrentThreadWorkerGlobal();
+  return GetCurrentThreadWorkerGlobal();
 }
 } // namespace binding_detail
 

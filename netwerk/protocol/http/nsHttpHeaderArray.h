@@ -61,6 +61,9 @@ public:
     nsresult SetHeaderFromNet(nsHttpAtom header, const nsACString &value,
                               bool response);
 
+    nsresult SetResponseHeaderFromCache(nsHttpAtom header, const nsACString &value,
+                                        HeaderVariety variety);
+
     nsresult GetHeader(nsHttpAtom header, nsACString &value) const;
     nsresult GetOriginalHeader(nsHttpAtom aHeader,
                                nsIHttpHeaderVisitor *aVisitor);
@@ -114,8 +117,8 @@ public:
         HeaderVariety variety = eVarietyUnknown;
 
         struct MatchHeader {
-          bool Equals(const nsEntry &entry, const nsHttpAtom &header) const {
-            return entry.header == header;
+          bool Equals(const nsEntry &aEntry, const nsHttpAtom &aHeader) const {
+            return aEntry.header == aHeader;
           }
         };
 

@@ -223,6 +223,7 @@ private:
                               void* aData);
   static bool EnqueuePromiseJobCallback(JSContext* aCx,
                                         JS::HandleObject aJob,
+                                        JS::HandleObject aAllocationSite,
                                         void* aData);
 
   virtual void TraceNativeBlackRoots(JSTracer* aTracer) { };
@@ -298,7 +299,7 @@ public:
   nsCycleCollectionParticipant* ZoneParticipant();
 
   nsresult TraverseRoots(nsCycleCollectionNoteRootCallback& aCb);
-  bool UsefulToMergeZones() const;
+  virtual bool UsefulToMergeZones() const;
   void FixWeakMappingGrayBits() const;
   bool AreGCGrayBitsValid() const;
   void GarbageCollect(uint32_t aReason) const;

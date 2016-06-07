@@ -354,7 +354,7 @@ public class Tab {
         ThreadUtils.postToBackgroundThread(new Runnable() {
             @Override
             public void run() {
-                urlMetadata.save(cr, mUrl, data);
+                urlMetadata.save(cr, data);
             }
         });
     }
@@ -461,8 +461,16 @@ public class Tab {
             mFaviconUrl = null;
         }
 
+        final Favicons.LoadType loadType;
+        if (mSiteIdentity.getSecurityMode() == SiteIdentity.SecurityMode.CHROMEUI) {
+            loadType = Favicons.LoadType.PRIVILEGED;
+        } else {
+            loadType = Favicons.LoadType.UNPRIVILEGED;
+        }
+
         int flags = (isPrivate() || mErrorType != ErrorType.NONE) ? 0 : LoadFaviconTask.FLAG_PERSIST;
-        mFaviconLoadId = Favicons.getSizedFavicon(mAppContext, mUrl, mFaviconUrl, Favicons.browserToolbarFaviconSize, flags,
+        mFaviconLoadId = Favicons.getSizedFavicon(mAppContext, mUrl, mFaviconUrl,
+                loadType, Favicons.browserToolbarFaviconSize, flags,
                 new OnFaviconLoadedListener() {
                     @Override
                     public void onFaviconLoaded(String pageUrl, String faviconURL, Bitmap favicon) {

@@ -43,6 +43,7 @@ interface nsIScrollObserver;
 interface nsITabParent;
 interface nsITabChild;
 interface nsICommandManager;
+interface nsICommandParams;
 native TabChildRef(already_AddRefed<nsITabChild>);
 
 typedef unsigned long nsLoadFlags;
@@ -124,12 +125,11 @@ interface nsIDocShell : nsIDocShellTreeItem
    * of an nsIDocShellLoadInfo object...
    *
    * @param aURI            - The URI to load.
-   * @param aOriginalURI    - The URI to set as the originalURI on the channel
-   *                          that does the load. If null, aURI will be set as
-   *                          the originalURI.
-   * @param aLoadReplace    - If set LOAD_REPLACE flag will be set on the
-   *                          channel. aOriginalURI is null, this argument is
-   *                          ignored.
+   * @param aOriginalURI    - If aOriginalURI is present and this function ends
+   *                          up actually loading data from network or cache,
+   *                          but not from bfcache, (e.g. in case of a reload)
+   *                          aOriginalURI will be loaded instead of aURI.
+   *                          Thereby we will load all redirects again.
    * @param aReferrer       - Referring URI
    * @param aReferrerPolicy - Referrer policy
    * @param aOwner          - Owner (security principal)
@@ -157,7 +157,6 @@ interface nsIDocShell : nsIDocShellTreeItem
    */
   [noscript]void internalLoad(in nsIURI aURI,
                               in nsIURI aOriginalURI,
-                              in boolean aLoadReplace,
                               in nsIURI aReferrer,
                               in unsigned long aReferrerPolicy,
                               in nsISupports aOwner,
@@ -647,7 +646,11 @@ interface nsIDocShell : nsIDocShellTreeItem
    * Puts the docshell in prerendering mode. noscript because we want only
    * native code to be able to put a docshell in prerendering.
    */
-  [noscript] void SetIsPrerendered(in boolean prerendered);
+  [noscript] void SetIsPrerendered();
+
+  /**
+   * Whether this docshell is in prerender mode.
+   */
   [infallible] readonly attribute boolean isPrerendered;
 
   /**
@@ -1015,6 +1018,7 @@ interface nsIDocShell : nsIDocShellTreeItem
     */
   boolean isCommandEnabled(in string command);
   void doCommand(in string command);
+  void doCommandWithParams(in string command, in nsICommandParams aParams);
 
   /**
    * Invisible DocShell are dummy construct to simulate DOM windows

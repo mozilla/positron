@@ -3,19 +3,22 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+/* Experimenting with 100 char long lines */
+/* eslint max-len: [2, 100, 2, {ignoreUrls: true, "ignorePattern": "\\s*require\\s*\\(|^\\s*loader\\.lazy|-\\*-"}] */ // eslint-disable-line
 
 "use strict";
 
-const {Cc, Ci, Cu} = require("chrome");
+const {Cc, Ci} = require("chrome");
 
 var Services = require("Services");
 var promise = require("promise");
 var EventEmitter = require("devtools/shared/event-emitter");
 var clipboard = require("sdk/clipboard");
-var {HostType} = require("devtools/client/framework/toolbox").Toolbox;
 const {executeSoon} = require("devtools/shared/DevToolsUtils");
 var {KeyShortcuts} = require("devtools/client/shared/key-shortcuts");
 var {Task} = require("devtools/shared/task");
+const {initCssProperties} = require("devtools/shared/fronts/css-properties");
+const nodeConstants = require("devtools/shared/dom-node-constants");
 
 loader.lazyRequireGetter(this, "CSS", "CSS");
 
@@ -39,7 +42,6 @@ loader.lazyGetter(this, "toolboxStrings", () => {
 loader.lazyGetter(this, "clipboardHelper", () => {
   return Cc["@mozilla.org/widget/clipboardhelper;1"].getService(Ci.nsIClipboardHelper);
 });
-
 
 /**
  * Represents an open instance of the Inspector for a tab.
@@ -97,6 +99,13 @@ function InspectorPanel(iframeWindow, toolbox) {
   this.onPaneToggleButtonClicked = this.onPaneToggleButtonClicked.bind(this);
   this._onMarkupFrameLoad = this._onMarkupFrameLoad.bind(this);
 
+  let doc = this.panelDoc;
+
+  // Handle 'Add Node' toolbar button.
+  this.addNode = this.addNode.bind(this);
+  this.addNodeButton = doc.getElementById("inspector-element-add-button");
+  this.addNodeButton.addEventListener("click", this.addNode);
+
   this._target.on("will-navigate", this._onBeforeNavigate);
 
   EventEmitter.decorate(this);
@@ -108,15 +117,14 @@ InspectorPanel.prototype = {
   /**
    * open is effectively an asynchronous constructor
    */
-  open: function () {
-    return this.target.makeRemote().then(() => {
-      return this._getPageStyle();
-    }).then(() => {
-      return this._getDefaultNodeForSelection();
-    }).then(defaultSelection => {
-      return this._deferredOpen(defaultSelection);
-    }).then(null, console.error);
-  },
+  open: Task.async(function* () {
+    this._cssPropertiesLoaded = initCssProperties(this.toolbox);
+    yield this._cssPropertiesLoaded;
+    yield this.target.makeRemote();
+    yield this._getPageStyle();
+    let defaultSelection = yield this._getDefaultNodeForSelection();
+    return yield this._deferredOpen(defaultSelection);
+  }),
 
   get toolbox() {
     return this._toolbox;
@@ -191,7 +199,6 @@ InspectorPanel.prototype = {
         if (notification && !this._toolbox.threadClient.paused) {
           notificationBox.removeNotification(notification);
         }
-
       };
       this.target.on("thread-paused", this.updateDebuggerPausedWarning);
       this.target.on("thread-resumed", this.updateDebuggerPausedWarning);
@@ -251,15 +258,16 @@ InspectorPanel.prototype = {
 
     // If available, set either the previously selected node or the body
     // as default selected, else set documentElement
-    return walker.getRootNode().then(aRootNode => {
+    return walker.getRootNode().then(node => {
       if (hasNavigated()) {
         return promise.reject("navigated; resolution of _defaultNode aborted");
       }
 
-      rootNode = aRootNode;
+      rootNode = node;
       if (this.selectionCssSelector) {
         return walker.querySelector(rootNode, this.selectionCssSelector);
       }
+      return null;
     }).then(front => {
       if (hasNavigated()) {
         return promise.reject("navigated; resolution of _defaultNode aborted");
@@ -391,7 +399,7 @@ InspectorPanel.prototype = {
     if (this.target.form.animationsActor) {
       this.sidebar.addTab("animationinspector",
                           "chrome://devtools/content/animationinspector/animation-inspector.xhtml",
-                          "animationinspector" == defaultTab);
+                          defaultTab == "animationinspector");
     }
 
     this.sidebar.show(defaultTab);
@@ -467,9 +475,8 @@ InspectorPanel.prototype = {
     if (this._selectionCssSelector &&
         this._selectionCssSelector.url === this._target.url) {
       return this._selectionCssSelector.selector;
-    } else {
-      return null;
     }
+    return null;
   },
 
   /**
@@ -650,9 +657,17 @@ InspectorPanel.prototype = {
       this.layoutview.destroy();
     }
 
+    let cssPropertiesDestroyer = this._cssPropertiesLoaded.then(({front}) => {
+      if (front) {
+        front.destroy();
+      }
+    });
+
     this.sidebar.off("select", this._setDefaultSidebar);
     let sidebarDestroyer = this.sidebar.destroy();
     this.sidebar = null;
+
+    this.addNodeButton.removeEventListener("click", this.addNode);
 
     this.nodemenu.removeEventListener("popupshowing", this._setupNodeMenu, true);
     this.nodemenu.removeEventListener("popuphiding", this._resetNodeMenu, true);
@@ -679,7 +694,8 @@ InspectorPanel.prototype = {
 
     this._panelDestroyer = promise.all([
       sidebarDestroyer,
-      markupDestroyer
+      markupDestroyer,
+      cssPropertiesDestroyer
     ]);
 
     return this._panelDestroyer;
@@ -688,13 +704,13 @@ InspectorPanel.prototype = {
   /**
    * Show the node menu.
    */
-  showNodeMenu: function (aButton, aPosition, aExtraItems) {
-    if (aExtraItems) {
-      for (let item of aExtraItems) {
+  showNodeMenu: function (button, position, extraItems) {
+    if (extraItems) {
+      for (let item of extraItems) {
         this.nodemenu.appendChild(item);
       }
     }
-    this.nodemenu.openPopup(aButton, aPosition, 0, 0, true, false);
+    this.nodemenu.openPopup(button, position, 0, 0, true, false);
   },
 
   hideNodeMenu: function () {
@@ -796,8 +812,7 @@ InspectorPanel.prototype = {
 
     if (isDuplicatableElement) {
       duplicateNode.removeAttribute("disabled");
-    }
-    else {
+    } else {
       duplicateNode.setAttribute("disabled", "true");
     }
 
@@ -997,7 +1012,8 @@ InspectorPanel.prototype = {
     this._markupBox.setAttribute("collapsed", true);
     this._markupBox.appendChild(this._markupFrame);
     this._markupFrame.setAttribute("src", "chrome://devtools/content/inspector/markup/markup.xhtml");
-    this._markupFrame.setAttribute("aria-label", strings.GetStringFromName("inspector.panelLabel.markupView"));
+    this._markupFrame.setAttribute("aria-label",
+      strings.GetStringFromName("inspector.panelLabel.markupView"));
   },
 
   _onMarkupFrameLoad: function () {
@@ -1096,16 +1112,17 @@ InspectorPanel.prototype = {
   /**
    * Toggle a pseudo class.
    */
-  togglePseudoClass: function (aPseudo) {
+  togglePseudoClass: function (pseudo) {
     if (this.selection.isElementNode()) {
       let node = this.selection.nodeFront;
-      if (node.hasPseudoClassLock(aPseudo)) {
-        return this.walker.removePseudoClassLock(node, aPseudo, {parents: true});
+      if (node.hasPseudoClassLock(pseudo)) {
+        return this.walker.removePseudoClassLock(node, pseudo, {parents: true});
       }
 
-      let hierarchical = aPseudo == ":hover" || aPseudo == ":active";
-      return this.walker.addPseudoClassLock(node, aPseudo, {parents: hierarchical});
+      let hierarchical = pseudo == ":hover" || pseudo == ":active";
+      return this.walker.addPseudoClassLock(node, pseudo, {parents: hierarchical});
     }
+    return promise.resolve();
   },
 
   /**
@@ -1156,7 +1173,7 @@ InspectorPanel.prototype = {
    */
   clearPseudoClasses: function () {
     if (!this.walker) {
-      return;
+      return promise.resolve();
     }
     return this.walker.clearPseudoClassLocks().then(null, console.error);
   },
@@ -1178,8 +1195,9 @@ InspectorPanel.prototype = {
    */
   pasteOuterHTML: function () {
     let content = this._getClipboardContentForPaste();
-    if (!content)
+    if (!content) {
       return promise.reject("No clipboard content for paste");
+    }
 
     let node = this.selection.nodeFront;
     return this.markup.getNodeOuterHTML(node).then(oldContent => {
@@ -1192,8 +1210,9 @@ InspectorPanel.prototype = {
    */
   pasteInnerHTML: function () {
     let content = this._getClipboardContentForPaste();
-    if (!content)
+    if (!content) {
       return promise.reject("No clipboard content for paste");
+    }
 
     let node = this.selection.nodeFront;
     return this.markup.getNodeInnerHTML(node).then(oldContent => {
@@ -1208,8 +1227,9 @@ InspectorPanel.prototype = {
    */
   pasteAdjacentHTML: function (position) {
     let content = this._getClipboardContentForPaste();
-    if (!content)
+    if (!content) {
       return promise.reject("No clipboard content for paste");
+    }
 
     let node = this.selection.nodeFront;
     return this.markup.insertAdjacentHTMLToNode(node, position, content);
@@ -1235,15 +1255,15 @@ InspectorPanel.prototype = {
     let node = this.selection.nodeFront;
 
     switch (node.nodeType) {
-      case Ci.nsIDOMNode.ELEMENT_NODE :
+      case nodeConstants.ELEMENT_NODE :
         this._copyLongString(this.walker.outerHTML(node));
         break;
-      case Ci.nsIDOMNode.COMMENT_NODE :
+      case nodeConstants.COMMENT_NODE :
         this._getLongString(node.getNodeValue()).then(comment => {
           clipboardHelper.copyString("<!--" + comment + "-->");
         });
         break;
-      case Ci.nsIDOMNode.DOCUMENT_TYPE_NODE :
+      case nodeConstants.DOCUMENT_TYPE_NODE :
         clipboardHelper.copyString(node.doctypeString);
         break;
     }
@@ -1415,16 +1435,18 @@ InspectorPanel.prototype = {
       // Open link in a new tab.
       // When the inspector menu was setup on click (see _setupNodeLinkMenu), we
       // already checked that resolveRelativeURL existed.
-      this.inspector.resolveRelativeURL(link, this.selection.nodeFront).then(url => {
-        if (type === "uri") {
-          let browserWin = this.target.tab.ownerDocument.defaultView;
-          browserWin.openUILinkIn(url, "tab");
-        } else if (type === "cssresource") {
-          return this.toolbox.viewSourceInStyleEditor(url);
-        } else if (type === "jsresource") {
-          return this.toolbox.viewSourceInDebugger(url);
-        }
-      }).catch(e => console.error(e));
+      this.inspector.resolveRelativeURL(
+        link, this.selection.nodeFront).then(url => {
+          if (type === "uri") {
+            let browserWin = this.target.tab.ownerDocument.defaultView;
+            browserWin.openUILinkIn(url, "tab");
+          } else if (type === "cssresource") {
+            return this.toolbox.viewSourceInStyleEditor(url);
+          } else if (type === "jsresource") {
+            return this.toolbox.viewSourceInDebugger(url);
+          }
+          return null;
+        }).catch(e => console.error(e));
     } else if (type == "idref") {
       // Select the node in the same document.
       this.walker.document(this.selection.nodeFront).then(doc => {

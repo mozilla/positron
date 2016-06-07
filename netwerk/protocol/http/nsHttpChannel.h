@@ -119,7 +119,8 @@ public:
 
     virtual nsresult Init(nsIURI *aURI, uint32_t aCaps, nsProxyInfo *aProxyInfo,
                           uint32_t aProxyResolveFlags,
-                          nsIURI *aProxyURI) override;
+                          nsIURI *aProxyURI,
+                          const nsID& aChannelId) override;
 
     nsresult OnPush(const nsACString &uri, Http2PushedStream *pushedStream);
 
@@ -434,6 +435,8 @@ private:
     void MaybeWarnAboutAppCache();
 
     void SetLoadGroupUserAgentOverride();
+
+    void SetDoNotTrack();
 
 private:
     nsCOMPtr<nsICancelable>           mProxyRequest;

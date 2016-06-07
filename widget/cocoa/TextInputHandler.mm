@@ -233,25 +233,6 @@ GetGeckoKeyEventType(const WidgetEvent& aEvent)
 }
 
 static const char*
-GetRangeTypeName(uint32_t aRangeType)
-{
-  switch (aRangeType) {
-    case NS_TEXTRANGE_RAWINPUT:
-      return "NS_TEXTRANGE_RAWINPUT";
-    case NS_TEXTRANGE_CONVERTEDTEXT:
-      return "NS_TEXTRANGE_CONVERTEDTEXT";
-    case NS_TEXTRANGE_SELECTEDRAWTEXT:
-      return "NS_TEXTRANGE_SELECTEDRAWTEXT";
-    case NS_TEXTRANGE_SELECTEDCONVERTEDTEXT:
-      return "NS_TEXTRANGE_SELECTEDCONVERTEDTEXT";
-    case NS_TEXTRANGE_CARETPOSITION:
-      return "NS_TEXTRANGE_CARETPOSITION";
-    default:
-      return "invalid range type";
-  }
-}
-
-static const char*
 GetWindowLevelName(NSInteger aWindowLevel)
 {
   switch (aWindowLevel) {
@@ -2743,7 +2724,7 @@ IMEInputHandler::ExecutePendingMethods()
  *
  ******************************************************************************/
 
-uint32_t
+TextRangeType
 IMEInputHandler::ConvertToTextRangeType(uint32_t aUnderlineStyle,
                                         NSRange& aSelectedRange)
 {
@@ -2759,23 +2740,23 @@ IMEInputHandler::ConvertToTextRangeType(uint32_t aUnderlineStyle,
   if (aSelectedRange.length == 0) {
     switch (aUnderlineStyle) {
       case NSUnderlineStyleSingle:
-        return NS_TEXTRANGE_RAWINPUT;
+        return TextRangeType::eRawClause;
       case NSUnderlineStyleThick:
-        return NS_TEXTRANGE_SELECTEDRAWTEXT;
+        return TextRangeType::eSelectedRawClause;
       default:
         NS_WARNING("Unexpected line style");
-        return NS_TEXTRANGE_SELECTEDRAWTEXT;
+        return TextRangeType::eSelectedRawClause;
     }
   }
 
   switch (aUnderlineStyle) {
     case NSUnderlineStyleSingle:
-      return NS_TEXTRANGE_CONVERTEDTEXT;
+      return TextRangeType::eConvertedClause;
     case NSUnderlineStyleThick:
-      return NS_TEXTRANGE_SELECTEDCONVERTEDTEXT;
+      return TextRangeType::eSelectedClause;
     default:
       NS_WARNING("Unexpected line style");
-      return NS_TEXTRANGE_SELECTEDCONVERTEDTEXT;
+      return TextRangeType::eSelectedClause;
   }
 }
 
@@ -2841,7 +2822,7 @@ IMEInputHandler::CreateTextRangeArray(NSAttributedString *aAttrString,
       ("%p IMEInputHandler::CreateTextRangeArray, "
        "range={ mStartOffset=%llu, mEndOffset=%llu, mRangeType=%s }",
        this, range.mStartOffset, range.mEndOffset,
-       GetRangeTypeName(range.mRangeType)));
+       ToChar(range.mRangeType)));
 
     limitRange =
       NSMakeRange(NSMaxRange(effectiveRange), 
@@ -2852,14 +2833,14 @@ IMEInputHandler::CreateTextRangeArray(NSAttributedString *aAttrString,
   TextRange range;
   range.mStartOffset = aSelectedRange.location + aSelectedRange.length;
   range.mEndOffset = range.mStartOffset;
-  range.mRangeType = NS_TEXTRANGE_CARETPOSITION;
+  range.mRangeType = TextRangeType::eCaret;
   textRangeArray->AppendElement(range);
 
   MOZ_LOG(gLog, LogLevel::Info,
     ("%p IMEInputHandler::CreateTextRangeArray, "
      "range={ mStartOffset=%llu, mEndOffset=%llu, mRangeType=%s }",
      this, range.mStartOffset, range.mEndOffset,
-     GetRangeTypeName(range.mRangeType)));
+     ToChar(range.mRangeType)));
 
   return textRangeArray.forget();
 
@@ -3217,33 +3198,6 @@ IMEInputHandler::SetMarkedText(NSAttributedString* aAttrString,
   NS_OBJC_END_TRY_ABORT_BLOCK;
 }
 
-NSInteger
-IMEInputHandler::ConversationIdentifier()
-{
-  MOZ_LOG(gLog, LogLevel::Info,
-    ("%p IMEInputHandler::ConversationIdentifier, Destroyed()=%s",
-     this, TrueOrFalse(Destroyed())));
-
-  if (Destroyed()) {
-    return reinterpret_cast<NSInteger>(mView);
-  }
-
-  RefPtr<IMEInputHandler> kungFuDeathGrip(this);
-
-  // NOTE: The size of NSInteger is same as pointer size.
-  WidgetQueryContentEvent textContent(true, eQueryTextContent, mWidget);
-  textContent.InitForQueryTextContent(0, 0);
-  DispatchEvent(textContent);
-  if (!textContent.mSucceeded) {
-    MOZ_LOG(gLog, LogLevel::Info,
-      ("%p IMEInputHandler::ConversationIdentifier, Failed", this));
-    return reinterpret_cast<NSInteger>(mView);
-  }
-  // XXX This might return same ID as a previously existing editor if the
-  //     deleted editor was created at the same address.  Is there a better way?
-  return reinterpret_cast<NSInteger>(textContent.mReply.mContentsRoot);
-}
-
 NSAttributedString*
 IMEInputHandler::GetAttributedSubstringFromRange(NSRange& aRange,
                                                  NSRange* aActualRange)
@@ -3317,27 +3271,13 @@ IMEInputHandler::GetAttributedSubstringFromRange(NSRange& aRange,
     return nil;
   }
 
-  NSString* nsstr = nsCocoaUtils::ToNSString(textContent.mReply.mString);
+  // We don't set vertical information at this point.  If required,
+  // OS will calls drawsVerticallyForCharacterAtIndex.
   NSMutableAttributedString* result =
-    [[[NSMutableAttributedString alloc] initWithString:nsstr
-                                            attributes:nil] autorelease];
-  const nsTArray<FontRange>& fontRanges = textContent.mReply.mFontRanges;
-  int32_t lastOffset = textContent.mReply.mString.Length();
-  for (auto i = fontRanges.Length(); i > 0; --i) {
-    const FontRange& fontRange = fontRanges[i - 1];
-    NSString* fontName = nsCocoaUtils::ToNSString(fontRange.mFontName);
-    CGFloat fontSize = fontRange.mFontSize / mWidget->BackingScaleFactor();
-    NSFont* font = [NSFont fontWithName:fontName size:fontSize];
-    if (!font) {
-      font = [NSFont systemFontOfSize:fontSize];
-    }
-
-    NSDictionary* attrs = @{ NSFontAttributeName: font };
-    NSRange range = NSMakeRange(fontRange.mStartOffset,
-                                lastOffset - fontRange.mStartOffset);
-    [result setAttributes:attrs range:range];
-    lastOffset = fontRange.mStartOffset;
-  }
+    nsCocoaUtils::GetNSMutableAttributedString(textContent.mReply.mString,
+                                               textContent.mReply.mFontRanges,
+                                               false,
+                                               mWidget->BackingScaleFactor());
   if (aActualRange) {
     aActualRange->location = textContent.mReply.mOffset;
     aActualRange->length = textContent.mReply.mString.Length();

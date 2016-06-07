@@ -205,6 +205,7 @@
 
   <wizardpage id="finishedBackground" pageid="finishedBackground"
               object="gFinishedPage" onextra1="gFinishedPage.onExtra1()"
+              onextra2="gFinishedPage.onExtra2()"
               onpageshow="gFinishedPage.onPageShowBackground();">
     <updateheader label="&finishedPage.title;"/>
     <vbox class="update-content" flex="1">
@@ -218,18 +219,13 @@
       </hbox>
       <spacer flex="1"/>
       <label id="finishedBackgroundMore">&finishedBackground.more;</label>
-    </vbox>
-  </wizardpage>
-
-  <wizardpage id="installed" pageid="installed" object="gInstalledPage"
-              onpageshow="gInstalledPage.onPageShow();">
-    <updateheader label="&installed.title;"/>
-    <vbox class="update-content" flex="1">
-      <label>&installed.intro;</label>
-      <separator/>
+      <label id="finishedBackgroundMoreElevated"
+             hidden="true">&finishedBackground.moreElevated;</label>
+      <label id="finishedBackgroundMoreElevatedLink"
+             hidden="true">&errorManual.label;</label>
       <hbox>
-        <label id="whatsnewLink" class="text-link" hidden="true"
-               value="&whatsnew.label;" onclick="openUpdateURL(event);"/>
+        <label class="text-link" id="finishedBackgroundMoreElevatedLinkLabel"
+               value="" onclick="openUpdateURL(event);" hidden="true"/>
       </hbox>
     </vbox>
   </wizardpage>

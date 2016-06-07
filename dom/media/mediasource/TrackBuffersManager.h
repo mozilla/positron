@@ -145,10 +145,13 @@ public:
                        const media::TimeUnit& aFuzz);
   uint32_t SkipToNextRandomAccessPoint(TrackInfo::TrackType aTrack,
                                        const media::TimeUnit& aTimeThreadshold,
+                                       const media::TimeUnit& aFuzz,
                                        bool& aFound);
   already_AddRefed<MediaRawData> GetSample(TrackInfo::TrackType aTrack,
                                            const media::TimeUnit& aFuzz,
                                            bool& aError);
+  int32_t FindCurrentPosition(TrackInfo::TrackType aTrack,
+                              const media::TimeUnit& aFuzz);
   media::TimeUnit GetNextRandomAccessPoint(TrackInfo::TrackType aTrack,
                                            const media::TimeUnit& aFuzz);
 
@@ -338,9 +341,12 @@ private:
   void InsertFrames(TrackBuffer& aSamples,
                     const media::TimeIntervals& aIntervals,
                     TrackData& aTrackData);
-  void RemoveFrames(const media::TimeIntervals& aIntervals,
-                    TrackData& aTrackData,
-                    uint32_t aStartIndex);
+  // Remove all frames and their dependencies contained in aIntervals.
+  // Return the index at which frames were first removed or 0 if no frames
+  // removed.
+  size_t RemoveFrames(const media::TimeIntervals& aIntervals,
+                      TrackData& aTrackData,
+                      uint32_t aStartIndex);
   // Find index of sample. Return a negative value if not found.
   uint32_t FindSampleIndex(const TrackBuffer& aTrackBuffer,
                            const media::TimeInterval& aInterval);

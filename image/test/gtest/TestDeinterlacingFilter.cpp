@@ -69,16 +69,6 @@ TEST(ImageDeinterlacingFilter, WritePixels100_100)
   });
 }
 
-TEST(ImageDeinterlacingFilter, WriteRows100_100)
-{
-  WithDeinterlacingFilter(IntSize(100, 100), /* aProgressiveDisplay = */ true,
-                          [](Decoder* aDecoder, SurfaceFilter* aFilter) {
-    CheckWriteRows(aDecoder, aFilter,
-                   /* aOutputRect = */ Some(IntRect(0, 0, 100, 100)),
-                   /* aInputRect = */ Some(IntRect(0, 0, 100, 100)));
-  });
-}
-
 TEST(ImageDeinterlacingFilter, WritePixels99_99)
 {
   WithDeinterlacingFilter(IntSize(99, 99), /* aProgressiveDisplay = */ true,
@@ -86,16 +76,6 @@ TEST(ImageDeinterlacingFilter, WritePixels99_99)
     CheckWritePixels(aDecoder, aFilter,
                      /* aOutputRect = */ Some(IntRect(0, 0, 99, 99)),
                      /* aInputRect = */ Some(IntRect(0, 0, 99, 99)));
-  });
-}
-
-TEST(ImageDeinterlacingFilter, WriteRows99_99)
-{
-  WithDeinterlacingFilter(IntSize(99, 99), /* aProgressiveDisplay = */ true,
-                          [](Decoder* aDecoder, SurfaceFilter* aFilter) {
-    CheckWriteRows(aDecoder, aFilter,
-                   /* aOutputRect = */ Some(IntRect(0, 0, 99, 99)),
-                   /* aInputRect = */ Some(IntRect(0, 0, 99, 99)));
   });
 }
 
@@ -109,16 +89,6 @@ TEST(ImageDeinterlacingFilter, WritePixels8_8)
   });
 }
 
-TEST(ImageDeinterlacingFilter, WriteRows8_8)
-{
-  WithDeinterlacingFilter(IntSize(8, 8), /* aProgressiveDisplay = */ true,
-                          [](Decoder* aDecoder, SurfaceFilter* aFilter) {
-    CheckWriteRows(aDecoder, aFilter,
-                   /* aOutputRect = */ Some(IntRect(0, 0, 8, 8)),
-                   /* aInputRect = */ Some(IntRect(0, 0, 8, 8)));
-  });
-}
-
 TEST(ImageDeinterlacingFilter, WritePixels7_7)
 {
   WithDeinterlacingFilter(IntSize(7, 7), /* aProgressiveDisplay = */ true,
@@ -126,16 +96,6 @@ TEST(ImageDeinterlacingFilter, WritePixels7_7)
     CheckWritePixels(aDecoder, aFilter,
                      /* aOutputRect = */ Some(IntRect(0, 0, 7, 7)),
                      /* aInputRect = */ Some(IntRect(0, 0, 7, 7)));
-  });
-}
-
-TEST(ImageDeinterlacingFilter, WriteRows7_7)
-{
-  WithDeinterlacingFilter(IntSize(7, 7), /* aProgressiveDisplay = */ true,
-                          [](Decoder* aDecoder, SurfaceFilter* aFilter) {
-    CheckWriteRows(aDecoder, aFilter,
-                   /* aOutputRect = */ Some(IntRect(0, 0, 7, 7)),
-                   /* aInputRect = */ Some(IntRect(0, 0, 7, 7)));
   });
 }
 
@@ -149,16 +109,6 @@ TEST(ImageDeinterlacingFilter, WritePixels3_3)
   });
 }
 
-TEST(ImageDeinterlacingFilter, WriteRows3_3)
-{
-  WithDeinterlacingFilter(IntSize(3, 3), /* aProgressiveDisplay = */ true,
-                          [](Decoder* aDecoder, SurfaceFilter* aFilter) {
-    CheckWriteRows(aDecoder, aFilter,
-                   /* aOutputRect = */ Some(IntRect(0, 0, 3, 3)),
-                   /* aInputRect = */ Some(IntRect(0, 0, 3, 3)));
-  });
-}
-
 TEST(ImageDeinterlacingFilter, WritePixels1_1)
 {
   WithDeinterlacingFilter(IntSize(1, 1), /* aProgressiveDisplay = */ true,
@@ -166,16 +116,6 @@ TEST(ImageDeinterlacingFilter, WritePixels1_1)
     CheckWritePixels(aDecoder, aFilter,
                      /* aOutputRect = */ Some(IntRect(0, 0, 1, 1)),
                      /* aInputRect = */ Some(IntRect(0, 0, 1, 1)));
-  });
-}
-
-TEST(ImageDeinterlacingFilter, WriteRows1_1)
-{
-  WithDeinterlacingFilter(IntSize(1, 1), /* aProgressiveDisplay = */ true,
-                          [](Decoder* aDecoder, SurfaceFilter* aFilter) {
-    CheckWriteRows(aDecoder, aFilter,
-                   /* aOutputRect = */ Some(IntRect(0, 0, 1, 1)),
-                   /* aInputRect = */ Some(IntRect(0, 0, 1, 1)));
   });
 }
 
@@ -187,11 +127,109 @@ TEST(ImageDeinterlacingFilter, PalettedWritePixels)
   });
 }
 
-TEST(ImageDeinterlacingFilter, PalettedWriteRows)
+TEST(ImageDeinterlacingFilter, WritePixelsNonProgressiveOutput51_52)
 {
-  WithPalettedDeinterlacingFilter(IntSize(100, 100),
-                                  [](Decoder* aDecoder, SurfaceFilter* aFilter) {
-    CheckPalettedWriteRows(aDecoder, aFilter);
+  WithDeinterlacingFilter(IntSize(51, 52), /* aProgressiveDisplay = */ false,
+                          [](Decoder* aDecoder, SurfaceFilter* aFilter) {
+    // Fill the image. The output should be green for even rows and red for odd
+    // rows but we need to write the rows in the order that the deinterlacer
+    // expects them.
+    uint32_t count = 0;
+    auto result = aFilter->WritePixels<uint32_t>([&]() {
+      uint32_t row = count / 51;  // Integer division.
+      ++count;
+
+      // Note that we use a switch statement here, even though it's quite
+      // verbose, because it's useful to have the mappings between input and
+      // output rows available when debugging these tests.
+
+      switch (row) {
+        // First pass. Output rows are positioned at 8n + 0.
+        case 0:  // Output row 0.
+        case 1:  // Output row 8.
+        case 2:  // Output row 16.
+        case 3:  // Output row 24.
+        case 4:  // Output row 32.
+        case 5:  // Output row 40.
+        case 6:  // Output row 48.
+          return AsVariant(BGRAColor::Green().AsPixel());
+
+        // Second pass. Rows are positioned at 8n + 4.
+        case 7:   // Output row 4.
+        case 8:   // Output row 12.
+        case 9:   // Output row 20.
+        case 10:  // Output row 28.
+        case 11:  // Output row 36.
+        case 12:  // Output row 44.
+          return AsVariant(BGRAColor::Green().AsPixel());
+
+        // Third pass. Rows are positioned at 4n + 2.
+        case 13:  // Output row 2.
+        case 14:  // Output row 6.
+        case 15:  // Output row 10.
+        case 16:  // Output row 14.
+        case 17:  // Output row 18.
+        case 18:  // Output row 22.
+        case 19:  // Output row 26.
+        case 20:  // Output row 30.
+        case 21:  // Output row 34.
+        case 22:  // Output row 38.
+        case 23:  // Output row 42.
+        case 24:  // Output row 46.
+        case 25:  // Output row 50.
+          return AsVariant(BGRAColor::Green().AsPixel());
+
+        // Fourth pass. Rows are positioned at 2n + 1.
+        case 26:  // Output row 1.
+        case 27:  // Output row 3.
+        case 28:  // Output row 5.
+        case 29:  // Output row 7.
+        case 30:  // Output row 9.
+        case 31:  // Output row 11.
+        case 32:  // Output row 13.
+        case 33:  // Output row 15.
+        case 34:  // Output row 17.
+        case 35:  // Output row 19.
+        case 36:  // Output row 21.
+        case 37:  // Output row 23.
+        case 38:  // Output row 25.
+        case 39:  // Output row 27.
+        case 40:  // Output row 29.
+        case 41:  // Output row 31.
+        case 42:  // Output row 33.
+        case 43:  // Output row 35.
+        case 44:  // Output row 37.
+        case 45:  // Output row 39.
+        case 46:  // Output row 41.
+        case 47:  // Output row 43.
+        case 48:  // Output row 45.
+        case 49:  // Output row 47.
+        case 50:  // Output row 49.
+        case 51:  // Output row 51.
+          return AsVariant(BGRAColor::Red().AsPixel());
+
+        default:
+          MOZ_ASSERT_UNREACHABLE("Unexpected row");
+          return AsVariant(BGRAColor::Transparent().AsPixel());
+      }
+    });
+    EXPECT_EQ(WriteState::FINISHED, result);
+    EXPECT_EQ(51u * 52u, count);
+
+    AssertCorrectPipelineFinalState(aFilter,
+                                    IntRect(0, 0, 51, 52),
+                                    IntRect(0, 0, 51, 52));
+
+    // Check that the generated image is correct. As mentioned above, we expect
+    // even rows to be green and odd rows to be red.
+    RawAccessFrameRef currentFrame = aDecoder->GetCurrentFrameRef();
+    RefPtr<SourceSurface> surface = currentFrame->GetSurface();
+
+    for (uint32_t row = 0; row < 52; ++row) {
+      EXPECT_TRUE(RowsAreSolidColor(surface, row, 1,
+                                    row % 2 == 0 ? BGRAColor::Green()
+                                                 : BGRAColor::Red()));
+    }
   });
 }
 
@@ -206,6 +244,10 @@ TEST(ImageDeinterlacingFilter, WritePixelsOutput20_20)
     auto result = aFilter->WritePixels<uint32_t>([&]() {
       uint32_t row = count / 20;  // Integer division.
       ++count;
+
+      // Note that we use a switch statement here, even though it's quite
+      // verbose, because it's useful to have the mappings between input and
+      // output rows available when debugging these tests.
 
       switch (row) {
         // First pass. Output rows are positioned at 8n + 0.
@@ -265,7 +307,7 @@ TEST(ImageDeinterlacingFilter, WritePixelsOutput20_20)
   });
 }
 
-TEST(ImageDeinterlacingFilter, WriteRowsOutput7_7)
+TEST(ImageDeinterlacingFilter, WritePixelsOutput7_7)
 {
   WithDeinterlacingFilter(IntSize(7, 7), /* aProgressiveDisplay = */ true,
                           [](Decoder* aDecoder, SurfaceFilter* aFilter) {
@@ -273,54 +315,41 @@ TEST(ImageDeinterlacingFilter, WriteRowsOutput7_7)
     // rows followed by two red rows but we need to write the rows in the order
     // that the deinterlacer expects them.
     uint32_t count = 0;
-    uint32_t row = 0;
-    auto result = aFilter->WriteRows<uint32_t>([&](uint32_t* aRow, uint32_t aLength) {
-      uint32_t color = 0;
+    auto result = aFilter->WritePixels<uint32_t>([&]() {
+      uint32_t row = count / 7;  // Integer division.
+      ++count;
+
       switch (row) {
         // First pass. Output rows are positioned at 8n + 0.
         case 0:  // Output row 0.
-          color = BGRAColor::Green().AsPixel();
-          break;
+          return AsVariant(BGRAColor::Green().AsPixel());
 
         // Second pass. Rows are positioned at 8n + 4.
         case 1:  // Output row 4.
-          color = BGRAColor::Green().AsPixel();
-          break;
+          return AsVariant(BGRAColor::Green().AsPixel());
 
         // Third pass. Rows are positioned at 4n + 2.
         case 2: // Output row 2.
         case 3: // Output row 6.
-          color = BGRAColor::Red().AsPixel();
-          break;
+          return AsVariant(BGRAColor::Red().AsPixel());
 
         // Fourth pass. Rows are positioned at 2n + 1.
         case 4:  // Output row 1.
-          color = BGRAColor::Green().AsPixel();
-          break;
+          return AsVariant(BGRAColor::Green().AsPixel());
 
         case 5:  // Output row 3.
-          color = BGRAColor::Red().AsPixel();
-          break;
+          return AsVariant(BGRAColor::Red().AsPixel());
 
         case 6:  // Output row 5.
-          color = BGRAColor::Green().AsPixel();
-          break;
+          return AsVariant(BGRAColor::Green().AsPixel());
 
         default:
           MOZ_ASSERT_UNREACHABLE("Unexpected row");
+          return AsVariant(BGRAColor::Transparent().AsPixel());
       }
-
-      ++row;
-
-      for (; aLength > 0; --aLength, ++aRow, ++count) {
-        *aRow = color;
-      }
-
-      return Nothing();
     });
     EXPECT_EQ(WriteState::FINISHED, result);
     EXPECT_EQ(7u * 7u, count);
-    EXPECT_EQ(7u, row);
 
     AssertCorrectPipelineFinalState(aFilter,
                                     IntRect(0, 0, 7, 7),
@@ -430,11 +459,12 @@ WriteRowAndCheckInterlacerOutput(Decoder* aDecoder,
 {
   uint32_t count = 0;
 
-  auto result = aFilter->WriteRows<uint32_t>([&](uint32_t* aRow, uint32_t aLength) {
-    for (; aLength > 0; --aLength, ++aRow, ++count) {
-      *aRow = aColor.AsPixel();
+  auto result = aFilter->WritePixels<uint32_t>([&]() -> NextPixel<uint32_t> {
+    if (count < 7) {
+      ++count;
+      return AsVariant(aColor.AsPixel());
     }
-    return Some(WriteState::NEED_MORE_DATA);
+    return AsVariant(WriteState::NEED_MORE_DATA);
   });
 
   EXPECT_EQ(aNextState, result);
@@ -460,7 +490,7 @@ WriteRowAndCheckInterlacerOutput(Decoder* aDecoder,
   }
 }
 
-TEST(ImageDeinterlacingFilter, WriteRowsIntermediateOutput7_7)
+TEST(ImageDeinterlacingFilter, WritePixelsIntermediateOutput7_7)
 {
   WithDeinterlacingFilter(IntSize(7, 7), /* aProgressiveDisplay = */ true,
                           [](Decoder* aDecoder, SurfaceFilter* aFilter) {
@@ -541,7 +571,7 @@ TEST(ImageDeinterlacingFilter, WriteRowsIntermediateOutput7_7)
   });
 }
 
-TEST(ImageDeinterlacingFilter, WriteRowsNonProgressiveIntermediateOutput7_7)
+TEST(ImageDeinterlacingFilter, WritePixelsNonProgressiveIntermediateOutput7_7)
 {
   WithDeinterlacingFilter(IntSize(7, 7), /* aProgressiveDisplay = */ false,
                           [](Decoder* aDecoder, SurfaceFilter* aFilter) {

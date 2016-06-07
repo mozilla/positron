@@ -29,6 +29,7 @@ namespace gc {
 
 typedef Vector<JS::Zone*, 4, SystemAllocPolicy> ZoneVector;
 
+class AutoMaybeStartBackgroundAllocation;
 class MarkingValidator;
 class AutoTraceSession;
 struct MovingTracer;
@@ -638,7 +639,8 @@ class GCRuntime
         TraceRuntime,
         MarkRuntime
     };
-    void markRuntime(JSTracer* trc, TraceOrMarkRuntime traceOrMark = TraceRuntime);
+    void markRuntime(JSTracer* trc, TraceOrMarkRuntime traceOrMark,
+                     AutoLockForExclusiveAccess& lock);
 
     void notifyDidPaint();
     void shrinkBuffers();
@@ -852,9 +854,10 @@ class GCRuntime
     bool isVerifyPreBarriersEnabled() const { return false; }
 #endif
 
-    // Free certain LifoAlloc blocks from the background sweep thread.
+    // Free certain LifoAlloc blocks when it is safe to do so.
     void freeUnusedLifoBlocksAfterSweeping(LifoAlloc* lifo);
     void freeAllLifoBlocksAfterSweeping(LifoAlloc* lifo);
+    void freeAllLifoBlocksAfterMinorGC(LifoAlloc* lifo);
 
     // Public here for ReleaseArenaLists and FinalizeTypedArenas.
     void releaseArena(Arena* arena, const AutoLockGC& lock);
@@ -873,7 +876,7 @@ class GCRuntime
                                          size_t nDynamicSlots);
     template <typename T, AllowGC allowGC>
     static T* tryNewTenuredThing(ExclusiveContext* cx, AllocKind kind, size_t thingSize);
-    static void* refillFreeListInGC(Zone* zone, AllocKind thingKind);
+    static TenuredCell* refillFreeListInGC(Zone* zone, AllocKind thingKind);
 
   private:
     enum IncrementalProgress
@@ -895,11 +898,11 @@ class GCRuntime
     MOZ_MUST_USE bool gcIfNeededPerAllocation(JSContext* cx);
     template <typename T>
     static void checkIncrementalZoneState(ExclusiveContext* cx, T* t);
-    static void* refillFreeListFromAnyThread(ExclusiveContext* cx, AllocKind thingKind,
-                                             size_t thingSize);
-    static void* refillFreeListFromMainThread(JSContext* cx, AllocKind thingKind,
-                                              size_t thingSize);
-    static void* refillFreeListOffMainThread(ExclusiveContext* cx, AllocKind thingKind);
+    static TenuredCell* refillFreeListFromAnyThread(ExclusiveContext* cx, AllocKind thingKind,
+                                                    size_t thingSize);
+    static TenuredCell* refillFreeListFromMainThread(JSContext* cx, AllocKind thingKind,
+                                                     size_t thingSize);
+    static TenuredCell* refillFreeListOffMainThread(ExclusiveContext* cx, AllocKind thingKind);
 
     /*
      * Return the list of chunks that can be released outside the GC lock.
@@ -911,13 +914,13 @@ class GCRuntime
 
     friend class BackgroundAllocTask;
     friend class AutoMaybeStartBackgroundAllocation;
-    inline bool wantBackgroundAllocation(const AutoLockGC& lock) const;
+    bool wantBackgroundAllocation(const AutoLockGC& lock) const;
     void startBackgroundAllocTaskIfIdle();
 
     void requestMajorGC(JS::gcreason::Reason reason);
     SliceBudget defaultBudget(JS::gcreason::Reason reason, int64_t millis);
-    void budgetIncrementalGC(SliceBudget& budget);
-    void resetIncrementalGC(const char* reason);
+    void budgetIncrementalGC(SliceBudget& budget, AutoLockForExclusiveAccess& lock);
+    void resetIncrementalGC(const char* reason, AutoLockForExclusiveAccess& lock);
 
     // Assert if the system state is such that we should never
     // receive a request to do GC work.
@@ -931,11 +934,12 @@ class GCRuntime
     void collect(bool nonincrementalByAPI, SliceBudget budget, JS::gcreason::Reason reason) JS_HAZ_GC_CALL;
     MOZ_MUST_USE bool gcCycle(bool nonincrementalByAPI, SliceBudget& budget,
                               JS::gcreason::Reason reason);
-    void incrementalCollectSlice(SliceBudget& budget, JS::gcreason::Reason reason);
+    void incrementalCollectSlice(SliceBudget& budget, JS::gcreason::Reason reason,
+                                 AutoLockForExclusiveAccess& lock);
 
     void pushZealSelectedObjects();
-    void purgeRuntime();
-    MOZ_MUST_USE bool beginMarkPhase(JS::gcreason::Reason reason);
+    void purgeRuntime(AutoLockForExclusiveAccess& lock);
+    MOZ_MUST_USE bool beginMarkPhase(JS::gcreason::Reason reason, AutoLockForExclusiveAccess& lock);
     bool shouldPreserveJITCode(JSCompartment* comp, int64_t currentTime,
                                JS::gcreason::Reason reason);
     void bufferGrayRoots();
@@ -949,16 +953,16 @@ class GCRuntime
     void markAllWeakReferences(gcstats::Phase phase);
     void markAllGrayReferences(gcstats::Phase phase);
 
-    void beginSweepPhase(bool lastGC);
-    void findZoneGroups();
+    void beginSweepPhase(bool lastGC, AutoLockForExclusiveAccess& lock);
+    void findZoneGroups(AutoLockForExclusiveAccess& lock);
     MOZ_MUST_USE bool findZoneEdgesForWeakMaps();
     void getNextZoneGroup();
     void endMarkingZoneGroup();
-    void beginSweepingZoneGroup();
+    void beginSweepingZoneGroup(AutoLockForExclusiveAccess& lock);
     bool shouldReleaseObservedTypes();
     void endSweepingZoneGroup();
-    IncrementalProgress sweepPhase(SliceBudget& sliceBudget);
-    void endSweepPhase(bool lastGC);
+    IncrementalProgress sweepPhase(SliceBudget& sliceBudget, AutoLockForExclusiveAccess& lock);
+    void endSweepPhase(bool lastGC, AutoLockForExclusiveAccess& lock);
     void sweepZones(FreeOp* fop, bool lastGC);
     void decommitAllWithoutUnlocking(const AutoLockGC& lock);
     void decommitArenas(AutoLockGC& lock);
@@ -968,7 +972,8 @@ class GCRuntime
     void assertBackgroundSweepingFinished();
     bool shouldCompact();
     void beginCompactPhase();
-    IncrementalProgress compactPhase(JS::gcreason::Reason reason, SliceBudget& sliceBudget);
+    IncrementalProgress compactPhase(JS::gcreason::Reason reason, SliceBudget& sliceBudget,
+                                     AutoLockForExclusiveAccess& lock);
     void endCompactPhase(JS::gcreason::Reason reason);
     void sweepTypesAfterCompacting(Zone* zone);
     void sweepZoneAfterCompacting(Zone* zone);
@@ -977,14 +982,14 @@ class GCRuntime
     void updateTypeDescrObjects(MovingTracer* trc, Zone* zone);
     void updateCellPointers(MovingTracer* trc, Zone* zone, AllocKinds kinds, size_t bgTaskCount);
     void updateAllCellPointers(MovingTracer* trc, Zone* zone);
-    void updatePointersToRelocatedCells(Zone* zone);
+    void updatePointersToRelocatedCells(Zone* zone, AutoLockForExclusiveAccess& lock);
     void protectAndHoldArenas(Arena* arenaList);
     void unprotectHeldRelocatedArenas();
     void releaseRelocatedArenas(Arena* arenaList);
     void releaseRelocatedArenasWithoutUnlocking(Arena* arenaList, const AutoLockGC& lock);
     void finishCollection(JS::gcreason::Reason reason);
 
-    void computeNonIncrementalMarkingForValidation();
+    void computeNonIncrementalMarkingForValidation(AutoLockForExclusiveAccess& lock);
     void validateIncrementalMarking();
     void finishMarkingValidation();
 
@@ -1166,9 +1171,15 @@ class GCRuntime
 
     /*
      * Free LIFO blocks are transferred to this allocator before being freed on
-     * the background GC thread.
+     * the background GC thread after sweeping.
      */
-    LifoAlloc freeLifoAlloc;
+    LifoAlloc blocksToFreeAfterSweeping;
+
+    /*
+     * Free LIFO blocks are transferred to this allocator before being freed
+     * after minor GC.
+     */
+    LifoAlloc blocksToFreeAfterMinorGC;
 
     /* Index of current zone group (for stats). */
     unsigned zoneGroupIndex;

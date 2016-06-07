@@ -330,14 +330,7 @@ nsPresContext::Destroy()
                                   "nglayout.debug.paint_flashing_chrome",
                                   this);
 
-  // Disconnect the refresh driver *after* the transition manager, which
-  // needs it.
-  if (mRefreshDriver) {
-    if (mRefreshDriver->PresContext() == this) {
-      mRefreshDriver->Disconnect();
-    }
-    mRefreshDriver = nullptr;
-  }
+  mRefreshDriver = nullptr;
 }
 
 nsPresContext::~nsPresContext()
@@ -768,7 +761,7 @@ nsPresContext::UpdateAfterPreferencesChanged()
   nsChangeHint hint = nsChangeHint(0);
 
   if (mPrefChangePendingNeedsReflow) {
-    NS_UpdateHint(hint, NS_STYLE_HINT_REFLOW);
+    hint |= NS_STYLE_HINT_REFLOW;
   }
 
   // Preferences require rerunning selector matching because we rebuild
@@ -981,6 +974,10 @@ nsPresContext::SetShell(nsIPresShell* aShell)
     if (mRestyleManager) {
       mRestyleManager->Disconnect();
       mRestyleManager = nullptr;
+    }
+    if (mRefreshDriver && mRefreshDriver->PresContext() == this) {
+      mRefreshDriver->Disconnect();
+      // Can't null out the refresh driver here.
     }
 
     if (IsRoot()) {
@@ -2032,6 +2029,12 @@ nsPresContext::UpdateIsChrome()
 nsPresContext::HasAuthorSpecifiedRules(const nsIFrame *aFrame,
                                        uint32_t ruleTypeMask) const
 {
+#ifdef MOZ_STYLO
+  if (!mShell || mShell->StyleSet()->IsServo()) {
+    NS_ERROR("stylo: nsPresContext::HasAuthorSpecifiedRules not implemented");
+    return true;
+  }
+#endif
   return
     nsRuleNode::HasAuthorSpecifiedRules(aFrame->StyleContext(),
                                         ruleTypeMask,

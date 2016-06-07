@@ -131,8 +131,8 @@ class GeckoInstance(object):
 
         # environment variables needed for crashreporting
         # https://developer.mozilla.org/docs/Environment_variables_affecting_crash_reporting
-        env.update({ 'MOZ_CRASHREPORTER': '1',
-                     'MOZ_CRASHREPORTER_NO_REPORT': '1', })
+        env.update({'MOZ_CRASHREPORTER': '1',
+                    'MOZ_CRASHREPORTER_NO_REPORT': '1'})
         self.runner = Runner(
             binary=self.bin,
             profile=self.profile,
@@ -162,6 +162,7 @@ class GeckoInstance(object):
         else:
             self.prefs = None
         self.start()
+
 
 class B2GDesktopInstance(GeckoInstance):
     def __init__(self, host, port, bin, **kwargs):
@@ -205,7 +206,6 @@ class DesktopInstance(GeckoInstance):
         'browser.tabs.warnOnClose': False,
         'browser.tabs.warnOnOpen': False,
         'browser.uitour.enabled': False,
-        'dom.report_all_js_exceptions': True,
         'extensions.getAddons.cache.enabled': False,
         'extensions.installDistroAddons': False,
         'extensions.showMismatchUI': False,

@@ -101,9 +101,9 @@ FindIssuerInner(const UniqueCERTCertList& candidates, bool useRoots,
       const_cast<unsigned char*>(encodedIssuerName.UnsafeGetData()),
       encodedIssuerName.GetLength()
     };
-    ScopedSECItem nameConstraints(::SECITEM_AllocItem(nullptr, nullptr, 0));
+    ScopedAutoSECItem nameConstraints;
     SECStatus srv = CERT_GetImposedNameConstraints(&encodedIssuerNameItem,
-                                                   nameConstraints.get());
+                                                   &nameConstraints);
     if (srv != SECSuccess) {
       if (PR_GetError() != SEC_ERROR_EXTENSION_NOT_FOUND) {
         return Result::FATAL_ERROR_LIBRARY_FAILURE;
@@ -114,9 +114,8 @@ FindIssuerInner(const UniqueCERTCertList& candidates, bool useRoots,
     } else {
       // Otherwise apply the constraints
       Input nameConstraintsInput;
-      if (nameConstraintsInput.Init(
-              nameConstraints->data,
-              nameConstraints->len) != Success) {
+      if (nameConstraintsInput.Init(nameConstraints.data, nameConstraints.len)
+            != Success) {
         return Result::FATAL_ERROR_LIBRARY_FAILURE;
       }
       rv = checker.Check(certDER, &nameConstraintsInput, keepGoing);
@@ -959,40 +958,6 @@ NSSCertDBTrustDomain::NetscapeStepUpMatchesServerAuth(Time notBefore,
   return Result::FATAL_ERROR_LIBRARY_FAILURE;
 }
 
-namespace {
-
-static char*
-nss_addEscape(const char* string, char quote)
-{
-  char* newString = 0;
-  size_t escapes = 0, size = 0;
-  const char* src;
-  char* dest;
-
-  for (src = string; *src; src++) {
-  if ((*src == quote) || (*src == '\\')) {
-    escapes++;
-  }
-  size++;
-  }
-
-  newString = (char*) PORT_ZAlloc(escapes + size + 1u);
-  if (!newString) {
-    return nullptr;
-  }
-
-  for (src = string, dest = newString; *src; src++, dest++) {
-    if ((*src == quote) || (*src == '\\')) {
-      *dest++ = '\\';
-    }
-    *dest = *src;
-  }
-
-  return newString;
-}
-
-} // unnamed namespace
-
 SECStatus
 InitializeNSS(const char* dir, bool readOnly, bool loadPKCS11Modules)
 {
@@ -1038,9 +1003,11 @@ LoadLoadableRoots(/*optional*/ const char* dir, const char* modNameUTF8)
     return SECFailure;
   }
 
-  UniquePORTString escapedFullLibraryPath(nss_addEscape(fullLibraryPath.get(),
-                                                        '\"'));
-  if (!escapedFullLibraryPath) {
+  // Escape the \ and " characters.
+  nsAutoCString escapedFullLibraryPath(fullLibraryPath.get());
+  escapedFullLibraryPath.ReplaceSubstring("\\", "\\\\");
+  escapedFullLibraryPath.ReplaceSubstring("\"", "\\\"");
+  if (escapedFullLibraryPath.IsEmpty()) {
     return SECFailure;
   }
 
@@ -1132,6 +1099,15 @@ DefaultServerNicknameForCert(const CERTCertificate* cert,
   return NS_ERROR_FAILURE;
 }
 
+/**
+ * Given a list of certificates representing a verified certificate path from an
+ * end-entity certificate to a trust anchor, imports the intermediate
+ * certificates into the permanent certificate database. This is an attempt to
+ * cope with misconfigured servers that don't include the appropriate
+ * intermediate certificates in the TLS handshake.
+ *
+ * @param certList the verified certificate list
+ */
 void
 SaveIntermediateCerts(const UniqueCERTCertList& certList)
 {
@@ -1161,6 +1137,16 @@ SaveIntermediateCerts(const UniqueCERTCertList& certList)
 
     if (node->cert->isperm) {
       // We don't need to remember certs already stored in perm db.
+      continue;
+    }
+
+    // No need to save the trust anchor - it's either already a permanent
+    // certificate or it's the Microsoft Family Safety root or an enterprise
+    // root temporarily imported via the child mode or enterprise root features.
+    // We don't want to import these because they're intended to be temporary
+    // (and because importing them happens to reset their trust settings, which
+    // breaks these features).
+    if (node == CERT_LIST_TAIL(certList)) {
       continue;
     }
 

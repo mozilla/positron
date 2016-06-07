@@ -37,9 +37,13 @@ class EventChainPreVisitor;
 
 namespace dom {
 
+class AfterSetFilesOrDirectoriesRunnable;
 class Date;
+class DispatchChangeEventCallback;
+class Entry;
 class File;
 class FileList;
+class GetFilesHelper;
 
 /**
  * A class we use to create a singleton object that is used to keep track of
@@ -106,6 +110,9 @@ class HTMLInputElement final : public nsGenericHTMLFormElementWithState,
                                public nsIDOMNSEditableElement,
                                public nsIConstraintValidation
 {
+  friend class AfterSetFilesOrDirectoriesCallback;
+  friend class DispatchChangeEventCallback;
+
 public:
   using nsIConstraintValidation::GetValidationMessage;
   using nsIConstraintValidation::CheckValidity;
@@ -230,6 +237,8 @@ public:
   void SetFilesOrDirectories(const nsTArray<OwningFileOrDirectory>& aFilesOrDirectories,
                              bool aSetValueChanged);
   void SetFiles(nsIDOMFileList* aFiles, bool aSetValueChanged);
+
+  void MozSetDndFilesAndDirectories(const nsTArray<OwningFileOrDirectory>& aSequence);
 
   // Called when a nsIFilePicker or a nsIColorPicker terminate.
   void PickerClosed();
@@ -699,9 +708,23 @@ public:
     SetHTMLBoolAttr(nsGkAtoms::directory, aValue, aRv);
   }
 
+  bool WebkitDirectoryAttr() const
+  {
+    return HasAttr(kNameSpaceID_None, nsGkAtoms::webkitdirectory);
+  }
+
+  void SetWebkitDirectoryAttr(bool aValue, ErrorResult& aRv)
+  {
+    SetHTMLBoolAttr(nsGkAtoms::webkitdirectory, aValue, aRv);
+  }
+
+  void GetWebkitEntries(nsTArray<RefPtr<Entry>>& aSequence);
+
   bool IsFilesAndDirectoriesSupported() const;
 
   already_AddRefed<Promise> GetFilesAndDirectories(ErrorResult& aRv);
+
+  already_AddRefed<Promise> GetFiles(bool aRecursiveFlag, ErrorResult& aRv);
 
   void ChooseDirectory(ErrorResult& aRv);
 
@@ -933,10 +956,20 @@ protected:
    */
   void UpdateFileList();
 
+  void UpdateEntries(const nsTArray<OwningFileOrDirectory>& aFilesOrDirectories);
+
   /**
    * Called after calling one of the SetFilesOrDirectories() functions.
+   * This method can explore the directory recursively if needed.
    */
   void AfterSetFilesOrDirectories(bool aSetValueChanged);
+  void AfterSetFilesOrDirectoriesInternal(bool aSetValueChanged);
+
+  /**
+   * Recursively explore the directory and populate mFileOrDirectories correctly
+   * for webkitdirectory.
+   */
+  void ExploreDirectoryRecursively(bool aSetValuechanged);
 
   /**
    * Determine whether the editor needs to be initialized explicitly for
@@ -1253,6 +1286,11 @@ protected:
    */
   bool IsPopupBlocked() const;
 
+  GetFilesHelper* GetOrCreateGetFilesHelper(bool aRecursiveFlag,
+                                            ErrorResult& aRv);
+
+  void ClearGetFilesHelpers();
+
   nsCOMPtr<nsIControllers> mControllers;
 
   /*
@@ -1286,6 +1324,9 @@ protected:
    */
   nsTArray<OwningFileOrDirectory> mFilesOrDirectories;
 
+  RefPtr<GetFilesHelper> mGetFilesRecursiveHelper;
+  RefPtr<GetFilesHelper> mGetFilesNonRecursiveHelper;
+
 #ifndef MOZ_CHILD_PERMISSIONS
   /**
    * Hack for bug 1086684: Stash the .value when we're a file picker.
@@ -1294,6 +1335,7 @@ protected:
 #endif
 
   RefPtr<FileList>  mFileList;
+  Sequence<RefPtr<Entry>> mEntries;
 
   nsString mStaticDocFileList;
 

@@ -94,7 +94,7 @@ CSSAnimation::PlayFromStyle()
   mIsStylePaused = false;
   if (!mPauseShouldStick) {
     ErrorResult rv;
-    DoPlay(rv, Animation::LimitBehavior::Continue);
+    PlayNoUpdate(rv, Animation::LimitBehavior::Continue);
     // play() should not throw when LimitBehavior is Continue
     MOZ_ASSERT(!rv.Failed(), "Unexpected exception playing animation");
   }
@@ -110,7 +110,7 @@ CSSAnimation::PauseFromStyle()
 
   mIsStylePaused = true;
   ErrorResult rv;
-  DoPause(rv);
+  PauseNoUpdate(rv);
   // pause() should only throw when *all* of the following conditions are true:
   // - we are in the idle state, and
   // - we have a negative playback rate, and
@@ -563,9 +563,8 @@ private:
   void AppendProperty(nsPresContext* aPresContext,
                       nsCSSProperty aProperty,
                       nsTArray<PropertyValuePair>& aPropertyValues);
-  void GetComputedValue(nsPresContext* aPresContext,
-                        nsCSSProperty aProperty,
-                        nsCSSValue& aResult);
+  nsCSSValue GetComputedValue(nsPresContext* aPresContext,
+                              nsCSSProperty aProperty);
 
   static TimingParams TimingParamsFrom(
     const StyleAnimation& aStyleAnimation)
@@ -573,7 +572,7 @@ private:
     TimingParams timing;
 
     timing.mDuration.emplace(StickyTimeDuration::FromMilliseconds(
-			       aStyleAnimation.GetDuration()));
+                               aStyleAnimation.GetDuration()));
     timing.mDelay = TimeDuration::FromMilliseconds(aStyleAnimation.GetDelay());
     timing.mIterations = aStyleAnimation.GetIterationCount();
     MOZ_ASSERT(timing.mIterations >= 0.0 && !IsNaN(timing.mIterations),
@@ -650,7 +649,7 @@ CSSAnimationBuilder::Build(nsPresContext* aPresContext,
   animation->SetOwningElement(
     OwningElementRef(*mTarget, mStyleContext->GetPseudoType()));
 
-  animation->SetTimeline(mTimeline);
+  animation->SetTimelineNoUpdate(mTimeline);
   animation->SetEffect(effect);
 
   if (isStylePaused) {
@@ -1023,16 +1022,16 @@ CSSAnimationBuilder::AppendProperty(
 {
   PropertyValuePair propertyValue;
   propertyValue.mProperty = aProperty;
-  GetComputedValue(aPresContext, aProperty, propertyValue.mValue);
+  propertyValue.mValue = GetComputedValue(aPresContext, aProperty);
 
   aPropertyValues.AppendElement(Move(propertyValue));
 }
 
-void
+nsCSSValue
 CSSAnimationBuilder::GetComputedValue(nsPresContext* aPresContext,
-                                      nsCSSProperty aProperty,
-                                      nsCSSValue& aResult)
+                                      nsCSSProperty aProperty)
 {
+  nsCSSValue result;
   StyleAnimationValue computedValue;
 
   if (!mStyleWithoutAnimation) {
@@ -1046,19 +1045,16 @@ CSSAnimationBuilder::GetComputedValue(nsPresContext* aPresContext,
 
   if (StyleAnimationValue::ExtractComputedValue(aProperty,
                                                 mStyleWithoutAnimation,
-                                                computedValue) &&
-      StyleAnimationValue::UncomputeValue(
-        aProperty, Move(computedValue), aResult)) {
-    // If we hit this assertion or the MOZ_ASSERT_UNREACHABLE below, it
-    // probably means we are fetching a value from the computed style that
-    // we don't know how to represent as a StyleAnimationValue.
-    MOZ_ASSERT(aResult.GetUnit() != eCSSUnit_Null,
-               "Got null computed value");
-    return;
+                                                computedValue)) {
+    StyleAnimationValue::UncomputeValue(aProperty, Move(computedValue), result);
   }
 
-  MOZ_ASSERT_UNREACHABLE("Failed to get computed value");
-  aResult.Reset();
+  // If we hit this assertion, it probably means we are fetching a value from
+  // the computed style that we don't know how to represent as
+  // a StyleAnimationValue.
+  MOZ_ASSERT(result.GetUnit() != eCSSUnit_Null, "Got null computed value");
+
+  return result;
 }
 
 void

@@ -122,6 +122,11 @@ XPCOMUtils.defineLazyModuleGetter(this, "TabCrashHandler",
 if (AppConstants.MOZ_CRASHREPORTER) {
   XPCOMUtils.defineLazyModuleGetter(this, "PluginCrashReporter",
                                     "resource:///modules/ContentCrashHandlers.jsm");
+  XPCOMUtils.defineLazyModuleGetter(this, "CrashSubmit",
+                                    "resource://gre/modules/CrashSubmit.jsm");
+  XPCOMUtils.defineLazyModuleGetter(this, "PluralForm",
+                                    "resource://gre/modules/PluralForm.jsm");
+
 }
 
 XPCOMUtils.defineLazyGetter(this, "gBrandBundle", function() {
@@ -304,6 +309,9 @@ BrowserGlue.prototype = {
       case "weave:service:ready":
         this._setSyncAutoconnectDelay();
         break;
+      case "fxaccounts:onverified":
+        this._showSyncStartedDoorhanger();
+        break;
       case "weave:engine:clients:display-uri":
         this._onDisplaySyncURI(subject);
         break;
@@ -380,6 +388,11 @@ BrowserGlue.prototype = {
           if (win) {
             data = JSON.parse(data);
             let where = win.whereToOpenLink(data);
+            // Preserve legacy behavior of non-modifier left-clicks
+            // opening in a new selected tab.
+            if (where == "current") {
+              where = "tab";
+            }
             win.openUILinkIn(data.href, where);
             linkHandled.data = true;
           }
@@ -516,6 +529,7 @@ BrowserGlue.prototype = {
       os.addObserver(this, "browser-lastwindow-close-granted", false);
     }
     os.addObserver(this, "weave:service:ready", false);
+    os.addObserver(this, "fxaccounts:onverified", false);
     os.addObserver(this, "weave:engine:clients:display-uri", false);
     os.addObserver(this, "session-save", false);
     os.addObserver(this, "places-init-complete", false);
@@ -581,6 +595,7 @@ BrowserGlue.prototype = {
       os.removeObserver(this, "browser-lastwindow-close-granted");
     }
     os.removeObserver(this, "weave:service:ready");
+    os.removeObserver(this, "fxaccounts:onverified");
     os.removeObserver(this, "weave:engine:clients:display-uri");
     os.removeObserver(this, "session-save");
     if (this._bookmarksBackupIdleTime) {
@@ -818,6 +833,60 @@ BrowserGlue.prototype = {
       if (buildDate + acceptableAge < today) {
         Cc["@mozilla.org/updates/update-service;1"].getService(Ci.nsIApplicationUpdateService).checkForBackgroundUpdates();
       }
+    }
+  },
+
+  checkForPendingCrashReports: function() {
+    // We don't process crash reports older than 28 days, so don't bother submitting them
+    const PENDING_CRASH_REPORT_DAYS = 28;
+    if (AppConstants.MOZ_CRASHREPORTER) {
+      let dateLimit = new Date();
+      dateLimit.setDate(dateLimit.getDate() - PENDING_CRASH_REPORT_DAYS);
+      CrashSubmit.pendingIDsAsync(dateLimit).then(
+        function onSuccess(ids) {
+          let count = ids.length;
+          if (count) {
+            let win = RecentWindow.getMostRecentBrowserWindow();
+            let nb =  win.document.getElementById("global-notificationbox");
+            let notification = nb.getNotificationWithValue("pending-crash-reports");
+            if (notification) {
+              return;
+            }
+            let buttons = [
+              {
+                label: win.gNavigatorBundle.getString("pendingCrashReports.submitAll"),
+                callback: function() {
+                  ids.forEach(function(id) {
+                    CrashSubmit.submit(id, {extraExtraKeyVals: {"SubmittedFromInfobar": true}});
+                  });
+                }
+              },
+              {
+                label: win.gNavigatorBundle.getString("pendingCrashReports.ignoreAll"),
+                callback: function() {
+                  ids.forEach(function(id) {
+                    CrashSubmit.ignore(id);
+                  });
+                }
+              },
+              {
+                label: win.gNavigatorBundle.getString("pendingCrashReports.viewAll"),
+                callback: function() {
+                  win.openUILinkIn("about:crashes", "tab");
+                }
+              }
+            ];
+            nb.appendNotification(PluralForm.get(count,
+                                                 win.gNavigatorBundle.getString("pendingCrashReports.label")).replace("#1", count),
+                                  "pending-crash-reports",
+                                  "chrome://browser/skin/tab-crashed.svg",
+                                  nb.PRIORITY_INFO_HIGH, buttons);
+          }
+        },
+        function onError(err) {
+          Cu.reportError(err);
+        }
+      );
     }
   },
 
@@ -1070,6 +1139,10 @@ BrowserGlue.prototype = {
     }
 
     this._checkForOldBuildUpdates();
+
+    if ("release" != AppConstants.MOZ_UPDATE_CHANNEL) {
+      this.checkForPendingCrashReports();
+    }
 
     this._firstWindowTelemetry(aWindow);
     this._firstWindowLoaded();
@@ -1825,6 +1898,19 @@ BrowserGlue.prototype = {
                                                     notifyBox.PRIORITY_CRITICAL_MEDIUM,
                                                     buttons);
     notification.persistence = -1; // Until user closes it
+  },
+
+  _showSyncStartedDoorhanger: function () {
+    let bundle = Services.strings.createBundle("chrome://browser/locale/accounts.properties");
+    let title = bundle.GetStringFromName("syncStartNotification.title");
+    let body = bundle.GetStringFromName("syncStartNotification.body");
+
+    let clickCallback = (subject, topic, data) => {
+      if (topic != "alertclickcallback")
+        return;
+      this._openPreferences("sync");
+    }
+    AlertsService.showAlertNotification(null, title, body, true, null, clickCallback);
   },
 
   _migrateUI: function BG__migrateUI() {

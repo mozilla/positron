@@ -12,7 +12,6 @@ const Telemetry = require("devtools/client/shared/telemetry");
 
 const NS_XHTML = "http://www.w3.org/1999/xhtml";
 const XUL_NS = "http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul";
-const Node = Ci.nsIDOMNode;
 
 loader.lazyImporter(this, "PluralForm", "resource://gre/modules/PluralForm.jsm");
 loader.lazyImporter(this, "EventEmitter", "resource://devtools/shared/event-emitter.js");
@@ -30,6 +29,7 @@ loader.lazyRequireGetter(this, "util", "gcli/util/util");
 loader.lazyRequireGetter(this, "ConsoleServiceListener", "devtools/shared/webconsole/utils", true);
 loader.lazyRequireGetter(this, "gDevTools", "devtools/client/framework/devtools", true);
 loader.lazyRequireGetter(this, "gDevToolsBrowser", "devtools/client/framework/devtools-browser", true);
+loader.lazyRequireGetter(this, "nodeConstants", "devtools/shared/dom-node-constants", true);
 
 /**
  * A collection of utilities to help working with commands
@@ -76,7 +76,7 @@ var CommandUtils = {
     return util.promiseEach(toolbarSpec, typed => {
       // Ask GCLI to parse the typed string (doesn't execute it)
       return requisition.update(typed).then(() => {
-        let button = document.createElement("toolbarbutton");
+        let button = document.createElementNS(NS_XHTML, "button");
 
         // Ignore invalid commands
         let command = requisition.commandAssignment.value;
@@ -93,13 +93,15 @@ var CommandUtils = {
         else {
           button.setAttribute("text-as-image", "true");
           button.setAttribute("label", command.name);
-          button.className = "devtools-toolbarbutton";
         }
+
+        button.classList.add("devtools-button");
+
         if (command.tooltipText != null) {
-          button.setAttribute("tooltiptext", command.tooltipText);
+          button.setAttribute("title", command.tooltipText);
         }
         else if (command.description != null) {
-          button.setAttribute("tooltiptext", command.description);
+          button.setAttribute("title", command.description);
         }
 
         button.addEventListener("click", () => {
@@ -390,7 +392,7 @@ DeveloperToolbar.prototype.focusToggle = function () {
     // inside the xul input element
     let active = this._chromeWindow.document.activeElement;
     let position = this._input.compareDocumentPosition(active);
-    if (position & Node.DOCUMENT_POSITION_CONTAINED_BY) {
+    if (position & nodeConstants.DOCUMENT_POSITION_CONTAINED_BY) {
       this.hide();
     }
     else {

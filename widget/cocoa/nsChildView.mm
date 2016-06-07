@@ -97,6 +97,7 @@
 #include "nsIDOMWindowUtils.h"
 #include "Units.h"
 #include "UnitTransforms.h"
+#include "mozilla/UniquePtrExtensions.h"
 
 using namespace mozilla;
 using namespace mozilla::layers;
@@ -1533,6 +1534,71 @@ bool nsChildView::PaintWindow(LayoutDeviceIntRegion aRegion)
   return returnValue;
 }
 
+bool
+nsChildView::PaintWindowInContext(CGContextRef aContext, const LayoutDeviceIntRegion& aRegion, gfx::IntSize aSurfaceSize)
+{
+  if (!mBackingSurface || mBackingSurface->GetSize() != aSurfaceSize) {
+    mBackingSurface =
+      gfxPlatform::GetPlatform()->CreateOffscreenContentDrawTarget(aSurfaceSize,
+                                                                   gfx::SurfaceFormat::B8G8R8A8);
+    if (!mBackingSurface) {
+      return false;
+    }
+  }
+
+  RefPtr<gfxContext> targetContext = gfxContext::ForDrawTarget(mBackingSurface);
+  MOZ_ASSERT(targetContext); // already checked the draw target above
+
+  // Set up the clip region and clear existing contents in the backing surface.
+  targetContext->NewPath();
+  for (auto iter = aRegion.RectIter(); !iter.Done(); iter.Next()) {
+    const LayoutDeviceIntRect& r = iter.Get();
+    targetContext->Rectangle(gfxRect(r.x, r.y, r.width, r.height));
+    mBackingSurface->ClearRect(gfx::Rect(r.ToUnknownRect()));
+  }
+  targetContext->Clip();
+
+  nsAutoRetainCocoaObject kungFuDeathGrip(mView);
+  bool painted = false;
+  if (GetLayerManager()->GetBackendType() == LayersBackend::LAYERS_BASIC) {
+    nsBaseWidget::AutoLayerManagerSetup
+      setupLayerManager(this, targetContext, BufferMode::BUFFER_NONE);
+    painted = PaintWindow(aRegion);
+  } else if (GetLayerManager()->GetBackendType() == LayersBackend::LAYERS_CLIENT) {
+    // We only need this so that we actually get DidPaintWindow fired
+    painted = PaintWindow(aRegion);
+  }
+
+  uint8_t* data;
+  gfx::IntSize size;
+  int32_t stride;
+  gfx::SurfaceFormat format;
+
+  if (!mBackingSurface->LockBits(&data, &size, &stride, &format)) {
+    return false;
+  }
+
+  // Draw the backing surface onto the window.
+  CGDataProviderRef provider = CGDataProviderCreateWithData(NULL, data, stride * size.height, NULL);
+  NSColorSpace* colorSpace = [[mView window] colorSpace];
+  CGImageRef image = CGImageCreate(size.width, size.height, 8, 32, stride,
+                                   [colorSpace CGColorSpace],
+                                   kCGBitmapByteOrder32Host | kCGImageAlphaPremultipliedFirst,
+                                   provider, NULL, false, kCGRenderingIntentDefault);
+  CGContextSaveGState(aContext);
+  CGContextTranslateCTM(aContext, 0, size.height);
+  CGContextScaleCTM(aContext, 1, -1);
+  CGContextSetBlendMode(aContext, kCGBlendModeCopy);
+  CGContextDrawImage(aContext, CGRectMake(0, 0, size.width, size.height), image);
+  CGImageRelease(image);
+  CGDataProviderRelease(provider);
+  CGContextRestoreGState(aContext);
+
+  mBackingSurface->ReleaseBits(data);
+
+  return painted;
+}
+
 #pragma mark -
 
 void nsChildView::ReportMoveEvent()
@@ -1938,8 +2004,18 @@ nsChildView::RectContainingTitlebarControls()
   NSRect rect = NSMakeRect(0, 0, [mView bounds].size.width,
                            [(ChildView*)mView cornerRadius]);
 
+  // If we draw the titlebar title string, increase the height to the default
+  // titlebar height. This height does not necessarily include all the titlebar
+  // controls because we may have moved them further down, but at least it will
+  // include the whole title text.
+  BaseWindow* window = (BaseWindow*)[mView window];
+  if ([window wantsTitleDrawn] && [window isKindOfClass:[ToolbarWindow class]]) {
+    CGFloat defaultTitlebarHeight = [(ToolbarWindow*)window titlebarHeight];
+    rect.size.height = std::max(rect.size.height, defaultTitlebarHeight);
+  }
+
   // Add the rects of the titlebar controls.
-  for (id view in [(BaseWindow*)[mView window] titlebarControls]) {
+  for (id view in [window titlebarControls]) {
     rect = NSUnionRect(rect, [mView convertRect:[view bounds] fromView:view]);
   }
   return CocoaPointsToDevPixels(rect);
@@ -1948,6 +2024,8 @@ nsChildView::RectContainingTitlebarControls()
 void
 nsChildView::PrepareWindowEffects()
 {
+  NS_OBJC_BEGIN_TRY_ABORT_BLOCK;
+
   MutexAutoLock lock(mEffectsLock);
   mShowsResizeIndicator = ShowsResizeIndicator(&mResizeIndicatorRect);
   mHasRoundedBottomCorners = [(ChildView*)mView hasRoundedBottomCorners];
@@ -1960,6 +2038,8 @@ nsChildView::PrepareWindowEffects()
     mTitlebarRect = RectContainingTitlebarControls();
     UpdateTitlebarCGContext();
   }
+
+  NS_OBJC_END_TRY_ABORT_BLOCK;
 }
 
 void
@@ -2866,6 +2946,67 @@ nsChildView::DispatchAPZWheelInputEvent(InputData& aEvent, bool aCanTriggerSwipe
   }
 }
 
+// When using 10.11, calling showDefinitionForAttributedString causes the
+// following exception on LookupViewService. (rdar://26476091)
+//
+// Exception: decodeObjectForKey: class "TitlebarAndBackgroundColor" not
+// loaded or does not exist
+//
+// So we set temporary color that is NSColor before calling it.
+
+class MOZ_RAII AutoBackgroundSetter final {
+public:
+  explicit AutoBackgroundSetter(NSView* aView) {
+    if (nsCocoaFeatures::OnElCapitanOrLater() &&
+        [[aView window] isKindOfClass:[ToolbarWindow class]]) {
+      mWindow = (ToolbarWindow*)[aView window];
+      [mWindow setTemporaryBackgroundColor];
+    } else {
+      mWindow = nullptr;
+    }
+  }
+
+  ~AutoBackgroundSetter() {
+    if (mWindow) {
+      [mWindow restoreBackgroundColor];
+    }
+  }
+
+private:
+  ToolbarWindow* mWindow;
+};
+
+void
+nsChildView::LookUpDictionary(
+               const nsAString& aText,
+               const nsTArray<mozilla::FontRange>& aFontRangeArray,
+               const bool aIsVertical,
+               const LayoutDeviceIntPoint& aPoint)
+{
+  NS_OBJC_BEGIN_TRY_ABORT_BLOCK;
+
+  NSMutableAttributedString* attrStr =
+    nsCocoaUtils::GetNSMutableAttributedString(aText, aFontRangeArray,
+                                               aIsVertical,
+                                               BackingScaleFactor());
+  NSPoint pt =
+    nsCocoaUtils::DevPixelsToCocoaPoints(aPoint, BackingScaleFactor());
+  NSDictionary* attributes = [attrStr attributesAtIndex:0 effectiveRange:nil];
+  NSFont* font = [attributes objectForKey:NSFontAttributeName];
+  if (font) {
+    if (aIsVertical) {
+      pt.x -= [font descender];
+    } else {
+      pt.y += [font ascender];
+    }
+  }
+
+  AutoBackgroundSetter setter(mView);
+  [mView showDefinitionForAttributedString:attrStr atPoint:pt];
+
+  NS_OBJC_END_TRY_ABORT_BLOCK;
+}
+
 #ifdef ACCESSIBILITY
 already_AddRefed<a11y::Accessible>
 nsChildView::GetDocumentAccessible()
@@ -3225,6 +3366,8 @@ NSEvent* gLastDragMouseDownEvent = nil;
     // progress.
     mDidForceRefreshOpenGL = NO;
 
+    mNeedsGLUpdate = NO;
+
     [self setFocusRingType:NSFocusRingTypeNone];
 
 #ifdef __LP64__
@@ -3316,17 +3459,9 @@ NSEvent* gLastDragMouseDownEvent = nil;
   NS_OBJC_BEGIN_TRY_ABORT_BLOCK;
 
   [mGLContext clearDrawable];
+  CGLLockContext((CGLContextObj)[mGLContext CGLContextObj]);
   [self updateGLContext];
-
-  NS_OBJC_END_TRY_ABORT_BLOCK;
-}
-
-- (void)setGLContext:(NSOpenGLContext *)aGLContext
-{
-  NS_OBJC_BEGIN_TRY_ABORT_BLOCK;
-
-  mGLContext = aGLContext;
-  [mGLContext retain];
+  CGLUnlockContext((CGLContextObj)[mGLContext CGLContextObj]);
 
   NS_OBJC_END_TRY_ABORT_BLOCK;
 }
@@ -3344,11 +3479,17 @@ NSEvent* gLastDragMouseDownEvent = nil;
   }
 
   if (!mGLContext) {
-    [self setGLContext:aGLContext];
-    [self updateGLContext];
+    mGLContext = aGLContext;
+    [mGLContext retain];
+    mNeedsGLUpdate = true;
   }
 
   CGLLockContext((CGLContextObj)[aGLContext CGLContextObj]);
+
+  if (mNeedsGLUpdate) {
+    [self updateGLContext];
+    mNeedsGLUpdate = NO;
+  }
 
   return true;
 
@@ -3581,17 +3722,17 @@ NSEvent* gLastDragMouseDownEvent = nil;
 
 -(void)updateGLContext
 {
-  if (mGLContext) {
-    CGLLockContext((CGLContextObj)[mGLContext CGLContextObj]);
-    [mGLContext setView:self];
-    [mGLContext update];
-    CGLUnlockContext((CGLContextObj)[mGLContext CGLContextObj]);
-  }
+  [mGLContext setView:self];
+  [mGLContext update];
 }
 
 - (void)_surfaceNeedsUpdate:(NSNotification*)notification
 {
-   [self updateGLContext];
+  if (mGLContext) {
+    CGLLockContext((CGLContextObj)[mGLContext CGLContextObj]);
+    mNeedsGLUpdate = YES;
+    CGLUnlockContext((CGLContextObj)[mGLContext CGLContextObj]);
+  }
 }
 
 - (BOOL)wantsBestResolutionOpenGLSurface
@@ -3740,50 +3881,9 @@ NSEvent* gLastDragMouseDownEvent = nil;
 
   NSSize viewSize = [self bounds].size;
   nsIntSize backingSize(viewSize.width * scale, viewSize.height * scale);
-
-  CGContextSaveGState(aContext);
-
   LayoutDeviceIntRegion region = [self nativeDirtyRegionWithBoundingRect:aRect];
 
-  // Create Cairo objects.
-  RefPtr<gfxQuartzSurface> targetSurface;
-
-  RefPtr<gfx::DrawTarget> dt =
-    gfx::Factory::CreateDrawTargetForCairoCGContext(aContext,
-                                                    gfx::IntSize(backingSize.width,
-                                                                 backingSize.height));
-  if (!dt || !dt->IsValid()) {
-    // This used to be an assertion, so keep crashing in nightly+aurora
-    gfxDevCrash(mozilla::gfx::LogReason::InvalidContext) << "Cannot create target with CreateDrawTargetForCairoCGContext " << backingSize;
-    return;
-  }
-  dt->AddUserData(&gfxContext::sDontUseAsSourceKey, dt, nullptr);
-  RefPtr<gfxContext> targetContext = gfxContext::ForDrawTarget(dt);
-  MOZ_ASSERT(targetContext); // already checked the draw target above
-
-  // Set up the clip region.
-  targetContext->NewPath();
-  for (auto iter = region.RectIter(); !iter.Done(); iter.Next()) {
-    const LayoutDeviceIntRect& r = iter.Get();
-    targetContext->Rectangle(gfxRect(r.x, r.y, r.width, r.height));
-  }
-  targetContext->Clip();
-
-  nsAutoRetainCocoaObject kungFuDeathGrip(self);
-  bool painted = false;
-  if (mGeckoChild->GetLayerManager()->GetBackendType() == LayersBackend::LAYERS_BASIC) {
-    nsBaseWidget::AutoLayerManagerSetup
-      setupLayerManager(mGeckoChild, targetContext, BufferMode::BUFFER_NONE);
-    painted = mGeckoChild->PaintWindow(region);
-  } else if (mGeckoChild->GetLayerManager()->GetBackendType() == LayersBackend::LAYERS_CLIENT) {
-    // We only need this so that we actually get DidPaintWindow fired
-    painted = mGeckoChild->PaintWindow(region);
-  }
-
-  targetContext = nullptr;
-  targetSurface = nullptr;
-
-  CGContextRestoreGState(aContext);
+  bool painted = mGeckoChild->PaintWindowInContext(aContext, region, backingSize);
 
   // Undo the scale transform so that from now on the context is in
   // CocoaPoints again.
@@ -5422,6 +5522,17 @@ PanGestureTypeForEvent(NSEvent* aEvent)
 {
   NS_ENSURE_TRUE(mTextInputHandler, NSMakeRect(0.0, 0.0, 0.0, 0.0));
   return mTextInputHandler->FirstRectForCharacterRange(aRange, actualRange);
+}
+
+- (void)quickLookWithEvent:(NSEvent*)event
+{
+  // Show dictionary by current point
+  WidgetContentCommandEvent
+    contentCommandEvent(true, eContentCommandLookUpDictionary, mGeckoChild);
+  NSPoint point = [self convertPoint:[event locationInWindow] fromView:nil];
+  contentCommandEvent.mRefPoint = mGeckoChild->CocoaPointsToDevPixels(point);
+  mGeckoChild->DispatchWindowEvent(contentCommandEvent);
+  // The widget might have been destroyed.
 }
 
 - (NSInteger)windowLevel

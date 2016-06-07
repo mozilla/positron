@@ -495,7 +495,7 @@ Element::WrapObject(JSContext *aCx, JS::Handle<JSObject*> aGivenProto)
   }
 
   nsCOMPtr<nsIURI> uri = bindingURL->GetURI();
-  nsCOMPtr<nsIPrincipal> principal = bindingURL->mOriginPrincipal;
+  nsCOMPtr<nsIPrincipal> principal = bindingURL->mOriginPrincipal.get();
 
   // We have a binding that must be installed.
   bool dummy;
@@ -1181,17 +1181,11 @@ Element::SetAttribute(const nsAString& aName,
   if (aError.Failed()) {
     return;
   }
-  const nsAttrName* name = InternalGetExistingAttrNameFromQName(aName);
+
+  nsAutoString nameToUse;
+  const nsAttrName* name = InternalGetAttrNameFromQName(aName, &nameToUse);
   if (!name) {
-    nsCOMPtr<nsIAtom> nameAtom;
-    if (IsHTMLElement() && IsInHTMLDocument()) {
-      nsAutoString lower;
-      nsContentUtils::ASCIIToLower(aName, lower);
-      nameAtom = NS_Atomize(lower);
-    }
-    else {
-      nameAtom = NS_Atomize(aName);
-    }
+    nsCOMPtr<nsIAtom> nameAtom = NS_Atomize(nameToUse);
     if (!nameAtom) {
       aError.Throw(NS_ERROR_OUT_OF_MEMORY);
       return;
@@ -1208,7 +1202,7 @@ Element::SetAttribute(const nsAString& aName,
 void
 Element::RemoveAttribute(const nsAString& aName, ErrorResult& aError)
 {
-  const nsAttrName* name = InternalGetExistingAttrNameFromQName(aName);
+  const nsAttrName* name = InternalGetAttrNameFromQName(aName);
 
   if (!name) {
     // If there is no canonical nsAttrName for this attribute name, then the
@@ -1991,7 +1985,7 @@ Element::FindAttributeDependence(const nsIAtom* aAttribute,
 already_AddRefed<mozilla::dom::NodeInfo>
 Element::GetExistingAttrNameFromQName(const nsAString& aStr) const
 {
-  const nsAttrName* name = InternalGetExistingAttrNameFromQName(aStr);
+  const nsAttrName* name = InternalGetAttrNameFromQName(aStr);
   if (!name) {
     return nullptr;
   }
@@ -2167,9 +2161,27 @@ Element::SetEventHandler(nsIAtom* aEventName,
 //----------------------------------------------------------------------
 
 const nsAttrName*
-Element::InternalGetExistingAttrNameFromQName(const nsAString& aStr) const
+Element::InternalGetAttrNameFromQName(const nsAString& aStr,
+                                      nsAutoString* aNameToUse) const
 {
-  return mAttrsAndChildren.GetExistingAttrNameFromQName(aStr);
+  MOZ_ASSERT(!aNameToUse || aNameToUse->IsEmpty());
+  const nsAttrName* val = nullptr;
+  if (IsHTMLElement() && IsInHTMLDocument()) {
+    nsAutoString lower;
+    nsAutoString& outStr = aNameToUse ? *aNameToUse : lower;
+    nsContentUtils::ASCIIToLower(aStr, outStr);
+    val = mAttrsAndChildren.GetExistingAttrNameFromQName(outStr);
+    if (val) {
+      outStr.Truncate();
+    }
+  } else {
+    val = mAttrsAndChildren.GetExistingAttrNameFromQName(aStr);
+    if (!val && aNameToUse) {
+      *aNameToUse = aStr;
+    }
+  }
+
+  return val;
 }
 
 bool
@@ -3077,10 +3089,6 @@ nsDOMTokenListPropertyDestructor(void *aObject, nsIAtom *aProperty,
 
 static nsIAtom** sPropertiesToTraverseAndUnlink[] =
   {
-    &nsGkAtoms::microdataProperties,
-    &nsGkAtoms::itemtype,
-    &nsGkAtoms::itemref,
-    &nsGkAtoms::itemprop,
     &nsGkAtoms::sandbox,
     &nsGkAtoms::sizes,
     nullptr
@@ -3120,26 +3128,6 @@ Element::GetTokenList(nsIAtom* aAtom,
     SetProperty(aAtom, list, nsDOMTokenListPropertyDestructor);
   }
   return list;
-}
-
-void
-Element::GetTokenList(nsIAtom* aAtom, nsIVariant** aResult)
-{
-  nsISupports* itemType = GetTokenList(aAtom);
-  nsCOMPtr<nsIWritableVariant> out = new nsVariant();
-  out->SetAsInterface(NS_GET_IID(nsISupports), itemType);
-  out.forget(aResult);
-}
-
-nsresult
-Element::SetTokenList(nsIAtom* aAtom, nsIVariant* aValue)
-{
-  nsDOMTokenList* itemType = GetTokenList(aAtom);
-  nsAutoString string;
-  aValue->GetAsAString(string);
-  ErrorResult rv;
-  itemType->SetValue(string, rv);
-  return rv.StealNSResult();
 }
 
 Element*
@@ -3358,9 +3346,10 @@ Element::Animate(const Nullable<ElementOrCSSPseudoElement>& aTarget,
     return nullptr;
   }
 
+  AnimationTimeline* timeline = referenceElement->OwnerDoc()->Timeline();
   RefPtr<Animation> animation =
     Animation::Constructor(global, effect,
-                           referenceElement->OwnerDoc()->Timeline(), aError);
+                           Optional<AnimationTimeline*>(timeline), aError);
   if (aError.Failed()) {
     return nullptr;
   }

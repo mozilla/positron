@@ -89,6 +89,12 @@ typedef any Transferable;
 Window implements GlobalEventHandlers;
 Window implements WindowEventHandlers;
 
+[NoInterfaceObject, Exposed=(Window)]
+interface AppInstallEventHandlersMixin {
+  attribute EventHandler oninstall;
+};
+Window implements AppInstallEventHandlersMixin;
+
 // http://www.whatwg.org/specs/web-apps/current-work/
 [NoInterfaceObject, Exposed=(Window,Worker)]
 interface WindowTimers {
@@ -412,12 +418,6 @@ partial interface Window {
            attribute EventHandler onorientationchange;
 };
 #endif
-
-// ConsoleAPI
-partial interface Window {
-  [Replaceable, GetterThrows]
-  readonly attribute Console console;
-};
 
 // https://w3c.github.io/webappsec-secure-contexts/#monkey-patching-global-object
 partial interface Window {

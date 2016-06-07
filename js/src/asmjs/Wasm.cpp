@@ -19,6 +19,7 @@
 #include "asmjs/Wasm.h"
 
 #include "mozilla/CheckedInt.h"
+#include "mozilla/unused.h"
 
 #include "jsprf.h"
 
@@ -38,6 +39,7 @@ using namespace js::wasm;
 
 using mozilla::CheckedInt;
 using mozilla::IsNaN;
+using mozilla::Unused;
 
 typedef Handle<WasmModuleObject*> HandleWasmModule;
 typedef MutableHandle<WasmModuleObject*> MutableHandleWasmModule;
@@ -289,21 +291,17 @@ DecodeExpr(FunctionDecoder& f)
       case Expr::F32Ceil:
       case Expr::F32Floor:
       case Expr::F32Sqrt:
-        return f.iter().readUnary(ValType::F32, nullptr);
       case Expr::F32Trunc:
-        return f.iter().notYetImplemented("trunc");
       case Expr::F32Nearest:
-        return f.iter().notYetImplemented("nearest");
+        return f.iter().readUnary(ValType::F32, nullptr);
       case Expr::F64Abs:
       case Expr::F64Neg:
       case Expr::F64Ceil:
       case Expr::F64Floor:
       case Expr::F64Sqrt:
-        return f.iter().readUnary(ValType::F64, nullptr);
       case Expr::F64Trunc:
-        return f.iter().notYetImplemented("trunc");
       case Expr::F64Nearest:
-        return f.iter().notYetImplemented("nearest");
+        return f.iter().readUnary(ValType::F64, nullptr);
       case Expr::I32Add:
       case Expr::I32Sub:
       case Expr::I32Mul:
@@ -343,18 +341,16 @@ DecodeExpr(FunctionDecoder& f)
       case Expr::F32Div:
       case Expr::F32Min:
       case Expr::F32Max:
-        return f.iter().readBinary(ValType::F32, nullptr, nullptr);
       case Expr::F32CopySign:
-        return f.iter().notYetImplemented("copysign");
+        return f.iter().readBinary(ValType::F32, nullptr, nullptr);
       case Expr::F64Add:
       case Expr::F64Sub:
       case Expr::F64Mul:
       case Expr::F64Div:
       case Expr::F64Min:
       case Expr::F64Max:
-        return f.iter().readBinary(ValType::F64, nullptr, nullptr);
       case Expr::F64CopySign:
-        return f.iter().notYetImplemented("copysign");
+        return f.iter().readBinary(ValType::F64, nullptr, nullptr);
       case Expr::I32Eq:
       case Expr::I32Ne:
       case Expr::I32LtS:
@@ -525,8 +521,6 @@ DecodeTypeSection(JSContext* cx, Decoder& d, ModuleGeneratorData* init)
 
     if (!init->sigs.resize(numSigs))
         return false;
-    if (!init->sigToTable.resize(numSigs))
-        return false;
 
     for (uint32_t sigIndex = 0; sigIndex < numSigs; sigIndex++) {
         uint32_t form;
@@ -635,17 +629,16 @@ DecodeTableSection(JSContext* cx, Decoder& d, ModuleGeneratorData* init)
     if (sectionStart == Decoder::NotStarted)
         return true;
 
-    if (!d.readVarU32(&init->numTableElems))
+    if (!d.readVarU32(&init->wasmTable.numElems))
         return Fail(cx, d, "expected number of table elems");
 
-    if (init->numTableElems > MaxTableElems)
+    if (init->wasmTable.numElems > MaxTableElems)
         return Fail(cx, d, "too many table elements");
 
-    Uint32Vector elems;
-    if (!elems.resize(init->numTableElems))
+    if (!init->wasmTable.elemFuncIndices.resize(init->wasmTable.numElems))
         return false;
 
-    for (uint32_t i = 0; i < init->numTableElems; i++) {
+    for (uint32_t i = 0; i < init->wasmTable.numElems; i++) {
         uint32_t funcIndex;
         if (!d.readVarU32(&funcIndex))
             return Fail(cx, d, "expected table element");
@@ -653,34 +646,11 @@ DecodeTableSection(JSContext* cx, Decoder& d, ModuleGeneratorData* init)
         if (funcIndex >= init->funcSigs.length())
             return Fail(cx, d, "table element out of range");
 
-        elems[i] = funcIndex;
+        init->wasmTable.elemFuncIndices[i] = funcIndex;
     }
 
     if (!d.finishSection(sectionStart, sectionSize))
         return Fail(cx, d, "table section byte size mismatch");
-
-    // Convert the single (heterogeneous) indirect function table into an
-    // internal set of asm.js-like homogeneous tables indexed by signature.
-    // Every element in the heterogeneous table is present in only one
-    // homogeneous table (as determined by its signature). An element's index in
-    // the heterogeneous table is the same as its index in its homogeneous table
-    // and all other homogeneous tables are given an entry that will fault if
-    // called for at that element's index.
-
-    for (uint32_t elemIndex = 0; elemIndex < elems.length(); elemIndex++) {
-        uint32_t funcIndex = elems[elemIndex];
-        TableModuleGeneratorData& table = init->sigToTable[init->funcSigIndex(funcIndex)];
-        if (table.numElems == 0) {
-            table.numElems = elems.length();
-            if (!table.elemFuncIndices.appendN(ModuleGenerator::BadIndirectCall, elems.length()))
-                return false;
-        }
-    }
-
-    for (uint32_t elemIndex = 0; elemIndex < elems.length(); elemIndex++) {
-        uint32_t funcIndex = elems[elemIndex];
-        init->sigToTable[init->funcSigIndex(funcIndex)].elemFuncIndices[elemIndex] = funcIndex;
-    }
 
     return true;
 }
@@ -705,12 +675,33 @@ CheckTypeForJS(JSContext* cx, Decoder& d, const Sig& sig)
     return true;
 }
 
+static UniqueChars
+MaybeDecodeName(JSContext* cx, Decoder& d)
+{
+    Bytes bytes;
+    if (!d.readBytes(&bytes))
+        return nullptr;
+
+    // Rejecting a name if null or non-ascii character was found.
+    // TODO Relax the requirement and allow valid non-null valid UTF8 characters.
+    for (size_t i = 0; i < bytes.length(); i++) {
+        const uint8_t ch = bytes[i];
+        if (ch == 0 || ch >= 128)
+            return nullptr;
+    }
+
+    if (!bytes.append(0))
+        return nullptr;
+
+    return UniqueChars((char*)bytes.extractOrCopyRawBuffer());
+}
+
 struct ImportName
 {
-    Bytes module;
-    Bytes func;
+    UniqueChars module;
+    UniqueChars func;
 
-    ImportName(Bytes&& module, Bytes&& func)
+    ImportName(UniqueChars&& module, UniqueChars&& func)
       : module(Move(module)), func(Move(func))
     {}
     ImportName(ImportName&& rhs)
@@ -733,16 +724,16 @@ DecodeImport(JSContext* cx, Decoder& d, ModuleGeneratorData* init, ImportNameVec
     if (!CheckTypeForJS(cx, d, *sig))
         return false;
 
-    Bytes moduleName;
-    if (!d.readBytes(&moduleName))
-        return Fail(cx, d, "expected import module name");
+    UniqueChars moduleName = MaybeDecodeName(cx, d);
+    if (!moduleName)
+        return Fail(cx, d, "expected valid import module name");
 
-    if (moduleName.empty())
+    if (!strlen(moduleName.get()))
         return Fail(cx, d, "module name cannot be empty");
 
-    Bytes funcName;
-    if (!d.readBytes(&funcName))
-        return Fail(cx, d, "expected import func name");
+    UniqueChars funcName = MaybeDecodeName(cx, d);
+    if (!funcName)
+        return Fail(cx, d, "expected valid import func name");
 
     return importNames->emplaceBack(Move(moduleName), Move(funcName));
 }
@@ -832,34 +823,22 @@ typedef HashSet<const char*, CStringHasher> CStringSet;
 static UniqueChars
 DecodeExportName(JSContext* cx, Decoder& d, CStringSet* dupSet)
 {
-    Bytes fieldBytes;
-    if (!d.readBytes(&fieldBytes)) {
-        Fail(cx, d, "expected export name");
+    UniqueChars exportName = MaybeDecodeName(cx, d);
+    if (!exportName) {
+        Fail(cx, d, "expected valid export name");
         return nullptr;
     }
 
-    if (memchr(fieldBytes.begin(), 0, fieldBytes.length())) {
-        Fail(cx, d, "null in export names not yet supported");
-        return nullptr;
-    }
-
-    if (!fieldBytes.append(0))
-        return nullptr;
-
-    UniqueChars fieldName((char*)fieldBytes.extractOrCopyRawBuffer());
-    if (!fieldName)
-        return nullptr;
-
-    CStringSet::AddPtr p = dupSet->lookupForAdd(fieldName.get());
+    CStringSet::AddPtr p = dupSet->lookupForAdd(exportName.get());
     if (p) {
         Fail(cx, d, "duplicate export");
         return nullptr;
     }
 
-    if (!dupSet->add(p, fieldName.get()))
+    if (!dupSet->add(p, exportName.get()))
         return nullptr;
 
-    return Move(fieldName);
+    return Move(exportName);
 }
 
 static bool
@@ -1057,8 +1036,73 @@ DecodeDataSection(JSContext* cx, Decoder& d, Handle<ArrayBufferObject*> heap)
 }
 
 static bool
+MaybeDecodeNameSectionBody(JSContext* cx, Decoder& d, uint32_t sectionStart,
+                           uint32_t sectionSize, CacheableCharsVector* funcNames)
+{
+    uint32_t numFuncNames;
+    if (!d.readVarU32(&numFuncNames))
+        return false;
+
+    if (numFuncNames > MaxFuncs)
+        return false;
+
+    CacheableCharsVector result;
+    if (!result.resize(numFuncNames))
+        return false;
+
+    for (uint32_t i = 0; i < numFuncNames; i++) {
+        UniqueChars funcName = MaybeDecodeName(cx, d);
+        if (!funcName)
+            return false;
+
+        result[i] = strlen(funcName.get()) ? Move(funcName) : nullptr;
+
+        // Skipping local names for a function.
+        uint32_t numLocals;
+        if (!d.readVarU32(&numLocals))
+            return false;
+
+        for (uint32_t j = 0; j < numLocals; j++) {
+            UniqueChars localName = MaybeDecodeName(cx, d);
+            if (!localName) {
+                cx->clearPendingException();
+                return false;
+            }
+
+            Unused << localName;
+        }
+    }
+
+    *funcNames = Move(result);
+    return true;
+}
+
+static bool
+DecodeNameSection(JSContext* cx, Decoder& d, CacheableCharsVector* funcNames)
+{
+    uint32_t sectionStart, sectionSize;
+    if (!d.startSection(NameSectionId, &sectionStart, &sectionSize))
+        return Fail(cx, d, "failed to start section");
+    if (sectionStart == Decoder::NotStarted)
+        return true;
+
+    if (!MaybeDecodeNameSectionBody(cx, d, sectionStart, sectionSize, funcNames)) {
+        // This section does not cause validation for the whole module to fail and
+        // is instead treated as if the section was absent.
+        d.ignoreSection(sectionStart, sectionSize);
+        return true;
+    }
+
+    if (!d.finishSection(sectionStart, sectionSize))
+        return Fail(cx, d, "names section byte size mismatch");
+
+    return true;
+}
+
+
+static bool
 DecodeModule(JSContext* cx, UniqueChars file, const uint8_t* bytes, uint32_t length,
-             ImportNameVector* importNames, UniqueExportMap* exportMap,
+             ImportNameVector* importNames, SharedExportMap* exportMap,
              MutableHandle<ArrayBufferObject*> heap, MutableHandle<WasmModuleObject*> moduleObj)
 {
     Decoder d(bytes, bytes + length);
@@ -1103,26 +1147,32 @@ DecodeModule(JSContext* cx, UniqueChars file, const uint8_t* bytes, uint32_t len
         return false;
 
     CacheableCharsVector funcNames;
+    if (!DecodeNameSection(cx, d, &funcNames))
+        return false;
 
     while (!d.done()) {
         if (!d.skipSection())
             return Fail(cx, d, "failed to skip unknown section at end");
     }
 
-    UniqueModuleData module;
-    UniqueStaticLinkData staticLink;
+    UniqueCodeSegment code;
+    SharedMetadata metadata;
+    SharedStaticLinkData staticLinkData;
     SlowFunctionVector slowFuncs(cx);
-    if (!mg.finish(Move(funcNames), &module, &staticLink, exportMap, &slowFuncs))
+    if (!mg.finish(Move(funcNames), &code, &metadata, &staticLinkData, exportMap, &slowFuncs))
         return false;
 
     moduleObj.set(WasmModuleObject::create(cx));
     if (!moduleObj)
         return false;
 
-    if (!moduleObj->init(cx->new_<Module>(Move(module))))
+    auto module = cx->new_<Module>(Move(code), *metadata);
+    if (!module)
         return false;
 
-    return moduleObj->module().staticallyLink(cx, *staticLink);
+    moduleObj->init(*module);
+
+    return moduleObj->module().staticallyLink(cx, *staticLinkData);
 }
 
 /*****************************************************************************/
@@ -1155,9 +1205,9 @@ CheckCompilerSupport(JSContext* cx)
 }
 
 static bool
-GetProperty(JSContext* cx, HandleObject obj, const Bytes& bytes, MutableHandleValue v)
+GetProperty(JSContext* cx, HandleObject obj, const char* chars, MutableHandleValue v)
 {
-    JSAtom* atom = AtomizeUTF8Chars(cx, (char*)bytes.begin(), bytes.length());
+    JSAtom* atom = AtomizeUTF8Chars(cx, chars, strlen(chars));
     if (!atom)
         return false;
 
@@ -1174,15 +1224,15 @@ ImportFunctions(JSContext* cx, HandleObject importObj, const ImportNameVector& i
 
     for (const ImportName& name : importNames) {
         RootedValue v(cx);
-        if (!GetProperty(cx, importObj, name.module, &v))
+        if (!GetProperty(cx, importObj, name.module.get(), &v))
             return false;
 
-        if (!name.func.empty()) {
+        if (strlen(name.func.get()) > 0) {
             if (!v.isObject())
                 return Fail(cx, "import object field is not an Object");
 
             RootedObject obj(cx, &v.toObject());
-            if (!GetProperty(cx, obj, name.func, &v))
+            if (!GetProperty(cx, obj, name.func.get(), &v))
                 return false;
         }
 
@@ -1249,7 +1299,7 @@ wasm::Eval(JSContext* cx, Handle<TypedArrayObject*> code, HandleObject importObj
         return false;
 
     ImportNameVector importNames;
-    UniqueExportMap exportMap;
+    SharedExportMap exportMap;
     Rooted<ArrayBufferObject*> heap(cx);
     Rooted<WasmModuleObject*> moduleObj(cx);
 
@@ -1272,7 +1322,7 @@ wasm::Eval(JSContext* cx, Handle<TypedArrayObject*> code, HandleObject importObj
     if (!CreateInstance(cx, exportObj, instance))
         return false;
 
-    if (cx->compartment()->debuggerObservesAsmJS()) {
+    if (cx->compartment()->isDebuggee()) {
         Bytes source;
         if (!source.append(bytes, length))
             return false;

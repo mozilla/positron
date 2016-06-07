@@ -290,7 +290,7 @@ SetPaintPattern(SkPaint& aPaint, const Pattern& aPattern, Float aAlpha = 1.0)
 
       sk_sp<SkShader> shader = SkShader::MakeBitmapShader(bitmap, xTileMode, yTileMode, &mat);
       aPaint.setShader(shader);
-      if (pat.mFilter == Filter::POINT) {
+      if (pat.mSamplingFilter == SamplingFilter::POINT) {
         aPaint.setFilterQuality(kNone_SkFilterQuality);
       }
       break;
@@ -405,7 +405,7 @@ DrawTargetSkia::DrawSurface(SourceSurface *aSurface,
   SkBitmap bitmap = GetBitmapForSurface(aSurface);
 
   AutoPaintSetup paint(mCanvas.get(), aOptions, &aDest);
-  if (aSurfOptions.mFilter == Filter::POINT) {
+  if (aSurfOptions.mSamplingFilter == SamplingFilter::POINT) {
     paint.mPaint.setFilterQuality(kNone_SkFilterQuality);
   }
 
@@ -1018,9 +1018,13 @@ DrawTargetSkia::FillGlyphs(ScaledFont *aFont,
 #endif
 
   ScaledFontBase* skiaFont = static_cast<ScaledFontBase*>(aFont);
+  SkTypeface* typeface = skiaFont->GetSkTypeface();
+  if (!typeface) {
+    return;
+  }
 
   AutoPaintSetup paint(mCanvas.get(), aOptions, aPattern);
-  paint.mPaint.setTypeface(skiaFont->GetSkTypeface());
+  paint.mPaint.setTypeface(typeface);
   paint.mPaint.setTextSize(SkFloatToScalar(skiaFont->mSize));
   paint.mPaint.setTextEncoding(SkPaint::kGlyphID_TextEncoding);
 
@@ -1066,6 +1070,14 @@ DrawTargetSkia::FillGlyphs(ScaledFont *aFont,
     } else {
       paint.mPaint.setHinting(SkPaint::kNormal_Hinting);
     }
+  }
+
+  if (!shouldLCDRenderText && aFont->GetType() == FontType::GDI) {
+    // If we have non LCD GDI text, Cairo currently always uses cleartype fonts and
+    // converts them to grayscale. Force Skia to do the same, otherwise we use
+    // GDI fonts with the ANTIALIASED_QUALITY which is generally bolder than
+    // Cleartype fonts.
+    paint.mPaint.setFlags(paint.mPaint.getFlags() | SkPaint::kGenA8FromLCD_Flag);
   }
 
   std::vector<uint16_t> indices;

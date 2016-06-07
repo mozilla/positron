@@ -66,7 +66,7 @@ BindMaskForProgram(ShaderProgramOGL* aProgram, TextureSourceOGL* aSourceMask,
                    GLenum aTexUnit, const gfx::Matrix4x4& aTransform)
 {
   MOZ_ASSERT(LOCAL_GL_TEXTURE0 <= aTexUnit && aTexUnit <= LOCAL_GL_TEXTURE31);
-  aSourceMask->BindTexture(aTexUnit, gfx::Filter::LINEAR);
+  aSourceMask->BindTexture(aTexUnit, gfx::SamplingFilter::LINEAR);
   aProgram->SetMaskTextureUnit(aTexUnit - LOCAL_GL_TEXTURE0);
   aProgram->SetMaskLayerTransform(aTransform);
 }
@@ -131,8 +131,10 @@ CompositorOGL::CreateContext()
     caps.preserve = false;
     caps.bpp16 = gfxPlatform::GetPlatform()->GetOffscreenFormat() == SurfaceFormat::R5G6B5_UINT16;
 
+    nsCString discardFailureId;
     context = GLContextProvider::CreateOffscreen(mSurfaceSize,
-                                                 caps, CreateContextFlags::REQUIRE_COMPAT_PROFILE);
+                                                 caps, CreateContextFlags::REQUIRE_COMPAT_PROFILE,
+                                                 discardFailureId);
   }
 
   if (!context) {
@@ -1005,6 +1007,8 @@ CompositorOGL::DrawQuad(const Rect& aRect,
     return;
   }
 
+  MakeCurrent();
+
   IntPoint offset = mCurrentRenderTarget->GetOrigin();
   IntSize size = mCurrentRenderTarget->GetSize();
 
@@ -1246,9 +1250,9 @@ CompositorOGL::DrawQuad(const Rect& aRect,
 
       didSetBlendMode = SetBlendMode(gl(), blendMode, texturedEffect->mPremultiplied);
 
-      gfx::Filter filter = texturedEffect->mFilter;
+      gfx::SamplingFilter samplingFilter = texturedEffect->mSamplingFilter;
 
-      source->AsSourceOGL()->BindTexture(LOCAL_GL_TEXTURE0, filter);
+      source->AsSourceOGL()->BindTexture(LOCAL_GL_TEXTURE0, samplingFilter);
 
       program->SetTextureUnit(0);
 
@@ -1279,9 +1283,9 @@ CompositorOGL::DrawQuad(const Rect& aRect,
         return;
       }
 
-      sourceY->BindTexture(LOCAL_GL_TEXTURE0, effectYCbCr->mFilter);
-      sourceCb->BindTexture(LOCAL_GL_TEXTURE1, effectYCbCr->mFilter);
-      sourceCr->BindTexture(LOCAL_GL_TEXTURE2, effectYCbCr->mFilter);
+      sourceY->BindTexture(LOCAL_GL_TEXTURE0, effectYCbCr->mSamplingFilter);
+      sourceCb->BindTexture(LOCAL_GL_TEXTURE1, effectYCbCr->mSamplingFilter);
+      sourceCr->BindTexture(LOCAL_GL_TEXTURE2, effectYCbCr->mSamplingFilter);
 
       program->SetYCbCrTextureUnits(Y, Cb, Cr);
       program->SetTextureTransform(Matrix4x4());
@@ -1312,8 +1316,8 @@ CompositorOGL::DrawQuad(const Rect& aRect,
         return;
       }
 
-      sourceY->BindTexture(LOCAL_GL_TEXTURE0, effectNV12->mFilter);
-      sourceCbCr->BindTexture(LOCAL_GL_TEXTURE1, effectNV12->mFilter);
+      sourceY->BindTexture(LOCAL_GL_TEXTURE0, effectNV12->mSamplingFilter);
+      sourceCbCr->BindTexture(LOCAL_GL_TEXTURE1, effectNV12->mSamplingFilter);
 
       if (config.mFeatures & ENABLE_TEXTURE_RECT) {
         // This is used by IOSurface that use 0,0...w,h coordinate rather then 0,0..1,1.
@@ -1385,8 +1389,8 @@ CompositorOGL::DrawQuad(const Rect& aRect,
         return;
       }
 
-      sourceOnBlack->BindTexture(LOCAL_GL_TEXTURE0, effectComponentAlpha->mFilter);
-      sourceOnWhite->BindTexture(LOCAL_GL_TEXTURE1, effectComponentAlpha->mFilter);
+      sourceOnBlack->BindTexture(LOCAL_GL_TEXTURE0, effectComponentAlpha->mSamplingFilter);
+      sourceOnWhite->BindTexture(LOCAL_GL_TEXTURE1, effectComponentAlpha->mSamplingFilter);
 
       program->SetBlackTextureUnit(0);
       program->SetWhiteTextureUnit(1);
@@ -1457,6 +1461,8 @@ CompositorOGL::EndFrame()
     js::ProfileEntry::Category::GRAPHICS);
 
   MOZ_ASSERT(mCurrentRenderTarget == mWindowRenderTarget, "Rendering target not properly restored");
+
+  Compositor::EndFrame();
 
 #ifdef MOZ_DUMP_PAINTING
   if (gfxEnv::DumpCompositorTextures()) {

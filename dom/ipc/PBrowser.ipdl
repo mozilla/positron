@@ -71,6 +71,7 @@ using nsEventStatus from "mozilla/EventForwards.h";
 using nsSizeMode from "nsIWidgetListener.h";
 using mozilla::widget::CandidateWindowPosition from "ipc/nsGUIEventIPC.h";
 using class mozilla::NativeEventData from "ipc/nsGUIEventIPC.h";
+using mozilla::FontRange from "ipc/nsGUIEventIPC.h";
 
 namespace mozilla {
 namespace dom {
@@ -461,6 +462,16 @@ parent:
      */
     async AsyncAuthPrompt(nsCString uri, nsString realm, uint64_t aCallbackId);
 
+    /**
+     * Look up dictionary by selected word for OSX
+     *
+     * @param aText       The word to look up
+     * @param aFontRange  Text decoration of aText
+     * @param aIsVertical true if vertical layout
+     */
+    async LookUpDictionary(nsString aText, FontRange[] aFontRangeArray,
+                           bool aIsVertical, LayoutDeviceIntPoint aPoint);
+
     async __delete__();
 
     async ReplyKeyEvent(WidgetKeyboardEvent event);
@@ -787,9 +798,10 @@ child:
     /**
      * Tell the child to print the current page with the given settings.
      *
+     * @param aOuterWindowID the ID of the outer window to print
      * @param aPrintData the serialized settings to print with
      */
-    async Print(PrintData aPrintData);
+    async Print(uint64_t aOuterWindowID, PrintData aPrintData);
 
 /*
  * FIXME: write protocol!

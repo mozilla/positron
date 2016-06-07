@@ -3558,7 +3558,7 @@ JS_FRIEND_API(void)
 js::DumpInterpreterFrame(JSContext* cx, InterpreterFrame* start)
 {
     /* This should only called during live debugging. */
-    ScriptFrameIter i(cx, ScriptFrameIter::GO_THROUGH_SAVED);
+    ScriptFrameIter i(cx);
     if (!start) {
         if (i.done()) {
             fprintf(stderr, "no stack for cx = %p\n", (void*) cx);
@@ -3862,7 +3862,7 @@ JSObject::traceChildren(JSTracer* trc)
 
         do {
             if (nobj->denseElementsAreCopyOnWrite()) {
-                HeapPtrNativeObject& owner = nobj->getElementsHeader()->ownerObject();
+                GCPtrNativeObject& owner = nobj->getElementsHeader()->ownerObject();
                 if (owner != nobj) {
                     TraceEdge(trc, &owner, "objectElementsOwner");
                     break;

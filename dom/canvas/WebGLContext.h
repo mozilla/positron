@@ -101,6 +101,7 @@ class WebGLSampler;
 class WebGLShader;
 class WebGLShaderPrecisionFormat;
 class WebGLTexture;
+class WebGLTimerQuery;
 class WebGLTransformFeedback;
 class WebGLUniformLocation;
 class WebGLVertexArray;
@@ -376,7 +377,7 @@ public:
     bool TryToRestoreContext();
 
     void AssertCachedBindings();
-    void AssertCachedState();
+    void AssertCachedGlobalState();
 
     dom::HTMLCanvasElement* GetCanvas() const { return mCanvasElement; }
 
@@ -1201,24 +1202,26 @@ public:
     virtual bool IsWebGL2() const = 0;
 
 protected:
-    bool InitWebGL2(nsACString* const out_failReason);
+    bool InitWebGL2(nsACString* const out_failReason, nsACString* const out_failureId);
 
-    bool CreateAndInitGL(bool forceEnabled, nsACString* const out_failReason);
+    bool CreateAndInitGL(bool forceEnabled, nsACString* const out_failReason, nsACString* const out_failureId);
     bool ResizeBackbuffer(uint32_t width, uint32_t height);
 
     typedef already_AddRefed<gl::GLContext> FnCreateGL_T(const gl::SurfaceCaps& caps,
                                                          gl::CreateContextFlags flags,
                                                          WebGLContext* webgl,
-                                                         nsACString* const out_failReason);
+                                                         nsACString* const out_failReason,
+                                                         nsACString* const out_failureId);
 
     bool CreateAndInitGLWith(FnCreateGL_T fnCreateGL, const gl::SurfaceCaps& baseCaps,
                              gl::CreateContextFlags flags,
-                             nsACString* const out_failReason);
+                             nsACString* const out_failReason,
+                             nsACString* const out_failureId);
     void ThrowEvent_WebGLContextCreationError(const nsACString& text);
 
     // -------------------------------------------------------------------------
     // Validation functions (implemented in WebGLContextValidate.cpp)
-    bool InitAndValidateGL(nsACString* const out_failReason);
+    bool InitAndValidateGL(nsACString* const out_failReason, nsACString* const out_failureId);
     bool ValidateBlendEquationEnum(GLenum cap, const char* info);
     bool ValidateBlendFuncDstEnum(GLenum mode, const char* info);
     bool ValidateBlendFuncSrcEnum(GLenum mode, const char* info);
@@ -1392,18 +1395,17 @@ protected:
     WebGLRefPtr<WebGLTransformFeedback> mBoundTransformFeedback;
     WebGLRefPtr<WebGLVertexArray> mBoundVertexArray;
 
-    LinkedList<WebGLTexture> mTextures;
     LinkedList<WebGLBuffer> mBuffers;
+    LinkedList<WebGLFramebuffer> mFramebuffers;
     LinkedList<WebGLProgram> mPrograms;
     LinkedList<WebGLQuery> mQueries;
-    LinkedList<WebGLShader> mShaders;
     LinkedList<WebGLRenderbuffer> mRenderbuffers;
-    LinkedList<WebGLFramebuffer> mFramebuffers;
-    LinkedList<WebGLVertexArray> mVertexArrays;
-
-    // TODO(djg): Does this need a rethink? Should it be WebGL2Context?
     LinkedList<WebGLSampler> mSamplers;
+    LinkedList<WebGLShader> mShaders;
+    LinkedList<WebGLTexture> mTextures;
+    LinkedList<WebGLTimerQuery> mTimerQueries;
     LinkedList<WebGLTransformFeedback> mTransformFeedbacks;
+    LinkedList<WebGLVertexArray> mVertexArrays;
 
     WebGLRefPtr<WebGLTransformFeedback> mDefaultTransformFeedback;
     WebGLRefPtr<WebGLVertexArray> mDefaultVertexArray;

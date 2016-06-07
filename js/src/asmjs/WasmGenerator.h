@@ -84,21 +84,22 @@ struct ModuleGeneratorData
 {
     CompileArgs                     args;
     ModuleKind                      kind;
-    uint32_t                        numTableElems;
     mozilla::Atomic<uint32_t>       minHeapLength;
 
     DeclaredSigVector               sigs;
-    TableModuleGeneratorDataVector  sigToTable;
     DeclaredSigPtrVector            funcSigs;
     ImportModuleGeneratorDataVector imports;
     GlobalDescVector                globals;
+
+    TableModuleGeneratorData        wasmTable;
+    TableModuleGeneratorDataVector  asmJSSigToTable;
 
     uint32_t funcSigIndex(uint32_t funcIndex) const {
         return funcSigs[funcIndex] - sigs.begin();
     }
 
     explicit ModuleGeneratorData(ExclusiveContext* cx, ModuleKind kind = ModuleKind::Wasm)
-      : args(cx), kind(kind), numTableElems(0), minHeapLength(0)
+      : args(cx), kind(kind), minHeapLength(0)
     {}
 };
 
@@ -118,8 +119,9 @@ class MOZ_STACK_CLASS ModuleGenerator
     jit::JitContext                 jcx_;
 
     // Data handed back to the caller in finish()
-    UniqueModuleData                module_;
-    UniqueExportMap                 exportMap_;
+    uint32_t                        globalDataLength_;
+    MutableMetadata                 metadata_;
+    MutableExportMap                exportMap_;
     SlowFunctionVector              slowFuncs_;
 
     // Data scoped to the ModuleGenerator's lifetime
@@ -147,14 +149,13 @@ class MOZ_STACK_CLASS ModuleGenerator
 
     MOZ_MUST_USE bool finishOutstandingTask();
     bool funcIsDefined(uint32_t funcIndex) const;
-    uint32_t funcEntry(uint32_t funcIndex) const;
+    const CodeRange& funcCodeRange(uint32_t funcIndex) const;
     MOZ_MUST_USE bool convertOutOfRangeBranchesToThunks();
     MOZ_MUST_USE bool finishTask(IonCompileTask* task);
     MOZ_MUST_USE bool finishCodegen(StaticLinkData* link);
-    MOZ_MUST_USE bool finishStaticLinkData(uint8_t* code, uint32_t codeBytes, StaticLinkData* link);
+    MOZ_MUST_USE bool finishStaticLinkData(uint8_t* code, uint32_t codeLength, StaticLinkData* link);
     MOZ_MUST_USE bool addImport(const Sig& sig, uint32_t globalDataOffset);
-    MOZ_MUST_USE bool allocateGlobalBytes(uint32_t bytes, uint32_t align,
-                                          uint32_t* globalDataOffset);
+    MOZ_MUST_USE bool allocateGlobalBytes(uint32_t bytes, uint32_t align, uint32_t* globalDataOff);
 
   public:
     explicit ModuleGenerator(ExclusiveContext* cx);
@@ -162,8 +163,8 @@ class MOZ_STACK_CLASS ModuleGenerator
 
     MOZ_MUST_USE bool init(UniqueModuleGeneratorData shared, UniqueChars filename);
 
-    bool isAsmJS() const { return module_->kind == ModuleKind::AsmJS; }
-    CompileArgs args() const { return module_->compileArgs; }
+    bool isAsmJS() const { return metadata_->kind == ModuleKind::AsmJS; }
+    CompileArgs args() const { return metadata_->compileArgs; }
     jit::MacroAssembler& masm() { return masm_; }
 
     // Heap usage:
@@ -175,7 +176,7 @@ class MOZ_STACK_CLASS ModuleGenerator
     const DeclaredSig& sig(uint32_t sigIndex) const;
 
     // Function declarations:
-    uint32_t numFuncSigs() const { return module_->numFuncs; }
+    uint32_t numFuncSigs() const { return shared_->funcSigs.length(); }
     const DeclaredSig& funcSig(uint32_t funcIndex) const;
 
     // Globals:
@@ -199,9 +200,6 @@ class MOZ_STACK_CLASS ModuleGenerator
                                     FunctionGenerator* fg);
     MOZ_MUST_USE bool finishFuncDefs();
 
-    // Function-pointer tables:
-    static const uint32_t BadIndirectCall = UINT32_MAX;
-
     // asm.js lazy initialization:
     void initSig(uint32_t sigIndex, Sig&& sig);
     void initFuncSig(uint32_t funcIndex, uint32_t sigIndex);
@@ -210,13 +208,14 @@ class MOZ_STACK_CLASS ModuleGenerator
     void initSigTableElems(uint32_t sigIndex, Uint32Vector&& elemFuncIndices);
     void bumpMinHeapLength(uint32_t newMinHeapLength);
 
-    // Return a ModuleData object which may be used to construct a Module, the
+    // Return a Metadata object which may be used to construct a Module, the
     // StaticLinkData required to call Module::staticallyLink, and the list of
     // functions that took a long time to compile.
     MOZ_MUST_USE bool finish(CacheableCharsVector&& prettyFuncNames,
-                             UniqueModuleData* module,
-                             UniqueStaticLinkData* staticLinkData,
-                             UniqueExportMap* exportMap,
+                             UniqueCodeSegment* codeSegment,
+                             SharedMetadata* metadata,
+                             SharedStaticLinkData* staticLinkData,
+                             SharedExportMap* exportMap,
                              SlowFunctionVector* slowFuncs);
 };
 

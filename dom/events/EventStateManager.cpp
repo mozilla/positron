@@ -816,6 +816,7 @@ EventStateManager::PreHandleEvent(nsPresContext* aPresContext,
   case eContentCommandUndo:
   case eContentCommandRedo:
   case eContentCommandPasteTransferable:
+  case eContentCommandLookUpDictionary:
     DoContentCommandEvent(aEvent->AsContentCommandEvent());
     break;
   case eContentCommandScroll:
@@ -1536,7 +1537,8 @@ EventStateManager::FireContextClick()
       }
       else if (mGestureDownContent->IsAnyOfHTMLElements(nsGkAtoms::applet,
                                                         nsGkAtoms::embed,
-                                                        nsGkAtoms::object)) {
+                                                        nsGkAtoms::object,
+                                                        nsGkAtoms::label)) {
         allowedToDispatch = false;
       }
     }
@@ -2030,8 +2032,9 @@ EventStateManager::GetContentViewer(nsIContentViewer** aCv)
 {
   *aCv = nullptr;
 
-  nsCOMPtr<nsPIDOMWindowOuter> rootWindow;
-  rootWindow = mDocument->GetWindow()->GetPrivateRoot();
+  nsPIDOMWindowOuter* window = mDocument->GetWindow();
+  if (!window) return NS_ERROR_FAILURE;
+  nsCOMPtr<nsPIDOMWindowOuter> rootWindow = window->GetPrivateRoot();
   if (!rootWindow) return NS_ERROR_FAILURE;
 
   TabChild* tabChild = TabChild::GetFrom(rootWindow);
@@ -4398,6 +4401,9 @@ EventStateManager::SetPointerLock(nsIWidget* aWidget,
     // pre-pointerlock position, so that the synthetic mouse event reports
     // no movement.
     sLastRefPoint = mPreLockPoint;
+    // Reset SynthCenteringPoint to invalid so that next time we start
+    // locking pointer, it has its initial value.
+    sSynthCenteringPoint = kInvalidRefPoint;
     if (aWidget) {
       aWidget->SynthesizeNativeMouseMove(
         mPreLockPoint + aWidget->WidgetToScreenOffset(), nullptr);
@@ -5220,6 +5226,9 @@ EventStateManager::DoContentCommandEvent(WidgetContentCommandEvent* aEvent)
     case eContentCommandPasteTransferable:
       cmd = "cmd_pasteTransferable";
       break;
+    case eContentCommandLookUpDictionary:
+      cmd = "cmd_lookUpDictionary";
+      break;
     default:
       return NS_ERROR_NOT_IMPLEMENTED;
   }
@@ -5250,7 +5259,34 @@ EventStateManager::DoContentCommandEvent(WidgetContentCommandEvent* aEvent)
           rv = commandController->DoCommandWithParams(cmd, params);
           break;
         }
-        
+
+        case eContentCommandLookUpDictionary: {
+          nsCOMPtr<nsICommandController> commandController =
+            do_QueryInterface(controller);
+          if (NS_WARN_IF(!commandController)) {
+            return NS_ERROR_FAILURE;
+          }
+
+          nsCOMPtr<nsICommandParams> params =
+            do_CreateInstance("@mozilla.org/embedcomp/command-params;1", &rv);
+          if (NS_WARN_IF(NS_FAILED(rv))) {
+            return rv;
+          }
+
+          rv = params->SetLongValue("x", aEvent->mRefPoint.x);
+          if (NS_WARN_IF(NS_FAILED(rv))) {
+            return rv;
+          }
+
+          rv = params->SetLongValue("y", aEvent->mRefPoint.y);
+          if (NS_WARN_IF(NS_FAILED(rv))) {
+            return rv;
+          }
+
+          rv = commandController->DoCommandWithParams(cmd, params);
+          break;
+        }
+
         default:
           rv = controller->DoCommand(cmd);
           break;

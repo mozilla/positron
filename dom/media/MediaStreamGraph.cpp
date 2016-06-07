@@ -185,12 +185,58 @@ MediaStreamGraphImpl::ExtractPendingInput(SourceMediaStream* aStream,
     for (int32_t i = aStream->mUpdateTracks.Length() - 1; i >= 0; --i) {
       SourceMediaStream::TrackData* data = &aStream->mUpdateTracks[i];
       aStream->ApplyTrackDisabling(data->mID, data->mData);
+      // Dealing with NotifyQueuedTrackChanges and NotifyQueuedAudioData part.
+
+      // The logic is different from the manipulating of aStream->mTracks part.
+      // So it is not combined with the manipulating of aStream->mTracks part.
       StreamTime offset = (data->mCommands & SourceMediaStream::TRACK_CREATE)
           ? data->mStart : aStream->mTracks.FindTrack(data->mID)->GetSegment()->GetDuration();
-      for (MediaStreamListener* l : aStream->mListeners) {
-        l->NotifyQueuedTrackChanges(this, data->mID,
-                                    offset, data->mCommands, *data->mData);
+
+      // Audio case.
+      if (data->mData->GetType() == MediaSegment::AUDIO) {
+        if (data->mCommands) {
+          MOZ_ASSERT(!(data->mCommands & SourceMediaStream::TRACK_UNUSED));
+          for (MediaStreamListener* l : aStream->mListeners) {
+            if (data->mCommands & SourceMediaStream::TRACK_END) {
+              l->NotifyQueuedAudioData(this, data->mID,
+                                       offset, *(static_cast<AudioSegment*>(data->mData.get())));
+            }
+            l->NotifyQueuedTrackChanges(this, data->mID,
+                                        offset, data->mCommands, *data->mData);
+            if (data->mCommands & SourceMediaStream::TRACK_CREATE) {
+              l->NotifyQueuedAudioData(this, data->mID,
+                                       offset, *(static_cast<AudioSegment*>(data->mData.get())));
+            }
+          }
+        } else {
+          for (MediaStreamListener* l : aStream->mListeners) {
+              l->NotifyQueuedAudioData(this, data->mID,
+                                       offset, *(static_cast<AudioSegment*>(data->mData.get())));
+          }
+        }
       }
+
+      // Video case.
+      if (data->mData->GetType() == MediaSegment::VIDEO) {
+        if (data->mCommands) {
+          MOZ_ASSERT(!(data->mCommands & SourceMediaStream::TRACK_UNUSED));
+          for (MediaStreamListener* l : aStream->mListeners) {
+            l->NotifyQueuedTrackChanges(this, data->mID,
+                                        offset, data->mCommands, *data->mData);
+          }
+        } else {
+          // Fixme: This part will be removed in the bug 1201363. It will be
+          // removed in changeset "Do not copy video segment to StreamTracks in
+          // TrackUnionStream."
+
+          // Dealing with video and not TRACK_CREATE and TRACK_END case.
+          for (MediaStreamListener* l : aStream->mListeners) {
+            l->NotifyQueuedTrackChanges(this, data->mID,
+                                        offset, data->mCommands, *data->mData);
+          }
+        }
+      }
+
       for (TrackBound<MediaStreamTrackListener>& b : aStream->mTrackListeners) {
         if (b.mTrackID != data->mID) {
           continue;
@@ -1239,6 +1285,27 @@ MediaStreamGraphImpl::PrepareUpdatesToMainThreadState(bool aFinalUpdate)
   // We don't want to frequently update the main thread about timing update
   // when we are not running in realtime.
   if (aFinalUpdate || ShouldUpdateMainThread()) {
+    // Strip updates that will be obsoleted below, so as to keep the length of
+    // mStreamUpdates sane.
+    size_t keptUpdateCount = 0;
+    for (size_t i = 0; i < mStreamUpdates.Length(); ++i) {
+      MediaStream* stream = mStreamUpdates[i].mStream;
+      // RemoveStreamGraphThread() clears mStream in updates for
+      // streams that are removed from the graph.
+      MOZ_ASSERT(!stream || stream->GraphImpl() == this);
+      if (!stream || stream->MainThreadNeedsUpdates()) {
+        // Discard this update as it has either been cleared when the stream
+        // was destroyed or there will be a newer update below.
+        continue;
+      }
+      if (keptUpdateCount != i) {
+        mStreamUpdates[keptUpdateCount] = Move(mStreamUpdates[i]);
+        MOZ_ASSERT(!mStreamUpdates[i].mStream);
+      }
+      ++keptUpdateCount;
+    }
+    mStreamUpdates.TruncateLength(keptUpdateCount);
+
     mStreamUpdates.SetCapacity(mStreamUpdates.Length() + mStreams.Length() +
         mSuspendedStreams.Length());
     for (MediaStream* stream : AllStreams()) {

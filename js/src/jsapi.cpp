@@ -1305,14 +1305,16 @@ JS::CurrentGlobalOrNull(JSContext* cx)
 }
 
 JS_PUBLIC_API(Value)
-JS_ComputeThis(JSContext* cx, Value* vp)
+JS::detail::ComputeThis(JSContext* cx, Value* vp)
 {
     AssertHeapIsIdle(cx);
     assertSameCompartment(cx, JSValueArray(vp, 2));
-    CallReceiver call = CallReceiverFromVp(vp);
-    if (!BoxNonStrictThis(cx, call))
+
+    MutableHandleValue thisv = MutableHandleValue::fromMarkedLocation(&vp[1]);
+    if (!BoxNonStrictThis(cx, thisv, thisv))
         return NullValue();
-    return call.thisv();
+
+    return thisv;
 }
 
 JS_PUBLIC_API(void*)
@@ -4777,6 +4779,14 @@ JS::SetEnqueuePromiseJobCallback(JSRuntime* rt, JSEnqueuePromiseJobCallback call
     rt->enqueuePromiseJobCallbackData = data;
 }
 
+extern JS_PUBLIC_API(void)
+JS::SetPromiseRejectionTrackerCallback(JSRuntime* rt, JSPromiseRejectionTrackerCallback callback,
+                                       void* data /* = nullptr */)
+{
+    rt->promiseRejectionTrackerCallback = callback;
+    rt->promiseRejectionTrackerCallbackData = data;
+}
+
 JS_PUBLIC_API(JSObject*)
 JS::NewPromiseObject(JSContext* cx, HandleObject executor, HandleObject proto /* = nullptr */)
 {
@@ -4818,7 +4828,7 @@ JS::GetPromiseState(JS::HandleObject obj)
     return promise->as<PromiseObject>().state();
 }
 
-JS_PUBLIC_API(double)
+JS_PUBLIC_API(uint64_t)
 JS::GetPromiseID(JS::HandleObject promise)
 {
     return promise->as<PromiseObject>().getID();
@@ -5002,22 +5012,6 @@ JS_IsRunning(JSContext* cx)
     return cx->currentlyRunning();
 }
 
-JS_PUBLIC_API(bool)
-JS_SaveFrameChain(JSContext* cx)
-{
-    AssertHeapIsIdleOrIterating(cx);
-    CHECK_REQUEST(cx);
-    return cx->saveFrameChain();
-}
-
-JS_PUBLIC_API(void)
-JS_RestoreFrameChain(JSContext* cx)
-{
-    AssertHeapIsIdleOrIterating(cx);
-    CHECK_REQUEST(cx);
-    cx->restoreFrameChain();
-}
-
 JS::AutoSetAsyncStackForNewCalls::AutoSetAsyncStackForNewCalls(
   JSContext* cx, HandleObject stack, const char* asyncCause,
   JS::AutoSetAsyncStackForNewCalls::AsyncCallKind kind)
@@ -5055,8 +5049,6 @@ JS_NewStringCopyN(JSContext* cx, const char* s, size_t n)
 {
     AssertHeapIsIdle(cx);
     CHECK_REQUEST(cx);
-    if (!n)
-        return cx->names().empty;
     return NewStringCopyN<CanGC>(cx, s, n);
 }
 
@@ -5065,7 +5057,7 @@ JS_NewStringCopyZ(JSContext* cx, const char* s)
 {
     AssertHeapIsIdle(cx);
     CHECK_REQUEST(cx);
-    if (!s || !*s)
+    if (!s)
         return cx->runtime()->emptyString;
     return NewStringCopyZ<CanGC>(cx, s);
 }
@@ -6161,9 +6153,9 @@ JS_GetGCZealBits(JSContext* cx, uint32_t* zealBits, uint32_t* frequency, uint32_
 }
 
 JS_PUBLIC_API(void)
-JS_SetGCZeal(JSContext* cx, uint8_t zeal, uint32_t frequency)
+JS_SetGCZeal(JSRuntime* rt, uint8_t zeal, uint32_t frequency)
 {
-    cx->runtime()->gc.setZeal(zeal, frequency);
+    rt->gc.setZeal(zeal, frequency);
 }
 
 JS_PUBLIC_API(void)
@@ -6416,7 +6408,10 @@ DescribeScriptedCaller(JSContext* cx, AutoFilename* filename, unsigned* lineno,
     if (column)
         *column = 0;
 
-    NonBuiltinFrameIter i(cx);
+    if (!cx->compartment())
+        return false;
+
+    NonBuiltinFrameIter i(cx, cx->compartment()->principals());
     if (i.done())
         return false;
 
@@ -6461,9 +6456,6 @@ static bool
 GetScriptedCallerActivationFast(JSContext* cx, Activation** activation)
 {
     ActivationIterator activationIter(cx->runtime());
-
-    while (!activationIter.done() && activationIter->cx() != cx)
-        ++activationIter;
 
     if (activationIter.done()) {
         *activation = nullptr;

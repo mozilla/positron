@@ -65,8 +65,11 @@ using mozilla::PodMove;
 using mozilla::Maybe;
 
 static void
-selfHosting_ErrorReporter(JSContext* cx, const char* message, JSErrorReport* report)
+selfHosting_WarningReporter(JSContext* cx, const char* message, JSErrorReport* report)
 {
+    MOZ_ASSERT(report);
+    MOZ_ASSERT(JSREPORT_IS_WARNING(report->flags));
+
     PrintError(cx, stderr, message, report, true);
 }
 
@@ -1785,16 +1788,84 @@ js::ReportIncompatibleSelfHostedMethod(JSContext* cx, const CallArgs& args)
 
 // ES6, 25.4.1.6.
 static bool
-intrinsic_EnqueuePromiseJob(JSContext* cx, unsigned argc, Value* vp)
+intrinsic_EnqueuePromiseReactionJob(JSContext* cx, unsigned argc, Value* vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
-    MOZ_ASSERT(args.length() == 1);
-    MOZ_ASSERT(args[0].isObject());
-    MOZ_ASSERT(args[0].toObject().is<JSFunction>());
+    MOZ_ASSERT(args.length() == 2);
+    MOZ_ASSERT(args[0].toObject().as<NativeObject>().getDenseInitializedLength() == 4);
 
-    RootedFunction job(cx, &args[0].toObject().as<JSFunction>());
-    if (!cx->runtime()->enqueuePromiseJob(cx, job))
+    // When using JS::AddPromiseReactions, no actual promise is created, so we
+    // might not have one here.
+    RootedObject promise(cx);
+    if (args[1].isObject())
+        promise = UncheckedUnwrap(&args[1].toObject());
+
+#ifdef DEBUG
+    MOZ_ASSERT_IF(promise, promise->is<PromiseObject>());
+    RootedNativeObject jobArgs(cx, &args[0].toObject().as<NativeObject>());
+    MOZ_ASSERT((jobArgs->getDenseElement(0).isNumber() &&
+                (jobArgs->getDenseElement(0).toNumber() == PROMISE_HANDLER_IDENTITY ||
+                 jobArgs->getDenseElement(0).toNumber() == PROMISE_HANDLER_THROWER)) ||
+               jobArgs->getDenseElement(0).toObject().isCallable());
+    MOZ_ASSERT(jobArgs->getDenseElement(2).toObject().isCallable());
+    MOZ_ASSERT(jobArgs->getDenseElement(3).toObject().isCallable());
+#endif
+
+    RootedAtom funName(cx, cx->names().empty);
+    RootedFunction job(cx, NewNativeFunction(cx, PromiseReactionJob, 0, funName,
+                                             gc::AllocKind::FUNCTION_EXTENDED));
+    if (!job)
         return false;
+
+    job->setExtendedSlot(0, args[0]);
+    if (!cx->runtime()->enqueuePromiseJob(cx, job, promise))
+        return false;
+    args.rval().setUndefined();
+    return true;
+}
+
+// ES6, 25.4.1.6.
+static bool
+intrinsic_EnqueuePromiseResolveThenableJob(JSContext* cx, unsigned argc, Value* vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+
+#ifdef DEBUG
+    MOZ_ASSERT(args.length() == 2);
+    MOZ_ASSERT(UncheckedUnwrap(&args[1].toObject())->is<PromiseObject>());
+    RootedNativeObject jobArgs(cx, &args[0].toObject().as<NativeObject>());
+    MOZ_ASSERT(jobArgs->getDenseInitializedLength() == 3);
+    MOZ_ASSERT(jobArgs->getDenseElement(0).toObject().isCallable());
+    MOZ_ASSERT(jobArgs->getDenseElement(1).isObject());
+    MOZ_ASSERT(UncheckedUnwrap(&jobArgs->getDenseElement(2).toObject())->is<PromiseObject>());
+#endif
+
+    RootedAtom funName(cx, cx->names().empty);
+    RootedFunction job(cx, NewNativeFunction(cx, PromiseResolveThenableJob, 0, funName,
+                                             gc::AllocKind::FUNCTION_EXTENDED));
+    if (!job)
+        return false;
+
+    job->setExtendedSlot(0, args[0]);
+    RootedObject promise(cx, CheckedUnwrap(&args[1].toObject()));
+    if (!cx->runtime()->enqueuePromiseJob(cx, job, promise))
+        return false;
+    args.rval().setUndefined();
+    return true;
+}
+
+// ES2016, February 12 draft, 25.4.1.9.
+static bool
+intrinsic_HostPromiseRejectionTracker(JSContext* cx, unsigned argc, Value* vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+    MOZ_ASSERT(args.length() == 2);
+    MOZ_ASSERT(args[0].toObject().is<PromiseObject>());
+
+    Rooted<PromiseObject*> promise(cx, &args[0].toObject().as<PromiseObject>());
+    mozilla::DebugOnly<bool> isHandled = args[1].toBoolean();
+    MOZ_ASSERT(isHandled, "HostPromiseRejectionTracker intrinsic currently only marks as handled");
+    cx->runtime()->removeUnhandledRejectedPromise(cx, promise);
     args.rval().setUndefined();
     return true;
 }
@@ -2157,33 +2228,9 @@ intrinsic_onPromiseSettled(JSContext* cx, unsigned argc, Value* vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
     MOZ_ASSERT(args.length() == 1);
-    RootedObject promise(cx, &args[0].toObject());
-    JS::dbg::onPromiseSettled(cx, promise);
+    Rooted<PromiseObject*> promise(cx, &args[0].toObject().as<PromiseObject>());
+    promise->onSettled(cx);
     args.rval().setUndefined();
-    return true;
-}
-
-/**
- * Intrinsic used to tell the debugger about settled promises.
- *
- * This is invoked both when resolving and rejecting promises, after the
- * resulting state has been set on the promise, and it's up to the debugger
- * to act on this signal in whichever way it wants.
- */
-static bool
-intrinsic_captureCurrentStack(JSContext* cx, unsigned argc, Value* vp)
-{
-    CallArgs args = CallArgsFromVp(argc, vp);
-    MOZ_ASSERT(args.length() < 2);
-    unsigned maxFrameCount = 0;
-    if (args.length() == 1)
-        maxFrameCount = args[0].toInt32();
-
-    RootedObject stack(cx);
-    if (!JS::CaptureCurrentStack(cx, &stack, maxFrameCount))
-        return false;
-
-    args.rval().setObject(*stack);
     return true;
 }
 
@@ -2447,7 +2494,9 @@ static const JSFunctionSpec intrinsic_functions[] = {
 
     JS_FN("IsPromise",                      intrinsic_IsInstanceOfBuiltin<PromiseObject>, 1,0),
     JS_FN("IsWrappedPromise",               intrinsic_IsWrappedPromiseObject,     1, 0),
-    JS_FN("_EnqueuePromiseJob",             intrinsic_EnqueuePromiseJob,          1, 0),
+    JS_FN("_EnqueuePromiseReactionJob",     intrinsic_EnqueuePromiseReactionJob,  2, 0),
+    JS_FN("_EnqueuePromiseResolveThenableJob", intrinsic_EnqueuePromiseResolveThenableJob, 2, 0),
+    JS_FN("HostPromiseRejectionTracker",    intrinsic_HostPromiseRejectionTracker,2, 0),
     JS_FN("_GetOriginalPromiseConstructor", intrinsic_OriginalPromiseConstructor, 0, 0),
     JS_FN("RejectUnwrappedPromise",         intrinsic_RejectUnwrappedPromise,     2, 0),
     JS_FN("CallPromiseMethodIfWrapped",
@@ -2487,8 +2536,8 @@ static const JSFunctionSpec intrinsic_functions[] = {
 #undef LOAD_AND_STORE_SCALAR_FN_DECLS
 
 #define LOAD_AND_STORE_REFERENCE_FN_DECLS(_constant, _type, _name)      \
-    JS_FN("Store_" #_name, js::StoreReference##_type::Func, 3, 0),      \
-    JS_FN("Load_" #_name,  js::LoadReference##_type::Func, 3, 0),
+    JS_FN("Store_" #_name, js::StoreReference##_name::Func, 3, 0),      \
+    JS_FN("Load_" #_name,  js::LoadReference##_name::Func, 3, 0),
     JS_FOR_EACH_REFERENCE_TYPE_REPR(LOAD_AND_STORE_REFERENCE_FN_DECLS)
 #undef LOAD_AND_STORE_REFERENCE_FN_DECLS
 
@@ -2560,7 +2609,6 @@ static const JSFunctionSpec intrinsic_functions[] = {
     JS_FN("ModuleNamespaceExports", intrinsic_ModuleNamespaceExports, 1, 0),
 
     JS_FN("_dbg_onPromiseSettled", intrinsic_onPromiseSettled, 1, 0),
-    JS_FN("_dbg_captureCurrentStack", intrinsic_captureCurrentStack, 1, 0),
 
     JS_FS_END
 };
@@ -2638,6 +2686,64 @@ JSRuntime::createSelfHostingGlobal(JSContext* cx)
     return shg;
 }
 
+static void
+MaybePrintAndClearPendingException(JSContext* cx, FILE* file)
+{
+    if (!cx->isExceptionPending())
+        return;
+
+    AutoClearPendingException acpe(cx);
+
+    RootedValue exn(cx);
+    if (!cx->getPendingException(&exn)) {
+        fprintf(file, "error getting pending exception\n");
+        return;
+    }
+    cx->clearPendingException();
+
+    ErrorReport report(cx);
+    if (!report.init(cx, exn, js::ErrorReport::WithSideEffects)) {
+        fprintf(file, "out of memory initializing ErrorReport\n");
+        return;
+    }
+
+    MOZ_ASSERT(!JSREPORT_IS_WARNING(report.report()->flags));
+    PrintError(cx, file, report.message(), report.report(), true);
+}
+
+class MOZ_STACK_CLASS AutoSelfHostingErrorReporter
+{
+    JSContext* cx_;
+    bool prevDontReportUncaught_;
+    bool prevAutoJSAPIOwnsErrorReporting_;
+    JSErrorReporter oldReporter_;
+
+  public:
+    explicit AutoSelfHostingErrorReporter(JSContext* cx)
+      : cx_(cx),
+        prevDontReportUncaught_(cx_->options().dontReportUncaught()),
+        prevAutoJSAPIOwnsErrorReporting_(cx_->options().autoJSAPIOwnsErrorReporting())
+    {
+        cx_->options().setDontReportUncaught(true);
+        cx_->options().setAutoJSAPIOwnsErrorReporting(true);
+
+        oldReporter_ = JS_SetErrorReporter(cx_->runtime(), selfHosting_WarningReporter);
+    }
+    ~AutoSelfHostingErrorReporter() {
+        cx_->options().setDontReportUncaught(prevDontReportUncaught_);
+        cx_->options().setAutoJSAPIOwnsErrorReporting(prevAutoJSAPIOwnsErrorReporting_);
+
+        JS_SetErrorReporter(cx_->runtime(), oldReporter_);
+
+        // Exceptions in self-hosted code will usually be printed to stderr in
+        // ErrorToException, but not all exceptions are handled there. For
+        // instance, ReportOutOfMemory will throw the "out of memory" string
+        // without going through ErrorToException. We handle these other
+        // exceptions here.
+        MaybePrintAndClearPendingException(cx_, stderr);
+    }
+};
+
 bool
 JSRuntime::initSelfHosting(JSContext* cx)
 {
@@ -2660,21 +2766,25 @@ JSRuntime::initSelfHosting(JSContext* cx)
 
     JSAutoCompartment ac(cx, shg);
 
-    CompileOptions options(cx);
-    FillSelfHostingCompileOptions(options);
-
     /*
      * Set a temporary error reporter printing to stderr because it is too
      * early in the startup process for any other reporter to be registered
      * and we don't want errors in self-hosted code to be silently swallowed.
+     *
+     * This class also overrides the warning reporter to print warnings to
+     * stderr. See selfHosting_WarningReporter.
      */
-    JSErrorReporter oldReporter = JS_SetErrorReporter(cx->runtime(), selfHosting_ErrorReporter);
+    AutoSelfHostingErrorReporter errorReporter(cx);
+
+    CompileOptions options(cx);
+    FillSelfHostingCompileOptions(options);
+
     RootedValue rv(cx);
-    bool ok = true;
 
     char* filename = getenv("MOZ_SELFHOSTEDJS");
     if (filename) {
-        ok = ok && Evaluate(cx, options, filename, &rv);
+        if (!Evaluate(cx, options, filename, &rv))
+            return false;
     } else {
         uint32_t srcLen = GetRawScriptsSize();
 
@@ -2684,13 +2794,13 @@ JSRuntime::initSelfHosting(JSContext* cx)
         if (!src || !DecompressString(compressed, compressedLen,
                                       reinterpret_cast<unsigned char*>(src.get()), srcLen))
         {
-            ok = false;
+            return false;
         }
 
-        ok = ok && Evaluate(cx, options, src, srcLen, &rv);
+        if (!Evaluate(cx, options, src, srcLen, &rv))
+            return false;
     }
-    JS_SetErrorReporter(cx->runtime(), oldReporter);
-    return ok;
+    return true;
 }
 
 void
@@ -3069,8 +3179,16 @@ js::SelfHostedFunction(JSContext* cx, HandlePropertyName propName)
 bool
 js::IsSelfHostedFunctionWithName(JSFunction* fun, JSAtom* name)
 {
-    return fun->isSelfHostedBuiltin() &&
-           fun->getExtendedSlot(LAZY_FUNCTION_NAME_SLOT).toString() == name;
+    return fun->isSelfHostedBuiltin() && GetSelfHostedFunctionName(fun) == name;
+}
+
+JSAtom*
+js::GetSelfHostedFunctionName(JSFunction* fun)
+{
+    Value name = fun->getExtendedSlot(LAZY_FUNCTION_NAME_SLOT);
+    if (!name.isString())
+        return nullptr;
+    return &name.toString()->asAtom();
 }
 
 static_assert(JSString::MAX_LENGTH <= INT32_MAX,

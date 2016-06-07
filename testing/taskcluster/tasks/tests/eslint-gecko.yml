@@ -6,6 +6,7 @@ $inherits:
       build_name: 'eslint-gecko'
       build_type: 'opt'
 
+docker-image: lint
 task:
   metadata:
     name: '[TC] - ESLint'
@@ -15,7 +16,8 @@ task:
     image:
       type: 'task-image'
       path: 'public/image.tar'
-      taskId: '{{#task_id_for_image}}lint{{/task_id_for_image}}'
+      taskId:
+        task-reference: "<docker-image>"
 
     command:
       - bash
@@ -27,7 +29,7 @@ task:
           tar xvfz eslint.tar.gz &&
           rm eslint.tar.gz &&
           cd ../.. &&
-          testing/eslint/node_modules/.bin/eslint --plugin html --ext [.js,.jsm,.jsx,.xml,.html] -f tools/lint/eslint-formatter .
+          testing/eslint/node_modules/.bin/eslint --quiet --plugin html --ext [.js,.jsm,.jsx,.xml,.html] -f tools/lint/eslint-formatter .
 
   extra:
     locations:

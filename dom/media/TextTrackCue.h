@@ -172,19 +172,15 @@ public:
     }
   }
 
-  AlignSetting LineAlign() const
+  LineAlignSetting LineAlign() const
   {
     return mLineAlign;
   }
 
-  void SetLineAlign(AlignSetting& aLineAlign, ErrorResult& aRv)
+  void SetLineAlign(LineAlignSetting& aLineAlign, ErrorResult& aRv)
   {
-    if (mLineAlign == aLineAlign)
+    if (mLineAlign == aLineAlign) {
       return;
-
-    if (aLineAlign == AlignSetting::Left ||
-        aLineAlign == AlignSetting::Right) {
-      return aRv.Throw(NS_ERROR_DOM_SYNTAX_ERR);
     }
 
     mReset = true;
@@ -211,19 +207,15 @@ public:
     mPosition = aPosition;
   }
 
-  AlignSetting PositionAlign() const
+  PositionAlignSetting PositionAlign() const
   {
     return mPositionAlign;
   }
 
-  void SetPositionAlign(AlignSetting aPositionAlign, ErrorResult& aRv)
+  void SetPositionAlign(PositionAlignSetting aPositionAlign, ErrorResult& aRv)
   {
-    if (mPositionAlign == aPositionAlign)
+    if (mPositionAlign == aPositionAlign) {
       return;
-
-    if (aPositionAlign == AlignSetting::Left ||
-        aPositionAlign == AlignSetting::Right) {
-      return aRv.Throw(NS_ERROR_DOM_SYNTAX_ERR);
     }
 
     mReset = true;
@@ -304,6 +296,8 @@ public:
     return mReset;
   }
 
+  PositionAlignSetting ComputedPositionAlign();
+
   // Helper functions for implementation.
   bool
   operator==(const TextTrackCue& rhs) const
@@ -332,6 +326,16 @@ public:
 
   void SetTrackElement(HTMLTrackElement* aTrackElement);
 
+  void SetActive(bool aActive)
+  {
+    mActive = aActive;
+  }
+
+  bool GetActive()
+  {
+    return mActive;
+  }
+
 private:
   ~TextTrackCue();
 
@@ -347,7 +351,7 @@ private:
   RefPtr<HTMLTrackElement> mTrackElement;
   nsString mId;
   int32_t mPosition;
-  AlignSetting mPositionAlign;
+  PositionAlignSetting mPositionAlign;
   int32_t mSize;
   bool mPauseOnExit;
   bool mSnapToLines;
@@ -356,7 +360,7 @@ private:
   bool mLineIsAutoKeyword;
   long mLineLong;
   AlignSetting mAlign;
-  AlignSetting mLineAlign;
+  LineAlignSetting mLineAlign;
 
   // Holds the computed DOM elements that represent the parsed cue text.
   // http://www.whatwg.org/specs/web-apps/current-work/#text-track-cue-display-state
@@ -365,6 +369,8 @@ private:
   // anytime a property that relates to the display of the TextTrackCue is
   // changed.
   bool mReset;
+
+  bool mActive;
 
   static StaticRefPtr<nsIWebVTTParserWrapper> sParserWrapper;
 };

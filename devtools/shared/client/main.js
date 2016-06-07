@@ -1479,6 +1479,8 @@ WorkerClient.prototype = {
         aOnResponse(connectReponse, this.thread);
         return [connectResponse, this.thread];
       });
+    }, error => {
+      aOnResponse(error, null);
     });
   },
 
@@ -2481,8 +2483,6 @@ ObjectClient.prototype = {
    *
    * @param options Object
    *        A dictionary object with various boolean attributes:
-   *        - ignoreSafeGetters Boolean
-   *          If true, do not iterate over safe getters.
    *        - ignoreIndexedProperties Boolean
    *          If true, filters out Array items.
    *          e.g. properties names between `0` and `object.length`.

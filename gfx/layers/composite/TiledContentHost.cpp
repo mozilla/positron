@@ -19,7 +19,7 @@
 #include "nsPoint.h"                    // for IntPoint
 #include "nsPrintfCString.h"            // for nsPrintfCString
 #include "nsRect.h"                     // for IntRect
-#include "mozilla/layers/TiledContentClient.h"
+#include "mozilla/layers/TextureClient.h"
 
 namespace mozilla {
 using namespace gfx;
@@ -98,7 +98,7 @@ TiledContentHost::~TiledContentHost()
 }
 
 already_AddRefed<TexturedEffect>
-TiledContentHost::GenEffect(const gfx::Filter& aFilter)
+TiledContentHost::GenEffect(const gfx::SamplingFilter aSamplingFilter)
 {
   // If we can use hwc for this TiledContentHost, it implies that we have exactly
   // one high precision tile. Please check TiledContentHost::GetRenderState() for
@@ -113,7 +113,7 @@ TiledContentHost::GenEffect(const gfx::Filter& aFilter)
 
   return CreateTexturedEffect(tile.mTextureSource,
                               nullptr,
-                              aFilter,
+                              aSamplingFilter,
                               true,
                               tile.mTextureHost->GetRenderState());
 }
@@ -184,47 +184,6 @@ UseTileTexture(CompositableTextureHostRef& aTexture,
   }
 
   aTexture->PrepareTextureSource(aTextureSource);
-}
-
-bool
-GetCopyOnWriteLock(const TileLock& ipcLock, TileHost& aTile, ISurfaceAllocator* aAllocator) {
-  MOZ_ASSERT(aAllocator);
-
-  RefPtr<gfxSharedReadLock> sharedLock;
-  if (ipcLock.type() == TileLock::TShmemSection) {
-    sharedLock = gfxShmSharedReadLock::Open(aAllocator, ipcLock.get_ShmemSection());
-  } else {
-    if (!aAllocator->IsSameProcess()) {
-      // Trying to use a memory based lock instead of a shmem based one in
-      // the cross-process case is a bad security violation.
-      NS_ERROR("A client process may be trying to peek at the host's address space!");
-      return false;
-    }
-    sharedLock = reinterpret_cast<gfxMemorySharedReadLock*>(ipcLock.get_uintptr_t());
-    if (sharedLock) {
-      // The corresponding AddRef is in TiledClient::GetTileDescriptor
-      sharedLock.get()->Release();
-    }
-  }
-  aTile.mSharedLock = sharedLock;
-  return true;
-}
-
-void
-TiledLayerBufferComposite::MarkTilesForUnlock()
-{
-  // Tiles without an internal buffer will have internal locks
-  // held by the gpu driver until the previous draw operation has finished.
-  // We don't know when that will be exactly, so wait until we start the
-  // next composite before unlocking.
-  for (TileHost& tile : mRetainedTiles) {
-    // Tile with an internal buffer get unlocked as soon as we've uploaded,
-    // so won't have a lock at this point.
-    if (tile.mTextureHost && tile.mSharedLock) {
-      mDelayedUnlocks.AppendElement(tile.mSharedLock);
-      tile.mSharedLock = nullptr;
-    }
-  }
 }
 
 class TextureSourceRecycler
@@ -321,15 +280,10 @@ TiledLayerBufferComposite::UseTiles(const SurfaceDescriptorTiles& aTiles,
 
   const InfallibleTArray<TileDescriptor>& tileDescriptors = aTiles.tiles();
 
-  // Step 1, unlock all the old tiles that haven't been unlocked yet. Any tiles that
-  // exist in both the old and new sets will have been locked again by content, so this
-  // doesn't result in the surface being writeable again.
-  MarkTilesForUnlock();
-
   TextureSourceRecycler oldRetainedTiles(Move(mRetainedTiles));
   mRetainedTiles.SetLength(tileDescriptors.Length());
 
-  // Step 2, deserialize the incoming set of tiles into mRetainedTiles, and attempt
+  // Step 1, deserialize the incoming set of tiles into mRetainedTiles, and attempt
   // to recycle the TextureSource for any repeated tiles.
   //
   // Since we don't have any retained 'tile' object, we have to search for instances
@@ -349,17 +303,17 @@ TiledLayerBufferComposite::UseTiles(const SurfaceDescriptorTiles& aTiles,
 
     const TexturedTileDescriptor& texturedDesc = tileDesc.get_TexturedTileDescriptor();
 
-    const TileLock& ipcLock = texturedDesc.sharedLock();
-    if (!GetCopyOnWriteLock(ipcLock, tile, aAllocator)) {
-      return false;
-    }
-
     tile.mTextureHost = TextureHost::AsTextureHost(texturedDesc.textureParent());
     tile.mTextureHost->SetCompositor(aCompositor);
+    tile.mTextureHost->DeserializeReadLock(texturedDesc.sharedLock(), aAllocator);
 
     if (texturedDesc.textureOnWhite().type() == MaybeTexture::TPTextureParent) {
-      tile.mTextureHostOnWhite =
-        TextureHost::AsTextureHost(texturedDesc.textureOnWhite().get_PTextureParent());
+      tile.mTextureHostOnWhite = TextureHost::AsTextureHost(
+        texturedDesc.textureOnWhite().get_PTextureParent()
+      );
+      tile.mTextureHostOnWhite->DeserializeReadLock(
+        texturedDesc.sharedLockOnWhite(), aAllocator
+      );
     }
 
     tile.mTilePosition = newTiles.TilePosition(i);
@@ -383,7 +337,7 @@ TiledLayerBufferComposite::UseTiles(const SurfaceDescriptorTiles& aTiles,
     }
   }
 
-  // Step 3, attempt to recycle unused texture sources from the old tile set into new tiles.
+  // Step 2, attempt to recycle unused texture sources from the old tile set into new tiles.
   //
   // For gralloc, binding a new TextureHost to the existing TextureSource is the fastest way
   // to ensure that any implicit locking on the old gralloc image is released.
@@ -394,7 +348,7 @@ TiledLayerBufferComposite::UseTiles(const SurfaceDescriptorTiles& aTiles,
     oldRetainedTiles.RecycleTextureSource(tile);
   }
 
-  // Step 4, handle the texture uploads, texture source binding and release the
+  // Step 3, handle the texture uploads, texture source binding and release the
   // copy-on-write locks for textures with an internal buffer.
   for (size_t i = 0; i < mRetainedTiles.Length(); i++) {
     TileHost& tile = mRetainedTiles[i];
@@ -416,12 +370,6 @@ TiledLayerBufferComposite::UseTiles(const SurfaceDescriptorTiles& aTiles,
                      texturedDesc.updateRect(),
                      aCompositor);
     }
-
-    if (tile.mTextureHost->HasIntermediateBuffer()) {
-      // Now that we did the texture upload (in UseTileTexture), we can release
-      // the lock.
-      tile.ReadUnlock();
-    }
   }
 
   mTiles = newTiles;
@@ -436,22 +384,9 @@ TiledLayerBufferComposite::UseTiles(const SurfaceDescriptorTiles& aTiles,
 }
 
 void
-TiledLayerBufferComposite::ProcessDelayedUnlocks()
-{
-  for (gfxSharedReadLock* lock : mDelayedUnlocks) {
-    lock->ReadUnlock();
-  }
-  mDelayedUnlocks.Clear();
-}
-
-void
 TiledLayerBufferComposite::Clear()
 {
-  for (TileHost& tile : mRetainedTiles) {
-    tile.ReadUnlock();
-  }
   mRetainedTiles.Clear();
-  ProcessDelayedUnlocks();
   mTiles.mFirst = TileIntPoint();
   mTiles.mSize = TileIntSize();
   mValidRegion = nsIntRegion();
@@ -463,7 +398,7 @@ TiledContentHost::Composite(LayerComposite* aLayer,
                             EffectChain& aEffectChain,
                             float aOpacity,
                             const gfx::Matrix4x4& aTransform,
-                            const gfx::Filter& aFilter,
+                            const gfx::SamplingFilter aSamplingFilter,
                             const gfx::IntRect& aClipRect,
                             const nsIntRegion* aVisibleRegion /* = nullptr */)
 {
@@ -510,11 +445,9 @@ TiledContentHost::Composite(LayerComposite* aLayer,
   RenderLayerBuffer(mLowPrecisionTiledBuffer,
                     lowPrecisionOpacityReduction < 1.0f ? &backgroundColor : nullptr,
                     aEffectChain, lowPrecisionOpacityReduction * aOpacity,
-                    aFilter, aClipRect, *renderRegion, aTransform);
-  RenderLayerBuffer(mTiledBuffer, nullptr, aEffectChain, aOpacity, aFilter,
+                    aSamplingFilter, aClipRect, *renderRegion, aTransform);
+  RenderLayerBuffer(mTiledBuffer, nullptr, aEffectChain, aOpacity, aSamplingFilter,
                     aClipRect, *renderRegion, aTransform);
-  mLowPrecisionTiledBuffer.ProcessDelayedUnlocks();
-  mTiledBuffer.ProcessDelayedUnlocks();
 }
 
 
@@ -523,7 +456,7 @@ TiledContentHost::RenderTile(TileHost& aTile,
                              EffectChain& aEffectChain,
                              float aOpacity,
                              const gfx::Matrix4x4& aTransform,
-                             const gfx::Filter& aFilter,
+                             const gfx::SamplingFilter aSamplingFilter,
                              const gfx::IntRect& aClipRect,
                              const nsIntRegion& aScreenRegion,
                              const IntPoint& aTextureOffset,
@@ -551,7 +484,7 @@ TiledContentHost::RenderTile(TileHost& aTile,
   RefPtr<TexturedEffect> effect =
     CreateTexturedEffect(aTile.mTextureSource,
                          aTile.mTextureSourceOnWhite,
-                         aFilter,
+                         aSamplingFilter,
                          true,
                          aTile.mTextureHost->GetRenderState());
   if (!effect) {
@@ -586,7 +519,7 @@ TiledContentHost::RenderLayerBuffer(TiledLayerBufferComposite& aLayerBuffer,
                                     const Color* aBackgroundColor,
                                     EffectChain& aEffectChain,
                                     float aOpacity,
-                                    const gfx::Filter& aFilter,
+                                    const gfx::SamplingFilter aSamplingFilter,
                                     const gfx::IntRect& aClipRect,
                                     nsIntRegion aVisibleRegion,
                                     gfx::Matrix4x4 aTransform)
@@ -669,7 +602,7 @@ TiledContentHost::RenderLayerBuffer(TiledLayerBufferComposite& aLayerBuffer,
 
     tileDrawRegion.ScaleRoundOut(resolution, resolution);
     RenderTile(tile, aEffectChain, aOpacity,
-               aTransform, aFilter, aClipRect, tileDrawRegion,
+               aTransform, aSamplingFilter, aClipRect, tileDrawRegion,
                tileOffset * resolution, aLayerBuffer.GetTileSize(),
                gfx::Rect(visibleRect.x, visibleRect.y,
                          visibleRect.width, visibleRect.height));

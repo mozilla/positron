@@ -208,7 +208,8 @@ BaselineCompiler::compile()
                             pcMappingIndexEntries.length(),
                             pcEntries.length(),
                             bytecodeTypeMapEntries,
-                            yieldOffsets_.length()));
+                            yieldOffsets_.length()),
+        JS::DeletePolicy<BaselineScript>(cx->runtime()));
     if (!baselineScript) {
         ReportOutOfMemory(cx);
         return Method_Error;
@@ -990,6 +991,13 @@ BaselineCompiler::emitBody()
             break;
 OPCODE_LIST(EMIT_OP)
 #undef EMIT_OP
+        }
+
+        // If the main instruction is not a jump target, then we emit the
+        //  corresponding code coverage counter.
+        if (pc == script->main() && !BytecodeIsJumpTarget(op)) {
+            if (!emit_JSOP_JUMPTARGET())
+                return Method_Error;
         }
 
         // Test if last instructions and stop emitting in that case.

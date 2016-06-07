@@ -342,12 +342,14 @@ class BuildOptionParser(object):
     # platform/bits
     build_variants = {
         'asan': 'builds/releng_sub_%s_configs/%s_asan.py',
+        'asan-tc': 'builds/releng_sub_%s_configs/%s_asan_tc.py',
         'tsan': 'builds/releng_sub_%s_configs/%s_tsan.py',
         'b2g-debug': 'b2g/releng_sub_%s_configs/%s_debug.py',
         'cross-debug': 'builds/releng_sub_%s_configs/%s_cross_debug.py',
         'cross-opt': 'builds/releng_sub_%s_configs/%s_cross_opt.py',
         'debug': 'builds/releng_sub_%s_configs/%s_debug.py',
         'asan-and-debug': 'builds/releng_sub_%s_configs/%s_asan_and_debug.py',
+        'asan-tc-and-debug': 'builds/releng_sub_%s_configs/%s_asan_tc_and_debug.py',
         'stat-and-debug': 'builds/releng_sub_%s_configs/%s_stat_and_debug.py',
         'mulet': 'builds/releng_sub_%s_configs/%s_mulet.py',
         'code-coverage': 'builds/releng_sub_%s_configs/%s_code_coverage.py',
@@ -367,6 +369,7 @@ class BuildOptionParser(object):
         'android-test': 'builds/releng_sub_%s_configs/%s_test.py',
         'android-checkstyle': 'builds/releng_sub_%s_configs/%s_checkstyle.py',
         'android-lint': 'builds/releng_sub_%s_configs/%s_lint.py',
+        'valgrind' : 'builds/releng_sub_%s_configs/%s_valgrind.py'
     }
     build_pool_cfg_file = 'builds/build_pool_specifics.py'
     branch_cfg_file = 'builds/branch_specifics.py'
@@ -848,6 +851,13 @@ or run without that action (ie: --no-{action})"
 
         # first grab the buildid
         env['MOZ_BUILD_DATE'] = self.query_buildid()
+
+        # Set the source repository to what we're building from since
+        # the default is to query `hg paths` which isn't reliable with pooled
+        # storage
+        repo_path = self._query_repo()
+        assert repo_path
+        env['MOZ_SOURCE_REPO'] = repo_path
 
         if self.query_is_nightly() or self.query_is_nightly_promotion():
             if self.query_is_nightly():
@@ -2015,6 +2025,27 @@ or run without that action (ie: --no-{action})"
                 EXIT_STATUS_DICT[TBPL_WARNING], self.return_code,
                 AUTOMATION_EXIT_CODES[::-1]
             )
+
+    def valgrind_test(self):
+        '''Execute mach's valgrind-test for memory leaks'''
+        env = self.query_build_env()
+        env.update(self.query_mach_build_env())
+
+        python = self.query_exe('python2.7')
+        return_code = self.run_command_m(
+            command=[python, 'mach', 'valgrind-test'],
+            cwd=self.query_abs_dirs()['abs_src_dir'],
+            env=env, output_timeout=self.config.get('max_build_output_timeout', 60 * 40)
+        )
+        if return_code:
+            self.return_code = self.worst_level(
+                EXIT_STATUS_DICT[TBPL_FAILURE],  self.return_code,
+                AUTOMATION_EXIT_CODES[::-1]
+            )
+            self.fatal("'mach valgrind-test' did not run successfully. Please check "
+                       "log for errors.")
+
+
 
     def _post_fatal(self, message=None, exit_code=None):
         if not self.return_code:  # only overwrite return_code if it's 0

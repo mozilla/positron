@@ -769,7 +769,7 @@ const KTableEntry nsCSSProps::kAppearanceKTable[] = {
   { eCSSKeyword_splitter,               NS_THEME_SPLITTER },
   { eCSSKeyword_statusbar,              NS_THEME_STATUSBAR },
   { eCSSKeyword_statusbarpanel,         NS_THEME_STATUSBARPANEL },
-  { eCSSKeyword_resizerpanel,           NS_THEME_RESIZER_PANEL },
+  { eCSSKeyword_resizerpanel,           NS_THEME_RESIZERPANEL },
   { eCSSKeyword_resizer,                NS_THEME_RESIZER },
   { eCSSKeyword_listbox,                NS_THEME_LISTBOX },
   { eCSSKeyword_listitem,               NS_THEME_LISTITEM },
@@ -809,7 +809,7 @@ const KTableEntry nsCSSProps::kAppearanceKTable[] = {
   { eCSSKeyword_scrollbarthumb_vertical,      NS_THEME_SCROLLBARTHUMB_VERTICAL },
   { eCSSKeyword_textfield,              NS_THEME_TEXTFIELD },
   { eCSSKeyword_textfield_multiline,    NS_THEME_TEXTFIELD_MULTILINE },
-  { eCSSKeyword_caret,                  NS_THEME_TEXTFIELD_CARET },
+  { eCSSKeyword_caret,                  NS_THEME_CARET },
   { eCSSKeyword_searchfield,            NS_THEME_SEARCHFIELD },
   { eCSSKeyword_menulist,               NS_THEME_MENULIST },
   { eCSSKeyword_menulist_button,        NS_THEME_MENULIST_BUTTON },
@@ -935,12 +935,16 @@ const KTableEntry nsCSSProps::kImageLayerRepeatKTable[] = {
   { eCSSKeyword_repeat,     NS_STYLE_IMAGELAYER_REPEAT_REPEAT },
   { eCSSKeyword_repeat_x,   NS_STYLE_IMAGELAYER_REPEAT_REPEAT_X },
   { eCSSKeyword_repeat_y,   NS_STYLE_IMAGELAYER_REPEAT_REPEAT_Y },
+  { eCSSKeyword_round,      NS_STYLE_IMAGELAYER_REPEAT_ROUND},
+  { eCSSKeyword_space,      NS_STYLE_IMAGELAYER_REPEAT_SPACE},
   { eCSSKeyword_UNKNOWN, -1 }
 };
 
 const KTableEntry nsCSSProps::kImageLayerRepeatPartKTable[] = {
   { eCSSKeyword_no_repeat,  NS_STYLE_IMAGELAYER_REPEAT_NO_REPEAT },
   { eCSSKeyword_repeat,     NS_STYLE_IMAGELAYER_REPEAT_REPEAT },
+  { eCSSKeyword_round,      NS_STYLE_IMAGELAYER_REPEAT_ROUND},
+  { eCSSKeyword_space,      NS_STYLE_IMAGELAYER_REPEAT_SPACE},
   { eCSSKeyword_UNKNOWN, -1 }
 };
 
@@ -1284,9 +1288,11 @@ KTableEntry nsCSSProps::kDisplayKTable[] = {
   // The next two entries are controlled by the layout.css.grid.enabled pref.
   { eCSSKeyword_grid,                NS_STYLE_DISPLAY_GRID },
   { eCSSKeyword_inline_grid,         NS_STYLE_DISPLAY_INLINE_GRID },
-  // The next two entries are controlled by the layout.css.prefixes.webkit pref.
+  // The next 4 entries are controlled by the layout.css.prefixes.webkit pref.
   { eCSSKeyword__webkit_box,         NS_STYLE_DISPLAY_WEBKIT_BOX },
   { eCSSKeyword__webkit_inline_box,  NS_STYLE_DISPLAY_WEBKIT_INLINE_BOX },
+  { eCSSKeyword__webkit_flex,        NS_STYLE_DISPLAY_FLEX },
+  { eCSSKeyword__webkit_inline_flex, NS_STYLE_DISPLAY_INLINE_FLEX },
   // The next entry is controlled by the layout.css.display-contents.enabled
   // pref.
   { eCSSKeyword_contents,            NS_STYLE_DISPLAY_CONTENTS },
@@ -2214,9 +2220,9 @@ const KTableEntry nsCSSProps::kWordBreakKTable[] = {
   { eCSSKeyword_UNKNOWN, -1 }
 };
 
-const KTableEntry nsCSSProps::kWordWrapKTable[] = {
-  { eCSSKeyword_normal, NS_STYLE_WORDWRAP_NORMAL },
-  { eCSSKeyword_break_word, NS_STYLE_WORDWRAP_BREAK_WORD },
+const KTableEntry nsCSSProps::kOverflowWrapKTable[] = {
+  { eCSSKeyword_normal, NS_STYLE_OVERFLOWWRAP_NORMAL },
+  { eCSSKeyword_break_word, NS_STYLE_OVERFLOWWRAP_BREAK_WORD },
   { eCSSKeyword_UNKNOWN, -1 }
 };
 

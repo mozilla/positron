@@ -539,8 +539,12 @@ public:
                              const IPC::Principal& aPrincipal) override;
 
   virtual bool
-  RecvPushError(const nsCString& aScope, const nsString& aMessage,
-                const uint32_t& aFlags) override;
+  RecvPushError(const nsCString& aScope, const IPC::Principal& aPrincipal,
+                const nsString& aMessage, const uint32_t& aFlags) override;
+
+  virtual bool
+  RecvNotifyPushSubscriptionModifiedObservers(const nsCString& aScope,
+                                              const IPC::Principal& aPrincipal) override;
 
   // Get the directory for IndexedDB files. We query the parent for this and
   // cache the value
@@ -611,6 +615,9 @@ public:
                           const nsString& aIconPath) override;
 
 private:
+  static void ForceKillTimerCallback(nsITimer* aTimer, void* aClosure);
+  void StartForceKillTimer();
+
   virtual void ActorDestroy(ActorDestroyReason why) override;
 
   virtual void ProcessingError(Result aCode, const char* aReason) override;
@@ -642,6 +649,7 @@ private:
   static ContentChild* sSingleton;
 
   nsCOMPtr<nsIDomainPolicy> mPolicy;
+  nsCOMPtr<nsITimer> mForceKillTimer;
 
   DISALLOW_EVIL_CONSTRUCTORS(ContentChild);
 };

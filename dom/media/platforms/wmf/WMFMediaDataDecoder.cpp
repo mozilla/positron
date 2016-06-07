@@ -13,13 +13,12 @@
 #include "mozilla/Logging.h"
 #include "mozilla/SyncRunnable.h"
 
-extern mozilla::LogModule* GetPDMLog();
-#define LOG(...) MOZ_LOG(GetPDMLog(), mozilla::LogLevel::Debug, (__VA_ARGS__))
+#define LOG(...) MOZ_LOG(sPDMLog, mozilla::LogLevel::Debug, (__VA_ARGS__))
 
 namespace mozilla {
 
 WMFMediaDataDecoder::WMFMediaDataDecoder(MFTManager* aMFTManager,
-                                         FlushableTaskQueue* aTaskQueue,
+                                         TaskQueue* aTaskQueue,
                                          MediaDataDecoderCallback* aCallback)
   : mTaskQueue(aTaskQueue)
   , mCallback(aCallback)
@@ -126,7 +125,7 @@ WMFMediaDataDecoder::ProcessDecode(MediaRawData* aSample)
   HRESULT hr = mMFTManager->Input(aSample);
   if (FAILED(hr)) {
     NS_WARNING("MFTManager rejected sample");
-    mCallback->Error();
+    mCallback->Error(MediaDataDecoderError::DECODE_ERROR);
     if (!mRecordedError) {
       SendTelemetry(hr);
       mRecordedError = true;
@@ -155,7 +154,7 @@ WMFMediaDataDecoder::ProcessOutput()
     }
   } else if (FAILED(hr)) {
     NS_WARNING("WMFMediaDataDecoder failed to output data");
-    mCallback->Error();
+    mCallback->Error(MediaDataDecoderError::DECODE_ERROR);
     if (!mRecordedError) {
       SendTelemetry(hr);
       mRecordedError = true;

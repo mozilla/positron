@@ -4,6 +4,11 @@
 
 const {classes: Cc, interfaces: Ci, utils: Cu} = Components;
 
+Cu.import("resource://gre/modules/ExtensionUtils.jsm");
+
+XPCOMUtils.defineLazyModuleGetter(this, "EventEmitter",
+                                  "resource://devtools/shared/event-emitter.js");
+
 XPCOMUtils.defineLazyGetter(this, "History", () => {
   Cu.import("resource://gre/modules/PlacesUtils.jsm");
   return PlacesUtils.history;
@@ -12,7 +17,27 @@ XPCOMUtils.defineLazyGetter(this, "History", () => {
 Cu.import("resource://gre/modules/ExtensionUtils.jsm");
 const {
   normalizeTime,
+  SingletonEventManager,
 } = ExtensionUtils;
+
+let historySvc = Ci.nsINavHistoryService;
+const TRANSITION_TO_TRANSITION_TYPES_MAP = new Map([
+  ["link", historySvc.TRANSITION_LINK],
+  ["typed", historySvc.TRANSITION_TYPED],
+  ["auto_bookmark", historySvc.TRANSITION_BOOKMARK],
+  ["auto_subframe", historySvc.TRANSITION_EMBED],
+  ["manual_subframe", historySvc.TRANSITION_FRAMED_LINK],
+]);
+
+function getTransitionType(transition) {
+  // cannot set a default value for the transition argument as the framework sets it to null
+  transition = transition || "link";
+  let transitionType = TRANSITION_TO_TRANSITION_TYPES_MAP.get(transition);
+  if (!transitionType) {
+    throw new Error(`|${transition}| is not a supported transition for history`);
+  }
+  return transitionType;
+}
 
 /*
  * Converts a nsINavHistoryResultNode into a plain object
@@ -24,7 +49,7 @@ function convertNavHistoryResultNode(node) {
     id: node.pageGuid,
     url: node.uri,
     title: node.title,
-    lastVisitTime: PlacesUtils.toTime(node.time),
+    lastVisitTime: PlacesUtils.toDate(node.time).getTime(),
     visitCount: node.accessCount,
   };
 }
@@ -45,16 +70,70 @@ function convertNavHistoryContainerResultNode(container) {
   return results;
 }
 
+var _observer;
+
+function getObserver() {
+  if (!_observer) {
+    _observer = {
+      onDeleteURI: function(uri, guid, reason) {
+        this.emit("visitRemoved", {allHistory: false, urls: [uri.spec]});
+      },
+      onVisit: function() {},
+      onBeginUpdateBatch: function() {},
+      onEndUpdateBatch: function() {},
+      onTitleChanged: function() {},
+      onClearHistory: function() {
+        this.emit("visitRemoved", {allHistory: true});
+      },
+      onPageChanged: function() {},
+      onFrecencyChanged: function() {},
+      onManyFrecenciesChanged: function() {},
+      onDeleteVisits: function(uri, time, guid, reason) {
+        this.emit("visitRemoved", {allHistory: false, urls: [uri.spec]});
+      },
+    };
+    EventEmitter.decorate(_observer);
+    PlacesUtils.history.addObserver(_observer, false);
+  }
+  return _observer;
+}
+
 extensions.registerSchemaAPI("history", "history", (extension, context) => {
   return {
     history: {
+      addUrl: function(details) {
+        let transition, date;
+        try {
+          transition = getTransitionType(details.transition);
+        } catch (error) {
+          return Promise.reject({message: error.message});
+        }
+        if (details.visitTime) {
+          date = normalizeTime(details.visitTime);
+        }
+        let pageInfo = {
+          title: details.title,
+          url: details.url,
+          visits: [
+            {
+              transition,
+              date,
+            },
+          ],
+        };
+        try {
+          return History.insert(pageInfo).then(() => undefined);
+        } catch (error) {
+          return Promise.reject({message: error.message});
+        }
+      },
       deleteAll: function() {
         return History.clear();
       },
       deleteRange: function(filter) {
         let newFilter = {
-          beginDate: new Date(filter.startTime),
-          endDate: new Date(filter.endTime),
+          beginDate: normalizeTime(filter.startTime),
+          endDate: normalizeTime(filter.endTime),
         };
         // History.removeVisitsByFilter returns a boolean, but our API should return nothing
         return History.removeVisitsByFilter(newFilter).then(() => undefined);
@@ -87,6 +166,17 @@ extensions.registerSchemaAPI("history", "history", (extension, context) => {
         let results = convertNavHistoryContainerResultNode(queryResult);
         return Promise.resolve(results);
       },
+
+      onVisitRemoved: new SingletonEventManager(context, "history.onVisitRemoved", fire => {
+        let listener = (event, data) => {
+          context.runSafe(fire, data);
+        };
+
+        getObserver().on("visitRemoved", listener);
+        return () => {
+          getObserver().off("visitRemoved", listener);
+        };
+      }).api(),
     },
   };
 });

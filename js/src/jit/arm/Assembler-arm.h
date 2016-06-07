@@ -101,12 +101,17 @@ class ABIArgGenerator
     ABIArg next(MIRType argType);
     ABIArg& current() { return current_; }
     uint32_t stackBytesConsumedSoFar() const { return stackOffset_; }
-
-    static const Register NonArgReturnReg0;
-    static const Register NonArgReturnReg1;
-    static const Register NonReturn_VolatileReg0;
-    static const Register NonReturn_VolatileReg1;
 };
+
+static MOZ_CONSTEXPR_VAR Register ABINonArgReg0 = r4;
+static MOZ_CONSTEXPR_VAR Register ABINonArgReg1 = r5;
+static MOZ_CONSTEXPR_VAR Register ABINonArgReturnReg0 = r4;
+static MOZ_CONSTEXPR_VAR Register ABINonArgReturnReg1 = r5;
+
+// Registers used for asm.js/wasm table calls. These registers must be disjoint
+// from the ABI argument registers and from each other.
+static MOZ_CONSTEXPR_VAR Register WasmTableCallPtrReg = ABINonArgReg0;
+static MOZ_CONSTEXPR_VAR Register WasmTableCallSigReg = ABINonArgReg1;
 
 static MOZ_CONSTEXPR_VAR Register PreBarrierReg = r1;
 
@@ -222,7 +227,9 @@ static const uint32_t AsmJSStackAlignment = SimdMemoryAlignment;
 // Does this architecture support SIMD conversions between Uint32x4 and Float32x4?
 static MOZ_CONSTEXPR_VAR bool SupportsUint32x4FloatConversions = false;
 
-// Does this architecture support comparisons of unsigned 32x4 integer vectors?
+// Does this architecture support comparisons of unsigned integer vectors?
+static MOZ_CONSTEXPR_VAR bool SupportsUint8x16Compares = false;
+static MOZ_CONSTEXPR_VAR bool SupportsUint16x8Compares = false;
 static MOZ_CONSTEXPR_VAR bool SupportsUint32x4Compares = false;
 
 static const Scale ScalePointer = TimesFour;

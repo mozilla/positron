@@ -11,6 +11,7 @@
  #include "mozilla/ChaosMode.h"
 
 #include "ImageLogging.h"
+#include "nsImageModule.h"
 #include "nsPrintfCString.h"
 #include "imgLoader.h"
 #include "imgRequestProxy.h"
@@ -1133,26 +1134,40 @@ imgMemoryReporter* imgLoader::sMemReporter;
 NS_IMPL_ISUPPORTS(imgLoader, imgILoader, nsIContentSniffer, imgICache,
                   nsISupportsWeakReference, nsIObserver)
 
-static imgLoader* gSingleton = nullptr;
-static imgLoader* gPBSingleton = nullptr;
+static imgLoader* gNormalLoader = nullptr;
+static imgLoader* gPrivateBrowsingLoader = nullptr;
 
-imgLoader*
-imgLoader::Singleton()
+/* static */ already_AddRefed<imgLoader>
+imgLoader::CreateImageLoader()
 {
-  if (!gSingleton) {
-    gSingleton = imgLoader::Create().take();
-  }
-  return gSingleton;
+  // In some cases, such as xpctests, XPCOM modules are not automatically
+  // initialized.  We need to make sure that our module is initialized before
+  // we hand out imgLoader instances and code starts using them.
+  mozilla::image::EnsureModuleInitialized();
+
+  RefPtr<imgLoader> loader = new imgLoader();
+  loader->Init();
+
+  return loader.forget();
 }
 
 imgLoader*
-imgLoader::PBSingleton()
+imgLoader::NormalLoader()
 {
-  if (!gPBSingleton) {
-    gPBSingleton = imgLoader::Create().take();
-    gPBSingleton->RespectPrivacyNotifications();
+  if (!gNormalLoader) {
+    gNormalLoader = CreateImageLoader().take();
   }
-  return gPBSingleton;
+  return gNormalLoader;
+}
+
+imgLoader*
+imgLoader::PrivateBrowsingLoader()
+{
+  if (!gPrivateBrowsingLoader) {
+    gPrivateBrowsingLoader = CreateImageLoader().take();
+    gPrivateBrowsingLoader->RespectPrivacyNotifications();
+  }
+  return gPrivateBrowsingLoader;
 }
 
 imgLoader::imgLoader()
@@ -1160,21 +1175,6 @@ imgLoader::imgLoader()
 {
   sMemReporter->AddRef();
   sMemReporter->RegisterLoader(this);
-}
-
-already_AddRefed<imgLoader>
-imgLoader::GetInstance()
-{
-  static RefPtr<imgLoader> singleton;
-  if (!singleton) {
-    singleton = imgLoader::Create();
-    if (!singleton) {
-        return nullptr;
-    }
-    ClearOnShutdown(&singleton);
-  }
-  RefPtr<imgLoader> loader = singleton.get();
-  return loader.forget();
 }
 
 imgLoader::~imgLoader()
@@ -1359,7 +1359,20 @@ imgLoader::FindEntryProperties(nsIURI* uri,
   *_retval = nullptr;
 
   nsCOMPtr<nsIDocument> doc = do_QueryInterface(aDOMDoc);
-  ImageCacheKey key(uri, doc);
+  nsCOMPtr<nsIPrincipal> principal;
+  if (doc) {
+    principal = doc->NodePrincipal();
+  } else {
+    nsCOMPtr<nsIScriptSecurityManager> ssm = nsContentUtils::GetSecurityManager();
+    NS_ENSURE_TRUE(ssm, NS_ERROR_FAILURE);
+    ssm->GetSystemPrincipal(getter_AddRefs(principal));
+  }
+  NS_ENSURE_TRUE(principal, NS_ERROR_FAILURE);
+
+  const PrincipalOriginAttributes& attrs =
+    BasePrincipal::Cast(principal)->OriginAttributesRef();
+
+  ImageCacheKey key(uri, attrs, doc);
   imgCacheTable& cache = GetCache(key);
 
   RefPtr<imgCacheEntry> entry;
@@ -1400,8 +1413,10 @@ imgLoader::ClearCacheForControlledDocument(nsIDocument* aDoc)
 void
 imgLoader::Shutdown()
 {
-  NS_IF_RELEASE(gSingleton);
-  NS_IF_RELEASE(gPBSingleton);
+  NS_IF_RELEASE(gNormalLoader);
+  gNormalLoader = nullptr;
+  NS_IF_RELEASE(gPrivateBrowsingLoader);
+  gPrivateBrowsingLoader = nullptr;
 }
 
 nsresult
@@ -2114,7 +2129,11 @@ imgLoader::LoadImage(nsIURI* aURI,
   // XXX For now ignore aCacheKey. We will need it in the future
   // for correctly dealing with image load requests that are a result
   // of post data.
-  ImageCacheKey key(aURI, aLoadingDocument);
+  NS_ENSURE_TRUE(aLoadingPrincipal, NS_ERROR_FAILURE);
+  const PrincipalOriginAttributes& attrs =
+    BasePrincipal::Cast(aLoadingPrincipal)->OriginAttributesRef();
+
+  ImageCacheKey key(aURI, attrs, aLoadingDocument);
   imgCacheTable& cache = GetCache(key);
 
   if (cache.Get(key, getter_AddRefs(entry)) && entry) {
@@ -2318,7 +2337,15 @@ imgLoader::LoadImageWithChannel(nsIChannel* channel,
   nsCOMPtr<nsIURI> uri;
   channel->GetURI(getter_AddRefs(uri));
   nsCOMPtr<nsIDocument> doc = do_QueryInterface(aCX);
-  ImageCacheKey key(uri, doc);
+
+  NS_ENSURE_TRUE(channel, NS_ERROR_FAILURE);
+  nsCOMPtr<nsILoadInfo> loadInfo = channel->GetLoadInfo();
+  NS_ENSURE_TRUE(loadInfo, NS_ERROR_FAILURE);
+
+  PrincipalOriginAttributes attrs;
+  attrs.InheritFromNecko(loadInfo->GetOriginAttributes());
+
+  ImageCacheKey key(uri, attrs, doc);
 
   nsLoadFlags requestFlags = nsIRequest::LOAD_NORMAL;
   channel->GetLoadFlags(&requestFlags);
@@ -2420,7 +2447,7 @@ imgLoader::LoadImageWithChannel(nsIChannel* channel,
     // constructed above with the *current URI* and not the *original URI*. I'm
     // pretty sure this is a bug, and it's preventing us from ever getting a
     // cache hit in LoadImageWithChannel when redirects are involved.
-    ImageCacheKey originalURIKey(originalURI, doc);
+    ImageCacheKey originalURIKey(originalURI, attrs, doc);
 
     // Default to doing a principal check because we don't know who
     // started that load and whether their principal ended up being

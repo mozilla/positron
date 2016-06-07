@@ -1032,6 +1032,8 @@ AccumulateCipherSuite(Telemetry::ID probe, const SSLChannelInfo& channelInfo)
     case TLS_ECDHE_ECDSA_WITH_3DES_EDE_CBC_SHA: value = 10; break;
     case TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256: value = 11; break;
     case TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256: value = 12; break;
+    case TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384: value = 13; break;
+    case TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384: value = 14; break;
     // DHE key exchange
     case TLS_DHE_RSA_WITH_AES_128_CBC_SHA: value = 21; break;
     case TLS_DHE_RSA_WITH_CAMELLIA_128_CBC_SHA: value = 22; break;
@@ -1159,10 +1161,6 @@ void HandshakeCallback(PRFileDesc* fd, void* client_data) {
           switch (cipherInfo.authAlgorithm) {
             case ssl_auth_rsa:
               AccumulateNonECCKeySize(Telemetry::SSL_AUTH_RSA_KEY_SIZE_FULL,
-                                      channelInfo.authKeyBits);
-              break;
-            case ssl_auth_dsa:
-              AccumulateNonECCKeySize(Telemetry::SSL_AUTH_DSA_KEY_SIZE_FULL,
                                       channelInfo.authKeyBits);
               break;
             case ssl_auth_ecdsa:

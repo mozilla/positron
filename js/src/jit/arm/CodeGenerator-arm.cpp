@@ -2330,9 +2330,9 @@ CodeGeneratorARM::visitAsmJSStoreHeap(LAsmJSStoreHeap* ins)
             VFPRegister vd(ToFloatRegister(ins->value()));
             Address addr(HeapReg, ptrImm);
             if (size == 32)
-                masm.ma_vstr(vd.singleOverlay(), addr, Assembler::Always);
+                masm.storeFloat32(vd, addr);
             else
-                masm.ma_vstr(vd, addr, Assembler::Always);
+                masm.storeDouble(vd, addr);
         } else {
             masm.ma_dataTransferN(IsStore, size, isSigned, HeapReg, Imm32(ptrImm),
                                   ToRegister(ins->value()), Offset, Assembler::Always);
@@ -2347,10 +2347,11 @@ CodeGeneratorARM::visitAsmJSStoreHeap(LAsmJSStoreHeap* ins)
         Register ptrReg = ToRegister(ptr);
         if (isFloat) {
             VFPRegister vd(ToFloatRegister(ins->value()));
+            BaseIndex addr(HeapReg, ptrReg, TimesOne, 0);
             if (size == 32)
-                masm.ma_vstr(vd.singleOverlay(), HeapReg, ptrReg, 0, 0, Assembler::Always);
+                masm.storeFloat32(vd, addr);
             else
-                masm.ma_vstr(vd, HeapReg, ptrReg, 0, 0, Assembler::Always);
+                masm.storeDouble(vd, addr);
         } else {
             masm.ma_dataTransferN(IsStore, size, isSigned, HeapReg, ptrReg,
                                   ToRegister(ins->value()), Offset, Assembler::Always);
@@ -2781,14 +2782,10 @@ CodeGeneratorARM::visitAsmJSLoadFuncPtr(LAsmJSLoadFuncPtr* ins)
                       wasm::JumpTarget::OutOfBounds);
     }
 
-    if (mir->alwaysThrow()) {
-        masm.jump(wasm::JumpTarget::BadIndirectCall);
-    } else {
-        unsigned addr = mir->globalDataOffset();
-        masm.ma_mov(Imm32(addr - AsmJSGlobalRegBias), tmp);
-        masm.as_add(tmp, tmp, lsl(index, 2));
-        masm.ma_ldr(DTRAddr(GlobalReg, DtrRegImmShift(tmp, LSL, 0)), out);
-    }
+    unsigned addr = mir->globalDataOffset();
+    masm.ma_mov(Imm32(addr - AsmJSGlobalRegBias), tmp);
+    masm.as_add(tmp, tmp, lsl(index, 2));
+    masm.ma_ldr(DTRAddr(GlobalReg, DtrRegImmShift(tmp, LSL, 0)), out);
 }
 
 void
@@ -2983,4 +2980,57 @@ CodeGeneratorARM::visitOutOfLineWasmTruncateCheck(OutOfLineWasmTruncateCheck* oo
 
     masm.bind(&inputIsNaN);
     masm.jump(wasm::JumpTarget::InvalidConversionToInteger);
+}
+
+void
+CodeGeneratorARM::visitCopySignF(LCopySignF* ins)
+{
+    FloatRegister lhs = ToFloatRegister(ins->getOperand(0));
+    FloatRegister rhs = ToFloatRegister(ins->getOperand(1));
+    FloatRegister output = ToFloatRegister(ins->getDef(0));
+
+    Register lhsi = ToRegister(ins->getTemp(0));
+    Register rhsi = ToRegister(ins->getTemp(1));
+
+    masm.ma_vxfer(lhs, lhsi);
+    masm.ma_vxfer(rhs, rhsi);
+
+    // Clear lhs's sign.
+    masm.ma_and(Imm32(INT32_MAX), lhsi, lhsi);
+
+    // Keep rhs's sign.
+    masm.ma_and(Imm32(INT32_MIN), rhsi, rhsi);
+
+    // Combine.
+    masm.ma_orr(lhsi, rhsi, rhsi);
+
+    masm.ma_vxfer(rhsi, output);
+}
+
+void
+CodeGeneratorARM::visitCopySignD(LCopySignD* ins)
+{
+    FloatRegister lhs = ToFloatRegister(ins->getOperand(0));
+    FloatRegister rhs = ToFloatRegister(ins->getOperand(1));
+    FloatRegister output = ToFloatRegister(ins->getDef(0));
+
+    Register lhsi = ToRegister(ins->getTemp(0));
+    Register rhsi = ToRegister(ins->getTemp(1));
+
+    // Manipulate high words of double inputs.
+    masm.as_vxfer(lhsi, InvalidReg, lhs, Assembler::FloatToCore, Assembler::Always, 1);
+    masm.as_vxfer(rhsi, InvalidReg, rhs, Assembler::FloatToCore, Assembler::Always, 1);
+
+    // Clear lhs's sign.
+    masm.ma_and(Imm32(INT32_MAX), lhsi, lhsi);
+
+    // Keep rhs's sign.
+    masm.ma_and(Imm32(INT32_MIN), rhsi, rhsi);
+
+    // Combine.
+    masm.ma_orr(lhsi, rhsi, rhsi);
+
+    // Reconstruct the output.
+    masm.as_vxfer(lhsi, InvalidReg, lhs, Assembler::FloatToCore, Assembler::Always, 0);
+    masm.ma_vxfer(lhsi, rhsi, output);
 }

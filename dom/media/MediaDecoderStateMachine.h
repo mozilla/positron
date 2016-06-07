@@ -830,18 +830,15 @@ private:
   // should exist at any given moment.
 
   CallbackID mAudioCallbackID;
-  MozPromiseRequestHolder<MediaDecoderReader::WaitForDataPromise> mAudioWaitRequest;
+  CallbackID mWaitAudioCallbackID;
   const char* AudioRequestStatus() const;
 
   CallbackID mVideoCallbackID;
-  MozPromiseRequestHolder<MediaDecoderReader::WaitForDataPromise> mVideoWaitRequest;
+  CallbackID mWaitVideoCallbackID;
   const char* VideoRequestStatus() const;
 
-  MozPromiseRequestHolder<MediaDecoderReader::WaitForDataPromise>& WaitRequestRef(MediaData::Type aType)
-  {
-    MOZ_ASSERT(OnTaskQueue());
-    return aType == MediaData::AUDIO_DATA ? mAudioWaitRequest : mVideoWaitRequest;
-  }
+  void OnSuspendTimerResolved();
+  void OnSuspendTimerRejected();
 
   // True if we shouldn't play our audio (but still write it to any capturing
   // streams). When this is true, the audio thread will never start again after
@@ -929,6 +926,12 @@ private:
   bool mSentFirstFrameLoadedEvent;
 
   bool mSentPlaybackEndedEvent;
+
+  // True if video decoding is suspended.
+  bool mVideoDecodeSuspended;
+
+  // Track enabling video decode suspension via timer
+  DelayedScheduler mVideoDecodeSuspendTimer;
 
   // Data about MediaStreams that are being fed by the decoder.
   const RefPtr<OutputStreamManager> mOutputStreamManager;

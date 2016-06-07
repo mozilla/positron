@@ -1014,14 +1014,14 @@ CompositorD3D11::DrawQuad(const gfx::Rect& aRect,
         restoreBlendMode = true;
       }
 
-      SetSamplerForFilter(texturedEffect->mFilter);
+      SetSamplerForSamplingFilter(texturedEffect->mSamplingFilter);
     }
     break;
   case EffectTypes::YCBCR: {
       EffectYCbCr* ycbcrEffect =
         static_cast<EffectYCbCr*>(aEffectChain.mPrimaryEffect.get());
 
-      SetSamplerForFilter(Filter::LINEAR);
+      SetSamplerForSamplingFilter(SamplingFilter::LINEAR);
 
       pTexCoordRect = &ycbcrEffect->mTextureCoords;
 
@@ -1064,7 +1064,7 @@ CompositorD3D11::DrawQuad(const gfx::Rect& aRect,
         return;
       }
 
-      SetSamplerForFilter(effectComponentAlpha->mFilter);
+      SetSamplerForSamplingFilter(effectComponentAlpha->mSamplingFilter);
 
       pTexCoordRect = &effectComponentAlpha->mTextureCoords;
 
@@ -1195,7 +1195,17 @@ CompositorD3D11::BeginFrame(const nsIntRegion& aInvalidRegion,
     MOZ_ASSERT(mutex);
     HRESULT hr = mutex->AcquireSync(0, 10000);
     if (hr == WAIT_TIMEOUT) {
-      MOZ_CRASH("GFX: D3D11 timeout");
+      hr = mDevice->GetDeviceRemovedReason();
+      if (hr == S_OK) {
+        // There is no driver-removed event. Crash with this timeout.
+        MOZ_CRASH("GFX: D3D11 normal status timeout");
+      }
+
+      // Since the timeout is related to the driver-removed, clear the
+      // render-bounding size to skip this frame.
+      gfxCriticalNote << "GFX: D3D11 timeout with device-removed:" << gfx::hexa(hr);
+      *aRenderBoundsOut = IntRect();
+      return;
     }
 
     mutex->ReleaseSync(0);
@@ -1205,6 +1215,8 @@ CompositorD3D11::BeginFrame(const nsIntRegion& aInvalidRegion,
 void
 CompositorD3D11::EndFrame()
 {
+  Compositor::EndFrame();
+
   if (!mDefaultRT) {
     return;
   }
@@ -1585,14 +1597,14 @@ CompositorD3D11::UpdateConstantBuffers()
 }
 
 void
-CompositorD3D11::SetSamplerForFilter(Filter aFilter)
+CompositorD3D11::SetSamplerForSamplingFilter(SamplingFilter aSamplingFilter)
 {
   ID3D11SamplerState *sampler;
-  switch (aFilter) {
-    case Filter::POINT:
+  switch (aSamplingFilter) {
+    case SamplingFilter::POINT:
     sampler = mAttachments->mPointSamplerState;
     break;
-  case Filter::LINEAR:
+  case SamplingFilter::LINEAR:
   default:
     sampler = mAttachments->mLinearSamplerState;
     break;

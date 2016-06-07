@@ -492,6 +492,8 @@ NS_InitXPCOM2(nsIServiceManager** aResult,
 
   NS_LogInit();
 
+  NS_InitAtomTable();
+
   mozilla::LogModule::Init();
 
   JS_SetCurrentEmbedderTimeFunction(TimeSinceProcessCreation);
@@ -924,9 +926,6 @@ ShutdownXPCOM(nsIServiceManager* aServMgr)
   // will cause servicemanager to become inaccessible.
   mozilla::services::Shutdown();
 
-#ifdef DEBUG_dougt
-  fprintf(stderr, "* * * * XPCOM shutdown. Access will be denied * * * * \n");
-#endif
   // We may have AddRef'd for the caller of NS_InitXPCOM, so release it
   // here again:
   NS_IF_RELEASE(aServMgr);
@@ -1026,7 +1025,7 @@ ShutdownXPCOM(nsIServiceManager* aServMgr)
   nsComponentManagerImpl::gComponentManager = nullptr;
   nsCategoryManager::Destroy();
 
-  NS_PurgeAtomTable();
+  NS_ShutdownAtomTable();
 
   NS_IF_RELEASE(gDebug);
 

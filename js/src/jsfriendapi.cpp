@@ -415,11 +415,16 @@ js::GetOutermostEnclosingFunctionOfScriptedCaller(JSContext* cx)
     if (!iter.isFunctionFrame())
         return nullptr;
 
+    if (iter.compartment() != cx->compartment())
+        return nullptr;
+
     RootedFunction curr(cx, iter.callee(cx));
     for (StaticScopeIter<NoGC> i(curr); !i.done(); i++) {
         if (i.type() == StaticScopeIter<NoGC>::Function)
             curr = &i.fun();
     }
+
+    assertSameCompartment(cx, curr);
     return curr;
 }
 

@@ -250,6 +250,10 @@ class ScalarTypeDescr : public SimpleTypeDescr
                       "TypedObjectConstants.h must be consistent with Scalar::Type");
         static_assert(Scalar::Float32x4 == JS_SCALARTYPEREPR_FLOAT32X4,
                       "TypedObjectConstants.h must be consistent with Scalar::Type");
+        static_assert(Scalar::Int8x16 == JS_SCALARTYPEREPR_INT8X16,
+                      "TypedObjectConstants.h must be consistent with Scalar::Type");
+        static_assert(Scalar::Int16x8 == JS_SCALARTYPEREPR_INT16X8,
+                      "TypedObjectConstants.h must be consistent with Scalar::Type");
         static_assert(Scalar::Int32x4 == JS_SCALARTYPEREPR_INT32X4,
                       "TypedObjectConstants.h must be consistent with Scalar::Type");
 
@@ -310,10 +314,10 @@ class ReferenceTypeDescr : public SimpleTypeDescr
     static MOZ_MUST_USE bool call(JSContext* cx, unsigned argc, Value* vp);
 };
 
-#define JS_FOR_EACH_REFERENCE_TYPE_REPR(macro_)                    \
-    macro_(ReferenceTypeDescr::TYPE_ANY,    HeapValue, Any)        \
-    macro_(ReferenceTypeDescr::TYPE_OBJECT, HeapPtrObject, Object) \
-    macro_(ReferenceTypeDescr::TYPE_STRING, HeapPtrString, string)
+#define JS_FOR_EACH_REFERENCE_TYPE_REPR(macro_) \
+    macro_(ReferenceTypeDescr::TYPE_ANY, GCPtrValue, Any) \
+    macro_(ReferenceTypeDescr::TYPE_OBJECT, GCPtrObject, Object) \
+    macro_(ReferenceTypeDescr::TYPE_STRING, GCPtrString, string)
 
 // Type descriptors whose instances are objects and hence which have
 // an associated `prototype` property.
@@ -498,7 +502,7 @@ class TypedObject : public JSObject
   protected:
     static const ObjectOps objectOps_;
 
-    HeapPtrShape shape_;
+    GCPtrShape shape_;
 
     static MOZ_MUST_USE bool obj_lookupProperty(JSContext* cx, HandleObject obj,
                                                 HandleId id, MutableHandleObject objp,
@@ -585,7 +589,7 @@ typedef Handle<TypedObject*> HandleTypedObject;
 class OutlineTypedObject : public TypedObject
 {
     // The object which owns the data this object points to. Because this
-    // pointer is managed in tandem with |data|, this is not a HeapPtr and
+    // pointer is managed in tandem with |data|, this is not a GCPtr and
     // barriers are managed directly.
     JSObject* owner_;
 
@@ -865,7 +869,7 @@ class StoreScalar##T {                                                        \
  * - `value` is an object or null (`Store_Object`) or string (`Store_string`).
  */
 #define JS_STORE_REFERENCE_CLASS_DEFN(_constant, T, _name)                    \
-class StoreReference##T {                                                     \
+class StoreReference##_name {                                                 \
   private:                                                                    \
     static MOZ_MUST_USE bool store(JSContext* cx, T* heap, const Value& v,    \
                                    TypedObject* obj, jsid id);                \
@@ -899,7 +903,7 @@ class LoadScalar##T {                                                         \
  * `targetDatum` must be attached.
  */
 #define JS_LOAD_REFERENCE_CLASS_DEFN(_constant, T, _name)                     \
-class LoadReference##T {                                                      \
+class LoadReference##_name {                                                  \
   private:                                                                    \
     static void load(T* heap, MutableHandleValue v);                          \
                                                                               \

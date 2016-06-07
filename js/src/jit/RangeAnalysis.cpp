@@ -216,6 +216,9 @@ RangeAnalysis::addBetaNodes()
                 greater = left;
             }
             if (smaller && greater) {
+                if (!alloc().ensureBallast())
+                    return false;
+
                 MBeta* beta;
                 beta = MBeta::New(alloc(), smaller,
                                   Range::NewInt32Range(alloc(), JSVAL_INT_MIN, JSVAL_INT_MAX-1));
@@ -304,6 +307,9 @@ RangeAnalysis::addBetaNodes()
             out.printf("Adding beta node for %d with range ", val->id());
             comp.dump(out);
         }
+
+        if (!alloc().ensureBallast())
+            return false;
 
         MBeta* beta = MBeta::New(alloc(), val, new(alloc()) Range(comp));
         block->insertBefore(*block->begin(), beta);
@@ -1756,6 +1762,8 @@ GetTypedArrayRange(TempAllocator& alloc, Scalar::Type type)
       case Scalar::Float32:
       case Scalar::Float64:
       case Scalar::Float32x4:
+      case Scalar::Int8x16:
+      case Scalar::Int16x8:
       case Scalar::Int32x4:
       case Scalar::MaxTypedArrayViewType:
         break;
@@ -1927,7 +1935,8 @@ RangeAnalysis::analyzeLoop(MBasicBlock* header)
 #ifdef DEBUG
     if (JitSpewEnabled(JitSpew_Range)) {
         Sprinter sp(GetJitContext()->cx);
-        sp.init();
+        if (!sp.init())
+            return false;
         iterationBound->boundSum.dump(sp);
         JitSpew(JitSpew_Range, "computed symbolic bound on backedges: %s",
                 sp.string());

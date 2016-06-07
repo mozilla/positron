@@ -57,7 +57,6 @@ var LoginManagerParent = {
       });
       return this._recipeManager.initializationPromise;
     });
-
   },
 
   receiveMessage: function (msg) {
@@ -169,21 +168,6 @@ var LoginManagerParent = {
       return;
     }
 
-    let allLoginsCount = Services.logins.countLogins(formOrigin, "", null);
-    // If there are no logins for this site, bail out now.
-    if (!allLoginsCount) {
-      try {
-        target.sendAsyncMessage("RemoteLogins:loginsFound", {
-          requestId: requestId,
-          logins: [],
-          recipes,
-        });
-      } catch (e) {
-        log("error sending message to target", e);
-      }
-      return;
-    }
-
     // If we're currently displaying a master password prompt, defer
     // processing this form until the user handles the prompt.
     if (Services.logins.uiBusy) {
@@ -222,7 +206,17 @@ var LoginManagerParent = {
       return;
     }
 
-    var logins = Services.logins.findLogins({}, formOrigin, actionOrigin, null);
+    let logins = LoginHelper.searchLoginsWithObject({
+      formSubmitURL: actionOrigin,
+      hostname: formOrigin,
+      schemeUpgrades: LoginHelper.schemeUpgrades,
+    });
+    let resolveBy = [
+      "scheme",
+      "timePasswordChanged",
+    ];
+    logins = LoginHelper.dedupeLogins(logins, ["username"], resolveBy, formOrigin);
+    log("sendLoginDataToChild:", logins.length, "deduped logins");
     // Convert the array of nsILoginInfo to vanilla JS objects since nsILoginInfo
     // doesn't support structured cloning.
     var jsLogins = LoginHelper.loginsToVanillaObjects(logins);
@@ -231,16 +225,6 @@ var LoginManagerParent = {
       logins: jsLogins,
       recipes,
     });
-
-    const PWMGR_FORM_ACTION_EFFECT =  Services.telemetry.getHistogramById("PWMGR_FORM_ACTION_EFFECT");
-    if (logins.length == 0) {
-      PWMGR_FORM_ACTION_EFFECT.add(2);
-    } else if (logins.length == allLoginsCount) {
-      PWMGR_FORM_ACTION_EFFECT.add(0);
-    } else {
-      // logins.length < allLoginsCount
-      PWMGR_FORM_ACTION_EFFECT.add(1);
-    }
   }),
 
   doAutocompleteSearch: function({ formOrigin, actionOrigin,
@@ -263,7 +247,16 @@ var LoginManagerParent = {
       log("Creating new autocomplete search result.");
 
       // Grab the logins from the database.
-      logins = Services.logins.findLogins({}, formOrigin, actionOrigin, null);
+      logins = LoginHelper.searchLoginsWithObject({
+        formSubmitURL: actionOrigin,
+        hostname: formOrigin,
+        schemeUpgrades: LoginHelper.schemeUpgrades,
+      });
+      let resolveBy = [
+        "scheme",
+        "timePasswordChanged",
+      ];
+      logins = LoginHelper.dedupeLogins(logins, ["username"], resolveBy, formOrigin);
     }
 
     let matchingLogins = logins.filter(function(fullMatch) {
@@ -335,7 +328,11 @@ var LoginManagerParent = {
                    (usernameField ? usernameField.name  : ""),
                    newPasswordField.name);
 
-    let logins = Services.logins.findLogins({}, hostname, formSubmitURL, null);
+    let logins = LoginHelper.searchLoginsWithObject({
+      formSubmitURL,
+      hostname,
+      schemeUpgrades: LoginHelper.schemeUpgrades,
+    });
 
     // If we didn't find a username field, but seem to be changing a
     // password, allow the user to select from a list of applicable
@@ -488,6 +485,7 @@ var LoginManagerParent = {
     }
     state.anchorDeferredTask.arm();
   },
+
   updateLoginAnchor: Task.async(function* (browser) {
     // Copy the state to use for this execution of the task. These will not
     // change during this execution of the asynchronous function, but in case a
@@ -498,7 +496,11 @@ var LoginManagerParent = {
 
     // Check if there are form logins for the site, ignoring formSubmitURL.
     let hasLogins = loginFormOrigin &&
-                    Services.logins.countLogins(loginFormOrigin, "", null) > 0;
+                    LoginHelper.searchLoginsWithObject({
+                      formSubmitURL: "",
+                      hostname: loginFormOrigin,
+                      schemeUpgrades: LoginHelper.schemeUpgrades,
+                    }).length > 0;
 
     // Once this preference is removed, this version of the fill doorhanger
     // should be enabled for Desktop only, and not for Android or B2G.
