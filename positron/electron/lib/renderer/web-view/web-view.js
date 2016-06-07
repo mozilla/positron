@@ -33,6 +33,11 @@ var WebViewImpl = (function() {
     this.browserPluginNode = this.createBrowserPluginNode();
     shadowRoot = this.webviewNode.createShadowRoot();
     shadowRoot.innerHTML = '<style>:host { display: flex; }</style>';
+    // Gecko doesn't support :host yet, per Mozilla bug 992245, so twiddle
+    // the display property directly.
+    // TODO: remove this workaround once the underlying Mozilla bug is fixed.
+    // https://github.com/mozilla/positron/issues/69
+    webviewNode.style.display = "flex";
     this.setupWebViewAttributes();
     this.setupFocusPropagation();
     this.viewInstanceId = getNextId();
@@ -128,7 +133,7 @@ var WebViewImpl = (function() {
       if (!this.guestInstanceId) {
         return;
       }
-      return guestViewInternal.attachGuest(this.internalInstanceId, this.guestInstanceId, this.buildParams());
+      return guestViewInternal.attachGuest(this.internalInstanceId, this.guestInstanceId, this.buildParams(), this);
     }
   };
 
@@ -254,22 +259,107 @@ var WebViewImpl = (function() {
     if (!this.internalInstanceId) {
       return true;
     }
-    return guestViewInternal.attachGuest(this.internalInstanceId, this.guestInstanceId, this.buildParams());
+    return guestViewInternal.attachGuest(this.internalInstanceId, this.guestInstanceId, this.buildParams(), this);
   };
 
   return WebViewImpl;
 
 })();
 
-// Registers browser plugin <object> custom element.
+// Registers browser plugin <iframe> custom element.
+// Electron bases this on an <object> element, but Positron reuses Gecko's
+// <iframe mozbrowser> to implement it.
 var registerBrowserPluginElement = function() {
   var proto;
-  proto = Object.create(HTMLObjectElement.prototype);
+  proto = Object.create(HTMLIFrameElement.prototype);
   proto.createdCallback = function() {
-    this.setAttribute('type', 'application/browser-plugin');
-    this.setAttribute('id', 'browser-plugin-' + getNextId());
+    // Commented out because 'type' isn't defined for <iframe> elements.
+    // this.setAttribute('type', 'application/browser-plugin');
 
-    // The <object> node fills in the <webview> container.
+    const id = getNextId();
+    this.setAttribute('id', 'browser-plugin-' + id);
+
+    // For some reason, setting the 'internalinstanceid' attribute immediately
+    // prevents the webview from loading the initial URL.  Setting it
+    // in a timeout works, but that seems coincidental and brittle.  We should
+    // figure out where/when to really set it.
+    //
+    // TODO: figure out where/when to really set it.
+    // https://github.com/mozilla/positron/issues/71
+    //
+    window.setTimeout(() => {
+      this.setAttribute(webViewConstants.ATTRIBUTE_INTERNALINSTANCEID, id);
+    }, 0);
+
+    this.setAttribute('mozbrowser', 'true');
+
+    // This breaks loading a page in the mozbrowser when we give the app page
+    // the system principal, so we've temporarily disabled it.
+    // this.setAttribute('remote', 'true');
+
+    this.addEventListener('mozbrowserloadstart', function(event) {
+      var internal;
+      internal = v8Util.getHiddenValue(this, 'internal');
+      if (!internal) {
+        return;
+      }
+
+      ipcRenderer.emit("ATOM_SHELL_GUEST_VIEW_INTERNAL_DISPATCH_EVENT-" + internal.viewInstanceId,
+                       event, 'did-start-loading');
+    }, false);
+
+    // https://wiki.mozilla.org/WebAPI/BrowserAPI/Common_Subset#DOM_Events
+    // suggests that Google's load-commit is the equivalent of Mozilla's
+    // mozbrowserloadend, while Mozilla's mozbrowserlocationchange doesn't have
+    // a Google equivalent.  But I suspect that load-commit is actually
+    // similar to mozbrowserlocationchange, at least for top-frame loads.
+    //
+    // However, load-commit also fires on sub-frame loads, which isn't the case
+    // for mozbrowserlocationchange.  This implementation also doesn't yet set
+    // the url and isMainFrame properties.
+    //
+    // TODO: complete support for the load-commit event.
+    // https://github.com/mozilla/positron/issues/70
+    //
+    this.addEventListener('mozbrowserlocationchange', function(event) {
+      var internal;
+      internal = v8Util.getHiddenValue(this, 'internal');
+      if (!internal) {
+        return;
+      }
+
+      ipcRenderer.emit("ATOM_SHELL_GUEST_VIEW_INTERNAL_DISPATCH_EVENT-" + internal.viewInstanceId,
+                       event, 'load-commit');
+    }, false);
+
+    this.addEventListener('mozbrowserloadend', function(event) {
+      var internal;
+      internal = v8Util.getHiddenValue(this, 'internal');
+      if (!internal) {
+        return;
+      }
+
+      ipcRenderer.emit("ATOM_SHELL_GUEST_VIEW_INTERNAL_DISPATCH_EVENT-" + internal.viewInstanceId,
+                       event, 'did-stop-loading');
+      ipcRenderer.emit("ATOM_SHELL_GUEST_VIEW_INTERNAL_DISPATCH_EVENT-" + internal.viewInstanceId,
+                       event, 'did-finish-load');
+    }, false);
+
+    this.addEventListener('mozbrowsererror', function(event) {
+      var internal;
+      internal = v8Util.getHiddenValue(this, 'internal');
+      if (!internal) {
+        return;
+      }
+
+      ipcRenderer.emit("ATOM_SHELL_GUEST_VIEW_INTERNAL_DISPATCH_EVENT-" + internal.viewInstanceId,
+                       event, 'did-stop-loading');
+      // TODO: support the 'did-fail-load' event properties.
+      ipcRenderer.emit("ATOM_SHELL_GUEST_VIEW_INTERNAL_DISPATCH_EVENT-" + internal.viewInstanceId,
+                       event, 'did-fail-load');
+    }, false);
+
+    // The <iframe> node fills in the <webview> container.
     return this.style.flex = '1 1 auto';
   };
   proto.attributeChangedCallback = function(name, oldValue, newValue) {
@@ -285,7 +375,7 @@ var registerBrowserPluginElement = function() {
     return this.nonExistentAttribute;
   };
   WebViewImpl.BrowserPlugin = webFrame.registerEmbedderCustomElement('browserplugin', {
-    "extends": 'object',
+    "extends": 'iframe',
     prototype: proto
   });
   delete proto.createdCallback;

@@ -27,6 +27,30 @@ const process = new EventEmitter();
 
 module.exports = process;
 
+// Based on addon-sdk/source/lib/sdk/timers.js.
+const threadManager = Cc["@mozilla.org/thread-manager;1"].
+                      getService(Ci.nsIThreadManager);
+let _immediateCallback;
+let _needImmediateCallback = false;
+let _immediateCallbackScheduled = false;
+Object.defineProperty(process, '_immediateCallback', {
+  get() { return _immediateCallback },
+  set(value) { _immediateCallback = value },
+});
+Object.defineProperty(process, '_needImmediateCallback', {
+  get() { return _needImmediateCallback },
+  set(value) {
+    _needImmediateCallback = value;
+    if (_needImmediateCallback && !_immediateCallbackScheduled) {
+      _immediateCallbackScheduled = true;
+      threadManager.currentThread.dispatch(() => {
+        _immediateCallbackScheduled = false;
+        _immediateCallback();
+      }, Ci.nsIThread.DISPATCH_NORMAL);
+    }
+  },
+});
+
 // This is a stub with a placeholder that browser/init.js and renderer/init.js
 // both remove.
 process.argv = [exeFile.leafName, "placeholder that init.js removes"];

@@ -93,9 +93,9 @@ module.exports = {
     ipcRenderer.send('ATOM_SHELL_GUEST_VIEW_MANAGER_CREATE_GUEST', params, requestId);
     return ipcRenderer.once("ATOM_SHELL_RESPONSE_" + requestId, callback);
   },
-  attachGuest: function(elementInstanceId, guestInstanceId, params) {
+  attachGuest: function(elementInstanceId, guestInstanceId, params, webView) {
     ipcRenderer.send('ATOM_SHELL_GUEST_VIEW_MANAGER_ATTACH_GUEST', elementInstanceId, guestInstanceId, params);
-    return webFrame.attachGuest(elementInstanceId);
+    return webFrame.attachGuest(elementInstanceId, webView);
   },
   destroyGuest: function(guestInstanceId) {
     return ipcRenderer.send('ATOM_SHELL_GUEST_VIEW_MANAGER_DESTROY_GUEST', guestInstanceId);
