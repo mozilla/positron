@@ -468,6 +468,7 @@ enum class FillMode : uint32_t;
 #define NS_STYLE_DISPLAY_CONTENTS               38
 #define NS_STYLE_DISPLAY_WEBKIT_BOX             39
 #define NS_STYLE_DISPLAY_WEBKIT_INLINE_BOX      40
+#define NS_STYLE_DISPLAY_WEBKIT_FLEX            41
 
 // See nsStyleDisplay
 // If these are re-ordered, nsComputedDOMStyle::DoGetContain() and

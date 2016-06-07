@@ -7047,6 +7047,12 @@ CSSParserImpl::LookupKeywordPrefixAware(nsAString& aKeywordStr,
       return (keyword == eCSSKeyword__moz_box) ?
         eCSSKeyword_flex : eCSSKeyword_inline_flex;
     }
+
+    if (keyword == eCSSKeyword__webkit_flex) {
+      if (sWebkitPrefixedAliasesEnabled || ShouldUseUnprefixingService()) {
+        return eCSSKeyword_flex;
+      }
+    }
   }
 
   return keyword;
