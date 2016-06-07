@@ -266,11 +266,31 @@ var WebViewImpl = (function() {
 
 })();
 
-// Registers browser plugin <object> custom element.
+// Registers browser plugin <iframe> custom element.
+// Electron bases this on an <object> element, but Positron reuses Gecko's
+// <iframe mozbrowser> to implement it.
 var registerBrowserPluginElement = function() {
   var proto;
   proto = Object.create(HTMLIFrameElement.prototype);
   proto.createdCallback = function() {
+    // Commented out because 'type' isn't defined for <iframe> elements.
+    // this.setAttribute('type', 'application/browser-plugin');
+
+    const id = getNextId();
+    this.setAttribute('id', 'browser-plugin-' + id);
+
+    // For some reason, setting the 'internalinstanceid' attribute immediately
+    // prevents the webview from loading the initial URL.  Setting it
+    // in a timeout works, but that seems coincidental and brittle.  We should
+    // figure out where/when to really set it.
+    //
+    // TODO: figure out where/when to really set it.
+    // https://github.com/mozilla/positron/issues/71
+    //
+    window.setTimeout(() => {
+      this.setAttribute(webViewConstants.ATTRIBUTE_INTERNALINSTANCEID, id);
+    }, 0);
+
     this.setAttribute('mozbrowser', 'true');
 
     // This breaks loading a page in the mozbrowser when we give the app page
@@ -339,24 +359,7 @@ var registerBrowserPluginElement = function() {
                        event, 'did-fail-load');
     }, false);
 
-    // this.setAttribute('type', 'application/browser-plugin');
-
-    const id = getNextId();
-    this.setAttribute('id', 'browser-plugin-' + id);
-
-    // For some reason, setting the 'internalinstanceid' attribute immediately
-    // prevents the webview from loading the initial URL.  Setting it
-    // in a timeout works, but that seems coincidental and brittle.  We should
-    // figure out where/when to really set it.
-    //
-    // TODO: figure out where/when to really set it.
-    // https://github.com/mozilla/positron/issues/71
-    //
-    window.setTimeout(() => {
-      this.setAttribute(webViewConstants.ATTRIBUTE_INTERNALINSTANCEID, id);
-    }, 0);
-
-    // The <object> node fills in the <webview> container.
+    // The <iframe> node fills in the <webview> container.
     return this.style.flex = '1 1 auto';
   };
   proto.attributeChangedCallback = function(name, oldValue, newValue) {
