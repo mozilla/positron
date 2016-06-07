@@ -323,6 +323,11 @@ CSS_PROP_ALIAS(-webkit-box-sizing,
                WebkitBoxSizing,
                WEBKIT_PREFIX_PREF)
 
+CSS_PROP_ALIAS(-webkit-flex,
+               flex,
+               WebkitFlex,
+               WEBKIT_PREFIX_PREF)
+
 // Alias -webkit-box properties to their -moz-box equivalents.
 // (NOTE: Even though they're aliases, in practice these -webkit properties
 // will behave a bit differently from their -moz versions, if they're
