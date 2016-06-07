@@ -29,6 +29,7 @@ using namespace js;
 
 using mozilla::ArrayLength;
 using mozilla::DebugOnly;
+using mozilla::TimeDuration;
 
 namespace js {
 
@@ -704,15 +705,13 @@ GlobalHelperThreadState::isLocked()
 #endif
 
 void
-GlobalHelperThreadState::wait(CondVar which, uint32_t millis)
+GlobalHelperThreadState::wait(CondVar which, TimeDuration timeout /* = TimeDuration::Forever() */)
 {
     MOZ_ASSERT(isLocked());
 #ifdef DEBUG
     lockOwner = nullptr;
 #endif
-    DebugOnly<PRStatus> status =
-        PR_WaitCondVar(whichWakeup(which),
-                       millis ? PR_MillisecondsToInterval(millis) : PR_INTERVAL_NO_TIMEOUT);
+    DebugOnly<PRStatus> status = PR_WaitCondVar(whichWakeup(which), DurationToPRInterval(timeout));
     MOZ_ASSERT(status == PR_SUCCESS);
 #ifdef DEBUG
     lockOwner = PR_GetCurrentThread();
@@ -1272,8 +1271,6 @@ GlobalHelperThreadState::mergeParseTaskCompartment(JSRuntime* rt, ParseTask* par
     LeaveParseTaskZone(rt, parseTask);
 
     {
-        gc::ZoneCellIter iter(parseTask->cx->zone(), gc::AllocKind::OBJECT_GROUP);
-
         // Generator functions don't have Function.prototype as prototype but a
         // different function object, so the IdentifyStandardPrototype trick
         // below won't work.  Just special-case it.
@@ -1289,8 +1286,7 @@ GlobalHelperThreadState::mergeParseTaskCompartment(JSRuntime* rt, ParseTask* par
         // to the corresponding prototype in the new compartment. This will briefly
         // create cross compartment pointers, which will be fixed by the
         // MergeCompartments call below.
-        for (; !iter.done(); iter.next()) {
-            ObjectGroup* group = iter.get<ObjectGroup>();
+        for (auto group = parseTask->cx->zone()->cellIter<ObjectGroup>(); !group.done(); group.next()) {
             TaggedProto proto(group->proto());
             if (!proto.isObject())
                 continue;
@@ -1641,10 +1637,8 @@ GlobalHelperThreadState::compressionInProgress(SourceCompressionTask* task)
 bool
 SourceCompressionTask::complete()
 {
-    if (!active()) {
-        MOZ_ASSERT(!compressed);
+    if (!active())
         return true;
-    }
 
     {
         AutoLockHelperThreadState lock;
@@ -1653,27 +1647,14 @@ SourceCompressionTask::complete()
     }
 
     if (result == Success) {
-        MOZ_ASSERT(compressed);
-        mozilla::UniquePtr<char[], JS::FreePolicy> compressedSource(
-            reinterpret_cast<char*>(compressed));
-        compressed = nullptr;
-
-        if (!ss->setCompressedSource(cx, mozilla::Move(compressedSource), compressedBytes,
-                                     ss->length()))
-        {
-            ss = nullptr;
-            MOZ_ASSERT(!active());
-            return false;
-        }
+        MOZ_ASSERT(resultString);
+        ss->setCompressedSource(mozilla::Move(*resultString), ss->length());
     } else {
-        js_free(compressed);
-
         if (result == OOM)
             ReportOutOfMemory(cx);
     }
 
     ss = nullptr;
-    compressed = nullptr;
     MOZ_ASSERT(!active());
 
     return result != OOM;

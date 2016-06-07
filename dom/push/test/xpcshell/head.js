@@ -24,6 +24,8 @@ const servicePrefs = new Preferences('dom.push.');
 
 const WEBSOCKET_CLOSE_GOING_AWAY = 1001;
 
+const MS_IN_ONE_DAY = 24 * 60 * 60 * 1000;
+
 var isParent = Cc['@mozilla.org/xre/runtime;1']
                  .getService(Ci.nsIXULRuntime).processType ==
                  Ci.nsIXULRuntime.PROCESS_TYPE_DEFAULT;
@@ -432,3 +434,23 @@ var tearDownServiceInParent = Task.async(function* (db) {
   record = yield db.getByKeyID('3a414737-2fd0-44c0-af05-7efc172475fc');
   ok(!record, 'Unsubscribed record should not exist');
 });
+
+function putTestRecord(db, keyID, scope, quota) {
+  return db.put({
+    channelID: keyID,
+    pushEndpoint: 'https://example.org/push/' + keyID,
+    scope: scope,
+    pushCount: 0,
+    lastPush: 0,
+    version: null,
+    originAttributes: '',
+    quota: quota,
+    systemRecord: quota == Infinity,
+  });
+}
+
+function getAllKeyIDs(db) {
+  return db.getAllKeyIDs().then(records =>
+    records.map(record => record.keyID).sort(compareAscending)
+  );
+}

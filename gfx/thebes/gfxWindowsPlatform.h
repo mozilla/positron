@@ -182,7 +182,6 @@ public:
 
     bool DidRenderingDeviceReset(DeviceResetReason* aResetReason = nullptr) override;
     void SchedulePaintIfDeviceReset() override;
-    void UpdateRenderModeIfDeviceReset() override;
 
     mozilla::gfx::BackendType GetContentBackendFor(mozilla::layers::LayersBackend aLayers) override;
 
@@ -251,9 +250,8 @@ public:
     void TestDeviceReset(DeviceResetReason aReason);
 
     virtual already_AddRefed<mozilla::gfx::VsyncSource> CreateHardwareVsyncSource() override;
-    static mozilla::Atomic<size_t> sD3D11MemoryUsed;
-    static mozilla::Atomic<size_t> sD3D9MemoryUsed;
-    static mozilla::Atomic<size_t> sD3D9SharedTextureUsed;
+    static mozilla::Atomic<size_t> sD3D11SharedTextures;
+    static mozilla::Atomic<size_t> sD3D9SharedTextures;
 
     void GetDeviceInitData(mozilla::gfx::DeviceInitData* aOut) override;
 
@@ -285,7 +283,8 @@ private:
     void InitializeD2D();
     bool InitDWriteSupport();
 
-    void DisableD2D(mozilla::gfx::FeatureStatus aStatus, const char* aMessage);
+    void DisableD2D(mozilla::gfx::FeatureStatus aStatus, const char* aMessage,
+                    const nsACString& aFailureId);
 
     void InitializeConfig();
     void InitializeD3D9Config();

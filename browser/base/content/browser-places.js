@@ -1452,12 +1452,6 @@ var BookmarkingUI = {
     options.maxResults = kMaxResults;
     let query = PlacesUtils.history.getNewQuery();
 
-    let onItemCommand = function (aEvent) {
-      let item = aEvent.target;
-      openUILink(item.getAttribute("targetURI"), aEvent);
-      CustomizableUI.hidePanelForNode(item);
-    };
-
     let fragment = document.createDocumentFragment();
     let root = PlacesUtils.history.executeQuery(query, options).root;
     root.containerOpen = true;
@@ -1475,7 +1469,6 @@ var BookmarkingUI = {
       item.setAttribute("simulated-places-node", true);
       item.setAttribute("class", "menuitem-iconic menuitem-with-favicon bookmark-item " +
                                  aExtraCSSClass);
-      item.addEventListener("command", onItemCommand);
       if (icon) {
         item.setAttribute("image", icon);
       }
@@ -1946,3 +1939,27 @@ var BookmarkingUI = {
     Ci.nsINavBookmarkObserver
   ])
 };
+
+var AutoShowBookmarksToolbar = {
+  init() {
+    Services.obs.addObserver(this, "autoshow-bookmarks-toolbar", false);
+  },
+
+  uninit() {
+    Services.obs.removeObserver(this, "autoshow-bookmarks-toolbar");
+  },
+
+  observe(subject, topic, data) {
+    let toolbar = document.getElementById("PersonalToolbar");
+    if (!toolbar.collapsed)
+      return;
+
+    let placement = CustomizableUI.getPlacementOfWidget("personal-bookmarks");
+    let area = placement && placement.area;
+    if (area != CustomizableUI.AREA_BOOKMARKS)
+      return;
+
+    setToolbarVisibility(toolbar, true);
+  }
+};
+

@@ -57,7 +57,7 @@ class LIRGenerator : public LIRGeneratorSpecific
     void lowerBinaryV(JSOp op, MBinaryInstruction* ins);
     void definePhis();
 
-    void lowerCallArguments(MCall* call);
+    MOZ_MUST_USE bool lowerCallArguments(MCall* call);
 
   public:
     bool visitInstruction(MInstruction* ins);
@@ -294,11 +294,6 @@ class LIRGenerator : public LIRGeneratorSpecific
     void visitRecompileCheck(MRecompileCheck* ins);
     void visitSimdBox(MSimdBox* ins);
     void visitSimdUnbox(MSimdUnbox* ins);
-    void visitSimdExtractElement(MSimdExtractElement* ins);
-    void visitSimdInsertElement(MSimdInsertElement* ins);
-    void visitSimdSwizzle(MSimdSwizzle* ins);
-    void visitSimdGeneralShuffle(MSimdGeneralShuffle* ins);
-    void visitSimdShuffle(MSimdShuffle* ins);
     void visitSimdUnaryArith(MSimdUnaryArith* ins);
     void visitSimdBinaryComp(MSimdBinaryComp* ins);
     void visitSimdBinaryBitwise(MSimdBinaryBitwise* ins);

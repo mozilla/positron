@@ -7,7 +7,6 @@ package org.mozilla.gecko.util;
 import android.content.Context;
 
 import android.util.Log;
-import org.mozilla.gecko.mozglue.SafeIntentUtils.SafeIntent;
 import android.text.TextUtils;
 
 import com.keepsafe.switchboard.Preferences;
@@ -23,9 +22,6 @@ import java.util.List;
  */
 public class Experiments {
     private static final String LOGTAG = "GeckoExperiments";
-
-    // Show search mode (instead of home panels) when tapping on urlbar if there is a search term in the urlbar.
-    public static final String SEARCH_TERM = "search-term";
 
     // Show a system notification linking to a "What's New" page on app update.
     public static final String WHATSNEW_NOTIFICATION = "whatsnew-notification";
@@ -57,37 +53,6 @@ public class Experiments {
 
     // Show name of organization (EV cert) instead of full URL in URL bar (Bug 1249594).
     public static final String URLBAR_SHOW_EV_CERT_OWNER = "urlbar-show-ev-cert-owner";
-
-    private static volatile Boolean disabled = null;
-
-    /**
-     * Determines whether Switchboard is disabled by the MOZ_DISABLE_SWITCHBOARD
-     * environment variable. We need to read this value from the intent string
-     * extra because environment variables from our test harness aren't set
-     * until Gecko is loaded, and we need to know this before then.
-     *
-     * @param intent Main intent that launched the app
-     * @return Whether Switchboard is disabled
-     */
-    public static boolean isDisabled(SafeIntent intent) {
-        if (disabled != null) {
-            return disabled;
-        }
-
-        String env = intent.getStringExtra("env0");
-        for (int i = 1; env != null; i++) {
-            if (env.startsWith("MOZ_DISABLE_SWITCHBOARD=")) {
-                if (!env.endsWith("=")) {
-                    Log.d(LOGTAG, "Switchboard disabled by MOZ_DISABLE_SWITCHBOARD environment variable");
-                    disabled = true;
-                    return disabled;
-                }
-            }
-            env = intent.getStringExtra("env" + i);
-        }
-        disabled = false;
-        return disabled;
-    }
 
     /**
      * Returns if a user is in certain local experiment.

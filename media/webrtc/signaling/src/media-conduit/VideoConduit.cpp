@@ -38,6 +38,7 @@
 #include <math.h>
 
 #define DEFAULT_VIDEO_MAX_FRAMERATE 30
+#define INVALID_RTP_PAYLOAD 255  //valid payload types are 0 to 127
 
 namespace mozilla {
 
@@ -745,7 +746,37 @@ WebrtcVideoConduit::ConfigureSendMediaCodec(const VideoCodecConfig* codecConfig)
   mSendingHeight = 0;
   mSendingFramerate = video_codec.maxFramerate;
 
-  if(codecConfig->RtcpFbNackIsSet("")) {
+  if (codecConfig->RtcpFbFECIsSet())
+  {
+    uint8_t payload_type_red = INVALID_RTP_PAYLOAD;
+    uint8_t payload_type_ulpfec = INVALID_RTP_PAYLOAD;
+    if (!DetermineREDAndULPFECPayloadTypes(payload_type_red, payload_type_ulpfec)) {
+      CSFLogError(logTag, "%s Unable to set FEC status: could not determine"
+                  "payload type: red %u ulpfec %u",
+                  __FUNCTION__, payload_type_red, payload_type_ulpfec);
+        return kMediaConduitFECStatusError;
+    }
+
+    if(codecConfig->RtcpFbNackIsSet("")) {
+      CSFLogDebug(logTag, "Enabling NACK/FEC (send) for video stream\n");
+      if (mPtrRTP->SetHybridNACKFECStatus(mChannel, true,
+                                          payload_type_red,
+                                          payload_type_ulpfec) != 0) {
+        CSFLogError(logTag,  "%s SetHybridNACKFECStatus Failed %d ",
+                    __FUNCTION__, mPtrViEBase->LastError());
+        return kMediaConduitHybridNACKFECStatusError;
+      }
+    } else {
+      CSFLogDebug(logTag, "Enabling FEC (send) for video stream\n");
+      if (mPtrRTP->SetFECStatus(mChannel, true,
+                                payload_type_red, payload_type_ulpfec) != 0)
+      {
+        CSFLogError(logTag,  "%s SetFECStatus Failed %d ", __FUNCTION__,
+                    mPtrViEBase->LastError());
+        return kMediaConduitFECStatusError;
+      }
+    }
+  } else if(codecConfig->RtcpFbNackIsSet("")) {
     CSFLogDebug(logTag, "Enabling NACK (send) for video stream\n");
     if (mPtrRTP->SetNACKStatus(mChannel, true) != 0)
     {
@@ -753,11 +784,6 @@ WebrtcVideoConduit::ConfigureSendMediaCodec(const VideoCodecConfig* codecConfig)
                   mPtrViEBase->LastError());
       return kMediaConduitNACKStatusError;
     }
-  }
-
-  condError = StartTransmitting();
-  if (condError != kMediaConduitNoError) {
-    return condError;
   }
 
   {
@@ -795,6 +821,8 @@ WebrtcVideoConduit::ConfigureRecvMediaCodecs(
   webrtc::ViEKeyFrameRequestMethod kf_request = webrtc::kViEKeyFrameRequestNone;
   bool use_nack_basic = false;
   bool use_tmmbr = false;
+  bool use_remb = false;
+  bool use_fec = false;
 
   //Try Applying the codecs in the list
   // we treat as success if atleast one codec was applied and reception was
@@ -827,6 +855,16 @@ WebrtcVideoConduit::ConfigureRecvMediaCodecs(
     // Check whether TMMBR is requested
     if (codecConfigList[i]->RtcpFbCcmIsSet("tmmbr")) {
       use_tmmbr = true;
+    }
+
+    // Check whether REMB is requested
+    if (codecConfigList[i]->RtcpFbRembIsSet()) {
+      use_remb = true;
+    }
+
+    // Check whether FEC is requested
+    if (codecConfigList[i]->RtcpFbFECIsSet()) {
+      use_fec = true;
     }
 
     webrtc::VideoCodec  video_codec;
@@ -949,8 +987,37 @@ WebrtcVideoConduit::ConfigureRecvMediaCodecs(
       mFrameRequestMethod = FrameRequestUnknown;
   }
 
-  if(use_nack_basic)
+  if (use_fec)
   {
+    uint8_t payload_type_red = INVALID_RTP_PAYLOAD;
+    uint8_t payload_type_ulpfec = INVALID_RTP_PAYLOAD;
+    if (!DetermineREDAndULPFECPayloadTypes(payload_type_red, payload_type_ulpfec)) {
+      CSFLogError(logTag, "%s Unable to set FEC status: could not determine"
+                  "payload type: red %u ulpfec %u",
+                  __FUNCTION__, payload_type_red, payload_type_ulpfec);
+        return kMediaConduitFECStatusError;
+    }
+
+    if (use_nack_basic) {
+      CSFLogDebug(logTag, "Enabling NACK/FEC (recv) for video stream\n");
+      if (mPtrRTP->SetHybridNACKFECStatus(mChannel, true,
+                                          payload_type_red,
+                                          payload_type_ulpfec) != 0) {
+        CSFLogError(logTag,  "%s SetHybridNACKFECStatus Failed %d ",
+                    __FUNCTION__, mPtrViEBase->LastError());
+        return kMediaConduitNACKStatusError;
+      }
+    } else {
+      CSFLogDebug(logTag, "Enabling FEC (recv) for video stream\n");
+      if (mPtrRTP->SetFECStatus(mChannel, true,
+                                payload_type_red, payload_type_ulpfec) != 0)
+      {
+        CSFLogError(logTag,  "%s SetFECStatus Failed %d ", __FUNCTION__,
+                    mPtrViEBase->LastError());
+        return kMediaConduitNACKStatusError;
+      }
+    }
+  } else if(use_nack_basic) {
     CSFLogDebug(logTag, "Enabling NACK (recv) for video stream\n");
     if (mPtrRTP->SetNACKStatus(mChannel, true) != 0)
     {
@@ -960,6 +1027,7 @@ WebrtcVideoConduit::ConfigureRecvMediaCodecs(
     }
   }
   mUsingNackBasic = use_nack_basic;
+  mUsingFEC = use_fec;
 
   if (use_tmmbr) {
     CSFLogDebug(logTag, "Enabling TMMBR for video stream");
@@ -977,7 +1045,9 @@ WebrtcVideoConduit::ConfigureRecvMediaCodecs(
   }
 
   // by now we should be successfully started the reception
-  mPtrRTP->SetRembStatus(mChannel, false, true);
+  CSFLogDebug(logTag, "REMB enabled for video stream %s",
+              (use_remb ? "yes" : "no"));
+  mPtrRTP->SetRembStatus(mChannel, use_remb, true);
   DumpCodecDB();
   return kMediaConduitNoError;
 }
@@ -1046,13 +1116,13 @@ WebrtcVideoConduit::SelectBitrates(unsigned short width,
   if (framerate >= 10) {
     out_min = out_min * (framerate/30);
     out_start = out_start * (framerate/30);
-    out_max = out_max * (framerate/30);
+    out_max = std::max((unsigned int)(out_max * (framerate/30)), cap);
   } else {
     // At low framerates, don't reduce bandwidth as much - cut slope to 1/2.
     // Mostly this would be ultra-low-light situations/mobile or screensharing.
     out_min = out_min * ((10-(framerate/2))/30);
     out_start = out_start * ((10-(framerate/2))/30);
-    out_max = out_max * ((10-(framerate/2))/30);
+    out_max = std::max((unsigned int)(out_max * ((10-(framerate/2))/30)), cap);
   }
 
   if (mMinBitrate && mMinBitrate > out_min) {
@@ -2046,6 +2116,34 @@ WebrtcVideoConduit::CodecPluginID()
     return mExternalRecvCodecHandle->PluginID();
   }
   return 0;
+}
+
+bool
+WebrtcVideoConduit::DetermineREDAndULPFECPayloadTypes(uint8_t &payload_type_red, uint8_t &payload_type_ulpfec)
+{
+    webrtc::VideoCodec video_codec;
+    payload_type_red = INVALID_RTP_PAYLOAD;
+    payload_type_ulpfec = INVALID_RTP_PAYLOAD;
+
+    for(int idx=0; idx < mPtrViECodec->NumberOfCodecs(); idx++)
+    {
+      if(mPtrViECodec->GetCodec(idx, video_codec) == 0)
+      {
+        switch(video_codec.codecType) {
+          case webrtc::VideoCodecType::kVideoCodecRED:
+            payload_type_red = video_codec.plType;
+            break;
+          case webrtc::VideoCodecType::kVideoCodecULPFEC:
+            payload_type_ulpfec = video_codec.plType;
+            break;
+          default:
+            break;
+        }
+      }
+    }
+
+    return payload_type_red != INVALID_RTP_PAYLOAD
+           && payload_type_ulpfec != INVALID_RTP_PAYLOAD;
 }
 
 }// end namespace

@@ -279,15 +279,47 @@ this.BrowserTestUtils = {
   /**
    * Waits for the next browser window to open and be fully loaded.
    *
+   * @param {bool} delayedStartup (optional)
+   *        Whether or not to wait for the browser-delayed-startup-finished
+   *        observer notification before resolving. Defaults to true.
+   * @param {string} initialBrowserLoaded (optional)
+   *        If set, we will wait until the initial browser in the new
+   *        window has loaded a particular page. If unset, the initial
+   *        browser may or may not have finished loading its first page
+   *        when the resulting Promise resolves.
    * @return {Promise}
    *         A Promise which resolves the next time that a DOM window
    *         opens and the delayed startup observer notification fires.
    */
-  waitForNewWindow: Task.async(function* (delayedStartup=true) {
+  waitForNewWindow: Task.async(function* (delayedStartup=true,
+                                          initialBrowserLoaded=null) {
     let win = yield this.domWindowOpened();
 
-    yield TestUtils.topicObserved("browser-delayed-startup-finished",
-                                   subject => subject == win);
+    let promises = [
+      TestUtils.topicObserved("browser-delayed-startup-finished",
+                              subject => subject == win),
+    ];
+
+    if (initialBrowserLoaded) {
+      yield this.waitForEvent(win, "DOMContentLoaded");
+
+      let browser = win.gBrowser.selectedBrowser;
+
+      // Retrieve the given browser's current process type.
+      let process =
+        browser.isRemoteBrowser ? Ci.nsIXULRuntime.PROCESS_TYPE_CONTENT
+                                : Ci.nsIXULRuntime.PROCESS_TYPE_DEFAULT;
+      if (win.gMultiProcessBrowser &&
+          !E10SUtils.canLoadURIInProcess(initialBrowserLoaded, process)) {
+        yield this.waitForEvent(browser, "XULFrameLoaderCreated");
+      }
+
+      let loadPromise = this.browserLoaded(browser, false, initialBrowserLoaded);
+      promises.push(loadPromise);
+    }
+
+    yield Promise.all(promises);
+
     return win;
   }),
 
@@ -379,7 +411,7 @@ this.BrowserTestUtils = {
    * @return {Promise}
    *         Resolves with the new window once it is loaded.
    */
-  openNewBrowserWindow(options={}) {
+  openNewBrowserWindow: Task.async(function*(options={}) {
     let argString = Cc["@mozilla.org/supports-string;1"].
                     createInstance(Ci.nsISupportsString);
     argString.data = "";
@@ -401,9 +433,17 @@ this.BrowserTestUtils = {
     // Wait for browser-delayed-startup-finished notification, it indicates
     // that the window has loaded completely and is ready to be used for
     // testing.
-    return TestUtils.topicObserved("browser-delayed-startup-finished",
-                                   subject => subject == win).then(() => win);
-  },
+    yield this.waitForEvent(win, "load");
+    let startupPromise =
+      TestUtils.topicObserved("browser-delayed-startup-finished",
+                              subject => subject == win).then(() => win);
+    let loadPromise = this.browserLoaded(win.gBrowser.selectedBrowser);
+
+    yield startupPromise;
+    yield loadPromise;
+
+    return win;
+  }),
 
   /**
    * Closes a window.

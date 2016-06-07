@@ -97,6 +97,10 @@
 #include "mozilla/net/DataChannelProtocol.h"
 #endif
 
+#ifndef USE_FAKE_MEDIA_STREAMS
+#include "MediaStreamGraphImpl.h"
+#endif
+
 #ifdef XP_WIN
 // We need to undef the MS macro again in case the windows include file
 // got imported after we included nsIDocument.h
@@ -870,7 +874,8 @@ class ConfigureCodec {
       mH264MaxMbps(0), // Unlimited
       mVP8MaxFs(0),
       mVP8MaxFr(0),
-      mUseTmmbr(false)
+      mUseTmmbr(false),
+      mUseRemb(false)
     {
 #ifdef MOZ_WEBRTC_OMX
       // Check to see if what HW codecs are available (not in use) at this moment.
@@ -936,6 +941,9 @@ class ConfigureCodec {
 
       // TMMBR is enabled from a pref in about:config
       branch->GetBoolPref("media.navigator.video.use_tmmbr", &mUseTmmbr);
+
+      // REMB is enabled by default, but can be disabled from about:config
+      branch->GetBoolPref("media.navigator.video.use_remb", &mUseRemb);
     }
 
     void operator()(JsepCodecDescription* codec) const
@@ -982,6 +990,9 @@ class ConfigureCodec {
             if (mUseTmmbr) {
               videoCodec.EnableTmmbr();
             }
+            if (mUseRemb) {
+              videoCodec.EnableRemb();
+            }
           }
           break;
         case SdpMediaSection::kText:
@@ -1003,6 +1014,7 @@ class ConfigureCodec {
     int32_t mVP8MaxFs;
     int32_t mVP8MaxFr;
     bool mUseTmmbr;
+    bool mUseRemb;
 };
 
 nsresult
@@ -1669,7 +1681,7 @@ PeerConnectionImpl::SetLocalDescription(int32_t aAction, const char* aSDP)
   STAMP_TIMECARD(mTimeCard, "Set Local Description");
 
 #if !defined(MOZILLA_EXTERNAL_LINKAGE)
-  bool isolated = mMedia->AnyLocalStreamHasPeerIdentity();
+  bool isolated = mMedia->AnyLocalTrackHasPeerIdentity();
   mPrivacyRequested = mPrivacyRequested || isolated;
 #endif
 
@@ -1734,6 +1746,61 @@ static void DeferredSetRemote(const std::string& aPcHandle,
     wrapper.impl()->SetRemoteDescription(aAction, aSdp.c_str());
   }
 }
+
+static void StartTrack(MediaStream* aSource,
+                       TrackID aTrackId,
+                       nsAutoPtr<MediaSegment>&& aSegment) {
+#if !defined(MOZILLA_EXTERNAL_LINKAGE)
+  class Message : public ControlMessage {
+   public:
+    Message(MediaStream* aStream,
+            TrackID aTrack,
+            nsAutoPtr<MediaSegment>&& aSegment)
+      : ControlMessage(aStream),
+        track_id_(aTrack),
+        segment_(aSegment) {}
+
+    virtual void Run() override {
+      TrackRate track_rate = segment_->GetType() == MediaSegment::AUDIO ?
+        WEBRTC_DEFAULT_SAMPLE_RATE : mStream->GraphRate();
+      StreamTime current_end = mStream->GetTracksEnd();
+      TrackTicks current_ticks =
+        mStream->TimeToTicksRoundUp(track_rate, current_end);
+
+      // Add a track 'now' to avoid possible underrun, especially if we add
+      // a track "later".
+
+      if (current_end != 0L) {
+        CSFLogDebug(logTag, "added track @ %u -> %f",
+                    static_cast<unsigned>(current_end),
+                    mStream->StreamTimeToSeconds(current_end));
+      }
+
+      // To avoid assertions, we need to insert a dummy segment that covers up
+      // to the "start" time for the track
+      segment_->AppendNullData(current_ticks);
+      if (segment_->GetType() == MediaSegment::AUDIO) {
+        mStream->AsSourceStream()->AddAudioTrack(
+            track_id_,
+            WEBRTC_DEFAULT_SAMPLE_RATE,
+            0,
+            static_cast<AudioSegment*>(segment_.forget()));
+      } else {
+        mStream->AsSourceStream()->AddTrack(track_id_, 0, segment_.forget());
+      }
+    }
+   private:
+    TrackID track_id_;
+    nsAutoPtr<MediaSegment> segment_;
+  };
+
+  aSource->GraphImpl()->AppendMessage(
+      MakeUnique<Message>(aSource, aTrackId, Move(aSegment)));
+  CSFLogInfo(logTag, "Dispatched track-add for track id %u on stream %p",
+             aTrackId, aSource);
+#endif
+}
+
 
 nsresult
 PeerConnectionImpl::CreateNewRemoteTracks(RefPtr<PeerConnectionObserver>& aPco)
@@ -1818,6 +1885,16 @@ PeerConnectionImpl::CreateNewRemoteTracks(RefPtr<PeerConnectionObserver>& aPco)
     }
 #endif
 
+    // We need to select unique ids, just use max + 1
+    TrackID maxTrackId = 0;
+    {
+      nsTArray<RefPtr<dom::MediaStreamTrack>> domTracks;
+      info->GetMediaStream()->GetTracks(domTracks);
+      for (auto& track : domTracks) {
+        maxTrackId = std::max(maxTrackId, track->mTrackID);
+      }
+    }
+
     for (RefPtr<JsepTrack>& track : tracks) {
       std::string webrtcTrackId(track->GetTrackId());
       if (!info->HasTrack(webrtcTrackId)) {
@@ -1827,20 +1904,27 @@ PeerConnectionImpl::CreateNewRemoteTracks(RefPtr<PeerConnectionObserver>& aPco)
 #else
         RefPtr<MediaStreamTrackSource> source = new MediaStreamTrackSource();
 #endif
-        TrackID trackID = info->GetNextAvailableNumericTrackId();
+        TrackID trackID = ++maxTrackId;
         RefPtr<MediaStreamTrack> domTrack;
+        nsAutoPtr<MediaSegment> segment;
         if (track->GetMediaType() == SdpMediaSection::kAudio) {
           domTrack =
             info->GetMediaStream()->CreateDOMTrack(trackID,
                                                    MediaSegment::AUDIO,
                                                    source);
+          segment = new AudioSegment;
         } else {
           domTrack =
             info->GetMediaStream()->CreateDOMTrack(trackID,
                                                    MediaSegment::VIDEO,
                                                    source);
+#if !defined(MOZILLA_EXTERNAL_LINKAGE)
+          segment = new VideoSegment;
+#endif
         }
 
+        StartTrack(info->GetMediaStream()->GetInputStream()->AsSourceStream(),
+                   trackID, Move(segment));
         info->AddTrack(webrtcTrackId, domTrack);
         CSFLogDebug(logTag, "Added remote track %s/%s",
                     info->GetId().c_str(), webrtcTrackId.c_str());
@@ -2201,20 +2285,6 @@ PeerConnectionImpl::PrincipalChanged(MediaStreamTrack* aTrack) {
 }
 #endif
 
-#if !defined(MOZILLA_EXTERNAL_LINKAGE)
-nsresult
-PeerConnectionImpl::GetRemoteTrackId(const std::string streamId,
-                                     const MediaStreamTrack& aTrack,
-                                     std::string* trackId) const
-{
-  if (IsClosed()) {
-    return NS_ERROR_UNEXPECTED;
-  }
-
-  return mMedia->GetRemoteTrackId(streamId, aTrack, trackId);
-}
-#endif
-
 std::string
 PeerConnectionImpl::GetTrackId(const MediaStreamTrack& aTrack)
 {
@@ -2264,15 +2334,6 @@ nsresult
 PeerConnectionImpl::AddTrack(MediaStreamTrack& aTrack,
                              DOMMediaStream& aMediaStream)
 {
-  if (!aMediaStream.HasTrack(aTrack)) {
-    CSFLogError(logTag, "%s: Track is not in stream", __FUNCTION__);
-    return NS_ERROR_FAILURE;
-  }
-  if (!aMediaStream.OwnsTrack(aTrack)) {
-    CSFLogError(logTag, "%s: Track is not in owned stream (Bug 1259236)", __FUNCTION__);
-    return NS_ERROR_NOT_IMPLEMENTED;
-  }
-
   std::string streamId = PeerConnectionImpl::GetStreamId(aMediaStream);
   std::string trackId = PeerConnectionImpl::GetTrackId(aTrack);
   nsresult res = mMedia->AddTrack(aMediaStream, streamId, aTrack, trackId);
@@ -3338,35 +3399,16 @@ PeerConnectionImpl::BuildStatsQuery_m(
   }
 
   for (int i = 0, len = mMedia->LocalStreamsLength(); i < len; i++) {
-    auto& pipelines = mMedia->GetLocalStreamByIndex(i)->GetPipelines();
-    if (aSelector) {
-      if (mMedia->GetLocalStreamByIndex(i)->GetMediaStream()->
-          HasTrack(*aSelector)) {
-        auto it = pipelines.find(trackId);
-        if (it != pipelines.end()) {
-          query->pipelines.AppendElement(it->second);
-        }
-      }
-    } else {
-      for (auto it = pipelines.begin(); it != pipelines.end(); ++it) {
-        query->pipelines.AppendElement(it->second);
+    for (auto pipeline : mMedia->GetLocalStreamByIndex(i)->GetPipelines()) {
+      if (!aSelector || pipeline.second->trackid() == trackId) {
+        query->pipelines.AppendElement(pipeline.second);
       }
     }
   }
-
-  for (size_t i = 0, len = mMedia->RemoteStreamsLength(); i < len; i++) {
-    auto& pipelines = mMedia->GetRemoteStreamByIndex(i)->GetPipelines();
-    if (aSelector) {
-      if (mMedia->GetRemoteStreamByIndex(i)->
-          GetMediaStream()->HasTrack(*aSelector)) {
-        auto it = pipelines.find(trackId);
-        if (it != pipelines.end()) {
-          query->pipelines.AppendElement(it->second);
-        }
-      }
-    } else {
-      for (auto it = pipelines.begin(); it != pipelines.end(); ++it) {
-        query->pipelines.AppendElement(it->second);
+  for (int i = 0, len = mMedia->RemoteStreamsLength(); i < len; i++) {
+    for (auto pipeline : mMedia->GetRemoteStreamByIndex(i)->GetPipelines()) {
+      if (!aSelector || pipeline.second->trackid() == trackId) {
+        query->pipelines.AppendElement(pipeline.second);
       }
     }
   }

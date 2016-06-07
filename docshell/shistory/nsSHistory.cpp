@@ -402,7 +402,7 @@ nsSHistory::AddEntry(nsISHEntry* aSHEntry, bool aPersist)
 
   nsCOMPtr<nsIURI> uri;
   aSHEntry->GetURI(getter_AddRefs(uri));
-  NOTIFY_LISTENERS(OnHistoryNewEntry, (uri));
+  NOTIFY_LISTENERS(OnHistoryNewEntry, (uri, currentIndex));
 
   // If a listener has changed mIndex, we need to get currentTxn again,
   // otherwise we'll be left at an inconsistent state (see bug 320742)
@@ -1766,10 +1766,6 @@ nsSHistory::InitiateLoad(nsISHEntry* aFrameEntry, nsIDocShell* aFrameDS,
   nsCOMPtr<nsIURI> originalURI;
   aFrameEntry->GetOriginalURI(getter_AddRefs(originalURI));
   loadInfo->SetOriginalURI(originalURI);
-
-  bool loadReplace;
-  aFrameEntry->GetLoadReplace(&loadReplace);
-  loadInfo->SetLoadReplace(loadReplace);
 
   nsCOMPtr<nsIURI> nextURI;
   aFrameEntry->GetURI(getter_AddRefs(nextURI));

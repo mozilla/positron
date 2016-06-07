@@ -17,7 +17,7 @@
 'use strict';
 
 var gScript = SpecialPowers.loadChromeScript(SimpleTest.getTestFileURL('PresentationSessionChromeScript1UA.js'));
-var receiverUrl = SimpleTest.getTestFileURL('file_presentation_1ua_receiver_oop.html');
+var receiverUrl = SimpleTest.getTestFileURL('file_presentation_1ua_receiver.html');
 var request;
 var connection;
 var receiverIframe;
@@ -46,6 +46,7 @@ function setup() {
     receiverIframe = document.createElement('iframe');
     receiverIframe.setAttribute("remote", "true");
     receiverIframe.setAttribute("mozbrowser", "true");
+    receiverIframe.setAttribute("mozpresentation", receiverUrl);
     receiverIframe.setAttribute('src', receiverUrl);
     receiverIframe.addEventListener("mozbrowserloadend", function mozbrowserloadendHander() {
       receiverIframe.removeEventListener("mozbrowserloadend", mozbrowserloadendHander);
@@ -133,8 +134,12 @@ function testStartConnection() {
       connection = aConnection;
       ok(connection, "Sender: Connection should be available.");
       ok(connection.id, "Sender: Connection ID should be set.");
-      is(connection.state, "connected", "Sender: Connection state at sender side should be connected by default.");
-      aResolve();
+      is(connection.state, "connecting", "The initial state should be connecting.");
+      connection.onconnect = function() {
+        connection.onconnect = null;
+        is(connection.state, "connected", "Connection should be connected.");
+        aResolve();
+      };
     })
     .catch((aError) => {
       ok(false, "Sender: Error occurred when establishing a connection: " + aError);
@@ -177,12 +182,15 @@ function testIncomingMessage() {
 function testTerminateConnection() {
   return new Promise(function(aResolve, aReject) {
     info('Sender: --- testTerminateConnection ---');
-    connection.onstatechange = function() {
-      connection.onstatechange = null;
+    connection.onterminate = function() {
+      connection.onterminate = null;
       is(connection.state, "terminated", "Sender: Connection should be terminated.");
       aResolve();
     };
-    connection.terminate();
+    gScript.addMessageListener('ready-to-terminate', function onReadyToTerminate() {
+      gScript.removeMessageListener('ready-to-terminate', onReadyToTerminate);
+      connection.terminate();
+    });
   });
 }
 
@@ -212,6 +220,8 @@ SpecialPowers.pushPermissions([
   {type: "browser", allow: true, context: document},
 ], () => {
   SpecialPowers.pushPrefEnv({ 'set': [["dom.presentation.enabled", true],
+                                      /* Mocked TCP session transport builder in the test */
+                                      ["dom.presentation.session_transport.data_channel.enable", false],
                                       ["dom.presentation.test.enabled", true],
                                       ["dom.presentation.test.stage", 0],
                                       ["dom.mozBrowserFramesEnabled", true],

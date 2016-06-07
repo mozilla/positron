@@ -132,11 +132,12 @@ Navigator implements NavigatorGeolocation;
 partial interface Navigator {
   [Throws, Pref="dom.battery.enabled"]
   Promise<BatteryManager> getBattery();
-  // Deprecated. Use getBattery() instead.
-  // XXXbz Per spec this should be non-nullable, but we return null in
-  // torn-down windows.  See bug 884925.
-  [Throws, Pref="dom.battery.enabled", BinaryName="deprecatedBattery"]
-  readonly attribute BatteryManager? battery;
+};
+
+partial interface Navigator {
+  [NewObject, Pref="dom.flyweb.enabled"]
+  Promise<FlyWebPublishedServer> publishServer(DOMString name,
+                                               optional FlyWebPublishOptions options);
 };
 
 // http://www.w3.org/TR/vibration/#vibration-interface

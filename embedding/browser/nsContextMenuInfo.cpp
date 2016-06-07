@@ -271,7 +271,8 @@ nsContextMenuInfo::GetBackgroundImageRequestInternal(nsIDOMNode* aDOMNode,
   nsAutoString bgStringValue;
 
   nsCOMPtr<nsIDocument> doc(do_QueryInterface(document));
-  nsCOMPtr<nsIPrincipal> principal = doc ? doc->NodePrincipal() : nullptr;
+  NS_ENSURE_TRUE(doc, NS_ERROR_FAILURE);
+  nsCOMPtr<nsIPrincipal> principal = doc->NodePrincipal();
 
   while (true) {
     nsCOMPtr<Element> domElement(do_QueryInterface(domNode));
@@ -296,7 +297,7 @@ nsContextMenuInfo::GetBackgroundImageRequestInternal(nsIDOMNode* aDOMNode,
           NS_NewURI(getter_AddRefs(bgUri), bgStringValue);
           NS_ENSURE_TRUE(bgUri, NS_ERROR_FAILURE);
 
-          RefPtr<imgLoader> il = imgLoader::GetInstance();
+          imgLoader* il = imgLoader::NormalLoader();
           NS_ENSURE_TRUE(il, NS_ERROR_FAILURE);
 
           return il->LoadImage(bgUri, nullptr, nullptr,

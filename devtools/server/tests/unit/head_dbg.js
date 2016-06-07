@@ -8,6 +8,18 @@ var Cu = Components.utils;
 var Cr = Components.results;
 var CC = Components.Constructor;
 
+// Populate AppInfo before anything (like the shared loader) accesses
+// System.appinfo, which is a lazy getter.
+const _appInfo = {};
+Cu.import("resource://testing-common/AppInfo.jsm", _appInfo);
+_appInfo.updateAppInfo({
+  ID: "devtools@tests.mozilla.org",
+  name: "devtools-tests",
+  version: "1",
+  platformVersion: "42",
+  crashReporter: true,
+});
+
 const { require, loader } = Cu.import("resource://devtools/shared/Loader.jsm", {});
 const { worker } = Cu.import("resource://devtools/shared/worker/loader.js", {});
 const promise = require("promise");
@@ -33,6 +45,21 @@ const systemPrincipal = Cc["@mozilla.org/systemprincipal;1"].createInstance(Ci.n
 var loadSubScript = Cc[
   "@mozilla.org/moz/jssubscript-loader;1"
 ].getService(Ci.mozIJSSubScriptLoader).loadSubScript;
+
+/**
+ * Initializes any test that needs to work with add-ons.
+ */
+function startupAddonsManager() {
+  // Create a directory for extensions.
+  const profileDir = do_get_profile().clone();
+  profileDir.append("extensions");
+
+  const internalManager = Cc["@mozilla.org/addons/integration;1"]
+    .getService(Ci.nsIObserver)
+    .QueryInterface(Ci.nsITimerCallback);
+
+  internalManager.observe(null, "addons-startup", null);
+}
 
 /**
  * Create a `run_test` function that runs the given generator in a task after

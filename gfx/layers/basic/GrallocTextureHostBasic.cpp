@@ -162,6 +162,7 @@ GrallocTextureHostBasic::BindTextureSource(CompositableTextureSourceRef& aTextur
 void
 GrallocTextureHostBasic::UnbindTextureSource()
 {
+  TextureHost::UnbindTextureSource();
   ClearTextureSource();
 }
 
@@ -189,6 +190,12 @@ GrallocTextureHostBasic::SetCompositor(Compositor* aCompositor)
   if (mTextureSource) {
     mTextureSource->SetCompositor(compositor);
   }
+}
+
+Compositor*
+GrallocTextureHostBasic::GetCompositor()
+{
+  return mCompositor;
 }
 
 gfx::SurfaceFormat

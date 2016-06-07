@@ -104,10 +104,6 @@ class LIRGeneratorARM : public LIRGeneratorShared
     void visitAsmJSAtomicExchangeHeap(MAsmJSAtomicExchangeHeap* ins);
     void visitAsmJSAtomicBinopHeap(MAsmJSAtomicBinopHeap* ins);
     void visitStoreTypedArrayElementStatic(MStoreTypedArrayElementStatic* ins);
-    void visitSimdBinaryArith(MSimdBinaryArith* ins);
-    void visitSimdSelect(MSimdSelect* ins);
-    void visitSimdSplat(MSimdSplat* ins);
-    void visitSimdValueX4(MSimdValueX4* ins);
     void visitCompareExchangeTypedArrayElement(MCompareExchangeTypedArrayElement* ins);
     void visitAtomicExchangeTypedArrayElement(MAtomicExchangeTypedArrayElement* ins);
     void visitAtomicTypedArrayElementBinop(MAtomicTypedArrayElementBinop* ins);
@@ -115,6 +111,7 @@ class LIRGeneratorARM : public LIRGeneratorShared
     void visitRandom(MRandom* ins);
     void visitWasmTruncateToInt64(MWasmTruncateToInt64* ins);
     void visitInt64ToFloatingPoint(MInt64ToFloatingPoint* ins);
+    void visitCopySign(MCopySign* ins);
 };
 
 typedef LIRGeneratorARM LIRGeneratorSpecific;

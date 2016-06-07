@@ -74,7 +74,8 @@ JsepCodecDescToCodecConfig(const JsepCodecDescription& aCodec,
                                   desc.mClock,
                                   desc.mPacketSize,
                                   desc.mForceMono ? 1 : desc.mChannels,
-                                  desc.mBitrate);
+                                  desc.mBitrate,
+                                  desc.mFECEnabled);
   (*aConfig)->mMaxPlaybackRate = desc.mMaxPlaybackRate;
 
   return NS_OK;
@@ -147,6 +148,7 @@ JsepCodecDescToCodecConfig(const JsepCodecDescription& aCodec,
   configRaw->mAckFbTypes = desc.mAckFbTypes;
   configRaw->mNackFbTypes = desc.mNackFbTypes;
   configRaw->mCcmFbTypes = desc.mCcmFbTypes;
+  configRaw->mRembFbSet = desc.RtcpFbRembIsSet();
 
   *aConfig = configRaw;
   return NS_OK;
@@ -460,6 +462,14 @@ MediaPipelineFactory::CreateOrUpdateMediaPipeline(
     return NS_OK;
   }
 
+  if (aTrack.GetActive()) {
+    auto error = conduit->StartTransmitting();
+    if (error) {
+      MOZ_MTLOG(ML_ERROR, "StartTransmitting failed: " << error);
+      return NS_ERROR_FAILURE;
+    }
+  }
+
   RefPtr<MediaPipeline> pipeline =
     stream->GetPipelineByTrackId_m(aTrack.GetTrackId());
 
@@ -526,8 +536,6 @@ MediaPipelineFactory::CreateMediaPipelineReceiving(
   TrackID numericTrackId = stream->GetNumericTrackId(aTrack.GetTrackId());
   MOZ_ASSERT(IsTrackIDExplicit(numericTrackId));
 
-  bool queue_track = stream->ShouldQueueTracks();
-
   MOZ_MTLOG(ML_DEBUG, __FUNCTION__ << ": Creating pipeline for "
             << numericTrackId << " -> " << aTrack.GetTrackId());
 
@@ -543,8 +551,7 @@ MediaPipelineFactory::CreateMediaPipelineReceiving(
         static_cast<AudioSessionConduit*>(aConduit.get()), // Ugly downcast.
         aRtpFlow,
         aRtcpFlow,
-        aFilter,
-        queue_track);
+        aFilter);
   } else if (aTrack.GetMediaType() == SdpMediaSection::kVideo) {
     pipeline = new MediaPipelineReceiveVideo(
         mPC->GetHandle(),
@@ -557,8 +564,7 @@ MediaPipelineFactory::CreateMediaPipelineReceiving(
         static_cast<VideoSessionConduit*>(aConduit.get()), // Ugly downcast.
         aRtpFlow,
         aRtcpFlow,
-        aFilter,
-        queue_track);
+        aFilter);
   } else {
     MOZ_ASSERT(false);
     MOZ_MTLOG(ML_ERROR, "Invalid media type in CreateMediaPipelineReceiving");
@@ -786,6 +792,15 @@ MediaPipelineFactory::GetOrCreateVideoConduit(
   }
 
   if (receiving) {
+    if (!aTrackPair.mSending) {
+      // No send track, but we still need to configure an SSRC for receiver
+      // reports.
+      if (!conduit->SetLocalSSRC(aTrackPair.mRecvonlySsrc)) {
+        MOZ_MTLOG(ML_ERROR, "SetLocalSSRC failed");
+        return NS_ERROR_FAILURE;
+      }
+    }
+
     // Prune out stuff we cannot actually do. We should work to eliminate the
     // need for this.
     bool configuredH264 = false;
@@ -815,15 +830,6 @@ MediaPipelineFactory::GetOrCreateVideoConduit(
     if (error) {
       MOZ_MTLOG(ML_ERROR, "ConfigureRecvMediaCodecs failed: " << error);
       return NS_ERROR_FAILURE;
-    }
-
-    if (!aTrackPair.mSending) {
-      // No send track, but we still need to configure an SSRC for receiver
-      // reports.
-      if (!conduit->SetLocalSSRC(aTrackPair.mRecvonlySsrc)) {
-        MOZ_MTLOG(ML_ERROR, "SetLocalSSRC failed");
-        return NS_ERROR_FAILURE;
-      }
     }
   } else {
     // For now we only expect to have one ssrc per local track.
@@ -867,24 +873,18 @@ MediaPipelineFactory::ConfigureVideoCodecMode(const JsepTrack& aTrack,
 {
 #if !defined(MOZILLA_EXTERNAL_LINKAGE)
   RefPtr<LocalSourceStreamInfo> stream =
-    mPCMedia->GetLocalStreamById(aTrack.GetStreamId());
+    mPCMedia->GetLocalStreamByTrackId(aTrack.GetTrackId());
 
   //get video track
+  RefPtr<mozilla::dom::MediaStreamTrack> track =
+    stream->GetTrackById(aTrack.GetTrackId());
+
   RefPtr<mozilla::dom::VideoStreamTrack> videotrack =
-    stream->GetVideoTrackByTrackId(aTrack.GetTrackId());
+    track->AsVideoStreamTrack();
 
   if (!videotrack) {
     MOZ_MTLOG(ML_ERROR, "video track not available");
     return NS_ERROR_FAILURE;
-  }
-
-  //get video source type
-  RefPtr<DOMMediaStream> mediastream =
-    mPCMedia->GetLocalStreamById(aTrack.GetStreamId())->GetMediaStream();
-
-  DOMLocalMediaStream* domLocalStream = mediastream->AsDOMLocalMediaStream();
-  if (!domLocalStream) {
-    return NS_OK;
   }
 
   dom::MediaSourceEnum source = videotrack->GetSource().GetMediaSource();

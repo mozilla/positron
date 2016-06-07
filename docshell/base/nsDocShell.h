@@ -232,6 +232,7 @@ public:
   NS_IMETHOD GetUseRemoteTabs(bool*) override;
   NS_IMETHOD SetRemoteTabs(bool) override;
   NS_IMETHOD GetOriginAttributes(JS::MutableHandle<JS::Value>) override;
+  NS_IMETHOD IsTrackingProtectionOn(bool*) override;
 
   // Restores a cached presentation from history (mLSHE).
   // This method swaps out the content viewer and simulates loads for
@@ -352,12 +353,7 @@ protected:
   // not have an owner on the channel should just pass null.
   // If aSrcdoc is not void, the load will be considered as a srcdoc load,
   // and the contents of aSrcdoc will be loaded instead of aURI.
-  // aOriginalURI will be set as the originalURI on the channel that does the
-  // load. If aOriginalURI is null, aURI will be set as the originalURI.
-  // If aLoadReplace is true, OLOAD_REPLACE flag will be set to the nsIChannel.
   nsresult DoURILoad(nsIURI* aURI,
-                     nsIURI* aOriginalURI,
-                     bool aLoadReplace,
                      nsIURI* aReferrer,
                      bool aSendReferrer,
                      uint32_t aReferrerPolicy,
@@ -1033,6 +1029,10 @@ private:
                               nsISupports* aRequestor,
                               nsIDocShellTreeItem* aOriginalRequestor,
                               nsIDocShellTreeItem** aResult);
+
+  // Helper assertion to enforce that mInPrivateBrowsing is in sync with
+  // OriginAttributes.mPrivateBrowsingId
+  void AssertOriginAttributesMatchPrivateBrowsing();
 
   // Notify consumers of a search being loaded through the observer service:
   void MaybeNotifyKeywordSearchLoading(const nsString& aProvider,

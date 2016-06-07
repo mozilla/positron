@@ -1517,7 +1517,7 @@ nsFlexContainerFrame::
   // have a single-line (nowrap) flex container which itself has a definite
   // cross-size.  Otherwise, we'll wait to do stretching, since (in other
   // cases) we don't know how much the item should stretch yet.
-  const nsHTMLReflowState* flexContainerRS = aItemReflowState.parentReflowState;
+  const nsHTMLReflowState* flexContainerRS = aItemReflowState.mParentReflowState;
   MOZ_ASSERT(flexContainerRS,
              "flex item's reflow state should have ptr to container's state");
   if (NS_STYLE_FLEX_WRAP_NOWRAP == flexContainerRS->mStylePosition->mFlexWrap) {
@@ -1705,7 +1705,7 @@ FlexItem::FlexItem(nsHTMLReflowState& aFlexItemReflowState,
   MOZ_ASSERT(!(mFrame->GetStateBits() & NS_FRAME_OUT_OF_FLOW),
              "out-of-flow frames should not be treated as flex items");
 
-  const nsHTMLReflowState* containerRS = aFlexItemReflowState.parentReflowState;
+  const nsHTMLReflowState* containerRS = aFlexItemReflowState.mParentReflowState;
   if (IsLegacyBox(containerRS->mStyleDisplay,
                   containerRS->frame->StyleContext())) {
     // For -webkit-box/-webkit-inline-box, we need to:
@@ -3258,11 +3258,13 @@ FlexboxAxisTracker::InitAxesFromLegacyProps(
     mMainAxis = eAxis_LR;
     mCrossAxis = eAxis_TB;
   }
-  // "direction: rtl" (in a horizontal -webkit-box) reverses the main axis.
+  // "direction: rtl" reverses the writing-mode's inline axis.
+  // So, we need to reverse the corresponding flex axis to match.
   // (Note this we don't toggle "mIsMainAxisReversed" for this condition,
   // because the main axis will still match aWM's inline direction.)
-  if (aWM.IsBidiLTR()) {
-    mMainAxis = GetReverseAxis(mMainAxis);
+  if (!aWM.IsBidiLTR()) {
+    AxisOrientationType& axisToFlip = mIsRowOriented ? mMainAxis : mCrossAxis;
+    axisToFlip = GetReverseAxis(axisToFlip);
   }
   // XXXdholbert END CODE TO SET DEPRECATED MEMBER-VARS
 

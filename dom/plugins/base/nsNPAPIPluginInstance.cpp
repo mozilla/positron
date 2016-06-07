@@ -92,7 +92,8 @@ static RefPtr<GLContext> sPluginContext = nullptr;
 static bool EnsureGLContext()
 {
   if (!sPluginContext) {
-    sPluginContext = GLContextProvider::CreateHeadless(CreateContextFlags::REQUIRE_COMPAT_PROFILE);
+    nsCString failureId;
+    sPluginContext = GLContextProvider::CreateHeadless(CreateContextFlags::REQUIRE_COMPAT_PROFILE, failureId);
   }
 
   return sPluginContext != nullptr;
@@ -1545,35 +1546,6 @@ nsNPAPIPluginInstance::GetMIMEType(const char* *result)
     *result = mMIMEType;
 
   return NS_OK;
-}
-
-nsresult
-nsNPAPIPluginInstance::GetJSContext(JSContext* *outContext)
-{
-  if (!mOwner)
-    return NS_ERROR_FAILURE;
-
-  RefPtr<nsPluginInstanceOwner> deathGrip(mOwner);
-
-  *outContext = nullptr;
-  nsCOMPtr<nsIDocument> document;
-
-  nsresult rv = mOwner->GetDocument(getter_AddRefs(document));
-
-  if (NS_SUCCEEDED(rv) && document) {
-    nsCOMPtr<nsIScriptGlobalObject> global =
-      do_QueryInterface(document->GetWindow());
-
-    if (global) {
-      nsIScriptContext *context = global->GetContext();
-
-      if (context) {
-        *outContext = context->GetNativeContext();
-      }
-    }
-  }
-
-  return rv;
 }
 
 nsPluginInstanceOwner*

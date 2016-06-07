@@ -73,6 +73,7 @@
 #include "mozilla/dom/time/DateCacheCleaner.h"
 #include "mozilla/dom/voicemail/VoicemailParent.h"
 #include "mozilla/embedding/printingui/PrintingParent.h"
+#include "mozilla/gfx/GPUProcessManager.h"
 #include "mozilla/hal_sandbox/PHalParent.h"
 #include "mozilla/ipc/BackgroundChild.h"
 #include "mozilla/ipc/BackgroundParent.h"
@@ -85,7 +86,6 @@
 #include "mozilla/ipc/InputStreamUtils.h"
 #include "mozilla/jsipc/CrossProcessObjectWrappers.h"
 #include "mozilla/layers/PAPZParent.h"
-#include "mozilla/layers/CompositorBridgeParent.h"
 #include "mozilla/layers/CompositorThread.h"
 #include "mozilla/layers/ImageBridgeParent.h"
 #include "mozilla/layers/SharedBufferManagerParent.h"
@@ -118,7 +118,6 @@
 #include "nsContentUtils.h"
 #include "nsDebugImpl.h"
 #include "nsFrameMessageManager.h"
-#include "nsGeolocationSettings.h"
 #include "nsHashPropertyBag.h"
 #include "nsIAlertsService.h"
 #include "nsIAppsService.h"
@@ -267,7 +266,7 @@ using namespace mozilla::system;
 #endif
 
 #ifndef MOZ_SIMPLEPUSH
-#include "nsIPushNotifier.h"
+#include "mozilla/dom/PushNotifier.h"
 #endif
 
 #ifdef XP_WIN
@@ -306,6 +305,7 @@ using namespace mozilla::dom::telephony;
 using namespace mozilla::dom::voicemail;
 using namespace mozilla::media;
 using namespace mozilla::embedding;
+using namespace mozilla::gfx;
 using namespace mozilla::gmp;
 using namespace mozilla::hal;
 using namespace mozilla::ipc;
@@ -1939,7 +1939,8 @@ ContentParent::AllocateLayerTreeId(ContentParent* aContent,
                                    TabParent* aTopLevel, const TabId& aTabId,
                                    uint64_t* aId)
 {
-  *aId = CompositorBridgeParent::AllocateLayerTreeId();
+  GPUProcessManager* gpu = GPUProcessManager::Get();
+  *aId = gpu->AllocateLayerTreeId();
 
   if (!gfxPlatform::AsyncPanZoomEnabled()) {
     return true;
@@ -1949,8 +1950,7 @@ ContentParent::AllocateLayerTreeId(ContentParent* aContent,
     return false;
   }
 
-  return CompositorBridgeParent::UpdateRemoteContentController(*aId, aContent,
-                                                         aTabId, aTopLevel);
+  return gpu->UpdateRemoteContentController(*aId, aContent, aTabId, aTopLevel);
 }
 
 bool
@@ -1996,8 +1996,9 @@ ContentParent::RecvDeallocateLayerTreeId(const uint64_t& aId)
 {
   auto iter = NestedBrowserLayerIds().find(this);
   if (iter != NestedBrowserLayerIds().end() &&
-    iter->second.find(aId) != iter->second.end()) {
-    CompositorBridgeParent::DeallocateLayerTreeId(aId);
+      iter->second.find(aId) != iter->second.end())
+  {
+    GPUProcessManager::Get()->DeallocateLayerTreeId(aId);
   } else {
     // You can't deallocate layer tree ids that you didn't allocate
     KillHard("DeallocateLayerTreeId");
@@ -3331,7 +3332,8 @@ PCompositorBridgeParent*
 ContentParent::AllocPCompositorBridgeParent(mozilla::ipc::Transport* aTransport,
                                             base::ProcessId aOtherProcess)
 {
-  return CompositorBridgeParent::Create(aTransport, aOtherProcess, mSubprocess);
+  return GPUProcessManager::Get()->CreateTabCompositorBridge(
+    aTransport, aOtherProcess, mSubprocess);
 }
 
 gfx::PVRManagerParent*
@@ -4567,19 +4569,6 @@ ContentParent::RecvAddGeolocationListener(const IPC::Principal& aPrincipal,
   // creation of a new listener.
   RecvRemoveGeolocationListener();
   mGeolocationWatchID = AddGeolocationListener(this, this, aHighAccuracy);
-
-  // let the the settings cache know the origin of the new listener
-  nsAutoCString origin;
-  // hint to the compiler to use the conversion operator to nsIPrincipal*
-  nsCOMPtr<nsIPrincipal> principal = static_cast<nsIPrincipal*>(aPrincipal);
-  if (!principal) {
-    return true;
-  }
-  principal->GetOrigin(origin);
-  RefPtr<nsGeolocationSettings> gs = nsGeolocationSettings::GetGeolocationSettings();
-  if (gs) {
-    gs->PutWatchOrigin(mGeolocationWatchID, origin);
-  }
   return true;
 }
 
@@ -4592,11 +4581,6 @@ ContentParent::RecvRemoveGeolocationListener()
       return true;
     }
     geo->ClearWatch(mGeolocationWatchID);
-
-    RefPtr<nsGeolocationSettings> gs = nsGeolocationSettings::GetGeolocationSettings();
-    if (gs) {
-      gs->RemoveWatchOrigin(mGeolocationWatchID);
-    }
     mGeolocationWatchID = -1;
   }
   return true;
@@ -4608,21 +4592,8 @@ ContentParent::RecvSetGeolocationHigherAccuracy(const bool& aEnable)
   // This should never be called without a listener already present,
   // so this check allows us to forgo securing privileges.
   if (mGeolocationWatchID != -1) {
-    nsCString origin;
-    RefPtr<nsGeolocationSettings> gs = nsGeolocationSettings::GetGeolocationSettings();
-    // get the origin stored for the curent watch ID
-    if (gs) {
-      gs->GetWatchOrigin(mGeolocationWatchID, origin);
-    }
-
-    // remove and recreate a new, high-accuracy listener
     RecvRemoveGeolocationListener();
     mGeolocationWatchID = AddGeolocationListener(this, this, aEnable);
-
-    // map the new watch ID to the origin
-    if (gs) {
-      gs->PutWatchOrigin(mGeolocationWatchID, origin);
-    }
   }
   return true;
 }
@@ -5536,10 +5507,13 @@ ContentParent::RecvCreateWindow(PBrowserParent* aThisTab,
   nsCOMPtr<mozIDOMWindowProxy> window;
   TabParent::AutoUseNewTab aunt(newTab, aWindowIsNew, aURLToLoad);
 
-  const char* name = aName.IsVoid() ? nullptr : NS_ConvertUTF16toUTF8(aName).get();
   const char* features = aFeatures.IsVoid() ? nullptr : aFeatures.get();
 
-  *aResult = pwwatch->OpenWindow2(parent, nullptr, name, features, aCalledFromJS,
+  *aResult = pwwatch->OpenWindow2(parent, nullptr,
+                                  aName.IsVoid() ?
+                                    nullptr :
+                                    NS_ConvertUTF16toUTF8(aName).get(),
+                                  features, aCalledFromJS,
                                   false, false, thisTabParent, nullptr,
                                   aFullZoom, 1, getter_AddRefs(window));
 
@@ -5822,15 +5796,8 @@ ContentParent::RecvNotifyPushObservers(const nsCString& aScope,
                                        const nsString& aMessageId)
 {
 #ifndef MOZ_SIMPLEPUSH
-  nsCOMPtr<nsIPushNotifier> pushNotifier =
-      do_GetService("@mozilla.org/push/Notifier;1");
-  if (NS_WARN_IF(!pushNotifier)) {
-      return true;
-  }
-
-  nsresult rv = pushNotifier->NotifyPushObservers(aScope, aPrincipal,
-                                                  Nothing());
-  Unused << NS_WARN_IF(NS_FAILED(rv));
+  PushMessageDispatcher dispatcher(aScope, aPrincipal, aMessageId, Nothing());
+  Unused << NS_WARN_IF(NS_FAILED(dispatcher.NotifyObservers()));
 #endif
   return true;
 }
@@ -5842,15 +5809,8 @@ ContentParent::RecvNotifyPushObserversWithData(const nsCString& aScope,
                                                InfallibleTArray<uint8_t>&& aData)
 {
 #ifndef MOZ_SIMPLEPUSH
-  nsCOMPtr<nsIPushNotifier> pushNotifier =
-      do_GetService("@mozilla.org/push/Notifier;1");
-  if (NS_WARN_IF(!pushNotifier)) {
-      return true;
-  }
-
-  nsresult rv = pushNotifier->NotifyPushObservers(aScope, aPrincipal,
-                                                  Some(aData));
-  Unused << NS_WARN_IF(NS_FAILED(rv));
+  PushMessageDispatcher dispatcher(aScope, aPrincipal, aMessageId, Some(aData));
+  Unused << NS_WARN_IF(NS_FAILED(dispatcher.NotifyObservers()));
 #endif
   return true;
 }
@@ -5860,15 +5820,8 @@ ContentParent::RecvNotifyPushSubscriptionChangeObservers(const nsCString& aScope
                                                          const IPC::Principal& aPrincipal)
 {
 #ifndef MOZ_SIMPLEPUSH
-  nsCOMPtr<nsIPushNotifier> pushNotifier =
-      do_GetService("@mozilla.org/push/Notifier;1");
-  if (NS_WARN_IF(!pushNotifier)) {
-      return true;
-  }
-
-  nsresult rv = pushNotifier->NotifySubscriptionChangeObservers(aScope,
-                                                                aPrincipal);
-  Unused << NS_WARN_IF(NS_FAILED(rv));
+  PushSubscriptionChangeDispatcher dispatcher(aScope, aPrincipal);
+  Unused << NS_WARN_IF(NS_FAILED(dispatcher.NotifyObservers()));
 #endif
   return true;
 }
@@ -5878,15 +5831,8 @@ ContentParent::RecvNotifyPushSubscriptionModifiedObservers(const nsCString& aSco
                                                            const IPC::Principal& aPrincipal)
 {
 #ifndef MOZ_SIMPLEPUSH
-  nsCOMPtr<nsIPushNotifier> pushNotifier =
-      do_GetService("@mozilla.org/push/Notifier;1");
-  if (NS_WARN_IF(!pushNotifier)) {
-      return true;
-  }
-
-  nsresult rv = pushNotifier->NotifySubscriptionModifiedObservers(aScope,
-                                                                  aPrincipal);
-  Unused << NS_WARN_IF(NS_FAILED(rv));
+  PushSubscriptionModifiedDispatcher dispatcher(aScope, aPrincipal);
+  Unused << NS_WARN_IF(NS_FAILED(dispatcher.NotifyObservers()));
 #endif
   return true;
 }

@@ -92,6 +92,9 @@ js::NewContext(JSRuntime* rt, size_t stackChunkSize)
 {
     JS_AbortIfWrongThread(rt);
 
+    MOZ_RELEASE_ASSERT(!rt->haveCreatedContext,
+                       "There must be at most 1 JSContext per runtime");
+
     JSContext* cx = js_new<JSContext>(rt);
     if (!cx)
         return nullptr;
@@ -968,7 +971,6 @@ JSContext::JSContext(JSRuntime* rt)
     reportGranularity(JS_DEFAULT_JITREPORT_GRANULARITY),
     resolvingList(nullptr),
     generatingError(false),
-    savedFrameChains_(),
     cycleDetectorSet(this),
     data(nullptr),
     data2(nullptr),
@@ -1024,42 +1026,11 @@ JSContext::isThrowingDebuggeeWouldRun()
 }
 
 bool
-JSContext::saveFrameChain()
-{
-    if (!savedFrameChains_.append(SavedFrameChain(compartment(), enterCompartmentDepth_)))
-        return false;
-
-    if (Activation* act = runtime()->activation())
-        act->saveFrameChain();
-
-    setCompartment(nullptr);
-    enterCompartmentDepth_ = 0;
-
-    return true;
-}
-
-void
-JSContext::restoreFrameChain()
-{
-    MOZ_ASSERT(enterCompartmentDepth_ == 0); // We're about to clobber it, and it
-                                            // will be wrong forevermore.
-    SavedFrameChain sfc = savedFrameChains_.popCopy();
-    setCompartment(sfc.compartment);
-    enterCompartmentDepth_ = sfc.enterCompartmentCount;
-
-    if (Activation* act = runtime()->activation())
-        act->restoreFrameChain();
-}
-
-bool
 JSContext::currentlyRunning() const
 {
     for (ActivationIterator iter(runtime()); !iter.done(); ++iter) {
-        if (iter->cx() == this) {
-            if (iter->hasSavedFrameChain())
-                return false;
+        if (iter->cx() == this)
             return true;
-        }
     }
 
     return false;

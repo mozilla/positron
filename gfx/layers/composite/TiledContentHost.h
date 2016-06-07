@@ -18,12 +18,12 @@
 #include "mozilla/gfx/MatrixFwd.h"      // for Matrix4x4
 #include "mozilla/gfx/Point.h"          // for Point
 #include "mozilla/gfx/Rect.h"           // for Rect
-#include "mozilla/gfx/Types.h"          // for Filter
+#include "mozilla/gfx/Types.h"          // for SamplingFilter
 #include "mozilla/layers/CompositorTypes.h"  // for TextureInfo, etc
 #include "mozilla/layers/LayersSurfaces.h"  // for SurfaceDescriptor
 #include "mozilla/layers/LayersTypes.h"  // for LayerRenderState, etc
 #include "mozilla/layers/TextureHost.h"  // for TextureHost
-#include "mozilla/layers/TiledContentClient.h"
+#include "mozilla/layers/TextureClient.h"
 #include "mozilla/mozalloc.h"           // for operator delete
 #include "nsRegion.h"                   // for nsIntRegion
 #include "nscore.h"                     // for nsACString
@@ -40,6 +40,7 @@ class Compositor;
 class ISurfaceAllocator;
 class Layer;
 class ThebesBufferData;
+class TextureReadLock;
 struct EffectChain;
 
 
@@ -52,14 +53,13 @@ public:
   TileHost()
   {}
 
-  // Constructs a TileHost from a gfxSharedReadLock and TextureHost.
-  TileHost(gfxSharedReadLock* aSharedLock,
+  // Constructs a TileHost from a TextureReadLock and TextureHost.
+  TileHost(TextureReadLock* aSharedLock,
                TextureHost* aTextureHost,
                TextureHost* aTextureHostOnWhite,
                TextureSource* aSource,
                TextureSource* aSourceOnWhite)
-    : mSharedLock(aSharedLock)
-    , mTextureHost(aTextureHost)
+    : mTextureHost(aTextureHost)
     , mTextureHostOnWhite(aTextureHostOnWhite)
     , mTextureSource(aSource)
     , mTextureSourceOnWhite(aSourceOnWhite)
@@ -70,7 +70,6 @@ public:
     mTextureHostOnWhite = o.mTextureHostOnWhite;
     mTextureSource = o.mTextureSource;
     mTextureSourceOnWhite = o.mTextureSourceOnWhite;
-    mSharedLock = o.mSharedLock;
     mTilePosition = o.mTilePosition;
   }
   TileHost& operator=(const TileHost& o) {
@@ -81,7 +80,6 @@ public:
     mTextureHostOnWhite = o.mTextureHostOnWhite;
     mTextureSource = o.mTextureSource;
     mTextureSourceOnWhite = o.mTextureSourceOnWhite;
-    mSharedLock = o.mSharedLock;
     mTilePosition = o.mTilePosition;
     return *this;
   }
@@ -94,13 +92,6 @@ public:
   }
 
   bool IsPlaceholderTile() const { return mTextureHost == nullptr; }
-
-  void ReadUnlock() {
-    if (mSharedLock) {
-      mSharedLock->ReadUnlock();
-      mSharedLock = nullptr;
-    }
-  }
 
   void Dump(std::stringstream& aStream) {
     aStream << "TileHost(...)"; // fill in as needed
@@ -119,7 +110,6 @@ public:
    */
   float GetFadeInOpacity(float aOpacity);
 
-  RefPtr<gfxSharedReadLock> mSharedLock;
   CompositableTextureHostRef mTextureHost;
   CompositableTextureHostRef mTextureHostOnWhite;
   mutable CompositableTextureSourceRef mTextureSource;
@@ -144,9 +134,6 @@ public:
 
   void Clear();
 
-  void MarkTilesForUnlock();
-  void ProcessDelayedUnlocks();
-
   TileHost GetPlaceholderTile() const { return TileHost(); }
 
   // Stores the absolute resolution of the containing frame, calculated
@@ -159,7 +146,6 @@ public:
 protected:
 
   CSSToParentLayerScale2D mFrameResolution;
-  nsTArray<RefPtr<gfxSharedReadLock>> mDelayedUnlocks;
 };
 
 /**
@@ -216,7 +202,7 @@ public:
   }
 
   // Generate effect for layerscope when using hwc.
-  virtual already_AddRefed<TexturedEffect> GenEffect(const gfx::Filter& aFilter) override;
+  virtual already_AddRefed<TexturedEffect> GenEffect(const gfx::SamplingFilter aSamplingFilter) override;
 
   virtual bool UpdateThebes(const ThebesBufferData& aData,
                             const nsIntRegion& aUpdated,
@@ -252,7 +238,7 @@ public:
                          EffectChain& aEffectChain,
                          float aOpacity,
                          const gfx::Matrix4x4& aTransform,
-                         const gfx::Filter& aFilter,
+                         const gfx::SamplingFilter aSamplingFilter,
                          const gfx::IntRect& aClipRect,
                          const nsIntRegion* aVisibleRegion = nullptr) override;
 
@@ -281,7 +267,7 @@ private:
                          const gfx::Color* aBackgroundColor,
                          EffectChain& aEffectChain,
                          float aOpacity,
-                         const gfx::Filter& aFilter,
+                         const gfx::SamplingFilter aSamplingFilter,
                          const gfx::IntRect& aClipRect,
                          nsIntRegion aMaskRegion,
                          gfx::Matrix4x4 aTransform);
@@ -291,7 +277,7 @@ private:
                   EffectChain& aEffectChain,
                   float aOpacity,
                   const gfx::Matrix4x4& aTransform,
-                  const gfx::Filter& aFilter,
+                  const gfx::SamplingFilter aSamplingFilter,
                   const gfx::IntRect& aClipRect,
                   const nsIntRegion& aScreenRegion,
                   const gfx::IntPoint& aTextureOffset,

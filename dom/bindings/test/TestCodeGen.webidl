@@ -783,6 +783,9 @@ interface TestInterface {
   static void staticMethod(boolean arg);
   static void staticMethodWithContext(any arg);
 
+  // Testing static method with a reserved C++ keyword as the name
+  static void assert(boolean arg);
+
   // Deprecated static methods and attributes
   [Deprecated="GetAttributeNode"]
   static attribute byte staticDeprecatedAttribute;
@@ -1215,6 +1218,23 @@ interface TestDeprecatedInterface {
 
 [Constructor(Promise<void> promise)]
 interface TestInterfaceWithPromiseConstructorArg {
+};
+
+namespace TestNamespace {
+  readonly attribute boolean foo;
+  long bar();
+};
+
+partial namespace TestNamespace {
+  void baz();
+};
+
+[ClassString="RenamedNamespaceClassName"]
+namespace TestRenamedNamespace {
+};
+
+[ProtoObjectHack]
+namespace TestProtoObjectHackedNamespace {
 };
 
 [SecureContext]

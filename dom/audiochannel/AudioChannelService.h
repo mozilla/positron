@@ -78,6 +78,12 @@ public:
     eNotCapturing = false
   };
 
+  enum AudibleChangedReasons : uint32_t {
+    eVolumeChanged = 0,
+    eDataAudibleChanged = 1,
+    ePauseStateChanged = 2
+  };
+
   /**
    * Returns the AudioChannelServce singleton.
    * If AudioChannelServce is not exist, create and return new one.
@@ -88,6 +94,8 @@ public:
   static bool IsAudioChannelMutedByDefault();
 
   static PRLogModuleInfo* GetAudioChannelLog();
+
+  static bool IsEnableAudioCompeting();
 
   /**
    * Any audio channel agent that starts playing should register itself to
@@ -120,7 +128,9 @@ public:
    * it would dispatch the playback event to observers which want to know the
    * actual audible state of the window.
    */
-  void AudioAudibleChanged(AudioChannelAgent* aAgent, AudibleState aAudible);
+  void AudioAudibleChanged(AudioChannelAgent* aAgent,
+                           AudibleState aAudible,
+                           AudibleChangedReasons aReason);
 
   /* Methods for the BrowserElementAudioChannel */
   float GetAudioChannelVolume(nsPIDOMWindowOuter* aWindow, AudioChannel aChannel);
@@ -220,6 +230,9 @@ private:
   void SetDefaultVolumeControlChannelInternal(int32_t aChannel,
                                               bool aVisible, uint64_t aChildID);
 
+  void RefreshAgentsAudioFocusChanged(AudioChannelAgent* aAgent,
+                                      bool aActive);
+
   class AudioChannelConfig final : public AudioPlaybackConfig
   {
   public:
@@ -236,14 +249,18 @@ private:
   {
   public:
     explicit AudioChannelWindow(uint64_t aWindowID)
-      : mWindowID(aWindowID),
-        mIsAudioCaptured(false)
+      : mWindowID(aWindowID)
+      , mIsAudioCaptured(false)
+      , mOwningAudioFocus(!AudioChannelService::IsEnableAudioCompeting())
     {
       // Workaround for bug1183033, system channel type can always playback.
       mChannels[(int16_t)AudioChannel::System].mMuted = false;
     }
 
-    void AudioAudibleChanged(AudioChannelAgent* aAgent, AudibleState aAudible);
+    void AudioFocusChanged(AudioChannelAgent* aNewPlayingAgent, bool aActive);
+    void AudioAudibleChanged(AudioChannelAgent* aAgent,
+                             AudibleState aAudible,
+                             AudibleChangedReasons aReason);
 
     void AppendAgent(AudioChannelAgent* aAgent, AudibleState aAudible);
     void RemoveAgent(AudioChannelAgent* aAgent);
@@ -256,12 +273,18 @@ private:
     nsTObserverArray<AudioChannelAgent*> mAgents;
     nsTObserverArray<AudioChannelAgent*> mAudibleAgents;
 
+    // Owning audio focus when the window starts playing audible sound, and
+    // lose audio focus when other windows starts playing.
+    bool mOwningAudioFocus;
+
   private:
     void AudioCapturedChanged(AudioChannelAgent* aAgent,
                               AudioCaptureState aCapture);
 
-    void AppendAudibleAgentIfNotContained(AudioChannelAgent* aAgent);
-    void RemoveAudibleAgentIfContained(AudioChannelAgent* aAgent);
+    void AppendAudibleAgentIfNotContained(AudioChannelAgent* aAgent,
+                                          AudibleChangedReasons aReason);
+    void RemoveAudibleAgentIfContained(AudioChannelAgent* aAgent,
+                                       AudibleChangedReasons aReason);
 
     void AppendAgentAndIncreaseAgentsNum(AudioChannelAgent* aAgent);
     void RemoveAgentAndReduceAgentsNum(AudioChannelAgent* aAgent);
@@ -270,9 +293,21 @@ private:
     bool IsLastAudibleAgent() const;
 
     void NotifyAudioAudibleChanged(nsPIDOMWindowOuter* aWindow,
-                                   AudibleState aAudible);
+                                   AudibleState aAudible,
+                                   AudibleChangedReasons aReason);
+
     void NotifyChannelActive(uint64_t aWindowID, AudioChannel aChannel,
                              bool aActive);
+
+    void RequestAudioFocus(AudioChannelAgent* aAgent);
+    void NotifyAudioCompetingChanged(AudioChannelAgent* aAgent, bool aActive);
+
+    uint32_t GetCompetingBehavior(AudioChannelAgent* aAgent,
+                                  int32_t aIncomingChannelType,
+                                  bool aIncomingChannelActive) const;
+    bool IsAgentInvolvingInAudioCompeting(AudioChannelAgent* aAgent) const;
+    bool IsAudioCompetingInSameTab() const;
+    bool IsContainingPlayingAgent(AudioChannelAgent* aAgent) const;
   };
 
   AudioChannelWindow*

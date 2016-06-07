@@ -1,3 +1,5 @@
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -471,7 +473,22 @@ BackgroundParentImpl::AllocPBroadcastChannelParent(
   AssertIsInMainProcess();
   AssertIsOnBackgroundThread();
 
-  return new BroadcastChannelParent(aOrigin, aChannel, aPrivateBrowsing);
+  nsString originChannelKey;
+
+  // The format of originChannelKey is:
+  //  <channelName>|pb={true,false}|<origin+OriginAttributes>
+
+  originChannelKey.Assign(aChannel);
+
+  if (aPrivateBrowsing) {
+    originChannelKey.AppendLiteral("|pb=true|");
+  } else {
+    originChannelKey.AppendLiteral("|pb=false|");
+  }
+
+  originChannelKey.Append(NS_ConvertUTF8toUTF16(aOrigin));
+
+  return new BroadcastChannelParent(originChannelKey);
 }
 
 namespace {

@@ -4,11 +4,10 @@
 
 "use strict";
 
-const {Cc, Ci, Cu} = require("chrome");
+const {Cc, Ci} = require("chrome");
 const {angleUtils} = require("devtools/client/shared/css-angle");
 const {colorUtils} = require("devtools/client/shared/css-color");
 const {getCSSLexer} = require("devtools/shared/css-lexer");
-const Services = require("Services");
 const EventEmitter = require("devtools/shared/event-emitter");
 
 const HTML_NS = "http://www.w3.org/1999/xhtml";
@@ -398,7 +397,8 @@ OutputParser.prototype = {
           style: "background-color:" + color
         });
         this.colorSwatches.set(swatch, colorObj);
-        swatch.addEventListener("mousedown", this._onColorSwatchMouseDown, false);
+        swatch.addEventListener("mousedown", this._onColorSwatchMouseDown,
+                                false);
         EventEmitter.decorate(swatch);
         container.appendChild(swatch);
       }
@@ -454,12 +454,12 @@ OutputParser.prototype = {
   },
 
   _onColorSwatchMouseDown: function (event) {
-    // Prevent text selection in the case of shift-click or double-click.
-    event.preventDefault();
-
     if (!event.shiftKey) {
       return;
     }
+
+    // Prevent click event to be fired to not show the tooltip
+    event.stopPropagation();
 
     let swatch = event.target;
     let color = this.colorSwatches.get(swatch);
@@ -470,12 +470,11 @@ OutputParser.prototype = {
   },
 
   _onAngleSwatchMouseDown: function (event) {
-    // Prevent text selection in the case of shift-click or double-click.
-    event.preventDefault();
-
     if (!event.shiftKey) {
       return;
     }
+
+    event.stopPropagation();
 
     let swatch = event.target;
     let angle = this.angleSwatches.get(swatch);
@@ -529,7 +528,11 @@ OutputParser.prototype = {
 
       let href = url;
       if (options.baseURI) {
-        href = options.baseURI.resolve(url);
+        try {
+          href = new URL(url, options.baseURI).href;
+        } catch (e) {
+          // Ignore.
+        }
       }
 
       this._appendNode("a", {
@@ -647,7 +650,7 @@ OutputParser.prototype = {
    *                                    // that follows the swatch.
    *           - supportsColor: false   // Does the CSS property support colors?
    *           - urlClass: ""           // The class to be used for url() links.
-   *           - baseURI: ""            // A string or nsIURI used to resolve
+   *           - baseURI: undefined     // A string used to resolve
    *                                    // relative links.
    *           - filterSwatch: false    // A special case for parsing a
    *                                    // "filter" property, causing the
@@ -668,13 +671,9 @@ OutputParser.prototype = {
       angleClass: "",
       supportsColor: false,
       urlClass: "",
-      baseURI: "",
+      baseURI: undefined,
       filterSwatch: false
     };
-
-    if (typeof overrides.baseURI === "string") {
-      overrides.baseURI = Services.io.newURI(overrides.baseURI, null, null);
-    }
 
     for (let item in overrides) {
       defaults[item] = overrides[item];

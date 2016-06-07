@@ -85,7 +85,7 @@ mgjar.sources += ['java/org/mozilla/gecko/' + x for x in [
     'mozglue/JNIObject.java',
     'mozglue/NativeReference.java',
     'mozglue/NativeZip.java',
-    'mozglue/SafeIntentUtils.java',
+    'mozglue/SafeIntent.java',
 ]]
 mgjar.generated_sources = [] # Keep it this way.
 mgjar.extra_jars += [
@@ -116,6 +116,7 @@ gujar.sources += ['java/org/mozilla/gecko/' + x for x in [
     'util/INIParser.java',
     'util/INISection.java',
     'util/InputOptionsUtils.java',
+    'util/IntentUtils.java',
     'util/IOUtils.java',
     'util/JSONUtils.java',
     'util/MenuUtils.java',
@@ -455,6 +456,7 @@ gbjar.sources += ['java/org/mozilla/gecko/' + x for x in [
     'lwt/LightweightThemeDrawable.java',
     'mdns/MulticastDNSManager.java',
     'media/AudioFocusAgent.java',
+    'media/MediaControlService.java',
     'MediaCastingBar.java',
     'MemoryMonitor.java',
     'menu/GeckoMenu.java',
@@ -588,10 +590,10 @@ gbjar.sources += ['java/org/mozilla/gecko/' + x for x in [
     'telemetry/stores/TelemetryJSONFilePingStore.java',
     'telemetry/stores/TelemetryPingStore.java',
     'telemetry/TelemetryConstants.java',
+    'telemetry/TelemetryCorePingDelegate.java',
     'telemetry/TelemetryDispatcher.java',
     'telemetry/TelemetryPing.java',
     'telemetry/TelemetryUploadService.java',
-    'telemetry/UploadTelemetryCorePingCallback.java',
     'TelemetryContract.java',
     'text/FloatingActionModeCallback.java',
     'text/FloatingToolbarTextSelection.java',
@@ -775,6 +777,7 @@ if CONFIG['MOZ_ANDROID_GCM']:
         CONFIG['ANDROID_PLAY_SERVICES_BASE_AAR_LIB'],
         CONFIG['ANDROID_PLAY_SERVICES_BASEMENT_AAR_LIB'],
         CONFIG['ANDROID_PLAY_SERVICES_GCM_AAR_LIB'],
+        CONFIG['ANDROID_PLAY_SERVICES_MEASUREMENT_AAR_LIB'],
     ]
 
     if CONFIG['ANDROID_PLAY_SERVICES_BASE_AAR']:
@@ -792,11 +795,14 @@ if CONFIG['MOZ_ANDROID_GCM']:
         ANDROID_EXTRA_RES_DIRS += ['%' + CONFIG['ANDROID_PLAY_SERVICES_GCM_AAR_RES']]
         resjar.generated_sources += ['com/google/android/gms/gcm/R.java']
 
+    if CONFIG['ANDROID_PLAY_SERVICES_MEASUREMENT_AAR']:
+        ANDROID_EXTRA_PACKAGES += ['com.google.android.gms.measurement']
+        ANDROID_EXTRA_RES_DIRS += ['%' + CONFIG['ANDROID_PLAY_SERVICES_MEASUREMENT_AAR_RES']]
+        resjar.generated_sources += ['com/google/android/gms/measurement/R.java']
+
 if CONFIG['MOZ_INSTALL_TRACKING']:
     gbjar.extra_jars += [
         CONFIG['ANDROID_PLAY_SERVICES_ADS_AAR_LIB'],
-        CONFIG['ANDROID_PLAY_SERVICES_ANALYTICS_AAR_LIB'],
-        CONFIG['ANDROID_PLAY_SERVICES_APPINDEXING_AAR_LIB'],
         CONFIG['ANDROID_PLAY_SERVICES_BASEMENT_AAR_LIB'],
     ]
 
@@ -804,17 +810,6 @@ if CONFIG['MOZ_INSTALL_TRACKING']:
         ANDROID_EXTRA_PACKAGES += ['com.google.android.gms.ads']
         ANDROID_EXTRA_RES_DIRS += ['%' + CONFIG['ANDROID_PLAY_SERVICES_ADS_AAR_RES']]
         resjar.generated_sources += ['com/google/android/gms/ads/R.java']
-
-    if CONFIG['ANDROID_PLAY_SERVICES_ANALYTICS_AAR']:
-        ANDROID_EXTRA_PACKAGES += ['com.google.android.gms.analytics']
-        ANDROID_EXTRA_RES_DIRS += ['%' + CONFIG['ANDROID_PLAY_SERVICES_ANALYTICS_AAR_RES']]
-        resjar.generated_sources += ['com/google/android/gms/analytics/R.java']
-
-    if CONFIG['ANDROID_PLAY_SERVICES_APPINDEXING_AAR']:
-        ANDROID_EXTRA_PACKAGES += ['com.google.android.gms.appindexing']
-        ANDROID_EXTRA_RES_DIRS += ['%' + CONFIG['ANDROID_PLAY_SERVICES_APPINDEXING_AAR_RES']]
-        resjar.generated_sources += ['com/google/android/gms/appindexing/R.java']
-
 
     if CONFIG['ANDROID_PLAY_SERVICES_BASEMENT_AAR']:
         ANDROID_EXTRA_PACKAGES += ['com.google.android.gms']

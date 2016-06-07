@@ -23,6 +23,8 @@
 #include "mozilla/HashFunctions.h"
 #include "mozilla/Maybe.h"
 #include "mozilla/Move.h"
+#include "mozilla/RefCounted.h"
+#include "mozilla/RefPtr.h"
 
 #include "NamespaceImports.h"
 
@@ -44,8 +46,31 @@ using mozilla::EnumeratedArray;
 using mozilla::Maybe;
 using mozilla::Move;
 using mozilla::MallocSizeOf;
+using mozilla::RefCounted;
 
 typedef Vector<uint32_t, 0, SystemAllocPolicy> Uint32Vector;
+
+// To call Vector::podResizeToFit, a type must specialize mozilla::IsPod
+// which is pretty verbose to do within js::wasm, so factor that process out
+// into a macro.
+
+#define WASM_DECLARE_POD_VECTOR(Type, VectorName)                               \
+} } namespace mozilla {                                                         \
+template <> struct IsPod<js::wasm::Type> : TrueType {};                         \
+} namespace js { namespace wasm {                                               \
+typedef Vector<Type, 0, SystemAllocPolicy> VectorName;
+
+// A wasm Module and everything it contains must support serialization and
+// deserialization. Some data can be simply copied as raw bytes and,
+// as a convention, is stored in an inline CacheablePod struct. Everything else
+// should implement the below methods which are called recusively by the
+// containing Module.
+
+#define WASM_DECLARE_SERIALIZABLE(Type)                                         \
+    size_t serializedSize() const;                                              \
+    uint8_t* serialize(uint8_t* cursor) const;                                  \
+    const uint8_t* deserialize(ExclusiveContext* cx, const uint8_t* cursor);    \
+    size_t sizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf) const;
 
 // ValType/ExprType utilities
 
@@ -424,14 +449,21 @@ struct ProfilingOffsets : Offsets
 
 struct FuncOffsets : ProfilingOffsets
 {
-    MOZ_IMPLICIT FuncOffsets(uint32_t nonProfilingEntry = 0,
-                             uint32_t profilingJump = 0,
-                             uint32_t profilingEpilogue = 0)
+    MOZ_IMPLICIT FuncOffsets()
       : ProfilingOffsets(),
-        nonProfilingEntry(nonProfilingEntry),
-        profilingJump(profilingJump),
-        profilingEpilogue(profilingEpilogue)
+        tableEntry(0),
+        tableProfilingJump(0),
+        nonProfilingEntry(0),
+        profilingJump(0),
+        profilingEpilogue(0)
     {}
+
+    // Function CodeRanges have a table entry which takes an extra signature
+    // argument which is checked against the callee's signature before falling
+    // through to the normal prologue. When profiling is enabled, a nop on the
+    // fallthrough is patched to instead jump to the profiling epilogue.
+    uint32_t tableEntry;
+    uint32_t tableProfilingJump;
 
     // Function CodeRanges have an additional non-profiling entry that comes
     // after the profiling entry and a non-profiling epilogue that comes before
@@ -445,6 +477,8 @@ struct FuncOffsets : ProfilingOffsets
 
     void offsetBy(uint32_t offset) {
         ProfilingOffsets::offsetBy(offset);
+        tableEntry += offset;
+        tableProfilingJump += offset;
         nonProfilingEntry += offset;
         profilingJump += offset;
         profilingEpilogue += offset;
@@ -504,6 +538,8 @@ class CallSite : public CallSiteDesc
     uint32_t stackDepth() const { return stackDepth_; }
 };
 
+WASM_DECLARE_POD_VECTOR(CallSite, CallSiteVector)
+
 class CallSiteAndTarget : public CallSite
 {
     uint32_t targetIndex_;
@@ -519,16 +555,6 @@ class CallSiteAndTarget : public CallSite
     uint32_t targetIndex() const { MOZ_ASSERT(isInternal()); return targetIndex_; }
 };
 
-} // namespace wasm
-} // namespace js
-namespace mozilla {
-template <> struct IsPod<js::wasm::CallSite>          : TrueType {};
-template <> struct IsPod<js::wasm::CallSiteAndTarget> : TrueType {};
-}
-namespace js {
-namespace wasm {
-
-typedef Vector<CallSite, 0, SystemAllocPolicy> CallSiteVector;
 typedef Vector<CallSiteAndTarget, 0, SystemAllocPolicy> CallSiteAndTargetVector;
 
 // Summarizes a heap access made by wasm code that needs to be patched later
@@ -630,15 +656,7 @@ class HeapAccess {
 };
 #endif
 
-} // namespace wasm
-} // namespace js
-namespace mozilla {
-template <> struct IsPod<js::wasm::HeapAccess> : TrueType {};
-}
-namespace js {
-namespace wasm {
-
-typedef Vector<HeapAccess, 0, SystemAllocPolicy> HeapAccessVector;
+WASM_DECLARE_POD_VECTOR(HeapAccess, HeapAccessVector)
 
 // A wasm::SymbolicAddress represents a pointer to a well-known function or
 // object that is embedded in wasm code. Since wasm code is serialized and
@@ -672,6 +690,10 @@ enum class SymbolicAddress
     CeilF,
     FloorD,
     FloorF,
+    TruncD,
+    TruncF,
+    NearbyIntD,
+    NearbyIntF,
     ExpD,
     LogD,
     PowD,
@@ -682,10 +704,10 @@ enum class SymbolicAddress
     ReportOverRecursed,
     HandleExecutionInterrupt,
     HandleTrap,
-    InvokeImport_Void,
-    InvokeImport_I32,
-    InvokeImport_I64,
-    InvokeImport_F64,
+    CallImport_Void,
+    CallImport_I32,
+    CallImport_I64,
+    CallImport_F64,
     CoerceInPlace_ToInt32,
     CoerceInPlace_ToNumber,
     Limit
@@ -693,10 +715,6 @@ enum class SymbolicAddress
 
 void*
 AddressOf(SymbolicAddress imm, ExclusiveContext* cx);
-
-// Extracts low and high from an int64 object {low: int32, high: int32}, for
-// testing purposes mainly.
-MOZ_MUST_USE bool ReadI64Object(JSContext* cx, HandleValue v, int64_t* val);
 
 // A wasm::Trap is a reason for why we reached a trap in executed code. Each
 // different trap is mapped to a different error message.
@@ -782,6 +800,7 @@ static const unsigned MaxFuncs                   =      512 * 1024;
 static const unsigned MaxLocals                  =       64 * 1024;
 static const unsigned MaxImports                 =       64 * 1024;
 static const unsigned MaxExports                 =       64 * 1024;
+static const unsigned MaxTables                  =        4 * 1024;
 static const unsigned MaxTableElems              =      128 * 1024;
 static const unsigned MaxArgsPerFunc             =        4 * 1024;
 static const unsigned MaxBrTableElems            = 4 * 1024 * 1024;

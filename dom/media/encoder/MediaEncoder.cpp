@@ -106,6 +106,24 @@ MediaEncoder::NotifyQueuedTrackChanges(MediaStreamGraph* aGraph,
 }
 
 void
+MediaEncoder::NotifyQueuedAudioData(MediaStreamGraph* aGraph, TrackID aID,
+                                    StreamTime aTrackOffset,
+                                    const AudioSegment& aQueuedMedia,
+                                    MediaStream* aInputStream,
+                                    TrackID aInputTrackID)
+{
+  if (!mDirectConnected) {
+    NotifyRealtimeData(aGraph, aID, aTrackOffset, 0, aQueuedMedia);
+  } else {
+    if (mSuspended == RECORD_RESUMED) {
+      if (!mVideoEncoder) {
+        mSuspended = RECORD_NOT_SUSPENDED; // no video
+      }
+    }
+  }
+}
+
+void
 MediaEncoder::NotifyEvent(MediaStreamGraph* aGraph,
                           MediaStreamListener::MediaStreamGraphEvent event)
 {

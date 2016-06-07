@@ -1257,15 +1257,7 @@ NS_METHOD nsWindow::Show(bool bState)
             if (CanTakeFocus()) {
               ::ShowWindow(mWnd, SW_SHOWNORMAL);
             } else {
-              // Place the window behind the foreground window
-              // (as long as it is not topmost)
-              HWND wndAfter = ::GetForegroundWindow();
-              if (!wndAfter)
-                wndAfter = HWND_BOTTOM;
-              else if (GetWindowLongPtrW(wndAfter, GWL_EXSTYLE) & WS_EX_TOPMOST)
-                wndAfter = HWND_TOP;
-              ::SetWindowPos(mWnd, wndAfter, 0, 0, 0, 0, SWP_SHOWWINDOW | SWP_NOSIZE | 
-                             SWP_NOMOVE | SWP_NOACTIVATE);
+              ::ShowWindow(mWnd, SW_SHOWNOACTIVATE);
               GetAttention(2);
             }
             break;
@@ -7527,6 +7519,13 @@ nsWindow::DealWithPopups(HWND aWnd, UINT aMessage,
       // requests to activate the window while it is displayed. Windows will
       // automatically activate the popup on the mousedown otherwise.
       return true;
+
+    case WM_SHOWWINDOW:
+      // If the window is being minimized, close popups.
+      if (aLParam == SW_PARENTCLOSING) {
+        break;
+      }
+      return false;
 
     case WM_KILLFOCUS:
       // If focus moves to other window created in different process/thread,

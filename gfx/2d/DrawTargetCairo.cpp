@@ -516,7 +516,7 @@ GfxPatternToCairoPattern(const Pattern& aPattern,
 
       matrix = &pattern.mMatrix;
 
-      cairo_pattern_set_filter(pat, GfxFilterToCairoFilter(pattern.mFilter));
+      cairo_pattern_set_filter(pat, GfxSamplingFilterToCairoFilter(pattern.mSamplingFilter));
       cairo_pattern_set_extend(pat, GfxExtendToCairoExtend(pattern.mExtendMode));
 
       cairo_surface_destroy(surf);
@@ -853,7 +853,7 @@ DrawTargetCairo::DrawSurface(SourceSurface *aSurface,
   cairo_surface_destroy(surf);
 
   cairo_pattern_set_matrix(pat, &src_mat);
-  cairo_pattern_set_filter(pat, GfxFilterToCairoFilter(aSurfOptions.mFilter));
+  cairo_pattern_set_filter(pat, GfxSamplingFilterToCairoFilter(aSurfOptions.mSamplingFilter));
   cairo_pattern_set_extend(pat, CAIRO_EXTEND_PAD);
 
   cairo_set_antialias(mContext, GfxAntialiasToCairoAntialias(aOptions.mAntialiasMode));
@@ -1960,11 +1960,17 @@ DrawTarget::Draw3DTransformedSurface(SourceSurface* aSurface, const Matrix4x4& a
     pixman_image_create_bits(PIXMAN_a8r8g8b8,
                              xformBounds.width, xformBounds.height,
                              (uint32_t*)dstSurf->GetData(), dstSurf->Stride());
+  if (!dst) {
+    return false;
+  }
   pixman_image_t* src =
     pixman_image_create_bits(srcFormat,
                              srcSurf->GetSize().width, srcSurf->GetSize().height,
                              (uint32_t*)srcMap.GetData(), srcMap.GetStride());
-  MOZ_ASSERT(src && dst, "Failed to create pixman images?");
+  if (!src) {
+    pixman_image_unref(dst);
+    return false;
+  }
 
   pixman_image_set_filter(src, PIXMAN_FILTER_BILINEAR, nullptr, 0);
   pixman_image_set_transform(src, &xform);

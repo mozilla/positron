@@ -57,6 +57,56 @@ ToChar(EventClassID aEventClassID)
   }
 }
 
+bool
+IsValidRawTextRangeValue(RawTextRangeType aRawTextRangeType)
+{
+  switch (static_cast<TextRangeType>(aRawTextRangeType)) {
+    case TextRangeType::eUninitialized:
+    case TextRangeType::eCaret:
+    case TextRangeType::eRawClause:
+    case TextRangeType::eSelectedRawClause:
+    case TextRangeType::eConvertedClause:
+    case TextRangeType::eSelectedClause:
+      return true;
+    default:
+      return false;
+  }
+}
+
+RawTextRangeType
+ToRawTextRangeType(TextRangeType aTextRangeType)
+{
+  return static_cast<RawTextRangeType>(aTextRangeType);
+}
+
+TextRangeType
+ToTextRangeType(RawTextRangeType aRawTextRangeType)
+{
+  MOZ_ASSERT(IsValidRawTextRangeValue(aRawTextRangeType));
+  return static_cast<TextRangeType>(aRawTextRangeType);
+}
+
+const char*
+ToChar(TextRangeType aTextRangeType)
+{
+  switch (aTextRangeType) {
+    case TextRangeType::eUninitialized:
+      return "TextRangeType::eUninitialized";
+    case TextRangeType::eCaret:
+      return "TextRangeType::eCaret";
+    case TextRangeType::eRawClause:
+      return "TextRangeType::eRawClause";
+    case TextRangeType::eSelectedRawClause:
+      return "TextRangeType::eSelectedRawClause";
+    case TextRangeType::eConvertedClause:
+      return "TextRangeType::eConvertedClause";
+    case TextRangeType::eSelectedClause:
+      return "TextRangeType::eSelectedClause";
+    default:
+      return "Invalid TextRangeType";
+  }
+}
+
 /******************************************************************************
  * As*Event() implementation
  ******************************************************************************/
@@ -898,11 +948,11 @@ WidgetKeyboardEvent::ComputeKeyCodeFromKeyNameIndex(KeyNameIndex aKeyNameIndex)
       return nsIDOMKeyEvent::DOM_VK_NUM_LOCK;
     case KEY_NAME_INDEX_ScrollLock:
       return nsIDOMKeyEvent::DOM_VK_SCROLL_LOCK;
-    case KEY_NAME_INDEX_VolumeMute:
+    case KEY_NAME_INDEX_AudioVolumeMute:
       return nsIDOMKeyEvent::DOM_VK_VOLUME_MUTE;
-    case KEY_NAME_INDEX_VolumeDown:
+    case KEY_NAME_INDEX_AudioVolumeDown:
       return nsIDOMKeyEvent::DOM_VK_VOLUME_DOWN;
-    case KEY_NAME_INDEX_VolumeUp:
+    case KEY_NAME_INDEX_AudioVolumeUp:
       return nsIDOMKeyEvent::DOM_VK_VOLUME_UP;
     case KEY_NAME_INDEX_Meta:
       return nsIDOMKeyEvent::DOM_VK_META;

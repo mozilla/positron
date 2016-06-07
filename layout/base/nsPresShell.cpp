@@ -789,9 +789,6 @@ PresShell::PresShell()
 #endif
   mPresShellId = sNextPresShellId++;
   mFrozen = false;
-#ifdef DEBUG
-  mPresArenaAllocCount = 0;
-#endif
   mRenderFlags = 0;
 
   mScrollPositionClampingScrollPortSizeSet = false;
@@ -840,10 +837,7 @@ PresShell::~PresShell()
     mPresContext->RefreshDriver()->Thaw();
   }
 
-#ifdef DEBUG
-  MOZ_ASSERT(mPresArenaAllocCount == 0,
-             "Some pres arena objects were not freed");
-#endif
+  MOZ_ASSERT(mAllocatedPointers.IsEmpty(), "Some pres arena objects were not freed");
 
   mStyleSet->Delete();
   delete mFrameConstructor;
@@ -1245,7 +1239,7 @@ PresShell::Destroy()
   // pointing to objects in the arena now.  This is done:
   //
   //   (a) before mFrameArena's destructor runs so that our
-  //       mPresArenaAllocCount gets down to 0 and doesn't trip the assertion
+  //       mAllocatedPointers becomes empty and doesn't trip the assertion
   //       in ~PresShell,
   //   (b) before the mPresContext->SetShell(nullptr) below, so
   //       that when we clear the ArenaRefPtrs they'll still be able to
@@ -1807,7 +1801,7 @@ PresShell::AsyncResizeEventCallback(nsITimer* aTimer, void* aPresShell)
 }
 
 nsresult
-PresShell::ResizeReflow(nscoord aWidth, nscoord aHeight)
+PresShell::ResizeReflow(nscoord aWidth, nscoord aHeight, nscoord aOldWidth, nscoord aOldHeight)
 {
   if (mZoomConstraintsClient) {
     // If we have a ZoomConstraintsClient and the available screen area
@@ -1823,11 +1817,11 @@ PresShell::ResizeReflow(nscoord aWidth, nscoord aHeight)
     return NS_OK;
   }
 
-  return ResizeReflowIgnoreOverride(aWidth, aHeight);
+  return ResizeReflowIgnoreOverride(aWidth, aHeight, aOldWidth, aOldHeight);
 }
 
 nsresult
-PresShell::ResizeReflowIgnoreOverride(nscoord aWidth, nscoord aHeight)
+PresShell::ResizeReflowIgnoreOverride(nscoord aWidth, nscoord aHeight, nscoord aOldWidth, nscoord aOldHeight)
 {
   NS_PRECONDITION(!mIsReflowing, "Shouldn't be in reflow here!");
 
@@ -1841,7 +1835,6 @@ PresShell::ResizeReflowIgnoreOverride(nscoord aWidth, nscoord aHeight)
     return NS_ERROR_NOT_AVAILABLE;
   }
 
-  nsSize oldVisibleSize = mPresContext->GetVisibleArea().Size();
   mPresContext->SetVisibleArea(nsRect(0, 0, aWidth, aHeight));
 
   // There isn't anything useful we can do if the initial reflow hasn't happened.
@@ -1854,8 +1847,8 @@ PresShell::ResizeReflowIgnoreOverride(nscoord aWidth, nscoord aHeight)
                   "shouldn't use unconstrained isize anymore");
 
   const bool isBSizeChanging = wm.IsVertical()
-                               ? oldVisibleSize.width != aWidth
-                               : oldVisibleSize.height != aHeight;
+                               ? aOldWidth != aWidth
+                               : aOldHeight != aHeight;
 
   RefPtr<nsViewManager> viewManagerDeathGrip = mViewManager;
   // Take this ref after viewManager so it'll make sure to go away first.
@@ -3654,6 +3647,16 @@ PresShell::ScheduleViewManagerFlush(PaintType aType)
   }
 }
 
+bool
+FlushLayoutRecursive(nsIDocument* aDocument,
+                     void* aData = nullptr)
+{
+  MOZ_ASSERT(!aData);
+  aDocument->EnumerateSubDocuments(FlushLayoutRecursive, nullptr);
+  aDocument->FlushPendingNotifications(Flush_Layout);
+  return true;
+}
+
 void
 PresShell::DispatchSynthMouseMove(WidgetGUIEvent* aEvent,
                                   bool aFlushOnHoverChange)
@@ -3678,7 +3681,10 @@ PresShell::DispatchSynthMouseMove(WidgetGUIEvent* aEvent,
       hoverGenerationBefore != restyleManager->AsGecko()->GetHoverGeneration()) {
     // Flush so that the resulting reflow happens now so that our caller
     // can suppress any synthesized mouse moves caused by that reflow.
-    FlushPendingNotifications(Flush_Layout);
+    // This code only ever runs for the root document, but :hover changes
+    // can happen in descendant documents too, so make sure we flush
+    // all of them.
+    FlushLayoutRecursive(mDocument);
   }
 }
 
@@ -6165,7 +6171,7 @@ PresShell::MarkFramesInSubtreeApproximatelyVisible(nsIFrame* aFrame,
         if (!preserves3DChildren || !child->Combines3DTransformWithAncestors()) {
           const nsRect overflow = child->GetVisualOverflowRectRelativeToSelf();
           nsRect out;
-          if (nsDisplayTransform::UntransformRect(r, overflow, child, nsPoint(0,0), &out)) {
+          if (nsDisplayTransform::UntransformRect(r, overflow, child, &out)) {
             r = out;
           } else {
             r.SetEmpty();
@@ -7696,7 +7702,7 @@ PresShell::HandleEvent(nsIFrame* aFrame,
 
   if (aEvent->IsUsingCoordinates()) {
     ReleasePointerCaptureCaller releasePointerCaptureCaller;
-    if (nsLayoutUtils::AreAsyncAnimationsEnabled() && mDocument) {
+    if (mDocument) {
       if (aEvent->mClass == eTouchEventClass) {
         nsIDocument::UnlockPointer();
       }

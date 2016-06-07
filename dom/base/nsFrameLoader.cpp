@@ -343,6 +343,32 @@ nsFrameLoader::SetIsPrerendered()
   return NS_OK;
 }
 
+NS_IMETHODIMP
+nsFrameLoader::MakePrerenderedLoaderActive()
+{
+  MOZ_ASSERT(mIsPrerendered, "This frameloader was not in prerendered mode.");
+
+  mIsPrerendered = false;
+  if (IsRemoteFrame()) {
+    if (!mRemoteBrowser) {
+      NS_WARNING("Missing remote browser.");
+      return NS_ERROR_FAILURE;
+    }
+
+    mRemoteBrowser->SetDocShellIsActive(true);
+  } else {
+    if (!mDocShell) {
+      NS_WARNING("Missing docshell.");
+      return NS_ERROR_FAILURE;
+    }
+
+    nsresult rv = mDocShell->SetIsActive(true);
+    NS_ENSURE_SUCCESS(rv, rv);
+  }
+
+  return NS_OK;
+}
+
 nsresult
 nsFrameLoader::ReallyStartLoading()
 {
@@ -1966,7 +1992,7 @@ nsFrameLoader::MaybeCreateDocShell()
   NS_ENSURE_TRUE(mDocShell, NS_ERROR_FAILURE);
 
   if (mIsPrerendered) {
-    nsresult rv = mDocShell->SetIsPrerendered(true);
+    nsresult rv = mDocShell->SetIsPrerendered();
     NS_ENSURE_SUCCESS(rv,rv);
   }
 
@@ -2120,7 +2146,15 @@ nsFrameLoader::MaybeCreateDocShell()
     return rv;
   }
 
-  nsDocShell::Cast(mDocShell)->SetOriginAttributes(attrs);
+  bool isPrivate = false;
+  nsCOMPtr<nsILoadContext> parentContext = do_QueryInterface(docShell);
+  NS_ENSURE_STATE(parentContext);
+
+  rv = parentContext->GetUsePrivateBrowsing(&isPrivate);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+  attrs.SyncAttributesWithPrivateBrowsing(isPrivate);
 
   if (OwnerIsMozBrowserOrAppFrame()) {
     // For inproc frames, set the docshell properties.
@@ -2142,11 +2176,14 @@ nsFrameLoader::MaybeCreateDocShell()
           NS_LITERAL_CSTRING("mozprivatebrowsing"),
           nullptr);
       } else {
-        nsCOMPtr<nsILoadContext> context = do_GetInterface(mDocShell);
-        context->SetUsePrivateBrowsing(true);
+        // This handles the case where a frames private browsing is set by chrome flags
+        // and not inherited by its parent.
+        attrs.SyncAttributesWithPrivateBrowsing(isPrivate);
       }
     }
   }
+
+  nsDocShell::Cast(mDocShell)->SetOriginAttributes(attrs);
 
   ReallyLoadFrameScripts();
   InitializeBrowserAPI();
@@ -2311,6 +2348,7 @@ nsFrameLoader::UpdatePositionAndSize(nsSubDocumentFrame *aIFrame)
       ScreenIntSize size = aIFrame->GetSubdocumentSize();
       nsIntRect dimensions;
       NS_ENSURE_SUCCESS(GetWindowDimensions(dimensions), NS_ERROR_FAILURE);
+      mLazySize = size;
       mRemoteBrowser->UpdateDimensions(dimensions, size);
     }
     return NS_OK;
@@ -2341,9 +2379,37 @@ nsFrameLoader::UpdateBaseWindowPositionAndSize(nsSubDocumentFrame *aIFrame)
     }
 
     ScreenIntSize size = aIFrame->GetSubdocumentSize();
+    mLazySize = size;
 
-    baseWindow->SetPositionAndSize(x, y, size.width, size.height, false);
+    baseWindow->SetPositionAndSize(x, y, size.width, size.height,
+                                   nsIBaseWindow::eDelayResize);
   }
+}
+
+NS_IMETHODIMP
+nsFrameLoader::GetLazyWidth(uint32_t* aLazyWidth)
+{
+  *aLazyWidth = mLazySize.width;
+
+  nsIFrame* frame = GetPrimaryFrameOfOwningContent();
+  if (frame) {
+    *aLazyWidth = frame->PresContext()->DevPixelsToIntCSSPixels(*aLazyWidth);
+  }
+
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsFrameLoader::GetLazyHeight(uint32_t* aLazyHeight)
+{
+  *aLazyHeight = mLazySize.height;
+
+  nsIFrame* frame = GetPrimaryFrameOfOwningContent();
+  if (frame) {
+    *aLazyHeight = frame->PresContext()->DevPixelsToIntCSSPixels(*aLazyHeight);
+  }
+
+  return NS_OK;
 }
 
 NS_IMETHODIMP
@@ -3137,7 +3203,8 @@ nsFrameLoader::RequestNotifyLayerTreeCleared()
 }
 
 NS_IMETHODIMP
-nsFrameLoader::Print(nsIPrintSettings* aPrintSettings,
+nsFrameLoader::Print(uint64_t aOuterWindowID,
+                     nsIPrintSettings* aPrintSettings,
                      nsIWebProgressListener* aProgressListener)
 {
 #if defined(NS_PRINTING)
@@ -3152,26 +3219,23 @@ nsFrameLoader::Print(nsIPrintSettings* aPrintSettings,
       return rv;
     }
 
-    bool success = mRemoteBrowser->SendPrint(printData);
+    bool success = mRemoteBrowser->SendPrint(aOuterWindowID, printData);
     return success ? NS_OK : NS_ERROR_FAILURE;
   }
 
-  if (mDocShell) {
-    nsCOMPtr<nsIContentViewer> viewer;
-    mDocShell->GetContentViewer(getter_AddRefs(viewer));
-    if (!viewer) {
-      return NS_ERROR_FAILURE;
-    }
-
-    nsCOMPtr<nsIWebBrowserPrint> webBrowserPrint = do_QueryInterface(viewer);
-    if (!webBrowserPrint) {
-      return NS_ERROR_FAILURE;
-    }
-
-    return webBrowserPrint->Print(aPrintSettings, aProgressListener);
+  nsGlobalWindow* outerWindow =
+    nsGlobalWindow::GetOuterWindowWithId(aOuterWindowID);
+  if (NS_WARN_IF(!outerWindow)) {
+    return NS_ERROR_FAILURE;
   }
 
-  return NS_ERROR_FAILURE;
+  nsCOMPtr<nsIWebBrowserPrint> webBrowserPrint =
+    do_GetInterface(outerWindow->AsOuter());
+  if (NS_WARN_IF(!webBrowserPrint)) {
+    return NS_ERROR_FAILURE;
+  }
+
+  return webBrowserPrint->Print(aPrintSettings, aProgressListener);
 #endif
   return NS_OK;
 }
@@ -3361,12 +3425,22 @@ nsFrameLoader::GetNewTabContext(MutableTabContext* aTabContext,
     attrs.mUserContextId = userContextId;
   }
 
+  nsAutoString presentationURLStr;
+  mOwnerContent->GetAttr(kNameSpaceID_None,
+                         nsGkAtoms::mozpresentation,
+                         presentationURLStr);
+
+  bool isPrivate = mOwnerContent->HasAttr(kNameSpaceID_None, nsGkAtoms::mozprivatebrowsing);
+  attrs.SyncAttributesWithPrivateBrowsing(isPrivate);
+
   bool tabContextUpdated =
     aTabContext->SetTabContext(OwnerIsMozBrowserFrame(),
+                               mIsPrerendered,
                                ownApp,
                                containingApp,
                                attrs,
-                               signedPkgOrigin);
+                               signedPkgOrigin,
+                               presentationURLStr);
   NS_ENSURE_STATE(tabContextUpdated);
 
   return NS_OK;

@@ -158,7 +158,9 @@ UNIFIED_SOURCES += [
     'asmjs/WasmBinary.cpp',
     'asmjs/WasmBinaryIterator.cpp',
     'asmjs/WasmBinaryToAST.cpp',
+    'asmjs/WasmBinaryToExperimentalText.cpp',
     'asmjs/WasmBinaryToText.cpp',
+    'asmjs/WasmCode.cpp',
     'asmjs/WasmFrameIterator.cpp',
     'asmjs/WasmGenerator.cpp',
     'asmjs/WasmIonCompile.cpp',
@@ -601,6 +603,13 @@ else:
 HostSimplePrograms([
     'host_jskwgen',
 ])
+
+GENERATED_FILES += ['jsautokw.h']
+jsautokw = GENERATED_FILES['jsautokw.h']
+jsautokw.script = 'jsautokw.py'
+jsautokw.inputs += [
+    '!host_jskwgen%s' % CONFIG['HOST_BIN_SUFFIX'],
+]
 
 # JavaScript must be built shared, even for static builds, as it is used by
 # other modules which are always built shared. Failure to do so results in

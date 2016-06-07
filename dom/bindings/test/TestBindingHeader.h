@@ -795,6 +795,7 @@ public:
   static void StaticMethodWithContext(const GlobalObject&, JS::Value);
   static bool StaticAttribute(const GlobalObject&);
   static void SetStaticAttribute(const GlobalObject&, bool);
+  static void Assert(const GlobalObject&, bool);
 
   // Deprecated static methods and attributes
   static int8_t StaticDeprecatedAttribute(const GlobalObject&);
@@ -1422,6 +1423,19 @@ public:
   static void AlsoSecureContext(const GlobalObject&);
 
   virtual nsISupports* GetParentObject();
+};
+
+class TestNamespace {
+public:
+  static bool Foo(const GlobalObject&);
+  static int32_t Bar(const GlobalObject&);
+  static void Baz(const GlobalObject&);
+};
+
+class TestRenamedNamespace {
+};
+
+class TestProtoObjectHackedNamespace {
 };
 
 } // namespace dom

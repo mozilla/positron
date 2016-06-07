@@ -7,7 +7,6 @@
 #if !defined(PlatformDecoderModule_h_)
 #define PlatformDecoderModule_h_
 
-#include "FlushableTaskQueue.h"
 #include "MediaDecoderReader.h"
 #include "mozilla/MozPromise.h"
 #include "mozilla/layers/LayersTypes.h"
@@ -28,8 +27,10 @@ class ImageContainer;
 
 class MediaDataDecoder;
 class MediaDataDecoderCallback;
-class FlushableTaskQueue;
+class TaskQueue;
 class CDMProxy;
+
+static LazyLogModule sPDMLog("PlatformDecoderModule");
 
 // The PlatformDecoderModule interface is used by the MediaFormatReader to
 // abstract access to decoders provided by various
@@ -90,7 +91,7 @@ protected:
   CreateVideoDecoder(const VideoInfo& aConfig,
                      layers::LayersBackend aLayersBackend,
                      layers::ImageContainer* aImageContainer,
-                     FlushableTaskQueue* aVideoTaskQueue,
+                     TaskQueue* aTaskQueue,
                      MediaDataDecoderCallback* aCallback,
                      DecoderDoctorDiagnostics* aDiagnostics) = 0;
 
@@ -106,9 +107,14 @@ protected:
   // This is called on the decode task queue.
   virtual already_AddRefed<MediaDataDecoder>
   CreateAudioDecoder(const AudioInfo& aConfig,
-                     FlushableTaskQueue* aAudioTaskQueue,
+                     TaskQueue* aTaskQueue,
                      MediaDataDecoderCallback* aCallback,
                      DecoderDoctorDiagnostics* aDiagnostics) = 0;
+};
+
+enum MediaDataDecoderError {
+  FATAL_ERROR,
+  DECODE_ERROR
 };
 
 // A callback used by MediaDataDecoder to return output/errors to the
@@ -123,7 +129,7 @@ public:
 
   // Denotes an error in the decoding process. The reader will stop calling
   // the decoder.
-  virtual void Error() = 0;
+  virtual void Error(MediaDataDecoderError aError) = 0;
 
   // Denotes that the last input sample has been inserted into the decoder,
   // and no more output can be produced unless more input is sent.

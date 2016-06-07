@@ -859,7 +859,7 @@ var BrowserApp = {
 
     NativeWindow.contextmenus.add({
       label: stringGetter("contextmenu.shareImage"),
-      selector: NativeWindow.contextmenus._disableRestricted("SHARE", NativeWindow.contextmenus.imageSaveableContext),
+      selector: NativeWindow.contextmenus._disableRestricted("SHARE", NativeWindow.contextmenus.imageShareableContext),
       order: NativeWindow.contextmenus.DEFAULT_HTML5_ORDER - 1, // Show above HTML5 menu items
       showAsActions: function(aTarget) {
         let doc = aTarget.ownerDocument;
@@ -2439,6 +2439,30 @@ var NativeWindow = {
       }
     },
 
+    imageShareableContext: {
+      matches: function imageShareableContextMatches(aElement) {
+        let imgSrc = '';
+        if (aElement instanceof Ci.nsIDOMHTMLImageElement) {
+          imgSrc = aElement.src;
+        } else if (aElement instanceof Ci.nsIImageLoadingContent &&
+            aElement.currentURI &&
+            aElement.currentURI.spec) {
+          imgSrc = aElement.currentURI.spec;
+        }
+
+        // In order to share an image, we need to pass the image src over IPC via an Intent (in
+        // `ApplicationPackageManager.queryIntentActivities`). However, the transaction has a 1MB limit
+        // (shared by all transactions in progress) - otherwise we crash! (bug 1243305)
+        //   https://developer.android.com/reference/android/os/TransactionTooLargeException.html
+        //
+        // The transaction limit is 1MB and we arbitrarily choose to cap this transaction at 1/4 of that = 250,000 bytes.
+        // In Java, a UTF-8 character is 1-4 bytes so, 250,000 bytes / 4 bytes/char = 62,500 char
+        let MAX_IMG_SRC_LEN = 62500;
+        let isTooLong = imgSrc.length >= MAX_IMG_SRC_LEN;
+        return !isTooLong && this.NativeWindow.contextmenus.imageSaveableContext.matches(aElement);
+      }.bind(this)
+    },
+
     mediaSaveableContext: {
       matches: function mediaSaveableContextMatches(aElement) {
         return (aElement instanceof HTMLVideoElement ||
@@ -3415,13 +3439,14 @@ Tab.prototype = {
     BrowserApp.deck.insertBefore(this.browser, aParams.sibling || null);
     BrowserApp.deck.selectedPanel = selectedPanel;
 
+    let attrs = {};
     if (BrowserApp.manifestUrl) {
       let appsService = Cc["@mozilla.org/AppsService;1"].getService(Ci.nsIAppsService);
       let manifest = appsService.getAppByManifestURL(BrowserApp.manifestUrl);
       if (manifest) {
         let app = manifest.QueryInterface(Ci.mozIApplication);
         this.browser.docShell.frameType = Ci.nsIDocShell.FRAME_TYPE_APP;
-        this.browser.docShell.setOriginAttributes({appId: app.localId});
+        attrs['appId'] = app.localId;
       }
     }
 
@@ -3430,8 +3455,10 @@ Tab.prototype = {
 
     let isPrivate = ("isPrivate" in aParams) && aParams.isPrivate;
     if (isPrivate) {
-      this.browser.docShell.QueryInterface(Ci.nsILoadContext).usePrivateBrowsing = true;
+      attrs['privateBrowsingId'] = 1;
     }
+
+    this.browser.docShell.setOriginAttributes(attrs);
 
     // Set the new docShell load flags based on network state.
     if (Tabs.useCache) {
@@ -3532,7 +3559,9 @@ Tab.prototype = {
         url: aURL,
         title: truncate(title, MAX_TITLE_LENGTH)
       }],
-      index: 1
+      index: 1,
+      desktopMode: this.desktopMode,
+      isPrivate: isPrivate
     };
 
     if (aParams.delayLoad) {
@@ -3857,7 +3886,7 @@ Tab.prototype = {
   addMetadata: function(type, value, quality = 1) {
     if (!this.metatags) {
       this.metatags = {
-        url: this.browser.currentURI.spec
+        url: this.browser.currentURI.specIgnoringRef
       };
     }
 
@@ -4114,8 +4143,8 @@ Tab.prototype = {
           jsonMessage = this.makeFaviconMessage(target);
         } else if (list.indexOf("[apple-touch-icon]") != -1 ||
             list.indexOf("[apple-touch-icon-precomposed]") != -1) {
-          let message = this.makeFaviconMessage(target);
-          this.addMetadata("touchIconList", message.href, message.size);
+          jsonMessage = this.makeFaviconMessage(target);
+          this.addMetadata("touchIconList", jsonMessage.href, jsonMessage.size);
         } else if (list.indexOf("[alternate]") != -1 && aEvent.type == "DOMLinkAdded") {
           let type = target.type.toLowerCase().replace(/^\s+|\s*(?:;.*)?$/g, "");
           let isFeed = (type == "application/rss+xml" || type == "application/atom+xml");
@@ -4466,6 +4495,7 @@ Tab.prototype = {
       // browser.contentDocument is changed to the new document we're loading
       this.contentDocumentIsDisplayed = false;
       this.hasTouchListener = false;
+      Services.obs.notifyObservers(this.browser, "Session:NotifyLocationChange", null);
     } else {
       setTimeout(function() {
         this.sendViewportUpdate();
@@ -6032,7 +6062,7 @@ var PopupBlockerObserver = {
     let pageReport = BrowserApp.selectedBrowser.pageReport;
     if (pageReport) {
       for (let i = 0; i < pageReport.length; ++i) {
-        let popupURIspec = pageReport[i].popupWindowURI.spec;
+        let popupURIspec = pageReport[i].popupWindowURIspec;
 
         // Sometimes the popup URI that we get back from the pageReport
         // isn't useful (for instance, netscape.com's popup URI ends up
@@ -6298,7 +6328,7 @@ var IdentityHandler = {
     }
 
     // We also allow "about:" by allowing the selector to be empty (i.e. '(|.....|...|...)'
-    let whitelist = /^about:($|about|accounts|addons|buildconfig|cache|config|crashes|devices|downloads|fennec|firefox|feedback|healthreport|license|logins|logo|memory|mozilla|networking|plugins|privatebrowsing|rights|serviceworkers|support|telemetry|webrtc)($|\?)/i;
+    let whitelist = /^about:($|about|accounts|addons|buildconfig|cache|config|crashes|devices|downloads|fennec|firefox|feedback|healthreport|home|license|logins|logo|memory|mozilla|networking|plugins|privatebrowsing|rights|serviceworkers|support|telemetry|webrtc)($|\?)/i;
     if (uri.schemeIs("about") && whitelist.test(uri.spec)) {
         return this.IDENTITY_MODE_CHROMEUI;
     }

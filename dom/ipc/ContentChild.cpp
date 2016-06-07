@@ -111,7 +111,9 @@
 #include "nsDirectoryServiceUtils.h"
 #include "nsDirectoryServiceDefs.h"
 #include "nsContentPermissionHelper.h"
+#ifdef NS_PRINTING
 #include "nsPrintingProxy.h"
+#endif
 
 #include "IHistory.h"
 #include "nsNetUtil.h"
@@ -174,7 +176,7 @@
 #endif
 
 #ifndef MOZ_SIMPLEPUSH
-#include "nsIPushNotifier.h"
+#include "mozilla/dom/PushNotifier.h"
 #endif
 
 #include "mozilla/dom/File.h"
@@ -641,6 +643,8 @@ ContentChild::Init(MessageLoop* aIOLoop,
     int argc = 3;
     char option_name[] = "--display";
     char* argv[] = {
+      // argv0 is unused because g_set_prgname() was called in
+      // XRE_InitChildProcess().
       nullptr,
       option_name,
       display_name,
@@ -2246,6 +2250,11 @@ ContentChild::RecvSetConnectivity(const bool& connectivity)
 void
 ContentChild::ActorDestroy(ActorDestroyReason why)
 {
+  if (mForceKillTimer) {
+    mForceKillTimer->Cancel();
+    mForceKillTimer = nullptr;
+  }
+
   if (AbnormalShutdown == why) {
     NS_WARNING("shutting down early because of crash!");
     ProcessChild::QuickExit();
@@ -3022,6 +3031,30 @@ ContentChild::RecvDomainSetChanged(const uint32_t& aSetType,
   return true;
 }
 
+void
+ContentChild::StartForceKillTimer()
+{
+  if (mForceKillTimer) {
+    return;
+  }
+
+  int32_t timeoutSecs = Preferences::GetInt("dom.ipc.tabs.shutdownTimeoutSecs", 5);
+  if (timeoutSecs > 0) {
+    mForceKillTimer = do_CreateInstance("@mozilla.org/timer;1");
+    MOZ_ASSERT(mForceKillTimer);
+    mForceKillTimer->InitWithFuncCallback(ContentChild::ForceKillTimerCallback,
+      this,
+      timeoutSecs * 1000,
+      nsITimer::TYPE_ONE_SHOT);
+  }
+}
+
+/* static */ void
+ContentChild::ForceKillTimerCallback(nsITimer* aTimer, void* aClosure)
+{
+  ProcessChild::QuickExit();
+}
+
 bool
 ContentChild::RecvShutdown()
 {
@@ -3050,6 +3083,11 @@ ContentChild::RecvShutdown()
     Unused << RecvGatherProfile();
   }
 #endif
+
+  // Start a timer that will insure we quickly exit after a reasonable
+  // period of time. Prevents shutdown hangs after our connection to the
+  // parent closes.
+  StartForceKillTimer();
 
   // Ignore errors here. If this fails, the parent will kill us after a
   // timeout.
@@ -3281,19 +3319,8 @@ ContentChild::RecvPush(const nsCString& aScope,
                        const nsString& aMessageId)
 {
 #ifndef MOZ_SIMPLEPUSH
-  nsCOMPtr<nsIPushNotifier> pushNotifier =
-      do_GetService("@mozilla.org/push/Notifier;1");
-  if (NS_WARN_IF(!pushNotifier)) {
-      return true;
-  }
-
-  nsresult rv = pushNotifier->NotifyPushObservers(aScope, aPrincipal,
-                                                  Nothing());
-  Unused << NS_WARN_IF(NS_FAILED(rv));
-
-  rv = pushNotifier->NotifyPushWorkers(aScope, aPrincipal,
-                                       aMessageId, Nothing());
-  Unused << NS_WARN_IF(NS_FAILED(rv));
+  PushMessageDispatcher dispatcher(aScope, aPrincipal, aMessageId, Nothing());
+  Unused << NS_WARN_IF(NS_FAILED(dispatcher.NotifyObserversAndWorkers()));
 #endif
   return true;
 }
@@ -3305,19 +3332,8 @@ ContentChild::RecvPushWithData(const nsCString& aScope,
                                InfallibleTArray<uint8_t>&& aData)
 {
 #ifndef MOZ_SIMPLEPUSH
-  nsCOMPtr<nsIPushNotifier> pushNotifier =
-      do_GetService("@mozilla.org/push/Notifier;1");
-  if (NS_WARN_IF(!pushNotifier)) {
-      return true;
-  }
-
-  nsresult rv = pushNotifier->NotifyPushObservers(aScope, aPrincipal,
-                                                  Some(aData));
-  Unused << NS_WARN_IF(NS_FAILED(rv));
-
-  rv = pushNotifier->NotifyPushWorkers(aScope, aPrincipal,
-                                       aMessageId, Some(aData));
-  Unused << NS_WARN_IF(NS_FAILED(rv));
+  PushMessageDispatcher dispatcher(aScope, aPrincipal, aMessageId, Some(aData));
+  Unused << NS_WARN_IF(NS_FAILED(dispatcher.NotifyObserversAndWorkers()));
 #endif
   return true;
 }
@@ -3327,33 +3343,30 @@ ContentChild::RecvPushSubscriptionChange(const nsCString& aScope,
                                          const IPC::Principal& aPrincipal)
 {
 #ifndef MOZ_SIMPLEPUSH
-  nsCOMPtr<nsIPushNotifier> pushNotifier =
-      do_GetService("@mozilla.org/push/Notifier;1");
-  if (NS_WARN_IF(!pushNotifier)) {
-      return true;
-  }
-
-  nsresult rv = pushNotifier->NotifySubscriptionChangeObservers(aScope,
-                                                                aPrincipal);
-  Unused << NS_WARN_IF(NS_FAILED(rv));
-
-  rv = pushNotifier->NotifySubscriptionChangeWorkers(aScope, aPrincipal);
-  Unused << NS_WARN_IF(NS_FAILED(rv));
+  PushSubscriptionChangeDispatcher dispatcher(aScope, aPrincipal);
+  Unused << NS_WARN_IF(NS_FAILED(dispatcher.NotifyObserversAndWorkers()));
 #endif
   return true;
 }
 
 bool
-ContentChild::RecvPushError(const nsCString& aScope, const nsString& aMessage,
-                            const uint32_t& aFlags)
+ContentChild::RecvPushError(const nsCString& aScope, const IPC::Principal& aPrincipal,
+                            const nsString& aMessage, const uint32_t& aFlags)
 {
 #ifndef MOZ_SIMPLEPUSH
-  nsCOMPtr<nsIPushNotifier> pushNotifier =
-      do_GetService("@mozilla.org/push/Notifier;1");
-  if (NS_WARN_IF(!pushNotifier)) {
-      return true;
-  }
-  pushNotifier->NotifyErrorWorkers(aScope, aMessage, aFlags);
+  PushErrorDispatcher dispatcher(aScope, aPrincipal, aMessage, aFlags);
+  Unused << NS_WARN_IF(NS_FAILED(dispatcher.NotifyObserversAndWorkers()));
+#endif
+  return true;
+}
+
+bool
+ContentChild::RecvNotifyPushSubscriptionModifiedObservers(const nsCString& aScope,
+                                                          const IPC::Principal& aPrincipal)
+{
+#ifndef MOZ_SIMPLEPUSH
+  PushSubscriptionModifiedDispatcher dispatcher(aScope, aPrincipal);
+  Unused << NS_WARN_IF(NS_FAILED(dispatcher.NotifyObservers()));
 #endif
   return true;
 }

@@ -20,6 +20,7 @@ class nsNSSU2FToken : public nsINSSU2FToken,
 {
 public:
   NS_DECL_ISUPPORTS
+  NS_DECL_NSIU2FTOKEN
   NS_DECL_NSINSSU2FTOKEN
 
   nsNSSU2FToken();
@@ -30,7 +31,7 @@ public:
 
 private:
   bool mInitialized;
-  mozilla::ScopedPK11SymKey mWrappingKey;
+  mozilla::UniquePK11SymKey mWrappingKey;
 
   static const nsCString mSecretNickname;
   static const nsString mVersion;

@@ -43,6 +43,8 @@ class ArrayBufferViewOrBlobOrStringOrFormData;
 struct MobileIdOptions;
 class ServiceWorkerContainer;
 class DOMRequest;
+struct FlyWebPublishOptions;
+struct FlyWebFilter;
 } // namespace dom
 } // namespace mozilla
 
@@ -165,8 +167,10 @@ public:
   // The XPCOM GetDoNotTrack is ok
   Geolocation* GetGeolocation(ErrorResult& aRv);
   Promise* GetBattery(ErrorResult& aRv);
-  battery::BatteryManager* GetDeprecatedBattery(ErrorResult& aRv);
 
+  already_AddRefed<Promise> PublishServer(const nsAString& aName,
+                                          const FlyWebPublishOptions& aOptions,
+                                          ErrorResult& aRv);
   static void AppName(nsAString& aAppName, bool aUsePrefOverriddenValue);
 
   static nsresult GetPlatform(nsAString& aPlatform,

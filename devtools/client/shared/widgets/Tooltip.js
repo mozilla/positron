@@ -18,7 +18,6 @@ const Heritage = require("sdk/core/heritage");
 const {Eyedropper} = require("devtools/client/eyedropper/eyedropper");
 const Editor = require("devtools/client/sourceeditor/editor");
 const Services = require("Services");
-const {Task} = require("devtools/shared/task");
 
 loader.lazyRequireGetter(this, "beautify", "devtools/shared/jsbeautify/beautify");
 loader.lazyRequireGetter(this, "setNamedTimeout", "devtools/client/shared/widgets/view-helpers", true);
@@ -343,6 +342,15 @@ Tooltip.prototype = {
   },
 
   /**
+   * Returns the outer container node (that includes the arrow etc.). Happens
+   * to be identical to this.panel here, can be different element in other
+   * Tooltip implementations.
+   */
+  get container() {
+    return this.panel;
+  },
+
+  /**
    * Set the content of this tooltip. Will first empty the tooltip and then
    * append the new content element.
    * Consider using one of the set<type>Content() functions instead.
@@ -493,7 +501,9 @@ Tooltip.prototype = {
     // Analyzing state history isn't useful with transient object inspectors.
     widget.commitHierarchy = () => {};
 
-    for (let e in relayEvents) widget.on(e, relayEvents[e]);
+    for (let e in relayEvents) {
+      widget.on(e, relayEvents[e]);
+    }
     VariablesViewController.attach(widget, controllerOptions);
 
     // Some of the view options are allowed to change between uses.
@@ -510,36 +520,13 @@ Tooltip.prototype = {
   },
 
   /**
-   * Uses the provided inspectorFront's getImageDataFromURL method to resolve
-   * the relative URL on the server-side, in the page context, and then sets the
-   * tooltip content with the resulting image just like |setImageContent| does.
-   * @return a promise that resolves when the image is shown in the tooltip or
-   * resolves when the broken image tooltip content is ready, but never rejects.
-   */
-  setRelativeImageContent: Task.async(function* (imageUrl, inspectorFront,
-                                                maxDim) {
-    if (imageUrl.startsWith("data:")) {
-      // If the imageUrl already is a data-url, save ourselves a round-trip
-      this.setImageContent(imageUrl, {maxDim: maxDim});
-    } else if (inspectorFront) {
-      try {
-        let {data, size} = yield inspectorFront.getImageDataFromURL(imageUrl,
-                                                                    maxDim);
-        size.maxDim = maxDim;
-        let str = yield data.string();
-        this.setImageContent(str, size);
-      } catch (e) {
-        this.setBrokenImageContent();
-      }
-    }
-  }),
-
-  /**
    * Fill the tooltip with a message explaining the the image is missing
    */
   setBrokenImageContent: function () {
     this.setTextContent({
-      messages: [l10n.strings.GetStringFromName("previewTooltip.image.brokenImage")]
+      messages: [
+        l10n.strings.GetStringFromName("previewTooltip.image.brokenImage")
+      ]
     });
   },
 
@@ -547,7 +534,7 @@ Tooltip.prototype = {
    * Fill the tooltip with an image and add the image dimension at the bottom.
    *
    * Only use this for absolute URLs that can be queried from the devtools
-   * client-side. For relative URLs, use |setRelativeImageContent|.
+   * client-side.
    *
    * @param {string} imageUrl
    *        The url to load the image from
@@ -738,7 +725,6 @@ Tooltip.prototype = {
 
     function onLoaded(iframe) {
       let win = iframe.contentWindow.wrappedJSObject;
-      let doc = win.document.documentElement;
       let def = promise.defer();
       let container = win.document.getElementById("container");
       let widget = new CSSFilterEditorWidget(container, filter);
@@ -755,38 +741,6 @@ Tooltip.prototype = {
       return def.promise;
     }
   },
-
-  /**
-   * Set the content of the tooltip to display a font family preview.
-   * This is based on Lea Verou's Dablet.
-   * See https://github.com/LeaVerou/dabblet
-   * for more info.
-   * @param {String} font The font family value.
-   * @param {object} nodeFront
-   *        The NodeActor that will used to retrieve the dataURL for the font
-   *        family tooltip contents.
-   * @return A promise that resolves when the font tooltip content is ready, or
-   *         rejects if no font is provided
-   */
-  setFontFamilyContent: Task.async(function* (font, nodeFront) {
-    if (!font || !nodeFront) {
-      throw new Error("Missing font");
-    }
-
-    if (typeof nodeFront.getFontFamilyDataURL === "function") {
-      font = font.replace(/"/g, "'");
-      font = font.replace("!important", "");
-      font = font.trim();
-
-      let fillStyle =
-          (Services.prefs.getCharPref("devtools.theme") === "light") ?
-          "black" : "white";
-
-      let {data, size} = yield nodeFront.getFontFamilyDataURL(font, fillStyle);
-      let str = yield data.string();
-      this.setImageContent(str, { hideDimensionLabel: true, maxDim: size });
-    }
-  }),
 
   /**
    * Set the content of this tooltip to the MDN docs widget.
@@ -1008,7 +962,8 @@ function SwatchColorPickerTooltip(doc) {
 
 module.exports.SwatchColorPickerTooltip = SwatchColorPickerTooltip;
 
-SwatchColorPickerTooltip.prototype = Heritage.extend(SwatchBasedEditorTooltip.prototype, {
+SwatchColorPickerTooltip.prototype =
+Heritage.extend(SwatchBasedEditorTooltip.prototype, {
   /**
    * Overriding the SwatchBasedEditorTooltip.show function to set spectrum's
    * color.
@@ -1287,8 +1242,9 @@ EventTooltip.prototype = {
       iframe.setAttribute("style", "width:100%;");
 
       editor.appendTo(content, iframe).then(() => {
+        /* eslint-disable camelcase */
         let tidied = beautify.js(handler, { indent_size: 2 });
-
+        /* eslint-enable */
         editor.setText(tidied);
 
         eventEditors.appended = true;
@@ -1335,7 +1291,9 @@ EventTooltip.prototype = {
         );
         if (item) {
           let actor = item.attachment.source.actor;
-          DebuggerView.setEditorLocation(actor, line, {noDebug: true}).then(() => {
+          DebuggerView.setEditorLocation(
+            actor, line, {noDebug: true}
+          ).then(() => {
             if (dom0) {
               let text = DebuggerView.editor.getText();
               let index = text.indexOf(searchString);
@@ -1420,7 +1378,8 @@ function SwatchCubicBezierTooltip(doc) {
 
 module.exports.SwatchCubicBezierTooltip = SwatchCubicBezierTooltip;
 
-SwatchCubicBezierTooltip.prototype = Heritage.extend(SwatchBasedEditorTooltip.prototype, {
+SwatchCubicBezierTooltip.prototype =
+Heritage.extend(SwatchBasedEditorTooltip.prototype, {
   /**
    * Overriding the SwatchBasedEditorTooltip.show function to set the cubic
    * bezier curve in the widget
@@ -1517,7 +1476,8 @@ function SwatchFilterTooltip(doc) {
 
 exports.SwatchFilterTooltip = SwatchFilterTooltip;
 
-SwatchFilterTooltip.prototype = Heritage.extend(SwatchBasedEditorTooltip.prototype, {
+SwatchFilterTooltip.prototype =
+Heritage.extend(SwatchBasedEditorTooltip.prototype, {
   show: function () {
     // Call the parent class' show function
     SwatchBasedEditorTooltip.prototype.show.call(this);

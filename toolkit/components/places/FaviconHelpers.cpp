@@ -419,7 +419,9 @@ AsyncFetchAndSetIconForPage::FetchFromNetwork() {
   rv = NS_NewChannel(getter_AddRefs(channel),
                      iconURI,
                      mLoadingPrincipal,
-                     nsILoadInfo::SEC_NORMAL,
+                     nsILoadInfo::SEC_ALLOW_CROSS_ORIGIN_DATA_INHERITS |
+                     nsILoadInfo::SEC_ALLOW_CHROME |
+                     nsILoadInfo::SEC_DISALLOW_SCRIPT,
                      nsIContentPolicy::TYPE_INTERNAL_IMAGE);
 
   NS_ENSURE_SUCCESS(rv, rv);
@@ -439,7 +441,7 @@ AsyncFetchAndSetIconForPage::FetchFromNetwork() {
     priorityChannel->AdjustPriority(nsISupportsPriority::PRIORITY_LOWEST);
   }
 
-  return channel->AsyncOpen(this, nullptr);
+  return channel->AsyncOpen2(this);
 }
 
 NS_IMETHODIMP
@@ -511,7 +513,9 @@ AsyncFetchAndSetIconForPage::AsyncOnChannelRedirect(
 , nsIAsyncVerifyRedirectCallback *cb
 )
 {
-  (void)cb->OnRedirectVerifyCallback(NS_OK);
+  // If we've been canceled, stop the redirect with NS_BINDING_ABORTED, and
+  // handle the cancel on the original channel.
+  (void)cb->OnRedirectVerifyCallback(mCanceled ? NS_BINDING_ABORTED : NS_OK);
   return NS_OK;
 }
 

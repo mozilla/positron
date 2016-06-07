@@ -257,6 +257,13 @@ MacroAssemblerMIPSShared::ma_subTestOverflow(Register rd, Register rs, Imm32 imm
 }
 
 void
+MacroAssemblerMIPSShared::ma_mul(Register rd, Register rs, Imm32 imm)
+{
+    ma_li(ScratchRegister, imm);
+    as_mul(rd, rs, ScratchRegister);
+}
+
+void
 MacroAssemblerMIPSShared::ma_mult(Register rs, Imm32 imm)
 {
     ma_li(ScratchRegister, imm);
@@ -1233,6 +1240,27 @@ MacroAssembler::repatchThunk(uint8_t* code, uint32_t u32Offset, uint32_t targetO
 {
     uint32_t* u32 = reinterpret_cast<uint32_t*>(code + u32Offset);
     *u32 = targetOffset - u32Offset;
+}
+
+CodeOffset
+MacroAssembler::nopPatchableToNearJump()
+{
+    CodeOffset offset(currentOffset());
+    as_nop();
+    as_nop();
+    return offset;
+}
+
+void
+MacroAssembler::patchNopToNearJump(uint8_t* jump, uint8_t* target)
+{
+    new (jump) InstImm(op_beq, zero, zero, BOffImm16(target - jump));
+}
+
+void
+MacroAssembler::patchNearJumpToNop(uint8_t* jump)
+{
+    new (jump) InstNOP();
 }
 
 void

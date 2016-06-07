@@ -2153,19 +2153,16 @@ CSSParserImpl::ParseSourceSizeList(const nsAString& aBuffer,
       break;
     }
 
+    if (GetToken(true)) {
+      if (!mToken.IsSymbol(',')) {
+        REPORT_UNEXPECTED_TOKEN(PEParseSourceSizeListNotComma);
+        hitError = true;
+        break;
+      }
+    }
+
     aQueries.AppendElement(query.forget());
     aValues.AppendElement(value);
-
-    if (!GetToken(true)) {
-      // Expected EOF
-      break;
-    }
-
-    if (eCSSToken_Symbol != mToken.mType || mToken.mSymbol != ',') {
-      REPORT_UNEXPECTED_TOKEN(PEParseSourceSizeListNotComma);
-      hitError = true;
-      break;
-    }
   }
 
   if (hitError) {
@@ -2180,7 +2177,7 @@ CSSParserImpl::ParseSourceSizeList(const nsAString& aBuffer,
   ReleaseScanner();
   mHTMLMediaMode = false;
 
-  return !hitError;
+  return !aQueries.IsEmpty();
 }
 
 bool
@@ -7475,6 +7472,7 @@ const UnitInfo UnitData[] = {
   { STR_WITH_LEN("vmin"), eCSSUnit_ViewportMin, VARIANT_LENGTH },
   { STR_WITH_LEN("vmax"), eCSSUnit_ViewportMax, VARIANT_LENGTH },
   { STR_WITH_LEN("pc"), eCSSUnit_Pica, VARIANT_LENGTH },
+  { STR_WITH_LEN("q"), eCSSUnit_Quarter, VARIANT_LENGTH },
   { STR_WITH_LEN("deg"), eCSSUnit_Degree, VARIANT_ANGLE },
   { STR_WITH_LEN("grad"), eCSSUnit_Grad, VARIANT_ANGLE },
   { STR_WITH_LEN("rad"), eCSSUnit_Radian, VARIANT_ANGLE },
@@ -9754,12 +9752,12 @@ CSSParserImpl::ParseGridGap()
     AppendValue(eCSSProperty_grid_column_gap, first);
     return true;
   }
-  if (ParseNonNegativeVariant(first, VARIANT_LCALC, nullptr) !=
+  if (ParseNonNegativeVariant(first, VARIANT_LPCALC, nullptr) !=
         CSSParseResult::Ok) {
     return false;
   }
   nsCSSValue second;
-  auto result = ParseNonNegativeVariant(second, VARIANT_LCALC, nullptr);
+  auto result = ParseNonNegativeVariant(second, VARIANT_LPCALC, nullptr);
   if (result == CSSParseResult::Error) {
     return false;
   }
@@ -12024,15 +12022,22 @@ CSSParserImpl::ParseImageLayersItem(
   // Fill in the values that the shorthand will set if we don't find
   // other values.
   aState.mImage->mValue.SetNoneValue();
-  aState.mRepeat->mXValue.SetIntValue(NS_STYLE_IMAGELAYER_REPEAT_REPEAT,
-                                      eCSSUnit_Enumerated);
-  aState.mRepeat->mYValue.Reset();
   aState.mAttachment->mValue.SetIntValue(NS_STYLE_IMAGELAYER_ATTACHMENT_SCROLL,
                                          eCSSUnit_Enumerated);
   aState.mClip->mValue.SetIntValue(NS_STYLE_IMAGELAYER_CLIP_BORDER,
                                    eCSSUnit_Enumerated);
-  aState.mOrigin->mValue.SetIntValue(NS_STYLE_IMAGELAYER_ORIGIN_PADDING,
-                                     eCSSUnit_Enumerated);
+
+  aState.mRepeat->mXValue.SetIntValue(NS_STYLE_IMAGELAYER_REPEAT_REPEAT,
+                                      eCSSUnit_Enumerated);
+  aState.mRepeat->mYValue.Reset();
+
+  if (eCSSProperty_mask == aTable[nsStyleImageLayers::shorthand]) {
+    aState.mOrigin->mValue.SetIntValue(NS_STYLE_IMAGELAYER_ORIGIN_BORDER,
+                                       eCSSUnit_Enumerated);
+  } else {
+    aState.mOrigin->mValue.SetIntValue(NS_STYLE_IMAGELAYER_ORIGIN_PADDING,
+                                       eCSSUnit_Enumerated);
+  }
 
   RefPtr<nsCSSValue::Array> positionXArr = nsCSSValue::Array::Create(2);
   RefPtr<nsCSSValue::Array> positionYArr = nsCSSValue::Array::Create(2);

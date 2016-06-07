@@ -8,7 +8,9 @@
 #define mozilla_ServoBindings_h
 
 #include "stdint.h"
+#include "nsColor.h"
 #include "mozilla/css/SheetParsingMode.h"
+#include "nsProxyRelease.h"
 
 /*
  * API for Servo to access Gecko data structures. This file must compile as valid
@@ -21,6 +23,8 @@
 class nsIAtom;
 class nsINode;
 typedef nsINode RawGeckoNode;
+class nsIPrincipal;
+class nsIURI;
 namespace mozilla { namespace dom { class Element; } }
 using mozilla::dom::Element;
 typedef mozilla::dom::Element RawGeckoElement;
@@ -30,6 +34,34 @@ struct ServoNodeData;
 struct ServoComputedValues;
 struct RawServoStyleSheet;
 struct RawServoStyleSet;
+struct nsStyleList;
+struct nsStyleImage;
+struct nsStyleGradientStop;
+class nsStyleGradient;
+class nsStyleCoord;
+struct nsStyleDisplay;
+
+#define NS_DECL_THREADSAFE_FFI_REFCOUNTING(class_, name_)                     \
+  static_assert(class_::HasThreadSafeRefCnt::value,                           \
+                "NS_DECL_THREADSAFE_FFI_REFCOUNTING can only be used with "   \
+                "classes that have thread-safe refcounting");                 \
+  void Gecko_AddRef##name_##ArbitraryThread(class_* aPtr);                    \
+  void Gecko_Release##name_##ArbitraryThread(class_* aPtr);
+#define NS_IMPL_THREADSAFE_FFI_REFCOUNTING(class_, name_)                     \
+  void Gecko_AddRef##name_##ArbitraryThread(class_* aPtr)                     \
+  { NS_ADDREF(aPtr); }                                                        \
+  void Gecko_Release##name_##ArbitraryThread(class_* aPtr)                    \
+  { NS_RELEASE(aPtr); }
+
+#define NS_DECL_HOLDER_FFI_REFCOUNTING(class_, name_)                         \
+  typedef nsMainThreadPtrHolder<class_> ThreadSafe##name_##Holder;            \
+  void Gecko_AddRef##name_##ArbitraryThread(ThreadSafe##name_##Holder* aPtr); \
+  void Gecko_Release##name_##ArbitraryThread(ThreadSafe##name_##Holder* aPtr);
+#define NS_IMPL_HOLDER_FFI_REFCOUNTING(class_, name_)                         \
+  void Gecko_AddRef##name_##ArbitraryThread(ThreadSafe##name_##Holder* aPtr)  \
+  { NS_ADDREF(aPtr); }                                                        \
+  void Gecko_Release##name_##ArbitraryThread(ThreadSafe##name_##Holder* aPtr) \
+  { NS_RELEASE(aPtr); }                                                       \
 
 extern "C" {
 
@@ -58,6 +90,22 @@ bool Gecko_IsUnvisitedLink(RawGeckoElement* element);
 bool Gecko_IsRootElement(RawGeckoElement* element);
 nsIAtom* Gecko_LocalName(RawGeckoElement* element);
 nsIAtom* Gecko_Namespace(RawGeckoElement* element);
+nsIAtom* Gecko_GetElementId(RawGeckoElement* element);
+
+// Gets the class or class list (if any) of the Element.
+//
+// The calling convention here is rather hairy, and is optimized for getting
+// Servo the information it needs for hot calls.
+//
+// The return value indicates the number of classes. If zero, neither outparam
+// is valid. If one, the class_ outparam is filled with the atom of the class.
+// If two or more, the classList outparam is set to point to an array of atoms
+// representing the class list.
+//
+// The array is borrowed and the atoms are not addrefed. These values can be
+// invalidated by any DOM mutation. Use them in a tight scope.
+uint32_t Gecko_ClassOrClassList(RawGeckoElement* element,
+                                nsIAtom** class_, nsIAtom*** classList);
 
 // Node data.
 ServoNodeData* Gecko_GetNodeData(RawGeckoNode* node);
@@ -74,16 +122,49 @@ bool Gecko_AtomEqualsUTF8(nsIAtom* aAtom, const char* aString, uint32_t aLength)
 bool Gecko_AtomEqualsUTF8IgnoreCase(nsIAtom* aAtom, const char* aString, uint32_t aLength);
 
 // Counter style.
-struct nsStyleList;
 void Gecko_SetListStyleType(nsStyleList* style_struct, uint32_t type);
 void Gecko_CopyListStyleTypeFrom(nsStyleList* dst, const nsStyleList* src);
+
+// background-image style.
+// TODO: support url() values (and maybe element() too?).
+void Gecko_SetNullImageValue(nsStyleImage* image);
+void Gecko_SetGradientImageValue(nsStyleImage* image, nsStyleGradient* gradient);
+void Gecko_CopyImageValueFrom(nsStyleImage* image, const nsStyleImage* other);
+
+nsStyleGradient* Gecko_CreateGradient(uint8_t shape,
+                                      uint8_t size,
+                                      bool repeating,
+                                      bool legacy_syntax,
+                                      uint32_t stops);
+
+void Gecko_SetGradientStop(nsStyleGradient* gradient,
+                           uint32_t index,
+                           const nsStyleCoord* location,
+                           nscolor color,
+                           bool is_interpolation_hint);
+
+// Object refcounting.
+NS_DECL_HOLDER_FFI_REFCOUNTING(nsIPrincipal, Principal)
+NS_DECL_HOLDER_FFI_REFCOUNTING(nsIURI, URI)
+
+// Display style.
+void Gecko_SetMozBinding(nsStyleDisplay* style_struct,
+                         const uint8_t* string_bytes, uint32_t string_length,
+                         ThreadSafeURIHolder* base_uri,
+                         ThreadSafeURIHolder* referrer,
+                         ThreadSafePrincipalHolder* principal);
+void Gecko_CopyMozBindingFrom(nsStyleDisplay* des, const nsStyleDisplay* src);
 
 // Styleset and Stylesheet management.
 //
 // TODO: Make these return already_AddRefed and UniquePtr when the binding
 // generator is smart enough to handle them.
-RawServoStyleSheet* Servo_StylesheetFromUTF8Bytes(const uint8_t* bytes, uint32_t length,
-                                                  mozilla::css::SheetParsingMode parsing_mode);
+RawServoStyleSheet* Servo_StylesheetFromUTF8Bytes(
+    const uint8_t* bytes, uint32_t length,
+    mozilla::css::SheetParsingMode parsing_mode,
+    ThreadSafeURIHolder* base,
+    ThreadSafeURIHolder* referrer,
+    ThreadSafePrincipalHolder* principal);
 void Servo_AddRefStyleSheet(RawServoStyleSheet* sheet);
 void Servo_ReleaseStyleSheet(RawServoStyleSheet* sheet);
 void Servo_AppendStyleSheet(RawServoStyleSheet* sheet, RawServoStyleSet* set);
@@ -113,8 +194,9 @@ void Servo_ReleaseComputedValues(ServoComputedValues*);
 // Initialize Servo components. Should be called exactly once at startup.
 void Servo_Initialize();
 
-// Restyle the given document.
+// Restyle the given document or subtree.
 void Servo_RestyleDocument(RawGeckoDocument* doc, RawServoStyleSet* set);
+void Servo_RestyleSubtree(RawGeckoNode* node, RawServoStyleSet* set);
 
 // Style-struct management.
 #define STYLE_STRUCT(name, checkdata_cb) \

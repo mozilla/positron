@@ -458,9 +458,13 @@ CodeGeneratorShared::encodeAllocation(LSnapshot* snapshot, MDefinition* mir,
         break;
       }
       case MIRType::Float32:
-      case MIRType::Bool32x4:
+      case MIRType::Int8x16:
+      case MIRType::Int16x8:
       case MIRType::Int32x4:
       case MIRType::Float32x4:
+      case MIRType::Bool8x16:
+      case MIRType::Bool16x8:
+      case MIRType::Bool32x4:
       {
         LAllocation* payload = snapshot->payloadOfSlot(*allocIndex);
         if (payload->isConstant()) {
@@ -1518,9 +1522,13 @@ CodeGeneratorShared::emitAsmJSCall(LAsmJSCall* ins)
       case MAsmJSCall::Callee::Internal:
         masm.call(mir->desc(), callee.internal());
         break;
-      case MAsmJSCall::Callee::Dynamic:
-        masm.call(mir->desc(), ToRegister(ins->getOperand(mir->dynamicCalleeOperandIndex())));
+      case MAsmJSCall::Callee::Dynamic: {
+        if (callee.dynamicHasSigIndex())
+            masm.move32(Imm32(callee.dynamicSigIndex()), WasmTableCallSigReg);
+        MOZ_ASSERT(WasmTableCallPtrReg == ToRegister(ins->getOperand(mir->dynamicCalleeOperandIndex())));
+        masm.call(mir->desc(), WasmTableCallPtrReg);
         break;
+      }
       case MAsmJSCall::Callee::Builtin:
         masm.call(callee.builtin());
         break;

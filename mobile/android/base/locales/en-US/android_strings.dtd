@@ -29,10 +29,6 @@
 <!ENTITY firstrun_tabqueue_message_on "Success!">
 <!ENTITY firstrun_tabqueue_subtext_on "You can always turn this off in &settings; under &pref_category_general;.">
 
-<!ENTITY firstrun_notifications_title "Blogs">
-<!ENTITY firstrun_notifications_message "Stay informed">
-<!ENTITY firstrun_notifications_subtext "Get notified when blogs you have bookmarked post an update.">
-
 <!ENTITY firstrun_readerview_title "Articles">
 <!-- Localization note (firstrun_readerview_message): This is a casual way of describing getting rid of unnecessary things, and is referring to simplifying websites so only the article text and images are visible, removing unnecessary headers or ads. -->
 <!ENTITY firstrun_readerview_message "Lose the clutter">
@@ -193,6 +189,9 @@
      it is applicable. -->
 <!ENTITY pref_search_hint2 "TIP: Add any website to your list of search providers by long-pressing on its search field and then touching the &formatI; icon.">
 <!ENTITY pref_category_advanced "Advanced">
+<!-- Localization note (pref_category_advanced_summary3): “data saver” in this
+     context means consuming less data, e.g. by not loading images, not
+     “storing data”. -->
 <!ENTITY pref_category_advanced_summary3 "Restore tabs, data saver, developer tools">
 <!ENTITY pref_category_notifications "Notifications">
 <!ENTITY pref_category_notifications_summary "New features, website updates">
@@ -244,6 +243,9 @@
 <!ENTITY pref_cookies_not_accept_foreign "Enabled, excluding 3rd party">
 <!ENTITY pref_cookies_disabled "Disabled">
 
+<!-- Localization note (pref_category_data_saver): “data saver” in this
+     context means consuming less data, e.g. by not loading images, not
+     “storing data”. -->
 <!ENTITY pref_category_data_saver "Data saver">
 <!ENTITY pref_category_media "Media">
 <!ENTITY pref_category_developer_tools "Developer tools">
@@ -445,12 +447,12 @@ size. -->
 <!ENTITY share_image_failed "Unable to share this image">
 <!ENTITY save_as_pdf "Save as PDF">
 <!ENTITY print "Print">
-<!ENTITY find_in_page "Find in Page">
-<!ENTITY desktop_mode "Request Desktop Site">
+<!ENTITY find_in_page "Find in page">
+<!ENTITY desktop_mode "Request desktop site">
 <!ENTITY page "Page">
 <!ENTITY tools "Tools">
-<!ENTITY new_tab "New Tab">
-<!ENTITY new_private_tab "New Private Tab">
+<!ENTITY new_tab "New tab">
+<!ENTITY new_private_tab "New private tab">
 <!ENTITY close_all_tabs "Close All Tabs">
 <!ENTITY close_private_tabs "Close Private Tabs">
 <!ENTITY tabs_normal "Tabs">

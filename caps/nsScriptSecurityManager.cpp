@@ -227,20 +227,6 @@ private:
     bool mMustFreeName;
 };
 
-JSContext *
-nsScriptSecurityManager::GetCurrentJSContext()
-{
-    // Get JSContext from stack.
-    return nsXPConnect::XPConnect()->GetCurrentJSContext();
-}
-
-JSContext *
-nsScriptSecurityManager::GetSafeJSContext()
-{
-    // Get JSContext from stack.
-    return nsXPConnect::XPConnect()->GetSafeJSContext();
-}
-
 /* static */
 bool
 nsScriptSecurityManager::SecurityCompareURIs(nsIURI* aSourceURI,
@@ -672,7 +658,7 @@ EqualOrSubdomain(nsIURI* aProbeArg, nsIURI* aBase)
         }
 
         nsAutoCString host, newHost;
-        nsresult rv = probe->GetHost(host);
+        rv = probe->GetHost(host);
         NS_ENSURE_SUCCESS(rv, false);
 
         rv = tldService->GetNextSubDomain(host, newHost);
@@ -688,37 +674,32 @@ EqualOrSubdomain(nsIURI* aProbeArg, nsIURI* aBase)
 static bool
 AllSchemesMatch(nsIURI* aURI, nsIURI* aOtherURI)
 {
-    nsCOMPtr<nsINestedURI> nestedURI = do_QueryInterface(aURI);
-    nsCOMPtr<nsINestedURI> nestedOtherURI = do_QueryInterface(aOtherURI);
     auto stringComparator = nsCaseInsensitiveCStringComparator();
-    if (!nestedURI && !nestedOtherURI) {
-        // Neither of the URIs is nested, compare their schemes directly:
-        nsAutoCString scheme, otherScheme;
-        aURI->GetScheme(scheme);
-        aOtherURI->GetScheme(otherScheme);
-        return scheme.Equals(otherScheme, stringComparator);
-    }
-    while (nestedURI && nestedOtherURI) {
-        nsCOMPtr<nsIURI> currentURI = do_QueryInterface(nestedURI);
-        nsCOMPtr<nsIURI> currentOtherURI = do_QueryInterface(nestedOtherURI);
+    nsCOMPtr<nsIURI> currentURI = aURI;
+    nsCOMPtr<nsIURI> currentOtherURI = aOtherURI;
+    while (currentURI && currentOtherURI) {
         nsAutoCString scheme, otherScheme;
         currentURI->GetScheme(scheme);
         currentOtherURI->GetScheme(otherScheme);
         if (!scheme.Equals(otherScheme, stringComparator)) {
             return false;
         }
-
+        nsCOMPtr<nsINestedURI> nestedURI = do_QueryInterface(currentURI);
+        nsCOMPtr<nsINestedURI> nestedOtherURI = do_QueryInterface(currentOtherURI);
+        // If neither are nested and all schemes have matched so far
+        // (or we would have bailed already), we're the same:
+        if (!nestedURI && !nestedOtherURI) {
+            return true;
+        }
+        // If one is nested and the other not, they're not equal:
+        if (!nestedURI != !nestedOtherURI) {
+            return false;
+        }
+        // At this stage, both are still nested URIs, so let's play again:
         nestedURI->GetInnerURI(getter_AddRefs(currentURI));
         nestedOtherURI->GetInnerURI(getter_AddRefs(currentOtherURI));
-        nestedURI = do_QueryInterface(currentURI);
-        nestedOtherURI = do_QueryInterface(currentOtherURI);
     }
-    if (!!nestedURI != !!nestedOtherURI) {
-        // If only one of the scheme chains runs out at one point, clearly the chains
-        // aren't of the same length, so we bail:
-        return false;
-    }
-    return true;
+    return false;
 }
 
 NS_IMETHODIMP
@@ -850,8 +831,6 @@ nsScriptSecurityManager::CheckLoadURIWithPrincipal(nsIPrincipal* aPrincipal,
         // as long as they don't represent null principals...
         // Or they don't require an special permission to do so
         // See bug#773886
-
-        bool hasFlags;
         rv = NS_URIChainHasFlags(targetBaseURI,
                                  nsIProtocolHandler::URI_CROSS_ORIGIN_NEEDS_WEBAPPS_PERM,
                                  &hasFlags);
@@ -1114,16 +1093,6 @@ nsScriptSecurityManager::CheckLoadURIStrWithPrincipal(nsIPrincipal* aPrincipal,
     return rv;
 }
 
-bool
-nsScriptSecurityManager::ScriptAllowed(JSObject *aGlobal)
-{
-    MOZ_ASSERT(aGlobal);
-    MOZ_ASSERT(JS_IsGlobalObject(aGlobal) || js::IsWindowProxy(aGlobal));
-
-    // Check the bits on the compartment private.
-    return xpc::Scriptability::Get(aGlobal).Allowed();
-}
-
 ///////////////// Principals ///////////////////////
 
 NS_IMETHODIMP
@@ -1132,16 +1101,6 @@ nsScriptSecurityManager::GetSystemPrincipal(nsIPrincipal **result)
     NS_ADDREF(*result = mSystemPrincipal);
 
     return NS_OK;
-}
-
-NS_IMETHODIMP
-nsScriptSecurityManager::GetSimpleCodebasePrincipal(nsIURI* aURI,
-                                                    nsIPrincipal** aPrincipal)
-{
-  PrincipalOriginAttributes attrs(UNKNOWN_APP_ID, false);
-  nsCOMPtr<nsIPrincipal> prin = BasePrincipal::CreateCodebasePrincipal(aURI, attrs);
-  prin.forget(aPrincipal);
-  return *aPrincipal ? NS_OK : NS_ERROR_FAILURE;
 }
 
 NS_IMETHODIMP

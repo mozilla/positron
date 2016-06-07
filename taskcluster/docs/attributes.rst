@@ -63,6 +63,11 @@ unittest_try_name
 (deprecated) This is the name used to refer to a unit test via try syntax.  It
 may not match either of ``unittest_suite`` or ``unittest_flavor``.
 
+talos_try_name
+==============
+
+(deprecated) This is the name used to refer to a talos job via try syntax.
+
 test_chunk
 ==========
 
@@ -73,8 +78,8 @@ legacy_kind
 ===========
 
 (deprecated) The kind of task as created by the legacy kind.  This is valid
-only for the ``legacy`` kind.  One of ``build``, ``unittest,`` ``post_build``,
-or ``job``.
+only for the ``legacy`` kind.  One of ``build``, ``unittest,``, ``talos``,
+``post_build``, or ``job``.
 
 job
 ===
@@ -88,3 +93,7 @@ post_build
 (deprecated) The name of the post-build activity.  This is valid only for the
 ``legacy`` kind.
 
+image_name
+==========
+
+For the ``docker_image`` kind, this attribute contains the docker image name.

@@ -1621,9 +1621,9 @@ TSFTextStore::FlushPendingActions()
           }
         }
 
-        // eCompositionStart always causes NOTIFY_IME_OF_COMPOSITION_UPDATE.
-        // Therefore, we should wait to clear the locked content until it's
-        // notified.
+        // eCompositionStart always causes
+        // NOTIFY_IME_OF_COMPOSITION_EVENT_HANDLED.  Therefore, we should
+        // wait to clear the locked content until it's notified.
         mDeferClearingLockedContent = true;
 
         MOZ_LOG(sTextStoreLog, LogLevel::Debug,
@@ -1652,9 +1652,9 @@ TSFTextStore::FlushPendingActions()
                 action.mRanges ? action.mRanges->Length() : 0));
 
         // eCompositionChange causes a DOM text event, the IME will be notified
-        // of NOTIFY_IME_OF_COMPOSITION_UPDATE.  In this case, we should not
-        // clear the locked content until we notify the IME of the composition
-        // update.
+        // of NOTIFY_IME_OF_COMPOSITION_EVENT_HANDLED.  In this case, we
+        // should not clear the locked content until we notify the IME of the
+        // composition update.
         mDeferClearingLockedContent = true;
 
         rv = mDispatcher->SetPendingComposition(action.mData,
@@ -1688,8 +1688,8 @@ TSFTextStore::FlushPendingActions()
                 this, NS_ConvertUTF16toUTF8(action.mData).get()));
 
         // Dispatching eCompositionCommit causes a DOM text event, then,
-        // the IME will be notified of NOTIFY_IME_OF_COMPOSITION_UPDATE.  In
-        // this case, we should not clear the locked content until we notify
+        // the IME will be notified of NOTIFY_IME_OF_COMPOSITION_EVENT_HANDLED.
+        // In this case, we should not clear the locked content until we notify
         // the IME of the composition update.
         mDeferClearingLockedContent = true;
 
@@ -2045,25 +2045,19 @@ GetRangeExtent(ITfRange* aRange, LONG* aStart, LONG* aLength)
   return rangeACP->GetExtent(aStart, aLength);
 }
 
-static uint32_t
+static TextRangeType
 GetGeckoSelectionValue(TF_DISPLAYATTRIBUTE& aDisplayAttr)
 {
-  uint32_t result;
   switch (aDisplayAttr.bAttr) {
     case TF_ATTR_TARGET_CONVERTED:
-      result = NS_TEXTRANGE_SELECTEDCONVERTEDTEXT;
-      break;
+      return TextRangeType::eSelectedClause;
     case TF_ATTR_CONVERTED:
-      result = NS_TEXTRANGE_CONVERTEDTEXT;
-      break;
+      return TextRangeType::eConvertedClause;
     case TF_ATTR_TARGET_NOTCONVERTED:
-      result = NS_TEXTRANGE_SELECTEDRAWTEXT;
-      break;
+      return TextRangeType::eSelectedRawClause;
     default:
-      result = NS_TEXTRANGE_RAWINPUT;
-      break;
+      return TextRangeType::eRawClause;
   }
-  return result;
 }
 
 HRESULT
@@ -2285,7 +2279,7 @@ TSFTextStore::RestartComposition(ITfCompositionView* aCompositionView,
   TextRange caretRange;
   caretRange.mStartOffset = caretRange.mEndOffset =
     uint32_t(oldComposition.mStart + commitString.Length());
-  caretRange.mRangeType = NS_TEXTRANGE_CARETPOSITION;
+  caretRange.mRangeType = TextRangeType::eCaret;
   action->mRanges->AppendElement(caretRange);
   action->mIncomplete = false;
 
@@ -2434,7 +2428,7 @@ TSFTextStore::RecordCompositionUpdateAction()
   // we always pass in at least one range to eCompositionChange
   newRange.mStartOffset = 0;
   newRange.mEndOffset = action->mData.Length();
-  newRange.mRangeType = NS_TEXTRANGE_RAWINPUT;
+  newRange.mRangeType = TextRangeType::eRawClause;
   action->mRanges->AppendElement(newRange);
 
   RefPtr<ITfRange> range;
@@ -2479,7 +2473,7 @@ TSFTextStore::RecordCompositionUpdateAction()
     TF_DISPLAYATTRIBUTE attr;
     hr = GetDisplayAttribute(attrPropetry, range, &attr);
     if (FAILED(hr)) {
-      newRange.mRangeType = NS_TEXTRANGE_RAWINPUT;
+      newRange.mRangeType = TextRangeType::eRawClause;
     } else {
       newRange.mRangeType = GetGeckoSelectionValue(attr);
       if (GetColor(attr.crText, newRange.mRangeStyle.mForegroundColor)) {
@@ -2529,7 +2523,7 @@ TSFTextStore::RecordCompositionUpdateAction()
         range.mRangeStyle.IsNoChangeStyle()) {
       range.mRangeStyle.Clear();
       // The looks of selected type is better than others.
-      range.mRangeType = NS_TEXTRANGE_SELECTEDRAWTEXT;
+      range.mRangeType = TextRangeType::eSelectedRawClause;
     }
   }
 
@@ -2547,7 +2541,7 @@ TSFTextStore::RecordCompositionUpdateAction()
       caretPosition > targetClause->mEndOffset) {
     TextRange caretRange;
     caretRange.mStartOffset = caretRange.mEndOffset = caretPosition;
-    caretRange.mRangeType = NS_TEXTRANGE_CARETPOSITION;
+    caretRange.mRangeType = TextRangeType::eCaret;
     action->mRanges->AppendElement(caretRange);
   }
 

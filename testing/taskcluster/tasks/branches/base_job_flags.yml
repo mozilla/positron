@@ -57,6 +57,10 @@ flags:
     mochitest-dt-e10s: /mochitest-devtools-chrome-e10s.*/
     mochitest-gl: /mochitest-webgl.*/
     mochitest-gl-e10s: /mochitest-webgl-e10s.*/
+    mochitest-gpu: /mochitest-gpu.*/
+    mochitest-gpu-e10s: /mochitest-gpu-e10s.*/
+    mochitest-clipboard: /mochitest-clipboard.*/
+    mochitest-clipboard-e10s: /mochitest-clipboard-e10s.*/
     mochitest-jetpack: /mochitest-jetpack.*/
     mochitest-media: /mochitest-media.*/
     mochitest-media-e10s: /mochitest-media-e10s.*/
@@ -93,7 +97,9 @@ flags:
     - linux64
     - linux64-st-an
     - linux64-artifact
+    - linux64-asan
     - linux64-pgo
+    - linux64-valgrind
     - macosx64
     - macosx64-st-an
 
@@ -101,7 +107,6 @@ flags:
     - cppunit
     - crashtest
     - crashtest-e10s
-    - crashtest-ipc
     - external-media-tests
     - firefox-ui-functional
     - firefox-ui-functional-e10s
@@ -130,17 +135,18 @@ flags:
     - mochitest-jetpack
     - mochitest-media
     - mochitest-media-e10s
-    - mochitest-oop
     - mochitest-webgl
     - mochitest-webgl-e10s
+    - mochitest-gpu
+    - mochitest-gpu-e10s
+    - mochitest-clipboard
+    - mochitest-clipboard-e10s
     - mochitest-valgrind
     - mozmill
     - reftest
     - reftest-e10s
-    - reftest-ipc
     - reftest-no-accel
     - reftest-no-accel-e10s
-    - reftest-sanity-oop
     - web-platform-tests
     - web-platform-tests-e10s
     - web-platform-tests-reftests

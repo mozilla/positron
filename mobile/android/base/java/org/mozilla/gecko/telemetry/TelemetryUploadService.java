@@ -47,6 +47,16 @@ public class TelemetryUploadService extends IntentService {
     public static final String ACTION_UPLOAD = "upload";
     public static final String EXTRA_STORE = "store";
 
+    // TelemetryUploadService can run in a background thread so for future proofing, we set it volatile.
+    private static volatile boolean isDisabled = false;
+
+    public static void setDisabled(final boolean isDisabled) {
+        TelemetryUploadService.isDisabled = isDisabled;
+        if (isDisabled) {
+            Log.d(LOGTAG, "Telemetry upload disabled (env var?");
+        }
+    }
+
     public TelemetryUploadService() {
         super(WORKER_THREAD_NAME);
 
@@ -149,6 +159,11 @@ public class TelemetryUploadService extends IntentService {
             return false;
         }
 
+        if (!NetworkUtils.isConnected(context)) {
+            Log.w(LOGTAG, "Network is not connected; returning");
+            return false;
+        }
+
         if (!isIntentValid(intent)) {
             Log.w(LOGTAG, "Received invalid Intent; returning");
             return false;
@@ -167,6 +182,8 @@ public class TelemetryUploadService extends IntentService {
      * {@link #isUploadEnabledByProfileConfig(Context, GeckoProfile)} if the profile is available as it takes into
      * account more information.
      *
+     * You may wish to also check if the network is connected when calling this method.
+     *
      * Note that this method logs debug statements when upload is disabled.
      */
     public static boolean isUploadEnabledByAppConfig(final Context context) {
@@ -175,13 +192,13 @@ public class TelemetryUploadService extends IntentService {
             return false;
         }
 
-        if (!GeckoPreferences.getBooleanPref(context, GeckoPreferences.PREFS_HEALTHREPORT_UPLOAD_ENABLED, true)) {
-            Log.d(LOGTAG, "Telemetry upload opt-out");
+        if (isDisabled) {
+            Log.d(LOGTAG, "Telemetry upload feature is disabled by intent (in testing?)");
             return false;
         }
 
-        if (!NetworkUtils.isBackgroundDataEnabled(context)) {
-            Log.d(LOGTAG, "Background data is disabled");
+        if (!GeckoPreferences.getBooleanPref(context, GeckoPreferences.PREFS_HEALTHREPORT_UPLOAD_ENABLED, true)) {
+            Log.d(LOGTAG, "Telemetry upload opt-out");
             return false;
         }
 
@@ -191,6 +208,8 @@ public class TelemetryUploadService extends IntentService {
     /**
      * Determines if the telemetry upload feature is enabled via profile & application level configurations. This is the
      * preferred method.
+     *
+     * You may wish to also check if the network is connected when calling this method.
      *
      * Note that this method logs debug statements when upload is disabled.
      */

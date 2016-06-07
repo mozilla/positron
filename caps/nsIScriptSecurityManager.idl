@@ -126,24 +126,12 @@ interface nsIScriptSecurityManager : nsISupports
                                       in AUTF8String uri,
                                       in unsigned long flags);
 
-    /**
-     * Return true if scripts may be executed in the scope of the given global.
-     */
-    [noscript,notxpcom] boolean scriptAllowed(in JSObjectPtr aGlobal);
-
     ///////////////// Principals ///////////////////////
 
     /**
      * Return the all-powerful system principal.
      */
     nsIPrincipal getSystemPrincipal();
-
-    /**
-     * Return a principal that has the same origin as aURI.
-     * This principals should not be used for any data/permission check, it will
-     * have appId = UNKNOWN_APP_ID.
-     */
-    nsIPrincipal getSimpleCodebasePrincipal(in nsIURI aURI);
 
     /**
      * Returns a principal that has the given information.

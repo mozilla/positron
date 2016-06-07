@@ -38,6 +38,7 @@
 typedef uint16_t nsMediaNetworkState;
 typedef uint16_t nsMediaReadyState;
 typedef uint32_t SuspendTypes;
+typedef uint32_t AudibleChangedReasons;
 
 namespace mozilla {
 class DecoderDoctorDiagnostics;
@@ -453,7 +454,7 @@ public:
   virtual void SetAudibleState(bool aAudible) final override;
 
   // Notify agent when the MediaElement changes its audible state.
-  void NotifyAudioPlaybackChanged();
+  void NotifyAudioPlaybackChanged(AudibleChangedReasons aReason);
 
   // XPCOM GetPreload() is OK
   void SetPreload(const nsAString& aValue, ErrorResult& aRv)
@@ -479,6 +480,8 @@ public:
   void SetCurrentTime(double aCurrentTime, ErrorResult& aRv);
 
   void FastSeek(double aTime, ErrorResult& aRv);
+
+  void SeekToNextFrame(ErrorResult& aRv);
 
   double Duration() const;
 
@@ -578,16 +581,6 @@ public:
   void SetDefaultMuted(bool aMuted, ErrorResult& aRv)
   {
     SetHTMLBoolAttr(nsGkAtoms::muted, aMuted, aRv);
-  }
-
-  bool MozMediaStatisticsShowing() const
-  {
-    return mStatsShowing;
-  }
-
-  void SetMozMediaStatisticsShowing(bool aShow)
-  {
-    mStatsShowing = aShow;
   }
 
   bool MozAllowCasting() const
@@ -707,6 +700,11 @@ public:
       mTextTrackManager->AddCue(aCue);
     }
   }
+  void NotifyCueRemoved(TextTrackCue& aCue) {
+    if (mTextTrackManager) {
+      mTextTrackManager->NotifyCueRemoved(aCue);
+    }
+  }
 
   /**
    * A public wrapper for FinishDecoderSetup()
@@ -742,9 +740,6 @@ protected:
     MOZ_ASSERT(aDecoder); // Use ShutdownDecoder() to clear.
     mDecoder = aDecoder;
   }
-
-  virtual void GetItemValueText(DOMString& text) override;
-  virtual void SetItemValueText(const nsAString& text) override;
 
   class WakeLockBoolWrapper {
   public:
@@ -1186,6 +1181,8 @@ protected:
 
   bool IsAllowedToPlay();
 
+  bool IsAudible() const;
+
   class nsAsyncEventRunner;
   using nsGenericHTMLElement::DispatchEvent;
   // For nsAsyncEventRunner.
@@ -1617,8 +1614,11 @@ private:
   // be seeked even before the media is loaded.
   double mDefaultPlaybackStartPosition;
 
-  // True if the audio track is producing audible sound.
+  // True if the audio track is not silent.
   bool mIsAudioTrackAudible;
+
+  // True if media element is audible for users.
+  bool mAudible;
 };
 
 } // namespace dom

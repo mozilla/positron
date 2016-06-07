@@ -400,6 +400,11 @@ var DebuggerServer = {
         type: { global: true }
       });
     }
+    this.registerModule("devtools/server/actors/addons", {
+      prefix: "addons",
+      constructor: "AddonsActor",
+      type: { global: true }
+    });
     this.registerModule("devtools/server/actors/webapps", {
       prefix: "webapps",
       constructor: "WebappsActor",
@@ -500,11 +505,6 @@ var DebuggerServer = {
       constructor: "MemoryActor",
       type: { tab: true }
     });
-    this.registerModule("devtools/server/actors/memprof", {
-      prefix: "memprof",
-      constructor: "MemprofActor",
-      type: { global: true, tab: true }
-    });
     this.registerModule("devtools/server/actors/framerate", {
       prefix: "framerate",
       constructor: "FramerateActor",
@@ -518,6 +518,11 @@ var DebuggerServer = {
     this.registerModule("devtools/server/actors/layout", {
       prefix: "reflow",
       constructor: "ReflowActor",
+      type: { tab: true }
+    });
+    this.registerModule("devtools/server/actors/css-properties", {
+      prefix: "cssProperties",
+      constructor: "CssPropertiesActor",
       type: { tab: true }
     });
     this.registerModule("devtools/server/actors/csscoverage", {

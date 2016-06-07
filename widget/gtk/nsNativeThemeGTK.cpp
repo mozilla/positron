@@ -354,10 +354,8 @@ nsNativeThemeGTK::GetGtkWidgetAndState(uint8_t aWidgetType, nsIFrame* aFrame,
 
           if (isTopLevel) {
             aState->inHover = menuFrame->IsOpen();
-            *aWidgetFlags |= MOZ_TOPLEVEL_MENU_ITEM;
           } else {
             aState->inHover = CheckBooleanAttr(aFrame, nsGkAtoms::menuactive);
-            *aWidgetFlags &= ~MOZ_TOPLEVEL_MENU_ITEM;
           }
 
           aState->active = FALSE;
@@ -612,7 +610,7 @@ nsNativeThemeGTK::GetGtkWidgetAndState(uint8_t aWidgetType, nsIFrame* aFrame,
     aGtkWidgetType = MOZ_GTK_TOOLTIP;
     break;
   case NS_THEME_STATUSBARPANEL:
-  case NS_THEME_RESIZER_PANEL:
+  case NS_THEME_RESIZERPANEL:
     aGtkWidgetType = MOZ_GTK_FRAME;
     break;
   case NS_THEME_PROGRESSBAR:
@@ -679,6 +677,13 @@ nsNativeThemeGTK::GetGtkWidgetAndState(uint8_t aWidgetType, nsIFrame* aFrame,
     aGtkWidgetType = MOZ_GTK_MENUPOPUP;
     break;
   case NS_THEME_MENUITEM:
+    {
+      nsMenuFrame *menuFrame = do_QueryFrame(aFrame);
+      if (menuFrame && menuFrame->IsOnMenuBar()) {
+        aGtkWidgetType = MOZ_GTK_MENUBARITEM;
+        break;
+      }
+    }
     aGtkWidgetType = MOZ_GTK_MENUITEM;
     break;
   case NS_THEME_MENUSEPARATOR:
@@ -1090,7 +1095,14 @@ nsNativeThemeGTK::DrawWidgetBackground(nsRenderingContext* aContext,
 {
   GtkWidgetState state;
   WidgetNodeType gtkWidgetType;
-  GtkTextDirection direction = GetTextDirection(aFrame);
+  // For resizer drawing, we want IsFrameRTL, which treats vertical-rl modes
+  // as right-to-left (in addition to horizontal text with direction=RTL),
+  // rather than just considering the text direction.
+  // This will make resizers on vertically-oriented elements render properly.
+  GtkTextDirection direction =
+    aWidgetType == NS_THEME_RESIZER
+    ? (IsFrameRTL(aFrame) ? GTK_TEXT_DIR_RTL : GTK_TEXT_DIR_LTR)
+    : GetTextDirection(aFrame);
   gint flags;
   if (!GetGtkWidgetAndState(aWidgetType, aFrame, gtkWidgetType, &state,
                             &flags))
@@ -1665,7 +1677,7 @@ nsNativeThemeGTK::WidgetStateChanged(nsIFrame* aFrame, uint8_t aWidgetType,
       aWidgetType == NS_THEME_TOOLBAR ||
       aWidgetType == NS_THEME_STATUSBAR ||
       aWidgetType == NS_THEME_STATUSBARPANEL ||
-      aWidgetType == NS_THEME_RESIZER_PANEL ||
+      aWidgetType == NS_THEME_RESIZERPANEL ||
       aWidgetType == NS_THEME_PROGRESSCHUNK ||
       aWidgetType == NS_THEME_PROGRESSCHUNK_VERTICAL ||
       aWidgetType == NS_THEME_PROGRESSBAR ||
@@ -1784,7 +1796,7 @@ nsNativeThemeGTK::ThemeSupportsWidget(nsPresContext* aPresContext,
   case NS_THEME_TOOLBARGRIPPER:
   case NS_THEME_STATUSBAR:
   case NS_THEME_STATUSBARPANEL:
-  case NS_THEME_RESIZER_PANEL:
+  case NS_THEME_RESIZERPANEL:
   case NS_THEME_RESIZER:
   case NS_THEME_LISTBOX:
     // case NS_THEME_LISTITEM:

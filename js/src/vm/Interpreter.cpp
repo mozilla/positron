@@ -107,34 +107,6 @@ js::BoxNonStrictThis(JSContext* cx, HandleValue thisv, MutableHandleValue vp)
     return true;
 }
 
-/*
- * ECMA requires "the global object", but in embeddings such as the browser,
- * which have multiple top-level objects (windows, frames, etc. in the DOM),
- * we prefer fun's parent.  An example that causes this code to run:
- *
- *   // in window w1
- *   function f() { return this }
- *   function g() { return f }
- *
- *   // in window w2
- *   var h = w1.g()
- *   alert(h() == w1)
- *
- * The alert should display "true".
- */
-bool
-js::BoxNonStrictThis(JSContext* cx, const CallReceiver& call)
-{
-    MOZ_ASSERT(!call.thisv().isMagic());
-
-#ifdef DEBUG
-    JSFunction* fun = call.callee().is<JSFunction>() ? &call.callee().as<JSFunction>() : nullptr;
-    MOZ_ASSERT_IF(fun && fun->isInterpreted(), !fun->strict());
-#endif
-
-    return BoxNonStrictThis(cx, call.thisv(), call.mutableThisv());
-}
-
 bool
 js::GetFunctionThis(JSContext* cx, AbstractFramePtr frame, MutableHandleValue res)
 {
@@ -737,6 +709,43 @@ js::Execute(JSContext* cx, HandleScript script, JSObject& scopeChainArg, Value* 
                          NullFramePtr() /* evalInFrame */, rval);
 }
 
+/*
+ * ES6 (4-25-16) 12.10.4 InstanceofOperator
+ */
+extern bool
+js::InstanceOfOperator(JSContext* cx, HandleObject obj, MutableHandleValue v, bool* bp)
+{
+    /* Step 1. is handled by caller. */
+
+    /* Step 2. */
+    RootedValue hasInstance(cx);
+    RootedId id(cx, SYMBOL_TO_JSID(cx->wellKnownSymbols().hasInstance));
+    if (!GetProperty(cx, obj, obj, id, &hasInstance))
+        return false;
+
+    if (!hasInstance.isNullOrUndefined()) {
+        if (!IsCallable(hasInstance))
+            ReportIsNotFunction(cx, hasInstance);
+
+        /* Step 3. */
+        RootedValue rval(cx);
+        if (!Call(cx, hasInstance, obj, v, &rval))
+            return false;
+        *bp = ToBoolean(rval);
+        return true;
+    }
+
+    /* Step 4. */
+    if (!obj->isCallable()) {
+        RootedValue val(cx, ObjectValue(*obj));
+        ReportIsNotFunction(cx, val);
+        return false;
+    }
+
+    /* Step 5. */
+    return js::OrdinaryHasInstance(cx, obj, v, bp);
+}
+
 bool
 js::HasInstance(JSContext* cx, HandleObject obj, HandleValue v, bool* bp)
 {
@@ -744,11 +753,7 @@ js::HasInstance(JSContext* cx, HandleObject obj, HandleValue v, bool* bp)
     RootedValue local(cx, v);
     if (JSHasInstanceOp hasInstance = clasp->getHasInstance())
         return hasInstance(cx, obj, &local, bp);
-
-    RootedValue val(cx, ObjectValue(*obj));
-    ReportValueError(cx, JSMSG_BAD_INSTANCEOF_RHS,
-                        JSDVG_SEARCH_STACK, val, nullptr);
-    return false;
+    return js::InstanceOfOperator(cx, obj, &local, bp);
 }
 
 static inline bool

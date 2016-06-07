@@ -303,12 +303,6 @@ public:
                                     bool showLocals,
                                     bool showThisProps) override;
 
-
-    static bool ReportAllJSExceptions()
-    {
-      return gReportAllJSExceptions > 0;
-    }
-
 protected:
     virtual ~nsXPConnect();
 
@@ -321,8 +315,6 @@ private:
 
     XPCJSRuntime*                   mRuntime;
     bool                            mShuttingDown;
-
-    static uint32_t gReportAllJSExceptions;
 
 public:
     static nsIScriptSecurityManager* gScriptSecurityManager;
@@ -551,6 +543,7 @@ public:
         return mStrings[index];
     }
 
+    virtual bool UsefulToMergeZones() const override;
     void TraceNativeBlackRoots(JSTracer* trc) override;
     void TraceAdditionalNativeGrayRoots(JSTracer* aTracer) override;
     void TraverseAdditionalNativeRoots(nsCycleCollectionNoteRootCallback& cb) override;
@@ -647,23 +640,9 @@ private:
     JS::PersistentRootedObject mCompilationScope;
     RefPtr<AsyncFreeSnowWhite> mAsyncSnowWhiteFreer;
 
-    // If we spend too much time running JS code in an event handler, then we
-    // want to show the slow script UI. The timeout T is controlled by prefs. We
-    // invoke the interrupt callback once after T/2 seconds and set
-    // mSlowScriptSecondHalf to true. After another T/2 seconds, we invoke the
-    // interrupt callback again. Since mSlowScriptSecondHalf is now true, it
-    // shows the slow script UI. The reason we invoke the callback twice is to
-    // ensure that putting the computer to sleep while running a script doesn't
-    // cause the UI to be shown. If the laptop goes to sleep during one of the
-    // timeout periods, the script still has the other T/2 seconds to complete
-    // before the slow script UI is shown.
-    bool mSlowScriptSecondHalf;
-
-    // mSlowScriptCheckpoint is set to the time when:
-    // 1. We started processing the current event, or
-    // 2. mSlowScriptSecondHalf was set to true
-    // (whichever comes later). We use it to determine whether the interrupt
-    // callback needs to do anything.
+    // mSlowScriptCheckpoint is set to the time when we started processing the
+    // current event.  We use it to determine whether the interrupt callback
+    // needs to do anything.
     mozilla::TimeStamp mSlowScriptCheckpoint;
     // Accumulates total time we actually waited for telemetry
     mozilla::TimeDuration mSlowScriptActualWait;
@@ -789,8 +768,6 @@ public:
     NS_IMETHOD GetLanguage(uint16_t* aResult);
 
     enum {NO_ARGS = (unsigned) -1};
-
-    static JSContext* GetDefaultJSContext();
 
     XPCCallContext(XPCContext::LangType callerLanguage,
                    JSContext* cx,
@@ -2300,8 +2277,7 @@ private:
     static nsresult CheckForException(XPCCallContext & ccx,
                                       mozilla::dom::AutoEntryScript& aes,
                                       const char * aPropertyName,
-                                      const char * anInterfaceName,
-                                      bool aForceReport);
+                                      const char * anInterfaceName);
     virtual ~nsXPCWrappedJSClass();
 
     nsXPCWrappedJSClass();   // not implemented
@@ -2775,19 +2751,9 @@ private:
 /***************************************************************************/
 // XPCJSContextStack is not actually an xpcom object, but xpcom calls are
 // delegated to it as an implementation detail.
-struct XPCJSContextInfo {
-    explicit XPCJSContextInfo(JSContext* aCx) :
-        cx(aCx),
-        savedFrameChain(false)
-    {}
-    JSContext* cx;
-
-    // Whether the frame chain was saved
-    bool savedFrameChain;
-};
 
 namespace xpc {
-bool PushNullJSContext();
+void PushNullJSContext();
 void PopNullJSContext();
 
 } /* namespace xpc */
@@ -2817,27 +2783,23 @@ public:
 
     JSContext* Peek()
     {
-        return mStack.IsEmpty() ? nullptr : mStack[mStack.Length() - 1].cx;
+        return mStack.IsEmpty() ? nullptr : mStack[mStack.Length() - 1];
     }
 
     JSContext* InitSafeJSContext();
     JSContext* GetSafeJSContext();
-    bool HasJSContext(JSContext* cx);
-
-    const InfallibleTArray<XPCJSContextInfo>* GetStack()
-    { return &mStack; }
 
 private:
     friend class mozilla::dom::danger::AutoCxPusher;
-    friend bool xpc::PushNullJSContext();
+    friend void xpc::PushNullJSContext();
     friend void xpc::PopNullJSContext();
 
     // We make these private so that stack manipulation can only happen
     // through one of the above friends.
-    JSContext* Pop();
-    bool Push(JSContext* cx);
+    void Pop();
+    void Push(JSContext* cx);
 
-    AutoTArray<XPCJSContextInfo, 16> mStack;
+    AutoTArray<JSContext*, 16> mStack;
     XPCJSRuntime* mRuntime;
     JSContext*  mSafeJSContext;
 };
@@ -3371,6 +3333,7 @@ struct GlobalProperties {
     bool atob : 1;
     bool btoa : 1;
     bool Blob : 1;
+    bool Directory : 1;
     bool File : 1;
     bool crypto : 1;
     bool rtcIdentityProvider : 1;
@@ -3800,9 +3763,7 @@ bool EnableUniversalXPConnect(JSContext* cx);
 inline void
 CrashIfNotInAutomation()
 {
-    const char* prefName =
-      "security.turn_off_all_security_so_that_viruses_can_take_over_this_computer";
-    MOZ_RELEASE_ASSERT(mozilla::Preferences::GetBool(prefName));
+    MOZ_RELEASE_ASSERT(IsInAutomation());
 }
 
 inline XPCWrappedNativeScope*

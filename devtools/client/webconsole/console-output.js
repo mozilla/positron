@@ -6,7 +6,7 @@
 
 "use strict";
 
-const {Cc, Ci, Cu} = require("chrome");
+const {Ci, Cu} = require("chrome");
 
 const Services = require("Services");
 
@@ -20,7 +20,6 @@ loader.lazyRequireGetter(this, "TableWidget", "devtools/client/shared/widgets/Ta
 loader.lazyRequireGetter(this, "ObjectClient", "devtools/shared/client/main", true);
 
 const { extend } = require("sdk/core/heritage");
-const URI = Cc["@mozilla.org/network/io-service;1"].getService(Ci.nsIIOService);
 const XHTML_NS = "http://www.w3.org/1999/xhtml";
 const XUL_NS = "http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul";
 const STRINGS_URI = "chrome://devtools/locale/webconsole.properties";
@@ -29,6 +28,7 @@ const WebConsoleUtils = require("devtools/shared/webconsole/utils").Utils;
 const { getSourceNames } = require("devtools/client/shared/source-utils");
 const {Task} = require("devtools/shared/task");
 const l10n = new WebConsoleUtils.L10n(STRINGS_URI);
+const nodeConstants = require("devtools/shared/dom-node-constants");
 
 const MAX_STRING_GRIP_LENGTH = 36;
 const ELLIPSIS = Services.prefs.getComplexValue("intl.ellipsis", Ci.nsIPrefLocalizedString).data;
@@ -1507,7 +1507,7 @@ Messages.ConsoleGeneric.prototype = extend(Messages.Extended.prototype, {
     let result = elem;
 
     if (style) {
-      if (elem.nodeType == Ci.nsIDOMNode.ELEMENT_NODE) {
+      if (elem.nodeType == nodeConstants.ELEMENT_NODE) {
         elem.style = style;
       } else {
         let span = this.document.createElementNS(XHTML_NS, "span");
@@ -2297,9 +2297,9 @@ Widgets.URLString.prototype = extend(Widgets.BaseWidget.prototype, {
    */
   _isURL: function (token) {
     try {
-      let uri = URI.newURI(token, null, null);
-      let url = uri.QueryInterface(Ci.nsIURL);
-      return true;
+      let url = new URL(token);
+      return ["http:", "https:", "ftp:", "data:", "javascript:",
+              "resource:", "chrome:"].includes(url.protocol);
     } catch (e) {
       return false;
     }
@@ -3055,12 +3055,12 @@ Widgets.ObjectRenderers.add({
     }
 
     switch (preview.nodeType) {
-      case Ci.nsIDOMNode.DOCUMENT_NODE:
-      case Ci.nsIDOMNode.ATTRIBUTE_NODE:
-      case Ci.nsIDOMNode.TEXT_NODE:
-      case Ci.nsIDOMNode.COMMENT_NODE:
-      case Ci.nsIDOMNode.DOCUMENT_FRAGMENT_NODE:
-      case Ci.nsIDOMNode.ELEMENT_NODE:
+      case nodeConstants.DOCUMENT_NODE:
+      case nodeConstants.ATTRIBUTE_NODE:
+      case nodeConstants.TEXT_NODE:
+      case nodeConstants.COMMENT_NODE:
+      case nodeConstants.DOCUMENT_FRAGMENT_NODE:
+      case nodeConstants.ELEMENT_NODE:
         return true;
       default:
         return false;
@@ -3070,26 +3070,26 @@ Widgets.ObjectRenderers.add({
   render: function ()
   {
     switch (this.objectActor.preview.nodeType) {
-      case Ci.nsIDOMNode.DOCUMENT_NODE:
+      case nodeConstants.DOCUMENT_NODE:
         this._renderDocumentNode();
         break;
-      case Ci.nsIDOMNode.ATTRIBUTE_NODE: {
+      case nodeConstants.ATTRIBUTE_NODE: {
         let {preview} = this.objectActor;
         this.element = this.el("span.attributeNode.kind-" + preview.kind);
         let attr = this._renderAttributeNode(preview.nodeName, preview.value, true);
         this.element.appendChild(attr);
         break;
       }
-      case Ci.nsIDOMNode.TEXT_NODE:
+      case nodeConstants.TEXT_NODE:
         this._renderTextNode();
         break;
-      case Ci.nsIDOMNode.COMMENT_NODE:
+      case nodeConstants.COMMENT_NODE:
         this._renderCommentNode();
         break;
-      case Ci.nsIDOMNode.DOCUMENT_FRAGMENT_NODE:
+      case nodeConstants.DOCUMENT_FRAGMENT_NODE:
         this._renderDocumentFragmentNode();
         break;
-      case Ci.nsIDOMNode.ELEMENT_NODE:
+      case nodeConstants.ELEMENT_NODE:
         this._renderElementNode();
         break;
       default:
@@ -3235,7 +3235,7 @@ Widgets.ObjectRenderers.add({
    * inspector, or rejects if it wasn't (either if no toolbox could be found to
    * access the inspector, or if the node isn't present in the inspector, i.e.
    * if the node is in a DocumentFragment or not part of the tree, or not of
-   * type Ci.nsIDOMNode.ELEMENT_NODE).
+   * type nodeConstants.ELEMENT_NODE).
    */
   linkToInspector: Task.async(function* ()
   {
@@ -3244,7 +3244,7 @@ Widgets.ObjectRenderers.add({
     }
 
     // Checking the node type
-    if (this.objectActor.preview.nodeType !== Ci.nsIDOMNode.ELEMENT_NODE) {
+    if (this.objectActor.preview.nodeType !== nodeConstants.ELEMENT_NODE) {
       throw new Error("The object cannot be linked to the inspector as it " +
         "isn't an element node");
     }
@@ -3253,8 +3253,8 @@ Widgets.ObjectRenderers.add({
     let target = this.message.output.toolboxTarget;
     this.toolbox = gDevTools.getToolbox(target);
     if (!this.toolbox) {
-      throw new Error("The object cannot be linked to the inspector without a " +
-        "toolbox");
+      // In cases like the browser console, there is no toolbox.
+      return;
     }
 
     // Checking that the inspector supports the node

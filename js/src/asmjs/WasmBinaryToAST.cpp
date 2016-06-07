@@ -78,6 +78,8 @@ class AstDecodeContext
     AstIndexVector funcSigs_;
     AstDecodeExprIter *iter_;
     const ValTypeVector* locals_;
+    AstNameVector blockLabels_;
+    uint32_t currentLabelIndex_;
 
   public:
     AstDecodeContext(JSContext* cx, LifoAlloc& lifo, Decoder& d, AstModule& module, bool generateNames)
@@ -91,23 +93,31 @@ class AstDecodeContext
        module_(module),
        funcSigs_(lifo),
        iter_(nullptr),
-       locals_(nullptr)
+       locals_(nullptr),
+       blockLabels_(lifo)
     {}
 
     AstModule& module() { return module_; }
     AstIndexVector& funcSigs() { return funcSigs_; }
     AstDecodeExprIter& iter() { return *iter_; }
     const ValTypeVector& locals() { return *locals_; }
+    AstNameVector& blockLabels() { return blockLabels_; }
 
     void startFunction(AstDecodeExprIter *iter, const ValTypeVector* locals)
     {
         iter_ = iter;
         locals_ = locals;
+        currentLabelIndex_ = 0;
     }
     void endFunction()
     {
         iter_ = nullptr;
         locals_ = nullptr;
+        MOZ_ASSERT(blockLabels_.length() == 0);
+    }
+    uint32_t nextLabelIndex()
+    {
+        return currentLabelIndex_++;
     }
 };
 
@@ -130,6 +140,8 @@ AstDecodeGenerateName(AstDecodeContext& c, const AstName& prefix, uint32_t index
     }
 
     AstVector<char16_t> result(c.lifo);
+    if (!result.append(MOZ_UTF16('$')))
+        return false;
     if (!result.append(prefix.begin(), prefix.length()))
         return false;
 
@@ -222,7 +234,7 @@ AstDecodeCall(AstDecodeContext& c)
     const AstSig* sig = c.module().sigs()[sigIndex];
 
     AstRef funcRef;
-    if (!AstDecodeGenerateRef(c, AstName(MOZ_UTF16("$func$"), 6), calleeIndex, &funcRef))
+    if (!AstDecodeGenerateRef(c, AstName(MOZ_UTF16("func")), calleeIndex, &funcRef))
         return false;
 
     AstExprVector args(c.lifo);
@@ -232,11 +244,12 @@ AstDecodeCall(AstDecodeContext& c)
     if (!AstDecodeCallReturn(c, *sig))
         return false;
 
+    uint32_t argsLength = args.length();
     AstCall* call = new(c.lifo) AstCall(Expr::Call, funcRef, Move(args));
     if (!call)
         return false;
 
-    c.iter().setResult(AstDecodeStackItem(call, args.length()));
+    c.iter().setResult(AstDecodeStackItem(call, argsLength));
     return true;
 }
 
@@ -249,7 +262,7 @@ AstDecodeCallIndirect(AstDecodeContext& c)
         return false;
 
     AstRef sigRef;
-    if (!AstDecodeGenerateRef(c, AstName(MOZ_UTF16("$type$"), 6), sigIndex, &sigRef))
+    if (!AstDecodeGenerateRef(c, AstName(MOZ_UTF16("type")), sigIndex, &sigRef))
         return false;
 
     if (sigIndex >= c.module().sigs().length())
@@ -268,11 +281,12 @@ AstDecodeCallIndirect(AstDecodeContext& c)
     if (!AstDecodeCallReturn(c, *sig))
         return false;
 
+    uint32_t argsLength = args.length();
     AstCallIndirect* call = new(c.lifo) AstCallIndirect(sigRef, index.expr, Move(args));
     if (!call)
         return false;
 
-    c.iter().setResult(AstDecodeStackItem(call, 1 + args.length()));
+    c.iter().setResult(AstDecodeStackItem(call, 1 + argsLength));
     return true;
 }
 
@@ -290,7 +304,7 @@ AstDecodeCallImport(AstDecodeContext& c)
     AstImport* import = c.module().imports()[importIndex];
     AstSig* sig = c.module().sigs()[import->sig().index()];
     AstRef funcRef;
-    if (!AstDecodeGenerateRef(c, AstName(MOZ_UTF16("$import$"), 8), importIndex, &funcRef))
+    if (!AstDecodeGenerateRef(c, AstName(MOZ_UTF16("import")), importIndex, &funcRef))
         return false;
 
     AstExprVector args(c.lifo);
@@ -300,11 +314,31 @@ AstDecodeCallImport(AstDecodeContext& c)
     if (!AstDecodeCallReturn(c, *sig))
         return false;
 
+    uint32_t argsLength = args.length();
     AstCall* call = new(c.lifo) AstCall(Expr::CallImport, funcRef, Move(args));
     if (!call)
         return false;
 
-    c.iter().setResult(AstDecodeStackItem(call, args.length()));
+    c.iter().setResult(AstDecodeStackItem(call, argsLength));
+    return true;
+}
+
+static bool
+AstDecodeGetBlockRef(AstDecodeContext& c, uint32_t depth, AstRef* ref)
+{
+    if (!c.generateNames || depth >= c.blockLabels().length()) {
+        // Also ignoring if it's a function body label.
+        *ref = AstRef(AstName(), depth);
+        return true;
+    }
+
+    uint32_t index = c.blockLabels().length() - depth - 1;
+    if (c.blockLabels()[index].empty()) {
+        if (!AstDecodeGenerateName(c, AstName(MOZ_UTF16("label")), c.nextLabelIndex(), &c.blockLabels()[index]))
+            return false;
+    }
+    *ref = AstRef(c.blockLabels()[index], AstNoIndex);
+    ref->setIndex(depth);
     return true;
 }
 
@@ -326,14 +360,18 @@ AstDecodeBrTable(AstDecodeContext& c)
     for (size_t i = 0, e = tableLength; i < e; ++i) {
         if (!c.iter().readBrTableEntry(type, &depth))
             return false;
-        table[i] = AstRef(AstName(), depth);
+        if (!AstDecodeGetBlockRef(c, depth, &table[i]))
+            return false;
     }
 
     // Read the default label.
     if (!c.iter().readBrTableEntry(type, &depth))
         return false;
 
-    AstRef def(AstName(), depth);
+    AstRef def;
+    if (!AstDecodeGetBlockRef(c, depth, &def))
+        return false;
+
     AstBranchTable* branchTable = new(c.lifo) AstBranchTable(*index.expr, def, Move(table), value.expr);
     if (!branchTable)
         return false;
@@ -348,9 +386,13 @@ AstDecodeBlock(AstDecodeContext& c, Expr expr)
     MOZ_ASSERT(expr == Expr::Block || expr == Expr::Loop);
 
     if (expr == Expr::Loop) {
+      if (!c.blockLabels().append(AstName()) || !c.blockLabels().append(AstName()))
+          return false;
       if (!c.iter().readLoop())
           return false;
     } else {
+      if (!c.blockLabels().append(AstName()))
+          return false;
       if (!c.iter().readBlock())
           return false;
     }
@@ -369,7 +411,11 @@ AstDecodeBlock(AstDecodeContext& c, Expr expr)
             return false;
     }
 
-    AstBlock* block = new(c.lifo) AstBlock(expr, AstName(), AstName(), Move(exprs));
+    AstName continueName;
+    if (expr == Expr::Loop)
+        continueName = c.blockLabels().popCopy();
+    AstName breakName = c.blockLabels().popCopy();
+    AstBlock* block = new(c.lifo) AstBlock(expr, breakName, continueName, Move(exprs));
     if (!block)
         return false;
 
@@ -386,6 +432,8 @@ AstDecodeIf(AstDecodeContext& c)
 
     bool hasElse = false;
 
+    if (!c.blockLabels().append(AstName()))
+        return false;
     AstExprVector thenExprs(c.lifo);
     while (true) {
         if (!AstDecodeExpr(c))
@@ -401,9 +449,13 @@ AstDecodeIf(AstDecodeContext& c)
         if (!thenExprs.append(item.expr))
             return false;
     }
+    AstName thenName = c.blockLabels().popCopy();
 
+    AstName elseName;
     AstExprVector elseExprs(c.lifo);
     if (hasElse) {
+        if (!c.blockLabels().append(AstName()))
+            return false;
         while (true) {
             if (!AstDecodeExpr(c))
                 return false;
@@ -416,9 +468,10 @@ AstDecodeIf(AstDecodeContext& c)
             if (!elseExprs.append(item.expr))
                 return false;
         }
+        elseName = c.blockLabels().popCopy();
     }
 
-    AstIf* if_ = new(c.lifo) AstIf(cond.expr, AstName(), Move(thenExprs), AstName(), Move(elseExprs));
+    AstIf* if_ = new(c.lifo) AstIf(cond.expr, thenName, Move(thenExprs), elseName, Move(elseExprs));
     if (!if_)
         return false;
 
@@ -590,7 +643,10 @@ AstDecodeBranch(AstDecodeContext& c, Expr expr)
         popped = value.expr ? 2 : 1;
     }
 
-    AstRef depthRef(AstName(), depth);
+    AstRef depthRef;
+    if (!AstDecodeGetBlockRef(c, depth, &depthRef))
+        return false;
+
     AstBranch* branch = new(c.lifo) AstBranch(expr, cond.expr, depthRef, value.expr);
     if (!branch)
         return false;
@@ -607,7 +663,7 @@ AstDecodeGetLocal(AstDecodeContext& c)
         return false;
 
     AstRef localRef;
-    if (!AstDecodeGenerateRef(c, AstName(MOZ_UTF16("$var$"), 5), getLocalId, &localRef))
+    if (!AstDecodeGenerateRef(c, AstName(MOZ_UTF16("var")), getLocalId, &localRef))
         return false;
 
     AstGetLocal* getLocal = new(c.lifo) AstGetLocal(localRef);
@@ -627,7 +683,7 @@ AstDecodeSetLocal(AstDecodeContext& c)
         return false;
 
     AstRef localRef;
-    if (!AstDecodeGenerateRef(c, AstName(MOZ_UTF16("$var$"), 5), setLocalId, &localRef))
+    if (!AstDecodeGenerateRef(c, AstName(MOZ_UTF16("var")), setLocalId, &localRef))
         return false;
 
     AstSetLocal* setLocal = new(c.lifo) AstSetLocal(localRef, *setLocalValue.expr);
@@ -998,7 +1054,7 @@ AstDecodeTypeSection(AstDecodeContext& c)
 
         AstSig sigNoName(Move(args), result);
         AstName sigName;
-        if (!AstDecodeGenerateName(c, AstName(MOZ_UTF16("$type$"), 6), sigIndex, &sigName))
+        if (!AstDecodeGenerateName(c, AstName(MOZ_UTF16("type")), sigIndex, &sigName))
             return false;
 
         AstSig* sig = new(c.lifo) AstSig(sigName, Move(sigNoName));
@@ -1119,7 +1175,7 @@ AstDecodeImport(AstDecodeContext& c, uint32_t importIndex, AstImport** import)
         return false;
 
     AstRef sigRef;
-    if (!AstDecodeGenerateRef(c, AstName(MOZ_UTF16("$type$"), 6), sigIndex, &sigRef))
+    if (!AstDecodeGenerateRef(c, AstName(MOZ_UTF16("type")), sigIndex, &sigRef))
         return false;
 
     AstName moduleName;
@@ -1134,7 +1190,7 @@ AstDecodeImport(AstDecodeContext& c, uint32_t importIndex, AstImport** import)
         return AstDecodeFail(c, "expected import func name");
 
     AstName importName;
-    if (!AstDecodeGenerateName(c, AstName(MOZ_UTF16("$import$"), 8), importIndex, &importName))
+    if (!AstDecodeGenerateName(c, AstName(MOZ_UTF16("import")), importIndex, &importName))
         return false;
 
     *import = new(c.lifo) AstImport(importName, moduleName, funcName, sigRef);
@@ -1187,7 +1243,7 @@ AstDecodeMemorySection(AstDecodeContext& c)
     if (!c.d.readVarU32(&initialSizePages))
         return AstDecodeFail(c, "expected initial memory size");
 
-    CheckedInt<int32_t> initialSize = initialSizePages;
+    CheckedInt<uint32_t> initialSize = initialSizePages;
     initialSize *= PageSize;
     if (!initialSize.isValid())
         return AstDecodeFail(c, "initial memory size too big");
@@ -1196,10 +1252,10 @@ AstDecodeMemorySection(AstDecodeContext& c)
     if (!c.d.readVarU32(&maxSizePages))
         return AstDecodeFail(c, "expected initial memory size");
 
-    CheckedInt<int32_t> maxSize = maxSizePages;
+    CheckedInt<uint32_t> maxSize = maxSizePages;
     maxSize *= PageSize;
     if (!maxSize.isValid())
-        return AstDecodeFail(c, "initial memory size too big");
+        return AstDecodeFail(c, "maximum memory size too big");
 
     uint8_t exported;
     if (!c.d.readFixedU8(&exported))
@@ -1211,7 +1267,7 @@ AstDecodeMemorySection(AstDecodeContext& c)
     }
 
     if (exported) {
-        AstExport* export_ = new(c.lifo) AstExport(AstName(MOZ_UTF16("memory"), 6));
+        AstExport* export_ = new(c.lifo) AstExport(AstName(MOZ_UTF16("memory")));
         if (!export_ || !c.module().append(export_))
             return false;
     }
@@ -1304,6 +1360,10 @@ AstDecodeFunctionBody(AstDecodeContext &c, uint32_t funcIndex, AstFunc** func)
 
     c.startFunction(&iter, &locals);
 
+    AstName funcName;
+    if (!AstDecodeGenerateName(c, AstName(MOZ_UTF16("func")), funcIndex, &funcName))
+        return false;
+
     uint32_t numParams = sig->args().length();
     uint32_t numLocals = locals.length();
     for (uint32_t i = numParams; i < numLocals; i++) {
@@ -1312,7 +1372,7 @@ AstDecodeFunctionBody(AstDecodeContext &c, uint32_t funcIndex, AstFunc** func)
     }
     for (uint32_t i = 0; i < numLocals; i++) {
         AstName varName;
-        if (!AstDecodeGenerateName(c, AstName(MOZ_UTF16("$var$"), 5), i, &varName))
+        if (!AstDecodeGenerateName(c, AstName(MOZ_UTF16("var")), i, &varName))
             return false;
         if (!localsNames.append(varName))
             return false;
@@ -1339,12 +1399,8 @@ AstDecodeFunctionBody(AstDecodeContext &c, uint32_t funcIndex, AstFunc** func)
     if (c.d.currentPosition() != bodyEnd)
         return AstDecodeFail(c, "function body length mismatch");
 
-    AstName funcName;
-    if (!AstDecodeGenerateName(c, AstName(MOZ_UTF16("$func$"), 6), funcIndex, &funcName))
-        return false;
-
     AstRef sigRef;
-    if (!AstDecodeGenerateRef(c, AstName(MOZ_UTF16("$type$"), 6), sigIndex, &sigRef))
+    if (!AstDecodeGenerateRef(c, AstName(MOZ_UTF16("type")), sigIndex, &sigRef))
         return false;
 
     *func = new(c.lifo) AstFunc(funcName, sigRef, Move(vars), Move(localsNames), Move(body));

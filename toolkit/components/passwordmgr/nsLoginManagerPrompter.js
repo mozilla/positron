@@ -536,7 +536,7 @@ LoginManagerPrompter.prototype = {
 
       // Looks for existing logins to prefill the prompt with.
       var foundLogins = this._pwmgr.findLogins({},
-                                  hostname, null, httpRealm);
+                                               hostname, null, httpRealm);
       this.log("found " + foundLogins.length + " matching logins.");
 
       // XXX Can't select from multiple accounts yet. (bug 227632)
@@ -721,6 +721,7 @@ LoginManagerPrompter.prototype = {
    *
    */
   promptToSavePassword : function (aLogin) {
+    this.log("promptToSavePassword");
     var notifyObj = this._getPopupNote() || this._getNotifyBox();
     if (notifyObj)
       this._showSaveLoginNotification(notifyObj, aLogin);
@@ -966,15 +967,13 @@ LoginManagerPrompter.prototype = {
                        .addEventListener("input", onInput);
               chromeDoc.getElementById("password-notification-password")
                        .addEventListener("input", onInput);
+              let toggleBtn = chromeDoc.getElementById("password-notification-visibilityToggle");
+
               if (Services.prefs.getBoolPref("signon.rememberSignons.visibilityToggle")) {
-                chromeDoc.getElementById("password-notification-visibilityToggle")
-                         .addEventListener("command", onVisibilityToggle);
-                chromeDoc.getElementById("password-notification-visibilityToggle")
-                         .setAttribute("label", togglePasswordLabel);
-                chromeDoc.getElementById("password-notification-visibilityToggle")
-                         .setAttribute("accesskey", togglePasswordAccessKey);
-                chromeDoc.getElementById("password-notification-visibilityToggle")
-                         .removeAttribute("hidden");
+                toggleBtn.addEventListener("command", onVisibilityToggle);
+                toggleBtn.setAttribute("label", togglePasswordLabel);
+                toggleBtn.setAttribute("accesskey", togglePasswordAccessKey);
+                toggleBtn.setAttribute("hidden", LoginHelper.isMasterPasswordSet());
               }
               break;
             case "shown":
@@ -1175,6 +1174,7 @@ LoginManagerPrompter.prototype = {
    *                       The new login from the page form.
    */
   promptToChangePassword(aOldLogin, aNewLogin) {
+    this.log("promptToChangePassword");
     let notifyObj = this._getPopupNote() || this._getNotifyBox();
 
     if (notifyObj) {
@@ -1302,6 +1302,7 @@ LoginManagerPrompter.prototype = {
    * Note; XPCOM stupidity: |count| is just |logins.length|.
    */
   promptToChangePasswordWithUsernames : function (logins, count, aNewLogin) {
+    this.log("promptToChangePasswordWithUsernames with count:", count);
     const buttonFlags = Ci.nsIPrompt.STD_YES_NO_BUTTONS;
 
     var usernames = logins.map(l => l.username);
