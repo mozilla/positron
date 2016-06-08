@@ -25,6 +25,7 @@
 #include "nsDirectoryServiceUtils.h"
 #include "nsXULAppAPI.h"
 #include "nsCategoryManagerUtils.h"
+#include "SpecialSystemDirectory.h"
 
 #include "nsINIParser.h"
 #include "nsDependentString.h"
