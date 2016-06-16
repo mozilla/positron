@@ -43,7 +43,7 @@ class WebViewAttribute {
 
   // Defines this attribute as a property on the webview node.
   defineProperty() {
-    return Object.defineProperty(this.webViewImpl.webviewNode, this.name, {
+    return Object.defineProperty(XPCWrappedNative.unwrap(this.webViewImpl.webviewNode), this.name, {
       get: () => {
         return this.getValue();
       },

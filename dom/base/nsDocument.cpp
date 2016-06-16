@@ -2156,15 +2156,15 @@ nsDocument::Reset(nsIChannel* aChannel, nsILoadGroup* aLoadGroup)
       //
       nsCOMPtr<nsIDocShell> docShell(mDocumentContainer);
       nsCOMPtr<nsIDocShellTreeItem> parentDocShellTreeItem;
-      if (docShell &&
-          NS_SUCCEEDED(docShell->GetParent(getter_AddRefs(parentDocShellTreeItem))) &&
-          !parentDocShellTreeItem)
-      {
-        securityManager->GetSystemPrincipal(getter_AddRefs(principal));
-      } else {
+      // if (docShell &&
+      //     NS_SUCCEEDED(docShell->GetParent(getter_AddRefs(parentDocShellTreeItem))) &&
+      //     !parentDocShellTreeItem)
+      // {
+      //   securityManager->GetSystemPrincipal(getter_AddRefs(principal));
+      // } else {
         securityManager->GetChannelResultPrincipal(aChannel,
                                                    getter_AddRefs(principal));
-      }
+      // }
     }
   }
 
