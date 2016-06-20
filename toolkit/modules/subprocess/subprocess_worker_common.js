@@ -68,7 +68,7 @@ class BaseProcess {
    * @param {string[]} strings
    *        The strings to convert into a C string array.
    *
-   * @returns {ctypes.char.ptr.array()}
+   * @returns {ctypes.char.ptr.array}
    */
   stringArray(strings) {
     let result = ctypes.char.ptr.array(strings.length + 1)();
@@ -148,6 +148,10 @@ let requests = {
     let data = new Map(Array.from(io.processes.values(),
                                   proc => [proc.id, proc.pid]));
     return {data};
+  },
+
+  waitForNoProcesses() {
+    return Promise.all(Array.from(io.processes.values(), proc => proc.exitPromise));
   },
 };
 

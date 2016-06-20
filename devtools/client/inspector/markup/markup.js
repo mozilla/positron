@@ -7,7 +7,7 @@
 
 "use strict";
 
-const {Cc, Cu, Ci} = require("chrome");
+const {Cc, Ci} = require("chrome");
 
 // Page size for pageup/pagedown
 const PAGE_SIZE = 10;
@@ -35,11 +35,10 @@ const {editableField, InplaceEditor} =
 const {HTMLEditor} = require("devtools/client/inspector/markup/html-editor");
 const promise = require("promise");
 const Services = require("Services");
-const {Tooltip} = require("devtools/client/shared/widgets/Tooltip");
 const {HTMLTooltip} = require("devtools/client/shared/widgets/HTMLTooltip");
 const {setImageTooltip, setBrokenImageTooltip} =
       require("devtools/client/shared/widgets/tooltip/ImageTooltipHelper");
-
+const {setEventTooltip} = require("devtools/client/shared/widgets/tooltip/EventTooltipHelper");
 const EventEmitter = require("devtools/shared/event-emitter");
 const Heritage = require("sdk/core/heritage");
 const {parseAttribute} =
@@ -50,8 +49,7 @@ const {PrefObserver} = require("devtools/client/styleeditor/utils");
 const {KeyShortcuts} = require("devtools/client/shared/key-shortcuts");
 const {template} = require("devtools/shared/gcli/templater");
 const nodeConstants = require("devtools/shared/dom-node-constants");
-
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
+const {XPCOMUtils} = require("resource://gre/modules/XPCOMUtils.jsm");
 
 loader.lazyRequireGetter(this, "CSS", "CSS");
 loader.lazyGetter(this, "DOMParser", () => {
@@ -174,7 +172,8 @@ MarkupView.prototype = {
   _selectedContainer: null,
 
   _initTooltips: function () {
-    this.eventDetailsTooltip = new Tooltip(this._inspector.panelDoc);
+    this.eventDetailsTooltip = new HTMLTooltip(this._inspector.toolbox,
+      {type: "arrow"});
     this.imagePreviewTooltip = new HTMLTooltip(this._inspector.toolbox,
       {type: "arrow"});
     this._enableImagePreviewTooltip();
@@ -2615,11 +2614,8 @@ MarkupElementContainer.prototype = Heritage.extend(MarkupContainer.prototype, {
       tooltip.hide(target);
 
       this.node.getEventListenerInfo().then(listenerInfo => {
-        tooltip.setEventContent({
-          eventListenerInfos: listenerInfo,
-          toolbox: this.markup._inspector.toolbox
-        });
-
+        let toolbox = this.markup._inspector.toolbox;
+        setEventTooltip(tooltip, listenerInfo, toolbox);
         // Disable the image preview tooltip while we display the event details
         this.markup._disableImagePreviewTooltip();
         tooltip.once("hidden", () => {
@@ -2704,10 +2700,10 @@ MarkupElementContainer.prototype = Heritage.extend(MarkupContainer.prototype, {
         maxDim: Services.prefs.getIntPref(PREVIEW_MAX_DIM_PREF)
       };
 
-      yield setImageTooltip(tooltip, this.markup.doc, data, options);
+      setImageTooltip(tooltip, this.markup.doc, data, options);
     } catch (e) {
       // Indicate the failure but show the tooltip anyway.
-      yield setBrokenImageTooltip(tooltip, this.markup.doc);
+      setBrokenImageTooltip(tooltip, this.markup.doc);
     }
     return true;
   }),

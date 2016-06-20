@@ -14,6 +14,7 @@
 
 #include "MediaDataDemuxer.h"
 #include "MediaDecoderReader.h"
+#include "nsAutoPtr.h"
 #include "PDMFactory.h"
 
 namespace mozilla {
@@ -62,7 +63,7 @@ public:
   // For Media Resource Management
   void ReleaseMediaResources() override;
 
-  nsresult ResetDecode(TargetQueues aQueues) override;
+  nsresult ResetDecode(TrackSet aTracks) override;
 
   RefPtr<ShutdownPromise> Shutdown() override;
 
@@ -101,6 +102,7 @@ public:
   void GetMozDebugReaderData(nsAString& aString);
 
 private:
+
   bool HasVideo() { return mVideo.mTrackDemuxer; }
   bool HasAudio() { return mAudio.mTrackDemuxer; }
 
@@ -182,6 +184,8 @@ private:
   void DropDecodedSamples(TrackType aTrack);
 
   bool ShouldSkip(bool aSkipToNextKeyframe, media::TimeUnit aTimeThreshold);
+
+  void SetVideoDecodeThreshold();
 
   size_t SizeOfQueue(TrackType aTrack);
 

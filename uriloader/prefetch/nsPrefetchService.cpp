@@ -38,11 +38,11 @@ using namespace mozilla;
 //
 // To enable logging (see mozilla/Logging.h for full details):
 //
-//    set NSPR_LOG_MODULES=nsPrefetch:5
-//    set NSPR_LOG_FILE=prefetch.log
+//    set MOZ_LOG=nsPrefetch:5
+//    set MOZ_LOG_FILE=prefetch.log
 //
 // this enables LogLevel::Debug level information and places all output in
-// the file http.log
+// the file prefetch.log
 //
 static LazyLogModule gPrefetchLog("nsPrefetch");
 
@@ -824,7 +824,8 @@ nsPrefetchService::Observe(nsISupports     *aSubject,
         mDisabled = true;
     }
     else if (!strcmp(aTopic, NS_PREFBRANCH_PREFCHANGE_TOPIC_ID)) {
-        const char *pref = NS_ConvertUTF16toUTF8(aData).get();
+        const nsCString converted = NS_ConvertUTF16toUTF8(aData);
+        const char* pref = converted.get();
         if (!strcmp(pref, PREFETCH_PREF)) {
             if (Preferences::GetBool(PREFETCH_PREF, false)) {
                 if (mDisabled) {

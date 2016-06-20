@@ -79,8 +79,8 @@
 #include "nsISiteSecurityService.h"
 #include "nsString.h"
 #include "nsCRT.h"
-#include "nsPerformance.h"
 #include "CacheObserver.h"
+#include "mozilla/dom/Performance.h"
 #include "mozilla/Telemetry.h"
 #include "AlternateServices.h"
 #include "InterceptedChannel.h"
@@ -1815,14 +1815,32 @@ nsHttpChannel::ContinueProcessResponse1(nsresult rv)
         }
         break;
     case 304:
-        rv = ProcessNotModified();
-        if (NS_FAILED(rv)) {
+        if (!ShouldBypassProcessNotModified()) {
+            rv = ProcessNotModified();
+            if (NS_SUCCEEDED(rv)) {
+                successfulReval = true;
+                break;
+            }
+
             LOG(("ProcessNotModified failed [rv=%x]\n", rv));
+
+            // We cannot read from the cache entry, it might be in an
+            // incosistent state.  Doom it and redirect the channel
+            // to the same URI to reload from the network.
             mCacheInputStream.CloseAndRelease();
-            rv = ProcessNormal();
+            if (mCacheEntry) {
+                mCacheEntry->AsyncDoom(nullptr);
+                mCacheEntry = nullptr;
+            }
+
+            rv = StartRedirectChannelToURI(mURI, nsIChannelEventSink::REDIRECT_INTERNAL);
+            if (NS_SUCCEEDED(rv)) {
+                return NS_OK;
+            }
         }
-        else {
-            successfulReval = true;
+
+        if (ShouldBypassProcessNotModified() || NS_FAILED(rv)) {
+            rv = ProcessNormal();
         }
         break;
     case 401:
@@ -2821,6 +2839,23 @@ nsHttpChannel::OnDoneReadingPartialCacheEntry(bool *streamDone)
 // nsHttpChannel <cache>
 //-----------------------------------------------------------------------------
 
+bool
+nsHttpChannel::ShouldBypassProcessNotModified()
+{
+    if (mCustomConditionalRequest) {
+        LOG(("Bypassing ProcessNotModified due to custom conditional headers"));
+        return true;
+    }
+
+    if (!mDidReval) {
+        LOG(("Server returned a 304 response even though we did not send a "
+             "conditional request"));
+        return true;
+    }
+
+    return false;
+}
+
 nsresult
 nsHttpChannel::ProcessNotModified()
 {
@@ -2828,16 +2863,9 @@ nsHttpChannel::ProcessNotModified()
 
     LOG(("nsHttpChannel::ProcessNotModified [this=%p]\n", this));
 
-    if (mCustomConditionalRequest) {
-        LOG(("Bypassing ProcessNotModified due to custom conditional headers"));
-        return NS_ERROR_FAILURE;
-    }
-
-    if (!mDidReval) {
-        LOG(("Server returned a 304 response even though we did not send a "
-             "conditional request"));
-        return NS_ERROR_FAILURE;
-    }
+    // Assert ShouldBypassProcessNotModified() has been checked before call to
+    // ProcessNotModified().
+    MOZ_ASSERT(!ShouldBypassProcessNotModified());
 
     MOZ_ASSERT(mCachedResponseHead);
     MOZ_ASSERT(mCacheEntry);
@@ -3407,6 +3435,13 @@ nsHttpChannel::OnCacheEntryCheck(nsICacheEntry* entry, nsIApplicationCache* appC
     // any other non-redirect 3xx responses from the cache (see bug 759043).
     NS_ENSURE_TRUE((mCachedResponseHead->Status() / 100 != 3) ||
                    isCachedRedirect, NS_ERROR_ABORT);
+
+    if (mCachedResponseHead->NoStore() && mCacheEntryIsReadOnly) {
+        // This prevents loading no-store responses when navigating back
+        // while the browser is set to work offline.
+        LOG(("  entry loading as read-only but is no-store, set INHIBIT_CACHING"));
+        mLoadFlags |= nsIRequest::INHIBIT_CACHING;
+    }
 
     // Don't bother to validate items that are read-only,
     // unless they are read-only because of INHIBIT_CACHING or because
@@ -6365,7 +6400,7 @@ nsHttpChannel::OnStopRequest(nsIRequest *request, nsISupports *ctxt, nsresult st
     }
 
     // Register entry to the Performance resource timing
-    nsPerformance* documentPerformance = GetPerformance();
+    mozilla::dom::Performance* documentPerformance = GetPerformance();
     if (documentPerformance) {
         documentPerformance->AddEntry(this, this);
     }

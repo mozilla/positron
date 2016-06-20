@@ -103,10 +103,29 @@ global.IconDetails = {
 
   // Returns the appropriate icon URL for the given icons object and the
   // screen resolution of the given window.
-  getURL(icons, window, extension, size = 18) {
+  getURL(icons, window, extension, size = 16) {
     const DEFAULT = "chrome://browser/content/extension.svg";
 
-    return AddonManager.getPreferredIconURL({icons: icons}, size, window) || DEFAULT;
+    size *= window.devicePixelRatio;
+
+    let bestSize = null;
+    if (icons[size]) {
+      bestSize = size;
+    } else if (icons[2 * size]) {
+      bestSize = 2 * size;
+    } else {
+      let sizes = Object.keys(icons)
+                        .map(key => parseInt(key, 10))
+                        .sort((a, b) => a - b);
+
+      bestSize = sizes.find(candidate => candidate > size) || sizes.pop();
+    }
+
+    if (bestSize) {
+      return {size: bestSize, icon: icons[bestSize]};
+    }
+
+    return {size, icon: DEFAULT};
   },
 
   convertImageDataToPNG(imageData, context) {
@@ -191,12 +210,10 @@ class BasePopup {
 
       this.viewNode.removeEventListener(this.DESTROY_EVENT, this);
 
-      this.context.unload();
       this.browser.remove();
 
       this.browser = null;
       this.viewNode = null;
-      this.context = null;
     });
   }
 
@@ -252,6 +269,7 @@ class BasePopup {
     this.browser = document.createElementNS(XUL_NS, "browser");
     this.browser.setAttribute("type", "content");
     this.browser.setAttribute("disableglobalhistory", "true");
+    this.browser.setAttribute("webextension-view-type", "popup");
 
     // Note: When using noautohide panels, the popup manager will add width and
     // height attributes to the panel, breaking our resize code, if the browser
@@ -280,15 +298,7 @@ class BasePopup {
                    .getInterface(Ci.nsIDOMWindowUtils)
                    .allowScriptsToClose();
 
-      this.context = new ExtensionContext(this.extension, {
-        type: "popup",
-        contentWindow,
-        uri: popupURI,
-        docShell: this.browser.docShell,
-      });
-
-      GlobalManager.injectInDocShell(this.browser.docShell, this.extension, this.context);
-      this.browser.setAttribute("src", this.context.uri.spec);
+      this.browser.setAttribute("src", popupURI.spec);
 
       this.browser.addEventListener("DOMWindowCreated", this, true);
       this.browser.addEventListener("load", this, true);
@@ -471,6 +481,7 @@ ExtensionTabManager.prototype = {
 
   convert(tab) {
     let window = tab.ownerDocument.defaultView;
+    let browser = tab.linkedBrowser;
 
     let mutedInfo = {muted: tab.muted};
     if (tab.muteReason === null) {
@@ -489,17 +500,17 @@ ExtensionTabManager.prototype = {
       active: tab.selected,
       pinned: tab.pinned,
       status: TabManager.getStatus(tab),
-      incognito: PrivateBrowsingUtils.isBrowserPrivate(tab.linkedBrowser),
-      width: tab.linkedBrowser.clientWidth,
-      height: tab.linkedBrowser.clientHeight,
+      incognito: PrivateBrowsingUtils.isBrowserPrivate(browser),
+      width: browser.frameLoader.lazyWidth || browser.clientWidth,
+      height: browser.frameLoader.lazyHeight || browser.clientHeight,
       audible: tab.soundPlaying,
       mutedInfo,
     };
 
     if (this.hasTabPermission(tab)) {
-      result.url = tab.linkedBrowser.currentURI.spec;
-      if (tab.linkedBrowser.contentTitle) {
-        result.title = tab.linkedBrowser.contentTitle;
+      result.url = browser.currentURI.spec;
+      if (browser.contentTitle) {
+        result.title = browser.contentTitle;
       }
       let icon = window.gBrowser.getIcon(tab);
       if (icon) {

@@ -13,7 +13,10 @@
 #include "base/task.h"                  // for NewRunnableMethod, etc
 #include "mozilla/layers/LayerTransactionChild.h"
 #include "mozilla/layers/PLayerTransactionChild.h"
+#include "mozilla/layers/TextureClient.h"// for TextureClient
+#include "mozilla/layers/TextureClientPool.h"// for TextureClientPool
 #include "mozilla/mozalloc.h"           // for operator new, etc
+#include "nsAutoPtr.h"
 #include "nsDebug.h"                    // for NS_RUNTIMEABORT
 #include "nsIObserver.h"                // for nsIObserver
 #include "nsISupportsImpl.h"            // for MOZ_COUNT_CTOR, etc
@@ -39,9 +42,16 @@ static StaticRefPtr<CompositorBridgeChild> sCompositorBridge;
 Atomic<int32_t> CompositableForwarder::sSerialCounter(0);
 
 CompositorBridgeChild::CompositorBridgeChild(ClientLayerManager *aLayerManager)
-  : mLayerManager(aLayerManager)
+  : TextureForwarder("CompositorBridgeChild")
+  , mLayerManager(aLayerManager)
   , mCanSend(false)
+  , mFwdTransactionId(0)
+  , mMessageLoop(MessageLoop::current())
 {
+  MOZ_ASSERT(NS_IsMainThread());
+
+  // Ensure destruction on the main thread
+  SetMessageLoopToPostDestructionTo(mMessageLoop);
 }
 
 CompositorBridgeChild::~CompositorBridgeChild()
@@ -74,10 +84,15 @@ void
 CompositorBridgeChild::Destroy()
 {
   // This must not be called from the destructor!
-  MOZ_ASSERT(mRefCnt != 0);
+  MOZ_ASSERT(!IsDead());
+  mTexturesWaitingRecycled.Clear();
 
   if (!mCanSend) {
     return;
+  }
+
+  for (size_t i = 0; i < mTexturePools.Length(); i++) {
+    mTexturePools[i]->Destroy();
   }
 
   // Destroying the layer manager may cause all sorts of things to happen, so
@@ -418,6 +433,11 @@ CompositorBridgeChild::RecvDidComposite(const uint64_t& aId, const uint64_t& aTr
       child->DidComposite(aTransactionId, aCompositeStart, aCompositeEnd);
     }
   }
+
+  for (size_t i = 0; i < mTexturePools.Length(); i++) {
+    mTexturePools[i]->ReturnDeferredClients();
+  }
+
   return true;
 }
 
@@ -765,7 +785,8 @@ PTextureChild*
 CompositorBridgeChild::AllocPTextureChild(const SurfaceDescriptor&,
                                           const LayersBackend&,
                                           const TextureFlags&,
-                                          const uint64_t&)
+                                          const uint64_t&,
+                                          const uint64_t& aSerial)
 {
   return TextureClient::CreateIPDLActor();
 }
@@ -774,6 +795,158 @@ bool
 CompositorBridgeChild::DeallocPTextureChild(PTextureChild* actor)
 {
   return TextureClient::DestroyIPDLActor(actor);
+}
+
+bool
+CompositorBridgeChild::RecvParentAsyncMessages(InfallibleTArray<AsyncParentMessageData>&& aMessages)
+{
+  for (AsyncParentMessageArray::index_type i = 0; i < aMessages.Length(); ++i) {
+    const AsyncParentMessageData& message = aMessages[i];
+
+    switch (message.type()) {
+      case AsyncParentMessageData::TOpDeliverFence: {
+        const OpDeliverFence& op = message.get_OpDeliverFence();
+        FenceHandle fence = op.fence();
+        DeliverFence(op.TextureId(), fence);
+        break;
+      }
+      case AsyncParentMessageData::TOpNotifyNotUsed: {
+        const OpNotifyNotUsed& op = message.get_OpNotifyNotUsed();
+        NotifyNotUsed(op.TextureId(), op.fwdTransactionId());
+        break;
+      }
+      default:
+        NS_ERROR("unknown AsyncParentMessageData type");
+        return false;
+    }
+  }
+  return true;
+}
+
+void
+CompositorBridgeChild::HoldUntilCompositableRefReleasedIfNecessary(TextureClient* aClient)
+{
+  if (!aClient) {
+    return;
+  }
+
+  if (!(aClient->GetFlags() & TextureFlags::RECYCLE) &&
+     !aClient->NeedsFenceHandle()) {
+    return;
+  }
+
+  if (aClient->GetFlags() & TextureFlags::RECYCLE) {
+    aClient->SetLastFwdTransactionId(GetFwdTransactionId());
+    mTexturesWaitingRecycled.Put(aClient->GetSerial(), aClient);
+    return;
+  }
+  MOZ_ASSERT(!(aClient->GetFlags() & TextureFlags::RECYCLE));
+  MOZ_ASSERT(aClient->NeedsFenceHandle());
+  // Handle a case of fence delivery via ImageBridge.
+  // GrallocTextureData alwasys requests fence delivery if ANDROID_VERSION >= 17.
+  ImageBridgeChild::GetSingleton()->HoldUntilFenceHandleDelivery(aClient, GetFwdTransactionId());
+}
+
+void
+CompositorBridgeChild::NotifyNotUsed(uint64_t aTextureId, uint64_t aFwdTransactionId)
+{
+  RefPtr<TextureClient> client = mTexturesWaitingRecycled.Get(aTextureId);
+  if (!client) {
+    return;
+  }
+  if (aFwdTransactionId < client->GetLastFwdTransactionId()) {
+    // Released on host side, but client already requested newer use texture.
+    return;
+  }
+  mTexturesWaitingRecycled.Remove(aTextureId);
+}
+
+void
+CompositorBridgeChild::DeliverFence(uint64_t aTextureId, FenceHandle& aReleaseFenceHandle)
+{
+  RefPtr<TextureClient> client = mTexturesWaitingRecycled.Get(aTextureId);
+  if (!client) {
+    return;
+  }
+  client->SetReleaseFenceHandle(aReleaseFenceHandle);
+}
+
+void
+CompositorBridgeChild::CancelWaitForRecycle(uint64_t aTextureId)
+{
+  RefPtr<TextureClient> client = mTexturesWaitingRecycled.Get(aTextureId);
+  if (!client) {
+    return;
+  }
+  mTexturesWaitingRecycled.Remove(aTextureId);
+}
+
+TextureClientPool*
+CompositorBridgeChild::GetTexturePool(SurfaceFormat aFormat, TextureFlags aFlags)
+{
+  for (size_t i = 0; i < mTexturePools.Length(); i++) {
+    if (mTexturePools[i]->GetFormat() == aFormat &&
+        mTexturePools[i]->GetFlags() == aFlags) {
+      return mTexturePools[i];
+    }
+  }
+
+  mTexturePools.AppendElement(
+      new TextureClientPool(aFormat, aFlags,
+                            IntSize(gfxPlatform::GetPlatform()->GetTileWidth(),
+                                    gfxPlatform::GetPlatform()->GetTileHeight()),
+                            gfxPrefs::LayersTileMaxPoolSize(),
+                            gfxPrefs::LayersTileShrinkPoolTimeout(),
+                            this));
+
+  return mTexturePools.LastElement();
+}
+
+void
+CompositorBridgeChild::HandleMemoryPressure()
+{
+  for (size_t i = 0; i < mTexturePools.Length(); i++) {
+    mTexturePools[i]->ShrinkToMinimumSize();
+  }
+}
+
+void
+CompositorBridgeChild::ClearTexturePool()
+{
+  for (size_t i = 0; i < mTexturePools.Length(); i++) {
+    mTexturePools[i]->Clear();
+  }
+}
+
+PTextureChild*
+CompositorBridgeChild::CreateTexture(const SurfaceDescriptor& aSharedData,
+                                     LayersBackend aLayersBackend,
+                                     TextureFlags aFlags,
+                                     uint64_t aSerial)
+{
+  return PCompositorBridgeChild::SendPTextureConstructor(aSharedData, aLayersBackend, aFlags, 0 /* FIXME? */, aSerial);
+}
+
+bool
+CompositorBridgeChild::AllocUnsafeShmem(size_t aSize,
+                                   ipc::SharedMemory::SharedMemoryType aType,
+                                   ipc::Shmem* aShmem)
+{
+  return PCompositorBridgeChild::AllocUnsafeShmem(aSize, aType, aShmem);
+}
+
+bool
+CompositorBridgeChild::AllocShmem(size_t aSize,
+                             ipc::SharedMemory::SharedMemoryType aType,
+                             ipc::Shmem* aShmem)
+{
+  return PCompositorBridgeChild::AllocShmem(aSize, aType, aShmem);
+}
+
+void
+CompositorBridgeChild::DeallocShmem(ipc::Shmem& aShmem)
+{
+    PCompositorBridgeChild::DeallocShmem(aShmem);
 }
 
 } // namespace layers

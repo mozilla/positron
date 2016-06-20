@@ -1629,10 +1629,11 @@ DataTransfer::FillInExternalCustomTypes(nsIVariant* aData, uint32_t aIndex,
 
   nsCOMPtr<nsIBinaryInputStream> stream =
     do_CreateInstance("@mozilla.org/binaryinputstream;1");
-  stream->SetInputStream(stringStream);
   if (!stream) {
     return;
   }
+
+  stream->SetInputStream(stringStream);
 
   uint32_t type;
   do {

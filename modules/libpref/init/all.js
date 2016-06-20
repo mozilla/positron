@@ -138,8 +138,6 @@ pref("dom.select_events.enabled", false);
 
 // Whether or not Web Workers are enabled.
 pref("dom.workers.enabled", true);
-// The number of workers per domain allowed to run concurrently.
-pref("dom.workers.maxPerDomain", 50);
 
 pref("dom.serviceWorkers.enabled", false);
 
@@ -398,8 +396,8 @@ pref("media.navigator.load_adapt.low_load","0.40");
 pref("media.navigator.video.default_fps",30);
 pref("media.navigator.video.default_minfps",10);
 pref("media.navigator.video.use_remb", true);
-pref("media.navigator.video.use_tmmbr", true);
-
+pref("media.navigator.video.use_tmmbr", false);
+pref("media.navigator.audio.use_fec", true);
 
 pref("media.webrtc.debug.trace_mask", 0);
 pref("media.webrtc.debug.multi_log", false);
@@ -596,7 +594,7 @@ pref("apz.axis_lock.lock_angle", "0.5235987");        // PI / 6 (30 degrees)
 pref("apz.axis_lock.breakout_threshold", "0.03125");  // 1/32 inches
 pref("apz.axis_lock.breakout_angle", "0.3926991");    // PI / 8 (22.5 degrees)
 pref("apz.axis_lock.direct_pan_angle", "1.047197");   // PI / 3 (60 degrees)
-pref("apz.content_response_timeout", 300);
+pref("apz.content_response_timeout", 400);
 pref("apz.drag.enabled", false);
 pref("apz.danger_zone_x", 50);
 pref("apz.danger_zone_y", 100);
@@ -612,6 +610,7 @@ pref("apz.fling_curve_function_x2", "1.0");
 pref("apz.fling_curve_function_y2", "1.0");
 pref("apz.fling_curve_threshold_inches_per_ms", "-1.0");
 pref("apz.fling_friction", "0.002");
+pref("apz.fling_min_velocity_threshold", "0.5");
 pref("apz.fling_stop_on_tap_threshold", "0.05");
 pref("apz.fling_stopped_threshold", "0.01");
 pref("apz.highlight_checkerboarded_areas", false);
@@ -764,6 +763,8 @@ pref("gfx.logging.painted-pixel-count.enabled", false);
 pref("gfx.logging.texture-usage.enabled", false);
 pref("gfx.logging.peak-texture-usage.enabled", false);
 
+pref("gfx.ycbcr.accurate-conversion", false);
+
 pref("accessibility.browsewithcaret", false);
 pref("accessibility.warn_on_browsewithcaret", true);
 
@@ -856,8 +857,10 @@ pref("accessibility.typeaheadfind.prefillwithselection", false);
 #else
 pref("accessibility.typeaheadfind.prefillwithselection", true);
 #endif
-pref("accessibility.typeaheadfind.matchesCountTimeout", 250);
-pref("accessibility.typeaheadfind.matchesCountLimit", 100);
+pref("accessibility.typeaheadfind.matchesCountTimeout", 100);
+pref("accessibility.typeaheadfind.matchesCountLimit", 1000);
+pref("findbar.highlightAll", false);
+pref("findbar.modalHighlight", false);
 
 // use Mac OS X Appearance panel text smoothing setting when rendering text, disabled by default
 pref("gfx.use_text_smoothing_setting", false);
@@ -1187,6 +1190,7 @@ pref("javascript.options.baselinejit",      true);
 pref("javascript.options.ion",              true);
 pref("javascript.options.asmjs",            true);
 pref("javascript.options.wasm",             false);
+pref("javascript.options.wasm_baselinejit", false);
 pref("javascript.options.native_regexp",    true);
 pref("javascript.options.parallel_parsing", true);
 #if !defined(RELEASE_BUILD) && !defined(ANDROID) && !defined(MOZ_B2G) && !defined(XP_IOS)
@@ -1407,7 +1411,7 @@ pref("network.http.referer.XOriginPolicy", 0);
 pref("network.http.sendSecureXSiteReferrer", true);
 
 // Controls whether referrer attributes in <a>, <img>, <area>, and <iframe> are honoured
-pref("network.http.enablePerElementReferrer", false);
+pref("network.http.enablePerElementReferrer", true);
 
 // Maximum number of consecutive redirects before aborting.
 pref("network.http.redirection-limit", 20);
@@ -1979,6 +1983,12 @@ pref("intl.ime.hack.on_ime_unaware_apps.fire_key_events_for_composition", true);
 #else
 pref("intl.ime.hack.on_ime_unaware_apps.fire_key_events_for_composition", false);
 #endif
+
+// If you use legacy Chinese IME which puts an ideographic space to composition
+// string as placeholder, this pref might be useful.  If this is true and when
+// web contents forcibly commits composition (e.g., moving focus), the
+// ideographic space will be ignored (i.e., commits with empty string).
+pref("intl.ime.remove_placeholder_character_at_commit", false);
 
 // these locales have right-to-left UI
 pref("intl.uidirection.ar", "rtl");
@@ -4628,9 +4638,7 @@ pref("notification.feature.enabled", false);
 
 // Web Notification
 pref("dom.webnotifications.enabled", true);
-#if !defined(RELEASE_BUILD)
 pref("dom.webnotifications.serviceworker.enabled", true);
-#endif
 
 // Alert animation effect, name is disableSlidingEffect for backwards-compat.
 pref("alerts.disableSlidingEffect", false);
@@ -4710,6 +4718,10 @@ pref("dom.push.userAgentID", "");
 // The maximum number of push messages that a service worker can receive
 // without user interaction.
 pref("dom.push.maxQuotaPerSubscription", 16);
+
+// The maximum number of recent message IDs to store for each push
+// subscription, to avoid duplicates for unacknowledged messages.
+pref("dom.push.maxRecentMessageIDsPerSubscription", 10);
 
 // The delay between receiving a push message and updating the quota for a
 // subscription.
@@ -5440,5 +5452,5 @@ pref("media.default_volume", "1.0");
 #ifdef RELEASE_BUILD
 pref("media.seekToNextFrame.enabled", false);
 #else
-pref("media.seekToNextFrame.enabled", false);
+pref("media.seekToNextFrame.enabled", true);
 #endif

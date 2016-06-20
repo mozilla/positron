@@ -152,5 +152,23 @@ TextTrackCueList::GetCueListByTimeInterval(media::Interval<double>& aInterval)
   return output.forget();
 }
 
+void
+TextTrackCueList::NotifyCueUpdated(TextTrackCue *aCue)
+{
+  if (aCue) {
+    mList.RemoveElement(aCue);
+    mList.InsertElementSorted(aCue, CompareCuesByTime());
+  }
+}
+
+bool
+TextTrackCueList::IsCueExist(TextTrackCue *aCue)
+{
+  if (aCue && mList.Contains(aCue)) {
+    return true;
+  }
+  return false;
+}
+
 } // namespace dom
 } // namespace mozilla

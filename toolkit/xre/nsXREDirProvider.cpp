@@ -33,6 +33,9 @@
 #include "nsArrayEnumerator.h"
 #include "nsEnumeratorUtils.h"
 #include "nsReadableUtils.h"
+
+#include "SpecialSystemDirectory.h"
+
 #include "mozilla/Services.h"
 #include "mozilla/Omnijar.h"
 #include "mozilla/Preferences.h"
@@ -1079,7 +1082,8 @@ nsXREDirProvider::DoShutdown()
 
       // Phase 3: Notify observers of a profile change
       obsSvc->NotifyObservers(nullptr, "profile-before-change", kShutdownPersist);
-      obsSvc->NotifyObservers(nullptr, "profile-before-change2", kShutdownPersist);
+      obsSvc->NotifyObservers(nullptr, "profile-before-change-qm", kShutdownPersist);
+      obsSvc->NotifyObservers(nullptr, "profile-before-change-telemetry", kShutdownPersist);
     }
     mProfileNotified = false;
   }

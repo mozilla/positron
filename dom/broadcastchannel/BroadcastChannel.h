@@ -9,6 +9,7 @@
 
 #include "mozilla/Attributes.h"
 #include "mozilla/DOMEventTargetHelper.h"
+#include "nsAutoPtr.h"
 #include "nsIIPCBackgroundChildCreateCallback.h"
 #include "nsIObserver.h"
 #include "nsTArray.h"
@@ -88,8 +89,7 @@ private:
   BroadcastChannel(nsPIDOMWindowInner* aWindow,
                    const PrincipalInfo& aPrincipalInfo,
                    const nsACString& aOrigin,
-                   const nsAString& aChannel,
-                   bool aPrivateBrowsing);
+                   const nsAString& aChannel);
 
   ~BroadcastChannel();
 
@@ -116,7 +116,6 @@ private:
 
   nsCString mOrigin;
   nsString mChannel;
-  bool mPrivateBrowsing;
 
   bool mIsKeptAlive;
 

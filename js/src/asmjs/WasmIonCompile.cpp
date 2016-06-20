@@ -18,6 +18,7 @@
 
 #include "asmjs/WasmIonCompile.h"
 
+#include "asmjs/WasmBaselineCompile.h"
 #include "asmjs/WasmBinaryIterator.h"
 #include "asmjs/WasmGenerator.h"
 
@@ -3393,7 +3394,7 @@ EmitExpr(FunctionCompiler& f)
 bool
 wasm::IonCompileFunction(IonCompileTask* task)
 {
-    int64_t before = PRMJ_Now();
+    MOZ_ASSERT(task->mode() == IonCompileTask::CompileMode::Ion);
 
     const FuncBytes& func = task->func();
     FuncCompileResults& results = task->results();
@@ -3463,6 +3464,20 @@ wasm::IonCompileFunction(IonCompileTask* task)
             return false;
     }
 
-    results.setCompileTime((PRMJ_Now() - before) / PRMJ_USEC_PER_MSEC);
     return true;
+}
+
+bool
+wasm::CompileFunction(IonCompileTask* task)
+{
+    switch (task->mode()) {
+      case wasm::IonCompileTask::CompileMode::Ion:
+        return wasm::IonCompileFunction(task);
+      case wasm::IonCompileTask::CompileMode::Baseline:
+        return wasm::BaselineCompileFunction(task);
+      case wasm::IonCompileTask::CompileMode::None:
+        MOZ_CRASH("Uninitialized task");
+    }
+    // Silence gcc 5.2.1 warning.
+    return false;
 }

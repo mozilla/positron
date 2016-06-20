@@ -60,7 +60,6 @@ extern PRLogModuleInfo *gWidgetDrawLog;
 
 #endif /* MOZ_LOGGING */
 
-class gfxASurface;
 class gfxPattern;
 class nsPluginNativeWindowGtk;
 
@@ -72,6 +71,7 @@ class CurrentX11TimeGetter;
 class nsWindow : public nsBaseWidget
 {
 public:
+    typedef mozilla::gfx::DrawTarget DrawTarget;
     typedef mozilla::WidgetEventTime WidgetEventTime;
 
     nsWindow();
@@ -320,8 +320,8 @@ public:
                                                              mozilla::layers::BufferMode* aBufferMode);
 
 #if (MOZ_WIDGET_GTK == 2)
-    static already_AddRefed<gfxASurface> GetSurfaceForGdkDrawable(GdkDrawable* aDrawable,
-                                                                  const nsIntSize& aSize);
+    static already_AddRefed<DrawTarget> GetDrawTargetForGdkDrawable(GdkDrawable* aDrawable,
+                                                                    const IntSize& aSize);
 #endif
     NS_IMETHOD         ReparentNativeWidget(nsIWidget* aNewParent) override;
 

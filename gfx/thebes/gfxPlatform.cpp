@@ -3,7 +3,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/layers/AsyncTransactionTracker.h" // for AsyncTransactionTracker
 #include "mozilla/layers/CompositorBridgeChild.h"
 #include "mozilla/layers/CompositorThread.h"
 #include "mozilla/layers/ImageBridgeChild.h"
@@ -142,6 +141,7 @@ class mozilla::gl::SkiaGLGlue : public GenericAtomicRefCounted {
 #include "mozilla/dom/ContentChild.h"
 #include "gfxVR.h"
 #include "VRManagerChild.h"
+#include "mozilla/gfx/GPUParent.h"
 
 namespace mozilla {
 namespace layers {
@@ -582,7 +582,7 @@ static uint32_t GetSkiaGlyphCacheSize()
 void
 gfxPlatform::Init()
 {
-    MOZ_RELEASE_ASSERT(NS_IsMainThread());
+    MOZ_RELEASE_ASSERT(NS_IsMainThread(), "GFX: Not in main thread.");
     if (gEverInitialized) {
         NS_RUNTIMEABORT("Already started???");
     }
@@ -594,7 +594,9 @@ gfxPlatform::Init()
 
     gfxConfig::Init();
 
-    GPUProcessManager::Initialize();
+    if (XRE_IsParentProcess()) {
+      GPUProcessManager::Initialize();
+    }
 
     auto fwd = new CrashStatsLogForwarder("GraphicsCriticalError");
     fwd->SetCircularBufferSize(gfxPrefs::GfxLoggingCrashLength());
@@ -848,7 +850,9 @@ gfxPlatform::Shutdown()
     GLContextProviderEGL::Shutdown();
 #endif
 
-    GPUProcessManager::Shutdown();
+    if (XRE_IsParentProcess()) {
+      GPUProcessManager::Shutdown();
+    }
 
     // This is a bit iffy - we're assuming that we were the ones that set the
     // log forwarder in the Factory, so that it's our responsibility to
@@ -876,8 +880,6 @@ gfxPlatform::InitLayersIPC()
       return;
     }
     sLayersIPCIsUp = true;
-
-    AsyncTransactionTrackersHolder::Initialize();
 
     if (XRE_IsParentProcess())
     {
@@ -1238,7 +1240,7 @@ gfxPlatform::PopulateScreenInfo()
 bool
 gfxPlatform::SupportsAzureContentForDrawTarget(DrawTarget* aTarget)
 {
-  if (!aTarget) {
+  if (!aTarget || !aTarget->IsValid()) {
     return false;
   }
 
@@ -2114,6 +2116,23 @@ gfxPlatform::InitAcceleration()
   Preferences::AddBoolVarCache(&sLayersHardwareVideoDecodingFailed,
                                "media.hardware-video-decoding.failed",
                                false);
+
+  if (XRE_IsParentProcess()) {
+    if (gfxPrefs::GPUProcessDevEnabled()) {
+      // We want to hide this from about:support, so only set a default if the
+      // pref is known to be true.
+      gfxConfig::SetDefaultFromPref(
+        Feature::GPU_PROCESS,
+        gfxPrefs::GetGPUProcessDevEnabledPrefName(),
+        true,
+        gfxPrefs::GetGPUProcessDevEnabledPrefDefault());
+    }
+
+    if (gfxConfig::IsEnabled(Feature::GPU_PROCESS)) {
+      GPUProcessManager* gpu = GPUProcessManager::Get();
+      gpu->EnableGPUProcess();
+    }
+  }
 
   sLayersAccelerationPrefsInitialized = true;
 }

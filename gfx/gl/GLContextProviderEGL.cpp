@@ -13,6 +13,10 @@
     #define GET_NATIVE_WINDOW(aWidget) ((EGLNativeWindowType)aWidget->GetNativeData(NS_NATIVE_WINDOW))
 #endif
 
+#ifdef MOZ_WIDGET_ANDROID
+    #define GET_JAVA_SURFACE(aWidget) (aWidget->GetNativeData(NS_JAVA_SURFACE))
+#endif
+
 #if defined(XP_UNIX)
     #ifdef MOZ_WIDGET_GONK
         #include "libdisplay/GonkDisplay.h"
@@ -173,7 +177,7 @@ CreateSurfaceForWindow(nsIWidget* widget, const EGLConfig& config) {
 
     MOZ_ASSERT(widget);
 #ifdef MOZ_WIDGET_ANDROID
-    void* javaSurface = GET_NATIVE_WINDOW(widget);
+    void* javaSurface = GET_JAVA_SURFACE(widget);
     if (!javaSurface) {
         MOZ_CRASH("GFX: Failed to get Java surface.\n");
     }

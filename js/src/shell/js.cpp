@@ -180,6 +180,9 @@ struct ShellRuntime
 
     int exitCode;
     bool quitting;
+
+    UniqueChars readLineBuf;
+    size_t readLineBufPos;
 };
 
 struct MOZ_STACK_CLASS EnvironmentPreparer : public js::ScriptEnvironmentPreparer {
@@ -202,6 +205,7 @@ static bool enableAsmJS = false;
 static bool enableNativeRegExp = false;
 static bool enableUnboxedArrays = false;
 static bool enableSharedMemory = SHARED_MEMORY_DEFAULT;
+static bool enableWasmAlwaysBaseline = false;
 #ifdef JS_GC_ZEAL
 static uint32_t gZealBits = 0;
 static uint32_t gZealFrequency = 0;
@@ -326,7 +330,8 @@ ShellRuntime::ShellRuntime(JSRuntime* rt)
     promiseRejectionTrackerCallback(rt, NullValue()),
 #endif // SPIDERMONKEY_PROMISE
     exitCode(0),
-    quitting(false)
+    quitting(false),
+    readLineBufPos(0)
 {}
 
 static ShellRuntime*
@@ -454,14 +459,27 @@ ShellInterruptCallback(JSContext* cx)
 
     bool result;
     if (sr->haveInterruptFunc) {
+        bool wasAlreadyThrowing = cx->isExceptionPending();
         JS::AutoSaveExceptionState savedExc(cx);
         JSAutoCompartment ac(cx, &sr->interruptFunc.toObject());
         RootedValue rval(cx);
-        if (!JS_CallFunctionValue(cx, nullptr, sr->interruptFunc,
-                                  JS::HandleValueArray::empty(), &rval))
+
+        // Report any exceptions thrown by the JS interrupt callback, but do
+        // *not* keep it on the cx. The interrupt handler is invoked at points
+        // that are not expected to throw catchable exceptions, like at
+        // JSOP_RETRVAL.
+        //
+        // If the interrupted JS code was already throwing, any exceptions
+        // thrown by the interrupt handler are silently swallowed.
         {
-            return false;
+            Maybe<AutoReportException> are;
+            if (!wasAlreadyThrowing)
+                are.emplace(cx);
+            result = JS_CallFunctionValue(cx, nullptr, sr->interruptFunc,
+                                          JS::HandleValueArray::empty(), &rval);
         }
+        savedExc.restore();
+
         if (rval.isBoolean())
             result = rval.toBoolean();
         else
@@ -1717,6 +1735,69 @@ ReadLine(JSContext* cx, unsigned argc, Value* vp)
     return true;
 }
 
+/*
+ * function readlineBuf()
+ * Provides a hook for scripts to emulate readline() using a string object.
+ */
+static bool
+ReadLineBuf(JSContext* cx, unsigned argc, Value* vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+    ShellRuntime* sr = GetShellRuntime(cx);
+
+    if (!args.length()) {
+        if (!sr->readLineBuf) {
+            JS_ReportError(cx, "No source buffer set. You must initially call readlineBuf with an argument.");
+            return false;
+        }
+
+        char* currentBuf = sr->readLineBuf.get() + sr->readLineBufPos;
+        size_t buflen = strlen(currentBuf);
+
+        if (!buflen) {
+            args.rval().setNull();
+            return true;
+        }
+
+        size_t len = 0;
+        while(len < buflen) {
+            if (currentBuf[len] == '\n')
+                break;
+            len++;
+        }
+
+        JSString* str = JS_NewStringCopyN(cx, currentBuf, len);
+        if (!str)
+            return false;
+
+        if (currentBuf[len] == '\0')
+            sr->readLineBufPos += len;
+        else
+            sr->readLineBufPos += len + 1;
+
+        args.rval().setString(str);
+        return true;
+    }
+
+    if (args.length() == 1) {
+        if (sr->readLineBuf)
+            sr->readLineBuf.reset();
+
+        RootedString str(cx, JS::ToString(cx, args[0]));
+        if (!str)
+            return false;
+        sr->readLineBuf = UniqueChars(JS_EncodeStringToUTF8(cx, str));
+        if (!sr->readLineBuf)
+            return false;
+
+        sr->readLineBufPos = 0;
+        return true;
+    }
+
+    JS_ReportError(cx, "Must specify at most one argument");
+    return false;
+}
+
 static bool
 PutStr(JSContext* cx, unsigned argc, Value* vp)
 {
@@ -1966,7 +2047,7 @@ ValueToScript(JSContext* cx, Value vArg, JSFunction** funp = nullptr)
     if (!script)
         return nullptr;
 
-    if (fun && funp)
+    if (funp)
         *funp = fun;
 
     return script;
@@ -2895,7 +2976,7 @@ WorkerMain(void* arg)
     sr->isWorker = true;
     JS_SetRuntimePrivate(rt, sr.get());
     JS_SetFutexCanWait(rt);
-    JS_SetErrorReporter(rt, WarningReporter);
+    JS::SetWarningReporter(rt, WarningReporter);
     JS_InitDestroyPrincipalsCallback(rt, ShellPrincipals::destroy);
     SetWorkerRuntimeOptions(rt);
 
@@ -5219,6 +5300,12 @@ static const JSFunctionSpecWithHelp shell_functions[] = {
 "readline()",
 "  Read a single line from stdin."),
 
+    JS_FN_HELP("readlineBuf", ReadLineBuf, 1, 0,
+"readlineBuf([ buf ])",
+"  Emulate readline() on the specified string. The first call with a string\n"
+"  argument sets the source buffer. Subsequent calls without an argument\n"
+"  then read from this buffer line by line.\n"),
+
     JS_FN_HELP("print", Print, 0, 0,
 "print([exp ...])",
 "  Evaluate and print expressions to stdout."),
@@ -6453,9 +6540,6 @@ NewContext(JSRuntime* rt)
     if (!cx)
         return nullptr;
 
-    JS::ContextOptionsRef(cx).setDontReportUncaught(true);
-    JS::ContextOptionsRef(cx).setAutoJSAPIOwnsErrorReporting(true);
-
     JSShellContextData* data = NewContextData();
     if (!data) {
         DestroyContext(cx, false);
@@ -6700,11 +6784,13 @@ SetRuntimeOptions(JSRuntime* rt, const OptionParser& op)
     enableAsmJS = !op.getBoolOption("no-asmjs");
     enableNativeRegExp = !op.getBoolOption("no-native-regexp");
     enableUnboxedArrays = op.getBoolOption("unboxed-arrays");
+    enableWasmAlwaysBaseline = op.getBoolOption("wasm-always-baseline");
 
     JS::RuntimeOptionsRef(rt).setBaseline(enableBaseline)
                              .setIon(enableIon)
                              .setAsmJS(enableAsmJS)
                              .setWasm(true)
+                             .setWasmAlwaysBaseline(enableWasmAlwaysBaseline)
                              .setNativeRegExp(enableNativeRegExp)
                              .setUnboxedArrays(enableUnboxedArrays);
 
@@ -6973,6 +7059,7 @@ SetWorkerRuntimeOptions(JSRuntime* rt)
                              .setIon(enableIon)
                              .setAsmJS(enableAsmJS)
                              .setWasm(true)
+                             .setWasmAlwaysBaseline(enableWasmAlwaysBaseline)
                              .setNativeRegExp(enableNativeRegExp)
                              .setUnboxedArrays(enableUnboxedArrays);
     rt->setOffthreadIonCompilationEnabled(offthreadCompilation);
@@ -7160,6 +7247,7 @@ main(int argc, char** argv, char** envp)
         || !op.addBoolOption('\0', "no-native-regexp", "Disable native regexp compilation")
         || !op.addBoolOption('\0', "no-unboxed-objects", "Disable creating unboxed plain objects")
         || !op.addBoolOption('\0', "unboxed-arrays", "Allow creating unboxed arrays")
+        || !op.addBoolOption('\0', "wasm-always-baseline", "Enable experimental Wasm baseline compiler when possible")
 #ifdef ENABLE_SHARED_ARRAY_BUFFER
         || !op.addStringOption('\0', "shared-memory", "on/off",
                                "SharedArrayBuffer and Atomics "
@@ -7361,7 +7449,7 @@ main(int argc, char** argv, char** envp)
     JS_SetRuntimePrivate(rt, sr.get());
     // Waiting is allowed on the shell's main thread, for now.
     JS_SetFutexCanWait(rt);
-    JS_SetErrorReporter(rt, WarningReporter);
+    JS::SetWarningReporter(rt, WarningReporter);
     if (!SetRuntimeOptions(rt, op))
         return 1;
 

@@ -8,6 +8,7 @@
 #include "mozilla/gfx/Helpers.h"
 #include "nsXULElement.h"
 
+#include "nsAutoPtr.h"
 #include "nsIServiceManager.h"
 #include "nsMathUtils.h"
 #include "SVGImageContext.h"
@@ -48,7 +49,6 @@
 #include "ImageRegion.h"
 
 #include "gfxContext.h"
-#include "gfxASurface.h"
 #include "gfxImageSurface.h"
 #include "gfxPlatform.h"
 #include "gfxFont.h"
@@ -896,7 +896,7 @@ public:
   virtual void DoUpdate() override
   {
     if (!mContext) {
-      MOZ_CRASH("This should never be called without a context");
+      MOZ_CRASH("GFX: This should never be called without a context");
     }
     // Refresh the cached FilterDescription in mContext->CurrentState().filter.
     // If this filter is not at the top of the state stack, we'll refresh the
@@ -2356,7 +2356,7 @@ GetFontStyleContext(Element* aElement, const nsAString& aFont,
   }
 
   MOZ_RELEASE_ASSERT(parentContext,
-                     "GetFontParentStyleContext should have returned an error if it couldn't get a parent context.");
+                     "GFX: GetFontParentStyleContext should have returned an error if it couldn't get a parent context.");
 
   MOZ_ASSERT(!aPresShell->IsDestroying(),
              "GetFontParentStyleContext should have returned an error if the presshell is being destroyed.");
@@ -3604,8 +3604,10 @@ struct MOZ_STACK_CLASS CanvasBidiProcessor : public nsBidiPresUtils::BidiProcess
     // not render well via the code below.
     if (mOp == CanvasRenderingContext2D::TextDrawOperation::FILL &&
         mState->StyleIsColor(CanvasRenderingContext2D::Style::FILL)) {
+      // TODO: determine if mCtx->mTarget is guaranteed to be non-null and valid
+      // here. If it's not, thebes will be null and we'll crash.
       RefPtr<gfxContext> thebes =
-        gfxContext::ForDrawTargetWithTransform(mCtx->mTarget);
+        gfxContext::CreatePreservingTransformOrNull(mCtx->mTarget);
       nscolor fill = mState->colorStyles[CanvasRenderingContext2D::Style::FILL];
       thebes->SetColor(Color::FromABGR(fill));
       gfxTextRun::DrawParams params(thebes);
@@ -4014,7 +4016,7 @@ CanvasRenderingContext2D::DrawOrMeasureText(const nsAString& aRawText,
     baselineAnchor = -fontMetrics.emDescent;
     break;
   default:
-    MOZ_CRASH("unexpected TextBaseline");
+    MOZ_CRASH("GFX: unexpected TextBaseline");
   }
 
   // We can't query the textRun directly, as it may not have been created yet;
@@ -4788,7 +4790,7 @@ CanvasRenderingContext2D::DrawDirectlyToCanvas(
   // the matrix even though this is a temp gfxContext.
   AutoRestoreTransform autoRestoreTransform(mTarget);
 
-  RefPtr<gfxContext> context = gfxContext::ForDrawTarget(tempTarget);
+  RefPtr<gfxContext> context = gfxContext::CreateOrNull(tempTarget);
   if (!context) {
     gfxDevCrash(LogReason::InvalidContext) << "Canvas context problem";
     return;
@@ -4908,10 +4910,13 @@ CanvasRenderingContext2D::DrawWindow(nsGlobalWindow& aWindow, double aX,
 {
   MOZ_ASSERT(aWindow.IsInnerWindow());
 
+  if (int32_t(aW) == 0 || int32_t(aH) == 0) {
+    return;
+  }
+
   // protect against too-large surfaces that will cause allocation
   // or overflow issues
-  if (!gfxASurface::CheckSurfaceSize(gfx::IntSize(int32_t(aW), int32_t(aH)),
-                                     0xffff)) {
+  if (!Factory::CheckSurfaceSize(IntSize(int32_t(aW), int32_t(aH)), 0xffff)) {
     aError.Throw(NS_ERROR_FAILURE);
     return;
   }
@@ -4991,8 +4996,9 @@ CanvasRenderingContext2D::DrawWindow(nsGlobalWindow& aWindow, double aX,
       GlobalAlpha() == 1.0f &&
       UsedOperation() == CompositionOp::OP_OVER)
   {
-    thebes = gfxContext::ForDrawTarget(mTarget);
-    MOZ_ASSERT(thebes); // alrady checked the draw target above
+    thebes = gfxContext::CreateOrNull(mTarget);
+    MOZ_ASSERT(thebes); // already checked the draw target above
+                        // (in SupportsAzureContentForDrawTarget)
     thebes->SetMatrix(gfxMatrix(matrix._11, matrix._12, matrix._21,
                                 matrix._22, matrix._31, matrix._32));
   } else {
@@ -5004,7 +5010,7 @@ CanvasRenderingContext2D::DrawWindow(nsGlobalWindow& aWindow, double aX,
       return;
     }
 
-    thebes = gfxContext::ForDrawTarget(drawDT);
+    thebes = gfxContext::CreateOrNull(drawDT);
     MOZ_ASSERT(thebes); // alrady checked the draw target above
     thebes->SetMatrix(gfxMatrix::Scaling(matrix._11, matrix._22));
   }
@@ -5110,7 +5116,7 @@ CanvasRenderingContext2D::AsyncDrawXULElement(nsXULElement& aElem,
 
   // protect against too-large surfaces that will cause allocation
   // or overflow issues
-  if (!gfxASurface::CheckSurfaceSize(gfx::IntSize(aW, aH), 0xffff)) {
+  if (!Factory::CheckSurfaceSize(IntSize(aW, aH), 0xffff)) {
     aError.Throw(NS_ERROR_FAILURE);
     return;
   }

@@ -57,6 +57,7 @@ include protocol PWebBrowserPersistDocument;
 include protocol PWebrtcGlobal;
 include protocol PPresentation;
 include protocol PVRManager;
+include protocol PFlyWebPublishedServer;
 include DOMTypes;
 include JavaScriptTypes;
 include InputStreamParams;
@@ -98,6 +99,7 @@ using class mozilla::dom::ipc::StructuredCloneData from "ipc/IPCMessageUtils.h";
 using mozilla::DataStorageType from "ipc/DataStorageIPCUtils.h";
 using mozilla::DocShellOriginAttributes from "mozilla/ipc/BackgroundUtils.h";
 using struct mozilla::layers::TextureFactoryIdentifier from "mozilla/layers/CompositorTypes.h";
+using struct mozilla::dom::FlyWebPublishOptions from "mozilla/dom/FlyWebPublishOptionsIPCSerializer.h";
 
 union ChromeRegistryItem
 {
@@ -433,6 +435,7 @@ prio(normal upto urgent) sync protocol PContent
     manages PWebBrowserPersistDocument;
     manages PWebrtcGlobal;
     manages PPresentation;
+    manages PFlyWebPublishedServer;
 
 both:
     // Depending on exactly how the new browser is being created, it might be
@@ -491,7 +494,7 @@ child:
      * Communication between the PuppetBidiKeyboard and the actual
      * BidiKeyboard hosted by the parent
      */
-    async BidiKeyboardNotify(bool isLangRTL);
+    async BidiKeyboardNotify(bool isLangRTL, bool haveBidiKeyboards);
 
     /**
      * Dump this process's GC and CC logs to the provided files.
@@ -510,6 +513,8 @@ child:
     async RegisterChrome(ChromePackage[] packages, SubstitutionMapping[] substitutions,
                          OverrideMapping[] overrides, nsCString locale, bool reset);
     async RegisterChromeItem(ChromeRegistryItem item);
+
+    async ClearImageCache(bool privateLoader, bool chrome);
 
     async SetOffline(bool offline);
     async SetConnectivity(bool connectivity);
@@ -699,7 +704,8 @@ parent:
     sync GetProcessAttributes()
         returns (ContentParentId cpId, bool isForApp, bool isForBrowser);
     sync GetXPCOMProcessAttributes()
-        returns (bool isOffline, bool isConnected, bool isLangRTL, nsString[] dictionaries,
+        returns (bool isOffline, bool isConnected, bool isLangRTL,
+                 bool haveBidiKeyboards, nsString[] dictionaries,
                  ClipboardCapabilities clipboardCaps,
                  DomainPolicyClone domainPolicy,
                  StructuredCloneData initialData);
@@ -852,6 +858,8 @@ parent:
     async PWebrtcGlobal();
 
     async PPresentation();
+
+    async PFlyWebPublishedServer(nsString name, FlyWebPublishOptions params);
 
     // Services remoting
 

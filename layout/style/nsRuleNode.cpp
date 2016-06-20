@@ -5327,12 +5327,12 @@ nsRuleNode::ComputeDisplayData(void* aStartStruct,
   COMPUTE_START_RESET(Display, display, parentDisplay)
 
   // We may have ended up with aStartStruct's values of mDisplay and
-  // mFloats, but those may not be correct if our style data overrides
+  // mFloat, but those may not be correct if our style data overrides
   // its position or float properties.  Reset to mOriginalDisplay and
-  // mOriginalFloats; it if turns out we still need the display/floats
-  // adjustments we'll do them below.
+  // mOriginalFloat; if it turns out we still need the display/floats
+  // adjustments, we'll do them below.
   display->mDisplay = display->mOriginalDisplay;
-  display->mFloats = display->mOriginalFloats;
+  display->mFloat = display->mOriginalFloat;
 
   // Each property's index in this array must match its index in the
   // const array |transitionPropInfo| above.
@@ -6016,12 +6016,12 @@ nsRuleNode::ComputeDisplayData(void* aStartStruct,
 
   // float: enum, inherit, initial
   SetValue(*aRuleData->ValueForFloat(),
-           display->mFloats, conditions,
+           display->mFloat, conditions,
            SETVAL_ENUMERATED | SETVAL_UNSET_INITIAL,
-           parentDisplay->mFloats,
+           parentDisplay->mFloat,
            NS_STYLE_FLOAT_NONE);
-  // Save mFloats in mOriginalFloats in case we need it later
-  display->mOriginalFloats = display->mFloats;
+  // Save mFloat in mOriginalFloat in case we need it later
+  display->mOriginalFloat = display->mFloat;
 
   // overflow-x: enum, inherit, initial
   SetValue(*aRuleData->ValueForOverflowX(),
@@ -6144,15 +6144,15 @@ nsRuleNode::ComputeDisplayData(void* aStartStruct,
       // 1) if position is 'absolute' or 'fixed' then display must be
       // block-level and float must be 'none'
       EnsureBlockDisplay(display->mDisplay);
-      display->mFloats = NS_STYLE_FLOAT_NONE;
+      display->mFloat = NS_STYLE_FLOAT_NONE;
 
       // Note that it's OK to cache this struct in the ruletree
       // because it's fine as-is for any style context that points to
       // it directly, and any use of it as aStartStruct (e.g. if a
       // more specific rule sets "position: static") will use
-      // mOriginalDisplay and mOriginalFloats, which we have carefully
+      // mOriginalDisplay and mOriginalFloat, which we have carefully
       // not changed.
-    } else if (display->mFloats != NS_STYLE_FLOAT_NONE) {
+    } else if (display->mFloat != NS_STYLE_FLOAT_NONE) {
       // 2) if float is not none, and display is not none, then we must
       // set a block-level 'display' type per CSS2.1 section 9.7.
       EnsureBlockDisplay(display->mDisplay);
@@ -9314,11 +9314,11 @@ nsRuleNode::ComputeSVGData(void* aStartStruct,
 
   // fill-opacity: factor, inherit, initial,
   // context-fill-opacity, context-stroke-opacity
-  nsStyleSVGOpacitySource contextFillOpacity = svg->mFillOpacitySource;
+  nsStyleSVGOpacitySource contextFillOpacity = svg->FillOpacitySource();
   SetSVGOpacity(*aRuleData->ValueForFillOpacity(),
                 svg->mFillOpacity, contextFillOpacity, conditions,
-                parentSVG->mFillOpacity, parentSVG->mFillOpacitySource);
-  svg->mFillOpacitySource = contextFillOpacity;
+                parentSVG->mFillOpacity, parentSVG->FillOpacitySource());
+  svg->SetFillOpacitySource(contextFillOpacity);
 
   // fill-rule: enum, inherit, initial
   SetValue(*aRuleData->ValueForFillRule(),
@@ -9414,7 +9414,7 @@ nsRuleNode::ComputeSVGData(void* aStartStruct,
   case eCSSUnit_Inherit:
   case eCSSUnit_Unset:
     conditions.SetUncacheable();
-    svg->mStrokeDasharrayFromObject = parentSVG->mStrokeDasharrayFromObject;
+    svg->SetStrokeDasharrayFromObject(parentSVG->StrokeDasharrayFromObject());
     svg->mStrokeDasharray = parentSVG->mStrokeDasharray;
     break;
 
@@ -9422,19 +9422,19 @@ nsRuleNode::ComputeSVGData(void* aStartStruct,
     MOZ_ASSERT(strokeDasharrayValue->GetIntValue() ==
                      NS_STYLE_STROKE_PROP_CONTEXT_VALUE,
                "Unknown keyword for stroke-dasharray");
-    svg->mStrokeDasharrayFromObject = true;
+    svg->SetStrokeDasharrayFromObject(true);
     svg->mStrokeDasharray.Clear();
     break;
 
   case eCSSUnit_Initial:
   case eCSSUnit_None:
-    svg->mStrokeDasharrayFromObject = false;
+    svg->SetStrokeDasharrayFromObject(false);
     svg->mStrokeDasharray.Clear();
     break;
 
   case eCSSUnit_List:
   case eCSSUnit_ListDep: {
-    svg->mStrokeDasharrayFromObject = false;
+    svg->SetStrokeDasharrayFromObject(false);
     svg->mStrokeDasharray.Clear();
 
     // count number of values
@@ -9463,10 +9463,10 @@ nsRuleNode::ComputeSVGData(void* aStartStruct,
   // stroke-dashoffset: <dashoffset>, inherit
   const nsCSSValue *strokeDashoffsetValue =
     aRuleData->ValueForStrokeDashoffset();
-  svg->mStrokeDashoffsetFromObject =
+  svg->SetStrokeDashoffsetFromObject(
     strokeDashoffsetValue->GetUnit() == eCSSUnit_Enumerated &&
-    strokeDashoffsetValue->GetIntValue() == NS_STYLE_STROKE_PROP_CONTEXT_VALUE;
-  if (svg->mStrokeDashoffsetFromObject) {
+    strokeDashoffsetValue->GetIntValue() == NS_STYLE_STROKE_PROP_CONTEXT_VALUE);
+  if (svg->StrokeDashoffsetFromObject()) {
     svg->mStrokeDashoffset.SetCoordValue(0);
   } else {
     SetCoord(*aRuleData->ValueForStrokeDashoffset(),
@@ -9498,11 +9498,11 @@ nsRuleNode::ComputeSVGData(void* aStartStruct,
             SETFCT_UNSET_INHERIT);
 
   // stroke-opacity:
-  nsStyleSVGOpacitySource contextStrokeOpacity = svg->mStrokeOpacitySource;
+  nsStyleSVGOpacitySource contextStrokeOpacity = svg->StrokeOpacitySource();
   SetSVGOpacity(*aRuleData->ValueForStrokeOpacity(),
                 svg->mStrokeOpacity, contextStrokeOpacity, conditions,
-                parentSVG->mStrokeOpacity, parentSVG->mStrokeOpacitySource);
-  svg->mStrokeOpacitySource = contextStrokeOpacity;
+                parentSVG->mStrokeOpacity, parentSVG->StrokeOpacitySource());
+  svg->SetStrokeOpacitySource(contextStrokeOpacity);
 
   // stroke-width:
   const nsCSSValue* strokeWidthValue = aRuleData->ValueForStrokeWidth();
@@ -9511,17 +9511,17 @@ nsRuleNode::ComputeSVGData(void* aStartStruct,
     MOZ_ASSERT(strokeWidthValue->GetIntValue() ==
                  NS_STYLE_STROKE_PROP_CONTEXT_VALUE,
                "Unrecognized keyword for stroke-width");
-    svg->mStrokeWidthFromObject = true;
+    svg->SetStrokeWidthFromObject(true);
     svg->mStrokeWidth.SetCoordValue(nsPresContext::CSSPixelsToAppUnits(1));
     break;
 
   case eCSSUnit_Initial:
-    svg->mStrokeWidthFromObject = false;
+    svg->SetStrokeWidthFromObject(false);
     svg->mStrokeWidth.SetCoordValue(nsPresContext::CSSPixelsToAppUnits(1));
     break;
 
   default:
-    svg->mStrokeWidthFromObject = false;
+    svg->SetStrokeWidthFromObject(false);
     SetCoord(*strokeWidthValue,
              svg->mStrokeWidth, parentSVG->mStrokeWidth,
              SETCOORD_LPH | SETCOORD_FACTOR | SETCOORD_UNSET_INHERIT,

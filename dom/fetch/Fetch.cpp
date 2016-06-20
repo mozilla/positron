@@ -124,23 +124,29 @@ public:
   Run()
   {
     AssertIsOnMainThread();
+    RefPtr<FetchDriver> fetch;
     RefPtr<PromiseWorkerProxy> proxy = mResolver->mPromiseProxy;
-    MutexAutoLock lock(proxy->Lock());
-    if (proxy->CleanedUp()) {
-      NS_WARNING("Aborting Fetch because worker already shut down");
-      return NS_OK;
+
+    {
+      // Acquire the proxy mutex while getting data from the WorkerPrivate...
+      MutexAutoLock lock(proxy->Lock());
+      if (proxy->CleanedUp()) {
+        NS_WARNING("Aborting Fetch because worker already shut down");
+        return NS_OK;
+      }
+
+      nsCOMPtr<nsIPrincipal> principal = proxy->GetWorkerPrivate()->GetPrincipal();
+      MOZ_ASSERT(principal);
+      nsCOMPtr<nsILoadGroup> loadGroup = proxy->GetWorkerPrivate()->GetLoadGroup();
+      MOZ_ASSERT(loadGroup);
+      fetch = new FetchDriver(mRequest, principal, loadGroup);
     }
 
-    nsCOMPtr<nsIPrincipal> principal = proxy->GetWorkerPrivate()->GetPrincipal();
-    MOZ_ASSERT(principal);
-    nsCOMPtr<nsILoadGroup> loadGroup = proxy->GetWorkerPrivate()->GetLoadGroup();
-    MOZ_ASSERT(loadGroup);
-    RefPtr<FetchDriver> fetch = new FetchDriver(mRequest, principal, loadGroup);
-    nsresult rv = fetch->Fetch(mResolver);
-    // Right now we only support async fetch, which should never directly fail.
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-      return rv;
-    }
+    // ...but release it before calling Fetch, because mResolver's callback can
+    // be called synchronously and they want the mutex, too.
+    fetch->Fetch(mResolver);
+
+    // FetchDriver::Fetch never directly fails
     return NS_OK;
   }
 };
@@ -262,7 +268,7 @@ MainThreadFetchResolver::~MainThreadFetchResolver()
   NS_ASSERT_OWNINGTHREAD(MainThreadFetchResolver);
 }
 
-class WorkerFetchResponseRunnable final : public WorkerRunnable
+class WorkerFetchResponseRunnable final : public MainThreadWorkerRunnable
 {
   RefPtr<WorkerFetchResolver> mResolver;
   // Passed from main thread to worker thread after being initialized.
@@ -271,7 +277,7 @@ public:
   WorkerFetchResponseRunnable(WorkerPrivate* aWorkerPrivate,
                               WorkerFetchResolver* aResolver,
                               InternalResponse* aResponse)
-    : WorkerRunnable(aWorkerPrivate, WorkerThreadUnchangedBusyCount)
+    : MainThreadWorkerRunnable(aWorkerPrivate)
     , mResolver(aResolver)
     , mInternalResponse(aResponse)
   {
@@ -296,25 +302,6 @@ public:
     }
     return true;
   }
-
-  bool
-  PreDispatch(WorkerPrivate* aWorkerPrivate) override
-  {
-    // Don't call default PreDispatch() since it incorrectly asserts we are
-    // dispatching from the parent worker thread.  We always dispatch from
-    // the main thread.
-    AssertIsOnMainThread();
-    return true;
-  }
-
-  void
-  PostDispatch(WorkerPrivate* aWorkerPrivate, bool aDispatchResult) override
-  {
-    // Don't call default PostDispatch() since it incorrectly asserts we are
-    // dispatching from the parent worker thread.  We always dispatch from
-    // the main thread.
-    AssertIsOnMainThread();
-  }
 };
 
 class WorkerFetchResponseEndBase
@@ -336,13 +323,12 @@ public:
   }
 };
 
-class WorkerFetchResponseEndRunnable final : public WorkerRunnable
+class WorkerFetchResponseEndRunnable final : public MainThreadWorkerRunnable
                                            , public WorkerFetchResponseEndBase
 {
 public:
   explicit WorkerFetchResponseEndRunnable(PromiseWorkerProxy* aPromiseProxy)
-    : WorkerRunnable(aPromiseProxy->GetWorkerPrivate(),
-                     WorkerThreadUnchangedBusyCount)
+    : MainThreadWorkerRunnable(aPromiseProxy->GetWorkerPrivate())
     , WorkerFetchResponseEndBase(aPromiseProxy)
   {
   }
@@ -361,25 +347,6 @@ public:
     // leaking the worker thread
     Run();
     return WorkerRunnable::Cancel();
-  }
-
-  bool
-  PreDispatch(WorkerPrivate* aWorkerPrivate) override
-  {
-    // Don't call default PreDispatch() since it incorrectly asserts we are
-    // dispatching from the parent worker thread.  We always dispatch from
-    // the main thread.
-    AssertIsOnMainThread();
-    return true;
-  }
-
-  void
-  PostDispatch(WorkerPrivate* aWorkerPrivate, bool aDispatchResult) override
-  {
-    // Don't call default PostDispatch() since it incorrectly asserts we are
-    // dispatching from the parent worker thread.  We always dispatch from
-    // the main thread.
-    AssertIsOnMainThread();
   }
 };
 
@@ -643,7 +610,7 @@ namespace {
  * Called on successfully reading the complete stream.
  */
 template <class Derived>
-class ContinueConsumeBodyRunnable final : public WorkerRunnable
+class ContinueConsumeBodyRunnable final : public MainThreadWorkerRunnable
 {
   // This has been addrefed before this runnable is dispatched,
   // released in WorkerRun().
@@ -655,7 +622,7 @@ class ContinueConsumeBodyRunnable final : public WorkerRunnable
 public:
   ContinueConsumeBodyRunnable(FetchBody<Derived>* aFetchBody, nsresult aStatus,
                               uint32_t aLength, uint8_t* aResult)
-    : WorkerRunnable(aFetchBody->mWorkerPrivate, WorkerThreadUnchangedBusyCount)
+    : MainThreadWorkerRunnable(aFetchBody->mWorkerPrivate)
     , mFetchBody(aFetchBody)
     , mStatus(aStatus)
     , mLength(aLength)
@@ -669,25 +636,6 @@ public:
   {
     mFetchBody->ContinueConsumeBody(mStatus, mLength, mResult);
     return true;
-  }
-
-  bool
-  PreDispatch(WorkerPrivate* aWorkerPrivate) override
-  {
-    // Don't call default PreDispatch() since it incorrectly asserts we are
-    // dispatching from the parent worker thread.  We always dispatch from
-    // the main thread.
-    AssertIsOnMainThread();
-    return true;
-  }
-
-  void
-  PostDispatch(WorkerPrivate* aWorkerPrivate, bool aDispatchResult) override
-  {
-    // Don't call default PostDispatch() since it incorrectly asserts we are
-    // dispatching from the parent worker thread.  We always dispatch from
-    // the main thread.
-    AssertIsOnMainThread();
   }
 };
 

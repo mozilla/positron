@@ -5,6 +5,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "ClientLayerManager.h"         // for ClientLayerManager
 #include "ShadowLayers.h"
 #include <set>                          // for _Rb_tree_const_iterator, etc
 #include <vector>                       // for vector
@@ -23,6 +24,7 @@
 #include "mozilla/layers/CompositableClient.h"  // for CompositableClient, etc
 #include "mozilla/layers/CompositorBridgeChild.h"
 #include "mozilla/layers/ImageDataSerializer.h"
+#include "mozilla/layers/ImageBridgeChild.h"
 #include "mozilla/layers/LayersMessages.h"  // for Edit, etc
 #include "mozilla/layers/LayersSurfaces.h"  // for SurfaceDescriptor, etc
 #include "mozilla/layers/LayersTypes.h"  // for MOZ_LAYERS_LOG
@@ -31,7 +33,6 @@
 #include "ShadowLayerUtils.h"
 #include "mozilla/layers/TextureClient.h"  // for TextureClient
 #include "mozilla/mozalloc.h"           // for operator new, etc
-#include "nsAutoPtr.h"                  // for nsRefPtr, getter_AddRefs, etc
 #include "nsTArray.h"                   // for AutoTArray, nsTArray, etc
 #include "nsXULAppAPI.h"                // for XRE_GetProcessType, etc
 #include "mozilla/ReentrantMonitor.h"
@@ -201,180 +202,6 @@ struct AutoTxnEnd {
   Transaction* mTxn;
 };
 
-
-// XXX - We should actually figure out the minimum shmem allocation size on
-// a certain platform and use that.
-const uint32_t sShmemPageSize = 4096;
-
-#ifdef DEBUG
-const uint32_t sSupportedBlockSize = 4;
-#endif
-
-FixedSizeSmallShmemSectionAllocator::FixedSizeSmallShmemSectionAllocator(ClientIPCAllocator* aShmProvider)
-: mShmProvider(aShmProvider)
-{
-  MOZ_ASSERT(mShmProvider && mShmProvider->AsShmemAllocator());
-}
-
-FixedSizeSmallShmemSectionAllocator::~FixedSizeSmallShmemSectionAllocator()
-{
-  ShrinkShmemSectionHeap();
-}
-
-bool
-FixedSizeSmallShmemSectionAllocator::AllocShmemSection(uint32_t aSize, ShmemSection* aShmemSection)
-{
-  // For now we only support sizes of 4. If we want to support different sizes
-  // some more complicated bookkeeping should be added.
-  MOZ_ASSERT(aSize == sSupportedBlockSize);
-  MOZ_ASSERT(aShmemSection);
-
-  if (!IPCOpen()) {
-    gfxCriticalError() << "Attempt to allocate a ShmemSection after shutdown.";
-    return false;
-  }
-
-  uint32_t allocationSize = (aSize + sizeof(ShmemSectionHeapAllocation));
-
-  for (size_t i = 0; i < mUsedShmems.size(); i++) {
-    ShmemSectionHeapHeader* header = mUsedShmems[i].get<ShmemSectionHeapHeader>();
-    if ((header->mAllocatedBlocks + 1) * allocationSize + sizeof(ShmemSectionHeapHeader) < sShmemPageSize) {
-      aShmemSection->shmem() = mUsedShmems[i];
-      MOZ_ASSERT(mUsedShmems[i].IsWritable());
-      break;
-    }
-  }
-
-  if (!aShmemSection->shmem().IsWritable()) {
-    ipc::Shmem tmp;
-    if (!GetShmAllocator()->AllocUnsafeShmem(sShmemPageSize, OptimalShmemType(), &tmp)) {
-      return false;
-    }
-
-    ShmemSectionHeapHeader* header = tmp.get<ShmemSectionHeapHeader>();
-    header->mTotalBlocks = 0;
-    header->mAllocatedBlocks = 0;
-
-    mUsedShmems.push_back(tmp);
-    aShmemSection->shmem() = tmp;
-  }
-
-  MOZ_ASSERT(aShmemSection->shmem().IsWritable());
-
-  ShmemSectionHeapHeader* header = aShmemSection->shmem().get<ShmemSectionHeapHeader>();
-  uint8_t* heap = aShmemSection->shmem().get<uint8_t>() + sizeof(ShmemSectionHeapHeader);
-
-  ShmemSectionHeapAllocation* allocHeader = nullptr;
-
-  if (header->mTotalBlocks > header->mAllocatedBlocks) {
-    // Search for the first available block.
-    for (size_t i = 0; i < header->mTotalBlocks; i++) {
-      allocHeader = reinterpret_cast<ShmemSectionHeapAllocation*>(heap);
-
-      if (allocHeader->mStatus == STATUS_FREED) {
-        break;
-      }
-      heap += allocationSize;
-    }
-    MOZ_ASSERT(allocHeader && allocHeader->mStatus == STATUS_FREED);
-    MOZ_ASSERT(allocHeader->mSize == sSupportedBlockSize);
-  } else {
-    heap += header->mTotalBlocks * allocationSize;
-
-    header->mTotalBlocks++;
-    allocHeader = reinterpret_cast<ShmemSectionHeapAllocation*>(heap);
-    allocHeader->mSize = aSize;
-  }
-
-  MOZ_ASSERT(allocHeader);
-  header->mAllocatedBlocks++;
-  allocHeader->mStatus = STATUS_ALLOCATED;
-
-  aShmemSection->size() = aSize;
-  aShmemSection->offset() = (heap + sizeof(ShmemSectionHeapAllocation)) - aShmemSection->shmem().get<uint8_t>();
-  ShrinkShmemSectionHeap();
-  return true;
-}
-
-void
-FixedSizeSmallShmemSectionAllocator::FreeShmemSection(mozilla::layers::ShmemSection& aShmemSection)
-{
-  MOZ_ASSERT(aShmemSection.size() == sSupportedBlockSize);
-  MOZ_ASSERT(aShmemSection.offset() < sShmemPageSize - sSupportedBlockSize);
-
-  if (!aShmemSection.shmem().IsWritable()) {
-    return;
-  }
-
-  ShmemSectionHeapAllocation* allocHeader =
-    reinterpret_cast<ShmemSectionHeapAllocation*>(aShmemSection.shmem().get<char>() +
-                                                  aShmemSection.offset() -
-                                                  sizeof(ShmemSectionHeapAllocation));
-
-  MOZ_ASSERT(allocHeader->mSize == aShmemSection.size());
-
-  DebugOnly<bool> success = allocHeader->mStatus.compareExchange(STATUS_ALLOCATED, STATUS_FREED);
-  // If this fails something really weird is going on.
-  MOZ_ASSERT(success);
-
-  ShmemSectionHeapHeader* header = aShmemSection.shmem().get<ShmemSectionHeapHeader>();
-  header->mAllocatedBlocks--;
-}
-
-void
-FixedSizeSmallShmemSectionAllocator::DeallocShmemSection(mozilla::layers::ShmemSection& aShmemSection)
-{
-  if (!IPCOpen()) {
-    gfxCriticalNote << "Attempt to dealloc a ShmemSections after shutdown.";
-    return;
-  }
-
-  FreeShmemSection(aShmemSection);
-  ShrinkShmemSectionHeap();
-}
-
-
-void
-FixedSizeSmallShmemSectionAllocator::ShrinkShmemSectionHeap()
-{
-  if (!IPCOpen()) {
-    mUsedShmems.clear();
-    return;
-  }
-
-  // The loop will terminate as we either increase i, or decrease size
-  // every time through.
-  size_t i = 0;
-  while (i < mUsedShmems.size()) {
-    ShmemSectionHeapHeader* header = mUsedShmems[i].get<ShmemSectionHeapHeader>();
-    if (header->mAllocatedBlocks == 0) {
-      GetShmAllocator()->DeallocShmem(mUsedShmems[i]);
-      // We don't particularly care about order, move the last one in the array
-      // to this position.
-      if (i < mUsedShmems.size() - 1) {
-        mUsedShmems[i] = mUsedShmems[mUsedShmems.size() - 1];
-      }
-      mUsedShmems.pop_back();
-    } else {
-      i++;
-    }
-  }
-}
-
-FixedSizeSmallShmemSectionAllocator*
-ShadowLayerForwarder::GetTileLockAllocator()
-{
-  MOZ_ASSERT(IPCOpen());
-  if (!IPCOpen()) {
-    return nullptr;
-  }
-
-  if (!mSectionAllocator) {
-    mSectionAllocator = new FixedSizeSmallShmemSectionAllocator(this);
-  }
-  return mSectionAllocator;
-}
-
 void
 CompositableForwarder::IdentifyTextureHost(const TextureFactoryIdentifier& aIdentifier)
 {
@@ -383,13 +210,14 @@ CompositableForwarder::IdentifyTextureHost(const TextureFactoryIdentifier& aIden
   mSyncObject = SyncObject::CreateSyncObject(aIdentifier.mSyncHandle);
 }
 
-ShadowLayerForwarder::ShadowLayerForwarder()
- : mMessageLoop(MessageLoop::current())
+ShadowLayerForwarder::ShadowLayerForwarder(ClientLayerManager* aClientLayerManager)
+ : CompositableForwarder("ShadowLayerForwarder")
+ , mClientLayerManager(aClientLayerManager)
+ , mMessageLoop(MessageLoop::current())
  , mDiagnosticTypes(DiagnosticTypes::NO_DIAGNOSTIC)
  , mIsFirstPaint(false)
  , mWindowOverlayChanged(false)
  , mPaintSyncId(0)
- , mSectionAllocator(nullptr)
 {
   mTxn = new Transaction();
 }
@@ -405,10 +233,6 @@ ShadowLayerForwarder::~ShadowLayerForwarder()
     mShadowManager->SetForwarder(nullptr);
     mShadowManager->Destroy();
   }
-
-  if (mSectionAllocator) {
-    delete mSectionAllocator;
-  }
 }
 
 void
@@ -418,6 +242,7 @@ ShadowLayerForwarder::BeginTransaction(const gfx::IntRect& aTargetBounds,
 {
   MOZ_ASSERT(HasShadowManager(), "no manager to forward to");
   MOZ_ASSERT(mTxn->Finished(), "uncommitted txn?");
+  UpdateFwdTransactionId();
   mTxn->Begin(aTargetBounds, aRotation, aOrientation);
 }
 
@@ -564,6 +389,24 @@ ShadowLayerForwarder::UseTiledLayerBuffer(CompositableClient* aCompositable,
 {
   MOZ_ASSERT(aCompositable && aCompositable->IsConnected());
 
+#ifdef MOZ_WIDGET_GONK
+  // GrallocTextureData alwasys requests fence delivery if ANDROID_VERSION >= 17.
+  const InfallibleTArray<TileDescriptor>& tileDescriptors = aTileLayerDescriptor.tiles();
+  for (size_t i = 0; i < tileDescriptors.Length(); i++) {
+    const TileDescriptor& tileDesc = tileDescriptors[i];
+    if (tileDesc.type() != TileDescriptor::TTexturedTileDescriptor) {
+      continue;
+    }
+    const TexturedTileDescriptor& texturedDesc = tileDesc.get_TexturedTileDescriptor();
+    RefPtr<TextureClient> texture = TextureClient::AsTextureClient(texturedDesc.textureChild());
+    mClientLayerManager->GetCompositorBridgeChild()->HoldUntilCompositableRefReleasedIfNecessary(texture);
+    if (texturedDesc.textureOnWhite().type() == MaybeTexture::TPTextureChild) {
+      texture = TextureClient::AsTextureClient(texturedDesc.textureOnWhite().get_PTextureChild());
+      mClientLayerManager->GetCompositorBridgeChild()->HoldUntilCompositableRefReleasedIfNecessary(texture);
+    }
+  }
+#endif
+
   mTxn->AddNoSwapPaint(CompositableOperation(nullptr, aCompositable->GetIPDLActor(),
                                              OpUseTiledLayerBuffer(aTileLayerDescriptor)));
 }
@@ -610,6 +453,7 @@ ShadowLayerForwarder::UseTextures(CompositableClient* aCompositable,
       // to be synchronous.
       mTxn->MarkSyncTransaction();
     }
+    mClientLayerManager->GetCompositorBridgeChild()->HoldUntilCompositableRefReleasedIfNecessary(t.mTextureClient);
   }
   mTxn->AddEdit(CompositableOperation(nullptr, aCompositable->GetIPDLActor(),
                                       OpUseTexture(textures)));
@@ -633,6 +477,9 @@ ShadowLayerForwarder::UseComponentAlphaTextures(CompositableClient* aCompositabl
   ReadLockDescriptor readLockB;
   aTextureOnBlack->SerializeReadLock(readLockB);
   aTextureOnWhite->SerializeReadLock(readLockW);
+
+  mClientLayerManager->GetCompositorBridgeChild()->HoldUntilCompositableRefReleasedIfNecessary(aTextureOnBlack);
+  mClientLayerManager->GetCompositorBridgeChild()->HoldUntilCompositableRefReleasedIfNecessary(aTextureOnWhite);
 
   mTxn->AddEdit(
     CompositableOperation(
@@ -713,29 +560,7 @@ ShadowLayerForwarder::RemoveTextureFromCompositableAsync(AsyncTransactionTracker
                                                          CompositableClient* aCompositable,
                                                          TextureClient* aTexture)
 {
-  MOZ_ASSERT(aCompositable);
-  MOZ_ASSERT(aTexture);
-  MOZ_ASSERT(aCompositable->IsConnected());
-  MOZ_ASSERT(aTexture->GetIPDLActor());
-
-  CompositableOperation op(
-    nullptr, aCompositable->GetIPDLActor(),
-    OpRemoveTextureAsync(CompositableClient::GetTrackersHolderId(aCompositable->GetIPDLActor()),
-      aAsyncTransactionTracker->GetId(),
-      nullptr, aCompositable->GetIPDLActor(),
-      nullptr, aTexture->GetIPDLActor()));
-
-#ifdef MOZ_WIDGET_GONK
-  mPendingAsyncMessages.push_back(op);
-#else
-  if (mTxn->Opened() && aCompositable->IsConnected()) {
-    mTxn->AddEdit(op);
-  } else {
-    NS_RUNTIMEABORT("not reached");
-  }
-#endif
-  CompositableClient::HoldUntilComplete(aCompositable->GetIPDLActor(),
-                                        aAsyncTransactionTracker);
+  NS_RUNTIMEABORT("not reached");
 }
 
 bool
@@ -924,6 +749,7 @@ ShadowLayerForwarder::EndTransaction(InfallibleTArray<EditReply>* aReplies,
     if (!HasShadowManager() ||
         !mShadowManager->IPCOpen() ||
         !mShadowManager->SendUpdate(cset, mTxn->mDestroyedActors,
+                                    GetFwdTransactionId(),
                                     aId, targetConfig, mPluginWindowData,
                                     mIsFirstPaint, aScheduleComposite,
                                     aPaintSequenceNumber, aIsRepeatTransaction,
@@ -940,6 +766,7 @@ ShadowLayerForwarder::EndTransaction(InfallibleTArray<EditReply>* aReplies,
     if (!HasShadowManager() ||
         !mShadowManager->IPCOpen() ||
         !mShadowManager->SendUpdateNoSwap(cset, mTxn->mDestroyedActors,
+                                          GetFwdTransactionId(),
                                           aId, targetConfig, mPluginWindowData,
                                           mIsFirstPaint, aScheduleComposite,
                                           aPaintSequenceNumber, aIsRepeatTransaction,
@@ -1084,14 +911,15 @@ void ShadowLayerForwarder::AttachAsyncCompositable(uint64_t aCompositableID,
 PTextureChild*
 ShadowLayerForwarder::CreateTexture(const SurfaceDescriptor& aSharedData,
                                     LayersBackend aLayersBackend,
-                                    TextureFlags aFlags)
+                                    TextureFlags aFlags,
+                                    uint64_t aSerial)
 {
   if (!HasShadowManager() ||
       !mShadowManager->IPCOpen() ||
       !mShadowManager->Manager()) {
     return nullptr;
   }
-  return mShadowManager->Manager()->SendPTextureConstructor(aSharedData, aLayersBackend, aFlags, mShadowManager->GetId());
+  return mShadowManager->Manager()->SendPTextureConstructor(aSharedData, aLayersBackend, aFlags, mShadowManager->GetId(), aSerial);
 }
 
 
@@ -1107,7 +935,6 @@ void ShadowLayerForwarder::StopReceiveAsyncParentMessge()
       !mShadowManager->IPCOpen()) {
     return;
   }
-  SendPendingAsyncMessges();
   mShadowManager->SetForwarder(nullptr);
 }
 
@@ -1117,7 +944,6 @@ void ShadowLayerForwarder::ClearCachedResources()
       !mShadowManager->IPCOpen()) {
     return;
   }
-  SendPendingAsyncMessges();
   mShadowManager->SendClearCachedResources();
 }
 
@@ -1128,27 +954,6 @@ void ShadowLayerForwarder::Composite()
     return;
   }
   mShadowManager->SendForceComposite();
-}
-
-void ShadowLayerForwarder::SendPendingAsyncMessges()
-{
-  if (!HasShadowManager() ||
-      !mShadowManager->IPCOpen()) {
-    mPendingAsyncMessages.clear();
-    return;
-  }
-
-  if (mPendingAsyncMessages.empty()) {
-    return;
-  }
-
-  InfallibleTArray<AsyncChildMessageData> replies;
-  // Prepare pending messages.
-  for (size_t i = 0; i < mPendingAsyncMessages.size(); i++) {
-    replies.AppendElement(mPendingAsyncMessages[i]);
-  }
-  mPendingAsyncMessages.clear();
-  mShadowManager->SendChildAsyncMessages(replies);
 }
 
 bool
@@ -1162,7 +967,7 @@ uint8_t*
 GetAddressFromDescriptor(const SurfaceDescriptor& aDescriptor)
 {
   MOZ_ASSERT(IsSurfaceDescriptorValid(aDescriptor));
-  MOZ_RELEASE_ASSERT(aDescriptor.type() == SurfaceDescriptor::TSurfaceDescriptorBuffer);
+  MOZ_RELEASE_ASSERT(aDescriptor.type() == SurfaceDescriptor::TSurfaceDescriptorBuffer, "GFX: surface descriptor is not the right type.");
 
   auto memOrShmem = aDescriptor.get_SurfaceDescriptorBuffer().data();
   if (memOrShmem.type() == MemoryOrShmem::TShmem) {
@@ -1286,6 +1091,34 @@ ShadowLayerForwarder::DestroySurfaceDescriptor(SurfaceDescriptor* aSurface)
       NS_RUNTIMEABORT("surface type not implemented!");
   }
   *aSurface = SurfaceDescriptor();
+}
+
+void
+ShadowLayerForwarder::UpdateFwdTransactionId()
+{
+  GetCompositorBridgeChild()->UpdateFwdTransactionId();
+}
+
+uint64_t
+ShadowLayerForwarder::GetFwdTransactionId()
+{
+  return GetCompositorBridgeChild()->GetFwdTransactionId();
+}
+
+void
+ShadowLayerForwarder::CancelWaitForRecycle(uint64_t aTextureId)
+{
+  GetCompositorBridgeChild()->CancelWaitForRecycle(aTextureId);
+}
+
+CompositorBridgeChild*
+ShadowLayerForwarder::GetCompositorBridgeChild()
+{
+  if (mCompositorBridgeChild) {
+    return mCompositorBridgeChild;
+  }
+  mCompositorBridgeChild = mClientLayerManager->GetCompositorBridgeChild();
+  return mCompositorBridgeChild;
 }
 
 } // namespace layers

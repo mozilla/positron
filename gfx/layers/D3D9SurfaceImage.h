@@ -8,7 +8,6 @@
 
 #include "mozilla/RefPtr.h"
 #include "ImageContainer.h"
-#include "nsAutoPtr.h"
 #include "d3d9.h"
 #include "mozilla/layers/TextureClientRecycleAllocator.h"
 
@@ -20,7 +19,7 @@ class TextureClient;
 class D3D9RecycleAllocator : public TextureClientRecycleAllocator
 {
 public:
-  explicit D3D9RecycleAllocator(CompositableForwarder* aAllocator,
+  explicit D3D9RecycleAllocator(TextureForwarder* aAllocator,
                                 IDirect3DDevice9* aDevice)
     : TextureClientRecycleAllocator(aAllocator)
     , mDevice(aDevice)

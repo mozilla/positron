@@ -1271,7 +1271,12 @@ IonBuilder::initArgumentsObject()
     JitSpew(JitSpew_IonMIR, "%s:%" PRIuSIZE " - Emitting code to initialize arguments object! block=%p",
                               script()->filename(), script()->lineno(), current);
     MOZ_ASSERT(info().needsArgsObj());
-    MCreateArgumentsObject* argsObj = MCreateArgumentsObject::New(alloc(), current->scopeChain());
+
+    bool mapped = script()->hasMappedArgsObj();
+    ArgumentsObject* templateObj = script()->compartment()->maybeArgumentsTemplateObject(mapped);
+
+    MCreateArgumentsObject* argsObj =
+        MCreateArgumentsObject::New(alloc(), current->scopeChain(), templateObj);
     current->add(argsObj);
     current->setArgumentsObject(argsObj);
     return true;
@@ -9825,7 +9830,7 @@ IonBuilder::jsop_getelem_dense(MDefinition* obj, MDefinition* index, JSValueType
 MInstruction*
 IonBuilder::addArrayBufferByteLength(MDefinition* obj)
 {
-    MLoadFixedSlot* ins = MLoadFixedSlot::New(alloc(), obj, ArrayBufferObject::BYTE_LENGTH_SLOT);
+    MLoadFixedSlot* ins = MLoadFixedSlot::New(alloc(), obj, size_t(ArrayBufferObject::BYTE_LENGTH_SLOT));
     current->add(ins);
     ins->setResultType(MIRType::Int32);
     return ins;

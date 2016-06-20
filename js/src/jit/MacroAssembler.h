@@ -1632,23 +1632,29 @@ class MacroAssembler : public MacroAssemblerSpecific
 
     void convertValueToFloatingPoint(ValueOperand value, FloatRegister output, Label* fail,
                                      MIRType outputType);
-    bool convertValueToFloatingPoint(JSContext* cx, const Value& v, FloatRegister output,
-                                     Label* fail, MIRType outputType);
-    bool convertConstantOrRegisterToFloatingPoint(JSContext* cx, ConstantOrRegister src,
+    MOZ_MUST_USE bool convertValueToFloatingPoint(JSContext* cx, const Value& v,
                                                   FloatRegister output, Label* fail,
                                                   MIRType outputType);
+    MOZ_MUST_USE bool convertConstantOrRegisterToFloatingPoint(JSContext* cx,
+                                                               ConstantOrRegister src,
+                                                               FloatRegister output, Label* fail,
+                                                               MIRType outputType);
     void convertTypedOrValueToFloatingPoint(TypedOrValueRegister src, FloatRegister output,
                                             Label* fail, MIRType outputType);
+
+    void outOfLineTruncateSlow(FloatRegister src, Register dest, bool widenFloatToDouble,
+                               bool compilingAsmJS);
 
     void convertInt32ValueToDouble(const Address& address, Register scratch, Label* done);
     void convertValueToDouble(ValueOperand value, FloatRegister output, Label* fail) {
         convertValueToFloatingPoint(value, output, fail, MIRType::Double);
     }
-    bool convertValueToDouble(JSContext* cx, const Value& v, FloatRegister output, Label* fail) {
+    MOZ_MUST_USE bool convertValueToDouble(JSContext* cx, const Value& v, FloatRegister output,
+                                           Label* fail) {
         return convertValueToFloatingPoint(cx, v, output, fail, MIRType::Double);
     }
-    bool convertConstantOrRegisterToDouble(JSContext* cx, ConstantOrRegister src,
-                                           FloatRegister output, Label* fail)
+    MOZ_MUST_USE bool convertConstantOrRegisterToDouble(JSContext* cx, ConstantOrRegister src,
+                                                        FloatRegister output, Label* fail)
     {
         return convertConstantOrRegisterToFloatingPoint(cx, src, output, fail, MIRType::Double);
     }
@@ -1659,11 +1665,12 @@ class MacroAssembler : public MacroAssemblerSpecific
     void convertValueToFloat(ValueOperand value, FloatRegister output, Label* fail) {
         convertValueToFloatingPoint(value, output, fail, MIRType::Float32);
     }
-    bool convertValueToFloat(JSContext* cx, const Value& v, FloatRegister output, Label* fail) {
+    MOZ_MUST_USE bool convertValueToFloat(JSContext* cx, const Value& v, FloatRegister output,
+                                          Label* fail) {
         return convertValueToFloatingPoint(cx, v, output, fail, MIRType::Float32);
     }
-    bool convertConstantOrRegisterToFloat(JSContext* cx, ConstantOrRegister src,
-                                          FloatRegister output, Label* fail)
+    MOZ_MUST_USE bool convertConstantOrRegisterToFloat(JSContext* cx, ConstantOrRegister src,
+                                                       FloatRegister output, Label* fail)
     {
         return convertConstantOrRegisterToFloatingPoint(cx, src, output, fail, MIRType::Float32);
     }
@@ -1706,10 +1713,11 @@ class MacroAssembler : public MacroAssemblerSpecific
         convertValueToInt(value, nullptr, nullptr, nullptr, nullptr, InvalidReg, temp, output,
                           fail, behavior);
     }
-    bool convertValueToInt(JSContext* cx, const Value& v, Register output, Label* fail,
-                           IntConversionBehavior behavior);
-    bool convertConstantOrRegisterToInt(JSContext* cx, ConstantOrRegister src, FloatRegister temp,
-                                        Register output, Label* fail, IntConversionBehavior behavior);
+    MOZ_MUST_USE bool convertValueToInt(JSContext* cx, const Value& v, Register output, Label* fail,
+                                        IntConversionBehavior behavior);
+    MOZ_MUST_USE bool convertConstantOrRegisterToInt(JSContext* cx, ConstantOrRegister src,
+                                                     FloatRegister temp, Register output,
+                                                     Label* fail, IntConversionBehavior behavior);
     void convertTypedOrValueToInt(TypedOrValueRegister src, FloatRegister temp, Register output,
                                   Label* fail, IntConversionBehavior behavior);
 
@@ -1733,15 +1741,16 @@ class MacroAssembler : public MacroAssemblerSpecific
                           : IntConversion_Normal,
                           conversion);
     }
-    bool convertValueToInt32(JSContext* cx, const Value& v, Register output, Label* fail,
-                             bool negativeZeroCheck)
+    MOZ_MUST_USE bool convertValueToInt32(JSContext* cx, const Value& v, Register output,
+                                          Label* fail, bool negativeZeroCheck)
     {
         return convertValueToInt(cx, v, output, fail, negativeZeroCheck
                                  ? IntConversion_NegativeZeroCheck
                                  : IntConversion_Normal);
     }
-    bool convertConstantOrRegisterToInt32(JSContext* cx, ConstantOrRegister src, FloatRegister temp,
-                                          Register output, Label* fail, bool negativeZeroCheck)
+    MOZ_MUST_USE bool convertConstantOrRegisterToInt32(JSContext* cx, ConstantOrRegister src,
+                                                       FloatRegister temp, Register output,
+                                                       Label* fail, bool negativeZeroCheck)
     {
         return convertConstantOrRegisterToInt(cx, src, temp, output, fail, negativeZeroCheck
                                               ? IntConversion_NegativeZeroCheck
@@ -1775,11 +1784,13 @@ class MacroAssembler : public MacroAssemblerSpecific
         convertValueToInt(value, input, nullptr, nullptr, nullptr, InvalidReg, temp, output, fail,
                           IntConversion_Truncate);
     }
-    bool truncateValueToInt32(JSContext* cx, const Value& v, Register output, Label* fail) {
+    MOZ_MUST_USE bool truncateValueToInt32(JSContext* cx, const Value& v, Register output,
+                                           Label* fail) {
         return convertValueToInt(cx, v, output, fail, IntConversion_Truncate);
     }
-    bool truncateConstantOrRegisterToInt32(JSContext* cx, ConstantOrRegister src, FloatRegister temp,
-                                           Register output, Label* fail)
+    MOZ_MUST_USE bool truncateConstantOrRegisterToInt32(JSContext* cx, ConstantOrRegister src,
+                                                        FloatRegister temp, Register output,
+                                                        Label* fail)
     {
         return convertConstantOrRegisterToInt(cx, src, temp, output, fail, IntConversion_Truncate);
     }
@@ -1806,11 +1817,13 @@ class MacroAssembler : public MacroAssemblerSpecific
         convertValueToInt(value, input, nullptr, nullptr, nullptr, InvalidReg, temp, output, fail,
                           IntConversion_ClampToUint8);
     }
-    bool clampValueToUint8(JSContext* cx, const Value& v, Register output, Label* fail) {
+    MOZ_MUST_USE bool clampValueToUint8(JSContext* cx, const Value& v, Register output,
+                                        Label* fail) {
         return convertValueToInt(cx, v, output, fail, IntConversion_ClampToUint8);
     }
-    bool clampConstantOrRegisterToUint8(JSContext* cx, ConstantOrRegister src, FloatRegister temp,
-                                        Register output, Label* fail)
+    MOZ_MUST_USE bool clampConstantOrRegisterToUint8(JSContext* cx, ConstantOrRegister src,
+                                                     FloatRegister temp, Register output,
+                                                     Label* fail)
     {
         return convertConstantOrRegisterToInt(cx, src, temp, output, fail,
                                               IntConversion_ClampToUint8);
@@ -1841,7 +1854,7 @@ class MacroAssembler : public MacroAssemblerSpecific
     void restoreFrameAlignmentForICArguments(AfterICSaveLive& aic) PER_ARCH;
 
     AfterICSaveLive icSaveLive(LiveRegisterSet& liveRegs);
-    bool icBuildOOLFakeExitFrame(void* fakeReturnAddr, AfterICSaveLive& aic);
+    MOZ_MUST_USE bool icBuildOOLFakeExitFrame(void* fakeReturnAddr, AfterICSaveLive& aic);
     void icRestoreLive(LiveRegisterSet& liveRegs, AfterICSaveLive& aic);
 
     // Align the stack pointer based on the number of arguments which are pushed

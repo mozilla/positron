@@ -18,7 +18,7 @@ config = {
     }, {
         "vcs": "hgtool",
         "repo": "https://hg.mozilla.org/releases/mozilla-release",
-        "revision": "default",
+        "revision": "%(revision)s",
         "dest": "mozilla-release",
     }, {
         "vcs": "hgtool",
@@ -31,6 +31,7 @@ config = {
     'default_actions': [
         "clobber",
         "pull",
+        "clone-locales",
         "list-locales",
         "setup",
         "repack",
