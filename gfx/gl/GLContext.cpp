@@ -100,6 +100,7 @@ static const char* const sExtensionNames[] = {
     "GL_ARB_robustness",
     "GL_ARB_sampler_objects",
     "GL_ARB_seamless_cube_map",
+    "GL_ARB_shader_texture_lod",
     "GL_ARB_sync",
     "GL_ARB_texture_compression",
     "GL_ARB_texture_float",
@@ -470,7 +471,7 @@ bool
 GLContext::InitWithPrefix(const char* prefix, bool trygl)
 {
     MOZ_RELEASE_ASSERT(!mSymbols.fBindFramebuffer,
-                       "InitWithPrefix should only be called once.");
+                       "GFX: InitWithPrefix should only be called once.");
 
     ScopedGfxFeatureReporter reporter("GL Context");
 
@@ -825,7 +826,7 @@ GLContext::InitWithPrefixImpl(const char* prefix, bool trygl)
         };
 
         if (!LoadGLSymbols(this, prefix, trygl, symbols, "get_string_indexed")) {
-            MOZ_RELEASE_ASSERT(false, "get_string_indexed is required!");
+            MOZ_RELEASE_ASSERT(false, "GFX: get_string_indexed is required!");
             return false;
         }
     }
@@ -966,7 +967,7 @@ GLContext::InitWithPrefixImpl(const char* prefix, bool trygl)
         NS_ERROR("GLContext requires support for framebuffer objects.");
         return false;
     }
-    MOZ_RELEASE_ASSERT(mSymbols.fBindFramebuffer);
+    MOZ_RELEASE_ASSERT(mSymbols.fBindFramebuffer, "GFX: mSymbols.fBindFramebuffer zero or not set.");
 
     ////////////////
 

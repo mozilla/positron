@@ -34,6 +34,7 @@
 #include "mozilla/Logging.h"
 #include "mozilla/NotNull.h"
 #include "nsIContentPolicy.h"
+#include "nsPIDOMWindow.h"
 
 #if defined(XP_WIN)
 // Undefine LoadImage to prevent naming conflict with Windows.
@@ -129,6 +130,11 @@ class nsIContentParent;
 class Selection;
 class TabParent;
 } // namespace dom
+
+namespace ipc {
+class Shmem;
+class IShmemAllocator;
+}
 
 namespace gfx {
 class DataSourceSurface;
@@ -2392,6 +2398,15 @@ public:
                                       CallOnRemoteChildFunction aCallback,
                                       void* aArg);
 
+  /*
+   * Call nsPIDOMWindow::SetKeyboardIndicators all all remote children. This is
+   * in here rather than nsGlobalWindow because TabParent indirectly includes
+   * Windows headers which aren't allowed there.
+   */
+  static void SetKeyboardIndicatorsOnRemoteChildren(nsPIDOMWindowOuter* aWindow,
+                                                    UIStateChangeType aShowAccelerators,
+                                                    UIStateChangeType aShowFocusRings);
+
   /**
    * Given an nsIFile, attempts to read it into aString.
    *
@@ -2441,6 +2456,15 @@ public:
   static mozilla::UniquePtr<char[]> GetSurfaceData(
     mozilla::NotNull<mozilla::gfx::DataSourceSurface*> aSurface,
     size_t* aLength, int32_t* aStride);
+
+  /*
+   * Get the pixel data from the given source surface and fill it in Shmem.
+   * The length and stride will be assigned from the surface.
+   */
+  static void GetSurfaceData(mozilla::gfx::DataSourceSurface* aSurface,
+                             size_t* aLength, int32_t* aStride,
+                             mozilla::ipc::IShmemAllocator* aAlloc,
+                             mozilla::ipc::Shmem *aOutShmem);
 
   // Helpers shared by the implementations of nsContentUtils methods and
   // nsIDOMWindowUtils methods.

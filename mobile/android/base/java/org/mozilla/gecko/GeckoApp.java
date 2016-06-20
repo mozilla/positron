@@ -1299,9 +1299,9 @@ public abstract class GeckoApp
                     }
                 }
 
-                synchronized (this) {
+                synchronized (GeckoApp.this) {
                     mSessionRestoreParsingFinished = true;
-                    notifyAll();
+                    GeckoApp.this.notifyAll();
                 }
 
                 // If we are doing a restore, send the parsed session data to Gecko.
@@ -1453,14 +1453,17 @@ public abstract class GeckoApp
     /**
      * Loads the initial tab at Fennec startup. If we don't restore tabs, this
      * tab will be about:home, or the homepage if the user has set one.
-     * If we've temporarily disabled restoring to break out of a crash loop, we'll
-     * show the recent tabs panel so the user can manually restore tabs as needed.
+     * If we've temporarily disabled restoring to break out of a crash loop, we'll show
+     * the Recent Tabs folder of the Combined History panel, so the user can manually
+     * restore tabs as needed.
      * If we restore tabs, we don't need to create a new tab.
      */
     protected void loadStartupTab(final int flags) {
         if (!mShouldRestore) {
             if (mLastSessionCrashed) {
-                Tabs.getInstance().loadUrl(AboutPages.getURLForBuiltinPanelType(PanelType.RECENT_TABS), flags);
+                // The Recent Tabs panel no longer exists, but BrowserApp will redirect us
+                // to the Recent Tabs folder of the Combined History panel.
+                Tabs.getInstance().loadUrl(AboutPages.getURLForBuiltinPanelType(PanelType.DEPRECATED_RECENT_TABS), flags);
             } else {
                 final String homepage = getHomepage();
                 Tabs.getInstance().loadUrl(!TextUtils.isEmpty(homepage) ? homepage : AboutPages.HOME, flags);
@@ -1602,11 +1605,6 @@ public abstract class GeckoApp
                 if (rec != null) {
                     rec.recordJavaStartupTime(javaDuration);
                 }
-
-                // Kick off our background services. We do this by invoking the broadcast
-                // receiver, which uses the system alarm infrastructure to perform tasks at
-                // intervals.
-                GeckoPreferences.broadcastHealthReportUploadPref(GeckoApp.this);
             }
         }, 50);
 
@@ -2142,11 +2140,6 @@ public abstract class GeckoApp
                 }
 
                 editor.apply();
-
-                // In theory, the first browser session will not run long enough that we need to
-                // prune during it and we'd rather run it when the browser is inactive so we wait
-                // until here to register the prune service.
-                GeckoPreferences.broadcastHealthReportPrune(context);
             }
         });
 

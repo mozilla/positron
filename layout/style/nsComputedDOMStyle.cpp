@@ -221,12 +221,14 @@ nsComputedDOMStyle::nsComputedDOMStyle(dom::Element* aElement,
                                        const nsAString& aPseudoElt,
                                        nsIPresShell* aPresShell,
                                        StyleType aStyleType)
-  : mDocumentWeak(nullptr), mOuterFrame(nullptr),
-    mInnerFrame(nullptr), mPresShell(nullptr),
-    mStyleType(aStyleType),
-    mStyleContextGeneration(0),
-    mExposeVisitedStyle(false),
-    mResolvedStyleContext(false)
+  : mDocumentWeak(nullptr)
+  , mOuterFrame(nullptr)
+  , mInnerFrame(nullptr)
+  , mPresShell(nullptr)
+  , mStyleType(aStyleType)
+  , mStyleContextGeneration(0)
+  , mExposeVisitedStyle(false)
+  , mResolvedStyleContext(false)
 {
   MOZ_ASSERT(aElement && aPresShell);
 
@@ -262,7 +264,6 @@ nsComputedDOMStyle::nsComputedDOMStyle(dom::Element* aElement,
 
   MOZ_ASSERT(aPresShell->GetPresContext());
 }
-
 
 nsComputedDOMStyle::~nsComputedDOMStyle()
 {
@@ -325,7 +326,6 @@ nsComputedDOMStyle::SetPropertyValue(const nsCSSProperty aPropID,
   return NS_ERROR_DOM_NO_MODIFICATION_ALLOWED_ERR;
 }
 
-
 NS_IMETHODIMP
 nsComputedDOMStyle::GetCssText(nsAString& aCssText)
 {
@@ -334,13 +334,11 @@ nsComputedDOMStyle::GetCssText(nsAString& aCssText)
   return NS_OK;
 }
 
-
 NS_IMETHODIMP
 nsComputedDOMStyle::SetCssText(const nsAString& aCssText)
 {
   return NS_ERROR_DOM_NO_MODIFICATION_ALLOWED_ERR;
 }
-
 
 NS_IMETHODIMP
 nsComputedDOMStyle::GetLength(uint32_t* aLength)
@@ -363,7 +361,6 @@ nsComputedDOMStyle::GetLength(uint32_t* aLength)
   return NS_OK;
 }
 
-
 NS_IMETHODIMP
 nsComputedDOMStyle::GetParentRule(nsIDOMCSSRule** aParentRule)
 {
@@ -371,7 +368,6 @@ nsComputedDOMStyle::GetParentRule(nsIDOMCSSRule** aParentRule)
 
   return NS_OK;
 }
-
 
 NS_IMETHODIMP
 nsComputedDOMStyle::GetPropertyValue(const nsAString& aPropertyName,
@@ -542,16 +538,8 @@ nsComputedDOMStyle::GetAdjustedValuesForBoxSizing()
   const nsStylePosition* stylePos = StylePosition();
 
   nsMargin adjustment;
-  switch(stylePos->mBoxSizing) {
-    case StyleBoxSizing::Border:
-      adjustment += mInnerFrame->GetUsedBorder();
-      MOZ_FALLTHROUGH;
-    case StyleBoxSizing::Padding:
-      adjustment += mInnerFrame->GetUsedPadding();
-      MOZ_FALLTHROUGH;
-    case StyleBoxSizing::Content:
-      // nothing
-      break;
+  if (stylePos->mBoxSizing == StyleBoxSizing::Border) {
+    adjustment = mInnerFrame->GetUsedBorderAndPadding();
   }
 
   return adjustment;
@@ -676,13 +664,13 @@ nsComputedDOMStyle::UpdateCurrentStyleSources(bool aNeedsLayoutFlush)
     mInnerFrame = mOuterFrame;
     if (mOuterFrame) {
       nsIAtom* type = mOuterFrame->GetType();
-      if (type == nsGkAtoms::tableOuterFrame) {
-        // If the frame is an outer table frame then we should get the style
+      if (type == nsGkAtoms::tableWrapperFrame) {
+        // If the frame is a table wrapper frame then we should get the style
         // from the inner table frame.
         mInnerFrame = mOuterFrame->PrincipalChildList().FirstChild();
-        NS_ASSERTION(mInnerFrame, "Outer table must have an inner");
+        NS_ASSERTION(mInnerFrame, "table wrapper must have an inner");
         NS_ASSERTION(!mInnerFrame->GetNextSibling(),
-                     "Outer table frames should have just one child, "
+                     "table wrapper frames should have just one child, "
                      "the inner table");
       }
 
@@ -824,7 +812,6 @@ nsComputedDOMStyle::GetPropertyCSSValue(const nsAString& aPropertyName, ErrorRes
   return val.forget();
 }
 
-
 NS_IMETHODIMP
 nsComputedDOMStyle::RemoveProperty(const nsAString& aPropertyName,
                                    nsAString& aReturn)
@@ -842,7 +829,6 @@ nsComputedDOMStyle::GetPropertyPriority(const nsAString& aPropertyName,
   return NS_OK;
 }
 
-
 NS_IMETHODIMP
 nsComputedDOMStyle::SetProperty(const nsAString& aPropertyName,
                                 const nsAString& aValue,
@@ -851,7 +837,6 @@ nsComputedDOMStyle::SetProperty(const nsAString& aPropertyName,
   return NS_ERROR_DOM_NO_MODIFICATION_ALLOWED_ERR;
 }
 
-
 NS_IMETHODIMP
 nsComputedDOMStyle::Item(uint32_t aIndex, nsAString& aReturn)
 {
@@ -859,7 +844,8 @@ nsComputedDOMStyle::Item(uint32_t aIndex, nsAString& aReturn)
 }
 
 void
-nsComputedDOMStyle::IndexedGetter(uint32_t aIndex, bool& aFound,
+nsComputedDOMStyle::IndexedGetter(uint32_t   aIndex,
+                                  bool&      aFound,
                                   nsAString& aPropName)
 {
   nsComputedStyleMap* map = GetComputedStyleMap();
@@ -925,7 +911,7 @@ already_AddRefed<CSSValue>
 nsComputedDOMStyle::DoGetFloat()
 {
   RefPtr<nsROCSSPrimitiveValue> val = new nsROCSSPrimitiveValue;
-  val->SetIdent(nsCSSProps::ValueToKeywordEnum(StyleDisplay()->mFloats,
+  val->SetIdent(nsCSSProps::ValueToKeywordEnum(StyleDisplay()->mFloat,
                                                nsCSSProps::kFloatKTable));
   return val.forget();
 }
@@ -1856,9 +1842,9 @@ nsComputedDOMStyle::DoGetBackgroundColor()
   return val.forget();
 }
 
-
 static void
-SetValueToCalc(const nsStyleCoord::CalcValue *aCalc, nsROCSSPrimitiveValue *aValue)
+SetValueToCalc(const nsStyleCoord::CalcValue* aCalc,
+               nsROCSSPrimitiveValue*         aValue)
 {
   RefPtr<nsROCSSPrimitiveValue> val = new nsROCSSPrimitiveValue;
   nsAutoString tmp, result;
@@ -1883,9 +1869,9 @@ SetValueToCalc(const nsStyleCoord::CalcValue *aCalc, nsROCSSPrimitiveValue *aVal
 }
 
 static void
-AppendCSSGradientLength(const nsStyleCoord& aValue,
+AppendCSSGradientLength(const nsStyleCoord&    aValue,
                         nsROCSSPrimitiveValue* aPrimitive,
-                        nsAString& aString)
+                        nsAString&             aString)
 {
   nsAutoString tokenString;
   if (aValue.IsCalcUnit())
@@ -1900,8 +1886,8 @@ AppendCSSGradientLength(const nsStyleCoord& aValue,
 
 static void
 AppendCSSGradientToBoxPosition(const nsStyleGradient* aGradient,
-                               nsAString& aString,
-                               bool& aNeedSep)
+                               nsAString&             aString,
+                               bool&                  aNeedSep)
 {
   float xValue = aGradient->mBgPosX.GetPercentValue();
   float yValue = aGradient->mBgPosY.GetPercentValue();
@@ -5209,7 +5195,7 @@ nsComputedDOMStyle::GetMarginWidthFor(mozilla::css::Side aSide)
     AssertFlushedPendingReflows();
 
     // For tables, GetUsedMargin always returns an empty margin, so we
-    // should read the margin from the outer table frame instead.
+    // should read the margin from the table wrapper frame instead.
     val->SetAppUnits(mOuterFrame->GetUsedMargin().Side(aSide));
     NS_ASSERTION(mOuterFrame == mInnerFrame ||
                  mInnerFrame->GetUsedMargin() == nsMargin(0, 0, 0, 0),

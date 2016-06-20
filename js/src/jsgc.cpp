@@ -5537,10 +5537,6 @@ GCRuntime::compactPhase(JS::gcreason::Reason reason, SliceBudget& sliceBudget,
 #ifdef DEBUG
     CheckHashTablesAfterMovingGC(rt);
 #endif
-#ifdef JS_GC_ZEAL
-    if (rt->hasZealMode(ZealMode::CheckHeapOnMovingGC))
-        CheckHeapAfterMovingGC(rt, lock);
-#endif
 
     return zonesToMaybeCompact.isEmpty() ? Finished : NotFinished;
 }
@@ -6309,6 +6305,13 @@ GCRuntime::collect(bool nonincrementalByAPI, SliceBudget budget, JS::gcreason::R
     } while (repeat);
 
     agc.setCycleCount(cycleCount);
+
+#ifdef JS_GC_ZEAL
+    if (shouldCompact() && rt->hasZealMode(ZealMode::CheckHeapOnMovingGC)) {
+        gcstats::AutoPhase ap(rt->gc.stats, gcstats::PHASE_TRACE_HEAP);
+        CheckHeapAfterMovingGC(rt);
+    }
+#endif
 }
 
 js::AutoEnqueuePendingParseTasksAfterGC::~AutoEnqueuePendingParseTasksAfterGC()
@@ -6516,6 +6519,11 @@ GCRuntime::minorGCImpl(JS::gcreason::Reason reason, Nursery::ObjectGroupList* pr
     MOZ_ASSERT(nursery.isEmpty());
 
     blocksToFreeAfterMinorGC.freeAll();
+
+#ifdef JS_GC_ZEAL
+    if (rt->hasZealMode(ZealMode::CheckHeapOnMovingGC))
+        CheckHeapAfterMovingGC(rt);
+#endif
 
     AutoLockGC lock(rt);
     for (ZonesIter zone(rt, WithAtoms); !zone.done(); zone.next())
@@ -7635,6 +7643,8 @@ AutoAssertHeapBusy::checkCondition(JSRuntime *rt)
 
 void
 AutoAssertEmptyNursery::checkCondition(JSRuntime *rt) {
+    if (!noAlloc)
+        noAlloc.emplace(rt);
     this->rt = rt;
     MOZ_ASSERT(rt->gc.nursery.isEmpty());
 }
@@ -7651,3 +7661,33 @@ AutoEmptyNursery::AutoEmptyNursery(JSRuntime *rt)
 
 } /* namespace gc */
 } /* namespace js */
+
+#ifdef DEBUG
+void
+js::gc::Cell::dump(FILE* fp) const
+{
+    switch (getTraceKind()) {
+      case JS::TraceKind::Object:
+        reinterpret_cast<const JSObject*>(this)->dump(fp);
+        break;
+
+      case JS::TraceKind::String:
+          js::DumpString(reinterpret_cast<JSString*>(const_cast<Cell*>(this)), fp);
+        break;
+
+      case JS::TraceKind::Shape:
+        reinterpret_cast<const Shape*>(this)->dump(fp);
+        break;
+
+      default:
+        fprintf(fp, "%s(%p)\n", JS::GCTraceKindToAscii(getTraceKind()), (void*) this);
+    }
+}
+
+// For use in a debugger.
+void
+js::gc::Cell::dump() const
+{
+    dump(stderr);
+}
+#endif

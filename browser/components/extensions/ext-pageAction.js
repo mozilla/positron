@@ -91,7 +91,7 @@ PageAction.prototype = {
       button.setAttribute("tooltiptext", title);
       button.setAttribute("aria-label", title);
 
-      let icon = IconDetails.getURL(tabData.icon, window, this.extension);
+      let {icon} = IconDetails.getURL(tabData.icon, window, this.extension);
       button.setAttribute("src", icon);
     }
 
@@ -134,6 +134,8 @@ PageAction.prototype = {
    * if it were clicked by a user.
    *
    * This has no effect if the page action is hidden for the selected tab.
+   *
+   * @param {Window} window
    */
   triggerAction(window) {
     let pageAction = pageActionMap.get(this.extension);
@@ -203,7 +205,7 @@ PageAction.for = extension => {
 
 global.pageActionFor = PageAction.for;
 
-extensions.registerSchemaAPI("pageAction", null, (extension, context) => {
+extensions.registerSchemaAPI("pageAction", (extension, context) => {
   return {
     pageAction: {
       onClicked: new EventManager(context, "pageAction.onClicked", fire => {

@@ -94,8 +94,6 @@
 #include "mozilla/scache/StartupCache.h"
 #include "gfxPrefs.h"
 
-#include "base/histogram.h"
-
 #include "mozilla/unused.h"
 
 #ifdef XP_WIN
@@ -624,6 +622,22 @@ GetAndCleanTempDir()
     return nullptr;
   }
 
+  // If the NS_APP_CONTENT_PROCESS_TEMP_DIR is the real temp directory, don't
+  // attempt to delete it.
+  nsCOMPtr<nsIFile> realTempDir;
+  rv = NS_GetSpecialDirectory(NS_OS_TEMP_DIR, getter_AddRefs(realTempDir));
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return nullptr;
+  }
+  bool isRealTemp;
+  rv = tempDir->Equals(realTempDir, &isRealTemp);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return nullptr;
+  }
+  if (isRealTemp) {
+    return tempDir.forget();
+  }
+
   // Don't return an error if the directory doesn't exist.
   // Windows Remove() returns NS_ERROR_FILE_NOT_FOUND while
   // OS X returns NS_ERROR_FILE_TARGET_DOES_NOT_EXIST.
@@ -946,9 +960,11 @@ SYNC_ENUMS(DEFAULT, Default)
 SYNC_ENUMS(PLUGIN, Plugin)
 SYNC_ENUMS(CONTENT, Content)
 SYNC_ENUMS(IPDLUNITTEST, IPDLUnitTest)
+SYNC_ENUMS(GMPLUGIN, GMPlugin)
+SYNC_ENUMS(GPU, GPU)
 
 // .. and ensure that that is all of them:
-static_assert(GeckoProcessType_GMPlugin + 1 == GeckoProcessType_End,
+static_assert(GeckoProcessType_GPU + 1 == GeckoProcessType_End,
               "Did not find the final GeckoProcessType");
 
 NS_IMETHODIMP
@@ -4570,12 +4586,9 @@ XRE_StopLateWriteChecks(void) {
 void
 XRE_CreateStatsObject()
 {
-  // A initializer to initialize histogram collection, a chromium
-  // thing used by Telemetry (and effectively a global; it's all static).
-  // Note: purposely leaked
-  base::StatisticsRecorder* statistics_recorder = new base::StatisticsRecorder();
-  MOZ_LSAN_INTENTIONALLY_LEAK_OBJECT(statistics_recorder);
-  Unused << statistics_recorder;
+  // Initialize global variables used by histogram collection
+  // machinery that is used by by Telemetry.  Note: is never de-initialised.
+  Telemetry::CreateStatisticsRecorder();
 }
 
 int
@@ -4774,7 +4787,14 @@ MultiprocessBlockPolicy() {
     }
   }
 
-  if (disabledForA11y) {
+  // For linux nightly and aurora builds skip accessibility
+  // checks.
+  bool doAccessibilityCheck = true;
+#if defined(MOZ_WIDGET_GTK) && !defined(RELEASE_BUILD)
+  doAccessibilityCheck = false;
+#endif
+
+  if (doAccessibilityCheck && disabledForA11y) {
     gMultiprocessBlockPolicy = kE10sDisabledForAccessibility;
     return gMultiprocessBlockPolicy;
   }

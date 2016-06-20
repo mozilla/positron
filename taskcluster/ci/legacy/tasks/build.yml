@@ -1,0 +1,44 @@
+# This is the "base" task which contains the common values all builds must
+# provide.
+---
+taskId: {{build_slugid}}
+
+task:
+  created: '{{now}}'
+  deadline: '{{#from_now}}24 hours{{/from_now}}'
+  metadata:
+    source: '{{source}}'
+    owner: mozilla-taskcluster-maintenance@mozilla.com
+
+  tags:
+    createdForUser: {{owner}}
+
+  provisionerId: aws-provisioner-v1
+  schedulerId: task-graph-scheduler
+
+  payload:
+    # Two hours is long but covers edge cases (and matches bb based infra)
+    maxRunTime: 7200
+
+    env:
+      # Common environment variables for checking out gecko
+      GECKO_BASE_REPOSITORY: '{{base_repository}}'
+      GECKO_HEAD_REPOSITORY: '{{head_repository}}'
+      GECKO_HEAD_REV: '{{head_rev}}'
+      GECKO_HEAD_REF: '{{head_ref}}'
+      TOOLTOOL_REPO: 'https://git.mozilla.org/build/tooltool.git'
+      TOOLTOOL_REV: 'master'
+      MOZ_BUILD_DATE: '{{pushdate}}'
+      MOZ_SCM_LEVEL: '{{level}}'
+
+  extra:
+    build_product: '{{build_product}}'
+    build_name: '{{build_name}}'
+    build_type: '{{build_type}}'
+    index:
+      rank: {{pushlog_id}}
+    treeherder:
+      jobKind: build
+      groupSymbol: tc
+      groupName: Submitted by taskcluster
+      symbol: B

@@ -221,6 +221,7 @@ extern "C" int MOZ_XMLCheckQName(const char* ptr, const char* end,
 class imgLoader;
 
 using namespace mozilla::dom;
+using namespace mozilla::ipc;
 using namespace mozilla::gfx;
 using namespace mozilla::layers;
 using namespace mozilla::widget;
@@ -1069,9 +1070,9 @@ nsContentUtils::ParseHTMLInteger(const nsAString& aValue,
     return 0;
   }
 
-  bool negate = false;
+  int sign = 1;
   if (*iter == char16_t('-')) {
-    negate = true;
+    sign = -1;
     ++iter;
   } else if (*iter == char16_t('+')) {
     result |= eParseHTMLInteger_NonStandard;
@@ -1095,7 +1096,7 @@ nsContentUtils::ParseHTMLInteger(const nsAString& aValue,
 
   while (iter != end) {
     if (*iter >= char16_t('0') && *iter <= char16_t('9')) {
-      value = (value * 10) + (*iter - char16_t('0'));
+      value = (value * 10) + (*iter - char16_t('0')) * sign;
       ++iter;
       if (!value.isValid()) {
         result |= eParseHTMLInteger_Error | eParseHTMLInteger_ErrorOverflow;
@@ -1116,16 +1117,9 @@ nsContentUtils::ParseHTMLInteger(const nsAString& aValue,
     result |= eParseHTMLInteger_Error | eParseHTMLInteger_ErrorNoValue;
   }
 
-  if (value.isValid() && negate) {
-    value = -value;
-    // Checking the special case of -0.
-    if (value == 0) {
-      result |= eParseHTMLInteger_NonStandard;
-    }
-  }
-
   if (value.isValid() &&
-      (leadingZeros > 1 || (leadingZeros == 1 && !(value == 0)))) {
+       ((leadingZeros > 1 || (leadingZeros == 1 && !(value == 0))) ||
+       (sign == -1 && value == 0))) {
     result |= eParseHTMLInteger_NonStandard;
   }
 
@@ -7242,6 +7236,36 @@ nsContentUtils::CallOnAllRemoteChildren(nsPIDOMWindowOuter* aWindow,
   }
 }
 
+struct UIStateChangeInfo {
+  UIStateChangeType mShowAccelerators;
+  UIStateChangeType mShowFocusRings;
+
+  UIStateChangeInfo(UIStateChangeType aShowAccelerators,
+                    UIStateChangeType aShowFocusRings)
+    : mShowAccelerators(aShowAccelerators),
+      mShowFocusRings(aShowFocusRings)
+  {}
+};
+
+bool
+SetKeyboardIndicatorsChild(TabParent* aParent, void* aArg)
+{
+  UIStateChangeInfo* stateInfo = static_cast<UIStateChangeInfo*>(aArg);
+  Unused << aParent->SendSetKeyboardIndicators(stateInfo->mShowAccelerators,
+                                               stateInfo->mShowFocusRings);
+  return false;
+}
+
+void
+nsContentUtils::SetKeyboardIndicatorsOnRemoteChildren(nsPIDOMWindowOuter* aWindow,
+                                                      UIStateChangeType aShowAccelerators,
+                                                      UIStateChangeType aShowFocusRings)
+{
+  UIStateChangeInfo stateInfo(aShowAccelerators, aShowFocusRings);
+  CallOnAllRemoteChildren(aWindow, SetKeyboardIndicatorsChild,
+                          (void *)&stateInfo);
+}
+
 void
 nsContentUtils::TransferablesToIPCTransferables(nsISupportsArray* aTransferables,
                                                 nsTArray<IPCDataTransfer>& aIPC,
@@ -7323,7 +7347,7 @@ nsresult
 nsContentUtils::DataTransferItemToImage(const IPCDataTransferItem& aItem,
                                         imgIContainer** aContainer)
 {
-  MOZ_ASSERT(aItem.data().type() == IPCDataTransferData::TnsCString);
+  MOZ_ASSERT(aItem.data().type() == IPCDataTransferData::TShmem);
   MOZ_ASSERT(IsFlavorImage(aItem.flavor()));
 
   const IPCDataTransferImage& imageDetails = aItem.imageDetails();
@@ -7332,12 +7356,12 @@ nsContentUtils::DataTransferItemToImage(const IPCDataTransferItem& aItem,
     return NS_ERROR_FAILURE;
   }
 
-  const nsCString& text = aItem.data().get_nsCString();
+  Shmem data = aItem.data().get_Shmem();
 
   RefPtr<DataSourceSurface> image =
       CreateDataSourceSurfaceFromData(size,
                                       static_cast<SurfaceFormat>(imageDetails.format()),
-                                      reinterpret_cast<const uint8_t*>(text.BeginReading()),
+                                      data.get<uint8_t>(),
                                       imageDetails.stride());
 
   RefPtr<gfxDrawable> drawable = new gfxSurfaceDrawable(image, size);
@@ -7356,6 +7380,31 @@ nsContentUtils::IsFlavorImage(const nsACString& aFlavor)
          aFlavor.EqualsLiteral(kJPGImageMime) ||
          aFlavor.EqualsLiteral(kPNGImageMime) ||
          aFlavor.EqualsLiteral(kGIFImageMime);
+}
+
+static Shmem
+ConvertToShmem(mozilla::dom::nsIContentChild* aChild,
+               mozilla::dom::nsIContentParent* aParent,
+               const nsACString& aInput)
+{
+  MOZ_ASSERT((aChild && !aParent) || (!aChild && aParent));
+
+  IShmemAllocator* allocator =
+    aChild ? static_cast<IShmemAllocator*>(aChild)
+           : static_cast<IShmemAllocator*>(aParent);
+
+  Shmem result;
+  if (!allocator->AllocShmem(aInput.Length() + 1,
+                             SharedMemory::TYPE_BASIC,
+                             &result)) {
+    return result;
+  }
+
+  memcpy(result.get<char>(),
+         aInput.BeginReading(),
+         aInput.Length() + 1);
+
+  return result;
 }
 
 void
@@ -7402,7 +7451,13 @@ nsContentUtils::TransferableToIPCTransferable(nsITransferable* aTransferable,
           ctext->GetData(dataAsString);
           IPCDataTransferItem* item = aIPCDataTransfer->items().AppendElement();
           item->flavor() = flavorStr;
-          item->data() = dataAsString;
+
+          Shmem dataAsShmem = ConvertToShmem(aChild, aParent, dataAsString);
+          if (!dataAsShmem.IsReadable() || !dataAsShmem.Size<char>()) {
+            continue;
+          }
+
+          item->data() = dataAsShmem;
         } else {
           nsCOMPtr<nsISupportsInterfacePointer> sip =
             do_QueryInterface(data);
@@ -7418,7 +7473,13 @@ nsContentUtils::TransferableToIPCTransferable(nsITransferable* aTransferable,
 
             nsCString imageData;
             NS_ConsumeStream(stream, UINT32_MAX, imageData);
-            item->data() = imageData;
+
+            Shmem imageDataShmem = ConvertToShmem(aChild, aParent, imageData);
+            if (!imageDataShmem.IsReadable() || !imageDataShmem.Size<char>()) {
+              continue;
+            }
+
+            item->data() = imageDataShmem;
             continue;
           }
 
@@ -7438,15 +7499,17 @@ nsContentUtils::TransferableToIPCTransferable(nsITransferable* aTransferable,
             }
             size_t length;
             int32_t stride;
-            mozilla::UniquePtr<char[]> surfaceData =
-              nsContentUtils::GetSurfaceData(WrapNotNull(dataSurface), &length,
-                                             &stride);
+            Shmem surfaceData;
+            IShmemAllocator* allocator = aChild ? static_cast<IShmemAllocator*>(aChild)
+                                                : static_cast<IShmemAllocator*>(aParent);
+            GetSurfaceData(dataSurface, &length, &stride,
+                           allocator,
+                           &surfaceData);
 
             IPCDataTransferItem* item = aIPCDataTransfer->items().AppendElement();
             item->flavor() = flavorStr;
             // Turn item->data() into an nsCString prior to accessing it.
-            item->data() = EmptyCString();
-            item->data().get_nsCString().Adopt(surfaceData.release(), length);
+            item->data() = surfaceData;
 
             IPCDataTransferImage& imageDetails = item->imageDetails();
             mozilla::gfx::IntSize size = dataSurface->GetSize();
@@ -7474,7 +7537,9 @@ nsContentUtils::TransferableToIPCTransferable(nsITransferable* aTransferable,
                 item->flavor() = type;
                 nsAutoCString data;
                 SlurpFileToString(file, data);
-                item->data() = data;
+
+                Shmem dataAsShmem = ConvertToShmem(aChild, aParent, data);
+                item->data() = dataAsShmem;
               }
 
               continue;
@@ -7533,7 +7598,7 @@ nsContentUtils::TransferableToIPCTransferable(nsITransferable* aTransferable,
               // Empty element, transfer only the flavor
               IPCDataTransferItem* item = aIPCDataTransfer->items().AppendElement();
               item->flavor() = flavorStr;
-              item->data() = EmptyCString();
+              item->data() = nsString();
               continue;
             }
           }
@@ -7543,15 +7608,82 @@ nsContentUtils::TransferableToIPCTransferable(nsITransferable* aTransferable,
   }
 }
 
-mozilla::UniquePtr<char[]>
-nsContentUtils::GetSurfaceData(
-  NotNull<mozilla::gfx::DataSourceSurface*> aSurface,
-  size_t* aLength, int32_t* aStride)
+namespace {
+// The default type used for calling GetSurfaceData(). Gets surface data as
+// raw buffer.
+struct GetSurfaceDataRawBuffer
+{
+  using ReturnType = mozilla::UniquePtr<char[]>;
+  using BufferType = char*;
+
+  ReturnType Allocate(size_t aSize)
+  {
+    return ReturnType(new char[aSize]);
+  }
+
+  static BufferType
+  GetBuffer(const ReturnType& aReturnValue)
+  {
+    return aReturnValue.get();
+  }
+
+  static ReturnType
+  NullValue()
+  {
+    return ReturnType();
+  }
+};
+
+// The type used for calling GetSurfaceData() that allocates and writes to
+// a shared memory buffer.
+struct GetSurfaceDataShmem
+{
+  using ReturnType = Shmem;
+  using BufferType = char*;
+
+  explicit GetSurfaceDataShmem(IShmemAllocator* aAllocator)
+    : mAllocator(aAllocator)
+  { }
+
+  ReturnType Allocate(size_t aSize)
+  {
+    Shmem returnValue;
+    mAllocator->AllocShmem(aSize,
+                           SharedMemory::TYPE_BASIC,
+                           &returnValue);
+    return returnValue;
+  }
+
+  static BufferType
+  GetBuffer(ReturnType aReturnValue)
+  {
+    return aReturnValue.get<char>();
+  }
+
+  static ReturnType
+  NullValue()
+  {
+    return ReturnType();
+  }
+private:
+  IShmemAllocator* mAllocator;
+};
+
+/*
+ * Get the pixel data from the given source surface and return it as a buffer.
+ * The length and stride will be assigned from the surface.
+ */
+template <typename GetSurfaceDataContext = GetSurfaceDataRawBuffer>
+typename GetSurfaceDataContext::ReturnType
+GetSurfaceDataImpl(mozilla::gfx::DataSourceSurface* aSurface,
+                   size_t* aLength, int32_t* aStride,
+                   GetSurfaceDataContext aContext = GetSurfaceDataContext())
 {
   mozilla::gfx::DataSourceSurface::MappedSurface map;
-  if (NS_WARN_IF(!aSurface->Map(mozilla::gfx::DataSourceSurface::MapType::READ, &map))) {
-    return nullptr;
+  if (!aSurface->Map(mozilla::gfx::DataSourceSurface::MapType::READ, &map)) {
+    return GetSurfaceDataContext::NullValue();
   }
+
   mozilla::gfx::IntSize size = aSurface->GetSize();
   mozilla::CheckedInt32 requiredBytes =
     mozilla::CheckedInt32(map.mStride) * mozilla::CheckedInt32(size.height);
@@ -7563,15 +7695,40 @@ nsContentUtils::GetSurfaceData(
   size_t bufLen = maxBufLen - map.mStride + (size.width * BytesPerPixel(format));
 
   // nsDependentCString wants null-terminated string.
-  mozilla::UniquePtr<char[]> surfaceData(new char[maxBufLen + 1]);
-  memcpy(surfaceData.get(), reinterpret_cast<char*>(map.mData), bufLen);
-  memset(surfaceData.get() + bufLen, 0, maxBufLen - bufLen + 1);
+  typename GetSurfaceDataContext::ReturnType surfaceData = aContext.Allocate(maxBufLen + 1);
+  if (GetSurfaceDataContext::GetBuffer(surfaceData)) {
+    memcpy(GetSurfaceDataContext::GetBuffer(surfaceData),
+           reinterpret_cast<char*>(map.mData),
+           bufLen);
+    memset(GetSurfaceDataContext::GetBuffer(surfaceData) + bufLen,
+           0,
+           maxBufLen - bufLen + 1);
+  }
 
   *aLength = maxBufLen;
   *aStride = map.mStride;
 
   aSurface->Unmap();
   return surfaceData;
+}
+} // Anonymous namespace.
+
+mozilla::UniquePtr<char[]>
+nsContentUtils::GetSurfaceData(
+  NotNull<mozilla::gfx::DataSourceSurface*> aSurface,
+  size_t* aLength, int32_t* aStride)
+{
+  return GetSurfaceDataImpl(aSurface, aLength, aStride);
+}
+
+void
+nsContentUtils::GetSurfaceData(mozilla::gfx::DataSourceSurface* aSurface,
+                               size_t* aLength, int32_t* aStride,
+                               IShmemAllocator* aAllocator,
+                               Shmem *aOutShmem)
+{
+  *aOutShmem = GetSurfaceDataImpl(aSurface, aLength, aStride,
+                                  GetSurfaceDataShmem(aAllocator));
 }
 
 mozilla::Modifiers

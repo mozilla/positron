@@ -148,10 +148,6 @@ function runSubtestsSeriallyInFreshWindows(aSubtests) {
     var testIndex = -1;
     var w = null;
 
-    // Some state that persists across subtests. This is made available to
-    // subtests to put things into / read things out of.
-    var statePersistentAcrossSubtests = {};
-
     function advanceSubtestExecution() {
       var test = aSubtests[testIndex];
       if (w) {
@@ -193,7 +189,6 @@ function runSubtestsSeriallyInFreshWindows(aSubtests) {
         w = window.open('', "_blank");
         w.subtestDone = advanceSubtestExecution;
         w.SimpleTest = SimpleTest;
-        w.statePersistentAcrossSubtests = statePersistentAcrossSubtests;
         w.is = function(a, b, msg) { return is(a, b, aFile + " | " + msg); };
         w.ok = function(cond, name, diag) { return ok(cond, aFile + " | " + name, diag); };
         w.location = location.href.substring(0, location.href.lastIndexOf('/') + 1) + aFile;
@@ -316,4 +311,25 @@ function getSnapshot(rect) {
   }
 
   return getSnapshot.chromeHelper.sendSyncMessage('snapshot', JSON.stringify(rect)).toString();
+}
+
+// Takes the document's query string and parses it, assuming the query string
+// is composed of key-value pairs where the value is in JSON format. The object
+// returned contains the various values indexed by their respective keys. In
+// case of duplicate keys, the last value be used.
+// Examples:
+//   ?key="value"&key2=false&key3=500
+//     produces { "key": "value", "key2": false, "key3": 500 }
+//   ?key={"x":0,"y":50}&key2=[1,2,true]
+//     produces { "key": { "x": 0, "y": 0 }, "key2": [1, 2, true] }
+function getQueryArgs() {
+  var args = {};
+  if (location.search.length > 0) {
+    var params = location.search.substr(1).split('&');
+    for (var p of params) {
+      var [k, v] = p.split('=');
+      args[k] = JSON.parse(v);
+    }
+  }
+  return args;
 }

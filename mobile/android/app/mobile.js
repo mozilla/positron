@@ -141,7 +141,7 @@ pref("browser.sessionhistory.bfcacheIgnoreMemoryPressure", false);
 pref("browser.sessionstore.resume_session_once", false);
 pref("browser.sessionstore.resume_from_crash", true);
 pref("browser.sessionstore.interval", 10000); // milliseconds
-pref("browser.sessionstore.max_tabs_undo", 5);
+pref("browser.sessionstore.max_tabs_undo", 10);
 pref("browser.sessionstore.max_resumed_crashes", 1);
 pref("browser.sessionstore.privacy_level", 0); // saving data: 0 = all, 1 = unencrypted sites, 2 = never
 pref("browser.sessionstore.debug_logging", false);
@@ -562,7 +562,7 @@ pref("layers.async-video.enabled", true);
 
 #ifdef MOZ_ANDROID_APZ
 pref("layers.async-pan-zoom.enabled", true);
-// APZ prefs that are different from B2G
+pref("apz.content_response_timeout", 600);
 pref("apz.allow_immediate_handoff", false);
 pref("apz.touch_start_tolerance", "0.06");
 pref("apz.axis_lock.breakout_angle", "0.7853982");    // PI / 4 (45 degrees)
@@ -582,11 +582,7 @@ pref("apz.overscroll.enabled", true);
 #endif
 
 pref("layers.progressive-paint", true);
-#ifdef NIGHTLY_BUILD
-pref("layers.low-precision-buffer", false);
-#else
 pref("layers.low-precision-buffer", true);
-#endif
 pref("layers.low-precision-resolution", "0.25");
 pref("layers.low-precision-opacity", "1.0");
 // We want to limit layers for two reasons:
@@ -744,10 +740,6 @@ pref("layout.framevisibility.numscrollportwidths", 1);
 pref("layout.framevisibility.numscrollportheights", 1);
 
 pref("layers.enable-tiles", true);
-#ifdef NIGHTLY_BUILD
-pref("layers.tiles.fade-in.enabled", true);
-pref("layers.tiles.fade-in.duration-ms", 250);
-#endif
 
 // Enable the dynamic toolbar
 pref("browser.chrome.dynamictoolbar", true);
@@ -901,7 +893,8 @@ pref("dom.serviceWorkers.openWindow.enabled", true);
 pref("dom.push.debug", false);
 // The upstream autopush endpoint must have the Google API key corresponding to
 // the App's sender ID; we bake this assumption directly into the URL.
-pref("dom.push.serverURL", "https://updates-autopush.stage.mozaws.net/v1/gcm/@MOZ_ANDROID_GCM_SENDERID@");
+pref("dom.push.serverURL", "https://updates.push.services.mozilla.com/v1/gcm/@MOZ_ANDROID_GCM_SENDERID@");
+pref("dom.push.maxRecentMessageIDsPerSubscription", 0);
 
 #ifdef MOZ_ANDROID_GCM
 pref("dom.push.enabled", true);

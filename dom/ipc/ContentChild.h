@@ -12,6 +12,7 @@
 #include "mozilla/dom/nsIContentChild.h"
 #include "mozilla/dom/PBrowserOrId.h"
 #include "mozilla/dom/PContentChild.h"
+#include "nsAutoPtr.h"
 #include "nsHashKeys.h"
 #include "nsIObserver.h"
 #include "nsTHashtable.h"
@@ -361,6 +362,12 @@ public:
 
   virtual bool DeallocPPresentationChild(PPresentationChild* aActor) override;
 
+  virtual PFlyWebPublishedServerChild*
+    AllocPFlyWebPublishedServerChild(const nsString& name,
+                                     const FlyWebPublishOptions& params) override;
+
+  virtual bool DeallocPFlyWebPublishedServerChild(PFlyWebPublishedServerChild* aActor) override;
+
   virtual bool
   RecvNotifyPresentationReceiverLaunched(PBrowserChild* aIframe,
                                          const nsString& aSessionId) override;
@@ -381,6 +388,9 @@ public:
                                   const bool& reset) override;
   virtual bool RecvRegisterChromeItem(const ChromeRegistryItem& item) override;
 
+  virtual bool RecvClearImageCache(const bool& privateLoader,
+                                   const bool& chrome) override;
+
   virtual mozilla::jsipc::PJavaScriptChild* AllocPJavaScriptChild() override;
 
   virtual bool DeallocPJavaScriptChild(mozilla::jsipc::PJavaScriptChild*) override;
@@ -395,7 +405,8 @@ public:
 
   virtual bool RecvSpeakerManagerNotify() override;
 
-  virtual bool RecvBidiKeyboardNotify(const bool& isLangRTL) override;
+  virtual bool RecvBidiKeyboardNotify(const bool& isLangRTL,
+                                      const bool& haveBidiKeyboards) override;
 
   virtual bool RecvNotifyVisited(const URIParams& aURI) override;
 
@@ -580,6 +591,8 @@ public:
                                        const ContentParentId& aCpID,
                                        const bool& aIsForApp,
                                        const bool& aIsForBrowser) override;
+
+  FORWARD_SHMEM_ALLOCATOR_TO(PContentChild)
 
   void GetAvailableDictionaries(InfallibleTArray<nsString>& aDictionaries);
 

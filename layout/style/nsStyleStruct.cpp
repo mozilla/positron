@@ -842,11 +842,8 @@ nsStyleSVG::nsStyleSVG(StyleStructContext aContext)
   , mStrokeLinecap(NS_STYLE_STROKE_LINECAP_BUTT)
   , mStrokeLinejoin(NS_STYLE_STROKE_LINEJOIN_MITER)
   , mTextAnchor(NS_STYLE_TEXT_ANCHOR_START)
-  , mFillOpacitySource(eStyleSVGOpacitySource_Normal)
-  , mStrokeOpacitySource(eStyleSVGOpacitySource_Normal)
-  , mStrokeDasharrayFromObject(false)
-  , mStrokeDashoffsetFromObject(false)
-  , mStrokeWidthFromObject(false)
+  , mContextFlags((eStyleSVGOpacitySource_Normal << FILL_OPACITY_SOURCE_SHIFT) |
+                  (eStyleSVGOpacitySource_Normal << STROKE_OPACITY_SOURCE_SHIFT))
 {
   MOZ_COUNT_CTOR(nsStyleSVG);
 }
@@ -877,11 +874,7 @@ nsStyleSVG::nsStyleSVG(const nsStyleSVG& aSource)
   , mStrokeLinecap(aSource.mStrokeLinecap)
   , mStrokeLinejoin(aSource.mStrokeLinejoin)
   , mTextAnchor(aSource.mTextAnchor)
-  , mFillOpacitySource(aSource.mFillOpacitySource)
-  , mStrokeOpacitySource(aSource.mStrokeOpacitySource)
-  , mStrokeDasharrayFromObject(aSource.mStrokeDasharrayFromObject)
-  , mStrokeDashoffsetFromObject(aSource.mStrokeDashoffsetFromObject)
-  , mStrokeWidthFromObject(aSource.mStrokeWidthFromObject)
+  , mContextFlags(aSource.mContextFlags)
 {
   MOZ_COUNT_CTOR(nsStyleSVG);
 }
@@ -964,11 +957,7 @@ nsStyleSVG::CalcDifference(const nsStyleSVG& aOther) const
        mPaintOrder            != aOther.mPaintOrder            ||
        mShapeRendering        != aOther.mShapeRendering        ||
        mStrokeDasharray       != aOther.mStrokeDasharray       ||
-       mFillOpacitySource     != aOther.mFillOpacitySource     ||
-       mStrokeOpacitySource   != aOther.mStrokeOpacitySource   ||
-       mStrokeDasharrayFromObject != aOther.mStrokeDasharrayFromObject ||
-       mStrokeDashoffsetFromObject != aOther.mStrokeDashoffsetFromObject ||
-       mStrokeWidthFromObject != aOther.mStrokeWidthFromObject) {
+       mContextFlags          != aOther.mContextFlags) {
     return hint | nsChangeHint_RepaintFrame;
   }
 
@@ -1299,7 +1288,7 @@ nsStyleSVGReset::CalcDifference(const nsStyleSVGReset& aOther) const
     hint |= nsChangeHint_RepaintFrame;
   }
 
-  hint |= mMask.CalcDifference(aOther.mMask);
+  hint |= mMask.CalcDifference(aOther.mMask, nsChangeHint_RepaintFrame);
 
   return hint;
 }
@@ -2314,7 +2303,8 @@ nsStyleImageLayers::nsStyleImageLayers(const nsStyleImageLayers &aSource)
 }
 
 nsChangeHint
-nsStyleImageLayers::CalcDifference(const nsStyleImageLayers& aOther) const
+nsStyleImageLayers::CalcDifference(const nsStyleImageLayers& aOther,
+                                   nsChangeHint aPositionChangeHint) const
 {
   nsChangeHint hint = nsChangeHint(0);
 
@@ -2328,7 +2318,8 @@ nsStyleImageLayers::CalcDifference(const nsStyleImageLayers& aOther) const
   NS_FOR_VISIBLE_IMAGE_LAYERS_BACK_TO_FRONT(i, moreLayers) {
     if (i < lessLayers.mImageCount) {
       nsChangeHint layerDifference =
-        moreLayers.mLayers[i].CalcDifference(lessLayers.mLayers[i]);
+        moreLayers.mLayers[i].CalcDifference(lessLayers.mLayers[i],
+                                             aPositionChangeHint);
       hint |= layerDifference;
       if (layerDifference &&
           ((moreLayers.mLayers[i].mImage.GetType() == eStyleImageType_Element) ||
@@ -2603,7 +2594,8 @@ nsStyleImageLayers::Layer::operator==(const Layer& aOther) const
 }
 
 nsChangeHint
-nsStyleImageLayers::Layer::CalcDifference(const nsStyleImageLayers::Layer& aOther) const
+nsStyleImageLayers::Layer::CalcDifference(const nsStyleImageLayers::Layer& aOther,
+                                          nsChangeHint aPositionChangeHint) const
 {
   nsChangeHint hint = nsChangeHint(0);
   if (!EqualURIs(mSourceURI, aOther.mSourceURI)) {
@@ -2625,7 +2617,7 @@ nsStyleImageLayers::Layer::CalcDifference(const nsStyleImageLayers::Layer& aOthe
   }
 
   if (mPosition != aOther.mPosition) {
-    hint |= nsChangeHint_UpdateBackgroundPosition;
+    hint |= aPositionChangeHint;
   }
 
   return hint;
@@ -2673,7 +2665,8 @@ nsStyleBackground::CalcDifference(const nsStyleBackground& aOther) const
     hint |= nsChangeHint_RepaintFrame;
   }
 
-  hint |= mImage.CalcDifference(aOther.mImage);
+  hint |= mImage.CalcDifference(aOther.mImage,
+                                nsChangeHint_UpdateBackgroundPosition);
 
   return hint;
 }
@@ -2839,8 +2832,8 @@ nsStyleDisplay::nsStyleDisplay(StyleStructContext aContext)
   , mContain(NS_STYLE_CONTAIN_NONE)
   , mAppearance(NS_THEME_NONE)
   , mPosition(NS_STYLE_POSITION_STATIC)
-  , mFloats(NS_STYLE_FLOAT_NONE)
-  , mOriginalFloats(NS_STYLE_FLOAT_NONE)
+  , mFloat(NS_STYLE_FLOAT_NONE)
+  , mOriginalFloat(NS_STYLE_FLOAT_NONE)
   , mBreakType(NS_STYLE_CLEAR_NONE)
   , mBreakInside(NS_STYLE_PAGE_BREAK_AUTO)
   , mBreakBefore(false)
@@ -2901,8 +2894,8 @@ nsStyleDisplay::nsStyleDisplay(const nsStyleDisplay& aSource)
   , mContain(aSource.mContain)
   , mAppearance(aSource.mAppearance)
   , mPosition(aSource.mPosition)
-  , mFloats(aSource.mFloats)
-  , mOriginalFloats(aSource.mOriginalFloats)
+  , mFloat(aSource.mFloat)
+  , mOriginalFloat(aSource.mOriginalFloat)
   , mBreakType(aSource.mBreakType)
   , mBreakInside(aSource.mBreakInside)
   , mBreakBefore(aSource.mBreakBefore)
@@ -2964,7 +2957,7 @@ nsStyleDisplay::CalcDifference(const nsStyleDisplay& aOther) const
       || mPosition != aOther.mPosition
       || mDisplay != aOther.mDisplay
       || mContain != aOther.mContain
-      || (mFloats == NS_STYLE_FLOAT_NONE) != (aOther.mFloats == NS_STYLE_FLOAT_NONE)
+      || (mFloat == NS_STYLE_FLOAT_NONE) != (aOther.mFloat == NS_STYLE_FLOAT_NONE)
       || mOverflowX != aOther.mOverflowX
       || mOverflowY != aOther.mOverflowY
       || mScrollBehavior != aOther.mScrollBehavior
@@ -3002,7 +2995,7 @@ nsStyleDisplay::CalcDifference(const nsStyleDisplay& aOther) const
     return nsChangeHint_ReconstructFrame;
   }
 
-  if (mFloats != aOther.mFloats) {
+  if (mFloat != aOther.mFloat) {
     // Changing which side we float on doesn't affect descendants directly
     hint |= nsChangeHint_AllReflowHints &
             ~(nsChangeHint_ClearDescendantIntrinsics |
@@ -3146,7 +3139,7 @@ nsStyleDisplay::CalcDifference(const nsStyleDisplay& aOther) const
 
   if (!hint &&
       (mOriginalDisplay != aOther.mOriginalDisplay ||
-       mOriginalFloats != aOther.mOriginalFloats ||
+       mOriginalFloat != aOther.mOriginalFloat ||
        mTransitions != aOther.mTransitions ||
        mTransitionTimingFunctionCount !=
          aOther.mTransitionTimingFunctionCount ||

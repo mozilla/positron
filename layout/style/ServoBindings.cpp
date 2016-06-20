@@ -6,6 +6,7 @@
 
 #include "mozilla/ServoBindings.h"
 
+#include "gfxFontFamilyList.h"
 #include "nsAttrValueInlines.h"
 #include "nsCSSRuleProcessor.h"
 #include "nsContentUtils.h"
@@ -287,6 +288,33 @@ Gecko_AtomEqualsUTF8IgnoreCase(nsIAtom* aAtom, const char* aString, uint32_t aLe
 }
 
 void
+Gecko_FontFamilyList_Clear(FontFamilyList* aList) {
+  aList->Clear();
+}
+
+void
+Gecko_FontFamilyList_AppendNamed(FontFamilyList* aList, nsIAtom* aName)
+{
+  // Servo doesn't record whether the name was quoted or unquoted, so just
+  // assume unquoted for now.
+  FontFamilyName family;
+  aName->ToString(family.mName);
+  aList->Append(family);
+}
+
+void
+Gecko_FontFamilyList_AppendGeneric(FontFamilyList* aList, FontFamilyType aType)
+{
+  aList->Append(FontFamilyName(aType));
+}
+
+void
+Gecko_CopyFontFamilyFrom(nsFont* dst, const nsFont* src)
+{
+  dst->fontlist = src->fontlist;
+}
+
+void
 Gecko_SetListStyleType(nsStyleList* style_struct, uint32_t type)
 {
   // Builtin counter styles are static and use no-op refcounting, and thus are
@@ -387,22 +415,6 @@ Gecko_CreateGradient(uint8_t aShape,
   }
 
   return result;
-}
-
-void
-Gecko_SetGradientStop(nsStyleGradient* aGradient,
-                      uint32_t aIndex,
-                      const nsStyleCoord* aLocation,
-                      nscolor aColor,
-                      bool aIsInterpolationHint)
-{
-  MOZ_ASSERT(aGradient);
-  MOZ_ASSERT(aLocation);
-  MOZ_ASSERT(aIndex < aGradient->mStops.Length());
-
-  aGradient->mStops[aIndex].mColor = aColor;
-  aGradient->mStops[aIndex].mLocation = *aLocation;
-  aGradient->mStops[aIndex].mIsInterpolationHint = aIsInterpolationHint;
 }
 
 #define STYLE_STRUCT(name, checkdata_cb)                                      \

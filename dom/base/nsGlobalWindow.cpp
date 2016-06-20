@@ -15,10 +15,10 @@
 #include "nsContentSecurityManager.h"
 #include "nsScreen.h"
 #include "nsHistory.h"
-#include "nsPerformance.h"
 #include "nsDOMNavigationTiming.h"
 #include "nsIDOMStorageManager.h"
 #include "mozilla/dom/DOMStorage.h"
+#include "mozilla/dom/Performance.h"
 #include "mozilla/dom/StorageEvent.h"
 #include "mozilla/dom/StorageEventBinding.h"
 #include "mozilla/IntegerPrintfMacros.h"
@@ -125,7 +125,6 @@
 #include "nsIControllers.h"
 #include "nsIControllerContext.h"
 #include "nsGlobalWindowCommands.h"
-#include "nsAutoPtr.h"
 #include "nsQueryObject.h"
 #include "nsContentUtils.h"
 #include "nsCSSProps.h"
@@ -307,6 +306,16 @@ static int32_t gMinBackgroundTimeoutValue;
 inline int32_t
 nsGlobalWindow::DOMMinTimeoutValue() const {
   bool isBackground = !mOuterWindow || mOuterWindow->IsBackground();
+  if (isBackground) {
+    // Don't use the background timeout value when there are audio contexts with
+    // active nodes, so that background audio can keep running smoothly.
+    for (const AudioContext* ctx : mAudioContexts) {
+      if (ctx->ActiveNodeCount() > 0) {
+        isBackground = false;
+        break;
+      }
+    }
+  }
   return
     std::max(isBackground ? gMinBackgroundTimeoutValue : gMinTimeoutValue, 0);
 }
@@ -1196,13 +1205,6 @@ nsGlobalWindow::nsGlobalWindow(nsGlobalWindow *aOuterWindow)
     mCleanMessageManager(false),
     mNeedsFocus(true),
     mHasFocus(false),
-#if defined(XP_MACOSX)
-    mShowAccelerators(false),
-    mShowFocusRings(false),
-#else
-    mShowAccelerators(true),
-    mShowFocusRings(true),
-#endif
     mShowFocusRingForContent(false),
     mFocusByKeyOccurred(false),
     mHasGamepad(false),
@@ -1257,8 +1259,6 @@ nsGlobalWindow::nsGlobalWindow(nsGlobalWindow *aOuterWindow)
 
       Preferences::AddStrongObserver(mObserver, "intl.accept_languages");
     }
-
-    InitializeShowFocusRings();
   } else {
     // |this| is an outer window. Outer windows start out frozen and
     // remain frozen until they get an inner window, so freeze this
@@ -2810,10 +2810,10 @@ nsGlobalWindow::SetNewDocument(nsIDocument* aDocument,
         currentInner->AsInner()->CreatePerformanceObjectIfNeeded();
         if (currentInner->mPerformance) {
           newInnerWindow->mPerformance =
-            new nsPerformance(newInnerWindow->AsInner(),
-                              currentInner->mPerformance->GetDOMTiming(),
-                              currentInner->mPerformance->GetChannel(),
-                              currentInner->mPerformance->GetParentPerformance());
+            Performance::CreateForMainThread(newInnerWindow->AsInner(),
+                                             currentInner->mPerformance->GetDOMTiming(),
+                                             currentInner->mPerformance->GetChannel(),
+                                             currentInner->mPerformance->GetParentPerformance());
         }
       }
 
@@ -3831,7 +3831,7 @@ nsGlobalWindow::GetHistory(ErrorResult& aError)
   return mHistory;
 }
 
-nsPerformance*
+Performance*
 nsPIDOMWindowInner::GetPerformance()
 {
   MOZ_ASSERT(IsInnerWindow());
@@ -3839,7 +3839,7 @@ nsPIDOMWindowInner::GetPerformance()
   return mPerformance;
 }
 
-nsPerformance*
+Performance*
 nsGlobalWindow::GetPerformance()
 {
   return AsInner()->GetPerformance();
@@ -3864,7 +3864,7 @@ nsPIDOMWindowInner::CreatePerformanceObjectIfNeeded()
   if (timing) {
     // If we are dealing with an iframe, we will need the parent's performance
     // object (so we can add the iframe as a resource of that page).
-    nsPerformance* parentPerformance = nullptr;
+    Performance* parentPerformance = nullptr;
     nsCOMPtr<nsPIDOMWindowOuter> parentWindow = GetScriptableParentOrNull();
     if (parentWindow) {
       nsPIDOMWindowInner* parentInnerWindow = nullptr;
@@ -3876,7 +3876,8 @@ nsPIDOMWindowInner::CreatePerformanceObjectIfNeeded()
       }
     }
     mPerformance =
-      new nsPerformance(this, timing, timedChannel, parentPerformance);
+      Performance::CreateForMainThread(this, timing, timedChannel,
+                                       parentPerformance);
   }
 }
 
@@ -9427,7 +9428,8 @@ nsGlobalWindow::GetSelectionOuter()
     return nullptr;
   }
 
-  return static_cast<Selection*>(presShell->GetCurrentSelection(nsISelectionController::SELECTION_NORMAL));
+  return static_cast<Selection*>(
+           presShell->GetCurrentSelection(SelectionType::eNormal));
 }
 
 Selection*
@@ -10027,62 +10029,50 @@ nsGlobalWindow::GetFocusMethod()
   return mFocusMethod;
 }
 
-void
-nsGlobalWindow::InitializeShowFocusRings()
-{
-  MOZ_ASSERT(IsInnerWindow());
-
-  // Initialize the focus ring state from the parent window. For root windows,
-  // there is no need to do this as SetKeyboardIndicators will propogate any
-  // non-default value to child windows.
-  nsPIDOMWindowOuter* root = GetPrivateRoot();
-  if (root && GetOuterWindow() != root) {
-    bool showAccelerators = false, showFocusRings = false;
-    root->GetKeyboardIndicators(&showAccelerators, &showFocusRings);
-    mShowFocusRings = showFocusRings;
-  }
-}
-
 bool
 nsGlobalWindow::ShouldShowFocusRing()
 {
   FORWARD_TO_INNER(ShouldShowFocusRing, (), false);
 
-  return mShowFocusRings || mShowFocusRingForContent || mFocusByKeyOccurred;
+  if (mShowFocusRingForContent || mFocusByKeyOccurred) {
+    return true;
+  }
+
+  nsCOMPtr<nsPIWindowRoot> root = GetTopWindowRoot();
+  return root ? root->ShowFocusRings() : false;
 }
 
 void
 nsGlobalWindow::SetKeyboardIndicators(UIStateChangeType aShowAccelerators,
                                       UIStateChangeType aShowFocusRings)
 {
-  FORWARD_TO_INNER_VOID(SetKeyboardIndicators, (aShowAccelerators, aShowFocusRings));
+  MOZ_ASSERT(IsOuterWindow());
+
+  nsPIDOMWindowOuter* piWin = GetPrivateRoot();
+  if (!piWin) {
+    return;
+  }
+
+  MOZ_ASSERT(piWin == AsOuter());
 
   bool oldShouldShowFocusRing = ShouldShowFocusRing();
 
   // only change the flags that have been modified
-  if (aShowAccelerators != UIStateChangeType_NoChange)
-    mShowAccelerators = aShowAccelerators == UIStateChangeType_Set;
-  if (aShowFocusRings != UIStateChangeType_NoChange)
-    mShowFocusRings = aShowFocusRings == UIStateChangeType_Set;
-
-  // propagate the indicators to child windows
-  nsCOMPtr<nsIDocShell> docShell = GetDocShell();
-  if (docShell) {
-    int32_t childCount = 0;
-    docShell->GetChildCount(&childCount);
-
-    for (int32_t i = 0; i < childCount; ++i) {
-      nsCOMPtr<nsIDocShellTreeItem> childShell;
-      docShell->GetChildAt(i, getter_AddRefs(childShell));
-      if (!childShell) {
-        continue;
-      }
-
-      if (nsCOMPtr<nsPIDOMWindowOuter> childWindow = childShell->GetWindow()) {
-        childWindow->SetKeyboardIndicators(aShowAccelerators, aShowFocusRings);
-      }
-    }
+  nsCOMPtr<nsPIWindowRoot> windowRoot = do_QueryInterface(mChromeEventHandler);
+  if (!windowRoot) {
+    return;
   }
+
+  if (aShowAccelerators != UIStateChangeType_NoChange) {
+    windowRoot->SetShowAccelerators(aShowAccelerators == UIStateChangeType_Set);
+  }
+  if (aShowFocusRings != UIStateChangeType_NoChange) {
+    windowRoot->SetShowFocusRings(aShowFocusRings == UIStateChangeType_Set);
+  }
+
+  nsContentUtils::SetKeyboardIndicatorsOnRemoteChildren(GetOuterWindow(),
+                                                        aShowAccelerators,
+                                                        aShowFocusRings);
 
   bool newShouldShowFocusRing = ShouldShowFocusRing();
   if (mHasFocus && mFocusedNode &&
@@ -10095,16 +10085,6 @@ nsGlobalWindow::SetKeyboardIndicators(UIStateChangeType aShowAccelerators,
       mFocusedNode->AsElement()->RemoveStates(NS_EVENT_STATE_FOCUSRING);
     }
   }
-}
-
-void
-nsGlobalWindow::GetKeyboardIndicators(bool* aShowAccelerators,
-                                      bool* aShowFocusRings)
-{
-  FORWARD_TO_INNER_VOID(GetKeyboardIndicators, (aShowAccelerators, aShowFocusRings));
-
-  *aShowAccelerators = mShowAccelerators;
-  *aShowFocusRings = mShowFocusRings;
 }
 
 bool
@@ -10719,13 +10699,14 @@ nsGlobalWindow::GetCaches(ErrorResult& aRv)
   return ref.forget();
 }
 
-already_AddRefed<ServiceWorkerRegistrationMainThread>
+already_AddRefed<ServiceWorkerRegistration>
 nsPIDOMWindowInner::GetServiceWorkerRegistration(const nsAString& aScope)
 {
-  RefPtr<ServiceWorkerRegistrationMainThread> registration;
+  RefPtr<ServiceWorkerRegistration> registration;
   if (!mServiceWorkerRegistrationTable.Get(aScope,
                                            getter_AddRefs(registration))) {
-    registration = new ServiceWorkerRegistrationMainThread(this, aScope);
+    registration =
+      ServiceWorkerRegistration::CreateForMainThread(this, aScope);
     mServiceWorkerRegistrationTable.Put(aScope, registration);
   }
   return registration.forget();

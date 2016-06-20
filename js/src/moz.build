@@ -155,6 +155,7 @@ EXPORTS.js += [
 UNIFIED_SOURCES += [
     'asmjs/AsmJS.cpp',
     'asmjs/Wasm.cpp',
+    'asmjs/WasmBaselineCompile.cpp',
     'asmjs/WasmBinary.cpp',
     'asmjs/WasmBinaryIterator.cpp',
     'asmjs/WasmBinaryToAST.cpp',
@@ -163,7 +164,9 @@ UNIFIED_SOURCES += [
     'asmjs/WasmCode.cpp',
     'asmjs/WasmFrameIterator.cpp',
     'asmjs/WasmGenerator.cpp',
+    'asmjs/WasmInstance.cpp',
     'asmjs/WasmIonCompile.cpp',
+    'asmjs/WasmJS.cpp',
     'asmjs/WasmModule.cpp',
     'asmjs/WasmSignalHandlers.cpp',
     'asmjs/WasmStubs.cpp',

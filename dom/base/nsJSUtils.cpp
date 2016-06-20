@@ -27,6 +27,7 @@
 #include "nsGlobalWindow.h"
 
 #include "mozilla/dom/BindingUtils.h"
+#include "mozilla/dom/Date.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/ScriptSettings.h"
 
@@ -149,8 +150,6 @@ nsJSUtils::EvaluateString(JSContext* aCx,
   PROFILER_LABEL("nsJSUtils", "EvaluateString",
     js::ProfileEntry::Category::JS);
 
-  MOZ_ASSERT(JS::ContextOptionsRef(aCx).autoJSAPIOwnsErrorReporting(),
-             "Caller must own error reporting");
   MOZ_ASSERT_IF(aCompileOptions.versionSet,
                 aCompileOptions.version != JSVERSION_UNKNOWN);
   MOZ_ASSERT(aCx == nsContentUtils::GetCurrentJSContext());
@@ -278,8 +277,6 @@ nsJSUtils::CompileModule(JSContext* aCx,
   PROFILER_LABEL("nsJSUtils", "CompileModule",
     js::ProfileEntry::Category::JS);
 
-  MOZ_ASSERT(JS::ContextOptionsRef(aCx).autoJSAPIOwnsErrorReporting(),
-             "Caller must own error reporting");
   MOZ_ASSERT_IF(aCompileOptions.versionSet,
                 aCompileOptions.version != JSVERSION_UNKNOWN);
   MOZ_ASSERT(aCx == nsContentUtils::GetCurrentJSContext());
@@ -305,8 +302,6 @@ nsJSUtils::ModuleDeclarationInstantiation(JSContext* aCx, JS::Handle<JSObject*> 
   PROFILER_LABEL("nsJSUtils", "ModuleDeclarationInstantiation",
     js::ProfileEntry::Category::JS);
 
-  MOZ_ASSERT(JS::ContextOptionsRef(aCx).autoJSAPIOwnsErrorReporting(),
-             "Caller must own error reporting");
   MOZ_ASSERT(aCx == nsContentUtils::GetCurrentJSContext());
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(nsContentUtils::IsInMicroTask());
@@ -326,8 +321,6 @@ nsJSUtils::ModuleEvaluation(JSContext* aCx, JS::Handle<JSObject*> aModule)
   PROFILER_LABEL("nsJSUtils", "ModuleEvaluation",
     js::ProfileEntry::Category::JS);
 
-  MOZ_ASSERT(JS::ContextOptionsRef(aCx).autoJSAPIOwnsErrorReporting(),
-             "Caller must own error reporting");
   MOZ_ASSERT(aCx == nsContentUtils::GetCurrentJSContext());
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(nsContentUtils::IsInMicroTask());

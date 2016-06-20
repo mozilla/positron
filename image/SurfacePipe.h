@@ -185,10 +185,7 @@ public:
             return WriteState::NEED_MORE_DATA;
 
           case WriteState::FINISHED:
-            // Make sure that IsSurfaceFinished() returns true so the caller
-            // can't write anything else to the pipeline.
-            mRowPointer = nullptr;
-            mCol = 0;
+            ZeroOutRestOfSurface<PixelType>();
             return WriteState::FINISHED;
 
           case WriteState::FAILURE:
@@ -320,7 +317,8 @@ public:
   }
 
   /**
-   * Write an empty row to the surface.
+   * Write an empty row to the surface. If some pixels have already been written
+   * to this row, they'll be discarded.
    *
    * @return WriteState::FINISHED if the entire surface has been written to.
    *         Otherwise, returns WriteState::NEED_MORE_DATA.
@@ -443,6 +441,13 @@ protected:
   }
 
 private:
+
+  template <typename PixelType>
+  void ZeroOutRestOfSurface()
+  {
+    WritePixels<PixelType>([]{ return AsVariant(PixelType(0)); });
+  }
+
   gfx::IntSize mInputSize;  /// The size of the input this filter expects.
   uint8_t* mRowPointer;     /// Pointer to the current row or null if finished.
   int32_t mCol;             /// The current column we're writing to. (0-indexed)
@@ -575,7 +580,8 @@ public:
   }
 
   /**
-   * Write an empty row to the surface.
+   * Write an empty row to the surface. If some pixels have already been written
+   * to this row, they'll be discarded.
    *
    * @see SurfaceFilter::WriteEmptyRow() for the canonical documentation.
    */

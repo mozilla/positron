@@ -94,7 +94,7 @@
 #define PREF_TESTING_FEATURES "dom.quotaManager.testing"
 
 // profile-before-change, when we need to shut down quota manager
-#define PROFILE_BEFORE_CHANGE_OBSERVER_ID "profile-before-change"
+#define PROFILE_BEFORE_CHANGE_QM_OBSERVER_ID "profile-before-change-qm"
 
 #define KB * 1024ULL
 #define MB * 1024ULL KB
@@ -1360,7 +1360,7 @@ class MOZ_STACK_CLASS OriginParser final
   enum SchemaType {
     eNone,
     eFile,
-    eMozSafeAbout
+    eAbout
   };
 
   enum State {
@@ -2262,9 +2262,10 @@ CreateRunnable::RegisterObserver()
 
   nsCOMPtr<nsIObserver> observer = new ShutdownObserver(mOwningThread);
 
-  nsresult rv = observerService->AddObserver(observer,
-                                             PROFILE_BEFORE_CHANGE_OBSERVER_ID,
-                                             false);
+  nsresult rv =
+    observerService->AddObserver(observer,
+                                 PROFILE_BEFORE_CHANGE_QM_OBSERVER_ID,
+                                 false);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }
@@ -2419,7 +2420,7 @@ ShutdownObserver::Observe(nsISupports* aSubject,
                           const char16_t* aData)
 {
   MOZ_ASSERT(NS_IsMainThread());
-  MOZ_ASSERT(!strcmp(aTopic, PROFILE_BEFORE_CHANGE_OBSERVER_ID));
+  MOZ_ASSERT(!strcmp(aTopic, PROFILE_BEFORE_CHANGE_QM_OBSERVER_ID));
 
   bool done = false;
 
@@ -6627,7 +6628,7 @@ OriginParser::Parse(nsACString& aSpec, PrincipalOriginAttributes* aAttrs)
     return true;
   }
 
-  if (mSchemaType == eMozSafeAbout) {
+  if (mSchemaType == eAbout) {
     spec.Append(':');
   } else {
     spec.AppendLiteral("://");
@@ -6651,19 +6652,20 @@ OriginParser::HandleSchema(const nsDependentCSubstring& aToken)
   MOZ_ASSERT(!aToken.IsEmpty());
   MOZ_ASSERT(mState == eExpectingAppIdOrSchema || mState == eExpectingSchema);
 
-  bool isMozSafeAbout = false;
+  bool isAbout = false;
   bool isFile = false;
   if (aToken.EqualsLiteral("http") ||
       aToken.EqualsLiteral("https") ||
-      (isMozSafeAbout = aToken.EqualsLiteral("moz-safe-about")) ||
+      (isAbout = aToken.EqualsLiteral("about") ||
+                 aToken.EqualsLiteral("moz-safe-about")) ||
       aToken.EqualsLiteral("indexeddb") ||
       (isFile = aToken.EqualsLiteral("file")) ||
       aToken.EqualsLiteral("app") ||
       aToken.EqualsLiteral("resource")) {
     mSchema = aToken;
 
-    if (isMozSafeAbout) {
-      mSchemaType = eMozSafeAbout;
+    if (isAbout) {
+      mSchemaType = eAbout;
       mState = eExpectingHost;
     } else {
       if (isFile) {

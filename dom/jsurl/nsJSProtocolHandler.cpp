@@ -5,7 +5,6 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsCOMPtr.h"
-#include "nsAutoPtr.h"
 #include "jsapi.h"
 #include "jswrapper.h"
 #include "nsCRT.h"
@@ -200,7 +199,7 @@ nsresult nsJSThunk::EvaluateScript(nsIChannel *aChannel,
     // Sandboxed document check: javascript: URI's are disabled
     // in a sandboxed document unless 'allow-scripts' was specified.
     nsIDocument* doc = aOriginalInnerWindow->GetExtantDoc();
-    if (doc && (doc->GetSandboxFlags() & SANDBOXED_SCRIPTS)) {
+    if (doc && doc->HasScriptsBlockedBySandbox()) {
         return NS_ERROR_DOM_RETVAL_UNDEFINED;
     }
 

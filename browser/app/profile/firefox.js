@@ -579,6 +579,9 @@ pref("mousewheel.with_win.action", 1);
 pref("browser.xul.error_pages.enabled", true);
 pref("browser.xul.error_pages.expert_bad_cert", false);
 
+// Enable captive portal detection.
+pref("network.captive-portal-service.enabled", true);
+
 // If true, network link events will change the value of navigator.onLine
 pref("network.manage-offline-status", true);
 
@@ -614,6 +617,8 @@ pref("accessibility.typeaheadfind", false);
 pref("accessibility.typeaheadfind.timeout", 5000);
 pref("accessibility.typeaheadfind.linksonly", false);
 pref("accessibility.typeaheadfind.flashBar", 1);
+pref("findbar.highlightAll", true);
+pref("findbar.modalHighlight", true);
 
 // Tracks when accessibility is loaded into the previous session.
 pref("accessibility.loadedInLastSession", false);
@@ -836,6 +841,7 @@ pref("places.frecency.bookmarkVisitBonus", 75);
 pref("places.frecency.downloadVisitBonus", 0);
 pref("places.frecency.permRedirectVisitBonus", 0);
 pref("places.frecency.tempRedirectVisitBonus", 0);
+pref("places.frecency.reloadVisitBonus", 0);
 pref("places.frecency.defaultVisitBonus", 0);
 
 // bonus (in percent) for place types for frecency calculations
@@ -1284,11 +1290,21 @@ pref("media.gmp.decoder.h264", 2);
 // decode H.264.
 pref("media.gmp.trial-create.enabled", true);
 
+// Note: when media.gmp-*.visible is true, provided we're running on a
+// supported platform/OS version, the corresponding CDM appears in the
+// plugins list, Firefox will download the GMP/CDM if enabled, and our
+// UI to re-enable EME prompts the user to re-enable EME if it's disabled
+// and script requests EME. If *.visible is false, we won't show the UI
+// to enable the CDM if its disabled; it's as if the keysystem is completely
+// unsupported.
+
 #ifdef MOZ_ADOBE_EME
+pref("media.gmp-eme-adobe.visible", true);
 pref("media.gmp-eme-adobe.enabled", true);
 #endif
 
 #ifdef MOZ_WIDEVINE_EME
+pref("media.gmp-widevinecdm.visible", true);
 pref("media.gmp-widevinecdm.enabled", true);
 #endif
 
@@ -1327,7 +1343,11 @@ pref("privacy.trackingprotection.introCount", 0);
 pref("privacy.trackingprotection.introURL", "https://www.mozilla.org/%LOCALE%/firefox/%VERSION%/tracking-protection/start/");
 
 // Enable Contextual Identity Containers
+#ifdef NIGHTLY_BUILD
+pref("privacy.userContext.enabled", true);
+#else
 pref("privacy.userContext.enabled", false);
+#endif
 
 #ifndef RELEASE_BUILD
 // At the moment, autostart.2 is used, while autostart.1 is unused.
@@ -1390,7 +1410,6 @@ pref("view_source.tab", true);
 
 pref("dom.serviceWorkers.enabled", true);
 pref("dom.serviceWorkers.openWindow.enabled", true);
-pref("dom.webnotifications.serviceworker.enabled", true);
 
 // Enable Push API.
 pref("dom.push.enabled", true);
@@ -1407,6 +1426,8 @@ pref("media.webspeech.synth.enabled", true);
 pref("browser.esedbreader.loglevel", "Error");
 
 pref("browser.laterrun.enabled", false);
+
+pref("browser.migration.automigrate", false);
 
 // Enable browser frames for use on desktop.  Only exposed to chrome callers.
 pref("dom.mozBrowserFramesEnabled", true);

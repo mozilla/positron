@@ -908,14 +908,17 @@ public:
     template<class Functor>
     static void OnNativeCall(Functor&& aCall)
     {
-        if (aCall.IsTarget(&GLControllerSupport::CreateCompositor) ||
-            aCall.IsTarget(&GLControllerSupport::PauseCompositor)) {
+        if (aCall.IsTarget(&GLControllerSupport::CreateCompositor)) {
 
             // These calls are blocking.
             nsAppShell::SyncRunEvent(WindowEvent<Functor>(
                     mozilla::Move(aCall)), &GLControllerEvent::MakeEvent);
             return;
 
+        } else if (aCall.IsTarget(&GLControllerSupport::PauseCompositor)) {
+            aCall.SetTarget(&GLControllerSupport::SyncPauseCompositor);
+            (Functor(aCall))();
+            return;
         } else if (aCall.IsTarget(
                 &GLControllerSupport::SyncResumeResizeCompositor)) {
             // This call is synchronous. Perform the original call using a copy
@@ -1933,7 +1936,7 @@ nsWindow::GetNativeData(uint32_t aDataType)
             return NS_ONLY_ONE_NATIVE_IME_CONTEXT;
         }
 
-        case NS_NATIVE_WINDOW:
+        case NS_JAVA_SURFACE:
             if (!mGLControllerSupport) {
                 return nullptr;
             }

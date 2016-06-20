@@ -71,7 +71,7 @@ class PreferenceAccessImpl;
 class gfxPrefs;
 class gfxPrefs final
 {
-  private:
+private:
   /// See Logging.h.  This lets Moz2D access preference values it owns.
   PreferenceAccessImpl* mMoz2DPrefAccess;
 
@@ -140,7 +140,7 @@ private:
   DECL_GFX_PREF(Live, "apz.axis_lock.direct_pan_angle",        APZAllowedDirectPanAngle, float, float(M_PI / 3.0) /* 60 degrees */);
   DECL_GFX_PREF(Live, "apz.axis_lock.lock_angle",              APZAxisLockAngle, float, float(M_PI / 6.0) /* 30 degrees */);
   DECL_GFX_PREF(Live, "apz.axis_lock.mode",                    APZAxisLockMode, int32_t, 0);
-  DECL_GFX_PREF(Live, "apz.content_response_timeout",          APZContentResponseTimeout, int32_t, 300);
+  DECL_GFX_PREF(Live, "apz.content_response_timeout",          APZContentResponseTimeout, int32_t, 400);
   DECL_GFX_PREF(Live, "apz.danger_zone_x",                     APZDangerZoneX, int32_t, 50);
   DECL_GFX_PREF(Live, "apz.danger_zone_y",                     APZDangerZoneY, int32_t, 100);
   DECL_GFX_PREF(Live, "apz.disable_for_scroll_linked_effects", APZDisableForScrollLinkedEffects, bool, false);
@@ -156,6 +156,7 @@ private:
   DECL_GFX_PREF(Once, "apz.fling_curve_function_y2",           APZCurveFunctionY2, float, 1.0f);
   DECL_GFX_PREF(Live, "apz.fling_curve_threshold_inches_per_ms", APZCurveThreshold, float, -1.0f);
   DECL_GFX_PREF(Live, "apz.fling_friction",                    APZFlingFriction, float, 0.002f);
+  DECL_GFX_PREF(Live, "apz.fling_min_velocity_threshold",      APZFlingMinVelocityThreshold, float, 0.5f);
   DECL_GFX_PREF(Live, "apz.fling_stop_on_tap_threshold",       APZFlingStopOnTapThreshold, float, 0.05f);
   DECL_GFX_PREF(Live, "apz.fling_stopped_threshold",           APZFlingStoppedThreshold, float, 0.01f);
   DECL_GFX_PREF(Live, "apz.highlight_checkerboarded_areas",    APZHighlightCheckerboardedAreas, bool, false);
@@ -273,6 +274,7 @@ private:
   DECL_GFX_PREF(Live, "gfx.SurfaceTexture.detach.enabled",     SurfaceTextureDetachEnabled, bool, true);
   DECL_GFX_PREF(Live, "gfx.testing.device-reset",              DeviceResetForTesting, int32_t, 0);
   DECL_GFX_PREF(Live, "gfx.testing.device-fail",               DeviceFailForTesting, bool, false);
+  DECL_GFX_PREF(Live, "gfx.ycbcr.accurate-conversion",         YCbCrAccurateConversion, bool, false);
 
   DECL_GFX_PREF(Live, "gfx.content.use-native-pushlayer",      UseNativePushLayer, bool, false);
 
@@ -364,6 +366,8 @@ private:
   DECL_GFX_PREF(Live, "layers.flash-borders",                  FlashLayerBorders, bool, false);
   DECL_GFX_PREF(Once, "layers.force-shmem-tiles",              ForceShmemTiles, bool, false);
   DECL_GFX_PREF(Live, "layers.frame-counter",                  DrawFrameCounter, bool, false);
+  DECL_GFX_PREF(Once, "layers.gpu-process.dev.enabled",        GPUProcessDevEnabled, bool, false);
+  DECL_GFX_PREF(Once, "layers.gpu-process.dev.timeout_ms",     GPUProcessDevTimeoutMs, int32_t, 5000);
   DECL_GFX_PREF(Once, "layers.gralloc.disable",                DisableGralloc, bool, false);
   DECL_GFX_PREF(Live, "layers.low-precision-buffer",           UseLowPrecisionBuffer, bool, false);
   DECL_GFX_PREF(Live, "layers.low-precision-opacity",          LowPrecisionOpacity, float, 1.0f);

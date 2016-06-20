@@ -6,6 +6,7 @@
 
 #include "ServiceWorkerManager.h"
 
+#include "nsAutoPtr.h"
 #include "nsIConsoleService.h"
 #include "nsIDOMEventTarget.h"
 #include "nsIDocument.h"
@@ -126,7 +127,9 @@ static_assert(nsIHttpChannelInternal::FETCH_CACHE_MODE_NO_CACHE == static_cast<u
              "RequestCache enumeration value should match Necko Cache mode value.");
 static_assert(nsIHttpChannelInternal::FETCH_CACHE_MODE_FORCE_CACHE == static_cast<uint32_t>(RequestCache::Force_cache),
              "RequestCache enumeration value should match Necko Cache mode value.");
-static_assert(5 == static_cast<uint32_t>(RequestCache::EndGuard_),
+static_assert(nsIHttpChannelInternal::FETCH_CACHE_MODE_ONLY_IF_CACHED == static_cast<uint32_t>(RequestCache::Only_if_cached),
+             "RequestCache enumeration value should match Necko Cache mode value.");
+static_assert(6 == static_cast<uint32_t>(RequestCache::EndGuard_),
              "RequestCache enumeration value should match Necko Cache mode value.");
 
 static StaticRefPtr<ServiceWorkerManager> gInstance;
@@ -298,7 +301,7 @@ class ServiceWorkerResolveWindowPromiseOnRegisterCallback final : public Service
       static_cast<ServiceWorkerRegisterJob*>(aJob);
     RefPtr<ServiceWorkerRegistrationInfo> reg = registerJob->GetRegistration();
 
-    RefPtr<ServiceWorkerRegistrationMainThread> swr =
+    RefPtr<ServiceWorkerRegistration> swr =
       mWindow->GetServiceWorkerRegistration(NS_ConvertUTF8toUTF16(reg->mScope));
     mPromise->MaybeResolve(swr);
   }
@@ -674,7 +677,7 @@ public:
       return NS_OK;
     }
 
-    nsTArray<RefPtr<ServiceWorkerRegistrationMainThread>> array;
+    nsTArray<RefPtr<ServiceWorkerRegistration>> array;
 
     if (NS_WARN_IF(!BasePrincipal::Cast(principal)->IsCodebasePrincipal())) {
       return NS_OK;
@@ -708,7 +711,7 @@ public:
         continue;
       }
 
-      RefPtr<ServiceWorkerRegistrationMainThread> swr =
+      RefPtr<ServiceWorkerRegistration> swr =
         mWindow->GetServiceWorkerRegistration(scope);
 
       array.AppendElement(swr);
@@ -815,7 +818,7 @@ public:
     }
 
     NS_ConvertUTF8toUTF16 scope(registration->mScope);
-    RefPtr<ServiceWorkerRegistrationMainThread> swr =
+    RefPtr<ServiceWorkerRegistration> swr =
       mWindow->GetServiceWorkerRegistration(scope);
     mPromise->MaybeResolve(swr);
 
@@ -1123,7 +1126,7 @@ ServiceWorkerManager::CheckReadyPromise(nsPIDOMWindowInner* aWindow,
 
   if (registration && registration->GetActive()) {
     NS_ConvertUTF8toUTF16 scope(registration->mScope);
-    RefPtr<ServiceWorkerRegistrationMainThread> swr =
+    RefPtr<ServiceWorkerRegistration> swr =
       aWindow->GetServiceWorkerRegistration(scope);
     aPromise->MaybeResolve(swr);
     return true;

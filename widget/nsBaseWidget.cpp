@@ -1102,15 +1102,17 @@ nsBaseWidget::ProcessUntransformedAPZEvent(WidgetInputEvent* aEvent,
       mAPZEventState->ProcessTouchEvent(*touchEvent, aGuid, aInputBlockId,
           aApzResponse, status);
     } else if (WidgetWheelEvent* wheelEvent = aEvent->AsWheelEvent()) {
-      if (wheelEvent->mFlags.mHandledByAPZ) {
-        APZCCallbackHelper::SendSetTargetAPZCNotification(this, GetDocument(),
-            *(original->AsWheelEvent()), aGuid, aInputBlockId);
-        if (wheelEvent->mCanTriggerSwipe) {
-          ReportSwipeStarted(aInputBlockId, wheelEvent->TriggersSwipe());
-        }
-        mAPZEventState->ProcessWheelEvent(*wheelEvent, aGuid, aInputBlockId);
+      MOZ_ASSERT(wheelEvent->mFlags.mHandledByAPZ);
+      APZCCallbackHelper::SendSetTargetAPZCNotification(this, GetDocument(),
+          *(original->AsWheelEvent()), aGuid, aInputBlockId);
+      if (wheelEvent->mCanTriggerSwipe) {
+        ReportSwipeStarted(aInputBlockId, wheelEvent->TriggersSwipe());
       }
+      mAPZEventState->ProcessWheelEvent(*wheelEvent, aGuid, aInputBlockId);
     } else if (WidgetMouseEvent* mouseEvent = aEvent->AsMouseEvent()) {
+      MOZ_ASSERT(mouseEvent->mFlags.mHandledByAPZ);
+      APZCCallbackHelper::SendSetTargetAPZCNotification(this, GetDocument(),
+          *(original->AsMouseEvent()), aGuid, aInputBlockId);
       mAPZEventState->ProcessMouseEvent(*mouseEvent, aGuid, aInputBlockId);
     }
   }
@@ -1936,9 +1938,10 @@ nsBaseWidget::GetWidgetScreen()
 
   LayoutDeviceIntRect bounds;
   GetScreenBounds(bounds);
+  DesktopIntRect deskBounds = RoundedToInt(bounds / GetDesktopToDeviceScale());
   nsCOMPtr<nsIScreen> screen;
-  screenManager->ScreenForRect(bounds.x, bounds.y,
-                               bounds.width, bounds.height,
+  screenManager->ScreenForRect(deskBounds.x, deskBounds.y,
+                               deskBounds.width, deskBounds.height,
                                getter_AddRefs(screen));
   return screen.forget();
 }

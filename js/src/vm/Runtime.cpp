@@ -175,7 +175,6 @@ JSRuntime::JSRuntime(JSRuntime* parentRuntime)
     jitRuntime_(nullptr),
     selfHostingGlobal_(nullptr),
     nativeStackBase(GetNativeStackBase()),
-    cxCallback(nullptr),
     destroyCompartmentCallback(nullptr),
     sizeOfIncludingThisCompartmentCallback(nullptr),
     destroyZoneCallback(nullptr),
@@ -217,7 +216,7 @@ JSRuntime::JSRuntime(JSRuntime* parentRuntime)
     DOMcallbacks(nullptr),
     destroyPrincipals(nullptr),
     readPrincipals(nullptr),
-    errorReporter(nullptr),
+    warningReporter(nullptr),
     buildIdOp(nullptr),
     propertyRemovals(0),
 #if !EXPOSE_INTL_API

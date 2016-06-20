@@ -70,7 +70,7 @@ esac
 AC_DEFUN([MOZ_ANDROID_CPU_ARCH],
 [
 
-if test "$OS_TARGET" = "Android" -a -z "$gonkdir"; then
+if test "$OS_TARGET" = "Android"; then
     case "${CPU_ARCH}-${MOZ_ARCH}" in
     arm-armv7*)
         ANDROID_CPU_ARCH=armeabi-v7a
@@ -93,7 +93,7 @@ fi
 AC_DEFUN([MOZ_ANDROID_STLPORT],
 [
 
-if test "$OS_TARGET" = "Android" -a -z "$gonkdir"; then
+if test "$OS_TARGET" = "Android"; then
     cpu_arch_dir="$ANDROID_CPU_ARCH"
     if test "$MOZ_THUMB2" = 1; then
         cpu_arch_dir="$cpu_arch_dir/thumb"
@@ -341,6 +341,7 @@ case "$target" in
     AC_SUBST(ANDROID_TOOLS)
     AC_SUBST(ANDROID_BUILD_TOOLS_VERSION)
 
+    MOZ_ANDROID_AAR(customtabs, $ANDROID_SUPPORT_LIBRARY_VERSION, android, com/android/support)
     MOZ_ANDROID_AAR(appcompat-v7, $ANDROID_SUPPORT_LIBRARY_VERSION, android, com/android/support)
     MOZ_ANDROID_AAR(cardview-v7, $ANDROID_SUPPORT_LIBRARY_VERSION, android, com/android/support)
     MOZ_ANDROID_AAR(design, $ANDROID_SUPPORT_LIBRARY_VERSION, android, com/android/support)

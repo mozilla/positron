@@ -410,12 +410,6 @@ AliasSet::Name(size_t flag)
 }
 
 MTest*
-MTest::New(TempAllocator& alloc, MDefinition* ins, MBasicBlock* ifTrue, MBasicBlock* ifFalse)
-{
-    return new(alloc) MTest(ins, ifTrue, ifFalse);
-}
-
-MTest*
 MTest::NewAsm(TempAllocator& alloc, MDefinition* ins, MBasicBlock* ifFalse)
 {
     return new(alloc) MTest(ins, nullptr, ifFalse);
@@ -1646,12 +1640,6 @@ MSimdUnbox::printOpcode(GenericPrinter& out) const
     out.printf(" (%s)", SimdTypeToString(simdType()));
 }
 
-MCloneLiteral*
-MCloneLiteral::New(TempAllocator& alloc, MDefinition* obj)
-{
-    return new(alloc) MCloneLiteral(obj);
-}
-
 void
 MControlInstruction::printOpcode(GenericPrinter& out) const
 {
@@ -2000,20 +1988,6 @@ MCallDOMNative::getJitInfo() const
     return jitInfo;
 }
 
-MApplyArgs*
-MApplyArgs::New(TempAllocator& alloc, JSFunction* target, MDefinition* fun, MDefinition* argc,
-                MDefinition* self)
-{
-    return new(alloc) MApplyArgs(target, fun, argc, self);
-}
-
-MApplyArray*
-MApplyArray::New(TempAllocator& alloc, JSFunction* target, MDefinition* fun, MDefinition* elements,
-                 MDefinition* self)
-{
-    return new(alloc) MApplyArray(target, fun, elements, self);
-}
-
 MDefinition*
 MStringLength::foldsTo(TempAllocator& alloc)
 {
@@ -2071,12 +2045,6 @@ MRound::trySpecializeFloat32(TempAllocator& alloc)
     MOZ_ASSERT(type() == MIRType::Int32);
     if (EnsureFloatInputOrConvert(this, alloc))
         specialization_ = MIRType::Float32;
-}
-
-MCompare*
-MCompare::New(TempAllocator& alloc, MDefinition* left, MDefinition* right, JSOp op)
-{
-    return new(alloc) MCompare(left, right, op);
 }
 
 MCompare*
@@ -3657,12 +3625,6 @@ MCompare::cacheOperandMightEmulateUndefined(CompilerConstraintList* constraints)
 }
 
 MBitNot*
-MBitNot::New(TempAllocator& alloc, MDefinition* input)
-{
-    return new(alloc) MBitNot(input);
-}
-
-MBitNot*
 MBitNot::NewAsmJS(TempAllocator& alloc, MDefinition* input)
 {
     MBitNot* ins = new(alloc) MBitNot(input);
@@ -4568,10 +4530,8 @@ MNot::foldsTo(TempAllocator& alloc)
     if (MConstant* inputConst = input()->maybeConstantValue()) {
         bool b;
         if (inputConst->valueToBoolean(&b)) {
-            if (type() == MIRType::Int32)
+            if (type() == MIRType::Int32 || type() == MIRType::Int64)
                 return MConstant::New(alloc, Int32Value(!b));
-            if (type() == MIRType::Int64)
-                return MConstant::NewInt64(alloc, int64_t(!b));
             return MConstant::New(alloc, BooleanValue(!b));
         }
     }

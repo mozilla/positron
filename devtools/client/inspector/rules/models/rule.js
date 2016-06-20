@@ -6,7 +6,7 @@
 
 "use strict";
 
-const {Cc, Ci, Cu} = require("chrome");
+const {Cc, Ci} = require("chrome");
 const promise = require("promise");
 const {CssLogic} = require("devtools/shared/inspector/css-logic");
 const {ELEMENT_STYLE} = require("devtools/server/actors/styles");
@@ -14,9 +14,7 @@ const {TextProperty} =
       require("devtools/client/inspector/rules/models/text-property");
 const {promiseWarn} = require("devtools/client/inspector/shared/utils");
 const {parseDeclarations} = require("devtools/shared/css-parsing-utils");
-const {getCssProperties} = require("devtools/shared/fronts/css-properties");
-
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
+const {XPCOMUtils} = require("resource://gre/modules/XPCOMUtils.jsm");
 
 XPCOMUtils.defineLazyGetter(this, "osString", function () {
   return Cc["@mozilla.org/xre/app-info;1"].getService(Ci.nsIXULRuntime).OS;
@@ -56,8 +54,7 @@ function Rule(elementStyle, options) {
     this.mediaText = this.domRule.mediaText;
   }
 
-  const toolbox = this.elementStyle.ruleView.inspector.toolbox;
-  this.cssProperties = getCssProperties(toolbox);
+  this.cssProperties = this.elementStyle.ruleView.cssProperties;
 
   // Populate the text properties with the style's current authoredText
   // value, and add in any disabled properties from the store.

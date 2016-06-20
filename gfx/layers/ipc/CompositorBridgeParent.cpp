@@ -588,7 +588,8 @@ CompositorBridgeParent::CompositorBridgeParent(widget::CompositorWidgetProxy* aW
                                                bool aUseAPZ,
                                                bool aUseExternalSurfaceSize,
                                                int aSurfaceWidth, int aSurfaceHeight)
-  : mWidgetProxy(aWidget)
+  : CompositorBridgeParentIPCAllocator("CompositorBridgeParent")
+  , mWidgetProxy(aWidget)
   , mIsTesting(false)
   , mPendingTransaction(0)
   , mPaused(false)
@@ -611,7 +612,6 @@ CompositorBridgeParent::CompositorBridgeParent(widget::CompositorWidgetProxy* aW
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(CompositorThread(),
              "The compositor thread must be Initialized before instanciating a CompositorBridgeParent.");
-  MOZ_COUNT_CTOR(CompositorBridgeParent);
 
   // Always run destructor on the main thread
   SetMessageLoopToPostDestructionTo(MessageLoop::current());
@@ -652,7 +652,6 @@ CompositorBridgeParent::RootLayerTreeId()
 CompositorBridgeParent::~CompositorBridgeParent()
 {
   MOZ_ASSERT(NS_IsMainThread());
-  MOZ_COUNT_DTOR(CompositorBridgeParent);
 
   InfallibleTArray<PTextureParent*> textures;
   ManagedPTextureParent(textures);
@@ -1815,14 +1814,15 @@ CompositorBridgeParent::RequestNotifyLayerTreeCleared(uint64_t aLayersId, Compos
  */
 class CrossProcessCompositorBridgeParent final : public PCompositorBridgeParent,
                                                  public ShadowLayersManager,
-                                                 public HostIPCAllocator,
+                                                 public CompositorBridgeParentIPCAllocator,
                                                  public ShmemAllocator
 {
   friend class CompositorBridgeParent;
 
 public:
   explicit CrossProcessCompositorBridgeParent(Transport* aTransport)
-    : mTransport(aTransport)
+    : CompositorBridgeParentIPCAllocator("CrossProcessCompositorBridgeParent")
+    , mTransport(aTransport)
     , mSubprocess(nullptr)
     , mNotifyAfterRemotePaint(false)
     , mDestroyCalled(false)
@@ -1956,7 +1956,8 @@ public:
   virtual PTextureParent* AllocPTextureParent(const SurfaceDescriptor& aSharedData,
                                               const LayersBackend& aLayersBackend,
                                               const TextureFlags& aFlags,
-                                              const uint64_t& aId) override;
+                                              const uint64_t& aId,
+                                              const uint64_t& aSerial) override;
 
   virtual bool DeallocPTextureParent(PTextureParent* actor) override;
 
@@ -1978,6 +1979,13 @@ public:
   {
     return OtherPid();
   }
+
+  virtual void SendAsyncMessage(const InfallibleTArray<AsyncParentMessageData>& aMessage) override
+  {
+    Unused << SendParentAsyncMessages(aMessage);
+  }
+
+  virtual CompositorBridgeParentIPCAllocator* AsCompositorBridgeParentIPCAllocator() override { return this; }
 
 protected:
   void OnChannelConnected(int32_t pid) override {
@@ -2198,9 +2206,10 @@ PTextureParent*
 CompositorBridgeParent::AllocPTextureParent(const SurfaceDescriptor& aSharedData,
                                             const LayersBackend& aLayersBackend,
                                             const TextureFlags& aFlags,
-                                            const uint64_t& aId)
+                                            const uint64_t& aId,
+                                            const uint64_t& aSerial)
 {
-  return TextureHost::CreateIPDLActor(this, aSharedData, aLayersBackend, aFlags);
+  return TextureHost::CreateIPDLActor(this, aSharedData, aLayersBackend, aFlags, aSerial);
 }
 
 bool
@@ -2229,6 +2238,12 @@ void
 CompositorBridgeParent::DeallocShmem(ipc::Shmem& aShmem)
 {
   PCompositorBridgeParent::DeallocShmem(aShmem);
+}
+
+void
+CompositorBridgeParent::SendAsyncMessage(const InfallibleTArray<AsyncParentMessageData>& aMessage)
+{
+  Unused << SendParentAsyncMessages(aMessage);
 }
 
 bool
@@ -2763,7 +2778,8 @@ PTextureParent*
 CrossProcessCompositorBridgeParent::AllocPTextureParent(const SurfaceDescriptor& aSharedData,
                                                         const LayersBackend& aLayersBackend,
                                                         const TextureFlags& aFlags,
-                                                        const uint64_t& aId)
+                                                        const uint64_t& aId,
+                                                        const uint64_t& aSerial)
 {
   CompositorBridgeParent::LayerTreeState* state = nullptr;
 
@@ -2786,7 +2802,7 @@ CrossProcessCompositorBridgeParent::AllocPTextureParent(const SurfaceDescriptor&
     gfxDevCrash(gfx::LogReason::PAllocTextureBackendMismatch) << "Texture backend is wrong";
   }
 
-  return TextureHost::CreateIPDLActor(this, aSharedData, aLayersBackend, aFlags);
+  return TextureHost::CreateIPDLActor(this, aSharedData, aLayersBackend, aFlags, aSerial);
 }
 
 bool

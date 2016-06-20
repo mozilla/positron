@@ -2617,8 +2617,7 @@
               modifiedAttrs.push("soundplaying");
             }
             if (aOtherTab.hasAttribute("usercontextid")) {
-              aOurTab.setAttribute("usercontextid", aOtherTab.getAttribute("usercontextid"));
-              ContextualIdentityService.setTabStyle(aOurTab);
+              aOurTab.setUserContextId(aOtherTab.getAttribute("usercontextid"));
               modifiedAttrs.push("usercontextid");
             }
 
@@ -5867,6 +5866,7 @@
           if (!this._dndPanel) {
             this._dndCanvas = canvas;
             this._dndPanel = document.createElement("panel");
+            this._dndPanel.className = "dragfeedback-tab";
             this._dndPanel.setAttribute("type", "drag");
             let wrapper = document.createElementNS("http://www.w3.org/1999/xhtml", "div");
             wrapper.style.width = "160px";
@@ -6425,12 +6425,18 @@
         <body>
         <![CDATA[
           if (aUserContextId) {
-            this.linkedBrowser.setAttribute("usercontextid", aUserContextId);
+            if (this.linkedBrowser) {
+              this.linkedBrowser.setAttribute("usercontextid", aUserContextId);
+            }
             this.setAttribute("usercontextid", aUserContextId);
           } else {
-            this.linkedBrowser.removeAttribute("usercontextid");
+            if (this.linkedBrowser) {
+              this.linkedBrowser.removeAttribute("usercontextid");
+            }
             this.removeAttribute("usercontextid");
           }
+
+          ContextualIdentityService.setTabStyle(this);
         ]]>
         </body>
       </method>

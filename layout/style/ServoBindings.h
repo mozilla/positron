@@ -25,7 +25,14 @@ class nsINode;
 typedef nsINode RawGeckoNode;
 class nsIPrincipal;
 class nsIURI;
-namespace mozilla { namespace dom { class Element; } }
+struct nsFont;
+namespace mozilla {
+  class FontFamilyList;
+  enum FontFamilyType : uint32_t;
+  namespace dom { class Element; }
+}
+using mozilla::FontFamilyList;
+using mozilla::FontFamilyType;
 using mozilla::dom::Element;
 typedef mozilla::dom::Element RawGeckoElement;
 class nsIDocument;
@@ -121,6 +128,12 @@ const uint16_t* Gecko_GetAtomAsUTF16(nsIAtom* aAtom, uint32_t* aLength);
 bool Gecko_AtomEqualsUTF8(nsIAtom* aAtom, const char* aString, uint32_t aLength);
 bool Gecko_AtomEqualsUTF8IgnoreCase(nsIAtom* aAtom, const char* aString, uint32_t aLength);
 
+// Font style
+void Gecko_FontFamilyList_Clear(FontFamilyList* aList);
+void Gecko_FontFamilyList_AppendNamed(FontFamilyList* aList, nsIAtom* aName);
+void Gecko_FontFamilyList_AppendGeneric(FontFamilyList* list, FontFamilyType familyType);
+void Gecko_CopyFontFamilyFrom(nsFont* dst, const nsFont* src);
+
 // Counter style.
 void Gecko_SetListStyleType(nsStyleList* style_struct, uint32_t type);
 void Gecko_CopyListStyleTypeFrom(nsStyleList* dst, const nsStyleList* src);
@@ -136,12 +149,6 @@ nsStyleGradient* Gecko_CreateGradient(uint8_t shape,
                                       bool repeating,
                                       bool legacy_syntax,
                                       uint32_t stops);
-
-void Gecko_SetGradientStop(nsStyleGradient* gradient,
-                           uint32_t index,
-                           const nsStyleCoord* location,
-                           nscolor color,
-                           bool is_interpolation_hint);
 
 // Object refcounting.
 NS_DECL_HOLDER_FFI_REFCOUNTING(nsIPrincipal, Principal)

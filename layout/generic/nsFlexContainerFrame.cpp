@@ -7,6 +7,7 @@
 
 /* rendering object for CSS "display: flex" */
 
+#include "nsAutoPtr.h"
 #include "nsFlexContainerFrame.h"
 #include "nsContentUtils.h"
 #include "nsCSSAnonBoxes.h"
@@ -1026,7 +1027,7 @@ GetFirstNonAnonBoxDescendant(nsIFrame* aFrame)
     // column, we'll always return the column. This is fine; we're really just
     // looking for a handle to *anything* with a meaningful content node inside
     // the table, for use in DOM comparisons to things outside of the table.)
-    if (MOZ_UNLIKELY(aFrame->GetType() == nsGkAtoms::tableOuterFrame)) {
+    if (MOZ_UNLIKELY(aFrame->GetType() == nsGkAtoms::tableWrapperFrame)) {
       nsIFrame* captionDescendant =
         GetFirstNonAnonBoxDescendant(aFrame->GetChildList(kCaptionList).FirstChild());
       if (captionDescendant) {

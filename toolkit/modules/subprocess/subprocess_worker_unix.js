@@ -280,6 +280,8 @@ class Process extends BaseProcess {
    * Initializes the IO pipes for use as standard input, output, and error
    * descriptors in the spawned process.
    *
+   * @param {object} options
+   *        The Subprocess options object for this process.
    * @returns {unix.Fd[]}
    *          The array of file descriptors belonging to the spawned process.
    */
@@ -432,6 +434,7 @@ class Process extends BaseProcess {
       }
 
       this.fd.dispose();
+      io.updatePollFds();
       this.resolveExit(this.exitCode);
       return this.exitCode;
     }
