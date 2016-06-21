@@ -135,7 +135,7 @@ const GuestWebContentsPrototype = {
   isGuest() { return true },
 
   getURL: function() {
-    if (this._webView) {
+    if (this._webView && this._webView.browserPluginNode.contentDocument) {
       return this._webView.browserPluginNode.contentDocument.URL;
     }
     console.warn('cannot get URL for guest WebContents');
