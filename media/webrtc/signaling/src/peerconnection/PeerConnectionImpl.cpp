@@ -55,9 +55,9 @@
 #endif // XP_WIN
 
 #include "nsIDocument.h"
-#include "nsPerformance.h"
 #include "nsGlobalWindow.h"
 #include "nsDOMDataChannel.h"
+#include "mozilla/dom/Performance.h"
 #include "mozilla/TimeStamp.h"
 #include "mozilla/Telemetry.h"
 #include "mozilla/Preferences.h"
@@ -81,6 +81,7 @@
 #include "mozilla/dom/RTCPeerConnectionBinding.h"
 #include "mozilla/dom/PeerConnectionImplBinding.h"
 #include "mozilla/dom/DataChannelBinding.h"
+#include "mozilla/dom/PerformanceTiming.h"
 #include "mozilla/dom/PluginCrashedEvent.h"
 #include "MediaStreamList.h"
 #include "MediaStreamTrack.h"
@@ -875,7 +876,8 @@ class ConfigureCodec {
       mVP8MaxFs(0),
       mVP8MaxFr(0),
       mUseTmmbr(false),
-      mUseRemb(false)
+      mUseRemb(false),
+      mUseAudioFec(false)
     {
 #ifdef MOZ_WEBRTC_OMX
       // Check to see if what HW codecs are available (not in use) at this moment.
@@ -944,13 +946,21 @@ class ConfigureCodec {
 
       // REMB is enabled by default, but can be disabled from about:config
       branch->GetBoolPref("media.navigator.video.use_remb", &mUseRemb);
+
+      branch->GetBoolPref("media.navigator.audio.use_fec", &mUseAudioFec);
     }
 
     void operator()(JsepCodecDescription* codec) const
     {
       switch (codec->mType) {
         case SdpMediaSection::kAudio:
-          // Nothing to configure here, for now.
+          {
+            JsepAudioCodecDescription& audioCodec =
+              static_cast<JsepAudioCodecDescription&>(*codec);
+            if (audioCodec.mName == "opus") {
+              audioCodec.mFECEnabled = mUseAudioFec;
+            }
+          }
           break;
         case SdpMediaSection::kVideo:
           {
@@ -1015,6 +1025,7 @@ class ConfigureCodec {
     int32_t mVP8MaxFr;
     bool mUseTmmbr;
     bool mUseRemb;
+    bool mUseAudioFec;
 };
 
 nsresult
@@ -2092,7 +2103,7 @@ PeerConnectionImpl::SetRemoteDescription(int32_t action, const char* aSDP)
 nsresult
 PeerConnectionImpl::GetTimeSinceEpoch(DOMHighResTimeStamp *result) {
   MOZ_ASSERT(NS_IsMainThread());
-  nsPerformance *perf = mWindow->GetPerformance();
+  Performance *perf = mWindow->GetPerformance();
   NS_ENSURE_TRUE(perf && perf->Timing(), NS_ERROR_UNEXPECTED);
   *result = perf->Now() + perf->Timing()->NavigationStart();
   return NS_OK;
@@ -2515,6 +2526,11 @@ PeerConnectionImpl::ReplaceTrack(MediaStreamTrack& aThisTrack,
 #if !defined(MOZILLA_EXTERNAL_LINKAGE)
   PrincipalChanged(&aWithTrack);
 #endif
+
+  // We update the media pipelines here so we can apply different codec
+  // settings for different sources (e.g. screensharing as opposed to camera.)
+  // TODO: We should probably only do this if the source has in fact changed.
+  mMedia->UpdateMediaPipelines(*mJsepSession);
 
   pco->OnReplaceTrackSuccess(jrv);
   if (jrv.Failed()) {

@@ -255,7 +255,7 @@ TextTrackManager::UpdateCueDisplay()
 }
 
 void
-TextTrackManager::AddCue(TextTrackCue& aCue)
+TextTrackManager::NotifyCueAdded(TextTrackCue& aCue)
 {
   if (mNewCues) {
     mNewCues->AddCue(aCue);
@@ -659,8 +659,7 @@ TextTrackManager::TimeMarchesOn()
   // Step 11, 17.
   for (uint32_t i = 0; i < otherCues->Length(); ++i) {
     TextTrackCue* cue = (*otherCues)[i];
-    if (cue->GetActive() ||
-        missedCues->GetCueById(cue->Id()) != nullptr) {
+    if (cue->GetActive() || missedCues->IsCueExist(cue)) {
       double time = cue->StartTime() > cue->EndTime() ? cue->StartTime()
                                                       : cue->EndTime();
       SimpleTextTrackEvent* event =
@@ -710,6 +709,13 @@ TextTrackManager::TimeMarchesOn()
 
   // Step 18.
   UpdateCueDisplay();
+}
+
+void
+TextTrackManager::NotifyCueUpdated(TextTrackCue *aCue)
+{
+  // TODO: Add/Reorder the cue to mNewCues if we have some optimization?
+  DispatchTimeMarchesOn();
 }
 
 } // namespace dom

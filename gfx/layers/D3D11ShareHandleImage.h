@@ -8,7 +8,6 @@
 
 #include "mozilla/RefPtr.h"
 #include "ImageContainer.h"
-#include "nsAutoPtr.h"
 #include "d3d11.h"
 #include "mozilla/layers/TextureClient.h"
 #include "mozilla/layers/TextureD3D11.h"
@@ -20,7 +19,7 @@ namespace layers {
 class D3D11RecycleAllocator : public TextureClientRecycleAllocator
 {
 public:
-  explicit D3D11RecycleAllocator(CompositableForwarder* aAllocator,
+  explicit D3D11RecycleAllocator(TextureForwarder* aAllocator,
                                  ID3D11Device* aDevice)
     : TextureClientRecycleAllocator(aAllocator)
     , mDevice(aDevice)

@@ -15,6 +15,7 @@
 #include "mozilla/dom/Element.h"
 #include "mozilla/OwningNonNull.h"
 #include "mozilla/mozalloc.h"
+#include "nsAutoPtr.h"
 #include "nsAString.h"
 #include "nsAlgorithm.h"
 #include "nsCRT.h"
@@ -53,6 +54,11 @@
 #include "nsUnicharUtils.h"
 #include "nsWSRunObject.h"
 #include <algorithm>
+
+// Workaround for windows headers
+#ifdef SetProp
+#undef SetProp
+#endif
 
 class nsISupports;
 class nsRulesInfo;

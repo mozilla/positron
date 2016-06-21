@@ -35,7 +35,6 @@
 #include "nsIWebBrowserPersist.h"
 #include "nsCWebBrowserPersist.h"
 #include "nsIServiceManager.h"
-#include "nsAutoPtr.h"
 #include "nsFocusManager.h"
 #include "Layers.h"
 #include "gfxContext.h"
@@ -655,6 +654,12 @@ nsWebBrowser::LoadURIWithOptions(const char16_t* aURI, uint32_t aLoadFlags,
   return mDocShellAsNav->LoadURIWithOptions(
     aURI, aLoadFlags, aReferringURI, aReferrerPolicy, aPostDataStream,
     aExtraHeaderStream, aBaseURI);
+}
+
+NS_IMETHODIMP
+nsWebBrowser::SetOriginAttributesBeforeLoading(JS::Handle<JS::Value> aOriginAttributes)
+{
+  return mDocShellAsNav->SetOriginAttributesBeforeLoading(aOriginAttributes);
 }
 
 NS_IMETHODIMP

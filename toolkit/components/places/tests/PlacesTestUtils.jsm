@@ -57,10 +57,15 @@ this.PlacesTestUtils = Object.freeze({
       if (typeof place.uri == "string") {
         place.uri = NetUtil.newURI(place.uri);
       } else if (place.uri instanceof URL) {
-        place.uri = NetUtil.newURI(place.href);
+        place.uri = NetUtil.newURI(place.uri.href);
       }
       if (typeof place.title != "string") {
         place.title = "test visit for " + place.uri.spec;
+      }
+      if (typeof place.referrer == "string") {
+        place.referrer = NetUtil.newURI(place.referrer);
+      } else if (place.referrer instanceof URL) {
+        place.referrer = NetUtil.newURI(place.referrer.href);
       }
       place.visits = [{
         transitionType: place.transition === undefined ? Ci.nsINavHistoryService.TRANSITION_LINK
@@ -120,23 +125,15 @@ this.PlacesTestUtils = Object.freeze({
    *       this is a problem only across different connections.
    */
   promiseAsyncUpdates() {
-    return new Promise(resolve => {
-      let db = PlacesUtils.history.DBConnection;
-      let begin = db.createAsyncStatement("BEGIN EXCLUSIVE");
-      begin.executeAsync();
-      begin.finalize();
-
-      let commit = db.createAsyncStatement("COMMIT");
-      commit.executeAsync({
-        handleResult: function () {},
-        handleError: function () {},
-        handleCompletion: function(aReason)
-        {
-          resolve();
-        }
-      });
-      commit.finalize();
-    });
+    return PlacesUtils.withConnectionWrapper("promiseAsyncUpdates", Task.async(function* (db) {
+      try {
+        yield db.executeCached("BEGIN EXCLUSIVE");
+        yield db.executeCached("COMMIT");
+      } catch (ex) {
+        // If we fail to start a transaction, it's because there is already one.
+        // In such a case we should not try to commit the existing transaction.
+      }
+    }));
   },
 
   /**

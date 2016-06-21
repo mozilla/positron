@@ -56,7 +56,7 @@ public:
   void RemoveTextTrack(TextTrack* aTextTrack, bool aPendingListOnly);
   void DidSeek();
 
-  void AddCue(TextTrackCue& aCue);
+  void NotifyCueAdded(TextTrackCue& aCue);
   void AddCues(TextTrack* aTextTrack);
   void NotifyCueRemoved(TextTrackCue& aCue);
   /**
@@ -98,6 +98,8 @@ public:
     mShutdown = true;
   }
 
+  void NotifyCueUpdated(TextTrackCue *aCue);
+
 private:
   /**
    * Converts the TextTrackCue's cuetext into a tree of DOM objects
@@ -112,7 +114,7 @@ private:
   RefPtr<TextTrackList> mPendingTextTracks;
   // List of newly introduced Text Track cues.
 
-  // Contain all cues for a MediaElement.
+  // Contain all cues for a MediaElement. Not sorted.
   RefPtr<TextTrackCueList> mNewCues;
   // The active cues for the last TimeMarchesOn iteration.
   RefPtr<TextTrackCueList> mLastActiveCues;

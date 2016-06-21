@@ -470,7 +470,7 @@ var LoginManagerContent = {
    */
   fillForm({ topDocument, loginFormOrigin, loginsFound, recipes, inputElement }) {
     let topState = this.stateForDocument(topDocument);
-    if (!topState.loginFormForFill) {
+    if (!inputElement && !topState.loginFormForFill) {
       log("fillForm: There is no login form anymore. The form may have been",
           "removed or the document may have changed.");
       return;
@@ -1187,7 +1187,7 @@ var LoginUtils = {
 
 // nsIAutoCompleteResult implementation
 function UserAutoCompleteResult (aSearchString, matchingLogins, messageManager) {
-  function loginSort(a,b) {
+  function loginSort(a, b) {
     var userA = a.username.toLowerCase();
     var userB = b.username.toLowerCase();
 

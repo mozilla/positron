@@ -8,7 +8,7 @@
 #include "mozilla/ClearOnShutdown.h"
 #include "mozilla/Move.h"
 #include "mozilla/Preferences.h"
- #include "mozilla/ChaosMode.h"
+#include "mozilla/ChaosMode.h"
 
 #include "ImageLogging.h"
 #include "nsImageModule.h"
@@ -37,6 +37,7 @@
 #include "nsIFile.h"
 #include "nsCRT.h"
 #include "nsINetworkPredictor.h"
+#include "mozilla/dom/ContentParent.h"
 #include "mozilla/dom/nsMixedContentBlocker.h"
 
 #include "nsIApplicationCache.h"
@@ -57,6 +58,7 @@
 #include "nsIDOMDocument.h"
 
 using namespace mozilla;
+using namespace mozilla::dom;
 using namespace mozilla::image;
 using namespace mozilla::net;
 
@@ -1344,6 +1346,13 @@ void imgLoader::ReadAcceptHeaderPref()
 NS_IMETHODIMP
 imgLoader::ClearCache(bool chrome)
 {
+  if (XRE_IsParentProcess()) {
+    bool privateLoader = this == gPrivateBrowsingLoader;
+    for (auto* cp : ContentParent::AllProcesses(ContentParent::eLive)) {
+      Unused << cp->SendClearImageCache(privateLoader, chrome);
+    }
+  }
+
   if (chrome) {
     return ClearChromeImageCache();
   } else {
@@ -1359,20 +1368,7 @@ imgLoader::FindEntryProperties(nsIURI* uri,
   *_retval = nullptr;
 
   nsCOMPtr<nsIDocument> doc = do_QueryInterface(aDOMDoc);
-  nsCOMPtr<nsIPrincipal> principal;
-  if (doc) {
-    principal = doc->NodePrincipal();
-  } else {
-    nsCOMPtr<nsIScriptSecurityManager> ssm = nsContentUtils::GetSecurityManager();
-    NS_ENSURE_TRUE(ssm, NS_ERROR_FAILURE);
-    ssm->GetSystemPrincipal(getter_AddRefs(principal));
-  }
-  NS_ENSURE_TRUE(principal, NS_ERROR_FAILURE);
-
-  const PrincipalOriginAttributes& attrs =
-    BasePrincipal::Cast(principal)->OriginAttributesRef();
-
-  ImageCacheKey key(uri, attrs, doc);
+  ImageCacheKey key(uri, doc);
   imgCacheTable& cache = GetCache(key);
 
   RefPtr<imgCacheEntry> entry;
@@ -2026,7 +2022,8 @@ imgLoader::LoadImageXPCOM(nsIURI* aURI,
     nsresult rv = LoadImage(aURI,
                             aInitialDocumentURI,
                             aReferrerURI,
-                            refpol,
+                            refpol == mozilla::net::RP_Unset ?
+                              mozilla::net::RP_Default : refpol,
                             aLoadingPrincipal,
                             aLoadGroup,
                             aObserver,
@@ -2129,11 +2126,7 @@ imgLoader::LoadImage(nsIURI* aURI,
   // XXX For now ignore aCacheKey. We will need it in the future
   // for correctly dealing with image load requests that are a result
   // of post data.
-  NS_ENSURE_TRUE(aLoadingPrincipal, NS_ERROR_FAILURE);
-  const PrincipalOriginAttributes& attrs =
-    BasePrincipal::Cast(aLoadingPrincipal)->OriginAttributesRef();
-
-  ImageCacheKey key(aURI, attrs, aLoadingDocument);
+  ImageCacheKey key(aURI, aLoadingDocument);
   imgCacheTable& cache = GetCache(key);
 
   if (cache.Get(key, getter_AddRefs(entry)) && entry) {
@@ -2337,15 +2330,7 @@ imgLoader::LoadImageWithChannel(nsIChannel* channel,
   nsCOMPtr<nsIURI> uri;
   channel->GetURI(getter_AddRefs(uri));
   nsCOMPtr<nsIDocument> doc = do_QueryInterface(aCX);
-
-  NS_ENSURE_TRUE(channel, NS_ERROR_FAILURE);
-  nsCOMPtr<nsILoadInfo> loadInfo = channel->GetLoadInfo();
-  NS_ENSURE_TRUE(loadInfo, NS_ERROR_FAILURE);
-
-  PrincipalOriginAttributes attrs;
-  attrs.InheritFromNecko(loadInfo->GetOriginAttributes());
-
-  ImageCacheKey key(uri, attrs, doc);
+  ImageCacheKey key(uri, doc);
 
   nsLoadFlags requestFlags = nsIRequest::LOAD_NORMAL;
   channel->GetLoadFlags(&requestFlags);
@@ -2447,7 +2432,7 @@ imgLoader::LoadImageWithChannel(nsIChannel* channel,
     // constructed above with the *current URI* and not the *original URI*. I'm
     // pretty sure this is a bug, and it's preventing us from ever getting a
     // cache hit in LoadImageWithChannel when redirects are involved.
-    ImageCacheKey originalURIKey(originalURI, attrs, doc);
+    ImageCacheKey originalURIKey(originalURI, doc);
 
     // Default to doing a principal check because we don't know who
     // started that load and whether their principal ended up being

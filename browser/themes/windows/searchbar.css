@@ -26,8 +26,7 @@
 .searchbar-engine-image {
   height: 16px;
   width: 16px;
-  list-style-image: url("chrome://global/skin/icons/folder-item.png");
-  -moz-image-region: rect(0px, 16px, 16px, 0px);
+  list-style-image: url("chrome://mozapps/skin/places/defaultFavicon.png");
   margin-inline-start: -1px;
 }
 
@@ -44,8 +43,7 @@
   width: 14px;
 }
 
-.search-go-button:-moz-locale-dir(rtl),
-.search-go-button:-moz-locale-dir(rtl) > .toolbarbutton-icon {
+.search-go-button:-moz-locale-dir(rtl) {
   transform: scaleX(-1);
 }
 
@@ -172,6 +170,10 @@
   background-image: url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAAWCAYAAAABxvaqAAAABmJLR0QA/wD/AP+gvaeTAAAACXBIWXMAAAsTAAALEwEAmpwYAAAAB3RJTUUH3gofECQNNVW2/AAAABBJREFUGFdjOHPmzH8GehEA/KpKg9YTf4AAAAAASUVORK5CYII=');
   background-repeat: no-repeat;
   background-position: right center;
+}
+
+.searchbar-engine-one-off-item:-moz-locale-dir(rtl) {
+  background-position: left center;
 }
 
 .searchbar-engine-one-off-item:not(.last-row) {

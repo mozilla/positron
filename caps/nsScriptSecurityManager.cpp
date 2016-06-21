@@ -50,7 +50,6 @@
 #include "nsIConsoleService.h"
 #include "nsIObserverService.h"
 #include "nsIContent.h"
-#include "nsAutoPtr.h"
 #include "nsDOMJSUtils.h"
 #include "nsAboutProtocolUtils.h"
 #include "nsIClassInfo.h"
@@ -1436,7 +1435,7 @@ nsScriptSecurityManager::InitStatics()
     RefPtr<nsScriptSecurityManager> ssManager = new nsScriptSecurityManager();
     nsresult rv = ssManager->Init();
     if (NS_FAILED(rv)) {
-        MOZ_CRASH();
+        MOZ_CRASH("ssManager->Init() failed");
     }
 
     ClearOnShutdown(&gScriptSecMan);

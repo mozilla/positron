@@ -28,7 +28,6 @@
 #include "mozilla/layers/Compositor.h"
 #include "mozilla/mozalloc.h"           // for operator new, etc
 #include "mozilla/unused.h"
-#include "nsAutoPtr.h"                  // for nsRefPtr
 #include "nsDebug.h"                    // for NS_RUNTIMEABORT, etc
 #include "nsISupportsImpl.h"            // for ImageBridgeParent::Release, etc
 #include "nsTArray.h"                   // for nsTArray, nsTArray_Impl
@@ -54,7 +53,8 @@ CompositorThreadHolder* GetCompositorThreadHolder();
 ImageBridgeParent::ImageBridgeParent(MessageLoop* aLoop,
                                      Transport* aTransport,
                                      ProcessId aChildProcessId)
-  : mMessageLoop(aLoop)
+  : CompositableParentManager("ImageBridgeParent")
+  , mMessageLoop(aLoop)
   , mTransport(aTransport)
   , mSetChildThreadPriority(false)
   , mClosed(false)
@@ -135,7 +135,10 @@ public:
   explicit AutoImageBridgeParentAsyncMessageSender(ImageBridgeParent* aImageBridge,
                                                    InfallibleTArray<OpDestroy>* aToDestroy = nullptr)
     : mImageBridge(aImageBridge)
-    , mToDestroy(aToDestroy) {}
+    , mToDestroy(aToDestroy)
+  {
+    mImageBridge->SetAboutToSendAsyncMessages();
+  }
 
   ~AutoImageBridgeParentAsyncMessageSender()
   {
@@ -153,9 +156,11 @@ private:
 
 bool
 ImageBridgeParent::RecvUpdate(EditArray&& aEdits, OpDestroyArray&& aToDestroy,
+                              const uint64_t& aFwdTransactionId,
                               EditReplyArray* aReply)
 {
   AutoImageBridgeParentAsyncMessageSender autoAsyncMessageSender(this, &aToDestroy);
+  UpdateFwdTransactionId(aFwdTransactionId);
 
   EditReplyVector replyv;
   for (EditArray::index_type i = 0; i < aEdits.Length(); ++i) {
@@ -180,10 +185,11 @@ ImageBridgeParent::RecvUpdate(EditArray&& aEdits, OpDestroyArray&& aToDestroy,
 }
 
 bool
-ImageBridgeParent::RecvUpdateNoSwap(EditArray&& aEdits, OpDestroyArray&& aToDestroy)
+ImageBridgeParent::RecvUpdateNoSwap(EditArray&& aEdits, OpDestroyArray&& aToDestroy,
+                                    const uint64_t& aFwdTransactionId)
 {
   InfallibleTArray<EditReply> noReplies;
-  bool success = RecvUpdate(Move(aEdits), Move(aToDestroy), &noReplies);
+  bool success = RecvUpdate(Move(aEdits), Move(aToDestroy), aFwdTransactionId, &noReplies);
   MOZ_ASSERT(noReplies.Length() == 0, "RecvUpdateNoSwap requires a sync Update to carry Edits");
   return success;
 }
@@ -252,9 +258,10 @@ bool ImageBridgeParent::DeallocPCompositableParent(PCompositableParent* aActor)
 PTextureParent*
 ImageBridgeParent::AllocPTextureParent(const SurfaceDescriptor& aSharedData,
                                        const LayersBackend& aLayersBackend,
-                                       const TextureFlags& aFlags)
+                                       const TextureFlags& aFlags,
+                                       const uint64_t& aSerial)
 {
-  return TextureHost::CreateIPDLActor(this, aSharedData, aLayersBackend, aFlags);
+  return TextureHost::CreateIPDLActor(this, aSharedData, aLayersBackend, aFlags, aSerial);
 }
 
 bool
@@ -296,12 +303,6 @@ ImageBridgeParent::SendAsyncMessage(const InfallibleTArray<AsyncParentMessageDat
   mozilla::Unused << SendParentAsyncMessages(aMessage);
 }
 
-bool
-ImageBridgeParent::RecvChildAsyncMessages(InfallibleTArray<AsyncChildMessageData>&& aMessages)
-{
-  return true;
-}
-
 class ProcessIdComparator
 {
 public:
@@ -336,6 +337,7 @@ ImageBridgeParent::NotifyImageComposites(nsTArray<ImageCompositeNotification>& a
       notifications.AppendElement(aNotifications[end]);
       ++end;
     }
+    GetInstance(pid)->SendPendingAsyncMessages();
     if (!GetInstance(pid)->SendDidComposite(notifications)) {
       ok = false;
     }
@@ -428,80 +430,76 @@ ImageBridgeParent::ReplyRemoveTexture(const OpReplyRemoveTexture& aReply)
   mPendingAsyncMessage.push_back(aReply);
 }
 
-/*static*/ void
-ImageBridgeParent::ReplyRemoveTexture(base::ProcessId aChildProcessId,
-                                      const OpReplyRemoveTexture& aReply)
-{
-  ImageBridgeParent* imageBridge = ImageBridgeParent::GetInstance(aChildProcessId);
-  if (!imageBridge) {
-    return;
-  }
-  imageBridge->ReplyRemoveTexture(aReply);
-}
-
 void
-ImageBridgeParent::SendFenceHandleIfPresent(PTextureParent* aTexture)
+ImageBridgeParent::SendFenceHandleToNonRecycle(PTextureParent* aTexture)
 {
   RefPtr<TextureHost> texture = TextureHost::AsTextureHost(aTexture);
-  if (!texture || !texture->NeedsFenceHandle()) {
+  if (!texture) {
     return;
   }
+
+  if (!(texture->GetFlags() & TextureFlags::RECYCLE) &&
+     !texture->NeedsFenceHandle()) {
+    return;
+  }
+
+  uint64_t textureId = TextureHost::GetTextureSerial(aTexture);
 
   // Send a ReleaseFence of CompositorOGL.
   FenceHandle fence = texture->GetCompositorReleaseFence();
   if (fence.IsValid()) {
-    mPendingAsyncMessage.push_back(OpDeliverFence(aTexture, nullptr,
-                                                  fence));
+    mPendingAsyncMessage.push_back(OpDeliverFenceToNonRecycle(textureId, fence));
   }
 
   // Send a ReleaseFence that is set to TextureHost by HwcComposer2D.
   fence = texture->GetAndResetReleaseFenceHandle();
   if (fence.IsValid()) {
-    mPendingAsyncMessage.push_back(OpDeliverFence(aTexture, nullptr,
-                                                  fence));
+    mPendingAsyncMessage.push_back(OpDeliverFenceToNonRecycle(textureId, fence));
   }
 }
 
 void
-ImageBridgeParent::AppendDeliverFenceMessage(uint64_t aDestHolderId,
-                                             uint64_t aTransactionId,
-                                             PTextureParent* aTexture)
+ImageBridgeParent::NotifyNotUsedToNonRecycle(PTextureParent* aTexture,
+                                             uint64_t aTransactionId)
 {
   RefPtr<TextureHost> texture = TextureHost::AsTextureHost(aTexture);
-  if (!texture || !texture->NeedsFenceHandle()) {
+  if (!texture) {
     return;
   }
 
-  // Send a ReleaseFence of CompositorOGL.
-  FenceHandle fence = texture->GetCompositorReleaseFence();
-  if (fence.IsValid()) {
-    mPendingAsyncMessage.push_back(OpDeliverFenceToTracker(aDestHolderId,
-                                                           aTransactionId,
-                                                           fence));
+  if (!(texture->GetFlags() & TextureFlags::RECYCLE) &&
+     !texture->NeedsFenceHandle()) {
+    return;
   }
 
-  // Send a ReleaseFence that is set to TextureHost by HwcComposer2D.
-  fence = texture->GetAndResetReleaseFenceHandle();
-  if (fence.IsValid()) {
-    mPendingAsyncMessage.push_back(OpDeliverFenceToTracker(aDestHolderId,
-                                                           aTransactionId,
-                                                           fence));
-  }
+  SendFenceHandleToNonRecycle(aTexture);
+
+  uint64_t textureId = TextureHost::GetTextureSerial(aTexture);
+  mPendingAsyncMessage.push_back(
+    OpNotifyNotUsedToNonRecycle(textureId, aTransactionId));
+
 }
 
 /*static*/ void
-ImageBridgeParent::AppendDeliverFenceMessage(base::ProcessId aChildProcessId,
-                                             uint64_t aDestHolderId,
-                                             uint64_t aTransactionId,
-                                             PTextureParent* aTexture)
+ImageBridgeParent::NotifyNotUsedToNonRecycle(base::ProcessId aChildProcessId,
+                                             PTextureParent* aTexture,
+                                             uint64_t aTransactionId)
 {
   ImageBridgeParent* imageBridge = ImageBridgeParent::GetInstance(aChildProcessId);
   if (!imageBridge) {
     return;
   }
-  imageBridge->AppendDeliverFenceMessage(aDestHolderId,
-                                         aTransactionId,
-                                         aTexture);
+  imageBridge->NotifyNotUsedToNonRecycle(aTexture, aTransactionId);
+}
+
+/*static*/ void
+ImageBridgeParent::SetAboutToSendAsyncMessages(base::ProcessId aChildProcessId)
+{
+  ImageBridgeParent* imageBridge = ImageBridgeParent::GetInstance(aChildProcessId);
+  if (!imageBridge) {
+    return;
+  }
+  imageBridge->SetAboutToSendAsyncMessages();
 }
 
 /*static*/ void
@@ -512,6 +510,29 @@ ImageBridgeParent::SendPendingAsyncMessages(base::ProcessId aChildProcessId)
     return;
   }
   imageBridge->SendPendingAsyncMessages();
+}
+
+void
+ImageBridgeParent::NotifyNotUsed(PTextureParent* aTexture, uint64_t aTransactionId)
+{
+  RefPtr<TextureHost> texture = TextureHost::AsTextureHost(aTexture);
+  if (!texture) {
+    return;
+  }
+
+  if (!(texture->GetFlags() & TextureFlags::RECYCLE) &&
+     !texture->NeedsFenceHandle()) {
+    return;
+  }
+
+  SendFenceHandleIfPresent(aTexture);
+  uint64_t textureId = TextureHost::GetTextureSerial(aTexture);
+  mPendingAsyncMessage.push_back(
+    OpNotifyNotUsed(textureId, aTransactionId));
+
+  if (!IsAboutToSendAsyncMessages()) {
+    SendPendingAsyncMessages();
+  }
 }
 
 } // namespace layers

@@ -1120,6 +1120,11 @@ MacroAssembler::initGCThing(Register obj, Register temp, JSObject* templateObj,
                           : 0),
                     Address(obj, elementsOffset + ObjectElements::offsetOfFlags()));
             MOZ_ASSERT(!ntemplate->hasPrivate());
+        } else if (ntemplate->is<ArgumentsObject>()) {
+            // The caller will initialize the reserved slots.
+            MOZ_ASSERT(!initContents);
+            MOZ_ASSERT(!ntemplate->hasPrivate());
+            storePtr(ImmPtr(emptyObjectElements), Address(obj, NativeObject::offsetOfElements()));
         } else {
             // If the target type could be a TypedArray that maps shared memory
             // then this would need to store emptyObjectElementsShared in that case.
@@ -1812,6 +1817,49 @@ MacroAssembler::convertTypedOrValueToFloatingPoint(TypedOrValueRegister src, Flo
       default:
         MOZ_CRASH("Bad MIRType");
     }
+}
+
+void
+MacroAssembler::outOfLineTruncateSlow(FloatRegister src, Register dest, bool widenFloatToDouble,
+                                      bool compilingWasm)
+{
+#if defined(JS_CODEGEN_ARM) || defined(JS_CODEGEN_ARM64)
+    if (widenFloatToDouble) {
+        convertFloat32ToDouble(src, ScratchDoubleReg);
+        src = ScratchDoubleReg;
+    }
+#elif defined(JS_CODEGEN_X86) || defined(JS_CODEGEN_X64)
+    FloatRegister srcSingle;
+    if (widenFloatToDouble) {
+        MOZ_ASSERT(src.isSingle());
+        srcSingle = src;
+        src = src.asDouble();
+        push(srcSingle);
+        convertFloat32ToDouble(srcSingle, src);
+    }
+#else
+    // Also see below
+    MOZ_CRASH("MacroAssembler platform hook: outOfLineTruncateSlow");
+#endif
+
+    MOZ_ASSERT(src.isDouble());
+
+    setupUnalignedABICall(dest);
+    passABIArg(src, MoveOp::DOUBLE);
+    if (compilingWasm)
+        callWithABI(wasm::SymbolicAddress::ToInt32);
+    else
+        callWithABI(mozilla::BitwiseCast<void*, int32_t(*)(double)>(JS::ToInt32));
+    storeCallResult(dest);
+
+#if defined(JS_CODEGEN_ARM) || defined(JS_CODEGEN_ARM64)
+    // Nothing
+#elif defined(JS_CODEGEN_X86) || defined(JS_CODEGEN_X64)
+    if (widenFloatToDouble)
+        pop(srcSingle);
+#else
+    MOZ_CRASH("MacroAssembler platform hook: outOfLineTruncateSlow");
+#endif
 }
 
 void

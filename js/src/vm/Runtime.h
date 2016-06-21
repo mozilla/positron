@@ -1107,10 +1107,6 @@ struct JSRuntime : public JS::shadow::Runtime,
     /* The native stack size limit that runtime should not exceed. */
     size_t              nativeStackQuota[js::StackKindCount];
 
-    /* Context create/destroy callback. */
-    JSContextCallback   cxCallback;
-    void*              cxCallbackData;
-
     /* Compartment destroy callback. */
     JSDestroyCompartmentCallback destroyCompartmentCallback;
 
@@ -1280,8 +1276,8 @@ struct JSRuntime : public JS::shadow::Runtime,
     JSDestroyPrincipalsOp destroyPrincipals;
     JSReadPrincipalsOp readPrincipals;
 
-    /* Optional error reporter. */
-    JSErrorReporter     errorReporter;
+    /* Optional warning reporter. */
+    JS::WarningReporter warningReporter;
 
     JS::BuildIdOp buildIdOp;
 

@@ -218,7 +218,7 @@ this.EXPORTED_SYMBOLS = ["WebVTT"];
           settings.percent(k, v);
           break;
         case "align":
-          settings.alt(k, v, ["start", "middle", "end", "left", "right"]);
+          settings.alt(k, v, ["start", "center", "end", "left", "right"]);
           break;
         }
       }, /:/, /\s/);
@@ -230,14 +230,8 @@ this.EXPORTED_SYMBOLS = ["WebVTT"];
       cue.lineAlign = settings.get("lineAlign", "start");
       cue.snapToLines = settings.get("snapToLines", true);
       cue.size = settings.get("size", 100);
-      cue.align = settings.get("align", "middle");
-      cue.position = settings.get("position", {
-        start: 0,
-        left: 0,
-        middle: 50,
-        end: 100,
-        right: 100
-      }, cue.align);
+      cue.align = settings.get("align", "center");
+      cue.position = settings.get("position", "auto");
       cue.positionAlign = settings.get("positionAlign", "center");
     }
 
@@ -679,26 +673,6 @@ this.EXPORTED_SYMBOLS = ["WebVTT"];
     return "ltr";
   }
 
-  function computeLinePos(cue) {
-    if (typeof cue.line === "number" &&
-        (cue.snapToLines || (cue.line >= 0 && cue.line <= 100))) {
-      return cue.line;
-    }
-    if (!cue.track || !cue.track.textTrackList ||
-        !cue.track.textTrackList.mediaElement) {
-      return -1;
-    }
-    var track = cue.track,
-        trackList = track.textTrackList,
-        count = 0;
-    for (var i = 0; i < trackList.length && trackList[i] !== track; i++) {
-      if (trackList[i].mode === "showing") {
-        count++;
-      }
-    }
-    return ++count * -1;
-  }
-
   function StyleBox() {
   }
 
@@ -756,11 +730,10 @@ this.EXPORTED_SYMBOLS = ["WebVTT"];
     this.applyStyles(styles, this.cueDiv);
 
     // Create an absolutely positioned div that will be used to position the cue
-    // div. Note, all WebVTT cue-setting alignments are equivalent to the CSS
-    // mirrors of them except "middle" which is "center" in CSS.
+    // div.
     this.div = window.document.createElement("div");
     styles = {
-      textAlign: cue.align === "middle" ? "center" : cue.align,
+      textAlign: cue.align,
       font: styleOptions.font,
       whiteSpace: "pre-line",
       position: "absolute"
@@ -1020,7 +993,7 @@ this.EXPORTED_SYMBOLS = ["WebVTT"];
 
     var boxPosition = new BoxPosition(styleBox),
         cue = styleBox.cue,
-        linePos = computeLinePos(cue),
+        linePos = cue.computedLine,
         axis = [];
 
     // If we have a line number to align the cue to.

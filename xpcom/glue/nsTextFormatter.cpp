@@ -631,7 +631,7 @@ BuildArgArray(const char16_t* aFmt, va_list aAp, int* aRv,
       continue;
     }
     cn = 0;
-    /* should imporve error check later */
+    /* should improve error check later */
     while (c && c != '$') {
       cn = cn * 10 + c - '0';
       c = *p++;
@@ -881,14 +881,14 @@ dosprintf(SprintfState* aState, const char16_t* aFmt, va_list aAp)
     if (nas) {
       /* the aFmt contains the Numbered Arguments feature */
       i = 0;
-      /* should imporve error check later */
+      /* should improve error check later */
       while (c && c != '$') {
         i = (i * 10) + (c - '0');
         c = *aFmt++;
       }
 
       if (nas[i - 1].type == NumArgState::UNKNOWN) {
-        if (nas && (nas != nasArray)) {
+        if (nas != nasArray) {
           PR_DELETE(nas);
         }
         return -1;

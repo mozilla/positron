@@ -25,11 +25,11 @@
 #include "mozilla/layers/LayersSurfaces.h"  // for SurfaceDescriptor
 #include "mozilla/mozalloc.h"           // for operator delete
 #include "mozilla/gfx/CriticalSection.h"
-#include "nsAutoPtr.h"                  // for nsRefPtr
 #include "nsCOMPtr.h"                   // for already_AddRefed
 #include "nsISupportsImpl.h"            // for TextureImage::AddRef, etc
 #include "GfxTexturesReporter.h"
 #include "pratom.h"
+#include "nsThreadUtils.h"
 
 class gfxImageSurface;
 
@@ -64,6 +64,7 @@ class ITextureClientRecycleAllocator;
 #ifdef GFX_DEBUG_TRACK_CLIENTS_IN_POOL
 class TextureClientPool;
 #endif
+class TextureForwarder;
 class KeepAlive;
 
 /**
@@ -336,7 +337,7 @@ public:
 
   // Creates and allocates a TextureClient usable with Moz2D.
   static already_AddRefed<TextureClient>
-  CreateForDrawing(CompositableForwarder* aAllocator,
+  CreateForDrawing(TextureForwarder* aAllocator,
                    gfx::SurfaceFormat aFormat,
                    gfx::IntSize aSize,
                    BackendSelector aSelector,
@@ -410,13 +411,6 @@ public:
   bool CanExposeDrawTarget() const { return mInfo.supportsMoz2D; }
 
   bool CanExposeMappedData() const { return mInfo.canExposeMappedData; }
-
-  /* TextureClientRecycleAllocator tracking to decide if we need
-   * to check with the compositor before recycling.
-   * Should be superceeded (and removed) by bug 1252835.
-   */
-  void SetInUse(bool aInUse) { mInUse = aInUse; }
-  bool IsInUse() { return mInUse; }
 
   /**
    * Returns a DrawTarget to draw into the TextureClient.
@@ -515,21 +509,6 @@ public:
   void RecycleTexture(TextureFlags aFlags);
 
   /**
-   * valid only for TextureFlags::RECYCLE TextureClient.
-   * When called this texture client will grab a strong reference and release
-   * it once the compositor notifies that it is done with the texture.
-   * NOTE: In this stage the texture client can no longer be used by the
-   * client in a transaction.
-   */
-  void WaitForCompositorRecycle();
-
-  /**
-   * Should only be called when dying. We no longer care whether the compositor
-   * has finished with the texture.
-   */
-  void CancelWaitForCompositorRecycle();
-
-  /**
    * After being shared with the compositor side, an immutable texture is never
    * modified, it can only be read. It is safe to not Lock/Unlock immutable
    * textures.
@@ -607,11 +586,6 @@ public:
   }
 
   /**
-   * Set AsyncTransactionTracker of RemoveTextureFromCompositableAsync() transaction.
-   */
-  virtual void SetRemoveFromCompositableWaiter(AsyncTransactionWaiter* aWaiter);
-
-  /**
    * This function waits until the buffer is no longer being used.
    *
    * XXX - Ideally we shouldn't need this method because Lock the right
@@ -647,9 +621,43 @@ public:
   TextureData* GetInternalData() { return mData; }
   const TextureData* GetInternalData() const { return mData; }
 
-  virtual void RemoveFromCompositable(CompositableClient* aCompositable,
-                                      AsyncTransactionWaiter* aWaiter = nullptr);
+  uint64_t GetSerial() const { return mSerial; }
 
+  bool NeedsFenceHandle()
+  {
+#if defined(MOZ_WIDGET_GONK) && ANDROID_VERSION >= 17
+    if (!mData) {
+      return false;
+    }
+    return !!mData->AsGrallocTextureData();
+#else
+    return false;
+#endif
+  }
+
+  void WaitFenceHandleOnImageBridge(Mutex& aMutex);
+  void ClearWaitFenceHandleOnImageBridge(Mutex& aMutex);
+  void CancelWaitFenceHandleOnImageBridge();
+
+  void CancelWaitForRecycle();
+
+  /**
+   * Set last transaction id of CompositableForwarder.
+   * 
+   * Called when TextureClient has TextureFlags::RECYCLE flag.
+   * When CompositableForwarder forwards the TextureClient with
+   * TextureFlags::RECYCLE, it holds TextureClient's ref until host side
+   * releases it. The host side sends TextureClient release message.
+   * The id is used to check if the message is for the last TextureClient
+   * forwarding.
+   */
+  void SetLastFwdTransactionId(uint64_t aTransactionId)
+  {
+    MOZ_ASSERT(mFwdTransactionId < aTransactionId);
+    mFwdTransactionId = aTransactionId;
+  }
+
+  uint64_t GetLastFwdTransactionId() { return mFwdTransactionId; }
 
   void EnableReadLock();
 
@@ -692,7 +700,6 @@ protected:
   RefPtr<ClientIPCAllocator> mAllocator;
   RefPtr<TextureChild> mActor;
   RefPtr<ITextureClientRecycleAllocator> mRecycleAllocator;
-  RefPtr<AsyncTransactionWaiter> mRemoveFromCompositableWaiter;
   RefPtr<TextureReadLock> mReadLock;
 
   TextureData* mData;
@@ -701,6 +708,8 @@ protected:
   TextureFlags mFlags;
   FenceHandle mReleaseFenceHandle;
   FenceHandle mAcquireFenceHandle;
+  RefPtr<AsyncTransactionWaiter> mFenceHandleWaiter;
+
   gl::GfxTextureWasteTracker mWasteTracker;
 
   OpenMode mOpenMode;
@@ -712,13 +721,19 @@ protected:
   // is sent to the compositor. We need this remember to lock mReadLock on
   // behalf of the compositor just before sending the notification.
   bool mUpdated;
-  bool mInUse;
 
   bool mAddedToCompositableClient;
   bool mWorkaroundAnnoyingSharedSurfaceLifetimeIssues;
   bool mWorkaroundAnnoyingSharedSurfaceOwnershipIssues;
 
   RefPtr<TextureReadbackSink> mReadbackSink;
+
+  uint64_t mFwdTransactionId;
+
+  // Serial id of TextureClient. It is unique in current process.
+  const uint64_t mSerial;
+  // Used to assign serial ids of TextureClient.
+  static mozilla::Atomic<uint64_t> sSerialCounter;
 
   friend class TextureChild;
   friend class RemoveTextureFromCompositableTracker;

@@ -57,9 +57,8 @@ extensions.on("page-load", (type, page, params, sender, delegate) => {
     let parentWindow = browser.ownerDocument.defaultView;
     page.windowId = WindowManager.getId(parentWindow);
 
-    let tab = null;
-    if (params.type == "tab") {
-      tab = parentWindow.gBrowser.getTabForBrowser(browser);
+    let tab = parentWindow.gBrowser.getTabForBrowser(browser);
+    if (tab) {
       sender.tabId = TabManager.getId(tab);
       page.tabId = TabManager.getId(tab);
     }
@@ -262,7 +261,7 @@ let tabListener = {
   },
 };
 
-extensions.registerSchemaAPI("tabs", null, (extension, context) => {
+extensions.registerSchemaAPI("tabs", (extension, context) => {
   let self = {
     tabs: {
       onActivated: new WindowEventManager(context, "tabs.onActivated", "TabSelect", (fire, event) => {

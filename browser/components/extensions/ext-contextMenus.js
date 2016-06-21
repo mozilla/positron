@@ -40,7 +40,7 @@ var gMenuBuilder = {
     this.xulMenu = xulMenu;
     for (let [, root] of gRootItems) {
       let rootElement = this.buildElementWithChildren(root, contextData);
-      if (!rootElement.firstChild.childNodes.length) {
+      if (!rootElement.firstChild || !rootElement.firstChild.childNodes.length) {
         // If the root has no visible children, there is no reason to show
         // the root menu item itself either.
         continue;
@@ -470,7 +470,7 @@ extensions.on("shutdown", (type, extension) => {
 });
 /* eslint-enable mozilla/balanced-listeners */
 
-extensions.registerSchemaAPI("contextMenus", "contextMenus", (extension, context) => {
+extensions.registerSchemaAPI("contextMenus", (extension, context) => {
   return {
     contextMenus: {
       create: function(createProperties, callback) {

@@ -39,7 +39,6 @@ static GtkWidget* gToolbarWidget;
 static GtkWidget* gFrameWidget;
 static GtkWidget* gTabWidget;
 static GtkWidget* gTextViewWidget;
-static GtkWidget* gTooltipWidget;
 static GtkWidget* gImageMenuItemWidget;
 static GtkWidget* gCheckMenuItemWidget;
 static GtkWidget* gTreeViewWidget;
@@ -86,15 +85,6 @@ GetStateFlagsFromGtkWidgetState(GtkWidgetState* state)
     }
   
     return stateFlags;
-}
-
-/* Because we have such an unconventional way of drawing widgets, signal to the GTK theme engine
-   that they are drawing for Mozilla instead of a conventional GTK app so they can do any specific
-   things they may want to do. */
-static void
-moz_gtk_set_widget_name(GtkWidget* widget)
-{
-    gtk_widget_set_name(widget, "MozillaGtkWidget");
 }
 
 gint
@@ -442,19 +432,6 @@ ensure_toolbar_separator_widget()
         ensure_toolbar_widget();
         gToolbarSeparatorWidget = GTK_WIDGET(gtk_separator_tool_item_new());
         setup_widget_prototype(gToolbarSeparatorWidget);
-    }
-    return MOZ_GTK_SUCCESS;
-}
-
-static gint
-ensure_tooltip_widget()
-{
-    if (!gTooltipWidget) {
-        gTooltipWidget = gtk_window_new(GTK_WINDOW_POPUP);
-        GtkStyleContext* style = gtk_widget_get_style_context(gTooltipWidget);
-        gtk_style_context_add_class(style, GTK_STYLE_CLASS_TOOLTIP);
-        gtk_widget_realize(gTooltipWidget);
-        moz_gtk_set_widget_name(gTooltipWidget);
     }
     return MOZ_GTK_SUCCESS;
 }
@@ -1037,6 +1014,36 @@ moz_gtk_scrollbar_button_paint(cairo_t *cr, GdkRectangle* rect,
     return MOZ_GTK_SUCCESS;
 }
 
+static void
+moz_gtk_update_scrollbar_style(GtkStyleContext* style,
+                               WidgetNodeType widget,
+                               GtkTextDirection direction)
+{
+    if (widget == MOZ_GTK_SCROLLBAR_HORIZONTAL) {
+        gtk_style_context_add_class(style, GTK_STYLE_CLASS_BOTTOM);
+    } else {
+        if (direction == GTK_TEXT_DIR_LTR) {
+            gtk_style_context_add_class(style, GTK_STYLE_CLASS_RIGHT);
+            gtk_style_context_remove_class(style, GTK_STYLE_CLASS_LEFT);
+        } else {
+            gtk_style_context_add_class(style, GTK_STYLE_CLASS_LEFT);
+            gtk_style_context_remove_class(style, GTK_STYLE_CLASS_RIGHT);
+        }
+    }
+}
+
+static void
+moz_gtk_draw_styled_frame(GtkStyleContext* style, cairo_t *cr,
+                          GdkRectangle* rect, bool drawFocus)
+{
+    gtk_render_background(style, cr, rect->x, rect->y, rect->width, rect->height);
+    gtk_render_frame(style, cr, rect->x, rect->y, rect->width, rect->height);
+    if (drawFocus) {
+        gtk_render_focus(style, cr,
+                         rect->x, rect->y, rect->width, rect->height);
+    }
+}
+
 static gint
 moz_gtk_scrollbar_trough_paint(WidgetNodeType widget,
                                cairo_t *cr, GdkRectangle* rect,
@@ -1051,19 +1058,28 @@ moz_gtk_scrollbar_trough_paint(WidgetNodeType widget,
         ReleaseStyleContext(style);
     }
 
-    GtkStyleContext* style =
-        ClaimStyleContext(widget == MOZ_GTK_SCROLLBAR_HORIZONTAL ?
-                          MOZ_GTK_SCROLLBAR_TROUGH_HORIZONTAL :
-                          MOZ_GTK_SCROLLBAR_TROUGH_VERTICAL,
-                          direction);
+    bool isHorizontal = (widget == MOZ_GTK_SCROLLBAR_HORIZONTAL);
+    GtkStyleContext* style;
 
-    gtk_render_background(style, cr, rect->x, rect->y, rect->width, rect->height);
-    gtk_render_frame(style, cr, rect->x, rect->y, rect->width, rect->height);
+    // Draw all child CSS Nodes for Gtk >= 3.20
+    if (gtk_check_version(3, 20, 0) == nullptr) {
+        style = ClaimStyleContext(widget, direction);
+        moz_gtk_update_scrollbar_style(style, widget, direction);
+        moz_gtk_draw_styled_frame(style, cr, rect, state->focused);
+        ReleaseStyleContext(style);
 
-    if (state->focused) {
-        gtk_render_focus(style, cr,
-                         rect->x, rect->y, rect->width, rect->height);
+        style = ClaimStyleContext(isHorizontal ?
+                                  MOZ_GTK_SCROLLBAR_CONTENTS_HORIZONTAL :
+                                  MOZ_GTK_SCROLLBAR_CONTENTS_VERTICAL,
+                                  direction);
+        moz_gtk_draw_styled_frame(style, cr, rect, state->focused);
+        ReleaseStyleContext(style);
     }
+    style = ClaimStyleContext(isHorizontal ?
+                              MOZ_GTK_SCROLLBAR_TROUGH_HORIZONTAL :
+                              MOZ_GTK_SCROLLBAR_TROUGH_VERTICAL,
+                              direction);
+    moz_gtk_draw_styled_frame(style, cr, rect, state->focused);
     ReleaseStyleContext(style);
 
     return MOZ_GTK_SUCCESS;
@@ -1809,14 +1825,10 @@ static gint
 moz_gtk_tooltip_paint(cairo_t *cr, GdkRectangle* rect,
                       GtkTextDirection direction)
 {
-    GtkStyleContext* style;
-
-    ensure_tooltip_widget();
-    gtk_widget_set_direction(gTooltipWidget, direction);
-
-    style = gtk_widget_get_style_context(gTooltipWidget);
+    GtkStyleContext* style = ClaimStyleContext(MOZ_GTK_TOOLTIP, direction);
     gtk_render_background(style, cr, rect->x, rect->y, rect->width, rect->height);
     gtk_render_frame(style, cr, rect->x, rect->y, rect->width, rect->height);
+    ReleaseStyleContext(style);
     return MOZ_GTK_SUCCESS;
 }
 
@@ -2415,21 +2427,13 @@ moz_gtk_menu_arrow_paint(cairo_t *cr, GdkRectangle* rect,
                          GtkWidgetState* state,
                          GtkTextDirection direction)
 {
-    GtkStyleContext* style;
     GtkStateFlags state_flags = GetStateFlagsFromGtkWidgetState(state);
-
-    GtkWidget* widget = GetWidget(MOZ_GTK_MENUITEM);
-    gtk_widget_set_direction(widget, direction);
-
-    style = gtk_widget_get_style_context(widget);
-    gtk_style_context_save(style);
-    gtk_style_context_add_class(style, GTK_STYLE_CLASS_MENUITEM);
-    gtk_style_context_set_state(style, state_flags);
+    GtkStyleContext* style = ClaimStyleContext(MOZ_GTK_MENUITEM,
+                                               direction, state_flags);
     gtk_render_arrow(style, cr,
                     (direction == GTK_TEXT_DIR_LTR) ? ARROW_RIGHT : ARROW_LEFT,
                     rect->x, rect->y, rect->width);
-    gtk_style_context_restore(style);
-
+    ReleaseStyleContext(style);
     return MOZ_GTK_SUCCESS;
 }
 
@@ -2738,6 +2742,14 @@ moz_gtk_get_widget_border(WidgetNodeType widget, gint* left, gint* top,
         ensure_info_bar();
         w = gInfoBar;
         break;
+    case MOZ_GTK_TOOLTIP:
+        {
+            style = ClaimStyleContext(MOZ_GTK_TOOLTIP);
+            moz_gtk_add_style_border(style, left, top, right, bottom);
+            moz_gtk_add_style_padding(style, left, top, right, bottom);
+            ReleaseStyleContext(style);
+            return MOZ_GTK_SUCCESS;
+        }
     /* These widgets have no borders, since they are not containers. */
     case MOZ_GTK_CHECKBUTTON_LABEL:
     case MOZ_GTK_RADIOBUTTON_LABEL:
@@ -2761,7 +2773,6 @@ moz_gtk_get_widget_border(WidgetNodeType widget, gint* left, gint* top,
     case MOZ_GTK_MENUSEPARATOR:
     /* These widgets have no borders.*/
     case MOZ_GTK_SPINBUTTON:
-    case MOZ_GTK_TOOLTIP:
     case MOZ_GTK_WINDOW:
     case MOZ_GTK_RESIZER:
     case MOZ_GTK_MENUARROW:
@@ -3287,10 +3298,7 @@ gboolean moz_gtk_has_scrollbar_buttons(void)
 gint
 moz_gtk_shutdown()
 {
-    if (gTooltipWidget)
-        gtk_widget_destroy(gTooltipWidget);
     /* This will destroy all of our widgets */
-
     ResetWidgetCache();
 
     /* TODO - replace it with appropriate widget */
@@ -3318,7 +3326,6 @@ moz_gtk_shutdown()
     gFrameWidget = NULL;
     gTabWidget = NULL;
     gTextViewWidget = nullptr;
-    gTooltipWidget = NULL;
     gImageMenuItemWidget = NULL;
     gCheckMenuItemWidget = NULL;
     gTreeViewWidget = NULL;

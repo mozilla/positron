@@ -19,6 +19,7 @@
 #include "jsprf.h"
 #include "jswrapper.h"
 
+#include "asmjs/WasmInstance.h"
 #include "builtin/Promise.h"
 #include "frontend/BytecodeCompiler.h"
 #include "frontend/Parser.h"
@@ -639,8 +640,8 @@ Debugger::Debugger(JSContext* cx, NativeObject* dbg)
     sources(cx),
     objects(cx),
     environments(cx),
-    wasmModuleScripts(cx),
-    wasmModuleSources(cx),
+    wasmInstanceScripts(cx),
+    wasmInstanceSources(cx),
 #ifdef NIGHTLY_BUILD
     traceLoggerLastDrainedSize(0),
     traceLoggerLastDrainedIteration(0),
@@ -681,8 +682,8 @@ Debugger::init(JSContext* cx)
               objects.init() &&
               observedGCs.init() &&
               environments.init() &&
-              wasmModuleScripts.init() &&
-              wasmModuleSources.init();
+              wasmInstanceScripts.init() &&
+              wasmInstanceSources.init();
     if (!ok)
         ReportOutOfMemory(cx);
     return ok;
@@ -1774,32 +1775,28 @@ Debugger::slowPathOnNewScript(JSContext* cx, HandleScript script)
             return JSTRAP_CONTINUE;
         });
 
-    if (status == JSTRAP_ERROR) {
-        ReportOutOfMemory(cx);
+    if (status == JSTRAP_ERROR)
         return;
-    }
 
     MOZ_ASSERT(status == JSTRAP_CONTINUE);
 }
 
 void
-Debugger::slowPathOnNewWasmModule(JSContext* cx, Handle<WasmModuleObject*> wasmModule)
+Debugger::slowPathOnNewWasmInstance(JSContext* cx, Handle<WasmInstanceObject*> wasmInstance)
 {
     JSTrapStatus status = dispatchHook(
         cx,
-        [wasmModule](Debugger* dbg) -> bool {
-            return dbg->observesNewScript() && dbg->observesGlobal(&wasmModule->global());
+        [wasmInstance](Debugger* dbg) -> bool {
+            return dbg->observesNewScript() && dbg->observesGlobal(&wasmInstance->global());
         },
         [&](Debugger* dbg) -> JSTrapStatus {
-            Rooted<DebuggerScriptReferent> scriptReferent(cx, wasmModule.get());
+            Rooted<DebuggerScriptReferent> scriptReferent(cx, wasmInstance.get());
             dbg->fireNewScript(cx, scriptReferent);
             return JSTRAP_CONTINUE;
         });
 
-    if (status == JSTRAP_ERROR) {
-        ReportOutOfMemory(cx);
+    if (status == JSTRAP_ERROR)
         return;
-    }
 
     MOZ_ASSERT(status == JSTRAP_CONTINUE);
 }
@@ -2781,8 +2778,8 @@ Debugger::markCrossCompartmentEdges(JSTracer* trc)
     environments.markCrossCompartmentEdges<DebuggerEnv_trace>(trc);
     scripts.markCrossCompartmentEdges<DebuggerScript_trace>(trc);
     sources.markCrossCompartmentEdges<DebuggerSource_trace>(trc);
-    wasmModuleScripts.markCrossCompartmentEdges<DebuggerScript_trace>(trc);
-    wasmModuleSources.markCrossCompartmentEdges<DebuggerSource_trace>(trc);
+    wasmInstanceScripts.markCrossCompartmentEdges<DebuggerScript_trace>(trc);
+    wasmInstanceSources.markCrossCompartmentEdges<DebuggerSource_trace>(trc);
 }
 
 /*
@@ -2923,8 +2920,8 @@ Debugger::markAll(JSTracer* trc)
         dbg->sources.trace(trc);
         dbg->objects.trace(trc);
         dbg->environments.trace(trc);
-        dbg->wasmModuleScripts.trace(trc);
-        dbg->wasmModuleSources.trace(trc);
+        dbg->wasmInstanceScripts.trace(trc);
+        dbg->wasmInstanceSources.trace(trc);
 
         for (Breakpoint* bp = dbg->firstBreakpoint(); bp; bp = bp->nextInDebugger()) {
             TraceManuallyBarrieredEdge(trc, &bp->site->script, "breakpoint script");
@@ -2973,11 +2970,11 @@ Debugger::trace(JSTracer* trc)
     /* Trace the referent -> Debugger.Environment weak map. */
     environments.trace(trc);
 
-    /* Trace the WasmModuleObject -> synthesized Debugger.Script weak map. */
-    wasmModuleScripts.trace(trc);
+    /* Trace the WasmInstanceObject -> synthesized Debugger.Script weak map. */
+    wasmInstanceScripts.trace(trc);
 
-    /* Trace the WasmModuleObject -> synthesized Debugger.Source weak map. */
-    wasmModuleSources.trace(trc);
+    /* Trace the WasmInstanceObject -> synthesized Debugger.Source weak map. */
+    wasmInstanceSources.trace(trc);
 }
 
 /* static */ void
@@ -3025,8 +3022,8 @@ Debugger::findZoneEdges(Zone* zone, js::gc::ZoneComponentFinder& finder)
             dbg->sources.hasKeyInZone(zone) ||
             dbg->objects.hasKeyInZone(zone) ||
             dbg->environments.hasKeyInZone(zone) ||
-            dbg->wasmModuleScripts.hasKeyInZone(zone) ||
-            dbg->wasmModuleSources.hasKeyInZone(zone))
+            dbg->wasmInstanceScripts.hasKeyInZone(zone) ||
+            dbg->wasmInstanceSources.hasKeyInZone(zone))
         {
             finder.addEdgeTo(w);
         }
@@ -3958,7 +3955,7 @@ class MOZ_STACK_CLASS Debugger::ScriptQuery
         source(cx, AsVariant(static_cast<ScriptSourceObject*>(nullptr))),
         innermostForCompartment(cx->runtime()),
         vector(cx, ScriptVector(cx)),
-        wasmModuleVector(cx, WasmModuleObjectVector(cx))
+        wasmInstanceVector(cx, WasmInstanceObjectVector(cx))
     {}
 
     /*
@@ -4147,10 +4144,13 @@ class MOZ_STACK_CLASS Debugger::ScriptQuery
         }
 
         // TODOshu: Until such time that wasm modules are real ES6 modules,
-        // unconditionally consider all wasm toplevel module scripts.
+        // unconditionally consider all wasm toplevel instance scripts.
         for (WeakGlobalObjectSet::Range r = debugger->allDebuggees(); !r.empty(); r.popFront()) {
-            for (wasm::Module* module : r.front()->compartment()->wasmModuleWeakList)
-                consider(module);
+            auto& wasmInstances = r.front()->compartment()->wasmInstances;
+            if (!wasmInstances.initialized())
+                continue;
+            for (auto i = wasmInstances.all(); !i.empty(); i.popFront())
+                consider(i.front());
         }
 
         return true;
@@ -4160,8 +4160,8 @@ class MOZ_STACK_CLASS Debugger::ScriptQuery
         return vector;
     }
 
-    Handle<WasmModuleObjectVector> foundWasmModules() const {
-        return wasmModuleVector;
+    Handle<WasmInstanceObjectVector> foundWasmInstances() const {
+        return wasmInstanceVector;
     }
 
   private:
@@ -4227,7 +4227,7 @@ class MOZ_STACK_CLASS Debugger::ScriptQuery
     /*
      * Like above, but for wasm modules.
      */
-    Rooted<WasmModuleObjectVector> wasmModuleVector;
+    Rooted<WasmInstanceObjectVector> wasmInstanceVector;
 
     /* Indicates whether OOM has occurred while matching. */
     bool oom;
@@ -4384,22 +4384,17 @@ class MOZ_STACK_CLASS Debugger::ScriptQuery
     }
 
     /*
-     * If |wasmModule| matches this query, append it to |wasmModuleVector|.
+     * If |instanceObject| matches this query, append it to |wasmInstanceVector|.
      * Set |oom| if an out of memory condition occurred.
      */
-    void consider(wasm::Module* wasmModule) {
+    void consider(WasmInstanceObject* instanceObject) {
         if (oom)
             return;
 
-        WasmModuleObject* moduleObject = wasmModule->owner();
-        if (hasSource && source != AsVariant(moduleObject))
+        if (hasSource && source != AsVariant(instanceObject))
             return;
 
-        // The compartment-wide wasm::Module list is held weakly. Read barrier
-        // the ones we intend to expose.
-        wasmModule->readBarrier();
-
-        if (!wasmModuleVector.append(moduleObject))
+        if (!wasmInstanceVector.append(instanceObject))
             oom = true;
     }
 };
@@ -4426,9 +4421,9 @@ Debugger::findScripts(JSContext* cx, unsigned argc, Value* vp)
         return false;
 
     Handle<ScriptVector> scripts(query.foundScripts());
-    Handle<WasmModuleObjectVector> wasmModules(query.foundWasmModules());
+    Handle<WasmInstanceObjectVector> wasmInstances(query.foundWasmInstances());
 
-    size_t resultLength = scripts.length() + wasmModules.length();
+    size_t resultLength = scripts.length() + wasmInstances.length();
     RootedArrayObject result(cx, NewDenseFullyAllocatedArray(cx, resultLength));
     if (!result)
         return false;
@@ -4443,8 +4438,8 @@ Debugger::findScripts(JSContext* cx, unsigned argc, Value* vp)
     }
 
     size_t wasmStart = scripts.length();
-    for (size_t i = 0; i < wasmModules.length(); i++) {
-        JSObject* scriptObject = dbg->wrapWasmScript(cx, wasmModules[i]);
+    for (size_t i = 0; i < wasmInstances.length(); i++) {
+        JSObject* scriptObject = dbg->wrapWasmScript(cx, wasmInstances[i]);
         if (!scriptObject)
             return false;
         result->setDenseElement(wasmStart + i, ObjectValue(*scriptObject));
@@ -4930,12 +4925,12 @@ Debugger::isCompilableUnit(JSContext* cx, unsigned argc, Value* vp)
                                                         options, chars.twoByteChars(),
                                                         length, /* foldConstants = */ true,
                                                         nullptr, nullptr);
-    JSErrorReporter older = JS_SetErrorReporter(cx->runtime(), nullptr);
+    JS::WarningReporter older = JS::SetWarningReporter(cx->runtime(), nullptr);
     if (!parser.checkOptions() || !parser.parse()) {
         // We ran into an error. If it was because we ran out of memory we report
         // it in the usual way.
         if (cx->isThrowingOutOfMemory()) {
-            JS_SetErrorReporter(cx->runtime(), older);
+            JS::SetWarningReporter(cx->runtime(), older);
             return false;
         }
 
@@ -4946,7 +4941,7 @@ Debugger::isCompilableUnit(JSContext* cx, unsigned argc, Value* vp)
 
         cx->clearPendingException();
     }
-    JS_SetErrorReporter(cx->runtime(), older);
+    JS::SetWarningReporter(cx->runtime(), older);
     args.rval().setBoolean(result);
     return true;
 }
@@ -5127,7 +5122,7 @@ GetScriptReferent(JSObject* obj)
         if (cell->getTraceKind() == JS::TraceKind::Script)
             return AsVariant(static_cast<JSScript*>(cell));
         MOZ_ASSERT(cell->getTraceKind() == JS::TraceKind::Object);
-        return AsVariant(&static_cast<NativeObject*>(cell)->as<WasmModuleObject>());
+        return AsVariant(&static_cast<NativeObject*>(cell)->as<WasmInstanceObject>());
     }
     return AsVariant(static_cast<JSScript*>(nullptr));
 }
@@ -5147,7 +5142,7 @@ DebuggerScript_trace(JSTracer* trc, JSObject* obj)
             JSObject* wasm = static_cast<JSObject*>(cell);
             TraceManuallyBarrieredCrossCompartmentEdge(trc, obj, &wasm,
                                                        "Debugger.Script wasm referent");
-            MOZ_ASSERT(wasm->is<WasmModuleObject>());
+            MOZ_ASSERT(wasm->is<WasmInstanceObject>());
             obj->as<NativeObject>().setPrivateUnbarriered(wasm);
         }
     }
@@ -5160,7 +5155,7 @@ class DebuggerScriptSetPrivateMatcher
     explicit DebuggerScriptSetPrivateMatcher(NativeObject* obj) : obj_(obj) { }
     using ReturnType = void;
     ReturnType match(HandleScript script) { obj_->setPrivateGCThing(script); }
-    ReturnType match(Handle<WasmModuleObject*> module) { obj_->setPrivateGCThing(module); }
+    ReturnType match(Handle<WasmInstanceObject*> instance) { obj_->setPrivateGCThing(instance); }
 };
 
 NativeObject*
@@ -5224,11 +5219,11 @@ Debugger::wrapVariantReferent(JSContext* cx, Handle<DebuggerScriptReferent> refe
         obj = wrapVariantReferent<DebuggerScriptReferent, JSScript*, ScriptWeakMap>(
             cx, scripts, key, referent);
     } else {
-        Handle<WasmModuleObject*> untaggedReferent = referent.template as<WasmModuleObject*>();
+        Handle<WasmInstanceObject*> untaggedReferent = referent.template as<WasmInstanceObject*>();
         Rooted<CrossCompartmentKey> key(cx, CrossCompartmentKey(object, untaggedReferent,
                                         CrossCompartmentKey::DebuggerObjectKind::DebuggerWasmScript));
-        obj = wrapVariantReferent<DebuggerScriptReferent, WasmModuleObject*, WasmModuleWeakMap>(
-            cx, wasmModuleScripts, key, referent);
+        obj = wrapVariantReferent<DebuggerScriptReferent, WasmInstanceObject*, WasmInstanceWeakMap>(
+            cx, wasmInstanceScripts, key, referent);
     }
     MOZ_ASSERT_IF(obj, GetScriptReferent(obj) == referent);
     return obj;
@@ -5242,9 +5237,9 @@ Debugger::wrapScript(JSContext* cx, HandleScript script)
 }
 
 JSObject*
-Debugger::wrapWasmScript(JSContext* cx, Handle<WasmModuleObject*> wasmModule)
+Debugger::wrapWasmScript(JSContext* cx, Handle<WasmInstanceObject*> wasmInstance)
 {
-    Rooted<DebuggerScriptReferent> referent(cx, wasmModule.get());
+    Rooted<DebuggerScriptReferent> referent(cx, wasmInstance.get());
     return wrapVariantReferent(cx, referent);
 }
 
@@ -5383,8 +5378,8 @@ class DebuggerScriptGetSourceMatcher
         return dbg_->wrapSource(cx_, source);
     }
 
-    ReturnType match(Handle<WasmModuleObject*> wasmModule) {
-        return dbg_->wrapWasmSource(cx_, wasmModule);
+    ReturnType match(Handle<WasmInstanceObject*> wasmInstance) {
+        return dbg_->wrapWasmSource(cx_, wasmInstance);
     }
 };
 
@@ -5439,7 +5434,7 @@ class DebuggerScriptGetFormatMatcher
     explicit DebuggerScriptGetFormatMatcher(const JSAtomState& names) : names_(names) { }
     using ReturnType = JSAtom*;
     ReturnType match(HandleScript script) { return names_.js; }
-    ReturnType match(Handle<WasmModuleObject*> wasmModule) { return names_.wasm; }
+    ReturnType match(Handle<WasmInstanceObject*> wasmInstance) { return names_.wasm; }
 };
 
 static bool
@@ -6482,7 +6477,7 @@ GetSourceReferent(JSObject* obj)
     if (NativeObject* referent = GetSourceReferentRawObject(obj)) {
         if (referent->is<ScriptSourceObject>())
             return AsVariant(&referent->as<ScriptSourceObject>());
-        return AsVariant(&referent->as<WasmModuleObject>());
+        return AsVariant(&referent->as<WasmInstanceObject>());
     }
     return AsVariant(static_cast<ScriptSourceObject*>(nullptr));
 }
@@ -6508,7 +6503,7 @@ class SetDebuggerSourcePrivateMatcher
     explicit SetDebuggerSourcePrivateMatcher(NativeObject* obj) : obj_(obj) { }
     using ReturnType = void;
     ReturnType match(HandleScriptSource source) { obj_->setPrivateGCThing(source); }
-    ReturnType match(Handle<WasmModuleObject*> module) { obj_->setPrivateGCThing(module); }
+    ReturnType match(Handle<WasmInstanceObject*> instance) { obj_->setPrivateGCThing(instance); }
 };
 
 NativeObject*
@@ -6540,11 +6535,11 @@ Debugger::wrapVariantReferent(JSContext* cx, Handle<DebuggerSourceReferent> refe
         obj = wrapVariantReferent<DebuggerSourceReferent, ScriptSourceObject*, SourceWeakMap>(
             cx, sources, key, referent);
     } else {
-        Handle<WasmModuleObject*> untaggedReferent = referent.template as<WasmModuleObject*>();
+        Handle<WasmInstanceObject*> untaggedReferent = referent.template as<WasmInstanceObject*>();
         Rooted<CrossCompartmentKey> key(cx, CrossCompartmentKey(object, untaggedReferent,
                                     CrossCompartmentKey::DebuggerObjectKind::DebuggerWasmSource));
-        obj = wrapVariantReferent<DebuggerSourceReferent, WasmModuleObject*, WasmModuleWeakMap>(
-            cx, wasmModuleSources, key, referent);
+        obj = wrapVariantReferent<DebuggerSourceReferent, WasmInstanceObject*, WasmInstanceWeakMap>(
+            cx, wasmInstanceSources, key, referent);
     }
     MOZ_ASSERT_IF(obj, GetSourceReferent(obj) == referent);
     return obj;
@@ -6558,9 +6553,9 @@ Debugger::wrapSource(JSContext* cx, HandleScriptSource source)
 }
 
 JSObject*
-Debugger::wrapWasmSource(JSContext* cx, Handle<WasmModuleObject*> wasmModule)
+Debugger::wrapWasmSource(JSContext* cx, Handle<WasmInstanceObject*> wasmInstance)
 {
-    Rooted<DebuggerSourceReferent> referent(cx, wasmModule.get());
+    Rooted<DebuggerSourceReferent> referent(cx, wasmInstance.get());
     return wrapVariantReferent(cx, referent);
 }
 
@@ -6648,8 +6643,8 @@ class DebuggerSourceGetTextMatcher
                              : NewStringCopyZ<CanGC>(cx_, "[no source]");
     }
 
-    ReturnType match(Handle<WasmModuleObject*> wasmModule) {
-        return wasmModule->module().createText(cx_);
+    ReturnType match(Handle<WasmInstanceObject*> wasmInstance) {
+        return wasmInstance->instance().createText(cx_);
     }
 };
 
@@ -6692,11 +6687,11 @@ class DebuggerSourceGetURLMatcher
         }
         return Nothing();
     }
-    ReturnType match(Handle<WasmModuleObject*> wasmModule) {
+    ReturnType match(Handle<WasmInstanceObject*> wasmInstance) {
         // TODOshu: Until wasm modules have real URLs, append "> wasm" to the
         // end to prevent them from being blacklisted by devtools by having
         // the same value as a source mapped URL.
-        char* buf = JS_smprintf("%s > wasm", wasmModule->module().filename());
+        char* buf = JS_smprintf("%s > wasm", wasmInstance->instance().metadata().filename.get());
         if (!buf)
             return Nothing();
         JSString* str = NewStringCopyZ<CanGC>(cx_, buf);
@@ -6730,8 +6725,8 @@ struct DebuggerSourceGetDisplayURLMatcher
         MOZ_ASSERT(ss);
         return ss->hasDisplayURL() ? ss->displayURL() : nullptr;
     }
-    ReturnType match(Handle<WasmModuleObject*> wasmModule) {
-        return wasmModule->module().displayURL();
+    ReturnType match(Handle<WasmInstanceObject*> wasmInstance) {
+        return wasmInstance->instance().metadata().displayURL();
     }
 };
 
@@ -6758,7 +6753,7 @@ struct DebuggerSourceGetElementMatcher
     ReturnType match(HandleScriptSource sourceObject) {
         return sourceObject->element();
     }
-    ReturnType match(Handle<WasmModuleObject*> wasmModule) {
+    ReturnType match(Handle<WasmInstanceObject*> wasmInstance) {
         return nullptr;
     }
 };
@@ -6785,7 +6780,7 @@ struct DebuggerSourceGetElementPropertyMatcher
     ReturnType match(HandleScriptSource sourceObject) {
         return sourceObject->elementAttributeName();
     }
-    ReturnType match(Handle<WasmModuleObject*> wasmModule) {
+    ReturnType match(Handle<WasmInstanceObject*> wasmInstance) {
         return UndefinedValue();
     }
 };
@@ -6828,8 +6823,8 @@ class DebuggerSourceGetIntroductionScriptMatcher
         return true;
     }
 
-    ReturnType match(Handle<WasmModuleObject*> wasmModule) {
-        RootedObject ds(cx_, dbg_->wrapWasmScript(cx_, wasmModule));
+    ReturnType match(Handle<WasmInstanceObject*> wasmInstance) {
+        RootedObject ds(cx_, dbg_->wrapWasmScript(cx_, wasmInstance));
         if (!ds)
             return false;
         rval_.setObject(*ds);
@@ -6858,7 +6853,7 @@ struct DebuggerGetIntroductionOffsetMatcher
             return Int32Value(ss->introductionOffset());
         return UndefinedValue();
     }
-    ReturnType match(Handle<WasmModuleObject*> wasmModule) {
+    ReturnType match(Handle<WasmInstanceObject*> wasmInstance) {
         return UndefinedValue();
     }
 };
@@ -6880,7 +6875,7 @@ struct DebuggerSourceGetIntroductionTypeMatcher
         MOZ_ASSERT(ss);
         return ss->hasIntroductionType() ? ss->introductionType() : nullptr;
     }
-    ReturnType match(Handle<WasmModuleObject*> wasmModule) {
+    ReturnType match(Handle<WasmInstanceObject*> wasmInstance) {
         return "wasm";
     }
 };
@@ -6931,7 +6926,7 @@ struct DebuggerSourceGetSourceMapURLMatcher
         MOZ_ASSERT(ss);
         return ss->hasSourceMapURL() ? ss->sourceMapURL() : nullptr;
     }
-    ReturnType match(Handle<WasmModuleObject*> wasmModule) {
+    ReturnType match(Handle<WasmInstanceObject*> wasmInstance) {
         return nullptr;
     }
 };
@@ -7869,8 +7864,45 @@ DebuggerObject_construct(JSContext* cx, unsigned argc, Value* vp)
     return false;
 }
 
-static bool
-DebuggerObject_getProto(JSContext* cx, unsigned argc, Value* vp)
+/* static */ bool
+DebuggerObject::callableGetter(JSContext* cx, unsigned argc, Value* vp)
+{
+    THIS_DEBUGOBJECT(cx, argc, vp, "get callable", args, object)
+
+    args.rval().setBoolean(DebuggerObject::isCallable(cx, object));
+    return true;
+}
+
+/* static */ bool
+DebuggerObject::isBoundFunctionGetter(JSContext* cx, unsigned argc, Value* vp)
+{
+    THIS_DEBUGOBJECT(cx, argc, vp, "get isBoundFunction", args, object)
+
+    if (!DebuggerObject::isDebuggeeFunction(cx, object)) {
+        args.rval().setUndefined();
+        return true;
+    }
+
+    args.rval().setBoolean(DebuggerObject::isBoundFunction(cx, object));
+    return true;
+}
+
+/* static */ bool
+DebuggerObject::isArrowFunctionGetter(JSContext* cx, unsigned argc, Value* vp)
+{
+    THIS_DEBUGOBJECT(cx, argc, vp, "get isArrowFunction", args, object)
+
+    if (!DebuggerObject::isDebuggeeFunction(cx, object)) {
+        args.rval().setUndefined();
+        return true;
+    }
+
+    args.rval().setBoolean(DebuggerObject::isArrowFunction(cx, object));
+    return true;
+}
+
+/* static */ bool
+DebuggerObject::protoGetter(JSContext* cx, unsigned argc, Value* vp)
 {
     THIS_DEBUGOBJECT(cx, argc, vp, "get proto", args, object)
 
@@ -7882,8 +7914,8 @@ DebuggerObject_getProto(JSContext* cx, unsigned argc, Value* vp)
     return true;
 }
 
-static bool
-DebuggerObject_getClass(JSContext* cx, unsigned argc, Value* vp)
+/* static */ bool
+DebuggerObject::classGetter(JSContext* cx, unsigned argc, Value* vp)
 {
     THIS_DEBUGOBJECT(cx, argc, vp, "get class", args, object)
 
@@ -7895,16 +7927,8 @@ DebuggerObject_getClass(JSContext* cx, unsigned argc, Value* vp)
     return true;
 }
 
-static bool
-DebuggerObject_getCallable(JSContext* cx, unsigned argc, Value* vp)
-{
-    THIS_DEBUGOBJECT_REFERENT(cx, argc, vp, "get callable", args, refobj);
-    args.rval().setBoolean(refobj->isCallable());
-    return true;
-}
-
-static bool
-DebuggerObject_getName(JSContext* cx, unsigned argc, Value* vp)
+/* static */ bool
+DebuggerObject::nameGetter(JSContext* cx, unsigned argc, Value* vp)
 {
     THIS_DEBUGOBJECT(cx, argc, vp, "get name", args, object)
 
@@ -7924,8 +7948,8 @@ DebuggerObject_getName(JSContext* cx, unsigned argc, Value* vp)
     return true;
 }
 
-static bool
-DebuggerObject_getDisplayName(JSContext* cx, unsigned argc, Value* vp)
+/* static */ bool
+DebuggerObject::displayNameGetter(JSContext* cx, unsigned argc, Value* vp)
 {
     THIS_DEBUGOBJECT(cx, argc, vp, "get displayName", args, object)
 
@@ -7945,58 +7969,40 @@ DebuggerObject_getDisplayName(JSContext* cx, unsigned argc, Value* vp)
     return true;
 }
 
-static bool
-DebuggerObject_getParameterNames(JSContext* cx, unsigned argc, Value* vp)
+/* static */ bool
+DebuggerObject::parameterNamesGetter(JSContext* cx, unsigned argc, Value* vp)
 {
-    THIS_DEBUGOBJECT_OWNER_REFERENT(cx, argc, vp, "get parameterNames", args, dbg, obj);
-    if (!obj->is<JSFunction>()) {
+    THIS_DEBUGOBJECT(cx, argc, vp, "get parameterNames", args, object)
+
+    if (!DebuggerObject::isDebuggeeFunction(cx, object)) {
         args.rval().setUndefined();
         return true;
     }
 
-    RootedFunction fun(cx, &obj->as<JSFunction>());
-
-    /* Only hand out parameter info for debuggee functions. */
-    if (!dbg->observesGlobal(&fun->global())) {
-        args.rval().setUndefined();
-        return true;
-    }
-
-    RootedArrayObject result(cx, NewDenseFullyAllocatedArray(cx, fun->nargs()));
-    if (!result)
+    Rooted<StringVector> names(cx, StringVector(cx));
+    if (!DebuggerObject::parameterNames(cx, object, &names))
         return false;
-    result->ensureDenseInitializedLength(cx, 0, fun->nargs());
 
-    if (fun->isInterpreted()) {
-        RootedScript script(cx, GetOrCreateFunctionScript(cx, fun));
-        if (!script)
-            return false;
+    RootedArrayObject obj(cx, NewDenseFullyAllocatedArray(cx, names.length()));
+    if (!obj)
+        return false;
 
-        MOZ_ASSERT(fun->nargs() == script->bindings.numArgs());
-
-        if (fun->nargs() > 0) {
-            BindingIter bi(script);
-            for (size_t i = 0; i < fun->nargs(); i++, bi++) {
-                MOZ_ASSERT(bi.argIndex() == i);
-                Value v;
-                if (bi->name()->length() == 0)
-                    v = UndefinedValue();
-                else
-                    v = StringValue(bi->name());
-                result->setDenseElement(i, v);
-            }
-        }
-    } else {
-        for (size_t i = 0; i < fun->nargs(); i++)
-            result->setDenseElement(i, UndefinedValue());
+    obj->ensureDenseInitializedLength(cx, 0, names.length());
+    for (size_t i = 0; i < names.length(); ++i) {
+        Value v;
+        if (names[i])
+            v = StringValue(names[i]);
+        else
+            v = UndefinedValue();
+        obj->setDenseElement(i, v);
     }
 
-    args.rval().setObject(*result);
+    args.rval().setObject(*obj);
     return true;
 }
 
-static bool
-DebuggerObject_getScript(JSContext* cx, unsigned argc, Value* vp)
+/* static */ bool
+DebuggerObject::scriptGetter(JSContext* cx, unsigned argc, Value* vp)
 {
     THIS_DEBUGOBJECT_OWNER_REFERENT(cx, argc, vp, "get script", args, dbg, obj);
 
@@ -8029,8 +8035,8 @@ DebuggerObject_getScript(JSContext* cx, unsigned argc, Value* vp)
     return true;
 }
 
-static bool
-DebuggerObject_getEnvironment(JSContext* cx, unsigned argc, Value* vp)
+/* static */ bool
+DebuggerObject::environmentGetter(JSContext* cx, unsigned argc, Value* vp)
 {
     THIS_DEBUGOBJECT_OWNER_REFERENT(cx, argc, vp, "get environment", args, dbg, obj);
 
@@ -8058,32 +8064,8 @@ DebuggerObject_getEnvironment(JSContext* cx, unsigned argc, Value* vp)
     return dbg->wrapEnvironment(cx, env, args.rval());
 }
 
-static bool
-DebuggerObject_getIsArrowFunction(JSContext* cx, unsigned argc, Value* vp)
-{
-    THIS_DEBUGOBJECT_REFERENT(cx, argc, vp, "get isArrowFunction", args, refobj);
-
-    args.rval().setBoolean(refobj->is<JSFunction>()
-                           && refobj->as<JSFunction>().isArrow());
-    return true;
-}
-
-static bool
-DebuggerObject_getIsBoundFunction(JSContext* cx, unsigned argc, Value* vp)
-{
-    THIS_DEBUGOBJECT(cx, argc, vp, "get isBoundFunction", args, object)
-
-    if (!DebuggerObject::isDebuggeeFunction(cx, object)) {
-        args.rval().setUndefined();
-        return true;
-    }
-
-    args.rval().setBoolean(DebuggerObject::isBoundFunction(cx, object));
-    return true;
-}
-
-static bool
-DebuggerObject_getBoundTargetFunction(JSContext* cx, unsigned argc, Value* vp)
+/* static */ bool
+DebuggerObject::boundTargetFunctionGetter(JSContext* cx, unsigned argc, Value* vp)
 {
     THIS_DEBUGOBJECT(cx, argc, vp, "get boundTargetFunction", args, object)
 
@@ -8102,8 +8084,8 @@ DebuggerObject_getBoundTargetFunction(JSContext* cx, unsigned argc, Value* vp)
     return true;
 }
 
-static bool
-DebuggerObject_getBoundThis(JSContext* cx, unsigned argc, Value* vp)
+/* static */ bool
+DebuggerObject::boundThisGetter(JSContext* cx, unsigned argc, Value* vp)
 {
     THIS_DEBUGOBJECT(cx, argc, vp, "get boundThis", args, object)
 
@@ -8117,8 +8099,8 @@ DebuggerObject_getBoundThis(JSContext* cx, unsigned argc, Value* vp)
     return DebuggerObject::boundThis(cx, object, args.rval());
 }
 
-static bool
-DebuggerObject_getBoundArguments(JSContext* cx, unsigned argc, Value* vp)
+/* static */ bool
+DebuggerObject::boundArgumentsGetter(JSContext* cx, unsigned argc, Value* vp)
 {
     THIS_DEBUGOBJECT(cx, argc, vp, "get boundArguments", args, object)
 
@@ -8141,10 +8123,48 @@ DebuggerObject_getBoundArguments(JSContext* cx, unsigned argc, Value* vp)
     return true;
 }
 
-static bool
-null(CallArgs& args)
+/* static */ bool
+DebuggerObject::globalGetter(JSContext* cx, unsigned argc, Value* vp)
 {
-    args.rval().setNull();
+    THIS_DEBUGOBJECT(cx, argc, vp, "get global", args, object)
+
+    RootedObject result(cx);
+    if (!DebuggerObject::global(cx, object, &result))
+        return false;
+
+    args.rval().setObject(*result);
+    return true;
+}
+
+/* static */ bool
+DebuggerObject::allocationSiteGetter(JSContext* cx, unsigned argc, Value* vp)
+{
+    THIS_DEBUGOBJECT(cx, argc, vp, "get allocationSite", args, object)
+
+    RootedObject result(cx);
+    if (!DebuggerObject::allocationSite(cx, object, &result))
+        return false;
+
+    args.rval().setObjectOrNull(result);
+    return true;
+}
+
+// Returns the "name" field (see js.msg), which may be used as a unique
+// identifier, for any error object with a JSErrorReport or undefined
+// if the object has no JSErrorReport.
+/* static */ bool
+DebuggerObject::errorMessageNameGetter(JSContext *cx, unsigned argc, Value* vp)
+{
+    THIS_DEBUGOBJECT(cx, argc, vp, "get errorMessageName", args, object)
+
+    RootedString result(cx);
+    if (!DebuggerObject::errorMessageName(cx, object, &result))
+        return false;
+
+    if (result)
+        args.rval().setString(result);
+    else
+        args.rval().setUndefined();
     return true;
 }
 
@@ -8291,83 +8311,8 @@ DebuggerObject_getPromiseDependentPromises(JSContext* cx, unsigned argc, Value* 
 }
 #endif // SPIDERMONKEY_PROMISE
 
-static bool
-DebuggerObject_getGlobal(JSContext* cx, unsigned argc, Value* vp)
-{
-    THIS_DEBUGOBJECT_OWNER_REFERENT(cx, argc, vp, "get global", args, dbg, obj);
-
-    RootedValue v(cx, ObjectValue(obj->global()));
-    if (!dbg->wrapDebuggeeValue(cx, &v))
-        return false;
-    args.rval().set(v);
-    return true;
-}
-
-/* static */ SavedFrame*
-Debugger::getObjectAllocationSite(JSObject& obj)
-{
-    JSObject* metadata = GetAllocationMetadata(&obj);
-    if (!metadata)
-        return nullptr;
-
-    MOZ_ASSERT(!metadata->is<WrapperObject>());
-    return SavedFrame::isSavedFrameAndNotProto(*metadata)
-        ? &metadata->as<SavedFrame>()
-        : nullptr;
-}
-
-static bool
-DebuggerObject_getAllocationSite(JSContext* cx, unsigned argc, Value* vp)
-{
-    THIS_DEBUGOBJECT_REFERENT(cx, argc, vp, "get allocationSite", args, obj);
-
-    RootedObject allocSite(cx, Debugger::getObjectAllocationSite(*obj));
-    if (!allocSite)
-        return null(args);
-    if (!cx->compartment()->wrap(cx, &allocSite))
-        return false;
-    args.rval().setObject(*allocSite);
-    return true;
-}
-
-// Returns the "name" field (see js.msg), which may be used as a unique
-// identifier, for any error object with a JSErrorReport or undefined
-// if the object has no JSErrorReport.
-static bool
-DebuggerObject_getErrorMessageName(JSContext *cx, unsigned argc, Value* vp)
-{
-    THIS_DEBUGOBJECT_REFERENT(cx, argc, vp, "get errorMessageName", args, referent);
-
-    JSObject* obj = referent;
-    if (IsCrossCompartmentWrapper(obj))
-        obj = CheckedUnwrap(obj);
-
-    if (!obj) {
-        JS_ReportError(cx, "Permission denied to access object");
-        return false;
-    }
-
-    JSErrorReport* report = nullptr;
-    if (obj->is<ErrorObject>())
-        report = obj->as<ErrorObject>().getErrorReport();
-
-    if (report) {
-        const JSErrorFormatString* efs = GetErrorMessage(nullptr, report->errorNumber);
-        if (efs) {
-            RootedString str(cx, JS_NewStringCopyZ(cx, efs->name));
-            if (!cx->compartment()->wrap(cx, &str))
-                return false;
-            args.rval().setString(str);
-            return true;
-        }
-    }
-
-    args.rval().setUndefined();
-    return true;
-}
-
-static bool
-DebuggerObject_isExtensible(JSContext* cx, unsigned argc, Value* vp)
+/* static */ bool
+DebuggerObject::isExtensibleMethod(JSContext* cx, unsigned argc, Value* vp)
 {
     THIS_DEBUGOBJECT(cx, argc, vp, "isExtensible", args, object)
 
@@ -8379,8 +8324,8 @@ DebuggerObject_isExtensible(JSContext* cx, unsigned argc, Value* vp)
     return true;
 }
 
-static bool
-DebuggerObject_isSealed(JSContext* cx, unsigned argc, Value* vp)
+/* static */ bool
+DebuggerObject::isSealedMethod(JSContext* cx, unsigned argc, Value* vp)
 {
     THIS_DEBUGOBJECT(cx, argc, vp, "isSealed", args, object)
 
@@ -8392,8 +8337,8 @@ DebuggerObject_isSealed(JSContext* cx, unsigned argc, Value* vp)
     return true;
 }
 
-static bool
-DebuggerObject_isFrozen(JSContext* cx, unsigned argc, Value* vp)
+/* static */ bool
+DebuggerObject::isFrozenMethod(JSContext* cx, unsigned argc, Value* vp)
 {
     THIS_DEBUGOBJECT(cx, argc, vp, "isFrozen", args, object)
 
@@ -8431,8 +8376,8 @@ IdVectorToArray(JSContext* cx, Handle<IdVector> ids)
     return NewDenseCopiedArray(cx, vals.length(), vals.begin());
 }
 
-static bool
-DebuggerObject_getOwnPropertyNames(JSContext* cx, unsigned argc, Value* vp)
+/* static */ bool
+DebuggerObject::getOwnPropertyNamesMethod(JSContext* cx, unsigned argc, Value* vp)
 {
     THIS_DEBUGOBJECT(cx, argc, vp, "getOwnPropertyNames", args, object)
 
@@ -8448,8 +8393,8 @@ DebuggerObject_getOwnPropertyNames(JSContext* cx, unsigned argc, Value* vp)
     return true;
 }
 
-static bool
-DebuggerObject_getOwnPropertySymbols(JSContext* cx, unsigned argc, Value* vp)
+/* static */ bool
+DebuggerObject::getOwnPropertySymbolsMethod(JSContext* cx, unsigned argc, Value* vp)
 {
     THIS_DEBUGOBJECT(cx, argc, vp, "getOwnPropertySymbols", args, object)
 
@@ -8465,8 +8410,8 @@ DebuggerObject_getOwnPropertySymbols(JSContext* cx, unsigned argc, Value* vp)
     return true;
 }
 
-static bool
-DebuggerObject_getOwnPropertyDescriptor(JSContext* cx, unsigned argc, Value* vp)
+/* static */ bool
+DebuggerObject::getOwnPropertyDescriptorMethod(JSContext* cx, unsigned argc, Value* vp)
 {
     THIS_DEBUGOBJECT(cx, argc, vp, "getOwnPropertyDescriptor", args, object)
 
@@ -8481,8 +8426,8 @@ DebuggerObject_getOwnPropertyDescriptor(JSContext* cx, unsigned argc, Value* vp)
     return JS::FromPropertyDescriptor(cx, desc, args.rval());
 }
 
-static bool
-DebuggerObject_preventExtensions(JSContext* cx, unsigned argc, Value* vp)
+/* static */ bool
+DebuggerObject::preventExtensionsMethod(JSContext* cx, unsigned argc, Value* vp)
 {
     THIS_DEBUGOBJECT(cx, argc, vp, "preventExtensions", args, object)
 
@@ -8493,8 +8438,8 @@ DebuggerObject_preventExtensions(JSContext* cx, unsigned argc, Value* vp)
     return true;
 }
 
-static bool
-DebuggerObject_seal(JSContext* cx, unsigned argc, Value* vp)
+/* static */ bool
+DebuggerObject::sealMethod(JSContext* cx, unsigned argc, Value* vp)
 {
     THIS_DEBUGOBJECT(cx, argc, vp, "seal", args, object)
 
@@ -8505,8 +8450,8 @@ DebuggerObject_seal(JSContext* cx, unsigned argc, Value* vp)
     return true;
 }
 
-static bool
-DebuggerObject_freeze(JSContext* cx, unsigned argc, Value* vp)
+/* static */ bool
+DebuggerObject::freezeMethod(JSContext* cx, unsigned argc, Value* vp)
 {
     THIS_DEBUGOBJECT(cx, argc, vp, "freeze", args, object)
 
@@ -8517,8 +8462,8 @@ DebuggerObject_freeze(JSContext* cx, unsigned argc, Value* vp)
     return true;
 }
 
-static bool
-DebuggerObject_defineProperty(JSContext* cx, unsigned argc, Value* vp)
+/* static */ bool
+DebuggerObject::definePropertyMethod(JSContext* cx, unsigned argc, Value* vp)
 {
     THIS_DEBUGOBJECT(cx, argc, vp, "defineProperty", args, object)
     if (!args.requireAtLeast(cx, "Debugger.Object.defineProperty", 2))
@@ -8539,8 +8484,8 @@ DebuggerObject_defineProperty(JSContext* cx, unsigned argc, Value* vp)
     return true;
 }
 
-static bool
-DebuggerObject_defineProperties(JSContext* cx, unsigned argc, Value* vp)
+/* static */ bool
+DebuggerObject::definePropertiesMethod(JSContext* cx, unsigned argc, Value* vp)
 {
     THIS_DEBUGOBJECT(cx, argc, vp, "defineProperties", args, object);
     if (!args.requireAtLeast(cx, "Debugger.Object.defineProperties", 1))
@@ -8569,8 +8514,8 @@ DebuggerObject_defineProperties(JSContext* cx, unsigned argc, Value* vp)
  * This does a non-strict delete, as a matter of API design. The case where the
  * property is non-configurable isn't necessarily exceptional here.
  */
-static bool
-DebuggerObject_deleteProperty(JSContext* cx, unsigned argc, Value* vp)
+/* static */ bool
+DebuggerObject::deletePropertyMethod(JSContext* cx, unsigned argc, Value* vp)
 {
     THIS_DEBUGOBJECT(cx, argc, vp, "deleteProperty", args, object)
 
@@ -8586,8 +8531,8 @@ DebuggerObject_deleteProperty(JSContext* cx, unsigned argc, Value* vp)
     return true;
 }
 
-static bool
-DebuggerObject_call(JSContext* cx, unsigned argc, Value* vp)
+/* static */ bool
+DebuggerObject::callMethod(JSContext* cx, unsigned argc, Value* vp)
 {
     THIS_DEBUGOBJECT(cx, argc, vp, "call", callArgs, object);
 
@@ -8604,8 +8549,8 @@ DebuggerObject_call(JSContext* cx, unsigned argc, Value* vp)
     return object->call(cx, object, thisv, args, callArgs.rval());
 }
 
-static bool
-DebuggerObject_apply(JSContext* cx, unsigned argc, Value* vp)
+/* static */ bool
+DebuggerObject::applyMethod(JSContext* cx, unsigned argc, Value* vp)
 {
     THIS_DEBUGOBJECT(cx, argc, vp, "apply", callArgs, object);
 
@@ -8633,8 +8578,8 @@ DebuggerObject_apply(JSContext* cx, unsigned argc, Value* vp)
     return object->call(cx, object, thisv, args, callArgs.rval());
 }
 
-static bool
-DebuggerObject_asEnvironment(JSContext* cx, unsigned argc, Value* vp)
+/* static */ bool
+DebuggerObject::asEnvironmentMethod(JSContext* cx, unsigned argc, Value* vp)
 {
     THIS_DEBUGOBJECT_OWNER_REFERENT(cx, argc, vp, "asEnvironment", args, dbg, referent);
     if (!RequireGlobalObject(cx, args.thisv(), referent))
@@ -8655,8 +8600,8 @@ DebuggerObject_asEnvironment(JSContext* cx, unsigned argc, Value* vp)
 // if it is an uninitialized lexical, otherwise do nothing. The method's
 // JavaScript return value is true _only_ when an uninitialized lexical has been
 // altered, otherwise it is false.
-bool
-DebuggerObject_forceLexicalInitializationByName(JSContext *cx, unsigned argc, Value* vp)
+/* static */ bool
+DebuggerObject::forceLexicalInitializationByNameMethod(JSContext *cx, unsigned argc, Value* vp)
 {
     THIS_DEBUGOBJECT(cx, argc, vp, "forceLexicalInitializationByName", args, object)
     if (!args.requireAtLeast(cx, "Debugger.Object.prototype.forceLexicalInitializationByName", 1))
@@ -8677,8 +8622,8 @@ DebuggerObject_forceLexicalInitializationByName(JSContext *cx, unsigned argc, Va
     return true;
 }
 
-static bool
-DebuggerObject_executeInGlobal(JSContext* cx, unsigned argc, Value* vp)
+/* static */ bool
+DebuggerObject::executeInGlobalMethod(JSContext* cx, unsigned argc, Value* vp)
 {
     THIS_DEBUGOBJECT(cx, argc, vp, "executeInGlobal", args, object);
     if (!args.requireAtLeast(cx, "Debugger.Object.prototype.executeInGlobal", 1))
@@ -8702,8 +8647,8 @@ DebuggerObject_executeInGlobal(JSContext* cx, unsigned argc, Value* vp)
     return DebuggerObject::executeInGlobal(cx, object, chars, nullptr, options, args.rval());
 }
 
-static bool
-DebuggerObject_executeInGlobalWithBindings(JSContext* cx, unsigned argc, Value* vp)
+/* static */ bool
+DebuggerObject::executeInGlobalWithBindingsMethod(JSContext* cx, unsigned argc, Value* vp)
 {
     THIS_DEBUGOBJECT(cx, argc, vp, "executeInGlobalWithBindings", args, object);
     if (!args.requireAtLeast(cx, "Debugger.Object.prototype.executeInGlobalWithBindings", 2))
@@ -8731,8 +8676,8 @@ DebuggerObject_executeInGlobalWithBindings(JSContext* cx, unsigned argc, Value* 
     return DebuggerObject::executeInGlobal(cx, object, chars, bindings, options, args.rval());
 }
 
-static bool
-DebuggerObject_makeDebuggeeValue(JSContext* cx, unsigned argc, Value* vp)
+/* static */ bool
+DebuggerObject::makeDebuggeeValueMethod(JSContext* cx, unsigned argc, Value* vp)
 {
     THIS_DEBUGOBJECT(cx, argc, vp, "makeDebuggeeValue", args, object);
     if (!args.requireAtLeast(cx, "Debugger.Object.prototype.makeDebuggeeValue", 1))
@@ -8741,8 +8686,8 @@ DebuggerObject_makeDebuggeeValue(JSContext* cx, unsigned argc, Value* vp)
     return DebuggerObject::makeDebuggeeValue(cx, object, args[0], args.rval());
 }
 
-static bool
-DebuggerObject_unsafeDereference(JSContext* cx, unsigned argc, Value* vp)
+/* static */ bool
+DebuggerObject::unsafeDereferenceMethod(JSContext* cx, unsigned argc, Value* vp)
 {
     THIS_DEBUGOBJECT(cx, argc, vp, "unsafeDereference", args, object);
 
@@ -8754,8 +8699,8 @@ DebuggerObject_unsafeDereference(JSContext* cx, unsigned argc, Value* vp)
     return true;
 }
 
-static bool
-DebuggerObject_unwrap(JSContext* cx, unsigned argc, Value* vp)
+/* static */ bool
+DebuggerObject::unwrapMethod(JSContext* cx, unsigned argc, Value* vp)
 {
     THIS_DEBUGOBJECT(cx, argc, vp, "unwrap", args, object);
 
@@ -8768,22 +8713,22 @@ DebuggerObject_unwrap(JSContext* cx, unsigned argc, Value* vp)
 }
 
 const JSPropertySpec DebuggerObject::properties_[] = {
-    JS_PSG("proto", DebuggerObject_getProto, 0),
-    JS_PSG("class", DebuggerObject_getClass, 0),
-    JS_PSG("callable", DebuggerObject_getCallable, 0),
-    JS_PSG("name", DebuggerObject_getName, 0),
-    JS_PSG("displayName", DebuggerObject_getDisplayName, 0),
-    JS_PSG("parameterNames", DebuggerObject_getParameterNames, 0),
-    JS_PSG("script", DebuggerObject_getScript, 0),
-    JS_PSG("environment", DebuggerObject_getEnvironment, 0),
-    JS_PSG("isArrowFunction", DebuggerObject_getIsArrowFunction, 0),
-    JS_PSG("isBoundFunction", DebuggerObject_getIsBoundFunction, 0),
-    JS_PSG("boundTargetFunction", DebuggerObject_getBoundTargetFunction, 0),
-    JS_PSG("boundThis", DebuggerObject_getBoundThis, 0),
-    JS_PSG("boundArguments", DebuggerObject_getBoundArguments, 0),
-    JS_PSG("global", DebuggerObject_getGlobal, 0),
-    JS_PSG("allocationSite", DebuggerObject_getAllocationSite, 0),
-    JS_PSG("errorMessageName", DebuggerObject_getErrorMessageName, 0),
+    JS_PSG("callable", DebuggerObject::callableGetter, 0),
+    JS_PSG("isBoundFunction", DebuggerObject::isBoundFunctionGetter, 0),
+    JS_PSG("isArrowFunction", DebuggerObject::isArrowFunctionGetter, 0),
+    JS_PSG("proto", DebuggerObject::protoGetter, 0),
+    JS_PSG("class", DebuggerObject::classGetter, 0),
+    JS_PSG("name", DebuggerObject::nameGetter, 0),
+    JS_PSG("displayName", DebuggerObject::displayNameGetter, 0),
+    JS_PSG("parameterNames", DebuggerObject::parameterNamesGetter, 0),
+    JS_PSG("script", DebuggerObject::scriptGetter, 0),
+    JS_PSG("environment", DebuggerObject::environmentGetter, 0),
+    JS_PSG("boundTargetFunction", DebuggerObject::boundTargetFunctionGetter, 0),
+    JS_PSG("boundThis", DebuggerObject::boundThisGetter, 0),
+    JS_PSG("boundArguments", DebuggerObject::boundArgumentsGetter, 0),
+    JS_PSG("global", DebuggerObject::globalGetter, 0),
+    JS_PSG("allocationSite", DebuggerObject::allocationSiteGetter, 0),
+    JS_PSG("errorMessageName", DebuggerObject::errorMessageNameGetter, 0),
     JS_PS_END
 };
 
@@ -8802,27 +8747,27 @@ const JSPropertySpec DebuggerObject::promiseProperties_[] = {
 #endif // SPIDERMONKEY_PROMISE
 
 const JSFunctionSpec DebuggerObject::methods_[] = {
-    JS_FN("isExtensible", DebuggerObject_isExtensible, 0, 0),
-    JS_FN("isSealed", DebuggerObject_isSealed, 0, 0),
-    JS_FN("isFrozen", DebuggerObject_isFrozen, 0, 0),
-    JS_FN("getOwnPropertyNames", DebuggerObject_getOwnPropertyNames, 0, 0),
-    JS_FN("getOwnPropertySymbols", DebuggerObject_getOwnPropertySymbols, 0, 0),
-    JS_FN("getOwnPropertyDescriptor", DebuggerObject_getOwnPropertyDescriptor, 1, 0),
-    JS_FN("preventExtensions", DebuggerObject_preventExtensions, 0, 0),
-    JS_FN("seal", DebuggerObject_seal, 0, 0),
-    JS_FN("freeze", DebuggerObject_freeze, 0, 0),
-    JS_FN("defineProperty", DebuggerObject_defineProperty, 2, 0),
-    JS_FN("defineProperties", DebuggerObject_defineProperties, 1, 0),
-    JS_FN("deleteProperty", DebuggerObject_deleteProperty, 1, 0),
-    JS_FN("call", DebuggerObject_call, 0, 0),
-    JS_FN("apply", DebuggerObject_apply, 0, 0),
-    JS_FN("asEnvironment", DebuggerObject_asEnvironment, 0, 0),
-    JS_FN("forceLexicalInitializationByName", DebuggerObject_forceLexicalInitializationByName, 1, 0),
-    JS_FN("executeInGlobal", DebuggerObject_executeInGlobal, 1, 0),
-    JS_FN("executeInGlobalWithBindings", DebuggerObject_executeInGlobalWithBindings, 2, 0),
-    JS_FN("makeDebuggeeValue", DebuggerObject_makeDebuggeeValue, 1, 0),
-    JS_FN("unsafeDereference", DebuggerObject_unsafeDereference, 0, 0),
-    JS_FN("unwrap", DebuggerObject_unwrap, 0, 0),
+    JS_FN("isExtensible", DebuggerObject::isExtensibleMethod, 0, 0),
+    JS_FN("isSealed", DebuggerObject::isSealedMethod, 0, 0),
+    JS_FN("isFrozen", DebuggerObject::isFrozenMethod, 0, 0),
+    JS_FN("getOwnPropertyNames", DebuggerObject::getOwnPropertyNamesMethod, 0, 0),
+    JS_FN("getOwnPropertySymbols", DebuggerObject::getOwnPropertySymbolsMethod, 0, 0),
+    JS_FN("getOwnPropertyDescriptor", DebuggerObject::getOwnPropertyDescriptorMethod, 1, 0),
+    JS_FN("preventExtensions", DebuggerObject::preventExtensionsMethod, 0, 0),
+    JS_FN("seal", DebuggerObject::sealMethod, 0, 0),
+    JS_FN("freeze", DebuggerObject::freezeMethod, 0, 0),
+    JS_FN("defineProperty", DebuggerObject::definePropertyMethod, 2, 0),
+    JS_FN("defineProperties", DebuggerObject::definePropertiesMethod, 1, 0),
+    JS_FN("deleteProperty", DebuggerObject::deletePropertyMethod, 1, 0),
+    JS_FN("call", DebuggerObject::callMethod, 0, 0),
+    JS_FN("apply", DebuggerObject::applyMethod, 0, 0),
+    JS_FN("asEnvironment", DebuggerObject::asEnvironmentMethod, 0, 0),
+    JS_FN("forceLexicalInitializationByName", DebuggerObject::forceLexicalInitializationByNameMethod, 1, 0),
+    JS_FN("executeInGlobal", DebuggerObject::executeInGlobalMethod, 1, 0),
+    JS_FN("executeInGlobalWithBindings", DebuggerObject::executeInGlobalWithBindingsMethod, 2, 0),
+    JS_FN("makeDebuggeeValue", DebuggerObject::makeDebuggeeValueMethod, 1, 0),
+    JS_FN("unsafeDereference", DebuggerObject::unsafeDereferenceMethod, 0, 0),
+    JS_FN("unwrap", DebuggerObject::unwrapMethod, 0, 0),
     JS_FS_END
 };
 
@@ -8863,6 +8808,14 @@ DebuggerObject::create(JSContext* cx, HandleObject proto, HandleObject referent,
 }
 
 /* static */ bool
+DebuggerObject::isCallable(JSContext* cx, Handle<DebuggerObject*> object)
+{
+    RootedObject referent(cx, object->referent());
+
+    return referent->isCallable();
+}
+
+/* static */ bool
 DebuggerObject::isFunction(JSContext* cx, Handle<DebuggerObject*> object)
 {
     RootedObject referent(cx, object->referent());
@@ -8878,6 +8831,26 @@ DebuggerObject::isDebuggeeFunction(JSContext* cx, Handle<DebuggerObject*> object
 
     return referent->is<JSFunction>() &&
            dbg->observesGlobal(&referent->as<JSFunction>().global());
+}
+
+/* static */ bool
+DebuggerObject::isBoundFunction(JSContext* cx, Handle<DebuggerObject*> object)
+{
+    MOZ_ASSERT(isDebuggeeFunction(cx, object));
+
+    RootedFunction referent(cx, &object->referent()->as<JSFunction>());
+
+    return referent->isBoundFunction();
+}
+
+/* static */ bool
+DebuggerObject::isArrowFunction(JSContext* cx, Handle<DebuggerObject*> object)
+{
+    MOZ_ASSERT(isDebuggeeFunction(cx, object));
+
+    RootedFunction referent(cx, &object->referent()->as<JSFunction>());
+
+    return referent->isArrow();
 }
 
 /* static */ bool
@@ -8909,6 +8882,16 @@ DebuggerObject::className(JSContext* cx, Handle<DebuggerObject*> object,
 }
 
 /* static */ bool
+DebuggerObject::global(JSContext* cx, Handle<DebuggerObject*> object, MutableHandleObject result)
+{
+    RootedObject referent(cx, object->referent());
+    Debugger* dbg = object->owner();
+
+    result.set(&referent->global());
+    return dbg->wrapDebuggeeObject(cx, result);
+}
+
+/* static */ bool
 DebuggerObject::name(JSContext* cx, Handle<DebuggerObject*> object, MutableHandleString result)
 {
     MOZ_ASSERT(isFunction(cx, object));
@@ -8932,13 +8915,38 @@ DebuggerObject::displayName(JSContext* cx, Handle<DebuggerObject*> object,
 }
 
 /* static */ bool
-DebuggerObject::isBoundFunction(JSContext* cx, Handle<DebuggerObject*> object)
+DebuggerObject::parameterNames(JSContext* cx, Handle<DebuggerObject*> object,
+                               MutableHandle<StringVector> result)
 {
     MOZ_ASSERT(isDebuggeeFunction(cx, object));
 
-    RootedObject referent(cx, object->referent());
+    RootedFunction referent(cx, &object->referent()->as<JSFunction>());
 
-    return referent->isBoundFunction();
+    if (!result.growBy(referent->nargs()))
+        return false;
+    if (referent->isInterpreted()) {
+        RootedScript script(cx, GetOrCreateFunctionScript(cx, referent));
+        if (!script)
+            return false;
+
+        MOZ_ASSERT(referent->nargs() == script->bindings.numArgs());
+
+        if (referent->nargs() > 0) {
+            BindingIter bi(script);
+            for (size_t i = 0; i < referent->nargs(); i++, bi++) {
+                MOZ_ASSERT(bi.argIndex() == i);
+                if (bi->name()->length() == 0)
+                    result[i].set(nullptr);
+                else
+                    result[i].set(bi->name());
+            }
+        }
+    } else {
+        for (size_t i = 0; i < referent->nargs(); i++)
+            result[i].set(nullptr);
+    }
+
+    return true;
 }
 
 /* static */ bool
@@ -8984,6 +8992,67 @@ DebuggerObject::boundArguments(JSContext* cx, Handle<DebuggerObject*> object,
         if (!dbg->wrapDebuggeeValue(cx, result[i]))
             return false;
     }
+    return true;
+}
+
+/* static */ SavedFrame*
+Debugger::getObjectAllocationSite(JSObject& obj)
+{
+    JSObject* metadata = GetAllocationMetadata(&obj);
+    if (!metadata)
+        return nullptr;
+
+    MOZ_ASSERT(!metadata->is<WrapperObject>());
+    return SavedFrame::isSavedFrameAndNotProto(*metadata)
+        ? &metadata->as<SavedFrame>()
+        : nullptr;
+}
+
+/* static */ bool
+DebuggerObject::allocationSite(JSContext* cx, Handle<DebuggerObject*> object,
+                               MutableHandleObject result)
+{
+    RootedObject referent(cx, object->referent());
+
+    RootedObject allocSite(cx, Debugger::getObjectAllocationSite(*referent));
+    if (!cx->compartment()->wrap(cx, &allocSite))
+        return false;
+
+    result.set(allocSite);
+    return true;
+}
+
+/* static */ bool
+DebuggerObject::errorMessageName(JSContext* cx, Handle<DebuggerObject*> object,
+                                 MutableHandleString result)
+{
+    RootedObject referent(cx, object->referent());
+
+    JSObject* obj = referent;
+    if (IsCrossCompartmentWrapper(obj))
+        obj = CheckedUnwrap(obj);
+
+    if (!obj) {
+        JS_ReportError(cx, "Permission denied to access object");
+        return false;
+    }
+
+    if (obj->is<ErrorObject>()) {
+        JSErrorReport* report = obj->as<ErrorObject>().getErrorReport();
+        if (report) {
+            const JSErrorFormatString* efs = GetErrorMessage(nullptr, report->errorNumber);
+            if (efs) {
+                RootedString str(cx, JS_NewStringCopyZ(cx, efs->name));
+                if (!cx->compartment()->wrap(cx, &str))
+                    return false;
+
+                result.set(str);
+                return true;
+            }
+        }
+    }
+
+    result.set(nullptr);
     return true;
 }
 

@@ -837,10 +837,6 @@ statuspanel[inactive][previoustype=overLink] {
   -moz-box-align: end;
 }
 
-.panel-inner-arrowcontentfooter[footertype="promobox"] {
-  -moz-binding: url("chrome://browser/content/urlbarBindings.xml#promobox");
-}
-
 /* gcli */
 
 html|*#gcli-tooltip-frame,
@@ -1281,4 +1277,10 @@ toolbarpaletteitem[place="palette"][hidden] {
 
 .popup-notification-invalid-input[focused] {
   box-shadow: 0 0 2px 2px rgba(255,0,0,0.4);
+}
+
+.dragfeedback-tab {
+  -moz-appearance: none;
+  opacity: 0.65;
+  -moz-window-shadow: none;
 }

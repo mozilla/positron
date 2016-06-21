@@ -20,6 +20,7 @@
 
 #include "mozilla/ArrayUtils.h"
 
+#include "asmjs/WasmCode.h"
 #include "asmjs/WasmIonCompile.h"
 
 #include "jit/MacroAssembler-inl.h"
@@ -95,7 +96,7 @@ static const unsigned FramePushedForEntrySP = FramePushedAfterSave + sizeof(void
 // function has an ABI derived from its specific signature, so this function
 // must map from the ABI of CodePtr to the export's signature's ABI.
 Offsets
-wasm::GenerateEntry(MacroAssembler& masm, unsigned target, const Sig& sig, bool usesHeap)
+wasm::GenerateEntry(MacroAssembler& masm, const Export& exp, bool usesHeap)
 {
     masm.haltingAlign(CodeAlignment);
 
@@ -160,12 +161,12 @@ wasm::GenerateEntry(MacroAssembler& masm, unsigned target, const Sig& sig, bool 
     masm.andToStackPtr(Imm32(~(AsmJSStackAlignment - 1)));
 
     // Bump the stack for the call.
-    masm.reserveStack(AlignBytes(StackArgBytes(sig.args()), AsmJSStackAlignment));
+    masm.reserveStack(AlignBytes(StackArgBytes(exp.sig().args()), AsmJSStackAlignment));
 
     // Copy parameters out of argv and into the registers/stack-slots specified by
     // the system ABI.
-    for (ABIArgValTypeIter iter(sig.args()); !iter.done(); iter++) {
-        unsigned argOffset = iter.index() * Module::SizeOfEntryArg;
+    for (ABIArgValTypeIter iter(exp.sig().args()); !iter.done(); iter++) {
+        unsigned argOffset = iter.index() * sizeof(ExportArg);
         Address src(argv, argOffset);
         MIRType type = iter.mirType();
         MOZ_ASSERT_IF(type == MIRType::Int64, JitOptions.wasmTestMode);
@@ -182,8 +183,8 @@ wasm::GenerateEntry(MacroAssembler& masm, unsigned target, const Sig& sig, bool 
             break;
 #endif
           case ABIArg::FPU: {
-            static_assert(Module::SizeOfEntryArg >= jit::Simd128DataSize,
-                          "EntryArg must be big enough to store SIMD values");
+            static_assert(sizeof(ExportArg) >= jit::Simd128DataSize,
+                          "ExportArg must be big enough to store SIMD values");
             switch (type) {
               case MIRType::Int8x16:
               case MIRType::Int16x8:
@@ -252,7 +253,7 @@ wasm::GenerateEntry(MacroAssembler& masm, unsigned target, const Sig& sig, bool 
 
     // Call into the real function.
     masm.assertStackAlignment(AsmJSStackAlignment);
-    masm.call(CallSiteDesc(CallSiteDesc::Relative), target);
+    masm.call(CallSiteDesc(CallSiteDesc::Relative), exp.funcIndex());
 
     // Recover the stack pointer value before dynamic alignment.
     masm.loadWasmActivation(scratch);
@@ -263,7 +264,7 @@ wasm::GenerateEntry(MacroAssembler& masm, unsigned target, const Sig& sig, bool 
     masm.Pop(argv);
 
     // Store the return value in argv[0]
-    switch (sig.ret()) {
+    switch (exp.sig().ret()) {
       case ExprType::Void:
         break;
       case ExprType::I32:
@@ -346,14 +347,28 @@ FillArgumentArray(MacroAssembler& masm, const ValTypeVector& args, unsigned argO
           case ABIArg::FPU: {
             MOZ_ASSERT(IsFloatingPointType(type));
             FloatRegister srcReg = i->fpu();
-            if (toValue) {
-                if (type == MIRType::Float32) {
-                    masm.convertFloat32ToDouble(i->fpu(), ScratchDoubleReg);
+            if (type == MIRType::Double) {
+                if (toValue) {
+                    // Preserve the NaN pattern in the input.
+                    masm.moveDouble(srcReg, ScratchDoubleReg);
                     srcReg = ScratchDoubleReg;
+                    masm.canonicalizeDouble(srcReg);
                 }
-                masm.canonicalizeDouble(srcReg);
+                masm.storeDouble(srcReg, dstAddr);
+            } else {
+                MOZ_ASSERT(type == MIRType::Float32);
+                if (toValue) {
+                    // JS::Values can't store Float32, so convert to a Double.
+                    masm.convertFloat32ToDouble(srcReg, ScratchDoubleReg);
+                    masm.canonicalizeDouble(ScratchDoubleReg);
+                    masm.storeDouble(ScratchDoubleReg, dstAddr);
+                } else {
+                    // Preserve the NaN pattern in the input.
+                    masm.moveFloat32(srcReg, ScratchFloat32Reg);
+                    masm.canonicalizeFloat(ScratchFloat32Reg);
+                    masm.storeFloat32(ScratchFloat32Reg, dstAddr);
+                }
             }
-            masm.storeDouble(srcReg, dstAddr);
             break;
           }
           case ABIArg::Stack:
@@ -558,7 +573,7 @@ wasm::GenerateJitExit(MacroAssembler& masm, const Import& import, bool usesHeap)
 #endif
 
     // 2.2. Get callee
-    masm.loadPtr(Address(callee, Module::OffsetOfImportExitFun), callee);
+    masm.loadPtr(Address(callee, offsetof(ImportExit, fun)), callee);
 
     // 2.3. Save callee
     masm.storePtr(callee, Address(masm.getStackPointer(), argOffset));
