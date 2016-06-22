@@ -218,7 +218,16 @@ function ModuleLoader(processType, window) {
     this.global.process = this.process;
   }
 
-  this.global.Buffer = this.require({}, 'resource:///modules/node/buffer.js').Buffer;
+  // This doesn't expose Buffer to modules like remote.js in renderer processes,
+  // since they get a wrapped view of the global that doesn't include expandos.
+  // To expose it to such modules, we need to bind it to the global with WebIDL.
+  //
+  // In the meantime, we attach Buffer to the unwrapped global, then unwrap it
+  // again in remote.js to get to it.  Perhaps we can instead attach it to each
+  // sandbox object, so remote.js can access it there without having to unwrap
+  // the global.
+  //
+  XPCNativeWrapper.unwrap(this.global).Buffer = this.require({}, 'resource:///modules/node/buffer.js').Buffer;
 
   // XXX Also define clearImmediate, and other Node globals.
   const timers = this.require({}, 'resource:///modules/node/timers.js');

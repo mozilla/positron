@@ -40,13 +40,29 @@ Process.prototype = {
   init: function(window) {
     this._contentWindow = window;
 
+    // The binding gets initialized for a document in a content docshell,
+    // if the document references the 'process' global, even though the binding
+    // is marked [ChromeOnly].  Hack around that.
+    //
+    // TODO: https://github.com/mozilla/positron/issues/64
+    //
+    const docShellType = window.QueryInterface(Ci.nsIInterfaceRequestor).
+                                getInterface(Ci.nsIWebNavigation).
+                                QueryInterface(Ci.nsIDocShell).itemType;
+    if (docShellType !== Ci.nsIDocShellTreeItem.typeChrome) {
+      this._processGlobal = new Proxy({}, {
+        get: function(target, name) {
+          window.console.error("'process' not defined in content document");
+        }
+      });
+      return window.processImpl._create(window, this);
+    }
+
     // The WebIDL binding applies to the hidden window too, but we don't want
     // to initialize the Electron environment for that window, so return early
     // if we've been called to initialize `process` for that window.
     //
-    // TODO: restrict the WebIDL binding to windows opened by the Electron app
-    // using the Func extended attribute
-    // <https://developer.mozilla.org/en-US/docs/Mozilla/WebIDL_bindings#Func>.
+    // TODO: https://github.com/mozilla/positron/issues/64
     //
     if (window.location.toString() === 'resource://gre-resources/hiddenWindow.html') {
       this._processGlobal = new Proxy({}, {

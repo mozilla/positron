@@ -295,7 +295,7 @@ var registerBrowserPluginElement = function() {
 
     // This breaks loading a page in the mozbrowser when we give the app page
     // the system principal, so we've temporarily disabled it.
-    // this.setAttribute('remote', 'true');
+    this.setAttribute('remote', 'true');
 
     this.addEventListener('mozbrowserloadstart', function(event) {
       var internal;

@@ -35,7 +35,7 @@ var wrapArgs = function(args, visited) {
         type: 'array',
         value: wrapArgs(value, visited)
       };
-    } else if (Buffer.isBuffer(value)) {
+    } else if (XPCNativeWrapper.unwrap(window).Buffer.isBuffer(value)) {
       return {
         type: 'buffer',
         value: Array.prototype.slice.call(value, 0)
