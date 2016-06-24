@@ -89,20 +89,10 @@ function ModuleLoader(processType, window) {
     this.global = window;
   }
 
-  /**
-   * Add default properties to the module-specific global object.
-   *
-   * @param  moduleGlobalObj {Object} the module-specific global object
-   *                                  to which we add default properties
-   * @param  module          {Object} the object that identifies the module
-   *                                  and caches its exported symbols
-   */
-  this.injectModuleGlobals = function(moduleGlobalObj, module) {
-    moduleGlobalObj.exports = module.exports;
-    moduleGlobalObj.module = module;
-    moduleGlobalObj.require = this.require.bind(this, module);
-    moduleGlobalObj.global = this.global;
-  };
+  const sandbox = new Cu.Sandbox(systemPrincipal, {
+    wantComponents: true,
+    sandboxPrototype: this.global,
+  });
 
   /**
    * Import a module.
@@ -176,21 +166,49 @@ function ModuleLoader(processType, window) {
     // implement APIs in JS that Node/Electron implement with native bindings).
     const wantComponents = uri.spec.startsWith('resource:///modules/gecko/');
 
-    let sandbox = new Cu.Sandbox(systemPrincipal, {
-      sandboxName: uri.spec,
-      wantComponents: wantComponents,
-      sandboxPrototype: this.global,
-    });
+    // Create a target object whose prototype is the sandbox, which we'll use
+    // to load the module via the subscript loader, so the module has the global
+    // scope of the sandbox and the local scope of the target.
+    let target = Object.create(sandbox);
 
-    this.injectModuleGlobals(sandbox, module);
+    // In the renderer process, we can't yet load all modules in a single
+    // sandbox, because attempts to reference Window properties on the target
+    // object then throw errors like:
+    //
+    //   TypeError: 'get location' called on an object that does not implement interface Window.
+    //
+    // This is described as "TypeError: invalid Array.prototype.sort argument"
+    // in the MDN docs on the error:
+    //
+    //   https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Array_sort_argument
+    //
+    // But that's clearly not the issue here.  Some code is deciding that
+    // the target object doesn't implement Window, even though its prototype
+    // is a Window instance.
+    //
+    // Whereas that code does think that a sandbox with a Window prototype
+    // implements Window.  So we work around the problem by loading modules
+    // in their own sandboxes in renderer processes.
+    //
+    // TODO: https://github.com/mozilla/positron/issues/93
+    //
+    if (processType === 'renderer') {
+      target = new Cu.Sandbox(systemPrincipal, {
+        wantComponents: true,
+        sandboxPrototype: window,
+      });
+    }
 
-    // XXX Move these into injectModuleGlobals().
-    sandbox.__filename = file.path;
-    sandbox.__dirname = file.parent.path;
+    // Inject module-specific locals into the target object.
+    target.exports = module.exports;
+    target.module = module;
+    target.require = this.require.bind(this, module);
+    target.global = this.global;
+    target.__filename = file.path;
+    target.__dirname = file.parent.path;
 
     try {
-      // XXX evalInSandbox?
-      subScriptLoader.loadSubScript(uri.spec, sandbox, 'UTF-8');
+      subScriptLoader.loadSubScript(uri.spec, target, 'UTF-8');
       return module.exports;
     } catch(ex) {
       modules.delete(module.id);
