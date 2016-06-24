@@ -128,18 +128,20 @@ const BrowserWindowWebContentsPrototype = {
 
 const GuestWebContentsPrototype = {
   _webView: null,
+  _url: null,
   attachWebViewToGuest(webView) {
     this._webView = webView;
+
+    let onBrowserLocationChange = (e) => {
+      this._url = e.detail;
+    };
+    this._webView.browserPluginNode.addEventListener("mozbrowserlocationchange", onBrowserLocationChange);
   },
 
   isGuest() { return true },
 
   getURL: function() {
-    if (this._webView && this._webView.browserPluginNode.contentDocument) {
-      return this._webView.browserPluginNode.contentDocument.URL;
-    }
-    console.warn('cannot get URL for guest WebContents');
-    return null;
+    return this._url;
   },
 
   loadURL: function(url) {
