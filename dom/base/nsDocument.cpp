@@ -2157,6 +2157,7 @@ nsDocument::Reset(nsIChannel* aChannel, nsILoadGroup* aLoadGroup)
       nsCOMPtr<nsIDocShell> docShell(mDocumentContainer);
       nsCOMPtr<nsIDocShellTreeItem> parentDocShellTreeItem;
       if (docShell &&
+          docShell->ItemType() == nsIDocShellTreeItem::typeChrome &&
           NS_SUCCEEDED(docShell->GetParent(getter_AddRefs(parentDocShellTreeItem))) &&
           !parentDocShellTreeItem)
       {
