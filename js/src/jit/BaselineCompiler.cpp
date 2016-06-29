@@ -302,7 +302,7 @@ BaselineCompiler::compile()
         code->setHasBytecodeMap();
     }
 
-    script->setBaselineScript(cx, baselineScript.release());
+    script->setBaselineScript(cx->runtime(), baselineScript.release());
 
     return Method_Compiled;
 }
@@ -4326,6 +4326,13 @@ BaselineCompiler::emit_JSOP_DEBUGCHECKSELFHOSTED()
 #endif
     return true;
 
+}
+
+bool
+BaselineCompiler::emit_JSOP_IS_CONSTRUCTING()
+{
+    frame.push(MagicValue(JS_IS_CONSTRUCTING));
+    return true;
 }
 
 bool

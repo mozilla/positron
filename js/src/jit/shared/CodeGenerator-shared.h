@@ -108,7 +108,15 @@ class CodeGeneratorShared : public LElementVisitor
     Vector<PatchableBackedgeInfo, 0, SystemAllocPolicy> patchableBackedges_;
 
 #ifdef JS_TRACE_LOGGING
+    struct PatchableTLEvent {
+        CodeOffset offset;
+        const char* event;
+        PatchableTLEvent(CodeOffset offset, const char* event)
+            : offset(offset), event(event)
+        {}
+    };
     js::Vector<CodeOffset, 0, SystemAllocPolicy> patchableTraceLoggers_;
+    js::Vector<PatchableTLEvent, 0, SystemAllocPolicy> patchableTLEvents_;
     js::Vector<CodeOffset, 0, SystemAllocPolicy> patchableTLScripts_;
 #endif
 
@@ -495,6 +503,7 @@ class CodeGeneratorShared : public LElementVisitor
   protected:
     void emitTracelogScript(bool isStart);
     void emitTracelogTree(bool isStart, uint32_t textId);
+    void emitTracelogTree(bool isStart, const char* text, TraceLoggerTextId enabledTextId);
 
   public:
     void emitTracelogScriptStart() {
@@ -508,6 +517,15 @@ class CodeGeneratorShared : public LElementVisitor
     }
     void emitTracelogStopEvent(uint32_t textId) {
         emitTracelogTree(/* isStart =*/ false, textId);
+    }
+    // Log an arbitrary text. The TraceloggerTextId is used to toggle the
+    // logging on and off.
+    // Note: the text is not copied and need to be kept alive until linking.
+    void emitTracelogStartEvent(const char* text, TraceLoggerTextId enabledTextId) {
+        emitTracelogTree(/* isStart =*/ true, text, enabledTextId);
+    }
+    void emitTracelogStopEvent(const char* text, TraceLoggerTextId enabledTextId) {
+        emitTracelogTree(/* isStart =*/ false, text, enabledTextId);
     }
 #endif
     void emitTracelogIonStart() {
@@ -526,6 +544,8 @@ class CodeGeneratorShared : public LElementVisitor
     inline void verifyHeapAccessDisassembly(uint32_t begin, uint32_t end, bool isLoad,
                                             Scalar::Type type, unsigned numElems,
                                             const Operand& mem, LAllocation alloc);
+
+    bool isGlobalObject(JSObject* object);
 };
 
 // An out-of-line path is generated at the end of the function.

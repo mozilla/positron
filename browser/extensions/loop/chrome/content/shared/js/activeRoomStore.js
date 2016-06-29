@@ -55,8 +55,7 @@ loop.store.ActiveRoomStore = function (mozL10n) {
     roomDescription: "roomDescription", 
     roomInfoFailure: "roomInfoFailure", 
     roomName: "roomName", 
-    roomState: "roomState", 
-    socialShareProviders: "socialShareProviders" };
+    roomState: "roomState" };
 
 
   var updateContextTimer = null;
@@ -158,8 +157,6 @@ loop.store.ActiveRoomStore = function (mozL10n) {
         roomName: null, 
         // True when sharing screen has been paused.
         streamPaused: false, 
-        // Social API state.
-        socialShareProviders: null, 
         // True if media has been connected both-ways.
         mediaConnected: false, 
         // True if a chat message was sent or received during a session.
@@ -273,7 +270,6 @@ loop.store.ActiveRoomStore = function (mozL10n) {
       "startBrowserShare", 
       "endScreenShare", 
       "toggleBrowserSharing", 
-      "updateSocialShareInfo", 
       "connectionStatus", 
       "mediaConnected", 
       "videoScreenStreamChanged"];
@@ -288,13 +284,11 @@ loop.store.ActiveRoomStore = function (mozL10n) {
 
       this._onUpdateListener = this._handleRoomUpdate.bind(this);
       this._onDeleteListener = this._handleRoomDelete.bind(this);
-      this._onSocialShareUpdate = this._handleSocialShareUpdate.bind(this);
 
       var roomToken = this._storeState.roomToken;
       loop.request("Rooms:PushSubscription", ["delete:" + roomToken, "update:" + roomToken]);
       loop.subscribe("Rooms:Delete:" + roomToken, this._handleRoomDelete.bind(this));
-      loop.subscribe("Rooms:Update:" + roomToken, this._handleRoomUpdate.bind(this));
-      loop.subscribe("SocialProvidersChanged", this._onSocialShareUpdate);}, 
+      loop.subscribe("Rooms:Update:" + roomToken, this._handleRoomUpdate.bind(this));}, 
 
 
     /**
@@ -320,16 +314,12 @@ loop.store.ActiveRoomStore = function (mozL10n) {
       this._registerPostSetupActions();
 
       // Get the window data from the Loop API.
-      return loop.requestMulti(
-      ["Rooms:Get", actionData.roomToken], 
-      ["GetSocialShareProviders"]).
-      then(function (results) {
-        var room = results[0];
-        var socialShareProviders = results[1];
+      return loop.request("Rooms:Get", actionData.roomToken).then(function (result) {
+        var room = result;
 
-        if (room.isError) {
+        if (result.isError) {
           this.dispatchAction(new sharedActions.RoomFailure({ 
-            error: room, 
+            error: result, 
             failedJoinRequest: false }));
 
           return;}
@@ -341,8 +331,7 @@ loop.store.ActiveRoomStore = function (mozL10n) {
           roomDescription: room.decryptedContext.description, 
           roomName: room.decryptedContext.roomName, 
           roomState: ROOM_STATES.READY, 
-          roomUrl: room.roomUrl, 
-          socialShareProviders: socialShareProviders }));
+          roomUrl: room.roomUrl }));
 
 
         // For the conversation window, we need to automatically join the room.
@@ -549,18 +538,6 @@ loop.store.ActiveRoomStore = function (mozL10n) {
 
 
     /**
-     * Handles the updateSocialShareInfo action. Updates the room data with new
-     * Social API info.
-     *
-     * @param  {sharedActions.UpdateSocialShareInfo} actionData
-     */
-    updateSocialShareInfo: function updateSocialShareInfo(actionData) {
-      this.setStoreState({ 
-        socialShareProviders: actionData.socialShareProviders });}, 
-
-
-
-    /**
      * Handles room updates notified by the Loop rooms API.
      *
      * @param {Object} roomData  The new roomData.
@@ -583,18 +560,6 @@ loop.store.ActiveRoomStore = function (mozL10n) {
       this._sdkDriver.forceDisconnectAll(function () {
         window.close();});}, 
 
-
-
-    /**
-     * Handles an update of the position of the Share widget and changes to list
-     * of Social API providers, notified by the Loop API.
-     */
-    _handleSocialShareUpdate: function _handleSocialShareUpdate() {
-      loop.request("GetSocialShareProviders").then(function (result) {
-        this.dispatchAction(new sharedActions.UpdateSocialShareInfo({ 
-          socialShareProviders: result }));}.
-
-      bind(this));}, 
 
 
     /**
@@ -751,13 +716,18 @@ loop.store.ActiveRoomStore = function (mozL10n) {
 
       this._setRefreshTimeout(actionData.expires);
 
-      // Only send media telemetry on one side of the call: the desktop side.
-      actionData.sendTwoWayMediaTelemetry = this._isDesktop;
-
       this._sdkDriver.connectSession(actionData);
 
-      loop.request("AddConversationContext", this._storeState.windowId, 
-      actionData.sessionId, "");}, 
+      this._browserSharingListener = this._handleSwitchBrowserShare.bind(this);
+
+      // Set up a listener for watching screen shares. This will get notified
+      // with the first windowId when it is added, so we may start off the sharing
+      // from within the listener.
+      loop.subscribe("BrowserSwitch", this._browserSharingListener);
+
+      loop.requestMulti(["AddConversationContext", this._storeState.windowId, 
+      actionData.sessionId, ""], 
+      ["AddBrowserSharingListener", this.getStoreState().windowId]);}, 
 
 
     /**
@@ -818,7 +788,14 @@ loop.store.ActiveRoomStore = function (mozL10n) {
       this.setStoreState({ 
         remoteAudioEnabled: actionData.hasAudio, 
         remoteVideoEnabled: actionData.hasVideo, 
-        remoteSrcMediaElement: actionData.srcMediaElement });}, 
+        remoteSrcMediaElement: actionData.srcMediaElement });
+
+
+      // We start browser sharing here so that it starts *after* the audio/video
+      // has connected. This is to attempt to help performance when a room is
+      // initially joined.
+      if (this._isDesktop) {
+        this.startBrowserShare();}}, 
 
 
 
@@ -904,10 +881,9 @@ loop.store.ActiveRoomStore = function (mozL10n) {
       if (Array.isArray(windowId)) {
         windowId = windowId[0];}
 
-      if (!windowId) {
-        return;}
 
-      if (windowId.isError) {
+      // There was an error getting the windowId, so lets just reset things.
+      if (windowId && windowId.isError) {
         console.error("Error getting the windowId: " + windowId.message);
         this.dispatchAction(new sharedActions.ScreenSharingState({ 
           state: SCREEN_SHARE_STATES.INACTIVE }));
@@ -915,7 +891,26 @@ loop.store.ActiveRoomStore = function (mozL10n) {
         return;}
 
 
+      // If there's no windowId, see if we've got one saved.
+      if (!windowId) {
+        // If we really don't have a window Id, then don't do anything.
+        if (!this._savedWindowId) {
+          return;}
+
+
+        windowId = this._savedWindowId;
+        delete this._savedWindowId;}
+
+
       var screenSharingState = this.getStoreState().screenSharingState;
+
+      // If we're inactive, or screen sharing is paused, just save the windowId
+      // for when we're ready.
+      if (screenSharingState === SCREEN_SHARE_STATES.INACTIVE || 
+      this._storeState.sharingPaused) {
+        this._savedWindowId = windowId;
+        return;}
+
 
       if (screenSharingState === SCREEN_SHARE_STATES.PENDING) {
         // Screen sharing is still pending, so assume that we need to kick it off.
@@ -985,14 +980,10 @@ loop.store.ActiveRoomStore = function (mozL10n) {
         state: SCREEN_SHARE_STATES.PENDING }));
 
 
-      this._browserSharingListener = this._handleSwitchBrowserShare.bind(this);
-
-      // Set up a listener for watching screen shares. This will get notified
-      // with the first windowId when it is added, so we start off the sharing
-      // from within the listener.
-      loop.request("AddBrowserSharingListener", this.getStoreState().windowId).
-      then(this._browserSharingListener);
-      loop.subscribe("BrowserSwitch", this._browserSharingListener);}, 
+      // This attempts to start the actual browser sharing - we assume we've
+      // already got a windowId due to having requested it before connecting the
+      // media.
+      this._handleSwitchBrowserShare();}, 
 
 
     /**
@@ -1021,6 +1012,16 @@ loop.store.ActiveRoomStore = function (mozL10n) {
     toggleBrowserSharing: function toggleBrowserSharing(actionData) {
       this.setStoreState({ 
         sharingPaused: !actionData.enabled });
+
+
+      // If we've un-paused screen sharing, but we haven't started sharing, then
+      // we need to start that off.
+      if (actionData.enabled && 
+      this._storeState.screenSharingState === SCREEN_SHARE_STATES.PENDING) {
+        this._handleSwitchBrowserShare();} else 
+      {
+        // Otherwise just toggle the stream.
+        this._sdkDriver.toggleBrowserSharing(actionData.enabled);}
 
 
       // If unpausing, check the context as it might have changed.
@@ -1161,10 +1162,6 @@ loop.store.ActiveRoomStore = function (mozL10n) {
         return;}
 
 
-      if (loop.standaloneMedia) {
-        loop.standaloneMedia.multiplexGum.reset();}
-
-
       if (this._browserSharingListener) {
         // Remove the browser sharing listener as we don't need it now.
         loop.unsubscribe("BrowserSwitch", this._browserSharingListener);
@@ -1263,10 +1260,8 @@ loop.store.ActiveRoomStore = function (mozL10n) {
       // There's no need to listen to these actions anymore.
       this.dispatcher.unregister(this, [
       "receivedTextChatMessage", 
-      "sendTextChatMessage"]);
+      "sendTextChatMessage"]);}, 
 
-      // Ping telemetry of this session with successful message(s) exchange.
-      loop.request("TelemetryAddValue", "LOOP_ROOM_SESSION_WITHCHAT", 1);}, 
 
 
     /**

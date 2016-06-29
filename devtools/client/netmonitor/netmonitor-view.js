@@ -30,6 +30,7 @@ const {LocalizationHelper} = require("devtools/client/shared/l10n");
 const {PrefsHelper} = require("devtools/client/shared/prefs");
 const {ViewHelpers, Heritage, WidgetMethods, setNamedTimeout} =
   require("devtools/client/shared/widgets/view-helpers");
+const {gDevTools} = require("devtools/client/framework/devtools");
 
 /**
  * Localization convenience methods.
@@ -714,7 +715,7 @@ RequestsMenuView.prototype = Heritage.extend(WidgetMethods, {
    * Opens selected item in a new tab.
    */
   openRequestInTab: function () {
-    let win = Services.wm.getMostRecentWindow("navigator:browser");
+    let win = Services.wm.getMostRecentWindow(gDevTools.chromeWindowType);
     let selected = this.selectedItem.attachment;
     win.openUILinkIn(selected.url, "tab", { relatedToCurrent: true });
   },
@@ -2341,13 +2342,22 @@ RequestsMenuView.prototype = Heritage.extend(WidgetMethods, {
     el.className = "stack-trace-tooltip devtools-monospace";
 
     for (let f of stacktrace) {
-      let { functionName, filename, lineNumber, columnNumber } = f;
+      let { functionName, filename, lineNumber, columnNumber, asyncCause } = f;
 
-      // Parse a stack frame in format "url -> url"
+      if (asyncCause) {
+        // if there is asyncCause, append a "divider" row into the trace
+        let asyncFrameEl = doc.createElementNS(HTML_NS, "div");
+        asyncFrameEl.className = "stack-frame stack-frame-async";
+        asyncFrameEl.textContent =
+          WEBCONSOLE_L10N.getFormatStr("stacktrace.asyncStack", asyncCause);
+        el.appendChild(asyncFrameEl);
+      }
+
+      // Parse a source name in format "url -> url"
       let sourceUrl = filename.split(" -> ").pop();
 
       let frameEl = doc.createElementNS(HTML_NS, "div");
-      frameEl.className = "stack-frame";
+      frameEl.className = "stack-frame stack-frame-call";
 
       let funcEl = doc.createElementNS(HTML_NS, "span");
       funcEl.className = "stack-frame-function-name";
@@ -2376,7 +2386,7 @@ RequestsMenuView.prototype = Heritage.extend(WidgetMethods, {
       el.appendChild(frameEl);
     }
 
-    tooltip.setContent(el, REQUESTS_TOOLTIP_STACK_TRACE_WIDTH);
+    tooltip.setContent(el, {width: REQUESTS_TOOLTIP_STACK_TRACE_WIDTH});
 
     return true;
   }),
@@ -3634,7 +3644,7 @@ NetworkDetailsView.prototype = {
       errorbox.hidden = false;
 
       // Strip any HTML from the message.
-      let plain = DOMParser.parseFromString(securityInfo.errorMessage,
+      let plain = new DOMParser().parseFromString(securityInfo.errorMessage,
         "text/html");
       setValue("#security-error-message", plain.body.textContent);
     }

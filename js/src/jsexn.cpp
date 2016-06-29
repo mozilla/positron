@@ -522,7 +522,7 @@ js::GetErrorTypeName(JSRuntime* rt, int16_t exnType)
         return nullptr;
     }
     JSProtoKey key = GetExceptionProtoKey(JSExnType(exnType));
-    return ClassName(key, rt);
+    return ClassName(key, rt->contextFromMainThread());
 }
 
 void
@@ -944,7 +944,7 @@ ErrorReport::populateUncaughtExceptionReportVA(JSContext* cx, va_list ap)
 
     if (!ExpandErrorArgumentsVA(cx, GetErrorMessage, nullptr,
                                 JSMSG_UNCAUGHT_EXCEPTION, &ownedMessage,
-                                &ownedReport, ArgumentsAreASCII, ap)) {
+                                ArgumentsAreASCII, &ownedReport, ap)) {
         return false;
     }
 

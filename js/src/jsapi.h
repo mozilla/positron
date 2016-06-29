@@ -1011,9 +1011,6 @@ namespace js {
 void
 AssertHeapIsIdle(JSRuntime* rt);
 
-void
-AssertHeapIsIdle(JSContext* cx);
-
 } /* namespace js */
 
 class MOZ_RAII JSAutoRequest
@@ -1041,32 +1038,15 @@ class MOZ_RAII JSAutoRequest
 #endif
 };
 
-extern JS_PUBLIC_API(JSContext*)
-JS_NewContext(JSRuntime* rt, size_t stackChunkSize);
-
-extern JS_PUBLIC_API(void)
-JS_DestroyContext(JSContext* cx);
-
-extern JS_PUBLIC_API(void)
-JS_DestroyContextNoGC(JSContext* cx);
-
-extern JS_PUBLIC_API(void*)
-JS_GetContextPrivate(JSContext* cx);
-
-extern JS_PUBLIC_API(void)
-JS_SetContextPrivate(JSContext* cx, void* data);
-
-extern JS_PUBLIC_API(void*)
-JS_GetSecondContextPrivate(JSContext* cx);
-
-extern JS_PUBLIC_API(void)
-JS_SetSecondContextPrivate(JSContext* cx, void* data);
-
 extern JS_PUBLIC_API(JSRuntime*)
 JS_GetRuntime(JSContext* cx);
 
+/**
+ * Returns the runtime's JSContext. The plan is to expose a single type to the
+ * API, so this function will likely be removed soon.
+ */
 extern JS_PUBLIC_API(JSContext*)
-JS_ContextIterator(JSRuntime* rt, JSContext** iterp);
+JS_GetContext(JSRuntime* rt);
 
 extern JS_PUBLIC_API(JSVersion)
 JS_GetVersion(JSContext* cx);
@@ -1252,6 +1232,14 @@ RuntimeOptionsRef(JSRuntime* rt);
 
 JS_PUBLIC_API(RuntimeOptions&)
 RuntimeOptionsRef(JSContext* cx);
+
+/**
+ * Initialize the runtime's self-hosted code. Embeddings should call this
+ * exactly once per runtime/context, before the first JS_NewGlobalObject
+ * call.
+ */
+JS_PUBLIC_API(bool)
+InitSelfHostedCode(JSContext* cx);
 
 } /* namespace JS */
 
@@ -2318,7 +2306,6 @@ class JS_PUBLIC_API(CompartmentBehaviors)
     }
 
     bool extraWarnings(JSRuntime* rt) const;
-    bool extraWarnings(JSContext* cx) const;
     Override& extraWarningsOverride() { return extraWarningsOverride_; }
 
     bool getSingletonsAsTemplates() const {
@@ -3910,7 +3897,7 @@ class JS_FRIEND_API(OwningCompileOptions) : public ReadOnlyCompileOptions
  * create an instance of this type, it's up to you to guarantee that
  * everything you store in it will outlive it.
  */
-class MOZ_STACK_CLASS JS_FRIEND_API(CompileOptions) : public ReadOnlyCompileOptions
+class MOZ_STACK_CLASS JS_FRIEND_API(CompileOptions) final : public ReadOnlyCompileOptions
 {
     RootedObject elementRoot;
     RootedString elementAttributeNameRoot;
@@ -4285,8 +4272,9 @@ ModuleEvaluation(JSContext* cx, JS::HandleObject moduleRecord);
  * Get a list of the module specifiers used by a source text module
  * record to request importation of modules.
  *
- * The result is a JavaScript array of string values.  ForOfIterator can be used
- * to extract the individual strings.
+ * The result is a JavaScript array of string values.  To extract the individual
+ * values use only JS_GetArrayLength and JS_GetElement with indices 0 to
+ * length - 1.
  */
 extern JS_PUBLIC_API(JSObject*)
 GetRequestedModules(JSContext* cx, JS::HandleObject moduleRecord);
@@ -6150,6 +6138,8 @@ struct PerformanceGroup {
     uint64_t refCount_;
 };
 
+using PerformanceGroupVector = mozilla::Vector<RefPtr<js::PerformanceGroup>, 0, SystemAllocPolicy>;
+
 /**
  * Commit any Performance Monitoring data.
  *
@@ -6208,12 +6198,12 @@ extern JS_PUBLIC_API(bool)
 SetStopwatchStartCallback(JSRuntime*, StopwatchStartCallback, void*);
 
 typedef bool
-(*StopwatchCommitCallback)(uint64_t, mozilla::Vector<RefPtr<PerformanceGroup>>&, void*);
+(*StopwatchCommitCallback)(uint64_t, PerformanceGroupVector&, void*);
 extern JS_PUBLIC_API(bool)
 SetStopwatchCommitCallback(JSRuntime*, StopwatchCommitCallback, void*);
 
 typedef bool
-(*GetGroupsCallback)(JSContext*, mozilla::Vector<RefPtr<PerformanceGroup>>&, void*);
+(*GetGroupsCallback)(JSContext*, PerformanceGroupVector&, void*);
 extern JS_PUBLIC_API(bool)
 SetGetPerformanceGroupsCallback(JSRuntime*, GetGroupsCallback, void*);
 

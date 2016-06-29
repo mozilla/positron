@@ -438,6 +438,7 @@ CycleCollectedJSRuntime::CycleCollectedJSRuntime()
   : mGCThingCycleCollectorGlobal(sGCThingCycleCollectorGlobal)
   , mJSZoneCycleCollectorGlobal(sJSZoneCycleCollectorGlobal)
   , mJSRuntime(nullptr)
+  , mJSContext(nullptr)
   , mPrevGCSliceCallback(nullptr)
   , mPrevGCNurseryCollectionCallback(nullptr)
   , mJSHolders(256)
@@ -479,6 +480,7 @@ CycleCollectedJSRuntime::~CycleCollectedJSRuntime()
 
   JS_DestroyRuntime(mJSRuntime);
   mJSRuntime = nullptr;
+  mJSContext = nullptr;
   nsCycleCollector_forgetJSRuntime();
 
   mozilla::dom::DestroyScriptSettings();
@@ -509,6 +511,7 @@ CycleCollectedJSRuntime::Initialize(JSRuntime* aParentRuntime,
   if (!mJSRuntime) {
     return NS_ERROR_OUT_OF_MEMORY;
   }
+  mJSContext = JS_GetContext(mJSRuntime);
 
   if (!JS_AddExtraGCRootsTracer(mJSRuntime, TraceBlackJS, this)) {
     MOZ_CRASH("JS_AddExtraGCRootsTracer failed");
@@ -1421,6 +1424,13 @@ CycleCollectedJSRuntime::RunInMetastableState(already_AddRefed<nsIRunnable>&& aR
   // There must be an event running to get here.
 #ifndef MOZ_WIDGET_COCOA
   MOZ_ASSERT(data.mRecursionDepth > mBaseRecursionDepth);
+#else
+  // XXX bug 1261143
+  // Recursion depth should be greater than mBaseRecursionDepth,
+  // or the runnable will stay in the queue forever.
+  if (data.mRecursionDepth <= mBaseRecursionDepth) {
+    data.mRecursionDepth = mBaseRecursionDepth + 1;
+  }
 #endif
 
   mMetastableStateEvents.AppendElement(Move(data));

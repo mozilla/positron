@@ -151,8 +151,12 @@ struct nsContentAndOffset
 // This is faster than nsBidiPresUtils::IsFrameInParagraphDirection,
 // because it uses the frame pointer passed in without drilling down to
 // the leaf frame.
-#define REVERSED_DIRECTION_FRAME(frame) \
-  (!IS_SAME_DIRECTION(NS_GET_EMBEDDING_LEVEL(frame), NS_GET_BASE_LEVEL(frame)))
+static bool
+IsReversedDirectionFrame(nsIFrame* aFrame)
+{
+  FrameBidiData bidiData = nsBidi::GetBidiData(aFrame);
+  return !IS_SAME_DIRECTION(bidiData.embeddingLevel, bidiData.baseLevel);
+}
 
 #include "nsILineIterator.h"
 
@@ -173,7 +177,7 @@ InitBoxMetrics(nsIFrame* aFrame, bool aClear)
     props.Delete(BoxMetricsProperty());
   }
 
-  nsBoxLayoutMetrics *metrics = new nsBoxLayoutMetrics();
+  nsBoxLayoutMetrics* metrics = new nsBoxLayoutMetrics();
   props.Set(BoxMetricsProperty(), metrics);
 
   static_cast<nsFrame*>(aFrame)->nsFrame::MarkIntrinsicISizesDirty();
@@ -660,8 +664,7 @@ nsFrame::DestroyFrom(nsIFrame* aDestructRoot)
   // because that clears our Properties() table.)
   if (mState & NS_FRAME_PART_OF_IBSPLIT) {
     // Delete previous sibling's reference to me.
-    nsIFrame* prevSib = static_cast<nsIFrame*>
-      (Properties().Get(nsIFrame::IBSplitPrevSibling()));
+    nsIFrame* prevSib = Properties().Get(nsIFrame::IBSplitPrevSibling());
     if (prevSib) {
       NS_WARN_IF_FALSE(this ==
          prevSib->Properties().Get(nsIFrame::IBSplitSibling()),
@@ -670,8 +673,7 @@ nsFrame::DestroyFrom(nsIFrame* aDestructRoot)
     }
 
     // Delete next sibling's reference to me.
-    nsIFrame* nextSib = static_cast<nsIFrame*>
-      (Properties().Get(nsIFrame::IBSplitSibling()));
+    nsIFrame* nextSib = Properties().Get(nsIFrame::IBSplitSibling());
     if (nextSib) {
       NS_WARN_IF_FALSE(this ==
          nextSib->Properties().Get(nsIFrame::IBSplitPrevSibling()),
@@ -963,8 +965,7 @@ nsIFrame::GetUsedMargin() const
       IsSVGText())
     return margin;
 
-  nsMargin *m = static_cast<nsMargin*>
-                           (Properties().Get(UsedMarginProperty()));
+  nsMargin *m = Properties().Get(UsedMarginProperty());
   if (m) {
     margin = *m;
   } else {
@@ -1003,8 +1004,7 @@ nsIFrame::GetUsedBorder() const
     return border;
   }
 
-  nsMargin *b = static_cast<nsMargin*>
-                           (Properties().Get(UsedBorderProperty()));
+  nsMargin *b = Properties().Get(UsedBorderProperty());
   if (b) {
     border = *b;
   } else {
@@ -1041,8 +1041,7 @@ nsIFrame::GetUsedPadding() const
     }
   }
 
-  nsMargin *p = static_cast<nsMargin*>
-                           (Properties().Get(UsedPaddingProperty()));
+  nsMargin *p = Properties().Get(UsedPaddingProperty());
   if (p) {
     padding = *p;
   } else {
@@ -5568,7 +5567,7 @@ nsIFrame::InvalidateFrameWithRect(const nsRect& aRect, uint32_t aDisplayItemKey)
     return;
   }
 
-  nsRect *rect = static_cast<nsRect*>(Properties().Get(InvalidationRect()));
+  nsRect* rect = Properties().Get(InvalidationRect());
   if (!rect) {
     if (alreadyInvalid) {
       return;
@@ -5675,7 +5674,7 @@ nsIFrame::IsInvalid(nsRect& aRect)
   }
   
   if (HasAnyStateBits(NS_FRAME_HAS_INVALID_RECT)) {
-    nsRect *rect = static_cast<nsRect*>(Properties().Get(InvalidationRect()));
+    nsRect* rect = Properties().Get(InvalidationRect());
     NS_ASSERTION(rect, "Must have an invalid rect if NS_FRAME_HAS_INVALID_RECT is set!");
     aRect = *rect;
   } else {
@@ -5687,8 +5686,8 @@ nsIFrame::IsInvalid(nsRect& aRect)
 void
 nsIFrame::SchedulePaint(PaintType aType)
 {
-  nsIFrame *displayRoot = nsLayoutUtils::GetDisplayRootFrame(this);
-  nsPresContext *pres = displayRoot->PresContext()->GetRootPresContext();
+  nsIFrame* displayRoot = nsLayoutUtils::GetDisplayRootFrame(this);
+  nsPresContext* pres = displayRoot->PresContext()->GetRootPresContext();
 
   // No need to schedule a paint for an external document since they aren't
   // painted directly.
@@ -5841,8 +5840,7 @@ nsIFrame::MovePositionBy(const nsPoint& aTranslation)
 
   const nsMargin* computedOffsets = nullptr;
   if (IsRelativelyPositioned()) {
-    computedOffsets = static_cast<nsMargin*>
-      (Properties().Get(nsIFrame::ComputedOffsetProperty()));
+    computedOffsets = Properties().Get(nsIFrame::ComputedOffsetProperty());
   }
   nsHTMLReflowState::ApplyRelativePositioning(this, computedOffsets ?
                                               *computedOffsets : nsMargin(),
@@ -5855,8 +5853,7 @@ nsIFrame::GetNormalRect() const
 {
   // It might be faster to first check
   // StyleDisplay()->IsRelativelyPositionedStyle().
-  nsPoint* normalPosition = static_cast<nsPoint*>
-    (Properties().Get(NormalPositionProperty()));
+  nsPoint* normalPosition = Properties().Get(NormalPositionProperty());
   if (normalPosition) {
     return nsRect(*normalPosition, GetSize());
   }
@@ -5868,8 +5865,7 @@ nsIFrame::GetNormalPosition() const
 {
   // It might be faster to first check
   // StyleDisplay()->IsRelativelyPositionedStyle().
-  nsPoint* normalPosition = static_cast<nsPoint*>
-    (Properties().Get(NormalPositionProperty()));
+  nsPoint* normalPosition = Properties().Get(NormalPositionProperty());
   if (normalPosition) {
     return *normalPosition;
   }
@@ -5927,8 +5923,8 @@ nsOverflowAreas
 nsIFrame::GetOverflowAreasRelativeToSelf() const
 {
   if (IsTransformed()) {
-    nsOverflowAreas* preTransformOverflows = static_cast<nsOverflowAreas*>
-      (Properties().Get(PreTransformOverflowAreasProperty()));
+    nsOverflowAreas* preTransformOverflows =
+      Properties().Get(PreTransformOverflowAreasProperty());
     if (preTransformOverflows) {
       return nsOverflowAreas(preTransformOverflows->VisualOverflow(),
                              preTransformOverflows->ScrollableOverflow());
@@ -5954,8 +5950,8 @@ nsRect
 nsIFrame::GetScrollableOverflowRectRelativeToSelf() const
 {
   if (IsTransformed()) {
-    nsOverflowAreas* preTransformOverflows = static_cast<nsOverflowAreas*>
-      (Properties().Get(PreTransformOverflowAreasProperty()));
+    nsOverflowAreas* preTransformOverflows =
+      Properties().Get(PreTransformOverflowAreasProperty());
     if (preTransformOverflows)
       return preTransformOverflows->ScrollableOverflow();
   }
@@ -5966,8 +5962,8 @@ nsRect
 nsIFrame::GetVisualOverflowRectRelativeToSelf() const
 {
   if (IsTransformed()) {
-    nsOverflowAreas* preTransformOverflows = static_cast<nsOverflowAreas*>
-      (Properties().Get(PreTransformOverflowAreasProperty()));
+    nsOverflowAreas* preTransformOverflows =
+      Properties().Get(PreTransformOverflowAreasProperty());
     if (preTransformOverflows)
       return preTransformOverflows->VisualOverflow();
   }
@@ -5977,8 +5973,7 @@ nsIFrame::GetVisualOverflowRectRelativeToSelf() const
 nsRect
 nsIFrame::GetPreEffectsVisualOverflowRect() const
 {
-  nsRect* r = static_cast<nsRect*>
-    (Properties().Get(nsIFrame::PreEffectsBBoxProperty()));
+  nsRect* r = Properties().Get(nsIFrame::PreEffectsBBoxProperty());
   return r ? *r : GetVisualOverflowRectRelativeToSelf();
 }
 
@@ -6586,11 +6581,11 @@ nsFrame::GetPointFromOffset(int32_t inOffset, nsPoint* outPoint)
       // nsBidiPresUtils::ResolveParagraph (odd levels = right-to-left).
       // If the embedding level isn't set, just use the CSS direction
       // property.
-      bool hasEmbeddingLevel;
-      nsBidiLevel embeddingLevel = Properties().Get(
-        nsBidi::EmbeddingLevelProperty(), &hasEmbeddingLevel);
-      bool isRTL = hasEmbeddingLevel
-        ? IS_LEVEL_RTL(embeddingLevel)
+      bool hasBidiData;
+      FrameBidiData bidiData =
+        Properties().Get(nsBidi::BidiDataProperty(), &hasBidiData);
+      bool isRTL = hasBidiData
+        ? IS_LEVEL_RTL(bidiData.embeddingLevel)
         : StyleVisibility()->mDirection == NS_STYLE_DIRECTION_RTL;
       if ((!isRTL && inOffset > newOffset) ||
           (isRTL && inOffset <= newOffset)) {
@@ -6600,6 +6595,14 @@ nsFrame::GetPointFromOffset(int32_t inOffset, nsPoint* outPoint)
   }
   *outPoint = pt;
   return NS_OK;
+}
+
+nsresult
+nsFrame::GetCharacterRectsInRange(int32_t aInOffset, int32_t aLength,
+                                  nsTArray<nsRect>& aOutRect)
+{
+  /* no text */
+  return NS_ERROR_FAILURE;
 }
 
 nsresult
@@ -7041,7 +7044,7 @@ nsIFrame::PeekOffsetParagraph(nsPeekOffsetStruct *aPos)
 // Determine movement direction relative to frame
 static bool IsMovingInFrameDirection(nsIFrame* frame, nsDirection aDirection, bool aVisual)
 {
-  bool isReverseDirection = aVisual && REVERSED_DIRECTION_FRAME(frame);
+  bool isReverseDirection = aVisual && IsReversedDirectionFrame(frame);
   return aDirection == (isReverseDirection ? eDirPrevious : eDirNext);
 }
 
@@ -7677,7 +7680,7 @@ nsIFrame::GetFrameFromDirection(nsDirection aDirection, bool aVisual,
 
   *aOutOffset = (aDirection == eDirNext) ? 0 : -1;
 
-  if (aVisual && REVERSED_DIRECTION_FRAME(traversedFrame)) {
+  if (aVisual && IsReversedDirectionFrame(traversedFrame)) {
     // The new frame is reverse-direction, go to the other end
     *aOutOffset = -1 - *aOutOffset;
   }
@@ -7744,8 +7747,7 @@ nsOverflowAreas*
 nsIFrame::GetOverflowAreasProperty()
 {
   FrameProperties props = Properties();
-  nsOverflowAreas *overflow =
-    static_cast<nsOverflowAreas*>(props.Get(OverflowAreasProperty()));
+  nsOverflowAreas* overflow = props.Get(OverflowAreasProperty());
 
   if (overflow) {
     return overflow; // the property already exists
@@ -7765,8 +7767,7 @@ bool
 nsIFrame::SetOverflowAreas(const nsOverflowAreas& aOverflowAreas)
 {
   if (mOverflow.mType == NS_FRAME_OVERFLOW_LARGE) {
-    nsOverflowAreas *overflow =
-      static_cast<nsOverflowAreas*>(Properties().Get(OverflowAreasProperty()));
+    nsOverflowAreas* overflow = Properties().Get(OverflowAreasProperty());
     bool changed = *overflow != aOverflowAreas;
     *overflow = aOverflowAreas;
 
@@ -8032,7 +8033,7 @@ nsIFrame::FinishAndStoreOverflow(nsOverflowAreas& aOverflowAreas,
     if (!aOverflowAreas.VisualOverflow().IsEqualEdges(bounds) ||
         !aOverflowAreas.ScrollableOverflow().IsEqualEdges(bounds)) {
       nsOverflowAreas* initial =
-        static_cast<nsOverflowAreas*>(Properties().Get(nsIFrame::InitialOverflowProperty()));
+        Properties().Get(nsIFrame::InitialOverflowProperty());
       if (!initial) {
         Properties().Set(nsIFrame::InitialOverflowProperty(),
                          new nsOverflowAreas(aOverflowAreas));
@@ -8201,7 +8202,7 @@ nsIFrame::RecomputePerspectiveChildrenOverflow(const nsIFrame* aStartFrame)
       }
       if (child->HasPerspective()) {
         nsOverflowAreas* overflow = 
-          static_cast<nsOverflowAreas*>(child->Properties().Get(nsIFrame::InitialOverflowProperty()));
+          child->Properties().Get(nsIFrame::InitialOverflowProperty());
         nsRect bounds(nsPoint(0, 0), child->GetSize());
         if (overflow) {
           nsOverflowAreas overflowCopy = *overflow;
@@ -8312,8 +8313,8 @@ GetIBSplitSiblingForAnonymousBlock(const nsIFrame* aFrame)
    * Now look up the nsGkAtoms::IBSplitPrevSibling
    * property.
    */
-  nsIFrame *ibSplitSibling = static_cast<nsIFrame*>
-    (aFrame->Properties().Get(nsIFrame::IBSplitPrevSibling()));
+  nsIFrame *ibSplitSibling =
+    aFrame->Properties().Get(nsIFrame::IBSplitPrevSibling());
   NS_ASSERTION(ibSplitSibling, "Broken frame tree?");
   return ibSplitSibling;
 }
@@ -9220,8 +9221,7 @@ nsFrame::BoxReflow(nsBoxLayoutState&        aState,
 nsBoxLayoutMetrics*
 nsFrame::BoxMetrics() const
 {
-  nsBoxLayoutMetrics* metrics =
-    static_cast<nsBoxLayoutMetrics*>(Properties().Get(BoxMetricsProperty()));
+  nsBoxLayoutMetrics* metrics = Properties().Get(BoxMetricsProperty());
   NS_ASSERTION(metrics, "A box layout method was called but InitBoxMetrics was never called");
   return metrics;
 }

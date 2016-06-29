@@ -106,7 +106,7 @@ DEFAULTS = dict(
             'http://127.0.0.1/safebrowsing-dummy/update',
         'privacy.trackingprotection.introURL':
             'http://127.0.0.1/trackingprotection/tour',
-        'browser.safebrowsing.enabled': False,
+        'browser.safebrowsing.phishing.enabled': False,
         'browser.safebrowsing.malware.enabled': False,
         'browser.safebrowsing.forbiddenURIs.enabled': False,
         'browser.safebrowsing.blockedURIs.enabled': False,
@@ -311,9 +311,11 @@ def get_global_overrides(config):
     global_overrides = {}
     for key in GLOBAL_OVERRIDES:
         # get global overrides for all tests
-        value = config.pop(key)
+        value = config[key]
         if value is not None:
             global_overrides[key] = value
+        if key != 'sps_profile':
+            config.pop(key)
 
     # add noChrome to global overrides (HACK)
     noChrome = config.pop('noChrome')

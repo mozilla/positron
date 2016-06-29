@@ -1696,7 +1696,7 @@ nsSHistory::CompareFrames(nsISHEntry* aPrevEntry, nsISHEntry* aNextEntry,
     aParent->GetChildAt(i, getter_AddRefs(treeItem));
     nsCOMPtr<nsIDocShell> shell = do_QueryInterface(treeItem);
     if (shell) {
-      docshells.AppendObject(shell);
+      docshells.AppendElement(shell.forget());
     }
   }
 
@@ -1772,6 +1772,10 @@ nsSHistory::InitiateLoad(nsISHEntry* aFrameEntry, nsIDocShell* aFrameDS,
   nsCOMPtr<nsIURI> originalURI;
   aFrameEntry->GetOriginalURI(getter_AddRefs(originalURI));
   loadInfo->SetOriginalURI(originalURI);
+
+  bool loadReplace;
+  aFrameEntry->GetLoadReplace(&loadReplace);
+  loadInfo->SetLoadReplace(loadReplace);
 
   nsCOMPtr<nsIURI> nextURI;
   aFrameEntry->GetURI(getter_AddRefs(nextURI));

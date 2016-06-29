@@ -1321,6 +1321,10 @@ static const CipherPref sCipherPrefs[] = {
 
  { "security.ssl3.ecdhe_psk_aes_128_gcm_sha256",
    TLS_ECDHE_PSK_WITH_AES_128_GCM_SHA256, true },
+ { "security.ssl3.ecdhe_psk_chacha20_poly1305_sha256",
+   TLS_ECDHE_PSK_WITH_CHACHA20_POLY1305_SHA256, true },
+ { "security.ssl3.ecdhe_psk_aes_256_gcm_sha384",
+   TLS_ECDHE_PSK_WITH_AES_256_GCM_SHA384, true },
 
  { "security.ssl3.rsa_aes_128_sha",
    TLS_RSA_WITH_AES_128_CBC_SHA, true }, // deprecated (RSA key exchange)
@@ -1747,6 +1751,10 @@ nsNSSComponent::InitializeNSS()
     MOZ_LOG(gPIPNSSLog, LogLevel::Error, ("could not initialize NSS - panicking\n"));
     return NS_ERROR_NOT_AVAILABLE;
   }
+
+  // ensure we have an initial value for the content signer root
+  mContentSigningRootHash =
+    Preferences::GetString("security.content.signature.root_hash");
 
   mNSSInitialized = true;
 
@@ -2181,16 +2189,19 @@ nsNSSComponent::IsCertContentSigningRoot(CERTCertificate* cert, bool& result)
   result = false;
 
   if (mContentSigningRootHash.IsEmpty()) {
-    return NS_OK;
+    MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("mContentSigningRootHash is empty"));
+    return NS_ERROR_FAILURE;
   }
 
   RefPtr<nsNSSCertificate> nsc = nsNSSCertificate::Create(cert);
   if (!nsc) {
+    MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("creating nsNSSCertificate failed"));
     return NS_ERROR_FAILURE;
   }
   nsAutoString certHash;
   nsresult rv = nsc->GetSha256Fingerprint(certHash);
   if (NS_FAILED(rv)) {
+    MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("getting cert fingerprint failed"));
     return rv;
   }
 

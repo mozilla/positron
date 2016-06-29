@@ -9,12 +9,13 @@
 
 const {Cc, Ci} = require("chrome");
 const promise = require("promise");
+const defer = require("devtools/shared/defer");
 const Services = require("Services");
 const {XPCOMUtils} = require("resource://gre/modules/XPCOMUtils.jsm");
 const {Task} = require("devtools/shared/task");
 const {Tools} = require("devtools/client/definitions");
 const {CssLogic} = require("devtools/shared/inspector/css-logic");
-const {ELEMENT_STYLE} = require("devtools/server/actors/styles");
+const {ELEMENT_STYLE} = require("devtools/shared/specs/styles");
 const {OutputParser} = require("devtools/client/shared/output-parser");
 const {PrefObserver, PREF_ORIG_SOURCES} = require("devtools/client/styleeditor/utils");
 const {ElementStyle} = require("devtools/client/inspector/rules/models/element-style");
@@ -125,7 +126,7 @@ function createDummyDocument() {
   docShell.createAboutBlankContentViewer(nullPrincipal);
   let window = docShell.contentViewer.DOMDocument.defaultView;
   window.location = "data:text/html,<html></html>";
-  let deferred = promise.defer();
+  let deferred = defer();
   eventTarget.addEventListener("DOMContentLoaded", function handler() {
     eventTarget.removeEventListener("DOMContentLoaded", handler, false);
     deferred.resolve(window.document);
@@ -1239,7 +1240,7 @@ CssRuleView.prototype = {
     let isSelectorHighlighted = false;
 
     let selectorNodes = [...rule.editor.selectorText.childNodes];
-    if (rule.domRule.type === Ci.nsIDOMCSSRule.KEYFRAME_RULE) {
+    if (rule.domRule.type === CSSRule.KEYFRAME_RULE) {
       selectorNodes = [rule.editor.selectorText];
     } else if (rule.domRule.type === ELEMENT_STYLE) {
       selectorNodes = [];
@@ -1652,7 +1653,7 @@ RuleViewTool.prototype = {
   },
 
   onPanelSelected: function () {
-    if (this.inspector.selection.nodeFront === this.view.viewedElement) {
+    if (this.inspector.selection.nodeFront === this.view._viewedElement) {
       this.refresh();
     } else {
       this.onSelected();

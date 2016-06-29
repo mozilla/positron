@@ -1606,10 +1606,14 @@ BuildTextRunsScanner::ContinueTextRunAcrossFrames(nsTextFrame* aFrame1, nsTextFr
   // that the font size inflation on all text frames in the text run is
   // already guaranteed to be the same as each other (and for the line
   // container).
-  if (mBidiEnabled &&
-      (NS_GET_EMBEDDING_LEVEL(aFrame1) != NS_GET_EMBEDDING_LEVEL(aFrame2) ||
-       NS_GET_PARAGRAPH_DEPTH(aFrame1) != NS_GET_PARAGRAPH_DEPTH(aFrame2)))
-    return false;
+  if (mBidiEnabled) {
+    FrameBidiData data1 = nsBidi::GetBidiData(aFrame1);
+    FrameBidiData data2 = nsBidi::GetBidiData(aFrame2);
+    if (data1.embeddingLevel != data2.embeddingLevel ||
+        data2.precedingControl != kBidiLevelNone) {
+      return false;
+    }
+  }
 
   nsStyleContext* sc1 = aFrame1->StyleContext();
   const nsStyleText* textStyle1 = sc1->StyleText();
@@ -2075,7 +2079,7 @@ BuildTextRunsScanner::BuildTextRunForFrames(void* aTextBuffer)
   if (textFlags & nsTextFrameUtils::TEXT_HAS_SHY) {
     textFlags |= gfxTextRunFactory::TEXT_ENABLE_HYPHEN_BREAKS;
   }
-  if (mBidiEnabled && (IS_LEVEL_RTL(NS_GET_EMBEDDING_LEVEL(firstFrame)))) {
+  if (mBidiEnabled && (IS_LEVEL_RTL(nsBidi::GetEmbeddingLevel(firstFrame)))) {
     textFlags |= gfxTextRunFactory::TEXT_IS_RTL;
   }
   if (mNextRunContextInfo & nsTextFrameUtils::INCOMING_WHITESPACE) {
@@ -2653,8 +2657,7 @@ nsTextFrame::EnsureTextRun(TextRunType aWhichTextRun,
       static const gfxSkipChars emptySkipChars;
       return gfxSkipCharsIterator(emptySkipChars, 0);
     }
-    TabWidthStore* tabWidths =
-      static_cast<TabWidthStore*>(Properties().Get(TabWidthProperty()));
+    TabWidthStore* tabWidths = Properties().Get(TabWidthProperty());
     if (tabWidths && tabWidths->mValidForContentOffset != GetContentOffset()) {
       Properties().Delete(TabWidthProperty());
     }
@@ -2891,7 +2894,6 @@ public:
       mLetterSpacing(LetterSpacing(aFrame, aTextStyle)),
       mHyphenWidth(-1),
       mOffsetFromBlockOriginForTabs(aOffsetFromBlockOriginForTabs),
-      mJustificationSpacing(0),
       mReflowing(true),
       mWhichTextRun(aWhichTextRun)
   {
@@ -2916,7 +2918,6 @@ public:
       mLetterSpacing(LetterSpacing(aFrame)),
       mHyphenWidth(-1),
       mOffsetFromBlockOriginForTabs(0),
-      mJustificationSpacing(0),
       mReflowing(false),
       mWhichTextRun(aWhichTextRun)
   {
@@ -2946,19 +2947,20 @@ public:
   void GetSpacingInternal(Range aRange, Spacing* aSpacing, bool aIgnoreTabs);
 
   /**
-   * Compute the justification information in given DOM range, and fill data
-   * necessary for computation of spacing.
+   * Compute the justification information in given DOM range, return
+   * justification info and assignments if requested.
    */
-  void ComputeJustification(Range aRange);
+  JustificationInfo ComputeJustification(
+    Range aRange, nsTArray<JustificationAssignment>* aAssignments = nullptr);
 
   const nsStyleText* StyleText() { return mTextStyle; }
   nsTextFrame* GetFrame() { return mFrame; }
   // This may not be equal to the frame offset/length in because we may have
   // adjusted for whitespace trimming according to the state bits set in the frame
   // (for the static provider)
-  const gfxSkipCharsIterator& GetStart() { return mStart; }
+  const gfxSkipCharsIterator& GetStart() const { return mStart; }
   // May return INT32_MAX if that was given to the constructor
-  uint32_t GetOriginalLength() {
+  uint32_t GetOriginalLength() const {
     NS_ASSERTION(mLength != INT32_MAX, "Length not known");
     return mLength;
   }
@@ -2979,11 +2981,6 @@ public:
   void CalcTabWidths(Range aTransformedRange);
 
   const gfxSkipCharsIterator& GetEndHint() { return mTempIterator; }
-
-  const JustificationInfo& GetJustificationInfo() const
-  {
-    return mJustificationInfo;
-  }
 
 protected:
   void SetupJustificationSpacing(bool aPostReflow);
@@ -3018,14 +3015,10 @@ protected:
   gfxFloat              mHyphenWidth;
   gfxFloat              mOffsetFromBlockOriginForTabs;
 
-  // The total spacing for justification
-  gfxFloat              mJustificationSpacing;
-  int32_t               mTotalJustificationGaps;
-  JustificationInfo     mJustificationInfo;
-  // The values in mJustificationAssignments corresponds to unskipped
+  // The values in mJustificationSpacings corresponds to unskipped
   // characters start from mJustificationArrayStart.
   uint32_t              mJustificationArrayStart;
-  nsTArray<JustificationAssignment> mJustificationAssignments;
+  nsTArray<Spacing>     mJustificationSpacings;
 
   bool                  mReflowing;
   nsTextFrame::TextRunType mWhichTextRun;
@@ -3070,16 +3063,19 @@ static void FindClusterEnd(gfxTextRun* aTextRun, int32_t aOriginalEnd,
   aPos->AdvanceOriginal(-1);
 }
 
-void
-PropertyProvider::ComputeJustification(Range aRange)
+JustificationInfo
+PropertyProvider::ComputeJustification(
+  Range aRange, nsTArray<JustificationAssignment>* aAssignments)
 {
+  JustificationInfo info;
+
   // Horizontal-in-vertical frame is orthogonal to the line, so it
   // doesn't actually include any justification opportunity inside.
   // The spec says such frame should be treated as a U+FFFC. Since we
   // do not insert justification opportunities on the sides of that
   // character, the sides of this frame are not justifiable either.
   if (mFrame->StyleContext()->IsTextCombined()) {
-    return;
+    return info;
   }
 
   bool isCJ = IsChineseOrJapanese(mFrame);
@@ -3088,14 +3084,13 @@ PropertyProvider::ComputeJustification(Range aRange)
   run.SetOriginalOffset(aRange.start);
   mJustificationArrayStart = run.GetSkippedOffset();
 
-  MOZ_ASSERT(mJustificationAssignments.IsEmpty());
-  mJustificationAssignments.SetCapacity(aRange.Length());
+  nsTArray<JustificationAssignment> assignments;
+  assignments.SetCapacity(aRange.Length());
   while (run.NextRun()) {
     uint32_t originalOffset = run.GetOriginalOffset();
     uint32_t skippedOffset = run.GetSkippedOffset();
     uint32_t length = run.GetRunLength();
-    mJustificationAssignments.SetLength(
-      skippedOffset + length - mJustificationArrayStart);
+    assignments.SetLength(skippedOffset + length - mJustificationArrayStart);
 
     gfxSkipCharsIterator iter = run.GetPos();
     for (uint32_t i = 0; i < length; ++i) {
@@ -3111,16 +3106,16 @@ PropertyProvider::ComputeJustification(Range aRange)
       uint32_t firstChar = firstCharOffset > mJustificationArrayStart ?
         firstCharOffset - mJustificationArrayStart : 0;
       if (!firstChar) {
-        mJustificationInfo.mIsStartJustifiable = true;
+        info.mIsStartJustifiable = true;
       } else {
-        auto& assign = mJustificationAssignments[firstChar];
-        auto& prevAssign = mJustificationAssignments[firstChar - 1];
+        auto& assign = assignments[firstChar];
+        auto& prevAssign = assignments[firstChar - 1];
         if (prevAssign.mGapsAtEnd) {
           prevAssign.mGapsAtEnd = 1;
           assign.mGapsAtStart = 1;
         } else {
           assign.mGapsAtStart = 2;
-          mJustificationInfo.mInnerOpportunities++;
+          info.mInnerOpportunities++;
         }
       }
 
@@ -3128,22 +3123,26 @@ PropertyProvider::ComputeJustification(Range aRange)
       uint32_t lastChar = iter.GetSkippedOffset() - mJustificationArrayStart;
       // Assign the two gaps temporary to the last char. If the next cluster is
       // justifiable as well, one of the gaps will be removed by code above.
-      mJustificationAssignments[lastChar].mGapsAtEnd = 2;
-      mJustificationInfo.mInnerOpportunities++;
+      assignments[lastChar].mGapsAtEnd = 2;
+      info.mInnerOpportunities++;
 
       // Skip the whole cluster
       i = iter.GetOriginalOffset() - originalOffset;
     }
   }
 
-  if (!mJustificationAssignments.IsEmpty() &&
-      mJustificationAssignments.LastElement().mGapsAtEnd) {
+  if (!assignments.IsEmpty() && assignments.LastElement().mGapsAtEnd) {
     // We counted the expansion opportunity after the last character,
     // but it is not an inner opportunity.
-    MOZ_ASSERT(mJustificationInfo.mInnerOpportunities > 0);
-    mJustificationInfo.mInnerOpportunities--;
-    mJustificationInfo.mIsEndJustifiable = true;
+    MOZ_ASSERT(info.mInnerOpportunities > 0);
+    info.mInnerOpportunities--;
+    info.mIsEndJustifiable = true;
   }
+
+  if (aAssignments) {
+    *aAssignments = Move(assignments);
+  }
+  return info;
 }
 
 // aStart, aLength in transformed string offsets
@@ -3225,22 +3224,20 @@ PropertyProvider::GetSpacingInternal(Range aRange, Spacing* aSpacing,
   }
 
   // Now add in justification spacing
-  if (mJustificationSpacing > 0 && mTotalJustificationGaps) {
+  if (mJustificationSpacings.Length() > 0) {
     // If there is any spaces trimmed at the end, aStart + aLength may
     // be larger than the flags array. When that happens, we can simply
     // ignore those spaces.
     auto arrayEnd = mJustificationArrayStart +
-      static_cast<uint32_t>(mJustificationAssignments.Length());
+      static_cast<uint32_t>(mJustificationSpacings.Length());
     auto end = std::min(aRange.end, arrayEnd);
     MOZ_ASSERT(aRange.start >= mJustificationArrayStart);
-    JustificationApplicationState state(
-        mTotalJustificationGaps, NSToCoordRound(mJustificationSpacing));
     for (auto i = aRange.start; i < end; i++) {
-      const auto& assign =
-        mJustificationAssignments[i - mJustificationArrayStart];
+      const auto& spacing =
+        mJustificationSpacings[i - mJustificationArrayStart];
       uint32_t offset = i - aRange.start;
-      aSpacing[offset].mBefore += state.Consume(assign.mGapsAtStart);
-      aSpacing[offset].mAfter += state.Consume(assign.mGapsAtEnd);
+      aSpacing[offset].mBefore += spacing.mBefore;
+      aSpacing[offset].mAfter += spacing.mAfter;
     }
   }
 }
@@ -3279,8 +3276,7 @@ PropertyProvider::CalcTabWidths(Range aRange)
       return;
     }
     if (!mReflowing) {
-      mTabWidths = static_cast<TabWidthStore*>
-        (mFrame->Properties().Get(TabWidthProperty()));
+      mTabWidths = mFrame->Properties().Get(TabWidthProperty());
 #ifdef DEBUG
       // If we're not reflowing, we should have already computed the
       // tab widths; check that they're available as far as the last
@@ -3451,13 +3447,15 @@ PropertyProvider::SetupJustificationSpacing(bool aPostReflow)
     mFrame->GetTrimmedOffsets(mFrag, true, aPostReflow);
   end.AdvanceOriginal(trimmed.mLength);
   gfxSkipCharsIterator realEnd(end);
-  ComputeJustification(Range(uint32_t(start.GetOriginalOffset()),
-                             uint32_t(end.GetOriginalOffset())));
+
+  Range range(uint32_t(start.GetOriginalOffset()),
+              uint32_t(end.GetOriginalOffset()));
+  nsTArray<JustificationAssignment> assignments;
+  JustificationInfo info = ComputeJustification(range, &assignments);
 
   auto assign = mFrame->GetJustificationAssignment();
-  mTotalJustificationGaps =
-    JustificationUtils::CountGaps(mJustificationInfo, assign);
-  if (!mTotalJustificationGaps || mJustificationAssignments.IsEmpty()) {
+  auto totalGaps = JustificationUtils::CountGaps(info, assign);
+  if (!totalGaps || assignments.IsEmpty()) {
     // Nothing to do, nothing is justifiable and we shouldn't have any
     // justification space assigned
     return;
@@ -3472,14 +3470,23 @@ PropertyProvider::SetupJustificationSpacing(bool aPostReflow)
   if (mFrame->GetStateBits() & TEXT_HYPHEN_BREAK) {
     naturalWidth += GetHyphenWidth();
   }
-  mJustificationSpacing = mFrame->ISize() - naturalWidth;
-  if (mJustificationSpacing <= 0) {
+  nscoord totalSpacing = mFrame->ISize() - naturalWidth;
+  if (totalSpacing <= 0) {
     // No space available
     return;
   }
 
-  mJustificationAssignments[0].mGapsAtStart = assign.mGapsAtStart;
-  mJustificationAssignments.LastElement().mGapsAtEnd = assign.mGapsAtEnd;
+  assignments[0].mGapsAtStart = assign.mGapsAtStart;
+  assignments.LastElement().mGapsAtEnd = assign.mGapsAtEnd;
+
+  MOZ_ASSERT(mJustificationSpacings.IsEmpty());
+  JustificationApplicationState state(totalGaps, totalSpacing);
+  mJustificationSpacings.SetCapacity(assignments.Length());
+  for (const JustificationAssignment& assign : assignments) {
+    Spacing* spacing = mJustificationSpacings.AppendElement();
+    spacing->mBefore = state.Consume(assign.mGapsAtStart);
+    spacing->mAfter = state.Consume(assign.mGapsAtEnd);
+  }
 }
 
 //----------------------------------------------------------------------
@@ -4147,18 +4154,9 @@ nsContinuingTextFrame::Init(nsIContent*       aContent,
     }
   }
   if (aPrevInFlow->GetStateBits() & NS_FRAME_IS_BIDI) {
-    FramePropertyTable *propTable = PresContext()->PropertyTable();
-    // Get all the properties from the prev-in-flow first to take
-    // advantage of the propTable's cache and simplify the assertion below
-    auto embeddingLevel =
-      propTable->Get(aPrevInFlow, nsBidi::EmbeddingLevelProperty());
-    auto baseLevel =
-      propTable->Get(aPrevInFlow, nsBidi::BaseLevelProperty());
-    auto paragraphDepth =
-      propTable->Get(aPrevInFlow, nsBidi::ParagraphDepthProperty());
-    propTable->Set(this, nsBidi::EmbeddingLevelProperty(), embeddingLevel);
-    propTable->Set(this, nsBidi::BaseLevelProperty(), baseLevel);
-    propTable->Set(this, nsBidi::ParagraphDepthProperty(), paragraphDepth);
+    FrameBidiData bidiData = nsBidi::GetBidiData(aPrevInFlow);
+    bidiData.precedingControl = kBidiLevelNone;
+    Properties().Set(nsBidi::BidiDataProperty(), bidiData);
 
     if (nextContinuation) {
       SetNextContinuation(nextContinuation);
@@ -4166,14 +4164,15 @@ nsContinuingTextFrame::Init(nsIContent*       aContent,
       // Adjust next-continuations' content offset as needed.
       while (nextContinuation &&
              nextContinuation->GetContentOffset() < mContentOffset) {
-        NS_ASSERTION(
-          embeddingLevel == propTable->Get(
-            nextContinuation, nsBidi::EmbeddingLevelProperty()) &&
-          baseLevel == propTable->Get(
-            nextContinuation, nsBidi::BaseLevelProperty()) &&
-          paragraphDepth == propTable->Get(
-            nextContinuation, nsBidi::ParagraphDepthProperty()),
-          "stealing text from different type of BIDI continuation");
+#ifdef DEBUG
+        FrameBidiData nextBidiData = nsBidi::GetBidiData(nextContinuation);
+        NS_ASSERTION(bidiData.embeddingLevel == nextBidiData.embeddingLevel &&
+                     bidiData.baseLevel == nextBidiData.baseLevel,
+                     "stealing text from different type of BIDI continuation");
+        MOZ_ASSERT(nextBidiData.precedingControl == kBidiLevelNone,
+                   "There shouldn't be any virtual bidi formatting character "
+                   "between continuations");
+#endif
         nextContinuation->mContentOffset = mContentOffset;
         nextContinuation = static_cast<nsTextFrame*>(nextContinuation->GetNextContinuation());
       }
@@ -5518,9 +5517,7 @@ nsTextFrame::DrawSelectionDecorations(gfxContext* aContext,
   params.context = aContext;
   params.dirtyRect = aDirtyRect;
   params.pt = aPt;
-  params.lineSize = Size(
-      aWidth, ComputeSelectionUnderlineHeight(aTextPaintStyle.PresContext(),
-                                              aFontMetrics, aSelectionType));
+  params.lineSize.width = aWidth;
   params.ascent = aAscent;
   params.offset = aDecoration == NS_STYLE_TEXT_DECORATION_LINE_UNDERLINE ?
                   aFontMetrics.underlineOffset : aFontMetrics.maxAscent;
@@ -5533,34 +5530,42 @@ nsTextFrame::DrawSelectionDecorations(gfxContext* aContext,
                                              aFontMetrics);
 
   float relativeSize;
-  int32_t index =
-    nsTextPaintStyle::GetUnderlineStyleIndexForSelectionType(aSelectionType);
-  bool weDefineSelectionUnderline =
-    aTextPaintStyle.GetSelectionUnderlineForPaint(index, &params.color,
-                                                  &relativeSize, &params.style);
-
 
   switch (aSelectionType) {
     case SelectionType::eIMERawClause:
     case SelectionType::eIMESelectedRawClause:
     case SelectionType::eIMEConvertedClause:
-    case SelectionType::eIMESelectedClause: {
-      // IME decoration lines should not be drawn on the both ends, i.e., we
-      // need to cut both edges of the decoration lines.  Because same style
-      // IME selections can adjoin, but the users need to be able to know
-      // where are the boundaries of the selections.
-      //
-      //  X: underline
-      //
-      //     IME selection #1        IME selection #2      IME selection #3
-      //  |                     |                      |                    
-      //  | XXXXXXXXXXXXXXXXXXX | XXXXXXXXXXXXXXXXXXXX | XXXXXXXXXXXXXXXXXXX
-      //  +---------------------+----------------------+--------------------
-      //   ^                   ^ ^                    ^ ^
-      //  gap                  gap                    gap
-      params.pt.x += 1.0;
-      params.lineSize.width -= 2.0;
-      if (aRangeStyle.IsDefined()) {
+    case SelectionType::eIMESelectedClause:
+    case SelectionType::eSpellCheck: {
+      int32_t index = nsTextPaintStyle::
+        GetUnderlineStyleIndexForSelectionType(aSelectionType);
+      bool weDefineSelectionUnderline =
+        aTextPaintStyle.GetSelectionUnderlineForPaint(index, &params.color,
+                                                      &relativeSize,
+                                                      &params.style);
+      params.lineSize.height =
+        ComputeSelectionUnderlineHeight(aTextPaintStyle.PresContext(),
+                                        aFontMetrics, aSelectionType);
+      bool isIMEType = aSelectionType != SelectionType::eSpellCheck;
+
+      if (isIMEType) {
+        // IME decoration lines should not be drawn on the both ends, i.e., we
+        // need to cut both edges of the decoration lines.  Because same style
+        // IME selections can adjoin, but the users need to be able to know
+        // where are the boundaries of the selections.
+        //
+        //  X: underline
+        //
+        //     IME selection #1        IME selection #2      IME selection #3
+        //  |                     |                      |                    
+        //  | XXXXXXXXXXXXXXXXXXX | XXXXXXXXXXXXXXXXXXXX | XXXXXXXXXXXXXXXXXXX
+        //  +---------------------+----------------------+--------------------
+        //   ^                   ^ ^                    ^ ^
+        //  gap                  gap                    gap
+        params.pt.x += 1.0;
+        params.lineSize.width -= 2.0;
+      }
+      if (isIMEType && aRangeStyle.IsDefined()) {
         // If IME defines the style, that should override our definition.
         if (aRangeStyle.IsLineStyleDefined()) {
           if (aRangeStyle.mLineStyle == TextRangeStyle::LINESTYLE_NONE) {
@@ -5600,10 +5605,6 @@ nsTextFrame::DrawSelectionDecorations(gfxContext* aContext,
       }
       break;
     }
-    case SelectionType::eSpellCheck:
-      if (!weDefineSelectionUnderline)
-        return;
-      break;
     case SelectionType::eURLStrikeout: {
       nscoord inflationMinFontSize =
         nsLayoutUtils::InflationMinFontSizeFor(this);
@@ -5613,6 +5614,9 @@ nsTextFrame::DrawSelectionDecorations(gfxContext* aContext,
         GetFirstFontMetrics(GetFontGroupForFrame(this, inflation), aVertical);
 
       relativeSize = 2.0f;
+      aTextPaintStyle.GetURLSecondaryColor(&params.color);
+      params.style = NS_STYLE_TEXT_DECORATION_STYLE_SOLID;
+      params.lineSize.height = metrics.strikeoutSize;
       params.offset = metrics.strikeoutOffset + 0.5;
       params.decoration = NS_STYLE_TEXT_DECORATION_LINE_LINE_THROUGH;
       break;
@@ -6221,7 +6225,7 @@ nsTextFrame::DrawEmphasisMarks(gfxContext* aContext, WritingMode aWM,
                                const nscolor* aDecorationOverrideColor,
                                PropertyProvider* aProvider)
 {
-  const auto info = Properties().Get(EmphasisMarkProperty());
+  const EmphasisMarkInfo* info = Properties().Get(EmphasisMarkProperty());
   if (!info) {
     return;
   }
@@ -7076,7 +7080,9 @@ nsTextFrame::CombineSelectionUnderlineRect(nsPresContext* aPresContext,
   SelectionDetails *details = GetSelectionDetails();
   for (SelectionDetails *sd = details; sd; sd = sd->mNext) {
     if (sd->mStart == sd->mEnd ||
-        !(sd->mSelectionType & kRawSelectionTypesWithDecorations)) {
+        !(sd->mSelectionType & kRawSelectionTypesWithDecorations) ||
+        // URL strikeout does not use underline.
+        sd->mSelectionType == SelectionType::eURLStrikeout) {
       continue;
     }
 
@@ -7172,6 +7178,65 @@ nsTextFrame::SetSelectedRange(uint32_t aStart, uint32_t aEnd, bool aSelected,
   }
 }
 
+void
+nsTextFrame::UpdateIteratorFromOffset(const PropertyProvider& aProperties,
+                                      int32_t& aInOffset,
+                                      gfxSkipCharsIterator& aIter)
+{
+  if (aInOffset < GetContentOffset()){
+    NS_WARNING("offset before this frame's content");
+    aInOffset = GetContentOffset();
+  } else if (aInOffset > GetContentEnd()) {
+    NS_WARNING("offset after this frame's content");
+    aInOffset = GetContentEnd();
+  }
+
+  int32_t trimmedOffset = aProperties.GetStart().GetOriginalOffset();
+  int32_t trimmedEnd = trimmedOffset + aProperties.GetOriginalLength();
+  aInOffset = std::max(aInOffset, trimmedOffset);
+  aInOffset = std::min(aInOffset, trimmedEnd);
+
+  aIter.SetOriginalOffset(aInOffset);
+
+  if (aInOffset < trimmedEnd &&
+      !aIter.IsOriginalCharSkipped() &&
+      !mTextRun->IsClusterStart(aIter.GetSkippedOffset())) {
+    NS_WARNING("called for non-cluster boundary");
+    FindClusterStart(mTextRun, trimmedOffset, &aIter);
+  }
+}
+
+nsPoint
+nsTextFrame::GetPointFromIterator(const gfxSkipCharsIterator& aIter,
+                                  PropertyProvider& aProperties)
+{
+  Range range(aProperties.GetStart().GetSkippedOffset(),
+              aIter.GetSkippedOffset());
+  gfxFloat advance = mTextRun->GetAdvanceWidth(range, &aProperties);
+  nscoord iSize = NSToCoordCeilClamped(advance);
+  nsPoint point;
+
+  if (mTextRun->IsVertical()) {
+    point.x = 0;
+    if (mTextRun->IsInlineReversed()) {
+      point.y = mRect.height - iSize;
+    } else {
+      point.y = iSize;
+    }
+  } else {
+    point.y = 0;
+    if (mTextRun->IsInlineReversed()) {
+      point.x = mRect.width - iSize;
+    } else {
+      point.x = iSize;
+    }
+    if (StyleContext()->IsTextCombined()) {
+      point.x *= GetTextCombineScaleFactor(this);
+    }
+  }
+  return point;
+}
+
 nsresult
 nsTextFrame::GetPointFromOffset(int32_t inOffset,
                                 nsPoint* outPoint)
@@ -7179,14 +7244,13 @@ nsTextFrame::GetPointFromOffset(int32_t inOffset,
   if (!outPoint)
     return NS_ERROR_NULL_POINTER;
 
-  outPoint->x = 0;
-  outPoint->y = 0;
-
   DEBUG_VERIFY_NOT_DIRTY(mState);
   if (mState & NS_FRAME_IS_DIRTY)
     return NS_ERROR_UNEXPECTED;
 
   if (GetContentLength() <= 0) {
+    outPoint->x = 0;
+    outPoint->y = 0;
     return NS_OK;
   }
 
@@ -7197,49 +7261,90 @@ nsTextFrame::GetPointFromOffset(int32_t inOffset,
   PropertyProvider properties(this, iter, nsTextFrame::eInflated);
   // Don't trim trailing whitespace, we want the caret to appear in the right
   // place if it's positioned there
-  properties.InitializeForDisplay(false);  
+  properties.InitializeForDisplay(false);
 
-  if (inOffset < GetContentOffset()){
-    NS_WARNING("offset before this frame's content");
-    inOffset = GetContentOffset();
-  } else if (inOffset > GetContentEnd()) {
-    NS_WARNING("offset after this frame's content");
-    inOffset = GetContentEnd();
-  }
-  int32_t trimmedOffset = properties.GetStart().GetOriginalOffset();
-  int32_t trimmedEnd = trimmedOffset + properties.GetOriginalLength();
-  inOffset = std::max(inOffset, trimmedOffset);
-  inOffset = std::min(inOffset, trimmedEnd);
+  UpdateIteratorFromOffset(properties, inOffset, iter);
 
-  iter.SetOriginalOffset(inOffset);
+  *outPoint = GetPointFromIterator(iter, properties);
 
-  if (inOffset < trimmedEnd &&
-      !iter.IsOriginalCharSkipped() &&
-      !mTextRun->IsClusterStart(iter.GetSkippedOffset())) {
-    NS_WARNING("GetPointFromOffset called for non-cluster boundary");
-    FindClusterStart(mTextRun, trimmedOffset, &iter);
+  return NS_OK;
+}
+
+nsresult
+nsTextFrame::GetCharacterRectsInRange(int32_t aInOffset,
+                                      int32_t aLength,
+                                      nsTArray<nsRect>& aRects)
+{
+  DEBUG_VERIFY_NOT_DIRTY(mState);
+  if (mState & NS_FRAME_IS_DIRTY) {
+    return NS_ERROR_UNEXPECTED;
   }
 
-  Range range(properties.GetStart().GetSkippedOffset(),
-              iter.GetSkippedOffset());
-  gfxFloat advance = mTextRun->GetAdvanceWidth(range, &properties);
-  nscoord iSize = NSToCoordCeilClamped(advance);
+  if (GetContentLength() <= 0) {
+    return NS_OK;
+  }
 
-  if (mTextRun->IsVertical()) {
-    if (mTextRun->IsInlineReversed()) {
-      outPoint->y = mRect.height - iSize;
+  if (!mTextRun) {
+    return NS_ERROR_FAILURE;
+  }
+
+  gfxSkipCharsIterator iter = EnsureTextRun(nsTextFrame::eInflated);
+  PropertyProvider properties(this, iter, nsTextFrame::eInflated);
+  // Don't trim trailing whitespace, we want the caret to appear in the right
+  // place if it's positioned there
+  properties.InitializeForDisplay(false);
+
+  UpdateIteratorFromOffset(properties, aInOffset, iter);
+
+  for (int32_t i = 0; i < aLength; i++) {
+    if (aInOffset > GetContentEnd()) {
+      break;
+    }
+
+    if (!iter.IsOriginalCharSkipped() &&
+        !mTextRun->IsClusterStart(iter.GetSkippedOffset())) {
+      FindClusterStart(mTextRun,
+                       properties.GetStart().GetOriginalOffset() +
+                         properties.GetOriginalLength(),
+                       &iter);
+    }
+
+    nsPoint point = GetPointFromIterator(iter, properties);
+    nsRect rect;
+    rect.x = point.x;
+    rect.y = point.y;
+
+    nscoord iSize = 0;
+    gfxSkipCharsIterator nextIter(iter);
+    if (aInOffset < GetContentEnd()) {
+      nextIter.AdvanceOriginal(1);
+      if (!nextIter.IsOriginalCharSkipped() &&
+          !mTextRun->IsClusterStart(nextIter.GetSkippedOffset())) {
+        FindClusterEnd(mTextRun, GetContentEnd(), &nextIter);
+      }
+
+      gfxFloat advance =
+        mTextRun->GetAdvanceWidth(Range(iter.GetSkippedOffset(),
+                                        nextIter.GetSkippedOffset()),
+                                  &properties);
+      iSize = NSToCoordCeilClamped(advance);
+    }
+
+    if (mTextRun->IsVertical()) {
+      rect.width = mRect.width;
+      rect.height = iSize;
     } else {
-      outPoint->y = iSize;
+      rect.width = iSize;
+      rect.height = mRect.height;
+
+      if (StyleContext()->IsTextCombined()) {
+        rect.width *= GetTextCombineScaleFactor(this);
+      }
     }
-  } else {
-    if (mTextRun->IsInlineReversed()) {
-      outPoint->x = mRect.width - iSize;
-    } else {
-      outPoint->x = iSize;
-    }
-    if (StyleContext()->IsTextCombined()) {
-      outPoint->x *= GetTextCombineScaleFactor(this);
-    }
+    aRects.AppendElement(rect);
+
+    iter.AdvanceOriginal(1);
+    aInOffset++;
   }
 
   return NS_OK;
@@ -9134,9 +9239,8 @@ nsTextFrame::ReflowText(nsLineLayout& aLineLayout, nscoord aAvailableWidth,
        shouldSuppressLineBreak) &&
       !lineContainer->IsSVGText()) {
     AddStateBits(TEXT_JUSTIFICATION_ENABLED);
-    provider.ComputeJustification(Range(uint32_t(offset),
-                                        uint32_t(offset + charsFit)));
-    aLineLayout.SetJustificationInfo(provider.GetJustificationInfo());
+    Range range(uint32_t(offset), uint32_t(offset + charsFit));
+    aLineLayout.SetJustificationInfo(provider.ComputeJustification(range));
   }
 
   SetLength(contentLength, &aLineLayout, ALLOW_FRAME_CREATION_AND_DESTRUCTION);

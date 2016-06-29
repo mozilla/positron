@@ -31,7 +31,6 @@ interfaces = [
     'svg',
     'smil',
     'apps',
-    'gamepad',
     'push',
 ]
 
@@ -100,6 +99,7 @@ DIRS += [
     'smil',
     'telephony',
     'tv',
+    'url',
     'voicemail',
     'inputmethod',
     'webidl',
@@ -114,6 +114,7 @@ DIRS += [
     'u2f',
     'console',
     'performance',
+    'xhr',
 ]
 
 if CONFIG['OS_ARCH'] == 'WINNT':

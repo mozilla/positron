@@ -434,11 +434,11 @@ var Scratchpad = {
   },
 
   /**
-   * Get the most recent chrome window of type navigator:browser.
+   * Get the most recent main chrome browser window
    */
   get browserWindow()
   {
-    return Services.wm.getMostRecentWindow("navigator:browser");
+    return Services.wm.getMostRecentWindow(gDevTools.chromeWindowType);
   },
 
   /**
@@ -1703,7 +1703,9 @@ var Scratchpad = {
       if (state) {
         state = JSON.parse(state);
         this.setState(state);
-        initialText = state.text;
+        if ("text" in state) {
+          initialText = state.text;
+        }
       }
     } else {
       this._instanceId = ScratchpadManager.createUid();
@@ -2059,9 +2061,8 @@ var Scratchpad = {
   openDocumentationPage: function SP_openDocumentationPage()
   {
     let url = this.strings.GetStringFromName("help.openDocumentationPage");
-    let newTab = this.gBrowser.addTab(url);
+    this.browserWindow.openUILinkIn(url,"tab");
     this.browserWindow.focus();
-    this.gBrowser.selectedTab = newTab;
   },
 };
 

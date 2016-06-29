@@ -13,36 +13,37 @@ import tempfile
 
 from .. import decision
 from ..graph import Graph
-from ..types import Task, TaskGraph
+from ..taskgraph import TaskGraph
+from .util import TestTask
 from mozunit import main
+
 
 class TestDecision(unittest.TestCase):
 
     def test_taskgraph_to_json(self):
         tasks = {
-            'a': Task(kind=None, label='a', attributes={'attr': 'a-task'}),
-            'b': Task(kind=None, label='b', task={'task': 'def'}),
+            'a': TestTask(label='a', attributes={'attr': 'a-task'}),
+            'b': TestTask(label='b', task={'task': 'def'}),
         }
         graph = Graph(nodes=set('ab'), edges={('a', 'b', 'edgelabel')})
         taskgraph = TaskGraph(tasks, graph)
 
-        res = decision.taskgraph_to_json(taskgraph)
+        res = taskgraph.to_json()
 
         self.assertEqual(res, {
             'a': {
                 'label': 'a',
-                'attributes': {'attr': 'a-task'},
+                'attributes': {'attr': 'a-task', 'kind': 'test'},
                 'task': {},
                 'dependencies': {'edgelabel': 'b'},
             },
             'b': {
                 'label': 'b',
-                'attributes': {},
+                'attributes': {'kind': 'test'},
                 'task': {'task': 'def'},
                 'dependencies': {},
             }
         })
-
 
     def test_write_artifact_json(self):
         data = [{'some': 'data'}]
@@ -56,7 +57,6 @@ class TestDecision(unittest.TestCase):
             if os.path.exists(tmpdir):
                 shutil.rmtree(tmpdir)
             decision.ARTIFACTS_DIR = 'artifacts'
-
 
     def test_write_artifact_yml(self):
         data = [{'some': 'data'}]
@@ -74,5 +74,3 @@ class TestDecision(unittest.TestCase):
 
 if __name__ == '__main__':
     main()
-
-

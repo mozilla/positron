@@ -41,20 +41,22 @@ struct ServoNodeData;
 struct ServoComputedValues;
 struct RawServoStyleSheet;
 struct RawServoStyleSet;
+class nsHTMLCSSStyleSheet;
 struct nsStyleList;
 struct nsStyleImage;
 struct nsStyleGradientStop;
 class nsStyleGradient;
 class nsStyleCoord;
 struct nsStyleDisplay;
+struct ServoDeclarationBlock;
 
 #define NS_DECL_THREADSAFE_FFI_REFCOUNTING(class_, name_)                     \
-  static_assert(class_::HasThreadSafeRefCnt::value,                           \
-                "NS_DECL_THREADSAFE_FFI_REFCOUNTING can only be used with "   \
-                "classes that have thread-safe refcounting");                 \
   void Gecko_AddRef##name_##ArbitraryThread(class_* aPtr);                    \
   void Gecko_Release##name_##ArbitraryThread(class_* aPtr);
 #define NS_IMPL_THREADSAFE_FFI_REFCOUNTING(class_, name_)                     \
+  static_assert(class_::HasThreadSafeRefCnt::value,                           \
+                "NS_DECL_THREADSAFE_FFI_REFCOUNTING can only be used with "   \
+                "classes that have thread-safe refcounting");                 \
   void Gecko_AddRef##name_##ArbitraryThread(class_* aPtr)                     \
   { NS_ADDREF(aPtr); }                                                        \
   void Gecko_Release##name_##ArbitraryThread(class_* aPtr)                    \
@@ -114,6 +116,9 @@ nsIAtom* Gecko_GetElementId(RawGeckoElement* element);
 uint32_t Gecko_ClassOrClassList(RawGeckoElement* element,
                                 nsIAtom** class_, nsIAtom*** classList);
 
+// Style attributes.
+ServoDeclarationBlock* Gecko_GetServoDeclarationBlock(RawGeckoElement* element);
+
 // Node data.
 ServoNodeData* Gecko_GetNodeData(RawGeckoNode* node);
 void Gecko_SetNodeData(RawGeckoNode* node, ServoNodeData* data);
@@ -123,7 +128,6 @@ void Servo_DropNodeData(ServoNodeData* data);
 nsIAtom* Gecko_Atomize(const char* aString, uint32_t aLength);
 void Gecko_AddRefAtom(nsIAtom* aAtom);
 void Gecko_ReleaseAtom(nsIAtom* aAtom);
-uint32_t Gecko_HashAtom(nsIAtom* aAtom);
 const uint16_t* Gecko_GetAtomAsUTF16(nsIAtom* aAtom, uint32_t* aLength);
 bool Gecko_AtomEqualsUTF8(nsIAtom* aAtom, const char* aString, uint32_t aLength);
 bool Gecko_AtomEqualsUTF8IgnoreCase(nsIAtom* aAtom, const char* aString, uint32_t aLength);
@@ -183,6 +187,16 @@ void Servo_InsertStyleSheetBefore(RawServoStyleSheet* sheet,
 bool Servo_StyleSheetHasRules(RawServoStyleSheet* sheet);
 RawServoStyleSet* Servo_InitStyleSet();
 void Servo_DropStyleSet(RawServoStyleSet* set);
+
+// Style attributes.
+ServoDeclarationBlock* Servo_ParseStyleAttribute(const uint8_t* bytes,
+                                                 uint8_t length,
+                                                 nsHTMLCSSStyleSheet* cache);
+void Servo_DropDeclarationBlock(ServoDeclarationBlock* declarations);
+nsHTMLCSSStyleSheet* Servo_GetDeclarationBlockCache(
+    ServoDeclarationBlock* declarations);
+void Servo_SetDeclarationBlockImmutable(ServoDeclarationBlock* declarations);
+void Servo_ClearDeclarationBlockCachePointer(ServoDeclarationBlock* declarations);
 
 // Computed style data.
 ServoComputedValues* Servo_GetComputedValues(RawGeckoNode* node);

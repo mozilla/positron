@@ -144,7 +144,6 @@ MOZ_TOOL_VARIABLES
 
 AC_PROG_CPP
 AC_PROG_CXXCPP
-MOZ_RUST_SUPPORT
 
 dnl Special win32 checks
 dnl ========================================================
@@ -959,8 +958,8 @@ case "$target" in
         _USE_CPP_INCLUDE_FLAG=1
         _DEFINES_CFLAGS='-FI $(topobjdir)/js/src/js-confdefs.h -DMOZILLA_CLIENT'
         _DEFINES_CXXFLAGS='-FI $(topobjdir)/js/src/js-confdefs.h -DMOZILLA_CLIENT'
-        CFLAGS="$CFLAGS -W3 -Gy"
-        CXXFLAGS="$CXXFLAGS -W3 -Gy"
+        CFLAGS="$CFLAGS -W3 -Gy -Zc:inline"
+        CXXFLAGS="$CXXFLAGS -W3 -Gy -Zc:inline"
         if test "$CPU_ARCH" = "x86";then
           dnl VS2012+ defaults to -arch:SSE2. We want to target nothing
           dnl more recent, so set that explicitly here unless another
@@ -2432,7 +2431,6 @@ AC_SUBST(IMPLIB)
 AC_SUBST(FILTER)
 AC_SUBST(BIN_FLAGS)
 AC_SUBST(MOZ_DEBUG)
-AC_SUBST(MOZ_DEBUG_SYMBOLS)
 AC_SUBST(MOZ_DEBUG_LDFLAGS)
 AC_SUBST(WARNINGS_AS_ERRORS)
 AC_SUBST(LIBICONV)

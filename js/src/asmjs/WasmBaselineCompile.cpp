@@ -144,10 +144,10 @@ struct BaseCompilePolicy : ExprIterPolicy
 typedef ExprIter<BaseCompilePolicy> BaseExprIter;
 
 typedef bool IsUnsigned;
-typedef bool IsDouble;
-typedef bool IsMax;
 typedef bool IsLoad;
 typedef bool ZeroOnOverflow;
+typedef bool IsKnownNotZero;
+typedef bool HandleNaNSpecially;
 
 #ifdef JS_CODEGEN_ARM64
 // FIXME: This is not correct, indeed for ARM64 there is no reliable
@@ -408,6 +408,8 @@ class BaseCompiler
 #endif
 
     // The join registers are used to carry values out of blocks.
+    // JoinRegI32 and joinRegI64 must overlap: emitBrIf and
+    // emitBrTable assume that.
 
     RegI32 joinRegI32;
     RegI64 joinRegI64;
@@ -1321,12 +1323,7 @@ class BaseCompiler
             loadF64(r.reg, v);
             break;
           case Stk::MemF64:
-#if defined(JS_CODEGEN_X86) || defined(JS_CODEGEN_X64)
             masm.Pop(r.reg);
-#else
-            // Strangely, ARM has no Pop(FloatRegister)
-            MOZ_CRASH("BaseCompiler platform hook: popD");
-#endif
             break;
           case Stk::RegisterF64:
             moveF64(v.f64reg(), r);
@@ -1376,12 +1373,7 @@ class BaseCompiler
             loadF32(r.reg, v);
             break;
           case Stk::MemF32:
-#if defined(JS_CODEGEN_X86) || defined(JS_CODEGEN_X64)
             masm.Pop(r.reg);
-#else
-            // Strangely, ARM has no Pop(FloatRegister)
-            MOZ_CRASH("BaseCompiler platform hook: popF");
-#endif
             break;
           case Stk::RegisterF32:
             moveF32(v.f32reg(), r);
@@ -1483,6 +1475,7 @@ class BaseCompiler
     void pushJoinReg(AnyReg r) {
         switch (r.tag) {
           case AnyReg::NONE:
+            pushVoid();
             break;
           case AnyReg::I32:
             pushI32(r.i32());
@@ -1723,12 +1716,6 @@ class BaseCompiler
     }
 
     bool endFunction() {
-        // A frame greater than 256KB is implausible, probably an attack,
-        // so bail out.
-
-        if (maxFramePushed_ > 256 * 1024)
-            return false;
-
         // Out-of-line prologue.  Assumes that the in-line prologue has
         // been executed and that a frame of size = localSize_ + sizeof(AsmJSFrame)
         // has been allocated.
@@ -1769,6 +1756,12 @@ class BaseCompiler
             return false;
 
         compileResults_.offsets().end = masm.currentOffset();
+
+        // A frame greater than 256KB is implausible, probably an attack,
+        // so fail the compilation.
+
+        if (maxFramePushed_ > 256 * 1024)
+            return false;
 
         return true;
     }
@@ -2151,72 +2144,21 @@ class BaseCompiler
         masm.jump(&returnLabel_);
     }
 
-    void addF32(RegF32 rhs, RegF32 srcDest) {
-#if defined(JS_CODEGEN_X86) || defined(JS_CODEGEN_X64)
-        masm.addFloat32(rhs.reg, srcDest.reg);
-#else
-        MOZ_CRASH("BaseCompiler platform hook: addF");
-#endif
-     }
-
-    void subI64(RegI64 rhs, RegI64 srcDest) {
+    void subtractI64(RegI64 rhs, RegI64 srcDest) {
 #if defined(JS_CODEGEN_X64)
         masm.subq(rhs.reg.reg, srcDest.reg.reg);
 #else
-        MOZ_CRASH("BaseCompiler platform hook: subI64");
+        MOZ_CRASH("BaseCompiler platform hook: subtractI64");
 #endif
     }
 
-    void subF32(RegF32 rhs, RegF32 srcDest) {
-#if defined(JS_CODEGEN_X86) || defined(JS_CODEGEN_X64)
-        // CodeGeneratorX86Shared::visitMathF()
-        masm.vsubss(rhs.reg, srcDest.reg, srcDest.reg);
-#else
-        MOZ_CRASH("BaseCompiler platform hook: subF32");
-#endif
-    }
-
-    void mulI32(RegI32 rhs, RegI32 srcDest) {
-#if defined(JS_CODEGEN_X86) || defined(JS_CODEGEN_X64)
-        MOZ_ASSERT(srcDest.reg == eax);
-        MOZ_ASSERT(isAvailable(edx));
-        masm.imull(rhs.reg, srcDest.reg);
-#else
-        MOZ_CRASH("BaseCompiler platform hook: mulI32");
-#endif
-    }
-
-    void mulI64(RegI64 rhs, RegI64 srcDest) {
+    void multiplyI64(RegI64 rhs, RegI64 srcDest) {
 #if defined(JS_CODEGEN_X64)
         MOZ_ASSERT(srcDest.reg.reg == rax);
         MOZ_ASSERT(isAvailable(rdx));
         masm.imulq(rhs.reg.reg, srcDest.reg.reg);
 #else
-        MOZ_CRASH("BaseCompiler platform hook: mulI64");
-#endif
-    }
-
-    void mulF32(RegF32 rhs, RegF32 srcDest) {
-#if defined(JS_CODEGEN_X86) || defined(JS_CODEGEN_X64)
-        masm.vmulss(rhs.reg, srcDest.reg, srcDest.reg);
-#else
-        MOZ_CRASH("BaseCompiler platform hook: mulF32");
-#endif
-    }
-
-    void divideF64(RegF64 rhs, RegF64 srcDest) {
-#if defined(JS_CODEGEN_X86) || defined(JS_CODEGEN_X64)
-        masm.vdivsd(rhs.reg, srcDest.reg, srcDest.reg);
-#else
-        MOZ_CRASH("BaseCompiler platform hook: divideF64");
-#endif
-    }
-
-    void divideF32(RegF32 rhs, RegF32 srcDest) {
-#if defined(JS_CODEGEN_X86) || defined(JS_CODEGEN_X64)
-        masm.vdivss(rhs.reg, srcDest.reg, srcDest.reg);
-#else
-        MOZ_CRASH("BaseCompiler platform hook: divideF32");
+        MOZ_CRASH("BaseCompiler platform hook: multiplyI64");
 #endif
     }
 
@@ -2283,34 +2225,6 @@ class BaseCompiler
 #endif
     }
 
-    void quotientI32(RegI32 rhs, RegI32 srcDest, IsUnsigned isUnsigned) {
-        // CodeGeneratorX86Shared::visitDivI(),
-        // CodeGeneratorX86Shared::visitUDivOrMod()
-
-        Label done;
-
-        checkDivideByZeroI32(rhs, srcDest, &done);
-
-        if (!isUnsigned)
-            checkDivideSignedOverflowI32(rhs, srcDest, &done, ZeroOnOverflow(false));
-
-#if defined(JS_CODEGEN_X86) || defined(JS_CODEGEN_X64)
-        // The caller must set up the following situation.
-        MOZ_ASSERT(srcDest.reg == eax);
-        MOZ_ASSERT(isAvailable(edx));
-        if (isUnsigned) {
-            masm.mov(ImmWord(0), edx);
-            masm.udiv(rhs.reg);
-        } else {
-            masm.cdq();
-            masm.idiv(rhs.reg);
-        }
-#else
-        MOZ_CRASH("BaseCompiler platform hook: quotientI32");
-#endif
-        masm.bind(&done);
-    }
-
     void quotientI64(RegI64 rhs, RegI64 srcDest, IsUnsigned isUnsigned) {
         // This follows quotientI32, above.
         Label done;
@@ -2333,32 +2247,6 @@ class BaseCompiler
         }
 #else
         MOZ_CRASH("BaseCompiler platform hook: quotientI64");
-#endif
-        masm.bind(&done);
-    }
-
-    void remainderI32(RegI32 rhs, RegI32 srcDest, IsUnsigned isUnsigned) {
-        Label done;
-
-        checkDivideByZeroI32(rhs, srcDest, &done);
-
-        if (!isUnsigned)
-            checkDivideSignedOverflowI32(rhs, srcDest, &done, ZeroOnOverflow(true));
-
-#if defined(JS_CODEGEN_X86) || defined(JS_CODEGEN_X64)
-        // The caller must set up the following situation.
-        MOZ_ASSERT(srcDest.reg == eax);
-        MOZ_ASSERT(isAvailable(edx));
-        if (isUnsigned) {
-            masm.mov(ImmWord(0), edx);
-            masm.udiv(rhs.reg);
-        } else {
-            masm.cdq();
-            masm.idiv(rhs.reg);
-        }
-        masm.mov(edx, eax);
-#else
-        MOZ_CRASH("BaseCompiler platform hook: remainderI32");
 #endif
         masm.bind(&done);
     }
@@ -2406,36 +2294,11 @@ class BaseCompiler
 #endif
     }
 
-    void xorI32(RegI32 rhs, RegI32 srcDest) {
-#if defined(JS_CODEGEN_X86) || defined(JS_CODEGEN_X64)
-        masm.xor32(rhs.reg, srcDest.reg);
-#else
-        MOZ_CRASH("BaseCompiler platform hook: xorI32");
-#endif
-    }
-
     void xorI64(RegI64 rhs, RegI64 srcDest) {
 #if defined(JS_CODEGEN_X64)
         masm.xorq(rhs.reg.reg, srcDest.reg.reg);
 #else
         MOZ_CRASH("BaseCompiler platform hook: xorI64");
-#endif
-    }
-
-    void lshiftI32(RegI32 rhs, RegI32 srcDest) {
-#if defined(JS_CODEGEN_X86) || defined(JS_CODEGEN_X64)
-        MOZ_ASSERT(rhs.reg == ecx);
-        masm.lshift32(rhs.reg, srcDest.reg);
-#else
-        MOZ_CRASH("BaseCompiler platform hook: lshiftI32");
-#endif
-    }
-
-    void lshiftI32(int32_t count, RegI32 srcDest) {
-#if defined(JS_CODEGEN_X86) || defined(JS_CODEGEN_X64)
-        masm.shll(Imm32(count), srcDest.reg);
-#else
-        MOZ_CRASH("BaseCompiler platform hook: lshiftI32");
 #endif
     }
 
@@ -2448,46 +2311,12 @@ class BaseCompiler
 #endif
     }
 
-    void rshiftI32(RegI32 rhs, RegI32 srcDest) {
-#if defined(JS_CODEGEN_X86) || defined(JS_CODEGEN_X64)
-        MOZ_ASSERT(rhs.reg == ecx);
-        masm.rshift32Arithmetic(rhs.reg, srcDest.reg);
-#else
-        MOZ_CRASH("BaseCompiler platform hook: rshiftI32");
-#endif
-    }
-
-    void rshiftI32(int32_t count, RegI32 srcDest) {
-#if defined(JS_CODEGEN_X86) || defined(JS_CODEGEN_X64)
-        masm.sarl(Imm32(count), srcDest.reg);
-#else
-        MOZ_CRASH("BaseCompiler platform hook: rshiftI32");
-#endif
-    }
-
     void rshiftI64(RegI64 rhs, RegI64 srcDest) {
 #if defined(JS_CODEGEN_X64)
         MOZ_ASSERT(rhs.reg.reg == rcx);
         masm.sarq_cl(srcDest.reg.reg);
 #else
         MOZ_CRASH("BaseCompiler platform hook: rshiftI64");
-#endif
-    }
-
-    void rshiftU32(RegI32 rhs, RegI32 srcDest) {
-#if defined(JS_CODEGEN_X86) || defined(JS_CODEGEN_X64)
-        MOZ_ASSERT(rhs.reg == ecx);
-        masm.rshift32(rhs.reg, srcDest.reg);
-#else
-        MOZ_CRASH("BaseCompiler platform hook: rshiftU32");
-#endif
-    }
-
-    void rshiftU32(int32_t count, RegI32 srcDest) {
-#if defined(JS_CODEGEN_X86) || defined(JS_CODEGEN_X64)
-        masm.shrl(Imm32(count), srcDest.reg);
-#else
-        MOZ_CRASH("BaseCompiler platform hook: rshiftU32");
 #endif
     }
 
@@ -2500,13 +2329,6 @@ class BaseCompiler
 #endif
     }
 
-    void rotateRightI32(RegI32 rhs, RegI32 srcDest) {
-#if defined(JS_CODEGEN_X86) || defined(JS_CODEGEN_X64)
-        MOZ_ASSERT(rhs.reg == ecx);
-#endif
-        masm.rotateRight(rhs.reg, srcDest.reg, srcDest.reg);
-    }
-
     void rotateRightI64(RegI64 rhs, RegI64 srcDest) {
 #if defined(JS_CODEGEN_X64)
         MOZ_ASSERT(rhs.reg.reg == rcx);
@@ -2514,13 +2336,6 @@ class BaseCompiler
 #else
         MOZ_CRASH("BaseCompiler platform hook: rotateRightI64");
 #endif
-    }
-
-    void rotateLeftI32(RegI32 rhs, RegI32 srcDest) {
-#if defined(JS_CODEGEN_X86) || defined(JS_CODEGEN_X64)
-        MOZ_ASSERT(rhs.reg == ecx);
-#endif
-        masm.rotateLeft(rhs.reg, srcDest.reg, srcDest.reg);
     }
 
     void rotateLeftI64(RegI64 rhs, RegI64 srcDest) {
@@ -2532,27 +2347,11 @@ class BaseCompiler
 #endif
     }
 
-    void clzI32(RegI32 srcDest) {
-#if defined(JS_CODEGEN_X86) || defined(JS_CODEGEN_X64)
-        masm.clz32(srcDest.reg, srcDest.reg, false);
-#else
-        MOZ_CRASH("BaseCompiler platform hook: clzI32");
-#endif
-    }
-
     void clzI64(RegI64 srcDest) {
 #if defined(JS_CODEGEN_X64)
         masm.clz64(srcDest.reg, srcDest.reg);
 #else
         MOZ_CRASH("BaseCompiler platform hook: clzI64");
-#endif
-    }
-
-    void ctzI32(RegI32 srcDest) {
-#if defined(JS_CODEGEN_X86) || defined(JS_CODEGEN_X64)
-        masm.ctz32(srcDest.reg, srcDest.reg, false);
-#else
-        MOZ_CRASH("BaseCompiler platform hook: ctzI32");
 #endif
     }
 
@@ -2588,97 +2387,11 @@ class BaseCompiler
 #endif
     }
 
-    void absI32(RegI32 srcDest) {
-        // TODO / OPTIMIZE: Use conditional move on some platforms
-        Label nonnegative;
-        masm.branch32(Assembler::GreaterThanOrEqual, srcDest.reg, Imm32(0), &nonnegative);
-        masm.neg32(srcDest.reg);
-        masm.bind(&nonnegative);
-    }
-
-    void absF32(RegF32 srcDest) {
-#if defined(JS_CODEGEN_X86) || defined(JS_CODEGEN_X64)
-        // CodeGeneratorX86Shared::visitAbsF()
-        ScratchFloat32Scope scratch(masm);
-        masm.loadConstantFloat32(SpecificNaN<float>(0, FloatingPoint<float>::kSignificandBits), scratch);
-        masm.vandps(scratch, srcDest.reg, srcDest.reg);
-#else
-        MOZ_CRASH("BaseCompiler platform hook: absF32");
-#endif
-    }
-
-    void absF64(RegF64 srcDest) {
-#if defined(JS_CODEGEN_X86) || defined(JS_CODEGEN_X64)
-        // CodeGeneratorX86Shared::visitAbsD()
-        ScratchDoubleScope scratch(masm);
-        masm.loadConstantDouble(SpecificNaN<double>(0, FloatingPoint<double>::kSignificandBits), scratch);
-        masm.vandpd(scratch, srcDest.reg, srcDest.reg);
-#else
-        MOZ_CRASH("BaseCompiler platform hook: absF64");
-#endif
-    }
-
-    void negateF32(RegF32 srcDest) {
-#if defined(JS_CODEGEN_X86) || defined(JS_CODEGEN_X64)
-        masm.negateFloat(srcDest.reg);
-#else
-        MOZ_CRASH("BaseCompiler platform hook: negateF32");
-#endif
-    }
-
-    void sqrtF64(RegF64 srcDest) {
-#if defined(JS_CODEGEN_X86) || defined(JS_CODEGEN_X64)
-        masm.vsqrtsd(srcDest.reg, srcDest.reg, srcDest.reg);
-#else
-        MOZ_CRASH("BaseCompiler platform hook: sqrtF64");
-#endif
-    }
-
-    void sqrtF32(RegF32 srcDest) {
-#if defined(JS_CODEGEN_X86) || defined(JS_CODEGEN_X64)
-        masm.vsqrtss(srcDest.reg, srcDest.reg, srcDest.reg);
-#else
-        MOZ_CRASH("BaseCompiler platform hook: sqrtF32");
-#endif
-    }
-
-    void minMaxF32(RegF32 rhs, RegF32 srcDest, IsMax isMax) {
-#if defined(JS_CODEGEN_X86) || defined(JS_CODEGEN_X64)
-        masm.minMaxFloat32(srcDest.reg, rhs.reg, true, isMax);
-#else
-        MOZ_CRASH("BaseCompiler platform hook: minMaxF32");
-#endif
-    }
-
-    void minMaxF64(RegF64 rhs, RegF64 srcDest, IsMax isMax) {
-#if defined(JS_CODEGEN_X86) || defined(JS_CODEGEN_X64)
-        masm.minMaxDouble(srcDest.reg, rhs.reg, true, isMax);
-#else
-        MOZ_CRASH("BaseCompiler platform hook: minMaxF64");
-#endif
-    }
-
-    void reinterpretI32AsF32(RegI32 src, RegF32 dest) {
-#if defined(JS_CODEGEN_X86) || defined(JS_CODEGEN_X64)
-        masm.vmovd(src.reg, dest.reg);
-#else
-        MOZ_CRASH("BaseCompiler platform hook: reinterpretI32AsF32");
-#endif
-    }
-
     void reinterpretI64AsF64(RegI64 src, RegF64 dest) {
 #if defined(JS_CODEGEN_X64)
         masm.vmovq(src.reg.reg, dest.reg);
 #else
         MOZ_CRASH("BaseCompiler platform hook: reinterpretI64AsF64");
-#endif
-    }
-
-    void reinterpretF32AsI32(RegF32 src, RegI32 dest) {
-#if defined(JS_CODEGEN_X86) || defined(JS_CODEGEN_X64)
-        masm.vmovd(src.reg, dest.reg);
-#else
-        MOZ_CRASH("BaseCompiler platform hook: reinterpretF32AsI32");
 #endif
     }
 
@@ -3325,7 +3038,7 @@ BaseCompiler::emitAddF32()
     // TODO / OPTIMIZE: Ditto check for constant here
     RegF32 r0, r1;
     pop2xF32(&r0, &r1);
-    addF32(r1, r0);
+    masm.addFloat32(r1.reg, r0.reg);
     freeF32(r1);
     pushF32(r0);
 }
@@ -3345,7 +3058,7 @@ BaseCompiler::emitSubtractI64()
 {
     RegI64 r0, r1;
     pop2xI64(&r0, &r1);
-    subI64(r1, r0);
+    subtractI64(r1, r0);
     freeI64(r1);
     pushI64(r0);
 }
@@ -3355,7 +3068,7 @@ BaseCompiler::emitSubtractF32()
 {
     RegF32 r0, r1;
     pop2xF32(&r0, &r1);
-    subF32(r1, r0);
+    masm.subFloat32(r1.reg, r0.reg);
     freeF32(r1);
     pushF32(r0);
 }
@@ -3376,6 +3089,7 @@ BaseCompiler::emitMultiplyI32()
     // TODO / OPTIMIZE: Multiplication by constant is common (bug 1275442)
     RegI32 r0, r1;
 #if defined(JS_CODEGEN_X86) || defined(JS_CODEGEN_X64)
+    // srcDest must be eax, and edx will be clobbered.
     need2xI32(specific_eax, specific_edx);
     r1 = popI32();
     r0 = popI32ToSpecific(specific_eax);
@@ -3383,7 +3097,7 @@ BaseCompiler::emitMultiplyI32()
 #else
     pop2xI32(&r0, &r1);
 #endif
-    mulI32(r1, r0);
+    masm.mul32(r1.reg, r0.reg);
     freeI32(r1);
     pushI32(r0);
 }
@@ -3394,6 +3108,7 @@ BaseCompiler::emitMultiplyI64()
     // TODO / OPTIMIZE: Multiplication by constant is common (bug 1275442)
     RegI64 r0, r1;
 #if defined(JS_CODEGEN_X64)
+    // srcDest must be rax, and rdx will be clobbered.
     need2xI64(specific_rax, specific_rdx);
     r1 = popI64();
     r0 = popI64ToSpecific(specific_rax);
@@ -3403,7 +3118,7 @@ BaseCompiler::emitMultiplyI64()
 #else
     pop2xI64(&r0, &r1);
 #endif
-    mulI64(r1, r0);
+    multiplyI64(r1, r0);
     freeI64(r1);
     pushI64(r0);
 }
@@ -3413,7 +3128,7 @@ BaseCompiler::emitMultiplyF32()
 {
     RegF32 r0, r1;
     pop2xF32(&r0, &r1);
-    mulF32(r1, r0);
+    masm.mulFloat32(r1.reg, r0.reg);
     freeF32(r1);
     pushF32(r0);
 }
@@ -3431,8 +3146,10 @@ BaseCompiler::emitMultiplyF64()
 void
 BaseCompiler::emitQuotientI32()
 {
+    // TODO / OPTIMIZE: Fast case if lhs >= 0 and rhs is power of two.
     RegI32 r0, r1;
 #if defined(JS_CODEGEN_X86) || defined(JS_CODEGEN_X64)
+    // srcDest must be eax, and edx will be clobbered.
     need2xI32(specific_eax, specific_edx);
     r1 = popI32();
     r0 = popI32ToSpecific(specific_eax);
@@ -3440,7 +3157,13 @@ BaseCompiler::emitQuotientI32()
 #else
     pop2xI32(&r0, &r1);
 #endif
-    quotientI32(r1, r0, IsUnsigned(false));
+
+    Label done;
+    checkDivideByZeroI32(r1, r0, &done);
+    checkDivideSignedOverflowI32(r1, r0, &done, ZeroOnOverflow(false));
+    masm.quotient32(r1.reg, r0.reg, IsUnsigned(false));
+    masm.bind(&done);
+
     freeI32(r1);
     pushI32(r0);
 }
@@ -3448,8 +3171,10 @@ BaseCompiler::emitQuotientI32()
 void
 BaseCompiler::emitQuotientU32()
 {
+    // TODO / OPTIMIZE: Fast case if lhs >= 0 and rhs is power of two.
     RegI32 r0, r1;
 #if defined(JS_CODEGEN_X86) || defined(JS_CODEGEN_X64)
+    // srcDest must be eax, and edx will be clobbered.
     need2xI32(specific_eax, specific_edx);
     r1 = popI32();
     r0 = popI32ToSpecific(specific_eax);
@@ -3457,7 +3182,12 @@ BaseCompiler::emitQuotientU32()
 #else
     pop2xI32(&r0, &r1);
 #endif
-    quotientI32(r1, r0, IsUnsigned(true));
+
+    Label done;
+    checkDivideByZeroI32(r1, r0, &done);
+    masm.quotient32(r1.reg, r0.reg, IsUnsigned(true));
+    masm.bind(&done);
+
     freeI32(r1);
     pushI32(r0);
 }
@@ -3467,6 +3197,7 @@ BaseCompiler::emitQuotientI64()
 {
     RegI64 r0, r1;
 #if defined(JS_CODEGEN_X64)
+    // srcDest must be rax, and rdx will be clobbered.
     need2xI64(specific_rax, specific_rdx);
     r1 = popI64();
     r0 = popI64ToSpecific(specific_rax);
@@ -3486,6 +3217,7 @@ BaseCompiler::emitQuotientU64()
 {
     RegI64 r0, r1;
 #if defined(JS_CODEGEN_X64)
+    // srcDest must be rax, and rdx will be clobbered.
     need2xI64(specific_rax, specific_rdx);
     r1 = popI64();
     r0 = popI64ToSpecific(specific_rax);
@@ -3503,8 +3235,10 @@ BaseCompiler::emitQuotientU64()
 void
 BaseCompiler::emitRemainderI32()
 {
+    // TODO / OPTIMIZE: Fast case if lhs >= 0 and rhs is power of two.
     RegI32 r0, r1;
 #if defined(JS_CODEGEN_X86) || defined(JS_CODEGEN_X64)
+    // srcDest must be eax, and edx will be clobbered.
     need2xI32(specific_eax, specific_edx);
     r1 = popI32();
     r0 = popI32ToSpecific(specific_eax);
@@ -3512,8 +3246,13 @@ BaseCompiler::emitRemainderI32()
 #else
     pop2xI32(&r0, &r1);
 #endif
-    // TODO / OPTIMIZE: Fast case if lhs >= 0 and rhs is power of two.
-    remainderI32(r1, r0, IsUnsigned(false));
+
+    Label done;
+    checkDivideByZeroI32(r1, r0, &done);
+    checkDivideSignedOverflowI32(r1, r0, &done, ZeroOnOverflow(true));
+    masm.remainder32(r1.reg, r0.reg, IsUnsigned(false));
+    masm.bind(&done);
+
     freeI32(r1);
     pushI32(r0);
 }
@@ -3521,8 +3260,10 @@ BaseCompiler::emitRemainderI32()
 void
 BaseCompiler::emitRemainderU32()
 {
+    // TODO / OPTIMIZE: Fast case if lhs >= 0 and rhs is power of two.
     RegI32 r0, r1;
 #if defined(JS_CODEGEN_X86) || defined(JS_CODEGEN_X64)
+    // srcDest must be eax, and edx will be clobbered.
     need2xI32(specific_eax, specific_edx);
     r1 = popI32();
     r0 = popI32ToSpecific(specific_eax);
@@ -3530,8 +3271,12 @@ BaseCompiler::emitRemainderU32()
 #else
     pop2xI32(&r0, &r1);
 #endif
-    // TODO / OPTIMIZE: Fast case if lhs >= 0 and rhs is power of two.
-    remainderI32(r1, r0, IsUnsigned(true));
+
+    Label done;
+    checkDivideByZeroI32(r1, r0, &done);
+    masm.remainder32(r1.reg, r0.reg, IsUnsigned(true));
+    masm.bind(&done);
+
     freeI32(r1);
     pushI32(r0);
 }
@@ -3579,7 +3324,7 @@ BaseCompiler::emitDivideF32()
 {
     RegF32 r0, r1;
     pop2xF32(&r0, &r1);
-    divideF32(r1, r0);
+    masm.divFloat32(r1.reg, r0.reg);
     freeF32(r1);
     pushF32(r0);
 }
@@ -3589,7 +3334,7 @@ BaseCompiler::emitDivideF64()
 {
     RegF64 r0, r1;
     pop2xF64(&r0, &r1);
-    divideF64(r1, r0);
+    masm.divDouble(r1.reg, r0.reg);
     freeF64(r1);
     pushF64(r0);
 }
@@ -3612,7 +3357,7 @@ BaseCompiler::emitMinMaxI32(Assembler::Condition cond)
     Label done;
     RegI32 r0, r1;
     pop2xI32(&r0, &r1);
-    // TODO / OPTIMIZE: Conditional move
+    // TODO / OPTIMIZE: Use conditional move on some platforms?
     masm.branch32(cond, r0.reg, r1.reg, &done);
     moveI32(r1, r0);
     masm.bind(&done);
@@ -3625,7 +3370,7 @@ BaseCompiler::emitMinF32()
 {
     RegF32 r0, r1;
     pop2xF32(&r0, &r1);
-    minMaxF32(r1, r0, IsMax(false));
+    masm.minFloat32(r1.reg, r0.reg, HandleNaNSpecially(true));
     freeF32(r1);
     pushF32(r0);
 }
@@ -3635,7 +3380,7 @@ BaseCompiler::emitMaxF32()
 {
     RegF32 r0, r1;
     pop2xF32(&r0, &r1);
-    minMaxF32(r1, r0, IsMax(true));
+    masm.maxFloat32(r1.reg, r0.reg, HandleNaNSpecially(true));
     freeF32(r1);
     pushF32(r0);
 }
@@ -3645,7 +3390,7 @@ BaseCompiler::emitMinF64()
 {
     RegF64 r0, r1;
     pop2xF64(&r0, &r1);
-    minMaxF64(r1, r0, IsMax(false));
+    masm.minDouble(r1.reg, r0.reg, HandleNaNSpecially(true));
     freeF64(r1);
     pushF64(r0);
 }
@@ -3655,7 +3400,7 @@ BaseCompiler::emitMaxF64()
 {
     RegF64 r0, r1;
     pop2xF64(&r0, &r1);
-    minMaxF64(r1, r0, IsMax(true));
+    masm.maxDouble(r1.reg, r0.reg, HandleNaNSpecially(true));
     freeF64(r1);
     pushF64(r0);
 }
@@ -3667,12 +3412,12 @@ BaseCompiler::emitCopysignF32()
     pop2xF32(&r0, &r1);
     RegI32 i0 = needI32();
     RegI32 i1 = needI32();
-    reinterpretF32AsI32(r0, i0);
-    reinterpretF32AsI32(r1, i1);
+    masm.moveFloat32ToGPR(r0.reg, i0.reg);
+    masm.moveFloat32ToGPR(r1.reg, i1.reg);
     masm.and32(Imm32(INT32_MAX), i0.reg);
     masm.and32(Imm32(INT32_MIN), i1.reg);
     masm.or32(i1.reg, i0.reg);
-    reinterpretI32AsF32(i0, r0);
+    masm.moveGPRToFloat32(i0.reg, r0.reg);
     freeI32(i0);
     freeI32(i1);
     freeF32(r1);
@@ -3743,7 +3488,7 @@ BaseCompiler::emitXorI32()
 {
     RegI32 r0, r1;
     pop2xI32(&r0, &r1);
-    xorI32(r1, r0);
+    masm.xor32(r1.reg, r0.reg);
     freeI32(r1);
     pushI32(r0);
 }
@@ -3764,7 +3509,7 @@ BaseCompiler::emitShlI32()
     int32_t c;
     if (popConstI32(c)) {
         RegI32 r = popI32();
-        lshiftI32(c, r);
+        masm.lshift32(Imm32(c & 31), r.reg);
         pushI32(r);
     } else {
         RegI32 r0, r1;
@@ -3774,7 +3519,7 @@ BaseCompiler::emitShlI32()
 #else
         pop2xI32(&r0, &r1);
 #endif
-        lshiftI32(r1, r0);
+        masm.lshift32(r1.reg, r0.reg);
         freeI32(r1);
         pushI32(r0);
     }
@@ -3804,7 +3549,7 @@ BaseCompiler::emitShrI32()
     int32_t c;
     if (popConstI32(c)) {
         RegI32 r = popI32();
-        rshiftI32(c, r);
+        masm.rshift32Arithmetic(Imm32(c & 31), r.reg);
         pushI32(r);
     } else {
         RegI32 r0, r1;
@@ -3814,7 +3559,7 @@ BaseCompiler::emitShrI32()
 #else
         pop2xI32(&r0, &r1);
 #endif
-        rshiftI32(r1, r0);
+        masm.rshift32Arithmetic(r1.reg, r0.reg);
         freeI32(r1);
         pushI32(r0);
     }
@@ -3844,7 +3589,7 @@ BaseCompiler::emitShrU32()
     int32_t c;
     if (popConstI32(c)) {
         RegI32 r = popI32();
-        rshiftU32(c, r);
+        masm.rshift32(Imm32(c & 31), r.reg);
         pushI32(r);
     } else {
         RegI32 r0, r1;
@@ -3854,7 +3599,7 @@ BaseCompiler::emitShrU32()
 #else
         pop2xI32(&r0, &r1);
 #endif
-        rshiftU32(r1, r0);
+        masm.rshift32(r1.reg, r0.reg);
         freeI32(r1);
         pushI32(r0);
     }
@@ -3889,7 +3634,7 @@ BaseCompiler::emitRotrI32()
 #else
     pop2xI32(&r0, &r1);
 #endif
-    rotateRightI32(r1, r0);
+    masm.rotateRight(r1.reg, r0.reg, r0.reg);
     freeI32(r1);
     pushI32(r0);
 }
@@ -3923,7 +3668,7 @@ BaseCompiler::emitRotlI32()
 #else
     pop2xI32(&r0, &r1);
 #endif
-    rotateLeftI32(r1, r0);
+    masm.rotateLeft(r1.reg, r0.reg, r0.reg);
     freeI32(r1);
     pushI32(r0);
 }
@@ -3973,7 +3718,7 @@ void
 BaseCompiler::emitClzI32()
 {
     RegI32 r0 = popI32();
-    clzI32(r0);
+    masm.clz32(r0.reg, r0.reg, IsKnownNotZero(false));
     pushI32(r0);
 }
 
@@ -3989,7 +3734,7 @@ void
 BaseCompiler::emitCtzI32()
 {
     RegI32 r0 = popI32();
-    ctzI32(r0);
+    masm.ctz32(r0.reg, r0.reg, IsKnownNotZero(false));
     pushI32(r0);
 }
 
@@ -4040,8 +3785,12 @@ BaseCompiler::emitBitNotI32()
 void
 BaseCompiler::emitAbsI32()
 {
+    // TODO / OPTIMIZE: Use conditional move on some platforms?
+    Label nonnegative;
     RegI32 r0 = popI32();
-    absI32(r0);
+    masm.branch32(Assembler::GreaterThanOrEqual, r0.reg, Imm32(0), &nonnegative);
+    masm.neg32(r0.reg);
+    masm.bind(&nonnegative);
     pushI32(r0);
 }
 
@@ -4049,7 +3798,7 @@ void
 BaseCompiler::emitAbsF32()
 {
     RegF32 r0 = popF32();
-    absF32(r0);
+    masm.absFloat32(r0.reg, r0.reg);
     pushF32(r0);
 }
 
@@ -4057,7 +3806,7 @@ void
 BaseCompiler::emitAbsF64()
 {
     RegF64 r0 = popF64();
-    absF64(r0);
+    masm.absDouble(r0.reg, r0.reg);
     pushF64(r0);
 }
 
@@ -4073,7 +3822,7 @@ void
 BaseCompiler::emitNegateF32()
 {
     RegF32 r0 = popF32();
-    negateF32(r0);
+    masm.negateFloat(r0.reg);
     pushF32(r0);
 }
 
@@ -4089,7 +3838,7 @@ void
 BaseCompiler::emitSqrtF32()
 {
     RegF32 r0 = popF32();
-    sqrtF32(r0);
+    masm.sqrtFloat32(r0.reg, r0.reg);
     pushF32(r0);
 }
 
@@ -4097,7 +3846,7 @@ void
 BaseCompiler::emitSqrtF64()
 {
     RegF64 r0 = popF64();
-    sqrtF64(r0);
+    masm.sqrtDouble(r0.reg, r0.reg);
     pushF64(r0);
 }
 
@@ -4199,7 +3948,7 @@ BaseCompiler::emitReinterpretF32AsI32()
 {
     RegF32 r0 = popF32();
     RegI32 i0 = needI32();
-    reinterpretF32AsI32(r0, i0);
+    masm.moveFloat32ToGPR(r0.reg, i0.reg);
     freeF32(r0);
     pushI32(i0);
 }
@@ -4319,7 +4068,7 @@ BaseCompiler::emitReinterpretI32AsF32()
 {
     RegI32 r0 = popI32();
     RegF32 f0 = needF32();
-    reinterpretI32AsF32(r0, f0);
+    masm.moveGPRToFloat32(r0.reg, f0.reg);
     freeI32(r0);
     pushF32(f0);
 }
@@ -4617,8 +4366,9 @@ BaseCompiler::emitBrIf()
     // allowing a conditional expression to be left on the stack and
     // reified here as part of the branch instruction.
 
-    // Don't use it for rc
-    if (type == ExprType::I32)
+    // We'll need the joinreg later, so don't use it for rc.
+    // We assume joinRegI32 and joinRegI64 overlap.
+    if (type == ExprType::I32 || type == ExprType::I64)
         needI32(joinRegI32);
 
     // Condition value is on top, always I32.
@@ -4629,7 +4379,7 @@ BaseCompiler::emitBrIf()
     if (IsVoid(type))
         pushVoid();
 
-    if (type == ExprType::I32)
+    if (type == ExprType::I32 || type == ExprType::I64)
         freeI32(joinRegI32);
 
     // Save any value in the designated join register, where the
@@ -4680,8 +4430,9 @@ BaseCompiler::emitBrTable()
     if (!iter_.readBrTableEntry(type, &defaultDepth))
         return false;
 
-    // We'll need this, so don't use it for rc
-    if (type == ExprType::I32)
+    // We'll need the joinreg later, so don't use it for rc.
+    // We assume joinRegI32 and joinRegI64 overlap.
+    if (type == ExprType::I32 || type == ExprType::I64)
         needI32(joinRegI32);
 
     // Table switch value always on top.
@@ -4692,7 +4443,7 @@ BaseCompiler::emitBrTable()
     if (IsVoid(type))
         pushVoid();
 
-    if (type == ExprType::I32)
+    if (type == ExprType::I32 || type == ExprType::I64)
         freeI32(joinRegI32);
 
     AnyReg r = popJoinReg();
@@ -4814,9 +4565,10 @@ void
 BaseCompiler::pushReturned(ExprType type)
 {
     switch (type) {
-      case ExprType::Void:
+      case ExprType::Void: {
         pushVoid();
         break;
+      }
       case ExprType::I32: {
         RegI32 rv = needI32();
         captureReturnedI32(rv);
@@ -5375,6 +5127,7 @@ BaseCompiler::emitSelect()
 
     RegI32 rc = popI32();
     switch (type) {
+      case AnyType:
       case ExprType::Void: {
         popValueStackBy(2);
         pushVoid();
@@ -5659,14 +5412,20 @@ BaseCompiler::emitBody()
         // every iteration.
 
         if (overhead == 0) {
+            // Check every 50 expressions -- a happy medium between
+            // memory usage and checking overhead.
+            overhead = 50;
+
             // Checking every 50 expressions should be safe, as the
             // baseline JIT does very little allocation per expression.
             CHECK(alloc_.ensureBallast());
-            CHECK(stk_.reserve(stk_.length() + 64));
-            overhead = 50;
-        } else {
-            overhead -= 1;
+
+            // The pushiest opcode is LOOP, which pushes two values
+            // per instance.
+            CHECK(stk_.reserve(stk_.length() + overhead * 2));
         }
+
+        overhead--;
 
         if (done())
             return true;

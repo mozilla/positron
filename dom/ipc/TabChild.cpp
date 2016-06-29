@@ -102,6 +102,7 @@
 #include "nsIOService.h"
 #include "nsDOMClassInfoID.h"
 #include "nsColorPickerProxy.h"
+#include "nsDatePickerProxy.h"
 #include "nsContentPermissionHelper.h"
 #include "nsPresShell.h"
 #include "nsIAppsService.h"
@@ -111,6 +112,7 @@
 #include "nsIScriptError.h"
 #include "mozilla/EventForwards.h"
 #include "nsDeviceContext.h"
+#include "nsSandboxFlags.h"
 #include "FrameLayerBuilder.h"
 
 #ifdef NS_PRINTING
@@ -891,6 +893,11 @@ TabChild::NotifyTabContextUpdated()
 
   UpdateFrameType();
   nsDocShell::Cast(docShell)->SetOriginAttributes(OriginAttributesRef());
+
+  // Set SANDBOXED_AUXILIARY_NAVIGATION flag if this is a receiver page.
+  if (!PresentationURL().IsEmpty()) {
+    docShell->SetSandboxFlags(SANDBOXED_AUXILIARY_NAVIGATION);
+  }
 }
 
 void
@@ -1921,8 +1928,13 @@ TabChild::RecvRealMouseButtonEvent(const WidgetMouseEvent& aEvent,
                                    const ScrollableLayerGuid& aGuid,
                                    const uint64_t& aInputBlockId)
 {
-  if (aInputBlockId) {
-    MOZ_ASSERT(aEvent.mFlags.mHandledByAPZ);
+  // Mouse events like eMouseEnterIntoWidget, that are created in the parent
+  // process EventStateManager code, have an input block id which they get from
+  // the InputAPZContext in the parent process stack. However, they did not
+  // actually go through the APZ code and so their mHandledByAPZ flag is false.
+  // Since thos events didn't go through APZ, we don't need to send notifications
+  // for them.
+  if (aInputBlockId && aEvent.mFlags.mHandledByAPZ) {
     nsCOMPtr<nsIDocument> document(GetDocument());
     APZCCallbackHelper::SendSetTargetAPZCNotification(
       mPuppetWidget, document, aEvent, aGuid, aInputBlockId);
@@ -1937,8 +1949,7 @@ TabChild::RecvRealMouseButtonEvent(const WidgetMouseEvent& aEvent,
       mPuppetWidget->GetDefaultScale());
   APZCCallbackHelper::DispatchWidgetEvent(localEvent);
 
-  if (aInputBlockId) {
-    MOZ_ASSERT(aEvent.mFlags.mHandledByAPZ);
+  if (aInputBlockId && aEvent.mFlags.mHandledByAPZ) {
     mAPZEventState->ProcessMouseEvent(aEvent, aGuid, aInputBlockId);
   }
   return true;
@@ -1949,8 +1960,7 @@ TabChild::RecvMouseWheelEvent(const WidgetWheelEvent& aEvent,
                               const ScrollableLayerGuid& aGuid,
                               const uint64_t& aInputBlockId)
 {
-  if (aInputBlockId) {
-    MOZ_ASSERT(aEvent.mFlags.mHandledByAPZ);
+  if (aInputBlockId && aEvent.mFlags.mHandledByAPZ) {
     nsCOMPtr<nsIDocument> document(GetDocument());
     APZCCallbackHelper::SendSetTargetAPZCNotification(
       mPuppetWidget, document, aEvent, aGuid, aInputBlockId);
@@ -1966,8 +1976,7 @@ TabChild::RecvMouseWheelEvent(const WidgetWheelEvent& aEvent,
     SendRespondStartSwipeEvent(aInputBlockId, localEvent.TriggersSwipe());
   }
 
-  if (aInputBlockId) {
-    MOZ_ASSERT(aEvent.mFlags.mHandledByAPZ);
+  if (aInputBlockId && aEvent.mFlags.mHandledByAPZ) {
     mAPZEventState->ProcessWheelEvent(localEvent, aGuid, aInputBlockId);
   }
   return true;
@@ -2278,6 +2287,21 @@ bool
 TabChild::DeallocPColorPickerChild(PColorPickerChild* aColorPicker)
 {
   nsColorPickerProxy* picker = static_cast<nsColorPickerProxy*>(aColorPicker);
+  NS_RELEASE(picker);
+  return true;
+}
+
+PDatePickerChild*
+TabChild::AllocPDatePickerChild(const nsString&, const nsString&)
+{
+  NS_RUNTIMEABORT("unused");
+  return nullptr;
+}
+
+bool
+TabChild::DeallocPDatePickerChild(PDatePickerChild* aDatePicker)
+{
+  nsDatePickerProxy* picker = static_cast<nsDatePickerProxy*>(aDatePicker);
   NS_RELEASE(picker);
   return true;
 }

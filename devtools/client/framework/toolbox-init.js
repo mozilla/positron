@@ -42,65 +42,56 @@ if (url.search.length > 1) {
   // Specify the default tool to open
   let tool = url.searchParams.get("tool");
 
-  let toolboxOpened;
-  if (url.searchParams.has("target")) {
-    // Attach toolbox to a given browser iframe (<xul:browser> or <html:iframe
-    // mozbrowser>) whose reference is set on the host iframe.
+  Task.spawn(function* () {
+    let target;
+    if (url.searchParams.has("target")) {
+      // Attach toolbox to a given browser iframe (<xul:browser> or <html:iframe
+      // mozbrowser>) whose reference is set on the host iframe.
 
-    // `iframe` is the targeted document to debug
-    let iframe = host.wrappedJSObject ? host.wrappedJSObject.target
-                                      : host.target;
-    if (iframe) {
-      // Need to use a xray and query some interfaces to have
-      // attributes and behavior expected by devtools codebase
-      iframe = XPCNativeWrapper(iframe);
-      iframe.QueryInterface(Ci.nsIFrameLoaderOwner);
+      // `iframe` is the targeted document to debug
+      let iframe = host.wrappedJSObject ? host.wrappedJSObject.target
+                                        : host.target;
+      if (iframe) {
+        // Need to use a xray and query some interfaces to have
+        // attributes and behavior expected by devtools codebase
+        iframe = XPCNativeWrapper(iframe);
+        iframe.QueryInterface(Ci.nsIFrameLoaderOwner);
 
-      // Fake a xul:tab object as we don't have one.
-      // linkedBrowser is the only one attribute being queried by client.getTab
-      let tab = { linkedBrowser: iframe };
+        // Fake a xul:tab object as we don't have one.
+        // linkedBrowser is the only one attribute being queried by client.getTab
+        let tab = { linkedBrowser: iframe };
 
-      if (!DebuggerServer.initialized) {
-        DebuggerServer.init();
-        DebuggerServer.addBrowserActors();
-      }
-      let client = new DebuggerClient(DebuggerServer.connectPipe());
-      toolboxOpened = Task.spawn(function*() {
+        if (!DebuggerServer.initialized) {
+          DebuggerServer.init();
+          DebuggerServer.addBrowserActors();
+        }
+        let client = new DebuggerClient(DebuggerServer.connectPipe());
+
         yield client.connect();
         // Creates a target for a given browser iframe.
         let response = yield client.getTab({ tab });
         let form = response.tab;
-        let target = yield TargetFactory.forRemoteTab({
-          client,
-          form,
-          chrome: false
-        });
-        let options = { customIframe: host };
-        return gDevTools.showToolbox(target, tool, Toolbox.HostType.CUSTOM,
-                                     options);
-      });
+        target = yield TargetFactory.forRemoteTab({client, form, chrome: false});
+      } else {
+        throw new Error("toolbox target is undefined");
+      }
     } else {
-      toolboxOpened = Promise.reject(new Error("toolbox target is undefined"));
+      target = yield targetFromURL(url);
     }
-  } else {
-    toolboxOpened = Task.spawn(function*() {
-      let target = yield targetFromURL(url);
-      let options = { customIframe: host };
-      return gDevTools.showToolbox(target, tool, Toolbox.HostType.CUSTOM,
-                                   options);
-    });
-  }
+    let options = { customIframe: host };
+    let toolbox = yield gDevTools.showToolbox(target, tool, Toolbox.HostType.CUSTOM, options);
 
-  // Ensure the toolbox gets destroyed if the host unloads
-  toolboxOpened.then(toolbox => {
-    let hostUnload = () => {
-      host.contentWindow.removeEventListener("unload", hostUnload);
+    // Watch for toolbox.xul unload in order to cleanup things when we close
+    // about:devtools-toolbox tabs
+    function onUnload() {
+      window.removeEventListener("unload", onUnload);
       toolbox.destroy();
-    };
-    host.contentWindow.addEventListener("unload", hostUnload);
-  });
-
-  toolboxOpened.catch(e => {
-    window.alert("Unable to start the toolbox: " + e.message);
+    }
+    window.addEventListener("unload", onUnload);
+    toolbox.on("destroy", function () {
+      window.removeEventListener("unload", onUnload);
+    });
+  }).catch(error => {
+    console.error("Exception while loading the toolbox", error);
   });
 }

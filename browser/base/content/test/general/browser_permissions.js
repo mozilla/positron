@@ -45,6 +45,10 @@ add_task(function* testMainViewVisible() {
   is(menulists[0].value, "1", "Correct value on install menulist");
   gIdentityHandler._identityPopup.hidden = true;
 
+  let img = menulists[0].parentNode.querySelector("image");
+  ok(img, "There is an image for the permissions");
+  ok(img.classList.contains("install-icon"), "proper class is in image class");
+
   gIdentityHandler.setPermission("install", SitePermissions.getDefault("install"));
 
   gIdentityHandler._identityBox.click();
@@ -58,25 +62,21 @@ add_task(function* testIdentityIcon() {
   yield promiseTabLoadEvent(tab, PERMISSIONS_PAGE);
 
   gIdentityHandler.setPermission("geo", SitePermissions.ALLOW);
-  gIdentityHandler.refreshIdentityBlock();
 
   ok(gIdentityHandler._identityBox.classList.contains("grantedPermissions"),
     "identity-box signals granted permssions");
 
   gIdentityHandler.setPermission("geo", SitePermissions.getDefault("geo"));
-  gIdentityHandler.refreshIdentityBlock();
 
   ok(!gIdentityHandler._identityBox.classList.contains("grantedPermissions"),
     "identity-box doesn't signal granted permssions");
 
   gIdentityHandler.setPermission("camera", SitePermissions.BLOCK);
-  gIdentityHandler.refreshIdentityBlock();
 
   ok(!gIdentityHandler._identityBox.classList.contains("grantedPermissions"),
     "identity-box doesn't signal granted permssions");
 
   gIdentityHandler.setPermission("cookie", SitePermissions.SESSION);
-  gIdentityHandler.refreshIdentityBlock();
 
   ok(gIdentityHandler._identityBox.classList.contains("grantedPermissions"),
     "identity-box signals granted permssions");

@@ -47,6 +47,9 @@
 
 <!ENTITY  switch_to_tab "Switch to tab">
 
+<!-- Localization note: Shown in a snackbar when tab is loaded from cache while device was offline. -->
+<!ENTITY  tab_offline_version "Showing offline version">
+
 <!ENTITY  crash_reporter_title "&brandShortName; Crash Reporter">
 <!ENTITY  crash_message2 "&brandShortName; had a problem and crashed. Your tabs should be listed on the &brandShortName; Start page when you restart.">
 <!ENTITY  crash_send_report_message3 "Tell &vendorShortName; about this crash so they can fix it">
@@ -627,7 +630,6 @@ with that structure, consider a translation which ignores the preceding domain a
 just addresses the organization to follow, e.g. "This site is run by " -->
 <!ENTITY identity_connection_secure "Secure Connection">
 <!ENTITY identity_connection_insecure "Insecure connection">
-<!ENTITY identity_login_insecure "This page is not secure and your login could be vulnerable.">
 <!ENTITY identity_connection_chromeui "This is a secure &brandShortName; page">
 
 <!-- Mixed content notifications in site identity popup -->

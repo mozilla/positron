@@ -25,8 +25,9 @@
 "use strict";
 
 const Services = require("Services");
-const Promise = require("promise");
+const defer = require("devtools/shared/defer");
 const {getCSSLexer} = require("devtools/shared/css-lexer");
+const {gDevTools} = require("devtools/client/framework/devtools");
 
 // Parameters for the XHR request
 // see https://developer.mozilla.org/en-US/docs/MDN/Kuma/API#Document_parameters
@@ -41,8 +42,6 @@ const PAGE_LINK_PARAMS =
 // URL for the page link omits locale, so a locale-specific page will be loaded
 var PAGE_LINK_URL = "https://developer.mozilla.org/docs/Web/CSS/";
 exports.PAGE_LINK_URL = PAGE_LINK_URL;
-
-const BROWSER_WINDOW = "navigator:browser";
 
 const PROPERTY_NAME_COLOR = "theme-fg-color5";
 const PROPERTY_VALUE_COLOR = "theme-fg-color1";
@@ -155,7 +154,7 @@ exports.appendSyntaxHighlightedCSS = appendSyntaxHighlightedCSS;
  * we could not load the page.
  */
 function getMdnPage(pageUrl) {
-  let deferred = Promise.defer();
+  let deferred = defer();
 
   let xhr = new XMLHttpRequest();
 
@@ -198,7 +197,7 @@ function getMdnPage(pageUrl) {
  * we could not load the page.
  */
 function getCssDocs(cssProperty) {
-  let deferred = Promise.defer();
+  let deferred = defer();
   let pageUrl = XHR_CSS_URL + cssProperty + XHR_PARAMS;
 
   getMdnPage(pageUrl).then(parseDocsFromResponse, handleRejection);
@@ -256,12 +255,11 @@ function MdnDocsWidget(tooltipDocument) {
     l10n.strings.GetStringFromName("docsTooltip.visitMDN");
 
   // listen for clicks and open in the browser window instead
-  let browserWindow = Services.wm.getMostRecentWindow(BROWSER_WINDOW);
+  let mainWindow = Services.wm.getMostRecentWindow(gDevTools.chromeWindowType);
   this.elements.linkToMdn.addEventListener("click", function (e) {
     e.stopPropagation();
     e.preventDefault();
-    let link = e.target.href;
-    browserWindow.gBrowser.addTab(link);
+    mainWindow.openUILinkIn(e.target.href, "tab", { inBackground: true });
   });
 }
 
@@ -348,7 +346,7 @@ MdnDocsWidget.prototype = {
       deferred.resolve(this);
     }
 
-    let deferred = Promise.defer();
+    let deferred = defer();
     let elements = this.elements;
 
     initializeDocument(propertyName);

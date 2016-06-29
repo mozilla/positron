@@ -20,6 +20,9 @@ from mozboot.osx import OSXBootstrapper
 from mozboot.openbsd import OpenBSDBootstrapper
 from mozboot.archlinux import ArchlinuxBootstrapper
 from mozboot.windows import WindowsBootstrapper
+from mozboot.util import (
+    get_state_dir,
+)
 
 APPLICATION_CHOICE = '''
 Please choose the version of Firefox you want to build:
@@ -88,7 +91,7 @@ Your system should be ready to build %s!
 SOURCE_ADVERTISE = '''
 Source code can be obtained by running
 
-    hg clone https://hg.mozilla.org/firefox
+    hg clone https://hg.mozilla.org/mozilla-unified
 
 Or, if you prefer Git, you should install git-cinnabar, and follow the
 instruction here to clone from the Mercurial repository:
@@ -135,16 +138,6 @@ DEBIAN_DISTROS = (
     'Elementary',
     '"elementary OS"',
 )
-
-
-def get_state_dir():
-    """Obtain path to a directory to hold state.
-
-    This code is shared with ``mach_bootstrap.py``.
-    """
-    state_user_dir = os.path.expanduser('~/.mozbuild')
-    state_env_dir = os.environ.get('MOZBUILD_STATE_PATH')
-    return state_env_dir or state_user_dir
 
 
 class Bootstrapper(object):
@@ -230,7 +223,7 @@ class Bootstrapper(object):
         # run in self-contained mode and only the files in this directory will
         # be available. We /could/ refactor parts of mach_bootstrap.py to be
         # part of this directory to avoid the code duplication.
-        state_dir = get_state_dir()
+        state_dir, _ = get_state_dir()
 
         if not os.path.exists(state_dir):
             if not self.instance.no_interactive:
@@ -369,7 +362,7 @@ def clone_firefox(hg, dest):
     # unless someone complains about it.
     with open(os.path.join(dest, '.hg', 'hgrc'), 'ab') as fh:
         fh.write('[paths]\n')
-        fh.write('default = https://hg.mozilla.org/firefox\n')
+        fh.write('default = https://hg.mozilla.org/mozilla-unified\n')
         fh.write('\n')
 
         # The server uses aggressivemergedeltas which can blow up delta chain
@@ -380,10 +373,10 @@ def clone_firefox(hg, dest):
         fh.write('# This is necessary to keep performance in check\n')
         fh.write('maxchainlen = 10000\n')
 
-    res = subprocess.call([hg, 'pull', 'https://hg.mozilla.org/firefox'], cwd=dest)
+    res = subprocess.call([hg, 'pull', 'https://hg.mozilla.org/mozilla-unified'], cwd=dest)
     print('')
     if res:
-        print('error pulling; try running `hg pull https://hg.mozilla.org/firefox` manually')
+        print('error pulling; try running `hg pull https://hg.mozilla.org/mozilla-unified` manually')
         return False
 
     print('updating to "central" - the development head of Gecko and Firefox')

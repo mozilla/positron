@@ -296,13 +296,31 @@ void ReportOverRecursed(JSContext* cx, unsigned errorNumber);
 } /* namespace js */
 
 struct JSContext : public js::ExclusiveContext,
-                   public mozilla::LinkedListElement<JSContext>
+                   public JSRuntime
 {
-    explicit JSContext(JSRuntime* rt);
+    explicit JSContext(JSRuntime* parentRuntime);
     ~JSContext();
 
-    JSRuntime* runtime() const { return runtime_; }
-    js::PerThreadData& mainThread() const { return runtime()->mainThread; }
+    bool init(uint32_t maxBytes, uint32_t maxNurseryBytes);
+
+    // For names that exist in both ExclusiveContext and JSRuntime, pick the
+    // ExclusiveContext version.
+    using ExclusiveContext::atomsCompartment;
+    using ExclusiveContext::buildIdOp;
+    using ExclusiveContext::emptyString;
+    using ExclusiveContext::jitSupportsSimd;
+    using ExclusiveContext::make_pod_array;
+    using ExclusiveContext::make_unique;
+    using ExclusiveContext::new_;
+    using ExclusiveContext::permanentAtoms;
+    using ExclusiveContext::pod_calloc;
+    using ExclusiveContext::pod_malloc;
+    using ExclusiveContext::staticStrings;
+    using ExclusiveContext::updateMallocCounter;
+    using ExclusiveContext::wellKnownSymbols;
+
+    JSRuntime* runtime() { return this; }
+    js::PerThreadData& mainThread() { return this->JSRuntime::mainThread; }
 
     static size_t offsetOfRuntime() {
         return offsetof(JSContext, runtime_);
@@ -343,10 +361,6 @@ struct JSContext : public js::ExclusiveContext,
 
     /* State for object and array toSource conversion. */
     js::AutoCycleDetector::Set cycleDetectorSet;
-
-    /* Client opaque pointers. */
-    void*               data;
-    void*               data2;
 
   public:
 
@@ -439,7 +453,7 @@ struct JSContext : public js::ExclusiveContext,
      */
     inline bool runningWithTrustedPrincipals() const;
 
-    JS_FRIEND_API(size_t) sizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf) const;
+    JS_FRIEND_API(size_t) sizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf) const;
 
     void mark(JSTracer* trc);
 
@@ -492,55 +506,14 @@ struct MOZ_RAII AutoResolving {
 };
 
 /*
- * Enumerate all contexts in a runtime.
- */
-class ContextIter
-{
-    JSContext* iter;
-
-  public:
-    explicit ContextIter(JSRuntime* rt) {
-        iter = rt->contextList.getFirst();
-    }
-
-    bool done() const {
-        return !iter;
-    }
-
-    void next() {
-        MOZ_ASSERT(!done());
-        iter = iter->getNext();
-    }
-
-    JSContext* get() const {
-        MOZ_ASSERT(!done());
-        return iter;
-    }
-
-    operator JSContext*() const {
-        return get();
-    }
-
-    JSContext* operator ->() const {
-        return get();
-    }
-};
-
-/*
  * Create and destroy functions for JSContext, which is manually allocated
  * and exclusively owned.
  */
 extern JSContext*
-NewContext(JSRuntime* rt, size_t stackChunkSize);
-
-enum DestroyContextMode {
-    DCM_NO_GC,
-    DCM_FORCE_GC,
-    DCM_NEW_FAILED
-};
+NewContext(uint32_t maxBytes, uint32_t maxNurseryBytes, JSRuntime* parentRuntime);
 
 extern void
-DestroyContext(JSContext* cx, DestroyContextMode mode);
+DestroyContext(JSContext* cx);
 
 enum ErrorArgumentsType {
     ArgumentsAreUnicode,
@@ -574,8 +547,8 @@ ReportErrorNumberUCArray(JSContext* cx, unsigned flags, JSErrorCallback callback
 extern bool
 ExpandErrorArgumentsVA(ExclusiveContext* cx, JSErrorCallback callback,
                        void* userRef, const unsigned errorNumber,
-                       char** message, JSErrorReport* reportp,
-                       ErrorArgumentsType argumentsType, va_list ap);
+                       char** message, ErrorArgumentsType argumentsType,
+                       JSErrorReport* reportp, va_list ap);
 
 /* |callee| requires a usage string provided by JS_DefineFunctionsWithHelp. */
 extern void
@@ -762,6 +735,10 @@ class MOZ_RAII AutoLockForExclusiveAccess
     explicit AutoLockForExclusiveAccess(JSRuntime* rt MOZ_GUARD_OBJECT_NOTIFIER_PARAM) {
         MOZ_GUARD_OBJECT_NOTIFIER_INIT;
         init(rt);
+    }
+    explicit AutoLockForExclusiveAccess(JSContext* cx MOZ_GUARD_OBJECT_NOTIFIER_PARAM) {
+        MOZ_GUARD_OBJECT_NOTIFIER_INIT;
+        init(cx->runtime());
     }
     ~AutoLockForExclusiveAccess() {
         if (runtime->numExclusiveThreads) {

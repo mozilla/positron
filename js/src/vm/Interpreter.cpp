@@ -321,6 +321,7 @@ RunState::maybeCreateThisForConstructor(JSContext* cx)
                 MOZ_ASSERT(callee->as<JSFunction>().isClassConstructor());
                 invoke.args().setThis(MagicValue(JS_UNINITIALIZED_LEXICAL));
             } else {
+                MOZ_ASSERT(invoke.args().thisv().isMagic(JS_IS_CONSTRUCTING));
                 RootedObject newTarget(cx, &invoke.args().newTarget().toObject());
                 NewObjectKind newKind = invoke.createSingleton() ? SingletonObject : GenericObject;
                 JSObject* obj = CreateThisForFunction(cx, callee, newTarget, newKind);
@@ -533,6 +534,8 @@ InternalConstruct(JSContext* cx, const AnyConstructArgs& args)
     MOZ_ASSERT(IsConstructor(args.CallArgs::newTarget()),
                "provided new.target value must be a constructor");
 
+    MOZ_ASSERT(args.thisv().isMagic(JS_IS_CONSTRUCTING) || args.thisv().isObject());
+
     JSObject& callee = args.callee();
     if (callee.is<JSFunction>()) {
         RootedFunction fun(cx, &callee.as<JSFunction>());
@@ -576,7 +579,6 @@ js::ConstructFromStack(JSContext* cx, const CallArgs& args)
     if (!StackCheckIsConstructorCalleeNewTarget(cx, args.calleev(), args.newTarget()))
         return false;
 
-    args.setThis(MagicValue(JS_IS_CONSTRUCTING));
     return InternalConstruct(cx, static_cast<const AnyConstructArgs&>(args));
 }
 
@@ -584,9 +586,10 @@ bool
 js::Construct(JSContext* cx, HandleValue fval, const AnyConstructArgs& args, HandleValue newTarget,
               MutableHandleObject objp)
 {
+    MOZ_ASSERT(args.thisv().isMagic(JS_IS_CONSTRUCTING));
+
     // Explicitly qualify to bypass AnyConstructArgs's deliberate shadowing.
     args.CallArgs::setCallee(fval);
-    args.CallArgs::setThis(MagicValue(JS_IS_CONSTRUCTING));
     args.CallArgs::newTarget().set(newTarget);
 
     if (!InternalConstruct(cx, args))
@@ -725,7 +728,7 @@ js::InstanceOfOperator(JSContext* cx, HandleObject obj, MutableHandleValue v, bo
 
     if (!hasInstance.isNullOrUndefined()) {
         if (!IsCallable(hasInstance))
-            ReportIsNotFunction(cx, hasInstance);
+            return ReportIsNotFunction(cx, hasInstance);
 
         /* Step 3. */
         RootedValue rval(cx);
@@ -738,8 +741,7 @@ js::InstanceOfOperator(JSContext* cx, HandleObject obj, MutableHandleValue v, bo
     /* Step 4. */
     if (!obj->isCallable()) {
         RootedValue val(cx, ObjectValue(*obj));
-        ReportIsNotFunction(cx, val);
-        return false;
+        return ReportIsNotFunction(cx, val);
     }
 
     /* Step 5. */
@@ -1266,8 +1268,7 @@ HandleError(JSContext* cx, InterpreterRegs& regs)
 #define PUSH_STRING(s)           do { REGS.sp++->setString(s); assertSameCompartmentDebugOnly(cx, REGS.sp[-1]); } while (0)
 #define PUSH_OBJECT(obj)         do { REGS.sp++->setObject(obj); assertSameCompartmentDebugOnly(cx, REGS.sp[-1]); } while (0)
 #define PUSH_OBJECT_OR_NULL(obj) do { REGS.sp++->setObjectOrNull(obj); assertSameCompartmentDebugOnly(cx, REGS.sp[-1]); } while (0)
-#define PUSH_HOLE()              REGS.sp++->setMagic(JS_ELEMENTS_HOLE)
-#define PUSH_UNINITIALIZED()     REGS.sp++->setMagic(JS_UNINITIALIZED_LEXICAL)
+#define PUSH_MAGIC(magic)        REGS.sp++->setMagic(magic)
 #define POP_COPY_TO(v)           (v) = *--REGS.sp
 #define POP_RETURN_VALUE()       REGS.fp()->setReturnValue(*--REGS.sp)
 
@@ -1825,7 +1826,6 @@ CASE(EnableInterruptsPseudoOpcode)
 CASE(JSOP_NOP)
 CASE(JSOP_NOP_DESTRUCTURING)
 CASE(JSOP_UNUSED14)
-CASE(JSOP_UNUSED65)
 CASE(JSOP_UNUSED149)
 CASE(JSOP_UNUSED179)
 CASE(JSOP_UNUSED180)
@@ -3296,7 +3296,7 @@ CASE(JSOP_INITGLEXICAL)
 END_CASE(JSOP_INITGLEXICAL)
 
 CASE(JSOP_UNINITIALIZED)
-    PUSH_UNINITIALIZED();
+    PUSH_MAGIC(JS_UNINITIALIZED_LEXICAL);
 END_CASE(JSOP_UNINITIALIZED)
 
 CASE(JSOP_GETARG)
@@ -3471,7 +3471,7 @@ CASE(JSOP_INITHIDDENELEM_SETTER)
 END_CASE(JSOP_INITELEM_GETTER)
 
 CASE(JSOP_HOLE)
-    PUSH_HOLE();
+    PUSH_MAGIC(JS_ELEMENTS_HOLE);
 END_CASE(JSOP_HOLE)
 
 CASE(JSOP_NEWINIT)
@@ -4026,6 +4026,10 @@ CASE(JSOP_DEBUGCHECKSELFHOSTED)
 #endif
 }
 END_CASE(JSOP_DEBUGCHECKSELFHOSTED)
+
+CASE(JSOP_IS_CONSTRUCTING)
+    PUSH_MAGIC(JS_IS_CONSTRUCTING);
+END_CASE(JSOP_IS_CONSTRUCTING)
 
 DEFAULT()
 {

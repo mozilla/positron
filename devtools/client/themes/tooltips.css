@@ -126,6 +126,11 @@
   display: flex;
 }
 
+.tooltip-hidden {
+  display: flex;
+  visibility: hidden;
+}
+
 /* Tooltip : arrow style */
 
 .tooltip-container[type="arrow"] {
@@ -158,6 +163,10 @@
   overflow: hidden;
   pointer-events: all;
   flex-shrink: 0;
+}
+
+.tooltip-arrow:-moz-locale-dir(rtl) {
+  align-self: flex-end;
 }
 
 .tooltip-filler {
@@ -197,10 +206,6 @@
 }
 
 /* Tooltip: Events */
-
-#devtools-tooltip-events-container {
-  overflow-y: auto;
-}
 
 .event-header {
   display: flex;
@@ -334,14 +339,18 @@
   margin-bottom: 5px;
 }
 
-.stack-frame {
+.stack-frame-call {
   color: var(--theme-body-color-alt);
   cursor: pointer;
   display: flex;
 }
 
-.stack-frame:hover {
+.stack-frame-call:hover {
   background-color: var(--theme-selection-background-semitransparent);
+}
+
+.stack-frame-async {
+  color: var(--theme-body-color-inactive);
 }
 
 .stack-frame-function-name {

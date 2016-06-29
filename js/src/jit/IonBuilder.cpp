@@ -766,7 +766,13 @@ IonBuilder::pushLoop(CFGState::State initial, jsbytecode* stopAt, MBasicBlock* e
 bool
 IonBuilder::init()
 {
-    if (!TypeScript::FreezeTypeSets(constraints(), script(), &thisTypes, &argTypes, &typeArray))
+    {
+        LifoAlloc::AutoFallibleScope fallibleAllocator(alloc().lifoAlloc());
+        if (!TypeScript::FreezeTypeSets(constraints(), script(), &thisTypes, &argTypes, &typeArray))
+            return false;
+    }
+
+    if (!alloc().ensureBallast())
         return false;
 
     if (inlineCallInfo_) {
@@ -1407,6 +1413,9 @@ IonBuilder::maybeAddOsrTypeBarriers()
         // discarded here.
         if (info().isSlotAliasedAtOsr(slot))
             continue;
+
+        if (!alloc().ensureBallast())
+            return false;
 
         MInstruction* def = osrBlock->getSlot(slot)->toInstruction();
         MPhi* preheaderPhi = preheader->getSlot(slot)->toPhi();
@@ -2151,6 +2160,9 @@ IonBuilder::inspectOpcode(JSOp op)
         return true;
       }
 
+      case JSOP_IS_CONSTRUCTING:
+        pushConstant(MagicValue(JS_IS_CONSTRUCTING));
+        return true;
 
 #ifdef DEBUG
       case JSOP_PUSHBLOCKSCOPE:

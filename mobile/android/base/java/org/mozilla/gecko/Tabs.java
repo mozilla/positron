@@ -105,8 +105,8 @@ public class Tabs implements GeckoEventListener {
             "Tab:Added",
             "Tab:Close",
             "Tab:Select",
+            "Tab:LoadedFromCache",
             "Content:LocationChange",
-            "Content:LoginInsecure",
             "Content:SecurityChange",
             "Content:StateChange",
             "Content:LoadError",
@@ -490,9 +490,6 @@ public class Tabs implements GeckoEventListener {
             } else if (event.equals("Content:SecurityChange")) {
                 tab.updateIdentityData(message.getJSONObject("identity"));
                 notifyListeners(tab, TabEvents.SECURITY_CHANGE);
-            } else if (event.equals("Content:LoginInsecure")) {
-                tab.setLoginInsecure(true);
-                notifyListeners(tab, TabEvents.SECURITY_CHANGE);
             } else if (event.equals("Content:StateChange")) {
                 int state = message.getInt("state");
                 if ((state & GeckoAppShell.WPL_STATE_IS_NETWORK) != 0) {
@@ -509,8 +506,9 @@ public class Tabs implements GeckoEventListener {
                 tab.handleContentLoaded();
                 notifyListeners(tab, Tabs.TabEvents.LOAD_ERROR);
             } else if (event.equals("Content:PageShow")) {
-                notifyListeners(tab, TabEvents.PAGE_SHOW);
+                tab.setLoadedFromCache(message.getBoolean("fromCache"));
                 tab.updateUserRequested(message.getString("userRequested"));
+                notifyListeners(tab, TabEvents.PAGE_SHOW);
             } else if (event.equals("DOMContentLoaded")) {
                 tab.handleContentLoaded();
                 String backgroundColor = message.getString("bgColor");
@@ -621,6 +619,7 @@ public class Tabs implements GeckoEventListener {
         BOOKMARK_ADDED,
         BOOKMARK_REMOVED,
         AUDIO_PLAYING_CHANGE,
+        OPENED_FROM_TABS_TRAY,
     }
 
     public void notifyListeners(Tab tab, TabEvents msg) {

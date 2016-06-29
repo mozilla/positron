@@ -158,6 +158,7 @@ struct ShellRuntime
 
     bool isWorker;
     double timeoutInterval;
+    double startTime;
     Atomic<bool> serviceInterrupt;
     Atomic<bool> haveInterruptFunc;
     JS::PersistentRootedValue interruptFunc;
@@ -242,12 +243,6 @@ ScheduleWatchdog(JSRuntime* rt, double t);
 static void
 CancelExecution(JSRuntime* rt);
 
-static JSContext*
-NewContext(JSRuntime* rt);
-
-static void
-DestroyContext(JSContext* cx, bool withGC);
-
 static JSObject*
 NewGlobalObject(JSContext* cx, JS::CompartmentOptions& options,
                 JSPrincipals* principals);
@@ -321,6 +316,7 @@ extern JS_EXPORT_API(void)   add_history(char* line);
 ShellRuntime::ShellRuntime(JSRuntime* rt)
   : isWorker(false),
     timeoutInterval(-1.0),
+    startTime(PRMJ_Now()),
     serviceInterrupt(false),
     haveInterruptFunc(false),
     interruptFunc(rt, NullValue()),
@@ -340,12 +336,6 @@ GetShellRuntime(JSRuntime *rt)
     ShellRuntime* sr = static_cast<ShellRuntime*>(JS_GetRuntimePrivate(rt));
     MOZ_ASSERT(sr);
     return sr;
-}
-
-static ShellRuntime*
-GetShellRuntime(JSContext* cx)
-{
-    return GetShellRuntime(cx->runtime());
 }
 
 static char*
@@ -416,32 +406,6 @@ GetLine(FILE* file, const char * prompt)
         current = buffer + len;
     } while (true);
     return nullptr;
-}
-
-/* State to store as JSContext private. */
-struct JSShellContextData {
-    /* Creation timestamp, used by the elapsed() shell builtin. */
-    int64_t startTime;
-};
-
-static JSShellContextData*
-NewContextData()
-{
-    JSShellContextData* data = (JSShellContextData*)
-                               js_calloc(sizeof(JSShellContextData), 1);
-    if (!data)
-        return nullptr;
-    data->startTime = PRMJ_Now();
-    return data;
-}
-
-static inline JSShellContextData*
-GetContextData(JSContext* cx)
-{
-    JSShellContextData* data = (JSShellContextData*) JS_GetContextPrivate(cx);
-
-    MOZ_ASSERT(data);
-    return data;
 }
 
 static bool
@@ -2980,8 +2944,8 @@ WorkerMain(void* arg)
     JS_InitDestroyPrincipalsCallback(rt, ShellPrincipals::destroy);
     SetWorkerRuntimeOptions(rt);
 
-    JSContext* cx = NewContext(rt);
-    if (!cx) {
+    JSContext* cx = JS_GetContext(rt);
+    if (!JS::InitSelfHostedCode(cx)) {
         JS_DestroyRuntime(rt);
         js_delete(input);
         return;
@@ -3025,8 +2989,6 @@ WorkerMain(void* arg)
     JS::SetEnqueuePromiseJobCallback(rt, nullptr);
     sr->jobQueue.reset();
 #endif // SPIDERMONKEY_PROMISE
-
-    DestroyContext(cx, false);
 
     KillWatchdog(rt);
 
@@ -3522,10 +3484,7 @@ Elapsed(JSContext* cx, unsigned argc, Value* vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
     if (args.length() == 0) {
-        double d = 0.0;
-        JSShellContextData* data = GetContextData(cx);
-        if (data)
-            d = PRMJ_Now() - data->startTime;
+        double d = PRMJ_Now() - GetShellRuntime(cx)->startTime;
         args.rval().setDouble(d);
         return true;
     }
@@ -3769,7 +3728,6 @@ class OffThreadState {
 
   public:
     OffThreadState() : monitor(), state(IDLE), token(), source(nullptr) { }
-    bool init() { return monitor.init(); }
 
     bool startIfIdle(JSContext* cx, ScriptKind kind,
                      ScopedJSFreePtr<char16_t>& newSource)
@@ -5222,8 +5180,8 @@ WasmLoop(JSContext* cx, unsigned argc, Value* vp)
             return false;
 
         Rooted<TypedArrayObject*> typedArray(cx, &ret->as<TypedArrayObject>());
-        RootedObject exportObj(cx);
-        if (!wasm::Eval(cx, typedArray, importObj, &exportObj)) {
+        RootedWasmInstanceObject instanceObj(cx);
+        if (!wasm::Eval(cx, typedArray, importObj, &instanceObj)) {
             // Clear any pending exceptions, we don't care about them
             cx->clearPendingException();
         }
@@ -5524,7 +5482,7 @@ static const JSFunctionSpecWithHelp shell_functions[] = {
 
     JS_FN_HELP("elapsed", Elapsed, 0, 0,
 "elapsed()",
-"  Execution time elapsed for the current context."),
+"  Execution time elapsed for the current thread."),
 
     JS_FN_HELP("decompileFunction", DecompileFunction, 1, 0,
 "decompileFunction(func)",
@@ -6533,35 +6491,6 @@ static const JS::AsmJSCacheOps asmJSCacheOps = {
     ShellCloseAsmJSCacheEntryForWrite
 };
 
-static JSContext*
-NewContext(JSRuntime* rt)
-{
-    JSContext* cx = JS_NewContext(rt, gStackChunkSize);
-    if (!cx)
-        return nullptr;
-
-    JSShellContextData* data = NewContextData();
-    if (!data) {
-        DestroyContext(cx, false);
-        return nullptr;
-    }
-
-    JS_SetContextPrivate(cx, data);
-    return cx;
-}
-
-static void
-DestroyContext(JSContext* cx, bool withGC)
-{
-    // Don't use GetContextData as |data| could be a nullptr in the case of
-    // destroying a context precisely because we couldn't create its private
-    // data.
-    JSShellContextData* data = (JSShellContextData*) JS_GetContextPrivate(cx);
-    JS_SetContextPrivate(cx, nullptr);
-    js_free(data);
-    withGC ? JS_DestroyContext(cx) : JS_DestroyContextNoGC(cx);
-}
-
 static JSObject*
 NewGlobalObject(JSContext* cx, JS::CompartmentOptions& options,
                 JSPrincipals* principals)
@@ -7183,8 +7112,6 @@ main(int argc, char** argv, char** envp)
     sArgc = argc;
     sArgv = argv;
 
-    JSRuntime* rt;
-    JSContext* cx;
     int result;
 
 #ifdef HAVE_SETLOCALE
@@ -7274,7 +7201,7 @@ main(int argc, char** argv, char** envp)
         || !op.addStringOption('\0', "ion-edgecase-analysis", "on/off",
                                "Find edge cases where Ion can avoid bailouts (default: on, off to disable)")
         || !op.addStringOption('\0', "ion-pgo", "on/off",
-                               "Profile guided optimization (default: off, on to enable)")
+                               "Profile guided optimization (default: on, off to disable)")
         || !op.addStringOption('\0', "ion-range-analysis", "on/off",
                                "Range analysis (default: on, off to disable)")
 #if defined(__APPLE__)
@@ -7320,8 +7247,6 @@ main(int argc, char** argv, char** envp)
                             "Wait for COUNT calls or iterations before baseline-compiling "
                             "(default: 10)", -1)
         || !op.addBoolOption('\0', "non-writable-jitcode", "(NOP for fuzzers) Allocate JIT code as non-writable memory.")
-        || !op.addBoolOption('\0', "no-fpu", "Pretend CPU does not support floating-point operations "
-                             "to test JIT codegen (no-op on platforms other than x86).")
         || !op.addBoolOption('\0', "no-sse3", "Pretend CPU does not support SSE3 instructions and above "
                              "to test JIT codegen (no-op on platforms other than x86 and x64).")
         || !op.addBoolOption('\0', "no-sse4", "Pretend CPU does not support SSE4 instructions"
@@ -7398,11 +7323,6 @@ main(int argc, char** argv, char** envp)
     OOM_printAllocationCount = op.getBoolOption('O');
 #endif
 
-#ifdef JS_CODEGEN_X86
-    if (op.getBoolOption("no-fpu"))
-        js::jit::CPUInfo::SetFloatingPointDisabled();
-#endif
-
 #if defined(JS_CODEGEN_X86) || defined(JS_CODEGEN_X64)
     if (op.getBoolOption("no-sse3")) {
         js::jit::CPUInfo::SetSSE3Disabled();
@@ -7438,7 +7358,7 @@ main(int argc, char** argv, char** envp)
     nurseryBytes = op.getIntOption("nursery-size") * 1024L * 1024L;
 
     /* Use the same parameters as the browser in xpcjsruntime.cpp. */
-    rt = JS_NewRuntime(JS::DefaultHeapMaxBytes, nurseryBytes);
+    JSRuntime* rt = JS_NewRuntime(JS::DefaultHeapMaxBytes, nurseryBytes);
     if (!rt)
         return 1;
 
@@ -7471,11 +7391,8 @@ main(int argc, char** argv, char** envp)
 
     JS::dbg::SetDebuggerMallocSizeOf(rt, moz_malloc_size_of);
 
-    if (!offThreadState.init())
-        return 1;
-
-    cx = NewContext(rt);
-    if (!cx)
+    JSContext* cx = JS_GetContext(rt);
+    if (!JS::InitSelfHostedCode(cx))
         return 1;
 
 #ifdef SPIDERMONKEY_PROMISE
@@ -7515,8 +7432,6 @@ main(int argc, char** argv, char** envp)
     JS::SetEnqueuePromiseJobCallback(rt, nullptr);
     sr->jobQueue.reset();
 #endif // SPIDERMONKEY_PROMISE
-
-    DestroyContext(cx, true);
 
     KillWatchdog(rt);
 

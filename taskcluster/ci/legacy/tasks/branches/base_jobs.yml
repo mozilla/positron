@@ -6,6 +6,14 @@ $inherits:
   from: tasks/branches/base_job_flags.yml
 
 builds:
+  android-api-15:
+    platforms:
+      - Android
+    types:
+      opt:
+        task: tasks/builds/android_api_15.yml
+      debug:
+        task: tasks/builds/android_api_15_debug.yml
   linux64-mulet:
     platforms:
       - Mulet Linux
@@ -15,6 +23,8 @@ builds:
   linux:
     platforms:
       - Linux
+    extra-builds:  # see RIDEALONG_BUILDS in `mach taskgraph`
+      - linux-l10n
     types:
       opt:
         task: tasks/builds/opt_linux32.yml
@@ -24,6 +34,7 @@ builds:
     platforms:
       - Linux64
     extra-builds:  # see RIDEALONG_BUILDS in `mach taskgraph`
+      - linux64-l10n
       - sm-plain
       - sm-nonunified
       - sm-arm-sim
@@ -212,6 +223,12 @@ tests:
         task: tasks/tests/fx_linux64_cppunit_dbg.yml
       tasks/builds/opt_linux64_pgo.yml:
         task: tasks/tests/fx_linux64_cppunit_opt.yml
+      tasks/builds/opt_linux64-asan.yml:
+        task: tasks/tests/fx_linux64_cppunit_opt.yml
+      tasks/builds/android_api_15.yml:
+        task: tasks/tests/fx_android-api-15_cppunit_opt.yml
+      tasks/builds/android_api_15_debug.yml:
+        task: tasks/tests/fx_android-api-15_cppunit_dbg.yml
   crashtest:
     allowed_build_tasks:
       tasks/builds/opt_linux64.yml:
@@ -220,6 +237,12 @@ tests:
         task: tasks/tests/fx_linux64_crashtest_dbg.yml
       tasks/builds/opt_linux64_pgo.yml:
         task: tasks/tests/fx_linux64_crashtest_opt.yml
+      tasks/builds/opt_linux64-asan.yml:
+        task: tasks/tests/fx_linux64_crashtest_opt.yml
+      tasks/builds/android_api_15.yml:
+        task: tasks/tests/fx_android-api-15_crashtest_opt.yml
+      tasks/builds/android_api_15_debug.yml:
+        task: tasks/tests/fx_android-api-15_crashtest_dbg.yml
   crashtest-e10s:
     allowed_build_tasks:
       tasks/builds/opt_linux64.yml:
@@ -227,6 +250,8 @@ tests:
       tasks/builds/dbg_linux64.yml:
         task: tasks/tests/fx_linux64_crashtest_e10s_dbg.yml
       tasks/builds/opt_linux64_pgo.yml:
+        task: tasks/tests/fx_linux64_crashtest_e10s_opt.yml
+      tasks/builds/opt_linux64-asan.yml:
         task: tasks/tests/fx_linux64_crashtest_e10s_opt.yml
   external-media-tests:
     allowed_build_tasks:
@@ -260,6 +285,8 @@ tests:
         task: tasks/tests/fx_linux64_gtest_dbg.yml
       tasks/builds/opt_linux64_pgo.yml:
         task: tasks/tests/fx_linux64_gtest_opt.yml
+      tasks/builds/opt_linux64-asan.yml:
+        task: tasks/tests/fx_linux64_gtest_opt.yml
   jittests:
     allowed_build_tasks:
       tasks/builds/opt_linux64.yml:
@@ -267,6 +294,8 @@ tests:
       tasks/builds/dbg_linux64.yml:
         task: tasks/tests/fx_linux64_jittests_dbg.yml
       tasks/builds/opt_linux64_pgo.yml:
+        task: tasks/tests/fx_linux64_jittests_opt.yml
+      tasks/builds/opt_linux64-asan.yml:
         task: tasks/tests/fx_linux64_jittests_opt.yml
   jsreftest:
     allowed_build_tasks:
@@ -276,6 +305,12 @@ tests:
         task: tasks/tests/fx_linux64_jsreftest_dbg.yml
       tasks/builds/opt_linux64_pgo.yml:
         task: tasks/tests/fx_linux64_jsreftest_opt.yml
+      tasks/builds/opt_linux64-asan.yml:
+        task: tasks/tests/fx_linux64_jsreftest_opt.yml
+      tasks/builds/android_api_15.yml:
+        task: tasks/tests/fx_android-api-15_jsreftest_opt.yml
+      tasks/builds/android_api_15_debug.yml:
+        task: tasks/tests/fx_android-api-15_jsreftest_dbg.yml
   jsreftest-e10s:
     allowed_build_tasks:
       tasks/builds/opt_linux64.yml:
@@ -283,6 +318,8 @@ tests:
       tasks/builds/dbg_linux64.yml:
         task: tasks/tests/fx_linux64_jsreftest_e10s_dbg.yml
       tasks/builds/opt_linux64_pgo.yml:
+        task: tasks/tests/fx_linux64_jsreftest_e10s_opt.yml
+      tasks/builds/opt_linux64-asan.yml:
         task: tasks/tests/fx_linux64_jsreftest_e10s_opt.yml
   marionette:
     allowed_build_tasks:
@@ -292,6 +329,8 @@ tests:
         task: tasks/tests/fx_linux64_marionette_dbg.yml
       tasks/builds/opt_linux64_pgo.yml:
         task: tasks/tests/fx_linux64_marionette_opt.yml
+      tasks/builds/opt_linux64-asan.yml:
+        task: tasks/tests/fx_linux64_marionette_opt.yml
   marionette-e10s:
     allowed_build_tasks:
       tasks/builds/opt_linux64.yml:
@@ -299,6 +338,8 @@ tests:
       tasks/builds/dbg_linux64.yml:
         task: tasks/tests/fx_linux64_marionette_e10s_dbg.yml
       tasks/builds/opt_linux64_pgo.yml:
+        task: tasks/tests/fx_linux64_marionette_e10s_opt.yml
+      tasks/builds/opt_linux64-asan.yml:
         task: tasks/tests/fx_linux64_marionette_e10s_opt.yml
   mochitest:
     allowed_build_tasks:
@@ -310,6 +351,12 @@ tests:
         task: tasks/tests/fx_linux64_mochitest_plain_dbg.yml
       tasks/builds/opt_linux64_pgo.yml:
         task: tasks/tests/fx_linux64_mochitest_plain_opt.yml
+      tasks/builds/opt_linux64-asan.yml:
+        task: tasks/tests/fx_linux64_mochitest_plain_opt.yml
+      tasks/builds/android_api_15.yml:
+        task: tasks/tests/fx_android-api-15_mochitest_plain_opt.yml
+      tasks/builds/android_api_15_debug.yml:
+        task: tasks/tests/fx_android-api-15_mochitest_plain_dbg.yml
   mochitest-e10s:
     allowed_build_tasks:
       tasks/builds/opt_linux64.yml:
@@ -317,6 +364,8 @@ tests:
       tasks/builds/dbg_linux64.yml:
         task: tasks/tests/fx_linux64_mochitest_plain_e10s_dbg.yml
       tasks/builds/opt_linux64_pgo.yml:
+        task: tasks/tests/fx_linux64_mochitest_plain_e10s_opt.yml
+      tasks/builds/opt_linux64-asan.yml:
         task: tasks/tests/fx_linux64_mochitest_plain_e10s_opt.yml
   mochitest-a11y:
     allowed_build_tasks:
@@ -334,6 +383,8 @@ tests:
         task: tasks/tests/fx_linux64_mochitest_bc_dbg.yml
       tasks/builds/opt_linux64_pgo.yml:
         task: tasks/tests/fx_linux64_mochitest_bc_opt.yml
+      tasks/builds/opt_linux64-asan.yml:
+        task: tasks/tests/fx_linux64_mochitest_bc_opt.yml
   mochitest-browser-chrome-e10s:
     allowed_build_tasks:
       tasks/builds/opt_linux64.yml:
@@ -341,6 +392,8 @@ tests:
       tasks/builds/dbg_linux64.yml:
         task: tasks/tests/fx_linux64_mochitest_bc_e10s_dbg.yml
       tasks/builds/opt_linux64_pgo.yml:
+        task: tasks/tests/fx_linux64_mochitest_bc_e10s_opt.yml
+      tasks/builds/opt_linux64-asan.yml:
         task: tasks/tests/fx_linux64_mochitest_bc_e10s_opt.yml
   mochitest-chrome:
     allowed_build_tasks:
@@ -350,6 +403,12 @@ tests:
         task: tasks/tests/fx_linux64_mochitest_chrome_dbg.yml
       tasks/builds/opt_linux64_pgo.yml:
         task: tasks/tests/fx_linux64_mochitest_chrome_opt.yml
+      tasks/builds/opt_linux64-asan.yml:
+        task: tasks/tests/fx_linux64_mochitest_chrome_opt.yml
+      tasks/builds/android_api_15.yml:
+        task: tasks/tests/fx_android-api-15_mochitest_chrome_opt.yml
+      tasks/builds/android_api_15_debug.yml:
+        task: tasks/tests/fx_android-api-15_mochitest_chrome_dbg.yml
   mochitest-devtools-chrome:
     allowed_build_tasks:
       tasks/builds/opt_linux64.yml:
@@ -358,11 +417,15 @@ tests:
         task: tasks/tests/fx_linux64_mochitest_dt_dbg.yml
       tasks/builds/opt_linux64_pgo.yml:
         task: tasks/tests/fx_linux64_mochitest_dt_opt.yml
+      tasks/builds/opt_linux64-asan.yml:
+        task: tasks/tests/fx_linux64_mochitest_dt_opt.yml
   mochitest-devtools-chrome-e10s:
     allowed_build_tasks:
       tasks/builds/opt_linux64.yml:
         task: tasks/tests/fx_linux64_mochitest_dt_e10s_opt.yml
       tasks/builds/opt_linux64_pgo.yml:
+        task: tasks/tests/fx_linux64_mochitest_dt_e10s_opt.yml
+      tasks/builds/opt_linux64-asan.yml:
         task: tasks/tests/fx_linux64_mochitest_dt_e10s_opt.yml
   mochitest-jetpack:
     allowed_build_tasks:
@@ -372,6 +435,8 @@ tests:
         task: tasks/tests/fx_linux64_mochitest_jetpack_dbg.yml
       tasks/builds/opt_linux64_pgo.yml:
         task: tasks/tests/fx_linux64_mochitest_jetpack_opt.yml
+      tasks/builds/opt_linux64-asan.yml:
+        task: tasks/tests/fx_linux64_mochitest_jetpack_opt.yml
   mochitest-media:
     allowed_build_tasks:
       tasks/builds/opt_linux64.yml:
@@ -380,6 +445,12 @@ tests:
         task: tasks/tests/fx_linux64_mochitest_media_dbg.yml
       tasks/builds/opt_linux64_pgo.yml:
         task: tasks/tests/fx_linux64_mochitest_media_opt.yml
+      tasks/builds/opt_linux64-asan.yml:
+        task: tasks/tests/fx_linux64_mochitest_media_opt.yml
+      tasks/builds/android_api_15.yml:
+        task: tasks/tests/fx_android-api-15_mochitest_media_opt.yml
+      tasks/builds/android_api_15_debug.yml:
+        task: tasks/tests/fx_android-api-15_mochitest_media_dbg.yml
   mochitest-media-e10s:
     allowed_build_tasks:
       tasks/builds/opt_linux64.yml:
@@ -387,6 +458,8 @@ tests:
       tasks/builds/dbg_linux64.yml:
         task: tasks/tests/fx_linux64_mochitest_media_e10s_dbg.yml
       tasks/builds/opt_linux64_pgo.yml:
+        task: tasks/tests/fx_linux64_mochitest_media_e10s_opt.yml
+      tasks/builds/opt_linux64-asan.yml:
         task: tasks/tests/fx_linux64_mochitest_media_e10s_opt.yml
   mochitest-webgl:
     allowed_build_tasks:
@@ -396,6 +469,12 @@ tests:
         task: tasks/tests/fx_linux64_mochitest_gl_dbg.yml
       tasks/builds/opt_linux64_pgo.yml:
         task: tasks/tests/fx_linux64_mochitest_gl_opt.yml
+      tasks/builds/opt_linux64-asan.yml:
+        task: tasks/tests/fx_linux64_mochitest_gl_opt.yml
+      tasks/builds/android_api_15.yml:
+        task: tasks/tests/fx_android-api-15_mochitest_gl_opt.yml
+      tasks/builds/android_api_15_debug.yml:
+        task: tasks/tests/fx_android-api-15_mochitest_gl_dbg.yml
   mochitest-webgl-e10s:
     allowed_build_tasks:
       tasks/builds/opt_linux64.yml:
@@ -403,6 +482,8 @@ tests:
       tasks/builds/dbg_linux64.yml:
         task: tasks/tests/fx_linux64_mochitest_gl_e10s_dbg.yml
       tasks/builds/opt_linux64_pgo.yml:
+        task: tasks/tests/fx_linux64_mochitest_gl_e10s_opt.yml
+      tasks/builds/opt_linux64-asan.yml:
         task: tasks/tests/fx_linux64_mochitest_gl_e10s_opt.yml
   mochitest-gpu:
     allowed_build_tasks:
@@ -412,6 +493,12 @@ tests:
         task: tasks/tests/fx_linux64_mochitest_gpu_dbg.yml
       tasks/builds/opt_linux64_pgo.yml:
         task: tasks/tests/fx_linux64_mochitest_gpu_opt.yml
+      tasks/builds/opt_linux64-asan.yml:
+        task: tasks/tests/fx_linux64_mochitest_gpu_opt.yml
+      tasks/builds/android_api_15.yml:
+        task: tasks/tests/fx_android-api-15_mochitest_gpu_opt.yml
+      tasks/builds/android_api_15_debug.yml:
+        task: tasks/tests/fx_android-api-15_mochitest_gpu_dbg.yml
   mochitest-gpu-e10s:
     allowed_build_tasks:
       tasks/builds/opt_linux64.yml:
@@ -419,6 +506,8 @@ tests:
       tasks/builds/dbg_linux64.yml:
         task: tasks/tests/fx_linux64_mochitest_gpu_e10s_dbg.yml
       tasks/builds/opt_linux64_pgo.yml:
+        task: tasks/tests/fx_linux64_mochitest_gpu_e10s_opt.yml
+      tasks/builds/opt_linux64-asan.yml:
         task: tasks/tests/fx_linux64_mochitest_gpu_e10s_opt.yml
   mochitest-clipboard:
     allowed_build_tasks:
@@ -428,6 +517,12 @@ tests:
         task: tasks/tests/fx_linux64_mochitest_clipboard_dbg.yml
       tasks/builds/opt_linux64_pgo.yml:
         task: tasks/tests/fx_linux64_mochitest_clipboard_opt.yml
+      tasks/builds/opt_linux64-asan.yml:
+        task: tasks/tests/fx_linux64_mochitest_clipboard_opt.yml
+      tasks/builds/android_api_15.yml:
+        task: tasks/tests/fx_android-api-15_mochitest_clipboard_opt.yml
+      tasks/builds/android_api_15_debug.yml:
+        task: tasks/tests/fx_android-api-15_mochitest_clipboard_dbg.yml
   mochitest-clipboard-e10s:
     allowed_build_tasks:
       tasks/builds/opt_linux64.yml:
@@ -435,6 +530,8 @@ tests:
       tasks/builds/dbg_linux64.yml:
         task: tasks/tests/fx_linux64_mochitest_clipboard_e10s_dbg.yml
       tasks/builds/opt_linux64_pgo.yml:
+        task: tasks/tests/fx_linux64_mochitest_clipboard_e10s_opt.yml
+      tasks/builds/opt_linux64-asan.yml:
         task: tasks/tests/fx_linux64_mochitest_clipboard_e10s_opt.yml
   reftest:
     allowed_build_tasks:
@@ -446,6 +543,10 @@ tests:
         task: tasks/tests/fx_linux64_reftest_dbg.yml
       tasks/builds/opt_linux64_pgo.yml:
         task: tasks/tests/fx_linux64_reftest_opt.yml
+      tasks/builds/android_api_15.yml:
+        task: tasks/tests/fx_android-api-15_reftest_opt.yml
+      tasks/builds/android_api_15_debug.yml:
+        task: tasks/tests/fx_android-api-15_reftest_dbg.yml
   reftest-e10s:
     allowed_build_tasks:
       tasks/builds/opt_linux64.yml:
@@ -470,6 +571,10 @@ tests:
         task: tasks/tests/fx_linux64_reftest_not_accelerated_e10s_dbg.yml
       tasks/builds/opt_linux64_pgo.yml:
         task: tasks/tests/fx_linux64_reftest_not_accelerated_e10s_opt.yml
+  robocop:
+    allowed_build_tasks:
+      tasks/builds/android_api_15.yml:
+        task: tasks/tests/fx_android-api-15_robocop_opt.yml
   web-platform-tests:
     allowed_build_tasks:
       tasks/builds/opt_linux64.yml:
@@ -510,6 +615,12 @@ tests:
         task: tasks/tests/fx_linux64_xpcshell_dbg.yml
       tasks/builds/opt_linux64_pgo.yml:
         task: tasks/tests/fx_linux64_xpcshell_opt.yml
+      tasks/builds/opt_linux64-asan.yml:
+        task: tasks/tests/fx_linux64_xpcshell_opt.yml
+      tasks/builds/android_api_15.yml:
+        task: tasks/tests/fx_android-api-15_xpcshell_opt.yml
+      tasks/builds/android_api_15_debug.yml:
+        task: tasks/tests/fx_android-api-15_xpcshell_dbg.yml
 
 # Miscellaneous tasks.
 tasks:
@@ -542,6 +653,15 @@ tasks:
         - 'python/mozlint/**'
         - 'tools/lint/**'
         - 'testing/docker/lint/**'
+        - 'taskcluster/**'
+  taskgraph-tests:
+    task: tasks/tests/taskgraph-tests.yml
+    root: true
+    when:
+      file_patterns:
+        - 'taskcluster/**.py'
+        - 'config/mozunit.py'
+        - 'python/mach/**.py'
   android-api-15-gradle-dependencies:
     task: tasks/builds/android_api_15_gradle_dependencies.yml
     root: true

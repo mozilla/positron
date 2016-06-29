@@ -55,7 +55,7 @@ function waitForContentMessage(name) {
 
   let mm = gBrowser.selectedBrowser.messageManager;
 
-  let def = promise.defer();
+  let def = defer();
   mm.addMessageListener(name, function onMessage(msg) {
     mm.removeMessageListener(name, onMessage);
     def.resolve(msg.data);
@@ -487,23 +487,6 @@ function getRuleViewLinkByIndex(view, index) {
 function getRuleViewLinkTextByIndex(view, index) {
   let link = getRuleViewLinkByIndex(view, index);
   return link.querySelector(".ruleview-rule-source-label").value;
-}
-
-/**
- * Get the rule editor from the rule-view given its index
- *
- * @param {CssRuleView} view
- *        The instance of the rule-view panel
- * @param {Number} childrenIndex
- *        The children index of the element to get
- * @param {Number} nodeIndex
- *        The child node index of the element to get
- * @return {DOMNode} The rule editor if any at this index
- */
-function getRuleViewRuleEditor(view, childrenIndex, nodeIndex) {
-  return nodeIndex !== undefined ?
-    view.element.children[childrenIndex].childNodes[nodeIndex]._ruleEditor :
-    view.element.children[childrenIndex]._ruleEditor;
 }
 
 /**

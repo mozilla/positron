@@ -68,6 +68,8 @@
 
   <string name="switch_to_tab">&switch_to_tab;</string>
 
+  <string name="tab_offline_version">&tab_offline_version;</string>
+
   <string name="crash_reporter_title">&crash_reporter_title;</string>
   <string name="crash_message2">&crash_message2;</string>
   <string name="crash_send_report_message3">&crash_send_report_message3;</string>
@@ -495,7 +497,6 @@
   <!-- Site identity popup -->
   <string name="identity_connection_secure">&identity_connection_secure;</string>
   <string name="identity_connection_insecure">&identity_connection_insecure;</string>
-  <string name="identity_login_insecure">&identity_login_insecure;</string>
   <string name="identity_connection_chromeui">&identity_connection_chromeui;</string>
 
   <string name="mixed_content_blocked_all">&mixed_content_blocked_all1;</string>

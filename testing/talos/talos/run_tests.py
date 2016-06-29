@@ -47,6 +47,14 @@ def buildCommandLine(test):
     if 'tpmanifest' not in test:
         raise TalosError("tpmanifest not found in test: %s" % test)
 
+    # if profiling is on, override tppagecycles to prevent test hanging
+    if test['sps_profile']:
+        LOG.info("sps profiling is enabled so talos is reducing the number "
+                 "of cycles, please disregard reported numbers")
+        for cycle_var in ['tppagecycles', 'tpcycles', 'cycles']:
+            if test[cycle_var] > 2:
+                test[cycle_var] = 2
+
     # build pageloader command from options
     url = ['-tp', test['tpmanifest']]
     CLI_bool_options = ['tpchrome', 'tpmozafterpaint', 'tpdisable_e10s',
@@ -161,7 +169,7 @@ def run_tests(config, browser_config):
     talos_results = TalosResults()
 
     # results links
-    if not browser_config['develop']:
+    if not browser_config['develop'] and not config['sps_profile']:
         results_urls = dict(
             # another hack; datazilla stands for Perfherder
             # and do not require url, but a non empty dict is required...
@@ -170,7 +178,6 @@ def run_tests(config, browser_config):
     else:
         # local mode, output to files
         results_urls = dict(output_urls=[os.path.abspath('local.json')])
-    talos_results.check_output_formats(results_urls)
 
     httpd = setup_webserver(browser_config['webserver'])
     httpd.start()
@@ -178,6 +185,9 @@ def run_tests(config, browser_config):
     # if e10s add as extra results option
     if config['e10s']:
         talos_results.add_extra_option('e10s')
+
+    if config['sps_profile']:
+        talos_results.add_extra_option('spsProfile')
 
     testname = None
     # run the tests
@@ -217,7 +227,7 @@ def run_tests(config, browser_config):
     # output results
     if results_urls:
         talos_results.output(results_urls)
-        if browser_config['develop']:
+        if browser_config['develop'] or config['sps_profile']:
             print ("Thanks for running Talos locally. Results are in %s"
                    % (results_urls['output_urls']))
 
