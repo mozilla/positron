@@ -87,7 +87,7 @@ if (url.search.length > 1) {
       window.removeEventListener("unload", onUnload);
       toolbox.destroy();
     }
-    window.addEventListener("unload", onUnload, true);
+    window.addEventListener("unload", onUnload);
     toolbox.on("destroy", function () {
       window.removeEventListener("unload", onUnload);
     });
