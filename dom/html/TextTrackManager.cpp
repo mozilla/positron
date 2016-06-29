@@ -145,7 +145,7 @@ TextTrackManager::AddTextTrack(TextTrackKind aKind, const nsAString& aLabel,
   AddCues(ttrack);
 
   if (aTextTrackSource == Track) {
-    HonorUserPreferencesForTrackSelection();
+    NS_DispatchToMainThread(NewRunnableMethod(this, &TextTrackManager::HonorUserPreferencesForTrackSelection));
   }
 
   return ttrack.forget();
@@ -160,7 +160,7 @@ TextTrackManager::AddTextTrack(TextTrack* aTextTrack)
   mTextTracks->AddTextTrack(aTextTrack, CompareTextTracks(mMediaElement));
   AddCues(aTextTrack);
   if (aTextTrack->GetTextTrackSource() == Track) {
-    HonorUserPreferencesForTrackSelection();
+    NS_DispatchToMainThread(NewRunnableMethod(this, &TextTrackManager::HonorUserPreferencesForTrackSelection));
   }
 }
 
@@ -230,6 +230,7 @@ TextTrackManager::UpdateCueDisplay()
   }
 
   nsCOMPtr<nsIContent> overlay = videoFrame->GetCaptionOverlay();
+  nsCOMPtr<nsIContent> controls = videoFrame->GetVideoControls();
   if (!overlay) {
     return;
   }
@@ -247,7 +248,7 @@ TextTrackManager::UpdateCueDisplay()
 
     nsPIDOMWindowInner* window = mMediaElement->OwnerDoc()->GetInnerWindow();
     if (window) {
-      sParserWrapper->ProcessCues(window, jsCues, overlay);
+      sParserWrapper->ProcessCues(window, jsCues, overlay, controls);
     }
   } else if (overlay->Length() > 0) {
     nsContentUtils::SetNodeTextContent(overlay, EmptyString(), true);
@@ -296,6 +297,10 @@ TextTrackManager::AddListeners()
   if (mMediaElement) {
     mMediaElement->AddEventListener(NS_LITERAL_STRING("resizevideocontrols"),
                                     this, false, false);
+    mMediaElement->AddEventListener(NS_LITERAL_STRING("seeked"),
+                                    this, false, false);
+    mMediaElement->AddEventListener(NS_LITERAL_STRING("controlbarchange"),
+                                    this, false, true);
   }
 }
 
@@ -405,11 +410,17 @@ TextTrackManager::HandleEvent(nsIDOMEvent* aEvent)
 
   nsAutoString type;
   aEvent->GetType(type);
-  if (type.EqualsLiteral("resizevideocontrols")) {
+  if (type.EqualsLiteral("resizevideocontrols") ||
+      type.EqualsLiteral("seeked")) {
     for (uint32_t i = 0; i< mTextTracks->Length(); i++) {
       ((*mTextTracks)[i])->SetCuesDirty();
     }
   }
+
+  if (type.EqualsLiteral("controlbarchange")) {
+    UpdateCueDisplay();
+  }
+
   return NS_OK;
 }
 
@@ -527,6 +538,11 @@ TextTrackManager::TimeMarchesOn()
 
   mTimeMarchesOnDispatched = false;
 
+  // Early return if we don't have any TextTracks.
+  if (mTextTracks->Length() == 0) {
+    return;
+  }
+
   nsISupports* parentObject =
     mMediaElement->OwnerDoc()->GetParentObject();
   if (NS_WARN_IF(!parentObject)) {
@@ -564,6 +580,11 @@ TextTrackManager::TimeMarchesOn()
   }
   // Populate otherCues with 'non-active" cues.
   if (hasNormalPlayback) {
+    if (currentPlaybackTime < mLastTimeMarchesOnCalled) {
+      // TODO: Add log and find the root cause why the
+      // playback position goes backward.
+      mLastTimeMarchesOnCalled = currentPlaybackTime;
+    }
     media::Interval<double> interval(mLastTimeMarchesOnCalled,
                                      currentPlaybackTime);
     otherCues = mNewCues->GetCueListByTimeInterval(interval);;
@@ -716,6 +737,12 @@ TextTrackManager::NotifyCueUpdated(TextTrackCue *aCue)
 {
   // TODO: Add/Reorder the cue to mNewCues if we have some optimization?
   DispatchTimeMarchesOn();
+}
+
+void
+TextTrackManager::NotifyReset()
+{
+  mLastTimeMarchesOnCalled = 0.0;
 }
 
 } // namespace dom

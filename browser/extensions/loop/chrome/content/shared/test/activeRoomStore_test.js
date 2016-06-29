@@ -13,8 +13,7 @@ describe("loop.store.ActiveRoomStore", function () {
   var FAILURE_DETAILS = loop.shared.utils.FAILURE_DETAILS;
   var SCREEN_SHARE_STATES = loop.shared.utils.SCREEN_SHARE_STATES;
   var ROOM_INFO_FAILURES = loop.shared.utils.ROOM_INFO_FAILURES;
-  var sandbox, dispatcher, store, requestStubs, fakeSdkDriver, fakeMultiplexGum;
-  var standaloneMediaRestore;
+  var sandbox, dispatcher, store, requestStubs, fakeSdkDriver;
   var clock;
 
   beforeEach(function () {
@@ -38,7 +37,6 @@ describe("loop.store.ActiveRoomStore", function () {
       "Rooms:PushSubscription": sinon.stub(), 
       SetScreenShareState: sinon.stub(), 
       GetActiveTabWindowId: sandbox.stub().returns(42), 
-      GetSocialShareProviders: sinon.stub().returns([]), 
       TelemetryAddValue: sinon.stub() });
 
 
@@ -53,16 +51,8 @@ describe("loop.store.ActiveRoomStore", function () {
       retryPublishWithoutVideo: sinon.stub(), 
       startScreenShare: sinon.stub(), 
       switchAcquiredWindow: sinon.stub(), 
+      toggleBrowserSharing: sinon.stub(), 
       endScreenShare: sinon.stub().returns(true) };
-
-
-    fakeMultiplexGum = { 
-      reset: sandbox.spy() };
-
-
-    standaloneMediaRestore = loop.standaloneMedia;
-    loop.standaloneMedia = { 
-      multiplexGum: fakeMultiplexGum };
 
 
     store = new loop.store.ActiveRoomStore(dispatcher, { 
@@ -76,8 +66,7 @@ describe("loop.store.ActiveRoomStore", function () {
 
   afterEach(function () {
     sandbox.restore();
-    LoopMochaUtils.restore();
-    loop.standaloneMedia = standaloneMediaRestore;});
+    LoopMochaUtils.restore();});
 
 
   describe("#constructor", function () {
@@ -182,15 +171,6 @@ describe("loop.store.ActiveRoomStore", function () {
       expect(store._storeState.failureReason).eql(FAILURE_DETAILS.EXPIRED_OR_INVALID);});
 
 
-    it("should reset the multiplexGum", function () {
-      store.roomFailure(new sharedActions.RoomFailure({ 
-        error: fakeError, 
-        failedJoinRequest: false }));
-
-
-      sinon.assert.calledOnce(fakeMultiplexGum.reset);});
-
-
     it("should disconnect from the servers via the sdk", function () {
       store.roomFailure(new sharedActions.RoomFailure({ 
         error: fakeError, 
@@ -216,7 +196,12 @@ describe("loop.store.ActiveRoomStore", function () {
       sandbox.stub(loop, "unsubscribe");
 
       // Setup the listener.
-      store.startBrowserShare(new sharedActions.StartBrowserShare());
+      store.joinedRoom(new sharedActions.JoinedRoom({ 
+        apiKey: "", 
+        sessionToken: "", 
+        sessionId: "", 
+        expires: 0 }));
+
 
       // Now simulate room failure.
       store.roomFailure(new sharedActions.RoomFailure({ 
@@ -370,8 +355,7 @@ describe("loop.store.ActiveRoomStore", function () {
           participants: [], 
           roomName: fakeRoomData.decryptedContext.roomName, 
           roomState: ROOM_STATES.READY, 
-          roomUrl: fakeRoomData.roomUrl, 
-          socialShareProviders: [] }));});});
+          roomUrl: fakeRoomData.roomUrl }));});});
 
 
 
@@ -806,28 +790,6 @@ describe("loop.store.ActiveRoomStore", function () {
 
 
 
-  describe("#updateSocialShareInfo", function () {
-    var fakeSocialShareInfo;
-
-    beforeEach(function () {
-      fakeSocialShareInfo = { 
-        socialShareProviders: [{ 
-          name: "foo", 
-          origin: "https://example.com", 
-          iconURL: "icon.png" }] };});
-
-
-
-
-    it("should save the Social API information", function () {
-      store.updateSocialShareInfo(new sharedActions.UpdateSocialShareInfo(fakeSocialShareInfo));
-
-      var state = store.getStoreState();
-      expect(state.socialShareProviders).
-      eql(fakeSocialShareInfo.socialShareProviders);});});
-
-
-
   describe("#joinRoom", function () {
     var hasDevicesStub;
 
@@ -1128,28 +1090,6 @@ describe("loop.store.ActiveRoomStore", function () {
       actionData);});
 
 
-    it("should pass 'sendTwoWayMediaTelemetry' as true to connectSession if " + 
-    "store._isDesktop is true", function () {
-      store._isDesktop = true;
-
-      store.joinedRoom(new sharedActions.JoinedRoom(fakeJoinedData));
-
-      sinon.assert.calledOnce(fakeSdkDriver.connectSession);
-      sinon.assert.calledWithMatch(fakeSdkDriver.connectSession, 
-      sinon.match.has("sendTwoWayMediaTelemetry", true));});
-
-
-    it("should pass 'sendTwoWayTelemetry' as false to connectionSession if " + 
-    "store._isDesktop is false", function () {
-      store._isDesktop = false;
-
-      store.joinedRoom(new sharedActions.JoinedRoom(fakeJoinedData));
-
-      sinon.assert.calledOnce(fakeSdkDriver.connectSession);
-      sinon.assert.calledWithMatch(fakeSdkDriver.connectSession, 
-      sinon.match.has("sendTwoWayMediaTelemetry", false));});
-
-
     it("should call LoopAPI.AddConversationContext", function () {
       var actionData = new sharedActions.JoinedRoom(fakeJoinedData);
 
@@ -1245,12 +1185,6 @@ describe("loop.store.ActiveRoomStore", function () {
       expect(store.getStoreState().failureReason).eql("FAIL");});
 
 
-    it("should reset the multiplexGum", function () {
-      store.connectionFailure(connectionFailureAction);
-
-      sinon.assert.calledOnce(fakeMultiplexGum.reset);});
-
-
     it("should disconnect from the servers via the sdk", function () {
       store.connectionFailure(connectionFailureAction);
 
@@ -1278,7 +1212,12 @@ describe("loop.store.ActiveRoomStore", function () {
       sandbox.stub(loop, "unsubscribe");
 
       // Setup the listener.
-      store.startBrowserShare(new sharedActions.StartBrowserShare());
+      store.joinedRoom(new sharedActions.JoinedRoom({ 
+        apiKey: "", 
+        sessionToken: "", 
+        sessionId: "", 
+        expires: 0 }));
+
 
       // Now simulate connection failure.
       store.connectionFailure(connectionFailureAction);
@@ -1312,7 +1251,6 @@ describe("loop.store.ActiveRoomStore", function () {
 
       store.connectionFailure(connectionFailureAction);
 
-      sinon.assert.notCalled(fakeMultiplexGum.reset);
       sinon.assert.notCalled(fakeSdkDriver.disconnectSession);});});
 
 
@@ -1410,7 +1348,25 @@ describe("loop.store.ActiveRoomStore", function () {
 
       expect(store.getStoreState().localVideoEnabled).eql(false);
       expect(store.getStoreState().remoteVideoEnabled).eql(true);
-      expect(store.getStoreState().remoteAudioEnabled).eql(true);});});
+      expect(store.getStoreState().remoteAudioEnabled).eql(true);});
+
+
+    it("should call startBrowserShare when is desktop", function () {
+      sandbox.stub(store, "startBrowserShare");
+      store._isDesktop = true;
+      store.setStoreState({ 
+        localVideoEnabled: false, 
+        remoteVideoEnabled: false });
+
+
+      store.mediaStreamCreated(new sharedActions.MediaStreamCreated({ 
+        hasAudio: true, 
+        hasVideo: true, 
+        isLocal: false, 
+        srcMediaElement: fakeStreamElement }));
+
+
+      sinon.assert.calledOnce(store.startBrowserShare);});});
 
 
 
@@ -1567,18 +1523,7 @@ describe("loop.store.ActiveRoomStore", function () {
 
 
   describe("#startBrowserShare", function () {
-    var getSelectedTabMetadataStub;
-
     beforeEach(function () {
-      getSelectedTabMetadataStub = sinon.stub();
-      LoopMochaUtils.stubLoopRequest({ 
-        GetSelectedTabMetadata: getSelectedTabMetadataStub.returns({ 
-          title: "fakeTitle", 
-          favicon: "fakeFavicon", 
-          url: "http://www.fakeurl.com" }) });
-
-
-
       store.setStoreState({ 
         roomState: ROOM_STATES.JOINED, 
         roomToken: "fakeToken", 
@@ -1592,7 +1537,8 @@ describe("loop.store.ActiveRoomStore", function () {
 
 
 
-      sandbox.stub(console, "error");});
+      sandbox.stub(console, "error");
+      sandbox.stub(store, "_handleSwitchBrowserShare");});
 
 
     afterEach(function () {
@@ -1629,13 +1575,140 @@ describe("loop.store.ActiveRoomStore", function () {
 
 
 
-    it("should add a browser sharing listener for tab sharing", function () {
+    it("should call _handleSwitchBrowserShare", function () {
       store.startBrowserShare(new sharedActions.StartBrowserShare());
-      sinon.assert.calledOnce(requestStubs.AddBrowserSharingListener);});
+
+      sinon.assert.calledOnce(store._handleSwitchBrowserShare);});});
 
 
-    it("should invoke the SDK driver with the correct options for tab sharing", function () {
-      store.startBrowserShare(new sharedActions.StartBrowserShare());
+
+  describe("Screen share Events", function () {
+    it("should call _handleSwitchBrowserShare", function () {
+      sandbox.stub(store, "_handleSwitchBrowserShare");
+
+      store.joinedRoom(new sharedActions.JoinedRoom({ 
+        apiKey: "", 
+        sessionToken: "", 
+        sessionId: "", 
+        expires: 0 }));
+
+
+      LoopMochaUtils.publish("BrowserSwitch", 72);
+
+      sinon.assert.calledOnce(store._handleSwitchBrowserShare);});});
+
+
+
+  describe("#_handleSwitchBrowserShare", function () {
+    var getSelectedTabMetadataStub;
+
+    beforeEach(function () {
+      getSelectedTabMetadataStub = sinon.stub();
+      LoopMochaUtils.stubLoopRequest({ 
+        GetSelectedTabMetadata: getSelectedTabMetadataStub.returns({ 
+          title: "fakeTitle", 
+          favicon: "fakeFavicon", 
+          url: "http://www.fakeurl.com" }) });
+
+
+
+      store.setStoreState({ 
+        roomState: ROOM_STATES.JOINED, 
+        roomToken: "fakeToken", 
+        screenSharingState: SCREEN_SHARE_STATES.ACTIVE, 
+        sessionToken: "1627384950", 
+        participants: [{ 
+          displayName: "Owner", 
+          owner: true }, 
+        { 
+          displayName: "Guest", 
+          owner: false }] });
+
+
+
+      // Stub to prevent errors surfacing in the console.
+      sandbox.stub(console, "error");});
+
+
+    afterEach(function () {
+      store.endScreenShare();});
+
+
+    it("should log an error in the console", function () {
+      var err = new Error("foo");
+      err.isError = true;
+      store._handleSwitchBrowserShare(err);
+
+      sinon.assert.calledOnce(console.error);});
+
+
+    it("should end the screen sharing session when the listener receives an error", function () {
+      var err = new Error("foo");
+      err.isError = true;
+      store._handleSwitchBrowserShare(err);
+
+      // The dispatcher was already called once in beforeEach().
+      sinon.assert.calledOnce(dispatcher.dispatch);
+      sinon.assert.calledWith(dispatcher.dispatch, 
+      new sharedActions.ScreenSharingState({ 
+        state: SCREEN_SHARE_STATES.INACTIVE }));
+
+      sinon.assert.notCalled(fakeSdkDriver.switchAcquiredWindow);});
+
+
+    it("should save the windowId when the state is INACTIVE", function () {
+      store.setStoreState({ 
+        screenSharingState: SCREEN_SHARE_STATES.INACTIVE });
+
+
+      store._handleSwitchBrowserShare(72);
+
+      expect(store._savedWindowId, 72);});
+
+
+    it("should not do anything else when the state is INACTIVE", function () {
+      store.setStoreState({ 
+        screenSharingState: SCREEN_SHARE_STATES.INACTIVE });
+
+
+      store._handleSwitchBrowserShare(72);
+
+      sinon.assert.notCalled(dispatcher.dispatch);
+      sinon.assert.notCalled(fakeSdkDriver.startScreenShare);
+      sinon.assert.notCalled(fakeSdkDriver.switchAcquiredWindow);});
+
+
+    it("should save the windowId when sharing is paused", function () {
+      store.setStoreState({ 
+        screenSharingState: SCREEN_SHARE_STATES.ACTIVE, 
+        sharingPaused: true });
+
+
+      store._handleSwitchBrowserShare(72);
+
+      expect(store._savedWindowId, 72);});
+
+
+    it("should not do anything else when the state is paused", function () {
+      store.setStoreState({ 
+        screenSharingState: SCREEN_SHARE_STATES.ACTIVE, 
+        sharingPaused: true });
+
+
+      store._handleSwitchBrowserShare(72);
+
+      sinon.assert.notCalled(dispatcher.dispatch);
+      sinon.assert.notCalled(fakeSdkDriver.startScreenShare);
+      sinon.assert.notCalled(fakeSdkDriver.switchAcquiredWindow);});
+
+
+    it("should invoke the SDK driver with the correct options if the state is pending", function () {
+      store.setStoreState({ 
+        screenSharingState: SCREEN_SHARE_STATES.PENDING });
+
+
+      store._handleSwitchBrowserShare(42);
+
       sinon.assert.calledOnce(fakeSdkDriver.startScreenShare);
       sinon.assert.calledWith(fakeSdkDriver.startScreenShare, { 
         videoSource: "browser", 
@@ -1646,13 +1719,31 @@ describe("loop.store.ActiveRoomStore", function () {
 
 
 
+    it("should update the SDK driver when the state is active", function () {
+      store._handleSwitchBrowserShare(72);
+
+      sinon.assert.calledOnce(fakeSdkDriver.switchAcquiredWindow);
+      sinon.assert.calledWithExactly(fakeSdkDriver.switchAcquiredWindow, 72);});
+
+
+    it("should log an error if the state is unexpected", function () {
+      store.setStoreState({ 
+        screenSharingState: "invalid" });
+
+
+      store._handleSwitchBrowserShare(72);
+
+      sinon.assert.calledOnce(console.error);});
+
+
     it("should request the new metadata when the browser being shared change", function () {
-      store.startBrowserShare(new sharedActions.StartBrowserShare());
+      store._handleSwitchBrowserShare(42);
+
       clock.tick(500);
 
       sinon.assert.calledOnce(getSelectedTabMetadataStub);
-      sinon.assert.calledTwice(dispatcher.dispatch);
-      sinon.assert.calledWith(dispatcher.dispatch.getCall(1), 
+      sinon.assert.calledOnce(dispatcher.dispatch);
+      sinon.assert.calledWithExactly(dispatcher.dispatch, 
       new sharedActions.UpdateRoomContext({ 
         newRoomDescription: "fakeTitle", 
         newRoomThumbnail: "fakeFavicon", 
@@ -1664,13 +1755,14 @@ describe("loop.store.ActiveRoomStore", function () {
     it("should process only one request", function () {
       store.startBrowserShare(new sharedActions.StartBrowserShare());
       // Simulates multiple requests.
-      LoopMochaUtils.publish("BrowserSwitch", 72);
-      LoopMochaUtils.publish("BrowserSwitch", 72);
+      store._handleSwitchBrowserShare(42);
+      store._handleSwitchBrowserShare(42);
 
       clock.tick(500);
-      sinon.assert.calledThrice(getSelectedTabMetadataStub);
-      sinon.assert.calledTwice(dispatcher.dispatch);
-      sinon.assert.calledWith(dispatcher.dispatch.getCall(1), 
+
+      sinon.assert.calledTwice(getSelectedTabMetadataStub);
+      sinon.assert.calledOnce(dispatcher.dispatch);
+      sinon.assert.calledWithExactly(dispatcher.dispatch, 
       new sharedActions.UpdateRoomContext({ 
         newRoomDescription: "fakeTitle", 
         newRoomThumbnail: "fakeFavicon", 
@@ -1685,11 +1777,12 @@ describe("loop.store.ActiveRoomStore", function () {
         favicon: "fakeFavicon" });
 
 
-      store.startBrowserShare(new sharedActions.StartBrowserShare());
+      store._handleSwitchBrowserShare(42);
+
       clock.tick(500);
 
       sinon.assert.calledOnce(getSelectedTabMetadataStub);
-      sinon.assert.calledOnce(dispatcher.dispatch);});
+      sinon.assert.notCalled(dispatcher.dispatch);});
 
 
     it("should not process a request if sharing is paused", function () {
@@ -1697,11 +1790,11 @@ describe("loop.store.ActiveRoomStore", function () {
         sharingPaused: true });
 
 
-      store.startBrowserShare(new sharedActions.StartBrowserShare());
+      store._handleSwitchBrowserShare(42);
       clock.tick(500);
 
       sinon.assert.notCalled(getSelectedTabMetadataStub);
-      sinon.assert.calledOnce(dispatcher.dispatch);});
+      sinon.assert.notCalled(dispatcher.dispatch);});
 
 
     it("should not process a request if no-one is in the room", function () {
@@ -1712,57 +1805,12 @@ describe("loop.store.ActiveRoomStore", function () {
 
 
 
-      store.startBrowserShare(new sharedActions.StartBrowserShare());
+      store._handleSwitchBrowserShare(42);
+
       clock.tick(500);
 
       sinon.assert.notCalled(getSelectedTabMetadataStub);
-      sinon.assert.calledOnce(dispatcher.dispatch);});});
-
-
-
-  describe("Screen share Events", function () {
-    beforeEach(function () {
-      store.startBrowserShare(new sharedActions.StartBrowserShare());
-
-      store.setStoreState({ 
-        screenSharingState: SCREEN_SHARE_STATES.ACTIVE });
-
-
-      // Stub to prevent errors surfacing in the console.
-      sandbox.stub(window.console, "error");});
-
-
-    afterEach(function () {
-      store.endScreenShare();});
-
-
-    it("should log an error in the console", function () {
-      var err = new Error("foo");
-      err.isError = true;
-      LoopMochaUtils.publish("BrowserSwitch", err);
-
-      sinon.assert.calledOnce(console.error);});
-
-
-    it("should update the SDK driver when a new window id is received", function () {
-      LoopMochaUtils.publish("BrowserSwitch", 72);
-
-      sinon.assert.calledOnce(fakeSdkDriver.switchAcquiredWindow);
-      sinon.assert.calledWithExactly(fakeSdkDriver.switchAcquiredWindow, 72);});
-
-
-    it("should end the screen sharing session when the listener receives an error", function () {
-      var err = new Error("foo");
-      err.isError = true;
-      LoopMochaUtils.publish("BrowserSwitch", err);
-
-      // The dispatcher was already called once in beforeEach().
-      sinon.assert.calledTwice(dispatcher.dispatch);
-      sinon.assert.calledWith(dispatcher.dispatch, 
-      new sharedActions.ScreenSharingState({ 
-        state: SCREEN_SHARE_STATES.INACTIVE }));
-
-      sinon.assert.notCalled(fakeSdkDriver.switchAcquiredWindow);});});
+      sinon.assert.notCalled(dispatcher.dispatch);});});
 
 
 
@@ -1779,7 +1827,12 @@ describe("loop.store.ActiveRoomStore", function () {
 
     it("should remove the sharing listener", function () {
       // Setup the listener.
-      store.startBrowserShare(new sharedActions.StartBrowserShare());
+      store.joinedRoom(new sharedActions.JoinedRoom({ 
+        apiKey: "", 
+        sessionToken: "", 
+        sessionId: "", 
+        expires: 0 }));
+
 
       // Now stop the screen share.
       store.endScreenShare();
@@ -1958,12 +2011,6 @@ describe("loop.store.ActiveRoomStore", function () {
       sinon.assert.calledWithExactly(requestStubs.SetScreenShareState, "1234", false);});
 
 
-    it("should reset the multiplexGum", function () {
-      store.windowUnload();
-
-      sinon.assert.calledOnce(fakeMultiplexGum.reset);});
-
-
     it("should disconnect from the servers via the sdk", function () {
       store.windowUnload();
 
@@ -2002,7 +2049,12 @@ describe("loop.store.ActiveRoomStore", function () {
       sandbox.stub(loop, "unsubscribe");
 
       // Setup the listener.
-      store.startBrowserShare(new sharedActions.StartBrowserShare());
+      store.joinedRoom(new sharedActions.JoinedRoom({ 
+        apiKey: "", 
+        sessionToken: "", 
+        sessionId: "", 
+        expires: 0 }));
+
 
       // Now unload the window.
       store.windowUnload();
@@ -2025,12 +2077,6 @@ describe("loop.store.ActiveRoomStore", function () {
         roomToken: "fakeToken", 
         sessionToken: "1627384950" });});
 
-
-
-    it("should reset the multiplexGum", function () {
-      store.leaveRoom();
-
-      sinon.assert.calledOnce(fakeMultiplexGum.reset);});
 
 
     it("should disconnect from the servers via the sdk", function () {
@@ -2077,7 +2123,12 @@ describe("loop.store.ActiveRoomStore", function () {
       sandbox.stub(loop, "unsubscribe");
 
       // Setup the listener.
-      store.startBrowserShare(new sharedActions.StartBrowserShare());
+      store.joinedRoom(new sharedActions.JoinedRoom({ 
+        apiKey: "", 
+        sessionToken: "", 
+        sessionId: "", 
+        expires: 0 }));
+
 
       // Now leave the room.
       store.leaveRoom();
@@ -2126,24 +2177,6 @@ describe("loop.store.ActiveRoomStore", function () {
 
       expect(store._storeState.roomName).eql("fred");
       expect(store._storeState.roomContextUrls).eql([{ fake: 1 }]);});});
-
-
-
-  describe("#_handleSocialShareUpdate", function () {
-    it("should dispatch an UpdateRoomInfo action", function () {
-      store._handleSocialShareUpdate();
-
-      sinon.assert.calledOnce(dispatcher.dispatch);
-      sinon.assert.calledWithExactly(dispatcher.dispatch, 
-      new sharedActions.UpdateSocialShareInfo({ 
-        socialShareProviders: [] }));});
-
-
-
-    it("should call respective mozLoop methods", function () {
-      store._handleSocialShareUpdate();
-
-      sinon.assert.calledOnce(requestStubs.GetSocialShareProviders);});});
 
 
 
@@ -2204,22 +2237,7 @@ describe("loop.store.ActiveRoomStore", function () {
         sentTimestamp: "1970-01-01T00:00:00.000Z" }));
 
 
-      assertWeDidNothing();});
-
-
-    it("should ping telemetry when a chat message arrived or is to be sent", function () {
-      store._handleTextChatMessage(new sharedActions.ReceivedTextChatMessage({ 
-        contentType: CHAT_CONTENT_TYPES.TEXT, 
-        message: "Hello!", 
-        receivedTimestamp: "1970-01-01T00:00:00.000Z" }));
-
-
-      sinon.assert.calledOnce(requestStubs.TelemetryAddValue);
-      sinon.assert.calledWithExactly(requestStubs.TelemetryAddValue, 
-      "LOOP_ROOM_SESSION_WITHCHAT", 1);
-      expect(store.getStoreState().chatMessageExchanged).eql(true);
-      expect(dispatcher._eventData.hasOwnProperty("receivedTextChatMessage")).eql(false);
-      expect(dispatcher._eventData.hasOwnProperty("sendTextChatMessage")).eql(false);});});
+      assertWeDidNothing();});});
 
 
 

@@ -11,12 +11,6 @@ flags:
     - simulator
 
 builds:
-  android-api-15:
-    platforms:
-      - Android
-    types:
-      opt:
-        task: tasks/builds/android_api_15.yml
   aries:
     platforms:
       - b2g

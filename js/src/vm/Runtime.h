@@ -1018,6 +1018,8 @@ struct JSRuntime : public JS::shadow::Runtime,
     js::LifoAlloc tempLifoAlloc;
 
   private:
+    JSContext* context_;
+
     js::jit::JitRuntime* jitRuntime_;
 
     /*
@@ -1052,6 +1054,11 @@ struct JSRuntime : public JS::shadow::Runtime,
         return interpreterStack_;
     }
 
+    JSContext* contextFromMainThread() {
+        MOZ_ASSERT(CurrentThreadCanAccessRuntime(this));
+        return context_;
+    }
+
     bool enqueuePromiseJob(JSContext* cx, js::HandleFunction job, js::HandleObject promise);
     void addUnhandledRejectedPromise(JSContext* cx, js::HandleObject promise);
     void removeUnhandledRejectedPromise(JSContext* cx, js::HandleObject promise);
@@ -1059,6 +1066,10 @@ struct JSRuntime : public JS::shadow::Runtime,
     //-------------------------------------------------------------------------
     // Self-hosting support
     //-------------------------------------------------------------------------
+
+    bool hasInitializedSelfHosting() const {
+        return selfHostingGlobal_;
+    }
 
     bool initSelfHosting(JSContext* cx);
     void finishSelfHosting();
@@ -1098,7 +1109,7 @@ struct JSRuntime : public JS::shadow::Runtime,
     /* Gets current default locale. String remains owned by context. */
     const char* getDefaultLocale();
 
-    JSVersion defaultVersion() { return defaultVersion_; }
+    JSVersion defaultVersion() const { return defaultVersion_; }
     void setDefaultVersion(JSVersion v) { defaultVersion_ = v; }
 
     /* Base address of the native stack for the current thread. */
@@ -1131,14 +1142,6 @@ struct JSRuntime : public JS::shadow::Runtime,
 
 #ifdef DEBUG
     unsigned            checkRequestDepth;
-
-    /*
-     * To help embedders enforce their invariants, we allow them to specify in
-     * advance which JSContext should be passed to JSAPI calls. If this is set
-     * to a non-null value, the assertSameCompartment machinery does double-
-     * duty (in debug builds) to verify that it matches the cx being used.
-     */
-    JSContext*         activeContext;
 #endif
 
     /* Garbage collector state, used by jsgc.c. */
@@ -1174,19 +1177,12 @@ struct JSRuntime : public JS::shadow::Runtime,
     /* Code coverage output. */
     js::coverage::LCovRuntime lcovOutput;
 
-    /* Well-known numbers held for use by this runtime's contexts. */
+    /* Well-known numbers. */
     const js::Value     NaNValue;
     const js::Value     negativeInfinityValue;
     const js::Value     positiveInfinityValue;
 
     js::PropertyName*   emptyString;
-
-    /* List of active contexts sharing this runtime. */
-    mozilla::LinkedList<JSContext> contextList;
-
-    bool hasContexts() const {
-        return !contextList.isEmpty();
-    }
 
     mozilla::UniquePtr<js::SourceHook> sourceHook;
 
@@ -1218,9 +1214,6 @@ struct JSRuntime : public JS::shadow::Runtime,
     /* We are currently deleting an object due to an initialization failure. */
     bool handlingInitFailure;
 #endif
-
-    /* A context has been created on this runtime. */
-    bool                haveCreatedContext;
 
     /*
      * Allow relazifying functions in compartments that are active. This is
@@ -1487,13 +1480,18 @@ struct JSRuntime : public JS::shadow::Runtime,
         return liveRuntimesCount > 0;
     }
 
-    explicit JSRuntime(JSRuntime* parentRuntime);
-    ~JSRuntime();
+  protected:
+    JSRuntime(JSContext* cx, JSRuntime* parentRuntime);
+
+    // destroyRuntime is used instead of a destructor, to ensure the downcast
+    // to JSContext remains valid. The final GC triggered here depends on this.
+    void destroyRuntime();
 
     bool init(uint32_t maxbytes, uint32_t maxNurseryBytes);
 
     JSRuntime* thisFromCtor() { return this; }
 
+  public:
     /*
      * Call this after allocating memory held by GC things, to update memory
      * pressure counters or report the OOM error if necessary. If oomError and
@@ -1627,6 +1625,23 @@ struct JSRuntime : public JS::shadow::Runtime,
 
   public:
     js::PerformanceMonitoring performanceMonitoring;
+
+  private:
+    /* List of Ion compilation waiting to get linked. */
+    typedef mozilla::LinkedList<js::jit::IonBuilder> IonBuilderList;
+
+    IonBuilderList ionLazyLinkList_;
+    size_t ionLazyLinkListSize_;
+
+  public:
+    IonBuilderList& ionLazyLinkList();
+
+    size_t ionLazyLinkListSize() {
+        return ionLazyLinkListSize_;
+    }
+
+    void ionLazyLinkListRemove(js::jit::IonBuilder* builder);
+    void ionLazyLinkListAdd(js::jit::IonBuilder* builder);
 };
 
 namespace js {
@@ -1739,14 +1754,26 @@ class MOZ_RAII AutoLockGC
     }
 
     void lock() {
-        runtime_->lockGC();
+        MOZ_ASSERT(lockGuard_.isNothing());
+        lockGuard_.emplace(runtime_->gc.lock);
+#ifdef DEBUG
+        runtime_->gc.lockOwner = PR_GetCurrentThread();
+#endif
     }
 
     void unlock() {
-        runtime_->unlockGC();
+        MOZ_ASSERT(lockGuard_.isSome());
+#ifdef DEBUG
+        runtime_->gc.lockOwner = nullptr;
+#endif
+        lockGuard_.reset();
 #ifdef DEBUG
         wasUnlocked_ = true;
 #endif
+    }
+
+    js::LockGuard<js::Mutex>& guard() {
+        return lockGuard_.ref();
     }
 
 #ifdef DEBUG
@@ -1757,6 +1784,7 @@ class MOZ_RAII AutoLockGC
 
   private:
     JSRuntime* runtime_;
+    mozilla::Maybe<js::LockGuard<js::Mutex>> lockGuard_;
 #ifdef DEBUG
     bool wasUnlocked_;
 #endif

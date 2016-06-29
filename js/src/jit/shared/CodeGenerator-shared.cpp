@@ -485,13 +485,28 @@ CodeGeneratorShared::encodeAllocation(LSnapshot* snapshot, MDefinition* mir,
       case MIRType::MagicOptimizedArguments:
       case MIRType::MagicOptimizedOut:
       case MIRType::MagicUninitializedLexical:
+      case MIRType::MagicIsConstructing:
       {
         uint32_t index;
-        Value v = MagicValue(type == MIRType::MagicOptimizedArguments
-                             ? JS_OPTIMIZED_ARGUMENTS
-                             : (type == MIRType::MagicOptimizedOut
-                                ? JS_OPTIMIZED_OUT
-                                : JS_UNINITIALIZED_LEXICAL));
+        JSWhyMagic why = JS_GENERIC_MAGIC;
+        switch (type) {
+          case MIRType::MagicOptimizedArguments:
+            why = JS_OPTIMIZED_ARGUMENTS;
+            break;
+          case MIRType::MagicOptimizedOut:
+            why = JS_OPTIMIZED_OUT;
+            break;
+          case MIRType::MagicUninitializedLexical:
+            why = JS_UNINITIALIZED_LEXICAL;
+            break;
+          case MIRType::MagicIsConstructing:
+            why = JS_IS_CONSTRUCTING;
+            break;
+          default:
+            MOZ_CRASH("Invalid Magic MIRType");
+        }
+
+        Value v = MagicValue(why);
         masm.propagateOOM(graph.addConstantToPool(v, &index));
         alloc = RValueAllocation::ConstantPool(index);
         break;
@@ -1122,7 +1137,7 @@ HandleRegisterDump(Op op, MacroAssembler& masm, LiveRegisterSet liveRegs, Regist
     const size_t baseOffset = JitActivation::offsetOfRegs();
 
     // Handle live GPRs.
-    for (GeneralRegisterIterator iter(liveRegs.gprs()); iter.more(); iter++) {
+    for (GeneralRegisterIterator iter(liveRegs.gprs()); iter.more(); ++iter) {
         Register reg = *iter;
         Address dump(activation, baseOffset + RegisterDump::offsetOfRegister(reg));
 
@@ -1139,7 +1154,7 @@ HandleRegisterDump(Op op, MacroAssembler& masm, LiveRegisterSet liveRegs, Regist
     }
 
     // Handle live FPRs.
-    for (FloatRegisterIterator iter(liveRegs.fpus()); iter.more(); iter++) {
+    for (FloatRegisterIterator iter(liveRegs.fpus()); iter.more(); ++iter) {
         FloatRegister reg = *iter;
         Address dump(activation, baseOffset + RegisterDump::offsetOfRegister(reg));
         op(reg, dump);
@@ -1340,6 +1355,7 @@ CodeGeneratorShared::callVM(const VMFunction& fun, LInstruction* ins, const Regi
 
 #ifdef JS_TRACE_LOGGING
     emitTracelogStartEvent(TraceLogger_VM);
+    emitTracelogStartEvent(fun.name(), TraceLogger_VMSpecific);
 #endif
 
     // Stack is:
@@ -1391,6 +1407,7 @@ CodeGeneratorShared::callVM(const VMFunction& fun, LInstruction* ins, const Regi
 
 #ifdef JS_TRACE_LOGGING
     emitTracelogStopEvent(TraceLogger_VM);
+    emitTracelogStopEvent(fun.name(), TraceLogger_VMSpecific);
 #endif
 }
 
@@ -1768,6 +1785,44 @@ CodeGeneratorShared::emitTracelogTree(bool isStart, uint32_t textId)
     masm.bind(&done);
 
     masm.Pop(logger);
+}
+
+void
+CodeGeneratorShared::emitTracelogTree(bool isStart, const char* text,
+                                      TraceLoggerTextId enabledTextId)
+{
+    if (!TraceLogTextIdEnabled(enabledTextId))
+        return;
+
+    Label done;
+
+    AllocatableRegisterSet regs(RegisterSet::Volatile());
+    Register loggerReg = regs.takeAnyGeneral();
+    Register eventReg = regs.takeAnyGeneral();
+
+    masm.Push(loggerReg);
+
+    CodeOffset patchLocation = masm.movWithPatch(ImmPtr(nullptr), loggerReg);
+    masm.propagateOOM(patchableTraceLoggers_.append(patchLocation));
+
+    Address enabledAddress(loggerReg, TraceLoggerThread::offsetOfEnabled());
+    masm.branch32(Assembler::Equal, enabledAddress, Imm32(0), &done);
+
+    masm.Push(eventReg);
+
+    PatchableTLEvent patchEvent(masm.movWithPatch(ImmWord(0), eventReg), text);
+    masm.propagateOOM(patchableTLEvents_.append(Move(patchEvent)));
+
+    if (isStart)
+        masm.tracelogStartId(loggerReg, eventReg);
+    else
+        masm.tracelogStopId(loggerReg, eventReg);
+
+    masm.Pop(eventReg);
+
+    masm.bind(&done);
+
+    masm.Pop(loggerReg);
 }
 #endif
 

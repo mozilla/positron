@@ -124,7 +124,9 @@ LINTER = {
     'include': [
         'python/mozlint',
         'tools/lint',
-        'testing/marionette/client'
+        'taskcluster',
+        'testing/marionette/client',
+        'testing/talos/talos',
     ],
     'exclude': [],
     'type': 'external',

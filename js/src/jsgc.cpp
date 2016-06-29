@@ -885,7 +885,6 @@ GCRuntime::GCRuntime(JSRuntime* rt) :
     noGCOrAllocationCheck(0),
     noNurseryAllocationCheck(0),
 #endif
-    lock(nullptr),
     allocTask(rt, emptyChunks_),
     helperState(rt)
 {
@@ -972,7 +971,7 @@ GCRuntime::parseAndSetZeal(const char* str)
 {
     int frequency = -1;
     bool foundFrequency = false;
-    mozilla::Vector<int> zeals;
+    mozilla::Vector<int, 0, SystemAllocPolicy> zeals;
 
     static const struct {
         const char* const zealMode;
@@ -1043,14 +1042,7 @@ GCRuntime::init(uint32_t maxbytes, uint32_t maxNurseryBytes)
 {
     InitMemorySubsystem();
 
-    lock = PR_NewLock();
-    if (!lock)
-        return false;
-
     if (!rootsHash.init(256))
-        return false;
-
-    if (!helperState.init())
         return false;
 
     /*
@@ -1129,11 +1121,6 @@ GCRuntime::finish()
     FreeChunkPool(rt, fullChunks_);
     FreeChunkPool(rt, availableChunks_);
     FreeChunkPool(rt, emptyChunks_);
-
-    if (lock) {
-        PR_DestroyLock(lock);
-        lock = nullptr;
-    }
 
     FinishTrace();
 }
@@ -1970,6 +1957,7 @@ RelocateArena(Arena* arena, SliceBudget& sliceBudget)
     MOZ_ASSERT(!arena->hasDelayedMarking);
     MOZ_ASSERT(!arena->markOverflow);
     MOZ_ASSERT(!arena->allocatedDuringIncremental);
+    MOZ_ASSERT(arena->bufferedCells->isEmpty());
 
     Zone* zone = arena->zone;
 
@@ -2469,11 +2457,20 @@ GCRuntime::updateCellPointers(MovingTracer* trc, Zone* zone, AllocKinds kinds, s
     }
 }
 
+// Pointer updates run in three phases because of depdendencies between the
+// different types of GC thing. The most important consideration is the
+// dependency:
+//
+//    object ---> shape ---> base shape
+
+static const AllocKinds UpdatePhaseBaseShapes {
+    AllocKind::BASE_SHAPE
+};
+
 static const AllocKinds UpdatePhaseMisc {
     AllocKind::SCRIPT,
     AllocKind::LAZY_SCRIPT,
     AllocKind::SHAPE,
-    AllocKind::BASE_SHAPE,
     AllocKind::ACCESSOR_SHAPE,
     AllocKind::OBJECT_GROUP,
     AllocKind::STRING,
@@ -2503,6 +2500,8 @@ GCRuntime::updateAllCellPointers(MovingTracer* trc, Zone* zone)
     AutoDisableProxyCheck noProxyCheck(rt); // These checks assert when run in parallel.
 
     size_t bgTaskCount = CellUpdateBackgroundTaskCount();
+
+    updateCellPointers(trc, zone, UpdatePhaseBaseShapes, bgTaskCount);
 
     updateCellPointers(trc, zone, UpdatePhaseMisc, bgTaskCount);
 
@@ -2643,8 +2642,9 @@ GCRuntime::releaseHeldRelocatedArenas()
 {
 #ifdef DEBUG
     unprotectHeldRelocatedArenas();
-    releaseRelocatedArenas(relocatedArenasToRelease);
+    Arena* arenas = relocatedArenasToRelease;
     relocatedArenasToRelease = nullptr;
+    releaseRelocatedArenas(arenas);
 #endif
 }
 
@@ -3134,7 +3134,7 @@ GCRuntime::decommitArenas(AutoLockGC& lock)
     // Build a Vector of all current available Chunks. Since we release the
     // gc lock while doing the decommit syscall, it is dangerous to iterate
     // the available list directly, as concurrent operations can modify it.
-    mozilla::Vector<Chunk*> toDecommit;
+    mozilla::Vector<Chunk*, 0, SystemAllocPolicy> toDecommit;
     MOZ_ASSERT(availableChunks(lock).verify());
     for (ChunkPool::Iter iter(availableChunks(lock)); !iter.done(); iter.next()) {
         if (!toDecommit.append(iter.get())) {
@@ -3252,28 +3252,11 @@ js::GetCPUCount()
     return ncpus;
 }
 
-bool
-GCHelperState::init()
-{
-    if (!(done = PR_NewCondVar(rt->gc.lock)))
-        return false;
-
-    return true;
-}
-
 void
 GCHelperState::finish()
 {
-    if (!rt->gc.lock) {
-        MOZ_ASSERT(state_ == IDLE);
-        return;
-    }
-
     // Wait for any lingering background sweeping to finish.
     waitBackgroundSweepEnd();
-
-    if (done)
-        PR_DestroyCondVar(done);
 }
 
 GCHelperState::State
@@ -3306,14 +3289,14 @@ GCHelperState::startBackgroundThread(State newState)
 }
 
 void
-GCHelperState::waitForBackgroundThread()
+GCHelperState::waitForBackgroundThread(js::AutoLockGC& lock)
 {
     MOZ_ASSERT(CurrentThreadCanAccessRuntime(rt));
 
 #ifdef DEBUG
     rt->gc.lockOwner = nullptr;
 #endif
-    PR_WaitCondVar(done, PR_INTERVAL_NO_TIMEOUT);
+    done.wait(lock.guard());
 #ifdef DEBUG
     rt->gc.lockOwner = PR_GetCurrentThread();
 #endif
@@ -3349,7 +3332,7 @@ GCHelperState::work()
     setState(IDLE);
     thread = nullptr;
 
-    PR_NotifyAllCondVar(done);
+    done.notify_all();
 }
 
 void
@@ -3415,7 +3398,7 @@ GCHelperState::waitBackgroundSweepEnd()
 {
     AutoLockGC lock(rt);
     while (state() == SWEEPING)
-        waitForBackgroundThread();
+        waitForBackgroundThread(lock);
     if (!rt->gc.isIncrementalGCInProgress())
         rt->gc.assertBackgroundSweepingFinished();
 }
@@ -3732,7 +3715,8 @@ CompartmentCheckTracer::onChild(const JS::GCCellPtr& thing)
                     InCrossCompartmentMap(static_cast<JSObject*>(src), thing)));
     } else {
         TenuredCell* tenured = TenuredCell::fromPointer(thing.asCell());
-        MOZ_ASSERT(tenured->zone() == zone || tenured->zone()->isAtomsZone());
+        Zone* thingZone = tenured->zoneFromAnyThread();
+        MOZ_ASSERT(thingZone == zone || thingZone->isAtomsZone());
     }
 }
 
@@ -4931,6 +4915,34 @@ GCRuntime::joinTask(GCParallelTask& task, gcstats::Phase phase)
     task.joinWithLockHeld();
 }
 
+using WeakCacheTaskVector = mozilla::Vector<SweepWeakCacheTask, 0, SystemAllocPolicy>;
+
+static void
+SweepWeakCachesFromMainThread(JSRuntime* rt)
+{
+    for (GCZoneGroupIter zone(rt); !zone.done(); zone.next()) {
+        for (JS::WeakCache<void*>* cache : zone->weakCaches_) {
+            SweepWeakCacheTask task(rt, *cache);
+            task.runFromMainThread(rt);
+        }
+    }
+}
+
+static WeakCacheTaskVector
+PrepareWeakCacheTasks(JSRuntime* rt)
+{
+    WeakCacheTaskVector out;
+    for (GCZoneGroupIter zone(rt); !zone.done(); zone.next()) {
+        for (JS::WeakCache<void*>* cache : zone->weakCaches_) {
+            if (!out.append(SweepWeakCacheTask(rt, *cache))) {
+                SweepWeakCachesFromMainThread(rt);
+                return WeakCacheTaskVector();
+            }
+        }
+    }
+    return out;
+}
+
 void
 GCRuntime::beginSweepingZoneGroup(AutoLockForExclusiveAccess& lock)
 {
@@ -4968,7 +4980,7 @@ GCRuntime::beginSweepingZoneGroup(AutoLockForExclusiveAccess& lock)
     SweepObjectGroupsTask sweepObjectGroupsTask(rt);
     SweepRegExpsTask sweepRegExpsTask(rt);
     SweepMiscTask sweepMiscTask(rt);
-    mozilla::Vector<SweepWeakCacheTask> sweepCacheTasks;
+    WeakCacheTaskVector sweepCacheTasks = PrepareWeakCacheTasks(rt);
 
     for (GCZoneGroupIter zone(rt); !zone.done(); zone.next()) {
         /* Clear all weakrefs that point to unmarked things. */
@@ -4979,13 +4991,8 @@ GCRuntime::beginSweepingZoneGroup(AutoLockForExclusiveAccess& lock)
         }
         zone->gcWeakRefs.clear();
 
-        AutoEnterOOMUnsafeRegion oomUnsafe;
-        for (JS::WeakCache<void*>* cache : zone->weakCaches_) {
-            if (!sweepCacheTasks.append(SweepWeakCacheTask(rt, *cache)))
-                oomUnsafe.crash("preparing weak cache sweeping task list");
-        }
-
         /* No need to look up any more weakmap keys from this zone group. */
+        AutoEnterOOMUnsafeRegion oomUnsafe;
         if (!zone->gcWeakKeys.clear())
             oomUnsafe.crash("clearing weak keys in beginSweepingZoneGroup()");
     }
@@ -6243,6 +6250,11 @@ GCRuntime::checkIfGCAllowedInCurrentState(JS::gcreason::Reason reason)
     if (rt->mainThread.suppressGC)
         return false;
 
+    // Only allow shutdown GCs when we're destroying the runtime. This keeps
+    // the GC callback from triggering a nested GC and resetting global state.
+    if (rt->isBeingDestroyed() && !IsShutdownGC(reason))
+        return false;
+
 #ifdef JS_GC_ZEAL
     if (deterministicOnly && !IsDeterministicGCReason(reason))
         return false;
@@ -6959,8 +6971,8 @@ AutoSuppressGC::AutoSuppressGC(JSCompartment* comp)
     suppressGC_++;
 }
 
-AutoSuppressGC::AutoSuppressGC(JSRuntime* rt)
-  : suppressGC_(rt->mainThread.suppressGC)
+AutoSuppressGC::AutoSuppressGC(JSContext* cx)
+  : suppressGC_(cx->mainThread().suppressGC)
 {
     suppressGC_++;
 }
@@ -7333,12 +7345,6 @@ JS_PUBLIC_API(bool)
 JS::IsIncrementalBarrierNeeded(JSRuntime* rt)
 {
     return rt->gc.state() == gc::MARK && !rt->isHeapBusy();
-}
-
-JS_PUBLIC_API(bool)
-JS::IsIncrementalBarrierNeeded(JSContext* cx)
-{
-    return IsIncrementalBarrierNeeded(cx->runtime());
 }
 
 struct IncrementalReferenceBarrierFunctor {

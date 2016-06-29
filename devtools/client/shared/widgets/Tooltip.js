@@ -5,7 +5,7 @@
 "use strict";
 
 const {Ci} = require("chrome");
-const promise = require("promise");
+const defer = require("devtools/shared/defer");
 const {Spectrum} = require("devtools/client/shared/widgets/Spectrum");
 const {CubicBezierWidget} =
       require("devtools/client/shared/widgets/CubicBezierWidget");
@@ -16,6 +16,7 @@ const EventEmitter = require("devtools/shared/event-emitter");
 const {colorUtils} = require("devtools/client/shared/css-color");
 const Heritage = require("sdk/core/heritage");
 const {Eyedropper} = require("devtools/client/eyedropper/eyedropper");
+const {gDevTools} = require("devtools/client/framework/devtools");
 const Services = require("Services");
 const {XPCOMUtils} = require("resource://gre/modules/XPCOMUtils.jsm");
 
@@ -529,7 +530,7 @@ Tooltip.prototype = {
    * and resolves the promise with the content window.
    */
   setIFrameContent: function ({width, height}, url) {
-    let def = promise.defer();
+    let def = defer();
 
     // Create an iframe
     let iframe = this.doc.createElementNS(XHTML_NS, "iframe");
@@ -568,7 +569,7 @@ Tooltip.prototype = {
 
     function onLoaded(iframe) {
       let win = iframe.contentWindow.wrappedJSObject;
-      let def = promise.defer();
+      let def = defer();
       let container = win.document.getElementById("spectrum");
       let spectrum = new Spectrum(container, color);
 
@@ -602,7 +603,7 @@ Tooltip.prototype = {
 
     function onLoaded(iframe) {
       let win = iframe.contentWindow.wrappedJSObject;
-      let def = promise.defer();
+      let def = defer();
       let container = win.document.getElementById("container");
       let widget = new CubicBezierWidget(container, bezier);
 
@@ -632,7 +633,7 @@ Tooltip.prototype = {
 
     function onLoaded(iframe) {
       let win = iframe.contentWindow.wrappedJSObject;
-      let def = promise.defer();
+      let def = defer();
       let container = win.document.getElementById("container");
       let widget = new CSSFilterEditorWidget(container, filter);
 
@@ -920,11 +921,11 @@ Heritage.extend(SwatchBasedEditorTooltip.prototype, {
     let windowType = chromeWindow.document.documentElement
                      .getAttribute("windowtype");
     let toolboxWindow;
-    if (windowType != "navigator:browser") {
+    if (windowType != gDevTools.chromeWindowType) {
       // this means the toolbox is in a seperate window. We need to make
       // sure we'll be inspecting the browser window instead
       toolboxWindow = chromeWindow;
-      chromeWindow = Services.wm.getMostRecentWindow("navigator:browser");
+      chromeWindow = Services.wm.getMostRecentWindow(gDevTools.chromeWindowType);
       chromeWindow.focus();
     }
     let dropper = new Eyedropper(chromeWindow, { copyOnSelect: false,

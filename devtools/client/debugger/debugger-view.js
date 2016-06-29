@@ -80,8 +80,6 @@ var DebuggerView = {
     this._editorSource = {};
     this._editorDocuments = {};
 
-    document.title = L10N.getStr("DebuggerWindowTitle");
-
     this.editor.on("cursorActivity", this.Sources._onEditorCursorActivity);
 
     this.controller = DebuggerController;
@@ -451,6 +449,10 @@ var DebuggerView = {
     // Use JS mode for files with .js and .jsm extensions.
     if (SourceUtils.isJavaScript(aUrl, aContentType)) {
       return void this.editor.setMode(Editor.modes.js);
+    }
+
+    if (aContentType === "text/wasm") {
+      return void this.editor.setMode(Editor.modes.wasm);
     }
 
     // Use HTML mode for files in which the first non whitespace character is

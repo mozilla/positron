@@ -301,7 +301,7 @@ JS_GetEmptyStringValue(JSContext* cx)
 JS_PUBLIC_API(JSString*)
 JS_GetEmptyString(JSRuntime* rt)
 {
-    MOZ_ASSERT(rt->hasContexts());
+    MOZ_ASSERT(rt->emptyString);
     return rt->emptyString;
 }
 
@@ -313,24 +313,12 @@ AssertHeapIsIdle(JSRuntime* rt)
     MOZ_ASSERT(!rt->isHeapBusy());
 }
 
-void
-AssertHeapIsIdle(JSContext* cx)
-{
-    AssertHeapIsIdle(cx->runtime());
-}
-
 } // namespace js
 
 static void
 AssertHeapIsIdleOrIterating(JSRuntime* rt)
 {
     MOZ_ASSERT(!rt->isHeapCollecting());
-}
-
-static void
-AssertHeapIsIdleOrIterating(JSContext* cx)
-{
-    AssertHeapIsIdleOrIterating(cx->runtime());
 }
 
 static void
@@ -466,22 +454,14 @@ JS_NewRuntime(uint32_t maxbytes, uint32_t maxNurseryBytes, JSRuntime* parentRunt
     while (parentRuntime && parentRuntime->parentRuntime)
         parentRuntime = parentRuntime->parentRuntime;
 
-    JSRuntime* rt = js_new<JSRuntime>(parentRuntime);
-    if (!rt)
-        return nullptr;
-
-    if (!rt->init(maxbytes, maxNurseryBytes)) {
-        JS_DestroyRuntime(rt);
-        return nullptr;
-    }
-
-    return rt;
+    return NewContext(maxbytes, maxNurseryBytes, parentRuntime);
 }
 
 JS_PUBLIC_API(void)
 JS_DestroyRuntime(JSRuntime* rt)
 {
-    js_delete(rt);
+    JSContext* cx = rt->contextFromMainThread();
+    DestroyContext(cx);
 }
 
 static JS_CurrentEmbedderTimeFunction currentEmbedderTimeFunction;
@@ -563,69 +543,22 @@ JS_EndRequest(JSContext* cx)
     StopRequest(cx);
 }
 
-JS_PUBLIC_API(JSContext*)
-JS_NewContext(JSRuntime* rt, size_t stackChunkSize)
-{
-    return NewContext(rt, stackChunkSize);
-}
-
-JS_PUBLIC_API(void)
-JS_DestroyContext(JSContext* cx)
-{
-    MOZ_ASSERT(!cx->compartment());
-    DestroyContext(cx, DCM_FORCE_GC);
-}
-
-JS_PUBLIC_API(void)
-JS_DestroyContextNoGC(JSContext* cx)
-{
-    MOZ_ASSERT(!cx->compartment());
-    DestroyContext(cx, DCM_NO_GC);
-}
-
-JS_PUBLIC_API(void*)
-JS_GetContextPrivate(JSContext* cx)
-{
-    return cx->data;
-}
-
-JS_PUBLIC_API(void)
-JS_SetContextPrivate(JSContext* cx, void* data)
-{
-    cx->data = data;
-}
-
-JS_PUBLIC_API(void*)
-JS_GetSecondContextPrivate(JSContext* cx)
-{
-    return cx->data2;
-}
-
-JS_PUBLIC_API(void)
-JS_SetSecondContextPrivate(JSContext* cx, void* data)
-{
-    cx->data2 = data;
-}
-
 JS_PUBLIC_API(JSRuntime*)
 JS_GetRuntime(JSContext* cx)
 {
     return cx->runtime();
 }
 
+JS_PUBLIC_API(JSContext*)
+JS_GetContext(JSRuntime* rt)
+{
+    return rt->contextFromMainThread();
+}
+
 JS_PUBLIC_API(JSRuntime*)
 JS_GetParentRuntime(JSRuntime* rt)
 {
     return rt->parentRuntime ? rt->parentRuntime : rt;
-}
-
-JS_PUBLIC_API(JSContext*)
-JS_ContextIterator(JSRuntime* rt, JSContext** iterp)
-{
-    JSContext* cx = *iterp;
-    cx = cx ? cx->getNext() : rt->contextList.getFirst();
-    *iterp = cx;
-    return cx;
 }
 
 JS_PUBLIC_API(JSVersion)
@@ -691,6 +624,30 @@ JS_PUBLIC_API(JS::RuntimeOptions&)
 JS::RuntimeOptionsRef(JSContext* cx)
 {
     return cx->runtime()->options();
+}
+
+JS_PUBLIC_API(bool)
+JS::InitSelfHostedCode(JSContext* cx)
+{
+    MOZ_RELEASE_ASSERT(!cx->runtime()->hasInitializedSelfHosting(),
+                       "JS::InitSelfHostedCode() called more than once");
+
+    JSRuntime* rt = cx->runtime();
+
+    JSAutoRequest ar(cx);
+    if (!rt->initializeAtoms(cx))
+        return false;
+
+    if (!cx->cycleDetectorSet.init())
+        return false;
+
+    if (!rt->initSelfHosting(cx))
+        return false;
+
+    if (!rt->parentRuntime && !rt->transformToPermanentAtoms(cx))
+        return false;
+
+    return true;
 }
 
 JS_PUBLIC_API(const char*)
@@ -1054,7 +1011,6 @@ static const JSStdName builtin_property_names[] = {
 JS_PUBLIC_API(bool)
 JS_ResolveStandardClass(JSContext* cx, HandleObject obj, HandleId id, bool* resolved)
 {
-    JSRuntime* rt;
     const JSStdName* stdnm;
 
     AssertHeapIsIdle(cx);
@@ -1064,8 +1020,7 @@ JS_ResolveStandardClass(JSContext* cx, HandleObject obj, HandleId id, bool* reso
     Rooted<GlobalObject*> global(cx, &obj->as<GlobalObject>());
     *resolved = false;
 
-    rt = cx->runtime();
-    if (!rt->hasContexts() || !JSID_IS_ATOM(id))
+    if (!JSID_IS_ATOM(id))
         return true;
 
     /* Check whether we're resolving 'undefined', and define it if so. */
@@ -1342,7 +1297,7 @@ JS_GetDefaultFreeOp(JSRuntime* rt)
 JS_PUBLIC_API(void)
 JS_updateMallocCounter(JSContext* cx, size_t nbytes)
 {
-    return cx->runtime()->updateMallocCounter(cx->zone(), nbytes);
+    return cx->updateMallocCounter(nbytes);
 }
 
 JS_PUBLIC_API(char*)
@@ -1798,12 +1753,6 @@ JS::CompartmentBehaviors::extraWarnings(JSRuntime* rt) const
     return extraWarningsOverride_.get(rt->options().extraWarnings());
 }
 
-bool
-JS::CompartmentBehaviors::extraWarnings(JSContext* cx) const
-{
-    return extraWarnings(cx->runtime());
-}
-
 JS::CompartmentCreationOptions&
 JS::CompartmentCreationOptions::setZone(ZoneSpecifier spec)
 {
@@ -1878,6 +1827,9 @@ JS_NewGlobalObject(JSContext* cx, const JSClass* clasp, JSPrincipals* principals
                    JS::OnNewGlobalHookOption hookOption,
                    const JS::CompartmentOptions& options)
 {
+    MOZ_RELEASE_ASSERT(cx->runtime()->hasInitializedSelfHosting(),
+                       "Must call JS::InitSelfHostedCode() before creating a global");
+
     AssertHeapIsIdle(cx);
     CHECK_REQUEST(cx);
 

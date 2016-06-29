@@ -617,8 +617,6 @@ pref("accessibility.typeaheadfind", false);
 pref("accessibility.typeaheadfind.timeout", 5000);
 pref("accessibility.typeaheadfind.linksonly", false);
 pref("accessibility.typeaheadfind.flashBar", 1);
-pref("findbar.highlightAll", true);
-pref("findbar.modalHighlight", true);
 
 // Tracks when accessibility is loaded into the previous session.
 pref("accessibility.loadedInLastSession", false);
@@ -1016,13 +1014,14 @@ pref("services.sync.prefs.sync.addons.ignoreUserEnabledChanges", true);
 // could weaken the pref locally, install an add-on from an untrusted
 // source, and this would propagate automatically to other,
 // uncompromised Sync-connected devices.
+pref("services.sync.prefs.sync.browser.download.useDownloadDir", true);
 pref("services.sync.prefs.sync.browser.formfill.enable", true);
 pref("services.sync.prefs.sync.browser.link.open_newwindow", true);
 pref("services.sync.prefs.sync.browser.newtabpage.enabled", true);
 pref("services.sync.prefs.sync.browser.newtabpage.enhanced", true);
 pref("services.sync.prefs.sync.browser.newtabpage.pinned", true);
 pref("services.sync.prefs.sync.browser.offline-apps.notify", true);
-pref("services.sync.prefs.sync.browser.safebrowsing.enabled", true);
+pref("services.sync.prefs.sync.browser.safebrowsing.phishing.enabled", true);
 pref("services.sync.prefs.sync.browser.safebrowsing.malware.enabled", true);
 pref("services.sync.prefs.sync.browser.search.update", true);
 pref("services.sync.prefs.sync.browser.sessionstore.restore_on_demand", true);
@@ -1366,7 +1365,6 @@ pref("browser.tabs.crashReporting.email", "");
 #ifndef MOZ_MULET
 pref("layers.async-pan-zoom.enabled", true);
 #endif
-pref("apz.velocity_bias", "0.0");
 
 // Enable e10s add-on interposition by default.
 pref("extensions.interposition.enabled", true);
@@ -1433,3 +1431,5 @@ pref("browser.migration.automigrate", false);
 pref("dom.mozBrowserFramesEnabled", true);
 
 pref("extensions.pocket.enabled", true);
+
+pref("signon.schemeUpgrades", true);

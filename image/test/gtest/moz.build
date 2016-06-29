@@ -8,6 +8,7 @@ Library('imagetest')
 
 UNIFIED_SOURCES = [
     'Common.cpp',
+    'TestADAM7InterpolatingFilter.cpp',
     'TestCopyOnWrite.cpp',
     'TestDecoders.cpp',
     'TestDecodeToSurface.cpp',
@@ -30,6 +31,9 @@ SOURCES += [
 ]
 
 TEST_HARNESS_FILES.gtest += [
+    'animated-with-extra-image-sub-blocks.gif',
+    'corrupt-with-bad-bmp-height.ico',
+    'corrupt-with-bad-bmp-width.ico',
     'corrupt.jpg',
     'downscaled.bmp',
     'downscaled.gif',

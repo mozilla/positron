@@ -38,7 +38,7 @@ registerCleanupFunction(() => {
   Services.prefs.clearUserPref("devtools.responsive.html.displayedDeviceList");
 });
 const { ResponsiveUIManager } = require("resource://devtools/client/responsivedesign/responsivedesign.jsm");
-const { loadDeviceList } = require("devtools/client/responsive.html/devices");
+const { _loadPreferredDevices } = require("devtools/client/responsive.html/actions/devices");
 const { getOwnerWindow } = require("sdk/tabs/utils");
 
 const OPEN_DEVICE_MODAL_VALUE = "OPEN_DEVICE_MODAL";
@@ -152,4 +152,60 @@ function openDeviceModal(ui) {
 
   ok(!modal.classList.contains("hidden"),
     "The device modal is displayed.");
+}
+
+function getSessionHistory(browser) {
+  return ContentTask.spawn(browser, {}, function* () {
+    /* eslint-disable no-undef */
+    let { interfaces: Ci } = Components;
+    let webNav = docShell.QueryInterface(Ci.nsIWebNavigation);
+    let sessionHistory = webNav.sessionHistory;
+    let result = {
+      index: sessionHistory.index,
+      entries: []
+    };
+
+    for (let i = 0; i < sessionHistory.count; i++) {
+      let entry = sessionHistory.getEntryAtIndex(i, false);
+      result.entries.push({
+        uri: entry.URI.spec,
+        title: entry.title
+      });
+    }
+
+    return result;
+    /* eslint-enable no-undef */
+  });
+}
+
+function waitForPageShow(browser) {
+  let mm = browser.messageManager;
+  return new Promise(resolve => {
+    let onShow = message => {
+      if (message.target != browser) {
+        return;
+      }
+      mm.removeMessageListener("PageVisibility:Show", onShow);
+      resolve();
+    };
+    mm.addMessageListener("PageVisibility:Show", onShow);
+  });
+}
+
+function load(browser, url) {
+  let loaded = BrowserTestUtils.browserLoaded(browser, false, url);
+  browser.loadURI(url, null, null);
+  return loaded;
+}
+
+function back(browser) {
+  let shown = waitForPageShow(browser);
+  browser.goBack();
+  return shown;
+}
+
+function forward(browser) {
+  let shown = waitForPageShow(browser);
+  browser.goForward();
+  return shown;
 }

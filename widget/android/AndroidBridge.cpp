@@ -52,6 +52,7 @@
 #include "mozilla/UniquePtr.h"
 #include "mozilla/dom/ContentChild.h"
 #include "nsIObserverService.h"
+#include "MediaPrefs.h"
 
 using namespace mozilla;
 using namespace mozilla::gfx;
@@ -169,6 +170,7 @@ AndroidBridge::ConstructBridge()
     MOZ_ASSERT(!sBridge);
     sBridge = new AndroidBridge();
 
+    MediaPrefs::GetSingleton();
 }
 
 void
@@ -505,6 +507,22 @@ AndroidBridge::GetClipboardText(nsAString& aText)
         aText = text->ToString();
     }
     return !!text;
+}
+
+void
+AndroidBridge::ShowPersistentAlertNotification(const nsAString& aPersistentData,
+                                               const nsAString& aImageUrl,
+                                               const nsAString& aAlertTitle,
+                                               const nsAString& aAlertText,
+                                               const nsAString& aAlertCookie,
+                                               const nsAString& aAlertName,
+                                               nsIPrincipal* aPrincipal)
+{
+    nsAutoString host;
+    nsAlertsUtils::GetSourceHostPort(aPrincipal, host);
+
+    GeckoAppShell::ShowPersistentAlertNotificationWrapper
+        (aPersistentData, aImageUrl, aAlertTitle, aAlertText, aAlertCookie, aAlertName, host);
 }
 
 void

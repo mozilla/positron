@@ -7,7 +7,7 @@
 const {Ci} = require("chrome");
 const {XPCOMUtils} = require("resource://gre/modules/XPCOMUtils.jsm");
 const {CssLogic} = require("devtools/shared/inspector/css-logic");
-const {ELEMENT_STYLE} = require("devtools/server/actors/styles");
+const {ELEMENT_STYLE} = require("devtools/shared/specs/styles");
 const {PREF_ORIG_SOURCES} = require("devtools/client/styleeditor/utils");
 const {Rule} = require("devtools/client/inspector/rules/models/rule");
 const {InplaceEditor, editableField, editableItem} =
@@ -60,6 +60,7 @@ function RuleEditor(ruleView, rule) {
 
   this.ruleView = ruleView;
   this.doc = this.ruleView.styleDocument;
+  this.toolbox = this.ruleView.inspector.toolbox;
   this.rule = rule;
 
   this.isEditable = !rule.isSystem;
@@ -71,8 +72,11 @@ function RuleEditor(ruleView, rule) {
   this._newPropertyDestroy = this._newPropertyDestroy.bind(this);
   this._onSelectorDone = this._onSelectorDone.bind(this);
   this._locationChanged = this._locationChanged.bind(this);
+  this.updateSourceLink = this.updateSourceLink.bind(this);
 
   this.rule.domRule.on("location-changed", this._locationChanged);
+  this.toolbox.on("tool-registered", this.updateSourceLink);
+  this.toolbox.on("tool-unregistered", this.updateSourceLink);
 
   this._create();
 }
@@ -80,14 +84,15 @@ function RuleEditor(ruleView, rule) {
 RuleEditor.prototype = {
   destroy: function () {
     this.rule.domRule.off("location-changed");
+    this.toolbox.off("tool-registered", this.updateSourceLink);
+    this.toolbox.off("tool-unregistered", this.updateSourceLink);
   },
 
   get isSelectorEditable() {
-    let toolbox = this.ruleView.inspector.toolbox;
     let trait = this.isEditable &&
-      toolbox.target.client.traits.selectorEditable &&
+      this.toolbox.target.client.traits.selectorEditable &&
       this.rule.domRule.type !== ELEMENT_STYLE &&
-      this.rule.domRule.type !== Ci.nsIDOMCSSRule.KEYFRAME_RULE;
+      this.rule.domRule.type !== CSSRule.KEYFRAME_RULE;
 
     // Do not allow editing anonymousselectors until we can
     // detect mutations on  pseudo elements in Bug 1034110.
@@ -146,7 +151,7 @@ RuleEditor.prototype = {
       });
     }
 
-    if (this.rule.domRule.type !== Ci.nsIDOMCSSRule.KEYFRAME_RULE &&
+    if (this.rule.domRule.type !== CSSRule.KEYFRAME_RULE &&
         this.rule.domRule.selectors) {
       let selector = this.rule.domRule.selectors.join(", ");
 
@@ -225,6 +230,12 @@ RuleEditor.prototype = {
 
     sourceLabel.setAttribute("tooltiptext", sourceHref + sourceLine);
 
+    if (this.toolbox.isToolRegistered("styleeditor")) {
+      this.source.removeAttribute("unselectable");
+    } else {
+      this.source.setAttribute("unselectable", true);
+    }
+
     if (this.rule.isSystem) {
       let uaLabel = _strings.GetStringFromName("rule.userAgentStyles");
       sourceLabel.setAttribute("value", uaLabel + " " + title);
@@ -233,14 +244,14 @@ RuleEditor.prototype = {
       // fly and the URI is not registered with the about: handler.
       // https://bugzilla.mozilla.org/show_bug.cgi?id=935803#c37
       if (sourceHref === "about:PreferenceStyleSheet") {
-        sourceLabel.parentNode.setAttribute("unselectable", "true");
+        this.source.setAttribute("unselectable", "true");
         sourceLabel.setAttribute("value", uaLabel);
         sourceLabel.removeAttribute("tooltiptext");
       }
     } else {
       sourceLabel.setAttribute("value", title);
       if (this.rule.ruleLine === -1 && this.rule.domRule.parentStyleSheet) {
-        sourceLabel.parentNode.setAttribute("unselectable", "true");
+        this.source.setAttribute("unselectable", "true");
       }
     }
 
@@ -279,7 +290,7 @@ RuleEditor.prototype = {
     // style, just show the text directly.
     if (this.rule.domRule.type === ELEMENT_STYLE) {
       this.selectorText.textContent = this.rule.selectorText;
-    } else if (this.rule.domRule.type === Ci.nsIDOMCSSRule.KEYFRAME_RULE) {
+    } else if (this.rule.domRule.type === CSSRule.KEYFRAME_RULE) {
       this.selectorText.textContent = this.rule.domRule.keyText;
     } else {
       this.rule.domRule.selectors.forEach((selector, i) => {

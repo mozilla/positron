@@ -19,7 +19,7 @@
 #include "js/GCAPI.h"
 #include "js/SliceBudget.h"
 #include "js/Vector.h"
-
+#include "threading/ConditionVariable.h"
 #include "vm/NativeObject.h"
 
 namespace js {
@@ -849,7 +849,7 @@ class GCHelperState
     // Condvar for notifying the main thread when work has finished. This is
     // associated with the runtime's GC lock --- the worker thread state
     // condvars can't be used here due to lock ordering issues.
-    PRCondVar* done;
+    js::ConditionVariable done;
 
     // Activity for the helper to do, protected by the GC lock.
     State state_;
@@ -858,7 +858,7 @@ class GCHelperState
     PRThread* thread;
 
     void startBackgroundThread(State newState);
-    void waitForBackgroundThread();
+    void waitForBackgroundThread(js::AutoLockGC& lock);
 
     State state();
     void setState(State state);
@@ -879,13 +879,12 @@ class GCHelperState
   public:
     explicit GCHelperState(JSRuntime* rt)
       : rt(rt),
-        done(nullptr),
+        done(),
         state_(IDLE),
         thread(nullptr),
         shrinkFlag(false)
     { }
 
-    bool init();
     void finish();
 
     void work();
@@ -1276,7 +1275,7 @@ class MOZ_RAII JS_HAZ_GC_SUPPRESSED AutoSuppressGC
   public:
     explicit AutoSuppressGC(ExclusiveContext* cx);
     explicit AutoSuppressGC(JSCompartment* comp);
-    explicit AutoSuppressGC(JSRuntime* rt);
+    explicit AutoSuppressGC(JSContext* cx);
 
     ~AutoSuppressGC()
     {

@@ -21,7 +21,7 @@
 namespace mozilla {
 namespace widget {
 
-PRLogModuleInfo* gGtkIMLog = nullptr;
+LazyLogModule gGtkIMLog("nsGtkIMModuleWidgets");
 
 static inline const char*
 ToChar(bool aBool)
@@ -180,9 +180,6 @@ IMContextWrapper::IMContextWrapper(nsWindow* aOwnerWindow)
     , mSetCursorPositionOnKeyEvent(true)
     , mPendingResettingIMContext(false)
 {
-    if (!gGtkIMLog) {
-        gGtkIMLog = PR_NewLogModule("nsGtkIMModuleWidgets");
-    }
     static bool sFirstInstance = true;
     if (sFirstInstance) {
         sFirstInstance = false;
@@ -336,16 +333,12 @@ IMContextWrapper::GetIMEUpdatePreference() const
     }
 
     nsIMEUpdatePreference::Notifications notifications =
-        nsIMEUpdatePreference::NOTIFY_SELECTION_CHANGE;
+        nsIMEUpdatePreference::NOTIFY_NOTHING;
     // If it's not enabled, we don't need position change notification.
     if (IsEnabled()) {
         notifications |= nsIMEUpdatePreference::NOTIFY_POSITION_CHANGE;
     }
     nsIMEUpdatePreference updatePreference(notifications);
-    // We shouldn't notify IME of selection change caused by changes of
-    // composition string.  Therefore, we don't need to be notified selection
-    // changes which are caused by compositionchange events handled.
-    updatePreference.DontNotifyChangesCausedByComposition();
     return updatePreference;
 }
 
@@ -1190,9 +1183,9 @@ IMContextWrapper::OnDeleteSurroundingNative(GtkIMContext* aContext,
                                             gint aNChars)
 {
     MOZ_LOG(gGtkIMLog, LogLevel::Info,
-        ("GTKIM: %p OnDeleteSurroundingNative(aContext=%p, aOffset=%ld, "
-         "aNChar=%ld), current context=%p",
-         this, aContext, GetCurrentContext()));
+        ("GTKIM: %p OnDeleteSurroundingNative(aContext=%p, aOffset=%d, "
+         "aNChar=%d), current context=%p",
+         this, aContext, aOffset, aNChars, GetCurrentContext()));
 
     // See bug 472635, we should do nothing if IM context doesn't match.
     if (GetCurrentContext() != aContext) {
@@ -2064,7 +2057,7 @@ IMContextWrapper::DeleteText(GtkIMContext* aContext,
                              uint32_t aNChars)
 {
     MOZ_LOG(gGtkIMLog, LogLevel::Info,
-        ("GTKIM: %p DeleteText(aContext=%p, aOffset=%d, aNChars=%d), "
+        ("GTKIM: %p DeleteText(aContext=%p, aOffset=%d, aNChars=%u), "
          "mCompositionState=%s",
          this, aContext, aOffset, aNChars, GetCompositionStateName()));
 

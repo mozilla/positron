@@ -222,6 +222,39 @@ IMEStateManager::StopIMEStateManagement()
 }
 
 // static
+void
+IMEStateManager::MaybeStartOffsetUpdatedInChild(nsIWidget* aWidget,
+                                                uint32_t aStartOffset)
+{
+  if (NS_WARN_IF(!sTextCompositions)) {
+    MOZ_LOG(sISMLog, LogLevel::Warning,
+      ("ISM: IMEStateManager::MaybeStartOffsetUpdatedInChild("
+       "aWidget=0x%p, aStartOffset=%u), called when there is no "
+       "composition", aWidget, aStartOffset));
+    return;
+  }
+
+  RefPtr<TextComposition> composition = GetTextCompositionFor(aWidget);
+  if (NS_WARN_IF(!composition)) {
+    MOZ_LOG(sISMLog, LogLevel::Warning,
+      ("ISM: IMEStateManager::MaybeStartOffsetUpdatedInChild("
+       "aWidget=0x%p, aStartOffset=%u), called when there is no "
+       "composition", aWidget, aStartOffset));
+    return;
+  }
+
+  if (composition->NativeOffsetOfStartComposition() == aStartOffset) {
+    return;
+  }
+
+  MOZ_LOG(sISMLog, LogLevel::Info,
+    ("ISM: IMEStateManager::MaybeStartOffsetUpdatedInChild("
+     "aWidget=0x%p, aStartOffset=%u), old offset=%u",
+     aWidget, aStartOffset, composition->NativeOffsetOfStartComposition()));
+  composition->OnStartOffsetUpdatedInChild(aStartOffset);
+}
+
+// static
 nsresult
 IMEStateManager::OnDestroyPresContext(nsPresContext* aPresContext)
 {
@@ -867,34 +900,6 @@ IMEStateManager::GetNewIMEState(nsPresContext* aPresContext,
   return newIMEState;
 }
 
-// Helper class, used for IME enabled state change notification
-class IMEEnabledStateChangedEvent : public Runnable {
-public:
-  explicit IMEEnabledStateChangedEvent(uint32_t aState)
-    : mState(aState)
-  {
-  }
-
-  NS_IMETHOD Run()
-  {
-    nsCOMPtr<nsIObserverService> observerService =
-      services::GetObserverService();
-    if (observerService) {
-      MOZ_LOG(sISMLog, LogLevel::Info,
-        ("ISM: IMEEnabledStateChangedEvent::Run(), notifies observers of "
-         "\"ime-enabled-state-changed\""));
-      nsAutoString state;
-      state.AppendInt(mState);
-      observerService->NotifyObservers(nullptr, "ime-enabled-state-changed",
-                                       state.get());
-    }
-    return NS_OK;
-  }
-
-private:
-  uint32_t mState;
-};
-
 static bool
 MayBeIMEUnawareWebApp(nsINode* aNode)
 {
@@ -1087,15 +1092,6 @@ IMEStateManager::SetInputContext(nsIWidget* aWidget,
 
   aWidget->SetInputContext(aInputContext, aAction);
   sActiveInputContextWidget = aWidget;
-
-  // Don't compare with old IME enabled state for reducing the count of
-  // notifying observers since in a remote process, nsIWidget::GetInputContext()
-  // call here may cause synchronous IPC, it's much more expensive than
-  // notifying observes.
-
-  // XXX Looks like nobody is observing this.
-  nsContentUtils::AddScriptRunner(
-    new IMEEnabledStateChangedEvent(aInputContext.mIMEState.mEnabled));
 }
 
 // static

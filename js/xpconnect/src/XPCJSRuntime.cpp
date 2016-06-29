@@ -1546,12 +1546,6 @@ CompartmentPrivate::SizeOfIncludingThis(MallocSizeOf mallocSizeOf)
 
 /***************************************************************************/
 
-void XPCJSRuntime::DestroyJSContextStack()
-{
-    delete mJSContextStack;
-    mJSContextStack = nullptr;
-}
-
 void XPCJSRuntime::SystemIsBeingShutDown()
 {
     for (auto i = mDetachedWrappedNativeProtoMap->Iter(); !i.Done(); i.Next()) {
@@ -3386,8 +3380,7 @@ static const JSWrapObjectCallbacks WrapObjectCallbacks = {
 };
 
 XPCJSRuntime::XPCJSRuntime()
- : mJSContextStack(new XPCJSContextStack(this)),
-   mCallContext(nullptr),
+ : mCallContext(nullptr),
    mAutoRoots(nullptr),
    mResolveName(JSID_VOID),
    mResolvingWrapper(nullptr),
@@ -3408,7 +3401,8 @@ XPCJSRuntime::XPCJSRuntime()
    mObjectHolderRoots(nullptr),
    mWatchdogManager(new WatchdogManager(this)),
    mAsyncSnowWhiteFreer(new AsyncFreeSnowWhite()),
-   mTimeoutAccumulated(false)
+   mTimeoutAccumulated(false),
+   mPendingResult(NS_OK)
 {
 }
 
@@ -3651,11 +3645,8 @@ XPCJSRuntime::newXPCJSRuntime()
 }
 
 bool
-XPCJSRuntime::InitXPCContext(JSContext* cx)
+XPCJSRuntime::JSContextInitialized(JSContext* cx)
 {
-    // If we were the first cx ever created (like the SafeJSContext), the caller
-    // would have had no way to enter a request. Enter one now before doing the
-    // rest of the cx setup.
     JSAutoRequest ar(cx);
 
     // if it is our first context then we need to generate our string ids
@@ -3675,10 +3666,6 @@ XPCJSRuntime::InitXPCContext(JSContext* cx)
             return false;
         }
     }
-
-    XPCContext* xpc = new XPCContext(this, cx);
-    if (!xpc)
-        return false;
 
     return true;
 }
@@ -3753,10 +3740,6 @@ XPCJSRuntime::BeforeProcessTask(bool aMightBlock)
     // cancel any ongoing performance measurement.
     js::ResetPerformanceMonitoring(Get()->Runtime());
 
-    // Push a null JSContext so that we don't see any script during
-    // event processing.
-    PushNullJSContext();
-
     CycleCollectedJSRuntime::BeforeProcessTask(aMightBlock);
 }
 
@@ -3775,8 +3758,6 @@ XPCJSRuntime::AfterProcessTask(uint32_t aNewRecursionDepth)
     // Now that we are certain that the event is complete,
     // we can flush any ongoing performance measurement.
     js::FlushPerformanceMonitoring(Get()->Runtime());
-
-    PopNullJSContext();
 }
 
 /***************************************************************************/
@@ -3789,20 +3770,7 @@ XPCJSRuntime::DebugDump(int16_t depth)
     XPC_LOG_ALWAYS(("XPCJSRuntime @ %x", this));
         XPC_LOG_INDENT();
         XPC_LOG_ALWAYS(("mJSRuntime @ %x", Runtime()));
-
-        int cxCount = 0;
-        JSContext* iter = nullptr;
-        while (JS_ContextIterator(Runtime(), &iter))
-            ++cxCount;
-        XPC_LOG_ALWAYS(("%d JS context(s)", cxCount));
-
-        iter = nullptr;
-        while (JS_ContextIterator(Runtime(), &iter)) {
-            XPCContext* xpc = XPCContext::GetXPCContext(iter);
-            XPC_LOG_INDENT();
-            xpc->DebugDump(depth);
-            XPC_LOG_OUTDENT();
-        }
+        XPC_LOG_ALWAYS(("mJSContext @ %x", Context()));
 
         XPC_LOG_ALWAYS(("mWrappedJSClassMap @ %x with %d wrapperclasses(s)",
                         mWrappedJSClassMap, mWrappedJSClassMap->Count()));
@@ -3848,6 +3816,8 @@ XPCJSRuntime::DebugDump(int16_t depth)
             }
             XPC_LOG_OUTDENT();
         }
+
+        XPC_LOG_ALWAYS(("mPendingResult of %x", mPendingResult));
 
         XPC_LOG_OUTDENT();
 #endif
@@ -3908,7 +3878,7 @@ void
 XPCJSRuntime::InitSingletonScopes()
 {
     // This all happens very early, so we don't bother with cx pushing.
-    JSContext* cx = GetJSContextStack()->GetSafeJSContext();
+    JSContext* cx = Context();
     JSAutoRequest ar(cx);
     RootedValue v(cx);
     nsresult rv;

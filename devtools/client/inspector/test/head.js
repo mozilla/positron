@@ -454,7 +454,7 @@ var clickContainer = Task.async(function* (selector, inspector) {
  */
 function mouseLeaveMarkupView(inspector) {
   info("Leaving the markup-view area");
-  let def = promise.defer();
+  let def = defer();
 
   // Find another element to mouseover over in order to leave the markup-view
   let btn = inspector.toolbox.doc.querySelector("#toolbox-controls");
@@ -655,7 +655,7 @@ function* waitForMultipleChildrenUpdates(inspector) {
  */
 function waitForChildrenUpdated({markup}) {
   info("Waiting for queued children updates to be handled");
-  let def = promise.defer();
+  let def = defer();
   markup._waitForChildren().then(() => {
     executeSoon(def.resolve);
   });
@@ -674,7 +674,7 @@ function waitForChildrenUpdated({markup}) {
  * ready
  */
 function waitForStyleEditor(toolbox, href) {
-  let def = promise.defer();
+  let def = defer();
 
   info("Waiting for the toolbox to switch to the styleeditor");
   toolbox.once("styleeditor-selected").then(() => {
@@ -725,7 +725,7 @@ function waitForStyleEditor(toolbox, href) {
  * the validator function has returned true, rejects otherwise.
  */
 function waitForClipboard(setup, expected) {
-  let def = promise.defer();
+  let def = defer();
   SimpleTest.waitForClipboard(expected, setup, def.resolve, def.reject);
   return def.promise;
 }
@@ -825,4 +825,21 @@ function openContextMenuAndGetAllItems(inspector, options) {
   }));
 
   return allItems;
+}
+
+/**
+ * Get the rule editor from the rule-view given its index
+ *
+ * @param {CssRuleView} view
+ *        The instance of the rule-view panel
+ * @param {Number} childrenIndex
+ *        The children index of the element to get
+ * @param {Number} nodeIndex
+ *        The child node index of the element to get
+ * @return {DOMNode} The rule editor if any at this index
+ */
+function getRuleViewRuleEditor(view, childrenIndex, nodeIndex) {
+  return nodeIndex !== undefined ?
+    view.element.children[childrenIndex].childNodes[nodeIndex]._ruleEditor :
+    view.element.children[childrenIndex]._ruleEditor;
 }

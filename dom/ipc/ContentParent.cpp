@@ -261,16 +261,16 @@ using namespace mozilla::system;
 #include "nsIProfileSaveEvent.h"
 #endif
 
-#ifdef MOZ_GAMEPAD
-#include "mozilla/dom/GamepadMonitoring.h"
-#endif
-
 #ifndef MOZ_SIMPLEPUSH
 #include "mozilla/dom/PushNotifier.h"
 #endif
 
 #ifdef XP_WIN
 #include "mozilla/widget/AudioSession.h"
+#endif
+
+#ifdef MOZ_CRASHREPORTER
+#include "nsThread.h"
 #endif
 
 #include "VRManagerParent.h"            // for VRManagerParent
@@ -1987,6 +1987,13 @@ ContentParent::RecvDeallocateLayerTreeId(const uint64_t& aId)
 
 namespace {
 
+void
+DelayedDeleteSubprocess(GeckoChildProcessHost* aSubprocess)
+{
+  RefPtr<DeleteTask<GeckoChildProcessHost>> task = new DeleteTask<GeckoChildProcessHost>(aSubprocess);
+  XRE_GetIOMessageLoop()->PostTask(task.forget());
+}
+
 // This runnable only exists to delegate ownership of the
 // ContentParent to this runnable, until it's deleted by the event
 // system.
@@ -2118,10 +2125,9 @@ ContentParent::ActorDestroy(ActorDestroyReason why)
   }
   mIdleListeners.Clear();
 
-  if (mSubprocess) {
-    mSubprocess->DissociateActor();
-    mSubprocess = nullptr;
-  }
+  MessageLoop::current()->
+    PostTask(NewRunnableFunction(DelayedDeleteSubprocess, mSubprocess));
+  mSubprocess = nullptr;
 
   // IPDL rules require actors to live on past ActorDestroy, but it
   // may be that the kungFuDeathGrip above is the last reference to
@@ -2298,7 +2304,6 @@ ContentParent::InitializeMembers()
   mShutdownPending = false;
   mIPCOpen = true;
   mHangMonitorActor = nullptr;
-  mHasGamepadListener = false;
 }
 
 bool
@@ -3317,7 +3322,7 @@ ContentParent::AllocPCompositorBridgeParent(mozilla::ipc::Transport* aTransport,
                                             base::ProcessId aOtherProcess)
 {
   return GPUProcessManager::Get()->CreateTabCompositorBridge(
-    aTransport, aOtherProcess, mSubprocess);
+    aTransport, aOtherProcess);
 }
 
 gfx::PVRManagerParent*
@@ -3331,7 +3336,7 @@ PImageBridgeParent*
 ContentParent::AllocPImageBridgeParent(mozilla::ipc::Transport* aTransport,
                                        base::ProcessId aOtherProcess)
 {
-  return ImageBridgeParent::Create(aTransport, aOtherProcess, mSubprocess);
+  return ImageBridgeParent::Create(aTransport, aOtherProcess);
 }
 
 PBackgroundParent*
@@ -5618,34 +5623,6 @@ ContentParent::GetBrowserConfiguration(const nsCString& aURI, BrowserConfigurati
 }
 
 bool
-ContentParent::RecvGamepadListenerAdded()
-{
-#ifdef MOZ_GAMEPAD
-  if (mHasGamepadListener) {
-    NS_WARNING("Gamepad listener already started, cannot start again!");
-    return false;
-  }
-  mHasGamepadListener = true;
-  StartGamepadMonitoring();
-#endif
-  return true;
-}
-
-bool
-ContentParent::RecvGamepadListenerRemoved()
-{
-#ifdef MOZ_GAMEPAD
-  if (!mHasGamepadListener) {
-    NS_WARNING("Gamepad listener already stopped, cannot stop again!");
-    return false;
-  }
-  mHasGamepadListener = false;
-  MaybeStopGamepadMonitoring();
-#endif
-  return true;
-}
-
-bool
 ContentParent::RecvProfile(const nsCString& aProfile)
 {
 #ifdef MOZ_ENABLE_PROFILER_SPS
@@ -5834,6 +5811,15 @@ ContentParent::RecvNotifyPushSubscriptionModifiedObservers(const nsCString& aSco
 #ifndef MOZ_SIMPLEPUSH
   PushSubscriptionModifiedDispatcher dispatcher(aScope, aPrincipal);
   Unused << NS_WARN_IF(NS_FAILED(dispatcher.NotifyObservers()));
+#endif
+  return true;
+}
+
+bool
+ContentParent::RecvNotifyLowMemory()
+{
+#ifdef MOZ_CRASHREPORTER
+  nsThread::SaveMemoryReportNearOOM(nsThread::ShouldSaveMemoryReport::kForceReport);
 #endif
   return true;
 }

@@ -122,6 +122,8 @@ GPUProcessHost::InitAfterConnect(bool aSucceeded)
     DebugOnly<bool> rv =
       mGPUChild->Open(GetChannel(), base::GetProcId(GetChildProcessHandle()));
     MOZ_ASSERT(rv);
+
+    mGPUChild->Init();
   }
 
   if (mListener) {
@@ -192,6 +194,13 @@ GPUProcessHost::KillHard(const char* aReason)
     NewRunnableFunction(&ProcessWatcher::EnsureProcessTerminated, handle, /*force=*/true));
 }
 
+static void
+DelayedDeleteSubprocess(GeckoChildProcessHost* aSubprocess)
+{
+  XRE_GetIOMessageLoop()->
+    PostTask(mozilla::MakeAndAddRef<DeleteTask<GeckoChildProcessHost>>(aSubprocess));
+}
+
 void
 GPUProcessHost::DestroyProcess()
 {
@@ -202,7 +211,8 @@ GPUProcessHost::DestroyProcess()
     mTaskFactory.RevokeAll();
   }
 
-  DissociateActor();
+  MessageLoop::current()->
+    PostTask(NewRunnableFunction(DelayedDeleteSubprocess, this));
 }
 
 } // namespace gfx

@@ -546,8 +546,6 @@ public:
 
   virtual bool HandleWindowsMessages(const Message& aMsg) const override;
 
-  bool HasGamepadListener() const { return mHasGamepadListener; }
-
   void SetNuwaParent(NuwaParent* aNuwaParent) { mNuwaParent = aNuwaParent; }
 
   void ForkNewProcess(bool aBlocking);
@@ -1145,10 +1143,6 @@ private:
   virtual bool RecvGetBrowserConfiguration(const nsCString& aURI,
                                            BrowserConfiguration* aConfig) override;
 
-  virtual bool RecvGamepadListenerAdded() override;
-
-  virtual bool RecvGamepadListenerRemoved() override;
-
   virtual bool RecvProfile(const nsCString& aProfile) override;
 
   virtual bool RecvGetGraphicsDeviceInitData(DeviceInitData* aOut) override;
@@ -1179,6 +1173,8 @@ private:
 
   virtual bool RecvNotifyPushSubscriptionModifiedObservers(const nsCString& aScope,
                                                            const IPC::Principal& aPrincipal) override;
+
+  virtual bool RecvNotifyLowMemory() override;
 
   // If you add strong pointers to cycle collected objects here, be sure to
   // release these objects in ShutDownProcess.  See the comment there for more
@@ -1223,7 +1219,6 @@ private:
   bool mSendPermissionUpdates;
   bool mIsForBrowser;
   bool mIsNuwaProcess;
-  bool mHasGamepadListener;
 
   // These variables track whether we've called Close() and KillHard() on our
   // channel.

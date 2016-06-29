@@ -1556,6 +1556,37 @@ PresShell::GetCurrentSelection(SelectionType aSelectionType)
   return mSelection->GetSelection(aSelectionType);
 }
 
+already_AddRefed<nsISelectionController>
+PresShell::GetSelectionControllerForFocusedContent(nsIContent** aFocusedContent)
+{
+  if (aFocusedContent) {
+    *aFocusedContent = nullptr;
+  }
+
+  if (mDocument) {
+    nsCOMPtr<nsPIDOMWindowOuter> focusedWindow;
+    nsCOMPtr<nsIContent> focusedContent =
+      nsFocusManager::GetFocusedDescendant(mDocument->GetWindow(), false,
+                                           getter_AddRefs(focusedWindow));
+    if (focusedContent) {
+      nsIFrame* frame = focusedContent->GetPrimaryFrame();
+      if (frame) {
+        nsCOMPtr<nsISelectionController> selectionController;
+        frame->GetSelectionController(mPresContext,
+                                      getter_AddRefs(selectionController));
+        if (selectionController) {
+          if (aFocusedContent) {
+            focusedContent.forget(aFocusedContent);
+          }
+          return selectionController.forget();
+        }
+      }
+    }
+  }
+  nsCOMPtr<nsISelectionController> self(this);
+  return self.forget();
+}
+
 NS_IMETHODIMP
 PresShell::ScrollSelectionIntoView(RawSelectionType aRawSelectionType,
                                    SelectionRegion aRegion,
@@ -1618,8 +1649,6 @@ PresShell::Initialize(nscoord aWidth, nscoord aHeight)
     // Nothing to do
     return NS_OK;
   }
-
-  mozilla::TimeStamp timerStart = mozilla::TimeStamp::Now();
 
   NS_ASSERTION(!mDidInitialize, "Why are we being called?");
 
@@ -1779,11 +1808,6 @@ PresShell::Initialize(nscoord aWidth, nscoord aHeight)
   // and we should fire the before-first-paint notification
   if (!mPaintingSuppressed) {
     ScheduleBeforeFirstPaint();
-  }
-
-  if (root && root->IsXULElement()) {
-    mozilla::Telemetry::AccumulateTimeDelta(Telemetry::XUL_INITIAL_FRAME_CONSTRUCTION,
-                                            timerStart);
   }
 
   return NS_OK; //XXX this needs to be real. MMP
@@ -5221,7 +5245,7 @@ PresShell::PaintRangePaintInfo(const nsTArray<UniquePtr<RangePaintInfo>>& aItems
   // selection.
   RefPtr<nsFrameSelection> frameSelection;
   if (aSelection) {
-    frameSelection = static_cast<Selection*>(aSelection)->GetFrameSelection();
+    frameSelection = aSelection->AsSelection()->GetFrameSelection();
   }
   else {
     frameSelection = FrameSelection();
@@ -9800,17 +9824,9 @@ PresShell::ProcessReflowCommands(bool aInterruptible)
     TimeDuration elapsed = TimeStamp::Now() - timerStart;
     int32_t intElapsed = int32_t(elapsed.ToMilliseconds());
 
-    Telemetry::ID id;
-    if (mDocument->GetRootElement()->IsXULElement()) {
-      id = mIsActive
-        ? Telemetry::XUL_FOREGROUND_REFLOW_MS
-        : Telemetry::XUL_BACKGROUND_REFLOW_MS;
-    } else {
-      id = mIsActive
-        ? Telemetry::HTML_FOREGROUND_REFLOW_MS_2
-        : Telemetry::HTML_BACKGROUND_REFLOW_MS_2;
+    if (!mDocument->GetRootElement()->IsXULElement() && mIsActive) {
+      Telemetry::Accumulate(Telemetry::HTML_FOREGROUND_REFLOW_MS_2, intElapsed);
     }
-    Telemetry::Accumulate(id, intElapsed);
     if (intElapsed > NS_LONG_REFLOW_TIME_MS) {
       Telemetry::Accumulate(Telemetry::LONG_REFLOW_INTERRUPTIBLE,
                             aInterruptible ? 1 : 0);

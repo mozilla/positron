@@ -134,7 +134,7 @@ CompositorOGL::CreateContext()
     nsCString discardFailureId;
     context = GLContextProvider::CreateOffscreen(mSurfaceSize,
                                                  caps, CreateContextFlags::REQUIRE_COMPAT_PROFILE,
-                                                 discardFailureId);
+                                                 &discardFailureId);
   }
 
   if (!context) {
@@ -541,6 +541,11 @@ CompositorOGL::CreateRenderTarget(const IntRect &aRect, SurfaceInitMode aInit)
     return nullptr;
   }
 
+  if (!gl()) {
+    // CompositingRenderTargetOGL does not work without a gl context.
+    return nullptr;
+  }
+
   GLuint tex = 0;
   GLuint fbo = 0;
   CreateFBOWithTexture(aRect, false, 0, &fbo, &tex);
@@ -558,6 +563,10 @@ CompositorOGL::CreateRenderTargetFromSource(const IntRect &aRect,
   MOZ_ASSERT(aRect.width != 0 && aRect.height != 0, "Trying to create a render target of invalid size");
 
   if (aRect.width * aRect.height == 0) {
+    return nullptr;
+  }
+
+  if (!gl()) {
     return nullptr;
   }
 
@@ -855,6 +864,8 @@ CompositorOGL::GetShaderConfigFor(Effect *aEffect,
     gfx::SurfaceFormat format = effectComponentAlpha->mOnWhite->GetFormat();
     config.SetRBSwap(format == gfx::SurfaceFormat::B8G8R8A8 ||
                      format == gfx::SurfaceFormat::B8G8R8X8);
+    TextureSourceOGL* source = effectComponentAlpha->mOnWhite->AsSourceOGL();
+    config.SetTextureTarget(source->GetTextureTarget());
     break;
   }
   case EffectTypes::RENDER_TARGET:
@@ -1151,9 +1162,16 @@ CompositorOGL::DrawQuad(const Rect& aRect,
   if (aOpacity != 1.f)
     program->SetLayerOpacity(aOpacity);
   if (config.mFeatures & ENABLE_TEXTURE_RECT) {
-    TexturedEffect* texturedEffect =
+    TextureSourceOGL* source = nullptr;
+    if (aEffectChain.mPrimaryEffect->mType == EffectTypes::COMPONENT_ALPHA) {
+      EffectComponentAlpha* effectComponentAlpha =
+        static_cast<EffectComponentAlpha*>(aEffectChain.mPrimaryEffect.get());
+      source = effectComponentAlpha->mOnWhite->AsSourceOGL();
+    } else {
+      TexturedEffect* texturedEffect =
         static_cast<TexturedEffect*>(aEffectChain.mPrimaryEffect.get());
-    TextureSourceOGL* source = texturedEffect->mTexture->AsSourceOGL();
+      source = texturedEffect->mTexture->AsSourceOGL();
+    }
     // This is used by IOSurface that use 0,0...w,h coordinate rather then 0,0..1,1.
     program->SetTexCoordMultiplier(source->GetSize().width, source->GetSize().height);
   }

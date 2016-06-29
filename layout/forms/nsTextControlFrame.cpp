@@ -121,7 +121,7 @@ nsTextControlFrame::DestroyFrom(nsIFrame* aDestructRoot)
 {
   mScrollEvent.Revoke();
 
-  EditorInitializer* initializer = (EditorInitializer*) Properties().Get(TextControlInitializer());
+  EditorInitializer* initializer = Properties().Get(TextControlInitializer());
   if (initializer) {
     initializer->Revoke();
     Properties().Delete(TextControlInitializer());
@@ -388,7 +388,7 @@ nsTextControlFrame::CreateAnonymousContent(nsTArray<ContentInfo>& aElements)
   if (initEagerly) {
     NS_ASSERTION(!nsContentUtils::IsSafeToRunScript(),
                  "Someone forgot a script blocker?");
-    EditorInitializer* initializer = (EditorInitializer*) Properties().Get(TextControlInitializer());
+    EditorInitializer* initializer = Properties().Get(TextControlInitializer());
     if (initializer) {
       initializer->Revoke();
     }
@@ -1039,7 +1039,7 @@ nsTextControlFrame::GetSelectionRange(int32_t* aSelectionStart,
   NS_ENSURE_SUCCESS(rv, rv);
   NS_ENSURE_TRUE(selection, NS_ERROR_FAILURE);
 
-  dom::Selection* sel = static_cast<dom::Selection*>(selection.get());
+  dom::Selection* sel = selection->AsSelection();
   if (aDirection) {
     nsDirection direction = sel->GetSelectionDirection();
     if (direction == eDirNext) {

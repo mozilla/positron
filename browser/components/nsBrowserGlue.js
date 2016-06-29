@@ -1927,7 +1927,7 @@ BrowserGlue.prototype = {
   },
 
   _migrateUI: function BG__migrateUI() {
-    const UI_VERSION = 39;
+    const UI_VERSION = 40;
     const BROWSER_DOCURL = "chrome://browser/content/browser.xul";
 
     let currentUIVersion;
@@ -1943,56 +1943,6 @@ BrowserGlue.prototype = {
       return;
 
     let xulStore = Cc["@mozilla.org/xul/xulstore;1"].getService(Ci.nsIXULStore);
-
-    if (currentUIVersion < 2) {
-      // This code adds the customizable bookmarks button.
-      let currentset = xulStore.getValue(BROWSER_DOCURL, "nav-bar", "currentset");
-      // Need to migrate only if toolbar is customized and the element is not found.
-      if (currentset &&
-          currentset.indexOf("bookmarks-menu-button-container") == -1) {
-        currentset += ",bookmarks-menu-button-container";
-        xulStore.setValue(BROWSER_DOCURL, "nav-bar", "currentset", currentset);
-      }
-    }
-
-    if (currentUIVersion < 4) {
-      // This code moves the home button to the immediate left of the bookmarks menu button.
-      let currentset = xulStore.getValue(BROWSER_DOCURL, "nav-bar", "currentset");
-      // Need to migrate only if toolbar is customized and the elements are found.
-      if (currentset &&
-          currentset.indexOf("home-button") != -1 &&
-          currentset.indexOf("bookmarks-menu-button-container") != -1) {
-        currentset = currentset.replace(/(^|,)home-button($|,)/, "$1$2")
-                               .replace(/(^|,)bookmarks-menu-button-container($|,)/,
-                                        "$1home-button,bookmarks-menu-button-container$2");
-        xulStore.setValue(BROWSER_DOCURL, "nav-bar", "currentset", currentset);
-      }
-    }
-
-    if (currentUIVersion < 5) {
-      // This code uncollapses PersonalToolbar if its collapsed status is not
-      // persisted, and user customized it or changed default bookmarks.
-      //
-      // If the user does not have a persisted value for the toolbar's
-      // "collapsed" attribute, try to determine whether it's customized.
-      if (!xulStore.hasValue(BROWSER_DOCURL, "PersonalToolbar", "collapsed")) {
-        // We consider the toolbar customized if it has more than
-        // 3 children, or if it has a persisted currentset value.
-        let toolbarIsCustomized = xulStore.hasValue(BROWSER_DOCURL,
-                                                    "PersonalToolbar", "currentset");
-        let getToolbarFolderCount = function () {
-          let toolbarFolder =
-            PlacesUtils.getFolderContents(PlacesUtils.toolbarFolderId).root;
-          let toolbarChildCount = toolbarFolder.childCount;
-          toolbarFolder.containerOpen = false;
-          return toolbarChildCount;
-        };
-
-        if (toolbarIsCustomized || getToolbarFolderCount() > 3) {
-          xulStore.setValue(BROWSER_DOCURL, "PersonalToolbar", "collapsed", "false");
-        }
-      }
-    }
 
     if (currentUIVersion < 9) {
       // This code adds the customizable downloads buttons.
@@ -2288,6 +2238,21 @@ BrowserGlue.prototype = {
         xulStore.removeValue(BROWSER_DOCURL, toolbarId, "defaultset");
       }
     }
+
+    if (currentUIVersion < 40) {
+      const kOldSafeBrowsingPref = "browser.safebrowsing.enabled";
+      // Default value is set to true, a user pref means that the pref was
+      // set to false.
+      if (Services.prefs.prefHasUserValue(kOldSafeBrowsingPref) &&
+          !Services.prefs.getBoolPref(kOldSafeBrowsingPref)) {
+        Services.prefs.setBoolPref("browser.safebrowsing.phishing.enabled",
+                                   false);
+        // Should just remove support for the pref entirely, even if it's
+        // only in about:config
+        Services.prefs.clearUserPref(kOldSafeBrowsingPref);
+      }
+    }
+
     // Update the migration version.
     Services.prefs.setIntPref("browser.migration.version", UI_VERSION);
   },
