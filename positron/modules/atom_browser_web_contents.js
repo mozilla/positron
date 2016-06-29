@@ -46,7 +46,7 @@ const BrowserWindowWebContentsPrototype = {
     return this._browserWindow;
   },
 
-  getURL() {
+  _getURL() {
     if (this._browserWindow && this._browserWindow._domWindow) {
       return this._browserWindow._domWindow.location;
     }
@@ -54,7 +54,7 @@ const BrowserWindowWebContentsPrototype = {
     return null;
   },
 
-  loadURL(url) {
+  _loadURL(url) {
     this._browserWindow._loadURL(url);
   },
 
@@ -133,6 +133,10 @@ const GuestWebContentsPrototype = {
     this._webView = webView;
 
     let onBrowserLocationChange = (e) => {
+      // TODO: Use an event that give us more information so we can fill in
+      // inPage and replaceEntry arguments.
+      // https://github.com/mozilla/positron/issues/98
+      this.emit('navigation-entry-commited', e, e.detail, /*inPage*/ false, /*replaceEntry*/ false);
       this._url = e.detail;
     };
     this._webView.browserPluginNode.addEventListener("mozbrowserlocationchange", onBrowserLocationChange);
@@ -140,11 +144,11 @@ const GuestWebContentsPrototype = {
 
   isGuest() { return true },
 
-  getURL: function() {
+  _getURL: function() {
     return this._url;
   },
 
-  loadURL: function(url) {
+  _loadURL: function(url) {
     this._webView.browserPluginNode.setAttribute('src', url);
   },
 
@@ -253,9 +257,6 @@ function WebContents(options) {
     Object.assign(this, BrowserWindowWebContentsPrototype);
     this._browserWindow = options.browserWindow;
   }
-
-  this._getURL = this.getURL;
-  this._loadURL = this.loadURL;
 }
 
 exports.create = function(options) {
