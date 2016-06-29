@@ -14,6 +14,7 @@ const Cr = Components.results;
 const Cu = Components.utils;
 
 Cu.import('resource://gre/modules/Services.jsm');
+Cu.import("resource://gre/modules/NetUtil.jsm");
 
 const subScriptLoader = Cc['@mozilla.org/moz/jssubscript-loader;1'].
                         getService(Ci.mozIJSSubScriptLoader);
@@ -162,53 +163,34 @@ function ModuleLoader(processType, window) {
     }
     modules.set(module.id, module);
 
-    // Provide the Components object to the "native binding modules" (which
-    // implement APIs in JS that Node/Electron implement with native bindings).
-    const wantComponents = uri.spec.startsWith('resource:///modules/gecko/');
+    // Read the source file in so it can be wrapped with a function to allow a
+    // shared global scope but independent local module scopes (this is the same
+    // way node does it).
+    let channel = NetUtil.newChannel({
+      uri: uri,
+      loadUsingSystemPrincipal: true
+    });
+    let stream = channel.open2();
 
-    // Create a target object whose prototype is the sandbox, which we'll use
-    // to load the module via the subscript loader, so the module has the global
-    // scope of the sandbox and the local scope of the target.
-    let target = Object.create(sandbox);
+    let src = "";
+    let cstream = Components.classes["@mozilla.org/intl/converter-input-stream;1"].
+                  createInstance(Components.interfaces.nsIConverterInputStream);
+    cstream.init(stream, "UTF-8", 0, 0); // you can use another encoding here if you wish
 
-    // In the renderer process, we can't yet load all modules in a single
-    // sandbox, because attempts to reference Window properties on the target
-    // object then throw errors like:
-    //
-    //   TypeError: 'get location' called on an object that does not implement interface Window.
-    //
-    // This is described as "TypeError: invalid Array.prototype.sort argument"
-    // in the MDN docs on the error:
-    //
-    //   https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Errors/Array_sort_argument
-    //
-    // But that's clearly not the issue here.  Some code is deciding that
-    // the target object doesn't implement Window, even though its prototype
-    // is a Window instance.
-    //
-    // Whereas that code does think that a sandbox with a Window prototype
-    // implements Window.  So we work around the problem by loading modules
-    // in their own sandboxes in renderer processes.
-    //
-    // TODO: https://github.com/mozilla/positron/issues/93
-    //
-    if (processType === 'renderer') {
-      target = new Cu.Sandbox(systemPrincipal, {
-        wantComponents: true,
-        sandboxPrototype: window,
-      });
-    }
-
-    // Inject module-specific locals into the target object.
-    target.exports = module.exports;
-    target.module = module;
-    target.require = this.require.bind(this, module);
-    target.global = this.global;
-    target.__filename = file.path;
-    target.__dirname = file.parent.path;
+    let str = {};
+    let read = 0;
+    do {
+      read = cstream.readString(0xffffffff, str);
+      src += str.value;
+    } while (read != 0);
+    cstream.close();
 
     try {
-      subScriptLoader.loadSubScript(uri.spec, target, 'UTF-8');
+      src = '(function (global, exports, require, module, __filename, __dirname) { ' +
+             src +
+             '\n});';
+      let result = Cu.evalInSandbox(src, sandbox, "latest", file.path, 1);
+      result(this.global, module.exports, this.require.bind(this, module), module, file.path, file.parent.path);
       return module.exports;
     } catch(ex) {
       modules.delete(module.id);

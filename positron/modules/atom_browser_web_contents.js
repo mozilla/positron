@@ -255,6 +255,7 @@ function WebContents(options) {
   }
 
   this._getURL = this.getURL;
+  this._loadURL = this.loadURL;
 }
 
 exports.create = function(options) {
