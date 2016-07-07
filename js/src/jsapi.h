@@ -3549,6 +3549,12 @@ extern JS_PUBLIC_API(JSFunction*)
 JS_DefineFunctionById(JSContext* cx, JS::Handle<JSObject*> obj, JS::Handle<jsid> id, JSNative call,
                       unsigned nargs, unsigned attrs);
 
+extern JS_PUBLIC_API(bool)
+JS_IsFunctionBound(JSFunction* fun);
+
+extern JS_PUBLIC_API(JSObject*)
+JS_GetBoundFunctionTarget(JSFunction* fun);
+
 namespace JS {
 
 /**
