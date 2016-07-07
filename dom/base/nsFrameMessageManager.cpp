@@ -1735,7 +1735,8 @@ nsMessageManagerScriptExecutor::LoadScriptInternal(const nsAString& aURL,
     JSContext* cx = aes.cx();
     if (script) {
       if (aRunInGlobalScope) {
-        JS::CloneAndExecuteScript(cx, script);
+        JS::RootedValue result(cx);
+        JS::CloneAndExecuteScript(cx, script, &result);
       } else {
         JS::Rooted<JSObject*> scope(cx);
         bool ok = js::ExecuteInGlobalAndReturnScope(cx, global, script, &scope);
