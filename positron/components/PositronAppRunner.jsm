@@ -61,6 +61,9 @@ PositronAppRunner.prototype = {
       id: "resource:///modules/PositronAppRunner.jsm",
       exports: {},
     };
+    let nodeLoader = Cc["@mozilla.org/positron/nodeloader;1"]
+                     .getService(Ci.nsINodeLoader);
+    nodeLoader.init();
     (new ModuleLoader("browser")).require(requirer, mainScriptURI);
   },
 

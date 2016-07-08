@@ -4,6 +4,37 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+USE_LIBS += [
+    'static:/positron/app/spidernode/.libs/cares',
+    'static:/positron/app/spidernode/.libs/gtest',
+    'static:/positron/app/spidernode/.libs/http_parser',
+    'static:/positron/app/spidernode/.libs/icudata',
+    'static:/positron/app/spidernode/.libs/icui18n',
+    'static:/positron/app/spidernode/.libs/icustubdata',
+    'static:/positron/app/spidernode/.libs/icuucx',
+    'static:/positron/app/spidernode/.libs/node',
+    'static:/positron/app/spidernode/.libs/openssl',
+    'static:/positron/app/spidernode/.libs/spidershim',
+    'static:/positron/app/spidernode/.libs/uv',
+    'static:/positron/app/spidernode/.libs/zlib',
+]
+
 WEBIDL_FILES += [
     'Process.webidl',
 ]
+
+XPIDL_SOURCES += [
+  'nsINodeLoader.idl',
+]
+
+EXPORTS += [
+    'NodeLoader.h',
+]
+
+SOURCES += [
+    'NodeLoader.cpp',
+]
+
+XPIDL_MODULE = 'positron'
+
+FINAL_LIBRARY = 'xul'
