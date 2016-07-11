@@ -344,6 +344,10 @@ public:
     return mUpgradeInsecureRequests;
   }
 
+  void SetReferrer(const nsACString& aReferrer) {
+    mReferrer = aReferrer;
+  }
+
   /**
    * Set the principal responsible for this document.
    */
@@ -695,6 +699,11 @@ public:
   {
     return mSandboxFlags;
   }
+
+  /**
+   * Get string representation of sandbox flags (null if no flags are set)
+   */
+  void GetSandboxFlagsAsString(nsAString& aFlags);
 
   /**
    * Set the sandbox flags for this document.
@@ -2584,11 +2593,6 @@ public:
     return !!GetFullscreenElement();
   }
   void ExitFullscreen();
-  bool FullscreenEnabledInternal() const { return mFullscreenEnabled; }
-  void SetFullscreenEnabled(bool aEnabled)
-  {
-    mFullscreenEnabled = aEnabled;
-  }
   Element* GetMozPointerLockElement();
   void MozExitPointerLock()
   {
@@ -3049,10 +3053,6 @@ protected:
 
   // Do we currently have an event posted to call FlushUserFontSet?
   bool mPostedFlushUserFontSet : 1;
-
-  // Whether fullscreen is enabled for this document. This corresponds
-  // to the "fullscreen enabled flag" in the HTML spec.
-  bool mFullscreenEnabled : 1;
 
   enum Type {
     eUnknown, // should never be used

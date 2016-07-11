@@ -61,10 +61,6 @@ import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.RectF;
 import android.hardware.Sensor;
-import android.hardware.SensorEvent;
-import android.hardware.SensorEventListener;
-import android.location.Location;
-import android.location.LocationListener;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -132,9 +128,7 @@ public abstract class GeckoApp
     GeckoEventListener,
     GeckoMenu.Callback,
     GeckoMenu.MenuPresenter,
-    LocationListener,
     NativeEventListener,
-    SensorEventListener,
     Tabs.OnTabsChangedListener,
     ViewTreeObserver.OnGlobalLayoutListener {
 
@@ -247,16 +241,6 @@ public abstract class GeckoApp
 
     @Override
     public Activity getActivity() {
-        return this;
-    }
-
-    @Override
-    public LocationListener getLocationListener() {
-        return this;
-    }
-
-    @Override
-    public SensorEventListener getSensorEventListener() {
         return this;
     }
 
@@ -1688,8 +1672,31 @@ public abstract class GeckoApp
                 final JSONArray tabs = new JSONArray();
                 final JSONObject windowObject = new JSONObject();
                 SessionParser parser = new SessionParser() {
+                    private boolean selectNextTab;
+
                     @Override
                     public void onTabRead(final SessionTab sessionTab) {
+                        if (sessionTab.isAboutHomeWithoutHistory()) {
+                            // This is a tab pointing to about:home with no history. We won't restore
+                            // this tab. If we end up restoring no tabs then the browser will decide
+                            // whether it needs to open about:home or a different 'homepage'. If we'd
+                            // always restore about:home only tabs then we'd never open the homepage.
+                            // See bug 1261008.
+
+                            if (sessionTab.isSelected()) {
+                                // Unfortunately this tab is the selected tab. Let's just try to select
+                                // the first tab. If we haven't restored any tabs so far then remember
+                                // to select the next tab that gets restored.
+
+                                if (!Tabs.getInstance().selectLastTab()) {
+                                    selectNextTab = true;
+                                }
+                            }
+
+                            // Do not restore this tab.
+                            return;
+                        }
+
                         JSONObject tabObject = sessionTab.getTabObject();
 
                         int flags = Tabs.LOADURL_NEW_TAB;
@@ -1698,6 +1705,13 @@ public abstract class GeckoApp
                         flags |= (tabObject.optBoolean("isPrivate") ? Tabs.LOADURL_PRIVATE : 0);
 
                         final Tab tab = Tabs.getInstance().loadUrl(sessionTab.getUrl(), flags);
+
+                        if (selectNextTab) {
+                            // We did not restore the selected tab previously. Now let's select this tab.
+                            Tabs.getInstance().selectTab(tab.getId());
+                            selectNextTab = false;
+                        }
+
                         ThreadUtils.postToUiThread(new Runnable() {
                             @Override
                             public void run() {
@@ -2530,38 +2544,6 @@ public abstract class GeckoApp
     @Override
     public AbsoluteLayout getPluginContainer() { return mPluginContainer; }
 
-    // Accelerometer.
-    @Override
-    public void onAccuracyChanged(Sensor sensor, int accuracy) {
-    }
-
-    @Override
-    public void onSensorChanged(SensorEvent event) {
-        GeckoAppShell.sendEventToGecko(GeckoEvent.createSensorEvent(event));
-    }
-
-    // Geolocation.
-    @Override
-    public void onLocationChanged(Location location) {
-        // No logging here: user-identifying information.
-        GeckoAppShell.sendEventToGecko(GeckoEvent.createLocationEvent(location));
-    }
-
-    @Override
-    public void onProviderDisabled(String provider)
-    {
-    }
-
-    @Override
-    public void onProviderEnabled(String provider)
-    {
-    }
-
-    @Override
-    public void onStatusChanged(String provider, int status, Bundle extras)
-    {
-    }
-
     private static final String CPU = "cpu";
     private static final String SCREEN = "screen";
 
@@ -2876,5 +2858,11 @@ public abstract class GeckoApp
                 TextUtils.isEmpty(action) ? Intent.ACTION_VIEW : action, "");
 
         return IntentHelper.getHandlersForIntent(intent);
+    }
+
+    @Override
+    public String getDefaultChromeURI() {
+        // Use the chrome URI specified by Gecko's defaultChromeURI pref.
+        return null;
     }
 }

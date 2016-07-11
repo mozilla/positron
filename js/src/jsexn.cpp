@@ -249,13 +249,13 @@ struct SuppressErrorsGuard
 
     explicit SuppressErrorsGuard(JSContext* cx)
       : cx(cx),
-        prevReporter(JS::SetWarningReporter(cx->runtime(), nullptr)),
+        prevReporter(JS::SetWarningReporter(cx, nullptr)),
         prevState(cx)
     {}
 
     ~SuppressErrorsGuard()
     {
-        JS::SetWarningReporter(cx->runtime(), prevReporter);
+        JS::SetWarningReporter(cx, prevReporter);
     }
 };
 
@@ -510,7 +510,7 @@ ErrorObject::createConstructor(JSContext* cx, JSProtoKey key)
 }
 
 JS_FRIEND_API(JSFlatString*)
-js::GetErrorTypeName(JSRuntime* rt, int16_t exnType)
+js::GetErrorTypeName(JSContext* cx, int16_t exnType)
 {
     /*
      * JSEXN_INTERNALERR returns null to prevent that "InternalError: "
@@ -522,7 +522,7 @@ js::GetErrorTypeName(JSRuntime* rt, int16_t exnType)
         return nullptr;
     }
     JSProtoKey key = GetExceptionProtoKey(JSExnType(exnType));
-    return ClassName(key, rt->contextFromMainThread());
+    return ClassName(key, cx);
 }
 
 void
@@ -550,7 +550,7 @@ js::ErrorToException(JSContext* cx, const char* message, JSErrorReport* reportp,
 
     if (exnType == JSEXN_WARN) {
         // werror must be enabled, so we use JSEXN_ERR.
-        MOZ_ASSERT(cx->runtime()->options().werror());
+        MOZ_ASSERT(cx->options().werror());
         exnType = JSEXN_ERR;
     }
 
@@ -1022,13 +1022,13 @@ js::ValueToSourceForError(JSContext* cx, HandleValue val, JSAutoByteString& byte
     StringBuffer sb(cx);
     if (val.isObject()) {
         RootedObject valObj(cx, val.toObjectOrNull());
-        ESClassValue cls;
+        ESClass cls;
         if (!GetBuiltinClass(cx, valObj, &cls))
             return "<<error determining class of value>>";
         const char* s;
-        if (cls == ESClass_Array)
+        if (cls == ESClass::Array)
             s = "the array ";
-        else if (cls == ESClass_ArrayBuffer)
+        else if (cls == ESClass::ArrayBuffer)
             s = "the array buffer ";
         else if (JS_IsArrayBufferViewObject(valObj))
             s = "the typed array ";

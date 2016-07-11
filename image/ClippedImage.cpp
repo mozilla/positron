@@ -3,6 +3,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "ClippedImage.h"
+
+#include <algorithm>
 #include <new>      // Workaround for bug in VS10; see bug 981264.
 #include <cmath>
 #include <utility>
@@ -20,14 +23,13 @@
 #include "Orientation.h"
 #include "SVGImageContext.h"
 
-#include "ClippedImage.h"
-
 namespace mozilla {
 
 using namespace gfx;
 using layers::LayerManager;
 using layers::ImageContainer;
 using std::make_pair;
+using std::max;
 using std::modf;
 using std::pair;
 
@@ -501,10 +503,12 @@ ClippedImage::OptimalImageSizeForDest(const gfxSize& aDest,
 
   int32_t imgWidth, imgHeight;
   bool needScale = false;
+  bool forceUniformScaling = false;
   if (mSVGViewportSize && !mSVGViewportSize->IsEmpty()) {
     imgWidth = mSVGViewportSize->width;
     imgHeight = mSVGViewportSize->height;
     needScale = true;
+    forceUniformScaling = (aFlags & imgIContainer::FLAG_FORCE_UNIFORM_SCALING);
   } else if (NS_SUCCEEDED(InnerImage()->GetWidth(&imgWidth)) &&
              NS_SUCCEEDED(InnerImage()->GetHeight(&imgHeight))) {
     needScale = true;
@@ -518,6 +522,10 @@ ClippedImage::OptimalImageSizeForDest(const gfxSize& aDest,
     // multiple of the size of the clipping region is always fine.
     nsIntSize scale(ceil(aDest.width / mClip.width),
                     ceil(aDest.height / mClip.height));
+
+    if (forceUniformScaling) {
+      scale.width = scale.height = max(scale.height, scale.width);
+    }
 
     // Determine the size we'd prefer to render the inner image at, and ask the
     // inner image what size we should actually use.

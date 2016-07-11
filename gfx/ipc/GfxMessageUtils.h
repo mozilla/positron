@@ -1170,14 +1170,24 @@ struct ParamTraits<mozilla::gfx::FilterDescription>
   }
 };
 
+typedef mozilla::layers::GeckoContentController::TapType TapType;
+
+template <>
+struct ParamTraits<TapType>
+  : public ContiguousEnumSerializer<
+             TapType,
+             TapType::eSingleTap,
+             TapType::eSentinel>
+{};
+
 typedef mozilla::layers::GeckoContentController::APZStateChange APZStateChange;
 
 template <>
 struct ParamTraits<APZStateChange>
   : public ContiguousEnumSerializer<
              APZStateChange,
-             APZStateChange::TransformBegin,
-             APZStateChange::APZStateChangeSentinel>
+             APZStateChange::eTransformBegin,
+             APZStateChange::eSentinel>
 {};
 
 template<>

@@ -124,7 +124,6 @@ static constexpr Register AsmJSIonExitRegCallee = r8;
 static constexpr Register AsmJSIonExitRegE0 = r0;
 static constexpr Register AsmJSIonExitRegE1 = r1;
 static constexpr Register AsmJSIonExitRegE2 = r2;
-static constexpr Register AsmJSIonExitRegE3 = r3;
 
 // Registers used in the GenerateFFIIonExit Disable Activation block.
 // None of these may be the second scratch register.
@@ -135,14 +134,14 @@ static constexpr Register AsmJSIonExitRegD1 = r1;
 static constexpr Register AsmJSIonExitRegD2 = r4;
 
 // Registerd used in RegExpMatcher instruction (do not use JSReturnOperand).
-static MOZ_CONSTEXPR_VAR Register RegExpMatcherRegExpReg = CallTempReg0;
-static MOZ_CONSTEXPR_VAR Register RegExpMatcherStringReg = CallTempReg1;
-static MOZ_CONSTEXPR_VAR Register RegExpMatcherLastIndexReg = CallTempReg2;
+static constexpr Register RegExpMatcherRegExpReg = CallTempReg0;
+static constexpr Register RegExpMatcherStringReg = CallTempReg1;
+static constexpr Register RegExpMatcherLastIndexReg = CallTempReg2;
 
 // Registerd used in RegExpTester instruction (do not use ReturnReg).
-static MOZ_CONSTEXPR_VAR Register RegExpTesterRegExpReg = CallTempReg0;
-static MOZ_CONSTEXPR_VAR Register RegExpTesterStringReg = CallTempReg1;
-static MOZ_CONSTEXPR_VAR Register RegExpTesterLastIndexReg = CallTempReg2;
+static constexpr Register RegExpTesterRegExpReg = CallTempReg0;
+static constexpr Register RegExpTesterStringReg = CallTempReg1;
+static constexpr Register RegExpTesterLastIndexReg = CallTempReg2;
 
 static constexpr Register JSReturnReg_Type = r3;
 static constexpr Register JSReturnReg_Data = r2;
@@ -176,12 +175,12 @@ static const uint32_t AsmJSStackAlignment = SimdMemoryAlignment;
 static const int32_t AsmJSGlobalRegBias = 1024;
 
 // Does this architecture support SIMD conversions between Uint32x4 and Float32x4?
-static MOZ_CONSTEXPR_VAR bool SupportsUint32x4FloatConversions = false;
+static constexpr bool SupportsUint32x4FloatConversions = false;
 
 // Does this architecture support comparisons of unsigned integer vectors?
-static MOZ_CONSTEXPR_VAR bool SupportsUint8x16Compares = false;
-static MOZ_CONSTEXPR_VAR bool SupportsUint16x8Compares = false;
-static MOZ_CONSTEXPR_VAR bool SupportsUint32x4Compares = false;
+static constexpr bool SupportsUint8x16Compares = false;
+static constexpr bool SupportsUint16x8Compares = false;
+static constexpr bool SupportsUint32x4Compares = false;
 
 class Assembler : public vixl::Assembler
 {
@@ -288,6 +287,7 @@ class Assembler : public vixl::Assembler
     }
 
     static bool SupportsFloatingPoint() { return true; }
+    static bool SupportsUnalignedAccesses() { return true; }
     static bool SupportsSimd() { return js::jit::SupportsSimd; }
 
     // Tracks a jump that is patchable after finalization.
@@ -457,15 +457,15 @@ class ABIArgGenerator
     ABIArg current_;
 };
 
-static MOZ_CONSTEXPR_VAR Register ABINonArgReg0 = r8;
-static MOZ_CONSTEXPR_VAR Register ABINonArgReg1 = r9;
-static MOZ_CONSTEXPR_VAR Register ABINonArgReturnReg0 = r8;
-static MOZ_CONSTEXPR_VAR Register ABINonArgReturnReg1 = r9;
+static constexpr Register ABINonArgReg0 = r8;
+static constexpr Register ABINonArgReg1 = r9;
+static constexpr Register ABINonArgReturnReg0 = r8;
+static constexpr Register ABINonArgReturnReg1 = r9;
 
 // Registers used for asm.js/wasm table calls. These registers must be disjoint
 // from the ABI argument registers and from each other.
-static MOZ_CONSTEXPR_VAR Register WasmTableCallPtrReg = ABINonArgReg0;
-static MOZ_CONSTEXPR_VAR Register WasmTableCallSigReg = ABINonArgReg1;
+static constexpr Register WasmTableCallPtrReg = ABINonArgReg0;
+static constexpr Register WasmTableCallSigReg = ABINonArgReg1;
 
 static inline bool
 GetIntArgReg(uint32_t usedIntArgs, uint32_t usedFloatArgs, Register* out)

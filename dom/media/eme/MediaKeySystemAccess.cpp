@@ -17,9 +17,6 @@
 #include "mozilla/WindowsVersion.h"
 #include "WMFDecoderModule.h"
 #endif
-#ifdef XP_MACOSX
-#include "nsCocoaFeatures.h"
-#endif
 #include "nsContentCID.h"
 #include "nsServiceManagerUtils.h"
 #include "mozIGeckoMediaPluginService.h"
@@ -292,12 +289,6 @@ MediaKeySystemAccess::GetKeySystemStatus(const nsAString& aKeySystem,
         return MediaKeySystemStatus::Cdm_not_supported;
       }
 #endif
-#ifdef XP_MACOSX
-      if (!nsCocoaFeatures::OnLionOrLater()) {
-        aOutMessage = NS_LITERAL_CSTRING("Minimum MacOSX version (10.7) not met for Adobe EME");
-        return MediaKeySystemStatus::Cdm_not_supported;
-      }
-#endif
       return EnsureMinCDMVersion(mps, aKeySystem, aMinCdmVersion, aOutMessage, aOutCdmVersion);
     }
   }
@@ -308,12 +299,6 @@ MediaKeySystemAccess::GetKeySystemStatus(const nsAString& aKeySystem,
       // Win Vista and later only.
       if (!IsVistaOrLater()) {
         aOutMessage = NS_LITERAL_CSTRING("Minimum Windows version (Vista) not met for Widevine EME");
-        return MediaKeySystemStatus::Cdm_not_supported;
-      }
-#endif
-#ifdef XP_MACOSX
-      if (!nsCocoaFeatures::OnLionOrLater()) {
-        aOutMessage = NS_LITERAL_CSTRING("Minimum MacOSX version (10.7) not met for Widevine EME");
         return MediaKeySystemStatus::Cdm_not_supported;
       }
 #endif
@@ -394,7 +379,7 @@ GMPDecryptsAndGeckoDecodesAAC(mozIGeckoMediaPluginService* aGMPService,
     // We do have a GMP for AAC -> Gecko itself does *not* decode AAC.
     return false;
   }
-#if defined(MOZ_WIDEVINE_EME) && defined(XP_WIN)
+#if defined(XP_WIN)
   // Widevine CDM doesn't include an AAC decoder. So if WMF can't
   // decode AAC, and a codec wasn't specified, be conservative
   // and reject the MediaKeys request, since our policy is to prevent
@@ -500,46 +485,13 @@ IsSupportedVideo(mozIGeckoMediaPluginService* aGMPService,
 }
 
 static bool
-IsSupported(mozIGeckoMediaPluginService* aGMPService,
-            const nsAString& aKeySystem,
-            const MediaKeySystemConfiguration& aConfig,
-            DecoderDoctorDiagnostics* aDiagnostics)
-{
-  if (aConfig.mInitDataType.IsEmpty() &&
-      aConfig.mAudioType.IsEmpty() &&
-      aConfig.mVideoType.IsEmpty()) {
-    // Not an old-style request.
-    return false;
-  }
-
-  // Backwards compatibility with legacy MediaKeySystemConfiguration method.
-  if (!aConfig.mInitDataType.IsEmpty() &&
-      !aConfig.mInitDataType.EqualsLiteral("cenc")) {
-    return false;
-  }
-  if (!aConfig.mAudioType.IsEmpty() &&
-      !IsSupportedAudio(aGMPService, aKeySystem, aConfig.mAudioType, aDiagnostics)) {
-    return false;
-  }
-  if (!aConfig.mVideoType.IsEmpty() &&
-      !IsSupportedVideo(aGMPService, aKeySystem, aConfig.mVideoType, aDiagnostics)) {
-    return false;
-  }
-
-  return true;
-}
-
-static bool
 IsSupportedInitDataType(const nsString& aCandidate, const nsAString& aKeySystem)
 {
   // All supported keySystems can handle "cenc" initDataType.
   // ClearKey also supports "keyids" and "webm" initDataTypes.
   return aCandidate.EqualsLiteral("cenc") ||
     ((aKeySystem.EqualsLiteral("org.w3.clearkey")
-#ifdef MOZ_WIDEVINE_EME
-    || aKeySystem.EqualsLiteral("com.widevine.alpha")
-#endif
-    ) &&
+    || aKeySystem.EqualsLiteral("com.widevine.alpha")) &&
     (aCandidate.EqualsLiteral("keyids") || aCandidate.EqualsLiteral("webm")));
 }
 
@@ -592,7 +544,7 @@ GetSupportedConfig(mozIGeckoMediaPluginService* aGMPService,
     config.mVideoCapabilities.Value().Assign(caps);
   }
 
-#if defined(MOZ_WIDEVINE_EME) && defined(XP_WIN)
+#if defined(XP_WIN)
   // Widevine CDM doesn't include an AAC decoder. So if WMF can't decode AAC,
   // and a codec wasn't specified, be conservative and reject the MediaKeys request.
   if (aKeySystem.EqualsLiteral("com.widevine.alpha") &&
@@ -610,34 +562,6 @@ GetSupportedConfig(mozIGeckoMediaPluginService* aGMPService,
   aOutConfig = config;
 
   return true;
-}
-
-// Backwards compatibility with legacy requestMediaKeySystemAccess with fields
-// from old MediaKeySystemOptions dictionary.
-/* static */
-bool
-MediaKeySystemAccess::IsSupported(const nsAString& aKeySystem,
-                                  const Sequence<MediaKeySystemConfiguration>& aConfigs,
-                                  DecoderDoctorDiagnostics* aDiagnostics)
-{
-  nsCOMPtr<mozIGeckoMediaPluginService> mps =
-    do_GetService("@mozilla.org/gecko-media-plugin-service;1");
-  if (NS_WARN_IF(!mps)) {
-    return false;
-  }
-
-  if (!HaveGMPFor(mps,
-                  NS_ConvertUTF16toUTF8(aKeySystem),
-                  NS_LITERAL_CSTRING(GMP_API_DECRYPTOR))) {
-    return false;
-  }
-
-  for (const MediaKeySystemConfiguration& config : aConfigs) {
-    if (mozilla::dom::IsSupported(mps, aKeySystem, config, aDiagnostics)) {
-      return true;
-    }
-  }
-  return false;
 }
 
 /* static */

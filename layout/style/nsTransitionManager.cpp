@@ -39,6 +39,8 @@
 using mozilla::TimeStamp;
 using mozilla::TimeDuration;
 using mozilla::dom::Animation;
+using mozilla::dom::AnimationPlayState;
+using mozilla::dom::CSSTransition;
 using mozilla::dom::KeyframeEffectReadOnly;
 
 using namespace mozilla;
@@ -418,13 +420,11 @@ nsTransitionManager::StyleContextChanged(dom::Element *aElement,
     EffectCompositor::CascadeLevel::Transitions;
 
   if (collection) {
-    EffectCompositor::UpdateCascadeResults(aElement, pseudoType,
-                                           newStyleContext);
-
     collection->UpdateCheckGeneration(mPresContext);
     mPresContext->EffectCompositor()->MaybeUpdateAnimationRule(aElement,
                                                                pseudoType,
-                                                               cascadeLevel);
+                                                               cascadeLevel,
+                                                               newStyleContext);
   }
 
   // We want to replace the new style context with the after-change style.

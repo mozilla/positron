@@ -142,6 +142,7 @@
 #include "nsIMutable.h"
 #include "nsINSSU2FToken.h"
 #include "nsIObserverService.h"
+#include "nsIParentChannel.h"
 #include "nsIPresShell.h"
 #include "nsIRemoteWindowContext.h"
 #include "nsIScriptError.h"
@@ -149,7 +150,6 @@
 #include "nsISiteSecurityService.h"
 #include "nsISpellChecker.h"
 #include "nsISupportsPrimitives.h"
-#include "nsISystemMessagesInternal.h"
 #include "nsITimer.h"
 #include "nsIURIFixup.h"
 #include "nsIDocShellTreeOwner.h"
@@ -886,9 +886,7 @@ ContentParent::GetInitialProcessPriority(Element* aFrameElement)
     return PROCESS_PRIORITY_FOREGROUND;
   }
 
-  return browserFrame->GetIsExpectingSystemMessage() ?
-           PROCESS_PRIORITY_FOREGROUND_HIGH :
-           PROCESS_PRIORITY_FOREGROUND;
+  return PROCESS_PRIORITY_FOREGROUND;
 }
 
 #if defined(XP_WIN)
@@ -1168,7 +1166,7 @@ ContentParent::CreateBrowserOrApp(const TabContext& aContext,
       }
       tabId = AllocateTabId(openerTabId,
                             aContext.AsIPCTabContext(),
-                           constructorSender->ChildID());
+                            constructorSender->ChildID());
     }
     if (constructorSender) {
       nsCOMPtr<nsIDocShellTreeOwner> treeOwner;
@@ -1356,8 +1354,6 @@ ContentParent::CreateBrowserOrApp(const TabContext& aContext,
     return nullptr;
   }
 
-  parent->AsContentParent()->MaybeTakeCPUWakeLock(aFrameElement);
-
   return TabParent::GetFrom(browser);
 }
 
@@ -1484,102 +1480,9 @@ ContentParent::ForwardKnownInfo()
     Unused << SendVolumes(volumeInfo);
   }
 #endif /* MOZ_WIDGET_GONK */
-
-  nsCOMPtr<nsISystemMessagesInternal> systemMessenger =
-    do_GetService("@mozilla.org/system-message-internal;1");
-  if (systemMessenger && !mIsForBrowser) {
-    nsCOMPtr<nsIURI> manifestURI;
-    nsresult rv = NS_NewURI(getter_AddRefs(manifestURI), mAppManifestURL);
-    if (NS_SUCCEEDED(rv)) {
-      systemMessenger->RefreshCache(mMessageManager, manifestURI);
-    }
-  }
 }
 
 namespace {
-
-class SystemMessageHandledListener final
-  : public nsITimerCallback
-  , public LinkedListElement<SystemMessageHandledListener>
-{
-public:
-  NS_DECL_ISUPPORTS
-
-  SystemMessageHandledListener() {}
-
-  static void OnSystemMessageHandled()
-  {
-    if (!sListeners) {
-      return;
-    }
-
-    SystemMessageHandledListener* listener = sListeners->popFirst();
-    if (!listener) {
-      return;
-    }
-
-    // Careful: ShutDown() may delete |this|.
-    listener->ShutDown();
-  }
-
-  void Init(WakeLock* aWakeLock)
-  {
-    MOZ_ASSERT(!mWakeLock);
-    MOZ_ASSERT(!mTimer);
-
-    // mTimer keeps a strong reference to |this|.  When this object's
-    // destructor runs, it will remove itself from the LinkedList.
-
-    if (!sListeners) {
-      sListeners = new LinkedList<SystemMessageHandledListener>();
-      ClearOnShutdown(&sListeners);
-    }
-    sListeners->insertBack(this);
-
-    mWakeLock = aWakeLock;
-
-    mTimer = do_CreateInstance("@mozilla.org/timer;1");
-
-    uint32_t timeoutSec =
-      Preferences::GetInt("dom.ipc.systemMessageCPULockTimeoutSec", 30);
-    mTimer->InitWithCallback(this, timeoutSec * 1000, nsITimer::TYPE_ONE_SHOT);
-  }
-
-  NS_IMETHOD Notify(nsITimer* aTimer) override
-  {
-    // Careful: ShutDown() may delete |this|.
-    ShutDown();
-    return NS_OK;
-  }
-
-private:
-  ~SystemMessageHandledListener() {}
-
-  static StaticAutoPtr<LinkedList<SystemMessageHandledListener> > sListeners;
-
-  void ShutDown()
-  {
-    RefPtr<SystemMessageHandledListener> kungFuDeathGrip = this;
-
-    ErrorResult rv;
-    mWakeLock->Unlock(rv);
-
-    if (mTimer) {
-      mTimer->Cancel();
-      mTimer = nullptr;
-    }
-  }
-
-  RefPtr<WakeLock> mWakeLock;
-  nsCOMPtr<nsITimer> mTimer;
-};
-
-StaticAutoPtr<LinkedList<SystemMessageHandledListener> >
-  SystemMessageHandledListener::sListeners;
-
-NS_IMPL_ISUPPORTS(SystemMessageHandledListener,
-                  nsITimerCallback)
-
 
 class RemoteWindowContext final : public nsIRemoteWindowContext
                                 , public nsIInterfaceRequestor
@@ -1619,30 +1522,6 @@ RemoteWindowContext::OpenURI(nsIURI* aURI)
 }
 
 } // namespace
-
-void
-ContentParent::MaybeTakeCPUWakeLock(Element* aFrameElement)
-{
-  // Take the CPU wake lock on behalf of this processs if it's expecting a
-  // system message.  We'll release the CPU lock once the message is
-  // delivered, or after some period of time, which ever comes first.
-
-  nsCOMPtr<nsIMozBrowserFrame> browserFrame =
-    do_QueryInterface(aFrameElement);
-  if (!browserFrame ||
-    !browserFrame->GetIsExpectingSystemMessage()) {
-    return;
-  }
-
-  RefPtr<PowerManagerService> pms = PowerManagerService::GetInstance();
-  RefPtr<WakeLock> lock =
-    pms->NewWakeLockOnBehalfOfProcess(NS_LITERAL_STRING("cpu"), this);
-
-  // This object's Init() function keeps it alive.
-  RefPtr<SystemMessageHandledListener> listener =
-    new SystemMessageHandledListener();
-  listener->Init(lock);
-}
 
 bool
 ContentParent::SetPriorityAndCheckIsAlive(ProcessPriority aPriority)
@@ -2392,8 +2271,6 @@ ContentParent::ContentParent(mozIApplication* aApp,
     ? base::PRIVILEGES_INHERIT
     : base::PRIVILEGES_DEFAULT;
   mSubprocess = new GeckoChildProcessHost(GeckoProcessType_Content, privs);
-
-  IToplevelProtocol::SetTransport(mSubprocess->GetChannel());
 }
 
 #ifdef MOZ_NUWA_PROCESS
@@ -2598,6 +2475,14 @@ ContentParent::InitInternal(ProcessPriority aInitialPriority,
 #endif
   MaybeFileDesc brokerFd = void_t();
 #ifdef XP_LINUX
+  // XXX: Checking the pref here makes it possible to enable/disable sandboxing
+  // during an active session. Currently the pref is only used for testing
+  // purpose. If the decision is made to permanently rely on the pref, this
+  // should be changed so that it is required to restart firefox for the change
+  // of value to take effect.
+  shouldSandbox = (Preferences::GetInt("security.sandbox.content.level") > 0) &&
+    !PR_GetEnv("MOZ_DISABLE_CONTENT_SANDBOX");
+
   if (shouldSandbox) {
     MOZ_ASSERT(!mSandboxBroker);
     UniquePtr<SandboxBroker::Policy> policy =
@@ -4420,6 +4305,32 @@ ContentParent::RecvLoadURIExternal(const URIParams& uri,
 }
 
 bool
+ContentParent::RecvExtProtocolChannelConnectParent(const uint32_t& registrarId)
+{
+  nsresult rv;
+
+  // First get the real channel created before redirect on the parent.
+  nsCOMPtr<nsIChannel> channel;
+  rv = NS_LinkRedirectChannels(registrarId, nullptr, getter_AddRefs(channel));
+  NS_ENSURE_SUCCESS(rv, true);
+
+  nsCOMPtr<nsIParentChannel> parent = do_QueryInterface(channel, &rv);
+  NS_ENSURE_SUCCESS(rv, true);
+
+  // The channel itself is its own (faked) parent, link it.
+  rv = NS_LinkRedirectChannels(registrarId, parent, getter_AddRefs(channel));
+  NS_ENSURE_SUCCESS(rv, true);
+
+  // Signal the parent channel that it's a redirect-to parent.  This will
+  // make AsyncOpen on it do nothing (what we want).
+  // Yes, this is a bit of a hack, but I don't think it's necessary to invent
+  // a new interface just to set this flag on the channel.
+  parent->SetParentListener(nullptr);
+
+  return true;
+}
+
+bool
 ContentParent::HasNotificationPermission(const IPC::Principal& aPrincipal)
 {
 #ifdef MOZ_CHILD_PERMISSIONS
@@ -4774,13 +4685,6 @@ ContentParent::SendPBlobConstructor(PBlobParent* aActor,
                                     const BlobConstructorParams& aParams)
 {
   return PContentParent::SendPBlobConstructor(aActor, aParams);
-}
-
-bool
-ContentParent::RecvSystemMessageHandled()
-{
-  SystemMessageHandledListener::OnSystemMessageHandled();
-  return true;
 }
 
 PBrowserParent*
@@ -5601,25 +5505,15 @@ ContentParent::PermissionManagerRelease(const ContentParentId& aCpId,
 }
 
 bool
-ContentParent::RecvGetBrowserConfiguration(const nsCString& aURI, BrowserConfiguration* aConfig)
+ContentParent::RecvGetBrowserConfiguration(BrowserConfiguration* aConfig)
 {
   MOZ_ASSERT(XRE_IsParentProcess());
 
-  return GetBrowserConfiguration(aURI, *aConfig);;
-}
+  RefPtr<ServiceWorkerRegistrar> swr = ServiceWorkerRegistrar::Get();
+  MOZ_ASSERT(swr);
 
-/*static*/ bool
-ContentParent::GetBrowserConfiguration(const nsCString& aURI, BrowserConfiguration& aConfig)
-{
-  if (XRE_IsParentProcess()) {
-    RefPtr<ServiceWorkerRegistrar> swr = ServiceWorkerRegistrar::Get();
-    MOZ_ASSERT(swr);
-
-    swr->GetRegistrations(aConfig.serviceWorkerRegistrations());
-    return true;
-  }
-
-  return ContentChild::GetSingleton()->SendGetBrowserConfiguration(aURI, &aConfig);
+  swr->GetRegistrations(aConfig->serviceWorkerRegistrations());
+  return true;
 }
 
 bool

@@ -11,7 +11,7 @@
 const {Cc, Ci} = require("chrome");
 
 const ToolDefinitions = require("devtools/client/definitions").Tools;
-const {CssLogic} = require("devtools/shared/inspector/css-logic");
+const CssLogic = require("devtools/shared/inspector/css-logic");
 const {ELEMENT_STYLE} = require("devtools/shared/specs/styles");
 const promise = require("promise");
 const defer = require("devtools/shared/defer");
@@ -194,7 +194,7 @@ function CssComputedView(inspector, document, pageStyle) {
   this.searchClearButton.hidden = true;
 
   // No results text.
-  this.noResults = this.styleDocument.getElementById("noResults");
+  this.noResults = this.styleDocument.getElementById("computedview-no-results");
 
   // Refresh panel when color unit changed.
   this._handlePrefChange = this._handlePrefChange.bind(this);

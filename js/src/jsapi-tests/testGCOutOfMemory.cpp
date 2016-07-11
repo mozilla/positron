@@ -32,7 +32,7 @@ BEGIN_TEST(testGCOutOfMemory)
     CHECK(match);
     JS_ClearPendingException(cx);
 
-    JS_GC(rt);
+    JS_GC(cx);
 
     // The above GC should have discarded everything. Verify that we can now
     // allocate half as many objects without OOMing.
@@ -58,7 +58,7 @@ virtual JSRuntime * createRuntime() override {
     JSRuntime* rt = JS_NewRuntime(768 * 1024, 128 * 1024);
     if (!rt)
         return nullptr;
-    setNativeStackQuota(rt);
+    setNativeStackQuota(JS_GetContext(rt));
     return rt;
 }
 

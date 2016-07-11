@@ -43,23 +43,23 @@ public:
 private:
   ~NextFrameSeekTask();
 
-  bool HasAudio() const;
-
-  bool HasVideo() const;
-
   bool IsVideoDecoding() const;
 
-  nsresult EnsureVideoDecodeTaskQueued();
+  void EnsureVideoDecodeTaskQueued();
 
   const char* VideoRequestStatus();
 
   void RequestVideoData();
 
-  bool IsAudioSeekComplete();
+  bool NeedMoreVideo() const;
 
-  bool IsVideoSeekComplete();
+  bool IsVideoRequestPending() const;
 
-  void CheckIfSeekComplete();
+  bool IsAudioSeekComplete() const;
+
+  bool IsVideoSeekComplete() const;
+
+  void MaybeFinishSeek();
 
   void OnAudioDecoded(MediaData* aAudioSample);
 
@@ -69,9 +69,9 @@ private:
 
   void OnVideoNotDecoded(MediaDecoderReader::NotDecodedReason aReason);
 
-  void SetMediaDecoderReaderWrapperCallback();
+  void SetCallbacks();
 
-  void CancelMediaDecoderReaderWrapperCallback();
+  void CancelCallbacks();
 
   // Update the seek target's time before resolving this seek task, the updated
   // time will be used in the MDSM::SeekCompleted() to update the MDSM's position.
@@ -87,8 +87,6 @@ private:
    * Internal state.
    */
   const int64_t mCurrentTimeBeforeSeek;
-  const bool mHasAudio;
-  const bool mHasVideo;
   media::TimeUnit mDuration;
 
   MediaEventListener mAudioCallback;

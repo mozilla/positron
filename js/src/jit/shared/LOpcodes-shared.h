@@ -384,6 +384,10 @@
     _(HasClass)                     \
     _(AsmSelect)                    \
     _(AsmSelectI64)                 \
+    _(WasmLoad)                     \
+    _(WasmLoadI64)                  \
+    _(WasmStore)                    \
+    _(WasmBoundsCheck)              \
     _(AsmJSLoadHeap)                \
     _(AsmJSStoreHeap)               \
     _(AsmJSLoadFuncPtr)             \

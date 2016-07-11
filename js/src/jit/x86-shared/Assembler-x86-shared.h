@@ -224,6 +224,7 @@ class CPUInfo
     static bool avxPresent;
     static bool avxEnabled;
     static bool popcntPresent;
+    static bool needAmdBugWorkaround;
 
     static void SetSSEVersion();
 
@@ -240,6 +241,7 @@ class CPUInfo
     static bool IsSSE41Present() { return GetSSEVersion() >= SSE4_1; }
     static bool IsSSE42Present() { return GetSSEVersion() >= SSE4_2; }
     static bool IsPOPCNTPresent() { return popcntPresent; }
+    static bool NeedAmdBugWorkaround() { return needAmdBugWorkaround; }
 
     static void SetSSE3Disabled() { maxEnabledSSEVersion = SSE2; avxEnabled = false; }
     static void SetSSE4Disabled() { maxEnabledSSEVersion = SSSE3; avxEnabled = false; }
@@ -908,6 +910,7 @@ class AssemblerX86Shared : public AssemblerShared
 
   public:
     void nop() { masm.nop(); }
+    void nop(size_t n) { masm.insert_nop(n); }
     void j(Condition cond, Label* label) { jSrc(cond, label); }
     void jmp(Label* label) { jmpSrc(label); }
     void j(Condition cond, RepatchLabel* label) { jSrc(cond, label); }
@@ -1077,18 +1080,31 @@ class AssemblerX86Shared : public AssemblerShared
     }
 
     static void UpdateBoundsCheck(uint8_t* patchAt, uint32_t heapLength) {
-        // An access is out-of-bounds iff
-        //          ptr + offset + data-type-byte-size > heapLength
-        //     i.e. ptr > heapLength - data-type-byte-size - offset.
-        // data-type-byte-size and offset are already included in the addend so
-        // we just have to add the heap length here.
-        //
         // On x64, even with signal handling being used for most bounds checks,
         // there may be atomic operations that depend on explicit checks. All
         // accesses that have been recorded are the only ones that need bound
-        // checks (see also
-        // CodeGeneratorX64::visitAsmJS{Load,Store,CompareExchange,Exchange,AtomicBinop}Heap)
-        X86Encoding::AddInt32(patchAt, heapLength);
+        // checks.
+        //
+        // An access is out-of-bounds iff
+        //          ptr + offset + data-type-byte-size > heapLength
+        //     i.e  ptr + offset + data-type-byte-size - 1 >= heapLength
+        //     i.e. ptr >= heapLength - data-type-byte-size - offset + 1.
+        //
+        // before := data-type-byte-size + offset - 1
+        uint32_t before = reinterpret_cast<uint32_t*>(patchAt)[-1];
+        uint32_t after = before + heapLength;
+
+        // If the computed index `before` already is out of bounds,
+        // we need to make sure the bounds check will fail all the time.
+        // For bounds checks, the sequence of instructions we use is:
+        //      cmp(ptrReg, #before)
+        //      jae(OutOfBounds)
+        // so replace the cmp immediate with 0.
+        if (after > heapLength)
+            after = 0;
+
+        MOZ_ASSERT_IF(after, int32_t(after) >= int32_t(before));
+        reinterpret_cast<uint32_t*>(patchAt)[-1] = after;
     }
 
     void breakpoint() {
@@ -1101,6 +1117,7 @@ class AssemblerX86Shared : public AssemblerShared
     static bool HasSSE41() { return CPUInfo::IsSSE41Present(); }
     static bool HasPOPCNT() { return CPUInfo::IsPOPCNTPresent(); }
     static bool SupportsFloatingPoint() { return CPUInfo::IsSSE2Present(); }
+    static bool SupportsUnalignedAccesses() { return true; }
     static bool SupportsSimd() { return CPUInfo::IsSSE2Present(); }
     static bool HasAVX() { return CPUInfo::IsAVXPresent(); }
 

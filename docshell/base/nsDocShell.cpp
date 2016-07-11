@@ -86,6 +86,7 @@
 #include "nsWhitespaceTokenizer.h"
 #include "nsICookieService.h"
 #include "nsIConsoleReportCollector.h"
+#include "nsObjectLoadingContent.h"
 
 // we want to explore making the document own the load group
 // so we can associate the document URI with the load group.
@@ -2512,10 +2513,6 @@ nsDocShell::GetFullscreenAllowed(bool* aFullscreenAllowed)
   // Assume false until we determine otherwise...
   *aFullscreenAllowed = false;
 
-  // If it is sandboxed, fullscreen is not allowed.
-  if (mSandboxFlags & SANDBOXED_FULLSCREEN) {
-    return NS_OK;
-  }
   nsCOMPtr<nsPIDOMWindowOuter> win = GetWindow();
   if (!win) {
     return NS_OK;
@@ -2524,19 +2521,35 @@ nsDocShell::GetFullscreenAllowed(bool* aFullscreenAllowed)
   if (frameElement && !frameElement->IsXULElement()) {
     // We do not allow document inside any containing element other
     // than iframe to enter fullscreen.
-    if (!frameElement->IsHTMLElement(nsGkAtoms::iframe)) {
-      return NS_OK;
-    }
-    // If any ancestor iframe does not have allowfullscreen attribute
-    // set, then fullscreen is not allowed.
-    if (!frameElement->HasAttr(kNameSpaceID_None,
-                               nsGkAtoms::allowfullscreen) &&
-        !frameElement->HasAttr(kNameSpaceID_None,
-                               nsGkAtoms::mozallowfullscreen)) {
-      return NS_OK;
-    }
-    nsIDocument* doc = frameElement->GetUncomposedDoc();
-    if (!doc || !doc->FullscreenEnabledInternal()) {
+    if (frameElement->IsHTMLElement(nsGkAtoms::iframe)) {
+      // If any ancestor iframe does not have allowfullscreen attribute
+      // set, then fullscreen is not allowed.
+      if (!frameElement->HasAttr(kNameSpaceID_None,
+                                 nsGkAtoms::allowfullscreen) &&
+          !frameElement->HasAttr(kNameSpaceID_None,
+                                 nsGkAtoms::mozallowfullscreen)) {
+        return NS_OK;
+      }
+    } else if (frameElement->IsHTMLElement(nsGkAtoms::embed)) {
+      // Respect allowfullscreen only if this is a rewritten YouTube embed.
+      nsCOMPtr<nsIObjectLoadingContent> objectLoadingContent =
+        do_QueryInterface(frameElement);
+      if (!objectLoadingContent) {
+        return NS_OK;
+      }
+      nsObjectLoadingContent* olc =
+        static_cast<nsObjectLoadingContent*>(objectLoadingContent.get());
+      if (!olc->IsRewrittenYoutubeEmbed()) {
+        return NS_OK;
+      }
+      // We don't have to check prefixed attributes because Flash does not
+      // support them.
+      if (!frameElement->HasAttr(kNameSpaceID_None,
+                                 nsGkAtoms::allowfullscreen)) {
+        return NS_OK;
+      }
+    } else {
+      // neither iframe nor embed
       return NS_OK;
     }
   }
@@ -3816,13 +3829,6 @@ nsDocShell::IsSandboxedFrom(nsIDocShell* aTargetDocShell)
   return true;
 }
 
-void
-nsDocShell::ApplySandboxAndFullscreenFlags(nsIDocument* aDoc)
-{
-  aDoc->SetSandboxFlags(mSandboxFlags);
-  aDoc->SetFullscreenEnabled(GetFullscreenAllowed());
-}
-
 NS_IMETHODIMP
 nsDocShell::GetTreeOwner(nsIDocShellTreeOwner** aTreeOwner)
 {
@@ -4980,8 +4986,7 @@ nsDocShell::DisplayLoadError(nsresult aError, nsIURI* aURI,
     }
   } else if (NS_ERROR_PHISHING_URI == aError ||
              NS_ERROR_MALWARE_URI == aError ||
-             NS_ERROR_UNWANTED_URI == aError ||
-             NS_ERROR_FORBIDDEN_URI == aError) {
+             NS_ERROR_UNWANTED_URI == aError) {
     nsAutoCString host;
     aURI->GetHost(host);
     CopyUTF8toUTF16(host, formatStrs[0]);
@@ -5012,8 +5017,6 @@ nsDocShell::DisplayLoadError(nsresult aError, nsIURI* aURI,
       error.AssignLiteral("unwantedBlocked");
       bucketId = IsFrame() ? nsISecurityUITelemetry::WARNING_UNWANTED_PAGE_FRAME
                            : nsISecurityUITelemetry::WARNING_UNWANTED_PAGE_TOP;
-    } else if (NS_ERROR_FORBIDDEN_URI == aError) {
-      error.AssignLiteral("forbiddenBlocked");
     }
 
     if (sendTelemetry && errorPage.EqualsIgnoreCase("blocked")) {
@@ -7870,7 +7873,6 @@ nsDocShell::EndPageLoad(nsIWebProgress* aProgress,
                aStatus == NS_ERROR_MALWARE_URI ||
                aStatus == NS_ERROR_PHISHING_URI ||
                aStatus == NS_ERROR_UNWANTED_URI ||
-               aStatus == NS_ERROR_FORBIDDEN_URI ||
                aStatus == NS_ERROR_UNSAFE_CONTENT_TYPE ||
                aStatus == NS_ERROR_REMOTE_XUL ||
                aStatus == NS_ERROR_INTERCEPTION_FAILED ||
@@ -8041,9 +8043,9 @@ nsDocShell::CreateAboutBlankContentViewer(nsIPrincipal* aPrincipal,
 
       blankDoc->SetContainer(this);
 
-      // Apply the sandbox and fullscreen enabled flags to the document.
-      // These are immutable after being set here.
-      ApplySandboxAndFullscreenFlags(blankDoc);
+      // Copy our sandbox flags to the document. These are immutable
+      // after being set here.
+      blankDoc->SetSandboxFlags(mSandboxFlags);
 
       // create a content viewer for us and the new document
       docFactory->CreateInstanceForDocument(
