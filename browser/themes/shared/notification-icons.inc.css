@@ -5,38 +5,10 @@
 %endif
 
 #notification-popup-box {
-  position: relative;
-  background-color: #fff;
-  background-clip: padding-box;
-  padding-left: 3px;
-  border-width: 0 8px 0 0;
-  border-style: solid;
-  border-image: url("chrome://browser/skin/urlbar-arrow.png") 0 8 0 0 fill;
-  margin-inline-end: -8px;
-}
-
-@media (min-resolution: 1.1dppx) {
-  #notification-popup-box {
-    border-image: url("chrome://browser/skin/urlbar-arrow@2x.png") 0 16 0 0 fill;
-  }
-}
-
-@conditionalForwardWithUrlbar@ > #forward-button[disabled] + #urlbar > #notification-popup-box {
-  padding-left: calc(var(--backbutton-urlbar-overlap) + 3px);
-}
-
-/* This changes the direction of the main notification box on the url bar. */
-#notification-popup-box:-moz-locale-dir(rtl),
-/* This adds a second flip for the notification anchors, as they don't switch direction
-   for RTL mode. */
-.notification-anchor-icon:-moz-locale-dir(rtl) {
-  transform: scaleX(-1);
-}
-
-/* For the anchor icons in the chat window, we don't have the notification popup box,
-   so we need to cancel the RTL transform. */
-.notification-anchor-icon.chat-toolbarbutton:-moz-locale-dir(rtl) {
-  transform: none;
+  padding: 5px 0px;
+  margin: -5px 0px;
+  margin-inline-end: -5px;
+  padding-inline-end: 5px;
 }
 
 /* This class can be used alone or in combination with the class defining the
@@ -45,7 +17,7 @@
 .notification-anchor-icon {
   width: 16px;
   height: 16px;
-  margin: 0 2px;
+  margin-inline-start: 2px;
 %ifdef MOZ_WIDGET_GTK
   list-style-image: url(moz-icon://stock/gtk-dialog-info?size=16);
 %else
@@ -109,40 +81,58 @@
 
 .popup-notification-icon[popupid="web-notifications"],
 .desktop-notification-icon {
-  list-style-image: url(chrome://browser/skin/glyphs.svg#desktop-notification);
+  list-style-image: url(chrome://browser/skin/permissions.svg#desktop-notification);
+}
+
+.desktop-notification-icon.blocked {
+  list-style-image: url(chrome://browser/skin/permissions.svg#desktop-notification-blocked);
 }
 
 .geo-icon {
 %ifdef XP_MACOSX
-  list-style-image: url(chrome://browser/skin/glyphs.svg#geo-osx);
+  list-style-image: url(chrome://browser/skin/permissions.svg#geo-osx);
 %elif defined(MOZ_WIDGET_GTK) || defined(MOZ_WIDGET_QT)
-  list-style-image: url(chrome://browser/skin/glyphs.svg#geo-linux);
+  list-style-image: url(chrome://browser/skin/permissions.svg#geo-linux);
 %else
-  list-style-image: url(chrome://browser/skin/glyphs.svg#geo-windows);
+  list-style-image: url(chrome://browser/skin/permissions.svg#geo-windows);
+%endif
+}
+
+.geo-icon.blocked {
+%ifdef XP_MACOSX
+  list-style-image: url(chrome://browser/skin/permissions.svg#geo-osx-blocked);
+%elif defined(MOZ_WIDGET_GTK) || defined(MOZ_WIDGET_QT)
+  list-style-image: url(chrome://browser/skin/permissions.svg#geo-linux-blocked);
+%else
+  list-style-image: url(chrome://browser/skin/permissions.svg#geo-windows-blocked);
 %endif
 }
 
 .popup-notification-icon[popupid="geolocation"] {
 %ifdef XP_MACOSX
-  list-style-image: url(chrome://browser/skin/glyphs.svg#geo-osx);
+  list-style-image: url(chrome://browser/skin/permissions.svg#geo-osx);
 %elif defined(MOZ_WIDGET_GTK) || defined(MOZ_WIDGET_QT)
-  list-style-image: url(chrome://browser/skin/glyphs.svg#geo-linux-detailed);
+  list-style-image: url(chrome://browser/skin/permissions.svg#geo-linux-detailed);
 %else
-  list-style-image: url(chrome://browser/skin/glyphs.svg#geo-windows-detailed);
+  list-style-image: url(chrome://browser/skin/permissions.svg#geo-windows-detailed);
 %endif
 }
 
 .popup-notification-icon[popupid="indexedDB-permissions-prompt"],
 .indexedDB-icon {
-  list-style-image: url(chrome://browser/skin/glyphs.svg#indexedDB);
+  list-style-image: url(chrome://browser/skin/permissions.svg#indexedDB);
+}
+
+.indexedDB-icon.blocked {
+  list-style-image: url(chrome://browser/skin/permissions.svg#indexedDB-blocked);
 }
 
 .login-icon {
-  list-style-image: url(chrome://browser/skin/glyphs.svg#login);
+  list-style-image: url(chrome://browser/skin/permissions.svg#login);
 }
 
 .popup-notification-icon[popupid="password"] {
-  list-style-image: url(chrome://browser/skin/glyphs.svg#login-detailed);
+  list-style-image: url(chrome://browser/skin/permissions.svg#login-detailed);
 }
 
 #login-fill-notification-icon {
@@ -155,33 +145,50 @@
 .camera-icon,
 .popup-notification-icon[popupid="webRTC-shareDevices"],
 .popup-notification-icon[popupid="webRTC-sharingDevices"] {
-  list-style-image: url(chrome://browser/skin/glyphs.svg#camera);
+  list-style-image: url(chrome://browser/skin/permissions.svg#camera);
+}
+
+.camera-icon.blocked {
+  list-style-image: url(chrome://browser/skin/permissions.svg#camera-blocked);
 }
 
 /* The first selector is used by socialchat.xml (bug 1275558). */
 .webRTC-sharingMicrophone-notification-icon,
 .microphone-icon {
-  list-style-image: url(chrome://browser/skin/glyphs.svg#microphone);
+  list-style-image: url(chrome://browser/skin/permissions.svg#microphone);
+}
+
+.microphone-icon.blocked {
+  list-style-image: url(chrome://browser/skin/permissions.svg#microphone-blocked);
 }
 
 .popup-notification-icon[popupid="webRTC-shareMicrophone"],
 .popup-notification-icon[popupid="webRTC-sharingMicrophone"] {
-  list-style-image: url(chrome://browser/skin/glyphs.svg#microphone-detailed);
+  list-style-image: url(chrome://browser/skin/permissions.svg#microphone-detailed);
 }
 
 .popup-notification-icon[popupid="webRTC-shareScreen"],
 .popup-notification-icon[popupid="webRTC-sharingScreen"],
 .screen-icon {
-  list-style-image: url(chrome://browser/skin/glyphs.svg#screen);
+  list-style-image: url(chrome://browser/skin/permissions.svg#screen);
+}
+
+.screen-icon.blocked {
+  list-style-image: url(chrome://browser/skin/permissions.svg#screen-blocked);
 }
 
 .popup-notification-icon[popupid="pointerLock"],
 .pointerLock-icon {
-  list-style-image: url(chrome://browser/skin/glyphs.svg#pointerLock);
+  list-style-image: url(chrome://browser/skin/permissions.svg#pointerLock);
 }
 
+.pointerLock-icon.blocked {
+  list-style-image: url(chrome://browser/skin/permissions.svg#pointerLock-blocked);
+}
+
+/* This icon has a block sign in it, so we don't need a blocked version. */
 .popup-icon {
-  list-style-image: url("chrome://browser/skin/glyphs.svg#popup");
+  list-style-image: url("chrome://browser/skin/permissions.svg#popup");
 }
 
 /* EME */
@@ -210,14 +217,6 @@
 
 .install-icon {
   list-style-image: url(chrome://browser/skin/addons/addon-install-anchor.svg#default);
-}
-
-.install-icon:hover {
-  list-style-image: url(chrome://browser/skin/addons/addon-install-anchor.svg#hover);
-}
-
-.install-icon:hover:active {
-  list-style-image: url(chrome://browser/skin/addons/addon-install-anchor.svg#active);
 }
 
 .popup-notification-icon[popupid="xpinstall-disabled"],
@@ -279,14 +278,6 @@
   -moz-image-region: rect(0, 16px, 16px, 0);
 }
 
-.plugin-icon:hover {
-  -moz-image-region: rect(0, 32px, 16px, 16px);
-}
-
-.plugin-icon:active {
-  -moz-image-region: rect(0, 48px, 16px, 32px);
-}
-
 %ifdef XP_MACOSX
 @media (min-resolution: 1.1dppx) {
   .plugin-icon {
@@ -303,14 +294,6 @@
 
   .plugin-icon {
     -moz-image-region: rect(0, 32px, 32px, 0);
-  }
-
-  .plugin-icon:hover {
-    -moz-image-region: rect(0, 64px, 32px, 32px);
-  }
-
-  .plugin-icon:active {
-    -moz-image-region: rect(0, 96px, 32px, 64px);
   }
 }
 %endif

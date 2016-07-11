@@ -185,6 +185,11 @@ public:
 
     ContentParentIterator begin()
     {
+      // Move the cursor to the first element that matches the policy.
+      while (mPolicy != eAll && mCurrent && !mCurrent->mIsAlive) {
+        mCurrent = mCurrent->LinkedListElement<ContentParent>::getNext();
+      }
+
       return *this;
     }
     ContentParentIterator end()
@@ -347,9 +352,6 @@ public:
    */
   static bool
   PermissionManagerRelease(const ContentParentId& aCpId, const TabId& aTabId);
-
-  static bool
-  GetBrowserConfiguration(const nsCString& aURI, BrowserConfiguration& aConfig);
 
   void ReportChildAlreadyBlocked();
 
@@ -654,12 +656,6 @@ private:
   // should be send from this function. This function should only be
   // called after the process has been transformed to app or browser.
   void ForwardKnownInfo();
-
-  // If the frame element indicates that the child process is "critical" and
-  // has a pending system message, this function acquires the CPU wake lock on
-  // behalf of the child.  We'll release the lock when the system message is
-  // handled or after a timeout, whichever comes first.
-  void MaybeTakeCPUWakeLock(Element* aFrameElement);
 
   // Set the child process's priority and then check whether the child is
   // still alive.  Returns true if the process is still alive, and false
@@ -999,6 +995,7 @@ private:
 
   virtual bool RecvLoadURIExternal(const URIParams& uri,
                                    PBrowserParent* windowContext) override;
+  virtual bool RecvExtProtocolChannelConnectParent(const uint32_t& registrarId) override;
 
   virtual bool RecvSyncMessage(const nsString& aMsg,
                                const ClonedMessageData& aData,
@@ -1056,8 +1053,6 @@ private:
   virtual bool RecvSpeakerManagerGetSpeakerStatus(bool* aValue) override;
 
   virtual bool RecvSpeakerManagerForceSpeaker(const bool& aEnable) override;
-
-  virtual bool RecvSystemMessageHandled() override;
 
   // Callbacks from NuwaParent.
   void OnNuwaReady();
@@ -1140,8 +1135,7 @@ private:
   virtual bool RecvUpdateDropEffect(const uint32_t& aDragAction,
                                     const uint32_t& aDropEffect) override;
 
-  virtual bool RecvGetBrowserConfiguration(const nsCString& aURI,
-                                           BrowserConfiguration* aConfig) override;
+  virtual bool RecvGetBrowserConfiguration(BrowserConfiguration* aConfig) override;
 
   virtual bool RecvProfile(const nsCString& aProfile) override;
 

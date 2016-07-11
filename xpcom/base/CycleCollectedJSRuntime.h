@@ -66,7 +66,7 @@ public:
 class JSZoneParticipant : public nsCycleCollectionParticipant
 {
 public:
-  MOZ_CONSTEXPR JSZoneParticipant(): nsCycleCollectionParticipant()
+  constexpr JSZoneParticipant(): nsCycleCollectionParticipant()
   {
   }
 
@@ -217,9 +217,11 @@ private:
   static void LargeAllocationFailureCallback(void* aData);
   static bool ContextCallback(JSContext* aCx, unsigned aOperation,
                               void* aData);
+  static JSObject* GetIncumbentGlobalCallback(JSContext* aCx);
   static bool EnqueuePromiseJobCallback(JSContext* aCx,
                                         JS::HandleObject aJob,
                                         JS::HandleObject aAllocationSite,
+                                        JS::HandleObject aIncumbentGlobal,
                                         void* aData);
 #ifdef SPIDERMONKEY_PROMISE
   static void PromiseRejectionTrackerCallback(JSContext* aCx,
@@ -370,7 +372,7 @@ public:
   void PrepareWaitingZonesForGC();
 
   // Queue an async microtask to the current main or worker thread.
-  virtual void DispatchToMicroTask(nsIRunnable* aRunnable);
+  virtual void DispatchToMicroTask(already_AddRefed<nsIRunnable> aRunnable);
 
   // Storage for watching rejected promises waiting for some client to
   // consume their rejection.

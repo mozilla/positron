@@ -454,7 +454,7 @@ BackgroundClipTextEnabledPrefChangeCallback(const char* aPrefName,
 
 template<typename TestType>
 static bool
-HasMatchingCurrentAnimations(const nsIFrame* aFrame, TestType&& aTest)
+HasMatchingAnimations(const nsIFrame* aFrame, TestType&& aTest)
 {
   EffectSet* effects = EffectSet::GetEffectSet(aFrame);
   if (!effects) {
@@ -462,10 +462,6 @@ HasMatchingCurrentAnimations(const nsIFrame* aFrame, TestType&& aTest)
   }
 
   for (KeyframeEffectReadOnly* effect : *effects) {
-    if (!effect->IsCurrent()) {
-      continue;
-    }
-
     if (aTest(*effect)) {
       return true;
     }
@@ -478,10 +474,10 @@ bool
 nsLayoutUtils::HasCurrentAnimationOfProperty(const nsIFrame* aFrame,
                                              nsCSSProperty aProperty)
 {
-  return HasMatchingCurrentAnimations(aFrame,
+  return HasMatchingAnimations(aFrame,
     [&aProperty](KeyframeEffectReadOnly& aEffect)
     {
-      return aEffect.HasAnimationOfProperty(aProperty);
+      return aEffect.IsCurrent() && aEffect.HasAnimationOfProperty(aProperty);
     }
   );
 }
@@ -489,12 +485,12 @@ nsLayoutUtils::HasCurrentAnimationOfProperty(const nsIFrame* aFrame,
 bool
 nsLayoutUtils::HasCurrentTransitions(const nsIFrame* aFrame)
 {
-  return HasMatchingCurrentAnimations(aFrame,
+  return HasMatchingAnimations(aFrame,
     [](KeyframeEffectReadOnly& aEffect)
     {
       // Since |aEffect| is current, it must have an associated Animation
       // so we don't need to null-check the result of GetAnimation().
-      return aEffect.GetAnimation()->AsCSSTransition();
+      return aEffect.IsCurrent() && aEffect.GetAnimation()->AsCSSTransition();
     }
   );
 }
@@ -504,10 +500,24 @@ nsLayoutUtils::HasCurrentAnimationsForProperties(const nsIFrame* aFrame,
                                                  const nsCSSProperty* aProperties,
                                                  size_t aPropertyCount)
 {
-  return HasMatchingCurrentAnimations(aFrame,
+  return HasMatchingAnimations(aFrame,
     [&aProperties, &aPropertyCount](KeyframeEffectReadOnly& aEffect)
     {
-      return aEffect.HasAnimationOfProperties(aProperties, aPropertyCount);
+      return aEffect.IsCurrent() &&
+        aEffect.HasAnimationOfProperties(aProperties, aPropertyCount);
+    }
+  );
+}
+
+bool
+nsLayoutUtils::HasRelevantAnimationOfProperty(const nsIFrame* aFrame,
+                                              nsCSSProperty aProperty)
+{
+  return HasMatchingAnimations(aFrame,
+    [&aProperty](KeyframeEffectReadOnly& aEffect)
+    {
+      return (aEffect.IsInEffect() || aEffect.IsCurrent()) &&
+             aEffect.HasAnimationOfProperty(aProperty);
     }
   );
 }
@@ -7606,7 +7616,7 @@ nsLayoutUtils::GetEditableRootContentByContentEditable(nsIDocument* aDocument)
   // contenteditable only works with HTML document.
   // Note: Use nsIDOMHTMLDocument rather than nsIHTMLDocument for getting the
   //       body node because nsIDOMHTMLDocument::GetBody() does something
-  //       additional work for some cases and nsEditor uses them.
+  //       additional work for some cases and EditorBase uses them.
   nsCOMPtr<nsIDOMHTMLDocument> domHTMLDoc = do_QueryInterface(aDocument);
   if (!domHTMLDoc) {
     return nullptr;
@@ -8752,7 +8762,7 @@ nsLayoutUtils::HasDocumentLevelListenersForApzAwareEvents(nsIPresShell* aShell)
         nullptr, nullptr, &targets);
     NS_ENSURE_SUCCESS(rv, false);
     for (size_t i = 0; i < targets.Length(); i++) {
-      if (targets[i]->HasApzAwareListeners()) {
+      if (targets[i]->IsApzAware()) {
         return true;
       }
     }
@@ -8863,6 +8873,8 @@ nsLayoutUtils::ComputeScrollMetadata(nsIFrame* aForFrame,
     }
     if (nsLayoutUtils::GetCriticalDisplayPort(aContent, &dp)) {
       metrics.SetCriticalDisplayPort(CSSRect::FromAppUnits(dp));
+      nsLayoutUtils::LogTestDataForPaint(aLayer->Manager(), scrollId,
+          "criticalDisplayport", metrics.GetCriticalDisplayPort());
     }
     DisplayPortMarginsPropertyData* marginsData =
         static_cast<DisplayPortMarginsPropertyData*>(aContent->GetProperty(nsGkAtoms::DisplayPortMargins));
@@ -9330,3 +9342,26 @@ nsLayoutUtils::IsTransformed(nsIFrame* aForFrame, nsIFrame* aTopFrame)
   return false;
 }
 
+/*static*/ CSSPoint
+nsLayoutUtils::GetCumulativeApzCallbackTransform(nsIFrame* aFrame)
+{
+  CSSPoint delta;
+  if (!aFrame) {
+    return delta;
+  }
+  nsIFrame* frame = aFrame;
+  nsCOMPtr<nsIContent> content = frame->GetContent();
+  nsCOMPtr<nsIContent> lastContent;
+  while (frame) {
+    if (content && (content != lastContent)) {
+      void* property = content->GetProperty(nsGkAtoms::apzCallbackTransform);
+      if (property) {
+        delta += *static_cast<CSSPoint*>(property);
+      }
+    }
+    frame = GetCrossDocParentFrame(frame);
+    lastContent = content;
+    content = frame ? frame->GetContent() : nullptr;
+  }
+  return delta;
+}

@@ -236,6 +236,7 @@ public:
     static void Open(const jni::Class::LocalRef& aCls,
                      GeckoView::Window::Param aWindow,
                      GeckoView::Param aView, jni::Object::Param aGLController,
+                     jni::String::Param aChromeURI,
                      int32_t aWidth, int32_t aHeight);
 
     // Close and destroy the nsWindow.
@@ -1113,6 +1114,7 @@ nsWindow::GeckoViewSupport::Open(const jni::Class::LocalRef& aCls,
                                  GeckoView::Window::Param aWindow,
                                  GeckoView::Param aView,
                                  jni::Object::Param aGLController,
+                                 jni::String::Param aChromeURI,
                                  int32_t aWidth, int32_t aHeight)
 {
     MOZ_ASSERT(NS_IsMainThread());
@@ -1123,9 +1125,14 @@ nsWindow::GeckoViewSupport::Open(const jni::Class::LocalRef& aCls,
     nsCOMPtr<nsIWindowWatcher> ww = do_GetService(NS_WINDOWWATCHER_CONTRACTID);
     MOZ_ASSERT(ww);
 
-    nsAdoptingCString url = Preferences::GetCString("toolkit.defaultChromeURI");
-    if (!url) {
-        url = NS_LITERAL_CSTRING("chrome://browser/content/browser.xul");
+    nsAdoptingCString url;
+    if (aChromeURI) {
+        url = aChromeURI->ToCString();
+    } else {
+        url = Preferences::GetCString("toolkit.defaultChromeURI");
+        if (!url) {
+            url = NS_LITERAL_CSTRING("chrome://browser/content/browser.xul");
+        }
     }
 
     nsCOMPtr<nsISupportsArray> args
@@ -1759,12 +1766,8 @@ nsWindow::SetWindowClass(const nsAString& xulWinType)
 }
 
 mozilla::layers::LayerManager*
-nsWindow::GetLayerManager(PLayerTransactionChild*, LayersBackend, LayerManagerPersistence,
-                          bool* aAllowRetaining)
+nsWindow::GetLayerManager(PLayerTransactionChild*, LayersBackend, LayerManagerPersistence)
 {
-    if (aAllowRetaining) {
-        *aAllowRetaining = true;
-    }
     if (mLayerManager) {
         return mLayerManager;
     }

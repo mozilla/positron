@@ -1994,7 +1994,7 @@ class DebugScopeProxy : public BaseProxyHandler
     static const char family;
     static const DebugScopeProxy singleton;
 
-    MOZ_CONSTEXPR DebugScopeProxy() : BaseProxyHandler(&family) {}
+    constexpr DebugScopeProxy() : BaseProxyHandler(&family) {}
 
     static bool isFunctionScopeWithThis(const JSObject& scope)
     {
@@ -3538,7 +3538,7 @@ RemoveReferencedNames(JSContext* cx, HandleScript script, PropertyNameSet& remai
 
           case JSOP_GETALIASEDVAR:
           case JSOP_SETALIASEDVAR:
-            name = ScopeCoordinateName(cx->runtime()->scopeCoordinateNameCache, script, pc);
+            name = ScopeCoordinateName(cx->caches.scopeCoordinateNameCache, script, pc);
             break;
 
           default:

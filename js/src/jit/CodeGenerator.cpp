@@ -2114,7 +2114,7 @@ CodeGenerator::visitRegExpPrototypeOptimizable(LRegExpPrototypeOptimizable* ins)
                     RegExpCompartment::offsetOfOptimizableRegExpPrototypeShape();
     masm.loadPtr(Address(temp, offset), temp);
 
-    masm.loadPtr(Address(object, JSObject::offsetOfShape()), output);
+    masm.loadPtr(Address(object, ShapedObject::offsetOfShape()), output);
     masm.branchPtr(Assembler::NotEqual, output, temp, ool->entry());
     masm.move32(Imm32(0x1), output);
 
@@ -2183,7 +2183,7 @@ CodeGenerator::visitRegExpInstanceOptimizable(LRegExpInstanceOptimizable* ins)
                     RegExpCompartment::offsetOfOptimizableRegExpInstanceShape();
     masm.loadPtr(Address(temp, offset), temp);
 
-    masm.loadPtr(Address(object, JSObject::offsetOfShape()), output);
+    masm.loadPtr(Address(object, ShapedObject::offsetOfShape()), output);
     masm.branchPtr(Assembler::NotEqual, output, temp, ool->entry());
     masm.move32(Imm32(0x1), output);
 
@@ -3703,7 +3703,7 @@ CodeGenerator::visitPostWriteElementBarrierV(LPostWriteElementBarrierV* lir)
 void
 CodeGenerator::visitCallNative(LCallNative* call)
 {
-    JSFunction* target = call->getSingleTarget();
+    WrappedFunction* target = call->getSingleTarget();
     MOZ_ASSERT(target);
     MOZ_ASSERT(target->isNative());
 
@@ -3732,7 +3732,7 @@ CodeGenerator::visitCallNative(LCallNative* call)
 
     // Push a Value containing the callee object: natives are allowed to access their callee before
     // setitng the return value. The StackPointer is moved to &vp[0].
-    masm.Push(ObjectValue(*target));
+    masm.Push(ObjectValue(*target->rawJSFunction()));
 
     // Preload arguments into registers.
     masm.loadJSContext(argContextReg);
@@ -3776,7 +3776,7 @@ LoadDOMPrivate(MacroAssembler& masm, Register obj, Register priv)
     MOZ_ASSERT(obj != priv);
 
     // Check shape->numFixedSlots != 0.
-    masm.loadPtr(Address(obj, JSObject::offsetOfShape()), priv);
+    masm.loadPtr(Address(obj, ShapedObject::offsetOfShape()), priv);
 
     Label hasFixedSlots, done;
     masm.branchTest32(Assembler::NonZero,
@@ -3798,7 +3798,7 @@ LoadDOMPrivate(MacroAssembler& masm, Register obj, Register priv)
 void
 CodeGenerator::visitCallDOMNative(LCallDOMNative* call)
 {
-    JSFunction* target = call->getSingleTarget();
+    WrappedFunction* target = call->getSingleTarget();
     MOZ_ASSERT(target);
     MOZ_ASSERT(target->isNative());
     MOZ_ASSERT(target->jitInfo());
@@ -3833,7 +3833,7 @@ CodeGenerator::visitCallDOMNative(LCallDOMNative* call)
 
     // Push a Value containing the callee object: natives are allowed to access their callee before
     // setitng the return value. After this the StackPointer points to &vp[0].
-    masm.Push(ObjectValue(*target));
+    masm.Push(ObjectValue(*target->rawJSFunction()));
 
     // Now compute the argv value.  Since StackPointer is pointing to &vp[0] and
     // argv is &vp[2] we just need to add 2*sizeof(Value) to the current
@@ -4049,7 +4049,7 @@ CodeGenerator::visitCallKnown(LCallKnown* call)
     Register calleereg = ToRegister(call->getFunction());
     Register objreg    = ToRegister(call->getTempObject());
     uint32_t unusedStack = StackOffsetOfPassedArg(call->argslot());
-    JSFunction* target = call->getSingleTarget();
+    WrappedFunction* target = call->getSingleTarget();
     Label end, uncompiled;
 
     // Native single targets are handled by LCallNative.
@@ -4739,7 +4739,7 @@ CodeGenerator::maybeCreateScriptCounts()
     // If scripts are being profiled, create a new IonScriptCounts for the
     // profiling data, which will be attached to the associated JSScript or
     // AsmJS module after code generation finishes.
-    if (!GetJitContext()->runtime->profilingScripts())
+    if (!GetJitContext()->hasProfilingScripts())
         return nullptr;
 
     // This test inhibits IonScriptCount creation for wasm code which is
@@ -5155,6 +5155,7 @@ CodeGenerator::generateBody()
             }
 
 #ifdef DEBUG
+            setElement(*iter); // needed to encode correct snapshot location.
             emitDebugForceBailing(*iter);
 #endif
 
@@ -5446,6 +5447,12 @@ typedef PlainObject* (*ObjectCreateWithTemplateFn)(JSContext*, HandlePlainObject
 static const VMFunction ObjectCreateWithTemplateInfo =
     FunctionInfo<ObjectCreateWithTemplateFn>(ObjectCreateWithTemplate, "ObjectCreateWithTemplate");
 
+typedef TypedArrayObject* (*TypedArrayCreateWithTemplateFn)(JSContext*, HandleObject);
+static const VMFunction TypedArrayCreateWithTemplateInfo =
+    FunctionInfo<TypedArrayCreateWithTemplateFn>(TypedArrayCreateWithTemplate,
+                                                 "TypedArrayCreateWithTemplate");
+
+
 void
 CodeGenerator::visitNewObjectVMCall(LNewObject* lir)
 {
@@ -5456,11 +5463,17 @@ CodeGenerator::visitNewObjectVMCall(LNewObject* lir)
 
     JSObject* templateObject = lir->mir()->templateObject();
 
+    MNewObject::Mode mode_ = lir->mir()->mode();
+
+    MOZ_ASSERT_IF(mode_ != MNewObject::TypedArray && templateObject,
+                  !templateObject->is<TypedArrayObject>());
+
     // If we're making a new object with a class prototype (that is, an object
     // that derives its class from its prototype instead of being
     // PlainObject::class_'d) from self-hosted code, we need a different init
     // function.
-    if (lir->mir()->mode() == MNewObject::ObjectLiteral) {
+    switch (mode_) {
+      case MNewObject::ObjectLiteral:
         if (templateObject) {
             pushArg(ImmGCPtr(templateObject));
             callVM(NewInitObjectWithTemplateInfo, lir);
@@ -5470,10 +5483,15 @@ CodeGenerator::visitNewObjectVMCall(LNewObject* lir)
             pushArg(ImmGCPtr(lir->mir()->block()->info().script()));
             callVM(NewInitObjectInfo, lir);
         }
-    } else {
-        MOZ_ASSERT(lir->mir()->mode() == MNewObject::ObjectCreate);
+        break;
+      case MNewObject::ObjectCreate:
         pushArg(ImmGCPtr(templateObject));
         callVM(ObjectCreateWithTemplateInfo, lir);
+        break;
+      case MNewObject::TypedArray:
+        pushArg(ImmGCPtr(templateObject));
+        callVM(TypedArrayCreateWithTemplateInfo, lir);
+        break;
     }
 
     if (ReturnReg != objReg)
@@ -9340,7 +9358,7 @@ CodeGenerator::link(JSContext* cx, CompilerConstraintList* constraints)
     for (uint32_t i = 0; i < patchableTLEvents_.length(); i++) {
         // Create an event on the mainthread.
         TraceLoggerEvent event(logger, patchableTLEvents_[i].event);
-        if (!ionScript->addTraceLoggerEvent(event)) {
+        if (!event.hasPayload() || !ionScript->addTraceLoggerEvent(event)) {
             TLFailed = true;
             break;
         }
@@ -9352,7 +9370,7 @@ CodeGenerator::link(JSContext* cx, CompilerConstraintList* constraints)
     if (!TLFailed && patchableTLScripts_.length() > 0) {
         MOZ_ASSERT(TraceLogTextIdEnabled(TraceLogger_Scripts));
         TraceLoggerEvent event(logger, TraceLogger_Scripts, script);
-        if (!ionScript->addTraceLoggerEvent(event))
+        if (!event.hasPayload() || !ionScript->addTraceLoggerEvent(event))
             TLFailed = true;
         if (!TLFailed) {
             uint32_t textId = event.payload()->textId();

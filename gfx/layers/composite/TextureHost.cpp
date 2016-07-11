@@ -15,6 +15,7 @@
 #include "mozilla/layers/Compositor.h"  // for Compositor
 #include "mozilla/layers/ISurfaceAllocator.h"  // for ISurfaceAllocator
 #include "mozilla/layers/LayersSurfaces.h"  // for SurfaceDescriptor, etc
+#include "mozilla/layers/TextureHostBasic.h"
 #include "mozilla/layers/TextureHostOGL.h"  // for TextureHostOGL
 #include "mozilla/layers/ImageDataSerializer.h"
 #include "mozilla/layers/TextureClient.h"
@@ -474,7 +475,7 @@ BufferTextureHost::BufferTextureHost(const BufferDescriptor& aDesc,
       const YCbCrDescriptor& ycbcr = mDescriptor.get_YCbCrDescriptor();
       mSize = ycbcr.ySize();
       mFormat = gfx::SurfaceFormat::YUV;
-      mHasIntermediateBuffer = true;
+      mHasIntermediateBuffer = ycbcr.hasIntermediateBuffer();
       break;
     }
     case BufferDescriptor::TRGBDescriptor: {
@@ -605,7 +606,6 @@ bool
 BufferTextureHost::EnsureWrappingTextureSource()
 {
   MOZ_ASSERT(!mHasIntermediateBuffer);
-  MOZ_ASSERT(mFormat != gfx::SurfaceFormat::YUV);
 
   if (mFirstSource) {
     return true;
@@ -615,15 +615,18 @@ BufferTextureHost::EnsureWrappingTextureSource()
     return false;
   }
 
-  RefPtr<gfx::DataSourceSurface> surf =
-    gfx::Factory::CreateWrappingDataSourceSurface(GetBuffer(),
-      ImageDataSerializer::ComputeRGBStride(mFormat, mSize.width), mSize, mFormat);
-
-  if (!surf) {
-    return false;
+  if (mFormat == gfx::SurfaceFormat::YUV) {
+    mFirstSource = mCompositor->CreateDataTextureSourceAroundYCbCr(this);
+  } else {
+    RefPtr<gfx::DataSourceSurface> surf =
+      gfx::Factory::CreateWrappingDataSourceSurface(GetBuffer(),
+        ImageDataSerializer::ComputeRGBStride(mFormat, mSize.width), mSize, mFormat);
+    if (!surf) {
+      return false;
+    }
+    mFirstSource = mCompositor->CreateDataTextureSourceAround(surf);
   }
 
-  mFirstSource = mCompositor->CreateDataTextureSourceAround(surf);
   if (!mFirstSource) {
     // BasicCompositor::CreateDataTextureSourceAround never returns null
     // and we don't expect to take this branch if we are using another backend.
@@ -640,9 +643,71 @@ BufferTextureHost::EnsureWrappingTextureSource()
   return true;
 }
 
+static
+bool IsCompatibleTextureSource(TextureSource* aTexture,
+                               const BufferDescriptor& aDescriptor,
+                               Compositor* aCompositor)
+{
+  if (!aCompositor) {
+    return false;
+  }
+
+  switch (aDescriptor.type()) {
+    case BufferDescriptor::TYCbCrDescriptor: {
+      const YCbCrDescriptor& ycbcr = aDescriptor.get_YCbCrDescriptor();
+
+      if (!aCompositor->SupportsEffect(EffectTypes::YCBCR)) {
+        return aTexture->GetFormat() == gfx::SurfaceFormat::B8G8R8X8
+            && aTexture->GetSize() == ycbcr.ySize();
+      }
+
+      if (aTexture->GetFormat() != gfx::SurfaceFormat::A8
+          || aTexture->GetSize() != ycbcr.ySize()) {
+        return false;
+      }
+
+      auto cbTexture = aTexture->GetSubSource(1);
+      if (!cbTexture
+          || cbTexture->GetFormat() != gfx::SurfaceFormat::A8
+          || cbTexture->GetSize() != ycbcr.cbCrSize()) {
+        return false;
+      }
+
+      auto crTexture = aTexture->GetSubSource(2);
+      if (!crTexture
+          || crTexture->GetFormat() != gfx::SurfaceFormat::A8
+          || crTexture->GetSize() != ycbcr.cbCrSize()) {
+        return false;
+      }
+
+      return true;
+    }
+    case BufferDescriptor::TRGBDescriptor: {
+      const RGBDescriptor& rgb = aDescriptor.get_RGBDescriptor();
+      return aTexture->GetFormat() == rgb.format()
+          && aTexture->GetSize() == rgb.size();
+    }
+    default: {
+      return false;
+    }
+  }
+}
+
 void
 BufferTextureHost::PrepareTextureSource(CompositableTextureSourceRef& aTexture)
 {
+  // Reuse WrappingTextureSourceYCbCrBasic to reduce memory consumption.
+  if (mFormat == gfx::SurfaceFormat::YUV &&
+      !mHasIntermediateBuffer &&
+      aTexture.get() &&
+      aTexture->AsWrappingTextureSourceYCbCrBasic() &&
+      aTexture->NumCompositableRefs() <= 1 &&
+      aTexture->GetSize() == GetSize()) {
+    aTexture->AsSourceBasic()->SetBufferTextureHost(this);
+    aTexture->AsDataTextureSource()->SetOwner(this);
+    mFirstSource = aTexture->AsDataTextureSource();
+  }
+
   if (!mHasIntermediateBuffer) {
     EnsureWrappingTextureSource();
   }
@@ -658,22 +723,14 @@ BufferTextureHost::PrepareTextureSource(CompositableTextureSourceRef& aTexture)
   mFirstSource = nullptr;
 
   DataTextureSource* texture = aTexture.get() ? aTexture->AsDataTextureSource() : nullptr;
-  bool compatibleFormats = texture
-                         && (mFormat == texture->GetFormat()
-                             || (mFormat == gfx::SurfaceFormat::YUV
-                                 && mCompositor
-                                 && mCompositor->SupportsEffect(EffectTypes::YCBCR)
-                                 && texture->GetNextSibling()
-                                 && texture->GetNextSibling()->GetNextSibling())
-                             || (mFormat == gfx::SurfaceFormat::YUV
-                                 && mCompositor
-                                 && !mCompositor->SupportsEffect(EffectTypes::YCBCR)
-                                 && texture->GetFormat() == gfx::SurfaceFormat::B8G8R8X8));
+
+  bool compatibleFormats = texture && IsCompatibleTextureSource(texture,
+                                                                mDescriptor,
+                                                                mCompositor);
 
   bool shouldCreateTexture = !compatibleFormats
                            || texture->NumCompositableRefs() > 1
-                           || texture->HasOwner()
-                           || texture->GetSize() != mSize;
+                           || texture->HasOwner();
 
   if (!shouldCreateTexture) {
     mFirstSource = texture;
@@ -703,6 +760,9 @@ BufferTextureHost::BindTextureSource(CompositableTextureSourceRef& aTexture)
 void
 BufferTextureHost::UnbindTextureSource()
 {
+  if (mFirstSource && mFirstSource->IsOwnedBy(this)) {
+    mFirstSource->Unbind();
+  }
   // This texture is not used by any layer anymore.
   // If the texture doesn't have an intermediate buffer, it means we are
   // compositing synchronously on the CPU, so we don't need to wait until

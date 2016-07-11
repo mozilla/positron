@@ -841,18 +841,26 @@ AudioContext::OnStateChanged(void* aPromise, AudioContextState aNewState)
   }
 
 #ifndef WIN32 // Bug 1170547
+#ifndef XP_MACOSX
+#ifdef DEBUG
 
-  MOZ_ASSERT((mAudioContextState == AudioContextState::Suspended &&
-              aNewState == AudioContextState::Running)   ||
-             (mAudioContextState == AudioContextState::Running   &&
-              aNewState == AudioContextState::Suspended) ||
-             (mAudioContextState == AudioContextState::Running   &&
-              aNewState == AudioContextState::Closed)    ||
-             (mAudioContextState == AudioContextState::Suspended &&
-              aNewState == AudioContextState::Closed)    ||
-             (mAudioContextState == aNewState),
-             "Invalid AudioContextState transition");
+  if (!((mAudioContextState == AudioContextState::Suspended &&
+       aNewState == AudioContextState::Running)   ||
+      (mAudioContextState == AudioContextState::Running   &&
+       aNewState == AudioContextState::Suspended) ||
+      (mAudioContextState == AudioContextState::Running   &&
+       aNewState == AudioContextState::Closed)    ||
+      (mAudioContextState == AudioContextState::Suspended &&
+       aNewState == AudioContextState::Closed)    ||
+      (mAudioContextState == aNewState))) {
+    fprintf(stderr,
+            "Invalid transition: mAudioContextState: %d -> aNewState %d\n",
+            static_cast<int>(mAudioContextState), static_cast<int>(aNewState));
+    MOZ_ASSERT(false);
+  }
 
+#endif // DEBUG
+#endif // XP_MACOSX
 #endif // WIN32
 
   MOZ_ASSERT(

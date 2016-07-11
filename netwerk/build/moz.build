@@ -22,7 +22,6 @@ LOCAL_INCLUDES += [
     '/netwerk/dns',
     '/netwerk/mime',
     '/netwerk/protocol/about',
-    '/netwerk/protocol/app',
     '/netwerk/socket',
     '/netwerk/streamconv',
     '/netwerk/streamconv/converters',
@@ -41,11 +40,6 @@ if CONFIG['OS_ARCH'] == 'WINNT':
 if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'cocoa':
     LOCAL_INCLUDES += [
         '/netwerk/system/mac',
-    ]
-
-if CONFIG['MOZ_ENABLE_QTNETWORK']:
-    LOCAL_INCLUDES += [
-        '/netwerk/system/qt',
     ]
 
 if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'android':

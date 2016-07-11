@@ -107,7 +107,7 @@ struct Keyframe
   }
 
   Maybe<double>                 mOffset;
-  static MOZ_CONSTEXPR_VAR double kComputedOffsetNotSet = -1.0;
+  static constexpr double kComputedOffsetNotSet = -1.0;
   double                        mComputedOffset = kComputedOffsetNotSet;
   Maybe<ComputedTimingFunction> mTimingFunction; // Nothing() here means
                                                  // "linear"
@@ -388,6 +388,12 @@ protected:
   void UnregisterTarget();
 
   void RequestRestyle(EffectCompositor::RestyleType aRestyleType);
+
+  // Update the associated frame state bits so that, if necessary, a stacking
+  // context will be created and the effect sent to the compositor.  We
+  // typically need to do this when the properties referenced by the keyframe
+  // have changed, or when the target frame might have changed.
+  void MaybeUpdateFrameForCompositor();
 
   // Looks up the style context associated with the target element, if any.
   // We need to be careful to *not* call this when we are updating the style

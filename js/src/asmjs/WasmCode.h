@@ -47,10 +47,11 @@ class CodeSegment
     uint32_t codeLength_;
     uint32_t globalDataLength_;
 
-    // These are pointers into code for two stubs used for asynchronous
+    // These are pointers into code for stubs used for asynchronous
     // signal-handler control-flow transfer.
     uint8_t* interruptCode_;
     uint8_t* outOfBoundsCode_;
+    uint8_t* unalignedAccessCode_;
 
     // The profiling mode may be changed dynamically.
     bool profilingEnabled_;
@@ -68,8 +69,7 @@ class CodeSegment
                                     const Bytes& code,
                                     const LinkData& linkData,
                                     const Metadata& metadata,
-                                    uint8_t* heapBase,
-                                    uint32_t heapLength);
+                                    HandleWasmMemoryObject memory);
     ~CodeSegment();
 
     uint8_t* code() const { return bytes_; }
@@ -80,6 +80,7 @@ class CodeSegment
 
     uint8_t* interruptCode() const { return interruptCode_; }
     uint8_t* outOfBoundsCode() const { return outOfBoundsCode_; }
+    uint8_t* unalignedAccessCode() const { return unalignedAccessCode_; }
 
     // The range [0, functionBytes) is a subrange of [0, codeBytes) that
     // contains only function body code, not the stub code. This distinction is
@@ -93,8 +94,6 @@ class CodeSegment
     bool containsCodePC(void* pc) const {
         return pc >= code() && pc < (code() + codeLength_);
     }
-
-    WASM_DECLARE_SERIALIZABLE(CodeSegment)
 };
 
 // This reusable base class factors out the logic for a resource that is shared
@@ -122,6 +121,9 @@ struct ShareableBase : RefCounted<T>
 
 struct ShareableBytes : ShareableBase<ShareableBytes>
 {
+    ShareableBytes() = default;
+    explicit ShareableBytes(Bytes&& bytes) : bytes(Move(bytes)) {}
+
     // Vector is 'final', so instead make Vector a member and add boilerplate.
     Bytes bytes;
     size_t sizeOfExcludingThis(MallocSizeOf m) const { return bytes.sizeOfExcludingThis(m); }
@@ -173,11 +175,13 @@ class Export
 
 typedef Vector<Export, 0, SystemAllocPolicy> ExportVector;
 
-// An Import describes a wasm module import. Currently, only functions can be
-// imported in wasm. A function import includes the signature used within the
-// module to call it.
+// An FuncImport contains the runtime metadata needed to implement a call to an
+// imported function. Each function import has two call stubs: an optimized path
+// into JIT code and a slow path into the generic C++ js::Invoke and these
+// offsets of these stubs are stored so that function-import callsites can be
+// dynamically patched at runtime.
 
-class Import
+class FuncImport
 {
     Sig sig_;
     struct CacheablePod {
@@ -187,8 +191,8 @@ class Import
     } pod;
 
   public:
-    Import() = default;
-    Import(Sig&& sig, uint32_t exitGlobalDataOffset)
+    FuncImport() = default;
+    FuncImport(Sig&& sig, uint32_t exitGlobalDataOffset)
       : sig_(Move(sig))
     {
         pod.exitGlobalDataOffset_ = exitGlobalDataOffset;
@@ -218,10 +222,10 @@ class Import
         return pod.jitExitCodeOffset_;
     }
 
-    WASM_DECLARE_SERIALIZABLE(Import)
+    WASM_DECLARE_SERIALIZABLE(FuncImport)
 };
 
-typedef Vector<Import, 0, SystemAllocPolicy> ImportVector;
+typedef Vector<FuncImport, 0, SystemAllocPolicy> FuncImportVector;
 
 // A CodeRange describes a single contiguous range of code within a wasm
 // module's code segment. A CodeRange describes what the code does and, for
@@ -368,10 +372,10 @@ struct CacheableChars : UniqueChars
 
 typedef Vector<CacheableChars, 0, SystemAllocPolicy> CacheableCharsVector;
 
-// A wasm module can either use no heap, a unshared heap (ArrayBuffer) or shared
-// heap (SharedArrayBuffer).
+// A wasm module can either use no memory, a unshared memory (ArrayBuffer) or
+// shared memory (SharedArrayBuffer).
 
-enum class HeapUsage
+enum class MemoryUsage
 {
     None = false,
     Unshared = 1,
@@ -379,9 +383,9 @@ enum class HeapUsage
 };
 
 static inline bool
-UsesHeap(HeapUsage heapUsage)
+UsesMemory(MemoryUsage memoryUsage)
 {
-    return bool(heapUsage);
+    return bool(memoryUsage);
 }
 
 // NameInBytecode represents a name that is embedded in the wasm bytecode.
@@ -409,8 +413,9 @@ typedef Vector<char16_t, 64> TwoByteName;
 struct MetadataCacheablePod
 {
     ModuleKind            kind;
-    HeapUsage             heapUsage;
-    CompileArgs           compileArgs;
+    MemoryUsage           memoryUsage;
+    uint32_t              minMemoryLength;
+    uint32_t              maxMemoryLength;
 
     MetadataCacheablePod() { mozilla::PodZero(this); }
 };
@@ -422,7 +427,7 @@ struct Metadata : ShareableBase<Metadata>, MetadataCacheablePod
     MetadataCacheablePod& pod() { return *this; }
     const MetadataCacheablePod& pod() const { return *this; }
 
-    ImportVector          imports;
+    FuncImportVector      funcImports;
     ExportVector          exports;
     MemoryAccessVector    memoryAccesses;
     BoundsCheckVector     boundsChecks;
@@ -431,9 +436,10 @@ struct Metadata : ShareableBase<Metadata>, MetadataCacheablePod
     CallThunkVector       callThunks;
     NameInBytecodeVector  funcNames;
     CacheableChars        filename;
+    Assumptions           assumptions;
 
-    bool usesHeap() const { return UsesHeap(heapUsage); }
-    bool hasSharedHeap() const { return heapUsage == HeapUsage::Shared; }
+    bool usesMemory() const { return UsesMemory(memoryUsage); }
+    bool hasSharedMemory() const { return memoryUsage == MemoryUsage::Shared; }
 
     // AsmJSMetadata derives Metadata iff isAsmJS(). Mostly this distinction is
     // encapsulated within AsmJS.cpp, but the additional virtual functions allow

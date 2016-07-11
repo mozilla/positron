@@ -367,8 +367,8 @@ JS_STATIC_ASSERT(sizeof(jsval_layout) == 8);
 #if defined(JS_VALUE_IS_CONSTEXPR)
 #  define JS_RETURN_LAYOUT_FROM_BITS(BITS) \
     return (jsval_layout) { .asBits = (BITS) }
-#  define JS_VALUE_CONSTEXPR MOZ_CONSTEXPR
-#  define JS_VALUE_CONSTEXPR_VAR MOZ_CONSTEXPR_VAR
+#  define JS_VALUE_CONSTEXPR constexpr
+#  define JS_VALUE_CONSTEXPR_VAR constexpr
 #else
 #  define JS_RETURN_LAYOUT_FROM_BITS(BITS) \
     jsval_layout l;                        \
@@ -546,7 +546,7 @@ static inline jsval_layout
 OBJECT_TO_JSVAL_IMPL(JSObject* obj)
 {
     jsval_layout l;
-    MOZ_ASSERT(uintptr_t(obj) > 0x1000 || uintptr_t(obj) == 0x42);
+    MOZ_ASSERT(uintptr_t(obj) > 0x1000 || uintptr_t(obj) == 0x48);
     l.s.tag = JSVAL_TAG_OBJECT;
     l.s.payload.obj = obj;
     return l;
@@ -828,7 +828,7 @@ OBJECT_TO_JSVAL_IMPL(JSObject* obj)
 {
     jsval_layout l;
     uint64_t objBits = (uint64_t)obj;
-    MOZ_ASSERT(uintptr_t(obj) > 0x1000 || uintptr_t(obj) == 0x42);
+    MOZ_ASSERT(uintptr_t(obj) > 0x1000 || uintptr_t(obj) == 0x48);
     MOZ_ASSERT((objBits >> JSVAL_TAG_SHIFT) == 0);
     l.asBits = objBits | JSVAL_SHIFTED_TAG_OBJECT;
     return l;
@@ -1552,7 +1552,7 @@ static inline Value
 ObjectValueCrashOnTouch()
 {
     Value v;
-    v.setObject(*reinterpret_cast<JSObject*>(0x42));
+    v.setObject(*reinterpret_cast<JSObject*>(0x48));
     return v;
 }
 

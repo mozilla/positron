@@ -1763,7 +1763,7 @@ Assembler::as_tst(Register src1, Operand2 op2, Condition c)
     return as_alu(InvalidReg, src1, op2, OpTst, SetCC, c);
 }
 
-static MOZ_CONSTEXPR_VAR Register NoAddend = { Registers::pc };
+static constexpr Register NoAddend = { Registers::pc };
 
 static const int SignExtend = 0x06000070;
 
@@ -2059,7 +2059,7 @@ Assembler::as_extdtr(LoadStore ls, int size, bool IsSigned, Index mode,
         extra_bits1 = 0;
         break;
       default:
-        MOZ_CRASH("SAY WHAT?");
+        MOZ_CRASH("unexpected size in as_extdtr");
     }
     return writeInst(extra_bits2 << 5 | extra_bits1 << 20 | 0x90 |
                      addr.encode() | RT(rt) | mode | c);

@@ -19,7 +19,6 @@
 #include "mozilla/gfx/2D.h"
 #include "mozilla/LinkedList.h"
 #include "mozilla/UniquePtr.h"
-#include "mozilla/WeakPtr.h"
 #include "nsCycleCollectionNoteChild.h"
 #include "nsICanvasRenderingContextInternal.h"
 #include "nsLayoutUtils.h"
@@ -34,6 +33,7 @@
 #endif
 
 // Local
+#include "WebGLContextLossHandler.h"
 #include "WebGLContextUnchecked.h"
 #include "WebGLFormats.h"
 #include "WebGLObjectModel.h"
@@ -90,7 +90,6 @@ class ScopedCopyTexImageSource;
 class ScopedResolveTexturesForDraw;
 class ScopedUnpackReset;
 class WebGLActiveInfo;
-class WebGLContextLossHandler;
 class WebGLBuffer;
 class WebGLExtensionBase;
 class WebGLFramebuffer;
@@ -187,7 +186,6 @@ class WebGLContext
     , public WebGLContextUnchecked
     , public WebGLRectangleObject
     , public nsWrapperCache
-    , public SupportsWeakPtr<WebGLContext>
 {
     friend class WebGL2Context;
     friend class WebGLContextUserData;
@@ -223,8 +221,6 @@ protected:
     virtual ~WebGLContext();
 
 public:
-    MOZ_DECLARE_WEAKREFERENCE_TYPENAME(WebGLContext)
-
     NS_DECL_CYCLE_COLLECTING_ISUPPORTS
 
     NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS_AMBIGUOUS(WebGLContext,
@@ -337,7 +333,8 @@ public:
 
     already_AddRefed<Layer>
     GetCanvasLayer(nsDisplayListBuilder* builder, Layer* oldLayer,
-                   LayerManager* manager) override;
+                   LayerManager* manager,
+                   bool aMirror = false) override;
 
     // Note that 'clean' here refers to its invalidation state, not the
     // contents of the buffer.
@@ -944,7 +941,13 @@ public:
                       &elem, &out_error);
     }
 
+    //////
     // WebGLTextureUpload.cpp
+public:
+    bool ValidateUnpackPixels(const char* funcName, uint32_t fullRows,
+                              uint32_t tailPixels, const webgl::TexUnpackBlob* blob);
+
+protected:
     bool ValidateTexImageSpecification(const char* funcName, uint8_t funcDims,
                                        GLenum texImageTarget, GLint level,
                                        GLsizei width, GLsizei height, GLsizei depth,
@@ -959,6 +962,13 @@ public:
                                    TexImageTarget* const out_target,
                                    WebGLTexture** const out_texture,
                                    WebGLTexture::ImageInfo** const out_imageInfo);
+
+    bool GetUnpackValuesForImage(const char* funcName, uint32_t srcImageWidth,
+                                 uint32_t srcImageHeight, uint32_t* const out_rowLength,
+                                 uint32_t* const out_imageHeight);
+
+    bool ValidateUnpackInfo(const char* funcName, GLenum format, GLenum type,
+                            webgl::PackingInfo* const out);
 
 // -----------------------------------------------------------------------------
 // Vertices Feature (WebGLContextVertices.cpp)
@@ -1202,27 +1212,41 @@ protected:
 public:
     virtual bool IsWebGL2() const = 0;
 
-protected:
-    bool InitWebGL2(nsACString* const out_failReason, nsACString* const out_failureId);
+    struct FailureReason {
+        nsCString key; // For reporting.
+        nsCString info;
 
-    bool CreateAndInitGL(bool forceEnabled, nsACString* const out_failReason, nsACString* const out_failureId);
+        FailureReason() { }
+
+        template<typename A, typename B>
+        FailureReason(const A& _key, const B& _info)
+            : key(nsCString(_key))
+            , info(nsCString(_info))
+        { }
+    };
+protected:
+    bool InitWebGL2(FailureReason* const out_failReason);
+
+    bool CreateAndInitGL(bool forceEnabled,
+                         std::vector<FailureReason>* const out_failReasons);
+
     bool ResizeBackbuffer(uint32_t width, uint32_t height);
 
     typedef already_AddRefed<gl::GLContext> FnCreateGL_T(const gl::SurfaceCaps& caps,
                                                          gl::CreateContextFlags flags,
                                                          WebGLContext* webgl,
-                                                         nsACString* const out_failReason,
-                                                         nsACString* const out_failureId);
+                                                         std::vector<FailureReason>* const out_failReasons);
 
     bool CreateAndInitGLWith(FnCreateGL_T fnCreateGL, const gl::SurfaceCaps& baseCaps,
                              gl::CreateContextFlags flags,
-                             nsACString* const out_failReason,
-                             nsACString* const out_failureId);
+                             std::vector<FailureReason>* const out_failReasons);
+
     void ThrowEvent_WebGLContextCreationError(const nsACString& text);
 
     // -------------------------------------------------------------------------
     // Validation functions (implemented in WebGLContextValidate.cpp)
-    bool InitAndValidateGL(nsACString* const out_failReason, nsACString* const out_failureId);
+    bool InitAndValidateGL(FailureReason* const out_failReason);
+
     bool ValidateBlendEquationEnum(GLenum cap, const char* info);
     bool ValidateBlendFuncDstEnum(GLenum mode, const char* info);
     bool ValidateBlendFuncSrcEnum(GLenum mode, const char* info);
@@ -1427,9 +1451,9 @@ protected:
     CheckedUint32 GetUnpackSize(bool isFunc3D, uint32_t width, uint32_t height,
                                 uint32_t depth, uint8_t bytesPerPixel);
 
-    CheckedUint32 GetPackSize(uint32_t width, uint32_t height, uint8_t bytesPerPixel,
-                              CheckedUint32* const out_startOffset,
-                              CheckedUint32* const out_rowStride);
+    bool ValidatePackSize(const char* funcName, uint32_t width, uint32_t height,
+                          uint8_t bytesPerPixel, uint32_t* const out_rowStride,
+                          uint32_t* const out_endOffset);
 
     GLenum mPixelStore_ColorspaceConversion;
     bool mPixelStore_FlipY;
@@ -1491,7 +1515,7 @@ protected:
     GLsizei mViewportHeight;
     bool mAlreadyWarnedAboutViewportLargerThanDest;
 
-    RefPtr<WebGLContextLossHandler> mContextLossHandler;
+    WebGLContextLossHandler mContextLossHandler;
     bool mAllowContextRestore;
     bool mLastLossWasSimulated;
     ContextStatus mContextStatus;

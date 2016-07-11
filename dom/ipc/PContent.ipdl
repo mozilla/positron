@@ -833,6 +833,7 @@ parent:
     async SetURITitle(URIParams uri, nsString title);
 
     async LoadURIExternal(URIParams uri, PBrowser windowContext);
+    async ExtProtocolChannelConnectParent(uint32_t registrarId);
 
     // PrefService message
     sync ReadPrefsArray() returns (PrefSetting[] prefs) verify;
@@ -926,9 +927,6 @@ parent:
                                nsString aStorageName,
                                nsString aFilepath,
                                nsCString aReason);
-
-    // Notify the parent that the child has finished handling a system message.
-    async SystemMessageHandled();
 
     // called by the child (test code only) to propagate volume changes to the parent
     async CreateFakeVolume(nsString fsName, nsString mountPoint);
@@ -1089,7 +1087,7 @@ parent:
     /**
      * Send ServiceWorkerRegistrationData to child process.
      */
-    sync GetBrowserConfiguration(nsCString aUri)
+    sync GetBrowserConfiguration()
         returns (BrowserConfiguration aConfig);
 
     async Profile(nsCString aProfile);

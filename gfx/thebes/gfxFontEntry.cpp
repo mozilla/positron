@@ -38,10 +38,6 @@
 #include "gfxMathTable.h"
 #include "gfx2DGlue.h"
 
-#if defined(XP_MACOSX)
-#include "nsCocoaFeatures.h"
-#endif
-
 #include "cairo.h"
 
 #include "harfbuzz/hb.h"
@@ -1062,12 +1058,14 @@ gfxFontEntry::SupportsGraphiteFeature(uint32_t aFeatureTag)
 
 bool
 gfxFontEntry::GetColorLayersInfo(uint32_t aGlyphId,
+                            const mozilla::gfx::Color& aDefaultColor,
                             nsTArray<uint16_t>& aLayerGlyphs,
                             nsTArray<mozilla::gfx::Color>& aLayerColors)
 {
     return gfxFontUtils::GetColorGlyphLayers(mCOLR,
                                              mCPAL,
                                              aGlyphId,
+                                             aDefaultColor,
                                              aLayerGlyphs,
                                              aLayerColors);
 }
@@ -1772,13 +1770,6 @@ gfxFontFamily::ReadFaceNames(gfxPlatformFontList *aPlatformFontList,
         return;
 
     bool asyncFontLoaderDisabled = false;
-
-#if defined(XP_MACOSX)
-    // bug 975460 - async font loader crashes sometimes under 10.6, disable
-    if (!nsCocoaFeatures::OnLionOrLater()) {
-        asyncFontLoaderDisabled = true;
-    }
-#endif
 
     if (!mOtherFamilyNamesInitialized &&
         aFontInfoData &&

@@ -138,6 +138,11 @@ const LOAD_CAUSE_STRINGS = {
   [Ci.nsIContentPolicy.TYPE_IMAGESET]: "imageset",
   [Ci.nsIContentPolicy.TYPE_WEB_MANIFEST]: "webManifest"
 };
+
+function loadCauseString(causeType) {
+  return LOAD_CAUSE_STRINGS[causeType] || "unknown";
+}
+
 const DEFAULT_EDITOR_CONFIG = {
   mode: Editor.modes.text,
   readOnly: true,
@@ -245,7 +250,7 @@ var NetMonitorView = {
    * @return boolean
    */
   get detailsPaneHidden() {
-    return this._detailsPane.hasAttribute("pane-collapsed");
+    return this._detailsPane.classList.contains("pane-collapsed");
   },
 
   /**
@@ -267,12 +272,12 @@ var NetMonitorView = {
     ViewHelpers.togglePane(flags, pane);
 
     if (flags.visible) {
-      this._body.removeAttribute("pane-collapsed");
-      button.removeAttribute("pane-collapsed");
+      this._body.classList.remove("pane-collapsed");
+      button.classList.remove("pane-collapsed");
       button.setAttribute("tooltiptext", this._collapsePaneString);
     } else {
-      this._body.setAttribute("pane-collapsed", "");
-      button.setAttribute("pane-collapsed", "");
+      this._body.classList.add("pane-collapsed");
+      button.classList.add("pane-collapsed");
       button.setAttribute("tooltiptext", this._expandPaneString);
     }
 
@@ -1228,6 +1233,13 @@ RequestsMenuView.prototype = Heritage.extend(WidgetMethods, {
           this.sortContents((a, b) => !this._byDomain(a, b));
         }
         break;
+      case "cause":
+        if (direction == "ascending") {
+          this.sortContents(this._byCause);
+        } else {
+          this.sortContents((a, b) => !this._byCause(a, b));
+        }
+        break;
       case "type":
         if (direction == "ascending") {
           this.sortContents(this._byType);
@@ -1439,10 +1451,18 @@ RequestsMenuView.prototype = Heritage.extend(WidgetMethods, {
       : firstDomain > secondDomain;
   },
 
+  _byCause: function ({ attachment: first }, { attachment: second }) {
+    let firstCause = loadCauseString(first.cause.type);
+    let secondCause = loadCauseString(second.cause.type);
+
+    return firstCause == secondCause
+      ? first.startedMillis > second.startedMillis
+      : firstCause > secondCause;
+  },
+
   _byType: function ({ attachment: first }, { attachment: second }) {
     let firstType = this._getAbbreviatedMimeType(first.mimeType).toLowerCase();
-    let secondType = this._getAbbreviatedMimeType(second.mimeType)
-      .toLowerCase();
+    let secondType = this._getAbbreviatedMimeType(second.mimeType).toLowerCase();
 
     return firstType == secondType
       ? first.startedMillis > second.startedMillis
@@ -1940,8 +1960,7 @@ RequestsMenuView.prototype = Heritage.extend(WidgetMethods, {
       }
       case "cause": {
         let labelNode = $(".requests-menu-cause-label", target);
-        let text = LOAD_CAUSE_STRINGS[value.type] || "unknown";
-        labelNode.setAttribute("value", text);
+        labelNode.setAttribute("value", loadCauseString(value.type));
         if (value.loadingDocumentUri) {
           labelNode.setAttribute("tooltiptext", value.loadingDocumentUri);
         }

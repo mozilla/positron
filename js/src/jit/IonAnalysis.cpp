@@ -1947,11 +1947,10 @@ IsRegExpHoistableCall(MCall* call, MDefinition* def)
         return false;
 
     JSAtom* name;
-    JSFunction* fun = call->getSingleTarget();
-    if (fun) {
+    if (WrappedFunction* fun = call->getSingleTarget()) {
         if (!fun->isSelfHostedBuiltin())
             return false;
-        name = GetSelfHostedFunctionName(fun);
+        name = GetSelfHostedFunctionName(fun->rawJSFunction());
     } else {
         MDefinition* funDef = call->getFunction();
         if (funDef->isDebugCheckSelfHosted())
@@ -2178,7 +2177,7 @@ jit::AccountForCFGChanges(MIRGenerator* mir, MIRGraph& graph, bool updateAliasAn
     // If needed, update alias analysis dependencies.
     if (updateAliasAnalysis) {
         TraceLoggerThread* logger;
-        if (GetJitContext()->runtime->onMainThread())
+        if (GetJitContext()->onMainThread())
             logger = TraceLoggerForMainThread(GetJitContext()->runtime);
         else
             logger = TraceLoggerForCurrentThread();

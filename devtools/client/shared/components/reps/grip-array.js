@@ -50,16 +50,13 @@ define(function (require, exports, module) {
         return items;
       }
 
-      let provider = this.props.provider;
-      if (!provider) {
-        return items;
-      }
-
       let delim;
+      let provider = this.props.provider;
 
       for (let i = 0; i < array.length && i <= max; i++) {
         try {
-          let value = provider.getValue(array[i]);
+          let itemGrip = array[i];
+          let value = provider ? provider.getValue(itemGrip) : itemGrip;
 
           delim = (i == array.length - 1 ? "" : ", ");
 
@@ -96,18 +93,6 @@ define(function (require, exports, module) {
       return items;
     },
 
-    hasSpecialProperties: function (array) {
-      return false;
-    },
-
-    // Event Handlers
-
-    onToggleProperties: function (event) {
-    },
-
-    onClickBracket: function (event) {
-    },
-
     render: function () {
       let mode = this.props.mode || "short";
       let object = this.props.object;
@@ -122,12 +107,8 @@ define(function (require, exports, module) {
       }
 
       return (
-        ObjectBox({
-          className: "array",
-          onClick: this.onToggleProperties},
-          a({
-            className: "objectLink",
-            onclick: this.onClickBracket},
+        ObjectBox({className: "array"},
+          a({className: "objectLink"},
             span({
               className: "arrayLeftBracket",
               role: "presentation"},
@@ -135,9 +116,7 @@ define(function (require, exports, module) {
             )
           ),
           items,
-          a({
-            className: "objectLink",
-            onclick: this.onClickBracket},
+          a({className: "objectLink"},
             span({
               className: "arrayRightBracket",
               role: "presentation"},

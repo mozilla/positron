@@ -1017,15 +1017,9 @@ GLContext::InitWithPrefixImpl(const char* prefix, bool trygl)
             mMaxRenderbufferSize   = std::min(mMaxRenderbufferSize,   4096);
             mNeedsTextureSizeChecks = true;
         } else if (mVendor == GLVendor::NVIDIA) {
-            if (nsCocoaFeatures::OnMountainLionOrLater()) {
-                // See bug 879656.  8192 fails, 8191 works.
-                mMaxTextureSize = std::min(mMaxTextureSize, 8191);
-                mMaxRenderbufferSize = std::min(mMaxRenderbufferSize, 8191);
-            } else {
-                // See bug 877949.
-                mMaxTextureSize = std::min(mMaxTextureSize, 4096);
-                mMaxRenderbufferSize = std::min(mMaxRenderbufferSize, 4096);
-            }
+            // See bug 879656.  8192 fails, 8191 works.
+            mMaxTextureSize = std::min(mMaxTextureSize, 8191);
+            mMaxRenderbufferSize = std::min(mMaxRenderbufferSize, 8191);
 
             // Part of the bug 879656, but it also doesn't hurt the 877949
             mNeedsTextureSizeChecks = true;
@@ -1116,9 +1110,10 @@ GLContext::LoadMoreSymbols(const char* prefix, bool trygl)
         return fnLoadForFeature(list, feature);
     };
 
-    bool hasRobustness = false;
-    if (SupportsRobustness()) {
-        if (IsExtensionSupported(ARB_robustness)) {
+    if (IsSupported(GLFeature::robustness)) {
+        bool hasRobustness = false;
+
+        if (!hasRobustness && IsExtensionSupported(ARB_robustness)) {
             const SymLoadStruct symbols[] = {
                 { (PRFuncPtr*) &mSymbols.fGetGraphicsResetStatus, { "GetGraphicsResetStatusARB", nullptr } },
                 END_SYMBOLS
@@ -1137,9 +1132,10 @@ GLContext::LoadMoreSymbols(const char* prefix, bool trygl)
                 hasRobustness = true;
             }
         }
-    }
-    if (!hasRobustness) {
-        MarkUnsupported(GLFeature::robustness);
+
+        if (!hasRobustness) {
+            MarkUnsupported(GLFeature::robustness);
+        }
     }
 
     if (IsSupported(GLFeature::sync)) {

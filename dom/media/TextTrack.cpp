@@ -215,7 +215,6 @@ TextTrack::UpdateActiveCueList()
 TextTrackCueList*
 TextTrack::GetActiveCues() {
   if (mMode != TextTrackMode::Disabled) {
-    UpdateActiveCueList();
     return mActiveCueList;
   }
   return nullptr;
@@ -225,7 +224,6 @@ void
 TextTrack::GetActiveCueArray(nsTArray<RefPtr<TextTrackCue> >& aCues)
 {
   if (mMode != TextTrackMode::Disabled) {
-    UpdateActiveCueList();
     mActiveCueList->GetArray(aCues);
   }
 }
@@ -299,6 +297,25 @@ TextTrack::NotifyCueUpdated(TextTrackCue *aCue)
     }
   }
   SetDirty();
+}
+
+void
+TextTrack::GetLabel(nsAString& aLabel) const
+{
+  if (mTrackElement) {
+    mTrackElement->GetLabel(aLabel);
+  } else {
+    aLabel = mLabel;
+  }
+}
+void
+TextTrack::GetLanguage(nsAString& aLanguage) const
+{
+  if (mTrackElement) {
+    mTrackElement->GetSrclang(aLanguage);
+  } else {
+    aLanguage = mLanguage;
+  }
 }
 
 } // namespace dom

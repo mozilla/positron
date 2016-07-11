@@ -4,15 +4,11 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this file,
 # You can obtain one at http://mozilla.org/MPL/2.0/.
 # ***** END LICENSE BLOCK *****
-"""firefox_ui_updates.py
 
-Author: Armen Zambrano G.
-        Henrik Skupin
-"""
+
 import copy
 import os
 import sys
-import urlparse
 
 from mozharness.base.log import FATAL, WARNING
 from mozharness.base.python import PostScriptRun, PreScriptAction
@@ -23,15 +19,6 @@ from mozharness.mozilla.testing.testbase import (
 )
 from mozharness.mozilla.vcstools import VCSToolsScript
 
-deprecated_options = [
-    # TODO update mozmill-ci jobs to use --disable-e10s instead?
-    [["--e10s"], {
-        'dest': 'e10s',
-        'action': 'store_true',
-        'default': False,
-        'help': 'Enable multi-process (e10s) mode when running tests.',
-    }],
-]
 
 # General command line arguments for Firefox ui tests
 firefox_ui_tests_config_options = [
@@ -39,6 +26,12 @@ firefox_ui_tests_config_options = [
         'dest': 'dry_run',
         'default': False,
         'help': 'Only show what was going to be tested.',
+    }],
+    [["--e10s"], {
+        'dest': 'e10s',
+        'action': 'store_true',
+        'default': False,
+        'help': 'Enable multi-process (e10s) mode when running tests.',
     }],
     [['--firefox-ui-branch'], {
         'dest': 'firefox_ui_branch',
@@ -54,8 +47,11 @@ firefox_ui_tests_config_options = [
         'help': 'absolute path to directory containing breakpad '
                 'symbols, or the url of a zip file containing symbols.',
     }],
-] + deprecated_options \
-    + copy.deepcopy(testing_config_options)
+    [['--tag=TAG'], {
+        'dest': 'tag',
+        'help': 'Subset of tests to run (local, remote).',
+    }],
+] + copy.deepcopy(testing_config_options)
 
 # Command line arguments for update tests
 firefox_ui_update_harness_config_options = [
@@ -121,7 +117,7 @@ class FirefoxUITests(TestingMixin, VCSToolsScript):
             default_actions=default_actions or actions,
             *args, **kwargs)
 
-        # As long as we don't run on buildbot the following properties have be set on our own
+        # Code which doesn't run on buildbot has to include the following properties
         self.binary_path = self.config.get('binary_path')
         self.installer_path = self.config.get('installer_path')
         self.installer_url = self.config.get('installer_url')
@@ -130,46 +126,17 @@ class FirefoxUITests(TestingMixin, VCSToolsScript):
 
         self.reports = {'html': 'report.html', 'xunit': 'report.xml'}
 
-        self.firefox_ui_repo = self.config['firefox_ui_repo']
-        self.firefox_ui_branch = self.config.get('firefox_ui_branch')
-
-        if not self.test_url and not self.test_packages_url and not self.firefox_ui_branch:
+        if not self.test_url and not self.test_packages_url:
             self.fatal(
-                'You must use --test-url, --test-packages-url, or --firefox-ui-branch (valid '
-                'values can be found at: https://github.com/mozilla/firefox-ui-tests/branches)')
+                'You must use --test-url, or --test-packages-url')
 
     @PreScriptAction('create-virtualenv')
     def _pre_create_virtualenv(self, action):
         dirs = self.query_abs_dirs()
 
-        # If tests are used from common.tests.zip install every Python package
-        # via the single requirements file
-        if self.test_packages_url or self.test_url:
-            requirements = os.path.join(dirs['abs_test_install_dir'],
-                                        'config', 'firefox_ui_requirements.txt')
-            self.register_virtualenv_module(requirements=[requirements], two_pass=True)
-
-        # We have a non-packaged version of Firefox UI tests. So install requirements
-        # and the firefox-ui-tests package separately
-        # TODO - Can be removed when the github repository is no longer needed
-        else:
-            # Register all modules for firefox-ui-tests including all dependencies
-            # as strict versions to ensure newer releases won't break something
-            requirements = os.path.join(dirs['abs_test_install_dir'],
-                                        'requirements.txt')
-            self.register_virtualenv_module(requirements=[requirements])
-
-    def checkout(self):
-        """Clone the firefox-ui-tests repository."""
-        dirs = self.query_abs_dirs()
-
-        self.vcs_checkout(
-            repo=self.firefox_ui_repo,
-            dest=dirs['abs_test_install_dir'],
-            branch=self.firefox_ui_branch,
-            vcs='gittool',
-            env=self.query_env(),
-        )
+        requirements = os.path.join(dirs['abs_test_install_dir'],
+                                    'config', 'firefox_ui_requirements.txt')
+        self.register_virtualenv_module(requirements=[requirements], two_pass=True)
 
     def clobber(self):
         """Delete the working directory"""
@@ -186,22 +153,14 @@ class FirefoxUITests(TestingMixin, VCSToolsScript):
         harness, puppeteer, and tests from and how to set them up.
 
         """
-        if self.test_packages_url or self.test_url:
-            target_unzip_dirs = ['config/*',
-                                 'firefox-ui/*',
-                                 'marionette/*',
-                                 'mozbase/*',
-                                 'puppeteer/*',
-                                 'tools/wptserve/*',
-                                 ]
-            super(FirefoxUITests, self).download_and_extract(target_unzip_dirs=target_unzip_dirs)
-
-        else:
-            self.checkout()
-            self._download_installer()
-
-            if self.config.get('download_symbols'):
-                self._download_and_extract_symbols()
+        target_unzip_dirs = ['config/*',
+                             'firefox-ui/*',
+                             'marionette/*',
+                             'mozbase/*',
+                             'puppeteer/*',
+                             'tools/wptserve/*',
+                             ]
+        super(FirefoxUITests, self).download_and_extract(target_unzip_dirs=target_unzip_dirs)
 
     def query_abs_dirs(self):
         if self.abs_dirs:
@@ -242,33 +201,6 @@ class FirefoxUITests(TestingMixin, VCSToolsScript):
                     args.extend([option[0][0], self.config[dest]])
 
         return args
-
-    def query_minidump_stackwalk(self):
-        """Download the minidump stackwalk binary.
-
-        We can remove this whole method once we no longer need the github repository.
-
-        """
-        # If the test package is available use it
-        if self.test_packages_url or self.test_url:
-            return super(FirefoxUITests, self).query_minidump_stackwalk()
-
-        # Otherwise grab the manifest file from hg.mozilla.org
-        manifest_path = None
-
-        if self.config.get('download_minidump_stackwalk'):
-            tooltool_manifest = self.query_minidump_tooltool_manifest()
-            url_base = 'https://hg.mozilla.org/mozilla-central/raw-file/default/testing/'
-
-            dirs = self.query_abs_dirs()
-            manifest_path = os.path.join(dirs['abs_work_dir'], 'releng.manifest')
-            try:
-                self.download_file(urlparse.urljoin(url_base, tooltool_manifest),
-                                   manifest_path)
-            except Exception as e:
-                self.fatal('Download of tooltool manifest file failed: %s' % e.message)
-
-        return super(FirefoxUITests, self).query_minidump_stackwalk(manifest=manifest_path)
 
     @PostScriptRun
     def copy_logs_to_upload_dir(self):
@@ -332,6 +264,9 @@ class FirefoxUITests(TestingMixin, VCSToolsScript):
         if self.query_minidump_stackwalk():
             env['MINIDUMP_STACKWALK'] = self.minidump_stackwalk_path
 
+        if self.config.get('tag'):
+            cmd.extend(['--tag', self.config['tag']])
+
         parser = StructuredOutputParser(config=self.config,
                                         log_obj=self.log_obj,
                                         strict=False)
@@ -365,7 +300,7 @@ class FirefoxUITests(TestingMixin, VCSToolsScript):
         )
 
     def download_unzip(self, url, parent_dir, target_unzip_dirs=None, halt_on_failure=True):
-        """Overwritten method from BaseScript until bug 1237706 is fixed.
+        """Overwritten method from BaseScript until bug 1258539 is fixed.
 
         The downloaded file will always be saved to the working directory and is not getting
         deleted after extracting.
@@ -396,7 +331,7 @@ class FirefoxUITests(TestingMixin, VCSToolsScript):
                                  error_level=FATAL)
 
         try:
-            self.info('Using ZipFile to extract {} to {}'.format(zip, parent_dir))
+            self.info('Using ZipFile to extract {0} to {1}'.format(zip, parent_dir))
             with zipfile.ZipFile(zip) as bundle:
                 for entry in _filter_entries(bundle.namelist()):
                     bundle.extract(entry, path=parent_dir)
@@ -408,7 +343,7 @@ class FirefoxUITests(TestingMixin, VCSToolsScript):
                     if mode:
                         os.chmod(fname, mode)
         except zipfile.BadZipfile as e:
-            self.log('%s (%s)' % (e.message, zip),
+            self.log('{0} ({1})'.format(e.message, zip),
                      level=FATAL, exit_code=2)
 
 
