@@ -3,12 +3,3 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 DIRS += ['app', 'chrome', 'components', 'electron', 'modules', 'node', 'webidl']
-
-EXPORTS += [
-		'spidernode/deps/spidershim/include/v8-version.h',
-		'spidernode/deps/spidershim/include/v8.h',
-		'spidernode/deps/spidershim/include/v8config.h',
-		'spidernode/src/node.h',
-		'spidernode/src/node_extern.h',
-		'spidernode/src/node_version.h',
-]

@@ -27,6 +27,13 @@ XPIDL_SOURCES += [
   'nsINodeLoader.idl',
 ]
 
+LOCAL_INCLUDES += [
+  '../spidernode/deps/cares/include',
+  '../spidernode/deps/spidershim/include',
+  '../spidernode/deps/uv/include',
+  '../spidernode/src',
+]
+
 EXPORTS += [
     'NodeLoader.h',
 ]
