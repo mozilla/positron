@@ -9,6 +9,8 @@
 #include "nsINodeLoader.h"
 #include "NodeLoader.h"
 #include "node.h"
+#include "uv.h"
+#include "env.h"
 
 ////////////////////////////////////////////////////////////////////////
 // Define the contructor function for the objects
@@ -67,19 +69,16 @@ NS_IMETHODIMP NodeLoader::Init(JSContext* aContext)
   v8::HandleScope handle_scope(isolate);
 
   v8::Local<v8::Context> context = v8::Context::New(isolate);
-  node::CreateEnvironment(
+  v8::Context::Scope context_scope(context);
+  node::Environment* env = node::CreateEnvironment(
     isolate,
-    // nullptr /*struct uv_loop_s* loop*/,
+    uv_default_loop(),
     context,
     argc, argv, 0, nullptr);
 
-  //   V8Engine engine;
+  env->process_object()->Set(v8::String::NewFromUtf8(isolate, "type"), v8::String::NewFromUtf8(isolate, "browser"));
 
-  // Isolate::Scope isolate_scope(engine.isolate());
-
-  // HandleScope handle_scope(engine.isolate());
-  // Local<Context> context = Context::New(engine.isolate());
-  // Context::Scope context_scope(context);
+  node::LoadEnvironment(env);
 
   return NS_OK;
 }
