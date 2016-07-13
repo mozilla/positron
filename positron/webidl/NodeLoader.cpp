@@ -55,9 +55,10 @@ NS_IMETHODIMP NodeLoader::Init(JSContext* aContext)
   // (we assume node::Init would not modify the parameters under embedded mode).
   int exec_argc;
   const char** exec_argv;
-  int argc = 1;
+  int argc = 2;
   char **argv = new char *[argc + 1];
-  argv[0] = new char[10];
+  argv[0] = "/Users/bdahl/projects/positron/obj.debug.noindex/dist/PositronDebug";
+  argv[1] = "/Users/bdahl/projects/positron/obj.debug.noindex/dist/bin/modules/browser/init.js";
   node::Init(&argc, const_cast<const char**>(argv),  &exec_argc, &exec_argv);
 
   v8::V8::Initialize();
