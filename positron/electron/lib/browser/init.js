@@ -172,11 +172,13 @@ app.setPath('userCache', path.join(app.getPath('cache'), app.getName()));
 
 app.setAppPath(packagePath);
 
+// TODO: figure out how we want to load extensions
 // Load the chrome extension support.
-require('./chrome-extension');
+// require('./chrome-extension');
 
+// TODO: figure out how we implement desktop capturer
 // Load internal desktop-capturer module.
-require('./desktop-capturer');
+// require('./desktop-capturer');
 
 // Set main startup script of the app.
 var mainStartupScript = packageJson.main || 'index.js';
