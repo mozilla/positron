@@ -32,7 +32,8 @@ if (!process.env.ELECTRON_HIDE_INTERNAL_MODULES) {
 // called.
 var wrapWithActivateUvLoop = function(func) {
   return function() {
-    process.activateUvLoop();
+    // TODO: add a binding to do this
+    // process.activateUvLoop();
     return func.apply(this, arguments);
   };
 };
