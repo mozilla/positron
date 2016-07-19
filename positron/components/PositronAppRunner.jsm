@@ -64,7 +64,6 @@ PositronAppRunner.prototype = {
     let nodeLoader = Cc["@mozilla.org/positron/nodeloader;1"]
                      .getService(Ci.nsINodeLoader);
     nodeLoader.init();
-    (new ModuleLoader("browser")).require(requirer, mainScriptURI);
   },
 
   _parsePackageJSON: function par_parsePackageJSON(aData) {

@@ -11,6 +11,7 @@
 #include "node.h"
 #include "uv.h"
 #include "env.h"
+#include "jsapi.h"
 
 ////////////////////////////////////////////////////////////////////////
 // Define the contructor function for the objects
@@ -53,29 +54,35 @@ NodeLoader::~NodeLoader()
 /* void init (); */
 NS_IMETHODIMP NodeLoader::Init(JSContext* aContext)
 {
-  printf("!!!!!!!!!!!!!!NodeLoader::Init\n");
-  // (we assume node::Init would not modify the parameters under embedded mode).
+  v8::V8::Initialize();
+  v8::Isolate* isolate = v8::Isolate::New(js::GetRuntime(aContext));
+  // v8::Isolate::Scope isolate_scope(isolate);
+  // TODO: FIX THIS LEAK
+  v8::Isolate::Scope* isolate_scope = new v8::Isolate::Scope(isolate);
+  v8::HandleScope handle_scope(isolate);
+
+  v8::Local<v8::Context> context = v8::Context::New(isolate);
+  // v8::Context::Scope context_scope(context);
+  // TODO: FIX THIS LEAK
+  v8::Context::Scope* context_scope = new v8::Context::Scope(context);
+
   int exec_argc;
   const char** exec_argv;
   int argc = 2;
   char **argv = new char *[argc + 1];
+  // TODO: remove these hardcoded paths
   argv[0] = "/Users/bdahl/projects/positron/obj.debug.noindex/dist/PositronDebug";
   argv[1] = "/Users/bdahl/projects/positron/obj.debug.noindex/dist/bin/modules/browser/init.js";
   node::Init(&argc, const_cast<const char**>(argv),  &exec_argc, &exec_argv);
 
-  v8::V8::Initialize();
-  v8::Isolate* isolate = v8::Isolate::New(js::GetRuntime(aContext));
-  v8::Isolate::Scope isolate_scope(isolate);
-  v8::HandleScope handle_scope(isolate);
-
-  v8::Local<v8::Context> context = v8::Context::New(isolate);
-  v8::Context::Scope context_scope(context);
   node::Environment* env = node::CreateEnvironment(
     isolate,
     uv_default_loop(),
     context,
     argc, argv, 0, nullptr);
 
+  // TODO: remove this hardcoded paths
+  env->process_object()->Set(v8::String::NewFromUtf8(isolate, "resourcesPath"), v8::String::NewFromUtf8(isolate, "/Users/bdahl/projects/positron/positron/test/browser"));
   env->process_object()->Set(v8::String::NewFromUtf8(isolate, "type"), v8::String::NewFromUtf8(isolate, "browser"));
 
   node::LoadEnvironment(env);
