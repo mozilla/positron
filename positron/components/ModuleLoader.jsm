@@ -5,7 +5,8 @@
 "use strict";
 
 /**
- * A minimally-viable Node-like module loader.
+ * A minimally-viable Node-like module loader. This is only used in the renderer
+ * process. In the browser process module loading is handled by node itself.
  */
 
 const Cc = Components.classes;
@@ -52,6 +53,10 @@ const windowLoaders = new WeakMap();
  */
 
 function ModuleLoader(processType, window) {
+  if (processType !== 'renderer') {
+    throw new Error('Unsupported process type for module loader "' + processType + '"');
+  }
+
   // Register this loader for the given window early, so modules that we require
   // during loader construction can access window.process without causing
   // the `process` WebIDL binding to create a new module loader (and thus enter
@@ -72,23 +77,12 @@ function ModuleLoader(processType, window) {
    */
   const modules = new Map();
 
-  /**
-   * The module-wide global object, which is available via a reference
-   * to the `global` symbol as well as implicitly via the sandbox prototype.
-   * This object is shared across all modules loaded by this loader.
-   */
-  if (processType === 'browser') {
-    this.global = {
-      // I don't think this is exactly the same as the Console Web API.
-      // XXX Replace this with the real Console Web API (or at least ensure
-      // that the current version is compatible with it).
-      console: Cu.import('resource://gre/modules/Console.jsm', {}).console,
-    };
-  } else {
-    // For renderer processes, the global object is the window object
-    // of the renderer window, so modules have access to all its globals.
-    this.global = window;
-  }
+  // The module-wide global object, which is available via a reference
+  // to the `global` symbol as well as implicitly via the sandbox prototype.
+  // This object is shared across all modules loaded by this loader.
+  // For renderer processes, the global object is the window object
+  // of the renderer window, so modules have access to all its globals.
+  this.global = window;
 
   const sandbox = new Cu.Sandbox(systemPrincipal, {
     wantComponents: true,
@@ -212,34 +206,16 @@ function ModuleLoader(processType, window) {
   //
   this.process = this.require({}, 'resource:///modules/gecko/process.js');
 
-  // In the browser process, assign global.process to this.process directly.
-  // In a renderer process, the WebIDL binding sets global.process.
-  if (processType === 'browser') {
-    this.global.process = this.process;
-  }
-
+  this.global.process = this.process;
   this.global.Buffer = this.require({}, 'resource:///modules/node/buffer.js').Buffer;
 
   // XXX Also define clearImmediate, and other Node globals.
   const timers = this.require({}, 'resource:///modules/node/timers.js');
   this.global.setImmediate = timers.setImmediate;
 
-  // Require the Electron init.js script for the given process type.
-  //
-  // We only do this for renderer processes for now.  For browser processes,
-  // we instead require the browser process modules that renderer/init.js
-  // depends on having already been required.
-  //
-  // Eventually, we should get browser/init.js working and require it here,
-  // at which point it'll require those modules for us.
-  //
-  if (processType === 'renderer') {
-    this.require({}, 'resource:///modules/renderer/init.js');
-  } else {
-    this.require({}, 'resource:///modules/browser/rpc-server.js');
-    this.require({}, 'resource:///modules/browser/guest-view-manager.js');
-    this.require({}, 'resource:///modules/browser/guest-window-manager.js');
-  }
+  // Require the Electron init.js script for the renderer process since we have
+  // a pseudo node in the renderer.
+  this.require({}, 'resource:///modules/renderer/init.js');
 }
 
 ModuleLoader.getLoaderForWindow = function(window) {

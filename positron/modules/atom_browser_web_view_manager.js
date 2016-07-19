@@ -6,7 +6,7 @@
 
 const { classes: Cc, interfaces: Ci, results: Cr, utils: Cu } = Components;
 
-const positronUtil = process.binding('positron_util');
+const positronUtil = process.positronBinding('positron_util');
 const guestViewManager = require('resource:///modules/browser/guest-view-manager.js');
 
 exports.addGuest = positronUtil.makeStub('atom_browser_web_view_manager.addGuest');

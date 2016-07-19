@@ -2,15 +2,21 @@ const path = require('path');
 const timers = require('timers');
 const Module = require('module');
 
-process.atomBinding = function(name) {
-  try {
-    return process.binding("atom_" + process.type + "_" + name);
-  } catch (error) {
-    if (/No such module/.test(error.message)) {
-      return process.binding("atom_common_" + name);
+if (process.type === 'browser') {
+  process.positronBinding = function(name) {
+    return require("/Users/bdahl/projects/positron/positron/modules/" + name);
+  };
+
+  process.atomBinding = function(name) {
+    try {
+      return require("/Users/bdahl/projects/positron/positron/modules/atom_" + process.type + "_" + name);
+    } catch (error) {
+      if (/Cannot find module/.test(error.message)) {
+        return require("/Users/bdahl/projects/positron/positron/modules/atom_common_" + name);
+      }
     }
-  }
-};
+  };
+}
 
 if (!process.env.ELECTRON_HIDE_INTERNAL_MODULES) {
   // Add common/api/lib to module search paths.

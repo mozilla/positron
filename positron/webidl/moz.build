@@ -19,10 +19,6 @@ USE_LIBS += [
     'static:/positron/app/spidernode/.libs/zlib',
 ]
 
-WEBIDL_FILES += [
-    'Process.webidl',
-]
-
 XPIDL_SOURCES += [
   'nsINodeLoader.idl',
 ]
