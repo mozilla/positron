@@ -4,15 +4,15 @@ const Module = require('module');
 
 if (process.type === 'browser') {
   process.positronBinding = function(name) {
-    return require("/Users/bdahl/projects/positron/positron/modules/" + name);
+    return require("../../../modules/" + name);
   };
 
   process.atomBinding = function(name) {
     try {
-      return require("/Users/bdahl/projects/positron/positron/modules/atom_" + process.type + "_" + name);
+      return require("../../../modules/atom_" + process.type + "_" + name);
     } catch (error) {
       if (/Cannot find module/.test(error.message)) {
-        return require("/Users/bdahl/projects/positron/positron/modules/atom_common_" + name);
+        return require("../../../modules/atom_common_" + name);
       }
     }
   };
