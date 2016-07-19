@@ -118,7 +118,8 @@ require('./guest-window-manager');
 
 // Now we try to load app's package.json.
 var packageJson = null;
-var searchPaths = ['app', 'app.asar', 'default_app'];
+// TODO: Figure out why we have to add the empty  search path here.
+var searchPaths = ['', 'app', 'app.asar', 'default_app'];
 var i, len, packagePath;
 for (i = 0, len = searchPaths.length; i < len; i++) {
   packagePath = searchPaths[i];
