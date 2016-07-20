@@ -6,7 +6,6 @@
 
 USE_LIBS += [
     'static:/positron/app/spidernode/.libs/cares',
-    'static:/positron/app/spidernode/.libs/gtest',
     'static:/positron/app/spidernode/.libs/http_parser',
     'static:/positron/app/spidernode/.libs/icudata',
     'static:/positron/app/spidernode/.libs/icui18n',
