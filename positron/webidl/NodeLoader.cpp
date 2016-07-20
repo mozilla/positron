@@ -8,10 +8,15 @@
 
 #include "nsINodeLoader.h"
 #include "NodeLoader.h"
+#include "nsIFile.h"
+#include "nsDirectoryService.h"
+#include "nsDirectoryServiceDefs.h"
 #include "node.h"
 #include "uv.h"
 #include "env.h"
 #include "jsapi.h"
+#include "nsString.h"
+#include "nsAppRunner.h"
 
 ////////////////////////////////////////////////////////////////////////
 // Define the contructor function for the objects
@@ -66,13 +71,29 @@ NS_IMETHODIMP NodeLoader::Init(JSContext* aContext)
   // TODO: FIX THIS LEAK
   v8::Context::Scope* context_scope = new v8::Context::Scope(context);
 
+  nsCOMPtr<nsIFile> greDir;
+  nsDirectoryService::gService->Get(NS_GRE_DIR,
+                                    NS_GET_IID(nsIFile),
+                                    getter_AddRefs(greDir));
+  MOZ_ASSERT(greDir);
+  greDir->AppendNative(NS_LITERAL_CSTRING("modules"));
+  greDir->AppendNative(NS_LITERAL_CSTRING("browser"));
+  greDir->AppendNative(NS_LITERAL_CSTRING("init.js"));
+  nsAutoString path;
+  greDir->GetPath(path);
+
+  // XXX There must be some better way to do this, but if the char array isn't
+  // copied it seems to get mangled.
+  NS_LossyConvertUTF16toASCII asciiPath(path);
+  char* copy = new char[asciiPath.Length() + 1];
+  strcpy(copy, asciiPath.get());
+
   int exec_argc;
   const char** exec_argv;
   int argc = 2;
   char **argv = new char *[argc + 1];
-  // TODO: remove these hardcoded paths
-  argv[0] = "/Users/bdahl/projects/positron/obj.debug.noindex/dist/PositronDebug";
-  argv[1] = "/Users/bdahl/projects/positron/obj.debug.noindex/dist/bin/modules/browser/init.js";
+  argv[0] = gArgv[0];
+  argv[1] = copy;
   node::Init(&argc, const_cast<const char**>(argv),  &exec_argc, &exec_argv);
 
   node::Environment* env = node::CreateEnvironment(
@@ -81,8 +102,7 @@ NS_IMETHODIMP NodeLoader::Init(JSContext* aContext)
     context,
     argc, argv, 0, nullptr);
 
-  // TODO: remove this hardcoded paths
-  env->process_object()->Set(v8::String::NewFromUtf8(isolate, "resourcesPath"), v8::String::NewFromUtf8(isolate, "/Users/bdahl/projects/positron/positron/test/browser"));
+  env->process_object()->Set(v8::String::NewFromUtf8(isolate, "resourcesPath"), v8::String::NewFromUtf8(isolate, gArgv[1]));
   env->process_object()->Set(v8::String::NewFromUtf8(isolate, "type"), v8::String::NewFromUtf8(isolate, "browser"));
 
   node::LoadEnvironment(env);
