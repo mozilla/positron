@@ -177,17 +177,12 @@ LayerManager::CreatePersistentBufferProvider(const mozilla::gfx::IntSize &aSize,
                                              mozilla::gfx::SurfaceFormat aFormat)
 {
   RefPtr<PersistentBufferProviderBasic> bufferProvider =
-    new PersistentBufferProviderBasic(aSize, aFormat,
-                                      gfxPlatform::GetPlatform()->GetPreferredCanvasBackend());
+    PersistentBufferProviderBasic::Create(aSize, aFormat,
+      gfxPlatform::GetPlatform()->GetPreferredCanvasBackend());
 
-  if (!bufferProvider->IsValid()) {
-    bufferProvider =
-      new PersistentBufferProviderBasic(aSize, aFormat,
-                                        gfxPlatform::GetPlatform()->GetFallbackCanvasBackend());
-  }
-
-  if (!bufferProvider->IsValid()) {
-    return nullptr;
+  if (!bufferProvider) {
+    bufferProvider = PersistentBufferProviderBasic::Create(aSize, aFormat,
+      gfxPlatform::GetPlatform()->GetFallbackCanvasBackend());
   }
 
   return bufferProvider.forget();
@@ -804,15 +799,13 @@ Layer::CalculateScissorRect(const RenderTargetIntRect& aCurrentScissorRect)
     return currentClip;
   }
 
-  if (GetVisibleRegion().IsEmpty()) {
+  if (GetLocalVisibleRegion().IsEmpty() &&
+      !(AsLayerComposite() && AsLayerComposite()->NeedToDrawCheckerboarding())) {
     // When our visible region is empty, our parent may not have created the
     // intermediate surface that we would require for correct clipping; however,
     // this does not matter since we are invisible.
-    // Note that we do not use GetLocalVisibleRegion(), because that can be
-    // empty for a layer whose rendered contents have been async-scrolled
-    // completely offscreen, but for which we still need to draw a
-    // checkerboarding backround color, and calculating an empty scissor rect
-    // for such a layer would prevent that (see bug 1247452 comment 10).
+    // Make sure we still compute a clip rect if we want to draw checkboarding
+    // for this layer, since we want to do this even if the layer is invisible.
     return RenderTargetIntRect(currentClip.TopLeft(), RenderTargetIntSize(0, 0));
   }
 
@@ -1465,6 +1458,8 @@ ContainerLayer::DefaultComputeEffectiveTransforms(const Matrix4x4& aTransformToS
     }
   }
 
+  NS_ASSERTION(!Extend3DContext() || !useIntermediateSurface, "Can't have an intermediate surface with preserve-3d!");
+
   if (useIntermediateSurface) {
     mEffectiveTransform = SnapTransformTranslation(idealTransform, &residual);
   } else {
@@ -1982,12 +1977,12 @@ Layer::PrintInfo(std::stringstream& aStream, const char* aPrefix)
                      ToString(anchor).c_str()).get();
   }
   if (GetIsStickyPosition()) {
-    aStream << nsPrintfCString(" [isStickyPosition scrollId=%d outer=%f,%f %fx%f "
-                     "inner=%f,%f %fx%f]", mStickyPositionData->mScrollId,
+    aStream << nsPrintfCString(" [isStickyPosition scrollId=%d outer=(%.3f,%.3f)-(%.3f,%.3f) "
+                     "inner=(%.3f,%.3f)-(%.3f,%.3f)]", mStickyPositionData->mScrollId,
                      mStickyPositionData->mOuter.x, mStickyPositionData->mOuter.y,
-                     mStickyPositionData->mOuter.width, mStickyPositionData->mOuter.height,
+                     mStickyPositionData->mOuter.XMost(), mStickyPositionData->mOuter.YMost(),
                      mStickyPositionData->mInner.x, mStickyPositionData->mInner.y,
-                     mStickyPositionData->mInner.width, mStickyPositionData->mInner.height).get();
+                     mStickyPositionData->mInner.XMost(), mStickyPositionData->mInner.YMost()).get();
   }
   if (mMaskLayer) {
     aStream << nsPrintfCString(" [mMaskLayer=%p]", mMaskLayer.get()).get();

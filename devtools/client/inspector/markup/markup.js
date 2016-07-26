@@ -15,11 +15,14 @@ const DEFAULT_MAX_CHILDREN = 100;
 const COLLAPSE_DATA_URL_REGEX = /^data.+base64/;
 const COLLAPSE_DATA_URL_LENGTH = 60;
 const NEW_SELECTION_HIGHLIGHTER_TIMER = 1000;
-const DRAG_DROP_AUTOSCROLL_EDGE_DISTANCE = 50;
-const DRAG_DROP_MIN_AUTOSCROLL_SPEED = 5;
-const DRAG_DROP_MAX_AUTOSCROLL_SPEED = 15;
+const DRAG_DROP_AUTOSCROLL_EDGE_MAX_DISTANCE = 50;
+const DRAG_DROP_AUTOSCROLL_EDGE_RATIO = 0.1;
+const DRAG_DROP_MIN_AUTOSCROLL_SPEED = 2;
+const DRAG_DROP_MAX_AUTOSCROLL_SPEED = 8;
 const DRAG_DROP_MIN_INITIAL_DISTANCE = 10;
-const AUTOCOMPLETE_POPUP_PANEL_ID = "markupview_autoCompletePopup";
+const DRAG_DROP_HEIGHT_TO_SPEED = 500;
+const DRAG_DROP_HEIGHT_TO_SPEED_MIN = 0.5;
+const DRAG_DROP_HEIGHT_TO_SPEED_MAX = 1;
 const ATTR_COLLAPSE_ENABLED_PREF = "devtools.markup.collapseAttributes";
 const ATTR_COLLAPSE_LENGTH_PREF = "devtools.markup.collapseAttributeLength";
 const PREVIEW_MAX_DIM_PREF = "devtools.inspector.imagePreviewTooltipSize";
@@ -105,12 +108,9 @@ function MarkupView(inspector, frame, controllerWindow) {
   let options = {
     autoSelect: true,
     theme: "auto",
-    // panelId option prevents the markupView autocomplete popup from
-    // sharing XUL elements with other views, such as ruleView (see Bug 1191093)
-    panelId: AUTOCOMPLETE_POPUP_PANEL_ID
   };
-  this.popup = new AutocompletePopup(this.doc.defaultView.parent.document,
-                                     options);
+
+  this.popup = new AutocompletePopup(inspector._toolbox, options);
 
   this.undo = new UndoStack();
   this.undo.installController(controllerWindow);
@@ -252,37 +252,58 @@ MarkupView.prototype = {
   _autoScroll: function (event) {
     let docEl = this.doc.documentElement;
 
-    if (this._autoScrollInterval) {
-      clearInterval(this._autoScrollInterval);
+    if (this._autoScrollAnimationFrame) {
+      this.win.cancelAnimationFrame(this._autoScrollAnimationFrame);
     }
 
     // Auto-scroll when the mouse approaches top/bottom edge.
     let fromBottom = docEl.clientHeight - event.pageY + this.win.scrollY;
     let fromTop = event.pageY - this.win.scrollY;
+    let edgeDistance = Math.min(DRAG_DROP_AUTOSCROLL_EDGE_MAX_DISTANCE,
+           docEl.clientHeight * DRAG_DROP_AUTOSCROLL_EDGE_RATIO);
 
-    if (fromBottom <= DRAG_DROP_AUTOSCROLL_EDGE_DISTANCE) {
-      // Map our distance from 0-50 to 5-15 range so the speed is kept in a
-      // range not too fast, not too slow.
+    // The smaller the screen, the slower the movement.
+    let heightToSpeedRatio =
+      Math.max(DRAG_DROP_HEIGHT_TO_SPEED_MIN,
+        Math.min(DRAG_DROP_HEIGHT_TO_SPEED_MAX,
+          docEl.clientHeight / DRAG_DROP_HEIGHT_TO_SPEED));
+
+    if (fromBottom <= edgeDistance) {
+      // Map our distance range to a speed range so that the speed is not too
+      // fast or too slow.
       let speed = map(
         fromBottom,
-        0, DRAG_DROP_AUTOSCROLL_EDGE_DISTANCE,
+        0, edgeDistance,
         DRAG_DROP_MIN_AUTOSCROLL_SPEED, DRAG_DROP_MAX_AUTOSCROLL_SPEED);
 
-      this._autoScrollInterval = setInterval(() => {
-        docEl.scrollTop -= speed - DRAG_DROP_MAX_AUTOSCROLL_SPEED;
-      }, 0);
+      this._runUpdateLoop(() => {
+        docEl.scrollTop -= heightToSpeedRatio *
+          (speed - DRAG_DROP_MAX_AUTOSCROLL_SPEED);
+      });
     }
 
-    if (fromTop <= DRAG_DROP_AUTOSCROLL_EDGE_DISTANCE) {
+    if (fromTop <= edgeDistance) {
       let speed = map(
         fromTop,
-        0, DRAG_DROP_AUTOSCROLL_EDGE_DISTANCE,
+        0, edgeDistance,
         DRAG_DROP_MIN_AUTOSCROLL_SPEED, DRAG_DROP_MAX_AUTOSCROLL_SPEED);
 
-      this._autoScrollInterval = setInterval(() => {
-        docEl.scrollTop += speed - DRAG_DROP_MAX_AUTOSCROLL_SPEED;
-      }, 0);
+      this._runUpdateLoop(() => {
+        docEl.scrollTop += heightToSpeedRatio *
+          (speed - DRAG_DROP_MAX_AUTOSCROLL_SPEED);
+      });
     }
+  },
+
+  /**
+   * Run a loop on the requestAnimationFrame.
+   */
+  _runUpdateLoop: function (update) {
+    let loop = () => {
+      update();
+      this._autoScrollAnimationFrame = this.win.requestAnimationFrame(loop);
+    };
+    loop();
   },
 
   _onMouseClick: function (event) {
@@ -309,8 +330,8 @@ MarkupView.prototype = {
   _onMouseUp: function () {
     this.indicateDropTarget(null);
     this.indicateDragTarget(null);
-    if (this._autoScrollInterval) {
-      clearInterval(this._autoScrollInterval);
+    if (this._autoScrollAnimationFrame) {
+      this.win.cancelAnimationFrame(this._autoScrollAnimationFrame);
     }
   },
 
@@ -336,8 +357,8 @@ MarkupView.prototype = {
 
     this.indicateDropTarget(null);
     this.indicateDragTarget(null);
-    if (this._autoScrollInterval) {
-      clearInterval(this._autoScrollInterval);
+    if (this._autoScrollAnimationFrame) {
+      this.win.cancelAnimationFrame(this._autoScrollAnimationFrame);
     }
   },
 
@@ -363,8 +384,8 @@ MarkupView.prototype = {
   },
 
   _onMouseLeave: function () {
-    if (this._autoScrollInterval) {
-      clearInterval(this._autoScrollInterval);
+    if (this._autoScrollAnimationFrame) {
+      this.win.cancelAnimationFrame(this._autoScrollAnimationFrame);
     }
     if (this.isDragging) {
       return;
@@ -852,12 +873,26 @@ MarkupView.prototype = {
       this.undo.do(() => {
         this.walker.removeNode(node).then(siblings => {
           nextSibling = siblings.nextSibling;
-          let focusNode = moveBackward ? siblings.previousSibling : nextSibling;
+          let prevSibling = siblings.previousSibling;
+          let focusNode = moveBackward ? prevSibling : nextSibling;
 
           // If we can't move as the user wants, we move to the other direction.
           // If there is no sibling elements anymore, move to the parent node.
           if (!focusNode) {
-            focusNode = nextSibling || siblings.previousSibling || parent;
+            focusNode = nextSibling || prevSibling || parent;
+          }
+
+          let isNextSiblingText = nextSibling ?
+            nextSibling.nodeType === Ci.nsIDOMNode.TEXT_NODE : false;
+          let isPrevSiblingText = prevSibling ?
+            prevSibling.nodeType === Ci.nsIDOMNode.TEXT_NODE : false;
+
+          // If the parent had two children and the next or previous sibling
+          // is a text node, then it now has only a single text node, is about
+          // to be in-lined; and focus should move to the parent.
+          if (parent.numChildren === 2
+              && (isNextSiblingText || isPrevSiblingText)) {
+            focusNode = parent;
           }
 
           if (container.selected) {
@@ -1870,6 +1905,7 @@ MarkupContainer.prototype = {
     this.undo = this.markup.undo;
     this.win = this.markup._frame.contentWindow;
     this.id = "treeitem-" + markupContainerID++;
+    this.htmlElt = this.win.document.documentElement;
 
     // The template will fill the following properties
     this.elt = null;
@@ -2171,10 +2207,12 @@ MarkupContainer.prototype = {
     this.tagLine.setAttribute("aria-grabbed", isDragging);
 
     if (isDragging) {
+      this.htmlElt.classList.add("dragging");
       this.elt.classList.add("dragging");
       this.markup.doc.body.classList.add("dragging");
       rootElt.setAttribute("aria-dropeffect", "move");
     } else {
+      this.htmlElt.classList.remove("dragging");
       this.elt.classList.remove("dragging");
       this.markup.doc.body.classList.remove("dragging");
       rootElt.setAttribute("aria-dropeffect", "none");
@@ -2511,6 +2549,7 @@ MarkupContainer.prototype = {
     }
 
     this.win = null;
+    this.htmlElt = null;
 
     if (this.expander) {
       this.expander.removeEventListener("click", this._onToggle, false);

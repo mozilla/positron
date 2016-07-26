@@ -36,6 +36,7 @@
 #include "mozilla/dom/PCrashReporterChild.h"
 #include "mozilla/dom/ProcessGlobal.h"
 #include "mozilla/dom/Promise.h"
+#include "mozilla/dom/workers/ServiceWorkerManager.h"
 #include "mozilla/dom/nsIContentChild.h"
 #include "mozilla/psm/PSMContentListener.h"
 #include "mozilla/hal_sandbox/PHalChild.h"
@@ -108,7 +109,6 @@
 #include "nsAnonymousTemporaryFile.h"
 #include "nsISpellChecker.h"
 #include "nsClipboardProxy.h"
-#include "nsISystemMessageCache.h"
 #include "nsDirectoryService.h"
 #include "nsDirectoryServiceUtils.h"
 #include "nsDirectoryServiceDefs.h"
@@ -223,6 +223,7 @@ using namespace mozilla::dom::mobileconnection;
 using namespace mozilla::dom::mobilemessage;
 using namespace mozilla::dom::telephony;
 using namespace mozilla::dom::voicemail;
+using namespace mozilla::dom::workers;
 using namespace mozilla::media;
 using namespace mozilla::embedding;
 using namespace mozilla::gmp;
@@ -487,39 +488,6 @@ ConsoleListener::Observe(nsIConsoleMessage* aMessage)
   return NS_OK;
 }
 
-class SystemMessageHandledObserver final : public nsIObserver
-{
-  ~SystemMessageHandledObserver() {}
-
-public:
-  NS_DECL_ISUPPORTS
-  NS_DECL_NSIOBSERVER
-
-  void Init();
-};
-
-void SystemMessageHandledObserver::Init()
-{
-  nsCOMPtr<nsIObserverService> os = mozilla::services::GetObserverService();
-
-  if (os) {
-    os->AddObserver(this, "handle-system-messages-done", /* ownsWeak */ false);
-  }
-}
-
-NS_IMETHODIMP
-SystemMessageHandledObserver::Observe(nsISupports* aSubject,
-                                      const char* aTopic,
-                                      const char16_t* aData)
-{
-  if (ContentChild::GetSingleton()) {
-    ContentChild::GetSingleton()->SendSystemMessageHandled();
-  }
-  return NS_OK;
-}
-
-NS_IMPL_ISUPPORTS(SystemMessageHandledObserver, nsIObserver)
-
 class BackgroundChildPrimer final :
   public nsIIPCBackgroundChildCreateCallback
 {
@@ -568,10 +536,6 @@ InitOnContentProcessCreated()
     MOZ_ASSERT(false, "Failed updating permission in child process");
   }
 #endif
-
-  nsCOMPtr<nsISystemMessageCache> smc =
-    do_GetService("@mozilla.org/system-message-cache;1");
-  NS_WARN_IF(!smc);
 
   // This will register cross-process observer.
   mozilla::dom::time::InitializeDateCacheCleaner();
@@ -965,7 +929,7 @@ ContentChild::ProvideWindowCommon(TabChild* aTabOpener,
   }
 
   if (!urlToLoad.IsEmpty()) {
-    newChild->RecvLoadURL(urlToLoad, BrowserConfiguration(), showInfo);
+    newChild->RecvLoadURL(urlToLoad, showInfo);
   }
 
   nsCOMPtr<mozIDOMWindowProxy> win = do_GetInterface(newChild->WebNavigation());
@@ -1081,10 +1045,13 @@ ContentChild::InitXPCOM()
     global->SetInitialProcessData(data);
   }
 
-  // This object is held alive by the observer service.
-  RefPtr<SystemMessageHandledObserver> sysMsgObserver =
-    new SystemMessageHandledObserver();
-  sysMsgObserver->Init();
+  // Loading the ServiceWorker configuration.
+  BrowserConfiguration configuration;
+  SendGetBrowserConfiguration(&configuration);
+
+  RefPtr<ServiceWorkerManager> swm = ServiceWorkerManager::GetInstance();
+  MOZ_ASSERT(swm);
+  swm->LoadRegistrations(configuration.serviceWorkerRegistrations());
 
   InitOnContentProcessCreated();
 }
@@ -3292,6 +3259,19 @@ ContentChild::RecvInvokeDragSession(nsTArray<IPCDataTransfer>&& aTransfers,
     dragService->GetCurrentSession(getter_AddRefs(session));
     if (session) {
       session->SetDragAction(aAction);
+      // Check if we are receiving any file objects. If we are we will want
+      // to hide any of the other objects coming in from content.
+      bool hasFiles = false;
+      for (uint32_t i = 0; i < aTransfers.Length() && !hasFiles; ++i) {
+        auto& items = aTransfers[i].items();
+        for (uint32_t j = 0; j < items.Length() && !hasFiles; ++j) {
+          if (items[j].data().type() == IPCDataTransferData::TPBlobChild) {
+            hasFiles = true;
+          }
+        }
+      }
+
+      // Add the entries from the IPC to the new DataTransfer
       nsCOMPtr<DataTransfer> dataTransfer =
         new DataTransfer(nullptr, eDragStart, false, -1);
       for (uint32_t i = 0; i < aTransfers.Length(); ++i) {
@@ -3313,9 +3293,11 @@ ContentChild::RecvInvokeDragSession(nsTArray<IPCDataTransfer>&& aTransfers,
           } else {
             continue;
           }
+          // We should hide this data from content if we have a file, and we aren't a file.
+          bool hidden = hasFiles && item.data().type() != IPCDataTransferData::TPBlobChild;
           dataTransfer->SetDataWithPrincipalFromOtherProcess(
             NS_ConvertUTF8toUTF16(item.flavor()), variant, i,
-            nsContentUtils::GetSystemPrincipal());
+            nsContentUtils::GetSystemPrincipal(), hidden);
         }
       }
       session->SetDataTransfer(dataTransfer);

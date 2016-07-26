@@ -121,9 +121,9 @@ public:
 
   bool IPCOpen() const { return mIPCOpen; }
 
-  void Lock() const { if (mCompositableForwarder->UsesImageBridge()) { mLock.Enter(); } }
+  void Lock() const { if (mCompositableForwarder && mCompositableForwarder->UsesImageBridge()) { mLock.Enter(); } }
 
-  void Unlock() const { if (mCompositableForwarder->UsesImageBridge()) { mLock.Leave(); } }
+  void Unlock() const { if (mCompositableForwarder && mCompositableForwarder->UsesImageBridge()) { mLock.Leave(); } }
 
 private:
 
@@ -364,6 +364,8 @@ void TextureClient::Destroy(bool aForceSync)
     mActor->Lock();
   }
 
+  mReadLock = nullptr;
+
   CancelWaitFenceHandleOnImageBridge();
   RefPtr<TextureChild> actor = mActor;
   mActor = nullptr;
@@ -494,7 +496,6 @@ TextureClient::Unlock()
   }
 
   if (mBorrowedDrawTarget) {
-    MOZ_ASSERT(mBorrowedDrawTarget->refCount() <= mExpectedDtRefs);
     if (mOpenMode & OpenMode::OPEN_WRITE) {
       mBorrowedDrawTarget->Flush();
       if (mReadbackSink && !mData->ReadBack(mReadbackSink)) {
@@ -505,6 +506,12 @@ TextureClient::Unlock()
         mReadbackSink->ProcessReadback(dataSurf);
       }
     }
+
+    mBorrowedDrawTarget->DetachAllSnapshots();
+    // If this assertion is hit, it means something is holding a strong reference
+    // to our DrawTarget externally, which is not allowed.
+    MOZ_ASSERT(mBorrowedDrawTarget->refCount() <= mExpectedDtRefs);
+
     mBorrowedDrawTarget = nullptr;
   }
 
@@ -729,9 +736,6 @@ TextureClient::AddFlags(TextureFlags aFlags)
   MOZ_ASSERT(!IsSharedWithCompositor() ||
              ((GetFlags() & TextureFlags::RECYCLE) && !IsAddedToCompositableClient()));
   mFlags |= aFlags;
-  if (IsValid() && mActor && !mActor->mDestroyed && mActor->IPCOpen()) {
-    mActor->SendRecycleTexture(mFlags);
-  }
 }
 
 void
@@ -740,9 +744,6 @@ TextureClient::RemoveFlags(TextureFlags aFlags)
   MOZ_ASSERT(!IsSharedWithCompositor() ||
              ((GetFlags() & TextureFlags::RECYCLE) && !IsAddedToCompositableClient()));
   mFlags &= ~aFlags;
-  if (IsValid() && mActor && !mActor->mDestroyed && mActor->IPCOpen()) {
-    mActor->SendRecycleTexture(mFlags);
-  }
 }
 
 void
@@ -750,21 +751,11 @@ TextureClient::RecycleTexture(TextureFlags aFlags)
 {
   MOZ_ASSERT(GetFlags() & TextureFlags::RECYCLE);
   MOZ_ASSERT(!mIsLocked);
-  if (mIsLocked) {
-    return;
-  }
-
-  LockActor();
 
   mAddedToCompositableClient = false;
   if (mFlags != aFlags) {
     mFlags = aFlags;
-    if (IsValid() && mActor && !mActor->mDestroyed && mActor->IPCOpen()) {
-      mActor->SendRecycleTexture(mFlags);
-    }
   }
-
-  UnlockActor();
 }
 
 void
@@ -772,6 +763,15 @@ TextureClient::SetAddedToCompositableClient()
 {
   if (!mAddedToCompositableClient) {
     mAddedToCompositableClient = true;
+    if(!(GetFlags() & TextureFlags::RECYCLE)) {
+      return;
+    }
+    MOZ_ASSERT(!mIsLocked);
+    LockActor();
+    if (IsValid() && mActor && !mActor->mDestroyed && mActor->IPCOpen()) {
+      mActor->SendRecycleTexture(mFlags);
+    }
+    UnlockActor();
   }
 }
 
@@ -900,6 +900,51 @@ TextureClient::InitIPDLActor(CompositableForwarder* aForwarder)
   MOZ_ASSERT(mActor);
   mActor->mCompositableForwarder = aForwarder;
   mActor->mTextureForwarder = aForwarder->AsTextureForwarder();
+  mActor->mTextureClient = this;
+  mActor->mMainThreadOnly = !!(mFlags & TextureFlags::DEALLOCATE_MAIN_THREAD);
+
+  // If the TextureClient is already locked, we have to lock TextureChild's mutex
+  // since it will be unlocked in TextureClient::Unlock.
+  if (mIsLocked) {
+    LockActor();
+  }
+
+  return mActor->IPCOpen();
+}
+
+bool
+TextureClient::InitIPDLActor(TextureForwarder* aForwarder, LayersBackend aBackend)
+{
+  MOZ_ASSERT(aForwarder && aForwarder->GetMessageLoop() == mAllocator->AsClientAllocator()->GetMessageLoop());
+  if (mActor && !mActor->mDestroyed) {
+    CompositableForwarder* currentFwd = mActor->mCompositableForwarder;
+    TextureForwarder* currentTexFwd = mActor->mTextureForwarder;
+
+    if (currentFwd) {
+      gfxCriticalError() << "Attempt to remove a texture from a CompositableForwarder.";
+      return false;
+    }
+
+    if (currentTexFwd && currentTexFwd != aForwarder) {
+      gfxCriticalError() << "Attempt to move a texture to a different channel.";
+      return false;
+    }
+    mActor->mTextureForwarder = aForwarder;
+    return true;
+  }
+  MOZ_ASSERT(!mActor || mActor->mDestroyed, "Cannot use a texture on several IPC channels.");
+
+  SurfaceDescriptor desc;
+  if (!ToSurfaceDescriptor(desc)) {
+    return false;
+  }
+
+  mActor = static_cast<TextureChild*>(aForwarder->CreateTexture(desc,
+    aBackend,
+    GetFlags(),
+    mSerial));
+  MOZ_ASSERT(mActor);
+  mActor->mTextureForwarder = aForwarder;
   mActor->mTextureClient = this;
   mActor->mMainThreadOnly = !!(mFlags & TextureFlags::DEALLOCATE_MAIN_THREAD);
 
@@ -1126,7 +1171,6 @@ TextureClient::CreateForYCbCr(ClientIPCAllocator* aAllocator,
 // static
 already_AddRefed<TextureClient>
 TextureClient::CreateForYCbCrWithBufferSize(ClientIPCAllocator* aAllocator,
-                                            gfx::SurfaceFormat aFormat,
                                             size_t aSize,
                                             TextureFlags aTextureFlags)
 {
@@ -1137,7 +1181,7 @@ TextureClient::CreateForYCbCrWithBufferSize(ClientIPCAllocator* aAllocator,
   }
 
   TextureData* data =
-    BufferTextureData::CreateForYCbCrWithBufferSize(aAllocator, aFormat, aSize,
+    BufferTextureData::CreateForYCbCrWithBufferSize(aAllocator, aSize,
                                                     aTextureFlags);
   if (!data) {
     return nullptr;

@@ -421,7 +421,7 @@ nsStyleSet::GatherRuleProcessors(SheetType aType)
     // Clear mScopedDocSheetRuleProcessors, but save it.
     oldScopedDocRuleProcessors.SwapElements(mScopedDocSheetRuleProcessors);
   }
-  if (mAuthorStyleDisabled && (aType == SheetType::Doc || 
+  if (mAuthorStyleDisabled && (aType == SheetType::Doc ||
                                aType == SheetType::ScopedDoc ||
                                aType == SheetType::StyleAttr)) {
     // Don't regather if this level is disabled.  Note that we gather
@@ -907,14 +907,14 @@ nsStyleSet::GetContext(nsStyleContext* aParentContext,
                                                 aVisitedRuleNode,
                                                 relevantLinkVisited);
 
-#ifdef NOISY_DEBUG
-  if (result)
-    fprintf(stdout, "--- SharedSC %d ---\n", ++gSharedCount);
-  else
-    fprintf(stdout, "+++ NewSC %d +++\n", ++gNewCount);
-#endif
-
   if (!result) {
+    // |aVisitedRuleNode| may have a ref-count of zero since we are yet
+    // to create the style context that will hold an owning reference to it.
+    // As a result, we need to make sure it stays alive until that point
+    // in case something in the first call to NS_NewStyleContext triggers a
+    // GC sweep of rule nodes.
+    RefPtr<nsRuleNode> kungFuDeathGrip{aVisitedRuleNode};
+
     result = NS_NewStyleContext(aParentContext, aPseudoTag, aPseudoType,
                                 aRuleNode,
                                 aFlags & eSkipParentDisplayBasedStyleFixup);
@@ -954,7 +954,8 @@ nsStyleSet::GetContext(nsStyleContext* aParentContext,
       animRule = PresContext()->EffectCompositor()->
                    GetAnimationRule(aElementForAnimation,
                                     result->GetPseudoType(),
-                                    EffectCompositor::CascadeLevel::Animations);
+                                    EffectCompositor::CascadeLevel::Animations,
+                                    result);
     }
 
     MOZ_ASSERT(result->RuleNode() == aRuleNode,
@@ -1068,7 +1069,7 @@ nsStyleSet::AssertNoCSSRules(nsRuleNode* aCurrLevelNode,
 
 // Enumerate the rules in a way that cares about the order of the rules.
 void
-nsStyleSet::FileRules(nsIStyleRuleProcessor::EnumFunc aCollectorFunc, 
+nsStyleSet::FileRules(nsIStyleRuleProcessor::EnumFunc aCollectorFunc,
                       RuleProcessorData* aData, Element* aElement,
                       nsRuleWalker* aRuleWalker)
 {
@@ -1539,7 +1540,8 @@ nsStyleSet::RuleNodeWithReplacement(Element* aElement,
               aPseudoType == CSSPseudoElementType::after) {
             nsIStyleRule* rule = PresContext()->EffectCompositor()->
               GetAnimationRule(aElement, aPseudoType,
-                               EffectCompositor::CascadeLevel::Animations);
+                               EffectCompositor::CascadeLevel::Animations,
+                               nullptr);
             if (rule) {
               ruleWalker.ForwardOnPossiblyCSSRule(rule);
               ruleWalker.CurrentNode()->SetIsAnimationRule();
@@ -1553,7 +1555,8 @@ nsStyleSet::RuleNodeWithReplacement(Element* aElement,
               aPseudoType == CSSPseudoElementType::after) {
             nsIStyleRule* rule = PresContext()->EffectCompositor()->
               GetAnimationRule(aElement, aPseudoType,
-                               EffectCompositor::CascadeLevel::Transitions);
+                               EffectCompositor::CascadeLevel::Transitions,
+                               nullptr);
             if (rule) {
               ruleWalker.ForwardOnPossiblyCSSRule(rule);
               ruleWalker.CurrentNode()->SetIsAnimationRule();

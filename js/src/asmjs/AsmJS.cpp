@@ -29,7 +29,6 @@
 
 #include "jswrapper.h"
 
-#include "asmjs/Wasm.h"
 #include "asmjs/WasmGenerator.h"
 #include "asmjs/WasmInstance.h"
 #include "asmjs/WasmJS.h"
@@ -268,7 +267,6 @@ enum class CacheResult
 
 struct AsmJSMetadataCacheablePod
 {
-    uint32_t                minHeapLength;
     uint32_t                numFFIs;
     uint32_t                srcLength;
     uint32_t                srcLengthWithRightBrace;
@@ -1662,7 +1660,6 @@ class MOZ_STACK_CLASS ModuleValidator
         importMap_(cx),
         arrayViews_(cx),
         atomicsPresent_(false),
-        mg_(cx),
         errorString_(nullptr),
         errorOffset_(UINT32_MAX),
         errorOverRecursed_(false)
@@ -1684,7 +1681,6 @@ class MOZ_STACK_CLASS ModuleValidator
         if (!asmJSMetadata_)
             return false;
 
-        asmJSMetadata_->minHeapLength = RoundUpToNextValidAsmJSHeapLength(0);
         asmJSMetadata_->srcStart = moduleFunctionNode_->pn_body->pn_pos.begin;
         asmJSMetadata_->srcBodyStart = parser_.tokenStream.currentToken().pos.end;
         asmJSMetadata_->strict = parser_.pc->sc->strict() && !parser_.pc->sc->hasExplicitUseStrict();
@@ -1755,27 +1751,30 @@ class MOZ_STACK_CLASS ModuleValidator
         if (!dummyFunction_)
             return false;
 
-        UniqueModuleGeneratorData genData = MakeUnique<ModuleGeneratorData>(cx_, ModuleKind::AsmJS);
+        CompileArgs args;
+        if (!args.init(cx_))
+            return false;
+
+        auto genData = MakeUnique<ModuleGeneratorData>(args.assumptions.usesSignal, ModuleKind::AsmJS);
         if (!genData ||
             !genData->sigs.resize(MaxSigs) ||
             !genData->funcSigs.resize(MaxFuncs) ||
-            !genData->imports.resize(MaxImports) ||
+            !genData->funcImports.resize(MaxImports) ||
             !genData->asmJSSigToTable.resize(MaxTables))
         {
             return false;
         }
 
-        CacheableChars filename;
+        genData->minMemoryLength = RoundUpToNextValidAsmJSHeapLength(0);
+
         if (parser_.ss->filename()) {
-            filename = DuplicateString(parser_.ss->filename());
-            if (!filename)
+            args.filename = DuplicateString(parser_.ss->filename());
+            if (!args.filename)
                 return false;
         }
 
-        if (!mg_.init(Move(genData), Move(filename), asmJSMetadata_.get()))
+        if (!mg_.init(Move(genData), Move(args), asmJSMetadata_.get()))
             return false;
-
-        mg_.bumpMinHeapLength(asmJSMetadata_->minHeapLength);
 
         return true;
     }
@@ -1791,7 +1790,7 @@ class MOZ_STACK_CLASS ModuleValidator
     RootedFunction& dummyFunction()          { return dummyFunction_; }
     bool supportsSimd() const                { return cx_->jitSupportsSimd(); }
     bool atomicsPresent() const              { return atomicsPresent_; }
-    uint32_t minHeapLength() const           { return asmJSMetadata_->minHeapLength; }
+    uint32_t minMemoryLength() const         { return mg_.minMemoryLength(); }
 
     void initModuleFunctionName(PropertyName* name) {
         MOZ_ASSERT(!moduleFunctionName_);
@@ -2109,8 +2108,7 @@ class MOZ_STACK_CLASS ModuleValidator
         if (table.defined())
             return false;
         table.define();
-        mg_.initSigTableElems(table.sigIndex(), Move(elems));
-        return true;
+        return mg_.initSigTableElems(table.sigIndex(), Move(elems));
     }
     bool declareImport(PropertyName* name, Sig&& sig, unsigned ffiIndex, uint32_t* importIndex) {
         ImportMap::AddPtr p = importMap_.lookupForAdd(NamedSig::Lookup(name, sig));
@@ -2137,10 +2135,8 @@ class MOZ_STACK_CLASS ModuleValidator
         if (len > uint64_t(INT32_MAX) + 1)
             return false;
         len = RoundUpToNextValidAsmJSHeapLength(len);
-        if (len > asmJSMetadata_->minHeapLength) {
-            asmJSMetadata_->minHeapLength = len;
-            mg_.bumpMinHeapLength(len);
-        }
+        if (len > mg_.minMemoryLength())
+            mg_.bumpMinMemoryLength(len);
         return true;
     }
 
@@ -2273,7 +2269,7 @@ class MOZ_STACK_CLASS ModuleValidator
     }
     UniqueModule finish() {
         if (!arrayViews_.empty())
-            mg_.initHeapUsage(atomicsPresent_ ? HeapUsage::Shared : HeapUsage::Unshared);
+            mg_.initMemoryUsage(atomicsPresent_ ? MemoryUsage::Shared : MemoryUsage::Unshared);
 
         MOZ_ASSERT(asmJSMetadata_->asmJSFuncNames.empty());
         for (const Func* func : functions_) {
@@ -2292,7 +2288,7 @@ class MOZ_STACK_CLASS ModuleValidator
 
         // asm.js has its own, different, version of imports through
         // AsmJSGlobal.
-        ImportNameVector importNames;
+        ImportVector imports;
 
         // asm.js does not have any wasm bytecode to save; view-source is
         // provided through the ScriptSource.
@@ -2300,7 +2296,7 @@ class MOZ_STACK_CLASS ModuleValidator
         if (!bytes)
             return nullptr;
 
-        return mg_.finish(Move(importNames), *bytes);
+        return mg_.finish(Move(imports), *bytes);
     }
 };
 
@@ -7760,7 +7756,7 @@ static bool
 CheckBuffer(JSContext* cx, const AsmJSMetadata& metadata, HandleValue bufferVal,
             MutableHandle<ArrayBufferObjectMaybeShared*> buffer)
 {
-    if (metadata.heapUsage == HeapUsage::Shared) {
+    if (metadata.memoryUsage == MemoryUsage::Shared) {
         if (!IsSharedArrayBuffer(bufferVal))
             return LinkFail(cx, "shared views can only be constructed onto SharedArrayBuffer");
     } else {
@@ -7769,14 +7765,14 @@ CheckBuffer(JSContext* cx, const AsmJSMetadata& metadata, HandleValue bufferVal,
     }
 
     buffer.set(&AsAnyArrayBuffer(bufferVal));
-    uint32_t heapLength = buffer->byteLength();
+    uint32_t memoryLength = buffer->byteLength();
 
-    if (!IsValidAsmJSHeapLength(heapLength)) {
+    if (!IsValidAsmJSHeapLength(memoryLength)) {
         UniqueChars msg(
             JS_smprintf("ArrayBuffer byteLength 0x%x is not a valid heap length. The next "
                         "valid length is 0x%x",
-                        heapLength,
-                        RoundUpToNextValidAsmJSHeapLength(heapLength)));
+                        memoryLength,
+                        RoundUpToNextValidAsmJSHeapLength(memoryLength)));
         if (!msg)
             return false;
         return LinkFail(cx, msg.get());
@@ -7784,27 +7780,21 @@ CheckBuffer(JSContext* cx, const AsmJSMetadata& metadata, HandleValue bufferVal,
 
     // This check is sufficient without considering the size of the loaded datum because heap
     // loads and stores start on an aligned boundary and the heap byteLength has larger alignment.
-    MOZ_ASSERT((metadata.minHeapLength - 1) <= INT32_MAX);
-    if (heapLength < metadata.minHeapLength) {
+    MOZ_ASSERT((metadata.minMemoryLength - 1) <= INT32_MAX);
+    if (memoryLength < metadata.minMemoryLength) {
         UniqueChars msg(
             JS_smprintf("ArrayBuffer byteLength of 0x%x is less than 0x%x (the size implied "
                         "by const heap accesses).",
-                        heapLength,
-                        metadata.minHeapLength));
+                        memoryLength,
+                        metadata.minMemoryLength));
         if (!msg)
             return false;
         return LinkFail(cx, msg.get());
     }
 
-    // Shell builtins may have disabled signal handlers since the module we're
-    // cloning was compiled. LookupAsmJSModuleInCache checks for signal handlers
-    // as well for the caching case.
-    if (metadata.compileArgs != CompileArgs(cx))
-        return LinkFail(cx, "Signals have been toggled since compilation");
-
     if (buffer->is<ArrayBufferObject>()) {
         Rooted<ArrayBufferObject*> abheap(cx, &buffer->as<ArrayBufferObject>());
-        bool useSignalHandlers = metadata.compileArgs.useSignalHandlersForOOB;
+        bool useSignalHandlers = metadata.assumptions.usesSignal.forOOB;
         if (!ArrayBufferObject::prepareForAsmJS(cx, abheap, useSignalHandlers))
             return LinkFail(cx, "Unable to prepare ArrayBuffer for asm.js use");
     }
@@ -7820,12 +7810,18 @@ TryInstantiate(JSContext* cx, CallArgs args, Module& module, const AsmJSMetadata
     HandleValue importVal = args.get(1);
     HandleValue bufferVal = args.get(2);
 
-    Rooted<ArrayBufferObjectMaybeShared*> heap(cx);
-    if (module.metadata().usesHeap() && !CheckBuffer(cx, metadata, bufferVal, &heap))
-        return false;
+    RootedArrayBufferObjectMaybeShared buffer(cx);
+    RootedWasmMemoryObject memoryObj(cx);
+    if (module.metadata().usesMemory()) {
+        if (!CheckBuffer(cx, metadata, bufferVal, &buffer))
+            return false;
+
+        memoryObj = WasmMemoryObject::create(cx, buffer, nullptr);
+        if (!memoryObj)
+            return false;
+    }
 
     Vector<Val> valImports(cx);
-
     Rooted<FunctionVector> ffis(cx, FunctionVector(cx));
     if (!ffis.resize(metadata.numFFIs))
         return false;
@@ -7880,7 +7876,11 @@ TryInstantiate(JSContext* cx, CallArgs args, Module& module, const AsmJSMetadata
             return false;
     }
 
-    if (!module.instantiate(cx, funcImports, heap, instanceObj))
+    instanceObj.set(WasmInstanceObject::create(cx));
+    if (!instanceObj)
+        return false;
+
+    if (!module.instantiate(cx, funcImports, memoryObj, instanceObj))
         return false;
 
     // Now write the imported values into global data.
@@ -8046,10 +8046,10 @@ AsmJSGlobal::serialize(uint8_t* cursor) const
 }
 
 const uint8_t*
-AsmJSGlobal::deserialize(ExclusiveContext* cx, const uint8_t* cursor)
+AsmJSGlobal::deserialize(const uint8_t* cursor)
 {
     (cursor = ReadBytes(cursor, &pod, sizeof(pod))) &&
-    (cursor = field_.deserialize(cx, cursor));
+    (cursor = field_.deserialize(cursor));
     return cursor;
 }
 
@@ -8089,17 +8089,17 @@ AsmJSMetadata::serialize(uint8_t* cursor) const
 }
 
 const uint8_t*
-AsmJSMetadata::deserialize(ExclusiveContext* cx, const uint8_t* cursor)
+AsmJSMetadata::deserialize(const uint8_t* cursor)
 {
-    (cursor = Metadata::deserialize(cx, cursor)) &&
+    (cursor = Metadata::deserialize(cursor)) &&
     (cursor = ReadBytes(cursor, &pod(), sizeof(pod()))) &&
-    (cursor = DeserializeVector(cx, cursor, &asmJSGlobals)) &&
-    (cursor = DeserializePodVector(cx, cursor, &asmJSImports)) &&
-    (cursor = DeserializePodVector(cx, cursor, &asmJSExports)) &&
-    (cursor = DeserializeVector(cx, cursor, &asmJSFuncNames)) &&
-    (cursor = globalArgumentName.deserialize(cx, cursor)) &&
-    (cursor = importArgumentName.deserialize(cx, cursor)) &&
-    (cursor = bufferArgumentName.deserialize(cx, cursor));
+    (cursor = DeserializeVector(cursor, &asmJSGlobals)) &&
+    (cursor = DeserializePodVector(cursor, &asmJSImports)) &&
+    (cursor = DeserializePodVector(cursor, &asmJSExports)) &&
+    (cursor = DeserializeVector(cursor, &asmJSFuncNames)) &&
+    (cursor = globalArgumentName.deserialize(cursor)) &&
+    (cursor = importArgumentName.deserialize(cursor)) &&
+    (cursor = bufferArgumentName.deserialize(cursor));
     cacheResult = CacheResult::Hit;
     return cursor;
 }
@@ -8170,7 +8170,7 @@ class ModuleCharsForStore : ModuleChars
         // An unnamed function expression captures the same thing, sans 'f'.
         // Since asm.js modules do not contain any free variables, equality of
         // [beginOffset, endOffset) is sufficient to guarantee identical code
-        // generation, modulo MachineId.
+        // generation, modulo Assumptions.
         //
         // For functions created with 'new Function', function arguments are
         // not present in the source so we must manually explicitly serialize
@@ -8213,7 +8213,7 @@ class ModuleCharsForLookup : ModuleChars
     Vector<char16_t, 0, SystemAllocPolicy> chars_;
 
   public:
-    const uint8_t* deserialize(ExclusiveContext* cx, const uint8_t* cursor) {
+    const uint8_t* deserialize(const uint8_t* cursor) {
         uint32_t uncompressedSize;
         cursor = ReadScalar<uint32_t>(cursor, &uncompressedSize);
 
@@ -8232,7 +8232,7 @@ class ModuleCharsForLookup : ModuleChars
 
         cursor = ReadScalar<uint32_t>(cursor, &isFunCtor_);
         if (isFunCtor_)
-            cursor = DeserializeVector(cx, cursor, &funCtorArgs_);
+            cursor = DeserializeVector(cursor, &funCtorArgs_);
 
         return cursor;
     }
@@ -8310,16 +8310,11 @@ struct ScopedCacheEntryOpenedForRead
 static JS::AsmJSCacheResult
 StoreAsmJSModuleInCache(AsmJSParser& parser, Module& module, ExclusiveContext* cx)
 {
-    MachineId machineId;
-    if (!machineId.extractCurrentState(cx))
-        return JS::AsmJSCache_InternalError;
-
     ModuleCharsForStore moduleChars;
     if (!moduleChars.init(parser))
         return JS::AsmJSCache_InternalError;
 
-    size_t serializedSize = machineId.serializedSize() +
-                            moduleChars.serializedSize() +
+    size_t serializedSize = moduleChars.serializedSize() +
                             module.serializedSize();
 
     JS::OpenAsmJSCacheEntryForWriteOp open = cx->asmJSCacheOps().openEntryForWrite;
@@ -8337,7 +8332,6 @@ StoreAsmJSModuleInCache(AsmJSParser& parser, Module& module, ExclusiveContext* c
         return openResult;
 
     uint8_t* cursor = entry.memory;
-    cursor = machineId.serialize(cursor);
     cursor = moduleChars.serialize(cursor);
     cursor = module.serialize(cursor);
 
@@ -8353,10 +8347,6 @@ LookupAsmJSModuleInCache(ExclusiveContext* cx, AsmJSParser& parser, bool* loaded
 
     *loadedFromCache = false;
 
-    MachineId machineId;
-    if (!machineId.extractCurrentState(cx))
-        return true;
-
     JS::OpenAsmJSCacheEntryForReadOp open = cx->asmJSCacheOps().openEntryForRead;
     if (!open)
         return true;
@@ -8370,15 +8360,8 @@ LookupAsmJSModuleInCache(ExclusiveContext* cx, AsmJSParser& parser, bool* loaded
 
     const uint8_t* cursor = entry.memory;
 
-    MachineId cachedMachineId;
-    cursor = cachedMachineId.deserialize(cx, cursor);
-    if (!cursor)
-        return false;
-    if (machineId != cachedMachineId)
-        return true;
-
     ModuleCharsForLookup moduleChars;
-    cursor = moduleChars.deserialize(cx, cursor);
+    cursor = moduleChars.deserialize(cursor);
     if (!moduleChars.match(parser))
         return true;
 
@@ -8386,9 +8369,11 @@ LookupAsmJSModuleInCache(ExclusiveContext* cx, AsmJSParser& parser, bool* loaded
     if (!asmJSMetadata)
         return false;
 
-    cursor = Module::deserialize(cx, cursor, module, asmJSMetadata.get());
-    if (!cursor)
+    cursor = Module::deserialize(cursor, module, asmJSMetadata.get());
+    if (!cursor) {
+        ReportOutOfMemory(cx);
         return false;
+    }
 
     // See AsmJSMetadata comment as well as ModuleValidator::init().
     asmJSMetadata->srcStart = parser.pc->maybeFunction->pn_body->pn_pos.begin;
@@ -8401,7 +8386,11 @@ LookupAsmJSModuleInCache(ExclusiveContext* cx, AsmJSParser& parser, bool* loaded
     if (!atEnd)
         return true;
 
-    if (asmJSMetadata->compileArgs != CompileArgs(cx))
+    Assumptions assumptions;
+    if (!assumptions.init(SignalUsage(cx), cx->buildIdOp()))
+        return true;
+
+    if (assumptions != (*module)->metadata().assumptions)
         return true;
 
     if (!parser.tokenStream.advance(asmJSMetadata->srcEndBeforeCurly()))
@@ -8616,7 +8605,7 @@ js::IsAsmJSCompilationAvailable(JSContext* cx, unsigned argc, Value* vp)
     CallArgs args = CallArgsFromVp(argc, vp);
 
     // See EstablishPreconditions.
-    bool available = HasCompilerSupport(cx) && cx->runtime()->options().asmJS();
+    bool available = HasCompilerSupport(cx) && cx->options().asmJS();
 
     args.rval().set(BooleanValue(available));
     return true;

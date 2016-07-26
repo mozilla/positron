@@ -293,7 +293,7 @@ xpc::ErrorReport::ErrorReportToMessageString(JSErrorReport* aReport,
     aString.Truncate();
     const char16_t* m = aReport->ucmessage;
     if (m) {
-        JSFlatString* name = js::GetErrorTypeName(CycleCollectedJSRuntime::Get()->Runtime(), aReport->exnType);
+        JSFlatString* name = js::GetErrorTypeName(CycleCollectedJSRuntime::Get()->Context(), aReport->exnType);
         if (name) {
             AssignJSFlatString(aString, name);
             aString.AppendLiteral(": ");
@@ -979,13 +979,6 @@ nsXPConnect::JSToVariant(JSContext* ctx, HandleValue value, nsIVariant** _retval
     return NS_OK;
 }
 
-/* virtual */
-JSContext*
-nsXPConnect::GetSafeJSContext()
-{
-    return GetRuntime()->Context();
-}
-
 nsIPrincipal*
 nsXPConnect::GetPrincipal(JSObject* obj, bool allowShortCircuit) const
 {
@@ -1083,7 +1076,7 @@ SetLocationForGlobal(JSObject* global, nsIURI* locationURI)
 NS_IMETHODIMP
 nsXPConnect::NotifyDidPaint()
 {
-    JS::NotifyDidPaint(GetRuntime()->Runtime());
+    JS::NotifyDidPaint(GetRuntime()->Context());
     return NS_OK;
 }
 
@@ -1287,6 +1280,20 @@ SetAddonInterposition(const nsACString& addonIdStr, nsIAddonInterposition* inter
     return XPCWrappedNativeScope::SetAddonInterposition(jsapi.cx(), addonId, interposition);
 }
 
+bool
+AllowCPOWsInAddon(const nsACString& addonIdStr, bool allow)
+{
+    JSAddonId* addonId;
+    // We enter the junk scope just to allocate a string, which actually will go
+    // in the system zone.
+    AutoJSAPI jsapi;
+    jsapi.Init(xpc::PrivilegedJunkScope());
+    addonId = NewAddonId(jsapi.cx(), addonIdStr);
+    if (!addonId)
+        return false;
+    return XPCWrappedNativeScope::AllowCPOWsInAddon(jsapi.cx(), addonId, allow);
+}
+
 } // namespace xpc
 
 namespace mozilla {
@@ -1305,6 +1312,19 @@ IsChromeOrXBL(JSContext* cx, JSObject* /* unused */)
     // and instead rely on the fact that AllowContentXBLScope() only returns false in
     // remote XUL situations.
     return AccessCheck::isChrome(c) || IsContentXBLScope(c) || !AllowContentXBLScope(c);
+}
+
+namespace workers {
+extern bool IsCurrentThreadRunningChromeWorker();
+} // namespace workers
+
+bool
+ThreadSafeIsChromeOrXBL(JSContext* cx, JSObject* obj)
+{
+    if (NS_IsMainThread()) {
+        return IsChromeOrXBL(cx, obj);
+    }
+    return workers::IsCurrentThreadRunningChromeWorker();
 }
 
 } // namespace dom

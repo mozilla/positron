@@ -41,7 +41,7 @@ public:
 class BasicCompositor : public Compositor
 {
 public:
-  explicit BasicCompositor(CompositorBridgeParent* aParent, widget::CompositorWidgetProxy *aWidget);
+  explicit BasicCompositor(CompositorBridgeParent* aParent, widget::CompositorWidget* aWidget);
 
 protected:
   virtual ~BasicCompositor();
@@ -50,7 +50,7 @@ public:
 
   virtual BasicCompositor* AsBasicCompositor() override { return this; }
 
-  virtual bool Initialize() override;
+  virtual bool Initialize(nsCString* const out_failureReason) override;
 
   virtual void DetachWidget() override;
 
@@ -74,6 +74,9 @@ public:
 
   virtual already_AddRefed<DataTextureSource>
   CreateDataTextureSourceAround(gfx::DataSourceSurface* aSurface) override;
+
+  virtual already_AddRefed<DataTextureSource>
+  CreateDataTextureSourceAroundYCbCr(TextureHost* aTexture) override;
 
   virtual bool SupportsEffect(EffectTypes aEffect) override;
 

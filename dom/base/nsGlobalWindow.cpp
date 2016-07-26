@@ -669,7 +669,7 @@ NS_IMPL_CYCLE_COLLECTING_RELEASE(DialogValueHolder)
 class nsOuterWindowProxy : public js::Wrapper
 {
 public:
-  MOZ_CONSTEXPR nsOuterWindowProxy() : js::Wrapper(0) { }
+  constexpr nsOuterWindowProxy() : js::Wrapper(0) { }
 
   virtual bool finalizeInBackground(JS::Value priv) const override {
     return false;
@@ -1139,7 +1139,7 @@ nsOuterWindowProxy::singleton;
 class nsChromeOuterWindowProxy : public nsOuterWindowProxy
 {
 public:
-  MOZ_CONSTEXPR nsChromeOuterWindowProxy() : nsOuterWindowProxy() { }
+  constexpr nsChromeOuterWindowProxy() : nsOuterWindowProxy() { }
 
   virtual const char *className(JSContext *cx, JS::Handle<JSObject*> wrapper) const override;
 
@@ -3298,12 +3298,6 @@ nsresult
 nsGlobalWindow::WillHandleEvent(EventChainPostVisitor& aVisitor)
 {
   return NS_OK;
-}
-
-JSContext*
-nsGlobalWindow::GetJSContextForEventHandlers()
-{
-  return nullptr;
 }
 
 nsresult
@@ -11152,15 +11146,14 @@ nsGlobalWindow::ShowSlowScriptDialog()
     buttonFlags += nsIPrompt::BUTTON_TITLE_IS_STRING * nsIPrompt::BUTTON_POS_2;
 
   // Null out the operation callback while we're re-entering JS here.
-  JSRuntime* rt = JS_GetRuntime(cx);
-  JSInterruptCallback old = JS_SetInterruptCallback(rt, nullptr);
+  JSInterruptCallback old = JS_SetInterruptCallback(cx, nullptr);
 
   // Open the dialog.
   rv = prompt->ConfirmEx(title, msg, buttonFlags, waitButton, stopButton,
                          debugButton, neverShowDlg, &neverShowDlgChk,
                          &buttonPressed);
 
-  JS_SetInterruptCallback(rt, old);
+  JS_SetInterruptCallback(cx, old);
 
   if (NS_SUCCEEDED(rv) && (buttonPressed == 0)) {
     return neverShowDlgChk ? AlwaysContinueSlowScript : ContinueSlowScript;
@@ -13078,13 +13071,6 @@ nsGlobalWindow::ResumeTimeouts(bool aThawChildren, bool aThawWorkers)
       RefPtr<Promise> d = mAudioContexts[i]->Resume(dummy);
     }
 
-    // Thaw or resume all of the workers for this window.
-    if (aThawWorkers) {
-      mozilla::dom::workers::ThawWorkersForWindow(AsInner());
-    } else {
-      mozilla::dom::workers::ResumeWorkersForWindow(AsInner());
-    }
-
     // Restore all of the timeouts, using the stored time remaining
     // (stored in timeout->mTimeRemaining).
 
@@ -13128,6 +13114,15 @@ nsGlobalWindow::ResumeTimeouts(bool aThawChildren, bool aThawWorkers)
 
       // Add a reference for the new timer's closure.
       t->AddRef();
+    }
+
+    // Thaw or resume all of the workers for this window.  We must do this
+    // after timeouts since workers may have queued events that can trigger
+    // a setTimeout().
+    if (aThawWorkers) {
+      mozilla::dom::workers::ThawWorkersForWindow(AsInner());
+    } else {
+      mozilla::dom::workers::ResumeWorkersForWindow(AsInner());
     }
   }
 

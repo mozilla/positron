@@ -134,6 +134,11 @@ public:
   virtual void Blur(ErrorResult& aError) override;
   virtual void Focus(ErrorResult& aError) override;
 
+  // nsINode
+#if defined(XP_WIN) || defined(XP_LINUX)
+  virtual bool IsNodeApzAwareInternal() const override;
+#endif
+
   // Element
   virtual bool IsInteractiveHTMLContent(bool aIgnoreTabindex) const override;
 
@@ -1017,7 +1022,11 @@ protected:
   /**
    * Returns if the step attribute apply for the current type.
    */
-  bool DoesStepApply() const { return DoesMinMaxApply(); }
+  bool DoesStepApply() const
+  {
+    // TODO: this is temporary until bug 888324 is fixed.
+    return DoesMinMaxApply() && mType != NS_FORM_INPUT_MONTH;
+  }
 
   /**
    * Returns if stepDown and stepUp methods apply for the current type.
@@ -1139,6 +1148,14 @@ protected:
   bool IsValidSimpleColor(const nsAString& aValue) const;
 
   /**
+   * Parse a date string of the form yyyy-mm
+   * @param the string to be parsed.
+   * @return whether the string is a valid month.
+   * Note : this function does not consider the empty string as valid.
+   */
+  bool IsValidMonth(const nsAString& aValue) const;
+
+  /**
    * Parse a date string of the form yyyy-mm-dd
    * @param the string to be parsed.
    * @return whether the string is a valid date.
@@ -1147,20 +1164,48 @@ protected:
   bool IsValidDate(const nsAString& aValue) const;
 
   /**
+   * Parse a year string of the form yyyy
+   *
+   * @param the string to be parsed.
+   *
+   * @return the year in aYear.
+   * @return whether the parsing was successful.
+   */
+  bool ParseYear(const nsAString& aValue, uint32_t* aYear) const;
+
+  /**
+   * Parse a month string of the form yyyy-mm
+   *
+   * @param the string to be parsed.
+   * @return the year and month in aYear and aMonth.
+   * @return whether the parsing was successful.
+   */
+  bool ParseMonth(const nsAString& aValue,
+                  uint32_t* aYear,
+                  uint32_t* aMonth) const;
+
+  /**
    * Parse a date string of the form yyyy-mm-dd
+   *
    * @param the string to be parsed.
    * @return the date in aYear, aMonth, aDay.
    * @return whether the parsing was successful.
    */
-  bool GetValueAsDate(const nsAString& aValue,
-                      uint32_t* aYear,
-                      uint32_t* aMonth,
-                      uint32_t* aDay) const;
+  bool ParseDate(const nsAString& aValue,
+                 uint32_t* aYear,
+                 uint32_t* aMonth,
+                 uint32_t* aDay) const;
 
   /**
    * This methods returns the number of days in a given month, for a given year.
    */
   uint32_t NumberOfDaysInMonth(uint32_t aMonth, uint32_t aYear) const;
+
+  /**
+   * This methods returns the number of months between January 1970 and the
+   * given year and month.
+   */
+  int32_t MonthsSinceJan1970(uint32_t aYear, uint32_t aMonth) const;
 
   /**
    * Returns whether aValue is a valid time as described by HTML specifications:
@@ -1251,6 +1296,12 @@ protected:
    */
   static bool IsExperimentalMobileType(uint8_t aType);
 
+  /*
+   * Returns if the current type is one of the date/time input types: date,
+   * time and month. TODO: week and datetime-local.
+   */
+  static bool IsDateTimeInputType(uint8_t aType);
+
   /**
    * Flushes the layout frame tree to make sure we have up-to-date frames.
    */
@@ -1291,6 +1342,17 @@ protected:
                                             ErrorResult& aRv);
 
   void ClearGetFilesHelpers();
+
+  /**
+   * nsINode::SetMayBeApzAware() will be invoked in this function if necessary 
+   * to prevent default action of APZC so that we can increase/decrease the
+   * value of this InputElement when mouse wheel event comes without scrolling
+   * the page.
+   *
+   * SetMayBeApzAware() will set flag MayBeApzAware which is checked by apzc to
+   * decide whether to add this element into its dispatch-to-content region.
+   */
+  void UpdateApzAwareFlag();
 
   nsCOMPtr<nsIControllers> mControllers;
 
@@ -1377,6 +1439,11 @@ protected:
 
   // Float value returned by GetStep() when the step attribute is set to 'any'.
   static const Decimal kStepAny;
+
+  // Maximum year limited by ECMAScript date object range, year <= 275760.
+  static const double kMaximumYear;
+  // Minimum year limited by HTML standard, year >= 1.
+  static const double kMinimumYear;
 
   /**
    * The type of this input (<input type=...>) as an integer.

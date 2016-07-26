@@ -2678,6 +2678,12 @@ var NativeWindow = {
         return;
       }
 
+      // If the event was already defaultPrevented by somebody (web content, or
+      // some other part of gecko), then don't do anything with it.
+      if (event.defaultPrevented) {
+        return;
+      }
+
       // Use the highlighted element for the context menu target. When accessibility is
       // enabled, elements may not be highlighted so use the event target instead.
       this._target = BrowserEventHandler._highlightElement || event.target;
@@ -3448,6 +3454,8 @@ Tab.prototype = {
     this.browser = document.createElement("browser");
     this.browser.setAttribute("type", "content-targetable");
     this.browser.setAttribute("messagemanagergroup", "browsers");
+
+    this.browser.permanentKey = {};
 
     // Make sure the previously selected panel remains selected. The selected panel of a deck is
     // not stable when panels are added.
@@ -4685,6 +4693,7 @@ var BrowserEventHandler = {
 
     BrowserApp.deck.addEventListener("DOMUpdatePageReport", PopupBlockerObserver.onUpdatePageReport, false);
     BrowserApp.deck.addEventListener("MozMouseHittest", this, true);
+    BrowserApp.deck.addEventListener("OpenMediaWithExternalApp", this, true);
 
     InitLater(() => BrowserApp.deck.addEventListener("click", InputWidgetHelper, true));
     InitLater(() => BrowserApp.deck.addEventListener("click", SelectHelper, true));
@@ -4707,6 +4716,9 @@ var BrowserEventHandler = {
         break;
       case 'MozMouseHittest':
         this._handleRetargetedTouchStart(aEvent);
+        break;
+      case 'OpenMediaWithExternalApp':
+        ExternalApps.openExternal(aEvent.target);
         break;
     }
   },
@@ -5245,9 +5257,6 @@ var ErrorPageEventHandler = {
             // ....but add a notify bar as a reminder, so that they don't lose
             // track after, e.g., tab switching.
             NativeWindow.doorhanger.show(Strings.browser.GetStringFromName("safeBrowsingDoorhanger"), "safebrowsing-warning", [], BrowserApp.selectedTab.id);
-          } else if (target == errorDoc.getElementById("whyForbiddenButton")) {
-            // This is the "Why is this site blocked" button for family friendly browsing.
-            BrowserApp.selectedBrowser.loadURI("https://support.mozilla.org/kb/controlledaccess");
           }
         }
         break;

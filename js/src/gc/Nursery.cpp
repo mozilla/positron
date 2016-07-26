@@ -381,7 +381,7 @@ void
 js::Nursery::collect(JSRuntime* rt, JS::gcreason::Reason reason, ObjectGroupList* pretenureGroups)
 {
     MOZ_ASSERT(!rt->mainThread.suppressGC);
-    JS_AbortIfWrongThread(rt);
+    MOZ_RELEASE_ASSERT(CurrentThreadCanAccessRuntime(rt));
 
     StoreBuffer& sb = rt->gc.storeBuffer;
     if (!isEnabled() || isEmpty()) {
@@ -451,7 +451,7 @@ js::Nursery::collect(JSRuntime* rt, JS::gcreason::Reason reason, ObjectGroupList
     TIME_END(markDebugger);
 
     TIME_START(clearNewObjectCache);
-    rt->newObjectCache.clearNurseryObjects(rt);
+    rt->contextFromMainThread()->caches.newObjectCache.clearNurseryObjects(rt);
     TIME_END(clearNewObjectCache);
 
     // Most of the work is done here. This loop iterates over objects that have
@@ -613,7 +613,7 @@ js::Nursery::freeMallocedBuffers()
     bool started;
     {
         AutoLockHelperThreadState lock;
-        freeMallocedBuffersTask->joinWithLockHeld();
+        freeMallocedBuffersTask->joinWithLockHeld(lock);
         freeMallocedBuffersTask->transferBuffersToFree(mallocedBuffers);
         started = freeMallocedBuffersTask->startWithLockHeld();
     }

@@ -20,6 +20,8 @@ builds:
     types:
       opt:
         task: tasks/builds/mulet_linux.yml
+      debug:
+        task: tasks/builds/mulet_linux_dbg.yml
   linux:
     platforms:
       - Linux
@@ -213,6 +215,22 @@ builds:
       file_patterns:
        - js/public/**
        - js/src/**
+  win32:
+    platforms:
+      - win32
+    types:
+      opt:
+        task: tasks/builds/opt_win32.yml
+      debug:
+        task: tasks/builds/dbg_win32.yml
+  win64:
+    platforms:
+      - win64
+    types:
+      opt:
+        task: tasks/builds/opt_win64.yml
+      debug:
+        task: tasks/builds/dbg_win64.yml
 
 tests:
   cppunit:
@@ -261,22 +279,74 @@ tests:
         task: tasks/tests/fx_linux64_external_media_tests_dbg.yml
       tasks/builds/opt_linux64_pgo.yml:
         task: tasks/tests/fx_linux64_external_media_tests_opt.yml
-  firefox-ui-functional:
+  firefox-ui-functional-local:
     allowed_build_tasks:
       tasks/builds/opt_linux64.yml:
-        task: tasks/tests/fx_linux64_firefox_ui_functional_opt.yml
+        task: tasks/tests/fx_linux64_fxui_functional_local_opt.yml
       tasks/builds/dbg_linux64.yml:
-        task: tasks/tests/fx_linux64_firefox_ui_functional_dbg.yml
+        task: tasks/tests/fx_linux64_fxui_functional_local_dbg.yml
       tasks/builds/opt_linux64_pgo.yml:
-        task: tasks/tests/fx_linux64_firefox_ui_functional_opt.yml
-  firefox-ui-functional-e10s:
+        task: tasks/tests/fx_linux64_fxui_functional_local_opt.yml
+  firefox-ui-functional-local-e10s:
     allowed_build_tasks:
       tasks/builds/opt_linux64.yml:
-        task: tasks/tests/fx_linux64_firefox_ui_functional_e10s_opt.yml
+        task: tasks/tests/fx_linux64_fxui_functional_local_e10s_opt.yml
       tasks/builds/dbg_linux64.yml:
-        task: tasks/tests/fx_linux64_firefox_ui_functional_e10s_dbg.yml
+        task: tasks/tests/fx_linux64_fxui_functional_local_e10s_dbg.yml
       tasks/builds/opt_linux64_pgo.yml:
-        task: tasks/tests/fx_linux64_firefox_ui_functional_e10s_opt.yml
+        task: tasks/tests/fx_linux64_fxui_functional_local_e10s_opt.yml
+  firefox-ui-functional-remote:
+    allowed_build_tasks:
+      tasks/builds/opt_linux64.yml:
+        task: tasks/tests/fx_linux64_fxui_functional_remote_opt.yml
+      tasks/builds/dbg_linux64.yml:
+        task: tasks/tests/fx_linux64_fxui_functional_remote_dbg.yml
+      tasks/builds/opt_linux64_pgo.yml:
+        task: tasks/tests/fx_linux64_fxui_functional_remote_opt.yml
+  firefox-ui-functional-remote-e10s:
+    allowed_build_tasks:
+      tasks/builds/opt_linux64.yml:
+        task: tasks/tests/fx_linux64_fxui_functional_remote_e10s_opt.yml
+      tasks/builds/dbg_linux64.yml:
+        task: tasks/tests/fx_linux64_fxui_functional_remote_e10s_dbg.yml
+      tasks/builds/opt_linux64_pgo.yml:
+        task: tasks/tests/fx_linux64_fxui_functional_remote_e10s_opt.yml
+  gaia-build:
+    allowed_build_tasks:
+      tasks/builds/mulet_linux.yml:
+        task: tasks/tests/mulet_build_test.yml
+      tasks/builds/mulet_linux_dbg.yml:
+        task: tasks/tests/mulet_build_test.yml
+  gaia-build-unit:
+    allowed_build_tasks:
+      tasks/builds/mulet_linux.yml:
+        task: tasks/tests/mulet_build_unit.yml
+      tasks/builds/mulet_linux_dbg.yml:
+        task: tasks/tests/mulet_build_unit.yml
+  gaia-js-integration:
+    allowed_build_tasks:
+      tasks/builds/mulet_linux.yml:
+        task: tasks/tests/mulet_gaia_js_integration_tests.yml
+      tasks/builds/mulet_linux_dbg.yml:
+        task: tasks/tests/mulet_gaia_js_integration_tests.yml
+  gaia-linter:
+    allowed_build_tasks:
+      tasks/builds/mulet_linux.yml:
+        task: tasks/tests/mulet_linter.yml
+      tasks/builds/mulet_linux_dbg.yml:
+        task: tasks/tests/mulet_linter.yml
+  gaia-unit:
+    allowed_build_tasks:
+      tasks/builds/mulet_linux.yml:
+        task: tasks/tests/mulet_gaia_unit.yml
+      tasks/builds/mulet_linux_dbg.yml:
+        task: tasks/tests/mulet_gaia_unit.yml
+  gaia-unit-oop:
+    allowed_build_tasks:
+      tasks/builds/mulet_linux.yml:
+        task: tasks/tests/mulet_gaia_unit_oop.yml
+      tasks/builds/mulet_linux_dbg.yml:
+        task: tasks/tests/mulet_gaia_unit_oop.yml
   gtest:
     allowed_build_tasks:
       tasks/builds/opt_linux64.yml:
@@ -344,6 +414,8 @@ tests:
   mochitest:
     allowed_build_tasks:
       tasks/builds/mulet_linux.yml:
+        task: tasks/tests/mulet_mochitests.yml
+      tasks/builds/mulet_linux_dbg.yml:
         task: tasks/tests/mulet_mochitests.yml
       tasks/builds/opt_linux64.yml:
         task: tasks/tests/fx_linux64_mochitest_plain_opt.yml
@@ -536,6 +608,8 @@ tests:
   reftest:
     allowed_build_tasks:
       tasks/builds/mulet_linux.yml:
+        task: tasks/tests/mulet_reftests.yml
+      tasks/builds/mulet_linux_dbg.yml:
         task: tasks/tests/mulet_reftests.yml
       tasks/builds/opt_linux64.yml:
         task: tasks/tests/fx_linux64_reftest_opt.yml

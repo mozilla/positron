@@ -918,6 +918,34 @@ public:
                                      nsXPIDLString& aResult);
 
   /**
+   * A helper function that parses a sandbox attribute (of an <iframe> or a CSP
+   * directive) and converts it to the set of flags used internally.
+   *
+   * @param aSandboxAttr  the sandbox attribute
+   * @return              the set of flags (SANDBOXED_NONE if aSandboxAttr is
+   *                      null)
+   */
+  static uint32_t ParseSandboxAttributeToFlags(const nsAttrValue* aSandboxAttr);
+
+  /**
+   * A helper function that checks if a string matches a valid sandbox flag.
+   *
+   * @param aFlag   the potential sandbox flag.
+   * @return        true if the flag is a sandbox flag.
+   */
+  static bool IsValidSandboxFlag(const nsAString& aFlag);
+
+  /**
+   * A helper function that returns a string attribute corresponding to the
+   * sandbox flags.
+   *
+   * @param aFlags    the sandbox flags
+   * @param aString   the attribute corresponding to the flags (null if aFlags
+   *                  is zero)
+   */
+  static void SandboxFlagsToString(uint32_t aFlags, nsAString& aString);
+
+  /**
    * Helper function that generates a UUID.
    */
   static nsresult GenerateUUIDInPlace(nsID& aUUID);
@@ -944,6 +972,17 @@ public:
   {
     return FormatLocalizedString(aFile, aKey, aParams, N, aResult);
   }
+
+  /**
+   * Fill (with the parameters given) the localized string named |aKey| in
+   * properties file |aFile| consuming an nsTArray of nsString parameters rather
+   * than a char16_t** for the sake of avoiding use-after-free errors involving
+   * temporaries.
+   */
+  static nsresult FormatLocalizedString(PropertiesFile aFile,
+                                        const char* aKey,
+                                        const nsTArray<nsString>& aParamArray,
+                                        nsXPIDLString& aResult);
 
   /**
    * Returns true if aDocument is a chrome document
@@ -1694,11 +1733,10 @@ public:
                                                       nsresult* aRv);
 
   static JSContext *GetCurrentJSContext();
-  static JSContext *GetSafeJSContext();
   static JSContext *GetCurrentJSContextForThread();
-  static JSContext *GetDefaultJSContextForThread();
-  inline static JSContext *RootingCx() { return GetSafeJSContext(); }
-  inline static JSContext *RootingCxForThread() { return GetDefaultJSContextForThread(); }
+  inline static JSContext *RootingCx() {
+    return mozilla::dom::danger::GetJSContext();
+  }
 
   /**
    * Case insensitive comparison between two strings. However it only ignores
@@ -1711,13 +1749,17 @@ public:
    * Convert ASCII A-Z to a-z.
    */
   static void ASCIIToLower(nsAString& aStr);
+  static void ASCIIToLower(nsACString& aStr);
   static void ASCIIToLower(const nsAString& aSource, nsAString& aDest);
+  static void ASCIIToLower(const nsACString& aSource, nsACString& aDest);
 
   /**
    * Convert ASCII a-z to A-Z.
    */
   static void ASCIIToUpper(nsAString& aStr);
+  static void ASCIIToUpper(nsACString& aStr);
   static void ASCIIToUpper(const nsAString& aSource, nsAString& aDest);
+  static void ASCIIToUpper(const nsACString& aSource, nsACString& aDest);
 
   /**
    * Return whether aStr contains an ASCII uppercase character.
@@ -1888,7 +1930,7 @@ public:
    * layer manager should be used for retained layers
    */
   static already_AddRefed<mozilla::layers::LayerManager>
-  LayerManagerForDocument(const nsIDocument *aDoc, bool *aAllowRetaining = nullptr);
+  LayerManagerForDocument(const nsIDocument *aDoc);
 
   /**
    * Returns a layer manager to use for the given document. Basically we
@@ -1905,7 +1947,7 @@ public:
    * layer manager should be used for retained layers
    */
   static already_AddRefed<mozilla::layers::LayerManager>
-  PersistentLayerManagerForDocument(nsIDocument *aDoc, bool *aAllowRetaining = nullptr);
+  PersistentLayerManagerForDocument(nsIDocument *aDoc);
 
   /**
    * Determine whether a content node is focused or not,

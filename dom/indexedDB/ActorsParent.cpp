@@ -256,7 +256,7 @@ const uint32_t kDEBUGTransactionThreadSleepMS = 0;
 #endif
 
 template <size_t N>
-MOZ_CONSTEXPR size_t
+constexpr size_t
 LiteralStringLength(const char (&aArr)[N])
 {
   static_assert(N, "Zero-length string literal?!");
@@ -2888,11 +2888,11 @@ UpgradeKeyFunction::CopyAndUpgradeKeyBufferInternal(const uint8_t*& aSource,
   MOZ_ASSERT(aDestination);
   MOZ_ASSERT(aTagOffset <=  Key::kMaxArrayCollapse);
 
-  static MOZ_CONSTEXPR_VAR uint8_t kOldNumberTag = 0x1;
-  static MOZ_CONSTEXPR_VAR uint8_t kOldDateTag = 0x2;
-  static MOZ_CONSTEXPR_VAR uint8_t kOldStringTag = 0x3;
-  static MOZ_CONSTEXPR_VAR uint8_t kOldArrayTag = 0x4;
-  static MOZ_CONSTEXPR_VAR uint8_t kOldMaxType = kOldArrayTag;
+  static constexpr uint8_t kOldNumberTag = 0x1;
+  static constexpr uint8_t kOldDateTag = 0x2;
+  static constexpr uint8_t kOldStringTag = 0x3;
+  static constexpr uint8_t kOldArrayTag = 0x4;
+  static constexpr uint8_t kOldMaxType = kOldArrayTag;
 
   if (NS_WARN_IF(aRecursionDepth > Key::kMaxRecursionDepth)) {
     IDB_REPORT_INTERNAL_ERR();
@@ -13811,6 +13811,14 @@ Database::ConnectionClosedCallback()
   mDirectoryLock = nullptr;
 
   CleanupMetadata();
+
+  if (IsInvalidated() && IsActorAlive()) {
+    // Step 3 and 4 of "5.2 Closing a Database":
+    // 1. Wait for all transactions to complete.
+    // 2. Fire a close event if forced flag is set, i.e., IsInvalidated() in our
+    //    implementation.
+    Unused << SendCloseAfterInvalidationComplete();
+  }
 }
 
 void
@@ -14937,7 +14945,7 @@ TransactionBase::Invalidate()
     mInvalidated = true;
     mInvalidatedOnAnyThread = true;
 
-    Abort(NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR, /* aForce */ true);
+    Abort(NS_ERROR_DOM_INDEXEDDB_ABORT_ERR, /* aForce */ false);
   }
 }
 
@@ -16186,10 +16194,6 @@ Cursor::Start(const OpenCursorParams& aParams)
       aParams.get_IndexOpenCursorParams().optionalKeyRange() :
       aParams.get_IndexOpenKeyCursorParams().optionalKeyRange();
 
-  if (mTransaction->IsInvalidated()) {
-    return true;
-  }
-
   RefPtr<OpenOp> openOp = new OpenOp(this, optionalKeyRange);
 
   if (NS_WARN_IF(!openOp->Init(mTransaction))) {
@@ -16347,10 +16351,6 @@ Cursor::RecvContinue(const CursorRequestParams& aParams, const Key& aKey)
   if (NS_WARN_IF(mTransaction->mCommitOrAbortReceived)) {
     ASSERT_UNLESS_FUZZING();
     return false;
-  }
-
-  if (mTransaction->IsInvalidated()) {
-    return true;
   }
 
   RefPtr<ContinueOp> continueOp = new ContinueOp(this, aParams, aKey);
@@ -22744,12 +22744,9 @@ TransactionDatabaseOperationBase::RunOnConnectionThread()
 
   // There are several cases where we don't actually have to to any work here.
 
-  if (mTransactionIsAborted) {
-    // This transaction is already set to be aborted.
+  if (mTransactionIsAborted || mTransaction->IsInvalidatedOnAnyThread()) {
+    // This transaction is already set to be aborted or invalidated.
     mResultCode = NS_ERROR_DOM_INDEXEDDB_ABORT_ERR;
-  } else if (mTransaction->IsInvalidatedOnAnyThread()) {
-    // This transaction is being invalidated.
-    mResultCode = NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
   } else if (!OperationMayProceed()) {
     // The operation was canceled in some way, likely because the child process
     // has crashed.
@@ -22820,9 +22817,7 @@ TransactionDatabaseOperationBase::RunOnOwningThread()
       mResultCode = NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
     }
   } else {
-    if (mTransaction->IsInvalidated()) {
-      mResultCode = NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
-    } else if (mTransaction->IsAborted()) {
+    if (mTransaction->IsInvalidated() || mTransaction->IsAborted()) {
       // Aborted transactions always see their requests fail with ABORT_ERR,
       // even if the request succeeded or failed with another error.
       mResultCode = NS_ERROR_DOM_INDEXEDDB_ABORT_ERR;
@@ -24155,10 +24150,11 @@ NormalJSRuntime::Init()
     return false;
   }
 
-  // Not setting this will cause JS_CHECK_RECURSION to report false positives.
-  JS_SetNativeStackQuota(mRuntime, 128 * sizeof(size_t) * 1024);
-
   mContext = JS_GetContext(mRuntime);
+
+  // Not setting this will cause JS_CHECK_RECURSION to report false positives.
+  JS_SetNativeStackQuota(mContext, 128 * sizeof(size_t) * 1024);
+
   if (NS_WARN_IF(!JS::InitSelfHostedCode(mContext))) {
     return false;
   }
@@ -26739,6 +26735,14 @@ CursorOpBase::SendFailureResult(nsresult aResultCode)
 
   if (!IsActorDestroyed()) {
     mResponse = ClampResultCode(aResultCode);
+
+    // This is an expected race when the transaction is invalidated after
+    // data is retrieved from database. We clear the retrieved files to prevent
+    // the assertion failure in SendResponseInternal when mResponse.type() is
+    // CursorResponse::Tnsresult.
+    if (Transaction()->IsInvalidated() && !mFiles.IsEmpty()) {
+      mFiles.Clear();
+    }
 
     mCursor->SendResponseInternal(mResponse, mFiles);
   }

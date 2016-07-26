@@ -719,13 +719,6 @@ TabParent::SendLoadRemoteScript(const nsString& aURL,
   return PBrowserParent::SendLoadRemoteScript(aURL, aRunInGlobalScope);
 }
 
-bool
-TabParent::InitBrowserConfiguration(const nsCString& aURI,
-                                    BrowserConfiguration& aConfiguration)
-{
-  return ContentParent::GetBrowserConfiguration(aURI, aConfiguration);
-}
-
 void
 TabParent::LoadURL(nsIURI* aURI)
 {
@@ -753,13 +746,7 @@ TabParent::LoadURL(nsIURI* aURI)
     }
     mSendOfflineStatus = false;
 
-    // This object contains the configuration for this new app.
-    BrowserConfiguration configuration;
-    if (NS_WARN_IF(!InitBrowserConfiguration(spec, configuration))) {
-      return;
-    }
-
-    Unused << SendLoadURL(spec, configuration, GetShowInfo());
+    Unused << SendLoadURL(spec, GetShowInfo());
 
     // If this app is a packaged app then we can speed startup by sending over
     // the file descriptor for the "application.zip" file that it will
@@ -3354,9 +3341,14 @@ TabParent::AddInitialDnDDataTo(DataTransfer* aDataTransfer)
 
       // Using system principal here, since once the data is on parent process
       // side, it can be handled as being from browser chrome or OS.
+
+      // We set aHidden to false, as we don't need to worry about hiding data
+      // from content in the parent process where there is no content.
+      // XXX: Nested Content Processes may change this
       aDataTransfer->SetDataWithPrincipalFromOtherProcess(NS_ConvertUTF8toUTF16(item.flavor()),
                                                           variant, i,
-                                                          nsContentUtils::GetSystemPrincipal());
+                                                          nsContentUtils::GetSystemPrincipal(),
+                                                          /* aHidden = */ false);
     }
   }
   mInitialDataTransferItems.Clear();

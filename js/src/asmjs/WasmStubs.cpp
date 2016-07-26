@@ -413,14 +413,14 @@ FillArgumentArray(MacroAssembler& masm, const ValTypeVector& args, unsigned argO
 // signature of the import and calls into an appropriate callImport C++
 // function, having boxed all the ABI arguments into a homogeneous Value array.
 ProfilingOffsets
-wasm::GenerateInterpExit(MacroAssembler& masm, const Import& import, uint32_t importIndex)
+wasm::GenerateInterpExit(MacroAssembler& masm, const FuncImport& fi, uint32_t funcImportIndex)
 {
-    const Sig& sig = import.sig();
+    const Sig& sig = fi.sig();
 
     masm.setFramePushed(0);
 
     // Argument types for Module::callImport_*:
-    static const MIRType typeArray[] = { MIRType::Pointer,   // ImportExit
+    static const MIRType typeArray[] = { MIRType::Pointer,   // FuncImportExit
                                          MIRType::Int32,     // argc
                                          MIRType::Pointer }; // argv
     MIRTypeVector invokeArgTypes;
@@ -445,11 +445,11 @@ wasm::GenerateInterpExit(MacroAssembler& masm, const Import& import, uint32_t im
     // Prepare the arguments for the call to Module::callImport_*.
     ABIArgMIRTypeIter i(invokeArgTypes);
 
-    // argument 0: importIndex
+    // argument 0: funcImportIndex
     if (i->kind() == ABIArg::GPR)
-        masm.mov(ImmWord(importIndex), i->gpr());
+        masm.mov(ImmWord(funcImportIndex), i->gpr());
     else
-        masm.store32(Imm32(importIndex), Address(masm.getStackPointer(), i->offsetFromArgBase()));
+        masm.store32(Imm32(funcImportIndex), Address(masm.getStackPointer(), i->offsetFromArgBase()));
     i++;
 
     // argument 1: argc
@@ -528,9 +528,9 @@ static const unsigned MaybeSavedGlobalReg = 0;
 // signature of the import and calls into a compatible JIT function,
 // having boxed all the ABI arguments into the JIT stack frame layout.
 ProfilingOffsets
-wasm::GenerateJitExit(MacroAssembler& masm, const Import& import, bool usesHeap)
+wasm::GenerateJitExit(MacroAssembler& masm, const FuncImport& fi, bool usesHeap)
 {
-    const Sig& sig = import.sig();
+    const Sig& sig = fi.sig();
 
     masm.setFramePushed(0);
 
@@ -562,7 +562,7 @@ wasm::GenerateJitExit(MacroAssembler& masm, const Import& import, bool usesHeap)
     Register scratch = ABINonArgReturnReg1;  // repeatedly clobbered
 
     // 2.1. Get ExitDatum
-    uint32_t globalDataOffset = import.exitGlobalDataOffset();
+    uint32_t globalDataOffset = fi.exitGlobalDataOffset();
 #if defined(JS_CODEGEN_X64)
     masm.append(AsmJSGlobalAccess(masm.leaRipRelative(callee), globalDataOffset));
 #elif defined(JS_CODEGEN_X86)
@@ -573,7 +573,7 @@ wasm::GenerateJitExit(MacroAssembler& masm, const Import& import, bool usesHeap)
 #endif
 
     // 2.2. Get callee
-    masm.loadPtr(Address(callee, offsetof(ImportExit, fun)), callee);
+    masm.loadPtr(Address(callee, offsetof(FuncImportExit, fun)), callee);
 
     // 2.3. Save callee
     masm.storePtr(callee, Address(masm.getStackPointer(), argOffset));
@@ -611,59 +611,48 @@ wasm::GenerateJitExit(MacroAssembler& masm, const Import& import, bool usesHeap)
     {
         // Enable Activation.
         //
-        // This sequence requires four registers, and needs to preserve the 'callee'
-        // register, so there are five live registers.
+        // This sequence requires three registers, and needs to preserve the 'callee'
+        // register, so there are four live registers.
         MOZ_ASSERT(callee == AsmJSIonExitRegCallee);
         Register reg0 = AsmJSIonExitRegE0;
         Register reg1 = AsmJSIonExitRegE1;
         Register reg2 = AsmJSIonExitRegE2;
-        Register reg3 = AsmJSIonExitRegE3;
 
         // The following is inlined:
         //   JSContext* cx = activation->cx();
-        //   Activation* act = cx->runtime()->activation();
+        //   Activation* act = cx->activation();
         //   act.active_ = true;
-        //   act.prevJitTop_ = cx->runtime()->jitTop;
-        //   act.prevJitJSContext_ = cx->runtime()->jitJSContext;
-        //   cx->runtime()->jitJSContext = cx;
-        //   act.prevJitActivation_ = cx->runtime()->jitActivation;
-        //   cx->runtime()->jitActivation = act;
-        //   act.prevProfilingActivation_ = cx->runtime()->profilingActivation;
-        //   cx->runtime()->profilingActivation_ = act;
+        //   act.prevJitTop_ = cx->jitTop;
+        //   act.prevJitActivation_ = cx->jitActivation;
+        //   cx->jitActivation = act;
+        //   act.prevProfilingActivation_ = cx->profilingActivation;
+        //   cx->profilingActivation_ = act;
         // On the ARM store8() uses the secondScratchReg (lr) as a temp.
-        size_t offsetOfActivation = JSRuntime::offsetOfActivation();
-        size_t offsetOfJitTop = offsetof(JSRuntime, jitTop);
-        size_t offsetOfJitJSContext = offsetof(JSRuntime, jitJSContext);
-        size_t offsetOfJitActivation = offsetof(JSRuntime, jitActivation);
-        size_t offsetOfProfilingActivation = JSRuntime::offsetOfProfilingActivation();
+        size_t offsetOfActivation = JSContext::offsetOfActivation();
+        size_t offsetOfJitTop = offsetof(JSContext, jitTop);
+        size_t offsetOfJitActivation = offsetof(JSContext, jitActivation);
+        size_t offsetOfProfilingActivation = JSContext::offsetOfProfilingActivation();
         masm.loadWasmActivation(reg0);
-        masm.loadPtr(Address(reg0, WasmActivation::offsetOfContext()), reg3);
-        masm.loadPtr(Address(reg3, JSContext::offsetOfRuntime()), reg0);
+        masm.loadPtr(Address(reg0, WasmActivation::offsetOfContext()), reg0);
         masm.loadPtr(Address(reg0, offsetOfActivation), reg1);
 
         //   act.active_ = true;
         masm.store8(Imm32(1), Address(reg1, JitActivation::offsetOfActiveUint8()));
 
-        //   act.prevJitTop_ = cx->runtime()->jitTop;
+        //   act.prevJitTop_ = cx->jitTop;
         masm.loadPtr(Address(reg0, offsetOfJitTop), reg2);
         masm.storePtr(reg2, Address(reg1, JitActivation::offsetOfPrevJitTop()));
 
-        //   act.prevJitJSContext_ = cx->runtime()->jitJSContext;
-        masm.loadPtr(Address(reg0, offsetOfJitJSContext), reg2);
-        masm.storePtr(reg2, Address(reg1, JitActivation::offsetOfPrevJitJSContext()));
-        //   cx->runtime()->jitJSContext = cx;
-        masm.storePtr(reg3, Address(reg0, offsetOfJitJSContext));
-
-        //   act.prevJitActivation_ = cx->runtime()->jitActivation;
+        //   act.prevJitActivation_ = cx->jitActivation;
         masm.loadPtr(Address(reg0, offsetOfJitActivation), reg2);
         masm.storePtr(reg2, Address(reg1, JitActivation::offsetOfPrevJitActivation()));
-        //   cx->runtime()->jitActivation = act;
+        //   cx->jitActivation = act;
         masm.storePtr(reg1, Address(reg0, offsetOfJitActivation));
 
-        //   act.prevProfilingActivation_ = cx->runtime()->profilingActivation;
+        //   act.prevProfilingActivation_ = cx->profilingActivation;
         masm.loadPtr(Address(reg0, offsetOfProfilingActivation), reg2);
         masm.storePtr(reg2, Address(reg1, Activation::offsetOfPrevProfiling()));
-        //   cx->runtime()->profilingActivation_ = act;
+        //   cx->profilingActivation_ = act;
         masm.storePtr(reg1, Address(reg0, offsetOfProfilingActivation));
     }
 
@@ -686,12 +675,10 @@ wasm::GenerateJitExit(MacroAssembler& masm, const Import& import, bool usesHeap)
         //   rt->profilingActivation = prevProfilingActivation_;
         //   rt->activation()->active_ = false;
         //   rt->jitTop = prevJitTop_;
-        //   rt->jitJSContext = prevJitJSContext_;
         //   rt->jitActivation = prevJitActivation_;
         // On the ARM store8() uses the secondScratchReg (lr) as a temp.
         size_t offsetOfActivation = JSRuntime::offsetOfActivation();
         size_t offsetOfJitTop = offsetof(JSRuntime, jitTop);
-        size_t offsetOfJitJSContext = offsetof(JSRuntime, jitJSContext);
         size_t offsetOfJitActivation = offsetof(JSRuntime, jitActivation);
         size_t offsetOfProfilingActivation = JSRuntime::offsetOfProfilingActivation();
 
@@ -708,10 +695,6 @@ wasm::GenerateJitExit(MacroAssembler& masm, const Import& import, bool usesHeap)
 
         //   rt->activation()->active_ = false;
         masm.store8(Imm32(0), Address(reg1, JitActivation::offsetOfActiveUint8()));
-
-        //   rt->jitJSContext = prevJitJSContext_;
-        masm.loadPtr(Address(reg1, JitActivation::offsetOfPrevJitJSContext()), reg2);
-        masm.storePtr(reg2, Address(reg0, offsetOfJitJSContext));
 
         //   rt->jitActivation = prevJitActivation_;
         masm.loadPtr(Address(reg1, JitActivation::offsetOfPrevJitActivation()), reg2);
@@ -951,6 +934,7 @@ wasm::GenerateJumpTarget(MacroAssembler& masm, JumpTarget target)
         return GenerateThrow(masm);
       case JumpTarget::BadIndirectCall:
       case JumpTarget::OutOfBounds:
+      case JumpTarget::UnalignedAccess:
       case JumpTarget::Unreachable:
       case JumpTarget::IntegerOverflow:
       case JumpTarget::InvalidConversionToInteger:

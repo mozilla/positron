@@ -19,7 +19,6 @@
 #include "mozilla/BrowserElementParent.h"
 #include "mozilla/ClearOnShutdown.h"
 #include "mozilla/EventListenerManager.h"
-#include "mozilla/dom/workers/ServiceWorkerManager.h"
 #include "mozilla/dom/indexedDB/PIndexedDBPermissionRequestChild.h"
 #include "mozilla/plugins/PluginWidgetChild.h"
 #include "mozilla/IMEStateManager.h"
@@ -138,6 +137,7 @@ using namespace mozilla::layout;
 using namespace mozilla::docshell;
 using namespace mozilla::widget;
 using namespace mozilla::jsipc;
+using mozilla::layers::GeckoContentController;
 
 NS_IMPL_ISUPPORTS(ContentListener, nsIDOMEventListener)
 
@@ -1337,7 +1337,6 @@ TabChild::SetProcessNameToAppName()
 
 bool
 TabChild::RecvLoadURL(const nsCString& aURI,
-                      const BrowserConfiguration& aConfiguration,
                       const ShowInfo& aInfo)
 {
   if (!mDidLoadURLInit) {
@@ -1349,10 +1348,6 @@ TabChild::RecvLoadURL(const nsCString& aURI,
     ApplyShowInfo(aInfo);
 
     SetProcessNameToAppName();
-
-    RefPtr<ServiceWorkerManager> swm = ServiceWorkerManager::GetInstance();
-    MOZ_ASSERT(swm);
-    swm->LoadRegistrations(aConfiguration.serviceWorkerRegistrations());
   }
 
   nsresult rv =
@@ -1784,27 +1779,39 @@ TabChild::HandleDoubleTap(const CSSPoint& aPoint, const Modifiers& aModifiers,
 }
 
 void
-TabChild::HandleSingleTap(const CSSPoint& aPoint,
-                          const Modifiers& aModifiers,
-                          const ScrollableLayerGuid& aGuid,
-                          bool aCallTakeFocusForClickFromTap)
+TabChild::HandleTap(GeckoContentController::TapType aType,
+                    const CSSPoint& aPoint, const Modifiers& aModifiers,
+                    const ScrollableLayerGuid& aGuid, const uint64_t& aInputBlockId,
+                    bool aCallTakeFocusForClickFromTap)
 {
-  if (aCallTakeFocusForClickFromTap && mRemoteFrame) {
-    mRemoteFrame->SendTakeFocusForClickFromTap();
-  }
-  if (mGlobal && mTabChildGlobal) {
-    mAPZEventState->ProcessSingleTap(aPoint, aModifiers, aGuid);
-  }
-}
-
-void
-TabChild::HandleLongTap(const CSSPoint& aPoint, const Modifiers& aModifiers,
-                        const ScrollableLayerGuid& aGuid,
-                        const uint64_t& aInputBlockId)
-{
-  if (mGlobal && mTabChildGlobal) {
-    mAPZEventState->ProcessLongTap(GetPresShell(), aPoint, aModifiers, aGuid,
-        aInputBlockId);
+  switch (aType) {
+  case GeckoContentController::TapType::eSingleTap:
+    if (aCallTakeFocusForClickFromTap && mRemoteFrame) {
+      mRemoteFrame->SendTakeFocusForClickFromTap();
+    }
+    if (mGlobal && mTabChildGlobal) {
+      mAPZEventState->ProcessSingleTap(aPoint, aModifiers, aGuid);
+    }
+    break;
+  case GeckoContentController::TapType::eDoubleTap:
+    HandleDoubleTap(aPoint, aModifiers, aGuid);
+    break;
+  case GeckoContentController::TapType::eLongTap:
+    if (mGlobal && mTabChildGlobal) {
+      mAPZEventState->ProcessLongTap(GetPresShell(), aPoint, aModifiers, aGuid,
+          aInputBlockId);
+    }
+    break;
+  case GeckoContentController::TapType::eLongTapUp:
+    if (mGlobal && mTabChildGlobal) {
+      mAPZEventState->ProcessLongTapUp();
+    }
+    break;
+  case GeckoContentController::TapType::eSentinel:
+    // Should never happen, but we need to handle this case to make the compiler
+    // happy.
+    MOZ_ASSERT(false);
+    break;
   }
 }
 
@@ -1814,7 +1821,7 @@ TabChild::NotifyAPZStateChange(const ViewID& aViewId,
                                const int& aArg)
 {
   mAPZEventState->ProcessAPZStateChange(GetDocument(), aViewId, aChange, aArg);
-  if (aChange == layers::GeckoContentController::APZStateChange::TransformEnd) {
+  if (aChange == layers::GeckoContentController::APZStateChange::eTransformEnd) {
     // This is used by tests to determine when the APZ is done doing whatever
     // it's doing. XXX generify this as needed when writing additional tests.
     nsCOMPtr<nsIObserverService> observerService = mozilla::services::GetObserverService();
@@ -3324,12 +3331,6 @@ TabChildGlobal::GetDocShell(nsIDocShell** aDocShell)
   nsCOMPtr<nsIDocShell> docShell = do_GetInterface(mTabChild->WebNavigation());
   docShell.swap(*aDocShell);
   return NS_OK;
-}
-
-JSContext*
-TabChildGlobal::GetJSContextForEventHandlers()
-{
-  return nsContentUtils::GetSafeJSContext();
 }
 
 nsIPrincipal*

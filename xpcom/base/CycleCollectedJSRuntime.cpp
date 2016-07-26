@@ -513,12 +513,12 @@ CycleCollectedJSRuntime::Initialize(JSRuntime* aParentRuntime,
   }
   mJSContext = JS_GetContext(mJSRuntime);
 
-  if (!JS_AddExtraGCRootsTracer(mJSRuntime, TraceBlackJS, this)) {
+  if (!JS_AddExtraGCRootsTracer(mJSContext, TraceBlackJS, this)) {
     MOZ_CRASH("JS_AddExtraGCRootsTracer failed");
   }
-  JS_SetGrayGCRootsTracer(mJSRuntime, TraceGrayJS, this);
-  JS_SetGCCallback(mJSRuntime, GCCallback, this);
-  mPrevGCSliceCallback = JS::SetGCSliceCallback(mJSRuntime, GCSliceCallback);
+  JS_SetGrayGCRootsTracer(mJSContext, TraceGrayJS, this);
+  JS_SetGCCallback(mJSContext, GCCallback, this);
+  mPrevGCSliceCallback = JS::SetGCSliceCallback(mJSContext, GCSliceCallback);
 
   if (NS_IsMainThread()) {
     // We would like to support all threads here, but the way timeline consumers
@@ -529,32 +529,34 @@ CycleCollectedJSRuntime::Initialize(JSRuntime* aParentRuntime,
     // main thread, since the UI for this tracing data only displays data
     // relevant to the main-thread.
     mPrevGCNurseryCollectionCallback = JS::SetGCNurseryCollectionCallback(
-      mJSRuntime, GCNurseryCollectionCallback);
+      mJSContext, GCNurseryCollectionCallback);
   }
 
-  JS_SetObjectsTenuredCallback(mJSRuntime, JSObjectsTenuredCb, this);
-  JS::SetOutOfMemoryCallback(mJSRuntime, OutOfMemoryCallback, this);
-  JS::SetLargeAllocationFailureCallback(mJSRuntime,
+  JS_SetObjectsTenuredCallback(mJSContext, JSObjectsTenuredCb, this);
+  JS::SetOutOfMemoryCallback(mJSContext, OutOfMemoryCallback, this);
+  JS::SetLargeAllocationFailureCallback(mJSContext,
                                         LargeAllocationFailureCallback, this);
-  JS_SetDestroyZoneCallback(mJSRuntime, XPCStringConvert::FreeZoneCache);
-  JS_SetSweepZoneCallback(mJSRuntime, XPCStringConvert::ClearZoneCache);
-  JS::SetBuildIdOp(mJSRuntime, GetBuildId);
-  JS::SetWarningReporter(mJSRuntime, MozCrashWarningReporter);
+  JS_SetDestroyZoneCallback(mJSContext, XPCStringConvert::FreeZoneCache);
+  JS_SetSweepZoneCallback(mJSContext, XPCStringConvert::ClearZoneCache);
+  JS::SetBuildIdOp(mJSContext, GetBuildId);
+  JS::SetWarningReporter(mJSContext, MozCrashWarningReporter);
 
   static js::DOMCallbacks DOMcallbacks = {
     InstanceClassHasProtoAtDepth
   };
-  SetDOMCallbacks(mJSRuntime, &DOMcallbacks);
-  js::SetScriptEnvironmentPreparer(mJSRuntime, &mEnvironmentPreparer);
+  SetDOMCallbacks(mJSContext, &DOMcallbacks);
+  js::SetScriptEnvironmentPreparer(mJSContext, &mEnvironmentPreparer);
+
+  JS::SetGetIncumbentGlobalCallback(mJSContext, GetIncumbentGlobalCallback);
 
 #ifdef SPIDERMONKEY_PROMISE
-  JS::SetEnqueuePromiseJobCallback(mJSRuntime, EnqueuePromiseJobCallback, this);
-  JS::SetPromiseRejectionTrackerCallback(mJSRuntime, PromiseRejectionTrackerCallback, this);
+  JS::SetEnqueuePromiseJobCallback(mJSContext, EnqueuePromiseJobCallback, this);
+  JS::SetPromiseRejectionTrackerCallback(mJSContext, PromiseRejectionTrackerCallback, this);
   mUncaughtRejections.init(mJSRuntime, JS::GCVector<JSObject*, 0, js::SystemAllocPolicy>(js::SystemAllocPolicy()));
   mConsumedRejections.init(mJSRuntime, JS::GCVector<JSObject*, 0, js::SystemAllocPolicy>(js::SystemAllocPolicy()));
 #endif // SPIDERMONKEY_PROMISE
 
-  JS::dbg::SetDebuggerMallocSizeOf(mJSRuntime, moz_malloc_size_of);
+  JS::dbg::SetDebuggerMallocSizeOf(mJSContext, moz_malloc_size_of);
 
   nsCycleCollector_registerJSRuntime(this);
 
@@ -920,8 +922,9 @@ CycleCollectedJSRuntime::LargeAllocationFailureCallback(void* aData)
 class PromiseJobRunnable final : public Runnable
 {
 public:
-  PromiseJobRunnable(JS::HandleObject aCallback, JS::HandleObject aAllocationSite)
-    : mCallback(new PromiseJobCallback(aCallback, aAllocationSite, nullptr))
+  PromiseJobRunnable(JS::HandleObject aCallback, JS::HandleObject aAllocationSite,
+                     nsIGlobalObject* aIncumbentGlobal)
+    : mCallback(new PromiseJobCallback(aCallback, aAllocationSite, aIncumbentGlobal))
   {
   }
 
@@ -945,18 +948,34 @@ private:
 };
 
 /* static */
+JSObject*
+CycleCollectedJSRuntime::GetIncumbentGlobalCallback(JSContext* aCx)
+{
+  nsIGlobalObject* global = mozilla::dom::GetIncumbentGlobal();
+  if (global) {
+    return global->GetGlobalJSObject();
+  }
+  return nullptr;
+}
+
+/* static */
 bool
 CycleCollectedJSRuntime::EnqueuePromiseJobCallback(JSContext* aCx,
                                                    JS::HandleObject aJob,
                                                    JS::HandleObject aAllocationSite,
+                                                   JS::HandleObject aIncumbentGlobal,
                                                    void* aData)
 {
   CycleCollectedJSRuntime* self = static_cast<CycleCollectedJSRuntime*>(aData);
   MOZ_ASSERT(JS_GetRuntime(aCx) == self->Runtime());
   MOZ_ASSERT(Get() == self);
 
-  nsCOMPtr<nsIRunnable> runnable = new PromiseJobRunnable(aJob, aAllocationSite);
-  self->DispatchToMicroTask(runnable);
+  nsIGlobalObject* global = nullptr;
+  if (aIncumbentGlobal) {
+    global = xpc::NativeGlobal(aIncumbentGlobal);
+  }
+  nsCOMPtr<nsIRunnable> runnable = new PromiseJobRunnable(aJob, aAllocationSite, global);
+  self->DispatchToMicroTask(runnable.forget());
   return true;
 }
 
@@ -1207,7 +1226,7 @@ void
 CycleCollectedJSRuntime::FixWeakMappingGrayBits() const
 {
   MOZ_ASSERT(mJSRuntime);
-  MOZ_ASSERT(!JS::IsIncrementalGCInProgress(mJSRuntime),
+  MOZ_ASSERT(!JS::IsIncrementalGCInProgress(mJSContext),
              "Don't call FixWeakMappingGrayBits during a GC.");
   FixWeakMappingGrayBitsTracer fixer(mJSRuntime);
   fixer.FixAll();
@@ -1228,8 +1247,8 @@ CycleCollectedJSRuntime::GarbageCollect(uint32_t aReason) const
   MOZ_ASSERT(aReason < JS::gcreason::NUM_REASONS);
   JS::gcreason::Reason gcreason = static_cast<JS::gcreason::Reason>(aReason);
 
-  JS::PrepareForFullGC(mJSRuntime);
-  JS::GCForReason(mJSRuntime, GC_NORMAL, gcreason);
+  JS::PrepareForFullGC(mJSContext);
+  JS::GCForReason(mJSContext, GC_NORMAL, gcreason);
 }
 
 void
@@ -1306,8 +1325,7 @@ CycleCollectedJSRuntime::DeferredFinalize(nsISupports* aSupports)
 void
 CycleCollectedJSRuntime::DumpJSHeap(FILE* aFile)
 {
-  MOZ_ASSERT(mJSRuntime);
-  js::DumpHeap(Runtime(), aFile, js::CollectNurseryBeforeDump);
+  js::DumpHeap(Context(), aFile, js::CollectNurseryBeforeDump);
 }
 
 void
@@ -1616,7 +1634,7 @@ CycleCollectedJSRuntime::OnGC(JSGCStatus aStatus)
 #endif
 
       // Do any deferred finalization of native objects.
-      FinalizeDeferredThings(JS::WasIncrementalGC(mJSRuntime) ? FinalizeIncrementally :
+      FinalizeDeferredThings(JS::WasIncrementalGC(mJSContext) ? FinalizeIncrementally :
                                                                 FinalizeNow);
       break;
     }
@@ -1651,7 +1669,7 @@ void
 CycleCollectedJSRuntime::PrepareWaitingZonesForGC()
 {
   if (mZonesWaitingForGC.Count() == 0) {
-    JS::PrepareForFullGC(Runtime());
+    JS::PrepareForFullGC(Context());
   } else {
     for (auto iter = mZonesWaitingForGC.Iter(); !iter.Done(); iter.Next()) {
       JS::PrepareZoneForGC(iter.Get()->GetKey());
@@ -1661,12 +1679,14 @@ CycleCollectedJSRuntime::PrepareWaitingZonesForGC()
 }
 
 void
-CycleCollectedJSRuntime::DispatchToMicroTask(nsIRunnable* aRunnable)
+CycleCollectedJSRuntime::DispatchToMicroTask(already_AddRefed<nsIRunnable> aRunnable)
 {
-  MOZ_ASSERT(NS_IsMainThread());
-  MOZ_ASSERT(aRunnable);
+  RefPtr<nsIRunnable> runnable(aRunnable);
 
-  mPromiseMicroTaskQueue.push(aRunnable);
+  MOZ_ASSERT(NS_IsMainThread());
+  MOZ_ASSERT(runnable);
+
+  mPromiseMicroTaskQueue.push(runnable.forget());
 }
 
 void
@@ -1678,10 +1698,7 @@ CycleCollectedJSRuntime::EnvironmentPreparer::invoke(JS::HandleObject scope,
   // Not much we can do if we simply don't have a usable global here...
   NS_ENSURE_TRUE_VOID(global && global->GetGlobalJSObject());
 
-  bool mainThread = NS_IsMainThread();
-  JSContext* cx =
-    mainThread ? nullptr : nsContentUtils::GetDefaultJSContextForThread();
-  AutoEntryScript aes(global, "JS-engine-initiated execution", mainThread, cx);
+  AutoEntryScript aes(global, "JS-engine-initiated execution");
 
   MOZ_ASSERT(!JS_IsExceptionPending(aes.cx()));
 

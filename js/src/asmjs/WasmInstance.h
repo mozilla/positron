@@ -60,14 +60,14 @@ class Instance
     const SharedMetadata                 metadata_;
     const SharedBytes                    maybeBytecode_;
     const TypedFuncTableVector           typedFuncTables_;
-    GCPtr<ArrayBufferObjectMaybeShared*> heap_;
+    GCPtrWasmMemoryObject                memory_;
 
     bool                                 profilingEnabled_;
     CacheableCharsVector                 funcLabels_;
 
     // Internal helpers:
-    uint8_t** addressOfHeapPtr() const;
-    ImportExit& importToExit(const Import& import);
+    uint8_t** addressOfMemoryBase() const;
+    FuncImportExit& funcImportToExit(const FuncImport& fi);
     MOZ_MUST_USE bool toggleProfiling(JSContext* cx);
 
     // An instance keeps track of its innermost WasmActivation. A WasmActivation
@@ -77,37 +77,27 @@ class Instance
 
     // Import call slow paths which are called directly from wasm code.
     friend void* AddressOf(SymbolicAddress, ExclusiveContext*);
-    bool callImport(JSContext* cx, uint32_t importIndex, unsigned argc, const uint64_t* argv,
+    bool callImport(JSContext* cx, uint32_t funcImportIndex, unsigned argc, const uint64_t* argv,
                     MutableHandleValue rval);
     static int32_t callImport_void(int32_t importIndex, int32_t argc, uint64_t* argv);
     static int32_t callImport_i32(int32_t importIndex, int32_t argc, uint64_t* argv);
     static int32_t callImport_i64(int32_t importIndex, int32_t argc, uint64_t* argv);
     static int32_t callImport_f64(int32_t importIndex, int32_t argc, uint64_t* argv);
 
-    template <class T> friend struct js::MallocProvider;
+  public:
     Instance(UniqueCodeSegment codeSegment,
              const Metadata& metadata,
              const ShareableBytes* maybeBytecode,
              TypedFuncTableVector&& typedFuncTables,
-             HandleArrayBufferObjectMaybeShared heap);
-
-  public:
-    static bool create(JSContext* cx,
-                       UniqueCodeSegment codeSegment,
-                       const Metadata& metadata,
-                       const ShareableBytes* maybeBytecode,
-                       TypedFuncTableVector&& typedFuncTables,
-                       HandleArrayBufferObjectMaybeShared heap,
-                       Handle<FunctionVector> funcImports,
-                       const ExportMap& exports,
-                       MutableHandle<WasmInstanceObject*> instanceObj);
+             HandleWasmMemoryObject memory,
+             Handle<FunctionVector> funcImports);
     ~Instance();
     void trace(JSTracer* trc);
 
     const CodeSegment& codeSegment() const { return *codeSegment_; }
     const Metadata& metadata() const { return *metadata_; }
-    SharedMem<uint8_t*> heap() const;
-    size_t heapLength() const;
+    SharedMem<uint8_t*> memoryBase() const;
+    size_t memoryLength() const;
 
     // Execute the given export given the JS call arguments, storing the return
     // value in args.rval.
@@ -142,7 +132,7 @@ class Instance
     // directly into the JIT code. If the JIT code is released, the Instance must
     // be notified so it can go back to the generic callImport.
 
-    void deoptimizeImportExit(uint32_t importIndex);
+    void deoptimizeImportExit(uint32_t funcImportIndex);
 
     // Stack frame iterator support:
 
@@ -161,18 +151,6 @@ class Instance
 };
 
 typedef UniquePtr<Instance> UniqueInstance;
-
-// These accessors are used to implemented the special asm.js semantics of
-// exported wasm functions:
-
-extern bool
-IsExportedFunction(JSFunction* fun);
-
-extern Instance&
-ExportedFunctionToInstance(JSFunction* fun);
-
-extern uint32_t
-ExportedFunctionToExportIndex(JSFunction* fun);
 
 } // namespace wasm
 } // namespace js

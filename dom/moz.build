@@ -41,7 +41,6 @@ DIRS += [
     'apps',
     'base',
     'bluetooth',
-    'activities',
     'archivereader',
     'bindings',
     'battery',
@@ -61,7 +60,9 @@ DIRS += [
     'filesystem',
     'flyweb',
     'fmradio',
+    'gamepad',
     'geolocation',
+    'grid',
     'html',
     'icc',
     'inputport',
@@ -70,7 +71,6 @@ DIRS += [
     'asmjscache',
     'mathml',
     'media',
-    'messages',
     'mobileconnection',
     'notification',
     'offline',
@@ -134,9 +134,6 @@ if CONFIG['MOZ_B2G_RIL']:
 
 if CONFIG['MOZ_PAY']:
     DIRS += ['payment']
-
-if CONFIG['MOZ_GAMEPAD']:
-    DIRS += ['gamepad']
 
 if CONFIG['MOZ_NFC']:
     DIRS += ['nfc']

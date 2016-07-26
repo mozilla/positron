@@ -30,6 +30,7 @@
 #include "mozilla/dom/VideoTrackList.h"
 #include "nsPrintfCString.h"
 #include "mozilla/Telemetry.h"
+#include "GMPService.h"
 
 #ifdef MOZ_ANDROID_OMX
 #include "AndroidBridge.h"
@@ -1108,6 +1109,34 @@ MediaDecoder::OwnerHasError() const
   return mShuttingDown || mOwner->HasError();
 }
 
+class MediaElementGMPCrashHelper : public GMPCrashHelper
+{
+public:
+  explicit MediaElementGMPCrashHelper(HTMLMediaElement* aElement)
+    : mElement(aElement)
+  {
+    MOZ_ASSERT(NS_IsMainThread()); // WeakPtr isn't thread safe.
+  }
+  already_AddRefed<nsPIDOMWindowInner> GetPluginCrashedEventTarget() override
+  {
+    MOZ_ASSERT(NS_IsMainThread()); // WeakPtr isn't thread safe.
+    if (!mElement) {
+      return nullptr;
+    }
+    return do_AddRef(mElement->OwnerDoc()->GetInnerWindow());
+  }
+private:
+  WeakPtr<HTMLMediaElement> mElement;
+};
+
+already_AddRefed<GMPCrashHelper>
+MediaDecoder::GetCrashHelper()
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  return mOwner->GetMediaElement() ?
+    MakeAndAddRef<MediaElementGMPCrashHelper>(mOwner->GetMediaElement()) : nullptr;
+}
+
 bool
 MediaDecoder::IsEnded() const
 {
@@ -1713,6 +1742,7 @@ void
 MediaDecoder::SetCDMProxy(CDMProxy* aProxy)
 {
   MOZ_ASSERT(NS_IsMainThread());
+  MOZ_ASSERT(aProxy);
 
   mCDMProxyPromiseHolder.ResolveIfExists(aProxy, __func__);
 }

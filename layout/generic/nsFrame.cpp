@@ -559,8 +559,8 @@ nsFrame::Init(nsIContent*       aContent,
   }
   const nsStyleDisplay *disp = StyleDisplay();
   if (disp->HasTransform(this) ||
-      nsLayoutUtils::HasCurrentAnimationOfProperty(this,
-                                                   eCSSProperty_transform)) {
+      nsLayoutUtils::HasRelevantAnimationOfProperty(this,
+                                                    eCSSProperty_transform)) {
     // The frame gets reconstructed if we toggle the -moz-transform
     // property, so we can set this bit here and then ignore it.
     mState |= NS_FRAME_MAY_BE_TRANSFORMED;
@@ -1150,7 +1150,7 @@ nsIFrame::IsTransformed() const
           (StyleDisplay()->HasTransform(this) ||
            IsSVGTransformed() ||
            (mContent &&
-            EffectCompositor::HasAnimationsForCompositor(
+            nsLayoutUtils::HasRelevantAnimationOfProperty(
               this, eCSSProperty_transform) &&
             IsFrameOfType(eSupportsCSSTransforms) &&
             mContent->GetPrimaryFrame() == this)));
@@ -1163,7 +1163,7 @@ nsIFrame::HasOpacityInternal(float aThreshold) const
   return StyleEffects()->mOpacity < aThreshold ||
          (StyleDisplay()->mWillChangeBitField & NS_STYLE_WILL_CHANGE_OPACITY) ||
          (mContent &&
-           EffectCompositor::HasAnimationsForCompositor(
+           nsLayoutUtils::HasRelevantAnimationOfProperty(
              this, eCSSProperty_opacity) &&
            mContent->GetPrimaryFrame() == this);
 }
@@ -1189,6 +1189,10 @@ nsIFrame::Extend3DContext() const
     return false;
   }
 
+  if (HasOpacity()) {
+    return false;
+  }
+
   const nsStyleEffects* effects = StyleEffects();
   nsRect temp;
   return !nsFrame::ShouldApplyOverflowClipping(this, disp) &&
@@ -1202,13 +1206,13 @@ nsIFrame::Combines3DTransformWithAncestors() const
   if (!GetParent() || !GetParent()->Extend3DContext()) {
     return false;
   }
-  return StyleDisplay()->HasTransform(this) || StyleDisplay()->BackfaceIsHidden();
+  return StyleDisplay()->HasTransform(this) || BackfaceIsHidden();
 }
 
 bool
 nsIFrame::In3DContextAndBackfaceIsHidden() const
 {
-  return Combines3DTransformWithAncestors() && StyleDisplay()->BackfaceIsHidden();
+  return Combines3DTransformWithAncestors() && BackfaceIsHidden();
 }
 
 bool
@@ -2102,7 +2106,7 @@ CheckForApzAwareEventHandlers(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame)
     return;
   }
 
-  if (content->HasApzAwareListeners()) {
+  if (content->IsNodeApzAware()) {
     aBuilder->SetAncestorHasApzAwareEventHandler(true);
   }
 }
@@ -2132,11 +2136,6 @@ ItemParticipatesIn3DContext(nsIFrame* aAncestor, nsDisplayItem* aItem)
   nsIFrame* transformFrame;
   if (aItem->GetType() == nsDisplayItem::TYPE_TRANSFORM) {
     transformFrame = aItem->Frame();
-  } else if (aItem->GetType() == nsDisplayItem::TYPE_OPACITY) {
-    transformFrame = aItem->Frame();
-    if (!transformFrame->IsTransformed()) {
-      return false;
-    }
   } else if (aItem->GetType() == nsDisplayItem::TYPE_PERSPECTIVE) {
     transformFrame = static_cast<nsDisplayPerspective*>(aItem)->TransformFrame();
   } else {
@@ -2159,26 +2158,6 @@ WrapSeparatorTransform(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame,
                                         aDirtyRect, Matrix4x4(), aIndex);
     sepIdItem->SetNoExtendContext();
     aTarget->AppendToTop(sepIdItem);
-  }
-}
-
-static void
-CreateOpacityItem(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame,
-                  nsDisplayList& aList, bool aItemForEventsOnly,
-                  const DisplayItemScrollClip* aScrollClip,
-                  bool aParticipatesInPreserve3D)
-{
-  // Don't clip nsDisplayOpacity items. We clip their descendants instead.
-  // The clip we would set on an element with opacity would clip
-  // all descendant content, but some should not be clipped.
-  DisplayListClipState::AutoSaveRestore opacityClipState(aBuilder);
-  opacityClipState.Clear();
-  nsDisplayOpacity* opacity =
-      new (aBuilder) nsDisplayOpacity(aBuilder, aFrame, &aList,
-                                      aScrollClip, aItemForEventsOnly);
-  if (opacity) {
-    opacity->SetParticipatesInPreserve3D(aParticipatesInPreserve3D);
-    aList.AppendToTop(opacity);
   }
 }
 
@@ -2334,13 +2313,15 @@ nsIFrame::BuildDisplayListForStackingContext(nsDisplayListBuilder* aBuilder,
       dirtyRect.IntersectRect(dirtyRect, clipPropClip);
     }
 
-    MarkAbsoluteFramesForDisplayList(aBuilder, dirtyRect);
-
     // Extend3DContext() also guarantees that applyAbsPosClipping and usingSVGEffects are false
     // We only modify the preserve-3d rect if we are the top of a preserve-3d heirarchy
     if (Extend3DContext()) {
+      // Mark these first so MarkAbsoluteFramesForDisplayList knows if we are
+      // going to be forced to descend into frames.
       aBuilder->MarkPreserve3DFramesForDisplayList(this);
     }
+
+    MarkAbsoluteFramesForDisplayList(aBuilder, dirtyRect);
 
     nsDisplayLayerEventRegions* eventRegions = nullptr;
     if (aBuilder->IsBuildingLayerEventRegions()) {
@@ -2464,6 +2445,19 @@ nsIFrame::BuildDisplayListForStackingContext(nsDisplayListBuilder* aBuilder,
     aBuilder->ExitSVGEffectsContents();
     resultList.AppendToTop(&hoistedScrollInfoItemsStorage);
   }
+  /* Else, if the list is non-empty and there is CSS group opacity without SVG
+   * effects, wrap it up in an opacity item.
+   */
+  else if (useOpacity && !resultList.IsEmpty()) {
+    // Don't clip nsDisplayOpacity items. We clip their descendants instead.
+    // The clip we would set on an element with opacity would clip
+    // all descendant content, but some should not be clipped.
+    DisplayListClipState::AutoSaveRestore opacityClipState(aBuilder);
+    opacityClipState.Clear();
+    resultList.AppendNewToTop(
+        new (aBuilder) nsDisplayOpacity(aBuilder, this, &resultList,
+                                        containerItemScrollClip, opacityItemForEventsOnly));
+  }
 
   /* If we're going to apply a transformation and don't have preserve-3d set, wrap
    * everything in an nsDisplayTransform. If there's nothing in the list, don't add
@@ -2473,10 +2467,9 @@ nsIFrame::BuildDisplayListForStackingContext(nsDisplayListBuilder* aBuilder,
    * a separate nsDisplayTransform instead. When the child is already an nsDisplayTransform,
    * we can skip this step, as the computed transform will already include our own.
    *
-   * We also traverse into sublists created by nsDisplayWrapList or nsDisplayOpacity, so that
-   * we find all the correct children.
+   * We also traverse into sublists created by nsDisplayWrapList, so that we find all the
+   * correct children.
    */
-  bool hasPreserve3DChildren = false;
   if (isTransformed && !resultList.IsEmpty() && Extend3DContext()) {
     // Install dummy nsDisplayTransform as a leaf containing
     // descendants not participating this 3D rendering context.
@@ -2490,7 +2483,6 @@ nsIFrame::BuildDisplayListForStackingContext(nsDisplayListBuilder* aBuilder,
         WrapSeparatorTransform(aBuilder, this, dirtyRect,
                                &nonparticipants, &participants, index++);
         participants.AppendToTop(item);
-        hasPreserve3DChildren = true;
       } else {
         // The frame of the item doesn't participate the current
         // context, or has no transform.
@@ -2507,20 +2499,19 @@ nsIFrame::BuildDisplayListForStackingContext(nsDisplayListBuilder* aBuilder,
     resultList.AppendToTop(&participants);
   }
 
-  /* We create the opacity outside any transform separators we created,
-   * so that the opacity will be applied to them as groups. When we have
-   * opacity and preserve-3d we break the 'group' nature of opacity in order
-   * to maintain preserve-3d. This matches the behaviour of blink and WebKit,
-   * see bug 1250718.
+  /* If we're creating an nsDisplayTransform item that is going to combine its transform
+   * with its children (preserve-3d or perspective), then we can't have an intermediate
+   * surface. Mask layers force an intermediate surface, so if we're going to need both
+   * then create a separate wrapping layer for the mask.
    */
-  if (useOpacity && !resultList.IsEmpty()) {
-    CreateOpacityItem(aBuilder, this, resultList,
-                      opacityItemForEventsOnly, containerItemScrollClip, hasPreserve3DChildren);
-  }
+  bool needsLayerForMask = isTransformed && (Extend3DContext() || HasPerspective()) &&
+                           clipState.SavedStateHasRoundedCorners();
+  NS_ASSERTION(!Combines3DTransformWithAncestors() || !clipState.SavedStateHasRoundedCorners(),
+               "Can't support mask layers on intermediate preserve-3d frames");
 
   if (isTransformed && !resultList.IsEmpty()) {
     // Restore clip state now so nsDisplayTransform is clipped properly.
-    if (!HasPerspective() && !useFixedPosition && !useStickyPosition) {
+    if (!HasPerspective() && !useFixedPosition && !useStickyPosition && !needsLayerForMask) {
       clipState.ExitStackingContextContents(&containerItemScrollClip);
     }
     // Revert to the dirtyrect coming in from the parent, without our transform
@@ -2549,7 +2540,7 @@ nsIFrame::BuildDisplayListForStackingContext(nsDisplayListBuilder* aBuilder,
     }
 
     if (HasPerspective()) {
-      if (!useFixedPosition && !useStickyPosition) {
+      if (!useFixedPosition && !useStickyPosition && !needsLayerForMask) {
         clipState.ExitStackingContextContents(&containerItemScrollClip);
       }
       resultList.AppendNewToTop(
@@ -2559,8 +2550,15 @@ nsIFrame::BuildDisplayListForStackingContext(nsDisplayListBuilder* aBuilder,
     }
   }
 
-  if (useFixedPosition || useStickyPosition) {
+  if (useFixedPosition || useStickyPosition || needsLayerForMask) {
     clipState.ExitStackingContextContents(&containerItemScrollClip);
+  }
+
+  if (needsLayerForMask) {
+    resultList.AppendNewToTop(
+      new (aBuilder) nsDisplayOwnLayer(aBuilder, this, &resultList, 0,
+                                       mozilla::layers::FrameMetrics::NULL_SCROLL_ID,
+                                       0.0f, /* aForceActive = */ false));
   }
 
   /* If we have sticky positioning, wrap it in a sticky position item.
@@ -2811,7 +2809,7 @@ nsIFrame::BuildDisplayListForChild(nsDisplayListBuilder*   aBuilder,
     // then we won't have stored clip data for it. We can just clear the clip
     // instead since we know we won't render anything, and the inner out-of-flow
     // frame will setup the correct clip for itself.
-    clipState.Clear();
+    clipState.SetClipForContainingBlockDescendants(nullptr);
     clipState.SetScrollClipForContainingBlockDescendants(nullptr);
   }
 

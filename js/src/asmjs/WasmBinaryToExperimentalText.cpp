@@ -23,7 +23,6 @@
 #include "jsnum.h"
 #include "jsprf.h"
 
-#include "asmjs/Wasm.h"
 #include "asmjs/WasmAST.h"
 #include "asmjs/WasmBinaryToAST.h"
 #include "asmjs/WasmTypes.h"
@@ -1433,7 +1432,7 @@ PrintTableSection(WasmPrintContext& c, AstTable* maybeTable, const AstModule::Fu
 static bool
 PrintImport(WasmPrintContext& c, AstImport& import, const AstModule::SigVector& sigs)
 {
-    const AstSig* sig = sigs[import.sig().index()];
+    const AstSig* sig = sigs[import.funcSig().index()];
     if (!PrintIndent(c))
         return false;
     if (!c.buffer.append("import "))
@@ -1441,8 +1440,8 @@ PrintImport(WasmPrintContext& c, AstImport& import, const AstModule::SigVector& 
     if (!c.buffer.append("\""))
         return false;
 
-    const AstName& funcName = import.func();
-    if (!PrintEscapedString(c, funcName))
+    const AstName& fieldName = import.field();
+    if (!PrintEscapedString(c, fieldName))
         return false;
 
     if (!c.buffer.append("\" as "))
@@ -1495,7 +1494,7 @@ PrintExport(WasmPrintContext& c, AstExport& export_, const AstModule::FuncVector
         return false;
     if (!c.buffer.append("export "))
         return false;
-    if (export_.kind() == AstExportKind::Memory) {
+    if (export_.kind() == DefinitionKind::Memory) {
         if (!c.buffer.append("memory"))
           return false;
     } else {
@@ -1617,7 +1616,7 @@ PrintCodeSection(WasmPrintContext& c, const AstModule::FuncVector& funcs, const 
 
 
 static bool
-PrintDataSection(WasmPrintContext& c, AstMemory* maybeMemory)
+PrintDataSection(WasmPrintContext& c, AstMemory* maybeMemory, const AstModule::SegmentVector& segments)
 {
     if (!maybeMemory)
         return true;
@@ -1626,19 +1625,18 @@ PrintDataSection(WasmPrintContext& c, AstMemory* maybeMemory)
         return false;
     if (!c.buffer.append("memory "))
         return false;
-    if (!PrintInt32(c, maybeMemory->initialSize()))
+    if (!PrintInt32(c, maybeMemory->initial()))
        return false;
-    Maybe<uint32_t> memMax = maybeMemory->maxSize();
-    if (memMax) {
+    if (maybeMemory->maximum()) {
         if (!c.buffer.append(", "))
             return false;
-        if (!PrintInt32(c, *memMax))
+        if (!PrintInt32(c, *maybeMemory->maximum()))
             return false;
     }
 
     c.indent++;
 
-    uint32_t numSegments = maybeMemory->segments().length();
+    uint32_t numSegments = segments.length();
     if (!numSegments) {
       if (!c.buffer.append(" {}\n\n"))
           return false;
@@ -1648,7 +1646,7 @@ PrintDataSection(WasmPrintContext& c, AstMemory* maybeMemory)
         return false;
 
     for (uint32_t i = 0; i < numSegments; i++) {
-        const AstSegment* segment = maybeMemory->segments()[i];
+        const AstSegment* segment = segments[i];
 
         if (!PrintIndent(c))
             return false;
@@ -1690,7 +1688,7 @@ PrintModule(WasmPrintContext& c, AstModule& module)
     if (!PrintCodeSection(c, module.funcs(), module.sigs()))
         return false;
 
-    if (!PrintDataSection(c, module.maybeMemory()))
+    if (!PrintDataSection(c, module.maybeMemory(), module.segments()))
         return false;
 
     return true;

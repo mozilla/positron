@@ -132,6 +132,9 @@ pref("dom.indexedDB.logging.profiler-marks", false);
 // Whether or not File Handle is enabled.
 pref("dom.fileHandle.enabled", true);
 
+// Whether window.oninstall from "W3C Web Manifest" is enabled
+pref("dom.manifest.oninstall", false);
+
 // Whether or not selection events are enabled
 #ifdef NIGHTLY_BUILD
 pref("dom.select_events.enabled", true);
@@ -331,7 +334,7 @@ pref("media.wmf.low-latency.enabled", false);
 pref("media.wmf.skip-blacklist", false);
 pref("media.windows-media-foundation.allow-d3d11-dxva", true);
 pref("media.wmf.disable-d3d11-for-dlls", "igd10iumd32.dll: 20.19.15.4444, 20.19.15.4424, 20.19.15.4409, 20.19.15.4390, 20.19.15.4380, 20.19.15.4360, 10.18.10.4358, 20.19.15.4331, 20.19.15.4312, 20.19.15.4300, 10.18.15.4281, 10.18.15.4279, 10.18.10.4276, 10.18.15.4268, 10.18.15.4256, 10.18.10.4252, 10.18.15.4248, 10.18.14.4112, 10.18.10.3958, 10.18.10.3496, 10.18.10.3431, 10.18.10.3412, 10.18.10.3355, 9.18.10.3234, 9.18.10.3071, 9.18.10.3055, 9.18.10.3006; igd10umd32.dll: 9.17.10.4229, 9.17.10.3040, 9.17.10.2857, 8.15.10.2274, 8.15.10.2272, 8.15.10.2246, 8.15.10.1840, 8.15.10.1808; igd10umd64.dll: 9.17.10.4229, 10.18.10.3496; isonyvideoprocessor.dll: 4.1.2247.8090, 4.1.2153.6200; tosqep.dll: 1.2.15.526, 1.1.12.201, 1.0.11.318, 1.0.11.215, 1.0.10.1224; tosqep64.dll: 1.1.12.201, 1.0.11.215; nvwgf2um.dll: 10.18.13.6510, 10.18.13.5891, 10.18.13.5887, 10.18.13.5582, 10.18.13.5382, 9.18.13.4195, 9.18.13.3165; atidxx32.dll: 8.17.10.671, 8.17.10.661, 8.17.10.648, 8.17.10.644, 8.17.10.625, 8.17.10.605, 8.17.10.581, 8.17.10.569, 8.17.10.560, 8.17.10.545, 8.17.10.539, 8.17.10.531, 8.17.10.525, 8.17.10.520, 8.17.10.519, 8.17.10.514, 8.17.10.511, 8.17.10.494, 8.17.10.489, 8.17.10.483, 8.17.10.453, 8.17.10.451, 8.17.10.441, 8.17.10.436, 8.17.10.432, 8.17.10.425, 8.17.10.418, 8.17.10.414, 8.17.10.401, 8.17.10.395, 8.17.10.385, 8.17.10.378, 8.17.10.362, 8.17.10.355, 8.17.10.342, 8.17.10.331, 8.17.10.318, 8.17.10.310, 8.17.10.286, 8.17.10.269, 8.17.10.261, 8.17.10.247, 8.17.10.240, 8.15.10.212; atidxx64.dll: 8.17.10.661, 8.17.10.644; nvumdshim.dll: 10.18.13.6822");
-pref("media.wmf.disable-d3d9-for-dlls", "igdumd64.dll: 8.15.10.2189, 8.771.1.0; atiumd64.dll: 7.14.10.833, 7.14.10.867, 7.14.10.885, 7.14.10.903, 7.14.10.911, 8.14.10.768, 9.14.10.1001, 9.14.10.1017, 9.14.10.1080, 9.14.10.1128, 9.14.10.1162, 9.14.10.1171, 9.14.10.1183, 9.14.10.1197, 9.14.10.945, 9.14.10.972, 9.14.10.984, 9.14.10.996");
+pref("media.wmf.disable-d3d9-for-dlls", "igdumd64.dll: 8.15.10.2189, 8.15.10.2119, 8.15.10.2104, 8.15.10.2102, 8.771.1.0; atiumd64.dll: 7.14.10.833, 7.14.10.867, 7.14.10.885, 7.14.10.903, 7.14.10.911, 8.14.10.768, 9.14.10.1001, 9.14.10.1017, 9.14.10.1080, 9.14.10.1128, 9.14.10.1162, 9.14.10.1171, 9.14.10.1183, 9.14.10.1197, 9.14.10.945, 9.14.10.972, 9.14.10.984, 9.14.10.996");
 #endif
 #if defined(MOZ_FFMPEG)
 #if defined(XP_MACOSX)
@@ -576,11 +579,7 @@ pref("media.video_stats.enabled", true);
 pref("layers.amd-switchable-gfx.enabled", true);
 
 // Whether to use async panning and zooming
-pref("layers.async-pan-zoom.enabled", false);
-
-#ifdef MOZ_WIDGET_UIKIT
 pref("layers.async-pan-zoom.enabled", true);
-#endif
 
 // Whether to enable event region building during painting
 pref("layout.event-regions.enabled", false);
@@ -1148,9 +1147,8 @@ pref("dom.forms.autocomplete.experimental", false);
 // Enables requestAutocomplete DOM API on forms.
 pref("dom.forms.requestAutocomplete", false);
 
-#ifdef NIGHTLY_BUILD
-pref("dom.input.dirpicker", true);
-#endif
+// Enable Directory API. By default, disabled.
+pref("dom.input.dirpicker", false);
 
 // Enables system messages and activities
 pref("dom.sysmsg.enabled", false);
@@ -3760,9 +3758,9 @@ pref("font.name.monospace.x-math", "Courier");
 pref("font.name.cursive.x-math", "Apple Chancery");
 pref("font.name.fantasy.x-math", "Papyrus");
 
-// individual font faces to be treated as independent families
-// names are Postscript names of each face
-pref("font.single-face-list", "Osaka-Mono");
+// Individual font faces to be treated as independent families,
+// listed as <Postscript name of face:Owning family name>
+pref("font.single-face-list", "Osaka-Mono:Osaka");
 
 // optimization hint for fonts with localized names to be read in at startup, otherwise read in at lookup miss
 // names are canonical family names (typically English names)
@@ -4406,6 +4404,7 @@ pref("gl.multithreaded", true);
 pref("webgl.force-enabled", false);
 pref("webgl.disabled", false);
 pref("webgl.disable-angle", false);
+pref("webgl.disable-wgl", false);
 pref("webgl.min_capability_mode", false);
 pref("webgl.disable-extensions", false);
 pref("webgl.msaa-force", false);
@@ -4443,7 +4442,7 @@ pref("webgl.vendor-string-override", "");
 pref("webgl.angle.try-d3d11", true);
 pref("webgl.angle.force-d3d11", false);
 pref("webgl.angle.force-warp", false);
-pref("webgl.dxgl.enabled", false);
+pref("webgl.dxgl.enabled", true);
 pref("webgl.dxgl.needs-finish", false);
 #endif
 
@@ -4522,7 +4521,6 @@ pref("layers.draw-bigimage-borders", false);
 pref("layers.frame-counter", false);
 pref("layers.enable-tiles", false);
 pref("layers.single-tile.enabled", true);
-pref("layers.tiled-drawtarget.enabled", false);
 pref("layers.low-precision-buffer", false);
 pref("layers.progressive-paint", false);
 pref("layers.tile-width", 256);
@@ -4547,16 +4545,10 @@ pref("layers.offmainthreadcomposition.frame-rate", -1);
 pref("layers.enable-tiles", true);
 pref("layers.tile-width", 512);
 pref("layers.tile-height", 512);
-pref("layers.tiled-drawtarget.enabled", true);
 pref("layers.tiles.edge-padding", false);
 #endif
 
-#ifdef MOZ_WIDGET_GONK
-pref("layers.tiled-drawtarget.enabled", true);
-#endif
-
 #ifdef MOZ_WIDGET_ANDROID
-pref("layers.tiled-drawtarget.enabled", true);
 pref("layers.tiles.edge-padding", true);
 #endif
 
@@ -4681,6 +4673,10 @@ pref("full-screen-api.transition.timeout", 1000);
 pref("full-screen-api.warning.timeout", 3000);
 // delay for the warning box to show when pointer stays on the top, unit: ms
 pref("full-screen-api.warning.delay", 500);
+
+// DOM pointerlock API
+// time for the warning box stays on the screen before sliding out, unit: ms
+pref("pointer-lock-api.warning.timeout", 3000);
 
 // DOM idle observers API
 pref("dom.idle-observers-api.enabled", true);
@@ -5051,8 +5047,8 @@ pref("dom.voicemail.enabled", false);
 // parameter omitted.
 pref("dom.voicemail.defaultServiceId", 0);
 
-// Disable mapped array buffer by default.
-pref("dom.mapped_arraybuffer.enabled", false);
+// Enable mapped array buffer by default.
+pref("dom.mapped_arraybuffer.enabled", true);
 
 // The tables used for Safebrowsing phishing and malware checks.
 pref("urlclassifier.malwareTable", "goog-malware-shavar,goog-unwanted-shavar,test-malware-simple,test-unwanted-simple");
@@ -5070,7 +5066,7 @@ pref("urlclassifier.downloadAllowTable", "goog-downloadwhite-digest256");
 pref("urlclassifier.downloadAllowTable", "");
 #endif
 
-pref("urlclassifier.disallow_completions", "test-malware-simple,test-phish-simple,test-unwanted-simple,test-track-simple,test-trackwhite-simple,test-forbid-simple,goog-downloadwhite-digest256,mozstd-track-digest256,mozstd-trackwhite-digest256,mozfull-track-digest256,test-block-simple,mozplugin-block-digest256,mozplugin2-block-digest256");
+pref("urlclassifier.disallow_completions", "test-malware-simple,test-phish-simple,test-unwanted-simple,test-track-simple,test-trackwhite-simple,test-block-simple,goog-downloadwhite-digest256,mozstd-track-digest256,mozstd-trackwhite-digest256,mozfull-track-digest256,mozplugin-block-digest256,mozplugin2-block-digest256");
 
 // The table and update/gethash URLs for Safebrowsing phishing and malware
 // checks.
@@ -5118,10 +5114,6 @@ pref("browser.safebrowsing.provider.google.reportURL", "https://safebrowsing.goo
 pref("browser.safebrowsing.reportPhishMistakeURL", "https://%LOCALE%.phish-error.mozilla.com/?hl=%LOCALE%&url=");
 pref("browser.safebrowsing.reportPhishURL", "https://%LOCALE%.phish-report.mozilla.com/?hl=%LOCALE%&url=");
 pref("browser.safebrowsing.reportMalwareMistakeURL", "https://%LOCALE%.malware-error.mozilla.com/?hl=%LOCALE%&url=");
-
-// The table and global pref for blocking access to sites forbidden by policy
-pref("browser.safebrowsing.forbiddenURIs.enabled", false);
-pref("urlclassifier.forbiddenTable", "test-forbid-simple");
 
 // The table and global pref for blocking plugin content
 pref("browser.safebrowsing.blockedURIs.enabled", false);
@@ -5280,8 +5272,6 @@ pref("browser.addon-watch.interval", 15000);
 pref("browser.addon-watch.interval", -1);
 #endif
 pref("browser.addon-watch.ignore", "[\"mochikit@mozilla.org\",\"special-powers@mozilla.org\",\"fxdevtools-adapters@mozilla.org\",\"fx-devtools\"]");
-// the percentage of time addons are allowed to use without being labeled slow
-pref("browser.addon-watch.percentage-limit", 5);
 
 // Search service settings
 pref("browser.search.log", false);
@@ -5432,8 +5422,6 @@ pref("media.useAudioChannelAPI", false);
 
 // Expose Request.context. Currently disabled since the spec is in flux.
 pref("dom.requestcontext.enabled", false);
-
-pref("dom.mozKillSwitch.enabled", false);
 
 pref("toolkit.pageThumbs.screenSizeDivisor", 7);
 pref("toolkit.pageThumbs.minWidth", 0);

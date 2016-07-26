@@ -1297,7 +1297,9 @@ var gBrowserInit = {
     if (Win7Features)
       Win7Features.onOpenWindow();
 
+    PointerlockFsWarning.init();
     FullScreen.init();
+    PointerLock.init();
 
     // initialize the sync UI
     gSyncUI.init();
@@ -2252,6 +2254,26 @@ function BrowserViewSourceOfDocument(aArgsOrDocument) {
     let inTab = Services.prefs.getBoolPref("view_source.tab");
     if (inTab) {
       let tabBrowser = gBrowser;
+      let forceNotRemote = false;
+      if (!tabBrowser) {
+        if (!args.browser) {
+          throw new Error("BrowserViewSourceOfDocument should be passed the " +
+                          "subject browser if called from a window without " +
+                          "gBrowser defined.");
+        }
+        forceNotRemote = !args.browser.isRemoteBrowser;
+      } else {
+        // Some internal URLs (such as specific chrome: and about: URLs that are
+        // not yet remote ready) cannot be loaded in a remote browser.  View
+        // source in tab expects the new view source browser's remoteness to match
+        // that of the original URL, so disable remoteness if necessary for this
+        // URL.
+        let contentProcess = Ci.nsIXULRuntime.PROCESS_TYPE_CONTENT
+        forceNotRemote =
+          gMultiProcessBrowser &&
+          !E10SUtils.canLoadURIInProcess(args.URL, contentProcess)
+      }
+
       // In the case of sidebars and chat windows, gBrowser is defined but null,
       // because no #content element exists.  For these cases, we need to find
       // the most recent browser window.
@@ -2261,15 +2283,7 @@ function BrowserViewSourceOfDocument(aArgsOrDocument) {
         let browserWindow = RecentWindow.getMostRecentBrowserWindow();
         tabBrowser = browserWindow.gBrowser;
       }
-      // Some internal URLs (such as specific chrome: and about: URLs that are
-      // not yet remote ready) cannot be loaded in a remote browser.  View
-      // source in tab expects the new view source browser's remoteness to match
-      // that of the original URL, so disable remoteness if necessary for this
-      // URL.
-      let contentProcess = Ci.nsIXULRuntime.PROCESS_TYPE_CONTENT
-      let forceNotRemote =
-        gMultiProcessBrowser &&
-        !E10SUtils.canLoadURIInProcess(args.URL, contentProcess);
+
       // `viewSourceInBrowser` will load the source content from the page
       // descriptor for the tab (when possible) or fallback to the network if
       // that fails.  Either way, the view source module will manage the tab's
@@ -2322,7 +2336,8 @@ function BrowserViewSource(browser) {
 // initialTab - name of the initial tab to display, or null for the first tab
 // imageElement - image to load in the Media Tab of the Page Info window; can be null/omitted
 // frameOuterWindowID - the id of the frame that the context menu opened in; can be null/omitted
-function BrowserPageInfo(documentURL, initialTab, imageElement, frameOuterWindowID) {
+// browser - the browser containing the document we're interested in inspecting; can be null/omitted
+function BrowserPageInfo(documentURL, initialTab, imageElement, frameOuterWindowID, browser) {
   if (documentURL instanceof HTMLDocument) {
     Deprecated.warning("Please pass the location URL instead of the document " +
                        "to BrowserPageInfo() as the first argument.",
@@ -2330,7 +2345,7 @@ function BrowserPageInfo(documentURL, initialTab, imageElement, frameOuterWindow
     documentURL = documentURL.location;
   }
 
-  let args = { initialTab, imageElement, frameOuterWindowID };
+  let args = { initialTab, imageElement, frameOuterWindowID, browser };
   var windows = Services.wm.getEnumerator("Browser:page-info");
 
   documentURL = documentURL || window.gBrowser.selectedBrowser.currentURI.spec;
@@ -2940,12 +2955,6 @@ var BrowserOnClick = {
           this.ignoreWarningButton(reason);
         }
         break;
-
-      case "whyForbiddenButton":
-        // This is the "Why is this site blocked" button for family friendly browsing
-        // for Fennec. There's no desktop focused support page yet.
-        gBrowser.loadURI("https://support.mozilla.org/kb/controlledaccess");
-        break;
     }
   },
 
@@ -2967,7 +2976,7 @@ var BrowserOnClick = {
         anchorTarget.classList.contains("newtab-link")) {
       event.preventDefault();
       let where = whereToOpenLink(event, false, false);
-      openLinkIn(anchorTarget.href, where, { charset: ownerDoc.characterSet });
+      openLinkIn(anchorTarget.href, where, { charset: ownerDoc.characterSet, referrerURI: ownerDoc.documentURIObject });
     }
   },
 
@@ -3012,8 +3021,6 @@ var BrowserOnClick = {
       title = gNavigatorBundle.getString("safebrowsing.reportedUnwantedSite");
       // There is no button for reporting errors since Google doesn't currently
       // provide a URL endpoint for these reports.
-    } else {
-      return; // no notifications for forbidden sites
     }
 
     let notificationBox = gBrowser.getNotificationBox();
@@ -6807,7 +6814,7 @@ var gIdentityHandler = {
    * display information about connection security in the notification shown
    * when a site enters the fullscreen mode.
    */
-  get fullscreenWarningClassName() {
+  get pointerlockFsWarningClassName() {
     // Note that the fullscreen warning does not handle _isSecureInternalUI.
     if (this._uriHasHost && this._isEV) {
       return "verifiedIdentity";
@@ -7248,8 +7255,9 @@ var gIdentityHandler = {
     label.textContent = aPermission.label;
 
     let img = document.createElement("image");
+    let isBlocked = (aPermission.state == SitePermissions.BLOCK) ? " blocked" : "";
     img.setAttribute("class",
-      "identity-popup-permission-icon " + aPermission.id + "-icon");
+      "identity-popup-permission-icon " + aPermission.id + "-icon" + isBlocked);
 
     let container = document.createElement("hbox");
     container.setAttribute("align", "center");

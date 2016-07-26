@@ -40,6 +40,13 @@ pref("security.remember_cert_checkbox_default_setting", true);
 pref("security.ask_for_password",        0);
 pref("security.password_lifetime",       30);
 
+// The supported values of this pref are:
+// 0: disable detecting Family Safety mode and importing the root
+// 1: only attempt to detect Family Safety mode (don't import the root)
+// 2: detect Family Safety mode and import the root
+// (This is only relevant to Windows 8.1)
+pref("security.family_safety.mode", 2);
+
 pref("security.OCSP.enabled", 1);
 pref("security.OCSP.require", false);
 pref("security.OCSP.GET.enabled", false);
@@ -85,3 +92,8 @@ pref("security.webauth.u2f_enable_usbtoken", false);
 pref("security.ssl.errorReporting.enabled", true);
 pref("security.ssl.errorReporting.url", "https://incoming.telemetry.mozilla.org/submit/sslreports/");
 pref("security.ssl.errorReporting.automatic", false);
+
+// Impose a maximum age on HPKP headers, to avoid sites getting permanently
+// blacking themselves out by setting a bad pin.  (60 days by default)
+// https://tools.ietf.org/html/rfc7469#section-4.1
+pref("security.cert_pinning.max_max_age_seconds", 5184000);

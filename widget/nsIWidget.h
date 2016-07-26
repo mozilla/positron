@@ -65,6 +65,8 @@ class SourceSurface;
 namespace widget {
 class TextEventDispatcher;
 class TextEventDispatcherListener;
+class CompositorWidget;
+class CompositorWidgetInitData;
 } // namespace widget
 } // namespace mozilla
 
@@ -1204,21 +1206,17 @@ class nsIWidget : public nsISupports
     /**
      * Return the widget's LayerManager. The layer tree for that
      * LayerManager is what gets rendered to the widget.
-     *
-     * @param aAllowRetaining an outparam that states whether the returned
-     * layer manager should be used for retained layers
      */
-    inline LayerManager* GetLayerManager(bool* aAllowRetaining = nullptr)
+    inline LayerManager* GetLayerManager()
     {
         return GetLayerManager(nullptr, mozilla::layers::LayersBackend::LAYERS_NONE,
-                               LAYER_MANAGER_CURRENT, aAllowRetaining);
+                               LAYER_MANAGER_CURRENT);
     }
 
-    inline LayerManager* GetLayerManager(LayerManagerPersistence aPersistence,
-                                         bool* aAllowRetaining = nullptr)
+    inline LayerManager* GetLayerManager(LayerManagerPersistence aPersistence)
     {
         return GetLayerManager(nullptr, mozilla::layers::LayersBackend::LAYERS_NONE,
-                               aPersistence, aAllowRetaining);
+                               aPersistence);
     }
 
     /**
@@ -1228,8 +1226,7 @@ class nsIWidget : public nsISupports
      */
     virtual LayerManager* GetLayerManager(PLayerTransactionChild* aShadowManager,
                                           LayersBackend aBackendHint,
-                                          LayerManagerPersistence aPersistence = LAYER_MANAGER_CURRENT,
-                                          bool* aAllowRetaining = nullptr) = 0;
+                                          LayerManagerPersistence aPersistence = LAYER_MANAGER_CURRENT) = 0;
 
     /**
      * Called before each layer manager transaction to allow any preparation
@@ -1630,6 +1627,11 @@ class nsIWidget : public nsISupports
     virtual nsresult ClearNativeTouchSequence(nsIObserver* aObserver);
 
     virtual void StartAsyncScrollbarDrag(const AsyncDragMetrics& aDragMetrics) = 0;
+
+    // If this widget supports out-of-process compositing, it can override
+    // this method to provide additional information to the compositor.
+    virtual void GetCompositorWidgetInitData(mozilla::widget::CompositorWidgetInitData* aInitData)
+    {}
 
 private:
   class LongTapInfo

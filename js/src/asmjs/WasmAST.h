@@ -149,10 +149,6 @@ class AstSig : public AstBase
         args_(Move(rhs.args_)),
         ret_(rhs.ret_)
     {}
-    void operator=(AstSig&& rhs) {
-        args_ = Move(rhs.args_);
-        ret_ = rhs.ret_;
-    }
     const AstValTypeVector& args() const {
         return args_;
     }
@@ -507,40 +503,59 @@ class AstFunc : public AstNode
     AstName name() const { return name_; }
 };
 
+class AstMemorySignature
+{
+    uint32_t initial_;
+    Maybe<uint32_t> maximum_;
+
+  public:
+    AstMemorySignature() = default;
+    AstMemorySignature(uint32_t initial, Maybe<uint32_t> maximum)
+      : initial_(initial), maximum_(maximum)
+    {}
+    uint32_t initial() const { return initial_; }
+    const Maybe<uint32_t>& maximum() const { return maximum_; }
+};
+
 class AstImport : public AstNode
 {
     AstName name_;
     AstName module_;
-    AstName func_;
-    AstRef sig_;
+    AstName field_;
+    DefinitionKind kind_;
+    AstRef funcSig_;
+    AstMemorySignature memSig_;
 
   public:
-    AstImport(AstName name, AstName module, AstName func, AstRef sig)
-      : name_(name), module_(module), func_(func), sig_(sig)
+    AstImport(AstName name, AstName module, AstName field, AstRef funcSig)
+      : name_(name), module_(module), field_(field), kind_(DefinitionKind::Function), funcSig_(funcSig)
+    {}
+    AstImport(AstName name, AstName module, AstName field, AstMemorySignature memSig)
+      : name_(name), module_(module), field_(field), kind_(DefinitionKind::Memory), memSig_(memSig)
     {}
     AstName name() const { return name_; }
     AstName module() const { return module_; }
-    AstName func() const { return func_; }
-    AstRef& sig() { return sig_; }
+    AstName field() const { return field_; }
+    DefinitionKind kind() const { return kind_; }
+    AstRef& funcSig() { MOZ_ASSERT(kind_ == DefinitionKind::Function); return funcSig_; }
+    const AstMemorySignature& memSig() const { MOZ_ASSERT(kind_ == DefinitionKind::Memory); return memSig_; }
 };
-
-enum class AstExportKind { Func, Memory };
 
 class AstExport : public AstNode
 {
     AstName name_;
-    AstExportKind kind_;
+    DefinitionKind kind_;
     AstRef func_;
 
   public:
     AstExport(AstName name, AstRef func)
-      : name_(name), kind_(AstExportKind::Func), func_(func)
+      : name_(name), kind_(DefinitionKind::Function), func_(func)
     {}
     explicit AstExport(AstName name)
-      : name_(name), kind_(AstExportKind::Memory)
+      : name_(name), kind_(DefinitionKind::Memory)
     {}
     AstName name() const { return name_; }
-    AstExportKind kind() const { return kind_; }
+    DefinitionKind kind() const { return kind_; }
     AstRef& func() { return func_; }
 };
 
@@ -570,22 +585,12 @@ class AstSegment : public AstNode
 
 typedef AstVector<AstSegment*> AstSegmentVector;
 
-class AstMemory : public AstNode
+class AstMemory : public AstNode, public AstMemorySignature
 {
-    uint32_t initialSize_;
-    Maybe<uint32_t> maxSize_;
-    AstSegmentVector segments_;
-
   public:
-    explicit AstMemory(uint32_t initialSize, Maybe<uint32_t> maxSize,
-                           AstSegmentVector&& segments)
-      : initialSize_(initialSize),
-        maxSize_(maxSize),
-        segments_(Move(segments))
+    explicit AstMemory(AstMemorySignature memSig)
+      : AstMemorySignature(memSig)
     {}
-    uint32_t initialSize() const { return initialSize_; }
-    const Maybe<uint32_t>& maxSize() const { return maxSize_; }
-    const AstSegmentVector& segments() const { return segments_; }
 };
 
 class AstModule : public AstNode
@@ -595,12 +600,14 @@ class AstModule : public AstNode
     typedef AstVector<AstImport*> ImportVector;
     typedef AstVector<AstExport*> ExportVector;
     typedef AstVector<AstSig*> SigVector;
+    typedef AstVector<AstSegment*> SegmentVector;
 
   private:
     typedef AstHashMap<AstSig*, uint32_t, AstSig> SigMap;
 
     LifoAlloc& lifo_;
     AstMemory* memory_;
+    SegmentVector segments_;
     SigVector sigs_;
     SigMap sigMap_;
     ImportVector imports_;
@@ -612,6 +619,7 @@ class AstModule : public AstNode
     explicit AstModule(LifoAlloc& lifo)
       : lifo_(lifo),
         memory_(nullptr),
+        segments_(lifo),
         sigs_(lifo),
         sigMap_(lifo),
         imports_(lifo),
@@ -630,6 +638,12 @@ class AstModule : public AstNode
     }
     AstMemory* maybeMemory() const {
         return memory_;
+    }
+    bool append(AstSegment* seg) {
+        return segments_.append(seg);
+    }
+    const SegmentVector& segments() const {
+        return segments_;
     }
     bool declare(AstSig&& sig, uint32_t* sigIndex) {
         SigMap::AddPtr p = sigMap_.lookupForAdd(sig);

@@ -81,7 +81,9 @@ addEventListener("blur", function(event) {
   LoginManagerContent.onUsernameInput(event);
 });
 
+var gLastContextMenuEvent = null; // null or a WeakReference to a contextmenu event
 var handleContentContextMenu = function (event) {
+  gLastContextMenuEvent = null;
   let defaultPrevented = event.defaultPrevented;
   if (!Services.prefs.getBoolPref("dom.event.contextmenu.enabled")) {
     let plugin = null;
@@ -96,8 +98,36 @@ var handleContentContextMenu = function (event) {
     defaultPrevented = false;
   }
 
-  if (defaultPrevented)
+  if (defaultPrevented) {
     return;
+  }
+
+  if (event.mozInputSource == Ci.nsIDOMMouseEvent.MOZ_SOURCE_TOUCH) {
+    // If this was triggered by touch, then we don't want to show the actual
+    // context menu until we get the APZ:LongTapUp notification. However, we
+    // will need the |event| object when we get that notification, so we save
+    // it in a WeakReference. That way it won't leak things if we never get
+    // the APZ:LongTapUp notification (which is quite possible).
+    gLastContextMenuEvent = Cu.getWeakReference(event);
+    return;
+  }
+
+  // For non-touch-derived contextmenu events, we can handle it right away.
+  showContentContextMenu(event);
+}
+
+var showContentContextMenu = function (event) {
+  if (event == null) {
+    // If we weren't given an event, then this is being invoked from the
+    // APZ:LongTapUp observer, and the contextmenu event is stashed in
+    // gLastContextMenuEvent.
+    event = (gLastContextMenuEvent ? gLastContextMenuEvent.get() : null);
+    gLastContextMenuEvent = null;
+    if (event == null) {
+      // Still no event? We can't do anything, bail out.
+      return;
+    }
+  }
 
   let addonInfo = {};
   let subject = {
@@ -215,6 +245,11 @@ Cc["@mozilla.org/eventlistenerservice;1"]
   .getService(Ci.nsIEventListenerService)
   .addSystemEventListener(global, "contextmenu", handleContentContextMenu, false);
 
+Services.obs.addObserver(showContentContextMenu, "APZ:LongTapUp", false);
+addEventListener("unload", () => {
+  Services.obs.removeObserver(showContentContextMenu, "APZ:LongTapUp")
+}, false);
+
 // Values for telemtery bins: see TLS_ERROR_REPORT_UI in Histograms.json
 const TLS_ERROR_REPORT_TELEMETRY_UI_SHOWN = 0;
 const TLS_ERROR_REPORT_TELEMETRY_EXPANDED = 1;
@@ -230,6 +265,7 @@ const SEC_ERROR_EXPIRED_ISSUER_CERTIFICATE         = SEC_ERROR_BASE + 30;
 const SEC_ERROR_OCSP_FUTURE_RESPONSE               = SEC_ERROR_BASE + 131;
 const SEC_ERROR_OCSP_OLD_RESPONSE                  = SEC_ERROR_BASE + 132;
 const MOZILLA_PKIX_ERROR_NOT_YET_VALID_CERTIFICATE = MOZILLA_PKIX_ERROR_BASE + 5;
+const MOZILLA_PKIX_ERROR_NOT_YET_VALID_ISSUER_CERTIFICATE = MOZILLA_PKIX_ERROR_BASE + 6;
 
 const PREF_BLOCKLIST_CLOCK_SKEW_SECONDS = "services.blocklist.clock_skew_seconds";
 
@@ -239,6 +275,20 @@ const PREF_SSL_IMPACT = PREF_SSL_IMPACT_ROOTS.reduce((prefs, root) => {
   return prefs.concat(Services.prefs.getChildList(root));
 }, []);
 
+
+function getSerializedSecurityInfo(docShell) {
+  let serhelper = Cc["@mozilla.org/network/serialization-helper;1"]
+                    .getService(Ci.nsISerializationHelper);
+
+  let securityInfo = docShell.failedChannel && docShell.failedChannel.securityInfo;
+  if (!securityInfo) {
+    return "";
+  }
+  securityInfo.QueryInterface(Ci.nsITransportSecurityInfo)
+              .QueryInterface(Ci.nsISerializable);
+
+  return serhelper.serializeToString(securityInfo);
+}
 
 var AboutNetAndCertErrorListener = {
   init: function(chromeGlobal) {
@@ -272,11 +322,12 @@ var AboutNetAndCertErrorListener = {
   onCertErrorDetails(msg) {
     let div = content.document.getElementById("certificateErrorText");
     div.textContent = msg.data.info;
+    let learnMoreLink = content.document.getElementById("learnMoreLink");
+    let baseURL = Services.urlFormatter.formatURLPref("app.support.baseURL");
 
     switch (msg.data.code) {
       case SEC_ERROR_UNKNOWN_ISSUER:
-        let learnMoreLink = content.document.getElementById("learnMoreLink");
-        learnMoreLink.href = "https://support.mozilla.org/kb/troubleshoot-SEC_ERROR_UNKNOWN_ISSUER";
+        learnMoreLink.href = baseURL  + "security-error";
         break;
 
       // in case the certificate expired we make sure the system clock
@@ -286,6 +337,7 @@ var AboutNetAndCertErrorListener = {
       case SEC_ERROR_OCSP_FUTURE_RESPONSE:
       case SEC_ERROR_OCSP_OLD_RESPONSE:
       case MOZILLA_PKIX_ERROR_NOT_YET_VALID_CERTIFICATE:
+      case MOZILLA_PKIX_ERROR_NOT_YET_VALID_ISSUER_CERTIFICATE:
 
         // use blocklist stats if available
         if (Services.prefs.getPrefType(PREF_BLOCKLIST_CLOCK_SKEW_SECONDS)) {
@@ -311,7 +363,7 @@ var AboutNetAndCertErrorListener = {
               .style.display = "block";
           }
         }
-
+        learnMoreLink.href = baseURL  + "time-errors";
         break;
     }
   },
@@ -379,19 +431,10 @@ var AboutNetAndCertErrorListener = {
 
     // if we're enabling reports, send a report for this failure
     if (evt.detail) {
-      let serhelper = Cc["@mozilla.org/network/serialization-helper;1"]
-                        .getService(Ci.nsISerializationHelper);
-
-      let serializable = docShell.failedChannel.securityInfo
-          .QueryInterface(Ci.nsITransportSecurityInfo)
-          .QueryInterface(Ci.nsISerializable);
-
-      let serializedSecurityInfo = serhelper.serializeToString(serializable);
-
       let {host, port} = content.document.mozDocumentURIIfNotForErrorPages;
       sendAsyncMessage("Browser:SendSSLErrorReport", {
         uri: { host, port },
-        securityInfo: serializedSecurityInfo
+        securityInfo: getSerializedSecurityInfo(docShell),
       });
 
     }
@@ -504,26 +547,14 @@ var ClickEventHandler = {
   },
 
   onCertError: function (targetElement, ownerDoc) {
-    let docshell = ownerDoc.defaultView.QueryInterface(Ci.nsIInterfaceRequestor)
+    let docShell = ownerDoc.defaultView.QueryInterface(Ci.nsIInterfaceRequestor)
                                        .getInterface(Ci.nsIWebNavigation)
                                        .QueryInterface(Ci.nsIDocShell);
-    let serhelper = Cc["@mozilla.org/network/serialization-helper;1"]
-                     .getService(Ci.nsISerializationHelper);
-    let serializedSecurityInfo = "";
-
-    try {
-      let serializable =  docShell.failedChannel.securityInfo
-                                  .QueryInterface(Ci.nsITransportSecurityInfo)
-                                  .QueryInterface(Ci.nsISerializable);
-
-      serializedSecurityInfo = serhelper.serializeToString(serializable);
-    } catch (e) { }
-
     sendAsyncMessage("Browser:CertExceptionError", {
       location: ownerDoc.location.href,
       elementId: targetElement.getAttribute("id"),
       isTopFrame: (ownerDoc.defaultView.parent === ownerDoc.defaultView),
-      securityInfoAsString: serializedSecurityInfo
+      securityInfoAsString: getSerializedSecurityInfo(docShell),
     });
   },
 
@@ -533,8 +564,6 @@ var ClickEventHandler = {
       reason = 'malware';
     } else if (/e=unwantedBlocked/.test(ownerDoc.documentURI)) {
       reason = 'unwanted';
-    } else if (/e=forbiddenBlocked/.test(ownerDoc.documentURI)) {
-      reason = 'forbidden';
     }
     sendAsyncMessage("Browser:SiteBlockedError", {
       location: ownerDoc.location.href,

@@ -2570,9 +2570,9 @@ nsXPCComponents_Utils::GetWeakReference(HandleValue object, JSContext* cx,
 NS_IMETHODIMP
 nsXPCComponents_Utils::ForceGC()
 {
-    JSRuntime* rt = nsXPConnect::GetRuntimeInstance()->Runtime();
-    PrepareForFullGC(rt);
-    GCForReason(rt, GC_NORMAL, gcreason::COMPONENT_UTILS);
+    JSContext* cx = nsXPConnect::GetRuntimeInstance()->Context();
+    PrepareForFullGC(cx);
+    GCForReason(cx, GC_NORMAL, gcreason::COMPONENT_UTILS);
     return NS_OK;
 }
 
@@ -2614,9 +2614,9 @@ nsXPCComponents_Utils::ClearMaxCCTime()
 NS_IMETHODIMP
 nsXPCComponents_Utils::ForceShrinkingGC()
 {
-    JSRuntime* rt = nsXPConnect::GetRuntimeInstance()->Runtime();
-    PrepareForFullGC(rt);
-    GCForReason(rt, GC_SHRINK, gcreason::COMPONENT_UTILS);
+    JSContext* cx = nsXPConnect::GetRuntimeInstance()->Context();
+    PrepareForFullGC(cx);
+    GCForReason(cx, GC_SHRINK, gcreason::COMPONENT_UTILS);
     return NS_OK;
 }
 
@@ -3000,33 +3000,18 @@ nsXPCComponents_Utils::Dispatch(HandleValue runnableArg, HandleValue scope,
         return NS_OK;                                                   \
     }
 
-#define GENERATE_JSRUNTIMEOPTION_GETTER_SETTER(_attr, _getter, _setter) \
-    NS_IMETHODIMP                                                       \
-    nsXPCComponents_Utils::Get## _attr(JSContext* cx, bool* aValue)     \
-    {                                                                   \
-        *aValue = RuntimeOptionsRef(cx)._getter();                      \
-        return NS_OK;                                                   \
-    }                                                                   \
-    NS_IMETHODIMP                                                       \
-    nsXPCComponents_Utils::Set## _attr(JSContext* cx, bool aValue)      \
-    {                                                                   \
-        RuntimeOptionsRef(cx)._setter(aValue);                          \
-        return NS_OK;                                                   \
-    }
-
-GENERATE_JSRUNTIMEOPTION_GETTER_SETTER(Strict, extraWarnings, setExtraWarnings)
-GENERATE_JSRUNTIMEOPTION_GETTER_SETTER(Werror, werror, setWerror)
-GENERATE_JSRUNTIMEOPTION_GETTER_SETTER(Strict_mode, strictMode, setStrictMode)
-GENERATE_JSRUNTIMEOPTION_GETTER_SETTER(Ion, ion, setIon)
+GENERATE_JSCONTEXTOPTION_GETTER_SETTER(Strict, extraWarnings, setExtraWarnings)
+GENERATE_JSCONTEXTOPTION_GETTER_SETTER(Werror, werror, setWerror)
+GENERATE_JSCONTEXTOPTION_GETTER_SETTER(Strict_mode, strictMode, setStrictMode)
+GENERATE_JSCONTEXTOPTION_GETTER_SETTER(Ion, ion, setIon)
 
 #undef GENERATE_JSCONTEXTOPTION_GETTER_SETTER
-#undef GENERATE_JSRUNTIMEOPTION_GETTER_SETTER
 
 NS_IMETHODIMP
 nsXPCComponents_Utils::SetGCZeal(int32_t aValue, JSContext* cx)
 {
 #ifdef JS_GC_ZEAL
-    JS_SetGCZeal(JS_GetRuntime(cx), uint8_t(aValue), JS_DEFAULT_ZEAL_FREQ);
+    JS_SetGCZeal(cx, uint8_t(aValue), JS_DEFAULT_ZEAL_FREQ);
 #endif
     return NS_OK;
 }
@@ -3359,6 +3344,20 @@ nsXPCComponents_Utils::SetAddonCallInterposition(HandleValue target,
 }
 
 NS_IMETHODIMP
+nsXPCComponents_Utils::AllowCPOWsInAddon(const nsACString& addonIdStr,
+                                         bool allow,
+                                         JSContext* cx)
+{
+    JSAddonId* addonId = xpc::NewAddonId(cx, addonIdStr);
+    if (!addonId)
+        return NS_ERROR_FAILURE;
+    if (!XPCWrappedNativeScope::AllowCPOWsInAddon(cx, addonId, allow))
+        return NS_ERROR_FAILURE;
+
+    return NS_OK;
+}
+
+NS_IMETHODIMP
 nsXPCComponents_Utils::Now(double* aRetval)
 {
     bool isInconsistent = false;
@@ -3495,7 +3494,7 @@ NS_IMETHODIMP nsXPCComponents::ReportError(HandleValue error, JSContext* cx)
 class ComponentsSH : public nsIXPCScriptable
 {
 public:
-    explicit MOZ_CONSTEXPR ComponentsSH(unsigned dummy)
+    explicit constexpr ComponentsSH(unsigned dummy)
     {
     }
 

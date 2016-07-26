@@ -323,6 +323,33 @@ LIRGeneratorX86Shared::visitAsmJSNeg(MAsmJSNeg* ins)
 }
 
 void
+LIRGeneratorX86Shared::visitWasmBoundsCheck(MWasmBoundsCheck* ins)
+{
+    if (!gen->needsBoundsCheckBranch(ins))
+        return;
+
+    MDefinition* index = ins->input();
+    auto* lir = new(alloc()) LWasmBoundsCheck(useRegisterAtStart(index));
+    add(lir, ins);
+}
+
+void
+LIRGeneratorX86Shared::visitWasmLoad(MWasmLoad* ins)
+{
+    MDefinition* base = ins->base();
+    MOZ_ASSERT(base->type() == MIRType::Int32);
+
+    if (ins->type() == MIRType::Int64) {
+        auto* lir = new(alloc()) LWasmLoadI64(useRegisterOrZeroAtStart(base));
+        defineInt64(lir, ins);
+        return;
+    }
+
+    auto* lir = new(alloc()) LWasmLoad(useRegisterOrZeroAtStart(base));
+    define(lir, ins);
+}
+
+void
 LIRGeneratorX86Shared::lowerUDiv(MDiv* div)
 {
     if (div->rhs()->isConstant()) {

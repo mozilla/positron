@@ -6,9 +6,9 @@
 
 toolkit = CONFIG['MOZ_WIDGET_TOOLKIT']
 
-if toolkit in ('cocoa', 'qt', 'android', 'gonk', 'uikit'):
+if toolkit in ('cocoa', 'android', 'gonk', 'uikit'):
     DIRS += [toolkit]
-if toolkit in ('qt', 'android', 'gonk', 'gtk2', 'gtk3'):
+if toolkit in ('android', 'gonk', 'gtk2', 'gtk3'):
     EXPORTS += ['nsIPrintDialogService.h']
 
 if toolkit == 'windows':
@@ -88,7 +88,6 @@ XPIDL_SOURCES += [
 XPIDL_MODULE = 'widget'
 
 EXPORTS += [
-    'CompositorWidgetProxy.h',
     'GfxDriverInfo.h',
     'GfxInfoBase.h',
     'GfxInfoCollector.h',
@@ -129,18 +128,21 @@ EXPORTS.mozilla += [
 ]
 
 EXPORTS.mozilla.widget += [
+    'CompositorWidget.h',
     'IMEData.h',
+    'InProcessCompositorWidget.h',
     'PuppetBidiKeyboard.h',
     'WidgetMessageUtils.h',
 ]
 
 UNIFIED_SOURCES += [
-    'CompositorWidgetProxy.cpp',
+    'CompositorWidget.cpp',
     'ContentCache.cpp',
     'GfxDriverInfo.cpp',
     'GfxInfoBase.cpp',
     'GfxInfoCollector.cpp',
     'GfxInfoWebGL.cpp',
+    'InProcessCompositorWidget.cpp',
     'InputData.cpp',
     'nsBaseAppShell.cpp',
     'nsBaseScreen.cpp',
@@ -209,13 +211,13 @@ if toolkit in ('cocoa', 'windows'):
         'nsBaseClipboard.cpp',
     ]
 
-if toolkit in {'qt', 'gtk2', 'gtk3', 'cocoa', 'windows',
+if toolkit in {'gtk2', 'gtk3', 'cocoa', 'windows',
                'android', 'gonk', 'uikit'}:
     UNIFIED_SOURCES += [
         'nsBaseFilePicker.cpp',
     ]
 
-if toolkit in ('qt', 'gtk2', 'gtk3', 'windows', 'cocoa'):
+if toolkit in ('gtk2', 'gtk3', 'windows', 'cocoa'):
     UNIFIED_SOURCES += [
         'nsNativeTheme.cpp',
     ]
@@ -239,6 +241,17 @@ LOCAL_INCLUDES += [
     '/view',
     '/widget',
 ]
+
+if toolkit == 'windows':
+    IPDL_SOURCES = [
+        'windows/PCompositorWidget.ipdl',
+        'windows/PlatformWidgetTypes.ipdlh',
+    ]
+else:
+    IPDL_SOURCES = [
+        'PCompositorWidget.ipdl',
+        'PlatformWidgetTypes.ipdlh',
+    ]
 
 widget_dir = toolkit
 if widget_dir in ('gtk3', 'gtk2'):

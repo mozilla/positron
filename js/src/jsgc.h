@@ -24,6 +24,7 @@
 
 namespace js {
 
+class AutoLockHelperThreadState;
 unsigned GetCPUCount();
 
 enum ThreadType
@@ -956,7 +957,7 @@ class GCParallelTask
     // If multiple tasks are to be started or joined at once, it is more
     // efficient to take the helper thread lock once and use these methods.
     bool startWithLockHeld();
-    void joinWithLockHeld();
+    void joinWithLockHeld(AutoLockHelperThreadState& locked);
 
     // Instead of dispatching to a helper, run the task on the main thread.
     void runFromMainThread(JSRuntime* rt);
@@ -975,7 +976,7 @@ class GCParallelTask
     // This should be friended to HelperThread, but cannot be because it
     // would introduce several circular dependencies.
   public:
-    virtual void runFromHelperThread();
+    virtual void runFromHelperThread(AutoLockHelperThreadState& locked);
 };
 
 typedef void (*IterateChunkCallback)(JSRuntime* rt, void* data, gc::Chunk* chunk);
@@ -991,7 +992,7 @@ typedef void (*IterateCellCallback)(JSRuntime* rt, void* data, void* thing,
  * on every in-use cell in the GC heap.
  */
 extern void
-IterateZonesCompartmentsArenasCells(JSRuntime* rt, void* data,
+IterateZonesCompartmentsArenasCells(JSContext* cx, void* data,
                                     IterateZoneCallback zoneCallback,
                                     JSIterateCompartmentCallback compartmentCallback,
                                     IterateArenaCallback arenaCallback,
@@ -1002,7 +1003,7 @@ IterateZonesCompartmentsArenasCells(JSRuntime* rt, void* data,
  * single zone.
  */
 extern void
-IterateZoneCompartmentsArenasCells(JSRuntime* rt, Zone* zone, void* data,
+IterateZoneCompartmentsArenasCells(JSContext* cx, Zone* zone, void* data,
                                    IterateZoneCallback zoneCallback,
                                    JSIterateCompartmentCallback compartmentCallback,
                                    IterateArenaCallback arenaCallback,
@@ -1012,7 +1013,7 @@ IterateZoneCompartmentsArenasCells(JSRuntime* rt, Zone* zone, void* data,
  * Invoke chunkCallback on every in-use chunk.
  */
 extern void
-IterateChunks(JSRuntime* rt, void* data, IterateChunkCallback chunkCallback);
+IterateChunks(JSContext* cx, void* data, IterateChunkCallback chunkCallback);
 
 typedef void (*IterateScriptCallback)(JSRuntime* rt, void* data, JSScript* script);
 
@@ -1021,7 +1022,7 @@ typedef void (*IterateScriptCallback)(JSRuntime* rt, void* data, JSScript* scrip
  * the given compartment or for all compartments if it is null.
  */
 extern void
-IterateScripts(JSRuntime* rt, JSCompartment* compartment,
+IterateScripts(JSContext* cx, JSCompartment* compartment,
                void* data, IterateScriptCallback scriptCallback);
 
 extern void
@@ -1442,7 +1443,7 @@ struct MOZ_RAII AutoDisableProxyCheck
 
 struct MOZ_RAII AutoDisableCompactingGC
 {
-    explicit AutoDisableCompactingGC(JSRuntime* rt);
+    explicit AutoDisableCompactingGC(JSContext* cx);
     ~AutoDisableCompactingGC();
 
   private:

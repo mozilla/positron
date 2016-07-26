@@ -14,7 +14,7 @@ const Services = require("Services");
 const {XPCOMUtils} = require("resource://gre/modules/XPCOMUtils.jsm");
 const {Task} = require("devtools/shared/task");
 const {Tools} = require("devtools/client/definitions");
-const {CssLogic} = require("devtools/shared/inspector/css-logic");
+const {l10n} = require("devtools/shared/inspector/css-logic");
 const {ELEMENT_STYLE} = require("devtools/shared/specs/styles");
 const {OutputParser} = require("devtools/client/shared/output-parser");
 const {PrefObserver, PREF_ORIG_SOURCES} = require("devtools/client/styleeditor/utils");
@@ -222,7 +222,7 @@ function CssRuleView(inspector, document, store, pageStyle) {
     autoSelect: true,
     theme: "auto"
   };
-  this.popup = new AutocompletePopup(this.styleDocument, options);
+  this.popup = new AutocompletePopup(inspector._toolbox, options);
 
   this._showEmpty();
 
@@ -962,13 +962,13 @@ CssRuleView.prototype = {
    * Show the user that the rule view has no node selected.
    */
   _showEmpty: function () {
-    if (this.styleDocument.getElementById("noResults") > 0) {
+    if (this.styleDocument.getElementById("ruleview-no-results")) {
       return;
     }
 
     createChild(this.element, "div", {
-      id: "noResults",
-      textContent: CssLogic.l10n("rule.empty")
+      id: "ruleview-no-results",
+      textContent: l10n("rule.empty")
     });
   },
 
@@ -1011,7 +1011,7 @@ CssRuleView.prototype = {
     if (this._selectedElementLabel) {
       return this._selectedElementLabel;
     }
-    this._selectedElementLabel = CssLogic.l10n("rule.selectedElement");
+    this._selectedElementLabel = l10n("rule.selectedElement");
     return this._selectedElementLabel;
   },
 
@@ -1022,7 +1022,7 @@ CssRuleView.prototype = {
     if (this._pseudoElementLabel) {
       return this._pseudoElementLabel;
     }
-    this._pseudoElementLabel = CssLogic.l10n("rule.pseudoElement");
+    this._pseudoElementLabel = l10n("rule.pseudoElement");
     return this._pseudoElementLabel;
   },
 

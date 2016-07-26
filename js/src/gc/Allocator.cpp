@@ -165,11 +165,10 @@ GCRuntime::tryNewTenuredThing(ExclusiveContext* cx, AllocKind kind, size_t thing
             // We have no memory available for a new chunk; perform an
             // all-compartments, non-incremental, shrinking GC and wait for
             // sweeping to finish.
-            JSRuntime *rt = cx->asJSContext()->runtime();
-            JS::PrepareForFullGC(rt);
+            JS::PrepareForFullGC(cx->asJSContext());
             AutoKeepAtoms keepAtoms(cx->perThreadData);
-            rt->gc.gc(GC_SHRINK, JS::gcreason::LAST_DITCH);
-            rt->gc.waitBackgroundSweepOrAllocEnd();
+            cx->asJSContext()->gc.gc(GC_SHRINK, JS::gcreason::LAST_DITCH);
+            cx->asJSContext()->gc.waitBackgroundSweepOrAllocEnd();
 
             t = tryNewTenuredThing<T, NoGC>(cx, kind, thingSize);
             if (!t)
@@ -294,7 +293,7 @@ GCRuntime::startBackgroundAllocTaskIfIdle()
 
     // Join the previous invocation of the task. This will return immediately
     // if the thread has never been started.
-    allocTask.joinWithLockHeld();
+    allocTask.joinWithLockHeld(helperLock);
     allocTask.startWithLockHeld();
 }
 
@@ -335,7 +334,7 @@ GCRuntime::refillFreeListOffMainThread(ExclusiveContext* cx, AllocKind thingKind
     // a GC session.
     AutoLockHelperThreadState lock;
     while (rt->isHeapBusy())
-        HelperThreadState().wait(GlobalHelperThreadState::PRODUCER);
+        HelperThreadState().wait(lock, GlobalHelperThreadState::PRODUCER);
 
     return arenas->allocateFromArena(zone, thingKind, maybeStartBGAlloc);
 }

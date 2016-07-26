@@ -995,7 +995,7 @@ Promise::PerformMicroTaskCheckpoint()
   AutoSafeJSContext cx;
 
   do {
-    nsCOMPtr<nsIRunnable> runnable = microtaskQueue.front();
+    nsCOMPtr<nsIRunnable> runnable = microtaskQueue.front().forget();
     MOZ_ASSERT(runnable);
 
     // This function can re-enter, so we remove the element before calling.
@@ -1032,7 +1032,7 @@ Promise::PerformWorkerMicroTaskCheckpoint()
       }
     }
 
-    nsCOMPtr<nsIRunnable> runnable = microtaskQueue->front();
+    nsCOMPtr<nsIRunnable> runnable = microtaskQueue->front().forget();
     MOZ_ASSERT(runnable);
 
     // This function can re-enter, so we remove the element before calling.
@@ -1062,7 +1062,7 @@ Promise::PerformWorkerDebuggerMicroTaskCheckpoint()
       break;
     }
 
-    nsCOMPtr<nsIRunnable> runnable = microtaskQueue->front();
+    nsCOMPtr<nsIRunnable> runnable = microtaskQueue->front().forget();
     MOZ_ASSERT(runnable);
 
     // This function can re-enter, so we remove the element before calling.
@@ -1367,7 +1367,7 @@ Promise::NewPromiseCapability(JSContext* aCx, nsIGlobalObject* aGlobal,
       return;
     }
 
-    JSObject* defaultCtor = PromiseBinding::GetConstructorObject(aCx, global);
+    JSObject* defaultCtor = PromiseBinding::GetConstructorObject(aCx);
     if (!defaultCtor) {
       aRv.NoteJSContextException(aCx);
       return;
@@ -1706,12 +1706,10 @@ Promise::Then(JSContext* aCx, JS::Handle<JSObject*> aCalleeGlobal,
   // Step 3.  We want to use aCalleeGlobal here because it will do the
   // right thing for us via Xrays (where we won't find @@species on
   // our promise constructor for now).
-  JS::Rooted<JSObject*> calleeGlobal(aCx, aCalleeGlobal);
   JS::Rooted<JS::Value> defaultCtorVal(aCx);
   { // Scope for JSAutoCompartment
     JSAutoCompartment ac(aCx, aCalleeGlobal);
-    JSObject* defaultCtor =
-      PromiseBinding::GetConstructorObject(aCx, calleeGlobal);
+    JSObject* defaultCtor = PromiseBinding::GetConstructorObject(aCx);
     if (!defaultCtor) {
       aRv.NoteJSContextException(aCx);
       return;
@@ -2697,7 +2695,7 @@ Promise::ResolveInternal(JSContext* aCx,
         new PromiseInit(nullptr, thenObj, mozilla::dom::GetIncumbentGlobal());
       RefPtr<PromiseResolveThenableJob> task =
         new PromiseResolveThenableJob(this, valueObj, thenCallback);
-      runtime->DispatchToMicroTask(task);
+      runtime->DispatchToMicroTask(task.forget());
       return;
     }
   }
@@ -2812,7 +2810,7 @@ Promise::TriggerPromiseReactions()
   for (uint32_t i = 0; i < callbacks.Length(); ++i) {
     RefPtr<PromiseReactionJob> task =
       new PromiseReactionJob(this, callbacks[i], mResult);
-    runtime->DispatchToMicroTask(task);
+    runtime->DispatchToMicroTask(task.forget());
   }
 }
 

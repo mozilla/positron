@@ -270,7 +270,7 @@ class JSAPITest
 
     bool definePrint();
 
-    static void setNativeStackQuota(JSRuntime* rt)
+    static void setNativeStackQuota(JSContext* cx)
     {
         const size_t MAX_STACK_SIZE =
 /* Assume we can't use more than 5e5 bytes of C stack by default. */
@@ -285,15 +285,15 @@ class JSAPITest
 #endif
         ;
 
-        JS_SetNativeStackQuota(rt, MAX_STACK_SIZE);
+        JS_SetNativeStackQuota(cx, MAX_STACK_SIZE);
     }
 
     virtual JSRuntime * createRuntime() {
         JSRuntime* rt = JS_NewRuntime(8L * 1024 * 1024);
         if (!rt)
             return nullptr;
-        JS::SetWarningReporter(rt, &reportWarning);
-        setNativeStackQuota(rt);
+        JS::SetWarningReporter(JS_GetContext(rt), &reportWarning);
+        setNativeStackQuota(JS_GetContext(rt));
         return rt;
     }
 
@@ -439,14 +439,14 @@ class AutoLeaveZeal
     explicit AutoLeaveZeal(JSContext* cx) : cx_(cx) {
         uint32_t dummy;
         JS_GetGCZealBits(cx_, &zealBits_, &frequency_, &dummy);
-        JS_SetGCZeal(JS_GetRuntime(cx_), 0, 0);
-        JS::PrepareForFullGC(JS_GetRuntime(cx_));
-        JS::GCForReason(JS_GetRuntime(cx_), GC_SHRINK, JS::gcreason::DEBUG_GC);
+        JS_SetGCZeal(cx_, 0, 0);
+        JS::PrepareForFullGC(cx_);
+        JS::GCForReason(cx_, GC_SHRINK, JS::gcreason::DEBUG_GC);
     }
     ~AutoLeaveZeal() {
         for (size_t i = 0; i < sizeof(zealBits_) * 8; i++) {
             if (zealBits_ & (1 << i))
-                JS_SetGCZeal(JS_GetRuntime(cx_), i, frequency_);
+                JS_SetGCZeal(cx_, i, frequency_);
         }
 
 #ifdef DEBUG

@@ -418,7 +418,7 @@ class MOZ_NONHEAP_CLASS Handle : public js::HandleBase<T>
      *     for the lifetime of the handle, as its users may not expect its value
      *     to change underneath them.
      */
-    static MOZ_CONSTEXPR Handle fromMarkedLocation(const T* p) {
+    static constexpr Handle fromMarkedLocation(const T* p) {
         return Handle(p, DeliberatelyChoosingThisOverload,
                       ImUsingThisOnlyInFromFromMarkedLocation);
     }
@@ -453,7 +453,7 @@ class MOZ_NONHEAP_CLASS Handle : public js::HandleBase<T>
 
     enum Disambiguator { DeliberatelyChoosingThisOverload = 42 };
     enum CallerIdentity { ImUsingThisOnlyInFromFromMarkedLocation = 17 };
-    MOZ_CONSTEXPR Handle(const T* p, Disambiguator, CallerIdentity) : ptr(p) {}
+    constexpr Handle(const T* p, Disambiguator, CallerIdentity) : ptr(p) {}
 
     const T* ptr;
 };
@@ -1089,17 +1089,13 @@ class JS_PUBLIC_API(ObjectPtr)
     /* Always call finalize before the destructor. */
     ~ObjectPtr() { MOZ_ASSERT(!value); }
 
-    void finalize(JSRuntime* rt) {
-        if (IsIncrementalBarrierNeeded(rt))
-            IncrementalObjectBarrier(value);
-        value = nullptr;
-    }
+    void finalize(JSRuntime* rt);
 
     void init(JSObject* obj) { value = obj; }
 
     JSObject* get() const { return value; }
 
-    void writeBarrierPre(JSRuntime* rt) {
+    void writeBarrierPre(JSContext* cx) {
         IncrementalObjectBarrier(value);
     }
 

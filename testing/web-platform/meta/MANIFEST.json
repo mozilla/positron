@@ -36391,10 +36391,22 @@
             "url": "/editing/run/multitest.html"
           }
         ],
+        "service-workers/service-worker/controller-on-disconnect.https.html": [
+          {
+            "path": "service-workers/service-worker/controller-on-disconnect.https.html",
+            "url": "/service-workers/service-worker/controller-on-disconnect.https.html"
+          }
+        ],
         "web-animations/animation-model/keyframe-effects/spacing-keyframes.html": [
           {
             "path": "web-animations/animation-model/keyframe-effects/spacing-keyframes.html",
             "url": "/web-animations/animation-model/keyframe-effects/spacing-keyframes.html"
+          }
+        ],
+        "service-workers/service-worker/client-navigate.https.html": [
+          {
+            "path": "service-workers/service-worker/client-navigate.https.html",
+            "url": "/service-workers/service-worker/client-navigate.https.html"
           }
         ],
         "web-animations/interfaces/DocumentTimeline/constructor.html": [

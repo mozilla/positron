@@ -42,6 +42,14 @@
     "keyed": true,
     "description": "Reasons why add-on shims were used, keyed by add-on ID."
   },
+  "ADDON_FORBIDDEN_CPOW_USAGE": {
+    "expires_in_version": "never",
+    "kind": "count",
+    "keyed": true,
+    "description": "Counts the number of times a given add-on used CPOWs when it was marked as e10s compatible.",
+    "bug_numbers": [1214824],
+    "alert_emails": ["wmccloskey@mozilla.com"]
+  },
   "BROWSER_SHIM_USAGE_BLOCKED": {
     "expires_in_version": "never",
     "kind": "count",
@@ -93,6 +101,15 @@
     "high": 10000,
     "n_buckets": 50,
     "description": "The length of time (in milliseconds) for the subsequent opens of AudioStream."
+  },
+  "AUDIOSTREAM_BACKEND_USED": {
+    "alert_emails": ["padenot@mozilla.com", "kinetik@flim.org"],
+    "bug_numbers": [1280630],
+    "expires_in_version": "55",
+    "kind": "enumerated",
+    "n_values": 16,
+    "description": "The operating system audio back-end used when successfully opening an audio stream, or whether the failure occurred on the first try or not <https://dxr.mozilla.org/mozilla-central/search?q=AUDIOSTREAM_BACKEND_ID_STR>",
+    "releaseChannelCollection": "opt-out"
   },
   "BACKGROUNDFILESAVER_THREAD_COUNT": {
     "expires_in_version": "never",
@@ -1938,48 +1955,6 @@
     "n_buckets": 50,
     "description": "Time spent waiting on the cache service lock (ms) on the main thread in NSDECOMPRESSINPUTSTREAMWRAPPER_RELEASE"
   },
-  "CACHE_SERVICE_LOCK_WAIT_MAINTHREAD_NSEVICTDISKCACHEENTRIESEVENT_RUN": {
-    "expires_in_version": "40",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 50,
-    "description": "Time spent waiting on the cache service lock (ms) on the main thread in NSEVICTDISKCACHEENTRIESEVENT_RUN *** No longer needed (bug 1156565). Delete histogram and accumulation code! ***"
-  },
-  "CACHE_SERVICE_LOCK_WAIT_MAINTHREAD_NSDOOMEVENT_RUN": {
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 50,
-    "description": "Time spent waiting on the cache service lock (ms) on the main thread in NSDOOMEVENT_RUN"
-  },
-  "CACHE_SERVICE_LOCK_WAIT_MAINTHREAD_NSDISKCACHESTREAMIO_WRITE": {
-    "expires_in_version": "40",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 50,
-    "description": "Time spent waiting on the cache service lock (ms) on the main thread in NSDISKCACHESTREAMIO_WRITE *** No longer needed (bug 1156565). Delete histogram and accumulation code! ***"
-  },
-  "CACHE_SERVICE_LOCK_WAIT_MAINTHREAD_NSDISKCACHESTREAMIO_CLOSEOUTPUTSTREAM": {
-    "expires_in_version": "40",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 50,
-    "description": "Time spent waiting on the cache service lock (ms) on the main thread in NSDISKCACHESTREAMIO_CLOSEOUTPUTSTREAM *** No longer needed (bug 1156565). Delete histogram and accumulation code! ***"
-  },
-  "CACHE_SERVICE_LOCK_WAIT_MAINTHREAD_NSDISKCACHEDEVICEDEACTIVATEENTRYEVENT_RUN": {
-    "expires_in_version": "40",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 50,
-    "description": "Time spent waiting on the cache service lock (ms) on the main thread in NSDISKCACHEDEVICEDEACTIVATEENTRYEVENT_RUN *** No longer needed (bug 1156565). Delete histogram and accumulation code! ***"
-  },
-  "CACHE_SERVICE_LOCK_WAIT_MAINTHREAD_NSDISKCACHEBINDING_DESTRUCTOR": {
-    "expires_in_version": "40",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 50,
-    "description": "Time spent waiting on the cache service lock (ms) on the main thread in NSDISKCACHEBINDING_DESTRUCTOR *** No longer needed (bug 1156565). Delete histogram and accumulation code! ***"
-  },
   "CACHE_SERVICE_LOCK_WAIT_MAINTHREAD_NSCACHESERVICE_SHUTDOWN": {
     "expires_in_version": "never",
     "kind": "exponential",
@@ -2336,13 +2311,6 @@
     "high": 10000,
     "n_buckets": 50,
     "description": "Time spent waiting on the cache service lock (ms) on the main thread in NSBLOCKONCACHETHREADEVENT_RUN"
-  },
-  "CACHE_SERVICE_LOCK_WAIT_MAINTHREAD_NSDISKCACHEMAP_REVALIDATION": {
-    "expires_in_version": "40",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 50,
-    "description": "Time spent waiting on the cache service lock (ms) on the main thread in NSDISKCACHEMAP_REVALIDATION *** No longer needed (bug 1156565). Delete histogram and accumulation code! ***"
   },
   "CACHE_SERVICE_LOCK_WAIT_MAINTHREAD_NSASYNCDOOMEVENT_RUN": {
     "expires_in_version": "never",
@@ -3310,33 +3278,6 @@
     "n_buckets": 10,
     "description": "Time spent (ms) during showdown deleting disk cache v2 for 'clear private data' option"
   },
-  "NETWORK_DISK_CACHE_REVALIDATION": {
-    "alert_emails": ["froydnj@mozilla.com"],
-    "bug_numbers": [731004],
-    "expires_in_version": "40",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 10,
-    "description": "Total Time spent (ms) during disk cache revalidation"
-  },
-  "NETWORK_DISK_CACHE_STREAMIO_CLOSE": {
-    "alert_emails": ["froydnj@mozilla.com"],
-    "bug_numbers": [731004],
-    "expires_in_version": "40",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 10,
-    "description": "Time spent in nsDiskCacheStreamIO::Close() on non-main thread (ms)"
-  },
-  "NETWORK_DISK_CACHE_STREAMIO_CLOSE_MAIN_THREAD": {
-    "alert_emails": ["froydnj@mozilla.com"],
-    "bug_numbers": [731004],
-    "expires_in_version": "40",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 10,
-    "description": "Time spent in nsDiskCacheStreamIO::Close() on the main thread (ms)"
-  },
   "NETWORK_ID": {
     "alert_emails": ["necko@mozilla.com"],
     "bug_numbers": [1240932],
@@ -3344,24 +3285,6 @@
     "kind": "enumerated",
     "n_values": 6,
     "description": "Network identification (0=None, 1=New, 2=Same)"
-  },
-  "IDLE_NOTIFY_BACK_MS": {
-    "alert_emails": ["froydnj@mozilla.com"],
-    "bug_numbers": [731004],
-    "expires_in_version": "40",
-    "kind": "exponential",
-    "high": 5000,
-    "n_buckets": 10,
-    "description": "Time spent checking for and notifying listeners that the user is back (ms)"
-  },
-  "IDLE_NOTIFY_BACK_LISTENERS": {
-    "alert_emails": ["froydnj@mozilla.com"],
-    "bug_numbers": [731004],
-    "expires_in_version": "40",
-    "kind": "linear",
-    "high": 100,
-    "n_buckets": 20,
-    "description": "Number of listeners notified that the user is back"
   },
   "IDLE_NOTIFY_IDLE_MS": {
     "alert_emails": ["froydnj@mozilla.com"],
@@ -3371,15 +3294,6 @@
     "high": 5000,
     "n_buckets": 10,
     "description": "Time spent checking for and notifying listeners that the user is idle (ms)"
-  },
-  "IDLE_NOTIFY_IDLE_LISTENERS": {
-    "alert_emails": ["froydnj@mozilla.com"],
-    "bug_numbers": [731004],
-    "expires_in_version": "40",
-    "kind": "linear",
-    "high": 100,
-    "n_buckets": 20,
-    "description": "Number of listeners notified that the user is idle"
   },
   "URLCLASSIFIER_LOOKUP_TIME": {
     "expires_in_version": "never",
@@ -4400,6 +4314,23 @@
     "releaseChannelCollection": "opt-out",
     "description": "Where automatic migration was attempted, indicates to what degree we succeeded. Values 0-25 indicate progress through the automatic migration sequence, with 25 indicating the migration finished. 26 is only used when the migration produced errors before it finished."
   },
+  "FX_STARTUP_MIGRATION_AUTOMATED_IMPORT_UNDO": {
+    "bug_numbers": [1283565],
+    "alert_emails": ["gijs@mozilla.com"],
+    "expires_in_version": "53",
+    "kind": "enumerated",
+    "n_values": 31,
+    "releaseChannelCollection": "opt-out",
+    "description": "Where undo of the automatic migration was attempted, indicates to what degree we succeeded to undo. 0 means we started to undo, 5 means we bailed out from the undo because it was not possible to complete it (there was nothing to undo or the user was signed in to sync). All higher values indicate progression through the undo sequence, with 30 indicating we finished the undo without exceptions in the middle."
+  },
+  "FX_STARTUP_MIGRATION_CANT_UNDO_BECAUSE_SYNC": {
+    "bug_numbers": [1283565],
+    "alert_emails": ["gijs@mozilla.com"],
+    "expires_in_version": "53",
+    "kind": "boolean",
+    "releaseChannelCollection": "opt-out",
+    "description": "Where undo of the automatic migration was requested and denied because the user was logged into sync."
+  },
   "FX_STARTUP_MIGRATION_DATA_RECENCY": {
     "bug_numbers": [1276694],
     "alert_emails": ["gijs@mozilla.com"],
@@ -4737,13 +4668,6 @@
     "expires_in_version": "never",
     "kind": "flag",
     "description": "Whether the decoder for ISO-8859-5 has been instantiated in this session."
-  },
-  "HTML_FOREGROUND_REFLOW_MS_2": {
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 20,
-    "description": "HTML reflows in foreground windows (ms)"
   },
   "LONG_REFLOW_INTERRUPTIBLE": {
     "expires_in_version": "never",
@@ -5747,458 +5671,6 @@
     "releaseChannelCollection": "opt-out",
     "description": "A counter incremented every time the browser enters simplified mode on print preview."
   },
-  "DEVTOOLS_DEBUGGER_RDP_LOCAL_RELOAD_MS": {
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 1000,
-    "description": "The time (in milliseconds) that it took a 'reload' request to go round trip."
-  },
-  "DEVTOOLS_DEBUGGER_RDP_REMOTE_RELOAD_MS": {
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 1000,
-    "description": "The time (in milliseconds) that it took a 'reload' request to go round trip."
-  },
-  "DEVTOOLS_DEBUGGER_RDP_LOCAL_NAVIGATETO_MS": {
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 1000,
-    "description": "The time (in milliseconds) that it took a 'navigateTo' request to go round trip."
-  },
-  "DEVTOOLS_DEBUGGER_RDP_REMOTE_NAVIGATETO_MS": {
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 1000,
-    "description": "The time (in milliseconds) that it took a 'navigateTo' request to go round trip."
-  },
-  "DEVTOOLS_DEBUGGER_RDP_LOCAL_EVENTLISTENERS_MS": {
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 1000,
-    "description": "The time (in milliseconds) that it took an 'eventListeners' request to go round trip."
-  },
-  "DEVTOOLS_DEBUGGER_RDP_REMOTE_EVENTLISTENERS_MS": {
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 1000,
-    "description": "The time (in milliseconds) that it took an 'eventListeners' request to go round trip."
-  },
-  "DEVTOOLS_DEBUGGER_RDP_LOCAL_DETACH_MS": {
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 1000,
-    "description": "The time (in milliseconds) that it took a 'detach' request to go round trip."
-  },
-  "DEVTOOLS_DEBUGGER_RDP_REMOTE_DETACH_MS": {
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 1000,
-    "description": "The time (in milliseconds) that it took a 'detach' request to go round trip."
-  },
-  "DEVTOOLS_DEBUGGER_RDP_LOCAL_RESUME_MS": {
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 1000,
-    "description": "The time (in milliseconds) that it took a 'resume' request to go round trip."
-  },
-  "DEVTOOLS_DEBUGGER_RDP_REMOTE_RESUME_MS": {
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 1000,
-    "description": "The time (in milliseconds) that it took a 'resume' request to go round trip."
-  },
-  "DEVTOOLS_DEBUGGER_RDP_LOCAL_INTERRUPT_MS": {
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 1000,
-    "description": "The time (in milliseconds) that it took an 'interrupt' request to go round trip."
-  },
-  "DEVTOOLS_DEBUGGER_RDP_REMOTE_INTERRUPT_MS": {
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 1000,
-    "description": "The time (in milliseconds) that it took an 'interrupt' request to go round trip."
-  },
-  "DEVTOOLS_DEBUGGER_RDP_LOCAL_CLIENTEVALUATE_MS": {
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 1000,
-    "description": "The time (in milliseconds) that it took a 'clientEvaluate' request to go round trip."
-  },
-  "DEVTOOLS_DEBUGGER_RDP_REMOTE_CLIENTEVALUATE_MS": {
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 1000,
-    "description": "The time (in milliseconds) that it took a 'clientEvaluate' request to go round trip."
-  },
-  "DEVTOOLS_DEBUGGER_RDP_LOCAL_RELEASEMANY_MS": {
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 1000,
-    "description": "The time (in milliseconds) that it took a 'releaseMany' request to go round trip."
-  },
-  "DEVTOOLS_DEBUGGER_RDP_REMOTE_RELEASEMANY_MS": {
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 1000,
-    "description": "The time (in milliseconds) that it took a 'releaseMany' request to go round trip."
-  },
-  "DEVTOOLS_DEBUGGER_RDP_LOCAL_THREADGRIPS_MS": {
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 1000,
-    "description": "The time (in milliseconds) that it took a 'threadGrips' request to go round trip."
-  },
-  "DEVTOOLS_DEBUGGER_RDP_REMOTE_THREADGRIPS_MS": {
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 1000,
-    "description": "The time (in milliseconds) that it took a 'threadGrips' request to go round trip."
-  },
-  "DEVTOOLS_DEBUGGER_RDP_LOCAL_SOURCES_MS": {
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 1000,
-    "description": "The time (in milliseconds) that it took a 'sources' request to go round trip."
-  },
-  "DEVTOOLS_DEBUGGER_RDP_REMOTE_SOURCES_MS": {
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 1000,
-    "description": "The time (in milliseconds) that it took a 'sources' request to go round trip."
-  },
-  "DEVTOOLS_DEBUGGER_RDP_LOCAL_FRAMES_MS": {
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 1000,
-    "description": "The time (in milliseconds) that it took a 'frames' request to go round trip."
-  },
-  "DEVTOOLS_DEBUGGER_RDP_REMOTE_FRAMES_MS": {
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 1000,
-    "description": "The time (in milliseconds) that it took a 'frames' request to go round trip."
-  },
-  "DEVTOOLS_DEBUGGER_RDP_LOCAL_PARAMETERNAMES_MS": {
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 1000,
-    "description": "The time (in milliseconds) that it took a 'parameterNames' request to go round trip."
-  },
-  "DEVTOOLS_DEBUGGER_RDP_REMOTE_PARAMETERNAMES_MS": {
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 1000,
-    "description": "The time (in milliseconds) that it took a 'parameterNames' request to go round trip."
-  },
-  "DEVTOOLS_DEBUGGER_RDP_LOCAL_OWNPROPERTYNAMES_MS": {
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 1000,
-    "description": "The time (in milliseconds) that it took a 'ownPropertyNames' request to go round trip."
-  },
-  "DEVTOOLS_DEBUGGER_RDP_REMOTE_OWNPROPERTYNAMES_MS": {
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 1000,
-    "description": "The time (in milliseconds) that it took a 'ownPropertyNames' request to go round trip."
-  },
-  "DEVTOOLS_DEBUGGER_RDP_LOCAL_PROTOTYPEANDPROPERTIES_MS": {
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 1000,
-    "description": "The time (in milliseconds) that it took a 'prototypeAndProperties' request to go round trip."
-  },
-  "DEVTOOLS_DEBUGGER_RDP_REMOTE_PROTOTYPEANDPROPERTIES_MS": {
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 1000,
-    "description": "The time (in milliseconds) that it took a 'prototypeAndProperties' request to go round trip."
-  },
-  "DEVTOOLS_DEBUGGER_RDP_LOCAL_ENUMPROPERTIES_MS": {
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 1000,
-    "description": "The time (in milliseconds) that it took a 'enumProperties' request to go round trip."
-  },
-  "DEVTOOLS_DEBUGGER_RDP_REMOTE_ENUMPROPERTIES_MS": {
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 1000,
-    "description": "The time (in milliseconds) that it took a 'enumProperties' request to go round trip."
-  },
-  "DEVTOOLS_DEBUGGER_RDP_LOCAL_PROTOTYPESANDPROPERTIES_MS": {
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 1000,
-    "description": "The time (in milliseconds) that it took a 'prototypesAndProperties' request to go round trip."
-  },
-  "DEVTOOLS_DEBUGGER_RDP_REMOTE_PROTOTYPESANDPROPERTIES_MS": {
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 1000,
-    "description": "The time (in milliseconds) that it took a 'prototypesAndProperties' request to go round trip."
-  },
-  "DEVTOOLS_DEBUGGER_RDP_LOCAL_PROPERTY_MS": {
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 1000,
-    "description": "The time (in milliseconds) that it took a 'property' request to go round trip."
-  },
-  "DEVTOOLS_DEBUGGER_RDP_REMOTE_PROPERTY_MS": {
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 1000,
-    "description": "The time (in milliseconds) that it took a 'property' request to go round trip."
-  },
-  "DEVTOOLS_DEBUGGER_RDP_LOCAL_PROTOTYPE_MS": {
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 1000,
-    "description": "The time (in milliseconds) that it took a 'prototype' request to go round trip."
-  },
-  "DEVTOOLS_DEBUGGER_RDP_REMOTE_PROTOTYPE_MS": {
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 1000,
-    "description": "The time (in milliseconds) that it took a 'prototype' request to go round trip."
-  },
-  "DEVTOOLS_DEBUGGER_RDP_REMOTE_DISPLAYSTRING_MS": {
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 1000,
-    "description": "The time (in milliseconds) that it took a 'displayString' request to go round trip."
-  },
-  "DEVTOOLS_DEBUGGER_RDP_LOCAL_DISPLAYSTRING_MS": {
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 1000,
-    "description": "The time (in milliseconds) that it took a 'displayString' request to go round trip."
-  },
-  "DEVTOOLS_DEBUGGER_RDP_LOCAL_SUBSTRING_MS": {
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 1000,
-    "description": "The time (in milliseconds) that it took a 'substring' request to go round trip."
-  },
-  "DEVTOOLS_DEBUGGER_RDP_REMOTE_SUBSTRING_MS": {
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 1000,
-    "description": "The time (in milliseconds) that it took a 'substring' request to go round trip."
-  },
-  "DEVTOOLS_DEBUGGER_RDP_LOCAL_RELEASE_MS": {
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 1000,
-    "description": "The time (in milliseconds) that it took a 'release' request to go round trip."
-  },
-  "DEVTOOLS_DEBUGGER_RDP_REMOTE_RELEASE_MS": {
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 1000,
-    "description": "The time (in milliseconds) that it took a 'release' request to go round trip."
-  },
-  "DEVTOOLS_DEBUGGER_RDP_LOCAL_LISTTABS_MS": {
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 1000,
-    "description": "The time (in milliseconds) that it took a 'listTabs' request to go round trip."
-  },
-  "DEVTOOLS_DEBUGGER_RDP_REMOTE_LISTTABS_MS": {
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 1000,
-    "description": "The time (in milliseconds) that it took a 'listTabs' request to go round trip."
-  },
-  "DEVTOOLS_DEBUGGER_RDP_LOCAL_LISTSERVICEWORKERREGISTRATIONS_MS": {
-    "alert_emails": ["dev-developer-tools@lists.mozilla.org", "ejpbruel@mozilla.com"],
-    "expires_in_version": "50",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 100,
-    "description": "The time (in milliseconds) that it took a 'listServiceWorkerRegistrations' request to go round trip."
-  },
-  "DEVTOOLS_DEBUGGER_RDP_REMOTE_LISTSERVICEWORKERREGISTRATIONS_MS": {
-    "alert_emails": ["dev-developer-tools@lists.mozilla.org", "ejpbruel@mozilla.com"],
-    "expires_in_version": "50",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 100,
-    "description": "The time (in milliseconds) that it took a 'listServiceWorkerRegistrations' request to go round trip."
-  },
-  "DEVTOOLS_DEBUGGER_RDP_LOCAL_PROTOCOLDESCRIPTION_MS": {
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 1000,
-    "description": "The time (in milliseconds) that it took a 'protocolDescription' request to go round trip."
-  },
-  "DEVTOOLS_DEBUGGER_RDP_REMOTE_PROTOCOLDESCRIPTION_MS": {
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 1000,
-    "description": "The time (in milliseconds) that it took a 'protocolDescription' request to go round trip."
-  },
-  "DEVTOOLS_DEBUGGER_RDP_LOCAL_LISTADDONS_MS": {
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 1000,
-    "description": "The time (in milliseconds) that it took a 'listAddons' request to go round trip."
-  },
-  "DEVTOOLS_DEBUGGER_RDP_REMOTE_LISTADDONS_MS": {
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 1000,
-    "description": "The time (in milliseconds) that it took a 'listAddons' request to go round trip."
-  },
-  "DEVTOOLS_DEBUGGER_RDP_LOCAL_LISTWORKERS_MS": {
-    "alert_emails": ["dev-developer-tools@lists.mozilla.org", "jan@mozilla.com"],
-    "expires_in_version": "55",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 50,
-    "description": "The time (in milliseconds) that it took a 'listWorkers' request to go round trip."
-  },
-  "DEVTOOLS_DEBUGGER_RDP_REMOTE_LISTWORKERS_MS": {
-    "alert_emails": ["dev-developer-tools@lists.mozilla.org", "jan@mozilla.com"],
-    "expires_in_version": "55",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 50,
-    "description": "The time (in milliseconds) that it took a 'listWorkers' request to go round trip."
-  },
-  "DEVTOOLS_DEBUGGER_RDP_LOCAL_LISTPROCESSES_MS": {
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 1000,
-    "description": "The time (in milliseconds) that it took a 'listProcesses' request to go round trip."
-  },
-  "DEVTOOLS_DEBUGGER_RDP_REMOTE_LISTPROCESSES_MS": {
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 1000,
-    "description": "The time (in milliseconds) that it took a 'listProcesses' request to go round trip."
-  },
-  "DEVTOOLS_DEBUGGER_RDP_LOCAL_DELETE_MS": {
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 1000,
-    "description": "The time (in milliseconds) that it took a 'delete' request to go round trip."
-  },
-  "DEVTOOLS_DEBUGGER_RDP_REMOTE_DELETE_MS": {
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 1000,
-    "description": "The time (in milliseconds) that it took a 'delete' request to go round trip."
-  },
-  "DEVTOOLS_DEBUGGER_RDP_LOCAL_THREADDETACH_MS": {
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 1000,
-    "description": "The time (in milliseconds) that it took a 'detach' request to go round trip."
-  },
-  "DEVTOOLS_DEBUGGER_RDP_REMOTE_THREADDETACH_MS": {
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 1000,
-    "description": "The time (in milliseconds) that it took a 'detach' request to go round trip."
-  },
-  "DEVTOOLS_DEBUGGER_RDP_LOCAL_ADDONDETACH_MS": {
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 1000,
-    "description": "The time (in milliseconds) that it took a 'detach' request to go round trip."
-  },
-  "DEVTOOLS_DEBUGGER_RDP_REMOTE_ADDONDETACH_MS": {
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 1000,
-    "description": "The time (in milliseconds) that it took a 'detach' request to go round trip."
-  },
-  "DEVTOOLS_DEBUGGER_RDP_LOCAL_TABDETACH_MS": {
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 1000,
-    "description": "The time (in milliseconds) that it took a 'detach' request to go round trip."
-  },
-  "DEVTOOLS_DEBUGGER_RDP_REMOTE_TABDETACH_MS": {
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 1000,
-    "description": "The time (in milliseconds) that it took a 'detach' request to go round trip."
-  },
-  "DEVTOOLS_DEBUGGER_RDP_LOCAL_WORKERDETACH_MS": {
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 1000,
-    "description": "The time (in milliseconds) that it took a 'detach' request to go round trip."
-  },
-  "DEVTOOLS_DEBUGGER_RDP_REMOTE_WORKERDETACH_MS": {
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 1000,
-    "description": "The time (in milliseconds) that it took a 'detach' request to go round trip."
-  },
   "DEVTOOLS_DEBUGGER_DISPLAY_SOURCE_LOCAL_MS": {
     "expires_in_version": "never",
     "kind": "exponential",
@@ -6212,48 +5684,6 @@
     "high": 10000,
     "n_buckets": 1000,
     "description": "The time (in milliseconds) that it took to display a selected source to the user."
-  },
-  "DEVTOOLS_DEBUGGER_RDP_LOCAL_RECONFIGURETAB_MS": {
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 1000,
-    "description": "The time (in milliseconds) that it took a 'reconfigure tab' request to go round trip."
-  },
-  "DEVTOOLS_DEBUGGER_RDP_REMOTE_RECONFIGURETAB_MS": {
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 1000,
-    "description": "The time (in milliseconds) that it took a 'reconfigure tab' request to go round trip."
-  },
-  "DEVTOOLS_DEBUGGER_RDP_LOCAL_LISTWORKERS_MS": {
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 1000,
-    "description": "The time (in milliseconds) that it took a 'listWorkers' request to go round trip."
-  },
-  "DEVTOOLS_DEBUGGER_RDP_REMOTE_LISTWORKERS_MS": {
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 1000,
-    "description": "The time (in milliseconds) that it took a 'listWorkers' request to go round trip."
-  },
-  "DEVTOOLS_DEBUGGER_RDP_LOCAL_RECONFIGURETHREAD_MS": {
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 1000,
-    "description": "The time (in milliseconds) that it took a 'reconfigure thread' request to go round trip."
-  },
-  "DEVTOOLS_DEBUGGER_RDP_REMOTE_RECONFIGURETHREAD_MS": {
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 1000,
-    "description": "The time (in milliseconds) that it took a 'reconfigure thread' request to go round trip."
   },
   "MEDIA_RUST_MP4PARSE_SUCCESS": {
     "alert_emails": ["giles@mozilla.com", "kinetik@flim.org"],
@@ -6736,7 +6166,7 @@
   },
   "WEBRTC_GET_USER_MEDIA_SECURE_ORIGIN": {
     "alert_emails": ["seceng@mozilla.org"],
-    "expires_in_version": "50",
+    "expires_in_version": "55",
     "kind": "enumerated",
     "n_values": 15,
     "description": "Origins for getUserMedia calls (0=other, 1=HTTPS, 2=file, 3=app, 4=localhost, 5=loop, 6=privileged)",
@@ -6849,132 +6279,6 @@
     "kind": "enumerated",
     "n_values": 8,
     "description": "Type of call: (Bitmask) Audio = 1, Video = 2, DataChannels = 4"
-  },
-  "DEVTOOLS_DEBUGGER_RDP_LOCAL_TRACERDETACH_MS": {
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 1000,
-    "description": "The time (in milliseconds) that it took a 'detach' request to go round trip."
-  },
-  "DEVTOOLS_DEBUGGER_RDP_REMOTE_TRACERDETACH_MS": {
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 1000,
-    "description": "The time (in milliseconds) that it took a 'detach' request to go round trip."
-  },
-  "DEVTOOLS_DEBUGGER_RDP_LOCAL_STARTTRACE_MS": {
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 1000,
-    "description": "The time (in milliseconds) that it took a 'startTrace' request to go round trip."
-  },
-  "DEVTOOLS_DEBUGGER_RDP_REMOTE_STARTTRACE_MS": {
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 1000,
-    "description": "The time (in milliseconds) that it took a 'startTrace' request to go round trip."
-  },
-  "DEVTOOLS_DEBUGGER_RDP_LOCAL_STOPTRACE_MS": {
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 1000,
-    "description": "The time (in milliseconds) that it took a 'stopTrace' request to go round trip."
-  },
-  "DEVTOOLS_DEBUGGER_RDP_REMOTE_STOPTRACE_MS": {
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 1000,
-    "description": "The time (in milliseconds) that it took a 'stopTrace' request to go round trip."
-  },
-  "DEVTOOLS_DEBUGGER_RDP_LOCAL_GET_EXECUTABLE_LINES_MS": {
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 1000,
-    "description": "The time (in milliseconds) that it took a 'getExecutableLines' request to go round trip."
-  },
-  "DEVTOOLS_DEBUGGER_RDP_REMOTE_GET_EXECUTABLE_LINES_MS": {
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 1000,
-    "description": "The time (in milliseconds) that it took a 'getExecutableLines' request to go round trip."
-  },
-  "DEVTOOLS_DEBUGGER_RDP_LOCAL_BLACKBOX_MS": {
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 1000,
-    "description": "The time (in milliseconds) that it took a 'blackbox' request to go round trip."
-  },
-  "DEVTOOLS_DEBUGGER_RDP_REMOTE_BLACKBOX_MS": {
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 1000,
-    "description": "The time (in milliseconds) that it took a 'blackbox' request to go round trip."
-  },
-  "DEVTOOLS_DEBUGGER_RDP_LOCAL_UNBLACKBOX_MS": {
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 1000,
-    "description": "The time (in milliseconds) that it took an 'ublackbox' request to go round trip."
-  },
-  "DEVTOOLS_DEBUGGER_RDP_REMOTE_UNBLACKBOX_MS": {
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 1000,
-    "description": "The time (in milliseconds) that it took an 'unblackbox' request to go round trip."
-  },
-  "DEVTOOLS_DEBUGGER_RDP_LOCAL_SCOPE_MS": {
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 1000,
-    "description": "The time (in milliseconds) that it took a 'scope' request to go round trip."
-  },
-  "DEVTOOLS_DEBUGGER_RDP_REMOTE_SCOPE_MS": {
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 1000,
-    "description": "The time (in milliseconds) that it took a 'scope' request to go round trip."
-  },
-  "DEVTOOLS_DEBUGGER_RDP_LOCAL_BINDINGS_MS": {
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 1000,
-    "description": "The time (in milliseconds) that it took a 'bindings' request to go round trip."
-  },
-  "DEVTOOLS_DEBUGGER_RDP_REMOTE_BINDINGS_MS": {
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 1000,
-    "description": "The time (in milliseconds) that it took a 'bindings' request to go round trip."
-  },
-  "DEVTOOLS_DEBUGGER_RDP_LOCAL_ASSIGN_MS": {
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 1000,
-    "description": "The time (in milliseconds) that it took an 'assign' request to go round trip."
-  },
-  "DEVTOOLS_DEBUGGER_RDP_REMOTE_ASSIGN_MS": {
-    "expires_in_version": "never",
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 1000,
-    "description": "The time (in milliseconds) that it took an 'assign' request to go round trip."
   },
   "DEVTOOLS_TOOLBOX_OPENED_COUNT": {
     "alert_emails": ["dev-developer-tools@lists.mozilla.org"],
@@ -8006,7 +7310,7 @@
   },
   "COOKIE_SCHEME_SECURITY": {
     "alert_emails": ["seceng@mozilla.org"],
-    "expires_in_version": "50",
+    "expires_in_version": "55",
     "kind": "enumerated",
     "n_values": 10,
     "releaseChannelCollection": "opt-out",
@@ -8248,13 +7552,6 @@
     "kind": "enumerated",
     "n_values": 16,
     "description": "TLS/SSL version fallback reached the minimum version (1=TLS 1.0, 2=TLS 1.1, 3=TLS 1.2) or the fallback limit (4=TLS 1.0, 8=TLS 1.1, 12=TLS 1.2), stopped the fallback"
-  },
-  "SSL_WEAK_CIPHERS_FALLBACK": {
-    "alert_emails": ["seceng-telemetry@mozilla.com"],
-    "expires_in_version": "never",
-    "kind": "enumerated",
-    "n_values": 64,
-    "description": "Fallback attempted when server did not support any strong cipher suites"
   },
   "SSL_CIPHER_SUITE_FULL": {
     "alert_emails": ["seceng-telemetry@mozilla.com"],
@@ -9368,41 +8665,16 @@
     "releaseChannelCollection": "opt-out",
     "description": "Reports results from the graphics sanity test to track which drivers are having problems (0=TEST_PASSED, 1=TEST_FAILED_RENDER, 2=TEST_FAILED_VIDEO, 3=TEST_CRASHED)"
   },
-  "READER_MODE_SERIALIZE_DOM_MS": {
-    "expires_in_version": "50",
-    "alert_emails": ["mleibovic@mozilla.com"],
-    "kind": "exponential",
-    "high": 5000,
-    "n_buckets": 15,
-    "description": "Time (ms) to serialize a DOM to send to the reader worker"
-  },
-  "READER_MODE_WORKER_PARSE_MS": {
-    "expires_in_version": "50",
-    "alert_emails": ["mleibovic@mozilla.com"],
-    "kind": "exponential",
-    "high": 10000,
-    "n_buckets": 30,
-    "description": "Time (ms) for the reader worker to parse a document"
-  },
-  "READER_MODE_DOWNLOAD_MS": {
-    "expires_in_version": "50",
-    "alert_emails": ["mleibovic@mozilla.com"],
-    "kind": "exponential",
-    "low": 50,
-    "high": 40000,
-    "n_buckets": 60,
-    "description": "Time (ms) to download a document to show in reader mode"
-  },
   "READER_MODE_PARSE_RESULT" : {
-    "expires_in_version": "50",
-    "alert_emails": ["mleibovic@mozilla.com"],
+    "expires_in_version": "54",
+    "alert_emails": ["firefox-dev@mozilla.org", "gijs@mozilla.com"],
     "kind": "enumerated",
     "n_values": 5,
     "description": "The result of trying to parse a document to show in reader view (0=Success, 1=Error too many elements, 2=Error in worker, 3=Error no article)"
   },
   "READER_MODE_DOWNLOAD_RESULT" : {
-    "expires_in_version": "50",
-    "alert_emails": ["mleibovic@mozilla.com"],
+    "expires_in_version": "54",
+    "alert_emails": ["firefox-dev@mozilla.org", "gijs@mozilla.com"],
     "kind": "enumerated",
     "n_values": 5,
     "description": "The result of trying to download a document to show in reader view (0=Success, 1=Error XHR, 2=Error no document)"
@@ -10299,17 +9571,10 @@
     "bug_numbers": [722110,1260065],
     "description": "Counts number of times a certain plugin has been activated."
   },
-  "SCROLL_LINKED_EFFECT_FOUND": {
-    "alert_emails": ["kgupta@mozilla.com"],
-    "bug_numbers": [1229052],
-    "expires_in_version": "50",
-    "kind": "boolean",
-    "description": "Attempt to determine prevalence of scroll-linked effects on the web."
-  },
   "SCROLL_INPUT_METHODS": {
     "alert_emails": ["botond@mozilla.com"],
     "bug_numbers": [1238137],
-    "expires_in_version": "50",
+    "expires_in_version": "55",
     "kind": "enumerated",
     "n_values": 64,
     "description": "Count of scroll actions triggered by different input methods. See gfx/layers/apz/util/ScrollInputMethods.h for a list of possible values and their meanings."
@@ -10318,7 +9583,7 @@
     "releaseChannelCollection": "opt-out",
     "alert_emails": ["firefox-dev@mozilla.org"],
     "bug_numbers": [1225336],
-    "expires_in_version": "50",
+    "expires_in_version": "55",
     "kind": "count",
     "description": "Count of times a web notification was clicked"
   },
@@ -10334,7 +9599,7 @@
     "releaseChannelCollection": "opt-out",
     "alert_emails": ["firefox-dev@mozilla.org"],
     "bug_numbers": [1225336],
-    "expires_in_version": "50",
+    "expires_in_version": "55",
     "kind": "count",
     "description": "Count of times a Notification was rendered (accounting for XUL DND). A system backend may put the notification directly into the tray if its own DND is on."
   },
@@ -10436,7 +9701,7 @@
     "releaseChannelCollection": "opt-out",
     "alert_emails": ["firefox-dev@mozilla.org"],
     "bug_numbers": [1219030],
-    "expires_in_version": "50",
+    "expires_in_version": "55",
     "kind": "enumerated",
     "n_values": 10,
     "description": "Number of origins with the web notifications permission (0 = denied, 1 = allowed)."
@@ -10686,12 +9951,52 @@
     "description": "Number of times about:crashes has been opened.",
     "releaseChannelCollection": "opt-out"
   },
-  "XHR_IN_WORKER": {
-    "alert_emails": ["amarchesini@mozilla.com"],
+   "D3D9_COMPOSITING_FAILURE_ID": {
+    "alert_emails": ["bgirard@mozilla.com"],
     "expires_in_version": "never",
     "kind": "count",
+    "keyed": true,
+    "description": "D3D9 compositor runtime and dynamic failure IDs. This will record a count for each context creation success or failure. Each failure id is a unique identifier that can be traced back to a particular failure branch or blocklist rule.",
+    "bug_numbers": [1002846]
+  },
+    "D3D11_COMPOSITING_FAILURE_ID": {
+    "alert_emails": ["bgirard@mozilla.com"],
+    "expires_in_version": "never",
+    "kind": "count",
+    "keyed": true,
+    "description": "D3D11 compositor runtime and dynamic failure IDs. This will record a count for each context creation success or failure. Each failure id is a unique identifier that can be traced back to a particular failure branch or blocklist rule.",
+    "bug_numbers": [1002846]
+  },
+    "OPENGL_COMPOSITING_FAILURE_ID": {
+    "alert_emails": ["bgirard@mozilla.com"],
+    "expires_in_version": "never",
+    "kind": "count",
+    "keyed": true,
+    "description": "OpenGL compositor runtime and dynamic failure IDs. This will record a count for each context creation success or failure. Each failure id is a unique identifier that can be traced back to a particular failure branch or blocklist rule.",
+    "bug_numbers": [1002846]
+  },
+  "XHR_IN_WORKER": {
+    "alert_emails": ["amarchesini@mozilla.com"],
+    "expires_in_version": "55",
+    "kind": "count",
     "bug_numbers": [1280229],
-    "description": "Number of the use of XHR in workers.",
+    "description": "Number of the use of XHR in workers."
+  },
+  "WEBVTT_TRACK_KINDS": {
+    "alert_emails": ["alwu@mozilla.com"],
+    "expires_in_version": "55",
+    "kind": "enumerated",
+    "n_values": 10,
+    "bug_numbers": [1280644],
+    "description": "Number of the use of the subtitles kind track. 0=Subtitles, 1=Captions, 2=Descriptions, 3=Chapters, 4=Metadata, 5=Undefined Error",
+    "releaseChannelCollection": "opt-out"
+  },
+  "WEBVTT_USED_VTT_CUES": {
+    "alert_emails": ["alwu@mozilla.com"],
+    "expires_in_version": "55",
+    "kind": "count",
+    "bug_numbers": [1280644],
+    "description": "Number of the use of the vtt cues.",
     "releaseChannelCollection": "opt-out"
   },
   "BLINK_FILESYSTEM_USED": {
@@ -10709,5 +10014,19 @@
     "bug_numbers": [1272501],
     "releaseChannelCollection": "opt-out",
     "description": "HTMLInputElement.webkitdirectory attribute used"
+  },
+  "UNIQUE_CONTAINERS_OPENED": {
+    "alert_emails": ["amarchesini@mozilla.com"],
+    "expires_in_version": "never",
+    "bug_numbers": [1276006],
+    "kind": "count",
+    "description": "Tracking the unique number of opened Containers."
+  },
+  "TOTAL_CONTAINERS_OPENED": {
+    "alert_emails": ["amarchesini@mozilla.com"],
+    "expires_in_version": "never",
+    "bug_numbers": [1276006],
+    "kind": "count",
+    "description": "Tracking the total number of opened Containers."
   }
 }

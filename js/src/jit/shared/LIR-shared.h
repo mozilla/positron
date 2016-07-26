@@ -1151,13 +1151,7 @@ class LNewCallObject : public LInstructionHelper<1, 0, 1>
     }
 };
 
-// Allocates a new CallObject with singleton type.
-//
-// This instruction generates two possible instruction sets:
-//   (1) If the call object is extensible, this is a callVM to create the
-//       call object.
-//   (2) Otherwise, an inline allocation of the call object is attempted.
-//
+// Performs a callVM to allocate a new CallObject with singleton type.
 class LNewSingletonCallObject : public LInstructionHelper<1, 0, 1>
 {
   public:
@@ -1171,9 +1165,8 @@ class LNewSingletonCallObject : public LInstructionHelper<1, 0, 1>
         return getTemp(0);
     }
 
-    MNewCallObjectBase* mir() const {
-        MOZ_ASSERT(mir_->isNewCallObject() || mir_->isNewRunOnceCallObject());
-        return static_cast<MNewCallObjectBase*>(mir_);
+    MNewSingletonCallObject* mir() const {
+        return mir_->toNewSingletonCallObject();
     }
 };
 
@@ -1826,7 +1819,7 @@ class LJSCallInstructionHelper : public LCallInstructionHelper<Defs, Operands, T
     bool hasSingleTarget() const {
         return getSingleTarget() != nullptr;
     }
-    JSFunction* getSingleTarget() const {
+    WrappedFunction* getSingleTarget() const {
         return mir()->getSingleTarget();
     }
 
@@ -2090,7 +2083,7 @@ class LApplyArgsGeneric : public LCallInstructionHelper<BOX_PIECES, BOX_PIECES +
     bool hasSingleTarget() const {
         return getSingleTarget() != nullptr;
     }
-    JSFunction* getSingleTarget() const {
+    WrappedFunction* getSingleTarget() const {
         return mir()->getSingleTarget();
     }
 
@@ -2133,7 +2126,7 @@ class LApplyArrayGeneric : public LCallInstructionHelper<BOX_PIECES, BOX_PIECES 
     bool hasSingleTarget() const {
         return getSingleTarget() != nullptr;
     }
-    JSFunction* getSingleTarget() const {
+    WrappedFunction* getSingleTarget() const {
         return mir()->getSingleTarget();
     }
 
@@ -7667,6 +7660,90 @@ class LAsmSelectI64 : public LAsmSelectBase<INT64_PIECES, 2 * INT64_PIECES + 1>
         setInt64Operand(0, trueExpr);
         setInt64Operand(1, falseExpr);
         setOperand(2, cond);
+    }
+};
+
+class LWasmBoundsCheck : public LInstructionHelper<0, 1, 0>
+{
+  public:
+    LIR_HEADER(WasmBoundsCheck);
+    explicit LWasmBoundsCheck(const LAllocation& ptr) {
+        setOperand(0, ptr);
+    }
+    MWasmBoundsCheck* mir() const {
+        return mir_->toWasmBoundsCheck();
+    }
+    const LAllocation* ptr() {
+        return getOperand(0);
+    }
+};
+
+namespace details {
+
+// This is a base class for LWasmLoad/LWasmLoadI64.
+template<size_t Defs, size_t Temp>
+class LWasmLoadBase : public LInstructionHelper<Defs, 1, Temp>
+{
+  public:
+    typedef LInstructionHelper<Defs, 1, Temp> Base;
+    explicit LWasmLoadBase(const LAllocation& ptr) {
+        Base::setOperand(0, ptr);
+    }
+    MWasmLoad* mir() const {
+        return Base::mir_->toWasmLoad();
+    }
+    const LAllocation* ptr() {
+        return Base::getOperand(0);
+    }
+};
+
+} // namespace details
+
+class LWasmLoad : public details::LWasmLoadBase<1, 1>
+{
+  public:
+    explicit LWasmLoad(const LAllocation& ptr)
+      : LWasmLoadBase(ptr)
+    {
+        setTemp(0, LDefinition::BogusTemp());
+    }
+
+    const LDefinition* ptrCopy() {
+        return Base::getTemp(0);
+    }
+
+    LIR_HEADER(WasmLoad);
+};
+
+class LWasmLoadI64 : public details::LWasmLoadBase<INT64_PIECES, 0>
+{
+  public:
+    explicit LWasmLoadI64(const LAllocation& ptr)
+      : LWasmLoadBase(ptr)
+    {}
+    LIR_HEADER(WasmLoadI64);
+};
+
+class LWasmStore : public LInstructionHelper<0, 2, 1>
+{
+  public:
+    LIR_HEADER(WasmStore);
+    LWasmStore(const LAllocation& ptr, const LAllocation& value) {
+        setOperand(0, ptr);
+        setOperand(1, value);
+        setTemp(0, LDefinition::BogusTemp());
+    }
+    MWasmStore* mir() const {
+        return mir_->toWasmStore();
+    }
+    const LAllocation* ptr() {
+        return getOperand(0);
+    }
+    const LDefinition* ptrCopy() {
+        return getTemp(0);
+    }
+    const LAllocation* value() {
+        return getOperand(1);
     }
 };
 

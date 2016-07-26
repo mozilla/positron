@@ -353,7 +353,7 @@ public:
                              ErrorResult& aRv);
 
   void
-  UpdateRuntimeOptions(const JS::RuntimeOptions& aRuntimeOptions);
+  UpdateContextOptions(const JS::ContextOptions& aContextOptions);
 
   void
   UpdateLanguages(const nsTArray<nsString>& aLanguages);
@@ -651,6 +651,18 @@ public:
     mLoadInfo.mCSP = aCSP;
   }
 
+  net::ReferrerPolicy
+  GetReferrerPolicy() const
+  {
+    return mLoadInfo.mReferrerPolicy;
+  }
+
+  void
+  SetReferrerPolicy(net::ReferrerPolicy aReferrerPolicy)
+  {
+    mLoadInfo.mReferrerPolicy = aReferrerPolicy;
+  }
+
   bool
   IsEvalAllowed() const
   {
@@ -667,6 +679,12 @@ public:
   GetReportCSPViolations() const
   {
     return mLoadInfo.mReportCSPViolations;
+  }
+
+  void
+  SetReportCSPViolations(bool aReport)
+  {
+    mLoadInfo.mReportCSPViolations = aReport;
   }
 
   bool
@@ -1150,7 +1168,7 @@ public:
   }
 
   void
-  UpdateRuntimeOptionsInternal(JSContext* aCx, const JS::RuntimeOptions& aRuntimeOptions);
+  UpdateContextOptionsInternal(JSContext* aCx, const JS::ContextOptions& aContextOptions);
 
   void
   UpdateLanguagesInternal(const nsTArray<nsString>& aLanguages);

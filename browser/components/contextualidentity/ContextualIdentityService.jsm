@@ -18,31 +18,50 @@ XPCOMUtils.defineLazyGetter(this, "gBrowserBundle", function() {
 this.ContextualIdentityService = {
   _identities: [
     { userContextId: 1,
+      public: true,
       icon: "chrome://browser/skin/usercontext/personal.svg",
       color: "#00a7e0",
       label: "userContextPersonal.label",
-      accessKey: "userContextPersonal.accesskey" },
+      accessKey: "userContextPersonal.accesskey",
+      alreadyOpened: false },
     { userContextId: 2,
+      public: true,
       icon: "chrome://browser/skin/usercontext/work.svg",
       color: "#f89c24",
       label: "userContextWork.label",
-      accessKey: "userContextWork.accesskey" },
+      accessKey: "userContextWork.accesskey",
+      alreadyOpened: false },
     { userContextId: 3,
+      public: true,
       icon: "chrome://browser/skin/usercontext/banking.svg",
       color: "#7dc14c",
       label: "userContextBanking.label",
-      accessKey: "userContextBanking.accesskey" },
+      accessKey: "userContextBanking.accesskey",
+      alreadyOpened: false },
     { userContextId: 4,
+      public: true,
       icon: "chrome://browser/skin/usercontext/shopping.svg",
       color: "#ee5195",
       label: "userContextShopping.label",
-      accessKey: "userContextShopping.accesskey" },
+      accessKey: "userContextShopping.accesskey",
+      alreadyOpened: false },
+    { userContextId: Math.pow(2, 31) - 1,
+      public: false,
+      icon: "",
+      color: "",
+      label: "userContextIdInternal.thumbnail",
+      accessKey: "",
+      alreadyOpened: false },
   ],
 
   _cssRule: false,
 
   getIdentities() {
-    return this._identities;
+    return this._identities.filter(info => info.public);
+  },
+
+  getPrivateIdentity(label) {
+    return this._identities.find(info => !info.public && info.label == label);
   },
 
   getIdentityFromId(userContextId) {
@@ -51,6 +70,9 @@ this.ContextualIdentityService = {
 
   getUserContextLabel(userContextId) {
     let identity = this.getIdentityFromId(userContextId);
+    if (!identity.public) {
+      return "";
+    }
     return gBrowserBundle.GetStringFromName(identity.label);
   },
 
@@ -71,5 +93,21 @@ this.ContextualIdentityService = {
     tab.style.backgroundImage = "linear-gradient(to right, transparent 20%, " + color + " 30%, " + color + " 70%, transparent 80%)";
     tab.style.backgroundSize = "auto 2px";
     tab.style.backgroundRepeat = "no-repeat";
+  },
+
+  telemetry(userContextId) {
+    let identity = this.getIdentityFromId(userContextId);
+
+    // Let's ignore unknown identities for now.
+    if (!identity) {
+      return;
+    }
+
+    if (!identity.alreadyOpened) {
+      identity.alreadyOpened = true;
+      Services.telemetry.getHistogramById("UNIQUE_CONTAINERS_OPENED").add(1);
+    }
+
+    Services.telemetry.getHistogramById("TOTAL_CONTAINERS_OPENED").add(1);
   },
 }

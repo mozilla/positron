@@ -5633,10 +5633,11 @@ float PresShell::GetCumulativeNonRootScaleResolution()
   return resolution;
 }
 
-void PresShell::SetRestoreResolution(float aResolution)
+void PresShell::SetRestoreResolution(float aResolution,
+                                     LayoutDeviceIntSize aDisplaySize)
 {
   if (mMobileViewportManager) {
-    mMobileViewportManager->SetRestoreResolution(aResolution);
+    mMobileViewportManager->SetRestoreResolution(aResolution, aDisplaySize);
   }
 }
 
@@ -6526,9 +6527,8 @@ PresShell::Paint(nsView*        aViewToPaint,
 
   nsIFrame* frame = aViewToPaint->GetFrame();
 
-  bool isRetainingManager;
   LayerManager* layerManager =
-    aViewToPaint->GetWidget()->GetLayerManager(&isRetainingManager);
+    aViewToPaint->GetWidget()->GetLayerManager();
   NS_ASSERTION(layerManager, "Must be in paint event");
   bool shouldInvalidate = layerManager->NeedsWidgetInvalidation();
 
@@ -6547,7 +6547,7 @@ PresShell::Paint(nsView*        aViewToPaint,
 
   layerManager->BeginTransaction();
 
-  if (frame && isRetainingManager) {
+  if (frame) {
     // Try to do an empty transaction, if the frame tree does not
     // need to be updated. Do not try to do an empty transaction on
     // a non-retained layer manager (like the BasicLayerManager that
@@ -9824,9 +9824,6 @@ PresShell::ProcessReflowCommands(bool aInterruptible)
     TimeDuration elapsed = TimeStamp::Now() - timerStart;
     int32_t intElapsed = int32_t(elapsed.ToMilliseconds());
 
-    if (!mDocument->GetRootElement()->IsXULElement() && mIsActive) {
-      Telemetry::Accumulate(Telemetry::HTML_FOREGROUND_REFLOW_MS_2, intElapsed);
-    }
     if (intElapsed > NS_LONG_REFLOW_TIME_MS) {
       Telemetry::Accumulate(Telemetry::LONG_REFLOW_INTERRUPTIBLE,
                             aInterruptible ? 1 : 0);
@@ -9880,7 +9877,7 @@ ReframeImageBoxes(nsIFrame *aFrame, void *aClosure)
   nsStyleChangeList *list = static_cast<nsStyleChangeList*>(aClosure);
   if (aFrame->GetType() == nsGkAtoms::imageBoxFrame) {
     list->AppendChange(aFrame, aFrame->GetContent(),
-                       NS_STYLE_HINT_FRAMECHANGE);
+                       nsChangeHint_ReconstructFrame);
     return false; // don't walk descendants
   }
   return true; // walk descendants

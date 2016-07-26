@@ -485,7 +485,6 @@ private:
   DECL_GFX_PREF(Once, "layers.tile-height",                    LayersTileHeight, int32_t, 256);
   DECL_GFX_PREF(Once, "layers.tile-max-pool-size",             LayersTileMaxPoolSize, uint32_t, (uint32_t)50);
   DECL_GFX_PREF(Once, "layers.tile-shrink-pool-timeout",       LayersTileShrinkPoolTimeout, uint32_t, (uint32_t)1000);
-  DECL_GFX_PREF(Once, "layers.tiled-drawtarget.enabled",       TiledDrawTargetEnabled, bool, false);
   DECL_GFX_PREF(Once, "layers.tiles.adjust",                   LayersTilesAdjust, bool, true);
   DECL_GFX_PREF(Once, "layers.tiles.edge-padding",             TileEdgePaddingEnabled, bool, true);
   DECL_GFX_PREF(Live, "layers.tiles.fade-in.enabled",          LayerTileFadeInEnabled, bool, false);
@@ -537,6 +536,7 @@ private:
   DECL_GFX_PREF(Live, "webgl.can-lose-context-in-foreground",  WebGLCanLoseContextInForeground, bool, true);
   DECL_GFX_PREF(Live, "webgl.default-no-alpha",                WebGLDefaultNoAlpha, bool, false);
   DECL_GFX_PREF(Live, "webgl.disable-angle",                   WebGLDisableANGLE, bool, false);
+  DECL_GFX_PREF(Live, "webgl.disable-wgl",                     WebGLDisableWGL, bool, false);
   DECL_GFX_PREF(Live, "webgl.disable-extensions",              WebGLDisableExtensions, bool, false);
   DECL_GFX_PREF(Live, "webgl.dxgl.enabled",                    WebGLDXGLEnabled, bool, false);
   DECL_GFX_PREF(Live, "webgl.dxgl.needs-finish",               WebGLDXGLNeedsFinish, bool, false);

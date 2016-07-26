@@ -359,6 +359,12 @@ var registerBrowserPluginElement = function() {
                        event, 'did-fail-load');
     }, false);
 
+    // Hide the border that Gecko adds by default.  Apps that want a border
+    // around the <webview> element can add one to the <webview> element itself.
+    // This iframe is an internal implementation detail, so it shouldn't express
+    // visible style.
+    this.style.border = '0';
+
     // The <iframe> node fills in the <webview> container.
     return this.style.flex = '1 1 auto';
   };

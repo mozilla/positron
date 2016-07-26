@@ -10,7 +10,6 @@
 #include "GeneratedJNIWrappers.h"
 #include "gfxPrefs.h"
 #include "OverscrollHandoffState.h"
-#include "OverScroller.h"
 #include "ViewConfiguration.h"
 
 #define ANDROID_APZ_LOG(...)
@@ -33,9 +32,9 @@ AndroidSpecificState::AndroidSpecificState() {
   } else {
     ANDROID_APZ_LOG("%p Failed to get ViewConfiguration\n", this);
   }
-  widget::sdk::OverScroller::LocalRef scroller;
-  if (widget::sdk::OverScroller::New(widget::GeckoAppShell::GetApplicationContext(), &scroller) != NS_OK) {
-    ANDROID_APZ_LOG("%p Failed to create Android OverScroller\n", this);
+  widget::StackScroller::LocalRef scroller;
+  if (widget::StackScroller::New(widget::GeckoAppShell::GetApplicationContext(), &scroller) != NS_OK) {
+    ANDROID_APZ_LOG("%p Failed to create Android StackScroller\n", this);
     return;
   }
   mOverScroller = scroller;
@@ -75,6 +74,7 @@ AndroidFlingAnimation::AndroidFlingAnimation(AsyncPanZoomController& aApzc,
   , mScrolledApzc(aScrolledApzc)
   , mSentBounceX(false)
   , mSentBounceY(false)
+  , mFlingDuration(0)
 {
   MOZ_ASSERT(mOverscrollHandoffChain);
   MOZ_ASSERT(aPlatformSpecificState->AsAndroidSpecificState());
@@ -120,7 +120,7 @@ AndroidFlingAnimation::AndroidFlingAnimation(AsyncPanZoomController& aApzc,
                        (int32_t)(velocity.x * 1000.0f), (int32_t)(velocity.y * 1000.0f),
                        (int32_t)floor(scrollRangeStartX), (int32_t)ceil(scrollRangeEndX),
                        (int32_t)floor(scrollRangeStartY), (int32_t)ceil(scrollRangeEndY),
-                       0, 0);
+                       0, 0, 0);
 }
 
 /**
@@ -135,15 +135,15 @@ AndroidFlingAnimation::DoSample(FrameMetrics& aFrameMetrics,
 {
   bool shouldContinueFling = true;
 
-  mOverScroller->ComputeScrollOffset(&shouldContinueFling);
-  // OverScroller::GetCurrVelocity will sometimes return NaN. So need to externally
-  // calculate current velocity and not rely on what the OverScroller calculates.
-  // mOverScroller->GetCurrVelocity(&speed);
+  mFlingDuration += aDelta.ToMilliseconds();
+  mOverScroller->ComputeScrollOffset(mFlingDuration, &shouldContinueFling);
+
   int32_t currentX = 0;
   int32_t currentY = 0;
   mOverScroller->GetCurrX(&currentX);
   mOverScroller->GetCurrY(&currentY);
   ParentLayerPoint offset((float)currentX, (float)currentY);
+  ParentLayerPoint preCheckedOffset(offset);
 
   bool hitBoundX = CheckBounds(mApzc.mX, offset.x, mFlingDirection.x, &(offset.x));
   bool hitBoundY = CheckBounds(mApzc.mY, offset.y, mFlingDirection.y, &(offset.y));
@@ -156,12 +156,20 @@ AndroidFlingAnimation::DoSample(FrameMetrics& aFrameMetrics,
   // of the fling, then end the animation.
   if (offset != mPreviousOffset) {
     if (aDelta.ToMilliseconds() > 0) {
-      velocity = (offset - mPreviousOffset) / (float)aDelta.ToMilliseconds();
+      mOverScroller->GetCurrSpeedX(&velocity.x);
+      mOverScroller->GetCurrSpeedY(&velocity.y);
+
+      velocity.x /= 1000;
+      velocity.y /= 1000;
+
       mPreviousVelocity = velocity;
     }
-  } else if (hitBoundX || hitBoundY) {
-    // We have reached the end of the scroll in one of the directions being scrolled and the offset has not
-    // changed so end animation.
+  } else if ((fabsf(offset.x - preCheckedOffset.x) > BOUNDS_EPSILON) || (fabsf(offset.y - preCheckedOffset.y) > BOUNDS_EPSILON)) {
+    // The page is no longer scrolling but the fling animation is still animating beyond the page bounds. If it goes
+    // beyond the BOUNDS_EPSILON then it has overflowed and will never stop. In that case, stop the fling animation.
+    shouldContinueFling = false;
+  } else if (hitBoundX && hitBoundY) {
+    // We can't scroll any farther along either axis.
     shouldContinueFling = false;
   }
 

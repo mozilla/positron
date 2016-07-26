@@ -338,6 +338,17 @@ SpdySession31::AddStream(nsAHttpTransaction *aHttpTransaction,
     mConnection = aHttpTransaction->Connection();
   }
 
+  if (mClosed || mShouldGoAway) {
+    nsHttpTransaction *trans = aHttpTransaction->QueryHttpTransaction();
+    if (trans && !trans->GetPushedStream()) {
+      LOG3(("SpdySession31::AddStream %p atrans=%p trans=%p session unusable - resched.\n",
+            this, aHttpTransaction, trans));
+      aHttpTransaction->SetConnection(nullptr);
+      gHttpHandler->InitiateTransaction(trans, trans->Priority());
+      return true;
+    }
+  }
+
   aHttpTransaction->SetConnection(this);
 
   if (aUseTunnel) {
@@ -2802,8 +2813,13 @@ SpdySession31::TransactionHasDataToWrite(nsAHttpTransaction *caller)
   LOG3(("SpdySession31::TransactionHasDataToWrite %p ID is 0x%X\n",
         this, stream->StreamID()));
 
-  mReadyForWrite.Push(stream);
-  SetWriteCallbacks();
+  if (!mClosed) {
+    mReadyForWrite.Push(stream);
+    SetWriteCallbacks();
+  } else {
+    LOG3(("SpdySession31::TransactionHasDataToWrite %p closed so not setting Ready4Write\n",
+          this));
+  }
 
   // NSPR poll will not poll the network if there are non system PR_FileDesc's
   // that are ready - so we can get into a deadlock waiting for the system IO

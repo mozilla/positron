@@ -1561,7 +1561,7 @@ static void
 ReloadPrefsCallback(const char* pref, void* data)
 {
     XPCJSRuntime* runtime = reinterpret_cast<XPCJSRuntime*>(data);
-    JSRuntime* rt = runtime->Runtime();
+    JSContext* cx = runtime->Context();
 
     bool safeMode = false;
     nsCOMPtr<nsIXULRuntime> xr = do_GetService("@mozilla.org/xre/runtime;1");
@@ -1611,11 +1611,11 @@ ReloadPrefsCallback(const char* pref, void* data)
         Preferences::GetInt(JS_OPTIONS_DOT_STR "gczeal.frequency",
                             JS_DEFAULT_ZEAL_FREQ);
     if (zeal >= 0) {
-        JS_SetGCZeal(rt, (uint8_t)zeal, zeal_frequency);
+        JS_SetGCZeal(cx, (uint8_t)zeal, zeal_frequency);
     }
 #endif // JS_GC_ZEAL
 
-    JS::RuntimeOptionsRef(rt).setBaseline(useBaseline)
+    JS::ContextOptionsRef(cx).setBaseline(useBaseline)
                              .setIon(useIon)
                              .setAsmJS(useAsmJS)
                              .setWasm(useWasm)
@@ -1628,11 +1628,11 @@ ReloadPrefsCallback(const char* pref, void* data)
                              .setWerror(werror)
                              .setExtraWarnings(extraWarnings);
 
-    JS_SetParallelParsingEnabled(rt, parallelParsing);
-    JS_SetOffthreadIonCompilationEnabled(rt, offthreadIonCompilation);
-    JS_SetGlobalJitCompilerOption(rt, JSJITCOMPILER_BASELINE_WARMUP_TRIGGER,
+    JS_SetParallelParsingEnabled(cx, parallelParsing);
+    JS_SetOffthreadIonCompilationEnabled(cx, offthreadIonCompilation);
+    JS_SetGlobalJitCompilerOption(cx, JSJITCOMPILER_BASELINE_WARMUP_TRIGGER,
                                   useBaselineEager ? 0 : -1);
-    JS_SetGlobalJitCompilerOption(rt, JSJITCOMPILER_ION_WARMUP_TRIGGER,
+    JS_SetGlobalJitCompilerOption(cx, JSJITCOMPILER_ION_WARMUP_TRIGGER,
                                   useIonEager ? 0 : -1);
 }
 
@@ -1646,16 +1646,16 @@ XPCJSRuntime::~XPCJSRuntime()
     // actual JS_DestroyRuntime() call. But destroying the runtime triggers
     // one final GC, which can call back into the runtime with various
     // callback if we aren't careful. Null out the relevant callbacks.
-    js::SetActivityCallback(Runtime(), nullptr, nullptr);
-    JS_RemoveFinalizeCallback(Runtime(), FinalizeCallback);
-    JS_RemoveWeakPointerZoneGroupCallback(Runtime(), WeakPointerZoneGroupCallback);
-    JS_RemoveWeakPointerCompartmentCallback(Runtime(), WeakPointerCompartmentCallback);
+    js::SetActivityCallback(Context(), nullptr, nullptr);
+    JS_RemoveFinalizeCallback(Context(), FinalizeCallback);
+    JS_RemoveWeakPointerZoneGroupCallback(Context(), WeakPointerZoneGroupCallback);
+    JS_RemoveWeakPointerCompartmentCallback(Context(), WeakPointerCompartmentCallback);
 
     // Clear any pending exception.  It might be an XPCWrappedJS, and if we try
     // to destroy it later we will crash.
     SetPendingException(nullptr);
 
-    JS::SetGCSliceCallback(Runtime(), mPrevGCSliceCallback);
+    JS::SetGCSliceCallback(Context(), mPrevGCSliceCallback);
 
     xpc_DelocalizeRuntime(Runtime());
 
@@ -2952,7 +2952,7 @@ JSReporter::CollectReports(WindowPaths* windowPaths,
     XPCJSRuntimeStats rtStats(windowPaths, topWindowPaths, getLocations,
                               anonymize);
     OrphanReporter orphanReporter(XPCConvert::GetISupportsFromJSObject);
-    if (!JS::CollectRuntimeStats(xpcrt->Runtime(), &rtStats, &orphanReporter,
+    if (!JS::CollectRuntimeStats(xpcrt->Context(), &rtStats, &orphanReporter,
                                  anonymize))
     {
         return NS_ERROR_FAILURE;
@@ -3135,12 +3135,12 @@ static nsresult
 JSSizeOfTab(JSObject* objArg, size_t* jsObjectsSize, size_t* jsStringsSize,
             size_t* jsPrivateSize, size_t* jsOtherSize)
 {
-    JSRuntime* rt = nsXPConnect::GetRuntimeInstance()->Runtime();
-    JS::RootedObject obj(rt, objArg);
+    JSContext* cx = nsXPConnect::GetRuntimeInstance()->Context();
+    JS::RootedObject obj(cx, objArg);
 
     TabSizes sizes;
     OrphanReporter orphanReporter(XPCConvert::GetISupportsFromJSObject);
-    NS_ENSURE_TRUE(JS::AddSizeOfTab(rt, obj, moz_malloc_size_of,
+    NS_ENSURE_TRUE(JS::AddSizeOfTab(cx, obj, moz_malloc_size_of,
                                     &orphanReporter, &sizes),
                    NS_ERROR_OUT_OF_MEMORY);
 
@@ -3454,6 +3454,8 @@ XPCJSRuntime::Initialize()
     MOZ_ASSERT(Runtime());
     JSRuntime* runtime = Runtime();
 
+    JSContext* cx = JS_GetContext(runtime);
+
     mUnprivilegedJunkScope.init(runtime, nullptr);
     mPrivilegedJunkScope.init(runtime, nullptr);
     mCompilationScope.init(runtime, nullptr);
@@ -3471,7 +3473,7 @@ XPCJSRuntime::Initialize()
     // This leaves the maximum-JS_malloc-bytes threshold still in effect
     // to cause period, and we hope hygienic, last-ditch GCs from within
     // the GC's allocator.
-    JS_SetGCParameter(runtime, JSGC_MAX_BYTES, 0xffffffff);
+    JS_SetGCParameter(cx, JSGC_MAX_BYTES, 0xffffffff);
 
     // The JS engine permits us to set different stack limits for system code,
     // trusted script, and untrusted script. We have tests that ensure that
@@ -3545,28 +3547,28 @@ XPCJSRuntime::Initialize()
     // default.
     (void) kDefaultStackQuota;
 
-    JS_SetNativeStackQuota(runtime,
+    JS_SetNativeStackQuota(cx,
                            kStackQuota,
                            kStackQuota - kSystemCodeBuffer,
                            kStackQuota - kSystemCodeBuffer - kTrustedScriptBuffer);
 
-    JS_SetDestroyCompartmentCallback(runtime, CompartmentDestroyedCallback);
-    JS_SetSizeOfIncludingThisCompartmentCallback(runtime, CompartmentSizeOfIncludingThisCallback);
-    JS_SetCompartmentNameCallback(runtime, CompartmentNameCallback);
-    mPrevGCSliceCallback = JS::SetGCSliceCallback(runtime, GCSliceCallback);
-    JS_AddFinalizeCallback(runtime, FinalizeCallback, nullptr);
-    JS_AddWeakPointerZoneGroupCallback(runtime, WeakPointerZoneGroupCallback, this);
-    JS_AddWeakPointerCompartmentCallback(runtime, WeakPointerCompartmentCallback, this);
-    JS_SetWrapObjectCallbacks(runtime, &WrapObjectCallbacks);
-    js::SetPreserveWrapperCallback(runtime, PreserveWrapper);
+    JS_SetDestroyCompartmentCallback(cx, CompartmentDestroyedCallback);
+    JS_SetSizeOfIncludingThisCompartmentCallback(cx, CompartmentSizeOfIncludingThisCallback);
+    JS_SetCompartmentNameCallback(cx, CompartmentNameCallback);
+    mPrevGCSliceCallback = JS::SetGCSliceCallback(cx, GCSliceCallback);
+    JS_AddFinalizeCallback(cx, FinalizeCallback, nullptr);
+    JS_AddWeakPointerZoneGroupCallback(cx, WeakPointerZoneGroupCallback, this);
+    JS_AddWeakPointerCompartmentCallback(cx, WeakPointerCompartmentCallback, this);
+    JS_SetWrapObjectCallbacks(cx, &WrapObjectCallbacks);
+    js::SetPreserveWrapperCallback(cx, PreserveWrapper);
 #ifdef MOZ_ENABLE_PROFILER_SPS
     if (PseudoStack* stack = mozilla_get_pseudo_stack())
         stack->sampleRuntime(runtime);
 #endif
-    JS_SetAccumulateTelemetryCallback(runtime, AccumulateTelemetryCallback);
-    js::SetActivityCallback(runtime, ActivityCallback, this);
-    JS_SetInterruptCallback(runtime, InterruptCallback);
-    js::SetWindowProxyClass(runtime, &OuterWindowProxyClass);
+    JS_SetAccumulateTelemetryCallback(cx, AccumulateTelemetryCallback);
+    js::SetActivityCallback(cx, ActivityCallback, this);
+    JS_SetInterruptCallback(cx, InterruptCallback);
+    js::SetWindowProxyClass(cx, &OuterWindowProxyClass);
 #ifdef MOZ_CRASHREPORTER
     js::AutoEnterOOMUnsafeRegion::setAnnotateOOMAllocationSizeCallback(
             CrashReporter::AnnotateOOMAllocationSize);
@@ -3589,7 +3591,7 @@ XPCJSRuntime::Initialize()
     // JS::CompileFunction). In practice, this means content scripts and event
     // handlers.
     UniquePtr<XPCJSSourceHook> hook(new XPCJSSourceHook);
-    js::SetSourceHook(runtime, Move(hook));
+    js::SetSourceHook(cx, Move(hook));
 
     // Set up locale information and callbacks for the newly-created runtime so
     // that the various toLocaleString() methods, localeCompare(), and other
@@ -3738,7 +3740,7 @@ XPCJSRuntime::BeforeProcessTask(bool aMightBlock)
 
     // As we may be entering a nested event loop, we need to
     // cancel any ongoing performance measurement.
-    js::ResetPerformanceMonitoring(Get()->Runtime());
+    js::ResetPerformanceMonitoring(Get()->Context());
 
     CycleCollectedJSRuntime::BeforeProcessTask(aMightBlock);
 }
@@ -3757,7 +3759,7 @@ XPCJSRuntime::AfterProcessTask(uint32_t aNewRecursionDepth)
 
     // Now that we are certain that the event is complete,
     // we can flush any ongoing performance measurement.
-    js::FlushPerformanceMonitoring(Get()->Runtime());
+    js::FlushPerformanceMonitoring(Get()->Context());
 }
 
 /***************************************************************************/
@@ -3843,7 +3845,7 @@ void
 XPCRootSetElem::RemoveFromRootSet()
 {
     nsXPConnect* xpc = nsXPConnect::XPConnect();
-    JS::PokeGC(xpc->GetRuntime()->Runtime());
+    JS::PokeGC(xpc->GetRuntime()->Context());
 
     MOZ_ASSERT(mSelfp, "Must be linked");
 

@@ -404,7 +404,7 @@ class ContentSandboxPolicy : public SandboxPolicyCommon {
   }
 
 public:
-  ContentSandboxPolicy(SandboxBrokerClient* aBroker):mBroker(aBroker) { }
+  explicit ContentSandboxPolicy(SandboxBrokerClient* aBroker):mBroker(aBroker) { }
   virtual ~ContentSandboxPolicy() { }
   virtual ResultExpr PrctlPolicy() const override {
     // Ideally this should be restricted to a whitelist, but content
@@ -440,6 +440,7 @@ public:
     case SYS_ACCEPT:
     case SYS_BIND:
     case SYS_LISTEN:
+    case SYS_GETSOCKOPT:
     case SYS_SETSOCKOPT:
     case SYS_GETSOCKNAME:
     case SYS_GETPEERNAME:
@@ -510,6 +511,7 @@ public:
     case __NR_rmdir:
     case __NR_getcwd:
     CASES_FOR_statfs:
+    CASES_FOR_fstatfs:
     case __NR_chmod:
     case __NR_rename:
     case __NR_symlink:
@@ -605,8 +607,8 @@ public:
 
     CASES_FOR_getrlimit:
     case __NR_clock_getres:
-    case __NR_getresuid:
-    case __NR_getresgid:
+    CASES_FOR_getresuid:
+    CASES_FOR_getresgid:
       return Allow();
 
     case __NR_umask:
@@ -623,6 +625,11 @@ public:
     case __NR_inotify_rm_watch:
       return Allow();
 
+#ifdef __NR_memfd_create
+    case __NR_memfd_create:
+      return Allow();
+#endif
+
 #ifdef __NR_rt_tgsigqueueinfo
       // Only allow to send signals within the process.
     case __NR_rt_tgsigqueueinfo: {
@@ -632,7 +639,17 @@ public:
     }
 #endif
 
+#ifdef __NR_semget
+    case __NR_semget:
+      return Allow();
+#endif
+
 #endif // DESKTOP
+
+#ifdef __NR_getrandom
+    case __NR_getrandom:
+      return Allow();
+#endif
 
       // nsSystemInfo uses uname (and we cache an instance, so
       // the info remains present even if we block the syscall)

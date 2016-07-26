@@ -24,7 +24,7 @@ class MediaStream;
 class MediaStreamGraph;
 class MediaStreamGraphImpl;
 class MediaStreamTrackListener;
-class MediaStreamTrackDirectListener;
+class DirectMediaStreamTrackListener;
 class PeerConnectionImpl;
 class PeerConnectionMedia;
 class PeerIdentity;
@@ -266,10 +266,29 @@ public:
   already_AddRefed<Promise>
   ApplyConstraints(const dom::MediaTrackConstraints& aConstraints, ErrorResult &aRv);
   already_AddRefed<MediaStreamTrack> Clone();
+  MediaStreamTrackState ReadyState() { return mReadyState; }
 
-  bool Ended() const { return mEnded; }
-  // Notifications from the MediaStreamGraph
-  void NotifyEnded() { mEnded = true; }
+  IMPL_EVENT_HANDLER(ended)
+
+  /**
+   * Convenience (and legacy) method for when ready state is "ended".
+   */
+  bool Ended() const { return mReadyState == MediaStreamTrackState::Ended; }
+
+  /**
+   * Forces the ready state to a particular value, for instance when we're
+   * cloning an already ended track.
+   */
+  void SetReadyState(MediaStreamTrackState aState) { mReadyState = aState; }
+
+  /**
+   * Notified by the MediaStreamGraph, through our owning MediaStream on the
+   * main thread.
+   *
+   * Note that this sets the track to ended and raises the "ended" event
+   * synchronously.
+   */
+  void NotifyEnded();
 
   /**
    * Get this track's principal.
@@ -344,8 +363,8 @@ public:
    * the listener succeeded (tracks originating from SourceMediaStreams) or
    * failed (e.g., WebAudio originated tracks).
    */
-  void AddDirectListener(MediaStreamTrackDirectListener *aListener);
-  void RemoveDirectListener(MediaStreamTrackDirectListener  *aListener);
+  void AddDirectListener(DirectMediaStreamTrackListener *aListener);
+  void RemoveDirectListener(DirectMediaStreamTrackListener  *aListener);
 
   /**
    * Sets up a MediaInputPort from the underlying track that this
@@ -358,6 +377,8 @@ public:
    * output stream.
    */
   bool IsForwardedThrough(MediaInputPort* aPort);
+
+  void SetMediaStreamSizeListener(DirectMediaStreamTrackListener* aListener);
 
 protected:
   virtual ~MediaStreamTrack();
@@ -397,11 +418,14 @@ protected:
   nsCOMPtr<nsIPrincipal> mPrincipal;
   nsCOMPtr<nsIPrincipal> mPendingPrincipal;
   RefPtr<PrincipalHandleListener> mPrincipalHandleListener;
+  // Keep tracking MediaStreamTrackListener and DirectMediaStreamTrackListener,
+  // so we can remove them in |Destory|.
+  nsTArray<RefPtr<MediaStreamTrackListener>> mTrackListeners;
+  nsTArray<RefPtr<DirectMediaStreamTrackListener>> mDirectTrackListeners;
   nsString mID;
-  bool mEnded;
+  MediaStreamTrackState mReadyState;
   bool mEnabled;
   const bool mRemote;
-  bool mStopped;
 };
 
 } // namespace dom

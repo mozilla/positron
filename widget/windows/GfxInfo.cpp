@@ -377,7 +377,7 @@ GfxInfo::Init()
             // Again, assume the worst
             mDriverDate.AssignLiteral("01-01-1970");
           }
-          RegCloseKey(key); 
+          RegCloseKey(key);
           break;
         }
       }
@@ -834,14 +834,48 @@ GfxInfo::GetGfxDriverInfo()
       (nsAString&) GfxDriverInfo::GetDeviceVendor(VendorNVIDIA), GfxDriverInfo::allDevices,
       GfxDriverInfo::allFeatures, nsIGfxInfo::FEATURE_BLOCKED_DRIVER_VERSION,
       DRIVER_LESS_THAN, V(6,14,11,8265), "FEATURE_FAILURE_NV_XP", "182.65" );
+
+    /*
+     * The last 5 digit of the NVIDIA driver version maps to the version that
+     * NVIDIA uses. The minor version (15, 16, 17) corresponds roughtly to the
+     * OS (Vista, Win7, Win7) but they show up in smaller numbers across all
+     * OS versions (perhaps due to OS upgrades). So we want to support
+     * May 2009+ drivers across all these minor versions.
+     *
+     * 182.65 correspond to end of May 2009.
+     */
     APPEND_TO_DRIVER_BLOCKLIST(OperatingSystem::WindowsVista,
       (nsAString&) GfxDriverInfo::GetDeviceVendor(VendorNVIDIA), GfxDriverInfo::allDevices,
       GfxDriverInfo::allFeatures, nsIGfxInfo::FEATURE_BLOCKED_DRIVER_VERSION,
-      DRIVER_LESS_THAN, V(8,17,11,8265), "FEATURE_FAILURE_NV_VISTA", "182.65" );
+      DRIVER_LESS_THAN, V(8,15,11,8265),
+      "FEATURE_FAILURE_NV_VISTA_15", "182.65" );
     APPEND_TO_DRIVER_BLOCKLIST(OperatingSystem::Windows7,
       (nsAString&) GfxDriverInfo::GetDeviceVendor(VendorNVIDIA), GfxDriverInfo::allDevices,
       GfxDriverInfo::allFeatures, nsIGfxInfo::FEATURE_BLOCKED_DRIVER_VERSION,
-      DRIVER_LESS_THAN, V(8,17,11,8265), "FEATURE_FAILURE_NV_W7", "182.65" );
+      DRIVER_LESS_THAN, V(8,15,11,8265),
+      "FEATURE_FAILURE_NV_W7_15", "182.65" );
+    APPEND_TO_DRIVER_BLOCKLIST_RANGE(OperatingSystem::WindowsVista,
+      (nsAString&) GfxDriverInfo::GetDeviceVendor(VendorNVIDIA), GfxDriverInfo::allDevices,
+      GfxDriverInfo::allFeatures, nsIGfxInfo::FEATURE_BLOCKED_DRIVER_VERSION,
+      DRIVER_BETWEEN_INCLUSIVE_START, V(8,16,10,0000), V(8,16,11,8265),
+      "FEATURE_FAILURE_NV_VISTA_16", "182.65" );
+    APPEND_TO_DRIVER_BLOCKLIST_RANGE(OperatingSystem::Windows7,
+      (nsAString&) GfxDriverInfo::GetDeviceVendor(VendorNVIDIA), GfxDriverInfo::allDevices,
+      GfxDriverInfo::allFeatures, nsIGfxInfo::FEATURE_BLOCKED_DRIVER_VERSION,
+      DRIVER_BETWEEN_INCLUSIVE_START, V(8,16,10,0000), V(8,16,11,8265),
+      "FEATURE_FAILURE_NV_W7_16", "182.65" );
+    // Telemetry doesn't show any driver in this range so it might not even be required.
+    APPEND_TO_DRIVER_BLOCKLIST_RANGE(OperatingSystem::WindowsVista,
+      (nsAString&) GfxDriverInfo::GetDeviceVendor(VendorNVIDIA), GfxDriverInfo::allDevices,
+      GfxDriverInfo::allFeatures, nsIGfxInfo::FEATURE_BLOCKED_DRIVER_VERSION,
+      DRIVER_BETWEEN_INCLUSIVE_START, V(8,17,10,0000), V(8,17,11,8265),
+      "FEATURE_FAILURE_NV_VISTA_17", "182.65" );
+    // Telemetry doesn't show any driver in this range so it might not even be required.
+    APPEND_TO_DRIVER_BLOCKLIST_RANGE(OperatingSystem::Windows7,
+      (nsAString&) GfxDriverInfo::GetDeviceVendor(VendorNVIDIA), GfxDriverInfo::allDevices,
+      GfxDriverInfo::allFeatures, nsIGfxInfo::FEATURE_BLOCKED_DRIVER_VERSION,
+      DRIVER_BETWEEN_INCLUSIVE_START, V(8,17,10,0000), V(8,17,11,8265),
+      "FEATURE_FAILURE_NV_W7_17", "182.65" );
 
     /*
      * AMD/ATI entries. 8.56.1.15 is the driver that shipped with Windows 7 RTM
@@ -898,17 +932,9 @@ GfxInfo::GetGfxDriverInfo()
       nsIGfxInfo::FEATURE_OPENGL_LAYERS, nsIGfxInfo::FEATURE_DISCOURAGED,
       DRIVER_LESS_THAN, GfxDriverInfo::allDriverVersions, "FEATURE_FAILURE_OGL_ATI_DIS" );
     APPEND_TO_DRIVER_BLOCKLIST2(OperatingSystem::Windows,
-      (nsAString&) GfxDriverInfo::GetDeviceVendor(VendorATI), GfxDriverInfo::allDevices,
-      nsIGfxInfo::FEATURE_WEBGL_OPENGL, nsIGfxInfo::FEATURE_DISCOURAGED,
-      DRIVER_LESS_THAN, GfxDriverInfo::allDriverVersions, "FEATURE_FAILURE_WEBGL_ATI_DIS" );
-    APPEND_TO_DRIVER_BLOCKLIST2(OperatingSystem::Windows,
       (nsAString&) GfxDriverInfo::GetDeviceVendor(VendorAMD), GfxDriverInfo::allDevices,
       nsIGfxInfo::FEATURE_OPENGL_LAYERS, nsIGfxInfo::FEATURE_DISCOURAGED,
       DRIVER_LESS_THAN, GfxDriverInfo::allDriverVersions, "FEATURE_FAILURE_OGL_AMD_DIS" );
-    APPEND_TO_DRIVER_BLOCKLIST2(OperatingSystem::Windows,
-      (nsAString&) GfxDriverInfo::GetDeviceVendor(VendorAMD), GfxDriverInfo::allDevices,
-      nsIGfxInfo::FEATURE_WEBGL_OPENGL, nsIGfxInfo::FEATURE_DISCOURAGED,
-      DRIVER_LESS_THAN, GfxDriverInfo::allDriverVersions, "FEATURE_FAILURE_WEBGL_AMD_DIS" );
 
     /*
      * Intel entries
@@ -1002,10 +1028,6 @@ GfxInfo::GetGfxDriverInfo()
       (nsAString&) GfxDriverInfo::GetDeviceVendor(VendorIntel), GfxDriverInfo::allDevices,
       nsIGfxInfo::FEATURE_OPENGL_LAYERS, nsIGfxInfo::FEATURE_DISCOURAGED,
       DRIVER_LESS_THAN, GfxDriverInfo::allDriverVersions, "FEATURE_FAILURE_INTEL_OGL_DIS" );
-    APPEND_TO_DRIVER_BLOCKLIST2(OperatingSystem::Windows,
-      (nsAString&) GfxDriverInfo::GetDeviceVendor(VendorIntel), GfxDriverInfo::allDevices,
-      nsIGfxInfo::FEATURE_WEBGL_OPENGL, nsIGfxInfo::FEATURE_DISCOURAGED,
-      DRIVER_LESS_THAN, GfxDriverInfo::allDriverVersions, "FEATURE_FAILURE_INTEL_WEBGL_DIS" );
 
     /**
      * Disable acceleration on Intel HD 3000 for graphics drivers <= 8.15.10.2321.
@@ -1129,6 +1151,27 @@ GfxInfo::GetGfxDriverInfo()
       (nsAString&)GfxDriverInfo::GetDeviceVendor(VendorIntel), (GfxDeviceFamily*)GfxDriverInfo::GetDeviceFamily(IntelGMAX4500HD),
       nsIGfxInfo::FEATURE_DIRECT3D_11_ANGLE, nsIGfxInfo::FEATURE_BLOCKED_DEVICE,
       DRIVER_LESS_THAN, GfxDriverInfo::allDriverVersions, "FEATURE_FAILURE_BUG_1153381");
+
+    ////////////////////////////////////
+    // WebGL
+
+    // Older than 5-15-2016
+    APPEND_TO_DRIVER_BLOCKLIST2(OperatingSystem::Windows,
+      (nsAString&) GfxDriverInfo::GetDeviceVendor(VendorAMD), GfxDriverInfo::allDevices,
+      nsIGfxInfo::FEATURE_WEBGL_OPENGL, nsIGfxInfo::FEATURE_DISCOURAGED, DRIVER_LESS_THAN,
+      V(16,200,1010,1002), "WEBGL_NATIVE_GL_OLD_AMD");
+
+    // Older than 11-18-2015
+    APPEND_TO_DRIVER_BLOCKLIST2(OperatingSystem::Windows,
+      (nsAString&) GfxDriverInfo::GetDeviceVendor(VendorIntel), GfxDriverInfo::allDevices,
+      nsIGfxInfo::FEATURE_WEBGL_OPENGL, nsIGfxInfo::FEATURE_DISCOURAGED, DRIVER_LESS_THAN,
+      V(20,19,15,4331), "WEBGL_NATIVE_GL_OLD_INTEL");
+
+    // Older than 2-23-2016
+    APPEND_TO_DRIVER_BLOCKLIST2(OperatingSystem::Windows,
+      (nsAString&) GfxDriverInfo::GetDeviceVendor(VendorNVIDIA), GfxDriverInfo::allDevices,
+      nsIGfxInfo::FEATURE_WEBGL_OPENGL, nsIGfxInfo::FEATURE_DISCOURAGED, DRIVER_LESS_THAN,
+      V(10,18,13,6200), "WEBGL_NATIVE_GL_OLD_NVIDIA");
 
   }
   return *mDriverInfo;

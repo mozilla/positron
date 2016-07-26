@@ -15,6 +15,7 @@
 #include "Decoder.h"
 #include "prenv.h"
 #include "prsystem.h"
+#include "IDecodingTask.h"
 #include "ImageContainer.h"
 #include "ImageRegion.h"
 #include "Layers.h"
@@ -83,7 +84,7 @@ RasterImage::RasterImage(ImageURL* aURI /* = nullptr */) :
 #ifdef DEBUG
   mFramesNotified(0),
 #endif
-  mSourceBuffer(new SourceBuffer()),
+  mSourceBuffer(WrapNotNull(new SourceBuffer())),
   mFrameCount(0),
   mHasSize(false),
   mTransient(false),
@@ -1230,33 +1231,33 @@ RasterImage::RequestDecodeForSize(const IntSize& aSize, uint32_t aFlags)
 }
 
 static void
-LaunchDecoder(Decoder* aDecoder,
-              RasterImage* aImage,
-              uint32_t aFlags,
-              bool aHaveSourceData)
+LaunchDecodingTask(IDecodingTask* aTask,
+                   RasterImage* aImage,
+                   uint32_t aFlags,
+                   bool aHaveSourceData)
 {
   if (aHaveSourceData) {
     // If we have all the data, we can sync decode if requested.
     if (aFlags & imgIContainer::FLAG_SYNC_DECODE) {
-      PROFILER_LABEL_PRINTF("DecodePool", "SyncDecodeIfPossible",
+      PROFILER_LABEL_PRINTF("DecodePool", "SyncRunIfPossible",
         js::ProfileEntry::Category::GRAPHICS,
         "%s", aImage->GetURIString().get());
-      DecodePool::Singleton()->SyncDecodeIfPossible(aDecoder);
+      DecodePool::Singleton()->SyncRunIfPossible(aTask);
       return;
     }
 
     if (aFlags & imgIContainer::FLAG_SYNC_DECODE_IF_FAST) {
-      PROFILER_LABEL_PRINTF("DecodePool", "SyncDecodeIfSmall",
+      PROFILER_LABEL_PRINTF("DecodePool", "SyncRunIfPreferred",
         js::ProfileEntry::Category::GRAPHICS,
         "%s", aImage->GetURIString().get());
-      DecodePool::Singleton()->SyncDecodeIfSmall(aDecoder);
+      DecodePool::Singleton()->SyncRunIfPreferred(aTask);
       return;
     }
   }
 
   // Perform an async decode. We also take this path if we don't have all the
   // source data yet, since sync decoding is impossible in that situation.
-  DecodePool::Singleton()->AsyncDecode(aDecoder);
+  DecodePool::Singleton()->AsyncRun(aTask);
 }
 
 NS_IMETHODIMP
@@ -1281,7 +1282,7 @@ RasterImage::Decode(const IntSize& aSize, uint32_t aFlags)
   // image is locked, any surfaces that are still useful will become locked
   // again when LookupFrame touches them, and the remainder will eventually
   // expire.
-  SurfaceCache::UnlockSurfaces(ImageKey(this));
+  SurfaceCache::UnlockEntries(ImageKey(this));
 
   Maybe<IntSize> targetSize = mSize != aSize ? Some(aSize) : Nothing();
 
@@ -1305,38 +1306,27 @@ RasterImage::Decode(const IntSize& aSize, uint32_t aFlags)
   }
 
   // Create a decoder.
-  RefPtr<Decoder> decoder;
+  RefPtr<IDecodingTask> task;
   if (mAnim) {
-    decoder = DecoderFactory::CreateAnimationDecoder(mDecoderType, this,
-                                                     mSourceBuffer, decoderFlags,
-                                                     surfaceFlags);
+    task = DecoderFactory::CreateAnimationDecoder(mDecoderType, WrapNotNull(this),
+                                                  mSourceBuffer, mSize,
+                                                  decoderFlags, surfaceFlags);
   } else {
-    decoder = DecoderFactory::CreateDecoder(mDecoderType, this, mSourceBuffer,
-                                            targetSize, decoderFlags,
-                                            surfaceFlags,
-                                            mRequestedSampleSize);
+    task = DecoderFactory::CreateDecoder(mDecoderType, WrapNotNull(this),
+                                         mSourceBuffer, mSize, targetSize,
+                                         decoderFlags, surfaceFlags,
+                                         mRequestedSampleSize);
   }
 
   // Make sure DecoderFactory was able to create a decoder successfully.
-  if (!decoder) {
-    return NS_ERROR_FAILURE;
-  }
-
-  // Add a placeholder for the first frame to the SurfaceCache so we won't
-  // trigger any more decoders with the same parameters.
-  InsertOutcome outcome =
-    SurfaceCache::InsertPlaceholder(ImageKey(this),
-                                    RasterSurfaceKey(aSize,
-                                                     decoder->GetSurfaceFlags(),
-                                                     /* aFrameNum = */ 0));
-  if (outcome != InsertOutcome::SUCCESS) {
+  if (!task) {
     return NS_ERROR_FAILURE;
   }
 
   mDecodeCount++;
 
   // We're ready to decode; start the decoder.
-  LaunchDecoder(decoder, this, aFlags, mHasSourceData);
+  LaunchDecodingTask(task, this, aFlags, mHasSourceData);
   return NS_OK;
 }
 
@@ -1350,17 +1340,17 @@ RasterImage::DecodeMetadata(uint32_t aFlags)
   MOZ_ASSERT(!mHasSize, "Should not do unnecessary metadata decodes");
 
   // Create a decoder.
-  RefPtr<Decoder> decoder =
-    DecoderFactory::CreateMetadataDecoder(mDecoderType, this, mSourceBuffer,
-                                          mRequestedSampleSize);
+  RefPtr<IDecodingTask> task =
+    DecoderFactory::CreateMetadataDecoder(mDecoderType, WrapNotNull(this),
+                                          mSourceBuffer, mRequestedSampleSize);
 
   // Make sure DecoderFactory was able to create a decoder successfully.
-  if (!decoder) {
+  if (!task) {
     return NS_ERROR_FAILURE;
   }
 
   // We're ready to decode; start the decoder.
-  LaunchDecoder(decoder, this, aFlags, mHasSourceData);
+  LaunchDecodingTask(task, this, aFlags, mHasSourceData);
   return NS_OK;
 }
 

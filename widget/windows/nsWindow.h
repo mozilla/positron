@@ -57,8 +57,8 @@ class imgIContainer;
 namespace mozilla {
 namespace widget {
 class NativeKey;
+class WinCompositorWidget;
 struct MSGResult;
-class WinCompositorWidgetProxy;
 } // namespace widget
 } // namespacw mozilla;
 
@@ -171,8 +171,7 @@ public:
   virtual bool            HasPendingInputEvent() override;
   virtual LayerManager*   GetLayerManager(PLayerTransactionChild* aShadowManager = nullptr,
                                           LayersBackend aBackendHint = mozilla::layers::LayersBackend::LAYERS_NONE,
-                                          LayerManagerPersistence aPersistence = LAYER_MANAGER_CURRENT,
-                                          bool* aAllowRetaining = nullptr) override;
+                                          LayerManagerPersistence aPersistence = LAYER_MANAGER_CURRENT) override;
   NS_IMETHOD              OnDefaultButtonLoaded(const LayoutDeviceIntRect& aButtonRect) override;
   virtual nsresult        SynthesizeNativeKeyEvent(int32_t aNativeKeyboardLayout,
                                                    int32_t aNativeKeyCode,
@@ -313,7 +312,7 @@ public:
                      const mozilla::NativeEventData& aKeyEventData,
                      nsIKeyEventInPluginCallback* aCallback) override;
 
-  mozilla::widget::CompositorWidgetProxy* NewCompositorWidgetProxy() override;
+  void GetCompositorWidgetInitData(mozilla::widget::CompositorWidgetInitData* aInitData) override;
 
 protected:
   virtual ~nsWindow();
@@ -488,8 +487,6 @@ protected:
   void                    ClearCachedResources();
   nsIWidgetListener*      GetPaintListener();
 
-  mozilla::widget::WinCompositorWidgetProxy* GetCompositorWidgetProxy();
-
 protected:
   nsCOMPtr<nsIWidget>   mParent;
   nsIntSize             mLastSize;
@@ -621,6 +618,8 @@ protected:
   POINT mCachedHitTestPoint;
   TimeStamp mCachedHitTestTime;
   int32_t mCachedHitTestResult;
+
+  RefPtr<mozilla::widget::WinCompositorWidget> mBasicLayersSurface;
 
   static bool sNeedsToInitMouseWheelSettings;
   static void InitMouseWheelScrollData();
