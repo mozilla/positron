@@ -991,16 +991,16 @@ JS_PUBLIC_API(double)
 JS_GetCurrentEmbedderTime();
 
 JS_PUBLIC_API(void*)
-JS_GetRuntimePrivate(JSRuntime* rt);
+JS_GetContextPrivate(JSContext* cx);
+
+JS_PUBLIC_API(void)
+JS_SetContextPrivate(JSContext* cx, void* data);
 
 extern JS_PUBLIC_API(JSRuntime*)
 JS_GetRuntime(JSContext* cx);
 
 extern JS_PUBLIC_API(JSRuntime*)
 JS_GetParentRuntime(JSRuntime* rt);
-
-JS_PUBLIC_API(void)
-JS_SetRuntimePrivate(JSRuntime* rt, void* data);
 
 extern JS_PUBLIC_API(void)
 JS_BeginRequest(JSContext* cx);
@@ -3551,6 +3551,12 @@ extern JS_PUBLIC_API(JSFunction*)
 JS_DefineFunctionById(JSContext* cx, JS::Handle<JSObject*> obj, JS::Handle<jsid> id, JSNative call,
                       unsigned nargs, unsigned attrs);
 
+extern JS_PUBLIC_API(bool)
+JS_IsFunctionBound(JSFunction* fun);
+
+extern JS_PUBLIC_API(JSObject*)
+JS_GetBoundFunctionTarget(JSFunction* fun);
+
 namespace JS {
 
 /**
@@ -4044,10 +4050,11 @@ CanCompileOffThread(JSContext* cx, const ReadOnlyCompileOptions& options, size_t
  * After successfully triggering an off thread compile of a script, the
  * callback will eventually be invoked with the specified data and a token
  * for the compilation. The callback will be invoked while off the main thread,
- * so must ensure that its operations are thread safe. Afterwards,
- * FinishOffThreadScript must be invoked on the main thread to get the result
- * script or nullptr. If maybecx is not specified, the resources will be freed,
- * but no script will be returned.
+ * so must ensure that its operations are thread safe. Afterwards, one of the
+ * following functions must be invoked on the main thread:
+ *
+ * - FinishOffThreadScript, to get the result script (or nullptr on failure).
+ * - CancelOffThreadScript, to free the resources without creating a script.
  *
  * The characters passed in to CompileOffThread must remain live until the
  * callback is invoked, and the resulting script will be rooted until the call
@@ -4060,7 +4067,10 @@ CompileOffThread(JSContext* cx, const ReadOnlyCompileOptions& options,
                  OffThreadCompileCallback callback, void* callbackData);
 
 extern JS_PUBLIC_API(JSScript*)
-FinishOffThreadScript(JSContext* maybecx, JSRuntime* rt, void* token);
+FinishOffThreadScript(JSContext* cx, void* token);
+
+extern JS_PUBLIC_API(void)
+CancelOffThreadScript(JSContext* cx, void* token);
 
 extern JS_PUBLIC_API(bool)
 CompileOffThreadModule(JSContext* cx, const ReadOnlyCompileOptions& options,
@@ -4068,7 +4078,10 @@ CompileOffThreadModule(JSContext* cx, const ReadOnlyCompileOptions& options,
                        OffThreadCompileCallback callback, void* callbackData);
 
 extern JS_PUBLIC_API(JSObject*)
-FinishOffThreadModule(JSContext* maybecx, JSRuntime* rt, void* token);
+FinishOffThreadModule(JSContext* cx, void* token);
+
+extern JS_PUBLIC_API(void)
+CancelOffThreadModule(JSContext* cx, void* token);
 
 /**
  * Compile a function with scopeChain plus the global as its scope chain.
@@ -4161,7 +4174,8 @@ namespace JS {
  * cross-compartment, it is cloned into the current compartment before executing.
  */
 extern JS_PUBLIC_API(bool)
-CloneAndExecuteScript(JSContext* cx, JS::Handle<JSScript*> script);
+CloneAndExecuteScript(JSContext* cx, JS::Handle<JSScript*> script,
+                      JS::MutableHandleValue rval);
 
 } /* namespace JS */
 
@@ -5036,13 +5050,13 @@ JS_ParseJSONWithReviver(JSContext* cx, JS::HandleString str, JS::HandleValue rev
  * The locale string remains owned by the caller.
  */
 extern JS_PUBLIC_API(bool)
-JS_SetDefaultLocale(JSRuntime* rt, const char* locale);
+JS_SetDefaultLocale(JSContext* cx, const char* locale);
 
 /**
  * Reset the default locale to OS defaults.
  */
 extern JS_PUBLIC_API(void)
-JS_ResetDefaultLocale(JSRuntime* rt);
+JS_ResetDefaultLocale(JSContext* cx);
 
 /**
  * Locale specific string conversion and error message callbacks.
@@ -5056,17 +5070,17 @@ struct JSLocaleCallbacks {
 
 /**
  * Establish locale callbacks. The pointer must persist as long as the
- * JSRuntime.  Passing nullptr restores the default behaviour.
+ * JSContext.  Passing nullptr restores the default behaviour.
  */
 extern JS_PUBLIC_API(void)
-JS_SetLocaleCallbacks(JSRuntime* rt, const JSLocaleCallbacks* callbacks);
+JS_SetLocaleCallbacks(JSContext* cx, const JSLocaleCallbacks* callbacks);
 
 /**
  * Return the address of the current locale callbacks struct, which may
  * be nullptr.
  */
 extern JS_PUBLIC_API(const JSLocaleCallbacks*)
-JS_GetLocaleCallbacks(JSRuntime* rt);
+JS_GetLocaleCallbacks(JSContext* cx);
 
 /************************************************************************/
 
@@ -5191,15 +5205,6 @@ class JSErrorReport
 #define JSREPORT_STRICT     0x4     /* error or warning due to strict option */
 
 /*
- * This condition is an error in strict mode code, a warning if
- * JS_HAS_STRICT_OPTION(cx), and otherwise should not be reported at
- * all.  We check the strictness of the context's top frame's script;
- * where that isn't appropriate, the caller should do the right checks
- * itself instead of using this flag.
- */
-#define JSREPORT_STRICT_MODE_ERROR 0x8
-
-/*
  * If JSREPORT_EXCEPTION is set, then a JavaScript-catchable exception
  * has been thrown for this runtime error, and the host should ignore it.
  * Exception-aware hosts should also check for JS_IsExceptionPending if
@@ -5209,8 +5214,7 @@ class JSErrorReport
 #define JSREPORT_IS_WARNING(flags)      (((flags) & JSREPORT_WARNING) != 0)
 #define JSREPORT_IS_EXCEPTION(flags)    (((flags) & JSREPORT_EXCEPTION) != 0)
 #define JSREPORT_IS_STRICT(flags)       (((flags) & JSREPORT_STRICT) != 0)
-#define JSREPORT_IS_STRICT_MODE_ERROR(flags) (((flags) &                      \
-                                              JSREPORT_STRICT_MODE_ERROR) != 0)
+
 namespace JS {
 
 typedef void
@@ -5551,7 +5555,6 @@ JS_SetOffthreadIonCompilationEnabled(JSContext* cx, bool enabled);
     Register(ION_ENABLE, "ion.enable")                                     \
     Register(BASELINE_ENABLE, "baseline.enable")                           \
     Register(OFFTHREAD_COMPILATION_ENABLE, "offthread-compilation.enable") \
-    Register(SIGNALS_ENABLE, "signals.enable")                             \
     Register(JUMP_THRESHOLD, "jump-threshold")                             \
     Register(WASM_TEST_MODE, "wasm.test-mode")
 

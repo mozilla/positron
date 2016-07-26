@@ -379,13 +379,13 @@ public:
       // because we have special behaviour for it when APZ scrolling is active.
       mOuter->SchedulePaint();
     }
-    NotifyPluginFrames(aTransforming ? BEGIN_APZ : END_APZ);
   }
   bool IsTransformingByAPZ() const {
     return mTransformingByAPZ;
   }
   void SetScrollableByAPZ(bool aScrollable);
   void SetZoomableByAPZ(bool aZoomable);
+  void SetScrollsClipOnUnscrolledOutOfFlow();
 
   bool UsesContainerScrolling() const;
 
@@ -581,6 +581,8 @@ public:
   // True if we don't want the scrollbar to repaint itself right now.
   bool mSuppressScrollbarRepaints:1;
 
+  bool mScrollsClipOnUnscrolledOutOfFlow:1;
+
   mozilla::layout::ScrollVelocityQueue mVelocityQueue;
 
 protected:
@@ -617,15 +619,9 @@ protected:
 
   void CompleteAsyncScroll(const nsRect &aRange, nsIAtom* aOrigin = nullptr);
 
-  /*
-   * Helper that notifies plugins about async smooth scroll operations managed
-   * by nsGfxScrollFrame.
-   */
-  enum AsyncScrollEventType { BEGIN_DOM, BEGIN_APZ, END_DOM, END_APZ };
-  void NotifyPluginFrames(AsyncScrollEventType aEvent);
-  AsyncScrollEventType mAsyncScrollEvent;
   bool HasPluginFrames();
   bool HasPerspective() const;
+  bool HasBgAttachmentLocal() const;
   uint8_t GetScrolledFrameDir() const;
 
   static void EnsureFrameVisPrefsCached();
@@ -1005,6 +1001,9 @@ public:
   }
   void SetZoomableByAPZ(bool aZoomable) override {
     mHelper.SetZoomableByAPZ(aZoomable);
+  }
+  void SetScrollsClipOnUnscrolledOutOfFlow() override {
+    mHelper.SetScrollsClipOnUnscrolledOutOfFlow();
   }
   
   ScrollSnapInfo GetScrollSnapInfo() const override {
@@ -1408,6 +1407,9 @@ public:
   }
   void SetZoomableByAPZ(bool aZoomable) override {
     mHelper.SetZoomableByAPZ(aZoomable);
+  }
+  void SetScrollsClipOnUnscrolledOutOfFlow() override {
+    mHelper.SetScrollsClipOnUnscrolledOutOfFlow();
   }
   virtual bool DecideScrollableLayer(nsDisplayListBuilder* aBuilder,
                                      nsRect* aDirtyRect,

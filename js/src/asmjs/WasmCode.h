@@ -50,6 +50,7 @@ class CodeSegment
     // These are pointers into code for stubs used for asynchronous
     // signal-handler control-flow transfer.
     uint8_t* interruptCode_;
+    uint8_t* badIndirectCallCode_;
     uint8_t* outOfBoundsCode_;
     uint8_t* unalignedAccessCode_;
 
@@ -79,6 +80,7 @@ class CodeSegment
     uint32_t totalLength() const { return codeLength_ + globalDataLength_; }
 
     uint8_t* interruptCode() const { return interruptCode_; }
+    uint8_t* badIndirectCallCode() const { return badIndirectCallCode_; }
     uint8_t* outOfBoundsCode() const { return outOfBoundsCode_; }
     uint8_t* unalignedAccessCode() const { return unalignedAccessCode_; }
 
@@ -96,34 +98,11 @@ class CodeSegment
     }
 };
 
-// This reusable base class factors out the logic for a resource that is shared
-// by multiple instances/modules but should only be counted once when computing
-// about:memory stats.
-
-template <class T>
-struct ShareableBase : RefCounted<T>
-{
-    using SeenSet = HashSet<const T*, DefaultHasher<const T*>, SystemAllocPolicy>;
-
-    size_t sizeOfIncludingThisIfNotSeen(MallocSizeOf mallocSizeOf, SeenSet* seen) const {
-        const T* self = static_cast<const T*>(this);
-        typename SeenSet::AddPtr p = seen->lookupForAdd(self);
-        if (p)
-            return 0;
-        bool ok = seen->add(p, self);
-        (void)ok;  // oh well
-        return mallocSizeOf(self) + self->sizeOfExcludingThis(mallocSizeOf);
-    }
-};
-
 // ShareableBytes is a ref-counted vector of bytes which are incrementally built
 // during compilation and then immutably shared.
 
 struct ShareableBytes : ShareableBase<ShareableBytes>
 {
-    ShareableBytes() = default;
-    explicit ShareableBytes(Bytes&& bytes) : bytes(Move(bytes)) {}
-
     // Vector is 'final', so instead make Vector a member and add boilerplate.
     Bytes bytes;
     size_t sizeOfExcludingThis(MallocSizeOf m) const { return bytes.sizeOfExcludingThis(m); }
@@ -135,28 +114,33 @@ struct ShareableBytes : ShareableBase<ShareableBytes>
 typedef RefPtr<ShareableBytes> MutableBytes;
 typedef RefPtr<const ShareableBytes> SharedBytes;
 
-// An Export represents a single function inside a wasm Module that has been
-// exported one or more times.
+// A FuncExport represents a single function inside a wasm Module that has been
+// exported one or more times. A FuncExport represents an internal entry point
+// that can be called via function-index by Instance::callExport(). To allow
+// O(log(n)) lookup of a FuncExport by function-index, the FuncExportVector
+// is stored sorted by function index.
 
-class Export
+class FuncExport
 {
     Sig sig_;
     struct CacheablePod {
         uint32_t funcIndex_;
-        uint32_t stubOffset_;
+        uint32_t entryOffset_;
+        uint32_t tableEntryOffset_;
     } pod;
 
   public:
-    Export() = default;
-    explicit Export(Sig&& sig, uint32_t funcIndex)
+    FuncExport() = default;
+    explicit FuncExport(Sig&& sig, uint32_t funcIndex, uint32_t tableEntryOffset)
       : sig_(Move(sig))
     {
         pod.funcIndex_ = funcIndex;
-        pod.stubOffset_ = UINT32_MAX;
+        pod.entryOffset_ = UINT32_MAX;
+        pod.tableEntryOffset_ = tableEntryOffset;
     }
-    void initStubOffset(uint32_t stubOffset) {
-        MOZ_ASSERT(pod.stubOffset_ == UINT32_MAX);
-        pod.stubOffset_ = stubOffset;
+    void initEntryOffset(uint32_t entryOffset) {
+        MOZ_ASSERT(pod.entryOffset_ == UINT32_MAX);
+        pod.entryOffset_ = entryOffset;
     }
 
     const Sig& sig() const {
@@ -165,15 +149,18 @@ class Export
     uint32_t funcIndex() const {
         return pod.funcIndex_;
     }
-    uint32_t stubOffset() const {
-        MOZ_ASSERT(pod.stubOffset_ != UINT32_MAX);
-        return pod.stubOffset_;
+    uint32_t entryOffset() const {
+        MOZ_ASSERT(pod.entryOffset_ != UINT32_MAX);
+        return pod.entryOffset_;
+    }
+    uint32_t tableEntryOffset() const {
+        return pod.tableEntryOffset_;
     }
 
-    WASM_DECLARE_SERIALIZABLE(Export)
+    WASM_DECLARE_SERIALIZABLE(FuncExport)
 };
 
-typedef Vector<Export, 0, SystemAllocPolicy> ExportVector;
+typedef Vector<FuncExport, 0, SystemAllocPolicy> FuncExportVector;
 
 // An FuncImport contains the runtime metadata needed to implement a call to an
 // imported function. Each function import has two call stubs: an optimized path
@@ -191,7 +178,10 @@ class FuncImport
     } pod;
 
   public:
-    FuncImport() = default;
+    FuncImport() {
+      memset(&pod, 0, sizeof(CacheablePod));
+    }
+
     FuncImport(Sig&& sig, uint32_t exitGlobalDataOffset)
       : sig_(Move(sig))
     {
@@ -226,6 +216,30 @@ class FuncImport
 };
 
 typedef Vector<FuncImport, 0, SystemAllocPolicy> FuncImportVector;
+
+// TableDesc contains the metadata describing a table as well as the
+// module-specific offset of the table's base pointer in global memory.
+// The element kind of this table. Currently, wasm only has "any function" and
+// asm.js only "typed function".
+
+enum class TableKind
+{
+    AnyFunction,
+    TypedFunction
+};
+
+struct TableDesc
+{
+    TableKind kind;
+    uint32_t globalDataOffset;
+    uint32_t initial;
+    uint32_t maximum;
+
+    TableDesc() { PodZero(this); }
+    explicit TableDesc(TableKind kind) : kind(kind), globalDataOffset(0), initial(0), maximum(0) {}
+};
+
+WASM_DECLARE_POD_VECTOR(TableDesc, TableDescVector)
 
 // A CodeRange describes a single contiguous range of code within a wasm
 // module's code segment. A CodeRange describes what the code does and, for
@@ -410,14 +424,37 @@ typedef Vector<char16_t, 64> TwoByteName;
 // Metadata is built incrementally by ModuleGenerator and then shared immutably
 // between modules.
 
-struct MetadataCacheablePod
+
+class MetadataCacheablePod
 {
+    static const uint32_t NO_START_FUNCTION = UINT32_MAX;
+    static_assert(NO_START_FUNCTION > MaxFuncs, "sentinel value");
+
+    uint32_t              startFuncIndex_;
+
+  public:
     ModuleKind            kind;
     MemoryUsage           memoryUsage;
     uint32_t              minMemoryLength;
     uint32_t              maxMemoryLength;
 
-    MetadataCacheablePod() { mozilla::PodZero(this); }
+    MetadataCacheablePod() {
+        mozilla::PodZero(this);
+        startFuncIndex_ = NO_START_FUNCTION;
+    }
+
+    bool hasStartFunction() const {
+        return startFuncIndex_ != NO_START_FUNCTION;
+    }
+    void initStartFuncIndex(uint32_t i) {
+        MOZ_ASSERT(!hasStartFunction());
+        startFuncIndex_ = i;
+        MOZ_ASSERT(hasStartFunction());
+    }
+    uint32_t startFuncIndex() const {
+        MOZ_ASSERT(hasStartFunction());
+        return startFuncIndex_;
+    }
 };
 
 struct Metadata : ShareableBase<Metadata>, MetadataCacheablePod
@@ -428,7 +465,8 @@ struct Metadata : ShareableBase<Metadata>, MetadataCacheablePod
     const MetadataCacheablePod& pod() const { return *this; }
 
     FuncImportVector      funcImports;
-    ExportVector          exports;
+    FuncExportVector      funcExports;
+    TableDescVector       tables;
     MemoryAccessVector    memoryAccesses;
     BoundsCheckVector     boundsChecks;
     CodeRangeVector       codeRanges;
@@ -440,6 +478,8 @@ struct Metadata : ShareableBase<Metadata>, MetadataCacheablePod
 
     bool usesMemory() const { return UsesMemory(memoryUsage); }
     bool hasSharedMemory() const { return memoryUsage == MemoryUsage::Shared; }
+
+    const FuncExport& lookupFuncExport(uint32_t funcIndex) const;
 
     // AsmJSMetadata derives Metadata iff isAsmJS(). Mostly this distinction is
     // encapsulated within AsmJS.cpp, but the additional virtual functions allow

@@ -6,8 +6,11 @@ from __future__ import absolute_import, print_function, unicode_literals
 
 import argparse
 import copy
+import logging
 import re
 import shlex
+
+logger = logging.getLogger(__name__)
 
 TRY_DELIMITER = 'try:'
 
@@ -135,6 +138,9 @@ RIDEALONG_BUILDS = {
         'sm-compacting',
         'sm-rootanalysis',
         'sm-package',
+        'sm-tsan',
+        'sm-asan',
+        'sm-msan',
     ],
 }
 
@@ -235,6 +241,8 @@ class TryOptionSyntax(object):
             results.append(build)
             if build in RIDEALONG_BUILDS:
                 results.extend(RIDEALONG_BUILDS[build])
+                logger.info("platform %s triggers ridealong builds %s" %
+                            (build, RIDEALONG_BUILDS[build]))
 
         return results
 
@@ -501,8 +509,9 @@ class TryOptionSyntax(object):
             elif attr('legacy_kind') == 'talos':
                 return match_test(self.talos, 'talos_try_name')
             return False
+        elif attr('kind') in ('desktop-test', 'android-test'):
+            return match_test(self.unittests, 'unittest_try_name')
         else:
-            # TODO: match other kinds
             return False
 
     def __str__(self):

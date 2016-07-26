@@ -46,6 +46,7 @@
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/File.h"
 #include "mozilla/dom/ExternalHelperAppParent.h"
+#include "mozilla/dom/GetFilesHelper.h"
 #include "mozilla/dom/GeolocationBinding.h"
 #ifdef MOZ_EME
 #include "mozilla/dom/MediaKeySystemAccess.h"
@@ -190,6 +191,7 @@
 #include "nsIBlocklistService.h"
 #include "mozilla/StyleSheetHandle.h"
 #include "mozilla/StyleSheetHandleInlines.h"
+#include "nsHostObjectProtocolHandler.h"
 
 #include "nsIBidiKeyboard.h"
 
@@ -2058,6 +2060,13 @@ ContentParent::ActorDestroy(ActorDestroyReason why)
   if (mDriverCrashGuard) {
     mDriverCrashGuard->NotifyCrashed();
   }
+
+  // Unregister all the BlobURLs registered by the ContentChild.
+  for (uint32_t i = 0; i < mBlobURLs.Length(); ++i) {
+    nsHostObjectProtocolHandler::RemoveDataEntry(mBlobURLs[i]);
+  }
+
+  mBlobURLs.Clear();
 }
 
 void
@@ -2318,7 +2327,6 @@ ContentParent::ContentParent(ContentParent* aTemplate,
   mSubprocess->LaunchAndWaitForProcessHandle();
 
   // Clone actors routed by aTemplate for this instance.
-  IToplevelProtocol::SetTransport(mSubprocess->GetChannel());
   ProtocolCloneContext cloneContext;
   cloneContext.SetContentParent(this);
   CloneManagees(aTemplate, &cloneContext);
@@ -2422,14 +2430,28 @@ ContentParent::InitInternal(ProcessPriority aInitialPriority,
     // on demand.)
     bool useOffMainThreadCompositing = !!CompositorThreadHolder::Loop();
     if (useOffMainThreadCompositing) {
-      DebugOnly<bool> opened = PCompositorBridge::Open(this);
-      MOZ_ASSERT(opened);
+      GPUProcessManager* gpm = GPUProcessManager::Get();
 
-      opened = PImageBridge::Open(this);
-      MOZ_ASSERT(opened);
+      {
+        Endpoint<PCompositorBridgeChild> endpoint;
+        DebugOnly<bool> opened =
+          gpm->CreateContentCompositorBridge(OtherPid(), &endpoint);
+        MOZ_ASSERT(opened);
+        Unused << SendInitCompositor(Move(endpoint));
+      }
 
-      opened = gfx::PVRManager::Open(this);
-      MOZ_ASSERT(opened);
+      {
+        Endpoint<PImageBridgeChild> endpoint;
+        DebugOnly<bool> opened =
+          gpm->CreateContentImageBridge(OtherPid(), &endpoint);
+        MOZ_ASSERT(opened);
+        Unused << SendInitImageBridge(Move(endpoint));
+      }
+
+      {
+        DebugOnly<bool> opened = gfx::PVRManager::Open(this);
+        MOZ_ASSERT(opened);
+      }
     }
 #ifdef MOZ_WIDGET_GONK
     DebugOnly<bool> opened = PSharedBufferManager::Open(this);
@@ -2512,6 +2534,23 @@ ContentParent::InitInternal(ProcessPriority aInitialPriority,
     Unused << SendSetAudioSessionData(id, sessionName, iconPath);
   }
 #endif
+
+  {
+    RefPtr<ServiceWorkerRegistrar> swr = ServiceWorkerRegistrar::Get();
+    MOZ_ASSERT(swr);
+
+    nsTArray<ServiceWorkerRegistrationData> registrations;
+    swr->GetRegistrations(registrations);
+    Unused << SendInitServiceWorkers(ServiceWorkerConfiguration(registrations));
+  }
+
+  {
+    nsTArray<BlobURLRegistrationData> registrations;
+    if (nsHostObjectProtocolHandler::GetAllBlobURLEntries(registrations,
+                                                          this)) {
+      Unused << SendInitBlobURLs(registrations);
+    }
+  }
 }
 
 bool
@@ -3202,26 +3241,11 @@ ContentParent::DeallocPAPZParent(PAPZParent* aActor)
   return true;
 }
 
-PCompositorBridgeParent*
-ContentParent::AllocPCompositorBridgeParent(mozilla::ipc::Transport* aTransport,
-                                            base::ProcessId aOtherProcess)
-{
-  return GPUProcessManager::Get()->CreateTabCompositorBridge(
-    aTransport, aOtherProcess);
-}
-
 gfx::PVRManagerParent*
 ContentParent::AllocPVRManagerParent(Transport* aTransport,
                                      ProcessId aOtherProcess)
 {
   return gfx::VRManagerParent::CreateCrossProcess(aTransport, aOtherProcess);
-}
-
-PImageBridgeParent*
-ContentParent::AllocPImageBridgeParent(mozilla::ipc::Transport* aTransport,
-                                       base::ProcessId aOtherProcess)
-{
-  return ImageBridgeParent::Create(aTransport, aOtherProcess);
 }
 
 PBackgroundParent*
@@ -4333,14 +4357,6 @@ ContentParent::RecvExtProtocolChannelConnectParent(const uint32_t& registrarId)
 bool
 ContentParent::HasNotificationPermission(const IPC::Principal& aPrincipal)
 {
-#ifdef MOZ_CHILD_PERMISSIONS
-  uint32_t permission = mozilla::CheckPermission(this, aPrincipal,
-                                                 "desktop-notification");
-  if (permission != nsIPermissionManager::ALLOW_ACTION) {
-    return false;
-  }
-#endif /* MOZ_CHILD_PERMISSIONS */
-
   return true;
 }
 
@@ -4475,16 +4491,6 @@ bool
 ContentParent::RecvAddGeolocationListener(const IPC::Principal& aPrincipal,
                                           const bool& aHighAccuracy)
 {
-#ifdef MOZ_CHILD_PERMISSIONS
-  if (!ContentParent::IgnoreIPCPrincipal()) {
-    uint32_t permission = mozilla::CheckPermission(this, aPrincipal,
-                                                   "geolocation");
-    if (permission != nsIPermissionManager::ALLOW_ACTION) {
-      return true;
-    }
-  }
-#endif /* MOZ_CHILD_PERMISSIONS */
-
   // To ensure no geolocation updates are skipped, we always force the
   // creation of a new listener.
   RecvRemoveGeolocationListener();
@@ -5505,18 +5511,6 @@ ContentParent::PermissionManagerRelease(const ContentParentId& aCpId,
 }
 
 bool
-ContentParent::RecvGetBrowserConfiguration(BrowserConfiguration* aConfig)
-{
-  MOZ_ASSERT(XRE_IsParentProcess());
-
-  RefPtr<ServiceWorkerRegistrar> swr = ServiceWorkerRegistrar::Get();
-  MOZ_ASSERT(swr);
-
-  swr->GetRegistrations(aConfig->serviceWorkerRegistrations());
-  return true;
-}
-
-bool
 ContentParent::RecvProfile(const nsCString& aProfile)
 {
 #ifdef MOZ_ENABLE_PROFILER_SPS
@@ -5718,6 +5712,73 @@ ContentParent::RecvNotifyLowMemory()
   return true;
 }
 
+/* static */ void
+ContentParent::BroadcastBlobURLRegistration(const nsACString& aURI,
+                                            BlobImpl* aBlobImpl,
+                                            nsIPrincipal* aPrincipal,
+                                            ContentParent* aIgnoreThisCP)
+{
+  nsCString uri(aURI);
+  IPC::Principal principal(aPrincipal);
+
+  for (auto* cp : AllProcesses(eLive)) {
+    if (cp != aIgnoreThisCP) {
+      PBlobParent* blobParent = cp->GetOrCreateActorForBlobImpl(aBlobImpl);
+      if (blobParent) {
+        Unused << cp->SendBlobURLRegistration(uri, blobParent, principal);
+      }
+    }
+  }
+}
+
+/* static */ void
+ContentParent::BroadcastBlobURLUnregistration(const nsACString& aURI,
+                                              ContentParent* aIgnoreThisCP)
+{
+  nsCString uri(aURI);
+
+  for (auto* cp : AllProcesses(eLive)) {
+    if (cp != aIgnoreThisCP) {
+      Unused << cp->SendBlobURLUnregistration(uri);
+    }
+  }
+}
+
+bool
+ContentParent::RecvStoreAndBroadcastBlobURLRegistration(const nsCString& aURI,
+                                                        PBlobParent* aBlobParent,
+                                                        const Principal& aPrincipal)
+{
+  RefPtr<BlobImpl> blobImpl =
+    static_cast<BlobParent*>(aBlobParent)->GetBlobImpl();
+  if (NS_WARN_IF(!blobImpl)) {
+    return false;
+  }
+
+  if (NS_SUCCEEDED(nsHostObjectProtocolHandler::AddDataEntry(aURI, blobImpl,
+                                                             aPrincipal))) {
+    BroadcastBlobURLRegistration(aURI, blobImpl, aPrincipal, this);
+
+    // We want to store this blobURL, so we can unregister it if the child
+    // crashes.
+    mBlobURLs.AppendElement(aURI);
+  }
+
+  BroadcastBlobURLRegistration(aURI, blobImpl, aPrincipal, this);
+  return true;
+}
+
+bool
+ContentParent::RecvUnstoreAndBroadcastBlobURLUnregistration(const nsCString& aURI)
+{
+  nsHostObjectProtocolHandler::RemoveDataEntry(aURI,
+                                               false /* Don't broadcast */);
+  BroadcastBlobURLUnregistration(aURI, this);
+  mBlobURLs.RemoveElement(aURI);
+
+  return true;
+}
+
 } // namespace dom
 } // namespace mozilla
 
@@ -5746,4 +5807,47 @@ ContentParent::HandleWindowsMessages(const Message& aMsg) const
   }
 
   return true;
+}
+
+bool
+ContentParent::RecvGetFilesRequest(const nsID& aUUID,
+                                   const nsString& aDirectoryPath,
+                                   const bool& aRecursiveFlag)
+{
+  MOZ_ASSERT(!mGetFilesPendingRequests.GetWeak(aUUID));
+
+  ErrorResult rv;
+  RefPtr<GetFilesHelper> helper =
+    GetFilesHelperParent::Create(aUUID, aDirectoryPath, aRecursiveFlag, this,
+                                 rv);
+
+  if (NS_WARN_IF(rv.Failed())) {
+    return SendGetFilesResponse(aUUID,
+                                GetFilesResponseFailure(rv.StealNSResult()));
+  }
+
+  mGetFilesPendingRequests.Put(aUUID, helper);
+  return true;
+}
+
+bool
+ContentParent::RecvDeleteGetFilesRequest(const nsID& aUUID)
+{
+  GetFilesHelper* helper = mGetFilesPendingRequests.GetWeak(aUUID);
+  if (helper) {
+    mGetFilesPendingRequests.Remove(aUUID);
+  }
+
+  return true;
+}
+
+void
+ContentParent::SendGetFilesResponseAndForget(const nsID& aUUID,
+                                             const GetFilesResponseResult& aResult)
+{
+  GetFilesHelper* helper = mGetFilesPendingRequests.GetWeak(aUUID);
+  if (helper) {
+    mGetFilesPendingRequests.Remove(aUUID);
+    Unused << SendGetFilesResponse(aUUID, aResult);
+  }
 }

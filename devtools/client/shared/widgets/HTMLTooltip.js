@@ -114,17 +114,24 @@ function (anchorRect, viewportRect, height, pos, offset) {
  *        space should not be used by tooltips (for instance OS toolbars, taskbars etc.).
  * @param {Number} width
  *        Preferred width for the tooltip.
+ * @param {String} type
+ *        The tooltip type (e.g. "arrow").
+ * @param {Number} offset
+ *        Horizontal offset in pixels.
+ * @param {Boolean} isRtl
+ *        If the anchor is in RTL, the tooltip should be aligned to the right.
  * @return {Object}
  *         - {Number} left: the left offset for the tooltip.
  *         - {Number} width: the width to use for the tooltip container.
  *         - {Number} arrowLeft: the left offset to use for the arrow element.
  */
 const calculateHorizontalPosition =
-function (anchorRect, viewportRect, width, type, offset) {
-  let {left: anchorLeft, width: anchorWidth} = anchorRect;
+function (anchorRect, viewportRect, width, type, offset, isRtl) {
+  let anchorWidth = anchorRect.width;
+  let anchorStart = isRtl ? anchorRect.right : anchorRect.left;
 
   // Translate to the available viewport space before calculating dimensions and position.
-  anchorLeft -= viewportRect.left;
+  anchorStart -= viewportRect.left;
 
   // Calculate WIDTH.
   width = Math.min(width, viewportRect.width);
@@ -132,14 +139,16 @@ function (anchorRect, viewportRect, width, type, offset) {
   // Calculate LEFT.
   // By default the tooltip is aligned with the anchor left edge. Unless this
   // makes it overflow the viewport, in which case is shifts to the left.
-  let left = Math.min(anchorLeft + offset, viewportRect.width - width);
+  let left = anchorStart + offset - (isRtl ? width : 0);
+  left = Math.min(left, viewportRect.width - width);
+  left = Math.max(0, left);
 
   // Calculate ARROW LEFT (tooltip's LEFT might be updated)
   let arrowLeft;
   // Arrow style tooltips may need to be shifted to the left
   if (type === TYPE.ARROW) {
     let arrowCenter = left + ARROW_OFFSET + ARROW_WIDTH / 2;
-    let anchorCenter = anchorLeft + anchorWidth / 2;
+    let anchorCenter = anchorStart + anchorWidth / 2;
     // If the anchor is too narrow, align the arrow and the anchor center.
     if (arrowCenter > anchorCenter) {
       left = Math.max(0, left - (arrowCenter - anchorCenter));
@@ -147,7 +156,7 @@ function (anchorRect, viewportRect, width, type, offset) {
     // Arrow's left offset relative to the anchor.
     arrowLeft = Math.min(ARROW_OFFSET, (anchorWidth - ARROW_WIDTH) / 2) | 0;
     // Translate the coordinate to tooltip container
-    arrowLeft += anchorLeft - left;
+    arrowLeft += anchorStart - left;
     // Make sure the arrow remains in the tooltip container.
     arrowLeft = Math.min(arrowLeft, width - ARROW_WIDTH);
     arrowLeft = Math.max(arrowLeft, 0);
@@ -211,12 +220,13 @@ function HTMLTooltip(toolbox, {
   this.type = type;
   this.autofocus = autofocus;
   this.consumeOutsideClicks = consumeOutsideClicks;
-  this.useXulWrapper = useXulWrapper;
+  this.useXulWrapper = this._isXUL() && useXulWrapper;
+
+  // The top window is used to attach click event listeners to close the tooltip if the
+  // user clicks on the content page.
+  this.topWindow = this._getTopWindow();
 
   this._position = null;
-
-  // Use the topmost window to listen for click events to close the tooltip
-  this.topWindow = this.doc.defaultView.top;
 
   this._onClick = this._onClick.bind(this);
 
@@ -229,7 +239,7 @@ function HTMLTooltip(toolbox, {
   if (stylesheet) {
     this._applyStylesheet(stylesheet);
   }
-  if (this._isXUL() && this.useXulWrapper) {
+  if (this.useXulWrapper) {
     // When using a XUL panel as the wrapper, the actual markup for the tooltip is as
     // follows :
     // <panel> <!-- XUL panel used to position the tooltip anywhere on screen -->
@@ -285,9 +295,8 @@ HTMLTooltip.prototype = {
    *        - {Number} width: preferred width for the tooltip container. If not specified
    *          the tooltip container will be measured before being displayed, and the
    *          measured width will be used as preferred width.
-   *        - {Number} height: optional, preferred height for the tooltip container. This
-   *          parameter acts as a max-height for the tooltip content. If not specified,
-   *          the tooltip will be able to use all the height available.
+   *        - {Number} height: optional, preferred height for the tooltip container. If
+   *          not specified, the tooltip will be able to use all the height available.
    */
   setContent: function (content, {width = "auto", height = Infinity} = {}) {
     this.preferredWidth = width;
@@ -332,6 +341,12 @@ HTMLTooltip.prototype = {
     let isTop = computedPosition === POSITION.TOP;
     this.container.classList.toggle("tooltip-top", isTop);
     this.container.classList.toggle("tooltip-bottom", !isTop);
+
+    // If the preferred height is set to Infinity, the tooltip container should grow based
+    // on its content's height and use as much height as possible.
+    this.container.classList.toggle("tooltip-flexible-height",
+      this.preferredHeight === Infinity);
+
     this.container.style.height = height + "px";
 
     let preferredWidth;
@@ -342,8 +357,10 @@ HTMLTooltip.prototype = {
       preferredWidth = this.preferredWidth + themeWidth;
     }
 
-    let {left, width, arrowLeft} =
-      calculateHorizontalPosition(anchorRect, viewportRect, preferredWidth, this.type, x);
+    let anchorWin = anchor.ownerDocument.defaultView;
+    let isRtl = anchorWin.getComputedStyle(anchor).direction === "rtl";
+    let {left, width, arrowLeft} = calculateHorizontalPosition(
+      anchorRect, viewportRect, preferredWidth, this.type, x, isRtl);
 
     this.container.style.width = width + "px";
 
@@ -366,6 +383,8 @@ HTMLTooltip.prototype = {
     this.doc.defaultView.clearTimeout(this.attachEventsTimer);
     this.attachEventsTimer = this.doc.defaultView.setTimeout(() => {
       this._maybeFocusTooltip();
+      // Updated the top window reference each time in case the host changes.
+      this.topWindow = this._getTopWindow();
       this.topWindow.addEventListener("click", this._onClick, true);
       this.emit("shown");
     }, 0);
@@ -486,7 +505,8 @@ HTMLTooltip.prototype = {
     }
 
     this.hide();
-    if (this.consumeOutsideClicks) {
+    if (this.consumeOutsideClicks && e.button === 0) {
+      // Consume only left click events (button === 0).
       e.preventDefault();
       e.stopPropagation();
     }
@@ -533,6 +553,10 @@ HTMLTooltip.prototype = {
     }
   },
 
+  _getTopWindow: function () {
+    return this.doc.defaultView.top;
+  },
+
   /**
    * Check if the tooltip's owner document is a XUL document.
    */
@@ -550,7 +574,10 @@ HTMLTooltip.prototype = {
     panel.setAttribute("noautofocus", true);
     panel.setAttribute("ignorekeys", true);
 
-    panel.setAttribute("level", "float");
+    // Use type="arrow" to prevent side effects (see Bug 1285206)
+    panel.setAttribute("type", "arrow");
+
+    panel.setAttribute("level", "top");
     panel.setAttribute("class", "tooltip-xul-wrapper");
 
     return panel;

@@ -28,7 +28,7 @@ XPCOMUtils.defineLazyModuleGetter(this, "PrivateBrowsingUtils",
 XPCOMUtils.defineLazyModuleGetter(this, "SyncedTabs",
   "resource://services-sync/SyncedTabs.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "ContextualIdentityService",
-  "resource:///modules/ContextualIdentityService.jsm");
+  "resource://gre/modules/ContextualIdentityService.jsm");
 
 XPCOMUtils.defineLazyGetter(this, "CharsetBundle", function() {
   const kCharsetBundle = "chrome://global/locale/charsetMenu.properties";
@@ -504,11 +504,9 @@ const CustomizableWidgets = [
     shortcutId: "key_privatebrowsing",
     defaultArea: CustomizableUI.AREA_PANEL,
     onCommand: function(e) {
-      if (e.target && e.target.ownerDocument && e.target.ownerDocument.defaultView) {
-        let win = e.target.ownerDocument.defaultView;
-        if (typeof win.OpenBrowserWindow == "function") {
-          win.OpenBrowserWindow({private: true});
-        }
+      let win = e.target.ownerGlobal;
+      if (typeof win.OpenBrowserWindow == "function") {
+        win.OpenBrowserWindow({private: true});
       }
     }
   }, {
@@ -517,10 +515,8 @@ const CustomizableWidgets = [
     tooltiptext: "save-page-button.tooltiptext3",
     defaultArea: CustomizableUI.AREA_PANEL,
     onCommand: function(aEvent) {
-      let win = aEvent.target &&
-                aEvent.target.ownerDocument &&
-                aEvent.target.ownerDocument.defaultView;
-      if (win && typeof win.saveBrowser == "function") {
+      let win = aEvent.target.ownerGlobal;
+      if (typeof win.saveBrowser == "function") {
         win.saveBrowser(win.gBrowser.selectedBrowser);
       }
     }
@@ -530,10 +526,8 @@ const CustomizableWidgets = [
     tooltiptext: "find-button.tooltiptext3",
     defaultArea: CustomizableUI.AREA_PANEL,
     onCommand: function(aEvent) {
-      let win = aEvent.target &&
-                aEvent.target.ownerDocument &&
-                aEvent.target.ownerDocument.defaultView;
-      if (win && win.gFindBar) {
+      let win = aEvent.target.ownerGlobal;
+      if (win.gFindBar) {
         win.gFindBar.onFindCommand();
       }
     }
@@ -543,10 +537,8 @@ const CustomizableWidgets = [
     tooltiptext: "open-file-button.tooltiptext3",
     defaultArea: CustomizableUI.AREA_PANEL,
     onCommand: function(aEvent) {
-      let win = aEvent.target
-                && aEvent.target.ownerDocument
-                && aEvent.target.ownerDocument.defaultView;
-      if (win && typeof win.BrowserOpenFileWindow == "function") {
+      let win = aEvent.target.ownerGlobal;
+      if (typeof win.BrowserOpenFileWindow == "function") {
         win.BrowserOpenFileWindow();
       }
     }
@@ -622,10 +614,8 @@ const CustomizableWidgets = [
     tooltiptext: "add-ons-button.tooltiptext3",
     defaultArea: CustomizableUI.AREA_PANEL,
     onCommand: function(aEvent) {
-      let win = aEvent.target &&
-                aEvent.target.ownerDocument &&
-                aEvent.target.ownerDocument.defaultView;
-      if (win && typeof win.BrowserOpenAddonsMgr == "function") {
+      let win = aEvent.target.ownerGlobal;
+      if (typeof win.BrowserOpenAddonsMgr == "function") {
         win.BrowserOpenAddonsMgr();
       }
     }
@@ -900,7 +890,7 @@ const CustomizableWidgets = [
     tooltiptext: "feed-button.tooltiptext2",
     defaultArea: CustomizableUI.AREA_PANEL,
     onClick: function(aEvent) {
-      let win = aEvent.target.ownerDocument.defaultView;
+      let win = aEvent.target.ownerGlobal;
       let feeds = win.gBrowser.selectedBrowser.feeds;
 
       // Here, we only care about the case where we have exactly 1 feed and the
@@ -926,7 +916,7 @@ const CustomizableWidgets = [
       }
     },
     onCreated: function(node) {
-      let win = node.ownerDocument.defaultView;
+      let win = node.ownerGlobal;
       let selectedBrowser = win.gBrowser.selectedBrowser;
       let feeds = selectedBrowser && selectedBrowser.feeds;
       if (!feeds || !feeds.length) {
@@ -1027,7 +1017,7 @@ const CustomizableWidgets = [
         return;
       }
 
-      let window = node.ownerDocument.defaultView;
+      let window = node.ownerGlobal;
       let section = node.section;
       let value = node.value;
 
@@ -1104,13 +1094,11 @@ const CustomizableWidgets = [
       let win = aEvent.view;
       win.MailIntegration.sendLinkForBrowser(win.gBrowser.selectedBrowser)
     }
-  }];
-
-if (Services.prefs.getBoolPref("privacy.userContext.enabled")) {
-  CustomizableWidgets.push({
+  }, {
     id: "containers-panelmenu",
     type: "view",
     viewId: "PanelUI-containers",
+    hasObserver: false,
     onCreated: function(aNode) {
       let doc = aNode.ownerDocument;
       let win = doc.defaultView;
@@ -1125,6 +1113,13 @@ if (Services.prefs.getBoolPref("privacy.userContext.enabled")) {
 
       if (PrivateBrowsingUtils.isWindowPrivate(win)) {
         aNode.setAttribute("disabled", "true");
+      }
+
+      this.updateVisibility(aNode);
+
+      if (!this.hasObserver) {
+        Services.prefs.addObserver("privacy.userContext.enabled", this, true);
+        this.hasObserver = true;
       }
     },
     onViewShowing: function(aEvent) {
@@ -1152,18 +1147,33 @@ if (Services.prefs.getBoolPref("privacy.userContext.enabled")) {
       });
 
       items.appendChild(fragment);
-    }
-  });
-}
+    },
+
+    updateVisibility(aNode) {
+      aNode.hidden = !Services.prefs.getBoolPref("privacy.userContext.enabled");
+    },
+
+    observe(aSubject, aTopic, aData) {
+      let {instances} = CustomizableUI.getWidget("containers-panelmenu");
+      for (let {node} of instances) {
+	if (node) {
+	  this.updateVisibility(node);
+	}
+      }
+    },
+
+    QueryInterface: XPCOMUtils.generateQI([
+      Ci.nsISupportsWeakReference,
+      Ci.nsIObserver
+    ]),
+  }];
 
 let preferencesButton = {
   id: "preferences-button",
   defaultArea: CustomizableUI.AREA_PANEL,
   onCommand: function(aEvent) {
-    let win = aEvent.target &&
-              aEvent.target.ownerDocument &&
-              aEvent.target.ownerDocument.defaultView;
-    if (win && typeof win.openPreferences == "function") {
+    let win = aEvent.target.ownerGlobal;
+    if (typeof win.openPreferences == "function") {
       win.openPreferences();
     }
   }

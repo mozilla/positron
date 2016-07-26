@@ -1193,9 +1193,6 @@ protected:
   bool IsAllowedToPlay();
 
   bool IsAudible() const;
-  bool HaveFailedWithSourceNotSupportedError() const;
-
-  void OpenUnsupportedMediaWithExtenalAppIfNeeded();
 
   class nsAsyncEventRunner;
   using nsGenericHTMLElement::DispatchEvent;
@@ -1616,6 +1613,9 @@ private:
   // Total time a video has spent playing.
   TimeDurationAccumulator mPlayTime;
 
+  // Total time a video has spent playing while hidden.
+  TimeDurationAccumulator mHiddenPlayTime;
+
   // Indicates if user has interacted with the element.
   // Used to block autoplay when disabled.
   bool mHasUserInteraction;
@@ -1633,8 +1633,6 @@ private:
 
   // True if media element is audible for users.
   bool mAudible;
-
-  nsAutoCString mMimeType;
 };
 
 } // namespace dom

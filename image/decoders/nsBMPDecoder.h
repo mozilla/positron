@@ -142,17 +142,10 @@ public:
   /// bitmap has been fully decoded.)
   bool HasTransparency() const { return mDoesHaveTransparency; }
 
-  /// Force transparency from outside. (Used by the ICO decoder.)
-  void SetHasTransparency()
-  {
-    mMayHaveTransparency = true;
-    mDoesHaveTransparency = true;
-  }
-
-  virtual void WriteInternal(const char* aBuffer,
-                             uint32_t aCount) override;
-  virtual void BeforeFinishInternal() override;
-  virtual void FinishInternal() override;
+  LexerResult DoDecode(SourceBufferIterator& aIterator,
+                       IResumable* aOnResume) override;
+  nsresult BeforeFinishInternal() override;
+  nsresult FinishInternal() override;
 
 private:
   friend class DecoderFactory;

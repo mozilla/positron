@@ -43,8 +43,6 @@
 #include "gfxQuartzSurface.h"
 #elif defined(MOZ_WIDGET_GTK)
 #include "gfxPlatformGtk.h"
-#elif defined(MOZ_WIDGET_QT)
-#include "gfxQtPlatform.h"
 #elif defined(ANDROID)
 #include "gfxAndroidPlatform.h"
 #endif
@@ -664,8 +662,6 @@ gfxPlatform::Init()
     gPlatform = new gfxPlatformMac;
 #elif defined(MOZ_WIDGET_GTK)
     gPlatform = new gfxPlatformGtk;
-#elif defined(MOZ_WIDGET_QT)
-    gPlatform = new gfxQtPlatform;
 #elif defined(ANDROID)
     gPlatform = new gfxAndroidPlatform;
 #else
@@ -691,8 +687,6 @@ gfxPlatform::Init()
     bool usePlatformFontList = true;
 #if defined(MOZ_WIDGET_GTK)
     usePlatformFontList = gfxPlatformGtk::UseFcFontList();
-#elif defined(MOZ_WIDGET_QT)
-    usePlatformFontList = false;
 #endif
 
     if (usePlatformFontList) {
@@ -774,9 +768,7 @@ gfxPlatform::Init()
     }
 #endif
 
-    ScrollMetadata::sNullMetadata = new ScrollMetadata();
-    ClearOnShutdown(&ScrollMetadata::sNullMetadata);
-
+    InitNullMetadata();
     InitOpenGLConfig();
 
     if (obs) {
@@ -785,6 +777,13 @@ gfxPlatform::Init()
 }
 
 static bool sLayersIPCIsUp = false;
+
+/* static */ void
+gfxPlatform::InitNullMetadata()
+{
+  ScrollMetadata::sNullMetadata = new ScrollMetadata();
+  ClearOnShutdown(&ScrollMetadata::sNullMetadata);
+}
 
 void
 gfxPlatform::Shutdown()
@@ -889,7 +888,6 @@ gfxPlatform::InitLayersIPC()
 #ifdef MOZ_WIDGET_GONK
         SharedBufferManagerChild::StartUp();
 #endif
-        mozilla::layers::ImageBridgeChild::StartUp();
         gfx::VRManagerChild::StartUpSameProcess();
     }
 }
@@ -903,16 +901,13 @@ gfxPlatform::ShutdownLayersIPC()
     sLayersIPCIsUp = false;
 
     if (XRE_IsContentProcess()) {
-
         gfx::VRManagerChild::ShutDown();
         // cf bug 1215265.
         if (gfxPrefs::ChildProcessShutdown()) {
           layers::CompositorBridgeChild::ShutDown();
           layers::ImageBridgeChild::ShutDown();
         }
-
     } else if (XRE_IsParentProcess()) {
-
         gfx::VRManagerChild::ShutDown();
         layers::CompositorBridgeChild::ShutDown();
         layers::ImageBridgeChild::ShutDown();
@@ -2276,20 +2271,19 @@ gfxPlatform::IsInLayoutAsapMode()
   // the second is that the compositor goes ASAP and the refresh driver
   // goes at whatever the configurated rate is. This only checks the version
   // talos uses, which is the refresh driver and compositor are in lockstep.
-  return Preferences::GetInt("layout.frame_rate", -1) == 0;
+  return gfxPrefs::LayoutFrameRate() == 0;
 }
 
 /* static */ bool
 gfxPlatform::ForceSoftwareVsync()
 {
-  return Preferences::GetInt("layout.frame_rate", -1) > 0;
+  return gfxPrefs::LayoutFrameRate() > 0;
 }
 
 /* static */ int
 gfxPlatform::GetSoftwareVsyncRate()
 {
-  int preferenceRate = Preferences::GetInt("layout.frame_rate",
-                                           gfxPlatform::GetDefaultFrameRate());
+  int preferenceRate = gfxPrefs::LayoutFrameRate();
   if (preferenceRate <= 0) {
     return gfxPlatform::GetDefaultFrameRate();
   }
@@ -2448,6 +2442,14 @@ gfxPlatform::BumpDeviceCounter()
 void
 gfxPlatform::InitOpenGLConfig()
 {
+  #ifdef XP_WIN
+  // Don't enable by default on Windows, since it could show up in about:support even
+  // though it'll never get used. Only attempt if user enables the pref
+  if (!Preferences::GetBool("layers.prefer-opengl")){
+    return;
+  }
+  #endif
+
   FeatureState& openGLFeature = gfxConfig::GetFeature(Feature::OPENGL_COMPOSITING);
 
   // Check to see hw comp supported
@@ -2458,11 +2460,9 @@ gfxPlatform::InitOpenGLConfig()
   }
 
   #ifdef XP_WIN
-  // Don't enable by default on Windows, since it could show up in about:support even
-  // though it'll never get used.
   openGLFeature.SetDefaultFromPref(
     gfxPrefs::GetLayersPreferOpenGLPrefName(),
-    false,
+    true,
     gfxPrefs::GetLayersPreferOpenGLPrefDefault());
   #else
     openGLFeature.EnableByDefault();

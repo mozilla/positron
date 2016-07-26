@@ -36,18 +36,6 @@ class FunctionGenerator;
 // any given datum before being read by a background thread. In particular,
 // once created, the Vectors are never resized.
 
-struct TableGenDesc
-{
-    uint32_t globalDataOffset;
-    uint32_t numElems;
-
-    TableGenDesc()
-      : globalDataOffset(0), numElems(0)
-    {}
-};
-
-typedef Vector<TableGenDesc, 0, SystemAllocPolicy> TableGenDescVector;
-
 struct FuncImportGenDesc
 {
     const DeclaredSig* sig;
@@ -71,9 +59,8 @@ struct ModuleGeneratorData
     DeclaredSigPtrVector      funcSigs;
     FuncImportGenDescVector   funcImports;
     GlobalDescVector          globals;
-
-    TableGenDesc              wasmTable;
-    TableGenDescVector        asmJSSigToTable;
+    TableDescVector           tables;
+    Uint32Vector              asmJSSigToTableIndex;
 
     uint32_t funcSigIndex(uint32_t funcIndex) const {
         return funcSigs[funcIndex] - sigs.begin();
@@ -86,6 +73,10 @@ struct ModuleGeneratorData
         minMemoryLength(0),
         maxMemoryLength(UINT32_MAX)
     {}
+
+    bool isAsmJS() const {
+        return kind == ModuleKind::AsmJS;
+    }
 };
 
 typedef UniquePtr<ModuleGeneratorData> UniqueModuleGeneratorData;
@@ -98,7 +89,7 @@ typedef UniquePtr<ModuleGeneratorData> UniqueModuleGeneratorData;
 
 class MOZ_STACK_CLASS ModuleGenerator
 {
-    typedef HashMap<uint32_t, uint32_t, DefaultHasher<uint32_t>, SystemAllocPolicy> FuncIndexMap;
+    typedef HashSet<uint32_t, DefaultHasher<uint32_t>, SystemAllocPolicy> Uint32Set;
     typedef Vector<IonCompileTask, 0, SystemAllocPolicy> IonCompileTaskVector;
     typedef Vector<IonCompileTask*, 0, SystemAllocPolicy> IonCompileTaskPtrVector;
 
@@ -108,22 +99,25 @@ class MOZ_STACK_CLASS ModuleGenerator
     // Data that is moved into the result of finish()
     LinkData                        linkData_;
     MutableMetadata                 metadata_;
-    ExportMap                       exportMap_;
+    ExportVector                    exports_;
+    ImportVector                    imports_;
     DataSegmentVector               dataSegments_;
     ElemSegmentVector               elemSegments_;
 
     // Data scoped to the ModuleGenerator's lifetime
     UniqueModuleGeneratorData       shared_;
     uint32_t                        numSigs_;
+    uint32_t                        numTables_;
     LifoAlloc                       lifo_;
     jit::JitContext                 jcx_;
     jit::TempAllocator              masmAlloc_;
     jit::MacroAssembler             masm_;
     Uint32Vector                    funcIndexToCodeRange_;
-    FuncIndexMap                    funcIndexToExport_;
+    Uint32Set                       exportedFuncs_;
     uint32_t                        lastPatchedCallsite_;
     uint32_t                        startOfUnpatchedBranches_;
     JumpSiteArray                   jumpThunks_;
+    bool                            externalTable_;
 
     // Parallel compilation
     bool                            parallel_;
@@ -141,13 +135,14 @@ class MOZ_STACK_CLASS ModuleGenerator
     const CodeRange& funcCodeRange(uint32_t funcIndex) const;
     MOZ_MUST_USE bool convertOutOfRangeBranchesToThunks();
     MOZ_MUST_USE bool finishTask(IonCompileTask* task);
+    MOZ_MUST_USE bool finishFuncExports();
     MOZ_MUST_USE bool finishCodegen();
     MOZ_MUST_USE bool finishLinkData(Bytes& code);
     MOZ_MUST_USE bool addFuncImport(const Sig& sig, uint32_t globalDataOffset);
     MOZ_MUST_USE bool allocateGlobalBytes(uint32_t bytes, uint32_t align, uint32_t* globalDataOff);
 
   public:
-    explicit ModuleGenerator();
+    explicit ModuleGenerator(ImportVector&& imports);
     ~ModuleGenerator();
 
     MOZ_MUST_USE bool init(UniqueModuleGeneratorData shared, CompileArgs&& args,
@@ -160,6 +155,9 @@ class MOZ_STACK_CLASS ModuleGenerator
     // Memory:
     bool usesMemory() const { return UsesMemory(shared_->memoryUsage); }
     uint32_t minMemoryLength() const { return shared_->minMemoryLength; }
+
+    // Tables:
+    const TableDescVector& tables() const { return shared_->tables; }
 
     // Signatures:
     uint32_t numSigs() const { return numSigs_; }
@@ -178,9 +176,8 @@ class MOZ_STACK_CLASS ModuleGenerator
     const FuncImportGenDesc& funcImport(uint32_t funcImportIndex) const;
 
     // Exports:
-    MOZ_MUST_USE bool declareExport(UniqueChars fieldName, uint32_t funcIndex,
-                                    uint32_t* exportIndex = nullptr);
-    uint32_t numExports() const;
+    MOZ_MUST_USE bool addFuncExport(UniqueChars fieldName, uint32_t funcIndex);
+    MOZ_MUST_USE bool addTableExport(UniqueChars fieldName);
     MOZ_MUST_USE bool addMemoryExport(UniqueChars fieldName);
 
     // Function definitions:
@@ -189,9 +186,12 @@ class MOZ_STACK_CLASS ModuleGenerator
     MOZ_MUST_USE bool finishFuncDef(uint32_t funcIndex, FunctionGenerator* fg);
     MOZ_MUST_USE bool finishFuncDefs();
 
+    // Start function:
+    bool setStartFunction(uint32_t funcIndex);
+
     // Segments:
     MOZ_MUST_USE bool addDataSegment(DataSegment s) { return dataSegments_.append(s); }
-    MOZ_MUST_USE bool addElemSegment(Uint32Vector&& elemFuncIndices);
+    MOZ_MUST_USE bool addElemSegment(ElemSegment&& s);
 
     // Function names:
     void setFuncNames(NameInBytecodeVector&& funcNames);
@@ -200,7 +200,7 @@ class MOZ_STACK_CLASS ModuleGenerator
     void initSig(uint32_t sigIndex, Sig&& sig);
     void initFuncSig(uint32_t funcIndex, uint32_t sigIndex);
     MOZ_MUST_USE bool initImport(uint32_t importIndex, uint32_t sigIndex);
-    MOZ_MUST_USE bool initSigTableLength(uint32_t sigIndex, uint32_t numElems);
+    MOZ_MUST_USE bool initSigTableLength(uint32_t sigIndex, uint32_t length);
     MOZ_MUST_USE bool initSigTableElems(uint32_t sigIndex, Uint32Vector&& elemFuncIndices);
     void initMemoryUsage(MemoryUsage memoryUsage);
     void bumpMinMemoryLength(uint32_t newMinMemoryLength);
@@ -208,7 +208,7 @@ class MOZ_STACK_CLASS ModuleGenerator
     // Finish compilation, provided the list of imports and source bytecode.
     // Both these Vectors may be empty (viz., b/c asm.js does different things
     // for imports and source).
-    UniqueModule finish(ImportVector&& imports, const ShareableBytes& bytecode);
+    SharedModule finish(const ShareableBytes& bytecode);
 };
 
 // A FunctionGenerator encapsulates the generation of a single function body.

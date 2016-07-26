@@ -11,6 +11,7 @@
 #include "gfxFontEntry.h"
 #include "nsString.h"
 #include "gfxPoint.h"
+#include "gfxPattern.h"
 #include "nsTArray.h"
 #include "nsTHashtable.h"
 #include "nsHashKeys.h"
@@ -57,7 +58,7 @@ class gfxTextContextPaint;
 // we use a platform-dependent value to harmonize with the platform's own APIs.
 #ifdef XP_WIN
 #define OBLIQUE_SKEW_FACTOR  0.3
-#elif defined(MOZ_WIDGET_GTK) || defined(MOZ_WIDGET_QT)
+#elif defined(MOZ_WIDGET_GTK)
 #define OBLIQUE_SKEW_FACTOR  0.2
 #else
 #define OBLIQUE_SKEW_FACTOR  0.25
@@ -2188,8 +2189,10 @@ struct TextRunDrawParams {
     mozilla::gfx::Color      fontSmoothingBGColor;
     gfxFloat                 direction;
     double                   devPerApp;
-    float                    textStrokeWidth;
     nscolor                  textStrokeColor;
+    gfxPattern              *textStrokePattern;
+    const mozilla::gfx::StrokeOptions *strokeOpts;
+    const mozilla::gfx::DrawOptions   *drawOpts;
     DrawMode                 drawMode;
     bool                     isVerticalRun;
     bool                     isRTL;

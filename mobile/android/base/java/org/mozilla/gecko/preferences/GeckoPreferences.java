@@ -24,7 +24,7 @@ import org.mozilla.gecko.LocaleManager;
 import org.mozilla.gecko.Locales;
 import org.mozilla.gecko.PrefsHelper;
 import org.mozilla.gecko.R;
-import org.mozilla.gecko.SnackbarHelper;
+import org.mozilla.gecko.SnackbarBuilder;
 import org.mozilla.gecko.Telemetry;
 import org.mozilla.gecko.TelemetryContract;
 import org.mozilla.gecko.TelemetryContract.Method;
@@ -75,6 +75,7 @@ import android.preference.SwitchPreference;
 import android.preference.TwoStatePreference;
 import android.support.design.widget.Snackbar;
 import android.support.design.widget.TextInputLayout;
+import android.support.v4.content.LocalBroadcastManager;
 import android.support.v7.app.ActionBar;
 import android.text.Editable;
 import android.text.InputType;
@@ -153,6 +154,7 @@ OnSharedPreferenceChangeListener
     private static final String PREFS_CLEAR_PRIVATE_DATA_EXIT = NON_PREF_PREFIX + "history.clear_on_exit";
     private static final String PREFS_SCREEN_ADVANCED = NON_PREF_PREFIX + "advanced_screen";
     public static final String PREFS_HOMEPAGE = NON_PREF_PREFIX + "homepage";
+    public static final String PREFS_HOMEPAGE_PARTNER_COPY = GeckoPreferences.PREFS_HOMEPAGE + ".partner";
     public static final String PREFS_HISTORY_SAVED_SEARCH = NON_PREF_PREFIX + "search.search_history.enabled";
     private static final String PREFS_FAQ_LINK = NON_PREF_PREFIX + "faq.link";
     private static final String PREFS_FEEDBACK_LINK = NON_PREF_PREFIX + "feedback.link";
@@ -160,8 +162,11 @@ OnSharedPreferenceChangeListener
     public static final String PREFS_NOTIFICATIONS_CONTENT_LEARN_MORE = NON_PREF_PREFIX + "notifications.content.learn_more";
     public static final String PREFS_NOTIFICATIONS_WHATS_NEW = NON_PREF_PREFIX + "notifications.whats_new";
     public static final String PREFS_APP_UPDATE_LAST_BUILD_ID = "app.update.last_build_id";
+    public static final String PREFS_READ_PARTNER_CUSTOMIZATIONS_PROVIDER = NON_PREF_PREFIX + "distribution.read_partner_customizations_provider";
+    public static final String PREFS_READ_PARTNER_BOOKMARKS_PROVIDER = NON_PREF_PREFIX + "distribution.read_partner_bookmarks_provider";
+    public static final String PREFS_CUSTOM_TABS = NON_PREF_PREFIX + "customtabs";
 
-    private static final String ACTION_STUMBLER_UPLOAD_PREF = AppConstants.ANDROID_PACKAGE_NAME + ".STUMBLER_PREF";
+    private static final String ACTION_STUMBLER_UPLOAD_PREF = "STUMBLER_PREF";
 
 
     // This isn't a Gecko pref, even if it looks like one.
@@ -618,9 +623,10 @@ OnSharedPreferenceChangeListener
                 boolean success = message.getBoolean("success");
                 final int stringRes = success ? R.string.private_data_success : R.string.private_data_fail;
 
-                SnackbarHelper.showSnackbar(GeckoPreferences.this,
-                        getString(stringRes),
-                        Snackbar.LENGTH_LONG);
+                SnackbarBuilder.builder(GeckoPreferences.this)
+                        .message(stringRes)
+                        .duration(Snackbar.LENGTH_LONG)
+                        .buildAndShow();
             }
         } catch (Exception e) {
             Log.e(LOGTAG, "Exception handling message \"" + event + "\":", e);
@@ -630,7 +636,10 @@ OnSharedPreferenceChangeListener
     @Override
     public void handleMessage(final String event, final NativeJSObject message, final EventCallback callback) {
         if ("Snackbar:Show".equals(event)) {
-            SnackbarHelper.showSnackbar(this, message, callback);
+            SnackbarBuilder.builder(this)
+                    .fromEvent(message)
+                    .callback(callback)
+                    .buildAndShow();
         }
     }
 
@@ -877,6 +886,10 @@ OnSharedPreferenceChangeListener
                         i--;
                         continue;
                     }
+                } else if (PREFS_CUSTOM_TABS.equals(key) && !AppConstants.MOZ_ANDROID_CUSTOM_TABS) {
+                    preferences.removePreference(pref);
+                    i--;
+                    continue;
                 }
 
                 // Some Preference UI elements are not actually preferences,
@@ -958,7 +971,7 @@ OnSharedPreferenceChangeListener
 
     public static void broadcastAction(final Context context, final Intent intent) {
         fillIntentWithProfileInfo(context, intent);
-        context.sendBroadcast(intent, GlobalConstants.PER_ANDROID_PACKAGE_PERMISSION);
+        LocalBroadcastManager.getInstance(context).sendBroadcast(intent);
     }
 
     private static void fillIntentWithProfileInfo(final Context context, final Intent intent) {

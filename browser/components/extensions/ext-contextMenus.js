@@ -51,10 +51,15 @@ var gMenuBuilder = {
 
       // Display the extension icon on the root element.
       if (root.extension.manifest.icons) {
-        let parentWindow = contextData.menu.ownerDocument.defaultView;
+        let parentWindow = contextData.menu.ownerGlobal;
         let extension = root.extension;
 
-        let {icon} = IconDetails.getURL(extension.manifest.icons, parentWindow, extension, 16 /* size */);
+        let {icon} = IconDetails.getPreferredIcon(extension.manifest.icons, extension,
+                                                  16 * parentWindow.devicePixelRatio);
+
+        // The extension icons in the manifest are not pre-resolved, since
+        // they're sometimes used by the add-on manager when the extension is
+        // not enabled, and its URLs are not resolvable.
         let resolvedURL = root.extension.baseURI.resolve(icon);
 
         if (rootElement.localName == "menu") {

@@ -11,9 +11,8 @@ define(function (require, exports, module) {
   const React = require("devtools/client/shared/vendor/react");
 
   // Reps
-  const { createFactories, isGrip } = require("./rep-utils");
+  const { createFactories, isGrip, getFileName } = require("./rep-utils");
   const { ObjectBox } = createFactories(require("./object-box"));
-  const { getFileName } = require("./url");
 
   // Shortcuts
   const DOM = React.DOM;
@@ -28,6 +27,18 @@ define(function (require, exports, module) {
       object: React.PropTypes.object.isRequired,
     },
 
+    getTitle: function (grip) {
+      let title = "StyleSheet ";
+      if (this.props.objectLink) {
+        return ObjectBox({},
+          this.props.objectLink({
+            object: grip
+          }, title)
+        );
+      }
+      return title;
+    },
+
     getLocation: function (grip) {
       // Embedded stylesheets don't have URL and so, no preview.
       let url = grip.preview ? grip.preview.url : "";
@@ -39,7 +50,7 @@ define(function (require, exports, module) {
 
       return (
         ObjectBox({className: "object"},
-          "StyleSheet ",
+          this.getTitle(grip),
           DOM.span({className: "objectPropValue"},
             this.getLocation(grip)
           )

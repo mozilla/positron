@@ -629,8 +629,10 @@ gfxTextRun::Draw(Range aRange, gfxPoint aPt, const DrawParams& aParams) const
     params.isVerticalRun = IsVertical();
     params.isRTL = IsRightToLeft();
     params.direction = direction;
-    params.textStrokeWidth = aParams.textStrokeWidth;
+    params.strokeOpts = aParams.strokeOpts;
     params.textStrokeColor = aParams.textStrokeColor;
+    params.textStrokePattern = aParams.textStrokePattern;
+    params.drawOpts = aParams.drawOpts;
     params.drawMode = aParams.drawMode;
     params.callbacks = aParams.callbacks;
     params.runContextPaint = aParams.contextPaint;
@@ -1610,8 +1612,6 @@ gfxFontGroup::BuildFontList()
 #if defined(MOZ_WIDGET_GTK)
     // xxx - eliminate this once gfxPangoFontGroup is no longer needed
     enumerateFonts = gfxPlatformGtk::UseFcFontList();
-#elif defined(MOZ_WIDGET_QT)
-    enumerateFonts = false;
 #endif
     if (!enumerateFonts) {
         return;
@@ -2857,11 +2857,6 @@ gfxFontGroup::FindFontForChar(uint32_t aCh, uint32_t aPrevCh, uint32_t aNextCh,
         *aMatchType = gfxTextRange::kSystemFallback;
         RefPtr<gfxFont> ret = aPrevMatchedFont;
         return ret.forget();
-    }
-
-    // never fall back for characters from unknown scripts
-    if (aRunScript == Script::UNKNOWN) {
-        return nullptr;
     }
 
     // for known "space" characters, don't do a full system-fallback search;

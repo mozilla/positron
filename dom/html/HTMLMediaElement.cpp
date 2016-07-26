@@ -74,6 +74,7 @@
 #include "AudioStreamTrack.h"
 #include "VideoStreamTrack.h"
 #include "MediaTrackList.h"
+#include "MediaStreamError.h"
 
 #include "AudioChannelService.h"
 
@@ -1030,7 +1031,6 @@ void HTMLMediaElement::NoSupportedMediaSourceError()
   DispatchAsyncEvent(NS_LITERAL_STRING("error"));
   ChangeDelayLoadStatus(false);
   UpdateAudioChannelPlayingState();
-  OpenUnsupportedMediaWithExtenalAppIfNeeded();
 }
 
 typedef void (HTMLMediaElement::*SyncSectionFn)();
@@ -1084,8 +1084,28 @@ void HTMLMediaElement::QueueSelectResourceTask()
   RunInStableState(r);
 }
 
+static bool HasSourceChildren(nsIContent* aElement)
+{
+  for (nsIContent* child = aElement->GetFirstChild();
+       child;
+       child = child->GetNextSibling()) {
+    if (child->IsHTMLElement(nsGkAtoms::source))
+    {
+      return true;
+    }
+  }
+  return false;
+}
+
 NS_IMETHODIMP HTMLMediaElement::Load()
 {
+  LOG(LogLevel::Debug,
+      ("%p Load() hasSrcAttrStream=%d hasSrcAttr=%d hasSourceChildren=%d "
+       "handlingInput=%d isCallerChromeOrNative=%d",
+       this, !!mSrcAttrStream, HasAttr(kNameSpaceID_None, nsGkAtoms::src),
+       HasSourceChildren(this), EventStateManager::IsHandlingUserInput(),
+       nsContentUtils::LegacyIsCallerChromeOrNativeCode()));
+
   if (mIsRunningLoadMethod) {
     return NS_OK;
   }
@@ -1100,6 +1120,15 @@ void HTMLMediaElement::DoLoad()
 {
   if (mIsRunningLoadMethod) {
     return;
+  }
+
+  // Detect if user has interacted with element so that play will not be
+  // blocked when initiated by a script. This enables sites to capture user
+  // intent to play by calling load() in the click handler of a "catalog
+  // view" of a gallery of videos.
+  if (EventStateManager::IsHandlingUserInput() ||
+      nsContentUtils::LegacyIsCallerChromeOrNativeCode()) {
+    mHasUserInteraction = true;
   }
 
   SetPlayedOrSeeked(false);
@@ -1121,19 +1150,6 @@ void HTMLMediaElement::ResetState()
     mVideoFrameContainer->ForgetElement();
     mVideoFrameContainer = nullptr;
   }
-}
-
-static bool HasSourceChildren(nsIContent* aElement)
-{
-  for (nsIContent* child = aElement->GetFirstChild();
-       child;
-       child = child->GetNextSibling()) {
-    if (child->IsHTMLElement(nsGkAtoms::source))
-    {
-      return true;
-    }
-  }
-  return false;
 }
 
 void HTMLMediaElement::SelectResourceWrapper()
@@ -1522,6 +1538,7 @@ nsresult HTMLMediaElement::LoadResource()
       decoder->Shutdown();
       return NS_ERROR_FAILURE;
     }
+    ChangeDelayLoadStatus(false);
     RefPtr<MediaResource> resource =
       MediaSourceDecoder::CreateResource(mMediaSource->GetPrincipal());
     return FinishDecoderSetup(decoder, resource, nullptr);
@@ -2104,13 +2121,15 @@ public:
     return mElement->GetCORSMode();
   }
 
-  already_AddRefed<Promise>
+  already_AddRefed<PledgeVoid>
   ApplyConstraints(nsPIDOMWindowInner* aWindow,
-                   const dom::MediaTrackConstraints& aConstraints,
-                   ErrorResult &aRv) override
+                   const dom::MediaTrackConstraints& aConstraints) override
   {
-    NS_ERROR("ApplyConstraints not implemented for media element capture");
-    return nullptr;
+    RefPtr<PledgeVoid> p = new PledgeVoid();
+    p->Reject(new dom::MediaStreamError(aWindow,
+                                        NS_LITERAL_STRING("OverconstrainedError"),
+                                        NS_LITERAL_STRING("")));
+    return p.forget();
   }
 
   void Stop() override
@@ -2678,10 +2697,6 @@ HTMLMediaElement::PlayInternal(bool aCallerIsChrome)
   UpdateSrcMediaStreamPlaying();
   UpdateAudioChannelPlayingState();
 
-  // The check here is to handle the case that the media element starts playing
-  // after it loaded fail. eg. preload the data before playing.
-  OpenUnsupportedMediaWithExtenalAppIfNeeded();
-
   return NS_OK;
 }
 
@@ -3061,9 +3076,12 @@ HTMLMediaElement::ReportTelemetry()
 
   if (HTMLVideoElement* vid = HTMLVideoElement::FromContentOrNull(this)) {
     RefPtr<VideoPlaybackQuality> quality = vid->GetVideoPlaybackQuality();
-    uint64_t totalFrames = quality->TotalVideoFrames();
-    uint64_t droppedFrames = quality->DroppedVideoFrames();
+    uint32_t totalFrames = quality->TotalVideoFrames();
     if (totalFrames) {
+      uint32_t droppedFrames = quality->DroppedVideoFrames();
+      MOZ_ASSERT(droppedFrames <= totalFrames);
+      // Dropped frames <= total frames, so 'percentage' cannot be higher than
+      // 100 and therefore can fit in a uint32_t (that Telemetry takes).
       uint32_t percentage = 100 * droppedFrames / totalFrames;
       LOG(LogLevel::Debug,
           ("Reporting telemetry DROPPED_FRAMES_IN_VIDEO_PLAYBACK"));
@@ -3074,6 +3092,9 @@ HTMLMediaElement::ReportTelemetry()
 
   Telemetry::Accumulate(Telemetry::VIDEO_PLAY_TIME_MS, SECONDS_TO_MS(mPlayTime.Total()));
   LOG(LogLevel::Debug, ("%p VIDEO_PLAY_TIME_MS = %f", this, mPlayTime.Total()));
+
+  Telemetry::Accumulate(Telemetry::VIDEO_HIDDEN_PLAY_TIME_MS, SECONDS_TO_MS(mHiddenPlayTime.Total()));
+  LOG(LogLevel::Debug, ("%p VIDEO_HIDDEN_PLAY_TIME_MS = %f", this, mHiddenPlayTime.Total()));
 }
 
 void HTMLMediaElement::UnbindFromTree(bool aDeep,
@@ -3176,26 +3197,28 @@ nsresult HTMLMediaElement::InitializeDecoderForChannel(nsIChannel* aChannel,
   NS_ASSERTION(mLoadingSrc, "mLoadingSrc must already be set");
   NS_ASSERTION(mDecoder == nullptr, "Shouldn't have a decoder");
 
-  aChannel->GetContentType(mMimeType);
-  NS_ASSERTION(!mMimeType.IsEmpty(), "We should have the Content-Type.");
+  nsAutoCString mimeType;
+
+  aChannel->GetContentType(mimeType);
+  NS_ASSERTION(!mimeType.IsEmpty(), "We should have the Content-Type.");
 
   DecoderDoctorDiagnostics diagnostics;
   RefPtr<MediaDecoder> decoder =
-    DecoderTraits::CreateDecoder(mMimeType, this, &diagnostics);
+    DecoderTraits::CreateDecoder(mimeType, this, &diagnostics);
   diagnostics.StoreFormatDiagnostics(OwnerDoc(),
-                                     NS_ConvertASCIItoUTF16(mMimeType),
+                                     NS_ConvertASCIItoUTF16(mimeType),
                                      decoder != nullptr,
                                      __func__);
   if (!decoder) {
     nsAutoString src;
     GetCurrentSrc(src);
-    NS_ConvertUTF8toUTF16 mimeUTF16(mMimeType);
+    NS_ConvertUTF8toUTF16 mimeUTF16(mimeType);
     const char16_t* params[] = { mimeUTF16.get(), src.get() };
     ReportLoadError("MediaLoadUnsupportedMimeType", params, ArrayLength(params));
     return NS_ERROR_FAILURE;
   }
 
-  LOG(LogLevel::Debug, ("%p Created decoder %p for type %s", this, decoder.get(), mMimeType.get()));
+  LOG(LogLevel::Debug, ("%p Created decoder %p for type %s", this, decoder.get(), mimeType.get()));
 
   RefPtr<MediaResource> resource =
     MediaResource::Create(decoder->GetResourceCallback(), aChannel);
@@ -3211,7 +3234,7 @@ nsresult HTMLMediaElement::InitializeDecoderForChannel(nsIChannel* aChannel,
   // We postpone the |FinishDecoderSetup| function call until we get
   // |OnConnected| signal from MediaStreamController which is held by
   // RtspMediaResource.
-  if (DecoderTraits::DecoderWaitsForOnConnected(mMimeType)) {
+  if (DecoderTraits::DecoderWaitsForOnConnected(mimeType)) {
     decoder->SetResource(resource);
     SetDecoder(decoder);
     if (aListener) {
@@ -4561,10 +4584,15 @@ nsresult HTMLMediaElement::DispatchAsyncEvent(const nsAString& aName)
 
   if ((aName.EqualsLiteral("play") || aName.EqualsLiteral("playing"))) {
     mPlayTime.Start();
+    if (IsHidden()) {
+      mHiddenPlayTime.Start();
+    }
   } else if (aName.EqualsLiteral("waiting")) {
     mPlayTime.Pause();
+    mHiddenPlayTime.Pause();
   } else if (aName.EqualsLiteral("pause")) {
     mPlayTime.Pause();
+    mHiddenPlayTime.Pause();
   }
 
   return NS_OK;
@@ -4686,12 +4714,10 @@ void HTMLMediaElement::SuspendOrResumeElement(bool aPauseElement, bool aSuspendE
     UpdateSrcMediaStreamPlaying();
     UpdateAudioChannelPlayingState();
     if (aPauseElement) {
-      if (mMediaSource) {
-        ReportTelemetry();
+      ReportTelemetry();
 #ifdef MOZ_EME
-        ReportEMETelemetry();
+      ReportEMETelemetry();
 #endif
-      }
 
 #ifdef MOZ_EME
       // For EME content, force destruction of the CDM client (and CDM
@@ -4761,8 +4787,17 @@ void HTMLMediaElement::NotifyOwnerDocumentActivityChanged()
 bool
 HTMLMediaElement::NotifyOwnerDocumentActivityChangedInternal()
 {
+  bool visible = !IsHidden();
+  if (visible) {
+    // Visible -> Just pause hidden play time (no-op if already paused).
+    mHiddenPlayTime.Pause();
+  } else if (mPlayTime.IsStarted()) {
+    // Not visible, play time is running -> Start hidden play time if needed.
+    mHiddenPlayTime.Start();
+  }
+
   if (mDecoder && !IsBeingDestroyed()) {
-    mDecoder->NotifyOwnerActivityChanged(!IsHidden());
+    mDecoder->NotifyOwnerActivityChanged(visible);
   }
 
   bool pauseElement = !IsActive();
@@ -5893,43 +5928,6 @@ HTMLMediaElement::IsAudible() const
   }
 
   return true;
-}
-
-bool
-HTMLMediaElement::HaveFailedWithSourceNotSupportedError() const
-{
-  if (!mError) {
-    return false;
-  }
-
-  uint16_t errorCode;
-  mError->GetCode(&errorCode);
-  return (mNetworkState == nsIDOMHTMLMediaElement::NETWORK_NO_SOURCE &&
-          errorCode == nsIDOMMediaError::MEDIA_ERR_SRC_NOT_SUPPORTED);
-}
-
-void
-HTMLMediaElement::OpenUnsupportedMediaWithExtenalAppIfNeeded()
-{
-  if (!Preferences::GetBool("media.openUnsupportedTypeWithExternalApp")) {
-    return;
-  }
-
-  if (!HaveFailedWithSourceNotSupportedError()) {
-    return;
-  }
-
-  // If media doesn't start playing, we don't need to open it.
-  if (mPaused) {
-    return;
-  }
-
-  LOG(LogLevel::Debug, ("Open unsupported type \'%s\' with external apps.",
-      mMimeType.get()));
-  nsContentUtils::DispatchTrustedEvent(OwnerDoc(), static_cast<nsIContent*>(this),
-                                       NS_LITERAL_STRING("OpenMediaWithExternalApp"),
-                                       true,
-                                       true);
 }
 
 static const char* VisibilityString(Visibility aVisibility) {

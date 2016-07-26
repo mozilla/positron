@@ -2599,7 +2599,8 @@ nsIFrame::BuildDisplayListForStackingContext(nsDisplayListBuilder* aBuilder,
 
 static nsDisplayItem*
 WrapInWrapList(nsDisplayListBuilder* aBuilder,
-               nsIFrame* aFrame, nsDisplayList* aList)
+               nsIFrame* aFrame, nsDisplayList* aList,
+               const DisplayItemScrollClip* aScrollClip)
 {
   nsDisplayItem* item = aList->GetBottom();
   if (!item) {
@@ -2617,7 +2618,7 @@ WrapInWrapList(nsDisplayListBuilder* aBuilder,
   }
 
   if (item->GetAbove() || itemFrame != aFrame) {
-    return new (aBuilder) nsDisplayWrapList(aBuilder, aFrame, aList);
+    return new (aBuilder) nsDisplayWrapList(aBuilder, aFrame, aList, aScrollClip);
   }
   aList->RemoveBottom();
   return item;
@@ -2799,18 +2800,26 @@ nsIFrame::BuildDisplayListForChild(nsDisplayListBuilder*   aBuilder,
   CheckForApzAwareEventHandlers(aBuilder, child);
 
   if (savedOutOfFlowData) {
+    aBuilder->SetBuildingInvisibleItems(false);
+
     clipState.SetClipForContainingBlockDescendants(
       &savedOutOfFlowData->mContainingBlockClip);
-    clipState.SetScrollClipForContainingBlockDescendants(
+    clipState.SetScrollClipForContainingBlockDescendants(aBuilder,
       savedOutOfFlowData->mContainingBlockScrollClip);
   } else if (GetStateBits() & NS_FRAME_FORCE_DISPLAY_LIST_DESCEND_INTO &&
              isPlaceholder) {
+    NS_ASSERTION(dirty.IsEmpty(), "should have empty dirty rect");
+    // Every item we build from now until we descent into an out of flow that
+    // does have saved out of flow data should be invisible. This state gets
+    // restored when AutoBuildingDisplayList gets out of scope.
+    aBuilder->SetBuildingInvisibleItems(true);
+
     // If we have nested out-of-flow frames and the outer one isn't visible
     // then we won't have stored clip data for it. We can just clear the clip
     // instead since we know we won't render anything, and the inner out-of-flow
     // frame will setup the correct clip for itself.
     clipState.SetClipForContainingBlockDescendants(nullptr);
-    clipState.SetScrollClipForContainingBlockDescendants(nullptr);
+    clipState.SetScrollClipForContainingBlockDescendants(aBuilder, nullptr);
   }
 
   // Setup clipping for the parent's overflow:-moz-hidden-unscrollable,
@@ -2898,17 +2907,22 @@ nsIFrame::BuildDisplayListForChild(nsDisplayListBuilder*   aBuilder,
     DisplayDebugBorders(aBuilder, child, aLists);
 #endif
   }
-    
+
+  buildingForChild.RestoreBuildingInvisibleItemsValue();
+ 
   // Clear clip rect for the construction of the items below. Since we're
   // clipping all their contents, they themselves don't need to be clipped.
   clipState.Clear();
+
+  const DisplayItemScrollClip* containerItemScrollClip =
+    aBuilder->ClipState().CurrentAncestorScrollClipForStackingContextContents();
 
   if (isPositioned || isVisuallyAtomic ||
       (aFlags & DISPLAY_CHILD_FORCE_STACKING_CONTEXT)) {
     // Genuine stacking contexts, and positioned pseudo-stacking-contexts,
     // go in this level.
     if (!list.IsEmpty()) {
-      nsDisplayItem* item = WrapInWrapList(aBuilder, child, &list);
+      nsDisplayItem* item = WrapInWrapList(aBuilder, child, &list, containerItemScrollClip);
       if (isSVG) {
         aLists.Content()->AppendNewToTop(item);
       } else {
@@ -2917,7 +2931,7 @@ nsIFrame::BuildDisplayListForChild(nsDisplayListBuilder*   aBuilder,
     }
   } else if (!isSVG && disp->IsFloating(child)) {
     if (!list.IsEmpty()) {
-      aLists.Floats()->AppendNewToTop(WrapInWrapList(aBuilder, child, &list));
+      aLists.Floats()->AppendNewToTop(WrapInWrapList(aBuilder, child, &list, containerItemScrollClip));
     }
   } else {
     aLists.Content()->AppendToTop(&list);

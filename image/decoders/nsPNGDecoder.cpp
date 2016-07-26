@@ -26,6 +26,8 @@
 
 using namespace mozilla::gfx;
 
+using std::min;
+
 namespace mozilla {
 namespace image {
 
@@ -98,7 +100,10 @@ nsPNGDecoder::nsPNGDecoder(RasterImage* aImage)
  : Decoder(aImage)
  , mLexer(Transition::ToUnbuffered(State::FINISHED_PNG_DATA,
                                    State::PNG_DATA,
-                                   SIZE_MAX))
+                                   SIZE_MAX),
+          Transition::TerminateSuccess())
+ , mNextTransition(Transition::ContinueUnbuffered(State::PNG_DATA))
+ , mLastChunkLength(0)
  , mPNG(nullptr)
  , mInfo(nullptr)
  , mCMSLine(nullptr)
@@ -176,15 +181,13 @@ nsPNGDecoder::PostHasTransparencyIfNeeded(TransparencyType aTransparencyType)
 
 // CreateFrame() is used for both simple and animated images.
 nsresult
-nsPNGDecoder::CreateFrame(SurfaceFormat aFormat,
-                          const IntRect& aFrameRect,
-                          bool aIsInterlaced)
+nsPNGDecoder::CreateFrame(const FrameInfo& aFrameInfo)
 {
   MOZ_ASSERT(HasSize());
   MOZ_ASSERT(!IsMetadataDecode());
 
   // Check if we have transparency, and send notifications if needed.
-  auto transparency = GetTransparencyType(aFormat, aFrameRect);
+  auto transparency = GetTransparencyType(aFrameInfo.mFormat, aFrameInfo.mFrameRect);
   PostHasTransparencyIfNeeded(transparency);
   SurfaceFormat format = transparency == TransparencyType::eNone
                        ? SurfaceFormat::B8G8R8X8
@@ -200,7 +203,7 @@ nsPNGDecoder::CreateFrame(SurfaceFormat aFormat,
 
   // If this image is interlaced, we can display better quality intermediate
   // results to the user by post processing them with ADAM7InterpolatingFilter.
-  SurfacePipeFlags pipeFlags = aIsInterlaced
+  SurfacePipeFlags pipeFlags = aFrameInfo.mIsInterlaced
                              ? SurfacePipeFlags::ADAM7_INTERPOLATE
                              : SurfacePipeFlags();
 
@@ -210,8 +213,9 @@ nsPNGDecoder::CreateFrame(SurfaceFormat aFormat,
   }
 
   Maybe<SurfacePipe> pipe =
-    SurfacePipeFactory::CreateSurfacePipe(this, mNumFrames, GetSize(), targetSize,
-                                          aFrameRect, format, pipeFlags);
+    SurfacePipeFactory::CreateSurfacePipe(this, mNumFrames, GetSize(),
+                                          targetSize, aFrameInfo.mFrameRect,
+                                          format, pipeFlags);
 
   if (!pipe) {
     mPipe = SurfacePipe();
@@ -220,13 +224,13 @@ nsPNGDecoder::CreateFrame(SurfaceFormat aFormat,
 
   mPipe = Move(*pipe);
 
-  mFrameRect = aFrameRect;
+  mFrameRect = aFrameInfo.mFrameRect;
   mPass = 0;
 
   MOZ_LOG(sPNGDecoderAccountingLog, LogLevel::Debug,
          ("PNGDecoderAccounting: nsPNGDecoder::CreateFrame -- created "
           "image frame with %dx%d pixels for decoder %p",
-          aFrameRect.width, aFrameRect.height, this));
+          mFrameRect.width, mFrameRect.height, this));
 
 #ifdef PNG_APNG_SUPPORTED
   if (png_get_valid(mPNG, mInfo, PNG_INFO_acTL)) {
@@ -262,7 +266,7 @@ nsPNGDecoder::EndImageFrame()
                 mAnimInfo.mBlend, Some(mFrameRect));
 }
 
-void
+nsresult
 nsPNGDecoder::InitInternal()
 {
   mCMSMode = gfxPlatform::GetCMSMode();
@@ -298,15 +302,13 @@ nsPNGDecoder::InitInternal()
                                 nullptr, nsPNGDecoder::error_callback,
                                 nsPNGDecoder::warning_callback);
   if (!mPNG) {
-    PostDecoderError(NS_ERROR_OUT_OF_MEMORY);
-    return;
+    return NS_ERROR_OUT_OF_MEMORY;
   }
 
   mInfo = png_create_info_struct(mPNG);
   if (!mInfo) {
-    PostDecoderError(NS_ERROR_OUT_OF_MEMORY);
     png_destroy_read_struct(&mPNG, nullptr, nullptr);
-    return;
+    return NS_ERROR_OUT_OF_MEMORY;
   }
 
 #ifdef PNG_HANDLE_AS_UNKNOWN_SUPPORTED
@@ -346,55 +348,60 @@ nsPNGDecoder::InitInternal()
                               nsPNGDecoder::row_callback,
                               nsPNGDecoder::end_callback);
 
+  return NS_OK;
 }
 
-void
-nsPNGDecoder::WriteInternal(const char* aBuffer, uint32_t aCount)
+LexerResult
+nsPNGDecoder::DoDecode(SourceBufferIterator& aIterator, IResumable* aOnResume)
 {
-  MOZ_ASSERT(!HasError(), "Shouldn't call WriteInternal after error!");
-  MOZ_ASSERT(aBuffer);
-  MOZ_ASSERT(aCount > 0);
+  MOZ_ASSERT(!HasError(), "Shouldn't call DoDecode after error!");
 
-  Maybe<TerminalState> terminalState =
-    mLexer.Lex(aBuffer, aCount, [=](State aState,
-                                    const char* aData, size_t aLength) {
-      switch (aState) {
-        case State::PNG_DATA:
-          return ReadPNGData(aData, aLength);
-        case State::FINISHED_PNG_DATA:
-          return FinishedPNGData();
-      }
-      MOZ_CRASH("Unknown State");
-    });
-
-  if (terminalState == Some(TerminalState::FAILURE)) {
-    PostDataError();
-  }
+  return mLexer.Lex(aIterator, aOnResume,
+                    [=](State aState, const char* aData, size_t aLength) {
+    switch (aState) {
+      case State::PNG_DATA:
+        return ReadPNGData(aData, aLength);
+      case State::FINISHED_PNG_DATA:
+        return FinishedPNGData();
+    }
+    MOZ_CRASH("Unknown State");
+  });
 }
 
 LexerTransition<nsPNGDecoder::State>
 nsPNGDecoder::ReadPNGData(const char* aData, size_t aLength)
 {
+  // If we were waiting until after returning from a yield to call
+  // CreateFrame(), call it now.
+  if (mNextFrameInfo) {
+    if (NS_FAILED(CreateFrame(*mNextFrameInfo))) {
+      return Transition::TerminateFailure();
+    }
+
+    MOZ_ASSERT(mImageData, "Should have a buffer now");
+    mNextFrameInfo = Nothing();
+  }
+
   // libpng uses setjmp/longjmp for error handling.
   if (setjmp(png_jmpbuf(mPNG))) {
     return Transition::TerminateFailure();
   }
 
   // Pass the data off to libpng.
+  mLastChunkLength = aLength;
+  mNextTransition = Transition::ContinueUnbuffered(State::PNG_DATA);
   png_process_data(mPNG, mInfo,
                    reinterpret_cast<unsigned char*>(const_cast<char*>((aData))),
                    aLength);
 
-  if (HasError()) {
-    return Transition::TerminateFailure();
-  }
+  // Make sure that we've reached a terminal state if decoding is done.
+  MOZ_ASSERT_IF(GetDecodeDone(), mNextTransition.NextStateIsTerminal());
+  MOZ_ASSERT_IF(HasError(), mNextTransition.NextStateIsTerminal());
 
-  if (GetDecodeDone()) {
-    return Transition::TerminateSuccess();
-  }
-
-  // Keep reading data.
-  return Transition::ContinueUnbuffered(State::PNG_DATA);
+  // Continue with whatever transition the callback code requested. We
+  // initialized this to Transition::ContinueUnbuffered(State::PNG_DATA) above,
+  // so by default we just continue the unbuffered read.
+  return mNextTransition;
 }
 
 LexerTransition<nsPNGDecoder::State>
@@ -690,8 +697,7 @@ nsPNGDecoder::info_callback(png_structp png_ptr, png_infop info_ptr)
 
     // We have the metadata we're looking for, so stop here, before we allocate
     // buffers below.
-    png_process_data_pause(png_ptr, /* save = */ false);
-    return;
+    return decoder->DoTerminate(png_ptr, TerminalState::SUCCESS);
   }
 
 #ifdef PNG_APNG_SUPPORTED
@@ -704,7 +710,9 @@ nsPNGDecoder::info_callback(png_structp png_ptr, png_infop info_ptr)
     decoder->mFrameIsHidden = true;
   } else {
 #endif
-    nsresult rv = decoder->CreateFrame(decoder->format, frameRect, isInterlaced);
+    nsresult rv = decoder->CreateFrame(FrameInfo{ decoder->format,
+                                                  frameRect,
+                                                  isInterlaced });
     if (NS_FAILED(rv)) {
       png_longjmp(decoder->mPNG, 5); // NS_ERROR_OUT_OF_MEMORY
     }
@@ -906,6 +914,37 @@ nsPNGDecoder::WriteRow(uint8_t* aRow)
   PostInvalidationIfNeeded();
 }
 
+void
+nsPNGDecoder::DoTerminate(png_structp aPNGStruct, TerminalState aState)
+{
+  // Stop processing data. Note that we intentionally ignore the return value of
+  // png_process_data_pause(), which tells us how many bytes of the data that
+  // was passed to png_process_data() have not been consumed yet, because now
+  // that we've reached a terminal state, we won't do any more decoding or call
+  // back into libpng anymore.
+  png_process_data_pause(aPNGStruct, /* save = */ false);
+
+  mNextTransition = aState == TerminalState::SUCCESS
+                  ? Transition::TerminateSuccess()
+                  : Transition::TerminateFailure();
+}
+
+void
+nsPNGDecoder::DoYield(png_structp aPNGStruct)
+{
+  // Pause data processing. png_process_data_pause() returns how many bytes of
+  // the data that was passed to png_process_data() have not been consumed yet.
+  // We use this information to tell StreamingLexer where to place us in the
+  // input stream when we come back from the yield.
+  png_size_t pendingBytes = png_process_data_pause(aPNGStruct, /* save = */ false);
+
+  MOZ_ASSERT(pendingBytes < mLastChunkLength);
+  size_t consumedBytes = mLastChunkLength - min(pendingBytes, mLastChunkLength);
+
+  mNextTransition =
+    Transition::ContinueUnbufferedAfterYield(State::PNG_DATA, consumedBytes);
+}
+
 #ifdef PNG_APNG_SUPPORTED
 // got the header of a new frame that's coming
 void
@@ -921,13 +960,14 @@ nsPNGDecoder::frame_info_callback(png_structp png_ptr, png_uint_32 frame_num)
     // We're about to get a second non-hidden frame, but we only want the first.
     // Stop decoding now. (And avoid allocating the unnecessary buffers below.)
     decoder->PostDecodeDone();
-    png_process_data_pause(png_ptr, /* save = */ false);
-    return;
+    return decoder->DoTerminate(png_ptr, TerminalState::SUCCESS);
   }
 
   // Only the first frame can be hidden, so unhide unconditionally here.
   decoder->mFrameIsHidden = false;
 
+  // Save the information necessary to create the frame; we'll actually create
+  // it when we return from the yield.
   const IntRect frameRect(png_get_next_frame_x_offset(png_ptr, decoder->mInfo),
                           png_get_next_frame_y_offset(png_ptr, decoder->mInfo),
                           png_get_next_frame_width(png_ptr, decoder->mInfo),
@@ -935,11 +975,12 @@ nsPNGDecoder::frame_info_callback(png_structp png_ptr, png_uint_32 frame_num)
 
   const bool isInterlaced = bool(decoder->interlacebuf);
 
-  nsresult rv = decoder->CreateFrame(decoder->format, frameRect, isInterlaced);
-  if (NS_FAILED(rv)) {
-    png_longjmp(decoder->mPNG, 5); // NS_ERROR_OUT_OF_MEMORY
-  }
-  MOZ_ASSERT(decoder->mImageData, "Should have a buffer now");
+  decoder->mNextFrameInfo = Some(FrameInfo{ decoder->format,
+                                            frameRect,
+                                            isInterlaced });
+
+  // Yield to the caller to notify them that the previous frame is now complete.
+  return decoder->DoYield(png_ptr);
 }
 #endif
 
@@ -972,9 +1013,10 @@ nsPNGDecoder::end_callback(png_structp png_ptr, png_infop info_ptr)
   }
 #endif
 
-  // Send final notifications
+  // Send final notifications.
   decoder->EndImageFrame();
   decoder->PostDecodeDone(loop_count);
+  return decoder->DoTerminate(png_ptr, TerminalState::SUCCESS);
 }
 
 

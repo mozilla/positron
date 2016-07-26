@@ -99,24 +99,17 @@ if test "$COMPILE_ENVIRONMENT"; then
     MOZ_ANDROID_NDK
 fi # COMPILE_ENVIRONMENT
 
-if test -n "$gonkdir" ; then
+if test -n "$gonkdir"; then
     dnl export for js/src/configure. We can't pass the option down normally,
     dnl because it's a `--enable-project=b2g`-only option.
     export gonkdir
     kernel_name=`uname -s | tr "[[:upper:]]" "[[:lower:]]"`
     android_source="$gonkdir"
     ANDROID_SOURCE="$android_source"
-    dnl Default to ICS
-    ANDROID_VERSION=15
-    if test -n "${PLATFORM_SDK_VERSION}"; then
-        ANDROID_VERSION="${PLATFORM_SDK_VERSION}"
-    fi
 
-    case "$ANDROID_VERSION" in
+    case "$android_version" in
     15)
-        GONK_INCLUDES="-I$gonkdir/frameworks/base/opengl/include -I$gonkdir/frameworks/base/native/include -I$gonkdir/frameworks/base/include -I$gonkdir/frameworks/base/services/camera -I$gonkdir/frameworks/base/include/media/ -I$gonkdir/frameworks/base/include/media/stagefright -I$gonkdir/frameworks/base/include/media/stagefright/openmax -I$gonkdir/frameworks/base/media/libstagefright/rtsp -I$gonkdir/frameworks/base/media/libstagefright/include -I$gonkdir/external/dbus -I$gonkdir/external/bluetooth/bluez/lib -I$gonkdir/dalvik/libnativehelper/include/nativehelper"
-        MOZ_B2G_BT=1
-        MOZ_B2G_BT_BLUEZ=1
+        CPPFLAGS="-I$gonkdir/frameworks/base/opengl/include -I$gonkdir/frameworks/base/native/include -I$gonkdir/frameworks/base/include -I$gonkdir/frameworks/base/services/camera -I$gonkdir/frameworks/base/include/media/ -I$gonkdir/frameworks/base/include/media/stagefright -I$gonkdir/frameworks/base/include/media/stagefright/openmax -I$gonkdir/frameworks/base/media/libstagefright/rtsp -I$gonkdir/frameworks/base/media/libstagefright/include -I$gonkdir/external/dbus -I$gonkdir/external/bluetooth/bluez/lib -I$gonkdir/dalvik/libnativehelper/include/nativehelper $CPPFLAGS"
         MOZ_NFC=1
         MOZ_B2G_CAMERA=1
         MOZ_OMX_DECODER=1
@@ -125,16 +118,7 @@ if test -n "$gonkdir" ; then
         MOZ_SECUREELEMENT=1
         ;;
     17|18)
-        GONK_INCLUDES="-I$gonkdir/frameworks/native/include -I$gonkdir/frameworks/av/include -I$gonkdir/frameworks/av/include/media -I$gonkdir/frameworks/av/include/camera -I$gonkdir/frameworks/native/include/media/openmax -I$gonkdir/frameworks/av/media/libstagefright/include -I$gonkdir/external/mdnsresponder/mDNSShared"
-        if test -d "$gonkdir/external/bluetooth/bluez"; then
-            GONK_INCLUDES="$GONK_INCLUDES -I$gonkdir/external/dbus -I$gonkdir/external/bluetooth/bluez/lib"
-            MOZ_B2G_BT=1
-            MOZ_B2G_BT_BLUEZ=1
-        elif test -d "$gonkdir/system/bluetoothd"; then
-            MOZ_B2G_BT=1
-            MOZ_B2G_BT_DAEMON=1
-        fi
-
+        CPPFLAGS="-I$gonkdir/frameworks/native/include -I$gonkdir/frameworks/av/include -I$gonkdir/frameworks/av/include/media -I$gonkdir/frameworks/av/include/camera -I$gonkdir/frameworks/native/include/media/openmax -I$gonkdir/frameworks/av/media/libstagefright/include $CPPFLAGS"
         MOZ_RTSP=1
         MOZ_NFC=1
         MOZ_B2G_CAMERA=1
@@ -146,12 +130,8 @@ if test -n "$gonkdir" ; then
         MOZ_SECUREELEMENT=1
         ;;
     19)
-        GONK_INCLUDES="-I$gonkdir/frameworks/native/include -I$gonkdir/frameworks/av/include -I$gonkdir/frameworks/av/include/media -I$gonkdir/frameworks/av/include/camera -I$gonkdir/frameworks/native/include/media/openmax -I$gonkdir/frameworks/av/media/libstagefright/include -I$gonkdir/external/mdnsresponder/mDNSShared"
+        CPPFLAGS="-I$gonkdir/frameworks/native/include -I$gonkdir/frameworks/av/include -I$gonkdir/frameworks/av/include/media -I$gonkdir/frameworks/av/include/camera -I$gonkdir/frameworks/native/include/media/openmax -I$gonkdir/frameworks/av/media/libstagefright/include $CPPFLAGS"
         MOZ_B2G_CAMERA=1
-        if test -d "$gonkdir/system/bluetoothd"; then
-            MOZ_B2G_BT=1
-            MOZ_B2G_BT_DAEMON=1
-        fi
         MOZ_NFC=1
         MOZ_RTSP=1
         MOZ_OMX_DECODER=1
@@ -163,7 +143,7 @@ if test -n "$gonkdir" ; then
         AC_DEFINE(MOZ_AUDIO_OFFLOAD)
         ;;
     21|22)
-        GONK_INCLUDES="-I$gonkdir/frameworks/native/include -I$gonkdir/frameworks/av/include -I$gonkdir/frameworks/av/include/media -I$gonkdir/frameworks/av/include/camera -I$gonkdir/frameworks/native/include/media/openmax -I$gonkdir/frameworks/av/media/libstagefright/include -I$gonkdir/external/mdnsresponder/mDNSShared"
+        CPPFLAGS="-I$gonkdir/frameworks/native/include -I$gonkdir/frameworks/av/include -I$gonkdir/frameworks/av/include/media -I$gonkdir/frameworks/av/include/camera -I$gonkdir/frameworks/native/include/media/openmax -I$gonkdir/frameworks/av/media/libstagefright/include $CPPFLAGS"
         MOZ_AUDIO_OFFLOAD=1
         MOZ_OMX_DECODER=1
         MOZ_OMX_ENCODER=1
@@ -171,28 +151,36 @@ if test -n "$gonkdir" ; then
         AC_SUBST(MOZ_AUDIO_OFFLOAD)
         AC_DEFINE(MOZ_AUDIO_OFFLOAD)
         MOZ_B2G_CAMERA=1
-        if test -d "$gonkdir/system/bluetoothd"; then
-            MOZ_B2G_BT=1
-            MOZ_B2G_BT_DAEMON=1
-        fi
         MOZ_NFC=1
         MOZ_RTSP=1
         ;;
     *)
-        AC_MSG_ERROR([Unsupported platform version: $ANDROID_VERSION])
+        AC_MSG_ERROR([Unsupported platform version: $android_version])
         ;;
     esac
 
-    CPPFLAGS="-I$gonkdir/system -I$gonkdir/system/core/include -I$gonkdir/hardware/libhardware/include -I$gonkdir/external/valgrind/fxos-include $GONK_INCLUDES $CPPFLAGS"
+    dnl Enable Bluetooth backends depending on available drivers
+    if test -d "$gonkdir/system/bluetoothd"; then
+        MOZ_B2G_BT=1
+        MOZ_B2G_BT_DAEMON=1
+    fi
+    if test -d "$gonkdir/external/bluetooth/bluez"; then
+        MOZ_B2G_BT=1
+        MOZ_B2G_BT_BLUEZ=1
+    fi
+
+    CPPFLAGS="-I$gonkdir/system -I$gonkdir/system/core/include -I$gonkdir/hardware/libhardware/include -I$gonkdir/external/valgrind/fxos-include $CPPFLAGS"
     LDFLAGS="-L$gonkdir/out/target/product/$GONK_PRODUCT/obj/lib -Wl,-rpath-link=$gonkdir/out/target/product/$GONK_PRODUCT/obj/lib $LDFLAGS"
-    dnl Add -llog by default, since we use it all over the place.
-    LIBS="$LIBS -llog"
 
     AC_DEFINE(ANDROID)
-    AC_DEFINE_UNQUOTED(ANDROID_VERSION, $ANDROID_VERSION)
-    AC_SUBST(ANDROID_VERSION)
+    AC_DEFINE_UNQUOTED(ANDROID_VERSION, $android_version)
     AC_DEFINE(HAVE_SYS_UIO_H)
     AC_DEFINE(HAVE_PTHREADS)
+
+    dnl ANDROID_VERSION is only required for the AC_SUBST below
+    ANDROID_VERSION=$android_version
+    AC_SUBST(ANDROID_VERSION)
+
     direct_nspr_config=1
 
 else
@@ -350,6 +338,11 @@ case "$target" in
             # C4091: 'typedef ': ignored on left of '' when no variable is declared
             CFLAGS="$CFLAGS -wd4091"
             CXXFLAGS="$CXXFLAGS -wd4091"
+
+            # This is intended as a temporary hack to support building with VS2015.
+            # 'noexcept' used with no exception handling mode specified;
+            # termination on exception is not guaranteed. Specify /EHsc
+            CXXFLAGS="$CXXFLAGS -wd4577"
 
             if test -n "$WIN_UCRT_REDIST_DIR"; then
               if test ! -d "$WIN_UCRT_REDIST_DIR"; then
@@ -648,7 +641,7 @@ fi
 
 case "$host_os" in
 mingw*)
-    MOZ_PATH_PROGS(GMAKE, $GMAKE $NOT_PYMAKE make gmake, :)
+    MOZ_PATH_PROGS(GMAKE, $GMAKE mingw32-make $NOT_PYMAKE make gmake, :)
     ;;
 *)
     MOZ_PATH_PROGS(GMAKE, $GMAKE $NOT_PYMAKE gmake make, :)
@@ -765,74 +758,7 @@ if test -n "${CLANG_CXX}${CLANG_CL}"; then
     _WARNINGS_CXXFLAGS="-Qunused-arguments ${_WARNINGS_CXXFLAGS}"
 fi
 
-dnl ========================================================
-dnl = Use Address Sanitizer
-dnl ========================================================
-MOZ_ARG_ENABLE_BOOL(address-sanitizer,
-[  --enable-address-sanitizer       Enable Address Sanitizer (default=no)],
-    MOZ_ASAN=1,
-    MOZ_ASAN= )
-if test -n "$MOZ_ASAN"; then
-    MOZ_LLVM_HACKS=1
-    if test -n "$CLANG_CL"; then
-        # Look for clang_rt.asan_dynamic-i386.dll
-        MOZ_CLANG_RT_ASAN_LIB=clang_rt.asan_dynamic-i386.dll
-        # We use MOZ_PATH_PROG in order to get a Windows style path.
-        MOZ_PATH_PROG(MOZ_CLANG_RT_ASAN_LIB_PATH, $MOZ_CLANG_RT_ASAN_LIB)
-        if test -z "$MOZ_CLANG_RT_ASAN_LIB_PATH"; then
-            AC_MSG_ERROR([Couldn't find $MOZ_CLANG_RT_ASAN_LIB.  It should be available in the same location as clang-cl.])
-        fi
-        AC_SUBST(MOZ_CLANG_RT_ASAN_LIB_PATH)
-    fi
-    AC_DEFINE(MOZ_ASAN)
-    MOZ_PATH_PROG(LLVM_SYMBOLIZER, llvm-symbolizer)
-fi
-AC_SUBST(MOZ_ASAN)
-
-dnl ========================================================
-dnl = Use Memory Sanitizer
-dnl ========================================================
-MOZ_ARG_ENABLE_BOOL(memory-sanitizer,
-[  --enable-memory-sanitizer       Enable Memory Sanitizer (default=no)],
-    MOZ_MSAN=1,
-    MOZ_MSAN= )
-if test -n "$MOZ_MSAN"; then
-    MOZ_LLVM_HACKS=1
-    AC_DEFINE(MOZ_MSAN)
-    MOZ_PATH_PROG(LLVM_SYMBOLIZER, llvm-symbolizer)
-fi
-AC_SUBST(MOZ_MSAN)
-
-dnl ========================================================
-dnl = Use Thread Sanitizer
-dnl ========================================================
-MOZ_ARG_ENABLE_BOOL(thread-sanitizer,
-[  --enable-thread-sanitizer       Enable Thread Sanitizer (default=no)],
-   MOZ_TSAN=1,
-   MOZ_TSAN= )
-if test -n "$MOZ_TSAN"; then
-    MOZ_LLVM_HACKS=1
-    AC_DEFINE(MOZ_TSAN)
-    MOZ_PATH_PROG(LLVM_SYMBOLIZER, llvm-symbolizer)
-fi
-AC_SUBST(MOZ_TSAN)
-
-# The LLVM symbolizer is used by all sanitizers
-AC_SUBST(LLVM_SYMBOLIZER)
-
-dnl ========================================================
-dnl = Enable hacks required for LLVM instrumentations
-dnl ========================================================
-MOZ_ARG_ENABLE_BOOL(llvm-hacks,
-[  --enable-llvm-hacks       Enable workarounds required for several LLVM instrumentations (default=no)],
-    MOZ_LLVM_HACKS=1,
-    MOZ_LLVM_HACKS= )
-if test -n "$MOZ_LLVM_HACKS"; then
-    MOZ_NO_WLZDEFS=1
-    MOZ_CFLAGS_NSS=1
-fi
-AC_SUBST(MOZ_NO_WLZDEFS)
-AC_SUBST(MOZ_CFLAGS_NSS)
+MOZ_CONFIG_SANITIZE
 
 dnl ========================================================
 dnl = Enable treating compiler warnings as errors
@@ -1767,15 +1693,15 @@ dnl Xt is dependent upon SM as of X11R6
 dnl ========================================================
 if test -n "$MOZ_X11"; then
     AC_DEFINE_UNQUOTED(FUNCPROTO,15)
-    XLIBS="-lX11 $XLIBS"
+    XLIBS="-lX11-xcb -lX11 -lxcb-shm -lxcb $XLIBS"
     _SAVE_LDFLAGS="$LDFLAGS"
+    _SAVE_LIBS="$LIBS"
     LDFLAGS="$XLDFLAGS $LDFLAGS"
     AC_CHECK_LIB(X11, XDrawLines, [X11_LIBS="-lX11"],
         [MISSING_X="$MISSING_X -lX11"], $XLIBS)
     AC_CHECK_LIB(Xext, XextAddDisplay, [XEXT_LIBS="-lXext"],
         [MISSING_X="$MISSING_X -lXext"], $XLIBS)
 
-    if test "$MOZ_WIDGET_TOOLKIT" != qt; then
     AC_CHECK_LIB(Xt, XtFree, [ XT_LIBS="-lXt"], [
         unset ac_cv_lib_Xt_XtFree
         AC_CHECK_LIB(ICE, IceFlush, [XT_LIBS="-lICE $XT_LIBS"],, $XT_LIBS $XLIBS)
@@ -1783,13 +1709,13 @@ if test -n "$MOZ_X11"; then
         AC_CHECK_LIB(Xt, XtFree, [ XT_LIBS="-lXt $XT_LIBS"],
             [MISSING_X="$MISSING_X -lXt"], $X_PRE_LIBS $XT_LIBS $XLIBS)
         ])
-    fi
 
     dnl ========================================================
-    dnl = Check for XShm
+    dnl = Check for xcb
     dnl ========================================================
-    AC_CHECK_LIB(Xext, XShmCreateImage, _HAVE_XSHM_XEXT=1,,
-        $XLIBS $XEXT_LIBS)
+    AC_CHECK_LIB(X11-xcb, XGetXCBConnection,, [MISSING_X="$MISSING_X -lX11-xcb"], $XLIBS)
+    AC_CHECK_LIB(xcb-shm, xcb_shm_query_version,, [MISSING_X="$MISSING_X -lxcb-shm"], $XLIBS)
+    AC_CHECK_LIB(xcb, xcb_connect,, [MISSING_X="$MISSING_X -lxcb"], $XLIBS)
 
     dnl ========================================================
     dnl = Check for Xss
@@ -1800,6 +1726,7 @@ if test -n "$MOZ_X11"; then
              AC_DEFINE(HAVE_LIBXSS)],, $XEXT_LIBS $XLIBS))
 
     LDFLAGS="$_SAVE_LDFLAGS"
+    LIBS="$_SAVE_LIBS"
 fi # $MOZ_X11
 
 AC_SUBST_LIST(XCFLAGS)
@@ -3536,9 +3463,9 @@ dnl ========================================================
 dnl = Built-in fragmented MP4 support.
 dnl ========================================================
 
-if test x"$MOZ_WIDGET_TOOLKIT" = x"gonk" -a -n "$MOZ_FMP4" -a -n "$ANDROID_VERSION"; then
-    # we now know for sure that $ANDROID_VERSION is not an empty string!
-    if test "$ANDROID_VERSION" -ge "18"; then
+if test x"$MOZ_WIDGET_TOOLKIT" = x"gonk" -a -n "$MOZ_FMP4" -a -n "$android_version"; then
+    # we now know for sure that $android_version is not an empty string!
+    if test "$android_version" -ge "18"; then
         MOZ_GONK_MEDIACODEC=1
         AC_SUBST(MOZ_GONK_MEDIACODEC)
     fi
@@ -3813,19 +3740,6 @@ AC_SUBST(MOZ_PERMISSIONS)
 if test -n "$MOZ_PERMISSIONS"; then
     AC_DEFINE(MOZ_PERMISSIONS)
 fi
-
-dnl ========================================================
-dnl Child permissions, currently only used for b2g
-dnl ========================================================
-if test -n "$MOZ_B2G"; then
-    if test -n "$MOZ_PERMISSIONS"; then
-        MOZ_CHILD_PERMISSIONS=1
-        AC_DEFINE(MOZ_CHILD_PERMISSIONS)
-    else
-        AC_MSG_ERROR([You need to enable MOZ_PERMISSIONS for MOZ_CHILD_PERMISSIONS])
-    fi
-fi
-AC_SUBST(MOZ_CHILD_PERMISSIONS)
 
 dnl ========================================================
 dnl NegotiateAuth
@@ -5611,9 +5525,13 @@ MOZ_ARG_WITH_STRING(servo,
   SERVO_TARGET_DIR=$withval,
   SERVO_TARGET_DIR=)
 if test -n "$SERVO_TARGET_DIR"; then
-   MOZ_SERVO_LIBS="-L${SERVO_TARGET_DIR} -lgeckoservo"
-   AC_DEFINE(MOZ_STYLO)
-   AC_SUBST_LIST(MOZ_SERVO_LIBS)
+    if test -n "$_WIN32_MSVC"; then
+        MOZ_SERVO_LIBS="${SERVO_TARGET_DIR}/geckoservo"
+    else
+        MOZ_SERVO_LIBS="-L${SERVO_TARGET_DIR} -lgeckoservo"
+    fi
+    AC_DEFINE(MOZ_STYLO)
+    AC_SUBST_LIST(MOZ_SERVO_LIBS)
 fi
 
 dnl ========================================================
@@ -5980,9 +5898,6 @@ if test "$MOZ_TREE_CAIRO"; then
     fi
 
     case "$MOZ_WIDGET_TOOLKIT" in
-      qt)
-        QT_SURFACE_FEATURE="#define CAIRO_HAS_QT_SURFACE 1"
-        ;;
       cocoa | uikit)
         QUARTZ_SURFACE_FEATURE="#define CAIRO_HAS_QUARTZ_SURFACE 1"
         QUARTZ_IMAGE_SURFACE_FEATURE="#define CAIRO_HAS_QUARTZ_IMAGE_SURFACE 1"

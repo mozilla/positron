@@ -40,12 +40,17 @@ add_task(function* () {
   dispatch(actions.messageAdd(packet));
   dispatch(actions.messageAdd(packet));
 
-  const expectedMessage = prepareMessage(packet);
-  expectedMessage.repeat = 3;
+  const messages = getAllMessages(getState());
+  equal(messages.size, 1,
+    "Repeated messages don't increase message list size");
+  equal(messages.first().repeat, 3, "Repeated message is updated as expected");
 
-  let messages = getAllMessages(getState());
-  deepEqual(messages.toArray(), [expectedMessage],
-    "Adding same message to the store three times results in repeated message");
+  let newPacket = Object.assign({}, packet);
+  newPacket.message.arguments = ["funny"];
+  dispatch(actions.messageAdd(newPacket));
+
+  equal(getAllMessages(getState()).size, 2,
+    "Non-repeated messages aren't clobbered");
 });
 
 /**
@@ -81,4 +86,44 @@ add_task(function*() {
   messages = getAllMessages(getState());
   deepEqual(messages.toArray(), [prepareMessage(clearPacket)],
     "console.clear clears existing messages and add a new one");
+});
+
+/**
+ * Test message limit on the store.
+ */
+add_task(function* () {
+  const { getState, dispatch } = storeFactory();
+  const logLimit = 1000;
+  const messageNumber = logLimit + 1;
+
+  let newPacket = Object.assign({}, packet);
+  for (let i = 1; i <= messageNumber; i++) {
+    newPacket.message.arguments = [i];
+    dispatch(actions.messageAdd(newPacket));
+  }
+
+  let messages = getAllMessages(getState());
+  equal(messages.count(), logLimit, "Messages are pruned up to the log limit");
+  deepEqual(messages.last().data.arguments, [messageNumber],
+    "The last message is the expected one");
+});
+
+/**
+ * Test message limit on the store with user set prefs.
+ */
+add_task(function* () {
+  const userSetLimit = 10;
+  Services.prefs.setIntPref("devtools.hud.loglimit", userSetLimit);
+
+  const { getState, dispatch } = storeFactory();
+
+  let newPacket = Object.assign({}, packet);
+  for (let i = 1; i <= userSetLimit + 1; i++) {
+    newPacket.message.arguments = [i];
+    dispatch(actions.messageAdd(newPacket));
+  }
+
+  let messages = getAllMessages(getState());
+  equal(messages.count(), userSetLimit,
+    "Messages are pruned up to the user set log limit");
 });

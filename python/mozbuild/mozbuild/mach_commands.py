@@ -1060,6 +1060,8 @@ class RunProgram(MachCommandBase):
         help='Do not pass the --foreground argument by default on Mac.')
     @CommandArgument('--noprofile', '-n', action='store_true', group=prog_group,
         help='Do not pass the --profile argument by default.')
+    @CommandArgument('--disable-e10s', action='store_true', group=prog_group,
+        help='Run the program with electrolysis disabled.')
 
     @CommandArgumentGroup('debugging')
     @CommandArgument('--debug', action='store_true', group='debugging',
@@ -1086,8 +1088,8 @@ class RunProgram(MachCommandBase):
         help='Allocation stack trace coverage. The default is \'partial\'.')
     @CommandArgument('--show-dump-stats', action='store_true', group='DMD',
         help='Show stats when doing dumps.')
-    def run(self, params, remote, background, noprofile, debug, debugger,
-        debugparams, slowscript, dmd, mode, stacks, show_dump_stats):
+    def run(self, params, remote, background, noprofile, disable_e10s, debug,
+        debugger, debugparams, slowscript, dmd, mode, stacks, show_dump_stats):
 
         if conditions.is_android(self):
             # Running Firefox for Android is completely different
@@ -1132,6 +1134,8 @@ class RunProgram(MachCommandBase):
                 args.append(path)
 
         extra_env = {'MOZ_CRASHREPORTER_DISABLE': '1'}
+        if disable_e10s:
+            extra_env['MOZ_FORCE_DISABLE_E10S'] = '1'
 
         if debug or debugger or debugparams:
             if 'INSIDE_EMACS' in os.environ:
@@ -1449,8 +1453,7 @@ class PackageFrontend(MachCommandBase):
         self._activate_virtualenv()
         os.environ['PATH'] = original_path
 
-        for package in ('pylru==1.0.9',
-                        'taskcluster==0.0.32',
+        for package in ('taskcluster==0.0.32',
                         'mozregression==1.0.2'):
             self._install_pip_package(package)
 

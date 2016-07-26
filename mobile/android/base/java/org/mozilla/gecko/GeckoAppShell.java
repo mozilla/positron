@@ -249,17 +249,14 @@ public class GeckoAppShell
 
     private static native void reportJavaCrash(String stackTrace);
 
-    public static void notifyUriVisited(String uri) {
-        sendEventToGecko(GeckoEvent.createVisitedEvent(uri));
-    }
+    @WrapForJNI
+    public static native void notifyUriVisited(String uri);
 
     public static native void notifyBatteryChange(double aLevel, boolean aCharging, double aRemainingTime);
 
     public static native void invalidateAndScheduleComposite();
 
     public static native float computeRenderIntegrity();
-
-    public static native SurfaceBits getSurfaceBits(Surface surface);
 
     public static native void addPresentationSurface(Surface surface);
     public static native void removePresentationSurface(Surface surface);
@@ -1660,7 +1657,7 @@ public class GeckoAppShell
         ArrayList<String> directories = new ArrayList<String>();
         PackageManager pm = getApplicationContext().getPackageManager();
         List<ResolveInfo> plugins = pm.queryIntentServices(new Intent(PLUGIN_ACTION),
-                PackageManager.GET_SERVICES | PackageManager.GET_META_DATA);
+                PackageManager.GET_META_DATA);
 
         synchronized (mPackageInfoCache) {
 

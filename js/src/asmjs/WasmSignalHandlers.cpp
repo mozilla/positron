@@ -147,6 +147,9 @@ class AutoSetHandlingSegFault
 # else
 #  define R15_sig(p) ((p)->uc_mcontext.gregs[REG_R15])
 # endif
+# if defined(__linux__) && defined(__aarch64__)
+#  define EPC_sig(p) ((p)->uc_mcontext.pc)
+# endif
 # if defined(__linux__) && defined(__mips__)
 #  define EPC_sig(p) ((p)->uc_mcontext.pc)
 #  define RSP_sig(p) ((p)->uc_mcontext.gregs[29])
@@ -348,6 +351,8 @@ struct macos_arm_context {
 # define PC_sig(p) EIP_sig(p)
 #elif defined(JS_CPU_ARM)
 # define PC_sig(p) R15_sig(p)
+#elif defined(__aarch64__)
+# define PC_sig(p) EPC_sig(p)
 #elif defined(JS_CPU_MIPS)
 # define PC_sig(p) EPC_sig(p)
 #endif
@@ -1261,23 +1266,20 @@ JitInterruptHandler(int signum, siginfo_t* info, void* context)
 }
 #endif
 
-bool
-wasm::EnsureSignalHandlersInstalled(JSRuntime* rt)
+static bool
+ProcessHasSignalHandlers()
 {
-#if defined(XP_DARWIN) && defined(ASMJS_MAY_USE_SIGNAL_HANDLERS)
-    // On OSX, each JSRuntime gets its own handler thread.
-    if (!rt->wasmMachExceptionHandler.installed() && !rt->wasmMachExceptionHandler.install(rt))
-        return false;
-#endif
-
-    // All the rest of the handlers are process-wide and thus must only be
-    // installed once. We assume that there are no races creating the first
-    // JSRuntime of the process.
+    // We assume that there are no races creating the first JSRuntime of the process.
     static bool sTried = false;
     static bool sResult = false;
     if (sTried)
         return sResult;
     sTried = true;
+
+    // Developers might want to forcibly disable signals to avoid seeing
+    // spurious SIGSEGVs in the debugger.
+    if (getenv("JS_DISABLE_SLOW_SCRIPT_SIGNALS") || getenv("JS_NO_SIGNALS"))
+        return false;
 
 #if defined(ANDROID)
     // Before Android 4.4 (SDK version 19), there is a bug
@@ -1357,6 +1359,39 @@ wasm::EnsureSignalHandlersInstalled(JSRuntime* rt)
     return true;
 }
 
+bool
+wasm::EnsureSignalHandlers(JSRuntime* rt)
+{
+    // Nothing to do if the platform doesn't support it.
+    if (!ProcessHasSignalHandlers())
+        return true;
+
+#if defined(XP_DARWIN) && defined(ASMJS_MAY_USE_SIGNAL_HANDLERS)
+    // On OSX, each JSRuntime gets its own handler thread.
+    if (!rt->wasmMachExceptionHandler.installed() && !rt->wasmMachExceptionHandler.install(rt))
+        return false;
+#endif
+
+    return true;
+}
+
+static bool sHandlersSuppressedForTesting = false;
+
+bool
+wasm::HaveSignalHandlers()
+{
+    if (!ProcessHasSignalHandlers())
+        return false;
+
+    return !sHandlersSuppressedForTesting;
+}
+
+void
+wasm::SuppressSignalHandlersForTesting(bool suppress)
+{
+    sHandlersSuppressedForTesting = suppress;
+}
+
 // JSRuntime::requestInterrupt sets interrupt_ (which is checked frequently by
 // C++ code at every Baseline JIT loop backedge) and jitStackLimit_ (which is
 // checked at every Baseline and Ion JIT function prologue). The remaining
@@ -1371,7 +1406,7 @@ js::InterruptRunningJitCode(JSRuntime* rt)
 {
     // If signal handlers weren't installed, then Ion and wasm emit normal
     // interrupt checks and don't need asynchronous interruption.
-    if (!rt->canUseSignalHandlers())
+    if (!HaveSignalHandlers())
         return;
 
     // Do nothing if we're already handling an interrupt here, to avoid races

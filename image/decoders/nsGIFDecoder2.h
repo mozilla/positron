@@ -24,8 +24,9 @@ class nsGIFDecoder2 : public Decoder
 public:
   ~nsGIFDecoder2();
 
-  virtual void WriteInternal(const char* aBuffer, uint32_t aCount) override;
-  virtual void FinishInternal() override;
+  LexerResult DoDecode(SourceBufferIterator& aIterator,
+                       IResumable* aOnResume) override;
+  nsresult FinishInternal() override;
   virtual Telemetry::ID SpeedHistogram() override;
 
 private:
@@ -79,6 +80,7 @@ private:
     GLOBAL_COLOR_TABLE,
     FINISHED_GLOBAL_COLOR_TABLE,
     BLOCK_HEADER,
+    BLOCK_HEADER_AFTER_YIELD,
     EXTENSION_HEADER,
     GRAPHIC_CONTROL_EXTENSION,
     APPLICATION_IDENTIFIER,

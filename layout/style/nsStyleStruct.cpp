@@ -207,7 +207,7 @@ nsStyleFont::CalcDifference(const nsStyleFont& aNewData) const
     return nsChangeHint_NeutralChange;
   }
 
-  return NS_STYLE_HINT_NONE;
+  return nsChangeHint(0);
 }
 
 /* static */ nscoord
@@ -283,7 +283,7 @@ nsChangeHint
 nsStyleMargin::CalcDifference(const nsStyleMargin& aNewData) const
 {
   if (mMargin == aNewData.mMargin) {
-    return NS_STYLE_HINT_NONE;
+    return nsChangeHint(0);
   }
   // Margin differences can't affect descendant intrinsic sizes and
   // don't need to force children to reflow.
@@ -318,7 +318,7 @@ nsChangeHint
 nsStylePadding::CalcDifference(const nsStylePadding& aNewData) const
 {
   if (mPadding == aNewData.mPadding) {
-    return NS_STYLE_HINT_NONE;
+    return nsChangeHint(0);
   }
   // Padding differences can't affect descendant intrinsic sizes, but do need
   // to force children to reflow so that we can reposition them, since their
@@ -527,7 +527,7 @@ nsStyleBorder::CalcDifference(const nsStyleBorder& aNewData) const
     return nsChangeHint_NeutralChange;
   }
 
-  return NS_STYLE_HINT_NONE;
+  return nsChangeHint(0);
 }
 
 nsStyleOutline::nsStyleOutline(StyleStructContext aContext)
@@ -602,7 +602,7 @@ nsStyleOutline::CalcDifference(const nsStyleOutline& aNewData) const
     return nsChangeHint_NeutralChange;
   }
 
-  return NS_STYLE_HINT_NONE;
+  return nsChangeHint(0);
 }
 
 // --------------------
@@ -698,7 +698,7 @@ nsStyleList::CalcDifference(const nsStyleList& aNewData) const
   if (EqualImages(mListStyleImage, aNewData.mListStyleImage) &&
       mCounterStyle == aNewData.mCounterStyle) {
     if (mImageRegion.IsEqualInterior(aNewData.mImageRegion)) {
-      return NS_STYLE_HINT_NONE;
+      return nsChangeHint(0);
     }
     if (mImageRegion.width == aNewData.mImageRegion.width &&
         mImageRegion.height == aNewData.mImageRegion.height) {
@@ -757,7 +757,7 @@ nsStyleXUL::CalcDifference(const nsStyleXUL& aNewData) const
       mBoxPack == aNewData.mBoxPack &&
       mBoxOrdinal == aNewData.mBoxOrdinal &&
       mStretchStack == aNewData.mStretchStack) {
-    return NS_STYLE_HINT_NONE;
+    return nsChangeHint(0);
   }
   if (mBoxOrdinal != aNewData.mBoxOrdinal) {
     return nsChangeHint_ReconstructFrame;
@@ -836,7 +836,7 @@ nsStyleColumn::CalcDifference(const nsStyleColumn& aNewData) const
     return nsChangeHint_NeutralChange;
   }
 
-  return NS_STYLE_HINT_NONE;
+  return nsChangeHint(0);
 }
 
 // --------------------
@@ -1007,14 +1007,14 @@ nsStyleBasicShape::GetShapeTypeName() const
 nsStyleClipPath::nsStyleClipPath()
   : mType(NS_STYLE_CLIP_PATH_NONE)
   , mURL(nullptr)
-  , mSizingBox(NS_STYLE_CLIP_SHAPE_SIZING_NOBOX)
+  , mSizingBox(mozilla::StyleClipShapeSizing::NoBox)
 {
 }
 
 nsStyleClipPath::nsStyleClipPath(const nsStyleClipPath& aSource)
   : mType(NS_STYLE_CLIP_PATH_NONE)
   , mURL(nullptr)
-  , mSizingBox(NS_STYLE_CLIP_SHAPE_SIZING_NOBOX)
+  , mSizingBox(mozilla::StyleClipShapeSizing::NoBox)
 {
   if (aSource.mType == NS_STYLE_CLIP_PATH_URL) {
     SetURL(aSource.mURL);
@@ -1045,7 +1045,7 @@ nsStyleClipPath::operator=(const nsStyleClipPath& aOther)
     SetSizingBox(aOther.mSizingBox);
   } else {
     ReleaseRef();
-    mSizingBox = NS_STYLE_CLIP_SHAPE_SIZING_NOBOX;
+    mSizingBox = mozilla::StyleClipShapeSizing::NoBox;
     mType = NS_STYLE_CLIP_PATH_NONE;
   }
   return *this;
@@ -1096,7 +1096,8 @@ nsStyleClipPath::SetURL(nsIURI* aURL)
 }
 
 void
-nsStyleClipPath::SetBasicShape(nsStyleBasicShape* aBasicShape, uint8_t aSizingBox)
+nsStyleClipPath::SetBasicShape(nsStyleBasicShape* aBasicShape,
+                               mozilla::StyleClipShapeSizing aSizingBox)
 {
   NS_ASSERTION(aBasicShape, "expected pointer");
   ReleaseRef();
@@ -1107,7 +1108,7 @@ nsStyleClipPath::SetBasicShape(nsStyleBasicShape* aBasicShape, uint8_t aSizingBo
 }
 
 void
-nsStyleClipPath::SetSizingBox(uint8_t aSizingBox)
+nsStyleClipPath::SetSizingBox(mozilla::StyleClipShapeSizing aSizingBox)
 {
   ReleaseRef();
   mSizingBox = aSizingBox;
@@ -1756,7 +1757,7 @@ nsStyleTable::CalcDifference(const nsStyleTable& aNewData) const
       mLayoutStrategy != aNewData.mLayoutStrategy) {
     return nsChangeHint_ReconstructFrame;
   }
-  return NS_STYLE_HINT_NONE;
+  return nsChangeHint(0);
 }
 
 // -----------------------
@@ -1802,7 +1803,7 @@ nsStyleTableBorder::CalcDifference(const nsStyleTableBorder& aNewData) const
       (mBorderSpacingCol == aNewData.mBorderSpacingCol) &&
       (mBorderSpacingRow == aNewData.mBorderSpacingRow)) {
     if (mEmptyCells == aNewData.mEmptyCells) {
-      return NS_STYLE_HINT_NONE;
+      return nsChangeHint(0);
     }
     return NS_STYLE_HINT_VISUAL;
   } else {
@@ -1830,7 +1831,7 @@ nsChangeHint
 nsStyleColor::CalcDifference(const nsStyleColor& aNewData) const
 {
   if (mColor == aNewData.mColor) {
-    return NS_STYLE_HINT_NONE;
+    return nsChangeHint(0);
   }
   return nsChangeHint_RepaintFrame;
 }
@@ -2037,7 +2038,7 @@ nsStyleImage::UntrackImage(nsPresContext* aContext)
   // Unregister the image with the document
   nsIDocument* doc = aContext->Document();
   if (doc) {
-    doc->RemoveImage(mImage, nsIDocument::REQUEST_DISCARD);
+    doc->RemoveImage(mImage);
   }
 
   // Mark state
@@ -2654,11 +2655,35 @@ nsStyleImageLayers::Layer::CalcDifference(const nsStyleImageLayers::Layer& aNewL
 {
   nsChangeHint hint = nsChangeHint(0);
   if (!EqualURIs(mSourceURI, aNewLayer.mSourceURI)) {
-    hint |= nsChangeHint_UpdateEffects |
-            nsChangeHint_RepaintFrame;
-    // Mask changes require that we update the PreEffectsBBoxProperty,
-    // which is done during overflow computation.
-    hint |= nsChangeHint_UpdateOverflow;
+    hint |= nsChangeHint_RepaintFrame;
+
+    // If Layer::mSourceURI links to a SVG mask, it has a fragment. Not vice
+    // versa. Here are examples of URI contains a fragment, two of them link
+    // to a SVG mask:
+    //   mask:url(a.svg#maskID); // The fragment of this URI is an ID of a mask
+    //                           // element in a.svg.
+    //   mask:url(#localMaskID); // The fragment of this URI is an ID of a mask
+    //                           // element in local document.
+    //   mask:url(b.svg#viewBoxID); // The fragment of this URI is an ID of a
+    //                              // viewbox defined in b.svg.
+    // That is, if mSourceURI has a fragment, it may link to a SVG mask; If
+    // not, it "must" not link to a SVG mask.
+    bool maybeSVGMask = false;
+    if (mSourceURI) {
+      mSourceURI->GetHasRef(&maybeSVGMask);
+    }
+    if (!maybeSVGMask && aNewLayer.mSourceURI) {
+      aNewLayer.mSourceURI->GetHasRef(&maybeSVGMask);
+    }
+
+    // Return nsChangeHint_UpdateEffects and nsChangeHint_UpdateOverflow if
+    // either URI might link to an SVG mask.
+    if (maybeSVGMask) {
+      hint |= nsChangeHint_UpdateEffects;
+      // Mask changes require that we update the PreEffectsBBoxProperty,
+      // which is done during overflow computation.
+      hint |= nsChangeHint_UpdateOverflow;
+    }
   } else if (mAttachment != aNewLayer.mAttachment ||
              mClip != aNewLayer.mClip ||
              mOrigin != aNewLayer.mOrigin ||
@@ -3389,7 +3414,7 @@ nsStyleContentData::UntrackImage(nsPresContext* aContext)
   // Unregister the image with the document
   nsIDocument* doc = aContext->Document();
   if (doc) {
-    doc->RemoveImage(mContent.mImage, nsIDocument::REQUEST_DISCARD);
+    doc->RemoveImage(mContent.mImage);
   }
 
   // Mark state
@@ -3522,7 +3547,7 @@ nsStyleContent::CalcDifference(const nsStyleContent& aNewData) const
   if (mMarkerOffset != aNewData.mMarkerOffset) {
     return NS_STYLE_HINT_REFLOW;
   }
-  return NS_STYLE_HINT_NONE;
+  return nsChangeHint(0);
 }
 
 nsresult
@@ -3602,7 +3627,7 @@ nsStyleTextReset::CalcDifference(const nsStyleTextReset& aNewData) const
     return nsChangeHint_RepaintFrame;
   }
 
-  return NS_STYLE_HINT_NONE;
+  return nsChangeHint(0);
 }
 
 // Returns true if the given shadow-arrays are equal.
@@ -3797,7 +3822,7 @@ nsStyleText::CalcDifference(const nsStyleText& aNewData) const
     return nsChangeHint_NeutralChange;
   }
 
-  return NS_STYLE_HINT_NONE;
+  return nsChangeHint(0);
 }
 
 LogicalSide
@@ -3992,7 +4017,7 @@ nsStyleUIReset::CalcDifference(const nsStyleUIReset& aNewData) const
     return nsChangeHint_SchedulePaint;
   }
 
-  return NS_STYLE_HINT_NONE;
+  return nsChangeHint(0);
 }
 
 //-----------------------

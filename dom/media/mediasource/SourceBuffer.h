@@ -87,6 +87,13 @@ public:
   void AbortBufferAppend();
 
   void Remove(double aStart, double aEnd, ErrorResult& aRv);
+
+  IMPL_EVENT_HANDLER(updatestart);
+  IMPL_EVENT_HANDLER(update);
+  IMPL_EVENT_HANDLER(updateend);
+  IMPL_EVENT_HANDLER(error);
+  IMPL_EVENT_HANDLER(abort);
+
   /** End WebIDL Methods. */
 
   NS_DECL_ISUPPORTS_INHERITED
@@ -110,6 +117,7 @@ public:
 
   double GetBufferedStart();
   double GetBufferedEnd();
+  double HighestStartTime();
 
   // Runs the range removal algorithm as defined by the MSE spec.
   void RangeRemoval(double aStart, double aEnd);
@@ -167,6 +175,7 @@ private:
   mozilla::Atomic<bool> mActive;
 
   MozPromiseRequestHolder<SourceBufferTask::AppendPromise> mPendingAppend;
+  MozPromiseRequestHolder<SourceBufferTask::RangeRemovalPromise> mPendingRemoval;
   const nsCString mType;
 
   RefPtr<TimeRanges> mBuffered;

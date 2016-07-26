@@ -10,6 +10,7 @@ const defer = require("devtools/shared/defer");
 const Services = require("Services");
 const { TargetFactory } = require("devtools/client/framework/target");
 const Telemetry = require("devtools/client/shared/telemetry");
+const {ViewHelpers} = require("devtools/client/shared/widgets/view-helpers");
 
 const NS_XHTML = "http://www.w3.org/1999/xhtml";
 const XUL_NS = "http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul";
@@ -107,6 +108,13 @@ var CommandUtils = {
 
         button.addEventListener("click", () => {
           requisition.updateExec(typed);
+        }, false);
+
+        button.addEventListener("keypress", (event) => {
+          if (ViewHelpers.isSpaceOrReturn(event)) {
+            event.preventDefault();
+            requisition.updateExec(typed);
+          }
         }, false);
 
         // Allow the command button to be toggleable
@@ -215,15 +223,10 @@ exports.CommandUtils = CommandUtils;
  * to using panels.
  */
 loader.lazyGetter(this, "isLinux", function () {
-  return OS == "Linux";
+  return Services.appinfo.OS == "Linux";
 });
 loader.lazyGetter(this, "isMac", function () {
-  return OS == "Darwin";
-});
-
-loader.lazyGetter(this, "OS", function () {
-  let os = Cc["@mozilla.org/xre/app-info;1"].getService(Ci.nsIXULRuntime).OS;
-  return os;
+  return Services.appinfo.OS == "Darwin";
 });
 
 /**
@@ -1002,7 +1005,7 @@ OutputPanel.prototype._resize = function () {
   // We'd like to put this in CSS but we can't:
   //   body { width: calc(min(-5px, max-content)); }
   //   #_panel { max-width: -5px; }
-  switch (OS) {
+  switch (Services.appinfo.OS) {
     case "Linux":
       maxWidth -= 5;
       break;
