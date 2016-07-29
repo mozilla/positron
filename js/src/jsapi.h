@@ -3432,6 +3432,15 @@ extern JS_PUBLIC_API(void*)
 JS_StealArrayBufferContents(JSContext* cx, JS::HandleObject obj);
 
 /**
+ * Externalizes the contents of the given array buffer.  The array buffer length is not modified,
+ * and its contents array still points to the returned buffer. The caller takes ownership of the
+ * return value and must free it or transfer ownership via JS_NewArrayBufferWithContents when done
+ * using it.
+ */
+extern JS_PUBLIC_API(void*)
+JS_ExternalizeArrayBufferContents(JSContext* cx, JS::HandleObject obj);
+
+/**
  * Create a new mapped array buffer with the given memory mapped contents. It
  * must be legal to free the contents pointer by unmapping it. On success,
  * ownership is transferred to the new mapped array buffer.

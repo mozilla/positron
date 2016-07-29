@@ -158,3 +158,47 @@ bool hasDetachedBuffer(JS::HandleObject obj) {
 }
 
 END_TEST(testArrayBuffer_bug720949_viewList)
+
+BEGIN_TEST(testArrayBuffer_externalize)
+{
+    if (!testWithSize(cx, 2))    // inlined storage
+        return false;
+    if (!testWithSize(cx, 2000)) // externalized storage
+        return false;
+
+    return true;
+}
+
+bool testWithSize(JSContext* cx, int32_t n)
+{
+    JS::RootedObject buffer(cx);
+
+    buffer = JS_NewArrayBuffer(cx, n);
+    JS::RootedObject view(cx, JS_NewUint8ArrayWithBuffer(cx, buffer, 0, -1));
+    void* contents = JS_ExternalizeArrayBufferContents(cx, buffer);
+    CHECK(contents != nullptr);
+    CHECK(hasExpectedLength(view, n));
+    CHECK(!JS_IsDetachedArrayBufferObject(buffer));
+    CHECK(JS_GetArrayBufferByteLength(buffer) == uint32_t(n));
+    view = nullptr;
+    GC(cx);
+    buffer = nullptr;
+    GC(cx);
+    JS_free(nullptr, contents);
+    GC(cx);
+
+    return true;
+}
+
+static void GC(JSContext* cx)
+{
+    JS_GC(cx);
+    JS_GC(cx); // Trigger another to wait for background finalization to end
+}
+
+bool hasExpectedLength(JS::HandleObject obj, int32_t n) {
+    JS::RootedValue v(cx);
+    return JS_GetProperty(cx, obj, "byteLength", &v) && v.toInt32() == n;
+}
+
+END_TEST(testArrayBuffer_externalize)
