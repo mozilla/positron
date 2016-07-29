@@ -30,6 +30,7 @@ using mozilla::Unused;
 #include "nsWindow.h"
 
 #include "nsIBaseWindow.h"
+#include "nsIDOMChromeWindow.h"
 #include "nsIObserverService.h"
 #include "nsISelection.h"
 #include "nsISupportsArray.h"
@@ -57,9 +58,9 @@ using mozilla::Unused;
 #include "Layers.h"
 #include "mozilla/layers/LayerManagerComposite.h"
 #include "mozilla/layers/AsyncCompositionManager.h"
-#include "mozilla/layers/APZCTreeManager.h"
 #include "mozilla/layers/APZEventState.h"
 #include "mozilla/layers/APZThreadUtils.h"
+#include "mozilla/layers/IAPZCTreeManager.h"
 #include "GLContext.h"
 #include "GLContextProvider.h"
 #include "ScopedGLHelpers.h"
@@ -84,8 +85,9 @@ using mozilla::Unused;
 
 using namespace mozilla;
 using namespace mozilla::dom;
-using namespace mozilla::widget;
 using namespace mozilla::layers;
+using namespace mozilla::java;
+using namespace mozilla::widget;
 
 NS_IMPL_ISUPPORTS_INHERITED0(nsWindow, nsBaseWidget)
 
@@ -111,6 +113,11 @@ static bool sFailedToCreateGLContext = false;
 // Multitouch swipe thresholds in inches
 static const double SWIPE_MAX_PINCH_DELTA_INCHES = 0.4;
 static const double SWIPE_MIN_DISTANCE_INCHES = 0.6;
+
+// Sync with GeckoEditableView class
+static const int IME_MONITOR_CURSOR_ONE_SHOT = 1;
+static const int IME_MONITOR_CURSOR_START_MONITOR = 2;
+static const int IME_MONITOR_CURSOR_END_MONITOR = 3;
 
 static Modifiers GetModifiers(int32_t metaState);
 
@@ -218,6 +225,7 @@ public:
         , mIMEUpdatingContext(false)
         , mIMESelectionChanged(false)
         , mIMETextChangedDuringFlush(false)
+        , mIMEMonitorCursor(false)
     {
         Base::AttachNative(aInstance, this);
         EditableBase::AttachNative(mEditable, this);
@@ -231,6 +239,9 @@ public:
     /**
      * GeckoView methods
      */
+private:
+    nsCOMPtr<nsPIDOMWindowOuter> mDOMWindow;
+
 public:
     // Create and attach a window.
     static void Open(const jni::Class::LocalRef& aCls,
@@ -244,6 +255,8 @@ public:
 
     // Reattach this nsWindow to a new GeckoView.
     void Reattach(GeckoView::Param aView);
+
+    void LoadUri(jni::String::Param aUri, int32_t aFlags);
 
     /**
      * GeckoEditable methods
@@ -271,8 +284,7 @@ private:
             , mOldEnd(aIMENotification.mTextChangeData.mRemovedEndOffset)
             , mNewEnd(aIMENotification.mTextChangeData.mAddedEndOffset)
         {
-            MOZ_ASSERT(aIMENotification.mMessage ==
-                           mozilla::widget::NOTIFY_IME_OF_TEXT_CHANGE,
+            MOZ_ASSERT(aIMENotification.mMessage == NOTIFY_IME_OF_TEXT_CHANGE,
                        "IMETextChange initialized with wrong notification");
             MOZ_ASSERT(aIMENotification.mTextChangeData.IsValid(),
                        "The text change notification isn't initialized");
@@ -284,7 +296,7 @@ private:
     };
 
     // GeckoEditable instance used by this nsWindow;
-    mozilla::widget::GeckoEditable::GlobalRef mEditable;
+    java::GeckoEditable::GlobalRef mEditable;
     AutoTArray<mozilla::UniquePtr<mozilla::WidgetEvent>, 8> mIMEKeyEvents;
     AutoTArray<IMETextChange, 4> mIMETextChanges;
     InputContext mInputContext;
@@ -293,6 +305,7 @@ private:
     bool mIMEUpdatingContext;
     bool mIMESelectionChanged;
     bool mIMETextChangedDuringFlush;
+    bool mIMEMonitorCursor;
 
     void SendIMEDummyKeyEvents();
     void AddIMETextChange(const IMETextChange& aChange);
@@ -304,6 +317,7 @@ private:
     void PostFlushIMEChanges();
     void FlushIMEChanges(FlushChangesFlag aFlags = FLUSH_FLAG_NONE);
     void AsyncNotifyIME(int32_t aNotification);
+    void UpdateCompositionRects();
 
 public:
     bool NotifyIME(const IMENotification& aIMENotification);
@@ -345,6 +359,9 @@ public:
 
     // Update styling for the active composition using previous-added ranges.
     void OnImeUpdateComposition(int32_t aStart, int32_t aEnd);
+
+    // Set cursor mode whether IME requests
+    void OnImeRequestCursorUpdates(int aRequestMode);
 };
 
 /**
@@ -466,7 +483,7 @@ public:
             return;
         }
 
-        RefPtr<APZCTreeManager> controller = mWindow->mAPZC;
+        RefPtr<IAPZCTreeManager> controller = mWindow->mAPZC;
         RefPtr<CompositorBridgeParent> compositor = mWindow->GetCompositorBridgeParent();
         if (controller && compositor) {
             // TODO: Pass in correct values for presShellId and viewId.
@@ -485,7 +502,7 @@ public:
             return;
         }
 
-        RefPtr<APZCTreeManager> controller = mWindow->mAPZC;
+        RefPtr<IAPZCTreeManager> controller = mWindow->mAPZC;
         if (controller) {
             controller->AdjustScrollForSurfaceShift(
                 ScreenPoint(aX, aY));
@@ -496,7 +513,10 @@ public:
     {
         MOZ_ASSERT(AndroidBridge::IsJavaUiThread());
 
-        APZCTreeManager::SetLongTapEnabled(aIsLongpressEnabled);
+        RefPtr<IAPZCTreeManager> controller = mWindow->mAPZC;
+        if (controller) {
+            controller->SetLongTapEnabled(aIsLongpressEnabled);
+        }
     }
 
     bool HandleScrollEvent(int64_t aTime, int32_t aMetaState,
@@ -511,7 +531,7 @@ public:
             return false;
         }
 
-        RefPtr<APZCTreeManager> controller = mWindow->mAPZC;
+        RefPtr<IAPZCTreeManager> controller = mWindow->mAPZC;
         if (!controller) {
             return false;
         }
@@ -562,13 +582,13 @@ public:
         MouseInput::ButtonType result = MouseInput::NONE;
 
         switch (button) {
-            case widget::sdk::MotionEvent::BUTTON_PRIMARY:
+            case java::sdk::MotionEvent::BUTTON_PRIMARY:
                 result = MouseInput::LEFT_BUTTON;
                 break;
-            case widget::sdk::MotionEvent::BUTTON_SECONDARY:
+            case java::sdk::MotionEvent::BUTTON_SECONDARY:
                 result = MouseInput::RIGHT_BUTTON;
                 break;
-            case widget::sdk::MotionEvent::BUTTON_TERTIARY:
+            case java::sdk::MotionEvent::BUTTON_TERTIARY:
                 result = MouseInput::MIDDLE_BUTTON;
                 break;
             default:
@@ -581,19 +601,19 @@ public:
     static int16_t ConvertButtons(int buttons) {
         int16_t result = 0;
 
-        if (buttons & widget::sdk::MotionEvent::BUTTON_PRIMARY) {
+        if (buttons & java::sdk::MotionEvent::BUTTON_PRIMARY) {
             result |= WidgetMouseEventBase::eLeftButtonFlag;
         }
-        if (buttons & widget::sdk::MotionEvent::BUTTON_SECONDARY) {
+        if (buttons & java::sdk::MotionEvent::BUTTON_SECONDARY) {
             result |= WidgetMouseEventBase::eRightButtonFlag;
         }
-        if (buttons & widget::sdk::MotionEvent::BUTTON_TERTIARY) {
+        if (buttons & java::sdk::MotionEvent::BUTTON_TERTIARY) {
             result |= WidgetMouseEventBase::eMiddleButtonFlag;
         }
-        if (buttons & widget::sdk::MotionEvent::BUTTON_BACK) {
+        if (buttons & java::sdk::MotionEvent::BUTTON_BACK) {
             result |= WidgetMouseEventBase::e4thButtonFlag;
         }
-        if (buttons & widget::sdk::MotionEvent::BUTTON_FORWARD) {
+        if (buttons & java::sdk::MotionEvent::BUTTON_FORWARD) {
             result |= WidgetMouseEventBase::e5thButtonFlag;
         }
 
@@ -611,7 +631,7 @@ public:
             return false;
         }
 
-        RefPtr<APZCTreeManager> controller = mWindow->mAPZC;
+        RefPtr<IAPZCTreeManager> controller = mWindow->mAPZC;
         if (!controller) {
             return false;
         }
@@ -704,7 +724,7 @@ public:
             return false;
         }
 
-        RefPtr<APZCTreeManager> controller = mWindow->mAPZC;
+        RefPtr<IAPZCTreeManager> controller = mWindow->mAPZC;
         if (!controller) {
             return false;
         }
@@ -826,7 +846,7 @@ public:
 
     void HandleMotionEventVelocity(int64_t aTime, float aSpeedY)
     {
-        RefPtr<APZCTreeManager> controller = mWindow->mAPZC;
+        RefPtr<IAPZCTreeManager> controller = mWindow->mAPZC;
         if (controller) {
             controller->ProcessTouchVelocity((uint32_t)aTime, aSpeedY);
         }
@@ -1123,7 +1143,7 @@ nsWindow::GeckoViewSupport::Open(const jni::Class::LocalRef& aCls,
                    js::ProfileEntry::Category::OTHER);
 
     nsCOMPtr<nsIWindowWatcher> ww = do_GetService(NS_WINDOWWATCHER_CONTRACTID);
-    MOZ_ASSERT(ww);
+    MOZ_RELEASE_ASSERT(ww);
 
     nsAdoptingCString url;
     if (aChromeURI) {
@@ -1154,10 +1174,11 @@ nsWindow::GeckoViewSupport::Open(const jni::Class::LocalRef& aCls,
     nsCOMPtr<mozIDOMWindowProxy> domWindow;
     ww->OpenWindow(nullptr, url, nullptr, "chrome,dialog=0,resizable",
                    args, getter_AddRefs(domWindow));
-    MOZ_ASSERT(domWindow);
+    MOZ_RELEASE_ASSERT(domWindow);
 
-    nsCOMPtr<nsIWidget> widget =
-        WidgetUtils::DOMWindowToWidget(nsPIDOMWindowOuter::From(domWindow));
+    nsCOMPtr<nsPIDOMWindowOuter> pdomWindow =
+            nsPIDOMWindowOuter::From(domWindow);
+    nsCOMPtr<nsIWidget> widget = WidgetUtils::DOMWindowToWidget(pdomWindow);
     MOZ_ASSERT(widget);
 
     const auto window = static_cast<nsWindow*>(widget.get());
@@ -1165,6 +1186,8 @@ nsWindow::GeckoViewSupport::Open(const jni::Class::LocalRef& aCls,
     // Attach a new GeckoView support object to the new window.
     window->mGeckoViewSupport  = mozilla::MakeUnique<GeckoViewSupport>(
             window, GeckoView::Window::LocalRef(aCls.Env(), aWindow), aView);
+
+    window->mGeckoViewSupport->mDOMWindow = pdomWindow;
 
     // Attach the GLController to the new window.
     window->mGLControllerSupport = mozilla::MakeUnique<GLControllerSupport>(
@@ -1177,7 +1200,7 @@ nsWindow::GeckoViewSupport::Open(const jni::Class::LocalRef& aCls,
         nsCOMPtr<nsIXULWindow> xulWindow(
                 window->mWidgetListener->GetXULWindow());
         if (xulWindow) {
-            // Out window is not intrinsically sized, so tell nsXULWindow to
+            // Our window is not intrinsically sized, so tell nsXULWindow to
             // not set a size for us.
             xulWindow->SetIntrinsicallySized(false);
         }
@@ -1187,20 +1210,12 @@ nsWindow::GeckoViewSupport::Open(const jni::Class::LocalRef& aCls,
 void
 nsWindow::GeckoViewSupport::Close()
 {
-    nsIWidgetListener* const widgetListener = window.mWidgetListener;
-
-    if (!widgetListener) {
+    if (!mDOMWindow) {
         return;
     }
 
-    nsCOMPtr<nsIXULWindow> xulWindow(widgetListener->GetXULWindow());
-    // GeckoView-created top-level windows should be a XUL window.
-    MOZ_ASSERT(xulWindow);
-
-    nsCOMPtr<nsIBaseWindow> baseWindow(do_QueryInterface(xulWindow));
-    MOZ_ASSERT(baseWindow);
-
-    baseWindow->Destroy();
+    mDOMWindow->ForceClose();
+    mDOMWindow = nullptr;
 }
 
 void
@@ -1208,6 +1223,40 @@ nsWindow::GeckoViewSupport::Reattach(GeckoView::Param aView)
 {
     // Associate our previous GeckoEditable with the new GeckoView.
     mEditable->OnViewChange(aView);
+}
+
+void
+nsWindow::GeckoViewSupport::LoadUri(jni::String::Param aUri, int32_t aFlags)
+{
+    if (!mDOMWindow) {
+        return;
+    }
+
+    nsCOMPtr<nsIURI> uri = nsAppShell::ResolveURI(aUri->ToCString());
+    if (NS_WARN_IF(!uri)) {
+        return;
+    }
+
+    nsCOMPtr<nsIDOMChromeWindow> chromeWin = do_QueryInterface(mDOMWindow);
+    nsCOMPtr<nsIBrowserDOMWindow> browserWin;
+
+    if (NS_WARN_IF(!chromeWin) || NS_WARN_IF(NS_FAILED(
+            chromeWin->GetBrowserDOMWindow(getter_AddRefs(browserWin))))) {
+        return;
+    }
+
+    const int flags = aFlags == GeckoView::LOAD_NEW_TAB ?
+                        nsIBrowserDOMWindow::OPEN_NEWTAB :
+                      aFlags == GeckoView::LOAD_SWITCH_TAB ?
+                        nsIBrowserDOMWindow::OPEN_SWITCHTAB :
+                        nsIBrowserDOMWindow::OPEN_CURRENTWINDOW;
+    nsCOMPtr<mozIDOMWindowProxy> newWin;
+
+    if (NS_FAILED(browserWin->OpenURI(
+            uri, nullptr, flags, nsIBrowserDOMWindow::OPEN_EXTERNAL,
+            getter_AddRefs(newWin)))) {
+        NS_WARNING("Failed to open URI");
+    }
 }
 
 void
@@ -2431,7 +2480,7 @@ ConvertAndroidScanCodeToCodeNameIndex(int scanCode)
 static bool
 IsModifierKey(int32_t keyCode)
 {
-    using mozilla::widget::sdk::KeyEvent;
+    using mozilla::java::sdk::KeyEvent;
     return keyCode == KeyEvent::KEYCODE_ALT_LEFT ||
            keyCode == KeyEvent::KEYCODE_ALT_RIGHT ||
            keyCode == KeyEvent::KEYCODE_SHIFT_LEFT ||
@@ -2445,7 +2494,7 @@ IsModifierKey(int32_t keyCode)
 static Modifiers
 GetModifiers(int32_t metaState)
 {
-    using mozilla::widget::sdk::KeyEvent;
+    using mozilla::java::sdk::KeyEvent;
     return (metaState & KeyEvent::META_ALT_MASK ? MODIFIER_ALT : 0)
         | (metaState & KeyEvent::META_SHIFT_MASK ? MODIFIER_SHIFT : 0)
         | (metaState & KeyEvent::META_CTRL_MASK ? MODIFIER_CONTROL : 0)
@@ -2860,6 +2909,46 @@ nsWindow::GeckoViewSupport::FlushIMEChanges(FlushChangesFlag aFlags)
     }
 }
 
+static jni::ObjectArray::LocalRef
+ConvertRectArrayToJavaRectFArray(JNIEnv* aJNIEnv, const nsTArray<LayoutDeviceIntRect>& aRects, const LayoutDeviceIntPoint& aOffset, const CSSToLayoutDeviceScale aScale)
+{
+    size_t length = aRects.Length();
+    jobjectArray rects = aJNIEnv->NewObjectArray(length, sdk::RectF::Context().ClassRef(), nullptr);
+    auto rectsRef = jni::ObjectArray::LocalRef::Adopt(aJNIEnv, rects);
+    for (size_t i = 0; i < length; i++) {
+        sdk::RectF::LocalRef rect(aJNIEnv);
+        LayoutDeviceIntRect tmp = aRects[i] + aOffset;
+        sdk::RectF::New(tmp.x / aScale.scale, tmp.y / aScale.scale,
+                        (tmp.x + tmp.width) / aScale.scale,
+                        (tmp.y + tmp.height) / aScale.scale,
+                        &rect);
+        rectsRef->SetElement(i, rect);
+    }
+    return rectsRef;
+}
+
+void
+nsWindow::GeckoViewSupport::UpdateCompositionRects()
+{
+    const auto composition(window.GetIMEComposition());
+    if (NS_WARN_IF(!composition)) {
+        return;
+    }
+
+    uint32_t offset = composition->NativeOffsetOfStartComposition();
+    WidgetQueryContentEvent textRects(true, eQueryTextRectArray, &window);
+    textRects.InitForQueryTextRectArray(offset, composition->String().Length());
+    window.DispatchEvent(&textRects);
+
+    auto rects =
+        ConvertRectArrayToJavaRectFArray(jni::GetGeckoThreadEnv(),
+                                         textRects.mReply.mRectArray,
+                                         window.WidgetToScreenOffset(),
+                                         window.GetDefaultScale());
+
+    mEditable->UpdateCompositionRects(rects);
+}
+
 void
 nsWindow::GeckoViewSupport::AsyncNotifyIME(int32_t aNotification)
 {
@@ -2911,6 +3000,9 @@ nsWindow::GeckoViewSupport::NotifyIME(const IMENotification& aIMENotification)
 
         case NOTIFY_IME_OF_FOCUS: {
             ALOGIME("IME: NOTIFY_IME_OF_FOCUS");
+            // IME will call requestCursorUpdates after getting context.
+            // So reset cursor update mode before getting context.
+            mIMEMonitorCursor = false;
             mEditable->NotifyIME(GeckoEditableListener::NOTIFY_IME_OF_FOCUS);
             return true;
         }
@@ -2945,6 +3037,16 @@ nsWindow::GeckoViewSupport::NotifyIME(const IMENotification& aIMENotification)
             PostFlushIMEChanges();
             mIMESelectionChanged = true;
             AddIMETextChange(IMETextChange(aIMENotification));
+            return true;
+        }
+
+        case NOTIFY_IME_OF_COMPOSITION_EVENT_HANDLED: {
+            ALOGIME("IME: NOTIFY_IME_OF_COMPOSITION_EVENT_HANDLED");
+
+            // Hardware keyboard support requires each string rect.
+            if (AndroidBridge::Bridge() && AndroidBridge::Bridge()->GetAPIVersion() >= 21 && mIMEMonitorCursor) {
+                UpdateCompositionRects();
+            }
             return true;
         }
 
@@ -3299,6 +3401,17 @@ nsWindow::GeckoViewSupport::OnImeUpdateComposition(int32_t aStart, int32_t aEnd)
     if (window.GetIMEComposition()) {
         window.DispatchEvent(&event);
     }
+}
+
+void
+nsWindow::GeckoViewSupport::OnImeRequestCursorUpdates(int aRequestMode)
+{
+    if (aRequestMode == IME_MONITOR_CURSOR_ONE_SHOT) {
+        UpdateCompositionRects();
+        return;
+    }
+
+    mIMEMonitorCursor = (aRequestMode == IME_MONITOR_CURSOR_START_MONITOR);
 }
 
 void

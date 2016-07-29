@@ -334,10 +334,8 @@ class BaseContext {
    *     belonging to the target scope. Otherwise, undefined.
    */
   wrapPromise(promise, callback = null) {
-    // Note: `promise instanceof this.cloneScope.Promise` returns true
-    // here even for promises that do not belong to the content scope.
     let runSafe = this.runSafe.bind(this);
-    if (promise.constructor === this.cloneScope.Promise) {
+    if (promise instanceof this.cloneScope.Promise) {
       runSafe = this.runSafeWithoutClone.bind(this);
     }
 
@@ -539,6 +537,75 @@ let IconDetails = {
     return canvas.toDataURL("image/png");
   },
 };
+
+const LISTENERS = Symbol("listeners");
+
+class EventEmitter {
+  constructor() {
+    this[LISTENERS] = new Map();
+  }
+
+  /**
+   * Adds the given function as a listener for the given event.
+   *
+   * The listener function may optionally return a Promise which
+   * resolves when it has completed all operations which event
+   * dispatchers may need to block on.
+   *
+   * @param {string} event
+   *       The name of the event to listen for.
+   * @param {function(string, ...any)} listener
+   *        The listener to call when events are emitted.
+   */
+  on(event, listener) {
+    if (!this[LISTENERS].has(event)) {
+      this[LISTENERS].set(event, new Set());
+    }
+
+    this[LISTENERS].get(event).add(listener);
+  }
+
+  /**
+   * Removes the given function as a listener for the given event.
+   *
+   * @param {string} event
+   *       The name of the event to stop listening for.
+   * @param {function(string, ...any)} listener
+   *        The listener function to remove.
+   */
+  off(event, listener) {
+    if (this[LISTENERS].has(event)) {
+      let set = this[LISTENERS].get(event);
+
+      set.delete(listener);
+      if (!set.size) {
+        this[LISTENERS].delete(event);
+      }
+    }
+  }
+
+  /**
+   * Triggers all listeners for the given event, and returns a promise
+   * which resolves when all listeners have been called, and any
+   * promises they have returned have likewise resolved.
+   *
+   * @param {string} event
+   *       The name of the event to emit.
+   * @param {any} args
+   *        Arbitrary arguments to pass to the listener functions, after
+   *        the event name.
+   * @returns {Promise}
+   */
+  emit(event, ...args) {
+    let listeners = this[LISTENERS].get(event) || new Set();
+
+    let promises = Array.from(listeners, listener => {
+      return runSafeSyncWithoutClone(listener, event, ...args);
+    });
+
+    return Promise.all(promises);
+  }
+}
 
 function LocaleData(data) {
   this.defaultLocale = data.defaultLocale;
@@ -950,11 +1017,56 @@ function promiseDocumentReady(doc) {
   });
 }
 
+/**
+ * Returns a Promise which resolves when the given document is fully
+ * loaded.
+ *
+ * @param {Document} doc The document to await the load of.
+ * @returns {Promise<Document>}
+ */
+function promiseDocumentLoaded(doc) {
+  if (doc.readyState == "complete") {
+    return Promise.resolve(doc);
+  }
+
+  return new Promise(resolve => {
+    doc.defaultView.addEventListener("load", function onReady(event) {
+      doc.defaultView.removeEventListener("load", onReady);
+      resolve(doc);
+    });
+  });
+}
+
+/**
+ * Returns a Promise which resolves the given observer topic has been
+ * observed.
+ *
+ * @param {string} topic
+ *        The topic to observe.
+ * @param {function(nsISupports, string)} [test]
+ *        An optional test function which, when called with the
+ *        observer's subject and data, should return true if this is the
+ *        expected notification, false otherwise.
+ * @returns {Promise<object>}
+ */
+function promiseObserved(topic, test = () => true) {
+  return new Promise(resolve => {
+    let observer = (subject, topic, data) => {
+      if (test(subject, data)) {
+        Services.obs.removeObserver(observer, topic);
+        resolve({subject, data});
+      }
+    };
+    Services.obs.addObserver(observer, topic, false);
+  });
+}
+
+
 /*
  * Messaging primitives.
  */
 
-var nextPortId = 1;
+let gNextPortId = 1;
 
 // Abstraction for a Port object in the extension API. Each port has a unique ID.
 function Port(context, messageManager, name, id, sender) {
@@ -1164,7 +1276,8 @@ Messenger.prototype = {
   },
 
   connect(messageManager, name, recipient) {
-    let portId = nextPortId++;
+    // TODO(robwu): Use a process ID instead of the process type. bugzil.la/1287626
+    let portId = `${gNextPortId++}-${Services.appinfo.processType}`;
     let port = new Port(this.context, messageManager, name, portId, null);
     let msg = {name, portId};
     // TODO: Disconnect the port if no response?
@@ -1407,13 +1520,16 @@ this.ExtensionUtils = {
   injectAPI,
   instanceOf,
   normalizeTime,
+  promiseDocumentLoaded,
   promiseDocumentReady,
+  promiseObserved,
   runSafe,
   runSafeSync,
   runSafeSyncWithoutClone,
   runSafeWithoutClone,
   BaseContext,
   DefaultWeakMap,
+  EventEmitter,
   EventManager,
   IconDetails,
   LocaleData,

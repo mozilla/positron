@@ -11,6 +11,7 @@ const OS_HISTOGRAM = "DEVTOOLS_OS_ENUMERATED_PER_USER";
 const OS_IS_64_BITS = "DEVTOOLS_OS_IS_64_BITS_PER_USER";
 const SCREENSIZE_HISTOGRAM = "DEVTOOLS_SCREEN_RESOLUTION_ENUMERATED_PER_USER";
 const HTML_NS = "http://www.w3.org/1999/xhtml";
+const { SourceMapService } = require("./source-map-service");
 
 var {Cc, Ci, Cu} = require("chrome");
 var promise = require("promise");
@@ -92,7 +93,6 @@ const ToolboxButtons = exports.ToolboxButtons = [
   { id: "command-button-responsive" },
   { id: "command-button-paintflashing" },
   { id: "command-button-scratchpad" },
-  { id: "command-button-eyedropper" },
   { id: "command-button-screenshot" },
   { id: "command-button-rulers" },
   { id: "command-button-measure" },
@@ -118,6 +118,9 @@ function Toolbox(target, selectedTool, hostType, hostOptions) {
   this._target = target;
   this._toolPanels = new Map();
   this._telemetry = new Telemetry();
+  if (Services.prefs.getBoolPref("devtools.sourcemap.locations.enabled")) {
+    this._sourceMapService = new SourceMapService(this._target);
+  }
 
   this._initInspector = null;
   this._inspector = null;
@@ -1099,7 +1102,9 @@ Toolbox.prototype = {
     radio.setAttribute("ordinal", toolDefinition.ordinal);
     radio.setAttribute("tooltiptext", toolDefinition.tooltip);
     if (toolDefinition.invertIconForLightTheme) {
-      radio.setAttribute("icon-invertable", "true");
+      radio.setAttribute("icon-invertable", "light-theme");
+    } else if (toolDefinition.invertIconForDarkTheme) {
+      radio.setAttribute("icon-invertable", "dark-theme");
     }
 
     radio.addEventListener("command", () => {
@@ -2031,6 +2036,10 @@ Toolbox.prototype = {
     gDevTools.off("pref-changed", this._prefChanged);
 
     this._lastFocusedElement = null;
+    if (this._sourceMapService) {
+      this._sourceMapService.destroy();
+      this._sourceMapService = null;
+    }
 
     if (this.webconsolePanel) {
       this._saveSplitConsoleHeight();

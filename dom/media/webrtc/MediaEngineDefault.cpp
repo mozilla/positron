@@ -19,7 +19,6 @@
 #include "nsIPrefBranch.h"
 
 #ifdef MOZ_WIDGET_ANDROID
-#include "AndroidBridge.h"
 #include "nsISupportsUtils.h"
 #endif
 
@@ -59,7 +58,7 @@ MediaEngineDefaultVideoSource::~MediaEngineDefaultVideoSource()
 void
 MediaEngineDefaultVideoSource::GetName(nsAString& aName) const
 {
-  aName.AssignLiteral(MOZ_UTF16("Default Video Device"));
+  aName.AssignLiteral(u"Default Video Device");
   return;
 }
 
@@ -387,7 +386,7 @@ MediaEngineDefaultAudioSource::~MediaEngineDefaultAudioSource()
 void
 MediaEngineDefaultAudioSource::GetName(nsAString& aName) const
 {
-  aName.AssignLiteral(MOZ_UTF16("Default Audio Device"));
+  aName.AssignLiteral(u"Default Audio Device");
   return;
 }
 

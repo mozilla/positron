@@ -99,7 +99,7 @@ GfxInfo::GetCleartypeParameters(nsAString & aCleartypeParams)
       {
         outStr.AppendPrintf("Pixel Structure: %S ",
                             (params.pixelStructure == PIXEL_STRUCT_RGB
-                            ? MOZ_UTF16("RGB") : MOZ_UTF16("BGR")));
+                            ? u"RGB" : u"BGR"));
       } else {
         outStr.AppendPrintf("Pixel Structure: %d ", params.pixelStructure);
       }
@@ -116,7 +116,7 @@ GfxInfo::GetCleartypeParameters(nsAString & aCleartypeParams)
     }
 
     if (displayNames) {
-      outStr.Append(MOZ_UTF16("] "));
+      outStr.Append(u"] ");
     }
   }
 
@@ -524,11 +524,11 @@ GfxInfo::Init()
     // by the registry was not the version of the DLL.
     bool is64bitApp = sizeof(void*) == 8;
     const char16_t *dllFileName = is64bitApp
-                                 ? MOZ_UTF16("igd10umd64.dll")
-                                 : MOZ_UTF16("igd10umd32.dll"),
+                                 ? u"igd10umd64.dll"
+                                 : u"igd10umd32.dll",
                     *dllFileName2 = is64bitApp
-                                 ? MOZ_UTF16("igd10iumd64.dll")
-                                 : MOZ_UTF16("igd10iumd32.dll");
+                                 ? u"igd10iumd64.dll"
+                                 : u"igd10iumd32.dll";
     nsString dllVersion, dllVersion2;
     gfxWindowsPlatform::GetDLLVersion((char16_t*)dllFileName, dllVersion);
     gfxWindowsPlatform::GetDLLVersion((char16_t*)dllFileName2, dllVersion2);
@@ -907,12 +907,6 @@ GfxInfo::GetGfxDriverInfo()
       (nsAString&) GfxDriverInfo::GetDeviceVendor(VendorAMD), GfxDriverInfo::allDevices,
       GfxDriverInfo::allFeatures, nsIGfxInfo::FEATURE_BLOCKED_DRIVER_VERSION,
       DRIVER_LESS_THAN, V(8,56,1,15), "FEATURE_FAILURE_AMD2", "8.56.1.15" );
-
-    // Bug 1277526
-    APPEND_TO_DRIVER_BLOCKLIST2(OperatingSystem::Windows7,
-      (nsAString&) GfxDriverInfo::GetDeviceVendor(VendorATI), GfxDriverInfo::allDevices,
-      GfxDriverInfo::allFeatures, nsIGfxInfo::FEATURE_BLOCKED_DRIVER_VERSION,
-      DRIVER_EQUAL, V(8,850,0,0), "FEATURE_FAILURE_BUG_1277526");
 
     // Bug 1099252
     APPEND_TO_DRIVER_BLOCKLIST2(OperatingSystem::Windows7,

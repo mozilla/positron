@@ -149,6 +149,11 @@ static constexpr uint32_t NumFloatArgRegs = 8;
 static constexpr FloatRegister FloatArgRegs[NumFloatArgRegs] = { xmm0, xmm1, xmm2, xmm3, xmm4, xmm5, xmm6, xmm7 };
 #endif
 
+// TLS pointer argument register for WebAssembly functions. This must not alias
+// any other register used for passing function arguments or return values.
+// Preserved by WebAssembly functions.
+static constexpr Register WasmTlsReg = r14;
+
 // Registers used in the GenerateFFIIonExit Enable Activation block.
 static constexpr Register AsmJSIonExitRegCallee = r10;
 static constexpr Register AsmJSIonExitRegE0 = rax;
@@ -825,13 +830,12 @@ class Assembler : public AssemblerX86Shared
         return CodeOffset(masm.leaq_rip(dest.encoding()).offset());
     }
 
-    void loadWasmActivation(Register dest) {
+    void loadWasmGlobalPtr(uint32_t globalDataOffset, Register dest) {
         CodeOffset label = loadRipRelativeInt64(dest);
-        append(AsmJSGlobalAccess(label, wasm::ActivationGlobalDataOffset));
+        append(wasm::GlobalAccess(label, globalDataOffset));
     }
     void loadAsmJSHeapRegisterFromGlobalData() {
-        CodeOffset label = loadRipRelativeInt64(HeapReg);
-        append(AsmJSGlobalAccess(label, wasm::HeapGlobalDataOffset));
+        loadWasmGlobalPtr(wasm::HeapGlobalDataOffset, HeapReg);
     }
 
     void cmpq(Register rhs, Register lhs) {

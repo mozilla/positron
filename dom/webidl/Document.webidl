@@ -14,6 +14,11 @@ interface nsILoadGroup;
 
 enum VisibilityState { "hidden", "visible", "prerender" };
 
+/* https://dom.spec.whatwg.org/#dictdef-elementcreationoptions */
+dictionary ElementCreationOptions {
+  DOMString is;
+};
+
 /* http://dom.spec.whatwg.org/#interface-document */
 [Constructor]
 interface Document : Node {
@@ -48,9 +53,9 @@ interface Document : Node {
   Element? getElementById(DOMString elementId);
 
   [NewObject, Throws]
-  Element createElement(DOMString localName);
+  Element createElement(DOMString localName, optional ElementCreationOptions options);
   [NewObject, Throws]
-  Element createElementNS(DOMString? namespace, DOMString qualifiedName);
+  Element createElementNS(DOMString? namespace, DOMString qualifiedName, optional ElementCreationOptions options);
   [NewObject]
   DocumentFragment createDocumentFragment();
   [NewObject]
@@ -256,16 +261,9 @@ partial interface Document {
 
 //http://dvcs.w3.org/hg/webcomponents/raw-file/tip/spec/custom/index.html#dfn-document-register
 partial interface Document {
-    [Throws, Func="nsDocument::IsWebComponentsEnabled"]
+    // this is deprecated from CustomElements v0
+    [Throws, Func="CustomElementsRegistry::IsCustomElementsEnabled"]
     object registerElement(DOMString name, optional ElementRegistrationOptions options);
-};
-
-//http://dvcs.w3.org/hg/webcomponents/raw-file/tip/spec/custom/index.html#dfn-document-register
-partial interface Document {
-    [NewObject, Throws]
-    Element createElement(DOMString localName, DOMString? typeExtension);
-    [NewObject, Throws]
-    Element createElementNS(DOMString? namespace, DOMString qualifiedName, DOMString? typeExtension);
 };
 
 // http://dvcs.w3.org/hg/webperf/raw-file/tip/specs/PageVisibility/Overview.html#sec-document-interface

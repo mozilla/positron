@@ -99,6 +99,7 @@ devtools/client/shared/developer-toolbar.js
 devtools/client/shared/components/test/**
 devtools/client/shared/redux/middleware/test/**
 devtools/client/shared/test/**
+!devtools/client/shared/test/test-actor-registry.js
 devtools/client/shared/widgets/*.jsm
 devtools/client/sourceeditor/**
 devtools/client/webaudioeditor/**
@@ -112,6 +113,8 @@ devtools/server/**
 !devtools/server/child.js
 !devtools/server/css-logic.js
 !devtools/server/main.js
+!devtools/server/actors/inspector.js
+!devtools/server/actors/highlighters/eye-dropper.js
 !devtools/server/actors/webbrowser.js
 !devtools/server/actors/styles.js
 !devtools/server/actors/string.js

@@ -10,7 +10,7 @@
 #include "mozilla/jni/Refs.h"
 
 namespace mozilla {
-namespace widget {
+namespace java {
 
 class ANRReporter : public mozilla::jni::ObjectBase<ANRReporter, jobject>
 {
@@ -1781,6 +1781,20 @@ public:
                 mozilla::jni::ExceptionMode::ABORT;
     };
 
+    struct OnImeRequestCursorUpdates_t {
+        typedef GeckoEditable Owner;
+        typedef void ReturnType;
+        typedef void SetterType;
+        typedef mozilla::jni::Args<
+                int32_t> Args;
+        static constexpr char name[] = "onImeRequestCursorUpdates";
+        static constexpr char signature[] =
+                "(I)V";
+        static const bool isStatic = false;
+        static const mozilla::jni::ExceptionMode exceptionMode =
+                mozilla::jni::ExceptionMode::ABORT;
+    };
+
     struct OnImeSynchronize_t {
         typedef GeckoEditable Owner;
         typedef void ReturnType;
@@ -1885,6 +1899,22 @@ public:
     };
 
     auto OnViewChange(mozilla::jni::Object::Param) const -> void;
+
+    struct UpdateCompositionRects_t {
+        typedef GeckoEditable Owner;
+        typedef void ReturnType;
+        typedef void SetterType;
+        typedef mozilla::jni::Args<
+                mozilla::jni::ObjectArray::Param> Args;
+        static constexpr char name[] = "updateCompositionRects";
+        static constexpr char signature[] =
+                "([Landroid/graphics/RectF;)V";
+        static const bool isStatic = false;
+        static const mozilla::jni::ExceptionMode exceptionMode =
+                mozilla::jni::ExceptionMode::ABORT;
+    };
+
+    auto UpdateCompositionRects(mozilla::jni::ObjectArray::Param) const -> void;
 
     static const bool isMultithreaded = false;
 
@@ -2048,6 +2078,76 @@ public:
     static auto UnpauseJavaProfiling() -> void;
 
     static const bool isMultithreaded = true;
+
+    template<class Impl> class Natives;
+};
+
+class GeckoNetworkManager : public mozilla::jni::ObjectBase<GeckoNetworkManager, jobject>
+{
+public:
+    static const char name[];
+
+    explicit GeckoNetworkManager(const Context& ctx) : ObjectBase<GeckoNetworkManager, jobject>(ctx) {}
+
+    struct OnConnectionChanged_t {
+        typedef GeckoNetworkManager Owner;
+        typedef void ReturnType;
+        typedef void SetterType;
+        typedef mozilla::jni::Args<
+                int32_t,
+                mozilla::jni::String::Param,
+                bool,
+                int32_t> Args;
+        static constexpr char name[] = "onConnectionChanged";
+        static constexpr char signature[] =
+                "(ILjava/lang/String;ZI)V";
+        static const bool isStatic = true;
+        static const mozilla::jni::ExceptionMode exceptionMode =
+                mozilla::jni::ExceptionMode::ABORT;
+    };
+
+    struct OnStatusChanged_t {
+        typedef GeckoNetworkManager Owner;
+        typedef void ReturnType;
+        typedef void SetterType;
+        typedef mozilla::jni::Args<
+                mozilla::jni::String::Param> Args;
+        static constexpr char name[] = "onStatusChanged";
+        static constexpr char signature[] =
+                "(Ljava/lang/String;)V";
+        static const bool isStatic = true;
+        static const mozilla::jni::ExceptionMode exceptionMode =
+                mozilla::jni::ExceptionMode::ABORT;
+    };
+
+    static const bool isMultithreaded = false;
+
+    template<class Impl> class Natives;
+};
+
+class GeckoScreenOrientation : public mozilla::jni::ObjectBase<GeckoScreenOrientation, jobject>
+{
+public:
+    static const char name[];
+
+    explicit GeckoScreenOrientation(const Context& ctx) : ObjectBase<GeckoScreenOrientation, jobject>(ctx) {}
+
+    struct OnOrientationChange_t {
+        typedef GeckoScreenOrientation Owner;
+        typedef void ReturnType;
+        typedef void SetterType;
+        typedef mozilla::jni::Args<
+                int16_t,
+                int16_t> Args;
+        static constexpr char name[] = "onOrientationChange";
+        static constexpr char signature[] =
+                "(SS)V";
+        static const bool isStatic = true;
+        static const mozilla::jni::ExceptionMode exceptionMode =
+                mozilla::jni::ExceptionMode::ABORT;
+    };
+
+    static const bool isMultithreaded = false;
 
     template<class Impl> class Natives;
 };
@@ -2620,6 +2720,12 @@ public:
 
     class Window;
 
+    static const int32_t LOAD_DEFAULT = 0;
+
+    static const int32_t LOAD_NEW_TAB = 1;
+
+    static const int32_t LOAD_SWITCH_TAB = 2;
+
     static const bool isMultithreaded = false;
 
 };
@@ -2667,6 +2773,21 @@ public:
         static constexpr char name[] = "disposeNative";
         static constexpr char signature[] =
                 "()V";
+        static const bool isStatic = false;
+        static const mozilla::jni::ExceptionMode exceptionMode =
+                mozilla::jni::ExceptionMode::ABORT;
+    };
+
+    struct LoadUri_t {
+        typedef Window Owner;
+        typedef void ReturnType;
+        typedef void SetterType;
+        typedef mozilla::jni::Args<
+                mozilla::jni::String::Param,
+                int32_t> Args;
+        static constexpr char name[] = "loadUri";
+        static constexpr char signature[] =
+                "(Ljava/lang/String;I)V";
         static const bool isStatic = false;
         static const mozilla::jni::ExceptionMode exceptionMode =
                 mozilla::jni::ExceptionMode::ABORT;
@@ -2864,7 +2985,7 @@ public:
         typedef void ReturnType;
         typedef void SetterType;
         typedef mozilla::jni::Args<
-                mozilla::jni::Object::Param,
+                mozilla::jni::ByteBuffer::Param,
                 int32_t,
                 bool,
                 bool> Args;
@@ -2876,10 +2997,28 @@ public:
                 mozilla::jni::ExceptionMode::ABORT;
     };
 
-    static auto SendThumbnail(mozilla::jni::Object::Param, int32_t, bool, bool) -> void;
+    static auto SendThumbnail(mozilla::jni::ByteBuffer::Param, int32_t, bool, bool) -> void;
+
+    struct RequestThumbnail_t {
+        typedef ThumbnailHelper Owner;
+        typedef void ReturnType;
+        typedef void SetterType;
+        typedef mozilla::jni::Args<
+                mozilla::jni::ByteBuffer::Param,
+                int32_t,
+                int32_t,
+                int32_t> Args;
+        static constexpr char name[] = "requestThumbnail";
+        static constexpr char signature[] =
+                "(Ljava/nio/ByteBuffer;III)V";
+        static const bool isStatic = true;
+        static const mozilla::jni::ExceptionMode exceptionMode =
+                mozilla::jni::ExceptionMode::ABORT;
+    };
 
     static const bool isMultithreaded = false;
 
+    template<class Impl> class Natives;
 };
 
 class Distribution : public mozilla::jni::ObjectBase<Distribution, jobject>
@@ -3525,7 +3664,7 @@ public:
         typedef void ReturnType;
         typedef void SetterType;
         typedef mozilla::jni::Args<
-                mozilla::jni::Object::Param> Args;
+                mozilla::jni::ByteBuffer::Param> Args;
         static constexpr char name[] = "updateZoomedView";
         static constexpr char signature[] =
                 "(Ljava/nio/ByteBuffer;)V";
@@ -3534,7 +3673,7 @@ public:
                 mozilla::jni::ExceptionMode::ABORT;
     };
 
-    static auto updateZoomedView(mozilla::jni::Object::Param) -> void;
+    static auto updateZoomedView(mozilla::jni::ByteBuffer::Param) -> void;
 
     static const bool isMultithreaded = true;
 

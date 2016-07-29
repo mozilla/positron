@@ -368,7 +368,8 @@ case "$target" in
 
         dnl Ensure that mt.exe is 'Microsoft (R) Manifest Tool',
         dnl not something else like "magnetic tape manipulation utility".
-        MSMT_TOOL=`${MT-mt} 2>&1|grep 'Microsoft (R) Manifest Tool'`
+        MT=${MT-mt.exe}
+        MSMT_TOOL=`${MT} 2>&1|grep 'Microsoft (R) Manifest Tool'`
         if test -z "$MSMT_TOOL"; then
           AC_MSG_ERROR([Microsoft (R) Manifest Tool must be in your \$PATH.])
         fi
@@ -383,6 +384,7 @@ case "$target" in
 
         MSMANIFEST_TOOL=1
         unset MSMT_TOOL
+        AC_SUBST(MT)
 
         # Check linker version
         _LD_FULL_VERSION=`"${LD}" -v 2>&1 | sed -nre "$_MSVC_VER_FILTER"`
@@ -1569,7 +1571,7 @@ dnl Checks for header files.
 dnl ========================================================
 AC_HEADER_DIRENT
 case "$target_os" in
-freebsd*|openbsd*)
+bitrig*|dragonfly*|freebsd*|openbsd*)
 # for stuff like -lXshm
     CPPFLAGS="${CPPFLAGS} ${X_CFLAGS}"
     ;;
@@ -4515,8 +4517,9 @@ AC_SUBST(MOZ_NO_EV_CERTS)
 dnl ========================================================
 dnl = Sandboxing support
 dnl ========================================================
-if test -n "$MOZ_TSAN"; then
+if test -n "$MOZ_TSAN" -o -n "$MOZ_ASAN"; then
     # Bug 1182565: TSan conflicts with sandboxing on Linux.
+    # Bug 1287971: LSan also conflicts with sandboxing on Linux.
     case $OS_TARGET in
     Linux|Android)
         MOZ_SANDBOX=
@@ -4537,7 +4540,7 @@ if test -n "$gonkdir"; then
 fi
 
 case "$OS_TARGET:$NIGHTLY_BUILD" in
-WINNT:1)
+WINNT:*)
     MOZ_CONTENT_SANDBOX=$MOZ_SANDBOX
     ;;
 Darwin:1)

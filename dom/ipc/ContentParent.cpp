@@ -275,8 +275,6 @@ using namespace mozilla::system;
 #include "nsThread.h"
 #endif
 
-#include "VRManagerParent.h"            // for VRManagerParent
-
 // For VP9Benchmark::sBenchmarkFpsPref
 #include "Benchmark.h"
 
@@ -2449,8 +2447,11 @@ ContentParent::InitInternal(ProcessPriority aInitialPriority,
       }
 
       {
-        DebugOnly<bool> opened = gfx::PVRManager::Open(this);
+        Endpoint<PVRManagerChild> endpoint;
+        DebugOnly<bool> opened =
+          gpm->CreateContentVRManager(OtherPid(), &endpoint);
         MOZ_ASSERT(opened);
+        Unused << SendInitVRManager(Move(endpoint));
       }
     }
 #ifdef MOZ_WIDGET_GONK
@@ -2837,7 +2838,7 @@ ContentParent::RecvGetShowPasswordSetting(bool* showPassword)
 #ifdef MOZ_WIDGET_ANDROID
   NS_ASSERTION(AndroidBridge::Bridge() != nullptr, "AndroidBridge is not available");
 
-  *showPassword = mozilla::widget::GeckoAppShell::GetShowPasswordSetting();
+  *showPassword = java::GeckoAppShell::GetShowPasswordSetting();
 #endif
   return true;
 }
@@ -3241,13 +3242,6 @@ ContentParent::DeallocPAPZParent(PAPZParent* aActor)
   return true;
 }
 
-gfx::PVRManagerParent*
-ContentParent::AllocPVRManagerParent(Transport* aTransport,
-                                     ProcessId aOtherProcess)
-{
-  return gfx::VRManagerParent::CreateCrossProcess(aTransport, aOtherProcess);
-}
-
 PBackgroundParent*
 ContentParent::AllocPBackgroundParent(Transport* aTransport,
                                       ProcessId aOtherProcess)
@@ -3341,6 +3335,7 @@ ContentParent::RecvGetXPCOMProcessAttributes(bool* aIsOffline,
     ErrorResult rv;
     aInitialData->Write(jsapi.cx(), init, rv);
     if (NS_WARN_IF(rv.Failed())) {
+      rv.SuppressException();
       return false;
     }
   }
@@ -4927,9 +4922,9 @@ ContentParent::RecvBackUpXResources(const FileDescriptor& aXSocketFd)
 #else
   MOZ_ASSERT(0 > mChildXSocketFdDup.get(),
              "Already backed up X resources??");
-  mChildXSocketFdDup.forget();
   if (aXSocketFd.IsValid()) {
-    mChildXSocketFdDup.reset(aXSocketFd.PlatformHandle());
+    auto rawFD = aXSocketFd.ClonePlatformHandle();
+    mChildXSocketFdDup.reset(rawFD.release());
   }
 #endif
   return true;
@@ -5288,7 +5283,6 @@ ContentParent::RecvCreateWindow(PBrowserParent* aThisTab,
                                 const bool& aCalledFromJS,
                                 const bool& aPositionSpecified,
                                 const bool& aSizeSpecified,
-                                const nsString& aName,
                                 const nsCString& aFeatures,
                                 const nsCString& aBaseURI,
                                 const DocShellOriginAttributes& aOpenerOriginAttributes,
@@ -5302,6 +5296,7 @@ ContentParent::RecvCreateWindow(PBrowserParent* aThisTab,
 {
   // We always expect to open a new window here. If we don't, it's an error.
   *aWindowIsNew = true;
+  *aResult = NS_OK;
 
   // The content process should never be in charge of computing whether or
   // not a window should be private or remote - the parent will do that.
@@ -5321,13 +5316,6 @@ ContentParent::RecvCreateWindow(PBrowserParent* aThisTab,
 
   if (NS_WARN_IF(thisTabParent && thisTabParent->IsMozBrowserOrApp())) {
     return false;
-  }
-
-  nsCOMPtr<nsPIWindowWatcher> pwwatch =
-    do_GetService(NS_WINDOWWATCHER_CONTRACTID, aResult);
-
-  if (NS_WARN_IF(NS_FAILED(*aResult))) {
-    return true;
   }
 
   TabParent* newTab = TabParent::GetFrom(aNewTab);
@@ -5423,43 +5411,22 @@ ContentParent::RecvCreateWindow(PBrowserParent* aThisTab,
   nsCOMPtr<mozIDOMWindowProxy> window;
   TabParent::AutoUseNewTab aunt(newTab, aWindowIsNew, aURLToLoad);
 
-  const char* features = aFeatures.IsVoid() ? nullptr : aFeatures.get();
+  nsCOMPtr<nsPIWindowWatcher> pwwatch =
+    do_GetService(NS_WINDOWWATCHER_CONTRACTID, aResult);
 
-  *aResult = pwwatch->OpenWindow2(parent, nullptr,
-                                  aName.IsVoid() ?
-                                    nullptr :
-                                    NS_ConvertUTF16toUTF8(aName).get(),
-                                  features, aCalledFromJS,
-                                  false, false, thisTabParent, nullptr,
-                                  aFullZoom, 1, getter_AddRefs(window));
-
-  if (NS_WARN_IF(!window)) {
-    return true;
-  }
-
-  *aResult = NS_ERROR_FAILURE;
-  auto* pwindow = nsPIDOMWindowOuter::From(window);
-  nsCOMPtr<nsIDocShell> windowDocShell = pwindow->GetDocShell();
-  if (NS_WARN_IF(!windowDocShell)) {
-    return true;
-  }
-
-  nsCOMPtr<nsIDocShellTreeOwner> treeOwner;
-  windowDocShell->GetTreeOwner(getter_AddRefs(treeOwner));
-
-  nsCOMPtr<nsIXULWindow> xulWin = do_GetInterface(treeOwner);
-  if (NS_WARN_IF(!xulWin)) {
-    return true;
-  }
-
-  nsCOMPtr<nsIXULBrowserWindow> xulBrowserWin;
-  xulWin->GetXULBrowserWindow(getter_AddRefs(xulBrowserWin));
-  if (NS_WARN_IF(!xulBrowserWin)) {
+  if (NS_WARN_IF(NS_FAILED(*aResult))) {
     return true;
   }
 
   nsCOMPtr<nsITabParent> newRemoteTab;
-  *aResult = xulBrowserWin->ForceInitialBrowserRemote(getter_AddRefs(newRemoteTab));
+  if (!thisTabParent) {
+    // Because we weren't passed an opener tab, the content process has asked us
+    // to open a new window that is unrelated to a pre-existing tab.
+    *aResult = pwwatch->OpenWindowWithoutParent(getter_AddRefs(newRemoteTab));
+  } else {
+    *aResult = pwwatch->OpenWindowWithTabParent(thisTabParent, aFeatures, aCalledFromJS,
+                                                aFullZoom, getter_AddRefs(newRemoteTab));
+  }
 
   if (NS_WARN_IF(NS_FAILED(*aResult))) {
     return true;
@@ -5755,8 +5722,8 @@ ContentParent::RecvStoreAndBroadcastBlobURLRegistration(const nsCString& aURI,
     return false;
   }
 
-  if (NS_SUCCEEDED(nsHostObjectProtocolHandler::AddDataEntry(aURI, blobImpl,
-                                                             aPrincipal))) {
+  if (NS_SUCCEEDED(nsHostObjectProtocolHandler::AddDataEntry(aURI, aPrincipal,
+                                                             blobImpl))) {
     BroadcastBlobURLRegistration(aURI, blobImpl, aPrincipal, this);
 
     // We want to store this blobURL, so we can unregister it if the child

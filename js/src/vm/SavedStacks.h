@@ -165,11 +165,11 @@ class SavedStacks {
     MOZ_MUST_USE bool init();
     bool initialized() const { return frames.initialized(); }
     MOZ_MUST_USE bool saveCurrentStack(JSContext* cx, MutableHandleSavedFrame frame,
-                                       unsigned maxFrameCount = 0);
+                                       JS::StackCapture&& capture = JS::StackCapture(JS::AllFrames()));
     MOZ_MUST_USE bool copyAsyncStack(JSContext* cx, HandleObject asyncStack,
                                      HandleString asyncCause,
                                      MutableHandleSavedFrame adoptedStack,
-                                     unsigned maxFrameCount = 0);
+                                     uint32_t maxFrameCount = 0);
     void sweep();
     void trace(JSTracer* trc);
     uint32_t count();
@@ -221,11 +221,11 @@ class SavedStacks {
 
     MOZ_MUST_USE bool insertFrames(JSContext* cx, FrameIter& iter,
                                    MutableHandleSavedFrame frame,
-                                   unsigned maxFrameCount = 0);
+                                   JS::StackCapture&& capture);
     MOZ_MUST_USE bool adoptAsyncStack(JSContext* cx, HandleSavedFrame asyncStack,
                                       HandleString asyncCause,
                                       MutableHandleSavedFrame adoptedStack,
-                                      unsigned maxFrameCount);
+                                      uint32_t maxFrameCount);
     SavedFrame* getOrCreateSavedFrame(JSContext* cx, SavedFrame::HandleLookup lookup);
     SavedFrame* createFrameFromLookup(JSContext* cx, SavedFrame::HandleLookup lookup);
 

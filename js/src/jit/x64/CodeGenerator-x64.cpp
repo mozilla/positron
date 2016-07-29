@@ -1173,9 +1173,9 @@ CodeGeneratorX64::visitAsmJSAtomicBinopHeapForEffect(LAsmJSAtomicBinopHeapForEff
 }
 
 void
-CodeGeneratorX64::visitAsmJSLoadGlobalVar(LAsmJSLoadGlobalVar* ins)
+CodeGeneratorX64::visitWasmLoadGlobalVar(LWasmLoadGlobalVar* ins)
 {
-    MAsmJSLoadGlobalVar* mir = ins->mir();
+    MWasmLoadGlobalVar* mir = ins->mir();
 
     MIRType type = mir->type();
     MOZ_ASSERT(IsNumberType(type) || IsSimdType(type));
@@ -1205,16 +1205,16 @@ CodeGeneratorX64::visitAsmJSLoadGlobalVar(LAsmJSLoadGlobalVar* ins)
         label = masm.loadRipRelativeFloat32x4(ToFloatRegister(ins->output()));
         break;
       default:
-        MOZ_CRASH("unexpected type in visitAsmJSLoadGlobalVar");
+        MOZ_CRASH("unexpected type in visitWasmLoadGlobalVar");
     }
 
-    masm.append(AsmJSGlobalAccess(label, mir->globalDataOffset()));
+    masm.append(wasm::GlobalAccess(label, mir->globalDataOffset()));
 }
 
 void
-CodeGeneratorX64::visitAsmJSStoreGlobalVar(LAsmJSStoreGlobalVar* ins)
+CodeGeneratorX64::visitWasmStoreGlobalVar(LWasmStoreGlobalVar* ins)
 {
-    MAsmJSStoreGlobalVar* mir = ins->mir();
+    MWasmStoreGlobalVar* mir = ins->mir();
 
     MIRType type = mir->value()->type();
     MOZ_ASSERT(IsNumberType(type) || IsSimdType(type));
@@ -1240,38 +1240,10 @@ CodeGeneratorX64::visitAsmJSStoreGlobalVar(LAsmJSStoreGlobalVar* ins)
         label = masm.storeRipRelativeFloat32x4(ToFloatRegister(ins->value()));
         break;
       default:
-        MOZ_CRASH("unexpected type in visitAsmJSStoreGlobalVar");
+        MOZ_CRASH("unexpected type in visitWasmStoreGlobalVar");
     }
 
-    masm.append(AsmJSGlobalAccess(label, mir->globalDataOffset()));
-}
-
-void
-CodeGeneratorX64::visitAsmJSLoadFuncPtr(LAsmJSLoadFuncPtr* ins)
-{
-    const MAsmJSLoadFuncPtr* mir = ins->mir();
-
-    Register index = ToRegister(ins->index());
-    Register out = ToRegister(ins->output());
-
-    if (mir->hasLimit()) {
-        masm.branch32(Assembler::Condition::AboveOrEqual, index, Imm32(mir->limit()),
-                      wasm::JumpTarget::OutOfBounds);
-    }
-
-    CodeOffset label = masm.loadRipRelativeInt64(out);
-    masm.append(AsmJSGlobalAccess(label, mir->globalDataOffset()));
-
-    masm.loadPtr(Operand(out, index, ScalePointer, 0), out);
-}
-
-void
-CodeGeneratorX64::visitAsmJSLoadFFIFunc(LAsmJSLoadFFIFunc* ins)
-{
-    MAsmJSLoadFFIFunc* mir = ins->mir();
-
-    CodeOffset label = masm.loadRipRelativeInt64(ToRegister(ins->output()));
-    masm.append(AsmJSGlobalAccess(label, mir->globalDataOffset()));
+    masm.append(wasm::GlobalAccess(label, mir->globalDataOffset()));
 }
 
 void

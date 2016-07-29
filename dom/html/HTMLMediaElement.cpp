@@ -1500,9 +1500,15 @@ nsresult HTMLMediaElement::LoadResource()
   mCORSMode = AttrValueToCORSMode(GetParsedAttr(nsGkAtoms::crossorigin));
 
 #ifdef MOZ_EME
+  bool isBlob = false;
   if (mMediaKeys &&
-      !IsMediaSourceURI(mLoadingSrc) &&
-      Preferences::GetBool("media.eme.mse-only", true)) {
+      Preferences::GetBool("media.eme.mse-only", true) &&
+      // We only want mediaSource URLs, but they are BlobURL, so we have to
+      // check the schema and if they are not MediaStream or real Blob.
+      (NS_FAILED(mLoadingSrc->SchemeIs(BLOBURI_SCHEME, &isBlob)) ||
+       !isBlob ||
+       IsMediaStreamURI(mLoadingSrc) ||
+       IsBlobURI(mLoadingSrc))) {
     return NS_ERROR_DOM_NOT_SUPPORTED_ERR;
   }
 #endif
@@ -3090,11 +3096,51 @@ HTMLMediaElement::ReportTelemetry()
     }
   }
 
-  Telemetry::Accumulate(Telemetry::VIDEO_PLAY_TIME_MS, SECONDS_TO_MS(mPlayTime.Total()));
-  LOG(LogLevel::Debug, ("%p VIDEO_PLAY_TIME_MS = %f", this, mPlayTime.Total()));
+  double playTime = mPlayTime.Total();
+  double hiddenPlayTime = mHiddenPlayTime.Total();
 
-  Telemetry::Accumulate(Telemetry::VIDEO_HIDDEN_PLAY_TIME_MS, SECONDS_TO_MS(mHiddenPlayTime.Total()));
-  LOG(LogLevel::Debug, ("%p VIDEO_HIDDEN_PLAY_TIME_MS = %f", this, mHiddenPlayTime.Total()));
+  Telemetry::Accumulate(Telemetry::VIDEO_PLAY_TIME_MS, SECONDS_TO_MS(playTime));
+  LOG(LogLevel::Debug, ("%p VIDEO_PLAY_TIME_MS = %f", this, playTime));
+
+  Telemetry::Accumulate(Telemetry::VIDEO_HIDDEN_PLAY_TIME_MS, SECONDS_TO_MS(hiddenPlayTime));
+  LOG(LogLevel::Debug, ("%p VIDEO_HIDDEN_PLAY_TIME_MS = %f", this, hiddenPlayTime));
+
+  if (playTime > 0.0 &&
+      mMediaInfo.HasVideo() &&
+      mMediaInfo.mVideo.mImage.height > 0) {
+    // We have actually played some valid video -> Report hidden/total ratio.
+    uint32_t hiddenPercentage = uint32_t(hiddenPlayTime / playTime * 100.0 + 0.5);
+
+    // Keyed by audio+video or video alone, and by a resolution range.
+    nsCString key(mMediaInfo.HasAudio() ? "AV," : "V,");
+    static const struct { int32_t mH; const char* mRes; } sResolutions[] = {
+      {  240, "0<h<=240" },
+      {  480, "240<h<=480" },
+      {  576, "480<h<=576" },
+      {  720, "576<h<=720" },
+      { 1080, "720<h<=1080" },
+      { 2160, "1080<h<=2160" }
+    };
+    const char* resolution = "h>2160";
+    int32_t height = mMediaInfo.mVideo.mImage.height;
+    for (const auto& res : sResolutions) {
+      if (height <= res.mH) {
+        resolution = res.mRes;
+        break;
+      }
+    }
+    key.AppendASCII(resolution);
+
+    Telemetry::Accumulate(Telemetry::VIDEO_HIDDEN_PLAY_TIME_PERCENTAGE,
+                          key,
+                          hiddenPercentage);
+    // Also accumulate all percentages in an "All" key.
+    Telemetry::Accumulate(Telemetry::VIDEO_HIDDEN_PLAY_TIME_PERCENTAGE,
+                          NS_LITERAL_CSTRING("All"),
+                          hiddenPercentage);
+    LOG(LogLevel::Debug, ("%p VIDEO_HIDDEN_PLAY_TIME_PERCENTAGE = %u, keys: '%s' and 'All'",
+                          this, hiddenPercentage, key.get()));
+  }
 }
 
 void HTMLMediaElement::UnbindFromTree(bool aDeep,

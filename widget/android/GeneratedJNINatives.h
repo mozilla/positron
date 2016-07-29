@@ -11,7 +11,7 @@
 #include "mozilla/jni/Natives.h"
 
 namespace mozilla {
-namespace widget {
+namespace java {
 
 template<class Impl>
 class ANRReporter::Natives : public mozilla::jni::NativeImpl<ANRReporter, Impl>
@@ -86,7 +86,7 @@ template<class Impl>
 class GeckoEditable::Natives : public mozilla::jni::NativeImpl<GeckoEditable, Impl>
 {
 public:
-    static const JNINativeMethod methods[7];
+    static const JNINativeMethod methods[8];
 };
 
 template<class Impl>
@@ -107,6 +107,10 @@ const JNINativeMethod GeckoEditable::Natives<Impl>::methods[] = {
     mozilla::jni::MakeNativeMethod<GeckoEditable::OnImeReplaceText_t>(
             mozilla::jni::NativeStub<GeckoEditable::OnImeReplaceText_t, Impl>
             ::template Wrap<&Impl::OnImeReplaceText>),
+
+    mozilla::jni::MakeNativeMethod<GeckoEditable::OnImeRequestCursorUpdates_t>(
+            mozilla::jni::NativeStub<GeckoEditable::OnImeRequestCursorUpdates_t, Impl>
+            ::template Wrap<&Impl::OnImeRequestCursorUpdates>),
 
     mozilla::jni::MakeNativeMethod<GeckoEditable::OnImeSynchronize_t>(
             mozilla::jni::NativeStub<GeckoEditable::OnImeSynchronize_t, Impl>
@@ -134,6 +138,40 @@ const JNINativeMethod GeckoJavaSampler::Natives<Impl>::methods[] = {
     mozilla::jni::MakeNativeMethod<GeckoJavaSampler::GetProfilerTime_t>(
             mozilla::jni::NativeStub<GeckoJavaSampler::GetProfilerTime_t, Impl>
             ::template Wrap<&Impl::GetProfilerTime>)
+};
+
+template<class Impl>
+class GeckoNetworkManager::Natives : public mozilla::jni::NativeImpl<GeckoNetworkManager, Impl>
+{
+public:
+    static const JNINativeMethod methods[2];
+};
+
+template<class Impl>
+const JNINativeMethod GeckoNetworkManager::Natives<Impl>::methods[] = {
+
+    mozilla::jni::MakeNativeMethod<GeckoNetworkManager::OnConnectionChanged_t>(
+            mozilla::jni::NativeStub<GeckoNetworkManager::OnConnectionChanged_t, Impl>
+            ::template Wrap<&Impl::OnConnectionChanged>),
+
+    mozilla::jni::MakeNativeMethod<GeckoNetworkManager::OnStatusChanged_t>(
+            mozilla::jni::NativeStub<GeckoNetworkManager::OnStatusChanged_t, Impl>
+            ::template Wrap<&Impl::OnStatusChanged>)
+};
+
+template<class Impl>
+class GeckoScreenOrientation::Natives : public mozilla::jni::NativeImpl<GeckoScreenOrientation, Impl>
+{
+public:
+    static const JNINativeMethod methods[1];
+};
+
+template<class Impl>
+const JNINativeMethod GeckoScreenOrientation::Natives<Impl>::methods[] = {
+
+    mozilla::jni::MakeNativeMethod<GeckoScreenOrientation::OnOrientationChange_t>(
+            mozilla::jni::NativeStub<GeckoScreenOrientation::OnOrientationChange_t, Impl>
+            ::template Wrap<&Impl::OnOrientationChange>)
 };
 
 template<class Impl>
@@ -238,7 +276,7 @@ template<class Impl>
 class GeckoView::Window::Natives : public mozilla::jni::NativeImpl<Window, Impl>
 {
 public:
-    static const JNINativeMethod methods[4];
+    static const JNINativeMethod methods[5];
 };
 
 template<class Impl>
@@ -251,6 +289,10 @@ const JNINativeMethod GeckoView::Window::Natives<Impl>::methods[] = {
     mozilla::jni::MakeNativeMethod<GeckoView::Window::DisposeNative_t>(
             mozilla::jni::NativeStub<GeckoView::Window::DisposeNative_t, Impl>
             ::template Wrap<&Impl::DisposeNative>),
+
+    mozilla::jni::MakeNativeMethod<GeckoView::Window::LoadUri_t>(
+            mozilla::jni::NativeStub<GeckoView::Window::LoadUri_t, Impl>
+            ::template Wrap<&Impl::LoadUri>),
 
     mozilla::jni::MakeNativeMethod<GeckoView::Window::Open_t>(
             mozilla::jni::NativeStub<GeckoView::Window::Open_t, Impl>
@@ -286,6 +328,21 @@ const JNINativeMethod PrefsHelper::Natives<Impl>::methods[] = {
     mozilla::jni::MakeNativeMethod<PrefsHelper::SetPref_t>(
             mozilla::jni::NativeStub<PrefsHelper::SetPref_t, Impl>
             ::template Wrap<&Impl::SetPref>)
+};
+
+template<class Impl>
+class ThumbnailHelper::Natives : public mozilla::jni::NativeImpl<ThumbnailHelper, Impl>
+{
+public:
+    static const JNINativeMethod methods[1];
+};
+
+template<class Impl>
+const JNINativeMethod ThumbnailHelper::Natives<Impl>::methods[] = {
+
+    mozilla::jni::MakeNativeMethod<ThumbnailHelper::RequestThumbnail_t>(
+            mozilla::jni::NativeStub<ThumbnailHelper::RequestThumbnail_t, Impl>
+            ::template Wrap<&Impl::RequestThumbnail>)
 };
 
 template<class Impl>

@@ -8,7 +8,9 @@
 
 "use strict";
 
+/* eslint-disable mozilla/reject-some-requires */
 const {Cc, Ci} = require("chrome");
+/* eslint-enable mozilla/reject-some-requires */
 
 var Services = require("Services");
 var promise = require("promise");
@@ -20,6 +22,7 @@ var {KeyShortcuts} = require("devtools/client/shared/key-shortcuts");
 var {Task} = require("devtools/shared/task");
 const {initCssProperties} = require("devtools/shared/fronts/css-properties");
 const nodeConstants = require("devtools/shared/dom-node-constants");
+const Telemetry = require("devtools/client/shared/telemetry");
 
 const Menu = require("devtools/client/framework/menu");
 const MenuItem = require("devtools/client/framework/menu-item");
@@ -89,8 +92,11 @@ function InspectorPanel(iframeWindow, toolbox) {
   this.panelWin = iframeWindow;
   this.panelWin.inspector = this;
 
+  this.telemetry = new Telemetry();
+
   this.nodeMenuTriggerInfo = null;
 
+  this._handleRejectionIfNotDestroyed = this._handleRejectionIfNotDestroyed.bind(this);
   this._onBeforeNavigate = this._onBeforeNavigate.bind(this);
   this.onNewRoot = this.onNewRoot.bind(this);
   this._onContextMenu = this._onContextMenu.bind(this);
@@ -98,16 +104,8 @@ function InspectorPanel(iframeWindow, toolbox) {
   this.onNewSelection = this.onNewSelection.bind(this);
   this.onBeforeNewSelection = this.onBeforeNewSelection.bind(this);
   this.onDetached = this.onDetached.bind(this);
-  this.onPaneToggleButtonActivated = this.onPaneToggleButtonActivated.bind(this);
-  this.onPaneToggleButtonPressed = this.onPaneToggleButtonPressed.bind(this);
+  this.onPaneToggleButtonClicked = this.onPaneToggleButtonClicked.bind(this);
   this._onMarkupFrameLoad = this._onMarkupFrameLoad.bind(this);
-
-  let doc = this.panelDoc;
-
-  // Handle 'Add Node' toolbar button.
-  this.addNode = this.addNode.bind(this);
-  this.addNodeButton = doc.getElementById("inspector-element-add-button");
-  this.addNodeButton.addEventListener("click", this.addNode);
 
   this._target.on("will-navigate", this._onBeforeNavigate);
   this._detectingActorFeatures = this._detectActorFeatures();
@@ -164,6 +162,18 @@ InspectorPanel.prototype = {
 
   get canPasteInnerOrAdjacentHTML() {
     return this._target.client.traits.pasteHTML;
+  },
+
+  /**
+   * Handle promise rejections for various asynchronous actions, and only log errors if
+   * the inspector panel still exists.
+   * This is useful to silence useless errors that happen when the inspector is closed
+   * while still initializing (and making protocol requests).
+   */
+  _handleRejectionIfNotDestroyed: function (e) {
+    if (!this._panelDestroyer) {
+      console.error(e);
+    }
   },
 
   /**
@@ -243,6 +253,7 @@ InspectorPanel.prototype = {
 
     this.setupSearchBox();
     this.setupSidebar();
+    this.setupToolbar();
 
     return deferred.promise;
   },
@@ -258,7 +269,7 @@ InspectorPanel.prototype = {
   _getPageStyle: function () {
     return this._toolbox.inspector.getPageStyle().then(pageStyle => {
       this.pageStyle = pageStyle;
-    });
+    }, this._handleRejectionIfNotDestroyed);
   },
 
   /**
@@ -450,22 +461,21 @@ InspectorPanel.prototype = {
       this.sidebar.toggleTab(true, "fontinspector");
     }
 
-    this.setupSidebarToggle();
-    this.setupSidebarWidth();
+    this.setupSidebarSize();
 
     this.sidebar.show(defaultTab);
   },
 
   /**
-   * Sidebar width is currently driven by vbox.inspector-sidebar-container
-   * element, which is located at the left side of the side bar splitter.
-   * It's width is changed by the splitter and stored into preferences.
+   * Sidebar size is currently driven by vbox.inspector-sidebar-container
+   * element, which is located at the left/bottom side of the side bar splitter.
+   * Its size is changed by the splitter and stored into preferences.
    * As soon as bug 1260552 is fixed and new HTML based splitter in place
-   * the width can be driven by div.inspector-sidebar element. This element
-   * represents the ToolSidebar and so, the entire logic related to width
+   * the size can be driven by div.inspector-sidebar element. This element
+   * represents the ToolSidebar and so, the entire logic related to size
    * persistence can be done inside the ToolSidebar.
    */
-  setupSidebarWidth: function () {
+  setupSidebarSize: function () {
     let sidePaneContainer = this.panelDoc.querySelector(
       "#inspector-sidebar-container");
 
@@ -473,34 +483,41 @@ InspectorPanel.prototype = {
       try {
         sidePaneContainer.width = Services.prefs.getIntPref(
           "devtools.toolsidebar-width.inspector");
+        sidePaneContainer.height = Services.prefs.getIntPref(
+          "devtools.toolsidebar-height.inspector");
       } catch (e) {
         // The default width is the min-width set in CSS
         // for #inspector-sidebar-container
+        // Set width and height of the sidebar container. Only one
+        // value is really useful at a time depending on the current
+        // toolbox orientation and having both doesn't break anything.
         sidePaneContainer.width = 450;
+        sidePaneContainer.height = 450;
       }
     });
 
     this.sidebar.on("hide", () => {
       Services.prefs.setIntPref("devtools.toolsidebar-width.inspector",
         sidePaneContainer.width);
+      Services.prefs.setIntPref("devtools.toolsidebar-height.inspector",
+        sidePaneContainer.height);
     });
 
     this.sidebar.on("destroy", () => {
       Services.prefs.setIntPref("devtools.toolsidebar-width.inspector",
         sidePaneContainer.width);
+      Services.prefs.setIntPref("devtools.toolsidebar-height.inspector",
+        sidePaneContainer.height);
     });
   },
 
-  /**
-   * Add the expand/collapse behavior for the sidebar panel.
-   */
-  setupSidebarToggle: function () {
+  setupToolbar: function () {
+    // Setup the sidebar toggle button.
     let SidebarToggle = this.React.createFactory(this.browserRequire(
       "devtools/client/shared/components/sidebar-toggle"));
 
     let sidebarToggle = SidebarToggle({
-      onClick: this.onPaneToggleButtonActivated,
-      onKeyDown: this.onPaneToggleButtonPressed,
+      onClick: this.onPaneToggleButtonClicked,
       collapsed: false,
       expandPaneTitle: strings.GetStringFromName("inspector.expandPane"),
       collapsePaneTitle: strings.GetStringFromName("inspector.collapsePane"),
@@ -508,6 +525,36 @@ InspectorPanel.prototype = {
 
     let parentBox = this.panelDoc.getElementById("inspector-sidebar-toggle-box");
     this._sidebarToggle = this.ReactDOM.render(sidebarToggle, parentBox);
+
+    // Setup the add-node button.
+    this.addNode = this.addNode.bind(this);
+    this.addNodeButton = this.panelDoc.getElementById("inspector-element-add-button");
+    this.addNodeButton.addEventListener("click", this.addNode);
+
+    // Setup the eye-dropper icon.
+    this.toolbox.target.actorHasMethod("inspector", "pickColorFromPage").then(value => {
+      if (!value) {
+        return;
+      }
+
+      this.onEyeDropperDone = this.onEyeDropperDone.bind(this);
+      this.onEyeDropperButtonClicked = this.onEyeDropperButtonClicked.bind(this);
+      this.eyeDropperButton = this.panelDoc.getElementById("inspector-eyedropper-toggle");
+      this.eyeDropperButton.style.display = "initial";
+      this.eyeDropperButton.addEventListener("click", this.onEyeDropperButtonClicked);
+    }, e => console.error(e));
+  },
+
+  teardownToolbar: function () {
+    if (this.addNodeButton) {
+      this.addNodeButton.removeEventListener("click", this.addNode);
+      this.addNodeButton = null;
+    }
+
+    if (this.eyeDropperButton) {
+      this.eyeDropperButton.removeEventListener("click", this.onEyeDropperButtonClicked);
+      this.eyeDropperButton = null;
+    }
   },
 
   /**
@@ -538,7 +585,8 @@ InspectorPanel.prototype = {
       });
     };
     this._pendingSelection = onNodeSelected;
-    this._getDefaultNodeForSelection().then(onNodeSelected, console.error);
+    this._getDefaultNodeForSelection()
+        .then(onNodeSelected, this._handleRejectionIfNotDestroyed);
   },
 
   _selectionCssSelector: null,
@@ -617,16 +665,7 @@ InspectorPanel.prototype = {
         this.selection.isElementNode()) {
       selection.getUniqueSelector().then(selector => {
         this.selectionCssSelector = selector;
-      }).then(null, e => {
-        // Only log this as an error if the panel hasn't been destroyed in the
-        // meantime.
-        if (!this._panelDestroyer) {
-          console.error(e);
-        } else {
-          console.warn("Could not set the unique selector for the newly " +
-            "selected node, the inspector was destroyed.");
-        }
-      });
+      }, this._handleRejectionIfNotDestroyed);
     }
 
     let selfUpdate = this.updating("inspector-panel");
@@ -755,7 +794,7 @@ InspectorPanel.prototype = {
     let sidebarDestroyer = this.sidebar.destroy();
     this.sidebar = null;
 
-    this.addNodeButton.removeEventListener("click", this.addNode);
+    this.teardownToolbar();
     this.breadcrumbs.destroy();
     this.selection.off("new-node-front", this.onNewSelection);
     this.selection.off("before-new-node", this.onBeforeNewSelection);
@@ -1203,24 +1242,12 @@ InspectorPanel.prototype = {
   },
 
   /**
-  * When the pane toggle button is pressed with space and return keys toggle
-  * the pane, change the button state and tooltip.
-  */
-  onPaneToggleButtonPressed: function (event) {
-    if (ViewHelpers.isSpaceOrReturn(event)) {
-      this.onPaneToggleButtonActivated(event);
-    }
-  },
-
-  /**
-   * When the pane toggle button is clicked, toggle the pane, change the button
+   * When the pane toggle button is clicked or pressed, toggle the pane, change the button
    * state and tooltip.
    */
-  onPaneToggleButtonActivated: function (e) {
+  onPaneToggleButtonClicked: function (e) {
     let sidePaneContainer = this.panelDoc.querySelector("#inspector-sidebar-container");
     let isVisible = !this._sidebarToggle.state.collapsed;
-    let sidePane = this.panelDoc.querySelector(
-      "#inspector-sidebar .devtools-sidebar-tabs");
 
     // Make sure the sidebar has width and height attributes before collapsing
     // because ViewHelpers needs it.
@@ -1228,12 +1255,10 @@ InspectorPanel.prototype = {
       let rect = sidePaneContainer.getBoundingClientRect();
       if (!sidePaneContainer.hasAttribute("width")) {
         sidePaneContainer.setAttribute("width", rect.width);
-        sidePane.style.width = rect.width + "px";
       }
       // always refresh the height attribute before collapsing, it could have
       // been modified by resizing the container.
       sidePaneContainer.setAttribute("height", rect.height);
-      sidePane.style.height = rect.height + "px";
     }
 
     let onAnimationDone = () => {
@@ -1250,6 +1275,52 @@ InspectorPanel.prototype = {
       delayed: true,
       callback: onAnimationDone
     }, sidePaneContainer);
+  },
+
+  onEyeDropperButtonClicked: function () {
+    this.eyeDropperButton.hasAttribute("checked")
+      ? this.hideEyeDropper()
+      : this.showEyeDropper();
+  },
+
+  startEyeDropperListeners: function () {
+    this.inspector.once("color-pick-canceled", this.onEyeDropperDone);
+    this.inspector.once("color-picked", this.onEyeDropperDone);
+    this.walker.once("new-root", this.onEyeDropperDone);
+  },
+
+  stopEyeDropperListeners: function () {
+    this.inspector.off("color-pick-canceled", this.onEyeDropperDone);
+    this.inspector.off("color-picked", this.onEyeDropperDone);
+    this.walker.off("new-root", this.onEyeDropperDone);
+  },
+
+  onEyeDropperDone: function () {
+    this.eyeDropperButton.removeAttribute("checked");
+    this.stopEyeDropperListeners();
+  },
+
+  /**
+   * Show the eyedropper on the page.
+   * @return {Promise} resolves when the eyedropper is visible.
+   */
+  showEyeDropper: function () {
+    this.telemetry.toolOpened("toolbareyedropper");
+    this.eyeDropperButton.setAttribute("checked", "true");
+    this.startEyeDropperListeners();
+    return this.inspector.pickColorFromPage({copyOnSelect: true})
+                         .catch(e => console.error(e));
+  },
+
+  /**
+   * Hide the eyedropper.
+   * @return {Promise} resolves when the eyedropper is hidden.
+   */
+  hideEyeDropper: function () {
+    this.eyeDropperButton.removeAttribute("checked");
+    this.stopEyeDropperListeners();
+    return this.inspector.cancelPickColorFromPage()
+                         .catch(e => console.error(e));
   },
 
   /**
@@ -1339,7 +1410,7 @@ InspectorPanel.prototype = {
     if (!this.walker) {
       return promise.resolve();
     }
-    return this.walker.clearPseudoClassLocks().then(null, console.error);
+    return this.walker.clearPseudoClassLocks().catch(this._handleRejectionIfNotDestroyed);
   },
 
   /**

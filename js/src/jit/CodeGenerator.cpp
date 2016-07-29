@@ -8972,19 +8972,21 @@ CodeGenerator::visitRest(LRest* lir)
 }
 
 bool
-CodeGenerator::generateWasm(uint32_t sigIndex, wasm::FuncOffsets* offsets)
+CodeGenerator::generateWasm(wasm::SigIdDesc sigId, wasm::FuncOffsets* offsets)
 {
     JitSpew(JitSpew_Codegen, "# Emitting asm.js code");
 
-    wasm::GenerateFunctionPrologue(masm, frameSize(), sigIndex, offsets);
+    wasm::GenerateFunctionPrologue(masm, frameSize(), sigId, offsets);
 
     // Overflow checks are omitted by CodeGenerator in some cases (leaf
     // functions with small framePushed). Perform overflow-checking after
     // pushing framePushed to catch cases with really large frames.
     Label onOverflow;
     if (!omitOverRecursedCheck()) {
+        // Get the per-thread stack limit from the TlsData struct pointed
+        // to by the WasmTlsReg hidden argument register.
         masm.branchPtr(Assembler::AboveOrEqual,
-                       wasm::SymbolicAddress::StackLimit,
+                       Address(WasmTlsReg, offsetof(wasm::TlsData, stackLimit)),
                        masm.getStackPointer(),
                        &onOverflow);
     }
@@ -11226,6 +11228,29 @@ CodeGenerator::visitAsmJSVoidReturn(LAsmJSVoidReturn* lir)
     // Don't emit a jump to the return label if this is the last block.
     if (current->mir() != *gen->graph().poBegin())
         masm.jump(&returnLabel_);
+}
+
+void
+CodeGenerator::visitAsmJSLoadFuncPtr(LAsmJSLoadFuncPtr* ins)
+{
+    const MAsmJSLoadFuncPtr* mir = ins->mir();
+
+    Register index = ToRegister(ins->index());
+    Register out = ToRegister(ins->output());
+
+    if (mir->hasLimit()) {
+        masm.branch32(Assembler::Condition::AboveOrEqual, index, Imm32(mir->limit()),
+                      wasm::JumpTarget::OutOfBounds);
+    }
+
+    masm.loadWasmGlobalPtr(mir->globalDataOffset(), out);
+    masm.loadPtr(BaseIndex(out, index, ScalePointer), out);
+}
+
+void
+CodeGenerator::visitAsmJSLoadFFIFunc(LAsmJSLoadFFIFunc* ins)
+{
+    masm.loadWasmGlobalPtr(ins->mir()->globalDataOffset(), ToRegister(ins->output()));
 }
 
 void

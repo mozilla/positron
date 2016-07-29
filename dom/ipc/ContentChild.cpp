@@ -862,7 +862,7 @@ ContentChild::ProvideWindowCommon(TabChild* aTabOpener,
     if (!SendCreateWindow(aTabOpener, newChild, renderFrame,
                           aChromeFlags, aCalledFromJS, aPositionSpecified,
                           aSizeSpecified,
-                          name, features,
+                          features,
                           baseURIString,
                           openerDocShell
                             ? openerDocShell->GetOriginAttributes()
@@ -1254,18 +1254,17 @@ ContentChild::RecvInitImageBridge(Endpoint<PImageBridgeChild>&& aEndpoint)
   return ImageBridgeChild::InitForContent(Move(aEndpoint));
 }
 
+bool
+ContentChild::RecvInitVRManager(Endpoint<PVRManagerChild>&& aEndpoint)
+{
+  return gfx::VRManagerChild::InitForContent(Move(aEndpoint));
+}
+
 PSharedBufferManagerChild*
 ContentChild::AllocPSharedBufferManagerChild(mozilla::ipc::Transport* aTransport,
                                               base::ProcessId aOtherProcess)
 {
   return SharedBufferManagerChild::StartUpInChildProcess(aTransport, aOtherProcess);
-}
-
-gfx::PVRManagerChild*
-ContentChild::AllocPVRManagerChild(Transport* aTransport,
-                                   ProcessId aOtherProcess)
-{
-  return gfx::VRManagerChild::StartUpInChildProcess(aTransport, aOtherProcess);
 }
 
 PBackgroundChild*
@@ -1357,9 +1356,14 @@ GetAppPaths(nsCString &aAppPath, nsCString &aAppBinaryPath, nsCString &aAppDir)
   return true;
 }
 
-static void
+static bool
 StartMacOSContentSandbox()
 {
+  int sandboxLevel = Preferences::GetInt("security.sandbox.content.level");
+  if (sandboxLevel < 1) {
+    return false;
+  }
+
   nsAutoCString appPath, appBinaryPath, appDir;
   if (!GetAppPaths(appPath, appBinaryPath, appDir)) {
     MOZ_CRASH("Error resolving child process path");
@@ -1383,7 +1387,7 @@ StartMacOSContentSandbox()
 
   MacSandboxInfo info;
   info.type = MacSandboxType_Content;
-  info.level = Preferences::GetInt("security.sandbox.content.level");
+  info.level = info.level = sandboxLevel;
   info.appPath.assign(appPath.get());
   info.appBinaryPath.assign(appBinaryPath.get());
   info.appDir.assign(appDir.get());
@@ -1394,6 +1398,8 @@ StartMacOSContentSandbox()
     NS_WARNING(err.c_str());
     MOZ_CRASH("sandbox_init() failed");
   }
+
+  return true;
 }
 #endif
 
@@ -1403,6 +1409,7 @@ ContentChild::RecvSetProcessSandbox(const MaybeFileDesc& aBroker)
   // We may want to move the sandbox initialization somewhere else
   // at some point; see bug 880808.
 #if defined(MOZ_CONTENT_SANDBOX)
+  bool sandboxEnabled = true;
 #if defined(XP_LINUX)
 #if defined(MOZ_WIDGET_GONK) && ANDROID_VERSION >= 19
   // For B2G >= KitKat, sandboxing is mandatory; this has already
@@ -1411,31 +1418,45 @@ ContentChild::RecvSetProcessSandbox(const MaybeFileDesc& aBroker)
 #else
   // Otherwise, sandboxing is best-effort.
   if (!SandboxInfo::Get().CanSandboxContent()) {
-      return true;
+       sandboxEnabled = false;
+   } else {
+       // This triggers the initialization of cubeb, which needs to happen
+       // before seccomp is enabled (Bug 1259508). It also increases the startup
+       // time of the content process, because cubeb is usually initialized
+       // when it is actually needed. This call here is no longer required
+       // once Bug 1104619 (remoting audio) is resolved.
+       Unused << CubebUtils::GetCubebContext();
   }
 
-  // This triggers the initialization of cubeb, which needs to happen
-  // before seccomp is enabled (Bug 1259508). It also increases the startup
-  // time of the content process, because cubeb is usually initialized
-  // when it is actually needed. This call here is no longer required
-  // once Bug 1104619 (remoting audio) is resolved.
-  Unused << CubebUtils::GetCubebContext();
-#endif
-  int brokerFd = -1;
-  if (aBroker.type() == MaybeFileDesc::TFileDescriptor) {
-      brokerFd = aBroker.get_FileDescriptor().PlatformHandle();
+#endif /* MOZ_WIDGET_GONK && ANDROID_VERSION >= 19 */
+  if (sandboxEnabled) {
+    int brokerFd = -1;
+    if (aBroker.type() == MaybeFileDesc::TFileDescriptor) {
+      auto fd = aBroker.get_FileDescriptor().ClonePlatformHandle();
+      brokerFd = fd.release();
       // brokerFd < 0 means to allow direct filesystem access, so
       // make absolutely sure that doesn't happen if the parent
       // didn't intend it.
       MOZ_RELEASE_ASSERT(brokerFd >= 0);
+    }
+    sandboxEnabled = SetContentProcessSandbox(brokerFd);
   }
-  SetContentProcessSandbox(brokerFd);
 #elif defined(XP_WIN)
   mozilla::SandboxTarget::Instance()->StartSandbox();
 #elif defined(XP_MACOSX)
-  StartMacOSContentSandbox();
+  sandboxEnabled = StartMacOSContentSandbox();
 #endif
-#endif
+
+#if defined(MOZ_CRASHREPORTER)
+  CrashReporter::AnnotateCrashReport(
+    NS_LITERAL_CSTRING("ContentSandboxEnabled"),
+    sandboxEnabled? NS_LITERAL_CSTRING("1") : NS_LITERAL_CSTRING("0"));
+#if defined(XP_LINUX) && !defined(OS_ANDROID)
+  SandboxInfo::Get().AnnotateCrashReport();
+#endif /* XP_LINUX && !OS_ANDROID */
+#endif /* MOZ_CRASHREPORTER */
+#endif /* MOZ_CONTENT_SANDBOX */
+
   return true;
 }
 
@@ -1684,6 +1705,9 @@ bool
 ContentChild::RecvNotifyGMPsChanged()
 {
   GMPDecoderModule::UpdateUsableCodecs();
+  MOZ_ASSERT(NS_IsMainThread());
+  nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
+  obs->NotifyObservers(nullptr, "gmp-changed", nullptr);
   return true;
 }
 
@@ -2645,8 +2669,9 @@ ContentChild::RecvInitBlobURLs(nsTArray<BlobURLRegistrationData>&& aRegistration
       static_cast<BlobChild*>(registration.blobChild())->GetBlobImpl();
     MOZ_ASSERT(blobImpl);
 
-    nsHostObjectProtocolHandler::AddDataEntry(registration.url(), blobImpl,
-                                              registration.principal());
+    nsHostObjectProtocolHandler::AddDataEntry(registration.url(),
+                                              registration.principal(),
+                                              blobImpl);
   }
 
   return true;
@@ -3397,7 +3422,7 @@ ContentChild::RecvBlobURLRegistration(const nsCString& aURI, PBlobChild* aBlobCh
   RefPtr<BlobImpl> blobImpl = static_cast<BlobChild*>(aBlobChild)->GetBlobImpl();
   MOZ_ASSERT(blobImpl);
 
-  nsHostObjectProtocolHandler::AddDataEntry(aURI, blobImpl, aPrincipal);
+  nsHostObjectProtocolHandler::AddDataEntry(aURI, aPrincipal, blobImpl);
   return true;
 }
 

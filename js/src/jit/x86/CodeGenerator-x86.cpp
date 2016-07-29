@@ -831,9 +831,9 @@ CodeGeneratorX86::visitAsmJSAtomicBinopHeapForEffect(LAsmJSAtomicBinopHeapForEff
 }
 
 void
-CodeGeneratorX86::visitAsmJSLoadGlobalVar(LAsmJSLoadGlobalVar* ins)
+CodeGeneratorX86::visitWasmLoadGlobalVar(LWasmLoadGlobalVar* ins)
 {
-    MAsmJSLoadGlobalVar* mir = ins->mir();
+    MWasmLoadGlobalVar* mir = ins->mir();
     MIRType type = mir->type();
     MOZ_ASSERT(IsNumberType(type) || IsSimdType(type));
 
@@ -862,15 +862,15 @@ CodeGeneratorX86::visitAsmJSLoadGlobalVar(LAsmJSLoadGlobalVar* ins)
         label = masm.vmovapsWithPatch(PatchedAbsoluteAddress(), ToFloatRegister(ins->output()));
         break;
       default:
-        MOZ_CRASH("unexpected type in visitAsmJSLoadGlobalVar");
+        MOZ_CRASH("unexpected type in visitWasmLoadGlobalVar");
     }
-    masm.append(AsmJSGlobalAccess(label, mir->globalDataOffset()));
+    masm.append(wasm::GlobalAccess(label, mir->globalDataOffset()));
 }
 
 void
-CodeGeneratorX86::visitAsmJSStoreGlobalVar(LAsmJSStoreGlobalVar* ins)
+CodeGeneratorX86::visitWasmStoreGlobalVar(LWasmStoreGlobalVar* ins)
 {
-    MAsmJSStoreGlobalVar* mir = ins->mir();
+    MWasmStoreGlobalVar* mir = ins->mir();
 
     MIRType type = mir->value()->type();
     MOZ_ASSERT(IsNumberType(type) || IsSimdType(type));
@@ -896,38 +896,9 @@ CodeGeneratorX86::visitAsmJSStoreGlobalVar(LAsmJSStoreGlobalVar* ins)
         label = masm.vmovapsWithPatch(ToFloatRegister(ins->value()), PatchedAbsoluteAddress());
         break;
       default:
-        MOZ_CRASH("unexpected type in visitAsmJSStoreGlobalVar");
+        MOZ_CRASH("unexpected type in visitWasmStoreGlobalVar");
     }
-    masm.append(AsmJSGlobalAccess(label, mir->globalDataOffset()));
-}
-
-void
-CodeGeneratorX86::visitAsmJSLoadFuncPtr(LAsmJSLoadFuncPtr* ins)
-{
-    const MAsmJSLoadFuncPtr* mir = ins->mir();
-
-    Register index = ToRegister(ins->index());
-    Register out = ToRegister(ins->output());
-
-    if (mir->hasLimit()) {
-        masm.branch32(Assembler::Condition::AboveOrEqual, index, Imm32(mir->limit()),
-                      wasm::JumpTarget::OutOfBounds);
-    }
-
-    CodeOffset label = masm.movlWithPatch(PatchedAbsoluteAddress(), out);
-    masm.append(AsmJSGlobalAccess(label, mir->globalDataOffset()));
-
-    masm.loadPtr(Operand(out, index, ScalePointer), out);
-}
-
-void
-CodeGeneratorX86::visitAsmJSLoadFFIFunc(LAsmJSLoadFFIFunc* ins)
-{
-    MAsmJSLoadFFIFunc* mir = ins->mir();
-
-    Register out = ToRegister(ins->output());
-    CodeOffset label = masm.movlWithPatch(PatchedAbsoluteAddress(), out);
-    masm.append(AsmJSGlobalAccess(label, mir->globalDataOffset()));
+    masm.append(wasm::GlobalAccess(label, mir->globalDataOffset()));
 }
 
 namespace js {

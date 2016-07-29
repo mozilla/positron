@@ -466,6 +466,11 @@ public:
   AnimatedGeometryRoot* GetAnimatedGeometryRoot() { return mAnimatedGeometryRoot; }
 
   /**
+   * A region including the horizontal pan, vertical pan, and no action regions.
+   */
+  nsRegion CombinedTouchActionRegion();
+
+  /**
    * Add the given hit regions to the hit regions to the hit retions for this
    * PaintedLayer.
    */
@@ -1331,14 +1336,12 @@ protected:
    * Builds an ImageLayer for the appropriate backend; the mask is relative to
    * aLayer's visible region.
    * aLayer is the layer to be clipped.
-   * aLayerVisibleRegion is the region that will be set as aLayer's visible region,
    * relative to the container reference frame
    * aRoundedRectClipCount is used when building mask layers for PaintedLayers,
    * SetupMaskLayer will build a mask layer for only the first
    * aRoundedRectClipCount rounded rects in aClip
    */
   void SetupMaskLayer(Layer *aLayer, const DisplayItemClip& aClip,
-                      const nsIntRegion& aLayerVisibleRegion,
                       uint32_t aRoundedRectClipCount = UINT32_MAX);
 
   /**
@@ -2047,6 +2050,15 @@ FrameLayerBuilder::GetDebugSingleOldPaintedLayerForFrame(nsIFrame* aFrame)
   return layer->AsPaintedLayer();
 }
 
+// Reset state that should not persist when a layer is recycled.
+static void
+ResetLayerStateForRecycling(Layer* aLayer) {
+  // Currently, this clears the mask layer and ancestor mask layers.
+  // Other cleanup may be added here.
+  aLayer->SetMaskLayer(nullptr);
+  aLayer->SetAncestorMaskLayers({});
+}
+
 already_AddRefed<ColorLayer>
 ContainerState::CreateOrRecycleColorLayer(PaintedLayer *aPainted)
 {
@@ -2054,7 +2066,7 @@ ContainerState::CreateOrRecycleColorLayer(PaintedLayer *aPainted)
       static_cast<PaintedDisplayItemLayerUserData*>(aPainted->GetUserData(&gPaintedDisplayItemLayerUserData));
   RefPtr<ColorLayer> layer = data->mColorLayer;
   if (layer) {
-    layer->SetMaskLayer(nullptr);
+    ResetLayerStateForRecycling(layer);
     layer->ClearExtraDumpInfo();
   } else {
     // Create a new layer
@@ -2078,7 +2090,7 @@ ContainerState::CreateOrRecycleImageLayer(PaintedLayer *aPainted)
       static_cast<PaintedDisplayItemLayerUserData*>(aPainted->GetUserData(&gPaintedDisplayItemLayerUserData));
   RefPtr<ImageLayer> layer = data->mImageLayer;
   if (layer) {
-    layer->SetMaskLayer(nullptr);
+    ResetLayerStateForRecycling(layer);
     layer->ClearExtraDumpInfo();
   } else {
     // Create a new layer
@@ -2265,8 +2277,7 @@ ContainerState::RecyclePaintedLayer(PaintedLayer* aLayer,
 {
   // Clear clip rect and mask layer so we don't accidentally stay clipped.
   // We will reapply any necessary clipping.
-  aLayer->SetMaskLayer(nullptr);
-  aLayer->SetAncestorMaskLayers({});
+  ResetLayerStateForRecycling(aLayer);
   aLayer->ClearExtraDumpInfo();
 
   PaintedDisplayItemLayerUserData* data =
@@ -3187,7 +3198,7 @@ void ContainerState::FinishPaintedLayerData(PaintedLayerData& aData, FindOpaqueB
       commonClipCount = data->mItemClip.GetRoundedRectCount();
     } else {
       commonClipCount = std::max(0, data->mCommonClipCount);
-      SetupMaskLayer(layer, data->mItemClip, data->mVisibleRegion, commonClipCount);
+      SetupMaskLayer(layer, data->mItemClip, commonClipCount);
     }
     // copy commonClipCount to the entry
     FrameLayerBuilder::PaintedLayerItemsEntry* entry = mLayerBuilder->
@@ -3195,7 +3206,7 @@ void ContainerState::FinishPaintedLayerData(PaintedLayerData& aData, FindOpaqueB
     entry->mCommonClipCount = commonClipCount;
   } else {
     // mask layer for image and color layers
-    SetupMaskLayer(layer, data->mItemClip, data->mVisibleRegion);
+    SetupMaskLayer(layer, data->mItemClip);
   }
 
   uint32_t flags = 0;
@@ -3243,6 +3254,12 @@ void ContainerState::FinishPaintedLayerData(PaintedLayerData& aData, FindOpaqueB
       &containingPaintedLayerData->mHitRegion,
       &containingPaintedLayerData->mMaybeHitRegion,
       &matrixCache);
+    // See the comment in nsDisplayList::AddFrame, where the touch action regions
+    // are handled. The same thing applies here.
+    bool alreadyHadRegions =
+        !containingPaintedLayerData->mNoActionRegion.IsEmpty() ||
+        !containingPaintedLayerData->mHorizontalPanRegion.IsEmpty() ||
+        !containingPaintedLayerData->mVerticalPanRegion.IsEmpty();
     nsLayoutUtils::TransformToAncestorAndCombineRegions(
       data->mNoActionRegion,
       mContainerReferenceFrame,
@@ -3264,7 +3281,10 @@ void ContainerState::FinishPaintedLayerData(PaintedLayerData& aData, FindOpaqueB
       &containingPaintedLayerData->mVerticalPanRegion,
       &containingPaintedLayerData->mDispatchToContentHitRegion,
       &matrixCache);
-
+    if (alreadyHadRegions) {
+      containingPaintedLayerData->mDispatchToContentHitRegion.OrWith(
+        containingPaintedLayerData->CombinedTouchActionRegion());
+    }
   } else {
     EventRegions regions;
     regions.mHitRegion = ScaleRegionToOutsidePixels(data->mHitRegion);
@@ -3461,17 +3481,35 @@ PaintedLayerData::Accumulate(ContainerState* aState,
   }
 }
 
+nsRegion
+PaintedLayerData::CombinedTouchActionRegion()
+{
+  nsRegion result;
+  result.Or(mHorizontalPanRegion, mVerticalPanRegion);
+  result.OrWith(mNoActionRegion);
+  return result;
+}
+
 void
 PaintedLayerData::AccumulateEventRegions(ContainerState* aState, nsDisplayLayerEventRegions* aEventRegions)
 {
   FLB_LOG_PAINTED_LAYER_DECISION(this, "Accumulating event regions %p against pld=%p\n", aEventRegions, this);
 
-  mHitRegion.Or(mHitRegion, aEventRegions->HitRegion());
-  mMaybeHitRegion.Or(mMaybeHitRegion, aEventRegions->MaybeHitRegion());
-  mDispatchToContentHitRegion.Or(mDispatchToContentHitRegion, aEventRegions->DispatchToContentHitRegion());
-  mNoActionRegion.Or(mNoActionRegion, aEventRegions->NoActionRegion());
-  mHorizontalPanRegion.Or(mHorizontalPanRegion, aEventRegions->HorizontalPanRegion());
-  mVerticalPanRegion.Or(mVerticalPanRegion, aEventRegions->VerticalPanRegion());
+  mHitRegion.OrWith(aEventRegions->HitRegion());
+  mMaybeHitRegion.OrWith(aEventRegions->MaybeHitRegion());
+  mDispatchToContentHitRegion.OrWith(aEventRegions->DispatchToContentHitRegion());
+
+  // See the comment in nsDisplayList::AddFrame, where the touch action regions
+  // are handled. The same thing applies here.
+  bool alreadyHadRegions = !mNoActionRegion.IsEmpty() ||
+      !mHorizontalPanRegion.IsEmpty() ||
+      !mVerticalPanRegion.IsEmpty();
+  mNoActionRegion.OrWith(aEventRegions->NoActionRegion());
+  mHorizontalPanRegion.OrWith(aEventRegions->HorizontalPanRegion());
+  mVerticalPanRegion.OrWith(aEventRegions->VerticalPanRegion());
+  if (alreadyHadRegions) {
+    mDispatchToContentHitRegion.OrWith(CombinedTouchActionRegion());
+  }
 
   // Calculate scaled versions of the bounds of mHitRegion and mMaybeHitRegion
   // for quick access in FindPaintedLayerFor().
@@ -4091,13 +4129,13 @@ ContainerState::ProcessDisplayItems(nsDisplayList* aList)
 
           // rounded rectangle clipping using mask layers
           // (must be done after visible rect is set on layer)
-          if (layerClip.IsRectClippedByRoundedCorner(itemContent)) {
-            SetupMaskLayer(ownLayer, layerClip, itemVisibleRect);
+          if (layerClip.GetRoundedRectCount() > 0) {
+            SetupMaskLayer(ownLayer, layerClip);
           }
         } else {
           LayerClip scrolledClip;
           scrolledClip.SetClipRect(layerClipRect);
-          if (layerClip.IsRectClippedByRoundedCorner(itemContent)) {
+          if (layerClip.GetRoundedRectCount() > 0) {
             scrolledClip.SetMaskLayerIndex(
                 SetupMaskLayerForScrolledClip(ownLayer.get(), layerClip));
           }
@@ -5200,8 +5238,7 @@ FrameLayerBuilder::BuildContainerLayerFor(nsDisplayListBuilder* aBuilder,
         NS_ASSERTION(oldLayer->GetType() == Layer::TYPE_CONTAINER,
                      "Wrong layer type");
         containerLayer = static_cast<ContainerLayer*>(oldLayer);
-        containerLayer->SetMaskLayer(nullptr);
-        containerLayer->SetAncestorMaskLayers({});
+        ResetLayerStateForRecycling(containerLayer);
       }
     }
   }
@@ -5387,7 +5424,7 @@ FrameLayerBuilder::GetLeafLayerFor(nsDisplayListBuilder* aBuilder,
     // layer rendering.
     return nullptr;
   }
-  layer->SetMaskLayer(nullptr);
+  ResetLayerStateForRecycling(layer);
   return layer;
 }
 
@@ -5956,7 +5993,6 @@ SetClipCount(PaintedDisplayItemLayerUserData* apaintedData,
 void
 ContainerState::SetupMaskLayer(Layer *aLayer,
                                const DisplayItemClip& aClip,
-                               const nsIntRegion& aLayerVisibleRegion,
                                uint32_t aRoundedRectClipCount)
 {
   // if the number of clips we are going to mask has decreased, then aLayer might have
@@ -5970,10 +6006,8 @@ ContainerState::SetupMaskLayer(Layer *aLayer,
   }
 
   // don't build an unnecessary mask
-  nsIntRect layerBounds = aLayerVisibleRegion.GetBounds();
   if (aClip.GetRoundedRectCount() == 0 ||
-      aRoundedRectClipCount == 0 ||
-      layerBounds.IsEmpty()) {
+      aRoundedRectClipCount == 0) {
     SetClipCount(paintedData, 0);
     return;
   }

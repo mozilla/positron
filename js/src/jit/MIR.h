@@ -13057,9 +13057,12 @@ class MWasmBoundsCheck
     public MWasmMemoryAccess,
     public NoTypePolicy::Data
 {
+    bool redundant_;
+
     explicit MWasmBoundsCheck(MDefinition* index, const MWasmMemoryAccess& access)
       : MUnaryInstruction(index),
-        MWasmMemoryAccess(access)
+        MWasmMemoryAccess(access),
+        redundant_(false)
     {
         setMovable();
         setGuard(); // Effectful: throws for OOB.
@@ -13080,6 +13083,14 @@ class MWasmBoundsCheck
 
     AliasSet getAliasSet() const override {
         return AliasSet::None();
+    }
+
+    bool isRedundant() const {
+        return redundant_;
+    }
+
+    void setRedundant(bool val) {
+        redundant_ = val;
     }
 };
 
@@ -13281,9 +13292,9 @@ class MAsmJSAtomicBinopHeap
     }
 };
 
-class MAsmJSLoadGlobalVar : public MNullaryInstruction
+class MWasmLoadGlobalVar : public MNullaryInstruction
 {
-    MAsmJSLoadGlobalVar(MIRType type, unsigned globalDataOffset, bool isConstant)
+    MWasmLoadGlobalVar(MIRType type, unsigned globalDataOffset, bool isConstant)
       : globalDataOffset_(globalDataOffset), isConstant_(isConstant)
     {
         MOZ_ASSERT(IsNumberType(type) || IsSimdType(type));
@@ -13295,7 +13306,7 @@ class MAsmJSLoadGlobalVar : public MNullaryInstruction
     bool isConstant_;
 
   public:
-    INSTRUCTION_HEADER(AsmJSLoadGlobalVar)
+    INSTRUCTION_HEADER(WasmLoadGlobalVar)
     TRIVIAL_NEW_WRAPPERS
 
     unsigned globalDataOffset() const { return globalDataOffset_; }
@@ -13311,18 +13322,18 @@ class MAsmJSLoadGlobalVar : public MNullaryInstruction
     AliasType mightAlias(const MDefinition* def) const override;
 };
 
-class MAsmJSStoreGlobalVar
+class MWasmStoreGlobalVar
   : public MUnaryInstruction,
     public NoTypePolicy::Data
 {
-    MAsmJSStoreGlobalVar(unsigned globalDataOffset, MDefinition* v)
+    MWasmStoreGlobalVar(unsigned globalDataOffset, MDefinition* v)
       : MUnaryInstruction(v), globalDataOffset_(globalDataOffset)
     {}
 
     unsigned globalDataOffset_;
 
   public:
-    INSTRUCTION_HEADER(AsmJSStoreGlobalVar)
+    INSTRUCTION_HEADER(WasmStoreGlobalVar)
     TRIVIAL_NEW_WRAPPERS
 
     unsigned globalDataOffset() const { return globalDataOffset_; }
@@ -13411,11 +13422,12 @@ class MAsmJSParameter : public MNullaryInstruction
 };
 
 class MAsmJSReturn
-  : public MAryControlInstruction<1, 0>,
+  : public MAryControlInstruction<2, 0>,
     public NoTypePolicy::Data
 {
-    explicit MAsmJSReturn(MDefinition* ins) {
+    explicit MAsmJSReturn(MDefinition* ins, MDefinition* tlsPtr) {
         initOperand(0, ins);
+        initOperand(1, tlsPtr);
     }
 
   public:
@@ -13424,9 +13436,13 @@ class MAsmJSReturn
 };
 
 class MAsmJSVoidReturn
-  : public MAryControlInstruction<0, 0>,
+  : public MAryControlInstruction<1, 0>,
     public NoTypePolicy::Data
 {
+    explicit MAsmJSVoidReturn(MDefinition* tlsPtr) {
+        initOperand(0, tlsPtr);
+    }
+
   public:
     INSTRUCTION_HEADER(AsmJSVoidReturn)
     TRIVIAL_NEW_WRAPPERS
@@ -13464,14 +13480,14 @@ class MAsmJSCall final
     class Callee {
       public:
         enum Which { Internal, Dynamic, Builtin };
-        static const uint32_t NoSigIndex = UINT32_MAX;
       private:
         Which which_;
-        union {
+        union U {
+            U() {}
             uint32_t internal_;
             struct {
                 MDefinition* callee_;
-                uint32_t sigIndex_;
+                wasm::SigIdDesc sigId_;
             } dynamic;
             wasm::SymbolicAddress builtin_;
         } u;
@@ -13480,9 +13496,11 @@ class MAsmJSCall final
         explicit Callee(uint32_t callee) : which_(Internal) {
             u.internal_ = callee;
         }
-        explicit Callee(MDefinition* callee, uint32_t sigIndex = NoSigIndex) : which_(Dynamic) {
+        explicit Callee(MDefinition* callee, wasm::SigIdDesc sigId = wasm::SigIdDesc())
+          : which_(Dynamic)
+        {
             u.dynamic.callee_ = callee;
-            u.dynamic.sigIndex_ = sigIndex;
+            u.dynamic.sigId_ = sigId;
         }
         explicit Callee(wasm::SymbolicAddress callee) : which_(Builtin) {
             u.builtin_ = callee;
@@ -13498,13 +13516,9 @@ class MAsmJSCall final
             MOZ_ASSERT(which_ == Dynamic);
             return u.dynamic.callee_;
         }
-        bool dynamicHasSigIndex() const {
+        wasm::SigIdDesc dynamicSigId() const {
             MOZ_ASSERT(which_ == Dynamic);
-            return u.dynamic.sigIndex_ != NoSigIndex;
-        }
-        uint32_t dynamicSigIndex() const {
-            MOZ_ASSERT(dynamicHasSigIndex());
-            return u.dynamic.sigIndex_;
+            return u.dynamic.sigId_;
         }
         wasm::SymbolicAddress builtin() const {
             MOZ_ASSERT(which_ == Builtin);
@@ -13517,9 +13531,14 @@ class MAsmJSCall final
     Callee callee_;
     FixedList<AnyRegister> argRegs_;
     size_t spIncrement_;
+    bool preservesTlsReg_;
 
-    MAsmJSCall(const wasm::CallSiteDesc& desc, Callee callee, size_t spIncrement)
-     : desc_(desc), callee_(callee), spIncrement_(spIncrement)
+    MAsmJSCall(const wasm::CallSiteDesc& desc, Callee callee, size_t spIncrement,
+               bool preservesTlsReg)
+      : desc_(desc)
+      , callee_(callee)
+      , spIncrement_(spIncrement)
+      , preservesTlsReg_(preservesTlsReg)
     { }
 
   public:
@@ -13533,7 +13552,8 @@ class MAsmJSCall final
     typedef Vector<Arg, 8, SystemAllocPolicy> Args;
 
     static MAsmJSCall* New(TempAllocator& alloc, const wasm::CallSiteDesc& desc, Callee callee,
-                           const Args& args, MIRType resultType, size_t spIncrement);
+                           const Args& args, MIRType resultType, size_t spIncrement,
+                           bool preservesTlsReg);
 
     size_t numArgs() const {
         return argRegs_.length();
@@ -13555,6 +13575,11 @@ class MAsmJSCall final
     }
     size_t spIncrement() const {
         return spIncrement_;
+    }
+
+    // Does this call preserve the value of the TLS pointer register?
+    bool preservesTlsReg() const {
+        return preservesTlsReg_;
     }
 
     bool possiblyCalls() const override {

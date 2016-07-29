@@ -45,6 +45,10 @@ class nsIPrincipal;
 #include "GonkGPSGeolocationProvider.h"
 #endif
 
+#ifdef MOZ_GPSD
+#include "GpsdLocationProvider.h"
+#endif
+
 #ifdef MOZ_WIDGET_COCOA
 #include "CoreLocationLocationProvider.h"
 #endif
@@ -766,6 +770,14 @@ nsresult nsGeolocationService::Init()
   mProvider = do_GetService(GONK_GPS_GEOLOCATION_PROVIDER_CONTRACTID);
 #endif
 
+#ifdef MOZ_WIDGET_GTK
+#ifdef MOZ_GPSD
+  if (Preferences::GetBool("geo.provider.use_gpsd", false)) {
+    mProvider = new GpsdLocationProvider();
+  }
+#endif
+#endif
+
 #ifdef MOZ_WIDGET_COCOA
   if (Preferences::GetBool("geo.provider.use_corelocation", true)) {
     mProvider = new CoreLocationLocationProvider();
@@ -960,7 +972,7 @@ nsGeolocationService::StartDevice(nsIPrincipal *aPrincipal)
 
   obs->NotifyObservers(mProvider,
                        "geolocation-device-events",
-                       MOZ_UTF16("starting"));
+                       u"starting");
 
   return NS_OK;
 }
@@ -1049,7 +1061,7 @@ nsGeolocationService::StopDevice()
   mProvider->Shutdown();
   obs->NotifyObservers(mProvider,
                        "geolocation-device-events",
-                       MOZ_UTF16("shutdown"));
+                       u"shutdown");
 }
 
 StaticRefPtr<nsGeolocationService> nsGeolocationService::sService;

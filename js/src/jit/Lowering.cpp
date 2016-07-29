@@ -4081,15 +4081,15 @@ LIRGenerator::visitHasClass(MHasClass* ins)
 }
 
 void
-LIRGenerator::visitAsmJSLoadGlobalVar(MAsmJSLoadGlobalVar* ins)
+LIRGenerator::visitWasmLoadGlobalVar(MWasmLoadGlobalVar* ins)
 {
-    define(new(alloc()) LAsmJSLoadGlobalVar, ins);
+    define(new(alloc()) LWasmLoadGlobalVar, ins);
 }
 
 void
-LIRGenerator::visitAsmJSStoreGlobalVar(MAsmJSStoreGlobalVar* ins)
+LIRGenerator::visitWasmStoreGlobalVar(MWasmStoreGlobalVar* ins)
 {
-    add(new(alloc()) LAsmJSStoreGlobalVar(useRegisterAtStart(ins->value())), ins);
+    add(new(alloc()) LWasmStoreGlobalVar(useRegisterAtStart(ins->value())), ins);
 }
 
 void
@@ -4135,13 +4135,24 @@ LIRGenerator::visitAsmJSReturn(MAsmJSReturn* ins)
 #endif
     else
         MOZ_CRASH("Unexpected asm.js return type");
+
+    // Preserve the TLS pointer we were passed in `WasmTlsReg`.
+    MDefinition* tlsPtr = ins->getOperand(1);
+    lir->setOperand(1, useFixed(tlsPtr, WasmTlsReg));
+
     add(lir);
 }
 
 void
 LIRGenerator::visitAsmJSVoidReturn(MAsmJSVoidReturn* ins)
 {
-    add(new(alloc()) LAsmJSVoidReturn);
+    auto* lir = new(alloc()) LAsmJSVoidReturn;
+
+    // Preserve the TLS pointer we were passed in `WasmTlsReg`.
+    MDefinition* tlsPtr = ins->getOperand(0);
+    lir->setOperand(0, useFixed(tlsPtr, WasmTlsReg));
+
+    add(lir);
 }
 
 void

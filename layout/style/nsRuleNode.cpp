@@ -1301,6 +1301,8 @@ struct SetEnumValueHelper
   }
 
   DEFINE_ENUM_CLASS_SETTER(StyleBoxSizing, Content, Border)
+  DEFINE_ENUM_CLASS_SETTER(StyleFloatEdge, ContentBox, MarginBox)
+  DEFINE_ENUM_CLASS_SETTER(StyleUserFocus, None_, SelectMenu)
 
 #undef DEF_SET_ENUMERATED_VALUE
 };
@@ -2427,7 +2429,13 @@ nsRuleNode::WalkRuleTree(const nsStyleStructID aSID,
     // the context by our caller) as not being owned by the context.
     if (!isReset) {
       aContext->AddStyleBit(nsCachedStyleData::GetBitForSID(aSID));
+    } else if (HasAnimationData()) {
+      // If we have animation data, the struct should be cached on the style
+      // context so that we can peek the struct.
+      // See comment in AnimValuesStyleRule::MapRuleInfoInto.
+      StoreStyleOnContext(aContext, aSID, startStruct);
     }
+
     return startStruct;
   }
   if ((!startStruct && !isReset &&
@@ -2830,6 +2838,12 @@ nsRuleNode::SetDefaultOnRoot(const nsStyleStructID aSID, nsStyleContext* aContex
       SetStyleData(eStyleStruct_##type_, data_);                              \
     /* Propagate the bit down. */                                             \
     PropagateDependentBit(eStyleStruct_##type_, aHighestNode, data_);         \
+    if (HasAnimationData()) {                                                 \
+      /* If we have animation data, the struct should be cached on the */     \
+      /* style context so that we can peek the struct. */                     \
+      /* See comment in AnimValuesStyleRule::MapRuleInfoInto. */              \
+      StoreStyleOnContext(aContext, eStyleStruct_##type_, data_);             \
+    }                                                                         \
   } else if (conditions.Cacheable()) {                                        \
     if (!mStyleData.mResetData) {                                             \
       mStyleData.mResetData = new (mPresContext) nsConditionalResetStyleData; \
@@ -4170,13 +4184,12 @@ inline uint32_t ListLength(const T* aList)
   return len;
 }
 
-
-
-already_AddRefed<nsCSSShadowArray>
-nsRuleNode::GetShadowData(const nsCSSValueList* aList,
-                          nsStyleContext* aContext,
-                          bool aIsBoxShadow,
-                          RuleNodeCacheConditions& aConditions)
+static already_AddRefed<nsCSSShadowArray>
+GetShadowData(const nsCSSValueList* aList,
+              nsStyleContext* aContext,
+              bool aIsBoxShadow,
+              nsPresContext* aPresContext,
+              RuleNodeCacheConditions& aConditions)
 {
   uint32_t arrayLength = ListLength(aList);
 
@@ -4199,13 +4212,13 @@ nsRuleNode::GetShadowData(const nsCSSValueList* aList,
     // OK to pass bad aParentCoord since we're not passing SETCOORD_INHERIT
     unitOK = SetCoord(arr->Item(0), tempCoord, nsStyleCoord(),
                       SETCOORD_LENGTH | SETCOORD_CALC_LENGTH_ONLY,
-                      aContext, mPresContext, aConditions);
+                      aContext, aPresContext, aConditions);
     NS_ASSERTION(unitOK, "unexpected unit");
     item->mXOffset = tempCoord.GetCoordValue();
 
     unitOK = SetCoord(arr->Item(1), tempCoord, nsStyleCoord(),
                       SETCOORD_LENGTH | SETCOORD_CALC_LENGTH_ONLY,
-                      aContext, mPresContext, aConditions);
+                      aContext, aPresContext, aConditions);
     NS_ASSERTION(unitOK, "unexpected unit");
     item->mYOffset = tempCoord.GetCoordValue();
 
@@ -4214,7 +4227,7 @@ nsRuleNode::GetShadowData(const nsCSSValueList* aList,
       unitOK = SetCoord(arr->Item(2), tempCoord, nsStyleCoord(),
                         SETCOORD_LENGTH | SETCOORD_CALC_LENGTH_ONLY |
                           SETCOORD_CALC_CLAMP_NONNEGATIVE,
-                        aContext, mPresContext, aConditions);
+                        aContext, aPresContext, aConditions);
       NS_ASSERTION(unitOK, "unexpected unit");
       item->mRadius = tempCoord.GetCoordValue();
     } else {
@@ -4225,7 +4238,7 @@ nsRuleNode::GetShadowData(const nsCSSValueList* aList,
     if (aIsBoxShadow && arr->Item(3).GetUnit() != eCSSUnit_Null) {
       unitOK = SetCoord(arr->Item(3), tempCoord, nsStyleCoord(),
                         SETCOORD_LENGTH | SETCOORD_CALC_LENGTH_ONLY,
-                        aContext, mPresContext, aConditions);
+                        aContext, aPresContext, aConditions);
       NS_ASSERTION(unitOK, "unexpected unit");
       item->mSpread = tempCoord.GetCoordValue();
     } else {
@@ -4235,13 +4248,14 @@ nsRuleNode::GetShadowData(const nsCSSValueList* aList,
     if (arr->Item(4).GetUnit() != eCSSUnit_Null) {
       item->mHasColor = true;
       // 2nd argument can be bogus since inherit is not a valid color
-      unitOK = SetColor(arr->Item(4), 0, mPresContext, aContext, item->mColor,
+      unitOK = SetColor(arr->Item(4), 0, aPresContext, aContext, item->mColor,
                         aConditions);
       NS_ASSERTION(unitOK, "unexpected unit");
     }
 
     if (aIsBoxShadow && arr->Item(5).GetUnit() == eCSSUnit_Enumerated) {
-      NS_ASSERTION(arr->Item(5).GetIntValue() == NS_STYLE_BOX_SHADOW_INSET,
+      NS_ASSERTION(arr->Item(5).GetIntValue()
+                   == uint8_t(StyleBoxShadowType::Inset),
                    "invalid keyword type for box shadow");
       item->mInset = true;
     } else {
@@ -4259,37 +4273,33 @@ struct TextEmphasisChars
 };
 
 #define TEXT_EMPHASIS_CHARS_LIST() \
-  TEXT_EMPHASIS_CHARS_ITEM("", "", NONE) \
-  TEXT_EMPHASIS_CHARS_ITEM("\u2022", "\u25e6", DOT) \
-  TEXT_EMPHASIS_CHARS_ITEM("\u25cf", "\u25cb", CIRCLE) \
-  TEXT_EMPHASIS_CHARS_ITEM("\u25c9", "\u25ce", DOUBLE_CIRCLE) \
-  TEXT_EMPHASIS_CHARS_ITEM("\u25b2", "\u25b3", TRIANGLE) \
-  TEXT_EMPHASIS_CHARS_ITEM("\ufe45", "\ufe46", SESAME)
+  TEXT_EMPHASIS_CHARS_ITEM(u"", u"", NONE) \
+  TEXT_EMPHASIS_CHARS_ITEM(u"\u2022", u"\u25e6", DOT) \
+  TEXT_EMPHASIS_CHARS_ITEM(u"\u25cf", u"\u25cb", CIRCLE) \
+  TEXT_EMPHASIS_CHARS_ITEM(u"\u25c9", u"\u25ce", DOUBLE_CIRCLE) \
+  TEXT_EMPHASIS_CHARS_ITEM(u"\u25b2", u"\u25b3", TRIANGLE) \
+  TEXT_EMPHASIS_CHARS_ITEM(u"\ufe45", u"\ufe46", SESAME)
 
 static constexpr TextEmphasisChars kTextEmphasisChars[] =
 {
 #define TEXT_EMPHASIS_CHARS_ITEM(filled_, open_, type_) \
-  { MOZ_UTF16(filled_), MOZ_UTF16(open_) }, // type_
+  { filled_, open_ }, // type_
   TEXT_EMPHASIS_CHARS_LIST()
 #undef TEXT_EMPHASIS_CHARS_ITEM
 };
 
-// MSVC before 2015 doesn't consider string literal as a constant expr,
-// and doesn't have constexpr either, so we cannot do the checks below.
-#if !defined(_MSC_VER) || _MSC_VER >= 1900
 #define TEXT_EMPHASIS_CHARS_ITEM(filled_, open_, type_) \
-  static_assert(ArrayLength(MOZ_UTF16(filled_)) <= 2 && \
-                ArrayLength(MOZ_UTF16(open_)) <= 2, \
+  static_assert(ArrayLength(filled_) <= 2 && \
+                ArrayLength(open_) <= 2, \
                 "emphasis marks should have no more than one char"); \
   static_assert( \
     *kTextEmphasisChars[NS_STYLE_TEXT_EMPHASIS_STYLE_##type_].mFilled == \
-    *MOZ_UTF16(filled_), "filled " #type_ " should be " #filled_); \
+    *filled_, "filled " #type_ " should be " #filled_); \
   static_assert( \
     *kTextEmphasisChars[NS_STYLE_TEXT_EMPHASIS_STYLE_##type_].mOpen == \
-    *MOZ_UTF16(open_), "open " #type_ " should be " #open_);
+    *open_, "open " #type_ " should be " #open_);
 TEXT_EMPHASIS_CHARS_LIST()
 #undef TEXT_EMPHASIS_CHARS_ITEM
-#endif
 
 #undef TEXT_EMPHASIS_CHARS_LIST
 
@@ -4441,7 +4451,7 @@ nsRuleNode::ComputeTextData(void* aStartStruct,
                textShadowValue->GetUnit() == eCSSUnit_ListDep) {
       // List of arrays
       text->mTextShadow = GetShadowData(textShadowValue->GetListValue(),
-                                        aContext, false, conditions);
+                                        aContext, false, mPresContext, conditions);
     }
   }
 
@@ -4695,7 +4705,7 @@ nsRuleNode::ComputeTextData(void* aStartStruct,
     case eCSSUnit_Initial:
     case eCSSUnit_None: {
       text->mTextEmphasisStyle = NS_STYLE_TEXT_EMPHASIS_STYLE_NONE;
-      text->mTextEmphasisStyleString = MOZ_UTF16("");
+      text->mTextEmphasisStyleString = u"";
       break;
     }
     case eCSSUnit_Inherit:
@@ -5059,7 +5069,7 @@ nsRuleNode::ComputeUserInterfaceData(void* aStartStruct,
            ui->mUserFocus, conditions,
            SETVAL_ENUMERATED | SETVAL_UNSET_INHERIT,
            parentUI->mUserFocus,
-           NS_STYLE_USER_FOCUS_NONE);
+           StyleUserFocus::None_);
 
   // pointer-events: enum, inherit, initial
   SetValue(*aRuleData->ValueForPointerEvents(), ui->mPointerEvents,
@@ -5908,7 +5918,7 @@ nsRuleNode::ComputeDisplayData(void* aStartStruct,
 
   // Backup original display value for calculation of a hypothetical
   // box (CSS2 10.6.4/10.6.5), in addition to getting our style data right later.
-  // See nsHTMLReflowState::CalculateHypotheticalBox
+  // See ReflowInput::CalculateHypotheticalBox
   display->mOriginalDisplay = display->mDisplay;
 
   // appearance: enum, inherit, initial
@@ -7569,7 +7579,7 @@ nsRuleNode::ComputeBorderData(void* aStartStruct,
            border->mFloatEdge, conditions,
            SETVAL_ENUMERATED | SETVAL_UNSET_INITIAL,
            parentBorder->mFloatEdge,
-           NS_STYLE_FLOAT_EDGE_CONTENT_BOX);
+           StyleFloatEdge::ContentBox);
 
   // border-image-source
   const nsCSSValue* borderImageSource = aRuleData->ValueForBorderImageSource();
@@ -7884,16 +7894,16 @@ nsRuleNode::ComputeListData(void* aStartStruct,
       nsAutoString name;
       switch (intValue) {
         case NS_STYLE_LIST_STYLE_LOWER_ROMAN:
-          name.AssignLiteral(MOZ_UTF16("lower-roman"));
+          name.AssignLiteral(u"lower-roman");
           break;
         case NS_STYLE_LIST_STYLE_UPPER_ROMAN:
-          name.AssignLiteral(MOZ_UTF16("upper-roman"));
+          name.AssignLiteral(u"upper-roman");
           break;
         case NS_STYLE_LIST_STYLE_LOWER_ALPHA:
-          name.AssignLiteral(MOZ_UTF16("lower-alpha"));
+          name.AssignLiteral(u"lower-alpha");
           break;
         case NS_STYLE_LIST_STYLE_UPPER_ALPHA:
-          name.AssignLiteral(MOZ_UTF16("upper-alpha"));
+          name.AssignLiteral(u"upper-alpha");
           break;
         default:
           CopyASCIItoUTF16(nsCSSProps::ValueToKeyword(
@@ -9538,11 +9548,11 @@ nsRuleNode::ComputeSVGData(void* aStartStruct,
   COMPUTE_END_INHERITED(SVG, svg)
 }
 
-already_AddRefed<nsStyleBasicShape>
-nsRuleNode::GetStyleBasicShapeFromCSSValue(const nsCSSValue& aValue,
-                                           nsStyleContext* aStyleContext,
-                                           nsPresContext* aPresContext,
-                                           RuleNodeCacheConditions& aConditions)
+static already_AddRefed<nsStyleBasicShape>
+GetStyleBasicShapeFromCSSValue(const nsCSSValue& aValue,
+                               nsStyleContext* aStyleContext,
+                               nsPresContext* aPresContext,
+                               RuleNodeCacheConditions& aConditions)
 {
   RefPtr<nsStyleBasicShape> basicShape;
 
@@ -9687,12 +9697,12 @@ nsRuleNode::GetStyleBasicShapeFromCSSValue(const nsCSSValue& aValue,
   return basicShape.forget();
 }
 
-void
-nsRuleNode::SetStyleClipPathToCSSValue(nsStyleClipPath* aStyleClipPath,
-                                       const nsCSSValue* aValue,
-                                       nsStyleContext* aStyleContext,
-                                       nsPresContext* aPresContext,
-                                       RuleNodeCacheConditions& aConditions)
+static void
+SetStyleClipPathToCSSValue(nsStyleClipPath* aStyleClipPath,
+                           const nsCSSValue* aValue,
+                           nsStyleContext* aStyleContext,
+                           nsPresContext* aPresContext,
+                           RuleNodeCacheConditions& aConditions)
 {
   MOZ_ASSERT(aValue->GetUnit() == eCSSUnit_Array,
              "expected a basic shape or reference box");
@@ -9729,12 +9739,12 @@ nsRuleNode::SetStyleClipPathToCSSValue(nsStyleClipPath* aStyleClipPath,
 }
 
 // Returns true if the nsStyleFilter was successfully set using the nsCSSValue.
-bool
-nsRuleNode::SetStyleFilterToCSSValue(nsStyleFilter* aStyleFilter,
-                                     const nsCSSValue& aValue,
-                                     nsStyleContext* aStyleContext,
-                                     nsPresContext* aPresContext,
-                                     RuleNodeCacheConditions& aConditions)
+static bool
+SetStyleFilterToCSSValue(nsStyleFilter* aStyleFilter,
+                         const nsCSSValue& aValue,
+                         nsStyleContext* aStyleContext,
+                         nsPresContext* aPresContext,
+                         RuleNodeCacheConditions& aConditions)
 {
   nsCSSUnit unit = aValue.GetUnit();
   if (unit == eCSSUnit_URL) {
@@ -9762,6 +9772,7 @@ nsRuleNode::SetStyleFilterToCSSValue(nsStyleFilter* aStyleFilter,
       filterFunction->Item(1).GetListValue(),
       aStyleContext,
       false,
+      aPresContext,
       aConditions);
     aStyleFilter->SetDropShadow(shadowArray);
     return true;
@@ -10150,7 +10161,7 @@ nsRuleNode::ComputeEffectsData(void* aStartStruct,
   case eCSSUnit_List:
   case eCSSUnit_ListDep:
     effects->mBoxShadow = GetShadowData(boxShadowValue->GetListValue(),
-                                        aContext, true, conditions);
+                                        aContext, true, mPresContext, conditions);
     break;
 
   default:
@@ -10268,7 +10279,13 @@ nsRuleNode::GetStyleData(nsStyleStructID aSID,
       // the context by our caller) as not being owned by the context.
       if (!nsCachedStyleData::IsReset(aSID)) {
         aContext->AddStyleBit(nsCachedStyleData::GetBitForSID(aSID));
+      } else if (HasAnimationData()) {
+        // If we have animation data, the struct should be cached on the style
+        // context so that we can peek the struct.
+        // See comment in AnimValuesStyleRule::MapRuleInfoInto.
+        StoreStyleOnContext(aContext, aSID, const_cast<void*>(data));
       }
+
       return data; // We have a fully specified struct. Just return it.
     }
   }
@@ -10625,6 +10642,15 @@ nsRuleNode::ParentHasPseudoElementData(nsStyleContext* aContext)
 {
   nsStyleContext* parent = aContext->GetParent();
   return parent && parent->HasPseudoElementData();
+}
+
+/* static */ void
+nsRuleNode::StoreStyleOnContext(nsStyleContext* aContext,
+                                nsStyleStructID aSID,
+                                void* aStruct)
+{
+  aContext->AddStyleBit(nsCachedStyleData::GetBitForSID(aSID));
+  aContext->SetStyle(aSID, aStruct);
 }
 
 #ifdef DEBUG

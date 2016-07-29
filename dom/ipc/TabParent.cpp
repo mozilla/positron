@@ -2118,6 +2118,9 @@ TabParent::RecvReplyKeyEvent(const WidgetKeyboardEvent& event)
   nsPresContext* presContext = presShell->GetPresContext();
   NS_ENSURE_TRUE(presContext, true);
 
+  AutoHandlingUserInputStatePusher userInpStatePusher(localEvent.IsTrusted(),
+                                                      &localEvent, doc);
+
   EventDispatcher::Dispatch(mFrameElement, presContext, &localEvent);
   return true;
 }
@@ -2671,7 +2674,7 @@ TabParent::RecvAudioChannelActivityNotification(const uint32_t& aAudioChannel,
 
     os->NotifyObservers(NS_ISUPPORTS_CAST(nsITabParent*, this),
                         topic.get(),
-                        aActive ? MOZ_UTF16("active") : MOZ_UTF16("inactive"));
+                        aActive ? u"active" : u"inactive");
   }
 
   return true;

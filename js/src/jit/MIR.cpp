@@ -4899,10 +4899,11 @@ MAsmJSLoadHeap::congruentTo(const MDefinition* ins) const
 }
 
 MDefinition::AliasType
-MAsmJSLoadGlobalVar::mightAlias(const MDefinition* def) const
+MWasmLoadGlobalVar::mightAlias(const MDefinition* def) const
 {
-    if (def->isAsmJSStoreGlobalVar()) {
-        const MAsmJSStoreGlobalVar* store = def->toAsmJSStoreGlobalVar();
+    if (def->isWasmStoreGlobalVar()) {
+        const MWasmStoreGlobalVar* store = def->toWasmStoreGlobalVar();
+        // Global variables can't alias each other or be type-reinterpreted.
         return (store->globalDataOffset() == globalDataOffset_) ? AliasType::MayAlias :
                                                                   AliasType::NoAlias;
     }
@@ -4910,7 +4911,7 @@ MAsmJSLoadGlobalVar::mightAlias(const MDefinition* def) const
 }
 
 HashNumber
-MAsmJSLoadGlobalVar::valueHash() const
+MWasmLoadGlobalVar::valueHash() const
 {
     HashNumber hash = MDefinition::valueHash();
     hash = addU32ToHash(hash, globalDataOffset_);
@@ -4918,22 +4919,20 @@ MAsmJSLoadGlobalVar::valueHash() const
 }
 
 bool
-MAsmJSLoadGlobalVar::congruentTo(const MDefinition* ins) const
+MWasmLoadGlobalVar::congruentTo(const MDefinition* ins) const
 {
-    if (ins->isAsmJSLoadGlobalVar()) {
-        const MAsmJSLoadGlobalVar* load = ins->toAsmJSLoadGlobalVar();
-        return globalDataOffset_ == load->globalDataOffset_;
-    }
+    if (ins->isWasmLoadGlobalVar())
+        return globalDataOffset_ == ins->toWasmLoadGlobalVar()->globalDataOffset_;
     return false;
 }
 
 MDefinition*
-MAsmJSLoadGlobalVar::foldsTo(TempAllocator& alloc)
+MWasmLoadGlobalVar::foldsTo(TempAllocator& alloc)
 {
-    if (!dependency() || !dependency()->isAsmJSStoreGlobalVar())
+    if (!dependency() || !dependency()->isWasmStoreGlobalVar())
         return this;
 
-    MAsmJSStoreGlobalVar* store = dependency()->toAsmJSStoreGlobalVar();
+    MWasmStoreGlobalVar* store = dependency()->toWasmStoreGlobalVar();
     if (!store->block()->dominates(block()))
         return this;
 
@@ -5361,9 +5360,10 @@ MAsmJSUnsignedToFloat32::foldsTo(TempAllocator& alloc)
 
 MAsmJSCall*
 MAsmJSCall::New(TempAllocator& alloc, const wasm::CallSiteDesc& desc, Callee callee,
-                const Args& args, MIRType resultType, size_t spIncrement)
+                const Args& args, MIRType resultType, size_t spIncrement,
+                bool preservesTlsReg)
 {
-    MAsmJSCall* call = new(alloc) MAsmJSCall(desc, callee, spIncrement);
+    MAsmJSCall* call = new(alloc) MAsmJSCall(desc, callee, spIncrement, preservesTlsReg);
     call->setResultType(resultType);
 
     if (!call->argRegs_.init(alloc, args.length()))

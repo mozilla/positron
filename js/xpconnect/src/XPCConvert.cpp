@@ -519,7 +519,7 @@ XPCConvert::JSData2Native(void* d, HandleValue s,
         nsAString* ws = *((nsAString**)d);
 
         if (!str) {
-            ws->AssignLiteral(MOZ_UTF16("undefined"));
+            ws->AssignLiteral(u"undefined");
         } else if (XPCStringConvert::IsDOMString(str)) {
             // The characters represent an existing nsStringBuffer that
             // was shared by XPCStringConvert::ReadableToJSVal.
@@ -823,18 +823,16 @@ XPCConvert::NativeInterface2JSObject(MutableHandleValue d,
 
     // Go ahead and create an XPCWrappedNative for this object.
     AutoMarkingNativeInterfacePtr iface(cx);
-    if (iid) {
+    if (Interface)
+        iface = *Interface;
+
+    if (!iface) {
+        iface = XPCNativeInterface::GetNewOrUsed(iid);
+        if (!iface)
+            return false;
+
         if (Interface)
-            iface = *Interface;
-
-        if (!iface) {
-            iface = XPCNativeInterface::GetNewOrUsed(iid);
-            if (!iface)
-                return false;
-
-            if (Interface)
-                *Interface = iface;
-        }
+            *Interface = iface;
     }
 
     RefPtr<XPCWrappedNative> wrapper;

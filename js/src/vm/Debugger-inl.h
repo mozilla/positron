@@ -79,22 +79,18 @@ js::Debugger::onNewWasmInstance(JSContext* cx, Handle<WasmInstanceObject*> wasmI
         slowPathOnNewWasmInstance(cx, wasmInstance);
 }
 
+inline bool
+js::Debugger::getScriptFrame(JSContext* cx, const ScriptFrameIter& iter,
+                             MutableHandle<DebuggerFrame*> result)
+{
+    return getScriptFrameWithIter(cx, iter.abstractFramePtr(), &iter, result);
+}
+
 inline js::Debugger*
 js::DebuggerEnvironment::owner() const
 {
     JSObject* dbgobj = &getReservedSlot(OWNER_SLOT).toObject();
     return Debugger::fromJSObject(dbgobj);
-}
-
-inline js::AbstractFramePtr
-js::DebuggerFrame::referent() const
-{
-    AbstractFramePtr frame = AbstractFramePtr::FromRaw(getPrivate());
-    if (frame.isScriptFrameIterData()) {
-        ScriptFrameIter iter(*(ScriptFrameIter::Data*)(frame.raw()));
-        frame = iter.abstractFramePtr();
-    }
-    return frame;
 }
 
 inline js::Debugger*

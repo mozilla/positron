@@ -79,6 +79,10 @@
 #include "mozilla/sandboxing/loggingCallbacks.h"
 #endif
 
+#if defined(MOZ_CONTENT_SANDBOX) && !defined(MOZ_WIDGET_GONK)
+#include "mozilla/Preferences.h"
+#endif
+
 #ifdef MOZ_IPDL_TESTS
 #include "mozilla/_ipdltest/IPDLUnitTests.h"
 #include "mozilla/_ipdltest/IPDLUnitTestProcessChild.h"
@@ -294,6 +298,22 @@ SetTaskbarGroupId(const nsString& aId)
 }
 #endif
 
+#if defined(MOZ_CRASHREPORTER)
+#if defined(MOZ_CONTENT_SANDBOX) && !defined(MOZ_WIDGET_GONK)
+void
+AddContentSandboxLevelAnnotation()
+{
+  if (XRE_GetProcessType() == GeckoProcessType_Content) {
+    int level = Preferences::GetInt("security.sandbox.content.level");
+    nsAutoCString levelString;
+    levelString.AppendInt(level);
+    CrashReporter::AnnotateCrashReport(
+      NS_LITERAL_CSTRING("ContentSandboxLevel"), levelString);
+  }
+}
+#endif /* MOZ_CONTENT_SANDBOX && !MOZ_WIDGET_GONK */
+#endif /* MOZ_CRASHREPORTER */
+
 nsresult
 XRE_InitChildProcess(int aArgc,
                      char* aArgv[],
@@ -303,10 +323,6 @@ XRE_InitChildProcess(int aArgc,
   NS_ENSURE_ARG_POINTER(aArgv);
   NS_ENSURE_ARG_POINTER(aArgv[0]);
   MOZ_ASSERT(aChildData);
-
-#ifdef HAS_DLL_BLOCKLIST
-  DllBlocklist_Initialize();
-#endif
 
 #ifdef MOZ_JPROF
   // Call the code to install our handler
@@ -654,6 +670,12 @@ XRE_InitChildProcess(int aArgc,
 #endif
 
       OverrideDefaultLocaleIfNeeded();
+
+#if defined(MOZ_CRASHREPORTER)
+#if defined(MOZ_CONTENT_SANDBOX) && !defined(MOZ_WIDGET_GONK)
+      AddContentSandboxLevelAnnotation();
+#endif
+#endif
 
       // Run the UI event loop on the main thread.
       uiMessageLoop.MessageLoop::Run();

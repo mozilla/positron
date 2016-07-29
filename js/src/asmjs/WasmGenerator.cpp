@@ -152,6 +152,26 @@ ModuleGenerator::init(UniqueModuleGeneratorData shared, CompileArgs&& args,
             if (!allocateGlobalBytes(sizeof(void*), sizeof(void*), &table.globalDataOffset))
                 return false;
         }
+
+        for (uint32_t i = 0; i < numSigs_; i++) {
+            SigWithId& sig = shared_->sigs[i];
+            if (SigIdDesc::isGlobal(sig)) {
+                uint32_t globalDataOffset;
+                if (!allocateGlobalBytes(sizeof(void*), sizeof(void*), &globalDataOffset))
+                    return false;
+
+                sig.id = SigIdDesc::global(sig, globalDataOffset);
+
+                Sig copy;
+                if (!copy.clone(sig))
+                    return false;
+
+                if (!metadata_->sigIds.emplaceBack(Move(copy), sig.id))
+                    return false;
+            } else {
+                sig.id = SigIdDesc::immediate(sig);
+            }
+        }
     } else {
         MOZ_ASSERT(shared_->sigs.length() == MaxSigs);
         MOZ_ASSERT(shared_->tables.length() == MaxTables);
@@ -341,9 +361,6 @@ ModuleGenerator::finishTask(IonCompileTask* task)
     return true;
 }
 
-typedef Vector<Offsets, 0, SystemAllocPolicy> OffsetVector;
-typedef Vector<ProfilingOffsets, 0, SystemAllocPolicy> ProfilingOffsetVector;
-
 bool
 ModuleGenerator::finishFuncExports()
 {
@@ -375,6 +392,9 @@ ModuleGenerator::finishFuncExports()
 
     return true;
 }
+
+typedef Vector<Offsets, 0, SystemAllocPolicy> OffsetVector;
+typedef Vector<ProfilingOffsets, 0, SystemAllocPolicy> ProfilingOffsetVector;
 
 bool
 ModuleGenerator::finishCodegen()
@@ -517,8 +537,7 @@ ModuleGenerator::finishLinkData(Bytes& code)
     // Global data accesses in x86 need to be patched with the absolute
     // address of the global. Globals are allocated sequentially after the
     // code section so we can just use an InternalLink.
-    for (size_t i = 0; i < masm_.numAsmJSGlobalAccesses(); i++) {
-        AsmJSGlobalAccess a = masm_.asmJSGlobalAccess(i);
+    for (GlobalAccess a : masm_.globalAccesses()) {
         LinkData::InternalLink inLink(LinkData::InternalLink::RawPointer);
         inLink.patchAtOffset = masm_.labelToPatchOffset(a.patchAt);
         inLink.targetOffset = code.length() + a.globalDataOffset;
@@ -528,15 +547,14 @@ ModuleGenerator::finishLinkData(Bytes& code)
 #elif defined(JS_CODEGEN_X64)
     // Global data accesses on x64 use rip-relative addressing and thus we can
     // patch here, now that we know the final codeLength.
-    for (size_t i = 0; i < masm_.numAsmJSGlobalAccesses(); i++) {
-        AsmJSGlobalAccess a = masm_.asmJSGlobalAccess(i);
+    for (GlobalAccess a : masm_.globalAccesses()) {
         void* from = code.begin() + a.patchAt.offset();
         void* to = code.end() + a.globalDataOffset;
         X86Encoding::SetRel32(from, to);
     }
 #else
     // Global access is performed using the GlobalReg and requires no patching.
-    MOZ_ASSERT(masm_.numAsmJSGlobalAccesses() == 0);
+    MOZ_ASSERT(masm_.globalAccesses().length() == 0);
 #endif
 
     return true;
@@ -618,7 +636,7 @@ ModuleGenerator::initSig(uint32_t sigIndex, Sig&& sig)
     shared_->sigs[sigIndex] = Move(sig);
 }
 
-const DeclaredSig&
+const SigWithId&
 ModuleGenerator::sig(uint32_t index) const
 {
     MOZ_ASSERT(index < numSigs_);
@@ -652,7 +670,7 @@ ModuleGenerator::bumpMinMemoryLength(uint32_t newMinMemoryLength)
     shared_->minMemoryLength = newMinMemoryLength;
 }
 
-const DeclaredSig&
+const SigWithId&
 ModuleGenerator::funcSig(uint32_t funcIndex) const
 {
     MOZ_ASSERT(shared_->funcSigs[funcIndex]);

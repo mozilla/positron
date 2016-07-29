@@ -5,8 +5,10 @@
 
 include protocol PCompositorBridge;
 include protocol PImageBridge;
+include protocol PVRManager;
 include protocol PVsyncBridge;
 
+using mozilla::TimeDuration from "mozilla/TimeStamp.h";
 using mozilla::CSSToLayoutDeviceScale from "Units.h";
 using mozilla::gfx::IntSize from "mozilla/gfx/2D.h";
 
@@ -33,6 +35,7 @@ parent:
 
   async InitVsyncBridge(Endpoint<PVsyncBridgeParent> endpoint);
   async InitImageBridge(Endpoint<PImageBridgeParent> endpoint);
+  async InitVRManager(Endpoint<PVRManagerParent> endpoint);
 
   // Called to update a gfx preference.
   async UpdatePref(GfxPrefSetting pref);
@@ -40,12 +43,14 @@ parent:
   // Create a new top-level compositor.
   async NewWidgetCompositor(Endpoint<PCompositorBridgeParent> endpoint,
                             CSSToLayoutDeviceScale scale,
+                            TimeDuration vsyncRate,
                             bool useExternalSurface,
                             IntSize surfaceSize);
 
   // Create a new content-process compositor bridge.
   async NewContentCompositorBridge(Endpoint<PCompositorBridgeParent> endpoint);
   async NewContentImageBridge(Endpoint<PImageBridgeParent> endpoint);
+  async NewContentVRManager(Endpoint<PVRManagerParent> endpoint);
 };
 
 } // namespace gfx
