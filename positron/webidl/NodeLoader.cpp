@@ -13,7 +13,7 @@
 #include "nsDirectoryServiceDefs.h"
 #include "node.h"
 #include "uv.h"
-#include "env.h"
+#include "env-inl.h"
 #include "jsapi.h"
 #include "nsString.h"
 #include "nsAppRunner.h"
@@ -96,9 +96,9 @@ NS_IMETHODIMP NodeLoader::Init(JSContext* aContext)
   argv[1] = copy;
   node::Init(&argc, const_cast<const char**>(argv),  &exec_argc, &exec_argv);
 
+  node::IsolateData* isolateData = node::CreateIsolateData(isolate, uv_default_loop());
   node::Environment* env = node::CreateEnvironment(
-    isolate,
-    uv_default_loop(),
+    isolateData,
     context,
     argc, argv, 0, nullptr);
 
