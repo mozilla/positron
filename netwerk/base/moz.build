@@ -48,6 +48,7 @@ XPIDL_SOURCES += [
     'nsIFileURL.idl',
     'nsIForcePendingChannel.idl',
     'nsIFormPOSTActionChannel.idl',
+    'nsIHttpAuthenticatorCallback.idl',
     'nsIHttpPushListener.idl',
     'nsIIncrementalDownload.idl',
     'nsIIncrementalStreamLoader.idl',
@@ -134,6 +135,7 @@ XPIDL_SOURCES += [
     'nsIUploadChannel2.idl',
     'nsIURI.idl',
     'nsIURIClassifier.idl',
+    'nsIURIWithBlobImpl.idl',
     'nsIURIWithPrincipal.idl',
     'nsIURL.idl',
     'nsIURLParser.idl',
@@ -287,17 +289,7 @@ elif CONFIG['MOZ_WIDGET_TOOLKIT'] == 'cocoa':
         'NetworkInfoServiceCocoa.cpp',
         'nsNetworkInfoService.cpp',
     ]
-elif CONFIG['OS_TARGET'] == 'Linux':
-    SOURCES += [
-        'NetworkInfoServiceLinux.cpp',
-        'nsNetworkInfoService.cpp',
-    ]
-elif CONFIG['MOZ_WIDGET_TOOLKIT'] == 'android':
-    SOURCES += [
-        'NetworkInfoServiceLinux.cpp',
-        'nsNetworkInfoService.cpp',
-    ]
-elif CONFIG['MOZ_WIDGET_TOOLKIT'] == 'gonk':
+elif CONFIG['OS_ARCH'] == 'Linux':
     SOURCES += [
         'NetworkInfoServiceLinux.cpp',
         'nsNetworkInfoService.cpp',

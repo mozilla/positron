@@ -118,8 +118,6 @@
 #endif
 #include "mozilla/dom/ContentChild.h"
 
-#include "mozilla/dom/FeatureList.h"
-
 #ifdef MOZ_EME
 #include "mozilla/EMEUtils.h"
 #include "mozilla/DetailedPromise.h"
@@ -1454,10 +1452,9 @@ Navigator::SendBeacon(const nsAString& aUrl,
 
   RefPtr<BeaconStreamListener> beaconListener = new BeaconStreamListener();
   rv = channel->AsyncOpen2(beaconListener);
-  if (NS_FAILED(rv)) {
-    aRv.Throw(rv);
-    return false;
-  }
+  // do not throw if security checks fail within asyncOpen2
+  NS_ENSURE_SUCCESS(rv, false);
+
   // make the beaconListener hold a strong reference to the loadgroup
   // which is released in ::OnStartRequest
   beaconListener->SetLoadGroup(loadGroup);
@@ -1793,11 +1790,7 @@ Navigator::HasFeature(const nsAString& aName, ErrorResult& aRv)
       return p.forget();
     }
 
-    if (IsFeatureDetectible(featureName)) {
-      p->MaybeResolve(true);
-    } else {
-      p->MaybeResolve(JS::UndefinedHandleValue);
-    }
+    p->MaybeResolve(JS::UndefinedHandleValue);
     return p.forget();
   }
 

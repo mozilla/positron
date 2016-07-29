@@ -542,12 +542,24 @@ GlyphObserver::NotifyGlyphsChanged()
       break;
     }
     f->InvalidateFrame();
-    // Theoretically we could just update overflow areas, perhaps using
-    // OverflowChangedTracker, but that would do a bunch of work eagerly that
-    // we should probably do lazily here since there could be a lot
-    // of text frames affected and we'd like to coalesce the work. So that's
-    // not easy to do well.
-    shell->FrameNeedsReflow(f, nsIPresShell::eResize, NS_FRAME_IS_DIRTY);
+
+    // If this is a non-display text frame within SVG <text>, we need
+    // to reflow the SVGTextFrame. (This is similar to reflowing the
+    // SVGTextFrame in response to style changes, in
+    // SVGTextFrame::DidSetStyleContext.)
+    if (f->IsSVGText() && f->GetStateBits() & NS_FRAME_IS_NONDISPLAY) {
+      auto svgTextFrame = static_cast<SVGTextFrame*>(
+                            nsLayoutUtils::GetClosestFrameOfType(f,
+                            nsGkAtoms::svgTextFrame));
+      svgTextFrame->ScheduleReflowSVGNonDisplayText();
+    } else {
+      // Theoretically we could just update overflow areas, perhaps using
+      // OverflowChangedTracker, but that would do a bunch of work eagerly that
+      // we should probably do lazily here since there could be a lot
+      // of text frames affected and we'd like to coalesce the work. So that's
+      // not easy to do well.
+      shell->FrameNeedsReflow(f, nsIPresShell::eResize, NS_FRAME_IS_DIRTY);
+    }
   }
 }
 
@@ -4790,8 +4802,16 @@ nsDisplayText::Paint(nsDisplayListBuilder* aBuilder,
   nsTextFrame::PaintTextParams params(aCtx->ThebesContext());
   params.framePt = gfxPoint(framePt.x, framePt.y);
   params.dirtyRect = extraVisible;
-  params.generateTextMask = aBuilder->IsForGenerateGlyphMask();
-  params.paintSelectionBackground = aBuilder->IsForPaintingSelectionBG();
+
+  if (aBuilder->IsForGenerateGlyphMask()) {
+    MOZ_ASSERT(!aBuilder->IsForPaintingSelectionBG());
+    params.state = nsTextFrame::PaintTextParams::GenerateTextMask;
+  } else if (aBuilder->IsForPaintingSelectionBG()) {
+    params.state = nsTextFrame::PaintTextParams::PaintTextBGColor;
+  } else {
+    params.state = nsTextFrame::PaintTextParams::PaintText;
+  }
+
   f->PaintText(params, *this, mOpacity);
 }
 
@@ -5991,8 +6011,7 @@ nsTextFrame::PaintTextWithSelectionColors(
   Range range; // in transformed string
   TextRangeStyle rangeStyle;
   // Draw background colors
-  if (anyBackgrounds && (!aParams.generateTextMask ||
-                         aParams.paintSelectionBackground)) {
+  if (anyBackgrounds && !aParams.IsGenerateTextMask()) {
     int32_t appUnitsPerDevPixel =
       aParams.textPaintStyle->PresContext()->AppUnitsPerDevPixel();
     SelectionIterator iterator(prevailingSelections, contentRange,
@@ -6025,7 +6044,7 @@ nsTextFrame::PaintTextWithSelectionColors(
     }
   }
 
-  if (aParams.paintSelectionBackground) {
+  if (aParams.IsPaintBGColor()) {
     return true;
   }
 
@@ -6051,7 +6070,7 @@ nsTextFrame::PaintTextWithSelectionColors(
   while (iterator.GetNextSegment(&iOffset, &range, &hyphenWidth,
                                  &selectionType, &rangeStyle)) {
     nscolor foreground, background;
-    if (aParams.generateTextMask) {
+    if (aParams.IsGenerateTextMask()) {
       foreground = NS_RGBA(0, 0, 0, 255);
     } else {
       GetSelectionTextColors(selectionType, *aParams.textPaintStyle,
@@ -6584,8 +6603,7 @@ nsTextFrame::PaintText(const PaintTextParams& aParams,
 
   // Fork off to the (slower) paint-with-selection path if necessary.
   if (aItem.mIsFrameSelected.value() &&
-      (aParams.paintSelectionBackground ||
-       ShouldDrawSelection(this->GetParent()))) {
+      (aParams.IsPaintBGColor() || ShouldDrawSelection(this->GetParent()))) {
     MOZ_ASSERT(aOpacity == 1.0f, "We don't support opacity with selections!");
     gfxSkipCharsIterator tmp(provider.GetStart());
     Range contentRange(
@@ -6601,11 +6619,11 @@ nsTextFrame::PaintText(const PaintTextParams& aParams,
     }
   }
 
-  if (aParams.paintSelectionBackground) {
+  if (aParams.IsPaintBGColor()) {
     return;
   }
 
-  nscolor foregroundColor = aParams.generateTextMask
+  nscolor foregroundColor = aParams.IsGenerateTextMask()
                             ? NS_RGBA(0, 0, 0, 255)
                             : textPaintStyle.GetTextColor();
   if (aOpacity != 1.0f) {
@@ -6614,7 +6632,7 @@ nsTextFrame::PaintText(const PaintTextParams& aParams,
     foregroundColor = gfxColor.ToABGR();
   }
 
-  nscolor textStrokeColor = aParams.generateTextMask
+  nscolor textStrokeColor = aParams.IsGenerateTextMask()
                             ? NS_RGBA(0, 0, 0, 255)
                             : textPaintStyle.GetWebkitTextStrokeColor();
   if (aOpacity != 1.0f) {
@@ -6624,7 +6642,7 @@ nsTextFrame::PaintText(const PaintTextParams& aParams,
   }
 
   range = Range(startOffset, startOffset + maxLength);
-  if (!aParams.callbacks) {
+  if (!aParams.callbacks && aParams.IsPaintText()) {
     const nsStyleText* textStyle = StyleText();
     PaintShadowParams shadowParams(aParams);
     shadowParams.range = range;
@@ -6679,12 +6697,15 @@ DrawTextRun(gfxTextRun* aTextRun,
 
     if (NS_GET_A(aParams.textStrokeColor) != 0 &&
         aParams.textStrokeWidth != 0.0f) {
+      StrokeOptions strokeOpts;
       params.drawMode |= DrawMode::GLYPH_STROKE;
-      params.textStrokeWidth = aParams.textStrokeWidth;
       params.textStrokeColor = aParams.textStrokeColor;
+      strokeOpts.mLineWidth = aParams.textStrokeWidth;
+      params.strokeOpts = &strokeOpts;
+      aTextRun->Draw(aRange, aTextBaselinePt, params);
+    } else {
+      aTextRun->Draw(aRange, aTextBaselinePt, params);
     }
-
-    aTextRun->Draw(aRange, aTextBaselinePt, params);
   }
 }
 

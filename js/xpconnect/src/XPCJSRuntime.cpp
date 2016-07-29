@@ -1657,7 +1657,7 @@ XPCJSRuntime::~XPCJSRuntime()
 
     JS::SetGCSliceCallback(Context(), mPrevGCSliceCallback);
 
-    xpc_DelocalizeRuntime(Runtime());
+    xpc_DelocalizeContext(Context());
 
     if (mWatchdogManager->GetWatchdog())
         mWatchdogManager->StopWatchdog();
@@ -1665,9 +1665,9 @@ XPCJSRuntime::~XPCJSRuntime()
     if (mCallContext)
         mCallContext->SystemIsBeingShutDown();
 
-    auto rtPrivate = static_cast<PerThreadAtomCache*>(JS_GetRuntimePrivate(Runtime()));
+    auto rtPrivate = static_cast<PerThreadAtomCache*>(JS_GetContextPrivate(Context()));
     delete rtPrivate;
-    JS_SetRuntimePrivate(Runtime(), nullptr);
+    JS_SetContextPrivate(Context(), nullptr);
 
     // clean up and destroy maps...
     mWrappedJSMap->ShutdownMarker();
@@ -3232,10 +3232,6 @@ AccumulateTelemetryCallback(int id, uint32_t sample, const char* key)
       case JS_TELEMETRY_ADDON_EXCEPTIONS:
         Telemetry::Accumulate(Telemetry::JS_TELEMETRY_ADDON_EXCEPTIONS, nsDependentCString(key), sample);
         break;
-      case JS_TELEMETRY_DEFINE_GETTER_SETTER_THIS_NULL_UNDEFINED:
-        MOZ_ASSERT(sample == 0 || sample == 1);
-        Telemetry::Accumulate(Telemetry::JS_DEFINE_GETTER_SETTER_THIS_NULL_UNDEFINED, sample);
-        break;
       default:
         MOZ_ASSERT_UNREACHABLE("Unexpected JS_TELEMETRY id");
     }
@@ -3463,9 +3459,9 @@ XPCJSRuntime::Initialize()
     // these jsids filled in later when we have a JSContext to work with.
     mStrIDs[0] = JSID_VOID;
 
-    auto rtPrivate = new PerThreadAtomCache();
-    memset(rtPrivate, 0, sizeof(PerThreadAtomCache));
-    JS_SetRuntimePrivate(runtime, rtPrivate);
+    auto cxPrivate = new PerThreadAtomCache();
+    memset(cxPrivate, 0, sizeof(PerThreadAtomCache));
+    JS_SetContextPrivate(cx, cxPrivate);
 
     // Unconstrain the runtime's threshold on nominal heap size, to avoid
     // triggering GC too often if operating continuously near an arbitrary
@@ -3593,11 +3589,11 @@ XPCJSRuntime::Initialize()
     UniquePtr<XPCJSSourceHook> hook(new XPCJSSourceHook);
     js::SetSourceHook(cx, Move(hook));
 
-    // Set up locale information and callbacks for the newly-created runtime so
+    // Set up locale information and callbacks for the newly-created context so
     // that the various toLocaleString() methods, localeCompare(), and other
     // internationalization APIs work as desired.
-    if (!xpc_LocalizeRuntime(runtime))
-        NS_RUNTIMEABORT("xpc_LocalizeRuntime failed.");
+    if (!xpc_LocalizeContext(cx))
+        NS_RUNTIMEABORT("xpc_LocalizeContext failed.");
 
     // Register memory reporters and distinguished amount functions.
     RegisterStrongMemoryReporter(new JSMainRuntimeCompartmentsReporter());

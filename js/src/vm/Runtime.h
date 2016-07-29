@@ -970,29 +970,9 @@ struct JSRuntime : public JS::shadow::Runtime,
      */
     JSCList             onNewGlobalObjectWatchers;
 
-    /* Client opaque pointers */
-    void*               data;
-
 #if defined(XP_DARWIN) && defined(ASMJS_MAY_USE_SIGNAL_HANDLERS)
     js::wasm::MachExceptionHandler wasmMachExceptionHandler;
 #endif
-
-  private:
-    // Whether EnsureSignalHandlersInstalled succeeded in installing all the
-    // relevant handlers for this platform.
-    bool signalHandlersInstalled_;
-
-    // Whether we should use them or they have been disabled for making
-    // debugging easier. If signal handlers aren't installed, it is set to false.
-    bool canUseSignalHandlers_;
-
-  public:
-    bool canUseSignalHandlers() const {
-        return canUseSignalHandlers_;
-    }
-    void setCanUseSignalHandlers(bool enable) {
-        canUseSignalHandlers_ = signalHandlersInstalled_ && enable;
-    }
 
   private:
     js::FreeOp          defaultFreeOp_;

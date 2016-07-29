@@ -1198,6 +1198,20 @@ public:
 
     static auto NotifyDefaultPrevented(bool) -> void;
 
+    struct NotifyUriVisited_t {
+        typedef GeckoAppShell Owner;
+        typedef void ReturnType;
+        typedef void SetterType;
+        typedef mozilla::jni::Args<
+                mozilla::jni::String::Param> Args;
+        static constexpr char name[] = "notifyUriVisited";
+        static constexpr char signature[] =
+                "(Ljava/lang/String;)V";
+        static const bool isStatic = true;
+        static const mozilla::jni::ExceptionMode exceptionMode =
+                mozilla::jni::ExceptionMode::ABORT;
+    };
+
     struct NotifyWakeLockChanged_t {
         typedef GeckoAppShell Owner;
         typedef void ReturnType;
@@ -2836,100 +2850,6 @@ public:
     static const bool isMultithreaded = false;
 
     template<class Impl> class Natives;
-};
-
-class SurfaceBits : public mozilla::jni::ObjectBase<SurfaceBits, jobject>
-{
-public:
-    static const char name[];
-
-    explicit SurfaceBits(const Context& ctx) : ObjectBase<SurfaceBits, jobject>(ctx) {}
-
-    struct New_t {
-        typedef SurfaceBits Owner;
-        typedef SurfaceBits::LocalRef ReturnType;
-        typedef SurfaceBits::Param SetterType;
-        typedef mozilla::jni::Args<> Args;
-        static constexpr char name[] = "<init>";
-        static constexpr char signature[] =
-                "()V";
-        static const bool isStatic = false;
-        static const mozilla::jni::ExceptionMode exceptionMode =
-                mozilla::jni::ExceptionMode::ABORT;
-    };
-
-    static auto New() -> SurfaceBits::LocalRef;
-
-    struct Buffer_t {
-        typedef SurfaceBits Owner;
-        typedef mozilla::jni::Object::LocalRef ReturnType;
-        typedef mozilla::jni::Object::Param SetterType;
-        typedef mozilla::jni::Args<> Args;
-        static constexpr char name[] = "buffer";
-        static constexpr char signature[] =
-                "Ljava/nio/ByteBuffer;";
-        static const bool isStatic = false;
-        static const mozilla::jni::ExceptionMode exceptionMode =
-                mozilla::jni::ExceptionMode::ABORT;
-    };
-
-    auto Buffer() const -> mozilla::jni::Object::LocalRef;
-
-    auto Buffer(mozilla::jni::Object::Param) const -> void;
-
-    struct Format_t {
-        typedef SurfaceBits Owner;
-        typedef int32_t ReturnType;
-        typedef int32_t SetterType;
-        typedef mozilla::jni::Args<> Args;
-        static constexpr char name[] = "format";
-        static constexpr char signature[] =
-                "I";
-        static const bool isStatic = false;
-        static const mozilla::jni::ExceptionMode exceptionMode =
-                mozilla::jni::ExceptionMode::ABORT;
-    };
-
-    auto Format() const -> int32_t;
-
-    auto Format(int32_t) const -> void;
-
-    struct Height_t {
-        typedef SurfaceBits Owner;
-        typedef int32_t ReturnType;
-        typedef int32_t SetterType;
-        typedef mozilla::jni::Args<> Args;
-        static constexpr char name[] = "height";
-        static constexpr char signature[] =
-                "I";
-        static const bool isStatic = false;
-        static const mozilla::jni::ExceptionMode exceptionMode =
-                mozilla::jni::ExceptionMode::ABORT;
-    };
-
-    auto Height() const -> int32_t;
-
-    auto Height(int32_t) const -> void;
-
-    struct Width_t {
-        typedef SurfaceBits Owner;
-        typedef int32_t ReturnType;
-        typedef int32_t SetterType;
-        typedef mozilla::jni::Args<> Args;
-        static constexpr char name[] = "width";
-        static constexpr char signature[] =
-                "I";
-        static const bool isStatic = false;
-        static const mozilla::jni::ExceptionMode exceptionMode =
-                mozilla::jni::ExceptionMode::ABORT;
-    };
-
-    auto Width() const -> int32_t;
-
-    auto Width(int32_t) const -> void;
-
-    static const bool isMultithreaded = true;
-
 };
 
 class ThumbnailHelper : public mozilla::jni::ObjectBase<ThumbnailHelper, jobject>

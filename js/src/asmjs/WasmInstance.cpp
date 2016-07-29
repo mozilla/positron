@@ -47,9 +47,17 @@ Instance::addressOfMemoryBase() const
     return (uint8_t**)(codeSegment_->globalData() + HeapGlobalDataOffset);
 }
 
+void**
+Instance::addressOfTableBase(size_t tableIndex) const
+{
+    MOZ_ASSERT(metadata_->tables[tableIndex].globalDataOffset >= InitialGlobalDataBytes);
+    return (void**)(codeSegment_->globalData() + metadata_->tables[tableIndex].globalDataOffset);
+}
+
 FuncImportExit&
 Instance::funcImportToExit(const FuncImport& fi)
 {
+    MOZ_ASSERT(fi.exitGlobalDataOffset() >= InitialGlobalDataBytes);
     return *(FuncImportExit*)(codeSegment_->globalData() + fi.exitGlobalDataOffset());
 }
 
@@ -111,13 +119,17 @@ Instance::toggleProfiling(JSContext* cx)
         funcLabels_.clear();
     }
 
-    // Homogeneous table elements point directly to the prologue and must be
-    // updated to reflect the profiling mode. In wasm, table elements point to
-    // the (one) table entry which checks signature before jumping to the
-    // appropriate prologue (which is patched by ToggleProfiling).
-    for (const TypedFuncTable& table : typedFuncTables_) {
-        auto array = reinterpret_cast<void**>(codeSegment_->globalData() + table.globalDataOffset);
-        for (size_t i = 0; i < table.numElems; i++) {
+    // Typed-function tables' elements point directly to either the profiling or
+    // non-profiling prologue and must therefore be updated when the profiling
+    // mode is toggled.
+
+    for (const SharedTable& table : tables_) {
+        if (!table->isTypedFunction())
+            continue;
+
+        void** array = table->array();
+        uint32_t length = table->length();
+        for (size_t i = 0; i < length; i++) {
             const CodeRange* codeRange = lookupCodeRange(array[i]);
             void* from = codeSegment_->code() + codeRange->funcNonProfilingEntry();
             void* to = codeSegment_->code() + codeRange->funcProfilingEntry();
@@ -348,17 +360,19 @@ Instance::callImport_f64(int32_t funcImportIndex, int32_t argc, uint64_t* argv)
 Instance::Instance(UniqueCodeSegment codeSegment,
                    const Metadata& metadata,
                    const ShareableBytes* maybeBytecode,
-                   TypedFuncTableVector&& typedFuncTables,
                    HandleWasmMemoryObject memory,
+                   SharedTableVector&& tables,
                    Handle<FunctionVector> funcImports)
   : codeSegment_(Move(codeSegment)),
     metadata_(&metadata),
     maybeBytecode_(maybeBytecode),
-    typedFuncTables_(Move(typedFuncTables)),
     memory_(memory),
+    tables_(Move(tables)),
     profilingEnabled_(false)
 {
     MOZ_ASSERT(funcImports.length() == metadata.funcImports.length());
+    MOZ_ASSERT(tables_.length() == metadata.tables.length());
+
     for (size_t i = 0; i < metadata.funcImports.length(); i++) {
         const FuncImport& fi = metadata.funcImports[i];
         FuncImportExit& exit = funcImportToExit(fi);
@@ -369,6 +383,9 @@ Instance::Instance(UniqueCodeSegment codeSegment,
 
     if (memory)
         *addressOfMemoryBase() = memory->buffer().dataPointerEither().unwrap();
+
+    for (size_t i = 0; i < tables_.length(); i++)
+        *addressOfTableBase(i) = tables_[i]->array();
 }
 
 Instance::~Instance()
@@ -403,9 +420,9 @@ Instance::memoryLength() const
 }
 
 bool
-Instance::callExport(JSContext* cx, uint32_t exportIndex, CallArgs args)
+Instance::callExport(JSContext* cx, uint32_t funcIndex, CallArgs args)
 {
-    const Export& exp = metadata_->exports[exportIndex];
+    const FuncExport& func = metadata_->lookupFuncExport(funcIndex);
 
     // Enable/disable profiling in the Module to match the current global
     // profiling state. Don't do this if the Module is already active on the
@@ -425,13 +442,13 @@ Instance::callExport(JSContext* cx, uint32_t exportIndex, CallArgs args)
     // value is stored in the first element of the array (which, therefore, must
     // have length >= 1).
     Vector<ExportArg, 8> exportArgs(cx);
-    if (!exportArgs.resize(Max<size_t>(1, exp.sig().args().length())))
+    if (!exportArgs.resize(Max<size_t>(1, func.sig().args().length())))
         return false;
 
     RootedValue v(cx);
-    for (unsigned i = 0; i < exp.sig().args().length(); ++i) {
+    for (unsigned i = 0; i < func.sig().args().length(); ++i) {
         v = i < args.length() ? args[i] : UndefinedValue();
-        switch (exp.sig().arg(i)) {
+        switch (func.sig().arg(i)) {
           case ValType::I32:
             if (!ToInt32(cx, v, (int32_t*)&exportArgs[i]))
                 return false;
@@ -516,7 +533,7 @@ Instance::callExport(JSContext* cx, uint32_t exportIndex, CallArgs args)
         JitActivation jitActivation(cx, /* active */ false);
 
         // Call the per-exported-function trampoline created by GenerateEntry.
-        auto funcPtr = JS_DATA_TO_FUNC_PTR(ExportFuncPtr, codeSegment_->code() + exp.stubOffset());
+        auto funcPtr = JS_DATA_TO_FUNC_PTR(ExportFuncPtr, codeSegment_->code() + func.entryOffset());
         if (!CALL_GENERATED_2(funcPtr, exportArgs.begin(), codeSegment_->globalData()))
             return false;
     }
@@ -535,7 +552,7 @@ Instance::callExport(JSContext* cx, uint32_t exportIndex, CallArgs args)
 
     void* retAddr = &exportArgs[0];
     JSObject* retObj = nullptr;
-    switch (exp.sig().ret()) {
+    switch (func.sig().ret()) {
       case ExprType::Void:
         args.rval().set(UndefinedValue());
         break;
@@ -725,13 +742,17 @@ void
 Instance::addSizeOfMisc(MallocSizeOf mallocSizeOf,
                         Metadata::SeenSet* seenMetadata,
                         ShareableBytes::SeenSet* seenBytes,
-                        size_t* code, size_t* data) const
+                        Table::SeenSet* seenTables,
+                        size_t* code,
+                        size_t* data) const
 {
     *code += codeSegment_->codeLength();
     *data += mallocSizeOf(this) +
              codeSegment_->globalDataLength() +
-             metadata_->sizeOfIncludingThisIfNotSeen(mallocSizeOf, seenMetadata) +
-             typedFuncTables_.sizeOfExcludingThis(mallocSizeOf);
+             metadata_->sizeOfIncludingThisIfNotSeen(mallocSizeOf, seenMetadata);
+
+    for (const SharedTable& table : tables_)
+         *data += table->sizeOfIncludingThisIfNotSeen(mallocSizeOf, seenTables);
 
     if (maybeBytecode_)
         *data += maybeBytecode_->sizeOfIncludingThisIfNotSeen(mallocSizeOf, seenBytes);

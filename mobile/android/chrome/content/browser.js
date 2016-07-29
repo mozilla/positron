@@ -133,7 +133,7 @@ var lazilyLoadedBrowserScripts = [
   ["CastingApps", "chrome://browser/content/CastingApps.js"],
   ["RemoteDebugger", "chrome://browser/content/RemoteDebugger.js"],
 ];
-if (AppConstants.NIGHTLY_BUILD) {
+if (!AppConstants.RELEASE_BUILD) {
   lazilyLoadedBrowserScripts.push(
     ["WebcompatReporter", "chrome://browser/content/WebcompatReporter.js"]);
 }
@@ -531,7 +531,7 @@ var BrowserApp = {
       InitLater(() => Services.obs.notifyObservers(window, "browser-delayed-startup-finished", ""));
       InitLater(() => Messaging.sendRequest({ type: "Gecko:DelayedStartup" }));
 
-      if (AppConstants.NIGHTLY_BUILD) {
+      if (!AppConstants.RELEASE_BUILD) {
         InitLater(() => WebcompatReporter.init());
       }
 
@@ -4693,7 +4693,6 @@ var BrowserEventHandler = {
 
     BrowserApp.deck.addEventListener("DOMUpdatePageReport", PopupBlockerObserver.onUpdatePageReport, false);
     BrowserApp.deck.addEventListener("MozMouseHittest", this, true);
-    BrowserApp.deck.addEventListener("OpenMediaWithExternalApp", this, true);
 
     InitLater(() => BrowserApp.deck.addEventListener("click", InputWidgetHelper, true));
     InitLater(() => BrowserApp.deck.addEventListener("click", SelectHelper, true));
@@ -4716,9 +4715,6 @@ var BrowserEventHandler = {
         break;
       case 'MozMouseHittest':
         this._handleRetargetedTouchStart(aEvent);
-        break;
-      case 'OpenMediaWithExternalApp':
-        ExternalApps.openExternal(aEvent.target);
         break;
     }
   },

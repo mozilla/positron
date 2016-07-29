@@ -87,7 +87,7 @@ public:
     return Trap(BlockedSyscallTrap, nullptr);
   }
 
-  virtual ResultExpr ClonePolicy() const {
+  virtual ResultExpr ClonePolicy(ResultExpr failPolicy) const {
     // Allow use for simple thread creation (pthread_create) only.
 
     // WARNING: s390 and cris pass the flags in the second arg -- see
@@ -113,7 +113,7 @@ public:
       .Case(flags_common, Allow()) // JB 4.3 or KK 4.4
 #endif
       .Case(flags_modern, Allow()) // Android L or glibc
-      .Default(InvalidSyscall());
+      .Default(failPolicy);
   }
 
   virtual ResultExpr PrctlPolicy() const {
@@ -187,6 +187,7 @@ public:
       // Simple I/O
     case __NR_write:
     case __NR_read:
+    case __NR_readv:
     case __NR_writev: // see SandboxLogging.cpp
     CASES_FOR_lseek:
       return Allow();
@@ -224,7 +225,7 @@ public:
 
       // Thread creation.
     case __NR_clone:
-      return ClonePolicy();
+      return ClonePolicy(InvalidSyscall());
 
       // More thread creation.
 #ifdef __NR_set_robust_list
@@ -438,6 +439,7 @@ public:
     case SYS_SOCKET: // DANGEROUS
     case SYS_CONNECT: // DANGEROUS
     case SYS_ACCEPT:
+    case SYS_ACCEPT4:
     case SYS_BIND:
     case SYS_LISTEN:
     case SYS_GETSOCKOPT:
@@ -463,6 +465,10 @@ public:
     case SHMCTL:
     case SHMAT:
     case SHMDT:
+    case SEMGET:
+    case SEMCTL:
+    case SEMOP:
+    case MSGGET:
       return Some(Allow());
     default:
       return SandboxPolicyCommon::EvaluateIpcCall(aCall);
@@ -517,8 +523,9 @@ public:
     case __NR_symlink:
     case __NR_quotactl:
     case __NR_utimes:
+    case __NR_link:
     case __NR_unlink:
-    case __NR_fchown:
+    CASES_FOR_fchown:
     case __NR_fchmod:
 #endif
       return Allow();
@@ -639,10 +646,18 @@ public:
     }
 #endif
 
-#ifdef __NR_semget
-    case __NR_semget:
+    case __NR_mlock:
+    case __NR_munlock:
       return Allow();
-#endif
+
+      // We can't usefully allow fork+exec, even on a temporary basis;
+      // the child would inherit the seccomp-bpf policy and almost
+      // certainly die from an unexpected SIGSYS.  We also can't have
+      // fork() crash, currently, because there are too many system
+      // libraries/plugins that try to run commands.  But they can
+      // usually do something reasonable on error.
+    case __NR_clone:
+      return ClonePolicy(Error(EPERM));
 
 #endif // DESKTOP
 

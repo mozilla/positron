@@ -9,6 +9,8 @@
 
 #include "stdint.h"
 #include "nsColor.h"
+#include "nsStyleStruct.h"
+#include "nsStyleCoord.h"
 #include "mozilla/css/SheetParsingMode.h"
 #include "nsProxyRelease.h"
 
@@ -176,6 +178,30 @@ void Gecko_SetMozBinding(nsStyleDisplay* style_struct,
                          ThreadSafePrincipalHolder* principal);
 void Gecko_CopyMozBindingFrom(nsStyleDisplay* des, const nsStyleDisplay* src);
 
+// Dirtiness tracking.
+uint32_t Gecko_GetNodeFlags(RawGeckoNode* node);
+void Gecko_SetNodeFlags(RawGeckoNode* node, uint32_t flags);
+void Gecko_UnsetNodeFlags(RawGeckoNode* node, uint32_t flags);
+
+// `array` must be an nsTArray
+// If changing this signature, please update the
+// friend function declaration in nsTArray.h
+void Gecko_EnsureTArrayCapacity(void* array, size_t capacity, size_t elem_size);
+
+
+void Gecko_EnsureImageLayersLength(nsStyleImageLayers* layers, size_t len);
+
+void Gecko_InitializeImageLayer(nsStyleImageLayers::Layer* layer,
+                                nsStyleImageLayers::LayerType layer_type);
+
+// Clean up pointer-based coordinates
+void Gecko_ResetStyleCoord(nsStyleUnit* unit, nsStyleUnion* value);
+
+// Set an nsStyleCoord to a computed `calc()` value
+void Gecko_SetStyleCoordCalcValue(nsStyleUnit* unit, nsStyleUnion* value, nsStyleCoord::CalcValue calc);
+
+NS_DECL_THREADSAFE_FFI_REFCOUNTING(nsStyleCoord::Calc, Calc);
+
 // Styleset and Stylesheet management.
 //
 // TODO: Make these return already_AddRefed and UniquePtr when the binding
@@ -200,13 +226,17 @@ void Servo_DropStyleSet(RawServoStyleSet* set);
 
 // Style attributes.
 ServoDeclarationBlock* Servo_ParseStyleAttribute(const uint8_t* bytes,
-                                                 uint8_t length,
+                                                 uint32_t length,
                                                  nsHTMLCSSStyleSheet* cache);
 void Servo_DropDeclarationBlock(ServoDeclarationBlock* declarations);
 nsHTMLCSSStyleSheet* Servo_GetDeclarationBlockCache(
     ServoDeclarationBlock* declarations);
 void Servo_SetDeclarationBlockImmutable(ServoDeclarationBlock* declarations);
 void Servo_ClearDeclarationBlockCachePointer(ServoDeclarationBlock* declarations);
+
+// CSS supports().
+bool Servo_CSSSupports(const uint8_t* name, uint32_t name_length,
+                       const uint8_t* value, uint32_t value_length);
 
 // Computed style data.
 ServoComputedValues* Servo_GetComputedValues(RawGeckoNode* node);

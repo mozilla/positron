@@ -27,8 +27,6 @@ const PREF_APP_UPDATE_URL_MANUAL          = "app.update.url.manual";
 
 const PREFBRANCH_APP_UPDATE_NEVER         = "app.update.never.";
 
-const PREF_PLUGINS_UPDATE_URL             = "plugins.update.url";
-
 const UPDATE_TEST_LOOP_INTERVAL = 2000;
 
 const URI_UPDATES_PROPERTIES  = "chrome://mozapps/locale/update/updates.properties";
@@ -406,18 +404,17 @@ var gUpdates = {
           let state = p.state;
           let patchFailed = this.update.getProperty("patchingFailed");
           if (patchFailed) {
-            if (patchFailed == "partial" && this.update.patchCount == 2) {
+            if (patchFailed != "partial" || this.update.patchCount != 2) {
+              // If the complete patch failed, which is far less likely, show
+              // the error text held by the update object in the generic errors
+              // page, triggered by the |STATE_DOWNLOAD_FAILED| state. This also
+              // handles the case when an elevation was cancelled on Mac OS X.
+              state = STATE_DOWNLOAD_FAILED;
+            } else {
               // If the system failed to apply the partial patch, show the
               // screen which best describes this condition, which is triggered
               // by the |STATE_FAILED| state.
               state = STATE_FAILED;
-            }
-            else {
-              // Otherwise, if the complete patch failed, which is far less
-              // likely, show the error text held by the update object in the
-              // generic errors page, triggered by the |STATE_DOWNLOAD_FAILED|
-              // state.
-              state = STATE_DOWNLOAD_FAILED;
             }
           }
 
@@ -622,61 +619,6 @@ var gCheckingPage = {
         throw CoR.NS_ERROR_NO_INTERFACE;
       return this;
     }
-  }
-};
-
-/**
- * The "You have outdated plugins" page
- */
-var gPluginsPage = {
-  /**
-   * URL of the plugin updates page
-   */
-  _url: null,
-
-  /**
-   * Initialize
-   */
-  onPageShow: function() {
-    var prefs = Services.prefs;
-    if (prefs.getPrefType(PREF_PLUGINS_UPDATE_URL) == prefs.PREF_INVALID) {
-      gUpdates.wiz.goTo("noupdatesfound");
-      return;
-    }
-
-    this._url = Services.urlFormatter.formatURLPref(PREF_PLUGINS_UPDATE_URL);
-    var link = document.getElementById("pluginupdateslink");
-    link.setAttribute("href", this._url);
-
-
-    var phs = CoC["@mozilla.org/plugin/host;1"].
-                 getService(CoI.nsIPluginHost);
-    var plugins = phs.getPluginTags();
-    var blocklist = CoC["@mozilla.org/extensions/blocklist;1"].
-                      getService(CoI.nsIBlocklistService);
-
-    var hasOutdated = false;
-    for (let i = 0; i < plugins.length; i++) {
-      let pluginState = blocklist.getPluginBlocklistState(plugins[i]);
-      if (pluginState == CoI.nsIBlocklistService.STATE_OUTDATED) {
-        hasOutdated = true;
-        break;
-      }
-    }
-    if (!hasOutdated) {
-      gUpdates.wiz.goTo("noupdatesfound");
-      return;
-    }
-
-    gUpdates.setButtons(null, null, "okButton", true);
-    gUpdates.wiz.getButton("finish").focus();
-  },
-
-  /**
-   * Finish button clicked.
-   */
-  onWizardFinish: function() {
-    openURL(this._url);
   }
 };
 

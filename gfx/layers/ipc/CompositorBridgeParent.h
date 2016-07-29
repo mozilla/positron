@@ -172,7 +172,7 @@ private:
   bool mIsObservingVsync;
   uint32_t mNeedsComposite;
   int32_t mVsyncNotificationsSkipped;
-  RefPtr<CompositorVsyncDispatcher> mCompositorVsyncDispatcher;
+  widget::CompositorWidget* mWidget;
   RefPtr<CompositorVsyncScheduler::Observer> mVsyncObserver;
 
   mozilla::Monitor mCurrentCompositeTaskMonitor;
@@ -212,19 +212,28 @@ class CompositorBridgeParent final : public PCompositorBridgeParent,
   friend class gfx::GPUProcessManager;
 
 public:
-  explicit CompositorBridgeParent(widget::CompositorWidget* aWidget,
-                                  CSSToLayoutDeviceScale aScale,
-                                  bool aUseAPZ,
+  explicit CompositorBridgeParent(CSSToLayoutDeviceScale aScale,
                                   bool aUseExternalSurfaceSize,
                                   const gfx::IntSize& aSurfaceSize);
 
+  // Must only be called by CompositorBridgeChild. After invoking this, the
+  // IPC channel is active and RecvWillStop/ActorDestroy must be called to
+  // free the compositor.
+  void InitSameProcess(widget::CompositorWidget* aWidget,
+                       const uint64_t& aLayerTreeId,
+                       bool aUseAPZ);
+
+  // Must only be called by GPUParent. After invoking this, the IPC channel
+  // is active and RecvWillStop/ActorDestroy must be called to free the
+  // compositor.
+  bool Bind(Endpoint<PCompositorBridgeParent>&& aEndpoint);
+
+  virtual bool RecvInitialize(const uint64_t& aRootLayerTreeId) override;
   virtual bool RecvGetFrameUniformity(FrameUniformityData* aOutData) override;
   virtual bool RecvRequestOverfill() override;
   virtual bool RecvWillClose() override;
   virtual bool RecvPause() override;
   virtual bool RecvResume() override;
-  virtual bool RecvNotifyHidden(const uint64_t& id) override { return true; }
-  virtual bool RecvNotifyVisible(const uint64_t& id) override { return true; }
   virtual bool RecvNotifyChildCreated(const uint64_t& child) override;
   virtual bool RecvAdoptChild(const uint64_t& child) override;
   virtual bool RecvMakeSnapshot(const SurfaceDescriptor& aInSnapshot,
@@ -257,6 +266,8 @@ public:
   void UpdateVisibleRegion(const VisibilityCounter& aCounter,
                            const ScrollableLayerGuid& aGuid,
                            const CSSIntRegion& aRegion);
+
+  virtual bool RecvAllPluginsCaptured() override;
 
   virtual void ActorDestroy(ActorDestroyReason why) override;
 
@@ -389,6 +400,11 @@ public:
   static CompositorBridgeParent* GetCompositorBridgeParent(uint64_t id);
 
   /**
+   * Notify the compositor for the given layer tree that vsync has occurred.
+   */
+  static void NotifyVsync(const TimeStamp& aTimeStamp, const uint64_t& aLayersId);
+
+  /**
    * Set aController as the pan/zoom callback for the subtree referred
    * to by aLayersId.
    *
@@ -401,8 +417,8 @@ public:
    * A new child process has been configured to push transactions
    * directly to us.  Transport is to its thread context.
    */
-  static PCompositorBridgeParent*
-  Create(Transport* aTransport, ProcessId aOtherProcess);
+  static bool
+  CreateForContent(Endpoint<PCompositorBridgeParent>&& aEndpoint);
 
   struct LayerTreeState {
     LayerTreeState();
@@ -476,6 +492,9 @@ public:
   }
 
 private:
+
+  void Initialize();
+
   /**
    * Called during destruction in order to release resources as early as possible.
    */
@@ -487,13 +506,6 @@ private:
    */
   static already_AddRefed<APZCTreeManager> GetAPZCTreeManager(uint64_t aLayersId);
 
-  /**
-   * Allocate an ID that can be used to refer to a layer tree and
-   * associated resources that live only on the compositor thread.
-   *
-   * Must run on the content main thread.
-   */
-  static uint64_t AllocateLayerTreeId();
   /**
    * Release compositor-thread resources referred to by |aID|.
    *
@@ -561,7 +573,7 @@ protected:
   /**
    * Creates the global compositor map.
    */
-  static void Initialize();
+  static void Setup();
 
   /**
    * Destroys the compositor thread and global compositor map.
@@ -591,6 +603,7 @@ protected:
   RefPtr<AsyncCompositionManager> mCompositionManager;
   widget::CompositorWidget* mWidget;
   TimeStamp mTestTime;
+  CSSToLayoutDeviceScale mScale;
   bool mIsTesting;
 
   uint64_t mPendingTransaction;
@@ -605,7 +618,7 @@ protected:
   mozilla::Monitor mResetCompositorMonitor;
 
   uint64_t mCompositorID;
-  const uint64_t mRootLayerTreeID;
+  uint64_t mRootLayerTreeID;
 
   bool mOverrideComposeReadiness;
   RefPtr<CancelableRunnable> mForceCompositionTask;
@@ -625,6 +638,10 @@ protected:
   nsIntPoint mPluginsLayerOffset;
   nsIntRegion mPluginsLayerVisibleRegion;
   nsTArray<PluginWindowData> mCachedPluginData;
+  // Time until which we will block composition to wait for plugin updates.
+  TimeStamp mWaitForPluginsUntil;
+  // Indicates that we have actually blocked a composition waiting for plugins.
+  bool mHaveBlockedForPlugins = false;
   // indicates if plugin window visibility and metric updates are currently
   // being defered due to a scroll operation.
   bool mDeferPluginWindows;

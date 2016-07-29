@@ -110,13 +110,22 @@ const WONTDIE_BODY = String.raw`
 import signal
 import struct
 import sys
+import time
 
 signal.signal(signal.SIGTERM, signal.SIG_IGN)
+
+def spin():
+    while True:
+        try:
+            signal.pause()
+        except AttributeError:
+            time.sleep(5)
 
 while True:
     rawlen = sys.stdin.read(4)
     if len(rawlen) == 0:
-        signal.pause()
+        spin()
+
     msglen = struct.unpack('@I', rawlen)[0]
     msg = sys.stdin.read(msglen)
 
@@ -128,9 +137,9 @@ const STDERR_LINES = ["hello stderr", "this should be a separate line"];
 let STDERR_MSG = STDERR_LINES.join("\\n");
 
 // Python apparently line-buffers stderr even with the -u arg on
-// Windows 7.  Dealing with that is more hassle than its worth but
+// Windows.  Dealing with that is more hassle than its worth but
 // on other platforms, we want to keep testing partial lines.
-if (AppConstants.isPlatformAndVersionAtMost("win", "7")) {
+if (AppConstants.platform == "win") {
   STDERR_MSG += "\\n";
 }
 

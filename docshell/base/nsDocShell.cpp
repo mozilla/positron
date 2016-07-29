@@ -767,8 +767,8 @@ nsDocShell::nsDocShell()
   , mPreviousTransIndex(-1)
   , mLoadedTransIndex(-1)
   , mSandboxFlags(0)
-  , mFullscreenAllowed(CHECK_ATTRIBUTES)
   , mOrientationLock(eScreenOrientation_None)
+  , mFullscreenAllowed(CHECK_ATTRIBUTES)
   , mCreated(false)
   , mAllowSubframes(true)
   , mAllowPlugins(true)
@@ -780,7 +780,6 @@ nsDocShell::nsDocShell()
   , mAllowWindowControl(true)
   , mAllowContentRetargeting(true)
   , mAllowContentRetargetingOnChildren(true)
-  , mCreatingDocument(false)
   , mUseErrorPages(false)
   , mObserveErrorPages(true)
   , mAllowAuth(true)
@@ -803,18 +802,20 @@ nsDocShell::nsDocShell()
   , mIsExecutingOnLoadHandler(false)
   , mIsPrintingOrPP(false)
   , mSavingOldViewer(false)
-#ifdef DEBUG
-  , mInEnsureScriptEnv(false)
-#endif
   , mAffectPrivateSessionLifetime(true)
   , mInvisible(false)
   , mHasLoadedNonBlankURI(false)
-  , mDefaultLoadFlags(nsIRequest::LOAD_NORMAL)
   , mBlankTiming(false)
+  , mCreatingDocument(false)
+#ifdef DEBUG
+  , mInEnsureScriptEnv(false)
+#endif
+  , mDefaultLoadFlags(nsIRequest::LOAD_NORMAL)
   , mFrameType(FRAME_TYPE_REGULAR)
   , mPrivateBrowsingId(0)
   , mParentCharsetSource(0)
   , mJSRunToCompletionDepth(0)
+  , mTouchEventsOverride(nsIDocShell::TOUCHEVENTS_OVERRIDE_NONE)
 {
   AssertOriginAttributesMatchPrivateBrowsing();
   mHistoryID = ++gDocshellIDCounter;
@@ -3180,6 +3181,36 @@ nsDocShell::SetCustomUserAgent(const nsAString& aCustomUserAgent)
   return NS_OK;
 }
 
+NS_IMETHODIMP
+nsDocShell::GetTouchEventsOverride(uint32_t* aTouchEventsOverride)
+{
+  NS_ENSURE_ARG_POINTER(aTouchEventsOverride);
+
+  *aTouchEventsOverride = mTouchEventsOverride;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsDocShell::SetTouchEventsOverride(uint32_t aTouchEventsOverride)
+{
+  if (!(aTouchEventsOverride == nsIDocShell::TOUCHEVENTS_OVERRIDE_NONE ||
+        aTouchEventsOverride == nsIDocShell::TOUCHEVENTS_OVERRIDE_ENABLED ||
+        aTouchEventsOverride == nsIDocShell::TOUCHEVENTS_OVERRIDE_DISABLED)) {
+    return NS_ERROR_INVALID_ARG;
+  }
+
+  mTouchEventsOverride = aTouchEventsOverride;
+
+  uint32_t childCount = mChildList.Length();
+  for (uint32_t i = 0; i < childCount; ++i) {
+    nsCOMPtr<nsIDocShell> childShell = do_QueryInterface(ChildAt(i));
+    if (childShell) {
+      childShell->SetTouchEventsOverride(aTouchEventsOverride);
+    }
+  }
+  return NS_OK;
+}
+
 /* virtual */ int32_t
 nsDocShell::ItemType()
 {
@@ -3351,6 +3382,10 @@ nsDocShell::SetDocLoaderParent(nsDocLoader* aParent)
     uint32_t flags;
     if (NS_SUCCEEDED(parentAsDocShell->GetDefaultLoadFlags(&flags))) {
       SetDefaultLoadFlags(flags);
+    }
+    uint32_t touchEventsOverride;
+    if (NS_SUCCEEDED(parentAsDocShell->GetTouchEventsOverride(&touchEventsOverride))) {
+      SetTouchEventsOverride(touchEventsOverride);
     }
   }
 
@@ -14236,7 +14271,10 @@ nsDocShell::SetOriginAttributesBeforeLoading(JS::Handle<JS::Value> aOriginAttrib
   }
 
   AutoJSAPI jsapi;
-  jsapi.Init(&aOriginAttributes.toObject());
+  if (!jsapi.Init(&aOriginAttributes.toObject())) {
+    return NS_ERROR_UNEXPECTED;
+  }
+
   JSContext* cx = jsapi.cx();
   if (NS_WARN_IF(!cx)) {
     return NS_ERROR_FAILURE;

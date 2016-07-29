@@ -77,8 +77,8 @@ static sslOptions ssl_defaults = {
     PR_FALSE,              /* enableFalseStart   */
     PR_TRUE,               /* cbcRandomIV        */
     PR_FALSE,              /* enableOCSPStapling */
-    PR_TRUE,               /* enableNPN          */
-    PR_FALSE,              /* enableALPN         */
+    PR_FALSE,              /* enableNPN          */
+    PR_TRUE,               /* enableALPN         */
     PR_TRUE,               /* reuseServerECDHEKey */
     PR_FALSE,              /* enableFallbackSCSV */
     PR_TRUE,               /* enableServerDhe */
@@ -260,7 +260,10 @@ ssl_DupSocket(sslSocket *os)
 
     ss->opt = os->opt;
     ss->opt.useSocks = PR_FALSE;
-    SECITEM_CopyItem(NULL, &ss->opt.nextProtoNego, &os->opt.nextProtoNego);
+    rv = SECITEM_CopyItem(NULL, &ss->opt.nextProtoNego, &os->opt.nextProtoNego);
+    if (rv != SECSuccess) {
+        goto loser;
+    }
     ss->vrange = os->vrange;
 
     ss->peerID = !os->peerID ? NULL : PORT_Strdup(os->peerID);

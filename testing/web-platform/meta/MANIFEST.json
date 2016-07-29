@@ -36097,6 +36097,12 @@
     "deleted_reftests": {},
     "items": {
       "testharness": {
+        "2dcontext/drawing-text-to-the-canvas/2d.text.draw.fill.maxWidth.NaN.html": [
+          {
+            "path": "2dcontext/drawing-text-to-the-canvas/2d.text.draw.fill.maxWidth.NaN.html",
+            "url": "/2dcontext/drawing-text-to-the-canvas/2d.text.draw.fill.maxWidth.NaN.html"
+          }
+        ],
         "WebCryptoAPI/generateKey/failures_AES-CBC.worker.js": [
           {
             "path": "WebCryptoAPI/generateKey/failures_AES-CBC.worker.js",
@@ -36391,6 +36397,30 @@
             "url": "/editing/run/multitest.html"
           }
         ],
+        "fetch/api/basic/request-referrer.html": [
+          {
+            "path": "fetch/api/basic/request-referrer.html",
+            "url": "/fetch/api/basic/request-referrer.html"
+          }
+        ],
+        "fetch/api/policies/referrer-origin-when-cross-origin-worker.html": [
+          {
+            "path": "fetch/api/policies/referrer-origin-when-cross-origin-worker.html",
+            "url": "/fetch/api/policies/referrer-origin-when-cross-origin-worker.html"
+          }
+        ],
+        "fetch/api/policies/referrer-origin-when-cross-origin.html": [
+          {
+            "path": "fetch/api/policies/referrer-origin-when-cross-origin.html",
+            "url": "/fetch/api/policies/referrer-origin-when-cross-origin.html"
+          }
+        ],
+        "service-workers/service-worker/client-navigate.https.html": [
+          {
+            "path": "service-workers/service-worker/client-navigate.https.html",
+            "url": "/service-workers/service-worker/client-navigate.https.html"
+          }
+        ],
         "service-workers/service-worker/controller-on-disconnect.https.html": [
           {
             "path": "service-workers/service-worker/controller-on-disconnect.https.html",
@@ -36401,12 +36431,6 @@
           {
             "path": "web-animations/animation-model/keyframe-effects/spacing-keyframes.html",
             "url": "/web-animations/animation-model/keyframe-effects/spacing-keyframes.html"
-          }
-        ],
-        "service-workers/service-worker/client-navigate.https.html": [
-          {
-            "path": "service-workers/service-worker/client-navigate.https.html",
-            "url": "/service-workers/service-worker/client-navigate.https.html"
           }
         ],
         "web-animations/interfaces/DocumentTimeline/constructor.html": [
@@ -36443,6 +36467,12 @@
           {
             "path": "webaudio/the-audio-api/the-audioparam-interface/setValueAtTime-within-block.html",
             "url": "/webaudio/the-audio-api/the-audioparam-interface/setValueAtTime-within-block.html"
+          }
+        ],
+        "webaudio/the-audio-api/the-pannernode-interface/test-pannernode-automation.html": [
+          {
+            "path": "webaudio/the-audio-api/the-pannernode-interface/test-pannernode-automation.html",
+            "url": "/webaudio/the-audio-api/the-pannernode-interface/test-pannernode-automation.html"
           }
         ]
       }

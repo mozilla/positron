@@ -74,7 +74,8 @@ nsJPEGDecoder::nsJPEGDecoder(RasterImage* aImage,
  : Decoder(aImage)
  , mLexer(Transition::ToUnbuffered(State::FINISHED_JPEG_DATA,
                                    State::JPEG_DATA,
-                                   SIZE_MAX))
+                                   SIZE_MAX),
+          Transition::TerminateSuccess())
  , mDecodeStyle(aDecodeStyle)
  , mSampleSize(0)
 {
@@ -128,7 +129,7 @@ nsJPEGDecoder::SpeedHistogram()
   return Telemetry::IMAGE_DECODE_SPEED_JPEG;
 }
 
-void
+nsresult
 nsJPEGDecoder::InitInternal()
 {
   mCMSMode = gfxPlatform::GetCMSMode();
@@ -142,10 +143,9 @@ nsJPEGDecoder::InitInternal()
   mErr.pub.error_exit = my_error_exit;
   // Establish the setjmp return context for my_error_exit to use.
   if (setjmp(mErr.setjmp_buffer)) {
-    // If we get here, the JPEG code has signaled an error.
-    // We need to clean up the JPEG object, close the input file, and return.
-    PostDecoderError(NS_ERROR_FAILURE);
-    return;
+    // If we get here, the JPEG code has signaled an error, and initialization
+    // has failed.
+    return NS_ERROR_FAILURE;
   }
 
   // Step 1: allocate and initialize JPEG decompression object
@@ -166,9 +166,11 @@ nsJPEGDecoder::InitInternal()
   for (uint32_t m = 0; m < 16; m++) {
     jpeg_save_markers(&mInfo, JPEG_APP0 + m, 0xFFFF);
   }
+
+  return NS_OK;
 }
 
-void
+nsresult
 nsJPEGDecoder::FinishInternal()
 {
   // If we're not in any sort of error case, force our state to JPEG_DONE.
@@ -177,30 +179,25 @@ nsJPEGDecoder::FinishInternal()
       !IsMetadataDecode()) {
     mState = JPEG_DONE;
   }
+
+  return NS_OK;
 }
 
-void
-nsJPEGDecoder::WriteInternal(const char* aBuffer, uint32_t aCount)
+LexerResult
+nsJPEGDecoder::DoDecode(SourceBufferIterator& aIterator, IResumable* aOnResume)
 {
-  MOZ_ASSERT(!HasError(), "Shouldn't call WriteInternal after error!");
-  MOZ_ASSERT(aBuffer);
-  MOZ_ASSERT(aCount > 0);
+  MOZ_ASSERT(!HasError(), "Shouldn't call DoDecode after error!");
 
-  Maybe<TerminalState> terminalState =
-    mLexer.Lex(aBuffer, aCount, [=](State aState,
-                                    const char* aData, size_t aLength) {
-      switch (aState) {
-        case State::JPEG_DATA:
-          return ReadJPEGData(aData, aLength);
-        case State::FINISHED_JPEG_DATA:
-          return FinishedJPEGData();
-      }
-      MOZ_CRASH("Unknown State");
-    });
-
-  if (terminalState == Some(TerminalState::FAILURE)) {
-    PostDataError();
-  }
+  return mLexer.Lex(aIterator, aOnResume,
+                    [=](State aState, const char* aData, size_t aLength) {
+    switch (aState) {
+      case State::JPEG_DATA:
+        return ReadJPEGData(aData, aLength);
+      case State::FINISHED_JPEG_DATA:
+        return FinishedJPEGData();
+    }
+    MOZ_CRASH("Unknown State");
+  });
 }
 
 LexerTransition<nsJPEGDecoder::State>
@@ -222,7 +219,6 @@ nsJPEGDecoder::ReadJPEGData(const char* aData, size_t aLength)
              ("} (setjmp returned NS_ERROR_FAILURE)"));
     } else {
       // Error for another reason. (Possibly OOM.)
-      PostDecoderError(error_code);
       mState = JPEG_ERROR;
       MOZ_LOG(sJPEGDecoderAccountingLog, LogLevel::Debug,
              ("} (setjmp returned an error)"));
@@ -306,7 +302,6 @@ nsJPEGDecoder::ReadJPEGData(const char* aData, size_t aLength)
           break;
         default:
           mState = JPEG_ERROR;
-          PostDataError();
           MOZ_LOG(sJPEGDecoderAccountingLog, LogLevel::Debug,
                  ("} (unknown colorpsace (1))"));
           return Transition::TerminateFailure();
@@ -323,7 +318,6 @@ nsJPEGDecoder::ReadJPEGData(const char* aData, size_t aLength)
             break;
           default:
             mState = JPEG_ERROR;
-            PostDataError();
             MOZ_LOG(sJPEGDecoderAccountingLog, LogLevel::Debug,
                    ("} (unknown colorpsace (2))"));
             return Transition::TerminateFailure();
@@ -382,7 +376,6 @@ nsJPEGDecoder::ReadJPEGData(const char* aData, size_t aLength)
           break;
         default:
           mState = JPEG_ERROR;
-          PostDataError();
           MOZ_LOG(sJPEGDecoderAccountingLog, LogLevel::Debug,
                  ("} (unknown colorpsace (3))"));
           return Transition::TerminateFailure();

@@ -61,7 +61,7 @@ function whenDelayedStartupFinished(aWindow, aCallback) {
   }, "browser-delayed-startup-finished", false);
 }
 
-function updateTabContextMenu(tab) {
+function updateTabContextMenu(tab, onOpened) {
   let menu = document.getElementById("tabContextMenu");
   if (!tab)
     tab = gBrowser.selectedTab;
@@ -69,7 +69,15 @@ function updateTabContextMenu(tab) {
   tab.dispatchEvent(evt);
   menu.openPopup(tab, "end_after", 0, 0, true, false, evt);
   is(TabContextMenu.contextTab, tab, "TabContextMenu context is the expected tab");
-  menu.hidePopup();
+  const onFinished = () => menu.hidePopup();
+  if (onOpened) {
+    return Task.spawn(function*() {
+      yield onOpened();
+      onFinished();
+    });
+  } else {
+    onFinished();
+  }
 }
 
 function openToolbarCustomizationUI(aCallback, aBrowserWin) {
@@ -690,7 +698,7 @@ function assertMixedContentBlockingState(tabbrowser, states = {}) {
   let identityBox = gIdentityHandler._identityBox;
   let classList = identityBox.classList;
   let connectionIcon = doc.getElementById("connection-icon");
-  let connectionIconImage = tabbrowser.ownerGlobal.getComputedStyle(connectionIcon, "").
+  let connectionIconImage = tabbrowser.ownerGlobal.getComputedStyle(connectionIcon).
                          getPropertyValue("list-style-image");
 
   let stateSecure = gIdentityHandler._state & Ci.nsIWebProgressListener.STATE_IS_SECURE;
@@ -767,9 +775,9 @@ function assertMixedContentBlockingState(tabbrowser, states = {}) {
   // Make sure the correct icon is visible in the Control Center.
   // This logic is controlled with CSS, so this helps prevent regressions there.
   let securityView = doc.getElementById("identity-popup-securityView");
-  let securityViewBG = tabbrowser.ownerGlobal.getComputedStyle(securityView, "").
+  let securityViewBG = tabbrowser.ownerGlobal.getComputedStyle(securityView).
                        getPropertyValue("background-image");
-  let securityContentBG = tabbrowser.ownerGlobal.getComputedStyle(securityView, "").
+  let securityContentBG = tabbrowser.ownerGlobal.getComputedStyle(securityView).
                           getPropertyValue("background-image");
 
   if (stateInsecure) {
@@ -823,7 +831,7 @@ function assertMixedContentBlockingState(tabbrowser, states = {}) {
 }
 
 function is_hidden(element) {
-  var style = element.ownerDocument.defaultView.getComputedStyle(element, "");
+  var style = element.ownerGlobal.getComputedStyle(element);
   if (style.display == "none")
     return true;
   if (style.visibility != "visible")
@@ -839,7 +847,7 @@ function is_hidden(element) {
 }
 
 function is_visible(element) {
-  var style = element.ownerDocument.defaultView.getComputedStyle(element, "");
+  var style = element.ownerGlobal.getComputedStyle(element);
   if (style.display == "none")
     return false;
   if (style.visibility != "visible")
@@ -889,7 +897,7 @@ function promisePopupHidden(popup) {
 }
 
 function promiseNotificationShown(notification) {
-  let win = notification.browser.ownerDocument.defaultView;
+  let win = notification.browser.ownerGlobal;
   if (win.PopupNotifications.panel.state == "open") {
     return Promise.resolve();
   }
@@ -1099,4 +1107,85 @@ function promiseErrorPageLoaded(browser) {
       resolve();
     }, false, true);
   });
+}
+
+function* loadBadCertPage(url) {
+  const EXCEPTION_DIALOG_URI = "chrome://pippki/content/exceptionDialog.xul";
+  let exceptionDialogResolved = new Promise(function(resolve) {
+    // When the certificate exception dialog has opened, click the button to add
+    // an exception.
+    let certExceptionDialogObserver = {
+      observe: function(aSubject, aTopic, aData) {
+        if (aTopic == "cert-exception-ui-ready") {
+          Services.obs.removeObserver(this, "cert-exception-ui-ready");
+          let certExceptionDialog = getCertExceptionDialog(EXCEPTION_DIALOG_URI);
+          ok(certExceptionDialog, "found exception dialog");
+          executeSoon(function() {
+            certExceptionDialog.documentElement.getButton("extra1").click();
+            resolve();
+          });
+        }
+      }
+    };
+
+    Services.obs.addObserver(certExceptionDialogObserver,
+                             "cert-exception-ui-ready", false);
+  });
+
+  yield BrowserTestUtils.loadURI(gBrowser.selectedBrowser, url);
+  yield promiseErrorPageLoaded(gBrowser.selectedBrowser);
+  yield ContentTask.spawn(gBrowser.selectedBrowser, null, function*() {
+    content.document.getElementById("exceptionDialogButton").click();
+  });
+  yield exceptionDialogResolved;
+  yield BrowserTestUtils.browserLoaded(gBrowser.selectedBrowser);
+}
+
+// Utility function to get a handle on the certificate exception dialog.
+// Modified from toolkit/components/passwordmgr/test/prompt_common.js
+function getCertExceptionDialog(aLocation) {
+  let enumerator = Services.wm.getXULWindowEnumerator(null);
+
+  while (enumerator.hasMoreElements()) {
+    let win = enumerator.getNext();
+    let windowDocShell = win.QueryInterface(Ci.nsIXULWindow).docShell;
+
+    let containedDocShells = windowDocShell.getDocShellEnumerator(
+                                      Ci.nsIDocShellTreeItem.typeChrome,
+                                      Ci.nsIDocShell.ENUMERATE_FORWARDS);
+    while (containedDocShells.hasMoreElements()) {
+      // Get the corresponding document for this docshell
+      let childDocShell = containedDocShells.getNext();
+      let childDoc = childDocShell.QueryInterface(Ci.nsIDocShell)
+                                  .contentViewer
+                                  .DOMDocument;
+
+      if (childDoc.location.href == aLocation) {
+        return childDoc;
+      }
+    }
+  }
+}
+
+function setupRemoteClientsFixture(fixture) {
+  let oldRemoteClientsGetter =
+    Object.getOwnPropertyDescriptor(gFxAccounts, "remoteClients").get;
+
+  Object.defineProperty(gFxAccounts, "remoteClients", {
+    get: function() { return fixture; }
+  });
+  return oldRemoteClientsGetter;
+}
+
+function restoreRemoteClients(getter) {
+  Object.defineProperty(gFxAccounts, "remoteClients", {
+    get: getter
+  });
+}
+
+function* openMenuItemSubmenu(id) {
+  let menuPopup = document.getElementById(id).menupopup;
+  let menuPopupPromise = BrowserTestUtils.waitForEvent(menuPopup, "popupshown");
+  menuPopup.showPopup();
+  yield menuPopupPromise;
 }

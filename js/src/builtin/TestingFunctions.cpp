@@ -23,6 +23,7 @@
 #include "asmjs/WasmBinaryToExperimentalText.h"
 #include "asmjs/WasmBinaryToText.h"
 #include "asmjs/WasmJS.h"
+#include "asmjs/WasmSignalHandlers.h"
 #include "asmjs/WasmTextToBinary.h"
 #include "builtin/Promise.h"
 #include "builtin/SelfHostingDefines.h"
@@ -515,7 +516,21 @@ static bool
 WasmUsesSignalForOOB(JSContext* cx, unsigned argc, Value* vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
-    args.rval().setBoolean(wasm::SignalUsage(cx).forOOB);
+    args.rval().setBoolean(wasm::SignalUsage().forOOB);
+    return true;
+}
+
+static bool
+SuppressSignalHandlers(JSContext* cx, unsigned argc, Value* vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+
+    if (!args.requireAtLeast(cx, "suppressSignalHandlers", 1))
+        return false;
+
+    wasm::SuppressSignalHandlersForTesting(ToBoolean(args[0]));
+
+    args.rval().setUndefined();
     return true;
 }
 
@@ -860,6 +875,8 @@ GCState(JSContext* cx, unsigned argc, Value* vp)
         state = "finalize";
     else if (globalState == gc::COMPACT)
         state = "compact";
+    else if (globalState == gc::DECOMMIT)
+        state = "decommit";
     else
         MOZ_CRASH("Unobserveable global GC state");
 
@@ -1499,6 +1516,15 @@ FinalizeCount(JSContext* cx, unsigned argc, Value* vp)
 }
 
 static bool
+ResetFinalizeCount(JSContext* cx, unsigned argc, Value* vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+    finalizeCount = 0;
+    args.rval().setUndefined();
+    return true;
+}
+
+static bool
 DumpHeap(JSContext* cx, unsigned argc, Value* vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
@@ -1585,6 +1611,13 @@ ReadSPSProfilingStack(JSContext* cx, unsigned argc, Value* vp)
     RootedObject stack(cx, NewDenseEmptyArray(cx));
     if (!stack)
         return false;
+
+    // If profiler sampling has been suppressed, return an empty
+    // stack.
+    if (!cx->runtime()->isProfilerSamplingEnabled()) {
+      args.rval().setObject(*stack);
+      return true;
+    }
 
     RootedObject inlineStack(cx);
     RootedObject inlineFrameInfo(cx);
@@ -3014,7 +3047,8 @@ ShellCloneAndExecuteScript(JSContext* cx, unsigned argc, Value* vp)
 
     AutoCompartment ac(cx, global);
 
-    if (!JS::CloneAndExecuteScript(cx, script))
+    JS::RootedValue rval(cx);
+    if (!JS::CloneAndExecuteScript(cx, script, &rval))
         return false;
 
     args.rval().setUndefined();
@@ -3656,6 +3690,10 @@ static const JSFunctionSpecWithHelp TestingFunctions[] = {
 "  Return the current value of the finalization counter that is incremented\n"
 "  each time an object returned by the makeFinalizeObserver is finalized."),
 
+    JS_FN_HELP("resetFinalizeCount", ResetFinalizeCount, 0, 0,
+"resetFinalizeCount()",
+"  Reset the value returned by finalizeCount()."),
+
     JS_FN_HELP("gcPreserveCode", GCPreserveCode, 0, 0,
 "gcPreserveCode()",
 "  Preserve JIT code during garbage collections."),
@@ -3785,6 +3823,11 @@ gc::ZealModeHelpText),
     JS_FN_HELP("wasmUsesSignalForOOB", WasmUsesSignalForOOB, 0, 0,
 "wasmUsesSignalForOOB()",
 "  Return whether wasm and asm.js use a signal handler for detecting out-of-bounds."),
+
+    JS_FN_HELP("suppressSignalHandlers", SuppressSignalHandlers, 1, 0,
+"suppressSignalHandlers(suppress)",
+"  This function allows artificially suppressing signal handler support, even if the underlying "
+"  platform supports it."),
 
     JS_FN_HELP("wasmTextToBinary", WasmTextToBinary, 1, 0,
 "wasmTextToBinary(str)",

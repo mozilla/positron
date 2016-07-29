@@ -121,8 +121,8 @@ assertErrorMessage(() => new Memory(1), TypeError, "first argument must be a mem
 assertErrorMessage(() => new Memory({initial:{valueOf() { throw new Error("here")}}}), Error, "here");
 assertErrorMessage(() => new Memory({initial:-1}), TypeError, /bad Memory initial size/);
 assertErrorMessage(() => new Memory({initial:Math.pow(2,32)}), TypeError, /bad Memory initial size/);
-assertErrorMessage(() => new Memory({initial:Math.pow(2,32)}), TypeError, /bad Memory initial size/);
 assertEq(new Memory({initial:1}) instanceof Memory, true);
+assertEq(new Memory({initial:1.5}).buffer.byteLength, 64*1024);
 
 // 'WebAssembly.Memory.prototype' property
 const memoryProtoDesc = Object.getOwnPropertyDescriptor(Memory, 'prototype');
@@ -157,3 +157,99 @@ assertErrorMessage(() => bufferGetter.call({}), TypeError, /called on incompatib
 assertEq(bufferGetter.call(mem1) instanceof ArrayBuffer, true);
 assertEq(bufferGetter.call(mem1).byteLength, 64 * 1024);
 
+// 'WebAssembly.Table' property
+const tableDesc = Object.getOwnPropertyDescriptor(WebAssembly, 'Table');
+assertEq(typeof tableDesc.value, "function");
+assertEq(tableDesc.writable, true);
+assertEq(tableDesc.enumerable, false);
+assertEq(tableDesc.configurable, true);
+
+// 'WebAssembly.Table' constructor function
+const Table = WebAssembly.Table;
+assertEq(Table, tableDesc.value);
+assertEq(Table.length, 1);
+assertEq(Table.name, "Table");
+assertErrorMessage(() => Table(), TypeError, /constructor without new is forbidden/);
+assertErrorMessage(() => new Table(1), TypeError, "first argument must be a table descriptor");
+assertErrorMessage(() => new Table({initial:{valueOf() { throw new Error("here")}}}), Error, "here");
+assertErrorMessage(() => new Table({initial:-1}), TypeError, /bad Table initial size/);
+assertErrorMessage(() => new Table({initial:Math.pow(2,32)}), TypeError, /bad Table initial size/);
+assertEq(new Table({initial:1}) instanceof Table, true);
+assertEq(new Table({initial:1.5}) instanceof Table, true);
+
+// 'WebAssembly.Table.prototype' property
+const tableProtoDesc = Object.getOwnPropertyDescriptor(Table, 'prototype');
+assertEq(typeof tableProtoDesc.value, "object");
+assertEq(tableProtoDesc.writable, false);
+assertEq(tableProtoDesc.enumerable, false);
+assertEq(tableProtoDesc.configurable, false);
+
+// 'WebAssembly.Table.prototype' object
+const tableProto = Table.prototype;
+assertEq(tableProto, tableProtoDesc.value);
+assertEq(String(tableProto), "[object Object]");
+assertEq(Object.getPrototypeOf(tableProto), Object.prototype);
+
+// 'WebAssembly.Table' instance objects
+const tbl1 = new Table({initial:2});
+assertEq(typeof tbl1, "object");
+assertEq(String(tbl1), "[object WebAssembly.Table]");
+assertEq(Object.getPrototypeOf(tbl1), tableProto);
+
+// 'WebAssembly.Table.prototype.length' accessor property
+const lengthDesc = Object.getOwnPropertyDescriptor(tableProto, 'length');
+assertEq(typeof lengthDesc.get, "function");
+assertEq(lengthDesc.set, undefined);
+assertEq(lengthDesc.enumerable, false);
+assertEq(lengthDesc.configurable, true);
+
+// 'WebAssembly.Table.prototype.length' getter
+const lengthGetter = lengthDesc.get;
+assertEq(lengthGetter.length, 0);
+assertErrorMessage(() => lengthGetter.call(), TypeError, /called on incompatible undefined/);
+assertErrorMessage(() => lengthGetter.call({}), TypeError, /called on incompatible Object/);
+assertEq(typeof lengthGetter.call(tbl1), "number");
+assertEq(lengthGetter.call(tbl1), 2);
+
+// 'WebAssembly.Table.prototype.get' property
+const getDesc = Object.getOwnPropertyDescriptor(tableProto, 'get');
+assertEq(typeof getDesc.value, "function");
+assertEq(getDesc.enumerable, false);
+assertEq(getDesc.configurable, true);
+
+// 'WebAssembly.Table.prototype.get' method
+const get = getDesc.value;
+assertEq(get.length, 1);
+assertErrorMessage(() => get.call(), TypeError, /called on incompatible undefined/);
+assertErrorMessage(() => get.call({}), TypeError, /called on incompatible Object/);
+assertEq(get.call(tbl1, 0), null);
+assertEq(get.call(tbl1, 1), null);
+assertEq(get.call(tbl1, 1.5), null);
+assertErrorMessage(() => get.call(tbl1, 2), RangeError, /out-of-range index/);
+assertErrorMessage(() => get.call(tbl1, 2.5), RangeError, /out-of-range index/);
+assertErrorMessage(() => get.call(tbl1, -1), RangeError, /out-of-range index/);
+assertErrorMessage(() => get.call(tbl1, Math.pow(2,33)), RangeError, /out-of-range index/);
+assertErrorMessage(() => get.call(tbl1, {valueOf() { throw new Error("hi") }}), Error, "hi");
+
+// 'WebAssembly.Table.prototype.set' property
+const setDesc = Object.getOwnPropertyDescriptor(tableProto, 'set');
+assertEq(typeof setDesc.value, "function");
+assertEq(setDesc.enumerable, false);
+assertEq(setDesc.configurable, true);
+
+// 'WebAssembly.Table.prototype.set' method
+const set = setDesc.value;
+assertEq(set.length, 2);
+assertErrorMessage(() => set.call(), TypeError, /called on incompatible undefined/);
+assertErrorMessage(() => set.call({}), TypeError, /called on incompatible Object/);
+assertErrorMessage(() => set.call(tbl1, 0), TypeError, /requires more than 1 argument/);
+assertErrorMessage(() => set.call(tbl1, 2, null), RangeError, /out-of-range index/);
+assertErrorMessage(() => set.call(tbl1, -1, null), RangeError, /out-of-range index/);
+assertErrorMessage(() => set.call(tbl1, Math.pow(2,33), null), RangeError, /out-of-range index/);
+assertErrorMessage(() => set.call(tbl1, 0, undefined), TypeError, /second argument must be null or an exported WebAssembly Function object/);
+assertErrorMessage(() => set.call(tbl1, 0, {}), TypeError, /second argument must be null or an exported WebAssembly Function object/);
+assertErrorMessage(() => set.call(tbl1, 0, function() {}), TypeError, /second argument must be null or an exported WebAssembly Function object/);
+assertErrorMessage(() => set.call(tbl1, 0, Math.sin), TypeError, /second argument must be null or an exported WebAssembly Function object/);
+assertErrorMessage(() => set.call(tbl1, {valueOf() { throw Error("hai") }}, null), Error, "hai");
+assertEq(set.call(tbl1, 0, null), undefined);
+assertEq(set.call(tbl1, 1, null), undefined);

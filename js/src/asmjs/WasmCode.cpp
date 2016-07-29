@@ -19,6 +19,7 @@
 #include "asmjs/WasmCode.h"
 
 #include "mozilla/Atomics.h"
+#include "mozilla/BinarySearch.h"
 #include "mozilla/EnumeratedRange.h"
 
 #include "jsprf.h"
@@ -40,6 +41,7 @@ using namespace js;
 using namespace js::jit;
 using namespace js::wasm;
 using mozilla::Atomic;
+using mozilla::BinarySearch;
 using mozilla::MakeEnumeratedRange;
 using JS::GenericNaN;
 
@@ -211,6 +213,7 @@ CodeSegment::create(JSContext* cx,
     cs->interruptCode_ = cs->code() + linkData.interruptOffset;
     cs->outOfBoundsCode_ = cs->code() + linkData.outOfBoundsOffset;
     cs->unalignedAccessCode_ = cs->code() + linkData.unalignedAccessOffset;
+    cs->badIndirectCallCode_ = cs->code() + linkData.badIndirectCallOffset;
 
     {
         JitContext jcx(CompileRuntime::get(cx->compartment()->runtimeFromAnyThread()));
@@ -283,14 +286,14 @@ SizeOfSigExcludingThis(const Sig& sig, MallocSizeOf mallocSizeOf)
 }
 
 size_t
-Export::serializedSize() const
+FuncExport::serializedSize() const
 {
     return SerializedSigSize(sig_) +
            sizeof(pod);
 }
 
 uint8_t*
-Export::serialize(uint8_t* cursor) const
+FuncExport::serialize(uint8_t* cursor) const
 {
     cursor = SerializeSig(cursor, sig_);
     cursor = WriteBytes(cursor, &pod, sizeof(pod));
@@ -298,7 +301,7 @@ Export::serialize(uint8_t* cursor) const
 }
 
 const uint8_t*
-Export::deserialize(const uint8_t* cursor)
+FuncExport::deserialize(const uint8_t* cursor)
 {
     (cursor = DeserializeSig(cursor, &sig_)) &&
     (cursor = ReadBytes(cursor, &pod, sizeof(pod)));
@@ -306,7 +309,7 @@ Export::deserialize(const uint8_t* cursor)
 }
 
 size_t
-Export::sizeOfExcludingThis(MallocSizeOf mallocSizeOf) const
+FuncExport::sizeOfExcludingThis(MallocSizeOf mallocSizeOf) const
 {
     return SizeOfSigExcludingThis(sig_, mallocSizeOf);
 }
@@ -448,7 +451,8 @@ Metadata::serializedSize() const
 {
     return sizeof(pod()) +
            SerializedVectorSize(funcImports) +
-           SerializedVectorSize(exports) +
+           SerializedVectorSize(funcExports) +
+           SerializedPodVectorSize(tables) +
            SerializedPodVectorSize(memoryAccesses) +
            SerializedPodVectorSize(boundsChecks) +
            SerializedPodVectorSize(codeRanges) +
@@ -464,7 +468,8 @@ Metadata::serialize(uint8_t* cursor) const
 {
     cursor = WriteBytes(cursor, &pod(), sizeof(pod()));
     cursor = SerializeVector(cursor, funcImports);
-    cursor = SerializeVector(cursor, exports);
+    cursor = SerializeVector(cursor, funcExports);
+    cursor = SerializePodVector(cursor, tables);
     cursor = SerializePodVector(cursor, memoryAccesses);
     cursor = SerializePodVector(cursor, boundsChecks);
     cursor = SerializePodVector(cursor, codeRanges);
@@ -481,7 +486,8 @@ Metadata::deserialize(const uint8_t* cursor)
 {
     (cursor = ReadBytes(cursor, &pod(), sizeof(pod()))) &&
     (cursor = DeserializeVector(cursor, &funcImports)) &&
-    (cursor = DeserializeVector(cursor, &exports)) &&
+    (cursor = DeserializeVector(cursor, &funcExports)) &&
+    (cursor = DeserializePodVector(cursor, &tables)) &&
     (cursor = DeserializePodVector(cursor, &memoryAccesses)) &&
     (cursor = DeserializePodVector(cursor, &boundsChecks)) &&
     (cursor = DeserializePodVector(cursor, &codeRanges)) &&
@@ -497,7 +503,8 @@ size_t
 Metadata::sizeOfExcludingThis(MallocSizeOf mallocSizeOf) const
 {
     return SizeOfVectorExcludingThis(funcImports, mallocSizeOf) +
-           SizeOfVectorExcludingThis(exports, mallocSizeOf) +
+           SizeOfVectorExcludingThis(funcExports, mallocSizeOf) +
+           tables.sizeOfExcludingThis(mallocSizeOf) +
            memoryAccesses.sizeOfExcludingThis(mallocSizeOf) +
            boundsChecks.sizeOfExcludingThis(mallocSizeOf) +
            codeRanges.sizeOfExcludingThis(mallocSizeOf) +
@@ -506,6 +513,25 @@ Metadata::sizeOfExcludingThis(MallocSizeOf mallocSizeOf) const
            funcNames.sizeOfExcludingThis(mallocSizeOf) +
            filename.sizeOfExcludingThis(mallocSizeOf) +
            assumptions.sizeOfExcludingThis(mallocSizeOf);
+}
+
+struct ProjectFuncIndex
+{
+    const FuncExportVector& funcExports;
+    explicit ProjectFuncIndex(const FuncExportVector& funcExports) : funcExports(funcExports) {}
+    uint32_t operator[](size_t index) const {
+        return funcExports[index].funcIndex();
+    }
+};
+
+const FuncExport&
+Metadata::lookupFuncExport(uint32_t funcIndex) const
+{
+    size_t match;
+    if (!BinarySearch(ProjectFuncIndex(funcExports), 0, funcExports.length(), funcIndex, &match))
+        MOZ_CRASH("missing function export");
+
+    return funcExports[match];
 }
 
 bool

@@ -90,7 +90,7 @@ SOURCES += [
 ]
 
 IPDL_SOURCES += [
-    'BrowserConfiguration.ipdlh',
+    'BlobTypes.ipdlh',
     'DOMTypes.ipdlh',
     'PBlob.ipdl',
     'PBlobStream.ipdl',
@@ -112,6 +112,7 @@ IPDL_SOURCES += [
     'PProcessHangMonitor.ipdl',
     'PScreenManager.ipdl',
     'PTabContext.ipdlh',
+    'ServiceWorkerConfiguration.ipdlh',
 ]
 
 include('/ipc/chromium/chromium-config.mozbuild')
@@ -168,7 +169,7 @@ if CONFIG['OS_ARCH'] != 'WINNT':
 
 DEFINES['BIN_SUFFIX'] = '"%s"' % CONFIG['BIN_SUFFIX']
 
-if CONFIG['MOZ_WIDGET_TOOLKIT'] in ('android', 'gtk2', 'gonk', 'qt'):
+if CONFIG['MOZ_WIDGET_TOOLKIT'] in ('android', 'gtk2', 'gonk'):
     DEFINES['MOZ_ENABLE_FREETYPE'] = True
 
 if CONFIG['MOZ_TOOLKIT_SEARCH']:
