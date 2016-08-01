@@ -368,7 +368,8 @@ HttpChannelChild::RecvOnStartRequest(const nsresult& channelStatus,
                                      const NetAddr& selfAddr,
                                      const NetAddr& peerAddr,
                                      const int16_t& redirectCount,
-                                     const uint32_t& cacheKey)
+                                     const uint32_t& cacheKey,
+                                     const bool& contentDecodingWillBeCalledOnParent)
 {
   LOG(("HttpChannelChild::RecvOnStartRequest [this=%p]\n", this));
   // mFlushedForDiversion and mDivertingToParent should NEVER be set at this
@@ -380,6 +381,10 @@ HttpChannelChild::RecvOnStartRequest(const nsresult& channelStatus,
 
 
   mRedirectCount = redirectCount;
+
+  if (contentDecodingWillBeCalledOnParent) {
+    SetApplyConversion(false);
+  }
 
   mEventQ->RunOrEnqueue(new StartRequestEvent(this, channelStatus, responseHead,
                                               useResponseHead, requestHeaders,
@@ -522,6 +527,13 @@ void
 HttpChannelChild::DoOnStartRequest(nsIRequest* aRequest, nsISupports* aContext)
 {
   LOG(("HttpChannelChild::DoOnStartRequest [this=%p]\n", this));
+
+  // In theory mListener should not be null, but in practice sometimes it is.
+  MOZ_ASSERT(mListener);
+  if (!mListener) {
+    Cancel(NS_ERROR_FAILURE);
+    return;
+  }
   nsresult rv = mListener->OnStartRequest(aRequest, aContext);
   if (NS_FAILED(rv)) {
     Cancel(rv);
@@ -944,7 +956,12 @@ HttpChannelChild::DoOnStopRequest(nsIRequest* aRequest, nsresult aChannelStatus,
 
   MOZ_ASSERT(!mOnStopRequestCalled,
              "We should not call OnStopRequest twice");
-  mListener->OnStopRequest(aRequest, aContext, mStatus);
+
+  // In theory mListener should not be null, but in practice sometimes it is.
+  MOZ_ASSERT(mListener);
+  if (mListener) {
+    mListener->OnStopRequest(aRequest, aContext, mStatus);
+  }
   mOnStopRequestCalled = true;
 
   mListener = 0;
@@ -1447,7 +1464,7 @@ HttpChannelChild::ConnectParent(uint32_t registrarId)
     return NS_ERROR_ILLEGAL_VALUE;
   }
 
-  if (tabChild && tabChild->IsDestroyed()) {
+  if (tabChild && !tabChild->IPCOpen()) {
     return NS_ERROR_FAILURE;
   }
 
@@ -1969,7 +1986,7 @@ HttpChannelChild::ContinueAsyncOpen()
   mChannelId.ToProvidedString(chid);
   openArgs.channelId().AssignASCII(chid);
 
-  if (tabChild && tabChild->IsDestroyed()) {
+  if (tabChild && !tabChild->IPCOpen()) {
     return NS_ERROR_FAILURE;
   }
 
@@ -2529,7 +2546,9 @@ HttpChannelChild::ResetInterception()
 
   // Continue with the original cross-process request
   nsresult rv = ContinueAsyncOpen();
-  NS_ENSURE_SUCCESS_VOID(rv);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    AsyncAbort(rv);
+  }
 }
 
 NS_IMETHODIMP
@@ -2560,7 +2579,9 @@ HttpChannelChild::OverrideWithSynthesizedResponse(nsAutoPtr<nsHttpResponseHead>&
     mShouldInterceptSubsequentRedirect = true;
     // Continue with the original cross-process request
     nsresult rv = ContinueAsyncOpen();
-    NS_ENSURE_SUCCESS_VOID(rv);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      AsyncAbort(rv);
+    }
     return;
   }
 

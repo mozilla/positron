@@ -1947,8 +1947,7 @@ WebGLContext::DidRefresh()
 bool
 WebGLContext::ValidateCurFBForRead(const char* funcName,
                                    const webgl::FormatUsageInfo** const out_format,
-                                   uint32_t* const out_width, uint32_t* const out_height,
-                                   GLenum* const out_mode)
+                                   uint32_t* const out_width, uint32_t* const out_height)
 {
     if (!mBoundReadFramebuffer) {
         const GLenum readBufferMode = gl->Screen()->GetReadBufferMode();
@@ -1972,12 +1971,11 @@ WebGLContext::ValidateCurFBForRead(const char* funcName,
 
         *out_width = mWidth;
         *out_height = mHeight;
-        *out_mode = gl->Screen()->GetReadBufferMode();
         return true;
     }
 
     return mBoundReadFramebuffer->ValidateForRead(funcName, out_format, out_width,
-                                                  out_height, out_mode);
+                                                  out_height);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -2105,19 +2103,19 @@ ZeroTexImageWithClear(WebGLContext* webgl, GLContext* gl, TexImageTarget target,
     GLenum attachPoint = 0;
     GLbitfield clearBits = 0;
 
-    if (format->isColorFormat) {
+    if (format->IsColorFormat()) {
         attachPoint = LOCAL_GL_COLOR_ATTACHMENT0;
         clearBits = LOCAL_GL_COLOR_BUFFER_BIT;
     }
 
-    if (format->hasDepth) {
+    if (format->d) {
         attachPoint = LOCAL_GL_DEPTH_ATTACHMENT;
         clearBits |= LOCAL_GL_DEPTH_BUFFER_BIT;
     }
 
-    if (format->hasStencil) {
-        attachPoint = (format->hasDepth ? LOCAL_GL_DEPTH_STENCIL_ATTACHMENT
-                                        : LOCAL_GL_STENCIL_ATTACHMENT);
+    if (format->s) {
+        attachPoint = (format->d ? LOCAL_GL_DEPTH_STENCIL_ATTACHMENT
+                                 : LOCAL_GL_STENCIL_ATTACHMENT);
         clearBits |= LOCAL_GL_STENCIL_BUFFER_BIT;
     }
 

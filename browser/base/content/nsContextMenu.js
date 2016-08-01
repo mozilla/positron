@@ -12,7 +12,7 @@ Components.utils.import("resource://gre/modules/XPCOMUtils.jsm");
 Components.utils.import("resource://gre/modules/Services.jsm");
 
 XPCOMUtils.defineLazyModuleGetter(this, "ContextualIdentityService",
-                                  "resource:///modules/ContextualIdentityService.jsm");
+                                  "resource://gre/modules/ContextualIdentityService.jsm");
 
 XPCOMUtils.defineLazyModuleGetter(this, "LoginHelper",
   "resource://gre/modules/LoginHelper.jsm");
@@ -117,6 +117,7 @@ nsContextMenu.prototype = {
     this.initLeaveDOMFullScreenItems();
     this.initClickToPlayItems();
     this.initPasswordManagerItems();
+    this.initSyncItems();
   },
 
   initPageMenuSeparator: function CM_initPageMenuSeparator() {
@@ -576,13 +577,17 @@ nsContextMenu.prototype = {
     popup.insertBefore(fragment, insertBeforeElement);
   },
 
+  initSyncItems: function() {
+    gFxAccounts.initPageContextMenu(this);
+  },
+
   openPasswordManager: function() {
     LoginHelper.openPasswordManager(window, gContextMenuContentData.documentURIObject.host);
   },
 
   inspectNode: function() {
     let {devtools} = Cu.import("resource://devtools/shared/Loader.jsm", {});
-    let gBrowser = this.browser.ownerDocument.defaultView.gBrowser;
+    let gBrowser = this.browser.ownerGlobal.gBrowser;
     let target = devtools.TargetFactory.forTab(gBrowser.selectedTab);
 
     return gDevTools.showToolbox(target, "inspector").then(toolbox => {

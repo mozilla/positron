@@ -494,15 +494,15 @@ JS_GetCurrentEmbedderTime()
 }
 
 JS_PUBLIC_API(void*)
-JS_GetRuntimePrivate(JSRuntime* rt)
+JS_GetContextPrivate(JSContext* cx)
 {
-    return rt->data;
+    return cx->data;
 }
 
 JS_PUBLIC_API(void)
-JS_SetRuntimePrivate(JSRuntime* rt, void* data)
+JS_SetContextPrivate(JSContext* cx, void* data)
 {
-    rt->data = data;
+    cx->data = data;
 }
 
 JS_PUBLIC_API(void)
@@ -4081,10 +4081,19 @@ JS::CompileOffThread(JSContext* cx, const ReadOnlyCompileOptions& options,
 }
 
 JS_PUBLIC_API(JSScript*)
-JS::FinishOffThreadScript(JSContext* maybecx, JSRuntime* rt, void* token)
+JS::FinishOffThreadScript(JSContext* cx, void* token)
 {
-    MOZ_ASSERT(CurrentThreadCanAccessRuntime(rt));
-    return HelperThreadState().finishScriptParseTask(maybecx, rt, token);
+    MOZ_ASSERT(cx);
+    MOZ_ASSERT(CurrentThreadCanAccessRuntime(cx));
+    return HelperThreadState().finishScriptParseTask(cx, token);
+}
+
+JS_PUBLIC_API(void)
+JS::CancelOffThreadScript(JSContext* cx, void* token)
+{
+    MOZ_ASSERT(cx);
+    MOZ_ASSERT(CurrentThreadCanAccessRuntime(cx));
+    HelperThreadState().cancelParseTask(cx, ParseTaskKind::Script, token);
 }
 
 JS_PUBLIC_API(bool)
@@ -4097,10 +4106,19 @@ JS::CompileOffThreadModule(JSContext* cx, const ReadOnlyCompileOptions& options,
 }
 
 JS_PUBLIC_API(JSObject*)
-JS::FinishOffThreadModule(JSContext* maybecx, JSRuntime* rt, void* token)
+JS::FinishOffThreadModule(JSContext* cx, void* token)
 {
-    MOZ_ASSERT(CurrentThreadCanAccessRuntime(rt));
-    return HelperThreadState().finishModuleParseTask(maybecx, rt, token);
+    MOZ_ASSERT(cx);
+    MOZ_ASSERT(CurrentThreadCanAccessRuntime(cx));
+    return HelperThreadState().finishModuleParseTask(cx, token);
+}
+
+JS_PUBLIC_API(void)
+JS::CancelOffThreadModule(JSContext* cx, void* token)
+{
+    MOZ_ASSERT(cx);
+    MOZ_ASSERT(CurrentThreadCanAccessRuntime(cx));
+    HelperThreadState().cancelParseTask(cx, ParseTaskKind::Module, token);
 }
 
 JS_PUBLIC_API(bool)
@@ -4691,8 +4709,7 @@ JS::NewPromiseObject(JSContext* cx, HandleObject executor, HandleObject proto /*
 JS_PUBLIC_API(bool)
 JS::IsPromiseObject(JS::HandleObject obj)
 {
-    JSObject* object = CheckedUnwrap(obj);
-    return object && object->is<PromiseObject>();
+    return obj->is<PromiseObject>();
 }
 
 JS_PUBLIC_API(JSObject*)
@@ -4712,9 +4729,8 @@ JS::GetPromisePrototype(JSContext* cx)
 }
 
 JS_PUBLIC_API(JS::PromiseState)
-JS::GetPromiseState(JS::HandleObject obj)
+JS::GetPromiseState(JS::HandleObject promise)
 {
-    JSObject* promise = CheckedUnwrap(obj);
     return promise->as<PromiseObject>().state();
 }
 
@@ -5827,31 +5843,31 @@ JS_GetRegExpSource(JSContext* cx, HandleObject obj)
 /************************************************************************/
 
 JS_PUBLIC_API(bool)
-JS_SetDefaultLocale(JSRuntime* rt, const char* locale)
+JS_SetDefaultLocale(JSContext* cx, const char* locale)
 {
-    AssertHeapIsIdle(rt);
-    return rt->setDefaultLocale(locale);
+    AssertHeapIsIdle(cx);
+    return cx->setDefaultLocale(locale);
 }
 
 JS_PUBLIC_API(void)
-JS_ResetDefaultLocale(JSRuntime* rt)
+JS_ResetDefaultLocale(JSContext* cx)
 {
-    AssertHeapIsIdle(rt);
-    rt->resetDefaultLocale();
+    AssertHeapIsIdle(cx);
+    cx->resetDefaultLocale();
 }
 
 JS_PUBLIC_API(void)
-JS_SetLocaleCallbacks(JSRuntime* rt, const JSLocaleCallbacks* callbacks)
+JS_SetLocaleCallbacks(JSContext* cx, const JSLocaleCallbacks* callbacks)
 {
-    AssertHeapIsIdle(rt);
-    rt->localeCallbacks = callbacks;
+    AssertHeapIsIdle(cx);
+    cx->localeCallbacks = callbacks;
 }
 
 JS_PUBLIC_API(const JSLocaleCallbacks*)
-JS_GetLocaleCallbacks(JSRuntime* rt)
+JS_GetLocaleCallbacks(JSContext* cx)
 {
     /* This function can be called by a finalizer. */
-    return rt->localeCallbacks;
+    return cx->localeCallbacks;
 }
 
 /************************************************************************/
@@ -6121,15 +6137,6 @@ JS_SetGlobalJitCompilerOption(JSContext* cx, JSJitCompilerOption opt, uint32_t v
             JitSpew(js::jit::JitSpew_IonScripts, "Disable offthread compilation");
         }
         break;
-      case JSJITCOMPILER_SIGNALS_ENABLE:
-        if (value == 1) {
-            rt->setCanUseSignalHandlers(true);
-            JitSpew(js::jit::JitSpew_IonScripts, "Enable signals");
-        } else if (value == 0) {
-            rt->setCanUseSignalHandlers(false);
-            JitSpew(js::jit::JitSpew_IonScripts, "Disable signals");
-        }
-        break;
       case JSJITCOMPILER_JUMP_THRESHOLD:
         if (value == uint32_t(-1)) {
             jit::DefaultJitOptions defaultValues;
@@ -6165,8 +6172,6 @@ JS_GetGlobalJitCompilerOption(JSContext* cx, JSJitCompilerOption opt)
         return JS::ContextOptionsRef(cx).baseline();
       case JSJITCOMPILER_OFFTHREAD_COMPILATION_ENABLE:
         return rt->canUseOffthreadIonCompilation();
-      case JSJITCOMPILER_SIGNALS_ENABLE:
-        return rt->canUseSignalHandlers();
       case JSJITCOMPILER_WASM_TEST_MODE:
         return jit::JitOptions.wasmTestMode ? 1 : 0;
       default:

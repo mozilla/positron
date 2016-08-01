@@ -16,6 +16,7 @@ import org.mozilla.gecko.util.GamepadUtils;
 import org.mozilla.gecko.util.ThreadUtils;
 import org.mozilla.gecko.util.ThreadUtils.AssertBehavior;
 
+import android.annotation.SuppressLint;
 import android.content.Context;
 import android.content.res.Configuration;
 import android.media.AudioManager;
@@ -71,6 +72,9 @@ class GeckoInputConnection
     private boolean mBatchSelectionChanged;
     private boolean mBatchTextChanged;
     private final InputConnection mKeyInputConnection;
+
+    // Prevent showSoftInput and hideSoftInput from causing reentrant calls on some devices.
+    private volatile boolean mSoftInputReentrancyGuard;
 
     public static GeckoEditableListener create(View targetView,
                                                GeckoEditableClient editable) {
@@ -234,6 +238,9 @@ class GeckoInputConnection
     }
 
     private void showSoftInput() {
+        if (mSoftInputReentrancyGuard) {
+            return;
+        }
         final View v = getView();
         final InputMethodManager imm = getInputMethodManager();
         if (v == null || imm == null) {
@@ -249,16 +256,23 @@ class GeckoInputConnection
                     v.clearFocus();
                     v.requestFocus();
                 }
+                mSoftInputReentrancyGuard = true;
                 imm.showSoftInput(v, 0);
+                mSoftInputReentrancyGuard = false;
             }
         });
     }
 
     private void hideSoftInput() {
+        if (mSoftInputReentrancyGuard) {
+            return;
+        }
         final InputMethodManager imm = getInputMethodManager();
         if (imm != null) {
             final View v = getView();
+            mSoftInputReentrancyGuard = true;
             imm.hideSoftInputFromWindow(v.getWindowToken(), 0);
+            mSoftInputReentrancyGuard = false;
         }
     }
 
@@ -455,6 +469,10 @@ class GeckoInputConnection
     }
 
     // Android N: @Override // InputConnection
+    // We need to suppress lint complaining about the lack override here in the meantime: it wants us to build
+    // against sdk 24, even though we're using 23, and therefore complains about the lack of override.
+    // Once we update to 24, we can use the actual override annotation and remove the lint suppression.
+    @SuppressLint("Override")
     public Handler getHandler() {
         if (isPhysicalKeyboardPresent()) {
             return ThreadUtils.getUiHandler();

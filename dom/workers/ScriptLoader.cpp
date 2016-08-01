@@ -541,10 +541,12 @@ private:
 
 NS_IMPL_ISUPPORTS(LoaderListener, nsIStreamLoaderObserver, nsIRequestObserver)
 
-class ScriptLoaderRunnable final : public WorkerHolder
-                                 , public nsIRunnable
+class ScriptLoaderHolder;
+
+class ScriptLoaderRunnable final : public nsIRunnable
 {
   friend class ScriptExecutorRunnable;
+  friend class ScriptLoaderHolder;
   friend class CachePromiseHandler;
   friend class CacheScriptLoader;
   friend class LoaderListener;
@@ -718,8 +720,8 @@ private:
     return NS_OK;
   }
 
-  virtual bool
-  Notify(Status aStatus) override
+  bool
+  Notify(Status aStatus)
   {
     mWorkerPrivate->AssertIsOnWorkerThread();
 
@@ -1039,13 +1041,13 @@ private:
     // Note that for data: url, where we allow it through the same-origin check
     // but then give it a different origin.
     aLoadInfo.mMutedErrorFlag.emplace(IsMainWorkerScript()
-                                        ? false 
+                                        ? false
                                         : !principal->Subsumes(channelPrincipal));
 
     // Make sure we're not seeing the result of a 404 or something by checking
     // the 'requestSucceeded' attribute on the http channel.
     nsCOMPtr<nsIHttpChannel> httpChannel = do_QueryInterface(request);
-    nsAutoCString tCspHeaderValue, tCspROHeaderValue;
+    nsAutoCString tCspHeaderValue, tCspROHeaderValue, tRPHeaderCValue;
 
     if (httpChannel) {
       bool requestSucceeded;
@@ -1063,6 +1065,10 @@ private:
       httpChannel->GetResponseHeader(
         NS_LITERAL_CSTRING("content-security-policy-report-only"),
         tCspROHeaderValue);
+
+      httpChannel->GetResponseHeader(
+        NS_LITERAL_CSTRING("referrer-policy"),
+        tRPHeaderCValue);
     }
 
     // May be null.
@@ -1220,6 +1226,16 @@ private:
       }
     }
 
+    NS_ConvertUTF8toUTF16 tRPHeaderValue(tRPHeaderCValue);
+    // If there's a Referrer-Policy header, apply it.
+    if (!tRPHeaderValue.IsEmpty()) {
+      net::ReferrerPolicy policy =
+        nsContentUtils::GetReferrerPolicyFromHeader(tRPHeaderValue);
+      if (policy != net::RP_Unset) {
+        mWorkerPrivate->SetReferrerPolicy(policy);
+      }
+    }
+
     return NS_OK;
   }
 
@@ -1355,6 +1371,26 @@ private:
 };
 
 NS_IMPL_ISUPPORTS(ScriptLoaderRunnable, nsIRunnable)
+
+class MOZ_STACK_CLASS ScriptLoaderHolder final : public WorkerHolder
+{
+  // Raw pointer because this holder object follows the mRunnable life-time.
+  ScriptLoaderRunnable* mRunnable;
+
+public:
+  explicit ScriptLoaderHolder(ScriptLoaderRunnable* aRunnable)
+    : mRunnable(aRunnable)
+  {
+    MOZ_ASSERT(aRunnable);
+  }
+
+  virtual bool
+  Notify(Status aStatus) override
+  {
+    mRunnable->Notify(aStatus);
+    return true;
+  }
+};
 
 NS_IMETHODIMP
 LoaderListener::OnStreamComplete(nsIStreamLoader* aLoader, nsISupports* aContext,
@@ -2008,7 +2044,6 @@ ScriptExecutorRunnable::ShutdownScriptLoader(JSContext* aCx,
     }
   }
 
-  mScriptLoader.ReleaseWorker();
   aWorkerPrivate->StopSyncLoop(mSyncLoopTarget, aResult);
 }
 
@@ -2060,15 +2095,15 @@ LoadAllScripts(WorkerPrivate* aWorkerPrivate,
 
   NS_ASSERTION(aLoadInfos.IsEmpty(), "Should have swapped!");
 
-  if (NS_WARN_IF(!loader->HoldWorker(aWorkerPrivate))) {
+  ScriptLoaderHolder workerHolder(loader);
+
+  if (NS_WARN_IF(!workerHolder.HoldWorker(aWorkerPrivate))) {
     aRv.Throw(NS_ERROR_FAILURE);
     return;
   }
 
   if (NS_FAILED(NS_DispatchToMainThread(loader))) {
     NS_ERROR("Failed to dispatch!");
-
-    loader->ReleaseWorker();
     aRv.Throw(NS_ERROR_FAILURE);
     return;
   }

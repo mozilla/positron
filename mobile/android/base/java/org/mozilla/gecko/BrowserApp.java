@@ -28,6 +28,7 @@ import org.mozilla.gecko.delegates.OfflineTabStatusDelegate;
 import org.mozilla.gecko.delegates.ScreenshotDelegate;
 import org.mozilla.gecko.distribution.Distribution;
 import org.mozilla.gecko.distribution.DistributionStoreCallback;
+import org.mozilla.gecko.distribution.PartnerBrowserCustomizationsClient;
 import org.mozilla.gecko.dlc.DownloadContentService;
 import org.mozilla.gecko.favicons.Favicons;
 import org.mozilla.gecko.favicons.OnFaviconLoadedListener;
@@ -288,8 +289,6 @@ public class BrowserApp extends GeckoApp
 
     private SharedPreferencesHelper mSharedPreferencesHelper;
 
-    private OrderedBroadcastHelper mOrderedBroadcastHelper;
-
     private ReadingListHelper mReadingListHelper;
 
     private AccountsHelper mAccountsHelper;
@@ -344,6 +343,14 @@ public class BrowserApp extends GeckoApp
             if (msg != Tabs.TabEvents.RESTORED) {
                 throw new IllegalArgumentException("onTabChanged:" + msg + " must specify a tab.");
             }
+
+            final Tab selectedTab = Tabs.getInstance().getSelectedTab();
+            if (selectedTab != null) {
+                // After restoring the tabs we want to update the home pager immediately. Otherwise we
+                // might wait for an event coming from Gecko and this can take several seconds. (Bug 1283627)
+                updateHomePagerForTab(selectedTab);
+            }
+
             return;
         }
 
@@ -698,7 +705,6 @@ public class BrowserApp extends GeckoApp
 
         JavaAddonManager.getInstance().init(appContext);
         mSharedPreferencesHelper = new SharedPreferencesHelper(appContext);
-        mOrderedBroadcastHelper = new OrderedBroadcastHelper(appContext);
         mReadingListHelper = new ReadingListHelper(appContext, profile);
         mAccountsHelper = new AccountsHelper(appContext, profile);
 
@@ -810,7 +816,7 @@ public class BrowserApp extends GeckoApp
     }
 
     private void showUpdaterPermissionSnackbar() {
-        SnackbarHelper.SnackbarCallback allowCallback = new SnackbarHelper.SnackbarCallback() {
+        SnackbarBuilder.SnackbarCallback allowCallback = new SnackbarBuilder.SnackbarCallback() {
             @Override
             public void onClick(View v) {
                 Permissions.from(BrowserApp.this)
@@ -819,11 +825,12 @@ public class BrowserApp extends GeckoApp
             }
         };
 
-        SnackbarHelper.showSnackbarWithAction(this,
-                getString(R.string.updater_permission_text),
-                Snackbar.LENGTH_INDEFINITE,
-                getString(R.string.updater_permission_allow),
-                allowCallback);
+        SnackbarBuilder.builder(this)
+                .message(R.string.updater_permission_text)
+                .duration(Snackbar.LENGTH_INDEFINITE)
+                .action(R.string.updater_permission_allow)
+                .callback(allowCallback)
+                .buildAndShow();
     }
 
     private void conditionallyNotifyEOL() {
@@ -1361,11 +1368,6 @@ public class BrowserApp extends GeckoApp
         if (mSharedPreferencesHelper != null) {
             mSharedPreferencesHelper.uninit();
             mSharedPreferencesHelper = null;
-        }
-
-        if (mOrderedBroadcastHelper != null) {
-            mOrderedBroadcastHelper.uninit();
-            mOrderedBroadcastHelper = null;
         }
 
         if (mReadingListHelper != null) {
@@ -2090,8 +2092,42 @@ public class BrowserApp extends GeckoApp
 
     @Override
     public String getHomepage() {
-        final SharedPreferences prefs = GeckoSharedPrefs.forProfile(getContext());
-        return prefs.getString(GeckoPreferences.PREFS_HOMEPAGE, null);
+        final SharedPreferences preferences = GeckoSharedPrefs.forProfile(this);
+        final String homepagePreference = preferences.getString(GeckoPreferences.PREFS_HOMEPAGE, null);
+
+        final boolean readFromPartnerProvider = preferences.getBoolean(
+                GeckoPreferences.PREFS_READ_PARTNER_CUSTOMIZATIONS_PROVIDER, false);
+
+        if (!readFromPartnerProvider) {
+            // Just return homepage as set by the user (or null).
+            return homepagePreference;
+        }
+
+
+        final String homepagePrevious = preferences.getString(GeckoPreferences.PREFS_HOMEPAGE_PARTNER_COPY, null);
+        if (homepagePrevious != null && !homepagePrevious.equals(homepagePreference)) {
+            // We have read the homepage once and the user has changed it since then. Just use the
+            // value the user has set.
+            return homepagePreference;
+        }
+
+        // This is the first time we read the partner provider or the value has not been altered by the user
+        final String homepagePartner = PartnerBrowserCustomizationsClient.getHomepage(this);
+
+        if (homepagePartner == null) {
+            // We didn't get anything from the provider. Let's just use what we have locally.
+            return homepagePreference;
+        }
+
+        if (!homepagePartner.equals(homepagePrevious)) {
+            // We have a new value. Update the preferences.
+            preferences.edit()
+                    .putString(GeckoPreferences.PREFS_HOMEPAGE, homepagePartner)
+                    .putString(GeckoPreferences.PREFS_HOMEPAGE_PARTNER_COPY, homepagePartner)
+                    .apply();
+        }
+
+        return homepagePartner;
     }
 
     @Override
@@ -2872,7 +2908,7 @@ public class BrowserApp extends GeckoApp
         @Override
         public boolean onInterceptTouchEvent(View view, MotionEvent event) {
             if (event.getActionMasked() == MotionEvent.ACTION_DOWN) {
-                SnackbarHelper.dismissCurrentSnackbar();
+                SnackbarBuilder.dismissCurrentSnackbar();
             }
 
 
@@ -3881,7 +3917,7 @@ public class BrowserApp extends GeckoApp
         // hold a reference to the Tab itself in the anonymous listener class.
         final int newTabId = newTab.getId();
 
-        final SnackbarHelper.SnackbarCallback callback = new SnackbarHelper.SnackbarCallback() {
+        final SnackbarBuilder.SnackbarCallback callback = new SnackbarBuilder.SnackbarCallback() {
             @Override
             public void onClick(View v) {
                 Telemetry.sendUIEvent(TelemetryContract.Event.SHOW, TelemetryContract.Method.TOAST, "switchtab");
@@ -3895,7 +3931,12 @@ public class BrowserApp extends GeckoApp
                 getResources().getString(R.string.new_tab_opened);
         final String buttonMessage = getResources().getString(R.string.switch_button_message);
 
-        SnackbarHelper.showSnackbarWithAction(this, message, Snackbar.LENGTH_LONG, buttonMessage, callback);
+        SnackbarBuilder.builder(this)
+                .message(message)
+                .duration(Snackbar.LENGTH_LONG)
+                .action(buttonMessage)
+                .callback(callback)
+                .buildAndShow();
     }
 
     // BrowserSearch.OnSearchListener

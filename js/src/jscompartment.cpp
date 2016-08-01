@@ -71,6 +71,7 @@ JSCompartment::JSCompartment(Zone* zone, const JS::CompartmentOptions& options =
     initialShapes(zone, InitialShapeSet()),
     selfHostingScriptSource(nullptr),
     objectMetadataTable(nullptr),
+    innerViews(zone, InnerViewTable()),
     lazyArrayBuffers(nullptr),
     wasmInstances(zone, WasmInstanceObjectSet()),
     nonSyntacticLexicalScopes_(nullptr),
@@ -227,7 +228,6 @@ class WrapperMapRef : public BufferableRef
         const char* name_;
         TraceFunctor(JSTracer *trc, const char* name) : trc_(trc), name_(name) {}
 
-        using ReturnType = void;
         template <class T> void operator()(T* t) { TraceManuallyBarrieredEdge(trc_, t, name_); }
     };
     void trace(JSTracer* trc) override {
@@ -250,7 +250,6 @@ class WrapperMapRef : public BufferableRef
 #ifdef JSGC_HASH_TABLE_CHECKS
 namespace {
 struct CheckGCThingAfterMovingGCFunctor {
-    using ReturnType = void;
     template <class T> void operator()(T* t) { CheckGCThingAfterMovingGC(*t); }
 };
 } // namespace (anonymous)
@@ -275,7 +274,6 @@ JSCompartment::checkWrapperMapAfterMovingGC()
 
 namespace {
 struct IsInsideNurseryFunctor {
-    using ReturnType = bool;
     template <class T> bool operator()(T tp) { return IsInsideNursery(*tp); }
 };
 } // namespace (anonymous)
@@ -688,12 +686,6 @@ JSCompartment::sweepAfterMinorGC()
 }
 
 void
-JSCompartment::sweepInnerViews()
-{
-    innerViews.sweep();
-}
-
-void
 JSCompartment::sweepSavedStacks()
 {
     savedStacks_.sweep();
@@ -775,11 +767,9 @@ struct TraceRootFunctor {
     JSTracer* trc;
     const char* name;
     TraceRootFunctor(JSTracer* trc, const char* name) : trc(trc), name(name) {}
-    using ReturnType = void;
-    template <class T> ReturnType operator()(T* t) { return TraceRoot(trc, t, name); }
+    template <class T> void operator()(T* t) { return TraceRoot(trc, t, name); }
 };
 struct NeedsSweepUnbarrieredFunctor {
-    using ReturnType = bool;
     template <class T> bool operator()(T* t) const { return IsAboutToBeFinalizedUnbarriered(t); }
 };
 } // namespace (anonymous)

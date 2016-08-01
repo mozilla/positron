@@ -18,6 +18,7 @@
 #include "nsNameSpaceManager.h"
 #include "nsString.h"
 #include "nsStyleStruct.h"
+#include "nsTArray.h"
 #include "nsStyleUtil.h"
 #include "StyleStructContext.h"
 
@@ -162,6 +163,25 @@ Gecko_GetElementId(RawGeckoElement* aElement)
 {
   const nsAttrValue* attr = aElement->GetParsedAttr(nsGkAtoms::id);
   return attr ? attr->GetAtomValue() : nullptr;
+}
+
+// Dirtiness tracking.
+uint32_t
+Gecko_GetNodeFlags(RawGeckoNode* aNode)
+{
+  return aNode->GetFlags();
+}
+
+void
+Gecko_SetNodeFlags(RawGeckoNode* aNode, uint32_t aFlags)
+{
+  aNode->SetFlags(aFlags);
+}
+
+void
+Gecko_UnsetNodeFlags(RawGeckoNode* aNode, uint32_t aFlags)
+{
+  aNode->UnsetFlags(aFlags);
 }
 
 template<class MatchFn>
@@ -541,6 +561,48 @@ Gecko_CreateGradient(uint8_t aShape,
   return result;
 }
 
+void
+Gecko_EnsureTArrayCapacity(void* aArray, size_t aCapacity, size_t aElemSize)
+{
+  auto base = reinterpret_cast<nsTArray_base<nsTArrayInfallibleAllocator, nsTArray_CopyWithMemutils> *>(aArray);
+  base->EnsureCapacity<nsTArrayInfallibleAllocator>(aCapacity, aElemSize);
+}
+
+void
+Gecko_EnsureImageLayersLength(nsStyleImageLayers* aLayers, size_t aLen)
+{
+  aLayers->mLayers.EnsureLengthAtLeast(aLen);
+}
+
+void
+Gecko_InitializeImageLayer(nsStyleImageLayers::Layer* aLayer,
+                                nsStyleImageLayers::LayerType aLayerType)
+{
+  aLayer->Initialize(aLayerType);
+}
+
+void
+Gecko_ResetStyleCoord(nsStyleUnit* aUnit, nsStyleUnion* aValue)
+{
+  nsStyleCoord::Reset(*aUnit, *aValue);
+}
+
+void
+Gecko_SetStyleCoordCalcValue(nsStyleUnit* aUnit, nsStyleUnion* aValue, nsStyleCoord::CalcValue aCalc)
+{
+  // Calc units should be cleaned up first
+  MOZ_ASSERT(*aUnit != nsStyleUnit::eStyleUnit_Calc);
+  nsStyleCoord::Calc* calcRef = new nsStyleCoord::Calc();
+  calcRef->mLength = aCalc.mLength;
+  calcRef->mPercent = aCalc.mPercent;
+  calcRef->mHasPercent = aCalc.mHasPercent;
+  *aUnit = nsStyleUnit::eStyleUnit_Calc;
+  aValue->mPointer = calcRef;
+  calcRef->AddRef();
+}
+
+NS_IMPL_THREADSAFE_FFI_REFCOUNTING(nsStyleCoord::Calc, Calc);
+
 #define STYLE_STRUCT(name, checkdata_cb)                                      \
                                                                               \
 void                                                                          \
@@ -649,7 +711,7 @@ Servo_DropStyleSet(RawServoStyleSet* set)
 }
 
 ServoDeclarationBlock*
-Servo_ParseStyleAttribute(const uint8_t* bytes, uint8_t length,
+Servo_ParseStyleAttribute(const uint8_t* bytes, uint32_t length,
                           nsHTMLCSSStyleSheet* cache)
 {
   MOZ_CRASH("stylo: shouldn't be calling Servo_ParseStyleAttribute in a "
@@ -681,6 +743,14 @@ void
 Servo_ClearDeclarationBlockCachePointer(ServoDeclarationBlock* declarations)
 {
   MOZ_CRASH("stylo: shouldn't be calling Servo_ClearDeclarationBlockCachePointer in a "
+            "non-MOZ_STYLO build");
+}
+
+bool
+Servo_CSSSupports(const uint8_t* name, uint32_t name_length,
+                  const uint8_t* value, uint32_t value_length)
+{
+  MOZ_CRASH("stylo: shouldn't be calling Servo_CSSSupports in a "
             "non-MOZ_STYLO build");
 }
 

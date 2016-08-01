@@ -25,6 +25,7 @@
 #include "nsIThreadInternal.h"
 #include "nsIDOMGeoPositionCallback.h"
 #include "nsIDOMGeoPositionErrorCallback.h"
+#include "nsRefPtrHashtable.h"
 #include "PermissionMessageUtils.h"
 #include "DriverCrashGuard.h"
 
@@ -65,7 +66,6 @@ class PJavaScriptParent;
 } // namespace jsipc
 
 namespace layers {
-class PCompositorBridgeParent;
 class PSharedBufferManagerParent;
 struct TextureFactoryIdentifier;
 } // namespace layers
@@ -83,6 +83,7 @@ class ClonedMessageData;
 class MemoryReport;
 class TabContext;
 class ContentBridgeParent;
+class GetFilesHelper;
 
 class ContentParent final : public PContentParent
                           , public nsIContentParent
@@ -573,6 +574,24 @@ public:
 
   static bool AllocateLayerTreeId(TabParent* aTabParent, uint64_t* aId);
 
+  static void
+  BroadcastBlobURLRegistration(const nsACString& aURI,
+                               BlobImpl* aBlobImpl,
+                               nsIPrincipal* aPrincipal,
+                               ContentParent* aIgnoreThisCP = nullptr);
+
+  static void
+  BroadcastBlobURLUnregistration(const nsACString& aURI,
+                                 ContentParent* aIgnoreThisCP = nullptr);
+
+  virtual bool
+  RecvStoreAndBroadcastBlobURLRegistration(const nsCString& aURI,
+                                           PBlobParent* aBlobParent,
+                                           const Principal& aPrincipal) override;
+
+  virtual bool
+  RecvUnstoreAndBroadcastBlobURLUnregistration(const nsCString& aURI) override;
+
 protected:
   void OnChannelConnected(int32_t pid) override;
 
@@ -725,14 +744,6 @@ private:
   AllocPAPZParent(const TabId& aTabId) override;
   bool
   DeallocPAPZParent(PAPZParent* aActor) override;
-
-  PCompositorBridgeParent*
-  AllocPCompositorBridgeParent(mozilla::ipc::Transport* aTransport,
-                               base::ProcessId aOtherProcess) override;
-
-  PImageBridgeParent*
-  AllocPImageBridgeParent(mozilla::ipc::Transport* aTransport,
-                          base::ProcessId aOtherProcess) override;
 
   PSharedBufferManagerParent*
   AllocPSharedBufferManagerParent(mozilla::ipc::Transport* aTranport,
@@ -1135,8 +1146,6 @@ private:
   virtual bool RecvUpdateDropEffect(const uint32_t& aDragAction,
                                     const uint32_t& aDropEffect) override;
 
-  virtual bool RecvGetBrowserConfiguration(BrowserConfiguration* aConfig) override;
-
   virtual bool RecvProfile(const nsCString& aProfile) override;
 
   virtual bool RecvGetGraphicsDeviceInitData(DeviceInitData* aOut) override;
@@ -1169,6 +1178,18 @@ private:
                                                            const IPC::Principal& aPrincipal) override;
 
   virtual bool RecvNotifyLowMemory() override;
+
+  virtual bool RecvGetFilesRequest(const nsID& aID,
+                                   const nsString& aDirectoryPath,
+                                   const bool& aRecursiveFlag) override;
+
+  virtual bool RecvDeleteGetFilesRequest(const nsID& aID) override;
+
+public:
+  void SendGetFilesResponseAndForget(const nsID& aID,
+                                     const GetFilesResponseResult& aResult);
+
+private:
 
   // If you add strong pointers to cycle collected objects here, be sure to
   // release these objects in ShutDownProcess.  See the comment there for more
@@ -1265,6 +1286,12 @@ private:
 #ifdef NS_PRINTING
   RefPtr<embedding::PrintingParent> mPrintingParent;
 #endif
+
+  // This hashtable is used to run GetFilesHelper objects in the parent process.
+  // GetFilesHelper can be aborted by receiving RecvDeleteGetFilesRequest.
+  nsRefPtrHashtable<nsIDHashKey, GetFilesHelper> mGetFilesPendingRequests;
+
+  nsTArray<nsCString> mBlobURLs;
 };
 
 } // namespace dom

@@ -36,7 +36,7 @@ typedef HashSet<Shape*> ShapeSet;
 class MOZ_RAII AutoCycleDetector
 {
   public:
-    using Set = HashSet<JSObject*, MovableCellHasher<JSObject*>>;
+    using Set = HashSet<JSObject*, MovableCellHasher<JSObject*>, SystemAllocPolicy>;
 
     AutoCycleDetector(JSContext* cx, HandleObject objArg
                       MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
@@ -218,7 +218,6 @@ class ExclusiveContext : public ContextFriendFields,
     void* stackLimitAddressForJitCode(StackKind kind);
     uintptr_t stackLimit(StackKind kind) { return runtime_->mainThread.nativeStackLimit[kind]; }
     size_t gcSystemPageSize() { return gc::SystemPageSize(); }
-    bool canUseSignalHandlers() const { return runtime_->canUseSignalHandlers(); }
     bool jitSupportsFloatingPoint() const { return runtime_->jitSupportsFloatingPoint; }
     bool jitSupportsUnalignedAccesses() const { return runtime_->jitSupportsUnalignedAccesses; }
     bool jitSupportsSimd() const { return runtime_->jitSupportsSimd; }
@@ -382,6 +381,9 @@ struct JSContext : public js::ExclusiveContext,
 
     /* State for object and array toSource conversion. */
     js::AutoCycleDetector::Set cycleDetectorSet;
+
+    /* Client opaque pointer. */
+    void* data;
 
   public:
 

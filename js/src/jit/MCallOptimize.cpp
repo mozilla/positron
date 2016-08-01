@@ -1492,11 +1492,14 @@ IonBuilder::inlineConstantStringSplitString(CallInfo& callInfo)
     // jsop_initelem_array is doing because we do not expect to bailout
     // because the memory is supposed to be allocated by now.
     for (uint32_t i = 0; i < initLength; i++) {
-       MConstant* value = arrayValues[i];
-       current->add(value);
+        if (!alloc().ensureBallast())
+            return InliningStatus_Error;
 
-       if (!initializeArrayElement(array, i, value, unboxedType, /* addResumePoint = */ false))
-           return InliningStatus_Error;
+        MConstant* value = arrayValues[i];
+        current->add(value);
+
+        if (!initializeArrayElement(array, i, value, unboxedType, /* addResumePoint = */ false))
+            return InliningStatus_Error;
     }
 
     MInstruction* setLength = setInitializedLength(array, unboxedType, initLength);
@@ -2329,22 +2332,11 @@ IonBuilder::inlineTypedArray(CallInfo& callInfo, Native native)
     if (obj->length() != len)
         return InliningStatus_NotInlined;
 
-    // Large typed arrays have a separate buffer object, while small arrays
-    // have their values stored inline.
-    bool createBuffer = len > TypedArrayObject::INLINE_BUFFER_LIMIT / obj->bytesPerElement();
-
-    // Buffers are not supported yet!
-    if (createBuffer)
-        return InliningStatus_NotInlined;
-
     callInfo.setImplicitlyUsedUnchecked();
 
-    MConstant* templateConst = MConstant::NewConstraintlessObject(alloc(), obj);
-    current->add(templateConst);
+    MInstruction* ins = MNewTypedArray::New(alloc(), constraints(), obj,
+                                            obj->group()->initialHeap(constraints()));
 
-    MNewObject* ins = MNewObject::New(alloc(), constraints(), templateConst,
-                                      obj->group()->initialHeap(constraints()),
-                                      MNewObject::TypedArray);
     current->add(ins);
     current->push(ins);
     if (!resumeAfter(ins))

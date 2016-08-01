@@ -38,7 +38,7 @@ private:
     WebGLRefPtr<WebGLRenderbuffer> mRenderbufferPtr;
     TexImageTarget mTexImageTarget;
     GLint mTexImageLayer;
-    GLint mTexImageLevel;
+    uint32_t mTexImageLevel;
 
     // PlacementArray needs a default constructor.
     template<typename T>
@@ -89,7 +89,7 @@ public:
     GLint Layer() const {
         return mTexImageLayer;
     }
-    GLint MipLevel() const {
+    uint32_t MipLevel() const {
         return mTexImageLevel;
     }
     void AttachmentName(nsCString* out) const;
@@ -259,6 +259,8 @@ public:
 
     GLenum ReadBufferMode() const { return mReadBufferMode; }
 
+    void GatherAttachments(std::vector<const WebGLFBAttachPoint*>* const out) const;
+
 protected:
     WebGLFBAttachPoint* GetAttachPoint(GLenum attachment); // Fallible
 
@@ -286,8 +288,7 @@ public:
 
     bool ValidateForRead(const char* info,
                          const webgl::FormatUsageInfo** const out_format,
-                         uint32_t* const out_width, uint32_t* const out_height,
-                         GLenum* const out_mode);
+                         uint32_t* const out_width, uint32_t* const out_height);
 
     JS::Value GetAttachmentParameter(const char* funcName, JSContext* cx, GLenum target,
                                      GLenum attachment, GLenum pname,

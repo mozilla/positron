@@ -1882,7 +1882,11 @@ GCMarker::enterWeakMarkingMode()
         return;
 
     // During weak marking mode, we maintain a table mapping weak keys to
-    // entries in known-live weakmaps.
+    // entries in known-live weakmaps. Initialize it with the keys of marked
+    // weakmaps -- or more precisely, the keys of marked weakmaps that are
+    // mapped to not yet live values. (Once bug 1167452 implements incremental
+    // weakmap marking, this initialization step will become unnecessary, as
+    // the table will already hold all such keys.)
     if (weakMapAction() == ExpandWeakMaps) {
         tag_ = TracerKindTag::WeakMarking;
 
@@ -2095,33 +2099,46 @@ js::gc::StoreBuffer::SlotsEdge::trace(TenuringTracer& mover) const
     }
 }
 
-void
-js::gc::StoreBuffer::traceWholeCell(TenuringTracer& mover, JS::TraceKind kind, Cell* edge)
+static inline void
+TraceWholeCell(TenuringTracer& mover, JSObject* object)
 {
-    MOZ_ASSERT(edge->isTenured());
-    if (kind == JS::TraceKind::Object) {
-        JSObject *object = static_cast<JSObject*>(edge);
-        mover.traceObject(object);
+    mover.traceObject(object);
 
-        // Additionally trace the expando object attached to any unboxed plain
-        // objects. Baseline and Ion can write properties to the expando while
-        // only adding a post barrier to the owning unboxed object. Note that
-        // it isn't possible for a nursery unboxed object to have a tenured
-        // expando, so that adding a post barrier on the original object will
-        // capture any tenured->nursery edges in the expando as well.
-        if (object->is<UnboxedPlainObject>()) {
-            if (UnboxedExpandoObject* expando = object->as<UnboxedPlainObject>().maybeExpando())
-                expando->traceChildren(&mover);
-        }
+    // Additionally trace the expando object attached to any unboxed plain
+    // objects. Baseline and Ion can write properties to the expando while
+    // only adding a post barrier to the owning unboxed object. Note that
+    // it isn't possible for a nursery unboxed object to have a tenured
+    // expando, so that adding a post barrier on the original object will
+    // capture any tenured->nursery edges in the expando as well.
 
-        return;
+    if (object->is<UnboxedPlainObject>()) {
+        if (UnboxedExpandoObject* expando = object->as<UnboxedPlainObject>().maybeExpando())
+            expando->traceChildren(&mover);
     }
-    if (kind == JS::TraceKind::Script)
-        static_cast<JSScript*>(edge)->traceChildren(&mover);
-    else if (kind == JS::TraceKind::JitCode)
-        static_cast<jit::JitCode*>(edge)->traceChildren(&mover);
-    else
-        MOZ_CRASH();
+}
+
+static inline void
+TraceWholeCell(TenuringTracer& mover, JSScript* script)
+{
+    script->traceChildren(&mover);
+}
+
+static inline void
+TraceWholeCell(TenuringTracer& mover, jit::JitCode* jitcode)
+{
+    jitcode->traceChildren(&mover);
+}
+
+template <typename T>
+static void
+TraceBufferedCells(TenuringTracer& mover, Arena* arena, ArenaCellSet* cells)
+{
+    for (size_t i = 0; i < ArenaCellCount; i++) {
+        if (cells->hasCell(i)) {
+            auto cell = reinterpret_cast<T*>(uintptr_t(arena) + CellSize * i);
+            TraceWholeCell(mover, cell);
+        }
+    }
 }
 
 void
@@ -2134,11 +2151,18 @@ js::gc::StoreBuffer::traceWholeCells(TenuringTracer& mover)
         arena->bufferedCells = &ArenaCellSet::Empty;
 
         JS::TraceKind kind = MapAllocToTraceKind(arena->getAllocKind());
-        for (size_t i = 0; i < ArenaCellCount; i++) {
-            if (cells->hasCell(i)) {
-                auto cell = reinterpret_cast<Cell*>(uintptr_t(arena) + CellSize * i);
-                traceWholeCell(mover, kind, cell);
-            }
+        switch (kind) {
+          case JS::TraceKind::Object:
+            TraceBufferedCells<JSObject>(mover, arena, cells);
+            break;
+          case JS::TraceKind::Script:
+            TraceBufferedCells<JSScript>(mover, arena, cells);
+            break;
+          case JS::TraceKind::JitCode:
+            TraceBufferedCells<jit::JitCode>(mover, arena, cells);
+            break;
+          default:
+            MOZ_CRASH("Unexpected trace kind");
         }
     }
 
@@ -2307,6 +2331,8 @@ js::TenuringTracer::moveObjectToTenured(JSObject* dst, JSObject* src, AllocKind 
 
     if (src->is<InlineTypedObject>()) {
         InlineTypedObject::objectMovedDuringMinorGC(this, dst, src);
+    } else if (src->is<TypedArrayObject>()) {
+        tenuredSize += TypedArrayObject::objectMovedDuringMinorGC(this, dst, src, dstKind);
     } else if (src->is<UnboxedArrayObject>()) {
         tenuredSize += UnboxedArrayObject::objectMovedDuringMinorGC(this, dst, src, dstKind);
     } else if (src->is<ArgumentsObject>()) {
@@ -2472,7 +2498,6 @@ bool
 js::gc::IsAboutToBeFinalizedDuringSweep(TenuredCell& tenured)
 {
     MOZ_ASSERT(!IsInsideNursery(&tenured));
-    MOZ_ASSERT(!tenured.runtimeFromAnyThread()->isHeapMinorCollecting());
     MOZ_ASSERT(tenured.zoneFromAnyThread()->isGCSweeping());
     if (tenured.arena()->allocatedDuringIncremental)
         return false;
@@ -2492,11 +2517,9 @@ IsAboutToBeFinalizedInternal(T** thingp)
         return false;
 
     Nursery& nursery = rt->gc.nursery;
-    MOZ_ASSERT_IF(!rt->isHeapMinorCollecting(), !IsInsideNursery(thing));
-    if (rt->isHeapMinorCollecting()) {
-        if (IsInsideNursery(thing))
-            return !nursery.getForwardedPointer(reinterpret_cast<JSObject**>(thingp));
-        return false;
+    if (IsInsideNursery(thing)) {
+        MOZ_ASSERT(rt->isHeapMinorCollecting());
+        return !nursery.getForwardedPointer(reinterpret_cast<JSObject**>(thingp));
     }
 
     Zone* zone = thing->asTenured().zoneFromAnyThread();

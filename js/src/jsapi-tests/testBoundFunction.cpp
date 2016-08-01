@@ -26,8 +26,7 @@ BEGIN_TEST(testBoundFunction)
     CHECK(!!target);
     CHECK(JS_ObjectIsFunction(cx, target));
     JS::RootedValue targetVal(cx, JS::ObjectValue(*target));
-    bool equal = false;
-    CHECK(JS_StrictlyEqual(cx, foo, targetVal, &equal) && equal);
+    CHECK_SAME(foo, targetVal);
 
     return true;
 }

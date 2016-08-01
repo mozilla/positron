@@ -2918,7 +2918,7 @@ nsIPresShell::RestyleForAnimation(Element* aElement, nsRestyleHint aHint)
   // but it still seems useful to offer as a "more public" API and as a
   // chokepoint for these restyles to go through.
   mPresContext->RestyleManager()->PostRestyleEvent(aElement, aHint,
-                                                   NS_STYLE_HINT_NONE);
+                                                   nsChangeHint(0));
 }
 
 void
@@ -3682,13 +3682,8 @@ PresShell::DispatchSynthMouseMove(WidgetGUIEvent* aEvent,
                                   bool aFlushOnHoverChange)
 {
   RestyleManagerHandle restyleManager = mPresContext->RestyleManager();
-  if (restyleManager->IsServo()) {
-    NS_ERROR("stylo: cannot dispatch synthetic mouse moves when using a "
-             "ServoRestyleManager yet");
-    return;
-  }
   uint32_t hoverGenerationBefore =
-    restyleManager->AsGecko()->GetHoverGeneration();
+    restyleManager->GetHoverGeneration();
   nsEventStatus status;
   nsView* targetView = nsView::GetViewFor(aEvent->mWidget);
   if (!targetView)
@@ -3698,7 +3693,7 @@ PresShell::DispatchSynthMouseMove(WidgetGUIEvent* aEvent,
     return;
   }
   if (aFlushOnHoverChange &&
-      hoverGenerationBefore != restyleManager->AsGecko()->GetHoverGeneration()) {
+      hoverGenerationBefore != restyleManager->GetHoverGeneration()) {
     // Flush so that the resulting reflow happens now so that our caller
     // can suppress any synthesized mouse moves caused by that reflow.
     // This code only ever runs for the root document, but :hover changes
@@ -4240,7 +4235,7 @@ PresShell::DocumentStatesChanged(nsIDocument* aDocument,
                                                aStateMask)) {
     mPresContext->RestyleManager()->PostRestyleEvent(mDocument->GetRootElement(),
                                                      eRestyle_Subtree,
-                                                     NS_STYLE_HINT_NONE);
+                                                     nsChangeHint(0));
     VERIFY_STYLE_TREE;
   }
 
@@ -4518,11 +4513,11 @@ nsIPresShell::RestyleForCSSRuleChanges()
     // the beginning of this function, and that we need to restyle the whole
     // document.
     restyleManager->PostRestyleEvent(root, eRestyle_Subtree,
-                                     NS_STYLE_HINT_NONE);
+                                     nsChangeHint(0));
   } else {
     for (Element* scopeRoot : scopeRoots) {
       restyleManager->PostRestyleEvent(scopeRoot, eRestyle_Subtree,
-                                       NS_STYLE_HINT_NONE);
+                                       nsChangeHint(0));
     }
   }
 }

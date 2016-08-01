@@ -639,21 +639,6 @@ nsLayoutUtils::IsAnimationLoggingEnabled()
 }
 
 bool
-nsLayoutUtils::UseBackgroundNearestFiltering()
-{
-  static bool sUseBackgroundNearestFilteringEnabled;
-  static bool sUseBackgroundNearestFilteringPrefInitialised = false;
-
-  if (!sUseBackgroundNearestFilteringPrefInitialised) {
-    sUseBackgroundNearestFilteringPrefInitialised = true;
-    sUseBackgroundNearestFilteringEnabled =
-      Preferences::GetBool("gfx.filter.nearest.force-enabled", false);
-  }
-
-  return sUseBackgroundNearestFilteringEnabled;
-}
-
-bool
 nsLayoutUtils::GPUImageScalingEnabled()
 {
   static bool sGPUImageScalingEnabled;
@@ -6951,10 +6936,6 @@ nsLayoutUtils::DrawBackgroundImage(gfxContext&         aContext,
   PROFILER_LABEL("layout", "nsLayoutUtils::DrawBackgroundImage",
                  js::ProfileEntry::Category::GRAPHICS);
 
-  if (UseBackgroundNearestFiltering()) {
-    aSamplingFilter = SamplingFilter::POINT;
-  }
-
   SVGImageContext svgContext(aImageSize, Nothing());
 
   /* Fast path when there is no need for image spacing */
@@ -9364,4 +9345,12 @@ nsLayoutUtils::GetCumulativeApzCallbackTransform(nsIFrame* aFrame)
     content = frame ? frame->GetContent() : nullptr;
   }
   return delta;
+}
+
+/* static */ bool
+nsLayoutUtils::SupportsServoStyleBackend(nsIDocument* aDocument)
+{
+  return nsPresContext::StyloEnabled() &&
+         aDocument->IsHTMLOrXHTML() &&
+         static_cast<nsDocument*>(aDocument)->IsContentDocument();
 }

@@ -53,6 +53,7 @@ const {PrefObserver} = require("devtools/client/styleeditor/utils");
 const {KeyShortcuts} = require("devtools/client/shared/key-shortcuts");
 const {template} = require("devtools/shared/gcli/templater");
 const nodeConstants = require("devtools/shared/dom-node-constants");
+const nodeFilterConstants = require("devtools/shared/dom-node-filter-constants");
 const {XPCOMUtils} = require("resource://gre/modules/XPCOMUtils.jsm");
 
 loader.lazyRequireGetter(this, "CSS", "CSS");
@@ -172,7 +173,7 @@ MarkupView.prototype = {
     this.eventDetailsTooltip = new HTMLTooltip(this._inspector.toolbox,
       {type: "arrow"});
     this.imagePreviewTooltip = new HTMLTooltip(this._inspector.toolbox,
-      {type: "arrow"});
+      {type: "arrow", useXulWrapper: "true"});
     this._enableImagePreviewTooltip();
   },
 
@@ -632,14 +633,14 @@ MarkupView.prototype = {
   _selectionWalker: function (start) {
     let walker = this.doc.createTreeWalker(
       start || this._elt,
-      Ci.nsIDOMNodeFilter.SHOW_ELEMENT,
+      nodeFilterConstants.SHOW_ELEMENT,
       function (element) {
         if (element.container &&
             element.container.elt === element &&
             element.container.visible) {
-          return Ci.nsIDOMNodeFilter.FILTER_ACCEPT;
+          return nodeFilterConstants.FILTER_ACCEPT;
         }
-        return Ci.nsIDOMNodeFilter.FILTER_SKIP;
+        return nodeFilterConstants.FILTER_SKIP;
       }
     );
     walker.currentNode = this._selectedContainer.elt;
@@ -2645,25 +2646,23 @@ function MarkupElementContainer(markupView, node) {
 }
 
 MarkupElementContainer.prototype = Heritage.extend(MarkupContainer.prototype, {
-  _buildEventTooltipContent: function (target, tooltip) {
+  _buildEventTooltipContent: Task.async(function* (target, tooltip) {
     if (target.hasAttribute("data-event")) {
-      tooltip.hide(target);
+      yield tooltip.hide();
 
-      this.node.getEventListenerInfo().then(listenerInfo => {
-        let toolbox = this.markup._inspector.toolbox;
-        setEventTooltip(tooltip, listenerInfo, toolbox);
-        // Disable the image preview tooltip while we display the event details
-        this.markup._disableImagePreviewTooltip();
-        tooltip.once("hidden", () => {
-          // Enable the image preview tooltip after closing the event details
-          this.markup._enableImagePreviewTooltip();
-        });
-        tooltip.show(target);
+      let listenerInfo = yield this.node.getEventListenerInfo();
+
+      let toolbox = this.markup._inspector.toolbox;
+      setEventTooltip(tooltip, listenerInfo, toolbox);
+      // Disable the image preview tooltip while we display the event details
+      this.markup._disableImagePreviewTooltip();
+      tooltip.once("hidden", () => {
+        // Enable the image preview tooltip after closing the event details
+        this.markup._enableImagePreviewTooltip();
       });
-      return true;
+      tooltip.show(target);
     }
-    return undefined;
-  },
+  }),
 
   /**
    * Generates the an image preview for this Element. The element must be an
@@ -3195,6 +3194,7 @@ ElementEditor.prototype = {
     // Create the template editor, which will save some variables here.
     let data = {
       attrName: attribute.name,
+      tabindex: this.container.canFocus ? "0" : "-1",
     };
     this.template("attribute", data);
     let {attr, inner, name, val} = data;

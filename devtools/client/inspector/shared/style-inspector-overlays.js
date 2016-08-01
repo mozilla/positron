@@ -12,7 +12,7 @@
 // - in-content highlighters that appear when hovering over property values
 // - etc.
 
-const {getTheme} = require("devtools/client/shared/theme");
+const {getColor} = require("devtools/client/shared/theme");
 const {HTMLTooltip} = require("devtools/client/shared/widgets/HTMLTooltip");
 const {
   getImageDimensions,
@@ -20,9 +20,11 @@ const {
   setBrokenImageTooltip,
 } = require("devtools/client/shared/widgets/tooltip/ImageTooltipHelper");
 const {
+  CssDocsTooltip,
+} = require("devtools/client/shared/widgets/tooltip/CssDocsTooltip");
+const {
   SwatchColorPickerTooltip,
   SwatchCubicBezierTooltip,
-  CssDocsTooltip,
   SwatchFilterTooltip
 } = require("devtools/client/shared/widgets/Tooltip");
 const EventEmitter = require("devtools/shared/event-emitter");
@@ -276,21 +278,21 @@ TooltipsOverlay.prototype = {
       return;
     }
 
-    let panelDoc = this.view.inspector.panelDoc;
+    let { toolbox } = this.view.inspector;
 
     // Image, fonts, ... preview tooltip
-    this.previewTooltip = new HTMLTooltip(this.view.inspector.toolbox, {
-      type: "arrow"
+    this.previewTooltip = new HTMLTooltip(toolbox, {
+      type: "arrow",
+      useXulWrapper: true
     });
     this.previewTooltip.startTogglingOnHover(this.view.element,
       this._onPreviewTooltipTargetHover.bind(this));
 
     // MDN CSS help tooltip
-    this.cssDocs = new CssDocsTooltip(panelDoc);
+    this.cssDocs = new CssDocsTooltip(toolbox);
 
     if (this.isRuleView) {
       // Color picker tooltip
-      let { toolbox } = this.view.inspector;
       this.colorPicker = new SwatchColorPickerTooltip(toolbox);
       // Cubic bezier tooltip
       this.cubicBezier = new SwatchCubicBezierTooltip(toolbox);
@@ -392,7 +394,7 @@ TooltipsOverlay.prototype = {
       this.cubicBezier.hide();
     }
 
-    if (this.isRuleView && this.cssDocs.tooltip.isShown()) {
+    if (this.isRuleView && this.cssDocs.tooltip.isVisible()) {
       this.cssDocs.hide();
     }
 
@@ -472,7 +474,7 @@ TooltipsOverlay.prototype = {
     font = font.replace("!important", "");
     font = font.trim();
 
-    let fillStyle = getTheme() === "light" ? "black" : "white";
+    let fillStyle = getColor("body-color");
     let {data, size: maxDim} = yield nodeFront.getFontFamilyDataURL(font, fillStyle);
 
     let imageUrl = yield data.string();

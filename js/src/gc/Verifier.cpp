@@ -235,8 +235,10 @@ gc::GCRuntime::startVerifyPreBarriers()
 
     for (ZonesIter zone(rt, WithAtoms); !zone.done(); zone.next()) {
         PurgeJITCaches(zone);
-        zone->setNeedsIncrementalBarrier(true, Zone::UpdateJit);
-        zone->arenas.purge();
+        if (!zone->usedByExclusiveThread) {
+            zone->setNeedsIncrementalBarrier(true, Zone::UpdateJit);
+            zone->arenas.purge();
+        }
     }
 
     return;
@@ -282,6 +284,13 @@ CheckEdgeTracer::onChild(const JS::GCCellPtr& thing)
             return;
         }
     }
+}
+
+void
+js::gc::AssertSafeToSkipBarrier(TenuredCell* thing)
+{
+    Zone* zone = thing->zoneFromAnyThread();
+    MOZ_ASSERT(!zone->needsIncrementalBarrier() || zone->isAtomsZone());
 }
 
 static void

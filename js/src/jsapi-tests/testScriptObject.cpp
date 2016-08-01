@@ -18,9 +18,6 @@ struct ScriptObjectFixture : public JSAPITest {
             uc_code[i] = code[i];
     }
 
-    using JSAPITest::setup;
-    using JSAPITest::teardown;
-
     bool tryScript(JS::HandleScript script)
     {
         CHECK(script);
@@ -32,21 +29,6 @@ struct ScriptObjectFixture : public JSAPITest {
         CHECK(JS_ExecuteScript(cx, script, &result));
 
         return true;
-    }
-
-    bool makeScript(const char* code, const char* file, size_t line,
-                    JS::MutableHandleScript script)
-    {
-        JS::CompileOptions options(cx);
-        options.setFileAndLine(file, line);
-        return JS_CompileScript(cx, code, strlen(code), options, script);
-    }
-
-    bool runScript(const char* code, const char* file, size_t line)
-    {
-        JS::RootedScript script(cx);
-        CHECK(makeScript(code, file, line, &script));
-        return tryScript(script);
     }
 };
 
@@ -194,22 +176,21 @@ BEGIN_FIXTURE_TEST(ScriptObjectFixture, CloneAndExecuteScript)
     fortyTwo.setInt32(42);
     CHECK(JS_SetProperty(cx, global, "val", fortyTwo));
     JS::RootedScript script(cx);
-    CHECK(makeScript("val", __FILE__, __LINE__, &script));
+    JS::CompileOptions options(cx);
+    options.setFileAndLine(__FILE__, __LINE__);
+    CHECK(JS_CompileScript(cx, "val", 3, options, &script));
     JS::RootedValue value(cx);
     CHECK(JS_ExecuteScript(cx, script, &value));
     CHECK(value.toInt32() == 42);
     {
-        cls_CloneAndExecuteScript other;
-        other.rt = rt;
-        CHECK(other.setup());
-        {
-            JSAutoCompartment ac(cx, global);
-            JS::RootedValue value2(cx);
-            CHECK(JS::CloneAndExecuteScript(cx, script, &value2));
-            CHECK(value2.toInt32() == 42);
-        }
-        other.teardown();
-        other.rt = nullptr;
+        JS::RootedObject global2(cx, createGlobal());
+        CHECK(global2);
+        JSAutoCompartment ac(cx, global2);
+        CHECK(JS_WrapValue(cx, &fortyTwo));
+        CHECK(JS_SetProperty(cx, global, "val", fortyTwo));
+        JS::RootedValue value2(cx);
+        CHECK(JS::CloneAndExecuteScript(cx, script, &value2));
+        CHECK(value2.toInt32() == 42);
     }
     JS::RootedValue value3(cx);
     CHECK(JS_ExecuteScript(cx, script, &value3));

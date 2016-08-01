@@ -153,6 +153,7 @@ class BaseContext {
     this.unloaded = false;
     this.extensionId = extensionId;
     this.jsonSandbox = null;
+    this.active = true;
   }
 
   get cloneScope() {
@@ -473,10 +474,8 @@ let IconDetails = {
 
   // Returns the appropriate icon URL for the given icons object and the
   // screen resolution of the given window.
-  getURL(icons, window, extension, size = 16) {
+  getPreferredIcon(icons, extension = null, size = 16) {
     const DEFAULT = "chrome://browser/content/extension.svg";
-
-    size *= window.devicePixelRatio;
 
     let bestSize = null;
     if (icons[size]) {
@@ -1004,7 +1003,10 @@ Port.prototype = {
       }).api(),
       onMessage: new EventManager(this.context, "Port.onMessage", fire => {
         let listener = ({data}) => {
-          if (!this.disconnected) {
+          if (!this.context.active) {
+            // TODO: Send error as a response.
+            Cu.reportError("Message received on port for an inactive content script");
+          } else if (!this.disconnected) {
             fire(data);
           }
         };
@@ -1046,7 +1048,9 @@ Port.prototype = {
 
   disconnect() {
     if (this.disconnected) {
-      throw new this.context.contentWindow.Error("Attempt to disconnect() a disconnected port");
+      // disconnect() may be called without side effects even after the port is
+      // closed - https://developer.chrome.com/extensions/runtime#type-Port
+      return;
     }
     this.handleDisconnection();
     this.messageManager.sendAsyncMessage(this.disconnectName);
@@ -1119,6 +1123,10 @@ Messenger.prototype = {
         messageFilterPermissive: this.filter,
 
         receiveMessage: ({target, data: message, sender, recipient}) => {
+          if (!this.context.active) {
+            return;
+          }
+
           if (this.delegate) {
             this.delegate.getSender(this.context, target, sender);
           }

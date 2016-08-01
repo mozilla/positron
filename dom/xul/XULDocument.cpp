@@ -3524,8 +3524,8 @@ XULDocument::ExecuteScript(nsXULPrototypeScript *aScript)
     // The script is in the compilation scope. Clone it into the target scope
     // and execute it. On failure, ~AutoScriptEntry will handle exceptions, so
     // there is no need to manually check the return value.
-    JS::RootedValue result(cx);
-    JS::CloneAndExecuteScript(cx, scriptObject, &result);
+    JS::RootedValue rval(cx);
+    JS::CloneAndExecuteScript(cx, scriptObject, &rval);
 
     return NS_OK;
 }

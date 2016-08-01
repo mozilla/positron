@@ -9,11 +9,17 @@
 #include "base/basictypes.h"
 #include "base/process.h"
 #include "Units.h"
+#include "mozilla/UniquePtr.h"
 #include "mozilla/dom/ipc/IdType.h"
 #include "mozilla/gfx/GPUProcessHost.h"
 #include "mozilla/gfx/Point.h"
+#include "mozilla/ipc/ProtocolUtils.h"
+#include "mozilla/ipc/TaskFactory.h"
 #include "mozilla/ipc/Transport.h"
 #include "nsIObserverService.h"
+#include "nsThreadUtils.h"
+class nsBaseWidget;
+
 
 namespace mozilla {
 namespace layers {
@@ -21,7 +27,8 @@ class APZCTreeManager;
 class CompositorSession;
 class ClientLayerManager;
 class CompositorUpdateObserver;
-class PCompositorBridgeParent;
+class PCompositorBridgeChild;
+class PImageBridgeChild;
 } // namespace layers
 namespace widget {
 class CompositorWidget;
@@ -36,6 +43,8 @@ class GeckoChildProcessHost;
 namespace gfx {
 
 class GPUChild;
+class VsyncBridgeChild;
+class VsyncIOThreadHolder;
 
 // The GPUProcessManager is a singleton responsible for creating GPU-bound
 // objects that may live in another process. Currently, it provides access
@@ -43,7 +52,11 @@ class GPUChild;
 class GPUProcessManager final : public GPUProcessHost::Listener
 {
   typedef layers::APZCTreeManager APZCTreeManager;
+  typedef layers::ClientLayerManager ClientLayerManager;
+  typedef layers::CompositorSession CompositorSession;
   typedef layers::CompositorUpdateObserver CompositorUpdateObserver;
+  typedef layers::PCompositorBridgeChild PCompositorBridgeChild;
+  typedef layers::PImageBridgeChild PImageBridgeChild;
 
 public:
   static void Initialize();
@@ -60,17 +73,19 @@ public:
   // Otherwise it blocks until the GPU process has finished launching.
   void EnsureGPUReady();
 
-  already_AddRefed<layers::CompositorSession> CreateTopLevelCompositor(
-    nsIWidget* aWidget,
-    layers::ClientLayerManager* aLayerManager,
+  RefPtr<CompositorSession> CreateTopLevelCompositor(
+    nsBaseWidget* aWidget,
+    ClientLayerManager* aLayerManager,
     CSSToLayoutDeviceScale aScale,
     bool aUseAPZ,
     bool aUseExternalSurfaceSize,
     const gfx::IntSize& aSurfaceSize);
 
-  layers::PCompositorBridgeParent* CreateTabCompositorBridge(
-    ipc::Transport* aTransport,
-    base::ProcessId aOtherProcess);
+  bool CreateContentCompositorBridge(base::ProcessId aOtherProcess,
+                                     ipc::Endpoint<PCompositorBridgeChild>* aOutEndpoint);
+
+  bool CreateContentImageBridge(base::ProcessId aOtherProcess,
+                                ipc::Endpoint<PImageBridgeChild>* aOutEndpoint);
 
   // This returns a reference to the APZCTreeManager to which
   // pan/zoom-related events can be sent.
@@ -106,6 +121,10 @@ public:
   void OnProcessLaunchComplete(GPUProcessHost* aHost) override;
   void OnProcessUnexpectedShutdown(GPUProcessHost* aHost) override;
 
+  // Notify the GPUProcessManager that a top-level PGPU protocol has been
+  // terminated. This may be called from any thread.
+  void NotifyRemoteActorDestroyed(const uint64_t& aProcessToken);
+
   // Returns access to the PGPU protocol if a GPU process is present.
   GPUChild* GetGPUChild() {
     return mGPUChild;
@@ -122,7 +141,22 @@ private:
   void DisableGPUProcess(const char* aMessage);
 
   // Shutdown the GPU process.
+  void CleanShutdown();
   void DestroyProcess();
+
+  void EnsureVsyncIOThread();
+  void ShutdownVsyncIOThread();
+
+  void EnsureImageBridgeChild();
+
+  RefPtr<CompositorSession> CreateRemoteSession(
+    nsBaseWidget* aWidget,
+    ClientLayerManager* aLayerManager,
+    const uint64_t& aRootLayerTreeId,
+    CSSToLayoutDeviceScale aScale,
+    bool aUseAPZ,
+    bool aUseExternalSurfaceSize,
+    const gfx::IntSize& aSurfaceSize);
 
   DISALLOW_COPY_AND_ASSIGN(GPUProcessManager);
 
@@ -141,8 +175,15 @@ private:
 
 private:
   RefPtr<Observer> mObserver;
+  ipc::TaskFactory<GPUProcessManager> mTaskFactory;
+  RefPtr<VsyncIOThreadHolder> mVsyncIOThread;
+  uint64_t mNextLayerTreeId;
+
+  // Fields that are associated with the current GPU process.
   GPUProcessHost* mProcess;
+  uint64_t mProcessToken;
   GPUChild* mGPUChild;
+  RefPtr<VsyncBridgeChild> mVsyncBridge;
 };
 
 } // namespace gfx

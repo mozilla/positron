@@ -8946,7 +8946,7 @@ public:
   {
     AssertIsOnBackgroundThread();
     MOZ_ASSERT(aMaintenance);
-    MOZ_ASSERT(mCurrentMaintenance = aMaintenance);
+    MOZ_ASSERT(mCurrentMaintenance == aMaintenance);
 
     mCurrentMaintenance = nullptr;
     ProcessMaintenanceQueue();
@@ -8994,6 +8994,12 @@ public:
 
   virtual void
   ShutdownWorkThreads() override;
+
+  virtual void
+  DidInitialize(QuotaManager* aQuotaManager) override;
+
+  virtual void
+  WillShutdown() override;
 
 private:
   ~QuotaClient();
@@ -9915,7 +9921,7 @@ RecvFlushPendingFileDeletions()
   RefPtr<FlushPendingFileDeletionsRunnable> runnable =
     new FlushPendingFileDeletionsRunnable();
 
-  MOZ_ALWAYS_SUCCEEDS(NS_DispatchToMainThread(runnable));
+  MOZ_ALWAYS_SUCCEEDS(NS_DispatchToMainThread(runnable.forget()));
 
   return true;
 }
@@ -12014,11 +12020,11 @@ ConnectionPool::ShutdownThread(ThreadInfo& aThreadInfo)
                  runnable->SerialNumber()));
 
   // This should clean up the thread with the profiler.
-  MOZ_ALWAYS_SUCCEEDS(thread->Dispatch(runnable, NS_DISPATCH_NORMAL));
+  MOZ_ALWAYS_SUCCEEDS(thread->Dispatch(runnable.forget(),
+                                       NS_DISPATCH_NORMAL));
 
-  nsCOMPtr<nsIRunnable> shutdownRunnable =
-    NewRunnableMethod(thread, &nsIThread::Shutdown);
-  MOZ_ALWAYS_SUCCEEDS(NS_DispatchToMainThread(shutdownRunnable));
+  MOZ_ALWAYS_SUCCEEDS(NS_DispatchToMainThread(
+                        NewRunnableMethod(thread, &nsIThread::Shutdown)));
 
   mTotalThreadCount--;
 }
@@ -12133,7 +12139,7 @@ ConnectionPool::ScheduleTransaction(TransactionInfo* aTransactionInfo,
           MOZ_ASSERT(dbInfo->mThreadInfo.mThread);
 
           MOZ_ALWAYS_SUCCEEDS(
-            dbInfo->mThreadInfo.mThread->Dispatch(runnable,
+            dbInfo->mThreadInfo.mThread->Dispatch(runnable.forget(),
                                                   NS_DISPATCH_NORMAL));
         }
       }
@@ -12191,7 +12197,8 @@ ConnectionPool::ScheduleTransaction(TransactionInfo* aTransactionInfo,
       queuedRunnables[index].swap(runnable);
 
       MOZ_ALWAYS_SUCCEEDS(
-        dbInfo->mThreadInfo.mThread->Dispatch(runnable, NS_DISPATCH_NORMAL));
+        dbInfo->mThreadInfo.mThread->Dispatch(runnable.forget(),
+                                              NS_DISPATCH_NORMAL));
     }
 
     queuedRunnables.Clear();
@@ -12525,7 +12532,7 @@ ConnectionPool::PerformIdleDatabaseMaintenance(DatabaseInfo* aDatabaseInfo)
   mDatabasesPerformingIdleMaintenance.AppendElement(aDatabaseInfo);
 
   MOZ_ALWAYS_SUCCEEDS(
-    aDatabaseInfo->mThreadInfo.mThread->Dispatch(runnable,
+    aDatabaseInfo->mThreadInfo.mThread->Dispatch(runnable.forget(),
                                                  NS_DISPATCH_NORMAL));
 }
 
@@ -12546,7 +12553,7 @@ ConnectionPool::CloseDatabase(DatabaseInfo* aDatabaseInfo)
   nsCOMPtr<nsIRunnable> runnable = new CloseConnectionRunnable(aDatabaseInfo);
 
   MOZ_ALWAYS_SUCCEEDS(
-    aDatabaseInfo->mThreadInfo.mThread->Dispatch(runnable,
+    aDatabaseInfo->mThreadInfo.mThread->Dispatch(runnable.forget(),
                                                  NS_DISPATCH_NORMAL));
 }
 
@@ -17413,6 +17420,26 @@ QuotaClient::ShutdownWorkThreads()
   }
 }
 
+void
+QuotaClient::DidInitialize(QuotaManager* aQuotaManager)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+
+  if (IndexedDatabaseManager* mgr = IndexedDatabaseManager::Get()) {
+    mgr->NoteLiveQuotaManager(aQuotaManager);
+  }
+}
+
+void
+QuotaClient::WillShutdown()
+{
+  MOZ_ASSERT(NS_IsMainThread());
+
+  if (IndexedDatabaseManager* mgr = IndexedDatabaseManager::Get()) {
+    mgr->NoteShuttingDownQuotaManager();
+  }
+}
+
 nsresult
 QuotaClient::GetDirectory(PersistenceType aPersistenceType,
                           const nsACString& aOrigin, nsIFile** aDirectory)
@@ -18583,8 +18610,7 @@ DatabaseMaintenance::RunOnOwningThread()
   AssertIsOnBackgroundThread();
 
   if (mCompleteCallback) {
-    MOZ_ALWAYS_SUCCEEDS(NS_DispatchToCurrentThread(mCompleteCallback));
-    mCompleteCallback = nullptr;
+    MOZ_ALWAYS_SUCCEEDS(NS_DispatchToCurrentThread(mCompleteCallback.forget()));
   }
 
   mMaintenance->UnregisterDatabaseMaintenance(this);
@@ -19930,13 +19956,11 @@ FactoryOp::Open()
   {
     // These services have to be started on the main thread currently.
 
-    IndexedDatabaseManager* mgr = IndexedDatabaseManager::GetOrCreate();
-    if (NS_WARN_IF(!mgr)) {
+    IndexedDatabaseManager* mgr;
+    if (NS_WARN_IF(!(mgr = IndexedDatabaseManager::GetOrCreate()))) {
       IDB_REPORT_INTERNAL_ERR();
       return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
     }
-
-    mgr->NoteBackgroundThread(mOwningThread);
 
     nsCOMPtr<mozIStorageService> ss;
     if (NS_WARN_IF(!(ss = do_GetService(MOZ_STORAGE_SERVICE_CONTRACTID)))) {
@@ -20143,8 +20167,7 @@ FactoryOp::FinishSendResults()
 
   if (mBlockedDatabaseOpen) {
     if (mDelayedOp) {
-      MOZ_ALWAYS_SUCCEEDS(NS_DispatchToCurrentThread(mDelayedOp));
-      mDelayedOp = nullptr;
+      MOZ_ALWAYS_SUCCEEDS(NS_DispatchToCurrentThread(mDelayedOp.forget()));
     }
 
     MOZ_ASSERT(gFactoryOps);
@@ -20283,25 +20306,9 @@ FactoryOp::CheckPermission(ContentParent* aContentParent,
   PermissionRequestBase::PermissionValue permission;
 
   if (QuotaManager::IsFirstPromptRequired(persistenceType, origin, isApp)) {
-#ifdef MOZ_CHILD_PERMISSIONS
-    if (aContentParent) {
-      if (NS_WARN_IF(!AssertAppPrincipal(aContentParent, principal))) {
-        IDB_REPORT_INTERNAL_ERR();
-        return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
-      }
-
-      uint32_t intPermission =
-        mozilla::CheckPermission(aContentParent, principal, IDB_PREFIX);
-
-      permission =
-        PermissionRequestBase::PermissionValueForIntPermission(intPermission);
-    } else
-#endif // MOZ_CHILD_PERMISSIONS
-    {
-      rv = PermissionRequestBase::GetCurrentPermission(principal, &permission);
-      if (NS_WARN_IF(NS_FAILED(rv))) {
-        return rv;
-      }
+    rv = PermissionRequestBase::GetCurrentPermission(principal, &permission);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return rv;
     }
   } else {
     permission = PermissionRequestBase::kPermissionAllowed;
@@ -20380,65 +20387,7 @@ FactoryOp::CheckAtLeastOneAppHasPermission(ContentParent* aContentParent,
   MOZ_ASSERT(aContentParent);
   MOZ_ASSERT(!aPermissionString.IsEmpty());
 
-#ifdef MOZ_CHILD_PERMISSIONS
-  const ManagedContainer<PBrowserParent>& browsers =
-    aContentParent->ManagedPBrowserParent();
-
-  if (!browsers.IsEmpty()) {
-    nsCOMPtr<nsIAppsService> appsService =
-      do_GetService(APPS_SERVICE_CONTRACTID);
-    if (NS_WARN_IF(!appsService)) {
-      return false;
-    }
-
-    nsCOMPtr<nsIIOService> ioService = do_GetIOService();
-    if (NS_WARN_IF(!ioService)) {
-      return false;
-    }
-
-    nsCOMPtr<nsIPermissionManager> permMan =
-      mozilla::services::GetPermissionManager();
-    if (NS_WARN_IF(!permMan)) {
-      return false;
-    }
-
-    const nsPromiseFlatCString permissionString =
-      PromiseFlatCString(aPermissionString);
-
-    for (auto iter = browsers.ConstIter(); !iter.Done(); iter.Next()) {
-      uint32_t appId =
-        TabParent::GetFrom(iter.Get()->GetKey())->OwnOrContainingAppId();
-      MOZ_ASSERT(appId != nsIScriptSecurityManager::UNKNOWN_APP_ID &&
-                 appId != nsIScriptSecurityManager::NO_APP_ID);
-
-      nsCOMPtr<mozIApplication> app;
-      nsresult rv = appsService->GetAppByLocalId(appId, getter_AddRefs(app));
-      if (NS_WARN_IF(NS_FAILED(rv))) {
-        return false;
-      }
-
-      nsCOMPtr<nsIPrincipal> principal;
-      app->GetPrincipal(getter_AddRefs(principal));
-      NS_ENSURE_TRUE(principal, false);
-
-      uint32_t permission;
-      rv = permMan->TestExactPermissionFromPrincipal(principal,
-                                                     permissionString.get(),
-                                                     &permission);
-      if (NS_WARN_IF(NS_FAILED(rv))) {
-        return false;
-      }
-
-      if (permission == nsIPermissionManager::ALLOW_ACTION) {
-        return true;
-      }
-    }
-  }
-
-  return false;
-#else
   return true;
-#endif // MOZ_CHILD_PERMISSIONS
 }
 
 nsresult
@@ -22276,7 +22225,8 @@ DeleteDatabaseOp::DispatchToWorkThread()
   MOZ_ASSERT(quotaManager);
 
   nsresult rv =
-    quotaManager->IOThread()->Dispatch(versionChangeOp, NS_DISPATCH_NORMAL);
+    quotaManager->IOThread()->Dispatch(versionChangeOp.forget(),
+                                       NS_DISPATCH_NORMAL);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     IDB_REPORT_INTERNAL_ERR();
     return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;

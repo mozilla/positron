@@ -57,9 +57,10 @@ public:
     mSampleSize = aSampleSize;
   }
 
-  virtual void InitInternal() override;
-  virtual void WriteInternal(const char* aBuffer, uint32_t aCount) override;
-  virtual void FinishInternal() override;
+  nsresult InitInternal() override;
+  LexerResult DoDecode(SourceBufferIterator& aIterator,
+                       IResumable* aOnResume) override;
+  nsresult FinishInternal() override;
 
   virtual Telemetry::ID SpeedHistogram() override;
   void NotifyDone();

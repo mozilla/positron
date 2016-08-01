@@ -1031,7 +1031,9 @@ js::FunctionToString(JSContext* cx, HandleFunction fun, bool lambdaParen)
                                         fun->isGetter() || fun->isSetter();
 
     // If we're not in pretty mode, put parentheses around lambda functions and methods.
-    if (fun->isInterpreted() && !lambdaParen && funIsMethodOrNonArrowLambda) {
+    if (fun->isInterpreted() && !lambdaParen && funIsMethodOrNonArrowLambda &&
+        !fun->isSelfHostedBuiltin())
+    {
         if (!out.append("("))
             return nullptr;
     }
@@ -1779,6 +1781,8 @@ JSFunction::maybeRelazify(JSRuntime* rt)
         MOZ_ASSERT(isExtended());
         MOZ_ASSERT(getExtendedSlot(LAZY_FUNCTION_NAME_SLOT).toString()->isAtom());
     }
+
+    comp->scheduleDelazificationForDebugger();
 }
 
 static bool

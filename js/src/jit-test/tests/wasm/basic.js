@@ -29,8 +29,8 @@ wasmEvalText('(module (func) (func) (export "a" 1))');
 wasmEvalText('(module (func $a) (func $b) (export "a" $a) (export "b" $b))');
 wasmEvalText('(module (func $a) (func $b) (export "a" $a) (export "b" $b))');
 
-assertErrorMessage(() => wasmEvalText('(module (func) (export "a" 1))'), TypeError, /export function index out of range/);
-assertErrorMessage(() => wasmEvalText('(module (func) (func) (export "a" 2))'), TypeError, /export function index out of range/);
+assertErrorMessage(() => wasmEvalText('(module (func) (export "a" 1))'), TypeError, /exported function index out of bounds/);
+assertErrorMessage(() => wasmEvalText('(module (func) (func) (export "a" 2))'), TypeError, /exported function index out of bounds/);
 
 var o = wasmEvalText('(module (func) (export "a" 0) (export "b" 0))');
 assertEq(Object.getOwnPropertyNames(o).sort().toString(), "a,b");
@@ -422,7 +422,7 @@ var {v2i, i2i, i2v} = wasmEvalText(`(module
     (export "i2v" 8)
 )`);
 
-const badIndirectCall = /wasm indirect call signature mismatch/;
+const badIndirectCall = /bad wasm indirect call/;
 
 assertEq(v2i(0), 13);
 assertEq(v2i(1), 42);

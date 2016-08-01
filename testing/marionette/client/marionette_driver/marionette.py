@@ -1310,10 +1310,7 @@ class Marionette(object):
     def get_active_frame(self):
         """Returns an HTMLElement representing the frame Marionette is
         currently acting on."""
-        element = self._send_message("getActiveFrame", key="value")
-        if element:
-            return HTMLElement(self, element)
-        return None
+        return self._send_message("getActiveFrame", key="value")
 
     def switch_to_default_content(self):
         """Switch the current context to page's default content."""
@@ -1934,7 +1931,7 @@ class Marionette(object):
 
         """
         body = {"width": width, "height": height}
-        self._send_message("setWindowSize", body)
+        return self._send_message("setWindowSize", body)
 
     def maximize_window(self):
         """ Resize the browser window currently receiving commands. The action

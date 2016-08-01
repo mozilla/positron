@@ -31,10 +31,9 @@ loader.lazyRequireGetter(this, "ComputedViewTool", "devtools/client/inspector/co
 loader.lazyRequireGetter(this, "FontInspector", "devtools/client/inspector/fonts/fonts", true);
 loader.lazyRequireGetter(this, "HTMLBreadcrumbs", "devtools/client/inspector/breadcrumbs", true);
 loader.lazyRequireGetter(this, "InspectorSearch", "devtools/client/inspector/inspector-search", true);
-loader.lazyRequireGetter(this, "LayoutView", "devtools/client/inspector/layout/layout", true);
 loader.lazyRequireGetter(this, "MarkupView", "devtools/client/inspector/markup/markup", true);
 loader.lazyRequireGetter(this, "RuleViewTool", "devtools/client/inspector/rules/rules", true);
-loader.lazyRequireGetter(this, "ToolSidebar", "devtools/client/framework/sidebar", true);
+loader.lazyRequireGetter(this, "ToolSidebar", "devtools/client/inspector/toolsidebar", true);
 loader.lazyRequireGetter(this, "ViewHelpers", "devtools/client/shared/widgets/view-helpers", true);
 
 loader.lazyGetter(this, "strings", () => {
@@ -99,7 +98,8 @@ function InspectorPanel(iframeWindow, toolbox) {
   this.onNewSelection = this.onNewSelection.bind(this);
   this.onBeforeNewSelection = this.onBeforeNewSelection.bind(this);
   this.onDetached = this.onDetached.bind(this);
-  this.onPaneToggleButtonClicked = this.onPaneToggleButtonClicked.bind(this);
+  this.onPaneToggleButtonActivated = this.onPaneToggleButtonActivated.bind(this);
+  this.onPaneToggleButtonPressed = this.onPaneToggleButtonPressed.bind(this);
   this._onMarkupFrameLoad = this._onMarkupFrameLoad.bind(this);
 
   let doc = this.panelDoc;
@@ -411,6 +411,17 @@ InspectorPanel.prototype = {
       defaultTab = "ruleview";
     }
 
+    // Append all side panels
+    this.sidebar.addExistingTab(
+      "ruleview",
+      strings.GetStringFromName("inspector.sidebar.ruleViewTitle"),
+      defaultTab == "ruleview");
+
+    this.sidebar.addExistingTab(
+      "computedview",
+      strings.GetStringFromName("inspector.sidebar.computedViewTitle"),
+      defaultTab == "computedview");
+
     this._setDefaultSidebar = (event, toolId) => {
       Services.prefs.setCharPref("devtools.inspector.activeSidebar", toolId);
     };
@@ -419,24 +430,65 @@ InspectorPanel.prototype = {
 
     this.ruleview = new RuleViewTool(this, this.panelWin);
     this.computedview = new ComputedViewTool(this, this.panelWin);
-    this.layoutview = new LayoutView(this, this.panelWin);
 
     if (this.target.form.animationsActor) {
-      this.sidebar.addTab("animationinspector",
-                          "chrome://devtools/content/animationinspector/animation-inspector.xhtml",
-                          {selected: defaultTab == "animationinspector",
-                           insertBefore: "fontinspector"});
+      this.sidebar.addFrameTab(
+        "animationinspector",
+        strings.GetStringFromName("inspector.sidebar.animationInspectorTitle"),
+        "chrome://devtools/content/animationinspector/animation-inspector.xhtml",
+        defaultTab == "animationinspector");
     }
 
     if (Services.prefs.getBoolPref("devtools.fontinspector.enabled") &&
         this.canGetUsedFontFaces) {
+      this.sidebar.addExistingTab(
+        "fontinspector",
+        strings.GetStringFromName("inspector.sidebar.fontInspectorTitle"),
+        defaultTab == "fontinspector");
+
       this.fontInspector = new FontInspector(this, this.panelWin);
       this.sidebar.toggleTab(true, "fontinspector");
     }
 
-    this.sidebar.show(defaultTab);
-
     this.setupSidebarToggle();
+    this.setupSidebarWidth();
+
+    this.sidebar.show(defaultTab);
+  },
+
+  /**
+   * Sidebar width is currently driven by vbox.inspector-sidebar-container
+   * element, which is located at the left side of the side bar splitter.
+   * It's width is changed by the splitter and stored into preferences.
+   * As soon as bug 1260552 is fixed and new HTML based splitter in place
+   * the width can be driven by div.inspector-sidebar element. This element
+   * represents the ToolSidebar and so, the entire logic related to width
+   * persistence can be done inside the ToolSidebar.
+   */
+  setupSidebarWidth: function () {
+    let sidePaneContainer = this.panelDoc.querySelector(
+      "#inspector-sidebar-container");
+
+    this.sidebar.on("show", () => {
+      try {
+        sidePaneContainer.width = Services.prefs.getIntPref(
+          "devtools.toolsidebar-width.inspector");
+      } catch (e) {
+        // The default width is the min-width set in CSS
+        // for #inspector-sidebar-container
+        sidePaneContainer.width = 450;
+      }
+    });
+
+    this.sidebar.on("hide", () => {
+      Services.prefs.setIntPref("devtools.toolsidebar-width.inspector",
+        sidePaneContainer.width);
+    });
+
+    this.sidebar.on("destroy", () => {
+      Services.prefs.setIntPref("devtools.toolsidebar-width.inspector",
+        sidePaneContainer.width);
+    });
   },
 
   /**
@@ -447,7 +499,8 @@ InspectorPanel.prototype = {
       "devtools/client/shared/components/sidebar-toggle"));
 
     let sidebarToggle = SidebarToggle({
-      onClick: this.onPaneToggleButtonClicked,
+      onClick: this.onPaneToggleButtonActivated,
+      onKeyDown: this.onPaneToggleButtonPressed,
       collapsed: false,
       expandPaneTitle: strings.GetStringFromName("inspector.expandPane"),
       collapsePaneTitle: strings.GetStringFromName("inspector.collapsePane"),
@@ -692,10 +745,6 @@ InspectorPanel.prototype = {
       this.fontInspector.destroy();
     }
 
-    if (this.layoutview) {
-      this.layoutview.destroy();
-    }
-
     let cssPropertiesDestroyer = this._cssPropertiesLoaded.then(({front}) => {
       if (front) {
         front.destroy();
@@ -890,7 +939,7 @@ InspectorPanel.prototype = {
     menu.append(new MenuItem({
       id: "node-menu-expand",
       label: strings.GetStringFromName("inspectorExpandNode.label"),
-      disabled: !isNodeWithChildren || markupContainer.expanded,
+      disabled: !isNodeWithChildren,
       click: () => this.expandNode(),
     }));
     menu.append(new MenuItem({
@@ -1154,36 +1203,53 @@ InspectorPanel.prototype = {
   },
 
   /**
+  * When the pane toggle button is pressed with space and return keys toggle
+  * the pane, change the button state and tooltip.
+  */
+  onPaneToggleButtonPressed: function (event) {
+    if (ViewHelpers.isSpaceOrReturn(event)) {
+      this.onPaneToggleButtonActivated(event);
+    }
+  },
+
+  /**
    * When the pane toggle button is clicked, toggle the pane, change the button
    * state and tooltip.
    */
-  onPaneToggleButtonClicked: function (e) {
-    let sidePane = this.panelDoc.querySelector("#inspector-sidebar");
+  onPaneToggleButtonActivated: function (e) {
+    let sidePaneContainer = this.panelDoc.querySelector("#inspector-sidebar-container");
     let isVisible = !this._sidebarToggle.state.collapsed;
+    let sidePane = this.panelDoc.querySelector(
+      "#inspector-sidebar .devtools-sidebar-tabs");
 
     // Make sure the sidebar has width and height attributes before collapsing
     // because ViewHelpers needs it.
     if (isVisible) {
-      let rect = sidePane.getBoundingClientRect();
-      if (!sidePane.hasAttribute("width")) {
-        sidePane.setAttribute("width", rect.width);
+      let rect = sidePaneContainer.getBoundingClientRect();
+      if (!sidePaneContainer.hasAttribute("width")) {
+        sidePaneContainer.setAttribute("width", rect.width);
+        sidePane.style.width = rect.width + "px";
       }
       // always refresh the height attribute before collapsing, it could have
       // been modified by resizing the container.
-      sidePane.setAttribute("height", rect.height);
+      sidePaneContainer.setAttribute("height", rect.height);
+      sidePane.style.height = rect.height + "px";
     }
+
+    let onAnimationDone = () => {
+      if (isVisible) {
+        this._sidebarToggle.setState({collapsed: true});
+      } else {
+        this._sidebarToggle.setState({collapsed: false});
+      }
+    };
 
     ViewHelpers.togglePane({
       visible: !isVisible,
       animated: true,
-      delayed: true
-    }, sidePane);
-
-    if (isVisible) {
-      this._sidebarToggle.setState({collapsed: true});
-    } else {
-      this._sidebarToggle.setState({collapsed: false});
-    }
+      delayed: true,
+      callback: onAnimationDone
+    }, sidePaneContainer);
   },
 
   /**

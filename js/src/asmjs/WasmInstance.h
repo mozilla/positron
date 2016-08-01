@@ -20,6 +20,7 @@
 #define wasm_instance_h
 
 #include "asmjs/WasmCode.h"
+#include "asmjs/WasmTable.h"
 #include "gc/Barrier.h"
 
 namespace js {
@@ -28,24 +29,6 @@ class WasmActivation;
 class WasmInstanceObject;
 
 namespace wasm {
-
-struct ExportMap;
-
-// TypedFuncTable is a compact version of LinkData::FuncTable that provides the
-// necessary range information necessary to patch typed function table elements
-// when the profiling mode is toggled.
-
-struct TypedFuncTable
-{
-    uint32_t globalDataOffset;
-    uint32_t numElems;
-
-    TypedFuncTable(uint32_t globalDataOffset, uint32_t numElems)
-      : globalDataOffset(globalDataOffset), numElems(numElems)
-    {}
-};
-
-typedef Vector<TypedFuncTable, 0, SystemAllocPolicy> TypedFuncTableVector;
 
 // Instance represents a wasm instance and provides all the support for runtime
 // execution of code in the instance. Instances share various immutable data
@@ -59,14 +42,15 @@ class Instance
     const UniqueCodeSegment              codeSegment_;
     const SharedMetadata                 metadata_;
     const SharedBytes                    maybeBytecode_;
-    const TypedFuncTableVector           typedFuncTables_;
     GCPtrWasmMemoryObject                memory_;
+    SharedTableVector                    tables_;
 
     bool                                 profilingEnabled_;
     CacheableCharsVector                 funcLabels_;
 
     // Internal helpers:
     uint8_t** addressOfMemoryBase() const;
+    void** addressOfTableBase(size_t tableIndex) const;
     FuncImportExit& funcImportToExit(const FuncImport& fi);
     MOZ_MUST_USE bool toggleProfiling(JSContext* cx);
 
@@ -88,21 +72,22 @@ class Instance
     Instance(UniqueCodeSegment codeSegment,
              const Metadata& metadata,
              const ShareableBytes* maybeBytecode,
-             TypedFuncTableVector&& typedFuncTables,
              HandleWasmMemoryObject memory,
+             SharedTableVector&& tables,
              Handle<FunctionVector> funcImports);
     ~Instance();
     void trace(JSTracer* trc);
 
     const CodeSegment& codeSegment() const { return *codeSegment_; }
     const Metadata& metadata() const { return *metadata_; }
+    const SharedTableVector& tables() const { return tables_; }
     SharedMem<uint8_t*> memoryBase() const;
     size_t memoryLength() const;
 
     // Execute the given export given the JS call arguments, storing the return
     // value in args.rval.
 
-    MOZ_MUST_USE bool callExport(JSContext* cx, uint32_t exportIndex, CallArgs args);
+    MOZ_MUST_USE bool callExport(JSContext* cx, uint32_t funcIndex, CallArgs args);
 
     // An instance has a profiling mode that is updated to match the runtime's
     // profiling mode when calling an instance's exports when there are no other
@@ -114,9 +99,9 @@ class Instance
     bool profilingEnabled() const { return profilingEnabled_; }
     const char* profilingLabel(uint32_t funcIndex) const { return funcLabels_[funcIndex].get(); }
 
-    // If the source binary was saved (by passing the bytecode to 'create'),
-    // this method will render the binary as text. Otherwise, a diagnostic
-    // string will be returned.
+    // If the source binary was saved (by passing the bytecode to the
+    // constructor), this method will render the binary as text. Otherwise, a
+    // diagnostic string will be returned.
 
     JSString* createText(JSContext* cx);
 
@@ -147,7 +132,9 @@ class Instance
     void addSizeOfMisc(MallocSizeOf mallocSizeOf,
                        Metadata::SeenSet* seenMetadata,
                        ShareableBytes::SeenSet* seenBytes,
-                       size_t* code, size_t* data) const;
+                       Table::SeenSet* seenTables,
+                       size_t* code,
+                       size_t* data) const;
 };
 
 typedef UniquePtr<Instance> UniqueInstance;

@@ -1364,6 +1364,9 @@ TrackBuffersManager::ProcessFrames(TrackBuffer& aSamples, TrackData& aTrackData)
   // a frame be ignored due to the target window.
   bool needDiscontinuityCheck = true;
 
+  // Highest presentation time seen in samples block.
+  TimeUnit highestSampleTime;
+
   if (aSamples.Length()) {
     aTrackData.mLastParsedEndTime = TimeUnit();
   }
@@ -1496,6 +1499,7 @@ TrackBuffersManager::ProcessFrames(TrackBuffer& aSamples, TrackData& aTrackData)
         samplesRange = TimeIntervals();
         trackBuffer.mSizeBuffer += sizeNewSamples;
         sizeNewSamples = 0;
+        UpdateHighestTimestamp(trackBuffer, highestSampleTime);
       }
       trackBuffer.mNeedRandomAccessPoint = true;
       needDiscontinuityCheck = true;
@@ -1528,6 +1532,9 @@ TrackBuffersManager::ProcessFrames(TrackBuffer& aSamples, TrackData& aTrackData)
         sampleInterval.mEnd > trackBuffer.mHighestEndTimestamp.ref()) {
       trackBuffer.mHighestEndTimestamp = Some(sampleInterval.mEnd);
     }
+    if (sampleInterval.mStart > highestSampleTime) {
+      highestSampleTime = sampleInterval.mStart;
+    }
     // 20. If frame end timestamp is greater than group end timestamp, then set group end timestamp equal to frame end timestamp.
     if (sampleInterval.mEnd > mSourceBufferAttributes->GetGroupEndTimestamp()) {
       mSourceBufferAttributes->SetGroupEndTimestamp(sampleInterval.mEnd);
@@ -1541,6 +1548,7 @@ TrackBuffersManager::ProcessFrames(TrackBuffer& aSamples, TrackData& aTrackData)
   if (samples.Length()) {
     InsertFrames(samples, samplesRange, trackBuffer);
     trackBuffer.mSizeBuffer += sizeNewSamples;
+    UpdateHighestTimestamp(trackBuffer, highestSampleTime);
   }
 }
 
@@ -1625,10 +1633,17 @@ TrackBuffersManager::InsertFrames(TrackBuffer& aSamples,
   intersection.Intersection(aIntervals);
 
   if (intersection.Length()) {
-    if (aSamples[0]->mKeyframe) {
+    if (aSamples[0]->mKeyframe &&
+        (mType.LowerCaseEqualsLiteral("video/webm") ||
+         mType.LowerCaseEqualsLiteral("audio/webm"))) {
       // We are starting a new GOP, we do not have to worry about breaking an
       // existing current coded frame group. Reset the next insertion index
       // so the search for when to start our frames removal can be exhaustive.
+      // This is a workaround for bug 1276184 and only until either bug 1277733
+      // or bug 1209386 is fixed.
+      // With the webm container, we can't always properly determine the
+      // duration of the last frame, which may cause the last frame of a cluster
+      // to overlap the following frame.
       trackBuffer.mNextInsertionIndex.reset();
     }
     size_t index =
@@ -1669,6 +1684,16 @@ TrackBuffersManager::InsertFrames(TrackBuffer& aSamples,
     TimeIntervals range(aIntervals);
     range.SetFuzz(trackBuffer.mLongestFrameDuration / 2);
     trackBuffer.mSanitizedBufferedRanges += range;
+  }
+}
+
+void
+TrackBuffersManager::UpdateHighestTimestamp(TrackData& aTrackData,
+                                            const media::TimeUnit& aHighestTime)
+{
+  if (aHighestTime > aTrackData.mHighestStartTimestamp) {
+    MonitorAutoLock mon(mMonitor);
+    aTrackData.mHighestStartTimestamp = aHighestTime;
   }
 }
 
@@ -1769,6 +1794,20 @@ TrackBuffersManager::RemoveFrames(const TimeIntervals& aIntervals,
   data.RemoveElementsAt(firstRemovedIndex.ref(),
                         lastRemovedIndex - firstRemovedIndex.ref() + 1);
 
+  if (aIntervals.GetEnd() >= aTrackData.mHighestStartTimestamp) {
+    // The sample with the highest presentation time got removed.
+    // Rescan the trackbuffer to determine the new one.
+    int64_t highestStartTime = 0;
+    for (const auto& sample : data) {
+      if (sample->mTime > highestStartTime) {
+        highestStartTime = sample->mTime;
+      }
+    }
+    MonitorAutoLock mon(mMonitor);
+    aTrackData.mHighestStartTimestamp =
+      TimeUnit::FromMicroseconds(highestStartTime);
+  }
+
   return firstRemovedIndex.ref();
 }
 
@@ -1793,7 +1832,6 @@ TrackBuffersManager::RecreateParser(bool aReuseInitData)
 nsTArray<TrackBuffersManager::TrackData*>
 TrackBuffersManager::GetTracksList()
 {
-  MOZ_ASSERT(OnTaskQueue());
   nsTArray<TrackData*> tracks;
   if (HasVideo()) {
     tracks.AppendElement(&mVideoTracks);
@@ -1833,6 +1871,18 @@ TrackBuffersManager::SafeBuffered(TrackInfo::TrackType aTrack) const
   return aTrack == TrackInfo::kVideoTrack
     ? mVideoBufferedRanges
     : mAudioBufferedRanges;
+}
+
+TimeUnit
+TrackBuffersManager::HighestStartTime()
+{
+  MonitorAutoLock mon(mMonitor);
+  TimeUnit highestStartTime;
+  for (auto& track : GetTracksList()) {
+    highestStartTime =
+      std::max(track->mHighestStartTimestamp, highestStartTime);
+  }
+  return highestStartTime;
 }
 
 const TrackBuffersManager::TrackBuffer&
