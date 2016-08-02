@@ -60,7 +60,7 @@ NodeLoader::~NodeLoader()
 NS_IMETHODIMP NodeLoader::Init(JSContext* aContext)
 {
   v8::V8::Initialize();
-  v8::Isolate* isolate = v8::Isolate::New(js::GetRuntime(aContext));
+  v8::Isolate* isolate = v8::Isolate::New(aContext);
   // v8::Isolate::Scope isolate_scope(isolate);
   // TODO: FIX THIS LEAK
   v8::Isolate::Scope* isolate_scope = new v8::Isolate::Scope(isolate);
