@@ -15,7 +15,6 @@ USE_LIBS += [
     'static:/positron/app/spidernode/.libs/icustubdata',
     'static:/positron/app/spidernode/.libs/icuucx',
     'static:/positron/app/spidernode/.libs/openssl',
-    'static:/positron/app/spidernode/.libs/spidershim',
     'static:/positron/app/spidernode/.libs/uv',
     'static:/positron/app/spidernode/.libs/zlib',
 ]
