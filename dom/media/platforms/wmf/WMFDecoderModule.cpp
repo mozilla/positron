@@ -12,6 +12,7 @@
 #include "mozilla/DebugOnly.h"
 #include "mozilla/Services.h"
 #include "WMFMediaDataDecoder.h"
+#include "nsAutoPtr.h"
 #include "nsIWindowsRegKey.h"
 #include "nsComponentManagerUtils.h"
 #include "nsServiceManagerUtils.h"
@@ -75,17 +76,12 @@ WMFDecoderModule::Startup()
 }
 
 already_AddRefed<MediaDataDecoder>
-WMFDecoderModule::CreateVideoDecoder(const VideoInfo& aConfig,
-                                     layers::LayersBackend aLayersBackend,
-                                     layers::ImageContainer* aImageContainer,
-                                     FlushableTaskQueue* aVideoTaskQueue,
-                                     MediaDataDecoderCallback* aCallback,
-                                     DecoderDoctorDiagnostics* aDiagnostics)
+WMFDecoderModule::CreateVideoDecoder(const CreateDecoderParams& aParams)
 {
   nsAutoPtr<WMFVideoMFTManager> manager(
-    new WMFVideoMFTManager(aConfig,
-                           aLayersBackend,
-                           aImageContainer,
+    new WMFVideoMFTManager(aParams.VideoConfig(),
+                           aParams.mLayersBackend,
+                           aParams.mImageContainer,
                            sDXVAEnabled));
 
   if (!manager->Init()) {
@@ -93,25 +89,22 @@ WMFDecoderModule::CreateVideoDecoder(const VideoInfo& aConfig,
   }
 
   RefPtr<MediaDataDecoder> decoder =
-    new WMFMediaDataDecoder(manager.forget(), aVideoTaskQueue, aCallback);
+    new WMFMediaDataDecoder(manager.forget(), aParams.mTaskQueue, aParams.mCallback);
 
   return decoder.forget();
 }
 
 already_AddRefed<MediaDataDecoder>
-WMFDecoderModule::CreateAudioDecoder(const AudioInfo& aConfig,
-                                     FlushableTaskQueue* aAudioTaskQueue,
-                                     MediaDataDecoderCallback* aCallback,
-                                     DecoderDoctorDiagnostics* aDiagnostics)
+WMFDecoderModule::CreateAudioDecoder(const CreateDecoderParams& aParams)
 {
-  nsAutoPtr<WMFAudioMFTManager> manager(new WMFAudioMFTManager(aConfig));
+  nsAutoPtr<WMFAudioMFTManager> manager(new WMFAudioMFTManager(aParams.AudioConfig()));
 
   if (!manager->Init()) {
     return nullptr;
   }
 
   RefPtr<MediaDataDecoder> decoder =
-    new WMFMediaDataDecoder(manager.forget(), aAudioTaskQueue, aCallback);
+    new WMFMediaDataDecoder(manager.forget(), aParams.mTaskQueue, aParams.mCallback);
   return decoder.forget();
 }
 

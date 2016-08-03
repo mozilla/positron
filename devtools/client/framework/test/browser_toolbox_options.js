@@ -10,6 +10,8 @@
 // and toggles appropriate things in the toolbox.
 
 var doc = null, toolbox = null, panelWin = null, modifiedPrefs = [];
+var strings = Services.strings.createBundle(
+  "chrome://devtools/locale/toolbox.properties");
 
 add_task(function* () {
   const URL = "data:text/html;charset=utf8,test for dynamically registering " +
@@ -58,18 +60,18 @@ function* testOptionsShortcut() {
 
   yield toolbox.selectTool("webconsole");
   is(toolbox.currentToolId, "webconsole", "webconsole is selected");
-  synthesizeKeyFromKeyTag(doc.getElementById("toolbox-options-key"));
+  synthesizeKeyShortcut(strings.GetStringFromName("toolbox.options.key"));
   is(toolbox.currentToolId, "options", "Toolbox selected via shortcut key (1)");
-  synthesizeKeyFromKeyTag(doc.getElementById("toolbox-options-key"));
+  synthesizeKeyShortcut(strings.GetStringFromName("toolbox.options.key"));
   is(toolbox.currentToolId, "webconsole", "webconsole is selected (1)");
 
   yield toolbox.selectTool("webconsole");
   is(toolbox.currentToolId, "webconsole", "webconsole is selected");
-  synthesizeKeyFromKeyTag(doc.getElementById("toolbox-options-key2"));
+  synthesizeKeyShortcut(strings.GetStringFromName("toolbox.help.key"));
   is(toolbox.currentToolId, "options", "Toolbox selected via shortcut key (2)");
-  synthesizeKeyFromKeyTag(doc.getElementById("toolbox-options-key"));
+  synthesizeKeyShortcut(strings.GetStringFromName("toolbox.options.key"));
   is(toolbox.currentToolId, "webconsole", "webconsole is reselected (2)");
-  synthesizeKeyFromKeyTag(doc.getElementById("toolbox-options-key2"));
+  synthesizeKeyShortcut(strings.GetStringFromName("toolbox.help.key"));
   is(toolbox.currentToolId, "options", "Toolbox selected via shortcut key (2)");
 }
 
@@ -114,7 +116,7 @@ function* testSelect(select) {
       continue;
     }
 
-    let deferred = promise.defer();
+    let deferred = defer();
     gDevTools.once("pref-changed", (event, data) => {
       if (data.pref == pref) {
         ok(true, "Correct pref was changed");
@@ -134,7 +136,7 @@ function* testSelect(select) {
 }
 
 function* testMouseClick(node, prefValue) {
-  let deferred = promise.defer();
+  let deferred = defer();
 
   let pref = node.getAttribute("data-pref");
   gDevTools.once("pref-changed", (event, data) => {
@@ -216,7 +218,7 @@ function* testToggleTools() {
 }
 
 function* toggleTool(node) {
-  let deferred = promise.defer();
+  let deferred = defer();
 
   let toolId = node.getAttribute("id");
   if (node.checked) {

@@ -217,6 +217,12 @@ class ReftestArgumentsParser(argparse.ArgumentParser):
                           default=None,
                           help=argparse.SUPPRESS)
 
+        self.add_argument("--cleanup-crashes",
+                          action = "store_true",
+                          dest = "cleanupCrashes",
+                          default = False,
+                          help = "Delete pending crash reports before running tests.")
+
         self.add_argument("tests",
                           metavar="TEST_PATH",
                           nargs="*",
@@ -366,18 +372,6 @@ class DesktopArgumentsParser(ReftestArgumentsParser):
 
             if bin_dir:
                 options.app = bin_dir
-            else:
-                self.error(
-                    "could not find the application path, --appname must be specified")
-
-        options.app = reftest.getFullPath(options.app)
-        if not os.path.exists(options.app):
-            self.error("""Error: Path %(app)s doesn't exist.
-            Are you executing $objdir/_tests/reftest/runreftest.py?"""
-                       % {"app": options.app})
-
-        if options.xrePath is None:
-            options.xrePath = os.path.dirname(options.app)
 
         if options.symbolsPath and len(urlparse(options.symbolsPath).scheme) < 2:
             options.symbolsPath = reftest.getFullPath(options.symbolsPath)

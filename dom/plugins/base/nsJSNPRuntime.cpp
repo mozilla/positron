@@ -8,6 +8,7 @@
 #include "jsfriendapi.h"
 #include "jswrapper.h"
 
+#include "nsAutoPtr.h"
 #include "nsIInterfaceRequestorUtils.h"
 #include "nsJSNPRuntime.h"
 #include "nsNPAPIPlugin.h"
@@ -334,11 +335,9 @@ RegisterGCCallbacks()
     return true;
   }
 
-  JSRuntime *jsRuntime = xpc::GetJSRuntime();
-  MOZ_ASSERT(jsRuntime != nullptr);
-
   // Register a callback to trace wrapped JSObjects.
-  if (!JS_AddExtraGCRootsTracer(jsRuntime, TraceJSObjWrappers, nullptr)) {
+  JSContext* cx = JS_GetContext(xpc::GetJSRuntime());
+  if (!JS_AddExtraGCRootsTracer(cx, TraceJSObjWrappers, nullptr)) {
     return false;
   }
 
@@ -356,11 +355,9 @@ UnregisterGCCallbacks()
 {
   MOZ_ASSERT(sCallbackIsRegistered);
 
-  JSRuntime *jsRuntime = xpc::GetJSRuntime();
-  MOZ_ASSERT(jsRuntime != nullptr);
-
   // Remove tracing callback.
-  JS_RemoveExtraGCRootsTracer(jsRuntime, TraceJSObjWrappers, nullptr);
+  JSContext* cx = JS_GetContext(xpc::GetJSRuntime());
+  JS_RemoveExtraGCRootsTracer(cx, TraceJSObjWrappers, nullptr);
 
   // Remove delayed destruction callback.
   if (sCallbackIsRegistered) {
@@ -470,18 +467,6 @@ GetGlobalObject(NPP npp)
   NS_ENSURE_TRUE(doc, nullptr);
 
   return doc->GetScopeObject();
-}
-
-JSContext *
-GetJSContext(NPP npp)
-{
-  nsCOMPtr<nsIScriptGlobalObject> sgo = do_QueryInterface(GetGlobalObject(npp));
-  NS_ENSURE_TRUE(sgo, nullptr);
-
-  nsIScriptContext *scx = sgo->GetContext();
-  NS_ENSURE_TRUE(scx, nullptr);
-
-  return scx->GetNativeContext();
 }
 
 } // namespace parent
@@ -610,7 +595,7 @@ JSValToNPVariant(NPP npp, JSContext *cx, JS::Value val, NPVariant *variant)
     obj = val.toObjectOrNull();
   }
 
-  NPObject *npobj = nsJSObjWrapper::GetNewOrUsed(npp, cx, obj);
+  NPObject* npobj = nsJSObjWrapper::GetNewOrUsed(npp, obj);
   if (!npobj) {
     return false;
   }
@@ -1103,7 +1088,7 @@ nsJSObjWrapper::NP_Construct(NPObject *npobj, const NPVariant *args,
 
 // static
 NPObject *
-nsJSObjWrapper::GetNewOrUsed(NPP npp, JSContext *cx, JS::Handle<JSObject*> obj)
+nsJSObjWrapper::GetNewOrUsed(NPP npp, JS::Handle<JSObject*> obj)
 {
   if (!npp) {
     NS_ERROR("Null NPP passed to nsJSObjWrapper::GetNewOrUsed()!");
@@ -1118,16 +1103,6 @@ nsJSObjWrapper::GetNewOrUsed(NPP npp, JSContext *cx, JS::Handle<JSObject*> obj)
   if (inst->GetPlugin()->GetLibrary()->IsOOP()) {
     PluginAsyncSurrogate* surrogate = PluginAsyncSurrogate::Cast(npp);
     if (surrogate && surrogate->IsDestroyPending()) {
-      return nullptr;
-    }
-  }
-
-  if (!cx) {
-    cx = GetJSContext(npp);
-
-    if (!cx) {
-      NS_ERROR("Unable to find a JSContext in nsJSObjWrapper::GetNewOrUsed()!");
-
       return nullptr;
     }
   }

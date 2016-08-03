@@ -538,7 +538,8 @@ var WindowListener = {
           state = "error";
           mozL10nId += "-error";} else 
         if (this.isSlideshowOpen) {
-          state = "slideshow";} else 
+          state = "slideshow";
+          suffix = ".label";} else 
         if (this.MozLoopService.screenShareActive) {
           state = "action";
           mozL10nId += "-screensharing";} else 
@@ -663,7 +664,9 @@ var WindowListener = {
         this.activeSound.load();
         this.activeSound.play();
 
-        this.activeSound.addEventListener("ended", function () {_this11.activeSound = undefined;}, false);}, 
+        this.activeSound.addEventListener("ended", function () {
+          _this11.activeSound = undefined;}, 
+        false);}, 
 
 
       /**
@@ -744,41 +747,7 @@ var WindowListener = {
 
         this._listeningToTabSelect = false;
         this._browserSharePaused = false;
-        this._currentRoomToken = null;
-
-        this._sendTelemetryEventsIfNeeded();}, 
-
-
-      /**
-       * Sends telemetry events for pause/ resume buttons if needed.
-       */
-      _sendTelemetryEventsIfNeeded: function _sendTelemetryEventsIfNeeded() {
-        // The user can't click Resume button without clicking Pause button first.
-        if (!this._pauseButtonClicked) {
-          return;}
-
-
-        var buckets = this.constants.SHARING_SCREEN;
-        this.LoopAPI.sendMessageToHandler({ 
-          name: "TelemetryAddValue", 
-          data: [
-          "LOOP_INFOBAR_ACTION_BUTTONS", 
-          buckets.PAUSED] });
-
-
-
-        if (this._resumeButtonClicked) {
-          this.LoopAPI.sendMessageToHandler({ 
-            name: "TelemetryAddValue", 
-            data: [
-            "LOOP_INFOBAR_ACTION_BUTTONS", 
-            buckets.RESUMED] });}
-
-
-
-
-        this._pauseButtonClicked = false;
-        this._resumeButtonClicked = false;}, 
+        this._currentRoomToken = null;}, 
 
 
       /**
@@ -908,6 +877,25 @@ var WindowListener = {
       _browserSharePaused: false, 
 
       /**
+       * Stores details about the last notification.
+       *
+       * @type {Object}
+       */
+      _lastNotification: {}, 
+
+      /**
+       * Used to determine if the browser sharing info bar is currently being
+       * shown or not.
+       */
+      _showingBrowserSharingInfoBar: function _showingBrowserSharingInfoBar() {
+        var browser = gBrowser.selectedBrowser;
+        var box = gBrowser.getNotificationBox(browser);
+        var notification = box.getNotificationWithValue(kBrowserSharingNotificationId);
+
+        return !!notification;}, 
+
+
+      /**
        * Shows an infobar notification at the top of the browser window that warns
        * the user that their browser tabs are being broadcasted through the current
        * conversation.
@@ -915,9 +903,24 @@ var WindowListener = {
        * @return {void}
        */
       _maybeShowBrowserSharingInfoBar: function _maybeShowBrowserSharingInfoBar(currentRoomToken) {var _this13 = this;
-        this._hideBrowserSharingInfoBar();
-
         var participantsCount = this.LoopRooms.getNumParticipants(currentRoomToken);
+
+        if (this._showingBrowserSharingInfoBar()) {
+          // When we first open the room, there will be one or zero partipicants
+          // in the room. The notification box changes when there's more than one,
+          // so work that out here.
+          var notAlone = participantsCount > 1;
+          var previousNotAlone = this._lastNotification.participantsCount <= 1;
+
+          // If we're not actually changing the notification bar, then don't
+          // re-display it. This avoids the bar sliding in twice.
+          if (notAlone !== previousNotAlone && 
+          this._browserSharePaused === this._lastNotification.paused) {
+            return;}
+
+
+          this._hideBrowserSharingInfoBar();}
+
 
         var initStrings = this._setInfoBarStrings(participantsCount > 1, this._browserSharePaused);
 
@@ -942,11 +945,8 @@ var WindowListener = {
             buttonNode.accessKey = stringObj.accesskey;
             LoopUI.MozLoopService.toggleBrowserSharing(_this13._browserSharePaused);
             if (_this13._browserSharePaused) {
-              _this13._pauseButtonClicked = true;
               // if paused we stop sharing remote cursors
-              _this13.removeRemoteCursor();} else 
-            {
-              _this13._resumeButtonClicked = true;}
+              _this13.removeRemoteCursor();}
 
             return true;}, 
 
@@ -969,7 +969,10 @@ var WindowListener = {
         bar.classList.toggle("paused", !!this._browserSharePaused);
 
         // Keep showing the notification bar until the user explicitly closes it.
-        bar.persistence = -1;}, 
+        bar.persistence = -1;
+
+        this._lastNotification.participantsCount = participantsCount;
+        this._lastNotification.paused = this._browserSharePaused;}, 
 
 
       /**
@@ -1418,10 +1421,10 @@ function startup(data) {
   // Load our stylesheets.
   var styleSheetService = Cc["@mozilla.org/content/style-sheet-service;1"].
   getService(Components.interfaces.nsIStyleSheetService);
-  var sheets = ["chrome://loop-shared/skin/loop.css"];
+  var sheets = [
+  "chrome://loop-shared/skin/loop.css", 
+  "chrome://loop/skin/platform.css"];var _iteratorNormalCompletion2 = true;var _didIteratorError2 = false;var _iteratorError2 = undefined;try {
 
-  if (AppConstants.platform != "linux") {
-    sheets.push("chrome://loop/skin/platform.css");}var _iteratorNormalCompletion2 = true;var _didIteratorError2 = false;var _iteratorError2 = undefined;try {
 
 
     for (var _iterator2 = sheets[Symbol.iterator](), _step2; !(_iteratorNormalCompletion2 = (_step2 = _iterator2.next()).done); _iteratorNormalCompletion2 = true) {var sheet = _step2.value;

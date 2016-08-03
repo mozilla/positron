@@ -702,7 +702,7 @@ EventStateManager::PreHandleEvent(nsPresContext* aPresContext,
     FlushPendingEvents(aPresContext);
     break;
   }
-  case eLegacyDragGesture:
+  case eDragStart:
     if (Prefs::ClickHoldContextMenu()) {
       // an external drag gesture event came in, not generated internally
       // by Gecko. Make sure we get rid of the click-hold timer.
@@ -710,8 +710,7 @@ EventStateManager::PreHandleEvent(nsPresContext* aPresContext,
     }
     break;
   case eDragOver:
-    // eDrop is fired before eLegacyDragDrop so send the enter/exit events
-    // before eDrop.
+    // Send the enter/exit events before eDrop.
     GenerateDragDropEnterExit(aPresContext, aEvent->AsDragEvent());
     break;
 
@@ -816,6 +815,7 @@ EventStateManager::PreHandleEvent(nsPresContext* aPresContext,
   case eContentCommandUndo:
   case eContentCommandRedo:
   case eContentCommandPasteTransferable:
+  case eContentCommandLookUpDictionary:
     DoContentCommandEvent(aEvent->AsContentCommandEvent());
     break;
   case eContentCommandScroll:
@@ -859,6 +859,7 @@ EventStateManager::HandleQueryContentEvent(WidgetQueryContentEvent* aEvent)
     case eQuerySelectionAsTransferable:
     case eQueryCharacterAtPoint:
     case eQueryDOMWidgetHittest:
+    case eQueryTextRectArray:
       break;
     default:
       return;
@@ -1536,7 +1537,8 @@ EventStateManager::FireContextClick()
       }
       else if (mGestureDownContent->IsAnyOfHTMLElements(nsGkAtoms::applet,
                                                         nsGkAtoms::embed,
-                                                        nsGkAtoms::object)) {
+                                                        nsGkAtoms::object,
+                                                        nsGkAtoms::label)) {
         allowedToDispatch = false;
       }
     }
@@ -1763,12 +1765,8 @@ EventStateManager::GenerateDragGesture(nsPresContext* aPresContext,
       WidgetDragEvent startEvent(aEvent->IsTrusted(), eDragStart, widget);
       FillInEventFromGestureDown(&startEvent);
 
-      WidgetDragEvent gestureEvent(aEvent->IsTrusted(),
-                                   eLegacyDragGesture, widget);
-      FillInEventFromGestureDown(&gestureEvent);
-
-      startEvent.mDataTransfer = gestureEvent.mDataTransfer = dataTransfer;
-      startEvent.inputSource = gestureEvent.inputSource = aEvent->inputSource;
+      startEvent.mDataTransfer = dataTransfer;
+      startEvent.inputSource = aEvent->inputSource;
 
       // Dispatch to the DOM. By setting mCurrentTarget we are faking
       // out the ESM and telling it that the current target frame is
@@ -1785,20 +1783,12 @@ EventStateManager::GenerateDragGesture(nsPresContext* aPresContext,
       // Set the current target to the content for the mouse down
       mCurrentTargetContent = targetContent;
 
-      // Dispatch both the dragstart and draggesture events to the DOM. For
-      // elements in an editor, only fire the draggesture event so that the
-      // editor code can handle it but content doesn't see a dragstart.
+      // Dispatch the dragstart event to the DOM.
       nsEventStatus status = nsEventStatus_eIgnore;
       EventDispatcher::Dispatch(targetContent, aPresContext, &startEvent,
                                 nullptr, &status);
 
       WidgetDragEvent* event = &startEvent;
-      if (status != nsEventStatus_eConsumeNoDefault) {
-        status = nsEventStatus_eIgnore;
-        EventDispatcher::Dispatch(targetContent, aPresContext, &gestureEvent,
-                                  nullptr, &status);
-        event = &gestureEvent;
-      }
 
       nsCOMPtr<nsIObserverService> observerService =
         mozilla::services::GetObserverService();
@@ -1822,10 +1812,6 @@ EventStateManager::GenerateDragGesture(nsPresContext* aPresContext,
           aEvent->StopPropagation();
         }
       }
-
-      // Note that frame event handling doesn't care about eLegacyDragGesture,
-      // which is just as well since we don't really know which frame to
-      // send it to
 
       // Reset mCurretTargetContent to what it was
       mCurrentTargetContent = targetBeforeEvent;
@@ -1931,7 +1917,7 @@ EventStateManager::DoDefaultDragStart(nsPresContext* aPresContext,
   if (!dragService)
     return false;
 
-  // Default handling for the draggesture/dragstart event.
+  // Default handling for the dragstart event.
   //
   // First, check if a drag session already exists. This means that the drag
   // service was called directly within a draggesture handler. In this case,
@@ -2030,8 +2016,9 @@ EventStateManager::GetContentViewer(nsIContentViewer** aCv)
 {
   *aCv = nullptr;
 
-  nsCOMPtr<nsPIDOMWindowOuter> rootWindow;
-  rootWindow = mDocument->GetWindow()->GetPrivateRoot();
+  nsPIDOMWindowOuter* window = mDocument->GetWindow();
+  if (!window) return NS_ERROR_FAILURE;
+  nsCOMPtr<nsPIDOMWindowOuter> rootWindow = window->GetPrivateRoot();
   if (!rootWindow) return NS_ERROR_FAILURE;
 
   TabChild* tabChild = TabChild::GetFrom(rootWindow);
@@ -3438,32 +3425,6 @@ EventStateManager::PostHandleEvent(nsPresContext* aPresContext,
 
   case eDrop:
     {
-      // now fire the dragdrop event, for compatibility with XUL
-      if (mCurrentTarget && nsEventStatus_eConsumeNoDefault != *aStatus) {
-        nsCOMPtr<nsIContent> targetContent;
-        mCurrentTarget->GetContentForEvent(aEvent,
-                                           getter_AddRefs(targetContent));
-
-        nsCOMPtr<nsIWidget> widget = mCurrentTarget->GetNearestWidget();
-        WidgetDragEvent event(aEvent->IsTrusted(), eLegacyDragDrop, widget);
-
-        WidgetMouseEvent* mouseEvent = aEvent->AsMouseEvent();
-        event.mRefPoint = mouseEvent->mRefPoint;
-        if (mouseEvent->mWidget) {
-          event.mRefPoint += mouseEvent->mWidget->WidgetToScreenOffset();
-        }
-        event.mRefPoint -= widget->WidgetToScreenOffset();
-        event.mModifiers = mouseEvent->mModifiers;
-        event.buttons = mouseEvent->buttons;
-        event.inputSource = mouseEvent->inputSource;
-
-        nsEventStatus status = nsEventStatus_eIgnore;
-        nsCOMPtr<nsIPresShell> presShell = mPresContext->GetPresShell();
-        if (presShell) {
-          presShell->HandleEventWithTarget(&event, mCurrentTarget,
-                                           targetContent, &status);
-        }
-      }
       sLastDragOverFrame = nullptr;
       ClearGlobalActiveContent(this);
       break;
@@ -4398,6 +4359,9 @@ EventStateManager::SetPointerLock(nsIWidget* aWidget,
     // pre-pointerlock position, so that the synthetic mouse event reports
     // no movement.
     sLastRefPoint = mPreLockPoint;
+    // Reset SynthCenteringPoint to invalid so that next time we start
+    // locking pointer, it has its initial value.
+    sSynthCenteringPoint = kInvalidRefPoint;
     if (aWidget) {
       aWidget->SynthesizeNativeMouseMove(
         mPreLockPoint + aWidget->WidgetToScreenOffset(), nullptr);
@@ -4810,26 +4774,11 @@ static nsIContent* FindCommonAncestor(nsIContent *aNode1, nsIContent *aNode2)
   return nullptr;
 }
 
-static Element*
-GetParentElement(Element* aElement)
-{
-  nsIContent* p = aElement->GetParent();
-  return (p && p->IsElement()) ? p->AsElement() : nullptr;
-}
-
 /* static */
 void
 EventStateManager::SetFullScreenState(Element* aElement, bool aIsFullScreen)
 {
   DoStateChange(aElement, NS_EVENT_STATE_FULL_SCREEN, aIsFullScreen);
-  Element* ancestor = aElement;
-  while ((ancestor = GetParentElement(ancestor))) {
-    DoStateChange(ancestor, NS_EVENT_STATE_FULL_SCREEN_ANCESTOR, aIsFullScreen);
-    if (ancestor->State().HasState(NS_EVENT_STATE_FULL_SCREEN)) {
-      // If we meet another fullscreen element, stop here.
-      break;
-    }
-  }
 }
 
 /* static */
@@ -5220,6 +5169,9 @@ EventStateManager::DoContentCommandEvent(WidgetContentCommandEvent* aEvent)
     case eContentCommandPasteTransferable:
       cmd = "cmd_pasteTransferable";
       break;
+    case eContentCommandLookUpDictionary:
+      cmd = "cmd_lookUpDictionary";
+      break;
     default:
       return NS_ERROR_NOT_IMPLEMENTED;
   }
@@ -5250,7 +5202,34 @@ EventStateManager::DoContentCommandEvent(WidgetContentCommandEvent* aEvent)
           rv = commandController->DoCommandWithParams(cmd, params);
           break;
         }
-        
+
+        case eContentCommandLookUpDictionary: {
+          nsCOMPtr<nsICommandController> commandController =
+            do_QueryInterface(controller);
+          if (NS_WARN_IF(!commandController)) {
+            return NS_ERROR_FAILURE;
+          }
+
+          nsCOMPtr<nsICommandParams> params =
+            do_CreateInstance("@mozilla.org/embedcomp/command-params;1", &rv);
+          if (NS_WARN_IF(NS_FAILED(rv))) {
+            return rv;
+          }
+
+          rv = params->SetLongValue("x", aEvent->mRefPoint.x);
+          if (NS_WARN_IF(NS_FAILED(rv))) {
+            return rv;
+          }
+
+          rv = params->SetLongValue("y", aEvent->mRefPoint.y);
+          if (NS_WARN_IF(NS_FAILED(rv))) {
+            return rv;
+          }
+
+          rv = commandController->DoCommandWithParams(cmd, params);
+          break;
+        }
+
         default:
           rv = controller->DoCommand(cmd);
           break;

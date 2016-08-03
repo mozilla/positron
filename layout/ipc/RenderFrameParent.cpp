@@ -31,6 +31,7 @@
 #include "nsView.h"
 #include "nsViewportFrame.h"
 #include "RenderFrameParent.h"
+#include "mozilla/gfx/GPUProcessManager.h"
 #include "mozilla/layers/LayerManagerComposite.h"
 #include "mozilla/layers/CompositorBridgeChild.h"
 #include "ClientLayerManager.h"
@@ -211,6 +212,7 @@ RenderFrameParent::OwnerContentChanged(nsIContent* aContent)
   // Perhaps the document containing this frame currently has no presentation?
   if (lm && lm->AsClientLayerManager()) {
     lm->AsClientLayerManager()->GetRemoteRenderer()->SendAdoptChild(mLayersId);
+    FrameLayerBuilder::InvalidateAllLayers(lm);
   }
 }
 
@@ -218,10 +220,10 @@ void
 RenderFrameParent::ActorDestroy(ActorDestroyReason why)
 {
   if (mLayersId != 0) {
-    if (XRE_IsContentProcess()) {
+    if (XRE_IsParentProcess()) {
+      GPUProcessManager::Get()->DeallocateLayerTreeId(mLayersId);
+    } else if (XRE_IsContentProcess()) {
       ContentChild::GetSingleton()->SendDeallocateLayerTreeId(mLayersId);
-    } else {
-      CompositorBridgeParent::DeallocateLayerTreeId(mLayersId);
     }
   }
 

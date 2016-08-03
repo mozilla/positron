@@ -1,6 +1,5 @@
-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*-
- * vim: sw=2 ts=8 et :
- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -12,8 +11,6 @@
 #include "mozilla/StaticMutex.h"
 
 #include "nsDebug.h"
-
-class NotificationService;
 
 namespace mozilla {
 namespace ipc {
@@ -55,8 +52,6 @@ private:
   // identifier at a given time.
   ID mIdentifier;
 
-  NotificationService* mNotificationService;
-
   // This lock protects |browser_threads_|.  Do not read or modify that array
   // without holding this lock.  Do not block while holding this lock.
 
@@ -72,7 +67,7 @@ private:
 inline void AssertIOThread()
 {
   NS_ASSERTION(MessageLoop::TYPE_IO == MessageLoop::current()->type(),
-	       "should be on the IO thread!");
+               "should be on the IO thread!");
 }
 
 } // namespace ipc

@@ -14,6 +14,21 @@ namespace jit {
 
 //{{{ check_macroassembler_style
 // ===============================================================
+// Move instructions
+
+void
+MacroAssembler::moveFloat32ToGPR(FloatRegister src, Register dest)
+{
+    vmovd(src, dest);
+}
+
+void
+MacroAssembler::moveGPRToFloat32(Register src, FloatRegister dest)
+{
+    vmovd(src, dest);
+}
+
+// ===============================================================
 // Logical instructions
 
 void
@@ -117,7 +132,9 @@ MacroAssembler::popcnt32(Register input, Register output, Register tmp)
 
     // Equivalent to mozilla::CountPopulation32()
 
-    movl(input, output);
+    movl(input, tmp);
+    if (input != output)
+        movl(input, output);
     shrl(Imm32(1), output);
     andl(Imm32(0x55555555), output);
     subl(output, tmp);
@@ -198,9 +215,65 @@ MacroAssembler::subDouble(FloatRegister src, FloatRegister dest)
 }
 
 void
+MacroAssembler::subFloat32(FloatRegister src, FloatRegister dest)
+{
+    vsubss(src, dest, dest);
+}
+
+void
+MacroAssembler::mul32(Register rhs, Register srcDest)
+{
+    MOZ_ASSERT(srcDest == eax);
+    imull(rhs, srcDest);        // Clobbers edx
+}
+
+void
+MacroAssembler::mulFloat32(FloatRegister src, FloatRegister dest)
+{
+    vmulss(src, dest, dest);
+}
+
+void
 MacroAssembler::mulDouble(FloatRegister src, FloatRegister dest)
 {
     vmulsd(src, dest, dest);
+}
+
+void
+MacroAssembler::quotient32(Register rhs, Register srcDest, bool isUnsigned)
+{
+    MOZ_ASSERT(srcDest == eax);
+
+    // Sign extend eax into edx to make (edx:eax): idiv/udiv are 64-bit.
+    if (isUnsigned) {
+        mov(ImmWord(0), edx);
+        udiv(rhs);
+    } else {
+        cdq();
+        idiv(rhs);
+    }
+}
+
+void
+MacroAssembler::remainder32(Register rhs, Register srcDest, bool isUnsigned)
+{
+    MOZ_ASSERT(srcDest == eax);
+
+    // Sign extend eax into edx to make (edx:eax): idiv/udiv are 64-bit.
+    if (isUnsigned) {
+        mov(ImmWord(0), edx);
+        udiv(rhs);
+    } else {
+        cdq();
+        idiv(rhs);
+    }
+    mov(edx, eax);
+}
+
+void
+MacroAssembler::divFloat32(FloatRegister src, FloatRegister dest)
+{
+    vdivss(src, dest, dest);
 }
 
 void
@@ -219,7 +292,7 @@ void
 MacroAssembler::negateFloat(FloatRegister reg)
 {
     ScratchFloat32Scope scratch(*this);
-    vpcmpeqw(scratch, scratch, scratch);
+    vpcmpeqw(Operand(scratch), scratch, scratch);
     vpsllq(Imm32(31), scratch, scratch);
 
     // XOR the float in a float register with -0.0.
@@ -231,11 +304,63 @@ MacroAssembler::negateDouble(FloatRegister reg)
 {
     // From MacroAssemblerX86Shared::maybeInlineDouble
     ScratchDoubleScope scratch(*this);
-    vpcmpeqw(scratch, scratch, scratch);
+    vpcmpeqw(Operand(scratch), scratch, scratch);
     vpsllq(Imm32(63), scratch, scratch);
 
     // XOR the float in a float register with -0.0.
     vxorpd(scratch, reg, reg); // s ^ 0x80000000000000
+}
+
+void
+MacroAssembler::absFloat32(FloatRegister src, FloatRegister dest)
+{
+    ScratchFloat32Scope scratch(*this);
+    loadConstantFloat32(mozilla::SpecificNaN<float>(0, mozilla::FloatingPoint<float>::kSignificandBits), scratch);
+    vandps(scratch, src, dest);
+}
+
+void
+MacroAssembler::absDouble(FloatRegister src, FloatRegister dest)
+{
+    ScratchDoubleScope scratch(*this);
+    loadConstantDouble(mozilla::SpecificNaN<double>(0, mozilla::FloatingPoint<double>::kSignificandBits), scratch);
+    vandpd(scratch, src, dest);
+}
+
+void
+MacroAssembler::sqrtFloat32(FloatRegister src, FloatRegister dest)
+{
+    vsqrtss(src, src, dest);
+}
+
+void
+MacroAssembler::sqrtDouble(FloatRegister src, FloatRegister dest)
+{
+    vsqrtsd(src, src, dest);
+}
+
+void
+MacroAssembler::minFloat32(FloatRegister other, FloatRegister srcDest, bool handleNaN)
+{
+    minMaxFloat32(srcDest, other, handleNaN, false);
+}
+
+void
+MacroAssembler::minDouble(FloatRegister other, FloatRegister srcDest, bool handleNaN)
+{
+    minMaxDouble(srcDest, other, handleNaN, false);
+}
+
+void
+MacroAssembler::maxFloat32(FloatRegister other, FloatRegister srcDest, bool handleNaN)
+{
+    minMaxFloat32(srcDest, other, handleNaN, true);
+}
+
+void
+MacroAssembler::maxDouble(FloatRegister other, FloatRegister srcDest, bool handleNaN)
+{
+    minMaxDouble(srcDest, other, handleNaN, true);
 }
 
 // ===============================================================
@@ -294,6 +419,24 @@ MacroAssembler::rshift32Arithmetic(Register shift, Register srcDest)
 {
     MOZ_ASSERT(shift == ecx);
     sarl_cl(srcDest);
+}
+
+void
+MacroAssembler::lshift32(Imm32 shift, Register srcDest)
+{
+    shll(shift, srcDest);
+}
+
+void
+MacroAssembler::rshift32(Imm32 shift, Register srcDest)
+{
+    shrl(shift, srcDest);
+}
+
+void
+MacroAssembler::rshift32Arithmetic(Imm32 shift, Register srcDest)
+{
+    sarl(shift, srcDest);
 }
 
 // ===============================================================
@@ -908,6 +1051,106 @@ MacroAssembler::branchTestMagicImpl(Condition cond, const T& t, L label)
 {
     cond = testMagic(cond, t);
     j(cond, label);
+}
+
+// ========================================================================
+// Canonicalization primitives.
+void
+MacroAssembler::canonicalizeFloat32x4(FloatRegister reg, FloatRegister scratch)
+{
+    ScratchSimd128Scope scratch2(*this);
+
+    MOZ_ASSERT(scratch.asSimd128() != scratch2.asSimd128());
+    MOZ_ASSERT(reg.asSimd128() != scratch2.asSimd128());
+    MOZ_ASSERT(reg.asSimd128() != scratch.asSimd128());
+
+    FloatRegister mask = scratch;
+    vcmpordps(Operand(reg), reg, mask);
+
+    FloatRegister ifFalse = scratch2;
+    float nanf = float(JS::GenericNaN());
+    loadConstantSimd128Float(SimdConstant::SplatX4(nanf), ifFalse);
+
+    bitwiseAndSimd128(Operand(mask), reg);
+    bitwiseAndNotSimd128(Operand(ifFalse), mask);
+    bitwiseOrSimd128(Operand(mask), reg);
+}
+
+// ========================================================================
+// Memory access primitives.
+void
+MacroAssembler::storeUncanonicalizedDouble(FloatRegister src, const Address& dest)
+{
+    vmovsd(src, dest);
+}
+void
+MacroAssembler::storeUncanonicalizedDouble(FloatRegister src, const BaseIndex& dest)
+{
+    vmovsd(src, dest);
+}
+void
+MacroAssembler::storeUncanonicalizedDouble(FloatRegister src, const Operand& dest)
+{
+    switch (dest.kind()) {
+      case Operand::MEM_REG_DISP:
+        storeUncanonicalizedDouble(src, dest.toAddress());
+        break;
+      case Operand::MEM_SCALE:
+        storeUncanonicalizedDouble(src, dest.toBaseIndex());
+        break;
+      default:
+        MOZ_CRASH("unexpected operand kind");
+    }
+}
+
+template void MacroAssembler::storeDouble(FloatRegister src, const Operand& dest);
+
+void
+MacroAssembler::storeUncanonicalizedFloat32(FloatRegister src, const Address& dest)
+{
+    vmovss(src, dest);
+}
+void
+MacroAssembler::storeUncanonicalizedFloat32(FloatRegister src, const BaseIndex& dest)
+{
+    vmovss(src, dest);
+}
+void
+MacroAssembler::storeUncanonicalizedFloat32(FloatRegister src, const Operand& dest)
+{
+    switch (dest.kind()) {
+      case Operand::MEM_REG_DISP:
+        storeUncanonicalizedFloat32(src, dest.toAddress());
+        break;
+      case Operand::MEM_SCALE:
+        storeUncanonicalizedFloat32(src, dest.toBaseIndex());
+        break;
+      default:
+        MOZ_CRASH("unexpected operand kind");
+    }
+}
+
+template void MacroAssembler::storeFloat32(FloatRegister src, const Operand& dest);
+
+void
+MacroAssembler::storeFloat32x3(FloatRegister src, const Address& dest)
+{
+    Address destZ(dest);
+    destZ.offset += 2 * sizeof(int32_t);
+    storeDouble(src, dest);
+    ScratchSimd128Scope scratch(*this);
+    vmovhlps(src, scratch, scratch);
+    storeFloat32(scratch, destZ);
+}
+void
+MacroAssembler::storeFloat32x3(FloatRegister src, const BaseIndex& dest)
+{
+    BaseIndex destZ(dest);
+    destZ.offset += 2 * sizeof(int32_t);
+    storeDouble(src, dest);
+    ScratchSimd128Scope scratch(*this);
+    vmovhlps(src, scratch, scratch);
+    storeFloat32(scratch, destZ);
 }
 
 //}}} check_macroassembler_style

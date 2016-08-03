@@ -29,7 +29,6 @@
 #include "mozilla/ipc/BackgroundUtils.h" // for PrincipalInfoToPrincipal
 
 #include "nsArrayUtils.h"
-#include "nsAutoPtr.h"
 #include "nsCharSeparatedTokenizer.h"
 #include "nsGlobalWindow.h"
 #include "nsServiceManagerUtils.h"
@@ -3976,8 +3975,7 @@ DeviceStorageRequestManager::Resolve(uint32_t aId, uint64_t aValue,
     return NS_OK;
   }
 
-  JS::RootedValue value(nsContentUtils::RootingCxForThread(),
-                        JS_NumberValue((double)aValue));
+  JS::RootedValue value(GetJSRuntime(), JS_NumberValue((double)aValue));
   return ResolveInternal(i, value);
 }
 

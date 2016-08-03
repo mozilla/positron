@@ -32,7 +32,9 @@
 #include "mozilla/FloatingPoint.h"
 #include "mozilla/net/ReferrerPolicy.h"
 #include "mozilla/Logging.h"
+#include "mozilla/NotNull.h"
 #include "nsIContentPolicy.h"
+#include "nsPIDOMWindow.h"
 
 #if defined(XP_WIN)
 // Undefine LoadImage to prevent naming conflict with Windows.
@@ -129,6 +131,11 @@ class Selection;
 class TabParent;
 } // namespace dom
 
+namespace ipc {
+class Shmem;
+class IShmemAllocator;
+}
+
 namespace gfx {
 class DataSourceSurface;
 } // namespace gfx
@@ -169,6 +176,9 @@ struct EventNameMapping
   int32_t  mType;
   mozilla::EventMessage mMessage;
   mozilla::EventClassID mEventClassID;
+  // True if mAtom is possibly used by special SVG/SMIL events, but
+  // mMessage is eUnidentifiedEvent. See EventNameList.h
+  bool mMaybeSpecialSVGorSMILEvent;
 };
 
 typedef bool (*CallOnRemoteChildFunction) (mozilla::dom::TabParent* aTabParent,
@@ -908,6 +918,34 @@ public:
                                      nsXPIDLString& aResult);
 
   /**
+   * A helper function that parses a sandbox attribute (of an <iframe> or a CSP
+   * directive) and converts it to the set of flags used internally.
+   *
+   * @param aSandboxAttr  the sandbox attribute
+   * @return              the set of flags (SANDBOXED_NONE if aSandboxAttr is
+   *                      null)
+   */
+  static uint32_t ParseSandboxAttributeToFlags(const nsAttrValue* aSandboxAttr);
+
+  /**
+   * A helper function that checks if a string matches a valid sandbox flag.
+   *
+   * @param aFlag   the potential sandbox flag.
+   * @return        true if the flag is a sandbox flag.
+   */
+  static bool IsValidSandboxFlag(const nsAString& aFlag);
+
+  /**
+   * A helper function that returns a string attribute corresponding to the
+   * sandbox flags.
+   *
+   * @param aFlags    the sandbox flags
+   * @param aString   the attribute corresponding to the flags (null if aFlags
+   *                  is zero)
+   */
+  static void SandboxFlagsToString(uint32_t aFlags, nsAString& aString);
+
+  /**
    * Helper function that generates a UUID.
    */
   static nsresult GenerateUUIDInPlace(nsID& aUUID);
@@ -936,6 +974,17 @@ public:
   }
 
   /**
+   * Fill (with the parameters given) the localized string named |aKey| in
+   * properties file |aFile| consuming an nsTArray of nsString parameters rather
+   * than a char16_t** for the sake of avoiding use-after-free errors involving
+   * temporaries.
+   */
+  static nsresult FormatLocalizedString(PropertiesFile aFile,
+                                        const char* aKey,
+                                        const nsTArray<nsString>& aParamArray,
+                                        nsXPIDLString& aResult);
+
+  /**
    * Returns true if aDocument is a chrome document
    */
   static bool IsChromeDoc(nsIDocument *aDocument);
@@ -944,6 +993,11 @@ public:
    * Returns true if aDocument is in a docshell whose parent is the same type
    */
   static bool IsChildOfSameType(nsIDocument* aDoc);
+
+  /**
+  '* Returns true if the content-type is any of the supported script types.
+   */
+  static bool IsScriptType(const nsACString& aContentType);
 
   /**
   '* Returns true if the content-type will be rendered as plain-text.
@@ -1170,6 +1224,13 @@ public:
    * @param aName the event name to look up
    */
   static mozilla::EventMessage GetEventMessage(nsIAtom* aName);
+
+  /**
+   * Returns the EventMessage and nsIAtom to be used for event listener
+   * registration.
+   */
+  static mozilla::EventMessage
+  GetEventMessageAndAtomForListener(const nsAString& aName, nsIAtom** aOnName);
 
   /**
    * Return the EventClassID for the event with the given name. The name is the
@@ -1677,11 +1738,10 @@ public:
                                                       nsresult* aRv);
 
   static JSContext *GetCurrentJSContext();
-  static JSContext *GetSafeJSContext();
   static JSContext *GetCurrentJSContextForThread();
-  static JSContext *GetDefaultJSContextForThread();
-  inline static JSContext *RootingCx() { return GetSafeJSContext(); }
-  inline static JSContext *RootingCxForThread() { return GetDefaultJSContextForThread(); }
+  inline static JSContext *RootingCx() {
+    return mozilla::dom::danger::GetJSContext();
+  }
 
   /**
    * Case insensitive comparison between two strings. However it only ignores
@@ -1694,13 +1754,17 @@ public:
    * Convert ASCII A-Z to a-z.
    */
   static void ASCIIToLower(nsAString& aStr);
+  static void ASCIIToLower(nsACString& aStr);
   static void ASCIIToLower(const nsAString& aSource, nsAString& aDest);
+  static void ASCIIToLower(const nsACString& aSource, nsACString& aDest);
 
   /**
    * Convert ASCII a-z to A-Z.
    */
   static void ASCIIToUpper(nsAString& aStr);
+  static void ASCIIToUpper(nsACString& aStr);
   static void ASCIIToUpper(const nsAString& aSource, nsAString& aDest);
+  static void ASCIIToUpper(const nsACString& aSource, nsACString& aDest);
 
   /**
    * Return whether aStr contains an ASCII uppercase character.
@@ -1871,7 +1935,7 @@ public:
    * layer manager should be used for retained layers
    */
   static already_AddRefed<mozilla::layers::LayerManager>
-  LayerManagerForDocument(const nsIDocument *aDoc, bool *aAllowRetaining = nullptr);
+  LayerManagerForDocument(const nsIDocument *aDoc);
 
   /**
    * Returns a layer manager to use for the given document. Basically we
@@ -1888,7 +1952,7 @@ public:
    * layer manager should be used for retained layers
    */
   static already_AddRefed<mozilla::layers::LayerManager>
-  PersistentLayerManagerForDocument(nsIDocument *aDoc, bool *aAllowRetaining = nullptr);
+  PersistentLayerManagerForDocument(nsIDocument *aDoc);
 
   /**
    * Determine whether a content node is focused or not,
@@ -2308,6 +2372,11 @@ public:
   static bool DOMWindowDumpEnabled();
 
   /**
+   * Returns true if the privacy.donottrackheader.enabled pref is set.
+   */
+  static bool DoNotTrackEnabled();
+
+  /**
    * Returns a LogModule that dump calls from content script are logged to.
    * This can be enabled with the 'Dump' module, and is useful for synchronizing
    * content JS to other logging modules.
@@ -2376,6 +2445,15 @@ public:
                                       CallOnRemoteChildFunction aCallback,
                                       void* aArg);
 
+  /*
+   * Call nsPIDOMWindow::SetKeyboardIndicators all all remote children. This is
+   * in here rather than nsGlobalWindow because TabParent indirectly includes
+   * Windows headers which aren't allowed there.
+   */
+  static void SetKeyboardIndicatorsOnRemoteChildren(nsPIDOMWindowOuter* aWindow,
+                                                    UIStateChangeType aShowAccelerators,
+                                                    UIStateChangeType aShowFocusRings);
+
   /**
    * Given an nsIFile, attempts to read it into aString.
    *
@@ -2422,8 +2500,18 @@ public:
    * Get the pixel data from the given source surface and return it as a buffer.
    * The length and stride will be assigned from the surface.
    */
-  static mozilla::UniquePtr<char[]> GetSurfaceData(mozilla::gfx::DataSourceSurface* aSurface,
-                                                   size_t* aLength, int32_t* aStride);
+  static mozilla::UniquePtr<char[]> GetSurfaceData(
+    mozilla::NotNull<mozilla::gfx::DataSourceSurface*> aSurface,
+    size_t* aLength, int32_t* aStride);
+
+  /*
+   * Get the pixel data from the given source surface and fill it in Shmem.
+   * The length and stride will be assigned from the surface.
+   */
+  static void GetSurfaceData(mozilla::gfx::DataSourceSurface* aSurface,
+                             size_t* aLength, int32_t* aStride,
+                             mozilla::ipc::IShmemAllocator* aAlloc,
+                             mozilla::ipc::Shmem *aOutShmem);
 
   // Helpers shared by the implementations of nsContentUtils methods and
   // nsIDOMWindowUtils methods.
@@ -2495,6 +2583,15 @@ public:
                                                 nsIHttpChannel* aChannel,
                                                 mozilla::net::ReferrerPolicy aReferrerPolicy);
 
+    /*
+   * Parse a referrer policy from a Referrer-Policy header
+   * https://www.w3.org/TR/referrer-policy/#parse-referrer-policy-from-header
+   *
+   * @param aHeader the response's Referrer-Policy header to parse
+   * @return referrer policy from the response header.
+   */
+  static mozilla::net::ReferrerPolicy GetReferrerPolicyFromHeader(const nsAString& aHeader);
+
   static bool PushEnabled(JSContext* aCx, JSObject* aObj);
 
   static bool IsNonSubresourceRequest(nsIChannel* aChannel);
@@ -2552,6 +2649,17 @@ public:
   static bool IsSpecificAboutPage(JSObject* aGlobal, const char* aUri);
 
   static void SetScrollbarsVisibility(nsIDocShell* aDocShell, bool aVisible);
+
+  /*
+   * Return the associated presentation URL of the presented content.
+   * Will return empty string if the docshell is not in a presented content.
+   */
+  static void GetPresentationURL(nsIDocShell* aDocShell, nsAString& aPresentationUrl);
+
+  /*
+   * Try to find the docshell corresponding to the given event target.
+   */
+  static nsIDocShell* GetDocShellForEventTarget(mozilla::dom::EventTarget* aTarget);
 
 private:
   static bool InitializeEventTable();
@@ -2618,15 +2726,6 @@ private:
   static nsIIOService *sIOService;
   static nsIUUIDGenerator *sUUIDGenerator;
 
-  static bool sImgLoaderInitialized;
-  static void InitImgLoader();
-
-  // The following four members are initialized lazily
-  static imgLoader* sImgLoader;
-  static imgLoader* sPrivateImgLoader;
-  static imgICache* sImgCache;
-  static imgICache* sPrivateImgCache;
-
   static nsIConsoleService* sConsoleService;
 
   static nsDataHashtable<nsISupportsHashKey, EventNameMapping>* sAtomEventTable;
@@ -2649,7 +2748,7 @@ private:
   static uint32_t sDOMNodeRemovedSuppressCount;
   static uint32_t sMicroTaskLevel;
   // Not an nsCOMArray because removing elements from those is slower
-  static nsTArray< nsCOMPtr<nsIRunnable> >* sBlockedScriptRunners;
+  static AutoTArray<nsCOMPtr<nsIRunnable>, 8>* sBlockedScriptRunners;
   static uint32_t sRunnersCountAtFirstBlocker;
   static uint32_t sScriptBlockerCountWhereRunnersPrevented;
 
@@ -2693,6 +2792,7 @@ private:
 #if !(defined(DEBUG) || defined(MOZ_ENABLE_JS_DUMP))
   static bool sDOMWindowDumpEnabled;
 #endif
+  static bool sDoNotTrackEnabled;
   static mozilla::LazyLogModule sDOMDumpLog;
 };
 

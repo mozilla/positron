@@ -18,19 +18,27 @@ XPCOMUtils.defineLazyGetter(this, "NetworkHelper", function () {
   return require("devtools/shared/webconsole/network-helper");
 });
 
+const {SideMenuWidget} = require("resource://devtools/client/shared/widgets/SideMenuWidget.jsm");
+const {VariablesView} = require("resource://devtools/client/shared/widgets/VariablesView.jsm");
+const {VariablesViewController} = require("resource://devtools/client/shared/widgets/VariablesViewController.jsm");
 const {ToolSidebar} = require("devtools/client/framework/sidebar");
-const {Tooltip} = require("devtools/client/shared/widgets/Tooltip");
+const {HTMLTooltip} = require("devtools/client/shared/widgets/HTMLTooltip");
+const {setImageTooltip, getImageDimensions} =
+  require("devtools/client/shared/widgets/tooltip/ImageTooltipHelper");
 const DevToolsUtils = require("devtools/shared/DevToolsUtils");
 const {LocalizationHelper} = require("devtools/client/shared/l10n");
 const {PrefsHelper} = require("devtools/client/shared/prefs");
 const {ViewHelpers, Heritage, WidgetMethods, setNamedTimeout} =
   require("devtools/client/shared/widgets/view-helpers");
+const {gDevTools} = require("devtools/client/framework/devtools");
 
 /**
  * Localization convenience methods.
  */
 const NET_STRINGS_URI = "chrome://devtools/locale/netmonitor.properties";
+const WEBCONSOLE_STRINGS_URI = "chrome://devtools/locale/webconsole.properties";
 var L10N = new LocalizationHelper(NET_STRINGS_URI);
+const WEBCONSOLE_L10N = new LocalizationHelper(WEBCONSOLE_STRINGS_URI);
 
 // ms
 const WDA_DEFAULT_VERIFY_INTERVAL = 50;
@@ -60,9 +68,12 @@ const SOURCE_SYNTAX_HIGHLIGHT_MAX_FILE_SIZE = 102400;
 const RESIZE_REFRESH_RATE = 50;
 // ms
 const REQUESTS_REFRESH_RATE = 50;
-const REQUESTS_TOOLTIP_POSITION = "topcenter bottomleft";
+// tooltip show/hide delay in ms
+const REQUESTS_TOOLTIP_TOGGLE_DELAY = 500;
 // px
 const REQUESTS_TOOLTIP_IMAGE_MAX_DIM = 400;
+// px
+const REQUESTS_TOOLTIP_STACK_TRACE_WIDTH = 600;
 // px
 const REQUESTS_WATERFALL_SAFE_BOUNDS = 90;
 // ms
@@ -102,6 +113,36 @@ const CONTENT_MIME_TYPE_MAPPINGS = {
   "/rss": Editor.modes.css,
   "/css": Editor.modes.css
 };
+const LOAD_CAUSE_STRINGS = {
+  [Ci.nsIContentPolicy.TYPE_INVALID]: "invalid",
+  [Ci.nsIContentPolicy.TYPE_OTHER]: "other",
+  [Ci.nsIContentPolicy.TYPE_SCRIPT]: "script",
+  [Ci.nsIContentPolicy.TYPE_IMAGE]: "img",
+  [Ci.nsIContentPolicy.TYPE_STYLESHEET]: "stylesheet",
+  [Ci.nsIContentPolicy.TYPE_OBJECT]: "object",
+  [Ci.nsIContentPolicy.TYPE_DOCUMENT]: "document",
+  [Ci.nsIContentPolicy.TYPE_SUBDOCUMENT]: "subdocument",
+  [Ci.nsIContentPolicy.TYPE_REFRESH]: "refresh",
+  [Ci.nsIContentPolicy.TYPE_XBL]: "xbl",
+  [Ci.nsIContentPolicy.TYPE_PING]: "ping",
+  [Ci.nsIContentPolicy.TYPE_XMLHTTPREQUEST]: "xhr",
+  [Ci.nsIContentPolicy.TYPE_OBJECT_SUBREQUEST]: "objectSubdoc",
+  [Ci.nsIContentPolicy.TYPE_DTD]: "dtd",
+  [Ci.nsIContentPolicy.TYPE_FONT]: "font",
+  [Ci.nsIContentPolicy.TYPE_MEDIA]: "media",
+  [Ci.nsIContentPolicy.TYPE_WEBSOCKET]: "websocket",
+  [Ci.nsIContentPolicy.TYPE_CSP_REPORT]: "csp",
+  [Ci.nsIContentPolicy.TYPE_XSLT]: "xslt",
+  [Ci.nsIContentPolicy.TYPE_BEACON]: "beacon",
+  [Ci.nsIContentPolicy.TYPE_FETCH]: "fetch",
+  [Ci.nsIContentPolicy.TYPE_IMAGESET]: "imageset",
+  [Ci.nsIContentPolicy.TYPE_WEB_MANIFEST]: "webManifest"
+};
+
+function loadCauseString(causeType) {
+  return LOAD_CAUSE_STRINGS[causeType] || "unknown";
+}
+
 const DEFAULT_EDITOR_CONFIG = {
   mode: Editor.modes.text,
   readOnly: true,
@@ -209,7 +250,7 @@ var NetMonitorView = {
    * @return boolean
    */
   get detailsPaneHidden() {
-    return this._detailsPane.hasAttribute("pane-collapsed");
+    return this._detailsPane.classList.contains("pane-collapsed");
   },
 
   /**
@@ -231,12 +272,12 @@ var NetMonitorView = {
     ViewHelpers.togglePane(flags, pane);
 
     if (flags.visible) {
-      this._body.removeAttribute("pane-collapsed");
-      button.removeAttribute("pane-collapsed");
+      this._body.classList.remove("pane-collapsed");
+      button.classList.remove("pane-collapsed");
       button.setAttribute("tooltiptext", this._collapsePaneString);
     } else {
-      this._body.setAttribute("pane-collapsed", "");
-      button.setAttribute("pane-collapsed", "");
+      this._body.classList.add("pane-collapsed");
+      button.classList.add("pane-collapsed");
       button.setAttribute("tooltiptext", this._expandPaneString);
     }
 
@@ -411,6 +452,7 @@ function RequestsMenuView() {
   this._onSelect = this._onSelect.bind(this);
   this._onSwap = this._onSwap.bind(this);
   this._onResize = this._onResize.bind(this);
+  this._onScroll = this._onScroll.bind(this);
   this._byFile = this._byFile.bind(this);
   this._byDomain = this._byDomain.bind(this);
   this._byType = this._byType.bind(this);
@@ -431,6 +473,14 @@ RequestsMenuView.prototype = Heritage.extend(WidgetMethods, {
     this.userInputTimer = Cc["@mozilla.org/timer;1"]
       .createInstance(Ci.nsITimer);
 
+    // Create a tooltip for the newly appended network request item.
+    this.tooltip = new HTMLTooltip(NetMonitorController._toolbox, { type: "arrow" });
+    this.tooltip.startTogglingOnHover(this.widget, this._onHover, {
+      toggleDelay: REQUESTS_TOOLTIP_TOGGLE_DELAY,
+      interactive: true
+    });
+    $("#requests-menu-contents").addEventListener("scroll", this._onScroll, true);
+
     Prefs.filters.forEach(type => this.filterOn(type));
     this.sortContents(this._byTiming);
 
@@ -443,7 +493,10 @@ RequestsMenuView.prototype = Heritage.extend(WidgetMethods, {
     window.addEventListener("resize", this._onResize, false);
 
     this.requestsMenuSortEvent = getKeyWithEvent(this.sortBy.bind(this));
+    this.requestsMenuSortKeyboardEvent = getKeyWithEvent(this.sortBy.bind(this), true);
     this.requestsMenuFilterEvent = getKeyWithEvent(this.filterOn.bind(this));
+    this.requestsMenuFilterKeyboardEvent = getKeyWithEvent(
+      this.filterOn.bind(this), true);
     this.reqeustsMenuClearEvent = this.clear.bind(this);
     this._onContextShowing = this._onContextShowing.bind(this);
     this._onContextNewTabCommand = this.openRequestInTab.bind(this);
@@ -475,8 +528,12 @@ RequestsMenuView.prototype = Heritage.extend(WidgetMethods, {
 
     $("#toolbar-labels").addEventListener("click",
       this.requestsMenuSortEvent, false);
+    $("#toolbar-labels").addEventListener("keydown",
+      this.requestsMenuSortKeyboardEvent, false);
     $("#requests-menu-filter-buttons").addEventListener("click",
       this.requestsMenuFilterEvent, false);
+    $("#requests-menu-filter-buttons").addEventListener("keydown",
+      this.requestsMenuFilterKeyboardEvent, false);
     $("#requests-menu-clear-button").addEventListener("click",
       this.reqeustsMenuClearEvent, false);
     $("#network-request-popup").addEventListener("popupshowing",
@@ -539,9 +596,14 @@ RequestsMenuView.prototype = Heritage.extend(WidgetMethods, {
    * Destruction function, called when the network monitor is closed.
    */
   destroy: function () {
-    dumpn("Destroying the SourcesView");
+    dumpn("Destroying the RequestsMenuView");
 
     Prefs.filters = this._activeFilters;
+
+    /* Destroy the tooltip */
+    this.tooltip.stopTogglingOnHover();
+    this.tooltip.destroy();
+    $("#requests-menu-contents").removeEventListener("scroll", this._onScroll, true);
 
     this.widget.removeEventListener("select", this._onSelect, false);
     this.widget.removeEventListener("swap", this._onSwap, false);
@@ -550,8 +612,12 @@ RequestsMenuView.prototype = Heritage.extend(WidgetMethods, {
 
     $("#toolbar-labels").removeEventListener("click",
       this.requestsMenuSortEvent, false);
+    $("#toolbar-labels").removeEventListener("keydown",
+      this.requestsMenuSortKeyboardEvent, false);
     $("#requests-menu-filter-buttons").removeEventListener("click",
       this.requestsMenuFilterEvent, false);
+    $("#requests-menu-filter-buttons").removeEventListener("keydown",
+      this.requestsMenuFilterKeyboardEvent, false);
     $("#requests-menu-clear-button").removeEventListener("click",
       this.reqeustsMenuClearEvent, false);
     this.freetextFilterBox.removeEventListener("input",
@@ -637,15 +703,20 @@ RequestsMenuView.prototype = Heritage.extend(WidgetMethods, {
    *        Specifies the request's url.
    * @param boolean isXHR
    *        True if this request was initiated via XHR.
+   * @param object cause
+   *        Specifies the request's cause. Has the following properties:
+   *        - type: nsContentPolicyType constant
+   *        - loadingDocumentUri: URI of the request origin
+   *        - stacktrace: JS stacktrace of the request
    * @param boolean fromCache
    *        Indicates if the result came from the browser cache
    * @param boolean fromServiceWorker
    *        Indicates if the request has been intercepted by a Service Worker
    */
-  addRequest: function (id, startedDateTime, method, url, isXHR, fromCache,
-    fromServiceWorker) {
-    this._addQueue.push([id, startedDateTime, method, url, isXHR, fromCache,
-      fromServiceWorker]);
+  addRequest: function (id, startedDateTime, method, url, isXHR, cause,
+    fromCache, fromServiceWorker) {
+    this._addQueue.push([id, startedDateTime, method, url, isXHR, cause,
+      fromCache, fromServiceWorker]);
 
     // Lazy updating is disabled in some tests.
     if (!this.lazyUpdate) {
@@ -660,7 +731,7 @@ RequestsMenuView.prototype = Heritage.extend(WidgetMethods, {
    * Opens selected item in a new tab.
    */
   openRequestInTab: function () {
-    let win = Services.wm.getMostRecentWindow("navigator:browser");
+    let win = Services.wm.getMostRecentWindow(gDevTools.chromeWindowType);
     let selected = this.selectedItem.attachment;
     win.openUILinkIn(selected.url, "tab", { relatedToCurrent: true });
   },
@@ -885,7 +956,8 @@ RequestsMenuView.prototype = Heritage.extend(WidgetMethods, {
     let selected = this.selectedItem.attachment;
 
     // Create the element node for the network request item.
-    let menuView = this._createMenuView(selected.method, selected.url);
+    let menuView = this._createMenuView(selected.method, selected.url,
+      selected.cause);
 
     // Append a network request item to this container.
     let newItem = this.push([menuView], {
@@ -1172,6 +1244,13 @@ RequestsMenuView.prototype = Heritage.extend(WidgetMethods, {
           this.sortContents((a, b) => !this._byDomain(a, b));
         }
         break;
+      case "cause":
+        if (direction == "ascending") {
+          this.sortContents(this._byCause);
+        } else {
+          this.sortContents((a, b) => !this._byCause(a, b));
+        }
+        break;
       case "type":
         if (direction == "ascending") {
           this.sortContents(this._byType);
@@ -1383,10 +1462,18 @@ RequestsMenuView.prototype = Heritage.extend(WidgetMethods, {
       : firstDomain > secondDomain;
   },
 
+  _byCause: function ({ attachment: first }, { attachment: second }) {
+    let firstCause = loadCauseString(first.cause.type);
+    let secondCause = loadCauseString(second.cause.type);
+
+    return firstCause == secondCause
+      ? first.startedMillis > second.startedMillis
+      : firstCause > secondCause;
+  },
+
   _byType: function ({ attachment: first }, { attachment: second }) {
     let firstType = this._getAbbreviatedMimeType(first.mimeType).toLowerCase();
-    let secondType = this._getAbbreviatedMimeType(second.mimeType)
-      .toLowerCase();
+    let secondType = this._getAbbreviatedMimeType(second.mimeType).toLowerCase();
 
     return firstType == secondType
       ? first.startedMillis > second.startedMillis
@@ -1452,19 +1539,6 @@ RequestsMenuView.prototype = Heritage.extend(WidgetMethods, {
   },
 
   /**
-   * Refreshes the toggling anchor for the specified item's tooltip.
-   *
-   * @param object item
-   *        The network request item in this container.
-   */
-  refreshTooltip: function (item) {
-    let tooltip = item.attachment.tooltip;
-    tooltip.hide();
-    tooltip.startTogglingOnHover(item.target, this._onHover);
-    tooltip.defaultPosition = REQUESTS_TOOLTIP_POSITION;
-  },
-
-  /**
    * Attaches security icon click listener for the given request menu item.
    *
    * @param object item
@@ -1510,13 +1584,13 @@ RequestsMenuView.prototype = Heritage.extend(WidgetMethods, {
     let widget = NetMonitorView.RequestsMenu.widget;
     let isScrolledToBottom = widget.isScrolledToBottom();
 
-    for (let [id, startedDateTime, method, url, isXHR, fromCache,
+    for (let [id, startedDateTime, method, url, isXHR, cause, fromCache,
       fromServiceWorker] of this._addQueue) {
       // Convert the received date/time string to a unix timestamp.
       let unixTime = Date.parse(startedDateTime);
 
       // Create the element node for the network request item.
-      let menuView = this._createMenuView(method, url);
+      let menuView = this._createMenuView(method, url, cause);
 
       // Remember the first and last event boundaries.
       this._registerFirstRequestStart(unixTime);
@@ -1530,21 +1604,11 @@ RequestsMenuView.prototype = Heritage.extend(WidgetMethods, {
           method: method,
           url: url,
           isXHR: isXHR,
+          cause: cause,
           fromCache: fromCache,
           fromServiceWorker: fromServiceWorker
         }
       });
-
-      // Create a tooltip for the newly appended network request item.
-      requestItem.attachment.tooltip = new Tooltip(document, {
-        closeOnEvents: [{
-          emitter: $("#requests-menu-contents"),
-          event: "scroll",
-          useCapture: true
-        }]
-      });
-
-      this.refreshTooltip(requestItem);
 
       if (id == this._preferredItemId) {
         this.selectedItem = requestItem;
@@ -1754,20 +1818,25 @@ RequestsMenuView.prototype = Heritage.extend(WidgetMethods, {
    *        Specifies the request method (e.g. "GET", "POST", etc.)
    * @param string url
    *        Specifies the request's url.
+   * @param object cause
+   *        Specifies the request's cause. Has two properties:
+   *        - type: nsContentPolicyType constant
+   *        - uri: URI of the request origin
    * @return nsIDOMNode
    *         The network request view.
    */
-  _createMenuView: function (method, url) {
+  _createMenuView: function (method, url, cause) {
     let template = $("#requests-menu-item-template");
     let fragment = document.createDocumentFragment();
-
-    this.updateMenuView(template, "method", method);
-    this.updateMenuView(template, "url", url);
 
     // Flatten the DOM by removing one redundant box (the template container).
     for (let node of template.childNodes) {
       fragment.appendChild(node.cloneNode(true));
     }
+
+    this.updateMenuView(fragment, "method", method);
+    this.updateMenuView(fragment, "url", url);
+    this.updateMenuView(fragment, "cause", cause);
 
     return fragment;
   },
@@ -1898,6 +1967,19 @@ RequestsMenuView.prototype = Heritage.extend(WidgetMethods, {
       case "statusText": {
         let node = $(".requests-menu-status", target);
         node.setAttribute("tooltiptext", value);
+        break;
+      }
+      case "cause": {
+        let labelNode = $(".requests-menu-cause-label", target);
+        labelNode.setAttribute("value", loadCauseString(value.type));
+        if (value.loadingDocumentUri) {
+          labelNode.setAttribute("tooltiptext", value.loadingDocumentUri);
+        }
+
+        let stackNode = $(".requests-menu-cause-stack", target);
+        if (value.stacktrace && value.stacktrace.length > 0) {
+          stackNode.removeAttribute("hidden");
+        }
         break;
       }
       case "contentSize": {
@@ -2230,11 +2312,6 @@ RequestsMenuView.prototype = Heritage.extend(WidgetMethods, {
    * Called when two items switch places, when the contents are sorted.
    */
   _onSwap: function ({ detail: [firstItem, secondItem] }) {
-    // Sorting will create new anchor nodes for all the swapped request items
-    // in this container, so it's necessary to refresh the Tooltip instances.
-    this.refreshTooltip(firstItem);
-    this.refreshTooltip(secondItem);
-
     // Reattach click listener to the security icons
     this.attachSecurityIconClickListener(firstItem);
     this.attachSecurityIconClickListener(secondItem);
@@ -2252,26 +2329,96 @@ RequestsMenuView.prototype = Heritage.extend(WidgetMethods, {
    */
   _onHover: Task.async(function* (target, tooltip) {
     let requestItem = this.getItemForElement(target);
-    if (!requestItem || !requestItem.attachment.responseContent) {
+    if (!requestItem) {
       return false;
     }
 
     let hovered = requestItem.attachment;
-    let { mimeType, text, encoding } = hovered.responseContent.content;
-
-    if (mimeType && mimeType.includes("image/") && (
-      target.classList.contains("requests-menu-icon") ||
-      target.classList.contains("requests-menu-file"))) {
-      let string = yield gNetwork.getString(text);
-      let anchor = $(".requests-menu-icon", requestItem.target);
-      let src = formDataURI(mimeType, encoding, string);
-
-      tooltip.setImageContent(src, {
-        maxDim: REQUESTS_TOOLTIP_IMAGE_MAX_DIM
-      });
-      return anchor;
+    if (hovered.responseContent && target.closest(".requests-menu-icon-and-file")) {
+      return this._setTooltipImageContent(tooltip, requestItem);
+    } else if (hovered.cause && target.closest(".requests-menu-cause-stack")) {
+      return this._setTooltipStackTraceContent(tooltip, requestItem);
     }
+
     return false;
+  }),
+
+  _setTooltipImageContent: Task.async(function* (tooltip, requestItem) {
+    let { mimeType, text, encoding } = requestItem.attachment.responseContent.content;
+
+    if (!mimeType || !mimeType.includes("image/")) {
+      return false;
+    }
+
+    let string = yield gNetwork.getString(text);
+    let src = formDataURI(mimeType, encoding, string);
+    let maxDim = REQUESTS_TOOLTIP_IMAGE_MAX_DIM;
+    let { naturalWidth, naturalHeight } = yield getImageDimensions(tooltip.doc, src);
+    let options = { maxDim, naturalWidth, naturalHeight };
+    setImageTooltip(tooltip, tooltip.doc, src, options);
+
+    return $(".requests-menu-icon", requestItem.target);
+  }),
+
+  _setTooltipStackTraceContent: Task.async(function* (tooltip, requestItem) {
+    let {stacktrace} = requestItem.attachment.cause;
+
+    if (!stacktrace || stacktrace.length == 0) {
+      return false;
+    }
+
+    let doc = tooltip.doc;
+    let el = doc.createElementNS(HTML_NS, "div");
+    el.className = "stack-trace-tooltip devtools-monospace";
+
+    for (let f of stacktrace) {
+      let { functionName, filename, lineNumber, columnNumber, asyncCause } = f;
+
+      if (asyncCause) {
+        // if there is asyncCause, append a "divider" row into the trace
+        let asyncFrameEl = doc.createElementNS(HTML_NS, "div");
+        asyncFrameEl.className = "stack-frame stack-frame-async";
+        asyncFrameEl.textContent =
+          WEBCONSOLE_L10N.getFormatStr("stacktrace.asyncStack", asyncCause);
+        el.appendChild(asyncFrameEl);
+      }
+
+      // Parse a source name in format "url -> url"
+      let sourceUrl = filename.split(" -> ").pop();
+
+      let frameEl = doc.createElementNS(HTML_NS, "div");
+      frameEl.className = "stack-frame stack-frame-call";
+
+      let funcEl = doc.createElementNS(HTML_NS, "span");
+      funcEl.className = "stack-frame-function-name";
+      funcEl.textContent =
+        functionName || WEBCONSOLE_L10N.getStr("stacktrace.anonymousFunction");
+      frameEl.appendChild(funcEl);
+
+      let sourceEl = doc.createElementNS(HTML_NS, "span");
+      sourceEl.className = "stack-frame-source-name";
+      frameEl.appendChild(sourceEl);
+
+      sourceEl.textContent = sourceUrl;
+      sourceEl.title = sourceUrl;
+
+      let lineEl = doc.createElementNS(HTML_NS, "span");
+      lineEl.className = "stack-frame-line";
+      lineEl.textContent = `:${lineNumber}:${columnNumber}`;
+      sourceEl.appendChild(lineEl);
+
+      frameEl.addEventListener("click", () => {
+        // hide the tooltip immediately, not after delay
+        tooltip.hide();
+        NetMonitorController.viewSourceInDebugger(filename, lineNumber);
+      }, false);
+
+      el.appendChild(frameEl);
+    }
+
+    tooltip.setContent(el, {width: REQUESTS_TOOLTIP_STACK_TRACE_WIDTH});
+
+    return true;
   }),
 
   /**
@@ -2293,6 +2440,13 @@ RequestsMenuView.prototype = Heritage.extend(WidgetMethods, {
     // Allow requests to settle down first.
     setNamedTimeout("resize-events",
       RESIZE_REFRESH_RATE, () => this._flushWaterfallViews(true));
+  },
+
+  /**
+   * Scroll listener for the requests menu view.
+   */
+  _onScroll: function () {
+    this.tooltip.hide();
   },
 
   /**
@@ -3520,7 +3674,7 @@ NetworkDetailsView.prototype = {
       errorbox.hidden = false;
 
       // Strip any HTML from the message.
-      let plain = DOMParser.parseFromString(securityInfo.errorMessage,
+      let plain = new DOMParser().parseFromString(securityInfo.errorMessage,
         "text/html");
       setValue("#security-error-message", plain.body.textContent);
     }
@@ -3874,13 +4028,19 @@ function responseIsFresh({ responseHeaders, status }) {
  * @param function callback
  *          Function to execute execute when data-key
  *          is present in event.target.
+ * @param bool onlySpaceOrReturn
+ *          Flag to indicate if callback should only be called
+            when the space or return button is pressed
  * @return function
- *          Wrapped function with the target data-key as the first argument.
+ *          Wrapped function with the target data-key as the first argument
+ *          and the event as the second argument.
  */
-function getKeyWithEvent(callback) {
+function getKeyWithEvent(callback, onlySpaceOrReturn) {
   return function (event) {
     let key = event.target.getAttribute("data-key");
-    if (key) {
+    let filterKeyboardEvent = onlySpaceOrReturn
+       ? ViewHelpers.isSpaceOrReturn(event) : true;
+    if (key && filterKeyboardEvent) {
       callback.call(null, key);
     }
   };

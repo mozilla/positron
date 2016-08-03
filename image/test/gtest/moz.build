@@ -8,12 +8,14 @@ Library('imagetest')
 
 UNIFIED_SOURCES = [
     'Common.cpp',
+    'TestADAM7InterpolatingFilter.cpp',
     'TestCopyOnWrite.cpp',
     'TestDecoders.cpp',
     'TestDecodeToSurface.cpp',
     'TestDeinterlacingFilter.cpp',
     'TestMetadata.cpp',
     'TestRemoveFrameRectFilter.cpp',
+    'TestSourceBuffer.cpp',
     'TestStreamingLexer.cpp',
     'TestSurfaceSink.cpp',
 ]
@@ -30,7 +32,16 @@ SOURCES += [
 ]
 
 TEST_HARNESS_FILES.gtest += [
+    'animated-with-extra-image-sub-blocks.gif',
+    'corrupt-with-bad-bmp-height.ico',
+    'corrupt-with-bad-bmp-width.ico',
     'corrupt.jpg',
+    'downscaled.bmp',
+    'downscaled.gif',
+    'downscaled.ico',
+    'downscaled.icon',
+    'downscaled.jpg',
+    'downscaled.png',
     'first-frame-green.gif',
     'first-frame-green.png',
     'first-frame-padding.gif',
@@ -40,9 +51,11 @@ TEST_HARNESS_FILES.gtest += [
     'green.icon',
     'green.jpg',
     'green.png',
+    'invalid-truncated-metadata.bmp',
     'no-frame-delay.gif',
     'rle4.bmp',
     'rle8.bmp',
+    'transparent-ico-with-and-mask.ico',
     'transparent-if-within-ico.bmp',
     'transparent.gif',
     'transparent.png',

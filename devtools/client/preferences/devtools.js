@@ -276,9 +276,6 @@ pref("devtools.browserconsole.filter.serverwarn", false);
 pref("devtools.browserconsole.filter.serverinfo", false);
 pref("devtools.browserconsole.filter.serverlog", false);
 
-// Text size in the Web Console. Use 0 for the system default size.
-pref("devtools.webconsole.fontSize", 0);
-
 // Max number of inputs to store in web console history.
 pref("devtools.webconsole.inputHistoryCount", 50);
 
@@ -298,6 +295,9 @@ pref("devtools.webconsole.autoMultiline", true);
 
 // Enable the experimental webconsole frontend (work in progress)
 pref("devtools.webconsole.new-frontend-enabled", false);
+
+// The number of lines that are displayed in the web console.
+pref("devtools.hud.loglimit", 1000);
 
 // The number of lines that are displayed in the web console for the Net,
 // CSS, JS and Web Developer categories. These defaults should be kept in sync
@@ -326,7 +326,7 @@ pref("devtools.editor.enableCodeFolding", true);
 pref("devtools.editor.autocomplete", true);
 
 // Enable the Font Inspector
-pref("devtools.fontinspector.enabled", false);
+pref("devtools.fontinspector.enabled", true);
 
 // Pref to store the browser version at the time of a telemetry ping for an
 // opened developer tool. This allows us to ping telemetry just once per browser

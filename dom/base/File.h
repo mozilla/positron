@@ -15,7 +15,6 @@
 #include "mozilla/StaticPtr.h"
 #include "mozilla/dom/BindingDeclarations.h"
 #include "mozilla/dom/Date.h"
-#include "nsAutoPtr.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsCOMPtr.h"
 #include "nsIDOMBlob.h"
@@ -42,7 +41,7 @@ struct ChromeFilePropertyBag;
 struct FilePropertyBag;
 class BlobImpl;
 class File;
-class OwningArrayBufferOrArrayBufferViewOrBlobOrString;
+class OwningArrayBufferOrArrayBufferViewOrBlobOrUSVString;
 
 class Blob : public nsIDOMBlob
            , public nsIXHRSendable
@@ -57,6 +56,8 @@ public:
 
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS_AMBIGUOUS(Blob, nsIDOMBlob)
+
+  typedef OwningArrayBufferOrArrayBufferViewOrBlobOrUSVString BlobPart;
 
   // This creates a Blob or a File based on the type of BlobImpl.
   static Blob*
@@ -122,12 +123,8 @@ public:
 
   // Blob constructor
   static already_AddRefed<Blob>
-  Constructor(const GlobalObject& aGlobal, ErrorResult& aRv);
-
-  // Blob constructor
-  static already_AddRefed<Blob>
   Constructor(const GlobalObject& aGlobal,
-              const Sequence<OwningArrayBufferOrArrayBufferViewOrBlobOrString>& aData,
+              const Optional<Sequence<BlobPart>>& aData,
               const BlobPropertyBag& aBag,
               ErrorResult& aRv);
 
@@ -204,7 +201,7 @@ public:
   // File constructor
   static already_AddRefed<File>
   Constructor(const GlobalObject& aGlobal,
-              const Sequence<OwningArrayBufferOrArrayBufferViewOrBlobOrString>& aData,
+              const Sequence<BlobPart>& aData,
               const nsAString& aName,
               const FilePropertyBag& aBag,
               ErrorResult& aRv);

@@ -11,7 +11,6 @@
 #include "nsCOMPtr.h"
 #include "nsIFile.h"
 #include "BinaryPath.h"
-#include "nsAutoPtr.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -138,7 +137,7 @@ GetAppIni(int argc, const char *argv[])
 
     char appEnv[MAXPATHLEN];
     snprintf(appEnv, MAXPATHLEN, "XUL_APP_FILE=%s", argv[2]);
-    if (putenv(appEnv)) {
+    if (putenv(strdup(appEnv))) {
       return nullptr;
     }
   }

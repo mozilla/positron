@@ -170,8 +170,7 @@ public:
   virtual LayerManager*
   GetLayerManager(PLayerTransactionChild* aShadowManager = nullptr,
                   LayersBackend aBackendHint = mozilla::layers::LayersBackend::LAYERS_NONE,
-                  LayerManagerPersistence aPersistence = LAYER_MANAGER_CURRENT,
-                  bool* aAllowRetaining = nullptr) override;
+                  LayerManagerPersistence aPersistence = LAYER_MANAGER_CURRENT) override;
 
   NS_IMETHOD_(void) SetInputContext(const InputContext& aContext,
                                     const InputContextAction& aAction) override;
@@ -270,15 +269,15 @@ public:
                      const NativeEventData& aKeyEventData,
                      nsIKeyEventInPluginCallback* aCallback) override;
 
+  virtual void LookUpDictionary(
+                 const nsAString& aText,
+                 const nsTArray<mozilla::FontRange>& aFontRangeArray,
+                 const bool aIsVertical,
+                 const LayoutDeviceIntPoint& aPoint) override;
+
 protected:
   virtual nsresult NotifyIMEInternal(
                      const IMENotification& aIMENotification) override;
-
-  // PuppetWidgets do not create compositors.
-  widget::CompositorWidgetProxy* NewCompositorWidgetProxy() override {
-    MOZ_ASSERT_UNREACHABLE("PuppetWidgets should not have widget proxies");
-    return nullptr;
-  }
 
 private:
   nsresult Paint();

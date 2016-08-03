@@ -13,7 +13,7 @@
 #include "mozilla/dom/MediaKeySession.h"
 #include "mozilla/dom/DOMException.h"
 #include "mozilla/dom/UnionTypes.h"
-#include "mozilla/CDMProxy.h"
+#include "GMPCDMProxy.h"
 #include "mozilla/EMEUtils.h"
 #include "nsContentUtils.h"
 #include "nsIScriptObjectPrincipal.h"
@@ -284,6 +284,26 @@ MediaKeys::ResolvePromise(PromiseId aId)
   MOZ_ASSERT(!mPromises.Contains(aId));
 }
 
+class MediaKeysGMPCrashHelper : public GMPCrashHelper
+{
+public:
+  explicit MediaKeysGMPCrashHelper(MediaKeys* aMediaKeys)
+    : mMediaKeys(aMediaKeys)
+  {
+    MOZ_ASSERT(NS_IsMainThread()); // WeakPtr isn't thread safe.
+  }
+  already_AddRefed<nsPIDOMWindowInner>
+  GetPluginCrashedEventTarget() override
+  {
+    MOZ_ASSERT(NS_IsMainThread()); // WeakPtr isn't thread safe.
+    EME_LOG("MediaKeysGMPCrashHelper::GetPluginCrashedEventTarget()");
+    return (mMediaKeys && mMediaKeys->GetParentObject()) ?
+      do_AddRef(mMediaKeys->GetParentObject()) : nullptr;
+  }
+private:
+  WeakPtr<MediaKeys> mMediaKeys;
+};
+
 already_AddRefed<DetailedPromise>
 MediaKeys::Init(ErrorResult& aRv)
 {
@@ -293,7 +313,7 @@ MediaKeys::Init(ErrorResult& aRv)
     return nullptr;
   }
 
-  mProxy = new CDMProxy(this, mKeySystem);
+  mProxy = new GMPCDMProxy(this, mKeySystem, new MediaKeysGMPCrashHelper(this));
 
   // Determine principal (at creation time) of the MediaKeys object.
   nsCOMPtr<nsIScriptObjectPrincipal> sop = do_QueryInterface(GetParentObject());
@@ -390,21 +410,6 @@ MediaKeys::OnCDMCreated(PromiseId aId, const nsACString& aNodeId, const uint32_t
   MediaKeySystemAccess::NotifyObservers(mParent,
                                         mKeySystem,
                                         MediaKeySystemStatus::Cdm_created);
-
-  if (aPluginId) {
-    // Prepare plugin crash reporter.
-    RefPtr<gmp::GeckoMediaPluginService> service =
-      gmp::GeckoMediaPluginService::GetGeckoMediaPluginService();
-    if (NS_WARN_IF(!service)) {
-      return;
-    }
-    if (NS_WARN_IF(!mParent)) {
-      return;
-    }
-    service->AddPluginCrashedEventTarget(aPluginId, mParent);
-    EME_LOG("MediaKeys[%p]::OnCDMCreated() registered crash handler for pluginId '%i'",
-            this, aPluginId);
-  }
 }
 
 already_AddRefed<MediaKeySession>

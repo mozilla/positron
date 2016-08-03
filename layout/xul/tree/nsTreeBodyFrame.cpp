@@ -10,9 +10,10 @@
 #include "mozilla/EventDispatcher.h"
 #include "mozilla/gfx/2D.h"
 #include "mozilla/gfx/PathHelpers.h"
+#include "mozilla/Likely.h"
 #include "mozilla/MathAlgorithms.h"
 #include "mozilla/MouseEvents.h"
-#include "mozilla/Likely.h"
+#include "mozilla/TextEditRules.h"
 
 #include "gfxUtils.h"
 #include "nsAlgorithm.h"
@@ -66,7 +67,6 @@
 #include "nsIScriptableRegion.h"
 #include <algorithm>
 #include "ScrollbarActivity.h"
-#include "../../editor/libeditor/nsTextEditRules.h"
 
 #ifdef ACCESSIBILITY
 #include "nsAccessibilityService.h"
@@ -150,7 +150,7 @@ static void
 GetBorderPadding(nsStyleContext* aContext, nsMargin& aMargin)
 {
   aMargin.SizeTo(0, 0, 0, 0);
-  aContext->StylePadding()->GetPaddingNoPercentage(aMargin);
+  aContext->StylePadding()->GetPadding(aMargin);
   aMargin += aContext->StyleBorder()->GetComputedBorder();
 }
 
@@ -3484,7 +3484,7 @@ nsTreeBodyFrame::PaintTwisty(int32_t              aRowIndex,
         result &=
           nsLayoutUtils::DrawSingleUnscaledImage(
               *aRenderingContext.ThebesContext(), aPresContext, image,
-              Filter::POINT, pt, &aDirtyRect,
+              SamplingFilter::POINT, pt, &aDirtyRect,
               imgIContainer::FLAG_NONE, &imageSize);
       }
     }
@@ -3650,7 +3650,7 @@ nsTreeBodyFrame::PaintImage(int32_t              aRowIndex,
 
     result &=
       nsLayoutUtils::DrawImage(*ctx, aPresContext, image,
-        nsLayoutUtils::GetGraphicsFilterForFrame(this),
+        nsLayoutUtils::GetSamplingFilterForFrame(this),
         wholeImageDest, destRect, destRect.TopLeft(), aDirtyRect,
         imgIContainer::FLAG_NONE);
 
@@ -3694,7 +3694,7 @@ nsTreeBodyFrame::PaintText(int32_t              aRowIndex,
   mView->GetCellText(aRowIndex, aColumn, text);
 
   if (aColumn->Type() == nsITreeColumn::TYPE_PASSWORD) {
-    nsTextEditRules::FillBufWithPWChars(&text, text.Length());
+    TextEditRules::FillBufWithPWChars(&text, text.Length());
   }
 
   // We're going to paint this text so we need to ensure bidi is enabled if
@@ -3874,7 +3874,7 @@ nsTreeBodyFrame::PaintCheckbox(int32_t              aRowIndex,
     result &=
       nsLayoutUtils::DrawSingleUnscaledImage(*aRenderingContext.ThebesContext(),
         aPresContext,
-        image, Filter::POINT, pt, &aDirtyRect,
+        image, SamplingFilter::POINT, pt, &aDirtyRect,
         imgIContainer::FLAG_NONE, &imageSize);
   }
 
@@ -3942,7 +3942,7 @@ nsTreeBodyFrame::PaintProgressMeter(int32_t              aRowIndex,
       result &=
         nsLayoutUtils::DrawImage(*aRenderingContext.ThebesContext(),
           aPresContext, image,
-          nsLayoutUtils::GetGraphicsFilterForFrame(this),
+          nsLayoutUtils::GetSamplingFilterForFrame(this),
           nsRect(meterRect.TopLeft(), size), meterRect, meterRect.TopLeft(),
           aDirtyRect, imgIContainer::FLAG_NONE);
     } else {
@@ -3970,7 +3970,7 @@ nsTreeBodyFrame::PaintProgressMeter(int32_t              aRowIndex,
       result &=
         nsLayoutUtils::DrawImage(*aRenderingContext.ThebesContext(),
           aPresContext, image,
-          nsLayoutUtils::GetGraphicsFilterForFrame(this),
+          nsLayoutUtils::GetSamplingFilterForFrame(this),
           nsRect(meterRect.TopLeft(), size), meterRect, meterRect.TopLeft(),
           aDirtyRect, imgIContainer::FLAG_NONE);
     }

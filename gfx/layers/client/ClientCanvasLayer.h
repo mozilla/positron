@@ -14,7 +14,6 @@
 #include "mozilla/RefPtr.h"             // for RefPtr
 #include "mozilla/layers/LayersMessages.h"  // for CanvasLayerAttributes, etc
 #include "mozilla/mozalloc.h"           // for operator delete
-#include "nsAutoPtr.h"                  // for nsRefPtr
 #include "nsDebug.h"                    // for NS_ASSERTION
 #include "nsISupportsImpl.h"            // for MOZ_COUNT_CTOR, etc
 #include "nsRegion.h"                   // for nsIntRegion
@@ -71,7 +70,7 @@ public:
 
   virtual void FillSpecificAttributes(SpecificLayerAttributes& aAttrs) override
   {
-    aAttrs = CanvasLayerAttributes(mFilter, mBounds);
+    aAttrs = CanvasLayerAttributes(mSamplingFilter, mBounds);
   }
 
   virtual Layer* AsLayer()  override { return this; }

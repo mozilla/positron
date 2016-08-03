@@ -3649,11 +3649,11 @@ ImplicitConvert(JSContext* cx,
                          arrObj, arrIndex);
       }
     } else {
-      ESClassValue cls;
+      ESClass cls;
       if (!GetClassOfValue(cx, val, &cls))
         return false;
 
-      if (cls == ESClass_Array) {
+      if (cls == ESClass::Array) {
         // Convert each element of the array by calling ImplicitConvert.
         uint32_t sourceLength;
         if (!JS_GetArrayLength(cx, valObj, &sourceLength) ||
@@ -3684,10 +3684,10 @@ ImplicitConvert(JSContext* cx,
         }
 
         memcpy(buffer, intermediate.get(), arraySize);
-      } else if (cls == ESClass_ArrayBuffer || cls == ESClass_SharedArrayBuffer) {
+      } else if (cls == ESClass::ArrayBuffer || cls == ESClass::SharedArrayBuffer) {
         // Check that array is consistent with type, then
         // copy the array.
-        const bool bufferShared = cls == ESClass_SharedArrayBuffer;
+        const bool bufferShared = cls == ESClass::SharedArrayBuffer;
         uint32_t sourceLength = bufferShared ? JS_GetSharedArrayBufferByteLength(valObj)
             : JS_GetArrayBufferByteLength(valObj);
         size_t elementSize = CType::GetSize(baseType);
@@ -7405,11 +7405,8 @@ CClosure::ClosureStub(ffi_cif* cif, void* result, void** args, void* userData)
   JSRuntime* rt = argClosure.cinfo->rt;
   RootedObject fun(rt, argClosure.cinfo->jsfnObj);
 
-  // Arbitrarily choose a cx in which to run this code. This is bad, as
-  // JSContexts are stateful and have options. The hope is to eliminate
-  // JSContexts (see bug 650361).
-  js::PrepareScriptEnvironmentAndInvoke(rt->contextList.getFirst(), fun,
-                                        argClosure);
+  JSContext* cx = JS_GetContext(rt);
+  js::PrepareScriptEnvironmentAndInvoke(cx, fun, argClosure);
 }
 
 bool CClosure::ArgClosure::operator()(JSContext* cx)
@@ -7425,7 +7422,7 @@ bool CClosure::ArgClosure::operator()(JSContext* cx)
   AssertSameCompartment(cx, cinfo->jsfnObj);
 
 
-  JS_AbortIfWrongThread(JS_GetRuntime(cx));
+  JS_AbortIfWrongThread(cx);
 
   // Assert that our CIFs agree.
   FunctionInfo* fninfo = FunctionType::GetFunctionInfo(typeObj);

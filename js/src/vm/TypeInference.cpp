@@ -2545,16 +2545,15 @@ js::PrintTypes(JSContext* cx, JSCompartment* comp, bool force)
     if (!force && !InferSpewActive(ISpewResult))
         return;
 
-    for (gc::ZoneCellIter i(zone, gc::AllocKind::SCRIPT); !i.done(); i.next()) {
-        RootedScript script(cx, i.get<JSScript>());
+    RootedScript script(cx);
+    for (auto iter = zone->cellIter<JSScript>(); !iter.done(); iter.next()) {
+        script = iter;
         if (script->types())
             script->types()->printTypes(cx, script);
     }
 
-    for (gc::ZoneCellIter i(zone, gc::AllocKind::OBJECT_GROUP); !i.done(); i.next()) {
-        ObjectGroup* group = i.get<ObjectGroup>();
+    for (auto group = zone->cellIter<ObjectGroup>(); !group.done(); group.next())
         group->print();
-    }
 #endif
 }
 
@@ -3431,7 +3430,7 @@ PreliminaryObjectArrayWithTemplate::writeBarrierPre(PreliminaryObjectArrayWithTe
 {
     Shape* shape = objects->shape();
 
-    if (!shape || shape->runtimeFromAnyThread()->isHeapBusy())
+    if (!shape || shape->runtimeFromAnyThread()->isHeapCollecting())
         return;
 
     JS::Zone* zone = shape->zoneFromAnyThread();
@@ -3989,7 +3988,7 @@ TypeNewScript::trace(JSTracer* trc)
 /* static */ void
 TypeNewScript::writeBarrierPre(TypeNewScript* newScript)
 {
-    if (newScript->function()->runtimeFromAnyThread()->isHeapBusy())
+    if (newScript->function()->runtimeFromAnyThread()->isHeapCollecting())
         return;
 
     JS::Zone* zone = newScript->function()->zoneFromAnyThread();
@@ -4059,14 +4058,20 @@ ConstraintTypeSet::trace(Zone* zone, JSTracer* trc)
     }
 }
 
-void
-ConstraintTypeSet::sweep(Zone* zone, AutoClearTypeInferenceStateOnOOM& oom)
+static inline void
+AssertGCStateForSweep(Zone* zone)
 {
     MOZ_ASSERT(zone->isGCSweepingOrCompacting());
 
     // IsAboutToBeFinalized doesn't work right on tenured objects when called
     // during a minor collection.
     MOZ_ASSERT(!zone->runtimeFromMainThread()->isHeapMinorCollecting());
+}
+
+void
+ConstraintTypeSet::sweep(Zone* zone, AutoClearTypeInferenceStateOnOOM& oom)
+{
+    AssertGCStateForSweep(zone);
 
     /*
      * Purge references to objects that are no longer live. Type sets hold
@@ -4185,8 +4190,7 @@ ObjectGroup::sweep(AutoClearTypeInferenceStateOnOOM* oom)
 
     setGeneration(zone()->types.generation);
 
-    MOZ_ASSERT(zone()->isGCSweepingOrCompacting());
-    MOZ_ASSERT(!zone()->runtimeFromMainThread()->isHeapMinorCollecting());
+    AssertGCStateForSweep(zone());
 
     Maybe<AutoClearTypeInferenceStateOnOOM> fallbackOOM;
     EnsureHasAutoClearTypeInferenceStateOnOOM(oom, zone(), fallbackOOM);
@@ -4280,8 +4284,7 @@ JSScript::maybeSweepTypes(AutoClearTypeInferenceStateOnOOM* oom)
 
     setTypesGeneration(zone()->types.generation);
 
-    MOZ_ASSERT(zone()->isGCSweepingOrCompacting());
-    MOZ_ASSERT(!zone()->runtimeFromMainThread()->isHeapMinorCollecting());
+    AssertGCStateForSweep(zone());
 
     Maybe<AutoClearTypeInferenceStateOnOOM> fallbackOOM;
     EnsureHasAutoClearTypeInferenceStateOnOOM(oom, zone(), fallbackOOM);
@@ -4425,10 +4428,8 @@ TypeZone::endSweep(JSRuntime* rt)
 void
 TypeZone::clearAllNewScriptsOnOOM()
 {
-    for (gc::ZoneCellIter iter(zone(), gc::AllocKind::OBJECT_GROUP);
-         !iter.done(); iter.next())
-    {
-        ObjectGroup* group = iter.get<ObjectGroup>();
+    for (auto iter = zone()->cellIter<ObjectGroup>(); !iter.done(); iter.next()) {
+        ObjectGroup* group = iter;
         if (!IsAboutToBeFinalizedUnbarriered(&group))
             group->maybeClearNewScriptOnOOM();
     }
@@ -4437,8 +4438,9 @@ TypeZone::clearAllNewScriptsOnOOM()
 AutoClearTypeInferenceStateOnOOM::~AutoClearTypeInferenceStateOnOOM()
 {
     if (oom) {
+        JSRuntime* rt = zone->runtimeFromMainThread();
         zone->setPreservingCode(false);
-        zone->discardJitCode(zone->runtimeFromMainThread()->defaultFreeOp());
+        zone->discardJitCode(rt->defaultFreeOp());
         zone->types.clearAllNewScriptsOnOOM();
     }
 }

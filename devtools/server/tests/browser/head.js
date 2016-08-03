@@ -31,25 +31,17 @@ waitForExplicitFinish();
  *         and Promises cannot be resolved with CPOWs (see bug 1233497).
  */
 var addTab = Task.async(function* (url) {
-  info("Adding a new tab with URL: '" + url + "'");
-  let tab = gBrowser.selectedTab = gBrowser.addTab();
-  let loaded = once(gBrowser.selectedBrowser, "load", true);
+  info(`Adding a new tab with URL: ${url}`);
+  let tab = gBrowser.selectedTab = gBrowser.addTab(url);
+  yield once(gBrowser.selectedBrowser, "load", true);
 
-  content.location = url;
-  yield loaded;
-
-  info("URL '" + url + "' loading complete");
-
-  yield new Promise(resolve => {
-    let isBlank = url == "about:blank";
-    waitForFocus(resolve, content, isBlank);
-  });
+  info(`Tab added and URL ${url} loaded`);
 
   return tab.linkedBrowser;
 });
 
 function* initAnimationsFrontForUrl(url) {
-  const {AnimationsFront} = require("devtools/server/actors/animation");
+  const {AnimationsFront} = require("devtools/shared/fronts/animation");
   const {InspectorFront} = require("devtools/shared/fronts/inspector");
 
   yield addTab(url);

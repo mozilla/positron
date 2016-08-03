@@ -63,7 +63,7 @@ FetchPageInfo(const RefPtr<Database>& aDB,
         "AND EXISTS(SELECT 1 FROM moz_bookmarks b WHERE b.fk = r_place_id) "
         "LIMIT 1 "
       ") "
-    ") FROM moz_places h WHERE h.url = :page_url",
+    ") FROM moz_places h WHERE h.url_hash = hash(:page_url) AND h.url = :page_url",
     nsINavHistoryService::TRANSITION_REDIRECT_PERMANENT,
     nsINavHistoryService::TRANSITION_REDIRECT_TEMPORARY,
     nsINavHistoryService::TRANSITION_REDIRECT_PERMANENT,
@@ -248,7 +248,7 @@ FetchIconURL(const RefPtr<Database>& aDB,
     "SELECT f.url "
     "FROM moz_places h "
     "JOIN moz_favicons f ON h.favicon_id = f.id "
-    "WHERE h.url = :page_url"
+    "WHERE h.url_hash = hash(:page_url) AND h.url = :page_url"
   );
   NS_ENSURE_STATE(stmt);
   mozStorageStatementScoper scoper(stmt);
@@ -419,7 +419,9 @@ AsyncFetchAndSetIconForPage::FetchFromNetwork() {
   rv = NS_NewChannel(getter_AddRefs(channel),
                      iconURI,
                      mLoadingPrincipal,
-                     nsILoadInfo::SEC_NORMAL,
+                     nsILoadInfo::SEC_ALLOW_CROSS_ORIGIN_DATA_INHERITS |
+                     nsILoadInfo::SEC_ALLOW_CHROME |
+                     nsILoadInfo::SEC_DISALLOW_SCRIPT,
                      nsIContentPolicy::TYPE_INTERNAL_IMAGE);
 
   NS_ENSURE_SUCCESS(rv, rv);
@@ -439,7 +441,11 @@ AsyncFetchAndSetIconForPage::FetchFromNetwork() {
     priorityChannel->AdjustPriority(nsISupportsPriority::PRIORITY_LOWEST);
   }
 
-  return channel->AsyncOpen(this, nullptr);
+  rv = channel->AsyncOpen2(this);
+  if (NS_SUCCEEDED(rv)) {
+    mRequest = channel;
+  }
+  return rv;
 }
 
 NS_IMETHODIMP
@@ -460,6 +466,9 @@ NS_IMETHODIMP
 AsyncFetchAndSetIconForPage::OnStartRequest(nsIRequest* aRequest,
                                             nsISupports* aContext)
 {
+  // mRequest should already be set from ::FetchFromNetwork, but in the case of
+  // a redirect we might get a new request, and we should make sure we keep a
+  // reference to the most current request.
   mRequest = aRequest;
   if (mCanceled) {
     mRequest->Cancel(NS_BINDING_ABORTED);
@@ -511,7 +520,9 @@ AsyncFetchAndSetIconForPage::AsyncOnChannelRedirect(
 , nsIAsyncVerifyRedirectCallback *cb
 )
 {
-  (void)cb->OnRedirectVerifyCallback(NS_OK);
+  // If we've been canceled, stop the redirect with NS_BINDING_ABORTED, and
+  // handle the cancel on the original channel.
+  (void)cb->OnRedirectVerifyCallback(mCanceled ? NS_BINDING_ABORTED : NS_OK);
   return NS_OK;
 }
 
@@ -602,7 +613,7 @@ AsyncFetchAndSetIconForPage::OnStopRequest(nsIRequest* aRequest,
 
   // If over the maximum size allowed, don't save data to the database to
   // avoid bloating it.
-  if (mIcon.data.Length() > MAX_FAVICON_SIZE) {
+  if (mIcon.data.Length() > nsIFaviconService::MAX_FAVICON_SIZE) {
     return NS_OK;
   }
 
@@ -685,7 +696,8 @@ AsyncAssociateIconToPage::Run()
     }
     else {
       stmt = DB->GetStatement(
-        "UPDATE moz_places SET favicon_id = :icon_id WHERE url = :page_url"
+        "UPDATE moz_places SET favicon_id = :icon_id "
+        "WHERE url_hash = hash(:page_url) AND url = :page_url"
       );
       NS_ENSURE_STATE(stmt);
       rv = URIBinder::Bind(stmt, NS_LITERAL_CSTRING("page_url"), mPage.spec);

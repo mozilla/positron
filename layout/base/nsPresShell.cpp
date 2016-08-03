@@ -128,7 +128,7 @@
 #include "nsArenaMemoryStats.h"
 #include "nsFrameSelection.h"
 
-#include "nsPerformance.h"
+#include "mozilla/dom/Performance.h"
 #include "nsRefreshDriver.h"
 #include "nsDOMNavigationTiming.h"
 
@@ -789,9 +789,6 @@ PresShell::PresShell()
 #endif
   mPresShellId = sNextPresShellId++;
   mFrozen = false;
-#ifdef DEBUG
-  mPresArenaAllocCount = 0;
-#endif
   mRenderFlags = 0;
 
   mScrollPositionClampingScrollPortSizeSet = false;
@@ -840,10 +837,7 @@ PresShell::~PresShell()
     mPresContext->RefreshDriver()->Thaw();
   }
 
-#ifdef DEBUG
-  MOZ_ASSERT(mPresArenaAllocCount == 0,
-             "Some pres arena objects were not freed");
-#endif
+  MOZ_ASSERT(mAllocatedPointers.IsEmpty(), "Some pres arena objects were not freed");
 
   mStyleSet->Delete();
   delete mFrameConstructor;
@@ -1245,7 +1239,7 @@ PresShell::Destroy()
   // pointing to objects in the arena now.  This is done:
   //
   //   (a) before mFrameArena's destructor runs so that our
-  //       mPresArenaAllocCount gets down to 0 and doesn't trip the assertion
+  //       mAllocatedPointers becomes empty and doesn't trip the assertion
   //       in ~PresShell,
   //   (b) before the mPresContext->SetShell(nullptr) below, so
   //       that when we clear the ArenaRefPtrs they'll still be able to
@@ -1537,12 +1531,13 @@ PresShell::GetDisplaySelection(int16_t *aToggle)
 }
 
 NS_IMETHODIMP
-PresShell::GetSelection(SelectionType aType, nsISelection **aSelection)
+PresShell::GetSelection(RawSelectionType aRawSelectionType,
+                        nsISelection **aSelection)
 {
   if (!aSelection || !mSelection)
     return NS_ERROR_NULL_POINTER;
 
-  *aSelection = mSelection->GetSelection(aType);
+  *aSelection = mSelection->GetSelection(ToSelectionType(aRawSelectionType));
 
   if (!(*aSelection))
     return NS_ERROR_INVALID_ARG;
@@ -1553,31 +1548,64 @@ PresShell::GetSelection(SelectionType aType, nsISelection **aSelection)
 }
 
 Selection*
-PresShell::GetCurrentSelection(SelectionType aType)
+PresShell::GetCurrentSelection(SelectionType aSelectionType)
 {
   if (!mSelection)
     return nullptr;
 
-  return mSelection->GetSelection(aType);
+  return mSelection->GetSelection(aSelectionType);
+}
+
+already_AddRefed<nsISelectionController>
+PresShell::GetSelectionControllerForFocusedContent(nsIContent** aFocusedContent)
+{
+  if (aFocusedContent) {
+    *aFocusedContent = nullptr;
+  }
+
+  if (mDocument) {
+    nsCOMPtr<nsPIDOMWindowOuter> focusedWindow;
+    nsCOMPtr<nsIContent> focusedContent =
+      nsFocusManager::GetFocusedDescendant(mDocument->GetWindow(), false,
+                                           getter_AddRefs(focusedWindow));
+    if (focusedContent) {
+      nsIFrame* frame = focusedContent->GetPrimaryFrame();
+      if (frame) {
+        nsCOMPtr<nsISelectionController> selectionController;
+        frame->GetSelectionController(mPresContext,
+                                      getter_AddRefs(selectionController));
+        if (selectionController) {
+          if (aFocusedContent) {
+            focusedContent.forget(aFocusedContent);
+          }
+          return selectionController.forget();
+        }
+      }
+    }
+  }
+  nsCOMPtr<nsISelectionController> self(this);
+  return self.forget();
 }
 
 NS_IMETHODIMP
-PresShell::ScrollSelectionIntoView(SelectionType aType, SelectionRegion aRegion,
+PresShell::ScrollSelectionIntoView(RawSelectionType aRawSelectionType,
+                                   SelectionRegion aRegion,
                                    int16_t aFlags)
 {
   if (!mSelection)
     return NS_ERROR_NULL_POINTER;
 
-  return mSelection->ScrollSelectionIntoView(aType, aRegion, aFlags);
+  return mSelection->ScrollSelectionIntoView(ToSelectionType(aRawSelectionType),
+                                             aRegion, aFlags);
 }
 
 NS_IMETHODIMP
-PresShell::RepaintSelection(SelectionType aType)
+PresShell::RepaintSelection(RawSelectionType aRawSelectionType)
 {
   if (!mSelection)
     return NS_ERROR_NULL_POINTER;
 
-  return mSelection->RepaintSelection(aType);
+  return mSelection->RepaintSelection(ToSelectionType(aRawSelectionType));
 }
 
 // Make shell be a document observer
@@ -1621,8 +1649,6 @@ PresShell::Initialize(nscoord aWidth, nscoord aHeight)
     // Nothing to do
     return NS_OK;
   }
-
-  mozilla::TimeStamp timerStart = mozilla::TimeStamp::Now();
 
   NS_ASSERTION(!mDidInitialize, "Why are we being called?");
 
@@ -1784,11 +1810,6 @@ PresShell::Initialize(nscoord aWidth, nscoord aHeight)
     ScheduleBeforeFirstPaint();
   }
 
-  if (root && root->IsXULElement()) {
-    mozilla::Telemetry::AccumulateTimeDelta(Telemetry::XUL_INITIAL_FRAME_CONSTRUCTION,
-                                            timerStart);
-  }
-
   return NS_OK; //XXX this needs to be real. MMP
 }
 
@@ -1807,7 +1828,7 @@ PresShell::AsyncResizeEventCallback(nsITimer* aTimer, void* aPresShell)
 }
 
 nsresult
-PresShell::ResizeReflow(nscoord aWidth, nscoord aHeight)
+PresShell::ResizeReflow(nscoord aWidth, nscoord aHeight, nscoord aOldWidth, nscoord aOldHeight)
 {
   if (mZoomConstraintsClient) {
     // If we have a ZoomConstraintsClient and the available screen area
@@ -1823,11 +1844,11 @@ PresShell::ResizeReflow(nscoord aWidth, nscoord aHeight)
     return NS_OK;
   }
 
-  return ResizeReflowIgnoreOverride(aWidth, aHeight);
+  return ResizeReflowIgnoreOverride(aWidth, aHeight, aOldWidth, aOldHeight);
 }
 
 nsresult
-PresShell::ResizeReflowIgnoreOverride(nscoord aWidth, nscoord aHeight)
+PresShell::ResizeReflowIgnoreOverride(nscoord aWidth, nscoord aHeight, nscoord aOldWidth, nscoord aOldHeight)
 {
   NS_PRECONDITION(!mIsReflowing, "Shouldn't be in reflow here!");
 
@@ -1841,7 +1862,6 @@ PresShell::ResizeReflowIgnoreOverride(nscoord aWidth, nscoord aHeight)
     return NS_ERROR_NOT_AVAILABLE;
   }
 
-  nsSize oldVisibleSize = mPresContext->GetVisibleArea().Size();
   mPresContext->SetVisibleArea(nsRect(0, 0, aWidth, aHeight));
 
   // There isn't anything useful we can do if the initial reflow hasn't happened.
@@ -1854,8 +1874,8 @@ PresShell::ResizeReflowIgnoreOverride(nscoord aWidth, nscoord aHeight)
                   "shouldn't use unconstrained isize anymore");
 
   const bool isBSizeChanging = wm.IsVertical()
-                               ? oldVisibleSize.width != aWidth
-                               : oldVisibleSize.height != aHeight;
+                               ? aOldWidth != aWidth
+                               : aOldHeight != aHeight;
 
   RefPtr<nsViewManager> viewManagerDeathGrip = mViewManager;
   // Take this ref after viewManager so it'll make sure to go away first.
@@ -2743,8 +2763,8 @@ nsIPresShell::GetFrameToScrollAsScrollable(
     focusedContent = do_QueryInterface(focusedElement);
   }
   if (!focusedContent && mSelection) {
-    nsISelection* domSelection = mSelection->
-      GetSelection(nsISelectionController::SELECTION_NORMAL);
+    nsISelection* domSelection =
+      mSelection->GetSelection(SelectionType::eNormal);
     if (domSelection) {
       nsCOMPtr<nsIDOMNode> focusedNode;
       domSelection->GetFocusNode(getter_AddRefs(focusedNode));
@@ -2898,7 +2918,7 @@ nsIPresShell::RestyleForAnimation(Element* aElement, nsRestyleHint aHint)
   // but it still seems useful to offer as a "more public" API and as a
   // chokepoint for these restyles to go through.
   mPresContext->RestyleManager()->PostRestyleEvent(aElement, aHint,
-                                                   NS_STYLE_HINT_NONE);
+                                                   nsChangeHint(0));
 }
 
 void
@@ -2929,21 +2949,15 @@ PresShell::CreateReferenceRenderingContext()
   nsDeviceContext* devCtx = mPresContext->DeviceContext();
   RefPtr<gfxContext> rc;
   if (mPresContext->IsScreen()) {
-    rc = gfxContext::ForDrawTarget(gfxPlatform::GetPlatform()->ScreenReferenceDrawTarget());
-    if (!rc) {
-      return nullptr;
-    }
+    rc = gfxContext::CreateOrNull(gfxPlatform::GetPlatform()->ScreenReferenceDrawTarget());
   } else {
     // We assume the devCtx has positive width and height for this call.
     // However, width and height, may be outside of the reasonable range
     // so rc may still be null.
     rc = devCtx->CreateRenderingContext();
-    if (!rc) {
-      return nullptr;
-    }
   }
 
-  return rc.forget();
+  return rc ? rc.forget() : nullptr;
 }
 
 nsresult
@@ -3080,8 +3094,7 @@ PresShell::GoToAnchor(const nsAString& aAnchorName, bool aScroll,
     NS_ASSERTION(node, "No nsIDOMNode for descendant of anchor");
     jumpToRange->SelectNodeContents(node);
     // Select the anchor
-    nsISelection* sel = mSelection->
-      GetSelection(nsISelectionController::SELECTION_NORMAL);
+    nsISelection* sel = mSelection->GetSelection(SelectionType::eNormal);
     if (sel) {
       sel->RemoveAllRanges();
       sel->AddRange(jumpToRange);
@@ -3654,18 +3667,23 @@ PresShell::ScheduleViewManagerFlush(PaintType aType)
   }
 }
 
+bool
+FlushLayoutRecursive(nsIDocument* aDocument,
+                     void* aData = nullptr)
+{
+  MOZ_ASSERT(!aData);
+  aDocument->EnumerateSubDocuments(FlushLayoutRecursive, nullptr);
+  aDocument->FlushPendingNotifications(Flush_Layout);
+  return true;
+}
+
 void
 PresShell::DispatchSynthMouseMove(WidgetGUIEvent* aEvent,
                                   bool aFlushOnHoverChange)
 {
   RestyleManagerHandle restyleManager = mPresContext->RestyleManager();
-  if (restyleManager->IsServo()) {
-    NS_ERROR("stylo: cannot dispatch synthetic mouse moves when using a "
-             "ServoRestyleManager yet");
-    return;
-  }
   uint32_t hoverGenerationBefore =
-    restyleManager->AsGecko()->GetHoverGeneration();
+    restyleManager->GetHoverGeneration();
   nsEventStatus status;
   nsView* targetView = nsView::GetViewFor(aEvent->mWidget);
   if (!targetView)
@@ -3675,10 +3693,13 @@ PresShell::DispatchSynthMouseMove(WidgetGUIEvent* aEvent,
     return;
   }
   if (aFlushOnHoverChange &&
-      hoverGenerationBefore != restyleManager->AsGecko()->GetHoverGeneration()) {
+      hoverGenerationBefore != restyleManager->GetHoverGeneration()) {
     // Flush so that the resulting reflow happens now so that our caller
     // can suppress any synthesized mouse moves caused by that reflow.
-    FlushPendingNotifications(Flush_Layout);
+    // This code only ever runs for the root document, but :hover changes
+    // can happen in descendant documents too, so make sure we flush
+    // all of them.
+    FlushLayoutRecursive(mDocument);
   }
 }
 
@@ -4214,7 +4235,7 @@ PresShell::DocumentStatesChanged(nsIDocument* aDocument,
                                                aStateMask)) {
     mPresContext->RestyleManager()->PostRestyleEvent(mDocument->GetRootElement(),
                                                      eRestyle_Subtree,
-                                                     NS_STYLE_HINT_NONE);
+                                                     nsChangeHint(0));
     VERIFY_STYLE_TREE;
   }
 
@@ -4492,11 +4513,11 @@ nsIPresShell::RestyleForCSSRuleChanges()
     // the beginning of this function, and that we need to restyle the whole
     // document.
     restyleManager->PostRestyleEvent(root, eRestyle_Subtree,
-                                     NS_STYLE_HINT_NONE);
+                                     nsChangeHint(0));
   } else {
     for (Element* scopeRoot : scopeRoots) {
       restyleManager->PostRestyleEvent(scopeRoot, eRestyle_Subtree,
-                                       NS_STYLE_HINT_NONE);
+                                       nsChangeHint(0));
     }
   }
 }
@@ -5188,7 +5209,7 @@ PresShell::PaintRangePaintInfo(const nsTArray<UniquePtr<RangePaintInfo>>& aItems
     return nullptr;
   }
 
-  RefPtr<gfxContext> ctx = gfxContext::ForDrawTarget(dt);
+  RefPtr<gfxContext> ctx = gfxContext::CreateOrNull(dt);
   MOZ_ASSERT(ctx); // already checked the draw target above
 
   if (aRegion) {
@@ -5219,7 +5240,7 @@ PresShell::PaintRangePaintInfo(const nsTArray<UniquePtr<RangePaintInfo>>& aItems
   // selection.
   RefPtr<nsFrameSelection> frameSelection;
   if (aSelection) {
-    frameSelection = static_cast<Selection*>(aSelection)->GetFrameSelection();
+    frameSelection = aSelection->AsSelection()->GetFrameSelection();
   }
   else {
     frameSelection = FrameSelection();
@@ -5607,10 +5628,11 @@ float PresShell::GetCumulativeNonRootScaleResolution()
   return resolution;
 }
 
-void PresShell::SetRestoreResolution(float aResolution)
+void PresShell::SetRestoreResolution(float aResolution,
+                                     LayoutDeviceIntSize aDisplaySize)
 {
   if (mMobileViewportManager) {
-    mMobileViewportManager->SetRestoreResolution(aResolution);
+    mMobileViewportManager->SetRestoreResolution(aResolution, aDisplaySize);
   }
 }
 
@@ -6165,7 +6187,7 @@ PresShell::MarkFramesInSubtreeApproximatelyVisible(nsIFrame* aFrame,
         if (!preserves3DChildren || !child->Combines3DTransformWithAncestors()) {
           const nsRect overflow = child->GetVisualOverflowRectRelativeToSelf();
           nsRect out;
-          if (nsDisplayTransform::UntransformRect(r, overflow, child, nsPoint(0,0), &out)) {
+          if (nsDisplayTransform::UntransformRect(r, overflow, child, &out)) {
             r = out;
           } else {
             r.SetEmpty();
@@ -6500,9 +6522,8 @@ PresShell::Paint(nsView*        aViewToPaint,
 
   nsIFrame* frame = aViewToPaint->GetFrame();
 
-  bool isRetainingManager;
   LayerManager* layerManager =
-    aViewToPaint->GetWidget()->GetLayerManager(&isRetainingManager);
+    aViewToPaint->GetWidget()->GetLayerManager();
   NS_ASSERTION(layerManager, "Must be in paint event");
   bool shouldInvalidate = layerManager->NeedsWidgetInvalidation();
 
@@ -6521,7 +6542,7 @@ PresShell::Paint(nsView*        aViewToPaint,
 
   layerManager->BeginTransaction();
 
-  if (frame && isRetainingManager) {
+  if (frame) {
     // Try to do an empty transaction, if the frame tree does not
     // need to be updated. Do not try to do an empty transaction on
     // a non-retained layer manager (like the BasicLayerManager that
@@ -7696,7 +7717,7 @@ PresShell::HandleEvent(nsIFrame* aFrame,
 
   if (aEvent->IsUsingCoordinates()) {
     ReleasePointerCaptureCaller releasePointerCaptureCaller;
-    if (nsLayoutUtils::AreAsyncAnimationsEnabled() && mDocument) {
+    if (mDocument) {
       if (aEvent->mClass == eTouchEventClass) {
         nsIDocument::UnlockPointer();
       }
@@ -9417,7 +9438,7 @@ PresShell::GetPerformanceNow()
   DOMHighResTimeStamp now = 0;
 
   if (nsPIDOMWindowInner* window = mDocument->GetInnerWindow()) {
-    nsPerformance* perf = window->GetPerformance();
+    Performance* perf = window->GetPerformance();
 
     if (perf) {
       now = perf->Now();
@@ -9798,17 +9819,6 @@ PresShell::ProcessReflowCommands(bool aInterruptible)
     TimeDuration elapsed = TimeStamp::Now() - timerStart;
     int32_t intElapsed = int32_t(elapsed.ToMilliseconds());
 
-    Telemetry::ID id;
-    if (mDocument->GetRootElement()->IsXULElement()) {
-      id = mIsActive
-        ? Telemetry::XUL_FOREGROUND_REFLOW_MS
-        : Telemetry::XUL_BACKGROUND_REFLOW_MS;
-    } else {
-      id = mIsActive
-        ? Telemetry::HTML_FOREGROUND_REFLOW_MS_2
-        : Telemetry::HTML_BACKGROUND_REFLOW_MS_2;
-    }
-    Telemetry::Accumulate(id, intElapsed);
     if (intElapsed > NS_LONG_REFLOW_TIME_MS) {
       Telemetry::Accumulate(Telemetry::LONG_REFLOW_INTERRUPTIBLE,
                             aInterruptible ? 1 : 0);
@@ -9862,7 +9872,7 @@ ReframeImageBoxes(nsIFrame *aFrame, void *aClosure)
   nsStyleChangeList *list = static_cast<nsStyleChangeList*>(aClosure);
   if (aFrame->GetType() == nsGkAtoms::imageBoxFrame) {
     list->AppendChange(aFrame, aFrame->GetContent(),
-                       NS_STYLE_HINT_FRAMECHANGE);
+                       nsChangeHint_ReconstructFrame);
     return false; // don't walk descendants
   }
   return true; // walk descendants

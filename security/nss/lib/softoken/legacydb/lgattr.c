@@ -71,11 +71,8 @@ lg_NewObjectCache(SDB *sdb, const SECItem *dbKey, CK_OBJECT_HANDLE handle)
 
     return obj;
 loser:
-    if (obj) {
-	(void) lg_DestroyObjectCache(obj);
-    }
+    (void) lg_DestroyObjectCache(obj);
     return NULL;
-
 }
 
 /*
@@ -136,7 +133,9 @@ lg_CopyAttribute(CK_ATTRIBUTE *attr, CK_ATTRIBUTE_TYPE type,
 	attr->ulValueLen = (CK_ULONG) -1;
 	return CKR_BUFFER_TOO_SMALL;
     }
-    PORT_Memcpy(attr->pValue,value,len);
+    if (value != NULL) {
+	PORT_Memcpy(attr->pValue,value,len);
+    }
     attr->ulValueLen = len;
     return CKR_OK;
 }
@@ -1627,7 +1626,7 @@ lg_SetTrustAttribute(LGObjectCache *obj, const CK_ATTRIBUTE *attr)
 {
     unsigned int flags;
     CK_TRUST  trust;
-    NSSLOWCERTCertificate  *cert;
+    NSSLOWCERTCertificate  *cert = NULL;
     NSSLOWCERTCertDBHandle *certHandle;
     NSSLOWCERTCertTrust    dbTrust;
     SECStatus rv;
@@ -1682,6 +1681,9 @@ lg_SetTrustAttribute(LGObjectCache *obj, const CK_ATTRIBUTE *attr)
     rv = nsslowcert_ChangeCertTrust(certHandle, cert, &dbTrust);
     crv = (rv == SECSuccess) ? CKR_OK : CKR_DEVICE_ERROR;
 done:
+    if (cert) {
+        nsslowcert_DestroyCertificate(cert);
+    }
     return crv;
 }
 

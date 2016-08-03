@@ -10,6 +10,7 @@
 #include "mozilla/dom/WebGL2RenderingContextBinding.h"
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/Telemetry.h"
+#include "nsPrintfCString.h"
 #include "WebGLBuffer.h"
 #include "WebGLFormats.h"
 #include "WebGLTransformFeedback.h"
@@ -96,7 +97,7 @@ static const gl::GLFeature kRequiredFeatures[] = {
 };
 
 bool
-WebGLContext::InitWebGL2(nsACString* const out_failReason)
+WebGLContext::InitWebGL2(FailureReason* const out_failReason)
 {
     MOZ_ASSERT(IsWebGL2(), "WebGLContext is not a WebGL 2 context!");
 
@@ -106,7 +107,8 @@ WebGLContext::InitWebGL2(nsACString* const out_failReason)
     {
         // On desktop, we fake occlusion_query_boolean with occlusion_query if
         // necessary. (See WebGL2ContextQueries.cpp)
-        out_failReason->AssignASCII("WebGL 2 requires occlusion query support.");
+        *out_failReason = FailureReason("FEATURE_FAILURE_WEBGL2_OCCL",
+                                        "WebGL 2 requires occlusion query support.");
         return false;
     }
 
@@ -137,7 +139,7 @@ WebGLContext::InitWebGL2(nsACString* const out_failReason)
         const nsPrintfCString reason("WebGL 2 requires support for the following"
                                      " features: %s",
                                      exts.BeginReading());
-        out_failReason->Assign(reason);
+        *out_failReason = FailureReason("FEATURE_FAILURE_WEBGL2_OCCL", reason);
         return false;
     }
 
@@ -159,6 +161,26 @@ WebGLContext::InitWebGL2(nsACString* const out_failReason)
         gl->MakeCurrent();
         gl->fEnable(LOCAL_GL_FRAMEBUFFER_SRGB_EXT);
     }
+
+    //////
+
+    static const GLenum kWebGL2_CompressedFormats[] = {
+        LOCAL_GL_COMPRESSED_R11_EAC,
+        LOCAL_GL_COMPRESSED_SIGNED_R11_EAC,
+        LOCAL_GL_COMPRESSED_RG11_EAC,
+        LOCAL_GL_COMPRESSED_SIGNED_RG11_EAC,
+        LOCAL_GL_COMPRESSED_RGB8_ETC2,
+        LOCAL_GL_COMPRESSED_RGB8_PUNCHTHROUGH_ALPHA1_ETC2,
+        LOCAL_GL_COMPRESSED_RGBA8_ETC2_EAC,
+        LOCAL_GL_COMPRESSED_SRGB8_ALPHA8_ETC2_EAC,
+        LOCAL_GL_COMPRESSED_SRGB8_ETC2,
+        LOCAL_GL_COMPRESSED_SRGB8_PUNCHTHROUGH_ALPHA1_ETC2
+    };
+
+    mCompressedTextureFormats.AppendElements(kWebGL2_CompressedFormats,
+                                             MOZ_ARRAY_LENGTH(kWebGL2_CompressedFormats));
+
+    //////
 
     return true;
 }

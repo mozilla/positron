@@ -70,8 +70,11 @@ enum nsChangeHint {
 
   /**
    * Change requires frame change (e.g., display:).
-   * This subsumes all the above. Reconstructs all frame descendants,
-   * including following placeholders to out-of-flows.
+   * Reconstructs all frame descendants, including following placeholders
+   * to out-of-flows.
+   *
+   * Note that this subsumes all the other change hints. (see
+   * RestyleManager::ProcessRestyledFrames for details).
    */
   nsChangeHint_ReconstructFrame = 1 << 10,
 
@@ -153,7 +156,7 @@ enum nsChangeHint {
 
   /**
    * A hint reflecting that style data changed with no change handling
-   * behavior.  We need to return this, rather than NS_STYLE_HINT_NONE,
+   * behavior.  We need to return this, rather than nsChangeHint(0),
    * so that certain optimizations that manipulate the style context tree are
    * correct.
    *
@@ -220,25 +223,6 @@ inline void operator>=(nsChangeHint s1, nsChangeHint s2) {}
 
 // Operators on nsChangeHints
 
-// Merge two hints, taking the union
-inline nsChangeHint NS_CombineHint(nsChangeHint aH1, nsChangeHint aH2) {
-  return (nsChangeHint)(aH1 | aH2);
-}
-
-// Merge two hints, taking the union
-inline nsChangeHint NS_SubtractHint(nsChangeHint aH1, nsChangeHint aH2) {
-  return (nsChangeHint)(aH1 & ~aH2);
-}
-
-// Merge the "src" hint into the "dst" hint
-// Returns true iff the destination changed
-inline bool NS_UpdateHint(nsChangeHint& aDest, nsChangeHint aSrc) {
-  nsChangeHint r = (nsChangeHint)(aDest | aSrc);
-  bool changed = (int)r != (int)aDest;
-  aDest = r;
-  return changed;
-}
-
 // Returns true iff the second hint contains all the hints of the first hint
 inline bool NS_IsHintSubset(nsChangeHint aSubset, nsChangeHint aSuperSet) {
   return (aSubset & aSuperSet) == aSubset;
@@ -248,13 +232,13 @@ inline bool NS_IsHintSubset(nsChangeHint aSubset, nsChangeHint aSuperSet) {
 // infinite recursion.
 typedef decltype(nsChangeHint(0) + nsChangeHint(0)) nsChangeHint_size_t;
 
-inline nsChangeHint MOZ_CONSTEXPR
+inline nsChangeHint constexpr
 operator|(nsChangeHint aLeft, nsChangeHint aRight)
 {
   return nsChangeHint(nsChangeHint_size_t(aLeft) | nsChangeHint_size_t(aRight));
 }
 
-inline nsChangeHint MOZ_CONSTEXPR
+inline nsChangeHint constexpr
 operator&(nsChangeHint aLeft, nsChangeHint aRight)
 {
   return nsChangeHint(nsChangeHint_size_t(aLeft) & nsChangeHint_size_t(aRight));
@@ -270,13 +254,13 @@ inline nsChangeHint& operator&=(nsChangeHint& aLeft, nsChangeHint aRight)
   return aLeft = aLeft & aRight;
 }
 
-inline nsChangeHint MOZ_CONSTEXPR
+inline nsChangeHint constexpr
 operator~(nsChangeHint aArg)
 {
   return nsChangeHint(~nsChangeHint_size_t(aArg));
 }
 
-inline nsChangeHint MOZ_CONSTEXPR
+inline nsChangeHint constexpr
 operator^(nsChangeHint aLeft, nsChangeHint aRight)
 {
   return nsChangeHint(nsChangeHint_size_t(aLeft) ^ nsChangeHint_size_t(aRight));
@@ -336,14 +320,14 @@ inline nsChangeHint NS_HintsNotHandledForDescendantsIn(nsChangeHint aChangeHint)
     if (NS_IsHintSubset(nsChangeHint_NeedReflow, aChangeHint)) {
       // If NeedDirtyReflow is *not* set, then NeedReflow is a
       // non-inherited hint.
-      NS_UpdateHint(result, nsChangeHint_NeedReflow);
+      result |= nsChangeHint_NeedReflow;
     }
 
     if (NS_IsHintSubset(nsChangeHint_ReflowChangesSizeOrPosition,
                         aChangeHint)) {
       // If NeedDirtyReflow is *not* set, then ReflowChangesSizeOrPosition is a
       // non-inherited hint.
-      NS_UpdateHint(result, nsChangeHint_ReflowChangesSizeOrPosition);
+      result |= nsChangeHint_ReflowChangesSizeOrPosition;
     }
   }
 
@@ -351,7 +335,7 @@ inline nsChangeHint NS_HintsNotHandledForDescendantsIn(nsChangeHint aChangeHint)
       NS_IsHintSubset(nsChangeHint_ClearAncestorIntrinsics, aChangeHint)) {
     // If ClearDescendantIntrinsics is *not* set, then
     // ClearAncestorIntrinsics is a non-inherited hint.
-    NS_UpdateHint(result, nsChangeHint_ClearAncestorIntrinsics);
+    result |= nsChangeHint_ClearAncestorIntrinsics;
   }
 
   MOZ_ASSERT(NS_IsHintSubset(result,
@@ -362,8 +346,6 @@ inline nsChangeHint NS_HintsNotHandledForDescendantsIn(nsChangeHint aChangeHint)
 }
 
 // Redefine the old NS_STYLE_HINT constants in terms of the new hint structure
-#define NS_STYLE_HINT_NONE \
-  nsChangeHint(0)
 #define NS_STYLE_HINT_VISUAL \
   nsChangeHint(nsChangeHint_RepaintFrame | nsChangeHint_SyncFrameView | \
                nsChangeHint_SchedulePaint)
@@ -375,8 +357,13 @@ inline nsChangeHint NS_HintsNotHandledForDescendantsIn(nsChangeHint aChangeHint)
                nsChangeHint_NeedDirtyReflow)
 #define NS_STYLE_HINT_REFLOW \
   nsChangeHint(NS_STYLE_HINT_VISUAL | nsChangeHint_AllReflowHints)
-#define NS_STYLE_HINT_FRAMECHANGE \
-  nsChangeHint(NS_STYLE_HINT_REFLOW | nsChangeHint_ReconstructFrame)
+
+#define nsChangeHint_Hints_CanIgnoreIfNotVisible   \
+  nsChangeHint(NS_STYLE_HINT_VISUAL |              \
+               nsChangeHint_NeutralChange |        \
+               nsChangeHint_UpdateOpacityLayer |   \
+               nsChangeHint_UpdateTransformLayer | \
+               nsChangeHint_UpdateUsesOpacity)
 
 /**
  * |nsRestyleHint| is a bitfield for the result of
@@ -475,14 +462,14 @@ enum nsRestyleHint {
 // infinite recursion.
 typedef decltype(nsRestyleHint(0) + nsRestyleHint(0)) nsRestyleHint_size_t;
 
-inline MOZ_CONSTEXPR nsRestyleHint operator|(nsRestyleHint aLeft,
+inline constexpr nsRestyleHint operator|(nsRestyleHint aLeft,
                                              nsRestyleHint aRight)
 {
   return nsRestyleHint(nsRestyleHint_size_t(aLeft) |
                        nsRestyleHint_size_t(aRight));
 }
 
-inline MOZ_CONSTEXPR nsRestyleHint operator&(nsRestyleHint aLeft,
+inline constexpr nsRestyleHint operator&(nsRestyleHint aLeft,
                                              nsRestyleHint aRight)
 {
   return nsRestyleHint(nsRestyleHint_size_t(aLeft) &
@@ -499,12 +486,12 @@ inline nsRestyleHint& operator&=(nsRestyleHint& aLeft, nsRestyleHint aRight)
   return aLeft = aLeft & aRight;
 }
 
-inline MOZ_CONSTEXPR nsRestyleHint operator~(nsRestyleHint aArg)
+inline constexpr nsRestyleHint operator~(nsRestyleHint aArg)
 {
   return nsRestyleHint(~nsRestyleHint_size_t(aArg));
 }
 
-inline MOZ_CONSTEXPR nsRestyleHint operator^(nsRestyleHint aLeft,
+inline constexpr nsRestyleHint operator^(nsRestyleHint aLeft,
                                              nsRestyleHint aRight)
 {
   return nsRestyleHint(nsRestyleHint_size_t(aLeft) ^

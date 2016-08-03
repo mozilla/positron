@@ -108,18 +108,14 @@ const ACTIVITY_TYPE = {
   DISABLE_CACHE: 4
 };
 
-Cu.import("resource://devtools/client/shared/widgets/SideMenuWidget.jsm");
-Cu.import("resource://devtools/client/shared/widgets/VariablesView.jsm");
-Cu.import("resource://devtools/client/shared/widgets/VariablesViewController.jsm");
-
 const {require} = Cu.import("resource://devtools/shared/Loader.jsm", {});
 const promise = require("promise");
 const Services = require("Services");
 const {XPCOMUtils} = require("resource://gre/modules/XPCOMUtils.jsm");
 const EventEmitter = require("devtools/shared/event-emitter");
 const Editor = require("devtools/client/sourceeditor/editor");
-const {TimelineFront} = require("devtools/server/actors/timeline");
-const { Task } = require("devtools/shared/task");
+const {TimelineFront} = require("devtools/shared/fronts/timeline");
+const {Task} = require("devtools/shared/task");
 
 XPCOMUtils.defineConstant(this, "EVENTS", EVENTS);
 XPCOMUtils.defineConstant(this, "ACTIVITY_TYPE", ACTIVITY_TYPE);
@@ -139,9 +135,6 @@ XPCOMUtils.defineLazyModuleGetter(this, "PluralForm",
 
 XPCOMUtils.defineLazyServiceGetter(this, "clipboardHelper",
   "@mozilla.org/widget/clipboardhelper;1", "nsIClipboardHelper");
-
-XPCOMUtils.defineLazyServiceGetter(this, "DOMParser",
-  "@mozilla.org/xmlextras/domparser;1", "nsIDOMParser");
 
 Object.defineProperty(this, "NetworkHelper", {
   get: function () {
@@ -433,6 +426,13 @@ var NetMonitorController = {
   get supportsPerfStats() {
     return this.tabClient &&
            (this.tabClient.traits.reconfigure || !this._target.isApp);
+  },
+
+  /**
+   * Open a given source in Debugger
+   */
+  viewSourceInDebugger(sourceURL, sourceLine) {
+    return this._toolbox.viewSourceInDebugger(sourceURL, sourceLine);
   }
 };
 
@@ -629,12 +629,14 @@ NetworkEventsHandler.prototype = {
       startedDateTime,
       request: { method, url },
       isXHR,
+      cause,
       fromCache,
       fromServiceWorker
     } = networkInfo;
 
     NetMonitorView.RequestsMenu.addRequest(
-      actor, startedDateTime, method, url, isXHR, fromCache, fromServiceWorker
+      actor, startedDateTime, method, url, isXHR, cause, fromCache,
+        fromServiceWorker
     );
     window.emit(EVENTS.NETWORK_EVENT, actor);
   },

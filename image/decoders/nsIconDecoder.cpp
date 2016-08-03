@@ -17,7 +17,8 @@ static const uint32_t ICON_HEADER_SIZE = 2;
 
 nsIconDecoder::nsIconDecoder(RasterImage* aImage)
  : Decoder(aImage)
- , mLexer(Transition::To(State::HEADER, ICON_HEADER_SIZE))
+ , mLexer(Transition::To(State::HEADER, ICON_HEADER_SIZE),
+          Transition::TerminateSuccess())
  , mBytesPerRow()   // set by ReadHeader()
 {
   // Nothing to do
@@ -26,31 +27,24 @@ nsIconDecoder::nsIconDecoder(RasterImage* aImage)
 nsIconDecoder::~nsIconDecoder()
 { }
 
-void
-nsIconDecoder::WriteInternal(const char* aBuffer, uint32_t aCount)
+LexerResult
+nsIconDecoder::DoDecode(SourceBufferIterator& aIterator, IResumable* aOnResume)
 {
-  MOZ_ASSERT(!HasError(), "Shouldn't call WriteInternal after error!");
-  MOZ_ASSERT(aBuffer);
-  MOZ_ASSERT(aCount > 0);
+  MOZ_ASSERT(!HasError(), "Shouldn't call DoDecode after error!");
 
-  Maybe<TerminalState> terminalState =
-    mLexer.Lex(aBuffer, aCount, [=](State aState,
-                                    const char* aData, size_t aLength) {
-      switch (aState) {
-        case State::HEADER:
-          return ReadHeader(aData);
-        case State::ROW_OF_PIXELS:
-          return ReadRowOfPixels(aData, aLength);
-        case State::FINISH:
-          return Finish();
-        default:
-          MOZ_CRASH("Unknown State");
-      }
-    });
-
-  if (terminalState == Some(TerminalState::FAILURE)) {
-    PostDataError();
-  }
+  return mLexer.Lex(aIterator, aOnResume,
+                    [=](State aState, const char* aData, size_t aLength) {
+    switch (aState) {
+      case State::HEADER:
+        return ReadHeader(aData);
+      case State::ROW_OF_PIXELS:
+        return ReadRowOfPixels(aData, aLength);
+      case State::FINISH:
+        return Finish();
+      default:
+        MOZ_CRASH("Unknown State");
+    }
+  });
 }
 
 LexerTransition<nsIconDecoder::State>
@@ -76,11 +70,11 @@ nsIconDecoder::ReadHeader(const char* aData)
 
   MOZ_ASSERT(!mImageData, "Already have a buffer allocated?");
   IntSize targetSize = mDownscaler ? mDownscaler->TargetSize() : GetSize();
-  IntRect targetFrameRect(IntPoint(0, 0), targetSize);
+  IntRect frameRect(IntPoint(0, 0), GetSize());
 
   Maybe<SurfacePipe> pipe =
     SurfacePipeFactory::CreateSurfacePipe(this, 0, GetSize(), targetSize,
-                                          targetFrameRect, SurfaceFormat::B8G8R8A8,
+                                          frameRect, SurfaceFormat::B8G8R8A8,
                                           SurfacePipeFlags());
   if (!pipe) {
     return Transition::TerminateFailure();

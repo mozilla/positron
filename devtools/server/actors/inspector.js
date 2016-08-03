@@ -76,6 +76,7 @@ const {
 } = require("devtools/shared/layout/utils");
 const {getLayoutChangesObserver, releaseLayoutChangesObserver} =
   require("devtools/server/actors/layout");
+const nodeFilterConstants = require("devtools/shared/dom-node-filter-constants");
 
 loader.lazyRequireGetter(this, "CSS", "CSS");
 
@@ -150,7 +151,7 @@ loader.lazyGetter(this, "eventListenerService", function () {
            .getService(Ci.nsIEventListenerService);
 });
 
-loader.lazyGetter(this, "CssLogic", () => require("devtools/shared/inspector/css-logic").CssLogic);
+loader.lazyGetter(this, "CssLogic", () => require("devtools/server/css-logic").CssLogic);
 
 /**
  * We only send nodeValue up to a certain size by default.  This stuff
@@ -248,7 +249,7 @@ var NodeActor = exports.NodeActor = protocol.ActorClassWithSpec(nodeSpec, {
     }
 
     let parentNode = this.walker.parentNode(this);
-    let singleTextChild = this.walker.singleTextChild(this);
+    let inlineTextChild = this.walker.inlineTextChild(this);
 
     let form = {
       actor: this.actorID,
@@ -257,9 +258,10 @@ var NodeActor = exports.NodeActor = protocol.ActorClassWithSpec(nodeSpec, {
       nodeType: this.rawNode.nodeType,
       namespaceURI: this.rawNode.namespaceURI,
       nodeName: this.rawNode.nodeName,
+      nodeValue: this.rawNode.nodeValue,
       displayName: getNodeDisplayName(this.rawNode),
       numChildren: this.numChildren,
-      singleTextChild: singleTextChild ? singleTextChild.form() : undefined,
+      inlineTextChild: inlineTextChild ? inlineTextChild.form() : undefined,
 
       // doctype attributes
       name: this.rawNode.name,
@@ -283,18 +285,6 @@ var NodeActor = exports.NodeActor = protocol.ActorClassWithSpec(nodeSpec, {
 
     if (this.isDocumentElement()) {
       form.isDocumentElement = true;
-    }
-
-    if (this.rawNode.nodeValue) {
-      // We only include a short version of the value if it's longer than
-      // gValueSummaryLength
-      if (this.rawNode.nodeValue.length > gValueSummaryLength) {
-        form.shortValue = this.rawNode.nodeValue
-          .substring(0, gValueSummaryLength);
-        form.incompleteValue = true;
-      } else {
-        form.shortValue = this.rawNode.nodeValue;
-      }
     }
 
     // Add an extra API for custom properties added by other
@@ -330,6 +320,7 @@ var NodeActor = exports.NodeActor = protocol.ActorClassWithSpec(nodeSpec, {
       nativeAnonymousChildList: true,
       attributes: true,
       characterData: true,
+      characterDataOldValue: true,
       childList: true,
       subtree: true
     });
@@ -358,8 +349,9 @@ var NodeActor = exports.NodeActor = protocol.ActorClassWithSpec(nodeSpec, {
     let hasAnonChildren = rawNode.nodeType === Ci.nsIDOMNode.ELEMENT_NODE &&
                           rawNode.ownerDocument.getAnonymousNodes(rawNode);
 
-    if (numChildren === 0 &&
-        (rawNode.contentDocument || rawNode.getSVGDocument)) {
+    let hasContentDocument = rawNode.contentDocument;
+    let hasSVGDocument = rawNode.getSVGDocument && rawNode.getSVGDocument();
+    if (numChildren === 0 && (hasContentDocument || hasSVGDocument)) {
       // This might be an iframe with virtual children.
       numChildren = 1;
     }
@@ -1147,12 +1139,12 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
   },
 
   /**
-   * If the given NodeActor only has a single text node as a child,
-   * return that child's NodeActor.
+   * If the given NodeActor only has a single text node as a child with a text
+   * content small enough to be inlined, return that child's NodeActor.
    *
    * @param NodeActor node
    */
-  singleTextChild: function (node) {
+  inlineTextChild: function (node) {
     // Quick checks to prevent creating a new walker if possible.
     if (node.isBeforePseudoElement ||
         node.isAfterPseudoElement ||
@@ -1164,11 +1156,15 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
     let docWalker = this.getDocumentWalker(node.rawNode);
     let firstChild = docWalker.firstChild();
 
-    // If the first child isn't a text node, or there are multiple children
-    // then bail out
+    // Bail out if:
+    // - more than one child
+    // - unique child is not a text node
+    // - unique child is a text node, but is too long to be inlined
     if (!firstChild ||
+        docWalker.nextSibling() ||
         firstChild.nodeType !== Ci.nsIDOMNode.TEXT_NODE ||
-        docWalker.nextSibling()) {
+        firstChild.nodeValue.length > gValueSummaryLength
+        ) {
       return undefined;
     }
 
@@ -1616,10 +1612,6 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
           }
         }
         sugs.classes.delete("");
-        // Editing the style editor may make the stylesheet have errors and
-        // thus the page's elements' styles start changing with a transition.
-        // That transition comes from the `moz-styleeditor-transitioning` class.
-        sugs.classes.delete("moz-styleeditor-transitioning");
         sugs.classes.delete(HIDDEN_CLASS);
         for (let [className, count] of sugs.classes) {
           if (className.startsWith(completing)) {
@@ -1691,10 +1683,6 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
           id && result.push(["#" + id, count]);
         }
         sugs.classes.delete("");
-        // Editing the style editor may make the stylesheet have errors and
-        // thus the page's elements' styles start changing with a transition.
-        // That transition comes from the `moz-styleeditor-transitioning` class.
-        sugs.classes.delete("moz-styleeditor-transitioning");
         sugs.classes.delete(HIDDEN_CLASS);
         for (let [className, count] of sugs.classes) {
           className && result.push(["." + className, count]);
@@ -2200,8 +2188,7 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
    *   newValue: <string> - The new value of the attribute, if any.
    *
    * `characterData` type:
-   *   newValue: <string> - the new shortValue for the node
-   *   [incompleteValue: true] - True if the shortValue was truncated.
+   *   newValue: <string> - the new nodeValue for the node
    *
    * `childList` type is returned when the set of children for a node
    * has changed.  Includes extra data, which can be used by the client to
@@ -2211,7 +2198,7 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
    *     seen by the client* that were added to the target node.
    *   removed: array of <domnode actor ID> The list of actors *previously
    *     seen by the client* that were removed from the target node.
-   *   singleTextChild: If the node now has a single text child, it will
+   *   inlineTextChild: If the node now has a single text child, it will
    *     be sent here.
    *
    * Actors that are included in a MutationRecord's `removed` but
@@ -2288,13 +2275,8 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
                             targetNode.getAttribute(mutation.attributeName)
                             : null;
       } else if (type === "characterData") {
-        if (targetNode.nodeValue.length > gValueSummaryLength) {
-          mutation.newValue = targetNode.nodeValue
-            .substring(0, gValueSummaryLength);
-          mutation.incompleteValue = true;
-        } else {
-          mutation.newValue = targetNode.nodeValue;
-        }
+        mutation.newValue = targetNode.nodeValue;
+        this._maybeQueueInlineTextChildMutation(change, targetNode);
       } else if (type === "childList" || type === "nativeAnonymousChildList") {
         // Get the list of removed and added actors that the client has seen
         // so that it can keep its ownership tree up to date.
@@ -2330,13 +2312,48 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
         mutation.removed = removedActors;
         mutation.added = addedActors;
 
-        let singleTextChild = this.singleTextChild(targetActor);
-        if (singleTextChild) {
-          mutation.singleTextChild = singleTextChild.form();
+        let inlineTextChild = this.inlineTextChild(targetActor);
+        if (inlineTextChild) {
+          mutation.inlineTextChild = inlineTextChild.form();
         }
       }
       this.queueMutation(mutation);
     }
+  },
+
+  /**
+   * Check if the provided mutation could change the way the target element is
+   * inlined with its parent node. If it might, a custom mutation of type
+   * "inlineTextChild" will be queued.
+   *
+   * @param {MutationRecord} mutation
+   *        A characterData type mutation
+   */
+  _maybeQueueInlineTextChildMutation: function (mutation) {
+    let {oldValue, target} = mutation;
+    let newValue = target.nodeValue;
+    let limit = gValueSummaryLength;
+
+    if ((oldValue.length <= limit && newValue.length <= limit) ||
+        (oldValue.length > limit && newValue.length > limit)) {
+      // Bail out if the new & old values are both below/above the size limit.
+      return;
+    }
+
+    let parentActor = this.getNode(target.parentNode);
+    if (!parentActor || parentActor.rawNode.children.length > 0) {
+      // If the parent node has other children, a character data mutation will
+      // not change anything regarding inlining text nodes.
+      return;
+    }
+
+    let inlineTextChild = this.inlineTextChild(parentActor);
+    this.queueMutation({
+      type: "inlineTextChild",
+      target: parentActor.actorID,
+      inlineTextChild:
+        inlineTextChild ? inlineTextChild.form() : undefined
+    });
   },
 
   onFrameLoad: function ({ window, isTopLevel }) {
@@ -2752,13 +2769,13 @@ function isNodeDead(node) {
  *
  * @param {DOMNode} node
  * @param {Window} rootWin
- * @param {Int} whatToShow See Ci.nsIDOMNodeFilter / inIDeepTreeWalker for
+ * @param {Int} whatToShow See nodeFilterConstants / inIDeepTreeWalker for
  * options.
  * @param {Function} filter A custom filter function Taking in a DOMNode
  *        and returning an Int. See WalkerActor.nodeFilter for an example.
  */
 function DocumentWalker(node, rootWin,
-    whatToShow = Ci.nsIDOMNodeFilter.SHOW_ALL,
+    whatToShow = nodeFilterConstants.SHOW_ALL,
     filter = standardTreeWalkerFilter) {
   if (!rootWin.location) {
     throw new Error("Got an invalid root window in DocumentWalker");
@@ -2777,7 +2794,7 @@ function DocumentWalker(node, rootWin,
   // causes currentNode to be updated.
   this.walker.currentNode = node;
   while (node &&
-         this.filter(node) === Ci.nsIDOMNodeFilter.FILTER_SKIP) {
+         this.filter(node) === nodeFilterConstants.FILTER_SKIP) {
     node = this.walker.parentNode();
   }
 }
@@ -2808,7 +2825,7 @@ DocumentWalker.prototype = {
 
     let nextNode = this.walker.nextNode();
     while (nextNode &&
-           this.filter(nextNode) === Ci.nsIDOMNodeFilter.FILTER_SKIP) {
+           this.filter(nextNode) === nodeFilterConstants.FILTER_SKIP) {
       nextNode = this.walker.nextNode();
     }
 
@@ -2823,7 +2840,7 @@ DocumentWalker.prototype = {
 
     let firstChild = this.walker.firstChild();
     while (firstChild &&
-           this.filter(firstChild) === Ci.nsIDOMNodeFilter.FILTER_SKIP) {
+           this.filter(firstChild) === nodeFilterConstants.FILTER_SKIP) {
       firstChild = this.walker.nextSibling();
     }
 
@@ -2838,7 +2855,7 @@ DocumentWalker.prototype = {
 
     let lastChild = this.walker.lastChild();
     while (lastChild &&
-           this.filter(lastChild) === Ci.nsIDOMNodeFilter.FILTER_SKIP) {
+           this.filter(lastChild) === nodeFilterConstants.FILTER_SKIP) {
       lastChild = this.walker.previousSibling();
     }
 
@@ -2847,7 +2864,7 @@ DocumentWalker.prototype = {
 
   previousSibling: function () {
     let node = this.walker.previousSibling();
-    while (node && this.filter(node) === Ci.nsIDOMNodeFilter.FILTER_SKIP) {
+    while (node && this.filter(node) === nodeFilterConstants.FILTER_SKIP) {
       node = this.walker.previousSibling();
     }
     return node;
@@ -2855,7 +2872,7 @@ DocumentWalker.prototype = {
 
   nextSibling: function () {
     let node = this.walker.nextSibling();
-    while (node && this.filter(node) === Ci.nsIDOMNodeFilter.FILTER_SKIP) {
+    while (node && this.filter(node) === nodeFilterConstants.FILTER_SKIP) {
       node = this.walker.nextSibling();
     }
     return node;
@@ -2879,13 +2896,13 @@ function standardTreeWalkerFilter(node) {
   // want to show them
   if (node.nodeName === "_moz_generated_content_before" ||
       node.nodeName === "_moz_generated_content_after") {
-    return Ci.nsIDOMNodeFilter.FILTER_ACCEPT;
+    return nodeFilterConstants.FILTER_ACCEPT;
   }
 
   // Ignore empty whitespace text nodes.
   if (node.nodeType == Ci.nsIDOMNode.TEXT_NODE &&
       !/[^\s]/.exec(node.nodeValue)) {
-    return Ci.nsIDOMNodeFilter.FILTER_SKIP;
+    return nodeFilterConstants.FILTER_SKIP;
   }
 
   // Ignore all native and XBL anonymous content inside a non-XUL document
@@ -2895,10 +2912,10 @@ function standardTreeWalkerFilter(node) {
     // that's XUL content injected in an HTML document, but we need to because
     // this also skips many other elements that need to be skipped - like form
     // controls, scrollbars, video controls, etc (see bug 1187482).
-    return Ci.nsIDOMNodeFilter.FILTER_SKIP;
+    return nodeFilterConstants.FILTER_SKIP;
   }
 
-  return Ci.nsIDOMNodeFilter.FILTER_ACCEPT;
+  return nodeFilterConstants.FILTER_ACCEPT;
 }
 
 /**
@@ -2909,9 +2926,9 @@ function allAnonymousContentTreeWalkerFilter(node) {
   // Ignore empty whitespace text nodes.
   if (node.nodeType == Ci.nsIDOMNode.TEXT_NODE &&
       !/[^\s]/.exec(node.nodeValue)) {
-    return Ci.nsIDOMNodeFilter.FILTER_SKIP;
+    return nodeFilterConstants.FILTER_SKIP;
   }
-  return Ci.nsIDOMNodeFilter.FILTER_ACCEPT;
+  return nodeFilterConstants.FILTER_ACCEPT;
 }
 
 /**
@@ -3007,8 +3024,9 @@ var imageToImageData = Task.async(function* (node, maxDim) {
   // Extract the image data
   let imageData;
   // The image may already be a data-uri, in which case, save ourselves the
-  // trouble of converting via the canvas.drawImage.toDataURL method
-  if (isImg && node.src.startsWith("data:")) {
+  // trouble of converting via the canvas.drawImage.toDataURL method, but only
+  // if the image doesn't need resizing
+  if (isImg && node.src.startsWith("data:") && resizeRatio === 1) {
     imageData = node.src;
   } else {
     // Create a canvas to copy the rawNode into and get the imageData from

@@ -1,4 +1,11 @@
 function testScript(script) {
+
+  // The framework runs the entire test in many different configurations.
+  // On slow platforms and builds this can make the tests likely to
+  // timeout while they are still running.  Lengthen the timeout to
+  // accomodate this.
+  SimpleTest.requestLongerTimeout(2);
+
   // reroute.html should have set this variable if a service worker is present!
   if (!("isSWPresent" in window)) {
     window.isSWPresent = false;
@@ -134,7 +141,9 @@ function testScript(script) {
       return workerTest();
     })
     .then(function() {
-      return nestedWorkerTest();
+      // XXX Bug 1281212 - This makes other, unrelated test suites fail, primarily on WinXP.
+      let isWin = navigator.platform.indexOf("Win") == 0;
+      return isWin ? undefined : nestedWorkerTest();
     })
     .then(function() {
       return serviceWorkerTest();

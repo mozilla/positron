@@ -99,7 +99,8 @@ child:
                        NetAddr             selfAddr,
                        NetAddr             peerAddr,
                        int16_t             redirectCount,
-                       uint32_t            cacheKey);
+                       uint32_t            cacheKey,
+                       bool                contentDecodingWillBeCalledOnParent);
 
   // Combines a single OnDataAvailable and its associated OnProgress &
   // OnStatus calls into one IPDL message
@@ -123,11 +124,12 @@ child:
 
   // Called to initiate content channel redirect, starts talking to sinks
   // on the content process and reports result via Redirect2Verify above
-  async Redirect1Begin(uint32_t           newChannelId,
+  async Redirect1Begin(uint32_t           registrarId,
                        URIParams          newUri,
                        uint32_t           redirectFlags,
                        nsHttpResponseHead responseHead,
-                       nsCString          securityInfoSerialization);
+                       nsCString          securityInfoSerialization,
+                       nsCString          channelId);
 
   // Called if redirect successful so that child can complete setup.
   async Redirect3Complete();
@@ -161,4 +163,3 @@ child:
 
 } // namespace net
 } // namespace mozilla
-

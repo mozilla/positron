@@ -22,6 +22,7 @@ DevToolsModules(
     'object-with-text.js',
     'object-with-url.js',
     'object.js',
+    'prop-rep.js',
     'regexp.js',
     'rep-utils.js',
     'rep.js',
@@ -30,6 +31,5 @@ DevToolsModules(
     'stylesheet.js',
     'text-node.js',
     'undefined.js',
-    'url.js',
     'window.js',
 )

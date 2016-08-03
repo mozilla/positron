@@ -4,6 +4,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "nsAttrValue.h"
+#include "nsContentUtils.h"
 #include "nsCSPUtils.h"
 #include "nsDebug.h"
 #include "nsIConsoleService.h"
@@ -13,6 +15,7 @@
 #include "nsIStringBundle.h"
 #include "nsIURL.h"
 #include "nsReadableUtils.h"
+#include "nsSandboxFlags.h"
 
 static mozilla::LogModule*
 GetCspUtilsLog()
@@ -163,6 +166,7 @@ CSP_ContentTypeToDirective(nsContentPolicyType aType)
     case nsIContentPolicy::TYPE_WEBSOCKET:
     case nsIContentPolicy::TYPE_XMLHTTPREQUEST:
     case nsIContentPolicy::TYPE_BEACON:
+    case nsIContentPolicy::TYPE_PING:
     case nsIContentPolicy::TYPE_FETCH:
       return nsIContentSecurityPolicy::CONNECT_SRC_DIRECTIVE;
 
@@ -171,7 +175,6 @@ CSP_ContentTypeToDirective(nsContentPolicyType aType)
       return nsIContentSecurityPolicy::OBJECT_SRC_DIRECTIVE;
 
     case nsIContentPolicy::TYPE_XBL:
-    case nsIContentPolicy::TYPE_PING:
     case nsIContentPolicy::TYPE_DTD:
     case nsIContentPolicy::TYPE_OTHER:
       return nsIContentSecurityPolicy::DEFAULT_SRC_DIRECTIVE;
@@ -311,6 +314,39 @@ permitsScheme(const nsAString& aEnforcementScheme,
   return ((aUpgradeInsecure && !aReportOnly) &&
           ((scheme.EqualsASCII("http") && aEnforcementScheme.EqualsASCII("https")) ||
            (scheme.EqualsASCII("ws") && aEnforcementScheme.EqualsASCII("wss"))));
+}
+
+/*
+ * A helper function for appending a CSP header to an existing CSP
+ * policy.
+ *
+ * @param aCsp           the CSP policy
+ * @param aHeaderValue   the header
+ * @param aReportOnly    is this a report-only header?
+ */
+
+nsresult
+CSP_AppendCSPFromHeader(nsIContentSecurityPolicy* aCsp,
+                        const nsAString& aHeaderValue,
+                        bool aReportOnly)
+{
+  NS_ENSURE_ARG(aCsp);
+
+  // Need to tokenize the header value since multiple headers could be
+  // concatenated into one comma-separated list of policies.
+  // See RFC2616 section 4.2 (last paragraph)
+  nsresult rv = NS_OK;
+  nsCharSeparatedTokenizer tokenizer(aHeaderValue, ',');
+  while (tokenizer.hasMoreTokens()) {
+    const nsSubstring& policy = tokenizer.nextToken();
+    rv = aCsp->AppendPolicy(policy, aReportOnly, false);
+    NS_ENSURE_SUCCESS(rv, rv);
+    {
+      CSPUTILSLOG(("CSP refined with policy: \"%s\"",
+                   NS_ConvertUTF16toUTF8(policy).get()));
+    }
+  }
+  return NS_OK;
 }
 
 /* ===== nsCSPSrc ============================ */
@@ -792,6 +828,29 @@ nsCSPReportURI::toString(nsAString& outStr) const
   outStr.AppendASCII(spec.get());
 }
 
+/* ===== nsCSPSandboxFlags ===================== */
+
+nsCSPSandboxFlags::nsCSPSandboxFlags(const nsAString& aFlags)
+  : mFlags(aFlags)
+{
+}
+
+nsCSPSandboxFlags::~nsCSPSandboxFlags()
+{
+}
+
+bool
+nsCSPSandboxFlags::visit(nsCSPSrcVisitor* aVisitor) const
+{
+  return false;
+}
+
+void
+nsCSPSandboxFlags::toString(nsAString& outStr) const
+{
+  outStr.Append(mFlags);
+}
+
 /* ===== nsCSPDirective ====================== */
 
 nsCSPDirective::nsCSPDirective(CSPDirective aDirective)
@@ -953,7 +1012,12 @@ nsCSPDirective::toDomCSPStruct(mozilla::dom::CSP& outCSP) const
       outCSP.mChild_src.Value() = mozilla::Move(srcs);
       return;
 
-    // REFERRER_DIRECTIVE is handled in nsCSPPolicy::toDomCSPStruct()
+    case nsIContentSecurityPolicy::SANDBOX_DIRECTIVE:
+      outCSP.mSandbox.Construct();
+      outCSP.mSandbox.Value() = mozilla::Move(srcs);
+      return;
+
+    // REFERRER_DIRECTIVE and REQUIRE_SRI_FOR are handled in nsCSPPolicy::toDomCSPStruct()
 
     default:
       NS_ASSERTION(false, "cannot find directive to convert CSP to JSON");
@@ -1075,6 +1139,56 @@ nsUpgradeInsecureDirective::toString(nsAString& outStr) const
     nsIContentSecurityPolicy::UPGRADE_IF_INSECURE_DIRECTIVE));
 }
 
+/* ===== nsRequireSRIForDirective ========================= */
+
+nsRequireSRIForDirective::nsRequireSRIForDirective(CSPDirective aDirective)
+: nsCSPDirective(aDirective)
+{
+}
+
+nsRequireSRIForDirective::~nsRequireSRIForDirective()
+{
+}
+
+void
+nsRequireSRIForDirective::toString(nsAString &outStr) const
+{
+  outStr.AppendASCII(CSP_CSPDirectiveToString(
+    nsIContentSecurityPolicy::REQUIRE_SRI_FOR));
+  for (uint32_t i = 0; i < mTypes.Length(); i++) {
+    if (mTypes[i] == nsIContentPolicy::TYPE_SCRIPT) {
+      outStr.AppendASCII(" script");
+    }
+    else if (mTypes[i] == nsIContentPolicy::TYPE_STYLESHEET) {
+      outStr.AppendASCII(" style");
+    }
+  }
+}
+
+bool
+nsRequireSRIForDirective::hasType(nsContentPolicyType aType) const
+{
+  for (uint32_t i = 0; i < mTypes.Length(); i++) {
+    if (mTypes[i] == aType) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool
+nsRequireSRIForDirective::restrictsContentType(const nsContentPolicyType aType) const
+{
+  return this->hasType(aType);
+}
+
+bool
+nsRequireSRIForDirective::allows(enum CSPKeyword aKeyword, const nsAString& aHashOrNonce) const
+{
+  // can only disallow CSP_REQUIRE_SRI_FOR.
+  return (aKeyword != CSP_REQUIRE_SRI_FOR);
+}
+
 /* ===== nsCSPPolicy ========================= */
 
 nsCSPPolicy::nsCSPPolicy()
@@ -1118,6 +1232,7 @@ nsCSPPolicy::permits(CSPDirective aDir,
   }
 
   NS_ASSERTION(aUri, "permits needs an uri to perform the check!");
+  outViolatedDirective.Truncate();
 
   nsCSPDirective* defaultDir = nullptr;
 
@@ -1293,6 +1408,33 @@ nsCSPPolicy::getDirectiveAsString(CSPDirective aDir, nsAString& outDirective) co
   }
 }
 
+/*
+ * Helper function that returns the underlying bit representation of sandbox
+ * flags. The function returns SANDBOXED_NONE if there are no sandbox
+ * directives.
+ */
+uint32_t
+nsCSPPolicy::getSandboxFlags() const
+{
+  for (uint32_t i = 0; i < mDirectives.Length(); i++) {
+    if (mDirectives[i]->equals(nsIContentSecurityPolicy::SANDBOX_DIRECTIVE)) {
+      nsAutoString flags;
+      mDirectives[i]->toString(flags);
+
+      if (flags.IsEmpty()) {
+        return SANDBOX_ALL_FLAGS;
+      }
+
+      nsAttrValue attr;
+      attr.ParseAtomArray(flags);
+
+      return nsContentUtils::ParseSandboxAttributeToFlags(&attr);
+    }
+  }
+
+  return SANDBOXED_NONE;
+}
+
 void
 nsCSPPolicy::getReportURIs(nsTArray<nsString>& outReportURIs) const
 {
@@ -1310,6 +1452,17 @@ nsCSPPolicy::visitDirectiveSrcs(CSPDirective aDir, nsCSPSrcVisitor* aVisitor) co
   for (uint32_t i = 0; i < mDirectives.Length(); i++) {
     if (mDirectives[i]->equals(aDir)) {
       return mDirectives[i]->visitSrcs(aVisitor);
+    }
+  }
+  return false;
+}
+
+bool
+nsCSPPolicy::requireSRIForType(nsContentPolicyType aContentType)
+{
+  for (uint32_t i = 0; i < mDirectives.Length(); i++) {
+    if (mDirectives[i]->equals(nsIContentSecurityPolicy::REQUIRE_SRI_FOR)) {
+      return static_cast<nsRequireSRIForDirective*>(mDirectives[i])->hasType(aContentType);
     }
   }
   return false;

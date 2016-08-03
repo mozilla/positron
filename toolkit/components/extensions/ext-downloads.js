@@ -246,7 +246,7 @@ function downloadQuery(query) {
     if (arg == null) {
       return before ? Number.MAX_VALUE : 0;
     } else {
-      return normalizeTime(arg);
+      return normalizeTime(arg).getTime();
     }
   }
 
@@ -388,7 +388,7 @@ function queryHelper(query) {
   });
 }
 
-extensions.registerSchemaAPI("downloads", "downloads", (extension, context) => {
+extensions.registerSchemaAPI("downloads", (extension, context) => {
   return {
     downloads: {
       download(options) {
@@ -420,8 +420,13 @@ extensions.registerSchemaAPI("downloads", "downloads", (extension, context) => {
           if (options.filename) {
             target = OS.Path.join(downloadsDir, options.filename);
           } else {
-            let uri = NetUtil.newURI(options.url).QueryInterface(Ci.nsIURL);
-            target = OS.Path.join(downloadsDir, uri.fileName);
+            let uri = NetUtil.newURI(options.url);
+
+            let filename;
+            if (uri instanceof Ci.nsIURL) {
+              filename = uri.fileName;
+            }
+            target = OS.Path.join(downloadsDir, filename || "download");
           }
 
           // This has a race, something else could come along and create
@@ -561,10 +566,6 @@ extensions.registerSchemaAPI("downloads", "downloads", (extension, context) => {
       },
 
       open(downloadId) {
-        if (!extension.hasPermission("downloads.open")) {
-          throw new context.cloneScope.Error(
-            "Permission denied because 'downloads.open' permission is missing.");
-        }
         return DownloadMap.lazyInit().then(() => {
           let download = DownloadMap.fromId(downloadId).download;
           if (download.succeeded) {

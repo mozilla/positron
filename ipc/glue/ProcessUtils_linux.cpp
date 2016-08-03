@@ -1,5 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim: set sw=2 ts=2 autoindent cindent expandtab: */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -218,9 +218,9 @@ ProcLoaderClientGeckoInit()
   TransportDescriptor fd;
   fd.mFd = base::FileDescriptor(sProcLoaderChannelFd, /*auto_close=*/ false);
   sProcLoaderChannelFd = -1;
-  Transport *transport = OpenDescriptor(fd, Transport::MODE_CLIENT);
+  UniquePtr<Transport> transport = OpenDescriptor(fd, Transport::MODE_CLIENT);
   sProcLoaderParent = new ProcLoaderParent();
-  sProcLoaderParent->Open(transport,
+  sProcLoaderParent->Open(transport.get(),
                           sProcLoaderPid,
                           XRE_GetIOMessageLoop(),
                           ParentSide);
@@ -569,11 +569,11 @@ ProcLoaderServiceRun(pid_t aPeerPid, int aFd,
     process = new ContentProcess(aPeerPid);
     ChildThread *iothread = process->child_thread();
 
-    Transport *transport = OpenDescriptor(fd, Transport::MODE_CLIENT);
+    UniquePtr<Transport> transport = OpenDescriptor(fd, Transport::MODE_CLIENT);
     ProcLoaderChild *loaderChild = new ProcLoaderChild(aPeerPid);
     // Pass a message loop to initialize (connect) the channel
     // (connection).
-    loaderChild->Open(transport, aPeerPid, iothread->message_loop());
+    loaderChild->Open(transport.get(), aPeerPid, iothread->message_loop());
 
     BackgroundHangMonitor::Prohibit();
 

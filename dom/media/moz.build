@@ -84,6 +84,7 @@ XPIDL_MODULE = 'dom_media'
 
 EXPORTS += [
     'AbstractMediaDecoder.h',
+    'AccurateSeekTask.h',
     'ADTSDecoder.h',
     'ADTSDemuxer.h',
     'AudioBufferUtils.h',
@@ -103,7 +104,6 @@ EXPORTS += [
     'DOMMediaStream.h',
     'EncodedBufferCache.h',
     'FileBlockCache.h',
-    'FlushableTaskQueue.h',
     'FrameStatistics.h',
     'Intervals.h',
     'Latency.h',
@@ -127,12 +127,14 @@ EXPORTS += [
     'MediaSegment.h',
     'MediaStatistics.h',
     'MediaStreamGraph.h',
+    'MediaStreamListener.h',
     'MediaTimer.h',
     'MediaTrack.h',
     'MediaTrackList.h',
     'MP3Decoder.h',
     'MP3Demuxer.h',
     'MP3FrameParser.h',
+    'NextFrameSeekTask.h',
     'nsIDocumentActivity.h',
     'PrincipalChangeObserver.h',
     'QueueObject.h',
@@ -197,6 +199,7 @@ EXPORTS.mozilla.dom += [
 ]
 
 UNIFIED_SOURCES += [
+    'AccurateSeekTask.cpp',
     'ADTSDecoder.cpp',
     'ADTSDemuxer.cpp',
     'AudioCaptureStream.cpp',
@@ -215,7 +218,6 @@ UNIFIED_SOURCES += [
     'DOMMediaStream.cpp',
     'EncodedBufferCache.cpp',
     'FileBlockCache.cpp',
-    'FlushableTaskQueue.cpp',
     'GetUserMediaRequest.cpp',
     'GraphDriver.cpp',
     'Latency.cpp',
@@ -237,6 +239,7 @@ UNIFIED_SOURCES += [
     'MediaShutdownManager.cpp',
     'MediaStreamError.cpp',
     'MediaStreamGraph.cpp',
+    'MediaStreamListener.cpp',
     'MediaStreamTrack.cpp',
     'MediaTimer.cpp',
     'MediaTrack.cpp',
@@ -244,6 +247,7 @@ UNIFIED_SOURCES += [
     'MP3Decoder.cpp',
     'MP3Demuxer.cpp',
     'MP3FrameParser.cpp',
+    'NextFrameSeekTask.cpp',
     'QueueObject.cpp',
     'RtspMediaResource.cpp',
     'SeekJob.cpp',

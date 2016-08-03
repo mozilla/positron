@@ -1,6 +1,7 @@
 /* vim: set ft=javascript ts=2 et sw=2 tw=80: */
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
+/* eslint no-inline-comments: 0 */
 "use strict";
 
 requestLongerTimeout(2);
@@ -87,7 +88,7 @@ add_task(function* () {
     is(inspector.selection.nodeFront, nodeFront,
        "Correct node is selected for state " + index);
 
-    is(!searchBox.classList.contains("devtools-no-search-result"), isValid,
+    is(!searchBox.classList.contains("devtools-style-searchbox-no-match"), isValid,
        "Correct searchbox result state for state " + index);
 
     index++;

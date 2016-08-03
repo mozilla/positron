@@ -26,6 +26,8 @@
 #include "nsIPrincipal.h"
 #include "nsIXPConnect.h"
 #include "nsUTF8Utils.h"
+#include "WorkerPrivate.h"
+#include "WorkerRunnable.h"
 #include "WrapperFactory.h"
 #include "xpcprivate.h"
 #include "XrayWrapper.h"
@@ -55,6 +57,8 @@
 
 namespace mozilla {
 namespace dom {
+
+using namespace workers;
 
 const JSErrorFormatString ErrorFormatString[] = {
 #define MSG_DEF(_name, _argc, _exn, _str) \
@@ -139,9 +143,12 @@ ThrowNoSetterArg(JSContext* aCx, prototypes::ID aProtoId)
 
 } // namespace dom
 
-struct ErrorResult::Message {
-  Message() { MOZ_COUNT_CTOR(ErrorResult::Message); }
-  ~Message() { MOZ_COUNT_DTOR(ErrorResult::Message); }
+namespace binding_danger {
+
+template<typename CleanupPolicy>
+struct TErrorResult<CleanupPolicy>::Message {
+  Message() { MOZ_COUNT_CTOR(TErrorResult::Message); }
+  ~Message() { MOZ_COUNT_DTOR(TErrorResult::Message); }
 
   nsTArray<nsString> mArgs;
   dom::ErrNum mErrorNumber;
@@ -152,9 +159,12 @@ struct ErrorResult::Message {
   }
 };
 
+template<typename CleanupPolicy>
 nsTArray<nsString>&
-ErrorResult::CreateErrorMessageHelper(const dom::ErrNum errorNumber, nsresult errorType)
+TErrorResult<CleanupPolicy>::CreateErrorMessageHelper(const dom::ErrNum errorNumber,
+                                                      nsresult errorType)
 {
+  AssertInOwningThread();
   mResult = errorType;
 
   mMessage = new Message();
@@ -162,20 +172,25 @@ ErrorResult::CreateErrorMessageHelper(const dom::ErrNum errorNumber, nsresult er
   return mMessage->mArgs;
 }
 
+template<typename CleanupPolicy>
 void
-ErrorResult::SerializeMessage(IPC::Message* aMsg) const
+TErrorResult<CleanupPolicy>::SerializeMessage(IPC::Message* aMsg) const
 {
   using namespace IPC;
+  AssertInOwningThread();
   MOZ_ASSERT(mUnionState == HasMessage);
   MOZ_ASSERT(mMessage);
   WriteParam(aMsg, mMessage->mArgs);
   WriteParam(aMsg, mMessage->mErrorNumber);
 }
 
+template<typename CleanupPolicy>
 bool
-ErrorResult::DeserializeMessage(const IPC::Message* aMsg, void** aIter)
+TErrorResult<CleanupPolicy>::DeserializeMessage(const IPC::Message* aMsg,
+                                                PickleIterator* aIter)
 {
   using namespace IPC;
+  AssertInOwningThread();
   nsAutoPtr<Message> readMessage(new Message());
   if (!ReadParam(aMsg, aIter, &readMessage->mArgs) ||
       !ReadParam(aMsg, aIter, &readMessage->mErrorNumber)) {
@@ -193,9 +208,11 @@ ErrorResult::DeserializeMessage(const IPC::Message* aMsg, void** aIter)
   return true;
 }
 
+template<typename CleanupPolicy>
 void
-ErrorResult::SetPendingExceptionWithMessage(JSContext* aCx)
+TErrorResult<CleanupPolicy>::SetPendingExceptionWithMessage(JSContext* aCx)
 {
+  AssertInOwningThread();
   MOZ_ASSERT(mMessage, "SetPendingExceptionWithMessage() can be called only once");
   MOZ_ASSERT(mUnionState == HasMessage);
 
@@ -216,9 +233,11 @@ ErrorResult::SetPendingExceptionWithMessage(JSContext* aCx)
   mResult = NS_OK;
 }
 
+template<typename CleanupPolicy>
 void
-ErrorResult::ClearMessage()
+TErrorResult<CleanupPolicy>::ClearMessage()
 {
+  AssertInOwningThread();
   MOZ_ASSERT(IsErrorWithMessage());
   delete mMessage;
   mMessage = nullptr;
@@ -227,9 +246,11 @@ ErrorResult::ClearMessage()
 #endif // DEBUG
 }
 
+template<typename CleanupPolicy>
 void
-ErrorResult::ThrowJSException(JSContext* cx, JS::Handle<JS::Value> exn)
+TErrorResult<CleanupPolicy>::ThrowJSException(JSContext* cx, JS::Handle<JS::Value> exn)
 {
+  AssertInOwningThread();
   MOZ_ASSERT(mMightHaveUnreportedJSException,
              "Why didn't you tell us you planned to throw a JS exception?");
 
@@ -239,7 +260,7 @@ ErrorResult::ThrowJSException(JSContext* cx, JS::Handle<JS::Value> exn)
   // don't set it to exn yet, because we don't want to do that until after we
   // root.
   mJSException.setUndefined();
-  if (!js::AddRawValueRoot(cx, &mJSException, "ErrorResult::mJSException")) {
+  if (!js::AddRawValueRoot(cx, &mJSException, "TErrorResult::mJSException")) {
     // Don't use NS_ERROR_DOM_JS_EXCEPTION, because that indicates we have
     // in fact rooted mJSException.
     mResult = NS_ERROR_OUT_OF_MEMORY;
@@ -252,9 +273,11 @@ ErrorResult::ThrowJSException(JSContext* cx, JS::Handle<JS::Value> exn)
   }
 }
 
+template<typename CleanupPolicy>
 void
-ErrorResult::SetPendingJSException(JSContext* cx)
+TErrorResult<CleanupPolicy>::SetPendingJSException(JSContext* cx)
 {
+  AssertInOwningThread();
   MOZ_ASSERT(!mMightHaveUnreportedJSException,
              "Why didn't you tell us you planned to handle JS exceptions?");
   MOZ_ASSERT(mUnionState == HasJSException);
@@ -274,7 +297,8 @@ ErrorResult::SetPendingJSException(JSContext* cx)
 #endif // DEBUG
 }
 
-struct ErrorResult::DOMExceptionInfo {
+template<typename CleanupPolicy>
+struct TErrorResult<CleanupPolicy>::DOMExceptionInfo {
   DOMExceptionInfo(nsresult rv, const nsACString& message)
     : mMessage(message)
     , mRv(rv)
@@ -284,20 +308,25 @@ struct ErrorResult::DOMExceptionInfo {
   nsresult mRv;
 };
 
+template<typename CleanupPolicy>
 void
-ErrorResult::SerializeDOMExceptionInfo(IPC::Message* aMsg) const
+TErrorResult<CleanupPolicy>::SerializeDOMExceptionInfo(IPC::Message* aMsg) const
 {
   using namespace IPC;
+  AssertInOwningThread();
   MOZ_ASSERT(mDOMExceptionInfo);
   MOZ_ASSERT(mUnionState == HasDOMExceptionInfo);
   WriteParam(aMsg, mDOMExceptionInfo->mMessage);
   WriteParam(aMsg, mDOMExceptionInfo->mRv);
 }
 
+template<typename CleanupPolicy>
 bool
-ErrorResult::DeserializeDOMExceptionInfo(const IPC::Message* aMsg, void** aIter)
+TErrorResult<CleanupPolicy>::DeserializeDOMExceptionInfo(const IPC::Message* aMsg,
+                                                         PickleIterator* aIter)
 {
   using namespace IPC;
+  AssertInOwningThread();
   nsCString message;
   nsresult rv;
   if (!ReadParam(aMsg, aIter, &message) ||
@@ -314,9 +343,12 @@ ErrorResult::DeserializeDOMExceptionInfo(const IPC::Message* aMsg, void** aIter)
   return true;
 }
 
+template<typename CleanupPolicy>
 void
-ErrorResult::ThrowDOMException(nsresult rv, const nsACString& message)
+TErrorResult<CleanupPolicy>::ThrowDOMException(nsresult rv,
+                                               const nsACString& message)
 {
+  AssertInOwningThread();
   ClearUnionData();
 
   mResult = NS_ERROR_DOM_DOMEXCEPTION;
@@ -326,9 +358,11 @@ ErrorResult::ThrowDOMException(nsresult rv, const nsACString& message)
 #endif
 }
 
+template<typename CleanupPolicy>
 void
-ErrorResult::SetPendingDOMException(JSContext* cx)
+TErrorResult<CleanupPolicy>::SetPendingDOMException(JSContext* cx)
 {
+  AssertInOwningThread();
   MOZ_ASSERT(mDOMExceptionInfo,
              "SetPendingDOMException() can be called only once");
   MOZ_ASSERT(mUnionState == HasDOMExceptionInfo);
@@ -339,9 +373,11 @@ ErrorResult::SetPendingDOMException(JSContext* cx)
   mResult = NS_OK;
 }
 
+template<typename CleanupPolicy>
 void
-ErrorResult::ClearDOMExceptionInfo()
+TErrorResult<CleanupPolicy>::ClearDOMExceptionInfo()
 {
+  AssertInOwningThread();
   MOZ_ASSERT(IsDOMException());
   MOZ_ASSERT(mUnionState == HasDOMExceptionInfo || !mDOMExceptionInfo);
   delete mDOMExceptionInfo;
@@ -351,11 +387,13 @@ ErrorResult::ClearDOMExceptionInfo()
 #endif // DEBUG
 }
 
+template<typename CleanupPolicy>
 void
-ErrorResult::ClearUnionData()
+TErrorResult<CleanupPolicy>::ClearUnionData()
 {
+  AssertInOwningThread();
   if (IsJSException()) {
-    JSContext* cx = nsContentUtils::GetDefaultJSContextForThread();
+    JSContext* cx = nsContentUtils::RootingCx();
     MOZ_ASSERT(cx);
     mJSException.setUndefined();
     js::RemoveRawValueRoot(cx, &mJSException);
@@ -369,9 +407,11 @@ ErrorResult::ClearUnionData()
   }
 }
 
+template<typename CleanupPolicy>
 void
-ErrorResult::SetPendingGenericErrorException(JSContext* cx)
+TErrorResult<CleanupPolicy>::SetPendingGenericErrorException(JSContext* cx)
 {
+  AssertInOwningThread();
   MOZ_ASSERT(!IsErrorWithMessage());
   MOZ_ASSERT(!IsJSException());
   MOZ_ASSERT(!IsDOMException());
@@ -379,9 +419,12 @@ ErrorResult::SetPendingGenericErrorException(JSContext* cx)
   mResult = NS_OK;
 }
 
-ErrorResult&
-ErrorResult::operator=(ErrorResult&& aRHS)
+template<typename CleanupPolicy>
+TErrorResult<CleanupPolicy>&
+TErrorResult<CleanupPolicy>::operator=(TErrorResult<CleanupPolicy>&& aRHS)
 {
+  AssertInOwningThread();
+  aRHS.AssertInOwningThread();
   // Clear out any union members we may have right now, before we
   // start writing to it.
   ClearUnionData();
@@ -394,10 +437,10 @@ ErrorResult::operator=(ErrorResult&& aRHS)
     mMessage = aRHS.mMessage;
     aRHS.mMessage = nullptr;
   } else if (aRHS.IsJSException()) {
-    JSContext* cx = nsContentUtils::GetDefaultJSContextForThread();
+    JSContext* cx = nsContentUtils::RootingCx();
     MOZ_ASSERT(cx);
     mJSException.setUndefined();
-    if (!js::AddRawValueRoot(cx, &mJSException, "ErrorResult::mJSException")) {
+    if (!js::AddRawValueRoot(cx, &mJSException, "TErrorResult::mJSException")) {
       MOZ_CRASH("Could not root mJSException, we're about to OOM");
     }
     mJSException = aRHS.mJSException;
@@ -423,9 +466,13 @@ ErrorResult::operator=(ErrorResult&& aRHS)
   return *this;
 }
 
+template<typename CleanupPolicy>
 void
-ErrorResult::CloneTo(ErrorResult& aRv) const
+TErrorResult<CleanupPolicy>::CloneTo(TErrorResult& aRv) const
 {
+  AssertInOwningThread();
+  aRv.AssertInOwningThread();
+
   aRv.ClearUnionData();
   aRv.mResult = mResult;
 #ifdef DEBUG
@@ -449,15 +496,17 @@ ErrorResult::CloneTo(ErrorResult& aRv) const
 #ifdef DEBUG
     aRv.mUnionState = HasJSException;
 #endif
-    JSContext* cx = nsContentUtils::RootingCxForThread();
+    JSContext* cx = nsContentUtils::RootingCx();
     JS::Rooted<JS::Value> exception(cx, mJSException);
     aRv.ThrowJSException(cx, exception);
   }
 }
 
+template<typename CleanupPolicy>
 void
-ErrorResult::SuppressException()
+TErrorResult<CleanupPolicy>::SuppressException()
 {
+  AssertInOwningThread();
   WouldReportJSException();
   ClearUnionData();
   // We don't use AssignErrorCode, because we want to override existing error
@@ -465,9 +514,11 @@ ErrorResult::SuppressException()
   mResult = NS_OK;
 }
 
+template<typename CleanupPolicy>
 void
-ErrorResult::SetPendingException(JSContext* cx)
+TErrorResult<CleanupPolicy>::SetPendingException(JSContext* cx)
 {
+  AssertInOwningThread();
   if (IsUncatchableException()) {
     // Nuke any existing exception on cx, to make sure we're uncatchable.
     JS_ClearPendingException(cx);
@@ -497,9 +548,11 @@ ErrorResult::SetPendingException(JSContext* cx)
   SetPendingGenericErrorException(cx);
 }
 
+template<typename CleanupPolicy>
 void
-ErrorResult::StealExceptionFromJSContext(JSContext* cx)
+TErrorResult<CleanupPolicy>::StealExceptionFromJSContext(JSContext* cx)
 {
+  AssertInOwningThread();
   MOZ_ASSERT(mMightHaveUnreportedJSException,
              "Why didn't you tell us you planned to throw a JS exception?");
 
@@ -513,15 +566,23 @@ ErrorResult::StealExceptionFromJSContext(JSContext* cx)
   JS_ClearPendingException(cx);
 }
 
+template<typename CleanupPolicy>
 void
-ErrorResult::NoteJSContextException(JSContext* aCx)
+TErrorResult<CleanupPolicy>::NoteJSContextException(JSContext* aCx)
 {
+  AssertInOwningThread();
   if (JS_IsExceptionPending(aCx)) {
     mResult = NS_ERROR_DOM_EXCEPTION_ON_JSCONTEXT;
   } else {
     mResult = NS_ERROR_UNCATCHABLE_EXCEPTION;
   }
 }
+
+template class TErrorResult<JustAssertCleanupPolicy>;
+template class TErrorResult<AssertAndSuppressCleanupPolicy>;
+template class TErrorResult<JustSuppressCleanupPolicy>;
+
+} // namespace binding_danger
 
 namespace dom {
 
@@ -1994,7 +2055,7 @@ ReparentWrapper(JSContext* aCx, JS::Handle<JSObject*> aObjArg)
   // First we clone the reflector. We get a copy of its properties and clone its
   // expando chain.
 
-  JS::Handle<JSObject*> proto = (domClass->mGetProto)(aCx, newParent);
+  JS::Handle<JSObject*> proto = (domClass->mGetProto)(aCx);
   if (!proto) {
     return NS_ERROR_FAILURE;
   }
@@ -2182,7 +2243,7 @@ InterfaceHasInstance(JSContext* cx, JS::Handle<JSObject*> obj,
 
   if (jsipc::IsWrappedCPOW(instance)) {
     bool boolp = false;
-    if (!jsipc::DOMInstanceOf(cx, js::CheckedUnwrap(instance), clasp->mPrototypeID,
+    if (!jsipc::DOMInstanceOf(cx, js::UncheckedUnwrap(instance), clasp->mPrototypeID,
                               clasp->mDepth, &boolp)) {
       return false;
     }
@@ -2346,7 +2407,7 @@ ConstructJSImplementation(const char* aContractId,
       do_QueryInterface(implISupports);
     nsCOMPtr<nsPIDOMWindowInner> window = do_QueryInterface(aGlobal);
     if (gpi) {
-      JS::Rooted<JS::Value> initReturn(nsContentUtils::RootingCxForThread());
+      JS::Rooted<JS::Value> initReturn(GetJSRuntime());
       rv = gpi->Init(window, &initReturn);
       if (NS_FAILED(rv)) {
         aRv.Throw(rv);
@@ -2498,34 +2559,6 @@ ConvertJSValueToByteString(JSContext* cx, JS::Handle<JS::Value> v,
   return true;
 }
 
-bool
-IsInPrivilegedApp(JSContext* aCx, JSObject* aObj)
-{
-  using mozilla::dom::workers::GetWorkerPrivateFromContext;
-  if (!NS_IsMainThread()) {
-    return GetWorkerPrivateFromContext(aCx)->IsInPrivilegedApp();
-  }
-
-  nsIPrincipal* principal = nsContentUtils::ObjectPrincipal(aObj);
-  uint16_t appStatus = principal->GetAppStatus();
-  return (appStatus == nsIPrincipal::APP_STATUS_CERTIFIED ||
-          appStatus == nsIPrincipal::APP_STATUS_PRIVILEGED) ||
-          Preferences::GetBool("dom.ignore_webidl_scope_checks", false);
-}
-
-bool
-IsInCertifiedApp(JSContext* aCx, JSObject* aObj)
-{
-  using mozilla::dom::workers::GetWorkerPrivateFromContext;
-  if (!NS_IsMainThread()) {
-    return GetWorkerPrivateFromContext(aCx)->IsInCertifiedApp();
-  }
-
-  nsIPrincipal* principal = nsContentUtils::ObjectPrincipal(aObj);
-  return principal->GetAppStatus() == nsIPrincipal::APP_STATUS_CERTIFIED ||
-         Preferences::GetBool("dom.ignore_webidl_scope_checks", false);
-}
-
 void
 FinalizeGlobal(JSFreeOp* aFreeOp, JSObject* aObj)
 {
@@ -2558,50 +2591,6 @@ EnumerateGlobal(JSContext* aCx, JS::Handle<JSObject*> aObj)
              "classes!");
 
   return JS_EnumerateStandardClasses(aCx, aObj);
-}
-
-bool
-CheckAnyPermissions(JSContext* aCx, JSObject* aObj, const char* const aPermissions[])
-{
-  JS::Rooted<JSObject*> rootedObj(aCx, aObj);
-  nsPIDOMWindowInner* window = xpc::WindowGlobalOrNull(rootedObj)->AsInner();
-  if (!window) {
-    return false;
-  }
-
-  nsCOMPtr<nsIPermissionManager> permMgr = services::GetPermissionManager();
-  NS_ENSURE_TRUE(permMgr, false);
-
-  do {
-    uint32_t permission = nsIPermissionManager::DENY_ACTION;
-    permMgr->TestPermissionFromWindow(window, *aPermissions, &permission);
-    if (permission == nsIPermissionManager::ALLOW_ACTION) {
-      return true;
-    }
-  } while (*(++aPermissions));
-  return false;
-}
-
-bool
-CheckAllPermissions(JSContext* aCx, JSObject* aObj, const char* const aPermissions[])
-{
-  JS::Rooted<JSObject*> rootedObj(aCx, aObj);
-  nsPIDOMWindowInner* window = xpc::WindowGlobalOrNull(rootedObj)->AsInner();
-  if (!window) {
-    return false;
-  }
-
-  nsCOMPtr<nsIPermissionManager> permMgr = services::GetPermissionManager();
-  NS_ENSURE_TRUE(permMgr, false);
-
-  do {
-    uint32_t permission = nsIPermissionManager::DENY_ACTION;
-    permMgr->TestPermissionFromWindow(window, *aPermissions, &permission);
-    if (permission != nsIPermissionManager::ALLOW_ACTION) {
-      return false;
-    }
-  } while (*(++aPermissions));
-  return true;
 }
 
 bool
@@ -3157,9 +3146,15 @@ ForEachHandler(JSContext* aCx, unsigned aArgc, JS::Value* aVp)
   JS::AutoValueVector newArgs(aCx);
   // Arguments are passed in as value, key, object. Keep value and key, replace
   // object with the maplike/setlike object.
-  newArgs.append(args.get(0));
-  newArgs.append(args.get(1));
-  newArgs.append(maplikeOrSetlikeObj);
+  if (!newArgs.append(args.get(0))) {
+    return false;
+  }
+  if (!newArgs.append(args.get(1))) {
+    return false;
+  }
+  if (!newArgs.append(maplikeOrSetlikeObj)) {
+    return false;
+  }
   JS::Rooted<JS::Value> rval(aCx, JS::UndefinedValue());
   // Now actually call the user specified callback
   return JS::Call(aCx, args.thisv(), callbackFn, newArgs, &rval);
@@ -3285,6 +3280,49 @@ SetDocumentAndPageUseCounter(JSContext* aCx, JSObject* aObject,
   }
 }
 
+namespace {
+
+// This runnable is used to write a deprecation message from a worker to the
+// console running on the main-thread.
+class DeprecationWarningRunnable final : public WorkerProxyToMainThreadRunnable
+{
+  nsIDocument::DeprecatedOperations mOperation;
+
+public:
+  DeprecationWarningRunnable(WorkerPrivate* aWorkerPrivate,
+                             nsIDocument::DeprecatedOperations aOperation)
+    : WorkerProxyToMainThreadRunnable(aWorkerPrivate)
+    , mOperation(aOperation)
+  {
+    MOZ_ASSERT(aWorkerPrivate);
+    aWorkerPrivate->AssertIsOnWorkerThread();
+  }
+
+private:
+  void
+  RunOnMainThread() override
+  {
+    MOZ_ASSERT(NS_IsMainThread());
+
+    // Walk up to our containing page
+    WorkerPrivate* wp = mWorkerPrivate;
+    while (wp->GetParent()) {
+      wp = wp->GetParent();
+    }
+
+    nsPIDOMWindowInner* window = wp->GetWindow();
+    if (window && window->GetExtantDoc()) {
+      window->GetExtantDoc()->WarnOnceAbout(mOperation);
+    }
+  }
+
+  void
+  RunBackOnWorkerThread() override
+  {}
+};
+
+} // anonymous namespace
+
 void
 DeprecationWarning(JSContext* aCx, JSObject* aObject,
                    nsIDocument::DeprecatedOperations aOperation)
@@ -3295,10 +3333,23 @@ DeprecationWarning(JSContext* aCx, JSObject* aObject,
     return;
   }
 
-  nsCOMPtr<nsPIDOMWindowInner> window = do_QueryInterface(global.GetAsSupports());
-  if (window && window->GetExtantDoc()) {
-    window->GetExtantDoc()->WarnOnceAbout(aOperation);
+  if (NS_IsMainThread()) {
+    nsCOMPtr<nsPIDOMWindowInner> window = do_QueryInterface(global.GetAsSupports());
+    if (window && window->GetExtantDoc()) {
+      window->GetExtantDoc()->WarnOnceAbout(aOperation);
+    }
+
+    return;
   }
+
+  WorkerPrivate* workerPrivate = GetWorkerPrivateFromContext(aCx);
+  if (!workerPrivate) {
+    return;
+  }
+
+  RefPtr<DeprecationWarningRunnable> runnable =
+    new DeprecationWarningRunnable(workerPrivate, aOperation);
+  runnable->Dispatch();
 }
 
 namespace binding_detail {
@@ -3309,7 +3360,7 @@ UnprivilegedJunkScopeOrWorkerGlobal()
     return xpc::UnprivilegedJunkScope();
   }
 
-  return workers::GetCurrentThreadWorkerGlobal();
+  return GetCurrentThreadWorkerGlobal();
 }
 } // namespace binding_detail
 

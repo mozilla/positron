@@ -33,6 +33,11 @@ const NOTIFY_TAB_RESTORED = "sessionstore-debug-tab-restored"; // WARNING: debug
 // the browser.sessionstore.max_concurrent_tabs pref.
 const MAX_CONCURRENT_TAB_RESTORES = 3;
 
+// Amount (in CSS px) by which we allow window edges to be off-screen
+// when restoring a window, before we override the saved position to
+// pull the window back within the available screen area.
+const SCREEN_EDGE_SLOP = 8;
+
 // global notifications observed
 const OBSERVING = [
   "browser-window-before-show", "domwindowclosed",
@@ -120,7 +125,7 @@ const CLOSED_MESSAGES = new Set([
 
 // These are tab events that we listen to.
 const TAB_EVENTS = [
-  "TabOpen", "TabClose", "TabSelect", "TabShow", "TabHide", "TabPinned",
+  "TabOpen", "TabBrowserCreated", "TabClose", "TabSelect", "TabShow", "TabHide", "TabPinned",
   "TabUnpinned"
 ];
 
@@ -672,7 +677,7 @@ var SessionStoreInternal = {
     // If we got here, that means we're dealing with a frame message
     // manager message, so the target will be a <xul:browser>.
     var browser = aMessage.target;
-    let win = browser.ownerDocument.defaultView;
+    let win = browser.ownerGlobal;
     let tab = win ? win.gBrowser.getTabForBrowser(browser) : null;
 
     // Ensure we receive only specific messages from <xul:browser>s that
@@ -784,7 +789,10 @@ var SessionStoreInternal = {
         // clear user input instead), so we shouldn't set them here either.
         // They also don't fall under the issues in bug 439675 where user input
         // needs to be preserved if the load doesn't succeed.
-        if (!browser.userTypedValue && uri && !win.gInitialPages.includes(uri)) {
+        // We also don't do this for remoteness updates, where it should not
+        // be necessary.
+        if (!browser.userTypedValue && uri && !data.isRemotenessUpdate &&
+            !win.gInitialPages.includes(uri)) {
           browser.userTypedValue = uri;
         }
 
@@ -882,11 +890,14 @@ var SessionStoreInternal = {
    * Implement nsIDOMEventListener for handling various window and tab events
    */
   handleEvent: function ssi_handleEvent(aEvent) {
-    let win = aEvent.currentTarget.ownerDocument.defaultView;
+    let win = aEvent.currentTarget.ownerGlobal;
     let target = aEvent.originalTarget;
     switch (aEvent.type) {
       case "TabOpen":
-        this.onTabAdd(win, target);
+        this.onTabAdd(win);
+        break;
+      case "TabBrowserCreated":
+        this.onTabBrowserCreated(win, target);
         break;
       case "TabClose":
         // `adoptedBy` will be set if the tab was closed because it is being
@@ -978,7 +989,7 @@ var SessionStoreInternal = {
 
     // add tab change listeners to all already existing tabs
     for (let i = 0; i < tabbrowser.tabs.length; i++) {
-      this.onTabAdd(aWindow, tabbrowser.tabs[i], true);
+      this.onTabBrowserCreated(aWindow, tabbrowser.tabs[i]);
     }
     // notification of tab add/remove/selection/show/hide
     TAB_EVENTS.forEach(function(aEvent) {
@@ -1480,22 +1491,33 @@ var SessionStoreInternal = {
    * @return Promise
    */
   flushAllWindowsAsync: Task.async(function*(progress={}) {
-    let windowPromises = [];
+    let windowPromises = new Map();
     // We collect flush promises and close each window immediately so that
     // the user can't start changing any window state while we're waiting
     // for the flushes to finish.
     this._forEachBrowserWindow((win) => {
-      windowPromises.push(TabStateFlusher.flushWindow(win));
-      win.close();
+      windowPromises.set(win, TabStateFlusher.flushWindow(win));
+
+      // We have to wait for these messages to come up from
+      // each window and each browser. In the meantime, hide
+      // the windows to improve perceived shutdown speed.
+      let baseWin = win.QueryInterface(Ci.nsIInterfaceRequestor)
+                       .getInterface(Ci.nsIDocShell)
+                       .QueryInterface(Ci.nsIDocShellTreeItem)
+                       .treeOwner
+                       .QueryInterface(Ci.nsIBaseWindow);
+      baseWin.visibility = false;
     });
 
-    progress.total = windowPromises.length;
+    progress.total = windowPromises.size;
+    progress.current = 0;
 
     // We'll iterate through the Promise array, yielding each one, so as to
     // provide useful progress information to AsyncShutdown.
-    for (let i = 0; i < windowPromises.length; ++i) {
-      progress.current = i;
-      yield windowPromises[i];
+    for (let [win, promise] of windowPromises) {
+      yield promise;
+      this._collectWindowData(win);
+      progress.current++;
     };
 
     // We must cache this because _getMostRecentBrowserWindow will always
@@ -1661,25 +1683,28 @@ var SessionStoreInternal = {
   },
 
   /**
+   * save state when new tab is added
+   * @param aWindow
+   *        Window reference
+   */
+  onTabAdd: function ssi_onTabAdd(aWindow) {
+    this.saveStateDelayed(aWindow);
+  },
+
+  /**
    * set up listeners for a new tab
    * @param aWindow
    *        Window reference
    * @param aTab
    *        Tab reference
-   * @param aNoNotification
-   *        bool Do not save state if we're updating an existing tab
    */
-  onTabAdd: function ssi_onTabAdd(aWindow, aTab, aNoNotification) {
+  onTabBrowserCreated: function ssi_onTabBrowserCreated(aWindow, aTab) {
     let browser = aTab.linkedBrowser;
     browser.addEventListener("SwapDocShells", this);
     browser.addEventListener("oop-browser-crashed", this);
 
     if (browser.frameLoader) {
       this._lastKnownFrameLoader.set(browser.permanentKey, browser.frameLoader);
-    }
-
-    if (!aNoNotification) {
-      this.saveStateDelayed(aWindow);
     }
   },
 
@@ -2026,7 +2051,7 @@ var SessionStoreInternal = {
   },
 
   getTabState: function ssi_getTabState(aTab) {
-    if (!aTab.ownerDocument.defaultView.__SSi) {
+    if (!aTab.ownerGlobal.__SSi) {
       throw Components.Exception("Default view is not tracked", Cr.NS_ERROR_INVALID_ARG);
     }
 
@@ -2051,7 +2076,7 @@ var SessionStoreInternal = {
       throw Components.Exception("Invalid state object: no entries", Cr.NS_ERROR_INVALID_ARG);
     }
 
-    let window = aTab.ownerDocument.defaultView;
+    let window = aTab.ownerGlobal;
     if (!("__SSi" in window)) {
       throw Components.Exception("Window is not tracked", Cr.NS_ERROR_INVALID_ARG);
     }
@@ -2064,7 +2089,7 @@ var SessionStoreInternal = {
   },
 
   duplicateTab: function ssi_duplicateTab(aWindow, aTab, aDelta = 0) {
-    if (!aTab.ownerDocument.defaultView.__SSi) {
+    if (!aTab.ownerGlobal.__SSi) {
       throw Components.Exception("Default view is not tracked", Cr.NS_ERROR_INVALID_ARG);
     }
     if (!aWindow.gBrowser) {
@@ -2093,7 +2118,7 @@ var SessionStoreInternal = {
         return;
       }
 
-      let window = newTab.ownerDocument && newTab.ownerDocument.defaultView;
+      let window = newTab.ownerGlobal;
 
       // The tab or its window might be gone.
       if (!window || !window.__SSi) {
@@ -2162,7 +2187,7 @@ var SessionStoreInternal = {
 
     // create a new tab
     let tabbrowser = aWindow.gBrowser;
-    let tab = tabbrowser.selectedTab = tabbrowser.addTab();
+    let tab = tabbrowser.selectedTab = tabbrowser.addTab(null, state);
 
     // restore tab content
     this.restoreTab(tab, state);
@@ -2280,13 +2305,13 @@ var SessionStoreInternal = {
     }
 
     aTab.__SS_extdata[aKey] = aStringValue;
-    this.saveStateDelayed(aTab.ownerDocument.defaultView);
+    this.saveStateDelayed(aTab.ownerGlobal);
   },
 
   deleteTabValue: function ssi_deleteTabValue(aTab, aKey) {
     if (aTab.__SS_extdata && aKey in aTab.__SS_extdata) {
       delete aTab.__SS_extdata[aKey];
-      this.saveStateDelayed(aTab.ownerDocument.defaultView);
+      this.saveStateDelayed(aTab.ownerGlobal);
     }
   },
 
@@ -2318,7 +2343,7 @@ var SessionStoreInternal = {
    * Restores the session state stored in LastSession. This will attempt
    * to merge data into the current session. If a window was opened at startup
    * with pinned tab(s), then the remaining data from the previous session for
-   * that window will be opened into that winddow. Otherwise new windows will
+   * that window will be opened into that window. Otherwise new windows will
    * be opened.
    */
   restoreLastSession: function ssi_restoreLastSession() {
@@ -2473,7 +2498,7 @@ var SessionStoreInternal = {
 
   /**
    * Navigate the given |tab| by first collecting its current state and then
-   * either changing only the index of the currently shown shistory entry,
+   * either changing only the index of the currently shown history entry,
    * or restoring the exact same state again and passing the new URL to load
    * in |loadArguments|. Use this method to seamlessly switch between pages
    * loaded in the parent and pages loaded in the child process.
@@ -2484,7 +2509,7 @@ var SessionStoreInternal = {
    * flush has finished.
    */
   navigateAndRestore(tab, loadArguments, historyIndex) {
-    let window = tab.ownerDocument.defaultView;
+    let window = tab.ownerGlobal;
     NS_ASSERT(window.__SSi, "tab's window must be tracked");
     let browser = tab.linkedBrowser;
 
@@ -2522,7 +2547,7 @@ var SessionStoreInternal = {
         return;
       }
 
-      let window = tab.ownerDocument && tab.ownerDocument.defaultView;
+      let window = tab.ownerGlobal;
 
       // The tab or its window might be gone.
       if (!window || !window.__SSi || window.closed) {
@@ -2920,12 +2945,30 @@ var SessionStoreInternal = {
     let numVisibleTabs = 0;
 
     for (var t = 0; t < newTabCount; t++) {
-      tabs.push(t < openTabCount ?
-                tabbrowser.tabs[t] :
-                tabbrowser.addTab("about:blank", {
-                  skipAnimation: true,
-                  forceNotRemote: true,
-                }));
+      // When trying to restore into existing tab, we also take the userContextId
+      // into account if present.
+      let userContextId = winData.tabs[t].userContextId;
+      let reuseExisting = t < openTabCount &&
+                          (tabbrowser.tabs[t].getAttribute("usercontextid") == (userContextId || ""));
+      // If the tab is pinned, then we'll be loading it right away, and
+      // there's no need to cause a remoteness flip by loading it initially
+      // non-remote.
+      let forceNotRemote = !winData.tabs[t].pinned;
+      let tab = reuseExisting ? tabbrowser.tabs[t] :
+                                tabbrowser.addTab("about:blank",
+                                                  {skipAnimation: true,
+                                                   forceNotRemote,
+                                                   userContextId});
+
+      // If we inserted a new tab because the userContextId didn't match with the
+      // open tab, even though `t < openTabCount`, we need to remove that open tab
+      // and put the newly added tab in its place.
+      if (!reuseExisting && t < openTabCount) {
+        tabbrowser.removeTab(tabbrowser.tabs[t]);
+        tabbrowser.moveTabTo(tab, t);
+      }
+
+      tabs.push(tab);
 
       if (winData.tabs[t].pinned)
         tabbrowser.pinTab(tabs[t]);
@@ -3167,7 +3210,7 @@ var SessionStoreInternal = {
     let restoreImmediately = options.restoreImmediately;
     let loadArguments = options.loadArguments;
     let browser = tab.linkedBrowser;
-    let window = tab.ownerDocument.defaultView;
+    let window = tab.ownerGlobal;
     let tabbrowser = window.gBrowser;
     let forceOnDemand = options.forceOnDemand;
 
@@ -3307,7 +3350,7 @@ var SessionStoreInternal = {
     }
 
     let browser = aTab.linkedBrowser;
-    let window = aTab.ownerDocument.defaultView;
+    let window = aTab.ownerGlobal;
     let tabbrowser = window.gBrowser;
     let tabData = TabState.clone(aTab);
     let activeIndex = tabData.index - 1;
@@ -3335,7 +3378,8 @@ var SessionStoreInternal = {
       browser.messageManager.sendAsyncMessage("SessionStore:restoreHistory", {
         tabData: tabData,
         epoch: epoch,
-        loadArguments: aLoadArguments
+        loadArguments: aLoadArguments,
+        isRemotenessUpdate,
       });
 
     }
@@ -3467,26 +3511,40 @@ var SessionStoreInternal = {
       // convert screen's device pixel dimensions to CSS px dimensions
       screen.GetAvailRect(screenLeft, screenTop, screenWidth, screenHeight);
       let cssToDevScale = screen.defaultCSSScaleFactor;
-      let screenWidthCss = screenWidth.value / cssToDevScale;
-      let screenHeightCss = screenHeight.value / cssToDevScale;
-      // constrain the dimensions to the actual space available
-      if (aWidth > screenWidthCss) {
-        aWidth = screenWidthCss;
-      }
-      if (aHeight > screenHeightCss) {
-        aHeight = screenHeightCss;
-      }
-      // and then pull the window within the screen's bounds
-      if (aLeft < screenLeftCss) {
+      let screenRightCss = screenLeftCss + screenWidth.value / cssToDevScale;
+      let screenBottomCss = screenTopCss + screenHeight.value / cssToDevScale;
+
+      // Pull the window within the screen's bounds (allowing a little slop
+      // for windows that may be deliberately placed with their border off-screen
+      // as when Win10 "snaps" a window to the left/right edge -- bug 1276516).
+      // First, ensure the left edge is large enough...
+      if (aLeft < screenLeftCss - SCREEN_EDGE_SLOP) {
         aLeft = screenLeftCss;
-      } else if (aLeft + aWidth > screenLeftCss + screenWidthCss) {
-        aLeft = screenLeftCss + screenWidthCss - aWidth;
       }
-      if (aTop < screenTopCss) {
+      // Then check the resulting right edge, and reduce it if necessary.
+      let right = aLeft + aWidth;
+      if (right > screenRightCss + SCREEN_EDGE_SLOP) {
+        right = screenRightCss;
+        // See if we can move the left edge leftwards to maintain width.
+        if (aLeft > screenLeftCss) {
+          aLeft = Math.max(right - aWidth, screenLeftCss);
+        }
+      }
+      // Finally, update aWidth to account for the adjusted left and right edges.
+      aWidth = right - aLeft;
+
+      // And do the same in the vertical dimension.
+      if (aTop < screenTopCss - SCREEN_EDGE_SLOP) {
         aTop = screenTopCss;
-      } else if (aTop + aHeight > screenTopCss + screenHeightCss) {
-        aTop = screenTopCss + screenHeightCss - aHeight;
       }
+      let bottom = aTop + aHeight;
+      if (bottom > screenBottomCss + SCREEN_EDGE_SLOP) {
+        bottom = screenBottomCss;
+        if (aTop > screenTopCss) {
+          aTop = Math.max(bottom - aHeight, screenTopCss);
+        }
+      }
+      aHeight = bottom - aTop;
     }
 
     // only modify those aspects which aren't correct yet
@@ -4087,7 +4145,7 @@ var SessionStoreInternal = {
     NS_ASSERT(aTab.linkedBrowser.__SS_restoreState,
               "given tab is not restoring");
 
-    let window = aTab.ownerDocument.defaultView;
+    let window = aTab.ownerGlobal;
     let browser = aTab.linkedBrowser;
 
     // Keep the tab's previous state for later in this method

@@ -20,7 +20,7 @@
 namespace js {
 namespace gc {
 
-void FinishGC(JSRuntime* rt);
+void FinishGC(JSContext* cx);
 
 /*
  * This class should be used by any code that needs to exclusive access to the
@@ -32,8 +32,9 @@ class MOZ_RAII AutoTraceSession
     explicit AutoTraceSession(JSRuntime* rt, JS::HeapState state = JS::HeapState::Tracing);
     ~AutoTraceSession();
 
-  protected:
     AutoLockForExclusiveAccess lock;
+
+  protected:
     JSRuntime* runtime;
 
   private:
@@ -44,11 +45,13 @@ class MOZ_RAII AutoTraceSession
     AutoSPSEntry pseudoFrame;
 };
 
-struct MOZ_RAII AutoPrepareForTracing
+class MOZ_RAII AutoPrepareForTracing
 {
-    mozilla::Maybe<AutoTraceSession> session;
+    mozilla::Maybe<AutoTraceSession> session_;
 
-    AutoPrepareForTracing(JSRuntime* rt, ZoneSelector selector);
+  public:
+    AutoPrepareForTracing(JSContext* cx, ZoneSelector selector);
+    AutoTraceSession& session() { return session_.ref(); }
 };
 
 class IncrementalSafety
@@ -141,26 +144,6 @@ struct MovingTracer : JS::CallbackTracer
 #ifdef DEBUG
     TracerKind getTracerKind() const override { return TracerKind::Moving; }
 #endif
-};
-
-class MOZ_RAII AutoMaybeStartBackgroundAllocation
-{
-  private:
-    JSRuntime* runtime;
-
-  public:
-    AutoMaybeStartBackgroundAllocation()
-      : runtime(nullptr)
-    {}
-
-    void tryToStartBackgroundAllocation(JSRuntime* rt) {
-        runtime = rt;
-    }
-
-    ~AutoMaybeStartBackgroundAllocation() {
-        if (runtime)
-            runtime->gc.startBackgroundAllocTaskIfIdle();
-    }
 };
 
 // In debug builds, set/unset the GC sweeping flag for the current thread.

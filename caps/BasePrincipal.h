@@ -33,7 +33,8 @@ public:
            mInIsolatedMozBrowser == aOther.mInIsolatedMozBrowser &&
            mAddonId == aOther.mAddonId &&
            mUserContextId == aOther.mUserContextId &&
-           mSignedPkg == aOther.mSignedPkg;
+           mSignedPkg == aOther.mSignedPkg &&
+           mPrivateBrowsingId == aOther.mPrivateBrowsingId;
   }
   bool operator!=(const OriginAttributes& aOther) const
   {
@@ -50,6 +51,10 @@ public:
   // |uri!key1=value1&key2=value2| and returns the uri without the suffix.
   bool PopulateFromOrigin(const nsACString& aOrigin,
                           nsACString& aOriginNoSuffix);
+
+  // Helper function to match mIsPrivateBrowsing to existing private browsing
+  // flags. Once all other flags are removed, this can be removed too.
+  void SyncAttributesWithPrivateBrowsing(bool aInPrivateBrowsing);
 
 protected:
   OriginAttributes() {}
@@ -172,6 +177,46 @@ public:
     }
 
     if (mSignedPkg.WasPassed() && mSignedPkg.Value() != aAttrs.mSignedPkg) {
+      return false;
+    }
+
+    if (mPrivateBrowsingId.WasPassed() && mPrivateBrowsingId.Value() != aAttrs.mPrivateBrowsingId) {
+      return false;
+    }
+
+    return true;
+  }
+
+  bool Overlaps(const OriginAttributesPattern& aOther) const
+  {
+    if (mAppId.WasPassed() && aOther.mAppId.WasPassed() &&
+        mAppId.Value() != aOther.mAppId.Value()) {
+      return false;
+    }
+
+    if (mInIsolatedMozBrowser.WasPassed() &&
+        aOther.mInIsolatedMozBrowser.WasPassed() &&
+        mInIsolatedMozBrowser.Value() != aOther.mInIsolatedMozBrowser.Value()) {
+      return false;
+    }
+
+    if (mAddonId.WasPassed() && aOther.mAddonId.WasPassed() &&
+        mAddonId.Value() != aOther.mAddonId.Value()) {
+      return false;
+    }
+
+    if (mUserContextId.WasPassed() && aOther.mUserContextId.WasPassed() &&
+        mUserContextId.Value() != aOther.mUserContextId.Value()) {
+      return false;
+    }
+
+    if (mSignedPkg.WasPassed() && aOther.mSignedPkg.WasPassed() &&
+        mSignedPkg.Value() != aOther.mSignedPkg.Value()) {
+      return false;
+    }
+
+    if (mPrivateBrowsingId.WasPassed() && aOther.mPrivateBrowsingId.WasPassed() &&
+        mPrivateBrowsingId.Value() != aOther.mPrivateBrowsingId.Value()) {
       return false;
     }
 

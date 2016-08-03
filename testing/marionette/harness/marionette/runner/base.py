@@ -4,11 +4,13 @@
 
 from argparse import ArgumentParser
 
+from copy import deepcopy
 import json
 import mozinfo
 import moznetwork
 import os
 import random
+import re
 import socket
 import sys
 import time
@@ -21,7 +23,6 @@ import mozprofile
 from manifestparser import TestManifest
 from manifestparser.filters import tags
 from marionette_driver.marionette import Marionette
-from mixins.b2g import B2GTestResultMixin, get_b2g_pid, get_dm
 from mozlog import get_default_logger
 from moztest.adapters.unit import StructuredTestRunner, StructuredTestResult
 from moztest.results import TestResultCollection, TestResult, relevant_line
@@ -67,14 +68,6 @@ class MarionetteTestResult(StructuredTestResult, TestResultCollection):
         self.passed = 0
         self.testsRun = 0
         self.result_modifiers = [] # used by mixins to modify the result
-        pid = kwargs.pop('b2g_pid')
-        logcat_stdout = kwargs.pop('logcat_stdout')
-        if pid:
-            if B2GTestResultMixin not in self.__class__.__bases__:
-                bases = [b for b in self.__class__.__bases__]
-                bases.append(B2GTestResultMixin)
-                self.__class__.__bases__ = tuple(bases)
-            B2GTestResultMixin.__init__(self, b2g_pid=pid, logcat_stdout=logcat_stdout)
         StructuredTestResult.__init__(self, *args, **kwargs)
 
     @property
@@ -228,35 +221,18 @@ class MarionetteTextTestRunner(StructuredTestRunner):
     def __init__(self, **kwargs):
         self.marionette = kwargs.pop('marionette')
         self.capabilities = kwargs.pop('capabilities')
-        self.pre_run_functions = []
-        self.b2g_pid = None
-        self.logcat_stdout = kwargs.pop('logcat_stdout')
-
-        if self.capabilities["device"] != "desktop" and self.capabilities["browserName"] == "B2G":
-            def b2g_pre_run():
-                dm_type = os.environ.get('DM_TRANS', 'adb')
-                if dm_type == 'adb':
-                    self.b2g_pid = get_b2g_pid(get_dm(self.marionette))
-            self.pre_run_functions.append(b2g_pre_run)
 
         StructuredTestRunner.__init__(self, **kwargs)
-
 
     def _makeResult(self):
         return self.resultclass(self.stream,
                                 self.descriptions,
                                 self.verbosity,
                                 marionette=self.marionette,
-                                b2g_pid=self.b2g_pid,
                                 logger=self.logger,
-                                logcat_stdout=self.logcat_stdout,
                                 result_callbacks=self.result_callbacks)
 
     def run(self, test):
-        "Run the given test case or test suite."
-        for pre_run_func in self.pre_run_functions:
-            pre_run_func()
-
         result = super(MarionetteTextTestRunner, self).run(test)
         result.printLogs(test)
         return result
@@ -278,66 +254,29 @@ class BaseMarionetteArguments(ArgumentParser):
         self.add_argument('tests',
                           nargs='*',
                           default=[],
-                          help='Tests to run.')
-        self.add_argument('-v', '--verbose',
-                        action='count',
-                        help='Increase verbosity to include debug messages with -v, '
-                            'and trace messages with -vv.')
-        self.add_argument('--emulator',
-                        choices=['x86', 'arm'],
-                        help='if no --address is given, then the harness will launch a B2G emulator on which to run '
-                             'emulator tests. if --address is given, then the harness assumes you are running an '
-                             'emulator already, and will run the emulator tests using that emulator. you need to '
-                             'specify which architecture to emulate for both cases')
-        self.add_argument('--emulator-binary',
-                        help='launch a specific emulator binary rather than launching from the B2G built emulator')
-        self.add_argument('--emulator-img',
-                        help='use a specific image file instead of a fresh one')
-        self.add_argument('--emulator-res',
-                        help='set a custom resolution for the emulator'
-                             'Example: "480x800"')
-        self.add_argument('--sdcard',
-                        help='size of sdcard to create for the emulator')
-        self.add_argument('--no-window',
-                        action='store_true',
-                        default=False,
-                        help='when Marionette launches an emulator, start it with the -no-window argument')
-        self.add_argument('--logcat-dir',
-                        dest='logdir',
-                        help='directory to store logcat dump files',
-                        type=dir_path)
-        self.add_argument('--logcat-stdout',
-                        action='store_true',
-                        default=False,
-                        help='dump adb logcat to stdout')
+                          help='Tests to run. '
+                               'One or more paths to test files (Python or JS), '
+                               'manifest files (.ini) or directories. '
+                               'When a directory is specified, '
+                               'all test files in the directory will be run.')
+        self.add_argument('--binary',
+                        help='path to gecko executable to launch before running the test')
         self.add_argument('--address',
                         help='host:port of running Gecko instance to connect to')
-        self.add_argument('--device',
-                        dest='device_serial',
-                        help='serial ID of a device to use for adb / fastboot')
-        self.add_argument('--adb-host',
-                        help='host to use for adb connection')
-        self.add_argument('--adb-port',
-                        help='port to use for adb connection')
-        self.add_argument('--type',
-                        help="the type of test to run, can be a combination of values defined in the manifest file; "
-                             "individual values are combined with '+' or '-' characters. for example: 'browser+b2g' "
-                             "means the set of tests which are compatible with both browser and b2g; 'b2g-qemu' means "
-                             "the set of tests which are compatible with b2g but do not require an emulator. this "
-                             "argument is only used when loading tests from manifest files")
-        self.add_argument('--homedir',
-                        help='home directory of emulator files')
+        self.add_argument('--emulator',
+                        action='store_true',
+                        help='If no --address is given, then the harness will launch an emulator. (See Remote options group.) '
+                             'If --address is given, then the harness assumes you are running an '
+                             'emulator already, and will launch gecko app on  that emulator.')
         self.add_argument('--app',
-                        help='application to use')
+                        help='application to use. see marionette_driver.geckoinstance')
         self.add_argument('--app-arg',
                         dest='app_args',
                         action='append',
                         default=[],
                         help='specify a command line argument to be passed onto the application')
-        self.add_argument('--binary',
-                        help='gecko executable to launch before running the test')
         self.add_argument('--profile',
-                        help='profile to use when launching the gecko process. if not passed, then a profile will be '
+                        help='profile to use when launching the gecko process. If not passed, then a profile will be '
                              'constructed and used',
                         type=dir_path)
         self.add_argument('--pref',
@@ -361,9 +300,6 @@ class BaseMarionetteArguments(ArgumentParser):
         self.add_argument('--testvars',
                         action='append',
                         help='path to a json file with any test data required')
-        self.add_argument('--tree',
-                        default='b2g',
-                        help='the tree that the revision parameter refers to')
         self.add_argument('--symbols-path',
                         help='absolute path to directory containing breakpad symbols, or the url of a zip file containing symbols')
         self.add_argument('--timeout',
@@ -429,6 +365,11 @@ class BaseMarionetteArguments(ArgumentParser):
                           help="Path to directory for Marionette output. "
                                "(Default: .) (Default profile dest: TMP)",
                           type=dir_path)
+        self.add_argument('-v', '--verbose',
+                        action='count',
+                        help='Increase verbosity to include debug messages with -v, '
+                            'and trace messages with -vv.')
+        self.register_argument_container(RemoteMarionetteArguments())
 
     def register_argument_container(self, container):
         group = self.add_argument_group(container.name)
@@ -438,12 +379,12 @@ class BaseMarionetteArguments(ArgumentParser):
 
         self.argument_containers.append(container)
 
-    def parse_args(self, args=None, values=None):
-        args = ArgumentParser.parse_args(self, args, values)
+    def parse_known_args(self, args=None, namespace=None):
+        args, remainder = ArgumentParser.parse_known_args(self, args, namespace)
         for container in self.argument_containers:
             if hasattr(container, 'parse_args_handler'):
                 container.parse_args_handler(args)
-        return args
+        return (args, remainder)
 
     def _get_preferences(self, prefs_files, prefs_args):
         """
@@ -460,11 +401,15 @@ class BaseMarionetteArguments(ArgumentParser):
         separator = ':'
         cli_prefs = []
         if prefs_args:
+            misformatted = []
             for pref in prefs_args:
                 if separator not in pref:
-                    continue
-                cli_prefs.append(pref.split(separator, 1))
-
+                    misformatted.append(pref)
+                else:
+                    cli_prefs.append(pref.split(separator, 1))
+            if misformatted:
+                self._print_message("Warning: Ignoring preferences not in key{}value format: {}\n"
+                                    .format(separator, ", ".join(misformatted)))
         # string preferences
         prefs.add(cli_prefs, cast=True)
 
@@ -472,33 +417,14 @@ class BaseMarionetteArguments(ArgumentParser):
 
     def verify_usage(self, args):
         if not args.tests:
-            print 'must specify one or more test files, manifests, or directories'
-            sys.exit(1)
+            self.error('You must specify one or more test files, manifests, or directories.')
 
-        for path in args.tests:
-            if not os.path.exists(path):
-                print '{0} does not exist'.format(path)
-                sys.exit(1)
+        missing_tests = [path for path in args.tests if not os.path.exists(path)]
+        if missing_tests:
+            self.error("Test file(s) not found: " + " ".join([path for path in missing_tests]))
 
-        if not args.emulator and not args.address and not args.binary:
-            print 'must specify --binary, --emulator or --address'
-            sys.exit(1)
-
-        if args.emulator and args.binary:
-            print 'can\'t specify both --emulator and --binary'
-            sys.exit(1)
-
-        # check for valid resolution string, strip whitespaces
-        try:
-            if args.emulator_res:
-                dims = args.emulator_res.split('x')
-                assert len(dims) == 2
-                width = str(int(dims[0]))
-                height = str(int(dims[1]))
-                args.emulator_res = 'x'.join([width, height])
-        except:
-            raise ValueError('Invalid emulator resolution format. '
-                             'Should be like "480x800".')
+        if not args.address and not args.binary and not args.emulator:
+            self.error('You must specify --binary, or --address, or --emulator')
 
         if args.total_chunks is not None and args.this_chunk is None:
             self.error('You must specify which chunk to run.')
@@ -507,7 +433,7 @@ class BaseMarionetteArguments(ArgumentParser):
             self.error('You must specify how many chunks to split the tests into.')
 
         if args.total_chunks is not None:
-            if not 1 <= args.total_chunks:
+            if not 1 < args.total_chunks:
                 self.error('Total chunks must be greater than 1.')
             if not 1 <= args.this_chunk <= args.total_chunks:
                 self.error('Chunk to run must be between 1 and %s.' % args.total_chunks)
@@ -521,6 +447,7 @@ class BaseMarionetteArguments(ArgumentParser):
         if args.e10s:
             args.prefs.update({
                 'browser.tabs.remote.autostart': True,
+                'browser.tabs.remote.force-enable': True,
                 'extensions.e10sBlocksEnabling': False
             })
 
@@ -530,57 +457,69 @@ class BaseMarionetteArguments(ArgumentParser):
 
         return args
 
+class RemoteMarionetteArguments(object):
+    name = 'Remote (Emulator/Device)'
+    args = [
+        [['--emulator-binary'],
+         {'help': 'Path to emulator binary. By default mozrunner uses `which emulator`',
+          'dest': 'emulator_bin',
+          }],
+        [['--adb'],
+         {'help': 'Path to the adb. By default mozrunner uses `which adb`',
+          'dest': 'adb_path'
+          }],
+        [['--avd'],
+         {'help': ('Name of an AVD available in your environment.'
+                   'See mozrunner.FennecEmulatorRunner'),
+          }],
+        [['--avd-home'],
+         {'help': 'Path to avd parent directory',
+          }],
+        [['--device'],
+         {'help': ('Serial ID to connect to as seen in `adb devices`,'
+                   'e.g emulator-5444'),
+          'dest': 'device_serial',
+          }],
+    ]
 
 class BaseMarionetteTestRunner(object):
 
     textrunnerclass = MarionetteTextTestRunner
     driverclass = Marionette
 
-    def __init__(self, address=None, emulator=None, emulator_binary=None,
-                 emulator_img=None, emulator_res='480x800', homedir=None,
+    def __init__(self, address=None,
                  app=None, app_args=None, binary=None, profile=None,
-                 logger=None, no_window=False, logdir=None, logcat_stdout=False,
-                 repeat=0, testvars=None, tree=None, type=None,
-                 device_serial=None, symbols_path=None, timeout=None,
-                 shuffle=False, shuffle_seed=random.randint(0, sys.maxint),
-                 sdcard=None, this_chunk=1, total_chunks=1, sources=None,
+                 logger=None, logdir=None,
+                 repeat=0, testvars=None,
+                 symbols_path=None, timeout=None,
+                 shuffle=False, shuffle_seed=random.randint(0, sys.maxint), this_chunk=1, total_chunks=1, sources=None,
                  server_root=None, gecko_log=None, result_callbacks=None,
-                 adb_host=None, adb_port=None, prefs=None, test_tags=None,
+                 prefs=None, test_tags=None,
                  socket_timeout=BaseMarionetteArguments.socket_timeout_default,
                  startup_timeout=None, addons=None, workspace=None,
-                 verbose=0, e10s=True, **kwargs):
+                 verbose=0, e10s=True, emulator=False, **kwargs):
+        self.extra_kwargs = kwargs
+        self.test_kwargs = deepcopy(kwargs)
         self.address = address
-        self.emulator = emulator
-        self.emulator_binary = emulator_binary
-        self.emulator_img = emulator_img
-        self.emulator_res = emulator_res
-        self.homedir = homedir
         self.app = app
         self.app_args = app_args or []
         self.bin = binary
+        self.emulator = emulator
         self.profile = profile
         self.addons = addons
         self.logger = logger
-        self.no_window = no_window
         self.httpd = None
         self.marionette = None
         self.logdir = logdir
-        self.logcat_stdout = logcat_stdout
         self.repeat = repeat
-        self.test_kwargs = kwargs
-        self.tree = tree
-        self.type = type
-        self.device_serial = device_serial
         self.symbols_path = symbols_path
         self.timeout = timeout
         self.socket_timeout = socket_timeout
-        self._device = None
         self._capabilities = None
         self._appinfo = None
         self._appName = None
         self.shuffle = shuffle
         self.shuffle_seed = shuffle_seed
-        self.sdcard = sdcard
         self.sources = sources
         self.server_root = server_root
         self.this_chunk = this_chunk
@@ -589,17 +528,16 @@ class BaseMarionetteTestRunner(object):
         self.manifest_skipped_tests = []
         self.tests = []
         self.result_callbacks = result_callbacks or []
-        self._adb_host = adb_host
-        self._adb_port = adb_port
         self.prefs = prefs or {}
         self.test_tags = test_tags
         self.startup_timeout = startup_timeout
         self.workspace = workspace
-        # If no workspace is set, default location for logcat and gecko.log is .
+        # If no workspace is set, default location for gecko.log is .
         # and default location for profile is TMP
         self.workspace_path = workspace or os.getcwd()
         self.verbose = verbose
         self.e10s = e10s
+        self._filename_pattern = None
 
         def gather_debug(test, status):
             rv = {}
@@ -630,15 +568,19 @@ class BaseMarionetteTestRunner(object):
         self.logger.info('Using workspace for temporary data: '
                          '"{}"'.format(self.workspace_path))
 
-        if self.emulator and not self.logdir:
-            self.logdir = os.path.join(self.workspace_path or '', 'logcat')
-
         if not gecko_log:
             self.gecko_log = os.path.join(self.workspace_path or '', 'gecko.log')
         else:
             self.gecko_log = gecko_log
 
         self.results = []
+
+    @property
+    def filename_pattern(self):
+        if self._filename_pattern is None:
+            self._filename_pattern = re.compile("^test(((_.+?)+?\.((py)|(js)))|(([A-Z].*?)+?\.js))$")
+
+        return self._filename_pattern
 
     @property
     def testvars(self):
@@ -706,14 +648,6 @@ class BaseMarionetteTestRunner(object):
         return self._appinfo
 
     @property
-    def device(self):
-        if self._device:
-            return self._device
-
-        self._device = self.capabilities.get('device')
-        return self._device
-
-    @property
     def appName(self):
         if self._appName:
             return self._appName
@@ -754,32 +688,36 @@ class BaseMarionetteTestRunner(object):
             os.mkdir(self.logdir)
 
         kwargs = {
-            'device_serial': self.device_serial,
-            'symbols_path': self.symbols_path,
             'timeout': self.timeout,
             'socket_timeout': self.socket_timeout,
-            'adb_host': self._adb_host,
-            'adb_port': self._adb_port,
             'prefs': self.prefs,
             'startup_timeout': self.startup_timeout,
             'verbose': self.verbose,
+            'symbols_path': self.symbols_path,
         }
-        if self.bin:
+        if self.bin or self.emulator:
             kwargs.update({
                 'host': 'localhost',
                 'port': 2828,
                 'app': self.app,
                 'app_args': self.app_args,
-                'bin': self.bin,
                 'profile': self.profile,
                 'addons': self.addons,
                 'gecko_log': self.gecko_log,
+                # ensure Marionette class takes care of starting gecko instance
+                'bin': True,
             })
+
+        if self.bin:
+            kwargs.update({
+                'bin': self.bin,
+        })
 
         if self.emulator:
             kwargs.update({
-                'homedir': self.homedir,
-                'logdir': self.logdir,
+                'avd_home': self.extra_kwargs.get('avd_home'),
+                'adb_path': self.extra_kwargs.get('adb_path'),
+                'emulator_binary': self.extra_kwargs.get('emulator_bin'),
             })
 
         if self.address:
@@ -789,9 +727,10 @@ class BaseMarionetteTestRunner(object):
                 'port': int(port),
             })
             if self.emulator:
-                kwargs['connectToRunningEmulator'] = True
-
-            if not self.bin:
+                kwargs.update({
+                    'connect_to_running_emulator': True,
+                })
+            if not self.bin and not self.emulator:
                 try:
                     #establish a socket connection so we can vertify the data come back
                     connection = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
@@ -799,21 +738,9 @@ class BaseMarionetteTestRunner(object):
                     connection.close()
                 except Exception, e:
                     raise Exception("Connection attempt to %s:%s failed with error: %s" %(host,port,e))
-        elif self.emulator:
-            kwargs.update({
-                'emulator': self.emulator,
-                'emulator_binary': self.emulator_binary,
-                'emulator_img': self.emulator_img,
-                'emulator_res': self.emulator_res,
-                'no_window': self.no_window,
-                'sdcard': self.sdcard,
-            })
         if self.workspace:
             kwargs['workspace'] = self.workspace_path
         return kwargs
-
-    def start_marionette(self):
-        self.marionette = self.driverclass(**self._build_kwargs())
 
     def launch_test_container(self):
         if self.marionette.session is None:
@@ -871,22 +798,24 @@ setReq.onerror = function() {
             traceback.print_exc()
         return crash
 
-    def run_tests(self, tests):
+    def _initialize_test_run(self, tests):
         assert len(tests) > 0
         assert len(self.test_handlers) > 0
         self.reset_test_stats()
-        self.start_time = time.time()
 
+    def _start_marionette(self):
         need_external_ip = True
         if not self.marionette:
-            self.start_marionette()
+            self.marionette = self.driverclass(**self._build_kwargs())
             # if we're working against a desktop version, we usually don't need
             # an external ip
-            if self.capabilities['device'] == "desktop":
+            if self.appName != 'Fennec':
                 need_external_ip = False
         self.logger.info('Initial Profile Destination is '
                          '"{}"'.format(self.marionette.profile_path))
+        return need_external_ip
 
+    def _set_baseurl(self, need_external_ip):
         # Gaia sets server_root and that means we shouldn't spin up our own httpd
         if not self.httpd:
             if self.server_root is None or os.path.isdir(self.server_root):
@@ -898,41 +827,22 @@ setReq.onerror = function() {
                 self.marionette.baseurl = self.server_root
                 self.logger.info("using remote content from %s" % self.marionette.baseurl)
 
-        device_info = None
-        if self.capabilities['device'] != 'desktop' and self.capabilities['browserName'] == 'B2G':
-            dm = get_dm(self.marionette)
-            device_info = dm.getInfo()
-            # Add Android version (SDK level) to mozinfo so that manifest entries
-            # can be conditional on android_version.
-            androidVersion = dm.shellCheckOutput(['getprop', 'ro.build.version.sdk'])
-            self.logger.info(
-                "Android sdk version '%s'; will use this to filter manifests" % androidVersion)
-            mozinfo.info['android_version'] = androidVersion
-
+    def _add_tests(self, tests):
         for test in tests:
             self.add_test(test)
 
-        # ensure we have only tests files with names starting with 'test_'
-        invalid_tests = \
-            [t['filepath'] for t in self.tests
-             if not os.path.basename(t['filepath']).startswith('test_')]
+        invalid_tests = [t['filepath'] for t in self.tests if not self._is_filename_valid(t['filepath'])]
         if invalid_tests:
-            raise Exception("Tests file names must starts with 'test_'."
+            raise Exception("Test file names must be of the form "
+                            "'test_something.py', 'test_something.js', or 'testSomething.js'."
                             " Invalid test names:\n  %s"
                             % '\n  '.join(invalid_tests))
 
-        self.logger.info("running with e10s: {}".format(self.e10s))
-        version_info = mozversion.get_version(binary=self.bin,
-                                              sources=self.sources,
-                                              dm_type=os.environ.get('DM_TRANS', 'adb'),
-                                              device_serial=self.device_serial,
-                                              adb_host=self.marionette.adb_host,
-                                              adb_port=self.marionette.adb_port)
+    def _is_filename_valid(self, filename):
+        filename = os.path.basename(filename)
+        return self.filename_pattern.match(filename)
 
-        self.logger.suite_start(self.tests,
-                                version_info=version_info,
-                                device_info=device_info)
-
+    def _log_skipped_tests(self):
         for test in self.manifest_skipped_tests:
             name = os.path.basename(test['path'])
             self.logger.test_start(name)
@@ -941,13 +851,43 @@ setReq.onerror = function() {
                                  message=test['disabled'])
             self.todo += 1
 
+    def run_tests(self, tests):
+        start_time = time.time()
+        self._initialize_test_run(tests)
+
+        need_external_ip = self._start_marionette()
+        self._set_baseurl(need_external_ip)
+
+        self._add_tests(tests)
+
+        device_info = None
+        if self.marionette.instance and self.emulator:
+            try:
+                device_info = self.marionette.instance.runner.device.dm.getInfo()
+            except Exception:
+                self.logger.warning('Could not get device info.')
+
+		#TODO Get version_info in Fennec case
+        version_info = None
+        if self.bin:
+            version_info = mozversion.get_version(binary=self.bin,
+                                                  sources=self.sources)
+
+        self.logger.info("running with e10s: {}".format(self.e10s))
+
+        self.logger.suite_start(self.tests,
+                                version_info=version_info,
+                                device_info=device_info)
+
+        self._log_skipped_tests()
+
         interrupted = None
         try:
             counter = self.repeat
             while counter >=0:
-                round = self.repeat - counter
-                if round > 0:
-                    self.logger.info('\nREPEAT %d\n-------' % round)
+                round_num = self.repeat - counter
+                if round_num > 0:
+                    self.logger.info('\nREPEAT %d\n-------' % round_num)
                 self.run_test_sets()
                 counter -= 1
         except KeyboardInterrupt:
@@ -957,6 +897,21 @@ setReq.onerror = function() {
             interrupted = sys.exc_info()
         try:
             self._print_summary(tests)
+            self.record_crash()
+            self.elapsedtime = time.time() - start_time
+
+            if self.marionette.instance:
+                self.marionette.instance.close()
+                self.marionette.instance = None
+            self.marionette.cleanup()
+
+            for run_tests in self.mixin_run_tests:
+                run_tests(tests)
+            if self.shuffle:
+                self.logger.info("Using seed where seed is:%d" % self.shuffle_seed)
+
+            self.logger.info('mode: {}'.format('e10s' if self.e10s else 'non-e10s'))
+            self.logger.suite_end()
         except:
             # raise only the exception if we were not interrupted
             if not interrupted:
@@ -983,24 +938,6 @@ setReq.onerror = function() {
             for failed_test in self.failures:
                 self.logger.info('%s' % failed_test[0])
 
-        self.record_crash()
-        self.end_time = time.time()
-        self.elapsedtime = self.end_time - self.start_time
-
-        if self.marionette.instance:
-            self.marionette.instance.close()
-            self.marionette.instance = None
-
-        self.marionette.cleanup()
-
-        for run_tests in self.mixin_run_tests:
-            run_tests(tests)
-        if self.shuffle:
-            self.logger.info("Using seed where seed is:%d" % self.shuffle_seed)
-
-        self.logger.info('mode: {}'.format('e10s' if self.e10s else 'non-e10s'))
-        self.logger.suite_end()
-
     def start_httpd(self, need_external_ip):
         warnings.warn("start_httpd has been deprecated in favour of create_httpd",
             DeprecationWarning)
@@ -1021,24 +958,16 @@ setReq.onerror = function() {
         if os.path.isdir(filepath):
             for root, dirs, files in os.walk(filepath):
                 for filename in files:
-                    if (filename.startswith('test_') and
-                        (filename.endswith('.py') or filename.endswith('.js'))):
-                        filepath = os.path.join(root, filename)
-                        self.add_test(filepath)
+                    if filename.endswith('.ini'):
+                        msg_tmpl = ("Ignoring manifest '{0}'; running all tests in '{1}'."
+                                    " See --help for details.")
+                        relpath = os.path.relpath(os.path.join(root, filename), filepath)
+                        self.logger.warning(msg_tmpl.format(relpath, filepath))
+                    elif self._is_filename_valid(filename):
+                        test_file = os.path.join(root, filename)
+                        self.add_test(test_file)
             return
 
-        testargs = {}
-        if self.type is not None:
-            testtypes = self.type.replace('+', ' +').replace('-', ' -').split()
-            for atype in testtypes:
-                if atype.startswith('+'):
-                    testargs.update({ atype[1:]: 'true' })
-                elif atype.startswith('-'):
-                    testargs.update({ atype[1:]: 'false' })
-                else:
-                    testargs.update({ atype: 'true' })
-
-        testarg_b2g = bool(testargs.get('b2g'))
 
         file_ext = os.path.splitext(os.path.split(filepath)[-1])[1]
 
@@ -1054,7 +983,6 @@ setReq.onerror = function() {
             manifest_tests = manifest.active_tests(exists=False,
                                                    disabled=True,
                                                    filters=filters,
-                                                   device=self.device,
                                                    app=self.appName,
                                                    e10s=self.e10s,
                                                    **mozinfo.info)
@@ -1063,18 +991,12 @@ setReq.onerror = function() {
                                   "combination of filters: {}".format(
                                        manifest.fmt_filters()))
 
-            unfiltered_tests = []
+            target_tests = []
             for test in manifest_tests:
                 if test.get('disabled'):
                     self.manifest_skipped_tests.append(test)
                 else:
-                    unfiltered_tests.append(test)
-
-            target_tests = manifest.get(tests=unfiltered_tests, **testargs)
-            for test in unfiltered_tests:
-                if test['path'] not in [x['path'] for x in target_tests]:
-                    test.setdefault('disabled', 'filtered by type (%s)' % self.type)
-                    self.manifest_skipped_tests.append(test)
+                    target_tests.append(test)
 
             for i in target_tests:
                 if not os.path.exists(i["path"]):
@@ -1082,11 +1004,6 @@ setReq.onerror = function() {
 
                 file_ext = os.path.splitext(os.path.split(i['path'])[-1])[-1]
                 test_container = None
-                if i.get('test_container') and testarg_b2g:
-                    if i.get('test_container') == "true":
-                        test_container = True
-                    elif i.get('test_container') == "false":
-                        test_container = False
 
                 self.add_test(i["path"], i["expected"], test_container)
             return
@@ -1115,7 +1032,6 @@ setReq.onerror = function() {
             runner = self.textrunnerclass(logger=self.logger,
                                           marionette=self.marionette,
                                           capabilities=self.capabilities,
-                                          logcat_stdout=self.logcat_stdout,
                                           result_callbacks=self.result_callbacks)
 
             if test_container:

@@ -130,14 +130,10 @@ AnimationEffectTiming::SetDirection(const PlaybackDirection& aDirection)
 }
 
 void
-AnimationEffectTiming::SetEasing(JSContext* aCx,
-                                 const nsAString& aEasing,
-                                 ErrorResult& aRv)
+AnimationEffectTiming::SetEasing(const nsAString& aEasing, ErrorResult& aRv)
 {
   Maybe<ComputedTimingFunction> newFunction =
-    TimingParams::ParseEasing(aEasing,
-                              AnimationUtils::GetCurrentRealmDocument(aCx),
-                              aRv);
+    TimingParams::ParseEasing(aEasing, mDocument, aRv);
   if (aRv.Failed()) {
     return;
   }

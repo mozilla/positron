@@ -17,14 +17,14 @@
 #include "gfxPrefs.h"
 #include "gfxCrashReporterUtils.h"
 #include "mozilla/layers/CompositorBridgeParent.h"
-#include "mozilla/widget/WinCompositorWidgetProxy.h"
+#include "mozilla/widget/WinCompositorWidget.h"
 
 namespace mozilla {
 namespace layers {
 
 using namespace mozilla::gfx;
 
-CompositorD3D9::CompositorD3D9(CompositorBridgeParent* aParent, widget::CompositorWidgetProxy* aWidget)
+CompositorD3D9::CompositorD3D9(CompositorBridgeParent* aParent, widget::CompositorWidget* aWidget)
   : Compositor(aWidget, aParent)
   , mDeviceResetCount(0)
   , mFailedResetAttempts(0)
@@ -38,25 +38,29 @@ CompositorD3D9::~CompositorD3D9()
 }
 
 bool
-CompositorD3D9::Initialize()
+CompositorD3D9::Initialize(nsCString* const out_failureReason)
 {
   ScopedGfxFeatureReporter reporter("D3D9 Layers");
 
   mDeviceManager = gfxWindowsPlatform::GetPlatform()->GetD3D9DeviceManager();
   if (!mDeviceManager) {
+    *out_failureReason = "FEATURE_FAILURE_D3D9_DEVICE_MANAGER";
     return false;
   }
 
-  mSwapChain = mDeviceManager->CreateSwapChain(mWidget->AsWindowsProxy()->GetHwnd());
+  mSwapChain = mDeviceManager->CreateSwapChain(mWidget->AsWindows()->GetHwnd());
   if (!mSwapChain) {
+    *out_failureReason = "FEATURE_FAILURE_D3D9_SWAP_CHAIN";
     return false;
   }
 
   if (!mWidget->InitCompositor(this)) {
+    *out_failureReason = "FEATURE_FAILURE_D3D9_INIT_COMPOSITOR";
     return false;
   }
 
   reporter.SetSuccessful();
+
   return true;
 }
 
@@ -363,7 +367,7 @@ CompositorD3D9::DrawQuad(const gfx::Rect &aRect,
                                              textureCoords.height),
                                            1);
 
-      SetSamplerForFilter(texturedEffect->mFilter);
+      SetSamplerForSamplingFilter(texturedEffect->mSamplingFilter);
 
       TextureSourceD3D9* source = texturedEffect->mTexture->AsSourceD3D9();
       d3d9Device->SetTexture(0, source->GetD3D9Texture());
@@ -381,7 +385,7 @@ CompositorD3D9::DrawQuad(const gfx::Rect &aRect,
       EffectYCbCr* ycbcrEffect =
         static_cast<EffectYCbCr*>(aEffectChain.mPrimaryEffect.get());
 
-      SetSamplerForFilter(Filter::LINEAR);
+      SetSamplerForSamplingFilter(SamplingFilter::LINEAR);
 
       Rect textureCoords = ycbcrEffect->mTextureCoords;
       d3d9Device->SetVertexShaderConstantF(CBvTextureCoords,
@@ -479,7 +483,7 @@ CompositorD3D9::DrawQuad(const gfx::Rect &aRect,
                                              textureCoords.height),
                                            1);
 
-      SetSamplerForFilter(effectComponentAlpha->mFilter);
+      SetSamplerForSamplingFilter(effectComponentAlpha->mSamplingFilter);
 
       maskTexture = mDeviceManager->SetShaderMode(DeviceManagerD3D9::COMPONENTLAYERPASS1, maskType);
       SetMask(aEffectChain, maskTexture);
@@ -590,7 +594,7 @@ CompositorD3D9::EnsureSwapChain()
   MOZ_ASSERT(mDeviceManager, "Don't call EnsureSwapChain without a device manager");
 
   if (!mSwapChain) {
-    mSwapChain = mDeviceManager->CreateSwapChain(mWidget->AsWindowsProxy()->GetHwnd());
+    mSwapChain = mDeviceManager->CreateSwapChain(mWidget->AsWindows()->GetHwnd());
     // We could not create a swap chain, return false
     if (!mSwapChain) {
       // Check the state of the device too
@@ -716,6 +720,8 @@ CompositorD3D9::BeginFrame(const nsIntRegion& aInvalidRegion,
 void
 CompositorD3D9::EndFrame()
 {
+  Compositor::EndFrame();
+
   if (mDeviceManager) {
     device()->EndScene();
 
@@ -762,14 +768,14 @@ CompositorD3D9::EnsureSize()
 }
 
 void
-CompositorD3D9::SetSamplerForFilter(Filter aFilter)
+CompositorD3D9::SetSamplerForSamplingFilter(SamplingFilter aSamplingFilter)
 {
-  switch (aFilter) {
-  case Filter::LINEAR:
+  switch (aSamplingFilter) {
+  case SamplingFilter::LINEAR:
     device()->SetSamplerState(0, D3DSAMP_MAGFILTER, D3DTEXF_LINEAR);
     device()->SetSamplerState(0, D3DSAMP_MINFILTER, D3DTEXF_LINEAR);
     return;
-  case Filter::POINT:
+  case SamplingFilter::POINT:
     device()->SetSamplerState(0, D3DSAMP_MAGFILTER, D3DTEXF_POINT);
     device()->SetSamplerState(0, D3DSAMP_MINFILTER, D3DTEXF_POINT);
     return;

@@ -19,7 +19,6 @@
 #include <algorithm>
 #include <ctime>
 #include <stdint.h>
-#include <string.h>
 
 #include "mozilla/Maybe.h"
 #include "mozilla/SSE.h"
@@ -72,7 +71,6 @@ template <typename Next>
 class DownscalingFilter final : public SurfaceFilter
 {
 public:
-  uint8_t* AdvanceRow() override { MOZ_CRASH(); return nullptr; }
   Maybe<SurfaceInvalidRect> TakeInvalidRect() override { return Nothing(); }
 
   template <typename... Rest>
@@ -83,6 +81,7 @@ public:
 
 protected:
   uint8_t* DoResetToFirstRow() override { MOZ_CRASH(); return nullptr; }
+  uint8_t* DoAdvanceRow() override { MOZ_CRASH(); return nullptr; }
 };
 
 #else
@@ -215,7 +214,19 @@ public:
     return invalidRect;
   }
 
-  uint8_t* AdvanceRow() override
+protected:
+  uint8_t* DoResetToFirstRow() override
+  {
+    mNext.ResetToFirstRow();
+
+    mInputRow = 0;
+    mOutputRow = 0;
+    mRowsInWindow = 0;
+
+    return GetRowPointer();
+  }
+
+  uint8_t* DoAdvanceRow() override
   {
     if (mInputRow >= mInputSize.height) {
       NS_WARNING("Advancing DownscalingFilter past the end of the input");
@@ -260,18 +271,6 @@ public:
                                          : nullptr;
   }
 
-protected:
-  uint8_t* DoResetToFirstRow() override
-  {
-    mNext.ResetToFirstRow();
-
-    mInputRow = 0;
-    mOutputRow = 0;
-    mRowsInWindow = 0;
-
-    return GetRowPointer();
-  }
-
 private:
   uint8_t* GetRowPointer() const { return mRowBuffer.get(); }
 
@@ -307,13 +306,12 @@ private:
     auto filterValues =
       mYFilter->FilterForValue(mOutputRow, &filterOffset, &filterLength);
 
-    mNext.template WriteRows<uint32_t>([&](uint32_t* aRow, uint32_t aLength)
-            -> Maybe<WriteState> {
+    mNext.template WriteUnsafeComputedRow<uint32_t>([&](uint32_t* aRow,
+                                                        uint32_t aLength) {
       skia::ConvolveVertically(static_cast<const FilterValue*>(filterValues),
                                filterLength, mWindow.get(), mXFilter->num_values(),
                                reinterpret_cast<uint8_t*>(aRow), mHasAlpha,
                                supports_sse2() || supports_mmi());
-      return Some(WriteState::NEED_MORE_DATA);
     });
 
     mOutputRow++;

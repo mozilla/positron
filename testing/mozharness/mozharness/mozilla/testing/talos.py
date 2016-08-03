@@ -14,6 +14,7 @@ import copy
 import re
 import json
 
+import mozharness
 from mozharness.base.config import parse_config_file
 from mozharness.base.errors import PythonErrorList
 from mozharness.base.log import OutputParser, DEBUG, ERROR, CRITICAL
@@ -24,6 +25,11 @@ from mozharness.base.vcs.vcsbase import MercurialScript
 from mozharness.mozilla.testing.errors import TinderBoxPrintRe
 from mozharness.mozilla.buildbot import TBPL_SUCCESS, TBPL_WORST_LEVEL_TUPLE
 from mozharness.mozilla.buildbot import TBPL_RETRY, TBPL_FAILURE, TBPL_WARNING
+
+external_tools_path = os.path.join(
+    os.path.abspath(os.path.dirname(os.path.dirname(mozharness.__file__))),
+    'external_tools',
+)
 
 TalosErrorList = PythonErrorList + [
     {'regex': re.compile(r'''run-as: Package '.*' is unknown'''), 'level': DEBUG},
@@ -327,8 +333,6 @@ class Talos(TestingMixin, MercurialScript, BlobUploadMixin):
         )
         # install jsonschema for perfherder validation
         self.install_module(module="jsonschema")
-        # install flake8 for static code validation
-        self.install_module(module="flake8")
 
     def _validate_treeherder_data(self, parser):
         # late import is required, because install is done in create_virtualenv
@@ -340,8 +344,8 @@ class Talos(TestingMixin, MercurialScript, BlobUploadMixin):
             parser.update_worst_log_and_tbpl_levels(WARNING, TBPL_WARNING)
             return
 
-        schema_path = os.path.join(self.talos_path, 'treeherder-schemas',
-                                   'performance-artifact.json')
+        schema_path = os.path.join(external_tools_path,
+                                   'performance-artifact-schema.json')
         self.info("Validating PERFHERDER_DATA against %s" % schema_path)
         try:
             with open(schema_path) as f:
@@ -350,12 +354,6 @@ class Talos(TestingMixin, MercurialScript, BlobUploadMixin):
             jsonschema.validate(data, schema)
         except:
             self.exception("Error while validating PERFHERDER_DATA")
-            parser.update_worst_log_and_tbpl_levels(WARNING, TBPL_WARNING)
-
-    def _flake8_check(self, parser):
-        if self.run_command([self.query_python_path('flake8'),
-                             os.path.join(self.talos_path, 'talos')]) != 0:
-            self.critical('flake8 check failed.')
             parser.update_worst_log_and_tbpl_levels(WARNING, TBPL_WARNING)
 
     def run_tests(self, args=None, **kw):
@@ -382,8 +380,6 @@ class Talos(TestingMixin, MercurialScript, BlobUploadMixin):
             env['PYTHONPATH'] = self.talos_path + os.pathsep + env['PYTHONPATH']
         else:
             env['PYTHONPATH'] = self.talos_path
-
-        self._flake8_check(parser)
 
         # sets a timeout for how long talos should run without output
         output_timeout = self.config.get('talos_output_timeout', 3600)
@@ -423,7 +419,8 @@ class Talos(TestingMixin, MercurialScript, BlobUploadMixin):
 
             parser.update_worst_log_and_tbpl_levels(log_level, tbpl_level)
         else:
-            self._validate_treeherder_data(parser)
+            if not self.sps_profile:
+                self._validate_treeherder_data(parser)
 
         self.buildbot_status(parser.worst_tbpl_status,
                              level=parser.worst_log_level)

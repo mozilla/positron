@@ -7,8 +7,7 @@
 "use strict";
 
 const {Ci} = require("chrome");
-const {parseDeclarations} =
-      require("devtools/client/shared/css-parsing-utils");
+const {parseDeclarations} = require("devtools/shared/css-parsing-utils");
 const promise = require("promise");
 const {getCSSLexer} = require("devtools/shared/css-lexer");
 
@@ -133,13 +132,15 @@ exports.throttle = throttle;
  * Event handler that causes a blur on the target if the input has
  * multiple CSS properties as the value.
  */
-function blurOnMultipleProperties(e) {
-  setTimeout(() => {
-    let props = parseDeclarations(e.target.value);
-    if (props.length > 1) {
-      e.target.blur();
-    }
-  }, 0);
+function blurOnMultipleProperties(cssProperties) {
+  return (e) => {
+    setTimeout(() => {
+      let props = parseDeclarations(cssProperties.isKnown, e.target.value);
+      if (props.length > 1) {
+        e.target.blur();
+      }
+    }, 0);
+  };
 }
 
 exports.blurOnMultipleProperties = blurOnMultipleProperties;

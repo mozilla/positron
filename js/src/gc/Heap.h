@@ -63,6 +63,7 @@ TraceManuallyBarrieredGenericPointerEdge(JSTracer* trc, gc::Cell** thingp, const
 namespace gc {
 
 class Arena;
+class ArenaCellSet;
 class ArenaList;
 class SortedArenaList;
 struct Chunk;
@@ -267,6 +268,8 @@ struct Cell
 
 #ifdef DEBUG
     inline bool isAligned() const;
+    void dump(FILE* fp) const;
+    void dump() const;
 #endif
 
   protected:
@@ -326,16 +329,23 @@ class TenuredCell : public Cell
 /* Cells are aligned to CellShift, so the largest tagged null pointer is: */
 const uintptr_t LargestTaggedNullCellPointer = (1 << CellShift) - 1;
 
+constexpr size_t
+DivideAndRoundUp(size_t numerator, size_t divisor) {
+    return (numerator + divisor - 1) / divisor;
+}
+
+const size_t ArenaCellCount = ArenaSize / CellSize;
+static_assert(ArenaSize % CellSize == 0, "Arena size must be a multiple of cell size");
+
 /*
  * The mark bitmap has one bit per each GC cell. For multi-cell GC things this
  * wastes space but allows to avoid expensive devisions by thing's size when
  * accessing the bitmap. In addition this allows to use some bits for colored
  * marking during the cycle GC.
  */
-const size_t ArenaCellCount = size_t(1) << (ArenaShift - CellShift);
 const size_t ArenaBitmapBits = ArenaCellCount;
-const size_t ArenaBitmapBytes = ArenaBitmapBits / 8;
-const size_t ArenaBitmapWords = ArenaBitmapBits / JS_BITS_PER_WORD;
+const size_t ArenaBitmapBytes = DivideAndRoundUp(ArenaBitmapBits, 8);
+const size_t ArenaBitmapWords = DivideAndRoundUp(ArenaBitmapBits, JS_BITS_PER_WORD);
 
 /*
  * A FreeSpan represents a contiguous sequence of free cells in an Arena. It
@@ -518,6 +528,13 @@ class Arena
     static_assert(ArenaShift >= 8 + 1 + 1 + 1,
                   "Arena::auxNextLink packing assumes that ArenaShift has "
                   "enough bits to cover allocKind and hasDelayedMarking.");
+
+    /*
+     * If non-null, points to an ArenaCellSet that represents the set of cells
+     * in this arena that are in the nursery's store buffer.
+     */
+    ArenaCellSet* bufferedCells;
+
     /*
      * The size of data should be |ArenaSize - offsetof(data)|, but the offset
      * is not yet known to the compiler, so we do it by hand. |firstFreeSpan|
@@ -526,19 +543,7 @@ class Arena
      */
     uint8_t data[ArenaSize - ArenaHeaderSize];
 
-    void init(JS::Zone* zoneArg, AllocKind kind) {
-        MOZ_ASSERT(firstFreeSpan.isEmpty());
-        MOZ_ASSERT(!zone);
-        MOZ_ASSERT(!allocated());
-        MOZ_ASSERT(!hasDelayedMarking);
-        MOZ_ASSERT(!allocatedDuringIncremental);
-        MOZ_ASSERT(!markOverflow);
-        MOZ_ASSERT(!auxNextLink);
-
-        zone = zoneArg;
-        allocKind = size_t(kind);
-        setAsFullyUnused();
-    }
+    void init(JS::Zone* zoneArg, AllocKind kind);
 
     // Sets |firstFreeSpan| to the Arena's entire valid range, and
     // also sets the next span stored at |firstFreeSpan.last| as empty.
@@ -558,6 +563,7 @@ class Arena
         allocatedDuringIncremental = 0;
         markOverflow = 0;
         auxNextLink = 0;
+        bufferedCells = nullptr;
     }
 
     uintptr_t address() const {
@@ -682,13 +688,20 @@ class Arena
     static void staticAsserts();
 
     void unmarkAll();
+
+    static size_t offsetOfBufferedCells() {
+        return offsetof(Arena, bufferedCells);
+    }
 };
 
 static_assert(ArenaZoneOffset == offsetof(Arena, zone),
               "The hardcoded API zone offset must match the actual offset.");
 
-static_assert(sizeof(Arena) == ArenaSize, "The hardcoded API header size (ArenaHeaderSize) "
-                                          "must match the actual size of the header fields.");
+static_assert(sizeof(Arena) == ArenaSize,
+              "ArenaSize must match the actual size of the Arena structure.");
+
+static_assert(offsetof(Arena, data) == ArenaHeaderSize,
+              "ArenaHeaderSize must match the actual size of the header fields.");
 
 inline Arena*
 FreeSpan::getArena()
@@ -1012,7 +1025,7 @@ struct Chunk
 
   public:
     /* Unlink and return the freeArenasHead. */
-    inline Arena* fetchNextFreeArena(JSRuntime* rt);
+    Arena* fetchNextFreeArena(JSRuntime* rt);
 };
 
 static_assert(sizeof(Chunk) == ChunkSize,
@@ -1274,10 +1287,8 @@ TenuredCell::readBarrier(TenuredCell* thing)
 {
     MOZ_ASSERT(!CurrentThreadIsIonCompiling());
     MOZ_ASSERT(!isNullLike(thing));
-    if (thing->shadowRuntimeFromAnyThread()->isHeapBusy())
+    if (thing->shadowRuntimeFromAnyThread()->isHeapCollecting())
         return;
-    MOZ_ASSERT_IF(CurrentThreadCanAccessRuntime(thing->runtimeFromAnyThread()),
-                  !thing->shadowRuntimeFromAnyThread()->isHeapCollecting());
 
     JS::shadow::Zone* shadowZone = thing->shadowZoneFromAnyThread();
     MOZ_ASSERT_IF(!CurrentThreadCanAccessRuntime(thing->runtimeFromAnyThread()),
@@ -1293,13 +1304,32 @@ TenuredCell::readBarrier(TenuredCell* thing)
         UnmarkGrayCellRecursively(thing, thing->getTraceKind());
 }
 
+void
+AssertSafeToSkipBarrier(TenuredCell* thing);
+
 /* static */ MOZ_ALWAYS_INLINE void
 TenuredCell::writeBarrierPre(TenuredCell* thing)
 {
     MOZ_ASSERT(!CurrentThreadIsIonCompiling());
     MOZ_ASSERT_IF(thing, !isNullLike(thing));
-    if (!thing || thing->shadowRuntimeFromAnyThread()->isHeapBusy())
+    if (!thing || thing->shadowRuntimeFromAnyThread()->isHeapCollecting())
         return;
+
+#ifdef JS_GC_ZEAL
+    // When verifying pre barriers we need to switch on all barriers, even
+    // those on the Atoms Zone. Normally, we never enter a parse task when
+    // collecting in the atoms zone, so will filter out atoms below.
+    // Unfortuantely, If we try that when verifying pre-barriers, we'd never be
+    // able to handle OMT parse tasks at all as we switch on the verifier any
+    // time we're not doing GC. This would cause us to deadlock, as OMT parsing
+    // is meant to resume after GC work completes. Instead we filter out any
+    // OMT barriers that reach us and assert that they would normally not be
+    // possible.
+    if (!CurrentThreadCanAccessRuntime(thing->runtimeFromAnyThread())) {
+        AssertSafeToSkipBarrier(thing);
+        return;
+    }
+#endif
 
     JS::shadow::Zone* shadowZone = thing->shadowZoneFromAnyThread();
     if (shadowZone->needsIncrementalBarrier()) {

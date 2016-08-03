@@ -12,8 +12,8 @@ const TEST_URI = "data:text/html;charset=utf-8,Web Console HSTS invalid " +
                  "header test";
 const SJS_URL = "https://example.com/browser/devtools/client/webconsole/" +
                 "test/test_hsts-invalid-headers.sjs";
-const LEARN_MORE_URI = "https://developer.mozilla.org/docs/Security/" +
-                       "HTTP_Strict_Transport_Security";
+const LEARN_MORE_URI = "https://developer.mozilla.org/docs/Web/Security/" +
+                       "HTTP_strict_transport_security" + DOCS_GA_PARAMS;
 
 add_task(function* () {
   yield loadTab(TEST_URI);
@@ -66,7 +66,7 @@ add_task(function* () {
 function* checkForMessage(curTest, hud) {
   hud.jsterm.clearOutput();
 
-  content.location = curTest.url;
+  BrowserTestUtils.loadURI(gBrowser.selectedBrowser, curTest.url);
 
   let results = yield waitForMessages({
     webconsole: hud,

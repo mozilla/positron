@@ -123,6 +123,51 @@ using namespace mozilla::gfx;
 
 class gfxContext;
 
+class OldWindowSize : public LinkedListElement<OldWindowSize>
+{
+public:
+  static void Set(nsIWeakReference* aWindowRef, const nsSize& aSize)
+  {
+    OldWindowSize* item = GetItem(aWindowRef);
+    if (item) {
+      item->mSize = aSize;
+    } else {
+      item = new OldWindowSize(aWindowRef, aSize);
+      sList.insertBack(item);
+    }
+  }
+
+  static nsSize GetAndRemove(nsIWeakReference* aWindowRef)
+  {
+    nsSize result;
+    if (OldWindowSize* item = GetItem(aWindowRef)) {
+      result = item->mSize;
+      delete item;
+    }
+    return result;
+  }
+
+private:
+  explicit OldWindowSize(nsIWeakReference* aWindowRef, const nsSize& aSize)
+    : mWindowRef(aWindowRef), mSize(aSize) { }
+  ~OldWindowSize() { };
+
+  static OldWindowSize* GetItem(nsIWeakReference* aWindowRef)
+  {
+    OldWindowSize* item = sList.getFirst();
+    while (item && item->mWindowRef != aWindowRef) {
+      item = item->getNext();
+    }
+    return item;
+  }
+
+  static LinkedList<OldWindowSize> sList;
+  nsWeakPtr mWindowRef;
+  nsSize mSize;
+};
+
+LinkedList<OldWindowSize> OldWindowSize::sList;
+
 NS_INTERFACE_MAP_BEGIN(nsDOMWindowUtils)
   NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsIDOMWindowUtils)
   NS_INTERFACE_MAP_ENTRY(nsIDOMWindowUtils)
@@ -141,6 +186,7 @@ nsDOMWindowUtils::nsDOMWindowUtils(nsGlobalWindow *aWindow)
 
 nsDOMWindowUtils::~nsDOMWindowUtils()
 {
+  OldWindowSize::GetAndRemove(mWindow);
 }
 
 nsIPresShell*
@@ -291,6 +337,22 @@ nsDOMWindowUtils::UpdateLayerTree()
 }
 
 NS_IMETHODIMP
+nsDOMWindowUtils::GetContentViewerSize(uint32_t *aDisplayWidth, uint32_t *aDisplayHeight)
+{
+  nsIPresShell* presShell = GetPresShell();
+  LayoutDeviceIntSize displaySize;
+
+  if (!presShell || !nsLayoutUtils::GetContentViewerSize(presShell->GetPresContext(), displaySize)) {
+    return NS_ERROR_FAILURE;
+  }
+
+  *aDisplayWidth = displaySize.width;
+  *aDisplayHeight = displaySize.height;
+
+  return NS_OK;
+}
+
+NS_IMETHODIMP
 nsDOMWindowUtils::GetViewportInfo(uint32_t aDisplayWidth,
                                   uint32_t aDisplayHeight,
                                   double *aDefaultZoom, bool *aAllowZoom,
@@ -376,17 +438,14 @@ nsDOMWindowUtils::SetDisplayPortForElement(float aXPx, float aYPx,
         rootFrame == nsLayoutUtils::GetDisplayRootFrame(rootFrame)) {
       nsCOMPtr<nsIWidget> widget = GetWidget();
       if (widget) {
-        bool isRetainingManager;
-        LayerManager* manager = widget->GetLayerManager(&isRetainingManager);
-        if (isRetainingManager) {
-          manager->BeginTransaction();
-          using PaintFrameFlags = nsLayoutUtils::PaintFrameFlags;
-          nsLayoutUtils::PaintFrame(nullptr, rootFrame, nsRegion(),
-                                    NS_RGB(255, 255, 255),
-                                    nsDisplayListBuilderMode::PAINTING,
-                                    PaintFrameFlags::PAINT_WIDGET_LAYERS |
-                                    PaintFrameFlags::PAINT_EXISTING_TRANSACTION);
-        }
+        LayerManager* manager = widget->GetLayerManager();
+        manager->BeginTransaction();
+        using PaintFrameFlags = nsLayoutUtils::PaintFrameFlags;
+        nsLayoutUtils::PaintFrame(nullptr, rootFrame, nsRegion(),
+                                  NS_RGB(255, 255, 255),
+                                  nsDisplayListBuilderMode::PAINTING,
+                                  PaintFrameFlags::PAINT_WIDGET_LAYERS |
+                                  PaintFrameFlags::PAINT_EXISTING_TRANSACTION);
       }
     }
   }
@@ -497,14 +556,17 @@ nsDOMWindowUtils::SetResolutionAndScaleTo(float aResolution)
 }
 
 NS_IMETHODIMP
-nsDOMWindowUtils::SetRestoreResolution(float aResolution)
+nsDOMWindowUtils::SetRestoreResolution(float aResolution,
+                                       uint32_t aDisplayWidth,
+                                       uint32_t aDisplayHeight)
 {
   nsIPresShell* presShell = GetPresShell();
   if (!presShell) {
     return NS_ERROR_FAILURE;
   }
 
-  presShell->SetRestoreResolution(aResolution);
+  presShell->SetRestoreResolution(aResolution,
+    LayoutDeviceIntSize(aDisplayWidth, aDisplayHeight));
 
   return NS_OK;
 }
@@ -1823,7 +1885,7 @@ InitEvent(WidgetGUIEvent& aEvent, LayoutDeviceIntPoint* aPt = nullptr)
 
 NS_IMETHODIMP
 nsDOMWindowUtils::SendQueryContentEvent(uint32_t aType,
-                                        uint32_t aOffset, uint32_t aLength,
+                                        int64_t aOffset, uint32_t aLength,
                                         int32_t aX, int32_t aY,
                                         uint32_t aAdditionalFlags,
                                         nsIQueryContentEventResult **aResult)
@@ -1868,20 +1930,89 @@ nsDOMWindowUtils::SendQueryContentEvent(uint32_t aType,
     case QUERY_CHARACTER_AT_POINT:
       message = eQueryCharacterAtPoint;
       break;
+    case QUERY_TEXT_RECT_ARRAY:
+      message = eQueryTextRectArray;
+      break;
     default:
       return NS_ERROR_INVALID_ARG;
+  }
+
+  SelectionType selectionType = SelectionType::eNormal;
+  static const uint32_t kSelectionFlags =
+    QUERY_CONTENT_FLAG_SELECTION_SPELLCHECK |
+    QUERY_CONTENT_FLAG_SELECTION_IME_RAWINPUT |
+    QUERY_CONTENT_FLAG_SELECTION_IME_SELECTEDRAWTEXT |
+    QUERY_CONTENT_FLAG_SELECTION_IME_CONVERTEDTEXT |
+    QUERY_CONTENT_FLAG_SELECTION_IME_SELECTEDCONVERTEDTEXT |
+    QUERY_CONTENT_FLAG_SELECTION_ACCESSIBILITY |
+    QUERY_CONTENT_FLAG_SELECTION_FIND |
+    QUERY_CONTENT_FLAG_SELECTION_URLSECONDARY |
+    QUERY_CONTENT_FLAG_SELECTION_URLSTRIKEOUT;
+  switch (aAdditionalFlags & kSelectionFlags) {
+    case QUERY_CONTENT_FLAG_SELECTION_SPELLCHECK:
+      selectionType = SelectionType::eSpellCheck;
+      break;
+    case QUERY_CONTENT_FLAG_SELECTION_IME_RAWINPUT:
+      selectionType = SelectionType::eIMERawClause;
+      break;
+    case QUERY_CONTENT_FLAG_SELECTION_IME_SELECTEDRAWTEXT:
+      selectionType = SelectionType::eIMESelectedRawClause;
+      break;
+    case QUERY_CONTENT_FLAG_SELECTION_IME_CONVERTEDTEXT:
+      selectionType = SelectionType::eIMEConvertedClause;
+      break;
+    case QUERY_CONTENT_FLAG_SELECTION_IME_SELECTEDCONVERTEDTEXT:
+      selectionType = SelectionType::eIMESelectedClause;
+      break;
+    case QUERY_CONTENT_FLAG_SELECTION_ACCESSIBILITY:
+      selectionType = SelectionType::eAccessibility;
+      break;
+    case QUERY_CONTENT_FLAG_SELECTION_FIND:
+      selectionType = SelectionType::eFind;
+      break;
+    case QUERY_CONTENT_FLAG_SELECTION_URLSECONDARY:
+      selectionType = SelectionType::eURLSecondary;
+      break;
+    case QUERY_CONTENT_FLAG_SELECTION_URLSTRIKEOUT:
+      selectionType = SelectionType::eURLStrikeout;
+      break;
+    case 0:
+      break;
+    default:
+      return NS_ERROR_INVALID_ARG;
+  }
+
+  if (selectionType != SelectionType::eNormal &&
+      message != eQuerySelectedText) {
+    return NS_ERROR_INVALID_ARG;
   }
 
   nsCOMPtr<nsIWidget> targetWidget = widget;
   LayoutDeviceIntPoint pt(aX, aY);
 
-  bool useNativeLineBreak =
+  WidgetQueryContentEvent::Options options;
+  options.mUseNativeLineBreak =
     !(aAdditionalFlags & QUERY_CONTENT_FLAG_USE_XP_LINE_BREAK);
+  options.mRelativeToInsertionPoint =
+    (aAdditionalFlags &
+       QUERY_CONTENT_FLAG_OFFSET_RELATIVE_TO_INSERTION_POINT) != 0;
+  if (options.mRelativeToInsertionPoint) {
+    switch (message) {
+      case eQueryTextContent:
+      case eQueryCaretRect:
+      case eQueryTextRect:
+        break;
+      default:
+        return NS_ERROR_INVALID_ARG;
+    }
+  } else if (aOffset < 0) {
+    return NS_ERROR_INVALID_ARG;
+  }
 
   if (message == eQueryCharacterAtPoint) {
     // Looking for the widget at the point.
     WidgetQueryContentEvent dummyEvent(true, eQueryContentState, widget);
-    dummyEvent.mUseNativeLineBreak = useNativeLineBreak;
+    dummyEvent.Init(options);
     InitEvent(dummyEvent, &pt);
     nsIFrame* popupFrame =
       nsLayoutUtils::GetPopupFrameForEventCoordinates(presContext->GetRootPresContext(), &dummyEvent);
@@ -1908,16 +2039,22 @@ nsDOMWindowUtils::SendQueryContentEvent(uint32_t aType,
 
   switch (message) {
     case eQueryTextContent:
-      queryEvent.InitForQueryTextContent(aOffset, aLength, useNativeLineBreak);
+      queryEvent.InitForQueryTextContent(aOffset, aLength, options);
       break;
     case eQueryCaretRect:
-      queryEvent.InitForQueryCaretRect(aOffset, useNativeLineBreak);
+      queryEvent.InitForQueryCaretRect(aOffset, options);
       break;
     case eQueryTextRect:
-      queryEvent.InitForQueryTextRect(aOffset, aLength, useNativeLineBreak);
+      queryEvent.InitForQueryTextRect(aOffset, aLength, options);
+      break;
+    case eQuerySelectedText:
+      queryEvent.InitForQuerySelectedText(selectionType, options);
+      break;
+    case eQueryTextRectArray:
+      queryEvent.InitForQueryTextRectArray(aOffset, aLength, options);
       break;
     default:
-      queryEvent.mUseNativeLineBreak = useNativeLineBreak;
+      queryEvent.Init(options);
       break;
   }
 
@@ -2183,7 +2320,7 @@ nsDOMWindowUtils::GetSupportsHardwareH264Decoding(JS::MutableHandle<JS::Value> a
   if (rv.Failed()) {
     return rv.StealNSResult();
   }
-  promise.MaybeResolve(NS_LITERAL_STRING("No; Compiled without MP4 support."));
+  promise->MaybeResolve(NS_LITERAL_STRING("No; Compiled without MP4 support."));
   aPromise.setObject(*promise->PromiseObj());
 #endif
   return NS_OK;
@@ -2911,7 +3048,8 @@ nsDOMWindowUtils::GetFileReferences(const nsAString& aDatabaseName, int64_t aId,
 
   nsCString origin;
   nsresult rv =
-    quota::QuotaManager::GetInfoFromWindow(window, nullptr, &origin, nullptr);
+    quota::QuotaManager::GetInfoFromWindow(window, nullptr, nullptr, &origin,
+                                           nullptr);
   NS_ENSURE_SUCCESS(rv, rv);
 
   IDBOpenDBOptions options;
@@ -2956,7 +3094,7 @@ nsDOMWindowUtils::FlushPendingFileDeletions()
 NS_IMETHODIMP
 nsDOMWindowUtils::IsIncrementalGCEnabled(JSContext* cx, bool* aResult)
 {
-  *aResult = JS::IsIncrementalGCEnabled(JS_GetRuntime(cx));
+  *aResult = JS::IsIncrementalGCEnabled(cx);
   return NS_OK;
 }
 
@@ -3092,6 +3230,10 @@ PrepareForFullscreenChange(nsIPresShell* aPresShell, const nsSize& aSize,
   }
   if (nsRefreshDriver* rd = aPresShell->GetRefreshDriver()) {
     rd->SetIsResizeSuppressed();
+    // Since we are suppressing the resize reflow which would originally
+    // be triggered by view manager, we need to ensure that the refresh
+    // driver actually schedules a flush, otherwise it may get stuck.
+    rd->ScheduleViewManagerFlush();
   }
   if (!aSize.IsEmpty()) {
     if (nsViewManager* viewManager = aPresShell->GetViewManager()) {
@@ -3102,62 +3244,6 @@ PrepareForFullscreenChange(nsIPresShell* aPresShell, const nsSize& aSize,
     }
   }
 }
-
-class OldWindowSize : public LinkedListElement<OldWindowSize>
-{
-public:
-  static void Set(nsPIDOMWindowOuter* aWindow, const nsSize& aSize)
-  {
-    OldWindowSize* item = GetItem(aWindow);
-    if (item) {
-      item->mSize = aSize;
-    } else if (aWindow) {
-      item = new OldWindowSize(do_GetWeakReference(aWindow), aSize);
-      sList.insertBack(item);
-    }
-  }
-
-  static nsSize GetAndRemove(nsPIDOMWindowOuter* aWindow)
-  {
-    nsSize result;
-    if (OldWindowSize* item = GetItem(aWindow)) {
-      result = item->mSize;
-      delete item;
-    }
-    return result;
-  }
-
-private:
-  explicit OldWindowSize(already_AddRefed<nsIWeakReference>&& aWindow,
-                         const nsSize& aSize)
-    : mWindow(Move(aWindow)), mSize(aSize) { }
-  ~OldWindowSize() { };
-
-  static OldWindowSize* GetItem(nsPIDOMWindowOuter* aWindow)
-  {
-    OldWindowSize* item = sList.getFirst();
-    while (item) {
-      nsCOMPtr<nsPIDOMWindowOuter> window = do_QueryReferent(item->mWindow);
-      if (!window) {
-        OldWindowSize* thisItem = item;
-        item = thisItem->getNext();
-        delete thisItem;
-        continue;
-      }
-      if (window == aWindow) {
-        break;
-      }
-      item = item->getNext();
-    }
-    return item;
-  }
-
-  static LinkedList<OldWindowSize> sList;
-  nsWeakPtr mWindow;
-  nsSize mSize;
-};
-
-LinkedList<OldWindowSize> OldWindowSize::sList;
 
 NS_IMETHODIMP
 nsDOMWindowUtils::HandleFullscreenRequests(bool* aRetVal)
@@ -3176,7 +3262,7 @@ nsDOMWindowUtils::HandleFullscreenRequests(bool* aRetVal)
   }
   nsSize oldSize;
   PrepareForFullscreenChange(GetPresShell(), screenRect.Size(), &oldSize);
-  OldWindowSize::Set(doc->GetWindow(), oldSize);
+  OldWindowSize::Set(mWindow, oldSize);
 
   *aRetVal = nsIDocument::HandlePendingFullscreenRequests(doc);
   return NS_OK;
@@ -3191,7 +3277,7 @@ nsDOMWindowUtils::ExitFullscreen()
 
   // Although we would not use the old size if we have already exited
   // fullscreen, we still want to cleanup in case we haven't.
-  nsSize oldSize = OldWindowSize::GetAndRemove(doc->GetWindow());
+  nsSize oldSize = OldWindowSize::GetAndRemove(mWindow);
   if (!doc->GetFullscreenElement()) {
     return NS_OK;
   }

@@ -11,11 +11,15 @@
 
 const TAB_URL = EXAMPLE_URL + "doc_auto-pretty-print-02.html";
 
-var FIRST_SOURCE = "code_ugly-6.js";
-var SECOND_SOURCE = "code_ugly-7.js";
+var FIRST_SOURCE = EXAMPLE_URL + "code_ugly-6.js";
+var SECOND_SOURCE = EXAMPLE_URL + "code_ugly-7.js";
 
 function test() {
-  initDebugger(TAB_URL).then(([aTab, aDebuggee, aPanel]) => {
+  let options = {
+    source: FIRST_SOURCE,
+    line: 1
+  };
+  initDebugger(TAB_URL, options).then(([aTab, aDebuggee, aPanel]) => {
     const gTab = aTab;
     const gPanel = aPanel;
     const gDebugger = gPanel.panelWin;
@@ -27,9 +31,7 @@ function test() {
     const actions = bindActionCreators(gPanel);
 
     Task.spawn(function* () {
-      yield waitForSourceShown(gPanel, FIRST_SOURCE);
-
-      const secondSource = queries.getSourceByURL(gController.getState(), EXAMPLE_URL + SECOND_SOURCE);
+      const secondSource = queries.getSourceByURL(gController.getState(), SECOND_SOURCE);
       actions.selectSource(secondSource);
 
       // It should be showing the loading text

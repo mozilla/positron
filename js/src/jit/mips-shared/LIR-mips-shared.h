@@ -269,20 +269,11 @@ class LUDivOrMod : public LBinaryMath<0>
             return mir_->toMod()->canBeDivideByZero();
         return mir_->toDiv()->canBeDivideByZero();
     }
-};
 
-class LAsmJSLoadFuncPtr : public LInstructionHelper<1, 1, 0>
-{
-  public:
-    LIR_HEADER(AsmJSLoadFuncPtr);
-    LAsmJSLoadFuncPtr(const LAllocation& index) {
-        setOperand(0, index);
-    }
-    const MAsmJSLoadFuncPtr* mir() const {
-        return mir_->toAsmJSLoadFuncPtr();
-    }
-    const LAllocation* index() {
-        return getOperand(0);
+    bool trapOnError() const {
+        if (mir_->isMod())
+            return mir_->toMod()->trapOnError();
+        return mir_->toDiv()->trapOnError();
     }
 };
 

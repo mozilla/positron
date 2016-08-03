@@ -505,7 +505,7 @@ public:
   /**
    * This can be used anytime. Ownership passes to the caller!
    */
-  nsAutoPtr<LayerUserData> RemoveUserData(void* aKey);
+  UniquePtr<LayerUserData> RemoveUserData(void* aKey);
 
   /**
    * This getter can be used anytime.
@@ -1462,7 +1462,7 @@ public:
   /**
    * This can be used anytime. Ownership passes to the caller!
    */
-  nsAutoPtr<LayerUserData> RemoveUserData(void* aKey);
+  UniquePtr<LayerUserData> RemoveUserData(void* aKey);
   /**
    * This getter can be used anytime.
    */
@@ -2375,6 +2375,7 @@ public:
       , mSize(0,0)
       , mHasAlpha(false)
       , mIsGLAlphaPremult(true)
+      , mIsMirror(false)
     { }
 
     // One of these three must be specified for Canvas2D, but never more than one
@@ -2393,6 +2394,10 @@ public:
 
     // Whether mGLContext contains data that is alpha-premultiplied.
     bool mIsGLAlphaPremult;
+
+    // Whether the canvas front buffer is already being rendered somewhere else.
+    // When true, do not swap buffers or Morph() to another factory on mGLContext
+    bool mIsMirror;
   };
 
   /**
@@ -2471,15 +2476,15 @@ public:
    * CONSTRUCTION PHASE ONLY
    * Set the filter used to resample this image (if necessary).
    */
-  void SetFilter(gfx::Filter aFilter)
+  void SetSamplingFilter(gfx::SamplingFilter aSamplingFilter)
   {
-    if (mFilter != aFilter) {
+    if (mSamplingFilter != aSamplingFilter) {
       MOZ_LAYERS_LOG_IF_SHADOWABLE(this, ("Layer::Mutated(%p) Filter", this));
-      mFilter = aFilter;
+      mSamplingFilter = aSamplingFilter;
       Mutated();
     }
   }
-  gfx::Filter GetFilter() const { return mFilter; }
+  gfx::SamplingFilter GetSamplingFilter() const { return mSamplingFilter; }
 
   MOZ_LAYER_DECL_NAME("CanvasLayer", TYPE_CANVAS)
 
@@ -2524,7 +2529,7 @@ protected:
   void* mPreTransCallbackData;
   DidTransactionCallback mPostTransCallback;
   void* mPostTransCallbackData;
-  gfx::Filter mFilter;
+  gfx::SamplingFilter mSamplingFilter;
   RefPtr<AsyncCanvasRenderer> mAsyncRenderer;
 
 private:

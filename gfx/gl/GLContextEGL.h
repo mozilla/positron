@@ -20,14 +20,16 @@ class GLContextEGL : public GLContext
     static already_AddRefed<GLContextEGL>
     CreateGLContext(CreateContextFlags flags,
                     const SurfaceCaps& caps,
-                    GLContextEGL *shareContext,
+                    GLContextEGL* shareContext,
                     bool isOffscreen,
                     EGLConfig config,
-                    EGLSurface surface);
+                    EGLSurface surface,
+                    nsACString* const out_failureId);
 
 public:
     MOZ_DECLARE_REFCOUNTED_VIRTUAL_TYPENAME(GLContextEGL, override)
-    GLContextEGL(const SurfaceCaps& caps,
+    GLContextEGL(CreateContextFlags flags,
+                 const SurfaceCaps& caps,
                  GLContext* shareContext,
                  bool isOffscreen,
                  EGLConfig config,
@@ -89,7 +91,7 @@ public:
 
     // hold a reference to the given surface
     // for the lifetime of this context.
-    void HoldSurface(gfxASurface *aSurf);
+    void HoldSurface(gfxASurface* aSurf);
 
     EGLSurface GetEGLSurface() const {
         return mSurface;
@@ -99,14 +101,15 @@ public:
         return sEGLLibrary.Display();
     }
 
-    bool BindTex2DOffscreen(GLContext *aOffscreen);
-    void UnbindTex2DOffscreen(GLContext *aOffscreen);
+    bool BindTex2DOffscreen(GLContext* aOffscreen);
+    void UnbindTex2DOffscreen(GLContext* aOffscreen);
     void BindOffscreenFramebuffer();
 
     static already_AddRefed<GLContextEGL>
     CreateEGLPBufferOffscreenContext(CreateContextFlags flags,
                                      const gfx::IntSize& size,
-                                     const SurfaceCaps& minCaps);
+                                     const SurfaceCaps& minCaps,
+                                     nsACString* const out_FailureId);
 
 protected:
     friend class GLContextProviderEGL;

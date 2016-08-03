@@ -5,7 +5,7 @@
 
 #include "APZCCallbackHelper.h"
 
-#include "ContentHelper.h"
+#include "TouchActionHelper.h"
 #include "gfxPlatform.h" // For gfxPlatform::UseTiling
 #include "gfxPrefs.h"
 #include "LayersLogging.h"  // For Stringify
@@ -162,7 +162,15 @@ ScrollFrame(nsIContent* aContent,
   // requested (|apzScrollOffset|). Since we may not have, record the difference
   // between what APZ asked for and what we actually applied, and apply it to
   // input events to compensate.
-  if (aContent) {
+  // Note that if the main-thread had a change in its scroll position, we don't
+  // want to record that difference here, because it can be large and throw off
+  // input events by a large amount. It is also going to be transient, because
+  // any main-thread scroll position change will be synced to APZ and we will
+  // get another repaint request when APZ confirms. In the interval while this
+  // is happening we can just leave the callback transform as it was.
+  bool mainThreadScrollChanged =
+    sf && sf->CurrentScrollGeneration() != aMetrics.GetScrollGeneration();
+  if (aContent && !mainThreadScrollChanged) {
     CSSPoint scrollDelta = apzScrollOffset - actualScrollOffset;
     aContent->SetProperty(nsGkAtoms::apzCallbackTransform, new CSSPoint(scrollDelta),
                           nsINode::DeleteProperty<CSSPoint>);
@@ -241,7 +249,7 @@ APZCCallbackHelper::UpdateRootFrame(FrameMetrics& aMetrics)
     // the time this repaint request was fired, consider this request out of date
     // and drop it; setting a zoom based on the out-of-date resolution can have
     // the effect of getting us stuck with the stale resolution.
-    if (presShellResolution != aMetrics.GetPresShellResolution()) {
+    if (!FuzzyEqualsMultiplicative(presShellResolution, aMetrics.GetPresShellResolution())) {
       return;
     }
 
@@ -400,8 +408,8 @@ APZCCallbackHelper::ApplyCallbackTransform(const CSSPoint& aInput,
     // that's not on the Root Document (RD). That is, on platforms where
     // RCD == RD, it's 1, and on platforms where RCD != RD, it's the RCD
     // resolution. 'input' has this resolution applied, but the scroll
-    // deltas retrieved below do not, so we need to apply them to the
-    // deltas before adding the deltas to 'input'. (Technically, deltas
+    // delta retrieved below do not, so we need to apply them to the
+    // delta before adding the delta to 'input'. (Technically, deltas
     // from scroll frames outside the RCD would already have this
     // resolution applied, but we don't have such scroll frames in
     // practice.)
@@ -409,30 +417,10 @@ APZCCallbackHelper::ApplyCallbackTransform(const CSSPoint& aInput,
     if (nsIPresShell* shell = GetRootContentDocumentPresShellForContent(content)) {
       nonRootResolution = shell->GetCumulativeNonRootScaleResolution();
     }
-    // Now apply the callback-transform.
-    // XXX: Walk up the frame tree from the frame of this content element
-    // to the root of the frame tree, and apply any apzCallbackTransform
-    // found on the way. This is only approximately correct, as it does
-    // not take into account CSS transforms, nor differences in structure between
-    // the frame tree (which determines the transforms we're applying)
-    // and the layer tree (which determines the transforms we *want* to
-    // apply).
-    nsIFrame* frame = content->GetPrimaryFrame();
-    nsCOMPtr<nsIContent> lastContent;
-    while (frame) {
-        if (content && (content != lastContent)) {
-            void* property = content->GetProperty(nsGkAtoms::apzCallbackTransform);
-            if (property) {
-                CSSPoint delta = (*static_cast<CSSPoint*>(property));
-                delta = delta * nonRootResolution;
-                input += delta;
-            }
-        }
-        frame = frame->GetParent();
-        lastContent = content;
-        content = frame ? frame->GetContent() : nullptr;
-    }
-    return input;
+    // Now apply the callback-transform. This is only approximately correct,
+    // see the comment on GetCumulativeApzCallbackTransform for details.
+    CSSPoint transform = nsLayoutUtils::GetCumulativeApzCallbackTransform(content->GetPrimaryFrame());
+    return input + transform * nonRootResolution;
 }
 
 LayoutDeviceIntPoint
@@ -762,6 +750,9 @@ APZCCallbackHelper::SendSetTargetAPZCNotification(nsIWidget* aWidget,
       } else if (const WidgetWheelEvent* wheelEvent = aEvent.AsWheelEvent()) {
         waitForRefresh = PrepareForSetTargetAPZCNotification(aWidget, aGuid,
             rootFrame, wheelEvent->mRefPoint, &targets);
+      } else if (const WidgetMouseEvent* mouseEvent = aEvent.AsMouseEvent()) {
+        waitForRefresh = PrepareForSetTargetAPZCNotification(aWidget, aGuid,
+            rootFrame, mouseEvent->mRefPoint, &targets);
       }
       // TODO: Do other types of events need to be handled?
 
@@ -787,7 +778,7 @@ APZCCallbackHelper::SendSetAllowedTouchBehaviorNotification(
   nsTArray<TouchBehaviorFlags> flags;
   for (uint32_t i = 0; i < aEvent.mTouches.Length(); i++) {
     flags.AppendElement(
-      widget::ContentHelper::GetAllowedTouchBehavior(
+      widget::TouchActionHelper::GetAllowedTouchBehavior(
                                aWidget, aEvent.mTouches[i]->mRefPoint));
   }
   aCallback(aInputBlockId, Move(flags));

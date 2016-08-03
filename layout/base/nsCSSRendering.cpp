@@ -74,7 +74,7 @@ static int gFrameTreeLockCount = 0;
 struct InlineBackgroundData
 {
   InlineBackgroundData()
-      : mFrame(nullptr), mBlockFrame(nullptr)
+      : mFrame(nullptr), mLineContainer(nullptr)
   {
   }
 
@@ -86,7 +86,7 @@ struct InlineBackgroundData
   {
     mBoundingBox.SetRect(0,0,0,0);
     mContinuationPoint = mLineContinuationPoint = mUnbrokenMeasure = 0;
-    mFrame = mBlockFrame = nullptr;
+    mFrame = mLineContainer = nullptr;
     mPIStartBorderData.Reset();
   }
 
@@ -109,10 +109,10 @@ struct InlineBackgroundData
       // Scan continuations on the same line as aFrame and accumulate the widths
       // of frames that are to the left (if this is an LTR block) or right
       // (if it's RTL) of the current one.
-      bool isRtlBlock = (mBlockFrame->StyleVisibility()->mDirection ==
+      bool isRtlBlock = (mLineContainer->StyleVisibility()->mDirection ==
                            NS_STYLE_DIRECTION_RTL);
-      nscoord curOffset = mVertical ? aFrame->GetOffsetTo(mBlockFrame).y
-                                    : aFrame->GetOffsetTo(mBlockFrame).x;
+      nscoord curOffset = mVertical ? aFrame->GetOffsetTo(mLineContainer).y
+                                    : aFrame->GetOffsetTo(mLineContainer).x;
 
       // If the continuation is fluid we know inlineFrame is not on the same line.
       // If it's not fluid, we need to test further to be sure.
@@ -120,8 +120,8 @@ struct InlineBackgroundData
       while (inlineFrame && !inlineFrame->GetNextInFlow() &&
              AreOnSameLine(aFrame, inlineFrame)) {
         nscoord frameOffset = mVertical
-          ? inlineFrame->GetOffsetTo(mBlockFrame).y
-          : inlineFrame->GetOffsetTo(mBlockFrame).x;
+          ? inlineFrame->GetOffsetTo(mLineContainer).y
+          : inlineFrame->GetOffsetTo(mLineContainer).x;
         if (isRtlBlock == (frameOffset >= curOffset)) {
           pos += mVertical
                ? inlineFrame->GetSize().height
@@ -134,8 +134,8 @@ struct InlineBackgroundData
       while (inlineFrame && !inlineFrame->GetPrevInFlow() &&
              AreOnSameLine(aFrame, inlineFrame)) {
         nscoord frameOffset = mVertical
-          ? inlineFrame->GetOffsetTo(mBlockFrame).y
-          : inlineFrame->GetOffsetTo(mBlockFrame).x;
+          ? inlineFrame->GetOffsetTo(mLineContainer).y
+          : inlineFrame->GetOffsetTo(mLineContainer).x;
         if (isRtlBlock == (frameOffset >= curOffset)) {
           pos += mVertical
                  ? inlineFrame->GetSize().height
@@ -243,7 +243,7 @@ protected:
   };
 
   nsIFrame*      mFrame;
-  nsBlockFrame*  mBlockFrame;
+  nsIFrame*      mLineContainer;
   nsRect         mBoundingBox;
   nscoord        mContinuationPoint;
   nscoord        mUnbrokenMeasure;
@@ -290,14 +290,14 @@ protected:
     nsIFrame* prevCont = aFrame->GetPrevContinuation();
     if (!prevCont &&
         (aFrame->GetStateBits() & NS_FRAME_PART_OF_IBSPLIT)) {
-      nsIFrame* block = static_cast<nsIFrame*>
-        (aFrame->Properties().Get(nsIFrame::IBSplitPrevSibling()));
+      nsIFrame* block =
+        aFrame->Properties().Get(nsIFrame::IBSplitPrevSibling());
       if (block) {
         // The {ib} properties are only stored on first continuations
         NS_ASSERTION(!block->GetPrevContinuation(),
                      "Incorrect value for IBSplitPrevSibling");
-        prevCont = static_cast<nsIFrame*>
-          (block->Properties().Get(nsIFrame::IBSplitPrevSibling()));
+        prevCont =
+          block->Properties().Get(nsIFrame::IBSplitPrevSibling());
         NS_ASSERTION(prevCont, "How did that happen?");
       }
     }
@@ -311,11 +311,9 @@ protected:
         (aFrame->GetStateBits() & NS_FRAME_PART_OF_IBSPLIT)) {
       // The {ib} properties are only stored on first continuations
       aFrame = aFrame->FirstContinuation();
-      nsIFrame* block = static_cast<nsIFrame*>
-        (aFrame->Properties().Get(nsIFrame::IBSplitSibling()));
+      nsIFrame* block = aFrame->Properties().Get(nsIFrame::IBSplitSibling());
       if (block) {
-        nextCont = static_cast<nsIFrame*>
-          (block->Properties().Get(nsIFrame::IBSplitSibling()));
+        nextCont = block->Properties().Get(nsIFrame::IBSplitSibling());
         NS_ASSERTION(nextCont, "How did that happen?");
       }
     }
@@ -327,15 +325,16 @@ protected:
     mPIStartBorderData.Reset();
     mBidiEnabled = aFrame->PresContext()->BidiEnabled();
     if (mBidiEnabled) {
-      // Find the containing block frame
-      nsIFrame* frame = aFrame;
-      do {
-        frame = frame->GetParent();
-        mBlockFrame = do_QueryFrame(frame);
+      // Find the line container frame
+      mLineContainer = aFrame;
+      while (mLineContainer &&
+             mLineContainer->IsFrameOfType(nsIFrame::eLineParticipant)) {
+        mLineContainer = mLineContainer->GetParent();
       }
-      while (frame && frame->IsFrameOfType(nsIFrame::eLineParticipant));
 
-      NS_ASSERTION(mBlockFrame, "Cannot find containing block.");
+      MOZ_ASSERT(mLineContainer, "Cannot find line containing frame.");
+      MOZ_ASSERT(mLineContainer != aFrame, "line container frame "
+                 "should be an ancestor of the target frame.");
     }
 
     mVertical = aFrame->GetWritingMode().IsVertical();
@@ -378,15 +377,41 @@ protected:
   }
 
   bool AreOnSameLine(nsIFrame* aFrame1, nsIFrame* aFrame2) {
-    bool isValid1, isValid2;
-    nsBlockInFlowLineIterator it1(mBlockFrame, aFrame1, &isValid1);
-    nsBlockInFlowLineIterator it2(mBlockFrame, aFrame2, &isValid2);
-    return isValid1 && isValid2 &&
-      // Make sure aFrame1 and aFrame2 are in the same continuation of
-      // mBlockFrame.
-      it1.GetContainer() == it2.GetContainer() &&
-      // And on the same line in it
-      it1.GetLine() == it2.GetLine();
+    if (nsBlockFrame* blockFrame = do_QueryFrame(mLineContainer)) {
+      bool isValid1, isValid2;
+      nsBlockInFlowLineIterator it1(blockFrame, aFrame1, &isValid1);
+      nsBlockInFlowLineIterator it2(blockFrame, aFrame2, &isValid2);
+      return isValid1 && isValid2 &&
+        // Make sure aFrame1 and aFrame2 are in the same continuation of
+        // blockFrame.
+        it1.GetContainer() == it2.GetContainer() &&
+        // And on the same line in it
+        it1.GetLine() == it2.GetLine();
+    }
+    if (nsRubyTextContainerFrame* rtcFrame = do_QueryFrame(mLineContainer)) {
+      nsBlockFrame* block = nsLayoutUtils::FindNearestBlockAncestor(rtcFrame);
+      // Ruby text container can only hold one line of text, so if they
+      // are in the same continuation, they are in the same line. Since
+      // ruby text containers are bidi isolate, they are never split for
+      // bidi reordering, which means being in different continuation
+      // indicates being in different lines.
+      for (nsIFrame* frame = rtcFrame->FirstContinuation();
+           frame; frame = frame->GetNextContinuation()) {
+        bool isDescendant1 =
+          nsLayoutUtils::IsProperAncestorFrame(frame, aFrame1, block);
+        bool isDescendant2 =
+          nsLayoutUtils::IsProperAncestorFrame(frame, aFrame2, block);
+        if (isDescendant1 && isDescendant2) {
+          return true;
+        }
+        if (isDescendant1 || isDescendant2) {
+          return false;
+        }
+      }
+      MOZ_ASSERT_UNREACHABLE("None of the frames is a descendant of this rtc?");
+    }
+    MOZ_ASSERT_UNREACHABLE("Do we have any other type of line container?");
+    return false;
   }
 };
 
@@ -771,6 +796,7 @@ nsCSSRendering::PaintBorderWithStyleBorder(nsPresContext* aPresContext,
                             Float(border.right / twipsPerPixel),
                             Float(border.bottom / twipsPerPixel),
                             Float(border.left / twipsPerPixel) };
+  Rect dirtyRect = NSRectToRect(aDirtyRect, twipsPerPixel);
 
   uint8_t borderStyles[4];
   nscolor borderColors[4];
@@ -796,8 +822,16 @@ nsCSSRendering::PaintBorderWithStyleBorder(nsPresContext* aPresContext,
   aDrawTarget.FillRect(joinedBorderAreaPx, color);
 #endif
 
-  nsCSSBorderRenderer br(aPresContext->Type(),
+  nsIDocument* document = nullptr;
+  nsIContent* content = aForFrame->GetContent();
+  if (content) {
+    document = content->OwnerDoc();
+  }
+
+  nsCSSBorderRenderer br(aPresContext,
+                         document,
                          &aDrawTarget,
+                         dirtyRect,
                          joinedBorderAreaPx,
                          borderStyles,
                          borderWidths,
@@ -819,8 +853,8 @@ nsCSSRendering::PaintBorderWithStyleBorder(nsPresContext* aPresContext,
 static nsRect
 GetOutlineInnerRect(nsIFrame* aFrame)
 {
-  nsRect* savedOutlineInnerRect = static_cast<nsRect*>
-    (aFrame->Properties().Get(nsIFrame::OutlineInnerRectProperty()));
+  nsRect* savedOutlineInnerRect =
+    aFrame->Properties().Get(nsIFrame::OutlineInnerRectProperty());
   if (savedOutlineInnerRect)
     return *savedOutlineInnerRect;
   NS_NOTREACHED("we should have saved a frame property");
@@ -932,11 +966,20 @@ nsCSSRendering::PaintOutline(nsPresContext* aPresContext,
                              Float(width / twipsPerPixel),
                              Float(width / twipsPerPixel),
                              Float(width / twipsPerPixel) };
+  Rect dirtyRect = NSRectToRect(aDirtyRect, twipsPerPixel);
+
+  nsIDocument* document = nullptr;
+  nsIContent* content = aForFrame->GetContent();
+  if (content) {
+    document = content->OwnerDoc();
+  }
 
   // start drawing
 
-  nsCSSBorderRenderer br(aPresContext->Type(),
+  nsCSSBorderRenderer br(aPresContext,
+                         document,
                          aRenderingContext.GetDrawTarget(),
+                         dirtyRect,
                          oRect,
                          outlineStyles,
                          outlineWidths,
@@ -982,8 +1025,10 @@ nsCSSRendering::PaintFocus(nsPresContext* aPresContext,
   // something that CSS can style, this function will then have access
   // to a style context and can use the same logic that PaintBorder
   // and PaintOutline do.)
-  nsCSSBorderRenderer br(aPresContext->Type(),
+  nsCSSBorderRenderer br(aPresContext,
+                         nullptr,
                          aDrawTarget,
+                         focusRect,
                          focusRect,
                          focusStyles,
                          focusWidths,
@@ -2046,9 +2091,13 @@ nsCSSRendering::DetermineBackgroundColor(nsPresContext* aPresContext,
   }
 
   // We can skip painting the background color if a background image is opaque.
+  nsStyleImageLayers::Repeat repeat = bg->BottomLayer().mRepeat;
+  bool xFullRepeat = repeat.mXRepeat == NS_STYLE_IMAGELAYER_REPEAT_REPEAT ||
+                     repeat.mXRepeat == NS_STYLE_IMAGELAYER_REPEAT_ROUND;
+  bool yFullRepeat = repeat.mYRepeat == NS_STYLE_IMAGELAYER_REPEAT_REPEAT ||
+                     repeat.mYRepeat == NS_STYLE_IMAGELAYER_REPEAT_ROUND;
   if (aDrawBackgroundColor &&
-      bg->BottomLayer().mRepeat.mXRepeat == NS_STYLE_IMAGELAYER_REPEAT_REPEAT &&
-      bg->BottomLayer().mRepeat.mYRepeat == NS_STYLE_IMAGELAYER_REPEAT_REPEAT &&
+      xFullRepeat && yFullRepeat &&
       bg->BottomLayer().mImage.IsOpaque() &&
       bg->BottomLayer().mBlendMode == NS_STYLE_BLEND_NORMAL) {
     aDrawBackgroundColor = false;
@@ -2490,6 +2539,7 @@ nsCSSRendering::PaintGradient(nsPresContext* aPresContext,
                               const nsRect& aDirtyRect,
                               const nsRect& aDest,
                               const nsRect& aFillArea,
+                              const nsSize& aRepeatSize,
                               const CSSIntRect& aSrc,
                               const nsSize& aIntrinsicSize)
 {
@@ -2825,14 +2875,14 @@ nsCSSRendering::PaintGradient(nsPresContext* aPresContext,
   bool isCTMPreservingAxisAlignedRectangles = ctm.PreservesAxisAlignedRectangles();
 
   // xStart/yStart are the top-left corner of the top-left tile.
-  nscoord xStart = FindTileStart(dirty.x, aDest.x, aDest.width);
-  nscoord yStart = FindTileStart(dirty.y, aDest.y, aDest.height);
+  nscoord xStart = FindTileStart(dirty.x, aDest.x, aRepeatSize.width);
+  nscoord yStart = FindTileStart(dirty.y, aDest.y, aRepeatSize.height);
   nscoord xEnd = forceRepeatToCoverTiles ? xStart + aDest.width : dirty.XMost();
   nscoord yEnd = forceRepeatToCoverTiles ? yStart + aDest.height : dirty.YMost();
 
   // x and y are the top-left corner of the tile to draw
-  for (nscoord y = yStart; y < yEnd; y += aDest.height) {
-    for (nscoord x = xStart; x < xEnd; x += aDest.width) {
+  for (nscoord y = yStart; y < yEnd; y += aRepeatSize.height) {
+    for (nscoord x = xStart; x < xEnd; x += aRepeatSize.width) {
       // The coordinates of the tile
       gfxRect tileRect = nsLayoutUtils::RectToGfxRect(
                       nsRect(x, y, aDest.width, aDest.height),
@@ -3102,7 +3152,8 @@ nsCSSRendering::PaintBackgroundWithSC(const PaintBGParams& aParams,
                                                 aParams.renderingCtx,
                                                 state.mDestArea, state.mFillArea,
                                                 state.mAnchor + paintBorderArea.TopLeft(),
-                                                clipState.mDirtyRect);
+                                                clipState.mDirtyRect,
+                                                state.mRepeatSize);
 
           if (co != CompositionOp::OP_OVER) {
             ctx->SetOp(CompositionOp::OP_OVER);
@@ -3225,6 +3276,19 @@ nsCSSRendering::ComputeImageLayerPositioningArea(nsPresContext* aPresContext,
   return bgPositioningArea;
 }
 
+// Implementation of the formula for computation of background-repeat round
+// See http://dev.w3.org/csswg/css3-background/#the-background-size
+// This function returns the adjusted size of the background image.
+static nscoord
+ComputeRoundedSize(nscoord aCurrentSize, nscoord aPositioningSize)
+{
+  float repeatCount = NS_roundf(float(aPositioningSize) / float(aCurrentSize));
+  if (repeatCount < 1.0f) {
+    return aPositioningSize;
+  }
+  return nscoord(NS_lround(float(aPositioningSize) / repeatCount));
+}
+
 // Apply the CSS image sizing algorithm as it applies to background images.
 // See http://www.w3.org/TR/css3-background/#the-background-size .
 // aIntrinsicSize is the size that the background image 'would like to be'.
@@ -3232,8 +3296,11 @@ nsCSSRendering::ComputeImageLayerPositioningArea(nsPresContext* aPresContext,
 static nsSize
 ComputeDrawnSizeForBackground(const CSSSizeOrRatio& aIntrinsicSize,
                               const nsSize& aBgPositioningArea,
-                              const nsStyleImageLayers::Size& aLayerSize)
+                              const nsStyleImageLayers::Size& aLayerSize,
+                              uint8_t aXRepeat, uint8_t aYRepeat)
 {
+  nsSize imageSize;
+
   // Size is dictated by cover or contain rules.
   if (aLayerSize.mWidthType == nsStyleImageLayers::Size::eContain ||
       aLayerSize.mWidthType == nsStyleImageLayers::Size::eCover) {
@@ -3241,25 +3308,86 @@ ComputeDrawnSizeForBackground(const CSSSizeOrRatio& aIntrinsicSize,
       aLayerSize.mWidthType == nsStyleImageLayers::Size::eCover
         ? nsImageRenderer::COVER
         : nsImageRenderer::CONTAIN;
-    return nsImageRenderer::ComputeConstrainedSize(aBgPositioningArea,
-                                                   aIntrinsicSize.mRatio,
-                                                   fitType);
+    imageSize = nsImageRenderer::ComputeConstrainedSize(aBgPositioningArea,
+                                                        aIntrinsicSize.mRatio,
+                                                        fitType);
+  } else {
+    // No cover/contain constraint, use default algorithm.
+    CSSSizeOrRatio specifiedSize;
+    if (aLayerSize.mWidthType == nsStyleImageLayers::Size::eLengthPercentage) {
+      specifiedSize.SetWidth(
+        aLayerSize.ResolveWidthLengthPercentage(aBgPositioningArea));
+    }
+    if (aLayerSize.mHeightType == nsStyleImageLayers::Size::eLengthPercentage) {
+      specifiedSize.SetHeight(
+        aLayerSize.ResolveHeightLengthPercentage(aBgPositioningArea));
+    }
+
+    imageSize = nsImageRenderer::ComputeConcreteSize(specifiedSize,
+                                                     aIntrinsicSize,
+                                                     aBgPositioningArea);
   }
 
-  // No cover/contain constraint, use default algorithm.
-  CSSSizeOrRatio specifiedSize;
-  if (aLayerSize.mWidthType == nsStyleImageLayers::Size::eLengthPercentage) {
-    specifiedSize.SetWidth(
-      aLayerSize.ResolveWidthLengthPercentage(aBgPositioningArea));
-  }
-  if (aLayerSize.mHeightType == nsStyleImageLayers::Size::eLengthPercentage) {
-    specifiedSize.SetHeight(
-      aLayerSize.ResolveHeightLengthPercentage(aBgPositioningArea));
+  // See https://www.w3.org/TR/css3-background/#background-size .
+  // "If 'background-repeat' is 'round' for one (or both) dimensions, there is a second
+  //  step. The UA must scale the image in that dimension (or both dimensions) so that
+  //  it fits a whole number of times in the background positioning area."
+  // "If 'background-repeat' is 'round' for one dimension only and if 'background-size'
+  //  is 'auto' for the other dimension, then there is a third step: that other dimension
+  //  is scaled so that the original aspect ratio is restored."
+  bool isRepeatRoundInBothDimensions = aXRepeat == NS_STYLE_IMAGELAYER_REPEAT_ROUND &&
+                                       aYRepeat == NS_STYLE_IMAGELAYER_REPEAT_ROUND;
+
+  // Calculate the rounded size only if the background-size computation
+  // returned a correct size for the image.
+  if (imageSize.width && aXRepeat == NS_STYLE_IMAGELAYER_REPEAT_ROUND) {
+    imageSize.width = ComputeRoundedSize(imageSize.width, aBgPositioningArea.width);
+    if (!isRepeatRoundInBothDimensions &&
+        aLayerSize.mHeightType == nsStyleImageLayers::Size::DimensionType::eAuto) {
+      // Restore intrinsic rato
+      if (aIntrinsicSize.mRatio.width) {
+        float scale = float(aIntrinsicSize.mRatio.height) / aIntrinsicSize.mRatio.width;
+        imageSize.height = NSCoordSaturatingNonnegativeMultiply(imageSize.width, scale);
+      }
+    }
   }
 
-  return nsImageRenderer::ComputeConcreteSize(specifiedSize,
-                                              aIntrinsicSize,
-                                              aBgPositioningArea);
+  // Calculate the rounded size only if the background-size computation
+  // returned a correct size for the image.
+  if (imageSize.height && aYRepeat == NS_STYLE_IMAGELAYER_REPEAT_ROUND) {
+    imageSize.height = ComputeRoundedSize(imageSize.height, aBgPositioningArea.height);
+    if (!isRepeatRoundInBothDimensions &&
+        aLayerSize.mWidthType == nsStyleImageLayers::Size::DimensionType::eAuto) {
+      // Restore intrinsic rato
+      if (aIntrinsicSize.mRatio.height) {
+        float scale = float(aIntrinsicSize.mRatio.width) / aIntrinsicSize.mRatio.height;
+        imageSize.width = NSCoordSaturatingNonnegativeMultiply(imageSize.height, scale);
+      }
+    }
+  }
+
+  return imageSize;
+}
+
+/* ComputeSpacedRepeatSize
+ * aImageDimension: the image width/height
+ * aAvailableSpace: the background positioning area width/height
+ * aRepeatSize: the image size plus gap size of app units for use as spacing
+ * aRepeat: determine whether the image is repeated
+ */
+static nscoord
+ComputeSpacedRepeatSize(nscoord aImageDimension,
+                        nscoord aAvailableSpace,
+                        bool& aRepeat) {
+  float ratio = static_cast<float>(aAvailableSpace) / aImageDimension;
+
+  if (ratio < 2.0f) { // If you can't repeat at least twice, then don't repeat.
+    aRepeat = false;
+    return aImageDimension;
+  } else {
+    aRepeat = true;
+    return (aAvailableSpace - aImageDimension) / (NSToIntFloor(ratio) - 1);
+  }
 }
 
 nsBackgroundLayerState
@@ -3384,14 +3512,20 @@ nsCSSRendering::PrepareImageLayer(nsPresContext* aPresContext,
     }
   }
 
-  // Scale the image as specified for background-size and as required for
-  // proper background positioning when background-position is defined with
-  // percentages.
+  int repeatX = aLayer.mRepeat.mXRepeat;
+  int repeatY = aLayer.mRepeat.mYRepeat;
+
+  // Scale the image as specified for background-size and background-repeat.
+  // Also as required for proper background positioning when background-position
+  // is defined with percentages.
   CSSSizeOrRatio intrinsicSize = state.mImageRenderer.ComputeIntrinsicSize();
   nsSize bgPositionSize = bgPositioningArea.Size();
   nsSize imageSize = ComputeDrawnSizeForBackground(intrinsicSize,
                                                    bgPositionSize,
-                                                   aLayer.mSize);
+                                                   aLayer.mSize,
+                                                   repeatX,
+                                                   repeatY);
+
   if (imageSize.width <= 0 || imageSize.height <= 0)
     return state;
 
@@ -3403,21 +3537,49 @@ nsCSSRendering::PrepareImageLayer(nsPresContext* aPresContext,
   nsImageRenderer::ComputeObjectAnchorPoint(aLayer.mPosition,
                                             bgPositionSize, imageSize,
                                             &imageTopLeft, &state.mAnchor);
+  state.mRepeatSize = imageSize;
+  if (repeatX == NS_STYLE_IMAGELAYER_REPEAT_SPACE) {
+    bool isRepeat;
+    state.mRepeatSize.width = ComputeSpacedRepeatSize(imageSize.width,
+                                                      bgPositionSize.width,
+                                                      isRepeat);
+    if (isRepeat) {
+      imageTopLeft.x = 0;
+      state.mAnchor.x = 0;
+    } else {
+      repeatX = NS_STYLE_IMAGELAYER_REPEAT_NO_REPEAT;
+    }
+  }
+
+  if (repeatY == NS_STYLE_IMAGELAYER_REPEAT_SPACE) {
+    bool isRepeat;
+    state.mRepeatSize.height = ComputeSpacedRepeatSize(imageSize.height,
+                                                       bgPositionSize.height,
+                                                       isRepeat);
+    if (isRepeat) {
+      imageTopLeft.y = 0;
+      state.mAnchor.y = 0;
+    } else {
+      repeatY = NS_STYLE_IMAGELAYER_REPEAT_NO_REPEAT;
+    }
+  }
+
   imageTopLeft += bgPositioningArea.TopLeft();
   state.mAnchor += bgPositioningArea.TopLeft();
-
   state.mDestArea = nsRect(imageTopLeft + aBorderArea.TopLeft(), imageSize);
   state.mFillArea = state.mDestArea;
-  int repeatX = aLayer.mRepeat.mXRepeat;
-  int repeatY = aLayer.mRepeat.mYRepeat;
 
   ExtendMode repeatMode = ExtendMode::CLAMP;
-  if (repeatX == NS_STYLE_IMAGELAYER_REPEAT_REPEAT) {
+  if (repeatX == NS_STYLE_IMAGELAYER_REPEAT_REPEAT ||
+      repeatX == NS_STYLE_IMAGELAYER_REPEAT_ROUND ||
+      repeatX == NS_STYLE_IMAGELAYER_REPEAT_SPACE) {
     state.mFillArea.x = bgClipRect.x;
     state.mFillArea.width = bgClipRect.width;
     repeatMode = ExtendMode::REPEAT_X;
   }
-  if (repeatY == NS_STYLE_IMAGELAYER_REPEAT_REPEAT) {
+  if (repeatY == NS_STYLE_IMAGELAYER_REPEAT_REPEAT ||
+      repeatY == NS_STYLE_IMAGELAYER_REPEAT_ROUND ||
+      repeatY == NS_STYLE_IMAGELAYER_REPEAT_SPACE) {
     state.mFillArea.y = bgClipRect.y;
     state.mFillArea.height = bgClipRect.height;
 
@@ -5122,6 +5284,7 @@ nsImageRenderer::Draw(nsPresContext*       aPresContext,
                       const nsRect&        aDest,
                       const nsRect&        aFill,
                       const nsPoint&       aAnchor,
+                      const nsSize&        aRepeatSize,
                       const CSSIntRect&    aSrc)
 {
   if (!IsReady()) {
@@ -5133,7 +5296,7 @@ nsImageRenderer::Draw(nsPresContext*       aPresContext,
     return DrawResult::SUCCESS;
   }
 
-  Filter filter = nsLayoutUtils::GetGraphicsFilterForFrame(mForFrame);
+  SamplingFilter samplingFilter = nsLayoutUtils::GetSamplingFilterForFrame(mForFrame);
   DrawResult result = DrawResult::SUCCESS;
   RefPtr<gfxContext> ctx = aRenderingContext.ThebesContext();
   IntRect tmpDTRect;
@@ -5141,8 +5304,15 @@ nsImageRenderer::Draw(nsPresContext*       aPresContext,
   if (ctx->CurrentOp() != CompositionOp::OP_OVER || mMaskOp == NS_STYLE_MASK_MODE_LUMINANCE) {
     gfxRect clipRect = ctx->GetClipExtents();
     tmpDTRect = RoundedOut(ToRect(clipRect));
-    RefPtr<DrawTarget> tempDT = ctx->GetDrawTarget()->CreateSimilarDrawTarget(tmpDTRect.Size(), SurfaceFormat::B8G8R8A8);
-    ctx = gfxContext::ForDrawTarget(tempDT, tmpDTRect.TopLeft());
+    RefPtr<DrawTarget> tempDT =
+      ctx->GetDrawTarget()->CreateSimilarDrawTarget(tmpDTRect.Size(),
+                                                    SurfaceFormat::B8G8R8A8);
+    if (!tempDT || !tempDT->IsValid()) {
+      gfxDevCrash(LogReason::InvalidContext) << "ImageRenderer::Draw problem " << gfx::hexa(tempDT);
+      return DrawResult::TEMPORARY_ERROR;
+    }
+    tempDT->SetTransform(Matrix::Translation(-tmpDTRect.TopLeft()));
+    ctx = gfxContext::CreatePreservingTransformOrNull(tempDT);
     if (!ctx) {
       gfxDevCrash(LogReason::InvalidContext) << "ImageRenderer::Draw problem " << gfx::hexa(tempDT);
       return DrawResult::TEMPORARY_ERROR;
@@ -5157,8 +5327,10 @@ nsImageRenderer::Draw(nsPresContext*       aPresContext,
       result =
         nsLayoutUtils::DrawBackgroundImage(*ctx,
                                            aPresContext,
-                                           mImageContainer, imageSize, filter,
-                                           aDest, aFill, aAnchor, aDirtyRect,
+                                           mImageContainer, imageSize,
+                                           samplingFilter,
+                                           aDest, aFill, aRepeatSize,
+                                           aAnchor, aDirtyRect,
                                            ConvertImageRendererToDrawFlags(mFlags),
                                            mExtendMode);
       break;
@@ -5167,7 +5339,7 @@ nsImageRenderer::Draw(nsPresContext*       aPresContext,
     {
       nsCSSRendering::PaintGradient(aPresContext, aRenderingContext,
                                     mGradientData, aDirtyRect,
-                                    aDest, aFill, aSrc, mSize);
+                                    aDest, aFill, aRepeatSize, aSrc, mSize);
       break;
     }
     case eStyleImageType_Element:
@@ -5183,7 +5355,7 @@ nsImageRenderer::Draw(nsPresContext*       aPresContext,
       result =
         nsLayoutUtils::DrawImage(*ctx,
                                  aPresContext, image,
-                                 filter, aDest, aFill, aAnchor, aDirtyRect,
+                                 samplingFilter, aDest, aFill, aAnchor, aDirtyRect,
                                  ConvertImageRendererToDrawFlags(mFlags));
       break;
     }
@@ -5209,7 +5381,7 @@ nsImageRenderer::Draw(nsPresContext*       aPresContext,
     DrawTarget* dt = aRenderingContext.ThebesContext()->GetDrawTarget();
     dt->DrawSurface(surf, Rect(tmpDTRect.x, tmpDTRect.y, tmpDTRect.width, tmpDTRect.height),
                     Rect(0, 0, tmpDTRect.width, tmpDTRect.height),
-                    DrawSurfaceOptions(Filter::POINT),
+                    DrawSurfaceOptions(SamplingFilter::POINT),
                     DrawOptions(1.0f, aRenderingContext.ThebesContext()->CurrentOp()));
   }
 
@@ -5255,7 +5427,8 @@ nsImageRenderer::DrawBackground(nsPresContext*       aPresContext,
                                 const nsRect&        aDest,
                                 const nsRect&        aFill,
                                 const nsPoint&       aAnchor,
-                                const nsRect&        aDirty)
+                                const nsRect&        aDirty,
+                                const nsSize&        aRepeatSize)
 {
   if (!IsReady()) {
     NS_NOTREACHED("Ensure PrepareImage() has returned true before calling me");
@@ -5267,7 +5440,7 @@ nsImageRenderer::DrawBackground(nsPresContext*       aPresContext,
   }
 
   return Draw(aPresContext, aRenderingContext,
-              aDirty, aDest, aFill, aAnchor,
+              aDirty, aDest, aFill, aAnchor, aRepeatSize,
               CSSIntRect(0, 0,
                          nsPresContext::AppUnitsToIntCSSPixels(mSize.width),
                          nsPresContext::AppUnitsToIntCSSPixels(mSize.height)));
@@ -5299,7 +5472,7 @@ ComputeTile(const nsRect&        aFill,
     break;
   case NS_STYLE_BORDER_IMAGE_REPEAT_ROUND:
     tile.x = aFill.x;
-    tile.width = aFill.width / ceil(gfxFloat(aFill.width)/aUnitSize.width);
+    tile.width = ComputeRoundedSize(aUnitSize.width, aFill.width);
     break;
   default:
     NS_NOTREACHED("unrecognized border-image fill style");
@@ -5316,7 +5489,7 @@ ComputeTile(const nsRect&        aFill,
     break;
   case NS_STYLE_BORDER_IMAGE_REPEAT_ROUND:
     tile.y = aFill.y;
-    tile.height = aFill.height/ceil(gfxFloat(aFill.height)/aUnitSize.height);
+    tile.height = ComputeRoundedSize(aUnitSize.height, aFill.height);
     break;
   default:
     NS_NOTREACHED("unrecognized border-image fill style");
@@ -5375,6 +5548,12 @@ nsImageRenderer::DrawBorderImageComponent(nsPresContext*       aPresContext,
     // preserveAspectRatio attribute, and always do non-uniform stretch.
     uint32_t drawFlags = ConvertImageRendererToDrawFlags(mFlags) |
                            imgIContainer::FLAG_FORCE_PRESERVEASPECTRATIO_NONE;
+    // For those SVG image sources which don't have fixed aspect ratio (i.e.
+    // without viewport size and viewBox), we should scale the source uniformly
+    // after the viewport size is decided by "Default Sizing Algorithm".
+    if (!ComputeIntrinsicSize().HasRatio()) {
+      drawFlags = drawFlags | imgIContainer::FLAG_FORCE_UNIFORM_SCALING;
+    }
     // Retrieve or create the subimage we'll draw.
     nsIntRect srcRect(aSrc.x, aSrc.y, aSrc.width, aSrc.height);
     if (mType == eStyleImageType_Image) {
@@ -5405,13 +5584,13 @@ nsImageRenderer::DrawBorderImageComponent(nsPresContext*       aPresContext,
     MOZ_ASSERT_IF(aSVGViewportSize,
                   subImage->GetType() == imgIContainer::TYPE_VECTOR);
 
-    Filter filter = nsLayoutUtils::GetGraphicsFilterForFrame(mForFrame);
+    SamplingFilter samplingFilter = nsLayoutUtils::GetSamplingFilterForFrame(mForFrame);
 
     if (!RequiresScaling(aFill, aHFill, aVFill, aUnitSize)) {
       return nsLayoutUtils::DrawSingleImage(*aRenderingContext.ThebesContext(),
                                             aPresContext,
                                             subImage,
-                                            filter,
+                                            samplingFilter,
                                             aFill, aDirtyRect,
                                             nullptr,
                                             drawFlags);
@@ -5421,7 +5600,7 @@ nsImageRenderer::DrawBorderImageComponent(nsPresContext*       aPresContext,
     return nsLayoutUtils::DrawImage(*aRenderingContext.ThebesContext(),
                                     aPresContext,
                                     subImage,
-                                    filter,
+                                    samplingFilter,
                                     tile, aFill, tile.TopLeft(), aDirtyRect,
                                     drawFlags);
   }
@@ -5431,7 +5610,7 @@ nsImageRenderer::DrawBorderImageComponent(nsPresContext*       aPresContext,
                   : aFill;
 
   return Draw(aPresContext, aRenderingContext, aDirtyRect, destTile,
-              aFill, destTile.TopLeft(), aSrc);
+              aFill, destTile.TopLeft(), destTile.Size(), aSrc);
 }
 
 bool

@@ -1,5 +1,3 @@
-/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
-/* vim: set ft=javascript ts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -7,17 +5,16 @@
 "use strict";
 
 const MAX_ORDINAL = 99;
-const ZOOM_PREF = "devtools.toolbox.zoomValue";
 const SPLITCONSOLE_ENABLED_PREF = "devtools.toolbox.splitconsoleEnabled";
 const SPLITCONSOLE_HEIGHT_PREF = "devtools.toolbox.splitconsoleHeight";
-const MIN_ZOOM = 0.5;
-const MAX_ZOOM = 2;
 const OS_HISTOGRAM = "DEVTOOLS_OS_ENUMERATED_PER_USER";
 const OS_IS_64_BITS = "DEVTOOLS_OS_IS_64_BITS_PER_USER";
 const SCREENSIZE_HISTOGRAM = "DEVTOOLS_SCREEN_RESOLUTION_ENUMERATED_PER_USER";
+const HTML_NS = "http://www.w3.org/1999/xhtml";
 
 var {Cc, Ci, Cu} = require("chrome");
 var promise = require("promise");
+var defer = require("devtools/shared/defer");
 var Services = require("Services");
 var {Task} = require("devtools/shared/task");
 var {gDevTools} = require("devtools/client/framework/devtools");
@@ -26,9 +23,9 @@ var Telemetry = require("devtools/client/shared/telemetry");
 var HUDService = require("devtools/client/webconsole/hudservice");
 var viewSource = require("devtools/client/shared/view-source");
 var { attachThread, detachThread } = require("./attach-thread");
-
-Cu.import("resource://devtools/client/scratchpad/scratchpad-manager.jsm");
-Cu.import("resource://devtools/client/shared/DOMHelpers.jsm");
+var Menu = require("devtools/client/framework/menu");
+var MenuItem = require("devtools/client/framework/menu-item");
+var { DOMHelpers } = require("resource://devtools/client/shared/DOMHelpers.jsm");
 
 const { BrowserLoader } =
   Cu.import("resource://devtools/client/shared/browser-loader.js", {});
@@ -63,14 +60,16 @@ loader.lazyRequireGetter(this, "DevToolsUtils",
 loader.lazyRequireGetter(this, "showDoorhanger",
   "devtools/client/shared/doorhanger", true);
 loader.lazyRequireGetter(this, "createPerformanceFront",
-  "devtools/server/actors/performance", true);
+  "devtools/shared/fronts/performance", true);
 loader.lazyRequireGetter(this, "system",
   "devtools/shared/system");
 loader.lazyRequireGetter(this, "getPreferenceFront",
-  "devtools/server/actors/preference", true);
-loader.lazyGetter(this, "osString", () => {
-  return Cc["@mozilla.org/xre/app-info;1"].getService(Ci.nsIXULRuntime).OS;
-});
+  "devtools/shared/fronts/preference", true);
+loader.lazyRequireGetter(this, "KeyShortcuts",
+  "devtools/client/shared/key-shortcuts", true);
+loader.lazyRequireGetter(this, "ZoomKeys",
+  "devtools/client/shared/zoom-keys");
+
 loader.lazyGetter(this, "registerHarOverlay", () => {
   return require("devtools/client/netmonitor/har/toolbox-overlay").register;
 });
@@ -123,11 +122,15 @@ function Toolbox(target, selectedTool, hostType, hostOptions) {
   this._initInspector = null;
   this._inspector = null;
 
+  // Map of frames (id => frame-info) and currently selected frame id.
+  this.frameMap = new Map();
+  this.selectedFrameId = null;
+
   this._toolRegistered = this._toolRegistered.bind(this);
   this._toolUnregistered = this._toolUnregistered.bind(this);
   this._refreshHostTitle = this._refreshHostTitle.bind(this);
   this._toggleAutohide = this._toggleAutohide.bind(this);
-  this.selectFrame = this.selectFrame.bind(this);
+  this.showFramesMenu = this.showFramesMenu.bind(this);
   this._updateFrames = this._updateFrames.bind(this);
   this._splitConsoleOnKeypress = this._splitConsoleOnKeypress.bind(this);
   this.destroy = this.destroy.bind(this);
@@ -229,7 +232,7 @@ Toolbox.prototype = {
    *          A promise that resolves once the panel is ready.
    */
   getPanelWhenReady: function (id) {
-    let deferred = promise.defer();
+    let deferred = defer();
     let panel = this.getPanel(id);
     if (panel) {
       deferred.resolve(panel);
@@ -291,13 +294,6 @@ Toolbox.prototype = {
    */
   get doc() {
     return this.frame.contentDocument;
-  },
-
-  /**
-   * Get current zoom level of toolbox
-   */
-  get zoomValue() {
-    return parseFloat(Services.prefs.getCharPref(ZOOM_PREF));
   },
 
   /**
@@ -366,7 +362,7 @@ Toolbox.prototype = {
   open: function () {
     return Task.spawn(function* () {
       let iframe = yield this._host.create();
-      let domReady = promise.defer();
+      let domReady = defer();
 
       // Prevent reloading the document when the toolbox is opened in a tab
       let location = iframe.contentWindow.location.href;
@@ -402,35 +398,35 @@ Toolbox.prototype = {
       let framesPromise = this._listFrames();
 
       this.closeButton = this.doc.getElementById("toolbox-close");
-      this.closeButton.addEventListener("command", this.destroy, true);
+      this.closeButton.addEventListener("click", this.destroy, true);
 
       gDevTools.on("pref-changed", this._prefChanged);
 
       let framesMenu = this.doc.getElementById("command-button-frames");
-      framesMenu.addEventListener("command", this.selectFrame, true);
+      framesMenu.addEventListener("click", this.showFramesMenu, false);
 
       let noautohideMenu = this.doc.getElementById("command-button-noautohide");
-      noautohideMenu.addEventListener("command", this._toggleAutohide, true);
+      noautohideMenu.addEventListener("click", this._toggleAutohide, true);
 
       this.textboxContextMenuPopup =
         this.doc.getElementById("toolbox-textbox-context-popup");
       this.textboxContextMenuPopup.addEventListener("popupshowing",
         this._updateTextboxMenuItems, true);
 
+      var shortcuts = new KeyShortcuts({
+        window: this.doc.defaultView
+      });
       this._buildDockButtons();
-      this._buildOptions();
+      this._buildOptions(shortcuts);
       this._buildTabs();
       this._applyCacheSettings();
       this._applyServiceWorkersTestingSettings();
       this._addKeysToWindow();
-      this._addReloadKeys();
-      this._addHostListeners();
+      this._addReloadKeys(shortcuts);
+      this._addHostListeners(shortcuts);
       this._registerOverlays();
-      if (this._hostOptions && this._hostOptions.zoom === false) {
-        this._disableZoomKeys();
-      } else {
-        this._addZoomKeys();
-        this._loadInitialZoom();
+      if (!this._hostOptions || this._hostOptions.zoom === true) {
+        ZoomKeys.register(this.win);
       }
       this._setToolbarKeyboardNavigation();
 
@@ -496,7 +492,8 @@ Toolbox.prototype = {
     this._telemetry.toolOpened("toolbox");
 
     this._telemetry.logOncePerBrowserVersion(OS_HISTOGRAM, system.getOSCPU());
-    this._telemetry.logOncePerBrowserVersion(OS_IS_64_BITS, system.is64Bit ? 1 : 0);
+    this._telemetry.logOncePerBrowserVersion(OS_IS_64_BITS,
+                                             Services.appinfo.is64Bit ? 1 : 0);
     this._telemetry.logOncePerBrowserVersion(SCREENSIZE_HISTOGRAM, system.getScreenDimensions());
   },
 
@@ -523,8 +520,8 @@ Toolbox.prototype = {
     }
   },
 
-  _buildOptions: function () {
-    let selectOptions = () => {
+  _buildOptions: function (shortcuts) {
+    let selectOptions = (name, event) => {
       // Flip back to the last used panel if we are already
       // on the options panel.
       if (this.currentToolId === "options" &&
@@ -533,11 +530,11 @@ Toolbox.prototype = {
       } else {
         this.selectTool("options");
       }
+      // Prevent the opening of bookmarks window on toolbox.options.key
+      event.preventDefault();
     };
-    let key = this.doc.getElementById("toolbox-options-key");
-    key.addEventListener("command", selectOptions, true);
-    let key2 = this.doc.getElementById("toolbox-options-key2");
-    key2.addEventListener("command", selectOptions, true);
+    shortcuts.on(toolboxStrings("toolbox.options.key"), selectOptions);
+    shortcuts.on(toolboxStrings("toolbox.help.key"), selectOptions);
   },
 
   _splitConsoleOnKeypress: function (e) {
@@ -551,6 +548,7 @@ Toolbox.prototype = {
       }
     }
   },
+
   /**
    * Add a shortcut key that should work when a split console
    * has focus to the toolbox.
@@ -574,34 +572,31 @@ Toolbox.prototype = {
     this.doc.getElementById("toolbox-keyset").appendChild(cloned);
   },
 
-  _addReloadKeys: function () {
+  _addReloadKeys: function (shortcuts) {
     [
-      ["toolbox-reload-key", false],
-      ["toolbox-reload-key2", false],
-      ["toolbox-force-reload-key", true],
-      ["toolbox-force-reload-key2", true]
+      ["reload", false],
+      ["reload2", false],
+      ["forceReload", true],
+      ["forceReload2", true]
     ].forEach(([id, force]) => {
-      this.doc.getElementById(id).addEventListener("command", () => {
-        this.reloadTarget(force);
-      }, true);
+      let key = toolboxStrings("toolbox." + id + ".key");
+      shortcuts.on(key, this.reloadTarget.bind(this, force));
     });
   },
 
-  _addHostListeners: function () {
-    let nextKey = this.doc.getElementById("toolbox-next-tool-key");
-    nextKey.addEventListener("command", this.selectNextTool.bind(this), true);
+  _addHostListeners: function (shortcuts) {
+    shortcuts.on(toolboxStrings("toolbox.nextTool.key"),
+                 this.selectNextTool.bind(this));
+    shortcuts.on(toolboxStrings("toolbox.previousTool.key"),
+                 this.selectPreviousTool.bind(this));
+    shortcuts.on(toolboxStrings("toolbox.minimize.key"),
+                 this._toggleMinimizeMode.bind(this));
+    shortcuts.on(toolboxStrings("toolbox.toggleHost.key"),
+                 (name, event) => {
+                   this.switchToPreviousHost();
+                   event.preventDefault();
+                 });
 
-    let prevKey = this.doc.getElementById("toolbox-previous-tool-key");
-    prevKey.addEventListener("command", this.selectPreviousTool.bind(this), true);
-
-    let minimizeKey = this.doc.getElementById("toolbox-minimize-key");
-    minimizeKey.addEventListener("command", this._toggleMinimizeMode, true);
-
-    let toggleKey = this.doc.getElementById("toolbox-toggle-host-key");
-    toggleKey.addEventListener("command", this.switchToPreviousHost.bind(this), true);
-
-    // Split console uses keypress instead of command so the event can be
-    // cancelled with stopPropagation on the keypress, and not preventDefault.
     this.doc.addEventListener("keypress", this._splitConsoleOnKeypress, false);
 
     this.doc.addEventListener("focus", this._onFocus, true);
@@ -648,104 +643,6 @@ Toolbox.prototype = {
         splitter.setAttribute("hidden", "true");
       }
     }
-  },
-
-  /**
-   * Wire up the listeners for the zoom keys.
-   */
-  _addZoomKeys: function () {
-    let inKey = this.doc.getElementById("toolbox-zoom-in-key");
-    inKey.addEventListener("command", this.zoomIn.bind(this), true);
-
-    let inKey2 = this.doc.getElementById("toolbox-zoom-in-key2");
-    inKey2.addEventListener("command", this.zoomIn.bind(this), true);
-
-    let inKey3 = this.doc.getElementById("toolbox-zoom-in-key3");
-    inKey3.addEventListener("command", this.zoomIn.bind(this), true);
-
-    let outKey = this.doc.getElementById("toolbox-zoom-out-key");
-    outKey.addEventListener("command", this.zoomOut.bind(this), true);
-
-    let outKey2 = this.doc.getElementById("toolbox-zoom-out-key2");
-    outKey2.addEventListener("command", this.zoomOut.bind(this), true);
-
-    let resetKey = this.doc.getElementById("toolbox-zoom-reset-key");
-    resetKey.addEventListener("command", this.zoomReset.bind(this), true);
-
-    let resetKey2 = this.doc.getElementById("toolbox-zoom-reset-key2");
-    resetKey2.addEventListener("command", this.zoomReset.bind(this), true);
-  },
-
-  _disableZoomKeys: function () {
-    let inKey = this.doc.getElementById("toolbox-zoom-in-key");
-    inKey.setAttribute("disabled", "true");
-
-    let inKey2 = this.doc.getElementById("toolbox-zoom-in-key2");
-    inKey2.setAttribute("disabled", "true");
-
-    let inKey3 = this.doc.getElementById("toolbox-zoom-in-key3");
-    inKey3.setAttribute("disabled", "true");
-
-    let outKey = this.doc.getElementById("toolbox-zoom-out-key");
-    outKey.setAttribute("disabled", "true");
-
-    let outKey2 = this.doc.getElementById("toolbox-zoom-out-key2");
-    outKey2.setAttribute("disabled", "true");
-
-    let resetKey = this.doc.getElementById("toolbox-zoom-reset-key");
-    resetKey.setAttribute("disabled", "true");
-
-    let resetKey2 = this.doc.getElementById("toolbox-zoom-reset-key2");
-    resetKey2.setAttribute("disabled", "true");
-  },
-
-  /**
-   * Set zoom on toolbox to whatever the last setting was.
-   */
-  _loadInitialZoom: function () {
-    this.setZoom(this.zoomValue);
-  },
-
-  /**
-   * Increase zoom level of toolbox window - make things bigger.
-   */
-  zoomIn: function () {
-    this.setZoom(this.zoomValue + 0.1);
-  },
-
-  /**
-   * Decrease zoom level of toolbox window - make things smaller.
-   */
-  zoomOut: function () {
-    this.setZoom(this.zoomValue - 0.1);
-  },
-
-  /**
-   * Reset zoom level of the toolbox window.
-   */
-  zoomReset: function () {
-    this.setZoom(1);
-  },
-
-  /**
-   * Set zoom level of the toolbox window.
-   *
-   * @param {number} zoomValue
-   *        Zoom level e.g. 1.2
-   */
-  setZoom: function (zoomValue) {
-    // cap zoom value
-    zoomValue = Math.max(zoomValue, MIN_ZOOM);
-    zoomValue = Math.min(zoomValue, MAX_ZOOM);
-
-    let docShell = this.win.QueryInterface(Ci.nsIInterfaceRequestor)
-      .getInterface(Ci.nsIWebNavigation)
-      .QueryInterface(Ci.nsIDocShell);
-    let contViewer = docShell.contentViewer;
-
-    contViewer.fullZoom = zoomValue;
-
-    Services.prefs.setCharPref(ZOOM_PREF, zoomValue);
   },
 
   /**
@@ -853,10 +750,11 @@ Toolbox.prototype = {
 
     // Bottom-type host can be minimized, add a button for this.
     if (this.hostType == Toolbox.HostType.BOTTOM) {
-      let minimizeBtn = this.doc.createElement("toolbarbutton");
+      let minimizeBtn = this.doc.createElementNS(HTML_NS, "button");
       minimizeBtn.id = "toolbox-dock-bottom-minimize";
+      minimizeBtn.className = "devtools-button";
 
-      minimizeBtn.addEventListener("command", this._toggleMinimizeMode);
+      minimizeBtn.addEventListener("click", this._toggleMinimizeMode);
       dockBox.appendChild(minimizeBtn);
       // Show the button in its maximized state.
       this._onBottomHostMaximized();
@@ -886,12 +784,12 @@ Toolbox.prototype = {
         continue;
       }
 
-      let button = this.doc.createElement("toolbarbutton");
+      let button = this.doc.createElementNS(HTML_NS, "button");
       button.id = "toolbox-dock-" + position;
-      button.className = "toolbox-dock-button";
-      button.setAttribute("tooltiptext", toolboxStrings("toolboxDockButtons." +
-                                                        position + ".tooltip"));
-      button.addEventListener("command", () => {
+      button.className = "toolbox-dock-button devtools-button";
+      button.setAttribute("title", toolboxStrings("toolboxDockButtons." +
+                                                  position + ".tooltip"));
+      button.addEventListener("click", () => {
         this.switchHost(position);
       });
 
@@ -900,17 +798,16 @@ Toolbox.prototype = {
   },
 
   _getMinimizeButtonShortcutTooltip: function () {
-    let key = this.doc.getElementById("toolbox-minimize-key")
-                      .getAttribute("key");
-    return "(" + (osString == "Darwin" ? "Cmd+Shift+" : "Ctrl+Shift+") +
-           key.toUpperCase() + ")";
+    let str = toolboxStrings("toolbox.minimize.key");
+    let key = KeyShortcuts.parseElectronKey(this.win, str);
+    return "(" + KeyShortcuts.stringify(key) + ")";
   },
 
   _onBottomHostMinimized: function () {
     let btn = this.doc.querySelector("#toolbox-dock-bottom-minimize");
     btn.className = "minimized";
 
-    btn.setAttribute("tooltiptext",
+    btn.setAttribute("title",
       toolboxStrings("toolboxDockButtons.bottom.maximize") + " " +
       this._getMinimizeButtonShortcutTooltip());
   },
@@ -919,7 +816,7 @@ Toolbox.prototype = {
     let btn = this.doc.querySelector("#toolbox-dock-bottom-minimize");
     btn.className = "maximized";
 
-    btn.setAttribute("tooltiptext",
+    btn.setAttribute("title",
       toolboxStrings("toolboxDockButtons.bottom.minimize") + " " +
       this._getMinimizeButtonShortcutTooltip());
   },
@@ -1068,17 +965,17 @@ Toolbox.prototype = {
    * since we want it to work for remote targets too
    */
   _buildPickerButton: function () {
-    this._pickerButton = this.doc.createElement("toolbarbutton");
+    this._pickerButton = this.doc.createElementNS(HTML_NS, "button");
     this._pickerButton.id = "command-button-pick";
-    this._pickerButton.className = "command-button command-button-invertable";
-    this._pickerButton.setAttribute("tooltiptext", toolboxStrings("pickButton.tooltip"));
+    this._pickerButton.className = "command-button command-button-invertable devtools-button";
+    this._pickerButton.setAttribute("title", toolboxStrings("pickButton.tooltip"));
     this._pickerButton.setAttribute("hidden", "true");
 
     let container = this.doc.querySelector("#toolbox-picker-container");
     container.appendChild(this._pickerButton);
 
     this._togglePicker = this.highlighterUtils.togglePicker.bind(this.highlighterUtils);
-    this._pickerButton.addEventListener("command", this._togglePicker, false);
+    this._pickerButton.addEventListener("click", this._togglePicker, false);
   },
 
   /**
@@ -1137,7 +1034,7 @@ Toolbox.prototype = {
       return {
         id: options.id,
         button: button,
-        label: button.getAttribute("tooltiptext"),
+        label: button.getAttribute("title"),
         visibilityswitch: "devtools." + options.id + ".enabled",
         isTargetSupported: options.isTargetSupported
                            ? options.isTargetSupported
@@ -1291,7 +1188,7 @@ Toolbox.prototype = {
       });
     }
 
-    let deferred = promise.defer();
+    let deferred = defer();
     let iframe = this.doc.getElementById("toolbox-panel-iframe-" + id);
 
     if (iframe) {
@@ -1338,7 +1235,7 @@ Toolbox.prototype = {
       // backward compatibility with existing extensions do a check
       // for a promise return value.
       let built = definition.build(iframe.contentWindow, this);
-      if (!(built instanceof Promise)) {
+      if (!(typeof built.then == "function")) {
         let panel = built;
         iframe.panel = panel;
 
@@ -1359,7 +1256,7 @@ Toolbox.prototype = {
         if (typeof panel.open == "function") {
           built = panel.open();
         } else {
-          let buildDeferred = promise.defer();
+          let buildDeferred = defer();
           buildDeferred.resolve(panel);
           built = buildDeferred.promise;
         }
@@ -1712,17 +1609,78 @@ Toolbox.prototype = {
     });
   },
 
-  selectFrame: function (event) {
-    let windowId = event.target.getAttribute("data-window-id");
+  /**
+   * Show a drop down menu that allows the user to switch frames.
+   */
+  showFramesMenu: function (event) {
+    let menu = new Menu();
+    let target = event.target;
+
+    // Generate list of menu items from the list of frames.
+    this.frameMap.forEach(frame => {
+      // A frame is checked if it's the selected one.
+      let checked = frame.id == this.selectedFrameId;
+
+      // Create menu item.
+      menu.append(new MenuItem({
+        label: frame.url,
+        type: "radio",
+        checked,
+        click: () => {
+          this.onSelectFrame(frame.id);
+        }
+      }));
+    });
+
+    menu.once("open").then(() => {
+      target.setAttribute("open", "true");
+    });
+
+    menu.once("close").then(() => {
+      target.removeAttribute("open");
+    });
+
+    // Show a drop down menu with frames.
+    // XXX Missing menu API for specifying target (anchor)
+    // and relative position to it. See also:
+    // https://developer.mozilla.org/en-US/docs/Mozilla/Tech/XUL/Method/openPopup
+    // https://bugzilla.mozilla.org/show_bug.cgi?id=1274551
+    let rect = target.getBoundingClientRect();
+    let screenX = target.ownerDocument.defaultView.mozInnerScreenX;
+    let screenY = target.ownerDocument.defaultView.mozInnerScreenY;
+    menu.popup(rect.left + screenX, rect.bottom + screenY, this);
+
+    return menu;
+  },
+
+  /**
+   * Select a frame by sending 'switchToFrame' packet to the backend.
+   */
+  onSelectFrame: function (frameId) {
+    // Send packet to the backend to select specified frame and
+    // wait for 'frameUpdate' event packet to update the UI.
     let packet = {
       to: this._target.form.actor,
       type: "switchToFrame",
-      windowId: windowId
+      windowId: frameId
     };
     this._target.client.request(packet);
-    // Wait for frameUpdate event to update the UI
   },
 
+  /**
+   * A handler for 'frameUpdate' packets received from the backend.
+   * Following properties might be set on the packet:
+   *
+   * destroyAll {Boolean}: All frames have been destroyed.
+   * selected {Number}: A frame has been selected
+   * frames {Array}: list of frames. Every frame can have:
+   *                 id {Number}: frame ID
+   *                 url {String}: frame URL
+   *                 title {String}: frame title
+   *                 destroy {Boolean}: Set to true if destroyed
+   *                 parentID {Number}: ID of the parent frame (not set
+   *                                    for top level window)
+   */
   _updateFrames: function (event, data) {
     if (!Services.prefs.getBoolPref("devtools.command-button-frames.enabled")) {
       return;
@@ -1733,58 +1691,47 @@ Toolbox.prototype = {
       return;
     }
 
-    let menu = this.doc.getElementById("command-button-frames");
-
+    // Store (synchronize) data about all existing frames on the backend
     if (data.destroyAll) {
-      let menupopup = menu.firstChild;
-      while (menupopup.firstChild) {
-        menupopup.firstChild.remove();
-      }
-      return;
+      this.frameMap.clear();
+      this.selectedFrameId = null;
     } else if (data.selected) {
-      let item = menu.querySelector("menuitem[data-window-id=\"" + data.selected + "\"]");
-      if (!item) {
-        return;
-      }
-      // Toggle the toolbarbutton if we selected a non top-level frame
-      if (item.hasAttribute("data-parent-id")) {
-        menu.setAttribute("checked", "true");
-      } else {
-        menu.removeAttribute("checked");
-      }
-      // Uncheck the previously selected frame
-      let selected = menu.querySelector("menuitem[checked=true]");
-      if (selected) {
-        selected.removeAttribute("checked");
-      }
-      // Check the new one
-      item.setAttribute("checked", "true");
+      this.selectedFrameId = data.selected;
     } else if (data.frames) {
-      data.frames.forEach(win => {
-        let item = menu.querySelector("menuitem[data-window-id=\"" + win.id + "\"]");
-        if (win.destroy) {
-          if (item) {
-            item.remove();
+      data.frames.forEach(frame => {
+        if (frame.destroy) {
+          this.frameMap.delete(frame.id);
+
+          // Reset the currently selected frame if it's destroyed.
+          if (this.selectedFrameId == frame.id) {
+            this.selectedFrameId = null;
           }
-          return;
+        } else {
+          this.frameMap.set(frame.id, frame);
         }
-        if (!item) {
-          item = this.doc.createElement("menuitem");
-          item.setAttribute("type", "radio");
-          item.setAttribute("data-window-id", win.id);
-          if (win.parentID) {
-            item.setAttribute("data-parent-id", win.parentID);
-          }
-          // If we register a root docshell and we don't have any selected,
-          // consider it as the currently targeted one.
-          if (!win.parentID && !menu.querySelector("menuitem[checked=true]")) {
-            item.setAttribute("checked", "true");
-            menu.removeAttribute("checked");
-          }
-          menu.firstChild.appendChild(item);
-        }
-        item.setAttribute("label", win.url);
       });
+    }
+
+    // If there is no selected frame select the first top level
+    // frame by default. Note that there might be more top level
+    // frames in case of the BrowserToolbox.
+    if (!this.selectedFrameId) {
+      let frames = [...this.frameMap.values()];
+      let topFrames = frames.filter(frame => !frame.parentID);
+      this.selectedFrameId = topFrames.length ? topFrames[0].id : null;
+    }
+
+    // Check out whether top frame is currently selected.
+    // Note that only child frame has parentID.
+    let frame = this.frameMap.get(this.selectedFrameId);
+    let topFrameSelected = frame ? !frame.parentID : false;
+    let button = this.doc.getElementById("command-button-frames");
+    button.removeAttribute("checked");
+
+    // If non-top level frame is selected the toolbar button is
+    // marked as 'checked' indicating that a child frame is active.
+    if (!topFrameSelected && this.selectedFrameId) {
+      button.setAttribute("checked", "true");
     }
   },
 
@@ -2090,7 +2037,7 @@ Toolbox.prototype = {
       this.webconsolePanel.removeEventListener("resize",
         this._saveSplitConsoleHeight);
     }
-    this.closeButton.removeEventListener("command", this.destroy, true);
+    this.closeButton.removeEventListener("click", this.destroy, true);
     this.textboxContextMenuPopup.removeEventListener("popupshowing",
       this._updateTextboxMenuItems, true);
 
@@ -2123,7 +2070,7 @@ Toolbox.prototype = {
     outstanding.push(this.destroyInspector().then(() => {
       // Removing buttons
       if (this._pickerButton) {
-        this._pickerButton.removeEventListener("command", this._togglePicker, false);
+        this._pickerButton.removeEventListener("click", this._togglePicker, false);
         this._pickerButton = null;
       }
     }));
@@ -2240,7 +2187,7 @@ Toolbox.prototype = {
       return this._performanceFrontConnection.promise;
     }
 
-    this._performanceFrontConnection = promise.defer();
+    this._performanceFrontConnection = defer();
     this._performance = createPerformanceFront(this._target);
     yield this.performance.connect();
 

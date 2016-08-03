@@ -16,6 +16,7 @@
 #include "gfxTypes.h"
 #include "gfxFontFamilyList.h"
 #include "gfxBlur.h"
+#include "gfxSkipChars.h"
 #include "nsRect.h"
 
 #include "qcms.h"
@@ -67,8 +68,6 @@ BackendTypeBit(BackendType b)
       printf_stderr("[" module "] " __VA_ARGS__); \
     } \
   } while (0)
-
-extern cairo_user_data_key_t kDrawTarget;
 
 enum eCMSMode {
     eCMSMode_Off          = 0,     // No color management
@@ -173,6 +172,11 @@ public:
 
     static void InitLayersIPC();
     static void ShutdownLayersIPC();
+
+    /**
+     * Initialize ScrollMetadata statics. Does not depend on gfxPlatform.
+     */
+    static void InitNullMetadata();
 
     /**
      * Create an offscreen surface of the given dimensions
@@ -522,6 +526,12 @@ public:
      * for measuring text etc as if they will be rendered to the screen
      */
     gfxASurface* ScreenReferenceSurface() { return mScreenReferenceSurface; }
+
+    /**
+     * Returns a 1x1 DrawTarget that can be used for measuring text etc. as
+     * it would measure if rendered on-screen.  Guaranteed to return a
+     * non-null and valid DrawTarget.
+     */
     mozilla::gfx::DrawTarget* ScreenReferenceDrawTarget() { return mScreenReferenceDrawTarget; }
 
     virtual mozilla::gfx::SurfaceFormat Optimal2DFormatForContent(gfxContentType aContent);
@@ -609,11 +619,6 @@ public:
     // widget. This should only be used within nsRefreshDriver.
     virtual void SchedulePaintIfDeviceReset() {}
 
-    // Immediately update all platform bits if a device reset has occurred.
-    // This should only be used at the top of the callstack (i.e. within
-    // a task, OS event, or IPDL message).
-    virtual void UpdateRenderModeIfDeviceReset() {}
-
     /**
      * Helper method, creates a draw target for a specific Azure backend.
      * Used by CreateOffscreenDrawTarget.
@@ -654,6 +659,15 @@ public:
     uint64_t GetDeviceCounter() const {
       return mDeviceCounter;
     }
+
+    /**
+     * Check the blocklist for a feature. Returns false if the feature is blocked
+     * with an appropriate message and failure ID.
+     * */
+    static bool IsGfxInfoStatusOkay(int32_t aFeature, nsCString* aOutMessage,
+                                    nsCString& aFailureId);
+
+    const gfxSkipChars& EmptySkipChars() const { return kEmptySkipChars; }
 
 protected:
     gfxPlatform();
@@ -751,6 +765,7 @@ private:
      */
     static void Init();
 
+    static void InitOpenGLConfig();
     static void CreateCMSOutputProfile();
 
     static void GetCMSOutputProfileData(void *&mem, size_t &size);
@@ -805,6 +820,10 @@ private:
 
     // Generation number for devices that ClientLayerManagers might depend on.
     uint64_t mDeviceCounter;
+
+    // An instance of gfxSkipChars which is empty. It is used as the
+    // basis for error-case iterators.
+    const gfxSkipChars kEmptySkipChars;
 };
 
 #endif /* GFX_PLATFORM_H */

@@ -14,6 +14,7 @@
 #include "nsIDocShell.h"
 #include "nsIPrefetchService.h"
 #include "nsCPrefetchService.h"
+#include "nsStyleLinkElement.h"
 
 #include "nsEscape.h"
 #include "nsGkAtoms.h"
@@ -104,7 +105,7 @@ Link::TryDNSPrefetchPreconnectOrPrefetch()
         nsCOMPtr<nsIDOMNode> domNode = GetAsDOMNode(mElement);
         prefetchService->PrefetchURI(uri,
                                      mElement->OwnerDoc()->GetDocumentURI(),
-                                     domNode, true);
+                                     domNode, linkTypes & nsStyleLinkElement::ePREFETCH);
         return;
       }
     }

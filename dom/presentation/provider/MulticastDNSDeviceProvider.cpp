@@ -9,9 +9,9 @@
 #include "mozilla/Preferences.h"
 #include "mozilla/Services.h"
 #include "mozilla/unused.h"
-#include "nsAutoPtr.h"
 #include "nsComponentManagerUtils.h"
 #include "nsIObserverService.h"
+#include "nsIWritablePropertyBag2.h"
 #include "nsServiceManagerUtils.h"
 #include "nsTCPDeviceInfo.h"
 #include "nsThreadUtils.h"
@@ -25,7 +25,8 @@
 #define PREF_PRESENTATION_DISCOVERABLE "dom.presentation.discoverable"
 #define PREF_PRESENTATION_DEVICE_NAME "dom.presentation.device.name"
 
-#define SERVICE_TYPE "_mozilla_papi._tcp."
+#define SERVICE_TYPE "_presentation-ctrl._tcp"
+#define PROTOCOL_VERSION_TAG "version"
 
 static mozilla::LazyLogModule sMulticastDNSProviderLogModule("MulticastDNSDeviceProvider");
 
@@ -69,14 +70,14 @@ class DNSServiceWrappedListener final
   : public nsIDNSServiceDiscoveryListener
   , public nsIDNSRegistrationListener
   , public nsIDNSServiceResolveListener
-  , public nsITCPPresentationServerListener
+  , public nsIPresentationControlServerListener
 {
 public:
   NS_DECL_ISUPPORTS
   NS_FORWARD_SAFE_NSIDNSSERVICEDISCOVERYLISTENER(mListener)
   NS_FORWARD_SAFE_NSIDNSREGISTRATIONLISTENER(mListener)
   NS_FORWARD_SAFE_NSIDNSSERVICERESOLVELISTENER(mListener)
-  NS_FORWARD_SAFE_NSITCPPRESENTATIONSERVERLISTENER(mListener)
+  NS_FORWARD_SAFE_NSIPRESENTATIONCONTROLSERVERLISTENER(mListener)
 
   explicit DNSServiceWrappedListener() = default;
 
@@ -96,14 +97,14 @@ NS_IMPL_ISUPPORTS(DNSServiceWrappedListener,
                   nsIDNSServiceDiscoveryListener,
                   nsIDNSRegistrationListener,
                   nsIDNSServiceResolveListener,
-                  nsITCPPresentationServerListener)
+                  nsIPresentationControlServerListener)
 
 NS_IMPL_ISUPPORTS(MulticastDNSDeviceProvider,
                   nsIPresentationDeviceProvider,
                   nsIDNSServiceDiscoveryListener,
                   nsIDNSRegistrationListener,
                   nsIDNSServiceResolveListener,
-                  nsITCPPresentationServerListener,
+                  nsIPresentationControlServerListener,
                   nsIObserver)
 
 MulticastDNSDeviceProvider::~MulticastDNSDeviceProvider()
@@ -132,7 +133,7 @@ MulticastDNSDeviceProvider::Init()
     return rv;
   }
 
-  mPresentationServer = do_CreateInstance(TCP_PRESENTATION_SERVER_CONTACT_ID, &rv);
+  mPresentationService = do_CreateInstance(PRESENTATION_CONTROL_SERVICE_CONTACT_ID, &rv);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }
@@ -145,7 +146,7 @@ MulticastDNSDeviceProvider::Init()
   Preferences::AddStrongObservers(this, kObservedPrefs);
 
   mDiscoveryEnabled = Preferences::GetBool(PREF_PRESENTATION_DISCOVERY);
-  mDiscveryTimeoutMs = Preferences::GetUint(PREF_PRESENTATION_DISCOVERY_TIMEOUT_MS);
+  mDiscoveryTimeoutMs = Preferences::GetUint(PREF_PRESENTATION_DISCOVERY_TIMEOUT_MS);
   mDiscoverable = Preferences::GetBool(PREF_PRESENTATION_DISCOVERABLE);
   mServiceName = Preferences::GetCString(PREF_PRESENTATION_DEVICE_NAME);
 
@@ -157,7 +158,7 @@ MulticastDNSDeviceProvider::Init()
   }
 #endif // MOZ_WIDGET_ANDROID
 
-  Unused << mPresentationServer->SetId(mServiceName);
+  Unused << mPresentationService->SetId(mServiceName);
 
   if (mDiscoveryEnabled && NS_WARN_IF(NS_FAILED(rv = ForceDiscovery()))) {
     return rv;
@@ -211,7 +212,7 @@ MulticastDNSDeviceProvider::RegisterService()
   nsresult rv;
 
   uint16_t servicePort;
-  if (NS_WARN_IF(NS_FAILED(rv = mPresentationServer->GetPort(&servicePort)))) {
+  if (NS_WARN_IF(NS_FAILED(rv = mPresentationService->GetPort(&servicePort)))) {
     return rv;
   }
 
@@ -220,13 +221,13 @@ MulticastDNSDeviceProvider::RegisterService()
     * Otherwise, we should make it start serving.
     */
   if (!servicePort) {
-    if (NS_WARN_IF(NS_FAILED(rv = mPresentationServer->SetListener(mWrappedListener)))) {
+    if (NS_WARN_IF(NS_FAILED(rv = mPresentationService->SetListener(mWrappedListener)))) {
       return rv;
     }
-    if (NS_WARN_IF(NS_FAILED(rv = mPresentationServer->StartService(0)))) {
+    if (NS_WARN_IF(NS_FAILED(rv = mPresentationService->StartServer(0)))) {
       return rv;
     }
-    if (NS_WARN_IF(NS_FAILED(rv = mPresentationServer->GetPort(&servicePort)))) {
+    if (NS_WARN_IF(NS_FAILED(rv = mPresentationService->GetPort(&servicePort)))) {
       return rv;
     }
   }
@@ -256,6 +257,21 @@ MulticastDNSDeviceProvider::RegisterService()
     return rv;
   }
 
+  nsCOMPtr<nsIWritablePropertyBag2> propBag =
+    do_CreateInstance("@mozilla.org/hash-property-bag;1");
+  MOZ_ASSERT(propBag);
+
+  uint32_t version;
+  rv = mPresentationService->GetVersion(&version);
+  MOZ_ASSERT(NS_SUCCEEDED(rv));
+
+  rv = propBag->SetPropertyAsUint32(NS_LITERAL_STRING(PROTOCOL_VERSION_TAG),
+                                    version);
+  MOZ_ASSERT(NS_SUCCEEDED(rv));
+  if (NS_WARN_IF(NS_FAILED(rv = serviceInfo->SetAttributes(propBag)))) {
+    return rv;
+  }
+
   return mMulticastDNS->RegisterService(serviceInfo,
                                         mWrappedListener,
                                         getter_AddRefs(mRegisterRequest));
@@ -271,9 +287,9 @@ MulticastDNSDeviceProvider::UnregisterService(nsresult aReason)
     mRegisterRequest = nullptr;
   }
 
-  if (mPresentationServer) {
-    mPresentationServer->SetListener(nullptr);
-    mPresentationServer->Close();
+  if (mPresentationService) {
+    mPresentationService->SetListener(nullptr);
+    mPresentationService->Close();
   }
 
   return NS_OK;
@@ -298,19 +314,43 @@ MulticastDNSDeviceProvider::StopDiscovery(nsresult aReason)
 }
 
 nsresult
-MulticastDNSDeviceProvider::RequestSession(Device* aDevice,
-                                           const nsAString& aUrl,
-                                           const nsAString& aPresentationId,
-                                           nsIPresentationControlChannel** aRetVal)
+MulticastDNSDeviceProvider::Connect(Device* aDevice,
+                                    nsIPresentationControlChannel** aRetVal)
 {
   MOZ_ASSERT(aDevice);
-  MOZ_ASSERT(mPresentationServer);
+  MOZ_ASSERT(mPresentationService);
 
   RefPtr<TCPDeviceInfo> deviceInfo = new TCPDeviceInfo(aDevice->Id(),
                                                        aDevice->Address(),
                                                        aDevice->Port());
 
-  return mPresentationServer->RequestSession(deviceInfo, aUrl, aPresentationId, aRetVal);
+  return mPresentationService->Connect(deviceInfo, aRetVal);
+}
+
+bool
+MulticastDNSDeviceProvider::IsCompatibleServer(nsIDNSServiceInfo* aServiceInfo)
+{
+  MOZ_ASSERT(aServiceInfo);
+
+  nsCOMPtr<nsIPropertyBag2> propBag;
+  if (NS_WARN_IF(NS_FAILED(
+          aServiceInfo->GetAttributes(getter_AddRefs(propBag)))) || !propBag) {
+    return false;
+  }
+
+  uint32_t remoteVersion;
+  if (NS_WARN_IF(NS_FAILED(
+          propBag->GetPropertyAsUint32(NS_LITERAL_STRING(PROTOCOL_VERSION_TAG),
+                                       &remoteVersion)))) {
+    return false;
+  }
+
+  bool isCompatible = false;
+  Unused << NS_WARN_IF(NS_FAILED(
+                mPresentationService->IsCompatibleServer(remoteVersion,
+                                                         &isCompatible)));
+
+  return isCompatible;
 }
 
 nsresult
@@ -321,7 +361,7 @@ MulticastDNSDeviceProvider::AddDevice(const nsACString& aId,
                                       const uint16_t aPort)
 {
   MOZ_ASSERT(NS_IsMainThread());
-  MOZ_ASSERT(mPresentationServer);
+  MOZ_ASSERT(mPresentationService);
 
   RefPtr<Device> device = new Device(aId, /* ID */
                                      aServiceName,
@@ -349,7 +389,7 @@ MulticastDNSDeviceProvider::UpdateDevice(const uint32_t aIndex,
                                          const uint16_t aPort)
 {
   MOZ_ASSERT(NS_IsMainThread());
-  MOZ_ASSERT(mPresentationServer);
+  MOZ_ASSERT(mPresentationService);
 
   if (NS_WARN_IF(aIndex >= mDevices.Length())) {
     return NS_ERROR_INVALID_ARG;
@@ -371,7 +411,7 @@ nsresult
 MulticastDNSDeviceProvider::RemoveDevice(const uint32_t aIndex)
 {
   MOZ_ASSERT(NS_IsMainThread());
-  MOZ_ASSERT(mPresentationServer);
+  MOZ_ASSERT(mPresentationService);
 
   if (NS_WARN_IF(aIndex >= mDevices.Length())) {
     return NS_ERROR_INVALID_ARG;
@@ -534,7 +574,7 @@ MulticastDNSDeviceProvider::ForceDiscovery()
     Unused << mDiscoveryTimer->Cancel();
 
     if (NS_WARN_IF(NS_FAILED( rv = mDiscoveryTimer->Init(this,
-        mDiscveryTimeoutMs,
+        mDiscoveryTimeoutMs,
         nsITimer::TYPE_ONE_SHOT)))) {
         return rv;
     }
@@ -565,7 +605,7 @@ MulticastDNSDeviceProvider::OnDiscoveryStarted(const nsACString& aServiceType)
 
   nsresult rv;
   if (NS_WARN_IF(NS_FAILED(rv = mDiscoveryTimer->Init(this,
-                                                      mDiscveryTimeoutMs,
+                                                      mDiscoveryTimeoutMs,
                                                       nsITimer::TYPE_ONE_SHOT)))) {
     return rv;
   }
@@ -764,10 +804,15 @@ MulticastDNSDeviceProvider::OnServiceResolved(nsIDNSServiceInfo* aServiceInfo)
   if (mRegisteredName == serviceName) {
     LOG_I("ignore self");
 
-    if (NS_WARN_IF(NS_FAILED(rv = mPresentationServer->SetId(host)))) {
+    if (NS_WARN_IF(NS_FAILED(rv = mPresentationService->SetId(host)))) {
       return rv;
     }
 
+    return NS_OK;
+  }
+
+  if (!IsCompatibleServer(aServiceInfo)) {
+    LOG_I("ignore incompatible service: %s", serviceName.get());
     return NS_OK;
   }
 
@@ -814,7 +859,7 @@ MulticastDNSDeviceProvider::OnResolveFailed(nsIDNSServiceInfo* aServiceInfo,
   return NS_OK;
 }
 
-// nsITCPPresentationServerListener
+// nsIPresentationControlServerListener
 NS_IMETHODIMP
 MulticastDNSDeviceProvider::OnPortChange(uint16_t aPort)
 {
@@ -872,6 +917,50 @@ MulticastDNSDeviceProvider::OnSessionRequest(nsITCPDeviceInfo* aDeviceInfo,
   return NS_OK;
 }
 
+NS_IMETHODIMP
+MulticastDNSDeviceProvider::OnTerminateRequest(nsITCPDeviceInfo* aDeviceInfo,
+                                               const nsAString& aPresentationId,
+                                               nsIPresentationControlChannel* aControlChannel,
+                                               bool aIsFromReceiver)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+
+  nsAutoCString address;
+  Unused << aDeviceInfo->GetAddress(address);
+
+  LOG_I("OnTerminateRequest: %s", address.get());
+
+  RefPtr<Device> device;
+  uint32_t index;
+  if (FindDeviceByAddress(address, index)) {
+    device = mDevices[index];
+  } else {
+    // Create a one-time device object for non-discoverable controller.
+    // This device will not be in the list of available devices and cannot
+    // be used for requesting session.
+    nsAutoCString id;
+    Unused << aDeviceInfo->GetId(id);
+    uint16_t port;
+    Unused << aDeviceInfo->GetPort(&port);
+
+    device = new Device(id,
+                        /* aName = */ id,
+                        /* aType = */ EmptyCString(),
+                        address,
+                        port,
+                        DeviceState::eActive,
+                        /* aProvider = */ nullptr);
+  }
+
+  nsCOMPtr<nsIPresentationDeviceListener> listener;
+  if (NS_SUCCEEDED(GetListener(getter_AddRefs(listener))) && listener) {
+    Unused << listener->OnTerminateRequest(device, aPresentationId,
+                                           aControlChannel, aIsFromReceiver);
+  }
+
+  return NS_OK;
+}
+
 // nsIObserver
 NS_IMETHODIMP
 MulticastDNSDeviceProvider::Observe(nsISupports* aSubject,
@@ -924,7 +1013,7 @@ MulticastDNSDeviceProvider::OnDiscoveryTimeoutChanged(uint32_t aTimeoutMs)
   LOG_I("OnDiscoveryTimeoutChanged = %d\n", aTimeoutMs);
   MOZ_ASSERT(NS_IsMainThread());
 
-  mDiscveryTimeoutMs = aTimeoutMs;
+  mDiscoveryTimeoutMs = aTimeoutMs;
 
   return NS_OK;
 }
@@ -994,15 +1083,14 @@ MulticastDNSDeviceProvider::Device::GetType(nsACString& aType)
 }
 
 NS_IMETHODIMP
-MulticastDNSDeviceProvider::Device::EstablishControlChannel(const nsAString& aUrl,
-                                                            const nsAString& aPresentationId,
-                                                            nsIPresentationControlChannel** aRetVal)
+MulticastDNSDeviceProvider::Device::EstablishControlChannel(
+                                        nsIPresentationControlChannel** aRetVal)
 {
   if (!mProvider) {
     return NS_ERROR_FAILURE;
   }
 
-  return mProvider->RequestSession(this, aUrl, aPresentationId, aRetVal);
+  return mProvider->Connect(this, aRetVal);
 }
 
 NS_IMETHODIMP

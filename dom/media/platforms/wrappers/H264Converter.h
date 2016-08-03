@@ -22,12 +22,7 @@ class H264Converter : public MediaDataDecoder {
 public:
 
   H264Converter(PlatformDecoderModule* aPDM,
-                const VideoInfo& aConfig,
-                layers::LayersBackend aLayersBackend,
-                layers::ImageContainer* aImageContainer,
-                FlushableTaskQueue* aVideoTaskQueue,
-                MediaDataDecoderCallback* aCallback,
-                DecoderDoctorDiagnostics* aDiagnostics);
+                const CreateDecoderParams& aParams);
   virtual ~H264Converter();
 
   RefPtr<InitPromise> Init() override;
@@ -65,11 +60,12 @@ private:
   VideoInfo mCurrentConfig;
   layers::LayersBackend mLayersBackend;
   RefPtr<layers::ImageContainer> mImageContainer;
-  RefPtr<FlushableTaskQueue> mVideoTaskQueue;
+  const RefPtr<TaskQueue> mTaskQueue;
   nsTArray<RefPtr<MediaRawData>> mMediaRawSamples;
   MediaDataDecoderCallback* mCallback;
   RefPtr<MediaDataDecoder> mDecoder;
   MozPromiseRequestHolder<InitPromise> mInitPromiseRequest;
+  RefPtr<GMPCrashHelper> mGMPCrashHelper;
   bool mNeedAVCC;
   nsresult mLastError;
 };

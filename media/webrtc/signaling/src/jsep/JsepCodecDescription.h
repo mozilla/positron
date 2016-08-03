@@ -132,7 +132,8 @@ class JsepAudioCodecDescription : public JsepCodecDescription {
         mPacketSize(packetSize),
         mBitrate(bitRate),
         mMaxPlaybackRate(0),
-        mForceMono(false)
+        mForceMono(false),
+        mFECEnabled(false)
   {
   }
 
@@ -171,6 +172,7 @@ class JsepAudioCodecDescription : public JsepCodecDescription {
         // We prefer to receive stereo, if available.
         opusParams.stereo = 1;
       }
+      opusParams.useInBandFec = mFECEnabled ? 1 : 0;
       msection.SetFmtp(SdpFmtpAttributeList::Fmtp(mDefaultPt, opusParams));
     }
   }
@@ -186,6 +188,10 @@ class JsepAudioCodecDescription : public JsepCodecDescription {
 
       mMaxPlaybackRate = opusParams.maxplaybackrate;
       mForceMono = !opusParams.stereo;
+      // draft-ietf-rtcweb-fec-03.txt section 4.2 says support for FEC
+      // at the received side is declarative and can be negotiated
+      // separately for either media direction.
+      mFECEnabled = opusParams.useInBandFec;
     }
 
     return true;
@@ -195,6 +201,7 @@ class JsepAudioCodecDescription : public JsepCodecDescription {
   uint32_t mBitrate;
   uint32_t mMaxPlaybackRate;
   bool mForceMono;
+  bool mFECEnabled;
 };
 
 class JsepVideoCodecDescription : public JsepCodecDescription {
@@ -205,6 +212,8 @@ class JsepVideoCodecDescription : public JsepCodecDescription {
                             bool enabled = true)
       : JsepCodecDescription(mozilla::SdpMediaSection::kVideo, defaultPt, name,
                              clock, 0, enabled),
+        mTmmbrEnabled(false),
+        mRembEnabled(false),
         mPacketizationMode(0)
   {
     // Add supported rtcp-fb types
@@ -215,7 +224,22 @@ class JsepVideoCodecDescription : public JsepCodecDescription {
 
   virtual void
   EnableTmmbr() {
-    mCcmFbTypes.push_back(SdpRtcpFbAttributeList::tmmbr);
+    // EnableTmmbr can be called multiple times due to multiple calls to
+    // PeerConnectionImpl::ConfigureJsepSessionCodecs
+    if (!mTmmbrEnabled) {
+      mTmmbrEnabled = true;
+      mCcmFbTypes.push_back(SdpRtcpFbAttributeList::tmmbr);
+    }
+  }
+
+  virtual void
+  EnableRemb() {
+    // EnableRemb can be called multiple times due to multiple calls to
+    // PeerConnectionImpl::ConfigureJsepSessionCodecs
+    if (!mRembEnabled) {
+      mRembEnabled = true;
+      mOtherFbTypes.push_back({ "", SdpRtcpFbAttributeList::kRemb, "", ""});
+    }
   }
 
   void
@@ -291,6 +315,9 @@ class JsepVideoCodecDescription : public JsepCodecDescription {
     for (const std::string& type : mCcmFbTypes) {
       rtcpfbs.PushEntry(mDefaultPt, SdpRtcpFbAttributeList::kCcm, type);
     }
+    for (const auto& fb : mOtherFbTypes) {
+      rtcpfbs.PushEntry(mDefaultPt, fb.type, fb.parameter, fb.extra);
+    }
 
     msection.SetRtcpFbs(rtcpfbs);
   }
@@ -347,12 +374,25 @@ class JsepVideoCodecDescription : public JsepCodecDescription {
   }
 
   void
+  NegotiateRtcpFb(const SdpMediaSection& remoteMsection,
+                  std::vector<SdpRtcpFbAttributeList::Feedback>* supportedFbs) {
+    std::vector<SdpRtcpFbAttributeList::Feedback> temp;
+    for (auto& fb : *supportedFbs) {
+      if (remoteMsection.HasRtcpFb(mDefaultPt, fb.type, fb.parameter)) {
+        temp.push_back(fb);
+      }
+    }
+    *supportedFbs = temp;
+  }
+
+  void
   NegotiateRtcpFb(const SdpMediaSection& remote)
   {
     // Removes rtcp-fb types that the other side doesn't support
     NegotiateRtcpFb(remote, SdpRtcpFbAttributeList::kAck, &mAckFbTypes);
     NegotiateRtcpFb(remote, SdpRtcpFbAttributeList::kNack, &mNackFbTypes);
     NegotiateRtcpFb(remote, SdpRtcpFbAttributeList::kCcm, &mCcmFbTypes);
+    NegotiateRtcpFb(remote, &mOtherFbTypes);
   }
 
   virtual bool
@@ -598,11 +638,25 @@ class JsepVideoCodecDescription : public JsepCodecDescription {
     return true;
   }
 
+  virtual bool
+  RtcpFbRembIsSet() const
+  {
+    for (const auto& fb : mOtherFbTypes) {
+      if (fb.type == SdpRtcpFbAttributeList::kRemb) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   JSEP_CODEC_CLONE(JsepVideoCodecDescription)
 
   std::vector<std::string> mAckFbTypes;
   std::vector<std::string> mNackFbTypes;
   std::vector<std::string> mCcmFbTypes;
+  std::vector<SdpRtcpFbAttributeList::Feedback> mOtherFbTypes;
+  bool mTmmbrEnabled;
+  bool mRembEnabled;
 
   // H264-specific stuff
   uint32_t mProfileLevelId;

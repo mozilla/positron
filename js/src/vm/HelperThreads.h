@@ -15,6 +15,7 @@
 
 #include "mozilla/GuardObjects.h"
 #include "mozilla/PodOperations.h"
+#include "mozilla/TimeStamp.h"
 #include "mozilla/Variant.h"
 
 #include "jscntxt.h"
@@ -22,9 +23,13 @@
 
 #include "frontend/TokenStream.h"
 #include "jit/Ion.h"
+#include "threading/ConditionVariable.h"
+#include "threading/Mutex.h"
 
 namespace js {
 
+class AutoLockHelperThreadState;
+class AutoUnlockHelperThreadState;
 struct HelperThread;
 struct ParseTask;
 namespace jit {
@@ -34,7 +39,7 @@ namespace wasm {
   class FuncIR;
   class FunctionCompileResults;
   class IonCompileTask;
-  typedef Vector<IonCompileTask*, 0, SystemAllocPolicy> IonCompileTaskVector;
+  typedef Vector<IonCompileTask*, 0, SystemAllocPolicy> IonCompileTaskPtrVector;
 } // namespace wasm
 
 enum class ParseTaskKind
@@ -46,6 +51,9 @@ enum class ParseTaskKind
 // Per-process state for off thread work items.
 class GlobalHelperThreadState
 {
+    friend class AutoLockHelperThreadState;
+    friend class AutoUnlockHelperThreadState;
+
   public:
     // Number of CPUs to treat this machine as having when creating threads.
     // May be accessed without locking.
@@ -59,7 +67,6 @@ class GlobalHelperThreadState
     typedef Vector<SourceCompressionTask*, 0, SystemAllocPolicy> SourceCompressionTaskVector;
     typedef Vector<GCHelperState*, 0, SystemAllocPolicy> GCHelperStateVector;
     typedef Vector<GCParallelTask*, 0, SystemAllocPolicy> GCParallelTaskVector;
-    typedef mozilla::LinkedList<jit::IonBuilder> IonBuilderList;
 
     // List of available threads, or null if the thread state has not been initialized.
     HelperThread* threads;
@@ -70,12 +77,8 @@ class GlobalHelperThreadState
     // Ion compilation worklist and finished jobs.
     IonBuilderVector ionWorklist_, ionFinishedList_;
 
-    // List of IonBuilders using lazy linking pending to get linked.
-    IonBuilderList ionLazyLinkList_;
-    size_t ionLazyLinkListSize_;
-
     // wasm worklist and finished jobs.
-    wasm::IonCompileTaskVector wasmWorklist_, wasmFinishedList_;
+    wasm::IonCompileTaskPtrVector wasmWorklist_, wasmFinishedList_;
 
   public:
     // For now, only allow a single parallel asm.js compilation to happen at a
@@ -97,6 +100,8 @@ class GlobalHelperThreadState
 
     // GC tasks needing to be done in parallel.
     GCParallelTaskVector gcParallelWorklist_;
+
+    ParseTask* removeFinishedParseTask(ParseTaskKind kind, void* token);
 
   public:
     size_t maxIonCompilationThreads() const;
@@ -132,7 +137,8 @@ class GlobalHelperThreadState
         PAUSE
     };
 
-    void wait(CondVar which, uint32_t timeoutMillis = 0);
+    void wait(AutoLockHelperThreadState& locked, CondVar which,
+              mozilla::TimeDuration timeout = mozilla::TimeDuration::Forever());
     void notifyAll(CondVar which);
     void notifyOne(CondVar which);
 
@@ -152,22 +158,12 @@ class GlobalHelperThreadState
         MOZ_ASSERT(isLocked());
         return ionFinishedList_;
     }
-    IonBuilderList& ionLazyLinkList() {
-        MOZ_ASSERT(TlsPerThreadData.get()->runtimeFromMainThread(),
-                   "Should only be mutated by the main thread.");
-        return ionLazyLinkList_;
-    }
-    size_t ionLazyLinkListSize() {
-        return ionLazyLinkListSize_;
-    }
-    void ionLazyLinkListRemove(jit::IonBuilder* builder);
-    void ionLazyLinkListAdd(jit::IonBuilder* builder);
 
-    wasm::IonCompileTaskVector& wasmWorklist() {
+    wasm::IonCompileTaskPtrVector& wasmWorklist() {
         MOZ_ASSERT(isLocked());
         return wasmWorklist_;
     }
-    wasm::IonCompileTaskVector& wasmFinishedList() {
+    wasm::IonCompileTaskPtrVector& wasmFinishedList() {
         MOZ_ASSERT(isLocked());
         return wasmFinishedList_;
     }
@@ -231,8 +227,10 @@ class GlobalHelperThreadState
         return bool(numWasmFailedJobs);
     }
 
-    JSScript* finishParseTask(JSContext* maybecx, JSRuntime* rt, ParseTaskKind kind, void* token);
-    void mergeParseTaskCompartment(JSRuntime* rt, ParseTask* parseTask,
+    JSScript* finishParseTask(JSContext* cx, ParseTaskKind kind, void* token);
+    void cancelParseTask(JSContext* cx, ParseTaskKind kind, void* token);
+
+    void mergeParseTaskCompartment(JSContext* cx, ParseTask* parseTask,
                                    Handle<GlobalObject*> global,
                                    JSCompartment* dest);
 
@@ -244,8 +242,8 @@ class GlobalHelperThreadState
     uint32_t numWasmFailedJobs;
 
   public:
-    JSScript* finishScriptParseTask(JSContext* maybecx, JSRuntime* rt, void* token);
-    JSObject* finishModuleParseTask(JSContext* maybecx, JSRuntime* rt, void* token);
+    JSScript* finishScriptParseTask(JSContext* cx, void* token);
+    JSObject* finishModuleParseTask(JSContext* cx, void* token);
     bool compressionInProgress(SourceCompressionTask* task);
     SourceCompressionTask* compressionTaskForSource(ScriptSource* ss);
 
@@ -261,22 +259,22 @@ class GlobalHelperThreadState
      * Lock protecting all mutable shared state accessed by helper threads, and
      * used by all condition variables.
      */
-    PRLock* helperLock;
+    js::Mutex helperLock;
 #ifdef DEBUG
     mozilla::Atomic<PRThread*> lockOwner;
 #endif
 
     /* Condvars for threads waiting/notifying each other. */
-    PRCondVar* consumerWakeup;
-    PRCondVar* producerWakeup;
-    PRCondVar* pauseWakeup;
+    js::ConditionVariable consumerWakeup;
+    js::ConditionVariable producerWakeup;
+    js::ConditionVariable pauseWakeup;
 
-    PRCondVar* whichWakeup(CondVar which) {
+    js::ConditionVariable& whichWakeup(CondVar which) {
         switch (which) {
           case CONSUMER: return consumerWakeup;
           case PRODUCER: return producerWakeup;
           case PAUSE: return pauseWakeup;
-          default: MOZ_CRASH();
+          default: MOZ_CRASH("Invalid CondVar in |whichWakeup|");
         }
     }
 };
@@ -365,12 +363,12 @@ struct HelperThread
         return nullptr;
     }
 
-    void handleWasmWorkload();
-    void handleIonWorkload();
-    void handleParseWorkload();
-    void handleCompressionWorkload();
-    void handleGCHelperWorkload();
-    void handleGCParallelWorkload();
+    void handleWasmWorkload(AutoLockHelperThreadState& locked);
+    void handleIonWorkload(AutoLockHelperThreadState& locked);
+    void handleParseWorkload(AutoLockHelperThreadState& locked);
+    void handleCompressionWorkload(AutoLockHelperThreadState& locked);
+    void handleGCHelperWorkload(AutoLockHelperThreadState& locked);
+    void handleGCParallelWorkload(AutoLockHelperThreadState& locked);
 };
 
 /* Methods for interacting with helper threads. */
@@ -398,7 +396,7 @@ PauseCurrentHelperThread();
 
 /* Perform MIR optimization and LIR generation on a single function. */
 bool
-StartOffThreadWasmCompile(ExclusiveContext* cx, wasm::IonCompileTask* task);
+StartOffThreadWasmCompile(wasm::IonCompileTask* task);
 
 /*
  * Schedule an Ion compilation for a script, given a builder which has been
@@ -412,7 +410,8 @@ StartOffThreadIonCompile(JSContext* cx, jit::IonBuilder* builder);
  * nullptr, all compilations for the compartment are cancelled.
  */
 void
-CancelOffThreadIonCompile(JSCompartment* compartment, JSScript* script);
+CancelOffThreadIonCompile(JSCompartment* compartment, JSScript* script,
+                          bool discardLazyLinkList = true);
 
 /* Cancel all scheduled, in progress or finished parses for runtime. */
 void
@@ -449,37 +448,58 @@ struct AutoEnqueuePendingParseTasksAfterGC {
 bool
 StartOffThreadCompression(ExclusiveContext* cx, SourceCompressionTask* task);
 
-class MOZ_RAII AutoLockHelperThreadState
+class MOZ_RAII AutoLockHelperThreadState : public LockGuard<Mutex>
 {
+    using Base = LockGuard<Mutex>;
+
     MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
 
   public:
     explicit AutoLockHelperThreadState(MOZ_GUARD_OBJECT_NOTIFIER_ONLY_PARAM)
+      : Base(HelperThreadState().helperLock)
     {
         MOZ_GUARD_OBJECT_NOTIFIER_INIT;
-        HelperThreadState().lock();
+
+#ifdef DEBUG
+        HelperThreadState().lockOwner = PR_GetCurrentThread();
+#endif
     }
 
     ~AutoLockHelperThreadState() {
-        HelperThreadState().unlock();
+#ifdef DEBUG
+        HelperThreadState().lockOwner = nullptr;
+#endif
     }
 };
 
 class MOZ_RAII AutoUnlockHelperThreadState
 {
+    // This is only in a Maybe so that we can update the DEBUG-only lockOwner
+    // thread in the proper order.
+    mozilla::Maybe<UnlockGuard<Mutex>> unlocked;
+
     MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
 
   public:
 
-    explicit AutoUnlockHelperThreadState(MOZ_GUARD_OBJECT_NOTIFIER_ONLY_PARAM)
+    explicit AutoUnlockHelperThreadState(AutoLockHelperThreadState& locked
+                                         MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
     {
         MOZ_GUARD_OBJECT_NOTIFIER_INIT;
-        HelperThreadState().unlock();
+
+#ifdef DEBUG
+        HelperThreadState().lockOwner = nullptr;
+#endif
+
+        unlocked.emplace(locked);
     }
 
-    ~AutoUnlockHelperThreadState()
-    {
-        HelperThreadState().lock();
+    ~AutoUnlockHelperThreadState() {
+        unlocked.reset();
+
+#ifdef DEBUG
+        HelperThreadState().lockOwner = PR_GetCurrentThread();
+#endif
     }
 };
 
@@ -577,14 +597,16 @@ struct SourceCompressionTask
         Aborted,
         Success
     } result;
-    void* compressed;
-    size_t compressedBytes;
-    HashNumber compressedHash;
+
+    mozilla::Maybe<SharedImmutableString> resultString;
 
   public:
     explicit SourceCompressionTask(ExclusiveContext* cx)
-      : helperThread(nullptr), cx(cx), ss(nullptr), abort_(false),
-        result(OOM), compressed(nullptr), compressedBytes(0), compressedHash(0)
+      : helperThread(nullptr)
+      , cx(cx)
+      , ss(nullptr)
+      , abort_(false)
+      , result(OOM)
     {}
 
     ~SourceCompressionTask()

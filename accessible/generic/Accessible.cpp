@@ -18,7 +18,6 @@
 #include "nsTextEquivUtils.h"
 #include "DocAccessibleChild.h"
 #include "EventTree.h"
-#include "Logging.h"
 #include "Relation.h"
 #include "Role.h"
 #include "RootAccessible.h"
@@ -190,16 +189,7 @@ Accessible::Description(nsString& aDescription)
                            aDescription);
 
   if (aDescription.IsEmpty()) {
-    bool isXUL = mContent->IsXULElement();
-    if (isXUL) {
-      // Try XUL <description control="[id]">description text</description>
-      XULDescriptionIterator iter(Document(), mContent);
-      Accessible* descr = nullptr;
-      while ((descr = iter.Next())) {
-        nsTextEquivUtils::AppendTextEquivFromContent(this, descr->GetContent(),
-                                                     &aDescription);
-      }
-    }
+    NativeDescription(aDescription);
 
     if (aDescription.IsEmpty()) {
       // Keep the Name() method logic.
@@ -1970,6 +1960,22 @@ Accessible::NativeName(nsString& aName)
 
 // Accessible protected
 void
+Accessible::NativeDescription(nsString& aDescription)
+{
+  bool isXUL = mContent->IsXULElement();
+  if (isXUL) {
+    // Try XUL <description control="[id]">description text</description>
+    XULDescriptionIterator iter(Document(), mContent);
+    Accessible* descr = nullptr;
+    while ((descr = iter.Next())) {
+      nsTextEquivUtils::AppendTextEquivFromContent(this, descr->GetContent(),
+                                                   &aDescription);
+    }
+  }
+}
+
+// Accessible protected
+void
 Accessible::BindToParent(Accessible* aParent, uint32_t aIndexInParent)
 {
   MOZ_ASSERT(aParent, "This method isn't used to set null parent");
@@ -2204,7 +2210,7 @@ Accessible::EmbeddedChildCount()
 {
   if (mStateFlags & eHasTextKids) {
     if (!mEmbeddedObjCollector)
-      mEmbeddedObjCollector = new EmbeddedObjCollector(this);
+      mEmbeddedObjCollector.reset(new EmbeddedObjCollector(this));
     return mEmbeddedObjCollector->Count();
   }
 
@@ -2216,8 +2222,8 @@ Accessible::GetEmbeddedChildAt(uint32_t aIndex)
 {
   if (mStateFlags & eHasTextKids) {
     if (!mEmbeddedObjCollector)
-      mEmbeddedObjCollector = new EmbeddedObjCollector(this);
-    return mEmbeddedObjCollector ?
+      mEmbeddedObjCollector.reset(new EmbeddedObjCollector(this));
+    return mEmbeddedObjCollector.get() ?
       mEmbeddedObjCollector->GetAccessibleAt(aIndex) : nullptr;
   }
 
@@ -2229,8 +2235,8 @@ Accessible::GetIndexOfEmbeddedChild(Accessible* aChild)
 {
   if (mStateFlags & eHasTextKids) {
     if (!mEmbeddedObjCollector)
-      mEmbeddedObjCollector = new EmbeddedObjCollector(this);
-    return mEmbeddedObjCollector ?
+      mEmbeddedObjCollector.reset(new EmbeddedObjCollector(this));
+    return mEmbeddedObjCollector.get() ?
       mEmbeddedObjCollector->GetIndexAt(aChild) : -1;
   }
 

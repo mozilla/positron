@@ -13,7 +13,6 @@
 
 // XXX fold this into nsStyleContext and group by nsStyleXXX struct
 
-// Indices into border/padding/margin arrays
 namespace mozilla {
 namespace css {
 typedef mozilla::Side Side;
@@ -58,19 +57,20 @@ static inline css::Side operator++(css::Side& side, int) {
 // box-sizing
 enum class StyleBoxSizing : uint8_t {
   Content,
-  Padding,
   Border
 };
 
 // clip-path sizing
-#define NS_STYLE_CLIP_SHAPE_SIZING_NOBOX   0
-#define NS_STYLE_CLIP_SHAPE_SIZING_CONTENT 1
-#define NS_STYLE_CLIP_SHAPE_SIZING_PADDING 2
-#define NS_STYLE_CLIP_SHAPE_SIZING_BORDER  3
-#define NS_STYLE_CLIP_SHAPE_SIZING_MARGIN  4
-#define NS_STYLE_CLIP_SHAPE_SIZING_FILL    5
-#define NS_STYLE_CLIP_SHAPE_SIZING_STROKE  6
-#define NS_STYLE_CLIP_SHAPE_SIZING_VIEW    7
+enum class StyleClipShapeSizing : uint8_t {
+    NoBox,
+    Content,
+    Padding,
+    Border,
+    Margin,
+    Fill,
+    Stroke,
+    View,
+};
 
 // Basic Shapes
 #define NS_STYLE_BASIC_SHAPE_POLYGON       0
@@ -300,6 +300,8 @@ enum class FillMode : uint32_t;
 #define NS_STYLE_IMAGELAYER_REPEAT_REPEAT_X          0x01
 #define NS_STYLE_IMAGELAYER_REPEAT_REPEAT_Y          0x02
 #define NS_STYLE_IMAGELAYER_REPEAT_REPEAT            0x03
+#define NS_STYLE_IMAGELAYER_REPEAT_SPACE             0x04
+#define NS_STYLE_IMAGELAYER_REPEAT_ROUND             0x05
 
 // See nsStyleImageLayers
 #define NS_STYLE_IMAGELAYER_SIZE_CONTAIN             0
@@ -696,7 +698,7 @@ enum class FillMode : uint32_t;
 #define NS_STYLE_POSITION_FIXED                 3
 #define NS_STYLE_POSITION_STICKY                4
 
-// See nsStyleDisplay.mClip
+// See nsStyleEffects.mClip, mClipFlags
 #define NS_STYLE_CLIP_AUTO                      0x00
 #define NS_STYLE_CLIP_RECT                      0x01
 #define NS_STYLE_CLIP_TYPE_MASK                 0x0F
@@ -912,8 +914,8 @@ enum class FillMode : uint32_t;
 #define NS_STYLE_WORDBREAK_KEEP_ALL             2
 
 // See nsStyleText
-#define NS_STYLE_WORDWRAP_NORMAL                0
-#define NS_STYLE_WORDWRAP_BREAK_WORD            1
+#define NS_STYLE_OVERFLOWWRAP_NORMAL            0
+#define NS_STYLE_OVERFLOWWRAP_BREAK_WORD        1
 
 // See nsStyleText
 #define NS_STYLE_HYPHENS_NONE                   0
@@ -1167,7 +1169,7 @@ enum class FillMode : uint32_t;
 
 // composite
 #define NS_STYLE_MASK_COMPOSITE_ADD                 0
-#define NS_STYLE_MASK_COMPOSITE_SUBSTRACT           1
+#define NS_STYLE_MASK_COMPOSITE_SUBTRACT            1
 #define NS_STYLE_MASK_COMPOSITE_INTERSECT           2
 #define NS_STYLE_MASK_COMPOSITE_EXCLUDE             3
 

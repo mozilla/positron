@@ -171,6 +171,15 @@ js::ExecuteRegExpLegacy(JSContext* cx, RegExpStatics* res, RegExpObject& reobj,
     return CreateRegExpMatchResult(cx, input, matches, rval);
 }
 
+static bool
+CheckPatternSyntax(JSContext* cx, HandleAtom pattern, RegExpFlag flags)
+{
+    CompileOptions options(cx);
+    frontend::TokenStream dummyTokenStream(cx, options, nullptr, 0, nullptr);
+    return irregexp::ParsePatternSyntax(dummyTokenStream, cx->tempLifoAlloc(), pattern,
+                                        flags & UnicodeFlag);
+}
+
 enum RegExpSharedUse {
     UseRegExpShared,
     DontUseRegExpShared
@@ -222,13 +231,8 @@ RegExpInitializeIgnoringLastIndex(JSContext* cx, Handle<RegExpObject*> obj,
         obj->setShared(*re);
     } else {
         /* Steps 7-8. */
-        CompileOptions options(cx);
-        frontend::TokenStream dummyTokenStream(cx, options, nullptr, 0, nullptr);
-        if (!irregexp::ParsePatternSyntax(dummyTokenStream, cx->tempLifoAlloc(), pattern,
-                                          flags & UnicodeFlag))
-        {
+        if (!CheckPatternSyntax(cx, pattern, flags))
             return false;
-        }
 
         /* Steps 9-12. */
         obj->initIgnoringLastIndex(pattern, flags);
@@ -286,11 +290,11 @@ js::IsRegExp(JSContext* cx, HandleValue value, bool* result)
     }
 
     /* Steps 5-6. */
-    ESClassValue cls;
+    ESClass cls;
     if (!GetClassOfValue(cx, value, &cls))
         return false;
 
-    *result = cls == ESClass_RegExp;
+    *result = cls == ESClass::RegExp;
     return true;
 }
 
@@ -304,10 +308,10 @@ regexp_compile_impl(JSContext* cx, const CallArgs& args)
 
     // Step 3.
     RootedValue patternValue(cx, args.get(0));
-    ESClassValue cls;
+    ESClass cls;
     if (!GetClassOfValue(cx, patternValue, &cls))
         return false;
-    if (cls == ESClass_RegExp) {
+    if (cls == ESClass::RegExp) {
         // Step 3a.
         if (args.hasDefined(1)) {
             JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_NEWREGEXP_FLAGGED);
@@ -401,10 +405,10 @@ js::regexp_construct(JSContext* cx, unsigned argc, Value* vp)
     RootedValue patternValue(cx, args.get(0));
 
     // Step 4.
-    ESClassValue cls;
+    ESClass cls;
     if (!GetClassOfValue(cx, patternValue, &cls))
         return false;
-    if (cls == ESClass_RegExp) {
+    if (cls == ESClass::RegExp) {
         // Beware!  |patternObj| might be a proxy into another compartment, so
         // don't assume |patternObj.is<RegExpObject>()|.  For the same reason,
         // don't reuse the RegExpShared below.
@@ -419,10 +423,9 @@ js::regexp_construct(JSContext* cx, unsigned argc, Value* vp)
                 return false;
             sourceAtom = g->getSource();
 
-            if (!args.hasDefined(1)) {
-                // Step 4.b.
-                flags = g->getFlags();
-            }
+            // Step 4.b.
+            // Get original flags in all cases, to compare with passed flags.
+            flags = g->getFlags();
         }
 
         // Step 7.
@@ -437,12 +440,22 @@ js::regexp_construct(JSContext* cx, unsigned argc, Value* vp)
         // Step 8.
         if (args.hasDefined(1)) {
             // Step 4.c / 21.2.3.2.2 RegExpInitialize step 4.
-            flags = RegExpFlag(0);
+            RegExpFlag flagsArg = RegExpFlag(0);
             RootedString flagStr(cx, ToString<CanGC>(cx, args[1]));
             if (!flagStr)
                 return false;
-            if (!ParseRegExpFlags(cx, flagStr, &flags))
+            if (!ParseRegExpFlags(cx, flagStr, &flagsArg))
                 return false;
+
+            if (!(flags & UnicodeFlag) && flagsArg & UnicodeFlag) {
+                // Have to check syntax again when adding 'u' flag.
+
+                // ES 2017 draft rev 9b49a888e9dfe2667008a01b2754c3662059ae56
+                // 21.2.3.2.2 step 7.
+                if (!CheckPatternSyntax(cx, sourceAtom, flagsArg))
+                    return false;
+            }
+            flags = flagsArg;
         }
 
         regexp->initAndZeroLastIndex(sourceAtom, flags, cx);

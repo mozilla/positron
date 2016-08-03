@@ -14,7 +14,6 @@
 #include "mozilla/WidgetUtils.h"        // for ScreenRotation
 #include "mozilla/layers/LayersTypes.h"  // for BufferMode, LayersBackend, etc
 #include "nsAString.h"
-#include "nsAutoPtr.h"                  // for nsRefPtr
 #include "nsCOMPtr.h"                   // for already_AddRefed
 #include "nsISupportsImpl.h"            // for gfxContext::AddRef, etc
 #include "nsRegion.h"                   // for nsIntRegion
@@ -152,7 +151,10 @@ public:
     gfx::Matrix mMaskTransform;
   };
 
-  PushedGroup PushGroupForLayer(gfxContext* aContext, Layer* aLayerContext, const nsIntRegion& aRegion);
+  // Construct a PushedGroup for a specific layer.
+  // Return false if it has some errors in PushGroupForLayer(). Then, the
+  // "aGroupResult" is unavailable for future using.
+  bool PushGroupForLayer(gfxContext* aContext, Layer* aLayerContext, const nsIntRegion& aRegion, PushedGroup& aGroupResult);
 
   void PopGroupForLayer(PushedGroup& aGroup);
 

@@ -4,21 +4,17 @@
 
 "use strict";
 
-var { components, Cc, Ci, Cu } = require("chrome");
-var Services = require("Services");
-
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
-Cu.import("resource://gre/modules/NetUtil.jsm");
-Cu.import("resource://gre/modules/FileUtils.jsm");
-
+const {Cc, Ci} = require("chrome");
+const Services = require("Services");
+const {XPCOMUtils} = require("resource://gre/modules/XPCOMUtils.jsm");
 const promise = require("promise");
 const events = require("sdk/event/core");
 const protocol = require("devtools/shared/protocol");
-const {Arg, Option, method, RetVal, types} = protocol;
-const {LongStringActor, ShortLongString} = require("devtools/server/actors/string");
+const {Arg, method, RetVal} = protocol;
 const {fetch} = require("devtools/shared/DevToolsUtils");
+const {oldStyleSheetSpec, styleEditorSpec} = require("devtools/shared/specs/styleeditor");
 
-loader.lazyGetter(this, "CssLogic", () => require("devtools/shared/inspector/css-logic").CssLogic);
+loader.lazyGetter(this, "CssLogic", () => require("devtools/shared/inspector/css-logic"));
 
 var TRANSITION_CLASS = "moz-styleeditor-transitioning";
 var TRANSITION_DURATION_MS = 500;
@@ -32,263 +28,8 @@ transition-property: all !important;\
 
 var LOAD_ERROR = "error-load";
 
-types.addActorType("old-stylesheet");
-
-/**
- * Creates a StyleEditorActor. StyleEditorActor provides remote access to the
- * stylesheets of a document.
- */
-var StyleEditorActor = exports.StyleEditorActor = protocol.ActorClass({
-  typeName: "styleeditor",
-
-  /**
-   * The window we work with, taken from the parent actor.
-   */
-  get window() {
-    return this.parentActor.window;
-  },
-
-  /**
-   * The current content document of the window we work with.
-   */
-  get document() {
-    return this.window.document;
-  },
-
-  events: {
-    "document-load" : {
-      type: "documentLoad",
-      styleSheets: Arg(0, "array:old-stylesheet")
-    }
-  },
-
-  form: function ()
-  {
-    return { actor: this.actorID };
-  },
-
-  initialize: function (conn, tabActor) {
-    protocol.Actor.prototype.initialize.call(this, null);
-
-    this.parentActor = tabActor;
-
-    // keep a map of sheets-to-actors so we don't create two actors for one sheet
-    this._sheets = new Map();
-  },
-
-  /**
-   * Destroy the current StyleEditorActor instance.
-   */
-  destroy: function ()
-  {
-    this._sheets.clear();
-  },
-
-  /**
-   * Called by client when target navigates to a new document.
-   * Adds load listeners to document.
-   */
-  newDocument: method(function () {
-    // delete previous document's actors
-    this._clearStyleSheetActors();
-
-    // Note: listening for load won't be necessary once
-    // https://bugzilla.mozilla.org/show_bug.cgi?id=839103 is fixed
-    if (this.document.readyState == "complete") {
-      this._onDocumentLoaded();
-    }
-    else {
-      this.window.addEventListener("load", this._onDocumentLoaded, false);
-    }
-    return {};
-  }),
-
-  /**
-   * Event handler for document loaded event. Add actor for each stylesheet
-   * and send an event notifying of the load
-   */
-  _onDocumentLoaded: function (event) {
-    if (event) {
-      this.window.removeEventListener("load", this._onDocumentLoaded, false);
-    }
-
-    let documents = [this.document];
-    var forms = [];
-    for (let doc of documents) {
-      let sheetForms = this._addStyleSheets(doc.styleSheets);
-      forms = forms.concat(sheetForms);
-      // Recursively handle style sheets of the documents in iframes.
-      for (let iframe of doc.getElementsByTagName("iframe")) {
-        documents.push(iframe.contentDocument);
-      }
-    }
-
-    events.emit(this, "document-load", forms);
-  },
-
-  /**
-   * Add all the stylesheets to the map and create an actor for each one
-   * if not already created. Send event that there are new stylesheets.
-   *
-   * @param {[DOMStyleSheet]} styleSheets
-   *        Stylesheets to add
-   * @return {[object]}
-   *         Array of actors for each StyleSheetActor created
-   */
-  _addStyleSheets: function (styleSheets)
-  {
-    let sheets = [];
-    for (let i = 0; i < styleSheets.length; i++) {
-      let styleSheet = styleSheets[i];
-      sheets.push(styleSheet);
-
-      // Get all sheets, including imported ones
-      let imports = this._getImported(styleSheet);
-      sheets = sheets.concat(imports);
-    }
-    let actors = sheets.map(this._createStyleSheetActor.bind(this));
-
-    return actors;
-  },
-
-  /**
-   * Create a new actor for a style sheet, if it hasn't already been created.
-   *
-   * @param  {DOMStyleSheet} styleSheet
-   *         The style sheet to create an actor for.
-   * @return {StyleSheetActor}
-   *         The actor for this style sheet
-   */
-  _createStyleSheetActor: function (styleSheet)
-  {
-    if (this._sheets.has(styleSheet)) {
-      return this._sheets.get(styleSheet);
-    }
-    let actor = new OldStyleSheetActor(styleSheet, this);
-
-    this.manage(actor);
-    this._sheets.set(styleSheet, actor);
-
-    return actor;
-  },
-
-  /**
-   * Get all the stylesheets @imported from a stylesheet.
-   *
-   * @param  {DOMStyleSheet} styleSheet
-   *         Style sheet to search
-   * @return {array}
-   *         All the imported stylesheets
-   */
-  _getImported: function (styleSheet) {
-    let imported = [];
-
-    for (let i = 0; i < styleSheet.cssRules.length; i++) {
-      let rule = styleSheet.cssRules[i];
-      if (rule.type == Ci.nsIDOMCSSRule.IMPORT_RULE) {
-        // Associated styleSheet may be null if it has already been seen due to
-        // duplicate @imports for the same URL.
-        if (!rule.styleSheet) {
-          continue;
-        }
-        imported.push(rule.styleSheet);
-
-        // recurse imports in this stylesheet as well
-        imported = imported.concat(this._getImported(rule.styleSheet));
-      }
-      else if (rule.type != Ci.nsIDOMCSSRule.CHARSET_RULE) {
-        // @import rules must precede all others except @charset
-        break;
-      }
-    }
-    return imported;
-  },
-
-  /**
-   * Clear all the current stylesheet actors in map.
-   */
-  _clearStyleSheetActors: function () {
-    for (let actor in this._sheets) {
-      this.unmanage(this._sheets[actor]);
-    }
-    this._sheets.clear();
-  },
-
-  /**
-   * Create a new style sheet in the document with the given text.
-   * Return an actor for it.
-   *
-   * @param  {object} request
-   *         Debugging protocol request object, with 'text property'
-   * @return {object}
-   *         Object with 'styelSheet' property for form on new actor.
-   */
-  newStyleSheet: method(function (text) {
-    let parent = this.document.documentElement;
-    let style = this.document.createElementNS("http://www.w3.org/1999/xhtml", "style");
-    style.setAttribute("type", "text/css");
-
-    if (text) {
-      style.appendChild(this.document.createTextNode(text));
-    }
-    parent.appendChild(style);
-
-    let actor = this._createStyleSheetActor(style.sheet);
-    return actor;
-  }, {
-    request: { text: Arg(0, "string") },
-    response: { styleSheet: RetVal("old-stylesheet") }
-  })
-});
-
-/**
- * The corresponding Front object for the StyleEditorActor.
- */
-var StyleEditorFront = protocol.FrontClass(StyleEditorActor, {
-  initialize: function (client, tabForm) {
-    protocol.Front.prototype.initialize.call(this, client);
-    this.actorID = tabForm.styleEditorActor;
-    this.manage(this);
-  },
-
-  getStyleSheets: function () {
-    let deferred = promise.defer();
-
-    events.once(this, "document-load", (styleSheets) => {
-      deferred.resolve(styleSheets);
-    });
-    this.newDocument();
-
-    return deferred.promise;
-  },
-
-  addStyleSheet: function (text) {
-    return this.newStyleSheet(text);
-  }
-});
-
-/**
- * A StyleSheetActor represents a stylesheet on the server.
- */
-var OldStyleSheetActor = protocol.ActorClass({
-  typeName: "old-stylesheet",
-
-  events: {
-    "property-change" : {
-      type: "propertyChange",
-      property: Arg(0, "string"),
-      value: Arg(1, "json")
-    },
-    "source-load" : {
-      type: "sourceLoad",
-      source: Arg(0, "string")
-    },
-    "style-applied" : {
-      type: "styleApplied"
-    }
-  },
-
-  toString: function () {
+var OldStyleSheetActor = protocol.ActorClassWithSpec(oldStyleSheetSpec, {
+  toString: function() {
     return "[OldStyleSheetActor " + this.actorID + "]";
   },
 
@@ -405,14 +146,12 @@ var OldStyleSheetActor = protocol.ActorClass({
    * @return {object}
    *         'disabled' - the disabled state after toggling.
    */
-  toggleDisabled: method(function () {
+  toggleDisabled: function () {
     this.rawSheet.disabled = !this.rawSheet.disabled;
     this._notifyPropertyChanged("disabled");
 
     return this.rawSheet.disabled;
-  }, {
-    response: { disabled: RetVal("boolean")}
-  }),
+  },
 
   /**
    * Send an event notifying that a property of the stylesheet
@@ -429,11 +168,11 @@ var OldStyleSheetActor = protocol.ActorClass({
     * Fetch the source of the style sheet from its URL. Send a "sourceLoad"
     * event when it's been fetched.
     */
-  fetchSource: method(function () {
+  fetchSource: function () {
     this._getText().then((content) => {
       events.emit(this, "source-load", this.text);
     });
-  }),
+  },
 
   /**
    * Fetch the text for this stylesheet from the cache or network. Return
@@ -525,7 +264,7 @@ var OldStyleSheetActor = protocol.ActorClass({
    *         'text' - new text
    *         'transition' - whether to do CSS transition for change.
    */
-  update: method(function (text, transition) {
+  update: function (text, transition) {
     DOMUtils.parseStyleSheet(this.rawSheet, text);
 
     this.text = text;
@@ -538,12 +277,7 @@ var OldStyleSheetActor = protocol.ActorClass({
     else {
       this._notifyStyleApplied();
     }
-  }, {
-    request: {
-      text: Arg(0, "string"),
-      transition: Arg(1, "boolean")
-    }
-  }),
+  },
 
   /**
    * Insert a catch-all transition rule into the document. Set a timeout
@@ -581,72 +315,200 @@ var OldStyleSheetActor = protocol.ActorClass({
   }
 });
 
+exports.OldStyleSheetActor = OldStyleSheetActor;
+
 /**
- * StyleSheetFront is the client-side counterpart to a StyleSheetActor.
+ * Creates a StyleEditorActor. StyleEditorActor provides remote access to the
+ * stylesheets of a document.
  */
-var OldStyleSheetFront = protocol.FrontClass(OldStyleSheetActor, {
-  initialize: function (conn, form, ctx, detail) {
-    protocol.Front.prototype.initialize.call(this, conn, form, ctx, detail);
-
-    this._onPropertyChange = this._onPropertyChange.bind(this);
-    events.on(this, "property-change", this._onPropertyChange);
+var StyleEditorActor = exports.StyleEditorActor = protocol.ActorClassWithSpec(styleEditorSpec, {
+  /**
+   * The window we work with, taken from the parent actor.
+   */
+  get window() {
+    return this.parentActor.window;
   },
 
-  destroy: function () {
-    events.off(this, "property-change", this._onPropertyChange);
-
-    protocol.Front.prototype.destroy.call(this);
+  /**
+   * The current content document of the window we work with.
+   */
+  get document() {
+    return this.window.document;
   },
 
-  _onPropertyChange: function (property, value) {
-    this._form[property] = value;
+  form: function ()
+  {
+    return { actor: this.actorID };
   },
 
-  form: function (form, detail) {
-    if (detail === "actorid") {
-      this.actorID = form;
-      return;
+  initialize: function (conn, tabActor) {
+    protocol.Actor.prototype.initialize.call(this, null);
+
+    this.parentActor = tabActor;
+
+    // keep a map of sheets-to-actors so we don't create two actors for one sheet
+    this._sheets = new Map();
+  },
+
+  /**
+   * Destroy the current StyleEditorActor instance.
+   */
+  destroy: function ()
+  {
+    this._sheets.clear();
+  },
+
+  /**
+   * Called by client when target navigates to a new document.
+   * Adds load listeners to document.
+   */
+  newDocument: function () {
+    // delete previous document's actors
+    this._clearStyleSheetActors();
+
+    // Note: listening for load won't be necessary once
+    // https://bugzilla.mozilla.org/show_bug.cgi?id=839103 is fixed
+    if (this.document.readyState == "complete") {
+      this._onDocumentLoaded();
     }
-    this.actorID = form.actor;
-    this._form = form;
+    else {
+      this.window.addEventListener("load", this._onDocumentLoaded, false);
+    }
+    return {};
   },
 
-  getText: function () {
-    let deferred = promise.defer();
+  /**
+   * Event handler for document loaded event. Add actor for each stylesheet
+   * and send an event notifying of the load
+   */
+  _onDocumentLoaded: function (event) {
+    if (event) {
+      this.window.removeEventListener("load", this._onDocumentLoaded, false);
+    }
 
-    events.once(this, "source-load", (source) => {
-      let longStr = new ShortLongString(source);
-      deferred.resolve(longStr);
-    });
-    this.fetchSource();
+    let documents = [this.document];
+    var forms = [];
+    for (let doc of documents) {
+      let sheetForms = this._addStyleSheets(doc.styleSheets);
+      forms = forms.concat(sheetForms);
+      // Recursively handle style sheets of the documents in iframes.
+      for (let iframe of doc.getElementsByTagName("iframe")) {
+        documents.push(iframe.contentDocument);
+      }
+    }
 
-    return deferred.promise;
+    events.emit(this, "document-load", forms);
   },
 
-  getOriginalSources: function () {
-    return promise.resolve([]);
+  /**
+   * Add all the stylesheets to the map and create an actor for each one
+   * if not already created. Send event that there are new stylesheets.
+   *
+   * @param {[DOMStyleSheet]} styleSheets
+   *        Stylesheets to add
+   * @return {[object]}
+   *         Array of actors for each StyleSheetActor created
+   */
+  _addStyleSheets: function (styleSheets)
+  {
+    let sheets = [];
+    for (let i = 0; i < styleSheets.length; i++) {
+      let styleSheet = styleSheets[i];
+      sheets.push(styleSheet);
+
+      // Get all sheets, including imported ones
+      let imports = this._getImported(styleSheet);
+      sheets = sheets.concat(imports);
+    }
+    let actors = sheets.map(this._createStyleSheetActor.bind(this));
+
+    return actors;
   },
 
-  get href() {
-    return this._form.href;
+  /**
+   * Create a new actor for a style sheet, if it hasn't already been created.
+   *
+   * @param  {DOMStyleSheet} styleSheet
+   *         The style sheet to create an actor for.
+   * @return {StyleSheetActor}
+   *         The actor for this style sheet
+   */
+  _createStyleSheetActor: function (styleSheet)
+  {
+    if (this._sheets.has(styleSheet)) {
+      return this._sheets.get(styleSheet);
+    }
+    let actor = new OldStyleSheetActor(styleSheet, this);
+
+    this.manage(actor);
+    this._sheets.set(styleSheet, actor);
+
+    return actor;
   },
-  get nodeHref() {
-    return this._form.nodeHref;
+
+  /**
+   * Get all the stylesheets @imported from a stylesheet.
+   *
+   * @param  {DOMStyleSheet} styleSheet
+   *         Style sheet to search
+   * @return {array}
+   *         All the imported stylesheets
+   */
+  _getImported: function (styleSheet) {
+   let imported = [];
+
+   for (let i = 0; i < styleSheet.cssRules.length; i++) {
+      let rule = styleSheet.cssRules[i];
+      if (rule.type == Ci.nsIDOMCSSRule.IMPORT_RULE) {
+        // Associated styleSheet may be null if it has already been seen due to
+        // duplicate @imports for the same URL.
+        if (!rule.styleSheet) {
+          continue;
+        }
+        imported.push(rule.styleSheet);
+
+        // recurse imports in this stylesheet as well
+        imported = imported.concat(this._getImported(rule.styleSheet));
+      }
+      else if (rule.type != Ci.nsIDOMCSSRule.CHARSET_RULE) {
+        // @import rules must precede all others except @charset
+        break;
+      }
+    }
+    return imported;
   },
-  get disabled() {
-    return !!this._form.disabled;
+
+  /**
+   * Clear all the current stylesheet actors in map.
+   */
+  _clearStyleSheetActors: function () {
+    for (let actor in this._sheets) {
+      this.unmanage(this._sheets[actor]);
+    }
+    this._sheets.clear();
   },
-  get title() {
-    return this._form.title;
-  },
-  get isSystem() {
-    return this._form.system;
-  },
-  get styleSheetIndex() {
-    return this._form.styleSheetIndex;
-  },
-  get ruleCount() {
-    return this._form.ruleCount;
+
+  /**
+   * Create a new style sheet in the document with the given text.
+   * Return an actor for it.
+   *
+   * @param  {object} request
+   *         Debugging protocol request object, with 'text property'
+   * @return {object}
+   *         Object with 'styelSheet' property for form on new actor.
+   */
+  newStyleSheet: function (text) {
+    let parent = this.document.documentElement;
+    let style = this.document.createElementNS("http://www.w3.org/1999/xhtml", "style");
+    style.setAttribute("type", "text/css");
+
+    if (text) {
+      style.appendChild(this.document.createTextNode(text));
+    }
+    parent.appendChild(style);
+
+    let actor = this._createStyleSheetActor(style.sheet);
+    return actor;
   }
 });
 
@@ -655,11 +517,6 @@ XPCOMUtils.defineLazyGetter(this, "DOMUtils", function () {
 });
 
 exports.StyleEditorActor = StyleEditorActor;
-exports.StyleEditorFront = StyleEditorFront;
-
-exports.OldStyleSheetActor = OldStyleSheetActor;
-exports.OldStyleSheetFront = OldStyleSheetFront;
-
 
 /**
  * Normalize multiple relative paths towards the base paths on the right.

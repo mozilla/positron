@@ -29,10 +29,6 @@
 <!ENTITY firstrun_tabqueue_message_on "Success!">
 <!ENTITY firstrun_tabqueue_subtext_on "You can always turn this off in &settings; under &pref_category_general;.">
 
-<!ENTITY firstrun_notifications_title "Blogs">
-<!ENTITY firstrun_notifications_message "Stay informed">
-<!ENTITY firstrun_notifications_subtext "Get notified when blogs you have bookmarked post an update.">
-
 <!ENTITY firstrun_readerview_title "Articles">
 <!-- Localization note (firstrun_readerview_message): This is a casual way of describing getting rid of unnecessary things, and is referring to simplifying websites so only the article text and images are visible, removing unnecessary headers or ads. -->
 <!ENTITY firstrun_readerview_message "Lose the clutter">
@@ -48,9 +44,11 @@
      They are automatically converted to all caps by the Android platform. -->
 <!ENTITY  bookmarks_title "Bookmarks">
 <!ENTITY  history_title "History">
-<!ENTITY  recent_tabs_title "Recent Tabs">
 
 <!ENTITY  switch_to_tab "Switch to tab">
+
+<!-- Localization note: Shown in a snackbar when tab is loaded from cache while device was offline. -->
+<!ENTITY  tab_offline_version "Showing offline version">
 
 <!ENTITY  crash_reporter_title "&brandShortName; Crash Reporter">
 <!ENTITY  crash_message2 "&brandShortName; had a problem and crashed. Your tabs should be listed on the &brandShortName; Start page when you restart.">
@@ -193,6 +191,9 @@
      it is applicable. -->
 <!ENTITY pref_search_hint2 "TIP: Add any website to your list of search providers by long-pressing on its search field and then touching the &formatI; icon.">
 <!ENTITY pref_category_advanced "Advanced">
+<!-- Localization note (pref_category_advanced_summary3): “data saver” in this
+     context means consuming less data, e.g. by not loading images, not
+     “storing data”. -->
 <!ENTITY pref_category_advanced_summary3 "Restore tabs, data saver, developer tools">
 <!ENTITY pref_category_notifications "Notifications">
 <!ENTITY pref_category_notifications_summary "New features, website updates">
@@ -244,6 +245,9 @@
 <!ENTITY pref_cookies_not_accept_foreign "Enabled, excluding 3rd party">
 <!ENTITY pref_cookies_disabled "Disabled">
 
+<!-- Localization note (pref_category_data_saver): “data saver” in this
+     context means consuming less data, e.g. by not loading images, not
+     “storing data”. -->
 <!ENTITY pref_category_data_saver "Data saver">
 <!ENTITY pref_category_media "Media">
 <!ENTITY pref_category_developer_tools "Developer tools">
@@ -267,6 +271,12 @@
 
 <!ENTITY pref_whats_new_notification "What\'s new in &brandShortName;">
 <!ENTITY pref_whats_new_notification_summary "Learn about new features after an update">
+
+<!-- Custom Tabs is an Android API for allowing third-party apps to open URLs in a customized UI.
+     Instead of switching to the browser it appears as if the user stays in the third-party app.
+     For more see: https://developer.chrome.com/multidevice/android/customtabs -->
+<!ENTITY pref_custom_tabs "Custom Tabs">
+<!ENTITY pref_custom_tabs_summary "Allow third-party apps to open URLs with a customized look and feel.">
 
 <!ENTITY tracking_protection_prompt_title "Now with Tracking Protection">
 <!ENTITY tracking_protection_prompt_text "Actively block tracking elements so you don\'t have to worry.">
@@ -380,6 +390,7 @@ size. -->
 <!ENTITY pref_private_data_syncedTabs "Synced tabs">
 
 <!ENTITY pref_default_browser "Make default browser">
+<!ENTITY pref_default_browser_mozilla_support_tablet "Visit Mozilla Support">
 <!ENTITY pref_about_firefox "About &brandShortName;">
 <!ENTITY pref_vendor_faqs "FAQs">
 <!ENTITY pref_vendor_feedback "Give feedback">
@@ -445,12 +456,12 @@ size. -->
 <!ENTITY share_image_failed "Unable to share this image">
 <!ENTITY save_as_pdf "Save as PDF">
 <!ENTITY print "Print">
-<!ENTITY find_in_page "Find in Page">
-<!ENTITY desktop_mode "Request Desktop Site">
+<!ENTITY find_in_page "Find in page">
+<!ENTITY desktop_mode "Request desktop site">
 <!ENTITY page "Page">
 <!ENTITY tools "Tools">
-<!ENTITY new_tab "New Tab">
-<!ENTITY new_private_tab "New Private Tab">
+<!ENTITY new_tab "New tab">
+<!ENTITY new_private_tab "New private tab">
 <!ENTITY close_all_tabs "Close All Tabs">
 <!ENTITY close_private_tabs "Close Private Tabs">
 <!ENTITY tabs_normal "Tabs">
@@ -568,10 +579,12 @@ size. -->
 <!ENTITY home_clear_history_button "Clear browsing history">
 <!ENTITY home_clear_history_confirm "Are you sure you want to clear your history?">
 <!ENTITY home_bookmarks_empty "Bookmarks you save show up here.">
-<!ENTITY home_closed_tabs_title "Recently closed tabs">
-<!ENTITY home_last_tabs_title "Tabs from last time">
+<!ENTITY home_closed_tabs_title2 "Recently closed">
 <!ENTITY home_last_tabs_empty "Your recent tabs show up here.">
-<!ENTITY home_open_all "Open all">
+<!ENTITY home_restore_all "Restore all">
+<!ENTITY home_closed_tabs_number "&formatD; tabs">
+<!-- Localization note (home_closed_tabs_one): This is the singular version of home_closed_tabs_number, referring to the number of recently closed tabs available. -->
+<!ENTITY home_closed_tabs_one "1 tab">
 <!ENTITY home_most_recent_empty "Websites you visited most recently show up here.">
 <!-- Localization note (home_most_recent_emptyhint2): "Psst" is a sound that might be used to attract someone's attention unobtrusively, and intended to hint at Private Browsing to the user.
      The placeholders &formatS1; and &formatS2; are used to mark the location of text underlining. -->
@@ -623,7 +636,6 @@ with that structure, consider a translation which ignores the preceding domain a
 just addresses the organization to follow, e.g. "This site is run by " -->
 <!ENTITY identity_connection_secure "Secure Connection">
 <!ENTITY identity_connection_insecure "Insecure connection">
-<!ENTITY identity_login_insecure "This page is not secure and your login could be vulnerable.">
 <!ENTITY identity_connection_chromeui "This is a secure &brandShortName; page">
 
 <!-- Mixed content notifications in site identity popup -->

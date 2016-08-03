@@ -11,13 +11,12 @@
 #include "OmxDataDecoder.h"
 #include "OmxPlatformLayer.h"
 
-extern mozilla::LogModule* GetPDMLog();
 
 #ifdef LOG
 #undef LOG
 #endif
 
-#define LOG(arg, ...) MOZ_LOG(GetPDMLog(), mozilla::LogLevel::Debug, ("OmxPromiseLayer(%p)::%s: " arg, this, __func__, ##__VA_ARGS__))
+#define LOG(arg, ...) MOZ_LOG(sPDMLog, mozilla::LogLevel::Debug, ("OmxPromiseLayer(%p)::%s: " arg, this, __func__, ##__VA_ARGS__))
 
 namespace mozilla {
 
@@ -173,15 +172,16 @@ OmxPromiseLayer::FindBufferById(OMX_DIRTYPE aType, BufferData::BufferID aId)
 void
 OmxPromiseLayer::EmptyFillBufferDone(OMX_DIRTYPE aType, BufferData* aData)
 {
-  MOZ_ASSERT(!!aData);
-  LOG("type %d, buffer %p", aType, aData->mBuffer);
   if (aData) {
+    LOG("type %d, buffer %p", aType, aData->mBuffer);
     if (aType == OMX_DirOutput) {
       aData->mRawData = nullptr;
       aData->mRawData = FindAndRemoveRawData(aData->mBuffer->nTimeStamp);
     }
     aData->mStatus = BufferData::BufferStatus::OMX_CLIENT;
     aData->mPromise.Resolve(aData, __func__);
+  } else {
+    LOG("type %d, no buffer", aType);
   }
 }
 

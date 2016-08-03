@@ -138,7 +138,6 @@ public:
     return NS_OK;
   }
 
-  virtual JSContext* GetJSContextForEventHandlers() override;
   virtual nsIPrincipal* GetPrincipal() override;
   virtual JSObject* GetGlobalJSObject() override;
 
@@ -228,7 +227,8 @@ class TabChild final : public TabChildBase,
                        public nsITabChild,
                        public nsIObserver,
                        public TabContext,
-                       public nsITooltipListener
+                       public nsITooltipListener,
+                       public mozilla::ipc::IShmemAllocator
 {
   typedef mozilla::dom::ClonedMessageData ClonedMessageData;
   typedef mozilla::layout::RenderFrameChild RenderFrameChild;
@@ -285,6 +285,8 @@ public:
   NS_DECL_NSIOBSERVER
   NS_DECL_NSITOOLTIPLISTENER
 
+  FORWARD_SHMEM_ALLOCATOR_TO(PBrowserChild)
+
   /**
    * MessageManagerCallback methods that we override.
    */
@@ -308,7 +310,6 @@ public:
                           const Maybe<ZoomConstraints>& aConstraints) override;
 
   virtual bool RecvLoadURL(const nsCString& aURI,
-                           const BrowserConfiguration& aConfiguration,
                            const ShowInfo& aInfo) override;
 
   virtual bool RecvCacheFileDescriptor(const nsString& aPath,
@@ -450,6 +451,10 @@ public:
 
   virtual bool DeallocPColorPickerChild(PColorPickerChild* aActor) override;
 
+    virtual PDatePickerChild*
+    AllocPDatePickerChild(const nsString& title, const nsString& initialDate) override;
+    virtual bool DeallocPDatePickerChild(PDatePickerChild* actor) override;
+
   virtual PFilePickerChild*
   AllocPFilePickerChild(const nsString& aTitle, const int16_t& aMode) override;
 
@@ -580,7 +585,8 @@ public:
                  const mozilla::NativeEventData& aKeyEventData,
                  const bool& aIsConsumed) override;
 
-  virtual bool RecvPrint(const PrintData& aPrintData) override;
+  virtual bool RecvPrint(const uint64_t& aOuterWindowID,
+                         const PrintData& aPrintData) override;
 
   /**
    * Native widget remoting protocol for use with windowed plugins with e10s.
@@ -616,17 +622,12 @@ public:
                                  bool aPreventDefault) const;
   void SetTargetAPZC(uint64_t aInputBlockId,
                     const nsTArray<ScrollableLayerGuid>& aTargets) const;
-  void HandleDoubleTap(const CSSPoint& aPoint,
-                       const Modifiers& aModifiers,
-                       const mozilla::layers::ScrollableLayerGuid& aGuid);
-  void HandleSingleTap(const CSSPoint& aPoint,
-                       const Modifiers& aModifiers,
-                       const mozilla::layers::ScrollableLayerGuid& aGuid,
-                       bool aCallTakeFocusForClickFromTap);
-  void HandleLongTap(const CSSPoint& aPoint,
-                     const Modifiers& aModifiers,
-                     const mozilla::layers::ScrollableLayerGuid& aGuid,
-                     const uint64_t& aInputBlockId);
+  void HandleTap(layers::GeckoContentController::TapType aType,
+                 const CSSPoint& aPoint,
+                 const Modifiers& aModifiers,
+                 const mozilla::layers::ScrollableLayerGuid& aGuid,
+                 const uint64_t& aInputBlockId,
+                 bool aCallTakeFocusForClickFromTap);
   void SetAllowedTouchBehavior(uint64_t aInputBlockId,
                                const nsTArray<TouchBehaviorFlags>& aFlags) const;
 
@@ -668,6 +669,9 @@ protected:
 
   virtual bool RecvParentActivated(const bool& aActivated) override;
 
+  virtual bool RecvSetKeyboardIndicators(const UIStateChangeType& aShowAccelerators,
+                                         const UIStateChangeType& aShowFocusRings) override;
+
   virtual bool RecvStopIMEStateManagement() override;
 
   virtual bool RecvMenuKeyboardListenerInstalled(
@@ -678,6 +682,9 @@ protected:
 #endif
 
 private:
+  void HandleDoubleTap(const CSSPoint& aPoint, const Modifiers& aModifiers,
+                       const ScrollableLayerGuid& aGuid);
+
   // Notify others that our TabContext has been updated.  (At the moment, this
   // sets the appropriate origin attributes on our docshell.)
   //

@@ -27,6 +27,7 @@ namespace jit {
     _(SimdUnaryArith)                                                       \
     _(SimdBinaryComp)                                                       \
     _(SimdBinaryArith)                                                      \
+    _(SimdBinarySaturating)                                                 \
     _(SimdBinaryBitwise)                                                    \
     _(SimdShift)                                                            \
     _(SimdSelect)                                                           \
@@ -128,11 +129,12 @@ namespace jit {
     _(NewArray)                                                             \
     _(NewArrayCopyOnWrite)                                                  \
     _(NewArrayDynamicLength)                                                \
+    _(NewTypedArray)                                                        \
     _(NewObject)                                                            \
     _(NewTypedObject)                                                       \
     _(NewDeclEnvObject)                                                     \
     _(NewCallObject)                                                        \
-    _(NewRunOnceCallObject)                                                 \
+    _(NewSingletonCallObject)                                               \
     _(NewStringObject)                                                      \
     _(ObjectState)                                                          \
     _(ArrayState)                                                           \
@@ -266,6 +268,10 @@ namespace jit {
     _(IsCallable)                                                           \
     _(IsObject)                                                             \
     _(HasClass)                                                             \
+    _(CopySign)                                                             \
+    _(WasmBoundsCheck)                                                      \
+    _(WasmLoad)                                                             \
+    _(WasmStore)                                                            \
     _(WasmTruncateToInt32)                                                  \
     _(AsmJSNeg)                                                             \
     _(AsmJSUnsignedToDouble)                                                \

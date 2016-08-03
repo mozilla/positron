@@ -236,6 +236,7 @@ public:
     static void Open(const jni::Class::LocalRef& aCls,
                      GeckoView::Window::Param aWindow,
                      GeckoView::Param aView, jni::Object::Param aGLController,
+                     jni::String::Param aChromeURI,
                      int32_t aWidth, int32_t aHeight);
 
     // Close and destroy the nsWindow.
@@ -908,14 +909,17 @@ public:
     template<class Functor>
     static void OnNativeCall(Functor&& aCall)
     {
-        if (aCall.IsTarget(&GLControllerSupport::CreateCompositor) ||
-            aCall.IsTarget(&GLControllerSupport::PauseCompositor)) {
+        if (aCall.IsTarget(&GLControllerSupport::CreateCompositor)) {
 
             // These calls are blocking.
             nsAppShell::SyncRunEvent(WindowEvent<Functor>(
                     mozilla::Move(aCall)), &GLControllerEvent::MakeEvent);
             return;
 
+        } else if (aCall.IsTarget(&GLControllerSupport::PauseCompositor)) {
+            aCall.SetTarget(&GLControllerSupport::SyncPauseCompositor);
+            (Functor(aCall))();
+            return;
         } else if (aCall.IsTarget(
                 &GLControllerSupport::SyncResumeResizeCompositor)) {
             // This call is synchronous. Perform the original call using a copy
@@ -1110,6 +1114,7 @@ nsWindow::GeckoViewSupport::Open(const jni::Class::LocalRef& aCls,
                                  GeckoView::Window::Param aWindow,
                                  GeckoView::Param aView,
                                  jni::Object::Param aGLController,
+                                 jni::String::Param aChromeURI,
                                  int32_t aWidth, int32_t aHeight)
 {
     MOZ_ASSERT(NS_IsMainThread());
@@ -1120,9 +1125,14 @@ nsWindow::GeckoViewSupport::Open(const jni::Class::LocalRef& aCls,
     nsCOMPtr<nsIWindowWatcher> ww = do_GetService(NS_WINDOWWATCHER_CONTRACTID);
     MOZ_ASSERT(ww);
 
-    nsAdoptingCString url = Preferences::GetCString("toolkit.defaultChromeURI");
-    if (!url) {
-        url = NS_LITERAL_CSTRING("chrome://browser/content/browser.xul");
+    nsAdoptingCString url;
+    if (aChromeURI) {
+        url = aChromeURI->ToCString();
+    } else {
+        url = Preferences::GetCString("toolkit.defaultChromeURI");
+        if (!url) {
+            url = NS_LITERAL_CSTRING("chrome://browser/content/browser.xul");
+        }
     }
 
     nsCOMPtr<nsISupportsArray> args
@@ -1756,12 +1766,8 @@ nsWindow::SetWindowClass(const nsAString& xulWinType)
 }
 
 mozilla::layers::LayerManager*
-nsWindow::GetLayerManager(PLayerTransactionChild*, LayersBackend, LayerManagerPersistence,
-                          bool* aAllowRetaining)
+nsWindow::GetLayerManager(PLayerTransactionChild*, LayersBackend, LayerManagerPersistence)
 {
-    if (aAllowRetaining) {
-        *aAllowRetaining = true;
-    }
     if (mLayerManager) {
         return mLayerManager;
     }
@@ -1933,7 +1939,7 @@ nsWindow::GetNativeData(uint32_t aDataType)
             return NS_ONLY_ONE_NATIVE_IME_CONTEXT;
         }
 
-        case NS_NATIVE_WINDOW:
+        case NS_JAVA_SURFACE:
             if (!mGLControllerSupport) {
                 return nullptr;
             }
@@ -3147,7 +3153,7 @@ nsWindow::GeckoViewSupport::OnImeReplaceText(int32_t aStart, int32_t aEnd,
             TextRange range;
             range.mStartOffset = 0;
             range.mEndOffset = event.mData.Length();
-            range.mRangeType = NS_TEXTRANGE_RAWINPUT;
+            range.mRangeType = TextRangeType::eRawClause;
             event.mRanges = new TextRangeArray();
             event.mRanges->AppendElement(range);
         }
@@ -3183,7 +3189,7 @@ nsWindow::GeckoViewSupport::OnImeAddCompositionRange(
     TextRange range;
     range.mStartOffset = aStart;
     range.mEndOffset = aEnd;
-    range.mRangeType = aRangeType;
+    range.mRangeType = ToTextRangeType(aRangeType);
     range.mRangeStyle.mDefinedStyles = aRangeStyle;
     range.mRangeStyle.mLineStyle = aRangeLineStyle;
     range.mRangeStyle.mIsBoldLine = aRangeBoldLine;
@@ -3366,9 +3372,7 @@ nsWindow::GetIMEUpdatePreference()
     if (GetInputContext().mIMEState.mEnabled == IMEState::PLUGIN) {
       return nsIMEUpdatePreference();
     }
-    return nsIMEUpdatePreference(
-        nsIMEUpdatePreference::NOTIFY_SELECTION_CHANGE |
-        nsIMEUpdatePreference::NOTIFY_TEXT_CHANGE);
+    return nsIMEUpdatePreference(nsIMEUpdatePreference::NOTIFY_TEXT_CHANGE);
 }
 
 nsresult

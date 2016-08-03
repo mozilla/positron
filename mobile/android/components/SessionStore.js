@@ -15,6 +15,7 @@ XPCOMUtils.defineLazyModuleGetter(this, "OS", "resource://gre/modules/osfile.jsm
 XPCOMUtils.defineLazyModuleGetter(this, "Messaging", "resource://gre/modules/Messaging.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "PrivateBrowsingUtils", "resource://gre/modules/PrivateBrowsingUtils.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "FormData", "resource://gre/modules/FormData.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "ScrollPosition", "resource://gre/modules/ScrollPosition.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "TelemetryStopwatch", "resource://gre/modules/TelemetryStopwatch.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "Log", "resource://gre/modules/AndroidLog.jsm", "AndroidLog");
 XPCOMUtils.defineLazyModuleGetter(this, "SharedPreferences", "resource://gre/modules/SharedPreferences.jsm");
@@ -38,6 +39,7 @@ function log(a) {
 
 const STATE_STOPPED = 0;
 const STATE_RUNNING = 1;
+const STATE_QUITTING = -1;
 
 const PRIVACY_NONE = 0;
 const PRIVACY_ENCRYPTED = 1;
@@ -45,6 +47,12 @@ const PRIVACY_FULL = 2;
 
 const PREFS_RESTORE_FROM_CRASH = "browser.sessionstore.resume_from_crash";
 const PREFS_MAX_CRASH_RESUMES = "browser.sessionstore.max_resumed_crashes";
+
+const MINIMUM_SAVE_DELAY = 2000;
+// We reduce the delay in background because we could be killed at any moment,
+// however we don't set it to 0 in order to allow for multiple events arriving
+// one after the other to be batched together in one write operation.
+const MINIMUM_SAVE_DELAY_BACKGROUND = 200;
 
 function SessionStore() { }
 
@@ -59,8 +67,10 @@ SessionStore.prototype = {
   _windows: {},
   _lastSaveTime: 0,
   _interval: 10000,
+  _minSaveDelay: MINIMUM_SAVE_DELAY,
   _maxTabsUndo: 5,
   _pendingWrite: 0,
+  _scrollSavePending: null,
 
   // The index where the most recently closed tab was in the tabs array
   // when it was closed.
@@ -75,10 +85,13 @@ SessionStore.prototype = {
     // Get file references
     this._sessionFile = Services.dirsvc.get("ProfD", Ci.nsILocalFile);
     this._sessionFileBackup = this._sessionFile.clone();
+    this._sessionFileTemp = this._sessionFile.clone();
     this._sessionFile.append("sessionstore.js");
     this._sessionFileBackup.append("sessionstore.bak");
+    this._sessionFileTemp.append(this._sessionFile.leafName + ".tmp");
 
     this._loadState = STATE_STOPPED;
+    this._startupRestoreFinished = false;
 
     this._interval = Services.prefs.getIntPref("browser.sessionstore.interval");
     this._maxTabsUndo = Services.prefs.getIntPref("browser.sessionstore.max_tabs_undo");
@@ -98,6 +111,7 @@ SessionStore.prototype = {
   _clearDisk: function ss_clearDisk() {
     OS.File.remove(this._sessionFile.path);
     OS.File.remove(this._sessionFileBackup.path);
+    OS.File.remove(this._sessionFileTemp.path);
   },
 
   observe: function ss_observe(aSubject, aTopic, aData) {
@@ -109,8 +123,13 @@ SessionStore.prototype = {
         observerService.addObserver(this, "domwindowopened", true);
         observerService.addObserver(this, "domwindowclosed", true);
         observerService.addObserver(this, "browser:purge-session-history", true);
+        observerService.addObserver(this, "quit-application-requested", true);
+        observerService.addObserver(this, "quit-application-proceeding", true);
+        observerService.addObserver(this, "quit-application", true);
         observerService.addObserver(this, "Session:Restore", true);
+        observerService.addObserver(this, "Session:NotifyLocationChange", true);
         observerService.addObserver(this, "application-background", true);
+        observerService.addObserver(this, "application-foreground", true);
         observerService.addObserver(this, "ClosedTabs:StartNotifications", true);
         observerService.addObserver(this, "ClosedTabs:StopNotifications", true);
         observerService.addObserver(this, "last-pb-context-exited", true);
@@ -132,6 +151,36 @@ SessionStore.prototype = {
       case "domwindowclosed": // catch closed windows
         this.onWindowClose(aSubject);
         break;
+      case "quit-application-requested":
+        log("quit-application-requested");
+        // Get a current snapshot of all windows
+        if (this._pendingWrite) {
+          this._forEachBrowserWindow(function(aWindow) {
+            self._collectWindowData(aWindow);
+          });
+        }
+        break;
+      case "quit-application-proceeding":
+        log("quit-application-proceeding");
+        // Freeze the data at what we've got (ignoring closing windows)
+        this._loadState = STATE_QUITTING;
+        break;
+      case "quit-application":
+        log("quit-application");
+        observerService.removeObserver(this, "domwindowopened");
+        observerService.removeObserver(this, "domwindowclosed");
+        observerService.removeObserver(this, "quit-application-requested");
+        observerService.removeObserver(this, "quit-application-proceeding");
+        observerService.removeObserver(this, "quit-application");
+
+        // If a save has been queued, kill the timer and save now
+        if (this._saveTimer) {
+          this._saveTimer.cancel();
+          this._saveTimer = null;
+          this.flushPendingState();
+        }
+
+        break;
       case "browser:purge-session-history": // catch sanitization 
         this._clearDisk();
 
@@ -144,6 +193,8 @@ SessionStore.prototype = {
         if (this._loadState == STATE_RUNNING) {
           // Save the purged state immediately
           this.saveState();
+        } else if (this._loadState == STATE_QUITTING) {
+          this.saveStateDelayed();
         }
 
         Services.obs.notifyObservers(null, "sessionstore-state-purge-complete", "");
@@ -152,11 +203,13 @@ SessionStore.prototype = {
         }
         break;
       case "timer-callback":
-        // Timer call back for delayed saving
-        this._saveTimer = null;
-        log("timer-callback, pendingWrite = " + this._pendingWrite);
-        if (this._pendingWrite) {
-          this.saveState();
+        if (this._loadState == STATE_RUNNING) {
+          // Timer call back for delayed saving
+          this._saveTimer = null;
+          log("timer-callback, pendingWrite = " + this._pendingWrite);
+          if (this._pendingWrite) {
+            this.saveState();
+          }
         }
         break;
       case "Session:Restore": {
@@ -173,6 +226,10 @@ SessionStore.prototype = {
                   selected: true
                 });
               }
+              // Normally, _restoreWindow() will have set this to true already,
+              // but we want to make sure it's set even in case of a restore failure.
+              this._startupRestoreFinished = true;
+              log("startupRestoreFinished = true (through notification)");
             }.bind(this)
           };
           Services.obs.addObserver(restoreCleanup, "sessionstore-windows-restored", false);
@@ -182,7 +239,23 @@ SessionStore.prototype = {
           this.restoreLastSession(data.sessionString);
         } else {
           // Not doing a restore; just send restore message
+          this._startupRestoreFinished = true;
+          log("startupRestoreFinished = true");
           Services.obs.notifyObservers(null, "sessionstore-windows-restored", "");
+        }
+        break;
+      }
+      case "Session:NotifyLocationChange": {
+        let browser = aSubject;
+
+        if (browser.__SS_restoreReloadPending && this._startupRestoreFinished) {
+          delete browser.__SS_restoreReloadPending;
+          log("remove restoreReloadPending");
+        }
+
+        if (browser.__SS_restoreDataOnLocationChange) {
+          delete browser.__SS_restoreDataOnLocationChange;
+          this._restoreZoom(browser.__SS_data.scrolldata, browser);
         }
         break;
       }
@@ -204,7 +277,17 @@ SessionStore.prototype = {
         // point without notice; therefore, we must synchronously write out any
         // pending save state to ensure that this data does not get lost.
         log("application-background");
+        // Tab events dispatched immediately before the application was backgrounded
+        // might actually arrive after this point, therefore save them without delay.
+        this._interval = 0;
+        this._minSaveDelay = MINIMUM_SAVE_DELAY_BACKGROUND; // A small delay allows successive tab events to be batched together.
         this.flushPendingState();
+        break;
+      case "application-foreground":
+        // Reset minimum interval between session store writes back to default.
+        log("application-foreground");
+        this._interval = Services.prefs.getIntPref("browser.sessionstore.interval");
+        this._minSaveDelay = MINIMUM_SAVE_DELAY;
         break;
       case "ClosedTabs:StartNotifications":
         this._notifyClosedTabs = true;
@@ -275,13 +358,43 @@ SessionStore.prototype = {
         break;
       }
       case "load": {
-        // Handle restoring the text data into the content and frames. We wait
-        // until the main content and all frames are loaded before trying to
-        // restore the text data.
         let browser = aEvent.currentTarget;
+
+        // Skip subframe loads.
+        if (browser.contentDocument !== aEvent.originalTarget) {
+          return;
+        }
+
+        // Handle restoring the text data into the content and frames.
+        // We wait until the main content and all frames are loaded
+        // before trying to restore this data.
         log("load for tab " + window.BrowserApp.getTabForBrowser(browser).id);
-        if (browser.__SS_restore_text_data) {
+        if (browser.__SS_restoreDataOnLoad) {
+          delete browser.__SS_restoreDataOnLoad;
           this._restoreTextData(browser.__SS_data.formdata, browser);
+        }
+        break;
+      }
+      case "pageshow": {
+        let browser = aEvent.currentTarget;
+
+        // Skip subframe pageshows.
+        if (browser.contentDocument !== aEvent.originalTarget) {
+          return;
+        }
+
+        // Restoring the scroll position needs to happen after the zoom level has been
+        // restored, which is done by the MobileViewportManager either on first paint
+        // or on load, whichever comes first.
+        // In the latter case, our load handler runs before the MVM's one, which is the
+        // wrong way around, so we have to use a later event instead.
+        log("pageshow for tab " + window.BrowserApp.getTabForBrowser(browser).id);
+        if (browser.__SS_restoreDataOnPageshow) {
+          delete browser.__SS_restoreDataOnPageshow;
+          this._restoreScrollPosition(browser.__SS_data.scrolldata, browser);
+        } else {
+          // We're not restoring, capture the initial scroll position on pageshow.
+          this.onTabScroll(window, browser);
         }
         break;
       }
@@ -291,6 +404,22 @@ SessionStore.prototype = {
         let browser = aEvent.currentTarget;
         log("TabInput for tab " + window.BrowserApp.getTabForBrowser(browser).id);
         this.onTabInput(window, browser);
+        break;
+      }
+      case "resize":
+      case "scroll": {
+        let browser = aEvent.currentTarget;
+        // Duplicated logging check to avoid calling getTabForBrowser on each scroll event.
+        if (loggingEnabled) {
+          log(aEvent.type + " for tab " + window.BrowserApp.getTabForBrowser(browser).id);
+        }
+        if (!this._scrollSavePending) {
+          this._scrollSavePending =
+            window.setTimeout(() => {
+              this._scrollSavePending = null;
+              this.onTabScroll(window, browser);
+            }, 500);
+        }
         break;
       }
     }
@@ -303,7 +432,7 @@ SessionStore.prototype = {
     }
 
     // Ignore non-browser windows and windows opened while shutting down
-    if (aWindow.document.documentElement.getAttribute("windowtype") != "navigator:browser") {
+    if (aWindow.document.documentElement.getAttribute("windowtype") != "navigator:browser" || this._loadState == STATE_QUITTING) {
       return;
     }
 
@@ -369,10 +498,18 @@ SessionStore.prototype = {
     // Use load to restore text data
     aBrowser.addEventListener("load", this, true);
 
+    // Gecko might set the initial zoom level after the JS "load" event,
+    // so we have to restore zoom and scroll position after that.
+    aBrowser.addEventListener("pageshow", this, true);
+
     // Use a combination of events to watch for text data changes
     aBrowser.addEventListener("change", this, true);
     aBrowser.addEventListener("input", this, true);
     aBrowser.addEventListener("DOMAutoComplete", this, true);
+
+    // Record the current scroll position and zoom level.
+    aBrowser.addEventListener("scroll", this, true);
+    aBrowser.addEventListener("resize", this, true);
 
     log("onTabAdd() ran for tab " + aWindow.BrowserApp.getTabForBrowser(aBrowser).id +
         ", aNoNotification = " + aNoNotification);
@@ -386,21 +523,17 @@ SessionStore.prototype = {
     // Cleanup event listeners
     aBrowser.removeEventListener("DOMTitleChanged", this, true);
     aBrowser.removeEventListener("load", this, true);
+    aBrowser.removeEventListener("pageshow", this, true);
     aBrowser.removeEventListener("change", this, true);
     aBrowser.removeEventListener("input", this, true);
     aBrowser.removeEventListener("DOMAutoComplete", this, true);
-
-    let tabId = aWindow.BrowserApp.getTabForBrowser(aBrowser).id;
-
-    // If this browser is being restored, skip any session save activity
-    if (aBrowser.__SS_restore) {
-      log("onTabRemove() ran for zombie tab " + tabId + ", aNoNotification = " + aNoNotification);
-      return;
-    }
+    aBrowser.removeEventListener("scroll", this, true);
+    aBrowser.removeEventListener("resize", this, true);
 
     delete aBrowser.__SS_data;
 
-    log("onTabRemove() ran for tab " + tabId + ", aNoNotification = " + aNoNotification);
+    log("onTabRemove() ran for tab " + aWindow.BrowserApp.getTabForBrowser(aBrowser).id +
+        ", aNoNotification = " + aNoNotification);
     if (!aNoNotification) {
       this.saveStateDelayed();
     }
@@ -436,8 +569,9 @@ SessionStore.prototype = {
   },
 
   onTabLoad: function ss_onTabLoad(aWindow, aBrowser) {
-    // If this browser is being restored, skip any session save activity
-    if (aBrowser.__SS_restore) {
+    // If this browser belongs to a zombie tab or the initial restore hasn't yet finished,
+    // skip any session save activity.
+    if (aBrowser.__SS_restore || !this._startupRestoreFinished || aBrowser.__SS_restoreReloadPending) {
       return;
     }
 
@@ -467,17 +601,20 @@ SessionStore.prototype = {
     let data = { entries: entries, index: index };
 
     let formdata;
+    let scrolldata;
     if (aBrowser.__SS_data) {
       formdata = aBrowser.__SS_data.formdata;
+      scrolldata = aBrowser.__SS_data.scrolldata;
     }
     delete aBrowser.__SS_data;
 
     this._collectTabData(aWindow, aBrowser, data);
-    if (aBrowser.__SS_restore_text_data) {
-      // If the tab has been freshly restored and the "load" event
-      // hasn't yet fired, we need to restore any form data that
-      // might have been present.
+    if (aBrowser.__SS_restoreDataOnLoad || aBrowser.__SS_restoreDataOnPageshow) {
+      // If the tab has been freshly restored and the "load" or "pageshow"
+      // events haven't yet fired, we need to preserve any form data and
+      // scroll positions that might have been present.
       aBrowser.__SS_data.formdata = formdata;
+      aBrowser.__SS_data.scrolldata = scrolldata;
     } else {
       // When navigating via the forward/back buttons, Gecko restores
       // the form data all by itself and doesn't invoke any input events.
@@ -528,8 +665,9 @@ SessionStore.prototype = {
   },
 
   onTabInput: function ss_onTabInput(aWindow, aBrowser) {
-    // If this browser is being restored, skip any session save activity
-    if (aBrowser.__SS_restore) {
+    // If this browser belongs to a zombie tab or the initial restore hasn't yet finished,
+    // skip any session save activity.
+    if (aBrowser.__SS_restore || !this._startupRestoreFinished || aBrowser.__SS_restoreReloadPending) {
       return;
     }
 
@@ -579,13 +717,93 @@ SessionStore.prototype = {
     }
   },
 
+  onTabScroll: function ss_onTabScroll(aWindow, aBrowser) {
+    // If we've been called directly, cancel any pending timeouts.
+    if (this._scrollSavePending) {
+      aWindow.clearTimeout(this._scrollSavePending);
+      this._scrollSavePending = null;
+      log("onTabScroll() clearing pending timeout");
+    }
+
+    // If this browser belongs to a zombie tab or the initial restore hasn't yet finished,
+    // skip any session save activity.
+    if (aBrowser.__SS_restore || !this._startupRestoreFinished || aBrowser.__SS_restoreReloadPending) {
+      return;
+    }
+
+    // Don't bother trying to save scroll positions if we don't have history yet.
+    let data = aBrowser.__SS_data;
+    if (!data || data.entries.length == 0) {
+      return;
+    }
+
+    // Neither bother if we're yet to restore the previous scroll position.
+    if (aBrowser.__SS_restoreDataOnLoad || aBrowser.__SS_restoreDataOnPageshow) {
+      return;
+    }
+
+    // Start with storing the main content.
+    let content = aBrowser.contentWindow;
+
+    // Store the main content.
+    let scrolldata = ScrollPosition.collect(content) || {};
+
+    // Loop over direct child frames, and store the scroll positions.
+    let children = [];
+    for (let i = 0; i < content.frames.length; i++) {
+      let frame = content.frames[i];
+
+      let result = ScrollPosition.collect(frame);
+      if (result && Object.keys(result).length) {
+        children[i] = result;
+      }
+    }
+
+    // If any frame had scroll positions, add them to the main scroll data.
+    if (children.length) {
+      scrolldata.children = children;
+    }
+
+    // Save the current document resolution.
+    let zoom = { value: 1 };
+    content.QueryInterface(Ci.nsIInterfaceRequestor).getInterface(
+      Ci.nsIDOMWindowUtils).getResolution(zoom);
+    scrolldata.zoom = {};
+    scrolldata.zoom.resolution = zoom.value;
+    log("onTabScroll() zoom level: " + zoom.value);
+
+    // Save some data that'll help in adjusting the zoom level
+    // when restoring in a different screen orientation.
+    scrolldata.zoom.displaySize = this._getContentViewerSize(content);
+    log("onTabScroll() displayWidth: " + scrolldata.zoom.displaySize.width);
+
+    // Save zoom and scroll data.
+    data.scrolldata = scrolldata;
+    log("onTabScroll() ran for tab " + aWindow.BrowserApp.getTabForBrowser(aBrowser).id);
+    let evt = new Event("SSTabScrollCaptured", {"bubbles":true, "cancelable":false});
+    aBrowser.dispatchEvent(evt);
+    this.saveStateDelayed();
+  },
+
+  _getContentViewerSize: function ss_getContentViewerSize(aWindow) {
+    let displaySize = {};
+    let width = {}, height = {};
+    aWindow.QueryInterface(Ci.nsIInterfaceRequestor).getInterface(
+      Ci.nsIDOMWindowUtils).getContentViewerSize(width, height);
+
+    displaySize.width = width.value;
+    displaySize.height = height.value;
+
+    return displaySize;
+  },
+
   saveStateDelayed: function ss_saveStateDelayed() {
     if (!this._saveTimer) {
       // Interval until the next disk operation is allowed
-      let minimalDelay = this._lastSaveTime + this._interval - Date.now();
+      let currentDelay = this._lastSaveTime + this._interval - Date.now();
 
       // If we have to wait, set a timer, otherwise saveState directly
-      let delay = Math.max(minimalDelay, 2000);
+      let delay = Math.max(currentDelay, this._minSaveDelay);
       if (delay > 0) {
         this._pendingWrite++;
         this._saveTimer = Cc["@mozilla.org/timer;1"].createInstance(Ci.nsITimer);
@@ -596,8 +814,9 @@ SessionStore.prototype = {
         log("saveStateDelayed() no delay");
         this.saveState();
       }
+    } else {
+      log("saveStateDelayed() timer already running, taking no action");
     }
-    log("saveStateDelayed() timer already running, taking no action");
   },
 
   saveState: function ss_saveState() {
@@ -662,7 +881,7 @@ SessionStore.prototype = {
     } else {
       log("_saveState() writing empty normal data");
     }
-    this._writeFile(this._sessionFile, normalData, aAsync);
+    this._writeFile(this._sessionFile, this._sessionFileTemp, normalData, aAsync);
 
     // If we have private data, send it to Java; otherwise, send null to
     // indicate that there is no private data
@@ -746,10 +965,11 @@ SessionStore.prototype = {
    * Writes the session state to a disk file, while doing some telemetry and notification
    * bookkeeping.
    * @param aFile nsIFile used for saving the session
+   * @param aFileTemp nsIFile used as a temporary file in writing the data
    * @param aData JSON session state
    * @param aAsync boolelan used to determine the method of saving the state
    */
-  _writeFile: function ss_writeFile(aFile, aData, aAsync) {
+  _writeFile: function ss_writeFile(aFile, aFileTemp, aData, aAsync) {
     TelemetryStopwatch.start("FX_SESSION_RESTORE_SERIALIZE_DATA_MS");
     let state = JSON.stringify(aData);
     TelemetryStopwatch.finish("FX_SESSION_RESTORE_SERIALIZE_DATA_MS");
@@ -763,7 +983,7 @@ SessionStore.prototype = {
 
     log("_writeFile(aAsync = " + aAsync + "), _pendingWrite = " + this._pendingWrite);
     let pendingWrite = this._pendingWrite;
-    this._write(aFile, buffer, aAsync).then(() => {
+    this._write(aFile, aFileTemp, buffer, aAsync).then(() => {
       let stopWriteMs = Cu.now();
 
       // Make sure this._pendingWrite is the same value it was before we
@@ -785,23 +1005,27 @@ SessionStore.prototype = {
   /**
    * Writes the session state to a disk file, using async or sync methods
    * @param aFile nsIFile used for saving the session
+   * @param aFileTemp nsIFile used as a temporary file in writing the data
    * @param aBuffer UTF-8 encoded ArrayBuffer of the session state
    * @param aAsync boolelan used to determine the method of saving the state
    * @return Promise that resolves when the file has been written
    */
-  _write: function ss_write(aFile, aBuffer, aAsync) {
+  _write: function ss_write(aFile, aFileTemp, aBuffer, aAsync) {
     // Use async file writer and just return it's promise
     if (aAsync) {
       log("_write() writing asynchronously");
-      return OS.File.writeAtomic(aFile.path, aBuffer, { tmpPath: aFile.path + ".tmp" });
+      return OS.File.writeAtomic(aFile.path, aBuffer, { tmpPath: aFileTemp.path });
     }
 
     // Convert buffer to an encoded string and sync write to disk
     let bytes = String.fromCharCode.apply(null, new Uint16Array(aBuffer));
     let stream = Cc["@mozilla.org/network/file-output-stream;1"].createInstance(Ci.nsIFileOutputStream);
-    stream.init(aFile, 0x02 | 0x08 | 0x20, 0o666, 0);
+    stream.init(aFileTemp, 0x02 | 0x08 | 0x20, 0o666, 0);
     stream.write(bytes, bytes.length);
     stream.close();
+    // Mimic writeAtomic behaviour when tmpPath is set and write
+    // to a temp file which is then renamed at the end.
+    aFileTemp.renameTo(null, aFile.leafName);
     log("_write() writing synchronously");
 
     // Return a resolved promise to make the caller happy
@@ -1120,9 +1344,17 @@ SessionStore.prototype = {
     }
     this._restoreHistory(aTabData, aBrowser.sessionHistory);
 
-    // Restoring the text data requires waiting for the content to load. So
-    // we set a flag and delay this until the "load" event.
-    aBrowser.__SS_restore_text_data = true;
+    // Various bits of state can only be restored if page loading has progressed far enough:
+    // The MobileViewportManager needs to be told as early as possible about
+    // our desired zoom level so it can take it into account during the
+    // initial document resolution calculation.
+    aBrowser.__SS_restoreDataOnLocationChange = true;
+    // Restoring saved form data requires the input fields to be available,
+    // so we have to wait for the content to load.
+    aBrowser.__SS_restoreDataOnLoad = true;
+    // Restoring the scroll position depends on the document resolution having been set,
+    // which is only guaranteed to have happened *after* we receive the load event.
+    aBrowser.__SS_restoreDataOnPageshow = true;
   },
 
   /**
@@ -1167,7 +1399,34 @@ SessionStore.prototype = {
       log("_restoreTextData()");
       FormData.restoreTree(aBrowser.contentWindow, aFormData);
     }
-    delete aBrowser.__SS_restore_text_data;
+  },
+
+  /**
+   * Restores the zoom level of the window. This needs to be called before
+   * first paint/load (whichever comes first) to take any effect.
+   */
+  _restoreZoom: function ss_restoreZoom(aScrollData, aBrowser) {
+    if (aScrollData && aScrollData.zoom && aScrollData.zoom.displaySize) {
+      log("_restoreZoom(), resolution: " + aScrollData.zoom.resolution +
+          ", old displayWidth: " + aScrollData.zoom.displaySize.width);
+
+      let utils = aBrowser.contentWindow.QueryInterface(
+        Ci.nsIInterfaceRequestor).getInterface(Ci.nsIDOMWindowUtils);
+      // Restore zoom level.
+      utils.setRestoreResolution(aScrollData.zoom.resolution,
+                                 aScrollData.zoom.displaySize.width,
+                                 aScrollData.zoom.displaySize.height);
+    }
+  },
+
+  /**
+  * Takes serialized scroll positions and restores them into the given browser.
+  */
+  _restoreScrollPosition: function ss_restoreScrollPosition(aScrollData, aBrowser) {
+    if (aScrollData) {
+      log("_restoreScrollPosition()");
+      ScrollPosition.restoreTree(aBrowser.contentWindow, aScrollData);
+    }
   },
 
   getBrowserState: function ss_getBrowserState() {
@@ -1228,6 +1487,13 @@ SessionStore.prototype = {
 
       if (window.BrowserApp.selectedTab == tab) {
         this._restoreTab(tabData, tab.browser);
+
+        // We can now lift the general ban on tab data capturing,
+        // but we still need to protect the foreground tab until we're
+        // sure it's actually reloading after history restoring has finished.
+        tab.browser.__SS_restoreReloadPending = true;
+        this._startupRestoreFinished = true;
+        log("startupRestoreFinished = true");
 
         delete tab.browser.__SS_restore;
         tab.browser.removeAttribute("pending");
@@ -1396,7 +1662,12 @@ SessionStore.prototype = {
     delete this._windows[aWindow.__SSID];
     delete aWindow.__SSID;
 
-    this.saveState();
+    if (this._loadState == STATE_RUNNING) {
+      // Save the purged state immediately
+      this.saveState();
+    } else if (this._loadState == STATE_QUITTING) {
+      this.saveStateDelayed();
+    }
   }
 
 };

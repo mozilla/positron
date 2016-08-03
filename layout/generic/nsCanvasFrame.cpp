@@ -299,8 +299,8 @@ nsDisplayCanvasBackgroundImage::Paint(nsDisplayListBuilder* aBuilder,
     // to snap for this context, because we checked HasNonIntegerTranslation
     // above.
     destRect.Round();
-    RefPtr<DrawTarget> dt = static_cast<DrawTarget*>(
-      Frame()->Properties().Get(nsIFrame::CachedBackgroundImageDT()));
+    RefPtr<DrawTarget> dt = 
+      Frame()->Properties().Get(nsIFrame::CachedBackgroundImageDT());
     DrawTarget* destDT = dest->GetDrawTarget();
     if (dt) {
       BlitSurface(destDT, destRect, dt);
@@ -311,7 +311,7 @@ nsDisplayCanvasBackgroundImage::Paint(nsDisplayListBuilder* aBuilder,
                                                  ceil(destRect.height)),
                                          SurfaceFormat::B8G8R8A8);
     if (dt && dt->IsValid()) {
-      RefPtr<gfxContext> ctx = gfxContext::ForDrawTarget(dt);
+      RefPtr<gfxContext> ctx = gfxContext::CreateOrNull(dt);
       MOZ_ASSERT(ctx); // already checked draw target above
       ctx->SetMatrix(ctx->CurrentMatrix().Translate(-destRect.x, -destRect.y));
       nsRenderingContext context(ctx);

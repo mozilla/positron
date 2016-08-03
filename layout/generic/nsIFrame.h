@@ -863,7 +863,7 @@ public:
 
 #define NS_DECLARE_FRAME_PROPERTY_WITH_DTOR(prop, type, dtor)             \
   static const mozilla::FramePropertyDescriptor<type>* prop() {           \
-    /* Use of MOZ_CONSTEXPR caused startup crashes with MSVC2015u1 PGO. */\
+    /* Use of constexpr caused startup crashes with MSVC2015u1 PGO. */    \
     static const auto descriptor =                                        \
       mozilla::FramePropertyDescriptor<type>::NewWithDestructor<dtor>();  \
     return &descriptor;                                                   \
@@ -872,7 +872,7 @@ public:
 // Don't use this unless you really know what you're doing!
 #define NS_DECLARE_FRAME_PROPERTY_WITH_FRAME_IN_DTOR(prop, type, dtor)    \
   static const mozilla::FramePropertyDescriptor<type>* prop() {           \
-    /* Use of MOZ_CONSTEXPR caused startup crashes with MSVC2015u1 PGO. */\
+    /* Use of constexpr caused startup crashes with MSVC2015u1 PGO. */    \
     static const auto descriptor = mozilla::                              \
       FramePropertyDescriptor<type>::NewWithDestructorWithFrame<dtor>();  \
     return &descriptor;                                                   \
@@ -880,7 +880,7 @@ public:
 
 #define NS_DECLARE_FRAME_PROPERTY_WITHOUT_DTOR(prop, type)                \
   static const mozilla::FramePropertyDescriptor<type>* prop() {           \
-    /* Use of MOZ_CONSTEXPR caused startup crashes with MSVC2015u1 PGO. */\
+    /* Use of constexpr caused startup crashes with MSVC2015u1 PGO. */    \
     static const auto descriptor =                                        \
       mozilla::FramePropertyDescriptor<type>::NewWithoutDestructor();     \
     return &descriptor;                                                   \
@@ -936,7 +936,6 @@ public:
   // or height), imposed by its flex container.
   NS_DECLARE_FRAME_PROPERTY_SMALL_VALUE(FlexItemMainSizeOverride, nscoord)
 
-  NS_DECLARE_FRAME_PROPERTY_RELEASABLE(CachedBackgroundImage, gfxASurface)
   NS_DECLARE_FRAME_PROPERTY_RELEASABLE(CachedBackgroundImageDT, DrawTarget)
 
   NS_DECLARE_FRAME_PROPERTY_DELETABLE(InvalidationRect, nsRect)
@@ -944,6 +943,9 @@ public:
   NS_DECLARE_FRAME_PROPERTY_SMALL_VALUE(RefusedAsyncAnimationProperty, bool)
 
   NS_DECLARE_FRAME_PROPERTY_SMALL_VALUE(FragStretchBSizeProperty, nscoord)
+
+  NS_DECLARE_FRAME_PROPERTY_SMALL_VALUE(IBaselinePadProperty, nscoord)
+  NS_DECLARE_FRAME_PROPERTY_SMALL_VALUE(BBaselinePadProperty, nscoord)
 
   NS_DECLARE_FRAME_PROPERTY_WITH_DTOR(GenConProperty, ContentArray,
                                       DestroyContentArray)
@@ -1359,13 +1361,14 @@ public:
   /**
    * Returns true if this frame is transformed (e.g. has CSS or SVG transforms)
    * or if its parent is an SVG frame that has children-only transforms (e.g.
-   * an SVG viewBox attribute).
+   * an SVG viewBox attribute) or if its transform-style is preserve-3d or
+   * the frame has transform animations.
    */
   bool IsTransformed() const;
 
   /**
-   * Returns true if the frame is translucent for the purposes of creating a
-   * stacking context.
+   * Returns true if the frame is translucent or the frame has opacity
+   * animations for the purposes of creating a stacking context.
    */
   bool HasOpacity() const
   {
@@ -1428,10 +1431,13 @@ public:
 
   bool ChildrenHavePerspective() const;
 
-  // Calculate the overflow size of all child frames, taking preserve-3d into account
-  void ComputePreserve3DChildrenOverflow(nsOverflowAreas& aOverflowAreas, const nsRect& aBounds);
+  /**
+   * Includes the overflow area of all descendants that participate in the current
+   * 3d context into aOverflowAreas.
+   */
+  void ComputePreserve3DChildrenOverflow(nsOverflowAreas& aOverflowAreas);
 
-  void RecomputePerspectiveChildrenOverflow(const nsIFrame* aStartFrame, const nsRect* aBounds);
+  void RecomputePerspectiveChildrenOverflow(const nsIFrame* aStartFrame);
 
   /**
    * Returns the number of ancestors between this and the root of our frame tree
@@ -1539,6 +1545,14 @@ public:
    */
   virtual nsresult  GetPointFromOffset(int32_t                  inOffset,
                                        nsPoint*                 outPoint) = 0;
+
+  /**
+   * Get a list of character rects in a given range.
+   * This is similar version of GetPointFromOffset.
+   */
+  virtual nsresult  GetCharacterRectsInRange(int32_t aInOffset,
+                                             int32_t aLength,
+                                             nsTArray<nsRect>& aRects) = 0;
   
   /**
    * Get the child frame of this frame which contains the given
@@ -3247,9 +3261,14 @@ public:
   virtual mozilla::dom::Element*
   GetPseudoElement(mozilla::CSSPseudoElementType aType);
 
-  bool BackfaceIsHidden() {
+  bool BackfaceIsHidden() const {
     return StyleDisplay()->BackfaceIsHidden();
   }
+
+  /**
+   * Returns true if the frame is scrolled out of view.
+   */
+  bool IsScrolledOutOfView();
 
 protected:
   // Members
@@ -3276,9 +3295,7 @@ private:
                                       DestroyPaintedPresShellList)
   
   nsTArray<nsWeakPtr>* PaintedPresShellList() {
-    nsTArray<nsWeakPtr>* list = static_cast<nsTArray<nsWeakPtr>*>(
-      Properties().Get(PaintedPresShellsProperty())
-    );
+    nsTArray<nsWeakPtr>* list = Properties().Get(PaintedPresShellsProperty());
     
     if (!list) {
       list = new nsTArray<nsWeakPtr>();
@@ -3462,6 +3479,11 @@ public:
     nsAutoCString t;
     ListTag(t, aFrame);
     fputs(t.get(), out);
+  }
+  static void ListTag(FILE* out, const nsFrameList& aFrameList) {
+    for (nsIFrame* frame : aFrameList) {
+      ListTag(out, frame);
+    }
   }
   void ListTag(nsACString& aTo) const;
   nsAutoCString ListTag() const {

@@ -124,7 +124,7 @@ HTMLFieldSetElement::MatchListedElements(nsIContent* aContent, int32_t aNamespac
                                          nsIAtom* aAtom, void* aData)
 {
   nsCOMPtr<nsIFormControl> formControl = do_QueryInterface(aContent);
-  return formControl && formControl->GetType() != NS_FORM_LABEL;
+  return formControl;
 }
 
 NS_IMETHODIMP
@@ -154,7 +154,7 @@ HTMLFieldSetElement::Reset()
 }
 
 NS_IMETHODIMP
-HTMLFieldSetElement::SubmitNamesValues(nsFormSubmission* aFormSubmission)
+HTMLFieldSetElement::SubmitNamesValues(HTMLFormSubmission* aFormSubmission)
 {
   return NS_OK;
 }

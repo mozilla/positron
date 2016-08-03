@@ -134,7 +134,7 @@ public:
 // This is a nsICancelableRunnable because we can dispatch it to Workers and
 // those can be shut down at any time, and in these cases, Cancel() is called
 // instead of Run().
-class nsTimerEvent : public CancelableRunnable
+class nsTimerEvent final : public CancelableRunnable
 {
 public:
   NS_IMETHOD Run() override;
@@ -153,8 +153,6 @@ public:
     : mTimer()
     , mGeneration(0)
   {
-    MOZ_COUNT_CTOR(nsTimerEvent);
-
     // Note: We override operator new for this class, and the override is
     // fallible!
     sAllocatorUsers++;
@@ -188,10 +186,12 @@ public:
   }
 
 private:
+  nsTimerEvent(const nsTimerEvent&) = delete;
+  nsTimerEvent& operator=(const nsTimerEvent&) = delete;
+  nsTimerEvent& operator=(const nsTimerEvent&&) = delete;
+
   ~nsTimerEvent()
   {
-    MOZ_COUNT_DTOR(nsTimerEvent);
-
     MOZ_ASSERT(!sCanDeleteAllocator || sAllocatorUsers > 0,
                "This will result in us attempting to deallocate the nsTimerEvent allocator twice");
     sAllocatorUsers--;

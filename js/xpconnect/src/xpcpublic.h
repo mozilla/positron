@@ -21,9 +21,11 @@
 #include "nsStringGlue.h"
 #include "nsTArray.h"
 #include "mozilla/dom/JSSlots.h"
+#include "mozilla/fallible.h"
 #include "nsMathUtils.h"
 #include "nsStringBuffer.h"
 #include "mozilla/dom/BindingDeclarations.h"
+#include "mozilla/Preferences.h"
 
 class nsGlobalWindow;
 class nsIPrincipal;
@@ -312,14 +314,22 @@ inline bool StringToJsval(JSContext* cx, nsAString& str, JS::MutableHandleValue 
 inline bool
 NonVoidStringToJsval(JSContext* cx, const nsAString& str, JS::MutableHandleValue rval)
 {
-    nsString mutableCopy(str);
+    nsString mutableCopy;
+    if (!mutableCopy.Assign(str, mozilla::fallible)) {
+        JS_ReportOutOfMemory(cx);
+        return false;
+    }
     return NonVoidStringToJsval(cx, mutableCopy, rval);
 }
 
 inline bool
 StringToJsval(JSContext* cx, const nsAString& str, JS::MutableHandleValue rval)
 {
-    nsString mutableCopy(str);
+    nsString mutableCopy;
+    if (!mutableCopy.Assign(str, mozilla::fallible)) {
+        JS_ReportOutOfMemory(cx);
+        return false;
+    }
     return StringToJsval(cx, mutableCopy, rval);
 }
 
@@ -494,6 +504,9 @@ bool
 SetAddonInterposition(const nsACString& addonId, nsIAddonInterposition* interposition);
 
 bool
+AllowCPOWsInAddon(const nsACString& addonId, bool allow);
+
+bool
 ExtraWarningsForSystemJS();
 
 class ErrorReport {
@@ -573,6 +586,30 @@ GetJSRuntime();
 void AddGCCallback(xpcGCCallback cb);
 void RemoveGCCallback(xpcGCCallback cb);
 
+inline bool
+AreNonLocalConnectionsDisabled()
+{
+    static int disabledForTest = -1;
+    if (disabledForTest == -1) {
+        char *s = getenv("MOZ_DISABLE_NONLOCAL_CONNECTIONS");
+        if (s) {
+            disabledForTest = *s != '0';
+        } else {
+            disabledForTest = 0;
+        }
+    }
+    return disabledForTest;
+}
+
+inline bool
+IsInAutomation()
+{
+    const char* prefName =
+      "security.turn_off_all_security_so_that_viruses_can_take_over_this_computer";
+    return mozilla::Preferences::GetBool(prefName) &&
+        AreNonLocalConnectionsDisabled();
+}
+
 } // namespace xpc
 
 namespace mozilla {
@@ -583,6 +620,11 @@ namespace dom {
  * chrome or XBL scopes should be exposed.
  */
 bool IsChromeOrXBL(JSContext* cx, JSObject* /* unused */);
+
+/**
+ * Same as IsChromeOrXBL but can be used in worker threads as well.
+ */
+bool ThreadSafeIsChromeOrXBL(JSContext* cx, JSObject* obj);
 
 } // namespace dom
 } // namespace mozilla

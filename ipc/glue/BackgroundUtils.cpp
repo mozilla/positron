@@ -1,3 +1,5 @@
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -75,12 +77,12 @@ PrincipalInfoToPrincipal(const PrincipalInfo& aPrincipalInfo,
         return nullptr;
       }
 
-      if (info.attrs().mAppId == nsIScriptSecurityManager::UNKNOWN_APP_ID) {
-        rv = secMan->GetSimpleCodebasePrincipal(uri, getter_AddRefs(principal));
-      } else {
-        principal = BasePrincipal::CreateCodebasePrincipal(uri, info.attrs());
-        rv = principal ? NS_OK : NS_ERROR_FAILURE;
+      PrincipalOriginAttributes attrs;
+      if (info.attrs().mAppId != nsIScriptSecurityManager::UNKNOWN_APP_ID) {
+        attrs = info.attrs();
       }
+      principal = BasePrincipal::CreateCodebasePrincipal(uri, attrs);
+      rv = principal ? NS_OK : NS_ERROR_FAILURE;
       if (NS_WARN_IF(NS_FAILED(rv))) {
         return nullptr;
       }
@@ -252,6 +254,7 @@ LoadInfoToLoadInfoArgs(nsILoadInfo *aLoadInfo,
       aLoadInfo->GetInnerWindowID(),
       aLoadInfo->GetOuterWindowID(),
       aLoadInfo->GetParentOuterWindowID(),
+      aLoadInfo->GetFrameOuterWindowID(),
       aLoadInfo->GetEnforceSecurity(),
       aLoadInfo->GetInitialSecurityCheckDone(),
       aLoadInfo->GetIsInThirdPartyContext(),
@@ -317,6 +320,7 @@ LoadInfoArgsToLoadInfo(const OptionalLoadInfoArgs& aOptionalLoadInfoArgs,
                           loadInfoArgs.innerWindowID(),
                           loadInfoArgs.outerWindowID(),
                           loadInfoArgs.parentOuterWindowID(),
+                          loadInfoArgs.frameOuterWindowID(),
                           loadInfoArgs.enforceSecurity(),
                           loadInfoArgs.initialSecurityCheckDone(),
                           loadInfoArgs.isInThirdPartyContext(),

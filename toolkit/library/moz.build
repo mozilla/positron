@@ -18,6 +18,7 @@ def Libxul(name):
     DELAYLOAD_DLLS += [
         'comdlg32.dll',
         'dbghelp.dll',
+        'netapi32.dll',
         'PowrProf.dll',
         'psapi.dll',
         'rasapi32.dll',
@@ -126,7 +127,7 @@ if CONFIG['MOZ_JPROF']:
         'jprof',
     ]
 
-if 'gtk' in CONFIG['MOZ_WIDGET_TOOLKIT'] or CONFIG['MOZ_WIDGET_TOOLKIT'] == 'qt' or \
+if 'gtk' in CONFIG['MOZ_WIDGET_TOOLKIT'] or \
         CONFIG['MOZ_TREE_FREETYPE']:
     USE_LIBS += [
         'freetype',
@@ -152,7 +153,8 @@ if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'cocoa':
     OS_LIBS += [
         '-framework OpenGL',
         '-framework SystemConfiguration',
-        '-framework QTKit',
+        '-framework AVFoundation',
+        '-framework CoreMedia',
         '-framework IOKit',
         '-F%s' % CONFIG['MACOS_PRIVATE_FRAMEWORKS_DIR'],
         '-framework CoreUI',
@@ -300,13 +302,6 @@ if 'gtk' in CONFIG['MOZ_WIDGET_TOOLKIT']:
         'gthread-2.0',
     ]
 
-if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'qt':
-    OS_LIBS += CONFIG['XLDFLAGS']
-    OS_LIBS += CONFIG['XLIBS']
-    OS_LIBS += CONFIG['XT_LIBS']
-    OS_LIBS += CONFIG['MOZ_QT_LIBS']
-    OS_LIBS += CONFIG['MOZ_PANGO_LIBS']
-
 if CONFIG['MOZ_ENABLE_STARTUP_NOTIFICATION']:
     OS_LIBS += CONFIG['MOZ_STARTUP_NOTIFICATION_LIBS']
 
@@ -336,6 +331,7 @@ if CONFIG['OS_ARCH'] == 'WINNT':
         'comdlg32',
         'imm32',
         'msimg32',
+        'netapi32',
         'shlwapi',
         'psapi',
         'ws2_32',
@@ -360,9 +356,6 @@ if CONFIG['OS_ARCH'] == 'WINNT':
         OS_LIBS += [
             'oleacc',
         ]
-
-if CONFIG['MOZ_ENABLE_QT']:
-    OS_LIBS += CONFIG['XEXT_LIBS']
 
 if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'windows':
     OS_LIBS += [

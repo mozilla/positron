@@ -8,10 +8,24 @@ var Cu = Components.utils;
 var Cr = Components.results;
 var CC = Components.Constructor;
 
+// Populate AppInfo before anything (like the shared loader) accesses
+// System.appinfo, which is a lazy getter.
+const _appInfo = {};
+Cu.import("resource://testing-common/AppInfo.jsm", _appInfo);
+_appInfo.updateAppInfo({
+  ID: "devtools@tests.mozilla.org",
+  name: "devtools-tests",
+  version: "1",
+  platformVersion: "42",
+  crashReporter: true,
+});
+
 const { require, loader } = Cu.import("resource://devtools/shared/Loader.jsm", {});
 const { worker } = Cu.import("resource://devtools/shared/worker/loader.js", {});
 const promise = require("promise");
 const { Task } = require("devtools/shared/task");
+const { console } = require("resource://gre/modules/Console.jsm");
+const { NetUtil } = require("resource://gre/modules/NetUtil.jsm");
 
 const Services = require("Services");
 // Always log packets when running tests. runxpcshelltests.py will throw
@@ -24,7 +38,7 @@ const DevToolsUtils = require("devtools/shared/DevToolsUtils");
 const { DebuggerServer } = require("devtools/server/main");
 const { DebuggerServer: WorkerDebuggerServer } = worker.require("devtools/server/main");
 const { DebuggerClient, ObjectClient } = require("devtools/shared/client/main");
-const { MemoryFront } = require("devtools/server/actors/memory");
+const { MemoryFront } = require("devtools/shared/fronts/memory");
 
 const { addDebuggerToGlobal } = Cu.import("resource://gre/modules/jsdebugger.jsm", {});
 
@@ -33,6 +47,21 @@ const systemPrincipal = Cc["@mozilla.org/systemprincipal;1"].createInstance(Ci.n
 var loadSubScript = Cc[
   "@mozilla.org/moz/jssubscript-loader;1"
 ].getService(Ci.mozIJSSubScriptLoader).loadSubScript;
+
+/**
+ * Initializes any test that needs to work with add-ons.
+ */
+function startupAddonsManager() {
+  // Create a directory for extensions.
+  const profileDir = do_get_profile().clone();
+  profileDir.append("extensions");
+
+  const internalManager = Cc["@mozilla.org/addons/integration;1"]
+    .getService(Ci.nsIObserver)
+    .QueryInterface(Ci.nsITimerCallback);
+
+  internalManager.observe(null, "addons-startup", null);
+}
 
 /**
  * Create a `run_test` function that runs the given generator in a task after
@@ -207,19 +236,6 @@ function setBreakpoint(sourceClient, location) {
 function dumpn(msg) {
   dump("DBG-TEST: " + msg + "\n");
 }
-
-function tryImport(url) {
-  try {
-    Cu.import(url);
-  } catch (e) {
-    dumpn("Error importing " + url);
-    dumpn(DevToolsUtils.safeErrorString(e));
-    throw e;
-  }
-}
-
-tryImport("resource://devtools/shared/Loader.jsm");
-tryImport("resource://gre/modules/Console.jsm");
 
 function testExceptionHook(ex) {
   try {
@@ -464,8 +480,6 @@ function getFilePath(aName, aAllowMissing = false, aUsePlatformPathSeparator = f
 
   return path;
 }
-
-Cu.import("resource://gre/modules/NetUtil.jsm");
 
 /**
  * Returns the full text contents of the given file.

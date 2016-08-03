@@ -141,7 +141,7 @@ pref("browser.sessionhistory.bfcacheIgnoreMemoryPressure", false);
 pref("browser.sessionstore.resume_session_once", false);
 pref("browser.sessionstore.resume_from_crash", true);
 pref("browser.sessionstore.interval", 10000); // milliseconds
-pref("browser.sessionstore.max_tabs_undo", 5);
+pref("browser.sessionstore.max_tabs_undo", 10);
 pref("browser.sessionstore.max_resumed_crashes", 1);
 pref("browser.sessionstore.privacy_level", 0); // saving data: 0 = all, 1 = unencrypted sites, 2 = never
 pref("browser.sessionstore.debug_logging", false);
@@ -235,35 +235,6 @@ pref("extensions.getAddons.getWithPerformance.url", "https://services.addons.moz
 /* preference for the locale picker */
 pref("extensions.getLocales.get.url", "");
 pref("extensions.compatability.locales.buildid", "0");
-
-/* blocklist preferences */
-pref("extensions.blocklist.enabled", true);
-// OneCRL freshness checking depends on this value, so if you change it,
-// please also update security.onecrl.maximum_staleness_in_seconds.
-pref("extensions.blocklist.interval", 86400);
-pref("extensions.blocklist.url", "https://blocklist.addons.mozilla.org/blocklist/3/%APP_ID%/%APP_VERSION%/%PRODUCT%/%BUILD_ID%/%BUILD_TARGET%/%LOCALE%/%CHANNEL%/%OS_VERSION%/%DISTRIBUTION%/%DISTRIBUTION_VERSION%/%PING_COUNT%/%TOTAL_PING_COUNT%/%DAYS_SINCE_LAST_PING%/");
-pref("extensions.blocklist.detailsURL", "https://www.mozilla.com/%LOCALE%/blocklist/");
-
-// Kinto blocklist preferences
-pref("services.kinto.base", "https://firefox.settings.services.mozilla.com/v1");
-pref("services.kinto.changes.path", "/buckets/monitor/collections/changes/records");
-pref("services.kinto.bucket", "blocklists");
-pref("services.kinto.onecrl.collection", "certificates");
-pref("services.kinto.onecrl.checked", 0);
-pref("services.kinto.addons.collection", "addons");
-pref("services.kinto.addons.checked", 0);
-pref("services.kinto.plugins.collection", "plugins");
-pref("services.kinto.plugins.checked", 0);
-pref("services.kinto.gfx.collection", "gfx");
-pref("services.kinto.gfx.checked", 0);
-
-// for now, let's keep kinto update out of the release channel (pending
-// collection signatures)
-#ifdef RELEASE_BUILD
-pref("services.kinto.update_enabled", false);
-#else
-pref("services.kinto.update_enabled", true);
-#endif
 
 /* Don't let XPIProvider install distribution add-ons; we do our own thing on mobile. */
 pref("extensions.installDistroAddons", false);
@@ -499,21 +470,21 @@ pref("plugin.default.state", 1);
 // product URLs
 // The breakpad report server to link to in about:crashes
 pref("breakpad.reportURL", "https://crash-stats.mozilla.com/report/index/");
-pref("app.support.baseURL", "http://support.mozilla.org/1/mobile/%VERSION%/%OS%/%LOCALE%/");
+pref("app.support.baseURL", "https://support.mozilla.org/1/mobile/%VERSION%/%OS%/%LOCALE%/");
 
 // URL for feedback page
 // This should be kept in sync with the "feedback_link" string defined in strings.xml.in
 pref("app.feedbackURL", "https://input.mozilla.org/feedback/android/%VERSION%/%CHANNEL%/?utm_source=feedback-prompt");
 
 pref("app.privacyURL", "https://www.mozilla.org/privacy/firefox/");
-pref("app.creditsURL", "http://www.mozilla.org/credits/");
-pref("app.channelURL", "http://www.mozilla.org/%LOCALE%/firefox/channel/");
+pref("app.creditsURL", "https://www.mozilla.org/credits/");
+pref("app.channelURL", "https://www.mozilla.org/%LOCALE%/firefox/channel/");
 #if MOZ_UPDATE_CHANNEL == aurora
-pref("app.releaseNotesURL", "http://www.mozilla.com/%LOCALE%/mobile/%VERSION%/auroranotes/");
+pref("app.releaseNotesURL", "https://www.mozilla.com/%LOCALE%/mobile/%VERSION%/auroranotes/");
 #elif MOZ_UPDATE_CHANNEL == beta
-pref("app.releaseNotesURL", "http://www.mozilla.com/%LOCALE%/mobile/%VERSION%beta/releasenotes/");
+pref("app.releaseNotesURL", "https://www.mozilla.com/%LOCALE%/mobile/%VERSION%beta/releasenotes/");
 #else
-pref("app.releaseNotesURL", "http://www.mozilla.com/%LOCALE%/mobile/%VERSION%/releasenotes/");
+pref("app.releaseNotesURL", "https://www.mozilla.com/%LOCALE%/mobile/%VERSION%/releasenotes/");
 #endif
 
 pref("app.faqURL", "https://support.mozilla.org/1/mobile/%VERSION%/%OS%/%LOCALE%/faq");
@@ -528,10 +499,6 @@ pref("security.mixed_content.block_active_content", true);
 
 // Enable pinning
 pref("security.cert_pinning.enforcement_level", 1);
-
-// Required blocklist freshness for OneCRL OCSP bypass
-// (default is 1.25x extensions.blocklist.interval, or 30 hours)
-pref("security.onecrl.maximum_staleness_in_seconds", 108000);
 
 // Only fetch OCSP for EV certificates
 pref("security.OCSP.enabled", 2);
@@ -593,9 +560,11 @@ pref("ui.dragThresholdY", 25);
 pref("layers.acceleration.disabled", false);
 pref("layers.async-video.enabled", true);
 
-#ifdef MOZ_ANDROID_APZ
-pref("layers.async-pan-zoom.enabled", true);
-// APZ prefs that are different from B2G
+#ifndef MOZ_ANDROID_APZ
+pref("layers.async-pan-zoom.enabled", false);
+#endif
+
+pref("apz.content_response_timeout", 600);
 pref("apz.allow_immediate_handoff", false);
 pref("apz.touch_start_tolerance", "0.06");
 pref("apz.axis_lock.breakout_angle", "0.7853982");    // PI / 4 (45 degrees)
@@ -612,14 +581,9 @@ pref("apz.fling_stopped_threshold", "0.0");
 pref("apz.max_velocity_inches_per_ms", "0.07");
 pref("apz.fling_accel_interval_ms", 750);
 pref("apz.overscroll.enabled", true);
-#endif
 
 pref("layers.progressive-paint", true);
-#ifdef NIGHTLY_BUILD
-pref("layers.low-precision-buffer", false);
-#else
 pref("layers.low-precision-buffer", true);
-#endif
 pref("layers.low-precision-resolution", "0.25");
 pref("layers.low-precision-opacity", "1.0");
 // We want to limit layers for two reasons:
@@ -690,7 +654,6 @@ pref("services.push.enabled", false);
 pref("device.camera.enabled", true);
 pref("media.realtime_decoder.enabled", true);
 
-pref("dom.report_all_js_exceptions", true);
 pref("javascript.options.showInConsole", true);
 
 pref("full-screen-api.enabled", true);
@@ -778,10 +741,6 @@ pref("layout.framevisibility.numscrollportwidths", 1);
 pref("layout.framevisibility.numscrollportheights", 1);
 
 pref("layers.enable-tiles", true);
-#ifdef NIGHTLY_BUILD
-pref("layers.tiles.fade-in.enabled", true);
-pref("layers.tiles.fade-in.duration-ms", 250);
-#endif
 
 // Enable the dynamic toolbar
 pref("browser.chrome.dynamictoolbar", true);
@@ -935,7 +894,8 @@ pref("dom.serviceWorkers.openWindow.enabled", true);
 pref("dom.push.debug", false);
 // The upstream autopush endpoint must have the Google API key corresponding to
 // the App's sender ID; we bake this assumption directly into the URL.
-pref("dom.push.serverURL", "https://updates-autopush.stage.mozaws.net/v1/gcm/@MOZ_ANDROID_GCM_SENDERID@");
+pref("dom.push.serverURL", "https://updates.push.services.mozilla.com/v1/gcm/@MOZ_ANDROID_GCM_SENDERID@");
+pref("dom.push.maxRecentMessageIDsPerSubscription", 0);
 
 #ifdef MOZ_ANDROID_GCM
 pref("dom.push.enabled", true);
@@ -956,7 +916,7 @@ pref("identity.sync.tokenserver.uri", "https://token.services.mozilla.com/1.0/sy
 // Enable Presentation API
 pref("dom.presentation.enabled", true);
 pref("dom.presentation.discovery.enabled", true);
+pref("dom.presentation.discovery.legacy.enabled", true); // for TV 2.5 backward capability
 
-// TODO : remove it after landing bug1242874 because now it's the only way to
-// suspend the MediaElement.
-pref("media.useAudioChannelAPI", true);
+pref("dom.audiochannel.audioCompeting", true);
+pref("dom.audiochannel.mediaControl", true);

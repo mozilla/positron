@@ -9,17 +9,18 @@
 define(function (require, exports, module) {
   // ReactJS
   const React = require("devtools/client/shared/vendor/react");
-
   // Dependencies
   const { createFactories, isGrip } = require("./rep-utils");
   const { ObjectBox } = createFactories(require("./object-box"));
   const { Caption } = createFactories(require("./caption"));
-
+  const { PropRep } = createFactories(require("./prop-rep"));
   // Shortcuts
   const { span } = React.DOM;
 
   /**
-   * @template TODO docs
+   * Renders generic grip. Grip is client representation
+   * of remote JS object and is used as an input object
+   * for this rep component.
    */
   const Grip = React.createClass({
     displayName: "Grip",
@@ -29,8 +30,13 @@ define(function (require, exports, module) {
       mode: React.PropTypes.string,
     },
 
-    getTitle: function () {
-      return "";
+    getTitle: function (object) {
+      if (this.props.objectLink) {
+        return this.props.objectLink({
+          object: object
+        }, object.class);
+      }
+      return object.class || "Object";
     },
 
     longPropIterator: function (object) {
@@ -68,7 +74,7 @@ define(function (require, exports, module) {
 
       if (props.length <= max) {
         // There are not enough props yet (or at least, not enough props to
-        // be able to know whether we should print "more..." or not).
+        // be able to know whether we should print "more…" or not).
         // Let's display also empty members and functions.
         props = props.concat(this.getProps(object, max, (t, value) => {
           return !isInterestingProp(t, value);
@@ -77,12 +83,17 @@ define(function (require, exports, module) {
 
       // getProps() can return max+1 properties (it can't return more)
       // to indicate that there is more props than allowed. Remove the last
-      // one and append 'more...' postfix in such case.
+      // one and append 'more…' postfix in such case.
       if (props.length > max) {
         props.pop();
+
+        let objectLink = this.props.objectLink || span;
+
         props.push(Caption({
           key: "more",
-          object: "more...",
+          object: objectLink({
+            object: object
+          }, "more…")
         }));
       } else if (props.length > 0) {
         // Remove the last comma.
@@ -141,71 +152,48 @@ define(function (require, exports, module) {
 
     render: function () {
       let object = this.props.object;
-      let props = this.shortPropIterator(object);
+      let props = (this.props.mode == "long") ?
+        this.longPropIterator(object) :
+        this.shortPropIterator(object);
 
+      let objectLink = this.props.objectLink || span;
       if (this.props.mode == "tiny" || !props.length) {
         return (
           ObjectBox({className: "object"},
-            span({className: "objectTitle"}, this.getTitle(object)),
-            span({className: "objectLeftBrace", role: "presentation"}, "{}")
+            this.getTitle(object),
+            objectLink({
+              className: "objectLeftBrace",
+              role: "presentation",
+              object: object
+            }, "")
           )
         );
       }
 
       return (
         ObjectBox({className: "object"},
-          span({className: "objectTitle"}, this.getTitle(object)),
-          span({className: "objectLeftBrace", role: "presentation"}, "{"),
+          this.getTitle(object),
+          objectLink({
+            className: "objectLeftBrace",
+            role: "presentation",
+            object: object
+          }, " {"),
           props,
-          span({className: "objectRightBrace"}, "}")
+          objectLink({
+            className: "objectRightBrace",
+            role: "presentation",
+            object: object
+          }, "}")
         )
       );
     },
   });
 
-  /**
-   * Property for a grip object.
-   */
-  let PropRep = React.createFactory(React.createClass({
-    displayName: "PropRep",
-
-    propTypes: {
-      name: React.PropTypes.string,
-      equal: React.PropTypes.string,
-      delim: React.PropTypes.string,
-    },
-
-    render: function () {
-      let { Rep } = createFactories(require("./rep"));
-
-      return (
-        span({},
-          span({
-            "className": "nodeName"},
-            this.props.name),
-          span({
-            "className": "objectEqual",
-            role: "presentation"},
-            this.props.equal
-          ),
-          Rep(this.props),
-          span({
-            "className": "objectComma",
-            role: "presentation"},
-            this.props.delim
-          )
-        )
-      );
-    }
-  }));
-
   // Registration
-
   function supportsObject(object, type) {
     if (!isGrip(object)) {
       return false;
     }
-
     return (object.preview && object.preview.ownProperties);
   }
 

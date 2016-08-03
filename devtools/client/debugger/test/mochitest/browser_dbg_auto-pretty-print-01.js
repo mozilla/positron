@@ -10,13 +10,17 @@ const TAB_URL = EXAMPLE_URL + "doc_auto-pretty-print-01.html";
 var gTab, gPanel, gDebugger;
 var gEditor, gSources, gPrefs, gOptions, gView;
 
-var gFirstSourceLabel = "code_ugly-5.js";
-var gSecondSourceLabel = "code_ugly-6.js";
+var gFirstSource = EXAMPLE_URL + "code_ugly-5.js";
+var gSecondSource = EXAMPLE_URL + "code_ugly-6.js";
 
 var gOriginalPref = Services.prefs.getBoolPref("devtools.debugger.auto-pretty-print");
 
 function test() {
-  initDebugger(TAB_URL).then(([aTab,, aPanel]) => {
+  let options = {
+    source: gFirstSource,
+    line: 1
+  };
+  initDebugger(TAB_URL, options).then(([aTab,, aPanel]) => {
     gTab = aTab;
     gPanel = aPanel;
     gDebugger = gPanel.panelWin;
@@ -27,16 +31,15 @@ function test() {
     gView = gDebugger.DebuggerView;
 
     Task.spawn(function* () {
-      yield waitForSourceShown(gPanel, gFirstSourceLabel);
       testSourceIsUgly();
 
       enableAutoPrettyPrint();
       testAutoPrettyPrintOn();
 
       reload(gPanel);
-      yield waitForSourceShown(gPanel, gFirstSourceLabel);
+      yield waitForSourceShown(gPanel, gFirstSource);
       testSourceIsUgly();
-      yield waitForSourceShown(gPanel, gFirstSourceLabel);
+      yield waitForSourceShown(gPanel, gFirstSource);
       testSourceIsPretty();
       disableAutoPrettyPrint();
       testAutoPrettyPrintOff();
@@ -61,7 +64,7 @@ function testSourceIsUgly() {
 
 function testSecondSourceLabel() {
   let source = gSources.selectedItem.attachment.source;
-  ok(source.url === EXAMPLE_URL + gSecondSourceLabel,
+  ok(source.url === gSecondSource,
     "Second source url is correct.");
 }
 

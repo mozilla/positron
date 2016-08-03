@@ -1,6 +1,7 @@
 /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 /* vim: set ts=8 sts=2 et sw=2 tw=80: */
 
+#include "base/task.h"
 #include "base/thread.h"
 
 #include "TestEndpointOpens.h"
@@ -115,11 +116,6 @@ ShutdownTestEndpointOpensOpenedParent(TestEndpointOpensOpenedParent* parent,
                                       Transport* transport)
 {
   delete parent;
-
-  // Now delete the transport, which has to happen after the
-  // top-level actor is deleted.
-  XRE_GetIOMessageLoop()->PostTask(
-    do_AddRef(new DeleteTask<Transport>(transport)));
 }
 
 void
@@ -248,11 +244,6 @@ ShutdownTestEndpointOpensOpenedChild(TestEndpointOpensOpenedChild* child,
                                      Transport* transport)
 {
   delete child;
-
-  // Now delete the transport, which has to happen after the
-  // top-level actor is deleted.
-  XRE_GetIOMessageLoop()->PostTask(
-    do_AddRef(new DeleteTask<Transport>(transport)));
 
   // Kick off main-thread shutdown.
   gMainThread->PostTask(

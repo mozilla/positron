@@ -4,10 +4,8 @@
 
 "use strict";
 
-const {Cc, Ci} = require("chrome");
 const Services = require("Services");
-
-loader.lazyGetter(this, "osString", () => Cc["@mozilla.org/xre/app-info;1"].getService(Ci.nsIXULRuntime).OS);
+const osString = Services.appinfo.OS;
 
 // Panels
 loader.lazyGetter(this, "OptionsPanel", () => require("devtools/client/framework/toolbox-options").OptionsPanel);
@@ -188,6 +186,7 @@ Tools.styleEditor = {
   id: "styleeditor",
   key: l10n("open.commandkey", styleEditorStrings),
   ordinal: 4,
+  visibilityswitch: "devtools.styleeditor.enabled",
   accesskey: l10n("open.accesskey", styleEditorStrings),
   modifiers: "shift",
   icon: "chrome://devtools/skin/images/tool-styleeditor.svg",

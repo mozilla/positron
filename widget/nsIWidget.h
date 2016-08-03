@@ -65,6 +65,8 @@ class SourceSurface;
 namespace widget {
 class TextEventDispatcher;
 class TextEventDispatcherListener;
+class CompositorWidget;
+class CompositorWidgetInitData;
 } // namespace widget
 } // namespace mozilla
 
@@ -128,9 +130,13 @@ typedef void* nsNativeWidget;
 #if defined(MOZ_WIDGET_GTK)
 // set/get nsPluginNativeWindowGtk, e10s specific
 #define NS_NATIVE_PLUGIN_OBJECT_PTR    104
+#ifdef MOZ_X11
+#define NS_NATIVE_COMPOSITOR_DISPLAY   105
+#endif // MOZ_X11
 #endif
 #ifdef MOZ_WIDGET_ANDROID
 #define NS_NATIVE_NEW_EGL_SURFACE      100
+#define NS_JAVA_SURFACE                101
 #endif
 
 #define NS_IWIDGET_IID \
@@ -1079,6 +1085,28 @@ class nsIWidget : public nsISupports
     static void UpdateRegisteredPluginWindowVisibility(uintptr_t aOwnerWidget,
                                                        nsTArray<uintptr_t>& aPluginIds);
 
+#if defined(XP_WIN)
+    /**
+     * Iterates over the list of registered plugins and for any that are owned
+     * by aOwnerWidget and visible it takes a snapshot.
+     *
+     * @param aOwnerWidget only captures visible widgets owned by this
+     */
+    static void CaptureRegisteredPlugins(uintptr_t aOwnerWidget);
+
+    /**
+     * Take a scroll capture for this widget if possible.
+     */
+    virtual void UpdateScrollCapture() = 0;
+
+    /**
+     * Creates an async ImageContainer to hold scroll capture images that can be
+     * used if the plugin is hidden during scroll.
+     * @return the async container ID of the created ImageContainer.
+     */
+    virtual uint64_t CreateScrollCaptureContainer() = 0;
+#endif
+
     /**
      * Set the shadow style of the window.
      *
@@ -1203,21 +1231,17 @@ class nsIWidget : public nsISupports
     /**
      * Return the widget's LayerManager. The layer tree for that
      * LayerManager is what gets rendered to the widget.
-     *
-     * @param aAllowRetaining an outparam that states whether the returned
-     * layer manager should be used for retained layers
      */
-    inline LayerManager* GetLayerManager(bool* aAllowRetaining = nullptr)
+    inline LayerManager* GetLayerManager()
     {
         return GetLayerManager(nullptr, mozilla::layers::LayersBackend::LAYERS_NONE,
-                               LAYER_MANAGER_CURRENT, aAllowRetaining);
+                               LAYER_MANAGER_CURRENT);
     }
 
-    inline LayerManager* GetLayerManager(LayerManagerPersistence aPersistence,
-                                         bool* aAllowRetaining = nullptr)
+    inline LayerManager* GetLayerManager(LayerManagerPersistence aPersistence)
     {
         return GetLayerManager(nullptr, mozilla::layers::LayersBackend::LAYERS_NONE,
-                               aPersistence, aAllowRetaining);
+                               aPersistence);
     }
 
     /**
@@ -1227,8 +1251,7 @@ class nsIWidget : public nsISupports
      */
     virtual LayerManager* GetLayerManager(PLayerTransactionChild* aShadowManager,
                                           LayersBackend aBackendHint,
-                                          LayerManagerPersistence aPersistence = LAYER_MANAGER_CURRENT,
-                                          bool* aAllowRetaining = nullptr) = 0;
+                                          LayerManagerPersistence aPersistence = LAYER_MANAGER_CURRENT) = 0;
 
     /**
      * Called before each layer manager transaction to allow any preparation
@@ -1630,6 +1653,11 @@ class nsIWidget : public nsISupports
 
     virtual void StartAsyncScrollbarDrag(const AsyncDragMetrics& aDragMetrics) = 0;
 
+    // If this widget supports out-of-process compositing, it can override
+    // this method to provide additional information to the compositor.
+    virtual void GetCompositorWidgetInitData(mozilla::widget::CompositorWidgetInitData* aInitData)
+    {}
+
 private:
   class LongTapInfo
   {
@@ -1960,6 +1988,22 @@ public:
     virtual nsresult OnWindowedPluginKeyEvent(
                        const mozilla::NativeEventData& aKeyEventData,
                        nsIKeyEventInPluginCallback* aCallback);
+
+
+    /**
+     * LookUpDictionary shows the dictionary for the word around current point.
+     *
+     * @param aText            the word to look up dictiorary.
+     * @param aFontRangeArray  text decoration of aText
+     * @param aIsVertical      true if the word is vertical layout
+     * @param aPoint           top-left point of aText
+     */
+    virtual void LookUpDictionary(
+                   const nsAString& aText,
+                   const nsTArray<mozilla::FontRange>& aFontRangeArray,
+                   const bool aIsVertical,
+                   const LayoutDeviceIntPoint& aPoint)
+    { }
 
 protected:
     /**

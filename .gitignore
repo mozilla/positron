@@ -101,7 +101,7 @@ testing/mozharness/.coverage
 testing/mozharness/nosetests.xml
 
 # Ignore node_modules
-testing/eslint/node_modules/
+tools/lint/eslint/node_modules/
 
 # Ignore talos virtualenv and tp5n files.
 # The tp5n set is supposed to be decompressed at
@@ -116,3 +116,6 @@ testing/talos/lib/
 testing/talos/talos/tests/tp5n.zip
 testing/talos/talos/tests/tp5n
 testing/talos/talos/tests/devtools/damp.manifest.develop
+
+# Ignore files created when running a reftest.
+lextab.py

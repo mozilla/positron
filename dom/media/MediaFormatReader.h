@@ -14,6 +14,7 @@
 
 #include "MediaDataDemuxer.h"
 #include "MediaDecoderReader.h"
+#include "nsAutoPtr.h"
 #include "PDMFactory.h"
 
 namespace mozilla {
@@ -62,7 +63,7 @@ public:
   // For Media Resource Management
   void ReleaseMediaResources() override;
 
-  nsresult ResetDecode(TargetQueues aQueues) override;
+  nsresult ResetDecode(TrackSet aTracks) override;
 
   RefPtr<ShutdownPromise> Shutdown() override;
 
@@ -101,6 +102,7 @@ public:
   void GetMozDebugReaderData(nsAString& aString);
 
 private:
+
   bool HasVideo() { return mVideo.mTrackDemuxer; }
   bool HasAudio() { return mAudio.mTrackDemuxer; }
 
@@ -133,14 +135,21 @@ private:
                             MediaRawData* aSample);
 
   struct InternalSeekTarget {
-    InternalSeekTarget(const media::TimeUnit& aTime, bool aDropTarget)
+    InternalSeekTarget(const media::TimeInterval& aTime, bool aDropTarget)
       : mTime(aTime)
       , mDropTarget(aDropTarget)
       , mWaiting(false)
       , mHasSeeked(false)
     {}
 
-    media::TimeUnit mTime;
+    media::TimeUnit Time() const { return mTime.mStart; }
+    media::TimeUnit EndTime() const { return mTime.mEnd; }
+    bool Contains(const media::TimeUnit& aTime) const
+    {
+      return mTime.Contains(aTime);
+    }
+
+    media::TimeInterval mTime;
     bool mDropTarget;
     bool mWaiting;
     bool mHasSeeked;
@@ -155,7 +164,7 @@ private:
   void NotifyNewOutput(TrackType aTrack, MediaData* aSample);
   void NotifyInputExhausted(TrackType aTrack);
   void NotifyDrainComplete(TrackType aTrack);
-  void NotifyError(TrackType aTrack);
+  void NotifyError(TrackType aTrack, MediaDataDecoderError aError = MediaDataDecoderError::FATAL_ERROR);
   void NotifyWaitingForData(TrackType aTrack);
   void NotifyEndOfStream(TrackType aTrack);
   void NotifyDecodingRequested(TrackType aTrack);
@@ -169,11 +178,14 @@ private:
   // functions.
   void Output(TrackType aType, MediaData* aSample);
   void InputExhausted(TrackType aTrack);
-  void Error(TrackType aTrack);
+  void Error(TrackType aTrack, MediaDataDecoderError aError = MediaDataDecoderError::FATAL_ERROR);
   void Reset(TrackType aTrack);
   void DrainComplete(TrackType aTrack);
+  void DropDecodedSamples(TrackType aTrack);
 
   bool ShouldSkip(bool aSkipToNextKeyframe, media::TimeUnit aTimeThreshold);
+
+  void SetVideoDecodeThreshold();
 
   size_t SizeOfQueue(TrackType aTrack);
 
@@ -192,8 +204,8 @@ private:
     void InputExhausted() override {
       mReader->InputExhausted(mType);
     }
-    void Error() override {
-      mReader->Error(mType);
+    void Error(MediaDataDecoderError aError) override {
+      mReader->Error(mType, aError);
     }
     void DrainComplete() override {
       mReader->DrainComplete(mType);
@@ -213,7 +225,8 @@ private:
   struct DecoderData {
     DecoderData(MediaFormatReader* aOwner,
                 MediaData::Type aType,
-                uint32_t aDecodeAhead)
+                uint32_t aDecodeAhead,
+                uint32_t aNumOfMaxError)
       : mOwner(aOwner)
       , mType(aType)
       , mMonitor("DecoderData")
@@ -228,16 +241,15 @@ private:
       , mDecodingRequested(false)
       , mOutputRequested(false)
       , mInputExhausted(false)
-      , mError(false)
       , mNeedDraining(false)
       , mDraining(false)
       , mDrainComplete(false)
+      , mNumOfConsecutiveError(0)
+      , mMaxConsecutiveError(aNumOfMaxError)
       , mNumSamplesInput(0)
       , mNumSamplesOutput(0)
       , mNumSamplesOutputTotal(0)
       , mNumSamplesSkippedTotal(0)
-      , mNumSamplesOutputTotalSinceTelemetry(0)
-      , mNumSamplesSkippedTotalSinceTelemetry(0)
       , mSizeOfQueue(0)
       , mIsHardwareAccelerated(false)
       , mLastStreamSourceID(UINT32_MAX)
@@ -249,7 +261,7 @@ private:
     RefPtr<MediaTrackDemuxer> mTrackDemuxer;
     // TaskQueue on which decoder can choose to decode.
     // Only non-null up until the decoder is created.
-    RefPtr<FlushableTaskQueue> mTaskQueue;
+    RefPtr<TaskQueue> mTaskQueue;
     // Callback that receives output and error notifications from the decoder.
     nsAutoPtr<DecoderCallback> mCallback;
 
@@ -299,16 +311,30 @@ private:
     bool mDecodingRequested;
     bool mOutputRequested;
     bool mInputExhausted;
-    bool mError;
     bool mNeedDraining;
     bool mDraining;
     bool mDrainComplete;
+
+    bool HasPendingDrain() const
+    {
+      return mDraining || mDrainComplete;
+    }
+
+    uint32_t mNumOfConsecutiveError;
+    uint32_t mMaxConsecutiveError;
+
+    Maybe<MediaDataDecoderError> mError;
+    bool HasFatalError() const
+    {
+      return mError.isSome() && mError.ref() == MediaDataDecoderError::FATAL_ERROR;
+    }
+
     // If set, all decoded samples prior mTimeThreshold will be dropped.
     // Used for internal seeking when a change of stream is detected or when
     // encountering data discontinuity.
     Maybe<InternalSeekTarget> mTimeThreshold;
     // Time of last sample returned.
-    Maybe<media::TimeUnit> mLastSampleTime;
+    Maybe<media::TimeInterval> mLastSampleTime;
 
     // Decoded samples returned my mDecoder awaiting being returned to
     // state machine upon request.
@@ -317,9 +343,6 @@ private:
     uint64_t mNumSamplesOutput;
     uint64_t mNumSamplesOutputTotal;
     uint64_t mNumSamplesSkippedTotal;
-
-    uint64_t mNumSamplesOutputTotalSinceTelemetry;
-    uint64_t mNumSamplesSkippedTotalSinceTelemetry;
 
     // These get overridden in the templated concrete class.
     // Indicate if we have a pending promise for decoded frame.
@@ -367,7 +390,6 @@ private:
       MOZ_ASSERT(mOwner->OnTaskQueue());
       mDemuxEOS = false;
       mWaitingForData = false;
-      mReceivedNewData = false;
       mDiscontinuity = true;
       mQueuedSamples.Clear();
       mDecodingRequested = false;
@@ -383,6 +405,9 @@ private:
       mNumSamplesOutput = 0;
       mSizeOfQueue = 0;
       mNextStreamSourceID.reset();
+      if (!HasFatalError()) {
+        mError.reset();
+      }
     }
 
     bool HasInternalSeekPending() const
@@ -408,8 +433,9 @@ private:
   public:
     DecoderDataWithPromise(MediaFormatReader* aOwner,
                            MediaData::Type aType,
-                           uint32_t aDecodeAhead)
-      : DecoderData(aOwner, aType, aDecodeAhead)
+                           uint32_t aDecodeAhead,
+                           uint32_t aNumOfMaxError)
+      : DecoderData(aOwner, aType, aDecodeAhead, aNumOfMaxError)
       , mHasPromise(false)
 
     {}
@@ -479,6 +505,7 @@ private:
 
   void SkipVideoDemuxToNextKeyFrame(media::TimeUnit aTimeThreshold);
   MozPromiseRequestHolder<MediaTrackDemuxer::SkipAccessPointPromise> mSkipRequest;
+  void VideoSkipReset(uint32_t aSkipped);
   void OnVideoSkipCompleted(uint32_t aSkipped);
   void OnVideoSkipFailed(MediaTrackDemuxer::SkipFailureHolder aFailure);
 
@@ -531,9 +558,6 @@ private:
   {
     OnSeekFailed(TrackType::kAudioTrack, aFailure);
   }
-
-  void ReportDroppedFramesTelemetry();
-
   // The SeekTarget that was last given to Seek()
   SeekTarget mOriginalSeekTarget;
   // Temporary seek information while we wait for the data
@@ -547,10 +571,7 @@ private:
 #ifdef MOZ_EME
   RefPtr<CDMProxy> mCDMProxy;
 #endif
-
-#if defined(READER_DORMANT_HEURISTIC)
-  const bool mDormantEnabled;
-#endif
+  RefPtr<GMPCrashHelper> mCrashHelper;
 };
 
 } // namespace mozilla

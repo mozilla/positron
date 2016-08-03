@@ -141,7 +141,7 @@ BenchmarkPlayback::BenchmarkPlayback(Benchmark* aMainThreadState,
                                      MediaDataDemuxer* aDemuxer)
   : QueueObject(new TaskQueue(GetMediaThreadPool(MediaThreadType::PLAYBACK)))
   , mMainThreadState(aMainThreadState)
-  , mDecoderTaskQueue(new FlushableTaskQueue(GetMediaThreadPool(
+  , mDecoderTaskQueue(new TaskQueue(GetMediaThreadPool(
                         MediaThreadType::PLATFORM_DECODER)))
   , mDemuxer(aDemuxer)
   , mSampleIndex(0)
@@ -207,8 +207,7 @@ BenchmarkPlayback::InitDecoder(TrackInfo&& aInfo)
   MOZ_ASSERT(OnThread());
 
   RefPtr<PDMFactory> platform = new PDMFactory();
-  mDecoder = platform->CreateDecoder(aInfo, mDecoderTaskQueue, this,
-     /* DecoderDoctorDiagnostics* */ nullptr);
+  mDecoder = platform->CreateDecoder({ aInfo, mDecoderTaskQueue, reinterpret_cast<MediaDataDecoderCallback*>(this) });
   if (!mDecoder) {
     MainThreadShutdown();
     return;
@@ -282,7 +281,7 @@ BenchmarkPlayback::Output(MediaData* aData)
 }
 
 void
-BenchmarkPlayback::Error()
+BenchmarkPlayback::Error(MediaDataDecoderError aError)
 {
   RefPtr<Benchmark> ref(mMainThreadState);
   Dispatch(NS_NewRunnableFunction([this, ref]() {  MainThreadShutdown(); }));

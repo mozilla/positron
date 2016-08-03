@@ -9,7 +9,9 @@
 
 /* exported EVENT_REORDER, EVENT_SHOW, EVENT_TEXT_INSERTED, EVENT_TEXT_REMOVED,
             EVENT_DOCUMENT_LOAD_COMPLETE, EVENT_HIDE, EVENT_TEXT_CARET_MOVED,
-            EVENT_STATE_CHANGE, waitForEvent, waitForMultipleEvents */
+            EVENT_DESCRIPTION_CHANGE, EVENT_NAME_CHANGE, EVENT_STATE_CHANGE,
+            EVENT_VALUE_CHANGE, EVENT_TEXT_VALUE_CHANGE, EVENT_FOCUS,
+            waitForEvent, waitForMultipleEvents */
 
 const EVENT_DOCUMENT_LOAD_COMPLETE = nsIAccessibleEvent.EVENT_DOCUMENT_LOAD_COMPLETE;
 const EVENT_HIDE = nsIAccessibleEvent.EVENT_HIDE;
@@ -19,6 +21,11 @@ const EVENT_STATE_CHANGE = nsIAccessibleEvent.EVENT_STATE_CHANGE;
 const EVENT_TEXT_CARET_MOVED = nsIAccessibleEvent.EVENT_TEXT_CARET_MOVED;
 const EVENT_TEXT_INSERTED = nsIAccessibleEvent.EVENT_TEXT_INSERTED;
 const EVENT_TEXT_REMOVED = nsIAccessibleEvent.EVENT_TEXT_REMOVED;
+const EVENT_DESCRIPTION_CHANGE = nsIAccessibleEvent.EVENT_DESCRIPTION_CHANGE;
+const EVENT_NAME_CHANGE = nsIAccessibleEvent.EVENT_NAME_CHANGE;
+const EVENT_VALUE_CHANGE = nsIAccessibleEvent.EVENT_VALUE_CHANGE;
+const EVENT_TEXT_VALUE_CHANGE = nsIAccessibleEvent.EVENT_TEXT_VALUE_CHANGE;
+const EVENT_FOCUS = nsIAccessibleEvent.EVENT_FOCUS;
 
 /**
  * Describe an event in string format.
@@ -42,13 +49,17 @@ function eventToString(event) {
 }
 
 /**
- * A helper function that waits for an accessible event of certain type that
- * belongs to a certain DOMNode (defined by its id).
- * @param  {String}  id         expected content element id for the event
- * @param  {Number}  eventType  expected accessible event type
- * @return {Promise}            promise that resolves to an event
+ * A helper function that returns a promise that resolves when an accessible
+ * event of the given type with the given target (defined by its id or
+ * accessible) is observed.
+ * @param  {String|nsIAccessible}  expectedIdOrAcc  expected content element id
+ *                                                  for the event
+ * @param  {Number}                eventType        expected accessible event
+ *                                                  type
+ * @return {Promise}                                promise that resolves to an
+ *                                                  event
  */
-function waitForEvent(eventType, id) {
+function waitForEvent(eventType, expectedIdOrAcc) {
   return new Promise(resolve => {
     let eventObserver = {
       observe(subject, topic, data) {
@@ -59,11 +70,23 @@ function waitForEvent(eventType, id) {
         let event = subject.QueryInterface(nsIAccessibleEvent);
         Logger.log(eventToString(event));
 
-        let domID = getAccessibleDOMNodeID(event.accessible);
-        // If event's accessible does not match expected event type or DOMNode
-        // id, skip thie event.
-        if (domID === id && event.eventType === eventType) {
-          Logger.log(`Correct event DOMNode id: ${id}`);
+        // If event type does not match expected type, skip the event.
+        if (event.eventType !== eventType) {
+          return;
+        }
+
+        let acc = event.accessible;
+        let id = getAccessibleDOMNodeID(acc);
+        let isID = typeof expectedIdOrAcc === 'string';
+        let actualIdOrAcc = isID ? id : acc;
+        // If event's accessible does not match expected DOMNode id or
+        // accessible, skip the event.
+        if (actualIdOrAcc === expectedIdOrAcc) {
+          if (isID) {
+            Logger.log(`Correct event DOMNode id: ${id}`);
+          } else {
+            Logger.log(`Correct event accessible: ${prettyName(acc)}`);
+          }
           Logger.log(`Correct event type: ${eventTypeToString(eventType)}`);
           ok(event.accessibleDocument instanceof nsIAccessibleDocument,
             'Accessible document present.');

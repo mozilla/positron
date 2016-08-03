@@ -207,6 +207,10 @@ protected:
                                   const ChannelDiverterArgs& channel) override;
   virtual bool DeallocPChannelDiverterParent(PChannelDiverterParent* actor)
                                                                 override;
+  virtual PTransportProviderParent*
+  AllocPTransportProviderParent() override;
+  virtual bool
+  DeallocPTransportProviderParent(PTransportProviderParent* aActor) override;
 
   virtual bool RecvOnAuthAvailable(const uint64_t& aCallbackId,
                                    const nsString& aUser,
@@ -231,8 +235,6 @@ protected:
   virtual bool RecvRemoveRequestContext(const nsCString& rcid) override;
 
 private:
-  nsCString mCoreAppsBasePath;
-  nsCString mWebAppsBasePath;
   RefPtr<OfflineObserver> mObserver;
 };
 

@@ -9,6 +9,7 @@
 
 #include <tuple>
 
+#include "sslproto.h"
 #include "sslt.h"
 
 #include "tls_agent.h"
@@ -26,9 +27,10 @@ class TlsConnectTestBase : public ::testing::Test {
   static ::testing::internal::ParamGenerator<std::string> kTlsModesAll;
   static ::testing::internal::ParamGenerator<uint16_t> kTlsV10;
   static ::testing::internal::ParamGenerator<uint16_t> kTlsV11;
+  static ::testing::internal::ParamGenerator<uint16_t> kTlsV12;
   static ::testing::internal::ParamGenerator<uint16_t> kTlsV10V11;
   static ::testing::internal::ParamGenerator<uint16_t> kTlsV11V12;
-  static ::testing::internal::ParamGenerator<uint16_t> kTlsV10To12;
+  static ::testing::internal::ParamGenerator<uint16_t> kTlsV10ToV12;
   static ::testing::internal::ParamGenerator<uint16_t> kTlsV13;
   static ::testing::internal::ParamGenerator<uint16_t> kTlsV11Plus;
   static ::testing::internal::ParamGenerator<uint16_t> kTlsV12Plus;
@@ -71,33 +73,51 @@ class TlsConnectTestBase : public ::testing::Test {
   void SetExpectedVersion(uint16_t version);
   // Expect resumption of a particular type.
   void ExpectResumption(SessionResumptionMode expected);
-  void DisableDheAndEcdheCiphers();
-  void DisableDheCiphers();
-  void DisableEcdheCiphers();
+  void DisableAllCiphers();
+  void EnableOnlyStaticRsaCiphers();
+  void EnableOnlyDheCiphers();
   void EnableSomeEcdhCiphers();
   void EnableExtendedMasterSecret();
   void ConfigureSessionCache(SessionResumptionMode client,
                              SessionResumptionMode server);
   void EnableAlpn();
+  void EnableAlpn(const uint8_t* val, size_t len);
+  void EnsureModelSockets();
+  void CheckAlpn(const std::string& val);
   void EnableSrtp();
   void CheckSrtp() const;
   void SendReceive();
+  void SetupForZeroRtt();
+  void ZeroRttSendReceive(
+      bool expect_readable,
+      std::function<bool()> post_clienthello_check = nullptr);
   void Receive(size_t amount);
   void ExpectExtendedMasterSecret(bool expected);
+  void ExpectEarlyDataAccepted(bool expected);
 
  protected:
   Mode mode_;
   TlsAgent* client_;
   TlsAgent* server_;
+  TlsAgent* client_model_;
+  TlsAgent* server_model_;
   uint16_t version_;
   SessionResumptionMode expected_resumption_mode_;
   std::vector<std::vector<uint8_t>> session_ids_;
 
+  // A simple value of "a", "b".  Note that the preferred value of "a" is placed
+  // at the end, because the NSS API follows the now defunct NPN specification,
+  // which places the preferred (and default) entry at the end of the list.
+  // NSS will move this final entry to the front when used with ALPN.
+  const uint8_t alpn_dummy_val_[4] = { 0x01, 0x62, 0x01, 0x61 };
+
  private:
   void CheckResumption(SessionResumptionMode expected);
   void CheckExtendedMasterSecret();
+  void CheckEarlyDataAccepted();
 
   bool expect_extended_master_secret_;
+  bool expect_early_data_accepted_;
 };
 
 // A non-parametrized TLS test base.
@@ -155,6 +175,31 @@ class TlsConnectTls12
  public:
   TlsConnectTls12();
 };
+
+// A TLS 1.2+ generic test.
+class TlsConnectTls12Plus
+  : public TlsConnectTestBase,
+    public ::testing::WithParamInterface<std::tuple<std::string, uint16_t>> {
+ public:
+  TlsConnectTls12Plus();
+};
+
+#ifdef NSS_ENABLE_TLS_1_3
+// A TLS 1.3 only generic test.
+class TlsConnectTls13
+  : public TlsConnectTestBase,
+    public ::testing::WithParamInterface<std::string> {
+ public:
+  TlsConnectTls13();
+};
+
+class TlsConnectDatagram13
+  : public TlsConnectTestBase {
+ public:
+  TlsConnectDatagram13()
+      : TlsConnectTestBase(DGRAM, SSL_LIBRARY_VERSION_TLS_1_3) {}
+};
+#endif
 
 // A variant that is used only with Pre13.
 class TlsConnectGenericPre13 : public TlsConnectGeneric {

@@ -26,7 +26,7 @@ function test() {
 }
 
 function testPrefsAreRespectedWhenReopeningToolbox() {
-  let deferred = promise.defer();
+  let deferred = defer();
   let target = TargetFactory.forTab(gBrowser.selectedTab);
 
   info("Closing toolbox to test after reopening");
@@ -45,7 +45,7 @@ function testPrefsAreRespectedWhenReopeningToolbox() {
 }
 
 function testSelectTool(devtoolsToolbox) {
-  let deferred = promise.defer();
+  let deferred = defer();
   info("Selecting the options panel");
 
   toolbox = devtoolsToolbox;
@@ -115,7 +115,7 @@ function testToggleToolboxButtons() {
 
     is(matchedCheckboxes[0].nextSibling.textContent, tool.label,
       "The label for checkbox matches the tool definition.");
-    is(matchedButtons[0].getAttribute("tooltiptext"), tool.label,
+    is(matchedButtons[0].getAttribute("title"), tool.label,
       "The tooltip for button matches the tool definition.");
   }
 

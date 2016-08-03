@@ -20,6 +20,7 @@ Cu.import('resource:///modules/ModuleLoader.jsm');
 function Process() {}
 
 Process.prototype = {
+  _contentWindow: null,
   _processGlobal: null,
 
   classID: Components.ID('{3c81d709-5fb4-4144-9612-9ecc1be4e7b1}'),
@@ -37,6 +38,8 @@ Process.prototype = {
    * for an explanation of the behavior of this method.
    */
   init: function(window) {
+    this._contentWindow = window;
+
     // The WebIDL binding applies to the hidden window too, but we don't want
     // to initialize the Electron environment for that window, so return early
     // if we've been called to initialize `process` for that window.
@@ -98,7 +101,17 @@ Process.prototype = {
   },
 
   binding(name) {
-    return this._processGlobal.binding(name);
+    try {
+      return this._processGlobal.binding(name);
+    } catch(ex) {
+      // Per
+      // https://developer.mozilla.org/en-US/docs/Mozilla/WebIDL_bindings#Throwing_exceptions_from_JS-implemented_APIs
+      // we need to recreate Error objects via our own content window,
+      // or the WebIDL binding will set its message to "NS_ERROR_UNEXPECTED",
+      // which will fail the `/No such module/.test(error.message)` check
+      // in common/init.js.
+      throw new this._contentWindow.Error(ex.message);
+    }
   },
 
   /* Node `EventEmitter` interface */

@@ -17,7 +17,7 @@ include "gfxipc/ShadowLayerUtils.h";
 include "mozilla/GfxMessageUtils.h";
 include "ImageLayers.h";
 
-using mozilla::gfx::Filter from "mozilla/gfx/2D.h";
+using mozilla::gfx::SamplingFilter from "mozilla/gfx/2D.h";
 using struct mozilla::gfx::Color from "mozilla/gfx/2D.h";
 using struct mozilla::gfx::Point3D from "mozilla/gfx/Point.h";
 using mozilla::gfx::IntPoint from "mozilla/gfx/Point.h";
@@ -258,14 +258,14 @@ struct ContainerLayerAttributes {
   int32_t inputFrameID;
 };
 struct ColorLayerAttributes     { LayerColor color; IntRect bounds; };
-struct CanvasLayerAttributes    { Filter filter; IntRect bounds; };
+struct CanvasLayerAttributes    { SamplingFilter samplingFilter; IntRect bounds; };
 struct RefLayerAttributes {
   int64_t id;
   // TODO: Once bug 1132895 is fixed we shouldn't need to propagate the override
   // explicitly here.
   EventRegionsOverride eventRegionsOverride;
 };
-struct ImageLayerAttributes     { Filter filter; IntSize scaleToSize; ScaleMode scaleMode; };
+struct ImageLayerAttributes     { SamplingFilter samplingFilter; IntSize scaleToSize; ScaleMode scaleMode; };
 
 union SpecificLayerAttributes {
   null_t;
@@ -312,9 +312,10 @@ struct ShmemSection {
   size_t size;
 };
 
-union TileLock {
+union ReadLockDescriptor {
   ShmemSection;
   uintptr_t;
+  null_t;
 };
 
 union MaybeTexture {
@@ -326,7 +327,8 @@ struct TexturedTileDescriptor {
   PTexture texture;
   MaybeTexture textureOnWhite;
   IntRect updateRect;
-  TileLock sharedLock;
+  ReadLockDescriptor sharedLock;
+  ReadLockDescriptor sharedLockOnWhite;
   bool wasPlaceholder;
 };
 
@@ -393,6 +395,7 @@ union MaybeFence {
 
 struct TimedTexture {
   PTexture texture;
+  ReadLockDescriptor sharedLock;
   MaybeFence fence;
   TimeStamp timeStamp;
   IntRect picture;
@@ -418,6 +421,8 @@ struct OpUseTexture {
 struct OpUseComponentAlphaTextures {
   PTexture textureOnBlack;
   PTexture textureOnWhite;
+  ReadLockDescriptor sharedLockBlack;
+  ReadLockDescriptor sharedLockWhite;
 };
 
 union MaybeRegion {
@@ -426,14 +431,23 @@ union MaybeRegion {
 };
 
 struct OpDeliverFence {
-  PTexture texture;
+  uint64_t TextureId;
   FenceHandle fence;
 };
 
-struct OpDeliverFenceToTracker {
-  uint64_t destHolderId;
-  uint64_t destTransactionId;
+struct OpDeliverFenceToNonRecycle {
+  uint64_t TextureId;
   FenceHandle fence;
+};
+
+struct OpNotifyNotUsed {
+  uint64_t TextureId;
+  uint64_t fwdTransactionId;
+};
+
+struct OpNotifyNotUsedToNonRecycle {
+  uint64_t TextureId;
+  uint64_t fwdTransactionId;
 };
 
 union CompositableOperationDetail {
@@ -455,6 +469,8 @@ struct CompositableOperation {
 };
 
 // A unit of a changeset; a set of these comprise a changeset
+// If adding a new edit type that requires the hit testing tree to be updated,
+// set the updateHitTestingTree flag to true in RecvUpdate()
 union Edit {
   OpCreatePaintedLayer;
   OpCreateContainerLayer;
@@ -514,12 +530,10 @@ union EditReply {
 
 union AsyncParentMessageData {
   OpDeliverFence;
-  OpDeliverFenceToTracker;
+  OpDeliverFenceToNonRecycle;
+  OpNotifyNotUsed;
+  OpNotifyNotUsedToNonRecycle;
   OpReplyRemoveTexture;
-};
-
-union AsyncChildMessageData {
-  CompositableOperation;
 };
 
 } // namespace

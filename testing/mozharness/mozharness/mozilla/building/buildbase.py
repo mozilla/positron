@@ -341,13 +341,16 @@ class BuildOptionParser(object):
     # *It will warn and fail if there is not a config for the current
     # platform/bits
     build_variants = {
+        'add-on-devel': 'builds/releng_sub_%s_configs/%s_add-on-devel.py',
         'asan': 'builds/releng_sub_%s_configs/%s_asan.py',
+        'asan-tc': 'builds/releng_sub_%s_configs/%s_asan_tc.py',
         'tsan': 'builds/releng_sub_%s_configs/%s_tsan.py',
         'b2g-debug': 'b2g/releng_sub_%s_configs/%s_debug.py',
         'cross-debug': 'builds/releng_sub_%s_configs/%s_cross_debug.py',
         'cross-opt': 'builds/releng_sub_%s_configs/%s_cross_opt.py',
         'debug': 'builds/releng_sub_%s_configs/%s_debug.py',
         'asan-and-debug': 'builds/releng_sub_%s_configs/%s_asan_and_debug.py',
+        'asan-tc-and-debug': 'builds/releng_sub_%s_configs/%s_asan_tc_and_debug.py',
         'stat-and-debug': 'builds/releng_sub_%s_configs/%s_stat_and_debug.py',
         'mulet': 'builds/releng_sub_%s_configs/%s_mulet.py',
         'code-coverage': 'builds/releng_sub_%s_configs/%s_code_coverage.py',
@@ -367,6 +370,7 @@ class BuildOptionParser(object):
         'android-test': 'builds/releng_sub_%s_configs/%s_test.py',
         'android-checkstyle': 'builds/releng_sub_%s_configs/%s_checkstyle.py',
         'android-lint': 'builds/releng_sub_%s_configs/%s_lint.py',
+        'valgrind' : 'builds/releng_sub_%s_configs/%s_valgrind.py'
     }
     build_pool_cfg_file = 'builds/build_pool_specifics.py'
     branch_cfg_file = 'builds/branch_specifics.py'
@@ -849,6 +853,13 @@ or run without that action (ie: --no-{action})"
         # first grab the buildid
         env['MOZ_BUILD_DATE'] = self.query_buildid()
 
+        # Set the source repository to what we're building from since
+        # the default is to query `hg paths` which isn't reliable with pooled
+        # storage
+        repo_path = self._query_repo()
+        assert repo_path
+        env['MOZ_SOURCE_REPO'] = repo_path
+
         if self.query_is_nightly() or self.query_is_nightly_promotion():
             if self.query_is_nightly():
                 # nightly promotion needs to set update_channel but not do all the 'IS_NIGHTLY'
@@ -913,8 +924,9 @@ or run without that action (ie: --no-{action})"
 
         # _query_post_upload_cmd returns a list (a cmd list), for env sake here
         # let's make it a string
-        pst_up_cmd = ' '.join([str(i) for i in self._query_post_upload_cmd(multiLocale)])
-        mach_env['POST_UPLOAD_CMD'] = pst_up_cmd
+        if c.get('is_automation'):
+            pst_up_cmd = ' '.join([str(i) for i in self._query_post_upload_cmd(multiLocale)])
+            mach_env['POST_UPLOAD_CMD'] = pst_up_cmd
 
         return mach_env
 
@@ -1096,7 +1108,9 @@ or run without that action (ie: --no-{action})"
         if not c.get('tooltool_manifest_src'):
             return self.warning(ERROR_MSGS['tooltool_manifest_undetermined'])
         fetch_script_path = os.path.join(dirs['abs_tools_dir'],
-                                         'scripts/tooltool/tooltool_wrapper.sh')
+                                         'scripts',
+                                         'tooltool',
+                                         'tooltool_wrapper.sh')
         tooltool_manifest_path = os.path.join(dirs['abs_src_dir'],
                                               c['tooltool_manifest_src'])
         cmd = [
@@ -1334,7 +1348,10 @@ or run without that action (ie: --no-{action})"
         self.activate_virtualenv()
 
         routes_file = os.path.join(dirs['abs_src_dir'],
-                                   'testing/taskcluster/routes.json')
+                                   'taskcluster',
+                                   'ci',
+                                   'legacy',
+                                   'routes.json')
         with open(routes_file) as f:
             self.routes_json = json.load(f)
 
@@ -1589,14 +1606,22 @@ or run without that action (ie: --no-{action})"
         # until an alternative solution is made or all builds that touch
         # mozconfig.cache are converted to mozharness.
         dirs = self.query_abs_dirs()
-        self.copyfile(os.path.join(dirs['base_work_dir'], 'buildprops.json'),
-                      os.path.join(dirs['abs_work_dir'], 'buildprops.json'))
+        buildprops = os.path.join(dirs['base_work_dir'], 'buildprops.json')
+        # not finding buildprops is not an error outside of buildbot
+        if os.path.exists(buildprops):
+            self.copyfile(
+                buildprops,
+                os.path.join(dirs['abs_work_dir'], 'buildprops.json'))
 
+        # use mh config override for mach build wrapper, if it exists
         python = self.query_exe('python2.7')
+        default_mach_build = [python, 'mach', '--log-no-times', 'build', '-v']
+        mach_build = self.query_exe('mach-build', default=default_mach_build)
         return_code = self.run_command_m(
-            command=[python, 'mach', '--log-no-times', 'build', '-v'],
-            cwd=self.query_abs_dirs()['abs_src_dir'],
-            env=env, output_timeout=self.config.get('max_build_output_timeout', 60 * 40)
+            command=mach_build,
+            cwd=dirs['abs_src_dir'],
+            env=env,
+            output_timeout=self.config.get('max_build_output_timeout', 60 * 40)
         )
         if return_code:
             self.return_code = self.worst_level(
@@ -1606,22 +1631,12 @@ or run without that action (ie: --no-{action})"
             self.fatal("'mach build' did not run successfully. Please check "
                        "log for errors.")
 
-    def _checkout_compare_locales(self):
-        dirs = self.query_abs_dirs()
-        dest = dirs['compare_locales_dir']
-        repo = self.config['compare_locales_repo']
-        rev = self.config['compare_locales_rev']
-        vcs = self.config['compare_locales_vcs']
-        abs_rev = self.vcs_checkout(repo=repo, dest=dest, revision=rev, vcs=vcs)
-        self.set_buildbot_property('compare_locales_revision', abs_rev, write_to_file=True)
-
     def multi_l10n(self):
         if not self.query_is_nightly():
             self.info("Not a nightly build, skipping multi l10n.")
             return
         self._initialize_taskcluster()
 
-        self._checkout_compare_locales()
         dirs = self.query_abs_dirs()
         base_work_dir = dirs['base_work_dir']
         objdir = dirs['abs_obj_dir']
@@ -2015,6 +2030,27 @@ or run without that action (ie: --no-{action})"
                 EXIT_STATUS_DICT[TBPL_WARNING], self.return_code,
                 AUTOMATION_EXIT_CODES[::-1]
             )
+
+    def valgrind_test(self):
+        '''Execute mach's valgrind-test for memory leaks'''
+        env = self.query_build_env()
+        env.update(self.query_mach_build_env())
+
+        python = self.query_exe('python2.7')
+        return_code = self.run_command_m(
+            command=[python, 'mach', 'valgrind-test'],
+            cwd=self.query_abs_dirs()['abs_src_dir'],
+            env=env, output_timeout=self.config.get('max_build_output_timeout', 60 * 40)
+        )
+        if return_code:
+            self.return_code = self.worst_level(
+                EXIT_STATUS_DICT[TBPL_FAILURE],  self.return_code,
+                AUTOMATION_EXIT_CODES[::-1]
+            )
+            self.fatal("'mach valgrind-test' did not run successfully. Please check "
+                       "log for errors.")
+
+
 
     def _post_fatal(self, message=None, exit_code=None):
         if not self.return_code:  # only overwrite return_code if it's 0

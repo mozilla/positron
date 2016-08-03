@@ -46,7 +46,7 @@ class LIRGenerator : public LIRGeneratorSpecific
         maxargslots_(0)
     { }
 
-    bool generate();
+    MOZ_MUST_USE bool generate();
 
   private:
     LBoxAllocation useBoxFixedAtStart(MDefinition* mir, ValueOperand op);
@@ -57,11 +57,11 @@ class LIRGenerator : public LIRGeneratorSpecific
     void lowerBinaryV(JSOp op, MBinaryInstruction* ins);
     void definePhis();
 
-    void lowerCallArguments(MCall* call);
+    MOZ_MUST_USE bool lowerCallArguments(MCall* call);
 
   public:
-    bool visitInstruction(MInstruction* ins);
-    bool visitBlock(MBasicBlock* block);
+    MOZ_MUST_USE bool visitInstruction(MInstruction* ins);
+    MOZ_MUST_USE bool visitBlock(MBasicBlock* block);
 
     // Visitor hooks are explicit, to give CPU-specific versions a chance to
     // intercept without a bunch of explicit gunk in the .cpp.
@@ -74,11 +74,12 @@ class LIRGenerator : public LIRGeneratorSpecific
     void visitNewArray(MNewArray* ins);
     void visitNewArrayCopyOnWrite(MNewArrayCopyOnWrite* ins);
     void visitNewArrayDynamicLength(MNewArrayDynamicLength* ins);
+    void visitNewTypedArray(MNewTypedArray* ins);
     void visitNewObject(MNewObject* ins);
     void visitNewTypedObject(MNewTypedObject* ins);
     void visitNewDeclEnvObject(MNewDeclEnvObject* ins);
     void visitNewCallObject(MNewCallObject* ins);
-    void visitNewRunOnceCallObject(MNewRunOnceCallObject* ins);
+    void visitNewSingletonCallObject(MNewSingletonCallObject* ins);
     void visitNewStringObject(MNewStringObject* ins);
     void visitNewDerivedTypedObject(MNewDerivedTypedObject* ins);
     void visitInitElem(MInitElem* ins);
@@ -282,6 +283,7 @@ class LIRGenerator : public LIRGeneratorSpecific
     void visitHasClass(MHasClass* ins);
     void visitAsmJSLoadGlobalVar(MAsmJSLoadGlobalVar* ins);
     void visitAsmJSStoreGlobalVar(MAsmJSStoreGlobalVar* ins);
+    void visitAsmJSLoadFuncPtr(MAsmJSLoadFuncPtr* ins);
     void visitAsmJSLoadFFIFunc(MAsmJSLoadFFIFunc* ins);
     void visitAsmJSParameter(MAsmJSParameter* ins);
     void visitAsmJSReturn(MAsmJSReturn* ins);
@@ -294,11 +296,6 @@ class LIRGenerator : public LIRGeneratorSpecific
     void visitRecompileCheck(MRecompileCheck* ins);
     void visitSimdBox(MSimdBox* ins);
     void visitSimdUnbox(MSimdUnbox* ins);
-    void visitSimdExtractElement(MSimdExtractElement* ins);
-    void visitSimdInsertElement(MSimdInsertElement* ins);
-    void visitSimdSwizzle(MSimdSwizzle* ins);
-    void visitSimdGeneralShuffle(MSimdGeneralShuffle* ins);
-    void visitSimdShuffle(MSimdShuffle* ins);
     void visitSimdUnaryArith(MSimdUnaryArith* ins);
     void visitSimdBinaryComp(MSimdBinaryComp* ins);
     void visitSimdBinaryBitwise(MSimdBinaryBitwise* ins);

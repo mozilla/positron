@@ -21,9 +21,7 @@ namespace mozilla {
 class VorbisDataDecoder : public MediaDataDecoder
 {
 public:
-  VorbisDataDecoder(const AudioInfo& aConfig,
-                FlushableTaskQueue* aTaskQueue,
-                MediaDataDecoderCallback* aCallback);
+  explicit VorbisDataDecoder(const CreateDecoderParams& aParams);
   ~VorbisDataDecoder();
 
   RefPtr<InitPromise> Init() override;
@@ -43,12 +41,12 @@ public:
 private:
   nsresult DecodeHeader(const unsigned char* aData, size_t aLength);
 
-  void Decode (MediaRawData* aSample);
-  int DoDecode (MediaRawData* aSample);
-  void DoDrain ();
+  void ProcessDecode(MediaRawData* aSample);
+  int DoDecode(MediaRawData* aSample);
+  void ProcessDrain();
 
   const AudioInfo& mInfo;
-  RefPtr<FlushableTaskQueue> mTaskQueue;
+  const RefPtr<TaskQueue> mTaskQueue;
   MediaDataDecoderCallback* mCallback;
 
   // Vorbis decoder state
@@ -61,6 +59,7 @@ private:
   int64_t mFrames;
   Maybe<int64_t> mLastFrameTime;
   UniquePtr<AudioConverter> mAudioConverter;
+  Atomic<bool> mIsFlushing;
 };
 
 } // namespace mozilla

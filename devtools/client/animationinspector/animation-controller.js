@@ -14,12 +14,12 @@
 
 var { classes: Cc, interfaces: Ci, utils: Cu, results: Cr } = Components;
 
-var { loader, require } = Cu.import("resource://devtools/shared/Loader.jsm");
+var { loader, require } = Cu.import("resource://devtools/shared/Loader.jsm", {});
 var { Task } = require("devtools/shared/task");
 
 loader.lazyRequireGetter(this, "promise");
 loader.lazyRequireGetter(this, "EventEmitter", "devtools/shared/event-emitter");
-loader.lazyRequireGetter(this, "AnimationsFront", "devtools/server/actors/animation", true);
+loader.lazyRequireGetter(this, "AnimationsFront", "devtools/shared/fronts/animation", true);
 
 const { LocalizationHelper } = require("devtools/client/shared/l10n");
 

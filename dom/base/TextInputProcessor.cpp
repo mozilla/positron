@@ -5,10 +5,12 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "gfxPrefs.h"
+#include "mozilla/dom/Event.h"
 #include "mozilla/EventForwards.h"
 #include "mozilla/TextEventDispatcher.h"
 #include "mozilla/TextEvents.h"
 #include "mozilla/TextInputProcessor.h"
+#include "nsContentUtils.h"
 #include "nsIDocShell.h"
 #include "nsIWidget.h"
 #include "nsPIDOMWindow.h"
@@ -422,11 +424,13 @@ TextInputProcessor::AppendClauseToPendingComposition(uint32_t aLength,
 {
   MOZ_RELEASE_ASSERT(nsContentUtils::IsCallerChrome());
   RefPtr<TextEventDispatcher> kungfuDeathGrip(mDispatcher);
+  TextRangeType textRangeType;
   switch (aAttribute) {
     case ATTR_RAW_CLAUSE:
     case ATTR_SELECTED_RAW_CLAUSE:
     case ATTR_CONVERTED_CLAUSE:
     case ATTR_SELECTED_CLAUSE:
+      textRangeType = ToTextRangeType(aAttribute);
       break;
     default:
       return NS_ERROR_INVALID_ARG;
@@ -435,7 +439,7 @@ TextInputProcessor::AppendClauseToPendingComposition(uint32_t aLength,
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }
-  return mDispatcher->AppendClauseToPendingComposition(aLength, aAttribute);
+  return mDispatcher->AppendClauseToPendingComposition(aLength, textRangeType);
 }
 
 NS_IMETHODIMP

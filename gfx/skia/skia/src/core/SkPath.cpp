@@ -504,6 +504,9 @@ bool SkPath::isRectContour(bool allowPartial, int* currVerb, const SkPoint** pts
                     *currVerb -= 1;  // try move again afterwards
                     goto addMissingClose;
                 }
+                if (pts != *ptsPtr) {
+                    return false;
+                }
                 last = *pts++;
                 closedOrMoved = true;
                 break;
@@ -2799,7 +2802,9 @@ static int winding_mono_cubic(const SkPoint pts[], SkScalar x, SkScalar y, int* 
 
     // compute the actual x(t) value
     SkScalar t;
-    SkAssertResult(SkCubicClipper::ChopMonoAtY(pts, y, &t));
+    if (!SkCubicClipper::ChopMonoAtY(pts, y, &t)) {
+      return 0;
+    }
     SkScalar xt = eval_cubic_pts(pts[0].fX, pts[1].fX, pts[2].fX, pts[3].fX, t);
     if (SkScalarNearlyEqual(xt, x)) {
         if (x != pts[3].fX || y != pts[3].fY) {  // don't test end points; they're start points
@@ -3036,7 +3041,9 @@ static void tangent_cubic(const SkPoint pts[], SkScalar x, SkScalar y,
     for (int i = 0; i <= n; ++i) {
         SkPoint* c = &dst[i * 3];
         SkScalar t;
-        SkAssertResult(SkCubicClipper::ChopMonoAtY(c, y, &t));
+        if (!SkCubicClipper::ChopMonoAtY(c, y, &t)) {
+          continue;
+        }
         SkScalar xt = eval_cubic_pts(c[0].fX, c[1].fX, c[2].fX, c[3].fX, t);
         if (!SkScalarNearlyEqual(x, xt)) {
             continue;

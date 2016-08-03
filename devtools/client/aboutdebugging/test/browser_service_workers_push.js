@@ -1,7 +1,6 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
-/* eslint-disable mozilla/no-cpows-in-tests */
 /* global sendAsyncMessage */
 
 "use strict";
@@ -12,10 +11,8 @@
 
 // Service workers can't be loaded from chrome://, but http:// is ok with
 // dom.serviceWorkers.testing.enabled turned on.
-const HTTP_ROOT = CHROME_ROOT.replace(
-  "chrome://mochitests/content/", "http://mochi.test:8888/");
-const SERVICE_WORKER = HTTP_ROOT + "service-workers/push-sw.js";
-const TAB_URL = HTTP_ROOT + "service-workers/push-sw.html";
+const SERVICE_WORKER = URL_ROOT + "service-workers/push-sw.js";
+const TAB_URL = URL_ROOT + "service-workers/push-sw.html";
 
 add_task(function* () {
   info("Turn on workers via mochitest http.");
@@ -37,16 +34,16 @@ add_task(function* () {
   let swTab = yield addTab(TAB_URL);
 
   info("Make the test page notify us when the service worker sends a message.");
-  let frameScript = function () {
+
+  yield ContentTask.spawn(swTab.linkedBrowser, {}, function () {
     let win = content.wrappedJSObject;
     win.navigator.serviceWorker.addEventListener("message", function (event) {
       sendAsyncMessage(event.data);
     }, false);
-  };
-  let mm = swTab.linkedBrowser.messageManager;
-  mm.loadFrameScript("data:,(" + encodeURIComponent(frameScript) + ")()", true);
+  });
 
   // Expect the service worker to claim the test window when activating.
+  let mm = swTab.linkedBrowser.messageManager;
   let onClaimed = new Promise(done => {
     mm.addMessageListener("sw-claimed", function listener() {
       mm.removeMessageListener("sw-claimed", listener);
@@ -90,8 +87,12 @@ add_task(function* () {
   ok(true, "Service worker received a push notification");
 
   // Finally, unregister the service worker itself.
-  yield unregisterServiceWorker(swTab);
-  ok(true, "Service worker registration unregistered");
+  try {
+    yield unregisterServiceWorker(swTab);
+    ok(true, "Service worker registration unregistered");
+  } catch (e) {
+    ok(false, "SW not unregistered; " + e);
+  }
 
   yield removeTab(swTab);
   yield closeAboutDebugging(tab);

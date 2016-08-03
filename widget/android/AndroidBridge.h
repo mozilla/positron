@@ -177,10 +177,18 @@ public:
 
     bool GetClipboardText(nsAString& aText);
 
+    void ShowPersistentAlertNotification(const nsAString& aPersistentData,
+                                         const nsAString& aImageUrl,
+                                         const nsAString& aAlertTitle,
+                                         const nsAString& aAlertText,
+                                         const nsAString& aAlertCookie,
+                                         const nsAString& aAlertName,
+                                         nsIPrincipal* aPrincipal);
+
     void ShowAlertNotification(const nsAString& aImageUrl,
                                const nsAString& aAlertTitle,
                                const nsAString& aAlertText,
-                               const nsAString& aAlertData,
+                               const nsAString& aAlertCookie,
                                nsIObserver *aAlertListener,
                                const nsAString& aAlertName,
                                nsIPrincipal* aPrincipal);
@@ -227,9 +235,6 @@ public:
 
     void *AcquireNativeWindowFromSurfaceTexture(JNIEnv* aEnv, jobject aSurface);
     void ReleaseNativeWindowForSurfaceTexture(void *window);
-
-    bool LockWindow(void *window, unsigned char **bits, int *width, int *height, int *format, int *stride);
-    bool UnlockWindow(void *window);
 
     void HandleGeckoMessage(JSContext* cx, JS::HandleObject message);
 
@@ -403,8 +408,6 @@ protected:
     void (*ANativeWindow_release)(void *window);
     int (*ANativeWindow_setBuffersGeometry)(void *window, int width, int height, int format);
 
-    int (* ANativeWindow_lock)(void *window, void *outBuffer, void *inOutDirtyBounds);
-    int (* ANativeWindow_unlockAndPost)(void *window);
     int (* ANativeWindow_getWidth)(void * window);
     int (* ANativeWindow_getHeight)(void * window);
 
@@ -599,6 +602,10 @@ private:
 
   void AddObservers();
   void RemoveObservers();
+
+  void UpdateAudioPlayingWindows(nsPIDOMWindowOuter* aWindow, bool aPlaying);
+
+  nsTArray<nsPIDOMWindowOuter*> mAudioPlayingWindows;
 
 protected:
 };

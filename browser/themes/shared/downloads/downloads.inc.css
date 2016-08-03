@@ -13,7 +13,8 @@
 
 /*** Panel and outer controls ***/
 
-#downloadsPanel > .panel-arrowcontainer > .panel-arrowcontent {
+#downloadsPanel > .panel-arrowcontainer > .panel-arrowcontent,
+#downloadsPanel-multiView > .panel-viewcontainer > .panel-viewstack > .panel-subviews {
   padding: 0;
 }
 
@@ -23,23 +24,29 @@
   color: inherit;
 }
 
-#downloadsPanel:not([hasdownloads]) > #downloadsListBox {
-  display: none;
-}
-
-#downloadsPanel[hasdownloads] > #emptyDownloads {
-  display: none;
-}
-
 #emptyDownloads {
   padding: 10px 20px;
-  max-width: 40ch;
+  /* The panel can be wider than this description after the blocked subview is
+     shown, so center the text. */
+  text-align: center;
 }
 
 #downloadsSummary {
-  padding: 8px 38px 8px 12px;
+  --summary-padding-end: 38px;
+  --summary-padding-start: 12px;
+  padding: 8px var(--summary-padding-end) 8px var(--summary-padding-start);
   cursor: pointer;
   -moz-user-focus: normal;
+}
+
+#downloadsSummary:-moz-locale-dir(rtl) {
+  padding-right: var(--summary-padding-start);
+  padding-left: var(--summary-padding-end);
+}
+
+#downloadsSummaryChildBox {
+  -moz-margin-start: var(--summary-padding-start);
+  -moz-margin-end: var(--summary-padding-end);
 }
 
 #downloadsSummary > .downloadTypeIcon {
@@ -93,14 +100,31 @@ richlistitem[type="download"]:last-child {
 }
 
 .downloadTypeIcon {
+  --inline-offset: 8px;
+  --block-offset: 4px;
+  --icon-size: 32px;
+}
+
+.downloadTypeIcon {
   margin-inline-end: 8px;
   /* Prevent flickering when changing states. */
-  height: 32px;
-  width: 32px;
+  width: calc(var(--icon-size) + var(--inline-offset));
+  height: calc(var(--icon-size) + var(--block-offset));
+  padding: var(--block-offset) var(--inline-offset) 0 0;
 }
 
 .blockedIcon {
-  list-style-image: url("chrome://global/skin/icons/Error.png");
+  --overlay-image-dimensions: top right / 16px no-repeat;
+  padding: 0;
+  background: url("chrome://browser/skin/downloads/download-blocked.svg") var(--overlay-image-dimensions);
+}
+
+@item@[verdict="PotentiallyUnwanted"] .blockedIcon {
+  background: url("chrome://browser/skin/warning.svg") var(--overlay-image-dimensions);
+}
+
+@item@[verdict="Uncommon"] .blockedIcon {
+  background: url("chrome://browser/skin/info.svg") var(--overlay-image-dimensions);
 }
 
 /* We hold .downloadTarget, .downloadProgress and .downloadDetails inside of
@@ -152,4 +176,75 @@ richlistitem[type="download"]:last-child {
 
 .downloadButton > .button-box {
   padding: 0;
+}
+
+
+/*** Blocked subview ***/
+
+#downloadsPanel-multiView > .panel-viewcontainer > .panel-viewstack[viewtype=main] > .panel-subviews {
+  /* When the main view is showing, the shadow on the left edge of the subview is
+     barely visible on the right edge of the main view, so set it to none. */
+  box-shadow: none;
+}
+
+/* When the subview is showing, turn the download button into an arrow pointing
+   back to the main view. */
+#downloadsPanel-multiView > .panel-viewcontainer > .panel-viewstack[viewtype="subview"] .download-state[showingsubview] .downloadButton {
+  list-style-image: url("chrome://browser/skin/customizableui/subView-arrow-back-inverted.png");
+}
+
+#downloadsPanel-multiView > .panel-viewcontainer > .panel-viewstack[viewtype="subview"] .download-state[showingsubview] .downloadButton:-moz-locale-dir(rtl) {
+  list-style-image: url("chrome://browser/skin/customizableui/subView-arrow-back-inverted-rtl.png");
+}
+
+#downloadsPanel-blockedSubview {
+  background-image: url("chrome://browser/skin/warning.svg");
+  background-size: 32px 32px;
+  background-position: 16px 16px;
+  background-repeat: no-repeat;
+}
+
+#downloadsPanel-blockedSubview:-moz-locale-dir(rtl) {
+  background-position: calc(100% - 16px) 16px;
+}
+
+#downloadsPanel-blockedSubview[verdict=Malware] {
+  background-image: url("chrome://browser/skin/downloads/download-blocked.svg");
+}
+
+#downloadsPanel-blockedSubview-title {
+  margin-top: 16px;
+  margin-bottom: 16px;
+  font-size: calc(100% / var(--downloads-item-font-size-factor));
+}
+
+#downloadsPanel-blockedSubview-details1,
+#downloadsPanel-blockedSubview-details2 {
+  font-size: calc(100% * var(--downloads-item-font-size-factor));
+  margin-bottom: 16px;
+  opacity: var(--downloads-item-details-opacity);
+}
+
+#downloadsPanel-blockedSubview-title,
+#downloadsPanel-blockedSubview-details1,
+#downloadsPanel-blockedSubview-details2 {
+  -moz-margin-start: 64px;
+  -moz-margin-end: 16px;
+}
+
+#downloadsPanel-blockedSubview-buttons {
+  height: 41px;
+  cursor: pointer;
+}
+
+#downloadsPanel-blockedSubview-buttons > button {
+  -moz-appearance: none;
+  padding: 0;
+  margin: 0;
+  background-color: transparent;
+}
+
+#downloadsPanel-blockedSubview-buttons > button[default] {
+  background-color: Highlight;
+  color: HighlightText;
 }

@@ -12,7 +12,7 @@ interface URI;
 interface nsIDocShell;
 interface nsILoadGroup;
 
-enum VisibilityState { "hidden", "visible" };
+enum VisibilityState { "hidden", "visible", "prerender" };
 
 /* http://dom.spec.whatwg.org/#interface-document */
 [Constructor]
@@ -116,7 +116,6 @@ partial interface Document {
   //(HTML only)readonly attribute HTMLCollection forms;
   //(HTML only)readonly attribute HTMLCollection scripts;
   //(HTML only)NodeList getElementsByName(DOMString elementName);
-  //(HTML only)NodeList getItems(optional DOMString typeNames); // microdata
   //(Not implemented)readonly attribute DOMElementMap cssElementMap;
 
   // dynamic markup insertion
@@ -223,24 +222,30 @@ partial interface Document {
 // https://fullscreen.spec.whatwg.org/#api
 partial interface Document {
   // Note: Per spec the 'S' in these two is lowercase, but the "Moz"
-  // versions hve it uppercase.
+  // versions have it uppercase.
   [LenientSetter, Func="nsDocument::IsUnprefixedFullscreenEnabled"]
   readonly attribute boolean fullscreen;
-  [BinaryName="fullscreen", Deprecated="PrefixedFullscreenAPI"]
+  [BinaryName="fullscreen"]
   readonly attribute boolean mozFullScreen;
   [LenientSetter, Func="nsDocument::IsUnprefixedFullscreenEnabled"]
   readonly attribute boolean fullscreenEnabled;
-  [BinaryName="fullscreenEnabled", Deprecated="PrefixedFullscreenAPI"]
+  [BinaryName="fullscreenEnabled"]
   readonly attribute boolean mozFullScreenEnabled;
   [LenientSetter, Func="nsDocument::IsUnprefixedFullscreenEnabled"]
   readonly attribute Element? fullscreenElement;
-  [BinaryName="fullscreenElement", Deprecated="PrefixedFullscreenAPI"]
+  [BinaryName="fullscreenElement"]
   readonly attribute Element? mozFullScreenElement;
 
   [Func="nsDocument::IsUnprefixedFullscreenEnabled"]
   void exitFullscreen();
-  [BinaryName="exitFullscreen", Deprecated="PrefixedFullscreenAPI"]
+  [BinaryName="exitFullscreen"]
   void mozCancelFullScreen();
+
+  // Events handlers
+  [Func="nsDocument::IsUnprefixedFullscreenEnabled"]
+  attribute EventHandler onfullscreenchange;
+  [Func="nsDocument::IsUnprefixedFullscreenEnabled"]
+  attribute EventHandler onfullscreenerror;
 };
 
 // http://dvcs.w3.org/hg/pointerlock/raw-file/default/index.html#extensions-to-the-document-interface
@@ -258,9 +263,9 @@ partial interface Document {
 //http://dvcs.w3.org/hg/webcomponents/raw-file/tip/spec/custom/index.html#dfn-document-register
 partial interface Document {
     [NewObject, Throws]
-    Element createElement(DOMString localName, DOMString typeExtension);
+    Element createElement(DOMString localName, DOMString? typeExtension);
     [NewObject, Throws]
-    Element createElementNS(DOMString? namespace, DOMString qualifiedName, DOMString typeExtension);
+    Element createElementNS(DOMString? namespace, DOMString qualifiedName, DOMString? typeExtension);
 };
 
 // http://dvcs.w3.org/hg/webperf/raw-file/tip/specs/PageVisibility/Overview.html#sec-document-interface
@@ -387,6 +392,14 @@ partial interface Document {
   [ChromeOnly] readonly attribute boolean isSrcdocDocument;
 };
 
+
+// Extension to give chrome JS the ability to get the underlying
+// sandbox flag attribute
+partial interface Document {
+  [ChromeOnly] readonly attribute DOMString? sandboxFlagsAsString;
+};
+
+
 /**
  * Chrome document anonymous content management.
  * This is a Chrome-only API that allows inserting fixed positioned anonymous
@@ -415,6 +428,12 @@ partial interface Document {
 // the user has interacted with the document or not.
 partial interface Document {
   [ChromeOnly] readonly attribute boolean userHasInteracted;
+};
+
+// Extension to give chrome and XBL JS the ability to determine whether
+// the document is sandboxed without permission to run scripts.
+partial interface Document {
+  [Func="IsChromeOrXBL"] readonly attribute boolean hasScriptsBlockedBySandbox;
 };
 
 Document implements XPathEvaluator;

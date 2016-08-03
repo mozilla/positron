@@ -6,7 +6,7 @@
 
 "use strict";
 
-const {Cc, Ci, Cu} = require("chrome");
+const {Ci, Cu} = require("chrome");
 
 const Services = require("Services");
 
@@ -20,7 +20,6 @@ loader.lazyRequireGetter(this, "TableWidget", "devtools/client/shared/widgets/Ta
 loader.lazyRequireGetter(this, "ObjectClient", "devtools/shared/client/main", true);
 
 const { extend } = require("sdk/core/heritage");
-const URI = Cc["@mozilla.org/network/io-service;1"].getService(Ci.nsIIOService);
 const XHTML_NS = "http://www.w3.org/1999/xhtml";
 const XUL_NS = "http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul";
 const STRINGS_URI = "chrome://devtools/locale/webconsole.properties";
@@ -29,9 +28,12 @@ const WebConsoleUtils = require("devtools/shared/webconsole/utils").Utils;
 const { getSourceNames } = require("devtools/client/shared/source-utils");
 const {Task} = require("devtools/shared/task");
 const l10n = new WebConsoleUtils.L10n(STRINGS_URI);
+const nodeConstants = require("devtools/shared/dom-node-constants");
 
 const MAX_STRING_GRIP_LENGTH = 36;
 const ELLIPSIS = Services.prefs.getComplexValue("intl.ellipsis", Ci.nsIPrefLocalizedString).data;
+
+const validProtocols = /^(http|https|ftp|data|javascript|resource|chrome):/i;
 
 // Constants for compatibility with the Web Console output implementation before
 // bug 778766.
@@ -781,6 +783,15 @@ Messages.Simple.prototype = extend(Messages.BaseMessage.prototype, {
    */
   _message: null,
 
+  /**
+   * The message's "attachment" element to be displayed under the message.
+   * Used for things like stack traces or tables in console.table().
+   *
+   * @private
+   * @type DOMElement|null
+   */
+  _attachment: null,
+
   _objectActors: null,
   _groupDepthCompat: 0,
 
@@ -900,10 +911,6 @@ Messages.Simple.prototype = extend(Messages.BaseMessage.prototype, {
     indentNode.style.width = indent + "px";
 
     let body = this._renderBody();
-    this._repeatID.textContent += "|" + body.textContent;
-
-    let repeatNode = this._renderRepeatNode();
-    let location = this._renderLocation();
 
     Messages.BaseMessage.prototype.render.call(this);
     if (this._className) {
@@ -929,12 +936,6 @@ Messages.Simple.prototype = extend(Messages.BaseMessage.prototype, {
     }
 
     this.element.appendChild(body);
-    if (repeatNode) {
-      this.element.appendChild(repeatNode);
-    }
-    if (location) {
-      this.element.appendChild(location);
-    }
 
     this.element.appendChild(this.document.createTextNode("\n"));
 
@@ -959,19 +960,24 @@ Messages.Simple.prototype = extend(Messages.BaseMessage.prototype, {
    */
   _renderBody: function ()
   {
+    let bodyWrapper = this.document.createElementNS(XHTML_NS, "span");
+    bodyWrapper.className = "message-body-wrapper";
+
+    let bodyFlex = this.document.createElementNS(XHTML_NS, "span");
+    bodyFlex.className = "message-flex-body";
+    bodyWrapper.appendChild(bodyFlex);
+
     let body = this.document.createElementNS(XHTML_NS, "span");
-    body.className = "message-body-wrapper message-body devtools-monospace";
+    body.className = "message-body devtools-monospace";
+    bodyFlex.appendChild(body);
 
-    let bodyInner = this.document.createElementNS(XHTML_NS, "span");
-    body.appendChild(bodyInner);
-
-    let anchor, container = bodyInner;
+    let anchor, container = body;
     if (this._link || this._linkCallback) {
       container = anchor = this.document.createElementNS(XHTML_NS, "a");
       anchor.href = this._link || "#";
       anchor.draggable = false;
       this._addLinkCallback(anchor, this._linkCallback);
-      bodyInner.appendChild(anchor);
+      body.appendChild(anchor);
     }
 
     if (typeof this._message == "function") {
@@ -982,13 +988,28 @@ Messages.Simple.prototype = extend(Messages.BaseMessage.prototype, {
       container.textContent = this._message;
     }
 
-    if (this.stack) {
-      let stack = new Widgets.Stacktrace(this, this.stack).render().element;
-      body.appendChild(this.document.createTextNode("\n"));
-      body.appendChild(stack);
+    // do this before repeatNode is rendered - it has no effect afterwards
+    this._repeatID.textContent += "|" + container.textContent;
+
+    let repeatNode = this._renderRepeatNode();
+    let location = this._renderLocation();
+
+    if (repeatNode) {
+      bodyFlex.appendChild(repeatNode);
+    }
+    if (location) {
+      bodyFlex.appendChild(location);
     }
 
-    return body;
+    if (this.stack) {
+      this._attachment = new Widgets.Stacktrace(this, this.stack).render().element;
+    }
+
+    if (this._attachment) {
+      bodyWrapper.appendChild(this._attachment);
+    }
+
+    return bodyWrapper;
   },
 
   /**
@@ -1028,9 +1049,7 @@ Messages.Simple.prototype = extend(Messages.BaseMessage.prototype, {
 
     // The ConsoleOutput owner is a WebConsoleFrame instance from webconsole.js.
     // TODO: move createLocationNode() into this file when bug 778766 is fixed.
-    return this.output.owner.createLocationNode({url: url,
-                                                 line: line,
-                                                 column: column});
+    return this.output.owner.createLocationNode({url, line, column });
   },
 
   /**
@@ -1432,31 +1451,8 @@ Messages.ConsoleGeneric.prototype = extend(Messages.Extended.prototype, {
 
   render: function ()
   {
-    let msg = this.document.createElementNS(XHTML_NS, "span");
-    msg.className = "message-body devtools-monospace";
-
-    this._renderBodyPieces(msg);
-
-    let repeatNode = Messages.Simple.prototype._renderRepeatNode.call(this);
-    let location = Messages.Simple.prototype._renderLocation.call(this);
-    if (location) {
-      location.target = "jsdebugger";
-    }
-
-    let flex = this.document.createElementNS(XHTML_NS, "span");
-    flex.className = "message-flex-body";
-
-    flex.appendChild(msg);
-
-    if (repeatNode) {
-      flex.appendChild(repeatNode);
-    }
-    if (location) {
-      flex.appendChild(location);
-    }
-
     let result = this.document.createDocumentFragment();
-    result.appendChild(flex);
+    this._renderBodyPieces(result);
 
     this._message = result;
     this._stacktrace = null;
@@ -1464,13 +1460,6 @@ Messages.ConsoleGeneric.prototype = extend(Messages.Extended.prototype, {
     Messages.Simple.prototype.render.call(this);
 
     return this;
-  },
-
-  _renderBody: function ()
-  {
-    let body = Messages.Simple.prototype._renderBody.apply(this, arguments);
-    body.classList.remove("devtools-monospace", "message-body");
-    return body;
   },
 
   _renderBodyPieces: function (container)
@@ -1507,7 +1496,7 @@ Messages.ConsoleGeneric.prototype = extend(Messages.Extended.prototype, {
     let result = elem;
 
     if (style) {
-      if (elem.nodeType == Ci.nsIDOMNode.ELEMENT_NODE) {
+      if (elem.nodeType == nodeConstants.ELEMENT_NODE) {
         elem.style = style;
       } else {
         let span = this.document.createElementNS(XHTML_NS, "span");
@@ -1519,11 +1508,6 @@ Messages.ConsoleGeneric.prototype = extend(Messages.Extended.prototype, {
 
     return result;
   },
-
-  // no-op for the message location and .repeats elements.
-  // |this.render()| handles customized message output.
-  _renderLocation: function () { },
-  _renderRepeatNode: function () { },
 
   /**
    * Given a style attribute value, return a cleaned up version of the string
@@ -1594,8 +1578,7 @@ Messages.ConsoleTrace = function (packet)
     },
   };
 
-  this._renderStack = this._renderStack.bind(this);
-  Messages.Simple.call(this, this._renderStack, options);
+  Messages.Simple.call(this, null, options);
 
   this._repeatID.consoleApiLevel = packet.level;
   this._stacktrace = this._repeatID.stacktrace = packet.stacktrace;
@@ -1638,21 +1621,19 @@ Messages.ConsoleTrace.prototype = extend(Messages.Simple.prototype, {
     return result;
   },
 
-  render: function ()
-  {
+  render: function () {
+    this._message = this._renderMessage();
+    this._attachment = this._renderStack();
+
     Messages.Simple.prototype.render.apply(this, arguments);
     this.element.setAttribute("open", true);
     return this;
   },
 
   /**
-   * Render the stack frames.
-   *
-   * @private
-   * @return DOMElement
+   * Render the console messageNode
    */
-  _renderStack: function ()
-  {
+  _renderMessage: function () {
     let cmvar = this.document.createElementNS(XHTML_NS, "span");
     cmvar.className = "cm-variable";
     cmvar.textContent = "console";
@@ -1661,50 +1642,24 @@ Messages.ConsoleTrace.prototype = extend(Messages.Simple.prototype, {
     cmprop.className = "cm-property";
     cmprop.textContent = "trace";
 
-    let title = this.document.createElementNS(XHTML_NS, "span");
-    title.className = "message-body devtools-monospace";
-    title.appendChild(cmvar);
-    title.appendChild(this.document.createTextNode("."));
-    title.appendChild(cmprop);
-    title.appendChild(this.document.createTextNode("():"));
-
-    let repeatNode = Messages.Simple.prototype._renderRepeatNode.call(this);
-    let location = Messages.Simple.prototype._renderLocation.call(this);
-    if (location) {
-      location.target = "jsdebugger";
-    }
-
-    let widget = new Widgets.Stacktrace(this, this._stacktrace).render();
-
-    let body = this.document.createElementNS(XHTML_NS, "span");
-    body.className = "message-flex-body";
-    body.appendChild(title);
-    if (repeatNode) {
-      body.appendChild(repeatNode);
-    }
-    if (location) {
-      body.appendChild(location);
-    }
-    body.appendChild(this.document.createTextNode("\n"));
-
     let frag = this.document.createDocumentFragment();
-    frag.appendChild(body);
-    frag.appendChild(widget.element);
+    frag.appendChild(cmvar);
+    frag.appendChild(this.document.createTextNode("."));
+    frag.appendChild(cmprop);
+    frag.appendChild(this.document.createTextNode("():"));
 
     return frag;
   },
 
-  _renderBody: function ()
-  {
-    let body = Messages.Simple.prototype._renderBody.apply(this, arguments);
-    body.classList.remove("devtools-monospace", "message-body");
-    return body;
+  /**
+   * Render the stack frames.
+   *
+   * @private
+   * @return DOMElement
+   */
+  _renderStack: function () {
+    return new Widgets.Stacktrace(this, this._stacktrace).render().element;
   },
-
-  // no-op for the message location and .repeats elements.
-  // |this._renderStack| handles customized message output.
-  _renderLocation: function () { },
-  _renderRepeatNode: function () { },
 }); // Messages.ConsoleTrace.prototype
 
 /**
@@ -1731,8 +1686,8 @@ Messages.ConsoleTable = function (packet)
   };
 
   this._populateTableData = this._populateTableData.bind(this);
-  this._renderTable = this._renderTable.bind(this);
-  Messages.Extended.call(this, [this._renderTable], options);
+  this._renderMessage = this._renderMessage.bind(this);
+  Messages.Extended.call(this, [this._renderMessage], options);
 
   this._repeatID.consoleApiLevel = packet.level;
   this._arguments = packet.arguments;
@@ -1963,19 +1918,13 @@ Messages.ConsoleTable.prototype = extend(Messages.Extended.prototype, {
 
   render: function ()
   {
+    this._attachment = this._renderTable();
     Messages.Extended.prototype.render.apply(this, arguments);
     this.element.setAttribute("open", true);
     return this;
   },
 
-  /**
-   * Render the table.
-   *
-   * @private
-   * @return DOMElement
-   */
-  _renderTable: function ()
-  {
+  _renderMessage: function () {
     let cmvar = this.document.createElementNS(XHTML_NS, "span");
     cmvar.className = "cm-variable";
     cmvar.textContent = "console";
@@ -1984,32 +1933,23 @@ Messages.ConsoleTable.prototype = extend(Messages.Extended.prototype, {
     cmprop.className = "cm-property";
     cmprop.textContent = "table";
 
-    let title = this.document.createElementNS(XHTML_NS, "span");
-    title.className = "message-body devtools-monospace";
-    title.appendChild(cmvar);
-    title.appendChild(this.document.createTextNode("."));
-    title.appendChild(cmprop);
-    title.appendChild(this.document.createTextNode("():"));
+    let frag = this.document.createDocumentFragment();
+    frag.appendChild(cmvar);
+    frag.appendChild(this.document.createTextNode("."));
+    frag.appendChild(cmprop);
+    frag.appendChild(this.document.createTextNode("():"));
 
-    let repeatNode = Messages.Simple.prototype._renderRepeatNode.call(this);
-    let location = Messages.Simple.prototype._renderLocation.call(this);
-    if (location) {
-      location.target = "jsdebugger";
-    }
+    return frag;
+  },
 
-    let body = this.document.createElementNS(XHTML_NS, "span");
-    body.className = "message-flex-body";
-    body.appendChild(title);
-    if (repeatNode) {
-      body.appendChild(repeatNode);
-    }
-    if (location) {
-      body.appendChild(location);
-    }
-    body.appendChild(this.document.createTextNode("\n"));
-
+  /**
+   * Render the table.
+   *
+   * @private
+   * @return DOMElement
+   */
+  _renderTable: function () {
     let result = this.document.createElementNS(XHTML_NS, "div");
-    result.appendChild(body);
 
     if (this._populatePromise) {
       this._populatePromise.then(() => {
@@ -2035,18 +1975,6 @@ Messages.ConsoleTable.prototype = extend(Messages.Extended.prototype, {
 
     return result;
   },
-
-  _renderBody: function ()
-  {
-    let body = Messages.Simple.prototype._renderBody.apply(this, arguments);
-    body.classList.remove("devtools-monospace", "message-body");
-    return body;
-  },
-
-  // no-op for the message location and .repeats elements.
-  // |this._renderTable| handles customized message output.
-  _renderLocation: function () { },
-  _renderRepeatNode: function () { },
 }); // Messages.ConsoleTable.prototype
 
 var Widgets = {};
@@ -2297,8 +2225,10 @@ Widgets.URLString.prototype = extend(Widgets.BaseWidget.prototype, {
    */
   _isURL: function (token) {
     try {
-      let uri = URI.newURI(token, null, null);
-      let url = uri.QueryInterface(Ci.nsIURL);
+      if (!validProtocols.test(token)) {
+        return false;
+      }
+      new URL(token);
       return true;
     } catch (e) {
       return false;
@@ -3055,12 +2985,12 @@ Widgets.ObjectRenderers.add({
     }
 
     switch (preview.nodeType) {
-      case Ci.nsIDOMNode.DOCUMENT_NODE:
-      case Ci.nsIDOMNode.ATTRIBUTE_NODE:
-      case Ci.nsIDOMNode.TEXT_NODE:
-      case Ci.nsIDOMNode.COMMENT_NODE:
-      case Ci.nsIDOMNode.DOCUMENT_FRAGMENT_NODE:
-      case Ci.nsIDOMNode.ELEMENT_NODE:
+      case nodeConstants.DOCUMENT_NODE:
+      case nodeConstants.ATTRIBUTE_NODE:
+      case nodeConstants.TEXT_NODE:
+      case nodeConstants.COMMENT_NODE:
+      case nodeConstants.DOCUMENT_FRAGMENT_NODE:
+      case nodeConstants.ELEMENT_NODE:
         return true;
       default:
         return false;
@@ -3070,26 +3000,26 @@ Widgets.ObjectRenderers.add({
   render: function ()
   {
     switch (this.objectActor.preview.nodeType) {
-      case Ci.nsIDOMNode.DOCUMENT_NODE:
+      case nodeConstants.DOCUMENT_NODE:
         this._renderDocumentNode();
         break;
-      case Ci.nsIDOMNode.ATTRIBUTE_NODE: {
+      case nodeConstants.ATTRIBUTE_NODE: {
         let {preview} = this.objectActor;
         this.element = this.el("span.attributeNode.kind-" + preview.kind);
         let attr = this._renderAttributeNode(preview.nodeName, preview.value, true);
         this.element.appendChild(attr);
         break;
       }
-      case Ci.nsIDOMNode.TEXT_NODE:
+      case nodeConstants.TEXT_NODE:
         this._renderTextNode();
         break;
-      case Ci.nsIDOMNode.COMMENT_NODE:
+      case nodeConstants.COMMENT_NODE:
         this._renderCommentNode();
         break;
-      case Ci.nsIDOMNode.DOCUMENT_FRAGMENT_NODE:
+      case nodeConstants.DOCUMENT_FRAGMENT_NODE:
         this._renderDocumentFragmentNode();
         break;
-      case Ci.nsIDOMNode.ELEMENT_NODE:
+      case nodeConstants.ELEMENT_NODE:
         this._renderElementNode();
         break;
       default:
@@ -3235,7 +3165,7 @@ Widgets.ObjectRenderers.add({
    * inspector, or rejects if it wasn't (either if no toolbox could be found to
    * access the inspector, or if the node isn't present in the inspector, i.e.
    * if the node is in a DocumentFragment or not part of the tree, or not of
-   * type Ci.nsIDOMNode.ELEMENT_NODE).
+   * type nodeConstants.ELEMENT_NODE).
    */
   linkToInspector: Task.async(function* ()
   {
@@ -3244,7 +3174,7 @@ Widgets.ObjectRenderers.add({
     }
 
     // Checking the node type
-    if (this.objectActor.preview.nodeType !== Ci.nsIDOMNode.ELEMENT_NODE) {
+    if (this.objectActor.preview.nodeType !== nodeConstants.ELEMENT_NODE) {
       throw new Error("The object cannot be linked to the inspector as it " +
         "isn't an element node");
     }
@@ -3253,8 +3183,8 @@ Widgets.ObjectRenderers.add({
     let target = this.message.output.toolboxTarget;
     this.toolbox = gDevTools.getToolbox(target);
     if (!this.toolbox) {
-      throw new Error("The object cannot be linked to the inspector without a " +
-        "toolbox");
+      // In cases like the browser console, there is no toolbox.
+      return;
     }
 
     // Checking that the inspector supports the node
@@ -3609,8 +3539,7 @@ Widgets.LongString.prototype = extend(Widgets.BaseWidget.prototype, {
  *        The stacktrace to display, array of frames as supplied by the server,
  *        over the remote protocol.
  */
-Widgets.Stacktrace = function (message, stacktrace)
-{
+Widgets.Stacktrace = function (message, stacktrace) {
   Widgets.BaseWidget.call(this, message);
   this.stacktrace = stacktrace;
 };
@@ -3622,72 +3551,31 @@ Widgets.Stacktrace.prototype = extend(Widgets.BaseWidget.prototype, {
    */
   stacktrace: null,
 
-  render: function ()
-  {
+  onViewSourceInDebugger(frame) {
+    this.output.openLocationInDebugger({
+      url: frame.source,
+      line: frame.line
+    });
+  },
+
+  render() {
     if (this.element) {
       return this;
     }
 
-    let result = this.element = this.document.createElementNS(XHTML_NS, "ul");
+    let result = this.element = this.document.createElementNS(XHTML_NS, "div");
     result.className = "stacktrace devtools-monospace";
 
     if (this.stacktrace) {
-      for (let frame of this.stacktrace) {
-        result.appendChild(this._renderFrame(frame));
-      }
+      this.output.owner.ReactDOM.render(this.output.owner.StackTraceView({
+        stacktrace: this.stacktrace,
+        onViewSourceInDebugger: frame => this.onViewSourceInDebugger(frame)
+      }), result);
     }
 
     return this;
-  },
-
-  /**
-   * Render a frame object received from the server.
-   *
-   * @param object frame
-   *        The stack frame to display. This object should have the following
-   *        properties: functionName, filename and lineNumber.
-   * @return DOMElement
-   *         The DOM element to display for the given frame.
-   */
-  _renderFrame: function (frame)
-  {
-    let fn = this.document.createElementNS(XHTML_NS, "span");
-    fn.className = "function";
-
-    let asyncCause = "";
-    if (frame.asyncCause) {
-      asyncCause =
-        l10n.getFormatStr("stacktrace.asyncStack", [frame.asyncCause]) + " ";
-    }
-
-    if (frame.functionName) {
-      let span = this.document.createElementNS(XHTML_NS, "span");
-      span.className = "cm-variable";
-      span.textContent = asyncCause + frame.functionName;
-      fn.appendChild(span);
-      fn.appendChild(this.document.createTextNode("()"));
-    } else {
-      fn.classList.add("cm-comment");
-      fn.textContent = asyncCause + l10n.getStr("stacktrace.anonymousFunction");
-    }
-
-    let location = this.output.owner.createLocationNode({url: frame.filename,
-                                                        line: frame.lineNumber});
-
-    // .devtools-monospace sets font-size to 80%, however .body already has
-    // .devtools-monospace. If we keep it here, the location would be rendered
-    // smaller.
-    location.classList.remove("devtools-monospace");
-
-    let elem = this.document.createElementNS(XHTML_NS, "li");
-    elem.appendChild(fn);
-    elem.appendChild(location);
-    elem.appendChild(this.document.createTextNode("\n"));
-
-    return elem;
-  },
-}); // Widgets.Stacktrace.prototype
-
+  }
+});
 
 /**
  * The table widget.

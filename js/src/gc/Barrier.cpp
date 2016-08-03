@@ -9,7 +9,7 @@
 #include "jscompartment.h"
 #include "jsobj.h"
 
-#include "asmjs/WasmModule.h"
+#include "asmjs/WasmJS.h"
 #include "builtin/TypedObject.h"
 #include "gc/Policy.h"
 #include "gc/Zone.h"
@@ -107,6 +107,27 @@ template void PreBarrierFunctor<jsid>::operator()<JS::Symbol>(JS::Symbol*);
 template void PreBarrierFunctor<jsid>::operator()<JSString>(JSString*);
 
 template <typename T>
+/* static */ bool
+MovableCellHasher<T>::hasHash(const Lookup& l)
+{
+    if (!l)
+        return true;
+
+    return l->zoneFromAnyThread()->hasUniqueId(l);
+}
+
+template <typename T>
+/* static */ bool
+MovableCellHasher<T>::ensureHash(const Lookup& l)
+{
+    if (!l)
+        return true;
+
+    uint64_t unusedId;
+    return l->zoneFromAnyThread()->getUniqueId(l, &unusedId);
+}
+
+template <typename T>
 /* static */ HashNumber
 MovableCellHasher<T>::hash(const Lookup& l)
 {
@@ -152,7 +173,7 @@ template struct MovableCellHasher<JSObject*>;
 template struct MovableCellHasher<GlobalObject*>;
 template struct MovableCellHasher<SavedFrame*>;
 template struct MovableCellHasher<ScopeObject*>;
-template struct MovableCellHasher<WasmModuleObject*>;
+template struct MovableCellHasher<WasmInstanceObject*>;
 template struct MovableCellHasher<JSScript*>;
 
 } // namespace js

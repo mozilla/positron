@@ -1,9 +1,9 @@
 [
 {
-"version": "Android NDK r11b",
-"size": 138385112,
+"version": "Android NDK r11c",
+"size": 138388708,
 "visibility": "internal",
-"digest": "eb397bfa09b4e2d64070c64c29946a9ed6a468b87675aa9e3a3c5a620144439bb20fa387b9becbb09c6dcf3d4df46ee2147a86ce73b196430db04d30edf9b471",
+"digest": "2dc605644e84fadf399a4e5cb60dfb3b42518803f80de15ef310ead4d0084a01dce3052bbf7d9dfb8bbe027019250235afe0a1e4ffdc87babc0f2bdbf2403232",
 "algorithm": "sha512",
 "filename": "android-ndk.tar.bz2",
 "unpack": true
@@ -12,13 +12,13 @@
 "versions": [
   "Android SDK 6.0 / API 23",
   "Android tools r24.4",
-  "Android build tools 23.0.1",
+  "Android build tools 23.0.3",
   "Android Support Repository (Support Library 23.0.1)",
   "Google Support Repository (Google Play Services 8.1.0)"
 ],
-"size": 510613380,
+"size": 573952124,
 "visibility": "internal", 
-"digest": "cdc5d661e5879ba9095c506090e1ed372a810ba073cf4e3e2c680b8d6a35016161d00c5f4b4859fe97a0decab816e9b882255271ed385b311304ad8cd600ac16",
+"digest": "1d495d7a7386af3f27b14982e0ff7b0963fd1a63a08040b9b1db0e94c9681fa3704c195ba8be23b5f73e15101b2b767293bc8f96e0584e17867ef13b074e5038",
 "algorithm": "sha512",
 "filename": "android-sdk-linux.tar.xz",
 "unpack": true

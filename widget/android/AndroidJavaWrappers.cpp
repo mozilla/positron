@@ -39,7 +39,6 @@ jfieldID AndroidGeckoEvent::jMetaStateField = 0;
 jfieldID AndroidGeckoEvent::jFlagsField = 0;
 jfieldID AndroidGeckoEvent::jCountField = 0;
 jfieldID AndroidGeckoEvent::jPointerIndexField = 0;
-jfieldID AndroidGeckoEvent::jLocationField = 0;
 jfieldID AndroidGeckoEvent::jConnectionTypeField = 0;
 jfieldID AndroidGeckoEvent::jIsWifiField = 0;
 jfieldID AndroidGeckoEvent::jDHCPGatewayField = 0;
@@ -70,15 +69,6 @@ jfieldID AndroidRectF::jLeftField = 0;
 jfieldID AndroidRectF::jRightField = 0;
 jfieldID AndroidRectF::jTopField = 0;
 
-jclass AndroidLocation::jLocationClass = 0;
-jmethodID AndroidLocation::jGetLatitudeMethod = 0;
-jmethodID AndroidLocation::jGetLongitudeMethod = 0;
-jmethodID AndroidLocation::jGetAltitudeMethod = 0;
-jmethodID AndroidLocation::jGetAccuracyMethod = 0;
-jmethodID AndroidLocation::jGetBearingMethod = 0;
-jmethodID AndroidLocation::jGetSpeedMethod = 0;
-jmethodID AndroidLocation::jGetTimeMethod = 0;
-
 RefCountedJavaObject::~RefCountedJavaObject() {
     if (mObject)
         GetEnvForThread()->DeleteGlobalRef(mObject);
@@ -90,7 +80,6 @@ mozilla::InitAndroidJavaWrappers(JNIEnv *jEnv)
 {
     AndroidGeckoEvent::InitGeckoEventClass(jEnv);
     AndroidPoint::InitPointClass(jEnv);
-    AndroidLocation::InitLocationClass(jEnv);
     AndroidRect::InitRectClass(jEnv);
     AndroidRectF::InitRectFClass(jEnv);
 }
@@ -123,7 +112,6 @@ AndroidGeckoEvent::InitGeckoEventClass(JNIEnv *jEnv)
     jFlagsField = geckoEvent.getField("mFlags", "I");
     jCountField = geckoEvent.getField("mCount", "I");
     jPointerIndexField = geckoEvent.getField("mPointerIndex", "I");
-    jLocationField = geckoEvent.getField("mLocation", "Landroid/location/Location;");
     jConnectionTypeField = geckoEvent.getField("mConnectionType", "I");
     jIsWifiField = geckoEvent.getField("mIsWifi", "Z");
     jDHCPGatewayField = geckoEvent.getField("mDHCPGateway", "I");
@@ -137,46 +125,6 @@ AndroidGeckoEvent::InitGeckoEventClass(JNIEnv *jEnv)
     jGamepadButtonPressedField = geckoEvent.getField("mGamepadButtonPressed", "Z");
     jGamepadButtonValueField = geckoEvent.getField("mGamepadButtonValue", "F");
     jGamepadValuesField = geckoEvent.getField("mGamepadValues", "[F");
-}
-
-void
-AndroidLocation::InitLocationClass(JNIEnv *jEnv)
-{
-    AutoJNIClass location(jEnv, "android/location/Location");
-    jLocationClass = location.getGlobalRef();
-    jGetLatitudeMethod = location.getMethod("getLatitude", "()D");
-    jGetLongitudeMethod = location.getMethod("getLongitude", "()D");
-    jGetAltitudeMethod = location.getMethod("getAltitude", "()D");
-    jGetAccuracyMethod = location.getMethod("getAccuracy", "()F");
-    jGetBearingMethod = location.getMethod("getBearing", "()F");
-    jGetSpeedMethod = location.getMethod("getSpeed", "()F");
-    jGetTimeMethod = location.getMethod("getTime", "()J");
-}
-
-nsGeoPosition*
-AndroidLocation::CreateGeoPosition(JNIEnv *jenv, jobject jobj)
-{
-    AutoLocalJNIFrame jniFrame(jenv);
-
-    double latitude  = jenv->CallDoubleMethod(jobj, jGetLatitudeMethod);
-    if (jniFrame.CheckForException()) return nullptr;
-    double longitude = jenv->CallDoubleMethod(jobj, jGetLongitudeMethod);
-    if (jniFrame.CheckForException()) return nullptr;
-    double altitude  = jenv->CallDoubleMethod(jobj, jGetAltitudeMethod);
-    if (jniFrame.CheckForException()) return nullptr;
-    float  accuracy  = jenv->CallFloatMethod (jobj, jGetAccuracyMethod);
-    if (jniFrame.CheckForException()) return nullptr;
-    float  bearing   = jenv->CallFloatMethod (jobj, jGetBearingMethod);
-    if (jniFrame.CheckForException()) return nullptr;
-    float  speed     = jenv->CallFloatMethod (jobj, jGetSpeedMethod);
-    if (jniFrame.CheckForException()) return nullptr;
-    long long time   = jenv->CallLongMethod  (jobj, jGetTimeMethod);
-    if (jniFrame.CheckForException()) return nullptr;
-
-    return new nsGeoPosition(latitude, longitude,
-                             altitude, accuracy,
-                             accuracy, bearing,
-                             speed,    time);
 }
 
 void
@@ -366,22 +314,6 @@ AndroidGeckoEvent::Init(JNIEnv *jenv, jobject jobj)
 
             break;
 
-        case SENSOR_EVENT:
-             mX = jenv->GetDoubleField(jobj, jXField);
-             mY = jenv->GetDoubleField(jobj, jYField);
-             mZ = jenv->GetDoubleField(jobj, jZField);
-             mW = jenv->GetDoubleField(jobj, jWField);
-             mFlags = jenv->GetIntField(jobj, jFlagsField);
-             mMetaState = jenv->GetIntField(jobj, jMetaStateField);
-             mTime = jenv->GetLongField(jobj, jTimeField);
-             break;
-
-        case LOCATION_EVENT: {
-            jobject location = jenv->GetObjectField(jobj, jLocationField);
-            mGeoPosition = AndroidLocation::CreateGeoPosition(jenv, location);
-            break;
-        }
-
         case LOAD_URI: {
             ReadCharactersField(jenv);
             ReadCharactersExtraField(jenv);
@@ -398,11 +330,6 @@ AndroidGeckoEvent::Init(JNIEnv *jenv, jobject jobj)
             mConnectionType = jenv->GetIntField(jobj, jConnectionTypeField);
             mIsWifi = jenv->GetBooleanField(jobj, jIsWifiField);
             mDHCPGateway = jenv->GetIntField(jobj, jDHCPGatewayField);
-            break;
-        }
-
-        case VISITED: {
-            ReadCharactersField(jenv);
             break;
         }
 
@@ -563,7 +490,9 @@ AndroidGeckoEvent::MakeTouchEvent(nsIWidget* widget)
                 break;
             }
         }
+            MOZ_FALLTHROUGH;
         case AndroidMotionEvent::ACTION_DOWN:
+            MOZ_FALLTHROUGH;
         case AndroidMotionEvent::ACTION_POINTER_DOWN: {
             type = eTouchStart;
             break;
@@ -573,6 +502,7 @@ AndroidGeckoEvent::MakeTouchEvent(nsIWidget* widget)
                 break;
             }
         }
+            MOZ_FALLTHROUGH;
         case AndroidMotionEvent::ACTION_MOVE: {
             type = eTouchMove;
             break;
@@ -582,7 +512,9 @@ AndroidGeckoEvent::MakeTouchEvent(nsIWidget* widget)
                 break;
             }
         }
+            MOZ_FALLTHROUGH;
         case AndroidMotionEvent::ACTION_UP:
+            MOZ_FALLTHROUGH;
         case AndroidMotionEvent::ACTION_POINTER_UP: {
             type = eTouchEnd;
             // for pointer-up events we only want the data from
@@ -592,6 +524,7 @@ AndroidGeckoEvent::MakeTouchEvent(nsIWidget* widget)
             break;
         }
         case AndroidMotionEvent::ACTION_OUTSIDE:
+            MOZ_FALLTHROUGH;
         case AndroidMotionEvent::ACTION_CANCEL: {
             type = eTouchCancel;
             break;

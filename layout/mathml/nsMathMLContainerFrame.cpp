@@ -15,7 +15,6 @@
 #include "nsRenderingContext.h"
 #include "nsIDOMMutationEvent.h"
 #include "nsGkAtoms.h"
-#include "nsAutoPtr.h"
 #include "nsDisplayList.h"
 #include "nsIReflowCallback.h"
 #include "mozilla/Likely.h"
@@ -147,7 +146,7 @@ nsMathMLContainerFrame::GetReflowAndBoundingMetricsFor(nsIFrame*            aFra
 {
   NS_PRECONDITION(aFrame, "null arg");
 
-  nsHTMLReflowMetrics *metrics =
+  nsHTMLReflowMetrics* metrics =
     aFrame->Properties().Get(HTMLReflowMetricsProperty());
 
   // IMPORTANT: This function is only meant to be called in Place() methods

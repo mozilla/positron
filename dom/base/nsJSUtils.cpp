@@ -21,13 +21,13 @@
 #include "nsIScriptSecurityManager.h"
 #include "nsPIDOMWindow.h"
 #include "GeckoProfiler.h"
-#include "nsDOMJSUtils.h" // for GetScriptContextFromJSContext
 #include "nsJSPrincipals.h"
 #include "xpcpublic.h"
 #include "nsContentUtils.h"
 #include "nsGlobalWindow.h"
 
 #include "mozilla/dom/BindingUtils.h"
+#include "mozilla/dom/Date.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/ScriptSettings.h"
 
@@ -102,8 +102,6 @@ nsJSUtils::CompileFunction(AutoJSAPI& jsapi,
   MOZ_ASSERT_IF(aScopeChain.length() != 0,
                 js::IsObjectInContextCompartment(aScopeChain[0], cx));
   MOZ_ASSERT_IF(aOptions.versionSet, aOptions.version != JSVERSION_UNKNOWN);
-  mozilla::DebugOnly<nsIScriptContext*> ctx = GetScriptContextFromJSContext(cx);
-  MOZ_ASSERT_IF(ctx, ctx->IsContextInitialized());
 
   // Do the junk Gecko is supposed to do before calling into JSAPI.
   for (size_t i = 0; i < aScopeChain.length(); ++i) {
@@ -152,8 +150,6 @@ nsJSUtils::EvaluateString(JSContext* aCx,
   PROFILER_LABEL("nsJSUtils", "EvaluateString",
     js::ProfileEntry::Category::JS);
 
-  MOZ_ASSERT(JS::ContextOptionsRef(aCx).autoJSAPIOwnsErrorReporting(),
-             "Caller must own error reporting");
   MOZ_ASSERT_IF(aCompileOptions.versionSet,
                 aCompileOptions.version != JSVERSION_UNKNOWN);
   MOZ_ASSERT(aCx == nsContentUtils::GetCurrentJSContext());
@@ -174,8 +170,7 @@ nsJSUtils::EvaluateString(JSContext* aCx,
 
   nsresult rv = NS_OK;
 
-  nsIScriptSecurityManager* ssm = nsContentUtils::GetSecurityManager();
-  NS_ENSURE_TRUE(ssm->ScriptAllowed(aEvaluationGlobal), NS_OK);
+  NS_ENSURE_TRUE(xpc::Scriptability::Get(aEvaluationGlobal).Allowed(), NS_OK);
 
   bool ok = true;
   // Scope the JSAutoCompartment so that we can later wrap the return value
@@ -200,7 +195,7 @@ nsJSUtils::EvaluateString(JSContext* aCx,
 
     if (ok && aOffThreadToken) {
       JS::Rooted<JSScript*>
-        script(aCx, JS::FinishOffThreadScript(aCx, JS_GetRuntime(aCx), *aOffThreadToken));
+        script(aCx, JS::FinishOffThreadScript(aCx, *aOffThreadToken));
       *aOffThreadToken = nullptr; // Mark the token as having been finished.
       if (script) {
         ok = JS_ExecuteScript(aCx, scopeChain, script);
@@ -282,8 +277,6 @@ nsJSUtils::CompileModule(JSContext* aCx,
   PROFILER_LABEL("nsJSUtils", "CompileModule",
     js::ProfileEntry::Category::JS);
 
-  MOZ_ASSERT(JS::ContextOptionsRef(aCx).autoJSAPIOwnsErrorReporting(),
-             "Caller must own error reporting");
   MOZ_ASSERT_IF(aCompileOptions.versionSet,
                 aCompileOptions.version != JSVERSION_UNKNOWN);
   MOZ_ASSERT(aCx == nsContentUtils::GetCurrentJSContext());
@@ -294,8 +287,7 @@ nsJSUtils::CompileModule(JSContext* aCx,
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(nsContentUtils::IsInMicroTask());
 
-  nsIScriptSecurityManager* ssm = nsContentUtils::GetSecurityManager();
-  NS_ENSURE_TRUE(ssm->ScriptAllowed(aEvaluationGlobal), NS_OK);
+  NS_ENSURE_TRUE(xpc::Scriptability::Get(aEvaluationGlobal).Allowed(), NS_OK);
 
   if (!JS::CompileModule(aCx, aCompileOptions, aSrcBuf, aModule)) {
     return NS_ERROR_FAILURE;
@@ -310,15 +302,11 @@ nsJSUtils::ModuleDeclarationInstantiation(JSContext* aCx, JS::Handle<JSObject*> 
   PROFILER_LABEL("nsJSUtils", "ModuleDeclarationInstantiation",
     js::ProfileEntry::Category::JS);
 
-  MOZ_ASSERT(JS::ContextOptionsRef(aCx).autoJSAPIOwnsErrorReporting(),
-             "Caller must own error reporting");
   MOZ_ASSERT(aCx == nsContentUtils::GetCurrentJSContext());
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(nsContentUtils::IsInMicroTask());
 
-  nsIScriptSecurityManager* ssm = nsContentUtils::GetSecurityManager();
-  JSObject* global = JS_GetGlobalForObject(aCx, aModule);
-  NS_ENSURE_TRUE(ssm->ScriptAllowed(global), NS_OK);
+  NS_ENSURE_TRUE(xpc::Scriptability::Get(aModule).Allowed(), NS_OK);
 
   if (!JS::ModuleDeclarationInstantiation(aCx, aModule)) {
     return NS_ERROR_FAILURE;
@@ -333,15 +321,11 @@ nsJSUtils::ModuleEvaluation(JSContext* aCx, JS::Handle<JSObject*> aModule)
   PROFILER_LABEL("nsJSUtils", "ModuleEvaluation",
     js::ProfileEntry::Category::JS);
 
-  MOZ_ASSERT(JS::ContextOptionsRef(aCx).autoJSAPIOwnsErrorReporting(),
-             "Caller must own error reporting");
   MOZ_ASSERT(aCx == nsContentUtils::GetCurrentJSContext());
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(nsContentUtils::IsInMicroTask());
 
-  nsIScriptSecurityManager* ssm = nsContentUtils::GetSecurityManager();
-  JSObject* global = JS_GetGlobalForObject(aCx, aModule);
-  NS_ENSURE_TRUE(ssm->ScriptAllowed(global), NS_OK);
+  NS_ENSURE_TRUE(xpc::Scriptability::Get(aModule).Allowed(), NS_OK);
 
   if (!JS::ModuleEvaluation(aCx, aModule)) {
     return NS_ERROR_FAILURE;
@@ -381,19 +365,10 @@ nsJSUtils::ResetTimeZone()
 // nsDOMJSUtils.h
 //
 
-JSObject* GetDefaultScopeFromJSContext(JSContext *cx)
-{
-  // DOM JSContexts don't store their default compartment object on
-  // the cx, so in those cases we need to fetch it via the scx
-  // instead.
-  nsIScriptContext *scx = GetScriptContextFromJSContext(cx);
-  return  scx ? scx->GetWindowProxy() : nullptr;
-}
-
 bool nsAutoJSString::init(const JS::Value &v)
 {
-  JSContext* cx = nsContentUtils::RootingCxForThread();
-  if (!init(nsContentUtils::RootingCxForThread(), v)) {
+  JSContext* cx = nsContentUtils::RootingCx();
+  if (!init(cx, v)) {
     JS_ClearPendingException(cx);
     return false;
   }

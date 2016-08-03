@@ -17,11 +17,13 @@
 namespace mozilla {
 namespace ipc {
 class PrincipalInfo;
+class AutoIPCStream;
 } // namespace ipc
 
 namespace dom {
 
 class InternalHeaders;
+class IPCInternalResponse;
 
 class InternalResponse final
 {
@@ -31,6 +33,15 @@ public:
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(InternalResponse)
 
   InternalResponse(uint16_t aStatus, const nsACString& aStatusText);
+
+  static already_AddRefed<InternalResponse>
+  FromIPC(const IPCInternalResponse& aIPCResponse);
+
+  template<typename M>
+  void
+  ToIPC(IPCInternalResponse* aIPCResponse,
+        M* aManager,
+        UniquePtr<mozilla::ipc::AutoIPCStream>& aAutoStream);
 
   already_AddRefed<InternalResponse> Clone();
 
@@ -176,37 +187,50 @@ public:
   }
 
   void
-  GetUnfilteredBody(nsIInputStream** aStream)
+  GetUnfilteredBody(nsIInputStream** aStream, int64_t* aBodySize = nullptr)
   {
     if (mWrappedResponse) {
       MOZ_ASSERT(!mBody);
-      return mWrappedResponse->GetBody(aStream);
+      return mWrappedResponse->GetBody(aStream, aBodySize);
     }
     nsCOMPtr<nsIInputStream> stream = mBody;
     stream.forget(aStream);
+    if (aBodySize) {
+      *aBodySize = mBodySize;
+    }
   }
 
   void
-  GetBody(nsIInputStream** aStream)
+  GetBody(nsIInputStream** aStream, int64_t* aBodySize = nullptr)
   {
     if (Type() == ResponseType::Opaque ||
         Type() == ResponseType::Opaqueredirect) {
       *aStream = nullptr;
+      if (aBodySize) {
+        *aBodySize = UNKNOWN_BODY_SIZE;
+      }
       return;
     }
 
-    return GetUnfilteredBody(aStream);
+    return GetUnfilteredBody(aStream, aBodySize);
   }
 
   void
-  SetBody(nsIInputStream* aBody)
+  SetBody(nsIInputStream* aBody, int64_t aBodySize)
   {
     if (mWrappedResponse) {
-      return mWrappedResponse->SetBody(aBody);
+      return mWrappedResponse->SetBody(aBody, aBodySize);
     }
     // A request's body may not be reset once set.
     MOZ_ASSERT(!mBody);
+    MOZ_ASSERT(mBodySize == UNKNOWN_BODY_SIZE);
+    // Check arguments.
+    MOZ_ASSERT(aBodySize == UNKNOWN_BODY_SIZE || aBodySize >= 0);
+    // If body is not given, then size must be unknown.
+    MOZ_ASSERT_IF(!aBody, aBodySize == UNKNOWN_BODY_SIZE);
+
     mBody = aBody;
+    mBodySize = aBodySize;
   }
 
   void
@@ -276,6 +300,10 @@ private:
   const nsCString mStatusText;
   RefPtr<InternalHeaders> mHeaders;
   nsCOMPtr<nsIInputStream> mBody;
+  int64_t mBodySize;
+public:
+  static const int64_t UNKNOWN_BODY_SIZE = -1;
+private:
   ChannelInfo mChannelInfo;
   UniquePtr<mozilla::ipc::PrincipalInfo> mPrincipalInfo;
 

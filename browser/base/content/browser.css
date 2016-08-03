@@ -243,19 +243,13 @@ toolbar[customizing] > .overflow-button {
   -moz-appearance: -moz-window-button-box;
 }
 
+#personal-bookmarks {
+  -moz-window-dragging: inherit;
+}
+
 %ifdef XP_MACOSX
 #titlebar-fullscreen-button {
   -moz-appearance: -moz-mac-fullscreen-button;
-}
-
-/* Because these buttons don't move, they should always be aligned the same,
- * left and right were deprecated, so we have to do work to get it to mean that: */
-#titlebar-buttonbox-container:-moz-locale-dir(ltr) {
-  -moz-box-align: start;
-}
-
-#titlebar-buttonbox-container:-moz-locale-dir(rtl) {
-  -moz-box-align: end;
 }
 
 /* Fullscreen and caption buttons don't move with RTL on OS X so override the automatic ordering. */
@@ -279,7 +273,7 @@ toolbar[customizing] > .overflow-button {
 }
 %endif
 
-%if !defined(MOZ_WIDGET_GTK) && !defined(MOZ_WIDGET_QT)
+%if !defined(MOZ_WIDGET_GTK)
 #TabsToolbar > .private-browsing-indicator {
   -moz-box-ordinal-group: 1000;
 }
@@ -296,8 +290,8 @@ toolbar[customizing] > .overflow-button {
 }
 
 #main-window[tabsintitlebar] #TabsToolbar,
-#main-window[tabsintitlebar] #toolbar-menubar:not([autohide=true]),
-#main-window[tabsintitlebar] #navigator-toolbox > toolbar:not(#toolbar-menubar):-moz-lwtheme {
+#main-window[tabsintitlebar] #toolbar-menubar,
+#main-window[tabsintitlebar] #navigator-toolbox > toolbar:-moz-lwtheme {
   -moz-window-dragging: drag;
 }
 %endif
@@ -331,6 +325,36 @@ toolbarpaletteitem:-moz-any([place="palette"], [place="panel"]) > toolbaritem[sd
 
 toolbarpaletteitem > toolbaritem[sdkstylewidget="true"][cui-areatype="toolbar"] > .toolbarbutton-text {
   display: -moz-box;
+}
+
+@media not all and (min-resolution: 1.1dppx) {
+  .webextension-browser-action {
+    list-style-image: var(--webextension-toolbar-image);
+  }
+
+  .webextension-browser-action[cui-areatype="menu-panel"],
+  toolbarpaletteitem[place="palette"] > .webextension-browser-action {
+    list-style-image: var(--webextension-menupanel-image);
+  }
+
+  .webextension-page-action {
+    list-style-image: var(--webextension-urlbar-image);
+  }
+}
+
+@media (min-resolution: 1.1dppx) {
+  .webextension-browser-action {
+    list-style-image: var(--webextension-toolbar-image-2x);
+  }
+
+  .webextension-browser-action[cui-areatype="menu-panel"],
+  toolbarpaletteitem[place="palette"] > .webextension-browser-action {
+    list-style-image: var(--webextension-menupanel-image-2x);
+  }
+
+  .webextension-page-action {
+    list-style-image: var(--webextension-urlbar-image-2x);
+  }
 }
 
 toolbarpaletteitem[removable="false"] {
@@ -368,16 +392,6 @@ toolbarpaletteitem > #personal-bookmarks > #bookmarks-toolbar-placeholder,
 toolbar:not(#TabsToolbar) > #wrapper-personal-bookmarks,
 toolbar:not(#TabsToolbar) > #personal-bookmarks {
   -moz-box-flex: 1;
-}
-
-/* Ensure that empty parts of the bookmarks container can be dragged on OSX, and on other OSes
- * only when a lwtheme is in use. */
-%ifdef XP_MACOSX
-#main-window[tabsintitlebar]:not([customizing]) #personal-bookmarks {
-%else
-#main-window[tabsintitlebar]:not([customizing]) #personal-bookmarks:-moz-lwtheme {
-%endif
-  -moz-window-dragging: drag;
 }
 
 #zoom-controls[cui-areatype="toolbar"]:not([overflowedItem=true]) > #zoom-reset-button > .toolbarbutton-text {
@@ -539,6 +553,10 @@ toolbar:not(#TabsToolbar) > #personal-bookmarks {
   pointer-events: none;
 }
 
+#urlbar[pageproxystate="invalid"] > #identity-box > #notification-popup-box {
+  pointer-events: auto;
+}
+
 #identity-icon-labels {
   max-width: 18em;
 }
@@ -672,7 +690,7 @@ window[chromehidden~="toolbar"] toolbar:not(#nav-bar):not(#TabsToolbar):not(#pri
   background: black;
 }
 
-html|*#fullscreen-warning {
+html|*.pointerlockfswarning {
   position: fixed;
   z-index: 2147483647 !important;
   visibility: visible;
@@ -686,28 +704,28 @@ html|*#fullscreen-warning {
   max-width: 95%;
   pointer-events: none;
 }
-html|*#fullscreen-warning:not([hidden]) {
+html|*.pointerlockfswarning:not([hidden]) {
   display: flex;
   will-change: transform;
 }
-html|*#fullscreen-warning[onscreen] {
+html|*.pointerlockfswarning[onscreen] {
   transform: translate(-50%, 50px);
 }
-html|*#fullscreen-warning[ontop] {
+html|*.pointerlockfswarning[ontop] {
   /* Use -10px to hide the border and border-radius on the top */
   transform: translate(-50%, -10px);
 }
-#main-window[OSXLionFullscreen] html|*#fullscreen-warning[ontop] {
+#main-window[OSXLionFullscreen] html|*.pointerlockfswarning[ontop] {
   transform: translate(-50%, 80px);
 }
 
-html|*#fullscreen-domain-text,
-html|*#fullscreen-generic-text {
+html|*.pointerlockfswarning-domain-text,
+html|*.pointerlockfswarning-generic-text {
   word-wrap: break-word;
   /* We must specify a min-width, otherwise word-wrap:break-word doesn't work. Bug 630864. */
   min-width: 1px
 }
-html|*#fullscreen-domain-text:not([hidden]) + html|*#fullscreen-generic-text {
+html|*.pointerlockfswarning-domain-text:not([hidden]) + html|*.pointerlockfswarning-generic-text {
   display: none;
 }
 
@@ -845,10 +863,6 @@ statuspanel[inactive][previoustype=overLink] {
   height: 3em;
   width: 100%;
   -moz-box-align: end;
-}
-
-.panel-inner-arrowcontentfooter[footertype="promobox"] {
-  -moz-binding: url("chrome://browser/content/urlbarBindings.xml#promobox");
 }
 
 /* gcli */
@@ -1291,4 +1305,10 @@ toolbarpaletteitem[place="palette"][hidden] {
 
 .popup-notification-invalid-input[focused] {
   box-shadow: 0 0 2px 2px rgba(255,0,0,0.4);
+}
+
+.dragfeedback-tab {
+  -moz-appearance: none;
+  opacity: 0.65;
+  -moz-window-shadow: none;
 }

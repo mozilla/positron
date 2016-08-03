@@ -31,10 +31,6 @@
 #include "mozilla/StyleSetHandle.h"
 #include "mozilla/StyleSetHandleInlines.h"
 
-#ifdef DEBUG
-// #define NOISY_DEBUG
-#endif
-
 using namespace mozilla;
 
 //----------------------------------------------------------------------
@@ -160,7 +156,10 @@ nsStyleContext::FinishConstruction(bool aSkipParentDisplayBasedStyleFixup)
     mParent->AddChild(this);
   }
 
-  ApplyStyleFixups(aSkipParentDisplayBasedStyleFixup);
+  SetStyleBits();
+  if (!mSource.IsServoComputedValues()) {
+    ApplyStyleFixups(aSkipParentDisplayBasedStyleFixup);
+  }
 
   #define eStyleStruct_LastItem (nsStyleStructID_Length - 1)
   NS_ASSERTION(NS_STYLE_INHERIT_MASK & NS_STYLE_INHERIT_BIT(LastItem),
@@ -328,7 +327,7 @@ void nsStyleContext::RemoveChild(nsStyleContext* aChild)
     if ((*list) == aChild) {
       (*list) = (*list)->mNextSibling;
     }
-  } 
+  }
   else {
     NS_ASSERTION((*list) == aChild, "bad sibling pointers");
     (*list) = nullptr;
@@ -442,13 +441,28 @@ const void* nsStyleContext::StyleData(nsStyleStructID aSID)
   if (cachedData)
     return cachedData; // We have computed data stored on this node in the context tree.
   // Our style source will take care of it for us.
-  const void* newData = mSource.IsGeckoRuleNode()
-                          ? mSource.AsGeckoRuleNode()->GetStyleData(aSID, this, true)
-                          : StyleStructFromServoComputedValues(aSID);
-  if (!nsCachedStyleData::IsReset(aSID)) {
-    // always cache inherited data on the style context; the rule
-    // node set the bit in mBits for us if needed.
-    mCachedInheritedData.mStyleStructs[aSID] = const_cast<void*>(newData);
+  const void* newData;
+  if (mSource.IsGeckoRuleNode()) {
+    newData = mSource.AsGeckoRuleNode()->GetStyleData(aSID, this, true);
+    if (!nsCachedStyleData::IsReset(aSID)) {
+      // always cache inherited data on the style context; the rule
+      // node set the bit in mBits for us if needed.
+      mCachedInheritedData.mStyleStructs[aSID] = const_cast<void*>(newData);
+    }
+  } else {
+    // The Servo-backed StyleContextSource owns the struct.
+    newData = StyleStructFromServoComputedValues(aSID);
+    AddStyleBit(nsCachedStyleData::GetBitForSID(aSID));
+
+    // XXXbholley: Unconditionally caching reset structs here defeats the memory
+    // optimization where we lazily allocate mCachedResetData, so that we can avoid
+    // performing an FFI call each time we want to get the style structs. We should
+    // measure the tradeoffs at some point. If the FFI overhead is low and the memory
+    // win significant, we should consider _always_ grabbing the struct over FFI, and
+    // potentially giving mCachedInheritedData the same treatment.
+    //
+    // Note that there is a similar comment in the struct getters in nsStyleContext.h.
+    SetStyle(aSID, const_cast<void*>(newData));
   }
   return newData;
 }
@@ -456,9 +470,12 @@ const void* nsStyleContext::StyleData(nsStyleStructID aSID)
 // This is an evil evil function, since it forces you to alloc your own separate copy of
 // style data!  Do not use this function unless you absolutely have to!  You should avoid
 // this at all costs! -dwh
-void* 
+void*
 nsStyleContext::GetUniqueStyleData(const nsStyleStructID& aSID)
 {
+  MOZ_ASSERT(!mSource.IsServoComputedValues(),
+             "Can't COW-mutate servo values from Gecko!");
+
   // If we already own the struct and no kids could depend on it, then
   // just return it.  (We leak in this case if there are kids -- and this
   // function really shouldn't be called for style contexts that could
@@ -538,7 +555,7 @@ nsStyleContext::SetStyle(nsStyleStructID aSID, void* aStruct)
 {
   // This method should only be called from nsRuleNode!  It is not a public
   // method!
-  
+
   NS_ASSERTION(aSID >= 0 && aSID < nsStyleStructID_Length, "out of bounds");
 
   // NOTE:  nsCachedStyleData::GetStyleData works roughly the same way.
@@ -637,8 +654,45 @@ ShouldBlockifyChildren(const nsStyleDisplay* aStyleDisp)
 }
 
 void
+nsStyleContext::SetStyleBits()
+{
+  // XXXbholley: We should get this information directly from the
+  // ServoComputedValues rather than computing it here. This setup for
+  // ServoComputedValues-backed nsStyleContexts is probably not something
+  // we should ship.
+  //
+  // For example, NS_STYLE_IS_TEXT_COMBINED is still set in ApplyStyleFixups,
+  // which isn't called for ServoComputedValues.
+
+  // See if we have any text decorations.
+  // First see if our parent has text decorations.  If our parent does, then we inherit the bit.
+  if (mParent && mParent->HasTextDecorationLines()) {
+    mBits |= NS_STYLE_HAS_TEXT_DECORATION_LINES;
+  } else {
+    // We might have defined a decoration.
+    if (StyleTextReset()->HasTextDecorationLines()) {
+      mBits |= NS_STYLE_HAS_TEXT_DECORATION_LINES;
+    }
+  }
+
+  if ((mParent && mParent->HasPseudoElementData()) || mPseudoTag) {
+    mBits |= NS_STYLE_HAS_PSEUDO_ELEMENT_DATA;
+  }
+
+  // Set the NS_STYLE_IN_DISPLAY_NONE_SUBTREE bit
+  const nsStyleDisplay* disp = StyleDisplay();
+  if ((mParent && mParent->IsInDisplayNoneSubtree()) ||
+      disp->mDisplay == NS_STYLE_DISPLAY_NONE) {
+    mBits |= NS_STYLE_IN_DISPLAY_NONE_SUBTREE;
+  }
+}
+
+void
 nsStyleContext::ApplyStyleFixups(bool aSkipParentDisplayBasedStyleFixup)
 {
+  MOZ_ASSERT(!mSource.IsServoComputedValues(),
+             "Can't do Gecko style fixups on Servo values");
+
 #define GET_UNIQUE_STYLE_DATA(name_) \
   static_cast<nsStyle##name_*>(GetUniqueStyleData(eStyleStruct_##name_))
 
@@ -658,21 +712,6 @@ nsStyleContext::ApplyStyleFixups(bool aSkipParentDisplayBasedStyleFixup)
     nsStyleVisibility* mutableVis = GET_UNIQUE_STYLE_DATA(Visibility);
     mutableVis->mWritingMode = NS_STYLE_WRITING_MODE_HORIZONTAL_TB;
     AddStyleBit(NS_STYLE_IS_TEXT_COMBINED);
-  }
-
-  // See if we have any text decorations.
-  // First see if our parent has text decorations.  If our parent does, then we inherit the bit.
-  if (mParent && mParent->HasTextDecorationLines()) {
-    mBits |= NS_STYLE_HAS_TEXT_DECORATION_LINES;
-  } else {
-    // We might have defined a decoration.
-    if (StyleTextReset()->HasTextDecorationLines()) {
-      mBits |= NS_STYLE_HAS_TEXT_DECORATION_LINES;
-    }
-  }
-
-  if ((mParent && mParent->HasPseudoElementData()) || mPseudoTag) {
-    mBits |= NS_STYLE_HAS_PSEUDO_ELEMENT_DATA;
   }
 
   // CSS 2.1 10.1: Propagate the root element's 'direction' to the ICB.
@@ -783,12 +822,8 @@ nsStyleContext::ApplyStyleFixups(bool aSkipParentDisplayBasedStyleFixup)
     }
   }
 
-  // Set the NS_STYLE_IN_DISPLAY_NONE_SUBTREE bit
-  if ((mParent && mParent->IsInDisplayNoneSubtree()) ||
-      disp->mDisplay == NS_STYLE_DISPLAY_NONE) {
-    mBits |= NS_STYLE_IN_DISPLAY_NONE_SUBTREE;
-  }
-
+  // Note: This must come after the blockification above, otherwise we fail
+  // the grid-item-blockifying-001.html reftest.
   if (mParent && ::ShouldSuppressLineBreak(this, disp, mParent,
                                            mParent->StyleDisplay())) {
     mBits |= NS_STYLE_SUPPRESS_LINEBREAK;
@@ -857,7 +892,7 @@ nsStyleContext::ApplyStyleFixups(bool aSkipParentDisplayBasedStyleFixup)
 }
 
 nsChangeHint
-nsStyleContext::CalcStyleDifference(nsStyleContext* aOther,
+nsStyleContext::CalcStyleDifference(nsStyleContext* aNewContext,
                                     nsChangeHint aParentHintsNotHandledForDescendants,
                                     uint32_t* aEqualStructs,
                                     uint32_t* aSamePointerStructs)
@@ -874,8 +909,8 @@ nsStyleContext::CalcStyleDifference(nsStyleContext* aOther,
 
   *aEqualStructs = 0;
 
-  nsChangeHint hint = NS_STYLE_HINT_NONE;
-  NS_ENSURE_TRUE(aOther, hint);
+  nsChangeHint hint = nsChangeHint(0);
+  NS_ENSURE_TRUE(aNewContext, hint);
   // We must always ensure that we populate the structs on the new style
   // context that are filled in on the old context, so that if we get
   // two style changes in succession, the second of which causes a real
@@ -898,7 +933,7 @@ nsStyleContext::CalcStyleDifference(nsStyleContext* aOther,
   // (Things like 'em' units are handled by the change hint produced
   // by font-size changing, so we don't need to worry about them like
   // we worry about 'inherit' values.)
-  bool compare = mSource != aOther->mSource;
+  bool compare = mSource != aNewContext->mSource;
 
   DebugOnly<uint32_t> structsFound = 0;
 
@@ -908,7 +943,7 @@ nsStyleContext::CalcStyleDifference(nsStyleContext* aOther,
   const nsStyleVariables* thisVariables = PeekStyleVariables();
   if (thisVariables) {
     structsFound |= NS_STYLE_INHERIT_BIT(Variables);
-    const nsStyleVariables* otherVariables = aOther->StyleVariables();
+    const nsStyleVariables* otherVariables = aNewContext->StyleVariables();
     if (thisVariables->mVariables == otherVariables->mVariables) {
       *aEqualStructs |= NS_STYLE_INHERIT_BIT(Variables);
     } else {
@@ -925,7 +960,7 @@ nsStyleContext::CalcStyleDifference(nsStyleContext* aOther,
     const nsStyle##struct_* this##struct_ = PeekStyle##struct_();             \
     if (this##struct_) {                                                      \
       structsFound |= NS_STYLE_INHERIT_BIT(struct_);                          \
-      const nsStyle##struct_* other##struct_ = aOther->Style##struct_();      \
+      const nsStyle##struct_* other##struct_ = aNewContext->Style##struct_(); \
       nsChangeHint maxDifference = nsStyle##struct_::MaxDifference();         \
       nsChangeHint differenceAlwaysHandledForDescendants =                    \
         nsStyle##struct_::DifferenceAlwaysHandledForDescendants();            \
@@ -934,15 +969,14 @@ nsStyleContext::CalcStyleDifference(nsStyleContext* aOther,
         /* differences.                                           */          \
         *aEqualStructs |= NS_STYLE_INHERIT_BIT(struct_);                      \
       } else if (compare ||                                                   \
-                 (NS_SubtractHint(maxDifference,                              \
-                                  differenceAlwaysHandledForDescendants) &    \
+                 ((maxDifference & ~differenceAlwaysHandledForDescendants) &  \
                   aParentHintsNotHandledForDescendants)) {                    \
         nsChangeHint difference =                                             \
           this##struct_->CalcDifference(*other##struct_ EXTRA_DIFF_ARGS);     \
         NS_ASSERTION(NS_IsHintSubset(difference, maxDifference),              \
                      "CalcDifference() returned bigger hint than "            \
                      "MaxDifference()");                                      \
-        NS_UpdateHint(hint, difference);                                      \
+        hint |= difference;                                                   \
         if (!difference) {                                                    \
           *aEqualStructs |= NS_STYLE_INHERIT_BIT(struct_);                    \
         }                                                                     \
@@ -1027,7 +1061,7 @@ nsStyleContext::CalcStyleDifference(nsStyleContext* aOther,
 #define STYLE_STRUCT(name_, callback_)                                        \
   {                                                                           \
     const nsStyle##name_* data = PeekStyle##name_();                          \
-    if (!data || data == aOther->Style##name_()) {                            \
+    if (!data || data == aNewContext->Style##name_()) {                       \
       *aSamePointerStructs |= NS_STYLE_INHERIT_BIT(name_);                    \
     }                                                                         \
   }
@@ -1035,7 +1069,7 @@ nsStyleContext::CalcStyleDifference(nsStyleContext* aOther,
 #undef STYLE_STRUCT
 
   // Note that we do not check whether this->RelevantLinkVisited() !=
-  // aOther->RelevantLinkVisited(); we don't need to since
+  // aNewContext->RelevantLinkVisited(); we don't need to since
   // nsCSSFrameConstructor::DoContentStateChanged always adds
   // nsChangeHint_RepaintFrame for NS_EVENT_STATE_VISITED changes (and
   // needs to, since HasStateDependentStyle probably doesn't work right
@@ -1051,11 +1085,11 @@ nsStyleContext::CalcStyleDifference(nsStyleContext* aOther,
   // things that can depend on :visited) for the properties on which we
   // call GetVisitedDependentColor.
   nsStyleContext *thisVis = GetStyleIfVisited(),
-                *otherVis = aOther->GetStyleIfVisited();
+                *otherVis = aNewContext->GetStyleIfVisited();
   if (!thisVis != !otherVis) {
     // One style context has a style-if-visited and the other doesn't.
     // Presume a difference.
-    NS_UpdateHint(hint, nsChangeHint_RepaintFrame);
+    hint |= nsChangeHint_RepaintFrame;
   } else if (thisVis && !NS_IsHintSubset(nsChangeHint_RepaintFrame, hint)) {
     // Both style contexts have a style-if-visited.
     bool change = false;
@@ -1105,9 +1139,9 @@ nsStyleContext::CalcStyleDifference(nsStyleContext* aOther,
       const nsStyleOutline *otherVisOutline = otherVis->StyleOutline();
       bool haveColor;
       nscolor thisColor, otherColor;
-      if (thisVisOutline->GetOutlineInitialColor() != 
+      if (thisVisOutline->GetOutlineInitialColor() !=
             otherVisOutline->GetOutlineInitialColor() ||
-          (haveColor = thisVisOutline->GetOutlineColor(thisColor)) != 
+          (haveColor = thisVisOutline->GetOutlineColor(thisColor)) !=
             otherVisOutline->GetOutlineColor(otherColor) ||
           (haveColor && thisColor != otherColor)) {
         change = true;
@@ -1172,11 +1206,11 @@ nsStyleContext::CalcStyleDifference(nsStyleContext* aOther,
     }
 
     if (change) {
-      NS_UpdateHint(hint, nsChangeHint_RepaintFrame);
+      hint |= nsChangeHint_RepaintFrame;
     }
   }
 
-  return NS_SubtractHint(hint, nsChangeHint_NeutralChange);
+  return hint & ~nsChangeHint_NeutralChange;
 }
 
 #ifdef DEBUG
@@ -1240,7 +1274,7 @@ void nsStyleContext::List(FILE* out, int32_t aIndent, bool aListDescendants)
 
 // Overloaded new operator. Initializes the memory to 0 and relies on an arena
 // (which comes from the presShell) to perform the allocation.
-void* 
+void*
 nsStyleContext::operator new(size_t sz, nsPresContext* aPresContext) CPP_THROW_NEW
 {
   // Check the recycle list first.
@@ -1250,7 +1284,7 @@ nsStyleContext::operator new(size_t sz, nsPresContext* aPresContext) CPP_THROW_N
 
 // Overridden to prevent the global delete from being called, since the memory
 // came out of an nsIArena instead of the global delete operator's heap.
-void 
+void
 nsStyleContext::Destroy()
 {
   // Get the pres context.

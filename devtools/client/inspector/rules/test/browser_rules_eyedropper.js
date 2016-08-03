@@ -61,7 +61,7 @@ add_task(function* () {
   let dropper = yield openEyedropper(view, swatch);
 
   let tooltip = view.tooltips.colorPicker.tooltip;
-  ok(tooltip.isHidden(),
+  ok(!tooltip.isVisible(),
      "color picker tooltip is closed after opening eyedropper");
 
   yield testESC(swatch, dropper);
@@ -76,7 +76,7 @@ add_task(function* () {
 });
 
 function testESC(swatch, dropper) {
-  let deferred = promise.defer();
+  let deferred = defer();
 
   dropper.once("destroy", () => {
     let color = swatch.style.backgroundColor;
@@ -129,13 +129,12 @@ function checkTelemetry() {
 /* Helpers */
 
 function openEyedropper(view, swatch) {
-  let deferred = promise.defer();
+  let deferred = defer();
 
   let tooltip = view.tooltips.colorPicker.tooltip;
 
   tooltip.once("shown", () => {
-    let tooltipDoc = tooltip.content.contentDocument;
-    let dropperButton = tooltipDoc.querySelector("#eyedropper-button");
+    let dropperButton = tooltip.doc.querySelector("#eyedropper-button");
 
     tooltip.once("eyedropper-opened", (event, dropper) => {
       deferred.resolve(dropper);

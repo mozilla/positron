@@ -150,8 +150,6 @@ this.AppConstants = Object.freeze({
   platform:
 #ifdef MOZ_WIDGET_GTK
   "linux",
-#elif MOZ_WIDGET_QT
-  "linux",
 #elif XP_WIN
   "win",
 #elif XP_MACOSX
@@ -316,8 +314,15 @@ this.AppConstants = Object.freeze({
 
   MOZ_NUWA_PROCESS:
 #ifdef MOZ_NUWA_PROCESS
-    true
+    true,
 #else
-    false
+    false,
+#endif
+
+  HAVE_USR_LIB64_DIR:
+#ifdef HAVE_USR_LIB64_DIR
+    true,
+#else
+    false,
 #endif
 });

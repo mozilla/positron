@@ -43,6 +43,7 @@
 #include "Telemetry.h"
 #include "TelemetryCommon.h"
 #include "TelemetryHistogram.h"
+#include "TelemetryScalar.h"
 #include "WebrtcTelemetry.h"
 #include "nsTHashtable.h"
 #include "nsHashKeys.h"
@@ -79,6 +80,7 @@ namespace {
 
 using namespace mozilla;
 using namespace mozilla::HangMonitor;
+using Telemetry::Common::AutoHashtable;
 
 // The maximum number of chrome hangs stacks that we're keeping.
 const size_t kMaxChromeStacksKept = 50;
@@ -1090,8 +1092,7 @@ TelemetryImpl::AddSQLInfo(JSContext *cx, JS::Handle<JSObject*> rootObj, bool mai
   if (!statsObj)
     return false;
 
-  AutoHashtable<SlowSQLEntryType> &sqlMap =
-    (privateSQL ? mPrivateSQL : mSanitizedSQL);
+  AutoHashtable<SlowSQLEntryType>& sqlMap = (privateSQL ? mPrivateSQL : mSanitizedSQL);
   AutoHashtable<SlowSQLEntryType>::ReflectEntryFunc reflectFunction =
     (mainThread ? ReflectMainThreadSQL : ReflectOtherThreadsSQL);
   if (!sqlMap.ReflectIntoJS(reflectFunction, cx, statsObj)) {
@@ -1887,6 +1888,7 @@ TelemetryImpl::GetCanRecordBase(bool *ret) {
 NS_IMETHODIMP
 TelemetryImpl::SetCanRecordBase(bool canRecord) {
   TelemetryHistogram::SetCanRecordBase(canRecord);
+  TelemetryScalar::SetCanRecordBase(canRecord);
   return NS_OK;
 }
 
@@ -1906,6 +1908,7 @@ TelemetryImpl::GetCanRecordExtended(bool *ret) {
 NS_IMETHODIMP
 TelemetryImpl::SetCanRecordExtended(bool canRecord) {
   TelemetryHistogram::SetCanRecordExtended(canRecord);
+  TelemetryScalar::SetCanRecordExtended(canRecord);
   return NS_OK;
 }
 
@@ -1925,10 +1928,13 @@ TelemetryImpl::CreateTelemetryInstance()
 {
   MOZ_ASSERT(sTelemetry == nullptr, "CreateTelemetryInstance may only be called once, via GetService()");
 
-  // First, initialize the TelemetryHistogram global state.
+  // First, initialize the TelemetryHistogram and TelemetryScalar global states.
   TelemetryHistogram::InitializeGlobalState(
                         XRE_IsParentProcess() || XRE_IsContentProcess(),
                         XRE_IsParentProcess() || XRE_IsContentProcess());
+
+  // Only record scalars from the parent process.
+  TelemetryScalar::InitializeGlobalState(XRE_IsParentProcess(), XRE_IsParentProcess());
 
   // Now, create and initialize the Telemetry global state.
   sTelemetry = new TelemetryImpl();
@@ -1951,16 +1957,17 @@ TelemetryImpl::ShutdownTelemetry()
   ClearIOReporting();
   NS_IF_RELEASE(sTelemetry);
 
-  // Lastly, de-initialise the TelemetryHistogram global state, so as to
-  // release any heap storage that would otherwise be kept alive by it.
+  // Lastly, de-initialise the TelemetryHistogram and TelemetryScalar global states,
+  // so as to release any heap storage that would otherwise be kept alive by it.
   TelemetryHistogram::DeInitializeGlobalState();
+  TelemetryScalar::DeInitializeGlobalState();
 }
 
 void
 TelemetryImpl::StoreSlowSQL(const nsACString &sql, uint32_t delay,
                             SanitizedState state)
 {
-  AutoHashtable<SlowSQLEntryType> *slowSQLMap = nullptr;
+  AutoHashtable<SlowSQLEntryType>* slowSQLMap = nullptr;
   if (state == Sanitized)
     slowSQLMap = &(sTelemetry->mSanitizedSQL);
   else
@@ -2116,7 +2123,7 @@ struct TrackedDBEntry
   const uint32_t mNameLength;
 
   // This struct isn't meant to be used beyond the static arrays below.
-  MOZ_CONSTEXPR
+  constexpr
   TrackedDBEntry(const char* aName, uint32_t aNameLength)
     : mName(aName)
     , mNameLength(aNameLength)
@@ -2130,7 +2137,7 @@ struct TrackedDBEntry
 
 // A whitelist of database names. If the database name exactly matches one of
 // these then its SQL statements will always be recorded.
-static MOZ_CONSTEXPR_VAR TrackedDBEntry kTrackedDBs[] = {
+static constexpr TrackedDBEntry kTrackedDBs[] = {
   // IndexedDB for about:home, see aboutHome.js
   TRACKEDDB_ENTRY("818200132aebmoouht.sqlite"),
   TRACKEDDB_ENTRY("addons.sqlite"),
@@ -2326,6 +2333,40 @@ TelemetryImpl::MsSinceProcessStart(double* aResult)
   return NS_OK;
 }
 
+// Telemetry Scalars IDL Implementation
+
+NS_IMETHODIMP
+TelemetryImpl::ScalarAdd(const nsACString& aName, JS::HandleValue aVal, JSContext* aCx)
+{
+  return TelemetryScalar::Add(aName, aVal, aCx);
+}
+
+NS_IMETHODIMP
+TelemetryImpl::ScalarSet(const nsACString& aName, JS::HandleValue aVal, JSContext* aCx)
+{
+  return TelemetryScalar::Set(aName, aVal, aCx);
+}
+
+NS_IMETHODIMP
+TelemetryImpl::ScalarSetMaximum(const nsACString& aName, JS::HandleValue aVal, JSContext* aCx)
+{
+  return TelemetryScalar::SetMaximum(aName, aVal, aCx);
+}
+
+NS_IMETHODIMP
+TelemetryImpl::SnapshotScalars(unsigned int aDataset, bool aClearScalars, JSContext* aCx,
+                               uint8_t optional_argc, JS::MutableHandleValue aResult)
+{
+  return TelemetryScalar::CreateSnapshots(aDataset, aClearScalars, aCx, optional_argc, aResult);
+}
+
+NS_IMETHODIMP
+TelemetryImpl::ClearScalars()
+{
+  TelemetryScalar::ClearScalars();
+  return NS_OK;
+}
+
 size_t
 TelemetryImpl::SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf)
 {
@@ -2333,6 +2374,7 @@ TelemetryImpl::SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf)
 
   // Ignore the hashtables in mAddonMap; they are not significant.
   n += TelemetryHistogram::GetMapShallowSizesOfExcludingThis(aMallocSizeOf);
+  n += TelemetryScalar::GetMapShallowSizesOfExcludingThis(aMallocSizeOf);
   n += mWebrtcTelemetry.SizeOfExcludingThis(aMallocSizeOf);
   { // Scope for mHashMutex lock
     MutexAutoLock lock(mHashMutex);
@@ -2355,13 +2397,60 @@ TelemetryImpl::SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf)
   }
 
   n += TelemetryHistogram::GetHistogramSizesofIncludingThis(aMallocSizeOf);
+  n += TelemetryScalar::GetScalarSizesOfIncludingThis(aMallocSizeOf);
 
   return n;
 }
 
+struct StackFrame
+{
+  uintptr_t mPC;      // The program counter at this position in the call stack.
+  uint16_t mIndex;    // The number of this frame in the call stack.
+  uint16_t mModIndex; // The index of module that has this program counter.
+};
+
+#ifdef MOZ_ENABLE_PROFILER_SPS
+static bool CompareByPC(const StackFrame &a, const StackFrame &b)
+{
+  return a.mPC < b.mPC;
+}
+
+static bool CompareByIndex(const StackFrame &a, const StackFrame &b)
+{
+  return a.mIndex < b.mIndex;
+}
+#endif
+
 } // namespace
 
+
+////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////
+//
+// EXTERNALLY VISIBLE FUNCTIONS in no name space
+// These are NOT listed in Telemetry.h
+
+NSMODULE_DEFN(nsTelemetryModule) = &kTelemetryModule;
+
+/**
+ * The XRE_TelemetryAdd function is to be used by embedding applications
+ * that can't use mozilla::Telemetry::Accumulate() directly.
+ */
+void
+XRE_TelemetryAccumulate(int aID, uint32_t aSample)
+{
+  mozilla::Telemetry::Accumulate((mozilla::Telemetry::ID) aID, aSample);
+}
+
+
+////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////
+//
+// EXTERNALLY VISIBLE FUNCTIONS in mozilla::
+// These are NOT listed in Telemetry.h
+
 namespace mozilla {
+
 void
 RecordShutdownStartTimeStamp() {
 #ifdef DEBUG
@@ -2427,6 +2516,256 @@ RecordShutdownEndTimeStamp() {
   PR_Rename(tmpName.get(), name.get());
 }
 
+} // namespace mozilla
+
+
+////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////
+//
+// EXTERNALLY VISIBLE FUNCTIONS in mozilla::Telemetry::
+// These are NOT listed in Telemetry.h
+
+namespace mozilla {
+namespace Telemetry {
+
+ProcessedStack::ProcessedStack()
+{
+}
+
+size_t ProcessedStack::GetStackSize() const
+{
+  return mStack.size();
+}
+
+size_t ProcessedStack::GetNumModules() const
+{
+  return mModules.size();
+}
+
+bool ProcessedStack::Module::operator==(const Module& aOther) const {
+  return  mName == aOther.mName &&
+    mBreakpadId == aOther.mBreakpadId;
+}
+
+const ProcessedStack::Frame &ProcessedStack::GetFrame(unsigned aIndex) const
+{
+  MOZ_ASSERT(aIndex < mStack.size());
+  return mStack[aIndex];
+}
+
+void ProcessedStack::AddFrame(const Frame &aFrame)
+{
+  mStack.push_back(aFrame);
+}
+
+const ProcessedStack::Module &ProcessedStack::GetModule(unsigned aIndex) const
+{
+  MOZ_ASSERT(aIndex < mModules.size());
+  return mModules[aIndex];
+}
+
+void ProcessedStack::AddModule(const Module &aModule)
+{
+  mModules.push_back(aModule);
+}
+
+void ProcessedStack::Clear() {
+  mModules.clear();
+  mStack.clear();
+}
+
+ProcessedStack
+GetStackAndModules(const std::vector<uintptr_t>& aPCs)
+{
+  std::vector<StackFrame> rawStack;
+  auto stackEnd = aPCs.begin() + std::min(aPCs.size(), kMaxChromeStackDepth);
+  for (auto i = aPCs.begin(); i != stackEnd; ++i) {
+    uintptr_t aPC = *i;
+    StackFrame Frame = {aPC, static_cast<uint16_t>(rawStack.size()),
+                        std::numeric_limits<uint16_t>::max()};
+    rawStack.push_back(Frame);
+  }
+
+#ifdef MOZ_ENABLE_PROFILER_SPS
+  // Remove all modules not referenced by a PC on the stack
+  std::sort(rawStack.begin(), rawStack.end(), CompareByPC);
+
+  size_t moduleIndex = 0;
+  size_t stackIndex = 0;
+  size_t stackSize = rawStack.size();
+
+  SharedLibraryInfo rawModules = SharedLibraryInfo::GetInfoForSelf();
+  rawModules.SortByAddress();
+
+  while (moduleIndex < rawModules.GetSize()) {
+    const SharedLibrary& module = rawModules.GetEntry(moduleIndex);
+    uintptr_t moduleStart = module.GetStart();
+    uintptr_t moduleEnd = module.GetEnd() - 1;
+    // the interval is [moduleStart, moduleEnd)
+
+    bool moduleReferenced = false;
+    for (;stackIndex < stackSize; ++stackIndex) {
+      uintptr_t pc = rawStack[stackIndex].mPC;
+      if (pc >= moduleEnd)
+        break;
+
+      if (pc >= moduleStart) {
+        // If the current PC is within the current module, mark
+        // module as used
+        moduleReferenced = true;
+        rawStack[stackIndex].mPC -= moduleStart;
+        rawStack[stackIndex].mModIndex = moduleIndex;
+      } else {
+        // PC does not belong to any module. It is probably from
+        // the JIT. Use a fixed mPC so that we don't get different
+        // stacks on different runs.
+        rawStack[stackIndex].mPC =
+          std::numeric_limits<uintptr_t>::max();
+      }
+    }
+
+    if (moduleReferenced) {
+      ++moduleIndex;
+    } else {
+      // Remove module if no PCs within its address range
+      rawModules.RemoveEntries(moduleIndex, moduleIndex + 1);
+    }
+  }
+
+  for (;stackIndex < stackSize; ++stackIndex) {
+    // These PCs are past the last module.
+    rawStack[stackIndex].mPC = std::numeric_limits<uintptr_t>::max();
+  }
+
+  std::sort(rawStack.begin(), rawStack.end(), CompareByIndex);
+#endif
+
+  // Copy the information to the return value.
+  ProcessedStack Ret;
+  for (std::vector<StackFrame>::iterator i = rawStack.begin(),
+         e = rawStack.end(); i != e; ++i) {
+    const StackFrame &rawFrame = *i;
+    mozilla::Telemetry::ProcessedStack::Frame frame = { rawFrame.mPC, rawFrame.mModIndex };
+    Ret.AddFrame(frame);
+  }
+
+#ifdef MOZ_ENABLE_PROFILER_SPS
+  for (unsigned i = 0, n = rawModules.GetSize(); i != n; ++i) {
+    const SharedLibrary &info = rawModules.GetEntry(i);
+    const std::string &name = info.GetName();
+    std::string basename = name;
+#ifdef XP_MACOSX
+    // FIXME: We want to use just the basename as the libname, but the
+    // current profiler addon needs the full path name, so we compute the
+    // basename in here.
+    size_t pos = name.rfind('/');
+    if (pos != std::string::npos) {
+      basename = name.substr(pos + 1);
+    }
+#endif
+    mozilla::Telemetry::ProcessedStack::Module module = {
+      basename,
+      info.GetBreakpadId()
+    };
+    Ret.AddModule(module);
+  }
+#endif
+
+  return Ret;
+}
+
+void
+TimeHistogram::Add(PRIntervalTime aTime)
+{
+  uint32_t timeMs = PR_IntervalToMilliseconds(aTime);
+  size_t index = mozilla::FloorLog2(timeMs);
+  operator[](index)++;
+}
+
+const char*
+HangStack::InfallibleAppendViaBuffer(const char* aText, size_t aLength)
+{
+  MOZ_ASSERT(this->canAppendWithoutRealloc(1));
+  // Include null-terminator in length count.
+  MOZ_ASSERT(mBuffer.canAppendWithoutRealloc(aLength + 1));
+
+  const char* const entry = mBuffer.end();
+  mBuffer.infallibleAppend(aText, aLength);
+  mBuffer.infallibleAppend('\0'); // Explicitly append null-terminator
+  this->infallibleAppend(entry);
+  return entry;
+}
+
+const char*
+HangStack::AppendViaBuffer(const char* aText, size_t aLength)
+{
+  if (!this->reserve(this->length() + 1)) {
+    return nullptr;
+  }
+
+  // Keep track of the previous buffer in case we need to adjust pointers later.
+  const char* const prevStart = mBuffer.begin();
+  const char* const prevEnd = mBuffer.end();
+
+  // Include null-terminator in length count.
+  if (!mBuffer.reserve(mBuffer.length() + aLength + 1)) {
+    return nullptr;
+  }
+
+  if (prevStart != mBuffer.begin()) {
+    // The buffer has moved; we have to adjust pointers in the stack.
+    for (const char** entry = this->begin(); entry != this->end(); entry++) {
+      if (*entry >= prevStart && *entry < prevEnd) {
+        // Move from old buffer to new buffer.
+        *entry += mBuffer.begin() - prevStart;
+      }
+    }
+  }
+
+  return InfallibleAppendViaBuffer(aText, aLength);
+}
+
+uint32_t
+HangHistogram::GetHash(const HangStack& aStack)
+{
+  uint32_t hash = 0;
+  for (const char* const* label = aStack.begin();
+       label != aStack.end(); label++) {
+    /* If the string is within our buffer, we need to hash its content.
+       Otherwise, the string is statically allocated, and we only need
+       to hash the pointer instead of the content. */
+    if (aStack.IsInBuffer(*label)) {
+      hash = AddToHash(hash, HashString(*label));
+    } else {
+      hash = AddToHash(hash, *label);
+    }
+  }
+  return hash;
+}
+
+bool
+HangHistogram::operator==(const HangHistogram& aOther) const
+{
+  if (mHash != aOther.mHash) {
+    return false;
+  }
+  if (mStack.length() != aOther.mStack.length()) {
+    return false;
+  }
+  return mStack == aOther.mStack;
+}
+
+} // namespace Telemetry
+} // namespace mozilla
+
+
+////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////
+//
+// EXTERNALLY VISIBLE FUNCTIONS in mozilla::Telemetry::
+// These are listed in Telemetry.h
+
+namespace mozilla {
 namespace Telemetry {
 
 // The external API for controlling recording state
@@ -2532,171 +2871,6 @@ void RecordThreadHangStats(ThreadHangStats& aStats)
   TelemetryImpl::RecordThreadHangStats(aStats);
 }
 
-ProcessedStack::ProcessedStack()
-{
-}
-
-size_t ProcessedStack::GetStackSize() const
-{
-  return mStack.size();
-}
-
-const ProcessedStack::Frame &ProcessedStack::GetFrame(unsigned aIndex) const
-{
-  MOZ_ASSERT(aIndex < mStack.size());
-  return mStack[aIndex];
-}
-
-void ProcessedStack::AddFrame(const Frame &aFrame)
-{
-  mStack.push_back(aFrame);
-}
-
-size_t ProcessedStack::GetNumModules() const
-{
-  return mModules.size();
-}
-
-const ProcessedStack::Module &ProcessedStack::GetModule(unsigned aIndex) const
-{
-  MOZ_ASSERT(aIndex < mModules.size());
-  return mModules[aIndex];
-}
-
-void ProcessedStack::AddModule(const Module &aModule)
-{
-  mModules.push_back(aModule);
-}
-
-void ProcessedStack::Clear() {
-  mModules.clear();
-  mStack.clear();
-}
-
-bool ProcessedStack::Module::operator==(const Module& aOther) const {
-  return  mName == aOther.mName &&
-    mBreakpadId == aOther.mBreakpadId;
-}
-
-struct StackFrame
-{
-  uintptr_t mPC;      // The program counter at this position in the call stack.
-  uint16_t mIndex;    // The number of this frame in the call stack.
-  uint16_t mModIndex; // The index of module that has this program counter.
-};
-
-
-#ifdef MOZ_ENABLE_PROFILER_SPS
-static bool CompareByPC(const StackFrame &a, const StackFrame &b)
-{
-  return a.mPC < b.mPC;
-}
-
-static bool CompareByIndex(const StackFrame &a, const StackFrame &b)
-{
-  return a.mIndex < b.mIndex;
-}
-#endif
-
-ProcessedStack
-GetStackAndModules(const std::vector<uintptr_t>& aPCs)
-{
-  std::vector<StackFrame> rawStack;
-  auto stackEnd = aPCs.begin() + std::min(aPCs.size(), kMaxChromeStackDepth);
-  for (auto i = aPCs.begin(); i != stackEnd; ++i) {
-    uintptr_t aPC = *i;
-    StackFrame Frame = {aPC, static_cast<uint16_t>(rawStack.size()),
-                        std::numeric_limits<uint16_t>::max()};
-    rawStack.push_back(Frame);
-  }
-
-#ifdef MOZ_ENABLE_PROFILER_SPS
-  // Remove all modules not referenced by a PC on the stack
-  std::sort(rawStack.begin(), rawStack.end(), CompareByPC);
-
-  size_t moduleIndex = 0;
-  size_t stackIndex = 0;
-  size_t stackSize = rawStack.size();
-
-  SharedLibraryInfo rawModules = SharedLibraryInfo::GetInfoForSelf();
-  rawModules.SortByAddress();
-
-  while (moduleIndex < rawModules.GetSize()) {
-    const SharedLibrary& module = rawModules.GetEntry(moduleIndex);
-    uintptr_t moduleStart = module.GetStart();
-    uintptr_t moduleEnd = module.GetEnd() - 1;
-    // the interval is [moduleStart, moduleEnd)
-
-    bool moduleReferenced = false;
-    for (;stackIndex < stackSize; ++stackIndex) {
-      uintptr_t pc = rawStack[stackIndex].mPC;
-      if (pc >= moduleEnd)
-        break;
-
-      if (pc >= moduleStart) {
-        // If the current PC is within the current module, mark
-        // module as used
-        moduleReferenced = true;
-        rawStack[stackIndex].mPC -= moduleStart;
-        rawStack[stackIndex].mModIndex = moduleIndex;
-      } else {
-        // PC does not belong to any module. It is probably from
-        // the JIT. Use a fixed mPC so that we don't get different
-        // stacks on different runs.
-        rawStack[stackIndex].mPC =
-          std::numeric_limits<uintptr_t>::max();
-      }
-    }
-
-    if (moduleReferenced) {
-      ++moduleIndex;
-    } else {
-      // Remove module if no PCs within its address range
-      rawModules.RemoveEntries(moduleIndex, moduleIndex + 1);
-    }
-  }
-
-  for (;stackIndex < stackSize; ++stackIndex) {
-    // These PCs are past the last module.
-    rawStack[stackIndex].mPC = std::numeric_limits<uintptr_t>::max();
-  }
-
-  std::sort(rawStack.begin(), rawStack.end(), CompareByIndex);
-#endif
-
-  // Copy the information to the return value.
-  ProcessedStack Ret;
-  for (std::vector<StackFrame>::iterator i = rawStack.begin(),
-         e = rawStack.end(); i != e; ++i) {
-    const StackFrame &rawFrame = *i;
-    ProcessedStack::Frame frame = { rawFrame.mPC, rawFrame.mModIndex };
-    Ret.AddFrame(frame);
-  }
-
-#ifdef MOZ_ENABLE_PROFILER_SPS
-  for (unsigned i = 0, n = rawModules.GetSize(); i != n; ++i) {
-    const SharedLibrary &info = rawModules.GetEntry(i);
-    const std::string &name = info.GetName();
-    std::string basename = name;
-#ifdef XP_MACOSX
-    // FIXME: We want to use just the basename as the libname, but the
-    // current profiler addon needs the full path name, so we compute the
-    // basename in here.
-    size_t pos = name.rfind('/');
-    if (pos != std::string::npos) {
-      basename = name.substr(pos + 1);
-    }
-#endif
-    ProcessedStack::Module module = {
-      basename,
-      info.GetBreakpadId()
-    };
-    Ret.AddModule(module);
-  }
-#endif
-
-  return Ret;
-}
 
 void
 WriteFailedProfileLock(nsIFile* aProfileDir)
@@ -2775,99 +2949,65 @@ SetProfileDir(nsIFile* aProfD)
   sTelemetryIOObserver->AddPath(profDirPath, NS_LITERAL_STRING("{profile}"));
 }
 
+void CreateStatisticsRecorder()
+{
+  TelemetryHistogram::CreateStatisticsRecorder();
+}
+
+void DestroyStatisticsRecorder()
+{
+  TelemetryHistogram::DestroyStatisticsRecorder();
+}
+
+// Scalar API C++ Endpoints
+
+/**
+ * Adds the value to the given scalar.
+ *
+ * @param aId The scalar enum id.
+ * @param aValue The unsigned value to add to the scalar.
+ */
 void
-TimeHistogram::Add(PRIntervalTime aTime)
+ScalarAdd(mozilla::Telemetry::ScalarID aId, uint32_t aVal)
 {
-  uint32_t timeMs = PR_IntervalToMilliseconds(aTime);
-  size_t index = mozilla::FloorLog2(timeMs);
-  operator[](index)++;
+  TelemetryScalar::Add(aId, aVal);
 }
 
-const char*
-HangStack::InfallibleAppendViaBuffer(const char* aText, size_t aLength)
+/**
+ * Sets the scalar to the given value.
+ *
+ * @param aId The scalar enum id.
+ * @param aValue The numeric, unsigned value to set the scalar to.
+ */
+void
+ScalarSet(mozilla::Telemetry::ScalarID aId, uint32_t aVal)
 {
-  MOZ_ASSERT(this->canAppendWithoutRealloc(1));
-  // Include null-terminator in length count.
-  MOZ_ASSERT(mBuffer.canAppendWithoutRealloc(aLength + 1));
-
-  const char* const entry = mBuffer.end();
-  mBuffer.infallibleAppend(aText, aLength);
-  mBuffer.infallibleAppend('\0'); // Explicitly append null-terminator
-  this->infallibleAppend(entry);
-  return entry;
+  TelemetryScalar::Set(aId, aVal);
 }
 
-const char*
-HangStack::AppendViaBuffer(const char* aText, size_t aLength)
+/**
+ * Sets the scalar to the given value.
+ *
+ * @param aId The scalar enum id.
+ * @param aValue The string value to set the scalar to.
+ */
+void
+ScalarSet(mozilla::Telemetry::ScalarID aId, const nsAString& aVal)
 {
-  if (!this->reserve(this->length() + 1)) {
-    return nullptr;
-  }
-
-  // Keep track of the previous buffer in case we need to adjust pointers later.
-  const char* const prevStart = mBuffer.begin();
-  const char* const prevEnd = mBuffer.end();
-
-  // Include null-terminator in length count.
-  if (!mBuffer.reserve(mBuffer.length() + aLength + 1)) {
-    return nullptr;
-  }
-
-  if (prevStart != mBuffer.begin()) {
-    // The buffer has moved; we have to adjust pointers in the stack.
-    for (const char** entry = this->begin(); entry != this->end(); entry++) {
-      if (*entry >= prevStart && *entry < prevEnd) {
-        // Move from old buffer to new buffer.
-        *entry += mBuffer.begin() - prevStart;
-      }
-    }
-  }
-
-  return InfallibleAppendViaBuffer(aText, aLength);
+  TelemetryScalar::Set(aId, aVal);
 }
 
-uint32_t
-HangHistogram::GetHash(const HangStack& aStack)
+/**
+ * Sets the scalar to the maximum of the current and the passed value.
+ *
+ * @param aId The scalar enum id.
+ * @param aValue The unsigned value to set the scalar to.
+ */
+void
+ScalarSetMaximum(mozilla::Telemetry::ScalarID aId, uint32_t aVal)
 {
-  uint32_t hash = 0;
-  for (const char* const* label = aStack.begin();
-       label != aStack.end(); label++) {
-    /* If the string is within our buffer, we need to hash its content.
-       Otherwise, the string is statically allocated, and we only need
-       to hash the pointer instead of the content. */
-    if (aStack.IsInBuffer(*label)) {
-      hash = AddToHash(hash, HashString(*label));
-    } else {
-      hash = AddToHash(hash, *label);
-    }
-  }
-  return hash;
+  TelemetryScalar::SetMaximum(aId, aVal);
 }
-
-bool
-HangHistogram::operator==(const HangHistogram& aOther) const
-{
-  if (mHash != aOther.mHash) {
-    return false;
-  }
-  if (mStack.length() != aOther.mStack.length()) {
-    return false;
-  }
-  return mStack == aOther.mStack;
-}
-
 
 } // namespace Telemetry
 } // namespace mozilla
-
-NSMODULE_DEFN(nsTelemetryModule) = &kTelemetryModule;
-
-/**
- * The XRE_TelemetryAdd function is to be used by embedding applications
- * that can't use mozilla::Telemetry::Accumulate() directly.
- */
-void
-XRE_TelemetryAccumulate(int aID, uint32_t aSample)
-{
-  mozilla::Telemetry::Accumulate((mozilla::Telemetry::ID) aID, aSample);
-}

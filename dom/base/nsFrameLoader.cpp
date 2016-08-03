@@ -343,6 +343,32 @@ nsFrameLoader::SetIsPrerendered()
   return NS_OK;
 }
 
+NS_IMETHODIMP
+nsFrameLoader::MakePrerenderedLoaderActive()
+{
+  MOZ_ASSERT(mIsPrerendered, "This frameloader was not in prerendered mode.");
+
+  mIsPrerendered = false;
+  if (IsRemoteFrame()) {
+    if (!mRemoteBrowser) {
+      NS_WARNING("Missing remote browser.");
+      return NS_ERROR_FAILURE;
+    }
+
+    mRemoteBrowser->SetDocShellIsActive(true);
+  } else {
+    if (!mDocShell) {
+      NS_WARNING("Missing docshell.");
+      return NS_ERROR_FAILURE;
+    }
+
+    nsresult rv = mDocShell->SetIsActive(true);
+    NS_ENSURE_SUCCESS(rv, rv);
+  }
+
+  return NS_OK;
+}
+
 nsresult
 nsFrameLoader::ReallyStartLoading()
 {
@@ -1966,18 +1992,9 @@ nsFrameLoader::MaybeCreateDocShell()
   NS_ENSURE_TRUE(mDocShell, NS_ERROR_FAILURE);
 
   if (mIsPrerendered) {
-    nsresult rv = mDocShell->SetIsPrerendered(true);
+    nsresult rv = mDocShell->SetIsPrerendered();
     NS_ENSURE_SUCCESS(rv,rv);
   }
-
-  // Apply sandbox flags even if our owner is not an iframe, as this copies
-  // flags from our owning content's owning document.
-  uint32_t sandboxFlags = 0;
-  HTMLIFrameElement* iframe = HTMLIFrameElement::FromContent(mOwnerContent);
-  if (iframe) {
-    sandboxFlags = iframe->GetSandboxFlags();
-  }
-  ApplySandboxFlags(sandboxFlags);
 
   if (!mNetworkCreated) {
     if (mDocShell) {
@@ -2076,11 +2093,8 @@ nsFrameLoader::MaybeCreateDocShell()
   }
 
   DocShellOriginAttributes attrs;
-
-  if (!mOwnerContent->IsXULElement(nsGkAtoms::browser)) {
-    nsCOMPtr<nsIPrincipal> parentPrin = doc->NodePrincipal();
-    PrincipalOriginAttributes poa = BasePrincipal::Cast(parentPrin)->OriginAttributesRef();
-    attrs.InheritFromDocToChildDocShell(poa);
+  if (docShell->ItemType() == mDocShell->ItemType()) {
+    attrs = nsDocShell::Cast(docShell)->GetOriginAttributes();
   }
 
   if (OwnerIsAppFrame()) {
@@ -2114,13 +2128,32 @@ nsFrameLoader::MaybeCreateDocShell()
     mDocShell->SetFrameType(nsIDocShell::FRAME_TYPE_BROWSER);
   }
 
+  // Apply sandbox flags even if our owner is not an iframe, as this copies
+  // flags from our owning content's owning document.
+  // Note: ApplySandboxFlags should be called after mDocShell->SetFrameType
+  // because we need to get the correct presentation URL in ApplySandboxFlags.
+  uint32_t sandboxFlags = 0;
+  HTMLIFrameElement* iframe = HTMLIFrameElement::FromContent(mOwnerContent);
+  if (iframe) {
+    sandboxFlags = iframe->GetSandboxFlags();
+  }
+  ApplySandboxFlags(sandboxFlags);
+
   // Grab the userContextId from owner if XUL
   nsresult rv = PopulateUserContextIdFromAttribute(attrs);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }
 
-  nsDocShell::Cast(mDocShell)->SetOriginAttributes(attrs);
+  bool isPrivate = false;
+  nsCOMPtr<nsILoadContext> parentContext = do_QueryInterface(docShell);
+  NS_ENSURE_STATE(parentContext);
+
+  rv = parentContext->GetUsePrivateBrowsing(&isPrivate);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+  attrs.SyncAttributesWithPrivateBrowsing(isPrivate);
 
   if (OwnerIsMozBrowserOrAppFrame()) {
     // For inproc frames, set the docshell properties.
@@ -2142,11 +2175,14 @@ nsFrameLoader::MaybeCreateDocShell()
           NS_LITERAL_CSTRING("mozprivatebrowsing"),
           nullptr);
       } else {
-        nsCOMPtr<nsILoadContext> context = do_GetInterface(mDocShell);
-        context->SetUsePrivateBrowsing(true);
+        // This handles the case where a frames private browsing is set by chrome flags
+        // and not inherited by its parent.
+        attrs.SyncAttributesWithPrivateBrowsing(isPrivate);
       }
     }
   }
+
+  nsDocShell::Cast(mDocShell)->SetOriginAttributes(attrs);
 
   ReallyLoadFrameScripts();
   InitializeBrowserAPI();
@@ -2311,6 +2347,7 @@ nsFrameLoader::UpdatePositionAndSize(nsSubDocumentFrame *aIFrame)
       ScreenIntSize size = aIFrame->GetSubdocumentSize();
       nsIntRect dimensions;
       NS_ENSURE_SUCCESS(GetWindowDimensions(dimensions), NS_ERROR_FAILURE);
+      mLazySize = size;
       mRemoteBrowser->UpdateDimensions(dimensions, size);
     }
     return NS_OK;
@@ -2341,9 +2378,37 @@ nsFrameLoader::UpdateBaseWindowPositionAndSize(nsSubDocumentFrame *aIFrame)
     }
 
     ScreenIntSize size = aIFrame->GetSubdocumentSize();
+    mLazySize = size;
 
-    baseWindow->SetPositionAndSize(x, y, size.width, size.height, false);
+    baseWindow->SetPositionAndSize(x, y, size.width, size.height,
+                                   nsIBaseWindow::eDelayResize);
   }
+}
+
+NS_IMETHODIMP
+nsFrameLoader::GetLazyWidth(uint32_t* aLazyWidth)
+{
+  *aLazyWidth = mLazySize.width;
+
+  nsIFrame* frame = GetPrimaryFrameOfOwningContent();
+  if (frame) {
+    *aLazyWidth = frame->PresContext()->DevPixelsToIntCSSPixels(*aLazyWidth);
+  }
+
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsFrameLoader::GetLazyHeight(uint32_t* aLazyHeight)
+{
+  *aLazyHeight = mLazySize.height;
+
+  nsIFrame* frame = GetPrimaryFrameOfOwningContent();
+  if (frame) {
+    *aLazyHeight = frame->PresContext()->DevPixelsToIntCSSPixels(*aLazyHeight);
+  }
+
+  return NS_OK;
 }
 
 NS_IMETHODIMP
@@ -2944,6 +3009,15 @@ nsFrameLoader::ApplySandboxFlags(uint32_t sandboxFlags)
 
     // The child can only add restrictions, never remove them.
     sandboxFlags |= parentSandboxFlags;
+
+    // If this frame is a receiving browsing context, we should add
+    // sandboxed auxiliary navigation flag to sandboxFlags. See
+    // https://w3c.github.io/presentation-api/#creating-a-receiving-browsing-context
+    nsAutoString presentationURL;
+    nsContentUtils::GetPresentationURL(mDocShell, presentationURL);
+    if (!presentationURL.IsEmpty()) {
+      sandboxFlags |= SANDBOXED_AUXILIARY_NAVIGATION;
+    }
     mDocShell->SetSandboxFlags(sandboxFlags);
   }
 }
@@ -3137,7 +3211,8 @@ nsFrameLoader::RequestNotifyLayerTreeCleared()
 }
 
 NS_IMETHODIMP
-nsFrameLoader::Print(nsIPrintSettings* aPrintSettings,
+nsFrameLoader::Print(uint64_t aOuterWindowID,
+                     nsIPrintSettings* aPrintSettings,
                      nsIWebProgressListener* aProgressListener)
 {
 #if defined(NS_PRINTING)
@@ -3152,26 +3227,23 @@ nsFrameLoader::Print(nsIPrintSettings* aPrintSettings,
       return rv;
     }
 
-    bool success = mRemoteBrowser->SendPrint(printData);
+    bool success = mRemoteBrowser->SendPrint(aOuterWindowID, printData);
     return success ? NS_OK : NS_ERROR_FAILURE;
   }
 
-  if (mDocShell) {
-    nsCOMPtr<nsIContentViewer> viewer;
-    mDocShell->GetContentViewer(getter_AddRefs(viewer));
-    if (!viewer) {
-      return NS_ERROR_FAILURE;
-    }
-
-    nsCOMPtr<nsIWebBrowserPrint> webBrowserPrint = do_QueryInterface(viewer);
-    if (!webBrowserPrint) {
-      return NS_ERROR_FAILURE;
-    }
-
-    return webBrowserPrint->Print(aPrintSettings, aProgressListener);
+  nsGlobalWindow* outerWindow =
+    nsGlobalWindow::GetOuterWindowWithId(aOuterWindowID);
+  if (NS_WARN_IF(!outerWindow)) {
+    return NS_ERROR_FAILURE;
   }
 
-  return NS_ERROR_FAILURE;
+  nsCOMPtr<nsIWebBrowserPrint> webBrowserPrint =
+    do_GetInterface(outerWindow->AsOuter());
+  if (NS_WARN_IF(!webBrowserPrint)) {
+    return NS_ERROR_FAILURE;
+  }
+
+  return webBrowserPrint->Print(aPrintSettings, aProgressListener);
 #endif
   return NS_OK;
 }
@@ -3361,12 +3433,41 @@ nsFrameLoader::GetNewTabContext(MutableTabContext* aTabContext,
     attrs.mUserContextId = userContextId;
   }
 
+  nsAutoString presentationURLStr;
+  mOwnerContent->GetAttr(kNameSpaceID_None,
+                         nsGkAtoms::mozpresentation,
+                         presentationURLStr);
+
+  nsCOMPtr<nsIDocShell> docShell = mOwnerContent->OwnerDoc()->GetDocShell();
+  nsCOMPtr<nsILoadContext> parentContext = do_QueryInterface(docShell);
+  NS_ENSURE_STATE(parentContext);
+
+  bool isPrivate = parentContext->UsePrivateBrowsing();
+  attrs.SyncAttributesWithPrivateBrowsing(isPrivate);
+
+  UIStateChangeType showAccelerators = UIStateChangeType_NoChange;
+  UIStateChangeType showFocusRings = UIStateChangeType_NoChange;
+  nsIDocument* doc = mOwnerContent->OwnerDoc();
+  if (doc) {
+    nsCOMPtr<nsPIWindowRoot> root = nsContentUtils::GetWindowRoot(doc);
+    if (root) {
+      showAccelerators =
+        root->ShowAccelerators() ? UIStateChangeType_Set : UIStateChangeType_Clear;
+      showFocusRings =
+        root->ShowFocusRings() ? UIStateChangeType_Set : UIStateChangeType_Clear;
+    }
+  }
+
   bool tabContextUpdated =
     aTabContext->SetTabContext(OwnerIsMozBrowserFrame(),
+                               mIsPrerendered,
                                ownApp,
                                containingApp,
+                               showAccelerators,
+                               showFocusRings,
                                attrs,
-                               signedPkgOrigin);
+                               signedPkgOrigin,
+                               presentationURLStr);
   NS_ENSURE_STATE(tabContextUpdated);
 
   return NS_OK;

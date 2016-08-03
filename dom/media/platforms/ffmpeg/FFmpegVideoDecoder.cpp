@@ -7,7 +7,6 @@
 #include "mozilla/TaskQueue.h"
 
 #include "nsThreadUtils.h"
-#include "nsAutoPtr.h"
 #include "ImageContainer.h"
 
 #include "MediaInfo.h"
@@ -101,13 +100,14 @@ FFmpegVideoDecoder<LIBAV_VER>::PtsCorrectionContext::Reset()
 }
 
 FFmpegVideoDecoder<LIBAV_VER>::FFmpegVideoDecoder(FFmpegLibWrapper* aLib,
-  FlushableTaskQueue* aTaskQueue, MediaDataDecoderCallback* aCallback,
+  TaskQueue* aTaskQueue, MediaDataDecoderCallback* aCallback,
   const VideoInfo& aConfig,
   ImageContainer* aImageContainer)
   : FFmpegDataDecoder(aLib, aTaskQueue, aCallback, GetCodecId(aConfig.mMimeType))
   , mImageContainer(aImageContainer)
   , mInfo(aConfig)
   , mCodecParser(nullptr)
+  , mLastInputDts(INT64_MIN)
 {
   MOZ_COUNT_CTOR(FFmpegVideoDecoder);
   // Use a new MediaByteBuffer as the object will be modified during initialization.
@@ -210,7 +210,7 @@ FFmpegVideoDecoder<LIBAV_VER>::DoDecode(MediaRawData* aSample,
 
   packet.data = aData;
   packet.size = aSize;
-  packet.dts = aSample->mTimecode;
+  packet.dts = mLastInputDts = aSample->mTimecode;
   packet.pts = aSample->mTime;
   packet.flags = aSample->mKeyframe ? AV_PKT_FLAG_KEY : 0;
   packet.pos = aSample->mOffset;
@@ -224,7 +224,7 @@ FFmpegVideoDecoder<LIBAV_VER>::DoDecode(MediaRawData* aSample,
 
   if (!PrepareFrame()) {
     NS_WARNING("FFmpeg h264 decoder failed to allocate frame.");
-    return DecodeResult::DECODE_ERROR;
+    return DecodeResult::FATAL_ERROR;
   }
 
   // Required with old version of FFmpeg/LibAV
@@ -300,7 +300,7 @@ FFmpegVideoDecoder<LIBAV_VER>::DoDecode(MediaRawData* aSample,
 
     if (!v) {
       NS_WARNING("image allocation error.");
-      return DecodeResult::DECODE_ERROR;
+      return DecodeResult::FATAL_ERROR;
     }
     mCallback->Output(v);
     return DecodeResult::DECODE_FRAME;
@@ -312,7 +312,7 @@ void
 FFmpegVideoDecoder<LIBAV_VER>::ProcessDrain()
 {
   RefPtr<MediaRawData> empty(new MediaRawData());
-  empty->mTimecode = mPtsContext.LastDts();
+  empty->mTimecode = mLastInputDts;
   while (DoDecode(empty) == DecodeResult::DECODE_FRAME) {
   }
   mCallback->DrainComplete();

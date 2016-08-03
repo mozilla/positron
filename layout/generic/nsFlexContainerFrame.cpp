@@ -7,6 +7,7 @@
 
 /* rendering object for CSS "display: flex" */
 
+#include "mozilla/UniquePtr.h"
 #include "nsFlexContainerFrame.h"
 #include "nsContentUtils.h"
 #include "nsCSSAnonBoxes.h"
@@ -1026,7 +1027,7 @@ GetFirstNonAnonBoxDescendant(nsIFrame* aFrame)
     // column, we'll always return the column. This is fine; we're really just
     // looking for a handle to *anything* with a meaningful content node inside
     // the table, for use in DOM comparisons to things outside of the table.)
-    if (MOZ_UNLIKELY(aFrame->GetType() == nsGkAtoms::tableOuterFrame)) {
+    if (MOZ_UNLIKELY(aFrame->GetType() == nsGkAtoms::tableWrapperFrame)) {
       nsIFrame* captionDescendant =
         GetFirstNonAnonBoxDescendant(aFrame->GetChildList(kCaptionList).FirstChild());
       if (captionDescendant) {
@@ -1176,7 +1177,7 @@ nsFlexContainerFrame::IsHorizontal()
   return axisTracker.IsMainAxisHorizontal();
 }
 
-FlexItem*
+UniquePtr<FlexItem>
 nsFlexContainerFrame::GenerateFlexItemForChild(
   nsPresContext* aPresContext,
   nsIFrame*      aChildFrame,
@@ -1286,12 +1287,12 @@ nsFlexContainerFrame::GenerateFlexItemForChild(
   }
 
   // Construct the flex item!
-  FlexItem* item = new FlexItem(childRS,
-                                flexGrow, flexShrink, flexBaseSize,
-                                mainMinSize, mainMaxSize,
-                                tentativeCrossSize,
-                                crossMinSize, crossMaxSize,
-                                aAxisTracker);
+  auto item = MakeUnique<FlexItem>(childRS,
+                                   flexGrow, flexShrink, flexBaseSize,
+                                   mainMinSize, mainMaxSize,
+                                   tentativeCrossSize,
+                                   crossMinSize, crossMaxSize,
+                                   aAxisTracker);
 
   // If we're inflexible, we can just freeze to our hypothetical main-size
   // up-front. Similarly, if we're a fixed-size widget, we only have one
@@ -1517,7 +1518,7 @@ nsFlexContainerFrame::
   // have a single-line (nowrap) flex container which itself has a definite
   // cross-size.  Otherwise, we'll wait to do stretching, since (in other
   // cases) we don't know how much the item should stretch yet.
-  const nsHTMLReflowState* flexContainerRS = aItemReflowState.parentReflowState;
+  const nsHTMLReflowState* flexContainerRS = aItemReflowState.mParentReflowState;
   MOZ_ASSERT(flexContainerRS,
              "flex item's reflow state should have ptr to container's state");
   if (NS_STYLE_FLEX_WRAP_NOWRAP == flexContainerRS->mStylePosition->mFlexWrap) {
@@ -1705,7 +1706,7 @@ FlexItem::FlexItem(nsHTMLReflowState& aFlexItemReflowState,
   MOZ_ASSERT(!(mFrame->GetStateBits() & NS_FRAME_OUT_OF_FLOW),
              "out-of-flow frames should not be treated as flex items");
 
-  const nsHTMLReflowState* containerRS = aFlexItemReflowState.parentReflowState;
+  const nsHTMLReflowState* containerRS = aFlexItemReflowState.mParentReflowState;
   if (IsLegacyBox(containerRS->mStyleDisplay,
                   containerRS->frame->StyleContext())) {
     // For -webkit-box/-webkit-inline-box, we need to:
@@ -3258,11 +3259,13 @@ FlexboxAxisTracker::InitAxesFromLegacyProps(
     mMainAxis = eAxis_LR;
     mCrossAxis = eAxis_TB;
   }
-  // "direction: rtl" (in a horizontal -webkit-box) reverses the main axis.
+  // "direction: rtl" reverses the writing-mode's inline axis.
+  // So, we need to reverse the corresponding flex axis to match.
   // (Note this we don't toggle "mIsMainAxisReversed" for this condition,
   // because the main axis will still match aWM's inline direction.)
-  if (aWM.IsBidiLTR()) {
-    mMainAxis = GetReverseAxis(mMainAxis);
+  if (!aWM.IsBidiLTR()) {
+    AxisOrientationType& axisToFlip = mIsRowOriented ? mMainAxis : mCrossAxis;
+    axisToFlip = GetReverseAxis(axisToFlip);
   }
   // XXXdholbert END CODE TO SET DEPRECATED MEMBER-VARS
 
@@ -3428,13 +3431,13 @@ nsFlexContainerFrame::GenerateFlexLines(
       curLine = AddNewFlexLineToList(aLines, shouldInsertAtFront);
     }
 
-    nsAutoPtr<FlexItem> item;
+    UniquePtr<FlexItem> item;
     if (nextStrutIdx < aStruts.Length() &&
         aStruts[nextStrutIdx].mItemIdx == itemIdxInContainer) {
 
       // Use the simplified "strut" FlexItem constructor:
-      item = new FlexItem(childFrame, aStruts[nextStrutIdx].mStrutCrossSize,
-                          aReflowState.GetWritingMode());
+      item = MakeUnique<FlexItem>(childFrame, aStruts[nextStrutIdx].mStrutCrossSize,
+                                  aReflowState.GetWritingMode());
       nextStrutIdx++;
     } else {
       item = GenerateFlexItemForChild(aPresContext, childFrame,
@@ -3457,7 +3460,7 @@ nsFlexContainerFrame::GenerateFlexLines(
 
     // Add item to current flex line (and update the line's bookkeeping about
     // how large its items collectively are).
-    curLine->AddItem(item.forget(), shouldInsertAtFront,
+    curLine->AddItem(item.release(), shouldInsertAtFront,
                      itemInnerHypotheticalMainSize,
                      itemOuterHypotheticalMainSize);
 
@@ -4266,8 +4269,7 @@ nsFlexContainerFrame::MoveFlexItemToFinalPosition(
   LogicalMargin logicalOffsets(outerWM);
   if (NS_STYLE_POSITION_RELATIVE == aItem.Frame()->StyleDisplay()->mPosition) {
     FrameProperties props = aItem.Frame()->Properties();
-    nsMargin* cachedOffsets =
-      static_cast<nsMargin*>(props.Get(nsIFrame::ComputedOffsetProperty()));
+    nsMargin* cachedOffsets = props.Get(nsIFrame::ComputedOffsetProperty());
     MOZ_ASSERT(cachedOffsets,
                "relpos previously-reflowed frame should've cached its offsets");
     logicalOffsets = LogicalMargin(outerWM, *cachedOffsets);

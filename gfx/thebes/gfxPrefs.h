@@ -9,6 +9,9 @@
 #include <cmath>                 // for M_PI
 #include <stdint.h>
 #include "mozilla/Assertions.h"
+#include "mozilla/Function.h"
+#include "mozilla/gfx/LoggingConstants.h"
+#include "nsTArray.h"
 
 // First time gfxPrefs::GetSingleton() needs to be called on the main thread,
 // before any of the methods accessing the values are used, but after
@@ -55,25 +58,31 @@
 // example, if the accessor is Foo() then calling SetFoo(...) will update
 // the preference and also change the return value of subsequent Foo() calls.
 // This is true even for 'Once' prefs which otherwise do not change if the
-// pref is updated after initialization.
+// pref is updated after initialization. Changing gfxPrefs values in content
+// processes will not affect the result in other processes. Changing gfxPrefs
+// values in the GPU process is not supported at all.
 
-#define DECL_GFX_PREF(Update, Pref, Name, Type, Default)                     \
+#define DECL_GFX_PREF(Update, Prefname, Name, Type, Default)                  \
 public:                                                                       \
 static Type Name() { MOZ_ASSERT(SingletonExists()); return GetSingleton().mPref##Name.mValue; } \
-static void Set##Name(Type aVal) { MOZ_ASSERT(SingletonExists()); \
+static void Set##Name(Type aVal) { MOZ_ASSERT(SingletonExists());             \
     GetSingleton().mPref##Name.Set(UpdatePolicy::Update, Get##Name##PrefName(), aVal); } \
-static const char* Get##Name##PrefName() { return Pref; }                     \
+static const char* Get##Name##PrefName() { return Prefname; }                 \
 static Type Get##Name##PrefDefault() { return Default; }                      \
 private:                                                                      \
+static Pref* Get##Name##PrefPtr() { return &GetSingleton().mPref##Name; }     \
 PrefTemplate<UpdatePolicy::Update, Type, Get##Name##PrefDefault, Get##Name##PrefName> mPref##Name
 
-class PreferenceAccessImpl;
+namespace mozilla {
+namespace gfx {
+class GfxPrefValue;   // defined in PGPU.ipdl
+} // namespace gfx
+} // namespace mozilla
+
 class gfxPrefs;
 class gfxPrefs final
 {
-  private:
-  /// See Logging.h.  This lets Moz2D access preference values it owns.
-  PreferenceAccessImpl* mMoz2DPrefAccess;
+  typedef mozilla::gfx::GfxPrefValue GfxPrefValue;
 
 private:
   // Enums for the update policy.
@@ -83,27 +92,81 @@ private:
     Live  // Evaluate the preference and set callback so it stays current/live
   };
 
+public:
+  class Pref
+  {
+  public:
+    Pref() : mChangeCallback(nullptr)
+    {
+      mIndex = sGfxPrefList->Length();
+      sGfxPrefList->AppendElement(this);
+    }
+
+    size_t Index() const { return mIndex; }
+    void OnChange();
+
+    typedef void (*ChangeCallback)();
+    void SetChangeCallback(ChangeCallback aCallback);
+
+    virtual const char* Name() const = 0;
+
+    // Returns true if the value is default, false if changed.
+    virtual bool HasDefaultValue() const = 0;
+
+    // Returns the pref value as a discriminated union.
+    virtual void GetCachedValue(GfxPrefValue* aOutValue) const = 0;
+
+    // Change the cached value. GfxPrefValue must be a compatible type.
+    virtual void SetCachedValue(const GfxPrefValue& aOutValue) = 0;
+
+  protected:
+    void FireChangeCallback();
+
+  private:
+    size_t mIndex;
+    ChangeCallback mChangeCallback;
+  };
+
+  static const nsTArray<Pref*>& all() {
+    return *sGfxPrefList;
+  }
+
+private:
   // Since we cannot use const char*, use a function that returns it.
-  template <UpdatePolicy Update, class T, T Default(void), const char* Pref(void)>
-  class PrefTemplate
+  template <UpdatePolicy Update, class T, T Default(void), const char* Prefname(void)>
+  class PrefTemplate : public Pref
   {
   public:
     PrefTemplate()
     : mValue(Default())
     {
-      Register(Update, Pref());
+      // If not using the Preferences service, values are synced over IPC, so
+      // there's no need to register us as a Preferences observer.
+      if (IsPrefsServiceAvailable()) {
+        Register(Update, Prefname());
+      }
+      // By default we only watch changes in the parent process, to communicate
+      // changes to the GPU process.
+      if (IsParentProcess() && Update == UpdatePolicy::Live) {
+        WatchChanges(Prefname(), this);
+      }
+    }
+    ~PrefTemplate() {
+      if (IsParentProcess() && Update == UpdatePolicy::Live) {
+        UnwatchChanges(Prefname(), this);
+      }
     }
     void Register(UpdatePolicy aUpdate, const char* aPreference)
     {
       AssertMainThread();
-      switch(aUpdate) {
+      switch (aUpdate) {
         case UpdatePolicy::Skip:
           break;
         case UpdatePolicy::Once:
           mValue = PrefGet(aPreference, mValue);
           break;
         case UpdatePolicy::Live:
-          PrefAddVarCache(&mValue,aPreference, mValue);
+          PrefAddVarCache(&mValue, aPreference, mValue);
           break;
         default:
           MOZ_CRASH("Incomplete switch");
@@ -124,6 +187,36 @@ private:
           MOZ_CRASH("Incomplete switch");
       }
     }
+    const char *Name() const override {
+      return Prefname();
+    }
+    // When using the Preferences service, the change callback can be triggered
+    // *before* our cached value is updated, so we expose a method to grab the
+    // true live value.
+    T GetLiveValue() const {
+      if (IsPrefsServiceAvailable()) {
+        return PrefGet(Prefname(), mValue);
+      }
+      return mValue;
+    }
+    bool HasDefaultValue() const override {
+      return mValue == Default();
+    }
+    void GetCachedValue(GfxPrefValue* aOutValue) const override {
+      CopyPrefValue(&mValue, aOutValue);
+    }
+    void SetCachedValue(const GfxPrefValue& aOutValue) override {
+      // This is only used in non-XPCOM processes.
+      MOZ_ASSERT(!IsPrefsServiceAvailable());
+
+      T newValue;
+      CopyPrefValue(&aOutValue, &newValue);
+
+      if (mValue != newValue) {
+        mValue = newValue;
+        FireChangeCallback();
+      }
+    }
     T mValue;
   };
 
@@ -140,7 +233,7 @@ private:
   DECL_GFX_PREF(Live, "apz.axis_lock.direct_pan_angle",        APZAllowedDirectPanAngle, float, float(M_PI / 3.0) /* 60 degrees */);
   DECL_GFX_PREF(Live, "apz.axis_lock.lock_angle",              APZAxisLockAngle, float, float(M_PI / 6.0) /* 30 degrees */);
   DECL_GFX_PREF(Live, "apz.axis_lock.mode",                    APZAxisLockMode, int32_t, 0);
-  DECL_GFX_PREF(Live, "apz.content_response_timeout",          APZContentResponseTimeout, int32_t, 300);
+  DECL_GFX_PREF(Live, "apz.content_response_timeout",          APZContentResponseTimeout, int32_t, 400);
   DECL_GFX_PREF(Live, "apz.danger_zone_x",                     APZDangerZoneX, int32_t, 50);
   DECL_GFX_PREF(Live, "apz.danger_zone_y",                     APZDangerZoneY, int32_t, 100);
   DECL_GFX_PREF(Live, "apz.disable_for_scroll_linked_effects", APZDisableForScrollLinkedEffects, bool, false);
@@ -156,6 +249,7 @@ private:
   DECL_GFX_PREF(Once, "apz.fling_curve_function_y2",           APZCurveFunctionY2, float, 1.0f);
   DECL_GFX_PREF(Live, "apz.fling_curve_threshold_inches_per_ms", APZCurveThreshold, float, -1.0f);
   DECL_GFX_PREF(Live, "apz.fling_friction",                    APZFlingFriction, float, 0.002f);
+  DECL_GFX_PREF(Live, "apz.fling_min_velocity_threshold",      APZFlingMinVelocityThreshold, float, 0.5f);
   DECL_GFX_PREF(Live, "apz.fling_stop_on_tap_threshold",       APZFlingStopOnTapThreshold, float, 0.05f);
   DECL_GFX_PREF(Live, "apz.fling_stopped_threshold",           APZFlingStoppedThreshold, float, 0.01f);
   DECL_GFX_PREF(Live, "apz.highlight_checkerboarded_areas",    APZHighlightCheckerboardedAreas, bool, false);
@@ -178,7 +272,7 @@ private:
   DECL_GFX_PREF(Live, "apz.test.logging_enabled",              APZTestLoggingEnabled, bool, false);
   DECL_GFX_PREF(Live, "apz.touch_move_tolerance",              APZTouchMoveTolerance, float, 0.0);
   DECL_GFX_PREF(Live, "apz.touch_start_tolerance",             APZTouchStartTolerance, float, 1.0f/4.5f);
-  DECL_GFX_PREF(Live, "apz.velocity_bias",                     APZVelocityBias, float, 1.0f);
+  DECL_GFX_PREF(Live, "apz.velocity_bias",                     APZVelocityBias, float, 0.0f);
   DECL_GFX_PREF(Live, "apz.velocity_relevance_time_ms",        APZVelocityRelevanceTime, uint32_t, 150);
   DECL_GFX_PREF(Live, "apz.x_skate_highmem_adjust",            APZXSkateHighMemAdjust, float, 0.0f);
   DECL_GFX_PREF(Live, "apz.x_skate_size_multiplier",           APZXSkateSizeMultiplier, float, 1.5f);
@@ -187,6 +281,7 @@ private:
   DECL_GFX_PREF(Live, "apz.y_skate_size_multiplier",           APZYSkateSizeMultiplier, float, 2.5f);
   DECL_GFX_PREF(Live, "apz.y_stationary_size_multiplier",      APZYStationarySizeMultiplier, float, 3.5f);
   DECL_GFX_PREF(Live, "apz.zoom_animation_duration_ms",        APZZoomAnimationDuration, int32_t, 250);
+  DECL_GFX_PREF(Live, "apz.scale_repaint_delay_ms",            APZScaleRepaintDelay, int32_t, 500);
 
   DECL_GFX_PREF(Live, "browser.ui.zoom.force-user-scalable",   ForceUserScalable, bool, false);
   DECL_GFX_PREF(Live, "browser.viewport.desktopWidth",         DesktopViewportWidth, int32_t, 980);
@@ -197,6 +292,7 @@ private:
   DECL_GFX_PREF(Once, "dom.vr.oculus.enabled",                 VROculusEnabled, bool, true);
   DECL_GFX_PREF(Once, "dom.vr.oculus050.enabled",              VROculus050Enabled, bool, true);
   DECL_GFX_PREF(Once, "dom.vr.cardboard.enabled",              VRCardboardEnabled, bool, false);
+  DECL_GFX_PREF(Once, "dom.vr.osvr.enabled",                   VROSVREnabled, bool, false);
   DECL_GFX_PREF(Once, "dom.vr.add-test-devices",               VRAddTestDevices, int32_t, 1);
   DECL_GFX_PREF(Live, "dom.vr.poseprediction.enabled",         VRPosePredictionEnabled, bool, false);
   DECL_GFX_PREF(Live, "dom.w3c_pointer_events.enabled",        PointerEventsEnabled, bool, false);
@@ -258,7 +354,8 @@ private:
   DECL_GFX_PREF(Live, "gfx.gralloc.fence-with-readpixels",     GrallocFenceWithReadPixels, bool, false);
   DECL_GFX_PREF(Live, "gfx.layerscope.enabled",                LayerScopeEnabled, bool, false);
   DECL_GFX_PREF(Live, "gfx.layerscope.port",                   LayerScopePort, int32_t, 23456);
-  // Note that        "gfx.logging.level" is defined in Logging.h
+  // Note that        "gfx.logging.level" is defined in Logging.h.
+  DECL_GFX_PREF(Live, "gfx.logging.level",                     GfxLoggingLevel, int32_t, mozilla::gfx::LOG_DEFAULT);
   DECL_GFX_PREF(Once, "gfx.logging.crash.length",              GfxLoggingCrashLength, uint32_t, 16);
   DECL_GFX_PREF(Live, "gfx.logging.painted-pixel-count.enabled",GfxLoggingPaintedPixelCountEnabled, bool, false);
   // The maximums here are quite conservative, we can tighten them if problems show up.
@@ -271,12 +368,15 @@ private:
   DECL_GFX_PREF(Live, "gfx.SurfaceTexture.detach.enabled",     SurfaceTextureDetachEnabled, bool, true);
   DECL_GFX_PREF(Live, "gfx.testing.device-reset",              DeviceResetForTesting, int32_t, 0);
   DECL_GFX_PREF(Live, "gfx.testing.device-fail",               DeviceFailForTesting, bool, false);
+  DECL_GFX_PREF(Live, "gfx.ycbcr.accurate-conversion",         YCbCrAccurateConversion, bool, false);
 
   DECL_GFX_PREF(Live, "gfx.content.use-native-pushlayer",      UseNativePushLayer, bool, false);
 
   // Disable surface sharing due to issues with compatible FBConfigs on
   // NVIDIA drivers as described in bug 1193015.
   DECL_GFX_PREF(Live, "gfx.use-glx-texture-from-pixmap",       UseGLXTextureFromPixmap, bool, false);
+
+  DECL_GFX_PREF(Once, "gfx.use-iosurface-textures",            UseIOSurfaceTextures, bool, false);
 
   // These times should be in milliseconds
   DECL_GFX_PREF(Once, "gfx.touch.resample.delay-threshold",    TouchResampleVsyncDelayThreshold, int32_t, 20);
@@ -328,6 +428,7 @@ private:
   DECL_GFX_PREF(Once, "layers.async-pan-zoom.separate-event-thread", AsyncPanZoomSeparateEventThread, bool, false);
   DECL_GFX_PREF(Live, "layers.bench.enabled",                  LayersBenchEnabled, bool, false);
   DECL_GFX_PREF(Once, "layers.bufferrotation.enabled",         BufferRotationEnabled, bool, true);
+  DECL_GFX_PREF(Live, "layers.shared-buffer-provider.enabled", PersistentBufferProviderSharedEnabled, bool, false);
 #ifdef MOZ_GFX_OPTIMIZE_MOBILE
   // If MOZ_GFX_OPTIMIZE_MOBILE is defined, we force component alpha off
   // and ignore the preference.
@@ -362,6 +463,8 @@ private:
   DECL_GFX_PREF(Live, "layers.flash-borders",                  FlashLayerBorders, bool, false);
   DECL_GFX_PREF(Once, "layers.force-shmem-tiles",              ForceShmemTiles, bool, false);
   DECL_GFX_PREF(Live, "layers.frame-counter",                  DrawFrameCounter, bool, false);
+  DECL_GFX_PREF(Once, "layers.gpu-process.dev.enabled",        GPUProcessDevEnabled, bool, false);
+  DECL_GFX_PREF(Once, "layers.gpu-process.dev.timeout_ms",     GPUProcessDevTimeoutMs, int32_t, 5000);
   DECL_GFX_PREF(Once, "layers.gralloc.disable",                DisableGralloc, bool, false);
   DECL_GFX_PREF(Live, "layers.low-precision-buffer",           UseLowPrecisionBuffer, bool, false);
   DECL_GFX_PREF(Live, "layers.low-precision-opacity",          LowPrecisionOpacity, float, 1.0f);
@@ -383,7 +486,6 @@ private:
   DECL_GFX_PREF(Once, "layers.tile-height",                    LayersTileHeight, int32_t, 256);
   DECL_GFX_PREF(Once, "layers.tile-max-pool-size",             LayersTileMaxPoolSize, uint32_t, (uint32_t)50);
   DECL_GFX_PREF(Once, "layers.tile-shrink-pool-timeout",       LayersTileShrinkPoolTimeout, uint32_t, (uint32_t)1000);
-  DECL_GFX_PREF(Once, "layers.tiled-drawtarget.enabled",       TiledDrawTargetEnabled, bool, false);
   DECL_GFX_PREF(Once, "layers.tiles.adjust",                   LayersTilesAdjust, bool, true);
   DECL_GFX_PREF(Once, "layers.tiles.edge-padding",             TileEdgePaddingEnabled, bool, true);
   DECL_GFX_PREF(Live, "layers.tiles.fade-in.enabled",          LayerTileFadeInEnabled, bool, false);
@@ -399,7 +501,7 @@ private:
   DECL_GFX_PREF(Live, "layout.css.scroll-snap.prediction-max-velocity", ScrollSnapPredictionMaxVelocity, int32_t, 2000);
   DECL_GFX_PREF(Live, "layout.css.scroll-snap.prediction-sensitivity", ScrollSnapPredictionSensitivity, float, 0.750f);
   DECL_GFX_PREF(Live, "layout.css.scroll-snap.proximity-threshold", ScrollSnapProximityThreshold, int32_t, 200);
-  DECL_GFX_PREF(Once, "layout.css.touch_action.enabled",       TouchActionEnabled, bool, false);
+  DECL_GFX_PREF(Live, "layout.css.touch_action.enabled",       TouchActionEnabled, bool, false);
   DECL_GFX_PREF(Live, "layout.display-list.dump",              LayoutDumpDisplayList, bool, false);
   DECL_GFX_PREF(Live, "layout.display-list.dump-content",      LayoutDumpDisplayListContent, bool, false);
   DECL_GFX_PREF(Live, "layout.event-regions.enabled",          LayoutEventRegionsEnabledDoNotUseDirectly, bool, false);
@@ -435,6 +537,7 @@ private:
   DECL_GFX_PREF(Live, "webgl.can-lose-context-in-foreground",  WebGLCanLoseContextInForeground, bool, true);
   DECL_GFX_PREF(Live, "webgl.default-no-alpha",                WebGLDefaultNoAlpha, bool, false);
   DECL_GFX_PREF(Live, "webgl.disable-angle",                   WebGLDisableANGLE, bool, false);
+  DECL_GFX_PREF(Live, "webgl.disable-wgl",                     WebGLDisableWGL, bool, false);
   DECL_GFX_PREF(Live, "webgl.disable-extensions",              WebGLDisableExtensions, bool, false);
   DECL_GFX_PREF(Live, "webgl.dxgl.enabled",                    WebGLDXGLEnabled, bool, false);
   DECL_GFX_PREF(Live, "webgl.dxgl.needs-finish",               WebGLDXGLNeedsFinish, bool, false);
@@ -474,7 +577,9 @@ public:
   {
     MOZ_ASSERT(!sInstanceHasBeenDestroyed, "Should never recreate a gfxPrefs instance!");
     if (!sInstance) {
+      sGfxPrefList = new nsTArray<Pref*>();
       sInstance = new gfxPrefs;
+      sInstance->Init();
     }
     MOZ_ASSERT(SingletonExists());
     return *sInstance;
@@ -485,8 +590,16 @@ public:
 private:
   static gfxPrefs* sInstance;
   static bool sInstanceHasBeenDestroyed;
+  static nsTArray<Pref*>* sGfxPrefList;
 
 private:
+  // The constructor cannot access GetSingleton(), since sInstance (necessarily)
+  // has not been assigned yet. Follow-up initialization that needs GetSingleton()
+  // must be added to Init().
+  void Init();
+
+  static bool IsPrefsServiceAvailable();
+  static bool IsParentProcess();
   // Creating these to avoid having to include Preferences.h in the .h
   static void PrefAddVarCache(bool*, const char*, bool);
   static void PrefAddVarCache(int32_t*, const char*, int32_t);
@@ -500,6 +613,17 @@ private:
   static void PrefSet(const char* aPref, int32_t aValue);
   static void PrefSet(const char* aPref, uint32_t aValue);
   static void PrefSet(const char* aPref, float aValue);
+  static void WatchChanges(const char* aPrefname, Pref* aPref);
+  static void UnwatchChanges(const char* aPrefname, Pref* aPref);
+  // Creating these to avoid having to include PGPU.h in the .h
+  static void CopyPrefValue(const bool* aValue, GfxPrefValue* aOutValue);
+  static void CopyPrefValue(const int32_t* aValue, GfxPrefValue* aOutValue);
+  static void CopyPrefValue(const uint32_t* aValue, GfxPrefValue* aOutValue);
+  static void CopyPrefValue(const float* aValue, GfxPrefValue* aOutValue);
+  static void CopyPrefValue(const GfxPrefValue* aValue, bool* aOutValue);
+  static void CopyPrefValue(const GfxPrefValue* aValue, int32_t* aOutValue);
+  static void CopyPrefValue(const GfxPrefValue* aValue, uint32_t* aOutValue);
+  static void CopyPrefValue(const GfxPrefValue* aValue, float* aOutValue);
 
   static void AssertMainThread();
 

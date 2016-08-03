@@ -29,6 +29,7 @@
 #include "nsCategoryManagerUtils.h"
 #include "nsCDefaultURIFixup.h"
 #include "nsToolkitCompsCID.h"
+#include "nsGeoPosition.h"
 
 #include "mozilla/Services.h"
 #include "mozilla/Preferences.h"
@@ -44,7 +45,7 @@
 
 #include "mozilla/dom/ScreenOrientation.h"
 #ifdef MOZ_GAMEPAD
-#include "mozilla/dom/GamepadFunctions.h"
+#include "mozilla/dom/GamepadPlatformService.h"
 #include "mozilla/dom/Gamepad.h"
 #endif
 
@@ -69,6 +70,7 @@
 #endif
 
 using namespace mozilla;
+typedef mozilla::dom::GamepadPlatformService GamepadPlatformService;
 
 nsIGeolocationUpdate *gLocationCallback = nullptr;
 nsAutoPtr<mozilla::AndroidGeckoEvent> gLastSizeChange;
@@ -310,6 +312,79 @@ public:
 
         obsServ->NotifyObservers(nullptr, aTopic->ToCString().get(),
                                  aData ? aData->ToString().get() : nullptr);
+    }
+
+    static void OnSensorChanged(int32_t aType, float aX, float aY, float aZ,
+                                float aW, int32_t aAccuracy, int64_t aTime)
+    {
+        AutoTArray<float, 4> values;
+
+        switch (aType) {
+        // Bug 938035, transfer HAL data for orientation sensor to meet w3c
+        // spec, ex: HAL report alpha=90 means East but alpha=90 means West
+        // in w3c spec
+        case hal::SENSOR_ORIENTATION:
+            values.AppendElement(360.0f - aX);
+            values.AppendElement(-aY);
+            values.AppendElement(-aZ);
+            break;
+
+        case hal::SENSOR_LINEAR_ACCELERATION:
+        case hal::SENSOR_ACCELERATION:
+        case hal::SENSOR_GYROSCOPE:
+        case hal::SENSOR_PROXIMITY:
+            values.AppendElement(aX);
+            values.AppendElement(aY);
+            values.AppendElement(aZ);
+            break;
+
+        case hal::SENSOR_LIGHT:
+            values.AppendElement(aX);
+            break;
+
+        case hal::SENSOR_ROTATION_VECTOR:
+        case hal::SENSOR_GAME_ROTATION_VECTOR:
+            values.AppendElement(aX);
+            values.AppendElement(aY);
+            values.AppendElement(aZ);
+            values.AppendElement(aW);
+            break;
+
+        default:
+            __android_log_print(ANDROID_LOG_ERROR, "Gecko",
+                                "Unknown sensor type %d", aType);
+        }
+
+        hal::SensorData sdata(hal::SensorType(aType), aTime, values,
+                              hal::SensorAccuracyType(aAccuracy));
+        hal::NotifySensorChange(sdata);
+    }
+
+    static void OnLocationChanged(double aLatitude, double aLongitude,
+                                  double aAltitude, float aAccuracy,
+                                  float aBearing, float aSpeed, int64_t aTime)
+    {
+        if (!gLocationCallback) {
+            return;
+        }
+
+        RefPtr<nsIDOMGeoPosition> geoPosition(
+                new nsGeoPosition(aLatitude, aLongitude, aAltitude, aAccuracy,
+                                  aAccuracy, aBearing, aSpeed, aTime));
+        gLocationCallback->Update(geoPosition);
+    }
+
+    static void NotifyUriVisited(jni::String::Param aUri)
+    {
+#ifdef MOZ_ANDROID_HISTORY
+        nsCOMPtr<IHistory> history = services::GetHistoryService();
+        nsCOMPtr<nsIURI> visitedURI;
+        if (history &&
+            NS_SUCCEEDED(NS_NewURI(getter_AddRefs(visitedURI),
+                                   aUri->ToString()))) {
+            history->NotifyVisited(visitedURI);
+        }
+#endif
     }
 };
 
@@ -622,64 +697,6 @@ nsAppShell::LegacyGeckoEvent::Run()
         nsAppShell::Get()->NativeEventCallback();
         break;
 
-    case AndroidGeckoEvent::SENSOR_EVENT: {
-        AutoTArray<float, 4> values;
-        mozilla::hal::SensorType type = (mozilla::hal::SensorType) curEvent->Flags();
-
-        switch (type) {
-          // Bug 938035, transfer HAL data for orientation sensor to meet w3c
-          // spec, ex: HAL report alpha=90 means East but alpha=90 means West
-          // in w3c spec
-          case hal::SENSOR_ORIENTATION:
-            values.AppendElement(360 -curEvent->X());
-            values.AppendElement(-curEvent->Y());
-            values.AppendElement(-curEvent->Z());
-            break;
-          case hal::SENSOR_LINEAR_ACCELERATION:
-          case hal::SENSOR_ACCELERATION:
-          case hal::SENSOR_GYROSCOPE:
-          case hal::SENSOR_PROXIMITY:
-            values.AppendElement(curEvent->X());
-            values.AppendElement(curEvent->Y());
-            values.AppendElement(curEvent->Z());
-            break;
-
-        case hal::SENSOR_LIGHT:
-            values.AppendElement(curEvent->X());
-            break;
-
-        case hal::SENSOR_ROTATION_VECTOR:
-        case hal::SENSOR_GAME_ROTATION_VECTOR:
-            values.AppendElement(curEvent->X());
-            values.AppendElement(curEvent->Y());
-            values.AppendElement(curEvent->Z());
-            values.AppendElement(curEvent->W());
-            break;
-
-        default:
-            __android_log_print(ANDROID_LOG_ERROR,
-                                "Gecko", "### SENSOR_EVENT fired, but type wasn't known %d",
-                                type);
-        }
-
-        const hal::SensorAccuracyType &accuracy = (hal::SensorAccuracyType) curEvent->MetaState();
-        hal::SensorData sdata(type, curEvent->Time(), values, accuracy);
-        hal::NotifySensorChange(sdata);
-      }
-      break;
-
-    case AndroidGeckoEvent::LOCATION_EVENT: {
-        if (!gLocationCallback)
-            break;
-
-        nsGeoPosition* p = curEvent->GeoPosition();
-        if (p)
-            gLocationCallback->Update(curEvent->GeoPosition());
-        else
-            NS_WARNING("Received location event without geoposition!");
-        break;
-    }
-
     case AndroidGeckoEvent::THUMBNAIL: {
         if (!nsAppShell::Get()->mBrowserApp)
             break;
@@ -819,19 +836,6 @@ nsAppShell::LegacyGeckoEvent::Run()
         break;
     }
 
-    case AndroidGeckoEvent::VISITED: {
-#ifdef MOZ_ANDROID_HISTORY
-        nsCOMPtr<IHistory> history = services::GetHistoryService();
-        nsCOMPtr<nsIURI> visitedURI;
-        if (history &&
-            NS_SUCCEEDED(NS_NewURI(getter_AddRefs(visitedURI),
-                                   curEvent->Characters()))) {
-            history->NotifyVisited(visitedURI);
-        }
-#endif
-        break;
-    }
-
     case AndroidGeckoEvent::NETWORK_CHANGED: {
         hal::NotifyNetworkChange(hal::NetworkInformation(curEvent->ConnectionType(),
                                                          curEvent->IsWifi(),
@@ -933,16 +937,21 @@ nsAppShell::LegacyGeckoEvent::Run()
 
     case AndroidGeckoEvent::GAMEPAD_ADDREMOVE: {
 #ifdef MOZ_GAMEPAD
+            RefPtr<GamepadPlatformService> service;
+            service = GamepadPlatformService::GetParentService();
+            if (!service) {
+              break;
+            }
             if (curEvent->Action() == AndroidGeckoEvent::ACTION_GAMEPAD_ADDED) {
-            int svc_id = dom::GamepadFunctions::AddGamepad("android",
-                                                           dom::GamepadMappingType::Standard,
-                                                           dom::kStandardGamepadButtons,
-                                                           dom::kStandardGamepadAxes);
-                widget::GeckoAppShell::GamepadAdded(curEvent->ID(),
-                                                    svc_id);
+              int svc_id = service->AddGamepad("android",
+                                               dom::GamepadMappingType::Standard,
+                                               dom::kStandardGamepadButtons,
+                                               dom::kStandardGamepadAxes);
+              widget::GeckoAppShell::GamepadAdded(curEvent->ID(),
+                                                  svc_id);
             } else if (curEvent->Action() == AndroidGeckoEvent::ACTION_GAMEPAD_REMOVED) {
-            dom::GamepadFunctions::RemoveGamepad(curEvent->ID());
-        }
+              service->RemoveGamepad(curEvent->ID());
+            }
 #endif
         break;
     }
@@ -950,19 +959,24 @@ nsAppShell::LegacyGeckoEvent::Run()
     case AndroidGeckoEvent::GAMEPAD_DATA: {
 #ifdef MOZ_GAMEPAD
             int id = curEvent->ID();
+            RefPtr<GamepadPlatformService> service;
+            service = GamepadPlatformService::GetParentService();
+            if (!service) {
+              break;
+            }
             if (curEvent->Action() == AndroidGeckoEvent::ACTION_GAMEPAD_BUTTON) {
-            dom::GamepadFunctions::NewButtonEvent(id, curEvent->GamepadButton(),
-                                     curEvent->GamepadButtonPressed(),
-                                     curEvent->GamepadButtonValue());
+              service->NewButtonEvent(id, curEvent->GamepadButton(),
+                                      curEvent->GamepadButtonPressed(),
+                                      curEvent->GamepadButtonValue());
             } else if (curEvent->Action() == AndroidGeckoEvent::ACTION_GAMEPAD_AXES) {
                 int valid = curEvent->Flags();
                 const nsTArray<float>& values = curEvent->GamepadValues();
                 for (unsigned i = 0; i < values.Length(); i++) {
                     if (valid & (1<<i)) {
-                    dom::GamepadFunctions::NewAxisMoveEvent(id, i, values[i]);
+                      service->NewAxisMoveEvent(id, i, values[i]);
+                    }
                 }
             }
-        }
 #endif
         break;
     }

@@ -8,7 +8,6 @@
 #ifndef nsComputedDOMStyle_h__
 #define nsComputedDOMStyle_h__
 
-#include "nsAutoPtr.h"
 #include "mozilla/ArenaRefPtr.h"
 #include "mozilla/ArenaRefPtrInlines.h"
 #include "mozilla/Attributes.h"
@@ -427,7 +426,7 @@ private:
   already_AddRefed<CSSValue> DoGetWordSpacing();
   already_AddRefed<CSSValue> DoGetWhiteSpace();
   already_AddRefed<CSSValue> DoGetWordBreak();
-  already_AddRefed<CSSValue> DoGetWordWrap();
+  already_AddRefed<CSSValue> DoGetOverflowWrap();
   already_AddRefed<CSSValue> DoGetHyphens();
   already_AddRefed<CSSValue> DoGetTabSize();
   already_AddRefed<CSSValue> DoGetTextSizeAdjust();
@@ -643,9 +642,13 @@ private:
   already_AddRefed<CSSValue> CreatePrimitiveValueForStyleFilter(
     const nsStyleFilter& aStyleFilter);
 
-  // Helper function for computing basic shape styles.
   already_AddRefed<CSSValue> CreatePrimitiveValueForClipPath(
-    const nsStyleBasicShape* aStyleBasicShape, uint8_t aSizingBox);
+    const nsStyleBasicShape* aStyleBasicShape,
+    mozilla::StyleClipShapeSizing aSizingBox);
+
+  // Helper function for computing basic shape styles.
+  already_AddRefed<CSSValue> CreatePrimitiveValueForBasicShape(
+    const nsStyleBasicShape* aStyleBasicShape);
   void BoxValuesToString(nsAString& aString,
                          const nsTArray<nsStyleCoord>& aBoxValues);
   void BasicShapeRadiiToString(nsAString& aCssText,

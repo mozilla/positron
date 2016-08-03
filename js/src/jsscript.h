@@ -127,17 +127,17 @@ struct BlockScopeNote {
 };
 
 struct ConstArray {
-    js::HeapValue*  vector;    /* array of indexed constant values */
-    uint32_t        length;
+    js::GCPtrValue* vector;     // array of indexed constant values
+    uint32_t length;
 };
 
 struct ObjectArray {
-    js::HeapPtrObject* vector;  // Array of indexed objects.
-    uint32_t        length;     // Count of indexed objects.
+    js::GCPtrObject* vector;    // Array of indexed objects.
+    uint32_t length;            // Count of indexed objects.
 };
 
 struct TryNoteArray {
-    JSTryNote*      vector;    // Array of indexed try notes.
+    JSTryNote*      vector;     // Array of indexed try notes.
     uint32_t        length;     // Count of indexed try notes.
 };
 
@@ -151,7 +151,7 @@ class YieldOffsetArray {
     detail::CopyScript(JSContext* cx, HandleObject scriptStaticScope, HandleScript src,
                        HandleScript dst);
 
-    uint32_t*       vector_;   // Array of bytecode offsets.
+    uint32_t*       vector_;    // Array of bytecode offsets.
     uint32_t        length_;    // Count of bytecode offsets.
 
   public:
@@ -224,7 +224,7 @@ class Bindings
     template <typename Outer> friend class BindingsOperations;
     template <typename Outer> friend class MutableBindingsOperations;
 
-    RelocatablePtrShape callObjShape_;
+    HeapPtr<Shape*> callObjShape_;
     uintptr_t bindingArrayAndFlag_;
     uint16_t numArgs_;
     uint16_t numBlockScoped_;
@@ -256,6 +256,7 @@ class Bindings
 
   public:
     static const uint32_t BODY_LEVEL_LEXICAL_LIMIT = UINT16_LIMIT;
+    static const uint32_t BLOCK_SCOPED_LIMIT = UINT16_LIMIT;
 
     Binding* bindingArray() const {
         return reinterpret_cast<Binding*>(bindingArrayAndFlag_ & ~TEMPORARY_STORAGE_BIT);
@@ -369,7 +370,7 @@ class BindingsOperations
 
   public:
     // Direct data access to the underlying bindings.
-    const RelocatablePtrShape& callObjShape() const {
+    const HeapPtr<Shape*>& callObjShape() const {
         return bindings().callObjShape_;
     }
     uint16_t numArgs() const {
@@ -738,17 +739,15 @@ class ScriptSource
     size_t length() const {
         struct LengthMatcher
         {
-            using ReturnType = size_t;
-
-            ReturnType match(const Uncompressed& u) {
+            size_t match(const Uncompressed& u) {
                 return u.string.length();
             }
 
-            ReturnType match(const Compressed& c) {
+            size_t match(const Compressed& c) {
                 return c.uncompressedLength;
             }
 
-            ReturnType match(const Missing& m) {
+            size_t match(const Missing& m) {
                 MOZ_CRASH("ScriptSource::length on a missing source");
                 return 0;
             }
@@ -778,7 +777,7 @@ class ScriptSource
         mozilla::UniquePtr<char[], JS::FreePolicy>&& raw,
         size_t rawLength,
         size_t sourceLength);
-    void setCompressedSource(SharedImmutableString&& raw, size_t length);
+    void setCompressedSource(SharedImmutableString&& raw, size_t sourceLength);
 
     // XDR handling
     template <XDRMode mode>
@@ -986,7 +985,7 @@ class JSScript : public js::gc::TenuredCell
     uint8_t*        data;      /* pointer to variable-length data array (see
                                    comment above Create() for details) */
 
-    js::HeapPtrAtom* atoms;     /* maps immediate index to literal struct */
+    js::GCPtrAtom* atoms;      /* maps immediate index to literal struct */
 
     JSCompartment*  compartment_;
 
@@ -998,11 +997,11 @@ class JSScript : public js::gc::TenuredCell
     //
     // (When we clone a JSScript into a new compartment, we don't clone its
     // source object. Instead, the clone refers to a wrapper.)
-    js::HeapPtrObject sourceObject_;
+    js::GCPtrObject sourceObject_;
 
-    js::HeapPtrFunction function_;
-    js::HeapPtr<js::ModuleObject*> module_;
-    js::HeapPtrObject   enclosingStaticScope_;
+    js::GCPtrFunction function_;
+    js::GCPtrModuleObject module_;
+    js::GCPtrObject enclosingStaticScope_;
 
     /*
      * Information attached by Ion. Nexto a valid IonScript this could be
@@ -1577,7 +1576,7 @@ class JSScript : public js::gc::TenuredCell
     js::jit::IonScript* const* addressOfIonScript() const {
         return &ion;
     }
-    void setIonScript(JSContext* maybecx, js::jit::IonScript* ionScript);
+    void setIonScript(JSRuntime* maybeRuntime, js::jit::IonScript* ionScript);
 
     bool hasBaselineScript() const {
         bool res = baseline && baseline != BASELINE_DISABLED_SCRIPT;
@@ -1591,9 +1590,9 @@ class JSScript : public js::gc::TenuredCell
         MOZ_ASSERT(hasBaselineScript());
         return baseline;
     }
-    inline void setBaselineScript(JSContext* maybecx, js::jit::BaselineScript* baselineScript);
+    inline void setBaselineScript(JSRuntime* maybeRuntime, js::jit::BaselineScript* baselineScript);
 
-    void updateBaselineOrIonRaw(JSContext* maybecx);
+    void updateBaselineOrIonRaw(JSRuntime* maybeRuntime);
 
     static size_t offsetOfBaselineScript() {
         return offsetof(JSScript, baseline);
@@ -1810,12 +1809,12 @@ class JSScript : public js::gc::TenuredCell
 
     size_t natoms() const { return natoms_; }
 
-    js::HeapPtrAtom& getAtom(size_t index) const {
+    js::GCPtrAtom& getAtom(size_t index) const {
         MOZ_ASSERT(index < natoms());
         return atoms[index];
     }
 
-    js::HeapPtrAtom& getAtom(jsbytecode* pc) const {
+    js::GCPtrAtom& getAtom(jsbytecode* pc) const {
         MOZ_ASSERT(containsPC(pc) && containsPC(pc + sizeof(uint32_t)));
         return getAtom(GET_UINT32_INDEX(pc));
     }
@@ -2149,15 +2148,15 @@ class LazyScript : public gc::TenuredCell
     WeakRef<JSScript*> script_;
 
     // Original function with which the lazy script is associated.
-    HeapPtrFunction function_;
+    GCPtrFunction function_;
 
     // Function or block chain in which the script is nested, or nullptr.
-    HeapPtrObject enclosingScope_;
+    GCPtrObject enclosingScope_;
 
     // ScriptSourceObject. We leave this set to nullptr until we generate
     // bytecode for our immediate parent. This is never a CCW; we don't clone
     // LazyScripts into other compartments.
-    HeapPtrObject sourceObject_;
+    GCPtrObject sourceObject_;
 
     // Heap allocated table with any free variables or inner functions.
     void* table_;
@@ -2291,8 +2290,8 @@ class LazyScript : public gc::TenuredCell
     uint32_t numInnerFunctions() const {
         return p_.numInnerFunctions;
     }
-    HeapPtrFunction* innerFunctions() {
-        return (HeapPtrFunction*)&freeVariables()[numFreeVariables()];
+    GCPtrFunction* innerFunctions() {
+        return (GCPtrFunction*)&freeVariables()[numFreeVariables()];
     }
 
     GeneratorKind generatorKind() const { return GeneratorKindFromBits(p_.generatorKindBits); }
@@ -2422,10 +2421,10 @@ struct SharedScriptData
     static SharedScriptData* new_(ExclusiveContext* cx, uint32_t codeLength,
                                   uint32_t srcnotesLength, uint32_t natoms);
 
-    HeapPtrAtom* atoms() {
+    GCPtrAtom* atoms() {
         if (!natoms)
             return nullptr;
-        return reinterpret_cast<HeapPtrAtom*>(data + length - sizeof(JSAtom*) * natoms);
+        return reinterpret_cast<GCPtrAtom*>(data + length - sizeof(JSAtom*) * natoms);
     }
 
     static SharedScriptData* fromBytecode(const jsbytecode* bytecode) {
@@ -2459,13 +2458,13 @@ typedef HashSet<SharedScriptData*,
                 SystemAllocPolicy> ScriptDataTable;
 
 extern void
-UnmarkScriptData(JSRuntime* rt);
+UnmarkScriptData(JSRuntime* rt, AutoLockForExclusiveAccess& lock);
 
 extern void
-SweepScriptData(JSRuntime* rt);
+SweepScriptData(JSRuntime* rt, AutoLockForExclusiveAccess& lock);
 
 extern void
-FreeScriptData(JSRuntime* rt);
+FreeScriptData(JSRuntime* rt, AutoLockForExclusiveAccess& lock);
 
 struct ScriptAndCounts
 {
@@ -2551,16 +2550,19 @@ CloneGlobalScript(JSContext* cx, Handle<StaticScope*> enclosingScope, HandleScri
 namespace JS {
 namespace ubi {
 template<>
-struct Concrete<js::LazyScript> : TracerConcrete<js::LazyScript> {
-    CoarseType coarseType() const final { return CoarseType::Script; }
-    Size size(mozilla::MallocSizeOf mallocSizeOf) const override;
-    const char* scriptFilename() const final;
-
+class Concrete<js::LazyScript> : TracerConcrete<js::LazyScript> {
   protected:
     explicit Concrete(js::LazyScript *ptr) : TracerConcrete<js::LazyScript>(ptr) { }
 
   public:
     static void construct(void *storage, js::LazyScript *ptr) { new (storage) Concrete(ptr); }
+
+    CoarseType coarseType() const final { return CoarseType::Script; }
+    Size size(mozilla::MallocSizeOf mallocSizeOf) const override;
+    const char* scriptFilename() const final;
+
+    const char16_t* typeName() const override { return concreteTypeName; }
+    static const char16_t concreteTypeName[];
 };
 } // namespace ubi
 } // namespace JS

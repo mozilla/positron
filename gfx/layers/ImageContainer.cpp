@@ -10,6 +10,7 @@
 #include "gfx2DGlue.h"
 #include "gfxPlatform.h"                // for gfxPlatform
 #include "gfxUtils.h"                   // for gfxUtils
+#include "libyuv.h"
 #include "mozilla/RefPtr.h"             // for already_AddRefed
 #include "mozilla/ipc/CrossProcessMutex.h"  // for CrossProcessMutex, etc
 #include "mozilla/layers/CompositorTypes.h"
@@ -19,6 +20,7 @@
 #include "mozilla/layers/LayersMessages.h"
 #include "mozilla/layers/SharedPlanarYCbCrImage.h"
 #include "mozilla/layers/SharedRGBImage.h"
+#include "mozilla/layers/TextureClientRecycleAllocator.h"
 #include "nsISupportsUtils.h"           // for NS_IF_ADDREF
 #include "YCbCrUtils.h"                 // for YCbCr conversions
 #ifdef MOZ_WIDGET_GONK
@@ -89,6 +91,16 @@ BufferRecycleBin::GetBuffer(uint32_t aSize)
   UniquePtr<uint8_t[]> result = Move(mRecycledBuffers[last]);
   mRecycledBuffers.RemoveElementAt(last);
   return result;
+}
+
+void
+BufferRecycleBin::ClearRecycledBuffers()
+{
+  MutexAutoLock lock(mLock);
+  if (!mRecycledBuffers.IsEmpty()) {
+    mRecycledBuffers.Clear();
+  }
+  mRecycledBufferSize = 0;
 }
 
 /**
@@ -196,11 +208,28 @@ ImageContainer::ImageContainer(Mode flag)
         break;
     }
   }
+  mAsyncContainerID = mImageClient ? mImageClient->GetAsyncID()
+                                   : sInvalidAsyncContainerId;
+}
+
+ImageContainer::ImageContainer(uint64_t aAsyncContainerID)
+  : mReentrantMonitor("ImageContainer.mReentrantMonitor"),
+  mGenerationCounter(++sGenerationCounter),
+  mPaintCount(0),
+  mDroppedImageCount(0),
+  mImageFactory(nullptr),
+  mRecycleBin(nullptr),
+  mImageClient(nullptr),
+  mAsyncContainerID(aAsyncContainerID),
+  mCurrentProducerID(-1),
+  mIPDLChild(nullptr)
+{
+  MOZ_ASSERT(mAsyncContainerID != sInvalidAsyncContainerId);
 }
 
 ImageContainer::~ImageContainer()
 {
-  if (IsAsync()) {
+  if (mIPDLChild) {
     mIPDLChild->ForgetImageContainer();
     ImageBridgeChild::DispatchReleaseImageClient(mImageClient, mIPDLChild);
   }
@@ -320,16 +349,16 @@ ImageContainer::SetCurrentImages(const nsTArray<NonOwningImage>& aImages)
 {
   MOZ_ASSERT(!aImages.IsEmpty());
   ReentrantMonitorAutoEnter mon(mReentrantMonitor);
-  if (IsAsync()) {
+  if (mImageClient) {
     ImageBridgeChild::DispatchImageClientUpdate(mImageClient, this);
   }
   SetCurrentImageInternal(aImages);
 }
 
- void
+void
 ImageContainer::ClearAllImages()
 {
-  if (IsAsync()) {
+  if (mImageClient) {
     // Let ImageClient release all TextureClients. This doesn't return
     // until ImageBridge has called ClearCurrentImageFromImageBridge.
     ImageBridgeChild::FlushAllImages(mImageClient, this);
@@ -338,6 +367,20 @@ ImageContainer::ClearAllImages()
 
   ReentrantMonitorAutoEnter mon(mReentrantMonitor);
   SetCurrentImageInternal(nsTArray<NonOwningImage>());
+}
+
+void
+ImageContainer::ClearCachedResources()
+{
+  ReentrantMonitorAutoEnter mon(mReentrantMonitor);
+  if (mImageClient && mImageClient->AsImageClientSingle()) {
+    if (!mImageClient->HasTextureClientRecycler()) {
+      return;
+    }
+    mImageClient->GetTextureClientRecycler()->ShrinkToMinimumSize();
+    return;
+  }
+  return mRecycleBin->ClearRecycledBuffers();
 }
 
 void
@@ -359,17 +402,13 @@ ImageContainer::SetCurrentImagesInTransaction(const nsTArray<NonOwningImage>& aI
 
 bool ImageContainer::IsAsync() const
 {
-  return mImageClient != nullptr;
+  return mAsyncContainerID != sInvalidAsyncContainerId;
 }
 
 uint64_t ImageContainer::GetAsyncContainerID() const
 {
   NS_ASSERTION(IsAsync(),"Shared image ID is only relevant to async ImageContainers");
-  if (IsAsync()) {
-    return mImageClient->GetAsyncID();
-  } else {
-    return 0; // zero is always an invalid AsyncID
-  }
+  return mAsyncContainerID;
 }
 
 bool
@@ -531,6 +570,7 @@ RecyclingPlanarYCbCrImage::CopyData(const Data& aData)
             mData.mCbCrSize, mData.mCbCrStride, mData.mCrSkip);
 
   mSize = aData.mPicSize;
+  mOrigin = gfx::IntPoint(aData.mPicX, aData.mPicY);
   return true;
 }
 
@@ -547,6 +587,7 @@ PlanarYCbCrImage::AdoptData(const Data &aData)
 {
   mData = aData;
   mSize = aData.mPicSize;
+  mOrigin = gfx::IntPoint(aData.mPicX, aData.mPicY);
   return true;
 }
 
@@ -594,6 +635,163 @@ PlanarYCbCrImage::GetAsSourceSurface()
   mSourceSurface = surface;
 
   return surface.forget();
+}
+
+NVImage::NVImage()
+  : Image(nullptr, ImageFormat::NV_IMAGE)
+  , mBufferSize(0)
+{
+}
+
+NVImage::~NVImage()
+{
+}
+
+IntSize
+NVImage::GetSize()
+{
+  return mSize;
+}
+
+IntRect
+NVImage::GetPictureRect()
+{
+  return mData.GetPictureRect();
+}
+
+already_AddRefed<SourceSurface>
+NVImage::GetAsSourceSurface()
+{
+  if (mSourceSurface) {
+    RefPtr<gfx::SourceSurface> surface(mSourceSurface);
+    return surface.forget();
+  }
+
+  // Convert the current NV12 or NV21 data to YUV420P so that we can follow the
+  // logics in PlanarYCbCrImage::GetAsSourceSurface().
+  const int bufferLength = mData.mYSize.height * mData.mYStride +
+                           mData.mCbCrSize.height * mData.mCbCrSize.width * 2;
+  uint8_t* buffer = new uint8_t[bufferLength];
+
+  Data aData = mData;
+  aData.mCbCrStride = aData.mCbCrSize.width;
+  aData.mCbSkip = 0;
+  aData.mCrSkip = 0;
+  aData.mYChannel = buffer;
+  aData.mCbChannel = aData.mYChannel + aData.mYSize.height * aData.mYStride;
+  aData.mCrChannel = aData.mCbChannel + aData.mCbCrSize.height * aData.mCbCrStride;
+
+  if (mData.mCbChannel < mData.mCrChannel) {  // NV12
+    libyuv::NV12ToI420(mData.mYChannel, mData.mYStride,
+                       mData.mCbChannel, mData.mCbCrStride,
+                       aData.mYChannel, aData.mYStride,
+                       aData.mCbChannel, aData.mCbCrStride,
+                       aData.mCrChannel, aData.mCbCrStride,
+                       aData.mYSize.width, aData.mYSize.height);
+  } else {  // NV21
+    libyuv::NV21ToI420(mData.mYChannel, mData.mYStride,
+                       mData.mCrChannel, mData.mCbCrStride,
+                       aData.mYChannel, aData.mYStride,
+                       aData.mCbChannel, aData.mCbCrStride,
+                       aData.mCrChannel, aData.mCbCrStride,
+                       aData.mYSize.width, aData.mYSize.height);
+  }
+
+  // The logics in PlanarYCbCrImage::GetAsSourceSurface().
+  gfx::IntSize size(mSize);
+  gfx::SurfaceFormat format =
+    gfx::ImageFormatToSurfaceFormat(gfxPlatform::GetPlatform()->GetOffscreenFormat());
+  gfx::GetYCbCrToRGBDestFormatAndSize(aData, format, size);
+  if (mSize.width > PlanarYCbCrImage::MAX_DIMENSION ||
+      mSize.height > PlanarYCbCrImage::MAX_DIMENSION) {
+    NS_ERROR("Illegal image dest width or height");
+    return nullptr;
+  }
+
+  RefPtr<gfx::DataSourceSurface> surface = gfx::Factory::CreateDataSourceSurface(size, format);
+  if (NS_WARN_IF(!surface)) {
+    return nullptr;
+  }
+
+  DataSourceSurface::ScopedMap mapping(surface, DataSourceSurface::WRITE);
+  if (NS_WARN_IF(!mapping.IsMapped())) {
+    return nullptr;
+  }
+
+  gfx::ConvertYCbCrToRGB(aData, format, size, mapping.GetData(), mapping.GetStride());
+
+  mSourceSurface = surface;
+
+  // Release the temporary buffer.
+  delete[] buffer;
+
+  return surface.forget();
+}
+
+bool
+NVImage::IsValid()
+{
+  return !!mBufferSize;
+}
+
+uint32_t
+NVImage::GetBufferSize() const
+{
+  return mBufferSize;
+}
+
+NVImage*
+NVImage::AsNVImage()
+{
+  return this;
+};
+
+bool
+NVImage::SetData(const Data& aData)
+{
+  MOZ_ASSERT(aData.mCbSkip == 1 && aData.mCrSkip == 1);
+  MOZ_ASSERT((int)std::abs(aData.mCbChannel - aData.mCrChannel) == 1);
+
+  // Calculate buffer size
+  const uint32_t size = aData.mYSize.height * aData.mYStride +
+                        aData.mCbCrSize.height * aData.mCbCrStride;
+
+  // Allocate a new buffer.
+  mBuffer = AllocateBuffer(size);
+  if (!mBuffer) {
+    return false;
+  }
+
+  // Update mBufferSize.
+  mBufferSize = size;
+
+  // Update mData.
+  mData = aData;
+  mData.mYChannel = mBuffer.get();
+  mData.mCbChannel = mData.mYChannel + (aData.mCbChannel - aData.mYChannel);
+  mData.mCrChannel = mData.mYChannel + (aData.mCrChannel - aData.mYChannel);
+
+  // Update mSize.
+  mSize = aData.mPicSize;
+
+  // Copy the input data into mBuffer.
+  // This copies the y-channel and the interleaving CbCr-channel.
+  memcpy(mData.mYChannel, aData.mYChannel, mBufferSize);
+
+  return true;
+}
+
+const NVImage::Data*
+NVImage::GetData() const
+{
+  return &mData;
+}
+
+UniquePtr<uint8_t>
+NVImage::AllocateBuffer(uint32_t aSize)
+{
+  UniquePtr<uint8_t> buffer(new uint8_t[aSize]);
+  return buffer;
 }
 
 SourceSurfaceImage::SourceSurfaceImage(const gfx::IntSize& aSize, gfx::SourceSurface* aSourceSurface)

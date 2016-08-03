@@ -557,7 +557,6 @@ SECMOD_DeleteInternalModule
 SECMOD_DeleteModule
 SECMOD_DestroyModule
 SECMOD_FindModule
-SECMOD_FindSlot
 SECMOD_GetDeadModuleList
 SECMOD_GetDefaultModuleList
 SECMOD_GetDefaultModuleListLock
@@ -690,6 +689,7 @@ SSL_SetSockPeerID
 SSL_SetSRTPCiphers
 SSL_SetStapledOCSPResponses
 SSL_SetURL
+SSL_ShutdownServerSessionIDCache
 SSL_SNISocketConfigHook
 SSL_VersionRangeGet
 SSL_VersionRangeGetDefault

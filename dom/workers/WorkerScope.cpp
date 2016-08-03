@@ -15,6 +15,8 @@
 #include "mozilla/dom/FunctionBinding.h"
 #include "mozilla/dom/IDBFactory.h"
 #include "mozilla/dom/ImageBitmap.h"
+#include "mozilla/dom/ImageBitmapBinding.h"
+#include "mozilla/dom/Performance.h"
 #include "mozilla/dom/Promise.h"
 #include "mozilla/dom/PromiseWorkerProxy.h"
 #include "mozilla/dom/ServiceWorkerGlobalScopeBinding.h"
@@ -41,7 +43,6 @@
 #include "ScriptLoader.h"
 #include "WorkerPrivate.h"
 #include "WorkerRunnable.h"
-#include "Performance.h"
 #include "ServiceWorkerClients.h"
 #include "ServiceWorkerManager.h"
 #include "ServiceWorkerRegistration.h"
@@ -56,8 +57,6 @@ USING_WORKERS_NAMESPACE
 
 using mozilla::dom::cache::CacheStorage;
 using mozilla::ipc::PrincipalInfo;
-
-BEGIN_WORKERS_NAMESPACE
 
 WorkerGlobalScope::WorkerGlobalScope(WorkerPrivate* aWorkerPrivate)
 : mWindowInteractionsAllowed(0)
@@ -358,7 +357,7 @@ WorkerGlobalScope::GetPerformance()
   mWorkerPrivate->AssertIsOnWorkerThread();
 
   if (!mPerformance) {
-    mPerformance = new Performance(mWorkerPrivate);
+    mPerformance = Performance::CreateForWorker(mWorkerPrivate);
   }
 
   return mPerformance;
@@ -414,6 +413,11 @@ already_AddRefed<Promise>
 WorkerGlobalScope::CreateImageBitmap(const ImageBitmapSource& aImage,
                                      ErrorResult& aRv)
 {
+  if (aImage.IsArrayBuffer() || aImage.IsArrayBufferView()) {
+    aRv.Throw(NS_ERROR_NOT_IMPLEMENTED);
+    return nullptr;
+  }
+
   return ImageBitmap::Create(this, aImage, Nothing(), aRv);
 }
 
@@ -422,7 +426,28 @@ WorkerGlobalScope::CreateImageBitmap(const ImageBitmapSource& aImage,
                                      int32_t aSx, int32_t aSy, int32_t aSw, int32_t aSh,
                                      ErrorResult& aRv)
 {
+  if (aImage.IsArrayBuffer() || aImage.IsArrayBufferView()) {
+    aRv.Throw(NS_ERROR_NOT_IMPLEMENTED);
+    return nullptr;
+  }
+
   return ImageBitmap::Create(this, aImage, Some(gfx::IntRect(aSx, aSy, aSw, aSh)), aRv);
+}
+
+already_AddRefed<mozilla::dom::Promise>
+WorkerGlobalScope::CreateImageBitmap(const ImageBitmapSource& aImage,
+                                     int32_t aOffset, int32_t aLength,
+                                     ImageBitmapFormat aFormat,
+                                     const Sequence<ChannelPixelLayout>& aLayout,
+                                     ErrorResult& aRv)
+{
+  if (aImage.IsArrayBuffer() || aImage.IsArrayBufferView()) {
+    return ImageBitmap::Create(this, aImage, aOffset, aLength, aFormat, aLayout,
+                               aRv);
+  } else {
+    aRv.Throw(NS_ERROR_TYPE_ERR);
+    return nullptr;
+  }
 }
 
 DedicatedWorkerGlobalScope::DedicatedWorkerGlobalScope(WorkerPrivate* aWorkerPrivate)
@@ -445,8 +470,7 @@ DedicatedWorkerGlobalScope::WrapGlobalObject(JSContext* aCx,
   // Note that xpc::ShouldDiscardSystemSource() and
   // xpc::ExtraWarningsForSystemJS() read prefs that are cached on the main
   // thread. This is benignly racey.
-  const bool discardSource = (usesSystemPrincipal ||
-                              mWorkerPrivate->IsInPrivilegedApp()) &&
+  const bool discardSource = usesSystemPrincipal &&
                              xpc::ShouldDiscardSystemSource();
   const bool extraWarnings = usesSystemPrincipal &&
                              xpc::ExtraWarningsForSystemJS();
@@ -455,17 +479,15 @@ DedicatedWorkerGlobalScope::WrapGlobalObject(JSContext* aCx,
   behaviors.setDiscardSource(discardSource)
            .extraWarningsOverride().set(extraWarnings);
 
-  const bool inCertifiedApp = mWorkerPrivate->IsInCertifiedApp();
   const bool sharedMemoryEnabled = xpc::SharedMemoryEnabled();
 
   JS::CompartmentCreationOptions& creationOptions = options.creationOptions();
-  creationOptions.setSharedMemoryAndAtomicsEnabled(sharedMemoryEnabled)
-                 .setExperimentalDateTimeFormatFormatToPartsEnabled(inCertifiedApp);
+  creationOptions.setSharedMemoryAndAtomicsEnabled(sharedMemoryEnabled);
 
-  return DedicatedWorkerGlobalScopeBinding_workers::Wrap(aCx, this, this,
-                                                         options,
-                                                         GetWorkerPrincipal(),
-                                                         true, aReflector);
+  return DedicatedWorkerGlobalScopeBinding::Wrap(aCx, this, this,
+                                                 options,
+                                                 GetWorkerPrincipal(),
+                                                 true, aReflector);
 }
 
 void
@@ -494,9 +516,9 @@ SharedWorkerGlobalScope::WrapGlobalObject(JSContext* aCx,
   JS::CompartmentOptions options;
   mWorkerPrivate->CopyJSCompartmentOptions(options);
 
-  return SharedWorkerGlobalScopeBinding_workers::Wrap(aCx, this, this, options,
-                                                      GetWorkerPrincipal(),
-                                                      true, aReflector);
+  return SharedWorkerGlobalScopeBinding::Wrap(aCx, this, this, options,
+                                              GetWorkerPrincipal(),
+                                              true, aReflector);
 }
 
 NS_IMPL_CYCLE_COLLECTION_INHERITED(ServiceWorkerGlobalScope, WorkerGlobalScope,
@@ -528,9 +550,9 @@ ServiceWorkerGlobalScope::WrapGlobalObject(JSContext* aCx,
   JS::CompartmentOptions options;
   mWorkerPrivate->CopyJSCompartmentOptions(options);
 
-  return ServiceWorkerGlobalScopeBinding_workers::Wrap(aCx, this, this, options,
-                                                       GetWorkerPrincipal(),
-                                                       true, aReflector);
+  return ServiceWorkerGlobalScopeBinding::Wrap(aCx, this, this, options,
+                                               GetWorkerPrincipal(),
+                                               true, aReflector);
 }
 
 ServiceWorkerClients*
@@ -543,12 +565,12 @@ ServiceWorkerGlobalScope::Clients()
   return mClients;
 }
 
-ServiceWorkerRegistrationWorkerThread*
+ServiceWorkerRegistration*
 ServiceWorkerGlobalScope::Registration()
 {
   if (!mRegistration) {
     mRegistration =
-      new ServiceWorkerRegistrationWorkerThread(mWorkerPrivate, mScope);
+      ServiceWorkerRegistration::CreateForWorker(mWorkerPrivate, mScope);
   }
 
   return mRegistration;
@@ -563,7 +585,7 @@ class SkipWaitingResultRunnable final : public WorkerRunnable
 public:
   SkipWaitingResultRunnable(WorkerPrivate* aWorkerPrivate,
                             PromiseWorkerProxy* aPromiseProxy)
-    : WorkerRunnable(aWorkerPrivate, WorkerThreadModifyBusyCount)
+    : WorkerRunnable(aWorkerPrivate)
     , mPromiseProxy(aPromiseProxy)
   {
     AssertIsOnMainThread();
@@ -879,12 +901,14 @@ WorkerDebuggerGlobalScope::Dump(JSContext* aCx,
   }
 }
 
+BEGIN_WORKERS_NAMESPACE
+
 bool
 IsWorkerGlobal(JSObject* object)
 {
   nsIGlobalObject* globalObject = nullptr;
-  return NS_SUCCEEDED(UNWRAP_WORKER_OBJECT(WorkerGlobalScope, object,
-                                           globalObject)) && !!globalObject;
+  return NS_SUCCEEDED(UNWRAP_OBJECT(WorkerGlobalScope, object,
+                                    globalObject)) && !!globalObject;
 }
 
 bool

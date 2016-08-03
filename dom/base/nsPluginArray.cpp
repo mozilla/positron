@@ -19,6 +19,7 @@
 #include "nsIWeakReference.h"
 #include "mozilla/Services.h"
 #include "nsIInterfaceRequestorUtils.h"
+#include "nsContentUtils.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -40,6 +41,12 @@ nsPluginArray::Init()
 
 nsPluginArray::~nsPluginArray()
 {
+}
+
+static bool
+ResistFingerprinting() {
+  return !nsContentUtils::ThreadsafeIsCallerChrome() &&
+         nsContentUtils::ResistFingerprinting();
 }
 
 nsPIDOMWindowInner*
@@ -166,7 +173,7 @@ nsPluginArray::IndexedGetter(uint32_t aIndex, bool &aFound)
 {
   aFound = false;
 
-  if (!AllowPlugins()) {
+  if (!AllowPlugins() || ResistFingerprinting()) {
     return nullptr;
   }
 
@@ -213,7 +220,7 @@ nsPluginArray::NamedGetter(const nsAString& aName, bool &aFound)
 {
   aFound = false;
 
-  if (!AllowPlugins()) {
+  if (!AllowPlugins() || ResistFingerprinting()) {
     return nullptr;
   }
 
@@ -227,7 +234,7 @@ nsPluginArray::NamedGetter(const nsAString& aName, bool &aFound)
 uint32_t
 nsPluginArray::Length()
 {
-  if (!AllowPlugins()) {
+  if (!AllowPlugins() || ResistFingerprinting()) {
     return 0;
   }
 

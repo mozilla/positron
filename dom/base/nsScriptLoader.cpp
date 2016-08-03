@@ -45,7 +45,6 @@
 #include "mozilla/Logging.h"
 #include "nsCRT.h"
 #include "nsContentCreatorFunctions.h"
-#include "nsCORSListenerProxy.h"
 #include "nsProxyRelease.h"
 #include "nsSandboxFlags.h"
 #include "nsContentTypeParser.h"
@@ -433,6 +432,7 @@ NS_IMPL_CYCLE_COLLECTING_RELEASE(nsScriptLoader)
 
 nsScriptLoader::nsScriptLoader(nsIDocument *aDocument)
   : mDocument(aDocument),
+    mParserBlockingBlockerCount(0),
     mBlockerCount(0),
     mNumberOfProcessors(0),
     mEnabled(true),
@@ -479,7 +479,7 @@ nsScriptLoader::~nsScriptLoader()
   // Unblock the kids, in case any of them moved to a different document
   // subtree in the meantime and therefore aren't actually going away.
   for (uint32_t j = 0; j < mPendingChildLoaders.Length(); ++j) {
-    mPendingChildLoaders[j]->RemoveExecuteBlocker();
+    mPendingChildLoaders[j]->RemoveParserBlockingScriptExecutionBlocker();
   }
 }
 
@@ -688,8 +688,7 @@ nsScriptLoader::CreateModuleScript(nsModuleLoadRequest* aRequest)
   }
 
   nsAutoMicroTask mt;
-  AutoEntryScript aes(globalObject, "CompileModule", true,
-                      context->GetNativeContext());
+  AutoEntryScript aes(globalObject, "CompileModule", true);
 
   bool oldProcessingScriptTag = context->GetProcessingScriptTag();
   context->SetProcessingScriptTag(true);
@@ -709,8 +708,7 @@ nsScriptLoader::CreateModuleScript(nsModuleLoadRequest* aRequest)
     JS::Rooted<JSObject*> module(cx);
 
     if (aRequest->mWasCompiledOMT) {
-      module = JS::FinishOffThreadModule(cx, xpc::GetJSRuntime(),
-                                         aRequest->mOffThreadToken);
+      module = JS::FinishOffThreadModule(cx, aRequest->mOffThreadToken);
       aRequest->mOffThreadToken = nullptr;
       rv = module ? NS_OK : NS_ERROR_FAILURE;
     } else {
@@ -866,27 +864,16 @@ ResolveRequestedModules(nsModuleLoadRequest* aRequest, nsCOMArray<nsIURI> &aUrls
     return NS_ERROR_FAILURE;
   }
 
-  nsCOMArray<nsIURI> uris(length);
-  MOZ_ASSERT(uris.Length() == 0);
-  JS::Rooted<JS::Value> arrayValue(cx, JS::ObjectValue(*specifiers));
-  JS::ForOfIterator iter(cx);
-  if (!iter.init(arrayValue)) {
-    return NS_ERROR_FAILURE;
-  }
-
   JS::Rooted<JS::Value> val(cx);
-  while (true) {
-    bool done;
-    if (!iter.next(&val, &done)) {
+  for (uint32_t i = 0; i < length; i++) {
+    if (!JS_GetElement(cx, specifiers, i, &val)) {
       return NS_ERROR_FAILURE;
     }
 
-    if (done) {
-      break;
-    }
-
     nsAutoJSString specifier;
-    specifier.init(cx, val);
+    if (!specifier.init(cx, val)) {
+      return NS_ERROR_FAILURE;
+    }
 
     // Let url be the result of resolving a module specifier given module script and requested.
     nsModuleScript* ms = aRequest->mModuleScript;
@@ -900,7 +887,7 @@ ResolveRequestedModules(nsModuleLoadRequest* aRequest, nsCOMArray<nsIURI> &aUrls
     nsresult rv = RequestedModuleIsInAncestorList(aRequest, uri, &isAncestor);
     NS_ENSURE_SUCCESS(rv, rv);
     if (!isAncestor) {
-      aUrls.AppendElement(uri);
+      aUrls.AppendElement(uri.forget());
     }
   }
 
@@ -1048,7 +1035,7 @@ nsScriptLoader::StartLoad(nsScriptLoadRequest *aRequest, const nsAString &aType,
   MOZ_ASSERT(aRequest->IsLoading());
 
   // If this document is sandboxed without 'allow-scripts', abort.
-  if (mDocument->GetSandboxFlags() & SANDBOXED_SCRIPTS) {
+  if (mDocument->HasScriptsBlockedBySandbox()) {
     return NS_OK;
   }
 
@@ -1289,7 +1276,8 @@ nsScriptLoader::ProcessScriptElement(nsIScriptElement *aElement)
   // Check the type attribute to determine language and version.
   // If type exists, it trumps the deprecated 'language='
   nsAutoString type;
-  aElement->GetScriptType(type);
+  bool hasType = aElement->GetScriptType(type);
+
   nsScriptKind scriptKind = nsScriptKind::Classic;
   if (!type.IsEmpty()) {
     // Support type="module" only for chrome documents.
@@ -1298,7 +1286,7 @@ nsScriptLoader::ProcessScriptElement(nsIScriptElement *aElement)
     } else {
       NS_ENSURE_TRUE(ParseTypeAttribute(type, &version), false);
     }
-  } else {
+  } else if (!hasType) {
     // no 'type=' element
     // "language" is a deprecated attribute of HTML, so we check it only for
     // HTML script elements.
@@ -1459,7 +1447,7 @@ nsScriptLoader::ProcessScriptElement(nsIScriptElement *aElement)
       return true;
     }
 
-    if (request->IsReadyToRun() && ReadyToExecuteScripts()) {
+    if (request->IsReadyToRun() && ReadyToExecuteParserBlockingScripts()) {
       // The request has already been loaded and there are no pending style
       // sheets. If the script comes from the network stream, cheat for
       // performance reasons and avoid a trip through the event loop.
@@ -1490,7 +1478,7 @@ nsScriptLoader::ProcessScriptElement(nsIScriptElement *aElement)
 
   // inline script
   // Is this document sandboxed without 'allow-scripts'?
-  if (mDocument->GetSandboxFlags() & SANDBOXED_SCRIPTS) {
+  if (mDocument->HasScriptsBlockedBySandbox()) {
     return false;
   }
 
@@ -1522,7 +1510,7 @@ nsScriptLoader::ProcessScriptElement(nsIScriptElement *aElement)
   }
   request->mProgress = nsScriptLoadRequest::Progress::Ready;
   if (aElement->GetParserCreated() == FROM_PARSER_XSLT &&
-      (!ReadyToExecuteScripts() || !mXSLTRequests.isEmpty())) {
+      (!ReadyToExecuteParserBlockingScripts() || !mXSLTRequests.isEmpty())) {
     // Need to maintain order for XSLT-inserted scripts
     NS_ASSERTION(!mParserBlockingRequest,
         "Parser-blocking scripts and XSLT scripts in the same doc!");
@@ -1537,7 +1525,7 @@ nsScriptLoader::ProcessScriptElement(nsIScriptElement *aElement)
     return false;
   }
   if (aElement->GetParserCreated() == FROM_PARSER_NETWORK &&
-      !ReadyToExecuteScripts()) {
+      !ReadyToExecuteParserBlockingScripts()) {
     NS_ASSERTION(!mParserBlockingRequest,
         "There can be only one parser-blocking script at a time");
     mParserBlockingRequest = request;
@@ -1605,7 +1593,7 @@ nsScriptLoader::ProcessOffThreadRequest(nsScriptLoadRequest* aRequest)
   aRequest->SetReady();
 
   if (aRequest == mParserBlockingRequest) {
-    if (!ReadyToExecuteScripts()) {
+    if (!ReadyToExecuteParserBlockingScripts()) {
       // If not ready to execute scripts, schedule an async call to
       // ProcessPendingRequests to handle it.
       ProcessPendingRequestsAsync();
@@ -1841,7 +1829,8 @@ nsScriptLoader::ProcessRequest(nsScriptLoadRequest* aRequest)
     // (disappearing window, some other error, ...). Finish the
     // request to avoid leaks in the JS engine.
     MOZ_ASSERT(!aRequest->IsModuleRequest());
-    JS::FinishOffThreadScript(nullptr, xpc::GetJSRuntime(), aRequest->mOffThreadToken);
+    JSContext* cx = JS_GetContext(xpc::GetJSRuntime());
+    JS::CancelOffThreadScript(cx, aRequest->mOffThreadToken);
     aRequest->mOffThreadToken = nullptr;
   }
 
@@ -1977,8 +1966,7 @@ nsScriptLoader::EvaluateScript(nsScriptLoadRequest* aRequest)
   // New script entry point required, due to the "Create a script" sub-step of
   // http://www.whatwg.org/specs/web-apps/current-work/#execute-the-script-block
   nsAutoMicroTask mt;
-  AutoEntryScript aes(globalObject, "<script> element", true,
-                      context->GetNativeContext());
+  AutoEntryScript aes(globalObject, "<script> element", true);
   JS::Rooted<JSObject*> global(aes.cx(),
                                globalObject->GetGlobalJSObject());
 
@@ -2001,7 +1989,7 @@ nsScriptLoader::EvaluateScript(nsScriptLoadRequest* aRequest)
     }
 
     if (aRequest->IsModuleRequest()) {
-      rv = EnsureModuleResolveHook(context->GetNativeContext());
+      rv = EnsureModuleResolveHook(aes.cx());
       NS_ENSURE_SUCCESS(rv, rv);
 
       nsModuleLoadRequest* request = aRequest->AsModuleRequest();
@@ -2032,7 +2020,12 @@ nsScriptLoader::EvaluateScript(nsScriptLoadRequest* aRequest)
 void
 nsScriptLoader::ProcessPendingRequestsAsync()
 {
-  if (mParserBlockingRequest || !mPendingChildLoaders.IsEmpty()) {
+  if (mParserBlockingRequest ||
+      !mXSLTRequests.isEmpty() ||
+      !mLoadedAsyncRequests.isEmpty() ||
+      !mNonAsyncExternalScriptInsertedRequests.isEmpty() ||
+      !mDeferRequests.isEmpty() ||
+      !mPendingChildLoaders.IsEmpty()) {
     NS_DispatchToCurrentThread(NewRunnableMethod(this,
                                                  &nsScriptLoader::ProcessPendingRequests));
   }
@@ -2045,7 +2038,7 @@ nsScriptLoader::ProcessPendingRequests()
 
   if (mParserBlockingRequest &&
       mParserBlockingRequest->IsReadyToRun() &&
-      ReadyToExecuteScripts()) {
+      ReadyToExecuteParserBlockingScripts()) {
     request.swap(mParserBlockingRequest);
     UnblockParser(request);
     ProcessRequest(request);
@@ -2055,14 +2048,14 @@ nsScriptLoader::ProcessPendingRequests()
     ContinueParserAsync(request);
   }
 
-  while (ReadyToExecuteScripts() &&
+  while (ReadyToExecuteParserBlockingScripts() &&
          !mXSLTRequests.isEmpty() &&
          mXSLTRequests.getFirst()->IsReadyToRun()) {
     request = mXSLTRequests.StealFirst();
     ProcessRequest(request);
   }
 
-  while (mEnabled && !mLoadedAsyncRequests.isEmpty()) {
+  while (ReadyToExecuteScripts() && !mLoadedAsyncRequests.isEmpty()) {
     request = mLoadedAsyncRequests.StealFirst();
     if (request->IsModuleRequest()) {
       ProcessRequest(request);
@@ -2071,7 +2064,8 @@ nsScriptLoader::ProcessPendingRequests()
     }
   }
 
-  while (mEnabled && !mNonAsyncExternalScriptInsertedRequests.isEmpty() &&
+  while (ReadyToExecuteScripts() &&
+         !mNonAsyncExternalScriptInsertedRequests.isEmpty() &&
          mNonAsyncExternalScriptInsertedRequests.getFirst()->IsReadyToRun()) {
     // Violate the HTML5 spec and execute these in the insertion order in
     // order to make LABjs and the "order" plug-in for RequireJS work with
@@ -2082,16 +2076,19 @@ nsScriptLoader::ProcessPendingRequests()
   }
 
   if (mDocumentParsingDone && mXSLTRequests.isEmpty()) {
-    while (!mDeferRequests.isEmpty() && mDeferRequests.getFirst()->IsReadyToRun()) {
+    while (ReadyToExecuteScripts() &&
+           !mDeferRequests.isEmpty() &&
+           mDeferRequests.getFirst()->IsReadyToRun()) {
       request = mDeferRequests.StealFirst();
       ProcessRequest(request);
     }
   }
 
-  while (!mPendingChildLoaders.IsEmpty() && ReadyToExecuteScripts()) {
+  while (!mPendingChildLoaders.IsEmpty() &&
+         ReadyToExecuteParserBlockingScripts()) {
     RefPtr<nsScriptLoader> child = mPendingChildLoaders[0];
     mPendingChildLoaders.RemoveElementAt(0);
-    child->RemoveExecuteBlocker();
+    child->RemoveParserBlockingScriptExecutionBlocker();
   }
 
   if (mDocumentParsingDone && mDocument && !mParserBlockingRequest &&
@@ -2115,19 +2112,19 @@ nsScriptLoader::ProcessPendingRequests()
 }
 
 bool
-nsScriptLoader::ReadyToExecuteScripts()
+nsScriptLoader::ReadyToExecuteParserBlockingScripts()
 {
-  // Make sure the SelfReadyToExecuteScripts check is first, so that
-  // we don't block twice on an ancestor.
-  if (!SelfReadyToExecuteScripts()) {
+  // Make sure the SelfReadyToExecuteParserBlockingScripts check is first, so
+  // that we don't block twice on an ancestor.
+  if (!SelfReadyToExecuteParserBlockingScripts()) {
     return false;
   }
 
   for (nsIDocument* doc = mDocument; doc; doc = doc->GetParentDocument()) {
     nsScriptLoader* ancestor = doc->ScriptLoader();
-    if (!ancestor->SelfReadyToExecuteScripts() &&
+    if (!ancestor->SelfReadyToExecuteParserBlockingScripts() &&
         ancestor->AddPendingChildLoader(this)) {
-      AddExecuteBlocker();
+      AddParserBlockingScriptExecutionBlocker();
       return false;
     }
   }
@@ -2153,7 +2150,8 @@ nsScriptLoader::ReadyToExecuteScripts()
     }
 
     nsCOMPtr<nsIDocument> doc = lastPred->GetDocument();
-    if (lastPred->IsBlocking() || !doc || (doc && !doc->ScriptLoader()->SelfReadyToExecuteScripts())) {
+    if (lastPred->IsBlocking() || !doc ||
+        !doc->ScriptLoader()->SelfReadyToExecuteParserBlockingScripts()) {
       // Document has not been created yet or it was created but not ready.
       // Either case we are blocked by it. The ImportLoader will take care
       // of blocking us, and adding the pending child loader to the blocking
@@ -2317,6 +2315,15 @@ nsScriptLoader::OnStreamComplete(nsIIncrementalStreamLoader* aLoader,
     if (enforceSRI) {
       MOZ_LOG(SRILogHelper::GetSriLog(), mozilla::LogLevel::Debug,
              ("nsScriptLoader::OnStreamComplete, required SRI not found"));
+      nsCOMPtr<nsIContentSecurityPolicy> csp;
+      loadInfo->LoadingPrincipal()->GetCsp(getter_AddRefs(csp));
+      nsAutoCString violationURISpec;
+      mDocument->GetDocumentURI()->GetAsciiSpec(violationURISpec);
+      uint32_t lineNo = request->mElement ? request->mElement->GetScriptLineNumber() : 0;
+      csp->LogViolationDetails(
+        nsIContentSecurityPolicy::VIOLATION_TYPE_REQUIRE_SRI_FOR_SCRIPT,
+        NS_ConvertUTF8toUTF16(violationURISpec),
+        EmptyString(), lineNo, EmptyString(), EmptyString());
       rv = NS_ERROR_SRI_CORRUPT;
     }
   }

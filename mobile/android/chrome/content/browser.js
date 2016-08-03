@@ -133,7 +133,7 @@ var lazilyLoadedBrowserScripts = [
   ["CastingApps", "chrome://browser/content/CastingApps.js"],
   ["RemoteDebugger", "chrome://browser/content/RemoteDebugger.js"],
 ];
-if (AppConstants.NIGHTLY_BUILD) {
+if (!AppConstants.RELEASE_BUILD) {
   lazilyLoadedBrowserScripts.push(
     ["WebcompatReporter", "chrome://browser/content/WebcompatReporter.js"]);
 }
@@ -531,7 +531,7 @@ var BrowserApp = {
       InitLater(() => Services.obs.notifyObservers(window, "browser-delayed-startup-finished", ""));
       InitLater(() => Messaging.sendRequest({ type: "Gecko:DelayedStartup" }));
 
-      if (AppConstants.NIGHTLY_BUILD) {
+      if (!AppConstants.RELEASE_BUILD) {
         InitLater(() => WebcompatReporter.init());
       }
 
@@ -859,7 +859,7 @@ var BrowserApp = {
 
     NativeWindow.contextmenus.add({
       label: stringGetter("contextmenu.shareImage"),
-      selector: NativeWindow.contextmenus._disableRestricted("SHARE", NativeWindow.contextmenus.imageSaveableContext),
+      selector: NativeWindow.contextmenus._disableRestricted("SHARE", NativeWindow.contextmenus.imageShareableContext),
       order: NativeWindow.contextmenus.DEFAULT_HTML5_ORDER - 1, // Show above HTML5 menu items
       showAsActions: function(aTarget) {
         let doc = aTarget.ownerDocument;
@@ -975,7 +975,7 @@ var BrowserApp = {
   },
 
   _migrateUI: function() {
-    const UI_VERSION = 2;
+    const UI_VERSION = 3;
     let currentUIVersion = 0;
     try {
       currentUIVersion = Services.prefs.getIntPref("browser.migration.version");
@@ -1037,6 +1037,20 @@ var BrowserApp = {
             Services.obs.notifyObservers(null, "default-search-engine-migrated", "");
           }
         });
+      }
+    }
+
+    if (currentUIVersion < 3) {
+      const kOldSafeBrowsingPref = "browser.safebrowsing.enabled";
+      // Default value is set to true, a user pref means that the pref was
+      // set to false.
+      if (Services.prefs.prefHasUserValue(kOldSafeBrowsingPref) &&
+          !Services.prefs.getBoolPref(kOldSafeBrowsingPref)) {
+        Services.prefs.setBoolPref("browser.safebrowsing.phishing.enabled",
+                                   false);
+        // Should just remove support for the pref entirely, even if it's
+        // only in about:config
+        Services.prefs.clearUserPref(kOldSafeBrowsingPref);
       }
     }
 
@@ -1353,6 +1367,8 @@ var BrowserApp = {
     if (cancelQuit.data) {
       return;
     }
+
+    Services.obs.notifyObservers(null, "quit-application-proceeding", null);
 
     // Tell session store to forget about this window
     if (aClear.dontSaveSession) {
@@ -2439,6 +2455,30 @@ var NativeWindow = {
       }
     },
 
+    imageShareableContext: {
+      matches: function imageShareableContextMatches(aElement) {
+        let imgSrc = '';
+        if (aElement instanceof Ci.nsIDOMHTMLImageElement) {
+          imgSrc = aElement.src;
+        } else if (aElement instanceof Ci.nsIImageLoadingContent &&
+            aElement.currentURI &&
+            aElement.currentURI.spec) {
+          imgSrc = aElement.currentURI.spec;
+        }
+
+        // In order to share an image, we need to pass the image src over IPC via an Intent (in
+        // `ApplicationPackageManager.queryIntentActivities`). However, the transaction has a 1MB limit
+        // (shared by all transactions in progress) - otherwise we crash! (bug 1243305)
+        //   https://developer.android.com/reference/android/os/TransactionTooLargeException.html
+        //
+        // The transaction limit is 1MB and we arbitrarily choose to cap this transaction at 1/4 of that = 250,000 bytes.
+        // In Java, a UTF-8 character is 1-4 bytes so, 250,000 bytes / 4 bytes/char = 62,500 char
+        let MAX_IMG_SRC_LEN = 62500;
+        let isTooLong = imgSrc.length >= MAX_IMG_SRC_LEN;
+        return !isTooLong && this.NativeWindow.contextmenus.imageSaveableContext.matches(aElement);
+      }.bind(this)
+    },
+
     mediaSaveableContext: {
       matches: function mediaSaveableContextMatches(aElement) {
         return (aElement instanceof HTMLVideoElement ||
@@ -2635,6 +2675,12 @@ var NativeWindow = {
       // Android Long-press / contextmenu event provides clientX/Y data. This is not provided
       // by mochitest: test_browserElement_inproc_ContextmenuEvents.html.
       if (!event.clientX || !event.clientY) {
+        return;
+      }
+
+      // If the event was already defaultPrevented by somebody (web content, or
+      // some other part of gecko), then don't do anything with it.
+      if (event.defaultPrevented) {
         return;
       }
 
@@ -3409,19 +3455,22 @@ Tab.prototype = {
     this.browser.setAttribute("type", "content-targetable");
     this.browser.setAttribute("messagemanagergroup", "browsers");
 
+    this.browser.permanentKey = {};
+
     // Make sure the previously selected panel remains selected. The selected panel of a deck is
     // not stable when panels are added.
     let selectedPanel = BrowserApp.deck.selectedPanel;
     BrowserApp.deck.insertBefore(this.browser, aParams.sibling || null);
     BrowserApp.deck.selectedPanel = selectedPanel;
 
+    let attrs = {};
     if (BrowserApp.manifestUrl) {
       let appsService = Cc["@mozilla.org/AppsService;1"].getService(Ci.nsIAppsService);
       let manifest = appsService.getAppByManifestURL(BrowserApp.manifestUrl);
       if (manifest) {
         let app = manifest.QueryInterface(Ci.mozIApplication);
         this.browser.docShell.frameType = Ci.nsIDocShell.FRAME_TYPE_APP;
-        this.browser.docShell.setOriginAttributes({appId: app.localId});
+        attrs['appId'] = app.localId;
       }
     }
 
@@ -3430,8 +3479,10 @@ Tab.prototype = {
 
     let isPrivate = ("isPrivate" in aParams) && aParams.isPrivate;
     if (isPrivate) {
-      this.browser.docShell.QueryInterface(Ci.nsILoadContext).usePrivateBrowsing = true;
+      attrs['privateBrowsingId'] = 1;
     }
+
+    this.browser.docShell.setOriginAttributes(attrs);
 
     // Set the new docShell load flags based on network state.
     if (Tabs.useCache) {
@@ -3532,7 +3583,9 @@ Tab.prototype = {
         url: aURL,
         title: truncate(title, MAX_TITLE_LENGTH)
       }],
-      index: 1
+      index: 1,
+      desktopMode: this.desktopMode,
+      isPrivate: isPrivate
     };
 
     if (aParams.delayLoad) {
@@ -3857,7 +3910,7 @@ Tab.prototype = {
   addMetadata: function(type, value, quality = 1) {
     if (!this.metatags) {
       this.metatags = {
-        url: this.browser.currentURI.spec
+        url: this.browser.currentURI.specIgnoringRef
       };
     }
 
@@ -4114,8 +4167,8 @@ Tab.prototype = {
           jsonMessage = this.makeFaviconMessage(target);
         } else if (list.indexOf("[apple-touch-icon]") != -1 ||
             list.indexOf("[apple-touch-icon-precomposed]") != -1) {
-          let message = this.makeFaviconMessage(target);
-          this.addMetadata("touchIconList", message.href, message.size);
+          jsonMessage = this.makeFaviconMessage(target);
+          this.addMetadata("touchIconList", jsonMessage.href, jsonMessage.size);
         } else if (list.indexOf("[alternate]") != -1 && aEvent.type == "DOMLinkAdded") {
           let type = target.type.toLowerCase().replace(/^\s+|\s*(?:;.*)?$/g, "");
           let isFeed = (type == "application/rss+xml" || type == "application/atom+xml");
@@ -4124,7 +4177,7 @@ Tab.prototype = {
             return;
 
           jsonMessage = this.makeFeedMessage(target, type);
-        } else if (list.indexOf("[search]" != -1) && aEvent.type == "DOMLinkAdded") {
+        } else if (list.indexOf("[search]") != -1 && aEvent.type == "DOMLinkAdded") {
           this.sendOpenSearchMessage(target);
         }
         if (!jsonMessage)
@@ -4268,7 +4321,8 @@ Tab.prototype = {
         Messaging.sendRequest({
           type: "Content:PageShow",
           tabID: this.id,
-          userRequested: this.userRequested
+          userRequested: this.userRequested,
+          fromCache: Tabs.useCache
         });
 
         this.isSearch = false;
@@ -4466,6 +4520,7 @@ Tab.prototype = {
       // browser.contentDocument is changed to the new document we're loading
       this.contentDocumentIsDisplayed = false;
       this.hasTouchListener = false;
+      Services.obs.notifyObservers(this.browser, "Session:NotifyLocationChange", null);
     } else {
       setTimeout(function() {
         this.sendViewportUpdate();
@@ -4641,9 +4696,6 @@ var BrowserEventHandler = {
 
     InitLater(() => BrowserApp.deck.addEventListener("click", InputWidgetHelper, true));
     InitLater(() => BrowserApp.deck.addEventListener("click", SelectHelper, true));
-    if (AppConstants.NIGHTLY_BUILD) {
-      InitLater(() => BrowserApp.deck.addEventListener("InsecureLoginFormsStateChange", IdentityHandler.sendLoginInsecure, true));
-    }
 
     // ReaderViews support backPress listeners.
     Messaging.addListener(() => {
@@ -5201,9 +5253,6 @@ var ErrorPageEventHandler = {
             // ....but add a notify bar as a reminder, so that they don't lose
             // track after, e.g., tab switching.
             NativeWindow.doorhanger.show(Strings.browser.GetStringFromName("safeBrowsingDoorhanger"), "safebrowsing-warning", [], BrowserApp.selectedTab.id);
-          } else if (target == errorDoc.getElementById("whyForbiddenButton")) {
-            // This is the "Why is this site blocked" button for family friendly browsing.
-            BrowserApp.selectedBrowser.loadURI("https://support.mozilla.org/kb/controlledaccess");
           }
         }
         break;
@@ -6032,7 +6081,7 @@ var PopupBlockerObserver = {
     let pageReport = BrowserApp.selectedBrowser.pageReport;
     if (pageReport) {
       for (let i = 0; i < pageReport.length; ++i) {
-        let popupURIspec = pageReport[i].popupWindowURI.spec;
+        let popupURIspec = pageReport[i].popupWindowURIspec;
 
         // Sometimes the popup URI that we get back from the pageReport
         // isn't useful (for instance, netscape.com's popup URI ends up
@@ -6298,7 +6347,7 @@ var IdentityHandler = {
     }
 
     // We also allow "about:" by allowing the selector to be empty (i.e. '(|.....|...|...)'
-    let whitelist = /^about:($|about|accounts|addons|buildconfig|cache|config|crashes|devices|downloads|fennec|firefox|feedback|healthreport|license|logins|logo|memory|mozilla|networking|plugins|privatebrowsing|rights|serviceworkers|support|telemetry|webrtc)($|\?)/i;
+    let whitelist = /^about:($|about|accounts|addons|buildconfig|cache|config|crashes|devices|downloads|fennec|firefox|feedback|healthreport|home|license|logins|logo|memory|mozilla|networking|plugins|privatebrowsing|rights|serviceworkers|support|telemetry|webrtc)($|\?)/i;
     if (uri.schemeIs("about") && whitelist.test(uri.spec)) {
         return this.IDENTITY_MODE_CHROMEUI;
     }
@@ -6351,18 +6400,6 @@ var IdentityHandler = {
     this.shieldHistogramAdd(aBrowser, 0);
     return this.TRACKING_MODE_UNKNOWN;
   },
-
-  sendLoginInsecure: function sendLoginInsecure() {
-    let loginInsecure = LoginManagerParent.hasInsecureLoginForms(BrowserApp.selectedBrowser);
-        if (loginInsecure) {
-          let message = {
-            type: "Content:LoginInsecure",
-            tabID: BrowserApp.selectedTab.id
-          };
-          Messaging.sendRequest(message);
-        }
-    },
-
 
   shieldHistogramAdd: function(browser, value) {
     if (PrivateBrowsingUtils.isBrowserPrivate(browser)) {
@@ -7362,25 +7399,6 @@ var Tabs = {
         // Clear the domain cache whenever a page is loaded into any browser.
         this._domains.clear();
 
-        // Notify if we are loading a page from cache.
-        if (this._useCache) {
-          let targetDoc = aEvent.originalTarget;
-          let isTopLevel = (targetDoc.defaultView.parent === targetDoc.defaultView);
-
-          // Ignore any about: pages, especially about:neterror since it means we failed to find the page in cache.
-          let targetURI = targetDoc.documentURI;
-          if (isTopLevel && !targetURI.startsWith("about:")) {
-            UITelemetry.addEvent("neterror.1", "toast", null, "usecache");
-            Snackbars.show(
-              Strings.browser.GetStringFromName("networkOffline.message2"),
-              Snackbars.LENGTH_INDEFINITE,
-              {
-                // link_blue
-                backgroundColor: "#0096DD"
-              }
-            );
-          }
-        }
         break;
       case "TabOpen":
         // Use opening a new tab as a trigger to expire the most stale tab.

@@ -864,6 +864,23 @@ class MacroAssemblerX64 : public MacroAssemblerX86Shared
     void loadConstantSimd128Int(const SimdConstant& v, FloatRegister dest);
     void loadConstantSimd128Float(const SimdConstant& v, FloatRegister dest);
 
+    void convertInt64ToDouble(Register input, FloatRegister output);
+    void convertInt64ToFloat32(Register input, FloatRegister output);
+
+    void convertUInt64ToDouble(Register input, FloatRegister output);
+    void convertUInt64ToFloat32(Register input, FloatRegister output);
+
+    void wasmTruncateDoubleToInt64(FloatRegister input, Register output, Label* oolEntry,
+                                   Label* oolRejoin, FloatRegister tempDouble);
+    void wasmTruncateDoubleToUInt64(FloatRegister input, Register output, Label* oolEntry,
+                                    Label* oolRejoin, FloatRegister tempDouble);
+
+    void wasmTruncateFloat32ToInt64(FloatRegister input, Register output, Label* oolEntry,
+                                    Label* oolRejoin, FloatRegister tempDouble);
+    void wasmTruncateFloat32ToUInt64(FloatRegister input, Register output, Label* oolEntry,
+                                     Label* oolRejoin, FloatRegister tempDouble);
+
+  public:
     Condition testInt32Truthy(bool truthy, const ValueOperand& operand) {
         test32(operand.valueReg(), operand.valueReg());
         return truthy ? NonZero : Zero;
@@ -887,9 +904,6 @@ class MacroAssemblerX64 : public MacroAssemblerX86Shared
         else
             unboxNonDouble(Operand(src), dest.gpr());
     }
-
-    template <typename T>
-    void storeUnboxedValue(ConstantOrRegister value, MIRType valueType, const T& dest, MIRType slotType);
 
     template <typename T>
     void storeUnboxedPayload(ValueOperand value, T address, size_t nbytes) {
@@ -932,16 +946,6 @@ class MacroAssemblerX64 : public MacroAssemblerX86Shared
 
   public:
     void handleFailureWithHandlerTail(void* handler);
-
-    // See CodeGeneratorX64 calls to noteAsmJSGlobalAccess.
-    void patchAsmJSGlobalAccess(CodeOffset patchAt, uint8_t* code, uint8_t* globalData,
-                                unsigned globalDataOffset)
-    {
-        uint8_t* nextInsn = code + patchAt.offset();
-        MOZ_ASSERT(nextInsn <= globalData);
-        uint8_t* target = globalData + globalDataOffset;
-        ((int32_t*)nextInsn)[-1] = target - nextInsn;
-    }
 
     // Instrumentation for entering and leaving the profiler.
     void profilerEnterFrame(Register framePtr, Register scratch);

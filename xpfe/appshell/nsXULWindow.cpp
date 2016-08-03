@@ -103,6 +103,7 @@ nsXULWindow::nsXULWindow(uint32_t aChromeFlags)
     mChromeFlagsFrozen(false),
     mIgnoreXULSizeMode(false),
     mDestroying(false),
+    mRegistered(false),
     mContextFlags(0),
     mPersistentAttributesDirty(0),
     mPersistentAttributesMask(0),
@@ -549,7 +550,7 @@ NS_IMETHODIMP nsXULWindow::Destroy()
     mWindow = nullptr;
   }
 
-  if (!mIsHiddenWindow) {
+  if (!mIsHiddenWindow && mRegistered) {
     /* Inform appstartup we've destroyed this window and it could
        quit now if it wanted. This must happen at least after mDocShell
        is destroyed, because onunload handlers fire then, and those being
@@ -641,7 +642,7 @@ NS_IMETHODIMP nsXULWindow::GetSize(int32_t* aCX, int32_t* aCY)
 }
 
 NS_IMETHODIMP nsXULWindow::SetPositionAndSize(int32_t aX, int32_t aY, 
-   int32_t aCX, int32_t aCY, bool aRepaint)
+   int32_t aCX, int32_t aCY, uint32_t aFlags)
 {
   /* any attempt to set the window's size or position overrides the window's
      zoom state. this is important when these two states are competing while
@@ -653,7 +654,7 @@ NS_IMETHODIMP nsXULWindow::SetPositionAndSize(int32_t aX, int32_t aY,
   DesktopToLayoutDeviceScale scale = mWindow->GetDesktopToDeviceScale();
   DesktopRect rect = LayoutDeviceIntRect(aX, aY, aCX, aCY) / scale;
   nsresult rv = mWindow->Resize(rect.x, rect.y, rect.width, rect.height,
-                                aRepaint);
+                                !!(aFlags & nsIBaseWindow::eRepaint));
   NS_ENSURE_SUCCESS(rv, NS_ERROR_FAILURE);
   if (!mChromeLoaded) {
     // If we're called before the chrome is loaded someone obviously wants this

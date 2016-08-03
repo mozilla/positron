@@ -8,6 +8,7 @@
 include protocol PHttpChannel;
 include protocol PFTPChannel;
 include protocol PRtspChannel;
+include BlobTypes;
 include URIParams;
 include InputStreamParams;
 include PBackgroundSharedTypes;
@@ -38,6 +39,7 @@ struct LoadInfoArgs
   uint64_t              innerWindowID;
   uint64_t              outerWindowID;
   uint64_t              parentOuterWindowID;
+  uint64_t              frameOuterWindowID;
   bool                  enforceSecurity;
   bool                  initialSecurityCheckDone;
   bool                  isInThirdPartyContext;
@@ -121,11 +123,12 @@ struct HttpChannelOpenArgs
   bool                        suspendAfterSynthesizeResponse;
   bool                        allowStaleCacheContent;
   nsCString                   contentTypeHint;
+  nsCString                   channelId;
 };
 
 struct HttpChannelConnectArgs
 {
-  uint32_t channelId;
+  uint32_t registrarId;
   bool shouldIntercept;
 };
 

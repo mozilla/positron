@@ -48,9 +48,9 @@ struct DevTools : public ::testing::Test {
     if (!rt)
       return;
 
-    cx = createContext();
-    if (!cx)
-      return;
+    MOZ_RELEASE_ASSERT(!cx);
+    cx = JS_GetContext(rt);
+
     JS_BeginRequest(cx);
 
     global.init(rt, createGlobal());
@@ -68,33 +68,11 @@ struct DevTools : public ::testing::Test {
     return CycleCollectedJSRuntime::Get()->Runtime();
   }
 
-  static void setNativeStackQuota(JSRuntime* rt)
-  {
-    const size_t MAX_STACK_SIZE =
-      /* Assume we can't use more than 5e5 bytes of C stack by default. */
-#if (defined(DEBUG) && defined(__SUNPRO_CC))  || defined(JS_CPU_SPARC)
-      /*
-       * Sun compiler uses a larger stack space for js::Interpret() with
-       * debug.  Use a bigger gMaxStackSize to make "make check" happy.
-       */
-      5000000
-#else
-      500000
-#endif
-      ;
-
-    JS_SetNativeStackQuota(rt, MAX_STACK_SIZE);
-  }
-
   static void reportError(JSContext* cx, const char* message, JSErrorReport* report) {
     fprintf(stderr, "%s:%u:%s\n",
             report->filename ? report->filename : "<no filename>",
             (unsigned int) report->lineno,
             message);
-  }
-
-  JSContext* createContext() {
-    return JS_NewContext(rt, 8192);
   }
 
   static const JSClass* getGlobalClass() {
@@ -139,11 +117,8 @@ struct DevTools : public ::testing::Test {
       JS_LeaveCompartment(cx, nullptr);
       global = nullptr;
     }
-    if (cx) {
+    if (cx)
       JS_EndRequest(cx);
-      JS_DestroyContext(cx);
-      cx = nullptr;
-    }
   }
 };
 

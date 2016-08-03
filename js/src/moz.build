@@ -130,6 +130,7 @@ EXPORTS.js += [
     '../public/ProfilingFrameIterator.h',
     '../public/ProfilingStack.h',
     '../public/Proxy.h',
+    '../public/Realm.h',
     '../public/RequiredDefines.h',
     '../public/RootingAPI.h',
     '../public/SliceBudget.h',
@@ -154,17 +155,23 @@ EXPORTS.js += [
 
 UNIFIED_SOURCES += [
     'asmjs/AsmJS.cpp',
-    'asmjs/Wasm.cpp',
+    'asmjs/WasmBaselineCompile.cpp',
     'asmjs/WasmBinary.cpp',
     'asmjs/WasmBinaryIterator.cpp',
     'asmjs/WasmBinaryToAST.cpp',
+    'asmjs/WasmBinaryToExperimentalText.cpp',
     'asmjs/WasmBinaryToText.cpp',
+    'asmjs/WasmCode.cpp',
+    'asmjs/WasmCompile.cpp',
     'asmjs/WasmFrameIterator.cpp',
     'asmjs/WasmGenerator.cpp',
+    'asmjs/WasmInstance.cpp',
     'asmjs/WasmIonCompile.cpp',
+    'asmjs/WasmJS.cpp',
     'asmjs/WasmModule.cpp',
     'asmjs/WasmSignalHandlers.cpp',
     'asmjs/WasmStubs.cpp',
+    'asmjs/WasmTable.cpp',
     'asmjs/WasmTextToBinary.cpp',
     'asmjs/WasmTypes.cpp',
     'builtin/AtomicsObject.cpp',
@@ -311,6 +318,7 @@ UNIFIED_SOURCES += [
     'proxy/Wrapper.cpp',
     'vm/ArgumentsObject.cpp',
     'vm/ArrayBufferObject.cpp',
+    'vm/Caches.cpp',
     'vm/CallNonGenericMethod.cpp',
     'vm/CharacterEncoding.cpp',
     'vm/CodeCoverage.cpp',
@@ -327,13 +335,13 @@ UNIFIED_SOURCES += [
     'vm/Interpreter.cpp',
     'vm/JSONParser.cpp',
     'vm/MemoryMetrics.cpp',
-    'vm/Monitor.cpp',
     'vm/NativeObject.cpp',
     'vm/ObjectGroup.cpp',
     'vm/PIC.cpp',
     'vm/Printer.cpp',
     'vm/Probes.cpp',
     'vm/ProxyObject.cpp',
+    'vm/Realm.cpp',
     'vm/ReceiverGuard.cpp',
     'vm/RegExpObject.cpp',
     'vm/RegExpStatics.cpp',
@@ -602,6 +610,13 @@ HostSimplePrograms([
     'host_jskwgen',
 ])
 
+GENERATED_FILES += ['jsautokw.h']
+jsautokw = GENERATED_FILES['jsautokw.h']
+jsautokw.script = 'jsautokw.py'
+jsautokw.inputs += [
+    '!host_jskwgen%s' % CONFIG['HOST_BIN_SUFFIX'],
+]
+
 # JavaScript must be built shared, even for static builds, as it is used by
 # other modules which are always built shared. Failure to do so results in
 # the js code getting copied into xpinstall and jsd as well as mozilla-bin,
@@ -716,7 +731,6 @@ OS_LIBS += CONFIG['REALTIME_LIBS']
 
 CFLAGS += CONFIG['MOZ_ICU_CFLAGS']
 CXXFLAGS += CONFIG['MOZ_ICU_CFLAGS']
-LOCAL_INCLUDES += CONFIG['MOZ_ICU_INCLUDES']
 
 NO_EXPAND_LIBS = True
 

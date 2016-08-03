@@ -81,7 +81,7 @@ gfxAlphaBoxBlur::Init(const gfxRect& aRect,
     IntRect irect = mBlur->GetRect();
     gfxPoint topleft(irect.TopLeft().x, irect.TopLeft().y);
 
-    mContext = gfxContext::ForDrawTarget(dt);
+    mContext = gfxContext::CreateOrNull(dt);
     MOZ_ASSERT(mContext); // already checked for target above
     mContext->SetMatrix(gfxMatrix::Translation(-topleft));
 
@@ -605,7 +605,7 @@ RepeatOrStretchSurface(DrawTarget& aDT, SourceSurface* aSurface,
 
   SurfacePattern pattern(aSurface, ExtendMode::REPEAT,
                          Matrix::Translation(aDest.TopLeft() - aSrc.TopLeft()),
-                         Filter::GOOD, RoundedToInt(aSrc));
+                         SamplingFilter::GOOD, RoundedToInt(aSrc));
   aDT.FillRect(aDest, pattern);
 }
 

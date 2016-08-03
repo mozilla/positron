@@ -6,6 +6,9 @@
 
 #include "mozilla/RangedPtr.h"
 
+#include <algorithm>
+#include <iterator>
+
 #include "nsURLHelper.h"
 #include "nsIFile.h"
 #include "nsIURLParser.h"
@@ -475,12 +478,19 @@ nsresult
 net_ExtractURLScheme(const nsACString &inURI,
                      nsACString& scheme)
 {
-    Tokenizer p(inURI, "\r\n\t");
+    nsACString::const_iterator start, end;
+    inURI.BeginReading(start);
+    inURI.EndReading(end);
 
-    while (p.CheckWhite() || p.CheckChar(' ')) {
-        // Skip leading whitespace
+    // Strip C0 and space from begining
+    while (start != end) {
+        if ((uint8_t) *start > 0x20) {
+            break;
+        }
+        start++;
     }
 
+    Tokenizer p(Substring(start, end), "\r\n\t");
     p.Record();
     if (!p.CheckChar(isAsciiAlpha)) {
         // First char must be alpha
@@ -523,11 +533,19 @@ net_IsValidScheme(const char *scheme, uint32_t schemeLen)
 bool
 net_IsAbsoluteURL(const nsACString& uri)
 {
-    Tokenizer p(uri, "\r\n\t");
+    nsACString::const_iterator start, end;
+    uri.BeginReading(start);
+    uri.EndReading(end);
 
-    while (p.CheckWhite() || p.CheckChar(' ')) {
-        // Skip leading whitespace
+    // Strip C0 and space from begining
+    while (start != end) {
+        if ((uint8_t) *start > 0x20) {
+            break;
+        }
+        start++;
     }
+
+    Tokenizer p(Substring(start, end), "\r\n\t");
 
     // First char must be alpha
     if (!p.CheckChar(isAsciiAlpha)) {
@@ -554,38 +572,42 @@ net_IsAbsoluteURL(const nsACString& uri)
     return false;
 }
 
-bool
-net_FilterURIString(const char *str, nsACString& result)
+void
+net_FilterURIString(const nsACString& input, nsACString& result)
 {
-    NS_PRECONDITION(str, "Must have a non-null string!");
+    const char kCharsToStrip[] = "\r\n\t";
+
     result.Truncate();
-    const char *p = str;
 
-    // Figure out if we need to filter anything.
-    bool writing = false;
-    while (*p) {
-        if (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n') {
-            writing = true;
-            break;
-        }
-        p++;
+    auto start = input.BeginReading();
+    auto end = input.EndReading();
+
+    // Trim off leading and trailing invalid chars.
+    auto charFilter = [](char c) { return static_cast<uint8_t>(c) > 0x20; };
+    auto newStart = std::find_if(start, end, charFilter);
+    auto newEnd = std::find_if(
+        std::reverse_iterator<decltype(end)>(end),
+        std::reverse_iterator<decltype(newStart)>(newStart),
+        charFilter).base();
+
+    // Check if chars need to be stripped.
+    auto itr = std::find_first_of(
+        newStart, newEnd, std::begin(kCharsToStrip), std::end(kCharsToStrip));
+    const bool needsStrip = itr != newEnd;
+
+    // Just use the passed in string rather than creating new copies if no
+    // changes are necessary.
+    if (newStart == start && newEnd == end && !needsStrip) {
+        result = input;
+        return;
     }
 
-    if (!writing) {
-        // Nothing to strip or filter
-        return false;
+    result.Assign(Substring(newStart, newEnd));
+    if (needsStrip) {
+        result.StripChars(kCharsToStrip);
     }
-
-    nsAutoCString temp;
-
-    temp.Assign(str);
-    temp.Trim("\r\n\t ");
-    temp.StripChars("\r\n\t");
-
-    result.Assign(temp);
-
-    return true;
 }
+
 
 #if defined(XP_WIN)
 bool

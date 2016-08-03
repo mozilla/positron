@@ -54,9 +54,6 @@ using namespace std;
 #include <gdk/gdk.h>
 #include "gtk2xtbin.h"
 
-#elif defined(MOZ_WIDGET_QT)
-#undef KeyPress
-#undef KeyRelease
 #elif defined(OS_WIN)
 
 #include <windows.h>
@@ -108,7 +105,6 @@ static const TCHAR kPluginIgnoreSubclassProperty[] = TEXT("PluginIgnoreSubclassP
 
 #elif defined(XP_MACOSX)
 #include <ApplicationServices/ApplicationServices.h>
-#include "nsCocoaFeatures.h"
 #include "PluginUtilsOSX.h"
 #endif // defined(XP_MACOSX)
 
@@ -129,7 +125,6 @@ CreateDrawTargetForSurface(gfxASurface *aSurface)
   if (!drawTarget) {
     NS_RUNTIMEABORT("CreateDrawTargetForSurface failed in plugin");
   }
-  aSurface->SetData(&kDrawTarget, drawTarget, nullptr);
   return drawTarget;
 }
 
@@ -1388,8 +1383,6 @@ PluginInstanceChild::AnswerNPP_SetWindow(const NPRemoteWindow& aWindow)
 
 #elif defined(ANDROID)
     // TODO: Need Android impl
-#elif defined(MOZ_WIDGET_QT)
-    // TODO: Need QT-nonX impl
 #elif defined(MOZ_WIDGET_UIKIT)
     // Don't care
 #else
@@ -3535,10 +3528,8 @@ PluginInstanceChild::EnsureCurrentBuffer(void)
         void *caLayer = nullptr;
         if (mDrawingModel == NPDrawingModelCoreGraphics) {
             if (!mCGLayer) {
-                bool avoidCGCrashes = !nsCocoaFeatures::OnMountainLionOrLater() &&
-                  (GetQuirks() & QUIRK_FLASH_AVOID_CGMODE_CRASHES);
-                caLayer = mozilla::plugins::PluginUtilsOSX::GetCGLayer(CallCGDraw, this,
-                                                                       avoidCGCrashes,
+                caLayer = mozilla::plugins::PluginUtilsOSX::GetCGLayer(CallCGDraw,
+                                                                       this, false,
                                                                        mContentsScaleFactor);
 
                 if (!caLayer) {
@@ -4634,5 +4625,11 @@ PluginInstanceChild::AnswerNPP_Destroy(NPError* aResult)
 void
 PluginInstanceChild::ActorDestroy(ActorDestroyReason why)
 {
+#ifdef XP_WIN
+    // ClearAllSurfaces() should not try to send anything after ActorDestroy.
+    mCurrentSurfaceActor = nullptr;
+    mBackSurfaceActor = nullptr;
+#endif
+
     Destroy();
 }

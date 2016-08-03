@@ -5,10 +5,9 @@
 
 var { classes: Cc, interfaces: Ci, utils: Cu, results: Cr } = Components;
 
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
-Cu.import("resource://devtools/client/shared/widgets/SideMenuWidget.jsm");
-
 const {require} = Cu.import("resource://devtools/shared/Loader.jsm", {});
+const {XPCOMUtils} = require("resource://gre/modules/XPCOMUtils.jsm");
+const {SideMenuWidget} = require("resource://devtools/client/shared/widgets/SideMenuWidget.jsm");
 const promise = require("promise");
 const Services = require("Services");
 const EventEmitter = require("devtools/shared/event-emitter");
@@ -595,7 +594,9 @@ var ShadersEditorsView = {
     let tooltip = node._markerErrorsTooltip = new Tooltip(document);
     tooltip.defaultOffsetX = GUTTER_ERROR_PANEL_OFFSET_X;
     tooltip.setTextContent({ messages: messages });
-    tooltip.startTogglingOnHover(node, () => true, GUTTER_ERROR_PANEL_DELAY);
+    tooltip.startTogglingOnHover(node, () => true, {
+      toggleDelay: GUTTER_ERROR_PANEL_DELAY
+    });
   },
 
   /**

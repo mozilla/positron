@@ -15,7 +15,6 @@
 #include "mozilla/dom/Headers.h"
 #include "mozilla/dom/Promise.h"
 #include "mozilla/dom/URL.h"
-#include "mozilla/dom/workers/bindings/URL.h"
 
 #include "nsDOMString.h"
 
@@ -39,6 +38,8 @@ Response::Response(nsIGlobalObject* aGlobal, InternalResponse* aInternalResponse
   , mOwner(aGlobal)
   , mInternalResponse(aInternalResponse)
 {
+  MOZ_ASSERT(aInternalResponse->Headers()->Guard() == HeadersGuardEnum::Immutable ||
+             aInternalResponse->Headers()->Guard() == HeadersGuardEnum::Response);
   SetMimeType();
 }
 
@@ -86,8 +87,7 @@ Response::Redirect(const GlobalObject& aGlobal, const nsAString& aUrl,
     worker->AssertIsOnWorkerThread();
 
     NS_ConvertUTF8toUTF16 baseURL(worker->GetLocationInfo().mHref);
-    RefPtr<workers::URL> url =
-      workers::URL::Constructor(aGlobal, aUrl, baseURL, aRv);
+    RefPtr<URL> url = URL::WorkerConstructor(aGlobal, aUrl, baseURL, aRv);
     if (aRv.Failed()) {
       return nullptr;
     }
@@ -205,8 +205,15 @@ Response::Constructor(const GlobalObject& aGlobal,
 
     nsCOMPtr<nsIInputStream> bodyStream;
     nsCString contentType;
-    aRv = ExtractByteStreamFromBody(aBody.Value(), getter_AddRefs(bodyStream), contentType);
-    internalResponse->SetBody(bodyStream);
+    uint64_t bodySize = 0;
+    aRv = ExtractByteStreamFromBody(aBody.Value(),
+                                    getter_AddRefs(bodyStream),
+                                    contentType,
+                                    bodySize);
+    if (NS_WARN_IF(aRv.Failed())) {
+      return nullptr;
+    }
+    internalResponse->SetBody(bodyStream, bodySize);
 
     if (!contentType.IsVoid() &&
         !internalResponse->Headers()->Has(NS_LITERAL_CSTRING("Content-Type"), aRv)) {
@@ -253,10 +260,10 @@ Response::CloneUnfiltered(ErrorResult& aRv) const
 }
 
 void
-Response::SetBody(nsIInputStream* aBody)
+Response::SetBody(nsIInputStream* aBody, int64_t aBodySize)
 {
   MOZ_ASSERT(!BodyUsed());
-  mInternalResponse->SetBody(aBody);
+  mInternalResponse->SetBody(aBody, aBodySize);
 }
 
 already_AddRefed<InternalResponse>

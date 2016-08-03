@@ -60,7 +60,7 @@ namespace mozilla {
 namespace dom {
 
 // Map html attribute string values to TextTrackKind enums.
-static MOZ_CONSTEXPR nsAttrValue::EnumTable kKindTable[] = {
+static constexpr nsAttrValue::EnumTable kKindTable[] = {
   { "subtitles", static_cast<int16_t>(TextTrackKind::Subtitles) },
   { "captions", static_cast<int16_t>(TextTrackKind::Captions) },
   { "descriptions", static_cast<int16_t>(TextTrackKind::Descriptions) },
@@ -71,7 +71,7 @@ static MOZ_CONSTEXPR nsAttrValue::EnumTable kKindTable[] = {
 
 // Invalid values are treated as "metadata" in ParseAttribute, but if no value
 // at all is specified, it's treated as "subtitles" in GetKind
-static MOZ_CONSTEXPR const nsAttrValue::EnumTable* kKindTableInvalidValueDefault = &kKindTable[4];
+static constexpr const nsAttrValue::EnumTable* kKindTableInvalidValueDefault = &kKindTable[4];
 
 /** HTMLTrackElement */
 HTMLTrackElement::HTMLTrackElement(already_AddRefed<mozilla::dom::NodeInfo>& aNodeInfo)
@@ -202,13 +202,6 @@ HTMLTrackElement::LoadResource()
     mChannel = nullptr;
   }
 
-  // We may already have a TextTrack at this point if GetTrack() has already
-  // been called. This happens, for instance, if script tries to get the
-  // TextTrack before its mTrackElement has been bound to the DOM tree.
-  if (!mTrack) {
-    CreateTextTrack();
-  }
-
   nsCOMPtr<nsIChannel> channel;
   nsCOMPtr<nsILoadGroup> loadGroup = OwnerDoc()->GetDocumentLoadGroup();
   rv = NS_NewChannel(getter_AddRefs(channel),
@@ -246,10 +239,6 @@ HTMLTrackElement::BindToTree(nsIDocument* aDocument,
                                                  aCompileEventHandlers);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  if (!aDocument) {
-    return NS_OK;
-  }
-
   LOG(LogLevel::Debug, ("Track Element bound to tree."));
   if (!aParent || !aParent->IsNodeOfType(nsINode::eMEDIA)) {
     return NS_OK;
@@ -259,13 +248,18 @@ HTMLTrackElement::BindToTree(nsIDocument* aDocument,
   if (!mMediaParent) {
     mMediaParent = static_cast<HTMLMediaElement*>(aParent);
 
-    HTMLMediaElement* media = static_cast<HTMLMediaElement*>(aParent);
     // TODO: separate notification for 'alternate' tracks?
-    media->NotifyAddedSource();
+    mMediaParent->NotifyAddedSource();
     LOG(LogLevel::Debug, ("Track element sent notification to parent."));
 
+    // We may already have a TextTrack at this point if GetTrack() has already
+    // been called. This happens, for instance, if script tries to get the
+    // TextTrack before its mTrackElement has been bound to the DOM tree.
+    if (!mTrack) {
+      CreateTextTrack();
+    }
     RefPtr<Runnable> r = NewRunnableMethod(this, &HTMLTrackElement::LoadResource);
-    mMediaParent->RunInStableState(r);
+    nsContentUtils::RunInStableState(r.forget());
   }
 
   return NS_OK;

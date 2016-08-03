@@ -14,13 +14,14 @@
  * limitations under the License.
  */
 
+#include "BigEndian.h"
 #include "ClearKeyDecryptionManager.h"
 #include "ClearKeySession.h"
 #include "ClearKeyUtils.h"
 #include "ClearKeyStorage.h"
+#include "ClearKeyCencParser.h"
 #include "gmp-task-utils.h"
 #include "gmp-api/gmp-decryption.h"
-#include "Endian.h"
 #include <assert.h>
 #include <string.h>
 
@@ -60,7 +61,7 @@ ClearKeySession::Init(uint32_t aCreateSessionToken,
   CK_LOGD("ClearKeySession::Init");
 
   if (aInitDataType == "cenc") {
-    ClearKeyUtils::ParseCENCInitData(aInitData, aInitDataSize, mKeyIds);
+    ParseCENCInitData(aInitData, aInitDataSize, mKeyIds);
   } else if (aInitDataType == "keyids") {
     std::string sessionType;
     ClearKeyUtils::ParseKeyIdsInitData(aInitData, aInitDataSize, mKeyIds, sessionType);

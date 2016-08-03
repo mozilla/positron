@@ -5,15 +5,14 @@
 
 var { classes: Cc, interfaces: Ci, utils: Cu, results: Cr } = Components;
 
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
-Cu.import("resource://devtools/client/shared/widgets/SideMenuWidget.jsm");
-
 const { require } = Cu.import("resource://devtools/shared/Loader.jsm", {});
+const { XPCOMUtils } = require("resource://gre/modules/XPCOMUtils.jsm");
+const { SideMenuWidget } = require("resource://devtools/client/shared/widgets/SideMenuWidget.jsm");
 const promise = require("promise");
 const Services = require("Services");
 const EventEmitter = require("devtools/shared/event-emitter");
-const { CallWatcherFront } = require("devtools/server/actors/call-watcher");
-const { CanvasFront } = require("devtools/server/actors/canvas");
+const { CallWatcherFront } = require("devtools/shared/fronts/call-watcher");
+const { CanvasFront } = require("devtools/shared/fronts/canvas");
 const DevToolsUtils = require("devtools/shared/DevToolsUtils");
 const { LocalizationHelper } = require("devtools/client/shared/l10n");
 const { Heritage, WidgetMethods, setNamedTimeout, clearNamedTimeout,

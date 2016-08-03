@@ -153,6 +153,7 @@ class DesktopUnittest(TestingMixin, MercurialScript, BlobUploadMixin, MozbaseMix
                 'download-and-extract',
                 'create-virtualenv',
                 'install',
+                'stage-files',
                 'run-tests',
             ],
             require_config_file=require_config_file,
@@ -170,6 +171,35 @@ class DesktopUnittest(TestingMixin, MercurialScript, BlobUploadMixin, MozbaseMix
         self.binary_path = c.get('binary_path')
         self.abs_app_dir = None
         self.abs_res_dir = None
+
+        # Construct an identifier to be used to identify Perfherder data
+        # for resource monitoring recording. This attempts to uniquely
+        # identify this test invocation configuration.
+        perfherder_parts = []
+        perfherder_options = []
+        suites = (
+            ('specified_mochitest_suites', 'mochitest'),
+            ('specified_reftest_suites', 'reftest'),
+            ('specified_xpcshell_suites', 'xpcshell'),
+            ('specified_cppunittest_suites', 'cppunit'),
+            ('specified_gtest_suites', 'gtest'),
+            ('specified_jittest_suites', 'jittest'),
+            ('specified_mozbase_suites', 'mozbase'),
+            ('specified_mozmill_suites', 'mozmill'),
+        )
+        for s, prefix in suites:
+            if s in c:
+                perfherder_parts.append(prefix)
+                perfherder_parts.extend(c[s])
+
+        if 'this_chunk' in c:
+            perfherder_parts.append(c['this_chunk'])
+
+        if c['e10s']:
+            perfherder_options.append('e10s')
+
+        self.resource_monitor_perfherder_id = ('.'.join(perfherder_parts),
+                                               perfherder_options)
 
     # helper methods {{{2
     def _pre_config_lock(self, rw_config):
@@ -357,7 +387,7 @@ class DesktopUnittest(TestingMixin, MercurialScript, BlobUploadMixin, MozbaseMix
             if suite_category not in c["suite_definitions"]:
                 self.fatal("'%s' not defined in the config!")
 
-            if suite == 'browser-chrome-coverage':
+            if suite in ('browser-chrome-coverage', 'xpcshell-coverage'):
                 base_cmd.append('--jscov-dir-prefix=%s' %
                                 dirs['abs_blob_upload_dir'])
 
@@ -465,24 +495,14 @@ class DesktopUnittest(TestingMixin, MercurialScript, BlobUploadMixin, MozbaseMix
         super(DesktopUnittest, self).download_and_extract(target_unzip_dirs=target_unzip_dirs,
                                                           suite_categories=target_categories)
 
-    # pull defined in VCSScript.
-    # preflight_run_tests defined in TestingMixin.
+    def stage_files(self):
+        for category in SUITE_CATEGORIES:
+            suites = self._query_specified_suites(category)
+            stage = getattr(self, '_stage_{}'.format(category), None)
+            if suites and stage:
+                stage(suites)
 
-    def run_tests(self):
-        self._run_category_suites('mochitest')
-        self._run_category_suites('reftest')
-        self._run_category_suites('xpcshell',
-                                  preflight_run_method=self.preflight_xpcshell)
-        self._run_category_suites('cppunittest',
-                                  preflight_run_method=self.preflight_cppunittest)
-        self._run_category_suites('gtest',
-                                  preflight_run_method=self.preflight_gtest)
-        self._run_category_suites('jittest')
-        self._run_category_suites('mozbase')
-        self._run_category_suites('mozmill',
-                                  preflight_run_method=self.preflight_mozmill)
-
-    def preflight_copydirs(self, bin_name=None):
+    def _stage_files(self, bin_name=None):
         dirs = self.query_abs_dirs()
         abs_app_dir = self.query_abs_app_dir()
 
@@ -512,10 +532,10 @@ class DesktopUnittest(TestingMixin, MercurialScript, BlobUploadMixin, MozbaseMix
                           abs_res_extensions_dir,
                           overwrite='overwrite_if_exists')
 
-    def preflight_xpcshell(self, suites):
-        self.preflight_copydirs(self.config['xpcshell_name'])
+    def _stage_xpcshell(self, suites):
+        self._stage_files(self.config['xpcshell_name'])
 
-    def preflight_cppunittest(self, suites):
+    def _stage_cppunittest(self, suites):
         abs_res_dir = self.query_abs_res_dir()
         dirs = self.query_abs_dirs()
         abs_cppunittest_dir = dirs['abs_cppunittest_dir']
@@ -526,7 +546,7 @@ class DesktopUnittest(TestingMixin, MercurialScript, BlobUploadMixin, MozbaseMix
         for f in files:
             self.move(f, abs_res_dir)
 
-    def preflight_gtest(self, suites):
+    def _stage_gtest(self, suites):
         abs_res_dir = self.query_abs_res_dir()
         abs_app_dir = self.query_abs_app_dir()
         dirs = self.query_abs_dirs()
@@ -541,8 +561,8 @@ class DesktopUnittest(TestingMixin, MercurialScript, BlobUploadMixin, MozbaseMix
         self.copytree(os.path.join(abs_gtest_dir, 'gtest_bin'),
                       os.path.join(abs_app_dir))
 
-    def preflight_mozmill(self, suites):
-        self.preflight_copydirs()
+    def _stage_mozmill(self, suites):
+        self._stage_files()
         dirs = self.query_abs_dirs()
         modules = ['jsbridge', 'mozmill']
         for module in modules:
@@ -550,7 +570,20 @@ class DesktopUnittest(TestingMixin, MercurialScript, BlobUploadMixin, MozbaseMix
                                                     'resources',
                                                     module))
 
-    def _run_category_suites(self, suite_category, preflight_run_method=None):
+
+    # pull defined in VCSScript.
+    # preflight_run_tests defined in TestingMixin.
+
+    def run_tests(self):
+        for category in SUITE_CATEGORIES:
+            self._run_category_suites(category)
+
+    def get_timeout_for_category(self, suite_category):
+        if suite_category == 'cppunittest':
+            return 2500
+        return self.config["suite_definitions"][suite_category].get('run_timeout', 1000)
+
+    def _run_category_suites(self, suite_category):
         """run suite(s) to a specific category"""
         dirs = self.query_abs_dirs()
         suites = self._query_specified_suites(suite_category)
@@ -558,8 +591,6 @@ class DesktopUnittest(TestingMixin, MercurialScript, BlobUploadMixin, MozbaseMix
         abs_res_dir = self.query_abs_res_dir()
 
         if suites:
-            if preflight_run_method:
-                preflight_run_method(suites)
             self.info('#### Running %s suites' % suite_category)
             for suite in suites:
                 abs_base_cmd = self._query_abs_base_cmd(suite_category, suite)
@@ -609,7 +640,7 @@ class DesktopUnittest(TestingMixin, MercurialScript, BlobUploadMixin, MozbaseMix
                 if not os.path.isdir(env['MOZ_UPLOAD_DIR']):
                     self.mkdir_p(env['MOZ_UPLOAD_DIR'])
                 env = self.query_env(partial_env=env, log_level=INFO)
-                cmd_timeout = 2500 if suite_category == 'cppunittest' else 1000
+                cmd_timeout = self.get_timeout_for_category(suite_category)
                 return_code = self.run_command(cmd, cwd=dirs['abs_work_dir'],
                                                output_timeout=cmd_timeout,
                                                output_parser=parser,

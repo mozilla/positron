@@ -16,16 +16,12 @@
 
 namespace mozilla {
 
-  using namespace layers;
+using namespace layers;
 
 class VPXDecoder : public MediaDataDecoder
 {
 public:
-  VPXDecoder(const VideoInfo& aConfig,
-             ImageContainer* aImageContainer,
-             FlushableTaskQueue* aTaskQueue,
-             MediaDataDecoderCallback* aCallback);
-
+  explicit VPXDecoder(const CreateDecoderParams& aParams);
   ~VPXDecoder();
 
   RefPtr<InitPromise> Init() override;
@@ -47,21 +43,21 @@ public:
   static bool IsVPX(const nsACString& aMimeType, uint8_t aCodecMask=VP8|VP9);
 
 private:
-  void DecodeFrame (MediaRawData* aSample);
-  int DoDecodeFrame (MediaRawData* aSample);
-  void DoDrain ();
-  void OutputDelayedFrames ();
+  void ProcessDecode(MediaRawData* aSample);
+  int DoDecode(MediaRawData* aSample);
+  void ProcessDrain();
 
-  RefPtr<ImageContainer> mImageContainer;
-  RefPtr<FlushableTaskQueue> mTaskQueue;
+  const RefPtr<ImageContainer> mImageContainer;
+  const RefPtr<TaskQueue> mTaskQueue;
   MediaDataDecoderCallback* mCallback;
+  Atomic<bool> mIsFlushing;
 
   // VPx decoder state
   vpx_codec_ctx_t mVPX;
 
   const VideoInfo& mInfo;
 
-  int mCodec;
+  const int mCodec;
 };
 
 } // namespace mozilla

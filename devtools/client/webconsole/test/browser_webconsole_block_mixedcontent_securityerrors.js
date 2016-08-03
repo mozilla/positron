@@ -18,8 +18,8 @@
 
 const TEST_URI = "https://example.com/browser/devtools/client/webconsole/" +
                  "test/test-mixedcontent-securityerrors.html";
-const LEARN_MORE_URI = "https://developer.mozilla.org/docs/Security/" +
-                       "MixedContent";
+const LEARN_MORE_URI = "https://developer.mozilla.org/docs/Web/Security/" +
+                       "Mixed_content" + DOCS_GA_PARAMS;
 
 add_task(function* () {
   yield pushPrefEnv();
@@ -57,10 +57,12 @@ add_task(function* () {
 
 function pushPrefEnv() {
   let deferred = promise.defer();
-  let options = {"set": [
-                  ["security.mixed_content.block_active_content", true],
-                  ["security.mixed_content.block_display_content", true]
-  ]};
+  let options = {
+    "set": [
+      ["security.mixed_content.block_active_content", true],
+      ["security.mixed_content.block_display_content", true]
+    ]
+  };
   SpecialPowers.pushPrefEnv(options, deferred.resolve);
   return deferred.promise;
 }

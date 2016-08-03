@@ -124,12 +124,15 @@
   border: 0;
   border-radius: 4px;
   box-shadow: 0px 4px 8px 0px rgba(0,0,0,0.40);
+  -moz-user-select: none;
 }
 
 /* Only used on desktop */
 .dropdown-popup > hr,
 .dropdown-arrow,
-#font-type-buttons > button > .name {
+#font-type-buttons > button > .name,
+#content-width-buttons,
+#line-height-buttons {
   display: none;
 }
 

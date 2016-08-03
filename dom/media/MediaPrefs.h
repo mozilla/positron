@@ -6,6 +6,10 @@
 #ifndef MEDIA_PREFS_H
 #define MEDIA_PREFS_H
 
+#ifdef MOZ_WIDGET_ANDROID
+#include "AndroidBridge.h"
+#endif
+
 // First time MediaPrefs::GetSingleton() needs to be called on the main thread,
 // before any of the methods accessing the values are used, but after
 // the Preferences system has been initialized.
@@ -34,6 +38,7 @@ PrefTemplate<Type, Get##Name##PrefDefault, Get##Name##PrefName> mPref##Name
 
 // Custom Definitions.
 #define GMP_DEFAULT_ASYNC_SHUTDOWN_TIMEOUT 3000
+#define SUSPEND_BACKGROUND_VIDEO_DELAY_MS 10000
 #define TEST_PREFERENCE_FAKE_RECOGNITION_SERVICE "media.webspeech.test.fake_recognition_service"
 
 namespace mozilla {
@@ -92,6 +97,7 @@ private:
 #endif
 #ifdef XP_WIN
   DECL_MEDIA_PREF("media.wmf.enabled",                        PDMWMFEnabled, bool, true);
+  DECL_MEDIA_PREF("media.decoder-doctor.wmf-disabled-is-failure", DecoderDoctorWMFDisabledIsFailure, bool, false);
   DECL_MEDIA_PREF("media.webm.intel_decoder.enabled",         PDMWMFIntelDecoderEnabled, bool, false);
   DECL_MEDIA_PREF("media.wmf.low-latency.enabled",            PDMWMFLowLatencyEnabled, bool, false);
   DECL_MEDIA_PREF("media.wmf.decoder.thread-count",           PDMWMFThreadCount, int32_t, -1);
@@ -106,6 +112,10 @@ private:
   DECL_MEDIA_PREF("media.gmp.decoder.aac",                    GMPAACPreferred, uint32_t, 0);
   DECL_MEDIA_PREF("media.gmp.decoder.h264",                   GMPH264Preferred, uint32_t, 0);
 
+  // MediaDecoderStateMachine
+  DECL_MEDIA_PREF("media.suspend-bkgnd-video.enabled",        MDSMSuspendBackgroundVideoEnabled, bool, false);
+  DECL_MEDIA_PREF("media.suspend-bkgnd-video.delay-ms",       MDSMSuspendBackgroundVideoDelay, uint32_t, SUSPEND_BACKGROUND_VIDEO_DELAY_MS);
+
   // WebSpeech
   DECL_MEDIA_PREF("media.webspeech.synth.force_global_queue", WebSpeechForceGlobal, bool, false);
   DECL_MEDIA_PREF("media.webspeech.test.enable",              WebSpeechTestEnabled, bool, false);
@@ -115,6 +125,7 @@ private:
   DECL_MEDIA_PREF("media.webspeech.recognition.force_enable", WebSpeechRecognitionForceEnabled, bool, false);
 
   DECL_MEDIA_PREF("media.num-decode-threads",                 MediaThreadPoolDefaultCount, uint32_t, 4);
+  DECL_MEDIA_PREF("media.decoder.limit",                      MediaDecoderLimit, int32_t, MediaDecoderLimitDefault());
 
 public:
   // Manage the singleton:
@@ -124,6 +135,21 @@ public:
 private:
   template<class T> friend class StaticAutoPtr;
   static StaticAutoPtr<MediaPrefs> sInstance;
+
+  // Default value functions
+  static int32_t MediaDecoderLimitDefault()
+  {
+#ifdef MOZ_WIDGET_ANDROID
+    if (AndroidBridge::Bridge() &&
+        AndroidBridge::Bridge()->GetAPIVersion() < 18) {
+      // Older Android versions have broken support for multiple simultaneous
+      // decoders, see bug 1278574.
+      return 1;
+    }
+#endif
+    // Otherwise, set no decoder limit.
+    return -1;
+  }
 
   // Creating these to avoid having to include Preferences.h in the .h
   static void PrefAddVarCache(bool*, const char*, bool);

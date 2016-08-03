@@ -6,7 +6,6 @@
 #include "gfxPlatformMac.h"
 
 #include "gfxQuartzSurface.h"
-#include "gfxQuartzImageSurface.h"
 #include "mozilla/gfx/2D.h"
 #include "mozilla/gfx/MacIOSurface.h"
 
@@ -25,7 +24,6 @@
 #include <dlfcn.h>
 #include <CoreVideo/CoreVideo.h>
 
-#include "nsCocoaFeatures.h"
 #include "mozilla/layers/CompositorBridgeParent.h"
 #include "VsyncSource.h"
 
@@ -371,22 +369,9 @@ gfxPlatformMac::ReadAntiAliasingThreshold()
 }
 
 bool
-gfxPlatformMac::UseProgressivePaint()
-{
-  // Progressive painting requires cross-process mutexes, which don't work so
-  // well on OS X 10.6 so we disable there.
-  return nsCocoaFeatures::OnLionOrLater() && gfxPlatform::UseProgressivePaint();
-}
-
-bool
 gfxPlatformMac::AccelerateLayersByDefault()
 {
-  // 10.6.2 and lower have a bug involving textures and pixel buffer objects
-  // that caused bug 629016, so we don't allow OpenGL-accelerated layers on
-  // those versions of the OS.
-  // This will still let full-screen video be accelerated on OpenGL, because
-  // that XUL widget opts in to acceleration, but that's probably OK.
-  return nsCocoaFeatures::AccelerateByDefault();
+  return true;
 }
 
 // This is the renderer output callback function, called on the vsync thread
@@ -422,9 +407,6 @@ public:
     ~OSXDisplay()
     {
       MOZ_ASSERT(NS_IsMainThread());
-      mTimer->Cancel();
-      mTimer = nullptr;
-      DisableVsync();
     }
 
     static void RetryEnableVsync(nsITimer* aTimer, void* aOsxDisplay)
@@ -518,6 +500,14 @@ public:
     virtual TimeDuration GetVsyncRate() override
     {
       return mVsyncRate;
+    }
+
+    virtual void Shutdown() override
+    {
+      MOZ_ASSERT(NS_IsMainThread());
+      mTimer->Cancel();
+      mTimer = nullptr;
+      DisableVsync();
     }
 
     // The vsync timestamps given by the CVDisplayLinkCallback are

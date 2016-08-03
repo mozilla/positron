@@ -130,7 +130,7 @@ WebGLContext::GetChannelBits(const char* funcName, GLenum pname, GLint* const ou
             break;
 
         default:
-            MOZ_CRASH("bad pname");
+            MOZ_CRASH("GFX: bad pname");
         }
         return true;
     }
@@ -174,7 +174,7 @@ WebGLContext::GetChannelBits(const char* funcName, GLenum pname, GLint* const ou
         break;
 
     default:
-        MOZ_CRASH("bad pname");
+        MOZ_CRASH("GFX: bad pname");
     }
 
     gl->fGetFramebufferAttachmentParameteriv(LOCAL_GL_DRAW_FRAMEBUFFER, fbAttachment,
@@ -301,7 +301,7 @@ WebGLContext::GetParameter(JSContext* cx, GLenum pname, ErrorResult& rv)
                     driverEnum = LOCAL_GL_VENDOR;
                     break;
                 default:
-                    MOZ_CRASH("bad `pname`");
+                    MOZ_CRASH("GFX: bad `pname`");
                 }
 
                 bool hasRetVal = false;
@@ -380,16 +380,10 @@ WebGLContext::GetParameter(JSContext* cx, GLenum pname, ErrorResult& rv)
             return JS::NumberValue(uint32_t(i));
         }
         case LOCAL_GL_IMPLEMENTATION_COLOR_READ_TYPE: {
-            if (mBoundReadFramebuffer) {
-                nsCString fbStatusInfoIgnored;
-                const auto status = mBoundReadFramebuffer->CheckFramebufferStatus(&fbStatusInfoIgnored);
-                if (status != LOCAL_GL_FRAMEBUFFER_COMPLETE) {
-                    ErrorInvalidOperation("getParameter: Read framebuffer must be"
-                                          " complete before querying"
-                                          " IMPLEMENTATION_COLOR_READ_TYPE.");
-                    return JS::NullValue();
-                }
-            }
+            const webgl::FormatUsageInfo* usage;
+            uint32_t width, height;
+            if (!ValidateCurFBForRead(funcName, &usage, &width, &height))
+                return JS::NullValue();
 
             GLint i = 0;
             if (gl->IsSupported(gl::GLFeature::ES2_compatibility)) {
@@ -401,16 +395,10 @@ WebGLContext::GetParameter(JSContext* cx, GLenum pname, ErrorResult& rv)
             return JS::NumberValue(uint32_t(i));
         }
         case LOCAL_GL_IMPLEMENTATION_COLOR_READ_FORMAT: {
-            if (mBoundReadFramebuffer) {
-                nsCString fbStatusInfoIgnored;
-                const auto status = mBoundReadFramebuffer->CheckFramebufferStatus(&fbStatusInfoIgnored);
-                if (status != LOCAL_GL_FRAMEBUFFER_COMPLETE) {
-                    ErrorInvalidOperation("getParameter: Read framebuffer must be"
-                                          " complete before querying"
-                                          " IMPLEMENTATION_COLOR_READ_FORMAT.");
-                    return JS::NullValue();
-                }
-            }
+            const webgl::FormatUsageInfo* usage;
+            uint32_t width, height;
+            if (!ValidateCurFBForRead(funcName, &usage, &width, &height))
+                return JS::NullValue();
 
             GLint i = 0;
             if (gl->IsSupported(gl::GLFeature::ES2_compatibility)) {

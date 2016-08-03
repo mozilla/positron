@@ -5,6 +5,8 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "ContentEventHandler.h"
+#include "IMEContentObserver.h"
+#include "IMEStateManager.h"
 #include "nsContentUtils.h"
 #include "nsIContent.h"
 #include "nsIEditor.h"
@@ -56,7 +58,7 @@ TextComposition::TextComposition(nsPresContext* aPresContext,
   , mTabParent(aTabParent)
   , mNativeContext(aCompositionEvent->mNativeIMEContext)
   , mCompositionStartOffset(0)
-  , mCompositionTargetOffset(0)
+  , mTargetClauseOffsetInComposition(0)
   , mIsSynthesizedForTests(aCompositionEvent->mFlags.mIsSynthesizedForTests)
   , mIsComposing(false)
   , mIsEditorHandlingEvent(false)
@@ -67,6 +69,7 @@ TextComposition::TextComposition(nsPresContext* aPresContext,
   , mAllowControlCharacters(
       Preferences::GetBool("dom.compositionevent.allow_control_characters",
                            false))
+  , mWasCompositionStringEmpty(true)
 {
   MOZ_ASSERT(aCompositionEvent->mNativeIMEContext.IsValid());
 }
@@ -150,6 +153,8 @@ TextComposition::DispatchEvent(WidgetCompositionEvent* aDispatchEvent,
 
   EventDispatcher::Dispatch(mNode, mPresContext,
                             aDispatchEvent, nullptr, aStatus, aCallBack);
+
+  OnCompositionEventDispatched(aDispatchEvent);
 }
 
 void
@@ -239,6 +244,8 @@ TextComposition::DispatchCompositionEvent(
                    EventDispatchingCallback* aCallBack,
                    bool aIsSynthesized)
 {
+  mWasCompositionStringEmpty = mString.IsEmpty();
+
   // If the content is a container of TabParent, composition should be in the
   // remote process.
   if (mTabParent) {
@@ -265,10 +272,13 @@ TextComposition::DispatchCompositionEvent(
     aCompositionEvent->mRanges = nullptr;
     NS_ASSERTION(aCompositionEvent->mData.IsEmpty(),
                  "mData of eCompositionCommitAsIs should be empty string");
-    if (mLastData == IDEOGRAPHIC_SPACE) {
-      // If the last data is an ideographic space (FullWidth space), it must be
+    bool removePlaceholderCharacter =
+      Preferences::GetBool("intl.ime.remove_placeholder_character_at_commit",
+                           false);
+    if (removePlaceholderCharacter && mLastData == IDEOGRAPHIC_SPACE) {
+      // If the last data is an ideographic space (FullWidth space), it might be
       // a placeholder character of some Chinese IME.  So, committing with
-      // this data must not be expected by users.  Let's use empty string.
+      // this data might not be expected by users.  Let's use empty string.
       aCompositionEvent->mData.Truncate();
     } else {
       aCompositionEvent->mData = mLastData;
@@ -397,8 +407,7 @@ TextComposition::DispatchCompositionEvent(
     MOZ_ASSERT(!HasEditor(), "Why does the editor still keep to hold this?");
   }
 
-  // Notify composition update to widget if possible
-  NotityUpdateComposition(aCompositionEvent);
+  MaybeNotifyIMEOfCompositionEventHandled(aCompositionEvent);
 }
 
 // static
@@ -425,38 +434,113 @@ TextComposition::HandleSelectionEvent(nsPresContext* aPresContext,
   handler.OnSelectionEvent(aSelectionEvent);
 }
 
+uint32_t
+TextComposition::GetSelectionStartOffset()
+{
+  nsCOMPtr<nsIWidget> widget = mPresContext->GetRootWidget();
+  WidgetQueryContentEvent selectedTextEvent(true, eQuerySelectedText, widget);
+  if (mRanges && mRanges->HasClauses()) {
+    selectedTextEvent.InitForQuerySelectedText(
+                        ToSelectionType(mRanges->GetFirstClause()->mRangeType));
+  } else {
+    selectedTextEvent.InitForQuerySelectedText(SelectionType::eNormal);
+  }
+
+  // The editor which has this composition is observed by active
+  // IMEContentObserver, we can use the cache of it.
+  RefPtr<IMEContentObserver> contentObserver =
+    IMEStateManager::GetActiveContentObserver();
+  bool doQuerySelection = true;
+  if (contentObserver) {
+    if (contentObserver->IsManaging(this)) {
+      doQuerySelection = false;
+      contentObserver->HandleQueryContentEvent(&selectedTextEvent);
+    }
+    // If another editor already has focus, we cannot retrieve selection
+    // in the editor which has this composition...
+    else if (NS_WARN_IF(contentObserver->GetPresContext() == mPresContext)) {
+      return 0;  // XXX Is this okay?
+    }
+  }
+
+  // Otherwise, using slow path (i.e., compute every time with
+  // ContentEventHandler)
+  if (doQuerySelection) {
+    ContentEventHandler handler(mPresContext);
+    handler.HandleQueryContentEvent(&selectedTextEvent);
+  }
+
+  if (NS_WARN_IF(!selectedTextEvent.mSucceeded)) {
+    return 0; // XXX Is this okay?
+  }
+  return selectedTextEvent.mReply.mOffset;
+}
+
 void
-TextComposition::NotityUpdateComposition(
+TextComposition::OnCompositionEventDispatched(
                    const WidgetCompositionEvent* aCompositionEvent)
 {
   MOZ_RELEASE_ASSERT(!mTabParent);
 
-  nsEventStatus status;
-
-  // When compositon start, notify the rect of first offset character.
-  // When not compositon start, notify the rect of selected composition
-  // string if compositionchange event.
-  if (aCompositionEvent->mMessage == eCompositionStart) {
-    nsCOMPtr<nsIWidget> widget = mPresContext->GetRootWidget();
-    // Update composition start offset
-    WidgetQueryContentEvent selectedTextEvent(true, eQuerySelectedText, widget);
-    widget->DispatchEvent(&selectedTextEvent, status);
-    if (selectedTextEvent.mSucceeded) {
-      mCompositionStartOffset = selectedTextEvent.mReply.mOffset;
-    } else {
-      // Unknown offset
-      NS_WARNING("Cannot get start offset of IME composition");
-      mCompositionStartOffset = 0;
-    }
-    mCompositionTargetOffset = mCompositionStartOffset;
-  } else if (aCompositionEvent->CausesDOMTextEvent()) {
-    mCompositionTargetOffset =
-      mCompositionStartOffset + aCompositionEvent->TargetClauseOffset();
-  } else {
+  if (!IsValidStateForComposition(aCompositionEvent->mWidget)) {
     return;
   }
 
-  NotifyIME(NOTIFY_IME_OF_COMPOSITION_UPDATE);
+  // Every composition event may cause changing composition start offset,
+  // especially when there is no composition string.  Therefore, we need to
+  // update mCompositionStartOffset with the latest offset.
+
+  MOZ_ASSERT(aCompositionEvent->mMessage != eCompositionStart ||
+               mWasCompositionStringEmpty,
+             "mWasCompositionStringEmpty should be true if the dispatched "
+             "event is eCompositionStart");
+
+  if (mWasCompositionStringEmpty &&
+      !aCompositionEvent->CausesDOMCompositionEndEvent()) {
+    // If there was no composition string, current selection start may be the
+    // offset for inserting composition string.
+    // Update composition start offset with current selection start.
+    mCompositionStartOffset = GetSelectionStartOffset();
+    mTargetClauseOffsetInComposition = 0;
+  }
+
+  if (aCompositionEvent->CausesDOMTextEvent()) {
+    mTargetClauseOffsetInComposition = aCompositionEvent->TargetClauseOffset();
+  }
+}
+
+void
+TextComposition::OnStartOffsetUpdatedInChild(uint32_t aStartOffset)
+{
+  mCompositionStartOffset = aStartOffset;
+}
+
+void
+TextComposition::MaybeNotifyIMEOfCompositionEventHandled(
+                   const WidgetCompositionEvent* aCompositionEvent)
+{
+  if (aCompositionEvent->mMessage != eCompositionStart &&
+      !aCompositionEvent->CausesDOMTextEvent()) {
+    return;
+  }
+
+  RefPtr<IMEContentObserver> contentObserver =
+    IMEStateManager::GetActiveContentObserver();
+  // When IMEContentObserver is managing the editor which has this composition,
+  // composition event handled notification should be sent after the observer
+  // notifies all pending notifications.  Therefore, we should use it.
+  // XXX If IMEContentObserver suddenly loses focus after here and notifying
+  //     widget of pending notifications, we won't notify widget of composition
+  //     event handled.  Although, this is a bug but it should be okay since
+  //     destroying IMEContentObserver notifies IME of blur.  So, native IME
+  //     handler can treat it as this notification too.
+  if (contentObserver && contentObserver->IsManaging(this)) {
+    contentObserver->MaybeNotifyCompositionEventHandled();
+    return;
+  }
+  // Otherwise, e.g., this composition is in non-active window, we should
+  // notify widget directly.
+  NotifyIME(NOTIFY_IME_OF_COMPOSITION_EVENT_HANDLED);
 }
 
 void

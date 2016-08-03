@@ -89,13 +89,14 @@ public:
       return;
     }
 
-    mBounds = mBounds.Union(aRect);
-
-    if (mCoversBounds) {
+    Maybe<RectT> newBounds = mBounds.SafeUnion(aRect);
+    if (!newBounds) {
       return;
     }
-    if (ExceedsMaximumSize()) {
-      FallBackToBounds();
+    mBounds = newBounds.value();
+    MOZ_ASSERT(!mBounds.Overflows());
+
+    if (mCoversBounds) {
       return;
     }
 
@@ -106,19 +107,25 @@ public:
 
   void Add(const RegionT& aRegion)
   {
-    mBounds = mBounds.Union(aRegion.GetBounds());
-
-    if (mCoversBounds) {
+    Maybe<RectT> newBounds = mBounds.SafeUnion(aRegion.GetBounds());
+    if (!newBounds) {
       return;
     }
-    if (ExceedsMaximumSize()) {
-      FallBackToBounds();
+    mBounds = newBounds.value();
+    MOZ_ASSERT(!mBounds.Overflows());
+
+    if (mCoversBounds) {
       return;
     }
 
     for (auto iter = aRegion.RectIter(); !iter.Done(); iter.Next()) {
       RectT r = iter.Get();
-      MOZ_ASSERT(!r.IsEmpty());
+      if (r.IsEmpty() || r.Overflows()) {
+        // This can happen if e.g. a negative-width rect was wrapped into a
+        // region. Treat it the same as we would if such a rect was passed to
+        // the Add(const RectT&) function.
+        continue;
+      }
       if (!mImpl.AddRect(RectToBox(r))) {
         FallBackToBounds();
         return;
@@ -136,10 +143,14 @@ public:
   }
 
   RectT GetBounds() const { return mBounds; }
+  bool CoversBounds() const { return mCoversBounds; }
 
   bool Intersects(const RectT& aRect) const
   {
-    if (!mBounds.Intersects(aRect)) {
+    if (aRect.IsEmpty()) {
+      return true;
+    }
+    if (aRect.Overflows() || !mBounds.Intersects(aRect)) {
       return false;
     }
     if (mCoversBounds) {
@@ -151,7 +162,10 @@ public:
 
   bool Contains(const RectT& aRect) const
   {
-    if (!mBounds.Contains(aRect)) {
+    if (aRect.IsEmpty()) {
+      return true;
+    }
+    if (aRect.Overflows() || !mBounds.Contains(aRect)) {
       return false;
     }
     if (mCoversBounds) {
@@ -162,12 +176,6 @@ public:
 
 private:
 
-  bool ExceedsMaximumSize() const
-  {
-    // This stops us from allocating insane numbers of tiles.
-    return mBounds.width >= 50 * 256 || mBounds.height >= 50 * 256;
-  }
-
   void FallBackToBounds()
   {
     mCoversBounds = true;
@@ -176,6 +184,8 @@ private:
 
   static pixman_box32_t RectToBox(const RectT& aRect)
   {
+    MOZ_ASSERT(!aRect.IsEmpty());
+    MOZ_ASSERT(!aRect.Overflows());
     return { aRect.x, aRect.y, aRect.XMost(), aRect.YMost() };
   }
 

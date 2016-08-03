@@ -39,6 +39,7 @@
 #include "jit/arm/Assembler-arm.h"
 #include "jit/arm/disasm/Constants-arm.h"
 #include "jit/AtomicOperations.h"
+#include "threading/LockGuard.h"
 #include "vm/Runtime.h"
 #include "vm/SharedMem.h"
 
@@ -358,11 +359,15 @@ class CachePage
 
 // Protects the icache() and redirection() properties of the
 // Simulator.
-class AutoLockSimulatorCache
+class AutoLockSimulatorCache : public LockGuard<Mutex>
 {
+    using Base = LockGuard<Mutex>;
+
   public:
-    explicit AutoLockSimulatorCache(Simulator* sim) : sim_(sim) {
-        PR_Lock(sim_->cacheLock_);
+    explicit AutoLockSimulatorCache(Simulator* sim)
+      : Base(sim->cacheLock_)
+      , sim_(sim)
+    {
         MOZ_ASSERT(!sim_->cacheLockHolder_);
 #ifdef DEBUG
         sim_->cacheLockHolder_ = PR_GetCurrentThread();
@@ -374,7 +379,6 @@ class AutoLockSimulatorCache
 #ifdef DEBUG
         sim_->cacheLockHolder_ = nullptr;
 #endif
-        PR_Unlock(sim_->cacheLock_);
     }
 
   private:
@@ -1124,7 +1128,6 @@ Simulator::Simulator()
 
     lastDebuggerInput_ = nullptr;
 
-    cacheLock_ = nullptr;
 #ifdef DEBUG
     cacheLockHolder_ = nullptr;
 #endif
@@ -1136,10 +1139,6 @@ Simulator::Simulator()
 bool
 Simulator::init()
 {
-    cacheLock_ = PR_NewLock();
-    if (!cacheLock_)
-        return false;
-
     if (!icache_.init())
         return false;
 
@@ -1226,7 +1225,6 @@ class Redirection
 Simulator::~Simulator()
 {
     js_free(stack_);
-    PR_DestroyLock(cacheLock_);
     Redirection* r = redirection_;
     while (r) {
         Redirection* next = r->next_;
@@ -1531,7 +1529,7 @@ Simulator::readW(int32_t addr, SimInstruction* instr)
 void
 Simulator::writeW(int32_t addr, int value, SimInstruction* instr)
 {
-    if ((addr & 3) == 0) {
+    if ((addr & 3) == 0 || !HasAlignmentFault()) {
         intptr_t* ptr = reinterpret_cast<intptr_t*>(addr);
         *ptr = value;
         return;
@@ -1617,7 +1615,7 @@ Simulator::readHU(int32_t addr, SimInstruction* instr)
 int16_t
 Simulator::readH(int32_t addr, SimInstruction* instr)
 {
-    if ((addr & 1) == 0) {
+    if ((addr & 1) == 0 || !HasAlignmentFault()) {
         int16_t* ptr = reinterpret_cast<int16_t*>(addr);
         return *ptr;
     }
@@ -1629,7 +1627,7 @@ Simulator::readH(int32_t addr, SimInstruction* instr)
 void
 Simulator::writeH(int32_t addr, uint16_t value, SimInstruction* instr)
 {
-    if ((addr & 1) == 0) {
+    if ((addr & 1) == 0 || !HasAlignmentFault()) {
         uint16_t* ptr = reinterpret_cast<uint16_t*>(addr);
         *ptr = value;
     } else {
@@ -1641,7 +1639,7 @@ Simulator::writeH(int32_t addr, uint16_t value, SimInstruction* instr)
 void
 Simulator::writeH(int32_t addr, int16_t value, SimInstruction* instr)
 {
-    if ((addr & 1) == 0) {
+    if ((addr & 1) == 0 || !HasAlignmentFault()) {
         int16_t* ptr = reinterpret_cast<int16_t*>(addr);
         *ptr = value;
     } else {

@@ -10,6 +10,7 @@
 
 #include "mozilla/Attributes.h"
 #include "mozilla/EventForwards.h"
+#include "mozilla/UniquePtr.h"
 #include "nsIObjectFrame.h"
 #include "nsFrame.h"
 #include "nsRegion.h"
@@ -213,11 +214,6 @@ public:
   void SetInstanceOwner(nsPluginInstanceOwner* aOwner);
 
   /**
-   * Helper for hiding windowed plugins during async scroll operations.
-   */
-  void SetScrollVisibility(bool aState);
-
-  /**
    * HandleWheelEventAsDefaultAction() handles eWheel event as default action.
    * This should be called only when WantsToHandleWheelEventAsDefaultAction()
    * returns true.
@@ -335,11 +331,7 @@ private:
   // updates.
   RefPtr<nsRootPresContext> mRootPresContextRegisteredWith;
 
-  nsAutoPtr<PluginFrameDidCompositeObserver> mDidCompositeObserver;
-
-  // Tracks windowed plugin visibility during scroll operations. See
-  // SetScrollVisibility.
-  bool mIsHiddenDueToScroll;
+  mozilla::UniquePtr<PluginFrameDidCompositeObserver> mDidCompositeObserver;
 };
 
 class nsDisplayPlugin : public nsDisplayItem {

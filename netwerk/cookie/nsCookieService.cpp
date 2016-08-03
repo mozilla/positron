@@ -176,9 +176,9 @@ struct nsListIter
 #ifdef MOZ_LOGGING
 // in order to do logging, the following environment variables need to be set:
 //
-//    set NSPR_LOG_MODULES=cookie:3 -- shows rejected cookies
-//    set NSPR_LOG_MODULES=cookie:4 -- shows accepted and rejected cookies
-//    set NSPR_LOG_FILE=cookie.log
+//    set MOZ_LOG=cookie:3 -- shows rejected cookies
+//    set MOZ_LOG=cookie:4 -- shows accepted and rejected cookies
+//    set MOZ_LOG_FILE=cookie.log
 //
 #include "mozilla/Logging.h"
 #endif
@@ -2260,6 +2260,45 @@ nsCookieService::GetEnumerator(nsISimpleEnumerator **aEnumerator)
   return NS_NewArrayEnumerator(aEnumerator, cookieList);
 }
 
+static nsresult
+InitializeOriginAttributes(NeckoOriginAttributes* aAttrs,
+                           JS::HandleValue aOriginAttributes,
+                           JSContext* aCx,
+                           uint8_t aArgc,
+                           const char16_t* aAPI,
+                           const char16_t* aInterfaceSuffix)
+{
+  MOZ_ASSERT(aAttrs);
+  MOZ_ASSERT(aCx);
+  MOZ_ASSERT(aAPI);
+  MOZ_ASSERT(aInterfaceSuffix);
+
+  if (aArgc == 0) {
+    const char16_t* params[] = {
+      aAPI,
+      aInterfaceSuffix
+    };
+
+    // This is supposed to be temporary and in 1 or 2 releases we want to
+    // have originAttributes param as mandatory. But for now, we don't want to
+    // break existing addons, so we write a console message to inform the addon
+    // developers about it.
+    nsContentUtils::ReportToConsole(nsIScriptError::warningFlag,
+                                    NS_LITERAL_CSTRING("Cookie Manager"),
+                                    nullptr,
+                                    nsContentUtils::eNECKO_PROPERTIES,
+                                    "nsICookieManagerAPIDeprecated",
+                                    params, ArrayLength(params));
+  } else if (aArgc == 1) {
+    if (!aOriginAttributes.isObject() ||
+        !aAttrs->Init(aCx, aOriginAttributes)) {
+      return NS_ERROR_INVALID_ARG;
+    }
+  }
+
+  return NS_OK;
+}
+
 NS_IMETHODIMP
 nsCookieService::Add(const nsACString &aHost,
                      const nsACString &aPath,
@@ -2268,8 +2307,41 @@ nsCookieService::Add(const nsACString &aHost,
                      bool              aIsSecure,
                      bool              aIsHttpOnly,
                      bool              aIsSession,
-                     int64_t           aExpiry)
+                     int64_t           aExpiry,
+                     JS::HandleValue   aOriginAttributes,
+                     JSContext*        aCx,
+                     uint8_t           aArgc)
 {
+  MOZ_ASSERT(aArgc == 0 || aArgc == 1);
+
+  NeckoOriginAttributes attrs;
+  nsresult rv = InitializeOriginAttributes(&attrs,
+                                           aOriginAttributes,
+                                           aCx,
+                                           aArgc,
+                                           MOZ_UTF16("nsICookieManager2.add()"),
+                                           MOZ_UTF16("2"));
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  return AddNative(aHost, aPath, aName, aValue, aIsSecure, aIsHttpOnly,
+                   aIsSession, aExpiry, &attrs);
+}
+
+NS_IMETHODIMP_(nsresult)
+nsCookieService::AddNative(const nsACString &aHost,
+                           const nsACString &aPath,
+                           const nsACString &aName,
+                           const nsACString &aValue,
+                           bool              aIsSecure,
+                           bool              aIsHttpOnly,
+                           bool              aIsSession,
+                           int64_t           aExpiry,
+                           NeckoOriginAttributes* aOriginAttributes)
+{
+  if (NS_WARN_IF(!aOriginAttributes)) {
+    return NS_ERROR_FAILURE;
+  }
+
   if (!mDBState) {
     NS_WARNING("No DBState! Profile already closed?");
     return NS_ERROR_NOT_AVAILABLE;
@@ -2287,7 +2359,7 @@ nsCookieService::Add(const nsACString &aHost,
   NS_ENSURE_SUCCESS(rv, rv);
 
   int64_t currentTimeInUsec = PR_Now();
-  nsCookieKey key = DEFAULT_APP_KEY(baseDomain);
+  nsCookieKey key = nsCookieKey(baseDomain, *aOriginAttributes);
 
   RefPtr<nsCookie> cookie =
     nsCookie::Create(aName, aValue, host, aPath,
@@ -2370,24 +2442,16 @@ nsCookieService::Remove(const nsACString &aHost,
                         uint8_t          aArgc)
 {
   MOZ_ASSERT(aArgc == 0 || aArgc == 1);
-  if (aArgc == 0) {
-    // This is supposed to be temporary and in 1 or 2 releases we want to
-    // have originAttributes param as mandatory. But for now, we don't want to
-    // break existing addons, so we write a console message to inform the addon
-    // developers about it.
-    nsContentUtils::ReportToConsole(nsIScriptError::warningFlag,
-                                    NS_LITERAL_CSTRING("Cookie Manager"),
-                                    nullptr,
-                                    nsContentUtils::eNECKO_PROPERTIES,
-                                    "nsICookieManagerRemoveDeprecated");
-  }
 
   NeckoOriginAttributes attrs;
-  if (aArgc == 1 &&
-      (!aOriginAttributes.isObject() ||
-       !attrs.Init(aCx, aOriginAttributes))) {
-    return NS_ERROR_INVALID_ARG;
-  }
+  nsresult rv = InitializeOriginAttributes(&attrs,
+                                           aOriginAttributes,
+                                           aCx,
+                                           aArgc,
+                                           MOZ_UTF16("nsICookieManager.remove()"),
+                                           MOZ_UTF16(""));
+  NS_ENSURE_SUCCESS(rv, rv);
+
   return RemoveNative(aHost, aName, aPath, aBlocked, &attrs);
 }
 
@@ -3247,6 +3311,11 @@ nsCookieService::SetCookieInternal(nsIURI                        *aHostURI,
     COOKIE_LOGFAILURE(SET_COOKIE, aHostURI, savedCookieHeader, "failed the path tests");
     return newCookie;
   }
+  // magic prefix checks. MUST be run after CheckDomain() and CheckPath()
+  if (!CheckPrefixes(cookieAttributes, isHTTPS)) {
+    COOKIE_LOGFAILURE(SET_COOKIE, aHostURI, savedCookieHeader, "failed the prefix tests");
+    return newCookie;
+  }
 
   // reject cookie if value contains an RFC 6265 disallowed character - see
   // https://bugzilla.mozilla.org/show_bug.cgi?id=1191423
@@ -3986,6 +4055,53 @@ nsCookieService::CheckPath(nsCookieAttributes &aCookieAttributes,
   return true;
 }
 
+// CheckPrefixes
+//
+// Reject cookies whose name starts with the magic prefixes from
+// https://tools.ietf.org/html/draft-ietf-httpbis-cookie-prefixes-00
+// if they do not meet the criteria required by the prefix.
+//
+// Must not be called until after CheckDomain() and CheckPath() have
+// regularized and validated the nsCookieAttributes values!
+bool
+nsCookieService::CheckPrefixes(nsCookieAttributes &aCookieAttributes,
+                               bool aSecureRequest)
+{
+  static const char kSecure[] = "__Secure-";
+  static const char kHost[]   = "__Host-";
+  static const int kSecureLen = sizeof( kSecure ) - 1;
+  static const int kHostLen   = sizeof( kHost ) - 1;
+
+  bool isSecure = strncmp( aCookieAttributes.name.get(), kSecure, kSecureLen ) == 0;
+  bool isHost   = strncmp( aCookieAttributes.name.get(), kHost, kHostLen ) == 0;
+
+  if ( !isSecure && !isHost ) {
+    // not one of the magic prefixes: carry on
+    return true;
+  }
+
+  if ( !aSecureRequest || !aCookieAttributes.isSecure ) {
+    // the magic prefixes may only be used from a secure request and
+    // the secure attribute must be set on the cookie
+    return false;
+  }
+
+  if ( isHost ) {
+    // The host prefix requires that the path is "/" and that the cookie
+    // had no domain attribute. CheckDomain() and CheckPath() MUST be run
+    // first to make sure invalid attributes are rejected and to regularlize
+    // them. In particular all explicit domain attributes result in a host
+    // that starts with a dot, and if the host doesn't start with a dot it
+    // correctly matches the true host.
+    if ( aCookieAttributes.host[0] == '.' ||
+         !aCookieAttributes.path.EqualsLiteral( "/" )) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
 bool
 nsCookieService::GetExpiry(nsCookieAttributes &aCookieAttributes,
                            int64_t             aServerTime,
@@ -4298,8 +4414,13 @@ nsCookieService::CountCookiesFromHost(const nsACString &aHost,
 // nsICookieManager2 interface.
 NS_IMETHODIMP
 nsCookieService::GetCookiesFromHost(const nsACString     &aHost,
+                                    JS::HandleValue       aOriginAttributes,
+                                    JSContext*            aCx,
+                                    uint8_t               aArgc,
                                     nsISimpleEnumerator **aEnumerator)
 {
+  MOZ_ASSERT(aArgc == 0 || aArgc == 1);
+
   if (!mDBState) {
     NS_WARNING("No DBState! Profile already closed?");
     return NS_ERROR_NOT_AVAILABLE;
@@ -4314,7 +4435,16 @@ nsCookieService::GetCookiesFromHost(const nsACString     &aHost,
   rv = GetBaseDomainFromHost(host, baseDomain);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  nsCookieKey key = DEFAULT_APP_KEY(baseDomain);
+  NeckoOriginAttributes attrs;
+  rv = InitializeOriginAttributes(&attrs,
+                                  aOriginAttributes,
+                                  aCx,
+                                  aArgc,
+                                  MOZ_UTF16("nsICookieManager2.getCookiesFromHost()"),
+                                  MOZ_UTF16("2"));
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  nsCookieKey key = nsCookieKey(baseDomain, attrs);
   EnsureReadDomain(key);
 
   nsCookieEntry *entry = mDBState->hostTable.GetEntry(key);

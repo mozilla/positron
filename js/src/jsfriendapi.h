@@ -45,7 +45,7 @@ class InterpreterFrame;
 } /* namespace js */
 
 extern JS_FRIEND_API(void)
-JS_SetGrayGCRootsTracer(JSRuntime* rt, JSTraceDataOp traceOp, void* data);
+JS_SetGrayGCRootsTracer(JSContext* cx, JSTraceDataOp traceOp, void* data);
 
 extern JS_FRIEND_API(JSObject*)
 JS_FindCompilationScope(JSContext* cx, JS::HandleObject obj);
@@ -134,18 +134,14 @@ enum {
     JS_TELEMETRY_DEPRECATED_LANGUAGE_EXTENSIONS_IN_CONTENT,
     JS_TELEMETRY_DEPRECATED_LANGUAGE_EXTENSIONS_IN_ADDONS,
     JS_TELEMETRY_ADDON_EXCEPTIONS,
-    JS_TELEMETRY_DEFINE_GETTER_SETTER_THIS_NULL_UNDEFINED,
     JS_TELEMETRY_END
 };
-
-static_assert(JS_TELEMETRY_DEFINE_GETTER_SETTER_THIS_NULL_UNDEFINED == 25,
-              "This value needs to be kept in sync with SelfHostingDefines.h");
 
 typedef void
 (*JSAccumulateTelemetryDataCallback)(int id, uint32_t sample, const char* key);
 
 extern JS_FRIEND_API(void)
-JS_SetAccumulateTelemetryCallback(JSRuntime* rt, JSAccumulateTelemetryDataCallback callback);
+JS_SetAccumulateTelemetryCallback(JSContext* cx, JSAccumulateTelemetryDataCallback callback);
 
 extern JS_FRIEND_API(bool)
 JS_GetIsSecureContext(JSCompartment* compartment);
@@ -189,7 +185,7 @@ JS_BasicObjectToString(JSContext* cx, JS::HandleObject obj);
 namespace js {
 
 JS_FRIEND_API(bool)
-GetBuiltinClass(JSContext* cx, JS::HandleObject obj, ESClassValue* classValue);
+GetBuiltinClass(JSContext* cx, JS::HandleObject obj, ESClass* cls);
 
 JS_FRIEND_API(const char*)
 ObjectClassName(JSContext* cx, JS::HandleObject obj);
@@ -209,39 +205,55 @@ GetPropertyNameFromPC(JSScript* script, jsbytecode* pc);
 #ifdef JS_DEBUG
 
 /*
- * Routines to print out values during debugging.  These are FRIEND_API to help
+ * Routines to print out values during debugging. These are FRIEND_API to help
  * the debugger find them and to support temporarily hacking js::Dump* calls
- * into other code.
+ * into other code. Note that there are overloads that do not require the FILE*
+ * parameter, which will default to stderr.
  */
 
 extern JS_FRIEND_API(void)
-DumpString(JSString* str);
+DumpString(JSString* str, FILE* fp);
 
 extern JS_FRIEND_API(void)
-DumpAtom(JSAtom* atom);
+DumpAtom(JSAtom* atom, FILE* fp);
 
 extern JS_FRIEND_API(void)
-DumpObject(JSObject* obj);
+DumpObject(JSObject* obj, FILE* fp);
 
 extern JS_FRIEND_API(void)
-DumpChars(const char16_t* s, size_t n);
+DumpChars(const char16_t* s, size_t n, FILE* fp);
 
 extern JS_FRIEND_API(void)
-DumpValue(const JS::Value& val);
+DumpValue(const JS::Value& val, FILE* fp);
 
 extern JS_FRIEND_API(void)
-DumpId(jsid id);
+DumpId(jsid id, FILE* fp);
 
 extern JS_FRIEND_API(void)
-DumpInterpreterFrame(JSContext* cx, InterpreterFrame* start = nullptr);
+DumpInterpreterFrame(JSContext* cx, FILE* fp, InterpreterFrame* start = nullptr);
 
 extern JS_FRIEND_API(bool)
-DumpPC(JSContext* cx);
+DumpPC(JSContext* cx, FILE* fp);
 
 extern JS_FRIEND_API(bool)
-DumpScript(JSContext* cx, JSScript* scriptArg);
+DumpScript(JSContext* cx, JSScript* scriptArg, FILE* fp);
+
+// Versions for use directly in a debugger (default parameters are not handled
+// well in gdb; built-in handles like stderr are not handled well in lldb.)
+extern JS_FRIEND_API(void) DumpString(JSString* str);
+extern JS_FRIEND_API(void) DumpAtom(JSAtom* atom);
+extern JS_FRIEND_API(void) DumpObject(JSObject* obj);
+extern JS_FRIEND_API(void) DumpChars(const char16_t* s, size_t n);
+extern JS_FRIEND_API(void) DumpValue(const JS::Value& val);
+extern JS_FRIEND_API(void) DumpId(jsid id);
+extern JS_FRIEND_API(void) DumpInterpreterFrame(JSContext* cx, InterpreterFrame* start = nullptr);
+extern JS_FRIEND_API(bool) DumpPC(JSContext* cx);
+extern JS_FRIEND_API(bool) DumpScript(JSContext* cx, JSScript* scriptArg);
 
 #endif
+
+extern JS_FRIEND_API(void)
+DumpBacktrace(JSContext* cx, FILE* fp);
 
 extern JS_FRIEND_API(void)
 DumpBacktrace(JSContext* cx);
@@ -430,17 +442,17 @@ class SourceHook {
 };
 
 /**
- * Have |rt| use |hook| to retrieve lazily-retrieved source code. See the
- * comments for SourceHook. The runtime takes ownership of the hook, and
- * will delete it when the runtime itself is deleted, or when a new hook is
+ * Have |cx| use |hook| to retrieve lazily-retrieved source code. See the
+ * comments for SourceHook. The context takes ownership of the hook, and
+ * will delete it when the context itself is deleted, or when a new hook is
  * set.
  */
 extern JS_FRIEND_API(void)
-SetSourceHook(JSRuntime* rt, mozilla::UniquePtr<SourceHook> hook);
+SetSourceHook(JSContext* cx, mozilla::UniquePtr<SourceHook> hook);
 
-/** Remove |rt|'s source hook, and return it. The caller now owns the hook. */
+/** Remove |cx|'s source hook, and return it. The caller now owns the hook. */
 extern JS_FRIEND_API(mozilla::UniquePtr<SourceHook>)
-ForgetSourceHook(JSRuntime* rt);
+ForgetSourceHook(JSContext* cx);
 
 extern JS_FRIEND_API(JS::Zone*)
 GetCompartmentZone(JSCompartment* comp);
@@ -458,7 +470,7 @@ typedef enum  {
   * fp is the file for the dump output.
   */
 extern JS_FRIEND_API(void)
-DumpHeap(JSRuntime* rt, FILE* fp, DumpHeapNurseryBehaviour nurseryBehaviour);
+DumpHeap(JSContext* cx, FILE* fp, DumpHeapNurseryBehaviour nurseryBehaviour);
 
 #ifdef JS_OLD_GETTER_SETTER_METHODS
 JS_FRIEND_API(bool) obj_defineGetter(JSContext* cx, unsigned argc, JS::Value* vp);
@@ -962,7 +974,7 @@ JS_FRIEND_API(bool)
 StringIsArrayIndex(JSLinearString* str, uint32_t* indexp);
 
 JS_FRIEND_API(void)
-SetPreserveWrapperCallback(JSRuntime* rt, PreserveWrapperCallback callback);
+SetPreserveWrapperCallback(JSContext* cx, PreserveWrapperCallback callback);
 
 JS_FRIEND_API(bool)
 IsObjectInContextCompartment(JSObject* obj, const JSContext* cx);
@@ -1093,9 +1105,6 @@ GetPCCountScriptContents(JSContext* cx, size_t script);
 JS_FRIEND_API(char*)
 GetCodeCoverageSummary(JSContext* cx, size_t* length);
 
-JS_FRIEND_API(bool)
-ContextHasOutstandingRequests(const JSContext* cx);
-
 typedef void
 (* ActivityCallback)(void* arg, bool active);
 
@@ -1105,7 +1114,7 @@ typedef void
  * idle and a request begins.
  */
 JS_FRIEND_API(void)
-SetActivityCallback(JSRuntime* rt, ActivityCallback cb, void* arg);
+SetActivityCallback(JSContext* cx, ActivityCallback cb, void* arg);
 
 typedef bool
 (* DOMInstanceClassHasProtoAtDepth)(const Class* instanceClass,
@@ -1116,10 +1125,10 @@ struct JSDOMCallbacks {
 typedef struct JSDOMCallbacks DOMCallbacks;
 
 extern JS_FRIEND_API(void)
-SetDOMCallbacks(JSRuntime* rt, const DOMCallbacks* callbacks);
+SetDOMCallbacks(JSContext* cx, const DOMCallbacks* callbacks);
 
 extern JS_FRIEND_API(const DOMCallbacks*)
-GetDOMCallbacks(JSRuntime* rt);
+GetDOMCallbacks(JSContext* cx);
 
 extern JS_FRIEND_API(JSObject*)
 GetTestingFunctions(JSContext* cx);
@@ -1142,7 +1151,7 @@ CastToJSFreeOp(FreeOp* fop)
  * Returns nullptr for invalid arguments and JSEXN_INTERNALERR
  */
 extern JS_FRIEND_API(JSFlatString*)
-GetErrorTypeName(JSRuntime* rt, int16_t exnType);
+GetErrorTypeName(JSContext* cx, int16_t exnType);
 
 #ifdef JS_DEBUG
 extern JS_FRIEND_API(unsigned)
@@ -1517,11 +1526,14 @@ enum Type {
     Uint8Clamped,
 
     /**
-     * SIMD types don't have their own TypedArray equivalent, for now.
+     * Types that don't have their own TypedArray equivalent, for now.
      */
     MaxTypedArrayViewType,
 
+    Int64,
     Float32x4,
+    Int8x16,
+    Int16x8,
     Int32x4
 };
 
@@ -1540,8 +1552,11 @@ byteSize(Type atype)
       case Uint32:
       case Float32:
         return 4;
+      case Int64:
       case Float64:
         return 8;
+      case Int8x16:
+      case Int16x8:
       case Int32x4:
       case Float32x4:
         return 16;
@@ -1556,6 +1571,9 @@ isSignedIntType(Type atype) {
       case Int8:
       case Int16:
       case Int32:
+      case Int64:
+      case Int8x16:
+      case Int16x8:
       case Int32x4:
         return true;
       case Uint8:
@@ -1581,9 +1599,12 @@ isSimdType(Type atype) {
       case Uint16:
       case Int32:
       case Uint32:
+      case Int64:
       case Float32:
       case Float64:
         return false;
+      case Int8x16:
+      case Int16x8:
       case Int32x4:
       case Float32x4:
         return true;
@@ -1596,6 +1617,10 @@ isSimdType(Type atype) {
 static inline size_t
 scalarByteSize(Type atype) {
     switch (atype) {
+      case Int8x16:
+        return 1;
+      case Int16x8:
+        return 2;
       case Int32x4:
       case Float32x4:
         return 4;
@@ -1606,6 +1631,7 @@ scalarByteSize(Type atype) {
       case Uint16:
       case Int32:
       case Uint32:
+      case Int64:
       case Float32:
       case Float64:
       case MaxTypedArrayViewType:
@@ -2663,22 +2689,7 @@ PrepareScriptEnvironmentAndInvoke(JSContext* cx, JS::HandleObject scope,
                                   ScriptEnvironmentPreparer::Closure& closure);
 
 JS_FRIEND_API(void)
-SetScriptEnvironmentPreparer(JSRuntime* rt, ScriptEnvironmentPreparer*
-preparer);
-
-/**
- * To help embedders enforce their invariants, we allow them to specify in
- * advance which JSContext should be passed to JSAPI calls. If this is set
- * to a non-null value, the assertSameCompartment machinery does double-
- * duty (in debug builds) to verify that it matches the cx being used.
- */
-#ifdef DEBUG
-JS_FRIEND_API(void)
-Debug_SetActiveJSContext(JSRuntime* rt, JSContext* cx);
-#else
-inline void
-Debug_SetActiveJSContext(JSRuntime* rt, JSContext* cx) {}
-#endif
+SetScriptEnvironmentPreparer(JSContext* cx, ScriptEnvironmentPreparer* preparer);
 
 enum CTypesActivityType {
     CTYPES_CALL_BEGIN,
@@ -2695,7 +2706,7 @@ typedef void
  * calling into C.
  */
 JS_FRIEND_API(void)
-SetCTypesActivityCallback(JSRuntime* rt, CTypesActivityCallback cb);
+SetCTypesActivityCallback(JSContext* cx, CTypesActivityCallback cb);
 
 class MOZ_RAII JS_FRIEND_API(AutoCTypesActivityCallback) {
   private:
@@ -2866,7 +2877,7 @@ ConvertArgsToArray(JSContext* cx, const JS::CallArgs& args);
  * functions below.
  */
 extern JS_FRIEND_API(void)
-SetWindowProxyClass(JSRuntime* rt, const Class* clasp);
+SetWindowProxyClass(JSContext* cx, const Class* clasp);
 
 /**
  * Associates a WindowProxy with a Window (global object). `windowProxy` must

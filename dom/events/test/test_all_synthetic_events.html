@@ -239,6 +239,10 @@ const kEventConstructors = {
                                                          return new ErrorEvent(aName, aProps);
                                                        },
   },
+  FlyWebFetchEvent:                          { create: null, // Cannot create untrusted event from JS.
+                                             },
+  FlyWebWebSocketEvent:                      { create: null, // Cannot create untrusted event from JS.
+                                             },
   FocusEvent:                                { create: function (aName, aProps) {
                                                          return new FocusEvent(aName, aProps);
                                                        },
@@ -299,9 +303,8 @@ const kEventConstructors = {
                                                          return new MediaStreamEvent(aName, aProps);
                                                        },
                                              },
-  MediaStreamTrackEvent:                     { create: function (aName, aProps) {
-                                                         return new MediaStreamTrackEvent(aName, aProps);
-                                                       },
+  MediaStreamTrackEvent:                     {
+                                               // Difficult to test required arguments.
                                              },
   MessageEvent:                              { create: function (aName, aProps) {
                                                          var e = new MessageEvent("messageevent", { bubbles: aProps.bubbles,

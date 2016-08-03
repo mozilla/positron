@@ -4,12 +4,14 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "mozilla/dom/Navigator.h"
 #include "mozilla/dom/TouchEvent.h"
 #include "mozilla/dom/Touch.h"
 #include "mozilla/dom/TouchListBinding.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/TouchEvents.h"
 #include "nsContentUtils.h"
+#include "nsIDocShell.h"
 #include "mozilla/WidgetUtils.h"
 
 namespace mozilla {
@@ -165,13 +167,43 @@ TouchEvent::ChangedTouches()
 bool
 TouchEvent::PrefEnabled(JSContext* aCx, JSObject* aGlobal)
 {
-  bool prefValue = false;
-  int32_t flag = 0;
-  if (NS_SUCCEEDED(Preferences::GetInt("dom.w3c_touch_events.enabled", &flag))) {
-    if (flag == 2) {
+  nsIDocShell* docShell = nullptr;
+  if (aGlobal) {
+    nsGlobalWindow* win = xpc::WindowOrNull(aGlobal);
+    if (win) {
+      docShell = win->GetDocShell();
+    }
+  }
+  return PrefEnabled(docShell);
+}
+
+// static
+bool
+TouchEvent::PrefEnabled(nsIDocShell* aDocShell)
+{
+  static bool sPrefCached = false;
+  static int32_t sPrefCacheValue = 0;
+
+  uint32_t touchEventsOverride = nsIDocShell::TOUCHEVENTS_OVERRIDE_NONE;
+  if (aDocShell) {
+    aDocShell->GetTouchEventsOverride(&touchEventsOverride);
+  }
+
+  if (!sPrefCached) {
+    sPrefCached = true;
+    Preferences::AddIntVarCache(&sPrefCacheValue, "dom.w3c_touch_events.enabled");
+  }
+
+  bool enabled = false;
+  if (touchEventsOverride == nsIDocShell::TOUCHEVENTS_OVERRIDE_ENABLED) {
+    enabled = true;
+  } else if (touchEventsOverride == nsIDocShell::TOUCHEVENTS_OVERRIDE_DISABLED) {
+    enabled = false;
+  } else {
+    if (sPrefCacheValue == 2) {
 #if defined(MOZ_B2G) || defined(MOZ_WIDGET_ANDROID)
       // Touch support is always enabled on B2G and android.
-      prefValue = true;
+      enabled = true;
 #elif defined(XP_WIN) || MOZ_WIDGET_GTK == 3
       static bool sDidCheckTouchDeviceSupport = false;
       static bool sIsTouchDeviceSupportPresent = false;
@@ -180,18 +212,19 @@ TouchEvent::PrefEnabled(JSContext* aCx, JSObject* aGlobal)
         sDidCheckTouchDeviceSupport = true;
         sIsTouchDeviceSupportPresent = WidgetUtils::IsTouchDeviceSupportPresent();
       }
-      prefValue = sIsTouchDeviceSupportPresent;
+      enabled = sIsTouchDeviceSupportPresent;
 #else
-      prefValue = false;
+      enabled = false;
 #endif
     } else {
-      prefValue = !!flag;
+      enabled = !!sPrefCacheValue;
     }
   }
-  if (prefValue) {
+
+  if (enabled) {
     nsContentUtils::InitializeTouchEventTable();
   }
-  return prefValue;
+  return enabled;
 }
 
 // static

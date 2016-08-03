@@ -475,6 +475,17 @@ sslBuffer_Append(sslBuffer *b, const void *data, unsigned int len)
     return SECSuccess;
 }
 
+void
+sslBuffer_Clear(sslBuffer *b)
+{
+    if (b->len > 0) {
+        PORT_Free(b->buf);
+        b->buf = NULL;
+        b->len = 0;
+        b->space = 0;
+    }
+}
+
 /*
 ** Save away write data that is trying to be written before the security
 ** handshake has been completed. When the handshake is completed, we will
@@ -838,6 +849,11 @@ ssl_SecureRecv(sslSocket *ss, unsigned char *buf, int len, int flags)
     }
 
     rv = 0;
+    if (!PR_CLIST_IS_EMPTY(&ss->ssl3.hs.bufferedEarlyData)) {
+        PORT_Assert(ss->version >= SSL_LIBRARY_VERSION_TLS_1_3);
+        return tls13_Read0RttData(ss, buf, len);
+    }
+
     /* If any of these is non-zero, the initial handshake is not done. */
     if (!ss->firstHsDone) {
         ssl_Get1stHandshakeLock(ss);
@@ -902,13 +918,19 @@ ssl_SecureSend(sslSocket *ss, const unsigned char *buf, int len, int flags)
 
     if (len > 0)
         ss->writerThread = PR_GetCurrentThread();
-    /* If any of these is non-zero, the initial handshake is not done. */
+
+    /* Check to see if we can write even though we're not finished.
+     *
+     * Case 1: False start
+     * Case 2: TLS 1.3 0-RTT
+     */
     if (!ss->firstHsDone) {
         PRBool falseStart = PR_FALSE;
         ssl_Get1stHandshakeLock(ss);
-        if (ss->opt.enableFalseStart) {
+        if (ss->opt.enableFalseStart ||
+            (ss->opt.enable0RttData && !ss->sec.isServer)) {
             ssl_GetSSL3HandshakeLock(ss);
-            falseStart = ss->ssl3.hs.canFalseStart;
+            falseStart = ss->ssl3.hs.canFalseStart || ss->ssl3.hs.doing0Rtt;
             ssl_ReleaseSSL3HandshakeLock(ss);
         }
         if (!falseStart && ss->handshake) {
@@ -938,7 +960,8 @@ ssl_SecureSend(sslSocket *ss, const unsigned char *buf, int len, int flags)
     if (!ss->firstHsDone) {
 #ifdef DEBUG
         ssl_GetSSL3HandshakeLock(ss);
-        PORT_Assert(ss->ssl3.hs.canFalseStart);
+        PORT_Assert(ss->ssl3.hs.canFalseStart ||
+                    (ss->ssl3.hs.doing0Rtt && !ss->sec.isServer));
         ssl_ReleaseSSL3HandshakeLock(ss);
 #endif
         SSL_TRC(3, ("%d: SSL[%d]: SecureSend: sending data due to false start",

@@ -145,7 +145,7 @@ WorkerThread::SetWorker(const WorkerThreadFriendKey& /* aKey */,
 
 nsresult
 WorkerThread::DispatchPrimaryRunnable(const WorkerThreadFriendKey& /* aKey */,
-                                      already_AddRefed<nsIRunnable>&& aRunnable)
+                                      already_AddRefed<nsIRunnable> aRunnable)
 {
   nsCOMPtr<nsIRunnable> runnable(aRunnable);
 
@@ -170,7 +170,7 @@ WorkerThread::DispatchPrimaryRunnable(const WorkerThreadFriendKey& /* aKey */,
 
 nsresult
 WorkerThread::DispatchAnyThread(const WorkerThreadFriendKey& /* aKey */,
-                       already_AddRefed<WorkerRunnable>&& aWorkerRunnable)
+                       already_AddRefed<WorkerRunnable> aWorkerRunnable)
 {
   // May be called on any thread!
 
@@ -213,7 +213,7 @@ WorkerThread::DispatchFromScript(nsIRunnable* aRunnable, uint32_t aFlags)
 }
 
 NS_IMETHODIMP
-WorkerThread::Dispatch(already_AddRefed<nsIRunnable>&& aRunnable, uint32_t aFlags)
+WorkerThread::Dispatch(already_AddRefed<nsIRunnable> aRunnable, uint32_t aFlags)
 {
   // May be called on any thread!
   nsCOMPtr<nsIRunnable> runnable(aRunnable); // in case we exit early
@@ -299,7 +299,7 @@ WorkerThread::Dispatch(already_AddRefed<nsIRunnable>&& aRunnable, uint32_t aFlag
 }
 
 NS_IMETHODIMP
-WorkerThread::DelayedDispatch(already_AddRefed<nsIRunnable>&&, uint32_t)
+WorkerThread::DelayedDispatch(already_AddRefed<nsIRunnable>, uint32_t)
 {
   return NS_ERROR_NOT_IMPLEMENTED;
 }
@@ -327,8 +327,9 @@ WorkerThread::Observer::OnProcessNextEvent(nsIThreadInternal* /* aThread */,
   mWorkerPrivate->AssertIsOnWorkerThread();
 
   // If the PBackground child is not created yet, then we must permit
-  // blocking event processing to support SynchronouslyCreatePBackground().
-  // If this occurs then we are spinning on the event queue at the start of
+  // blocking event processing to support
+  // BackgroundChild::SynchronouslyCreateForCurrentThread(). If this occurs
+  // then we are spinning on the event queue at the start of
   // PrimaryWorkerRunnable::Run() and don't want to process the event in
   // mWorkerPrivate yet.
   if (aMayWait) {

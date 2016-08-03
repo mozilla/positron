@@ -8,16 +8,19 @@
 #define vm_ProxyObject_h
 
 #include "js/Proxy.h"
-#include "vm/NativeObject.h"
+#include "vm/ShapedObject.h"
 
 namespace js {
 
-// This is the base class for the various kinds of proxy objects.  It's never
-// instantiated.
-class ProxyObject : public JSObject
+/**
+ * This is the base class for the various kinds of proxy objects.  It's never
+ * instantiated.
+ *
+ * Proxy objects use ShapedObject::shape_ primarily to record flags.  Property
+ * information, &c. is all dynamically computed.
+ */
+class ProxyObject : public ShapedObject
 {
-    HeapPtrShape shape;
-
     // GetProxyDataLayout computes the address of this field.
     detail::ProxyDataLayout data;
 
@@ -39,8 +42,8 @@ class ProxyObject : public JSObject
     void setCrossCompartmentPrivate(const Value& priv);
     void setSameCompartmentPrivate(const Value& priv);
 
-    HeapValue* slotOfPrivate() {
-        return reinterpret_cast<HeapValue*>(&detail::GetProxyDataLayout(this)->values->privateSlot);
+    GCPtrValue* slotOfPrivate() {
+        return reinterpret_cast<GCPtrValue*>(&detail::GetProxyDataLayout(this)->values->privateSlot);
     }
 
     JSObject* target() const {
@@ -75,9 +78,9 @@ class ProxyObject : public JSObject
     }
 
   private:
-    HeapValue* slotOfExtra(size_t n) {
+    GCPtrValue* slotOfExtra(size_t n) {
         MOZ_ASSERT(n < detail::PROXY_EXTRA_SLOTS);
-        return reinterpret_cast<HeapValue*>(&detail::GetProxyDataLayout(this)->values->extraSlots[n]);
+        return reinterpret_cast<GCPtrValue*>(&detail::GetProxyDataLayout(this)->values->extraSlots[n]);
     }
 
     static bool isValidProxyClass(const Class* clasp) {

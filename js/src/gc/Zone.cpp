@@ -153,13 +153,13 @@ Zone::sweepBreakpoints(FreeOp* fop)
      */
 
     MOZ_ASSERT(isGCSweepingOrCompacting());
-    for (ZoneCellIterUnderGC i(this, AllocKind::SCRIPT); !i.done(); i.next()) {
-        JSScript* script = i.get<JSScript>();
+    for (auto iter = cellIter<JSScript>(); !iter.done(); iter.next()) {
+        JSScript* script = iter;
         if (!script->hasAnyBreakpointsOrStepMode())
             continue;
 
         bool scriptGone = IsAboutToBeFinalizedUnbarriered(&script);
-        MOZ_ASSERT(script == i.get<JSScript>());
+        MOZ_ASSERT(script == iter);
         for (unsigned i = 0; i < script->length(); i++) {
             BreakpointSite* site = script->getBreakpointSite(script->offsetToPC(i));
             if (!site)
@@ -168,7 +168,7 @@ Zone::sweepBreakpoints(FreeOp* fop)
             Breakpoint* nextbp;
             for (Breakpoint* bp = site->firstBreakpoint(); bp; bp = nextbp) {
                 nextbp = bp->nextInSite();
-                HeapPtrNativeObject& dbgobj = bp->debugger->toJSObjectRef();
+                GCPtrNativeObject& dbgobj = bp->debugger->toJSObjectRef();
 
                 // If we are sweeping, then we expect the script and the
                 // debugger object to be swept in the same zone group, except if
@@ -207,10 +207,8 @@ Zone::discardJitCode(FreeOp* fop)
 
 #ifdef DEBUG
         /* Assert no baseline scripts are marked as active. */
-        for (ZoneCellIter i(this, AllocKind::SCRIPT); !i.done(); i.next()) {
-            JSScript* script = i.get<JSScript>();
+        for (auto script = cellIter<JSScript>(); !script.done(); script.next())
             MOZ_ASSERT_IF(script->hasBaselineScript(), !script->baselineScript()->active());
-        }
 #endif
 
         /* Mark baseline scripts on the stack as active. */
@@ -219,14 +217,7 @@ Zone::discardJitCode(FreeOp* fop)
         /* Only mark OSI points if code is being discarded. */
         jit::InvalidateAll(fop, this);
 
-        /* The storebuffer may contain pointers into data owned by BaselineScript. */
-        JSRuntime* rt = runtimeFromMainThread();
-        if (!rt->isHeapCollecting())
-            rt->gc.evictNursery();
-        MOZ_ASSERT(rt->gc.nursery.isEmpty());
-
-        for (ZoneCellIter i(this, AllocKind::SCRIPT); !i.done(); i.next()) {
-            JSScript* script = i.get<JSScript>();
+        for (auto script = cellIter<JSScript>(); !script.done(); script.next())  {
             jit::FinishInvalidation(fop, script);
 
             /*
@@ -243,7 +234,15 @@ Zone::discardJitCode(FreeOp* fop)
             script->resetWarmUpCounter();
         }
 
-        jitZone()->optimizedStubSpace()->free();
+        /*
+         * When scripts contains pointers to nursery things, the store buffer
+         * can contain entries that point into the optimized stub space. Since
+         * this method can be called outside the context of a GC, this situation
+         * could result in us trying to mark invalid store buffer entries.
+         *
+         * Defer freeing any allocated blocks until after the next minor GC.
+         */
+        jitZone()->optimizedStubSpace()->freeAllAfterMinorGC(fop->runtime());
     }
 }
 

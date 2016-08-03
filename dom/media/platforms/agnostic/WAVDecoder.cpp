@@ -6,7 +6,6 @@
 
 #include "WAVDecoder.h"
 #include "AudioSampleFormat.h"
-#include "nsAutoPtr.h"
 #include "mozilla/SyncRunnable.h"
 
 using mp4_demuxer::ByteReader;
@@ -46,10 +45,9 @@ DecodeULawSample(uint8_t aValue)
   return sign * sample;
 }
 
-WaveDataDecoder::WaveDataDecoder(const AudioInfo& aConfig,
-                                 MediaDataDecoderCallback* aCallback)
-  : mInfo(aConfig)
-  , mCallback(aCallback)
+WaveDataDecoder::WaveDataDecoder(const CreateDecoderParams& aParams)
+  : mInfo(aParams.AudioConfig())
+  , mCallback(aParams.mCallback)
 {
 }
 
@@ -69,7 +67,7 @@ nsresult
 WaveDataDecoder::Input(MediaRawData* aSample)
 {
   if (!DoDecode(aSample)) {
-    mCallback->Error();
+    mCallback->Error(MediaDataDecoderError::DECODE_ERROR);
   }
   return NS_OK;
 }

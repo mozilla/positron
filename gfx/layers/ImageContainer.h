@@ -152,6 +152,7 @@ class PlanarYCbCrImage;
 class TextureClient;
 class CompositableClient;
 class GrallocImage;
+class NVImage;
 
 struct ImageBackendData
 {
@@ -194,9 +195,13 @@ public:
   void* GetImplData() { return mImplData; }
 
   virtual gfx::IntSize GetSize() = 0;
+  virtual gfx::IntPoint GetOrigin()
+  {
+    return gfx::IntPoint(0, 0);
+  }
   virtual gfx::IntRect GetPictureRect()
   {
-    return gfx::IntRect(0, 0, GetSize().width, GetSize().height);
+    return gfx::IntRect(GetOrigin().x, GetOrigin().y, GetSize().width, GetSize().height);
   }
 
   ImageBackendData* GetBackendData(LayersBackend aBackend)
@@ -232,6 +237,8 @@ public:
   virtual MacIOSurfaceImage* AsMacIOSurfaceImage() { return nullptr; }
 #endif
   virtual PlanarYCbCrImage* AsPlanarYCbCrImage() { return nullptr; }
+
+  virtual NVImage* AsNVImage() { return nullptr; }
 
 protected:
   Image(void* aImplData, ImageFormat aFormat) :
@@ -273,7 +280,7 @@ public:
   void RecycleBuffer(mozilla::UniquePtr<uint8_t[]> aBuffer, uint32_t aSize);
   // Returns a recycled buffer of the right size, or allocates a new buffer.
   mozilla::UniquePtr<uint8_t[]> GetBuffer(uint32_t aSize);
-
+  virtual void ClearRecycledBuffers();
 private:
   typedef mozilla::Mutex Mutex;
 
@@ -352,7 +359,16 @@ public:
 
   enum Mode { SYNCHRONOUS = 0x0, ASYNCHRONOUS = 0x01 };
 
+  static const uint64_t sInvalidAsyncContainerId = 0;
+
   explicit ImageContainer(ImageContainer::Mode flag = SYNCHRONOUS);
+
+  /**
+   * Create ImageContainer just to hold another ASYNCHRONOUS ImageContainer's
+   * async container ID.
+   * @param aAsyncContainerID async container ID for which we are a proxy
+   */
+  explicit ImageContainer(uint64_t aAsyncContainerID);
 
   typedef uint32_t FrameID;
   typedef uint32_t ProducerID;
@@ -410,6 +426,12 @@ public:
    * Clear all images. Let ImageClient release all TextureClients.
    */
   void ClearAllImages();
+
+  /**
+   * Clear any resources that are not immediately necessary. This may be called
+   * in low-memory conditions.
+   */
+  void ClearCachedResources();
 
   /**
    * Clear the current images.
@@ -614,6 +636,8 @@ private:
   // asynchronusly using the ImageBridge IPDL protocol.
   ImageClient* mImageClient;
 
+  uint64_t mAsyncContainerID;
+
   nsTArray<FrameID> mFrameIDsNotYetComposited;
   // ProducerID for last current image(s), including the frames in
   // mFrameIDsNotYetComposited
@@ -764,6 +788,8 @@ public:
 
   virtual gfx::IntSize GetSize() { return mSize; }
 
+  virtual gfx::IntPoint GetOrigin() { return mOrigin; }
+
   explicit PlanarYCbCrImage();
 
   virtual SharedPlanarYCbCrImage *AsSharedPlanarYCbCrImage() { return nullptr; }
@@ -783,6 +809,7 @@ protected:
   gfxImageFormat GetOffscreenFormat();
 
   Data mData;
+  gfx::IntPoint mOrigin;
   gfx::IntSize mSize;
   gfxImageFormat mOffscreenFormat;
   nsCountedRef<nsMainThreadSourceSurfaceRef> mSourceSurface;
@@ -805,6 +832,48 @@ protected:
 
   RefPtr<BufferRecycleBin> mRecycleBin;
   mozilla::UniquePtr<uint8_t[]> mBuffer;
+};
+
+/**
+ * NVImage is used to store YUV420SP_NV12 and YUV420SP_NV21 data natively, which
+ * are not supported by PlanarYCbCrImage. (PlanarYCbCrImage only stores YUV444P,
+ * YUV422P and YUV420P, it converts YUV420SP_NV12 and YUV420SP_NV21 data into
+ * YUV420P in its PlanarYCbCrImage::SetData() method.)
+ *
+ * PlanarYCbCrData is able to express all the YUV family and so we keep use it
+ * in NVImage.
+ */
+class NVImage: public Image {
+  typedef PlanarYCbCrData Data;
+
+public:
+  explicit NVImage();
+  virtual ~NVImage() override;
+
+  // Methods inherited from layers::Image.
+  virtual gfx::IntSize GetSize() override;
+  virtual gfx::IntRect GetPictureRect() override;
+  virtual already_AddRefed<gfx::SourceSurface> GetAsSourceSurface() override;
+  virtual bool IsValid() override;
+  virtual NVImage* AsNVImage() override;
+
+  // Methods mimic layers::PlanarYCbCrImage.
+  virtual bool SetData(const Data& aData);
+  virtual const Data* GetData() const;
+  virtual uint32_t GetBufferSize() const;
+
+protected:
+
+  /**
+   * Return a buffer to store image data in.
+   */
+  mozilla::UniquePtr<uint8_t> AllocateBuffer(uint32_t aSize);
+
+  mozilla::UniquePtr<uint8_t> mBuffer;
+  uint32_t mBufferSize;
+  gfx::IntSize mSize;
+  Data mData;
+  nsCountedRef<nsMainThreadSourceSurfaceRef> mSourceSurface;
 };
 
 /**

@@ -89,6 +89,12 @@ typedef any Transferable;
 Window implements GlobalEventHandlers;
 Window implements WindowEventHandlers;
 
+// https://w3c.github.io/manifest/#oninstall-attribute
+partial interface Window {
+  [Pref="dom.manifest.oninstall"]
+  attribute EventHandler oninstall;
+};
+
 // http://www.whatwg.org/specs/web-apps/current-work/
 [NoInterfaceObject, Exposed=(Window,Worker)]
 interface WindowTimers {
@@ -412,12 +418,6 @@ partial interface Window {
            attribute EventHandler onorientationchange;
 };
 #endif
-
-// ConsoleAPI
-partial interface Window {
-  [Replaceable, GetterThrows]
-  readonly attribute Console console;
-};
 
 // https://w3c.github.io/webappsec-secure-contexts/#monkey-patching-global-object
 partial interface Window {

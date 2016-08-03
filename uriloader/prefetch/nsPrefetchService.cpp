@@ -38,11 +38,11 @@ using namespace mozilla;
 //
 // To enable logging (see mozilla/Logging.h for full details):
 //
-//    set NSPR_LOG_MODULES=nsPrefetch:5
-//    set NSPR_LOG_FILE=prefetch.log
+//    set MOZ_LOG=nsPrefetch:5
+//    set MOZ_LOG_FILE=prefetch.log
 //
 // this enables LogLevel::Debug level information and places all output in
-// the file http.log
+// the file prefetch.log
 //
 static LazyLogModule gPrefetchLog("nsPrefetch");
 
@@ -109,9 +109,17 @@ nsPrefetchNode::OpenChannel()
     }
     nsCOMPtr<nsILoadGroup> loadGroup = source->OwnerDoc()->GetDocumentLoadGroup();
     CORSMode corsMode = CORS_NONE;
+    net::ReferrerPolicy referrerPolicy = net::RP_Unset;
     if (source->IsHTMLElement(nsGkAtoms::link)) {
-      corsMode = static_cast<dom::HTMLLinkElement*>(source.get())->GetCORSMode();
+      dom::HTMLLinkElement* link = static_cast<dom::HTMLLinkElement*>(source.get());
+      corsMode = link->GetCORSMode();
+      referrerPolicy = link->GetLinkReferrerPolicy();
     }
+
+    if (referrerPolicy == net::RP_Unset) {
+      referrerPolicy = source->OwnerDoc()->GetReferrerPolicy();
+    }
+
     uint32_t securityFlags;
     if (corsMode == CORS_NONE) {
       securityFlags = nsILoadInfo::SEC_ALLOW_CROSS_ORIGIN_DATA_INHERITS;
@@ -139,7 +147,7 @@ nsPrefetchNode::OpenChannel()
     nsCOMPtr<nsIHttpChannel> httpChannel =
         do_QueryInterface(mChannel);
     if (httpChannel) {
-        httpChannel->SetReferrer(mReferrerURI);
+        httpChannel->SetReferrerWithPolicy(mReferrerURI, referrerPolicy);
         httpChannel->SetRequestHeader(
             NS_LITERAL_CSTRING("X-Moz"),
             NS_LITERAL_CSTRING("prefetch"),
@@ -824,7 +832,8 @@ nsPrefetchService::Observe(nsISupports     *aSubject,
         mDisabled = true;
     }
     else if (!strcmp(aTopic, NS_PREFBRANCH_PREFCHANGE_TOPIC_ID)) {
-        const char *pref = NS_ConvertUTF16toUTF8(aData).get();
+        const nsCString converted = NS_ConvertUTF16toUTF8(aData);
+        const char* pref = converted.get();
         if (!strcmp(pref, PREFETCH_PREF)) {
             if (Preferences::GetBool(PREFETCH_PREF, false)) {
                 if (mDisabled) {

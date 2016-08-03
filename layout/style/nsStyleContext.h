@@ -376,7 +376,7 @@ public:
 
   /**
    * Compute the style changes needed during restyling when this style
-   * context is being replaced by aOther.  (This is nonsymmetric since
+   * context is being replaced by aNewContext.  (This is nonsymmetric since
    * we optimize by skipping comparison for styles that have never been
    * requested.)
    *
@@ -393,7 +393,7 @@ public:
    * aEqualStructs must not be null.  Into it will be stored a bitfield
    * representing which structs were compared to be non-equal.
    */
-  nsChangeHint CalcStyleDifference(nsStyleContext* aOther,
+  nsChangeHint CalcStyleDifference(nsStyleContext* aNewContext,
                                    nsChangeHint aParentHintsNotHandledForDescendants,
                                    uint32_t* aEqualStructs,
                                    uint32_t* aSamePointerStructs);
@@ -527,6 +527,7 @@ private:
   void* GetUniqueStyleData(const nsStyleStructID& aSID);
   void* CreateEmptyStyleData(const nsStyleStructID& aSID);
 
+  void SetStyleBits();
   void ApplyStyleFixups(bool aSkipParentDisplayBasedStyleFixup);
 
   const void* StyleStructFromServoComputedValues(nsStyleStructID aSID) {
@@ -622,8 +623,22 @@ private:
       } else {                                                          \
         newData =                                                       \
           Servo_GetStyle##name_(mSource.AsServoComputedValues());       \
-        /* the Servo-backed StyleContextSource owns the struct */       \
+        /* The Servo-backed StyleContextSource owns the struct.         \
+         *                                                              \
+         * XXXbholley: Unconditionally caching reset structs here       \
+         * defeats the memory optimization where we lazily allocate     \
+         * mCachedResetData, so that we can avoid performing an FFI     \
+         * call each time we want to get the style structs. We should   \
+         * measure the tradeoffs at some point. If the FFI overhead is  \
+         * low and the memory win significant, we should consider       \
+         * _always_ grabbing the struct over FFI, and potentially       \
+         * giving mCachedInheritedData the same treatment.              \
+         *                                                              \
+         * Note that there is a similar comment in StyleData().         \
+         */                                                             \
         AddStyleBit(NS_STYLE_INHERIT_BIT(name_));                       \
+        SetStyle(eStyleStruct_##name_,                                  \
+                 const_cast<nsStyle##name_*>(newData));                 \
       }                                                                 \
       return newData;                                                   \
     }

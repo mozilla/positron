@@ -287,6 +287,10 @@ nsAndroidHistory::SetURITitle(nsIURI *aURI, const nsAString& aTitle)
     nsAutoCString uri;
     nsresult rv = aURI->GetSpec(uri);
     if (NS_FAILED(rv)) return rv;
+    if (RemovePendingVisitURI(aURI)) {
+      // We have a title, so aURI isn't a redirect, so save the visit now before setting the title.
+      SaveVisitURI(aURI);
+    }
     NS_ConvertUTF8toUTF16 uriString(uri);
     widget::GeckoAppShell::SetURITitle(uriString, aTitle);
   }
@@ -358,6 +362,16 @@ nsAndroidHistory::CanAddURI(nsIURI* aURI, bool* canAdd)
   if (scheme.EqualsLiteral("https")) {
     *canAdd = true;
     return NS_OK;
+  }
+  if (scheme.EqualsLiteral("about")) {
+    nsAutoCString path;
+    rv = aURI->GetPath(path);
+    NS_ENSURE_SUCCESS(rv, rv);
+
+    if (StringBeginsWith(path, NS_LITERAL_CSTRING("reader"))) {
+      *canAdd = true;
+      return NS_OK;
+    }
   }
 
   // now check for all bad things

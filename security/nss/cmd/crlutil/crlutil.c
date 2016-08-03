@@ -39,6 +39,7 @@ FindCRL(CERTCertDBHandle *certHandle, char *name, int type)
     if (!cert) {
         CERTName *certName = NULL;
         PLArenaPool *arena = NULL;
+        SECStatus rv = SECSuccess;
 
         certName = CERT_AsciiToName(name);
         if (certName) {
@@ -48,11 +49,16 @@ FindCRL(CERTCertDBHandle *certHandle, char *name, int type)
                     SEC_ASN1EncodeItem(arena, NULL, (void *)certName,
                                        SEC_ASN1_GET(CERT_NameTemplate));
                 if (nameItem) {
-                    SECITEM_CopyItem(NULL, &derName, nameItem);
+                    rv = SECITEM_CopyItem(NULL, &derName, nameItem);
                 }
                 PORT_FreeArena(arena, PR_FALSE);
             }
             CERT_DestroyName(certName);
+        }
+
+        if (rv != SECSuccess) {
+            SECU_PrintError(progName, "SECITEM_CopyItem failed, out of memory");
+            return ((CERTSignedCrl *)NULL);
         }
 
         if (!derName.len || !derName.data) {
@@ -277,6 +283,7 @@ loser:
     if (slot) {
         PK11_FreeSlot(slot);
     }
+    SECITEM_FreeItem(&crlDER, PR_FALSE);
     return (rv);
 }
 
@@ -449,10 +456,14 @@ CreateModifiedCRLCopy(PLArenaPool *arena, CERTCertDBHandle *certHandle,
     }
 
     signCrl->arena = arena;
+    signCrl->referenceCount = 1;
 
 loser:
     if (crlDER.data) {
         SECITEM_FreeItem(&crlDER, PR_FALSE);
+    }
+    if (modArena && (!modCrl || modCrl->arena != modArena)) {
+        PORT_FreeArena(modArena, PR_FALSE);
     }
     if (modCrl)
         SEC_DestroyCrl(modCrl);
@@ -524,6 +535,8 @@ CreateNewCrl(PLArenaPool *arena, CERTCertDBHandle *certHandle,
     signCrl->arena = arena;
     signCrl->dbhandle = certHandle;
     signCrl->crl.arena = arena;
+
+    PORT_ArenaUnmark(arena, mark);
 
     return signCrl;
 
@@ -855,7 +868,7 @@ main(int argc, char **argv)
     int rv;
     char *nickName;
     char *url;
-    char *dbPrefix = "";
+    char *dbPrefix = PORT_Strdup("");
     char *alg = NULL;
     char *outFile = NULL;
     char *slotName = NULL;
@@ -932,11 +945,12 @@ main(int argc, char **argv)
                 break;
 
             case 'P':
-                dbPrefix = strdup(optstate->value);
+                PORT_Free(dbPrefix);
+                dbPrefix = PORT_Strdup(optstate->value);
                 break;
 
             case 'Z':
-                alg = strdup(optstate->value);
+                alg = PORT_Strdup(optstate->value);
                 break;
 
             case 'a':
@@ -948,8 +962,8 @@ main(int argc, char **argv)
                 if (!inCrlInitFile) {
                     PR_fprintf(PR_STDERR, "%s: unable to open \"%s\" for reading\n",
                                progName, optstate->value);
-                    PL_DestroyOptState(optstate);
-                    return -1;
+                    rv = SECFailure;
+                    goto loser;
                 }
                 break;
 
@@ -959,11 +973,11 @@ main(int argc, char **argv)
 
             case 'f':
                 pwdata.source = PW_FROMFILE;
-                pwdata.data = strdup(optstate->value);
+                pwdata.data = PORT_Strdup(optstate->value);
                 break;
 
             case 'h':
-                slotName = strdup(optstate->value);
+                slotName = PORT_Strdup(optstate->value);
                 break;
 
             case 'i':
@@ -971,17 +985,17 @@ main(int argc, char **argv)
                 if (!inFile) {
                     PR_fprintf(PR_STDERR, "%s: unable to open \"%s\" for reading\n",
                                progName, optstate->value);
-                    PL_DestroyOptState(optstate);
-                    return -1;
+                    rv = SECFailure;
+                    goto loser;
                 }
                 break;
 
             case 'n':
-                nickName = strdup(optstate->value);
+                nickName = PORT_Strdup(optstate->value);
                 break;
 
             case 'o':
-                outFile = strdup(optstate->value);
+                outFile = PORT_Strdup(optstate->value);
                 break;
 
             case 'p':
@@ -998,8 +1012,8 @@ main(int argc, char **argv)
                 crlType = atoi(optstate->value);
                 if (crlType != SEC_CRL_TYPE && crlType != SEC_KRL_TYPE) {
                     PR_fprintf(PR_STDERR, "%s: invalid crl type\n", progName);
-                    PL_DestroyOptState(optstate);
-                    return -1;
+                    rv = SECFailure;
+                    goto loser;
                 }
                 break;
 
@@ -1009,16 +1023,15 @@ main(int argc, char **argv)
 
                 case 'w':
                     pwdata.source = PW_PLAINTEXT;
-                    pwdata.data = strdup(optstate->value);
+                    pwdata.data = PORT_Strdup(optstate->value);
                     break;
 
                 case 'u':
-                    url = strdup(optstate->value);
+                    url = PORT_Strdup(optstate->value);
                     break;
             }
         }
     }
-    PL_DestroyOptState(optstate);
 
     if (deleteCRL && !nickName)
         Usage(progName);
@@ -1048,7 +1061,8 @@ main(int argc, char **argv)
                                    "secmod.db", readonly ? NSS_INIT_READONLY : 0);
         if (secstatus != SECSuccess) {
             SECU_PrintPRandOSError(progName);
-            return -1;
+            rv = SECFailure;
+            goto loser;
         }
     }
 
@@ -1057,9 +1071,8 @@ main(int argc, char **argv)
     certHandle = CERT_GetDefaultCertDB();
     if (certHandle == NULL) {
         SECU_PrintError(progName, "unable to open the cert db");
-        /*ignoring return value of NSS_Shutdown() as code returns -1*/
-        (void)NSS_Shutdown();
-        return (-1);
+        rv = SECFailure;
+        goto loser;
     }
 
     CRLGEN_InitCrlGenParserLock();
@@ -1103,6 +1116,33 @@ main(int argc, char **argv)
     }
 
     CRLGEN_DestroyCrlGenParserLock();
+
+loser:
+    PL_DestroyOptState(optstate);
+
+    if (inFile) {
+        PR_Close(inFile);
+    }
+    if (alg) {
+        PORT_Free(alg);
+    }
+    if (slotName) {
+        PORT_Free(slotName);
+    }
+    if (nickName) {
+        PORT_Free(nickName);
+    }
+    if (outFile) {
+        PORT_Free(outFile);
+    }
+    if (url) {
+        PORT_Free(url);
+    }
+    if (pwdata.data) {
+        PORT_Free(pwdata.data);
+    }
+
+    PORT_Free(dbPrefix);
 
     if (NSS_Shutdown() != SECSuccess) {
         rv = SECFailure;

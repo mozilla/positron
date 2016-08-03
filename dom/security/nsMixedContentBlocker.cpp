@@ -118,17 +118,18 @@ public:
         // Bug 1182551 - before changing the security state to broken, check
         // that the root is actually secure.
         if (mRootHasSecureConnection) {
+          // reset state security flag
+          state = state >> 4 << 4;
+          // set state security flag to broken, since there is mixed content
+          state |= nsIWebProgressListener::STATE_IS_BROKEN;
+
           // If mixed display content is loaded, make sure to include that in the state.
           if (rootDoc->GetHasMixedDisplayContentLoaded()) {
-            eventSink->OnSecurityChange(mContext,
-                                        (nsIWebProgressListener::STATE_IS_BROKEN |
-                                         nsIWebProgressListener::STATE_LOADED_MIXED_ACTIVE_CONTENT |
-                                         nsIWebProgressListener::STATE_LOADED_MIXED_DISPLAY_CONTENT));
-          } else {
-            eventSink->OnSecurityChange(mContext,
-                                        (nsIWebProgressListener::STATE_IS_BROKEN |
-                                         nsIWebProgressListener::STATE_LOADED_MIXED_ACTIVE_CONTENT));
+            state |= nsIWebProgressListener::STATE_LOADED_MIXED_DISPLAY_CONTENT;
           }
+
+          eventSink->OnSecurityChange(mContext,
+                                      (state | nsIWebProgressListener::STATE_LOADED_MIXED_ACTIVE_CONTENT));
         } else {
           // root not secure, mixed active content loaded in an https subframe
           if (NS_SUCCEEDED(stateRV)) {
@@ -149,16 +150,18 @@ public:
         // Bug 1182551 - before changing the security state to broken, check
         // that the root is actually secure.
         if (mRootHasSecureConnection) {
-        // If mixed active content is loaded, make sure to include that in the state.
+          // reset state security flag
+          state = state >> 4 << 4;
+          // set state security flag to broken, since there is mixed content
+          state |= nsIWebProgressListener::STATE_IS_BROKEN;
+
+          // If mixed active content is loaded, make sure to include that in the state.
           if (rootDoc->GetHasMixedActiveContentLoaded()) {
-            eventSink->OnSecurityChange(mContext,
-                                        (nsIWebProgressListener::STATE_IS_BROKEN |
-                                         nsIWebProgressListener::STATE_LOADED_MIXED_DISPLAY_CONTENT |
-                                         nsIWebProgressListener::STATE_LOADED_MIXED_ACTIVE_CONTENT));
-          } else {
-            eventSink->OnSecurityChange(mContext, (nsIWebProgressListener::STATE_IS_BROKEN |
-                                                   nsIWebProgressListener::STATE_LOADED_MIXED_DISPLAY_CONTENT));
+            state |= nsIWebProgressListener::STATE_LOADED_MIXED_ACTIVE_CONTENT;
           }
+
+          eventSink->OnSecurityChange(mContext,
+                                      (state | nsIWebProgressListener::STATE_LOADED_MIXED_DISPLAY_CONTENT));
         } else {
           // root not secure, mixed display content loaded in an https subframe
           if (NS_SUCCEEDED(stateRV)) {
@@ -646,32 +649,6 @@ nsMixedContentBlocker::ShouldLoad(bool aHadInsecureImageRedirect,
   nsCOMPtr<nsIDocShell> docShell = NS_CP_GetDocShellFromContext(aRequestingContext);
   NS_ENSURE_TRUE(docShell, NS_OK);
 
-  // The page might have set the CSP directive 'block-all-mixed-content' which
-  // should block not only active mixed content loads but in fact all mixed content
-  // loads, see https://www.w3.org/TR/mixed-content/#strict-checking
-  // Block all non secure loads in case the CSP directive is present. Please note
-  // that at this point we already know, based on |schemeSecure| that the load is
-  // not secure, so we can bail out early at this point.
-  if (docShell->GetDocument()->GetBlockAllMixedContent(isPreload)) {
-    // log a message to the console before returning.
-    nsAutoCString spec;
-    rv = aContentLocation->GetSpec(spec);
-    NS_ENSURE_SUCCESS(rv, rv);
-    NS_ConvertUTF8toUTF16 reportSpec(spec);
-
-    const char16_t* params[] = { reportSpec.get()};
-    CSP_LogLocalizedStr(MOZ_UTF16("blockAllMixedContent"),
-                        params, ArrayLength(params),
-                        EmptyString(), // aSourceFile
-                        EmptyString(), // aScriptSample
-                        0, // aLineNumber
-                        0, // aColumnNumber
-                        nsIScriptError::errorFlag, "CSP",
-                        docShell->GetDocument()->InnerWindowID());
-    *aDecision = REJECT_REQUEST;
-    return NS_OK;
-  }
-
   // Disallow mixed content loads for workers, shared workers and service
   // workers.
   if (isWorkerType) {
@@ -708,6 +685,32 @@ nsMixedContentBlocker::ShouldLoad(bool aHadInsecureImageRedirect,
     return NS_OK;
   }
 
+  // The page might have set the CSP directive 'block-all-mixed-content' which
+  // should block not only active mixed content loads but in fact all mixed content
+  // loads, see https://www.w3.org/TR/mixed-content/#strict-checking
+  // Block all non secure loads in case the CSP directive is present. Please note
+  // that at this point we already know, based on |schemeSecure| that the load is
+  // not secure, so we can bail out early at this point.
+  if (docShell->GetDocument()->GetBlockAllMixedContent(isPreload)) {
+    // log a message to the console before returning.
+    nsAutoCString spec;
+    rv = aContentLocation->GetSpec(spec);
+    NS_ENSURE_SUCCESS(rv, rv);
+    NS_ConvertUTF8toUTF16 reportSpec(spec);
+
+    const char16_t* params[] = { reportSpec.get()};
+    CSP_LogLocalizedStr(MOZ_UTF16("blockAllMixedContent"),
+                        params, ArrayLength(params),
+                        EmptyString(), // aSourceFile
+                        EmptyString(), // aScriptSample
+                        0, // aLineNumber
+                        0, // aColumnNumber
+                        nsIScriptError::errorFlag, "CSP",
+                        docShell->GetDocument()->InnerWindowID());
+    *aDecision = REJECT_REQUEST;
+    return NS_OK;
+  }
+
   // Determine if the rootDoc is https and if the user decided to allow Mixed Content
   bool rootHasSecureConnection = false;
   bool allowMixedContent = false;
@@ -739,8 +742,21 @@ nsMixedContentBlocker::ShouldLoad(bool aHadInsecureImageRedirect,
       nsCOMPtr<nsIURI> parentURI;
 
       parentAsNav->GetCurrentURI(getter_AddRefs(parentURI));
-      if (!parentURI || NS_FAILED(parentURI->SchemeIs("https", &httpsParentExists))) {
-        // if getting the URI or the scheme fails, assume there is a https parent and break.
+      if (!parentURI) {
+        // if getting the URI fails, assume there is a https parent and break.
+        httpsParentExists = true;
+        break;
+      }
+
+      nsCOMPtr<nsIURI> innerParentURI = NS_GetInnermostURI(parentURI);
+      if (!innerParentURI) {
+        NS_ERROR("Can't get innerURI from parentURI");
+        *aDecision = REJECT_REQUEST;
+        return NS_OK;
+      }
+
+      if (NS_FAILED(innerParentURI->SchemeIs("https", &httpsParentExists))) {
+        // if getting the scheme fails, assume there is a https parent and break.
         httpsParentExists = true;
         break;
       }
@@ -828,23 +844,24 @@ nsMixedContentBlocker::ShouldLoad(bool aHadInsecureImageRedirect,
       rootDoc->SetHasMixedDisplayContentLoaded(true);
 
       if (rootHasSecureConnection) {
+        // reset state security flag
+        state = state >> 4 << 4;
+        // set state security flag to broken, since there is mixed content
+        state |= nsIWebProgressListener::STATE_IS_BROKEN;
+
+        // If mixed active content is loaded, make sure to include that in the state.
         if (rootDoc->GetHasMixedActiveContentLoaded()) {
-          // If mixed active content is loaded, make sure to include that in the state.
-          eventSink->OnSecurityChange(aRequestingContext,
-                                      (nsIWebProgressListener::STATE_IS_BROKEN |
-                                       nsIWebProgressListener::STATE_LOADED_MIXED_DISPLAY_CONTENT |
-                                       nsIWebProgressListener::STATE_LOADED_MIXED_ACTIVE_CONTENT));
-        } else {
-          eventSink->OnSecurityChange(aRequestingContext,
-                                      (nsIWebProgressListener::STATE_IS_BROKEN |
-                                       nsIWebProgressListener::STATE_LOADED_MIXED_DISPLAY_CONTENT));
+          state |= nsIWebProgressListener::STATE_LOADED_MIXED_ACTIVE_CONTENT;
         }
+
+        eventSink->OnSecurityChange(aRequestingContext,
+                                    (state | nsIWebProgressListener::STATE_LOADED_MIXED_DISPLAY_CONTENT));
       } else {
         // User has overriden the pref and the root is not https;
         // mixed display content was allowed on an https subframe.
         if (NS_SUCCEEDED(stateRV)) {
           eventSink->OnSecurityChange(aRequestingContext, (state | nsIWebProgressListener::STATE_LOADED_MIXED_DISPLAY_CONTENT));
-         }
+        }
       }
     } else {
       *aDecision = nsIContentPolicy::REJECT_REQUEST;
@@ -869,18 +886,19 @@ nsMixedContentBlocker::ShouldLoad(bool aHadInsecureImageRedirect,
       rootDoc->SetHasMixedActiveContentLoaded(true);
 
       if (rootHasSecureConnection) {
-        // User has decided to override the pref and the root is https, so change the Security State.
+        // reset state security flag
+        state = state >> 4 << 4;
+        // set state security flag to broken, since there is mixed content
+        state |= nsIWebProgressListener::STATE_IS_BROKEN;
+
+        // If mixed display content is loaded, make sure to include that in the state.
         if (rootDoc->GetHasMixedDisplayContentLoaded()) {
-          // If mixed display content is loaded, make sure to include that in the state.
-          eventSink->OnSecurityChange(aRequestingContext,
-                                      (nsIWebProgressListener::STATE_IS_BROKEN |
-                                       nsIWebProgressListener::STATE_LOADED_MIXED_ACTIVE_CONTENT |
-                                       nsIWebProgressListener::STATE_LOADED_MIXED_DISPLAY_CONTENT));
-        } else {
-          eventSink->OnSecurityChange(aRequestingContext,
-                                      (nsIWebProgressListener::STATE_IS_BROKEN |
-                                       nsIWebProgressListener::STATE_LOADED_MIXED_ACTIVE_CONTENT));
+          state |= nsIWebProgressListener::STATE_LOADED_MIXED_DISPLAY_CONTENT;
         }
+
+        eventSink->OnSecurityChange(aRequestingContext,
+                                    (state | nsIWebProgressListener::STATE_LOADED_MIXED_ACTIVE_CONTENT));
+
         return NS_OK;
       } else {
         // User has already overriden the pref and the root is not https;

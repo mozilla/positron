@@ -28,11 +28,14 @@ class nsIRequestContextService;
 class nsISiteSecurityService;
 class nsIStreamConverterService;
 class nsITimer;
+class nsIUUIDGenerator;
 
-extern mozilla::Atomic<PRThread*, mozilla::Relaxed> gSocketThread;
 
 namespace mozilla {
 namespace net {
+
+extern Atomic<PRThread*, Relaxed> gSocketThread;
+
 class ATokenBucketEvent;
 class EventTokenBucket;
 class Tickler;
@@ -626,6 +629,11 @@ private:
     nsresult SpeculativeConnectInternal(nsIURI *aURI,
                                         nsIInterfaceRequestor *aCallbacks,
                                         bool anonymous);
+
+    // UUID generator for channelIds
+    nsCOMPtr<nsIUUIDGenerator> mUUIDGen;
+
+    nsresult NewChannelId(nsID *channelId);
 };
 
 extern nsHttpHandler *gHttpHandler;

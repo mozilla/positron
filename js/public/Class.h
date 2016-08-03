@@ -488,7 +488,7 @@ typedef void
 // The special treatment of |finalize| and |trace| is necessary because if we
 // assign either of those hooks to a local variable and then call it -- as is
 // done with the other hooks -- the GC hazard analysis gets confused.
-#define JS_CLASS_MEMBERS(ClassOpsType, FinalizeOpType, FreeOpType) \
+#define JS_CLASS_MEMBERS(ClassOpsType, FreeOpType) \
     const char* name; \
     uint32_t flags; \
     const ClassOpsType* cOps; \
@@ -705,7 +705,7 @@ struct JSClassOps
 #define JS_NULL_CLASS_OPS nullptr
 
 struct JSClass {
-    JS_CLASS_MEMBERS(JSClassOps, JSFinalizeOp, JSFreeOp);
+    JS_CLASS_MEMBERS(JSClassOps, JSFreeOp);
 
     void* reserved[3];
 };
@@ -812,7 +812,7 @@ namespace js {
 
 struct Class
 {
-    JS_CLASS_MEMBERS(js::ClassOps, FinalizeOp, FreeOp);
+    JS_CLASS_MEMBERS(js::ClassOps, FreeOp);
     const ClassSpec* spec;
     const ClassExtension* ext;
     const ObjectOps* oOps;
@@ -958,14 +958,26 @@ Valueify(const JSClass* c)
  * Enumeration describing possible values of the [[Class]] internal property
  * value of objects.
  */
-enum ESClassValue {
-    ESClass_Object, ESClass_Array, ESClass_Number, ESClass_String,
-    ESClass_Boolean, ESClass_RegExp, ESClass_ArrayBuffer, ESClass_SharedArrayBuffer,
-    ESClass_Date, ESClass_Set, ESClass_Map, ESClass_Promise, ESClass_MapIterator,
-    ESClass_SetIterator,
+enum class ESClass {
+    Object,
+    Array,
+    Number,
+    String,
+    Boolean,
+    RegExp,
+    ArrayBuffer,
+    SharedArrayBuffer,
+    Date,
+    Set,
+    Map,
+    Promise,
+    MapIterator,
+    SetIterator,
+    Arguments,
+    Error,
 
     /** None of the above. */
-    ESClass_Other
+    Other
 };
 
 /* Fills |vp| with the unboxed value for boxed types, or undefined otherwise. */

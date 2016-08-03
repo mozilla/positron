@@ -8,10 +8,12 @@
 #define nsHostObjectURI_h
 
 #include "mozilla/Attributes.h"
+#include "mozilla/dom/File.h"
 #include "nsCOMPtr.h"
 #include "nsIClassInfo.h"
 #include "nsIPrincipal.h"
 #include "nsISerializable.h"
+#include "nsIURIWithBlobImpl.h"
 #include "nsIURIWithPrincipal.h"
 #include "nsSimpleURI.h"
 #include "nsIIPCSerializableURI.h"
@@ -21,18 +23,23 @@
  * MediaStreams, with scheme "mediastream", and MediaSources, with scheme
  * "mediasource".
  */
-class nsHostObjectURI : public nsSimpleURI,
-                        public nsIURIWithPrincipal
+class nsHostObjectURI : public mozilla::net::nsSimpleURI
+                      , public nsIURIWithPrincipal
+                      , public nsIURIWithBlobImpl
 {
 public:
-  explicit nsHostObjectURI(nsIPrincipal* aPrincipal) :
-      nsSimpleURI(), mPrincipal(aPrincipal)
+  nsHostObjectURI(nsIPrincipal* aPrincipal,
+                  mozilla::dom::BlobImpl* aBlobImpl)
+    : mozilla::net::nsSimpleURI()
+    , mPrincipal(aPrincipal)
+    , mBlobImpl(aBlobImpl)
   {}
 
   // For use only from deserialization
-  nsHostObjectURI() : nsSimpleURI() {}
+  nsHostObjectURI() : mozilla::net::nsSimpleURI() {}
 
   NS_DECL_ISUPPORTS_INHERITED
+  NS_DECL_NSIURIWITHBLOBIMPL
   NS_DECL_NSIURIWITHPRINCIPAL
   NS_DECL_NSISERIALIZABLE
   NS_DECL_NSICLASSINFO
@@ -48,10 +55,11 @@ public:
                                   bool* aResult) override;
 
   // Override StartClone to hand back a nsHostObjectURI
-  virtual nsSimpleURI* StartClone(RefHandlingEnum /* unused */) override
+  virtual mozilla::net::nsSimpleURI* StartClone(RefHandlingEnum /* unused */) override
   { return new nsHostObjectURI(); }
 
   nsCOMPtr<nsIPrincipal> mPrincipal;
+  RefPtr<mozilla::dom::BlobImpl> mBlobImpl;
 
 protected:
   virtual ~nsHostObjectURI() {}

@@ -12,8 +12,8 @@ generated = [
     'KeyEvent',
     'MediaCodec',
     'MotionEvent',
-    'OverScroller',
-    'SurfaceTexture'
+    'SurfaceTexture',
+    'ViewConfiguration'
 ]
 
 SOURCES += ['!%s.cpp' % stem for stem in generated]

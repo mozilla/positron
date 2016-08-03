@@ -15,7 +15,7 @@ const { FrameActor } = require("devtools/server/actors/frame");
 const { ObjectActor, createValueGrip, longStringGrip } = require("devtools/server/actors/object");
 const { SourceActor, getSourceURL } = require("devtools/server/actors/source");
 const { DebuggerServer } = require("devtools/server/main");
-const { ActorClass } = require("devtools/shared/protocol");
+const { ActorClassWithSpec } = require("devtools/shared/protocol");
 const DevToolsUtils = require("devtools/shared/DevToolsUtils");
 const { assert, dumpn, update, fetch } = DevToolsUtils;
 const promise = require("promise");
@@ -24,6 +24,7 @@ const xpcInspector = require("xpcInspector");
 const ScriptStore = require("./utils/ScriptStore");
 const { DevToolsWorker } = require("devtools/shared/worker/worker");
 const object = require("sdk/util/object");
+const { threadSpec } = require("devtools/shared/specs/script");
 
 const { defer, resolve, reject, all } = promise;
 
@@ -32,7 +33,7 @@ loader.lazyGetter(this, "Debugger", () => {
   hackDebugger(Debugger);
   return Debugger;
 });
-loader.lazyRequireGetter(this, "CssLogic", "devtools/shared/inspector/css-logic", true);
+loader.lazyRequireGetter(this, "CssLogic", "devtools/server/css-logic", true);
 loader.lazyRequireGetter(this, "events", "sdk/event/core");
 loader.lazyRequireGetter(this, "mapURIToAddonID", "devtools/server/actors/utils/map-uri-to-addon-id");
 
@@ -408,9 +409,7 @@ EventLoop.prototype = {
  *        An optional (for content debugging only) reference to the content
  *        window.
  */
-const ThreadActor = ActorClass({
-  typeName: "context",
-
+const ThreadActor = ActorClassWithSpec(threadSpec, {
   initialize: function (aParent, aGlobal) {
     this._state = "detached";
     this._frameActors = [];
@@ -621,7 +620,7 @@ const ThreadActor = ActorClass({
     }
 
     this._state = "attached";
-    this._debuggerSourcesSeen = new Set();
+    this._debuggerSourcesSeen = new WeakSet();
 
     Object.assign(this._options, aRequest.options || {});
     this.sources.setOptions(this._options);
@@ -1986,14 +1985,11 @@ const ThreadActor = ActorClass({
         } else {
           promises.push(this.sources.getAllGeneratedLocations(actor.originalLocation)
                                     .then((generatedLocations) => {
-                                      if (generatedLocations.length > 0 &&
+            if (generatedLocations.length > 0 &&
                 generatedLocations[0].generatedSourceActor.actorID === sourceActor.actorID) {
-                                        sourceActor._setBreakpointAtAllGeneratedLocations(
-                actor,
-                generatedLocations
-              );
-                                      }
-                                    }));
+              sourceActor._setBreakpointAtAllGeneratedLocations(actor, generatedLocations);
+            }
+          }));
         }
       }
 
@@ -2014,7 +2010,13 @@ const ThreadActor = ActorClass({
       // debugger, and carefully avoid the use of unsafeSynchronize in this
       // function when source maps are disabled.
       for (let actor of bpActors) {
-        actor.originalLocation.originalSourceActor._setBreakpoint(actor);
+        if (actor.isPending) {
+          actor.originalLocation.originalSourceActor._setBreakpoint(actor);
+        } else {
+          actor.originalLocation.originalSourceActor._setBreakpointAtGeneratedLocation(
+            actor, GeneratedLocation.fromOriginalLocation(actor.originalLocation)
+          );
+        }
       }
     }
 

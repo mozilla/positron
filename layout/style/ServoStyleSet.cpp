@@ -6,6 +6,7 @@
 
 #include "mozilla/ServoStyleSet.h"
 
+#include "mozilla/ServoRestyleManager.h"
 #include "nsCSSAnonBoxes.h"
 #include "nsCSSPseudoElements.h"
 #include "nsIDocumentInlines.h"
@@ -83,12 +84,6 @@ ServoStyleSet::GetContext(nsIContent* aContent,
                           nsIAtom* aPseudoTag,
                           CSSPseudoElementType aPseudoType)
 {
-  while (aContent->IsInAnonymousSubtree()) {
-    NS_ERROR("stylo: anonymous content isn't styled properly yet");
-    aContent = aContent->GetParentElement();
-    MOZ_ASSERT(aContent, "couldn't break out of anonymous content");
-  }
-
   RefPtr<ServoComputedValues> computedValues = dont_AddRef(Servo_GetComputedValues(aContent));
   MOZ_ASSERT(computedValues);
   return GetContext(computedValues.forget(), aParentContext, aPseudoTag, aPseudoType);
@@ -372,7 +367,8 @@ nsRestyleHint
 ServoStyleSet::HasStateDependentStyle(dom::Element* aElement,
                                       EventStates aStateMask)
 {
-  MOZ_CRASH("stylo: not implemented");
+  NS_ERROR("stylo: HasStateDependentStyle not implemented");
+  return nsRestyleHint(0);
 }
 
 nsRestyleHint
@@ -381,5 +377,17 @@ ServoStyleSet::HasStateDependentStyle(dom::Element* aElement,
                                      dom::Element* aPseudoElement,
                                      EventStates aStateMask)
 {
-  MOZ_CRASH("stylo: not implemented");
+  NS_ERROR("stylo: HasStateDependentStyle not implemented");
+  return nsRestyleHint(0);
+}
+
+void
+ServoStyleSet::RestyleSubtree(nsINode* aNode, bool aForce)
+{
+  if (aForce) {
+    MOZ_ASSERT(aNode->IsContent());
+    ServoRestyleManager::DirtyTree(aNode->AsContent());
+  }
+
+  Servo_RestyleSubtree(aNode, mRawSet.get());
 }

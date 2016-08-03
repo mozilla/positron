@@ -129,6 +129,7 @@ enum class MaybeAdding { Adding = true, NotAdding = false };
 class ShapeTable {
   public:
     friend class NativeObject;
+    friend class BaseShape;
     static const uint32_t MIN_ENTRIES   = 11;
 
     class Entry {
@@ -145,6 +146,7 @@ class ShapeTable {
       public:
         bool isFree() const { return shape_ == nullptr; }
         bool isRemoved() const { return shape_ == SHAPE_REMOVED; }
+        bool isLive() const { return !isFree() && !isRemoved(); }
         bool hadCollision() const { return uintptr_t(shape_) & SHAPE_COLLISION; }
 
         void setFree() { shape_ = nullptr; }
@@ -379,7 +381,7 @@ class BaseShape : public gc::TenuredCell
                                          * dictionary last properties. */
 
     /* For owned BaseShapes, the canonical unowned BaseShape. */
-    HeapPtrUnownedBaseShape unowned_;
+    GCPtrUnownedBaseShape unowned_;
 
     /* For owned BaseShapes, the shape's shape table. */
     ShapeTable*      table_;
@@ -453,6 +455,10 @@ class BaseShape : public gc::TenuredCell
 
     void traceChildren(JSTracer* trc);
     void traceChildrenSkipShapeTable(JSTracer* trc);
+
+#ifdef DEBUG
+    bool canSkipMarkingShapeTable(Shape* lastShape);
+#endif
 
   private:
     static void staticAsserts() {
@@ -538,12 +544,12 @@ class Shape : public gc::TenuredCell
     friend class TenuringTracer;
     friend struct StackBaseShape;
     friend struct StackShape;
-    friend struct JS::ubi::Concrete<Shape>;
+    friend class JS::ubi::Concrete<Shape>;
     friend class js::gc::RelocationOverlay;
 
   protected:
-    HeapPtrBaseShape    base_;
-    PreBarrieredId      propid_;
+    GCPtrBaseShape base_;
+    PreBarrieredId propid_;
 
     enum SlotInfo : uint32_t
     {
@@ -576,15 +582,15 @@ class Shape : public gc::TenuredCell
     uint8_t             attrs;          /* attributes, see jsapi.h JSPROP_* */
     uint8_t             flags;          /* flags, see below for defines */
 
-    HeapPtrShape        parent;        /* parent node, reverse for..in order */
+    GCPtrShape   parent;          /* parent node, reverse for..in order */
     /* kids is valid when !inDictionary(), listp is valid when inDictionary(). */
     union {
-        KidsPointer kids;       /* null, single child, or a tagged ptr
-                                   to many-kids data structure */
-        HeapPtrShape* listp;    /* dictionary list starting at shape_
-                                   has a double-indirect back pointer,
-                                   either to the next shape's parent if not
-                                   last, else to obj->shape_ */
+        KidsPointer kids;         /* null, single child, or a tagged ptr
+                                     to many-kids data structure */
+        GCPtrShape* listp;        /* dictionary list starting at shape_
+                                     has a double-indirect back pointer,
+                                     either to the next shape's parent if not
+                                     last, else to obj->shape_ */
     };
 
     template<MaybeAdding Adding = MaybeAdding::NotAdding>
@@ -593,9 +599,10 @@ class Shape : public gc::TenuredCell
     static inline Shape* searchNoHashify(Shape* start, jsid id);
 
     void removeFromDictionary(NativeObject* obj);
-    void insertIntoDictionary(HeapPtrShape* dictp);
+    void insertIntoDictionary(GCPtrShape* dictp);
 
-    inline void initDictionaryShape(const StackShape& child, uint32_t nfixed, HeapPtrShape* dictp);
+    inline void initDictionaryShape(const StackShape& child, uint32_t nfixed,
+                                    GCPtrShape* dictp);
 
     /* Replace the base shape of the last shape in a non-dictionary lineage with base. */
     static Shape* replaceLastProperty(ExclusiveContext* cx, StackBaseShape& base,
@@ -652,7 +659,7 @@ class Shape : public gc::TenuredCell
         return *(AccessorShape*)this;
     }
 
-    const HeapPtrShape& previous() const { return parent; }
+    const GCPtrShape& previous() const { return parent; }
     JSCompartment* compartment() const { return base()->compartment(); }
     JSCompartment* maybeCompartment() const { return compartment(); }
 
@@ -944,8 +951,8 @@ class Shape : public gc::TenuredCell
     }
 
 #ifdef DEBUG
-    void dump(JSContext* cx, FILE* fp) const;
-    void dumpSubtree(JSContext* cx, int level, FILE* fp) const;
+    void dump(FILE* fp) const;
+    void dumpSubtree(int level, FILE* fp) const;
 #endif
 
     void sweep();
@@ -1010,7 +1017,7 @@ StackBaseShape::StackBaseShape(Shape* shape)
 
 class MOZ_RAII AutoRooterGetterSetter
 {
-    class Inner : private JS::CustomAutoRooter
+    class Inner final : private JS::CustomAutoRooter
     {
       public:
         inline Inner(ExclusiveContext* cx, uint8_t attrs, GetterOp* pgetter_, SetterOp* psetter_);
@@ -1350,7 +1357,7 @@ Shape::setterObject() const
 }
 
 inline void
-Shape::initDictionaryShape(const StackShape& child, uint32_t nfixed, HeapPtrShape* dictp)
+Shape::initDictionaryShape(const StackShape& child, uint32_t nfixed, GCPtrShape* dictp)
 {
     if (child.isAccessorShape())
         new (this) AccessorShape(child, nfixed);
@@ -1458,24 +1465,32 @@ ReshapeForAllocKind(JSContext* cx, Shape* shape, TaggedProto proto,
 namespace JS {
 namespace ubi {
 
-template<> struct Concrete<js::Shape> : TracerConcreteWithCompartment<js::Shape> {
-    Size size(mozilla::MallocSizeOf mallocSizeOf) const override;
-
+template<>
+class Concrete<js::Shape> : TracerConcreteWithCompartment<js::Shape> {
   protected:
     explicit Concrete(js::Shape *ptr) : TracerConcreteWithCompartment<js::Shape>(ptr) { }
 
   public:
     static void construct(void *storage, js::Shape *ptr) { new (storage) Concrete(ptr); }
-};
 
-template<> struct Concrete<js::BaseShape> : TracerConcreteWithCompartment<js::BaseShape> {
     Size size(mozilla::MallocSizeOf mallocSizeOf) const override;
 
+    const char16_t* typeName() const override { return concreteTypeName; }
+    static const char16_t concreteTypeName[];
+};
+
+template<>
+class Concrete<js::BaseShape> : TracerConcreteWithCompartment<js::BaseShape> {
   protected:
     explicit Concrete(js::BaseShape *ptr) : TracerConcreteWithCompartment<js::BaseShape>(ptr) { }
 
   public:
     static void construct(void *storage, js::BaseShape *ptr) { new (storage) Concrete(ptr); }
+
+    Size size(mozilla::MallocSizeOf mallocSizeOf) const override;
+
+    const char16_t* typeName() const override { return concreteTypeName; }
+    static const char16_t concreteTypeName[];
 };
 
 } // namespace ubi

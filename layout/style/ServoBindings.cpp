@@ -6,14 +6,20 @@
 
 #include "mozilla/ServoBindings.h"
 
+#include "gfxFontFamilyList.h"
+#include "nsAttrValueInlines.h"
 #include "nsCSSRuleProcessor.h"
 #include "nsContentUtils.h"
+#include "nsDOMTokenList.h"
 #include "nsIDOMNode.h"
 #include "nsIDocument.h"
 #include "nsINode.h"
+#include "nsIPrincipal.h"
 #include "nsNameSpaceManager.h"
 #include "nsString.h"
 #include "nsStyleStruct.h"
+#include "nsTArray.h"
+#include "nsStyleUtil.h"
 #include "StyleStructContext.h"
 
 #include "mozilla/EventStates.h"
@@ -152,6 +158,215 @@ Gecko_Namespace(RawGeckoElement* aElement)
   return nsContentUtils::NameSpaceManager()->NameSpaceURIAtom(id);
 }
 
+nsIAtom*
+Gecko_GetElementId(RawGeckoElement* aElement)
+{
+  const nsAttrValue* attr = aElement->GetParsedAttr(nsGkAtoms::id);
+  return attr ? attr->GetAtomValue() : nullptr;
+}
+
+// Dirtiness tracking.
+uint32_t
+Gecko_GetNodeFlags(RawGeckoNode* aNode)
+{
+  return aNode->GetFlags();
+}
+
+void
+Gecko_SetNodeFlags(RawGeckoNode* aNode, uint32_t aFlags)
+{
+  aNode->SetFlags(aFlags);
+}
+
+void
+Gecko_UnsetNodeFlags(RawGeckoNode* aNode, uint32_t aFlags)
+{
+  aNode->UnsetFlags(aFlags);
+}
+
+template<class MatchFn>
+bool
+DoMatch(RawGeckoElement* aElement, nsIAtom* aNS, nsIAtom* aName, MatchFn aMatch)
+{
+  if (aNS) {
+    int32_t ns = nsContentUtils::NameSpaceManager()->GetNameSpaceID(aNS);
+    NS_ENSURE_TRUE(ns != kNameSpaceID_Unknown, false);
+    const nsAttrValue* value = aElement->GetParsedAttr(aName, ns);
+    return value && aMatch(value);
+  }
+  // No namespace means any namespace - we have to check them all. :-(
+  const nsAttrName* attrName;
+  for (uint32_t i = 0; (attrName = aElement->GetAttrNameAt(i)); ++i) {
+    if (attrName->LocalName() != aName) {
+      continue;
+    }
+    const nsAttrValue* value =
+      aElement->GetParsedAttr(attrName->LocalName(), attrName->NamespaceID());
+    if (aMatch(value)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Work around our overly-restrictive static analysis. This can be removed once
+// bug 1281935 lands.
+template<typename T>
+struct FakeRef {
+  MOZ_IMPLICIT FakeRef(T* aPtr) : mPtr(aPtr) {}
+  operator T*() const { return mPtr; }
+  T* mPtr;
+};
+
+bool
+Gecko_HasAttr(RawGeckoElement* aElement, nsIAtom* aNS, nsIAtom* aName)
+{
+  auto match = [](const nsAttrValue* aValue) { return true; };
+  return DoMatch(aElement, aNS, aName, match);
+}
+
+bool
+Gecko_AttrEquals(RawGeckoElement* aElement, nsIAtom* aNS, nsIAtom* aName,
+                 nsIAtom* aStr_, bool aIgnoreCase)
+{
+  FakeRef<nsIAtom> aStr(aStr_);
+  auto match = [aStr, aIgnoreCase](const nsAttrValue* aValue) {
+    return aValue->Equals(aStr, aIgnoreCase ? eIgnoreCase : eCaseMatters);
+  };
+  return DoMatch(aElement, aNS, aName, match);
+}
+
+bool
+Gecko_AttrDashEquals(RawGeckoElement* aElement, nsIAtom* aNS, nsIAtom* aName,
+                     nsIAtom* aStr_)
+{
+  FakeRef<nsIAtom> aStr(aStr_);
+  auto match = [aStr](const nsAttrValue* aValue) {
+    nsAutoString str;
+    aValue->ToString(str);
+    const nsDefaultStringComparator c;
+    return nsStyleUtil::DashMatchCompare(str, nsDependentAtomString(aStr), c);
+  };
+  return DoMatch(aElement, aNS, aName, match);
+}
+
+bool
+Gecko_AttrIncludes(RawGeckoElement* aElement, nsIAtom* aNS, nsIAtom* aName,
+                   nsIAtom* aStr_)
+{
+  FakeRef<nsIAtom> aStr(aStr_);
+  auto match = [aStr](const nsAttrValue* aValue) {
+    nsAutoString str;
+    aValue->ToString(str);
+    const nsDefaultStringComparator c;
+    return nsStyleUtil::ValueIncludes(str, nsDependentAtomString(aStr), c);
+  };
+  return DoMatch(aElement, aNS, aName, match);
+}
+
+bool
+Gecko_AttrHasSubstring(RawGeckoElement* aElement, nsIAtom* aNS, nsIAtom* aName,
+                       nsIAtom* aStr_)
+{
+  FakeRef<nsIAtom> aStr(aStr_);
+  auto match = [aStr](const nsAttrValue* aValue) {
+    nsAutoString str;
+    aValue->ToString(str);
+    return FindInReadable(str, nsDependentAtomString(aStr));
+  };
+  return DoMatch(aElement, aNS, aName, match);
+}
+
+bool
+Gecko_AttrHasPrefix(RawGeckoElement* aElement, nsIAtom* aNS, nsIAtom* aName,
+                    nsIAtom* aStr_)
+{
+  FakeRef<nsIAtom> aStr(aStr_);
+  auto match = [aStr](const nsAttrValue* aValue) {
+    nsAutoString str;
+    aValue->ToString(str);
+    return StringBeginsWith(str, nsDependentAtomString(aStr));
+  };
+  return DoMatch(aElement, aNS, aName, match);
+}
+
+bool
+Gecko_AttrHasSuffix(RawGeckoElement* aElement, nsIAtom* aNS, nsIAtom* aName,
+                    nsIAtom* aStr_)
+{
+  FakeRef<nsIAtom> aStr(aStr_);
+  auto match = [aStr](const nsAttrValue* aValue) {
+    nsAutoString str;
+    aValue->ToString(str);
+    return StringEndsWith(str, nsDependentAtomString(aStr));
+  };
+  return DoMatch(aElement, aNS, aName, match);
+}
+
+uint32_t
+Gecko_ClassOrClassList(RawGeckoElement* aElement,
+                       nsIAtom** aClass, nsIAtom*** aClassList)
+{
+  const nsAttrValue* attr = aElement->GetParsedAttr(nsGkAtoms::_class);
+  if (!attr) {
+    return 0;
+  }
+
+  // For class values with only whitespace, Gecko just stores a string. For the
+  // purposes of the style system, there is no class in this case.
+  if (attr->Type() == nsAttrValue::eString) {
+    MOZ_ASSERT(nsContentUtils::TrimWhitespace<nsContentUtils::IsHTMLWhitespace>(
+                 attr->GetStringValue()).IsEmpty());
+    return 0;
+  }
+
+  // Single tokens are generally stored as an atom. Check that case.
+  if (attr->Type() == nsAttrValue::eAtom) {
+    *aClass = attr->GetAtomValue();
+    return 1;
+  }
+
+  // At this point we should have an atom array. It is likely, but not
+  // guaranteed, that we have two or more elements in the array.
+  MOZ_ASSERT(attr->Type() == nsAttrValue::eAtomArray);
+  nsTArray<nsCOMPtr<nsIAtom>>* atomArray = attr->GetAtomArrayValue();
+  uint32_t length = atomArray->Length();
+
+  // Special case: zero elements.
+  if (length == 0) {
+    return 0;
+  }
+
+  // Special case: one element.
+  if (length == 1) {
+    *aClass = atomArray->ElementAt(0);
+    return 1;
+  }
+
+  // General case: Two or more elements.
+  //
+  // Note: We could also expose this array as an array of nsCOMPtrs, since
+  // bindgen knows what those look like, and eliminate the reinterpret_cast.
+  // But it's not obvious that that would be preferable.
+  static_assert(sizeof(nsCOMPtr<nsIAtom>) == sizeof(nsIAtom*), "Bad simplification");
+  static_assert(alignof(nsCOMPtr<nsIAtom>) == alignof(nsIAtom*), "Bad simplification");
+
+  nsCOMPtr<nsIAtom>* elements = atomArray->Elements();
+  nsIAtom** rawElements = reinterpret_cast<nsIAtom**>(elements);
+  *aClassList = rawElements;
+  return atomArray->Length();
+}
+
+ServoDeclarationBlock*
+Gecko_GetServoDeclarationBlock(RawGeckoElement* aElement)
+{
+  const nsAttrValue* attr = aElement->GetParsedAttr(nsGkAtoms::style);
+  if (!attr || attr->Type() != nsAttrValue::eServoCSSDeclaration) {
+    return nullptr;
+  }
+  return attr->GetServoCSSDeclarationValue();
+}
+
 ServoNodeData*
 Gecko_GetNodeData(RawGeckoNode* aNode)
 {
@@ -167,31 +382,19 @@ Gecko_SetNodeData(RawGeckoNode* aNode, ServoNodeData* aData)
 nsIAtom*
 Gecko_Atomize(const char* aString, uint32_t aLength)
 {
-  // XXXbholley: This isn't yet threadsafe, but will probably need to be.
-  MOZ_ASSERT(NS_IsMainThread());
   return NS_Atomize(nsDependentCSubstring(aString, aLength)).take();
 }
 
 void
 Gecko_AddRefAtom(nsIAtom* aAtom)
 {
-  // XXXbholley: This isn't yet threadsafe, but will probably need to be.
-  MOZ_ASSERT(NS_IsMainThread());
   NS_ADDREF(aAtom);
 }
 
 void
 Gecko_ReleaseAtom(nsIAtom* aAtom)
 {
-  // XXXbholley: This isn't yet threadsafe, but will probably need to be.
-  MOZ_ASSERT(NS_IsMainThread());
   NS_RELEASE(aAtom);
-}
-
-uint32_t
-Gecko_HashAtom(nsIAtom* aAtom)
-{
-  return aAtom->hash();
 }
 
 const uint16_t*
@@ -229,6 +432,33 @@ Gecko_AtomEqualsUTF8IgnoreCase(nsIAtom* aAtom, const char* aString, uint32_t aLe
 }
 
 void
+Gecko_FontFamilyList_Clear(FontFamilyList* aList) {
+  aList->Clear();
+}
+
+void
+Gecko_FontFamilyList_AppendNamed(FontFamilyList* aList, nsIAtom* aName)
+{
+  // Servo doesn't record whether the name was quoted or unquoted, so just
+  // assume unquoted for now.
+  FontFamilyName family;
+  aName->ToString(family.mName);
+  aList->Append(family);
+}
+
+void
+Gecko_FontFamilyList_AppendGeneric(FontFamilyList* aList, FontFamilyType aType)
+{
+  aList->Append(FontFamilyName(aType));
+}
+
+void
+Gecko_CopyFontFamilyFrom(nsFont* dst, const nsFont* src)
+{
+  dst->fontlist = src->fontlist;
+}
+
+void
 Gecko_SetListStyleType(nsStyleList* style_struct, uint32_t type)
 {
   // Builtin counter styles are static and use no-op refcounting, and thus are
@@ -241,6 +471,137 @@ Gecko_CopyListStyleTypeFrom(nsStyleList* dst, const nsStyleList* src)
 {
   dst->SetCounterStyle(src->GetCounterStyle());
 }
+
+NS_IMPL_HOLDER_FFI_REFCOUNTING(nsIPrincipal, Principal)
+NS_IMPL_HOLDER_FFI_REFCOUNTING(nsIURI, URI)
+
+void
+Gecko_SetMozBinding(nsStyleDisplay* aDisplay,
+                    const uint8_t* aURLString, uint32_t aURLStringLength,
+                    ThreadSafeURIHolder* aBaseURI,
+                    ThreadSafeURIHolder* aReferrer,
+                    ThreadSafePrincipalHolder* aPrincipal)
+{
+  MOZ_ASSERT(aDisplay);
+  MOZ_ASSERT(aURLString);
+  MOZ_ASSERT(aBaseURI);
+  MOZ_ASSERT(aReferrer);
+  MOZ_ASSERT(aPrincipal);
+
+  nsString url;
+  nsDependentCSubstring urlString(reinterpret_cast<const char*>(aURLString),
+                                  aURLStringLength);
+  AppendUTF8toUTF16(urlString, url);
+  RefPtr<nsStringBuffer> urlBuffer = nsCSSValue::BufferFromString(url);
+
+  aDisplay->mBinding =
+    new css::URLValue(urlBuffer, do_AddRef(aBaseURI),
+                      do_AddRef(aReferrer), do_AddRef(aPrincipal));
+}
+
+void
+Gecko_CopyMozBindingFrom(nsStyleDisplay* aDest, const nsStyleDisplay* aSrc)
+{
+  aDest->mBinding = aSrc->mBinding;
+}
+
+
+void
+Gecko_SetNullImageValue(nsStyleImage* aImage)
+{
+  MOZ_ASSERT(aImage);
+  aImage->SetNull();
+}
+
+void
+Gecko_SetGradientImageValue(nsStyleImage* aImage, nsStyleGradient* aGradient)
+{
+  MOZ_ASSERT(aImage);
+  aImage->SetGradientData(aGradient);
+}
+
+void
+Gecko_CopyImageValueFrom(nsStyleImage* aImage, const nsStyleImage* aOther)
+{
+  MOZ_ASSERT(aImage);
+  MOZ_ASSERT(aOther);
+
+  *aImage = *aOther;
+}
+
+nsStyleGradient*
+Gecko_CreateGradient(uint8_t aShape,
+                     uint8_t aSize,
+                     bool aRepeating,
+                     bool aLegacySyntax,
+                     uint32_t aStopCount)
+{
+  nsStyleGradient* result = new nsStyleGradient();
+
+  result->mShape = aShape;
+  result->mSize = aSize;
+  result->mRepeating = aRepeating;
+  result->mLegacySyntax = aLegacySyntax;
+
+  result->mAngle.SetNoneValue();
+  result->mBgPosX.SetNoneValue();
+  result->mBgPosY.SetNoneValue();
+  result->mRadiusX.SetNoneValue();
+  result->mRadiusY.SetNoneValue();
+
+  nsStyleGradientStop dummyStop;
+  dummyStop.mLocation.SetNoneValue();
+  dummyStop.mColor = NS_RGB(0, 0, 0);
+  dummyStop.mIsInterpolationHint = 0;
+
+  for (uint32_t i = 0; i < aStopCount; i++) {
+    result->mStops.AppendElement(dummyStop);
+  }
+
+  return result;
+}
+
+void
+Gecko_EnsureTArrayCapacity(void* aArray, size_t aCapacity, size_t aElemSize)
+{
+  auto base = reinterpret_cast<nsTArray_base<nsTArrayInfallibleAllocator, nsTArray_CopyWithMemutils> *>(aArray);
+  base->EnsureCapacity<nsTArrayInfallibleAllocator>(aCapacity, aElemSize);
+}
+
+void
+Gecko_EnsureImageLayersLength(nsStyleImageLayers* aLayers, size_t aLen)
+{
+  aLayers->mLayers.EnsureLengthAtLeast(aLen);
+}
+
+void
+Gecko_InitializeImageLayer(nsStyleImageLayers::Layer* aLayer,
+                                nsStyleImageLayers::LayerType aLayerType)
+{
+  aLayer->Initialize(aLayerType);
+}
+
+void
+Gecko_ResetStyleCoord(nsStyleUnit* aUnit, nsStyleUnion* aValue)
+{
+  nsStyleCoord::Reset(*aUnit, *aValue);
+}
+
+void
+Gecko_SetStyleCoordCalcValue(nsStyleUnit* aUnit, nsStyleUnion* aValue, nsStyleCoord::CalcValue aCalc)
+{
+  // Calc units should be cleaned up first
+  MOZ_ASSERT(*aUnit != nsStyleUnit::eStyleUnit_Calc);
+  nsStyleCoord::Calc* calcRef = new nsStyleCoord::Calc();
+  calcRef->mLength = aCalc.mLength;
+  calcRef->mPercent = aCalc.mPercent;
+  calcRef->mHasPercent = aCalc.mHasPercent;
+  *aUnit = nsStyleUnit::eStyleUnit_Calc;
+  aValue->mPointer = calcRef;
+  calcRef->AddRef();
+}
+
+NS_IMPL_THREADSAFE_FFI_REFCOUNTING(nsStyleCoord::Calc, Calc);
 
 #define STYLE_STRUCT(name, checkdata_cb)                                      \
                                                                               \
@@ -277,7 +638,10 @@ Servo_DropNodeData(ServoNodeData* data)
 
 RawServoStyleSheet*
 Servo_StylesheetFromUTF8Bytes(const uint8_t* bytes, uint32_t length,
-                              mozilla::css::SheetParsingMode mode)
+                              mozilla::css::SheetParsingMode mode,
+                              ThreadSafeURIHolder* base,
+                              ThreadSafeURIHolder* referrer,
+                              ThreadSafePrincipalHolder* principal)
 {
   MOZ_CRASH("stylo: shouldn't be calling Servo_StylesheetFromUTF8Bytes in a "
             "non-MOZ_STYLO build");
@@ -346,6 +710,50 @@ Servo_DropStyleSet(RawServoStyleSet* set)
             "non-MOZ_STYLO build");
 }
 
+ServoDeclarationBlock*
+Servo_ParseStyleAttribute(const uint8_t* bytes, uint32_t length,
+                          nsHTMLCSSStyleSheet* cache)
+{
+  MOZ_CRASH("stylo: shouldn't be calling Servo_ParseStyleAttribute in a "
+            "non-MOZ_STYLO build");
+}
+
+void
+Servo_DropDeclarationBlock(ServoDeclarationBlock* declarations)
+{
+  MOZ_CRASH("stylo: shouldn't be calling Servo_DropDeclarationBlock in a "
+            "non-MOZ_STYLO build");
+}
+
+nsHTMLCSSStyleSheet*
+Servo_GetDeclarationBlockCache(ServoDeclarationBlock* declarations)
+{
+  MOZ_CRASH("stylo: shouldn't be calling Servo_GetDeclarationBlockCache in a "
+            "non-MOZ_STYLO build");
+}
+
+void
+Servo_SetDeclarationBlockImmutable(ServoDeclarationBlock* declarations)
+{
+  MOZ_CRASH("stylo: shouldn't be calling Servo_SetDeclarationBlockImmutable in a "
+            "non-MOZ_STYLO build");
+}
+
+void
+Servo_ClearDeclarationBlockCachePointer(ServoDeclarationBlock* declarations)
+{
+  MOZ_CRASH("stylo: shouldn't be calling Servo_ClearDeclarationBlockCachePointer in a "
+            "non-MOZ_STYLO build");
+}
+
+bool
+Servo_CSSSupports(const uint8_t* name, uint32_t name_length,
+                  const uint8_t* value, uint32_t value_length)
+{
+  MOZ_CRASH("stylo: shouldn't be calling Servo_CSSSupports in a "
+            "non-MOZ_STYLO build");
+}
+
 ServoComputedValues*
 Servo_GetComputedValues(RawGeckoNode* node)
 {
@@ -405,6 +813,12 @@ void
 Servo_RestyleDocument(RawGeckoDocument* doc, RawServoStyleSet* set)
 {
   MOZ_CRASH("stylo: shouldn't be calling Servo_RestyleDocument in a "
+            "non-MOZ_STYLO build");
+}
+
+void Servo_RestyleSubtree(RawGeckoNode* node, RawServoStyleSet* set)
+{
+  MOZ_CRASH("stylo: shouldn't be calling Servo_RestyleSubtree in a "
             "non-MOZ_STYLO build");
 }
 

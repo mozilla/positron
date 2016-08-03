@@ -70,6 +70,9 @@ class LIRGeneratorMIPSShared : public LIRGeneratorShared
     void lowerUMod(MMod* mod);
     void visitPowHalf(MPowHalf* ins);
     void visitAsmJSNeg(MAsmJSNeg* ins);
+    void visitWasmBoundsCheck(MWasmBoundsCheck* ins);
+    void visitWasmLoad(MWasmLoad* ins);
+    void visitWasmStore(MWasmStore* ins);
     void visitAsmSelect(MAsmSelect* ins);
 
     LTableSwitch* newLTableSwitch(const LAllocation& in, const LDefinition& inputCopy,
@@ -87,18 +90,14 @@ class LIRGeneratorMIPSShared : public LIRGeneratorShared
     void visitAsmJSCompareExchangeHeap(MAsmJSCompareExchangeHeap* ins);
     void visitAsmJSAtomicExchangeHeap(MAsmJSAtomicExchangeHeap* ins);
     void visitAsmJSAtomicBinopHeap(MAsmJSAtomicBinopHeap* ins);
-    void visitAsmJSLoadFuncPtr(MAsmJSLoadFuncPtr* ins);
     void visitStoreTypedArrayElementStatic(MStoreTypedArrayElementStatic* ins);
-    void visitSimdBinaryArith(MSimdBinaryArith* ins);
-    void visitSimdSelect(MSimdSelect* ins);
-    void visitSimdSplat(MSimdSplat* ins);
-    void visitSimdValueX4(MSimdValueX4* ins);
     void visitCompareExchangeTypedArrayElement(MCompareExchangeTypedArrayElement* ins);
     void visitAtomicExchangeTypedArrayElement(MAtomicExchangeTypedArrayElement* ins);
     void visitAtomicTypedArrayElementBinop(MAtomicTypedArrayElementBinop* ins);
     void visitSubstr(MSubstr* ins);
     void visitWasmTruncateToInt64(MWasmTruncateToInt64* ins);
     void visitInt64ToFloatingPoint(MInt64ToFloatingPoint* ins);
+    void visitCopySign(MCopySign* ins);
 };
 
 } // namespace jit

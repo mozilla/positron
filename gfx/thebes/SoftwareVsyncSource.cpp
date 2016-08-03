@@ -20,7 +20,6 @@ SoftwareVsyncSource::SoftwareVsyncSource()
 SoftwareVsyncSource::~SoftwareVsyncSource()
 {
   MOZ_ASSERT(NS_IsMainThread());
-  mGlobalDisplay->Shutdown();
   mGlobalDisplay = nullptr;
 }
 
@@ -32,7 +31,7 @@ SoftwareDisplay::SoftwareDisplay()
   const double rate = 1000.0 / (double) gfxPlatform::GetSoftwareVsyncRate();
   mVsyncRate = mozilla::TimeDuration::FromMilliseconds(rate);
   mVsyncThread = new base::Thread("SoftwareVsyncThread");
-  MOZ_RELEASE_ASSERT(mVsyncThread->Start(), "Could not start software vsync thread");
+  MOZ_RELEASE_ASSERT(mVsyncThread->Start(), "GFX: Could not start software vsync thread");
 }
 
 SoftwareDisplay::~SoftwareDisplay() {}

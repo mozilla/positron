@@ -890,6 +890,7 @@ class IonBuilder
 
     // TypedArray intrinsics.
     enum WrappingBehavior { AllowWrappedTypedArrays, RejectWrappedTypedArrays };
+    InliningStatus inlineTypedArray(CallInfo& callInfo, Native native);
     InliningStatus inlineIsTypedArrayHelper(CallInfo& callInfo, WrappingBehavior wrappingBehavior);
     InliningStatus inlineIsTypedArray(CallInfo& callInfo);
     InliningStatus inlineIsPossiblyWrappedTypedArray(CallInfo& callInfo);
@@ -915,9 +916,12 @@ class IonBuilder
 
     InliningStatus inlineSimd(CallInfo& callInfo, JSFunction* target, SimdType type);
 
-    template <typename T>
-    InliningStatus inlineSimdBinary(CallInfo& callInfo, JSNative native,
-                                    typename T::Operation op, SimdType type);
+    InliningStatus inlineSimdBinaryArith(CallInfo& callInfo, JSNative native,
+                                         MSimdBinaryArith::Operation op, SimdType type);
+    InliningStatus inlineSimdBinaryBitwise(CallInfo& callInfo, JSNative native,
+                                           MSimdBinaryBitwise::Operation op, SimdType type);
+    InliningStatus inlineSimdBinarySaturating(CallInfo& callInfo, JSNative native,
+                                              MSimdBinarySaturating::Operation op, SimdType type);
     InliningStatus inlineSimdShift(CallInfo& callInfo, JSNative native, MSimdShift::Operation op,
                                    SimdType type);
     InliningStatus inlineSimdComp(CallInfo& callInfo, JSNative native,
@@ -1044,7 +1048,7 @@ class IonBuilder
     JSObject* testSingletonProperty(JSObject* obj, jsid id);
     JSObject* testSingletonPropertyTypes(MDefinition* obj, jsid id);
 
-    MOZ_MUST_USE bool testNotDefinedProperty(MDefinition* obj, jsid id);
+    ResultWithOOM<bool> testNotDefinedProperty(MDefinition* obj, jsid id);
 
     uint32_t getDefiniteSlot(TemporaryTypeSet* types, PropertyName* name, uint32_t* pnfixed);
     MDefinition* convertUnboxedObjects(MDefinition* obj);

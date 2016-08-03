@@ -1,3 +1,5 @@
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -16,8 +18,14 @@
 #include "mozilla/dom/DOMTypes.h"
 #include "mozilla/dom/FileSystemBase.h"
 #include "mozilla/dom/FileSystemRequestParent.h"
+#ifdef MOZ_GAMEPAD
+#include "mozilla/dom/GamepadEventChannelParent.h"
+#include "mozilla/dom/GamepadTestChannelParent.h"
+#endif
 #include "mozilla/dom/NuwaParent.h"
 #include "mozilla/dom/PBlobParent.h"
+#include "mozilla/dom/PGamepadEventChannelParent.h"
+#include "mozilla/dom/PGamepadTestChannelParent.h"
 #include "mozilla/dom/MessagePortParent.h"
 #include "mozilla/dom/ServiceWorkerRegistrar.h"
 #include "mozilla/dom/asmjscache/AsmJSCache.h"
@@ -465,13 +473,23 @@ mozilla::dom::PBroadcastChannelParent*
 BackgroundParentImpl::AllocPBroadcastChannelParent(
                                             const PrincipalInfo& aPrincipalInfo,
                                             const nsCString& aOrigin,
-                                            const nsString& aChannel,
-                                            const bool& aPrivateBrowsing)
+                                            const nsString& aChannel)
 {
   AssertIsInMainProcess();
   AssertIsOnBackgroundThread();
 
-  return new BroadcastChannelParent(aOrigin, aChannel, aPrivateBrowsing);
+  nsString originChannelKey;
+
+  // The format of originChannelKey is:
+  //  <channelName>|<origin+OriginAttributes>
+
+  originChannelKey.Assign(aChannel);
+
+  originChannelKey.AppendLiteral("|");
+
+  originChannelKey.Append(NS_ConvertUTF8toUTF16(aOrigin));
+
+  return new BroadcastChannelParent(originChannelKey);
 }
 
 namespace {
@@ -631,8 +649,7 @@ BackgroundParentImpl::RecvPBroadcastChannelConstructor(
                                             PBroadcastChannelParent* actor,
                                             const PrincipalInfo& aPrincipalInfo,
                                             const nsCString& aOrigin,
-                                            const nsString& aChannel,
-                                            const bool& aPrivateBrowsing)
+                                            const nsString& aChannel)
 {
   AssertIsInMainProcess();
   AssertIsOnBackgroundThread();
@@ -902,6 +919,55 @@ BackgroundParentImpl::DeallocPFileSystemRequestParent(
 
   RefPtr<FileSystemRequestParent> parent =
     dont_AddRef(static_cast<FileSystemRequestParent*>(aDoomed));
+  return true;
+}
+
+// Gamepad API Background IPC
+dom::PGamepadEventChannelParent*
+BackgroundParentImpl::AllocPGamepadEventChannelParent()
+{
+#ifdef MOZ_GAMEPAD
+  RefPtr<dom::GamepadEventChannelParent> parent =
+    new dom::GamepadEventChannelParent();
+
+  return parent.forget().take();
+#else
+  return nullptr;
+#endif
+}
+
+bool
+BackgroundParentImpl::DeallocPGamepadEventChannelParent(dom::PGamepadEventChannelParent *aActor)
+{
+#ifdef MOZ_GAMEPAD
+  MOZ_ASSERT(aActor);
+  RefPtr<dom::GamepadEventChannelParent> parent =
+    dont_AddRef(static_cast<dom::GamepadEventChannelParent*>(aActor));
+#endif
+  return true;
+}
+
+dom::PGamepadTestChannelParent*
+BackgroundParentImpl::AllocPGamepadTestChannelParent()
+{
+#ifdef MOZ_GAMEPAD
+  RefPtr<dom::GamepadTestChannelParent> parent =
+    new dom::GamepadTestChannelParent();
+
+  return parent.forget().take();
+#else
+  return nullptr;
+#endif
+}
+
+bool
+BackgroundParentImpl::DeallocPGamepadTestChannelParent(dom::PGamepadTestChannelParent *aActor)
+{
+#ifdef MOZ_GAMEPAD
+  MOZ_ASSERT(aActor);
+  RefPtr<dom::GamepadTestChannelParent> parent =
+    dont_AddRef(static_cast<dom::GamepadTestChannelParent*>(aActor));
+#endif
   return true;
 }
 

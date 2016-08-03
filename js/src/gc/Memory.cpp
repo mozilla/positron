@@ -280,6 +280,61 @@ GetPageFaultCount()
     return pmc.PageFaultCount;
 }
 
+// On Windows the minimum size for a mapping is the allocation granularity
+// (64KiB in practice), so mapping very small buffers is potentially wasteful.
+void*
+AllocateMappedContent(int fd, size_t offset, size_t length, size_t alignment)
+{
+    // The allocation granularity must be a whole multiple of the alignment and
+    // the caller must request an aligned offset to satisfy Windows' and the
+    // caller's alignment requirements.
+    if (allocGranularity % alignment != 0 || offset % alignment != 0)
+        return nullptr;
+
+    // Make sure file exists and do sanity check for offset and size.
+    HANDLE hFile = reinterpret_cast<HANDLE>(intptr_t(fd));
+    MOZ_ASSERT(hFile != INVALID_HANDLE_VALUE);
+
+    uint32_t fSizeHgh;
+    uint32_t fSizeLow = GetFileSize(hFile, LPDWORD(&fSizeHgh));
+    if (fSizeLow == INVALID_FILE_SIZE && GetLastError() != NO_ERROR)
+        return nullptr;
+
+    uint64_t fSize = (uint64_t(fSizeHgh) << 32) + fSizeLow;
+    if (offset >= size_t(fSize) || length == 0 || length > fSize - offset)
+        return nullptr;
+
+    uint64_t mapSize = length + offset;
+    HANDLE hMap = CreateFileMapping(hFile, nullptr, PAGE_READONLY, mapSize >> 32, mapSize, nullptr);
+    if (!hMap)
+        return nullptr;
+
+    // MapViewOfFile requires the offset to be a whole multiple of the
+    // allocation granularity.
+    size_t alignOffset = offset - (offset % allocGranularity);
+    size_t alignLength = length + (offset % allocGranularity);
+    void* map = MapViewOfFile(hMap, FILE_MAP_COPY, 0, alignOffset, alignLength);
+    CloseHandle(hMap);
+    if (!map)
+        return nullptr;
+
+    return reinterpret_cast<void*>(uintptr_t(map) + (offset - alignOffset));
+}
+
+void
+DeallocateMappedContent(void* p, size_t /*length*/)
+{
+    if (!p)
+        return;
+
+    // Calculate the address originally returned by MapViewOfFile.
+    // This is required because AllocateMappedContent returns a pointer that
+    // might be offset into the view, necessitated by the requirement that the
+    // beginning of a view must be aligned with the allocation granularity.
+    uintptr_t map = uintptr_t(p) - (uintptr_t(p) % allocGranularity);
+    MOZ_ALWAYS_TRUE(UnmapViewOfFile(reinterpret_cast<void*>(map)));
+}
+
 #  else // Various APIs are unavailable.
 
 void*
@@ -328,12 +383,10 @@ GetPageFaultCount()
     return 0;
 }
 
-#  endif
-
 void*
 AllocateMappedContent(int fd, size_t offset, size_t length, size_t alignment)
 {
-    // TODO: Bug 988813 - Support memory mapped array buffer for Windows platform.
+    // Not implemented.
     return nullptr;
 }
 
@@ -341,8 +394,10 @@ AllocateMappedContent(int fd, size_t offset, size_t length, size_t alignment)
 void
 DeallocateMappedContent(void* p, size_t length)
 {
-    // TODO: Bug 988813 - Support memory mapped array buffer for Windows platform.
+    // Not implemented.
 }
+
+#  endif
 
 #elif defined(SOLARIS)
 
@@ -435,8 +490,8 @@ static inline void*
 MapMemoryAt(void* desired, size_t length, int prot = PROT_READ | PROT_WRITE,
             int flags = MAP_PRIVATE | MAP_ANON, int fd = -1, off_t offset = 0)
 {
-#if defined(__ia64__) || (defined(__sparc64__) && defined(__NetBSD__))
-    MOZ_ASSERT(0xffff800000000000ULL & (uintptr_t(desired) + length - 1) == 0);
+#if defined(__ia64__) || (defined(__sparc64__) && defined(__NetBSD__)) || defined(__aarch64__)
+    MOZ_ASSERT((0xffff800000000000ULL & (uintptr_t(desired) + length - 1)) == 0);
 #endif
     void* region = mmap(desired, length, prot, flags, fd, offset);
     if (region == MAP_FAILED)
@@ -485,6 +540,41 @@ MapMemory(size_t length, int prot = PROT_READ | PROT_WRITE,
         return nullptr;
     }
     return region;
+#elif defined(__aarch64__)
+   /*
+    * There might be similar virtual address issue on arm64 which depends on
+    * hardware and kernel configurations. But the work around is slightly
+    * different due to the different mmap behavior.
+    *
+    * TODO: Merge with the above code block if this implementation works for
+    * ia64 and sparc64.
+    */
+    const uintptr_t start = UINT64_C(0x0000070000000000);
+    const uintptr_t end   = UINT64_C(0x0000800000000000);
+    const uintptr_t step  = ChunkSize;
+   /*
+    * Optimization options if there are too many retries in practice:
+    * 1. Examine /proc/self/maps to find an available address. This file is
+    *    not always available, however. In addition, even if we examine
+    *    /proc/self/maps, we may still need to retry several times due to
+    *    racing with other threads.
+    * 2. Use a global/static variable with lock to track the addresses we have
+    *    allocated or tried.
+    */
+    uintptr_t hint;
+    void* region = MAP_FAILED;
+    for (hint = start; region == MAP_FAILED && hint + length <= end; hint += step) {
+        region = mmap((void*)hint, length, prot, flags, fd, offset);
+        if (region != MAP_FAILED) {
+            if ((uintptr_t(region) + (length - 1)) & 0xffff800000000000) {
+                if (munmap(region, length)) {
+                    MOZ_ASSERT(errno == ENOMEM);
+                }
+                region = MAP_FAILED;
+            }
+        }
+    }
+    return region == MAP_FAILED ? nullptr : region;
 #else
     void* region = MozTaggedAnonymousMmap(nullptr, length, prot, flags, fd, offset, "js-gc-heap");
     if (region == MAP_FAILED)
@@ -763,6 +853,21 @@ ProtectPages(void* p, size_t size)
 }
 
 void
+MakePagesReadOnly(void* p, size_t size)
+{
+    MOZ_ASSERT(size % pageSize == 0);
+#if defined(XP_WIN)
+    DWORD oldProtect;
+    if (!VirtualProtect(p, size, PAGE_READONLY, &oldProtect))
+        MOZ_CRASH("VirtualProtect(PAGE_READONLY) failed");
+    MOZ_ASSERT(oldProtect == PAGE_READWRITE);
+#else  // assume Unix
+    if (mprotect(p, size, PROT_READ))
+        MOZ_CRASH("mprotect(PROT_READ) failed");
+#endif
+}
+
+void
 UnprotectPages(void* p, size_t size)
 {
     MOZ_ASSERT(size % pageSize == 0);
@@ -770,7 +875,7 @@ UnprotectPages(void* p, size_t size)
     DWORD oldProtect;
     if (!VirtualProtect(p, size, PAGE_READWRITE, &oldProtect))
         MOZ_CRASH("VirtualProtect(PAGE_READWRITE) failed");
-    MOZ_ASSERT(oldProtect == PAGE_NOACCESS);
+    MOZ_ASSERT(oldProtect == PAGE_NOACCESS || oldProtect == PAGE_READONLY);
 #else  // assume Unix
     if (mprotect(p, size, PROT_READ | PROT_WRITE))
         MOZ_CRASH("mprotect(PROT_READ | PROT_WRITE) failed");

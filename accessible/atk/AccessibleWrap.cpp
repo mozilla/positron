@@ -19,7 +19,6 @@
 #include "nsMai.h"
 #include "nsMaiHyperlink.h"
 #include "nsString.h"
-#include "nsAutoPtr.h"
 #include "prprf.h"
 #include "nsStateMap.h"
 #include "mozilla/a11y/Platform.h"
@@ -1157,6 +1156,10 @@ void
 a11y::ProxyDestroyed(ProxyAccessible* aProxy)
 {
   auto obj = reinterpret_cast<MaiAtkObject*>(aProxy->GetWrapper() & ~IS_PROXY);
+  if (!obj) {
+    return;
+  }
+
   obj->Shutdown();
   g_object_unref(obj);
   aProxy->SetWrapper(0);

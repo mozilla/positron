@@ -769,7 +769,7 @@ const KTableEntry nsCSSProps::kAppearanceKTable[] = {
   { eCSSKeyword_splitter,               NS_THEME_SPLITTER },
   { eCSSKeyword_statusbar,              NS_THEME_STATUSBAR },
   { eCSSKeyword_statusbarpanel,         NS_THEME_STATUSBARPANEL },
-  { eCSSKeyword_resizerpanel,           NS_THEME_RESIZER_PANEL },
+  { eCSSKeyword_resizerpanel,           NS_THEME_RESIZERPANEL },
   { eCSSKeyword_resizer,                NS_THEME_RESIZER },
   { eCSSKeyword_listbox,                NS_THEME_LISTBOX },
   { eCSSKeyword_listitem,               NS_THEME_LISTITEM },
@@ -809,7 +809,7 @@ const KTableEntry nsCSSProps::kAppearanceKTable[] = {
   { eCSSKeyword_scrollbarthumb_vertical,      NS_THEME_SCROLLBARTHUMB_VERTICAL },
   { eCSSKeyword_textfield,              NS_THEME_TEXTFIELD },
   { eCSSKeyword_textfield_multiline,    NS_THEME_TEXTFIELD_MULTILINE },
-  { eCSSKeyword_caret,                  NS_THEME_TEXTFIELD_CARET },
+  { eCSSKeyword_caret,                  NS_THEME_CARET },
   { eCSSKeyword_searchfield,            NS_THEME_SEARCHFIELD },
   { eCSSKeyword_menulist,               NS_THEME_MENULIST },
   { eCSSKeyword_menulist_button,        NS_THEME_MENULIST_BUTTON },
@@ -935,12 +935,16 @@ const KTableEntry nsCSSProps::kImageLayerRepeatKTable[] = {
   { eCSSKeyword_repeat,     NS_STYLE_IMAGELAYER_REPEAT_REPEAT },
   { eCSSKeyword_repeat_x,   NS_STYLE_IMAGELAYER_REPEAT_REPEAT_X },
   { eCSSKeyword_repeat_y,   NS_STYLE_IMAGELAYER_REPEAT_REPEAT_Y },
+  { eCSSKeyword_round,      NS_STYLE_IMAGELAYER_REPEAT_ROUND},
+  { eCSSKeyword_space,      NS_STYLE_IMAGELAYER_REPEAT_SPACE},
   { eCSSKeyword_UNKNOWN, -1 }
 };
 
 const KTableEntry nsCSSProps::kImageLayerRepeatPartKTable[] = {
   { eCSSKeyword_no_repeat,  NS_STYLE_IMAGELAYER_REPEAT_NO_REPEAT },
   { eCSSKeyword_repeat,     NS_STYLE_IMAGELAYER_REPEAT_REPEAT },
+  { eCSSKeyword_round,      NS_STYLE_IMAGELAYER_REPEAT_ROUND},
+  { eCSSKeyword_space,      NS_STYLE_IMAGELAYER_REPEAT_SPACE},
   { eCSSKeyword_UNKNOWN, -1 }
 };
 
@@ -959,7 +963,7 @@ const KTableEntry nsCSSProps::kImageLayerModeKTable[] = {
 
 const KTableEntry nsCSSProps::kImageLayerCompositeKTable[] = {
   { eCSSKeyword_add, NS_STYLE_MASK_COMPOSITE_ADD },
-  { eCSSKeyword_substract, NS_STYLE_MASK_COMPOSITE_SUBSTRACT },
+  { eCSSKeyword_subtract, NS_STYLE_MASK_COMPOSITE_SUBTRACT },
   { eCSSKeyword_intersect, NS_STYLE_MASK_COMPOSITE_INTERSECT },
   { eCSSKeyword_exclude, NS_STYLE_MASK_COMPOSITE_EXCLUDE },
   { eCSSKeyword_UNKNOWN, -1 }
@@ -1043,7 +1047,6 @@ const KTableEntry nsCSSProps::kBoxShadowTypeKTable[] = {
 const KTableEntry nsCSSProps::kBoxSizingKTable[] = {
   { eCSSKeyword_content_box,  uint8_t(StyleBoxSizing::Content) },
   { eCSSKeyword_border_box,   uint8_t(StyleBoxSizing::Border) },
-  { eCSSKeyword_padding_box,  uint8_t(StyleBoxSizing::Padding) },
   { eCSSKeyword_UNKNOWN,      -1 }
 };
 
@@ -1284,9 +1287,11 @@ KTableEntry nsCSSProps::kDisplayKTable[] = {
   // The next two entries are controlled by the layout.css.grid.enabled pref.
   { eCSSKeyword_grid,                NS_STYLE_DISPLAY_GRID },
   { eCSSKeyword_inline_grid,         NS_STYLE_DISPLAY_INLINE_GRID },
-  // The next two entries are controlled by the layout.css.prefixes.webkit pref.
+  // The next 4 entries are controlled by the layout.css.prefixes.webkit pref.
   { eCSSKeyword__webkit_box,         NS_STYLE_DISPLAY_WEBKIT_BOX },
   { eCSSKeyword__webkit_inline_box,  NS_STYLE_DISPLAY_WEBKIT_INLINE_BOX },
+  { eCSSKeyword__webkit_flex,        NS_STYLE_DISPLAY_FLEX },
+  { eCSSKeyword__webkit_inline_flex, NS_STYLE_DISPLAY_INLINE_FLEX },
   // The next entry is controlled by the layout.css.display-contents.enabled
   // pref.
   { eCSSKeyword_contents,            NS_STYLE_DISPLAY_CONTENTS },
@@ -2105,6 +2110,9 @@ const KTableEntry nsCSSProps::kUnicodeBidiKTable[] = {
   { eCSSKeyword_normal, NS_STYLE_UNICODE_BIDI_NORMAL },
   { eCSSKeyword_embed, NS_STYLE_UNICODE_BIDI_EMBED },
   { eCSSKeyword_bidi_override, NS_STYLE_UNICODE_BIDI_BIDI_OVERRIDE },
+  { eCSSKeyword_isolate, NS_STYLE_UNICODE_BIDI_ISOLATE },
+  { eCSSKeyword_isolate_override, NS_STYLE_UNICODE_BIDI_ISOLATE_OVERRIDE },
+  { eCSSKeyword_plaintext, NS_STYLE_UNICODE_BIDI_PLAINTEXT },
   { eCSSKeyword__moz_isolate, NS_STYLE_UNICODE_BIDI_ISOLATE },
   { eCSSKeyword__moz_isolate_override, NS_STYLE_UNICODE_BIDI_ISOLATE_OVERRIDE },
   { eCSSKeyword__moz_plaintext, NS_STYLE_UNICODE_BIDI_PLAINTEXT },
@@ -2214,9 +2222,9 @@ const KTableEntry nsCSSProps::kWordBreakKTable[] = {
   { eCSSKeyword_UNKNOWN, -1 }
 };
 
-const KTableEntry nsCSSProps::kWordWrapKTable[] = {
-  { eCSSKeyword_normal, NS_STYLE_WORDWRAP_NORMAL },
-  { eCSSKeyword_break_word, NS_STYLE_WORDWRAP_BREAK_WORD },
+const KTableEntry nsCSSProps::kOverflowWrapKTable[] = {
+  { eCSSKeyword_normal, NS_STYLE_OVERFLOWWRAP_NORMAL },
+  { eCSSKeyword_break_word, NS_STYLE_OVERFLOWWRAP_BREAK_WORD },
   { eCSSKeyword_UNKNOWN, -1 }
 };
 
@@ -2292,13 +2300,13 @@ const KTableEntry nsCSSProps::kFillRuleKTable[] = {
 };
 
 const KTableEntry nsCSSProps::kClipShapeSizingKTable[] = {
-  { eCSSKeyword_content_box,   NS_STYLE_CLIP_SHAPE_SIZING_CONTENT },
-  { eCSSKeyword_padding_box,   NS_STYLE_CLIP_SHAPE_SIZING_PADDING },
-  { eCSSKeyword_border_box,    NS_STYLE_CLIP_SHAPE_SIZING_BORDER },
-  { eCSSKeyword_margin_box,    NS_STYLE_CLIP_SHAPE_SIZING_MARGIN },
-  { eCSSKeyword_fill_box,      NS_STYLE_CLIP_SHAPE_SIZING_FILL },
-  { eCSSKeyword_stroke_box,    NS_STYLE_CLIP_SHAPE_SIZING_STROKE },
-  { eCSSKeyword_view_box,      NS_STYLE_CLIP_SHAPE_SIZING_VIEW },
+  { eCSSKeyword_content_box,   uint8_t(StyleClipShapeSizing::Content) },
+  { eCSSKeyword_padding_box,   uint8_t(StyleClipShapeSizing::Padding) },
+  { eCSSKeyword_border_box,    uint8_t(StyleClipShapeSizing::Border) },
+  { eCSSKeyword_margin_box,    uint8_t(StyleClipShapeSizing::Margin) },
+  { eCSSKeyword_fill_box,      uint8_t(StyleClipShapeSizing::Fill) },
+  { eCSSKeyword_stroke_box,    uint8_t(StyleClipShapeSizing::Stroke) },
+  { eCSSKeyword_view_box,      uint8_t(StyleClipShapeSizing::View) },
   { eCSSKeyword_UNKNOWN,       -1 }
 };
 

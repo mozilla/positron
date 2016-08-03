@@ -75,7 +75,9 @@ public:
     }
 
     RefPtr<gl::GLContext> gl;
-    gl = gl::GLContextProvider::CreateHeadless(gl::CreateContextFlags::REQUIRE_COMPAT_PROFILE);
+    nsCString discardFailureId;
+    gl = gl::GLContextProvider::CreateHeadless(gl::CreateContextFlags::REQUIRE_COMPAT_PROFILE,
+                                               &discardFailureId);
 
     if (!gl) {
       // Setting mReady to true here means that we won't retry. Everything will
@@ -370,7 +372,7 @@ const nsTArray<GfxDriverInfo>&
 GfxInfo::GetGfxDriverInfo()
 {
   if (mDriverInfo->IsEmpty()) {
-    APPEND_TO_DRIVER_BLOCKLIST2( DRIVER_OS_ALL,
+    APPEND_TO_DRIVER_BLOCKLIST2(OperatingSystem::Android,
       (nsAString&) GfxDriverInfo::GetDeviceVendor(VendorAll), GfxDriverInfo::allDevices,
       nsIGfxInfo::FEATURE_OPENGL_LAYERS, nsIGfxInfo::FEATURE_STATUS_OK,
       DRIVER_COMPARISON_IGNORED, GfxDriverInfo::allDriverVersions,

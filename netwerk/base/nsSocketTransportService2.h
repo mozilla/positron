@@ -15,6 +15,7 @@
 #include "mozilla/Logging.h"
 #include "prinit.h"
 #include "nsIObserver.h"
+#include "mozilla/LinkedList.h"
 #include "mozilla/Mutex.h"
 #include "mozilla/net/DashboardTypes.h"
 #include "mozilla/Atomics.h"
@@ -29,19 +30,22 @@ class nsIPrefBranch;
 
 //-----------------------------------------------------------------------------
 
-//
-// set NSPR_LOG_MODULES=nsSocketTransport:5
-//
-extern mozilla::LazyLogModule gSocketTransportLog;
-#define SOCKET_LOG(args)     MOZ_LOG(gSocketTransportLog, mozilla::LogLevel::Debug, args)
-#define SOCKET_LOG_ENABLED() MOZ_LOG_TEST(gSocketTransportLog, mozilla::LogLevel::Debug)
+namespace mozilla {
+namespace net {
 
 //
-// set NSPR_LOG_MODULES=UDPSocket:5
+// set MOZ_LOG=nsSocketTransport:5
 //
-extern mozilla::LazyLogModule gUDPSocketLog;
-#define UDPSOCKET_LOG(args)     MOZ_LOG(gUDPSocketLog, mozilla::LogLevel::Debug, args)
-#define UDPSOCKET_LOG_ENABLED() MOZ_LOG_TEST(gUDPSocketLog, mozilla::LogLevel::Debug)
+extern LazyLogModule gSocketTransportLog;
+#define SOCKET_LOG(args)     MOZ_LOG(gSocketTransportLog, LogLevel::Debug, args)
+#define SOCKET_LOG_ENABLED() MOZ_LOG_TEST(gSocketTransportLog, LogLevel::Debug)
+
+//
+// set MOZ_LOG=UDPSocket:5
+//
+extern LazyLogModule gUDPSocketLog;
+#define UDPSOCKET_LOG(args)     MOZ_LOG(gUDPSocketLog, LogLevel::Debug, args)
+#define UDPSOCKET_LOG_ENABLED() MOZ_LOG_TEST(gUDPSocketLog, LogLevel::Debug)
 
 //-----------------------------------------------------------------------------
 
@@ -49,8 +53,6 @@ extern mozilla::LazyLogModule gUDPSocketLog;
 
 //-----------------------------------------------------------------------------
 
-namespace mozilla {
-namespace net {
 // These maximums are borrowed from the linux kernel.
 static const int32_t kMaxTCPKeepIdle  = 32767; // ~9 hours.
 static const int32_t kMaxTCPKeepIntvl = 32767;
@@ -63,8 +65,20 @@ static const int32_t kDefaultTCPKeepCount =
 #else
                                               4;  // Specifiable in Linux.
 #endif
-} // namespace net
-} // namespace mozilla
+
+class LinkedRunnableEvent final : public LinkedListElement<LinkedRunnableEvent>
+{
+public:
+  explicit LinkedRunnableEvent(nsIRunnable *event) : mEvent(event) {}
+  ~LinkedRunnableEvent() {}
+
+  already_AddRefed<nsIRunnable> TakeEvent()
+  {
+    return mEvent.forget();
+  }
+private:
+    nsCOMPtr<nsIRunnable> mEvent;
+};
 
 //-----------------------------------------------------------------------------
 
@@ -74,8 +88,6 @@ class nsSocketTransportService final : public nsPISocketTransportService
                                      , public nsIRunnable
                                      , public nsIObserver
 {
-    typedef mozilla::Mutex Mutex;
-
 public:
     NS_DECL_THREADSAFE_ISUPPORTS
     NS_DECL_NSPISOCKETTRANSPORTSERVICE
@@ -99,7 +111,7 @@ public:
 
     // Called by the networking dashboard on the socket thread only
     // Fills the passed array with socket information
-    void GetSocketConnections(nsTArray<mozilla::net::SocketInfo> *);
+    void GetSocketConnections(nsTArray<SocketInfo> *);
     uint64_t GetSentBytes() { return mSentBytesCount; }
     uint64_t GetReceivedBytes() { return mReceivedBytesCount; }
 
@@ -119,8 +131,8 @@ private:
     // misc (any thread)
     //-------------------------------------------------------------------------
 
-    nsCOMPtr<nsIThread> mThread;    // protected by mLock
-    mozilla::UniquePtr<mozilla::net::PollableEvent> mPollableEvent;
+    nsCOMPtr<nsIThread>      mThread;    // protected by mLock
+    UniquePtr<PollableEvent> mPollableEvent;
 
     // Returns mThread, protecting the get-and-addref with mLock
     already_AddRefed<nsIThread> GetThreadSafely();
@@ -192,10 +204,10 @@ private:
     PRPollDesc *mPollList;                        /* mListSize + 1 entries */
 
     PRIntervalTime PollTimeout();            // computes ideal poll timeout
-    nsresult       DoPollIteration(mozilla::TimeDuration *pollDuration);
+    nsresult       DoPollIteration(TimeDuration *pollDuration);
                                              // perfoms a single poll iteration
     int32_t        Poll(uint32_t *interval,
-                        mozilla::TimeDuration *pollDuration);
+                        TimeDuration *pollDuration);
                                              // calls PR_Poll.  the out param
                                              // interval indicates the poll
                                              // duration in seconds.
@@ -205,9 +217,7 @@ private:
     //-------------------------------------------------------------------------
     // pending socket queue - see NotifyWhenCanAttachSocket
     //-------------------------------------------------------------------------
-
-    mozilla::Mutex mEventQueueLock;
-    nsEventQueue mPendingSocketQ; // queue of nsIRunnable objects
+    AutoCleanLinkedList<LinkedRunnableEvent> mPendingSocketQueue;
 
     // Preference Monitor for SendBufferSize and Keepalive prefs.
     nsresult    UpdatePrefs();
@@ -222,15 +232,15 @@ private:
     // True if TCP keepalive is enabled globally.
     bool        mKeepaliveEnabledPref;
 
-    mozilla::Atomic<bool>  mServingPendingQueue;
-    mozilla::Atomic<int32_t, mozilla::Relaxed> mMaxTimePerPollIter;
-    mozilla::Atomic<bool, mozilla::Relaxed>  mTelemetryEnabledPref;
-    mozilla::Atomic<PRIntervalTime, mozilla::Relaxed> mMaxTimeForPrClosePref;
+    Atomic<bool>                    mServingPendingQueue;
+    Atomic<int32_t, Relaxed>        mMaxTimePerPollIter;
+    Atomic<bool, Relaxed>           mTelemetryEnabledPref;
+    Atomic<PRIntervalTime, Relaxed> mMaxTimeForPrClosePref;
 
     // Between a computer going to sleep and waking up the PR_*** telemetry
     // will be corrupted - so do not record it.
-    mozilla::Atomic<bool, mozilla::Relaxed> mSleepPhase;
-    nsCOMPtr<nsITimer> mAfterWakeUpTimer;
+    Atomic<bool, Relaxed>           mSleepPhase;
+    nsCOMPtr<nsITimer>              mAfterWakeUpTimer;
 
     void OnKeepaliveEnabledPrefChange();
     void NotifyKeepaliveEnabledPrefChange(SocketContext *sock);
@@ -241,7 +251,7 @@ private:
 #endif
     bool mProbedMaxCount;
 
-    void AnalyzeConnection(nsTArray<mozilla::net::SocketInfo> *data,
+    void AnalyzeConnection(nsTArray<SocketInfo> *data,
                            SocketContext *context, bool aActive);
 
     void ClosePrivateConnections();
@@ -253,6 +263,9 @@ private:
 };
 
 extern nsSocketTransportService *gSocketTransportService;
-extern mozilla::Atomic<PRThread*, mozilla::Relaxed> gSocketThread;
+extern Atomic<PRThread*, Relaxed> gSocketThread;
+
+} // namespace net
+} // namespace mozilla
 
 #endif // !nsSocketTransportService_h__

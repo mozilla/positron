@@ -129,6 +129,14 @@ interface nsIXPConnectWrappedJS : nsIXPConnectJSObjectHolder
 
 };
 
+// Special interface to unmark the internal JSObject.
+// QIing to nsIXPConnectWrappedJSUnmarkGray does *not* addref, it only unmarks,
+// and QIing to nsIXPConnectWrappedJSUnmarkGray is always supposed to fail.
+[builtinclass, uuid(c02a0ce6-275f-4ea1-9c23-08494898b070)]
+interface nsIXPConnectWrappedJSUnmarkGray : nsIXPConnectWrappedJS
+{
+};
+
 /***************************************************************************/
 
 /**
@@ -266,7 +274,7 @@ interface nsIXPCFunctionThisTranslator : nsISupports
     { 0xbd, 0xd6, 0x0, 0x0, 0x64, 0x65, 0x73, 0x74 } }
 %}
 
-[noscript, uuid(f339ea52-10ce-4103-b1f2-fd9659040e3c)]
+[noscript, uuid(768507b5-b981-40c7-8276-f6a1da502a24)]
 interface nsIXPConnect : nsISupports
 {
 %{ C++
@@ -409,9 +417,6 @@ interface nsIXPConnect : nsISupports
     getNativeOfWrapper(in JSContextPtr aJSContext,
                        in JSObjectPtr  aJSObj);
 
-    [noscript,notxpcom,nostdcall] JSContextPtr getCurrentJSContext();
-    [noscript,notxpcom,nostdcall] JSContextPtr getSafeJSContext();
-
     // Will return null if there is no JS stack right now.
     readonly attribute nsIStackFrame                CurrentJSStack;
     readonly attribute nsAXPCNativeCallContextPtr   CurrentNativeCallContext;
@@ -498,14 +503,6 @@ interface nsIXPConnect : nsISupports
                                          in JSContextPtr cx,
                                          in JSObjectPtr sandbox,
                                          in int32_t version);
-
-    /**
-     * Whether or not XPConnect should report all JS exceptions when returning
-     * from JS into C++. False by default, although any value set in the
-     * MOZ_REPORT_ALL_JS_EXCEPTIONS environment variable will override the value
-     * passed here.
-     */
-    void setReportAllJSExceptions(in boolean reportAllJSExceptions);
 
     /**
      * Trigger a JS garbage collection.

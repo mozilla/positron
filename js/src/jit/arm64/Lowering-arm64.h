@@ -102,22 +102,21 @@ class LIRGeneratorARM64 : public LIRGeneratorShared
     void visitAsmJSUnsignedToFloat32(MAsmJSUnsignedToFloat32* ins);
     void visitAsmJSLoadHeap(MAsmJSLoadHeap* ins);
     void visitAsmJSStoreHeap(MAsmJSStoreHeap* ins);
-    void visitAsmJSLoadFuncPtr(MAsmJSLoadFuncPtr* ins);
     void visitAsmJSCompareExchangeHeap(MAsmJSCompareExchangeHeap* ins);
     void visitAsmJSAtomicExchangeHeap(MAsmJSAtomicExchangeHeap* ins);
     void visitAsmJSAtomicBinopHeap(MAsmJSAtomicBinopHeap* ins);
     void visitStoreTypedArrayElementStatic(MStoreTypedArrayElementStatic* ins);
-    void visitSimdBinaryArith(MSimdBinaryArith* ins);
-    void visitSimdSelect(MSimdSelect* ins);
-    void visitSimdSplat(MSimdSplat* ins);
-    void visitSimdValueX4(MSimdValueX4* ins);
     void visitCompareExchangeTypedArrayElement(MCompareExchangeTypedArrayElement* ins);
     void visitAtomicExchangeTypedArrayElement(MAtomicExchangeTypedArrayElement* ins);
     void visitAtomicTypedArrayElementBinop(MAtomicTypedArrayElementBinop* ins);
     void visitSubstr(MSubstr* ins);
     void visitRandom(MRandom* ins);
     void visitWasmTruncateToInt64(MWasmTruncateToInt64* ins);
+    void visitWasmBoundsCheck(MWasmBoundsCheck* ins);
+    void visitWasmLoad(MWasmLoad* ins);
+    void visitWasmStore(MWasmStore* ins);
     void visitInt64ToFloatingPoint(MInt64ToFloatingPoint* ins);
+    void visitCopySign(MCopySign* ins);
 };
 
 typedef LIRGeneratorARM64 LIRGeneratorSpecific;

@@ -11,7 +11,7 @@ this.EXPORTED_SYMBOLS = [
 const {classes: Cc, interfaces: Ci, utils: Cu} = Components;
 
 // The time to wait before considering a transaction stuck and rejecting it.
-const TRANSACTIONS_QUEUE_TIMEOUT_MS = 120000 // 2 minutes
+const TRANSACTIONS_QUEUE_TIMEOUT_MS = 240000 // 4 minutes
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Timer.jsm");
@@ -931,9 +931,10 @@ function openConnection(options) {
       try {
         resolve(
           new OpenedConnection(connection.QueryInterface(Ci.mozIStorageAsyncConnection),
-                              identifier, openedOptions));
+                               identifier, openedOptions));
       } catch (ex) {
         log.warn("Could not open database", ex);
+        connection.asyncClose();
         reject(ex);
       }
     });
@@ -1012,6 +1013,7 @@ function cloneStorageConnection(options) {
         resolve(new OpenedConnection(conn, identifier, openedOptions));
       } catch (ex) {
         log.warn("Could not clone database", ex);
+        connection.asyncClose();
         reject(ex);
       }
     });

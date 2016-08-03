@@ -10,6 +10,7 @@
 #include "mozilla/Logging.h"
 #include "GMPParent.h"
 #include "GMPVideoDecoderParent.h"
+#include "nsAutoPtr.h"
 #include "nsIObserverService.h"
 #include "GeckoChildProcessHost.h"
 #include "mozilla/Preferences.h"
@@ -524,7 +525,8 @@ GeckoMediaPluginServiceParent::EnsureInitialized() {
 }
 
 bool
-GeckoMediaPluginServiceParent::GetContentParentFrom(const nsACString& aNodeId,
+GeckoMediaPluginServiceParent::GetContentParentFrom(GMPCrashHelper* aHelper,
+                                                    const nsACString& aNodeId,
                                                     const nsCString& aAPI,
                                                     const nsTArray<nsCString>& aTags,
                                                     UniquePtr<GetGMPContentParentCallback>&& aCallback)
@@ -539,8 +541,9 @@ GeckoMediaPluginServiceParent::GetContentParentFrom(const nsACString& aNodeId,
   nsTArray<nsCString> tags(aTags);
   nsCString api(aAPI);
   GetGMPContentParentCallback* rawCallback = aCallback.release();
+  RefPtr<GMPCrashHelper> helper(aHelper);
   EnsureInitialized()->Then(thread, __func__,
-    [self, tags, api, nodeId, rawCallback]() -> void {
+    [self, tags, api, nodeId, rawCallback, helper]() -> void {
       UniquePtr<GetGMPContentParentCallback> callback(rawCallback);
       RefPtr<GMPParent> gmp = self->SelectPluginForAPI(nodeId, api, tags);
       LOGD(("%s: %p returning %p for api %s", __FUNCTION__, (void *)self, (void *)gmp, api.get()));
@@ -549,6 +552,7 @@ GeckoMediaPluginServiceParent::GetContentParentFrom(const nsACString& aNodeId,
         callback->Done(nullptr);
         return;
       }
+      self->ConnectCrashHelper(gmp->GetPluginId(), helper);
       gmp->GetGMPContentParent(Move(callback));
     },
     [rawCallback]() -> void {
@@ -715,7 +719,7 @@ GeckoMediaPluginServiceParent::UnloadPlugins()
     MutexAutoLock lock(mMutex);
     // Move all plugins references to a local array. This way mMutex won't be
     // locked when calling CloseActive (to avoid inter-locking).
-    plugins = Move(mPlugins);
+    Swap(plugins, mPlugins);
   }
 
   LOGD(("%s::%s plugins:%u including async:%u", __CLASS__, __FUNCTION__,
@@ -1817,41 +1821,74 @@ GeckoMediaPluginServiceParent::ClearStorage()
   NS_DispatchToMainThread(new NotifyObserversTask("gmp-clear-storage-complete"), NS_DISPATCH_NORMAL);
 }
 
+already_AddRefed<GMPParent>
+GeckoMediaPluginServiceParent::GetById(uint32_t aPluginId)
+{
+  MutexAutoLock lock(mMutex);
+  for (const RefPtr<GMPParent>& gmp : mPlugins) {
+    if (gmp->GetPluginId() == aPluginId) {
+      return do_AddRef(gmp);
+    }
+  }
+  return nullptr;
+}
+
 GMPServiceParent::~GMPServiceParent()
 {
-  RefPtr<DeleteTask<Transport>> task = new DeleteTask<Transport>(GetTransport());
-  XRE_GetIOMessageLoop()->PostTask(task.forget());
 }
 
 bool
-GMPServiceParent::RecvLoadGMP(const nsCString& aNodeId,
-                              const nsCString& aAPI,
-                              nsTArray<nsCString>&& aTags,
-                              nsTArray<ProcessId>&& aAlreadyBridgedTo,
-                              ProcessId* aId,
-                              nsCString* aDisplayName,
-                              uint32_t* aPluginId,
-                              nsresult* aRv)
+GMPServiceParent::RecvSelectGMP(const nsCString& aNodeId,
+                                const nsCString& aAPI,
+                                nsTArray<nsCString>&& aTags,
+                                uint32_t* aOutPluginId,
+                                nsresult* aOutRv)
 {
-  *aRv = NS_OK;
   if (mService->IsShuttingDown()) {
-    *aRv = NS_ERROR_ILLEGAL_DURING_SHUTDOWN;
+    *aOutRv = NS_ERROR_ILLEGAL_DURING_SHUTDOWN;
     return true;
   }
 
   RefPtr<GMPParent> gmp = mService->SelectPluginForAPI(aNodeId, aAPI, aTags);
+  if (gmp) {
+    *aOutPluginId = gmp->GetPluginId();
+    *aOutRv = NS_OK;
+  } else {
+    *aOutRv = NS_ERROR_FAILURE;
+  }
 
   nsCString api = aTags[0];
   LOGD(("%s: %p returning %p for api %s", __FUNCTION__, (void *)this, (void *)gmp, api.get()));
 
-  if (!gmp || !gmp->EnsureProcessLoaded(aId)) {
+  return true;
+}
+
+bool
+GMPServiceParent::RecvLaunchGMP(const uint32_t& aPluginId,
+                                nsTArray<ProcessId>&& aAlreadyBridgedTo,
+                                ProcessId* aOutProcessId,
+                                nsCString* aOutDisplayName,
+                                nsresult* aOutRv)
+{
+  *aOutRv = NS_OK;
+  if (mService->IsShuttingDown()) {
+    *aOutRv = NS_ERROR_ILLEGAL_DURING_SHUTDOWN;
+    return true;
+  }
+
+  RefPtr<GMPParent> gmp(mService->GetById(aPluginId));
+  if (!gmp) {
+    *aOutRv = NS_ERROR_FAILURE;
+    return true;
+  }
+
+  if (!gmp->EnsureProcessLoaded(aOutProcessId)) {
     return false;
   }
 
-  *aDisplayName = gmp->GetDisplayName();
-  *aPluginId = gmp->GetPluginId();
+  *aOutDisplayName = gmp->GetDisplayName();
 
-  return aAlreadyBridgedTo.Contains(*aId) || gmp->Bridge(this);
+  return aAlreadyBridgedTo.Contains(*aOutProcessId) || gmp->Bridge(this);
 }
 
 bool

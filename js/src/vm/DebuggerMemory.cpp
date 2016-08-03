@@ -233,8 +233,8 @@ DebuggerMemory::drainAllocationsLog(JSContext* cx, unsigned argc, Value* vp)
         result->setDenseElement(i, ObjectValue(*obj));
 
         // Pop the front queue entry, and delete it immediately, so that the GC
-        // sees the AllocationsLogEntry's RelocatablePtr barriers run atomically
-        // with the change to the graph (the queeue link).
+        // sees the AllocationsLogEntry's HeapPtr barriers run atomically with
+        // the change to the graph (the queue link).
         if (!dbg->allocationsLog.popFront()) {
             ReportOutOfMemory(cx);
             return false;
@@ -355,15 +355,15 @@ DebuggerMemory::setOnGarbageCollection(JSContext* cx, unsigned argc, Value* vp)
 /* Debugger.Memory.prototype.takeCensus */
 
 JS_PUBLIC_API(void)
-JS::dbg::SetDebuggerMallocSizeOf(JSRuntime* rt, mozilla::MallocSizeOf mallocSizeOf)
+JS::dbg::SetDebuggerMallocSizeOf(JSContext* cx, mozilla::MallocSizeOf mallocSizeOf)
 {
-    rt->debuggerMallocSizeOf = mallocSizeOf;
+    cx->debuggerMallocSizeOf = mallocSizeOf;
 }
 
 JS_PUBLIC_API(mozilla::MallocSizeOf)
-JS::dbg::GetDebuggerMallocSizeOf(JSRuntime* rt)
+JS::dbg::GetDebuggerMallocSizeOf(JSContext* cx)
 {
-    return rt->debuggerMallocSizeOf;
+    return cx->debuggerMallocSizeOf;
 }
 
 using JS::ubi::Census;

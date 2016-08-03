@@ -17,6 +17,7 @@
 #include "nsIRunnable.h"
 #include "nsIAsyncShutdown.h"
 #include "Latency.h"
+#include "mozilla/Services.h"
 #include "mozilla/UniquePtr.h"
 #include "mozilla/WeakPtr.h"
 #include "GraphDriver.h"
@@ -156,8 +157,9 @@ public:
     nsCOMPtr<nsIAsyncShutdownClient> barrier;
     nsresult rv = svc->GetProfileBeforeChange(getter_AddRefs(barrier));
     if (!barrier) {
-      // We are probably in a content process.
-      rv = svc->GetContentChildShutdown(getter_AddRefs(barrier));
+      // We are probably in a content process. We need to do cleanup at
+      // XPCOM shutdown in leakchecking builds.
+      rv = svc->GetXpcomWillShutdown(getter_AddRefs(barrier));
     }
     MOZ_RELEASE_ASSERT(NS_SUCCEEDED(rv));
     MOZ_RELEASE_ASSERT(barrier);

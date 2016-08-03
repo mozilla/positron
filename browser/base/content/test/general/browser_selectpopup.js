@@ -8,8 +8,8 @@
 const XHTML_DTD = '<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">';
 
 const PAGECONTENT =
-  "<html xmlns='http://www.w3.org/1999/xhtml'>" + 
-  "<body onload='gChangeEvents = 0; document.body.firstChild.focus()'><select onchange='gChangeEvents++'>" +
+  "<html xmlns='http://www.w3.org/1999/xhtml'>" +
+  "<body onload='gChangeEvents = 0;gInputEvents = 0; document.body.firstChild.focus()'><select oninput='gInputEvents++' onchange='gChangeEvents++'>" +
   "  <optgroup label='First Group'>" +
   "    <option value='One'>One</option>" +
   "    <option value='Two'>Two</option>" +
@@ -74,6 +74,13 @@ function hideSelectPopup(selectPopup, withEscape)
   return popupHiddenPromise;
 }
 
+function getInputEvents()
+{
+  return ContentTask.spawn(gBrowser.selectedBrowser, {}, function() {
+    return content.wrappedJSObject.gInputEvents;
+  });
+}
+
 function getChangeEvents()
 {
   return ContentTask.spawn(gBrowser.selectedBrowser, {}, function() {
@@ -111,7 +118,7 @@ function doSelectTests(contentType, dtd)
 
   // On Windows, one can navigate on disabled menuitems
   let expectedIndex = isWindows ? 5 : 9;
-     
+
   is(menulist.menuBoxObject.activeChild, menulist.getItemAtIndex(expectedIndex),
      "Skip optgroup header and disabled items select item 7");
   is(menulist.selectedIndex, isWindows ? 5 : 1, "Select or skip disabled item selectedIndex");
@@ -124,6 +131,7 @@ function doSelectTests(contentType, dtd)
   is(menulist.menuBoxObject.activeChild, menulist.getItemAtIndex(3), "Select item 3 again");
   is(menulist.selectedIndex, isWindows ? 3 : 1, "Select item 3 selectedIndex");
 
+  is((yield getInputEvents()), 0, "Before closed - number of input events");
   is((yield getChangeEvents()), 0, "Before closed - number of change events");
 
   EventUtils.synthesizeKey("a", { accelKey: true });
@@ -135,22 +143,27 @@ function doSelectTests(contentType, dtd)
   yield hideSelectPopup(selectPopup);
 
   is(menulist.selectedIndex, 3, "Item 3 still selected");
+  is((yield getInputEvents()), 1, "After closed - number of input events");
   is((yield getChangeEvents()), 1, "After closed - number of change events");
 
   // Opening and closing the popup without changing the value should not fire a change event.
   yield openSelectPopup(selectPopup, true);
   yield hideSelectPopup(selectPopup, true);
+  is((yield getInputEvents()), 1, "Open and close with no change - number of input events");
   is((yield getChangeEvents()), 1, "Open and close with no change - number of change events");
   EventUtils.synthesizeKey("VK_TAB", { });
   EventUtils.synthesizeKey("VK_TAB", { shiftKey: true });
+  is((yield getInputEvents()), 1, "Tab away from select with no change - number of input events");
   is((yield getChangeEvents()), 1, "Tab away from select with no change - number of change events");
 
   yield openSelectPopup(selectPopup, true);
   EventUtils.synthesizeKey("KEY_ArrowDown", { code: "ArrowDown" });
   yield hideSelectPopup(selectPopup, true);
+  is((yield getInputEvents()), isWindows ? 2 : 1, "Open and close with change - number of input events");
   is((yield getChangeEvents()), isWindows ? 2 : 1, "Open and close with change - number of change events");
   EventUtils.synthesizeKey("VK_TAB", { });
   EventUtils.synthesizeKey("VK_TAB", { shiftKey: true });
+  is((yield getInputEvents()), isWindows ? 2 : 1, "Tab away from select with change - number of input events");
   is((yield getChangeEvents()), isWindows ? 2 : 1, "Tab away from select with change - number of change events");
 
   is(selectPopup.lastChild.previousSibling.label, "Seven", "Spaces collapsed");
@@ -185,7 +198,7 @@ add_task(function*() {
 
   // Wait a bit just to make sure the popup won't close.
   yield new Promise(resolve => setTimeout(resolve, 1000));
-  
+
   is(selectPopup.state, "open", "Different popup did not affect open popup");
 
   yield hideSelectPopup(selectPopup);
@@ -342,3 +355,53 @@ add_task(function* test_event_order() {
   });
 });
 
+// This test checks select elements with a large number of options to ensure that
+// the popup appears within the browser area.
+add_task(function* test_large_popup() {
+  const pageUrl = "data:text/html," + escape(PAGECONTENT_SMALL);
+  let tab = yield BrowserTestUtils.openNewForegroundTab(gBrowser, pageUrl);
+
+  yield ContentTask.spawn(tab.linkedBrowser, null, function*() {
+    let doc = content.document;
+    let select = doc.getElementById("one");
+    for (var i = 0; i < 180; i++) {
+      select.add(new content.Option("Test" + i));
+    }
+
+    select.focus();
+  });
+
+  let selectPopup = document.getElementById("ContentSelectDropdown").menupopup;
+  let browserRect = tab.linkedBrowser.getBoundingClientRect();
+
+  let positions = [
+    "margin-top: 300px;",
+    "position: fixed; bottom: 100px;",
+    "width: 100%; height: 9999px;"
+  ];
+
+  let position;
+  while (true) {
+    yield openSelectPopup(selectPopup, false);
+
+    let rect = selectPopup.getBoundingClientRect();
+    ok(rect.top >= browserRect.top, "Popup top position in within browser area");
+    ok(rect.bottom <= browserRect.bottom, "Popup bottom position in within browser area");
+
+    yield hideSelectPopup(selectPopup, false);
+
+    position = positions.shift();
+    if (!position) {
+      break;
+    }
+
+    let contentPainted = BrowserTestUtils.contentPainted(tab.linkedBrowser);
+    yield ContentTask.spawn(tab.linkedBrowser, position, function*(position) {
+      let select = content.document.getElementById("one");
+      select.setAttribute("style", position);
+    });
+    yield contentPainted;
+  }
+
+  yield BrowserTestUtils.removeTab(tab);
+});

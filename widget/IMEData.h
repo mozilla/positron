@@ -39,7 +39,6 @@ struct nsIMEUpdatePreference final
   enum : Notifications
   {
     NOTIFY_NOTHING                       = 0,
-    NOTIFY_SELECTION_CHANGE              = 1 << 0,
     NOTIFY_TEXT_CHANGE                   = 1 << 1,
     NOTIFY_POSITION_CHANGE               = 1 << 2,
     // NOTIFY_MOUSE_BUTTON_EVENT_ON_CHAR is used when mouse button is pressed
@@ -48,42 +47,24 @@ struct nsIMEUpdatePreference final
     // returns NS_SUCCESS_EVENT_CONSUMED.  Otherwise, it returns NS_OK if it's
     // handled without any error.
     NOTIFY_MOUSE_BUTTON_EVENT_ON_CHAR    = 1 << 3,
-    // Following values indicate when widget needs or doesn't need notification.
-    NOTIFY_CHANGES_CAUSED_BY_COMPOSITION = 1 << 6,
     // NOTE: NOTIFY_DURING_DEACTIVE isn't supported in environments where two
     //       or more compositions are possible.  E.g., Mac and Linux (GTK).
-    NOTIFY_DURING_DEACTIVE               = 1 << 7,
-    // Changes are notified in following conditions if the instance is
-    // just constructed.  If some platforms don't need change notifications
-    // in some of following conditions, the platform should remove following
-    // flags before returing the instance from nsIWidget::GetUpdatePreference().
-    DEFAULT_CONDITIONS_OF_NOTIFYING_CHANGES =
-      NOTIFY_CHANGES_CAUSED_BY_COMPOSITION
+    NOTIFY_DURING_DEACTIVE               = 1 << 7
   };
 
   nsIMEUpdatePreference()
-    : mWantUpdates(DEFAULT_CONDITIONS_OF_NOTIFYING_CHANGES)
+    : mWantUpdates(NOTIFY_NOTHING)
   {
   }
 
   explicit nsIMEUpdatePreference(Notifications aWantUpdates)
-    : mWantUpdates(aWantUpdates | DEFAULT_CONDITIONS_OF_NOTIFYING_CHANGES)
+    : mWantUpdates(aWantUpdates)
   {
   }
 
   nsIMEUpdatePreference operator|(const nsIMEUpdatePreference& aOther) const
   {
     return nsIMEUpdatePreference(aOther.mWantUpdates | mWantUpdates);
-  }
-
-  void DontNotifyChangesCausedByComposition()
-  {
-    mWantUpdates &= ~DEFAULT_CONDITIONS_OF_NOTIFYING_CHANGES;
-  }
-
-  bool WantSelectionChange() const
-  {
-    return !!(mWantUpdates & NOTIFY_SELECTION_CHANGE);
   }
 
   bool WantTextChange() const
@@ -98,18 +79,12 @@ struct nsIMEUpdatePreference final
 
   bool WantChanges() const
   {
-    return WantSelectionChange() || WantTextChange();
+    return WantTextChange();
   }
 
   bool WantMouseButtonEventOnChar() const
   {
     return !!(mWantUpdates & NOTIFY_MOUSE_BUTTON_EVENT_ON_CHAR);
-  }
-
-  bool WantChangesCausedByComposition() const
-  {
-    return WantChanges() &&
-             !!(mWantUpdates & NOTIFY_CHANGES_CAUSED_BY_COMPOSITION);
   }
 
   bool WantDuringDeactive() const
@@ -163,7 +138,12 @@ struct IMEState final
      * directly. Because we don't process some native events, but they may
      * be needed by the plug-in.
      */
-    PLUGIN
+    PLUGIN,
+    /**
+     * 'Unknown' is useful when you cache this enum.  So, this shouldn't be
+     * used with nsIWidget::SetInputContext().
+     */
+    UNKNOWN
   };
   Enabled mEnabled;
 
@@ -436,8 +416,18 @@ enum IMEMessage : IMEMessageType
   NOTIFY_IME_OF_SELECTION_CHANGE,
   // Text in the focused editable content is changed
   NOTIFY_IME_OF_TEXT_CHANGE,
-  // Composition string has been updated
-  NOTIFY_IME_OF_COMPOSITION_UPDATE,
+  // Notified when a dispatched composition event is handled by the
+  // contents.  This must be notified after the other notifications.
+  // Note that if a remote process has focus, this is notified only once when
+  // all dispatched events are handled completely.  So, the receiver shouldn't
+  // count number of received this notification for comparing with the number
+  // of dispatched events.
+  // NOTE: If a composition event causes moving focus from the focused editor,
+  //       this notification may not be notified as usual.  Even in such case,
+  //       NOTIFY_IME_OF_BLUR is always sent.  So, notification listeners
+  //       should tread the blur notification as including this if there is
+  //       pending composition events.
+  NOTIFY_IME_OF_COMPOSITION_EVENT_HANDLED,
   // Position or size of focused element may be changed.
   NOTIFY_IME_OF_POSITION_CHANGE,
   // Mouse button event is fired on a character in focused editor
@@ -449,6 +439,9 @@ enum IMEMessage : IMEMessageType
   // (some platforms may not support)
   REQUEST_TO_CANCEL_COMPOSITION
 };
+
+// FYI: Implemented in nsBaseWidget.cpp
+const char* ToChar(IMEMessage aIMEMessage);
 
 struct IMENotification final
 {
@@ -555,7 +548,7 @@ struct IMENotification final
         mTextChangeData += aNotification.mTextChangeData;
         break;
       case NOTIFY_IME_OF_POSITION_CHANGE:
-      case NOTIFY_IME_OF_COMPOSITION_UPDATE:
+      case NOTIFY_IME_OF_COMPOSITION_EVENT_HANDLED:
         MOZ_ASSERT(aNotification.mMessage == mMessage);
         break;
       default:

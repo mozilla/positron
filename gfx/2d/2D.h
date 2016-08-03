@@ -136,13 +136,13 @@ struct StrokeOptions {
  */
 struct DrawSurfaceOptions {
   /// For constructor parameter description, see member data documentation.
-  explicit DrawSurfaceOptions(Filter aFilter = Filter::LINEAR,
+  explicit DrawSurfaceOptions(SamplingFilter aSamplingFilter = SamplingFilter::LINEAR,
                               SamplingBounds aSamplingBounds = SamplingBounds::UNBOUNDED)
-    : mFilter(aFilter)
+    : mSamplingFilter(aSamplingFilter)
     , mSamplingBounds(aSamplingBounds)
   { }
 
-  Filter mFilter;                 /**< Filter used when resampling source surface
+  SamplingFilter mSamplingFilter; /**< SamplingFilter used when resampling source surface
                                        region to the destination region. */
   SamplingBounds mSamplingBounds; /**< This indicates whether the implementation is
                                        allowed to sample pixels outside the source
@@ -287,11 +287,12 @@ class SurfacePattern : public Pattern
 public:
   /// For constructor parameter description, see member data documentation.
   SurfacePattern(SourceSurface *aSourceSurface, ExtendMode aExtendMode,
-                 const Matrix &aMatrix = Matrix(), Filter aFilter = Filter::GOOD,
+                 const Matrix &aMatrix = Matrix(),
+                 SamplingFilter aSamplingFilter = SamplingFilter::GOOD,
                  const IntRect &aSamplingRect = IntRect())
     : mSurface(aSourceSurface)
     , mExtendMode(aExtendMode)
-    , mFilter(aFilter)
+    , mSamplingFilter(aSamplingFilter)
     , mMatrix(aMatrix)
     , mSamplingRect(aSamplingRect)
   {}
@@ -304,7 +305,7 @@ public:
   RefPtr<SourceSurface> mSurface; //!< Surface to use for drawing
   ExtendMode mExtendMode;         /**< This determines how the image is extended
                                        outside the bounds of the image */
-  Filter mFilter;                 //!< Resampling filter for resampling the image.
+  SamplingFilter mSamplingFilter; //!< Resampling filter for resampling the image.
   Matrix mMatrix;                 //!< Transforms the pattern into user space
 
   IntRect mSamplingRect;          /**< Rect that must not be sampled outside of,
@@ -1174,6 +1175,17 @@ public:
     return mPermitSubpixelAA;
   }
 
+  /**
+   * Ensures that no snapshot is still pointing to this DrawTarget's surface data.
+   *
+   * This can be useful if the DrawTarget is wrapped around data that it does not
+   * own, and for some reason the owner of the data has to make it temporarily
+   * unavailable without the DrawTarget knowing about it.
+   * This can cause costly surface copies, so it should not be used without a
+   * a good reason.
+   */
+  virtual void DetachAllSnapshots() = 0;
+
 #ifdef USE_SKIA_GPU
   virtual bool InitWithGrContext(GrContext* aGrContext,
                                  const IntSize &aSize,
@@ -1236,9 +1248,21 @@ public:
 
   static bool HasSSE2();
 
-  /** Make sure that the given dimensions don't overflow a 32-bit signed int
-   * using 4 bytes per pixel; optionally, make sure that either dimension
-   * doesn't exceed the given limit.
+  /**
+   * Returns false if any of the following are true:
+   *
+   *   - the width/height of |sz| are less than or equal to zero
+   *   - the width/height of |sz| are greater than |limit|
+   *   - the number of bytes that need to be allocated for the surface is too
+   *     big to fit in an int32_t, or bigger than |allocLimit|, if specifed
+   *
+   * To calculate the number of bytes that need to be allocated for the surface
+   * this function makes the conservative assumption that there need to be
+   * 4 bytes-per-pixel, and the stride alignment is 16 bytes.
+   *
+   * The reason for using int32_t rather than uint32_t is again to be
+   * conservative; some code has in the past and may in the future use signed
+   * integers to store buffer lengths etc.
    */
   static bool CheckSurfaceSize(const IntSize &sz,
                                int32_t limit = 0,

@@ -10,6 +10,7 @@
 #include "nsHttpHeaderArray.h"
 #include "nsURLHelper.h"
 #include "nsIHttpHeaderVisitor.h"
+#include "nsHttpHandler.h"
 
 namespace mozilla {
 namespace net {
@@ -171,6 +172,41 @@ nsHttpHeaderArray::SetHeaderFromNet(nsHttpAtom header,
     return NS_OK;
 }
 
+nsresult
+nsHttpHeaderArray::SetResponseHeaderFromCache(nsHttpAtom header,
+                                              const nsACString &value,
+                                              nsHttpHeaderArray::HeaderVariety variety)
+{
+    MOZ_ASSERT((variety == eVarietyResponse) ||
+               (variety == eVarietyResponseNetOriginal),
+               "Headers from cache can only be eVarietyResponse and "
+               "eVarietyResponseNetOriginal");
+
+    if (variety == eVarietyResponseNetOriginal) {
+        return SetHeader_internal(header, value,
+                                  eVarietyResponseNetOriginal);
+    } else {
+        nsTArray<nsEntry>::index_type index = 0;
+        do {
+            index = mHeaders.IndexOf(header, index, nsEntry::MatchHeader());
+            if (index != mHeaders.NoIndex) {
+                nsEntry &entry = mHeaders[index];
+                if (value.Equals(entry.value)) {
+                    MOZ_ASSERT((entry.variety == eVarietyResponseNetOriginal) ||
+                               (entry.variety == eVarietyResponseNetOriginalAndResponse),
+                               "This array must contain only eVarietyResponseNetOriginal"
+                               " and eVarietyResponseNetOriginalAndRespons headers!");
+                    entry.variety = eVarietyResponseNetOriginalAndResponse;
+                    return NS_OK;
+                }
+                index++;
+            }
+        } while (index != mHeaders.NoIndex);
+        // If we are here, we have not found an entry so add a new one.
+        return SetHeader_internal(header, value, eVarietyResponse);
+    }
+}
+
 void
 nsHttpHeaderArray::ClearHeader(nsHttpAtom header)
 {
@@ -250,6 +286,8 @@ nsresult
 nsHttpHeaderArray::VisitHeaders(nsIHttpHeaderVisitor *visitor, nsHttpHeaderArray::VisitorFilter filter)
 {
     NS_ENSURE_ARG_POINTER(visitor);
+    nsresult rv;
+
     uint32_t i, count = mHeaders.Length();
     for (i = 0; i < count; ++i) {
         const nsEntry &entry = mHeaders[i];
@@ -260,9 +298,10 @@ nsHttpHeaderArray::VisitHeaders(nsIHttpHeaderVisitor *visitor, nsHttpHeaderArray
         } else if (filter == eFilterResponseOriginal && entry.variety == eVarietyResponse) {
             continue;
         }
-        if (NS_FAILED(visitor->VisitHeader(nsDependentCString(entry.header),
-                                           entry.value))) {
-            break;
+        rv = visitor->VisitHeader(
+            nsDependentCString(entry.header), entry.value);
+        if NS_FAILED(rv) {
+            return rv;
         }
     }
     return NS_OK;

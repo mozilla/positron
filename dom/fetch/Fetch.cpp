@@ -124,23 +124,29 @@ public:
   Run()
   {
     AssertIsOnMainThread();
+    RefPtr<FetchDriver> fetch;
     RefPtr<PromiseWorkerProxy> proxy = mResolver->mPromiseProxy;
-    MutexAutoLock lock(proxy->Lock());
-    if (proxy->CleanedUp()) {
-      NS_WARNING("Aborting Fetch because worker already shut down");
-      return NS_OK;
+
+    {
+      // Acquire the proxy mutex while getting data from the WorkerPrivate...
+      MutexAutoLock lock(proxy->Lock());
+      if (proxy->CleanedUp()) {
+        NS_WARNING("Aborting Fetch because worker already shut down");
+        return NS_OK;
+      }
+
+      nsCOMPtr<nsIPrincipal> principal = proxy->GetWorkerPrivate()->GetPrincipal();
+      MOZ_ASSERT(principal);
+      nsCOMPtr<nsILoadGroup> loadGroup = proxy->GetWorkerPrivate()->GetLoadGroup();
+      MOZ_ASSERT(loadGroup);
+      fetch = new FetchDriver(mRequest, principal, loadGroup);
     }
 
-    nsCOMPtr<nsIPrincipal> principal = proxy->GetWorkerPrivate()->GetPrincipal();
-    MOZ_ASSERT(principal);
-    nsCOMPtr<nsILoadGroup> loadGroup = proxy->GetWorkerPrivate()->GetLoadGroup();
-    MOZ_ASSERT(loadGroup);
-    RefPtr<FetchDriver> fetch = new FetchDriver(mRequest, principal, loadGroup);
-    nsresult rv = fetch->Fetch(mResolver);
-    // Right now we only support async fetch, which should never directly fail.
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-      return rv;
-    }
+    // ...but release it before calling Fetch, because mResolver's callback can
+    // be called synchronously and they want the mutex, too.
+    fetch->Fetch(mResolver);
+
+    // FetchDriver::Fetch never directly fails
     return NS_OK;
   }
 };
@@ -163,9 +169,12 @@ FetchRequest(nsIGlobalObject* aGlobal, const RequestOrUSVString& aInput,
                 nsContentUtils::IsCallerChrome());
 
   AutoJSAPI jsapi;
-  jsapi.Init(aGlobal);
-  JSContext* cx = jsapi.cx();
+  if (!jsapi.Init(aGlobal)) {
+    aRv.Throw(NS_ERROR_NOT_AVAILABLE);
+    return nullptr;
+  }
 
+  JSContext* cx = jsapi.cx();
   JS::Rooted<JSObject*> jsGlobal(cx, aGlobal->GetGlobalJSObject());
   GlobalObject global(cx, jsGlobal);
 
@@ -223,7 +232,7 @@ FetchRequest(nsIGlobalObject* aGlobal, const RequestOrUSVString& aInput,
 
     RefPtr<WorkerFetchResolver> resolver = WorkerFetchResolver::Create(worker, p);
     if (!resolver) {
-      NS_WARNING("Could not add WorkerFetchResolver feature to worker");
+      NS_WARNING("Could not add WorkerFetchResolver workerHolder to worker");
       aRv.Throw(NS_ERROR_DOM_ABORT_ERR);
       return nullptr;
     }
@@ -262,7 +271,7 @@ MainThreadFetchResolver::~MainThreadFetchResolver()
   NS_ASSERT_OWNINGTHREAD(MainThreadFetchResolver);
 }
 
-class WorkerFetchResponseRunnable final : public WorkerRunnable
+class WorkerFetchResponseRunnable final : public MainThreadWorkerRunnable
 {
   RefPtr<WorkerFetchResolver> mResolver;
   // Passed from main thread to worker thread after being initialized.
@@ -271,7 +280,7 @@ public:
   WorkerFetchResponseRunnable(WorkerPrivate* aWorkerPrivate,
                               WorkerFetchResolver* aResolver,
                               InternalResponse* aResponse)
-    : WorkerRunnable(aWorkerPrivate, WorkerThreadUnchangedBusyCount)
+    : MainThreadWorkerRunnable(aWorkerPrivate)
     , mResolver(aResolver)
     , mInternalResponse(aResponse)
   {
@@ -296,25 +305,6 @@ public:
     }
     return true;
   }
-
-  bool
-  PreDispatch(WorkerPrivate* aWorkerPrivate) override
-  {
-    // Don't call default PreDispatch() since it incorrectly asserts we are
-    // dispatching from the parent worker thread.  We always dispatch from
-    // the main thread.
-    AssertIsOnMainThread();
-    return true;
-  }
-
-  void
-  PostDispatch(WorkerPrivate* aWorkerPrivate, bool aDispatchResult) override
-  {
-    // Don't call default PostDispatch() since it incorrectly asserts we are
-    // dispatching from the parent worker thread.  We always dispatch from
-    // the main thread.
-    AssertIsOnMainThread();
-  }
 };
 
 class WorkerFetchResponseEndBase
@@ -336,13 +326,12 @@ public:
   }
 };
 
-class WorkerFetchResponseEndRunnable final : public WorkerRunnable
+class WorkerFetchResponseEndRunnable final : public MainThreadWorkerRunnable
                                            , public WorkerFetchResponseEndBase
 {
 public:
   explicit WorkerFetchResponseEndRunnable(PromiseWorkerProxy* aPromiseProxy)
-    : WorkerRunnable(aPromiseProxy->GetWorkerPrivate(),
-                     WorkerThreadUnchangedBusyCount)
+    : MainThreadWorkerRunnable(aPromiseProxy->GetWorkerPrivate())
     , WorkerFetchResponseEndBase(aPromiseProxy)
   {
   }
@@ -361,25 +350,6 @@ public:
     // leaking the worker thread
     Run();
     return WorkerRunnable::Cancel();
-  }
-
-  bool
-  PreDispatch(WorkerPrivate* aWorkerPrivate) override
-  {
-    // Don't call default PreDispatch() since it incorrectly asserts we are
-    // dispatching from the parent worker thread.  We always dispatch from
-    // the main thread.
-    AssertIsOnMainThread();
-    return true;
-  }
-
-  void
-  PostDispatch(WorkerPrivate* aWorkerPrivate, bool aDispatchResult) override
-  {
-    // Don't call default PostDispatch() since it incorrectly asserts we are
-    // dispatching from the parent worker thread.  We always dispatch from
-    // the main thread.
-    AssertIsOnMainThread();
   }
 };
 
@@ -438,7 +408,7 @@ WorkerFetchResolver::OnResponseEnd()
     RefPtr<WorkerFetchResponseEndControlRunnable> cr =
       new WorkerFetchResponseEndControlRunnable(mPromiseProxy);
     // This can fail if the worker thread is canceled or killed causing
-    // the PromiseWorkerProxy to give up its WorkerFeature immediately,
+    // the PromiseWorkerProxy to give up its WorkerHolder immediately,
     // allowing the worker thread to become Dead.
     if (!cr->Dispatch()) {
       NS_WARNING("Failed to dispatch WorkerFetchResponseEndControlRunnable");
@@ -449,9 +419,11 @@ WorkerFetchResolver::OnResponseEnd()
 namespace {
 nsresult
 ExtractFromArrayBuffer(const ArrayBuffer& aBuffer,
-                       nsIInputStream** aStream)
+                       nsIInputStream** aStream,
+                       uint64_t& aContentLength)
 {
   aBuffer.ComputeLengthAndData();
+  aContentLength = aBuffer.Length();
   //XXXnsm reinterpret_cast<> is used in DOMParser, should be ok.
   return NS_NewByteInputStream(aStream,
                                reinterpret_cast<char*>(aBuffer.Data()),
@@ -460,9 +432,11 @@ ExtractFromArrayBuffer(const ArrayBuffer& aBuffer,
 
 nsresult
 ExtractFromArrayBufferView(const ArrayBufferView& aBuffer,
-                           nsIInputStream** aStream)
+                           nsIInputStream** aStream,
+                           uint64_t& aContentLength)
 {
   aBuffer.ComputeLengthAndData();
+  aContentLength = aBuffer.Length();
   //XXXnsm reinterpret_cast<> is used in DOMParser, should be ok.
   return NS_NewByteInputStream(aStream,
                                reinterpret_cast<char*>(aBuffer.Data()),
@@ -470,11 +444,18 @@ ExtractFromArrayBufferView(const ArrayBufferView& aBuffer,
 }
 
 nsresult
-ExtractFromBlob(const Blob& aBlob, nsIInputStream** aStream,
-                nsCString& aContentType)
+ExtractFromBlob(const Blob& aBlob,
+                nsIInputStream** aStream,
+                nsCString& aContentType,
+                uint64_t& aContentLength)
 {
   RefPtr<BlobImpl> impl = aBlob.Impl();
   ErrorResult rv;
+  aContentLength = impl->GetSize(rv);
+  if (NS_WARN_IF(rv.Failed())) {
+    return rv.StealNSResult();
+  }
+
   impl->GetInternalStream(aStream, rv);
   if (NS_WARN_IF(rv.Failed())) {
     return rv.StealNSResult();
@@ -487,19 +468,21 @@ ExtractFromBlob(const Blob& aBlob, nsIInputStream** aStream,
 }
 
 nsresult
-ExtractFromFormData(FormData& aFormData, nsIInputStream** aStream,
-                    nsCString& aContentType)
+ExtractFromFormData(FormData& aFormData,
+                    nsIInputStream** aStream,
+                    nsCString& aContentType,
+                    uint64_t& aContentLength)
 {
-  uint64_t unusedContentLength;
   nsAutoCString unusedCharset;
-  return aFormData.GetSendInfo(aStream, &unusedContentLength,
+  return aFormData.GetSendInfo(aStream, &aContentLength,
                                aContentType, unusedCharset);
 }
 
 nsresult
 ExtractFromUSVString(const nsString& aStr,
                      nsIInputStream** aStream,
-                     nsCString& aContentType)
+                     nsCString& aContentType,
+                     uint64_t& aContentLength)
 {
   nsCOMPtr<nsIUnicodeEncoder> encoder = EncodingUtils::EncoderForEncoding("UTF-8");
   if (!encoder) {
@@ -529,6 +512,7 @@ ExtractFromUSVString(const nsString& aStr,
   encoded.SetLength(outLen);
 
   aContentType = NS_LITERAL_CSTRING("text/plain;charset=UTF-8");
+  aContentLength = outLen;
 
   return NS_NewCStringInputStream(aStream, encoded);
 }
@@ -536,11 +520,13 @@ ExtractFromUSVString(const nsString& aStr,
 nsresult
 ExtractFromURLSearchParams(const URLSearchParams& aParams,
                            nsIInputStream** aStream,
-                           nsCString& aContentType)
+                           nsCString& aContentType,
+                           uint64_t& aContentLength)
 {
   nsAutoString serialized;
   aParams.Stringify(serialized);
   aContentType = NS_LITERAL_CSTRING("application/x-www-form-urlencoded;charset=UTF-8");
+  aContentLength = serialized.Length();
   return NS_NewCStringInputStream(aStream, NS_ConvertUTF16toUTF8(serialized));
 }
 } // namespace
@@ -548,29 +534,35 @@ ExtractFromURLSearchParams(const URLSearchParams& aParams,
 nsresult
 ExtractByteStreamFromBody(const OwningArrayBufferOrArrayBufferViewOrBlobOrFormDataOrUSVStringOrURLSearchParams& aBodyInit,
                           nsIInputStream** aStream,
-                          nsCString& aContentType)
+                          nsCString& aContentType,
+                          uint64_t& aContentLength)
 {
   MOZ_ASSERT(aStream);
 
   if (aBodyInit.IsArrayBuffer()) {
     const ArrayBuffer& buf = aBodyInit.GetAsArrayBuffer();
-    return ExtractFromArrayBuffer(buf, aStream);
-  } else if (aBodyInit.IsArrayBufferView()) {
+    return ExtractFromArrayBuffer(buf, aStream, aContentLength);
+  }
+  if (aBodyInit.IsArrayBufferView()) {
     const ArrayBufferView& buf = aBodyInit.GetAsArrayBufferView();
-    return ExtractFromArrayBufferView(buf, aStream);
-  } else if (aBodyInit.IsBlob()) {
+    return ExtractFromArrayBufferView(buf, aStream, aContentLength);
+  }
+  if (aBodyInit.IsBlob()) {
     const Blob& blob = aBodyInit.GetAsBlob();
-    return ExtractFromBlob(blob, aStream, aContentType);
-  } else if (aBodyInit.IsFormData()) {
+    return ExtractFromBlob(blob, aStream, aContentType, aContentLength);
+  }
+  if (aBodyInit.IsFormData()) {
     FormData& form = aBodyInit.GetAsFormData();
-    return ExtractFromFormData(form, aStream, aContentType);
-  } else if (aBodyInit.IsUSVString()) {
+    return ExtractFromFormData(form, aStream, aContentType, aContentLength);
+  }
+  if (aBodyInit.IsUSVString()) {
     nsAutoString str;
     str.Assign(aBodyInit.GetAsUSVString());
-    return ExtractFromUSVString(str, aStream, aContentType);
-  } else if (aBodyInit.IsURLSearchParams()) {
+    return ExtractFromUSVString(str, aStream, aContentType, aContentLength);
+  }
+  if (aBodyInit.IsURLSearchParams()) {
     URLSearchParams& params = aBodyInit.GetAsURLSearchParams();
-    return ExtractFromURLSearchParams(params, aStream, aContentType);
+    return ExtractFromURLSearchParams(params, aStream, aContentType, aContentLength);
   }
 
   NS_NOTREACHED("Should never reach here");
@@ -580,29 +572,36 @@ ExtractByteStreamFromBody(const OwningArrayBufferOrArrayBufferViewOrBlobOrFormDa
 nsresult
 ExtractByteStreamFromBody(const ArrayBufferOrArrayBufferViewOrBlobOrFormDataOrUSVStringOrURLSearchParams& aBodyInit,
                           nsIInputStream** aStream,
-                          nsCString& aContentType)
+                          nsCString& aContentType,
+                          uint64_t& aContentLength)
 {
   MOZ_ASSERT(aStream);
+  MOZ_ASSERT(!*aStream);
 
   if (aBodyInit.IsArrayBuffer()) {
     const ArrayBuffer& buf = aBodyInit.GetAsArrayBuffer();
-    return ExtractFromArrayBuffer(buf, aStream);
-  } else if (aBodyInit.IsArrayBufferView()) {
+    return ExtractFromArrayBuffer(buf, aStream, aContentLength);
+  }
+  if (aBodyInit.IsArrayBufferView()) {
     const ArrayBufferView& buf = aBodyInit.GetAsArrayBufferView();
-    return ExtractFromArrayBufferView(buf, aStream);
-  } else if (aBodyInit.IsBlob()) {
+    return ExtractFromArrayBufferView(buf, aStream, aContentLength);
+  }
+  if (aBodyInit.IsBlob()) {
     const Blob& blob = aBodyInit.GetAsBlob();
-    return ExtractFromBlob(blob, aStream, aContentType);
-  } else if (aBodyInit.IsFormData()) {
+    return ExtractFromBlob(blob, aStream, aContentType, aContentLength);
+  }
+  if (aBodyInit.IsFormData()) {
     FormData& form = aBodyInit.GetAsFormData();
-    return ExtractFromFormData(form, aStream, aContentType);
-  } else if (aBodyInit.IsUSVString()) {
+    return ExtractFromFormData(form, aStream, aContentType, aContentLength);
+  }
+  if (aBodyInit.IsUSVString()) {
     nsAutoString str;
     str.Assign(aBodyInit.GetAsUSVString());
-    return ExtractFromUSVString(str, aStream, aContentType);
-  } else if (aBodyInit.IsURLSearchParams()) {
+    return ExtractFromUSVString(str, aStream, aContentType, aContentLength);
+  }
+  if (aBodyInit.IsURLSearchParams()) {
     URLSearchParams& params = aBodyInit.GetAsURLSearchParams();
-    return ExtractFromURLSearchParams(params, aStream, aContentType);
+    return ExtractFromURLSearchParams(params, aStream, aContentType, aContentLength);
   }
 
   NS_NOTREACHED("Should never reach here");
@@ -614,7 +613,7 @@ namespace {
  * Called on successfully reading the complete stream.
  */
 template <class Derived>
-class ContinueConsumeBodyRunnable final : public WorkerRunnable
+class ContinueConsumeBodyRunnable final : public MainThreadWorkerRunnable
 {
   // This has been addrefed before this runnable is dispatched,
   // released in WorkerRun().
@@ -626,7 +625,7 @@ class ContinueConsumeBodyRunnable final : public WorkerRunnable
 public:
   ContinueConsumeBodyRunnable(FetchBody<Derived>* aFetchBody, nsresult aStatus,
                               uint32_t aLength, uint8_t* aResult)
-    : WorkerRunnable(aFetchBody->mWorkerPrivate, WorkerThreadUnchangedBusyCount)
+    : MainThreadWorkerRunnable(aFetchBody->mWorkerPrivate)
     , mFetchBody(aFetchBody)
     , mStatus(aStatus)
     , mLength(aLength)
@@ -640,25 +639,6 @@ public:
   {
     mFetchBody->ContinueConsumeBody(mStatus, mLength, mResult);
     return true;
-  }
-
-  bool
-  PreDispatch(WorkerPrivate* aWorkerPrivate) override
-  {
-    // Don't call default PreDispatch() since it incorrectly asserts we are
-    // dispatching from the parent worker thread.  We always dispatch from
-    // the main thread.
-    AssertIsOnMainThread();
-    return true;
-  }
-
-  void
-  PostDispatch(WorkerPrivate* aWorkerPrivate, bool aDispatchResult) override
-  {
-    // Don't call default PostDispatch() since it incorrectly asserts we are
-    // dispatching from the parent worker thread.  We always dispatch from
-    // the main thread.
-    AssertIsOnMainThread();
   }
 };
 
@@ -776,7 +756,7 @@ public:
                                         nonconstResult);
       if (!r->Dispatch()) {
         // XXXcatalinb: The worker is shutting down, the pump will be canceled
-        // by FetchBodyFeature::Notify.
+        // by FetchBodyWorkerHolder::Notify.
         NS_WARNING("Could not dispatch ConsumeBodyRunnable");
         // Return failure so that aResult is freed.
         return NS_ERROR_FAILURE;
@@ -842,20 +822,20 @@ public:
 } // namespace
 
 template <class Derived>
-class FetchBodyFeature final : public workers::WorkerFeature
+class FetchBodyWorkerHolder final : public workers::WorkerHolder
 {
-  // This is addrefed before the feature is created, and is released in ContinueConsumeBody()
-  // so we can hold a rawptr.
+  // This is addrefed before the workerHolder is created, and is released in
+  // ContinueConsumeBody() so we can hold a rawptr.
   FetchBody<Derived>* mBody;
   bool mWasNotified;
 
 public:
-  explicit FetchBodyFeature(FetchBody<Derived>* aBody)
+  explicit FetchBodyWorkerHolder(FetchBody<Derived>* aBody)
     : mBody(aBody)
     , mWasNotified(false)
   { }
 
-  ~FetchBodyFeature()
+  ~FetchBodyWorkerHolder()
   { }
 
   bool Notify(workers::Status aStatus) override
@@ -871,7 +851,7 @@ public:
 
 template <class Derived>
 FetchBody<Derived>::FetchBody()
-  : mFeature(nullptr)
+  : mWorkerHolder(nullptr)
   , mBodyUsed(false)
 #ifdef DEBUG
   , mReadDone(false)
@@ -898,8 +878,8 @@ FetchBody<Derived>::~FetchBody()
 
 // Returns true if addref succeeded.
 // Always succeeds on main thread.
-// May fail on worker if RegisterFeature() fails. In that case, it will release
-// the object before returning false.
+// May fail on worker if RegisterWorkerHolder() fails. In that case, it will
+// release the object before returning false.
 template <class Derived>
 bool
 FetchBody<Derived>::AddRefObject()
@@ -907,8 +887,8 @@ FetchBody<Derived>::AddRefObject()
   AssertIsOnTargetThread();
   DerivedClass()->AddRef();
 
-  if (mWorkerPrivate && !mFeature) {
-    if (!RegisterFeature()) {
+  if (mWorkerPrivate && !mWorkerHolder) {
+    if (!RegisterWorkerHolder()) {
       ReleaseObject();
       return false;
     }
@@ -922,8 +902,8 @@ FetchBody<Derived>::ReleaseObject()
 {
   AssertIsOnTargetThread();
 
-  if (mWorkerPrivate && mFeature) {
-    UnregisterFeature();
+  if (mWorkerPrivate && mWorkerHolder) {
+    UnregisterWorkerHolder();
   }
 
   DerivedClass()->Release();
@@ -931,16 +911,16 @@ FetchBody<Derived>::ReleaseObject()
 
 template <class Derived>
 bool
-FetchBody<Derived>::RegisterFeature()
+FetchBody<Derived>::RegisterWorkerHolder()
 {
   MOZ_ASSERT(mWorkerPrivate);
   mWorkerPrivate->AssertIsOnWorkerThread();
-  MOZ_ASSERT(!mFeature);
-  mFeature = new FetchBodyFeature<Derived>(this);
+  MOZ_ASSERT(!mWorkerHolder);
+  mWorkerHolder = new FetchBodyWorkerHolder<Derived>(this);
 
-  if (!mWorkerPrivate->AddFeature(mFeature)) {
-    NS_WARNING("Failed to add feature");
-    mFeature = nullptr;
+  if (!mWorkerHolder->HoldWorker(mWorkerPrivate)) {
+    NS_WARNING("Failed to add workerHolder");
+    mWorkerHolder = nullptr;
     return false;
   }
 
@@ -949,14 +929,14 @@ FetchBody<Derived>::RegisterFeature()
 
 template <class Derived>
 void
-FetchBody<Derived>::UnregisterFeature()
+FetchBody<Derived>::UnregisterWorkerHolder()
 {
   MOZ_ASSERT(mWorkerPrivate);
   mWorkerPrivate->AssertIsOnWorkerThread();
-  MOZ_ASSERT(mFeature);
+  MOZ_ASSERT(mWorkerHolder);
 
-  mWorkerPrivate->RemoveFeature(mFeature);
-  mFeature = nullptr;
+  mWorkerHolder->ReleaseWorker();
+  mWorkerHolder = nullptr;
 }
 
 template <class Derived>
@@ -975,7 +955,7 @@ nsresult
 FetchBody<Derived>::BeginConsumeBody()
 {
   AssertIsOnTargetThread();
-  MOZ_ASSERT(!mFeature);
+  MOZ_ASSERT(!mWorkerHolder);
   MOZ_ASSERT(mConsumePromise);
 
   // The FetchBody is not thread-safe refcounted. We addref it here and release
@@ -1059,7 +1039,7 @@ FetchBody<Derived>::ContinueConsumeBody(nsresult aStatus, uint32_t aResultLength
   // sync with a body read.
   MOZ_ASSERT(mBodyUsed);
   MOZ_ASSERT(!mReadDone);
-  MOZ_ASSERT_IF(mWorkerPrivate, mFeature);
+  MOZ_ASSERT_IF(mWorkerPrivate, mWorkerHolder);
 #ifdef DEBUG
   mReadDone = true;
 #endif
@@ -1118,9 +1098,12 @@ FetchBody<Derived>::ContinueConsumeBody(nsresult aStatus, uint32_t aResultLength
   MOZ_ASSERT(aResult);
 
   AutoJSAPI jsapi;
-  jsapi.Init(DerivedClass()->GetParentObject());
-  JSContext* cx = jsapi.cx();
+  if (!jsapi.Init(DerivedClass()->GetParentObject())) {
+    localPromise->MaybeReject(NS_ERROR_UNEXPECTED);
+    return;
+  }
 
+  JSContext* cx = jsapi.cx();
   ErrorResult error;
 
   switch (mConsumeType) {

@@ -203,19 +203,7 @@ GetCurrentJSStack(int32_t aMaxDepth)
     return nullptr;
   }
 
-  return exceptions::CreateStack(cx, aMaxDepth);
-}
-
-AutoForceSetExceptionOnContext::AutoForceSetExceptionOnContext(JSContext* aCx)
-  : mCx(aCx)
-{
-  mOldValue = JS::ContextOptionsRef(mCx).autoJSAPIOwnsErrorReporting();
-  JS::ContextOptionsRef(mCx).setAutoJSAPIOwnsErrorReporting(true);
-}
-
-AutoForceSetExceptionOnContext::~AutoForceSetExceptionOnContext()
-{
-  JS::ContextOptionsRef(mCx).setAutoJSAPIOwnsErrorReporting(mOldValue);
+  return dom::exceptions::CreateStack(cx, aMaxDepth);
 }
 
 namespace exceptions {

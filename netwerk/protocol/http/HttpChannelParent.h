@@ -139,7 +139,8 @@ protected:
                    const bool&                aBlockAuthPrompt,
                    const bool&                aSuspendAfterSynthesizeResponse,
                    const bool&                aAllowStaleCacheContent,
-                   const nsCString&           aContentTypeHint);
+                   const nsCString&           aContentTypeHint,
+                   const nsCString&           aChannelId);
 
   virtual bool RecvSetPriority(const uint16_t& priority) override;
   virtual bool RecvSetClassOfService(const uint32_t& cos) override;
@@ -179,6 +180,10 @@ protected:
 
   nsresult ReportSecurityMessage(const nsAString& aMessageTag,
                                  const nsAString& aMessageCategory) override;
+
+  // Calls SendDeleteSelf and sets mIPCClosed to true because we should not
+  // send any more messages after that. Bug 1274886
+  bool DoSendDeleteSelf();
 
 private:
   void UpdateAndSerializeSecurityInfo(nsACString& aSerializedSecurityInfoOut);

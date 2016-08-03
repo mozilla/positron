@@ -23,7 +23,7 @@
 
 "use strict";
 
-const {Ci, Cu, Cc} = require("chrome");
+const {Ci, Cc} = require("chrome");
 const Services = require("Services");
 
 const HTML_NS = "http://www.w3.org/1999/xhtml";
@@ -33,7 +33,6 @@ const CONTENT_TYPES = {
   CSS_MIXED: 2,
   CSS_PROPERTY: 3,
 };
-const AUTOCOMPLETE_POPUP_CLASSNAME = "inplace-editor-autocomplete-popup";
 
 // The limit of 500 autocomplete suggestions should not be reached but is kept
 // for safety.
@@ -42,8 +41,8 @@ const MAX_POPUP_ENTRIES = 500;
 const FOCUS_FORWARD = Ci.nsIFocusManager.MOVEFOCUS_FORWARD;
 const FOCUS_BACKWARD = Ci.nsIFocusManager.MOVEFOCUS_BACKWARD;
 
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
-Cu.import("resource://devtools/shared/event-emitter.js");
+const { XPCOMUtils } = require("resource://gre/modules/XPCOMUtils.jsm");
+const EventEmitter = require("devtools/shared/event-emitter");
 const { findMostRelevantCssPropertyIndex } = require("./suggestion-picker");
 
 /**
@@ -191,6 +190,9 @@ function editableItem(options, callback) {
   // Save the trigger type so we can dispatch this later
   element._trigger = trigger;
 
+  // Add button semantics to the element, to indicate that it can be activated.
+  element.setAttribute("role", "button");
+
   return function turnOnEditMode() {
     callback(element);
   };
@@ -297,11 +299,11 @@ function InplaceEditor(options, event) {
 
   this._updateSize();
 
+  EventEmitter.decorate(this);
+
   if (options.start) {
     options.start(this, event);
   }
-
-  EventEmitter.decorate(this);
 }
 
 exports.InplaceEditor = InplaceEditor;
@@ -628,7 +630,9 @@ InplaceEditor.prototype = {
    *         'type'.
    */
   _parseCSSValue: function (value, offset) {
+    /* eslint-disable max-len */
     const reSplitCSS = /(url\("?[^"\)]+"?\)?)|(rgba?\([^)]*\)?)|(hsla?\([^)]*\)?)|(#[\dA-Fa-f]+)|(-?\d*\.?\d+(%|[a-z]{1,4})?)|"([^"]*)"?|'([^']*)'?|([^,\s\/!\(\)]+)|(!(.*)?)/;
+    /* eslint-enable */
     let start = 0;
     let m;
 
@@ -984,13 +988,13 @@ InplaceEditor.prototype = {
     let label, preLabel;
 
     if (this._selectedIndex === undefined) {
-      ({label, preLabel} =
-        this.popup.getItemAtIndex(this.popup.selectedIndex));
+      ({label, preLabel} = this.popup.getItemAtIndex(this.popup.selectedIndex));
     } else {
       ({label, preLabel} = this.popup.getItemAtIndex(this._selectedIndex));
     }
 
     let input = this.input;
+
     let pre = "";
 
     // CSS_MIXED needs special treatment here to make it so that
@@ -1016,13 +1020,13 @@ InplaceEditor.prototype = {
     // Wait for the popup to hide and then focus input async otherwise it does
     // not work.
     let onPopupHidden = () => {
-      this.popup._panel.removeEventListener("popuphidden", onPopupHidden);
+      this.popup.off("popup-closed", onPopupHidden);
       this.doc.defaultView.setTimeout(()=> {
         input.focus();
         this.emit("after-suggest");
       }, 0);
     };
-    this.popup._panel.addEventListener("popuphidden", onPopupHidden);
+    this.popup.on("popup-closed", onPopupHidden);
     this._hideAutocompletePopup();
   },
 
@@ -1045,7 +1049,7 @@ InplaceEditor.prototype = {
       increment = this._getIncrement(event);
     }
 
-    if (isKeyIn(key, "HOME", "END", "PAGE_UP", "PAGE_DOWN")) {
+    if (isKeyIn(key, "PAGE_UP", "PAGE_DOWN")) {
       this._preventSuggestions = true;
     }
 
@@ -1063,7 +1067,7 @@ InplaceEditor.prototype = {
       this._doValidation();
     }
 
-    if (isKeyIn(key, "BACK_SPACE", "DELETE", "LEFT", "RIGHT")) {
+    if (isKeyIn(key, "BACK_SPACE", "DELETE", "LEFT", "RIGHT", "HOME", "END")) {
       if (isPopupOpen) {
         this._hideAutocompletePopup();
       }
@@ -1169,7 +1173,6 @@ InplaceEditor.prototype = {
    *        item selected.
    */
   _openAutocompletePopup: function (offset, selectedIndex) {
-    this.popup._panel.classList.add(AUTOCOMPLETE_POPUP_CLASSNAME);
     this.popup.on("popup-click", this._onAutocompletePopupClick);
     this.popup.openPopup(this.input, offset, 0, selectedIndex);
   },
@@ -1179,7 +1182,6 @@ InplaceEditor.prototype = {
    * popup.
    */
   _hideAutocompletePopup: function () {
-    this.popup._panel.classList.remove(AUTOCOMPLETE_POPUP_CLASSNAME);
     this.popup.off("popup-click", this._onAutocompletePopupClick);
     this.popup.hidePopup();
   },
@@ -1292,18 +1294,22 @@ InplaceEditor.prototype = {
       if (query == null) {
         return;
       }
-      // If nothing is selected and there is a non-space character after the
-      // cursor, do not autocomplete.
+      // If nothing is selected and there is a word (\w) character after the cursor, do
+      // not autocomplete.
       if (input.selectionStart == input.selectionEnd &&
-          input.selectionStart < input.value.length &&
-          input.value.slice(input.selectionStart)[0] != " ") {
-        // This emit is mainly to make the test flow simpler.
-        this.emit("after-suggest", "nothing to autocomplete");
-        return;
+          input.selectionStart < input.value.length) {
+        let nextChar = input.value.slice(input.selectionStart)[0];
+        // Check if the next character is a valid word character, no suggestion should be
+        // provided when preceeding a word.
+        if (/[\w-]/.test(nextChar)) {
+          // This emit is mainly to make the test flow simpler.
+          this.emit("after-suggest", "nothing to autocomplete");
+          return;
+        }
       }
       let list = [];
       if (this.contentType == CONTENT_TYPES.CSS_PROPERTY) {
-        list = CSSPropertyList;
+        list = this._getCSSPropertyList();
       } else if (this.contentType == CONTENT_TYPES.CSS_VALUE) {
         // Get the last query to be completed before the caret.
         let match = /([^\s,.\/]+$)/.exec(query);
@@ -1315,7 +1321,7 @@ InplaceEditor.prototype = {
 
         list =
           ["!important",
-           ...domUtils.getCSSValuesForProperty(this.property.name)];
+           ...this._getCSSValuesForPropertyName(this.property.name)];
 
         if (query == "") {
           // Do not suggest '!important' without any manually typed character.
@@ -1341,7 +1347,7 @@ InplaceEditor.prototype = {
               query.match(/[;"'=]\s*([^"';:= ]+)\s*:\s*[^"';:=]*$/)[1];
             list =
               ["!important;",
-               ...domUtils.getCSSValuesForProperty(propertyName)];
+               ...this._getCSSValuesForPropertyName(propertyName)];
             let matchLastQuery = /([^\s,.\/]+$)/.exec(match[2] || "");
             if (matchLastQuery) {
               startCheckQuery = matchLastQuery[0];
@@ -1354,7 +1360,7 @@ InplaceEditor.prototype = {
             }
           } else if (match[1]) {
             // We are in CSS property name completion
-            list = CSSPropertyList;
+            list = this._getCSSPropertyList();
             startCheckQuery = match[2];
           }
           if (startCheckQuery == null) {
@@ -1422,7 +1428,7 @@ InplaceEditor.prototype = {
       // Display the list of suggestions if there are more than one.
       if (finalList.length > 1) {
         // Calculate the popup horizontal offset.
-        let indent = this.input.selectionStart - query.length;
+        let indent = this.input.selectionStart - startCheckQuery.length;
         let offset = indent * this.inputCharDimensions.width;
         offset = this._isSingleLine() ? offset : 0;
 
@@ -1449,6 +1455,28 @@ InplaceEditor.prototype = {
   _isSingleLine: function () {
     let inputRect = this.input.getBoundingClientRect();
     return inputRect.height < 2 * this.inputCharDimensions.height;
+  },
+
+  /**
+   * Returns the list of CSS properties to use for the autocompletion. This
+   * method is overridden by tests in order to use mocked suggestion lists.
+   *
+   * @return {Array} array of CSS property names (Strings)
+   */
+  _getCSSPropertyList: function () {
+    return CSSPropertyList;
+  },
+
+  /**
+   * Returns a list of CSS values valid for a provided property name to use for
+   * the autocompletion. This method is overridden by tests in order to use
+   * mocked suggestion lists.
+   *
+   * @param {String} propertyName
+   * @return {Array} array of CSS property values (Strings)
+   */
+  _getCSSValuesForPropertyName: function (propertyName) {
+    return domUtils.getCSSValuesForProperty(propertyName);
   },
 };
 

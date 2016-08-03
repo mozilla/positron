@@ -19,7 +19,7 @@ USE_EXTENSION_MANIFEST = True
 
 FINAL_TARGET_PP_FILES += ['install.rdf']
 
-if CONFIG['MOZ_BUILD_APP'] != 'mobile/android' and CONFIG['MOZ_WIDGET_TOOLKIT'] != 'gonk':
+if CONFIG['OS_TARGET'] != 'Android':
     DEFINES['MOCHITEST_BOOTSTRAP'] = True
     FINAL_TARGET_FILES += ['bootstrap.js']
 
@@ -69,6 +69,11 @@ TEST_HARNESS_FILES.testing.mochitest += [
     'server.js',
     'start_b2g.js',
     'start_desktop.js',
+]
+
+TEST_HARNESS_FILES.testing.mochitest.embed += [
+    'embed/Xm5i5kbIXzc',
+    'embed/Xm5i5kbIXzc^headers^',
 ]
 
 TEST_HARNESS_FILES.testing.mochitest.pywebsocket += [

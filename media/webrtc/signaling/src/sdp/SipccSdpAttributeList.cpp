@@ -726,6 +726,7 @@ SipccSdpAttributeList::LoadFmtp(sdp_t* sdp, uint16_t level)
             new SdpFmtpAttributeList::OpusParameters);
         opusParameters->maxplaybackrate = fmtp->maxplaybackrate;
         opusParameters->stereo = fmtp->stereo;
+        opusParameters->useInBandFec = fmtp->useinbandfec;
         parameters.reset(opusParameters);
       } break;
       default: {
@@ -930,6 +931,9 @@ SipccSdpAttributeList::LoadRtcpFb(sdp_t* sdp, uint16_t level,
         std::ostringstream os;
         os << rtcpfb->param.trr_int;
         parameter = os.str();
+      } break;
+      case SDP_RTCP_FB_REMB: {
+        type = SdpRtcpFbAttributeList::kRemb;
       } break;
       default:
         // Type we don't care about, ignore.

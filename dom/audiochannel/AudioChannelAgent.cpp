@@ -7,12 +7,11 @@
 #include "AudioChannelAgent.h"
 #include "AudioChannelService.h"
 #include "mozilla/Preferences.h"
-#include "nsIAppsService.h"
+#include "nsContentUtils.h"
 #include "nsIDocument.h"
 #include "nsIDOMWindow.h"
-#include "nsIPrincipal.h"
 #include "nsPIDOMWindow.h"
-#include "nsXULAppAPI.h"
+#include "nsIURI.h"
 
 using namespace mozilla::dom;
 
@@ -112,38 +111,27 @@ AudioChannelAgent::FindCorrectWindow(nsPIDOMWindowInner* aWindow)
     return NS_OK;
   }
 
+  if (nsContentUtils::IsChromeDoc(doc)) {
+    return NS_OK;
+  }
+
+  nsAdoptingCString systemAppUrl =
+    mozilla::Preferences::GetCString("b2g.system_startup_url");
+  if (!systemAppUrl) {
+    return NS_OK;
+  }
+
   nsCOMPtr<nsIPrincipal> principal = doc->NodePrincipal();
+  nsCOMPtr<nsIURI> uri;
+  principal->GetURI(getter_AddRefs(uri));
 
-  uint32_t appId;
-  nsresult rv = principal->GetAppId(&appId);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
-  }
+  if (uri) {
+    nsAutoCString spec;
+    uri->GetSpec(spec);
 
-  if (appId == nsIScriptSecurityManager::NO_APP_ID ||
-      appId == nsIScriptSecurityManager::UNKNOWN_APP_ID) {
-    return NS_OK;
-  }
-
-  nsCOMPtr<nsIAppsService> appsService = do_GetService(APPS_SERVICE_CONTRACTID);
-  if (NS_WARN_IF(!appsService)) {
-    return NS_ERROR_FAILURE;
-  }
-
-  nsAdoptingString systemAppManifest =
-    mozilla::Preferences::GetString("b2g.system_manifest_url");
-  if (!systemAppManifest) {
-    return NS_OK;
-  }
-
-  uint32_t systemAppId;
-  rv = appsService->GetAppLocalIdByManifestURL(systemAppManifest, &systemAppId);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return rv;
-  }
-
-  if (systemAppId == appId) {
-    return NS_OK;
+    if (spec.Equals(systemAppUrl)) {
+      return NS_OK;
+    }
   }
 
   return FindCorrectWindow(parent);
@@ -225,8 +213,8 @@ AudioChannelAgent::NotifyStartedPlaying(AudioPlaybackConfig* aConfig,
 
   MOZ_LOG(AudioChannelService::GetAudioChannelLog(), LogLevel::Debug,
          ("AudioChannelAgent, NotifyStartedPlaying, this = %p, "
-          "mute = %d, volume = %f, suspend = %d\n", this,
-          config.mMuted, config.mVolume, config.mSuspend));
+          "audible = %d, mute = %d, volume = %f, suspend = %d\n", this,
+          aAudible, config.mMuted, config.mVolume, config.mSuspend));
 
   aConfig->SetConfig(config.mVolume, config.mMuted, config.mSuspend);
   mIsRegToService = true;
@@ -254,11 +242,11 @@ AudioChannelAgent::NotifyStoppedPlaying()
 }
 
 NS_IMETHODIMP
-AudioChannelAgent::NotifyStartedAudible(bool aAudible)
+AudioChannelAgent::NotifyStartedAudible(bool aAudible, uint32_t aReason)
 {
   MOZ_LOG(AudioChannelService::GetAudioChannelLog(), LogLevel::Debug,
          ("AudioChannelAgent, NotifyStartedAudible, this = %p, "
-          "audible = %d\n", this, aAudible));
+          "audible = %d, reason = %d\n", this, aAudible, aReason));
 
   RefPtr<AudioChannelService> service = AudioChannelService::GetOrCreate();
   if (NS_WARN_IF(!service)) {
@@ -266,7 +254,9 @@ AudioChannelAgent::NotifyStartedAudible(bool aAudible)
   }
 
   service->AudioAudibleChanged(
-    this, static_cast<AudioChannelService::AudibleState>(aAudible));
+    this,
+    static_cast<AudioChannelService::AudibleState>(aAudible),
+    static_cast<AudioChannelService::AudibleChangedReasons>(aReason));
   return NS_OK;
 }
 

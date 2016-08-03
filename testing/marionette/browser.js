@@ -42,11 +42,7 @@ browser.Context = class {
     this.mainContentId = null;
     // used to set curFrameId upon new session
     this.newSession = true;
-    this.elementManager = new ElementManager([
-      element.Strategy.Name,
-      element.Strategy.LinkText,
-      element.Strategy.PartialLinkText,
-    ]);
+    this.seenEls = new element.Store();
     this.setBrowser(win);
 
     // A reference to the tab corresponding to the current window handle, if any.
@@ -67,7 +63,11 @@ browser.Context = class {
   }
 
   get browserForTab() {
-    return this.browser.getBrowserForTab(this.tab);
+    if (this.browser.getBrowserForTab) {
+      return this.browser.getBrowserForTab(this.tab);
+    } else {
+      return this.browser.selectedBrowser;
+    }
   }
 
   /**
@@ -77,7 +77,7 @@ browser.Context = class {
    */
   get curFrameId() {
     let rv = null;
-    if (this.driver.appName != "Firefox") {
+    if (this.driver.appName == "B2G") {
       rv = this._curFrameId;
     } else if (this.tab) {
       rv = this.getIdForBrowser(this.browserForTab);
@@ -161,10 +161,14 @@ browser.Context = class {
       this.window = win;
       this.setBrowser(win);
     }
-
-    this.browser.selectTabAtIndex(ind);
-    this.tab = this.browser.selectedTab;
-    this._browserWasRemote = this.browserForTab.isRemoteBrowser;
+    if (this.browser.selectTabAtIndex) {
+      this.browser.selectTabAtIndex(ind);
+      this.tab = this.browser.selectedTab;
+      this._browserWasRemote = this.browserForTab.isRemoteBrowser;
+    }
+    else {
+      this.tab = this.browser.selectedTab;
+    }
     this._hasRemotenessChange = false;
   }
 
@@ -255,6 +259,58 @@ browser.Context = class {
       this.pendingCommands.push(cb);
     } else {
       cb();
+    }
+  }
+
+};
+
+/**
+ * The window storage is used to save outer window IDs mapped to weak
+ * references of Window objects.
+ *
+ * Usage:
+ *
+ *     let wins = new browser.Windows();
+ *     wins.set(browser.outerWindowID, window);
+ *
+ *     ...
+ *
+ *     let win = wins.get(browser.outerWindowID);
+ *
+ */
+browser.Windows = class extends Map {
+
+  /**
+   * Save a weak reference to the Window object.
+   *
+   * @param {string} id
+   *     Outer window ID.
+   * @param {Window} win
+   *     Window object to save.
+   *
+   * @return {browser.Windows}
+   *     Instance of self.
+   */
+  set(id, win) {
+    let wref = Cu.getWeakReference(win);
+    super.set(id, wref);
+    return this;
+  }
+
+  /**
+   * Get the window object stored by provided |id|.
+   *
+   * @param {string} id
+   *     Outer window ID.
+   *
+   * @return {Window}
+   *     Saved window object, or |undefined| if no window is stored by
+   *     provided |id|.
+   */
+  get(id) {
+    let wref = super.get(id);
+    if (wref) {
+      return wref.get();
     }
   }
 

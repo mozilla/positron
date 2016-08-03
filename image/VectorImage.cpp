@@ -27,6 +27,7 @@
 #include "nsSVGEffects.h" // for nsSVGRenderingObserver
 #include "nsWindowMemoryReporter.h"
 #include "ImageRegion.h"
+#include "ISurfaceProvider.h"
 #include "LookupResult.h"
 #include "Orientation.h"
 #include "SVGDocumentWrapper.h"
@@ -263,7 +264,7 @@ public:
   { }
   virtual bool operator()(gfxContext* aContext,
                           const gfxRect& aFillRect,
-                          const Filter& aFilter,
+                          const SamplingFilter aSamplingFilter,
                           const gfxMatrix& aTransform);
 private:
   RefPtr<SVGDocumentWrapper> mSVGDocumentWrapper;
@@ -276,7 +277,7 @@ private:
 bool
 SVGDrawingCallback::operator()(gfxContext* aContext,
                                const gfxRect& aFillRect,
-                               const Filter& aFilter,
+                               const SamplingFilter aSamplingFilter,
                                const gfxMatrix& aTransform)
 {
   MOZ_ASSERT(mSVGDocumentWrapper, "need an SVGDocumentWrapper");
@@ -735,11 +736,11 @@ VectorImage::GetFrameAtSize(const IntSize& aSize,
     return nullptr;
   }
 
-  RefPtr<gfxContext> context = gfxContext::ForDrawTarget(dt);
+  RefPtr<gfxContext> context = gfxContext::CreateOrNull(dt);
   MOZ_ASSERT(context); // already checked the draw target above
 
   auto result = Draw(context, aSize, ImageRegion::Create(aSize),
-                     aWhichFrame, Filter::POINT, Nothing(), aFlags);
+                     aWhichFrame, SamplingFilter::POINT, Nothing(), aFlags);
 
   return result == DrawResult::SUCCESS ? dt->Snapshot() : nullptr;
 }
@@ -762,14 +763,14 @@ struct SVGDrawingParameters
   SVGDrawingParameters(gfxContext* aContext,
                        const nsIntSize& aSize,
                        const ImageRegion& aRegion,
-                       Filter aFilter,
+                       SamplingFilter aSamplingFilter,
                        const Maybe<SVGImageContext>& aSVGContext,
                        float aAnimationTime,
                        uint32_t aFlags)
     : context(aContext)
     , size(aSize.width, aSize.height)
     , region(aRegion)
-    , filter(aFilter)
+    , samplingFilter(aSamplingFilter)
     , svgContext(aSVGContext)
     , viewportSize(aSize)
     , animationTime(aAnimationTime)
@@ -785,7 +786,7 @@ struct SVGDrawingParameters
   gfxContext*                   context;
   IntSize                       size;
   ImageRegion                   region;
-  Filter                        filter;
+  SamplingFilter                samplingFilter;
   const Maybe<SVGImageContext>& svgContext;
   nsIntSize                     viewportSize;
   float                         animationTime;
@@ -799,7 +800,7 @@ VectorImage::Draw(gfxContext* aContext,
                   const nsIntSize& aSize,
                   const ImageRegion& aRegion,
                   uint32_t aWhichFrame,
-                  Filter aFilter,
+                  SamplingFilter aSamplingFilter,
                   const Maybe<SVGImageContext>& aSVGContext,
                   uint32_t aFlags)
 {
@@ -855,7 +856,7 @@ VectorImage::Draw(gfxContext* aContext,
                                      mSVGDocumentWrapper->GetRootSVGElem());
 
 
-  SVGDrawingParameters params(aContext, aSize, aRegion, aFilter,
+  SVGDrawingParameters params(aContext, aSize, aRegion, aSamplingFilter,
                               svgContext, animTime, aFlags);
 
   if (aFlags & FLAG_BYPASS_SURFACE_CACHE) {
@@ -919,15 +920,15 @@ VectorImage::CreateSurfaceAndShow(const SVGDrawingParameters& aParams)
   // invalidation. If this image is locked, any surfaces that are still useful
   // will become locked again when Draw touches them, and the remainder will
   // eventually expire.
-  SurfaceCache::UnlockSurfaces(ImageKey(this));
+  SurfaceCache::UnlockEntries(ImageKey(this));
 
   // Try to create an imgFrame, initializing the surface it contains by drawing
   // our gfxDrawable into it. (We use FILTER_NEAREST since we never scale here.)
-  RefPtr<imgFrame> frame = new imgFrame;
+  NotNull<RefPtr<imgFrame>> frame = WrapNotNull(new imgFrame);
   nsresult rv =
     frame->InitWithDrawable(svgDrawable, aParams.size,
                             SurfaceFormat::B8G8R8A8,
-                            Filter::POINT, aParams.flags);
+                            SamplingFilter::POINT, aParams.flags);
 
   // If we couldn't create the frame, it was probably because it would end
   // up way too big. Generally it also wouldn't fit in the cache, but the prefs
@@ -944,7 +945,9 @@ VectorImage::CreateSurfaceAndShow(const SVGDrawingParameters& aParams)
   }
 
   // Attempt to cache the frame.
-  SurfaceCache::Insert(frame, ImageKey(this),
+  NotNull<RefPtr<ISurfaceProvider>> provider =
+    WrapNotNull(new SimpleSurfaceProvider(frame));
+  SurfaceCache::Insert(provider, ImageKey(this),
                        VectorSurfaceKey(aParams.size,
                                         aParams.svgContext,
                                         aParams.animationTime));
@@ -969,7 +972,8 @@ VectorImage::Show(gfxDrawable* aDrawable, const SVGDrawingParameters& aParams)
                              aParams.size,
                              aParams.region,
                              SurfaceFormat::B8G8R8A8,
-                             aParams.filter, aParams.flags, aParams.opacity);
+                             aParams.samplingFilter,
+                             aParams.flags, aParams.opacity);
 
   MOZ_ASSERT(mRenderingObserver, "Should have a rendering observer by now");
   mRenderingObserver->ResumeHonoringInvalidations();
@@ -1202,6 +1206,10 @@ VectorImage::OnSVGDocumentLoaded()
                         FLAG_DECODE_COMPLETE |
                         FLAG_ONLOAD_UNBLOCKED;
 
+    if (mHaveAnimations) {
+      progress |= FLAG_IS_ANIMATED;
+    }
+
     // Merge in any saved progress from OnImageDataComplete.
     if (mLoadProgress) {
       progress |= *mLoadProgress;
@@ -1286,7 +1294,7 @@ VectorImage::ReportUseCounters()
 nsIntSize
 VectorImage::OptimalImageSizeForDest(const gfxSize& aDest,
                                      uint32_t aWhichFrame,
-                                     Filter aFilter,
+                                     SamplingFilter aSamplingFilter,
                                      uint32_t aFlags)
 {
   MOZ_ASSERT(aDest.width >= 0 || ceil(aDest.width) <= INT32_MAX ||

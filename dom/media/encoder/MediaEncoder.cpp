@@ -66,7 +66,7 @@ void
 MediaEncoder::NotifyQueuedTrackChanges(MediaStreamGraph* aGraph,
                                        TrackID aID,
                                        StreamTime aTrackOffset,
-                                       uint32_t aTrackEvents,
+                                       TrackEventCommand aTrackEvents,
                                        const MediaSegment& aQueuedMedia,
                                        MediaStream* aInputStream,
                                        TrackID aInputTrackID)
@@ -74,7 +74,7 @@ MediaEncoder::NotifyQueuedTrackChanges(MediaStreamGraph* aGraph,
   if (!mDirectConnected) {
     NotifyRealtimeData(aGraph, aID, aTrackOffset, aTrackEvents, aQueuedMedia);
   } else {
-    if (aTrackEvents != 0) {
+    if (aTrackEvents != TrackEventCommand::TRACK_EVENT_NONE) {
       // forward events (TRACK_EVENT_ENDED) but not the media
       if (aQueuedMedia.GetType() == MediaSegment::VIDEO) {
         VideoSegment segment;
@@ -106,8 +106,26 @@ MediaEncoder::NotifyQueuedTrackChanges(MediaStreamGraph* aGraph,
 }
 
 void
+MediaEncoder::NotifyQueuedAudioData(MediaStreamGraph* aGraph, TrackID aID,
+                                    StreamTime aTrackOffset,
+                                    const AudioSegment& aQueuedMedia,
+                                    MediaStream* aInputStream,
+                                    TrackID aInputTrackID)
+{
+  if (!mDirectConnected) {
+    NotifyRealtimeData(aGraph, aID, aTrackOffset, 0, aQueuedMedia);
+  } else {
+    if (mSuspended == RECORD_RESUMED) {
+      if (!mVideoEncoder) {
+        mSuspended = RECORD_NOT_SUSPENDED; // no video
+      }
+    }
+  }
+}
+
+void
 MediaEncoder::NotifyEvent(MediaStreamGraph* aGraph,
-                          MediaStreamListener::MediaStreamGraphEvent event)
+                          MediaStreamGraphEvent event)
 {
   // In case that MediaEncoder does not receive a TRACK_EVENT_ENDED event.
   LOG(LogLevel::Debug, ("NotifyRemoved in [MediaEncoder]."));

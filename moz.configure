@@ -53,6 +53,46 @@ def compile_environment(compile_env):
 set_config('COMPILE_ENVIRONMENT', compile_environment)
 add_old_configure_assignment('COMPILE_ENVIRONMENT', compile_environment)
 
+js_option('--disable-tests',
+          help='Do not build test libraries & programs')
+
+@depends('--disable-tests')
+def enable_tests(value):
+    if value:
+        return True
+
+set_config('ENABLE_TESTS', enable_tests)
+set_define('ENABLE_TESTS', enable_tests)
+
+@depends(enable_tests)
+def gtest_has_rtti(value):
+    if value:
+        return '0'
+
+set_define('GTEST_HAS_RTTI', gtest_has_rtti)
+
+@depends(target, enable_tests)
+def linux_gtest_defines(target, enable_tests):
+    if enable_tests and target.os == 'Android':
+        return namespace(os_linux_android=True,
+                         use_own_tr1_tuple=True,
+                         has_clone='0')
+
+set_define('GTEST_OS_LINUX_ANDROID',
+           delayed_getattr(linux_gtest_defines, 'os_linux_android'))
+set_define('GTEST_USE_OWN_TR1_TUPLE',
+           delayed_getattr(linux_gtest_defines, 'use_own_tr1_tuple'))
+set_define('GTEST_HAS_CLONE',
+           delayed_getattr(linux_gtest_defines, 'has_clone'))
+
+js_option('--enable-debug',
+          nargs='?',
+          help='Enable building with developer debug info '
+               '(using the given compiler flags).')
+
+add_old_configure_assignment('MOZ_DEBUG',
+                             depends('--enable-debug')(lambda v: bool(v)))
+
 @depends('--disable-compile-environment', '--help')
 def toolchain_include(compile_env, help):
     if compile_env:
@@ -74,19 +114,37 @@ def build_backends_choices(help):
     return tuple(backends)
 
 
-option('--enable-build-backend', nargs='+', choices=build_backends_choices,
-       help='Enable additional build backends')
+@deprecated_option('--enable-build-backend', nargs='+',
+                   choices=build_backends_choices)
+def build_backend(backends):
+    if backends:
+        return tuple('+%s' % b for b in backends)
 
-@depends('--enable-build-backend', '--enable-artifact-builds')
-def build_backend(backends, artifact_builds):
+imply_option('--build-backends', build_backend)
+
+
+@depends('--enable-artifact-builds', '--disable-compile-environment', '--help')
+@imports('sys')
+def build_backend_defaults(artifact_builds, compile_environment, _):
     if artifact_builds:
         all_backends = ['FasterMake+RecursiveMake']
     else:
         all_backends = ['RecursiveMake', 'FasterMake']
-    all_backends.extend(backends)
-    return unique_list(all_backends)
+    # Normally, we'd use target.os == 'WINNT', but a dependency on target
+    # would require target to depend on --help, as well as host and shell,
+    # and this is not a can of worms we can open at the moment.
+    if sys.platform == 'win32' and compile_environment:
+        all_backends.append('VisualStudio')
+    return tuple(all_backends)
 
-set_config('BUILD_BACKENDS', build_backend)
+option('--build-backends', nargs='+', default=build_backend_defaults,
+       choices=build_backends_choices, help='Build backends to generate')
+
+@depends('--build-backends')
+def build_backends(backends):
+    return backends
+
+set_config('BUILD_BACKENDS', build_backends)
 
 
 # Awk detection

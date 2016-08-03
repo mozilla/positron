@@ -592,7 +592,7 @@ nsXMLContentSink::CloseElement(nsIContent* aContent)
                                   &isAlternate);
       if (NS_SUCCEEDED(rv) && willNotify && !isAlternate && !mRunsToCompletion) {
         ++mPendingSheetCount;
-        mScriptLoader->AddExecuteBlocker();
+        mScriptLoader->AddParserBlockingScriptExecutionBlocker();
       }
     }
   }
@@ -928,7 +928,7 @@ nsXMLContentSink::HandleStartElement(const char16_t *aName,
   // XXX Hopefully the parser will flag this before we get
   // here. If we're in the epilog, there should be no
   // new elements
-  PR_ASSERT(eXMLContentSinkState_InEpilog != mState);
+  MOZ_ASSERT(eXMLContentSinkState_InEpilog != mState);
 
   FlushText();
   DidAddContent();
@@ -1021,7 +1021,7 @@ nsXMLContentSink::HandleEndElement(const char16_t *aName,
   // XXX Hopefully the parser will flag this before we get
   // here. If we're in the prolog or epilog, there should be
   // no close tags for elements.
-  PR_ASSERT(eXMLContentSinkState_InDocumentElement == mState);
+  MOZ_ASSERT(eXMLContentSinkState_InDocumentElement == mState);
 
   FlushText();
 
@@ -1213,7 +1213,7 @@ nsXMLContentSink::HandleProcessingInstruction(const char16_t *aTarget,
       // Successfully started a stylesheet load
       if (!isAlternate && !mRunsToCompletion) {
         ++mPendingSheetCount;
-        mScriptLoader->AddExecuteBlocker();
+        mScriptLoader->AddParserBlockingScriptExecutionBlocker();
       }
 
       return NS_OK;

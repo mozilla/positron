@@ -169,7 +169,13 @@ var gSearchPane = {
         gSearchPane.remove(aEngine);
         break;
       case "engine-current":
-        gSearchPane.buildDefaultEngineDropDown();
+        // If the user is going through the drop down using up/down keys, the
+        // dropdown may still be open (eg. on Windows) when engine-current is
+        // fired, so rebuilding the list unconditionally would get in the way.
+        let selectedEngine =
+          document.getElementById("defaultEngine").selectedItem.engine;
+        if (selectedEngine.name != aEngine.name)
+          gSearchPane.buildDefaultEngineDropDown();
         break;
       case "engine-default":
         // Not relevant
@@ -203,8 +209,13 @@ var gSearchPane = {
     else {
       let isMac = Services.appinfo.OS == "Darwin";
       if ((isMac && aEvent.keyCode == KeyEvent.DOM_VK_RETURN) ||
-          (!isMac && aEvent.keyCode == KeyEvent.DOM_VK_F2))
+          (!isMac && aEvent.keyCode == KeyEvent.DOM_VK_F2)) {
         tree.startEditing(index, tree.columns.getLastColumn());
+      } else if (aEvent.keyCode == KeyEvent.DOM_VK_DELETE ||
+                 isMac && aEvent.shiftKey && aEvent.keyCode == KeyEvent.DOM_VK_BACK_SPACE) {
+        // Delete and Shift+Backspace (Mac) removes selected engine.
+        Services.search.removeEngine(gEngineView.selectedEngine.originalEngine);
+     }
     }
   },
 

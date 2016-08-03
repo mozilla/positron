@@ -295,7 +295,7 @@ ImageHost::Composite(LayerComposite* aLayer,
                      EffectChain& aEffectChain,
                      float aOpacity,
                      const gfx::Matrix4x4& aTransform,
-                     const gfx::Filter& aFilter,
+                     const gfx::SamplingFilter aSamplingFilter,
                      const gfx::IntRect& aClipRect,
                      const nsIntRegion* aVisibleRegion)
 {
@@ -313,7 +313,7 @@ ImageHost::Composite(LayerComposite* aLayer,
                                  aEffectChain,
                                  aOpacity,
                                  aTransform,
-                                 aFilter,
+                                 aSamplingFilter,
                                  aClipRect,
                                  aVisibleRegion);
     mBias = BIAS_NONE;
@@ -331,11 +331,6 @@ ImageHost::Composite(LayerComposite* aLayer,
 
   TimedImage* img = &mImages[imageIndex];
   img->mTextureHost->SetCompositor(GetCompositor());
-  // If this TextureHost will be recycled, then make sure we hold a reference to
-  // it until we're sure that the compositor has finished reading from it.
-  if (img->mTextureHost->GetFlags() & TextureFlags::RECYCLE) {
-    aLayer->GetLayerManager()->HoldTextureUntilNextComposite(img->mTextureHost);
-  }
   SetCurrentTextureHost(img->mTextureHost);
 
   {
@@ -359,7 +354,7 @@ ImageHost::Composite(LayerComposite* aLayer,
         !(mCurrentTextureHost->GetFlags() & TextureFlags::NON_PREMULTIPLIED);
     RefPtr<TexturedEffect> effect =
         CreateTexturedEffect(mCurrentTextureHost->GetReadFormat(),
-            mCurrentTextureSource.get(), aFilter, isAlphaPremultiplied,
+            mCurrentTextureSource.get(), aSamplingFilter, isAlphaPremultiplied,
             GetRenderState());
     if (!effect) {
       return;
@@ -604,7 +599,7 @@ ImageHost::IsOpaque()
 }
 
 already_AddRefed<TexturedEffect>
-ImageHost::GenEffect(const gfx::Filter& aFilter)
+ImageHost::GenEffect(const gfx::SamplingFilter aSamplingFilter)
 {
   TimedImage* img = ChooseImage();
   if (!img) {
@@ -621,7 +616,7 @@ ImageHost::GenEffect(const gfx::Filter& aFilter)
 
   return CreateTexturedEffect(mCurrentTextureHost->GetReadFormat(),
                               mCurrentTextureSource,
-                              aFilter,
+                              aSamplingFilter,
                               isAlphaPremultiplied,
                               GetRenderState());
 }
@@ -682,7 +677,7 @@ ImageHostOverlay::Composite(Compositor* aCompositor,
                             EffectChain& aEffectChain,
                             float aOpacity,
                             const gfx::Matrix4x4& aTransform,
-                            const gfx::Filter& aFilter,
+                            const gfx::SamplingFilter aSamplingFilter,
                             const gfx::IntRect& aClipRect,
                             const nsIntRegion* aVisibleRegion)
 {

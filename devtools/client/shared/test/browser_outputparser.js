@@ -3,9 +3,8 @@
 
 "use strict";
 
-var {Loader} = Cu.import("resource://gre/modules/commonjs/toolkit/loader.js",
-                         {});
-var {OutputParser} = require("devtools/client/shared/output-parser");
+const {OutputParser} = require("devtools/client/shared/output-parser");
+const {initCssProperties, getCssProperties} = require("devtools/shared/fronts/css-properties");
 
 add_task(function* () {
   yield addTab("about:blank");
@@ -17,7 +16,12 @@ function* performTest() {
   let [host, , doc] = yield createHost("bottom", "data:text/html," +
     "<h1>browser_outputParser.js</h1><div></div>");
 
-  let parser = new OutputParser(doc);
+  // Mock the toolbox that initCssProperties expect so we get the fallback css properties.
+  let toolbox = {target: {client: {}, hasActor: () => false}};
+  yield initCssProperties(toolbox);
+  let cssProperties = getCssProperties(toolbox);
+
+  let parser = new OutputParser(doc, cssProperties.supportsType);
   testParseCssProperty(doc, parser);
   testParseCssVar(doc, parser);
   testParseURL(doc, parser);
@@ -216,6 +220,13 @@ function testParseURL(doc, parser) {
       expectedTrailer: ")"
     },
     {
+      desc: "bad url, missing paren, with baseURI",
+      baseURI: "data:text/html,<style></style>",
+      leader: "url(",
+      trailer: "",
+      expectedTrailer: ")"
+    },
+    {
       desc: "bad url, double quote, missing paren",
       leader: "url(\"",
       trailer: "\"",
@@ -232,7 +243,8 @@ function testParseURL(doc, parser) {
   for (let test of tests) {
     let url = test.leader + "something.jpg" + test.trailer;
     let frag = parser.parseCssProperty("background", url, {
-      urlClass: "test-urlclass"
+      urlClass: "test-urlclass",
+      baseURI: test.baseURI,
     });
 
     let target = doc.querySelector("div");

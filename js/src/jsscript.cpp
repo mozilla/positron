@@ -15,6 +15,7 @@
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/PodOperations.h"
 #include "mozilla/ScopeExit.h"
+#include "mozilla/unused.h"
 #include "mozilla/Vector.h"
 
 #include <algorithm>
@@ -53,6 +54,7 @@
 #include "jsfuninlines.h"
 #include "jsobjinlines.h"
 
+#include "vm/NativeObject-inl.h"
 #include "vm/ScopeObject-inl.h"
 #include "vm/SharedImmutableStringsCache-inl.h"
 #include "vm/Stack-inl.h"
@@ -574,7 +576,7 @@ static inline uint32_t
 FindScopeObjectIndex(JSScript* script, NestedStaticScope& scope)
 {
     ObjectArray* objects = script->objects();
-    HeapPtrObject* vector = objects->vector;
+    GCPtrObject* vector = objects->vector;
     unsigned length = objects->length;
     for (unsigned i = 0; i < length; ++i) {
         if (vector[i] == &scope)
@@ -990,7 +992,7 @@ js::XDRScript(XDRState<mode>* xdr, HandleObject enclosingScopeArg, HandleScript 
     }
 
     if (nconsts) {
-        HeapValue* vector = script->consts()->vector;
+        GCPtrValue* vector = script->consts()->vector;
         RootedValue val(cx);
         for (i = 0; i != nconsts; ++i) {
             if (mode == XDR_ENCODE)
@@ -1008,7 +1010,7 @@ js::XDRScript(XDRState<mode>* xdr, HandleObject enclosingScopeArg, HandleScript 
      * after the enclosing block has been XDR'd.
      */
     for (i = 0; i != nobjects; ++i) {
-        HeapPtrObject* objp = &script->objects()->vector[i];
+        GCPtrObject* objp = &script->objects()->vector[i];
         XDRClassKind classk;
 
         if (mode == XDR_ENCODE) {
@@ -1287,7 +1289,7 @@ js::XDRLazyScript(XDRState<mode>* xdr, HandleObject enclosingScope, HandleScript
     // Code inner functions.
     {
         RootedFunction func(cx);
-        HeapPtrFunction* innerFunctions = lazy->innerFunctions();
+        GCPtrFunction* innerFunctions = lazy->innerFunctions();
         size_t numInnerFunctions = lazy->numInnerFunctions();
         for (size_t i = 0; i < numInnerFunctions; i++) {
             if (mode == XDR_ENCODE)
@@ -1494,14 +1496,14 @@ ScriptCounts::getThrowCounts(size_t offset) {
 }
 
 void
-JSScript::setIonScript(JSContext* maybecx, js::jit::IonScript* ionScript)
+JSScript::setIonScript(JSRuntime* maybeRuntime, js::jit::IonScript* ionScript)
 {
     MOZ_ASSERT_IF(ionScript != ION_DISABLED_SCRIPT, !baselineScript()->hasPendingIonBuilder());
     if (hasIonScript())
         js::jit::IonScript::writeBarrierPre(zone(), ion);
     ion = ionScript;
     MOZ_ASSERT_IF(hasIonScript(), hasBaselineScript());
-    updateBaselineOrIonRaw(maybecx);
+    updateBaselineOrIonRaw(maybeRuntime);
 }
 
 js::PCCounts*
@@ -1682,7 +1684,7 @@ ScriptSourceObject::create(ExclusiveContext* cx, ScriptSource* source)
 ScriptSourceObject::initFromOptions(JSContext* cx, HandleScriptSource source,
                                     const ReadOnlyCompileOptions& options)
 {
-    assertSameCompartment(cx, source);
+    releaseAssertSameCompartment(cx, source);
     MOZ_ASSERT(source->getReservedSlot(ELEMENT_SLOT).isMagic(JS_GENERIC_MAGIC));
     MOZ_ASSERT(source->getReservedSlot(ELEMENT_PROPERTY_SLOT).isMagic(JS_GENERIC_MAGIC));
     MOZ_ASSERT(source->getReservedSlot(INTRODUCTION_SCRIPT_SLOT).isMagic(JS_GENERIC_MAGIC));
@@ -1859,8 +1861,6 @@ ScriptSource::chars(JSContext* cx, UncompressedSourceCache::AutoHoldEntry& holde
 {
     struct CharsMatcher
     {
-        using ReturnType = const char16_t*;
-
         JSContext* cx;
         ScriptSource& ss;
         UncompressedSourceCache::AutoHoldEntry& holder;
@@ -1872,12 +1872,12 @@ ScriptSource::chars(JSContext* cx, UncompressedSourceCache::AutoHoldEntry& holde
           , holder(holder)
         { }
 
-        ReturnType match(Uncompressed& u) {
+        const char16_t* match(Uncompressed& u) {
             return u.string.chars();
         }
 
-        ReturnType match(Compressed& c) {
-            if (const char16_t* decompressed = cx->runtime()->uncompressedSourceCache.lookup(&ss, holder))
+        const char16_t* match(Compressed& c) {
+            if (const char16_t* decompressed = cx->caches.uncompressedSourceCache.lookup(&ss, holder))
                 return decompressed;
 
             const size_t lengthWithNull = ss.length() + 1;
@@ -1914,15 +1914,15 @@ ScriptSource::chars(JSContext* cx, UncompressedSourceCache::AutoHoldEntry& holde
                 return ss.data.as<Uncompressed>().string.chars();
             }
 
-            ReturnType ret = decompressed.get();
-            if (!cx->runtime()->uncompressedSourceCache.put(&ss, Move(decompressed), holder)) {
+            const char16_t* ret = decompressed.get();
+            if (!cx->caches.uncompressedSourceCache.put(&ss, Move(decompressed), holder)) {
                 JS_ReportOutOfMemory(cx);
                 return nullptr;
             }
             return ret;
         }
 
-        ReturnType match(Missing&) {
+        const char16_t* match(Missing&) {
             MOZ_CRASH("ScriptSource::chars() on ScriptSource with SourceType = Missing");
             return nullptr;
         }
@@ -1994,12 +1994,13 @@ ScriptSource::setCompressedSource(ExclusiveContext* cx,
 }
 
 void
-ScriptSource::setCompressedSource(SharedImmutableString&& raw, size_t length)
+ScriptSource::setCompressedSource(SharedImmutableString&& raw, size_t uncompressedLength)
 {
     MOZ_ASSERT(data.is<Missing>() || data.is<Uncompressed>());
-    MOZ_ASSERT_IF(data.is<Uncompressed>(), data.as<Uncompressed>().string.length() == length);
+    MOZ_ASSERT_IF(data.is<Uncompressed>(),
+                  data.as<Uncompressed>().string.length() == uncompressedLength);
 
-    data = SourceType(Compressed(mozilla::Move(raw), length));
+    data = SourceType(Compressed(mozilla::Move(raw), uncompressedLength));
 }
 
 bool
@@ -2053,6 +2054,19 @@ ScriptSource::setSourceCopy(ExclusiveContext* cx, SourceBufferHolder& srcBuf,
     return true;
 }
 
+static MOZ_MUST_USE bool
+reallocUniquePtr(UniquePtr<char[], JS::FreePolicy>& unique, size_t size)
+{
+    auto newPtr = static_cast<char*>(js_realloc(unique.get(), size));
+    if (!newPtr)
+        return false;
+
+    // Since the realloc succeeded, unique is now holding a freed pointer.
+    mozilla::Unused << unique.release();
+    unique.reset(newPtr);
+    return true;
+}
+
 SourceCompressionTask::ResultType
 SourceCompressionTask::work()
 {
@@ -2062,7 +2076,7 @@ SourceCompressionTask::work()
     // size of the string, first.
     size_t inputBytes = ss->length() * sizeof(char16_t);
     size_t firstSize = inputBytes / 2;
-    compressed = js_malloc(firstSize);
+    mozilla::UniquePtr<char[], JS::FreePolicy> compressed(js_pod_malloc<char>(firstSize));
     if (!compressed)
         return OOM;
 
@@ -2072,7 +2086,7 @@ SourceCompressionTask::work()
     if (!comp.init())
         return OOM;
 
-    comp.setOutput((unsigned char*) compressed, firstSize);
+    comp.setOutput(reinterpret_cast<unsigned char*>(compressed.get()), firstSize);
     bool cont = true;
     while (cont) {
         if (abort_)
@@ -2089,11 +2103,10 @@ SourceCompressionTask::work()
 
             // The compressed output is greater than half the size of the
             // original string. Reallocate to the full size.
-            compressed = js_realloc(compressed, inputBytes);
-            if (!compressed)
+            if (!reallocUniquePtr(compressed, inputBytes))
                 return OOM;
 
-            comp.setOutput((unsigned char*) compressed, inputBytes);
+            comp.setOutput(reinterpret_cast<unsigned char*>(compressed.get()), inputBytes);
             break;
           }
           case Compressor::DONE:
@@ -2103,12 +2116,15 @@ SourceCompressionTask::work()
             return OOM;
         }
     }
-    compressedBytes = comp.outWritten();
-    compressedHash = mozilla::HashBytes(compressed, compressedBytes);
+    size_t compressedBytes = comp.outWritten();
 
     // Shrink the buffer to the size of the compressed data.
-    if (void* newCompressed = js_realloc(compressed, compressedBytes))
-        compressed = newCompressed;
+    mozilla::Unused << reallocUniquePtr(compressed, compressedBytes);
+
+    auto& strings = cx->sharedImmutableStrings();
+    resultString = strings.getOrCreate(mozilla::Move(compressed), compressedBytes);
+    if (!resultString)
+        return OOM;
 
     return Success;
 }
@@ -2129,17 +2145,15 @@ ScriptSource::performXDR(XDRState<mode>* xdr)
 {
     struct CompressedLengthMatcher
     {
-        using ReturnType = size_t;
-
-        ReturnType match(Uncompressed&) {
+        size_t match(Uncompressed&) {
             return 0;
         }
 
-        ReturnType match(Compressed& c) {
+        size_t match(Compressed& c) {
             return c.raw.length();
         }
 
-        ReturnType match(Missing&) {
+        size_t match(Missing&) {
             MOZ_CRASH("Missing source data in ScriptSource::performXDR");
             return 0;
         }
@@ -2147,17 +2161,15 @@ ScriptSource::performXDR(XDRState<mode>* xdr)
 
     struct RawDataMatcher
     {
-        using ReturnType = void*;
-
-        ReturnType match(Uncompressed& u) {
+        void* match(Uncompressed& u) {
             return (void*) u.string.chars();
         }
 
-        ReturnType match(Compressed& c) {
+        void* match(Compressed& c) {
             return (void*) c.raw.chars();
         }
 
-        ReturnType match(Missing&) {
+        void* match(Missing&) {
             MOZ_CRASH("Missing source data in ScriptSource::performXDR");
             return nullptr;
         }
@@ -2429,12 +2441,12 @@ js::SharedScriptData::new_(ExclusiveContext* cx, uint32_t codeLength,
 
     /*
      * Call constructors to initialize the storage that will be accessed as a
-     * HeapPtrAtom array via atoms().
+     * GCPtrAtom array via atoms().
      */
-    HeapPtrAtom* atoms = entry->atoms();
+    GCPtrAtom* atoms = entry->atoms();
     MOZ_ASSERT(reinterpret_cast<uintptr_t>(atoms) % sizeof(JSAtom*) == 0);
     for (unsigned i = 0; i < natoms; ++i)
-        new (&atoms[i]) HeapPtrAtom();
+        new (&atoms[i]) GCPtrAtom();
 
     return entry;
 }
@@ -2456,12 +2468,12 @@ SaveSharedScriptData(ExclusiveContext* cx, Handle<JSScript*> script, SharedScrip
 
     ScriptBytecodeHasher::Lookup l(ssd);
 
-    ScriptDataTable::AddPtr p = cx->scriptDataTable().lookupForAdd(l);
+    ScriptDataTable::AddPtr p = cx->scriptDataTable(lock).lookupForAdd(l);
     if (p) {
         js_free(ssd);
         ssd = *p;
     } else {
-        if (!cx->scriptDataTable().add(p, ssd)) {
+        if (!cx->scriptDataTable(lock).add(p, ssd)) {
             script->setCode(nullptr);
             script->atoms = nullptr;
             js_free(ssd);
@@ -2477,8 +2489,8 @@ SaveSharedScriptData(ExclusiveContext* cx, Handle<JSScript*> script, SharedScrip
      * reachable. This is effectively a read barrier.
      */
     if (cx->isJSContext()) {
-        JSRuntime* rt = cx->asJSContext()->runtime();
-        if (JS::IsIncrementalGCInProgress(rt) && rt->gc.isFullGc())
+        JSContext* ncx = cx->asJSContext();
+        if (JS::IsIncrementalGCInProgress(ncx) && ncx->gc.isFullGc())
             ssd->marked = true;
     }
 
@@ -2500,10 +2512,10 @@ MarkScriptData(JSRuntime* rt, const jsbytecode* bytecode)
 }
 
 void
-js::UnmarkScriptData(JSRuntime* rt)
+js::UnmarkScriptData(JSRuntime* rt, AutoLockForExclusiveAccess& lock)
 {
     MOZ_ASSERT(rt->gc.isFullGc());
-    ScriptDataTable& table = rt->scriptDataTable();
+    ScriptDataTable& table = rt->scriptDataTable(lock);
     for (ScriptDataTable::Enum e(table); !e.empty(); e.popFront()) {
         SharedScriptData* entry = e.front();
         entry->marked = false;
@@ -2511,10 +2523,10 @@ js::UnmarkScriptData(JSRuntime* rt)
 }
 
 void
-js::SweepScriptData(JSRuntime* rt)
+js::SweepScriptData(JSRuntime* rt, AutoLockForExclusiveAccess& lock)
 {
     MOZ_ASSERT(rt->gc.isFullGc());
-    ScriptDataTable& table = rt->scriptDataTable();
+    ScriptDataTable& table = rt->scriptDataTable(lock);
 
     if (rt->keepAtoms())
         return;
@@ -2529,9 +2541,9 @@ js::SweepScriptData(JSRuntime* rt)
 }
 
 void
-js::FreeScriptData(JSRuntime* rt)
+js::FreeScriptData(JSRuntime* rt, AutoLockForExclusiveAccess& lock)
 {
-    ScriptDataTable& table = rt->scriptDataTable();
+    ScriptDataTable& table = rt->scriptDataTable(lock);
     if (!table.initialized())
         return;
 
@@ -2623,17 +2635,17 @@ JS_STATIC_ASSERT(KEEPS_JSVAL_ALIGNMENT(TryNoteArray));
 JS_STATIC_ASSERT(KEEPS_JSVAL_ALIGNMENT(BlockScopeArray));
 
 /* These assertions ensure there is no padding required between array elements. */
-JS_STATIC_ASSERT(HAS_JSVAL_ALIGNMENT(HeapValue));
-JS_STATIC_ASSERT(NO_PADDING_BETWEEN_ENTRIES(HeapValue, HeapPtrObject));
-JS_STATIC_ASSERT(NO_PADDING_BETWEEN_ENTRIES(HeapPtrObject, HeapPtrObject));
-JS_STATIC_ASSERT(NO_PADDING_BETWEEN_ENTRIES(HeapPtrObject, JSTryNote));
+JS_STATIC_ASSERT(HAS_JSVAL_ALIGNMENT(GCPtrValue));
+JS_STATIC_ASSERT(NO_PADDING_BETWEEN_ENTRIES(GCPtrValue, GCPtrObject));
+JS_STATIC_ASSERT(NO_PADDING_BETWEEN_ENTRIES(GCPtrObject, GCPtrObject));
+JS_STATIC_ASSERT(NO_PADDING_BETWEEN_ENTRIES(GCPtrObject, JSTryNote));
 JS_STATIC_ASSERT(NO_PADDING_BETWEEN_ENTRIES(JSTryNote, uint32_t));
 JS_STATIC_ASSERT(NO_PADDING_BETWEEN_ENTRIES(uint32_t, uint32_t));
 
-JS_STATIC_ASSERT(NO_PADDING_BETWEEN_ENTRIES(HeapValue, BlockScopeNote));
+JS_STATIC_ASSERT(NO_PADDING_BETWEEN_ENTRIES(GCPtrValue, BlockScopeNote));
 JS_STATIC_ASSERT(NO_PADDING_BETWEEN_ENTRIES(BlockScopeNote, BlockScopeNote));
 JS_STATIC_ASSERT(NO_PADDING_BETWEEN_ENTRIES(JSTryNote, BlockScopeNote));
-JS_STATIC_ASSERT(NO_PADDING_BETWEEN_ENTRIES(HeapPtrObject, BlockScopeNote));
+JS_STATIC_ASSERT(NO_PADDING_BETWEEN_ENTRIES(GCPtrObject, BlockScopeNote));
 JS_STATIC_ASSERT(NO_PADDING_BETWEEN_ENTRIES(BlockScopeNote, uint32_t));
 
 static inline size_t
@@ -2762,13 +2774,13 @@ JSScript::partiallyInit(ExclusiveContext* cx, HandleScript script, uint32_t ncon
     if (nconsts != 0) {
         MOZ_ASSERT(reinterpret_cast<uintptr_t>(cursor) % sizeof(JS::Value) == 0);
         script->consts()->length = nconsts;
-        script->consts()->vector = (HeapValue*)cursor;
+        script->consts()->vector = (GCPtrValue*)cursor;
         cursor += nconsts * sizeof(script->consts()->vector[0]);
     }
 
     if (nobjects != 0) {
         script->objects()->length = nobjects;
-        script->objects()->vector = (HeapPtrObject*)cursor;
+        script->objects()->vector = (GCPtrObject*)cursor;
         cursor += nobjects * sizeof(script->objects()->vector[0]);
     }
 
@@ -3140,7 +3152,7 @@ JSScript::finalize(FreeOp* fop)
         fop->free_(data);
     }
 
-    fop->runtime()->lazyScriptCache.remove(this);
+    fop->runtime()->contextFromMainThread()->caches.lazyScriptCache.remove(this);
 
     // In most cases, our LazyScript's script pointer will reference this
     // script, and thus be nulled out by normal weakref processing. However, if
@@ -3219,7 +3231,7 @@ js::GetSrcNote(GSNCache& cache, JSScript* script, jsbytecode* pc)
 jssrcnote*
 js::GetSrcNote(JSContext* cx, JSScript* script, jsbytecode* pc)
 {
-    return GetSrcNote(cx->runtime()->gsnCache, script, pc);
+    return GetSrcNote(cx->caches.gsnCache, script, pc);
 }
 
 unsigned
@@ -3352,7 +3364,7 @@ js::DescribeScriptedCallerForCompilation(JSContext* cx, MutableHandleScript mayb
         return;
     }
 
-    NonBuiltinFrameIter iter(cx);
+    NonBuiltinFrameIter iter(cx, cx->compartment()->principals());
 
     if (iter.done()) {
         maybeScript.set(nullptr);
@@ -3466,7 +3478,7 @@ js::detail::CopyScript(JSContext* cx, HandleObject scriptStaticScope, HandleScri
 
     AutoObjectVector objects(cx);
     if (nobjects != 0) {
-        HeapPtrObject* vector = src->objects()->vector;
+        GCPtrObject* vector = src->objects()->vector;
         for (unsigned i = 0; i < nobjects; i++) {
             RootedObject obj(cx, vector[i]);
             RootedObject clone(cx);
@@ -3545,7 +3557,9 @@ js::detail::CopyScript(JSContext* cx, HandleObject scriptStaticScope, HandleScri
     /* This assignment must occur before all the Rebase calls. */
     dst->data = data.forget();
     dst->dataSize_ = size;
-    memcpy(dst->data, src->data, size);
+    MOZ_ASSERT(bool(dst->data) == bool(src->data));
+    if (dst->data)
+        memcpy(dst->data, src->data, size);
 
     /* Script filenames, bytecodes and atoms are runtime-wide. */
     dst->setCode(src->code());
@@ -3582,13 +3596,13 @@ js::detail::CopyScript(JSContext* cx, HandleObject scriptStaticScope, HandleScri
     dst->isDefaultClassConstructor_ = src->isDefaultClassConstructor();
 
     if (nconsts != 0) {
-        HeapValue* vector = Rebase<HeapValue>(dst, src, src->consts()->vector);
+        GCPtrValue* vector = Rebase<GCPtrValue>(dst, src, src->consts()->vector);
         dst->consts()->vector = vector;
         for (unsigned i = 0; i < nconsts; ++i)
             MOZ_ASSERT_IF(vector[i].isMarkable(), vector[i].toString()->isAtom());
     }
     if (nobjects != 0) {
-        HeapPtrObject* vector = Rebase<HeapPtrObject>(dst, src, src->objects()->vector);
+        GCPtrObject* vector = Rebase<GCPtrObject>(dst, src, src->objects()->vector);
         dst->objects()->vector = vector;
         for (unsigned i = 0; i < nobjects; ++i)
             vector[i].init(&objects[i]->as<NativeObject>());
@@ -4265,7 +4279,7 @@ LazyScript::CreateRaw(ExclusiveContext* cx, HandleFunction fun,
     p.treatAsRunOnce = false;
 
     size_t bytes = (p.numFreeVariables * sizeof(FreeVariable))
-                 + (p.numInnerFunctions * sizeof(HeapPtrFunction));
+                 + (p.numInnerFunctions * sizeof(GCPtrFunction));
 
     ScopedJSFreePtr<uint8_t> table(bytes ? fun->zone()->pod_malloc<uint8_t>(bytes) : nullptr);
     if (bytes && !table) {
@@ -4334,7 +4348,7 @@ LazyScript::Create(ExclusiveContext* cx, HandleFunction fun,
     for (i = 0, num = res->numFreeVariables(); i < num; i++)
         variables[i] = FreeVariable(dummyAtom);
 
-    HeapPtrFunction* functions = res->innerFunctions();
+    GCPtrFunction* functions = res->innerFunctions();
     for (i = 0, num = res->numInnerFunctions(); i < num; i++)
         functions[i].init(dummyFun);
 
@@ -4382,13 +4396,13 @@ LazyScript::hasUncompiledEnclosingScript() const
 }
 
 void
-JSScript::updateBaselineOrIonRaw(JSContext* maybecx)
+JSScript::updateBaselineOrIonRaw(JSRuntime* maybeRuntime)
 {
     if (hasBaselineScript() && baseline->hasPendingIonBuilder()) {
-        MOZ_ASSERT(maybecx);
+        MOZ_ASSERT(maybeRuntime);
         MOZ_ASSERT(!isIonCompilingOffThread());
-        baselineOrIonRaw = maybecx->runtime()->jitRuntime()->lazyLinkStub()->raw();
-        baselineOrIonSkipArgCheck = maybecx->runtime()->jitRuntime()->lazyLinkStub()->raw();
+        baselineOrIonRaw = maybeRuntime->jitRuntime()->lazyLinkStub()->raw();
+        baselineOrIonSkipArgCheck = maybeRuntime->jitRuntime()->lazyLinkStub()->raw();
     } else if (hasIonScript()) {
         baselineOrIonRaw = ion->method()->raw();
         baselineOrIonSkipArgCheck = ion->method()->raw() + ion->getSkipArgCheckEntryOffset();

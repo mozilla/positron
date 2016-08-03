@@ -17,6 +17,7 @@ import re
 import shutil
 import signal
 import sys
+import tempfile
 import time
 import traceback
 
@@ -131,7 +132,9 @@ class XPCShellTestThread(Thread):
         self.xpcshell = kwargs.get('xpcshell')
         self.xpcsRunArgs = kwargs.get('xpcsRunArgs')
         self.failureManifest = kwargs.get('failureManifest')
+        self.jscovdir = kwargs.get('jscovdir')
         self.stack_fixer_function = kwargs.get('stack_fixer_function')
+        self._rootTempDir = kwargs.get('tempDir')
 
         self.app_dir_key = app_dir_key
         self.interactive = interactive
@@ -321,7 +324,7 @@ class XPCShellTestThread(Thread):
                   name.replace('\\', '/')]
 
     def setupTempDir(self):
-        tempDir = mkdtemp(prefix='xpc-other-')
+        tempDir = mkdtemp(prefix='xpc-other-', dir=self._rootTempDir)
         self.env["XPCSHELL_TEST_TEMP_DIR"] = tempDir
         if self.interactive:
             self.log.info("temp dir is %s" % tempDir)
@@ -331,7 +334,7 @@ class XPCShellTestThread(Thread):
         if not os.path.isdir(self.pluginsPath):
             return None
 
-        pluginsDir = mkdtemp(prefix='xpc-plugins-')
+        pluginsDir = mkdtemp(prefix='xpc-plugins-', dir=self._rootTempDir)
         # shutil.copytree requires dst to not exist. Deleting the tempdir
         # would make a race condition possible in a concurrent environment,
         # so we are using dir_utils.copy_tree which accepts an existing dst
@@ -357,7 +360,7 @@ class XPCShellTestThread(Thread):
                 pass
             os.makedirs(profileDir)
         else:
-            profileDir = mkdtemp(prefix='xpc-profile-')
+            profileDir = mkdtemp(prefix='xpc-profile-', dir=self._rootTempDir)
         self.env["XPCSHELL_TEST_PROFILE_DIR"] = profileDir
         if self.interactive or self.singleFile:
             self.log.info("profile dir is %s" % profileDir)
@@ -629,7 +632,14 @@ class XPCShellTestThread(Thread):
 
         # The test name to log
         cmdI = ['-e', 'const _TEST_NAME = "%s"' % name]
-        self.complete_command = cmdH + cmdT + cmdI + args
+
+        # Directory for javascript code coverage output, null by default.
+        cmdC = ['-e', 'const _JSCOV_DIR = null']
+        if self.jscovdir:
+            cmdC = ['-e', 'const _JSCOV_DIR = "%s"' % self.jscovdir.replace('\\', '/')]
+            self.complete_command = cmdH + cmdT + cmdI + cmdC + args
+        else:
+            self.complete_command = cmdH + cmdT + cmdI + args
 
         if self.test_object.get('dmd') == 'true':
             if sys.platform.startswith('linux'):
@@ -649,6 +659,9 @@ class XPCShellTestThread(Thread):
             self.env['BREAKPAD_SYMBOLS_PATH'] = self.symbolsPath
             self.env['DMD_PRELOAD_VAR'] = preloadEnvVar
             self.env['DMD_PRELOAD_VALUE'] = libdmd
+
+        if self.test_object.get('subprocess') == 'true':
+            self.env['PYTHON'] = sys.executable
 
         testTimeoutInterval = self.harness_timeout
         # Allow a test to request a multiple of the timeout if it is expected to take long
@@ -1067,7 +1080,7 @@ class XPCShellTests(object):
         return path
 
     def runTests(self, xpcshell=None, xrePath=None, appPath=None, symbolsPath=None,
-                 manifest=None, testPaths=None, mobileArgs=None,
+                 manifest=None, testPaths=None, mobileArgs=None, tempDir=None,
                  interactive=False, verbose=False, keepGoing=False, logfiles=True,
                  thisChunk=1, totalChunks=1, debugger=None,
                  debuggerArgs=None, debuggerInteractive=False,
@@ -1076,7 +1089,7 @@ class XPCShellTests(object):
                  testClass=XPCShellTestThread, failureManifest=None,
                  log=None, stream=None, jsDebugger=False, jsDebuggerPort=0,
                  test_tags=None, dump_tests=None, utility_path=None,
-                 rerun_failures=False, failure_manifest=None, **otherOptions):
+                 rerun_failures=False, failure_manifest=None, jscovdir=None, **otherOptions):
         """Run xpcshell tests.
 
         |xpcshell|, is the xpcshell executable to use to run the tests.
@@ -1107,6 +1120,7 @@ class XPCShellTests(object):
         |shuffle|, if True, execute tests in random order.
         |testingModulesDir|, if provided, specifies where JS modules reside.
           xpcshell will register a resource handler mapping this path.
+        |tempDir|, if provided, specifies a temporary directory to use.
         |otherOptions| may be present for the convenience of subclasses
         """
 
@@ -1160,6 +1174,7 @@ class XPCShellTests(object):
         self.xrePath = xrePath
         self.appPath = appPath
         self.symbolsPath = symbolsPath
+        self.tempDir = os.path.normpath(tempDir or tempfile.gettempdir())
         self.manifest = manifest
         self.dump_tests = dump_tests
         self.interactive = interactive
@@ -1174,6 +1189,7 @@ class XPCShellTests(object):
         self.pluginsPath = pluginsPath
         self.sequential = sequential
         self.failure_manifest = failure_manifest
+        self.jscovdir = jscovdir
 
         self.testCount = 0
         self.passCount = 0
@@ -1246,6 +1262,7 @@ class XPCShellTests(object):
             'httpdManifest': self.httpdManifest,
             'httpdJSPath': self.httpdJSPath,
             'headJSPath': self.headJSPath,
+            'tempDir': self.tempDir,
             'testharnessdir': self.testharnessdir,
             'profileName': self.profileName,
             'singleFile': self.singleFile,
@@ -1255,6 +1272,7 @@ class XPCShellTests(object):
             'xpcshell': self.xpcshell,
             'xpcsRunArgs': self.xpcsRunArgs,
             'failureManifest': self.failure_manifest,
+            'jscovdir': self.jscovdir,
             'harness_timeout': self.harness_timeout,
             'stack_fixer_function': self.stack_fixer_function,
         }

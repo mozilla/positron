@@ -67,7 +67,7 @@ void* nsFloatManager::operator new(size_t aSize) CPP_THROW_NEW
     return sCachedFloatManagers[--sCachedFloatManagerCount];
   }
 
-  // The cache is empty, this means we haveto create a new instance using
+  // The cache is empty, this means we have to create a new instance using
   // the global |operator new|.
   return moz_xmalloc(aSize);
 }
@@ -350,8 +350,7 @@ nsFloatManager::StoreRegionFor(WritingMode aWM, nsIFrame* aFloat,
     props.Delete(FloatRegionProperty());
   }
   else {
-    nsMargin* storedMargin = static_cast<nsMargin*>
-      (props.Get(FloatRegionProperty()));
+    nsMargin* storedMargin = props.Get(FloatRegionProperty());
     if (!storedMargin) {
       storedMargin = new nsMargin();
       props.Set(FloatRegionProperty(), storedMargin);

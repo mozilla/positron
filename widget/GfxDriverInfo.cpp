@@ -18,7 +18,7 @@ GfxDeviceFamily* GfxDriverInfo::mDeviceFamilies[DeviceFamilyMax];
 nsAString* GfxDriverInfo::mDeviceVendors[DeviceVendorMax];
 
 GfxDriverInfo::GfxDriverInfo()
-  : mOperatingSystem(DRIVER_OS_UNKNOWN),
+  : mOperatingSystem(OperatingSystem::Unknown),
     mOperatingSystemVersion(0),
     mAdapterVendor(GfxDriverInfo::GetDeviceVendor(VendorAll)),
     mDevices(allDevices),
@@ -274,9 +274,6 @@ const GfxDeviceFamily* GfxDriverInfo::GetDeviceFamily(DeviceFamily id)
       APPEND_DEVICE(0xa002);
       APPEND_DEVICE(0xa011);
       APPEND_DEVICE(0xa012);
-      break;
-    case AMDRadeonHD5800:
-      APPEND_DEVICE(0x6899);
       break;
     // This should never happen, but we get a warning if we don't handle this.
     case DeviceFamilyMax:

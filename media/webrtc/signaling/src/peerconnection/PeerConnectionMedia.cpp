@@ -33,6 +33,10 @@
 #endif
 #endif
 
+#ifndef USE_FAKE_MEDIA_STREAMS
+#include "MediaStreamGraphImpl.h"
+#endif
+
 #include "nsNetCID.h"
 #include "nsNetUtil.h"
 #include "nsIURI.h"
@@ -53,6 +57,7 @@
 #include "mozilla/dom/RTCStatsReportBinding.h"
 #include "MediaStreamTrack.h"
 #include "VideoStreamTrack.h"
+#include "MediaStreamError.h"
 #endif
 
 
@@ -111,9 +116,37 @@ PipelineDetachTransport_s(RefPtr<MediaPipeline> pipeline,
 }
 
 void
+SourceStreamInfo::EndTrack(MediaStream* stream, dom::MediaStreamTrack* track)
+{
+  if (!stream || !stream->AsSourceStream()) {
+    return;
+  }
+
+#if !defined(MOZILLA_EXTERNAL_LINKAGE)
+  class Message : public ControlMessage {
+   public:
+    Message(MediaStream* stream, TrackID track)
+      : ControlMessage(stream),
+        track_id_(track) {}
+
+    virtual void Run() override {
+      mStream->AsSourceStream()->EndTrack(track_id_);
+    }
+   private:
+    TrackID track_id_;
+  };
+
+  stream->GraphImpl()->AppendMessage(
+      MakeUnique<Message>(stream, track->mTrackID));
+#endif
+
+}
+
+void
 SourceStreamInfo::RemoveTrack(const std::string& trackId)
 {
   mTracks.erase(trackId);
+
   RefPtr<MediaPipeline> pipeline = GetPipelineByTrackId_m(trackId);
   if (pipeline) {
     mPipelines.erase(trackId);
@@ -173,8 +206,8 @@ OnProxyAvailable(nsICancelable *request,
                  nsIProxyInfo *proxyinfo,
                  nsresult result) {
 
-  if (result == NS_ERROR_ABORT) {
-    // NS_ERROR_ABORT means that the PeerConnectionMedia is no longer waiting
+  if (!pcm_->mProxyRequest) {
+    // PeerConnectionMedia is no longer waiting
     return NS_OK;
   }
 
@@ -185,6 +218,7 @@ OnProxyAvailable(nsICancelable *request,
   }
 
   pcm_->mProxyResolveCompleted = true;
+  pcm_->mProxyRequest = nullptr;
   pcm_->FlushIceCtxOperationQueueIfReady();
 
   return NS_OK;
@@ -945,23 +979,6 @@ PeerConnectionMedia::RemoveRemoteTrack(const std::string& streamId,
   return NS_OK;
 }
 
-nsresult
-PeerConnectionMedia::GetRemoteTrackId(const std::string streamId,
-                                      const MediaStreamTrack& track,
-                                      std::string* trackId) const
-{
-  auto* ncThis = const_cast<PeerConnectionMedia*>(this);
-  const RemoteSourceStreamInfo* info =
-    ncThis->GetRemoteStreamById(streamId);
-
-  if (!info) {
-    CSFLogError(logTag, "%s: Could not find stream info", __FUNCTION__);
-    return NS_ERROR_NOT_AVAILABLE;
-  }
-
-  return info->GetTrackId(track, trackId);
-}
-
 void
 PeerConnectionMedia::SelfDestruct()
 {
@@ -980,6 +997,7 @@ PeerConnectionMedia::SelfDestruct()
 
   if (mProxyRequest) {
     mProxyRequest->Cancel(NS_ERROR_ABORT);
+    mProxyRequest = nullptr;
   }
 
   // Shutdown the transport (async)
@@ -1390,25 +1408,22 @@ LocalSourceStreamInfo::TakePipelineFrom(RefPtr<LocalSourceStreamInfo>& info,
 
 #if !defined(MOZILLA_EXTERNAL_LINKAGE)
 /**
- * Tells you if any local streams is isolated to a specific peer identity.
- * Obviously, we want all the streams to be isolated equally so that they can
+ * Tells you if any local track is isolated to a specific peer identity.
+ * Obviously, we want all the tracks to be isolated equally so that they can
  * all be sent or not.  We check once when we are setting a local description
  * and that determines if we flip the "privacy requested" bit on.  Once the bit
  * is on, all media originating from this peer connection is isolated.
  *
- * @returns true if any stream has a peerIdentity set on it
+ * @returns true if any track has a peerIdentity set on it
  */
 bool
-PeerConnectionMedia::AnyLocalStreamHasPeerIdentity() const
+PeerConnectionMedia::AnyLocalTrackHasPeerIdentity() const
 {
   ASSERT_ON_THREAD(mMainThread);
 
   for (uint32_t u = 0; u < mLocalSourceStreams.Length(); u++) {
-    DOMMediaStream* stream = mLocalSourceStreams[u]->GetMediaStream();
-    nsTArray<RefPtr<MediaStreamTrack>> tracks;
-    stream->GetTracks(tracks);
-    for (const RefPtr<MediaStreamTrack>& track : tracks) {
-      if (track->GetPeerIdentity() != nullptr) {
+    for (auto pair : mLocalSourceStreams[u]->GetMediaStreamTracks()) {
+      if (pair.second->GetPeerIdentity() != nullptr) {
         return true;
       }
     }
@@ -1463,9 +1478,11 @@ void RemoteSourceStreamInfo::UpdatePrincipal_m(nsIPrincipal* aPrincipal)
     source.SetPrincipal(aPrincipal);
 
     RefPtr<MediaPipeline> pipeline = GetPipelineByTrackId_m(trackPair.first);
-    MOZ_ASSERT(pipeline->direction() == MediaPipeline::RECEIVE);
-    static_cast<MediaPipelineReceive*>(pipeline.get())
-      ->SetPrincipalHandle_m(MakePrincipalHandle(aPrincipal));
+    if (pipeline) {
+      MOZ_ASSERT(pipeline->direction() == MediaPipeline::RECEIVE);
+      static_cast<MediaPipelineReceive*>(pipeline.get())
+        ->SetPrincipalHandle_m(MakePrincipalHandle(aPrincipal));
+    }
   }
 }
 #endif // MOZILLA_INTERNAL_API
@@ -1498,26 +1515,6 @@ SourceStreamInfo::AnyCodecHasPluginID(uint64_t aPluginID)
   return false;
 }
 
-#if !defined(MOZILLA_EXTERNAL_LINKAGE)
-RefPtr<mozilla::dom::VideoStreamTrack>
-SourceStreamInfo::GetVideoTrackByTrackId(const std::string& trackId)
-{
-  nsTArray<RefPtr<mozilla::dom::VideoStreamTrack>> videoTracks;
-
-  mMediaStream->GetVideoTracks(videoTracks);
-
-  for (size_t i = 0; i < videoTracks.Length(); ++i) {
-    nsString aTrackId;
-    videoTracks[i]->GetId(aTrackId);
-    if (aTrackId.EqualsIgnoreCase(trackId.c_str())) {
-      return videoTracks[i];
-    }
-  }
-
-  return nullptr;
-}
-#endif
-
 nsresult
 SourceStreamInfo::StorePipeline(
     const std::string& trackId,
@@ -1531,6 +1528,26 @@ SourceStreamInfo::StorePipeline(
 
   mPipelines[trackId] = aPipeline;
   return NS_OK;
+}
+
+void
+RemoteSourceStreamInfo::DetachMedia_m()
+{
+  for (auto& webrtcIdAndTrack : mTracks) {
+    EndTrack(mMediaStream->GetInputStream(), webrtcIdAndTrack.second);
+  }
+  SourceStreamInfo::DetachMedia_m();
+}
+
+void
+RemoteSourceStreamInfo::RemoveTrack(const std::string& trackId)
+{
+  auto it = mTracks.find(trackId);
+  if (it != mTracks.end()) {
+    EndTrack(mMediaStream->GetInputStream(), it->second);
+  }
+
+  SourceStreamInfo::RemoveTrack(trackId);
 }
 
 void
@@ -1571,7 +1588,6 @@ RemoteSourceStreamInfo::StartReceiving()
   mReceiving = true;
 
   SourceMediaStream* source = GetMediaStream()->GetInputStream()->AsSourceStream();
-  source->FinishAddTracks();
   source->SetPullEnabled(true);
   // AdvanceKnownTracksTicksTime(HEAT_DEATH_OF_UNIVERSE) means that in
   // theory per the API, we can't add more tracks before that
@@ -1620,5 +1636,19 @@ LocalSourceStreamInfo::ForgetPipelineByTrackId_m(const std::string& trackId)
 
   return nullptr;
 }
+
+#if !defined(MOZILLA_EXTERNAL_LINKAGE)
+auto
+RemoteTrackSource::ApplyConstraints(
+    nsPIDOMWindowInner* aWindow,
+    const dom::MediaTrackConstraints& aConstraints) -> already_AddRefed<PledgeVoid>
+{
+  RefPtr<PledgeVoid> p = new PledgeVoid();
+  p->Reject(new dom::MediaStreamError(aWindow,
+                                      NS_LITERAL_STRING("OverconstrainedError"),
+                                      NS_LITERAL_STRING("")));
+  return p.forget();
+}
+#endif
 
 } // namespace mozilla

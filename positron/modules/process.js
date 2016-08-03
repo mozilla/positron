@@ -9,8 +9,6 @@ const { classes: Cc, interfaces: Ci, results: Cr, utils: Cu } = Components;
 // The Node version of this module only re-exports the `process` global,
 // because the global is implemented natively.  But we implement the global
 // in this file, which is the first module required by the ModuleLoader.
-// Because `process` is already defined, we don't need to construct it, so we
-// simply populate it.
 
 Cu.import('resource://gre/modules/Services.jsm');
 
@@ -27,6 +25,30 @@ const process = new EventEmitter();
 
 module.exports = process;
 
+// Based on addon-sdk/source/lib/sdk/timers.js.
+const threadManager = Cc["@mozilla.org/thread-manager;1"].
+                      getService(Ci.nsIThreadManager);
+let _immediateCallback;
+let _needImmediateCallback = false;
+let _immediateCallbackScheduled = false;
+Object.defineProperty(process, '_immediateCallback', {
+  get() { return _immediateCallback },
+  set(value) { _immediateCallback = value },
+});
+Object.defineProperty(process, '_needImmediateCallback', {
+  get() { return _needImmediateCallback },
+  set(value) {
+    _needImmediateCallback = value;
+    if (_needImmediateCallback && !_immediateCallbackScheduled) {
+      _immediateCallbackScheduled = true;
+      threadManager.currentThread.dispatch(() => {
+        _immediateCallbackScheduled = false;
+        _immediateCallback();
+      }, Ci.nsIThread.DISPATCH_NORMAL);
+    }
+  },
+});
+
 // This is a stub with a placeholder that browser/init.js and renderer/init.js
 // both remove.
 process.argv = [exeFile.leafName, "placeholder that init.js removes"];
@@ -36,14 +58,12 @@ process.argv = [exeFile.leafName, "placeholder that init.js removes"];
 // this module, so we construct the `process` global by importing this module
 // rather than the other way around.
 
-// Because we construct the `process` global in this module, and we also inject
-// the global into this module, we don't actually have to export its symbols
-// here.  We just have to attach them to this module's own `process` global.
-// XXX Figure out if that's really the best way to implement this functionality.
-
 // This comes from Electron, where it's defined by common/init.js, which we
-// currently don't load.  Once we enable loading of init.js modules, we should
-// remove it from this module.
+// currently don't load in the main process (although we do load it in renderer
+// processes, so the version in init.js overrides this one in those processes).
+//
+// TODO: once we enable the loading of init.js in the main process, remove this.
+//
 process.atomBinding = function(name) {
   try {
     return process.binding("atom_" + process.type + "_" + name);

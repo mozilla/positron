@@ -37,7 +37,7 @@ protected:
     nsresult rv;
 
     for (;;) {
-      ScopedCERTCertificate cert(
+      UniqueCERTCertificate cert(
         PK11_FindCertFromNickname(mNickname.get(), nullptr));
       if (!cert) {
         return NS_OK; // All done
@@ -57,7 +57,7 @@ protected:
         return NS_ERROR_UNEXPECTED; // Issuer should match nickname
       }
 
-      rv = MapSECStatus(PK11_DeleteTokenCertAndKey(cert, nullptr));
+      rv = MapSECStatus(PK11_DeleteTokenCertAndKey(cert.get(), nullptr));
       if (NS_FAILED(rv)) {
         return rv; // Some error, abort the loop
       }
@@ -71,10 +71,12 @@ class LocalCertGetTask final : public LocalCertTask
 {
 public:
   LocalCertGetTask(const nsACString& aNickname,
-                   nsILocalCertGetCallback* aCallback)
+                   nsILocalCertGetCallback* aCallback,
+                   uint32_t aKeyType)
     : LocalCertTask(aNickname)
     , mCallback(new nsMainThreadPtrHolder<nsILocalCertGetCallback>(aCallback))
     , mCert(nullptr)
+    , mKeyType(aKeyType)
   {
   }
 
@@ -124,43 +126,62 @@ private:
     // Generate a new cert
     NS_NAMED_LITERAL_CSTRING(commonNamePrefix, "CN=");
     nsAutoCString subjectNameStr(commonNamePrefix + mNickname);
-    ScopedCERTName subjectName(CERT_AsciiToName(subjectNameStr.get()));
+    UniqueCERTName subjectName(CERT_AsciiToName(subjectNameStr.get()));
     if (!subjectName) {
       return mozilla::psm::GetXPCOMFromNSSError(PR_GetError());
     }
 
-    // Use the well-known NIST P-256 curve
-    SECOidData* curveOidData = SECOID_FindOIDByTag(SEC_OID_SECG_EC_SECP256R1);
-    if (!curveOidData) {
-      return mozilla::psm::GetXPCOMFromNSSError(PR_GetError());
-    }
+    UniqueSECKEYPrivateKey privateKey;
 
-    // Get key params from the curve
-    ScopedAutoSECItem keyParams(2 + curveOidData->oid.len);
-    keyParams.data[0] = SEC_ASN1_OBJECT_ID;
-    keyParams.data[1] = curveOidData->oid.len;
-    memcpy(keyParams.data + 2, curveOidData->oid.data, curveOidData->oid.len);
-
-    // Generate cert key pair
-    ScopedSECKEYPublicKey publicKey;
+    SECOidTag algTag;
     SECKEYPublicKey* tempPublicKey;
-    UniqueSECKEYPrivateKey privateKey(
-      PK11_GenerateKeyPair(slot.get(), CKM_EC_KEY_PAIR_GEN, &keyParams,
-                           &tempPublicKey, true /* token */,
-                           true /* sensitive */, nullptr));
-    if (!privateKey) {
+    if (mKeyType == nsILocalCertService::KEY_TYPE_RSA) {
+      // Use RSA key params
+      PK11RSAGenParams rsaParams;
+      rsaParams.keySizeInBits = 2048;
+      rsaParams.pe = 65537;
+      algTag = SEC_OID_PKCS1_SHA256_WITH_RSA_ENCRYPTION;
+
+      // Generate cert key pair
+      privateKey.reset(
+        PK11_GenerateKeyPair(slot.get(), CKM_RSA_PKCS_KEY_PAIR_GEN, &rsaParams,
+                             &tempPublicKey, true /* token */,
+                             true /* sensitive */, nullptr));
+    } else {
+      // Use the well-known NIST P-256 curve
+      SECOidData* curveOidData = SECOID_FindOIDByTag(SEC_OID_SECG_EC_SECP256R1);
+      if (!curveOidData) {
+        return mozilla::psm::GetXPCOMFromNSSError(PR_GetError());
+      }
+
+      // Get key params from the curve
+      ScopedAutoSECItem keyParams(2 + curveOidData->oid.len);
+      keyParams.data[0] = SEC_ASN1_OBJECT_ID;
+      keyParams.data[1] = curveOidData->oid.len;
+      memcpy(keyParams.data + 2, curveOidData->oid.data, curveOidData->oid.len);
+      algTag = SEC_OID_ANSIX962_ECDSA_SHA256_SIGNATURE;
+
+      // Generate cert key pair
+      privateKey.reset(
+        PK11_GenerateKeyPair(slot.get(), CKM_EC_KEY_PAIR_GEN, &keyParams,
+                             &tempPublicKey, true /* token */,
+                             true /* sensitive */, nullptr));
+    }
+
+    UniqueSECKEYPublicKey publicKey(tempPublicKey);
+    tempPublicKey = nullptr;
+    if (!privateKey || !publicKey) {
       return mozilla::psm::GetXPCOMFromNSSError(PR_GetError());
     }
-    publicKey = tempPublicKey;
 
     // Create subject public key info and cert request
-    ScopedCERTSubjectPublicKeyInfo spki(
-      SECKEY_CreateSubjectPublicKeyInfo(publicKey));
+    UniqueCERTSubjectPublicKeyInfo spki(
+      SECKEY_CreateSubjectPublicKeyInfo(publicKey.get()));
     if (!spki) {
       return mozilla::psm::GetXPCOMFromNSSError(PR_GetError());
     }
-    ScopedCERTCertificateRequest certRequest(
-      CERT_CreateCertificateRequest(subjectName, spki, nullptr));
+    UniqueCERTCertificateRequest certRequest(
+      CERT_CreateCertificateRequest(subjectName.get(), spki.get(), nullptr));
     if (!certRequest) {
       return mozilla::psm::GetXPCOMFromNSSError(PR_GetError());
     }
@@ -174,7 +195,7 @@ private:
     PRTime now = PR_Now();
     PRTime notBefore = now - oneDay;
     PRTime notAfter = now + (PRTime(365) * oneDay);
-    ScopedCERTValidity validity(CERT_CreateValidity(notBefore, notAfter));
+    UniqueCERTValidity validity(CERT_CreateValidity(notBefore, notAfter));
     if (!validity) {
       return mozilla::psm::GetXPCOMFromNSSError(PR_GetError());
     }
@@ -190,8 +211,9 @@ private:
     }
 
     // Create the cert from these pieces
-    ScopedCERTCertificate cert(
-      CERT_CreateCertificate(serial, subjectName, validity, certRequest));
+    UniqueCERTCertificate cert(
+      CERT_CreateCertificate(serial, subjectName.get(), validity.get(),
+                             certRequest.get()));
     if (!cert) {
       return mozilla::psm::GetXPCOMFromNSSError(PR_GetError());
     }
@@ -209,29 +231,27 @@ private:
       return NS_ERROR_INVALID_POINTER;
     }
     rv = MapSECStatus(
-           SECOID_SetAlgorithmID(arena, &cert->signature,
-                                 SEC_OID_ANSIX962_ECDSA_SHA256_SIGNATURE, 0));
+           SECOID_SetAlgorithmID(arena, &cert->signature, algTag, 0));
     if (NS_FAILED(rv)) {
       return rv;
     }
 
     // Encode and self-sign the cert
-    ScopedSECItem certDER(
-      SEC_ASN1EncodeItem(nullptr, nullptr, cert,
+    UniqueSECItem certDER(
+      SEC_ASN1EncodeItem(nullptr, nullptr, cert.get(),
                          SEC_ASN1_GET(CERT_CertificateTemplate)));
     if (!certDER) {
       return mozilla::psm::GetXPCOMFromNSSError(PR_GetError());
     }
     rv = MapSECStatus(
            SEC_DerSignData(arena, &cert->derCert, certDER->data, certDER->len,
-                           privateKey.get(),
-                           SEC_OID_ANSIX962_ECDSA_SHA256_SIGNATURE));
+                           privateKey.get(), algTag));
     if (NS_FAILED(rv)) {
       return rv;
     }
 
     // Create a CERTCertificate from the signed data
-    ScopedCERTCertificate certFromDER(
+    UniqueCERTCertificate certFromDER(
       CERT_NewTempCertificate(CERT_GetDefaultCertDB(), &cert->derCert, nullptr,
                               true /* perm */, true /* copyDER */));
     if (!certFromDER) {
@@ -239,8 +259,9 @@ private:
     }
 
     // Save the cert in the DB
-    rv = MapSECStatus(PK11_ImportCert(slot.get(), certFromDER, CK_INVALID_HANDLE,
-                                      mNickname.get(), false /* unused */));
+    rv = MapSECStatus(PK11_ImportCert(slot.get(), certFromDER.get(),
+                                      CK_INVALID_HANDLE, mNickname.get(),
+                                      false /* unused */));
     if (NS_FAILED(rv)) {
       return rv;
     }
@@ -324,6 +345,7 @@ private:
 
   nsMainThreadPtrHandle<nsILocalCertGetCallback> mCallback;
   nsCOMPtr<nsIX509Cert> mCert; // out
+  uint32_t mKeyType;
 };
 
 class LocalCertRemoveTask final : public LocalCertTask
@@ -403,13 +425,18 @@ LocalCertService::LoginToKeySlot()
 
 NS_IMETHODIMP
 LocalCertService::GetOrCreateCert(const nsACString& aNickname,
-                                  nsILocalCertGetCallback* aCallback)
+                                  nsILocalCertGetCallback* aCallback,
+                                  uint32_t aKeyType)
 {
   if (NS_WARN_IF(aNickname.IsEmpty())) {
     return NS_ERROR_INVALID_ARG;
   }
   if (NS_WARN_IF(!aCallback)) {
     return NS_ERROR_INVALID_POINTER;
+  }
+  if (aKeyType != nsILocalCertService::KEY_TYPE_EC &&
+      aKeyType != nsILocalCertService::KEY_TYPE_RSA) {
+    return NS_ERROR_INVALID_ARG;
   }
 
   // Before sending off the task, login to key slot if needed
@@ -419,7 +446,8 @@ LocalCertService::GetOrCreateCert(const nsACString& aNickname,
     return NS_OK;
   }
 
-  RefPtr<LocalCertGetTask> task(new LocalCertGetTask(aNickname, aCallback));
+  RefPtr<LocalCertGetTask> task(new LocalCertGetTask(aNickname, aCallback,
+                                                     aKeyType));
   return task->Dispatch("LocalCertGet");
 }
 

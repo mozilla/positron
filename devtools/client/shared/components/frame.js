@@ -9,6 +9,7 @@ const { getSourceNames, parseURL, isScratchpadScheme } = require("devtools/clien
 const { LocalizationHelper } = require("devtools/client/shared/l10n");
 
 const l10n = new LocalizationHelper("chrome://devtools/locale/components.properties");
+const webl10n = new LocalizationHelper("chrome://devtools/locale/webconsole.properties");
 
 module.exports = createClass({
   displayName: "Frame",
@@ -25,19 +26,37 @@ module.exports = createClass({
     onClick: PropTypes.func.isRequired,
     // Option to display a function name before the source link.
     showFunctionName: PropTypes.bool,
+    // Option to display a function name even if it's anonymous.
+    showAnonymousFunctionName: PropTypes.bool,
     // Option to display a host name after the source link.
     showHost: PropTypes.bool,
+    // Option to display a host name if the filename is empty or just '/'
+    showEmptyPathAsHost: PropTypes.bool,
+    // Option to display a full source instead of just the filename.
+    showFullSourceUrl: PropTypes.bool,
   },
 
   getDefaultProps() {
     return {
       showFunctionName: false,
+      showAnonymousFunctionName: false,
       showHost: false,
+      showEmptyPathAsHost: false,
+      showFullSourceUrl: false,
     };
   },
 
   render() {
-    let { onClick, frame, showFunctionName, showHost } = this.props;
+    let {
+      onClick,
+      frame,
+      showFunctionName,
+      showAnonymousFunctionName,
+      showHost,
+      showEmptyPathAsHost,
+      showFullSourceUrl
+    } = this.props;
+
     let source = frame.source ? String(frame.source) : "";
     let line = frame.line != void 0 ? Number(frame.line) : null;
     let column = frame.column != void 0 ? Number(frame.column) : null;
@@ -70,41 +89,56 @@ module.exports = createClass({
       className: "frame-link",
     };
 
-    if (showFunctionName && frame.functionDisplayName) {
-      elements.push(
-        dom.span({ className: "frame-link-function-display-name" },
-                 frame.functionDisplayName)
-      );
+    if (showFunctionName) {
+      let functionDisplayName = frame.functionDisplayName;
+      if (!functionDisplayName && showAnonymousFunctionName) {
+        functionDisplayName = webl10n.getStr("stacktrace.anonymousFunction");
+      }
+
+      if (functionDisplayName) {
+        elements.push(
+          dom.span({ className: "frame-link-function-display-name" },
+            functionDisplayName)
+        );
+      }
+    }
+
+    let displaySource = showFullSourceUrl ? long : short;
+    if (showEmptyPathAsHost && (displaySource === "" || displaySource === "/")) {
+      displaySource = host;
     }
 
     sourceElements.push(dom.span({
       className: "frame-link-filename",
-    }, short));
+    }, displaySource));
 
     // If source is linkable, and we have a line number > 0
     if (isLinkable && line) {
-      sourceElements.push(dom.span({ className: "frame-link-colon" }, ":"));
-      sourceElements.push(dom.span({ className: "frame-link-line" }, line));
+      let lineInfo = `:${line}`;
+      // Add `data-line` attribute for testing
+      attributes["data-line"] = line;
+
       // Intentionally exclude 0
       if (column) {
-        sourceElements.push(dom.span({ className: "frame-link-colon" }, ":"));
-        sourceElements.push(
-          dom.span({ className: "frame-link-column" }, column)
-        );
+        lineInfo += `:${column}`;
         // Add `data-column` attribute for testing
         attributes["data-column"] = column;
       }
 
-      // Add `data-line` attribute for testing
-      attributes["data-line"] = line;
+      sourceElements.push(dom.span({ className: "frame-link-line" }, lineInfo));
     }
 
     // If source is not a URL (self-hosted, eval, etc.), don't make
     // it an anchor link, as we can't link to it.
     if (isLinkable) {
       sourceEl = dom.a({
-        onClick,
+        onClick: e => {
+          e.preventDefault();
+          onClick(frame);
+        },
+        href: source,
         className: "frame-link-source",
+        draggable: false,
         title: l10n.getFormatStr("frame.viewsourceindebugger", tooltip)
       }, sourceElements);
     } else {

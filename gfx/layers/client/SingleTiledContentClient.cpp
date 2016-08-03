@@ -30,11 +30,6 @@ SingleTiledContentClient::ClearCachedResources()
 void
 SingleTiledContentClient::UpdatedBuffer(TiledBufferType aType)
 {
-  // Take a ReadLock on behalf of the TiledContentHost. This
-  // reference will be adopted when the descriptor is opened in
-  // TiledLayerBufferComposite.
-  mTiledBuffer->ReadLock();
-
   mForwarder->UseTiledLayerBuffer(this, mTiledBuffer->GetSurfaceDescriptorTiles());
   mTiledBuffer->ClearPaintedRegion();
 }
@@ -54,13 +49,6 @@ ClientSingleTiledLayerBuffer::ClientSingleTiledLayerBuffer(ClientTiledPaintedLay
   , mWasLastPaintProgressive(false)
   , mFormat(gfx::SurfaceFormat::UNKNOWN)
 {
-}
-
-void
-ClientSingleTiledLayerBuffer::ReadLock() {
-  if (!mTile.IsPlaceholderTile()) {
-    mTile.ReadLock();
-  }
 }
 
 void
@@ -190,7 +178,7 @@ ClientSingleTiledLayerBuffer::PaintThebes(const nsIntRegion& aNewValidRegion,
   }
 
   {
-    RefPtr<gfxContext> ctx = gfxContext::ForDrawTarget(dt);
+    RefPtr<gfxContext> ctx = gfxContext::CreateOrNull(dt);
     if (!ctx) {
       gfxDevCrash(gfx::LogReason::InvalidContext) << "SingleTiledContextClient context problem " << gfx::hexa(dt);
       return;

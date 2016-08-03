@@ -94,7 +94,6 @@
 #include "mozilla/dom/UndoManager.h"
 #include "mozilla/BloomFilter.h"
 
-#include "HTMLPropertiesCollection.h"
 #include "nsVariant.h"
 #include "nsDOMTokenList.h"
 #include "nsThreadUtils.h"
@@ -229,12 +228,12 @@ nsGenericHTMLElement::CopyInnerTo(Element* aDst)
     value->ToString(valStr);
 
     if (name->Equals(nsGkAtoms::style, kNameSpaceID_None) &&
-        value->Type() == nsAttrValue::eCSSDeclaration) {
+        value->Type() == nsAttrValue::eGeckoCSSDeclaration) {
       // We can't just set this as a string, because that will fail
       // to reparse the string into style data until the node is
       // inserted into the document.  Clone the Rule instead.
       RefPtr<css::Declaration> declClone =
-        new css::Declaration(*value->GetCSSDeclarationValue());
+        new css::Declaration(*value->GetGeckoCSSDeclarationValue());
 
       rv = aDst->SetInlineStyleDeclaration(declClone, &valStr, false);
       NS_ENSURE_SUCCESS(rv, rv);
@@ -339,7 +338,7 @@ nsGenericHTMLElement::GetOffsetRect(CSSIntRect& aRect)
   nsIFrame* parent = frame->GetParent();
   nsPoint origin(0, 0);
 
-  if (parent && parent->GetType() == nsGkAtoms::tableOuterFrame &&
+  if (parent && parent->GetType() == nsGkAtoms::tableWrapperFrame &&
       frame->GetType() == nsGkAtoms::tableFrame) {
     origin = parent->GetPositionIgnoringScrolling();
     parent = parent->GetParent();
@@ -547,13 +546,6 @@ nsGenericHTMLElement::BindToTree(nsIDocument* aDocument, nsIContent* aParent,
   NS_ENSURE_SUCCESS(rv, rv);
 
   if (aDocument) {
-    if (HasProperties()) {
-      HTMLPropertiesCollection* properties = 
-        static_cast<HTMLPropertiesCollection*>(GetProperty(nsGkAtoms::microdataProperties));
-      if (properties) {
-        properties->SetDocument(aDocument);
-      }
-    }
     RegAccessKey();
     if (HasName()) {
       aDocument->
@@ -578,14 +570,6 @@ nsGenericHTMLElement::UnbindFromTree(bool aDeep, bool aNullParent)
     UnregAccessKey();
   }
   
-  if(HasProperties()) {
-    HTMLPropertiesCollection* properties = 
-      static_cast<HTMLPropertiesCollection*>(GetProperty(nsGkAtoms::microdataProperties));
-    if (properties) {
-      properties->SetDocument(nullptr);
-    }
-  }
-
   RemoveFromNameTable();
 
   if (GetContentEditableValue() == eTrue) {
@@ -1028,10 +1012,7 @@ nsGenericHTMLElement::ParseAttribute(int32_t aNamespaceID,
       return true;
     }
 
-    if (aAttribute == nsGkAtoms::itemref ||
-        aAttribute == nsGkAtoms::itemprop ||
-        aAttribute == nsGkAtoms::itemtype ||
-        aAttribute == nsGkAtoms::rel) {
+    if (aAttribute == nsGkAtoms::rel) {
       aResult.ParseAtomArray(aValue);
       return true;
     }
@@ -1940,9 +1921,9 @@ nsGenericHTMLElement::SetUndoScopeInternal(bool aUndoScope)
 
 // static
 bool
-nsGenericHTMLElement::TouchEventsEnabled(JSContext* /* unused */, JSObject* /* unused */)
+nsGenericHTMLElement::TouchEventsEnabled(JSContext* aCx, JSObject* aGlobal)
 {
-  return TouchEvent::PrefEnabled();
+  return TouchEvent::PrefEnabled(aCx, aGlobal);
 }
 
 //----------------------------------------------------------------------
@@ -2320,7 +2301,6 @@ nsGenericHTMLFormElement::CanBeDisabled() const
   int32_t type = GetType();
   // It's easier to test the types that _cannot_ be disabled
   return
-    type != NS_FORM_LABEL &&
     type != NS_FORM_OBJECT &&
     type != NS_FORM_OUTPUT;
 }
@@ -2822,18 +2802,6 @@ nsGenericHTMLElement::DispatchSimulatedClick(nsGenericHTMLElement* aElement,
   return EventDispatcher::Dispatch(ToSupports(aElement), aPresContext, &event);
 }
 
-const nsAttrName*
-nsGenericHTMLElement::InternalGetExistingAttrNameFromQName(const nsAString& aStr) const
-{
-  if (IsInHTMLDocument()) {
-    nsAutoString lower;
-    nsContentUtils::ASCIIToLower(aStr, lower);
-    return mAttrsAndChildren.GetExistingAttrNameFromQName(lower);
-  }
-
-  return mAttrsAndChildren.GetExistingAttrNameFromQName(aStr);
-}
-
 nsresult
 nsGenericHTMLElement::GetEditor(nsIEditor** aEditor)
 {
@@ -3117,134 +3085,6 @@ void
 nsGenericHTMLFormElementWithState::NodeInfoChanged(mozilla::dom::NodeInfo* aOldNodeInfo)
 {
   mStateKey.SetIsVoid(true);
-}
-
-void
-nsGenericHTMLElement::GetItemValue(JSContext* aCx, JSObject* aScope,
-                                   JS::MutableHandle<JS::Value> aRetval,
-                                   ErrorResult& aError)
-{
-  JS::Rooted<JSObject*> scope(aCx, aScope);
-  if (!HasAttr(kNameSpaceID_None, nsGkAtoms::itemprop)) {
-    aRetval.setNull();
-    return;
-  }
-
-  if (ItemScope()) {
-    JS::Rooted<JS::Value> v(aCx);
-    JSAutoCompartment ac(aCx, scope);
-    if (!mozilla::dom::WrapObject(aCx, this, aRetval)) {
-      aError.Throw(NS_ERROR_FAILURE);
-    }
-    return;
-  }
-
-  DOMString string;
-  GetItemValueText(string);
-  if (!xpc::NonVoidStringToJsval(aCx, string, aRetval)) {
-    aError.Throw(NS_ERROR_FAILURE);
-  }
-}
-
-NS_IMETHODIMP
-nsGenericHTMLElement::GetItemValue(nsIVariant** aValue)
-{
-  nsCOMPtr<nsIWritableVariant> out = new nsVariant();
-
-  if (!HasAttr(kNameSpaceID_None, nsGkAtoms::itemprop)) {
-    out->SetAsEmpty();
-    out.forget(aValue);
-    return NS_OK;
-  }
-
-  if (ItemScope()) {
-    out->SetAsISupports(static_cast<nsIContent*>(this));
-  } else {
-    DOMString string;
-    GetItemValueText(string);
-    nsString xpcomString;
-    string.ToString(xpcomString);
-    out->SetAsAString(xpcomString);
-  }
-
-  out.forget(aValue);
-  return NS_OK;
-}
-
-void
-nsGenericHTMLElement::SetItemValue(JSContext* aCx, JS::Value aValue,
-                                   ErrorResult& aError)
-{
-  if (!HasAttr(kNameSpaceID_None, nsGkAtoms::itemprop) ||
-      HasAttr(kNameSpaceID_None, nsGkAtoms::itemscope)) {
-    aError.Throw(NS_ERROR_DOM_INVALID_ACCESS_ERR);
-    return;
-  }
-
-  nsAutoString string;
-  JS::Rooted<JS::Value> value(aCx, aValue);
-  if (!ConvertJSValueToString(aCx, value, eStringify, eStringify, string)) {
-    aError.Throw(NS_ERROR_UNEXPECTED);
-    return;
-  }
-  SetItemValueText(string);
-}
-
-NS_IMETHODIMP
-nsGenericHTMLElement::SetItemValue(nsIVariant* aValue)
-{
-  if (!HasAttr(kNameSpaceID_None, nsGkAtoms::itemprop) ||
-      HasAttr(kNameSpaceID_None, nsGkAtoms::itemscope)) {
-    return NS_ERROR_DOM_INVALID_ACCESS_ERR;
-  }
-
-  nsAutoString string;
-  aValue->GetAsAString(string);
-  SetItemValueText(string);
-  return NS_OK;
-}
-
-void
-nsGenericHTMLElement::GetItemValueText(DOMString& text)
-{
-  ErrorResult rv;
-  GetTextContentInternal(text, rv);
-}
-
-void
-nsGenericHTMLElement::SetItemValueText(const nsAString& text)
-{
-  mozilla::ErrorResult rv;
-  SetTextContentInternal(text, rv);
-}
-
-static void
-HTMLPropertiesCollectionDestructor(void *aObject, nsIAtom *aProperty,
-                                   void *aPropertyValue, void *aData)
-{
-  HTMLPropertiesCollection* properties =
-    static_cast<HTMLPropertiesCollection*>(aPropertyValue);
-  NS_IF_RELEASE(properties);
-}
-
-HTMLPropertiesCollection*
-nsGenericHTMLElement::Properties()
-{
-  HTMLPropertiesCollection* properties =
-    static_cast<HTMLPropertiesCollection*>(GetProperty(nsGkAtoms::microdataProperties));
-  if (!properties) {
-     properties = new HTMLPropertiesCollection(this);
-     NS_ADDREF(properties);
-     SetProperty(nsGkAtoms::microdataProperties, properties, HTMLPropertiesCollectionDestructor);
-  }
-  return properties;
-}
-
-NS_IMETHODIMP
-nsGenericHTMLElement::GetProperties(nsISupports** aProperties)
-{
-  NS_ADDREF(*aProperties = static_cast<nsIHTMLCollection*>(Properties()));
-  return NS_OK;
 }
 
 nsSize

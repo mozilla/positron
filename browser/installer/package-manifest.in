@@ -35,6 +35,7 @@
 #ifdef XP_MACOSX
 ; Mac bundle stuff
 @APPNAME@/Contents/Info.plist
+@APPNAME@/Contents/Library/LaunchServices
 @APPNAME@/Contents/PkgInfo
 @RESPATH@/firefox.icns
 @RESPATH@/document.icns
@@ -47,6 +48,9 @@
 @RESPATH@/chrome/@AB_CD@@JAREXT@
 @RESPATH@/chrome/@AB_CD@.manifest
 @RESPATH@/dictionaries/*
+#if defined(XP_WIN) || defined(XP_LINUX)
+@RESPATH@/fonts/*
+#endif
 @RESPATH@/hyphenation/*
 @RESPATH@/browser/@PREF_DIR@/firefox-l10n.js
 #ifdef HAVE_MAKENSISU
@@ -109,6 +113,9 @@
 ; [Base Browser Files]
 #ifndef XP_UNIX
 @BINPATH@/@MOZ_APP_NAME@.exe
+@BINPATH@/firefox.VisualElementsManifest.xml
+@BINPATH@/browser/VisualElements/VisualElements_150.png
+@BINPATH@/browser/VisualElements/VisualElements_70.png
 #else
 @BINPATH@/@MOZ_APP_NAME@-bin
 @BINPATH@/@MOZ_APP_NAME@
@@ -167,10 +174,6 @@
 @RESPATH@/components/directory.xpt
 @RESPATH@/components/docshell.xpt
 @RESPATH@/components/dom.xpt
-#ifdef MOZ_ACTIVITIES
-@RESPATH@/components/dom_activities.xpt
-@RESPATH@/components/dom_messages.xpt
-#endif
 @RESPATH@/components/dom_apps.xpt
 @RESPATH@/components/dom_newapps.xpt
 @RESPATH@/components/dom_base.xpt
@@ -212,11 +215,9 @@
 #endif
 @RESPATH@/components/dom_workers.xpt
 @RESPATH@/components/dom_xbl.xpt
+@RESPATH@/components/dom_xhr.xpt
 @RESPATH@/components/dom_xpath.xpt
 @RESPATH@/components/dom_xul.xpt
-#ifdef MOZ_GAMEPAD
-@RESPATH@/components/dom_gamepad.xpt
-#endif
 @RESPATH@/components/dom_payment.xpt
 @RESPATH@/components/dom_presentation.xpt
 @RESPATH@/components/downloads.xpt
@@ -388,8 +389,6 @@
 @RESPATH@/components/crypto-SDR.js
 @RESPATH@/components/TooltipTextProvider.js
 @RESPATH@/components/TooltipTextProvider.manifest
-@RESPATH@/components/jsconsole-clhandler.manifest
-@RESPATH@/components/jsconsole-clhandler.js
 @RESPATH@/components/webvtt.xpt
 @RESPATH@/components/WebVTT.manifest
 @RESPATH@/components/WebVTTParserWrapper.js
@@ -438,6 +437,7 @@
 @RESPATH@/components/nsTaggingService.js
 @RESPATH@/components/UnifiedComplete.js
 @RESPATH@/components/nsPlacesExpiration.js
+@RESPATH@/components/PageIconProtocolHandler.js
 @RESPATH@/components/PlacesCategoriesStarter.js
 @RESPATH@/components/ColorAnalyzer.js
 @RESPATH@/components/PageThumbsProtocol.js
@@ -532,19 +532,6 @@
 @RESPATH@/components/TVSimulatorService.js
 @RESPATH@/components/TVSimulatorService.manifest
 
-#ifdef MOZ_ACTIVITIES
-@RESPATH@/components/SystemMessageCache.js
-@RESPATH@/components/SystemMessageInternal.js
-@RESPATH@/components/SystemMessageManager.js
-@RESPATH@/components/SystemMessageManager.manifest
-
-@RESPATH@/components/Activities.manifest
-@RESPATH@/components/ActivityProxy.js
-@RESPATH@/components/ActivityRequestHandler.js
-@RESPATH@/components/ActivityWrapper.js
-@RESPATH@/components/ActivityMessageConfigurator.js
-#endif
-
 @RESPATH@/components/Payment.js
 @RESPATH@/components/PaymentFlowInfo.js
 @RESPATH@/components/Payment.manifest
@@ -569,7 +556,7 @@
 @RESPATH@/components/PresentationDeviceInfoManager.manifest
 @RESPATH@/components/PresentationDeviceInfoManager.js
 @RESPATH@/components/BuiltinProviders.manifest
-@RESPATH@/components/TCPPresentationServer.js
+@RESPATH@/components/PresentationControlService.js
 @RESPATH@/components/PresentationDataChannelSessionTransport.js
 @RESPATH@/components/PresentationDataChannelSessionTransport.manifest
 

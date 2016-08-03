@@ -22,7 +22,7 @@
 #include "nsTableColGroupFrame.h"
 #include "nsTableRowFrame.h"
 #include "nsTableRowGroupFrame.h"
-#include "nsTableOuterFrame.h"
+#include "nsTableWrapperFrame.h"
 #include "nsTablePainter.h"
 
 #include "BasicTableLayoutStrategy.h"
@@ -39,7 +39,6 @@
 #include "nsIScriptError.h"
 #include "nsFrameManager.h"
 #include "nsError.h"
-#include "nsAutoPtr.h"
 #include "nsCSSFrameConstructor.h"
 #include "mozilla/StyleSetHandle.h"
 #include "mozilla/StyleSetHandleInlines.h"
@@ -125,10 +124,10 @@ struct BCPropertyData
 nsStyleContext*
 nsTableFrame::GetParentStyleContext(nsIFrame** aProviderFrame) const
 {
-  // Since our parent, the table outer frame, returned this frame, we
+  // Since our parent, the table wrapper frame, returned this frame, we
   // must return whatever our parent would normally have returned.
 
-  NS_PRECONDITION(GetParent(), "table constructed without outer table");
+  NS_PRECONDITION(GetParent(), "table constructed without table wrapper");
   if (!mContent->GetParent() && !StyleContext()->GetPseudo()) {
     // We're the root.  We have no style context parent.
     *aProviderFrame = nullptr;
@@ -184,7 +183,7 @@ nsTableFrame::Init(nsIContent*       aContent,
     }
   } else {
     // Set my isize, because all frames in a table flow are the same isize and
-    // code in nsTableOuterFrame depends on this being set.
+    // code in nsTableWrapperFrame depends on this being set.
     WritingMode wm = GetWritingMode();
     SetSize(LogicalSize(wm, aPrevInFlow->ISize(wm), BSize(wm)));
   }
@@ -244,8 +243,6 @@ nsTableFrame::PageBreakAfter(nsIFrame* aSourceFrame,
   return false;
 }
 
-typedef nsTArray<nsIFrame*> FrameTArray;
-
 /* static */ void
 nsTableFrame::RegisterPositionedTablePart(nsIFrame* aFrame)
 {
@@ -272,8 +269,7 @@ nsTableFrame::RegisterPositionedTablePart(nsIFrame* aFrame)
 
   // Retrieve the positioned parts array for this table.
   FrameProperties props = tableFrame->Properties();
-  auto positionedParts =
-    static_cast<FrameTArray*>(props.Get(PositionedTablePartArray()));
+  FrameTArray* positionedParts = props.Get(PositionedTablePartArray());
 
   // Lazily create the array if it doesn't exist yet.
   if (!positionedParts) {
@@ -303,8 +299,7 @@ nsTableFrame::UnregisterPositionedTablePart(nsIFrame* aFrame,
 
   // Retrieve the positioned parts array for this table.
   FrameProperties props = tableFrame->Properties();
-  auto positionedParts =
-    static_cast<FrameTArray*>(props.Get(PositionedTablePartArray()));
+  FrameTArray* positionedParts = props.Get(PositionedTablePartArray());
 
   // Remove the frame.
   MOZ_ASSERT(positionedParts && positionedParts->Contains(aFrame),
@@ -1117,7 +1112,7 @@ nsDisplayTableItem::ComputeInvalidationRegion(nsDisplayListBuilder* aBuilder,
     static_cast<const nsDisplayTableItemGeometry*>(aGeometry);
 
   bool invalidateForAttachmentFixed = false;
-  if (mPartHasFixedBackground) {
+  if (mDrawsBackground && mPartHasFixedBackground) {
     nsPoint frameOffsetToViewport = mFrame->GetOffsetTo(
         mFrame->PresContext()->PresShell()->GetRootFrame());
     invalidateForAttachmentFixed =
@@ -1137,8 +1132,9 @@ nsDisplayTableItem::ComputeInvalidationRegion(nsDisplayListBuilder* aBuilder,
 class nsDisplayTableBorderBackground : public nsDisplayTableItem {
 public:
   nsDisplayTableBorderBackground(nsDisplayListBuilder* aBuilder,
-                                 nsTableFrame* aFrame) :
-    nsDisplayTableItem(aBuilder, aFrame) {
+                                 nsTableFrame* aFrame,
+                                 bool aDrawsBackground) :
+    nsDisplayTableItem(aBuilder, aFrame, aDrawsBackground) {
     MOZ_COUNT_CTOR(nsDisplayTableBorderBackground);
   }
 #ifdef NS_BUILD_REFCNT_LOGGING
@@ -1321,8 +1317,8 @@ nsTableFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
 
   nsDisplayTableItem* item = nullptr;
   if (IsVisibleInSelection(aBuilder)) {
+    nsMargin deflate = GetDeflationForBackground(PresContext());
     if (StyleVisibility()->IsVisible()) {
-      nsMargin deflate = GetDeflationForBackground(PresContext());
       // If 'deflate' is (0,0,0,0) then we can paint the table background
       // in its own display item, so do that to take advantage of
       // opacity and visibility optimizations
@@ -1339,7 +1335,8 @@ nsTableFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
     if (aBuilder->IsForEventDelivery() ||
         AnyTablePartHasBorderOrBackground(this, GetNextSibling()) ||
         AnyTablePartHasBorderOrBackground(mColGroups.FirstChild(), nullptr)) {
-      item = new (aBuilder) nsDisplayTableBorderBackground(aBuilder, this);
+      item = new (aBuilder) nsDisplayTableBorderBackground(aBuilder, this,
+          deflate != nsMargin(0, 0, 0, 0));
       aLists.BorderBackground()->AppendNewToTop(item);
     }
   }
@@ -1676,7 +1673,7 @@ nsTableFrame::AncestorsHaveStyleBSize(const nsHTMLReflowState& aParentReflowStat
 {
   WritingMode wm = aParentReflowState.GetWritingMode();
   for (const nsHTMLReflowState* rs = &aParentReflowState;
-       rs && rs->frame; rs = rs->parentReflowState) {
+       rs && rs->frame; rs = rs->mParentReflowState) {
     nsIAtom* frameType = rs->frame->GetType();
     if (IS_TABLE_CELL(frameType)                     ||
         (nsGkAtoms::tableRowFrame      == frameType) ||
@@ -1711,7 +1708,7 @@ nsTableFrame::CheckRequestSpecialBSizeReflow(const nsHTMLReflowState& aReflowSta
       (NS_UNCONSTRAINEDSIZE == aReflowState.ComputedBSize() ||  // no computed bsize
        0                    == aReflowState.ComputedBSize()) &&
       eStyleUnit_Percent == aReflowState.mStylePosition->BSize(wm).GetUnit() && // pct bsize
-      nsTableFrame::AncestorsHaveStyleBSize(*aReflowState.parentReflowState)) {
+      nsTableFrame::AncestorsHaveStyleBSize(*aReflowState.mParentReflowState)) {
     nsTableFrame::RequestSpecialBSizeReflow(aReflowState);
   }
 }
@@ -1725,7 +1722,7 @@ void
 nsTableFrame::RequestSpecialBSizeReflow(const nsHTMLReflowState& aReflowState)
 {
   // notify the frame and its ancestors of the special reflow, stopping at the containing table
-  for (const nsHTMLReflowState* rs = &aReflowState; rs && rs->frame; rs = rs->parentReflowState) {
+  for (const nsHTMLReflowState* rs = &aReflowState; rs && rs->frame; rs = rs->mParentReflowState) {
     nsIAtom* frameType = rs->frame->GetType();
     NS_ASSERTION(IS_TABLE_CELL(frameType) ||
                  nsGkAtoms::tableRowFrame == frameType ||
@@ -1991,8 +1988,7 @@ nsTableFrame::FixupPositionedTableParts(nsPresContext*           aPresContext,
                                         nsHTMLReflowMetrics&     aDesiredSize,
                                         const nsHTMLReflowState& aReflowState)
 {
-  auto positionedParts =
-    static_cast<FrameTArray*>(Properties().Get(PositionedTablePartArray()));
+  FrameTArray* positionedParts = Properties().Get(PositionedTablePartArray());
   if (!positionedParts) {
     return;
   }
@@ -2645,8 +2641,8 @@ nsTableFrame::GetUsedPadding() const
 /* virtual */ nsMargin
 nsTableFrame::GetUsedMargin() const
 {
-  // The margin is inherited to the outer table frame via
-  // the ::-moz-table-outer rule in ua.css.
+  // The margin is inherited to the table wrapper frame via
+  // the ::-moz-table-wrapper rule in ua.css.
   return nsMargin(0, 0, 0, 0);
 }
 
@@ -2760,7 +2756,7 @@ nsTableFrame::InitChildReflowState(nsHTMLReflowState& aReflowState)
   aReflowState.Init(presContext, nullptr, pCollapseBorder, &padding);
 
   NS_ASSERTION(!mBits.mResizedColumns ||
-               !aReflowState.parentReflowState->mFlags.mSpecialBSizeReflow,
+               !aReflowState.mParentReflowState->mFlags.mSpecialBSizeReflow,
                "should not resize columns on special bsize reflow");
   if (mBits.mResizedColumns) {
     aReflowState.SetIResize(true);
@@ -6486,7 +6482,7 @@ BCPaintBorderIterator::SetDamageArea(const nsRect& aDirtyRect)
 
   // XXX comment refers to the obsolete NS_FRAME_OUTSIDE_CHILDREN flag
   // XXX but I don't understand it, so not changing it for now
-  // outer table borders overflow the table, so the table might be
+  // table wrapper borders overflow the table, so the table might be
   // target to other areas as the NS_FRAME_OUTSIDE_CHILDREN is set
   // on the table
   if (!haveIntersect)

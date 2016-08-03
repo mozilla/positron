@@ -258,8 +258,7 @@ struct Token
 struct CompileError {
     JSErrorReport report;
     char* message;
-    ErrorArgumentsType argumentsType;
-    CompileError() : message(nullptr), argumentsType(ArgumentsAreUnicode) {}
+    CompileError() : message(nullptr) {}
     ~CompileError();
     void throwError(JSContext* cx);
 
@@ -454,16 +453,16 @@ class MOZ_STACK_CLASS TokenStream
 
   public:
     typedef Token::Modifier Modifier;
-    static MOZ_CONSTEXPR_VAR Modifier None = Token::None;
-    static MOZ_CONSTEXPR_VAR Modifier Operand = Token::Operand;
-    static MOZ_CONSTEXPR_VAR Modifier KeywordIsName = Token::KeywordIsName;
-    static MOZ_CONSTEXPR_VAR Modifier TemplateTail = Token::TemplateTail;
+    static constexpr Modifier None = Token::None;
+    static constexpr Modifier Operand = Token::Operand;
+    static constexpr Modifier KeywordIsName = Token::KeywordIsName;
+    static constexpr Modifier TemplateTail = Token::TemplateTail;
 
     typedef Token::ModifierException ModifierException;
-    static MOZ_CONSTEXPR_VAR ModifierException NoException = Token::NoException;
-    static MOZ_CONSTEXPR_VAR ModifierException NoneIsOperand = Token::NoneIsOperand;
-    static MOZ_CONSTEXPR_VAR ModifierException OperandIsNone = Token::OperandIsNone;
-    static MOZ_CONSTEXPR_VAR ModifierException NoneIsKeywordIsName = Token::NoneIsKeywordIsName;
+    static constexpr ModifierException NoException = Token::NoException;
+    static constexpr ModifierException NoneIsOperand = Token::NoneIsOperand;
+    static constexpr ModifierException OperandIsNone = Token::OperandIsNone;
+    static constexpr ModifierException NoneIsKeywordIsName = Token::NoneIsKeywordIsName;
 
     void addModifierException(ModifierException modifierException) {
 #ifdef DEBUG
@@ -1038,10 +1037,6 @@ class MOZ_STACK_CLASS TokenStream
     bool                mutedErrors;
     StrictModeGetter*   strictModeGetter;  // used to test for strict mode
 };
-
-// Steal one JSREPORT_* bit (see jsapi.h) to tell that arguments to the error
-// message have const char16_t* type, not const char*.
-#define JSREPORT_UC 0x100
 
 extern const char*
 TokenKindToDesc(TokenKind tt);

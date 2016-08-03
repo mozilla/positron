@@ -257,6 +257,13 @@ MacroAssemblerMIPSShared::ma_subTestOverflow(Register rd, Register rs, Imm32 imm
 }
 
 void
+MacroAssemblerMIPSShared::ma_mul(Register rd, Register rs, Imm32 imm)
+{
+    ma_li(ScratchRegister, imm);
+    as_mul(rd, rs, ScratchRegister);
+}
+
+void
 MacroAssemblerMIPSShared::ma_mult(Register rs, Imm32 imm)
 {
     ma_li(ScratchRegister, imm);
@@ -809,6 +816,96 @@ MacroAssemblerMIPSShared::ma_bc1d(FloatRegister lhs, FloatRegister rhs, Label* l
 }
 
 void
+MacroAssemblerMIPSShared::minMaxDouble(FloatRegister srcDest, FloatRegister second,
+                                       bool handleNaN, bool isMax)
+{
+    FloatRegister first = srcDest;
+
+    Assembler::DoubleCondition cond = isMax
+                                      ? Assembler::DoubleLessThanOrEqual
+                                      : Assembler::DoubleGreaterThanOrEqual;
+    Label nan, equal, returnSecond, done;
+
+    // First or second is NaN, result is NaN.
+    ma_bc1d(first, second, &nan, Assembler::DoubleUnordered, ShortJump);
+    // Make sure we handle -0 and 0 right.
+    ma_bc1d(first, second, &equal, Assembler::DoubleEqual, ShortJump);
+    ma_bc1d(first, second, &returnSecond, cond, ShortJump);
+    ma_b(&done, ShortJump);
+
+    // Check for zero.
+    bind(&equal);
+    asMasm().loadConstantDouble(0.0, ScratchDoubleReg);
+    // First wasn't 0 or -0, so just return it.
+    ma_bc1d(first, ScratchDoubleReg, &done, Assembler::DoubleNotEqualOrUnordered, ShortJump);
+
+    // So now both operands are either -0 or 0.
+    if (isMax) {
+        // -0 + -0 = -0 and -0 + 0 = 0.
+        as_addd(first, first, second);
+    } else {
+        as_negd(first, first);
+        as_subd(first, first, second);
+        as_negd(first, first);
+    }
+    ma_b(&done, ShortJump);
+
+    bind(&nan);
+    asMasm().loadConstantDouble(JS::GenericNaN(), srcDest);
+    ma_b(&done, ShortJump);
+
+    bind(&returnSecond);
+    as_movd(srcDest, second);
+
+    bind(&done);
+}
+
+void
+MacroAssemblerMIPSShared::minMaxFloat32(FloatRegister srcDest, FloatRegister second,
+                                        bool handleNaN, bool isMax)
+{
+    FloatRegister first = srcDest;
+
+    Assembler::DoubleCondition cond = isMax
+                                      ? Assembler::DoubleLessThanOrEqual
+                                      : Assembler::DoubleGreaterThanOrEqual;
+    Label nan, equal, returnSecond, done;
+
+    // First or second is NaN, result is NaN.
+    ma_bc1s(first, second, &nan, Assembler::DoubleUnordered, ShortJump);
+    // Make sure we handle -0 and 0 right.
+    ma_bc1s(first, second, &equal, Assembler::DoubleEqual, ShortJump);
+    ma_bc1s(first, second, &returnSecond, cond, ShortJump);
+    ma_b(&done, ShortJump);
+
+    // Check for zero.
+    bind(&equal);
+    asMasm().loadConstantFloat32(0.0f, ScratchFloat32Reg);
+    // First wasn't 0 or -0, so just return it.
+    ma_bc1s(first, ScratchFloat32Reg, &done, Assembler::DoubleNotEqualOrUnordered, ShortJump);
+
+    // So now both operands are either -0 or 0.
+    if (isMax) {
+        // -0 + -0 = -0 and -0 + 0 = 0.
+        as_adds(first, first, second);
+    } else {
+        as_negs(first, first);
+        as_subs(first, first, second);
+        as_negs(first, first);
+    }
+    ma_b(&done, ShortJump);
+
+    bind(&nan);
+    asMasm().loadConstantFloat32(JS::GenericNaN(), srcDest);
+    ma_b(&done, ShortJump);
+
+    bind(&returnSecond);
+    as_movs(srcDest, second);
+
+    bind(&done);
+}
+
+void
 MacroAssemblerMIPSShared::ma_call(ImmPtr dest)
 {
     asMasm().ma_liPatchable(CallReg, dest);
@@ -1164,6 +1261,13 @@ MacroAssembler::Pop(Register reg)
 }
 
 void
+MacroAssembler::Pop(FloatRegister f)
+{
+    ma_pop(f);
+    adjustFrame(-sizeof(double));
+}
+
+void
 MacroAssembler::Pop(const ValueOperand& val)
 {
     popValue(val);
@@ -1192,7 +1296,13 @@ MacroAssembler::call(Label* label)
 CodeOffset
 MacroAssembler::callWithPatch()
 {
-    as_bal(BOffImm16(0));
+    as_bal(BOffImm16(3 * sizeof(uint32_t)));
+    addPtr(Imm32(5 * sizeof(uint32_t)), ra);
+    // Allocate space which will be patched by patchCall().
+    writeInst(UINT32_MAX);
+    as_lw(ScratchRegister, ra, -(int32_t)(5 * sizeof(uint32_t)));
+    addPtr(ra, ScratchRegister);
+    as_jr(ScratchRegister);
     as_nop();
     return CodeOffset(currentOffset());
 }
@@ -1200,9 +1310,16 @@ MacroAssembler::callWithPatch()
 void
 MacroAssembler::patchCall(uint32_t callerOffset, uint32_t calleeOffset)
 {
-    BufferOffset call(callerOffset - 2 * sizeof(uint32_t));
-    InstImm* bal = (InstImm*)editSrc(call);
-    bal->setBOffImm16(BufferOffset(calleeOffset).diffB<BOffImm16>(call));
+    BufferOffset call(callerOffset - 7 * sizeof(uint32_t));
+
+    if (BOffImm16::IsInRange(BufferOffset(calleeOffset).diffB<int>(call))) {
+        InstImm* bal = (InstImm*)editSrc(call);
+        bal->setBOffImm16(BufferOffset(calleeOffset).diffB<BOffImm16>(call));
+    } else {
+        uint32_t u32Offset = callerOffset - 5 * sizeof(uint32_t);
+        uint32_t* u32 = reinterpret_cast<uint32_t*>(editSrc(BufferOffset(u32Offset)));
+        *u32 = calleeOffset - callerOffset;
+    }
 }
 
 CodeOffset
@@ -1233,6 +1350,27 @@ MacroAssembler::repatchThunk(uint8_t* code, uint32_t u32Offset, uint32_t targetO
 {
     uint32_t* u32 = reinterpret_cast<uint32_t*>(code + u32Offset);
     *u32 = targetOffset - u32Offset;
+}
+
+CodeOffset
+MacroAssembler::nopPatchableToNearJump()
+{
+    CodeOffset offset(currentOffset());
+    as_nop();
+    as_nop();
+    return offset;
+}
+
+void
+MacroAssembler::patchNopToNearJump(uint8_t* jump, uint8_t* target)
+{
+    new (jump) InstImm(op_beq, zero, zero, BOffImm16(target - jump));
+}
+
+void
+MacroAssembler::patchNearJumpToNop(uint8_t* jump)
+{
+    new (jump) InstNOP();
 }
 
 void

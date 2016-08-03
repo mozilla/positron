@@ -12,7 +12,6 @@
 #include "gfxContext.h"                 // for gfxContext, etc
 #include "mozilla/Attributes.h"         // for MOZ_STACK_CLASS
 #include "mozilla/Maybe.h"              // for Maybe
-#include "nsAutoPtr.h"                  // for nsRefPtr
 #include "nsDebug.h"                    // for NS_ASSERTION
 #include "nsISupportsImpl.h"            // for gfxContext::Release, etc
 #include "nsRegion.h"                   // for nsIntRegion
@@ -106,7 +105,7 @@ void
 FillRectWithMask(gfx::DrawTarget* aDT,
                  const gfx::Rect& aRect,
                  gfx::SourceSurface* aSurface,
-                 gfx::Filter aFilter,
+                 gfx::SamplingFilter aSamplingFilter,
                  const gfx::DrawOptions& aOptions,
                  gfx::ExtendMode aExtendMode,
                  gfx::SourceSurface* aMaskSource = nullptr,
@@ -117,7 +116,7 @@ FillRectWithMask(gfx::DrawTarget* aDT,
                  const gfx::Point& aDeviceOffset,
                  const gfx::Rect& aRect,
                  gfx::SourceSurface* aSurface,
-                 gfx::Filter aFilter,
+                 gfx::SamplingFilter aSamplingFilter,
                  const gfx::DrawOptions& aOptions,
                  Layer* aMaskLayer);
 void

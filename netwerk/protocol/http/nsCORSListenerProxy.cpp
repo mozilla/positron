@@ -41,7 +41,9 @@
 #include "nsINetworkInterceptController.h"
 #include "nsNullPrincipal.h"
 #include "nsICorsPreflightCallback.h"
+#include "nsISupportsImpl.h"
 #include "mozilla/LoadInfo.h"
+#include "nsIHttpHeaderVisitor.h"
 #include <algorithm>
 
 using namespace mozilla;
@@ -145,7 +147,7 @@ public:
     {
       MOZ_COUNT_CTOR(nsPreflightCache::CacheEntry);
     }
-    
+
     ~CacheEntry()
     {
       MOZ_COUNT_DTOR(nsPreflightCache::CacheEntry);
@@ -269,16 +271,16 @@ nsPreflightCache::GetEntry(nsIURI* aURI,
     return nullptr;
   }
 
-  CacheEntry* entry;
+  CacheEntry* existingEntry = nullptr;
 
-  if (mTable.Get(key, &entry)) {
+  if (mTable.Get(key, &existingEntry)) {
     // Entry already existed so just return it. Also update the LRU list.
 
     // Move to the head of the list.
-    entry->removeFrom(mList);
-    mList.insertFront(entry);
+    existingEntry->removeFrom(mList);
+    mList.insertFront(existingEntry);
 
-    return entry;
+    return existingEntry;
   }
 
   if (!aCreate) {
@@ -287,8 +289,8 @@ nsPreflightCache::GetEntry(nsIURI* aURI,
 
   // This is a new entry, allocate and insert into the table now so that any
   // failures don't cause items to be removed from a full cache.
-  entry = new CacheEntry(key);
-  if (!entry) {
+  CacheEntry* newEntry = new CacheEntry(key);
+  if (!newEntry) {
     NS_WARNING("Failed to allocate new cache entry!");
     return nullptr;
   }
@@ -325,11 +327,11 @@ nsPreflightCache::GetEntry(nsIURI* aURI,
                    "Somehow tried to remove an entry that was never added!");
     }
   }
-  
-  mTable.Put(key, entry);
-  mList.insertFront(entry);
 
-  return entry;
+  mTable.Put(key, newEntry);
+  mList.insertFront(newEntry);
+
+  return newEntry;
 }
 
 void
@@ -365,13 +367,13 @@ nsPreflightCache::GetCacheKey(nsIURI* aURI,
 {
   NS_ASSERTION(aURI, "Null uri!");
   NS_ASSERTION(aPrincipal, "Null principal!");
-  
+
   NS_NAMED_LITERAL_CSTRING(space, " ");
 
   nsCOMPtr<nsIURI> uri;
   nsresult rv = aPrincipal->GetURI(getter_AddRefs(uri));
   NS_ENSURE_SUCCESS(rv, false);
-  
+
   nsAutoCString scheme, host, port;
   if (uri) {
     uri->GetScheme(scheme);
@@ -497,6 +499,40 @@ nsCORSListenerProxy::OnStartRequest(nsIRequest* aRequest,
   return mOuterListener->OnStartRequest(aRequest, aContext);
 }
 
+namespace {
+class CheckOriginHeader final : public nsIHttpHeaderVisitor {
+
+public:
+  NS_DECL_ISUPPORTS
+
+  CheckOriginHeader()
+   : mHeaderCount(0)
+  {}
+
+  NS_IMETHOD
+  VisitHeader(const nsACString & aHeader, const nsACString & aValue) override
+  {
+    if (aHeader.EqualsLiteral("Access-Control-Allow-Origin")) {
+      mHeaderCount++;
+    }
+
+    if (mHeaderCount > 1) {
+      return NS_ERROR_DOM_BAD_URI;
+    }
+    return NS_OK;
+  }
+
+private:
+  uint32_t mHeaderCount;
+
+  ~CheckOriginHeader()
+  {}
+
+};
+
+NS_IMPL_ISUPPORTS(CheckOriginHeader, nsIHttpHeaderVisitor)
+}
+
 nsresult
 nsCORSListenerProxy::CheckRequestApproved(nsIRequest* aRequest)
 {
@@ -535,7 +571,16 @@ nsCORSListenerProxy::CheckRequestApproved(nsIRequest* aRequest)
   }
 
   // Check the Access-Control-Allow-Origin header
+  RefPtr<CheckOriginHeader> visitor = new CheckOriginHeader();
   nsAutoCString allowedOriginHeader;
+
+  // check for duplicate headers
+  rv = http->VisitOriginalResponseHeaders(visitor);
+  if (NS_FAILED(rv)) {
+    LogBlockedRequest(aRequest, "CORSAllowOriginNotMatchingOrigin", nullptr);
+    return rv;
+  }
+
   rv = http->GetResponseHeader(
     NS_LITERAL_CSTRING("Access-Control-Allow-Origin"), allowedOriginHeader);
   if (NS_FAILED(rv)) {
@@ -999,6 +1044,7 @@ class nsCORSPreflightListener final : public nsIStreamListener,
 public:
   nsCORSPreflightListener(nsIPrincipal* aReferrerPrincipal,
                           nsICorsPreflightCallback* aCallback,
+                          nsILoadContext* aLoadContext,
                           bool aWithCredentials,
                           const nsCString& aPreflightMethod,
                           const nsTArray<nsCString>& aPreflightHeaders)
@@ -1006,6 +1052,7 @@ public:
      mPreflightHeaders(aPreflightHeaders),
      mReferrerPrincipal(aReferrerPrincipal),
      mCallback(aCallback),
+     mLoadContext(aLoadContext),
      mWithCredentials(aWithCredentials)
   {
   }
@@ -1027,6 +1074,7 @@ private:
   nsTArray<nsCString> mPreflightHeaders;
   nsCOMPtr<nsIPrincipal> mReferrerPrincipal;
   nsCOMPtr<nsICorsPreflightCallback> mCallback;
+  nsCOMPtr<nsILoadContext> mLoadContext;
   bool mWithCredentials;
 };
 
@@ -1295,6 +1343,12 @@ nsCORSPreflightListener::CheckPreflightRequestApproved(nsIRequest* aRequest)
 NS_IMETHODIMP
 nsCORSPreflightListener::GetInterface(const nsIID & aIID, void **aResult)
 {
+  if (aIID.Equals(NS_GET_IID(nsILoadContext)) && mLoadContext) {
+    nsCOMPtr<nsILoadContext> copy = mLoadContext;
+    copy.forget(aResult);
+    return NS_OK;
+  }
+
   return QueryInterface(aIID, aResult);
 }
 
@@ -1369,6 +1423,15 @@ nsCORSListenerProxy::StartCORSPreflight(nsIChannel* aRequestChannel,
   rv = aRequestChannel->GetLoadGroup(getter_AddRefs(loadGroup));
   NS_ENSURE_SUCCESS(rv, rv);
 
+  // We want to give the preflight channel's notification callbacks the same
+  // load context as the original channel's notification callbacks had.  We
+  // don't worry about a load context provided via the loadgroup here, since
+  // they have the same loadgroup.
+  nsCOMPtr<nsIInterfaceRequestor> callbacks;
+  rv = aRequestChannel->GetNotificationCallbacks(getter_AddRefs(callbacks));
+  NS_ENSURE_SUCCESS(rv, rv);
+  nsCOMPtr<nsILoadContext> loadContext = do_GetInterface(callbacks);
+
   nsLoadFlags loadFlags;
   rv = aRequestChannel->GetLoadFlags(&loadFlags);
   NS_ENSURE_SUCCESS(rv, rv);
@@ -1426,8 +1489,8 @@ nsCORSListenerProxy::StartCORSPreflight(nsIChannel* aRequestChannel,
 
   // Set up listener which will start the original channel
   RefPtr<nsCORSPreflightListener> preflightListener =
-    new nsCORSPreflightListener(principal, aCallback, withCredentials,
-                                method, preflightHeaders);
+    new nsCORSPreflightListener(principal, aCallback, loadContext,
+                                withCredentials, method, preflightHeaders);
 
   rv = preflightChannel->SetNotificationCallbacks(preflightListener);
   NS_ENSURE_SUCCESS(rv, rv);
@@ -1435,10 +1498,9 @@ nsCORSListenerProxy::StartCORSPreflight(nsIChannel* aRequestChannel,
   // Start preflight
   rv = preflightChannel->AsyncOpen2(preflightListener);
   NS_ENSURE_SUCCESS(rv, rv);
-  
+
   // Return newly created preflight channel
   preflightChannel.forget(aPreflightChannel);
 
   return NS_OK;
 }
-

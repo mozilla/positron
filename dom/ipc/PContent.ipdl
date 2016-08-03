@@ -57,6 +57,7 @@ include protocol PWebBrowserPersistDocument;
 include protocol PWebrtcGlobal;
 include protocol PPresentation;
 include protocol PVRManager;
+include protocol PFlyWebPublishedServer;
 include DOMTypes;
 include JavaScriptTypes;
 include InputStreamParams;
@@ -66,7 +67,7 @@ include PluginTypes;
 include ProtocolTypes;
 include PBackgroundSharedTypes;
 include PContentPermission;
-include BrowserConfiguration;
+include ServiceWorkerConfiguration;
 include GraphicsMessages;
 include ProfilerTypes;
 
@@ -98,6 +99,7 @@ using class mozilla::dom::ipc::StructuredCloneData from "ipc/IPCMessageUtils.h";
 using mozilla::DataStorageType from "ipc/DataStorageIPCUtils.h";
 using mozilla::DocShellOriginAttributes from "mozilla/ipc/BackgroundUtils.h";
 using struct mozilla::layers::TextureFactoryIdentifier from "mozilla/layers/CompositorTypes.h";
+using struct mozilla::dom::FlyWebPublishOptions from "mozilla/dom/FlyWebPublishOptionsIPCSerializer.h";
 
 union ChromeRegistryItem
 {
@@ -337,37 +339,7 @@ struct DomainPolicyClone
     URIParams[] superWhitelist;
 };
 
-struct GamepadAdded {
-    nsString id;
-    uint32_t index;
-    uint32_t mapping;
-    uint32_t num_buttons;
-    uint32_t num_axes;
-};
 
-struct GamepadRemoved {
-    uint32_t index;
-};
-
-struct GamepadAxisInformation {
-    uint32_t index;
-    uint32_t axis;
-    double value;
-};
-
-struct GamepadButtonInformation {
-    uint32_t index;
-    uint32_t button;
-    bool pressed;
-    double value;
-};
-
-union GamepadChangeEvent {
-    GamepadAdded;
-    GamepadRemoved;
-    GamepadAxisInformation;
-    GamepadButtonInformation;
-};
 
 struct FrameScriptInfo
 {
@@ -385,14 +357,35 @@ struct AndroidSystemInfo
     bool     isTablet;
 };
 
+struct GetFilesResponseSuccess
+{
+  PBlob[] blobs;
+};
+
+struct GetFilesResponseFailure
+{
+  nsresult errorCode;
+};
+
+union GetFilesResponseResult
+{
+  GetFilesResponseSuccess;
+  GetFilesResponseFailure;
+};
+
+struct BlobURLRegistrationData
+{
+    nsCString url;
+    PBlob blob;
+    Principal principal;
+};
+
 prio(normal upto urgent) sync protocol PContent
 {
     parent spawns PPluginModule;
 
-    parent opens PCompositorBridge;
     parent opens PProcessHangMonitor;
     parent opens PSharedBufferManager;
-    parent opens PImageBridge;
     parent opens PGMPService;
     parent opens PVRManager;
     child opens PBackground;
@@ -433,6 +426,7 @@ prio(normal upto urgent) sync protocol PContent
     manages PWebBrowserPersistDocument;
     manages PWebrtcGlobal;
     manages PPresentation;
+    manages PFlyWebPublishedServer;
 
 both:
     // Depending on exactly how the new browser is being created, it might be
@@ -475,6 +469,10 @@ both:
                                      uint64_t aOuterWindowID);
 
 child:
+    // Give the content process its endpoints to the compositor.
+    async InitCompositor(Endpoint<PCompositorBridgeChild> compositor);
+    async InitImageBridge(Endpoint<PImageBridgeChild> bridge);
+
     /**
      * Enable system-level sandboxing features, if available.  Can
      * usually only be performed zero or one times.  The child may
@@ -491,7 +489,7 @@ child:
      * Communication between the PuppetBidiKeyboard and the actual
      * BidiKeyboard hosted by the parent
      */
-    async BidiKeyboardNotify(bool isLangRTL);
+    async BidiKeyboardNotify(bool isLangRTL, bool haveBidiKeyboards);
 
     /**
      * Dump this process's GC and CC logs to the provided files.
@@ -510,6 +508,8 @@ child:
     async RegisterChrome(ChromePackage[] packages, SubstitutionMapping[] substitutions,
                          OverrideMapping[] overrides, nsCString locale, bool reset);
     async RegisterChromeItem(ChromeRegistryItem item);
+
+    async ClearImageCache(bool privateLoader, bool chrome);
 
     async SetOffline(bool offline);
     async SetConnectivity(bool connectivity);
@@ -550,6 +550,16 @@ child:
     async AppInfo(nsCString version, nsCString buildID, nsCString name, nsCString UAName,
                   nsCString ID, nsCString vendor);
     async AppInit();
+
+    /**
+     * Send ServiceWorkerRegistrationData to child process.
+     */
+    async InitServiceWorkers(ServiceWorkerConfiguration aConfig);
+
+    /**
+     * Send BlobURLRegistrationData to child process.
+     */
+    async InitBlobURLs(BlobURLRegistrationData[] registrations);
 
     // Notify child that last-pb-context-exited notification was observed
     async LastPrivateDocShellDestroyed();
@@ -632,11 +642,6 @@ child:
     async UpdateWindow(uintptr_t aChildId);
 
     /**
-     * Send gamepad status update to child.
-     */
-    async GamepadUpdate(GamepadChangeEvent aGamepadEvent);
-
-    /**
      * Notify the child that presentation receiver has been launched with the
      * correspondent iframe.
      */
@@ -672,7 +677,8 @@ child:
     /**
      * Send a Push error message to all service worker clients in the child.
      */
-    async PushError(nsCString scope, nsString message, uint32_t flags);
+    async PushError(nsCString scope, Principal principal, nsString message,
+                    uint32_t flags);
 
     /**
      * Windows specific: associate this content process with the browsers
@@ -681,6 +687,14 @@ child:
     async SetAudioSessionData(nsID aID,
                               nsString aDisplayName,
                               nsString aIconPath);
+
+    async GetFilesResponse(nsID aID, GetFilesResponseResult aResult);
+
+    async BlobURLRegistration(nsCString aURI, PBlob aBlob,
+                              Principal aPrincipal);
+
+    async BlobURLUnregistration(nsCString aURI);
+
 parent:
     /**
      * Tell the content process some attributes of itself.  This is
@@ -698,7 +712,8 @@ parent:
     sync GetProcessAttributes()
         returns (ContentParentId cpId, bool isForApp, bool isForBrowser);
     sync GetXPCOMProcessAttributes()
-        returns (bool isOffline, bool isConnected, bool isLangRTL, nsString[] dictionaries,
+        returns (bool isOffline, bool isConnected, bool isLangRTL,
+                 bool haveBidiKeyboards, nsString[] dictionaries,
                  ClipboardCapabilities clipboardCaps,
                  DomainPolicyClone domainPolicy,
                  StructuredCloneData initialData);
@@ -852,6 +867,8 @@ parent:
 
     async PPresentation();
 
+    async PFlyWebPublishedServer(nsString name, FlyWebPublishOptions params);
+
     // Services remoting
 
     async StartVisitedQuery(URIParams uri);
@@ -859,9 +876,10 @@ parent:
     async SetURITitle(URIParams uri, nsString title);
 
     async LoadURIExternal(URIParams uri, PBrowser windowContext);
+    async ExtProtocolChannelConnectParent(uint32_t registrarId);
 
     // PrefService message
-    sync ReadPrefsArray() returns (PrefSetting[] prefs);
+    sync ReadPrefsArray() returns (PrefSetting[] prefs) verify;
 
     sync ReadFontList() returns (FontListEntry[] retValue);
 
@@ -952,9 +970,6 @@ parent:
                                nsString aStorageName,
                                nsString aFilepath,
                                nsCString aReason);
-
-    // Notify the parent that the child has finished handling a system message.
-    async SystemMessageHandled();
 
     // called by the child (test code only) to propagate volume changes to the parent
     async CreateFakeVolume(nsString fsName, nsString mountPoint);
@@ -1112,22 +1127,6 @@ parent:
     async PContentPermissionRequest(PermissionRequest[] aRequests, Principal aPrincipal,
                                     TabId tabId);
 
-    /**
-     * Send ServiceWorkerRegistrationData to child process.
-     */
-    sync GetBrowserConfiguration(nsCString aUri)
-        returns (BrowserConfiguration aConfig);
-
-    /*
-     * Tells the parent to start the gamepad listening service if it hasn't already.
-     */
-    async GamepadListenerAdded();
-
-    /**
-     * Tells the parent to stop the gamepad listening service if it hasn't already.
-     */
-    async GamepadListenerRemoved();
-
     async Profile(nsCString aProfile);
 
     /**
@@ -1199,14 +1198,29 @@ parent:
                                                 Principal principal);
 
     /**
-     * Notify `push-subscription-modified` observers in the parent.
+     * Tell the parent process that the child process is low on memory. This
+     * allows the parent process to save a memory report that can potentially be
+     * sent with a crash report from the content process.
      */
-    async NotifyPushSubscriptionModifiedObservers(nsCString scope,
-                                                  Principal principal);
+     async NotifyLowMemory();
+
+     async GetFilesRequest(nsID aID, nsString aDirectory, bool aRecursiveFlag);
+     async DeleteGetFilesRequest(nsID aID);
+
+     async StoreAndBroadcastBlobURLRegistration(nsCString url, PBlob blob,
+                                                Principal principal);
+
+     async UnstoreAndBroadcastBlobURLUnregistration(nsCString url);
 
 both:
      async AsyncMessage(nsString aMessage, CpowEntry[] aCpows,
                         Principal aPrincipal, ClonedMessageData aData);
+
+    /**
+     * Notify `push-subscription-modified` observers in the parent and child.
+     */
+    async NotifyPushSubscriptionModifiedObservers(nsCString scope,
+                                                  Principal principal);
 };
 
 }

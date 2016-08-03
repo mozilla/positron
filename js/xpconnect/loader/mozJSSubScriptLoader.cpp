@@ -591,8 +591,6 @@ mozJSSubScriptLoader::DoLoadSubScriptWithOptions(const nsAString& url,
     if (targetObj != result_obj)
         principal = GetObjectPrincipal(targetObj);
 
-    JSAutoCompartment ac(cx, targetObj);
-
     /* load up the url.  From here on, failures are reflected as ``custom''
      * js exceptions */
     nsCOMPtr<nsIURI> uri;
@@ -605,6 +603,8 @@ mozJSSubScriptLoader::DoLoadSubScriptWithOptions(const nsAString& url,
         // No scripted frame means we don't know who's calling, bail.
         return NS_ERROR_FAILURE;
     }
+
+    JSAutoCompartment ac(cx, targetObj);
 
     // Suppress caching if we're compiling as content.
     StartupCache* cache = (principal == mSystemPrincipal)
@@ -776,9 +776,9 @@ NotifyPrecompilationCompleteRunnable::Run(void)
     AutoSendObserverNotification notifier(mPrecompiler);
 
     if (mToken) {
-        JSRuntime* rt = XPCJSRuntime::Get()->Runtime();
-        NS_ENSURE_TRUE(rt, NS_ERROR_FAILURE);
-        JS::FinishOffThreadScript(nullptr, rt, mToken);
+        JSContext* cx = XPCJSRuntime::Get()->Context();
+        NS_ENSURE_TRUE(cx, NS_ERROR_FAILURE);
+        JS::CancelOffThreadScript(cx, mToken);
     }
 
     return NS_OK;

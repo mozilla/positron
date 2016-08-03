@@ -53,24 +53,6 @@ namespace layers {
 
 using namespace gfx;
 
-static bool
-LayerHasCheckerboardingAPZC(Layer* aLayer, Color* aOutColor)
-{
-  for (LayerMetricsWrapper i(aLayer, LayerMetricsWrapper::StartAt::BOTTOM); i; i = i.GetParent()) {
-    if (!i.Metrics().IsScrollable()) {
-      continue;
-    }
-    if (i.GetApzc() && i.GetApzc()->IsCurrentlyCheckerboarding()) {
-      if (aOutColor) {
-        *aOutColor = i.Metadata().GetBackgroundColor();
-      }
-      return true;
-    }
-    break;
-  }
-  return false;
-}
-
 static void DrawLayerInfo(const RenderTargetIntRect& aClipRect,
                           LayerManagerComposite* aManager,
                           Layer* aLayer)
@@ -357,15 +339,6 @@ ContainerRenderVR(ContainerT* aContainer,
   DUMP("<<< ContainerRenderVR [%p]\n", aContainer);
 }
 
-static bool
-NeedToDrawCheckerboardingForLayer(Layer* aLayer, Color* aOutCheckerboardingColor)
-{
-  return (aLayer->Manager()->AsyncPanZoomEnabled() &&
-         aLayer->GetContentFlags() & Layer::CONTENT_OPAQUE) &&
-         aLayer->IsOpaqueForVisibility() &&
-         LayerHasCheckerboardingAPZC(aLayer, aOutCheckerboardingColor);
-}
-
 /* all of the prepared data that we need in RenderLayer() */
 struct PreparedData
 {
@@ -412,7 +385,7 @@ ContainerPrepare(ContainerT* aContainer,
     // may be null which is not allowed.
     if (!layerToRender->GetLayer()->AsContainerLayer()) {
       if (!layerToRender->GetLayer()->IsVisible() &&
-          !NeedToDrawCheckerboardingForLayer(layerToRender->GetLayer(), nullptr)) {
+          !layerToRender->NeedToDrawCheckerboarding(nullptr)) {
         CULLING_LOG("Sublayer %p has no effective visible region\n", layerToRender->GetLayer());
         continue;
       }
@@ -625,8 +598,17 @@ RenderLayers(ContainerT* aContainer,
       continue;
     }
 
+    if (gfxPrefs::LayersDrawFPS()) {
+      for (auto metadata : layer->GetAllScrollMetadata()) {
+        if (metadata.IsApzForceDisabled()) {
+          aManager->DisabledApzWarning();
+          break;
+        }
+      }
+    }
+
     Color color;
-    if (NeedToDrawCheckerboardingForLayer(layer, &color)) {
+    if (layerToRender->NeedToDrawCheckerboarding(&color)) {
       if (gfxPrefs::APZHighlightCheckerboardedAreas()) {
         color = Color(255 / 255.f, 188 / 255.f, 217 / 255.f, 1.f); // "Cotton Candy"
       }
@@ -909,6 +891,8 @@ void
 ContainerLayerComposite::CleanupResources()
 {
   mLastIntermediateSurface = nullptr;
+  mVRRenderTargetSet = nullptr;
+  mPrepared = nullptr;
 
   for (Layer* l = GetFirstChild(); l; l = l->GetNextSibling()) {
     LayerComposite* layerToCleanup = static_cast<LayerComposite*>(l->ImplData());
@@ -956,11 +940,12 @@ RefLayerComposite::Prepare(const RenderTargetIntRect& aClipRect)
   ContainerPrepare(this, mCompositeManager, aClipRect);
 }
 
-
 void
 RefLayerComposite::CleanupResources()
 {
   mLastIntermediateSurface = nullptr;
+  mVRRenderTargetSet = nullptr;
+  mPrepared = nullptr;
 }
 
 } // namespace layers

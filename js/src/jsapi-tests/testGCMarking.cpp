@@ -129,7 +129,8 @@ BEGIN_TEST(testIncrementalRoots)
 
     // This is marked during markRuntime
     JS::AutoObjectVector vec(cx);
-    vec.append(root);
+    if (!vec.append(root))
+        return false;
 
     // Tenure everything so intentionally unrooted objects don't move before we
     // can use them.
@@ -161,13 +162,13 @@ BEGIN_TEST(testIncrementalRoots)
     // descendants. It shouldn't make it all the way through (it gets a budget
     // of 1000, and the graph is about 3000 objects deep).
     js::SliceBudget budget(js::WorkBudget(1000));
-    JS_SetGCParameter(rt, JSGC_MODE, JSGC_MODE_INCREMENTAL);
+    JS_SetGCParameter(cx, JSGC_MODE, JSGC_MODE_INCREMENTAL);
     rt->gc.startDebugGC(GC_NORMAL, budget);
 
     // We'd better be between iGC slices now. There's always a risk that
     // something will decide that we need to do a full GC (such as gczeal, but
     // that is turned off.)
-    MOZ_ASSERT(JS::IsIncrementalGCInProgress(rt));
+    MOZ_ASSERT(JS::IsIncrementalGCInProgress(cx));
 
     // And assert that the mark bits are as we expect them to be.
     MOZ_ASSERT(vec[0]->asTenured().isMarked());

@@ -10,6 +10,7 @@
 #include "mozilla/Casting.h"
 #include "mozilla/Telemetry.h"
 #include "mozilla/TimeStamp.h"
+#include "mozilla/unused.h"
 #include "nsContentUtils.h"
 #include "nsICertOverrideService.h"
 #include "nsIHttpChannelInternal.h"
@@ -1032,6 +1033,8 @@ AccumulateCipherSuite(Telemetry::ID probe, const SSLChannelInfo& channelInfo)
     case TLS_ECDHE_ECDSA_WITH_3DES_EDE_CBC_SHA: value = 10; break;
     case TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256: value = 11; break;
     case TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256: value = 12; break;
+    case TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384: value = 13; break;
+    case TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384: value = 14; break;
     // DHE key exchange
     case TLS_DHE_RSA_WITH_AES_128_CBC_SHA: value = 21; break;
     case TLS_DHE_RSA_WITH_CAMELLIA_128_CBC_SHA: value = 22; break;
@@ -1064,6 +1067,8 @@ AccumulateCipherSuite(Telemetry::ID probe, const SSLChannelInfo& channelInfo)
     case TLS_RSA_WITH_RC4_128_MD5: value = 69; break;
     // TLS 1.3 PSK resumption
     case TLS_ECDHE_PSK_WITH_AES_128_GCM_SHA256: value = 70; break;
+    case TLS_ECDHE_PSK_WITH_CHACHA20_POLY1305_SHA256: value = 71; break;
+    case TLS_ECDHE_PSK_WITH_AES_256_GCM_SHA384: value = 72; break;
     // unknown
     default:
       value = 0;
@@ -1099,7 +1104,7 @@ void HandshakeCallback(PRFileDesc* fd, void* client_data) {
                                            infoObject->GetPort(),
                                            versions.max);
 
-  bool usesWeakCipher = false;
+  bool usesFallbackCipher = false;
   SSLChannelInfo channelInfo;
   rv = SSL_GetChannelInfo(fd, &channelInfo, sizeof(channelInfo));
   MOZ_ASSERT(rv == SECSuccess);
@@ -1119,7 +1124,7 @@ void HandshakeCallback(PRFileDesc* fd, void* client_data) {
                                 sizeof cipherInfo);
     MOZ_ASSERT(rv == SECSuccess);
     if (rv == SECSuccess) {
-      usesWeakCipher = cipherInfo.symCipher == ssl_calg_rc4;
+      usesFallbackCipher = cipherInfo.keaType == ssl_kea_dh;
 
       // keyExchange null=0, rsa=1, dh=2, fortezza=3, ecdh=4
       Telemetry::Accumulate(
@@ -1159,10 +1164,6 @@ void HandshakeCallback(PRFileDesc* fd, void* client_data) {
           switch (cipherInfo.authAlgorithm) {
             case ssl_auth_rsa:
               AccumulateNonECCKeySize(Telemetry::SSL_AUTH_RSA_KEY_SIZE_FULL,
-                                      channelInfo.authKeyBits);
-              break;
-            case ssl_auth_dsa:
-              AccumulateNonECCKeySize(Telemetry::SSL_AUTH_DSA_KEY_SIZE_FULL,
                                       channelInfo.authKeyBits);
               break;
             case ssl_auth_ecdsa:
@@ -1206,20 +1207,19 @@ void HandshakeCallback(PRFileDesc* fd, void* client_data) {
                                                              status);
 
   uint32_t state;
-  if (usesWeakCipher || renegotiationUnsafe) {
+  if (renegotiationUnsafe) {
     state = nsIWebProgressListener::STATE_IS_BROKEN;
-    if (usesWeakCipher) {
-      state |= nsIWebProgressListener::STATE_USES_WEAK_CRYPTO;
-    }
   } else {
     state = nsIWebProgressListener::STATE_IS_SECURE |
             nsIWebProgressListener::STATE_SECURE_HIGH;
-    SSLVersionRange defVersion;
-    rv = SSL_VersionRangeGetDefault(ssl_variant_stream, &defVersion);
-    if (rv == SECSuccess && versions.max >= defVersion.max) {
-      // we know this site no longer requires a weak cipher
-      ioLayerHelpers.removeInsecureFallbackSite(infoObject->GetHostName(),
-                                                infoObject->GetPort());
+    if (!usesFallbackCipher) {
+      SSLVersionRange defVersion;
+      rv = SSL_VersionRangeGetDefault(ssl_variant_stream, &defVersion);
+      if (rv == SECSuccess && versions.max >= defVersion.max) {
+        // we know this site no longer requires a fallback cipher
+        ioLayerHelpers.removeInsecureFallbackSite(infoObject->GetHostName(),
+                                                  infoObject->GetPort());
+      }
     }
   }
 
@@ -1234,25 +1234,17 @@ void HandshakeCallback(PRFileDesc* fd, void* client_data) {
     status->SetServerCert(nssc, nsNSSCertificate::ev_status_unknown);
   }
 
-  nsCOMPtr<nsICertOverrideService> overrideService =
-      do_GetService(NS_CERTOVERRIDE_CONTRACTID);
-
-  if (overrideService) {
-    bool haveOverride;
-    uint32_t overrideBits = 0; // Unused.
-    bool isTemporaryOverride; // Unused.
-    const nsACString& hostString(infoObject->GetHostName());
-    const int32_t port(infoObject->GetPort());
-    nsCOMPtr<nsIX509Cert> cert;
-    status->GetServerCert(getter_AddRefs(cert));
-    nsresult nsrv = overrideService->HasMatchingOverride(hostString, port,
-                                                         cert,
-                                                         &overrideBits,
-                                                         &isTemporaryOverride,
-                                                         &haveOverride);
-    if (NS_SUCCEEDED(nsrv) && haveOverride) {
-      state |= nsIWebProgressListener::STATE_CERT_USER_OVERRIDDEN;
-    }
+  bool domainMismatch;
+  bool untrusted;
+  bool notValidAtThisTime;
+  // These all return NS_OK, so don't even bother checking the return values.
+  Unused << status->GetIsDomainMismatch(&domainMismatch);
+  Unused << status->GetIsUntrusted(&untrusted);
+  Unused << status->GetIsNotValidAtThisTime(&notValidAtThisTime);
+  // If we're here, the TLS handshake has succeeded. Thus if any of these
+  // booleans are true, the user has added an override for a certificate error.
+  if (domainMismatch || untrusted || notValidAtThisTime) {
+    state |= nsIWebProgressListener::STATE_CERT_USER_OVERRIDDEN;
   }
 
   infoObject->SetSecurityState(state);

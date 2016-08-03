@@ -21,7 +21,6 @@
 #include "mozilla/CheckedInt.h"
 #include "mozilla/MathAlgorithms.h"
 
-#include "asmjs/Wasm.h"
 #include "asmjs/WasmBinaryIterator.h"
 
 using namespace js;
@@ -69,15 +68,13 @@ class AstDecodeContext
     Decoder& d;
     bool generateNames;
 
-    uint32_t numTableElems;
-    Maybe<uint32_t> initialSizePages;
-    Maybe<uint32_t> maxSizePages;
-
   private:
     AstModule& module_;
     AstIndexVector funcSigs_;
     AstDecodeExprIter *iter_;
     const ValTypeVector* locals_;
+    AstNameVector blockLabels_;
+    uint32_t currentLabelIndex_;
 
   public:
     AstDecodeContext(JSContext* cx, LifoAlloc& lifo, Decoder& d, AstModule& module, bool generateNames)
@@ -85,29 +82,35 @@ class AstDecodeContext
        lifo(lifo),
        d(d),
        generateNames(generateNames),
-       numTableElems(0),
-       initialSizePages(),
-       maxSizePages(),
        module_(module),
        funcSigs_(lifo),
        iter_(nullptr),
-       locals_(nullptr)
+       locals_(nullptr),
+       blockLabels_(lifo),
+       currentLabelIndex_(0)
     {}
 
     AstModule& module() { return module_; }
     AstIndexVector& funcSigs() { return funcSigs_; }
     AstDecodeExprIter& iter() { return *iter_; }
     const ValTypeVector& locals() { return *locals_; }
+    AstNameVector& blockLabels() { return blockLabels_; }
 
     void startFunction(AstDecodeExprIter *iter, const ValTypeVector* locals)
     {
         iter_ = iter;
         locals_ = locals;
+        currentLabelIndex_ = 0;
     }
     void endFunction()
     {
         iter_ = nullptr;
         locals_ = nullptr;
+        MOZ_ASSERT(blockLabels_.length() == 0);
+    }
+    uint32_t nextLabelIndex()
+    {
+        return currentLabelIndex_++;
     }
 };
 
@@ -130,6 +133,8 @@ AstDecodeGenerateName(AstDecodeContext& c, const AstName& prefix, uint32_t index
     }
 
     AstVector<char16_t> result(c.lifo);
+    if (!result.append(MOZ_UTF16('$')))
+        return false;
     if (!result.append(prefix.begin(), prefix.length()))
         return false;
 
@@ -222,7 +227,7 @@ AstDecodeCall(AstDecodeContext& c)
     const AstSig* sig = c.module().sigs()[sigIndex];
 
     AstRef funcRef;
-    if (!AstDecodeGenerateRef(c, AstName(MOZ_UTF16("$func$"), 6), calleeIndex, &funcRef))
+    if (!AstDecodeGenerateRef(c, AstName(MOZ_UTF16("func")), calleeIndex, &funcRef))
         return false;
 
     AstExprVector args(c.lifo);
@@ -232,11 +237,12 @@ AstDecodeCall(AstDecodeContext& c)
     if (!AstDecodeCallReturn(c, *sig))
         return false;
 
+    uint32_t argsLength = args.length();
     AstCall* call = new(c.lifo) AstCall(Expr::Call, funcRef, Move(args));
     if (!call)
         return false;
 
-    c.iter().setResult(AstDecodeStackItem(call, args.length()));
+    c.iter().setResult(AstDecodeStackItem(call, argsLength));
     return true;
 }
 
@@ -249,7 +255,7 @@ AstDecodeCallIndirect(AstDecodeContext& c)
         return false;
 
     AstRef sigRef;
-    if (!AstDecodeGenerateRef(c, AstName(MOZ_UTF16("$type$"), 6), sigIndex, &sigRef))
+    if (!AstDecodeGenerateRef(c, AstName(MOZ_UTF16("type")), sigIndex, &sigRef))
         return false;
 
     if (sigIndex >= c.module().sigs().length())
@@ -268,11 +274,12 @@ AstDecodeCallIndirect(AstDecodeContext& c)
     if (!AstDecodeCallReturn(c, *sig))
         return false;
 
+    uint32_t argsLength = args.length();
     AstCallIndirect* call = new(c.lifo) AstCallIndirect(sigRef, index.expr, Move(args));
     if (!call)
         return false;
 
-    c.iter().setResult(AstDecodeStackItem(call, 1 + args.length()));
+    c.iter().setResult(AstDecodeStackItem(call, 1 + argsLength));
     return true;
 }
 
@@ -288,9 +295,9 @@ AstDecodeCallImport(AstDecodeContext& c)
         return c.iter().fail("import index out of range");
 
     AstImport* import = c.module().imports()[importIndex];
-    AstSig* sig = c.module().sigs()[import->sig().index()];
+    AstSig* sig = c.module().sigs()[import->funcSig().index()];
     AstRef funcRef;
-    if (!AstDecodeGenerateRef(c, AstName(MOZ_UTF16("$import$"), 8), importIndex, &funcRef))
+    if (!AstDecodeGenerateRef(c, AstName(MOZ_UTF16("import")), importIndex, &funcRef))
         return false;
 
     AstExprVector args(c.lifo);
@@ -300,11 +307,31 @@ AstDecodeCallImport(AstDecodeContext& c)
     if (!AstDecodeCallReturn(c, *sig))
         return false;
 
+    uint32_t argsLength = args.length();
     AstCall* call = new(c.lifo) AstCall(Expr::CallImport, funcRef, Move(args));
     if (!call)
         return false;
 
-    c.iter().setResult(AstDecodeStackItem(call, args.length()));
+    c.iter().setResult(AstDecodeStackItem(call, argsLength));
+    return true;
+}
+
+static bool
+AstDecodeGetBlockRef(AstDecodeContext& c, uint32_t depth, AstRef* ref)
+{
+    if (!c.generateNames || depth >= c.blockLabels().length()) {
+        // Also ignoring if it's a function body label.
+        *ref = AstRef(AstName(), depth);
+        return true;
+    }
+
+    uint32_t index = c.blockLabels().length() - depth - 1;
+    if (c.blockLabels()[index].empty()) {
+        if (!AstDecodeGenerateName(c, AstName(MOZ_UTF16("label")), c.nextLabelIndex(), &c.blockLabels()[index]))
+            return false;
+    }
+    *ref = AstRef(c.blockLabels()[index], AstNoIndex);
+    ref->setIndex(depth);
     return true;
 }
 
@@ -326,14 +353,18 @@ AstDecodeBrTable(AstDecodeContext& c)
     for (size_t i = 0, e = tableLength; i < e; ++i) {
         if (!c.iter().readBrTableEntry(type, &depth))
             return false;
-        table[i] = AstRef(AstName(), depth);
+        if (!AstDecodeGetBlockRef(c, depth, &table[i]))
+            return false;
     }
 
     // Read the default label.
     if (!c.iter().readBrTableEntry(type, &depth))
         return false;
 
-    AstRef def(AstName(), depth);
+    AstRef def;
+    if (!AstDecodeGetBlockRef(c, depth, &def))
+        return false;
+
     AstBranchTable* branchTable = new(c.lifo) AstBranchTable(*index.expr, def, Move(table), value.expr);
     if (!branchTable)
         return false;
@@ -348,9 +379,13 @@ AstDecodeBlock(AstDecodeContext& c, Expr expr)
     MOZ_ASSERT(expr == Expr::Block || expr == Expr::Loop);
 
     if (expr == Expr::Loop) {
+      if (!c.blockLabels().append(AstName()) || !c.blockLabels().append(AstName()))
+          return false;
       if (!c.iter().readLoop())
           return false;
     } else {
+      if (!c.blockLabels().append(AstName()))
+          return false;
       if (!c.iter().readBlock())
           return false;
     }
@@ -369,7 +404,11 @@ AstDecodeBlock(AstDecodeContext& c, Expr expr)
             return false;
     }
 
-    AstBlock* block = new(c.lifo) AstBlock(expr, AstName(), AstName(), Move(exprs));
+    AstName continueName;
+    if (expr == Expr::Loop)
+        continueName = c.blockLabels().popCopy();
+    AstName breakName = c.blockLabels().popCopy();
+    AstBlock* block = new(c.lifo) AstBlock(expr, breakName, continueName, Move(exprs));
     if (!block)
         return false;
 
@@ -386,6 +425,8 @@ AstDecodeIf(AstDecodeContext& c)
 
     bool hasElse = false;
 
+    if (!c.blockLabels().append(AstName()))
+        return false;
     AstExprVector thenExprs(c.lifo);
     while (true) {
         if (!AstDecodeExpr(c))
@@ -401,9 +442,13 @@ AstDecodeIf(AstDecodeContext& c)
         if (!thenExprs.append(item.expr))
             return false;
     }
+    AstName thenName = c.blockLabels().popCopy();
 
+    AstName elseName;
     AstExprVector elseExprs(c.lifo);
     if (hasElse) {
+        if (!c.blockLabels().append(AstName()))
+            return false;
         while (true) {
             if (!AstDecodeExpr(c))
                 return false;
@@ -416,9 +461,10 @@ AstDecodeIf(AstDecodeContext& c)
             if (!elseExprs.append(item.expr))
                 return false;
         }
+        elseName = c.blockLabels().popCopy();
     }
 
-    AstIf* if_ = new(c.lifo) AstIf(cond.expr, AstName(), Move(thenExprs), AstName(), Move(elseExprs));
+    AstIf* if_ = new(c.lifo) AstIf(cond.expr, thenName, Move(thenExprs), elseName, Move(elseExprs));
     if (!if_)
         return false;
 
@@ -590,7 +636,10 @@ AstDecodeBranch(AstDecodeContext& c, Expr expr)
         popped = value.expr ? 2 : 1;
     }
 
-    AstRef depthRef(AstName(), depth);
+    AstRef depthRef;
+    if (!AstDecodeGetBlockRef(c, depth, &depthRef))
+        return false;
+
     AstBranch* branch = new(c.lifo) AstBranch(expr, cond.expr, depthRef, value.expr);
     if (!branch)
         return false;
@@ -607,7 +656,7 @@ AstDecodeGetLocal(AstDecodeContext& c)
         return false;
 
     AstRef localRef;
-    if (!AstDecodeGenerateRef(c, AstName(MOZ_UTF16("$var$"), 5), getLocalId, &localRef))
+    if (!AstDecodeGenerateRef(c, AstName(MOZ_UTF16("var")), getLocalId, &localRef))
         return false;
 
     AstGetLocal* getLocal = new(c.lifo) AstGetLocal(localRef);
@@ -627,7 +676,7 @@ AstDecodeSetLocal(AstDecodeContext& c)
         return false;
 
     AstRef localRef;
-    if (!AstDecodeGenerateRef(c, AstName(MOZ_UTF16("$var$"), 5), setLocalId, &localRef))
+    if (!AstDecodeGenerateRef(c, AstName(MOZ_UTF16("var")), setLocalId, &localRef))
         return false;
 
     AstSetLocal* setLocal = new(c.lifo) AstSetLocal(localRef, *setLocalValue.expr);
@@ -998,7 +1047,7 @@ AstDecodeTypeSection(AstDecodeContext& c)
 
         AstSig sigNoName(Move(args), result);
         AstName sigName;
-        if (!AstDecodeGenerateName(c, AstName(MOZ_UTF16("$type$"), 6), sigIndex, &sigName))
+        if (!AstDecodeGenerateName(c, AstName(MOZ_UTF16("type")), sigIndex, &sigName))
             return false;
 
         AstSig* sig = new(c.lifo) AstSig(sigName, Move(sigNoName));
@@ -1064,17 +1113,18 @@ AstDecodeTableSection(AstDecodeContext& c)
     if (sectionStart == Decoder::NotStarted)
         return true;
 
-    if (!c.d.readVarU32(&c.numTableElems))
+    uint32_t numElems;
+    if (!c.d.readVarU32(&numElems))
         return AstDecodeFail(c, "expected number of table elems");
 
-    if (c.numTableElems > MaxTableElems)
+    if (numElems > MaxTableElems)
         return AstDecodeFail(c, "too many table elements");
 
-    AstTableElemVector elems(c.lifo);
-    if (!elems.resize(c.numTableElems))
+    AstRefVector elems(c.lifo);
+    if (!elems.resize(numElems))
         return false;
 
-    for (uint32_t i = 0; i < c.numTableElems; i++) {
+    for (uint32_t i = 0; i < numElems; i++) {
         uint32_t funcIndex;
         if (!c.d.readVarU32(&funcIndex))
             return AstDecodeFail(c, "expected table element");
@@ -1085,11 +1135,12 @@ AstDecodeTableSection(AstDecodeContext& c)
         elems[i] = AstRef(AstName(), funcIndex);
     }
 
-    AstTable* table = new(c.lifo) AstTable(Move(elems));
-    if (!table)
+    AstElemSegment* seg = new(c.lifo) AstElemSegment(0, Move(elems));
+    if (!seg || !c.module().append(seg))
         return false;
 
-    c.module().initTable(table);
+    if (!c.module().setTable(AstResizable(numElems, Nothing())))
+        return AstDecodeFail(c, "already have a table");
 
     if (!c.d.finishSection(sectionStart, sectionSize))
         return AstDecodeFail(c, "table section byte size mismatch");
@@ -1100,13 +1151,18 @@ AstDecodeTableSection(AstDecodeContext& c)
 static bool
 AstDecodeName(AstDecodeContext& c, AstName* name)
 {
-    Bytes bytes;
-    if (!c.d.readBytes(&bytes))
+    uint32_t length;
+    if (!c.d.readVarU32(&length))
         return false;
-    size_t length = bytes.length();
-    char16_t *buffer = static_cast<char16_t *>(c.lifo.alloc(length * sizeof(char16_t)));
+
+    const uint8_t* bytes;
+    if (!c.d.readBytes(length, &bytes))
+        return false;
+
+    char16_t* buffer = static_cast<char16_t *>(c.lifo.alloc(length * sizeof(char16_t)));
     for (size_t i = 0; i < length; i++)
         buffer[i] = bytes[i];
+
     *name = AstName(buffer, length);
     return true;
 }
@@ -1119,7 +1175,7 @@ AstDecodeImport(AstDecodeContext& c, uint32_t importIndex, AstImport** import)
         return false;
 
     AstRef sigRef;
-    if (!AstDecodeGenerateRef(c, AstName(MOZ_UTF16("$type$"), 6), sigIndex, &sigRef))
+    if (!AstDecodeGenerateRef(c, AstName(MOZ_UTF16("type")), sigIndex, &sigRef))
         return false;
 
     AstName moduleName;
@@ -1134,7 +1190,7 @@ AstDecodeImport(AstDecodeContext& c, uint32_t importIndex, AstImport** import)
         return AstDecodeFail(c, "expected import func name");
 
     AstName importName;
-    if (!AstDecodeGenerateName(c, AstName(MOZ_UTF16("$import$"), 8), importIndex, &importName))
+    if (!AstDecodeGenerateName(c, AstName(MOZ_UTF16("import")), importIndex, &importName))
         return false;
 
     *import = new(c.lifo) AstImport(importName, moduleName, funcName, sigRef);
@@ -1187,7 +1243,7 @@ AstDecodeMemorySection(AstDecodeContext& c)
     if (!c.d.readVarU32(&initialSizePages))
         return AstDecodeFail(c, "expected initial memory size");
 
-    CheckedInt<int32_t> initialSize = initialSizePages;
+    CheckedInt<uint32_t> initialSize = initialSizePages;
     initialSize *= PageSize;
     if (!initialSize.isValid())
         return AstDecodeFail(c, "initial memory size too big");
@@ -1196,22 +1252,18 @@ AstDecodeMemorySection(AstDecodeContext& c)
     if (!c.d.readVarU32(&maxSizePages))
         return AstDecodeFail(c, "expected initial memory size");
 
-    CheckedInt<int32_t> maxSize = maxSizePages;
+    CheckedInt<uint32_t> maxSize = maxSizePages;
     maxSize *= PageSize;
     if (!maxSize.isValid())
-        return AstDecodeFail(c, "initial memory size too big");
+        return AstDecodeFail(c, "maximum memory size too big");
 
     uint8_t exported;
     if (!c.d.readFixedU8(&exported))
         return AstDecodeFail(c, "expected exported byte");
 
-    c.initialSizePages.emplace(initialSizePages);
-    if (initialSizePages != maxSizePages) {
-      c.maxSizePages.emplace(maxSizePages);
-    }
-
     if (exported) {
-        AstExport* export_ = new(c.lifo) AstExport(AstName(MOZ_UTF16("memory"), 6));
+        AstName fieldName(MOZ_UTF16("memory"));
+        AstExport* export_ = new(c.lifo) AstExport(fieldName, DefinitionKind::Memory);
         if (!export_ || !c.module().append(export_))
             return false;
     }
@@ -1219,6 +1271,7 @@ AstDecodeMemorySection(AstDecodeContext& c)
     if (!c.d.finishSection(sectionStart, sectionSize))
         return AstDecodeFail(c, "memory section byte size mismatch");
 
+    c.module().setMemory(AstResizable(initialSizePages, Some(maxSizePages)));
     return true;
 }
 
@@ -1286,7 +1339,7 @@ AstDecodeFunctionBody(AstDecodeContext &c, uint32_t funcIndex, AstFunc** func)
     const uint8_t* bodyBegin = c.d.currentPosition();
     const uint8_t* bodyEnd = bodyBegin + bodySize;
 
-    AstDecodeExprIter iter(AstDecodePolicy(), c.d);
+    AstDecodeExprIter iter(c.d);
 
     uint32_t sigIndex = c.funcSigs()[funcIndex];
     const AstSig* sig = c.module().sigs()[sigIndex];
@@ -1304,6 +1357,10 @@ AstDecodeFunctionBody(AstDecodeContext &c, uint32_t funcIndex, AstFunc** func)
 
     c.startFunction(&iter, &locals);
 
+    AstName funcName;
+    if (!AstDecodeGenerateName(c, AstName(MOZ_UTF16("func")), funcIndex, &funcName))
+        return false;
+
     uint32_t numParams = sig->args().length();
     uint32_t numLocals = locals.length();
     for (uint32_t i = numParams; i < numLocals; i++) {
@@ -1312,7 +1369,7 @@ AstDecodeFunctionBody(AstDecodeContext &c, uint32_t funcIndex, AstFunc** func)
     }
     for (uint32_t i = 0; i < numLocals; i++) {
         AstName varName;
-        if (!AstDecodeGenerateName(c, AstName(MOZ_UTF16("$var$"), 5), i, &varName))
+        if (!AstDecodeGenerateName(c, AstName(MOZ_UTF16("var")), i, &varName))
             return false;
         if (!localsNames.append(varName))
             return false;
@@ -1339,12 +1396,8 @@ AstDecodeFunctionBody(AstDecodeContext &c, uint32_t funcIndex, AstFunc** func)
     if (c.d.currentPosition() != bodyEnd)
         return AstDecodeFail(c, "function body length mismatch");
 
-    AstName funcName;
-    if (!AstDecodeGenerateName(c, AstName(MOZ_UTF16("$func$"), 6), funcIndex, &funcName))
-        return false;
-
     AstRef sigRef;
-    if (!AstDecodeGenerateRef(c, AstName(MOZ_UTF16("$type$"), 6), sigIndex, &sigRef))
+    if (!AstDecodeGenerateRef(c, AstName(MOZ_UTF16("type")), sigIndex, &sigRef))
         return false;
 
     *func = new(c.lifo) AstFunc(funcName, sigRef, Move(vars), Move(localsNames), Move(body));
@@ -1395,25 +1448,14 @@ AstDecodeDataSection(AstDecodeContext &c)
     uint32_t sectionStart, sectionSize;
     if (!c.d.startSection(DataSectionId, &sectionStart, &sectionSize))
         return AstDecodeFail(c, "failed to start section");
-    AstSegmentVector segments(c.lifo);
-    if (sectionStart == Decoder::NotStarted) {
-        if (!c.initialSizePages)
-            return true;
-
-        AstMemory* memory = new(c.lifo) AstMemory(*c.initialSizePages, c.maxSizePages, Move(segments));
-        if (!memory)
-            return false;
-
-        c.module().setMemory(memory);
+    if (sectionStart == Decoder::NotStarted)
         return true;
-    }
 
     uint32_t numSegments;
     if (!c.d.readVarU32(&numSegments))
         return AstDecodeFail(c, "failed to read number of data segments");
 
-    uint32_t initialSizePages = c.initialSizePages ? *c.initialSizePages : 0;
-    uint32_t heapLength = initialSizePages * PageSize;
+    const uint32_t heapLength = c.module().hasMemory() ? c.module().memory().initial() : 0;
     uint32_t prevEnd = 0;
 
     for (uint32_t i = 0; i < numSegments; i++) {
@@ -1432,7 +1474,7 @@ AstDecodeDataSection(AstDecodeContext &c)
             return AstDecodeFail(c, "data segment does not fit in memory");
 
         const uint8_t* src;
-        if (!c.d.readBytesRaw(numBytes, &src))
+        if (!c.d.readBytes(numBytes, &src))
             return AstDecodeFail(c, "data segment shorter than declared");
 
         char16_t *buffer = static_cast<char16_t *>(c.lifo.alloc(numBytes * sizeof(char16_t)));
@@ -1440,18 +1482,12 @@ AstDecodeDataSection(AstDecodeContext &c)
             buffer[i] = src[i];
 
         AstName name(buffer, numBytes);
-        AstSegment* segment = new(c.lifo) AstSegment(dstOffset, name);
-        if (!segment || !segments.append(segment))
+        AstDataSegment* segment = new(c.lifo) AstDataSegment(dstOffset, name);
+        if (!segment || !c.module().append(segment))
             return false;
 
         prevEnd = dstOffset + numBytes;
     }
-
-    AstMemory* memory = new(c.lifo) AstMemory(initialSizePages, c.maxSizePages, Move(segments));
-    if (!memory)
-        return false;
-
-    c.module().setMemory(memory);
 
     if (!c.d.finishSection(sectionStart, sectionSize))
         return AstDecodeFail(c, "data section byte size mismatch");

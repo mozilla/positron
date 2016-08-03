@@ -14,14 +14,7 @@
         <item name="windowActionBar">false</item>
         <item name="windowNoTitle">true</item>
         <item name="android:windowContentOverlay">@null</item>
-        <item name="android:actionBarStyle">@style/GeckoActionBar</item>
-        <!-- TODO (bug 1220863): Once we extend AppCompatActivity, set actionBarStyle. -->
         <item name="android:alertDialogTheme">@style/GeckoAlertDialog</item>
-    </style>
-
-    <style name="GeckoPreferencesBase" parent="Gecko">
-        <item name="windowActionBar">true</item>
-        <item name="windowNoTitle">false</item>
     </style>
 
     <style name="GeckoAlertDialog" parent="@android:style/Theme.Material.Light.Dialog.Alert">
@@ -30,10 +23,6 @@
 
     <style name="ActionBar.FxAccountStatusActivity" parent="@android:style/Widget.Material.ActionBar.Solid">
         <item name="android:displayOptions">homeAsUp|showTitle</item>
-        <item name="android:titleTextStyle">@style/ActionBarTitleTextStyle</item>
-    </style>
-
-    <style name="ActionBar.GeckoPreferences" parent="@android:style/Widget.Material.ActionBar.Solid">
         <item name="android:titleTextStyle">@style/ActionBarTitleTextStyle</item>
     </style>
 

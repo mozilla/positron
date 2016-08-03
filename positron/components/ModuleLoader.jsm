@@ -14,6 +14,7 @@ const Cr = Components.results;
 const Cu = Components.utils;
 
 Cu.import('resource://gre/modules/Services.jsm');
+Cu.import("resource://gre/modules/NetUtil.jsm");
 
 const subScriptLoader = Cc['@mozilla.org/moz/jssubscript-loader;1'].
                         getService(Ci.mozIJSSubScriptLoader);
@@ -89,20 +90,10 @@ function ModuleLoader(processType, window) {
     this.global = window;
   }
 
-  /**
-   * Add default properties to the module-specific global object.
-   *
-   * @param  moduleGlobalObj {Object} the module-specific global object
-   *                                  to which we add default properties
-   * @param  module          {Object} the object that identifies the module
-   *                                  and caches its exported symbols
-   */
-  this.injectModuleGlobals = function(moduleGlobalObj, module) {
-    moduleGlobalObj.exports = module.exports;
-    moduleGlobalObj.module = module;
-    moduleGlobalObj.require = this.require.bind(this, module);
-    moduleGlobalObj.global = this.global;
-  };
+  const sandbox = new Cu.Sandbox(systemPrincipal, {
+    wantComponents: true,
+    sandboxPrototype: this.global,
+  });
 
   /**
    * Import a module.
@@ -172,25 +163,34 @@ function ModuleLoader(processType, window) {
     }
     modules.set(module.id, module);
 
-    // Provide the Components object to the "native binding modules" (which
-    // implement APIs in JS that Node/Electron implement with native bindings).
-    const wantComponents = uri.spec.startsWith('resource:///modules/gecko/');
-
-    let sandbox = new Cu.Sandbox(systemPrincipal, {
-      sandboxName: uri.spec,
-      wantComponents: wantComponents,
-      sandboxPrototype: this.global,
+    // Read the source file in so it can be wrapped with a function to allow a
+    // shared global scope but independent local module scopes (this is the same
+    // way node does it).
+    let channel = NetUtil.newChannel({
+      uri: uri,
+      loadUsingSystemPrincipal: true
     });
+    let stream = channel.open2();
 
-    this.injectModuleGlobals(sandbox, module);
+    let src = "";
+    let cstream = Components.classes["@mozilla.org/intl/converter-input-stream;1"].
+                  createInstance(Components.interfaces.nsIConverterInputStream);
+    cstream.init(stream, "UTF-8", 0, 0); // you can use another encoding here if you wish
 
-    // XXX Move these into injectModuleGlobals().
-    sandbox.__filename = file.path;
-    sandbox.__dirname = file.parent.path;
+    let str = {};
+    let read = 0;
+    do {
+      read = cstream.readString(0xffffffff, str);
+      src += str.value;
+    } while (read != 0);
+    cstream.close();
 
     try {
-      // XXX evalInSandbox?
-      subScriptLoader.loadSubScript(uri.spec, sandbox, 'UTF-8');
+      src = '(function (global, exports, require, module, __filename, __dirname) { ' +
+             src +
+             '\n});';
+      let result = Cu.evalInSandbox(src, sandbox, "latest", file.path, 1);
+      result(this.global, module.exports, this.require.bind(this, module), module, file.path, file.parent.path);
       return module.exports;
     } catch(ex) {
       modules.delete(module.id);
@@ -220,21 +220,25 @@ function ModuleLoader(processType, window) {
 
   this.global.Buffer = this.require({}, 'resource:///modules/node/buffer.js').Buffer;
 
-  // XXX Also define setImmediate, clearImmediate, and other Node globals.
+  // XXX Also define clearImmediate, and other Node globals.
+  const timers = this.require({}, 'resource:///modules/node/timers.js');
+  this.global.setImmediate = timers.setImmediate;
 
   // Require the Electron init.js script for the given process type.
   //
   // We only do this for renderer processes for now.  For browser processes,
-  // we instead require the one browser process module that renderer/init.js
-  // depends on having already been required, browser/rpc-server.js.
+  // we instead require the browser process modules that renderer/init.js
+  // depends on having already been required.
   //
   // Eventually, we should get browser/init.js working and require it here,
-  // at which point it'll require browser/rpc-server.js for us.
+  // at which point it'll require those modules for us.
   //
   if (processType === 'renderer') {
     this.require({}, 'resource:///modules/renderer/init.js');
   } else {
     this.require({}, 'resource:///modules/browser/rpc-server.js');
+    this.require({}, 'resource:///modules/browser/guest-view-manager.js');
+    this.require({}, 'resource:///modules/browser/guest-window-manager.js');
   }
 }
 

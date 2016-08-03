@@ -14,6 +14,7 @@
   var { NetUtil } = Cu.import("resource://gre/modules/NetUtil.jsm", {});
   var { fetch } = require("devtools/shared/DevToolsUtils");
   var promise = require("promise");
+  var defer = require("devtools/shared/defer");
 
   var TEST_URL_ROOT = "http://example.com/browser/devtools/client/shared/test/";
   var ACTOR_URL = TEST_URL_ROOT + "test-actor.js";
@@ -22,10 +23,10 @@
   exports.registerTestActor = Task.async(function* (client) {
   // First, instanciate ActorRegistryFront to be able to dynamically
   // register an actor
-    let deferred = promise.defer();
+    let deferred = defer();
     client.listTabs(deferred.resolve);
     let response = yield deferred.promise;
-    let { ActorRegistryFront } = require("devtools/server/actors/actor-registry");
+    let { ActorRegistryFront } = require("devtools/shared/fronts/actor-registry");
     let registryFront = ActorRegistryFront(client, response);
 
   // Then ask to register our test-actor to retrieve its front

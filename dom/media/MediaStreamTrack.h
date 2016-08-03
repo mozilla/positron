@@ -14,6 +14,9 @@
 #include "MediaTrackConstraints.h"
 #include "mozilla/CORSMode.h"
 #include "PrincipalChangeObserver.h"
+#include "mozilla/dom/MediaStreamTrackBinding.h"
+#include "mozilla/dom/MediaTrackSettingsBinding.h"
+#include "mozilla/media/MediaUtils.h"
 
 namespace mozilla {
 
@@ -24,17 +27,19 @@ class MediaStream;
 class MediaStreamGraph;
 class MediaStreamGraphImpl;
 class MediaStreamTrackListener;
-class MediaStreamTrackDirectListener;
+class DirectMediaStreamTrackListener;
 class PeerConnectionImpl;
 class PeerConnectionMedia;
 class PeerIdentity;
 class ProcessedMediaStream;
 class RemoteSourceStreamInfo;
+class SourceStreamInfo;
 
 namespace dom {
 
 class AudioStreamTrack;
 class VideoStreamTrack;
+class MediaStreamError;
 
 /**
  * Common interface through which a MediaStreamTrack can communicate with its
@@ -119,14 +124,21 @@ public:
    */
   virtual nsresult TakePhoto(MediaEnginePhotoCallback*) const { return NS_ERROR_NOT_IMPLEMENTED; }
 
+  typedef media::Pledge<bool, dom::MediaStreamError*> PledgeVoid;
+
   /**
    * We provide a fallback solution to ApplyConstraints() here.
    * Sources that support ApplyConstraints() will have to override it.
    */
-  virtual already_AddRefed<Promise>
+  virtual already_AddRefed<PledgeVoid>
   ApplyConstraints(nsPIDOMWindowInner* aWindow,
-                   const dom::MediaTrackConstraints& aConstraints,
-                   ErrorResult &aRv);
+                   const dom::MediaTrackConstraints& aConstraints);
+
+  /**
+   * Same for GetSettings (no-op).
+   */
+  virtual void
+  GetSettings(dom::MediaTrackSettings& aResult) {};
 
   /**
    * Called by the source interface when all registered sinks have unregistered.
@@ -207,6 +219,9 @@ public:
 
   MediaSourceEnum GetMediaSource() const override { return mMediaSource; }
 
+  void
+  GetSettings(dom::MediaTrackSettings& aResult) override {}
+
   void Stop() override {}
 
 protected:
@@ -228,6 +243,7 @@ class MediaStreamTrack : public DOMEventTargetHelper,
   // PeerConnection and friends need to know our owning DOMStream and track id.
   friend class mozilla::PeerConnectionImpl;
   friend class mozilla::PeerConnectionMedia;
+  friend class mozilla::SourceStreamInfo;
   friend class mozilla::RemoteSourceStreamInfo;
 
   class PrincipalHandleListener;
@@ -238,8 +254,9 @@ public:
    * MediaStream owned by aStream.
    */
   MediaStreamTrack(DOMMediaStream* aStream, TrackID aTrackID,
-                   TrackID aInputTrackID,
-                   MediaStreamTrackSource* aSource);
+      TrackID aInputTrackID,
+      MediaStreamTrackSource* aSource,
+      const MediaTrackConstraints& aConstraints = MediaTrackConstraints());
 
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(MediaStreamTrack,
@@ -261,13 +278,35 @@ public:
   bool Enabled() { return mEnabled; }
   void SetEnabled(bool aEnabled);
   void Stop();
+  void GetConstraints(dom::MediaTrackConstraints& aResult);
+  void GetSettings(dom::MediaTrackSettings& aResult);
+
   already_AddRefed<Promise>
   ApplyConstraints(const dom::MediaTrackConstraints& aConstraints, ErrorResult &aRv);
   already_AddRefed<MediaStreamTrack> Clone();
+  MediaStreamTrackState ReadyState() { return mReadyState; }
 
-  bool Ended() const { return mEnded; }
-  // Notifications from the MediaStreamGraph
-  void NotifyEnded() { mEnded = true; }
+  IMPL_EVENT_HANDLER(ended)
+
+  /**
+   * Convenience (and legacy) method for when ready state is "ended".
+   */
+  bool Ended() const { return mReadyState == MediaStreamTrackState::Ended; }
+
+  /**
+   * Forces the ready state to a particular value, for instance when we're
+   * cloning an already ended track.
+   */
+  void SetReadyState(MediaStreamTrackState aState) { mReadyState = aState; }
+
+  /**
+   * Notified by the MediaStreamGraph, through our owning MediaStream on the
+   * main thread.
+   *
+   * Note that this sets the track to ended and raises the "ended" event
+   * synchronously.
+   */
+  void NotifyEnded();
 
   /**
    * Get this track's principal.
@@ -342,8 +381,8 @@ public:
    * the listener succeeded (tracks originating from SourceMediaStreams) or
    * failed (e.g., WebAudio originated tracks).
    */
-  void AddDirectListener(MediaStreamTrackDirectListener *aListener);
-  void RemoveDirectListener(MediaStreamTrackDirectListener  *aListener);
+  void AddDirectListener(DirectMediaStreamTrackListener *aListener);
+  void RemoveDirectListener(DirectMediaStreamTrackListener  *aListener);
 
   /**
    * Sets up a MediaInputPort from the underlying track that this
@@ -356,6 +395,8 @@ public:
    * output stream.
    */
   bool IsForwardedThrough(MediaInputPort* aPort);
+
+  void SetMediaStreamSizeListener(DirectMediaStreamTrackListener* aListener);
 
 protected:
   virtual ~MediaStreamTrack();
@@ -395,11 +436,15 @@ protected:
   nsCOMPtr<nsIPrincipal> mPrincipal;
   nsCOMPtr<nsIPrincipal> mPendingPrincipal;
   RefPtr<PrincipalHandleListener> mPrincipalHandleListener;
+  // Keep tracking MediaStreamTrackListener and DirectMediaStreamTrackListener,
+  // so we can remove them in |Destory|.
+  nsTArray<RefPtr<MediaStreamTrackListener>> mTrackListeners;
+  nsTArray<RefPtr<DirectMediaStreamTrackListener>> mDirectTrackListeners;
   nsString mID;
-  bool mEnded;
+  MediaStreamTrackState mReadyState;
   bool mEnabled;
   const bool mRemote;
-  bool mStopped;
+  dom::MediaTrackConstraints mConstraints;
 };
 
 } // namespace dom

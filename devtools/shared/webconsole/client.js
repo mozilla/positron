@@ -9,6 +9,7 @@
 const DevToolsUtils = require("devtools/shared/DevToolsUtils");
 const EventEmitter = require("devtools/shared/event-emitter");
 const promise = require("promise");
+const defer = require("devtools/shared/defer");
 const {LongStringClient} = require("devtools/shared/client/main");
 
 /**
@@ -100,6 +101,7 @@ WebConsoleClient.prototype = {
           method: actor.method,
         },
         isXHR: actor.isXHR,
+        cause: actor.cause,
         response: {},
         timings: {},
         // track the list of network event updates
@@ -630,7 +632,7 @@ WebConsoleClient.prototype = {
       return stringGrip._fullText.promise;
     }
 
-    let deferred = stringGrip._fullText = promise.defer();
+    let deferred = stringGrip._fullText = defer();
     let { initial, length } = stringGrip;
     let longStringClient = this.longString(stringGrip);
 

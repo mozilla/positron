@@ -6,6 +6,8 @@
 #ifndef mozilla_image_test_gtest_Common_h
 #define mozilla_image_test_gtest_Common_h
 
+#include <vector>
+
 #include "gtest/gtest.h"
 
 #include "mozilla/Maybe.h"
@@ -13,6 +15,7 @@
 #include "mozilla/gfx/2D.h"
 #include "Decoder.h"
 #include "gfxColor.h"
+#include "imgITools.h"
 #include "nsCOMPtr.h"
 #include "SurfacePipe.h"
 #include "SurfacePipeFactory.h"
@@ -33,6 +36,7 @@ enum TestCaseFlags
   TEST_CASE_HAS_ERROR       = 1 << 1,
   TEST_CASE_IS_TRANSPARENT  = 1 << 2,
   TEST_CASE_IS_ANIMATED     = 1 << 3,
+  TEST_CASE_IGNORE_OUTPUT   = 1 << 4,
 };
 
 struct ImageTestCase
@@ -44,17 +48,33 @@ struct ImageTestCase
     : mPath(aPath)
     , mMimeType(aMimeType)
     , mSize(aSize)
+    , mOutputSize(aSize)
+    , mFlags(aFlags)
+  { }
+
+  ImageTestCase(const char* aPath,
+                const char* aMimeType,
+                gfx::IntSize aSize,
+                gfx::IntSize aOutputSize,
+                uint32_t aFlags = TEST_CASE_DEFAULT_FLAGS)
+    : mPath(aPath)
+    , mMimeType(aMimeType)
+    , mSize(aSize)
+    , mOutputSize(aOutputSize)
     , mFlags(aFlags)
   { }
 
   const char* mPath;
   const char* mMimeType;
   gfx::IntSize mSize;
+  gfx::IntSize mOutputSize;
   uint32_t mFlags;
 };
 
 struct BGRAColor
 {
+  BGRAColor() : BGRAColor(0, 0, 0, 0) { }
+
   BGRAColor(uint8_t aBlue, uint8_t aGreen, uint8_t aRed, uint8_t aAlpha)
     : mBlue(aBlue)
     , mGreen(aGreen)
@@ -64,6 +84,7 @@ struct BGRAColor
 
   static BGRAColor Green() { return BGRAColor(0x00, 0xFF, 0x00, 0xFF); }
   static BGRAColor Red()   { return BGRAColor(0x00, 0x00, 0xFF, 0xFF); }
+  static BGRAColor Blue()   { return BGRAColor(0xFF, 0x00, 0x00, 0xFF); }
   static BGRAColor Transparent() { return BGRAColor(0x00, 0x00, 0x00, 0x00); }
 
   uint32_t AsPixel() const { return gfxPackedPixel(mAlpha, mRed, mGreen, mBlue); }
@@ -78,6 +99,23 @@ struct BGRAColor
 ///////////////////////////////////////////////////////////////////////////////
 // General Helpers
 ///////////////////////////////////////////////////////////////////////////////
+
+/**
+ * A RAII class that ensure that ImageLib services are available. Any tests that
+ * require ImageLib to be initialized (for example, any test that uses the
+ * SurfaceCache; see image::EnsureModuleInitialized() for the full list) can
+ * use this class to ensure that ImageLib services are available. Failure to do
+ * so can result in strange, non-deterministic failures.
+ */
+struct AutoInitializeImageLib
+{
+  AutoInitializeImageLib()
+  {
+    // Ensure that ImageLib services are initialized.
+    nsCOMPtr<imgITools> imgTools = do_CreateInstance("@mozilla.org/image/tools;1");
+    EXPECT_TRUE(imgTools != nullptr);
+  }
+};
 
 /// Loads a file from the current directory. @return an nsIInputStream for it.
 already_AddRefed<nsIInputStream> LoadFile(const char* aRelativePath);
@@ -94,6 +132,12 @@ bool IsSolidColor(gfx::SourceSurface* aSurface,
                   uint8_t aFuzz = 0);
 
 /**
+ * @returns true if every pixel of @aDecoder's surface has the palette index
+ * specified by @aColor.
+ */
+bool IsSolidPalettedColor(Decoder* aDecoder, uint8_t aColor);
+
+/**
  * @returns true if every pixel in the range of rows specified by @aStartRow and
  * @aRowCount of @aSurface is @aColor.
  *
@@ -108,6 +152,15 @@ bool RowsAreSolidColor(gfx::SourceSurface* aSurface,
                        uint8_t aFuzz = 0);
 
 /**
+ * @returns true if every pixel in the range of rows specified by @aStartRow and
+ * @aRowCount of @aDecoder's surface has the palette index specified by @aColor.
+ */
+bool PalettedRowsAreSolidColor(Decoder* aDecoder,
+                               int32_t aStartRow,
+                               int32_t aRowCount,
+                               uint8_t aColor);
+
+/**
  * @returns true if every pixel in the rect specified by @aRect is @aColor.
  *
  * If @aFuzz is nonzero, a tolerance of @aFuzz is allowed in each color
@@ -118,6 +171,53 @@ bool RectIsSolidColor(gfx::SourceSurface* aSurface,
                       const gfx::IntRect& aRect,
                       BGRAColor aColor,
                       uint8_t aFuzz = 0);
+
+/**
+ * @returns true if every pixel in the rect specified by @aRect has the palette
+ * index specified by @aColor.
+ */
+bool PalettedRectIsSolidColor(Decoder* aDecoder,
+                              const gfx::IntRect& aRect,
+                              uint8_t aColor);
+
+/**
+ * @returns true if the pixels in @aRow of @aSurface match the pixels given in
+ * @aPixels.
+ */
+bool RowHasPixels(gfx::SourceSurface* aSurface,
+                  int32_t aRow,
+                  const std::vector<BGRAColor>& aPixels);
+
+// ExpectNoResume is an IResumable implementation for use by tests that expect
+// Resume() to never get called.
+class ExpectNoResume final : public IResumable
+{
+public:
+  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(ExpectNoResume, override)
+
+  void Resume() override { FAIL() << "Resume() should not get called"; }
+
+private:
+  ~ExpectNoResume() override { }
+};
+
+// CountResumes is an IResumable implementation for use by tests that expect
+// Resume() to get called a certain number of times.
+class CountResumes : public IResumable
+{
+public:
+  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(CountResumes, override)
+
+  CountResumes() : mCount(0) { }
+
+  void Resume() override { mCount++; }
+  uint32_t Count() const { return mCount; }
+
+private:
+  ~CountResumes() override { }
+
+  uint32_t mCount;
+};
 
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -204,12 +304,25 @@ void AssertCorrectPipelineFinalState(SurfaceFilter* aFilter,
  * @param aRect The region in the space of the output surface that the filter
  *              pipeline will actually write to. It's expected that pixels in
  *              this region are green, while pixels outside this region are
- *              transparent. Defaults to the entire output rect.
+ *              transparent.
  * @param aFuzz The amount of fuzz to use in pixel comparisons.
  */
 void CheckGeneratedImage(Decoder* aDecoder,
                          const gfx::IntRect& aRect,
                          uint8_t aFuzz = 0);
+
+/**
+ * Checks a generated paletted image for correctness. Reports any unexpected
+ * deviation from the expected image as GTest failures.
+ *
+ * @param aDecoder The decoder which contains the image. The decoder's current
+ *                 frame will be checked.
+ * @param aRect The region in the space of the output surface that the filter
+ *              pipeline will actually write to. It's expected that pixels in
+ *              this region have a palette index of 255, while pixels outside
+ *              this region have a palette index of 0.
+ */
+void CheckGeneratedPalettedImage(Decoder* aDecoder, const gfx::IntRect& aRect);
 
 /**
  * Tests the result of calling WritePixels() using the provided SurfaceFilter
@@ -248,19 +361,6 @@ void CheckWritePixels(Decoder* aDecoder,
                       uint8_t aFuzz = 0);
 
 /**
- * Tests the result of calling WriteRows() using the provided SurfaceFilter
- * pipeline. The pipeline must be a normal (i.e., non-paletted) pipeline.
- * @see CheckWritePixels() for documentation of the arguments.
- */
-void CheckWriteRows(Decoder* aDecoder,
-                    SurfaceFilter* aFilter,
-                    Maybe<gfx::IntRect> aOutputRect = Nothing(),
-                    Maybe<gfx::IntRect> aInputRect = Nothing(),
-                    Maybe<gfx::IntRect> aInputWriteRect = Nothing(),
-                    Maybe<gfx::IntRect> aOutputWriteRect = Nothing(),
-                    uint8_t aFuzz = 0);
-
-/**
  * Tests the result of calling WritePixels() using the provided SurfaceFilter
  * pipeline. The pipeline must be a paletted pipeline.
  * @see CheckWritePixels() for documentation of the arguments.
@@ -272,19 +372,6 @@ void CheckPalettedWritePixels(Decoder* aDecoder,
                               Maybe<gfx::IntRect> aInputWriteRect = Nothing(),
                               Maybe<gfx::IntRect> aOutputWriteRect = Nothing(),
                               uint8_t aFuzz = 0);
-
-/**
- * Tests the result of calling WriteRows() using the provided SurfaceFilter
- * pipeline. The pipeline must be a paletted pipeline.
- * @see CheckWritePixels() for documentation of the arguments.
- */
-void CheckPalettedWriteRows(Decoder* aDecoder,
-                            SurfaceFilter* aFilter,
-                            Maybe<gfx::IntRect> aOutputRect = Nothing(),
-                            Maybe<gfx::IntRect> aInputRect = Nothing(),
-                            Maybe<gfx::IntRect> aInputWriteRect = Nothing(),
-                            Maybe<gfx::IntRect> aOutputWriteRect = Nothing(),
-                            uint8_t aFuzz = 0);
 
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -302,15 +389,27 @@ ImageTestCase GreenFirstFrameAnimatedGIFTestCase();
 ImageTestCase GreenFirstFrameAnimatedPNGTestCase();
 
 ImageTestCase CorruptTestCase();
+ImageTestCase CorruptBMPWithTruncatedHeader();
+ImageTestCase CorruptICOWithBadBMPWidthTestCase();
+ImageTestCase CorruptICOWithBadBMPHeightTestCase();
 
 ImageTestCase TransparentPNGTestCase();
 ImageTestCase TransparentGIFTestCase();
 ImageTestCase FirstFramePaddingGIFTestCase();
 ImageTestCase NoFrameDelayGIFTestCase();
+ImageTestCase ExtraImageSubBlocksAnimatedGIFTestCase();
 
 ImageTestCase TransparentBMPWhenBMPAlphaEnabledTestCase();
 ImageTestCase RLE4BMPTestCase();
 ImageTestCase RLE8BMPTestCase();
+
+ImageTestCase DownscaledPNGTestCase();
+ImageTestCase DownscaledGIFTestCase();
+ImageTestCase DownscaledJPGTestCase();
+ImageTestCase DownscaledBMPTestCase();
+ImageTestCase DownscaledICOTestCase();
+ImageTestCase DownscaledIconTestCase();
+ImageTestCase DownscaledTransparentICOWithANDMaskTestCase();
 
 } // namespace image
 } // namespace mozilla

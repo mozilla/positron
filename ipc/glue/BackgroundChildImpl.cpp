@@ -1,3 +1,5 @@
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -22,6 +24,10 @@
 #include "mozilla/dom/indexedDB/PBackgroundIndexedDBUtilsChild.h"
 #include "mozilla/dom/ipc/BlobChild.h"
 #include "mozilla/dom/quota/PQuotaChild.h"
+#ifdef MOZ_GAMEPAD
+#include "mozilla/dom/GamepadEventChannelChild.h"
+#include "mozilla/dom/GamepadTestChannelChild.h"
+#endif
 #include "mozilla/dom/MessagePortChild.h"
 #include "mozilla/dom/NuwaChild.h"
 #include "mozilla/ipc/PBackgroundTestChild.h"
@@ -274,8 +280,7 @@ BackgroundChildImpl::DeallocPUDPSocketChild(PUDPSocketChild* child)
 dom::PBroadcastChannelChild*
 BackgroundChildImpl::AllocPBroadcastChannelChild(const PrincipalInfo& aPrincipalInfo,
                                                  const nsCString& aOrigin,
-                                                 const nsString& aChannel,
-                                                 const bool& aPrivateBrowsing)
+                                                 const nsString& aChannel)
 {
   RefPtr<dom::BroadcastChannelChild> agent =
     new dom::BroadcastChannelChild(aOrigin);
@@ -479,6 +484,43 @@ BackgroundChildImpl::DeallocPFileSystemRequestChild(PFileSystemRequestChild* aAc
   // FileSystemTaskBase.cpp. We should decrease it after IPC.
   RefPtr<dom::FileSystemTaskChildBase> child =
     dont_AddRef(static_cast<dom::FileSystemTaskChildBase*>(aActor));
+  return true;
+}
+
+// Gamepad API Background IPC
+dom::PGamepadEventChannelChild*
+BackgroundChildImpl::AllocPGamepadEventChannelChild()
+{
+  MOZ_CRASH("PGamepadEventChannelChild actor should be manually constructed!");
+  return nullptr;
+}
+
+bool
+BackgroundChildImpl::DeallocPGamepadEventChannelChild(PGamepadEventChannelChild* aActor)
+{
+#ifdef MOZ_GAMEPAD
+  MOZ_ASSERT(aActor);
+  delete static_cast<dom::GamepadEventChannelChild*>(aActor);
+#endif
+  return true;
+}
+
+dom::PGamepadTestChannelChild*
+BackgroundChildImpl::AllocPGamepadTestChannelChild()
+{
+#ifdef MOZ_GAMEPAD
+  MOZ_CRASH("PGamepadTestChannelChild actor should be manually constructed!");
+#endif
+  return nullptr;
+}
+
+bool
+BackgroundChildImpl::DeallocPGamepadTestChannelChild(PGamepadTestChannelChild* aActor)
+{
+#ifdef MOZ_GAMEPAD
+  MOZ_ASSERT(aActor);
+  delete static_cast<dom::GamepadTestChannelChild*>(aActor);
+#endif
   return true;
 }
 

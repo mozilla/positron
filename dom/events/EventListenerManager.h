@@ -100,7 +100,7 @@ inline EventListenerFlags TrustedEventsAtCapture()
   return flags;
 }
 
-inline EventListenerFlags AllEventsAtBubbe()
+inline EventListenerFlags AllEventsAtBubble()
 {
   EventListenerFlags flags;
   flags.mAllowUntrustedEvents = true;
@@ -466,8 +466,6 @@ protected:
    * returns the passed-in EventMessage.
    */
   EventMessage GetLegacyEventMessage(EventMessage aEventMessage) const;
-
-  nsIDocShell* GetDocShellForTarget();
 
   void ProcessApzAwareEventListenerAdd();
 

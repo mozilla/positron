@@ -437,7 +437,7 @@ WebGLContext::ValidateUniformLocation(WebGLUniformLocation* loc, const char* fun
         return false;
     }
 
-    return loc->ValidateForProgram(mCurrentProgram, this, funcName);
+    return loc->ValidateForProgram(mCurrentProgram, funcName);
 }
 
 bool
@@ -459,7 +459,7 @@ WebGLContext::ValidateAttribArraySetter(const char* name, uint32_t setterElemSiz
 bool
 WebGLContext::ValidateUniformSetter(WebGLUniformLocation* loc,
                                     uint8_t setterElemSize, GLenum setterType,
-                                    const char* funcName, GLuint* out_rawLoc)
+                                    const char* funcName)
 {
     if (IsContextLost())
         return false;
@@ -467,10 +467,9 @@ WebGLContext::ValidateUniformSetter(WebGLUniformLocation* loc,
     if (!ValidateUniformLocation(loc, funcName))
         return false;
 
-    if (!loc->ValidateSizeAndType(setterElemSize, setterType, this, funcName))
+    if (!loc->ValidateSizeAndType(setterElemSize, setterType, funcName))
         return false;
 
-    *out_rawLoc = loc->mLoc;
     return true;
 }
 
@@ -478,10 +477,9 @@ bool
 WebGLContext::ValidateUniformArraySetter(WebGLUniformLocation* loc,
                                          uint8_t setterElemSize,
                                          GLenum setterType,
-                                         size_t setterArraySize,
+                                         uint32_t setterArraySize,
                                          const char* funcName,
-                                         GLuint* const out_rawLoc,
-                                         GLsizei* const out_numElementsToUpload)
+                                         uint32_t* const out_numElementsToUpload)
 {
     if (IsContextLost())
         return false;
@@ -489,14 +487,17 @@ WebGLContext::ValidateUniformArraySetter(WebGLUniformLocation* loc,
     if (!ValidateUniformLocation(loc, funcName))
         return false;
 
-    if (!loc->ValidateSizeAndType(setterElemSize, setterType, this, funcName))
+    if (!loc->ValidateSizeAndType(setterElemSize, setterType, funcName))
         return false;
 
-    if (!loc->ValidateArrayLength(setterElemSize, setterArraySize, this, funcName))
+    if (!loc->ValidateArrayLength(setterElemSize, setterArraySize, funcName))
         return false;
 
-    *out_rawLoc = loc->mLoc;
-    *out_numElementsToUpload = std::min((size_t)loc->mActiveInfo->mElemCount,
+    const auto& elemCount = loc->mInfo->mActiveInfo->mElemCount;
+    MOZ_ASSERT(elemCount > loc->mArrayIndex);
+    const uint32_t uniformElemCount = elemCount - loc->mArrayIndex;
+
+    *out_numElementsToUpload = std::min(uniformElemCount,
                                         setterArraySize / setterElemSize);
     return true;
 }
@@ -506,13 +507,12 @@ WebGLContext::ValidateUniformMatrixArraySetter(WebGLUniformLocation* loc,
                                                uint8_t setterCols,
                                                uint8_t setterRows,
                                                GLenum setterType,
-                                               size_t setterArraySize,
+                                               uint32_t setterArraySize,
                                                bool setterTranspose,
                                                const char* funcName,
-                                               GLuint* const out_rawLoc,
-                                               GLsizei* const out_numElementsToUpload)
+                                               uint32_t* const out_numElementsToUpload)
 {
-    uint8_t setterElemSize = setterCols * setterRows;
+    const uint8_t setterElemSize = setterCols * setterRows;
 
     if (IsContextLost())
         return false;
@@ -520,17 +520,20 @@ WebGLContext::ValidateUniformMatrixArraySetter(WebGLUniformLocation* loc,
     if (!ValidateUniformLocation(loc, funcName))
         return false;
 
-    if (!loc->ValidateSizeAndType(setterElemSize, setterType, this, funcName))
+    if (!loc->ValidateSizeAndType(setterElemSize, setterType, funcName))
         return false;
 
-    if (!loc->ValidateArrayLength(setterElemSize, setterArraySize, this, funcName))
+    if (!loc->ValidateArrayLength(setterElemSize, setterArraySize, funcName))
         return false;
 
     if (!ValidateUniformMatrixTranspose(setterTranspose, funcName))
         return false;
 
-    *out_rawLoc = loc->mLoc;
-    *out_numElementsToUpload = std::min((size_t)loc->mActiveInfo->mElemCount,
+    const auto& elemCount = loc->mInfo->mActiveInfo->mElemCount;
+    MOZ_ASSERT(elemCount > loc->mArrayIndex);
+    const uint32_t uniformElemCount = elemCount - loc->mArrayIndex;
+
+    *out_numElementsToUpload = std::min(uniformElemCount,
                                         setterArraySize / setterElemSize);
     return true;
 }
@@ -645,16 +648,17 @@ FloorPOT(int32_t x)
 }
 
 bool
-WebGLContext::InitAndValidateGL(nsACString* const out_failReason)
+WebGLContext::InitAndValidateGL(FailureReason* const out_failReason)
 {
-    MOZ_RELEASE_ASSERT(gl);
+    MOZ_RELEASE_ASSERT(gl, "GFX: GL not initialized");
 
     // Unconditionally create a new format usage authority. This is
     // important when restoring contexts and extensions need to add
     // formats back into the authority.
     mFormatUsage = CreateFormatUsage(gl);
     if (!mFormatUsage) {
-        out_failReason->AssignLiteral("Failed to create mFormatUsage.");
+        *out_failReason = { "FEATURE_FAILURE_WEBGL_FORMAT",
+                            "Failed to create mFormatUsage." };
         return false;
     }
 
@@ -663,7 +667,7 @@ WebGLContext::InitAndValidateGL(nsACString* const out_failReason)
         const nsPrintfCString reason("GL error 0x%x occurred during OpenGL context"
                                      " initialization, before WebGL initialization!",
                                      error);
-        out_failReason->Assign(reason);
+        *out_failReason = { "FEATURE_FAILURE_WEBGL_GLERR_1", reason };
         return false;
     }
 
@@ -754,7 +758,7 @@ WebGLContext::InitAndValidateGL(nsACString* const out_failReason)
     if (mGLMaxVertexAttribs < 8) {
         const nsPrintfCString reason("GL_MAX_VERTEX_ATTRIBS: %d is < 8!",
                                      mGLMaxVertexAttribs);
-        out_failReason->Assign(reason);
+        *out_failReason = { "FEATURE_FAILURE_WEBGL_V_ATRB", reason };
         return false;
     }
 
@@ -769,7 +773,7 @@ WebGLContext::InitAndValidateGL(nsACString* const out_failReason)
     if (mGLMaxTextureUnits < 8) {
         const nsPrintfCString reason("GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS: %d is < 8!",
                                      mGLMaxTextureUnits);
-        out_failReason->Assign(reason);
+        *out_failReason = { "FEATURE_FAILURE_WEBGL_T_UNIT", reason };
         return false;
     }
 
@@ -925,7 +929,8 @@ WebGLContext::InitAndValidateGL(nsACString* const out_failReason)
 
     // initialize shader translator
     if (!ShInitialize()) {
-        out_failReason->AssignLiteral("GLSL translator initialization failed!");
+        *out_failReason = { "FEATURE_FAILURE_WEBGL_GLSL",
+                            "GLSL translator initialization failed!" };
         return false;
     }
 
@@ -942,7 +947,7 @@ WebGLContext::InitAndValidateGL(nsACString* const out_failReason)
         const nsPrintfCString reason("GL error 0x%x occurred during WebGL context"
                                      " initialization!",
                                      error);
-        out_failReason->Assign(reason);
+        *out_failReason = { "FEATURE_FAILURE_WEBGL_GLERR_2", reason };
         return false;
     }
 

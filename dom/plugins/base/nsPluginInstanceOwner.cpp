@@ -322,21 +322,6 @@ nsPluginInstanceOwner::GetCurrentImageSize()
   return size;
 }
 
-bool
-nsPluginInstanceOwner::UpdateScrollState(bool aIsScrolling)
-{
-#if defined(XP_WIN)
-  if (!mInstance) {
-    return false;
-  }
-  mScrollState = aIsScrolling;
-  nsresult rv = mInstance->UpdateScrollState(aIsScrolling);
-  return NS_SUCCEEDED(rv);
-#else
-  return false;
-#endif
-}
-
 nsPluginInstanceOwner::nsPluginInstanceOwner()
   : mPluginWindow(nullptr)
 {
@@ -384,7 +369,6 @@ nsPluginInstanceOwner::nsPluginInstanceOwner()
   mGotCompositionData = false;
   mSentStartComposition = false;
   mPluginDidNotHandleIMEComposition = false;
-  mScrollState = false;
 #endif
 }
 
@@ -763,7 +747,7 @@ NS_IMETHODIMP nsPluginInstanceOwner::GetNetscapeWindow(void *value)
   }
 
   return NS_OK;
-#elif (defined(MOZ_WIDGET_GTK) || defined(MOZ_WIDGET_QT)) && defined(MOZ_X11)
+#elif defined(MOZ_WIDGET_GTK) && defined(MOZ_X11)
   // X11 window managers want the toplevel window for WM_TRANSIENT_FOR.
   nsIWidget* win = mPluginFrame->GetNearestWidget();
   if (!win)
@@ -886,16 +870,16 @@ nsPluginInstanceOwner::GetCompositionString(uint32_t aType,
       for (TextRange& range : *ranges) {
         uint8_t type = ATTR_INPUT;
         switch(range.mRangeType) {
-          case NS_TEXTRANGE_RAWINPUT:
+          case TextRangeType::eRawClause:
             type = ATTR_INPUT;
             break;
-          case NS_TEXTRANGE_SELECTEDRAWTEXT:
+          case TextRangeType::eSelectedRawClause:
             type = ATTR_TARGET_NOTCONVERTED;
             break;
-          case NS_TEXTRANGE_CONVERTEDTEXT:
+          case TextRangeType::eConvertedClause:
             type = ATTR_CONVERTED;
             break;
-          case NS_TEXTRANGE_SELECTEDCONVERTEDTEXT:
+          case TextRangeType::eSelectedClause:
             type = ATTR_TARGET_CONVERTED;
             break;
           default:
@@ -2616,8 +2600,6 @@ nsEventStatus nsPluginInstanceOwner::ProcessEvent(const WidgetGUIEvent& anEvent)
         }
 #ifdef MOZ_WIDGET_GTK
         Window root = GDK_ROOT_WINDOW();
-#elif defined(MOZ_WIDGET_QT)
-        Window root = RootWindowOfScreen(DefaultScreenOfDisplay(mozilla::DefaultXDisplay()));
 #else
         Window root = None; // Could XQueryTree, but this is not important.
 #endif
@@ -2906,14 +2888,12 @@ nsPluginInstanceOwner::Destroy()
   content->RemoveEventListener(NS_LITERAL_STRING("keydown"), this, true);
   content->RemoveEventListener(NS_LITERAL_STRING("keyup"), this, true);
   content->RemoveEventListener(NS_LITERAL_STRING("drop"), this, true);
-  content->RemoveEventListener(NS_LITERAL_STRING("dragdrop"), this, true);
   content->RemoveEventListener(NS_LITERAL_STRING("drag"), this, true);
   content->RemoveEventListener(NS_LITERAL_STRING("dragenter"), this, true);
   content->RemoveEventListener(NS_LITERAL_STRING("dragover"), this, true);
   content->RemoveEventListener(NS_LITERAL_STRING("dragleave"), this, true);
   content->RemoveEventListener(NS_LITERAL_STRING("dragexit"), this, true);
   content->RemoveEventListener(NS_LITERAL_STRING("dragstart"), this, true);
-  content->RemoveEventListener(NS_LITERAL_STRING("draggesture"), this, true);
   content->RemoveEventListener(NS_LITERAL_STRING("dragend"), this, true);
   content->RemoveSystemEventListener(NS_LITERAL_STRING("compositionstart"),
                                      this, true);
@@ -3306,14 +3286,12 @@ nsresult nsPluginInstanceOwner::Init(nsIContent* aContent)
   aContent->AddEventListener(NS_LITERAL_STRING("keydown"), this, true);
   aContent->AddEventListener(NS_LITERAL_STRING("keyup"), this, true);
   aContent->AddEventListener(NS_LITERAL_STRING("drop"), this, true);
-  aContent->AddEventListener(NS_LITERAL_STRING("dragdrop"), this, true);
   aContent->AddEventListener(NS_LITERAL_STRING("drag"), this, true);
   aContent->AddEventListener(NS_LITERAL_STRING("dragenter"), this, true);
   aContent->AddEventListener(NS_LITERAL_STRING("dragover"), this, true);
   aContent->AddEventListener(NS_LITERAL_STRING("dragleave"), this, true);
   aContent->AddEventListener(NS_LITERAL_STRING("dragexit"), this, true);
   aContent->AddEventListener(NS_LITERAL_STRING("dragstart"), this, true);
-  aContent->AddEventListener(NS_LITERAL_STRING("draggesture"), this, true);
   aContent->AddEventListener(NS_LITERAL_STRING("dragend"), this, true);
   aContent->AddSystemEventListener(NS_LITERAL_STRING("compositionstart"),
     this, true);

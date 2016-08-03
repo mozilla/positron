@@ -157,7 +157,7 @@ js::math_acos(JSContext* cx, unsigned argc, Value* vp)
     if (!ToNumber(cx, args[0], &x))
         return false;
 
-    MathCache* mathCache = cx->runtime()->getMathCache(cx);
+    MathCache* mathCache = cx->caches.getMathCache(cx);
     if (!mathCache)
         return false;
 
@@ -192,7 +192,7 @@ js::math_asin(JSContext* cx, unsigned argc, Value* vp)
     if (!ToNumber(cx, args[0], &x))
         return false;
 
-    MathCache* mathCache = cx->runtime()->getMathCache(cx);
+    MathCache* mathCache = cx->caches.getMathCache(cx);
     if (!mathCache)
         return false;
 
@@ -227,7 +227,7 @@ js::math_atan(JSContext* cx, unsigned argc, Value* vp)
     if (!ToNumber(cx, args[0], &x))
         return false;
 
-    MathCache* mathCache = cx->runtime()->getMathCache(cx);
+    MathCache* mathCache = cx->caches.getMathCache(cx);
     if (!mathCache)
         return false;
 
@@ -346,7 +346,7 @@ js::math_cos(JSContext* cx, unsigned argc, Value* vp)
     if (!ToNumber(cx, args[0], &x))
         return false;
 
-    MathCache* mathCache = cx->runtime()->getMathCache(cx);
+    MathCache* mathCache = cx->caches.getMathCache(cx);
     if (!mathCache)
         return false;
 
@@ -381,7 +381,7 @@ js::math_exp(JSContext* cx, unsigned argc, Value* vp)
     if (!ToNumber(cx, args[0], &x))
         return false;
 
-    MathCache* mathCache = cx->runtime()->getMathCache(cx);
+    MathCache* mathCache = cx->caches.getMathCache(cx);
     if (!mathCache)
         return false;
 
@@ -499,7 +499,7 @@ js::math_log_handle(JSContext* cx, HandleValue val, MutableHandleValue res)
     if (!ToNumber(cx, val, &in))
         return false;
 
-    MathCache* mathCache = cx->runtime()->getMathCache(cx);
+    MathCache* mathCache = cx->caches.getMathCache(cx);
     if (!mathCache)
         return false;
 
@@ -805,18 +805,18 @@ js::math_round(JSContext* cx, unsigned argc, Value* vp)
 double
 js::math_sin_impl(MathCache* cache, double x)
 {
-#ifdef _WIN64
-    // Workaround MSVC bug where sin(-0) is +0 instead of -0 on x64 on
-    // CPUs without FMA3 (pre-Haswell). See bug 1076670.
-    if (IsNegativeZero(x))
-        return -0.0;
-#endif
     return cache->lookup(math_sin_uncached, x, MathCache::Sin);
 }
 
 double
 js::math_sin_uncached(double x)
 {
+#ifdef _WIN64
+    // Workaround MSVC bug where sin(-0) is +0 instead of -0 on x64 on
+    // CPUs without FMA3 (pre-Haswell). See bug 1076670.
+    if (IsNegativeZero(x))
+        return -0.0;
+#endif
     return sin(x);
 }
 
@@ -827,7 +827,7 @@ js::math_sin_handle(JSContext* cx, HandleValue val, MutableHandleValue res)
     if (!ToNumber(cx, val, &in))
         return false;
 
-    MathCache* mathCache = cx->runtime()->getMathCache(cx);
+    MathCache* mathCache = cx->caches.getMathCache(cx);
     if (!mathCache)
         return false;
 
@@ -890,7 +890,7 @@ js::math_sqrt_handle(JSContext* cx, HandleValue number, MutableHandleValue resul
     if (!ToNumber(cx, number, &x))
         return false;
 
-    MathCache* mathCache = cx->runtime()->getMathCache(cx);
+    MathCache* mathCache = cx->caches.getMathCache(cx);
     if (!mathCache)
         return false;
 
@@ -938,7 +938,7 @@ js::math_tan(JSContext* cx, unsigned argc, Value* vp)
     if (!ToNumber(cx, args[0], &x))
         return false;
 
-    MathCache* mathCache = cx->runtime()->getMathCache(cx);
+    MathCache* mathCache = cx->caches.getMathCache(cx);
     if (!mathCache)
         return false;
 
@@ -962,7 +962,7 @@ static bool math_function(JSContext* cx, unsigned argc, Value* vp)
     if (!ToNumber(cx, args[0], &x))
         return false;
 
-    MathCache* mathCache = cx->runtime()->getMathCache(cx);
+    MathCache* mathCache = cx->caches.getMathCache(cx);
     if (!mathCache)
         return false;
     double z = F(mathCache, x);

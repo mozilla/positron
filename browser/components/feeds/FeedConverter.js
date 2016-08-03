@@ -255,8 +255,11 @@ FeedConverter.prototype = {
         let aboutFeedsURI = ios.newURI("about:feeds", null, null);
         chromeChannel = ios.newChannelFromURIWithLoadInfo(aboutFeedsURI, loadInfo);
         chromeChannel.originalURI = result.uri;
+
+        // carry the origin attributes from the channel that loaded the feed.
         chromeChannel.owner =
-          Services.scriptSecurityManager.createCodebasePrincipal(aboutFeedsURI, {});
+          Services.scriptSecurityManager.createCodebasePrincipal(aboutFeedsURI,
+                                                                 loadInfo.originAttributes);
       } else {
         chromeChannel = ios.newChannelFromURIWithLoadInfo(result.uri, loadInfo);
       }
@@ -488,7 +491,9 @@ GenericProtocolHandler.prototype = {
   },
 
   get protocolFlags() {
-    return this._http.protocolFlags;
+    let {URI_DANGEROUS_TO_LOAD, ALLOWS_PROXY_HTTP, ALLOWS_PROXY} =
+      Ci.nsIProtocolHandler;
+    return URI_DANGEROUS_TO_LOAD | ALLOWS_PROXY | ALLOWS_PROXY_HTTP;
   },
 
   get defaultPort() {
@@ -509,16 +514,13 @@ GenericProtocolHandler.prototype = {
       throw Cr.NS_ERROR_MALFORMED_URI;
 
     let prefix = spec.substr(scheme.length, 2) == "//" ? "http:" : "";
-    let inner = Cc["@mozilla.org/network/io-service;1"].
-                getService(Ci.nsIIOService).newURI(spec.replace(scheme, prefix),
-                                                   originalCharset, baseURI);
-    let netutil = Cc["@mozilla.org/network/util;1"].getService(Ci.nsINetUtil);
-    const URI_INHERITS_SECURITY_CONTEXT = Ci.nsIProtocolHandler
-                                            .URI_INHERITS_SECURITY_CONTEXT;
-    if (netutil.URIChainHasFlags(inner, URI_INHERITS_SECURITY_CONTEXT))
+    let inner = Services.io.newURI(spec.replace(scheme, prefix),
+                                   originalCharset, baseURI);
+
+    if (!["http", "https"].includes(inner.scheme))
       throw Cr.NS_ERROR_MALFORMED_URI;
 
-    let uri = netutil.newSimpleNestedURI(inner);
+    let uri = Services.io.QueryInterface(Ci.nsINetUtil).newSimpleNestedURI(inner);
     uri.spec = inner.spec.replace(prefix, scheme);
     return uri;
   },

@@ -18,12 +18,9 @@
 
 #include "asmjs/WasmBinaryToText.h"
 
-#include "mozilla/CheckedInt.h"
-
 #include "jsnum.h"
 #include "jsprf.h"
 
-#include "asmjs/Wasm.h"
 #include "asmjs/WasmAST.h"
 #include "asmjs/WasmBinaryToAST.h"
 #include "asmjs/WasmTypes.h"
@@ -33,7 +30,6 @@
 using namespace js;
 using namespace js::wasm;
 
-using mozilla::CheckedInt;
 using mozilla::IsInfinite;
 using mozilla::IsNaN;
 using mozilla::IsNegativeZero;
@@ -44,11 +40,6 @@ struct WasmRenderContext
     AstModule* module;
     StringBuffer& buffer;
     uint32_t indent;
-
-    DeclaredSigVector signatures;
-    Uint32Vector funcSigs;
-    Uint32Vector funcLocals;
-    Uint32Vector importSigs;
 
     uint32_t currentFuncIndex;
 
@@ -298,6 +289,10 @@ RenderCallIndirect(WasmRenderContext& c, AstCallIndirect& call)
         return false;
     if (!RenderCallArgs(c, call.args()))
         return false;
+
+    if (!c.buffer.append(")"))
+        return false;
+
     return true;
 }
 
@@ -385,9 +380,25 @@ RenderBlock(WasmRenderContext& c, AstBlock& block)
     if (block.expr() == Expr::Block) {
         if (!c.buffer.append("(block "))
             return false;
+        if (!RenderName(c, block.breakName()))
+            return false;
     } else if (block.expr() == Expr::Loop) {
         if (!c.buffer.append("(loop "))
             return false;
+        if (block.breakName().empty() && !block.continueName().empty()) {
+            // Giving auto label if continue label is present.
+            if (!c.buffer.append("$exit$"))
+                return false;
+        } else {
+            if (!RenderName(c, block.breakName()))
+                return false;
+        }
+        if (!block.continueName().empty()) {
+          if (!c.buffer.append(" "))
+              return false;
+          if (!RenderName(c, block.continueName()))
+              return false;
+        }
     } else
         return false;
 
@@ -655,6 +666,9 @@ RenderIf(WasmRenderContext& c, AstIf& if_)
     if (!c.buffer.append(" (then "))
         return false;
 
+    if (!RenderName(c, if_.thenName()))
+        return false;
+
     c.indent++;
     if (!RenderExprList(c, if_.thenExprs()))
         return false;
@@ -662,6 +676,9 @@ RenderIf(WasmRenderContext& c, AstIf& if_)
 
     if (if_.hasElse()) {
         if (!c.buffer.append(") (else "))
+            return false;
+
+        if (!RenderName(c, if_.elseName()))
             return false;
 
         c.indent++;
@@ -1045,10 +1062,10 @@ RenderTypeSection(WasmRenderContext& c, const AstModule::SigVector& sigs)
         if (!c.buffer.append("(type"))
             return false;
         if (!sig->name().empty()) {
-          if (!c.buffer.append(" "))
-              return false;
-          if (!RenderName(c, sig->name()))
-              return false;
+            if (!c.buffer.append(" "))
+                return false;
+            if (!RenderName(c, sig->name()))
+                return false;
         }
         if (!c.buffer.append(" (func"))
             return false;
@@ -1061,19 +1078,23 @@ RenderTypeSection(WasmRenderContext& c, const AstModule::SigVector& sigs)
 }
 
 static bool
-RenderTableSection(WasmRenderContext& c, AstTable* maybeTable, const AstModule::FuncVector& funcs)
+RenderTableSection(WasmRenderContext& c, const AstModule& module)
 {
-    if (!maybeTable)
+    if (module.elemSegments().empty())
         return true;
 
-    uint32_t numTableElems = maybeTable->elems().length();
+    const AstElemSegment& segment = *module.elemSegments()[0];
 
-    if (!c.buffer.append("(table "))
+    if (!RenderIndent(c))
         return false;
 
-    for (uint32_t i = 0; i < numTableElems; i++) {
-        AstRef& elem = maybeTable->elems()[i];
-        AstFunc* func = funcs[elem.index()];
+    if (!c.buffer.append("(table"))
+        return false;
+
+    for (const AstRef& elem : segment.elems()) {
+        if (!c.buffer.append(" "))
+            return false;
+        AstFunc* func = module.funcs()[elem.index()];
         if (func->name().empty()) {
             if (!RenderInt32(c, elem.index()))
                 return false;
@@ -1083,7 +1104,7 @@ RenderTableSection(WasmRenderContext& c, AstTable* maybeTable, const AstModule::
         }
     }
 
-    if (!c.buffer.append(")"))
+    if (!c.buffer.append(")\n"))
         return false;
 
     return true;
@@ -1092,7 +1113,7 @@ RenderTableSection(WasmRenderContext& c, AstTable* maybeTable, const AstModule::
 static bool
 RenderImport(WasmRenderContext& c, AstImport& import, const AstModule::SigVector& sigs)
 {
-    const AstSig* sig = sigs[import.sig().index()];
+    const AstSig* sig = sigs[import.funcSig().index()];
     if (!RenderIndent(c))
         return false;
     if (!c.buffer.append("(import "))
@@ -1109,8 +1130,8 @@ RenderImport(WasmRenderContext& c, AstImport& import, const AstModule::SigVector
     if (!c.buffer.append("\" \""))
         return false;
 
-    const AstName& funcName = import.func();
-    if (!RenderEscapedString(c, funcName))
+    const AstName& fieldName = import.field();
+    if (!RenderEscapedString(c, fieldName))
         return false;
 
     if (!c.buffer.append("\""))
@@ -1149,7 +1170,7 @@ RenderExport(WasmRenderContext& c, AstExport& export_, const AstModule::FuncVect
         return false;
     if (!c.buffer.append("\" "))
         return false;
-    if (export_.kind() == AstExportKind::Memory) {
+    if (export_.kind() == DefinitionKind::Memory) {
         if (!c.buffer.append("memory"))
           return false;
     } else {
@@ -1262,18 +1283,18 @@ RenderCodeSection(WasmRenderContext& c, const AstModule::FuncVector& funcs, cons
 
 
 static bool
-RenderDataSection(WasmRenderContext& c, AstMemory* maybeMemory)
+RenderDataSection(WasmRenderContext& c, const AstModule& module)
 {
-    if (!maybeMemory)
+    if (!module.hasMemory())
         return true;
 
     if (!RenderIndent(c))
         return false;
     if (!c.buffer.append("(memory "))
         return false;
-    if (!RenderInt32(c, maybeMemory->initialSize()))
+    if (!RenderInt32(c, module.memory().initial()))
        return false;
-    Maybe<uint32_t> memMax = maybeMemory->maxSize();
+    Maybe<uint32_t> memMax = module.memory().maximum();
     if (memMax) {
         if (!c.buffer.append(" "))
             return false;
@@ -1283,7 +1304,7 @@ RenderDataSection(WasmRenderContext& c, AstMemory* maybeMemory)
 
     c.indent++;
 
-    uint32_t numSegments = maybeMemory->segments().length();
+    uint32_t numSegments = module.dataSegments().length();
     if (!numSegments) {
       if (!c.buffer.append(")\n"))
           return false;
@@ -1293,7 +1314,7 @@ RenderDataSection(WasmRenderContext& c, AstMemory* maybeMemory)
         return false;
 
     for (uint32_t i = 0; i < numSegments; i++) {
-        const AstSegment* segment = maybeMemory->segments()[i];
+        const AstDataSegment* segment = module.dataSegments()[i];
 
         if (!RenderIndent(c))
             return false;
@@ -1331,7 +1352,7 @@ RenderModule(WasmRenderContext& c, AstModule& module)
     if (!RenderImportSection(c, module.imports(), module.sigs()))
         return false;
 
-    if (!RenderTableSection(c, module.maybeTable(), module.funcs()))
+    if (!RenderTableSection(c, module))
         return false;
 
     if (!RenderExportSection(c, module.exports(), module.funcs()))
@@ -1340,7 +1361,7 @@ RenderModule(WasmRenderContext& c, AstModule& module)
     if (!RenderCodeSection(c, module.funcs(), module.sigs()))
         return false;
 
-    if (!RenderDataSection(c, module.maybeMemory()))
+    if (!RenderDataSection(c, module))
         return false;
 
     c.indent--;

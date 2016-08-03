@@ -91,6 +91,7 @@ final class UnusedResourcesUtil {
             R.xml.preferences_home,
             R.xml.preferences_privacy,
             R.xml.preferences_privacy_clear_tablet,
+            R.xml.preferences_default_browser_tablet
     };
 
     // We are migrating to Gradle 2.10 and the Android Gradle plugin 2.0. The new plugin does find
@@ -102,7 +103,6 @@ final class UnusedResourcesUtil {
 
             R.drawable.remote_tabs_setup_button_background,
 
-            R.style.ActionBarThemeGeckoPreferences,
             R.style.TabsPanelSectionBase,
             R.style.TabsPanelSection,
             R.style.TabsPanelItemBase,

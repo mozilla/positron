@@ -30,8 +30,7 @@
 #include "MediaTelemetryConstants.h"
 #include "GMPUtils.h" // For SplitAt. TODO: Move SplitAt to a central place.
 
-extern mozilla::LogModule* GetPDMLog();
-#define LOG(...) MOZ_LOG(GetPDMLog(), mozilla::LogLevel::Debug, (__VA_ARGS__))
+#define LOG(...) MOZ_LOG(sPDMLog, mozilla::LogLevel::Debug, (__VA_ARGS__))
 
 using mozilla::layers::Image;
 using mozilla::layers::IMFYCbCrImage;
@@ -154,46 +153,47 @@ WMFVideoMFTManager::GetMediaSubtypeGUID()
   };
 }
 
-struct D3D11BlacklistingCache
+struct D3DDLLBlacklistingCache
 {
-  // D3D11-blacklist pref last seen.
+  // Blacklist pref value last seen.
   nsCString mBlacklistPref;
-  // Non-empty if a D3D11-blacklisted DLL was found.
+  // Non-empty if a blacklisted DLL was found.
   nsCString mBlacklistedDLL;
 };
-StaticAutoPtr<D3D11BlacklistingCache> sD3D11BlacklistingCache;
+StaticAutoPtr<D3DDLLBlacklistingCache> sD3D11BlacklistingCache;
+StaticAutoPtr<D3DDLLBlacklistingCache> sD3D9BlacklistingCache;
 
 // If a blacklisted DLL is found, return its information, otherwise "".
 static const nsACString&
-FindD3D11BlacklistedDLL()
+FindDXVABlacklistedDLL(StaticAutoPtr<D3DDLLBlacklistingCache>& aDLLBlacklistingCache,
+                       const char* aDLLBlacklistPrefName)
 {
   NS_ASSERTION(NS_IsMainThread(), "Must be on main thread.");
 
-  if (!sD3D11BlacklistingCache) {
+  if (!aDLLBlacklistingCache) {
     // First time here, create persistent data that will be reused in all
     // D3D11-blacklisting checks.
-    sD3D11BlacklistingCache = new D3D11BlacklistingCache();
-    ClearOnShutdown(&sD3D11BlacklistingCache);
+    aDLLBlacklistingCache = new D3DDLLBlacklistingCache();
+    ClearOnShutdown(&aDLLBlacklistingCache);
   }
 
-  nsAdoptingCString blacklist =
-    Preferences::GetCString("media.wmf.disable-d3d11-for-dlls");
+  nsAdoptingCString blacklist = Preferences::GetCString(aDLLBlacklistPrefName);
   if (blacklist.IsEmpty()) {
     // Empty blacklist -> No blacklisting.
-    sD3D11BlacklistingCache->mBlacklistPref.SetLength(0);
-    sD3D11BlacklistingCache->mBlacklistedDLL.SetLength(0);
-    return sD3D11BlacklistingCache->mBlacklistedDLL;
+    aDLLBlacklistingCache->mBlacklistPref.SetLength(0);
+    aDLLBlacklistingCache->mBlacklistedDLL.SetLength(0);
+    return aDLLBlacklistingCache->mBlacklistedDLL;
   }
 
   // Detect changes in pref.
-  if (sD3D11BlacklistingCache->mBlacklistPref.Equals(blacklist)) {
+  if (aDLLBlacklistingCache->mBlacklistPref.Equals(blacklist)) {
     // Same blacklist -> Return same result (i.e., don't check DLLs again).
-    return sD3D11BlacklistingCache->mBlacklistedDLL;
+    return aDLLBlacklistingCache->mBlacklistedDLL;
   }
   // Adopt new pref now, so we don't work on it again.
-  sD3D11BlacklistingCache->mBlacklistPref = blacklist;
+  aDLLBlacklistingCache->mBlacklistPref = blacklist;
 
-  // media.wmf.disable-d3d11-for-dlls format: (whitespace is trimmed)
+  // media.wmf.disable-d3d*-for-dlls format: (whitespace is trimmed)
   // "dll1.dll: 1.2.3.4[, more versions...][; more dlls...]"
   nsTArray<nsCString> dlls;
   SplitAt(";", blacklist, dlls);
@@ -201,7 +201,8 @@ FindD3D11BlacklistedDLL()
     nsTArray<nsCString> nameAndVersions;
     SplitAt(":", dll, nameAndVersions);
     if (nameAndVersions.Length() != 2) {
-      NS_WARNING("Skipping incorrect 'media.wmf.disable-d3d11-for-dlls' dll:versions format");
+      NS_WARNING(nsPrintfCString("Skipping incorrect '%s' dll:versions format",
+                                 aDLLBlacklistPrefName).get());
       continue;
     }
 
@@ -236,7 +237,8 @@ FindD3D11BlacklistedDLL()
       nsTArray<nsCString> numberStrings;
       SplitAt(".", version, numberStrings);
       if (numberStrings.Length() != 4) {
-        NS_WARNING("Skipping incorrect 'media.wmf.disable-d3d11-for-dlls' a.b.c.d version format");
+        NS_WARNING(nsPrintfCString("Skipping incorrect '%s' a.b.c.d version format",
+                                   aDLLBlacklistPrefName).get());
         continue;
       }
       DWORD numbers[4];
@@ -254,25 +256,38 @@ FindD3D11BlacklistedDLL()
       }
 
       if (NS_FAILED(errorCode)) {
-        NS_WARNING("Skipping incorrect 'media.wmf.disable-d3d11-for-dlls' a.b.c.d version format");
+        NS_WARNING(nsPrintfCString("Skipping incorrect '%s' a.b.c.d version format",
+                                   aDLLBlacklistPrefName).get());
         continue;
       }
 
       if (vInfo->dwFileVersionMS == ((numbers[0] << 16) | numbers[1])
           && vInfo->dwFileVersionLS == ((numbers[2] << 16) | numbers[3])) {
         // Blacklisted! Record bad DLL.
-        sD3D11BlacklistingCache->mBlacklistedDLL.SetLength(0);
-        sD3D11BlacklistingCache->mBlacklistedDLL.AppendPrintf(
+        aDLLBlacklistingCache->mBlacklistedDLL.SetLength(0);
+        aDLLBlacklistingCache->mBlacklistedDLL.AppendPrintf(
           "%s (%lu.%lu.%lu.%lu)",
           nameAndVersions[0].get(), numbers[0], numbers[1], numbers[2], numbers[3]);
-        return sD3D11BlacklistingCache->mBlacklistedDLL;
+        return aDLLBlacklistingCache->mBlacklistedDLL;
       }
     }
   }
 
   // No blacklisted DLL.
-  sD3D11BlacklistingCache->mBlacklistedDLL.SetLength(0);
-  return sD3D11BlacklistingCache->mBlacklistedDLL;
+  aDLLBlacklistingCache->mBlacklistedDLL.SetLength(0);
+  return aDLLBlacklistingCache->mBlacklistedDLL;
+}
+
+static const nsACString&
+FindD3D11BlacklistedDLL() {
+  return FindDXVABlacklistedDLL(sD3D11BlacklistingCache,
+                                "media.wmf.disable-d3d11-for-dlls");
+}
+
+static const nsACString&
+FindD3D9BlacklistedDLL() {
+  return FindDXVABlacklistedDLL(sD3D9BlacklistingCache,
+                                "media.wmf.disable-d3d9-for-dlls");
 }
 
 class CreateDXVAManagerEvent : public Runnable {
@@ -303,9 +318,16 @@ public:
       failureReason = &secondFailureReason;
       mFailureReason.Append(NS_LITERAL_CSTRING("; "));
     }
-    mDXVA2Manager = DXVA2Manager::CreateD3D9DXVA(*failureReason);
-    // Make sure we include the messages from both attempts (if applicable).
-    mFailureReason.Append(secondFailureReason);
+
+    const nsACString& blacklistedDLL = FindD3D9BlacklistedDLL();
+    if (!blacklistedDLL.IsEmpty()) {
+      mFailureReason.AppendPrintf("D3D9 blacklisted with DLL %s",
+                                  blacklistedDLL);
+    } else {
+      mDXVA2Manager = DXVA2Manager::CreateD3D9DXVA(*failureReason);
+      // Make sure we include the messages from both attempts (if applicable).
+      mFailureReason.Append(secondFailureReason);
+    }
     return NS_OK;
   }
   nsAutoPtr<DXVA2Manager> mDXVA2Manager;
@@ -648,11 +670,31 @@ WMFVideoMFTManager::CreateBasicVideoFrame(IMFSample* aSample,
   NS_ENSURE_TRUE(pts.IsValid(), E_FAIL);
   media::TimeUnit duration = GetSampleDuration(aSample);
   NS_ENSURE_TRUE(duration.IsValid(), E_FAIL);
+  nsIntRect pictureRegion = mVideoInfo.ScaledImageRect(videoWidth, videoHeight);
+
+  if (mLayersBackend != LayersBackend::LAYERS_D3D9 &&
+      mLayersBackend != LayersBackend::LAYERS_D3D11) {
+    RefPtr<VideoData> v = VideoData::Create(mVideoInfo,
+                                            mImageContainer,
+                                            aStreamOffset,
+                                            pts.ToMicroseconds(),
+                                            duration.ToMicroseconds(),
+                                            b,
+                                            false,
+                                            -1,
+                                            pictureRegion);
+    if (twoDBuffer) {
+      twoDBuffer->Unlock2D();
+    } else {
+      buffer->Unlock();
+    }
+    v.forget(aOutVideoData);
+    return S_OK;
+  }
 
   RefPtr<layers::PlanarYCbCrImage> image =
     new IMFYCbCrImage(buffer, twoDBuffer);
 
-  nsIntRect pictureRegion = mVideoInfo.ScaledImageRect(videoWidth, videoHeight);
   VideoData::SetVideoDataToImage(image,
                                  mVideoInfo,
                                  b,
@@ -767,6 +809,21 @@ WMFVideoMFTManager::Output(int64_t aStreamOffset,
         }
         continue;
       }
+      if (mSeekTargetThreshold.isSome()) {
+        media::TimeUnit pts = GetSampleTime(sample);
+		media::TimeUnit duration = GetSampleDuration(sample);
+        if (!pts.IsValid() || !duration.IsValid()) {
+          return E_FAIL;
+        }
+        if ((pts + duration) < mSeekTargetThreshold.ref()) {
+          LOG("Dropping video frame which pts is smaller than seek target.");
+          // It is necessary to clear the pointer to release the previous output
+          // buffer.
+          sample = nullptr;
+          continue;
+        }
+        mSeekTargetThreshold.reset();
+      }
       break;
     }
     // Else unexpected error, assert, and bail.
@@ -806,17 +863,6 @@ WMFVideoMFTManager::IsHardwareAccelerated(nsACString& aFailureReason) const
 {
   aFailureReason = mDXVAFailureReason;
   return mDecoder && mUseHwAccel;
-}
-
-const char*
-WMFVideoMFTManager::GetDescriptionName() const
-{
-  if (mDecoder && mUseHwAccel && mDXVA2Manager) {
-    return (mDXVA2Manager->IsD3D11()) ?
-      "D3D11 Hardware Decoder" : "D3D9 Hardware Decoder";
-  } else {
-    return "wmf software video decoder";
-  }
 }
 
 void

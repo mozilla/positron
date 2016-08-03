@@ -143,11 +143,6 @@ ABIArgGenerator::next(MIRType type)
     return softNext(type);
 }
 
-const Register ABIArgGenerator::NonArgReturnReg0 = r4;
-const Register ABIArgGenerator::NonArgReturnReg1 = r5;
-const Register ABIArgGenerator::NonReturn_VolatileReg0 = r2;
-const Register ABIArgGenerator::NonReturn_VolatileReg1 = r3;
-
 // Encode a standard register when it is being used as src1, the dest, and an
 // extra register. These should never be called with an InvalidReg.
 uint32_t
@@ -1768,7 +1763,7 @@ Assembler::as_tst(Register src1, Operand2 op2, Condition c)
     return as_alu(InvalidReg, src1, op2, OpTst, SetCC, c);
 }
 
-static MOZ_CONSTEXPR_VAR Register NoAddend = { Registers::pc };
+static constexpr Register NoAddend = { Registers::pc };
 
 static const int SignExtend = 0x06000070;
 
@@ -1916,6 +1911,7 @@ Assembler::as_udiv(Register rd, Register rn, Register rm, Condition c)
 BufferOffset
 Assembler::as_clz(Register dest, Register src, Condition c)
 {
+    MOZ_ASSERT(src != pc && dest != pc);
     return writeInst(RD(dest) | src.code() | c | 0x016f0f10);
 }
 
@@ -2063,7 +2059,7 @@ Assembler::as_extdtr(LoadStore ls, int size, bool IsSigned, Index mode,
         extra_bits1 = 0;
         break;
       default:
-        MOZ_CRASH("SAY WHAT?");
+        MOZ_CRASH("unexpected size in as_extdtr");
     }
     return writeInst(extra_bits2 << 5 | extra_bits1 << 20 | 0x90 |
                      addr.encode() | RT(rt) | mode | c);
@@ -3311,20 +3307,19 @@ Assembler::BailoutTableStart(uint8_t* code)
     return (uint8_t*) inst;
 }
 
-void Assembler::UpdateBoundsCheck(uint32_t heapSize, Instruction* inst)
+void
+Assembler::UpdateBoundsCheck(uint8_t* patchAt, uint32_t heapLength)
 {
+    Instruction* inst = (Instruction*) patchAt;
     MOZ_ASSERT(inst->is<InstCMP>());
     InstCMP* cmp = inst->as<InstCMP>();
 
     Register index;
     cmp->extractOp1(&index);
 
-#ifdef DEBUG
-    Operand2 op = cmp->extractOp2();
-    MOZ_ASSERT(op.isImm8());
-#endif
+    MOZ_ASSERT(cmp->extractOp2().isImm8());
 
-    Imm8 imm8 = Imm8(heapSize);
+    Imm8 imm8 = Imm8(heapLength);
     MOZ_ASSERT(!imm8.invalid);
 
     *inst = InstALU(InvalidReg, index, imm8, OpCmp, SetCC, Always);

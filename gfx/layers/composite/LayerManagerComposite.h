@@ -309,6 +309,9 @@ public:
   void UnusedApzTransformWarning() {
     mUnusedApzTransformWarning = true;
   }
+  void DisabledApzWarning() {
+    mDisabledApzWarning = true;
+  }
 
   bool LastFrameMissedHWC() { return mLastFrameMissedHWC; }
 
@@ -336,10 +339,6 @@ public:
   void SetWindowOverlayChanged() { mWindowOverlayChanged = true; }
 
   void ForcePresent() { mCompositor->ForcePresent(); }
-
-  void HoldTextureUntilNextComposite(TextureHost* aTextureHost) {
-    mCurrentHeldTextureHosts.AppendElement(aTextureHost);
-  }
 
 private:
   /** Region we're clipping our current drawing to. */
@@ -396,13 +395,11 @@ private:
   float mWarningLevel;
   mozilla::TimeStamp mWarnTime;
   bool mUnusedApzTransformWarning;
+  bool mDisabledApzWarning;
   RefPtr<Compositor> mCompositor;
   UniquePtr<LayerProperties> mClonedLayerTreeProperties;
 
   nsTArray<ImageCompositeNotification> mImageCompositeNotifications;
-
-  nsTArray<RefPtr<TextureHost>> mCurrentHeldTextureHosts;
-  nsTArray<RefPtr<TextureHost>> mPreviousHeldTextureHosts;
 
   /**
    * Context target, nullptr when drawing directly to our swap chain.
@@ -562,6 +559,12 @@ public:
    * a subset of the shadow visible region.
    */
   virtual nsIntRegion GetFullyRenderedRegion();
+
+  /**
+   * Return true if a checkerboarding background color needs to be drawn
+   * for this layer.
+   */
+  bool NeedToDrawCheckerboarding(gfx::Color* aOutCheckerboardingColor = nullptr);
 
 protected:
   gfx::Matrix4x4 mShadowTransform;

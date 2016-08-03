@@ -39,12 +39,12 @@ function* testImageDimension(ruleView) {
 
   info("Showing the tooltip");
   let onShown = tooltip.once("shown");
-  tooltip.show();
+  tooltip.show(uriSpan);
   yield onShown;
 
   // Let's not test for a specific size, but instead let's make sure it's at
   // least as big as the image
-  let imageRect = panel.querySelector("image").getBoundingClientRect();
+  let imageRect = panel.querySelector("img").getBoundingClientRect();
   let panelRect = panel.getBoundingClientRect();
 
   ok(panelRect.width >= imageRect.width,
@@ -70,12 +70,13 @@ function* testPickerDimension(ruleView) {
 
   // The colorpicker spectrum's iframe has a fixed width height, so let's
   // make sure the tooltip is at least as big as that
-  let w = cPicker.tooltip.panel.querySelector("iframe").width;
-  let h = cPicker.tooltip.panel.querySelector("iframe").height;
-  let panelRect = cPicker.tooltip.panel.getBoundingClientRect();
+  let spectrumRect = cPicker.spectrum.element.getBoundingClientRect();
+  let panelRect = cPicker.tooltip.container.getBoundingClientRect();
 
-  ok(panelRect.width >= w, "The panel is wide enough to show the picker");
-  ok(panelRect.height >= h, "The panel is high enough to show the picker");
+  ok(panelRect.width >= spectrumRect.width,
+    "The panel is wide enough to show the picker");
+  ok(panelRect.height >= spectrumRect.height,
+    "The panel is high enough to show the picker");
 
   let onHidden = cPicker.tooltip.once("hidden");
   let onRuleViewChanged = ruleView.once("ruleview-changed");

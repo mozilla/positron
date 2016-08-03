@@ -134,13 +134,29 @@ PeerConnectionTest.prototype.closePC = function() {
       return Promise.resolve();
     }
 
-    return new Promise(resolve => {
-      pc.onsignalingstatechange = e => {
-        is(e.target.signalingState, "closed", "signalingState is closed");
-        resolve();
-      };
-      pc.close();
-    });
+    var promise = Promise.all([
+      new Promise(resolve => {
+        pc.onsignalingstatechange = e => {
+          is(e.target.signalingState, "closed", "signalingState is closed");
+          resolve();
+        };
+      }),
+      Promise.all(pc._pc.getReceivers()
+        .filter(receiver => receiver.track.readyState == "live")
+        .map(receiver => {
+          info("Waiting for track " + receiver.track.id + " (" +
+               receiver.track.kind + ") to end.");
+          return haveEvent(receiver.track, "ended", wait(50000))
+            .then(event => {
+              is(event.target, receiver.track, "Event target should be the correct track");
+              info("ended fired for track " + receiver.track.id);
+            }, e => e ? Promise.reject(e)
+                      : ok(false, "ended never fired for track " +
+                                    receiver.track.id));
+        }))
+    ]);
+    pc.close();
+    return promise;
   };
 
   return timerGuard(Promise.all([
@@ -450,19 +466,22 @@ PeerConnectionTest.prototype.run = function() {
   /* We have to modify the chain here to allow tests which modify the default
    * test chain instantiating a PeerConnectionTest() */
   this.updateChainSteps();
+  var finished = () => {
+    if (window.SimpleTest) {
+      networkTestFinished();
+    } else {
+      finish();
+    }
+  };
   return this.chain.execute()
     .then(() => this.close())
-    .then(() => {
-      if (window.SimpleTest) {
-        networkTestFinished();
-      } else {
-        finish();
-      }
-    })
     .catch(e =>
-           ok(false, 'Error in test execution: ' + e +
-              ((typeof e.stack === 'string') ?
-               (' ' + e.stack.split('\n').join(' ... ')) : '')));
+      ok(false, 'Error in test execution: ' + e +
+         ((typeof e.stack === 'string') ?
+          (' ' + e.stack.split('\n').join(' ... ')) : '')))
+    .then(() => finished())
+    .catch(e =>
+      ok(false, "Error in finished()"));
 };
 
 /**
@@ -878,7 +897,10 @@ PeerConnectionWrapper.prototype = {
       streamId: stream.id,
     };
 
-    this.ensureMediaElement(track, stream, "local");
+    // This will create one media element per track, which might not be how
+    // we set up things with the RTCPeerConnection. It's the only way
+    // we can ensure all sent tracks are flowing however.
+    this.ensureMediaElement(track, new MediaStream([track]), "local");
 
     return this.observedNegotiationNeeded;
   },
@@ -1131,9 +1153,7 @@ PeerConnectionWrapper.prototype = {
   },
 
   isTrackOnPC: function(track) {
-    return this._pc.getRemoteStreams().some(stream => {
-      return stream.getTracks().some(pcTrack => pcTrack.id == track.id);
-    });
+    return this._pc.getRemoteStreams().some(s => !!s.getTrackById(track.id));
   },
 
   allExpectedTracksAreObserved: function(expected, observed) {
@@ -1478,7 +1498,7 @@ PeerConnectionWrapper.prototype = {
     // As input we use the stream of |from|'s first available audio sender.
     var inputSenderTracks = from._pc.getSenders().map(sn => sn.track);
     var inputAudioStream = from._pc.getLocalStreams()
-      .find(s => s.getAudioTracks().some(t => inputSenderTracks.some(t2 => t == t2)));
+      .find(s => inputSenderTracks.some(t => t.kind == "audio" && s.getTrackById(t.id)));
     var inputAnalyser = new AudioStreamAnalyser(audiocontext, inputAudioStream);
 
     // It would have been nice to have a working getReceivers() here, but until

@@ -101,6 +101,33 @@ function errorWithResult(message, result = Cr.NS_ERROR_FAILURE) {
 }
 
 /**
+ * Copied from ForgetAboutSite.jsm.
+ *
+ * Returns true if the string passed in is part of the root domain of the
+ * current string.  For example, if this is "www.mozilla.org", and we pass in
+ * "mozilla.org", this will return true.  It would return false the other way
+ * around.
+ */
+function hasRootDomain(str, aDomain)
+{
+  let index = str.indexOf(aDomain);
+  // If aDomain is not found, we know we do not have it as a root domain.
+  if (index == -1)
+    return false;
+
+  // If the strings are the same, we obviously have a match.
+  if (str == aDomain)
+    return true;
+
+  // Otherwise, we have aDomain as our root domain iff the index of aDomain is
+  // aDomain.length subtracted from our length and (since we do not have an
+  // exact match) the character before the index is a dot or slash.
+  let prevChar = str[index - 1];
+  return (index == (str.length - aDomain.length)) &&
+         (prevChar == "." || prevChar == "/");
+}
+
+/**
  * The implementation of the push system. It uses WebSockets
  * (PushServiceWebSocket) to communicate with the server and PushDB (IndexedDB)
  * for persistence.
@@ -330,14 +357,8 @@ this.PushService = {
     }
 
     let pattern = JSON.parse(data);
-    return this._db.clearIf(record => {
-      if (!record.matchesOriginAttributes(pattern)) {
-        return false;
-      }
-      this._backgroundUnregister(record,
-                                 Ci.nsIPushErrorReporter.UNSUBSCRIBE_MANUAL);
-      return true;
-    });
+    return this._dropRegistrationsIf(record =>
+      record.matchesOriginAttributes(pattern));
   },
 
   /**
@@ -657,15 +678,12 @@ this.PushService = {
    * once the permission is reinstated.
    */
   dropUnexpiredRegistrations: function() {
-    let subscriptionChanges = [];
     return this._db.clearIf(record => {
       if (record.isExpired()) {
         return false;
       }
-      subscriptionChanges.push(record);
+      this._notifySubscriptionChangeObservers(record);
       return true;
-    }).then(() => {
-      this.notifySubscriptionChanges(subscriptionChanges);
     });
   },
 
@@ -715,12 +733,6 @@ this.PushService = {
         this._notifySubscriptionChangeObservers(record);
         return record;
       });
-  },
-
-  notifySubscriptionChanges: function(records) {
-    records.forEach(record => {
-      this._notifySubscriptionChangeObservers(record);
-    });
   },
 
   ensureCrypto: function(record) {
@@ -788,16 +800,18 @@ this.PushService = {
       if (!record) {
         throw new Error("Ignoring update for key ID " + keyID);
       }
-      // Update quota after the delay, at which point
-      // we check for visible notifications.
-      let timeoutID = setTimeout(_ =>
-        {
-          this._updateQuota(keyID);
-          if (!this._updateQuotaTimeouts.delete(timeoutID)) {
-            console.debug("receivedPushMessage: quota update timeout missing?");
-          }
-        }, prefs.get("quotaUpdateDelay"));
-      this._updateQuotaTimeouts.add(timeoutID);
+      if (record.quotaApplies()) {
+        // Update quota after the delay, at which point
+        // we check for visible notifications.
+        let timeoutID = setTimeout(_ =>
+          {
+            this._updateQuota(keyID);
+            if (!this._updateQuotaTimeouts.delete(timeoutID)) {
+              console.debug("receivedPushMessage: quota update timeout missing?");
+            }
+          }, prefs.get("quotaUpdateDelay"));
+        this._updateQuotaTimeouts.add(timeoutID);
+      }
       return this._decryptAndNotifyApp(record, messageID, data, cryptoParams);
     }).catch(error => {
       console.error("receivedPushMessage: Error notifying app", error);
@@ -848,7 +862,10 @@ this.PushService = {
         });
       });
     }).then(record => {
-      gPushNotifier.notifySubscriptionModified(record.scope, record.principal);
+      if (record) {
+        gPushNotifier.notifySubscriptionModified(record.scope,
+                                                 record.principal);
+      }
       return record;
     });
   },
@@ -1006,10 +1023,8 @@ this.PushService = {
   _sendRequest(action, ...params) {
     if (this._state == PUSH_SERVICE_CONNECTION_DISABLE) {
       return Promise.reject(new Error("Push service disabled"));
-    } else if (this._state == PUSH_SERVICE_ACTIVE_OFFLINE) {
-      if (this._service.serviceType() == "WebSocket" && action == "unregister") {
-        return Promise.resolve();
-      }
+    }
+    if (this._state == PUSH_SERVICE_ACTIVE_OFFLINE) {
       return Promise.reject(new Error("Push service offline"));
     }
     // Ensure the backend is ready. `getByPageRecord` already checks this, but
@@ -1186,66 +1201,27 @@ this.PushService = {
         let reason = Ci.nsIPushErrorReporter.UNSUBSCRIBE_MANUAL;
         return Promise.all([
           this._sendUnregister(record, reason),
-          this._db.delete(record.keyID),
-        ]).then(() => {
-          gPushNotifier.notifySubscriptionModified(record.scope,
-                                                   record.principal);
-          return true;
-        });
+          this._db.delete(record.keyID).then(record => {
+            if (record) {
+              gPushNotifier.notifySubscriptionModified(record.scope,
+                                                       record.principal);
+            }
+          }),
+        ]).then(([success]) => success);
       });
   },
 
   clear: function(info) {
-    if (info.domain == "*") {
-      return this._clearAll();
-    }
-    return this._clearForDomain(info.domain);
-  },
-
-  _clearAll: function _clearAll() {
     return this._checkActivated()
-      .then(_ => this._db.drop())
-      .catch(_ => Promise.resolve());
-  },
-
-  _clearForDomain: function(domain) {
-    /**
-     * Copied from ForgetAboutSite.jsm.
-     *
-     * Returns true if the string passed in is part of the root domain of the
-     * current string.  For example, if this is "www.mozilla.org", and we pass in
-     * "mozilla.org", this will return true.  It would return false the other way
-     * around.
-     */
-    function hasRootDomain(str, aDomain)
-    {
-      let index = str.indexOf(aDomain);
-      // If aDomain is not found, we know we do not have it as a root domain.
-      if (index == -1)
-        return false;
-
-      // If the strings are the same, we obviously have a match.
-      if (str == aDomain)
-        return true;
-
-      // Otherwise, we have aDomain as our root domain iff the index of aDomain is
-      // aDomain.length subtracted from our length and (since we do not have an
-      // exact match) the character before the index is a dot or slash.
-      let prevChar = str[index - 1];
-      return (index == (str.length - aDomain.length)) &&
-             (prevChar == "." || prevChar == "/");
-    }
-
-    let clear = (db, domain) => {
-      db.clearIf(record => {
-        return record.uri && hasRootDomain(record.uri.prePath, domain);
-      });
-    }
-
-    return this._checkActivated()
-      .then(_ => clear(this._db, domain))
+      .then(_ => {
+        return this._dropRegistrationsIf(record =>
+          info.domain == "*" ||
+          (record.uri && hasRootDomain(record.uri.prePath, info.domain))
+        );
+      })
       .catch(e => {
-        console.warn("clearForDomain: Error forgetting about domain", e);
+        console.warn("clear: Error dropping subscriptions for domain",
+          info.domain, e);
         return Promise.resolve();
       });
   },
@@ -1307,26 +1283,14 @@ this.PushService = {
   _clearPermissions() {
     console.debug("clearPermissions()");
 
-    let subscriptionModifications = [];
     return this._db.clearIf(record => {
       if (!record.quotaApplies()) {
         // Only drop registrations that are subject to quota.
         return false;
       }
-      if (record.isExpired()) {
-        // Fire subscription modified notifications for expired
-        // records after the IndexedDB transaction has committed.
-        subscriptionModifications.push(record);
-      } else {
-        // Drop unexpired registrations in the background.
-        this._backgroundUnregister(record,
-          Ci.nsIPushErrorReporter.UNSUBSCRIBE_PERMISSION_REVOKED);
-      }
+      this._backgroundUnregister(record,
+        Ci.nsIPushErrorReporter.UNSUBSCRIBE_PERMISSION_REVOKED);
       return true;
-    }).then(() => {
-      subscriptionModifications.forEach(record =>
-        gPushNotifier.notifySubscriptionModified(record.scope, record.principal)
-      );
     });
   },
 
@@ -1341,34 +1305,27 @@ this.PushService = {
       // Permission set to "allow". Drop all expired registrations for this
       // site, notify the associated service workers, and reset the quota
       // for active registrations.
-      return this._reduceByPrincipal(
+      return this._forEachPrincipal(
         permission.principal,
-        (subscriptionChanges, record, cursor) => {
-          this._permissionAllowed(subscriptionChanges, record, cursor);
-          return subscriptionChanges;
-        },
-        []
-      ).then(subscriptionChanges => {
-        this.notifySubscriptionChanges(subscriptionChanges);
-      });
+        (record, cursor) => this._permissionAllowed(record, cursor)
+      );
     } else if (isChange || (isAllow && type == "deleted")) {
       // Permission set to "block" or "always ask," or "allow" permission
       // removed. Expire all registrations for this site.
-      return this._reduceByPrincipal(
+      return this._forEachPrincipal(
         permission.principal,
-        (memo, record, cursor) => this._permissionDenied(record, cursor)
+        (record, cursor) => this._permissionDenied(record, cursor)
       );
     }
 
     return Promise.resolve();
   },
 
-  _reduceByPrincipal: function(principal, callback, initialValue) {
-    return this._db.reduceByOrigin(
+  _forEachPrincipal: function(principal, callback) {
+    return this._db.forEachOrigin(
       principal.URI.prePath,
       ChromeUtils.originAttributesToSuffix(principal.originAttributes),
-      callback,
-      initialValue
+      callback
     );
   },
 
@@ -1401,12 +1358,10 @@ this.PushService = {
    * permission is granted. If the record has expired, it will be dropped;
    * otherwise, its quota will be reset to the default value.
    *
-   * @param {Array} subscriptionChanges A list of records whose associated
-   *  service workers should be notified once the transaction has committed.
    * @param {PushRecord} record The record to update.
    * @param {IDBCursor} cursor The IndexedDB cursor.
    */
-  _permissionAllowed: function(subscriptionChanges, record, cursor) {
+  _permissionAllowed(record, cursor) {
     console.debug("permissionAllowed()");
 
     if (!record.quotaApplies()) {
@@ -1415,11 +1370,40 @@ this.PushService = {
     if (record.isExpired()) {
       // If the registration has expired, drop and notify the worker
       // unconditionally.
-      subscriptionChanges.push(record);
+      this._notifySubscriptionChangeObservers(record);
       cursor.delete();
       return;
     }
     record.resetQuota();
     cursor.update(record);
+  },
+
+  /**
+   * Drops all matching registrations from the database. Notifies the
+   * associated service workers if permission is granted, and removes
+   * unexpired registrations from the server.
+   *
+   * @param {Function} predicate A function called for each record.
+   * @returns {Promise} Resolves once the registrations have been dropped.
+   */
+  _dropRegistrationsIf(predicate) {
+    return this._db.clearIf(record => {
+      if (!predicate(record)) {
+        return false;
+      }
+      if (record.hasPermission()) {
+        // "Clear Recent History" and the Forget button remove permissions
+        // before clearing registrations, but it's possible for the worker to
+        // resubscribe if the "dom.push.testing.ignorePermission" pref is set.
+        this._notifySubscriptionChangeObservers(record);
+      }
+      if (!record.isExpired()) {
+        // Only unregister active registrations, since we already told the
+        // server about expired ones.
+        this._backgroundUnregister(record,
+                                   Ci.nsIPushErrorReporter.UNSUBSCRIBE_MANUAL);
+      }
+      return true;
+    });
   },
 };

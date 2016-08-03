@@ -9,6 +9,9 @@
 #include "mozilla/IntegerRange.h"
 #include "mozilla/Move.h"
 #include "mozilla/Vector.h"
+
+#include "jsalloc.h"
+
 #include "jsapi-tests/tests.h"
 #include "threading/Thread.h"
 
@@ -62,7 +65,7 @@ BEGIN_TEST(testThreadingThreadVectorMoveConstruct)
 {
     const static size_t N = 10;
     mozilla::Atomic<int> count(0);
-    mozilla::Vector<js::Thread> v;
+    mozilla::Vector<js::Thread, 0, js::SystemAllocPolicy> v;
     for (auto i : mozilla::MakeRange(N)) {
         CHECK(v.emplaceBack([](mozilla::Atomic<int>* countp){(*countp)++;}, &count));
         CHECK(v.length() == i + 1);
@@ -73,3 +76,22 @@ BEGIN_TEST(testThreadingThreadVectorMoveConstruct)
     return true;
 }
 END_TEST(testThreadingThreadVectorMoveConstruct)
+
+// This test is checking that args are using "decay" copy, per spec. If we do
+// not use decay copy properly, the rvalue reference |bool&& b| in the
+// constructor will automatically become an lvalue reference |bool& b| in the
+// trampoline, causing us to read through the reference when passing |bool bb|
+// from the trampoline. If the parent runs before the child, the bool may have
+// already become false, causing the trampoline to read the changed value, thus
+// causing the child's assertion to fail.
+BEGIN_TEST(testThreadingThreadArgCopy)
+{
+    for (size_t i = 0; i < 10000; ++i) {
+        bool b = true;
+        js::Thread thread([](bool bb){MOZ_RELEASE_ASSERT(bb);}, b);
+        b = false;
+        thread.join();
+    }
+    return true;
+}
+END_TEST(testThreadingThreadArgCopy)

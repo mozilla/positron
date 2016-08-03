@@ -5,6 +5,8 @@
 import pprint
 from datetime import datetime
 
+import mozfile
+
 from marionette import MarionetteTestCase
 from marionette_driver import Wait
 
@@ -57,7 +59,8 @@ class UpdateTestCase(FirefoxTestCase):
         # Bug 604364 - Preparation to test multiple update steps
         self.current_update_index = 0
 
-        self.staging_directory = self.software_update.staging_directory
+        # Ensure that there exists no already partially downloaded update
+        self.remove_downloaded_update()
 
         # If requested modify the default update channel. It will be active
         # after the next restart of the application
@@ -118,6 +121,9 @@ class UpdateTestCase(FirefoxTestCase):
         finally:
             super(UpdateTestCase, self).tearDown()
 
+            # Ensure that no trace of an partially downloaded update remain
+            self.remove_downloaded_update()
+
             self.restore_config_files()
 
     @property
@@ -152,20 +158,13 @@ class UpdateTestCase(FirefoxTestCase):
         return about_window.deck.selected_panel != about_window.deck.no_updates_found
 
     def check_update_applied(self):
-        self.updates[self.current_update_index]['build_post'] = self.software_update.build_info
+        """Check that the update has been applied correctly"""
+        update = self.updates[self.current_update_index]
+        update['build_post'] = self.software_update.build_info
 
         about_window = self.browser.open_about_window()
         try:
             update_available = self.check_for_updates(about_window)
-
-            # No further updates should be offered now with the same update type
-            if update_available:
-                self.download_update(about_window, wait_for_finish=False)
-                self.assertNotEqual(self.software_update.active_update.type,
-                                    self.updates[self.current_update_index].type)
-
-            # Check that the update has been applied correctly
-            update = self.updates[self.current_update_index]
 
             # The upgraded version should be identical with the version given by
             # the update and we shouldn't have run a downgrade
@@ -195,6 +194,17 @@ class UpdateTestCase(FirefoxTestCase):
             # Check that no application-wide add-ons have been disabled
             self.assertEqual(update['build_post']['disabled_addons'],
                              update['build_pre']['disabled_addons'])
+
+            # Bug 604364 - We do not support watershed releases yet.
+            if update_available:
+                self.download_update(about_window, wait_for_finish=False)
+                self.assertNotEqual(self.software_update.active_update.type,
+                                    update['patch']['type'],
+                                    'No further update of the same type gets offered: '
+                                    '{0} != {1}'.format(
+                                        self.software_update.active_update.type,
+                                        update['patch']['type']
+                                    ))
 
             update['success'] = True
 
@@ -361,6 +371,12 @@ class UpdateTestCase(FirefoxTestCase):
 
         # Restart Firefox to apply the update
         self.restart()
+
+    def remove_downloaded_update(self):
+        """Remove an already downloaded update from the update staging directory."""
+        self.logger.info('Clean-up update staging directory: {}'.format(
+            self.software_update.staging_directory))
+        mozfile.remove(self.software_update.staging_directory)
 
     def restore_config_files(self):
         # Reset channel-prefs.js file if modified

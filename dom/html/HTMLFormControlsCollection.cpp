@@ -47,6 +47,7 @@ HTMLFormControlsCollection::ShouldBeInElements(nsIFormControl* aFormControl)
   case NS_FORM_INPUT_TEXT :
   case NS_FORM_INPUT_TEL :
   case NS_FORM_INPUT_URL :
+  case NS_FORM_INPUT_MONTH :
   case NS_FORM_INPUT_NUMBER :
   case NS_FORM_INPUT_RANGE :
   case NS_FORM_INPUT_DATE :
@@ -63,7 +64,9 @@ HTMLFormControlsCollection::ShouldBeInElements(nsIFormControl* aFormControl)
   // form.elements array
   //
   // NS_FORM_INPUT_IMAGE
-  // NS_FORM_LABEL
+  //
+  // XXXbz maybe we should just check for that type here instead of the big
+  // switch?
 
   return false;
 }

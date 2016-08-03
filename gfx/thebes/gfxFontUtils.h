@@ -10,7 +10,7 @@
 #include "nsComponentManagerUtils.h"
 #include "nsTArray.h"
 #include "mozilla/Likely.h"
-#include "mozilla/Endian.h"
+#include "mozilla/EndianUtils.h"
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/UniquePtr.h"
 
@@ -979,6 +979,7 @@ public:
     static bool GetColorGlyphLayers(hb_blob_t* aCOLR,
                                     hb_blob_t* aCPAL,
                                     uint32_t aGlyphId,
+                                    const mozilla::gfx::Color& aDefaultColor,
                                     nsTArray<uint16_t> &aGlyphs,
                                     nsTArray<mozilla::gfx::Color> &aColors);
 
@@ -1008,6 +1009,5 @@ protected:
     static const char* gISOFontNameCharsets[];
     static const char* gMSFontNameCharsets[];
 };
-
 
 #endif /* GFX_FONT_UTILS_H */

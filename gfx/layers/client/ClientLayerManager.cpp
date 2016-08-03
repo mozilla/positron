@@ -21,7 +21,6 @@
 #include "mozilla/layers/PLayerChild.h"  // for PLayerChild
 #include "mozilla/layers/LayerTransactionChild.h"
 #include "mozilla/layers/ShadowLayerChild.h"
-#include "mozilla/layers/TextureClientPool.h" // for TextureClientPool
 #include "mozilla/layers/PersistentBufferProvider.h"
 #include "ClientReadbackLayer.h"        // for ClientReadbackLayer
 #include "nsAString.h"
@@ -101,7 +100,7 @@ ClientLayerManager::ClientLayerManager(nsIWidget* aWidget)
   , mCompositorMightResample(false)
   , mNeedsComposite(false)
   , mPaintSequenceNumber(0)
-  , mForwarder(new ShadowLayerForwarder)
+  , mForwarder(new ShadowLayerForwarder(this))
   , mDeviceCounter(gfxPlatform::GetPlatform()->GetDeviceCounter())
 {
   MOZ_COUNT_CTOR(ClientLayerManager);
@@ -135,9 +134,6 @@ ClientLayerManager::Destroy()
   // It's important to call ClearCachedResource before Destroy because the
   // former will early-return if the later has already run.
   ClearCachedResources();
-  for (size_t i = 0; i < mTexturePools.Length(); i++) {
-    mTexturePools[i]->Destroy();
-  }
   LayerManager::Destroy();
 }
 
@@ -429,10 +425,6 @@ ClientLayerManager::DidComposite(uint64_t aTransactionId,
   for (size_t i = 0; i < mDidCompositeObservers.Length(); i++) {
     mDidCompositeObservers[i]->DidComposite();
   }
-
-  for (size_t i = 0; i < mTexturePools.Length(); i++) {
-    mTexturePools[i]->ReturnDeferredClients();
-  }
 }
 
 void
@@ -534,8 +526,13 @@ ClientLayerManager::MakeSnapshotIfRequired()
           mForwarder->AllocSurfaceDescriptor(bounds.Size(),
                                              gfxContentType::COLOR_ALPHA,
                                              &inSnapshot)) {
+
+        // Make a copy of |inSnapshot| because the call to send it over IPC
+        // will call forget() on the Shmem inside, and zero it out.
+        SurfaceDescriptor outSnapshot = inSnapshot;
+
         if (remoteRenderer->SendMakeSnapshot(inSnapshot, bounds)) {
-          RefPtr<DataSourceSurface> surf = GetSurfaceForDescriptor(inSnapshot);
+          RefPtr<DataSourceSurface> surf = GetSurfaceForDescriptor(outSnapshot);
           DrawTarget* dt = mShadowTarget->GetDrawTarget();
 
           Rect dstRect(bounds.x, bounds.y, bounds.width, bounds.height);
@@ -552,7 +549,7 @@ ClientLayerManager::MakeSnapshotIfRequired()
                           DrawOptions(1.0f, CompositionOp::OP_OVER));
           dt->SetTransform(oldMatrix);
         }
-        mForwarder->DestroySurfaceDescriptor(&inSnapshot);
+        mForwarder->DestroySurfaceDescriptor(&outSnapshot);
       }
     }
   }
@@ -670,7 +667,6 @@ ClientLayerManager::ForwardTransaction(bool aScheduleComposite)
     mTransactionIdAllocator->RevokeTransactionId(mLatestTransactionId);
   }
 
-  mForwarder->SendPendingAsyncMessges();
   mPhase = PHASE_NONE;
 
   // this may result in Layers being deleted, which results in
@@ -718,29 +714,6 @@ ClientLayerManager::SetIsFirstPaint()
   mForwarder->SetIsFirstPaint();
 }
 
-TextureClientPool*
-ClientLayerManager::GetTexturePool(SurfaceFormat aFormat, TextureFlags aFlags)
-{
-  MOZ_DIAGNOSTIC_ASSERT(!mDestroyed);
-
-  for (size_t i = 0; i < mTexturePools.Length(); i++) {
-    if (mTexturePools[i]->GetFormat() == aFormat &&
-        mTexturePools[i]->GetFlags() == aFlags) {
-      return mTexturePools[i];
-    }
-  }
-
-  mTexturePools.AppendElement(
-      new TextureClientPool(aFormat, aFlags,
-                            IntSize(gfxPlatform::GetPlatform()->GetTileWidth(),
-                                    gfxPlatform::GetPlatform()->GetTileHeight()),
-                            gfxPrefs::LayersTileMaxPoolSize(),
-                            gfxPrefs::LayersTileShrinkPoolTimeout(),
-                            mForwarder));
-
-  return mTexturePools.LastElement();
-}
-
 void
 ClientLayerManager::ClearCachedResources(Layer* aSubtree)
 {
@@ -755,9 +728,6 @@ ClientLayerManager::ClearCachedResources(Layer* aSubtree)
   } else if (mRoot) {
     ClearLayer(mRoot);
   }
-  for (size_t i = 0; i < mTexturePools.Length(); i++) {
-    mTexturePools[i]->Clear();
-  }
 }
 
 void
@@ -767,8 +737,8 @@ ClientLayerManager::HandleMemoryPressure()
     HandleMemoryPressureLayer(mRoot);
   }
 
-  for (size_t i = 0; i < mTexturePools.Length(); i++) {
-    mTexturePools[i]->ShrinkToMinimumSize();
+  if (GetCompositorBridgeChild()) {
+    GetCompositorBridgeChild()->HandleMemoryPressure();
   }
 }
 
@@ -873,6 +843,23 @@ ClientLayerManager::DependsOnStaleDevice() const
 {
   return gfxPlatform::GetPlatform()->GetDeviceCounter() != mDeviceCounter;
 }
+
+
+already_AddRefed<PersistentBufferProvider>
+ClientLayerManager::CreatePersistentBufferProvider(const gfx::IntSize& aSize,
+                                                   gfx::SurfaceFormat aFormat)
+{
+  if (gfxPrefs::PersistentBufferProviderSharedEnabled()) {
+    RefPtr<PersistentBufferProvider> provider
+      = PersistentBufferProviderShared::Create(aSize, aFormat, AsShadowForwarder());
+    if (provider) {
+      return provider.forget();
+    }
+  }
+
+  return LayerManager::CreatePersistentBufferProvider(aSize, aFormat);
+}
+
 
 ClientLayer::~ClientLayer()
 {

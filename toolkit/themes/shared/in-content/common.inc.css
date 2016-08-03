@@ -175,6 +175,7 @@ html|button {
 /* xul buttons and menulists */
 
 *|button,
+html|select,
 xul|colorpicker[type="button"],
 xul|menulist {
   -moz-appearance: none;
@@ -190,6 +191,7 @@ xul|menulist {
 }
 
 html|button:enabled:hover,
+html|select:enabled:hover,
 xul|button:not([disabled="true"]):hover,
 xul|colorpicker[type="button"]:not([disabled="true"]):hover,
 xul|menulist:not([disabled="true"]):hover {
@@ -197,6 +199,7 @@ xul|menulist:not([disabled="true"]):hover {
 }
 
 html|button:enabled:hover:active,
+html|select:enabled:hover:active,
 xul|button:not([disabled="true"]):hover:active,
 xul|colorpicker[type="button"]:not([disabled="true"]):hover:active,
 xul|menulist[open="true"]:not([disabled="true"]) {
@@ -204,6 +207,7 @@ xul|menulist[open="true"]:not([disabled="true"]) {
 }
 
 html|button:disabled,
+html|select:disabled,
 xul|button[disabled="true"],
 xul|colorpicker[type="button"][disabled="true"],
 xul|menulist[disabled="true"] {
@@ -425,6 +429,14 @@ xul|textbox {
   padding-left: 10px;
 }
 
+/* Create a separate rule to unset these styles on .tree-input instead of
+   using :not(.tree-input) so the selector specifity doesn't change. */
+xul|textbox.tree-input {
+  min-height: unset;
+  padding-right: unset;
+  padding-left: unset;
+}
+
 html|input[type="text"],
 html|textarea {
   font-family: inherit;
@@ -447,15 +459,13 @@ xul|textbox[disabled="true"] {
 /* Links */
 
 html|a,
-.text-link,
-.inline-link {
+.text-link {
   color: var(--in-content-link-color);
   text-decoration: none;
 }
 
 html|a:hover,
-.text-link:hover,
-.inline-link:hover {
+.text-link:hover {
   color: var(--in-content-link-color-hover);
   text-decoration: underline;
 }
@@ -465,8 +475,7 @@ html|a:visited {
 }
 
 html|a:hover:active,
-.text-link:hover:active,
-.inline-link:hover:active {
+.text-link:hover:active {
   color: var(--in-content-link-color-active);
   text-decoration: none;
 }

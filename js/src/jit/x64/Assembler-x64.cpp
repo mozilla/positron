@@ -55,9 +55,13 @@ ABIArgGenerator::next(MIRType type)
       case MIRType::Double:
         current_ = ABIArg(FloatArgRegs[regIndex_++]);
         break;
-      case MIRType::Bool32x4:
+      case MIRType::Int8x16:
+      case MIRType::Int16x8:
       case MIRType::Int32x4:
       case MIRType::Float32x4:
+      case MIRType::Bool8x16:
+      case MIRType::Bool16x8:
+      case MIRType::Bool32x4:
         // On Win64, >64 bit args need to be passed by reference, but asm.js
         // doesn't allow passing SIMD values to FFIs. The only way to reach
         // here is asm to asm calls, so we can break the ABI here.
@@ -91,9 +95,13 @@ ABIArgGenerator::next(MIRType type)
         else
             current_ = ABIArg(FloatArgRegs[floatRegIndex_++]);
         break;
-      case MIRType::Bool32x4:
+      case MIRType::Int8x16:
+      case MIRType::Int16x8:
       case MIRType::Int32x4:
       case MIRType::Float32x4:
+      case MIRType::Bool8x16:
+      case MIRType::Bool16x8:
+      case MIRType::Bool32x4:
         if (floatRegIndex_ == NumFloatArgRegs) {
             stackOffset_ = AlignBytes(stackOffset_, SimdMemoryAlignment);
             current_ = ABIArg(stackOffset_);
@@ -108,13 +116,6 @@ ABIArgGenerator::next(MIRType type)
     return current_;
 #endif
 }
-
-// Avoid r11, which is the MacroAssembler's ScratchReg.
-const Register ABIArgGenerator::NonArgReturnReg0 = jit::r10;
-const Register ABIArgGenerator::NonArgReturnReg1 = jit::r12;
-const Register ABIArgGenerator::NonVolatileReg = jit::r13;
-const Register ABIArgGenerator::NonArg_VolatileReg = jit::rax;
-const Register ABIArgGenerator::NonReturn_VolatileReg0 = jit::rcx;
 
 void
 Assembler::writeRelocation(JmpSrc src, Relocation::Kind reloc)

@@ -7,6 +7,7 @@
 #include "gc/Statistics.h"
 
 #include "mozilla/ArrayUtils.h"
+#include "mozilla/DebugOnly.h"
 #include "mozilla/IntegerRange.h"
 #include "mozilla/PodOperations.h"
 
@@ -27,6 +28,7 @@ using namespace js;
 using namespace js::gc;
 using namespace js::gcstats;
 
+using mozilla::DebugOnly;
 using mozilla::MakeRange;
 using mozilla::PodArrayZero;
 using mozilla::PodZero;
@@ -192,13 +194,13 @@ static ExtraPhaseInfo phaseExtra[PHASE_LIMIT] = { { 0, 0 } };
 // Mapping from all nodes with a multi-parented child to a Vector of all
 // multi-parented children and their descendants. (Single-parented children will
 // not show up in this list.)
-static mozilla::Vector<Phase> dagDescendants[Statistics::NumTimingArrays];
+static mozilla::Vector<Phase, 0, SystemAllocPolicy> dagDescendants[Statistics::NumTimingArrays];
 
 struct AllPhaseIterator {
     int current;
     int baseLevel;
     size_t activeSlot;
-    mozilla::Vector<Phase>::Range descendants;
+    mozilla::Vector<Phase, 0, SystemAllocPolicy>::Range descendants;
 
     explicit AllPhaseIterator(const Statistics::PhaseTimeTable table)
       : current(0)
@@ -336,15 +338,14 @@ Statistics::formatCompactSliceMessage() const
     slice.budget.describe(budgetDescription, sizeof(budgetDescription) - 1);
 
     const char* format =
-        "GC Slice %u - Pause: %.3fms of %s budget (@ %.3fms); Reason: %s; Reset: %s%s; Cycles: %u "
-        "Times: ";
+        "GC Slice %u - Pause: %.3fms of %s budget (@ %.3fms); Reason: %s; Reset: %s%s; Times: ";
     char buffer[1024];
     memset(buffer, 0, sizeof(buffer));
     JS_snprintf(buffer, sizeof(buffer), format, index,
                 t(slice.duration()), budgetDescription, t(slice.start - slices[0].start),
                 ExplainReason(slice.reason),
-                slice.resetReason ? "yes - " : "no", slice.resetReason ? slice.resetReason : "",
-                slice.cycleCount);
+                slice.resetReason ? "yes - " : "no",
+                slice.resetReason ? slice.resetReason : "");
 
     FragmentVector fragments;
     if (!fragments.append(DuplicateString(buffer)) ||
@@ -383,10 +384,11 @@ Statistics::formatCompactSummaryMessage() const
         return UniqueChars(nullptr);
 
     JS_snprintf(buffer, sizeof(buffer),
-                "Zones: %d of %d; Compartments: %d of %d; HeapSize: %.3f MiB; "\
+                "Zones: %d of %d (-%d); Compartments: %d of %d (-%d); HeapSize: %.3f MiB; "\
                 "HeapChange (abs): %+d (%d); ",
-                zoneStats.collectedZoneCount, zoneStats.zoneCount,
+                zoneStats.collectedZoneCount, zoneStats.zoneCount, zoneStats.sweptZoneCount,
                 zoneStats.collectedCompartmentCount, zoneStats.compartmentCount,
+                zoneStats.sweptCompartmentCount,
                 double(preBytes) / bytesPerMiB,
                 counts[STAT_NEW_CHUNK] - counts[STAT_DESTROY_CHUNK],
                 counts[STAT_NEW_CHUNK] + counts[STAT_DESTROY_CHUNK]);
@@ -478,8 +480,8 @@ Statistics::formatDetailedDescription()
   Invocation Kind: %s\n\
   Reason: %s\n\
   Incremental: %s%s\n\
-  Zones Collected: %d of %d\n\
-  Compartments Collected: %d of %d\n\
+  Zones Collected: %d of %d (-%d)\n\
+  Compartments Collected: %d of %d (-%d)\n\
   MinorGCs since last GC: %d\n\
   Store Buffer Overflows: %d\n\
   MMU 20ms:%.1f%%; 50ms:%.1f%%\n\
@@ -495,8 +497,9 @@ Statistics::formatDetailedDescription()
                 ExplainReason(slices[0].reason),
                 nonincrementalReason_ ? "no - " : "yes",
                                                   nonincrementalReason_ ? nonincrementalReason_ : "",
-                zoneStats.collectedZoneCount, zoneStats.zoneCount,
+                zoneStats.collectedZoneCount, zoneStats.zoneCount, zoneStats.sweptZoneCount,
                 zoneStats.collectedCompartmentCount, zoneStats.compartmentCount,
+                zoneStats.sweptCompartmentCount,
                 counts[STAT_MINOR_GC],
                 counts[STAT_STOREBUFFER_OVERFLOW],
                 mmu20 * 100., mmu50 * 100.,
@@ -522,7 +525,6 @@ Statistics::formatDetailedSliceDescription(unsigned i, const SliceData& slice)
     State: %s -> %s\n\
     Page Faults: %ld\n\
     Pause: %.3fms of %s budget (@ %.3fms)\n\
-    Cycles: %u\n\
 ";
     char buffer[1024];
     memset(buffer, 0, sizeof(buffer));
@@ -531,8 +533,7 @@ Statistics::formatDetailedSliceDescription(unsigned i, const SliceData& slice)
                 slice.resetReason ? "yes - " : "no", slice.resetReason ? slice.resetReason : "",
                 gc::StateName(slice.initialState), gc::StateName(slice.finalState),
                 uint64_t(slice.endFaults - slice.startFaults),
-                t(slice.duration()), budgetDescription, t(slice.start - slices[0].start),
-                slice.cycleCount);
+                t(slice.duration()), budgetDescription, t(slice.start - slices[0].start));
     return DuplicateString(buffer);
 }
 
@@ -695,8 +696,7 @@ Statistics::formatJsonSliceDescription(unsigned i, const SliceData& slice)
         "\"budget\":\"%s\","
         "\"page_faults\":%llu,"
         "\"start_timestamp\":%llu,"
-        "\"end_timestamp\":%llu,"
-        "\"cycle_count\":%u,";
+        "\"end_timestamp\":%llu,";
     char buffer[1024];
     memset(buffer, 0, sizeof(buffer));
     JS_snprintf(buffer, sizeof(buffer), format,
@@ -709,8 +709,7 @@ Statistics::formatJsonSliceDescription(unsigned i, const SliceData& slice)
                 budgetDescription,
                 pageFaults,
                 slice.start,
-                slice.end,
-                slice.cycleCount);
+                slice.end);
     return DuplicateString(buffer);
 }
 
@@ -761,7 +760,7 @@ Statistics::Statistics(JSRuntime* rt)
     maxPauseInInterval(0),
     phaseNestingDepth(0),
     activeDagSlot(PHASE_DAG_NONE),
-    suspendedPhaseNestingDepth(0),
+    suspended(0),
     sliceCallback(nullptr),
     nurseryCollectionCallback(nullptr),
     aborted(false)
@@ -827,7 +826,7 @@ Statistics::initialize()
 
     // Fill in the depth of each node in the tree. Multi-parented nodes
     // have depth 0.
-    mozilla::Vector<Phase> stack;
+    mozilla::Vector<Phase, 0, SystemAllocPolicy> stack;
     if (!stack.append(PHASE_LIMIT)) // Dummy entry to avoid special-casing the first node
         return false;
     for (int i = 0; i < PHASE_LIMIT; i++) {
@@ -1052,13 +1051,6 @@ Statistics::endSlice()
     MOZ_ASSERT(gcDepth >= 0);
 }
 
-void
-Statistics::setSliceCycleCount(unsigned cycleCount)
-{
-    if (!aborted)
-        slices.back().cycleCount = cycleCount;
-}
-
 bool
 Statistics::startTimingMutator()
 {
@@ -1069,7 +1061,7 @@ Statistics::startTimingMutator()
         return false;
     }
 
-    MOZ_ASSERT(suspendedPhaseNestingDepth == 0);
+    MOZ_ASSERT(suspended == 0);
 
     timedGCTime = 0;
     phaseStartTimes[PHASE_MUTATOR] = 0;
@@ -1095,6 +1087,35 @@ Statistics::stopTimingMutator(double& mutator_ms, double& gc_ms)
 }
 
 void
+Statistics::suspendPhases(Phase suspension)
+{
+    MOZ_ASSERT(suspension == PHASE_EXPLICIT_SUSPENSION || suspension == PHASE_IMPLICIT_SUSPENSION);
+    while (phaseNestingDepth) {
+        MOZ_ASSERT(suspended < mozilla::ArrayLength(suspendedPhases));
+        Phase parent = phaseNesting[phaseNestingDepth - 1];
+        suspendedPhases[suspended++] = parent;
+        recordPhaseEnd(parent);
+    }
+    suspendedPhases[suspended++] = suspension;
+}
+
+void
+Statistics::resumePhases()
+{
+    DebugOnly<Phase> popped = suspendedPhases[--suspended];
+    MOZ_ASSERT(popped == PHASE_EXPLICIT_SUSPENSION || popped == PHASE_IMPLICIT_SUSPENSION);
+    while (suspended &&
+           suspendedPhases[suspended - 1] != PHASE_EXPLICIT_SUSPENSION &&
+           suspendedPhases[suspended - 1] != PHASE_IMPLICIT_SUSPENSION)
+    {
+        Phase resumePhase = suspendedPhases[--suspended];
+        if (resumePhase == PHASE_MUTATOR)
+            timedGCTime += PRMJ_Now() - timedGCStart;
+        beginPhase(resumePhase);
+    }
+}
+
+void
 Statistics::beginPhase(Phase phase)
 {
     Phase parent = phaseNestingDepth ? phaseNesting[phaseNestingDepth - 1] : PHASE_NO_PARENT;
@@ -1105,9 +1126,7 @@ Statistics::beginPhase(Phase phase)
     //
     // Reuse this mechanism for managing PHASE_MUTATOR.
     if (parent == PHASE_GC_BEGIN || parent == PHASE_GC_END || parent == PHASE_MUTATOR) {
-        MOZ_ASSERT(suspendedPhaseNestingDepth < mozilla::ArrayLength(suspendedPhases));
-        suspendedPhases[suspendedPhaseNestingDepth++] = parent;
-        recordPhaseEnd(parent);
+        suspendPhases(PHASE_IMPLICIT_SUSPENSION);
         parent = phaseNestingDepth ? phaseNesting[phaseNestingDepth - 1] : PHASE_NO_PARENT;
     }
 
@@ -1154,12 +1173,8 @@ Statistics::endPhase(Phase phase)
 
     // When emptying the stack, we may need to resume a callback phase
     // (PHASE_GC_BEGIN/END) or return to timing the mutator (PHASE_MUTATOR).
-    if (phaseNestingDepth == 0 && suspendedPhaseNestingDepth > 0) {
-        Phase resumePhase = suspendedPhases[--suspendedPhaseNestingDepth];
-        if (resumePhase == PHASE_MUTATOR)
-            timedGCTime += PRMJ_Now() - timedGCStart;
-        beginPhase(resumePhase);
-    }
+    if (phaseNestingDepth == 0 && suspended > 0 && suspendedPhases[suspended - 1] == PHASE_IMPLICIT_SUSPENSION)
+        resumePhases();
 }
 
 void

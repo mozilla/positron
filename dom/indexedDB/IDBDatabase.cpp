@@ -38,6 +38,7 @@
 #include "mozilla/ipc/FileDescriptor.h"
 #include "mozilla/ipc/InputStreamParams.h"
 #include "mozilla/ipc/InputStreamUtils.h"
+#include "nsAutoPtr.h"
 #include "nsCOMPtr.h"
 #include "nsIDocument.h"
 #include "nsIObserver.h"
@@ -872,7 +873,7 @@ IDBDatabase::AbortTransactions(bool aShouldWarn)
           }
         }
 
-        transaction->Abort(NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
+        transaction->Abort(NS_ERROR_DOM_INDEXEDDB_ABORT_ERR);
       }
 
       static const char kWarningMessage[] =
@@ -1071,7 +1072,7 @@ IDBDatabase::GetQuotaInfo(nsACString& aOrigin,
       MOZ_CRASH("Is this needed?!");
 
     case PrincipalInfo::TSystemPrincipalInfo:
-      QuotaManager::GetInfoForChrome(nullptr, &aOrigin, nullptr);
+      QuotaManager::GetInfoForChrome(nullptr, nullptr, &aOrigin, nullptr);
       return NS_OK;
 
     case PrincipalInfo::TContentPrincipalInfo: {
@@ -1083,6 +1084,7 @@ IDBDatabase::GetQuotaInfo(nsACString& aOrigin,
       }
 
       rv = QuotaManager::GetInfoFromPrincipal(principal,
+                                              nullptr,
                                               nullptr,
                                               &aOrigin,
                                               nullptr);

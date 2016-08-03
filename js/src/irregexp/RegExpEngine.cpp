@@ -93,10 +93,10 @@ static const int kWordAndSurrogateRanges[] = {
 static const int kWordAndSurrogateRangeCount = ArrayLength(kWordAndSurrogateRanges);
 static const int kNegatedIgnoreCaseWordAndSurrogateRanges[] = {
     0, '0', '9' + 1, 'A',
-    'K', 'K' + 1, 'S', 'S' + 1,
     'Z' + 1, '_', '_' + 1, 'a',
-    'k', 'k' + 1, 's', 's' + 1,
-    'z' + 1, unicode::LeadSurrogateMin,
+    'z' + 1, 0x017F,
+    0x017F + 1, 0x212A,
+    0x212A + 1, unicode::LeadSurrogateMin,
     unicode::TrailSurrogateMax + 1, 0x10000,
     0x10000 };
 static const int kNegatedIgnoreCaseWordAndSurrogateRangeCount =
@@ -1720,6 +1720,12 @@ RegExpCompiler::Assemble(JSContext* cx,
     macro_assembler_ = assembler;
     macro_assembler_->set_slow_safe(false);
 
+    // The LifoAlloc used by the regexp compiler is infallible and is currently
+    // expected to crash on OOM. Thus we have to disable the assertions made to
+    // prevent us from allocating any new chunk in the LifoAlloc. This is needed
+    // because the jit::MacroAssembler turns these assertions on by default.
+    LifoAlloc::AutoFallibleScope fallibleAllocator(alloc());
+
     jit::Label fail;
     macro_assembler_->PushBacktrack(&fail);
     Trace new_trace;
@@ -1766,7 +1772,7 @@ IsNativeRegExpEnabled(JSContext* cx)
 #ifdef JS_CODEGEN_NONE
     return false;
 #else
-    return cx->runtime()->options().nativeRegExp();
+    return cx->options().nativeRegExp();
 #endif
 }
 

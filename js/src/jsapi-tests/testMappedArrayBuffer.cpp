@@ -157,7 +157,9 @@ bool TestTransferObject()
 
     // Create an Array of transferable values.
     JS::AutoValueVector argv(cx);
-    argv.append(v1);
+    if (!argv.append(v1))
+        return false;
+
     JS::RootedObject obj(cx, JS_NewArrayObject(cx, JS::HandleValueArray::subarray(argv, 0, 1)));
     CHECK(obj);
     JS::RootedValue transferable(cx, JS::ObjectValue(*obj));
@@ -175,9 +177,9 @@ bool TestTransferObject()
 
 static void GC(JSContext* cx)
 {
-    JS_GC(JS_GetRuntime(cx));
+    JS_GC(cx);
     // Trigger another to wait for background finalization to end.
-    JS_GC(JS_GetRuntime(cx));
+    JS_GC(cx);
 }
 
 END_TEST(testMappedArrayBuffer_bug945152)

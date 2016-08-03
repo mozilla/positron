@@ -30,8 +30,8 @@ StepTiming(uint32_t aSteps,
            nsTimingFunction::Type aType)
 {
   MOZ_ASSERT(0.0 <= aPortion && aPortion <= 1.0, "out of range");
-  MOZ_ASSERT(aType != nsTimingFunction::Type::StepStart ||
-             aType != nsTimingFunction::Type::StepEnd, "invalid type");
+  MOZ_ASSERT(aType == nsTimingFunction::Type::StepStart ||
+             aType == nsTimingFunction::Type::StepEnd, "invalid type");
 
   if (aPortion == 1.0) {
     return 1.0;
@@ -70,6 +70,14 @@ ComputedTimingFunction::GetValue(
     if (mTimingFunction.X1() == mTimingFunction.Y1() &&
         mTimingFunction.X2() == mTimingFunction.Y2()) {
       return aPortion;
+    }
+
+    // Ensure that we return 0 or 1 on both edges.
+    if (aPortion == 0.0) {
+      return 0.0;
+    }
+    if (aPortion == 1.0) {
+      return 1.0;
     }
 
     // For negative values, try to extrapolate with tangent (p1 - p0) or,

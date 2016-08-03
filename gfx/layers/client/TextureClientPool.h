@@ -18,8 +18,8 @@ namespace mozilla {
 namespace layers {
 
 class ISurfaceAllocator;
-class CompositableForwarder;
-class gfxSharedReadLock;
+class TextureForwarder;
+class TextureReadLock;
 
 class TextureClientAllocator
 {
@@ -34,7 +34,7 @@ public:
    * Return a TextureClient that is not yet ready to be reused, but will be
    * imminently.
    */
-  virtual void ReturnTextureClientDeferred(TextureClient *aClient, gfxSharedReadLock* aLock) = 0;
+  virtual void ReturnTextureClientDeferred(TextureClient *aClient) = 0;
 
   virtual void ReportClientLost() = 0;
 };
@@ -44,12 +44,13 @@ class TextureClientPool final : public TextureClientAllocator
   ~TextureClientPool();
 
 public:
-  TextureClientPool(gfx::SurfaceFormat aFormat,
-                    TextureFlags aFlags,
+  TextureClientPool(LayersBackend aBackend,
+                    gfx::SurfaceFormat aFormat,
                     gfx::IntSize aSize,
+                    TextureFlags aFlags,
                     uint32_t aMaxTextureClients,
                     uint32_t aShrinkTimeoutMsec,
-                    CompositableForwarder* aAllocator);
+                    TextureForwarder* aAllocator);
 
   /**
    * Gets an allocated TextureClient of size and format that are determined
@@ -72,7 +73,7 @@ public:
    * Return a TextureClient that is not yet ready to be reused, but will be
    * imminently.
    */
-  void ReturnTextureClientDeferred(TextureClient *aClient, gfxSharedReadLock* aLock) override;
+  void ReturnTextureClientDeferred(TextureClient *aClient) override;
 
   /**
    * Attempt to shrink the pool so that there are no more than
@@ -104,6 +105,7 @@ public:
    */
   void Clear();
 
+  LayersBackend GetBackend() const { return mBackend; }
   gfx::SurfaceFormat GetFormat() { return mFormat; }
   TextureFlags GetFlags() const { return mFlags; }
 
@@ -119,14 +121,17 @@ private:
   // shrinking).
   static const uint32_t sMinCacheSize = 0;
 
+  /// Backend passed to the TextureClient for buffer creation.
+  LayersBackend mBackend;
+
   /// Format is passed to the TextureClient for buffer creation.
   gfx::SurfaceFormat mFormat;
 
-  /// Flags passed to the TextureClient for buffer creation.
-  const TextureFlags mFlags;
-
   /// The width and height of the tiles to be used.
   gfx::IntSize mSize;
+
+  /// Flags passed to the TextureClient for buffer creation.
+  const TextureFlags mFlags;
 
   // The maximum number of texture clients managed by this pool that we want
   // to remain active.
@@ -141,23 +146,15 @@ private:
   /// existence is always mOutstandingClients + the size of mTextureClients.
   uint32_t mOutstandingClients;
 
-  struct TextureClientHolder {
-    RefPtr<TextureClient> mTextureClient;
-    RefPtr<gfxSharedReadLock> mLock;
-
-    TextureClientHolder(TextureClient* aTextureClient, gfxSharedReadLock* aLock)
-      : mTextureClient(aTextureClient), mLock(aLock)
-    {}
-  };
-
   // On b2g gonk, std::queue might be a better choice.
   // On ICS, fence wait happens implicitly before drawing.
   // Since JB, fence wait happens explicitly when fetching a client from the pool.
   std::stack<RefPtr<TextureClient> > mTextureClients;
 
-  std::list<TextureClientHolder> mTextureClientsDeferred;
+  std::list<RefPtr<TextureClient>> mTextureClientsDeferred;
   RefPtr<nsITimer> mTimer;
-  RefPtr<CompositableForwarder> mSurfaceAllocator;
+  // This mSurfaceAllocator owns us, so no need to hold a ref to it
+  TextureForwarder* mSurfaceAllocator;
 };
 
 } // namespace layers

@@ -189,7 +189,7 @@ void nsViewManager::DoSetWindowDimensions(nscoord aWidth, nscoord aHeight)
     // Don't resize the widget. It is already being set elsewhere.
     mRootView->SetDimensions(newDim, true, false);
     if (mPresShell)
-      mPresShell->ResizeReflow(aWidth, aHeight);
+      mPresShell->ResizeReflow(aWidth, aHeight, oldDim.width, oldDim.height);
   }
 }
 
@@ -210,10 +210,10 @@ nsViewManager::ShouldDelayResize() const
 }
 
 void
-nsViewManager::SetWindowDimensions(nscoord aWidth, nscoord aHeight)
+nsViewManager::SetWindowDimensions(nscoord aWidth, nscoord aHeight, bool aDelayResize)
 {
   if (mRootView) {
-    if (!ShouldDelayResize()) {
+    if (!ShouldDelayResize() && !aDelayResize) {
       if (mDelayedResize != nsSize(NSCOORD_NONE, NSCOORD_NONE) &&
           mDelayedResize != nsSize(aWidth, aHeight)) {
         // We have a delayed resize; that now obsolete size may already have
@@ -229,7 +229,9 @@ nsViewManager::SetWindowDimensions(nscoord aWidth, nscoord aHeight)
     } else {
       mDelayedResize.SizeTo(aWidth, aHeight);
       if (mPresShell && mPresShell->GetDocument()) {
-        mPresShell->GetDocument()->SetNeedStyleFlush();
+        nsIDocument* doc = mPresShell->GetDocument();
+        doc->SetNeedStyleFlush();
+        doc->SetNeedLayoutFlush();
       }
     }
   }

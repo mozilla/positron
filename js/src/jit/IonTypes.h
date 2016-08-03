@@ -699,12 +699,18 @@ ScalarTypeToMIRType(Scalar::Type type)
       case Scalar::Uint32:
       case Scalar::Uint8Clamped:
         return MIRType::Int32;
+      case Scalar::Int64:
+        return MIRType::Int64;
       case Scalar::Float32:
         return MIRType::Float32;
       case Scalar::Float64:
         return MIRType::Double;
       case Scalar::Float32x4:
         return MIRType::Float32x4;
+      case Scalar::Int8x16:
+        return MIRType::Int8x16;
+      case Scalar::Int16x8:
+        return MIRType::Int16x8;
       case Scalar::Int32x4:
         return MIRType::Int32x4;
       case Scalar::MaxTypedArrayViewType:
@@ -723,6 +729,7 @@ ScalarTypeToLength(Scalar::Type type)
       case Scalar::Uint16:
       case Scalar::Int32:
       case Scalar::Uint32:
+      case Scalar::Int64:
       case Scalar::Float32:
       case Scalar::Float64:
       case Scalar::Uint8Clamped:
@@ -730,6 +737,10 @@ ScalarTypeToLength(Scalar::Type type)
       case Scalar::Float32x4:
       case Scalar::Int32x4:
         return 4;
+      case Scalar::Int16x8:
+        return 8;
+      case Scalar::Int8x16:
+        return 16;
       case Scalar::MaxTypedArrayViewType:
         break;
     }

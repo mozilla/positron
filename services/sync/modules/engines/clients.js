@@ -75,6 +75,16 @@ ClientEngine.prototype = {
     Svc.Prefs.set(this.name + ".lastRecordUpload", Math.floor(value));
   },
 
+  get remoteClients() {
+    // return all non-stale clients for external consumption.
+    return Object.values(this._store._remoteClients).filter(v => !v.stale);
+  },
+
+  remoteClientExists(id) {
+    let client = this._store._remoteClients[id];
+    return !!(client && !client.stale);
+  },
+
   // Aggregate some stats on the composition of clients on this account
   get stats() {
     let stats = {
@@ -84,10 +94,12 @@ ClientEngine.prototype = {
     };
 
     for (let id in this._store._remoteClients) {
-      let {name, type} = this._store._remoteClients[id];
-      stats.hasMobile = stats.hasMobile || type == DEVICE_TYPE_MOBILE;
-      stats.names.push(name);
-      stats.numClients++;
+      let {name, type, stale} = this._store._remoteClients[id];
+      if (!stale) {
+        stats.hasMobile = stats.hasMobile || type == DEVICE_TYPE_MOBILE;
+        stats.names.push(name);
+        stats.numClients++;
+      }
     }
 
     return stats;
@@ -105,6 +117,9 @@ ClientEngine.prototype = {
 
     for (let id in this._store._remoteClients) {
       let record = this._store._remoteClients[id];
+      if (record.stale) {
+        continue; // pretend "stale" records don't exist.
+      }
       let type = record.type;
       if (!counts.has(type)) {
         counts.set(type, 0);
@@ -153,10 +168,6 @@ ClientEngine.prototype = {
     Svc.Prefs.set("client.type", value);
   },
 
-  remoteClientExists(id) {
-    return !!this._store._remoteClients[id];
-  },
-
   getClientName(id) {
     if (id == this.localID) {
       return this.localName;
@@ -198,8 +209,10 @@ ClientEngine.prototype = {
         }
       }
       // Bug 1264498: Mobile clients don't remove themselves from the clients
-      // collection when the user disconnects Sync, so we filter out clients
+      // collection when the user disconnects Sync, so we mark as stale clients
       // with the same name that haven't synced in over a week.
+      // (Note we can't simply delete them, or we re-apply them next sync - see
+      // bug 1287687)
       delete this._incomingClients[this.localID];
       let names = new Set([this.localName]);
       for (let id in this._incomingClients) {
@@ -211,7 +224,7 @@ ClientEngine.prototype = {
         let remoteAge = AsyncResource.serverTime - this._incomingClients[id];
         if (remoteAge > STALE_CLIENT_REMOTE_AGE) {
           this._log.info(`Hiding stale client ${id} with age ${remoteAge}`);
-          this._removeRemoteClient(id);
+          record.stale = true;
         }
       }
     } finally {
@@ -341,6 +354,9 @@ ClientEngine.prototype = {
     if (!client) {
       throw new Error("Unknown remote client ID: '" + clientId + "'.");
     }
+    if (client.stale) {
+      throw new Error("Stale remote client ID: '" + clientId + "'.");
+    }
 
     let action = {
       command: command,
@@ -379,6 +395,7 @@ ClientEngine.prototype = {
       if (!commands) {
         return true;
       }
+      let URIsToDisplay = [];
       for (let key in commands) {
         let {command, args} = commands[key];
         this._log.debug("Processing command: " + command + "(" + args + ")");
@@ -401,12 +418,16 @@ ClientEngine.prototype = {
             this.service.logout();
             return false;
           case "displayURI":
-            this._handleDisplayURI.apply(this, args);
+            let [uri, clientId, title] = args;
+            URIsToDisplay.push({ uri, clientId, title });
             break;
           default:
             this._log.debug("Received an unknown command: " + command);
             break;
         }
+      }
+      if (URIsToDisplay.length) {
+        this._handleDisplayURIs(URIsToDisplay);
       }
 
       return true;
@@ -445,8 +466,10 @@ ClientEngine.prototype = {
     if (clientId) {
       this._sendCommandToClient(command, args, clientId);
     } else {
-      for (let id in this._store._remoteClients) {
-        this._sendCommandToClient(command, args, id);
+      for (let [id, record] in Iterator(this._store._remoteClients)) {
+        if (!record.stale) {
+          this._sendCommandToClient(command, args, id);
+        }
       }
     }
   },
@@ -477,11 +500,11 @@ ClientEngine.prototype = {
   },
 
   /**
-   * Handle a single received 'displayURI' command.
+   * Handle a bunch of received 'displayURI' commands.
    *
-   * Interested parties should observe the "weave:engine:clients:display-uri"
-   * topic. The callback will receive an object as the subject parameter with
-   * the following keys:
+   * Interested parties should observe the "weave:engine:clients:display-uris"
+   * topic. The callback will receive an array as the subject parameter
+   * containing objects with the following keys:
    *
    *   uri       URI (string) that is requested for display.
    *   clientId  ID of client that sent the command.
@@ -489,20 +512,18 @@ ClientEngine.prototype = {
    *
    * The 'data' parameter to the callback will not be defined.
    *
-   * @param uri
+   * @param uris
+   *        An array containing URI objects to display
+   * @param uris[].uri
    *        String URI that was received
-   * @param clientId
+   * @param uris[].clientId
    *        ID of client that sent URI
-   * @param title
+   * @param uris[].title
    *        String title of page that URI corresponds to. Older clients may not
    *        send this.
    */
-  _handleDisplayURI: function _handleDisplayURI(uri, clientId, title) {
-    this._log.info("Received a URI for display: " + uri + " (" + title +
-                   ") from " + clientId);
-
-    let subject = {uri: uri, client: clientId, title: title};
-    Svc.Obs.notify("weave:engine:clients:display-uri", subject);
+  _handleDisplayURIs: function _handleDisplayURIs(uris) {
+    Svc.Obs.notify("weave:engine:clients:display-uris", uris);
   },
 
   _removeRemoteClient(id) {
@@ -602,6 +623,12 @@ ClientStore.prototype = {
       // record.formfactor = "";        // Bug 1100722
     } else {
       record.cleartext = this._remoteClients[id];
+      if (record.cleartext.stale) {
+        // It's almost certainly a logic error for us to upload a record we
+        // consider stale, so make log noise, but still remove the flag.
+        this._log.error(`Preparing to upload record ${id} that we consider stale`);
+        delete record.cleartext.stale;
+      }
     }
 
     return record;
@@ -644,7 +671,7 @@ ClientsTracker.prototype = {
         break;
       case "weave:engine:stop-tracking":
         if (this._enabled) {
-          Svc.Prefs.ignore("clients.name", this);
+          Svc.Prefs.ignore("client.name", this);
           this._enabled = false;
         }
         break;

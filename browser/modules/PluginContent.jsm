@@ -247,7 +247,7 @@ PluginContent.prototype = {
       return false;
     }
 
-    let contentWindow = plugin.ownerDocument.defaultView;
+    let contentWindow = plugin.ownerGlobal;
     let cwu = contentWindow.QueryInterface(Ci.nsIInterfaceRequestor)
                            .getInterface(Ci.nsIDOMWindowUtils);
 
@@ -395,7 +395,9 @@ PluginContent.prototype = {
 
       case "PluginVulnerableUpdatable":
         let updateLink = this.getPluginUI(plugin, "checkForUpdatesLink");
-        this.addLinkClickCallback(updateLink, "forwardCallback", "openPluginUpdatePage");
+        let { pluginTag } = this._getPluginInfo(plugin);
+        this.addLinkClickCallback(updateLink, "forwardCallback",
+                                  "openPluginUpdatePage", pluginTag);
         /* FALLTHRU */
 
       case "PluginVulnerableNoUpdate":
@@ -524,7 +526,7 @@ PluginContent.prototype = {
 
     let pluginHost = Cc["@mozilla.org/plugin/host;1"].getService(Ci.nsIPluginHost);
     let permissionString = pluginHost.getPermissionStringForType(objLoadingContent.actualType);
-    let principal = objLoadingContent.ownerDocument.defaultView.top.document.nodePrincipal;
+    let principal = objLoadingContent.ownerGlobal.top.document.nodePrincipal;
     let pluginPermission = Services.perms.testPermissionFromPrincipal(principal, permissionString);
 
     let isFallbackTypeValid =
@@ -544,8 +546,9 @@ PluginContent.prototype = {
   },
 
   // Forward a link click callback to the chrome process.
-  forwardCallback: function (name) {
-    this.global.sendAsyncMessage("PluginContent:LinkClickCallback", { name: name });
+  forwardCallback: function (name, pluginTag) {
+    this.global.sendAsyncMessage("PluginContent:LinkClickCallback",
+      { name, pluginTag });
   },
 
   submitReport: function submitReport(plugin) {
@@ -609,7 +612,7 @@ PluginContent.prototype = {
   onOverlayClick: function (event) {
     let document = event.target.ownerDocument;
     let plugin = document.getBindingParent(event.target);
-    let contentWindow = plugin.ownerDocument.defaultView.top;
+    let contentWindow = plugin.ownerGlobal.top;
     let objLoadingContent = plugin.QueryInterface(Ci.nsIObjectLoadingContent);
     let overlay = this.getPluginUI(plugin, "main");
     // Have to check that the target is not the link to update the plugin

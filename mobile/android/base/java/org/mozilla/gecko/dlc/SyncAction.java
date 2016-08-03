@@ -9,6 +9,7 @@ import android.content.Context;
 import android.net.Uri;
 import android.util.Log;
 
+import com.keepsafe.switchboard.SwitchBoard;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -33,6 +34,8 @@ public class SyncAction extends BaseAction {
     private static final String KINTO_KEY_ID = "id";
     private static final String KINTO_KEY_DELETED = "deleted";
     private static final String KINTO_KEY_DATA = "data";
+    private static final String KINTO_KEY_ATTACHMENT = "attachment";
+    private static final String KINTO_KEY_ORIGINAL = "original";
 
     private static final String KINTO_PARAMETER_SINCE = "_since";
     private static final String KINTO_PARAMETER_FIELDS = "_fields";
@@ -44,7 +47,7 @@ public class SyncAction extends BaseAction {
      * Dev instance:
      * https://kinto-ota.dev.mozaws.net/v1/buckets/dlc/collections/catalog/records
      */
-    private static final String CATALOG_ENDPOINT = "https://firefox.settings.services.mozilla.com/v1/buckets/fennec-dlc/collections/catalog/records";
+    private static final String CATALOG_ENDPOINT = "https://firefox.settings.services.mozilla.com/v1/buckets/fennec/collections/catalog/records";
 
     @Override
     public void perform(Context context, DownloadContentCatalog catalog) {
@@ -71,6 +74,12 @@ public class SyncAction extends BaseAction {
                 String id = object.getString(KINTO_KEY_ID);
 
                 final boolean isDeleted = object.optBoolean(KINTO_KEY_DELETED, false);
+
+                if (!isDeleted) {
+                    JSONObject attachment = object.getJSONObject(KINTO_KEY_ATTACHMENT);
+                    if (attachment.isNull(KINTO_KEY_ORIGINAL))
+                        throw new JSONException(String.format("Old Attachment Format"));
+                }
 
                 DownloadContent existingContent = catalog.getContentById(id);
 
@@ -121,7 +130,7 @@ public class SyncAction extends BaseAction {
             }
             // Only select the fields we are actually going to read.
             builder.appendQueryParameter(KINTO_PARAMETER_FIELDS,
-                    "attachment.location,original.filename,original.hash,attachment.hash,type,kind,original.size,match");
+                    "attachment.location,attachment.original.filename,attachment.original.hash,attachment.hash,type,kind,attachment.original.size,match");
 
             // We want to process items in the order they have been modified. This is to ensure that
             // our last_modified values are correct if we processing is interrupted and not all items
@@ -234,7 +243,7 @@ public class SyncAction extends BaseAction {
 
     protected boolean isSyncEnabledForClient(Context context) {
         // Sync action is behind a switchboard flag for staged rollout.
-        return Experiments.isInExperimentLocal(context, Experiments.DOWNLOAD_CONTENT_CATALOG_SYNC);
+        return SwitchBoard.isInExperiment(context, Experiments.DOWNLOAD_CONTENT_CATALOG_SYNC);
     }
 
     private void logErrorResponse(HttpURLConnection connection) {

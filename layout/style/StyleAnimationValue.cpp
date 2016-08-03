@@ -12,6 +12,7 @@
 #include "mozilla/StyleAnimationValue.h"
 #include "mozilla/UniquePtr.h"
 #include "nsStyleTransformMatrix.h"
+#include "nsAutoPtr.h"
 #include "nsCOMArray.h"
 #include "nsIStyleRule.h"
 #include "mozilla/css/StyleRule.h"
@@ -2507,15 +2508,6 @@ StyleAnimationValue::AddWeighted(nsCSSProperty aProperty,
         ++len2;
       }
       MOZ_ASSERT(len1 > 0 && len2 > 0, "unexpected length");
-      if (list1->mValue.GetUnit() == eCSSUnit_None ||
-          list2->mValue.GetUnit() == eCSSUnit_None) {
-        // One of our values is "none".  Can't do addition with that.
-        MOZ_ASSERT(
-          (list1->mValue.GetUnit() != eCSSUnit_None || len1 == 1) &&
-          (list2->mValue.GetUnit() != eCSSUnit_None || len2 == 1),
-          "multi-value valuelist with 'none' as first element");
-        return false;
-      }
 
       nsAutoPtr<nsCSSValueList> result;
       nsCSSValueList **resultTail = getter_Transfers(result);
@@ -3581,7 +3573,8 @@ StyleClipBasicShapeToCSSArray(const nsStyleClipPath& aClipPath,
       MOZ_ASSERT_UNREACHABLE("Unknown shape type");
       return false;
   }
-  aResult->Item(1).SetIntValue(aClipPath.GetSizingBox(), eCSSUnit_Enumerated);
+  aResult->Item(1).SetIntValue(uint8_t(aClipPath.GetSizingBox()),
+                               eCSSUnit_Enumerated);
   return true;
 }
 
@@ -3773,15 +3766,10 @@ StyleAnimationValue::ExtractComputedValue(nsCSSProperty aProperty,
 
         case eCSSProperty_stroke_dasharray: {
           const nsStyleSVG *svg = static_cast<const nsStyleSVG*>(styleStruct);
-          MOZ_ASSERT((svg->mStrokeDasharray != nullptr) ==
-                     (svg->mStrokeDasharrayLength != 0),
-                     "pointer/length mismatch");
-          nsAutoPtr<nsCSSValueList> result;
-          if (svg->mStrokeDasharray) {
-            MOZ_ASSERT(svg->mStrokeDasharrayLength > 0,
-                       "non-null list should have positive length");
+          if (!svg->mStrokeDasharray.IsEmpty()) {
+            nsAutoPtr<nsCSSValueList> result;
             nsCSSValueList **resultTail = getter_Transfers(result);
-            for (uint32_t i = 0, i_end = svg->mStrokeDasharrayLength;
+            for (uint32_t i = 0, i_end = svg->mStrokeDasharray.Length();
                  i != i_end; ++i) {
               nsCSSValueList *item = new nsCSSValueList;
               *resultTail = item;
@@ -3810,12 +3798,17 @@ StyleAnimationValue::ExtractComputedValue(nsCSSProperty aProperty,
                   return false;
               }
             }
+            aComputedValue.SetAndAdoptCSSValueListValue(result.forget(),
+                                                        eUnit_Dasharray);
+          } else if (svg->StrokeDasharrayFromObject()) {
+            // An empty dasharray with StrokeDasharrayFromObject() == true
+            // corresponds to the "context-value" keyword.
+            aComputedValue.SetIntValue(NS_STYLE_STROKE_PROP_CONTEXT_VALUE,
+                                       eUnit_Enumerated);
           } else {
-            result = new nsCSSValueList;
-            result->mValue.SetNoneValue();
+            // Otherwise, an empty dasharray corresponds to the "none" keyword.
+            aComputedValue.SetNoneValue();
           }
-          aComputedValue.SetAndAdoptCSSValueListValue(result.forget(),
-                                                      eUnit_Dasharray);
           break;
         }
 
@@ -3971,7 +3964,8 @@ StyleAnimationValue::ExtractComputedValue(nsCSSProperty aProperty,
             result->SetURLValue(url);
             aComputedValue.SetAndAdoptCSSValueValue(result.release(), eUnit_URL);
           } else if (type == NS_STYLE_CLIP_PATH_BOX) {
-            aComputedValue.SetIntValue(clipPath.GetSizingBox(), eUnit_Enumerated);
+            aComputedValue.SetIntValue(uint8_t(clipPath.GetSizingBox()),
+                                       eUnit_Enumerated);
           } else if (type == NS_STYLE_CLIP_PATH_SHAPE) {
             RefPtr<nsCSSValue::Array> result = nsCSSValue::Array::Create(2);
             if (!StyleClipBasicShapeToCSSArray(clipPath, result)) {

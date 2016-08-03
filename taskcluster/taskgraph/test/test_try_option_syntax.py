@@ -8,26 +8,40 @@ import unittest
 
 from ..try_option_syntax import TryOptionSyntax
 from ..graph import Graph
-from ..types import TaskGraph, Task
+from ..taskgraph import TaskGraph
+from .util import TestTask
 from mozunit import main
 
 # an empty graph, for things that don't look at it
 empty_graph = TaskGraph({}, Graph(set(), set()))
 
+
 def unittest_task(n, tp):
-    return (n, Task('test', n, {
+    return (n, TestTask('test', n, {
         'unittest_try_name': n,
         'test_platform': tp,
     }))
 
-tasks = {k: v for k,v in [
+
+def talos_task(n, tp):
+    return (n, TestTask('test', n, {
+        'talos_try_name': n,
+        'test_platform': tp,
+    }))
+
+tasks = {k: v for k, v in [
     unittest_task('mochitest-browser-chrome', 'linux'),
     unittest_task('mochitest-browser-chrome-e10s', 'linux64'),
     unittest_task('mochitest-chrome', 'linux'),
     unittest_task('mochitest-webgl', 'linux'),
     unittest_task('crashtest-e10s', 'linux'),
     unittest_task('gtest', 'linux64'),
+    talos_task('dromaeojs', 'linux64'),
 ]}
+unittest_tasks = {k: v for k, v in tasks.iteritems()
+                  if 'unittest_try_name' in v.attributes}
+talos_tasks = {k: v for k, v in tasks.iteritems()
+               if 'talos_try_name' in v.attributes}
 graph_with_jobs = TaskGraph(tasks, Graph(set(tasks), set()))
 
 
@@ -39,6 +53,7 @@ class TestTryOptionSyntax(unittest.TestCase):
         self.assertEqual(tos.build_types, [])
         self.assertEqual(tos.jobs, [])
         self.assertEqual(tos.unittests, [])
+        self.assertEqual(tos.talos, [])
         self.assertEqual(tos.platforms, [])
 
     def test_message_without_try(self):
@@ -47,6 +62,7 @@ class TestTryOptionSyntax(unittest.TestCase):
         self.assertEqual(tos.build_types, [])
         self.assertEqual(tos.jobs, [])
         self.assertEqual(tos.unittests, [])
+        self.assertEqual(tos.talos, [])
         self.assertEqual(tos.platforms, [])
 
     def test_unknown_args(self):
@@ -107,24 +123,28 @@ class TestTryOptionSyntax(unittest.TestCase):
         self.assertEqual(tos.platforms, None)
 
     def test_p_linux(self):
-        "-p linux sets platforms=['linux']"
+        "-p linux sets platforms=['linux', 'linux-l10n']"
         tos = TryOptionSyntax('try: -p linux', empty_graph)
-        self.assertEqual(tos.platforms, ['linux'])
+        self.assertEqual(tos.platforms, ['linux', 'linux-l10n'])
 
     def test_p_linux_win32(self):
-        "-p linux,win32 sets platforms=['linux', 'win32']"
+        "-p linux,win32 sets platforms=['linux', 'linux-l10n', 'win32']"
         tos = TryOptionSyntax('try: -p linux,win32', empty_graph)
-        self.assertEqual(sorted(tos.platforms), ['linux', 'win32'])
+        self.assertEqual(sorted(tos.platforms), ['linux', 'linux-l10n', 'win32'])
 
     def test_p_expands_ridealongs(self):
         "-p linux,linux64 includes the RIDEALONG_BUILDS"
         tos = TryOptionSyntax('try: -p linux,linux64', empty_graph)
         self.assertEqual(sorted(tos.platforms), [
             'linux',
+            'linux-l10n',
             'linux64',
+            'linux64-l10n',
             'sm-arm-sim',
             'sm-arm64-sim',
             'sm-compacting',
+            'sm-nonunified',
+            'sm-package',
             'sm-plain',
             'sm-rootanalysis',
         ])
@@ -137,7 +157,7 @@ class TestTryOptionSyntax(unittest.TestCase):
     def test_u_all(self):
         "-u all sets unittests=[..whole list..]"
         tos = TryOptionSyntax('try: -u all', graph_with_jobs)
-        self.assertEqual(sorted(tos.unittests), sorted([{'test': t} for t in tasks]))
+        self.assertEqual(sorted(tos.unittests), sorted([{'test': t} for t in unittest_tasks]))
 
     def test_u_single(self):
         "-u mochitest-webgl sets unittests=[mochitest-webgl]"
@@ -153,7 +173,7 @@ class TestTryOptionSyntax(unittest.TestCase):
         "-u e10s sets unittests=[all e10s unittests]"
         tos = TryOptionSyntax('try: -u e10s', graph_with_jobs)
         self.assertEqual(sorted(tos.unittests), sorted([
-            {'test': t} for t in tasks if 'e10s' in t
+            {'test': t} for t in unittest_tasks if 'e10s' in t
         ]))
 
     def test_u_commas(self):
@@ -218,12 +238,29 @@ class TestTryOptionSyntax(unittest.TestCase):
         tos = TryOptionSyntax('try: -u e10s-1[linux]', graph_with_jobs)
         self.assertEqual(sorted(tos.unittests), sorted([
             {'test': t, 'platforms': ['linux'], 'only_chunks': set('1')}
-            for t in tasks if 'e10s' in t
+            for t in unittest_tasks if 'e10s' in t
         ]))
 
+    def test_t_none(self):
+        "-t none sets talos=[]"
+        tos = TryOptionSyntax('try: -t none', graph_with_jobs)
+        self.assertEqual(sorted(tos.talos), [])
+
+    def test_t_all(self):
+        "-t all sets talos=[..whole list..]"
+        tos = TryOptionSyntax('try: -t all', graph_with_jobs)
+        self.assertEqual(sorted(tos.talos), sorted([{'test': t} for t in talos_tasks]))
+
+    def test_t_single(self):
+        "-t mochitest-webgl sets talos=[mochitest-webgl]"
+        tos = TryOptionSyntax('try: -t mochitest-webgl', graph_with_jobs)
+        self.assertEqual(sorted(tos.talos), sorted([{'test': 'mochitest-webgl'}]))
+
+    # -t shares an implementation with -u, so it's not tested heavily
+
     def test_trigger_tests(self):
-        "--trigger-tests 10 sets trigger_tests"
-        tos = TryOptionSyntax('try: --trigger-tests 10', empty_graph)
+        "--rebuild 10 sets trigger_tests"
+        tos = TryOptionSyntax('try: --rebuild 10', empty_graph)
         self.assertEqual(tos.trigger_tests, 10)
 
     def test_interactive(self):

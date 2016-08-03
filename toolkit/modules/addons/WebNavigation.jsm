@@ -25,6 +25,7 @@ const RECENT_DATA_THRESHOLD = 5 * 1000000;
 // onCreatedNavigationTarget
 
 var Manager = {
+  // Map[string -> Map[listener -> URLFilter]]
   listeners: new Map(),
 
   init() {
@@ -33,10 +34,12 @@ var Manager = {
     this.recentTabTransitionData = new WeakMap();
     Services.obs.addObserver(this, "autocomplete-did-enter-text", true);
 
+    Services.mm.addMessageListener("Content:Click", this);
     Services.mm.addMessageListener("Extension:DOMContentLoaded", this);
     Services.mm.addMessageListener("Extension:StateChange", this);
     Services.mm.addMessageListener("Extension:DocumentChange", this);
     Services.mm.addMessageListener("Extension:HistoryChange", this);
+
     Services.mm.loadFrameScript("resource://gre/modules/WebNavigationContent.js", true);
   },
 
@@ -45,24 +48,26 @@ var Manager = {
     Services.obs.removeObserver(this, "autocomplete-did-enter-text", true);
     this.recentTabTransitionData = new WeakMap();
 
+    Services.mm.removeMessageListener("Content:Click", this);
     Services.mm.removeMessageListener("Extension:StateChange", this);
     Services.mm.removeMessageListener("Extension:DocumentChange", this);
     Services.mm.removeMessageListener("Extension:HistoryChange", this);
     Services.mm.removeMessageListener("Extension:DOMContentLoaded", this);
+
     Services.mm.removeDelayedFrameScript("resource://gre/modules/WebNavigationContent.js");
     Services.mm.broadcastAsyncMessage("Extension:DisableWebNavigation");
   },
 
-  addListener(type, listener) {
+  addListener(type, listener, filters) {
     if (this.listeners.size == 0) {
       this.init();
     }
 
     if (!this.listeners.has(type)) {
-      this.listeners.set(type, new Set());
+      this.listeners.set(type, new Map());
     }
     let listeners = this.listeners.get(type);
-    listeners.add(listener);
+    listeners.set(listener, filters);
   },
 
   removeListener(type, listener) {
@@ -81,35 +86,41 @@ var Manager = {
   },
 
   /**
-   *  Support nsIObserver interface to observe the urlbar autocomplete events used
-   *  to keep track of the urlbar user interaction.
+   * Support nsIObserver interface to observe the urlbar autocomplete events used
+   * to keep track of the urlbar user interaction.
    */
   QueryInterface: XPCOMUtils.generateQI([Ci.nsIObserver, Ci.nsISupportsWeakReference]),
 
   /**
-   *  Observe autocomplete-did-enter-text topic to track the user interaction with
-   *  the awesome bar.
+   * Observe autocomplete-did-enter-text topic to track the user interaction with
+   * the awesome bar.
+   *
+   * @param {nsIAutoCompleteInput} subject
+   * @param {string} topic
+   * @param {string} data
    */
   observe: function(subject, topic, data) {
     if (topic == "autocomplete-did-enter-text") {
-      this.onURLBarAutoCompletion(subject, topic, data);
+      this.onURLBarAutoCompletion(subject);
     }
   },
 
   /**
-   *  Recognize the type of urlbar user interaction (e.g. typing a new url,
-   *  clicking on an url generated from a searchengine or a keyword, or a
-   *  bookmark found by the urlbar autocompletion).
+   * Recognize the type of urlbar user interaction (e.g. typing a new url,
+   * clicking on an url generated from a searchengine or a keyword, or a
+   * bookmark found by the urlbar autocompletion).
+   *
+   * @param {nsIAutoCompleteInput} input
    */
-  onURLBarAutoCompletion(subject, topic, data) {
-    if (subject && subject instanceof Ci.nsIAutoCompleteInput) {
+  onURLBarAutoCompletion(input) {
+    if (input && input instanceof Ci.nsIAutoCompleteInput) {
       // We are only interested in urlbar autocompletion events
-      if (subject.id !== "urlbar") {
+      if (input.id !== "urlbar") {
         return;
       }
 
-      let controller = subject.popup.view.QueryInterface(Ci.nsIAutoCompleteController);
-      let idx = subject.popup.selectedIndex;
+      let controller = input.popup.view.QueryInterface(Ci.nsIAutoCompleteController);
+      let idx = input.popup.selectedIndex;
 
       let tabTransistionData = {
         from_address_bar: true,
@@ -120,7 +131,7 @@ var Manager = {
         tabTransistionData.typed = true;
       } else {
         let value = controller.getValueAt(idx);
-        let action = subject._parseActionUrl(value);
+        let action = input._parseActionUrl(value);
 
         if (action) {
           // Detect keywork and generated and more typed scenarios.
@@ -170,8 +181,16 @@ var Manager = {
   },
 
   /**
-   *  Keep track of a recent user interaction and cache it in a
-   *  map associated to the current selected tab.
+   * Keep track of a recent user interaction and cache it in a
+   * map associated to the current selected tab.
+   *
+   * @param {object} tabTransitionData
+   * @param {boolean} [tabTransitionData.auto_bookmark]
+   * @param {boolean} [tabTransitionData.from_address_bar]
+   * @param {boolean} [tabTransitionData.generated]
+   * @param {boolean} [tabTransitionData.keyword]
+   * @param {boolean} [tabTransitionData.link]
+   * @param {boolean} [tabTransitionData.typed]
    */
   setRecentTabTransitionData(tabTransitionData) {
     let window = RecentWindow.getMostRecentBrowserWindow();
@@ -192,13 +211,16 @@ var Manager = {
   },
 
   /**
-   *  Retrieve recent data related to a recent user interaction give a
-   *  given tab's linkedBrowser (only if is is more recent than the
-   *  `RECENT_DATA_THRESHOLD`).
+   * Retrieve recent data related to a recent user interaction give a
+   * given tab's linkedBrowser (only if is is more recent than the
+   * `RECENT_DATA_THRESHOLD`).
    *
-   *  NOTE: this method is used to retrieve the tab transition data
-   *  collected when one of the `onCommitted`, `onHistoryStateUpdated`
-   *  or `onReferenceFragmentUpdated` events has been received.
+   * NOTE: this method is used to retrieve the tab transition data
+   * collected when one of the `onCommitted`, `onHistoryStateUpdated`
+   * or `onReferenceFragmentUpdated` events has been received.
+   *
+   * @param {XULBrowserElement} browser
+   * @returns {object}
    */
   getAndForgetRecentTabTransitionData(browser) {
     let data = this.recentTabTransitionData.get(browser);
@@ -214,8 +236,8 @@ var Manager = {
   },
 
   /**
-   *  Receive messages from the WebNavigationContent.js framescript
-   *  over message manager events.
+   * Receive messages from the WebNavigationContent.js framescript
+   * over message manager events.
    */
   receiveMessage({name, data, target}) {
     switch (name) {
@@ -234,6 +256,21 @@ var Manager = {
       case "Extension:DOMContentLoaded":
         this.onLoad(target, data);
         break;
+
+      case "Content:Click":
+        this.onContentClick(target, data);
+        break;
+    }
+  },
+
+  onContentClick(target, data) {
+    // We are interested only on clicks to links which are not "add to bookmark" commands
+    if (data.href && !data.bookmark) {
+      let ownerWin = target.ownerDocument.defaultView;
+      let where = ownerWin.whereToOpenLink(data);
+      if (where == "current") {
+        this.setRecentTabTransitionData({link: true});
+      }
     }
   },
 
@@ -303,8 +340,11 @@ var Manager = {
       details[prop] = extra[prop];
     }
 
-    for (let listener of listeners) {
-      listener(details);
+    for (let [listener, filters] of listeners) {
+      // Call the listener if the listener has no filter or if its filter matches.
+      if (!filters || filters.matches(extra.url)) {
+        listener(details);
+      }
     }
   },
 };

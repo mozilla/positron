@@ -1,3 +1,5 @@
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -166,11 +168,6 @@ private:
   // Only touched on the main thread, null if this is a same-process actor.
   RefPtr<ContentParent> mContent;
 
-  // mTransport is "owned" by this object but it must only be released on the
-  // IPC thread. It's left as a raw pointer here to prevent accidentally
-  // deleting it on the wrong thread. Only non-null for other-process actors.
-  Transport* mTransport;
-
   // Set when the actor is opened successfully and used to handle shutdown
   // hangs. Only touched on the background thread.
   nsTArray<ParentImpl*>* mLiveActorArray;
@@ -235,7 +232,7 @@ private:
 
   // For same-process actors.
   ParentImpl()
-  : mTransport(nullptr), mLiveActorArray(nullptr), mIsOtherProcessActor(false),
+  : mLiveActorArray(nullptr), mIsOtherProcessActor(false),
     mActorDestroyed(false)
   {
     AssertIsInMainProcess();
@@ -243,14 +240,13 @@ private:
   }
 
   // For other-process actors.
-  ParentImpl(ContentParent* aContent, Transport* aTransport)
-  : mContent(aContent), mTransport(aTransport), mLiveActorArray(nullptr),
+  explicit ParentImpl(ContentParent* aContent)
+  : mContent(aContent), mLiveActorArray(nullptr),
     mIsOtherProcessActor(true), mActorDestroyed(false)
   {
     AssertIsInMainProcess();
     AssertIsOnMainThread();
     MOZ_ASSERT(aContent);
-    MOZ_ASSERT(aTransport);
   }
 
   ~ParentImpl()
@@ -258,7 +254,6 @@ private:
     AssertIsInMainProcess();
     AssertIsOnMainThread();
     MOZ_ASSERT(!mContent);
-    MOZ_ASSERT(!mTransport);
   }
 
   void
@@ -409,6 +404,10 @@ private:
   GetOrCreateForCurrentThread(nsIIPCBackgroundChildCreateCallback* aCallback);
 
   // Forwarded from BackgroundChild.
+  static PBackgroundChild*
+  SynchronouslyCreateForCurrentThread();
+
+  // Forwarded from BackgroundChild.
   static void
   CloseForCurrentThread();
 
@@ -435,7 +434,7 @@ private:
           threadLocalInfo->mActor.forget(&actor);
 
           MOZ_ALWAYS_SUCCEEDS(
-	    NS_DispatchToMainThread(NewNonOwningRunnableMethod(actor, &ChildImpl::Release)));
+            NS_DispatchToMainThread(NewNonOwningRunnableMethod(actor, &ChildImpl::Release)));
         }
       }
       delete threadLocalInfo;
@@ -448,10 +447,6 @@ private:
   // This class is reference counted.
   ~ChildImpl()
   {
-    RefPtr<DeleteTask<Transport>> task =
-      new DeleteTask<Transport>(GetTransport());
-    XRE_GetIOMessageLoop()->PostTask(task.forget());
-
     AssertActorDestroyed();
   }
 
@@ -886,6 +881,13 @@ BackgroundChild::GetOrCreateForCurrentThread(
 }
 
 // static
+PBackgroundChild*
+BackgroundChild::SynchronouslyCreateForCurrentThread()
+{
+  return ChildImpl::SynchronouslyCreateForCurrentThread();
+}
+
+// static
 PBlobChild*
 BackgroundChild::GetOrCreateActorForBlob(PBackgroundChild* aBackgroundActor,
                                          nsIDOMBlob* aBlob)
@@ -1048,7 +1050,7 @@ ParentImpl::Alloc(ContentParent* aContent,
 
   sLiveActorCount++;
 
-  RefPtr<ParentImpl> actor = new ParentImpl(aContent, aTransport);
+  RefPtr<ParentImpl> actor = new ParentImpl(aContent);
 
   nsCOMPtr<nsIRunnable> connectRunnable =
     new ConnectActorRunnable(actor, aTransport, aOtherPid,
@@ -1258,7 +1260,7 @@ ParentImpl::ShutdownTimerCallback(nsITimer* aTimer, void* aClosure)
   nsCOMPtr<nsIRunnable> forceCloseRunnable =
     new ForceCloseBackgroundActorsRunnable(closure->mLiveActors);
   MOZ_ALWAYS_SUCCEEDS(closure->mThread->Dispatch(forceCloseRunnable,
-						 NS_DISPATCH_NORMAL));
+                                                 NS_DISPATCH_NORMAL));
 }
 
 void
@@ -1279,14 +1281,6 @@ ParentImpl::MainThreadActorDestroy()
   AssertIsOnMainThread();
   MOZ_ASSERT_IF(mIsOtherProcessActor, mContent);
   MOZ_ASSERT_IF(!mIsOtherProcessActor, !mContent);
-  MOZ_ASSERT_IF(mIsOtherProcessActor, mTransport);
-  MOZ_ASSERT_IF(!mIsOtherProcessActor, !mTransport);
-
-  if (mTransport) {
-    RefPtr<DeleteTask<Transport>> task = new DeleteTask<Transport>(mTransport);
-    XRE_GetIOMessageLoop()->PostTask(task.forget());
-    mTransport = nullptr;
-  }
 
   mContent = nullptr;
 
@@ -1313,19 +1307,18 @@ ParentImpl::CloneToplevel(const InfallibleTArray<ProtocolFdMapping>& aFds,
       continue;
     }
 
-    Transport* transport = OpenDescriptor(aFds[i].fd(),
-                                          Transport::MODE_SERVER);
+    UniquePtr<Transport> transport = OpenDescriptor(aFds[i].fd(), Transport::MODE_SERVER);
     if (!transport) {
       NS_WARNING("Failed to open transport!");
       break;
     }
 
     PBackgroundParent* clonedActor =
-      Alloc(aCtx->GetContentParent(), transport, base::GetProcId(aPeerProcess));
+      Alloc(aCtx->GetContentParent(), transport.get(), base::GetProcId(aPeerProcess));
     MOZ_ASSERT(clonedActor);
 
     clonedActor->CloneManagees(this, aCtx);
-    clonedActor->SetTransport(transport);
+    clonedActor->SetTransport(Move(transport));
 
     return clonedActor;
   }
@@ -1701,6 +1694,67 @@ ChildImpl::GetOrCreateForCurrentThread(
   }
 
   return true;
+}
+
+namespace {
+
+class Callback final : public nsIIPCBackgroundChildCreateCallback
+{
+  bool* mDone;
+
+public:
+  explicit Callback(bool* aDone)
+    : mDone(aDone)
+  {
+    MOZ_ASSERT(mDone);
+  }
+
+  NS_DECL_ISUPPORTS
+
+private:
+  ~Callback()
+  { }
+
+  virtual void
+  ActorCreated(PBackgroundChild* aActor) override
+  {
+    *mDone = true;
+  }
+
+  virtual void
+  ActorFailed() override
+  {
+    *mDone = true;
+  }
+};
+
+NS_IMPL_ISUPPORTS(Callback, nsIIPCBackgroundChildCreateCallback)
+
+} // anonymous namespace
+
+/* static */
+PBackgroundChild*
+ChildImpl::SynchronouslyCreateForCurrentThread()
+{
+  MOZ_ASSERT(!GetForCurrentThread());
+
+  bool done = false;
+  nsCOMPtr<nsIIPCBackgroundChildCreateCallback> callback = new Callback(&done);
+
+  if (NS_WARN_IF(!GetOrCreateForCurrentThread(callback))) {
+    return nullptr;
+  }
+
+  nsIThread* currentThread = NS_GetCurrentThread();
+  MOZ_ASSERT(currentThread);
+
+  while (!done) {
+    if (NS_WARN_IF(!NS_ProcessNextEvent(currentThread, true /* aMayWait */))) {
+      return nullptr;
+    }
+  }
+
+  return GetForCurrentThread();
 }
 
 // static

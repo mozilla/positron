@@ -47,9 +47,9 @@ const MS_PER_DAY = 86400000;
  });
 
 // Download remote resources early
-getJSON("devtools.webide.addonsURL", true);
-getJSON("devtools.webide.templatesURL", true);
-getJSON("devtools.devices.url", true);
+getJSON("devtools.webide.addonsURL");
+getJSON("devtools.webide.templatesURL");
+getJSON("devtools.devices.url");
 
 // See bug 989619
 console.log = console.log.bind(console);
@@ -238,11 +238,10 @@ var UI = {
 
   openInBrowser: function (url) {
     // Open a URL in a Firefox window
-    let browserWin = Services.wm.getMostRecentWindow("navigator:browser");
-    if (browserWin) {
-      let gBrowser = browserWin.gBrowser;
-      gBrowser.selectedTab = gBrowser.addTab(url);
-      browserWin.focus();
+    let mainWindow = Services.wm.getMostRecentWindow(gDevTools.chromeWindowType);
+    if (mainWindow) {
+      mainWindow.openUILinkIn(url, "tab");
+      mainWindow.focus()
     } else {
       window.open(url);
     }

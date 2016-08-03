@@ -312,14 +312,6 @@ CreateMediaDecodeTaskQueue()
   return queue.forget();
 }
 
-already_AddRefed<FlushableTaskQueue>
-CreateFlushableMediaDecodeTaskQueue()
-{
-  RefPtr<FlushableTaskQueue> queue = new FlushableTaskQueue(
-    GetMediaThreadPool(MediaThreadType::PLATFORM_DECODER));
-  return queue.forget();
-}
-
 void
 SimpleTimer::Cancel() {
   if (mTimer) {
@@ -495,6 +487,43 @@ IsAACContentType(const nsAString& aContentType)
       return codec.EqualsLiteral("mp4a.40.2") || // MPEG4 AAC-LC
              codec.EqualsLiteral("mp4a.40.5") || // MPEG4 HE-AAC
              codec.EqualsLiteral("mp4a.67");     // MPEG2 AAC-LC
+    });
+}
+
+bool
+IsVorbisContentType(const nsAString& aContentType)
+{
+  return CheckContentType(aContentType,
+    [](const nsAString& type) {
+      return type.EqualsLiteral("audio/webm") ||
+             type.EqualsLiteral("audio/ogg");
+    },
+    [](const nsAString& codec) {
+      return codec.EqualsLiteral("vorbis");
+    });
+}
+
+bool
+IsVP8ContentType(const nsAString& aContentType)
+{
+  return CheckContentType(aContentType,
+    [](const nsAString& type) {
+      return type.EqualsLiteral("video/webm");
+    },
+    [](const nsAString& codec) {
+      return codec.EqualsLiteral("vp8");
+    });
+}
+
+bool
+IsVP9ContentType(const nsAString& aContentType)
+{
+  return CheckContentType(aContentType,
+    [](const nsAString& type) {
+      return type.EqualsLiteral("video/webm");
+    },
+    [](const nsAString& codec) {
+      return codec.EqualsLiteral("vp9");
     });
 }
 

@@ -330,7 +330,16 @@ BytecodeEmitter::emitN(JSOp op, size_t extra, ptrdiff_t* offset)
 bool
 BytecodeEmitter::emitJumpTarget(JumpTarget* target)
 {
-    target->offset = offset();
+    ptrdiff_t off = offset();
+
+    // Alias consecutive jump targets.
+    if (off == current->lastTarget.offset + ptrdiff_t(JSOP_JUMPTARGET_LENGTH)) {
+        target->offset = current->lastTarget.offset;
+        return true;
+    }
+
+    target->offset = off;
+    current->lastTarget.offset = off;
     if (!emit1(JSOP_JUMPTARGET))
         return false;
     return true;
@@ -1018,17 +1027,9 @@ BytecodeEmitter::enterNestedScope(StmtInfoBCE* stmt, ObjectBox* objbox, StmtType
 bool
 BytecodeEmitter::popStatement()
 {
-    JumpTarget brk{ -1 };
-    return popStatement(brk);
-}
-
-bool
-BytecodeEmitter::popStatement(JumpTarget brk)
-{
     if (!innermostStmt()->isTrying()) {
-        if (brk.offset == -1 && !emitJumpTarget(&brk))
+        if (!emitJumpTargetAndPatch(innermostStmt()->breaks))
             return false;
-        patchJumpsToTarget(innermostStmt()->breaks, brk);
         patchJumpsToTarget(innermostStmt()->continues, innermostStmt()->update);
     }
 
@@ -2110,9 +2111,24 @@ BytecodeEmitter::checkSideEffects(ParseNode* pn, bool* answer)
       case PNK_TYPEOFEXPR:
       case PNK_VOID:
       case PNK_NOT:
-      case PNK_COMPUTED_NAME:
         MOZ_ASSERT(pn->isArity(PN_UNARY));
         return checkSideEffects(pn->pn_kid, answer);
+
+      // Even if the name expression is effect-free, performing ToPropertyKey on
+      // it might not be effect-free:
+      //
+      //   RegExp.prototype.toString = () => { throw 42; };
+      //   ({ [/regex/]: 0 }); // ToPropertyKey(/regex/) throws 42
+      //
+      //   function Q() {
+      //     ({ [new.target]: 0 });
+      //   }
+      //   Q.toString = () => { throw 17; };
+      //   new Q; // new.target will be Q, ToPropertyKey(Q) throws 17
+      case PNK_COMPUTED_NAME:
+        MOZ_ASSERT(pn->isArity(PN_UNARY));
+        *answer = true;
+        return true;
 
       // Looking up or evaluating the associated name could throw.
       case PNK_TYPEOFNAME:
@@ -3501,7 +3517,7 @@ BytecodeEmitter::emitSwitch(ParseNode* pn)
     }
 
     // Set the SRC_SWITCH note's offset operand to tell end of switch.
-    if (!setSrcNoteOffset(noteIndex, 0, offset() - top.offset))
+    if (!setSrcNoteOffset(noteIndex, 0, lastNonJumpTargetOffset() - top.offset))
         return false;
 
     if (switchOp == JSOP_TABLESWITCH) {
@@ -5748,7 +5764,7 @@ BytecodeEmitter::emitSpread(bool allowSelfHosted)
     if (!setSrcNoteOffset(noteIndex, 0, beq.offset - initialJump.offset))
         return false;
 
-    if (!popStatement(brk))
+    if (!popStatement())
         return false;
 
     if (!tryNoteList.append(JSTRY_FOR_OF, stackDepth, top.offset, brk.offset))
@@ -5859,7 +5875,7 @@ BytecodeEmitter::emitForOf(ParseNode* pn)
 
     // Fixup breaks and continues.
     // For StmtType::SPREAD, just pop innermostStmt().
-    if (!popStatement(brk))
+    if (!popStatement())
         return false;
 
     if (!tryNoteList.append(JSTRY_FOR_OF, stackDepth, top.offset, brk.offset))
@@ -5955,7 +5971,7 @@ BytecodeEmitter::emitForIn(ParseNode* pn)
         return false;
 
     // Fix up breaks and continues.
-    if (!popStatement(brk))
+    if (!popStatement())
         return false;
 
     // Pop the enumeration value.
@@ -6139,7 +6155,7 @@ BytecodeEmitter::emitCStyleFor(ParseNode* pn)
         return false;
 
     /* Now fixup all breaks and continues. */
-    if (!popStatement(brk))
+    if (!popStatement())
         return false;
     return true;
 }
@@ -6302,7 +6318,7 @@ BytecodeEmitter::emitComprehensionForOf(ParseNode* pn)
         return false;
 
     // Fixup breaks and continues.
-    if (!popStatement(brk))
+    if (!popStatement())
         return false;
 
     if (!tryNoteList.append(JSTRY_FOR_OF, stackDepth, top.offset, brk.offset))
@@ -6418,7 +6434,7 @@ BytecodeEmitter::emitComprehensionForIn(ParseNode* pn)
         return false;
 
     // Fix up breaks and continues.
-    if (!popStatement(brk))
+    if (!popStatement())
         return false;
 
     // Pop the enumeration value.
@@ -6716,7 +6732,7 @@ BytecodeEmitter::emitDo(ParseNode* pn)
     if (!setSrcNoteOffset(noteIndex, 0, 1 + (continues.offset - top.offset)))
         return false;
 
-    if (!popStatement(brk))
+    if (!popStatement())
         return false;
     return true;
 }
@@ -6787,7 +6803,7 @@ BytecodeEmitter::emitWhile(ParseNode* pn)
     if (!setSrcNoteOffset(noteIndex, 0, beq.offset - jmp.offset))
         return false;
 
-    if (!popStatement(brk))
+    if (!popStatement())
         return false;
     return true;
 }
@@ -7692,13 +7708,21 @@ BytecodeEmitter::emitCallOrNew(ParseNode* pn)
         callop = false;             /* trigger JSOP_UNDEFINED after */
         break;
     }
-    if (!callop) {
-        if (!emit1(JSOP_UNDEFINED))
-            return false;
-    }
 
     bool isNewOp = pn->getOp() == JSOP_NEW || pn->getOp() == JSOP_SPREADNEW ||
-                   pn->getOp() == JSOP_SUPERCALL || pn->getOp() == JSOP_SPREADSUPERCALL;;
+                   pn->getOp() == JSOP_SUPERCALL || pn->getOp() == JSOP_SPREADSUPERCALL;
+
+
+    // Emit room for |this|.
+    if (!callop) {
+        if (isNewOp) {
+            if (!emit1(JSOP_IS_CONSTRUCTING))
+                return false;
+        } else {
+            if (!emit1(JSOP_UNDEFINED))
+                return false;
+        }
+    }
 
     /*
      * Emit code for each argument in order, then emit the JSOP_*CALL or
@@ -7980,7 +8004,7 @@ BytecodeEmitter::emitLabeledStatement(const LabeledStatement* pn)
         return false;
 
     /* Patch the JSOP_LABEL offset. */
-    JumpTarget brk{ offset() };
+    JumpTarget brk{ lastNonJumpTargetOffset() };
     patchJumpsToTarget(top, brk);
 
     if (!popStatement())
@@ -8592,7 +8616,7 @@ BytecodeEmitter::emitClass(ParseNode* pn)
         ClassMethod& method = mn->as<ClassMethod>();
         ParseNode& methodName = method.name();
         if (!method.isStatic() &&
-            methodName.isKind(PNK_OBJECT_PROPERTY_NAME) &&
+            (methodName.isKind(PNK_OBJECT_PROPERTY_NAME) || methodName.isKind(PNK_STRING)) &&
             methodName.pn_atom == cx->names().constructor)
         {
             constructor = &method.method();
@@ -9380,7 +9404,7 @@ CGObjectList::finish(ObjectArray* array)
     MOZ_ASSERT(length <= INDEX_LIMIT);
     MOZ_ASSERT(length == array->length);
 
-    js::HeapPtrObject* cursor = array->vector + array->length;
+    js::GCPtrObject* cursor = array->vector + array->length;
     ObjectBox* objbox = lastbox;
     do {
         --cursor;

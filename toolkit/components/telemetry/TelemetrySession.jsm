@@ -105,12 +105,6 @@ var gLastMemoryPoll = null;
 
 var gWasDebuggerAttached = false;
 
-function getLocale() {
-  return Cc["@mozilla.org/chrome/chrome-registry;1"].
-         getService(Ci.nsIXULChromeRegistry).
-         getSelectedLocale('global');
-}
-
 XPCOMUtils.defineLazyServiceGetter(this, "Telemetry",
                                    "@mozilla.org/base/telemetry;1",
                                    "nsITelemetry");
@@ -187,35 +181,6 @@ function getPingType(aPayload) {
   }
 
   return PING_TYPE_MAIN;
-}
-
-/**
- * Date.toISOString() gives us UTC times, this gives us local times in the ISO date format.
- * http://www.w3.org/TR/NOTE-datetime
- */
-function toLocalTimeISOString(date) {
-  function padNumber(number, places) {
-    number = number.toString();
-    while (number.length < places) {
-      number = "0" + number;
-    }
-    return number;
-  }
-
-  let sign = (n) => n >= 0 ? "+" : "-";
-  // getTimezoneOffset counter-intuitively returns -60 for UTC+1.
-  let tzOffset = - date.getTimezoneOffset();
-
-  // YYYY-MM-DDThh:mm:ss.sTZD (eg 1997-07-16T19:20:30.45+01:00)
-  return    padNumber(date.getFullYear(), 4)
-    + "-" + padNumber(date.getMonth() + 1, 2)
-    + "-" + padNumber(date.getDate(), 2)
-    + "T" + padNumber(date.getHours(), 2)
-    + ":" + padNumber(date.getMinutes(), 2)
-    + ":" + padNumber(date.getSeconds(), 2)
-    + "." + date.getMilliseconds()
-    + sign(tzOffset) + padNumber(Math.floor(Math.abs(tzOffset / 60)), 2)
-    + ":" + padNumber(Math.abs(tzOffset % 60), 2);
 }
 
 /**
@@ -999,6 +964,31 @@ var Impl = {
     return ret;
   },
 
+  getScalars: function (subsession, clearSubsession) {
+    this._log.trace("getScalars - subsession: " + subsession + ", clearSubsession: " + clearSubsession);
+
+    if (!subsession) {
+      // We only support scalars for subsessions.
+      this._log.trace("getScalars - We only support scalars in subsessions.");
+      return {};
+    }
+
+    let scalarsSnapshot =
+      Telemetry.snapshotScalars(this.getDatasetType(), clearSubsession);
+
+    // Don't return the test scalars.
+    let ret = {};
+    for (let name in scalarsSnapshot) {
+      if (name.startsWith('telemetry.test') && this._testing == false) {
+        this._log.trace("getScalars - Skipping test scalar: " + name);
+      } else {
+        ret[name] = scalarsSnapshot[name];
+      }
+    }
+
+    return ret;
+  },
+
   getThreadHangStats: function getThreadHangStats(stats) {
     this._log.trace("getThreadHangStats");
 
@@ -1022,8 +1012,8 @@ var Impl = {
   getMetadata: function getMetadata(reason) {
     this._log.trace("getMetadata - Reason " + reason);
 
-    const sessionStartDate = toLocalTimeISOString(Utils.truncateToDays(this._sessionStartDate));
-    const subsessionStartDate = toLocalTimeISOString(Utils.truncateToDays(this._subsessionStartDate));
+    const sessionStartDate = Utils.toLocalTimeISOString(Utils.truncateToDays(this._sessionStartDate));
+    const subsessionStartDate = Utils.toLocalTimeISOString(Utils.truncateToDays(this._subsessionStartDate));
     const monotonicNow = Policy.monotonicNow();
 
     let ret = {
@@ -1282,6 +1272,13 @@ var Impl = {
       return payloadObj;
     }
 
+    // Set the scalars for the parent process.
+    payloadObj.processes = {
+      parent: {
+        scalars: protect(() => this.getScalars(isSubsession, clearSubsession)),
+      }
+    };
+
     // Additional payload for chrome process.
     payloadObj.info = info;
 
@@ -1354,6 +1351,10 @@ var Impl = {
         // Persist session data to disk (don't wait until it completes).
         let sessionData = this._getSessionDataObject();
         TelemetryStorage.saveSessionData(sessionData);
+
+        // Notify that there was a subsession split in the parent process. This is an
+        // internal topic and is only meant for internal Telemetry usage.
+        Services.obs.notifyObservers(null, "internal-telemetry-after-subsession-split", null);
       }
     }
 

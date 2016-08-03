@@ -9,10 +9,8 @@
 
 // Service workers can't be loaded from chrome://, but http:// is ok with
 // dom.serviceWorkers.testing.enabled turned on.
-const HTTP_ROOT = CHROME_ROOT.replace(
-  "chrome://mochitests/content/", "http://mochi.test:8888/");
-const SERVICE_WORKER = HTTP_ROOT + "service-workers/empty-sw.js";
-const TAB_URL = HTTP_ROOT + "service-workers/empty-sw.html";
+const SERVICE_WORKER = URL_ROOT + "service-workers/empty-sw.js";
+const TAB_URL = URL_ROOT + "service-workers/empty-sw.html";
 
 const SW_TIMEOUT = 1000;
 
@@ -55,12 +53,18 @@ add_task(function* () {
   ok(name, "Found the service worker in the list");
   let targetElement = name.parentNode.parentNode;
 
-  // Check that there is a Debug button but not a Start button.
-  ok(targetElement.querySelector(".debug-button"), "Found its debug button");
-  ok(!targetElement.querySelector(".start-button"), "No start button");
+  // The service worker may already be killed with the low 1s timeout
+  if (!targetElement.querySelector(".start-button")) {
+    // Check that there is a Debug button but not a Start button.
+    ok(targetElement.querySelector(".debug-button"), "Found its debug button");
 
-  // Wait for the service worker to be killed due to inactivity.
-  yield waitForMutation(targetElement, { childList: true });
+    // Wait for the service worker to be killed due to inactivity.
+    yield waitForMutation(targetElement, { childList: true });
+  } else {
+    // Check that there is no Debug button when the SW is already shut down.
+    ok(!targetElement.querySelector(".debug-button"), "No debug button when " +
+      "the worker is already killed");
+  }
 
   // We should now have a Start button but no Debug button.
   let startBtn = targetElement.querySelector(".start-button");
@@ -77,8 +81,12 @@ add_task(function* () {
   ok(!targetElement.querySelector(".start-button"), "No start button");
 
   // Finally, unregister the service worker itself.
-  yield unregisterServiceWorker(swTab);
-  ok(true, "Service worker registration unregistered");
+  try {
+    yield unregisterServiceWorker(swTab);
+    ok(true, "Service worker registration unregistered");
+  } catch (e) {
+    ok(false, "SW not unregistered; " + e);
+  }
 
   yield removeTab(swTab);
   yield closeAboutDebugging(tab);

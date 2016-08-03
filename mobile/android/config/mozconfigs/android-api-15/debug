@@ -2,6 +2,7 @@
 
 # Global options
 ac_add_options --enable-debug
+ENABLE_MARIONETTE=1
 
 # Android
 ac_add_options --with-android-min-sdk=15
@@ -15,5 +16,4 @@ ac_add_options --with-branding=mobile/android/branding/nightly
 # Treat warnings as errors (modulo ALLOW_COMPILER_WARNINGS).
 ac_add_options --enable-warnings-as-errors
 
-. "$topsrcdir/build/mozconfig.rust"
 . "$topsrcdir/mobile/android/config/mozconfigs/common.override"

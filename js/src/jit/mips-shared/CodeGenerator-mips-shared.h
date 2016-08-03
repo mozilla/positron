@@ -164,8 +164,14 @@ class CodeGeneratorMIPSShared : public CodeGeneratorShared
     virtual void visitTruncateDToInt32(LTruncateDToInt32* ins);
     virtual void visitTruncateFToInt32(LTruncateFToInt32* ins);
 
+    void visitWasmTruncateToInt32(LWasmTruncateToInt32* lir);
+
     // Out of line visitors.
     virtual void visitOutOfLineBailout(OutOfLineBailout* ool) = 0;
+    void visitOutOfLineWasmTruncateCheck(OutOfLineWasmTruncateCheck* ool);
+    void visitCopySignD(LCopySignD* ins);
+    void visitCopySignF(LCopySignF* ins);
+
   protected:
     virtual ValueOperand ToOutValue(LInstruction* ins) = 0;
     void memoryBarrier(MemoryBarrierBits barrier);
@@ -239,7 +245,7 @@ class CodeGeneratorMIPSShared : public CodeGeneratorShared
     void visitSimdBinaryCompFx4(LSimdBinaryCompFx4* lir) { MOZ_CRASH("NYI"); }
     void visitSimdBinaryArithIx4(LSimdBinaryArithIx4* lir) { MOZ_CRASH("NYI"); }
     void visitSimdBinaryArithFx4(LSimdBinaryArithFx4* lir) { MOZ_CRASH("NYI"); }
-    void visitSimdBinaryBitwiseX4(LSimdBinaryBitwiseX4* lir) { MOZ_CRASH("NYI"); }
+    void visitSimdBinaryBitwise(LSimdBinaryBitwise* lir) { MOZ_CRASH("NYI"); }
     void visitSimdGeneralShuffleI(LSimdGeneralShuffleI* lir) { MOZ_CRASH("NYI"); }
     void visitSimdGeneralShuffleF(LSimdGeneralShuffleF* lir) { MOZ_CRASH("NYI"); }
 };

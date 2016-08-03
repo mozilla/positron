@@ -4,10 +4,8 @@
 
 "use strict";
 
-const { Ci, Cc } = require("chrome");
 const { getJSON } = require("devtools/client/shared/getjson");
 const Services = require("Services");
-const promise = require("promise");
 
 const DEVICES_URL = "devtools.devices.url";
 const Strings = Services.strings.createBundle("chrome://devtools/locale/device.properties");
@@ -48,11 +46,9 @@ function AddDevice(device, type = "phones") {
 exports.AddDevice = AddDevice;
 
 // Get the complete devices catalog.
-function GetDevices(bypassCache = false) {
-  let deferred = promise.defer();
-
+function GetDevices() {
   // Fetch common devices from Mozilla's CDN.
-  getJSON(DEVICES_URL, bypassCache).then(devices => {
+  return getJSON(DEVICES_URL).then(devices => {
     for (let type in localDevices) {
       if (!devices[type]) {
         devices.TYPES.push(type);
@@ -60,10 +56,8 @@ function GetDevices(bypassCache = false) {
       }
       devices[type] = localDevices[type].concat(devices[type]);
     }
-    deferred.resolve(devices);
+    return devices;
   });
-
-  return deferred.promise;
 }
 exports.GetDevices = GetDevices;
 

@@ -353,8 +353,7 @@ HTMLCanvasElement::HTMLCanvasElement(already_AddRefed<mozilla::dom::NodeInfo>& a
   : nsGenericHTMLElement(aNodeInfo),
     mResetLayer(true) ,
     mWriteOnly(false)
-{
-}
+{}
 
 HTMLCanvasElement::~HTMLCanvasElement()
 {
@@ -593,10 +592,10 @@ HTMLCanvasElement::GetAttributeChangeHint(const nsIAtom* aAttribute,
   if (aAttribute == nsGkAtoms::width ||
       aAttribute == nsGkAtoms::height)
   {
-    NS_UpdateHint(retval, NS_STYLE_HINT_REFLOW);
+    retval |= NS_STYLE_HINT_REFLOW;
   } else if (aAttribute == nsGkAtoms::moz_opaque)
   {
-    NS_UpdateHint(retval, NS_STYLE_HINT_VISUAL);
+    retval |= NS_STYLE_HINT_VISUAL;
   }
   return retval;
 }

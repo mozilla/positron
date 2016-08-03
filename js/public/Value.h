@@ -51,12 +51,8 @@ namespace JS { class Value; }
 # define JSVAL_TAG_SHIFT 47
 #endif
 
-/*
- * We try to use enums so that printing a jsval_layout in the debugger shows
- * nice symbolic type tags, however we can only do this when we can force the
- * underlying type of the enum to be the desired size.
- */
-#if !defined(__SUNPRO_CC) && !defined(__xlC__)
+// Use enums so that printing a jsval_layout in the debugger shows nice
+// symbolic type tags.
 
 #if defined(_MSC_VER)
 # define JS_ENUM_HEADER(id, type)              enum id : type
@@ -157,64 +153,6 @@ static_assert(sizeof(JSValueShiftedTag) == sizeof(uint64_t),
 #undef JS_ENUM_HEADER
 #undef JS_ENUM_FOOTER
 
-#else  /* !defined(__SUNPRO_CC) && !defined(__xlC__) */
-
-typedef uint8_t JSValueType;
-#define JSVAL_TYPE_DOUBLE            ((uint8_t)0x00)
-#define JSVAL_TYPE_INT32             ((uint8_t)0x01)
-#define JSVAL_TYPE_UNDEFINED         ((uint8_t)0x02)
-#define JSVAL_TYPE_BOOLEAN           ((uint8_t)0x03)
-#define JSVAL_TYPE_MAGIC             ((uint8_t)0x04)
-#define JSVAL_TYPE_STRING            ((uint8_t)0x05)
-#define JSVAL_TYPE_SYMBOL            ((uint8_t)0x06)
-#define JSVAL_TYPE_PRIVATE_GCTHING   ((uint8_t)0x07)
-#define JSVAL_TYPE_NULL              ((uint8_t)0x08)
-#define JSVAL_TYPE_OBJECT            ((uint8_t)0x0c)
-#define JSVAL_TYPE_UNKNOWN           ((uint8_t)0x20)
-
-#if defined(JS_NUNBOX32)
-
-typedef uint32_t JSValueTag;
-#define JSVAL_TAG_CLEAR              ((uint32_t)(0xFFFFFF80))
-#define JSVAL_TAG_INT32              ((uint32_t)(JSVAL_TAG_CLEAR | JSVAL_TYPE_INT32))
-#define JSVAL_TAG_UNDEFINED          ((uint32_t)(JSVAL_TAG_CLEAR | JSVAL_TYPE_UNDEFINED))
-#define JSVAL_TAG_STRING             ((uint32_t)(JSVAL_TAG_CLEAR | JSVAL_TYPE_STRING))
-#define JSVAL_TAG_SYMBOL             ((uint32_t)(JSVAL_TAG_CLEAR | JSVAL_TYPE_SYMBOL))
-#define JSVAL_TAG_BOOLEAN            ((uint32_t)(JSVAL_TAG_CLEAR | JSVAL_TYPE_BOOLEAN))
-#define JSVAL_TAG_MAGIC              ((uint32_t)(JSVAL_TAG_CLEAR | JSVAL_TYPE_MAGIC))
-#define JSVAL_TAG_NULL               ((uint32_t)(JSVAL_TAG_CLEAR | JSVAL_TYPE_NULL))
-#define JSVAL_TAG_OBJECT             ((uint32_t)(JSVAL_TAG_CLEAR | JSVAL_TYPE_OBJECT))
-#define JSVAL_TAG_PRIVATE_GCTHING    ((uint32_t)(JSVAL_TAG_CLEAR | JSVAL_TYPE_PRIVATE_GCTHING))
-
-#elif defined(JS_PUNBOX64)
-
-typedef uint32_t JSValueTag;
-#define JSVAL_TAG_MAX_DOUBLE         ((uint32_t)(0x1FFF0))
-#define JSVAL_TAG_INT32              (uint32_t)(JSVAL_TAG_MAX_DOUBLE | JSVAL_TYPE_INT32)
-#define JSVAL_TAG_UNDEFINED          (uint32_t)(JSVAL_TAG_MAX_DOUBLE | JSVAL_TYPE_UNDEFINED)
-#define JSVAL_TAG_STRING             (uint32_t)(JSVAL_TAG_MAX_DOUBLE | JSVAL_TYPE_STRING)
-#define JSVAL_TAG_SYMBOL             (uint32_t)(JSVAL_TAG_MAX_DOUBLE | JSVAL_TYPE_SYMBOL)
-#define JSVAL_TAG_BOOLEAN            (uint32_t)(JSVAL_TAG_MAX_DOUBLE | JSVAL_TYPE_BOOLEAN)
-#define JSVAL_TAG_MAGIC              (uint32_t)(JSVAL_TAG_MAX_DOUBLE | JSVAL_TYPE_MAGIC)
-#define JSVAL_TAG_NULL               (uint32_t)(JSVAL_TAG_MAX_DOUBLE | JSVAL_TYPE_NULL)
-#define JSVAL_TAG_OBJECT             (uint32_t)(JSVAL_TAG_MAX_DOUBLE | JSVAL_TYPE_OBJECT)
-#define JSVAL_TAG_PRIVATE_GCTHING    (uint32_t)(JSVAL_TAG_MAX_DOUBLE | JSVAL_TYPE_PRIVATE_GCTHING)
-
-typedef uint64_t JSValueShiftedTag;
-#define JSVAL_SHIFTED_TAG_MAX_DOUBLE      ((((uint64_t)JSVAL_TAG_MAX_DOUBLE)     << JSVAL_TAG_SHIFT) | 0xFFFFFFFF)
-#define JSVAL_SHIFTED_TAG_INT32           (((uint64_t)JSVAL_TAG_INT32)           << JSVAL_TAG_SHIFT)
-#define JSVAL_SHIFTED_TAG_UNDEFINED       (((uint64_t)JSVAL_TAG_UNDEFINED)       << JSVAL_TAG_SHIFT)
-#define JSVAL_SHIFTED_TAG_STRING          (((uint64_t)JSVAL_TAG_STRING)          << JSVAL_TAG_SHIFT)
-#define JSVAL_SHIFTED_TAG_SYMBOL          (((uint64_t)JSVAL_TAG_SYMBOL)          << JSVAL_TAG_SHIFT)
-#define JSVAL_SHIFTED_TAG_BOOLEAN         (((uint64_t)JSVAL_TAG_BOOLEAN)         << JSVAL_TAG_SHIFT)
-#define JSVAL_SHIFTED_TAG_MAGIC           (((uint64_t)JSVAL_TAG_MAGIC)           << JSVAL_TAG_SHIFT)
-#define JSVAL_SHIFTED_TAG_NULL            (((uint64_t)JSVAL_TAG_NULL)            << JSVAL_TAG_SHIFT)
-#define JSVAL_SHIFTED_TAG_OBJECT          (((uint64_t)JSVAL_TAG_OBJECT)          << JSVAL_TAG_SHIFT)
-#define JSVAL_SHIFTED_TAG_PRIVATE_GCTHING (((uint64_t)JSVAL_TAG_PRIVATE_GCTHING) << JSVAL_TAG_SHIFT)
-
-#endif  /* JS_PUNBOX64 */
-#endif  /* !defined(__SUNPRO_CC) && !defined(__xlC__) */
-
 #if defined(JS_NUNBOX32)
 
 #define JSVAL_TYPE_TO_TAG(type)      ((JSValueTag)(JSVAL_TAG_CLEAR | (type)))
@@ -274,9 +212,6 @@ typedef enum JSWhyMagic
 
     /** magic value passed to natives to indicate construction */
     JS_IS_CONSTRUCTING,
-
-    /** arguments.callee has been overwritten */
-    JS_OVERWRITTEN_CALLEE,
 
     /** value of static block object slot */
     JS_BLOCK_NEEDS_CLONE,
@@ -432,8 +367,8 @@ JS_STATIC_ASSERT(sizeof(jsval_layout) == 8);
 #if defined(JS_VALUE_IS_CONSTEXPR)
 #  define JS_RETURN_LAYOUT_FROM_BITS(BITS) \
     return (jsval_layout) { .asBits = (BITS) }
-#  define JS_VALUE_CONSTEXPR MOZ_CONSTEXPR
-#  define JS_VALUE_CONSTEXPR_VAR MOZ_CONSTEXPR_VAR
+#  define JS_VALUE_CONSTEXPR constexpr
+#  define JS_VALUE_CONSTEXPR_VAR constexpr
 #else
 #  define JS_RETURN_LAYOUT_FROM_BITS(BITS) \
     jsval_layout l;                        \
@@ -611,7 +546,7 @@ static inline jsval_layout
 OBJECT_TO_JSVAL_IMPL(JSObject* obj)
 {
     jsval_layout l;
-    MOZ_ASSERT(uintptr_t(obj) > 0x1000 || uintptr_t(obj) == 0x42);
+    MOZ_ASSERT(uintptr_t(obj) > 0x1000 || uintptr_t(obj) == 0x48);
     l.s.tag = JSVAL_TAG_OBJECT;
     l.s.payload.obj = obj;
     return l;
@@ -627,7 +562,7 @@ static inline jsval_layout
 PRIVATE_PTR_TO_JSVAL_IMPL(void* ptr)
 {
     jsval_layout l;
-    MOZ_ASSERT(((uint32_t)ptr & 1) == 0);
+    MOZ_ASSERT((uintptr_t(ptr) & 1) == 0);
     l.s.tag = (JSValueTag)0;
     l.s.payload.ptr = ptr;
     MOZ_ASSERT(JSVAL_IS_DOUBLE_IMPL(l));
@@ -893,7 +828,7 @@ OBJECT_TO_JSVAL_IMPL(JSObject* obj)
 {
     jsval_layout l;
     uint64_t objBits = (uint64_t)obj;
-    MOZ_ASSERT(uintptr_t(obj) > 0x1000 || uintptr_t(obj) == 0x42);
+    MOZ_ASSERT(uintptr_t(obj) > 0x1000 || uintptr_t(obj) == 0x48);
     MOZ_ASSERT((objBits >> JSVAL_TAG_SHIFT) == 0);
     l.asBits = objBits | JSVAL_SHIFTED_TAG_OBJECT;
     return l;
@@ -943,7 +878,7 @@ static inline jsval_layout
 PRIVATE_PTR_TO_JSVAL_IMPL(void* ptr)
 {
     jsval_layout l;
-    uint64_t ptrBits = (uint64_t)ptr;
+    uintptr_t ptrBits = uintptr_t(ptr);
     MOZ_ASSERT((ptrBits & 1) == 0);
     l.asBits = ptrBits >> 1;
     MOZ_ASSERT(JSVAL_IS_DOUBLE_IMPL(l));
@@ -1617,7 +1552,7 @@ static inline Value
 ObjectValueCrashOnTouch()
 {
     Value v;
-    v.setObject(*reinterpret_cast<JSObject*>(0x42));
+    v.setObject(*reinterpret_cast<JSObject*>(0x48));
     return v;
 }
 
@@ -1851,10 +1786,11 @@ class ValueOperations
     JSObject* toObjectOrNull() const { return value().toObjectOrNull(); }
     gc::Cell* toGCThing() const { return value().toGCThing(); }
     JS::TraceKind traceKind() const { return value().traceKind(); }
-    uint64_t asRawBits() const { return value().asRawBits(); }
-
-    JSValueType extractNonDoubleType() const { return value().extractNonDoubleType(); }
+    void* toPrivate() const { return value().toPrivate(); }
     uint32_t toPrivateUint32() const { return value().toPrivateUint32(); }
+
+    uint64_t asRawBits() const { return value().asRawBits(); }
+    JSValueType extractNonDoubleType() const { return value().extractNonDoubleType(); }
 
     JSWhyMagic whyMagic() const { return value().whyMagic(); }
     uint32_t magicUint32() const { return value().magicUint32(); }
@@ -1885,6 +1821,8 @@ class MutableValueOperations : public ValueOperations<Outer>
     void setSymbol(JS::Symbol* sym) { this->value().setSymbol(sym); }
     void setObject(JSObject& obj) { this->value().setObject(obj); }
     void setObjectOrNull(JSObject* arg) { this->value().setObjectOrNull(arg); }
+    void setPrivate(void* ptr) { this->value().setPrivate(ptr); }
+    void setPrivateUint32(uint32_t ui) { this->value().setPrivateUint32(ui); }
     void setPrivateGCThing(js::gc::Cell* cell) { this->value().setPrivateGCThing(cell); }
 };
 

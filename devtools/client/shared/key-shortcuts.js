@@ -34,7 +34,6 @@ const ElectronKeysMapping = {
   "F22": "DOM_VK_F22",
   "F23": "DOM_VK_F23",
   "F24": "DOM_VK_F24",
-  "Plus": "DOM_VK_PLUS",
   "Space": "DOM_VK_SPACE",
   "Backspace": "DOM_VK_BACK_SPACE",
   "Delete": "DOM_VK_DELETE",
@@ -51,6 +50,7 @@ const ElectronKeysMapping = {
   "PageDown": "DOM_VK_PAGE_DOWN",
   "Escape": "DOM_VK_ESCAPE",
   "Esc": "DOM_VK_ESCAPE",
+  "Tab": "DOM_VK_TAB",
   "VolumeUp": "DOM_VK_VOLUME_UP",
   "VolumeDown": "DOM_VK_VOLUME_DOWN",
   "VolumeMute": "DOM_VK_VOLUME_MUTE",
@@ -69,12 +69,16 @@ const ElectronKeysMapping = {
  *
  * @param DOMWindow window
  *        The window object of the document to listen events from.
+ * @param DOMElement target
+ *        Optional DOM Element on which we should listen events from.
+ *        If omitted, we listen for all events fired on `window`.
  */
-function KeyShortcuts({ window }) {
+function KeyShortcuts({ window, target }) {
   this.window = window;
+  this.target = target || window;
   this.keys = new Map();
   this.eventEmitter = new EventEmitter();
-  this.window.addEventListener("keydown", this);
+  this.target.addEventListener("keydown", this);
 }
 
 /*
@@ -118,27 +122,61 @@ KeyShortcuts.parseElectronKey = function (window, str) {
     } else if (mod === "Shift") {
       shortcut.shift = true;
     } else {
-      throw new Error("Unsupported modifier: " + mod);
+      console.error("Unsupported modifier:", mod, "from key:", str);
+      return null;
     }
   }
 
-  if (typeof (key) === "string" && key.length === 1) {
+  // Plus is a special case. It's a character key and shouldn't be matched
+  // against a keycode as it is only accessible via Shift/Capslock
+  if (key === "Plus") {
+    key = "+";
+  }
+
+  if (typeof key === "string" && key.length === 1) {
     // Match any single character
     shortcut.key = key.toLowerCase();
   } else if (key in ElectronKeysMapping) {
     // Maps the others manually to DOM API DOM_VK_*
     key = ElectronKeysMapping[key];
     shortcut.keyCode = window.KeyboardEvent[key];
+    // Used only to stringify the shortcut
+    shortcut.keyCodeString = key;
   } else {
-    throw new Error("Unsupported key: " + key);
+    console.error("Unsupported key:", key);
+    return null;
   }
 
   return shortcut;
 };
 
+KeyShortcuts.stringify = function (shortcut) {
+  let list = [];
+  if (shortcut.alt) {
+    list.push("Alt");
+  }
+  if (shortcut.ctrl) {
+    list.push("Ctrl");
+  }
+  if (shortcut.meta) {
+    list.push("Cmd");
+  }
+  if (shortcut.shift) {
+    list.push("Shift");
+  }
+  let key;
+  if (shortcut.key) {
+    key = shortcut.key.toUpperCase();
+  } else {
+    key = shortcut.keyCodeString;
+  }
+  list.push(key);
+  return list.join("+");
+};
+
 KeyShortcuts.prototype = {
   destroy() {
-    this.window.removeEventListener("keydown", this);
+    this.target.removeEventListener("keydown", this);
     this.keys.clear();
   },
 
@@ -161,7 +199,12 @@ KeyShortcuts.prototype = {
     if (shortcut.keyCode) {
       return event.keyCode == shortcut.keyCode;
     }
-    return event.key.toLowerCase() == shortcut.key;
+    // For character keys, we match if the final character is the expected one.
+    // But for digits we also accept indirect match to please azerty keyboard,
+    // which requires Shift to be pressed to get digits.
+    return event.key.toLowerCase() == shortcut.key ||
+      (shortcut.key.match(/[0-9]/) &&
+       event.keyCode == shortcut.key.charCodeAt(0));
   },
 
   handleEvent(event) {
@@ -174,10 +217,15 @@ KeyShortcuts.prototype = {
 
   on(key, listener) {
     if (typeof listener !== "function") {
-      throw new Error("KeyShortcuts.on() expects a function as second argument");
+      throw new Error("KeyShortcuts.on() expects a function as " +
+                      "second argument");
     }
     if (!this.keys.has(key)) {
       let shortcut = KeyShortcuts.parseElectronKey(this.window, key);
+      // The key string is wrong and we were unable to compute the key shortcut
+      if (!shortcut) {
+        return;
+      }
       this.keys.set(key, shortcut);
     }
     this.eventEmitter.on(key, listener);

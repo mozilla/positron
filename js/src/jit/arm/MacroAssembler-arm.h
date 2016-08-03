@@ -277,6 +277,7 @@ class MacroAssemblerARM : public Assembler
     void ma_udiv(Register num, Register div, Register dest, Condition cond = Always);
     // Misc operations
     void ma_clz(Register src, Register dest, Condition cond = Always);
+    void ma_ctz(Register src, Register dest);
     // Memory:
     // Shortcut for when we know we're transferring 32 bits of data.
     void ma_dtr(LoadStore ls, Register rn, Imm32 offset, Register rt,
@@ -301,14 +302,16 @@ class MacroAssemblerARM : public Assembler
     void ma_strb(Register rt, DTRAddr addr, Index mode = Offset, Condition cc = Always);
     void ma_strh(Register rt, EDtrAddr addr, Index mode = Offset, Condition cc = Always);
     void ma_strd(Register rt, DebugOnly<Register> rt2, EDtrAddr addr, Index mode = Offset, Condition cc = Always);
+
     // Specialty for moving N bits of data, where n == 8,16,32,64.
     BufferOffset ma_dataTransferN(LoadStore ls, int size, bool IsSigned,
-                          Register rn, Register rm, Register rt,
-                          Index mode = Offset, Condition cc = Always, unsigned scale = TimesOne);
+                                  Register rn, Register rm, Register rt,
+                                  Index mode = Offset, Condition cc = Always, unsigned scale = TimesOne);
 
     BufferOffset ma_dataTransferN(LoadStore ls, int size, bool IsSigned,
-                          Register rn, Imm32 offset, Register rt,
-                          Index mode = Offset, Condition cc = Always);
+                                  Register rn, Imm32 offset, Register rt,
+                                  Index mode = Offset, Condition cc = Always);
+
     void ma_pop(Register r);
     void ma_push(Register r);
 
@@ -392,14 +395,13 @@ class MacroAssemblerARM : public Assembler
 
     BufferOffset ma_vdtr(LoadStore ls, const Address& addr, VFPRegister dest, Condition cc = Always);
 
-
     BufferOffset ma_vldr(VFPAddr addr, VFPRegister dest, Condition cc = Always);
     BufferOffset ma_vldr(const Address& addr, VFPRegister dest, Condition cc = Always);
-    BufferOffset ma_vldr(VFPRegister src, Register base, Register index, int32_t shift = defaultShift, Condition cc = Always);
+    BufferOffset ma_vldr(VFPRegister src, Register base, Register index,
+                         int32_t shift = defaultShift, Condition cc = Always);
 
     BufferOffset ma_vstr(VFPRegister src, VFPAddr addr, Condition cc = Always);
     BufferOffset ma_vstr(VFPRegister src, const Address& addr, Condition cc = Always);
-
     BufferOffset ma_vstr(VFPRegister src, Register base, Register index, int32_t shift,
                          int32_t offset, Condition cc = Always);
 
@@ -770,10 +772,6 @@ class MacroAssemblerARMCompat : public MacroAssemblerARM
     }
 
     template <typename T>
-    void storeUnboxedValue(ConstantOrRegister value, MIRType valueType, const T& dest,
-                           MIRType slotType);
-
-    template <typename T>
     void storeUnboxedPayload(ValueOperand value, T address, size_t nbytes) {
         switch (nbytes) {
           case 4:
@@ -948,8 +946,6 @@ class MacroAssemblerARMCompat : public MacroAssemblerARM
 
     void loadFloat32x3(const Address& src, FloatRegister dest) { MOZ_CRASH("NYI"); }
     void loadFloat32x3(const BaseIndex& src, FloatRegister dest) { MOZ_CRASH("NYI"); }
-    void storeFloat32x3(FloatRegister src, const Address& dest) { MOZ_CRASH("NYI"); }
-    void storeFloat32x3(FloatRegister src, const BaseIndex& dest) { MOZ_CRASH("NYI"); }
     void loadAlignedSimd128Float(const Address& addr, FloatRegister dest) { MOZ_CRASH("NYI"); }
     void storeAlignedSimd128Float(FloatRegister src, Address addr) { MOZ_CRASH("NYI"); }
     void loadUnalignedSimd128Float(const Address& addr, FloatRegister dest) { MOZ_CRASH("NYI"); }
@@ -967,6 +963,11 @@ class MacroAssemblerARMCompat : public MacroAssemblerARM
     void loadFloat32(const Address& addr, FloatRegister dest);
     void loadFloat32(const BaseIndex& src, FloatRegister dest);
 
+    void ma_loadHeapAsmJS(Register ptrReg, int size, bool needsBoundsCheck, bool faultOnOOB,
+                          FloatRegister output);
+    void ma_loadHeapAsmJS(Register ptrReg, int size, bool isSigned, bool needsBoundsCheck,
+                          bool faultOnOOB, Register output);
+
     void store8(Register src, const Address& address);
     void store8(Imm32 imm, const Address& address);
     void store8(Register src, const BaseIndex& address);
@@ -983,8 +984,6 @@ class MacroAssemblerARMCompat : public MacroAssemblerARM
     void store32(Imm32 src, const Address& address);
     void store32(Imm32 src, const BaseIndex& address);
 
-    void store32_NoSecondScratch(Imm32 src, const Address& address);
-
     void store64(Register64 src, Address address) {
         store32(src.low, address);
         store32(src.high, Address(address.base, address.offset + 4));
@@ -996,24 +995,14 @@ class MacroAssemblerARMCompat : public MacroAssemblerARM
     void storePtr(Register src, const Address& address);
     void storePtr(Register src, const BaseIndex& address);
     void storePtr(Register src, AbsoluteAddress dest);
-    void storeDouble(FloatRegister src, Address addr) {
-        ma_vstr(src, addr);
-    }
-    void storeDouble(FloatRegister src, BaseIndex addr) {
-        uint32_t scale = Imm32::ShiftOf(addr.scale).value;
-        ma_vstr(src, addr.base, addr.index, scale, addr.offset);
-    }
     void moveDouble(FloatRegister src, FloatRegister dest, Condition cc = Always) {
         ma_vmov(src, dest, cc);
     }
 
-    void storeFloat32(FloatRegister src, const Address& addr) {
-        ma_vstr(VFPRegister(src).singleOverlay(), addr);
-    }
-    void storeFloat32(FloatRegister src, const BaseIndex& addr) {
-        uint32_t scale = Imm32::ShiftOf(addr.scale).value;
-        ma_vstr(VFPRegister(src).singleOverlay(), addr.base, addr.index, scale, addr.offset);
-    }
+    void ma_storeHeapAsmJS(Register ptrReg, int size, bool needsBoundsCheck, bool faultOnOOB,
+                           FloatRegister value);
+    void ma_storeHeapAsmJS(Register ptrReg, int size, bool isSigned, bool needsBoundsCheck,
+                           bool faultOnOOB, Register value);
 
   private:
     template<typename T>
@@ -1345,6 +1334,11 @@ class MacroAssemblerARMCompat : public MacroAssemblerARM
     // The message will be printed at the stopping point.
     // (On non-simulator builds, does nothing.)
     void simulatorStop(const char* msg);
+
+    // Evaluate srcDest = minmax<isMax>{Float32,Double}(srcDest, other).
+    // Handle NaN specially if handleNaN is true.
+    void minMaxDouble(FloatRegister srcDest, FloatRegister other, bool handleNaN, bool isMax);
+    void minMaxFloat32(FloatRegister srcDest, FloatRegister other, bool handleNaN, bool isMax);
 
     void compareDouble(FloatRegister lhs, FloatRegister rhs);
 

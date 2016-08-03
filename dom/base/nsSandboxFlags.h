@@ -13,6 +13,11 @@
 #define nsSandboxFlags_h___
 
 /**
+ * This constant denotes the lack of a sandbox attribute/directive.
+ */
+const unsigned long SANDBOXED_NONE = 0x0;
+
+/**
  * This flag prevents content from navigating browsing contexts other than
  * itself, browsing contexts nested inside it, the top-level browsing context
  * and browsing contexts that it has opened.
@@ -80,33 +85,33 @@ const unsigned long SANDBOXED_AUTOMATIC_FEATURES = 0x100;
 // const unsigned long SANDBOXED_STORAGE_AREA_URLS = 0x200;
 
 /**
- * This flag prevents content from using the requestFullscreen() method.
- */
-const unsigned long SANDBOXED_FULLSCREEN = 0x400;
-
-/**
  * This flag blocks the document from changing document.domain.
  */
-const unsigned long SANDBOXED_DOMAIN = 0x800;
+const unsigned long SANDBOXED_DOMAIN = 0x400;
 
 /**
  * This flag prevents content from using window.alert(), window.confirm(),
  * window.print(), window.prompt() and the beforeunload event from putting up
  * dialogs.
  */
-const unsigned long SANDBOXED_MODALS = 0x1000;
+const unsigned long SANDBOXED_MODALS = 0x800;
 
 /**
  * This flag prevents content from escaping the sandbox by ensuring that any
  * auxiliary browsing context it creates inherits the content's active
  * sandboxing flag set.
  */
-const unsigned long SANDBOX_PROPAGATES_TO_AUXILIARY_BROWSING_CONTEXTS = 0x2000;
+const unsigned long SANDBOX_PROPAGATES_TO_AUXILIARY_BROWSING_CONTEXTS = 0x1000;
 
 /**
  * This flag prevents locking screen orientation.
  */
-const unsigned long SANDBOXED_ORIENTATION_LOCK = 0x4000;
+const unsigned long SANDBOXED_ORIENTATION_LOCK = 0x2000;
+
+/**
+ * This flag disables the Presentation API.
+ */
+const unsigned long SANDBOXED_PRESENTATION = 0x4000;
 
 const unsigned long SANDBOX_ALL_FLAGS = 0x7FFF;
 #endif

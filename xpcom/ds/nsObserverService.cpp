@@ -25,11 +25,11 @@
 //
 // To enable logging (see prlog.h for full details):
 //
-//    set NSPR_LOG_MODULES=ObserverService:5
-//    set NSPR_LOG_FILE=nspr.log
+//    set MOZ_LOG=ObserverService:5
+//    set MOZ_LOG_FILE=service.log
 //
-// this enables LogLevel::Debug level information and places all output in
-// the file nspr.log
+// This enables LogLevel::Debug level information and places all output in
+// the file service.log.
 static mozilla::LazyLogModule sObserverServiceLog("ObserverService");
 #define LOG(x) MOZ_LOG(sObserverServiceLog, mozilla::LogLevel::Debug, x)
 
@@ -227,7 +227,10 @@ nsObserverService::AddObserver(nsIObserver* aObserver, const char* aTopic,
     return NS_ERROR_INVALID_ARG;
   }
 
-  if (mozilla::net::IsNeckoChild() && !strncmp(aTopic, "http-on-", 8)) {
+  // Specifically allow http-on-opening-request in the child process;
+  // see bug 1269765.
+  if (mozilla::net::IsNeckoChild() && !strncmp(aTopic, "http-on-", 8) &&
+      strcmp(aTopic, "http-on-opening-request")) {
     nsCOMPtr<nsIConsoleService> console(do_GetService(NS_CONSOLESERVICE_CONTRACTID));
     nsCOMPtr<nsIScriptError> error(do_CreateInstance(NS_SCRIPTERROR_CONTRACTID));
     error->Init(NS_LITERAL_STRING("http-on-* observers only work in the parent process"),

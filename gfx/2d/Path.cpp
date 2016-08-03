@@ -259,7 +259,7 @@ FlattenBezierCurveSegment(const BezierControlPoints &aControlPoints,
 
   double t = 0;
   while (t < 1.0) {
-    PointD cp21 = currentCP.mCP2 - currentCP.mCP3;
+    PointD cp21 = currentCP.mCP2 - currentCP.mCP1;
     PointD cp31 = currentCP.mCP3 - currentCP.mCP1;
 
     /* To remove divisions and check for divide-by-zero, this is optimized from:
@@ -457,7 +457,7 @@ FlattenBezier(const BezierControlPoints &aControlPoints,
   FindInflectionPoints(aControlPoints, &t1, &t2, &count);
 
   // Check that at least one of the inflection points is inside [0..1]
-  if (count == 0 || ((t1 < 0 || t1 > 1.0) && (count == 1 || (t2 < 0 || t2 > 1.0))) ) {
+  if (count == 0 || ((t1 <= 0.0 || t1 >= 1.0) && (count == 1 || (t2 <= 0.0 || t2 >= 1.0))) ) {
     FlattenBezierCurveSegment(aControlPoints, aSink, aTolerance);
     return;
   }

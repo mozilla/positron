@@ -17,7 +17,8 @@ import org.mozilla.gecko.R;
 import org.mozilla.gecko.db.BrowserContract;
 
 public class CombinedHistoryAdapter extends RecyclerView.Adapter<CombinedHistoryItem> implements CombinedHistoryRecyclerView.AdapterContextMenuBuilder {
-    private static final int SYNCED_DEVICES_SMARTFOLDER_INDEX = 0;
+    private static final int RECENT_TABS_SMARTFOLDER_INDEX = 0;
+    private static final int SYNCED_DEVICES_SMARTFOLDER_INDEX = 1;
 
     // Array for the time ranges in milliseconds covered by each section.
     static final HistorySectionsHelper.SectionDateRange[] sectionDateRangeArray = new HistorySectionsHelper.SectionDateRange[SectionHeader.values().length];
@@ -39,6 +40,8 @@ public class CombinedHistoryAdapter extends RecyclerView.Adapter<CombinedHistory
     private Cursor historyCursor;
     private DevicesUpdateHandler devicesUpdateHandler;
     private int deviceCount = 0;
+    private RecentTabsUpdateHandler recentTabsUpdateHandler;
+    private int recentTabsCount = 0;
 
     // We use a sparse array to store each section header's position in the panel [more cheaply than a HashMap].
     private final SparseArray<SectionHeader> sectionHeaders;
@@ -47,6 +50,7 @@ public class CombinedHistoryAdapter extends RecyclerView.Adapter<CombinedHistory
         super();
         sectionHeaders = new SparseArray<>();
         HistorySectionsHelper.updateRecentSectionOffset(resources, sectionDateRangeArray);
+        this.setHasStableIds(true);
     }
 
     public void setHistory(Cursor history) {
@@ -65,11 +69,28 @@ public class CombinedHistoryAdapter extends RecyclerView.Adapter<CombinedHistory
                 @Override
                 public void onDeviceCountUpdated(int count) {
                     deviceCount = count;
-                    notifyItemChanged(0);
+                    notifyItemChanged(SYNCED_DEVICES_SMARTFOLDER_INDEX);
                 }
             };
         }
         return devicesUpdateHandler;
+    }
+
+    public interface RecentTabsUpdateHandler {
+        void onRecentTabsCountUpdated(int count);
+    }
+
+    public RecentTabsUpdateHandler getRecentTabsUpdateHandler() {
+        if (recentTabsUpdateHandler == null) {
+            recentTabsUpdateHandler = new RecentTabsUpdateHandler() {
+                @Override
+                public void onRecentTabsCountUpdated(int count) {
+                    recentTabsCount = count;
+                    notifyItemChanged(RECENT_TABS_SMARTFOLDER_INDEX);
+                }
+            };
+        }
+        return recentTabsUpdateHandler;
     }
 
     @Override
@@ -80,6 +101,7 @@ public class CombinedHistoryAdapter extends RecyclerView.Adapter<CombinedHistory
         final CombinedHistoryItem.ItemType itemType = CombinedHistoryItem.ItemType.viewTypeToItemType(viewType);
 
         switch (itemType) {
+            case RECENT_TABS:
             case SYNCED_DEVICES:
                 view = inflater.inflate(R.layout.home_smartfolder, viewGroup, false);
                 return new CombinedHistoryItem.SmartFolder(view);
@@ -102,6 +124,10 @@ public class CombinedHistoryAdapter extends RecyclerView.Adapter<CombinedHistory
         final int localPosition = transformAdapterPositionForDataStructure(itemType, position);
 
         switch (itemType) {
+            case RECENT_TABS:
+                ((CombinedHistoryItem.SmartFolder) viewHolder).bind(R.drawable.icon_recent, R.string.home_closed_tabs_title2, R.string.home_closed_tabs_one, R.string.home_closed_tabs_number, recentTabsCount);
+                break;
+
             case SYNCED_DEVICES:
                 ((CombinedHistoryItem.SmartFolder) viewHolder).bind(R.drawable.cloud, R.string.home_synced_devices_smartfolder, R.string.home_synced_devices_one, R.string.home_synced_devices_number, deviceCount);
                 break;
@@ -140,6 +166,9 @@ public class CombinedHistoryAdapter extends RecyclerView.Adapter<CombinedHistory
     }
 
     private CombinedHistoryItem.ItemType getItemTypeForPosition(int position) {
+        if (position == RECENT_TABS_SMARTFOLDER_INDEX) {
+            return CombinedHistoryItem.ItemType.RECENT_TABS;
+        }
         if (position == SYNCED_DEVICES_SMARTFOLDER_INDEX) {
             return CombinedHistoryItem.ItemType.SYNCED_DEVICES;
         }
@@ -159,6 +188,52 @@ public class CombinedHistoryAdapter extends RecyclerView.Adapter<CombinedHistory
     public int getItemCount() {
         final int historySize = historyCursor == null ? 0 : historyCursor.getCount();
         return historySize + sectionHeaders.size() + CombinedHistoryPanel.NUM_SMART_FOLDERS;
+    }
+
+    /**
+     * Returns stable ID for each position. Data behind historyCursor is a sorted Combined view.
+     *
+     * @param position view item position for which to generate a stable ID
+     * @return stable ID for given position
+     */
+    @Override
+    public long getItemId(int position) {
+        // Two randomly selected large primes used to generate non-clashing IDs.
+        final long PRIME_BOOKMARKS = 32416189867L;
+        final long PRIME_SECTION_HEADERS = 32416187737L;
+
+        // RecyclerView.NO_ID is -1, so let's start from -2 for our hard-coded IDs.
+        final int RECENT_TABS_ID = -2;
+        final int SYNCED_DEVICES_ID = -3;
+
+        switch (getItemTypeForPosition(position)) {
+            case RECENT_TABS:
+                return RECENT_TABS_ID;
+            case SYNCED_DEVICES:
+                return SYNCED_DEVICES_ID;
+            case SECTION_HEADER:
+                // We might have multiple section headers, so we try get unique IDs for them.
+                return position * PRIME_SECTION_HEADERS;
+            case HISTORY:
+                if (!historyCursor.moveToPosition(position)) {
+                    return RecyclerView.NO_ID;
+                }
+
+                final int historyIdCol = historyCursor.getColumnIndexOrThrow(BrowserContract.Combined.HISTORY_ID);
+                final long historyId = historyCursor.getLong(historyIdCol);
+
+                if (historyId != -1) {
+                    return historyId;
+                }
+
+                final int bookmarkIdCol = historyCursor.getColumnIndexOrThrow(BrowserContract.Combined.BOOKMARK_ID);
+                final long bookmarkId = historyCursor.getLong(bookmarkIdCol);
+
+                // Avoid clashing with historyId.
+                return bookmarkId * PRIME_BOOKMARKS;
+            default:
+                throw new IllegalStateException("Unexpected Home Panel item type");
+        }
     }
 
     /**

@@ -217,7 +217,8 @@ public:
                             const nsRect&        aDest,
                             const nsRect&        aFill,
                             const nsPoint&       aAnchor,
-                            const nsRect&        aDirty);
+                            const nsRect&        aDirty,
+                            const nsSize&        aRepeatSize);
 
   /**
    * Draw the image to a single component of a border-image style rendering.
@@ -273,10 +274,11 @@ private:
                   const nsRect&        aDest,
                   const nsRect&        aFill,
                   const nsPoint&       aAnchor,
+                  const nsSize&        aRepeatSize,
                   const mozilla::CSSIntRect& aSrc);
 
   /**
-   * Helper method for creating a gfxDrawable from mPaintServerFrame or 
+   * Helper method for creating a gfxDrawable from mPaintServerFrame or
    * mImageElementSurface.
    * Requires mType is eStyleImageType_Element.
    * Returns null if we cannot create the drawable.
@@ -336,6 +338,11 @@ struct nsBackgroundLayerState {
    * PrepareImageLayer.
    */
   nsPoint mAnchor;
+  /**
+   * The background-repeat property space keyword computes the
+   * repeat size which is image size plus spacing.
+   */
+  nsSize mRepeatSize;
 };
 
 struct nsCSSRendering {
@@ -443,6 +450,7 @@ struct nsCSSRendering {
                             const nsRect& aDirtyRect,
                             const nsRect& aDest,
                             const nsRect& aFill,
+                            const nsSize& aRepeatSize,
                             const mozilla::CSSIntRect& aSrc,
                             const nsSize& aIntrinsiceSize);
 
@@ -787,13 +795,12 @@ struct nsCSSRendering {
 
   static CompositionOp GetGFXCompositeMode(uint8_t aCompositeMode) {
     switch (aCompositeMode) {
-      case NS_STYLE_MASK_COMPOSITE_ADD:        return CompositionOp::OP_OVER;
-      case NS_STYLE_MASK_COMPOSITE_SUBSTRACT:  return CompositionOp::OP_OUT;
-      case NS_STYLE_MASK_COMPOSITE_INTERSECT:  return CompositionOp::OP_IN;
-      case NS_STYLE_MASK_COMPOSITE_EXCLUDE:    return CompositionOp::OP_XOR;
-      default:              MOZ_ASSERT(false); return CompositionOp::OP_OVER;
+      case NS_STYLE_MASK_COMPOSITE_ADD:       return CompositionOp::OP_OVER;
+      case NS_STYLE_MASK_COMPOSITE_SUBTRACT:  return CompositionOp::OP_OUT;
+      case NS_STYLE_MASK_COMPOSITE_INTERSECT: return CompositionOp::OP_IN;
+      case NS_STYLE_MASK_COMPOSITE_EXCLUDE:   return CompositionOp::OP_XOR;
+      default: MOZ_ASSERT(false);             return CompositionOp::OP_OVER;
     }
-
   }
 protected:
   static gfxRect GetTextDecorationRectInternal(

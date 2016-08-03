@@ -5,10 +5,13 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "mozilla/ArrayUtils.h"
+#include "mozilla/Preferences.h"
 #include "nsCOMPtr.h"
+#include "nsContentUtils.h"
 #include "nsCSPParser.h"
 #include "nsCSPUtils.h"
 #include "nsIConsoleService.h"
+#include "nsIContentPolicy.h"
 #include "nsIScriptError.h"
 #include "nsIStringBundle.h"
 #include "nsNetUtil.h"
@@ -56,6 +59,9 @@ static const uint32_t kSubHostPathCharacterCutoff = 512;
 
 static const char *const kHashSourceValidFns [] = { "sha256", "sha384", "sha512" };
 static const uint32_t kHashSourceValidFnsLen = 3;
+
+static const char* const kStyle    = "style";
+static const char* const kScript   = "script";
 
 /* ===== nsCSPTokenizer ==================== */
 
@@ -116,6 +122,7 @@ nsCSPTokenizer::tokenizeCSPPolicy(const nsAString &aPolicyString,
 }
 
 /* ===== nsCSPParser ==================== */
+bool nsCSPParser::sCSPExperimentalEnabled = false;
 
 nsCSPParser::nsCSPParser(cspTokens& aTokens,
                          nsIURI* aSelfURI,
@@ -133,6 +140,11 @@ nsCSPParser::nsCSPParser(cspTokens& aTokens,
  , mCSPContext(aCSPContext)
  , mDeliveredViaMetaTag(aDeliveredViaMetaTag)
 {
+  static bool initialized = false;
+  if (!initialized) {
+    initialized = true;
+    Preferences::AddBoolVarCache(&sCSPExperimentalEnabled, "security.csp.experimentalEnabled");
+  }
   CSPPARSERLOG(("nsCSPParser::nsCSPParser"));
 }
 
@@ -913,6 +925,46 @@ nsCSPParser::referrerDirectiveValue()
 }
 
 void
+nsCSPParser::requireSRIForDirectiveValue(nsRequireSRIForDirective* aDir) {
+  // directive-value = "style" / "script"
+  // directive name is token 0, we need to examine the remaining tokens
+  for (uint32_t i = 1; i < mCurDir.Length(); i++) {
+    // mCurToken is only set here and remains the current token
+    // to be processed, which avoid passing arguments between functions.
+    mCurToken = mCurDir[i];
+    resetCurValue();
+    CSPPARSERLOG(("nsCSPParser:::directive (require-sri-for directive), "
+                  "mCurToken: %s (valid), mCurValue: %s",
+                  NS_ConvertUTF16toUTF8(mCurToken).get(),
+                  NS_ConvertUTF16toUTF8(mCurValue).get()));
+    // add contentPolicyTypes to the CSP's required-SRI list for this token
+    if (mCurToken.LowerCaseEqualsASCII(kScript)) {
+      aDir->addType(nsIContentPolicy::TYPE_SCRIPT);
+    }
+    else if (mCurToken.LowerCaseEqualsASCII(kStyle)) {
+      aDir->addType(nsIContentPolicy::TYPE_STYLESHEET);
+    } else {
+      const char16_t* invalidTokenName[] = { mCurToken.get() };
+      logWarningErrorToConsole(nsIScriptError::warningFlag, "failedToParseUnrecognizedSource",
+                            invalidTokenName, ArrayLength(invalidTokenName));
+      CSPPARSERLOG(("nsCSPParser:::directive (require-sri-for directive), "
+                    "mCurToken: %s (invalid), mCurValue: %s",
+                    NS_ConvertUTF16toUTF8(mCurToken).get(),
+                    NS_ConvertUTF16toUTF8(mCurValue).get()));
+    }
+  }
+  if (!(aDir->hasType(nsIContentPolicy::TYPE_STYLESHEET)) &&
+      !(aDir->hasType(nsIContentPolicy::TYPE_SCRIPT))) {
+    const char16_t* directiveName[] = { mCurToken.get() };
+    logWarningErrorToConsole(nsIScriptError::warningFlag, "ignoringDirectiveWithNoValues",
+                               directiveName, ArrayLength(directiveName));
+    return;
+  } else {
+    mPolicy->addDirective(aDir);
+  }
+}
+
+void
 nsCSPParser::reportURIList(nsTArray<nsCSPBaseSrc*>& outSrcs)
 {
   nsCOMPtr<nsIURI> uri;
@@ -942,6 +994,41 @@ nsCSPParser::reportURIList(nsTArray<nsCSPBaseSrc*>& outSrcs)
   }
 }
 
+/* Helper function for parsing sandbox flags. This function solely concatenates
+ * all the source list tokens (the sandbox flags) so the attribute parser
+ * (nsContentUtils::ParseSandboxAttributeToFlags) can parse them.
+ */
+void
+nsCSPParser::sandboxFlagList(nsTArray<nsCSPBaseSrc*>& outSrcs)
+{
+  nsAutoString flags;
+
+  // remember, srcs start at index 1
+  for (uint32_t i = 1; i < mCurDir.Length(); i++) {
+    mCurToken = mCurDir[i];
+
+    CSPPARSERLOG(("nsCSPParser::sandboxFlagList, mCurToken: %s, mCurValue: %s",
+                 NS_ConvertUTF16toUTF8(mCurToken).get(),
+                 NS_ConvertUTF16toUTF8(mCurValue).get()));
+
+    if (!nsContentUtils::IsValidSandboxFlag(mCurToken)) {
+      const char16_t* params[] = { mCurToken.get() };
+      logWarningErrorToConsole(nsIScriptError::warningFlag,
+                               "couldntParseInvalidSandboxFlag",
+                               params, ArrayLength(params));
+      continue;
+    }
+
+    flags.Append(mCurToken);
+    if (i != mCurDir.Length() - 1) {
+      flags.AppendASCII(" ");
+    }
+  }
+
+  nsCSPSandboxFlags* sandboxFlags = new nsCSPSandboxFlags(flags);
+  outSrcs.AppendElement(sandboxFlags);
+}
+
 // directive-value = *( WSP / <VCHAR except ";" and ","> )
 void
 nsCSPParser::directiveValue(nsTArray<nsCSPBaseSrc*>& outSrcs)
@@ -963,6 +1050,13 @@ nsCSPParser::directiveValue(nsTArray<nsCSPBaseSrc*>& outSrcs)
     return;
   }
 
+  // For the sandbox flag the source list is a list of flags, so we're special
+  // casing this directive
+  if (CSP_IsDirective(mCurDir[0], nsIContentSecurityPolicy::SANDBOX_DIRECTIVE)) {
+    sandboxFlagList(outSrcs);
+    return;
+  }
+
   // Otherwise just forward to sourceList
   sourceList(outSrcs);
 }
@@ -976,7 +1070,9 @@ nsCSPParser::directiveName()
                NS_ConvertUTF16toUTF8(mCurValue).get()));
 
   // Check if it is a valid directive
-  if (!CSP_IsValidDirective(mCurToken)) {
+  if (!CSP_IsValidDirective(mCurToken) ||
+       (!sCSPExperimentalEnabled &&
+         CSP_IsDirective(mCurToken, nsIContentSecurityPolicy::REQUIRE_SRI_FOR))) {
     const char16_t* params[] = { mCurToken.get() };
     logWarningErrorToConsole(nsIScriptError::warningFlag, "couldNotProcessUnknownDirective",
                              params, ArrayLength(params));
@@ -1008,7 +1104,8 @@ nsCSPParser::directiveName()
   // http://www.w3.org/TR/CSP11/#delivery-html-meta-element
   if (mDeliveredViaMetaTag &&
        ((CSP_IsDirective(mCurToken, nsIContentSecurityPolicy::REPORT_URI_DIRECTIVE)) ||
-        (CSP_IsDirective(mCurToken, nsIContentSecurityPolicy::FRAME_ANCESTORS_DIRECTIVE)))) {
+        (CSP_IsDirective(mCurToken, nsIContentSecurityPolicy::FRAME_ANCESTORS_DIRECTIVE)) ||
+        (CSP_IsDirective(mCurToken, nsIContentSecurityPolicy::SANDBOX_DIRECTIVE)))) {
     // log to the console to indicate that meta CSP is ignoring the directive
     const char16_t* params[] = { mCurToken.get() };
     logWarningErrorToConsole(nsIScriptError::warningFlag,
@@ -1040,6 +1137,10 @@ nsCSPParser::directiveName()
                              params, ArrayLength(params));
     mFrameSrc = new nsCSPDirective(CSP_StringToCSPDirective(mCurToken));
     return mFrameSrc;
+  }
+
+  if (CSP_IsDirective(mCurToken, nsIContentSecurityPolicy::REQUIRE_SRI_FOR)) {
+    return new nsRequireSRIForDirective(CSP_StringToCSPDirective(mCurToken));
   }
 
   return new nsCSPDirective(CSP_StringToCSPDirective(mCurToken));
@@ -1098,6 +1199,13 @@ nsCSPParser::directive()
     }
     // add the directive and return
     mPolicy->addUpgradeInsecDir(static_cast<nsUpgradeInsecureDirective*>(cspDir));
+    return;
+  }
+
+  // special case handling for require-sri-for, which has directive values that
+  // are well-defined tokens but are not sources
+  if (cspDir->equals(nsIContentSecurityPolicy::REQUIRE_SRI_FOR)) {
+    requireSRIForDirectiveValue(static_cast<nsRequireSRIForDirective*>(cspDir));
     return;
   }
 

@@ -10,14 +10,14 @@
   */
 
 const EventEmitter = require("devtools/shared/event-emitter");
-const { Cu, Cc, Ci } = require("chrome");
-const { ViewHelpers } = require("devtools/client/shared/widgets/view-helpers");
+const { Cc, Ci } = require("chrome");
+const XHTML_NS = "http://www.w3.org/1999/xhtml";
 
 const { LocalizationHelper } = require("devtools/client/shared/l10n");
 const STRINGS_URI = "chrome://devtools/locale/filterwidget.properties";
 const L10N = new LocalizationHelper(STRINGS_URI);
 
-const {cssTokenizer} = require("devtools/client/shared/css-parsing-utils");
+const {cssTokenizer} = require("devtools/shared/css-parsing-utils");
 
 loader.lazyGetter(this, "asyncStorage",
                   () => require("devtools/shared/async-storage"));
@@ -152,6 +152,34 @@ exports.CSSFilterEditorWidget = CSSFilterEditorWidget;
 
 CSSFilterEditorWidget.prototype = {
   _initMarkup: function () {
+    let filterListSelectPlaceholder =
+      L10N.getStr("filterListSelectPlaceholder");
+    let addNewFilterButton = L10N.getStr("addNewFilterButton");
+    let presetsToggleButton = L10N.getStr("presetsToggleButton");
+    let newPresetPlaceholder = L10N.getStr("newPresetPlaceholder");
+    let savePresetButton = L10N.getStr("savePresetButton");
+
+    this.el.innerHTML = `
+      <div class="filters-list">
+        <div id="filters"></div>
+        <div class="footer">
+          <select value="">
+            <option value="">${filterListSelectPlaceholder}</option>
+          </select>
+          <button id="add-filter" class="add">${addNewFilterButton}</button>
+          <button id="toggle-presets">${presetsToggleButton}</button>
+        </div>
+      </div>
+
+      <div class="presets-list">
+        <div id="presets"></div>
+        <div class="footer">
+          <input value="" class="devtools-textinput"
+                 placeholder="${newPresetPlaceholder}"></input>
+          <button class="add">${savePresetButton}</button>
+        </div>
+      </div>
+    `;
     this.filtersList = this.el.querySelector("#filters");
     this.presetsList = this.el.querySelector("#presets");
     this.togglePresets = this.el.querySelector("#toggle-presets");
@@ -184,7 +212,7 @@ CSSFilterEditorWidget.prototype = {
   _populateFilterSelect: function () {
     let select = this.filterSelect;
     filterList.forEach(filter => {
-      let option = this.doc.createElement("option");
+      let option = this.doc.createElementNS(XHTML_NS, "option");
       option.innerHTML = option.value = filter.name;
       select.appendChild(option);
     });
@@ -194,31 +222,31 @@ CSSFilterEditorWidget.prototype = {
     * Creates a template for filter elements which is cloned and used in render
     */
   _buildFilterItemMarkup: function () {
-    let base = this.doc.createElement("div");
+    let base = this.doc.createElementNS(XHTML_NS, "div");
     base.className = "filter";
 
-    let name = this.doc.createElement("div");
+    let name = this.doc.createElementNS(XHTML_NS, "div");
     name.className = "filter-name";
 
-    let value = this.doc.createElement("div");
+    let value = this.doc.createElementNS(XHTML_NS, "div");
     value.className = "filter-value";
 
-    let drag = this.doc.createElement("i");
+    let drag = this.doc.createElementNS(XHTML_NS, "i");
     drag.title = L10N.getStr("dragHandleTooltipText");
 
-    let label = this.doc.createElement("label");
+    let label = this.doc.createElementNS(XHTML_NS, "label");
 
     name.appendChild(drag);
     name.appendChild(label);
 
-    let unitPreview = this.doc.createElement("span");
-    let input = this.doc.createElement("input");
+    let unitPreview = this.doc.createElementNS(XHTML_NS, "span");
+    let input = this.doc.createElementNS(XHTML_NS, "input");
     input.classList.add("devtools-textinput");
 
     value.appendChild(input);
     value.appendChild(unitPreview);
 
-    let removeButton = this.doc.createElement("button");
+    let removeButton = this.doc.createElementNS(XHTML_NS, "button");
     removeButton.className = "remove-button";
 
     base.appendChild(name);
@@ -229,16 +257,16 @@ CSSFilterEditorWidget.prototype = {
   },
 
   _buildPresetItemMarkup: function () {
-    let base = this.doc.createElement("div");
+    let base = this.doc.createElementNS(XHTML_NS, "div");
     base.classList.add("preset");
 
-    let name = this.doc.createElement("label");
+    let name = this.doc.createElementNS(XHTML_NS, "label");
     base.appendChild(name);
 
-    let value = this.doc.createElement("span");
+    let value = this.doc.createElementNS(XHTML_NS, "span");
     base.appendChild(value);
 
-    let removeButton = this.doc.createElement("button");
+    let removeButton = this.doc.createElementNS(XHTML_NS, "button");
     removeButton.classList.add("remove-button");
 
     base.appendChild(removeButton);
@@ -539,7 +567,8 @@ CSSFilterEditorWidget.prototype = {
       if (el.classList.contains("remove-button")) {
         // If the click happened on the remove button.
         presets.splice(id, 1);
-        this.setPresets(presets).then(this.renderPresets, e => console.error(e));
+        this.setPresets(presets).then(this.renderPresets,
+                                      ex => console.error(ex));
       } else {
         // Or if the click happened on a preset.
         let p = presets[id];
@@ -547,7 +576,7 @@ CSSFilterEditorWidget.prototype = {
         this.setCssValue(p.value);
         this.addPresetInput.value = p.name;
       }
-    }, e => console.error(e));
+    }, ex => console.error(ex));
   },
 
   _togglePresets: function () {
@@ -575,8 +604,9 @@ CSSFilterEditorWidget.prototype = {
         presets.push({name, value});
       }
 
-      this.setPresets(presets).then(this.renderPresets, e => console.error(e));
-    }, e => console.error(e));
+      this.setPresets(presets).then(this.renderPresets,
+                                    ex => console.error(ex));
+    }, ex => console.error(ex));
   },
 
   /**
@@ -658,6 +688,11 @@ CSSFilterEditorWidget.prototype = {
 
   renderPresets: function () {
     this.getPresets().then(presets => {
+      // getPresets is async and the widget may be destroyed in between.
+      if (!this.presetsList) {
+        return;
+      }
+
       if (!presets || !presets.length) {
         this.presetsList.innerHTML = `<p>${L10N.getStr("emptyPresetList")}</p>`;
         this.emit("render");
@@ -840,7 +875,7 @@ CSSFilterEditorWidget.prototype = {
 
   removeAt: function (index) {
     if (!this.filters[index]) {
-      return null;
+      return;
     }
 
     this.filters.splice(index, 1);

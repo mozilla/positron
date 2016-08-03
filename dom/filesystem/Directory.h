@@ -11,7 +11,6 @@
 #include "mozilla/ErrorResult.h"
 #include "mozilla/dom/BindingDeclarations.h"
 #include "mozilla/dom/File.h"
-#include "nsAutoPtr.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsWrapperCache.h"
 
@@ -61,6 +60,11 @@ public:
 
   static already_AddRefed<Promise>
   GetRoot(FileSystemBase* aFileSystem, ErrorResult& aRv);
+
+  static already_AddRefed<Directory>
+  Constructor(const GlobalObject& aGlobal,
+              const nsAString& aRealPath,
+              ErrorResult& aRv);
 
   static already_AddRefed<Directory>
   Create(nsISupports* aParent, nsIFile* aDirectory,

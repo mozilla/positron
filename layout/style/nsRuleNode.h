@@ -788,6 +788,11 @@ protected:
                             nsStyleContext* aContext,
                             bool aIsBoxShadow,
                             mozilla::RuleNodeCacheConditions& aConditions);
+  already_AddRefed<nsStyleBasicShape>
+  GetStyleBasicShapeFromCSSValue(const nsCSSValue& aValue,
+                                 nsStyleContext* aStyleContext,
+                                 nsPresContext* aPresContext,
+                                 mozilla::RuleNodeCacheConditions& aConditions);
   bool SetStyleFilterToCSSValue(nsStyleFilter* aStyleFilter,
                                 const nsCSSValue& aValue,
                                 nsStyleContext* aStyleContext,
@@ -1024,15 +1029,15 @@ public:
   static void ComputeFontFeatures(const nsCSSValuePairList *aFeaturesList,
                                   nsTArray<gfxFontFeature>& aFeatureSettings);
 
-  static nscoord CalcFontPointSize(int32_t aHTMLSize, int32_t aBasePointSize, 
+  static nscoord CalcFontPointSize(int32_t aHTMLSize, int32_t aBasePointSize,
                                    nsPresContext* aPresContext,
                                    nsFontSizeType aFontSizeType = eFontSize_HTML);
 
-  static nscoord FindNextSmallerFontSize(nscoord aFontSize, int32_t aBasePointSize, 
+  static nscoord FindNextSmallerFontSize(nscoord aFontSize, int32_t aBasePointSize,
                                          nsPresContext* aPresContext,
                                          nsFontSizeType aFontSizeType = eFontSize_HTML);
 
-  static nscoord FindNextLargerFontSize(nscoord aFontSize, int32_t aBasePointSize, 
+  static nscoord FindNextLargerFontSize(nscoord aFontSize, int32_t aBasePointSize,
                                         nsPresContext* aPresContext,
                                         nsFontSizeType aFontSizeType = eFontSize_HTML);
 

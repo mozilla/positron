@@ -7,7 +7,7 @@ package org.mozilla.gecko.preferences;
 import org.json.JSONException;
 import org.json.JSONObject;
 import org.mozilla.gecko.R;
-import org.mozilla.gecko.SnackbarHelper;
+import org.mozilla.gecko.SnackbarBuilder;
 import org.mozilla.gecko.favicons.Favicons;
 import org.mozilla.gecko.favicons.OnFaviconLoadedListener;
 import org.mozilla.gecko.favicons.decoders.FaviconDecoder;
@@ -92,9 +92,10 @@ public class SearchEnginePreference extends CustomListPreference {
         if (mParentCategory.getPreferenceCount() == 1) {
             Activity activity = (Activity) getContext();
 
-            SnackbarHelper.showSnackbar(activity,
-                    activity.getString(R.string.pref_search_last_toast),
-                    Snackbar.LENGTH_LONG);
+            SnackbarBuilder.builder(activity)
+                    .message(R.string.pref_search_last_toast)
+                    .duration(Snackbar.LENGTH_LONG)
+                    .buildAndShow();
 
             return;
         }
@@ -172,7 +173,9 @@ public class SearchEnginePreference extends CustomListPreference {
                 }
             }
 
-            Favicons.getSizedFavicon(getContext(), mIdentifier, iconURI, desiredWidth, 0,
+            Favicons.getSizedFavicon(getContext(), mIdentifier, iconURI,
+                Favicons.LoadType.PRIVILEGED, // We have an internal store of search engine icons, hence we're always loading PRIVILEGED icons here
+                desiredWidth, 0,
                 new OnFaviconLoadedListener() {
                     @Override
                     public void onFaviconLoaded(String url, String faviconURL, Bitmap favicon) {

@@ -9,11 +9,13 @@ import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.List;
 
+import android.support.annotation.Nullable;
 import android.support.v4.content.ContextCompat;
 import org.mozilla.gecko.AppConstants.Versions;
 import org.mozilla.gecko.BrowserApp;
 import org.mozilla.gecko.GeckoAppShell;
 import org.mozilla.gecko.R;
+import org.mozilla.gecko.SiteIdentity;
 import org.mozilla.gecko.Tab;
 import org.mozilla.gecko.Tabs;
 import org.mozilla.gecko.Telemetry;
@@ -161,8 +163,9 @@ public abstract class BrowserToolbar extends ThemedRelativeLayout
     }
 
     public static BrowserToolbar create(final Context context, final AttributeSet attrs) {
+        final boolean isLargeResource = context.getResources().getBoolean(R.bool.is_large_resource);
         final BrowserToolbar toolbar;
-        if (HardwareUtils.isTablet()) {
+        if (isLargeResource) {
             toolbar = new BrowserToolbarTablet(context, attrs);
         } else {
             toolbar = new BrowserToolbarPhone(context, attrs);
@@ -403,7 +406,7 @@ public abstract class BrowserToolbar extends ThemedRelativeLayout
     }
 
     @Override
-    public void onTabChanged(@NonNull Tab tab, Tabs.TabEvents msg, String data) {
+    public void onTabChanged(@Nullable Tab tab, Tabs.TabEvents msg, String data) {
         Log.d(LOGTAG, "onTabChanged: " + msg);
         final Tabs tabs = Tabs.getInstance();
 
@@ -492,7 +495,7 @@ public abstract class BrowserToolbar extends ThemedRelativeLayout
                     break;
             }
 
-            if (!flags.isEmpty()) {
+            if (!flags.isEmpty() && tab != null) {
                 updateDisplayLayout(tab, flags);
             }
         }
@@ -802,6 +805,11 @@ public abstract class BrowserToolbar extends ThemedRelativeLayout
      * @return the url that was entered
      */
     public String commitEdit() {
+        Tab tab = Tabs.getInstance().getSelectedTab();
+        if (tab != null) {
+            tab.resetSiteIdentity();
+        }
+
         final String url = stopEditing();
         if (!TextUtils.isEmpty(url)) {
             setTitle(url);

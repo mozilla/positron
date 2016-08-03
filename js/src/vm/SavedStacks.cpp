@@ -246,6 +246,8 @@ SavedFrame::HashPolicy::hash(const Lookup& lookup)
 /* static */ bool
 SavedFrame::HashPolicy::match(SavedFrame* existing, const Lookup& lookup)
 {
+    MOZ_ASSERT(existing);
+
     if (existing->getLine() != lookup.line)
         return false;
 
@@ -355,7 +357,7 @@ SavedFrame::finalize(FreeOp* fop, JSObject* obj)
     JSPrincipals* p = obj->as<SavedFrame>().getPrincipals();
     if (p) {
         JSRuntime* rt = obj->runtimeFromMainThread();
-        JS_DropPrincipals(rt, p);
+        JS_DropPrincipals(rt->contextFromMainThread(), p);
     }
 }
 
@@ -509,10 +511,10 @@ SavedFrame::create(JSContext* cx)
 }
 
 bool
-SavedFrame::isSelfHosted()
+SavedFrame::isSelfHosted(JSContext* cx)
 {
     JSAtom* source = getSource();
-    return StringEqualsAscii(source, "self-hosted");
+    return source == cx->names().selfHosted;
 }
 
 /* static */ bool
@@ -558,7 +560,8 @@ GetFirstSubsumedFrame(JSContext* cx, HandleSavedFrame frame, JS::SavedFrameSelfH
 
     RootedSavedFrame rootedFrame(cx, frame);
     while (rootedFrame) {
-        if ((selfHosted == JS::SavedFrameSelfHosted::Include || !rootedFrame->isSelfHosted()) &&
+        if ((selfHosted == JS::SavedFrameSelfHosted::Include ||
+             !rootedFrame->isSelfHosted(cx)) &&
             SavedFrameSubsumedByCaller(cx, rootedFrame))
         {
             return rootedFrame;
@@ -900,7 +903,7 @@ BuildStackString(JSContext* cx, HandleObject stack, MutableHandleString stringp,
         js::RootedSavedFrame parent(cx);
         do {
             MOZ_ASSERT(SavedFrameSubsumedByCaller(cx, frame));
-            MOZ_ASSERT(!frame->isSelfHosted());
+            MOZ_ASSERT(!frame->isSelfHosted(cx));
 
             RootedString asyncCause(cx, frame->getAsyncCause());
             if (!asyncCause && skippedAsync)
@@ -1081,7 +1084,7 @@ SavedStacks::saveCurrentStack(JSContext* cx, MutableHandleSavedFrame frame, unsi
     }
 
     AutoSPSEntry psuedoFrame(cx->runtime(), "js::SavedStacks::saveCurrentStack");
-    FrameIter iter(cx, FrameIter::ALL_CONTEXTS, FrameIter::GO_THROUGH_SAVED);
+    FrameIter iter(cx);
     return insertFrames(cx, iter, frame, maxFrameCount);
 }
 
@@ -1361,8 +1364,10 @@ SavedStacks::getOrCreateSavedFrame(JSContext* cx, SavedFrame::HandleLookup looku
 {
     const SavedFrame::Lookup& lookupInstance = lookup.get();
     DependentAddPtr<SavedFrame::Set> p(cx, frames, lookupInstance);
-    if (p)
+    if (p) {
+        MOZ_ASSERT(*p);
         return *p;
+    }
 
     RootedSavedFrame frame(cx, createFrameFromLookup(cx, lookup));
     if (!frame)
@@ -1560,8 +1565,6 @@ ConcreteStackFrame<SavedFrame>::constructSavedFrameStack(JSContext* cx,
 // `JS::ubi::AtomOrTwoByteChars` string to a `JSAtom*`.
 struct MOZ_STACK_CLASS AtomizingMatcher
 {
-    using ReturnType = JSAtom*;
-
     JSContext* cx;
     size_t     length;
 

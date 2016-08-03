@@ -268,14 +268,20 @@ public class ToolbarDisplayLayout extends ThemedLinearLayout {
             return;
         }
 
-        final boolean isHttpOrHttps = StringUtils.isHttpOrHttps(url);
         final String baseDomain = tab.getBaseDomain();
 
         String strippedURL = stripAboutReaderURL(url);
 
+        final boolean isHttpOrHttps = StringUtils.isHttpOrHttps(strippedURL);
+
         if (mPrefs.shouldTrimUrls()) {
             strippedURL = StringUtils.stripCommonSubdomains(StringUtils.stripScheme(strippedURL));
         }
+
+        // The URL bar does not support RTL currently (See bug 928688 and meta bug 702845).
+        // Displaying a URL using RTL (or mixed) characters can lead to an undesired reordering
+        // of elements of the URL. That's why we are forcing the URL to use LTR (bug 1284372).
+        strippedURL = StringUtils.forceLTR(strippedURL);
 
         // This value is not visible to screen readers but we rely on it when running UI tests. Screen
         // readers will instead focus BrowserToolbar and read the "base domain" from there. UI tests
@@ -290,12 +296,9 @@ public class ToolbarDisplayLayout extends ThemedLinearLayout {
                 && SwitchBoard.isInExperiment(mActivity, Experiments.URLBAR_SHOW_ORIGIN_ONLY)) {
             // Show just the base domain as title
             setTitle(baseDomain);
-        } else if (isHttpOrHttps) {
+        } else {
             // Display full URL with base domain highlighted as title
             updateAndColorTitleFromFullURL(strippedURL, baseDomain, tab.isPrivate());
-        } else {
-            // Not http(s): Just show the full URL as title
-            setTitle(url);
         }
     }
 
@@ -352,19 +355,16 @@ public class ToolbarDisplayLayout extends ThemedLinearLayout {
         final MixedMode activeMixedMode;
         final MixedMode displayMixedMode;
         final TrackingMode trackingMode;
-        final boolean loginInsecure;
         if (siteIdentity == null) {
             securityMode = SecurityMode.UNKNOWN;
             activeMixedMode = MixedMode.UNKNOWN;
             displayMixedMode = MixedMode.UNKNOWN;
             trackingMode = TrackingMode.UNKNOWN;
-            loginInsecure = false;
         } else {
             securityMode = siteIdentity.getSecurityMode();
             activeMixedMode = siteIdentity.getMixedModeActive();
             displayMixedMode = siteIdentity.getMixedModeDisplay();
             trackingMode = siteIdentity.getTrackingMode();
-            loginInsecure = siteIdentity.loginInsecure();
         }
 
         // This is a bit tricky, but we have one icon and three potential indicators.
@@ -383,8 +383,6 @@ public class ToolbarDisplayLayout extends ThemedLinearLayout {
         if (AboutPages.isTitlelessAboutPage(tab.getURL())) {
             // We always want to just show a search icon on about:home
             imageLevel = LEVEL_SEARCH_ICON;
-        } else if (loginInsecure) {
-            imageLevel = LEVEL_LOCK_DISABLED;
         } else if (trackingMode == TrackingMode.TRACKING_CONTENT_LOADED) {
             imageLevel = LEVEL_SHIELD_DISABLED;
         } else if (trackingMode == TrackingMode.TRACKING_CONTENT_BLOCKED) {

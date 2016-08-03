@@ -223,18 +223,17 @@ AutoGCRooter::trace(JSTracer* trc)
 /* static */ void
 AutoGCRooter::traceAll(JSTracer* trc)
 {
-    for (ContextIter cx(trc->runtime()); !cx.done(); cx.next())
-        traceAllInContext(&*cx, trc);
+    traceAllInContext(trc->runtime()->contextFromMainThread(), trc);
 }
 
 /* static */ void
 AutoGCRooter::traceAllWrappers(JSTracer* trc)
 {
-    for (ContextIter cx(trc->runtime()); !cx.done(); cx.next()) {
-        for (AutoGCRooter* gcr = cx->roots.autoGCRooters_; gcr; gcr = gcr->down) {
-            if (gcr->tag_ == WRAPVECTOR || gcr->tag_ == WRAPPER)
-                gcr->trace(trc);
-        }
+    JSContext* cx = trc->runtime()->contextFromMainThread();
+
+    for (AutoGCRooter* gcr = cx->roots.autoGCRooters_; gcr; gcr = gcr->down) {
+        if (gcr->tag_ == WRAPVECTOR || gcr->tag_ == WRAPPER)
+            gcr->trace(trc);
     }
 }
 
@@ -272,7 +271,8 @@ PropertyDescriptor::trace(JSTracer* trc)
 }
 
 void
-js::gc::GCRuntime::markRuntime(JSTracer* trc, TraceOrMarkRuntime traceOrMark)
+js::gc::GCRuntime::markRuntime(JSTracer* trc, TraceOrMarkRuntime traceOrMark,
+                               AutoLockForExclusiveAccess& lock)
 {
     gcstats::AutoPhase ap(stats, gcstats::PHASE_MARK_ROOTS);
 
@@ -306,19 +306,18 @@ js::gc::GCRuntime::markRuntime(JSTracer* trc, TraceOrMarkRuntime traceOrMark)
     if (!rt->isBeingDestroyed() && !rt->isHeapMinorCollecting()) {
         gcstats::AutoPhase ap(stats, gcstats::PHASE_MARK_RUNTIME_DATA);
 
-        if (traceOrMark == TraceRuntime || rt->atomsCompartment()->zone()->isCollecting()) {
+        if (traceOrMark == TraceRuntime || rt->atomsCompartment(lock)->zone()->isCollecting()) {
             MarkPermanentAtoms(trc);
-            MarkAtoms(trc);
+            MarkAtoms(trc, lock);
             MarkWellKnownSymbols(trc);
-            jit::JitRuntime::Mark(trc);
+            jit::JitRuntime::Mark(trc, lock);
         }
     }
 
     if (rt->isHeapMinorCollecting())
         jit::JitRuntime::MarkJitcodeGlobalTableUnconditionally(trc);
 
-    for (ContextIter acx(rt); !acx.done(); acx.next())
-        acx->mark(trc);
+    rt->contextFromMainThread()->mark(trc);
 
     for (CompartmentsIter c(rt, SkipAtoms); !c.done(); c.next())
         c->traceRoots(trc, traceOrMark);

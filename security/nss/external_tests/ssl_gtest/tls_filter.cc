@@ -7,7 +7,13 @@
 #include "tls_filter.h"
 #include "sslproto.h"
 
+extern "C" {
+// This is not something that should make you happy.
+#include "libssl_internals.h"
+}
+
 #include <iostream>
+#include "tls_agent.h"
 #include "gtest_utils.h"
 
 namespace nss_test {
@@ -284,7 +290,7 @@ PacketFilter::Action TlsExtensionFilter::FilterHandshake(
   }
   if (header.handshake_type() == kTlsHandshakeServerHello) {
     TlsParser parser(input);
-    if (!FindServerHelloExtensions(&parser, header.version())) {
+    if (!FindServerHelloExtensions(&parser)) {
       return KEEP;
     }
     return FilterExtensions(&parser, input, output);
@@ -312,13 +318,19 @@ bool TlsExtensionFilter::FindClientHelloExtensions(TlsParser* parser,
   return true;
 }
 
-bool TlsExtensionFilter::FindServerHelloExtensions(TlsParser* parser,
-                                                   uint16_t version) {
-  if (!parser->Skip(2 + 32)) { // version + random
+bool TlsExtensionFilter::FindServerHelloExtensions(TlsParser* parser) {
+  uint32_t vtmp;
+  if (!parser->Read(&vtmp, 2)) {
     return false;
   }
-  if (!parser->SkipVariable(1)) { // session ID
+  uint16_t version = static_cast<uint16_t>(vtmp);
+  if (!parser->Skip(32)) { // random
     return false;
+  }
+  if (NormalizeTlsVersion(version) <= SSL_LIBRARY_VERSION_TLS_1_2) {
+    if (!parser->SkipVariable(1)) { // session ID
+      return false;
+    }
   }
   if (!parser->Skip(2)) { // cipher suite
     return false;
@@ -400,6 +412,31 @@ PacketFilter::Action TlsExtensionCapture::FilterExtension(
     uint16_t extension_type, const DataBuffer& input, DataBuffer* output) {
   if (extension_type == extension_) {
     data_.Assign(input);
+  }
+  return KEEP;
+}
+
+PacketFilter::Action AfterRecordN::FilterRecord(
+      const RecordHeader& header, const DataBuffer& body, DataBuffer* out) {
+  if (counter_++ == record_) {
+    DataBuffer buf;
+    header.Write(&buf, 0, body);
+    src_->SendDirect(buf);
+    dest_->Handshake();
+    func_();
+    return DROP;
+  }
+
+  return KEEP;
+}
+
+PacketFilter::Action TlsInspectorClientHelloVersionChanger::FilterHandshake(
+    const HandshakeHeader& header,
+    const DataBuffer& input, DataBuffer* output) {
+  if (header.handshake_type() == kTlsHandshakeClientKeyExchange) {
+    EXPECT_EQ(
+        SECSuccess,
+        SSLInt_IncrementClientHandshakeVersion(server_->ssl_fd()));
   }
   return KEEP;
 }

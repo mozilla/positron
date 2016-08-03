@@ -10,6 +10,7 @@ XPCSHELL_TESTS_MANIFESTS += ['test/unit/xpcshell.ini']
 DIRS += [
     'components',
     'redux',
+    'shim',
     'vendor',
     'widgets',
 ]
@@ -21,7 +22,6 @@ DevToolsModules(
     'css-angle.js',
     'css-color-db.js',
     'css-color.js',
-    'css-parsing-utils.js',
     'css-reload.js',
     'Curl.jsm',
     'demangle.js',
@@ -52,4 +52,5 @@ DevToolsModules(
     'undo.js',
     'view-source.js',
     'webgl-utils.js',
+    'zoom-keys.js',
 )

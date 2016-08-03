@@ -33,7 +33,10 @@ typedef unsigned long nsSecurityFlags;
 interface nsILoadInfo : nsISupports
 {
   /**
-   * No special security flags:
+   * *** DEPRECATED ***
+   * No LoadInfo created within Gecko should contain this security flag.
+   * Please use any of the five security flags defined underneath.
+   * We only keep this security flag to provide backwards compatibilty.
    */
   const unsigned long SEC_NORMAL = 0;
 
@@ -148,6 +151,11 @@ interface nsILoadInfo : nsISupports
   const unsigned long SEC_ALLOW_CHROME = (1<<10);
 
   /**
+   * Disallow access to javascript: uris.
+   */
+  const unsigned long SEC_DISALLOW_SCRIPT = (1<<11);
+
+  /**
    * Don't follow redirects. Instead the redirect response is returned
    * as a successful response for the channel.
    *
@@ -158,7 +166,7 @@ interface nsILoadInfo : nsISupports
    * the response body might not be available.
    * This can happen if the redirect was cached.
    */
-  const unsigned long SEC_DONT_FOLLOW_REDIRECTS = (1<<11);
+  const unsigned long SEC_DONT_FOLLOW_REDIRECTS = (1<<12);
 
   /**
    * Force private browsing. Setting this flag the private browsing can be
@@ -167,7 +175,7 @@ interface nsILoadInfo : nsISupports
    * If the flag is true, even if a document context is present,
    * GetUsePrivateBrowsing will always return true.
    */
-  const unsigned long SEC_FORCE_PRIVATE_BROWSING = (1<<12);
+  const unsigned long SEC_FORCE_PRIVATE_BROWSING = (1<<13);
 
   /**
    * The SEC_FORCE_INHERIT_PRINCIPAL flag may be dropped when a load info
@@ -175,7 +183,7 @@ interface nsILoadInfo : nsISupports
    * flag is also present.  This flag is set if SEC_FORCE_INHERIT_PRINCIPAL was
    * dropped.
    */
-  const unsigned long SEC_FORCE_INHERIT_PRINCIPAL_WAS_DROPPED = (1<<13);
+  const unsigned long SEC_FORCE_INHERIT_PRINCIPAL_WAS_DROPPED = (1<<14);
 
   /**
    * The loadingPrincipal is the principal that is responsible for the load.
@@ -314,6 +322,12 @@ interface nsILoadInfo : nsISupports
   [infallible] readonly attribute boolean allowChrome;
 
   /**
+   * If disallowScript is true, then use nsIScriptSecurityManager::DISALLOW_SCRIPT
+   * when calling CheckLoadURIWithPrincipal().
+   */
+  [infallible] readonly attribute boolean disallowScript;
+
+  /**
    * Returns true if SEC_DONT_FOLLOW_REDIRECTS is set.
    */
   [infallible] readonly attribute boolean dontFollowRedirects;
@@ -378,12 +392,9 @@ interface nsILoadInfo : nsISupports
   [infallible] attribute boolean enforceSRI;
 
   /**
-   * Typically these are the window IDs of the window in which the element being
-   * loaded lives. However, if the element being loaded is <frame
-   * src="foo.html"> (or, more generally, if the element QIs to
-   * nsIFrameLoaderOwner) then the window IDs are for the window containing the
-   * foo.html document. In this case, parentOuterWindowID is the window ID of
-   * the window containing the <frame> element.
+   * These are the window IDs of the window in which the element being
+   * loaded lives. parentOuterWindowID is the window ID of this window's
+   * parent.
    *
    * Note that these window IDs can be 0 if the window is not
    * available. parentOuterWindowID will be the same as outerWindowID if the
@@ -392,6 +403,16 @@ interface nsILoadInfo : nsISupports
   [infallible] readonly attribute unsigned long long innerWindowID;
   [infallible] readonly attribute unsigned long long outerWindowID;
   [infallible] readonly attribute unsigned long long parentOuterWindowID;
+
+  /**
+   * Only when the element being loaded is <frame src="foo.html">
+   * (or, more generally, if the element QIs to nsIFrameLoaderOwner),
+   * the frameOuterWindowID is the outer window containing the
+   * foo.html document.
+   *
+   * Note: For other cases, frameOuterWindowID is 0.
+   */
+  [infallible] readonly attribute unsigned long long frameOuterWindowID;
 
   /**
    * Customized NeckoOriginAttributes within LoadInfo to allow overwriting of the

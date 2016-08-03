@@ -1994,7 +1994,7 @@ class DebugScopeProxy : public BaseProxyHandler
     static const char family;
     static const DebugScopeProxy singleton;
 
-    MOZ_CONSTEXPR DebugScopeProxy() : BaseProxyHandler(&family) {}
+    constexpr DebugScopeProxy() : BaseProxyHandler(&family) {}
 
     static bool isFunctionScopeWithThis(const JSObject& scope)
     {
@@ -2319,7 +2319,8 @@ class DebugScopeProxy : public BaseProxyHandler
                 if (inScope)
                     props[j++].set(props[i]);
             }
-            props.resize(j);
+            if (!props.resize(j))
+                return false;
         }
 
         /*
@@ -2736,7 +2737,12 @@ DebugScopes::onPopCall(AbstractFramePtr frame, JSContext* cx)
          * but it simplifies later indexing logic.
          */
         Rooted<GCVector<Value>> vec(cx, GCVector<Value>(cx));
-        if (!frame.copyRawFrameSlots(&vec) || vec.length() == 0)
+        if (!frame.copyRawFrameSlots(&vec)) {
+            cx->recoverFromOutOfMemory();
+            return;
+        }
+
+        if (vec.length() == 0)
             return;
 
         /*
@@ -2757,7 +2763,7 @@ DebugScopes::onPopCall(AbstractFramePtr frame, JSContext* cx)
          */
         RootedArrayObject snapshot(cx, NewDenseCopiedArray(cx, vec.length(), vec.begin()));
         if (!snapshot) {
-            cx->clearPendingException();
+            cx->recoverFromOutOfMemory();
             return;
         }
 
@@ -3532,7 +3538,7 @@ RemoveReferencedNames(JSContext* cx, HandleScript script, PropertyNameSet& remai
 
           case JSOP_GETALIASEDVAR:
           case JSOP_SETALIASEDVAR:
-            name = ScopeCoordinateName(cx->runtime()->scopeCoordinateNameCache, script, pc);
+            name = ScopeCoordinateName(cx->caches.scopeCoordinateNameCache, script, pc);
             break;
 
           default:

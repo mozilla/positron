@@ -95,7 +95,7 @@ class WeakMapBase : public mozilla::LinkedListElement<WeakMapBase>
 
   protected:
     // Object that this weak map is part of, if any.
-    HeapPtrObject memberOf;
+    GCPtrObject memberOf;
 
     // Zone containing this weak map.
     JS::Zone* zone;
@@ -136,7 +136,8 @@ class WeakMap : public HashMap<Key, Value, HashPolicy, RuntimeAllocPolicy>,
         if (!Base::init(len))
             return false;
         zone->gcWeakMapList.insertFront(this);
-        marked = JS::IsIncrementalGCInProgress(zone->runtimeFromMainThread());
+        JSRuntime* rt = zone->runtimeFromMainThread();
+        marked = JS::IsIncrementalGCInProgress(rt->contextFromMainThread());
         return true;
     }
 
@@ -277,18 +278,18 @@ class WeakMap : public HashMap<Key, Value, HashPolicy, RuntimeAllocPolicy>,
         return markedAny;
     }
 
-  private:
-    void exposeGCThingToActiveJS(const JS::Value& v) const { JS::ExposeValueToActiveJS(v); }
-    void exposeGCThingToActiveJS(JSObject* obj) const { JS::ExposeObjectToActiveJS(obj); }
-
     JSObject* getDelegate(JSObject* key) const {
         JSWeakmapKeyDelegateOp op = key->getClass()->extWeakmapKeyDelegateOp();
         return op ? op(key) : nullptr;
     }
 
-    JSObject* getDelegate(gc::Cell* cell) const {
+    JSObject* getDelegate(JSScript* script) const {
         return nullptr;
     }
+
+  private:
+    void exposeGCThingToActiveJS(const JS::Value& v) const { JS::ExposeValueToActiveJS(v); }
+    void exposeGCThingToActiveJS(JSObject* obj) const { JS::ExposeObjectToActiveJS(obj); }
 
     bool keyNeedsMark(JSObject* key) const {
         JSObject* delegate = getDelegate(key);
@@ -299,7 +300,7 @@ class WeakMap : public HashMap<Key, Value, HashPolicy, RuntimeAllocPolicy>,
         return delegate && gc::IsMarkedUnbarriered(&delegate);
     }
 
-    bool keyNeedsMark(gc::Cell* cell) const {
+    bool keyNeedsMark(JSScript* script) const {
         return false;
     }
 
@@ -372,13 +373,13 @@ extern JSObject*
 InitWeakMapClass(JSContext* cx, HandleObject obj);
 
 
-class ObjectValueMap : public WeakMap<RelocatablePtrObject, RelocatableValue,
-                                      MovableCellHasher<RelocatablePtrObject>>
+class ObjectValueMap : public WeakMap<HeapPtr<JSObject*>, HeapPtr<Value>,
+                                      MovableCellHasher<HeapPtr<JSObject*>>>
 {
   public:
     ObjectValueMap(JSContext* cx, JSObject* obj)
-      : WeakMap<RelocatablePtrObject, RelocatableValue,
-                MovableCellHasher<RelocatablePtrObject>>(cx, obj)
+      : WeakMap<HeapPtr<JSObject*>, HeapPtr<Value>,
+                MovableCellHasher<HeapPtr<JSObject*>>>(cx, obj)
     {}
 
     virtual bool findZoneEdges();

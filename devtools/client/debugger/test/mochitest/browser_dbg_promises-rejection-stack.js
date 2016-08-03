@@ -10,7 +10,7 @@
 "use strict";
 
 const TAB_URL = EXAMPLE_URL + "doc_promise-get-rejection-stack.html";
-const { PromisesFront } = require("devtools/server/actors/promises");
+const { PromisesFront } = require("devtools/shared/fronts/promises");
 var events = require("sdk/event/core");
 
 const TEST_DATA = [
@@ -36,7 +36,11 @@ function test() {
     DebuggerServer.init();
     DebuggerServer.addBrowserActors();
 
-    const [ tab,, panel ] = yield initDebugger(TAB_URL);
+    let options = {
+      source: TAB_URL,
+      line: 1
+    };
+    const [ tab,, panel ] = yield initDebugger(TAB_URL, options);
 
     let client = new DebuggerClient(DebuggerServer.connectPipe());
     yield connect(client);

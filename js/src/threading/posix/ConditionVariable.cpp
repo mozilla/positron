@@ -23,8 +23,8 @@ using mozilla::TimeStamp;
 
 static const long NanoSecPerSec = 1000000000;
 
-// Android has the clock functions, but not pthread_condattr_setclock.
-#if defined(HAVE_CLOCK_MONOTONIC) && !defined(__ANDROID__)
+// Android & macOS 10.12 has the clock functions, but not pthread_condattr_setclock.
+#if defined(HAVE_CLOCK_MONOTONIC) && !defined(__ANDROID__) && !defined(__APPLE__)
 # define USE_CLOCK_API
 #endif
 
@@ -129,6 +129,11 @@ js::CVStatus
 js::ConditionVariable::wait_for(UniqueLock<Mutex>& lock,
                                 const TimeDuration& a_rel_time)
 {
+  if (a_rel_time == TimeDuration::Forever()) {
+    wait(lock);
+    return CVStatus::NoTimeout;
+  }
+
   pthread_cond_t* ptCond = &platformData()->ptCond;
   pthread_mutex_t* ptMutex = &lock.lock.platformData()->ptMutex;
   int r;

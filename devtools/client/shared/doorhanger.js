@@ -8,7 +8,7 @@ const { Ci, Cc } = require("chrome");
 const Services = require("Services");
 const { DOMHelpers } = require("resource://devtools/client/shared/DOMHelpers.jsm");
 const { Task } = require("devtools/shared/task");
-const { Promise } = require("resource://gre/modules/Promise.jsm");
+const defer = require("devtools/shared/defer");
 const { getMostRecentBrowserWindow } = require("sdk/window/utils");
 
 const XULNS = "http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul";
@@ -37,7 +37,9 @@ var TYPES = {
   // in Beta releases. Only displayed once per profile.
   deveditionpromo: {
     predicate: shouldDevEditionPromoShow,
-    success: () => Services.prefs.setBoolPref(DEV_EDITION_PROMO_SHOWN_PREF, true),
+    success: () => {
+      return Services.prefs.setBoolPref(DEV_EDITION_PROMO_SHOWN_PREF, true);
+    },
     action: () => {
       let url = Services.prefs.getCharPref(DEV_EDITION_PROMO_URL_PREF);
       getGBrowser().selectedTab = getGBrowser().addTab(url);
@@ -63,10 +65,11 @@ var panelAttrs = {
  * @param {XULWindow} window
  *        The window that should house the doorhanger.
  * @param {String} type
- *        The type of doorhanger to be displayed is, using the `TYPES` definition.
+ *        The type of doorhanger to be displayed is, using the `TYPES`
+ *        definition.
  * @param {String} selector
- *        The selector that the doorhanger should be appended to within `window`.
- *        Defaults to a XUL Document's `window` element.
+ *        The selector that the doorhanger should be appended to within
+ *        `window`.  Defaults to a XUL Document's `window` element.
  */
 exports.showDoorhanger = Task.async(function* ({ window, type, anchor }) {
   let { predicate, success, url, action } = TYPES[type];
@@ -118,7 +121,9 @@ exports.showDoorhanger = Task.async(function* ({ window, type, anchor }) {
 });
 
 function setDoorhangerStyle(panel, frame) {
-  Object.keys(panelAttrs).forEach(prop => panel.setAttribute(prop, panelAttrs[prop]));
+  Object.keys(panelAttrs).forEach(prop => {
+    return panel.setAttribute(prop, panelAttrs[prop]);
+  });
   panel.style.margin = "20px";
   panel.style.borderRadius = "5px";
   panel.style.border = "none";
@@ -132,7 +137,7 @@ function setDoorhangerStyle(panel, frame) {
 }
 
 function onFrameLoad(frame) {
-  let { resolve, promise } = Promise.defer();
+  let { resolve, promise } = defer();
 
   if (frame.contentWindow) {
     let domHelper = new DOMHelpers(frame.contentWindow);
@@ -153,7 +158,7 @@ function getGBrowser() {
 }
 
 function wait(n) {
-  let { resolve, promise } = Promise.defer();
+  let { resolve, promise } = defer();
   setTimeout(resolve, n);
   return promise;
 }

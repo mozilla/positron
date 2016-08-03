@@ -50,6 +50,9 @@ struct AudioChannel {
   };
 };
 
+enum MediaStreamGraphEvent : uint32_t;
+enum TrackEventCommand : uint32_t;
+
 class MediaStreamGraph {
 public:
   // Keep this in sync with the enum in MediaStreamGraph.h
@@ -89,19 +92,24 @@ protected:
 public:
   virtual void NotifyQueuedTrackChanges(mozilla::MediaStreamGraph* aGraph, mozilla::TrackID aID,
                                         mozilla::StreamTime aTrackOffset,
-                                        uint32_t aTrackEvents,
+                                        mozilla::TrackEventCommand  aTrackEvents,
                                         const mozilla::MediaSegment& aQueuedMedia,
                                         Fake_MediaStream* aInputStream,
-                                        mozilla::TrackID aInputTrackID) = 0;
+                                        mozilla::TrackID aInputTrackID) {}
   virtual void NotifyPull(mozilla::MediaStreamGraph* aGraph, mozilla::StreamTime aDesiredTime) = 0;
+  virtual void NotifyQueuedAudioData(mozilla::MediaStreamGraph* aGraph, mozilla::TrackID aID,
+                                       mozilla::StreamTime aTrackOffset,
+                                       const mozilla::AudioSegment& aQueuedMedia,
+                                       Fake_MediaStream* aInputStream,
+                                       mozilla::TrackID aInputTrackID) {}
 
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(Fake_MediaStreamListener)
 };
 
-class Fake_MediaStreamDirectListener : public Fake_MediaStreamListener
+class Fake_DirectMediaStreamListener : public Fake_MediaStreamListener
 {
 protected:
-  virtual ~Fake_MediaStreamDirectListener() {}
+  virtual ~Fake_DirectMediaStreamListener() {}
 
 public:
   virtual void NotifyRealtimeData(mozilla::MediaStreamGraph* graph, mozilla::TrackID tid,
@@ -122,10 +130,10 @@ public:
                                    const mozilla::MediaSegment& aQueuedMedia) = 0;
 };
 
-class Fake_MediaStreamTrackDirectListener : public Fake_MediaStreamTrackListener
+class Fake_DirectMediaStreamTrackListener : public Fake_MediaStreamTrackListener
 {
 protected:
-  virtual ~Fake_MediaStreamTrackDirectListener() {}
+  virtual ~Fake_DirectMediaStreamTrackListener() {}
 
 public:
   virtual void NotifyRealtimeTrackData(mozilla::MediaStreamGraph* aGraph,
@@ -395,13 +403,13 @@ public:
   }
   void AddListener(Fake_MediaStreamTrackListener *aListener);
   void RemoveListener(Fake_MediaStreamTrackListener *aListener);
-  void AddDirectListener(Fake_MediaStreamTrackDirectListener *aListener)
+  void AddDirectListener(Fake_DirectMediaStreamTrackListener *aListener)
   {
     AddListener(aListener);
     aListener->NotifyDirectListenerInstalled(
-      Fake_MediaStreamTrackDirectListener::InstallationResult::STREAM_NOT_SUPPORTED);
+      Fake_DirectMediaStreamTrackListener::InstallationResult::STREAM_NOT_SUPPORTED);
   }
-  void RemoveDirectListener(Fake_MediaStreamTrackDirectListener *aListener)
+  void RemoveDirectListener(Fake_DirectMediaStreamTrackListener *aListener)
   {
     RemoveListener(aListener);
   }
@@ -606,9 +614,9 @@ namespace mozilla {
 typedef Fake_MediaStream MediaStream;
 typedef Fake_SourceMediaStream SourceMediaStream;
 typedef Fake_MediaStreamListener MediaStreamListener;
-typedef Fake_MediaStreamDirectListener MediaStreamDirectListener;
+typedef Fake_DirectMediaStreamListener DirectMediaStreamListener;
 typedef Fake_MediaStreamTrackListener MediaStreamTrackListener;
-typedef Fake_MediaStreamTrackDirectListener MediaStreamTrackDirectListener;
+typedef Fake_DirectMediaStreamTrackListener DirectMediaStreamTrackListener;
 typedef Fake_DOMMediaStream DOMMediaStream;
 typedef Fake_DOMMediaStream DOMLocalMediaStream;
 

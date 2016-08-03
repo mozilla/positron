@@ -303,6 +303,8 @@ HistoryDownloadElementShell.prototype = {
     if (this.element.selected) {
       goUpdateDownloadCommands();
     } else {
+      // If a state change occurs in an item that is not currently selected,
+      // this is the only command that may be affected.
       goUpdateCommand("downloadsCmd_clearDownloads");
     }
   },
@@ -1137,8 +1139,7 @@ DownloadsPlacesView.prototype = {
   // nsIController
   supportsCommand(aCommand) {
     // Firstly, determine if this is a command that we can handle.
-    if (!aCommand.startsWith("cmd_") &&
-        !aCommand.startsWith("downloadsCmd_")) {
+    if (!DownloadsViewUI.isCommandName(aCommand)) {
       return false;
     }
     if (!(aCommand in this) &&
@@ -1419,11 +1420,11 @@ for (let methodName of ["load", "applyFilter", "selectNode", "selectItems"]) {
 function goUpdateDownloadCommands() {
   function updateCommandsForObject(object) {
     for (let name in object) {
-      if (name.startsWith("cmd_") || name.startsWith("downloadsCmd_")) {
+      if (DownloadsViewUI.isCommandName(name)) {
         goUpdateCommand(name);
       }
     }
   }
-  updateCommandsForObject(this);
+  updateCommandsForObject(DownloadsPlacesView.prototype);
   updateCommandsForObject(HistoryDownloadElementShell.prototype);
 }

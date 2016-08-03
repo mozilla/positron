@@ -229,13 +229,16 @@
 
     <style name="Widget.Home.HeaderItem">
         <item name="android:layout_width">match_parent</item>
-        <item name="android:layout_height">32dp</item>
+        <item name="android:layout_height">36dp</item>
         <item name="android:textAppearance">@style/TextAppearance.Widget.Home.Header</item>
-        <item name="android:background">@color/about_page_header_grey</item>
+        <item name="android:background">@android:color/white</item>
         <item name="android:focusable">false</item>
         <item name="android:gravity">center|left</item>
-        <item name="android:paddingLeft">10dip</item>
-        <item name="android:paddingRight">10dip</item>
+        <item name="android:paddingLeft">16dp</item>
+        <item name="android:paddingRight">16dp</item>
+        <item name="android:paddingTop">11dp</item>
+        <item name="android:paddingBottom">11dp</item>
+        <item name="android:includeFontPadding">false</item>
     </style>
 
     <style name="Widget.Home.ActionButton">
@@ -384,7 +387,8 @@
     <style name="TextAppearance.Widget.Home" />
 
     <style name="TextAppearance.Widget.Home.Header" parent="TextAppearance.Small">
-        <item name="android:textColor">?android:attr/textColorPrimary</item>
+        <item name="android:textColor">@color/disabled_grey</item>
+        <item name="android:textSize">12sp</item>
     </style>
 
     <style name="TextAppearance.Widget.Home.ItemTitle" parent="TextAppearance">
@@ -662,8 +666,20 @@
         <item name="android:textStyle">bold</item>
     </style>
 
-    <style name="GeckoActionBar">
-        <item name="android:background">@drawable/ab_background</item>
+    <!-- Ideally, we use the same style for the action bar & action mode, but unfortunately
+         some attrs that share a purpose have different names so instead we inherit. -->
+    <style name="GeckoActionBar" parent="ThemeOverlay.AppCompat.ActionBar">
+        <item name="android:colorBackground">@color/action_bar_bg_color</item>
+        <item name="colorAccent">@color/fennec_ui_orange</item>
+        <item name="colorControlNormal">@color/toolbar_icon_grey</item>
+    </style>
+    <style name="GeckoActionBar.ActionMode">
+        <item name="android:background">@color/action_bar_bg_color</item>
+        <!-- Note: the bottom divider is drawn in code. -->
+    </style>
+
+    <style name="PreferencesActionBar" parent="Widget.AppCompat.ActionBar.Solid">
+        <item name="displayOptions">showHome|homeAsUp|showTitle</item>
     </style>
 
     <style name="GeckoActionBar.Title">

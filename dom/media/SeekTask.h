@@ -9,8 +9,7 @@
 
 #include "mozilla/MozPromise.h"
 #include "MediaCallbackID.h"
-#include "MediaDecoderReader.h"
-#include "SeekJob.h"
+#include "SeekTarget.h"
 
 namespace mozilla {
 
@@ -18,22 +17,22 @@ class AbstractThread;
 class MediaData;
 class MediaDecoderReaderWrapper;
 
+namespace media {
+class TimeUnit;
+}
+
 struct SeekTaskResolveValue
 {
   RefPtr<MediaData> mSeekedAudioData;
   RefPtr<MediaData> mSeekedVideoData;
   bool mIsAudioQueueFinished;
   bool mIsVideoQueueFinished;
-  bool mNeedToStopPrerollingAudio;
-  bool mNeedToStopPrerollingVideo;
 };
 
 struct SeekTaskRejectValue
 {
   bool mIsAudioQueueFinished;
   bool mIsVideoQueueFinished;
-  bool mNeedToStopPrerollingAudio;
-  bool mNeedToStopPrerollingVideo;
 };
 
 class SeekTask {
@@ -46,33 +45,19 @@ public:
   using SeekTaskPromise =
     MozPromise<SeekTaskResolveValue, SeekTaskRejectValue, IsExclusive>;
 
-  static already_AddRefed<SeekTask>
-  CreateSeekTask(const void* aDecoderID,
-                 AbstractThread* aThread,
-                 MediaDecoderReaderWrapper* aReader,
-                 SeekJob&& aSeekJob,
-                 const MediaInfo& aInfo,
-                 const media::TimeUnit& aDuration,
-                 int64_t aCurrentMediaTime);
+  virtual void Discard() = 0;
 
-  virtual void Discard();
+  virtual RefPtr<SeekTaskPromise> Seek(const media::TimeUnit& aDuration) = 0;
 
-  virtual RefPtr<SeekTaskPromise> Seek(const media::TimeUnit& aDuration);
+  virtual bool NeedToResetMDSM() const = 0;
 
-  virtual bool NeedToResetMDSM() const;
-
-  SeekJob& GetSeekJob();
-
-  bool Exists() const;
+  const SeekTarget& GetSeekTarget();
 
 protected:
   SeekTask(const void* aDecoderID,
            AbstractThread* aThread,
            MediaDecoderReaderWrapper* aReader,
-           SeekJob&& aSeekJob,
-           const MediaInfo& aInfo,
-           const media::TimeUnit& aDuration,
-           int64_t aCurrentMediaTime);
+           const SeekTarget& aTarget);
 
   virtual ~SeekTask();
 
@@ -82,55 +67,7 @@ protected:
 
   void AssertOwnerThread() const;
 
-  bool HasAudio() const;
-
-  bool HasVideo() const;
-
-  TaskQueue* DecodeTaskQueue() const;
-
   AbstractThread* OwnerThread() const;
-
-  bool IsVideoDecoding() const;
-
-  bool IsAudioDecoding() const;
-
-  nsresult EnsureVideoDecodeTaskQueued();
-
-  nsresult EnsureAudioDecodeTaskQueued();
-
-  const char* AudioRequestStatus();
-
-  const char* VideoRequestStatus();
-
-  void RequestVideoData();
-
-  void RequestAudioData();
-
-  nsresult DropAudioUpToSeekTarget(MediaData* aSample);
-
-  nsresult DropVideoUpToSeekTarget(MediaData* aSample);
-
-  bool IsAudioSeekComplete();
-
-  bool IsVideoSeekComplete();
-
-  void CheckIfSeekComplete();
-
-  virtual void OnSeekResolved(media::TimeUnit);
-
-  virtual void OnSeekRejected(nsresult aResult);
-
-  virtual void OnAudioDecoded(MediaData* aAudioSample);
-
-  virtual void OnAudioNotDecoded(MediaDecoderReader::NotDecodedReason aReason);
-
-  virtual void OnVideoDecoded(MediaData* aVideoSample);
-
-  virtual void OnVideoNotDecoded(MediaDecoderReader::NotDecodedReason aReason);
-
-  void SetMediaDecoderReaderWrapperCallback();
-
-  void CancelMediaDecoderReaderWrapperCallback();
 
   /*
    * Data shared with MDSM.
@@ -142,30 +79,9 @@ protected:
   /*
    * Internal state.
    */
-  SeekJob mSeekJob;
+  SeekTarget mTarget;
   MozPromiseHolder<SeekTaskPromise> mSeekTaskPromise;
-  int64_t mCurrentTimeBeforeSeek;
-  const uint32_t mAudioRate;  // Audio sample rate.
-  const bool mHasAudio;
-  const bool mHasVideo;
-  bool mDropAudioUntilNextDiscontinuity;
-  bool mDropVideoUntilNextDiscontinuity;
   bool mIsDiscarded;
-
-  // This temporarily stores the first frame we decode after we seek.
-  // This is so that if we hit end of stream while we're decoding to reach
-  // the seek target, we will still have a frame that we can display as the
-  // last frame in the media.
-  RefPtr<MediaData> mFirstVideoFrameAfterSeek;
-
-  /*
-   * Track the current seek promise made by the reader.
-   */
-  MozPromiseRequestHolder<MediaDecoderReader::SeekPromise> mSeekRequest;
-  CallbackID mAudioCallbackID;
-  CallbackID mVideoCallbackID;
-  MozPromiseRequestHolder<MediaDecoderReader::WaitForDataPromise> mAudioWaitRequest;
-  MozPromiseRequestHolder<MediaDecoderReader::WaitForDataPromise> mVideoWaitRequest;
 
   /*
    * Information which are going to be returned to MDSM.
@@ -174,8 +90,6 @@ protected:
   RefPtr<MediaData> mSeekedVideoData;
   bool mIsAudioQueueFinished;
   bool mIsVideoQueueFinished;
-  bool mNeedToStopPrerollingAudio;
-  bool mNeedToStopPrerollingVideo;
 };
 
 } // namespace mozilla

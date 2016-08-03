@@ -40,6 +40,6 @@ interface processImpl : EventEmitter {
   [Cached, Pure] readonly attribute ReleaseDictionary release;
   [Cached, Pure] readonly attribute DOMString type;
   [Cached, Pure] readonly attribute VersionDictionary versions;
-  [Throws] any atomBinding(DOMString name);
-  [Throws] any binding(DOMString name);
+  any atomBinding(DOMString name);
+  any binding(DOMString name);
 };

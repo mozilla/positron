@@ -8,8 +8,11 @@
 #define mozilla_ServoRestyleManager_h
 
 #include "mozilla/EventStates.h"
+#include "mozilla/RestyleManagerBase.h"
 #include "nsChangeHint.h"
 #include "nsISupportsImpl.h"
+#include "nsPresContext.h"
+#include "nsINode.h"
 
 namespace mozilla {
 namespace dom {
@@ -26,14 +29,14 @@ namespace mozilla {
 /**
  * Restyle manager for a Servo-backed style system.
  */
-class ServoRestyleManager
+class ServoRestyleManager : public RestyleManagerBase
 {
+  friend class ServoStyleSet;
 public:
   NS_INLINE_DECL_REFCOUNTING(ServoRestyleManager)
 
-  ServoRestyleManager();
+  explicit ServoRestyleManager(nsPresContext* aPresContext);
 
-  void Disconnect();
   void PostRestyleEvent(dom::Element* aElement,
                         nsRestyleHint aRestyleHint,
                         nsChangeHint aMinChangeHint);
@@ -63,13 +66,43 @@ public:
                         int32_t aModType,
                         const nsAttrValue* aOldValue);
   nsresult ReparentStyleContext(nsIFrame* aFrame);
-  bool HasPendingRestyles();
-  uint64_t GetRestyleGeneration() const;
+
+  bool HasPendingRestyles() {
+    if (MOZ_UNLIKELY(IsDisconnected())) {
+      return false;
+    }
+
+    return PresContext()->PresShell()->GetDocument()->HasDirtyDescendantsForServo();
+  }
 
 protected:
   ~ServoRestyleManager() {}
 
-  uint64_t mRestyleGeneration;
+private:
+  /**
+   * Traverses a tree of content that Servo has just restyled, recreating style
+   * contexts for their frames with the new style data.
+   *
+   * This is just static so ServoStyleSet can mark this class as friend, so we
+   * can access to the GetContext method without making it available to everyone
+   * else.
+   */
+  static void RecreateStyleContexts(nsIContent* aContent,
+                                    nsStyleContext* aParentContext,
+                                    ServoStyleSet* aStyleSet);
+
+  /**
+   * Propagates the IS_DIRTY flag down to the tree, setting
+   * HAS_DIRTY_DESCENDANTS appropriately.
+   */
+  static void DirtyTree(nsIContent* aContent);
+
+  inline ServoStyleSet* StyleSet() const {
+    MOZ_ASSERT(PresContext()->StyleSet()->IsServo(),
+               "ServoRestyleManager should only be used with a Servo-flavored "
+               "style backend");
+    return PresContext()->StyleSet()->AsServo();
+  }
 };
 
 } // namespace mozilla

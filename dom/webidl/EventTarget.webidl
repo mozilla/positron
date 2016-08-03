@@ -13,11 +13,14 @@
 
 dictionary EventListenerOptions {
   boolean capture = false;
+  /* Setting to true make the listener be added to the system group. */
+  [Func="ThreadSafeIsChromeOrXBL"]
+  boolean mozSystemGroup = false;
 };
 
 dictionary AddEventListenerOptions : EventListenerOptions {
   boolean passive = false;
-  boolean once = false;
+  // boolean once = false; Bug 1287706
 };
 
 [Exposed=(Window,Worker,WorkerDebugger,System)]

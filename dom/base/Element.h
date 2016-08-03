@@ -75,27 +75,27 @@ NS_GetContentList(nsINode* aRootNode,
 // Element-specific flags
 enum {
   // Set if the element has a pending style change.
-  ELEMENT_HAS_PENDING_RESTYLE =                 ELEMENT_FLAG_BIT(0),
+  ELEMENT_HAS_PENDING_RESTYLE =                 NODE_SHARED_RESTYLE_BIT_1,
 
   // Set if the element is a potential restyle root (that is, has a style
   // change pending _and_ that style change will attempt to restyle
   // descendants).
-  ELEMENT_IS_POTENTIAL_RESTYLE_ROOT =           ELEMENT_FLAG_BIT(1),
+  ELEMENT_IS_POTENTIAL_RESTYLE_ROOT =           NODE_SHARED_RESTYLE_BIT_2,
 
   // Set if the element has a pending animation-only style change as
   // part of an animation-only style update (where we update styles from
   // animation to the current refresh tick, but leave everything else as
   // it was).
-  ELEMENT_HAS_PENDING_ANIMATION_ONLY_RESTYLE =  ELEMENT_FLAG_BIT(2),
+  ELEMENT_HAS_PENDING_ANIMATION_ONLY_RESTYLE =  ELEMENT_FLAG_BIT(0),
 
   // Set if the element is a potential animation-only restyle root (that
   // is, has an animation-only style change pending _and_ that style
   // change will attempt to restyle descendants).
-  ELEMENT_IS_POTENTIAL_ANIMATION_ONLY_RESTYLE_ROOT = ELEMENT_FLAG_BIT(3),
+  ELEMENT_IS_POTENTIAL_ANIMATION_ONLY_RESTYLE_ROOT = ELEMENT_FLAG_BIT(1),
 
   // Set if this element has a pending restyle with an eRestyle_SomeDescendants
   // restyle hint.
-  ELEMENT_IS_CONDITIONAL_RESTYLE_ANCESTOR = ELEMENT_FLAG_BIT(4),
+  ELEMENT_IS_CONDITIONAL_RESTYLE_ANCESTOR = ELEMENT_FLAG_BIT(2),
 
   // Just the HAS_PENDING bits, for convenience
   ELEMENT_PENDING_RESTYLE_FLAGS =
@@ -112,8 +112,11 @@ enum {
                               ELEMENT_POTENTIAL_RESTYLE_ROOT_FLAGS |
                               ELEMENT_IS_CONDITIONAL_RESTYLE_ANCESTOR,
 
+  // Set if this element is marked as 'scrollgrab' (see bug 912666)
+  ELEMENT_HAS_SCROLLGRAB = ELEMENT_FLAG_BIT(3),
+
   // Remaining bits are for subclasses
-  ELEMENT_TYPE_SPECIFIC_BITS_OFFSET = NODE_TYPE_SPECIFIC_BITS_OFFSET + 5
+  ELEMENT_TYPE_SPECIFIC_BITS_OFFSET = NODE_TYPE_SPECIFIC_BITS_OFFSET + 4
 };
 
 #undef ELEMENT_FLAG_BIT
@@ -137,6 +140,7 @@ class UndoManager;
 class DOMRect;
 class DOMRectList;
 class DestinationInsertionPointList;
+class Grid;
 
 // IID for the dom::Element interface
 #define NS_ELEMENT_IID \
@@ -188,15 +192,6 @@ public:
    * Method to update mState with link state information.  This does not notify.
    */
   void UpdateLinkState(EventStates aState);
-
-  /**
-   * Returns true if this element is either a full-screen element or an
-   * ancestor of the full-screen element.
-   */
-  bool IsFullScreenAncestor() const {
-    return mState.HasAtLeastOneOfStates(NS_EVENT_STATE_FULL_SCREEN_ANCESTOR |
-                                        NS_EVENT_STATE_FULL_SCREEN);
-  }
 
   /**
    * The style state of this element. This is the real state of the element
@@ -660,7 +655,7 @@ public:
                          ErrorResult& aError);
   bool HasAttribute(const nsAString& aName) const
   {
-    return InternalGetExistingAttrNameFromQName(aName) != nullptr;
+    return InternalGetAttrNameFromQName(aName) != nullptr;
   }
   bool HasAttributeNS(const nsAString& aNamespaceURI,
                       const nsAString& aLocalName) const;
@@ -836,6 +831,8 @@ public:
            0;
   }
 
+  void GetGridFragments(nsTArray<RefPtr<Grid>>& aResult);
+
   virtual already_AddRefed<UndoManager> GetUndoManager()
   {
     return nullptr;
@@ -958,6 +955,11 @@ public:
   const nsAttrValue* GetParsedAttr(nsIAtom* aAttr) const
   {
     return mAttrsAndChildren.GetAttr(aAttr);
+  }
+
+  const nsAttrValue* GetParsedAttr(nsIAtom* aAttr, int32_t aNameSpaceID) const
+  {
+    return mAttrsAndChildren.GetAttr(aAttr, aNameSpaceID);
   }
 
   /**
@@ -1273,9 +1275,13 @@ protected:
     GetEventListenerManagerForAttr(nsIAtom* aAttrName, bool* aDefer);
 
   /**
-   * Internal hook for converting an attribute name-string to an atomized name
+   * Internal hook for converting an attribute name-string to nsAttrName in
+   * case there is such existing attribute. aNameToUse can be passed to get
+   * name which was used for looking for the attribute (lowercase in HTML).
    */
-  virtual const nsAttrName* InternalGetExistingAttrNameFromQName(const nsAString& aStr) const;
+  const nsAttrName*
+  InternalGetAttrNameFromQName(const nsAString& aStr,
+                               nsAutoString* aNameToUse = nullptr) const;
 
   nsIFrame* GetStyledFrame();
 
@@ -1336,8 +1342,6 @@ protected:
 
   nsDOMTokenList* GetTokenList(nsIAtom* aAtom,
                                const DOMTokenListSupportedTokenArray aSupportedTokens = nullptr);
-  void GetTokenList(nsIAtom* aAtom, nsIVariant** aResult);
-  nsresult SetTokenList(nsIAtom* aAtom, nsIVariant* aValue);
 
 private:
   /**
@@ -1444,6 +1448,13 @@ inline const mozilla::dom::Element* nsINode::AsElement() const
 {
   MOZ_ASSERT(IsElement());
   return static_cast<const mozilla::dom::Element*>(this);
+}
+
+inline void nsINode::UnsetRestyleFlagsIfGecko()
+{
+  if (IsElement() && !IsStyledByServo()) {
+    UnsetFlags(ELEMENT_ALL_RESTYLE_FLAGS);
+  }
 }
 
 /**

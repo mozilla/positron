@@ -21,7 +21,6 @@
 #include "nsNetUtil.h"
 #include "nsNullPrincipal.h"
 #include "nsPrincipal.h"
-#include "nsXMLHttpRequest.h"
 #include "WrapperFactory.h"
 #include "xpcprivate.h"
 #include "XPCWrapper.h"
@@ -31,6 +30,7 @@
 #include "mozilla/dom/BlobBinding.h"
 #include "mozilla/dom/cache/CacheStorage.h"
 #include "mozilla/dom/CSSBinding.h"
+#include "mozilla/dom/DirectoryBinding.h"
 #include "mozilla/dom/IndexedDatabaseManager.h"
 #include "mozilla/dom/Fetch.h"
 #include "mozilla/dom/FileBinding.h"
@@ -47,6 +47,7 @@
 #include "mozilla/dom/UnionConversions.h"
 #include "mozilla/dom/URLBinding.h"
 #include "mozilla/dom/URLSearchParamsBinding.h"
+#include "mozilla/dom/XMLHttpRequest.h"
 
 using namespace mozilla;
 using namespace JS;
@@ -315,9 +316,9 @@ SandboxCreateFetch(JSContext* cx, HandleObject obj)
     MOZ_ASSERT(JS_IsGlobalObject(obj));
 
     return JS_DefineFunction(cx, obj, "fetch", SandboxFetchPromise, 2, 0) &&
-        dom::RequestBinding::GetConstructorObject(cx, obj) &&
-        dom::ResponseBinding::GetConstructorObject(cx, obj) &&
-        dom::HeadersBinding::GetConstructorObject(cx, obj);
+        dom::RequestBinding::GetConstructorObject(cx) &&
+        dom::ResponseBinding::GetConstructorObject(cx) &&
+        dom::HeadersBinding::GetConstructorObject(cx);
 }
 
 static bool
@@ -909,6 +910,8 @@ xpc::GlobalProperties::Parse(JSContext* cx, JS::HandleObject obj)
             btoa = true;
         } else if (!strcmp(name.ptr(), "Blob")) {
             Blob = true;
+        } else if (!strcmp(name.ptr(), "Directory")) {
+            Directory = true;
         } else if (!strcmp(name.ptr(), "File")) {
             File = true;
         } else if (!strcmp(name.ptr(), "crypto")) {
@@ -934,32 +937,33 @@ xpc::GlobalProperties::Parse(JSContext* cx, JS::HandleObject obj)
 bool
 xpc::GlobalProperties::Define(JSContext* cx, JS::HandleObject obj)
 {
+    MOZ_ASSERT(js::GetContextCompartment(cx) == js::GetObjectCompartment(obj));
     // Properties will be exposed to System automatically but not to Sandboxes
     // if |[Exposed=System]| is specified.
     // This function holds common properties not exposed automatically but able
     // to be requested either in |Cu.importGlobalProperties| or
     // |wantGlobalProperties| of a sandbox.
-    if (CSS && !dom::CSSBinding::GetConstructorObject(cx, obj))
+    if (CSS && !dom::CSSBinding::GetConstructorObject(cx))
         return false;
 
     if (XMLHttpRequest &&
-        !dom::XMLHttpRequestBinding::GetConstructorObject(cx, obj))
+        !dom::XMLHttpRequestBinding::GetConstructorObject(cx))
         return false;
 
     if (TextEncoder &&
-        !dom::TextEncoderBinding::GetConstructorObject(cx, obj))
+        !dom::TextEncoderBinding::GetConstructorObject(cx))
         return false;
 
     if (TextDecoder &&
-        !dom::TextDecoderBinding::GetConstructorObject(cx, obj))
+        !dom::TextDecoderBinding::GetConstructorObject(cx))
         return false;
 
     if (URL &&
-        !dom::URLBinding::GetConstructorObject(cx, obj))
+        !dom::URLBinding::GetConstructorObject(cx))
         return false;
 
     if (URLSearchParams &&
-        !dom::URLSearchParamsBinding::GetConstructorObject(cx, obj))
+        !dom::URLSearchParamsBinding::GetConstructorObject(cx))
         return false;
 
     if (atob &&
@@ -971,11 +975,15 @@ xpc::GlobalProperties::Define(JSContext* cx, JS::HandleObject obj)
         return false;
 
     if (Blob &&
-        !dom::BlobBinding::GetConstructorObject(cx, obj))
+        !dom::BlobBinding::GetConstructorObject(cx))
+        return false;
+
+    if (Directory &&
+        !dom::DirectoryBinding::GetConstructorObject(cx))
         return false;
 
     if (File &&
-        !dom::FileBinding::GetConstructorObject(cx, obj))
+        !dom::FileBinding::GetConstructorObject(cx))
         return false;
 
     if (crypto && !SandboxCreateCrypto(cx, obj))
@@ -992,7 +1000,7 @@ xpc::GlobalProperties::Define(JSContext* cx, JS::HandleObject obj)
     if (caches && !dom::cache::CacheStorage::DefineCaches(cx, obj))
         return false;
 
-    if (fileReader && !dom::FileReaderBinding::GetConstructorObject(cx, obj))
+    if (fileReader && !dom::FileReaderBinding::GetConstructorObject(cx))
         return false;
 
     return true;
@@ -1012,9 +1020,10 @@ bool
 xpc::GlobalProperties::DefineInSandbox(JSContext* cx, JS::HandleObject obj)
 {
     MOZ_ASSERT(IsSandbox(obj));
+    MOZ_ASSERT(js::GetContextCompartment(cx) == js::GetObjectCompartment(obj));
 
     if (indexedDB &&
-        !(IndexedDatabaseManager::ResolveSandboxBinding(cx, obj) &&
+        !(IndexedDatabaseManager::ResolveSandboxBinding(cx) &&
           IndexedDatabaseManager::DefineIndexedDB(cx, obj)))
         return false;
 
@@ -1196,7 +1205,7 @@ xpc::CreateSandboxObject(JSContext* cx, MutableHandleValue vp, nsISupports* prin
 #ifndef SPIDERMONKEY_PROMISE
         // Promise is supposed to be part of ES, and therefore should appear on
         // every global.
-        if (!dom::PromiseBinding::GetConstructorObject(cx, sandbox))
+        if (!dom::PromiseBinding::GetConstructorObject(cx))
             return NS_ERROR_XPC_UNEXPECTED;
 #endif // SPIDERMONKEY_PROMISE
     }
@@ -1732,7 +1741,7 @@ xpc::EvalInSandbox(JSContext* cx, HandleObject sandboxArg, const nsAString& sour
                    const nsACString& filename, int32_t lineNo,
                    JSVersion jsVersion, MutableHandleValue rval)
 {
-    JS_AbortIfWrongThread(JS_GetRuntime(cx));
+    JS_AbortIfWrongThread(cx);
     rval.set(UndefinedValue());
 
     bool waiveXray = xpc::WrapperFactory::HasWaiveXrayFlag(sandboxArg);
@@ -1766,8 +1775,6 @@ xpc::EvalInSandbox(JSContext* cx, HandleObject sandboxArg, const nsAString& sour
         // This is clearly Gecko-specific and not in any spec.
         mozilla::dom::AutoEntryScript aes(priv, "XPConnect sandbox evaluation");
         JSContext* sandcx = aes.cx();
-        AutoSaveContextOptions savedOptions(sandcx);
-        JS::ContextOptionsRef(sandcx).setDontReportUncaught(true);
         JSAutoCompartment ac(sandcx, sandbox);
 
         JS::CompileOptions options(sandcx);
@@ -1779,7 +1786,9 @@ xpc::EvalInSandbox(JSContext* cx, HandleObject sandboxArg, const nsAString& sour
 
         // If the sandbox threw an exception, grab it off the context.
         if (aes.HasException()) {
-            aes.StealException(&exn);
+            if (!aes.StealException(&exn)) {
+                return NS_ERROR_OUT_OF_MEMORY;
+            }
         }
     }
 

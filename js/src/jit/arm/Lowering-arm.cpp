@@ -377,25 +377,25 @@ LIRGeneratorARM::newLTableSwitchV(MTableSwitch* tableswitch)
 void
 LIRGeneratorARM::visitGuardShape(MGuardShape* ins)
 {
-    MOZ_ASSERT(ins->obj()->type() == MIRType::Object);
+    MOZ_ASSERT(ins->object()->type() == MIRType::Object);
 
     LDefinition tempObj = temp(LDefinition::OBJECT);
-    LGuardShape* guard = new(alloc()) LGuardShape(useRegister(ins->obj()), tempObj);
+    LGuardShape* guard = new(alloc()) LGuardShape(useRegister(ins->object()), tempObj);
     assignSnapshot(guard, ins->bailoutKind());
     add(guard, ins);
-    redefine(ins, ins->obj());
+    redefine(ins, ins->object());
 }
 
 void
 LIRGeneratorARM::visitGuardObjectGroup(MGuardObjectGroup* ins)
 {
-    MOZ_ASSERT(ins->obj()->type() == MIRType::Object);
+    MOZ_ASSERT(ins->object()->type() == MIRType::Object);
 
     LDefinition tempObj = temp(LDefinition::OBJECT);
-    LGuardObjectGroup* guard = new(alloc()) LGuardObjectGroup(useRegister(ins->obj()), tempObj);
+    LGuardObjectGroup* guard = new(alloc()) LGuardObjectGroup(useRegister(ins->object()), tempObj);
     assignSnapshot(guard, ins->bailoutKind());
     add(guard, ins);
-    redefine(ins, ins->obj());
+    redefine(ins, ins->object());
 }
 
 void
@@ -498,6 +498,48 @@ LIRGeneratorARM::visitAsmJSUnsignedToFloat32(MAsmJSUnsignedToFloat32* ins)
 }
 
 void
+LIRGeneratorARM::visitWasmBoundsCheck(MWasmBoundsCheck* ins)
+{
+    MDefinition* input = ins->input();
+    MOZ_ASSERT(input->type() == MIRType::Int32);
+
+    LAllocation baseAlloc = useRegisterAtStart(input);
+    auto* lir = new(alloc()) LWasmBoundsCheck(baseAlloc);
+    add(lir, ins);
+}
+
+void
+LIRGeneratorARM::visitWasmLoad(MWasmLoad* ins)
+{
+    MDefinition* base = ins->base();
+    MOZ_ASSERT(base->type() == MIRType::Int32);
+
+    LAllocation baseAlloc = useRegisterAtStart(base);
+    auto* lir = new(alloc()) LWasmLoad(baseAlloc);
+
+    if (ins->offset())
+        lir->setTemp(0, tempCopy(base, 0));
+
+    define(lir, ins);
+}
+
+void
+LIRGeneratorARM::visitWasmStore(MWasmStore* ins)
+{
+    MDefinition* base = ins->base();
+    MOZ_ASSERT(base->type() == MIRType::Int32);
+
+    LAllocation baseAlloc = useRegisterAtStart(base);
+    LAllocation valueAlloc = useRegisterAtStart(ins->value());
+    auto* lir = new(alloc()) LWasmStore(baseAlloc, valueAlloc);
+
+    if (ins->offset())
+        lir->setTemp(0, tempCopy(base, 0));
+
+    add(lir, ins);
+}
+
+void
 LIRGeneratorARM::visitAsmJSLoadHeap(MAsmJSLoadHeap* ins)
 {
     MOZ_ASSERT(ins->offset() == 0);
@@ -538,12 +580,6 @@ LIRGeneratorARM::visitAsmJSStoreHeap(MAsmJSStoreHeap* ins)
 }
 
 void
-LIRGeneratorARM::visitAsmJSLoadFuncPtr(MAsmJSLoadFuncPtr* ins)
-{
-    define(new(alloc()) LAsmJSLoadFuncPtr(useRegister(ins->index()), temp()), ins);
-}
-
-void
 LIRGeneratorARM::lowerTruncateDToInt32(MTruncateToInt32* ins)
 {
     MDefinition* opd = ins->input();
@@ -563,30 +599,6 @@ LIRGeneratorARM::lowerTruncateFToInt32(MTruncateToInt32* ins)
 
 void
 LIRGeneratorARM::visitStoreTypedArrayElementStatic(MStoreTypedArrayElementStatic* ins)
-{
-    MOZ_CRASH("NYI");
-}
-
-void
-LIRGeneratorARM::visitSimdBinaryArith(MSimdBinaryArith* ins)
-{
-    MOZ_CRASH("NYI");
-}
-
-void
-LIRGeneratorARM::visitSimdSelect(MSimdSelect* ins)
-{
-    MOZ_CRASH("NYI");
-}
-
-void
-LIRGeneratorARM::visitSimdSplat(MSimdSplat* ins)
-{
-    MOZ_CRASH("NYI");
-}
-
-void
-LIRGeneratorARM::visitSimdValueX4(MSimdValueX4* ins)
 {
     MOZ_CRASH("NYI");
 }
@@ -805,4 +817,26 @@ void
 LIRGeneratorARM::visitInt64ToFloatingPoint(MInt64ToFloatingPoint* ins)
 {
     MOZ_CRASH("NY");
+}
+
+void
+LIRGeneratorARM::visitCopySign(MCopySign* ins)
+{
+    MDefinition* lhs = ins->lhs();
+    MDefinition* rhs = ins->rhs();
+
+    MOZ_ASSERT(IsFloatingPointType(lhs->type()));
+    MOZ_ASSERT(lhs->type() == rhs->type());
+    MOZ_ASSERT(lhs->type() == ins->type());
+
+    LInstructionHelper<1, 2, 2>* lir;
+    if (lhs->type() == MIRType::Double)
+        lir = new(alloc()) LCopySignD();
+    else
+        lir = new(alloc()) LCopySignF();
+
+    lir->setTemp(0, temp());
+    lir->setTemp(1, temp());
+
+    lowerForFPU(lir, ins, lhs, rhs);
 }

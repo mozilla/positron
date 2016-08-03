@@ -87,7 +87,7 @@ public:
     return Trap(BlockedSyscallTrap, nullptr);
   }
 
-  virtual ResultExpr ClonePolicy() const {
+  virtual ResultExpr ClonePolicy(ResultExpr failPolicy) const {
     // Allow use for simple thread creation (pthread_create) only.
 
     // WARNING: s390 and cris pass the flags in the second arg -- see
@@ -113,7 +113,7 @@ public:
       .Case(flags_common, Allow()) // JB 4.3 or KK 4.4
 #endif
       .Case(flags_modern, Allow()) // Android L or glibc
-      .Default(InvalidSyscall());
+      .Default(failPolicy);
   }
 
   virtual ResultExpr PrctlPolicy() const {
@@ -187,6 +187,7 @@ public:
       // Simple I/O
     case __NR_write:
     case __NR_read:
+    case __NR_readv:
     case __NR_writev: // see SandboxLogging.cpp
     CASES_FOR_lseek:
       return Allow();
@@ -224,7 +225,7 @@ public:
 
       // Thread creation.
     case __NR_clone:
-      return ClonePolicy();
+      return ClonePolicy(InvalidSyscall());
 
       // More thread creation.
 #ifdef __NR_set_robust_list
@@ -404,7 +405,7 @@ class ContentSandboxPolicy : public SandboxPolicyCommon {
   }
 
 public:
-  ContentSandboxPolicy(SandboxBrokerClient* aBroker):mBroker(aBroker) { }
+  explicit ContentSandboxPolicy(SandboxBrokerClient* aBroker):mBroker(aBroker) { }
   virtual ~ContentSandboxPolicy() { }
   virtual ResultExpr PrctlPolicy() const override {
     // Ideally this should be restricted to a whitelist, but content
@@ -437,6 +438,11 @@ public:
     case SYS_SEND:
     case SYS_SOCKET: // DANGEROUS
     case SYS_CONNECT: // DANGEROUS
+    case SYS_ACCEPT:
+    case SYS_ACCEPT4:
+    case SYS_BIND:
+    case SYS_LISTEN:
+    case SYS_GETSOCKOPT:
     case SYS_SETSOCKOPT:
     case SYS_GETSOCKNAME:
     case SYS_GETPEERNAME:
@@ -459,6 +465,10 @@ public:
     case SHMCTL:
     case SHMAT:
     case SHMDT:
+    case SEMGET:
+    case SEMCTL:
+    case SEMOP:
+    case MSGGET:
       return Some(Allow());
     default:
       return SandboxPolicyCommon::EvaluateIpcCall(aCall);
@@ -507,13 +517,15 @@ public:
     case __NR_rmdir:
     case __NR_getcwd:
     CASES_FOR_statfs:
+    CASES_FOR_fstatfs:
     case __NR_chmod:
     case __NR_rename:
     case __NR_symlink:
     case __NR_quotactl:
     case __NR_utimes:
+    case __NR_link:
     case __NR_unlink:
-    case __NR_fchown:
+    CASES_FOR_fchown:
     case __NR_fchmod:
 #endif
       return Allow();
@@ -532,6 +544,7 @@ public:
     case __NR_writev:
     case __NR_pread64:
 #ifdef DESKTOP
+    case __NR_pwrite64:
     case __NR_readahead:
 #endif
       return Allow();
@@ -601,8 +614,8 @@ public:
 
     CASES_FOR_getrlimit:
     case __NR_clock_getres:
-    case __NR_getresuid:
-    case __NR_getresgid:
+    CASES_FOR_getresuid:
+    CASES_FOR_getresgid:
       return Allow();
 
     case __NR_umask:
@@ -617,6 +630,39 @@ public:
     case __NR_inotify_init1:
     case __NR_inotify_add_watch:
     case __NR_inotify_rm_watch:
+      return Allow();
+
+#ifdef __NR_memfd_create
+    case __NR_memfd_create:
+      return Allow();
+#endif
+
+#ifdef __NR_rt_tgsigqueueinfo
+      // Only allow to send signals within the process.
+    case __NR_rt_tgsigqueueinfo: {
+      Arg<pid_t> tgid(0);
+      return If(tgid == getpid(), Allow())
+        .Else(InvalidSyscall());
+    }
+#endif
+
+    case __NR_mlock:
+    case __NR_munlock:
+      return Allow();
+
+      // We can't usefully allow fork+exec, even on a temporary basis;
+      // the child would inherit the seccomp-bpf policy and almost
+      // certainly die from an unexpected SIGSYS.  We also can't have
+      // fork() crash, currently, because there are too many system
+      // libraries/plugins that try to run commands.  But they can
+      // usually do something reasonable on error.
+    case __NR_clone:
+      return ClonePolicy(Error(EPERM));
+
+#endif // DESKTOP
+
+#ifdef __NR_getrandom
+    case __NR_getrandom:
       return Allow();
 #endif
 

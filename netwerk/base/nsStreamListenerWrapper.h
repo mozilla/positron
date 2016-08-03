@@ -11,6 +11,9 @@
 #include "nsIThreadRetargetableStreamListener.h"
 #include "mozilla/Attributes.h"
 
+namespace mozilla {
+namespace net {
+
 // Wrapper class to make replacement of nsHttpChannel's listener
 // from JavaScript possible. It is workaround for bug 433711 and 682305.
 class nsStreamListenerWrapper final : public nsIStreamListener
@@ -24,28 +27,17 @@ public:
   }
 
   NS_DECL_ISUPPORTS
+  NS_FORWARD_NSIREQUESTOBSERVER(mListener->)
   NS_FORWARD_NSISTREAMLISTENER(mListener->)
   NS_DECL_NSITHREADRETARGETABLESTREAMLISTENER
-
-  //  Don't use NS_FORWARD_NSIREQUESTOBSERVER(mListener->) here, because we need
-  //  to release mListener in OnStopRequest, and IDL-generated function doesn't.
-  NS_IMETHOD OnStartRequest(nsIRequest *aRequest,
-                            nsISupports *aContext) override
-  {
-    return mListener->OnStartRequest(aRequest, aContext);
-  }
-  NS_IMETHOD OnStopRequest(nsIRequest *aRequest, nsISupports *aContext,
-                           nsresult aStatusCode) override
-  {
-    nsresult rv = mListener->OnStopRequest(aRequest, aContext, aStatusCode);
-    mListener = nullptr;
-    return rv;
-  }
 
 private:
   ~nsStreamListenerWrapper() {}
   nsCOMPtr<nsIStreamListener> mListener;
 };
+
+} // namespace net
+} // namespace mozilla
 
 #endif // nsStreamListenerWrapper_h__
 

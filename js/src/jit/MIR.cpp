@@ -270,22 +270,53 @@ MDefinition::mightBeMagicType() const
 }
 
 MDefinition*
-MInstruction::foldsToStoredValue(TempAllocator& alloc, MDefinition* loaded)
+MInstruction::foldsToStore(TempAllocator& alloc)
 {
+    if (!dependency())
+        return nullptr;
+
+    MDefinition* store = dependency();
+    if (mightAlias(store) != AliasType::MustAlias)
+        return nullptr;
+
+    if (!store->block()->dominates(block()))
+        return nullptr;
+
+    MDefinition* value;
+    switch (store->op()) {
+      case Op_StoreFixedSlot:
+        value = store->toStoreFixedSlot()->value();
+        break;
+      case Op_StoreSlot:
+        value = store->toStoreSlot()->value();
+        break;
+      case Op_StoreElement:
+        value = store->toStoreElement()->value();
+        break;
+      case Op_StoreUnboxedObjectOrNull:
+        value = store->toStoreUnboxedObjectOrNull()->value();
+        break;
+      default:
+        MOZ_CRASH("unknown store");
+    }
+
     // If the type are matching then we return the value which is used as
     // argument of the store.
-    if (loaded->type() != type()) {
+    if (value->type() != type()) {
         // If we expect to read a type which is more generic than the type seen
         // by the store, then we box the value used by the store.
         if (type() != MIRType::Value)
-            return this;
+            return nullptr;
+        // We cannot unbox ObjectOrNull yet.
+        if (value->type() == MIRType::ObjectOrNull)
+            return nullptr;
 
-        MOZ_ASSERT(loaded->type() < MIRType::Value);
-        MBox* box = MBox::New(alloc, loaded);
-        loaded = box;
+        MOZ_ASSERT(value->type() < MIRType::Value);
+        MBox* box = MBox::New(alloc, value);
+        value = box;
     }
 
-    return loaded;
+    return value;
 }
 
 void
@@ -376,12 +407,6 @@ AliasSet::Name(size_t flag)
       default:
         MOZ_CRASH("Unknown flag");
     }
-}
-
-MTest*
-MTest::New(TempAllocator& alloc, MDefinition* ins, MBasicBlock* ifTrue, MBasicBlock* ifFalse)
-{
-    return new(alloc) MTest(ins, ifTrue, ifFalse);
 }
 
 MTest*
@@ -659,12 +684,14 @@ MDefinition::justReplaceAllUsesWithExcept(MDefinition* dom)
     uses_.pushFront(exceptUse);
 }
 
-void
+bool
 MDefinition::optimizeOutAllUses(TempAllocator& alloc)
 {
     for (MUseIterator i(usesBegin()), e(usesEnd()); i != e;) {
         MUse* use = *i++;
         MConstant* constant = use->consumer()->block()->optimizedOutConstant(alloc);
+        if (!alloc.ensureBallast())
+            return false;
 
         // Update the resume point operand to use the optimized-out constant.
         use->setProducerUnchecked(constant);
@@ -673,6 +700,7 @@ MDefinition::optimizeOutAllUses(TempAllocator& alloc)
 
     // Remove dangling pointers.
     this->uses_.clear();
+    return true;
 }
 
 void
@@ -740,7 +768,7 @@ MakeSingletonTypeSetFromKey(CompilerConstraintList* constraints, TypeSet::Object
     // we want to invalidate and mark this TypeSet as containing AnyObject
     // (because mutating __proto__ will change an object's ObjectGroup).
     MOZ_ASSERT(constraints);
-    key->hasStableClassAndProto(constraints);
+    (void)key->hasStableClassAndProto(constraints);
 
     LifoAlloc* alloc = GetJitContext()->temp->lifoAlloc();
     return alloc->new_<TemporaryTypeSet>(alloc, TypeSet::ObjectType(key));
@@ -1156,9 +1184,29 @@ MSimdSplat::foldsTo(TempAllocator& alloc)
 
     SimdConstant cst;
     switch (type()) {
+      case MIRType::Bool8x16: {
+        int8_t v = op->toConstant()->valueToBooleanInfallible() ? -1 : 0;
+        cst = SimdConstant::SplatX16(v);
+        break;
+      }
+      case MIRType::Bool16x8: {
+        int16_t v = op->toConstant()->valueToBooleanInfallible() ? -1 : 0;
+        cst = SimdConstant::SplatX8(v);
+        break;
+      }
       case MIRType::Bool32x4: {
         int32_t v = op->toConstant()->valueToBooleanInfallible() ? -1 : 0;
         cst = SimdConstant::SplatX4(v);
+        break;
+      }
+      case MIRType::Int8x16: {
+        int32_t v = op->toConstant()->toInt32();
+        cst = SimdConstant::SplatX16(v);
+        break;
+      }
+      case MIRType::Int16x8: {
+        int32_t v = op->toConstant()->toInt32();
+        cst = SimdConstant::SplatX8(v);
         break;
       }
       case MIRType::Int32x4: {
@@ -1267,8 +1315,7 @@ MSimdConvert::AddLegalized(TempAllocator& alloc, MBasicBlock* addTo, MDefinition
         // Compute hi = obj >> 16 (lane-wise unsigned shift).
         MInstruction* c16 = MConstant::New(alloc, Int32Value(16));
         addTo->add(c16);
-        MInstruction* hi = MSimdShift::New(alloc, obj, c16, MSimdShift::ursh);
-        addTo->add(hi);
+        MInstruction* hi = MSimdShift::AddLegalized(alloc, addTo, obj, c16, MSimdShift::ursh);
 
         // Compute lo = obj & 0xffff (lane-wise).
         MInstruction* m16 =
@@ -1302,15 +1349,11 @@ MSimdConvert::AddLegalized(TempAllocator& alloc, MBasicBlock* addTo, MDefinition
           MSimdConstant::New(alloc, SimdConstant::SplatX4(BiasValue), MIRType::Float32x4);
         addTo->add(bias);
         MInstruction* fhi_debiased =
-          MSimdBinaryArith::New(alloc, fhi, bias, MSimdBinaryArith::Op_sub);
-        addTo->add(fhi_debiased);
+          MSimdBinaryArith::AddLegalized(alloc, addTo, fhi, bias, MSimdBinaryArith::Op_sub);
 
         // Compute the final result.
-        MInstruction* result =
-          MSimdBinaryArith::New(alloc, fhi_debiased, flo, MSimdBinaryArith::Op_add);
-        addTo->add(result);
-
-        return result;
+        return MSimdBinaryArith::AddLegalized(alloc, addTo, fhi_debiased, flo,
+                                              MSimdBinaryArith::Op_add);
     }
 
     if (fromType == MIRType::Float32x4 && toType == MIRType::Int32x4) {
@@ -1333,28 +1376,42 @@ MSimdBinaryComp::AddLegalized(TempAllocator& alloc, MBasicBlock* addTo, MDefinit
     MOZ_ASSERT(IsSimdType(opType));
     bool IsEquality = op == equal || op == notEqual;
 
-    if (!SupportsUint32x4Compares && sign == SimdSign::Unsigned && !IsEquality) {
-        MOZ_ASSERT(opType == MIRType::Int32x4);
+    // Check if this is an unsupported unsigned compare that needs to be biased.
+    // If so, put the bias vector in `bias`.
+    if (sign == SimdSign::Unsigned && !IsEquality) {
+        MInstruction* bias = nullptr;
+
         // This is an order comparison of Uint32x4 vectors which are not supported on this target.
         // Simply offset |left| and |right| by INT_MIN, then do a signed comparison.
-        MInstruction* bias =
-          MSimdConstant::New(alloc, SimdConstant::SplatX4(int32_t(0x80000000)), opType);
-        addTo->add(bias);
+        if (!SupportsUint32x4Compares && opType == MIRType::Int32x4)
+            bias = MSimdConstant::New(alloc, SimdConstant::SplatX4(int32_t(0x80000000)), opType);
+        else if (!SupportsUint16x8Compares && opType == MIRType::Int16x8)
+            bias = MSimdConstant::New(alloc, SimdConstant::SplatX8(int16_t(0x8000)), opType);
+        if (!SupportsUint8x16Compares && opType == MIRType::Int8x16)
+            bias = MSimdConstant::New(alloc, SimdConstant::SplatX16(int8_t(0x80)), opType);
 
-        // Add the bias.
-        MInstruction* bleft = MSimdBinaryArith::New(alloc, left, bias, MSimdBinaryArith::Op_add);
-        addTo->add(bleft);
-        MInstruction* bright = MSimdBinaryArith::New(alloc, right, bias, MSimdBinaryArith::Op_add);
-        addTo->add(bright);
+        if (bias) {
+            addTo->add(bias);
 
-        // Do the equivalent signed comparison.
-        MInstruction* result = MSimdBinaryComp::New(alloc, bleft, bright, op, SimdSign::Signed);
-        addTo->add(result);
+            // Add the bias.
+            MInstruction* bleft =
+              MSimdBinaryArith::AddLegalized(alloc, addTo, left, bias, MSimdBinaryArith::Op_add);
+            MInstruction* bright =
+              MSimdBinaryArith::AddLegalized(alloc, addTo, right, bias, MSimdBinaryArith::Op_add);
 
-        return result;
+            // Do the equivalent signed comparison.
+            MInstruction* result =
+              MSimdBinaryComp::New(alloc, bleft, bright, op, SimdSign::Signed);
+            addTo->add(result);
+
+            return result;
+        }
     }
 
-    if (!SupportsUint32x4Compares && sign == SimdSign::Unsigned && opType == MIRType::Int32x4) {
+    if (sign == SimdSign::Unsigned &&
+        ((!SupportsUint32x4Compares && opType == MIRType::Int32x4) ||
+         (!SupportsUint16x8Compares && opType == MIRType::Int16x8) ||
+         (!SupportsUint8x16Compares && opType == MIRType::Int8x16))) {
         // The sign doesn't matter for equality tests. Flip it to make the
         // backend assertions happy.
         MOZ_ASSERT(IsEquality);
@@ -1363,6 +1420,161 @@ MSimdBinaryComp::AddLegalized(TempAllocator& alloc, MBasicBlock* addTo, MDefinit
 
     // This is a legal operation already. Just create the instruction requested.
     MInstruction* result = MSimdBinaryComp::New(alloc, left, right, op, sign);
+    addTo->add(result);
+    return result;
+}
+
+MInstruction*
+MSimdBinaryArith::AddLegalized(TempAllocator& alloc, MBasicBlock* addTo, MDefinition* left,
+                               MDefinition* right, Operation op)
+{
+    MOZ_ASSERT(left->type() == right->type());
+    MIRType opType = left->type();
+    MOZ_ASSERT(IsSimdType(opType));
+
+    // SSE does not have 8x16 multiply instructions.
+    if (opType == MIRType::Int8x16 && op == Op_mul) {
+        // Express the multiply in terms of Int16x8 multiplies by handling the
+        // even and odd lanes separately.
+
+        MInstruction* wideL = MSimdReinterpretCast::New(alloc, left, MIRType::Int16x8);
+        addTo->add(wideL);
+        MInstruction* wideR = MSimdReinterpretCast::New(alloc, right, MIRType::Int16x8);
+        addTo->add(wideR);
+
+        // wideL = yyxx yyxx yyxx yyxx yyxx yyxx yyxx yyxx
+        // wideR = bbaa bbaa bbaa bbaa bbaa bbaa bbaa bbaa
+
+        // Shift the odd lanes down to the low bits of the 16x8 vectors.
+        MInstruction* eight = MConstant::New(alloc, Int32Value(8));
+        addTo->add(eight);
+        MInstruction* evenL = wideL;
+        MInstruction* evenR = wideR;
+        MInstruction* oddL =
+          MSimdShift::AddLegalized(alloc, addTo, wideL, eight, MSimdShift::ursh);
+        MInstruction* oddR =
+          MSimdShift::AddLegalized(alloc, addTo, wideR, eight, MSimdShift::ursh);
+
+        // evenL = yyxx yyxx yyxx yyxx yyxx yyxx yyxx yyxx
+        // evenR = bbaa bbaa bbaa bbaa bbaa bbaa bbaa bbaa
+        // oddL  = 00yy 00yy 00yy 00yy 00yy 00yy 00yy 00yy
+        // oddR  = 00bb 00bb 00bb 00bb 00bb 00bb 00bb 00bb
+
+        // Now do two 16x8 multiplications. We can use the low bits of each.
+        MInstruction* even = MSimdBinaryArith::AddLegalized(alloc, addTo, evenL, evenR, Op_mul);
+        MInstruction* odd = MSimdBinaryArith::AddLegalized(alloc, addTo, oddL, oddR, Op_mul);
+
+        // even = ~~PP ~~PP ~~PP ~~PP ~~PP ~~PP ~~PP ~~PP
+        // odd  = ~~QQ ~~QQ ~~QQ ~~QQ ~~QQ ~~QQ ~~QQ ~~QQ
+
+        MInstruction* mask =
+          MSimdConstant::New(alloc, SimdConstant::SplatX8(int16_t(0x00ff)), MIRType::Int16x8);
+        addTo->add(mask);
+        even = MSimdBinaryBitwise::New(alloc, even, mask, MSimdBinaryBitwise::and_);
+        addTo->add(even);
+        odd = MSimdShift::AddLegalized(alloc, addTo, odd, eight, MSimdShift::lsh);
+
+        // even = 00PP 00PP 00PP 00PP 00PP 00PP 00PP 00PP
+        // odd  = QQ00 QQ00 QQ00 QQ00 QQ00 QQ00 QQ00 QQ00
+
+        // Combine:
+        MInstruction* result = MSimdBinaryBitwise::New(alloc, even, odd, MSimdBinaryBitwise::or_);
+        addTo->add(result);
+        result = MSimdReinterpretCast::New(alloc, result, opType);
+        addTo->add(result);
+        return result;
+    }
+
+    // This is a legal operation already. Just create the instruction requested.
+    MInstruction* result = MSimdBinaryArith::New(alloc, left, right, op);
+    addTo->add(result);
+    return result;
+}
+
+MInstruction*
+MSimdShift::AddLegalized(TempAllocator& alloc, MBasicBlock* addTo, MDefinition* left,
+                         MDefinition* right, Operation op)
+{
+    MIRType opType = left->type();
+    MOZ_ASSERT(IsIntegerSimdType(opType));
+
+    // SSE does not provide 8x16 shift instructions.
+    if (opType == MIRType::Int8x16) {
+        // Express the shift in terms of Int16x8 shifts by splitting into even
+        // and odd lanes, place 8-bit lanes into the high bits of Int16x8
+        // vectors `even` and `odd`. Shift, mask, combine.
+        //
+        //   wide = Int16x8.fromInt8x16Bits(left);
+        //   shiftBy = right & 7
+        //   mask = Int16x8.splat(0xff00);
+        //
+        MInstruction* wide = MSimdReinterpretCast::New(alloc, left, MIRType::Int16x8);
+        addTo->add(wide);
+
+        // wide = yyxx yyxx yyxx yyxx yyxx yyxx yyxx yyxx
+
+        MInstruction* shiftMask = MConstant::New(alloc, Int32Value(7));
+        addTo->add(shiftMask);
+        MBinaryBitwiseInstruction* shiftBy = MBitAnd::New(alloc, right, shiftMask);
+        shiftBy->setInt32Specialization();
+        addTo->add(shiftBy);
+
+        // Move the even 8x16 lanes into the high bits of the 16x8 lanes.
+        MInstruction* eight = MConstant::New(alloc, Int32Value(8));
+        addTo->add(eight);
+        MInstruction* even = MSimdShift::AddLegalized(alloc, addTo, wide, eight, lsh);
+
+        // Leave the odd lanes in place.
+        MInstruction* odd = wide;
+
+        // even = xx00 xx00 xx00 xx00 xx00 xx00 xx00 xx00
+        // odd  = yyxx yyxx yyxx yyxx yyxx yyxx yyxx yyxx
+
+        MInstruction* mask =
+          MSimdConstant::New(alloc, SimdConstant::SplatX8(int16_t(0xff00)), MIRType::Int16x8);
+        addTo->add(mask);
+
+        // Left-shift: Clear the low bits in `odd` before shifting.
+        if (op == lsh) {
+            odd = MSimdBinaryBitwise::New(alloc, odd, mask, MSimdBinaryBitwise::and_);
+            addTo->add(odd);
+            // odd  = yy00 yy00 yy00 yy00 yy00 yy00 yy00 yy00
+        }
+
+        // Do the real shift twice: once for the even lanes, once for the odd
+        // lanes. This is a recursive call, but with a different type.
+        even = MSimdShift::AddLegalized(alloc, addTo, even, shiftBy, op);
+        odd = MSimdShift::AddLegalized(alloc, addTo, odd, shiftBy, op);
+
+        // even = XX~~ XX~~ XX~~ XX~~ XX~~ XX~~ XX~~ XX~~
+        // odd  = YY~~ YY~~ YY~~ YY~~ YY~~ YY~~ YY~~ YY~~
+
+        // Right-shift: Clear the low bits in `odd` after shifting.
+        if (op != lsh) {
+            odd = MSimdBinaryBitwise::New(alloc, odd, mask, MSimdBinaryBitwise::and_);
+            addTo->add(odd);
+            // odd  = YY00 YY00 YY00 YY00 YY00 YY00 YY00 YY00
+        }
+
+        // Move the even lanes back to their original place.
+        even = MSimdShift::AddLegalized(alloc, addTo, even, eight, ursh);
+
+        // Now, `odd` contains the odd lanes properly shifted, and `even`
+        // contains the even lanes properly shifted:
+        //
+        // even = 00XX 00XX 00XX 00XX 00XX 00XX 00XX 00XX
+        // odd  = YY00 YY00 YY00 YY00 YY00 YY00 YY00 YY00
+        //
+        // Combine:
+        MInstruction* result = MSimdBinaryBitwise::New(alloc, even, odd, MSimdBinaryBitwise::or_);
+        addTo->add(result);
+        result = MSimdReinterpretCast::New(alloc, result, opType);
+        addTo->add(result);
+        return result;
+    }
+
+    // This is a legal operation already. Just create the instruction requested.
+    MInstruction* result = MSimdShift::New(alloc, left, right, op);
     addTo->add(result);
     return result;
 }
@@ -1377,6 +1589,11 @@ PrintOpcodeOperation(T* mir, GenericPrinter& out)
 
 void
 MSimdBinaryArith::printOpcode(GenericPrinter& out) const
+{
+    PrintOpcodeOperation(this, out);
+}
+void
+MSimdBinarySaturating::printOpcode(GenericPrinter& out) const
 {
     PrintOpcodeOperation(this, out);
 }
@@ -1421,12 +1638,6 @@ MSimdUnbox::printOpcode(GenericPrinter& out) const
 {
     MDefinition::printOpcode(out);
     out.printf(" (%s)", SimdTypeToString(simdType()));
-}
-
-MCloneLiteral*
-MCloneLiteral::New(TempAllocator& alloc, MDefinition* obj)
-{
-    return new(alloc) MCloneLiteral(obj);
 }
 
 void
@@ -1645,17 +1856,27 @@ MParameter::congruentTo(const MDefinition* ins) const
     return ins->toParameter()->index() == index_;
 }
 
+WrappedFunction::WrappedFunction(JSFunction* fun)
+  : fun_(fun),
+    nargs_(fun->nargs()),
+    isNative_(fun->isNative()),
+    isConstructor_(fun->isConstructor()),
+    isClassConstructor_(fun->isClassConstructor()),
+    isSelfHostedBuiltin_(fun->isSelfHostedBuiltin())
+{}
+
 MCall*
 MCall::New(TempAllocator& alloc, JSFunction* target, size_t maxArgc, size_t numActualArgs,
            bool construct, bool isDOMCall)
 {
+    WrappedFunction* wrappedTarget = target ? new(alloc) WrappedFunction(target) : nullptr;
     MOZ_ASSERT(maxArgc >= numActualArgs);
     MCall* ins;
     if (isDOMCall) {
         MOZ_ASSERT(!construct);
-        ins = new(alloc) MCallDOMNative(target, numActualArgs);
+        ins = new(alloc) MCallDOMNative(wrappedTarget, numActualArgs);
     } else {
-        ins = new(alloc) MCall(target, numActualArgs, construct);
+        ins = new(alloc) MCall(wrappedTarget, numActualArgs, construct);
     }
     if (!ins->init(alloc, maxArgc + NumNonArgumentOperands))
         return nullptr;
@@ -1777,20 +1998,6 @@ MCallDOMNative::getJitInfo() const
     return jitInfo;
 }
 
-MApplyArgs*
-MApplyArgs::New(TempAllocator& alloc, JSFunction* target, MDefinition* fun, MDefinition* argc,
-                MDefinition* self)
-{
-    return new(alloc) MApplyArgs(target, fun, argc, self);
-}
-
-MApplyArray*
-MApplyArray::New(TempAllocator& alloc, JSFunction* target, MDefinition* fun, MDefinition* elements,
-                 MDefinition* self)
-{
-    return new(alloc) MApplyArray(target, fun, elements, self);
-}
-
 MDefinition*
 MStringLength::foldsTo(TempAllocator& alloc)
 {
@@ -1851,12 +2058,6 @@ MRound::trySpecializeFloat32(TempAllocator& alloc)
 }
 
 MCompare*
-MCompare::New(TempAllocator& alloc, MDefinition* left, MDefinition* right, JSOp op)
-{
-    return new(alloc) MCompare(left, right, op);
-}
-
-MCompare*
 MCompare::NewAsmJS(TempAllocator& alloc, MDefinition* left, MDefinition* right, JSOp op,
                    CompareType compareType)
 {
@@ -1878,6 +2079,13 @@ MTableSwitch::New(TempAllocator& alloc, MDefinition* ins, int32_t low, int32_t h
 
 MGoto*
 MGoto::New(TempAllocator& alloc, MBasicBlock* target)
+{
+    MOZ_ASSERT(target);
+    return new(alloc) MGoto(target);
+}
+
+MGoto*
+MGoto::New(TempAllocator::Fallible alloc, MBasicBlock* target)
 {
     MOZ_ASSERT(target);
     return new(alloc) MGoto(target);
@@ -3434,12 +3642,6 @@ MCompare::cacheOperandMightEmulateUndefined(CompilerConstraintList* constraints)
 }
 
 MBitNot*
-MBitNot::New(TempAllocator& alloc, MDefinition* input)
-{
-    return new(alloc) MBitNot(input);
-}
-
-MBitNot*
 MBitNot::NewAsmJS(TempAllocator& alloc, MDefinition* input)
 {
     MBitNot* ins = new(alloc) MBitNot(input);
@@ -4345,10 +4547,8 @@ MNot::foldsTo(TempAllocator& alloc)
     if (MConstant* inputConst = input()->maybeConstantValue()) {
         bool b;
         if (inputConst->valueToBoolean(&b)) {
-            if (type() == MIRType::Int32)
+            if (type() == MIRType::Int32 || type() == MIRType::Int64)
                 return MConstant::New(alloc, Int32Value(!b));
-            if (type() == MIRType::Int64)
-                return MConstant::NewInt64(alloc, int64_t(!b));
             return MConstant::New(alloc, BooleanValue(!b));
         }
     }
@@ -4625,38 +4825,49 @@ MNewArray::MNewArray(CompilerConstraintList* constraints, uint32_t length, MCons
 }
 
 MDefinition::AliasType
-MLoadFixedSlot::mightAlias(const MDefinition* store) const
+MLoadFixedSlot::mightAlias(const MDefinition* def) const
 {
-    if (store->isStoreFixedSlot() && store->toStoreFixedSlot()->slot() != slot())
-        return AliasType::NoAlias;
-    return AliasType::MayAlias;
-}
-
-MDefinition::AliasType
-MLoadFixedSlotAndUnbox::mightAlias(const MDefinition* store) const
-{
-    if (store->isStoreFixedSlot() && store->toStoreFixedSlot()->slot() != slot())
-        return AliasType::NoAlias;
+    if (def->isStoreFixedSlot()) {
+        const MStoreFixedSlot* store = def->toStoreFixedSlot();
+        if (store->slot() != slot())
+            return AliasType::NoAlias;
+        if (store->object() != object())
+            return AliasType::MayAlias;
+        return AliasType::MustAlias;
+    }
     return AliasType::MayAlias;
 }
 
 MDefinition*
 MLoadFixedSlot::foldsTo(TempAllocator& alloc)
 {
-    if (!dependency() || !dependency()->isStoreFixedSlot())
-        return this;
+    if (MDefinition* def = foldsToStore(alloc))
+        return def;
 
-    MStoreFixedSlot* store = dependency()->toStoreFixedSlot();
-    if (!store->block()->dominates(block()))
-        return this;
+    return this;
+}
 
-    if (store->object() != object())
-        return this;
+MDefinition::AliasType
+MLoadFixedSlotAndUnbox::mightAlias(const MDefinition* def) const
+{
+    if (def->isStoreFixedSlot()) {
+        const MStoreFixedSlot* store = def->toStoreFixedSlot();
+        if (store->slot() != slot())
+            return AliasType::NoAlias;
+        if (store->object() != object())
+            return AliasType::MayAlias;
+        return AliasType::MustAlias;
+    }
+    return AliasType::MayAlias;
+}
 
-    if (store->slot() != slot())
-        return this;
+MDefinition*
+MLoadFixedSlotAndUnbox::foldsTo(TempAllocator& alloc)
+{
+    if (MDefinition* def = foldsToStore(alloc))
+        return def;
 
-    return foldsToStoredValue(alloc, store->value());
+    return this;
 }
 
 MDefinition::AliasType
@@ -4739,9 +4950,7 @@ HashNumber
 MAsmJSLoadFuncPtr::valueHash() const
 {
     HashNumber hash = MDefinition::valueHash();
-    hash = addU32ToHash(hash, hasLimit_);
     hash = addU32ToHash(hash, limit_);
-    hash = addU32ToHash(hash, alwaysThrow_);
     hash = addU32ToHash(hash, globalDataOffset_);
     return hash;
 }
@@ -4751,9 +4960,7 @@ MAsmJSLoadFuncPtr::congruentTo(const MDefinition* ins) const
 {
     if (ins->isAsmJSLoadFuncPtr()) {
         const MAsmJSLoadFuncPtr* load = ins->toAsmJSLoadFuncPtr();
-        return hasLimit_ == load->hasLimit_ &&
-               limit_ == load->limit_ &&
-               alwaysThrow_ == load->alwaysThrow_ &&
+        return limit_ == load->limit_ &&
                globalDataOffset_ == load->globalDataOffset_;
     }
     return false;
@@ -4778,10 +4985,18 @@ MAsmJSLoadFFIFunc::congruentTo(const MDefinition* ins) const
 }
 
 MDefinition::AliasType
-MLoadSlot::mightAlias(const MDefinition* store) const
+MLoadSlot::mightAlias(const MDefinition* def) const
 {
-    if (store->isStoreSlot() && store->toStoreSlot()->slot() != slot())
-        return AliasType::NoAlias;
+    if (def->isStoreSlot()) {
+        const MStoreSlot* store = def->toStoreSlot();
+        if (store->slot() != slot())
+            return AliasType::NoAlias;
+
+        if (store->slots() != slots())
+            return AliasType::MayAlias;
+
+        return AliasType::MustAlias;
+    }
     return AliasType::MayAlias;
 }
 
@@ -4796,20 +5011,10 @@ MLoadSlot::valueHash() const
 MDefinition*
 MLoadSlot::foldsTo(TempAllocator& alloc)
 {
-    if (!dependency() || !dependency()->isStoreSlot())
-        return this;
+    if (MDefinition* def = foldsToStore(alloc))
+        return def;
 
-    MStoreSlot* store = dependency()->toStoreSlot();
-    if (!store->block()->dominates(block()))
-        return this;
-
-    if (store->slots() != slots())
-        return this;
-
-    if (store->slot() != slot())
-        return this;
-
-    return foldsToStoredValue(alloc, store->value());
+    return this;
 }
 
 MDefinition*
@@ -4821,190 +5026,114 @@ MFunctionEnvironment::foldsTo(TempAllocator& alloc)
     return input()->toLambda()->scopeChain();
 }
 
+static bool
+AddIsANonZeroAdditionOf(MAdd* add, MDefinition* ins)
+{
+    if (add->lhs() != ins && add->rhs() != ins)
+        return false;
+    MDefinition* other = (add->lhs() == ins) ? add->rhs() : add->lhs();
+    if (!IsNumberType(other->type()))
+        return false;
+    if (!other->isConstant())
+        return false;
+    if (other->toConstant()->numberToDouble() == 0)
+        return false;
+    return true;
+}
+
+static bool
+DefinitelyDifferentValue(MDefinition* ins1, MDefinition* ins2)
+{
+    if (ins1 == ins2)
+        return false;
+
+    // Drop the MToInt32 added by the TypePolicy for double and float values.
+    if (ins1->isToInt32())
+        return DefinitelyDifferentValue(ins1->toToInt32()->input(), ins2);
+    if (ins2->isToInt32())
+        return DefinitelyDifferentValue(ins2->toToInt32()->input(), ins1);
+
+    // Ignore the bounds check, which in most cases will contain the same info.
+    if (ins1->isBoundsCheck())
+        return DefinitelyDifferentValue(ins1->toBoundsCheck()->index(), ins2);
+    if (ins2->isBoundsCheck())
+        return DefinitelyDifferentValue(ins2->toBoundsCheck()->index(), ins1);
+
+    // For constants check they are not equal.
+    if (ins1->isConstant() && ins2->isConstant())
+        return !ins1->toConstant()->equals(ins2->toConstant());
+
+    // Check if "ins1 = ins2 + cte", which would make both instructions
+    // have different values.
+    if (ins1->isAdd()) {
+        if (AddIsANonZeroAdditionOf(ins1->toAdd(), ins2))
+            return true;
+    }
+    if (ins2->isAdd()) {
+        if (AddIsANonZeroAdditionOf(ins2->toAdd(), ins1))
+            return true;
+    }
+
+    return false;
+}
+
+MDefinition::AliasType
+MLoadElement::mightAlias(const MDefinition* def) const
+{
+    if (def->isStoreElement()) {
+        const MStoreElement* store = def->toStoreElement();
+        if (store->index() != index()) {
+            if (DefinitelyDifferentValue(store->index(), index()))
+                return AliasType::NoAlias;
+            return AliasType::MayAlias;
+        }
+
+        if (store->elements() != elements())
+            return AliasType::MayAlias;
+
+        return AliasType::MustAlias;
+    }
+    return AliasType::MayAlias;
+}
+
 MDefinition*
 MLoadElement::foldsTo(TempAllocator& alloc)
 {
-    if (!dependency() || !dependency()->isStoreElement())
-        return this;
+    if (MDefinition* def = foldsToStore(alloc))
+        return def;
 
-    MStoreElement* store = dependency()->toStoreElement();
-    if (!store->block()->dominates(block()))
-        return this;
+    return this;
+}
 
-    if (store->elements() != elements())
-        return this;
+MDefinition::AliasType
+MLoadUnboxedObjectOrNull::mightAlias(const MDefinition* def) const
+{
+    if (def->isStoreUnboxedObjectOrNull()) {
+        const MStoreUnboxedObjectOrNull* store = def->toStoreUnboxedObjectOrNull();
+        if (store->index() != index()) {
+            if (DefinitelyDifferentValue(store->index(), index()))
+                return AliasType::NoAlias;
+            return AliasType::MayAlias;
+        }
 
-    if (store->index() != index())
-        return this;
+        if (store->elements() != elements())
+            return AliasType::MayAlias;
 
-    return foldsToStoredValue(alloc, store->value());
+        if (store->offsetAdjustment() != offsetAdjustment())
+            return AliasType::MayAlias;
+
+        return AliasType::MustAlias;
+    }
+    return AliasType::MayAlias;
 }
 
 MDefinition*
 MLoadUnboxedObjectOrNull::foldsTo(TempAllocator& alloc)
 {
-    if (!dependency() || !dependency()->isStoreUnboxedObjectOrNull())
-        return this;
+    if (MDefinition* def = foldsToStore(alloc))
+        return def;
 
-    MStoreUnboxedObjectOrNull* store = dependency()->toStoreUnboxedObjectOrNull();
-    if (!store->block()->dominates(block()))
-        return this;
-
-    if (store->elements() != elements())
-        return this;
-
-    if (store->index() != index())
-        return this;
-
-    if (store->value()->type() == MIRType::ObjectOrNull)
-        return this;
-
-    if (store->offsetAdjustment() != offsetAdjustment())
-        return this;
-
-    return foldsToStoredValue(alloc, store->value());
-}
-
-// Gets the MDefinition* representing the source/target object's storage.
-// Usually this is just an MElements*, but sometimes there are layers
-// of indirection or inlining, which are handled elsewhere.
-static inline const MElements*
-MaybeUnwrapElements(const MDefinition* elementsOrObj)
-{
-    // Sometimes there is a level of indirection for conversion.
-    if (elementsOrObj->isConvertElementsToDoubles())
-        return MaybeUnwrapElements(elementsOrObj->toConvertElementsToDoubles()->elements());
-
-    // For inline elements, the object may be passed directly, for example as MUnbox.
-    if (elementsOrObj->type() == MIRType::Object)
-        return nullptr;
-
-    // MTypedArrayElements and MTypedObjectElements aren't handled.
-    if (!elementsOrObj->isElements())
-        return nullptr;
-
-    return elementsOrObj->toElements();
-}
-
-static inline const MDefinition*
-GetElementsObject(const MDefinition* elementsOrObj)
-{
-    if (elementsOrObj->type() == MIRType::Object)
-        return elementsOrObj;
-
-    const MDefinition* elements = MaybeUnwrapElements(elementsOrObj);
-    if (elements)
-        return elements->toElements()->input();
-
-    return nullptr;
-}
-
-// Gets the MDefinition of the target Object for the given store operation.
-static inline const MDefinition*
-GetStoreObject(const MDefinition* store)
-{
-    switch (store->op()) {
-      case MDefinition::Op_StoreElement:
-        return GetElementsObject(store->toStoreElement()->elements());
-
-      case MDefinition::Op_StoreElementHole:
-        return store->toStoreElementHole()->object();
-
-      case MDefinition::Op_StoreUnboxedObjectOrNull:
-        return GetElementsObject(store->toStoreUnboxedObjectOrNull()->elements());
-
-      case MDefinition::Op_StoreUnboxedString:
-        return GetElementsObject(store->toStoreUnboxedString()->elements());
-
-      case MDefinition::Op_StoreUnboxedScalar:
-        return GetElementsObject(store->toStoreUnboxedScalar()->elements());
-
-      default:
-        return nullptr;
-    }
-}
-
-// Implements mightAlias() logic common to all load operations.
-static MDefinition::AliasType
-GenericLoadMightAlias(const MDefinition* elementsOrObj, const MDefinition* store)
-{
-    const MElements* elements = MaybeUnwrapElements(elementsOrObj);
-    if (elements)
-        return elements->mightAlias(store);
-
-    // Unhandled Elements kind.
-    if (elementsOrObj->type() != MIRType::Object)
-        return MDefinition::AliasType::MayAlias;
-
-    // Inline storage for objects.
-    // Refer to IsValidElementsType().
-    const MDefinition* object = elementsOrObj;
-    MOZ_ASSERT(object->type() == MIRType::Object);
-    if (!object->resultTypeSet())
-        return MDefinition::AliasType::MayAlias;
-
-    const MDefinition* storeObject = GetStoreObject(store);
-    if (!storeObject)
-        return MDefinition::AliasType::MayAlias;
-    if (!storeObject->resultTypeSet())
-        return MDefinition::AliasType::MayAlias;
-
-    if (object->resultTypeSet()->objectsIntersect(storeObject->resultTypeSet()))
-        return MDefinition::AliasType::MayAlias;
-    return MDefinition::AliasType::NoAlias;
-}
-
-MDefinition::AliasType
-MElements::mightAlias(const MDefinition* store) const
-{
-    if (!input()->resultTypeSet())
-        return AliasType::MayAlias;
-
-    const MDefinition* storeObj = GetStoreObject(store);
-    if (!storeObj)
-        return AliasType::MayAlias;
-    if (!storeObj->resultTypeSet())
-        return AliasType::MayAlias;
-
-    if (input()->resultTypeSet()->objectsIntersect(storeObj->resultTypeSet()))
-        return AliasType::MayAlias;
-    return AliasType::NoAlias;
-}
-
-MDefinition::AliasType
-MLoadElement::mightAlias(const MDefinition* store) const
-{
-    return GenericLoadMightAlias(elements(), store);
-}
-
-MDefinition::AliasType
-MInitializedLength::mightAlias(const MDefinition* store) const
-{
-    return GenericLoadMightAlias(elements(), store);
-}
-
-MDefinition::AliasType
-MLoadUnboxedObjectOrNull::mightAlias(const MDefinition* store) const
-{
-    return GenericLoadMightAlias(elements(), store);
-}
-
-MDefinition::AliasType
-MLoadUnboxedString::mightAlias(const MDefinition* store) const
-{
-    return GenericLoadMightAlias(elements(), store);
-}
-
-MDefinition::AliasType
-MLoadUnboxedScalar::mightAlias(const MDefinition* store) const
-{
-    return GenericLoadMightAlias(elements(), store);
-}
-
-MDefinition::AliasType
-MUnboxedArrayInitializedLength::mightAlias(const MDefinition* store) const
-{
-    return GenericLoadMightAlias(object(), store);
+    return this;
 }
 
 bool
@@ -5248,7 +5377,7 @@ MAsmJSCall::New(TempAllocator& alloc, const wasm::CallSiteDesc& desc, Callee cal
     for (size_t i = 0; i < call->argRegs_.length(); i++)
         call->initOperand(i, args[i].def);
     if (callee.which() == Callee::Dynamic)
-        call->initOperand(call->argRegs_.length(), callee.dynamic());
+        call->initOperand(call->argRegs_.length(), callee.dynamicPtr());
 
     return call;
 }
@@ -5928,6 +6057,9 @@ PropertyTypeIncludes(TempAllocator& alloc, HeapTypeSetKey property,
             types = types->clone(alloc.lifoAlloc());
         else
             types = alloc.lifoAlloc()->new_<TemporaryTypeSet>();
+        if (!types) {
+            return false;
+        }
         types->addType(newType, alloc.lifoAlloc());
     }
 

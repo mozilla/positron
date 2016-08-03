@@ -179,6 +179,8 @@ public class GeckoNetworkManager extends BroadcastReceiver implements NativeEven
                         return ManagerState.OffNoListeners;
                     case enableNotifications:
                         return ManagerState.OnWithListeners;
+                    case receivedUpdate:
+                        return ManagerState.OnNoListeners;
                     default:
                         return null;
                 }
@@ -224,15 +226,23 @@ public class GeckoNetworkManager extends BroadcastReceiver implements NativeEven
             case OffNoListeners:
                 if (event == ManagerEvent.start) {
                     updateNetworkStateAndConnectionType();
+                    registerBroadcastReceiver();
                 }
                 if (event == ManagerEvent.enableNotifications) {
                     updateNetworkStateAndConnectionType();
                 }
                 break;
             case OnNoListeners:
+                if (event == ManagerEvent.receivedUpdate) {
+                    updateNetworkStateAndConnectionType();
+                    sendNetworkStateToListeners();
+                }
                 if (event == ManagerEvent.enableNotifications) {
                     updateNetworkStateAndConnectionType();
                     registerBroadcastReceiver();
+                }
+                if (event == ManagerEvent.stop) {
+                    unregisterBroadcastReceiver();
                 }
                 break;
             case OnWithListeners:
@@ -243,14 +253,13 @@ public class GeckoNetworkManager extends BroadcastReceiver implements NativeEven
                 if (event == ManagerEvent.stop) {
                     unregisterBroadcastReceiver();
                 }
-                if (event == ManagerEvent.disableNotifications) {
-                    unregisterBroadcastReceiver();
-                }
+                /* no-op event: ManagerEvent.disableNotifications */
                 break;
             case OffWithListeners:
                 if (event == ManagerEvent.start) {
                     registerBroadcastReceiver();
                 }
+                /* no-op event: ManagerEvent.disableNotifications */
                 break;
             default:
                 throw new IllegalStateException("Unknown current state: " + currentState.name());
@@ -278,20 +287,23 @@ public class GeckoNetworkManager extends BroadcastReceiver implements NativeEven
      * Send current network state and connection type as a GeckoEvent, to whomever is listening.
      */
     private void sendNetworkStateToListeners() {
-        if (GeckoThread.isRunning()) {
-            final Context applicationContext = GeckoAppShell.getApplicationContext();
-            GeckoAppShell.sendEventToGecko(
-                    GeckoEvent.createNetworkEvent(
-                            currentConnectionType.value,
-                            currentConnectionType == ConnectionType.WIFI,
-                            wifiDhcpGatewayAddress(applicationContext),
-                            currentConnectionSubtype.value
-                    )
-            );
+        final Context applicationContext = GeckoAppShell.getApplicationContext();
+        final GeckoEvent networkEvent = GeckoEvent.createNetworkEvent(
+                currentConnectionType.value,
+                currentConnectionType == ConnectionType.WIFI,
+                wifiDhcpGatewayAddress(applicationContext),
+                currentConnectionSubtype.value
+        );
+        final GeckoEvent networkLinkChangeValueEvent = GeckoEvent.createNetworkLinkChangeEvent(
+                currentNetworkStatus.value
+        );
+        final GeckoEvent networkLinkChangeNotificationEvent = GeckoEvent.createNetworkLinkChangeEvent(
+                LINK_DATA_CHANGED
+        );
 
-            GeckoAppShell.sendEventToGecko(GeckoEvent.createNetworkLinkChangeEvent(currentNetworkStatus.value));
-            GeckoAppShell.sendEventToGecko(GeckoEvent.createNetworkLinkChangeEvent(LINK_DATA_CHANGED));
-        }
+        GeckoAppShell.sendEventToGecko(networkEvent);
+        GeckoAppShell.sendEventToGecko(networkLinkChangeValueEvent);
+        GeckoAppShell.sendEventToGecko(networkLinkChangeNotificationEvent);
     }
 
     /**
@@ -306,9 +318,7 @@ public class GeckoNetworkManager extends BroadcastReceiver implements NativeEven
      */
     private void registerBroadcastReceiver() {
         final IntentFilter filter = new IntentFilter(ConnectivityManager.CONNECTIVITY_ACTION);
-        if (GeckoAppShell.getApplicationContext().registerReceiver(this, filter) == null) {
-            Log.e(LOGTAG, "Registering receiver failed");
-        }
+        GeckoAppShell.getApplicationContext().registerReceiver(this, filter);
     }
 
     private static int wifiDhcpGatewayAddress(Context context) {

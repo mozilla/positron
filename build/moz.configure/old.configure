@@ -159,7 +159,6 @@ def old_configure_options(*options):
     '--enable-address-sanitizer',
     '--enable-alsa',
     '--enable-android-omx',
-    '--enable-android-resource-constrained',
     '--enable-approximate-location',
     '--enable-b2g-bt',
     '--enable-b2g-camera',
@@ -173,9 +172,7 @@ def old_configure_options(*options):
     '--enable-ctypes',
     '--enable-dbm',
     '--enable-dbus',
-    '--enable-debug',
     '--enable-debug-js-modules',
-    '--enable-debug-symbols',
     '--enable-directshow',
     '--enable-dtrace',
     '--enable-dump-painting',
@@ -231,7 +228,6 @@ def old_configure_options(*options):
     '--enable-reflow-perf',
     '--enable-release',
     '--enable-require-all-d3dc-versions',
-    '--enable-rust',
     '--enable-safe-browsing',
     '--enable-sandbox',
     '--enable-signmar',
@@ -251,7 +247,6 @@ def old_configure_options(*options):
     '--enable-system-pixman',
     '--enable-system-sqlite',
     '--enable-tasktracer',
-    '--enable-tests',
     '--enable-thread-sanitizer',
     '--enable-trace-logging',
     '--enable-tree-freetype',
@@ -311,7 +306,6 @@ def old_configure_options(*options):
     '--with-nss-prefix',
     '--with-pthreads',
     '--with-qemu-exe',
-    '--with-qtdir',
     '--with-servo',
     '--with-sixgill',
     '--with-soft-float',
@@ -337,6 +331,8 @@ def old_configure_options(*options):
     '--enable-mapi',
     '--enable-calendar',
     '--enable-incomplete-external-linkage',
+
+    '--enable-ipc-fuzzer',
 )
 @imports(_from='__builtin__', _import='compile')
 @imports(_from='__builtin__', _import='open')

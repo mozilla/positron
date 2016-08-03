@@ -18,8 +18,8 @@ DIRS += [
     'apppicker',
     'asyncshutdown',
     'commandlines',
-    'console',
     'contentprefs',
+    'contextualidentity',
     'cookie',
     'crashmonitor',
     'diskspacewatcher',
@@ -34,7 +34,6 @@ DIRS += [
     'gfx',
     'jsdownloads',
     'lz4',
-    'narrate',
     'mediasniffer',
     'microformats',
     'osfile',
@@ -68,7 +67,7 @@ DIRS += [
 ]
 
 if CONFIG['MOZ_BUILD_APP'] != 'mobile/android':
-    DIRS += ['viewsource'];
+    DIRS += ['narrate', 'viewsource'];
 
     if CONFIG['NS_PRINTING']:
         DIRS += ['printing']
@@ -99,7 +98,7 @@ if CONFIG['MOZ_URL_CLASSIFIER']:
 
 DIRS += ['captivedetect']
 
-if CONFIG['MOZ_WIDGET_TOOLKIT'] != "gonk" and CONFIG['MOZ_WIDGET_TOOLKIT'] != 'android':
+if CONFIG['OS_TARGET'] != 'Android':
     DIRS += ['terminator']
 
 DIRS += ['build']

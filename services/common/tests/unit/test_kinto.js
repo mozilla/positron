@@ -118,8 +118,9 @@ add_task(function* test_kinto_update() {
     let updateResult = yield collection.update(copiedRecord);
     // check the field was updated
     do_check_eq(updateResult.data.foo, copiedRecord.foo);
-    // check the status has changed
-    do_check_eq(updateResult.data._status, "updated");
+    // check the status is still "created", since we haven't synced
+    // the record
+    do_check_eq(updateResult.data._status, "created");
   } finally {
     yield collection.db.close();
   }
@@ -369,7 +370,7 @@ function getSampleResponse(req, port) {
         "Server: waitress"
       ],
       "status": {status: 200, statusText: "OK"},
-      "responseBody": JSON.stringify({"settings":{"cliquet.batch_max_requests":25}, "url":`http://localhost:${port}/v1/`, "documentation":"https://kinto.readthedocs.org/", "version":"1.5.1", "commit":"cbc6f58", "hello":"kinto"})
+      "responseBody": JSON.stringify({"settings":{"batch_max_requests":25}, "url":`http://localhost:${port}/v1/`, "documentation":"https://kinto.readthedocs.org/", "version":"1.5.1", "commit":"cbc6f58", "hello":"kinto"})
     },
     "GET:/v1/buckets/default/collections/test_collection/records?_sort=-last_modified": {
       "sampleHeaders": [

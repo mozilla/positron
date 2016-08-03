@@ -4,9 +4,6 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-for cdm in CONFIG['MOZ_EME_MODULES']:
-    DEFINES['MOZ_%s_EME' % cdm.upper()] = True
-
 EXPORTS.mozilla.dom += [
     'MediaEncryptedEvent.h',
     'MediaKeyError.h',
@@ -19,7 +16,6 @@ EXPORTS.mozilla.dom += [
 ]
 
 EXPORTS.mozilla += [
-    'CDMCallbackProxy.h',
     'CDMCaps.h',
     'CDMProxy.h',
     'DetailedPromise.h',
@@ -27,9 +23,7 @@ EXPORTS.mozilla += [
 ]
 
 UNIFIED_SOURCES += [
-    'CDMCallbackProxy.cpp',
     'CDMCaps.cpp',
-    'CDMProxy.cpp',
     'DetailedPromise.cpp',
     'EMEUtils.cpp',
     'MediaEncryptedEvent.cpp',

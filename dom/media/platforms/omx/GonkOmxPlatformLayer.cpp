@@ -16,18 +16,18 @@
 #include "mozilla/layers/TextureClient.h"
 #include "mozilla/layers/GrallocTextureClient.h"
 #include "mozilla/layers/ImageBridgeChild.h"
+#include "mozilla/layers/TextureClientRecycleAllocator.h"
 
 #include "ImageContainer.h"
 #include "MediaInfo.h"
 #include "OmxDataDecoder.h"
 
-extern mozilla::LogModule* GetPDMLog();
 
 #ifdef LOG
 #undef LOG
 #endif
 
-#define LOG(arg, ...) MOZ_LOG(GetPDMLog(), mozilla::LogLevel::Debug, ("GonkOmxPlatformLayer(%p)::%s: " arg, this, __func__, ##__VA_ARGS__))
+#define LOG(arg, ...) MOZ_LOG(sPDMLog, mozilla::LogLevel::Debug, ("GonkOmxPlatformLayer(%p)::%s: " arg, this, __func__, ##__VA_ARGS__))
 
 #define CHECK_ERR(err)                    \
   if (err != OK)                       {  \

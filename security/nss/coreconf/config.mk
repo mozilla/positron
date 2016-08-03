@@ -162,6 +162,10 @@ ifdef BUILD_LIBPKIX_TESTS
 DEFINES += -DBUILD_LIBPKIX_TESTS
 endif
 
+ifdef NSS_DISABLE_LIBPKIX
+DEFINES += -DNSS_DISABLE_LIBPKIX
+endif
+
 ifdef NSS_DISABLE_DBM
 DEFINES += -DNSS_DISABLE_DBM
 endif
@@ -208,6 +212,11 @@ DEFINES += -DSSL_DISABLE_DEPRECATED_CIPHER_SUITE_NAMES
 # exported symbols, which causes problem when NSS is built as part of Mozilla.
 # So we add a NSS_SSL_ENABLE_ZLIB variable to allow Mozilla to turn this off.
 NSS_SSL_ENABLE_ZLIB = 1
+
+# Allow disabling PKCS11 bypass.
+ifdef NSS_NO_PKCS11_BYPASS
+DEFINES += -DNO_PKCS11_BYPASS
+endif
 
 # Allow build-time configuration of TLS 1.3 (Experimental)
 ifdef NSS_ENABLE_TLS_1_3

@@ -116,7 +116,7 @@ class RegExpShared
 
     struct RegExpCompilation
     {
-        RelocatablePtrJitCode jitCode;
+        HeapPtr<jit::JitCode*> jitCode;
         uint8_t* byteCode;
 
         RegExpCompilation() : byteCode(nullptr) {}
@@ -128,7 +128,7 @@ class RegExpShared
     };
 
     /* Source to the RegExp, for lazy compilation. */
-    RelocatablePtrAtom source;
+    HeapPtr<JSAtom*>     source;
 
     RegExpFlag         flags;
     size_t             parenCount;
@@ -509,7 +509,7 @@ class RegExpObject : public NativeObject
 bool
 ParseRegExpFlags(JSContext* cx, JSString* flagStr, RegExpFlag* flagsOut);
 
-/* Assuming GetBuiltinClass(obj) is ESClass_RegExp, return a RegExpShared for obj. */
+/* Assuming GetBuiltinClass(obj) is ESClass::RegExp, return a RegExpShared for obj. */
 inline bool
 RegExpToShared(JSContext* cx, HandleObject obj, RegExpGuard* g)
 {

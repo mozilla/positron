@@ -22,6 +22,7 @@
 #include "nsIHTMLDocument.h"
 #include "nsIDocShell.h"
 #include "nsIDocShellTreeOwner.h"
+#include "nsIFormControl.h"
 #include "nsLayoutUtils.h"
 #include "nsIPresShell.h"
 #include "nsFrameTraversal.h"
@@ -42,9 +43,11 @@
 #include "nsStyleCoord.h"
 #include "TabChild.h"
 #include "nsFrameLoader.h"
+#include "nsNumberControlFrame.h"
 
 #include "mozilla/ContentEvents.h"
 #include "mozilla/dom/Element.h"
+#include "mozilla/dom/HTMLInputElement.h"
 #include "mozilla/EventDispatcher.h"
 #include "mozilla/EventStateManager.h"
 #include "mozilla/EventStates.h"
@@ -310,6 +313,24 @@ nsFocusManager::GetFocusedDescendant(nsPIDOMWindowOuter* aWindow, bool aDeep,
 nsIContent*
 nsFocusManager::GetRedirectedFocus(nsIContent* aContent)
 {
+  // For input number, redirect focus to our anonymous text control.
+  if (aContent->IsHTMLElement(nsGkAtoms::input)) {
+    bool typeIsNumber =
+      static_cast<dom::HTMLInputElement*>(aContent)->GetType() ==
+        NS_FORM_INPUT_NUMBER;
+
+    if (typeIsNumber) {
+      nsNumberControlFrame* numberControlFrame =
+        do_QueryFrame(aContent->GetPrimaryFrame());
+
+      if (numberControlFrame) {
+        HTMLInputElement* textControl =
+          numberControlFrame->GetAnonTextControl();
+        return static_cast<nsIContent*>(textControl);
+      }
+    }
+  }
+
 #ifdef MOZ_XUL
   if (aContent->IsXULElement()) {
     nsCOMPtr<nsIDOMNode> inputField;
@@ -1505,8 +1526,8 @@ nsFocusManager::CheckIfFocusable(nsIContent* aContent, uint32_t aFlags)
   if (!aContent)
     return nullptr;
 
-  // this is a special case for some XUL elements where an anonymous child is
-  // actually focusable and not the element itself.
+  // this is a special case for some XUL elements or input number, where an
+  // anonymous child is actually focusable and not the element itself.
   nsIContent* redirectedFocus = GetRedirectedFocus(aContent);
   if (redirectedFocus)
     return CheckIfFocusable(redirectedFocus, aFlags);
@@ -2229,8 +2250,8 @@ nsFocusManager::MoveCaretToFocus(nsIPresShell* aPresShell, nsIContent* aContent)
   nsCOMPtr<nsIDOMDocument> domDoc = do_QueryInterface(aPresShell->GetDocument());
   if (domDoc) {
     RefPtr<nsFrameSelection> frameSelection = aPresShell->FrameSelection();
-    nsCOMPtr<nsISelection> domSelection = frameSelection->
-      GetSelection(nsISelectionController::SELECTION_NORMAL);
+    nsCOMPtr<nsISelection> domSelection =
+      frameSelection->GetSelection(SelectionType::eNormal);
     if (domSelection) {
       nsCOMPtr<nsIDOMNode> currentFocusNode(do_QueryInterface(aContent));
       // First clear the selection. This way, if there is no currently focused
@@ -2290,8 +2311,8 @@ nsFocusManager::SetCaretVisible(nsIPresShell* aPresShell,
 
   if (docFrameSelection && caret &&
      (frameSelection == docFrameSelection || !aContent)) {
-    nsISelection* domSelection = docFrameSelection->
-      GetSelection(nsISelectionController::SELECTION_NORMAL);
+    nsISelection* domSelection =
+      docFrameSelection->GetSelection(SelectionType::eNormal);
     if (domSelection) {
       nsCOMPtr<nsISelectionController> selCon(do_QueryInterface(aPresShell));
       if (!selCon) {
@@ -2333,8 +2354,7 @@ nsFocusManager::GetSelectionLocation(nsIDocument* aDocument,
 
   nsCOMPtr<nsISelection> domSelection;
   if (frameSelection) {
-    domSelection = frameSelection->
-      GetSelection(nsISelectionController::SELECTION_NORMAL);
+    domSelection = frameSelection->GetSelection(SelectionType::eNormal);
   }
 
   nsCOMPtr<nsIDOMNode> startNode, endNode;

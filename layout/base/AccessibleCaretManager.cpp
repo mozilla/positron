@@ -538,9 +538,9 @@ AccessibleCaretManager::SelectWordOrShortcut(const nsPoint& aPoint)
   }
 
   // Find the frame under point.
-  nsIFrame* ptFrame = nsLayoutUtils::GetFrameForPoint(rootFrame, aPoint,
+  nsWeakFrame ptFrame = nsLayoutUtils::GetFrameForPoint(rootFrame, aPoint,
     nsLayoutUtils::IGNORE_PAINT_SUPPRESSION | nsLayoutUtils::IGNORE_CROSS_DOC);
-  if (!ptFrame) {
+  if (!ptFrame.IsAlive()) {
     return NS_ERROR_FAILURE;
   }
 
@@ -552,6 +552,14 @@ AccessibleCaretManager::SelectWordOrShortcut(const nsPoint& aPoint)
   AC_LOG("%s: Found %s focusable", __FUNCTION__,
          focusableFrame ? focusableFrame->ListTag().get() : "no frame");
 #endif
+
+  // Get ptInFrame here so that we don't need to check whether rootFrame is
+  // alive later. Note that if ptFrame is being moved by
+  // IMEStateManager::NotifyIME() or ChangeFocusToOrClearOldFocus() below,
+  // something under the original point will be selected, which may not be the
+  // original text the user wants to select.
+  nsPoint ptInFrame = aPoint;
+  nsLayoutUtils::TransformPoint(rootFrame, ptFrame, ptInFrame);
 
   // Firstly check long press on an empty editable content.
   Element* newFocusEditingHost = GetEditingHostForFrame(ptFrame);
@@ -585,9 +593,17 @@ AccessibleCaretManager::SelectWordOrShortcut(const nsPoint& aPoint)
   // is any) before changing the focus.
   IMEStateManager::NotifyIME(widget::REQUEST_TO_COMMIT_COMPOSITION,
                              mPresShell->GetPresContext());
+  if (!ptFrame.IsAlive()) {
+    // Cannot continue because ptFrame died.
+    return NS_ERROR_FAILURE;
+  }
 
   // ptFrame is selectable. Now change the focus.
   ChangeFocusToOrClearOldFocus(focusableFrame);
+  if (!ptFrame.IsAlive()) {
+    // Cannot continue because ptFrame died.
+    return NS_ERROR_FAILURE;
+  }
 
   if (GetCaretMode() == CaretMode::Selection &&
       !mFirstCaret->IsLogicallyVisible() && !mSecondCaret->IsLogicallyVisible()) {
@@ -600,9 +616,6 @@ AccessibleCaretManager::SelectWordOrShortcut(const nsPoint& aPoint)
   }
 
   // Then try select a word under point.
-  nsPoint ptInFrame = aPoint;
-  nsLayoutUtils::TransformPoint(rootFrame, ptFrame, ptInFrame);
-
   nsresult rv = SelectWord(ptFrame, ptInFrame);
   UpdateCaretsWithHapticFeedback();
 
@@ -697,6 +710,13 @@ AccessibleCaretManager::OnKeyboardEvent()
   }
 }
 
+void
+AccessibleCaretManager::OnFrameReconstruction()
+{
+  mFirstCaret->EnsureApzAware();
+  mSecondCaret->EnsureApzAware();
+}
+
 Selection*
 AccessibleCaretManager::GetSelection() const
 {
@@ -704,7 +724,7 @@ AccessibleCaretManager::GetSelection() const
   if (!fs) {
     return nullptr;
   }
-  return fs->GetSelection(nsISelectionController::SELECTION_NORMAL);
+  return fs->GetSelection(SelectionType::eNormal);
 }
 
 already_AddRefed<nsFrameSelection>
@@ -948,6 +968,7 @@ AccessibleCaretManager::GetFrameForFirstRangeStartOrLastRangeEnd(
   }
 
   MOZ_ASSERT(GetCaretMode() == CaretMode::Selection);
+  MOZ_ASSERT(aOutOffset, "aOutOffset shouldn't be nullptr!");
 
   nsRange* range = nullptr;
   RefPtr<nsINode> startNode;
@@ -977,6 +998,34 @@ AccessibleCaretManager::GetFrameForFirstRangeStartOrLastRangeEnd(
   nsIFrame* startFrame =
     fs->GetFrameForNodeOffset(startContent, nodeOffset, hint, aOutOffset);
 
+  if (!startFrame) {
+    ErrorResult err;
+    RefPtr<TreeWalker> walker = mPresShell->GetDocument()->CreateTreeWalker(
+      *startNode, nsIDOMNodeFilter::SHOW_ALL, nullptr, err);
+
+    if (!walker) {
+      return nullptr;
+    }
+
+    startFrame = startContent ? startContent->GetPrimaryFrame() : nullptr;
+    while (!startFrame && startNode != endNode) {
+      startNode = findInFirstRangeStart ? walker->NextNode(err)
+                                        : walker->PreviousNode(err);
+
+      if (!startNode) {
+        break;
+      }
+
+      startContent = startNode->AsContent();
+      startFrame = startContent ? startContent->GetPrimaryFrame() : nullptr;
+    }
+
+    // We are walking among the nodes in the content tree, so the node offset
+    // relative to startNode should be set to 0.
+    nodeOffset = 0;
+    *aOutOffset = 0;
+  }
+
   if (startFrame) {
     if (aOutNode) {
       *aOutNode = startNode.get();
@@ -984,29 +1033,8 @@ AccessibleCaretManager::GetFrameForFirstRangeStartOrLastRangeEnd(
     if (aOutNodeOffset) {
       *aOutNodeOffset = nodeOffset;
     }
-    return startFrame;
   }
 
-  ErrorResult err;
-  RefPtr<TreeWalker> walker = mPresShell->GetDocument()->CreateTreeWalker(
-    *startNode, nsIDOMNodeFilter::SHOW_ALL, nullptr, err);
-
-  if (!walker) {
-    return nullptr;
-  }
-
-  startFrame = startContent ? startContent->GetPrimaryFrame() : nullptr;
-  while (!startFrame && startNode != endNode) {
-    startNode = findInFirstRangeStart ? walker->NextNode(err)
-                                      : walker->PreviousNode(err);
-
-    if (!startNode) {
-      break;
-    }
-
-    startContent = startNode->AsContent();
-    startFrame = startContent ? startContent->GetPrimaryFrame() : nullptr;
-  }
   return startFrame;
 }
 

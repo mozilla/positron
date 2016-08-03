@@ -4,10 +4,6 @@
 
 #include "mozilla/DebugOnly.h"
 
-#if defined(MOZ_WIDGET_QT)
-#include "nsQAppInstance.h"
-#endif
-
 #include "base/basictypes.h"
 
 #include "nsXULAppAPI.h"
@@ -54,7 +50,6 @@
 #include "base/message_loop.h"
 #include "base/process_util.h"
 #include "chrome/common/child_process.h"
-#include "chrome/common/notification_service.h"
 
 #include "mozilla/ipc/BrowserProcessSubThread.h"
 #include "mozilla/ipc/GeckoChildProcessHost.h"
@@ -73,10 +68,11 @@
 
 #include "GMPProcessChild.h"
 #include "GMPLoader.h"
+#include "mozilla/gfx/GPUProcessImpl.h"
 
 #include "GeckoProfiler.h"
 
- #include "base/histogram.h"
+#include "mozilla/Telemetry.h"
 
 #if defined(MOZ_SANDBOX) && defined(XP_WIN)
 #include "mozilla/sandboxTarget.h"
@@ -93,6 +89,10 @@ using mozilla::_ipdltest::IPDLUnitTestProcessChild;
 #ifdef MOZ_B2G_LOADER
 #include "nsLocalFile.h"
 #include "nsXREAppData.h"
+#endif
+
+#ifdef MOZ_JPROF
+#include "jprof.h"
 #endif
 
 using namespace mozilla;
@@ -214,7 +214,7 @@ const char*
 XRE_ChildProcessTypeToString(GeckoProcessType aProcessType)
 {
   return (aProcessType < GeckoProcessType_End) ?
-    kGeckoProcessTypeString[aProcessType] : nullptr;
+    kGeckoProcessTypeString[aProcessType] : "invalid";
 }
 
 namespace mozilla {
@@ -308,9 +308,10 @@ XRE_InitChildProcess(int aArgc,
   DllBlocklist_Initialize();
 #endif
 
-  // This is needed by Telemetry to initialize histogram collection.
-  UniquePtr<base::StatisticsRecorder> statisticsRecorder =
-    MakeUnique<base::StatisticsRecorder>();
+#ifdef MOZ_JPROF
+  // Call the code to install our handler
+  setupProfilingStuff();
+#endif
 
 #if !defined(MOZ_WIDGET_ANDROID) && !defined(MOZ_WIDGET_GONK)
   // On non-Fennec Gecko, the GMPLoader code resides in plugin-container,
@@ -356,6 +357,14 @@ XRE_InitChildProcess(int aArgc,
 
   // NB: This must be called before profiler_init
   NS_LogInit();
+
+  // This is needed by Telemetry to initialize histogram collection.
+  // NB: This must be called after NS_LogInit().
+  // NS_LogInit must be called before Telemetry::CreateStatisticsRecorder
+  // so as to avoid many log messages of the form
+  //   WARNING: XPCOM objects created/destroyed from static ctor/dtor: [..]
+  // See bug 1279614.
+  Telemetry::CreateStatisticsRecorder();
 
   mozilla::LogModule::Init();
 
@@ -478,9 +487,9 @@ XRE_InitChildProcess(int aArgc,
 #if MOZ_WIDGET_GTK == 2
   XRE_GlibInit();
 #endif
-
-#if defined(MOZ_WIDGET_QT)
-  nsQAppInstance::AddRef();
+#ifdef MOZ_WIDGET_GTK
+  // Setting the name here avoids the need to pass this through to gtk_init().
+  g_set_prgname(aArgv[0]);
 #endif
 
 #ifdef OS_POSIX
@@ -536,7 +545,6 @@ XRE_InitChildProcess(int aArgc,
 #endif
 
   base::AtExitManager exitManager;
-  NotificationService notificationService;
 
   nsresult rv = XRE_InitCommandLine(aArgc, aArgv);
   if (NS_FAILED(rv)) {
@@ -553,6 +561,9 @@ XRE_InitChildProcess(int aArgc,
       break;
   case GeckoProcessType_GMPlugin:
       uiLoopType = MessageLoop::TYPE_DEFAULT;
+      break;
+  case GeckoProcessType_GPU:
+      uiLoopType = MessageLoop::TYPE_UI;
       break;
   default:
       uiLoopType = MessageLoop::TYPE_UI;
@@ -609,6 +620,10 @@ XRE_InitChildProcess(int aArgc,
         process = new gmp::GMPProcessChild(parentPID);
         break;
 
+      case GeckoProcessType_GPU:
+        process = new gfx::GPUProcessImpl(parentPID);
+        break;
+
       default:
         NS_RUNTIMEABORT("Unknown main thread class");
       }
@@ -647,10 +662,15 @@ XRE_InitChildProcess(int aArgc,
       // scope and being deleted
       process->CleanUp();
       mozilla::Omnijar::CleanUp();
+
+#if defined(XP_MACOSX)
+      // Everybody should be done using shared memory by now.
+      mozilla::ipc::SharedMemoryBasic::Shutdown();
+#endif
     }
   }
 
-  statisticsRecorder = nullptr;
+  Telemetry::DestroyStatisticsRecorder();
   profiler_shutdown();
   NS_LogTerm();
   return XRE_DeinitCommandLine();
@@ -813,9 +833,6 @@ void
 XRE_ShutdownChildProcess()
 {
   MOZ_ASSERT(NS_IsMainThread(), "Wrong thread!");
-#if defined(XP_MACOSX)
-  mozilla::ipc::SharedMemoryBasic::Shutdown();
-#endif
 
   mozilla::DebugOnly<MessageLoop*> ioLoop = XRE_GetIOMessageLoop();
   MOZ_ASSERT(!!ioLoop, "Bad shutdown order");

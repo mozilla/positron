@@ -24,6 +24,7 @@
 
 #include "nsAppDirectoryServiceDefs.h"
 #include "nsDirectoryServiceUtils.h"
+#include "prenv.h"
 #include "prsystem.h"
 #include "nsPrintfCString.h"
 #include "mozilla/Preferences.h"
@@ -46,6 +47,15 @@
 
 // Set to specify the size of the places database growth increments in kibibytes
 #define PREF_GROWTH_INCREMENT_KIB "places.database.growthIncrementKiB"
+
+// Set to disable the default robust storage and use volatile, in-memory
+// storage without robust transaction flushing guarantees. This makes
+// SQLite use much less I/O at the cost of losing data when things crash.
+// The pref is only honored if an environment variable is set. The env
+// variable is intentionally named something scary to help prevent someone
+// from thinking it is a useful performance optimization they should enable.
+#define PREF_DISABLE_DURABILITY "places.database.disableDurability"
+#define ENV_ALLOW_CORRUPTION "ALLOW_PLACES_DATABASE_TO_LOSE_DATA_AND_BECOME_CORRUPT"
 
 // The maximum url length we can store in history.
 // We do not add to history URLs longer than this value.
@@ -625,31 +635,41 @@ Database::InitSchema(bool* aDatabaseMigrated)
       MOZ_STORAGE_UNIQUIFY_QUERY_STR "PRAGMA temp_store = MEMORY"));
   NS_ENSURE_SUCCESS(rv, rv);
 
-  // Be sure to set journal mode after page_size.  WAL would prevent the change
-  // otherwise.
-  if (JOURNAL_WAL == SetJournalMode(mMainConn, JOURNAL_WAL)) {
-    // Set the WAL journal size limit.  We want it to be small, since in
-    // synchronous = NORMAL mode a crash could cause loss of all the
-    // transactions in the journal.  For added safety we will also force
-    // checkpointing at strategic moments.
-    int32_t checkpointPages =
-      static_cast<int32_t>(DATABASE_MAX_WAL_SIZE_IN_KIBIBYTES * 1024 / mDBPageSize);
-    nsAutoCString checkpointPragma("PRAGMA wal_autocheckpoint = ");
-    checkpointPragma.AppendInt(checkpointPages);
-    rv = mMainConn->ExecuteSimpleSQL(checkpointPragma);
+  if (PR_GetEnv(ENV_ALLOW_CORRUPTION) && Preferences::GetBool(PREF_DISABLE_DURABILITY, false)) {
+    // Volatile storage was requested. Use the in-memory journal (no
+    // filesystem I/O) and don't sync the filesystem after writing.
+    SetJournalMode(mMainConn, JOURNAL_MEMORY);
+    rv = mMainConn->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
+        "PRAGMA synchronous = OFF"));
     NS_ENSURE_SUCCESS(rv, rv);
   }
   else {
-    // Ignore errors, if we fail here the database could be considered corrupt
-    // and we won't be able to go on, even if it's just matter of a bogus file
-    // system.  The default mode (DELETE) will be fine in such a case.
-    (void)SetJournalMode(mMainConn, JOURNAL_TRUNCATE);
+    // Be sure to set journal mode after page_size.  WAL would prevent the change
+    // otherwise.
+    if (JOURNAL_WAL == SetJournalMode(mMainConn, JOURNAL_WAL)) {
+      // Set the WAL journal size limit.  We want it to be small, since in
+      // synchronous = NORMAL mode a crash could cause loss of all the
+      // transactions in the journal.  For added safety we will also force
+      // checkpointing at strategic moments.
+      int32_t checkpointPages =
+        static_cast<int32_t>(DATABASE_MAX_WAL_SIZE_IN_KIBIBYTES * 1024 / mDBPageSize);
+      nsAutoCString checkpointPragma("PRAGMA wal_autocheckpoint = ");
+      checkpointPragma.AppendInt(checkpointPages);
+      rv = mMainConn->ExecuteSimpleSQL(checkpointPragma);
+      NS_ENSURE_SUCCESS(rv, rv);
+    }
+    else {
+      // Ignore errors, if we fail here the database could be considered corrupt
+      // and we won't be able to go on, even if it's just matter of a bogus file
+      // system.  The default mode (DELETE) will be fine in such a case.
+      (void)SetJournalMode(mMainConn, JOURNAL_TRUNCATE);
 
-    // Set synchronous to FULL to ensure maximum data integrity, even in
-    // case of crashes or unclean shutdowns.
-    rv = mMainConn->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
-        "PRAGMA synchronous = FULL"));
-    NS_ENSURE_SUCCESS(rv, rv);
+      // Set synchronous to FULL to ensure maximum data integrity, even in
+      // case of crashes or unclean shutdowns.
+      rv = mMainConn->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
+          "PRAGMA synchronous = FULL"));
+      NS_ENSURE_SUCCESS(rv, rv);
+    }
   }
 
   // The journal is usually free to grow for performance reasons, but it never
@@ -827,6 +847,13 @@ Database::InitSchema(bool* aDatabaseMigrated)
 
       // Firefox 49 uses schema version 32.
 
+      if (currentSchemaVersion < 33) {
+        rv = MigrateV33Up();
+        NS_ENSURE_SUCCESS(rv, rv);
+      }
+
+      // Firefox 50 uses schema version 33.
+
       // Schema Upgrades must add migration code here.
 
       rv = UpdateBookmarkRootTitles();
@@ -841,7 +868,7 @@ Database::InitSchema(bool* aDatabaseMigrated)
     // moz_places.
     rv = mMainConn->ExecuteSimpleSQL(CREATE_MOZ_PLACES);
     NS_ENSURE_SUCCESS(rv, rv);
-    rv = mMainConn->ExecuteSimpleSQL(CREATE_IDX_MOZ_PLACES_URL);
+    rv = mMainConn->ExecuteSimpleSQL(CREATE_IDX_MOZ_PLACES_URL_HASH);
     NS_ENSURE_SUCCESS(rv, rv);
     rv = mMainConn->ExecuteSimpleSQL(CREATE_IDX_MOZ_PLACES_FAVICON);
     NS_ENSURE_SUCCESS(rv, rv);
@@ -1016,6 +1043,10 @@ Database::InitFunctions()
   rv = FixupURLFunction::create(mMainConn);
   NS_ENSURE_SUCCESS(rv, rv);
   rv = FrecencyNotificationFunction::create(mMainConn);
+  NS_ENSURE_SUCCESS(rv, rv);
+  rv = StoreLastInsertedIdFunction::create(mMainConn);
+  NS_ENSURE_SUCCESS(rv, rv);
+  rv = HashFunction::create(mMainConn);
   NS_ENSURE_SUCCESS(rv, rv);
 
   return NS_OK;
@@ -1749,6 +1780,39 @@ Database::MigrateV32Up() {
   return NS_OK;
 }
 
+nsresult
+Database::MigrateV33Up() {
+  MOZ_ASSERT(NS_IsMainThread());
+
+  nsresult rv = mMainConn->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
+    "DROP INDEX IF EXISTS moz_places_url_uniqueindex"
+  ));
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  // Add an url_hash column to moz_places.
+  nsCOMPtr<mozIStorageStatement> stmt;
+  rv = mMainConn->CreateStatement(NS_LITERAL_CSTRING(
+    "SELECT url_hash FROM moz_places"
+  ), getter_AddRefs(stmt));
+  if (NS_FAILED(rv)) {
+    rv = mMainConn->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
+      "ALTER TABLE moz_places ADD COLUMN url_hash INTEGER DEFAULT 0 NOT NULL"
+    ));
+    NS_ENSURE_SUCCESS(rv, rv);
+  }
+
+  rv = mMainConn->ExecuteSimpleSQL(NS_LITERAL_CSTRING(
+    "UPDATE moz_places SET url_hash = hash(url) WHERE url_hash = 0"
+  ));
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  // Create an index on url_hash.
+  rv = mMainConn->ExecuteSimpleSQL(CREATE_IDX_MOZ_PLACES_URL_HASH);
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  return NS_OK;
+}
+
 void
 Database::Shutdown()
 {
@@ -1780,7 +1844,7 @@ Database::Shutdown()
     MOZ_ASSERT(NS_SUCCEEDED(rv));
     rv = stmt->ExecuteStep(&haveNullGuids);
     MOZ_ASSERT(NS_SUCCEEDED(rv));
-    MOZ_ASSERT(!haveNullGuids && "Found a page without a GUID!");
+    MOZ_ASSERT(!haveNullGuids, "Found a page without a GUID!");
 
     rv = mMainConn->CreateStatement(NS_LITERAL_CSTRING(
       "SELECT 1 "
@@ -1790,7 +1854,7 @@ Database::Shutdown()
     MOZ_ASSERT(NS_SUCCEEDED(rv));
     rv = stmt->ExecuteStep(&haveNullGuids);
     MOZ_ASSERT(NS_SUCCEEDED(rv));
-    MOZ_ASSERT(!haveNullGuids && "Found a bookmark without a GUID!");
+    MOZ_ASSERT(!haveNullGuids, "Found a bookmark without a GUID!");
   }
 
   { // Sanity check for unrounded dateAdded and lastModified values (bug
@@ -1806,7 +1870,31 @@ Database::Shutdown()
     MOZ_ASSERT(NS_SUCCEEDED(rv));
     rv = stmt->ExecuteStep(&hasUnroundedDates);
     MOZ_ASSERT(NS_SUCCEEDED(rv));
-    MOZ_ASSERT(!hasUnroundedDates && "Found unrounded dates!");
+    MOZ_ASSERT(!hasUnroundedDates, "Found unrounded dates!");
+  }
+
+  { // Sanity check url_hash
+    bool hasNullHash = false;
+    nsCOMPtr<mozIStorageStatement> stmt;
+    nsresult rv = mMainConn->CreateStatement(NS_LITERAL_CSTRING(
+      "SELECT 1 FROM moz_places WHERE url_hash = 0"
+    ), getter_AddRefs(stmt));
+    MOZ_ASSERT(NS_SUCCEEDED(rv));
+    rv = stmt->ExecuteStep(&hasNullHash);
+    MOZ_ASSERT(NS_SUCCEEDED(rv));
+    MOZ_ASSERT(!hasNullHash, "Found a place without a hash!");
+  }
+
+  { // Sanity check unique urls
+    bool hasDupeUrls = false;
+    nsCOMPtr<mozIStorageStatement> stmt;
+    nsresult rv = mMainConn->CreateStatement(NS_LITERAL_CSTRING(
+      "SELECT 1 FROM moz_places GROUP BY url HAVING count(*) > 1 "
+    ), getter_AddRefs(stmt));
+    MOZ_ASSERT(NS_SUCCEEDED(rv));
+    rv = stmt->ExecuteStep(&hasDupeUrls);
+    MOZ_ASSERT(NS_SUCCEEDED(rv));
+    MOZ_ASSERT(!hasDupeUrls, "Found a duplicate url!");
   }
 #endif
 

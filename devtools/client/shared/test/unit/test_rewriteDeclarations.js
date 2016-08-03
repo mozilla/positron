@@ -1,14 +1,12 @@
-/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
-/* vim: set ts=2 et sw=2 tw=80: */
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
 "use strict";
 
 var Cu = Components.utils;
-Cu.import("resource://devtools/shared/Loader.jsm");
-const {parseDeclarations, RuleRewriter} =
-      devtools.require("devtools/client/shared/css-parsing-utils");
+const {require} = Cu.import("resource://devtools/shared/Loader.jsm", {});
+const {RuleRewriter} = require("devtools/shared/css-parsing-utils");
+const {isCssPropertyKnown} = require("devtools/server/actors/css-properties");
 
 const TEST_DATA = [
   {
@@ -444,7 +442,7 @@ const TEST_DATA = [
 ];
 
 function rewriteDeclarations(inputString, instruction, defaultIndentation) {
-  let rewriter = new RuleRewriter(null, inputString);
+  let rewriter = new RuleRewriter(isCssPropertyKnown, null, inputString);
   rewriter.defaultIndentation = defaultIndentation;
 
   switch (instruction.type) {

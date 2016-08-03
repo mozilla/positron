@@ -251,14 +251,7 @@ nsViewSourceChannel::Open(nsIInputStream **_retval)
 {
     NS_ENSURE_TRUE(mChannel, NS_ERROR_FAILURE);
 
-    nsresult rv = NS_OK;
-    nsCOMPtr<nsILoadInfo> loadInfo = mChannel->GetLoadInfo();
-    if (loadInfo && loadInfo->GetEnforceSecurity()) {
-        mChannel->Open2(_retval);
-    }
-    else {
-        mChannel->Open(_retval);
-    }
+    nsresult rv = NS_MaybeOpenChannelUsingOpen2(mChannel, _retval);
     if (NS_SUCCEEDED(rv)) {
         mOpened = true;
     }
@@ -715,6 +708,20 @@ nsViewSourceChannel::OnDataAvailable(nsIRequest *aRequest, nsISupports* aContext
 // We want to forward most of nsIHttpChannel over to mHttpChannel, but we want
 // to override GetRequestHeader and VisitHeaders. The reason is that we don't
 // want various headers like Link: and Refresh: applying to view-source.
+NS_IMETHODIMP
+nsViewSourceChannel::GetChannelId(nsACString& aChannelId)
+{
+  return !mHttpChannel ? NS_ERROR_NULL_POINTER :
+      mHttpChannel->GetChannelId(aChannelId);
+}
+
+NS_IMETHODIMP
+nsViewSourceChannel::SetChannelId(const nsACString& aChannelId)
+{
+  return !mHttpChannel ? NS_ERROR_NULL_POINTER :
+      mHttpChannel->SetChannelId(aChannelId);
+}
+
 NS_IMETHODIMP
 nsViewSourceChannel::GetRequestMethod(nsACString & aRequestMethod)
 {

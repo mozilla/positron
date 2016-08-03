@@ -48,6 +48,12 @@ ssl_PrintBuf(sslSocket *ss, const char *msg, const void *vp, int len)
     } else {
         SSL_TRACE(("%d: SSL: %s [Len: %d]", SSL_GETPID(), msg, len));
     }
+
+    if (!cp) {
+        SSL_TRACE(("   <NULL>"));
+        return;
+    }
+
     memset(buf, ' ', sizeof buf);
     bp = buf;
     ap = buf + 50;
@@ -88,7 +94,7 @@ ssl_Trace(const char *format, ...)
 }
 
 void
-ssl_PrintKey(sslSocket *ss, const char *msg, PK11SymKey* key)
+ssl_PrintKey(sslSocket *ss, const char *msg, PK11SymKey *key)
 {
     SECStatus rv;
     SECItem *rawkey;

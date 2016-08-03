@@ -212,7 +212,7 @@ nsresult NrIceStunServer::ToNicerStunStruct(nr_ice_stun_server *server) const {
   } else if (transport_ == kNrIceTransportTcp) {
     server->transport = IPPROTO_TCP;
   } else {
-    MOZ_ASSERT(false);
+    MOZ_MTLOG(ML_ERROR, "Unsupported STUN server transport: " << transport_);
     return NS_ERROR_FAILURE;
   }
 
@@ -671,6 +671,11 @@ void NrIceCtx::internal_SetTimerAccelarator(int divider) {
 
 NrIceCtx::~NrIceCtx() {
   MOZ_MTLOG(ML_DEBUG, "Destroying ICE ctx '" << name_ <<"'");
+  for (auto stream = streams_.begin(); stream != streams_.end(); stream++) {
+    if (*stream) {
+      (*stream)->Close();
+    }
+  }
   nr_ice_peer_ctx_destroy(&peer_);
   nr_ice_ctx_destroy(&ctx_);
   delete ice_handler_vtbl_;

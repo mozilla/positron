@@ -14,14 +14,16 @@
 
 /* Remove filters on firebug specific images */
 
-.theme-firebug #toolbox-dock-buttons > toolbarbutton > image,
-.theme-firebug .devtools-closebutton > image,
+.theme-firebug .devtools-tabbar .devtools-button::before,
 .theme-firebug .devtools-option-toolbarbutton > image,
-.theme-firebug .command-button-invertable > image,
+.theme-firebug .command-button-invertable::before,
 .theme-firebug #sources-toolbar image,
 .theme-firebug [id$="pane-toggle"] > image,
-.theme-firebug #global-toolbar .devtools-button::before,
+.theme-firebug [id$="pane-toggle"]::before,
+.theme-firebug .sidebar-toggle::before,
 .theme-firebug #element-picker::before,
+.theme-firebug #rewind-timeline::before,
+.theme-firebug #pause-resume-timeline::before,
 .theme-firebug #debugger-controls .toolbarbutton-icon,
 .theme-firebug #filter-button .toolbarbutton-icon {
   filter: none !important;
@@ -244,7 +246,7 @@
   min-width: 24px;
 }
 
-/* Move the Inspector button a bit down (looks better) */
-.theme-firebug #command-button-pick > image {
-  margin-bottom: -4px;
+
+.theme-firebug #element-picker {
+  min-height: 21px;
 }

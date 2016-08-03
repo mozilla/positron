@@ -32,7 +32,7 @@ const {
   DEFAULT_PRESET_CATEGORY
 } = require("devtools/client/shared/widgets/CubicBezierPresets");
 const {getCSSLexer} = require("devtools/shared/css-lexer");
-const {Cc, Ci} = require("chrome");
+const XHTML_NS = "http://www.w3.org/1999/xhtml";
 
 /**
  * CubicBezier data structure helper
@@ -114,10 +114,12 @@ BezierCanvas.prototype = {
 
     return [{
       left: w * (this.bezier.coordinates[0] * (1 - p[3] - p[1]) - p[3]) + "px",
-      top: h * (1 - this.bezier.coordinates[1] * (1 - p[0] - p[2]) - p[0]) + "px"
+      top: h * (1 - this.bezier.coordinates[1] * (1 - p[0] - p[2]) - p[0])
+           + "px"
     }, {
       left: w * (this.bezier.coordinates[2] * (1 - p[3] - p[1]) - p[3]) + "px",
-      top: h * (1 - this.bezier.coordinates[3] * (1 - p[0] - p[2]) - p[0]) + "px"
+      top: h * (1 - this.bezier.coordinates[3] * (1 - p[0] - p[2]) - p[0])
+           + "px"
     }];
   },
 
@@ -252,26 +254,24 @@ CubicBezierWidget.prototype = {
   _initMarkup: function () {
     let doc = this.parent.ownerDocument;
 
-    let wrap = doc.createElement("div");
+    let wrap = doc.createElementNS(XHTML_NS, "div");
     wrap.className = "display-wrap";
 
-    let plane = doc.createElement("div");
+    let plane = doc.createElementNS(XHTML_NS, "div");
     plane.className = "coordinate-plane";
 
-    let p1 = doc.createElement("button");
+    let p1 = doc.createElementNS(XHTML_NS, "button");
     p1.className = "control-point";
-    p1.id = "P1";
     plane.appendChild(p1);
 
-    let p2 = doc.createElement("button");
+    let p2 = doc.createElementNS(XHTML_NS, "button");
     p2.className = "control-point";
-    p2.id = "P2";
     plane.appendChild(p2);
 
-    let curve = doc.createElement("canvas");
+    let curve = doc.createElementNS(XHTML_NS, "canvas");
     curve.setAttribute("width", 150);
     curve.setAttribute("height", 370);
-    curve.id = "curve";
+    curve.className = "curve";
 
     plane.appendChild(curve);
     wrap.appendChild(plane);
@@ -279,14 +279,14 @@ CubicBezierWidget.prototype = {
     this.parent.appendChild(wrap);
 
     return {
-      p1: p1,
-      p2: p2,
-      curve: curve
+      p1,
+      p2,
+      curve
     };
   },
 
   _removeMarkup: function () {
-    this.parent.ownerDocument.querySelector(".display-wrap").remove();
+    this.parent.querySelector(".display-wrap").remove();
   },
 
   _initEvents: function () {
@@ -400,7 +400,9 @@ CubicBezierWidget.prototype = {
   _updateFromPoints: function () {
     // Get the new coordinates from the point's offsets
     let coordinates = this.bezierCanvas.offsetsToCoordinates(this.p1);
-    coordinates = coordinates.concat(this.bezierCanvas.offsetsToCoordinates(this.p2));
+    coordinates = coordinates.concat(
+      this.bezierCanvas.offsetsToCoordinates(this.p2)
+    );
 
     this.presets.refreshMenu(coordinates);
     this._redraw(coordinates);
@@ -516,13 +518,13 @@ CubicBezierPresetWidget.prototype = {
   _initMarkup: function () {
     let doc = this.parent.ownerDocument;
 
-    let presetPane = doc.createElement("div");
+    let presetPane = doc.createElementNS(XHTML_NS, "div");
     presetPane.className = "preset-pane";
 
-    let categoryList = doc.createElement("div");
+    let categoryList = doc.createElementNS(XHTML_NS, "div");
     categoryList.id = "preset-categories";
 
-    let presetContainer = doc.createElement("div");
+    let presetContainer = doc.createElementNS(XHTML_NS, "div");
     presetContainer.id = "preset-container";
 
     Object.keys(PRESETS).forEach(categoryLabel => {
@@ -551,7 +553,7 @@ CubicBezierPresetWidget.prototype = {
   _createCategory: function (categoryLabel) {
     let doc = this.parent.ownerDocument;
 
-    let category = doc.createElement("div");
+    let category = doc.createElementNS(XHTML_NS, "div");
     category.id = categoryLabel;
     category.classList.add("category");
 
@@ -569,7 +571,7 @@ CubicBezierPresetWidget.prototype = {
   _createPresetList: function (categoryLabel) {
     let doc = this.parent.ownerDocument;
 
-    let presetList = doc.createElement("div");
+    let presetList = doc.createElementNS(XHTML_NS, "div");
     presetList.id = "preset-category-" + categoryLabel;
     presetList.classList.add("preset-list");
 
@@ -584,12 +586,12 @@ CubicBezierPresetWidget.prototype = {
   _createPreset: function (categoryLabel, presetLabel) {
     let doc = this.parent.ownerDocument;
 
-    let preset = doc.createElement("div");
+    let preset = doc.createElementNS(XHTML_NS, "div");
     preset.classList.add("preset");
     preset.id = presetLabel;
     preset.coordinates = PRESETS[categoryLabel][presetLabel];
     // Create preset preview
-    let curve = doc.createElement("canvas");
+    let curve = doc.createElementNS(XHTML_NS, "canvas");
     let bezier = new CubicBezier(preset.coordinates);
     curve.setAttribute("height", 50);
     curve.setAttribute("width", 50);
@@ -601,8 +603,9 @@ CubicBezierPresetWidget.prototype = {
     preset.appendChild(curve);
 
     // Create preset label
-    let presetLabelElem = doc.createElement("p");
-    let presetDisplayLabel = this._normalizePresetLabel(categoryLabel, presetLabel);
+    let presetLabelElem = doc.createElementNS(XHTML_NS, "p");
+    let presetDisplayLabel = this._normalizePresetLabel(categoryLabel,
+                                                        presetLabel);
     presetLabelElem.textContent = presetDisplayLabel;
     preset.appendChild(presetLabelElem);
     preset.setAttribute("title", presetDisplayLabel);
@@ -730,14 +733,14 @@ TimingFunctionPreviewWidget.prototype = {
   _initMarkup: function () {
     let doc = this.parent.ownerDocument;
 
-    let container = doc.createElement("div");
+    let container = doc.createElementNS(XHTML_NS, "div");
     container.className = "timing-function-preview";
 
-    this.dot = doc.createElement("div");
+    this.dot = doc.createElementNS(XHTML_NS, "div");
     this.dot.className = "dot";
     container.appendChild(this.dot);
 
-    let scale = doc.createElement("div");
+    let scale = doc.createElementNS(XHTML_NS, "div");
     scale.className = "scale";
     container.appendChild(scale);
 
@@ -759,7 +762,7 @@ TimingFunctionPreviewWidget.prototype = {
   preview: function (value) {
     // Don't restart the preview animation if the value is the same
     if (value === this.previousValue) {
-      return false;
+      return;
     }
 
     clearTimeout(this.autoRestartAnimation);
@@ -776,13 +779,17 @@ TimingFunctionPreviewWidget.prototype = {
    * Re-start the preview animation from the beginning
    */
   restartAnimation: function () {
-    // Reset the animation duration in case it was changed
-    this.dot.style.animationDuration = (this.PREVIEW_DURATION * 2) + "ms";
-
     // Just toggling the class won't do it unless there's a sync reflow
-    this.dot.classList.remove("animate");
-    let w = this.dot.offsetWidth;
-    this.dot.classList.add("animate");
+    this.dot.animate([
+      { left: "-7px", offset: 0 },
+      { left: "143px", offset: 0.25 },
+      { left: "143px", offset: 0.5 },
+      { left: "-7px", offset: 0.75 },
+      { left: "-7px", offset: 1 }
+    ], {
+      duration: (this.PREVIEW_DURATION * 2),
+      fill: "forwards"
+    });
 
     // Restart it again after a while
     this.autoRestartAnimation = setTimeout(this.restartAnimation.bind(this),

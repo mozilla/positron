@@ -8,7 +8,6 @@ window.performance.mark('gecko-shell-loadstart');
 
 Cu.import('resource://gre/modules/ContactService.jsm');
 Cu.import('resource://gre/modules/AlarmService.jsm');
-Cu.import('resource://gre/modules/ActivitiesService.jsm');
 Cu.import('resource://gre/modules/NotificationDB.jsm');
 Cu.import('resource://gre/modules/Payment.jsm');
 Cu.import("resource://gre/modules/AppsUtils.jsm");
@@ -22,8 +21,6 @@ if (isGonk) {
   Cu.import('resource://gre/modules/NetworkStatsService.jsm');
   Cu.import('resource://gre/modules/ResourceStatsService.jsm');
 }
-
-Cu.import('resource://gre/modules/KillSwitchMain.jsm');
 
 // Identity
 Cu.import('resource://gre/modules/SignInToWebsite.jsm');
@@ -1316,8 +1313,8 @@ if (isGonk) {
 Services.obs.addObserver(function resetProfile(subject, topic, data) {
   Services.obs.removeObserver(resetProfile, topic);
 
-  // Listening for 'profile-before-change2' which is late in the shutdown
-  // sequence, but still has xpcom access.
+  // Listening for 'profile-before-change-telemetry' which is late in the
+  // shutdown sequence, but still has xpcom access.
   Services.obs.addObserver(function clearProfile(subject, topic, data) {
     Services.obs.removeObserver(clearProfile, topic);
     if (isGonk) {
@@ -1357,7 +1354,7 @@ Services.obs.addObserver(function resetProfile(subject, topic, data) {
       }
     }
   },
-  'profile-before-change2', false);
+  'profile-before-change-telemetry', false);
 
   let appStartup = Cc['@mozilla.org/toolkit/app-startup;1']
                      .getService(Ci.nsIAppStartup);

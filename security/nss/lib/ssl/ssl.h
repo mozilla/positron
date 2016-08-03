@@ -206,6 +206,42 @@ SSL_IMPORT PRFileDesc *DTLS_ImportFD(PRFileDesc *model, PRFileDesc *fd);
 /* Request Signed Certificate Timestamps via TLS extension (client) */
 #define SSL_ENABLE_SIGNED_CERT_TIMESTAMPS 31
 
+/* Ordinarily, when negotiating a TLS_DHE_* cipher suite the server picks the
+ * group.  draft-ietf-tls-negotiated-ff-dhe changes this to use supported_groups
+ * (formerly supported_curves) to signal which pre-defined groups are OK.
+ *
+ * This option causes an NSS client to use this extension and demand that those
+ * groups be used.  A client will signal any enabled DHE groups in the
+ * supported_groups extension and reject groups that don't match what it has
+ * enabled.  A server will only negotiate TLS_DHE_* cipher suites if the
+ * client includes the extension.
+ *
+ * See SSL_DHEGroupPrefSet() for how to control which groups are enabled.
+ *
+ * This option cannot be enabled if NSS is not compiled with ECC support.
+ */
+#define SSL_REQUIRE_DH_NAMED_GROUPS 32
+
+/* Allow 0-RTT data (for TLS 1.3).
+ *
+ * When this option is set, the server's session tickets will contain
+ * a flag indicating that it accepts 0-RTT. When resuming such a
+ * session, PR_Write() on the client will be allowed immediately after
+ * starting the handshake and PR_Read() on the server will be allowed
+ * on the server to read that data. Calls to
+ * SSL_GetPreliminaryChannelInfo() and SSL_GetNextProto()
+ * can be made used during this period to learn about the channel
+ * parameters [TODO(ekr@rtfm.com): This hasn't landed yet].
+ *
+ * The transition between the 0-RTT and 1-RTT modes is marked by the
+ * handshake callback.
+ *
+ * WARNING: 0-RTT data has different anti-replay and PFS properties than
+ * the rest of the TLS data. See [draft-ietf-tls-tls13; Section 6.2.3]
+ * for more details.
+ */
+#define SSL_ENABLE_0RTT_DATA 33
+
 #ifdef SSL_DEPRECATED_FUNCTION
 /* Old deprecated function names */
 SSL_IMPORT SECStatus SSL_Enable(PRFileDesc *fd, int option, PRBool on);
@@ -267,10 +303,11 @@ SSL_IMPORT SECStatus SSL_SetNextProtoNego(PRFileDesc *fd,
                                           unsigned int length);
 
 typedef enum SSLNextProtoState {
-    SSL_NEXT_PROTO_NO_SUPPORT = 0, /* No peer support                */
-    SSL_NEXT_PROTO_NEGOTIATED = 1, /* Mutual agreement               */
-    SSL_NEXT_PROTO_NO_OVERLAP = 2, /* No protocol overlap found      */
-    SSL_NEXT_PROTO_SELECTED = 3    /* Server selected proto (ALPN)   */
+    SSL_NEXT_PROTO_NO_SUPPORT = 0, /* No peer support                   */
+    SSL_NEXT_PROTO_NEGOTIATED = 1, /* Mutual agreement                  */
+    SSL_NEXT_PROTO_NO_OVERLAP = 2, /* No protocol overlap found         */
+    SSL_NEXT_PROTO_SELECTED = 3,   /* Server selected proto (ALPN)      */
+    SSL_NEXT_PROTO_EARLY_VALUE = 4 /* We are in 0-RTT using this value. */
 } SSLNextProtoState;
 
 /* SSL_GetNextProto can be used in the HandshakeCallback or any time after
@@ -356,7 +393,7 @@ SSL_IMPORT unsigned int SSL_SignatureMaxCount();
 ** For example, a TLS extension sent by the client might indicate a preference.
 */
 SSL_IMPORT SECStatus SSL_DHEGroupPrefSet(PRFileDesc *fd,
-                                         SSLDHEGroupType *groups,
+                                         const SSLDHEGroupType *groups,
                                          PRUint16 num_groups);
 
 /* Enable the use of a DHE group that's smaller than the library default,

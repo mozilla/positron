@@ -885,7 +885,10 @@ class TypedArrayMethods
              if (isShared)
                  return ElementSpecific<Uint8ClampedArrayType, SharedOps>::setFromTypedArray(cx, target, source, offset);
              return ElementSpecific<Uint8ClampedArrayType, UnsharedOps>::setFromTypedArray(cx, target, source, offset);
+           case Scalar::Int64:
            case Scalar::Float32x4:
+           case Scalar::Int8x16:
+           case Scalar::Int16x8:
            case Scalar::Int32x4:
            case Scalar::MaxTypedArrayViewType:
              break;
@@ -939,7 +942,10 @@ class TypedArrayMethods
             if (isShared)
                 return ElementSpecific<Uint8ClampedArrayType, SharedOps>::setFromNonTypedArray(cx, target, source, len, offset);
             return ElementSpecific<Uint8ClampedArrayType, UnsharedOps>::setFromNonTypedArray(cx, target, source, len, offset);
+          case Scalar::Int64:
           case Scalar::Float32x4:
+          case Scalar::Int8x16:
+          case Scalar::Int16x8:
           case Scalar::Int32x4:
           case Scalar::MaxTypedArrayViewType:
             break;

@@ -29,8 +29,6 @@ namespace base {
 typedef ::Lock Lock;
 typedef ::AutoLock AutoLock;
 
-using mozilla::OffTheBooksMutexAutoLock;
-
 // Static table of checksums for all possible 8 bit bytes.
 const uint32_t Histogram::kCrcTable[256] = {0x0, 0x77073096L, 0xee0e612cL,
 0x990951baL, 0x76dc419L, 0x706af48fL, 0xe963a535L, 0x9e6495a3L, 0xedb8832L,
@@ -177,24 +175,20 @@ void Histogram::WriteAscii(bool graph_it, const std::string& newline,
   SampleSet snapshot;
   SnapshotSample(&snapshot);
 
-  // For the rest of the routine, we hold |snapshot|'s lock so as to
-  // be able to examine it atomically.
-  OffTheBooksMutexAutoLock locker(snapshot.mutex());
+  Count sample_count = snapshot.TotalCount();
 
-  Count sample_count = snapshot.TotalCount(locker);
-
-  WriteAsciiHeader(snapshot, locker, sample_count, output);
+  WriteAsciiHeader(snapshot, sample_count, output);
   output->append(newline);
 
   // Prepare to normalize graphical rendering of bucket contents.
   double max_size = 0;
   if (graph_it)
-    max_size = GetPeakBucketSize(snapshot, locker);
+    max_size = GetPeakBucketSize(snapshot);
 
   // Calculate space needed to print bucket range numbers.  Leave room to print
   // nearly the largest bucket range without sliding over the histogram.
   size_t largest_non_empty_bucket = bucket_count() - 1;
-  while (0 == snapshot.counts(locker, largest_non_empty_bucket)) {
+  while (0 == snapshot.counts(largest_non_empty_bucket)) {
     if (0 == largest_non_empty_bucket)
       break;  // All buckets are empty.
     --largest_non_empty_bucket;
@@ -203,7 +197,7 @@ void Histogram::WriteAscii(bool graph_it, const std::string& newline,
   // Calculate largest print width needed for any of our bucket range displays.
   size_t print_width = 1;
   for (size_t i = 0; i < bucket_count(); ++i) {
-    if (snapshot.counts(locker, i)) {
+    if (snapshot.counts(i)) {
       size_t width = GetAsciiBucketRange(i).size() + 1;
       if (width > print_width)
         print_width = width;
@@ -214,7 +208,7 @@ void Histogram::WriteAscii(bool graph_it, const std::string& newline,
   int64_t past = 0;
   // Output the actual histogram graph.
   for (size_t i = 0; i < bucket_count(); ++i) {
-    Count current = snapshot.counts(locker, i);
+    Count current = snapshot.counts(i);
     if (!current && !PrintEmptyBucket(i))
       continue;
     remaining -= current;
@@ -223,8 +217,8 @@ void Histogram::WriteAscii(bool graph_it, const std::string& newline,
     for (size_t j = 0; range.size() + j < print_width + 1; ++j)
       output->push_back(' ');
     if (0 == current &&
-        i < bucket_count() - 1 && 0 == snapshot.counts(locker, i + 1)) {
-      while (i < bucket_count() - 1 && 0 == snapshot.counts(locker, i + 1))
+        i < bucket_count() - 1 && 0 == snapshot.counts(i + 1)) {
+      while (i < bucket_count() - 1 && 0 == snapshot.counts(i + 1))
         ++i;
       output->append("... ");
       output->append(newline);
@@ -240,111 +234,18 @@ void Histogram::WriteAscii(bool graph_it, const std::string& newline,
   DCHECK_EQ(sample_count, past);
 }
 
-// static
-std::string Histogram::SerializeHistogramInfo(const Histogram& histogram,
-                                              const SampleSet& snapshot) {
-  DCHECK_NE(NOT_VALID_IN_RENDERER, histogram.histogram_type());
-
-  Pickle pickle;
-  pickle.WriteString(histogram.histogram_name());
-  pickle.WriteInt(histogram.declared_min());
-  pickle.WriteInt(histogram.declared_max());
-  pickle.WriteSize(histogram.bucket_count());
-  pickle.WriteUInt32(histogram.range_checksum());
-  pickle.WriteInt(histogram.histogram_type());
-  pickle.WriteInt(histogram.flags());
-
-  snapshot.Serialize(&pickle);
-  return std::string(static_cast<const char*>(pickle.data()), pickle.size());
-}
-
-// static
-bool Histogram::DeserializeHistogramInfo(const std::string& histogram_info) {
-  if (histogram_info.empty()) {
-      return false;
-  }
-
-  Pickle pickle(histogram_info.data(),
-                static_cast<int>(histogram_info.size()));
-  std::string histogram_name;
-  int declared_min;
-  int declared_max;
-  size_t bucket_count;
-  uint32_t range_checksum;
-  int histogram_type;
-  int pickle_flags;
-  SampleSet sample;
-
-  void* iter = NULL;
-  if (!pickle.ReadString(&iter, &histogram_name) ||
-      !pickle.ReadInt(&iter, &declared_min) ||
-      !pickle.ReadInt(&iter, &declared_max) ||
-      !pickle.ReadSize(&iter, &bucket_count) ||
-      !pickle.ReadUInt32(&iter, &range_checksum) ||
-      !pickle.ReadInt(&iter, &histogram_type) ||
-      !pickle.ReadInt(&iter, &pickle_flags) ||
-      !sample.Histogram::SampleSet::Deserialize(&iter, pickle)) {
-    CHROMIUM_LOG(ERROR) << "Pickle error decoding Histogram: " << histogram_name;
-    return false;
-  }
-  DCHECK(pickle_flags & kIPCSerializationSourceFlag);
-  // Since these fields may have come from an untrusted renderer, do additional
-  // checks above and beyond those in Histogram::Initialize()
-  if (declared_max <= 0 || declared_min <= 0 || declared_max < declared_min ||
-      INT_MAX / sizeof(Count) <= bucket_count || bucket_count < 2) {
-    CHROMIUM_LOG(ERROR) << "Values error decoding Histogram: " << histogram_name;
-    return false;
-  }
-
-  Flags flags = static_cast<Flags>(pickle_flags & ~kIPCSerializationSourceFlag);
-
-  DCHECK_NE(NOT_VALID_IN_RENDERER, histogram_type);
-
-  Histogram* render_histogram(NULL);
-
-  if (histogram_type == HISTOGRAM) {
-    render_histogram = Histogram::FactoryGet(
-        histogram_name, declared_min, declared_max, bucket_count, flags);
-  } else if (histogram_type == LINEAR_HISTOGRAM) {
-    render_histogram = LinearHistogram::FactoryGet(
-        histogram_name, declared_min, declared_max, bucket_count, flags);
-  } else if (histogram_type == BOOLEAN_HISTOGRAM) {
-    render_histogram = BooleanHistogram::FactoryGet(histogram_name, flags);
-  } else {
-    CHROMIUM_LOG(ERROR) << "Error Deserializing Histogram Unknown histogram_type: "
-                        << histogram_type;
-    return false;
-  }
-
-  DCHECK_EQ(render_histogram->declared_min(), declared_min);
-  DCHECK_EQ(render_histogram->declared_max(), declared_max);
-  DCHECK_EQ(render_histogram->bucket_count(), bucket_count);
-  DCHECK_EQ(render_histogram->range_checksum(), range_checksum);
-  DCHECK_EQ(render_histogram->histogram_type(), histogram_type);
-
-  if (render_histogram->flags() & kIPCSerializationSourceFlag) {
-    DVLOG(1) << "Single process mode, histogram observed and not copied: "
-             << histogram_name;
-  } else {
-    DCHECK_EQ(flags & render_histogram->flags(), flags);
-    render_histogram->AddSampleSet(sample);
-  }
-
-  return true;
-}
-
 //------------------------------------------------------------------------------
 // Methods for the validating a sample and a related histogram.
 //------------------------------------------------------------------------------
 
-Histogram::Inconsistencies Histogram::FindCorruption(
-    const SampleSet& snapshot,
-    const OffTheBooksMutexAutoLock& snapshotLockEvidence) const {
+Histogram::Inconsistencies
+Histogram::FindCorruption(const SampleSet& snapshot) const
+{
   int inconsistencies = NO_INCONSISTENCIES;
   Sample previous_range = -1;  // Bottom range is always 0.
   int64_t count = 0;
   for (size_t index = 0; index < bucket_count(); ++index) {
-    count += snapshot.counts(snapshotLockEvidence, index);
+    count += snapshot.counts(index);
     int new_range = ranges(index);
     if (previous_range >= new_range)
       inconsistencies |= BUCKET_ORDER_ERROR;
@@ -354,7 +255,7 @@ Histogram::Inconsistencies Histogram::FindCorruption(
   if (!HasValidRangeChecksum())
     inconsistencies |= RANGE_CHECKSUM_ERROR;
 
-  int64_t delta64 = snapshot.redundant_count(snapshotLockEvidence) - count;
+  int64_t delta64 = snapshot.redundant_count() - count;
   if (delta64 != 0) {
     int delta = static_cast<int>(delta64);
     if (delta != delta64)
@@ -395,7 +296,6 @@ size_t Histogram::bucket_count() const {
 }
 
 void Histogram::SnapshotSample(SampleSet* sample) const {
-  OffTheBooksMutexAutoLock locker(sample_.mutex());
   *sample = sample_;
 }
 
@@ -429,9 +329,9 @@ size_t Histogram::SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf)
   return n;
 }
 
-size_t Histogram::SampleSet::SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf)
+size_t
+Histogram::SampleSet::SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf)
 {
-  OffTheBooksMutexAutoLock locker(mutex_);
   // We're not allowed to do deep dives into STL data structures.  This
   // is as close as we can get to measuring this array.
   return aMallocSizeOf(&counts_[0]);
@@ -649,13 +549,11 @@ uint32_t Histogram::Crc32(uint32_t sum, Histogram::Sample range) {
 //------------------------------------------------------------------------------
 // Private methods
 
-double Histogram::GetPeakBucketSize(const SampleSet& snapshot,
-                                    const OffTheBooksMutexAutoLock&
-                                          snapshotLockEvidence) const {
+double Histogram::GetPeakBucketSize(const SampleSet& snapshot) const {
   double max = 0;
   for (size_t i = 0; i < bucket_count() ; ++i) {
     double current_size
-        = GetBucketSize(snapshot.counts(snapshotLockEvidence, i), i);
+        = GetBucketSize(snapshot.counts(i), i);
     if (current_size > max)
       max = current_size;
   }
@@ -663,15 +561,13 @@ double Histogram::GetPeakBucketSize(const SampleSet& snapshot,
 }
 
 void Histogram::WriteAsciiHeader(const SampleSet& snapshot,
-                                 const OffTheBooksMutexAutoLock&
-                                       snapshotLockEvidence,
                                  Count sample_count,
                                  std::string* output) const {
   StringAppendF(output,
                 "Histogram: %s recorded %d samples",
                 histogram_name().c_str(),
                 sample_count);
-  int64_t snapshot_sum = snapshot.sum(snapshotLockEvidence);
+  int64_t snapshot_sum = snapshot.sum();
   if (0 == sample_count) {
     DCHECK_EQ(snapshot_sum, 0);
   } else {
@@ -722,20 +618,17 @@ void Histogram::WriteAsciiBucketGraph(double current_size, double max_size,
 Histogram::SampleSet::SampleSet()
     : counts_(),
       sum_(0),
-      redundant_count_(0),
-      mutex_("Histogram::SampleSet::SampleSet") {
+      redundant_count_(0) {
 }
 
 Histogram::SampleSet::~SampleSet() {
 }
 
 void Histogram::SampleSet::Resize(const Histogram& histogram) {
-  OffTheBooksMutexAutoLock locker(mutex_);
   counts_.resize(histogram.bucket_count(), 0);
 }
 
-void Histogram::SampleSet::Accumulate(const OffTheBooksMutexAutoLock& ev,
-                                      Sample value, Count count,
+void Histogram::SampleSet::Accumulate(Sample value, Count count,
                                       size_t index) {
   DCHECK(count == 1 || count == -1);
   counts_[index] += count;
@@ -746,15 +639,7 @@ void Histogram::SampleSet::Accumulate(const OffTheBooksMutexAutoLock& ev,
   DCHECK_GE(redundant_count_, 0);
 }
 
-void Histogram::SampleSet::Accumulate(Sample value,
-                                      Count count,
-                                      size_t index) {
-  OffTheBooksMutexAutoLock locker(mutex_);
-  Accumulate(locker, value, count, index);
-}
-
-Count Histogram::SampleSet::TotalCount(const OffTheBooksMutexAutoLock& ev)
-                                                                       const {
+Count Histogram::SampleSet::TotalCount() const {
   Count total = 0;
   for (Counts::const_iterator it = counts_.begin();
        it != counts_.end();
@@ -765,54 +650,11 @@ Count Histogram::SampleSet::TotalCount(const OffTheBooksMutexAutoLock& ev)
 }
 
 void Histogram::SampleSet::Add(const SampleSet& other) {
-  OffTheBooksMutexAutoLock locker(mutex_);
   DCHECK_EQ(counts_.size(), other.counts_.size());
   sum_ += other.sum_;
   redundant_count_ += other.redundant_count_;
   for (size_t index = 0; index < counts_.size(); ++index)
     counts_[index] += other.counts_[index];
-}
-
-bool Histogram::SampleSet::Serialize(Pickle* pickle) const {
-  OffTheBooksMutexAutoLock locker(mutex_);
-  pickle->WriteInt64(sum_);
-  pickle->WriteInt64(redundant_count_);
-  pickle->WriteSize(counts_.size());
-
-  for (size_t index = 0; index < counts_.size(); ++index) {
-    pickle->WriteInt(counts_[index]);
-  }
-
-  return true;
-}
-
-bool Histogram::SampleSet::Deserialize(void** iter, const Pickle& pickle) {
-  OffTheBooksMutexAutoLock locker(mutex_);
-  DCHECK_EQ(counts_.size(), 0u);
-  DCHECK_EQ(sum_, 0);
-  DCHECK_EQ(redundant_count_, 0);
-
-  size_t counts_size;
-
-  if (!pickle.ReadInt64(iter, &sum_) ||
-      !pickle.ReadInt64(iter, &redundant_count_) ||
-      !pickle.ReadSize(iter, &counts_size)) {
-    return false;
-  }
-
-  if (counts_size == 0)
-    return false;
-
-  int count = 0;
-  for (size_t index = 0; index < counts_size; ++index) {
-    int i;
-    if (!pickle.ReadInt(iter, &i))
-      return false;
-    counts_.push_back(i);
-    count += i;
-  }
-
-  return true;
 }
 
 //------------------------------------------------------------------------------
@@ -1009,8 +851,7 @@ FlagHistogram::Accumulate(Sample value, Count count, size_t index)
 
 void
 FlagHistogram::AddSampleSet(const SampleSet& sample) {
-  OffTheBooksMutexAutoLock locker(sample.mutex());
-  DCHECK_EQ(bucket_count(), sample.size(locker));
+  DCHECK_EQ(bucket_count(), sample.size());
   // We can't be sure the SampleSet provided came from another FlagHistogram,
   // so we take the following steps:
   //  - If our flag has already been set do nothing.
@@ -1024,12 +865,12 @@ FlagHistogram::AddSampleSet(const SampleSet& sample) {
     return;
   }
 
-  if (sample.sum(locker) != 1) {
+  if (sample.sum() != 1) {
     return;
   }
 
   size_t one_index = BucketIndex(1);
-  if (sample.counts(locker, one_index) == 1) {
+  if (sample.counts(one_index) == 1) {
     Accumulate(1, 1, one_index);
   }
 }
@@ -1076,25 +917,23 @@ void
 CountHistogram::Accumulate(Sample value, Count count, size_t index)
 {
   size_t zero_index = BucketIndex(0);
-  LinearHistogram::Accumulate(1, 1, zero_index);
+  LinearHistogram::Accumulate(value, 1, zero_index);
 }
 
 void
 CountHistogram::AddSampleSet(const SampleSet& sample) {
-  OffTheBooksMutexAutoLock locker(sample.mutex());
-  DCHECK_EQ(bucket_count(), sample.size(locker));
+  DCHECK_EQ(bucket_count(), sample.size());
   // We can't be sure the SampleSet provided came from another CountHistogram,
   // so we at least check that the unused buckets are empty.
 
   const size_t indices[] = { BucketIndex(0), BucketIndex(1), BucketIndex(2) };
 
-  if (sample.counts(locker, indices[1]) != 0 ||
-      sample.counts(locker, indices[2]) != 0) {
+  if (sample.counts(indices[1]) != 0 || sample.counts(indices[2]) != 0) {
     return;
   }
 
-  if (sample.counts(locker, indices[0]) != 0) {
-    Accumulate(1, sample.counts(locker, indices[0]), indices[0]);
+  if (sample.counts(indices[0]) != 0) {
+    Accumulate(1, sample.counts(indices[0]), indices[0]);
   }
 }
 

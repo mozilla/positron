@@ -10,6 +10,7 @@
 #include "mozIApplication.h"
 #include "nsCOMPtr.h"
 #include "mozilla/BasePrincipal.h"
+#include "nsPIWindowRoot.h"
 
 namespace mozilla {
 namespace dom {
@@ -130,6 +131,15 @@ public:
    */
   const nsACString& SignedPkgOriginNoSuffix() const;
 
+  /**
+   * Returns the presentation URL associated with the tab if this tab is
+   * created for presented content
+   */
+  const nsAString& PresentationURL() const;
+
+  UIStateChangeType ShowAccelerators() const;
+  UIStateChangeType ShowFocusRings() const;
+
 protected:
   friend class MaybeInvalidTabContext;
 
@@ -148,6 +158,11 @@ protected:
   bool SetTabContext(const TabContext& aContext);
 
   /**
+   * Set the tab context's origin attributes to a private browsing value.
+   */
+  void SetPrivateBrowsingAttributes(bool aIsPrivateBrowsing);
+
+  /**
    * Set the TabContext for this frame. This can either be:
    *  - an app frame (with the given own app) inside the given owner app. Either
    *    apps can be null.
@@ -155,10 +170,14 @@ protected:
    *  - a non-browser, non-app frame. Both own app and owner app should be null.
    */
   bool SetTabContext(bool aIsMozBrowserElement,
+                     bool aIsPrerendered,
                      mozIApplication* aOwnApp,
                      mozIApplication* aAppFrameOwnerApp,
+                     UIStateChangeType aShowAccelerators,
+                     UIStateChangeType aShowFocusRings,
                      const DocShellOriginAttributes& aOriginAttributes,
-                     const nsACString& aSignedPkgOriginNoSuffix);
+                     const nsACString& aSignedPkgOriginNoSuffix,
+                     const nsAString& aPresentationURL);
 
   /**
    * Modify this TabContext to match the given TabContext.  This is a special
@@ -170,6 +189,11 @@ protected:
    * returns false.
    */
   bool UpdateTabContextAfterSwap(const TabContext& aContext);
+
+  /**
+   * Whether this TabContext is in prerender mode.
+   */
+  bool mIsPrerendered;
 
 private:
   /**
@@ -215,6 +239,17 @@ private:
    * doesn't own a signed package, this value would be empty.
    */
   nsCString mSignedPkgOriginNoSuffix;
+
+  /**
+   * The requested presentation URL.
+   */
+  nsString mPresentationURL;
+
+  /**
+   * Keyboard indicator state (focus rings, accelerators).
+   */
+  UIStateChangeType mShowAccelerators;
+  UIStateChangeType mShowFocusRings;
 };
 
 /**
@@ -232,16 +267,24 @@ public:
 
   bool
   SetTabContext(bool aIsMozBrowserElement,
+                bool aIsPrerendered,
                 mozIApplication* aOwnApp,
                 mozIApplication* aAppFrameOwnerApp,
+                UIStateChangeType aShowAccelerators,
+                UIStateChangeType aShowFocusRings,
                 const DocShellOriginAttributes& aOriginAttributes,
-                const nsACString& aSignedPkgOriginNoSuffix = EmptyCString())
+                const nsACString& aSignedPkgOriginNoSuffix = EmptyCString(),
+                const nsAString& aPresentationURL = EmptyString())
   {
     return TabContext::SetTabContext(aIsMozBrowserElement,
+                                     aIsPrerendered,
                                      aOwnApp,
                                      aAppFrameOwnerApp,
+                                     aShowAccelerators,
+                                     aShowFocusRings,
                                      aOriginAttributes,
-                                     aSignedPkgOriginNoSuffix);
+                                     aSignedPkgOriginNoSuffix,
+                                     aPresentationURL);
   }
 };
 

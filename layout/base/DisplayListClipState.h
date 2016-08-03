@@ -29,6 +29,7 @@ public:
     , mCurrentCombinedClip(nullptr)
     , mScrollClipContentDescendants(nullptr)
     , mScrollClipContainingBlockDescendants(nullptr)
+    , mClipContentDescendantsScrollClip(nullptr)
     , mStackingContextAncestorSC(nullptr)
   {}
 
@@ -74,11 +75,8 @@ private:
     mCurrentCombinedClip = nullptr;
   }
 
-  void SetScrollClipForContainingBlockDescendants(const DisplayItemScrollClip* aScrollClip)
-  {
-    mScrollClipContainingBlockDescendants = aScrollClip;
-    mStackingContextAncestorSC = DisplayItemScrollClip::PickAncestor(mStackingContextAncestorSC, aScrollClip);
-  }
+  void SetScrollClipForContainingBlockDescendants(nsDisplayListBuilder* aBuilder,
+                                                  const DisplayItemScrollClip* aScrollClip);
 
   void Clear()
   {
@@ -184,6 +182,11 @@ private:
   const DisplayItemScrollClip* mScrollClipContainingBlockDescendants;
 
   /**
+   * The scroll clip that was in effect when mClipContentDescendants was set.
+   */
+  const DisplayItemScrollClip* mClipContentDescendantsScrollClip;
+
+  /**
    * A scroll clip that is an ancestor of all the scroll clips that were
    * "current" on this clip state since EnterStackingContextContents was
    * called.
@@ -267,6 +270,24 @@ public:
       *aOutContainerSC = mState.CurrentAncestorScrollClipForStackingContextContents();
     }
     Restore();
+  }
+
+  bool SavedStateHasRoundedCorners()
+  {
+    const DisplayItemScrollClip* scrollClip = mSavedState.GetCurrentInnermostScrollClip();
+    if (scrollClip && scrollClip->HasRoundedCorners()) {
+      return true;
+    }
+    const DisplayItemClip* clip = mSavedState.GetClipForContainingBlockDescendants();
+    if (clip && clip->GetRoundedRectCount() > 0) {
+      return true;
+    }
+
+    clip = mSavedState.GetClipForContentDescendants();
+    if (clip && clip->GetRoundedRectCount() > 0) {
+      return true;
+    }
+    return false;
   }
 
   void TurnClipIntoScrollClipForContentDescendants(nsDisplayListBuilder* aBuilder, nsIScrollableFrame* aScrollableFrame)
@@ -413,9 +434,10 @@ public:
     mState.SetClipForContainingBlockDescendants(aClip);
   }
 
-  void SetScrollClipForContainingBlockDescendants(const DisplayItemScrollClip* aScrollClip)
+  void SetScrollClipForContainingBlockDescendants(nsDisplayListBuilder* aBuilder,
+                                                  const DisplayItemScrollClip* aScrollClip)
   {
-    mState.SetScrollClipForContainingBlockDescendants(aScrollClip);
+    mState.SetScrollClipForContainingBlockDescendants(aBuilder, aScrollClip);
   }
 
   /**

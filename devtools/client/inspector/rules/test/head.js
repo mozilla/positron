@@ -19,6 +19,8 @@ var {getInplaceEditorForSpan: inplaceEditor} =
 
 const ROOT_TEST_DIR = getRootDirectory(gTestPath);
 const FRAME_SCRIPT_URL = ROOT_TEST_DIR + "doc_frame_script.js";
+const _STRINGS = Services.strings.createBundle(
+  "chrome://devtools-shared/locale/styleinspector.properties");
 
 registerCleanupFunction(() => {
   Services.prefs.clearUserPref("devtools.defaultColorUnit");
@@ -55,7 +57,7 @@ function waitForContentMessage(name) {
 
   let mm = gBrowser.selectedBrowser.messageManager;
 
-  let def = promise.defer();
+  let def = defer();
   mm.addMessageListener(name, function onMessage(msg) {
     mm.removeMessageListener(name, onMessage);
     def.resolve(msg.data);
@@ -215,24 +217,6 @@ var waitForSuccess = Task.async(function* (validatorFn, desc = "untitled") {
 });
 
 /**
- * Get the dataURL for the font family tooltip.
- *
- * @param {String} font
- *        The font family value.
- * @param {object} nodeFront
- *        The NodeActor that will used to retrieve the dataURL for the
- *        font family tooltip contents.
- */
-var getFontFamilyDataURL = Task.async(function* (font, nodeFront) {
-  let fillStyle = (Services.prefs.getCharPref("devtools.theme") === "light") ?
-      "black" : "white";
-
-  let {data} = yield nodeFront.getFontFamilyDataURL(font, fillStyle);
-  let dataURL = yield data.string();
-  return dataURL;
-});
-
-/**
  * Get the DOMNode for a css rule in the rule-view that corresponds to the given
  * selector
  *
@@ -356,9 +340,14 @@ function getRuleViewSelectorHighlighterIcon(view, selectorText) {
  */
 var simulateColorPickerChange = Task.async(function* (ruleView, colorPicker,
     newRgba, expectedChange) {
+  let onComputedStyleChanged;
+  if (expectedChange) {
+    let {selector, name, value} = expectedChange;
+    onComputedStyleChanged = waitForComputedStyleProperty(selector, null, name, value);
+  }
   let onRuleViewChanged = ruleView.once("ruleview-changed");
   info("Getting the spectrum colorpicker object");
-  let spectrum = yield colorPicker.spectrum;
+  let spectrum = colorPicker.spectrum;
   info("Setting the new color");
   spectrum.rgb = newRgba;
   info("Applying the change");
@@ -369,8 +358,7 @@ var simulateColorPickerChange = Task.async(function* (ruleView, colorPicker,
 
   if (expectedChange) {
     info("Waiting for the style to be applied on the page");
-    let {selector, name, value} = expectedChange;
-    yield waitForComputedStyleProperty(selector, null, name, value);
+    yield onComputedStyleChanged;
   }
 });
 
@@ -487,23 +475,6 @@ function getRuleViewLinkByIndex(view, index) {
 function getRuleViewLinkTextByIndex(view, index) {
   let link = getRuleViewLinkByIndex(view, index);
   return link.querySelector(".ruleview-rule-source-label").value;
-}
-
-/**
- * Get the rule editor from the rule-view given its index
- *
- * @param {CssRuleView} view
- *        The instance of the rule-view panel
- * @param {Number} childrenIndex
- *        The children index of the element to get
- * @param {Number} nodeIndex
- *        The child node index of the element to get
- * @return {DOMNode} The rule editor if any at this index
- */
-function getRuleViewRuleEditor(view, childrenIndex, nodeIndex) {
-  return nodeIndex !== undefined ?
-    view.element.children[childrenIndex].childNodes[nodeIndex]._ruleEditor :
-    view.element.children[childrenIndex]._ruleEditor;
 }
 
 /**
@@ -733,6 +704,7 @@ function* reloadPage(inspector, testActor) {
 
 /**
  * Create a new rule by clicking on the "add rule" button.
+ * This will leave the selector inplace-editor active.
  *
  * @param {InspectorPanel} inspector
  *        The instance of InspectorPanel currently loaded in the toolbox
@@ -746,6 +718,36 @@ function* addNewRule(inspector, view) {
 
   info("Waiting for rule view to change");
   yield view.once("ruleview-changed");
+}
+
+/**
+ * Create a new rule by clicking on the "add rule" button, dismiss the editor field and
+ * verify that the selector is correct.
+ *
+ * @param {InspectorPanel} inspector
+ *        The instance of InspectorPanel currently loaded in the toolbox
+ * @param {CssRuleView} view
+ *        The instance of the rule-view panel
+ * @param {String} expectedSelector
+ *        The value we expect the selector to have
+ * @param {Number} expectedIndex
+ *        The index we expect the rule to have in the rule-view
+ * @return a promise that resolves after the rule has been added
+ */
+function* addNewRuleAndDismissEditor(inspector, view, expectedSelector, expectedIndex) {
+  yield addNewRule(inspector, view);
+
+  info("Getting the new rule at index " + expectedIndex);
+  let ruleEditor = getRuleViewRuleEditor(view, expectedIndex);
+  let editor = ruleEditor.selectorText.ownerDocument.activeElement;
+  is(editor.value, expectedSelector,
+     "The editor for the new selector has the correct value: " + expectedSelector);
+
+  info("Pressing escape to leave the editor");
+  EventUtils.synthesizeKey("VK_ESCAPE", {});
+
+  is(ruleEditor.selectorText.textContent, expectedSelector,
+     "The new selector has the correct text: " + expectedSelector);
 }
 
 /**
@@ -767,4 +769,24 @@ function* sendKeysAndWaitForFocus(view, element, keys) {
     EventUtils.sendKey(key, view.styleWindow);
   }
   yield onFocus;
+}
+
+/**
+ * Open the style editor context menu and return all of it's items in a flat array
+ * @param {CssRuleView} view
+ *        The instance of the rule-view panel
+ * @return An array of MenuItems
+ */
+function openStyleContextMenuAndGetAllItems(view, target) {
+  let menu = view._contextmenu._openMenu({target: target});
+
+  // Flatten all menu items into a single array to make searching through it easier
+  let allItems = [].concat.apply([], menu.items.map(function addItem(item) {
+    if (item.submenu) {
+      return addItem(item.submenu.items);
+    }
+    return item;
+  }));
+
+  return allItems;
 }

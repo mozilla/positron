@@ -41,6 +41,39 @@ NS_NewHTMLVideoFrame(nsIPresShell* aPresShell, nsStyleContext* aContext)
 
 NS_IMPL_FRAMEARENA_HELPERS(nsVideoFrame)
 
+// A matrix to obtain a correct-rotated video frame.
+static Matrix
+ComputeRotationMatrix(gfxFloat aRotatedWidth,
+                      gfxFloat aRotatedHeight,
+                      VideoInfo::Rotation aDegrees)
+{
+  Matrix shiftVideoCenterToOrigin;
+  if (aDegrees == VideoInfo::Rotation::kDegree_90 ||
+      aDegrees == VideoInfo::Rotation::kDegree_270) {
+    shiftVideoCenterToOrigin = Matrix::Translation(-aRotatedHeight / 2.0,
+                                                   -aRotatedWidth / 2.0);
+  } else {
+    shiftVideoCenterToOrigin = Matrix::Translation(-aRotatedWidth / 2.0,
+                                                   -aRotatedHeight / 2.0);
+  }
+
+  Matrix rotation = Matrix::Rotation(gfx::Float(aDegrees / 180.0 * M_PI));
+  Matrix shiftLeftTopToOrigin = Matrix::Translation(aRotatedWidth / 2.0,
+                                                    aRotatedHeight / 2.0);
+  return shiftVideoCenterToOrigin * rotation * shiftLeftTopToOrigin;
+}
+
+static void
+SwapScaleWidthHeightForRotation(IntSize& aSize, VideoInfo::Rotation aDegrees)
+{
+  if (aDegrees == VideoInfo::Rotation::kDegree_90 ||
+      aDegrees == VideoInfo::Rotation::kDegree_270) {
+    int32_t tmpWidth = aSize.width;
+    aSize.width = aSize.height;
+    aSize.height = tmpWidth;
+  }
+}
+
 nsVideoFrame::nsVideoFrame(nsStyleContext* aContext)
   : nsContainerFrame(aContext)
 {
@@ -172,7 +205,7 @@ nsVideoFrame::BuildLayer(nsDisplayListBuilder* aBuilder,
   RefPtr<ImageContainer> container = element->GetImageContainer();
   if (!container)
     return nullptr;
-  
+
   // Retrieve the size of the decoded video frame, before being scaled
   // by pixel aspect ratio.
   mozilla::gfx::IntSize frameSize = container->GetCurrentSize();
@@ -200,8 +233,12 @@ nsVideoFrame::BuildLayer(nsDisplayListBuilder* aBuilder,
   if (destGFXRect.IsEmpty()) {
     return nullptr;
   }
+
+  VideoInfo::Rotation rotationDeg = element->RotationDegrees();
   IntSize scaleHint(static_cast<int32_t>(destGFXRect.Width()),
                     static_cast<int32_t>(destGFXRect.Height()));
+  // scaleHint is set regardless of rotation, so swap w/h if needed.
+  SwapScaleWidthHeightForRotation(scaleHint, rotationDeg);
   container->SetScaleHint(scaleHint);
 
   RefPtr<ImageLayer> layer = static_cast<ImageLayer*>
@@ -213,10 +250,16 @@ nsVideoFrame::BuildLayer(nsDisplayListBuilder* aBuilder,
   }
 
   layer->SetContainer(container);
-  layer->SetFilter(nsLayoutUtils::GetGraphicsFilterForFrame(this));
+  layer->SetSamplingFilter(nsLayoutUtils::GetSamplingFilterForFrame(this));
   // Set a transform on the layer to draw the video in the right place
   gfxPoint p = destGFXRect.TopLeft() + aContainerParameters.mOffset;
-  Matrix transform = Matrix::Translation(p.x, p.y);
+
+  Matrix preTransform = ComputeRotationMatrix(destGFXRect.Width(),
+                                              destGFXRect.Height(),
+                                              rotationDeg);
+
+  Matrix transform = preTransform * Matrix::Translation(p.x, p.y);
+
   layer->SetBaseTransform(gfx::Matrix4x4::From2D(transform));
   layer->SetScaleToSize(scaleHint, ScaleMode::STRETCH);
   RefPtr<Layer> result = layer.forget();
@@ -356,7 +399,7 @@ public:
     MOZ_COUNT_DTOR(nsDisplayVideo);
   }
 #endif
-  
+
   NS_DISPLAY_DECL_NAME("Video", TYPE_VIDEO)
 
   // It would be great if we could override GetOpaqueRegion to return nonempty here,
@@ -592,7 +635,11 @@ nsVideoFrame::UpdatePosterSource(bool aNotify)
   NS_ASSERTION(HasVideoElement(), "Only call this on <video> elements.");
   HTMLVideoElement* element = static_cast<HTMLVideoElement*>(GetContent());
 
-  if (element->HasAttr(kNameSpaceID_None, nsGkAtoms::poster)) {
+  if (element->HasAttr(kNameSpaceID_None, nsGkAtoms::poster) &&
+      !element->AttrValueIs(kNameSpaceID_None,
+                            nsGkAtoms::poster,
+                            nsGkAtoms::_empty,
+                            eIgnoreCase)) {
     nsAutoString posterStr;
     element->GetPoster(posterStr);
     mPosterImage->SetAttr(kNameSpaceID_None,
@@ -600,7 +647,7 @@ nsVideoFrame::UpdatePosterSource(bool aNotify)
                           posterStr,
                           aNotify);
   } else {
-    mPosterImage->UnsetAttr(kNameSpaceID_None, nsGkAtoms::poster, aNotify);
+    mPosterImage->UnsetAttr(kNameSpaceID_None, nsGkAtoms::src, aNotify);
   }
 }
 
@@ -622,15 +669,16 @@ nsVideoFrame::OnVisibilityChange(Visibility aOldVisibility,
                                  Visibility aNewVisibility,
                                  Maybe<OnNonvisible> aNonvisibleAction)
 {
-  nsCOMPtr<nsIImageLoadingContent> imageLoader = do_QueryInterface(mPosterImage);
-  if (!imageLoader) {
-    nsContainerFrame::OnVisibilityChange(aOldVisibility, aNewVisibility,
-                                         aNonvisibleAction);
-    return;
+  if (HasVideoElement()) {
+    nsCOMPtr<nsIDOMHTMLMediaElement> mediaDomElement = do_QueryInterface(mContent);
+    mediaDomElement->OnVisibilityChange(aOldVisibility, aNewVisibility);
   }
 
-  imageLoader->OnVisibilityChange(aOldVisibility, aNewVisibility,
-                                  aNonvisibleAction);
+  nsCOMPtr<nsIImageLoadingContent> imageLoader = do_QueryInterface(mPosterImage);
+  if (imageLoader) {
+    imageLoader->OnVisibilityChange(aOldVisibility, aNewVisibility,
+                                    aNonvisibleAction);
+  }
 
   nsContainerFrame::OnVisibilityChange(aOldVisibility, aNewVisibility,
                                        aNonvisibleAction);

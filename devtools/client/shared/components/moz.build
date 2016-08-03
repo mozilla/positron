@@ -6,6 +6,7 @@
 
 DIRS += [
     'reps',
+    'tabs',
     'tree'
 ]
 
@@ -14,6 +15,9 @@ DevToolsModules(
     'h-split-box.js',
     'notification-box.css',
     'notification-box.js',
+    'sidebar-toggle.css',
+    'sidebar-toggle.js',
+    'stack-trace.js',
     'tree.js',
 )
 

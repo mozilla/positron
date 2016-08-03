@@ -45,6 +45,16 @@
   max-height: 20rem;
 }
 
+/* Reset list styles. */
+.devtools-autocomplete-popup ul {
+  list-style: none;
+}
+
+.devtools-autocomplete-popup ul,
+.devtools-autocomplete-popup li {
+  margin: 0;
+}
+
 :root[platform="linux"] .devtools-autocomplete-popup {
   /* Root font size is bigger on Linux, adjust rem-based values. */
   max-height: 16rem;
@@ -55,50 +65,48 @@
   background-color: transparent;
   border-width: 0px !important;
   margin: 0;
-}
-
-.devtools-autocomplete-listbox > scrollbox {
   padding: 2px;
 }
 
-.inplace-editor-autocomplete-popup .devtools-autocomplete-listbox {
-  /* Inplace editor closes the autocomplete popup on blur, the autocomplete
-  popup should not steal the focus here.*/
-  -moz-user-focus: ignore;
-}
-
-.devtools-autocomplete-listbox > richlistitem,
-.devtools-autocomplete-listbox > richlistitem[selected] {
+.devtools-autocomplete-listbox .autocomplete-item {
   width: 100%;
   background-color: transparent;
   border-radius: 4px;
+  padding: 1px 0;
+  /* Force text-align even in RTL locales to ensure a correct display of the popup */
+  text-align: left;
 }
 
-.devtools-autocomplete-listbox.dark-theme > richlistitem[selected],
-.devtools-autocomplete-listbox.dark-theme > richlistitem:hover {
+.devtools-autocomplete-listbox .autocomplete-selected {
+  background-color: rgba(0,0,0,0.2);
+}
+
+.devtools-autocomplete-listbox.dark-theme .autocomplete-selected,
+.devtools-autocomplete-listbox.dark-theme .autocomplete-item:hover {
   background-color: rgba(0,0,0,0.5);
 }
 
-.devtools-autocomplete-listbox.dark-theme > richlistitem[selected] > .autocomplete-value,
-.devtools-autocomplete-listbox:focus.dark-theme > richlistitem[selected] > .initial-value {
+.devtools-autocomplete-listbox.dark-theme .autocomplete-selected > .autocomplete-value,
+.devtools-autocomplete-listbox:focus.dark-theme .autocomplete-selected > .initial-value {
   color: hsl(208,100%,60%);
 }
 
-.devtools-autocomplete-listbox.dark-theme > richlistitem[selected] > label {
+.devtools-autocomplete-listbox.dark-theme .autocomplete-selected > span {
   color: #eee;
 }
 
-.devtools-autocomplete-listbox.dark-theme > richlistitem > label {
+.devtools-autocomplete-listbox.dark-theme .autocomplete-item > span {
   color: #ccc;
 }
 
-.devtools-autocomplete-listbox > richlistitem > .initial-value,
-.devtools-autocomplete-listbox > richlistitem > .autocomplete-value {
+.devtools-autocomplete-listbox .autocomplete-item > .initial-value,
+.devtools-autocomplete-listbox .autocomplete-item > .autocomplete-value {
   margin: 0;
-  padding: 1px 0;
+  padding: 0;
+  cursor: default;
 }
 
-.devtools-autocomplete-listbox > richlistitem > .autocomplete-count {
+.devtools-autocomplete-listbox .autocomplete-item > .autocomplete-count {
   text-align: end;
 }
 
@@ -132,124 +140,23 @@
   background: var(--theme-body-background);
 }
 
-.devtools-autocomplete-listbox.firebug-theme > richlistitem[selected],
-.devtools-autocomplete-listbox.firebug-theme > richlistitem:hover,
-.devtools-autocomplete-listbox.light-theme > richlistitem[selected],
-.devtools-autocomplete-listbox.light-theme > richlistitem:hover {
+.devtools-autocomplete-listbox.firebug-theme .autocomplete-selected,
+.devtools-autocomplete-listbox.firebug-theme .autocomplete-item:hover,
+.devtools-autocomplete-listbox.light-theme .autocomplete-selected,
+.devtools-autocomplete-listbox.light-theme .autocomplete-item:hover {
   background-color: rgba(128,128,128,0.3);
 }
 
-.devtools-autocomplete-listbox.firebug-theme > richlistitem[selected] > .autocomplete-value,
-.devtools-autocomplete-listbox:focus.firebug-theme > richlistitem[selected] > .initial-value,
-.devtools-autocomplete-listbox.light-theme > richlistitem[selected] > .autocomplete-value,
-.devtools-autocomplete-listbox:focus.light-theme > richlistitem[selected] > .initial-value {
+.devtools-autocomplete-listbox.firebug-theme .autocomplete-selected > .autocomplete-value,
+.devtools-autocomplete-listbox:focus.firebug-theme .autocomplete-selected > .initial-value,
+.devtools-autocomplete-listbox.light-theme .autocomplete-selected > .autocomplete-value,
+.devtools-autocomplete-listbox:focus.light-theme .autocomplete-selected > .initial-value {
   color: #222;
 }
 
-.devtools-autocomplete-listbox.firebug-theme > richlistitem > label,
-.devtools-autocomplete-listbox.light-theme > richlistitem > label {
+.devtools-autocomplete-listbox.firebug-theme .autocomplete-item > span,
+.devtools-autocomplete-listbox.light-theme .autocomplete-item > span {
   color: #666;
-}
-
-/* Tooltip widget (see devtools/client/shared/widgets/Tooltip.js) */
-
-.devtools-tooltip .panel-arrowcontent {
-  padding: 4px;
-}
-
-.devtools-tooltip .panel-arrowcontainer {
-  /* Reseting the transition used when panels are shown */
-  transition: none;
-  /* Panels slide up/down/left/right when they appear using a transform.
-  Since we want to remove the transition, we don't need to transform anymore
-  plus it can interfeer by causing mouseleave events on the underlying nodes */
-  transform: none;
-}
-
-.devtools-tooltip[clamped-dimensions] {
-  min-height: 100px;
-  max-height: 400px;
-  min-width: 100px;
-  max-width: 400px;
-}
-.devtools-tooltip[clamped-dimensions-no-min-height] {
-  min-height: 0;
-  max-height: 400px;
-  min-width: 100px;
-  max-width: 400px;
-}
-.devtools-tooltip[clamped-dimensions-no-max-or-min-height] {
-  min-width: 400px;
-  max-width: 400px;
-}
-.devtools-tooltip[clamped-dimensions] .panel-arrowcontent,
-.devtools-tooltip[clamped-dimensions-no-min-height] .panel-arrowcontent,
-.devtools-tooltip[clamped-dimensions-no-max-or-min-height] .panel-arrowcontent {
-  overflow: hidden;
-}
-.devtools-tooltip[wide] {
-  max-width: 600px;
-}
-
-/* Tooltip: Simple Text */
-
-.devtools-tooltip-simple-text {
-  max-width: 400px;
-  margin: 0 -4px; /* Compensate for the .panel-arrowcontent padding. */
-  padding: 8px 12px;
-  white-space: pre-wrap;
-}
-
-.devtools-tooltip-simple-text:first-child {
-  margin-top: -4px;
-}
-
-.devtools-tooltip-simple-text:last-child {
-  margin-bottom: -4px;
-}
-
-/* Tooltip: Alert Icon */
-
-.devtools-tooltip-alert-icon {
-  width: 32px;
-  height: 32px;
-  margin: 6px;
-  margin-inline-end: 20px;
-}
-
-.devtools-tooltip-alert-icon {
-  list-style-image: url("chrome://global/skin/icons/warning-32.png");
-}
-
-/* Tooltip: Variables View */
-
-.devtools-tooltip-variables-view-box {
-  margin: -4px; /* Compensate for the .panel-arrowcontent padding. */
-}
-
-.devtools-tooltip-variables-view-box .variable-or-property > .title {
-  padding-inline-end: 6px;
-}
-
-/* Tooltip: Tiles */
-
-.devtools-tooltip-tiles {
-  background-color: #eee;
-  background-image: linear-gradient(45deg, #ccc 25%, transparent 25%, transparent 75%, #ccc 75%, #ccc),
-    linear-gradient(45deg, #ccc 25%, transparent 25%, transparent 75%, #ccc 75%, #ccc);
-  background-size: 20px 20px;
-  background-position: 0 0, 10px 10px;
-}
-
-.devtools-tooltip-iframe {
-  border: none;
-  background: transparent;
-}
-
-.devtools-htmltooltip-container {
-  display: none;
-  position: fixed;
-  z-index: 9999;
 }
 
 /* links to source code, like displaying `myfile.js:45` */

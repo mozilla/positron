@@ -89,7 +89,7 @@ const TEST_DATA = [
     },
     check: function* (inspector) {
       let container = yield getContainerForSelector("#node1", inspector);
-      ok(container.singleTextChild, "Has single text child.");
+      ok(container.inlineTextChild, "Has single text child.");
     }
   },
   {
@@ -99,9 +99,9 @@ const TEST_DATA = [
     },
     check: function* (inspector) {
       let container = yield getContainerForSelector("#node1", inspector);
-      ok(container.singleTextChild, "Has single text child.");
-      ok(!container.canExpand, "Can't expand container with singleTextChild.");
-      ok(!container.singleTextChild.canExpand, "Can't expand singleTextChild.");
+      ok(container.inlineTextChild, "Has single text child.");
+      ok(!container.canExpand, "Can't expand container with inlineTextChild.");
+      ok(!container.inlineTextChild.canExpand, "Can't expand inlineTextChild.");
       is(container.editor.elt.querySelector(".text").textContent.trim(),
          "newtext", "Single text child editor updated.");
     }
@@ -117,7 +117,7 @@ const TEST_DATA = [
     },
     check: function* (inspector) {
       let container = yield getContainerForSelector("#node1", inspector);
-      ok(!container.singleTextChild, "Does not have single text child.");
+      ok(!container.inlineTextChild, "Does not have single text child.");
       ok(container.canExpand, "Can expand container with child nodes.");
       ok(container.editor.elt.querySelector(".text") == null,
         "Single text child editor removed.");
@@ -130,9 +130,9 @@ const TEST_DATA = [
     },
     check: function* (inspector) {
       let container = yield getContainerForSelector("#node1", inspector);
-      ok(container.singleTextChild, "Has single text child.");
-      ok(!container.canExpand, "Can't expand container with singleTextChild.");
-      ok(!container.singleTextChild.canExpand, "Can't expand singleTextChild.");
+      ok(container.inlineTextChild, "Has single text child.");
+      ok(!container.canExpand, "Can't expand container with inlineTextChild.");
+      ok(!container.inlineTextChild.canExpand, "Can't expand inlineTextChild.");
       ok(container.editor.elt.querySelector(".text").textContent.trim(),
          "newtext", "Single text child editor updated.");
     },
@@ -144,7 +144,7 @@ const TEST_DATA = [
     },
     check: function* (inspector) {
       let container = yield getContainerForSelector("#node1", inspector);
-      ok(!container.singleTextChild, "Does not have single text child.");
+      ok(!container.inlineTextChild, "Does not have single text child.");
       ok(!container.canExpand, "Can't expand empty container.");
       ok(container.editor.elt.querySelector(".text") == null,
         "Single text child editor removed.");
@@ -157,9 +157,9 @@ const TEST_DATA = [
     },
     check: function* (inspector) {
       let container = yield getContainerForSelector("#node1", inspector);
-      ok(container.singleTextChild, "Has single text child.");
-      ok(!container.canExpand, "Can't expand container with singleTextChild.");
-      ok(!container.singleTextChild.canExpand, "Can't expand singleTextChild.");
+      ok(container.inlineTextChild, "Has single text child.");
+      ok(!container.canExpand, "Can't expand container with inlineTextChild.");
+      ok(!container.inlineTextChild.canExpand, "Can't expand inlineTextChild.");
       ok(container.editor.elt.querySelector(".text").textContent.trim(),
          "newtext", "Single text child editor updated.");
     },
@@ -281,7 +281,7 @@ add_task(function* () {
 
     // If a test expects more than one mutation it may come through in a single
     // event or possibly in multiples.
-    let def = promise.defer();
+    let def = defer();
     let seenMutations = 0;
     inspector.on("markupmutation", function onmutation(e, mutations) {
       seenMutations += mutations.length;

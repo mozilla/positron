@@ -48,9 +48,11 @@ static inline bool FrameHasBorderOrBackground(nsIFrame* f) {
 class nsDisplayTableItem : public nsDisplayItem
 {
 public:
-  nsDisplayTableItem(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame) :
+  nsDisplayTableItem(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame,
+                     bool aDrawsBackground = true) :
       nsDisplayItem(aBuilder, aFrame),
-      mPartHasFixedBackground(false) {}
+      mPartHasFixedBackground(false),
+      mDrawsBackground(aDrawsBackground) {}
 
   // With collapsed borders, parts of the collapsed border can extend outside
   // the table part frames, so allow this display element to blow out to our
@@ -67,6 +69,7 @@ public:
 
 private:
   bool mPartHasFixedBackground;
+  bool mDrawsBackground;
 };
 
 class nsAutoPushCurrentTableItem
@@ -118,7 +121,7 @@ enum nsTableColType {
 
 /**
   * nsTableFrame maps the inner portion of a table (everything except captions.)
-  * Used as a pseudo-frame within nsTableOuterFrame, it may also be used
+  * Used as a pseudo-frame within nsTableWrapperFrame, it may also be used
   * stand-alone as the top-level frame.
   *
   * The principal child list contains row group frames. There is also an
@@ -134,11 +137,11 @@ public:
   NS_DECL_QUERYFRAME_TARGET(nsTableFrame)
   NS_DECL_FRAMEARENA_HELPERS
 
-  NS_DECLARE_FRAME_PROPERTY_DELETABLE(PositionedTablePartArray,
-                                      nsTArray<nsIFrame*>)
+  typedef nsTArray<nsIFrame*> FrameTArray;
+  NS_DECLARE_FRAME_PROPERTY_DELETABLE(PositionedTablePartArray, FrameTArray)
 
-  /** nsTableOuterFrame has intimate knowledge of the inner table frame */
-  friend class nsTableOuterFrame;
+  /** nsTableWrapperFrame has intimate knowledge of the inner table frame */
+  friend class nsTableWrapperFrame;
 
   /** instantiate a new instance of nsTableRowFrame.
     * @param aPresShell the pres shell for this frame

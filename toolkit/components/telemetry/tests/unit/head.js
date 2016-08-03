@@ -77,7 +77,10 @@ const PingServer = {
 
   promiseNextRequest: function() {
     const deferred = this._defers[this._currentDeferred++];
-    return deferred.promise;
+    // Send the ping to the consumer on the next tick, so that the completion gets
+    // signaled to Telemetry.
+    return new Promise(r => Services.tm.currentThread.dispatch(() => r(deferred.promise),
+                                                               Ci.nsIThread.DISPATCH_NORMAL));
   },
 
   promiseNextPing: function() {
@@ -279,6 +282,13 @@ function getHistogram(histogramId) {
 // Short-hand for retrieving the snapshot of the Histogram with that id.
 function getSnapshot(histogramId) {
   return Telemetry.getHistogramById(histogramId).snapshot();
+}
+
+// Helper for setting an empty list of Environment preferences to watch.
+function setEmptyPrefWatchlist() {
+  let TelemetryEnvironment =
+    Cu.import("resource://gre/modules/TelemetryEnvironment.jsm").TelemetryEnvironment;
+  TelemetryEnvironment.testWatchPreferences(new Map());
 }
 
 if (runningInParent) {

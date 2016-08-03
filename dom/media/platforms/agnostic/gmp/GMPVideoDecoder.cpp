@@ -6,7 +6,7 @@
 
 #include "GMPVideoDecoder.h"
 #include "GMPVideoHost.h"
-#include "mozilla/Endian.h"
+#include "mozilla/EndianUtils.h"
 #include "prsystem.h"
 #include "MediaData.h"
 #include "GMPDecoderModule.h"
@@ -52,7 +52,7 @@ VideoCallbackAdapter::Decoded(GMPVideoi420Frame* aDecodedFrame)
   if (v) {
     mCallback->Output(v);
   } else {
-    mCallback->Error();
+    mCallback->Error(MediaDataDecoderError::FATAL_ERROR);
   }
 }
 
@@ -93,7 +93,7 @@ void
 VideoCallbackAdapter::Error(GMPErr aErr)
 {
   MOZ_ASSERT(IsOnGMPThread());
-  mCallback->Error();
+  mCallback->Error(MediaDataDecoderError::FATAL_ERROR);
 }
 
 void
@@ -101,7 +101,55 @@ VideoCallbackAdapter::Terminated()
 {
   // Note that this *may* be called from the proxy thread also.
   NS_WARNING("H.264 GMP decoder terminated.");
-  mCallback->Error();
+  mCallback->Error(MediaDataDecoderError::FATAL_ERROR);
+}
+
+GMPVideoDecoderParams::GMPVideoDecoderParams(const CreateDecoderParams& aParams)
+  : mConfig(aParams.VideoConfig())
+  , mTaskQueue(aParams.mTaskQueue)
+  , mCallback(nullptr)
+  , mAdapter(nullptr)
+  , mImageContainer(aParams.mImageContainer)
+  , mLayersBackend(aParams.mLayersBackend)
+  , mCrashHelper(aParams.mCrashHelper)
+{}
+
+GMPVideoDecoderParams&
+GMPVideoDecoderParams::WithCallback(MediaDataDecoderProxy* aWrapper)
+{
+  MOZ_ASSERT(aWrapper);
+  MOZ_ASSERT(!mCallback); // Should only be called once per instance.
+  mCallback = aWrapper->Callback();
+  mAdapter = nullptr;
+  return *this;
+}
+
+GMPVideoDecoderParams&
+GMPVideoDecoderParams::WithAdapter(VideoCallbackAdapter* aAdapter)
+{
+  MOZ_ASSERT(aAdapter);
+  MOZ_ASSERT(!mAdapter); // Should only be called once per instance.
+  mCallback = aAdapter->Callback();
+  mAdapter = aAdapter;
+  return *this;
+}
+
+GMPVideoDecoder::GMPVideoDecoder(const GMPVideoDecoderParams& aParams)
+  : mConfig(aParams.mConfig)
+  , mCallback(aParams.mCallback)
+  , mGMP(nullptr)
+  , mHost(nullptr)
+  , mAdapter(aParams.mAdapter)
+  , mConvertNALUnitLengths(false)
+  , mCrashHelper(aParams.mCrashHelper)
+{
+  MOZ_ASSERT(!mAdapter || mCallback == mAdapter->Callback());
+  if (!mAdapter) {
+    mAdapter = new VideoCallbackAdapter(mCallback,
+                                        VideoInfo(mConfig.mDisplay.width,
+                                                  mConfig.mDisplay.height),
+                                        aParams.mImageContainer);
+  }
 }
 
 void
@@ -127,14 +175,14 @@ GMPVideoDecoder::CreateFrame(MediaRawData* aSample)
   GMPVideoFrame* ftmp = nullptr;
   GMPErr err = mHost->CreateFrame(kGMPEncodedVideoFrame, &ftmp);
   if (GMP_FAILED(err)) {
-    mCallback->Error();
+    mCallback->Error(MediaDataDecoderError::FATAL_ERROR);
     return nullptr;
   }
 
   GMPUniquePtr<GMPVideoEncodedFrame> frame(static_cast<GMPVideoEncodedFrame*>(ftmp));
   err = frame->CreateEmptyFrame(aSample->Size());
   if (GMP_FAILED(err)) {
-    mCallback->Error();
+    mCallback->Error(MediaDataDecoderError::FATAL_ERROR);
     return nullptr;
   }
 
@@ -235,7 +283,7 @@ GMPVideoDecoder::Init()
   nsTArray<nsCString> tags;
   InitTags(tags);
   UniquePtr<GetGMPVideoDecoderCallback> callback(new GMPInitDoneCallback(this));
-  if (NS_FAILED(mMPS->GetGMPVideoDecoder(&tags, GetNodeId(), Move(callback)))) {
+  if (NS_FAILED(mMPS->GetGMPVideoDecoder(mCrashHelper, &tags, GetNodeId(), Move(callback)))) {
     mInitPromise.Reject(MediaDataDecoder::DecoderFailureReason::INIT_ERROR, __func__);
   }
 
@@ -249,7 +297,7 @@ GMPVideoDecoder::Input(MediaRawData* aSample)
 
   RefPtr<MediaRawData> sample(aSample);
   if (!mGMP) {
-    mCallback->Error();
+    mCallback->Error(MediaDataDecoderError::FATAL_ERROR);
     return NS_ERROR_FAILURE;
   }
 
@@ -257,13 +305,13 @@ GMPVideoDecoder::Input(MediaRawData* aSample)
 
   GMPUniquePtr<GMPVideoEncodedFrame> frame = CreateFrame(sample);
   if (!frame) {
-    mCallback->Error();
+    mCallback->Error(MediaDataDecoderError::FATAL_ERROR);
     return NS_ERROR_FAILURE;
   }
   nsTArray<uint8_t> info; // No codec specific per-frame info to pass.
   nsresult rv = mGMP->Decode(Move(frame), false, info, 0);
   if (NS_FAILED(rv)) {
-    mCallback->Error();
+    mCallback->Error(MediaDataDecoderError::DECODE_ERROR);
     return rv;
   }
 

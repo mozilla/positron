@@ -6,24 +6,15 @@
 
 "use strict";
 
-const {Cc, Ci, Cu} = require("chrome");
+const {Ci} = require("chrome");
 const promise = require("promise");
-const {CssLogic} = require("devtools/shared/inspector/css-logic");
-const {ELEMENT_STYLE} = require("devtools/server/actors/styles");
+const CssLogic = require("devtools/shared/inspector/css-logic");
+const {ELEMENT_STYLE} = require("devtools/shared/specs/styles");
 const {TextProperty} =
       require("devtools/client/inspector/rules/models/text-property");
 const {promiseWarn} = require("devtools/client/inspector/shared/utils");
-const {parseDeclarations} = require("devtools/client/shared/css-parsing-utils");
-
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
-
-XPCOMUtils.defineLazyGetter(this, "osString", function () {
-  return Cc["@mozilla.org/xre/app-info;1"].getService(Ci.nsIXULRuntime).OS;
-});
-
-XPCOMUtils.defineLazyGetter(this, "domUtils", function () {
-  return Cc["@mozilla.org/inspector/dom-utils;1"].getService(Ci.inIDOMUtils);
-});
+const {parseDeclarations} = require("devtools/shared/css-parsing-utils");
+const Services = require("Services");
 
 /**
  * Rule is responsible for the following:
@@ -58,6 +49,8 @@ function Rule(elementStyle, options) {
   if (this.domRule && this.domRule.mediaText) {
     this.mediaText = this.domRule.mediaText;
   }
+
+  this.cssProperties = this.elementStyle.ruleView.cssProperties;
 
   // Populate the text properties with the style's current authoredText
   // value, and add in any disabled properties from the store.
@@ -248,7 +241,8 @@ Rule.prototype = {
       // Note that even though StyleRuleActors normally provide parsed
       // declarations already, _applyPropertiesNoAuthored is only used when
       // connected to older backend that do not provide them. So parse here.
-      for (let cssProp of parseDeclarations(this.style.authoredText)) {
+      for (let cssProp of parseDeclarations(this.cssProperties.isKnown,
+                                            this.style.authoredText)) {
         cssProps[cssProp.name] = cssProp;
       }
 
@@ -312,7 +306,8 @@ Rule.prototype = {
     // until it settles before applying the next modification.
     let resultPromise =
         promise.resolve(this._applyingModifications).then(() => {
-          let modifications = this.style.startModifyingProperties();
+          let modifications = this.style.startModifyingProperties(
+            this.cssProperties);
           modifier(modifications);
           if (this.style.canSetRuleText) {
             return this._applyPropertiesAuthored(modifications);
@@ -388,7 +383,7 @@ Rule.prototype = {
    *        The property's priority (either "important" or an empty string).
    */
   previewPropertyValue: function (property, value, priority) {
-    let modifications = this.style.startModifyingProperties();
+    let modifications = this.style.startModifyingProperties(this.cssProperties);
     modifications.setProperty(this.textProps.indexOf(property),
                               property.name, value, priority);
     modifications.apply().then(() => {
@@ -443,8 +438,9 @@ Rule.prototype = {
 
     // Starting with FF49, StyleRuleActors provide parsed declarations.
     let props = this.style.declarations;
-    if (!props) {
-      props = parseDeclarations(this.style.authoredText, true);
+    if (!props.length) {
+      props = parseDeclarations(this.cssProperties.isKnown,
+                                this.style.authoredText, true);
     }
 
     for (let prop of props) {
@@ -459,7 +455,7 @@ Rule.prototype = {
       // However, we must keep all properties in order for rule
       // rewriting to work properly.  So, compute the "invisible"
       // property here.
-      let invisible = this.inherited && !domUtils.isInheritedProperty(name);
+      let invisible = this.inherited && !this.cssProperties.isInherited(name);
       let value = store.userProperties.getProperty(this.style, name,
                                                    prop.value);
       let textProp = new TextProperty(this, name, value, prop.priority,
@@ -660,7 +656,7 @@ Rule.prototype = {
   stringifyRule: function () {
     let selectorText = this.selectorText;
     let cssText = "";
-    let terminator = osString === "WINNT" ? "\r\n" : "\n";
+    let terminator = Services.appinfo.OS === "WINNT" ? "\r\n" : "\n";
 
     for (let textProp of this.textProps) {
       if (!textProp.invisible) {

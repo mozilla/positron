@@ -1,3 +1,7 @@
+import os
+
+ABS_WORK_DIR = os.path.join(os.getcwd(), "build")
+
 config = {
     "log_name": "aurora_to_beta",
     "version_files": [
@@ -11,7 +15,6 @@ config = {
         "ac_add_options --with-branding=mobile/android/branding/aurora",
         "ac_add_options --with-branding=mobile/android/branding/beta")
         for d in ["mobile/android/config/mozconfigs/android-api-15/",
-                  "mobile/android/config/mozconfigs/android-api-9-10-constrained/",
                   "mobile/android/config/mozconfigs/android-x86/"]
         for f in ["debug", "nightly", "l10n-nightly"]
     ] + [
@@ -57,11 +60,11 @@ config = {
          "# Enable enforcing that add-ons are signed by the trusted root")
     ],
 
-    # Disallow sharing, since we want pristine .hg directories.
-    # "vcs_share_base": None,
+    "use_vcs_unique_share": True,
+    "vcs_share_base": os.path.join(ABS_WORK_DIR, 'hg-shared'),
     # "hg_share_base": None,
     "tools_repo_url": "https://hg.mozilla.org/build/tools",
-    "tools_repo_revision": "default",
+    "tools_repo_branch": "default",
     "from_repo_url": "ssh://hg.mozilla.org/releases/mozilla-aurora",
     "to_repo_url": "ssh://hg.mozilla.org/releases/mozilla-beta",
 

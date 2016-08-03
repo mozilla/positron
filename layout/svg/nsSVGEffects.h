@@ -271,6 +271,14 @@ protected:
   virtual void DoUpdate() = 0;
 
 private:
+
+  void DetachReferences()
+  {
+    for (uint32_t i = 0; i < mReferences.Length(); i++) {
+      mReferences[i]->DetachFromChainObserver();
+    }
+  }
+
   nsTArray<RefPtr<nsSVGFilterReference>> mReferences;
 };
 
@@ -420,8 +428,8 @@ public:
   typedef nsInterfaceHashtable<nsURIHashKey, nsIMutationObserver>
     URIObserverHashtable;
 
-  using ObserverPropertyDescriptor =
-    const mozilla::FramePropertyDescriptor<nsISupports>*;
+  using PaintingPropertyDescriptor =
+    const mozilla::FramePropertyDescriptor<nsSVGPaintingProperty>*;
   using URIObserverHashtablePropertyDescriptor =
     const mozilla::FramePropertyDescriptor<URIObserverHashtable>*;
 
@@ -438,13 +446,16 @@ public:
   NS_DECLARE_FRAME_PROPERTY_WITH_DTOR(FilterProperty, nsSVGFilterProperty,
                                       DestroyFilterProperty)
   NS_DECLARE_FRAME_PROPERTY_RELEASABLE(MaskProperty, nsSVGMaskProperty)
-  NS_DECLARE_FRAME_PROPERTY_RELEASABLE(ClipPathProperty, nsISupports)
-  NS_DECLARE_FRAME_PROPERTY_RELEASABLE(MarkerBeginProperty, nsISupports)
-  NS_DECLARE_FRAME_PROPERTY_RELEASABLE(MarkerMiddleProperty, nsISupports)
-  NS_DECLARE_FRAME_PROPERTY_RELEASABLE(MarkerEndProperty, nsISupports)
-  NS_DECLARE_FRAME_PROPERTY_RELEASABLE(FillProperty, nsISupports)
-  NS_DECLARE_FRAME_PROPERTY_RELEASABLE(StrokeProperty, nsISupports)
-  NS_DECLARE_FRAME_PROPERTY_RELEASABLE(HrefProperty, nsISupports)
+  NS_DECLARE_FRAME_PROPERTY_RELEASABLE(ClipPathProperty, nsSVGPaintingProperty)
+  NS_DECLARE_FRAME_PROPERTY_RELEASABLE(MarkerBeginProperty, nsSVGMarkerProperty)
+  NS_DECLARE_FRAME_PROPERTY_RELEASABLE(MarkerMiddleProperty, nsSVGMarkerProperty)
+  NS_DECLARE_FRAME_PROPERTY_RELEASABLE(MarkerEndProperty, nsSVGMarkerProperty)
+  NS_DECLARE_FRAME_PROPERTY_RELEASABLE(FillProperty, nsSVGPaintingProperty)
+  NS_DECLARE_FRAME_PROPERTY_RELEASABLE(StrokeProperty, nsSVGPaintingProperty)
+  NS_DECLARE_FRAME_PROPERTY_RELEASABLE(HrefAsTextPathProperty,
+                                       nsSVGTextPathProperty)
+  NS_DECLARE_FRAME_PROPERTY_RELEASABLE(HrefAsPaintingProperty,
+                                       nsSVGPaintingProperty)
   NS_DECLARE_FRAME_PROPERTY_DELETABLE(BackgroundImageProperty,
                                       URIObserverHashtable)
 
@@ -453,7 +464,7 @@ public:
    */
   static nsSVGPaintServerFrame *GetPaintServer(nsIFrame *aTargetFrame,
                                                const nsStyleSVGPaint *aPaint,
-                                               ObserverPropertyDescriptor aProperty);
+                                               PaintingPropertyDescriptor aProperty);
 
   struct EffectProperties {
     nsSVGFilterProperty*   mFilter;
@@ -561,19 +572,19 @@ public:
    */
   static nsSVGMarkerProperty *
   GetMarkerProperty(nsIURI *aURI, nsIFrame *aFrame,
-                    ObserverPropertyDescriptor aProperty);
+    const mozilla::FramePropertyDescriptor<nsSVGMarkerProperty>* aProperty);
   /**
    * Get an nsSVGTextPathProperty for the frame, creating a fresh one if necessary
    */
   static nsSVGTextPathProperty *
   GetTextPathProperty(nsIURI *aURI, nsIFrame *aFrame,
-                      ObserverPropertyDescriptor aProperty);
+    const mozilla::FramePropertyDescriptor<nsSVGTextPathProperty>* aProperty);
   /**
    * Get an nsSVGPaintingProperty for the frame, creating a fresh one if necessary
    */
   static nsSVGPaintingProperty *
   GetPaintingProperty(nsIURI *aURI, nsIFrame *aFrame,
-                      ObserverPropertyDescriptor aProperty);
+      const mozilla::FramePropertyDescriptor<nsSVGPaintingProperty>* aProperty);
   /**
    * Get an nsSVGPaintingProperty for the frame for that URI, creating a fresh
    * one if necessary

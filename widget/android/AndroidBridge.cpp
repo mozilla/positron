@@ -52,6 +52,7 @@
 #include "mozilla/UniquePtr.h"
 #include "mozilla/dom/ContentChild.h"
 #include "nsIObserverService.h"
+#include "MediaPrefs.h"
 
 using namespace mozilla;
 using namespace mozilla::gfx;
@@ -169,6 +170,7 @@ AndroidBridge::ConstructBridge()
     MOZ_ASSERT(!sBridge);
     sBridge = new AndroidBridge();
 
+    MediaPrefs::GetSingleton();
 }
 
 void
@@ -508,6 +510,22 @@ AndroidBridge::GetClipboardText(nsAString& aText)
 }
 
 void
+AndroidBridge::ShowPersistentAlertNotification(const nsAString& aPersistentData,
+                                               const nsAString& aImageUrl,
+                                               const nsAString& aAlertTitle,
+                                               const nsAString& aAlertText,
+                                               const nsAString& aAlertCookie,
+                                               const nsAString& aAlertName,
+                                               nsIPrincipal* aPrincipal)
+{
+    nsAutoString host;
+    nsAlertsUtils::GetSourceHostPort(aPrincipal, host);
+
+    GeckoAppShell::ShowPersistentAlertNotificationWrapper
+        (aPersistentData, aImageUrl, aAlertTitle, aAlertText, aAlertCookie, aAlertName, host);
+}
+
+void
 AndroidBridge::ShowAlertNotification(const nsAString& aImageUrl,
                                      const nsAString& aAlertTitle,
                                      const nsAString& aAlertText,
@@ -769,15 +787,13 @@ AndroidBridge::OpenGraphicsLibraries()
             ANativeWindow_fromSurface = (void* (*)(JNIEnv*, jobject))dlsym(handle, "ANativeWindow_fromSurface");
             ANativeWindow_release = (void (*)(void*))dlsym(handle, "ANativeWindow_release");
             ANativeWindow_setBuffersGeometry = (int (*)(void*, int, int, int)) dlsym(handle, "ANativeWindow_setBuffersGeometry");
-            ANativeWindow_lock = (int (*)(void*, void*, void*)) dlsym(handle, "ANativeWindow_lock");
-            ANativeWindow_unlockAndPost = (int (*)(void*))dlsym(handle, "ANativeWindow_unlockAndPost");
             ANativeWindow_getWidth = (int (*)(void*))dlsym(handle, "ANativeWindow_getWidth");
             ANativeWindow_getHeight = (int (*)(void*))dlsym(handle, "ANativeWindow_getHeight");
 
             // This is only available in Honeycomb and ICS. It was removed in Jelly Bean
             ANativeWindow_fromSurfaceTexture = (void* (*)(JNIEnv*, jobject))dlsym(handle, "ANativeWindow_fromSurfaceTexture");
 
-            mHasNativeWindowAccess = ANativeWindow_fromSurface && ANativeWindow_release && ANativeWindow_lock && ANativeWindow_unlockAndPost;
+            mHasNativeWindowAccess = ANativeWindow_fromSurface && ANativeWindow_release;
 
             ALOG_BRIDGE("Successfully opened libandroid.so, have native window access? %d", mHasNativeWindowAccess);
         }
@@ -1369,78 +1385,6 @@ AndroidBridge::ReleaseNativeWindowForSurfaceTexture(void *window)
     // FIXME: we don't ref the pointer we get, so nothing to do currently. We should ref it.
 }
 
-bool
-AndroidBridge::LockWindow(void *window, unsigned char **bits, int *width, int *height, int *format, int *stride)
-{
-    /* Copied from native_window.h in Android NDK (platform-9) */
-    typedef struct ANativeWindow_Buffer {
-        // The number of pixels that are show horizontally.
-        int32_t width;
-
-        // The number of pixels that are shown vertically.
-        int32_t height;
-
-        // The number of *pixels* that a line in the buffer takes in
-        // memory.  This may be >= width.
-        int32_t stride;
-
-        // The format of the buffer.  One of WINDOW_FORMAT_*
-        int32_t format;
-
-        // The actual bits.
-        void* bits;
-
-        // Do not touch.
-        uint32_t reserved[6];
-    } ANativeWindow_Buffer;
-
-    // Very similar to the above, but the 'usage' field is included. We use this
-    // in the fallback case when NDK support is not available
-    struct SurfaceInfo {
-        uint32_t    w;
-        uint32_t    h;
-        uint32_t    s;
-        uint32_t    usage;
-        uint32_t    format;
-        unsigned char* bits;
-        uint32_t    reserved[2];
-    };
-
-    int err;
-    *bits = nullptr;
-    *width = *height = *format = 0;
-
-    if (mHasNativeWindowAccess) {
-        ANativeWindow_Buffer buffer;
-
-        if ((err = ANativeWindow_lock(window, (void*)&buffer, nullptr)) != 0) {
-            ALOG_BRIDGE("ANativeWindow_lock failed! (error %d)", err);
-            return false;
-        }
-
-        *bits = (unsigned char*)buffer.bits;
-        *width = buffer.width;
-        *height = buffer.height;
-        *format = buffer.format;
-        *stride = buffer.stride;
-    } else if (mHasNativeWindowFallback) {
-        SurfaceInfo info;
-
-        if ((err = Surface_lock(window, &info, nullptr, true)) != 0) {
-            ALOG_BRIDGE("Surface_lock failed! (error %d)", err);
-            return false;
-        }
-
-        *bits = info.bits;
-        *width = info.w;
-        *height = info.h;
-        *format = info.format;
-        *stride = info.s;
-    } else return false;
-
-    return true;
-}
-
 jobject
 AndroidBridge::GetGlobalContextRef() {
     if (sGlobalContext) {
@@ -1475,25 +1419,6 @@ AndroidBridge::GetGlobalContextRef() {
     sGlobalContext = env->NewGlobalRef(appContext);
     MOZ_ASSERT(sGlobalContext);
     return sGlobalContext;
-}
-
-bool
-AndroidBridge::UnlockWindow(void* window)
-{
-    int err;
-
-    if (!HasNativeWindowAccess())
-        return false;
-
-    if (mHasNativeWindowAccess && (err = ANativeWindow_unlockAndPost(window)) != 0) {
-        ALOG_BRIDGE("ANativeWindow_unlockAndPost failed! (error %d)", err);
-        return false;
-    } else if (mHasNativeWindowFallback && (err = Surface_unlockAndPost(window)) != 0) {
-        ALOG_BRIDGE("Surface_unlockAndPost failed! (error %d)", err);
-        return false;
-    }
-
-    return true;
 }
 
 void
@@ -1646,15 +1571,43 @@ nsAndroidBridge::Observe(nsISupports* aSubject, const char* aTopic,
     RemoveObservers();
   } else if (!strcmp(aTopic, "audio-playback")) {
     ALOG_BRIDGE("nsAndroidBridge::Observe, get audio-playback event.");
+
+    nsCOMPtr<nsPIDOMWindowOuter> window = do_QueryInterface(aSubject);
+    MOZ_ASSERT(window);
+
     nsAutoString activeStr(aData);
-    if (activeStr.EqualsLiteral("active")) {
+    if (activeStr.EqualsLiteral("inactive-nonaudible")) {
+      // This state means the audio becomes silent, but it's still playing, so
+      // we don't need to notify the AudioFocusAgent.
+      return NS_OK;
+    }
+
+    bool isPlaying = activeStr.EqualsLiteral("active");
+
+    UpdateAudioPlayingWindows(window, isPlaying);
+  }
+  return NS_OK;
+}
+
+void
+nsAndroidBridge::UpdateAudioPlayingWindows(nsPIDOMWindowOuter* aWindow,
+                                           bool aPlaying)
+{
+  // Request audio focus for the first audio playing window and abandon focus
+  // for the last audio playing window.
+  if (aPlaying && !mAudioPlayingWindows.Contains(aWindow)) {
+    mAudioPlayingWindows.AppendElement(aWindow);
+    if (mAudioPlayingWindows.Length() == 1) {
+      ALOG_BRIDGE("nsAndroidBridge, request audio focus.");
       AudioFocusAgent::NotifyStartedPlaying();
-    } else {
+    }
+  } else if (!aPlaying && mAudioPlayingWindows.Contains(aWindow)) {
+    mAudioPlayingWindows.RemoveElement(aWindow);
+    if (mAudioPlayingWindows.Length() == 0) {
+      ALOG_BRIDGE("nsAndroidBridge, abandon audio focus.");
       AudioFocusAgent::NotifyStoppedPlaying();
     }
   }
-
-  return NS_OK;
 }
 
 void
@@ -1875,7 +1828,7 @@ AndroidBridge::CaptureZoomedView(mozIDOMWindowProxy *window, nsIntRect zoomedVie
         ALOG_BRIDGE("Error creating DrawTarget");
         return NS_ERROR_FAILURE;
     }
-    RefPtr<gfxContext> context = gfxContext::ForDrawTarget(dt);
+    RefPtr<gfxContext> context = gfxContext::CreateOrNull(dt);
     MOZ_ASSERT(context); // already checked the draw target above
     context->SetMatrix(context->CurrentMatrix().Scale(zoomFactor, zoomFactor));
 
@@ -1981,7 +1934,7 @@ nsresult AndroidBridge::CaptureThumbnail(mozIDOMWindowProxy *window, int32_t buf
         ALOG_BRIDGE("Error creating DrawTarget");
         return NS_ERROR_FAILURE;
     }
-    RefPtr<gfxContext> context = gfxContext::ForDrawTarget(dt);
+    RefPtr<gfxContext> context = gfxContext::CreateOrNull(dt);
     MOZ_ASSERT(context); // checked the draw target above
 
     context->SetMatrix(

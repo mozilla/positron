@@ -458,9 +458,13 @@ CodeGeneratorShared::encodeAllocation(LSnapshot* snapshot, MDefinition* mir,
         break;
       }
       case MIRType::Float32:
-      case MIRType::Bool32x4:
+      case MIRType::Int8x16:
+      case MIRType::Int16x8:
       case MIRType::Int32x4:
       case MIRType::Float32x4:
+      case MIRType::Bool8x16:
+      case MIRType::Bool16x8:
+      case MIRType::Bool32x4:
       {
         LAllocation* payload = snapshot->payloadOfSlot(*allocIndex);
         if (payload->isConstant()) {
@@ -481,13 +485,28 @@ CodeGeneratorShared::encodeAllocation(LSnapshot* snapshot, MDefinition* mir,
       case MIRType::MagicOptimizedArguments:
       case MIRType::MagicOptimizedOut:
       case MIRType::MagicUninitializedLexical:
+      case MIRType::MagicIsConstructing:
       {
         uint32_t index;
-        Value v = MagicValue(type == MIRType::MagicOptimizedArguments
-                             ? JS_OPTIMIZED_ARGUMENTS
-                             : (type == MIRType::MagicOptimizedOut
-                                ? JS_OPTIMIZED_OUT
-                                : JS_UNINITIALIZED_LEXICAL));
+        JSWhyMagic why = JS_GENERIC_MAGIC;
+        switch (type) {
+          case MIRType::MagicOptimizedArguments:
+            why = JS_OPTIMIZED_ARGUMENTS;
+            break;
+          case MIRType::MagicOptimizedOut:
+            why = JS_OPTIMIZED_OUT;
+            break;
+          case MIRType::MagicUninitializedLexical:
+            why = JS_UNINITIALIZED_LEXICAL;
+            break;
+          case MIRType::MagicIsConstructing:
+            why = JS_IS_CONSTRUCTING;
+            break;
+          default:
+            MOZ_CRASH("Invalid Magic MIRType");
+        }
+
+        Value v = MagicValue(why);
         masm.propagateOOM(graph.addConstantToPool(v, &index));
         alloc = RValueAllocation::ConstantPool(index);
         break;
@@ -525,7 +544,8 @@ CodeGeneratorShared::encodeAllocation(LSnapshot* snapshot, MDefinition* mir,
     if (mir->isIncompleteObject())
         alloc.setNeedSideEffect();
 
-    snapshots_.add(alloc);
+    masm.propagateOOM(snapshots_.add(alloc));
+
     *allocIndex += mir->isRecoveredOnBailout() ? 0 : 1;
 }
 
@@ -1117,7 +1137,7 @@ HandleRegisterDump(Op op, MacroAssembler& masm, LiveRegisterSet liveRegs, Regist
     const size_t baseOffset = JitActivation::offsetOfRegs();
 
     // Handle live GPRs.
-    for (GeneralRegisterIterator iter(liveRegs.gprs()); iter.more(); iter++) {
+    for (GeneralRegisterIterator iter(liveRegs.gprs()); iter.more(); ++iter) {
         Register reg = *iter;
         Address dump(activation, baseOffset + RegisterDump::offsetOfRegister(reg));
 
@@ -1134,7 +1154,7 @@ HandleRegisterDump(Op op, MacroAssembler& masm, LiveRegisterSet liveRegs, Regist
     }
 
     // Handle live FPRs.
-    for (FloatRegisterIterator iter(liveRegs.fpus()); iter.more(); iter++) {
+    for (FloatRegisterIterator iter(liveRegs.fpus()); iter.more(); ++iter) {
         FloatRegister reg = *iter;
         Address dump(activation, baseOffset + RegisterDump::offsetOfRegister(reg));
         op(reg, dump);
@@ -1335,6 +1355,7 @@ CodeGeneratorShared::callVM(const VMFunction& fun, LInstruction* ins, const Regi
 
 #ifdef JS_TRACE_LOGGING
     emitTracelogStartEvent(TraceLogger_VM);
+    emitTracelogStartEvent(fun.name(), TraceLogger_VMSpecific);
 #endif
 
     // Stack is:
@@ -1386,6 +1407,7 @@ CodeGeneratorShared::callVM(const VMFunction& fun, LInstruction* ins, const Regi
 
 #ifdef JS_TRACE_LOGGING
     emitTracelogStopEvent(TraceLogger_VM);
+    emitTracelogStopEvent(fun.name(), TraceLogger_VMSpecific);
 #endif
 }
 
@@ -1393,11 +1415,11 @@ class OutOfLineTruncateSlow : public OutOfLineCodeBase<CodeGeneratorShared>
 {
     FloatRegister src_;
     Register dest_;
-    bool needFloat32Conversion_;
+    bool widenFloatToDouble_;
 
   public:
-    OutOfLineTruncateSlow(FloatRegister src, Register dest, bool needFloat32Conversion = false)
-      : src_(src), dest_(dest), needFloat32Conversion_(needFloat32Conversion)
+    OutOfLineTruncateSlow(FloatRegister src, Register dest, bool widenFloatToDouble = false)
+      : src_(src), dest_(dest), widenFloatToDouble_(widenFloatToDouble)
     { }
 
     void accept(CodeGeneratorShared* codegen) {
@@ -1409,8 +1431,8 @@ class OutOfLineTruncateSlow : public OutOfLineCodeBase<CodeGeneratorShared>
     Register dest() const {
         return dest_;
     }
-    bool needFloat32Conversion() const {
-        return needFloat32Conversion_;
+    bool widenFloatToDouble() const {
+        return widenFloatToDouble_;
     }
 
 };
@@ -1449,36 +1471,9 @@ CodeGeneratorShared::visitOutOfLineTruncateSlow(OutOfLineTruncateSlow* ool)
     Register dest = ool->dest();
 
     saveVolatile(dest);
-
-#if defined(JS_CODEGEN_ARM) || defined(JS_CODEGEN_ARM64)
-    if (ool->needFloat32Conversion()) {
-        masm.convertFloat32ToDouble(src, ScratchDoubleReg);
-        src = ScratchDoubleReg;
-    }
-#else
-    FloatRegister srcSingle = src.asSingle();
-    if (ool->needFloat32Conversion()) {
-        MOZ_ASSERT(src.isSingle());
-        masm.push(src);
-        masm.convertFloat32ToDouble(src, src);
-        src = src.asDouble();
-    }
-#endif
-
-    masm.setupUnalignedABICall(dest);
-    masm.passABIArg(src, MoveOp::DOUBLE);
-    if (gen->compilingAsmJS())
-        masm.callWithABI(wasm::SymbolicAddress::ToInt32);
-    else
-        masm.callWithABI(BitwiseCast<void*, int32_t(*)(double)>(JS::ToInt32));
-    masm.storeCallResult(dest);
-
-#if !defined(JS_CODEGEN_ARM) && !defined(JS_CODEGEN_ARM64)
-    if (ool->needFloat32Conversion())
-        masm.pop(srcSingle);
-#endif
-
+    masm.outOfLineTruncateSlow(src, dest, ool->widenFloatToDouble(), gen->compilingAsmJS());
     restoreVolatile(dest);
+
     masm.jump(ool->rejoin());
 }
 
@@ -1518,9 +1513,13 @@ CodeGeneratorShared::emitAsmJSCall(LAsmJSCall* ins)
       case MAsmJSCall::Callee::Internal:
         masm.call(mir->desc(), callee.internal());
         break;
-      case MAsmJSCall::Callee::Dynamic:
-        masm.call(mir->desc(), ToRegister(ins->getOperand(mir->dynamicCalleeOperandIndex())));
+      case MAsmJSCall::Callee::Dynamic: {
+        if (callee.dynamicHasSigIndex())
+            masm.move32(Imm32(callee.dynamicSigIndex()), WasmTableCallSigReg);
+        MOZ_ASSERT(WasmTableCallPtrReg == ToRegister(ins->getOperand(mir->dynamicCalleeOperandIndex())));
+        masm.call(mir->desc(), WasmTableCallPtrReg);
         break;
+      }
       case MAsmJSCall::Callee::Builtin:
         masm.call(callee.builtin());
         break;
@@ -1740,6 +1739,8 @@ CodeGeneratorShared::emitTracelogScript(bool isStart)
     CodeOffset patchLogger = masm.movWithPatch(ImmPtr(nullptr), logger);
     masm.propagateOOM(patchableTraceLoggers_.append(patchLogger));
 
+    masm.branchTest32(Assembler::Zero, logger, logger, &done);
+
     Address enabledAddress(logger, TraceLoggerThread::offsetOfEnabled());
     masm.branch32(Assembler::Equal, enabledAddress, Imm32(0), &done);
 
@@ -1775,6 +1776,8 @@ CodeGeneratorShared::emitTracelogTree(bool isStart, uint32_t textId)
     CodeOffset patchLocation = masm.movWithPatch(ImmPtr(nullptr), logger);
     masm.propagateOOM(patchableTraceLoggers_.append(patchLocation));
 
+    masm.branchTest32(Assembler::Zero, logger, logger, &done);
+
     Address enabledAddress(logger, TraceLoggerThread::offsetOfEnabled());
     masm.branch32(Assembler::Equal, enabledAddress, Imm32(0), &done);
 
@@ -1786,6 +1789,46 @@ CodeGeneratorShared::emitTracelogTree(bool isStart, uint32_t textId)
     masm.bind(&done);
 
     masm.Pop(logger);
+}
+
+void
+CodeGeneratorShared::emitTracelogTree(bool isStart, const char* text,
+                                      TraceLoggerTextId enabledTextId)
+{
+    if (!TraceLogTextIdEnabled(enabledTextId))
+        return;
+
+    Label done;
+
+    AllocatableRegisterSet regs(RegisterSet::Volatile());
+    Register loggerReg = regs.takeAnyGeneral();
+    Register eventReg = regs.takeAnyGeneral();
+
+    masm.Push(loggerReg);
+
+    CodeOffset patchLocation = masm.movWithPatch(ImmPtr(nullptr), loggerReg);
+    masm.propagateOOM(patchableTraceLoggers_.append(patchLocation));
+
+    masm.branchTest32(Assembler::Zero, loggerReg, loggerReg, &done);
+
+    Address enabledAddress(loggerReg, TraceLoggerThread::offsetOfEnabled());
+    masm.branch32(Assembler::Equal, enabledAddress, Imm32(0), &done);
+
+    masm.Push(eventReg);
+
+    PatchableTLEvent patchEvent(masm.movWithPatch(ImmWord(0), eventReg), text);
+    masm.propagateOOM(patchableTLEvents_.append(Move(patchEvent)));
+
+    if (isStart)
+        masm.tracelogStartId(loggerReg, eventReg);
+    else
+        masm.tracelogStopId(loggerReg, eventReg);
+
+    masm.Pop(eventReg);
+
+    masm.bind(&done);
+
+    masm.Pop(loggerReg);
 }
 #endif
 

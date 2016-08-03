@@ -942,7 +942,7 @@ class SdpRtcpFbAttributeList : public SdpAttribute
 public:
   SdpRtcpFbAttributeList() : SdpAttribute(kRtcpFbAttribute) {}
 
-  enum Type { kAck, kApp, kCcm, kNack, kTrrInt };
+  enum Type { kAck, kApp, kCcm, kNack, kTrrInt, kRemb };
 
   static const char* pli;
   static const char* sli;
@@ -992,6 +992,9 @@ inline std::ostream& operator<<(std::ostream& os,
       break;
     case SdpRtcpFbAttributeList::kTrrInt:
       os << "trr-int";
+      break;
+    case SdpRtcpFbAttributeList::kRemb:
+      os << "goog-remb";
       break;
     default:
       MOZ_ASSERT(false);
@@ -1240,11 +1243,13 @@ public:
   {
   public:
     enum { kDefaultMaxPlaybackRate = 48000,
-           kDefaultStereo = 0 };
+           kDefaultStereo = 0,
+           kDefaultUseInBandFec = 0 };
     OpusParameters() :
       Parameters(SdpRtpmapAttributeList::kOpus),
       maxplaybackrate(kDefaultMaxPlaybackRate),
-      stereo(kDefaultStereo)
+      stereo(kDefaultStereo),
+      useInBandFec(kDefaultUseInBandFec)
     {}
 
     Parameters*
@@ -1256,12 +1261,14 @@ public:
     void
     Serialize(std::ostream& os) const override
     {
-      os << "maxplaybackrate=" << maxplaybackrate << ";"
-         << "stereo=" << stereo;
+      os << "maxplaybackrate=" << maxplaybackrate
+         << ";stereo=" << stereo
+         << ";useinbandfec=" << useInBandFec;
     }
 
     unsigned int maxplaybackrate;
     unsigned int stereo;
+    unsigned int useInBandFec;
   };
 
   class Fmtp

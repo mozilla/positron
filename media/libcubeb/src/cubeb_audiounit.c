@@ -1188,7 +1188,7 @@ audiounit_stream_init(cubeb * context,
   }
 
   *stream = stm;
-  LOG("Cubeb stream init successfully.\n");
+  LOG("Cubeb stream (%p) init successful.\n", stm);
   return CUBEB_OK;
 }
 
@@ -1231,6 +1231,9 @@ audiounit_stream_destroy(cubeb_stream * stm)
 static int
 audiounit_stream_start(cubeb_stream * stm)
 {
+  pthread_mutex_lock(&stm->context->mutex);
+  stm->shutdown = 0;
+  stm->draining = 0;
   OSStatus r;
   if (stm->input_unit != NULL) {
     r = AudioOutputUnitStart(stm->input_unit);
@@ -1242,12 +1245,15 @@ audiounit_stream_start(cubeb_stream * stm)
   }
   stm->state_callback(stm, stm->user_ptr, CUBEB_STATE_STARTED);
   LOG("Cubeb stream (%p) started successfully.\n", stm);
+  pthread_mutex_unlock(&stm->context->mutex);
   return CUBEB_OK;
 }
 
 static int
 audiounit_stream_stop(cubeb_stream * stm)
 {
+  pthread_mutex_lock(&stm->context->mutex);
+  stm->shutdown = 1;
   OSStatus r;
   if (stm->input_unit != NULL) {
     r = AudioOutputUnitStop(stm->input_unit);
@@ -1259,6 +1265,7 @@ audiounit_stream_stop(cubeb_stream * stm)
   }
   stm->state_callback(stm, stm->user_ptr, CUBEB_STATE_STOPPED);
   LOG("Cubeb stream (%p) stopped successfully.\n", stm);
+  pthread_mutex_unlock(&stm->context->mutex);
   return CUBEB_OK;
 }
 
@@ -1536,6 +1543,7 @@ audiounit_get_devices(AudioObjectID ** devices, uint32_t * count)
     }
   } else {
     *devices = NULL;
+    ret = -1;
   }
 
   return ret;
@@ -1598,24 +1606,23 @@ audiounit_get_available_samplerate(AudioObjectID devid, AudioObjectPropertyScope
   }
 
   adr.mSelector = kAudioDevicePropertyAvailableNominalSampleRates;
-  if (AudioObjectHasProperty(devid, &adr)) {
-    UInt32 size = 0;
-    AudioValueRange range;
-    if (AudioObjectGetPropertyDataSize(devid, &adr, 0, NULL, &size) == noErr) {
-      uint32_t i, count = size / sizeof(AudioValueRange);
-      AudioValueRange * ranges = malloc(size);
-      range.mMinimum = 9999999999.0;
-      range.mMaximum = 0.0;
-      if (AudioObjectGetPropertyData(devid, &adr, 0, NULL, &size, ranges) == noErr) {
-        for (i = 0; i < count; i++) {
-          if (ranges[i].mMaximum > range.mMaximum)
-            range.mMaximum = ranges[i].mMaximum;
-          if (ranges[i].mMinimum < range.mMinimum)
-            range.mMinimum = ranges[i].mMinimum;
-        }
+  UInt32 size = 0;
+  AudioValueRange range;
+  if (AudioObjectHasProperty(devid, &adr) &&
+      AudioObjectGetPropertyDataSize(devid, &adr, 0, NULL, &size) == noErr) {
+    uint32_t i, count = size / sizeof(AudioValueRange);
+    AudioValueRange * ranges = malloc(size);
+    range.mMinimum = 9999999999.0;
+    range.mMaximum = 0.0;
+    if (AudioObjectGetPropertyData(devid, &adr, 0, NULL, &size, ranges) == noErr) {
+      for (i = 0; i < count; i++) {
+        if (ranges[i].mMaximum > range.mMaximum)
+          range.mMaximum = ranges[i].mMaximum;
+        if (ranges[i].mMinimum < range.mMinimum)
+          range.mMinimum = ranges[i].mMinimum;
       }
-      free(ranges);
     }
+    free(ranges);
     *max = (uint32_t)range.mMaximum;
     *min = (uint32_t)range.mMinimum;
   } else {
@@ -1839,7 +1846,7 @@ audiounit_get_devices_of_type(cubeb_device_type devtype, AudioObjectID ** devid_
     }
   }
 
-  if (devid_array) {
+  if (devid_array && dev_count > 0) {
     *devid_array = calloc(dev_count, sizeof(AudioObjectID));
     assert(*devid_array);
     memcpy(*devid_array, &devices_in_scope, dev_count * sizeof(AudioObjectID));

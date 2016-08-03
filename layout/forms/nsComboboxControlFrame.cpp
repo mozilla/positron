@@ -30,7 +30,6 @@
 #include "nsIDocument.h"
 #include "nsIScrollableFrame.h"
 #include "nsListControlFrame.h"
-#include "nsAutoPtr.h"
 #include "mozilla/StyleSetHandle.h"
 #include "mozilla/StyleSetHandleInlines.h"
 #include "nsNodeInfoManager.h"
@@ -287,7 +286,7 @@ nsComboboxControlFrame::SetFocus(bool aOn, bool aRepaint)
       }
     }
     // May delete |this|.
-    mListControlFrame->FireOnChange();
+    mListControlFrame->FireOnInputAndOnChange();
   }
 
   if (!weakFrame.IsAlive()) {

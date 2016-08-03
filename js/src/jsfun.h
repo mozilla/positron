@@ -144,7 +144,7 @@ class JSFunction : public js::NativeObject
         } i;
         void*           nativeOrScript;
     } u;
-    js::HeapPtrAtom  atom_;       /* name for diagnostics and decompiling */
+    js::GCPtrAtom atom_;      /* name for diagnostics and decompiling */
 
   public:
 
@@ -337,6 +337,12 @@ class JSFunction : public js::NativeObject
         atom_ = atom;
         flags_ |= HAS_GUESSED_ATOM;
     }
+    void clearGuessedAtom() {
+        MOZ_ASSERT(hasGuessedAtom());
+        MOZ_ASSERT(atom_);
+        atom_ = nullptr;
+        flags_ &= ~HAS_GUESSED_ATOM;
+    }
 
     /* uint16_t representation bounds number of call object dynamic slots. */
     enum { MAX_ARGS_AND_VARS = 2 * ((1U << 16) - 1) };
@@ -352,12 +358,12 @@ class JSFunction : public js::NativeObject
 
     void setEnvironment(JSObject* obj) {
         MOZ_ASSERT(isInterpreted() && !isBeingParsed());
-        *reinterpret_cast<js::HeapPtrObject*>(&u.i.env_) = obj;
+        *reinterpret_cast<js::GCPtrObject*>(&u.i.env_) = obj;
     }
 
     void initEnvironment(JSObject* obj) {
         MOZ_ASSERT(isInterpreted() && !isBeingParsed());
-        reinterpret_cast<js::HeapPtrObject*>(&u.i.env_)->init(obj);
+        reinterpret_cast<js::GCPtrObject*>(&u.i.env_)->init(obj);
     }
 
     void unsetEnvironment() {
@@ -564,9 +570,9 @@ class JSFunction : public js::NativeObject
     size_t getBoundFunctionArgumentCount() const;
 
   private:
-    js::HeapPtrScript& mutableScript() {
+    js::GCPtrScript& mutableScript() {
         MOZ_ASSERT(hasScript());
-        return *(js::HeapPtrScript*)&u.i.s.script_;
+        return *(js::GCPtrScript*)&u.i.s.script_;
     }
 
     inline js::FunctionExtended* toExtended();
@@ -677,6 +683,17 @@ FunctionHasResolveHook(const JSAtomState& atomState, jsid id);
 extern bool
 fun_toString(JSContext* cx, unsigned argc, Value* vp);
 
+struct WellKnownSymbols;
+
+extern bool
+FunctionHasDefaultHasInstance(JSFunction* fun, const WellKnownSymbols& symbols);
+
+extern bool
+fun_symbolHasInstance(JSContext* cx, unsigned argc, Value* vp);
+
+extern bool
+OrdinaryHasInstance(JSContext* cx, HandleObject objArg, MutableHandleValue v, bool* bp);
+
 /*
  * Function extended with reserved slots for use by various kinds of functions.
  * Most functions do not have these extensions, but enough do that efficient
@@ -693,20 +710,26 @@ class FunctionExtended : public JSFunction
     static const unsigned METHOD_HOMEOBJECT_SLOT = 0;
 
     /*
-     * All asm.js/wasm functions store their compiled module (either
-     * WasmModuleObject or AsmJSModuleObject) in the first extended slot.
+     * Exported asm.js/wasm functions store their WasmInstanceObject in the
+     * first slot.
      */
-    static const unsigned WASM_MODULE_SLOT = 0;
+    static const unsigned WASM_INSTANCE_SLOT = 0;
 
     /*
-     * wasm/asm.js exported functions store the index of the export in the
-     * module's export vector in the second slot.
+     * wasm/asm.js exported functions store the function index of the exported
+     * function in the original module.
      */
-    static const unsigned WASM_EXPORT_INDEX_SLOT = 1;
+    static const unsigned WASM_FUNC_INDEX_SLOT = 1;
+
+    /*
+     * asm.js module functions store their WasmModuleObject in the first slot.
+     */
+    static const unsigned ASMJS_MODULE_SLOT = 0;
+
 
     static inline size_t offsetOfExtendedSlot(unsigned which) {
         MOZ_ASSERT(which < NUM_EXTENDED_SLOTS);
-        return offsetof(FunctionExtended, extendedSlots) + which * sizeof(HeapValue);
+        return offsetof(FunctionExtended, extendedSlots) + which * sizeof(GCPtrValue);
     }
     static inline size_t offsetOfArrowNewTargetSlot() {
         return offsetOfExtendedSlot(ARROW_NEWTARGET_SLOT);
@@ -716,7 +739,7 @@ class FunctionExtended : public JSFunction
     friend class JSFunction;
 
     /* Reserved slots available for storage by particular native functions. */
-    HeapValue extendedSlots[NUM_EXTENDED_SLOTS];
+    GCPtrValue extendedSlots[NUM_EXTENDED_SLOTS];
 };
 
 extern bool
@@ -801,14 +824,14 @@ XDRInterpretedFunction(XDRState<mode>* xdr, HandleObject enclosingScope,
  * is what was called.
  */
 extern void
-ReportIncompatibleMethod(JSContext* cx, CallReceiver call, const Class* clasp);
+ReportIncompatibleMethod(JSContext* cx, const CallArgs& args, const Class* clasp);
 
 /*
  * Report an error that call.thisv is not an acceptable this for the callee
  * function.
  */
 extern void
-ReportIncompatible(JSContext* cx, CallReceiver call);
+ReportIncompatible(JSContext* cx, const CallArgs& args);
 
 extern const JSFunctionSpec function_methods[];
 extern const JSFunctionSpec function_selfhosted_methods[];

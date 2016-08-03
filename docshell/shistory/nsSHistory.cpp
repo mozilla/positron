@@ -402,7 +402,7 @@ nsSHistory::AddEntry(nsISHEntry* aSHEntry, bool aPersist)
 
   nsCOMPtr<nsIURI> uri;
   aSHEntry->GetURI(getter_AddRefs(uri));
-  NOTIFY_LISTENERS(OnHistoryNewEntry, (uri));
+  NOTIFY_LISTENERS(OnHistoryNewEntry, (uri, currentIndex));
 
   // If a listener has changed mIndex, we need to get currentTxn again,
   // otherwise we'll be left at an inconsistent state (see bug 320742)
@@ -1497,6 +1497,12 @@ nsSHistory::LoadURIWithOptions(const char16_t* aURI,
 }
 
 NS_IMETHODIMP
+nsSHistory::SetOriginAttributesBeforeLoading(JS::HandleValue aOriginAttributes)
+{
+  return NS_OK;
+}
+
+NS_IMETHODIMP
 nsSHistory::LoadURI(const char16_t* aURI,
                     uint32_t aLoadFlags,
                     nsIURI* aReferringURI,
@@ -1690,7 +1696,7 @@ nsSHistory::CompareFrames(nsISHEntry* aPrevEntry, nsISHEntry* aNextEntry,
     aParent->GetChildAt(i, getter_AddRefs(treeItem));
     nsCOMPtr<nsIDocShell> shell = do_QueryInterface(treeItem);
     if (shell) {
-      docshells.AppendObject(shell);
+      docshells.AppendElement(shell.forget());
     }
   }
 

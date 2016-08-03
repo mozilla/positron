@@ -829,7 +829,7 @@ ICStubCompiler::PushStubPayload(MacroAssembler& masm, Register scratch)
     masm.adjustFrame(sizeof(intptr_t));
 }
 
-bool
+void
 ICStubCompiler::emitPostWriteBarrierSlot(MacroAssembler& masm, Register obj, ValueOperand val,
                                          Register scratch, LiveGeneralRegisterSet saveRegs)
 {
@@ -851,7 +851,6 @@ ICStubCompiler::emitPostWriteBarrierSlot(MacroAssembler& masm, Register obj, Val
     masm.PopRegsInMask(saveRegs);
 
     masm.bind(&skipBarrier);
-    return true;
 }
 
 SharedStubInfo::SharedStubInfo(JSContext* cx, void* payload, ICEntry* icEntry)
@@ -1645,7 +1644,7 @@ DoCompareFallback(JSContext* cx, void* payload, ICCompare_Fallback* stub_, Handl
             return false;
         break;
       default:
-        MOZ_ASSERT(!"Unhandled baseline compare op");
+        MOZ_ASSERT_UNREACHABLE("Unhandled baseline compare op");
         return false;
     }
 
@@ -2891,7 +2890,7 @@ ICGetProp_Primitive::Compiler::generateStubCode(MacroAssembler& masm)
     masm.movePtr(ImmGCPtr(prototype_.get()), holderReg);
 
     Address shapeAddr(ICStubReg, ICGetProp_Primitive::offsetOfProtoShape());
-    masm.loadPtr(Address(holderReg, JSObject::offsetOfShape()), scratchReg);
+    masm.loadPtr(Address(holderReg, ShapedObject::offsetOfShape()), scratchReg);
     masm.branchPtr(Assembler::NotEqual, shapeAddr, scratchReg, &failure);
 
     if (!isFixedSlot_)
@@ -4091,18 +4090,32 @@ ICTypeMonitor_PrimitiveSet::Compiler::generateStubCode(MacroAssembler& masm)
     return true;
 }
 
+static void
+MaybeWorkAroundAmdBug(MacroAssembler& masm)
+{
+    // Attempt to work around an AMD bug (see bug 1034706 and bug 1281759), by
+    // inserting a 4-byte NOP.
+#if defined(JS_CODEGEN_X86) || defined(JS_CODEGEN_X64)
+    if (CPUInfo::NeedAmdBugWorkaround())
+        masm.nop(4);
+#endif
+}
+
 bool
 ICTypeMonitor_SingleObject::Compiler::generateStubCode(MacroAssembler& masm)
 {
     Label failure;
     masm.branchTestObject(Assembler::NotEqual, R0, &failure);
+    MaybeWorkAroundAmdBug(masm);
 
     // Guard on the object's identity.
     Register obj = masm.extractObject(R0, ExtractTemp0);
     Address expectedObject(ICStubReg, ICTypeMonitor_SingleObject::offsetOfObject());
     masm.branchPtr(Assembler::NotEqual, expectedObject, obj, &failure);
+    MaybeWorkAroundAmdBug(masm);
 
     EmitReturnFromIC(masm);
+    MaybeWorkAroundAmdBug(masm);
 
     masm.bind(&failure);
     EmitStubGuardFailure(masm);
@@ -4114,6 +4127,7 @@ ICTypeMonitor_ObjectGroup::Compiler::generateStubCode(MacroAssembler& masm)
 {
     Label failure;
     masm.branchTestObject(Assembler::NotEqual, R0, &failure);
+    MaybeWorkAroundAmdBug(masm);
 
     // Guard on the object's ObjectGroup.
     Register obj = masm.extractObject(R0, ExtractTemp0);
@@ -4121,8 +4135,10 @@ ICTypeMonitor_ObjectGroup::Compiler::generateStubCode(MacroAssembler& masm)
 
     Address expectedGroup(ICStubReg, ICTypeMonitor_ObjectGroup::offsetOfGroup());
     masm.branchPtr(Assembler::NotEqual, expectedGroup, R1.scratchReg(), &failure);
+    MaybeWorkAroundAmdBug(masm);
 
     EmitReturnFromIC(masm);
+    MaybeWorkAroundAmdBug(masm);
 
     masm.bind(&failure);
     EmitStubGuardFailure(masm);

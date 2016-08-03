@@ -449,6 +449,8 @@ struct CoTaskMemFreePolicy
   }
 };
 
+SetThreadDpiAwarenessContextProc WinUtils::sSetThreadDpiAwarenessContext = NULL;
+EnableNonClientDpiScalingProc WinUtils::sEnableNonClientDpiScaling = NULL;
 
 /* static */
 void
@@ -473,6 +475,27 @@ WinUtils::Initialize()
       dwmFlushProcPtr = (DwmFlushProc)::GetProcAddress(sDwmDll, "DwmFlush");
     }
   }
+
+  if (IsWin10OrLater()) {
+    HMODULE user32Dll = ::GetModuleHandleW(L"user32");
+    if (user32Dll) {
+      sEnableNonClientDpiScaling = (EnableNonClientDpiScalingProc)
+        ::GetProcAddress(user32Dll, "EnableNonClientDpiScaling");
+      sSetThreadDpiAwarenessContext = (SetThreadDpiAwarenessContextProc)
+        ::GetProcAddress(user32Dll, "SetThreadDpiAwarenessContext");
+    }
+  }
+}
+
+// static
+LRESULT WINAPI
+WinUtils::NonClientDpiScalingDefWindowProcW(HWND hWnd, UINT msg,
+                                            WPARAM wParam, LPARAM lParam)
+{
+  if (msg == WM_NCCREATE && sEnableNonClientDpiScaling) {
+    sEnableNonClientDpiScaling(hWnd);
+  }
+  return ::DefWindowProcW(hWnd, msg, wParam, lParam);
 }
 
 // static

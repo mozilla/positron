@@ -86,7 +86,6 @@ const IS_WIN = ("@mozilla.org/windows-registry-key;1" in Cc);
 // app update wizard's access method being random.
 const PAGEID_DUMMY            = "dummy";                 // Done
 const PAGEID_CHECKING         = "checking";              // Done
-const PAGEID_PLUGIN_UPDATES   = "pluginupdatesfound";
 const PAGEID_NO_UPDATES_FOUND = "noupdatesfound";        // Done
 const PAGEID_MANUAL_UPDATE    = "manualUpdate";          // Done
 const PAGEID_UNSUPPORTED      = "unsupported";           // Done
@@ -98,7 +97,6 @@ const PAGEID_ERROR_EXTRA      = "errorextra";            // Done
 const PAGEID_ERROR_PATCHING   = "errorpatching";         // Done
 const PAGEID_FINISHED         = "finished";              // Done
 const PAGEID_FINISHED_BKGRD   = "finishedBackground";    // Done
-const PAGEID_INSTALLED        = "installed";             // Done
 
 const UPDATE_WINDOW_NAME = "Update:Wizard";
 
@@ -554,7 +552,6 @@ function getExpectedButtonStates() {
     case PAGEID_UNSUPPORTED:
     case PAGEID_ERRORS:
     case PAGEID_ERROR_EXTRA:
-    case PAGEID_INSTALLED:
       return { finish: { disabled: false, hidden: false } };
     case PAGEID_ERROR_PATCHING:
       return { next  : { disabled: false, hidden: false } };
@@ -984,16 +981,16 @@ function resetPrefs() {
     Services.prefs.clearUserPref(PREF_APP_UPDATE_URL_DETAILS);
   }
 
-  if (Services.prefs.prefHasUserValue(PREF_APP_UPDATE_SHOW_INSTALLED_UI)) {
-    Services.prefs.clearUserPref(PREF_APP_UPDATE_SHOW_INSTALLED_UI);
-  }
-
   if (Services.prefs.prefHasUserValue(PREF_APP_UPDATE_NOTIFIEDUNSUPPORTED)) {
     Services.prefs.clearUserPref(PREF_APP_UPDATE_NOTIFIEDUNSUPPORTED);
   }
 
   if (Services.prefs.prefHasUserValue(PREF_APP_UPDATE_LOG)) {
     Services.prefs.clearUserPref(PREF_APP_UPDATE_LOG);
+  }
+
+  if (Services.prefs.prefHasUserValue(PREF_APP_UPDATE_SILENT)) {
+    Services.prefs.clearUserPref(PREF_APP_UPDATE_SILENT);
   }
 
   if (Services.prefs.prefHasUserValue(PREF_APP_UPDATE_CERT_ERRORS)) {
@@ -1020,13 +1017,13 @@ function resetPrefs() {
     Services.prefs.clearUserPref(PREF_APP_UPDATE_CERT_REQUIREBUILTIN);
   }
 
-  if (Services.prefs.prefHasUserValue(PREF_APP_UPDATE_CERT_CHECKATTRS)) {
-    Services.prefs.clearUserPref(PREF_APP_UPDATE_CERT_CHECKATTRS);
+  if (Services.prefs.prefHasUserValue(PREF_APP_UPDATE_CERT_CHECKATTRIBUTES)) {
+    Services.prefs.clearUserPref(PREF_APP_UPDATE_CERT_CHECKATTRIBUTES);
   }
 
   try {
     CERT_ATTRS.forEach(function(aCertAttrName) {
-      Services.prefs.clearUserPref(PREF_APP_UPDATE_CERTS_BRANCH + "1." +
+      Services.prefs.clearUserPref(PREFBRANCH_APP_UPDATE_CERTS + "1." +
                                    aCertAttrName);
     });
   }
@@ -1034,13 +1031,9 @@ function resetPrefs() {
   }
 
   try {
-    Services.prefs.deleteBranch(PREF_APP_UPDATE_NEVER_BRANCH);
+    Services.prefs.deleteBranch(PREFBRANCH_APP_UPDATE_NEVER);
   }
   catch(e) {
-  }
-
-  if (Services.prefs.prefHasUserValue(PREF_APP_UPDATE_SILENT)) {
-    Services.prefs.clearUserPref(PREF_APP_UPDATE_SILENT);
   }
 }
 

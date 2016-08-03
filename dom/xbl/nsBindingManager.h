@@ -7,6 +7,7 @@
 #ifndef nsBindingManager_h_
 #define nsBindingManager_h_
 
+#include "nsAutoPtr.h"
 #include "nsIContent.h"
 #include "nsStubMutationObserver.h"
 #include "nsHashKeys.h"
@@ -95,7 +96,18 @@ public:
 
   nsresult AddToAttachedQueue(nsXBLBinding* aBinding);
   void RemoveFromAttachedQueue(nsXBLBinding* aBinding);
-  void ProcessAttachedQueue(uint32_t aSkipSize = 0);
+  void ProcessAttachedQueue(uint32_t aSkipSize = 0)
+  {
+    if (mProcessingAttachedStack || mAttachedStack.Length() <= aSkipSize) {
+      return;
+    }
+
+    ProcessAttachedQueueInternal(aSkipSize);
+  }
+private:
+  void ProcessAttachedQueueInternal(uint32_t aSkipSize);
+
+public:
 
   void ExecuteDetachedHandlers();
 
@@ -135,8 +147,18 @@ public:
 
   // Notify the binding manager when an outermost update begins and
   // ends.  The end method can execute script.
-  void BeginOutermostUpdate();
-  void EndOutermostUpdate();
+  void BeginOutermostUpdate()
+  {
+    mAttachedStackSizeOnOutermost = mAttachedStack.Length();
+  }
+
+  void EndOutermostUpdate()
+  {
+    if (!mProcessingAttachedStack) {
+      ProcessAttachedQueue(mAttachedStackSizeOnOutermost);
+      mAttachedStackSizeOnOutermost = 0;
+    }
+  }
 
   // When removing an insertion point or a parent of one, clear the insertion
   // points and their insertion parents.

@@ -68,13 +68,21 @@
 #define PROMISE_ALLOCATION_TIME_SLOT   8
 #define PROMISE_RESOLUTION_TIME_SLOT   9
 #define PROMISE_ID_SLOT               10
+#define PROMISE_IS_HANDLED_SLOT       11
 
 #define PROMISE_STATE_PENDING   0
 #define PROMISE_STATE_FULFILLED 1
 #define PROMISE_STATE_REJECTED  2
 
+#define PROMISE_IS_HANDLED_STATE_HANDLED   0
+#define PROMISE_IS_HANDLED_STATE_UNHANDLED 1
+#define PROMISE_IS_HANDLED_STATE_REPORTED  2
+
 #define PROMISE_HANDLER_IDENTITY 0
 #define PROMISE_HANDLER_THROWER  1
+
+#define PROMISE_REJECTION_TRACKER_OPERATION_REJECT false
+#define PROMISE_REJECTION_TRACKER_OPERATION_HANDLE true
 
 // NB: keep these in sync with the copy in jsfriendapi.h.
 #define JSITER_OWNONLY    0x8   /* iterate over obj's own properties only */
@@ -82,7 +90,6 @@
 #define JSITER_SYMBOLS    0x20  /* also include symbol property keys */
 #define JSITER_SYMBOLSONLY 0x40 /* exclude string property keys */
 
-#define TELEMETRY_DEFINE_GETTER_SETTER_THIS_NULL_UNDEFINED 25
 
 #define REGEXP_FLAGS_SLOT 2
 
@@ -91,5 +98,7 @@
 #define REGEXP_MULTILINE_FLAG   0x04
 #define REGEXP_STICKY_FLAG      0x08
 #define REGEXP_UNICODE_FLAG     0x10
+
+#define MODULE_OBJECT_ENVIRONMENT_SLOT 3
 
 #endif

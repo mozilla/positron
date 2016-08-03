@@ -1,6 +1,5 @@
-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*-
- * vim: sw=2 ts=8 et :
- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -27,6 +26,8 @@
 
 #include "mozilla/TypeTraits.h"
 #endif
+
+#include "nsAutoPtr.h"
 
 using namespace IPC;
 
@@ -65,7 +66,6 @@ static StaticMutex gProtocolMutex;
 IToplevelProtocol::IToplevelProtocol(ProtocolId aProtoId)
  : mOpener(nullptr)
  , mProtocolId(aProtoId)
- , mTrans(nullptr)
 {
 }
 
@@ -83,6 +83,11 @@ IToplevelProtocol::~IToplevelProtocol()
 
   if (mOpener) {
       removeFrom(mOpener->mOpenActors);
+  }
+
+  if (mTrans) {
+    RefPtr<DeleteTask<Transport>> task = new DeleteTask<Transport>(mTrans.release());
+    XRE_GetIOMessageLoop()->PostTask(task.forget());
   }
 }
 
@@ -190,7 +195,7 @@ public:
                    ProcessId* aOtherProcess,
                    ProtocolId* aProtocol)
   {
-    void* iter = nullptr;
+    PickleIterator iter(aMsg);
     if (!IPC::ReadParam(&aMsg, &iter, aDescriptor) ||
         !IPC::ReadParam(&aMsg, &iter, aOtherProcess) ||
         !IPC::ReadParam(&aMsg, &iter, reinterpret_cast<uint32_t*>(aProtocol))) {
@@ -480,6 +485,48 @@ void
 LogicError(const char* aMsg)
 {
   NS_RUNTIMEABORT(aMsg);
+}
+
+void
+ActorIdReadError(const char* aActorDescription)
+{
+  nsPrintfCString message("Error deserializing id for %s", aActorDescription);
+  NS_RUNTIMEABORT(message.get());
+}
+
+void
+BadActorIdError(const char* aActorDescription)
+{
+  nsPrintfCString message("bad id for %s", aActorDescription);
+  ProtocolErrorBreakpoint(message.get());
+}
+
+void
+ActorLookupError(const char* aActorDescription)
+{
+  nsPrintfCString message("could not lookup id for %s", aActorDescription);
+  ProtocolErrorBreakpoint(message.get());
+}
+
+void
+MismatchedActorTypeError(const char* aActorDescription)
+{
+  nsPrintfCString message("actor that should be of type %s has different type",
+                          aActorDescription);
+  ProtocolErrorBreakpoint(message.get());
+}
+
+void
+UnionTypeReadError(const char* aUnionName)
+{
+  nsPrintfCString message("error deserializing type of union %s", aUnionName);
+  NS_RUNTIMEABORT(message.get());
+}
+
+void ArrayLengthReadError(const char* aElementName)
+{
+  nsPrintfCString message("error deserializing length of %s[]", aElementName);
+  NS_RUNTIMEABORT(message.get());
 }
 
 } // namespace ipc

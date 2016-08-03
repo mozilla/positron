@@ -7,7 +7,10 @@
  * Make sure eval scripts appear in the source list
  */
 
+const ADDON_PATH = "addon-webext-contentscript.xpi";
 const TAB_URL = EXAMPLE_URL + "doc_script_webext_contentscript.html";
+
+let {getExtensionUUID} = Cu.import("resource://gre/modules/Extension.jsm", {});
 
 function test() {
   let gPanel, gDebugger;
@@ -28,19 +31,18 @@ function test() {
   };
 
   return Task.spawn(function* () {
-    gAddon = yield addAddon(EXAMPLE_URL + "/addon-webext-contentscript.xpi");
+    gAddon = yield addTemporaryAddon(ADDON_PATH);
+    let uuid = getExtensionUUID(gAddon.id);
 
-    [,, gPanel] = yield initDebugger(TAB_URL);
+    let options = {
+      source: `moz-extension://${uuid}/webext-content-script.js`,
+      line: 1
+    };
+    [,, gPanel] = yield initDebugger(TAB_URL, options);
     gDebugger = gPanel.panelWin;
     gSources = gDebugger.DebuggerView.Sources;
 
-    // Wait for a SOURCE_SHOWN event for at most 4 seconds.
-    yield Promise.race([
-      waitForDebuggerEvents(gPanel, gDebugger.EVENTS.SOURCE_SHOWN),
-      waitForTime(4000),
-    ]);
-
-    is(gSources.values.length, 1, "Should have 1 source");
+    is(gSources.values.length, 2, "Should have 2 sources");
 
     let item = gSources.getItemForAttachment(attachment => {
       return attachment.source.url.includes("moz-extension");

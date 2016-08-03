@@ -7,6 +7,8 @@
 #ifndef jslock_h
 #define jslock_h
 
+#include "mozilla/TimeStamp.h"
+
 #ifdef JS_POSIX_NSPR
 
 #include "vm/PosixNSPR.h"
@@ -15,9 +17,20 @@
 
 # include "prcvar.h"
 # include "prinit.h"
+# include "prio.h"
 # include "prlock.h"
 # include "prthread.h"
+# include "private/pprio.h"
 
 #endif
+
+inline PRIntervalTime
+DurationToPRInterval(mozilla::TimeDuration duration)
+{
+    double millis = duration.ToMilliseconds();
+    return millis < double(UINT32_MAX)
+           ? PR_MillisecondsToInterval(millis)
+           : PR_INTERVAL_NO_TIMEOUT;
+}
 
 #endif /* jslock_h */

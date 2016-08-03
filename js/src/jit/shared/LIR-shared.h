@@ -195,6 +195,36 @@ class LSimdUnbox : public LInstructionHelper<1, 1, 1>
     }
 };
 
+// Constructs a SIMD value with 16 equal components (int8x16).
+class LSimdSplatX16 : public LInstructionHelper<1, 1, 0>
+{
+  public:
+    LIR_HEADER(SimdSplatX16)
+    explicit LSimdSplatX16(const LAllocation& v)
+    {
+        setOperand(0, v);
+    }
+
+    MSimdSplat* mir() const {
+        return mir_->toSimdSplat();
+    }
+};
+
+// Constructs a SIMD value with 8 equal components (int16x8).
+class LSimdSplatX8 : public LInstructionHelper<1, 1, 0>
+{
+  public:
+    LIR_HEADER(SimdSplatX8)
+    explicit LSimdSplatX8(const LAllocation& v)
+    {
+        setOperand(0, v);
+    }
+
+    MSimdSplat* mir() const {
+        return mir_->toSimdSplat();
+    }
+};
+
 // Constructs a SIMD value with 4 equal components (e.g. int32x4, float32x4).
 class LSimdSplatX4 : public LInstructionHelper<1, 1, 0>
 {
@@ -236,8 +266,8 @@ class LSimdExtractElementBase : public LInstructionHelper<1, 1, 0>
     const LAllocation* getBase() {
         return getOperand(0);
     }
-    unsigned lane() const {
-        return mir_->toSimdExtractElement()->lane();
+    MSimdExtractElement* mir() const {
+        return mir_->toSimdExtractElement();
     }
 };
 
@@ -280,8 +310,8 @@ class LSimdExtractElementU2D : public LInstructionHelper<1, 1, 1>
         setOperand(0, base);
         setTemp(0, temp);
     }
-    unsigned lane() const {
-        return mir_->toSimdExtractElement()->lane();
+    MSimdExtractElement* mir() const {
+        return mir_->toSimdExtractElement();
     }
     const LDefinition* temp() {
         return getTemp(0);
@@ -308,6 +338,9 @@ class LSimdInsertElementBase : public LInstructionHelper<1, 2, 0>
     unsigned lane() const {
         return mir_->toSimdInsertElement()->lane();
     }
+    unsigned length() const {
+        return SimdTypeToLength(mir_->toSimdInsertElement()->type());
+    }
 };
 
 // Replace an element from a given SIMD integer or boolean lane with a given value.
@@ -332,7 +365,7 @@ class LSimdInsertElementF : public LSimdInsertElementBase
 };
 
 // Base class for both int32x4 and float32x4 shuffle instructions.
-class LSimdSwizzleBase : public LInstructionHelper<1, 1, 0>
+class LSimdSwizzleBase : public LInstructionHelper<1, 1, 1>
 {
   public:
     explicit LSimdSwizzleBase(const LAllocation& base)
@@ -344,6 +377,7 @@ class LSimdSwizzleBase : public LInstructionHelper<1, 1, 0>
         return getOperand(0);
     }
 
+    unsigned numLanes() const { return mir_->toSimdSwizzle()->numLanes(); }
     uint32_t lane(unsigned i) const { return mir_->toSimdSwizzle()->lane(i); }
 
     bool lanesMatch(uint32_t x, uint32_t y, uint32_t z, uint32_t w) const {
@@ -409,11 +443,11 @@ class LSimdGeneralShuffleF : public LSimdGeneralShuffleBase
 };
 
 // Base class for both int32x4 and float32x4 shuffle instructions.
-class LSimdShuffle : public LInstructionHelper<1, 2, 1>
+class LSimdShuffleX4 : public LInstructionHelper<1, 2, 1>
 {
   public:
-    LIR_HEADER(SimdShuffle);
-    LSimdShuffle()
+    LIR_HEADER(SimdShuffleX4);
+    LSimdShuffleX4()
     {}
 
     const LAllocation* lhs() {
@@ -431,6 +465,28 @@ class LSimdShuffle : public LInstructionHelper<1, 2, 1>
     bool lanesMatch(uint32_t x, uint32_t y, uint32_t z, uint32_t w) const {
         return mir_->toSimdShuffle()->lanesMatch(x, y, z, w);
     }
+};
+
+// Remaining shuffles (8x16, 16x8).
+class LSimdShuffle : public LInstructionHelper<1, 2, 1>
+{
+  public:
+    LIR_HEADER(SimdShuffle);
+    LSimdShuffle()
+    {}
+
+    const LAllocation* lhs() {
+        return getOperand(0);
+    }
+    const LAllocation* rhs() {
+        return getOperand(1);
+    }
+    const LDefinition* temp() {
+        return getTemp(0);
+    }
+
+    unsigned numLanes() const { return mir_->toSimdShuffle()->numLanes(); }
+    unsigned lane(unsigned i) const { return mir_->toSimdShuffle()->lane(i); }
 };
 
 // Binary SIMD comparison operation between two SIMD operands
@@ -454,7 +510,23 @@ public:
     }
 };
 
-// Binary SIMD comparison operation between two Int32x4 operands
+// Binary SIMD comparison operation between two Int8x16 operands.
+class LSimdBinaryCompIx16 : public LSimdBinaryComp
+{
+  public:
+    LIR_HEADER(SimdBinaryCompIx16);
+    LSimdBinaryCompIx16() : LSimdBinaryComp() {}
+};
+
+// Binary SIMD comparison operation between two Int16x8 operands.
+class LSimdBinaryCompIx8 : public LSimdBinaryComp
+{
+  public:
+    LIR_HEADER(SimdBinaryCompIx8);
+    LSimdBinaryCompIx8() : LSimdBinaryComp() {}
+};
+
+// Binary SIMD comparison operation between two Int32x4 operands.
 class LSimdBinaryCompIx4 : public LSimdBinaryComp
 {
   public:
@@ -494,6 +566,22 @@ class LSimdBinaryArith : public LInstructionHelper<1, 2, 1>
     }
 };
 
+// Binary SIMD arithmetic operation between two Int8x16 operands
+class LSimdBinaryArithIx16 : public LSimdBinaryArith
+{
+  public:
+    LIR_HEADER(SimdBinaryArithIx16);
+    LSimdBinaryArithIx16() : LSimdBinaryArith() {}
+};
+
+// Binary SIMD arithmetic operation between two Int16x8 operands
+class LSimdBinaryArithIx8 : public LSimdBinaryArith
+{
+  public:
+    LIR_HEADER(SimdBinaryArithIx8);
+    LSimdBinaryArithIx8() : LSimdBinaryArith() {}
+};
+
 // Binary SIMD arithmetic operation between two Int32x4 operands
 class LSimdBinaryArithIx4 : public LSimdBinaryArith
 {
@@ -510,6 +598,34 @@ class LSimdBinaryArithFx4 : public LSimdBinaryArith
     LSimdBinaryArithFx4() : LSimdBinaryArith() {}
 };
 
+// Binary SIMD saturating arithmetic operation between two SIMD operands
+class LSimdBinarySaturating : public LInstructionHelper<1, 2, 0>
+{
+  public:
+    LIR_HEADER(SimdBinarySaturating);
+    LSimdBinarySaturating() {}
+
+    const LAllocation* lhs() {
+        return this->getOperand(0);
+    }
+    const LAllocation* rhs() {
+        return this->getOperand(1);
+    }
+
+    MSimdBinarySaturating::Operation operation() const {
+        return this->mir_->toSimdBinarySaturating()->operation();
+    }
+    SimdSign signedness() const {
+        return this->mir_->toSimdBinarySaturating()->signedness();
+    }
+    MIRType type() const {
+        return mir_->type();
+    }
+    const char* extraName() const {
+        return MSimdBinarySaturating::OperationName(operation());
+    }
+};
+
 // Unary SIMD arithmetic operation on a SIMD operand
 class LSimdUnaryArith : public LInstructionHelper<1, 1, 0>
 {
@@ -520,6 +636,22 @@ class LSimdUnaryArith : public LInstructionHelper<1, 1, 0>
     MSimdUnaryArith::Operation operation() const {
         return mir_->toSimdUnaryArith()->operation();
     }
+};
+
+// Unary SIMD arithmetic operation on a Int8x16 operand
+class LSimdUnaryArithIx16 : public LSimdUnaryArith
+{
+  public:
+    LIR_HEADER(SimdUnaryArithIx16);
+    explicit LSimdUnaryArithIx16(const LAllocation& in) : LSimdUnaryArith(in) {}
+};
+
+// Unary SIMD arithmetic operation on a Int16x8 operand
+class LSimdUnaryArithIx8 : public LSimdUnaryArith
+{
+  public:
+    LIR_HEADER(SimdUnaryArithIx8);
+    explicit LSimdUnaryArithIx8(const LAllocation& in) : LSimdUnaryArith(in) {}
 };
 
 // Unary SIMD arithmetic operation on a Int32x4 operand
@@ -538,11 +670,11 @@ class LSimdUnaryArithFx4 : public LSimdUnaryArith
     explicit LSimdUnaryArithFx4(const LAllocation& in) : LSimdUnaryArith(in) {}
 };
 
-// Binary SIMD bitwise operation between two int32x4 or float32x4 operands
-class LSimdBinaryBitwiseX4 : public LInstructionHelper<1, 2, 0>
+// Binary SIMD bitwise operation between two 128-bit operands.
+class LSimdBinaryBitwise : public LInstructionHelper<1, 2, 0>
 {
   public:
-    LIR_HEADER(SimdBinaryBitwiseX4);
+    LIR_HEADER(SimdBinaryBitwise);
     const LAllocation* lhs() {
         return getOperand(0);
     }
@@ -589,6 +721,9 @@ class LSimdShift : public LInstructionHelper<1, 2, 1>
     }
     MSimdShift* mir() const {
         return mir_->toSimdShift();
+    }
+    MIRType type() const {
+        return mir_->type();
     }
 };
 
@@ -926,6 +1061,29 @@ class LNewArrayDynamicLength : public LInstructionHelper<1, 1, 1>
     }
 };
 
+class LNewTypedArray : public LInstructionHelper<1, 0, 2>
+{
+  public:
+    LIR_HEADER(NewTypedArray)
+
+    explicit LNewTypedArray(const LDefinition& temp1, const LDefinition& temp2) {
+        setTemp(0, temp1);
+        setTemp(1, temp2);
+    }
+
+    const LDefinition* temp1() {
+        return getTemp(0);
+    }
+
+    const LDefinition* temp2() {
+        return getTemp(1);
+    }
+
+    MNewTypedArray* mir() const {
+        return mir_->toNewTypedArray();
+    }
+};
+
 class LNewObject : public LInstructionHelper<1, 0, 1>
 {
   public:
@@ -1016,13 +1174,7 @@ class LNewCallObject : public LInstructionHelper<1, 0, 1>
     }
 };
 
-// Allocates a new CallObject with singleton type.
-//
-// This instruction generates two possible instruction sets:
-//   (1) If the call object is extensible, this is a callVM to create the
-//       call object.
-//   (2) Otherwise, an inline allocation of the call object is attempted.
-//
+// Performs a callVM to allocate a new CallObject with singleton type.
 class LNewSingletonCallObject : public LInstructionHelper<1, 0, 1>
 {
   public:
@@ -1036,9 +1188,8 @@ class LNewSingletonCallObject : public LInstructionHelper<1, 0, 1>
         return getTemp(0);
     }
 
-    MNewCallObjectBase* mir() const {
-        MOZ_ASSERT(mir_->isNewCallObject() || mir_->isNewRunOnceCallObject());
-        return static_cast<MNewCallObjectBase*>(mir_);
+    MNewSingletonCallObject* mir() const {
+        return mir_->toNewSingletonCallObject();
     }
 };
 
@@ -1509,15 +1660,28 @@ class LCreateThisWithTemplate : public LInstructionHelper<1, 0, 1>
 };
 
 // Allocate a new arguments object for the frame.
-class LCreateArgumentsObject : public LCallInstructionHelper<1, 1, 1>
+class LCreateArgumentsObject : public LCallInstructionHelper<1, 1, 3>
 {
   public:
     LIR_HEADER(CreateArgumentsObject)
 
-    LCreateArgumentsObject(const LAllocation& callObj, const LDefinition& temp)
+    LCreateArgumentsObject(const LAllocation& callObj, const LDefinition& temp0,
+                           const LDefinition& temp1, const LDefinition& temp2)
     {
         setOperand(0, callObj);
-        setTemp(0, temp);
+        setTemp(0, temp0);
+        setTemp(1, temp1);
+        setTemp(2, temp2);
+    }
+
+    const LDefinition* temp0() {
+        return getTemp(0);
+    }
+    const LDefinition* temp1() {
+        return getTemp(1);
+    }
+    const LDefinition* temp2() {
+        return getTemp(2);
     }
 
     const LAllocation* getCallObject() {
@@ -1678,7 +1842,7 @@ class LJSCallInstructionHelper : public LCallInstructionHelper<Defs, Operands, T
     bool hasSingleTarget() const {
         return getSingleTarget() != nullptr;
     }
-    JSFunction* getSingleTarget() const {
+    WrappedFunction* getSingleTarget() const {
         return mir()->getSingleTarget();
     }
 
@@ -1942,7 +2106,7 @@ class LApplyArgsGeneric : public LCallInstructionHelper<BOX_PIECES, BOX_PIECES +
     bool hasSingleTarget() const {
         return getSingleTarget() != nullptr;
     }
-    JSFunction* getSingleTarget() const {
+    WrappedFunction* getSingleTarget() const {
         return mir()->getSingleTarget();
     }
 
@@ -1985,7 +2149,7 @@ class LApplyArrayGeneric : public LCallInstructionHelper<BOX_PIECES, BOX_PIECES 
     bool hasSingleTarget() const {
         return getSingleTarget() != nullptr;
     }
-    JSFunction* getSingleTarget() const {
+    WrappedFunction* getSingleTarget() const {
         return mir()->getSingleTarget();
     }
 
@@ -2111,6 +2275,27 @@ class LTestIAndBranch : public LControlInstructionHelper<2, 1, 0>
     LTestIAndBranch(const LAllocation& in, MBasicBlock* ifTrue, MBasicBlock* ifFalse)
     {
         setOperand(0, in);
+        setSuccessor(0, ifTrue);
+        setSuccessor(1, ifFalse);
+    }
+
+    MBasicBlock* ifTrue() const {
+        return getSuccessor(0);
+    }
+    MBasicBlock* ifFalse() const {
+        return getSuccessor(1);
+    }
+};
+
+// Takes in an int64 input and tests it for truthiness.
+class LTestI64AndBranch : public LControlInstructionHelper<2, INT64_PIECES, 0>
+{
+  public:
+    LIR_HEADER(TestI64AndBranch)
+
+    LTestI64AndBranch(const LInt64Allocation& in, MBasicBlock* ifTrue, MBasicBlock* ifFalse)
+    {
+        setInt64Operand(0, in);
         setSuccessor(0, ifTrue);
         setSuccessor(1, ifFalse);
     }
@@ -3262,6 +3447,22 @@ class LAbsF : public LInstructionHelper<1, 1, 0>
     explicit LAbsF(const LAllocation& num) {
         setOperand(0, num);
     }
+};
+
+// Copysign for doubles.
+class LCopySignD : public LInstructionHelper<1, 2, 2>
+{
+  public:
+    LIR_HEADER(CopySignD)
+    explicit LCopySignD() {}
+};
+
+// Copysign for float32.
+class LCopySignF : public LInstructionHelper<1, 2, 2>
+{
+  public:
+    LIR_HEADER(CopySignF)
+    explicit LCopySignF() {}
 };
 
 // Count leading zeroes on an int32.
@@ -7485,6 +7686,90 @@ class LAsmSelectI64 : public LAsmSelectBase<INT64_PIECES, 2 * INT64_PIECES + 1>
     }
 };
 
+class LWasmBoundsCheck : public LInstructionHelper<0, 1, 0>
+{
+  public:
+    LIR_HEADER(WasmBoundsCheck);
+    explicit LWasmBoundsCheck(const LAllocation& ptr) {
+        setOperand(0, ptr);
+    }
+    MWasmBoundsCheck* mir() const {
+        return mir_->toWasmBoundsCheck();
+    }
+    const LAllocation* ptr() {
+        return getOperand(0);
+    }
+};
+
+namespace details {
+
+// This is a base class for LWasmLoad/LWasmLoadI64.
+template<size_t Defs, size_t Temp>
+class LWasmLoadBase : public LInstructionHelper<Defs, 1, Temp>
+{
+  public:
+    typedef LInstructionHelper<Defs, 1, Temp> Base;
+    explicit LWasmLoadBase(const LAllocation& ptr) {
+        Base::setOperand(0, ptr);
+    }
+    MWasmLoad* mir() const {
+        return Base::mir_->toWasmLoad();
+    }
+    const LAllocation* ptr() {
+        return Base::getOperand(0);
+    }
+};
+
+} // namespace details
+
+class LWasmLoad : public details::LWasmLoadBase<1, 1>
+{
+  public:
+    explicit LWasmLoad(const LAllocation& ptr)
+      : LWasmLoadBase(ptr)
+    {
+        setTemp(0, LDefinition::BogusTemp());
+    }
+
+    const LDefinition* ptrCopy() {
+        return Base::getTemp(0);
+    }
+
+    LIR_HEADER(WasmLoad);
+};
+
+class LWasmLoadI64 : public details::LWasmLoadBase<INT64_PIECES, 0>
+{
+  public:
+    explicit LWasmLoadI64(const LAllocation& ptr)
+      : LWasmLoadBase(ptr)
+    {}
+    LIR_HEADER(WasmLoadI64);
+};
+
+class LWasmStore : public LInstructionHelper<0, 2, 1>
+{
+  public:
+    LIR_HEADER(WasmStore);
+    LWasmStore(const LAllocation& ptr, const LAllocation& value) {
+        setOperand(0, ptr);
+        setOperand(1, value);
+        setTemp(0, LDefinition::BogusTemp());
+    }
+    MWasmStore* mir() const {
+        return mir_->toWasmStore();
+    }
+    const LAllocation* ptr() {
+        return getOperand(0);
+    }
+    const LDefinition* ptrCopy() {
+        return getTemp(0);
+    }
+    const LAllocation* value() {
+        return getOperand(1);
+    }
+};
+
 class LAsmJSLoadHeap : public LInstructionHelper<1, 1, 0>
 {
   public:
@@ -7781,6 +8066,21 @@ class LAsmJSStoreGlobalVar : public LInstructionHelper<0, 1, 0>
         return mir_->toAsmJSStoreGlobalVar();
     }
     const LAllocation* value() {
+        return getOperand(0);
+    }
+};
+
+class LAsmJSLoadFuncPtr : public LInstructionHelper<1, 1, 0>
+{
+  public:
+    LIR_HEADER(AsmJSLoadFuncPtr);
+    explicit LAsmJSLoadFuncPtr(const LAllocation& index) {
+        setOperand(0, index);
+    }
+    const MAsmJSLoadFuncPtr* mir() const {
+        return mir_->toAsmJSLoadFuncPtr();
+    }
+    const LAllocation* index() {
         return getOperand(0);
     }
 };

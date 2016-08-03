@@ -112,7 +112,9 @@ RemotePrintJobParent::PrintPage(const Shmem& aStoredPage)
 
   std::istringstream recording(std::string(aStoredPage.get<char>(),
                                            aStoredPage.Size<char>()));
-  mPrintTranslator->TranslateRecording(recording);
+  if (!mPrintTranslator->TranslateRecording(recording)) {
+    return NS_ERROR_FAILURE;
+  }
 
   rv = mPrintDeviceContext->EndPage();
   if (NS_WARN_IF(NS_FAILED(rv))) {
@@ -198,6 +200,13 @@ RemotePrintJobParent::RegisterListener(nsIWebProgressListener* aListener)
   MOZ_ASSERT(aListener);
 
   mPrintProgressListeners.AppendElement(aListener);
+}
+
+already_AddRefed<nsIPrintSettings>
+RemotePrintJobParent::GetPrintSettings()
+{
+  nsCOMPtr<nsIPrintSettings> printSettings = mPrintSettings;
+  return printSettings.forget();
 }
 
 RemotePrintJobParent::~RemotePrintJobParent()

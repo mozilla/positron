@@ -14,7 +14,7 @@ XPCOMUtils.defineLazyModuleGetter(this, "ShellService",
                                   "resource:///modules/ShellService.jsm");
 
 XPCOMUtils.defineLazyModuleGetter(this, "ContextualIdentityService",
-                                  "resource:///modules/ContextualIdentityService.jsm");
+                                  "resource://gre/modules/ContextualIdentityService.jsm");
 
 XPCOMUtils.defineLazyServiceGetter(this, "aboutNewTabService",
                                    "@mozilla.org/browser/aboutnewtab-service;1",
@@ -274,12 +274,17 @@ function openLinkIn(url, where, params) {
                                  createInstance(Ci.nsISupportsPRUint32);
     referrerPolicySupports.data = aReferrerPolicy;
 
+    var userContextIdSupports = Cc["@mozilla.org/supports-PRUint32;1"].
+                                 createInstance(Ci.nsISupportsPRUint32);
+    userContextIdSupports.data = aUserContextId;
+
     sa.AppendElement(wuri);
     sa.AppendElement(charset);
     sa.AppendElement(referrerURISupports);
     sa.AppendElement(aPostData);
     sa.AppendElement(allowThirdPartyFixupSupports);
     sa.AppendElement(referrerPolicySupports);
+    sa.AppendElement(userContextIdSupports);
 
     let features = "chrome,dialog=no,all";
     if (aIsPrivate) {
@@ -352,6 +357,7 @@ function openLinkIn(url, where, params) {
       referrerURI: aNoReferrer ? null : aReferrerURI,
       referrerPolicy: aReferrerPolicy,
       postData: aPostData,
+      userContextId: aUserContextId
     });
     break;
   case "tabshifted":
@@ -409,7 +415,7 @@ function checkForMiddleClick(node, event) {
 // Populate a menu with user-context menu items. This method should be called
 // by onpopupshowing passing the event as first argument. addCommandAttribute
 // param is used to set the 'command' attribute in the new menuitem elements.
-function createUserContextMenu(event, addCommandAttribute = true) {
+function createUserContextMenu(event, addCommandAttribute = true, excludeUserContextId = 0) {
   while (event.target.hasChildNodes()) {
     event.target.removeChild(event.target.firstChild);
   }
@@ -417,17 +423,39 @@ function createUserContextMenu(event, addCommandAttribute = true) {
   let bundle = document.getElementById("bundle_browser");
   let docfrag = document.createDocumentFragment();
 
+  // If we are excluding a userContextId, we want to add a 'no-container' item.
+  if (excludeUserContextId) {
+    let menuitem = document.createElement("menuitem");
+    menuitem.setAttribute("usercontextid", "0");
+    menuitem.setAttribute("label", bundle.getString("userContextNone.label"));
+    menuitem.setAttribute("accesskey", bundle.getString("userContextNone.accesskey"));
+
+    // We don't set an oncommand/command attribute attribute because if we have
+    // to exclude a userContextId we are generating the contextMenu and
+    // addCommandAttribute will be false.
+
+    docfrag.appendChild(menuitem);
+
+    let menuseparator = document.createElement("menuseparator");
+    docfrag.appendChild(menuseparator);
+  }
+
   ContextualIdentityService.getIdentities().forEach(identity => {
+    if (identity.userContextId == excludeUserContextId) {
+      return;
+    }
+
     let menuitem = document.createElement("menuitem");
     menuitem.setAttribute("usercontextid", identity.userContextId);
     menuitem.setAttribute("label", bundle.getString(identity.label));
     menuitem.setAttribute("accesskey", bundle.getString(identity.accessKey));
+    menuitem.classList.add("menuitem-iconic");
 
     if (addCommandAttribute) {
       menuitem.setAttribute("command", "Browser:NewUserContextTab");
     }
 
-    menuitem.style.listStyleImage = "url(" + identity.icon + ")";
+    menuitem.setAttribute("image", identity.icon);
 
     docfrag.appendChild(menuitem);
   });

@@ -571,8 +571,10 @@ nsPrintEngine::DoCommonPrint(bool                    aIsPrintPreview,
   mPrt->mPrintSettings->SetPrintOptions(nsIPrintSettings::kEnableSelectionRB,
                                         isSelection || mPrt->mIsIFrameSelected);
 
+  bool printingViaParent = XRE_IsContentProcess() &&
+                           Preferences::GetBool("print.print_via_parent");
   nsCOMPtr<nsIDeviceContextSpec> devspec;
-  if (XRE_IsContentProcess() && Preferences::GetBool("print.print_via_parent")) {
+  if (printingViaParent) {
     devspec = new nsDeviceContextSpecProxy();
   } else {
     devspec = do_CreateInstance("@mozilla.org/gfx/devicecontextspec;1", &rv);
@@ -596,7 +598,9 @@ nsPrintEngine::DoCommonPrint(bool                    aIsPrintPreview,
     // Ask dialog to be Print Shown via the Plugable Printing Dialog Service
     // This service is for the Print Dialog and the Print Progress Dialog
     // If printing silently or you can't get the service continue on
-    if (!printSilently) {
+    // If printing via the parent then we need to confirm that the pref is set
+    // and get a remote print job, but the parent won't display a prompt.
+    if (!printSilently || printingViaParent) {
       nsCOMPtr<nsIPrintingPromptService> printPromptService(do_GetService(kPrintingPromptService));
       if (printPromptService) {
         nsPIDOMWindowOuter* domWin = mDocument->GetWindow(); 
@@ -1094,8 +1098,7 @@ nsPrintEngine::IsThereARangeSelection(nsPIDOMWindowOuter* aDOMWin)
 
   // check here to see if there is a range selection
   // so we know whether to turn on the "Selection" radio button
-  Selection* selection =
-    presShell->GetCurrentSelection(nsISelectionController::SELECTION_NORMAL);
+  Selection* selection = presShell->GetCurrentSelection(SelectionType::eNormal);
   if (!selection) {
     return false;
   }
@@ -1559,7 +1562,9 @@ nsPrintEngine::FirePrintingErrorEvent(nsresult aPrintError)
   asyncDispatcher->RunDOMEventWhenSafe();
 
   // Inform any progress listeners of the Error.
-  mPrt->DoOnStatusChange(aPrintError);
+  if (mPrt) {
+    mPrt->DoOnStatusChange(aPrintError);
+  }
 }
 
 //-----------------------------------------------------------------
@@ -1954,9 +1959,9 @@ nsPrintEngine::UpdateSelectionAndShrinkPrintObject(nsPrintObject* aPO,
   RefPtr<Selection> selection, selectionPS;
   // It's okay if there is no display shell, just skip copying the selection
   if (displayShell) {
-    selection = displayShell->GetCurrentSelection(nsISelectionController::SELECTION_NORMAL);
+    selection = displayShell->GetCurrentSelection(SelectionType::eNormal);
   }
-  selectionPS = aPO->mPresShell->GetCurrentSelection(nsISelectionController::SELECTION_NORMAL);
+  selectionPS = aPO->mPresShell->GetCurrentSelection(SelectionType::eNormal);
 
   // Reset all existing selection ranges that might have been added by calling
   // this function before.
@@ -2367,9 +2372,9 @@ static nsresult CloneSelection(nsIDocument* aOrigDoc, nsIDocument* aDoc)
   NS_ENSURE_STATE(origShell && shell);
 
   RefPtr<Selection> origSelection =
-    origShell->GetCurrentSelection(nsISelectionController::SELECTION_NORMAL);
+    origShell->GetCurrentSelection(SelectionType::eNormal);
   RefPtr<Selection> selection =
-    shell->GetCurrentSelection(nsISelectionController::SELECTION_NORMAL);
+    shell->GetCurrentSelection(SelectionType::eNormal);
   NS_ENSURE_STATE(origSelection && selection);
 
   int32_t rangeCount = origSelection->RangeCount();

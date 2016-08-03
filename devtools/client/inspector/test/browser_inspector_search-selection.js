@@ -4,7 +4,7 @@
 "use strict";
 
 // Testing navigation between nodes in search results
-var {AppConstants} = Cu.import("resource://gre/modules/AppConstants.jsm");
+const {AppConstants} = require("resource://gre/modules/AppConstants.jsm");
 
 const TEST_URL = URL_ROOT + "doc_inspector_search.html";
 
@@ -36,17 +36,20 @@ add_task(function* () {
     yield sendKeyAndCheck(inspector, msg, "VK_G", { metaKey: true }, "#p2");
 
     msg = "Press shift+meta-g to select the previous node";
-    yield sendKeyAndCheck(inspector, msg, "VK_G", { metaKey: true, shiftKey: true }, "#p1");
+    yield sendKeyAndCheck(inspector, msg, "VK_G",
+                          { metaKey: true, shiftKey: true }, "#p1");
   } else {
     msg = "Press ctrl-g to cycle through multiple nodes";
     yield sendKeyAndCheck(inspector, msg, "VK_G", { ctrlKey: true }, "#p2");
 
     msg = "Press shift+ctrl-g to select the previous node";
-    yield sendKeyAndCheck(inspector, msg, "VK_G", { ctrlKey: true, shiftKey: true }, "#p1");
+    yield sendKeyAndCheck(inspector, msg, "VK_G",
+                          { ctrlKey: true, shiftKey: true }, "#p1");
   }
 });
 
-let sendKeyAndCheck = Task.async(function* (inspector, description, key, modifiers, expectedId) {
+let sendKeyAndCheck = Task.async(function* (inspector, description, key,
+                                            modifiers, expectedId) {
   info(description);
   let onSelect = inspector.once("inspector-updated");
   EventUtils.synthesizeKey(key, modifiers, inspector.panelWin);

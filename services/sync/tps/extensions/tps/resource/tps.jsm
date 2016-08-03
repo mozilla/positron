@@ -18,11 +18,12 @@ Cu.import("resource://gre/modules/Log.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/AppConstants.jsm");
+Cu.import("resource://gre/modules/PlacesUtils.jsm");
 Cu.import("resource://services-common/async.js");
 Cu.import("resource://services-sync/constants.js");
 Cu.import("resource://services-sync/main.js");
 Cu.import("resource://services-sync/util.js");
-
+Cu.import("resource://services-sync/bookmark_validator.js");
 // TPS modules
 Cu.import("resource://tps/logger.jsm");
 
@@ -96,7 +97,6 @@ var TPS = {
   _currentPhase: -1,
   _enabledEngines: null,
   _errors: 0,
-  _finalPhase: false,
   _isTracking: false,
   _operations_pending: 0,
   _phaseFinished: false,
@@ -111,6 +111,7 @@ var TPS = {
   _triggeredSync: false,
   _usSinceEpoch: 0,
   _requestedQuit: false,
+  shouldValidateBookmarks: false,
 
   _init: function TPS__init() {
     // Check if Firefox Accounts is enabled
@@ -162,13 +163,6 @@ var TPS = {
           break;
 
         case "quit-application-requested":
-          // Ensure that we eventually wipe the data on the server
-          if (this._errors || !this._phaseFinished || this._finalPhase) {
-            try {
-              this.WipeServer();
-            } catch (ex) {}
-          }
-
           OBSERVER_TOPICS.forEach(function(topic) {
             Services.obs.removeObserver(this, topic);
           }, this);
@@ -492,6 +486,7 @@ var TPS = {
   },
 
   HandleBookmarks: function (bookmarks, action) {
+    this.shouldValidateBookmarks = true;
     try {
       let items = [];
       for (let folder in bookmarks) {
@@ -583,10 +578,92 @@ var TPS = {
     Logger.logInfo("mozmill setTest: " + obj.name);
   },
 
+  Cleanup() {
+    try {
+      this.WipeServer();
+    } catch (ex) {
+      Logger.logError("Failed to wipe server: " + Log.exceptionStr(ex));
+    }
+    try {
+      Authentication.signOut();
+    } catch (e) {
+      Logger.logError("Failed to sign out: " + Log.exceptionStr(e));
+    }
+  },
+
+  /**
+   * Use Sync's bookmark validation code to see if we've corrupted the tree.
+   */
+  ValidateBookmarks() {
+
+    let getServerBookmarkState = () => {
+      let bookmarkEngine = Weave.Service.engineManager.get('bookmarks');
+      let collection = bookmarkEngine._itemSource();
+      let collectionKey = bookmarkEngine.service.collectionKeys.keyForCollection(bookmarkEngine.name);
+      collection.full = true;
+      let items = [];
+      collection.recordHandler = function(item) {
+        item.decrypt(collectionKey);
+        items.push(item.cleartext);
+      };
+      collection.get();
+      return items;
+    };
+    let serverRecordDumpStr;
+    try {
+      Logger.logInfo("About to perform bookmark validation");
+      let clientTree = Async.promiseSpinningly(PlacesUtils.promiseBookmarksTree("", {
+        includeItemIds: true
+      }));
+      let serverRecords = getServerBookmarkState();
+      // We can't wait until catch to stringify this, since at that point it will have cycles.
+      serverRecordDumpStr = JSON.stringify(serverRecords);
+
+      let validator = new BookmarkValidator();
+      let {problemData} = validator.compareServerWithClient(serverRecords, clientTree);
+
+      for (let {name, count} of problemData.getSummary()) {
+        // Exclude mobile showing up on the server hackily so that we don't
+        // report it every time, see bug 1273234 and 1274394 for more information.
+        if (name === "serverUnexpected" && problemData.serverUnexpected.indexOf("mobile") >= 0) {
+          --count;
+        } else if (name === "differences") {
+          // Also exclude errors in parentName/wrongParentName (bug 1276969) for
+          // the same reason.
+          let newCount = problemData.differences.filter(diffInfo =>
+            !diffInfo.differences.every(diff =>
+              diff === "parentName")).length
+          count = newCount;
+        } else if (name === "wrongParentName") {
+          continue;
+        }
+        if (count) {
+          // Log this out before we assert. This is useful in the context of TPS logs, since we
+          // can see the IDs in the test files.
+          Logger.logInfo(`Validation problem: "${name}": ${JSON.stringify(problemData[name])}`);
+        }
+        Logger.AssertEqual(count, 0, `Bookmark validation error of type ${name}`);
+      }
+    } catch (e) {
+      // Dump the client records (should always be doable)
+      DumpBookmarks();
+      // Dump the server records if gotten them already.
+      if (serverRecordDumpStr) {
+        Logger.logInfo("Server bookmark records:\n" + serverRecordDumpStr + "\n");
+      }
+      this.DumpError("Bookmark validation failed", e);
+    }
+    Logger.logInfo("Bookmark validation finished");
+  },
+
   RunNextTestAction: function() {
     try {
       if (this._currentAction >=
-          this._phaselist["phase" + this._currentPhase].length) {
+          this._phaselist[this._currentPhase].length) {
+        if (this.shouldValidateBookmarks) {
+          // Run bookmark validation and then finish up
+          this.ValidateBookmarks();
+        }
         // we're all done
         Logger.logInfo("test phase " + this._currentPhase + ": " +
                        (this._errors ? "FAIL" : "PASS"));
@@ -602,7 +679,7 @@ var TPS = {
         return;
       }
 
-      let phase = this._phaselist["phase" + this._currentPhase];
+      let phase = this._phaselist[this._currentPhase];
       let action = phase[this._currentAction];
       Logger.logInfo("starting action: " + action[0].name);
       action[0].apply(this, action.slice(1));
@@ -676,6 +753,9 @@ var TPS = {
         this.waitForEvent("weave:service:ready");
       }
 
+      // We only want to do this if we modified the bookmarks this phase.
+      this.shouldValidateBookmarks = false;
+
       // Always give Sync an extra tick to initialize. If we waited for the
       // service:ready event, this is required to ensure all handlers have
       // executed.
@@ -696,14 +776,21 @@ var TPS = {
       // parse the test file
       Services.scriptloader.loadSubScript(file, this);
       this._currentPhase = phase;
-      let this_phase = this._phaselist["phase" + this._currentPhase];
+      if (this._currentPhase.startsWith("cleanup-")) {
+        let profileToClean = Cc["@mozilla.org/toolkit/profile-service;1"]
+                             .getService(Ci.nsIToolkitProfileService)
+                             .selectedProfile.name;
+        this.phases[this._currentPhase] = profileToClean;
+        this.Phase(this._currentPhase, [[this.Cleanup]]);
+      }
+      let this_phase = this._phaselist[this._currentPhase];
 
       if (this_phase == undefined) {
         this.DumpError("invalid phase " + this._currentPhase);
         return;
       }
 
-      if (this.phases["phase" + this._currentPhase] == undefined) {
+      if (this.phases[this._currentPhase] == undefined) {
         this.DumpError("no profile defined for phase " + this._currentPhase);
         return;
       }
@@ -723,26 +810,10 @@ var TPS = {
           }
         }
       }
+      Logger.logInfo("Starting phase " + this._currentPhase);
 
-      Logger.logInfo("Starting phase " + parseInt(phase, 10) + "/" +
-                     Object.keys(this._phaselist).length);
-
-      Logger.logInfo("setting client.name to " + this.phases["phase" + this._currentPhase]);
-      Weave.Svc.Prefs.set("client.name", this.phases["phase" + this._currentPhase]);
-
-      // TODO Phases should be defined in a data type that has strong
-      // ordering, not by lexical sorting.
-      let currentPhase = parseInt(this._currentPhase, 10);
-
-      // Login at the beginning of the test.
-      if (currentPhase <= 1) {
-        this_phase.unshift([this.Login]);
-      }
-
-      // Wipe the server at the end of the final test phase.
-      if (currentPhase >= Object.keys(this.phases).length) {
-        this._finalPhase = true;
-      }
+      Logger.logInfo("setting client.name to " + this.phases[this._currentPhase]);
+      Weave.Svc.Prefs.set("client.name", this.phases[this._currentPhase]);
 
       // If a custom server was specified, set it now
       if (this.config["serverURL"]) {
@@ -782,6 +853,10 @@ var TPS = {
    *         Array of functions/actions to perform.
    */
   Phase: function Test__Phase(phasename, fnlist) {
+    if (Object.keys(this._phaselist).length === 0) {
+      // This is the first phase, add that we need to login.
+      fnlist.unshift([this.Login]);
+    }
     this._phaselist[phasename] = fnlist;
   },
 
@@ -974,6 +1049,9 @@ var Bookmarks = {
   },
   verifyNot: function Bookmarks__verifyNot(bookmarks) {
     TPS.HandleBookmarks(bookmarks, ACTION_VERIFY_NOT);
+  },
+  skipValidation() {
+    TPS.shouldValidateBookmarks = false;
   }
 };
 

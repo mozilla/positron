@@ -25,6 +25,7 @@
 # include <mach/mach.h>
 # include "jslock.h"
 #endif
+#include "threading/Thread.h"
 
 struct JSRuntime;
 
@@ -36,12 +37,21 @@ InterruptRunningJitCode(JSRuntime* rt);
 
 namespace wasm {
 
-// Set up any signal/exception handlers needed to execute code in the given
-// runtime. Return whether runtime can:
-//  - rely on fault handler support for avoiding asm.js heap bounds checks
-//  - rely on InterruptRunningJitCode to halt running Ion/asm.js from any thread
+// Ensure the given JSRuntime is set up to use signals. Failure to enable signal
+// handlers indicates some catastrophic failure and creation of the runtime must
+// fail.
 MOZ_MUST_USE bool
-EnsureSignalHandlersInstalled(JSRuntime* rt);
+EnsureSignalHandlers(JSRuntime* rt);
+
+// Return whether signals can be used in this process for interrupts or, ifdef
+// ASMJS_MAY_USE_SIGNAL_HANDLERS, asm.js/wasm out-of-bounds. This value can
+// change over time solely due to DisableSignalHandlersForTesting.
+bool
+HaveSignalHandlers();
+
+// Artificially suppress signal handler support, for testing purposes.
+void
+SuppressSignalHandlersForTesting(bool suppress);
 
 #if defined(XP_DARWIN) && defined(ASMJS_MAY_USE_SIGNAL_HANDLERS)
 // On OSX we are forced to use the lower-level Mach exception mechanism instead
@@ -53,7 +63,7 @@ EnsureSignalHandlersInstalled(JSRuntime* rt);
 class MachExceptionHandler
 {
     bool installed_;
-    PRThread* thread_;
+    js::Thread thread_;
     mach_port_t port_;
 
     void uninstall();

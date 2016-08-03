@@ -104,6 +104,9 @@ public class Tab {
     private boolean mIsEditing;
     private final TabEditingState mEditingState = new TabEditingState();
 
+    // Will be true when tab is loaded from cache while device was offline.
+    private boolean mLoadedFromCache;
+
     public static final int STATE_DELAYED = 0;
     public static final int STATE_LOADING = 1;
     public static final int STATE_SUCCESS = 2;
@@ -301,8 +304,19 @@ public class Tab {
         return mHasOpenSearch;
     }
 
+    public boolean hasLoadedFromCache() {
+        return mLoadedFromCache;
+    }
+
     public SiteIdentity getSiteIdentity() {
         return mSiteIdentity;
+    }
+
+    public void resetSiteIdentity() {
+        if (mSiteIdentity != null) {
+            mSiteIdentity.reset();
+            Tabs.getInstance().notifyListeners(this, Tabs.TabEvents.SECURITY_CHANGE);
+        }
     }
 
     public SiteLogins getSiteLogins() {
@@ -354,7 +368,7 @@ public class Tab {
         ThreadUtils.postToBackgroundThread(new Runnable() {
             @Override
             public void run() {
-                urlMetadata.save(cr, mUrl, data);
+                urlMetadata.save(cr, data);
             }
         });
     }
@@ -461,8 +475,16 @@ public class Tab {
             mFaviconUrl = null;
         }
 
+        final Favicons.LoadType loadType;
+        if (mSiteIdentity.getSecurityMode() == SiteIdentity.SecurityMode.CHROMEUI) {
+            loadType = Favicons.LoadType.PRIVILEGED;
+        } else {
+            loadType = Favicons.LoadType.UNPRIVILEGED;
+        }
+
         int flags = (isPrivate() || mErrorType != ErrorType.NONE) ? 0 : LoadFaviconTask.FLAG_PERSIST;
-        mFaviconLoadId = Favicons.getSizedFavicon(mAppContext, mUrl, mFaviconUrl, Favicons.browserToolbarFaviconSize, flags,
+        mFaviconLoadId = Favicons.getSizedFavicon(mAppContext, mUrl, mFaviconUrl,
+                loadType, Favicons.browserToolbarFaviconSize, flags,
                 new OnFaviconLoadedListener() {
                     @Override
                     public void onFaviconLoaded(String pageUrl, String faviconURL, Bitmap favicon) {
@@ -521,12 +543,12 @@ public class Tab {
         mHasOpenSearch = hasOpenSearch;
     }
 
-    public void updateIdentityData(JSONObject identityData) {
-        mSiteIdentity.update(identityData);
+    public void setLoadedFromCache(boolean loadedFromCache) {
+        mLoadedFromCache = loadedFromCache;
     }
 
-    public void setLoginInsecure(boolean isInsecure) {
-        mSiteIdentity.setLoginInsecure(isInsecure);
+    public void updateIdentityData(JSONObject identityData) {
+        mSiteIdentity.update(identityData);
     }
 
     public void setSiteLogins(SiteLogins siteLogins) {

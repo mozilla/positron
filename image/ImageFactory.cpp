@@ -4,6 +4,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "ImageFactory.h"
+
 #include <algorithm>
 
 #include "mozilla/Likely.h"
@@ -22,7 +24,6 @@
 #include "nsContentUtils.h"
 #include "nsIScriptSecurityManager.h"
 
-#include "ImageFactory.h"
 #include "gfxPrefs.h"
 
 namespace mozilla {
@@ -106,16 +107,6 @@ template <typename T>
 static already_AddRefed<Image>
 BadImage(const char* aMessage, RefPtr<T>& aImage)
 {
-#ifdef DEBUG
-  nsAutoCString msg(aMessage);
-  const ImageURL* uri = aImage->GetURI();
-  if (uri && uri->Spec()) {
-    msg.AppendLiteral(" for ");
-    msg.Append(uri->Spec());
-  }
-  NS_WARNING(msg.get());
-#endif
-
   aImage->SetHasError();
   return aImage.forget();
 }

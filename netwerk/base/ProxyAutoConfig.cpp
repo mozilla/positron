@@ -319,17 +319,56 @@ void PACLogToConsole(nsString &aMessage)
   consoleService->LogStringMessage(aMessage.get());
 }
 
-// Javascript errors are logged to the main error console
+// Javascript errors and warnings are logged to the main error console
 static void
-PACErrorReporter(JSContext *cx, const char *message, JSErrorReport *report)
+PACLogErrorOrWarning(const nsAString& aKind, JSErrorReport* aReport)
 {
-  nsString formattedMessage(NS_LITERAL_STRING("PAC Execution Error: "));
-  formattedMessage += report->ucmessage;
+  nsString formattedMessage(NS_LITERAL_STRING("PAC Execution "));
+  formattedMessage += aKind;
+  formattedMessage += NS_LITERAL_STRING(": ");
+  formattedMessage += aReport->ucmessage;
   formattedMessage += NS_LITERAL_STRING(" [");
-  formattedMessage.Append(report->linebuf(), report->linebufLength());
+  formattedMessage.Append(aReport->linebuf(), aReport->linebufLength());
   formattedMessage += NS_LITERAL_STRING("]");
   PACLogToConsole(formattedMessage);
 }
+
+static void
+PACWarningReporter(JSContext* aCx, const char* aMessage, JSErrorReport* aReport)
+{
+  MOZ_ASSERT(aReport);
+  MOZ_ASSERT(JSREPORT_IS_WARNING(aReport->flags));
+
+  PACLogErrorOrWarning(NS_LITERAL_STRING("Warning"), aReport);
+}
+
+class MOZ_STACK_CLASS AutoPACErrorReporter
+{
+  JSContext* mCx;
+
+public:
+  explicit AutoPACErrorReporter(JSContext* aCx)
+    : mCx(aCx)
+  {}
+  ~AutoPACErrorReporter() {
+    if (!JS_IsExceptionPending(mCx)) {
+      return;
+    }
+    JS::RootedValue exn(mCx);
+    if (!JS_GetPendingException(mCx, &exn)) {
+      return;
+    }
+    JS_ClearPendingException(mCx);
+
+    js::ErrorReport report(mCx);
+    if (!report.init(mCx, exn, js::ErrorReport::WithSideEffects)) {
+      JS_ClearPendingException(mCx);
+      return;
+    }
+
+    PACLogErrorOrWarning(NS_LITERAL_STRING("Error"), report.report());
+  }
+};
 
 // timeout of 0 means the normal necko timeout strategy, otherwise the dns request
 // will be canceled after aTimeout milliseconds
@@ -600,9 +639,6 @@ class JSRuntimeWrapper
     mGlobal = nullptr;
 
     MOZ_COUNT_DTOR(JSRuntimeWrapper);
-    if (mContext) {
-      JS_DestroyContext(mContext);
-    }
 
     if (mRuntime) {
       JS_DestroyRuntime(mRuntime);
@@ -637,16 +673,19 @@ private:
 
   nsresult Init()
   {
+    mContext = JS_GetContext(mRuntime);
+
     /*
      * Not setting this will cause JS_CHECK_RECURSION to report false
      * positives
      */
-    JS_SetNativeStackQuota(mRuntime, 128 * sizeof(size_t) * 1024);
+    JS_SetNativeStackQuota(mContext, 128 * sizeof(size_t) * 1024);
 
-    JS_SetErrorReporter(mRuntime, PACErrorReporter);
+    JS::SetWarningReporter(mContext, PACWarningReporter);
 
-    mContext = JS_NewContext(mRuntime, 0);
-    NS_ENSURE_TRUE(mContext, NS_ERROR_OUT_OF_MEMORY);
+    if (!JS::InitSelfHostedCode(mContext)) {
+      return NS_ERROR_OUT_OF_MEMORY;
+    }
 
     JSAutoRequest ar(mContext);
 
@@ -655,14 +694,20 @@ private:
     options.behaviors().setVersion(JSVERSION_LATEST);
     mGlobal = JS_NewGlobalObject(mContext, &sGlobalClass, nullptr,
                                  JS::DontFireOnNewGlobalHook, options);
-    NS_ENSURE_TRUE(mGlobal, NS_ERROR_OUT_OF_MEMORY);
+    if (!mGlobal) {
+      JS_ClearPendingException(mContext);
+      return NS_ERROR_OUT_OF_MEMORY;
+    }
     JS::Rooted<JSObject*> global(mContext, mGlobal);
 
     JSAutoCompartment ac(mContext, global);
-    JS_InitStandardClasses(mContext, global);
-
-    if (!JS_DefineFunctions(mContext, global, PACGlobalFunctions))
+    AutoPACErrorReporter aper(mContext);
+    if (!JS_InitStandardClasses(mContext, global)) {
       return NS_ERROR_FAILURE;
+    }
+    if (!JS_DefineFunctions(mContext, global, PACGlobalFunctions)) {
+      return NS_ERROR_FAILURE;
+    }
 
     JS_FireOnNewGlobalObject(mContext, global);
 
@@ -723,6 +768,7 @@ ProxyAutoConfig::SetupJS()
   JSContext* cx = mJSRuntime->Context();
   JSAutoRequest ar(cx);
   JSAutoCompartment ac(cx, mJSRuntime->Global());
+  AutoPACErrorReporter aper(cx);
 
   // check if this is a data: uri so that we don't spam the js console with
   // huge meaningless strings. this is not on the main thread, so it can't
@@ -785,6 +831,7 @@ ProxyAutoConfig::GetProxyForURI(const nsCString &aTestURI,
   JSContext *cx = mJSRuntime->Context();
   JSAutoRequest ar(cx);
   JSAutoCompartment ac(cx, mJSRuntime->Global());
+  AutoPACErrorReporter aper(cx);
 
   // the sRunning flag keeps a new PAC file from being installed
   // while the event loop is spinning on a DNS function. Don't early return.

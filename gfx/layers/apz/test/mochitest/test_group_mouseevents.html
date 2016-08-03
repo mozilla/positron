@@ -10,21 +10,23 @@
 
 var subtests = [
   // Sanity test to synthesize a mouse click
-  {'file': 'helper_click.html'},
+  {'file': 'helper_click.html?dtc=false'},
+  // Same as above, but with a dispatch-to-content region that exercises the
+  // main-thread notification codepaths for mouse events
+  {'file': 'helper_click.html?dtc=true'},
   // Sanity test for click but with some mouse movement between the down and up
-  {'file': 'helper_drag_click.html'}
+  {'file': 'helper_drag_click.html'},
+  // Test for dragging on a fake-scrollbar element that scrolls the page
+  {'file': 'helper_drag_scroll.html'}
 ];
 
-SimpleTest.waitForExplicitFinish();
-window.onload = function() {
-  if (!SpecialPowers.getDOMWindowUtils(window).asyncPanZoomEnabled) {
-    ok(true, "APZ is not enabled, this test is not relevant, sorry!\n");
-    SimpleTest.finish();
-    return;
-  }
-  runSubtestsSeriallyInFreshWindows(subtests)
-    .then(function() { SimpleTest.finish() });
-};
+if (isApzEnabled()) {
+  SimpleTest.waitForExplicitFinish();
+  window.onload = function() {
+    runSubtestsSeriallyInFreshWindows(subtests)
+    .then(SimpleTest.finish);
+  };
+}
 
   </script>
 </head>

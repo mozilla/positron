@@ -73,11 +73,15 @@ wasm::Classify(Expr expr)
       case Expr::F32Neg:
       case Expr::F32Ceil:
       case Expr::F32Floor:
+      case Expr::F32Trunc:
+      case Expr::F32Nearest:
       case Expr::F32Sqrt:
       case Expr::F64Abs:
       case Expr::F64Neg:
       case Expr::F64Ceil:
       case Expr::F64Floor:
+      case Expr::F64Trunc:
+      case Expr::F64Nearest:
       case Expr::F64Sqrt:
       case Expr::I32BitNot:
       case Expr::I32Abs:
@@ -263,8 +267,17 @@ wasm::Classify(Expr expr)
       case Expr::F32x4fromInt32x4:
       case Expr::F32x4fromUint32x4:
       case Expr::I32x4fromFloat32x4Bits:
+      case Expr::I32x4fromInt8x16Bits:
+      case Expr::I32x4fromInt16x8Bits:
+      case Expr::I16x8fromInt8x16Bits:
+      case Expr::I16x8fromInt32x4Bits:
+      case Expr::I16x8fromFloat32x4Bits:
+      case Expr::I8x16fromInt16x8Bits:
+      case Expr::I8x16fromInt32x4Bits:
+      case Expr::I8x16fromFloat32x4Bits:
+      case Expr::F32x4fromInt8x16Bits:
+      case Expr::F32x4fromInt16x8Bits:
       case Expr::F32x4fromInt32x4Bits:
-      case Expr::F32x4fromUint32x4Bits:
         return ExprKind::Conversion;
       case Expr::I32Load8S:
       case Expr::I32Load8U:
@@ -459,10 +472,6 @@ wasm::Classify(Expr expr)
         return ExprKind::SimdComparison;
       case Expr::CurrentMemory:
       case Expr::GrowMemory:
-      case Expr::F32Trunc:
-      case Expr::F32Nearest:
-      case Expr::F64Trunc:
-      case Expr::F64Nearest:
         break;
     }
     MOZ_MAKE_COMPILER_ASSUME_IS_UNREACHABLE("unimplemented opcode");

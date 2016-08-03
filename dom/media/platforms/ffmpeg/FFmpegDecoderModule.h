@@ -31,30 +31,28 @@ public:
   virtual ~FFmpegDecoderModule() {}
 
   already_AddRefed<MediaDataDecoder>
-  CreateVideoDecoder(const VideoInfo& aConfig,
-                     layers::LayersBackend aLayersBackend,
-                     layers::ImageContainer* aImageContainer,
-                     FlushableTaskQueue* aVideoTaskQueue,
-                     MediaDataDecoderCallback* aCallback,
-                     DecoderDoctorDiagnostics* aDiagnostics) override
+  CreateVideoDecoder(const CreateDecoderParams& aParams) override
   {
     RefPtr<MediaDataDecoder> decoder =
-      new FFmpegVideoDecoder<V>(mLib, aVideoTaskQueue, aCallback, aConfig,
-                                aImageContainer);
+      new FFmpegVideoDecoder<V>(mLib,
+                                aParams.mTaskQueue,
+                                aParams.mCallback,
+                                aParams.VideoConfig(),
+                                aParams.mImageContainer);
     return decoder.forget();
   }
 
   already_AddRefed<MediaDataDecoder>
-  CreateAudioDecoder(const AudioInfo& aConfig,
-                     FlushableTaskQueue* aAudioTaskQueue,
-                     MediaDataDecoderCallback* aCallback,
-                     DecoderDoctorDiagnostics* aDiagnostics) override
+  CreateAudioDecoder(const CreateDecoderParams& aParams) override
   {
 #ifdef USING_MOZFFVPX
     return nullptr;
 #else
     RefPtr<MediaDataDecoder> decoder =
-      new FFmpegAudioDecoder<V>(mLib, aAudioTaskQueue, aCallback, aConfig);
+      new FFmpegAudioDecoder<V>(mLib,
+                                aParams.mTaskQueue,
+                                aParams.mCallback,
+                                aParams.AudioConfig());
     return decoder.forget();
 #endif
   }

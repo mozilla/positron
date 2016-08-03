@@ -32,7 +32,7 @@ var ContentClick = {
   contentAreaClick: function (json, browser) {
     // This is heavily based on contentAreaClick from browser.js (Bug 903016)
     // The json is set up in a way to look like an Event.
-    let window = browser.ownerDocument.defaultView;
+    let window = browser.ownerGlobal;
 
     if (!json.href) {
       // Might be middle mouse navigation.
@@ -82,6 +82,11 @@ var ContentClick = {
                    referrerPolicy: json.referrerPolicy,
                    noReferrer: json.noReferrer,
                    allowMixedContent: json.allowMixedContent };
+
+    // The new tab/window must use the same userContextId.
+    if (json.originAttributes.userContextId) {
+      params.userContextId = json.originAttributes.userContextId;
+    }
 
     window.openLinkIn(json.href, where, params);
   }

@@ -30,27 +30,18 @@ if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'windows':
         'nsNativeAppSupportWin.cpp',
     ]
 elif CONFIG['MOZ_WIDGET_TOOLKIT'] == 'cocoa':
-    EXPORTS += ['MacQuirks.h']
-    UNIFIED_SOURCES += [
-        'nsCommandLineServiceMac.cpp',
-    ]
     UNIFIED_SOURCES += [
         'MacApplicationDelegate.mm',
         'MacAutoreleasePool.mm',
         'MacLaunchHelper.mm',
+        'nsCommandLineServiceMac.cpp',
         'nsNativeAppSupportCocoa.mm',
+        'updaterfileutils_osx.mm',
     ]
 elif CONFIG['MOZ_WIDGET_TOOLKIT'] == 'uikit':
     UNIFIED_SOURCES += [
         'nsNativeAppSupportDefault.cpp',
         'UIKitDirProvider.mm',
-    ]
-elif CONFIG['MOZ_WIDGET_TOOLKIT'] == 'qt':
-    EXPORTS += ['nsQAppInstance.h']
-    SOURCES += [
-        '!moc_nsNativeAppSupportQt.cpp',
-        'nsNativeAppSupportQt.cpp',
-        'nsQAppInstance.cpp',
     ]
 elif 'gtk' in CONFIG['MOZ_WIDGET_TOOLKIT']:
     UNIFIED_SOURCES += [

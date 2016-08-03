@@ -93,7 +93,7 @@ class EvalScriptGuard
             EvalCacheEntry cacheEntry = {lookupStr_, script_, lookup_.callerScript, lookup_.pc};
             lookup_.str = lookupStr_;
             if (lookup_.str && IsEvalCacheCandidate(script_)) {
-                bool ok = cx_->runtime()->evalCache.relookupOrAdd(p_, lookup_, cacheEntry);
+                bool ok = cx_->caches.evalCache.relookupOrAdd(p_, lookup_, cacheEntry);
                 (void)ok; // Ignore failure to add cache entry.
             }
         }
@@ -106,10 +106,10 @@ class EvalScriptGuard
         lookup_.callerScript = callerScript;
         lookup_.version = cx_->findVersion();
         lookup_.pc = pc;
-        p_ = cx_->runtime()->evalCache.lookupForAdd(lookup_);
+        p_ = cx_->caches.evalCache.lookupForAdd(lookup_);
         if (p_) {
             script_ = p_->script;
-            cx_->runtime()->evalCache.remove(p_);
+            cx_->caches.evalCache.remove(p_);
             script_->uncacheForEval();
         }
     }
@@ -293,13 +293,19 @@ EvalKernel(JSContext* cx, HandleValue v, EvalType evalType, AbstractFramePtr cal
             return false;
 
         CompileOptions options(cx);
-        options.setFileAndLine(filename, 1)
-               .setIsRunOnce(true)
+        options.setIsRunOnce(true)
                .setForEval(true)
                .setNoScriptRval(false)
                .setMutedErrors(mutedErrors)
-               .setIntroductionInfo(introducerFilename, "eval", lineno, maybeScript, pcOffset)
                .maybeMakeStrictMode(evalType == DIRECT_EVAL && IsStrictEvalPC(pc));
+
+        if (introducerFilename) {
+            options.setFileAndLine(filename, 1);
+            options.setIntroductionInfo(introducerFilename, "eval", lineno, maybeScript, pcOffset);
+        } else {
+            options.setFileAndLine("eval", 1);
+            options.setIntroductionType("eval");
+        }
 
         AutoStableStringChars linearChars(cx);
         if (!linearChars.initTwoByte(cx, linearStr))
@@ -375,13 +381,19 @@ js::DirectEvalStringFromIon(JSContext* cx,
             return false;
 
         CompileOptions options(cx);
-        options.setFileAndLine(filename, 1)
-               .setIsRunOnce(true)
+        options.setIsRunOnce(true)
                .setForEval(true)
                .setNoScriptRval(false)
                .setMutedErrors(mutedErrors)
-               .setIntroductionInfo(introducerFilename, "eval", lineno, maybeScript, pcOffset)
                .maybeMakeStrictMode(IsStrictEvalPC(pc));
+
+        if (introducerFilename) {
+            options.setFileAndLine(filename, 1);
+            options.setIntroductionInfo(introducerFilename, "eval", lineno, maybeScript, pcOffset);
+        } else {
+            options.setFileAndLine("eval", 1);
+            options.setIntroductionType("eval");
+        }
 
         AutoStableStringChars linearChars(cx);
         if (!linearChars.initTwoByte(cx, linearStr))

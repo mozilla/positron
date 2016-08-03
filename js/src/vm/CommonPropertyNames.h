@@ -66,9 +66,9 @@
     macro(currencyDisplay, currencyDisplay, "currencyDisplay") \
     macro(DateTimeFormat, DateTimeFormat, "DateTimeFormat") \
     macro(DateTimeFormatFormatGet, DateTimeFormatFormatGet, "Intl_DateTimeFormat_format_get") \
-    macro(DateTimeFormatFormatToPartsGet, DateTimeFormatFormatToPartsGet, "Intl_DateTimeFormat_formatToParts_get") \
+    macro(DateTimeFormatFormatToParts, DateTimeFormatFormatToParts, "Intl_DateTimeFormat_formatToParts") \
     macro(day, day, "day") \
-    macro(dayperiod, dayperiod, "dayperiod") \
+    macro(dayPeriod, dayPeriod, "dayPeriod") \
     macro(decodeURI, decodeURI, "decodeURI") \
     macro(decodeURIComponent, decodeURIComponent, "decodeURIComponent") \
     macro(default_, default_, "default") \
@@ -169,6 +169,7 @@
     macro(let, let, "let") \
     macro(line, line, "line") \
     macro(lineNumber, lineNumber, "lineNumber") \
+    macro(literal, literal, "literal") \
     macro(loc, loc, "loc") \
     macro(locale, locale, "locale") \
     macro(lookupGetter, lookupGetter, "__lookupGetter__") \
@@ -188,6 +189,7 @@
     macro(multiline, multiline, "multiline") \
     macro(name, name, "name") \
     macro(NaN, NaN, "NaN") \
+    macro(NegativeInfinity, NegativeInfinity, "-Infinity") \
     macro(new, new_, "new") \
     macro(next, next, "next") \
     macro(NFC, NFC, "NFC") \
@@ -238,7 +240,6 @@
     macro(scripts, scripts, "scripts") \
     macro(second, second, "second") \
     macro(sensitivity, sensitivity, "sensitivity") \
-    macro(separator, separator, "separator") \
     macro(set, set, "set") \
     macro(setPrefix, setPrefix, "set ") \
     macro(setPrototypeOf, setPrototypeOf, "setPrototypeOf") \
@@ -299,6 +300,12 @@
     macro(wasm, wasm, "wasm") \
     macro(watch, watch, "watch") \
     macro(WeakSet_add, WeakSet_add, "WeakSet_add") \
+    macro(RegExp_prototype_Exec, RegExp_prototype_Exec, "RegExp_prototype_Exec") \
+    macro(UnwrapAndCallRegExpBuiltinExec, UnwrapAndCallRegExpBuiltinExec, "UnwrapAndCallRegExpBuiltinExec") \
+    macro(RegExpBuiltinExec, RegExpBuiltinExec, "RegExpBuiltinExec") \
+    macro(RegExpMatcher, RegExpMatcher, "RegExpMatcher") \
+    macro(RegExpSearcher, RegExpSearcher, "RegExpSearcher") \
+    macro(RegExpTester, RegExpTester, "RegExpTester") \
     macro(weekday, weekday, "weekday") \
     macro(writable, writable, "writable") \
     macro(year, year, "year") \
@@ -315,5 +322,8 @@
     macro(symbol, symbol, "symbol") \
     /* Function names for properties named by symbols. */ \
     macro(Symbol_iterator_fun, Symbol_iterator_fun, "[Symbol.iterator]") \
+    /* Not really a property name, but we use this to compare to atomized
+       script source strings */ \
+    macro(selfHosted, selfHosted, "self-hosted") \
 
 #endif /* vm_CommonPropertyNames_h */

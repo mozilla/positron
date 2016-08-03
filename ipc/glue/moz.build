@@ -35,10 +35,15 @@ EXPORTS.mozilla.ipc += [
     'SharedMemory.h',
     'SharedMemoryBasic.h',
     'Shmem.h',
+    'TaskFactory.h',
     'Transport.h',
     'URIUtils.h',
     'WindowsMessageLoop.h',
 ]
+
+if CONFIG['MOZ_FAULTY'] == '1':
+    EXPORTS.mozilla.ipc += ['Faulty.h']
+    SOURCES += ['Faulty.cpp']
 
 if CONFIG['OS_ARCH'] == 'WINNT':
     DEFINES['WEBRTC_WIN'] = True

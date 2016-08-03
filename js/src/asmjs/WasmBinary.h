@@ -33,8 +33,11 @@ static const char FunctionSectionId[]    = "function";
 static const char TableSectionId[]       = "table";
 static const char MemorySectionId[]      = "memory";
 static const char ExportSectionId[]      = "export";
+static const char StartSectionId[]       = "start";
 static const char CodeSectionId[]        = "code";
+static const char ElemSectionId[]        = "elem";
 static const char DataSectionId[]        = "data";
+static const char NameSectionId[]        = "name";
 
 enum class ValType
 {
@@ -61,6 +64,20 @@ enum class ValType
 enum class TypeConstructor
 {
     Function                             = 0x40
+};
+
+enum class DefinitionKind
+{
+    Function                             = 0x00,
+    Table                                = 0x01,
+    Memory                               = 0x02
+};
+
+enum class ResizableFlags
+{
+    Default                              = 0x1,
+    HasMaximum                           = 0x2,
+    AllowedMask                          = 0x3
 };
 
 enum class Expr
@@ -571,6 +588,7 @@ class Decoder
     const uint8_t* const beg_;
     const uint8_t* const end_;
     const uint8_t* cur_;
+    UniqueChars* error_;
 
     template <class T>
     MOZ_MUST_USE bool read(T* out) {
@@ -646,18 +664,33 @@ class Decoder
     static const size_t ExprLimit = 2 * UINT8_MAX - 1;
 
   public:
-    Decoder(const uint8_t* begin, const uint8_t* end)
+    Decoder(const uint8_t* begin, const uint8_t* end, UniqueChars* error = nullptr)
       : beg_(begin),
         end_(end),
-        cur_(begin)
+        cur_(begin),
+        error_(error)
     {
         MOZ_ASSERT(begin <= end);
     }
-    explicit Decoder(const Bytes& bytes)
+    explicit Decoder(const Bytes& bytes, UniqueChars* error = nullptr)
       : beg_(bytes.begin()),
         end_(bytes.end()),
-        cur_(bytes.begin())
+        cur_(bytes.begin()),
+        error_(error)
     {}
+
+    bool fail(const char* msg) {
+        error_->reset(strdup(msg));
+        return false;
+    }
+    bool fail(UniqueChars msg) {
+        *error_ = Move(msg);
+        return false;
+    }
+    void clearError() {
+        if (error_)
+            error_->reset();
+    }
 
     bool done() const {
         MOZ_ASSERT(cur_ <= end_);
@@ -744,19 +777,7 @@ class Decoder
 
     // See writeBytes comment.
 
-    MOZ_MUST_USE bool readBytes(Bytes* bytes) {
-        uint32_t numBytes;
-        if (!readVarU32(&numBytes))
-            return false;
-        if (bytesRemain() < numBytes)
-            return false;
-        if (!bytes->resize(numBytes))
-            return false;
-        memcpy(bytes->begin(), cur_, numBytes);
-        cur_ += numBytes;
-        return true;
-    }
-    MOZ_MUST_USE bool readBytesRaw(uint32_t numBytes, const uint8_t** bytes) {
+    MOZ_MUST_USE bool readBytes(uint32_t numBytes, const uint8_t** bytes = nullptr) {
         if (bytes)
             *bytes = cur_;
         if (bytesRemain() < numBytes)
@@ -770,8 +791,9 @@ class Decoder
     static const uint32_t NotStarted = UINT32_MAX;
 
     template <size_t IdSizeWith0>
-    MOZ_MUST_USE bool startSection(const char (&id)[IdSizeWith0], uint32_t* startOffset,
-                                             uint32_t* size) {
+    MOZ_MUST_USE bool startSection(const char (&id)[IdSizeWith0],
+                                   uint32_t* startOffset,
+                                   uint32_t* size) {
         static const size_t IdSize = IdSizeWith0 - 1;
         MOZ_ASSERT(id[IdSize] == '\0');
         const uint8_t* before = cur_;
@@ -796,6 +818,10 @@ class Decoder
     }
     MOZ_MUST_USE bool finishSection(uint32_t startOffset, uint32_t size) {
         return size == (cur_ - beg_) - startOffset;
+    }
+    void ignoreSection(uint32_t startOffset, uint32_t size) {
+        cur_ = (beg_ + startOffset) + size;
+        MOZ_ASSERT(cur_ <= end_);
     }
     MOZ_MUST_USE bool skipSection() {
         uint32_t idSize;

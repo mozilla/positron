@@ -1,17 +1,12 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
-/* eslint-disable mozilla/no-cpows-in-tests */
-/* global sendAsyncMessage */
-
 "use strict";
 
 // Service workers can't be loaded from chrome://,
 // but http:// is ok with dom.serviceWorkers.testing.enabled turned on.
-const HTTP_ROOT = CHROME_ROOT.replace("chrome://mochitests/content/",
-                                      "http://mochi.test:8888/");
-const SERVICE_WORKER = HTTP_ROOT + "service-workers/empty-sw.js";
-const TAB_URL = HTTP_ROOT + "service-workers/empty-sw.html";
+const SERVICE_WORKER = URL_ROOT + "service-workers/empty-sw.js";
+const TAB_URL = URL_ROOT + "service-workers/empty-sw.html";
 
 add_task(function* () {
   yield new Promise(done => {
@@ -40,29 +35,12 @@ add_task(function* () {
   let aboutDebuggingUpdate = waitForMutation(serviceWorkersElement,
     { childList: true });
 
-  // Use message manager to work with e10s
-  let frameScript = function () {
-    // Retrieve the `sw` promise created in the html page
-    let { sw } = content.wrappedJSObject;
-    sw.then(function (registration) {
-      registration.unregister().then(function () {
-        sendAsyncMessage("sw-unregistered");
-      },
-      function (e) {
-        dump("SW not unregistered; " + e + "\n");
-      });
-    });
-  };
-  let mm = swTab.linkedBrowser.messageManager;
-  mm.loadFrameScript("data:,(" + encodeURIComponent(frameScript) + ")()", true);
-
-  yield new Promise(done => {
-    mm.addMessageListener("sw-unregistered", function listener() {
-      mm.removeMessageListener("sw-unregistered", listener);
-      done();
-    });
-  });
-  ok(true, "Service worker registration unregistered");
+  try {
+    yield unregisterServiceWorker(swTab);
+    ok(true, "Service worker registration unregistered");
+  } catch (e) {
+    ok(false, "SW not unregistered; " + e);
+  }
 
   yield aboutDebuggingUpdate;
 

@@ -13,8 +13,7 @@
 #include "mozilla/SyncRunnable.h"
 #include "mozilla/UniquePtr.h"
 
-extern mozilla::LogModule* GetPDMLog();
-#define LOG(...) MOZ_LOG(GetPDMLog(), mozilla::LogLevel::Debug, (__VA_ARGS__))
+#define LOG(...) MOZ_LOG(sPDMLog, mozilla::LogLevel::Debug, (__VA_ARGS__))
 #define FourCC2Str(n) ((char[5]){(char)(n >> 24), (char)(n >> 16), (char)(n >> 8), (char)(n), 0})
 
 namespace mozilla {
@@ -199,7 +198,7 @@ AppleATDecoder::SubmitSample(MediaRawData* aSample)
   if (!mConverter) {
     rv = SetupDecoder(aSample);
     if (rv != NS_OK && rv != NS_ERROR_NOT_INITIALIZED) {
-      mCallback->Error();
+      mCallback->Error(MediaDataDecoderError::FATAL_ERROR);
       return;
     }
   }
@@ -210,7 +209,7 @@ AppleATDecoder::SubmitSample(MediaRawData* aSample)
     for (size_t i = 0; i < mQueuedSamples.Length(); i++) {
       if (NS_FAILED(DecodeSample(mQueuedSamples[i]))) {
         mQueuedSamples.Clear();
-        mCallback->Error();
+        mCallback->Error(MediaDataDecoderError::DECODE_ERROR);
         return;
       }
     }

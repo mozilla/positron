@@ -7,7 +7,7 @@
 #include "ContainerParser.h"
 
 #include "WebMBufferedParser.h"
-#include "mozilla/Endian.h"
+#include "mozilla/EndianUtils.h"
 #include "mozilla/ErrorResult.h"
 #include "mp4_demuxer/MoofParser.h"
 #include "mozilla/Logging.h"
@@ -18,6 +18,7 @@
 #include "mp4_demuxer/AtomType.h"
 #include "mp4_demuxer/ByteReader.h"
 #endif
+#include "nsAutoPtr.h"
 #include "SourceBufferResource.h"
 
 extern mozilla::LogModule* GetMediaSourceSamplesLog();

@@ -603,7 +603,7 @@ public class LayerView extends ScrollView implements Tabs.OnTabsChangedListener 
         @Override
         protected void onLayout(boolean changed, int left, int top, int right, int bottom) {
             super.onLayout(changed, left, top, right, bottom);
-            if (changed) {
+            if (changed && mParent.mGLController.isServerSurfaceValid()) {
                 mParent.surfaceChanged(right - left, bottom - top);
             }
         }

@@ -173,8 +173,6 @@ protected:
     JNIEnv* const mEnv;
 
 public:
-    static const char name[];
-
     static jclass RawClassRef()
     {
         return sClassRef;
@@ -193,7 +191,7 @@ public:
     jclass ClassRef() const
     {
         if (!sClassRef) {
-            sClassRef = GetClassGlobalRef(mEnv, name);
+            sClassRef = GetClassGlobalRef(mEnv, Cls::name);
         }
         return sClassRef;
     }
@@ -251,6 +249,7 @@ public:
     using Param = const Ref&;
 
     static const bool isMultithreaded = true;
+    static const char name[];
 
     explicit ObjectBase(const Context& ctx) : mCtx(ctx) {}
 
@@ -491,7 +490,7 @@ public:
 
     // Copy constructor
     GlobalRef(const GlobalRef& ref)
-        : Ref(NewGlobalRef(Ref::FindEnv(), ref.mInstance))
+        : Ref(NewGlobalRef(GetEnvForThread(), ref.mInstance))
     {}
 
     // Move constructor
@@ -502,7 +501,7 @@ public:
     }
 
     MOZ_IMPLICIT GlobalRef(const Ref& ref)
-        : Ref(NewGlobalRef(Ref::FindEnv(), ref.Get()))
+        : Ref(NewGlobalRef(GetEnvForThread(), ref.Get()))
     {}
 
     GlobalRef(JNIEnv* env, const Ref& ref)
@@ -521,7 +520,7 @@ public:
     ~GlobalRef()
     {
         if (Ref::mInstance) {
-            Clear(Ref::FindEnv());
+            Clear(GetEnvForThread());
         }
     }
 

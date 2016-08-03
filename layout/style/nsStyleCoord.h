@@ -104,7 +104,7 @@ public:
   // Reference counted calc() value.  This is the type that is used to store
   // the calc() value in nsStyleCoord.
   struct Calc final : public CalcValue {
-    NS_INLINE_DECL_REFCOUNTING(Calc)
+    NS_INLINE_DECL_THREADSAFE_REFCOUNTING(Calc)
     Calc() {}
 
   private:
@@ -186,11 +186,11 @@ public:
 
   static nscoord ToLength(nsStyleUnit aUnit, nsStyleUnion aValue) {
     MOZ_ASSERT(ConvertsToLength(aUnit, aValue));
-    if (aUnit == eStyleUnit_Coord) {
-      return aValue.mInt;
+    if (IsCalcUnit(aUnit)) {
+      return AsCalcValue(aValue)->ToLength(); // Note: This asserts !mHasPercent
     }
-    MOZ_ASSERT(IsCalcUnit(aUnit) && !AsCalcValue(aValue)->mHasPercent);
-    return AsCalcValue(aValue)->ToLength();
+    MOZ_ASSERT(aUnit == eStyleUnit_Coord);
+    return aValue.mInt;
   }
 
   nscoord ToLength() const {

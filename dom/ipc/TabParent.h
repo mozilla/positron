@@ -143,6 +143,7 @@ public:
             uint32_t aChromeFlags);
 
   Element* GetOwnerElement() const { return mFrameElement; }
+  already_AddRefed<nsPIDOMWindowOuter> GetParentWindowOuter();
 
   void SetOwnerElement(Element* aElement);
 
@@ -312,6 +313,12 @@ public:
 
   virtual bool RecvRequestFocus(const bool& aCanRaise) override;
 
+  virtual bool RecvLookUpDictionary(
+                 const nsString& aText,
+                 nsTArray<mozilla::FontRange>&& aFontRangeArray,
+                 const bool& aIsVertical,
+                 const LayoutDeviceIntPoint& aPoint) override;
+
   virtual bool
   RecvEnableDisableCommands(const nsString& aAction,
                             nsTArray<nsCString>&& aEnabledCommands,
@@ -371,6 +378,10 @@ public:
 
   virtual bool
   DeallocPColorPickerParent(PColorPickerParent* aColorPicker) override;
+
+  virtual PDatePickerParent*
+  AllocPDatePickerParent(const nsString& aTitle, const nsString& aInitialDate) override;
+  virtual bool DeallocPDatePickerParent(PDatePickerParent* aDatePicker) override;
 
   virtual PDocAccessibleParent*
   AllocPDocAccessibleParent(PDocAccessibleParent*, const uint64_t&) override;
@@ -588,7 +599,7 @@ public:
   virtual bool
   RecvInvokeDragSession(nsTArray<IPCDataTransfer>&& aTransfers,
                         const uint32_t& aAction,
-                        const nsCString& aVisualDnDData,
+                        const OptionalShmem& aVisualDnDData,
                         const uint32_t& aWidth, const uint32_t& aHeight,
                         const uint32_t& aStride, const uint8_t& aFormat,
                         const int32_t& aDragAreaX, const int32_t& aDragAreaY) override;
@@ -641,9 +652,6 @@ protected:
 
   virtual bool RecvAudioChannelActivityNotification(const uint32_t& aAudioChannel,
                                                     const bool& aActive) override;
-
-  bool InitBrowserConfiguration(const nsCString& aURI,
-                                BrowserConfiguration& aConfiguration);
 
   ContentCacheInParent mContentCache;
 

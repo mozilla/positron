@@ -16,7 +16,7 @@ namespace IPC {
 
 //------------------------------------------------------------------------------
 
-class Channel : public Message::Sender {
+class Channel {
   // Security tests need access to the pipe handle.
   friend class ChannelTest;
 
@@ -50,7 +50,7 @@ class Channel : public Message::Sender {
   enum {
     // The maximum message size in bytes. Attempting to receive a
     // message of this size or bigger results in a channel error.
-    kMaximumMessageSize = 128 * 1024 * 1024,
+    kMaximumMessageSize = 256 * 1024 * 1024,
 
     // Ammount of data to read at once from the pipe.
     kReadBufferSize = 4 * 1024,
@@ -105,7 +105,7 @@ class Channel : public Message::Sender {
   //
   // If you Send() a message on a Close()'d channel, we delete the message
   // immediately.
-  virtual bool Send(Message* message) override;
+  bool Send(Message* message);
 
   // Unsound_IsClosed() and Unsound_NumQueuedMessages() are safe to call from
   // any thread, but the value returned may be out of date, because we don't

@@ -9,6 +9,7 @@
 #include "inDOMUtils.h"
 #include "inLayoutUtils.h"
 
+#include "nsAutoPtr.h"
 #include "nsIServiceManager.h"
 #include "nsISupportsArray.h"
 #include "nsString.h"
@@ -1215,9 +1216,10 @@ GetStatesForPseudoClass(const nsAString& aStatePseudo)
   CSSPseudoClassType type = nsCSSPseudoClasses::
     GetPseudoType(atom, CSSEnabledState::eIgnoreEnabledState);
 
-  // Ignore :moz-any-link so we don't give the element simultaneous
+  // Ignore :any-link so we don't give the element simultaneous
   // visited and unvisited style state
-  if (type == CSSPseudoClassType::mozAnyLink) {
+  if (type == CSSPseudoClassType::anyLink ||
+      type == CSSPseudoClassType::mozAnyLink) {
     return EventStates();
   }
   // Our array above is long enough that indexing into it with

@@ -1,3 +1,4 @@
+// |jit-test| test-also-wasm-baseline
 load(libdir + "wasm.js");
 
 // MagicNumber = 0x6d736100;
@@ -20,6 +21,7 @@ const functionTableId      = "table";
 const exportTableId        = "export";
 const functionBodiesId     = "code";
 const dataSegmentsId       = "data";
+const nameId               = "name";
 
 const magicError = /failed to match magic number/;
 const versionError = /failed to match binary version/;
@@ -36,6 +38,7 @@ const FunctionConstructorCode = 0x40;
 
 const Block = 0x01;
 const End = 0x0f;
+const CallImport = 0x18;
 
 function toU8(array) {
     for (let b of array)
@@ -100,6 +103,12 @@ function string(name) {
     return varU32(nameBytes.length).concat(nameBytes);
 }
 
+function encodedString(name, len) {
+    var name = unescape(encodeURIComponent(name)); // break into string of utf8 code points
+    var nameBytes = name.split('').map(c => c.charCodeAt(0)); // map to array of numbers
+    return varU32(len === undefined ? nameBytes.length : len).concat(nameBytes);
+}
+
 function moduleWithSections(sectionArray) {
     var bytes = moduleHeaderThen();
     for (let section of sectionArray) {
@@ -158,12 +167,38 @@ function importSection(imports) {
     return { name: importId, body };
 }
 
+function exportSection(exports) {
+    var body = [];
+    body.push(...varU32(exports.length));
+    for (let exp of exports) {
+        body.push(...varU32(exp.funcIndex));
+        body.push(...string(exp.name));
+    }
+    return { name: exportTableId, body };
+}
+
 function tableSection(elems) {
     var body = [];
     body.push(...varU32(elems.length));
     for (let i of elems)
         body.push(...varU32(i));
     return { name: functionTableId, body };
+}
+
+function nameSection(elems) {
+    var body = [];
+    body.push(...varU32(elems.length));
+    for (let fn of elems) {
+        body.push(...encodedString(fn.name, fn.nameLen));
+        if (!fn.locals) {
+           body.push(...varU32(0));
+           continue;
+        }
+        body.push(...varU32(fn.locals.length));
+        for (let local of fn.locals)
+            body.push(...encodedString(local.name, local.nameLen));
+    }
+    return { name: nameId, body };
 }
 
 const v2vSig = {args:[], ret:VoidCode};
@@ -218,3 +253,43 @@ var manyBlocks = [];
 for (var i = 0; i < 20000; i++)
     manyBlocks.push(Block, End);
 wasmEval(moduleWithSections([sigSection([v2vSig]), declSection([0]), bodySection([funcBody({locals:[], body:manyBlocks})])]));
+
+// Ignore errors in name section.
+var tooBigNameSection = {
+    name: nameId,
+    body: [...varU32(2**31)] // declare 2**31 functions.
+};
+wasmEval(moduleWithSections([tooBigNameSection]));
+
+// Checking stack trace.
+function runStackTraceTest(namesContent, expectedName) {
+    var sections = [
+        sigSection([v2vSig]),
+        importSection([{sigIndex:0, module:"env", func:"callback"}]),
+        declSection([0]),
+        exportSection([{funcIndex:0, name: "run"}]),
+        bodySection([funcBody({locals: [], body: [CallImport, varU32(0), varU32(0)]})])
+    ];
+    if (namesContent)
+        sections.push(nameSection(namesContent));
+    var result = "";
+    var callback = () => {
+        var prevFrameEntry = new Error().stack.split('\n')[1];
+        result = prevFrameEntry.split('@')[0];
+    };
+    wasmEval(moduleWithSections(sections), {"env": { callback }}).run();
+    assertEq(result, expectedName);
+};
+
+runStackTraceTest(null, 'wasm-function[0]');
+runStackTraceTest([{name: 'test'}], 'test');
+runStackTraceTest([{name: 'test', locals: [{name: 'var1'}, {name: 'var2'}]}], 'test');
+runStackTraceTest([{name: 'test', locals: [{name: 'var1'}, {name: 'var2'}]}], 'test');
+runStackTraceTest([{name: 'test1'}, {name: 'test2'}], 'test1');
+runStackTraceTest([{name: 'test☃'}], 'test☃');
+runStackTraceTest([{name: 'te\xE0\xFF'}], 'te\xE0\xFF');
+runStackTraceTest([], 'wasm-function[0]');
+// Notice that invalid names section content shall not fail the parsing
+runStackTraceTest([{nameLen: 100, name: 'test'}], 'wasm-function[0]'); // invalid name size
+runStackTraceTest([{name: 'test', locals: [{nameLen: 40, name: 'var1'}]}], 'wasm-function[0]'); // invalid variable name size
+runStackTraceTest([{name: ''}], 'wasm-function[0]'); // empty name

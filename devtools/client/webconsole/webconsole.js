@@ -36,23 +36,15 @@ loader.lazyImporter(this, "VariablesView", "resource://devtools/client/shared/wi
 loader.lazyImporter(this, "VariablesViewController", "resource://devtools/client/shared/widgets/VariablesViewController.jsm");
 loader.lazyRequireGetter(this, "gDevTools", "devtools/client/framework/devtools", true);
 loader.lazyImporter(this, "PluralForm", "resource://gre/modules/PluralForm.jsm");
+loader.lazyRequireGetter(this, "KeyShortcuts", "devtools/client/shared/key-shortcuts", true);
+loader.lazyRequireGetter(this, "ZoomKeys", "devtools/client/shared/zoom-keys");
 
 const STRINGS_URI = "chrome://devtools/locale/webconsole.properties";
 var l10n = new WebConsoleUtils.L10n(STRINGS_URI);
 
 const XHTML_NS = "http://www.w3.org/1999/xhtml";
 
-const MIXED_CONTENT_LEARN_MORE = "https://developer.mozilla.org/docs/Security/MixedContent";
-
-const TRACKING_PROTECTION_LEARN_MORE = "https://developer.mozilla.org/Firefox/Privacy/Tracking_Protection";
-
-const INSECURE_PASSWORDS_LEARN_MORE = "https://developer.mozilla.org/docs/Security/InsecurePasswords";
-
-const PUBLIC_KEY_PINS_LEARN_MORE = "https://developer.mozilla.org/docs/Web/Security/Public_Key_Pinning";
-
-const STRICT_TRANSPORT_SECURITY_LEARN_MORE = "https://developer.mozilla.org/docs/Security/HTTP_Strict_Transport_Security";
-
-const WEAK_SIGNATURE_ALGORITHM_LEARN_MORE = "https://developer.mozilla.org/docs/Security/Weak_Signature_Algorithm";
+const MIXED_CONTENT_LEARN_MORE = "https://developer.mozilla.org/docs/Web/Security/Mixed_content";
 
 const IGNORED_SOURCE_URLS = ["debugger eval code"];
 
@@ -243,6 +235,7 @@ function WebConsoleFrame(webConsoleOwner) {
   this.React = require("devtools/client/shared/vendor/react");
   this.ReactDOM = require("devtools/client/shared/vendor/react-dom");
   this.FrameView = this.React.createFactory(require("devtools/client/shared/components/frame"));
+  this.StackTraceView = this.React.createFactory(require("devtools/client/shared/components/stack-trace"));
 
   this._telemetry = new Telemetry();
 
@@ -508,8 +501,9 @@ WebConsoleFrame.prototype = {
   _initUI: function () {
     this.document = this.window.document;
     this.rootElement = this.document.documentElement;
-    this.NEW_CONSOLE_OUTPUT_ENABLED = !this.owner._browserConsole &&
-      Services.prefs.getBoolPref(PREF_NEW_FRONTEND_ENABLED);
+    this.NEW_CONSOLE_OUTPUT_ENABLED = !this.owner._browserConsole
+      && !this.owner.target.chrome
+      && Services.prefs.getBoolPref(PREF_NEW_FRONTEND_ENABLED);
 
     this._initDefaultFilterPrefs();
 
@@ -521,12 +515,6 @@ WebConsoleFrame.prototype = {
 
     let doc = this.document;
 
-    if (system.constants.platform === "macosx") {
-      doc.querySelector("#key_clearOSX").removeAttribute("disabled");
-    } else {
-      doc.querySelector("#key_clear").removeAttribute("disabled");
-    }
-
     this.filterBox = doc.querySelector(".hud-filter-box");
     this.outputNode = doc.getElementById("output-container");
     this.outputWrapper = doc.getElementById("output-wrapper");
@@ -536,25 +524,6 @@ WebConsoleFrame.prototype = {
 
     this._setFilterTextBoxEvents();
     this._initFilterButtons();
-
-    let fontSize = this.owner._browserConsole ?
-                   Services.prefs.getIntPref("devtools.webconsole.fontSize") :
-                   0;
-
-    if (fontSize != 0) {
-      fontSize = Math.max(MIN_FONT_SIZE, fontSize);
-
-      this.outputNode.style.fontSize = fontSize + "px";
-      this.completeNode.style.fontSize = fontSize + "px";
-      this.inputNode.style.fontSize = fontSize + "px";
-    }
-
-    if (this.owner._browserConsole) {
-      for (let id of ["Enlarge", "Reduce", "Reset"]) {
-        this.document.getElementById("cmd_fullZoom" + id)
-                     .removeAttribute("disabled");
-      }
-    }
 
     // Update the character width and height needed for the popup offset
     // calculations.
@@ -627,6 +596,8 @@ WebConsoleFrame.prototype = {
       newValue: Services.prefs.getBoolPref(PREF_MESSAGE_TIMESTAMP),
     });
 
+    this._initShortcuts();
+
     // focus input node
     this.jsterm.focus();
   },
@@ -637,7 +608,12 @@ WebConsoleFrame.prototype = {
    * using -moz-box-flex and 100% width.  See Bug 1237368.
    */
   resize: function () {
-    this.outputNode.style.width = this.outputWrapper.clientWidth + "px";
+    if (this.NEW_CONSOLE_OUTPUT_ENABLED) {
+      this.experimentalOutputNode.style.width =
+        this.outputWrapper.clientWidth + "px";
+    } else {
+      this.outputNode.style.width = this.outputWrapper.clientWidth + "px";
+    }
   },
 
   /**
@@ -663,6 +639,34 @@ WebConsoleFrame.prototype = {
     for (let pref of prefs) {
       this.filterPrefs[pref] = Services.prefs.getBoolPref(
         this._filterPrefsPrefix + pref);
+    }
+  },
+
+  _initShortcuts: function() {
+    var shortcuts = new KeyShortcuts({
+      window: this.window
+    });
+
+    shortcuts.on(l10n.getStr("webconsole.find.key"),
+                 (name, event) => {
+                   this.filterBox.focus();
+                   event.preventDefault();
+                 });
+
+    let clearShortcut;
+    if (system.constants.platform === "macosx") {
+      clearShortcut = l10n.getStr("webconsole.clear.keyOSX");
+    } else {
+      clearShortcut = l10n.getStr("webconsole.clear.key");
+    }
+    shortcuts.on(clearShortcut,
+                 () => this.jsterm.clearOutput(true));
+
+    if (this.owner._browserConsole) {
+      shortcuts.on(l10n.getStr("webconsole.close.key"),
+                   this.window.close.bind(this.window));
+
+      ZoomKeys.register(this.window);
     }
   },
 
@@ -791,50 +795,6 @@ WebConsoleFrame.prototype = {
         this.document.querySelector("toolbarbutton[category=server]");
       serverLogging.removeAttribute("accesskey");
     }
-  },
-
-  /**
-   * Increase, decrease or reset the font size.
-   *
-   * @param string size
-   *        The size of the font change. Accepted values are "+" and "-".
-   *        An unmatched size assumes a font reset.
-   */
-  changeFontSize: function (size) {
-    let fontSize = this.window
-                   .getComputedStyle(this.outputNode, null)
-                   .getPropertyValue("font-size").replace("px", "");
-
-    if (this.outputNode.style.fontSize) {
-      fontSize = this.outputNode.style.fontSize.replace("px", "");
-    }
-
-    if (size == "+" || size == "-") {
-      fontSize = parseInt(fontSize, 10);
-
-      if (size == "+") {
-        fontSize += 1;
-      } else {
-        fontSize -= 1;
-      }
-
-      if (fontSize < MIN_FONT_SIZE) {
-        fontSize = MIN_FONT_SIZE;
-      }
-
-      Services.prefs.setIntPref("devtools.webconsole.fontSize", fontSize);
-      fontSize = fontSize + "px";
-
-      this.completeNode.style.fontSize = fontSize;
-      this.inputNode.style.fontSize = fontSize;
-      this.outputNode.style.fontSize = fontSize;
-    } else {
-      this.completeNode.style.fontSize = "";
-      this.inputNode.style.fontSize = "";
-      this.outputNode.style.fontSize = "";
-      Services.prefs.clearUserPref("devtools.webconsole.fontSize");
-    }
-    this._updateCharSize();
   },
 
   /**
@@ -1519,7 +1479,9 @@ WebConsoleFrame.prototype = {
     let msgBody = node.getElementsByClassName("message-body")[0];
 
     // Add the more info link node to messages that belong to certain categories
-    this.addMoreInfoLink(msgBody, scriptError);
+    if (scriptError.exceptionDocURL) {
+      this.addLearnMoreWarningNode(msgBody, scriptError.exceptionDocURL);
+    }
 
     // Collect telemetry data regarding JavaScript errors
     this._telemetry.logKeyed("DEVTOOLS_JAVASCRIPT_ERROR_DISPLAYED",
@@ -1663,7 +1625,7 @@ WebConsoleFrame.prototype = {
 
     if (this.window.NetRequest) {
       this.window.NetRequest.onNetworkEvent({
-        client: this.webConsoleClient,
+        consoleFrame: this,
         response: networkInfo,
         node: messageNode,
         update: false
@@ -1699,48 +1661,6 @@ WebConsoleFrame.prototype = {
     });
   },
 
-  /**
-   * Adds a more info link node to messages based on the nsIScriptError object
-   * that we need to report to the console
-   *
-   * @param node
-   *        The node to which we will be adding the more info link node
-   * @param scriptError
-   *        The script error object that we are reporting to the console
-   */
-  addMoreInfoLink: function (node, scriptError) {
-    let url;
-    switch (scriptError.category) {
-      case "Insecure Password Field":
-        url = INSECURE_PASSWORDS_LEARN_MORE;
-        break;
-      case "Mixed Content Message":
-      case "Mixed Content Blocker":
-        url = MIXED_CONTENT_LEARN_MORE;
-        break;
-      case "Invalid HPKP Headers":
-        url = PUBLIC_KEY_PINS_LEARN_MORE;
-        break;
-      case "Invalid HSTS Headers":
-        url = STRICT_TRANSPORT_SECURITY_LEARN_MORE;
-        break;
-      case "SHA-1 Signature":
-        url = WEAK_SIGNATURE_ALGORITHM_LEARN_MORE;
-        break;
-      case "Tracking Protection":
-        url = TRACKING_PROTECTION_LEARN_MORE;
-        break;
-      default:
-        // If all else fails check for an error doc URL.
-        url = ErrorDocs.GetURL(scriptError.errorMessageName);
-        break;
-    }
-
-    if (url) {
-      this.addLearnMoreWarningNode(node, url);
-    }
-  },
-
   /*
    * Appends a clickable warning node to the node passed
    * as a parameter to the function. When a user clicks on the appended
@@ -1757,7 +1677,7 @@ WebConsoleFrame.prototype = {
     let moreInfoLabel = "[" + l10n.getStr("webConsoleMoreInfoLabel") + "]";
 
     let warningNode = this.document.createElementNS(XHTML_NS, "a");
-    warningNode.title = url;
+    warningNode.title = url.split("?")[0];
     warningNode.href = url;
     warningNode.draggable = false;
     warningNode.textContent = moreInfoLabel;
@@ -2372,10 +2292,16 @@ WebConsoleFrame.prototype = {
    *        The message node you want to clean up.
    */
   unmountMessage(node) {
-    // Select all `.message-location` within this node to ensure we get
-    // messages of stacktraces, which contain multiple location nodes.
-    for (let locationNode of node.querySelectorAll(".message-location")) {
+    // Unmount the Frame component with the message location
+    let locationNode = node.querySelector(".message-location");
+    if (locationNode) {
       this.ReactDOM.unmountComponentAtNode(locationNode);
+    }
+
+    // Unmount the StackTrace component if present in the message
+    let stacktraceNode = node.querySelector(".stacktrace");
+    if (stacktraceNode) {
+      this.ReactDOM.unmountComponentAtNode(stacktraceNode);
     }
   },
 
@@ -2596,26 +2522,25 @@ WebConsoleFrame.prototype = {
    *         The new anchor element, ready to be added to the message node.
    */
   createLocationNode: function ({url, line, column}) {
+    let locationNode = this.document.createElementNS(XHTML_NS, "div");
+    locationNode.className = "message-location devtools-monospace";
+
     if (!url) {
       url = "";
     }
 
     let fullURL = url.split(" -> ").pop();
-    let locationNode = this.document.createElementNS(XHTML_NS, "a");
-    locationNode.draggable = false;
-    locationNode.className = "message-location devtools-monospace";
-
     // Make the location clickable.
     let onClick = () => {
-      let category = locationNode.parentNode.category;
+      let category = locationNode.closest(".message").category;
       let target = null;
 
-      if (category === CATEGORY_CSS) {
+      if (/^Scratchpad\/\d+$/.test(url)) {
+        target = "scratchpad";
+      } else if (category === CATEGORY_CSS) {
         target = "styleeditor";
       } else if (category === CATEGORY_JS || category === CATEGORY_WEBDEV) {
         target = "jsdebugger";
-      } else if (/^Scratchpad\/\d+$/.test(url)) {
-        target = "scratchpad";
       } else if (/\.js$/.test(fullURL)) {
         // If it ends in .js, let's attempt to open in debugger
         // anyway, as this falls back to normal view-source.
@@ -2641,9 +2566,10 @@ WebConsoleFrame.prototype = {
       frame: {
         source: fullURL,
         line,
-        column,
+        column
       },
-      onClick
+      showEmptyPathAsHost: true,
+      onClick,
     }), locationNode);
 
     return locationNode;
@@ -3044,15 +2970,8 @@ CommandController.prototype = {
         return this.owner._contextMenuHandler.lastClickedMessage &&
               !this.owner.output.getSelectedMessages(1)[0];
       }
-      case "consoleCmd_clearOutput":
       case "cmd_selectAll":
-      case "cmd_find":
         return true;
-      case "cmd_fontSizeEnlarge":
-      case "cmd_fontSizeReduce":
-      case "cmd_fontSizeReset":
-      case "cmd_close":
-        return this.owner.owner._browserConsole;
     }
     return false;
   },
@@ -3065,29 +2984,11 @@ CommandController.prototype = {
       case "consoleCmd_copyURL":
         this.copyURL();
         break;
-      case "consoleCmd_clearOutput":
-        this.owner.jsterm.clearOutput(true);
-        break;
       case "cmd_copy":
         this.copyLastClicked();
         break;
-      case "cmd_find":
-        this.owner.filterBox.focus();
-        break;
       case "cmd_selectAll":
         this.selectAll();
-        break;
-      case "cmd_fontSizeEnlarge":
-        this.owner.changeFontSize("+");
-        break;
-      case "cmd_fontSizeReduce":
-        this.owner.changeFontSize("-");
-        break;
-      case "cmd_fontSizeReset":
-        this.owner.changeFontSize("");
-        break;
-      case "cmd_close":
-        this.owner.window.close();
         break;
     }
   }
@@ -3328,10 +3229,15 @@ WebConsoleConnectionProxy.prototype = {
       response.messages.concat(...this.webConsoleClient.getNetworkEvents());
     messages.sort((a, b) => a.timeStamp - b.timeStamp);
 
-    this.webConsoleFrame.displayCachedMessages(messages);
-
-    if (!this._hasNativeConsoleAPI) {
-      this.webConsoleFrame.logWarningAboutReplacedAPI();
+    if (this.webConsoleFrame.NEW_CONSOLE_OUTPUT_ENABLED) {
+      for (let packet of messages) {
+        this.webConsoleFrame.newConsoleOutput.dispatchMessageAdd(packet);
+      }
+    } else {
+      this.webConsoleFrame.displayCachedMessages(messages);
+      if (!this._hasNativeConsoleAPI) {
+        this.webConsoleFrame.logWarningAboutReplacedAPI();
+      }
     }
 
     this.connected = true;

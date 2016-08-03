@@ -84,6 +84,7 @@ public:
 
     mStartTime = aStartTime;
     mReset = true;
+    NotifyCueUpdated(this);
   }
 
   double EndTime() const
@@ -99,6 +100,7 @@ public:
 
     mEndTime = aEndTime;
     mReset = true;
+    NotifyCueUpdated(this);
   }
 
   bool PauseOnExit()
@@ -113,6 +115,7 @@ public:
     }
 
     mPauseOnExit = aPauseOnExit;
+    NotifyCueUpdated(nullptr);
   }
 
   TextTrackRegion* GetRegion();
@@ -148,21 +151,21 @@ public:
     mSnapToLines = aSnapToLines;
   }
 
-  void GetLine(OwningLongOrAutoKeyword& aLine) const
+  void GetLine(OwningDoubleOrAutoKeyword& aLine) const
   {
     if (mLineIsAutoKeyword) {
       aLine.SetAsAutoKeyword() = AutoKeyword::Auto;
       return;
     }
-    aLine.SetAsLong() = mLineLong;
+    aLine.SetAsDouble() = mLine;
   }
 
-  void SetLine(const LongOrAutoKeyword& aLine)
+  void SetLine(const DoubleOrAutoKeyword& aLine)
   {
-    if (aLine.IsLong() &&
-        (mLineIsAutoKeyword || (aLine.GetAsLong() != mLineLong))) {
+    if (aLine.IsDouble() &&
+        (mLineIsAutoKeyword || (aLine.GetAsDouble() != mLine))) {
       mLineIsAutoKeyword = false;
-      mLineLong = aLine.GetAsLong();
+      mLine = aLine.GetAsDouble();
       mReset = true;
       return;
     }
@@ -172,76 +175,79 @@ public:
     }
   }
 
-  AlignSetting LineAlign() const
+  LineAlignSetting LineAlign() const
   {
     return mLineAlign;
   }
 
-  void SetLineAlign(AlignSetting& aLineAlign, ErrorResult& aRv)
+  void SetLineAlign(LineAlignSetting& aLineAlign, ErrorResult& aRv)
   {
-    if (mLineAlign == aLineAlign)
+    if (mLineAlign == aLineAlign) {
       return;
-
-    if (aLineAlign == AlignSetting::Left ||
-        aLineAlign == AlignSetting::Right) {
-      return aRv.Throw(NS_ERROR_DOM_SYNTAX_ERR);
     }
 
     mReset = true;
     mLineAlign = aLineAlign;
   }
 
-  int32_t Position() const
+  void GetPosition(OwningDoubleOrAutoKeyword& aPosition) const
   {
-    return mPosition;
-  }
-
-  void SetPosition(int32_t aPosition, ErrorResult& aRv)
-  {
-    if (mPosition == aPosition) {
+    if (mPositionIsAutoKeyword) {
+      aPosition.SetAsAutoKeyword() = AutoKeyword::Auto;
       return;
     }
+    aPosition.SetAsDouble() = mPosition;
+  }
 
-    if (aPosition > 100 || aPosition < 0){
+  void SetPosition(const DoubleOrAutoKeyword& aPosition, ErrorResult& aRv)
+  {
+    if (!aPosition.IsAutoKeyword() &&
+        (aPosition.GetAsDouble() > 100.0 || aPosition.GetAsDouble() < 0.0)){
       aRv.Throw(NS_ERROR_DOM_INDEX_SIZE_ERR);
       return;
     }
 
-    mReset = true;
-    mPosition = aPosition;
+    if (aPosition.IsDouble() &&
+        (mPositionIsAutoKeyword || (aPosition.GetAsDouble() != mPosition))) {
+      mPositionIsAutoKeyword = false;
+      mPosition = aPosition.GetAsDouble();
+      mReset = true;
+      return;
+    }
+
+    if (aPosition.IsAutoKeyword() && !mPositionIsAutoKeyword) {
+      mPositionIsAutoKeyword = true;
+      mReset = true;
+    }
   }
 
-  AlignSetting PositionAlign() const
+  PositionAlignSetting PositionAlign() const
   {
     return mPositionAlign;
   }
 
-  void SetPositionAlign(AlignSetting aPositionAlign, ErrorResult& aRv)
+  void SetPositionAlign(PositionAlignSetting aPositionAlign, ErrorResult& aRv)
   {
-    if (mPositionAlign == aPositionAlign)
+    if (mPositionAlign == aPositionAlign) {
       return;
-
-    if (aPositionAlign == AlignSetting::Left ||
-        aPositionAlign == AlignSetting::Right) {
-      return aRv.Throw(NS_ERROR_DOM_SYNTAX_ERR);
     }
 
     mReset = true;
     mPositionAlign = aPositionAlign;
   }
 
-  int32_t Size() const
+  double Size() const
   {
     return mSize;
   }
 
-  void SetSize(int32_t aSize, ErrorResult& aRv)
+  void SetSize(double aSize, ErrorResult& aRv)
   {
     if (mSize == aSize) {
       return;
     }
 
-    if (aSize < 0 || aSize > 100) {
+    if (aSize < 0.0 || aSize > 100.0) {
       aRv.Throw(NS_ERROR_DOM_INDEX_SIZE_ERR);
       return;
     }
@@ -304,13 +310,11 @@ public:
     return mReset;
   }
 
-  // Helper functions for implementation.
-  bool
-  operator==(const TextTrackCue& rhs) const
-  {
-    return mId.Equals(rhs.mId);
-  }
+  double ComputedLine();
+  double ComputedPosition();
+  PositionAlignSetting ComputedPositionAlign();
 
+  // Helper functions for implementation.
   const nsAString& Id() const
   {
     return mId;
@@ -332,9 +336,30 @@ public:
 
   void SetTrackElement(HTMLTrackElement* aTrackElement);
 
+  void SetActive(bool aActive)
+  {
+    if (mActive == aActive) {
+      return;
+    }
+
+    mActive = aActive;
+    mDisplayState = mActive ? mDisplayState : nullptr;
+  }
+
+  bool GetActive()
+  {
+    return mActive;
+  }
+
 private:
   ~TextTrackCue();
 
+  void NotifyCueUpdated(TextTrackCue* aCue)
+  {
+    if (mTrack) {
+      mTrack->NotifyCueUpdated(aCue);
+    }
+  }
   void SetDefaultCueSettings();
   nsresult StashDocument();
 
@@ -346,17 +371,18 @@ private:
   RefPtr<TextTrack> mTrack;
   RefPtr<HTMLTrackElement> mTrackElement;
   nsString mId;
-  int32_t mPosition;
-  AlignSetting mPositionAlign;
-  int32_t mSize;
+  double mPosition;
+  bool mPositionIsAutoKeyword;
+  PositionAlignSetting mPositionAlign;
+  double mSize;
   bool mPauseOnExit;
   bool mSnapToLines;
   RefPtr<TextTrackRegion> mRegion;
   DirectionSetting mVertical;
   bool mLineIsAutoKeyword;
-  long mLineLong;
+  double mLine;
   AlignSetting mAlign;
-  AlignSetting mLineAlign;
+  LineAlignSetting mLineAlign;
 
   // Holds the computed DOM elements that represent the parsed cue text.
   // http://www.whatwg.org/specs/web-apps/current-work/#text-track-cue-display-state
@@ -365,6 +391,8 @@ private:
   // anytime a property that relates to the display of the TextTrackCue is
   // changed.
   bool mReset;
+
+  bool mActive;
 
   static StaticRefPtr<nsIWebVTTParserWrapper> sParserWrapper;
 };

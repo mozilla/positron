@@ -15,6 +15,8 @@ namespace widget {
 class ANRReporter : public mozilla::jni::ObjectBase<ANRReporter, jobject>
 {
 public:
+    static const char name[];
+
     explicit ANRReporter(const Context& ctx) : ObjectBase<ANRReporter, jobject>(ctx) {}
 
     struct GetNativeStack_t {
@@ -65,6 +67,8 @@ public:
 class AlarmReceiver : public mozilla::jni::ObjectBase<AlarmReceiver, jobject>
 {
 public:
+    static const char name[];
+
     explicit AlarmReceiver(const Context& ctx) : ObjectBase<AlarmReceiver, jobject>(ctx) {}
 
     struct NotifyAlarmFired_t {
@@ -88,6 +92,8 @@ public:
 class DownloadsIntegration : public mozilla::jni::ObjectBase<DownloadsIntegration, jobject>
 {
 public:
+    static const char name[];
+
     explicit DownloadsIntegration(const Context& ctx) : ObjectBase<DownloadsIntegration, jobject>(ctx) {}
 
     struct GetTemporaryDownloadDirectory_t {
@@ -129,6 +135,8 @@ public:
 class GeckoAppShell : public mozilla::jni::ObjectBase<GeckoAppShell, jobject>
 {
 public:
+    static const char name[];
+
     explicit GeckoAppShell(const Context& ctx) : ObjectBase<GeckoAppShell, jobject>(ctx) {}
 
     struct AddPluginViewWrapper_t {
@@ -1190,6 +1198,20 @@ public:
 
     static auto NotifyDefaultPrevented(bool) -> void;
 
+    struct NotifyUriVisited_t {
+        typedef GeckoAppShell Owner;
+        typedef void ReturnType;
+        typedef void SetterType;
+        typedef mozilla::jni::Args<
+                mozilla::jni::String::Param> Args;
+        static constexpr char name[] = "notifyUriVisited";
+        static constexpr char signature[] =
+                "(Ljava/lang/String;)V";
+        static const bool isStatic = true;
+        static const mozilla::jni::ExceptionMode exceptionMode =
+                mozilla::jni::ExceptionMode::ABORT;
+    };
+
     struct NotifyWakeLockChanged_t {
         typedef GeckoAppShell Owner;
         typedef void ReturnType;
@@ -1206,6 +1228,46 @@ public:
     };
 
     static auto NotifyWakeLockChanged(mozilla::jni::String::Param, mozilla::jni::String::Param) -> void;
+
+    struct OnLocationChanged_t {
+        typedef GeckoAppShell Owner;
+        typedef void ReturnType;
+        typedef void SetterType;
+        typedef mozilla::jni::Args<
+                double,
+                double,
+                double,
+                float,
+                float,
+                float,
+                int64_t> Args;
+        static constexpr char name[] = "onLocationChanged";
+        static constexpr char signature[] =
+                "(DDDFFFJ)V";
+        static const bool isStatic = true;
+        static const mozilla::jni::ExceptionMode exceptionMode =
+                mozilla::jni::ExceptionMode::ABORT;
+    };
+
+    struct OnSensorChanged_t {
+        typedef GeckoAppShell Owner;
+        typedef void ReturnType;
+        typedef void SetterType;
+        typedef mozilla::jni::Args<
+                int32_t,
+                float,
+                float,
+                float,
+                float,
+                int32_t,
+                int64_t> Args;
+        static constexpr char name[] = "onSensorChanged";
+        static constexpr char signature[] =
+                "(IFFFFIJ)V";
+        static const bool isStatic = true;
+        static const mozilla::jni::ExceptionMode exceptionMode =
+                mozilla::jni::ExceptionMode::ABORT;
+    };
 
     struct OpenUriExternal_t {
         typedef GeckoAppShell Owner;
@@ -1430,6 +1492,28 @@ public:
 
     static auto ShowAlertNotificationWrapper(mozilla::jni::String::Param, mozilla::jni::String::Param, mozilla::jni::String::Param, mozilla::jni::String::Param, mozilla::jni::String::Param, mozilla::jni::String::Param) -> void;
 
+    struct ShowPersistentAlertNotificationWrapper_t {
+        typedef GeckoAppShell Owner;
+        typedef void ReturnType;
+        typedef void SetterType;
+        typedef mozilla::jni::Args<
+                mozilla::jni::String::Param,
+                mozilla::jni::String::Param,
+                mozilla::jni::String::Param,
+                mozilla::jni::String::Param,
+                mozilla::jni::String::Param,
+                mozilla::jni::String::Param,
+                mozilla::jni::String::Param> Args;
+        static constexpr char name[] = "showPersistentAlertNotification";
+        static constexpr char signature[] =
+                "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V";
+        static const bool isStatic = true;
+        static const mozilla::jni::ExceptionMode exceptionMode =
+                mozilla::jni::ExceptionMode::ABORT;
+    };
+
+    static auto ShowPersistentAlertNotificationWrapper(mozilla::jni::String::Param, mozilla::jni::String::Param, mozilla::jni::String::Param, mozilla::jni::String::Param, mozilla::jni::String::Param, mozilla::jni::String::Param, mozilla::jni::String::Param) -> void;
+
     struct StartMonitoringGamepad_t {
         typedef GeckoAppShell Owner;
         typedef void ReturnType;
@@ -1562,6 +1646,8 @@ public:
 class GeckoEditable : public mozilla::jni::ObjectBase<GeckoEditable, jobject>
 {
 public:
+    static const char name[];
+
     explicit GeckoEditable(const Context& ctx) : ObjectBase<GeckoEditable, jobject>(ctx) {}
 
     struct New_t {
@@ -1808,6 +1894,8 @@ public:
 class GeckoEditableListener : public mozilla::jni::ObjectBase<GeckoEditableListener, jobject>
 {
 public:
+    static const char name[];
+
     explicit GeckoEditableListener(const Context& ctx) : ObjectBase<GeckoEditableListener, jobject>(ctx) {}
 
     static const int32_t NOTIFY_IME_OF_BLUR = 2;
@@ -1829,6 +1917,8 @@ public:
 class GeckoJavaSampler : public mozilla::jni::ObjectBase<GeckoJavaSampler, jobject>
 {
 public:
+    static const char name[];
+
     explicit GeckoJavaSampler(const Context& ctx) : ObjectBase<GeckoJavaSampler, jobject>(ctx) {}
 
     struct GetFrameNameJavaProfilingWrapper_t {
@@ -1965,6 +2055,8 @@ public:
 class GeckoSmsManager : public mozilla::jni::ObjectBase<GeckoSmsManager, jobject>
 {
 public:
+    static const char name[];
+
     explicit GeckoSmsManager(const Context& ctx) : ObjectBase<GeckoSmsManager, jobject>(ctx) {}
 
     struct NotifyCursorDone_t {
@@ -2213,6 +2305,8 @@ public:
 class GeckoThread : public mozilla::jni::ObjectBase<GeckoThread, jobject>
 {
 public:
+    static const char name[];
+
     explicit GeckoThread(const Context& ctx) : ObjectBase<GeckoThread, jobject>(ctx) {}
 
     class State;
@@ -2374,120 +2468,9 @@ public:
 class GeckoThread::State : public mozilla::jni::ObjectBase<State, jobject>
 {
 public:
+    static const char name[];
+
     explicit State(const Context& ctx) : ObjectBase<State, jobject>(ctx) {}
-
-    struct New_t {
-        typedef State Owner;
-        typedef State::LocalRef ReturnType;
-        typedef State::Param SetterType;
-        typedef mozilla::jni::Args<
-                mozilla::jni::String::Param,
-                int32_t> Args;
-        static constexpr char name[] = "<init>";
-        static constexpr char signature[] =
-                "(Ljava/lang/String;I)V";
-        static const bool isStatic = false;
-        static const mozilla::jni::ExceptionMode exceptionMode =
-                mozilla::jni::ExceptionMode::ABORT;
-    };
-
-    static auto New(mozilla::jni::String::Param, int32_t) -> State::LocalRef;
-
-    struct Is_t {
-        typedef State Owner;
-        typedef bool ReturnType;
-        typedef bool SetterType;
-        typedef mozilla::jni::Args<
-                State::Param> Args;
-        static constexpr char name[] = "is";
-        static constexpr char signature[] =
-                "(Lorg/mozilla/gecko/GeckoThread$State;)Z";
-        static const bool isStatic = false;
-        static const mozilla::jni::ExceptionMode exceptionMode =
-                mozilla::jni::ExceptionMode::ABORT;
-    };
-
-    auto Is(State::Param) const -> bool;
-
-    struct IsAtLeast_t {
-        typedef State Owner;
-        typedef bool ReturnType;
-        typedef bool SetterType;
-        typedef mozilla::jni::Args<
-                State::Param> Args;
-        static constexpr char name[] = "isAtLeast";
-        static constexpr char signature[] =
-                "(Lorg/mozilla/gecko/GeckoThread$State;)Z";
-        static const bool isStatic = false;
-        static const mozilla::jni::ExceptionMode exceptionMode =
-                mozilla::jni::ExceptionMode::ABORT;
-    };
-
-    auto IsAtLeast(State::Param) const -> bool;
-
-    struct IsAtMost_t {
-        typedef State Owner;
-        typedef bool ReturnType;
-        typedef bool SetterType;
-        typedef mozilla::jni::Args<
-                State::Param> Args;
-        static constexpr char name[] = "isAtMost";
-        static constexpr char signature[] =
-                "(Lorg/mozilla/gecko/GeckoThread$State;)Z";
-        static const bool isStatic = false;
-        static const mozilla::jni::ExceptionMode exceptionMode =
-                mozilla::jni::ExceptionMode::ABORT;
-    };
-
-    auto IsAtMost(State::Param) const -> bool;
-
-    struct IsBetween_t {
-        typedef State Owner;
-        typedef bool ReturnType;
-        typedef bool SetterType;
-        typedef mozilla::jni::Args<
-                State::Param,
-                State::Param> Args;
-        static constexpr char name[] = "isBetween";
-        static constexpr char signature[] =
-                "(Lorg/mozilla/gecko/GeckoThread$State;Lorg/mozilla/gecko/GeckoThread$State;)Z";
-        static const bool isStatic = false;
-        static const mozilla::jni::ExceptionMode exceptionMode =
-                mozilla::jni::ExceptionMode::ABORT;
-    };
-
-    auto IsBetween(State::Param, State::Param) const -> bool;
-
-    struct ValueOf_t {
-        typedef State Owner;
-        typedef State::LocalRef ReturnType;
-        typedef State::Param SetterType;
-        typedef mozilla::jni::Args<
-                mozilla::jni::String::Param> Args;
-        static constexpr char name[] = "valueOf";
-        static constexpr char signature[] =
-                "(Ljava/lang/String;)Lorg/mozilla/gecko/GeckoThread$State;";
-        static const bool isStatic = true;
-        static const mozilla::jni::ExceptionMode exceptionMode =
-                mozilla::jni::ExceptionMode::ABORT;
-    };
-
-    static auto ValueOf(mozilla::jni::String::Param) -> State::LocalRef;
-
-    struct Values_t {
-        typedef State Owner;
-        typedef mozilla::jni::ObjectArray::LocalRef ReturnType;
-        typedef mozilla::jni::ObjectArray::Param SetterType;
-        typedef mozilla::jni::Args<> Args;
-        static constexpr char name[] = "values";
-        static constexpr char signature[] =
-                "()[Lorg/mozilla/gecko/GeckoThread$State;";
-        static const bool isStatic = true;
-        static const mozilla::jni::ExceptionMode exceptionMode =
-                mozilla::jni::ExceptionMode::ABORT;
-    };
-
-    static auto Values() -> mozilla::jni::ObjectArray::LocalRef;
 
     struct EXITED_t {
         typedef State Owner;
@@ -2624,13 +2607,15 @@ public:
 
     static auto RUNNING() -> State::LocalRef;
 
-    static const bool isMultithreaded = true;
+    static const bool isMultithreaded = false;
 
 };
 
 class GeckoView : public mozilla::jni::ObjectBase<GeckoView, jobject>
 {
 public:
+    static const char name[];
+
     explicit GeckoView(const Context& ctx) : ObjectBase<GeckoView, jobject>(ctx) {}
 
     class Window;
@@ -2642,6 +2627,8 @@ public:
 class GeckoView::Window : public mozilla::jni::ObjectBase<Window, jobject>
 {
 public:
+    static const char name[];
+
     explicit Window(const Context& ctx) : ObjectBase<Window, jobject>(ctx) {}
 
     struct New_t {
@@ -2693,11 +2680,12 @@ public:
                 Window::Param,
                 GeckoView::Param,
                 mozilla::jni::Object::Param,
+                mozilla::jni::String::Param,
                 int32_t,
                 int32_t> Args;
         static constexpr char name[] = "open";
         static constexpr char signature[] =
-                "(Lorg/mozilla/gecko/GeckoView$Window;Lorg/mozilla/gecko/GeckoView;Lorg/mozilla/gecko/gfx/GLController;II)V";
+                "(Lorg/mozilla/gecko/GeckoView$Window;Lorg/mozilla/gecko/GeckoView;Lorg/mozilla/gecko/gfx/GLController;Ljava/lang/String;II)V";
         static const bool isStatic = true;
         static const mozilla::jni::ExceptionMode exceptionMode =
                 mozilla::jni::ExceptionMode::ABORT;
@@ -2740,6 +2728,8 @@ public:
 class PrefsHelper : public mozilla::jni::ObjectBase<PrefsHelper, jobject>
 {
 public:
+    static const char name[];
+
     explicit PrefsHelper(const Context& ctx) : ObjectBase<PrefsHelper, jobject>(ctx) {}
 
     struct CallPrefHandler_t {
@@ -2862,101 +2852,11 @@ public:
     template<class Impl> class Natives;
 };
 
-class SurfaceBits : public mozilla::jni::ObjectBase<SurfaceBits, jobject>
-{
-public:
-    explicit SurfaceBits(const Context& ctx) : ObjectBase<SurfaceBits, jobject>(ctx) {}
-
-    struct New_t {
-        typedef SurfaceBits Owner;
-        typedef SurfaceBits::LocalRef ReturnType;
-        typedef SurfaceBits::Param SetterType;
-        typedef mozilla::jni::Args<> Args;
-        static constexpr char name[] = "<init>";
-        static constexpr char signature[] =
-                "()V";
-        static const bool isStatic = false;
-        static const mozilla::jni::ExceptionMode exceptionMode =
-                mozilla::jni::ExceptionMode::ABORT;
-    };
-
-    static auto New() -> SurfaceBits::LocalRef;
-
-    struct Buffer_t {
-        typedef SurfaceBits Owner;
-        typedef mozilla::jni::Object::LocalRef ReturnType;
-        typedef mozilla::jni::Object::Param SetterType;
-        typedef mozilla::jni::Args<> Args;
-        static constexpr char name[] = "buffer";
-        static constexpr char signature[] =
-                "Ljava/nio/ByteBuffer;";
-        static const bool isStatic = false;
-        static const mozilla::jni::ExceptionMode exceptionMode =
-                mozilla::jni::ExceptionMode::ABORT;
-    };
-
-    auto Buffer() const -> mozilla::jni::Object::LocalRef;
-
-    auto Buffer(mozilla::jni::Object::Param) const -> void;
-
-    struct Format_t {
-        typedef SurfaceBits Owner;
-        typedef int32_t ReturnType;
-        typedef int32_t SetterType;
-        typedef mozilla::jni::Args<> Args;
-        static constexpr char name[] = "format";
-        static constexpr char signature[] =
-                "I";
-        static const bool isStatic = false;
-        static const mozilla::jni::ExceptionMode exceptionMode =
-                mozilla::jni::ExceptionMode::ABORT;
-    };
-
-    auto Format() const -> int32_t;
-
-    auto Format(int32_t) const -> void;
-
-    struct Height_t {
-        typedef SurfaceBits Owner;
-        typedef int32_t ReturnType;
-        typedef int32_t SetterType;
-        typedef mozilla::jni::Args<> Args;
-        static constexpr char name[] = "height";
-        static constexpr char signature[] =
-                "I";
-        static const bool isStatic = false;
-        static const mozilla::jni::ExceptionMode exceptionMode =
-                mozilla::jni::ExceptionMode::ABORT;
-    };
-
-    auto Height() const -> int32_t;
-
-    auto Height(int32_t) const -> void;
-
-    struct Width_t {
-        typedef SurfaceBits Owner;
-        typedef int32_t ReturnType;
-        typedef int32_t SetterType;
-        typedef mozilla::jni::Args<> Args;
-        static constexpr char name[] = "width";
-        static constexpr char signature[] =
-                "I";
-        static const bool isStatic = false;
-        static const mozilla::jni::ExceptionMode exceptionMode =
-                mozilla::jni::ExceptionMode::ABORT;
-    };
-
-    auto Width() const -> int32_t;
-
-    auto Width(int32_t) const -> void;
-
-    static const bool isMultithreaded = true;
-
-};
-
 class ThumbnailHelper : public mozilla::jni::ObjectBase<ThumbnailHelper, jobject>
 {
 public:
+    static const char name[];
+
     explicit ThumbnailHelper(const Context& ctx) : ObjectBase<ThumbnailHelper, jobject>(ctx) {}
 
     struct SendThumbnail_t {
@@ -2985,6 +2885,8 @@ public:
 class Distribution : public mozilla::jni::ObjectBase<Distribution, jobject>
 {
 public:
+    static const char name[];
+
     explicit Distribution(const Context& ctx) : ObjectBase<Distribution, jobject>(ctx) {}
 
     struct GetDistributionDirectories_t {
@@ -3009,6 +2911,8 @@ public:
 class DisplayPortMetrics : public mozilla::jni::ObjectBase<DisplayPortMetrics, jobject>
 {
 public:
+    static const char name[];
+
     explicit DisplayPortMetrics(const Context& ctx) : ObjectBase<DisplayPortMetrics, jobject>(ctx) {}
 
     struct New_t {
@@ -3068,6 +2972,8 @@ public:
 class GLController : public mozilla::jni::ObjectBase<GLController, jobject>
 {
 public:
+    static const char name[];
+
     explicit GLController(const Context& ctx) : ObjectBase<GLController, jobject>(ctx) {}
 
     struct AttachToJava_t {
@@ -3209,6 +3115,8 @@ public:
 class GeckoLayerClient : public mozilla::jni::ObjectBase<GeckoLayerClient, jobject>
 {
 public:
+    static const char name[];
+
     explicit GeckoLayerClient(const Context& ctx) : ObjectBase<GeckoLayerClient, jobject>(ctx) {}
 
     struct ActivateProgram_t {
@@ -3485,6 +3393,8 @@ public:
 class ImmutableViewportMetrics : public mozilla::jni::ObjectBase<ImmutableViewportMetrics, jobject>
 {
 public:
+    static const char name[];
+
     explicit ImmutableViewportMetrics(const Context& ctx) : ObjectBase<ImmutableViewportMetrics, jobject>(ctx) {}
 
     struct New_t {
@@ -3522,6 +3432,8 @@ public:
 class LayerRenderer : public mozilla::jni::ObjectBase<LayerRenderer, jobject>
 {
 public:
+    static const char name[];
+
     explicit LayerRenderer(const Context& ctx) : ObjectBase<LayerRenderer, jobject>(ctx) {}
 
     class Frame;
@@ -3533,6 +3445,8 @@ public:
 class LayerRenderer::Frame : public mozilla::jni::ObjectBase<Frame, jobject>
 {
 public:
+    static const char name[];
+
     explicit Frame(const Context& ctx) : ObjectBase<Frame, jobject>(ctx) {}
 
     struct BeginDrawing_t {
@@ -3602,6 +3516,8 @@ public:
 class LayerView : public mozilla::jni::ObjectBase<LayerView, jobject>
 {
 public:
+    static const char name[];
+
     explicit LayerView(const Context& ctx) : ObjectBase<LayerView, jobject>(ctx) {}
 
     struct updateZoomedView_t {
@@ -3627,6 +3543,8 @@ public:
 class NativePanZoomController : public mozilla::jni::ObjectBase<NativePanZoomController, jobject>
 {
 public:
+    static const char name[];
+
     explicit NativePanZoomController(const Context& ctx) : ObjectBase<NativePanZoomController, jobject>(ctx) {}
 
     struct AdjustScrollForSurfaceShift_t {
@@ -3870,6 +3788,8 @@ public:
 class ProgressiveUpdateData : public mozilla::jni::ObjectBase<ProgressiveUpdateData, jobject>
 {
 public:
+    static const char name[];
+
     explicit ProgressiveUpdateData(const Context& ctx) : ObjectBase<ProgressiveUpdateData, jobject>(ctx) {}
 
     struct New_t {
@@ -3975,9 +3895,406 @@ public:
 
 };
 
+class StackScroller : public mozilla::jni::ObjectBase<StackScroller, jobject>
+{
+public:
+    static const char name[];
+
+    explicit StackScroller(const Context& ctx) : ObjectBase<StackScroller, jobject>(ctx) {}
+
+    struct New_t {
+        typedef StackScroller Owner;
+        typedef StackScroller::LocalRef ReturnType;
+        typedef StackScroller::Param SetterType;
+        typedef mozilla::jni::Args<
+                mozilla::jni::Object::Param> Args;
+        static constexpr char name[] = "<init>";
+        static constexpr char signature[] =
+                "(Landroid/content/Context;)V";
+        static const bool isStatic = false;
+        static const mozilla::jni::ExceptionMode exceptionMode =
+                mozilla::jni::ExceptionMode::NSRESULT;
+    };
+
+    static auto New(mozilla::jni::Object::Param, StackScroller::LocalRef*) -> nsresult;
+
+    struct AbortAnimation_t {
+        typedef StackScroller Owner;
+        typedef void ReturnType;
+        typedef void SetterType;
+        typedef mozilla::jni::Args<> Args;
+        static constexpr char name[] = "abortAnimation";
+        static constexpr char signature[] =
+                "()V";
+        static const bool isStatic = false;
+        static const mozilla::jni::ExceptionMode exceptionMode =
+                mozilla::jni::ExceptionMode::NSRESULT;
+    };
+
+    auto AbortAnimation() const -> nsresult;
+
+    struct ComputeScrollOffset_t {
+        typedef StackScroller Owner;
+        typedef bool ReturnType;
+        typedef bool SetterType;
+        typedef mozilla::jni::Args<
+                int64_t> Args;
+        static constexpr char name[] = "computeScrollOffset";
+        static constexpr char signature[] =
+                "(J)Z";
+        static const bool isStatic = false;
+        static const mozilla::jni::ExceptionMode exceptionMode =
+                mozilla::jni::ExceptionMode::NSRESULT;
+    };
+
+    auto ComputeScrollOffset(int64_t, bool*) const -> nsresult;
+
+    struct Fling_t {
+        typedef StackScroller Owner;
+        typedef void ReturnType;
+        typedef void SetterType;
+        typedef mozilla::jni::Args<
+                int32_t,
+                int32_t,
+                int32_t,
+                int32_t,
+                int32_t,
+                int32_t,
+                int32_t,
+                int32_t,
+                int32_t,
+                int32_t,
+                int64_t> Args;
+        static constexpr char name[] = "fling";
+        static constexpr char signature[] =
+                "(IIIIIIIIIIJ)V";
+        static const bool isStatic = false;
+        static const mozilla::jni::ExceptionMode exceptionMode =
+                mozilla::jni::ExceptionMode::NSRESULT;
+    };
+
+    auto Fling(int32_t, int32_t, int32_t, int32_t, int32_t, int32_t, int32_t, int32_t, int32_t, int32_t, int64_t) const -> nsresult;
+
+    struct ForceFinished_t {
+        typedef StackScroller Owner;
+        typedef void ReturnType;
+        typedef void SetterType;
+        typedef mozilla::jni::Args<
+                bool> Args;
+        static constexpr char name[] = "forceFinished";
+        static constexpr char signature[] =
+                "(Z)V";
+        static const bool isStatic = false;
+        static const mozilla::jni::ExceptionMode exceptionMode =
+                mozilla::jni::ExceptionMode::NSRESULT;
+    };
+
+    auto ForceFinished(bool) const -> nsresult;
+
+    struct GetCurrSpeedX_t {
+        typedef StackScroller Owner;
+        typedef float ReturnType;
+        typedef float SetterType;
+        typedef mozilla::jni::Args<> Args;
+        static constexpr char name[] = "getCurrSpeedX";
+        static constexpr char signature[] =
+                "()F";
+        static const bool isStatic = false;
+        static const mozilla::jni::ExceptionMode exceptionMode =
+                mozilla::jni::ExceptionMode::NSRESULT;
+    };
+
+    auto GetCurrSpeedX(float*) const -> nsresult;
+
+    struct GetCurrSpeedY_t {
+        typedef StackScroller Owner;
+        typedef float ReturnType;
+        typedef float SetterType;
+        typedef mozilla::jni::Args<> Args;
+        static constexpr char name[] = "getCurrSpeedY";
+        static constexpr char signature[] =
+                "()F";
+        static const bool isStatic = false;
+        static const mozilla::jni::ExceptionMode exceptionMode =
+                mozilla::jni::ExceptionMode::NSRESULT;
+    };
+
+    auto GetCurrSpeedY(float*) const -> nsresult;
+
+    struct GetCurrX_t {
+        typedef StackScroller Owner;
+        typedef int32_t ReturnType;
+        typedef int32_t SetterType;
+        typedef mozilla::jni::Args<> Args;
+        static constexpr char name[] = "getCurrX";
+        static constexpr char signature[] =
+                "()I";
+        static const bool isStatic = false;
+        static const mozilla::jni::ExceptionMode exceptionMode =
+                mozilla::jni::ExceptionMode::NSRESULT;
+    };
+
+    auto GetCurrX(int32_t*) const -> nsresult;
+
+    struct GetCurrY_t {
+        typedef StackScroller Owner;
+        typedef int32_t ReturnType;
+        typedef int32_t SetterType;
+        typedef mozilla::jni::Args<> Args;
+        static constexpr char name[] = "getCurrY";
+        static constexpr char signature[] =
+                "()I";
+        static const bool isStatic = false;
+        static const mozilla::jni::ExceptionMode exceptionMode =
+                mozilla::jni::ExceptionMode::NSRESULT;
+    };
+
+    auto GetCurrY(int32_t*) const -> nsresult;
+
+    struct GetFinalX_t {
+        typedef StackScroller Owner;
+        typedef int32_t ReturnType;
+        typedef int32_t SetterType;
+        typedef mozilla::jni::Args<> Args;
+        static constexpr char name[] = "getFinalX";
+        static constexpr char signature[] =
+                "()I";
+        static const bool isStatic = false;
+        static const mozilla::jni::ExceptionMode exceptionMode =
+                mozilla::jni::ExceptionMode::NSRESULT;
+    };
+
+    auto GetFinalX(int32_t*) const -> nsresult;
+
+    struct GetFinalY_t {
+        typedef StackScroller Owner;
+        typedef int32_t ReturnType;
+        typedef int32_t SetterType;
+        typedef mozilla::jni::Args<> Args;
+        static constexpr char name[] = "getFinalY";
+        static constexpr char signature[] =
+                "()I";
+        static const bool isStatic = false;
+        static const mozilla::jni::ExceptionMode exceptionMode =
+                mozilla::jni::ExceptionMode::NSRESULT;
+    };
+
+    auto GetFinalY(int32_t*) const -> nsresult;
+
+    struct InitContants_t {
+        typedef StackScroller Owner;
+        typedef void ReturnType;
+        typedef void SetterType;
+        typedef mozilla::jni::Args<> Args;
+        static constexpr char name[] = "initContants";
+        static constexpr char signature[] =
+                "()V";
+        static const bool isStatic = true;
+        static const mozilla::jni::ExceptionMode exceptionMode =
+                mozilla::jni::ExceptionMode::NSRESULT;
+    };
+
+    static auto InitContants() -> nsresult;
+
+    struct IsFinished_t {
+        typedef StackScroller Owner;
+        typedef bool ReturnType;
+        typedef bool SetterType;
+        typedef mozilla::jni::Args<> Args;
+        static constexpr char name[] = "isFinished";
+        static constexpr char signature[] =
+                "()Z";
+        static const bool isStatic = false;
+        static const mozilla::jni::ExceptionMode exceptionMode =
+                mozilla::jni::ExceptionMode::NSRESULT;
+    };
+
+    auto IsFinished(bool*) const -> nsresult;
+
+    struct SetFinalX_t {
+        typedef StackScroller Owner;
+        typedef void ReturnType;
+        typedef void SetterType;
+        typedef mozilla::jni::Args<
+                int32_t> Args;
+        static constexpr char name[] = "setFinalX";
+        static constexpr char signature[] =
+                "(I)V";
+        static const bool isStatic = false;
+        static const mozilla::jni::ExceptionMode exceptionMode =
+                mozilla::jni::ExceptionMode::NSRESULT;
+    };
+
+    auto SetFinalX(int32_t) const -> nsresult;
+
+    struct SpringBack_t {
+        typedef StackScroller Owner;
+        typedef bool ReturnType;
+        typedef bool SetterType;
+        typedef mozilla::jni::Args<
+                int32_t,
+                int32_t,
+                int32_t,
+                int32_t,
+                int32_t,
+                int32_t,
+                int64_t> Args;
+        static constexpr char name[] = "springBack";
+        static constexpr char signature[] =
+                "(IIIIIIJ)Z";
+        static const bool isStatic = false;
+        static const mozilla::jni::ExceptionMode exceptionMode =
+                mozilla::jni::ExceptionMode::NSRESULT;
+    };
+
+    auto SpringBack(int32_t, int32_t, int32_t, int32_t, int32_t, int32_t, int64_t, bool*) const -> nsresult;
+
+    struct StartScroll_t {
+        typedef StackScroller Owner;
+        typedef void ReturnType;
+        typedef void SetterType;
+        typedef mozilla::jni::Args<
+                int32_t,
+                int32_t,
+                int32_t,
+                int32_t,
+                int64_t,
+                int32_t> Args;
+        static constexpr char name[] = "startScroll";
+        static constexpr char signature[] =
+                "(IIIIJI)V";
+        static const bool isStatic = false;
+        static const mozilla::jni::ExceptionMode exceptionMode =
+                mozilla::jni::ExceptionMode::NSRESULT;
+    };
+
+    auto StartScroll(int32_t, int32_t, int32_t, int32_t, int64_t, int32_t) const -> nsresult;
+
+    struct ViscousFluid_t {
+        typedef StackScroller Owner;
+        typedef float ReturnType;
+        typedef float SetterType;
+        typedef mozilla::jni::Args<
+                float> Args;
+        static constexpr char name[] = "viscousFluid";
+        static constexpr char signature[] =
+                "(F)F";
+        static const bool isStatic = true;
+        static const mozilla::jni::ExceptionMode exceptionMode =
+                mozilla::jni::ExceptionMode::NSRESULT;
+    };
+
+    static auto ViscousFluid(float, float*) -> nsresult;
+
+    static const int32_t FLING_MODE = 1;
+
+    static const int32_t SCROLL_MODE = 0;
+
+    struct MFlywheel_t {
+        typedef StackScroller Owner;
+        typedef bool ReturnType;
+        typedef bool SetterType;
+        typedef mozilla::jni::Args<> Args;
+        static constexpr char name[] = "mFlywheel";
+        static constexpr char signature[] =
+                "Z";
+        static const bool isStatic = false;
+        static const mozilla::jni::ExceptionMode exceptionMode =
+                mozilla::jni::ExceptionMode::NSRESULT;
+    };
+
+    auto MFlywheel(bool*) const -> nsresult;
+
+    struct MMode_t {
+        typedef StackScroller Owner;
+        typedef int32_t ReturnType;
+        typedef int32_t SetterType;
+        typedef mozilla::jni::Args<> Args;
+        static constexpr char name[] = "mMode";
+        static constexpr char signature[] =
+                "I";
+        static const bool isStatic = false;
+        static const mozilla::jni::ExceptionMode exceptionMode =
+                mozilla::jni::ExceptionMode::NSRESULT;
+    };
+
+    auto MMode(int32_t*) const -> nsresult;
+
+    auto MMode(int32_t) const -> nsresult;
+
+    struct MScrollerX_t {
+        typedef StackScroller Owner;
+        typedef mozilla::jni::Object::LocalRef ReturnType;
+        typedef mozilla::jni::Object::Param SetterType;
+        typedef mozilla::jni::Args<> Args;
+        static constexpr char name[] = "mScrollerX";
+        static constexpr char signature[] =
+                "Lorg/mozilla/gecko/gfx/StackScroller$SplineStackScroller;";
+        static const bool isStatic = false;
+        static const mozilla::jni::ExceptionMode exceptionMode =
+                mozilla::jni::ExceptionMode::NSRESULT;
+    };
+
+    auto MScrollerX(mozilla::jni::Object::LocalRef*) const -> nsresult;
+
+    struct MScrollerY_t {
+        typedef StackScroller Owner;
+        typedef mozilla::jni::Object::LocalRef ReturnType;
+        typedef mozilla::jni::Object::Param SetterType;
+        typedef mozilla::jni::Args<> Args;
+        static constexpr char name[] = "mScrollerY";
+        static constexpr char signature[] =
+                "Lorg/mozilla/gecko/gfx/StackScroller$SplineStackScroller;";
+        static const bool isStatic = false;
+        static const mozilla::jni::ExceptionMode exceptionMode =
+                mozilla::jni::ExceptionMode::NSRESULT;
+    };
+
+    auto MScrollerY(mozilla::jni::Object::LocalRef*) const -> nsresult;
+
+    struct SViscousFluidNormalize_t {
+        typedef StackScroller Owner;
+        typedef float ReturnType;
+        typedef float SetterType;
+        typedef mozilla::jni::Args<> Args;
+        static constexpr char name[] = "sViscousFluidNormalize";
+        static constexpr char signature[] =
+                "F";
+        static const bool isStatic = true;
+        static const mozilla::jni::ExceptionMode exceptionMode =
+                mozilla::jni::ExceptionMode::NSRESULT;
+    };
+
+    static auto SViscousFluidNormalize(float*) -> nsresult;
+
+    static auto SViscousFluidNormalize(float) -> nsresult;
+
+    struct SViscousFluidScale_t {
+        typedef StackScroller Owner;
+        typedef float ReturnType;
+        typedef float SetterType;
+        typedef mozilla::jni::Args<> Args;
+        static constexpr char name[] = "sViscousFluidScale";
+        static constexpr char signature[] =
+                "F";
+        static const bool isStatic = true;
+        static const mozilla::jni::ExceptionMode exceptionMode =
+                mozilla::jni::ExceptionMode::NSRESULT;
+    };
+
+    static auto SViscousFluidScale(float*) -> nsresult;
+
+    static auto SViscousFluidScale(float) -> nsresult;
+
+    static const bool isMultithreaded = true;
+
+};
+
 class ViewTransform : public mozilla::jni::ObjectBase<ViewTransform, jobject>
 {
 public:
+    static const char name[];
+
     explicit ViewTransform(const Context& ctx) : ObjectBase<ViewTransform, jobject>(ctx) {}
 
     struct New_t {
@@ -4158,6 +4475,8 @@ public:
 class AudioFocusAgent : public mozilla::jni::ObjectBase<AudioFocusAgent, jobject>
 {
 public:
+    static const char name[];
+
     explicit AudioFocusAgent(const Context& ctx) : ObjectBase<AudioFocusAgent, jobject>(ctx) {}
 
     struct NotifyStartedPlaying_t {
@@ -4197,6 +4516,8 @@ public:
 class Restrictions : public mozilla::jni::ObjectBase<Restrictions, jobject>
 {
 public:
+    static const char name[];
+
     explicit Restrictions(const Context& ctx) : ObjectBase<Restrictions, jobject>(ctx) {}
 
     struct IsAllowed_t {
@@ -4238,6 +4559,8 @@ public:
 class MatrixBlobCursor : public mozilla::jni::ObjectBase<MatrixBlobCursor, jobject>
 {
 public:
+    static const char name[];
+
     explicit MatrixBlobCursor(const Context& ctx) : ObjectBase<MatrixBlobCursor, jobject>(ctx) {}
 
     struct New_t {
@@ -4329,6 +4652,8 @@ public:
 class SQLiteBridgeException : public mozilla::jni::ObjectBase<SQLiteBridgeException, jobject>
 {
 public:
+    static const char name[];
+
     explicit SQLiteBridgeException(const Context& ctx) : ObjectBase<SQLiteBridgeException, jobject>(ctx) {}
 
     struct New_t {
@@ -4371,6 +4696,8 @@ public:
 class Clipboard : public mozilla::jni::ObjectBase<Clipboard, jobject>
 {
 public:
+    static const char name[];
+
     explicit Clipboard(const Context& ctx) : ObjectBase<Clipboard, jobject>(ctx) {}
 
     struct ClearText_t {
@@ -4441,6 +4768,8 @@ public:
 class HardwareCodecCapabilityUtils : public mozilla::jni::ObjectBase<HardwareCodecCapabilityUtils, jobject>
 {
 public:
+    static const char name[];
+
     explicit HardwareCodecCapabilityUtils(const Context& ctx) : ObjectBase<HardwareCodecCapabilityUtils, jobject>(ctx) {}
 
     struct FindDecoderCodecInfoForMimeType_t {
@@ -4466,6 +4795,8 @@ public:
 class NativeJSContainer : public mozilla::jni::ObjectBase<NativeJSContainer, jobject>
 {
 public:
+    static const char name[];
+
     explicit NativeJSContainer(const Context& ctx) : ObjectBase<NativeJSContainer, jobject>(ctx) {}
 
     struct New_t {
@@ -4517,6 +4848,8 @@ public:
 class NativeJSObject : public mozilla::jni::ObjectBase<NativeJSObject, jobject>
 {
 public:
+    static const char name[];
+
     explicit NativeJSObject(const Context& ctx) : ObjectBase<NativeJSObject, jobject>(ctx) {}
 
     struct New_t {

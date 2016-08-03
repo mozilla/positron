@@ -24,6 +24,7 @@ namespace dom {
 class Element;
 } // namespace dom
 class CSSStyleSheet;
+class ServoRestyleManager;
 class ServoStyleSheet;
 } // namespace mozilla
 class nsIDocument;
@@ -39,6 +40,7 @@ namespace mozilla {
  */
 class ServoStyleSet
 {
+  friend class ServoRestyleManager;
 public:
   ServoStyleSet();
 
@@ -115,6 +117,14 @@ public:
                                        mozilla::CSSPseudoElementType aPseudoType,
                                        dom::Element* aPseudoElement,
                                        EventStates aStateMask);
+
+  /**
+   * Restyles a whole subtree of nodes.
+   *
+   * The aForce parameter propagates the dirty bits down the subtree, and when
+   * used aNode needs to be nsIContent.
+   */
+  void RestyleSubtree(nsINode* aNode, bool aForce);
 
 private:
   already_AddRefed<nsStyleContext> GetContext(already_AddRefed<ServoComputedValues>,

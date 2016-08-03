@@ -60,6 +60,7 @@ config = {
         "bin/*",
         "certs/*",
         "config/*",
+        "mach",
         "marionette/*",
         "modules/*",
         "mozbase/*",
@@ -90,10 +91,12 @@ config = {
                 "--no-slow",
                 "--no-progress",
                 "--format=automation",
-                "--jitflags=all"
+                "--jitflags=all",
+                "--timeout=970" # Keep in sync with run_timeout below.
             ],
             "run_filename": "jit_test.py",
-            "testsdir": "jit-test/jit-test"
+            "testsdir": "jit-test/jit-test",
+            "run_timeout": 1000 # Keep in sync with --timeout above.
         },
         "luciddream-emulator": {
             "options": [
@@ -129,6 +132,7 @@ config = {
                 "--log-errorsummary=%(error_summary_file)s",
                 "--use-test-media-devices",
                 "--screenshot-on-fail",
+                "--cleanup-crashes",
             ],
             "run_filename": "runtests.py",
             "testsdir": "mochitest"
@@ -159,6 +163,7 @@ config = {
                 "--symbols-path=%(symbols_path)s",
                 "--log-raw=%(raw_log_file)s",
                 "--log-errorsummary=%(error_summary_file)s",
+                "--cleanup-crashes",
             ],
             "run_filename": "runreftest.py",
             "testsdir": "reftest"
@@ -191,12 +196,18 @@ config = {
                            "--valgrind-supp-files=" + VALGRIND_SUPP_ARCH +
                                "," + VALGRIND_SUPP_CROSS_ARCH,
                            "--timeout=900", "--max-timeouts=50"],
-         "plain": [],
+        "plain": [],
+        "plain-gpu": ["--subsuite=gpu"],
+        "plain-clipboard": ["--subsuite=clipboard"],
         "plain-chunked": ["--chunk-by-dir=4"],
         "mochitest-media": ["--subsuite=media"],
         "chrome": ["--chrome"],
+        "chrome-gpu": ["--chrome", "--subsuite=gpu"],
+        "chrome-clipboard": ["--chrome", "--subsuite=clipboard"],
         "chrome-chunked": ["--chrome", "--chunk-by-dir=4"],
         "browser-chrome": ["--browser-chrome"],
+        "browser-chrome-gpu": ["--browser-chrome", "--subsuite=gpu"],
+        "browser-chrome-clipboard": ["--browser-chrome", "--subsuite=clipboard"],
         "browser-chrome-chunked": ["--browser-chrome", "--chunk-by-runtime"],
         "browser-chrome-addons": ["--browser-chrome", "--chunk-by-runtime", "--tag=addons"],
         "browser-chrome-coverage": ["--browser-chrome", "--chunk-by-runtime", "--timeout=1200"],
@@ -205,6 +216,7 @@ config = {
         "mochitest-devtools-chrome": ["--browser-chrome", "--subsuite=devtools"],
         "mochitest-devtools-chrome-chunked": ["--browser-chrome", "--subsuite=devtools", "--chunk-by-runtime"],
         "jetpack-package": ["--jetpack-package"],
+        "jetpack-package-clipboard": ["--jetpack-package", "--subsuite=clipboard"],
         "jetpack-addon": ["--jetpack-addon"],
         "a11y": ["--a11y"],
     },
@@ -261,6 +273,11 @@ config = {
         "xpcshell-addons": {
             "options": ["--xpcshell=%(abs_app_dir)s/" + XPCSHELL_NAME,
                         "--tag=addons",
+                        "--manifest=tests/xpcshell/tests/xpcshell.ini"],
+            "tests": []
+        },
+        "xpcshell-coverage": {
+            "options": ["--xpcshell=%(abs_app_dir)s/" + XPCSHELL_NAME,
                         "--manifest=tests/xpcshell/tests/xpcshell.ini"],
             "tests": []
         },

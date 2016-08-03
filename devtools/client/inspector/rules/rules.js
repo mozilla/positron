@@ -9,23 +9,21 @@
 
 const {Cc, Ci} = require("chrome");
 const promise = require("promise");
+const defer = require("devtools/shared/defer");
 const Services = require("Services");
 const {XPCOMUtils} = require("resource://gre/modules/XPCOMUtils.jsm");
 const {Task} = require("devtools/shared/task");
 const {Tools} = require("devtools/client/definitions");
-const {CssLogic} = require("devtools/shared/inspector/css-logic");
-const {ELEMENT_STYLE} = require("devtools/server/actors/styles");
+const {l10n} = require("devtools/shared/inspector/css-logic");
+const {ELEMENT_STYLE} = require("devtools/shared/specs/styles");
 const {OutputParser} = require("devtools/client/shared/output-parser");
-const {PrefObserver, PREF_ORIG_SOURCES} =
-      require("devtools/client/styleeditor/utils");
-const {ElementStyle} =
-      require("devtools/client/inspector/rules/models/element-style");
+const {PrefObserver, PREF_ORIG_SOURCES} = require("devtools/client/styleeditor/utils");
+const {ElementStyle} = require("devtools/client/inspector/rules/models/element-style");
 const {Rule} = require("devtools/client/inspector/rules/models/rule");
-const {RuleEditor} =
-      require("devtools/client/inspector/rules/views/rule-editor");
-const {createChild, promiseWarn} =
-      require("devtools/client/inspector/shared/utils");
+const {RuleEditor} = require("devtools/client/inspector/rules/views/rule-editor");
+const {createChild, promiseWarn} = require("devtools/client/inspector/shared/utils");
 const {gDevTools} = require("devtools/client/framework/devtools");
+const {getCssProperties} = require("devtools/shared/fronts/css-properties");
 
 loader.lazyRequireGetter(this, "overlays",
   "devtools/client/inspector/shared/style-inspector-overlays");
@@ -33,6 +31,8 @@ loader.lazyRequireGetter(this, "EventEmitter",
   "devtools/shared/event-emitter");
 loader.lazyRequireGetter(this, "StyleInspectorMenu",
   "devtools/client/inspector/shared/style-inspector-menu");
+loader.lazyRequireGetter(this, "KeyShortcuts",
+  "devtools/client/shared/key-shortcuts", true);
 
 XPCOMUtils.defineLazyGetter(this, "clipboardHelper", function () {
   return Cc["@mozilla.org/widget/clipboardhelper;1"]
@@ -126,7 +126,7 @@ function createDummyDocument() {
   docShell.createAboutBlankContentViewer(nullPrincipal);
   let window = docShell.contentViewer.DOMDocument.defaultView;
   window.location = "data:text/html,<html></html>";
-  let deferred = promise.defer();
+  let deferred = defer();
   eventTarget.addEventListener("DOMContentLoaded", function handler() {
     eventTarget.removeEventListener("DOMContentLoaded", handler, false);
     deferred.resolve(window.document);
@@ -159,15 +159,14 @@ function CssRuleView(inspector, document, store, pageStyle) {
   this.store = store || {};
   this.pageStyle = pageStyle;
 
-  this._outputParser = new OutputParser(document);
+  this.cssProperties = getCssProperties(inspector.toolbox);
 
-  this._onKeydown = this._onKeydown.bind(this);
-  this._onKeypress = this._onKeypress.bind(this);
+  this._outputParser = new OutputParser(document, this.cssProperties.supportsType);
+
   this._onAddRule = this._onAddRule.bind(this);
   this._onContextMenu = this._onContextMenu.bind(this);
   this._onCopy = this._onCopy.bind(this);
   this._onFilterStyles = this._onFilterStyles.bind(this);
-  this._onFilterKeyPress = this._onFilterKeyPress.bind(this);
   this._onClearSearch = this._onClearSearch.bind(this);
   this._onFilterTextboxContextMenu =
     this._onFilterTextboxContextMenu.bind(this);
@@ -187,13 +186,16 @@ function CssRuleView(inspector, document, store, pageStyle) {
 
   this.searchClearButton.hidden = true;
 
-  this.styleDocument.addEventListener("keydown", this._onKeydown);
-  this.styleDocument.addEventListener("keypress", this._onKeypress);
+  this.shortcuts = new KeyShortcuts({ window: this.styleWindow });
+  this._onShortcut = this._onShortcut.bind(this);
+  this.shortcuts.on("Escape", this._onShortcut);
+  this.shortcuts.on("Return", this._onShortcut);
+  this.shortcuts.on("Space", this._onShortcut);
+  this.shortcuts.on("CmdOrCtrl+F", this._onShortcut);
   this.element.addEventListener("copy", this._onCopy);
   this.element.addEventListener("contextmenu", this._onContextMenu);
   this.addRuleButton.addEventListener("click", this._onAddRule);
   this.searchField.addEventListener("input", this._onFilterStyles);
-  this.searchField.addEventListener("keypress", this._onFilterKeyPress);
   this.searchField.addEventListener("contextmenu",
                                     this._onFilterTextboxContextMenu);
   this.searchClearButton.addEventListener("click", this._onClearSearch);
@@ -220,7 +222,7 @@ function CssRuleView(inspector, document, store, pageStyle) {
     autoSelect: true,
     theme: "auto"
   };
-  this.popup = new AutocompletePopup(this.styleDocument, options);
+  this.popup = new AutocompletePopup(inspector._toolbox, options);
 
   this._showEmpty();
 
@@ -475,11 +477,6 @@ CssRuleView.prototype = {
 
         // Remove any double newlines.
         text = text.replace(/(\r?\n)\r?\n/g, "$1");
-
-        // Remove "inline"
-        let inline = _strings.GetStringFromName("rule.sourceInline");
-        let rx = new RegExp("^" + inline + "\\r?\\n?", "g");
-        text = text.replace(rx, "");
       }
 
       clipboardHelper.copyString(text);
@@ -704,18 +701,6 @@ CssRuleView.prototype = {
   },
 
   /**
-   * Handle the search box's keypress event. If the escape key is pressed,
-   * clear the search box field.
-   */
-  _onFilterKeyPress: function (event) {
-    if (event.keyCode === Ci.nsIDOMKeyEvent.DOM_VK_ESCAPE &&
-        this._onClearSearch()) {
-      event.preventDefault();
-      event.stopPropagation();
-    }
-  },
-
-  /**
    * Context menu handler for filter style search box.
    */
   _onFilterTextboxContextMenu: function (event) {
@@ -766,13 +751,11 @@ CssRuleView.prototype = {
     this.highlighters.destroy();
 
     // Remove bound listeners
-    this.styleDocument.removeEventListener("keydown", this._onKeydown);
-    this.styleDocument.removeEventListener("keypress", this._onKeypress);
+    this.shortcuts.destroy();
     this.element.removeEventListener("copy", this._onCopy);
     this.element.removeEventListener("contextmenu", this._onContextMenu);
     this.addRuleButton.removeEventListener("click", this._onAddRule);
     this.searchField.removeEventListener("input", this._onFilterStyles);
-    this.searchField.removeEventListener("keypress", this._onFilterKeyPress);
     this.searchField.removeEventListener("contextmenu",
       this._onFilterTextboxContextMenu);
     this.searchClearButton.removeEventListener("click", this._onClearSearch);
@@ -979,13 +962,13 @@ CssRuleView.prototype = {
    * Show the user that the rule view has no node selected.
    */
   _showEmpty: function () {
-    if (this.styleDocument.getElementById("noResults") > 0) {
+    if (this.styleDocument.getElementById("ruleview-no-results")) {
       return;
     }
 
     createChild(this.element, "div", {
-      id: "noResults",
-      textContent: CssLogic.l10n("rule.empty")
+      id: "ruleview-no-results",
+      textContent: l10n("rule.empty")
     });
   },
 
@@ -1028,7 +1011,7 @@ CssRuleView.prototype = {
     if (this._selectedElementLabel) {
       return this._selectedElementLabel;
     }
-    this._selectedElementLabel = CssLogic.l10n("rule.selectedElement");
+    this._selectedElementLabel = l10n("rule.selectedElement");
     return this._selectedElementLabel;
   },
 
@@ -1039,7 +1022,7 @@ CssRuleView.prototype = {
     if (this._pseudoElementLabel) {
       return this._pseudoElementLabel;
     }
-    this._pseudoElementLabel = CssLogic.l10n("rule.pseudoElement");
+    this._pseudoElementLabel = l10n("rule.pseudoElement");
     return this._pseudoElementLabel;
   },
 
@@ -1257,7 +1240,7 @@ CssRuleView.prototype = {
     let isSelectorHighlighted = false;
 
     let selectorNodes = [...rule.editor.selectorText.childNodes];
-    if (rule.domRule.type === Ci.nsIDOMCSSRule.KEYFRAME_RULE) {
+    if (rule.domRule.type === CSSRule.KEYFRAME_RULE) {
       selectorNodes = [rule.editor.selectorText];
     } else if (rule.domRule.type === ELEMENT_STYLE) {
       selectorNodes = [];
@@ -1490,32 +1473,29 @@ CssRuleView.prototype = {
   },
 
   /**
-   * Handle the keydown event in the rule view.
-   */
-  _onKeydown: function (event) {
-    if (this.element.classList.contains("non-interactive") &&
-        (event.code === "Enter" || event.code === " ")) {
-      event.preventDefault();
-    }
-  },
-
-  /**
    * Handle the keypress event in the rule view.
    */
-  _onKeypress: function (event) {
+  _onShortcut: function (name, event) {
     if (!event.target.closest("#sidebar-panel-ruleview")) {
       return;
     }
 
-    let isOSX = Services.appinfo.OS === "Darwin";
-
-    if (((isOSX && event.metaKey && !event.ctrlKey && !event.altKey) ||
-        (!isOSX && event.ctrlKey && !event.metaKey && !event.altKey)) &&
-        event.key === "f") {
+    if (name === "CmdOrCtrl+F") {
       this.searchField.focus();
       event.preventDefault();
+    } else if ((name === "Return" || name === "Space") &&
+               this.element.classList.contains("non-interactive")) {
+      event.preventDefault();
+    } else if (name === "Escape" &&
+               event.target === this.searchField &&
+               this._onClearSearch()) {
+      // Handle the search box's keypress event. If the escape key is pressed,
+      // clear the search box field.
+      event.preventDefault();
+      event.stopPropagation();
     }
   }
+
 };
 
 /**
@@ -1673,7 +1653,7 @@ RuleViewTool.prototype = {
   },
 
   onPanelSelected: function () {
-    if (this.inspector.selection.nodeFront === this.view.viewedElement) {
+    if (this.inspector.selection.nodeFront === this.view._viewedElement) {
       this.refresh();
     } else {
       this.onSelected();

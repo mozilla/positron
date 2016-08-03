@@ -8,10 +8,6 @@
 #include <gtk/gtk.h>
 #endif
 
-#ifdef MOZ_WIDGET_QT
-#include "nsQAppInstance.h"
-#endif
-
 #include "ContentChild.h"
 
 #include "BlobChild.h"
@@ -32,9 +28,12 @@
 #include "mozilla/dom/DataTransfer.h"
 #include "mozilla/dom/DOMStorageIPC.h"
 #include "mozilla/dom/ExternalHelperAppChild.h"
+#include "mozilla/dom/FlyWebPublishedServerIPC.h"
+#include "mozilla/dom/GetFilesHelper.h"
 #include "mozilla/dom/PCrashReporterChild.h"
 #include "mozilla/dom/ProcessGlobal.h"
 #include "mozilla/dom/Promise.h"
+#include "mozilla/dom/workers/ServiceWorkerManager.h"
 #include "mozilla/dom/nsIContentChild.h"
 #include "mozilla/psm/PSMContentListener.h"
 #include "mozilla/hal_sandbox/PHalChild.h"
@@ -59,6 +58,7 @@
 #include "mozilla/media/MediaChild.h"
 #include "mozilla/BasePrincipal.h"
 #include "mozilla/WebBrowserPersistDocumentChild.h"
+#include "imgLoader.h"
 
 #if defined(MOZ_CONTENT_SANDBOX)
 #if defined(XP_WIN)
@@ -106,12 +106,13 @@
 #include "nsAnonymousTemporaryFile.h"
 #include "nsISpellChecker.h"
 #include "nsClipboardProxy.h"
-#include "nsISystemMessageCache.h"
 #include "nsDirectoryService.h"
 #include "nsDirectoryServiceUtils.h"
 #include "nsDirectoryServiceDefs.h"
 #include "nsContentPermissionHelper.h"
+#ifdef NS_PRINTING
 #include "nsPrintingProxy.h"
+#endif
 
 #include "IHistory.h"
 #include "nsNetUtil.h"
@@ -128,6 +129,7 @@
 #include "mozilla/dom/PCycleCollectWithLogsChild.h"
 
 #include "nsIScriptSecurityManager.h"
+#include "nsHostObjectProtocolHandler.h"
 
 #ifdef MOZ_WEBRTC
 #include "signaling/src/peerconnection/WebrtcGlobalChild.h"
@@ -169,12 +171,8 @@
 #endif
 #include "NuwaChild.h"
 
-#ifdef MOZ_GAMEPAD
-#include "mozilla/dom/GamepadService.h"
-#endif
-
 #ifndef MOZ_SIMPLEPUSH
-#include "nsIPushNotifier.h"
+#include "mozilla/dom/PushNotifier.h"
 #endif
 
 #include "mozilla/dom/File.h"
@@ -223,6 +221,7 @@ using namespace mozilla::dom::mobileconnection;
 using namespace mozilla::dom::mobilemessage;
 using namespace mozilla::dom::telephony;
 using namespace mozilla::dom::voicemail;
+using namespace mozilla::dom::workers;
 using namespace mozilla::media;
 using namespace mozilla::embedding;
 using namespace mozilla::gmp;
@@ -487,39 +486,6 @@ ConsoleListener::Observe(nsIConsoleMessage* aMessage)
   return NS_OK;
 }
 
-class SystemMessageHandledObserver final : public nsIObserver
-{
-  ~SystemMessageHandledObserver() {}
-
-public:
-  NS_DECL_ISUPPORTS
-  NS_DECL_NSIOBSERVER
-
-  void Init();
-};
-
-void SystemMessageHandledObserver::Init()
-{
-  nsCOMPtr<nsIObserverService> os = mozilla::services::GetObserverService();
-
-  if (os) {
-    os->AddObserver(this, "handle-system-messages-done", /* ownsWeak */ false);
-  }
-}
-
-NS_IMETHODIMP
-SystemMessageHandledObserver::Observe(nsISupports* aSubject,
-                                      const char* aTopic,
-                                      const char16_t* aData)
-{
-  if (ContentChild::GetSingleton()) {
-    ContentChild::GetSingleton()->SendSystemMessageHandled();
-  }
-  return NS_OK;
-}
-
-NS_IMPL_ISUPPORTS(SystemMessageHandledObserver, nsIObserver)
-
 class BackgroundChildPrimer final :
   public nsIIPCBackgroundChildCreateCallback
 {
@@ -568,10 +534,6 @@ InitOnContentProcessCreated()
     MOZ_ASSERT(false, "Failed updating permission in child process");
   }
 #endif
-
-  nsCOMPtr<nsISystemMessageCache> smc =
-    do_GetService("@mozilla.org/system-message-cache;1");
-  NS_WARN_IF(!smc);
 
   // This will register cross-process observer.
   mozilla::dom::time::InitializeDateCacheCleaner();
@@ -641,6 +603,8 @@ ContentChild::Init(MessageLoop* aIOLoop,
     int argc = 3;
     char option_name[] = "--display";
     char* argv[] = {
+      // argv0 is unused because g_set_prgname() was called in
+      // XRE_InitChildProcess().
       nullptr,
       option_name,
       display_name,
@@ -653,18 +617,9 @@ ContentChild::Init(MessageLoop* aIOLoop,
   }
 #endif
 
-#ifdef MOZ_WIDGET_QT
-  // sigh, seriously
-  nsQAppInstance::AddRef();
-#endif
-
 #ifdef MOZ_X11
   // Do this after initializing GDK, or GDK will install its own handler.
   XRE_InstallX11ErrorHandler();
-#endif
-
-#ifdef MOZ_NUWA_PROCESS
-  SetTransport(aChannel);
 #endif
 
   NS_ASSERTION(!sSingleton, "only one ContentChild per child");
@@ -963,7 +918,7 @@ ContentChild::ProvideWindowCommon(TabChild* aTabOpener,
   }
 
   if (!urlToLoad.IsEmpty()) {
-    newChild->RecvLoadURL(urlToLoad, BrowserConfiguration(), showInfo);
+    newChild->RecvLoadURL(urlToLoad, showInfo);
   }
 
   nsCOMPtr<mozIDOMWindowProxy> win = do_GetInterface(newChild->WebNavigation());
@@ -1032,18 +987,19 @@ ContentChild::InitXPCOM()
   if (NS_FAILED(svc->RegisterListener(mConsoleListener)))
     NS_WARNING("Couldn't register console listener for child process");
 
-  bool isOffline, isLangRTL;
+  bool isOffline, isLangRTL, haveBidiKeyboards;
   bool isConnected;
   ClipboardCapabilities clipboardCaps;
   DomainPolicyClone domainPolicy;
   StructuredCloneData initialData;
 
   SendGetXPCOMProcessAttributes(&isOffline, &isConnected,
-                                &isLangRTL, &mAvailableDictionaries,
+                                &isLangRTL, &haveBidiKeyboards,
+                                &mAvailableDictionaries,
                                 &clipboardCaps, &domainPolicy, &initialData);
   RecvSetOffline(isOffline);
   RecvSetConnectivity(isConnected);
-  RecvBidiKeyboardNotify(isLangRTL);
+  RecvBidiKeyboardNotify(isLangRTL, haveBidiKeyboards);
 
   // Create the CPOW manager as soon as possible.
   SendPJavaScriptConstructor();
@@ -1077,11 +1033,6 @@ ContentChild::InitXPCOM()
     ProcessGlobal* global = ProcessGlobal::Get();
     global->SetInitialProcessData(data);
   }
-
-  // This object is held alive by the observer service.
-  RefPtr<SystemMessageHandledObserver> sysMsgObserver =
-    new SystemMessageHandledObserver();
-  sysMsgObserver->Init();
 
   InitOnContentProcessCreated();
 }
@@ -1291,11 +1242,16 @@ ContentChild::DeallocPAPZChild(PAPZChild* aActor)
   return true;
 }
 
-PCompositorBridgeChild*
-ContentChild::AllocPCompositorBridgeChild(mozilla::ipc::Transport* aTransport,
-                                          base::ProcessId aOtherProcess)
+bool
+ContentChild::RecvInitCompositor(Endpoint<PCompositorBridgeChild>&& aEndpoint)
 {
-  return CompositorBridgeChild::Create(aTransport, aOtherProcess);
+  return CompositorBridgeChild::InitForContent(Move(aEndpoint));
+}
+
+bool
+ContentChild::RecvInitImageBridge(Endpoint<PImageBridgeChild>&& aEndpoint)
+{
+  return ImageBridgeChild::InitForContent(Move(aEndpoint));
 }
 
 PSharedBufferManagerChild*
@@ -1303,13 +1259,6 @@ ContentChild::AllocPSharedBufferManagerChild(mozilla::ipc::Transport* aTransport
                                               base::ProcessId aOtherProcess)
 {
   return SharedBufferManagerChild::StartUpInChildProcess(aTransport, aOtherProcess);
-}
-
-PImageBridgeChild*
-ContentChild::AllocPImageBridgeChild(mozilla::ipc::Transport* aTransport,
-                                     base::ProcessId aOtherProcess)
-{
-  return ImageBridgeChild::StartUpInChildProcess(aTransport, aOtherProcess);
 }
 
 gfx::PVRManagerChild*
@@ -1506,13 +1455,14 @@ ContentChild::RecvSpeakerManagerNotify()
 }
 
 bool
-ContentChild::RecvBidiKeyboardNotify(const bool& aIsLangRTL)
+ContentChild::RecvBidiKeyboardNotify(const bool& aIsLangRTL,
+                                     const bool& aHaveBidiKeyboards)
 {
   // bidi is always of type PuppetBidiKeyboard* (because in the child, the only
   // possible implementation of nsIBidiKeyboard is PuppetBidiKeyboard).
   PuppetBidiKeyboard* bidi = static_cast<PuppetBidiKeyboard*>(nsContentUtils::GetBidiKeyboard());
   if (bidi) {
-    bidi->SetIsLangRTL(aIsLangRTL);
+    bidi->SetBidiKeyboardInfo(aIsLangRTL, aHaveBidiKeyboards);
   }
   return true;
 }
@@ -1682,6 +1632,22 @@ bool
 ContentChild::DeallocPPresentationChild(PPresentationChild* aActor)
 {
   delete aActor;
+  return true;
+}
+
+PFlyWebPublishedServerChild*
+ContentChild::AllocPFlyWebPublishedServerChild(const nsString& name,
+                                               const FlyWebPublishOptions& params)
+{
+  MOZ_CRASH("We should never be manually allocating PFlyWebPublishedServerChild actors");
+  return nullptr;
+}
+
+bool
+ContentChild::DeallocPFlyWebPublishedServerChild(PFlyWebPublishedServerChild* aActor)
+{
+  RefPtr<FlyWebPublishedServerChild> actor =
+    dont_AddRef(static_cast<FlyWebPublishedServerChild*>(aActor));
   return true;
 }
 
@@ -2221,6 +2187,16 @@ ContentChild::RecvRegisterChromeItem(const ChromeRegistryItem& item)
 }
 
 bool
+ContentChild::RecvClearImageCache(const bool& privateLoader, const bool& chrome)
+{
+  imgLoader* loader = privateLoader ? imgLoader::PrivateBrowsingLoader() :
+                                      imgLoader::NormalLoader();
+
+  loader->ClearCache(chrome);
+  return true;
+}
+
+bool
 ContentChild::RecvSetOffline(const bool& offline)
 {
   nsCOMPtr<nsIIOService> io (do_GetIOService());
@@ -2246,6 +2222,11 @@ ContentChild::RecvSetConnectivity(const bool& connectivity)
 void
 ContentChild::ActorDestroy(ActorDestroyReason why)
 {
+  if (mForceKillTimer) {
+    mForceKillTimer->Cancel();
+    mForceKillTimer = nullptr;
+  }
+
   if (AbnormalShutdown == why) {
     NS_WARNING("shutting down early because of crash!");
     ProcessChild::QuickExit();
@@ -2260,6 +2241,8 @@ ContentChild::ActorDestroy(ActorDestroyReason why)
   if (sFirstIdleTask) {
     sFirstIdleTask->Cancel();
   }
+
+  nsHostObjectProtocolHandler::RemoveDataEntries();
 
   mAlertObservers.Clear();
 
@@ -2486,13 +2469,11 @@ ContentChild::RecvAddPermission(const IPC::Permission& permission)
   MOZ_ASSERT(permissionManager,
          "We have no permissionManager in the Content process !");
 
+  // note we do not need to force mUserContextId to the default here because
+  // the permission manager does that internally.
   nsAutoCString originNoSuffix;
   PrincipalOriginAttributes attrs;
   attrs.PopulateFromOrigin(permission.origin, originNoSuffix);
-  // we're doing this because we currently don't support isolating permissions
-  // by userContextId.
-  MOZ_ASSERT(attrs.mUserContextId == nsIScriptSecurityManager::DEFAULT_USER_CONTEXT_ID,
-      "permission user context should be set to default!");
 
   nsCOMPtr<nsIURI> uri;
   nsresult rv = NS_NewURI(getter_AddRefs(uri), originNoSuffix);
@@ -2642,6 +2623,31 @@ ContentChild::RecvAppInit()
     MessageLoop::current()->PostTask(NewRunnableFunction(OnFinishNuwaPreparation));
   }
 #endif
+
+  return true;
+}
+
+bool
+ContentChild::RecvInitServiceWorkers(const ServiceWorkerConfiguration& aConfig)
+{
+  RefPtr<ServiceWorkerManager> swm = ServiceWorkerManager::GetInstance();
+  MOZ_ASSERT(swm);
+  swm->LoadRegistrations(aConfig.serviceWorkerRegistrations());
+  return true;
+}
+
+bool
+ContentChild::RecvInitBlobURLs(nsTArray<BlobURLRegistrationData>&& aRegistrations)
+{
+  for (uint32_t i = 0; i < aRegistrations.Length(); ++i) {
+    BlobURLRegistrationData& registration = aRegistrations[i];
+    RefPtr<BlobImpl> blobImpl =
+      static_cast<BlobChild*>(registration.blobChild())->GetBlobImpl();
+    MOZ_ASSERT(blobImpl);
+
+    nsHostObjectProtocolHandler::AddDataEntry(registration.url(), blobImpl,
+                                              registration.principal());
+  }
 
   return true;
 }
@@ -3022,9 +3028,51 @@ ContentChild::RecvDomainSetChanged(const uint32_t& aSetType,
   return true;
 }
 
+void
+ContentChild::StartForceKillTimer()
+{
+  if (mForceKillTimer) {
+    return;
+  }
+
+  int32_t timeoutSecs = Preferences::GetInt("dom.ipc.tabs.shutdownTimeoutSecs", 5);
+  if (timeoutSecs > 0) {
+    mForceKillTimer = do_CreateInstance("@mozilla.org/timer;1");
+    MOZ_ASSERT(mForceKillTimer);
+    mForceKillTimer->InitWithFuncCallback(ContentChild::ForceKillTimerCallback,
+      this,
+      timeoutSecs * 1000,
+      nsITimer::TYPE_ONE_SHOT);
+  }
+}
+
+/* static */ void
+ContentChild::ForceKillTimerCallback(nsITimer* aTimer, void* aClosure)
+{
+  ProcessChild::QuickExit();
+}
+
 bool
 ContentChild::RecvShutdown()
 {
+  // If we receive the shutdown message from within a nested event loop, we want
+  // to wait for that event loop to finish. Otherwise we could prematurely
+  // terminate an "unload" or "pagehide" event handler (which might be doing a
+  // sync XHR, for example).
+  nsCOMPtr<nsIThread> thread;
+  nsresult rv = NS_GetMainThread(getter_AddRefs(thread));
+  if (NS_SUCCEEDED(rv) && thread) {
+    RefPtr<nsThread> mainThread(thread.forget().downcast<nsThread>());
+    if (mainThread->RecursionDepth() > 1) {
+      // We're in a nested event loop. Let's delay for an arbitrary period of
+      // time (100ms) in the hopes that the event loop will have finished by
+      // then.
+      MessageLoop::current()->PostDelayedTask(
+        NewRunnableMethod(this, &ContentChild::RecvShutdown), 100);
+      return true;
+    }
+  }
+
   if (mPolicy) {
     mPolicy->Deactivate();
     mPolicy = nullptr;
@@ -3050,6 +3098,11 @@ ContentChild::RecvShutdown()
     Unused << RecvGatherProfile();
   }
 #endif
+
+  // Start a timer that will insure we quickly exit after a reasonable
+  // period of time. Prevents shutdown hangs after our connection to the
+  // parent closes.
+  StartForceKillTimer();
 
   // Ignore errors here. If this fails, the parent will kill us after a
   // timeout.
@@ -3146,18 +3199,6 @@ ContentChild::DeallocPWebBrowserPersistDocumentChild(PWebBrowserPersistDocumentC
 }
 
 bool
-ContentChild::RecvGamepadUpdate(const GamepadChangeEvent& aGamepadEvent)
-{
-#ifdef MOZ_GAMEPAD
-  RefPtr<GamepadService> svc(GamepadService::GetService());
-  if (svc) {
-    svc->Update(aGamepadEvent);
-  }
-#endif
-  return true;
-}
-
-bool
 ContentChild::RecvSetAudioSessionData(const nsID& aId,
                                       const nsString& aDisplayName,
                                       const nsString& aIconPath)
@@ -3224,6 +3265,19 @@ ContentChild::RecvInvokeDragSession(nsTArray<IPCDataTransfer>&& aTransfers,
     dragService->GetCurrentSession(getter_AddRefs(session));
     if (session) {
       session->SetDragAction(aAction);
+      // Check if we are receiving any file objects. If we are we will want
+      // to hide any of the other objects coming in from content.
+      bool hasFiles = false;
+      for (uint32_t i = 0; i < aTransfers.Length() && !hasFiles; ++i) {
+        auto& items = aTransfers[i].items();
+        for (uint32_t j = 0; j < items.Length() && !hasFiles; ++j) {
+          if (items[j].data().type() == IPCDataTransferData::TPBlobChild) {
+            hasFiles = true;
+          }
+        }
+      }
+
+      // Add the entries from the IPC to the new DataTransfer
       nsCOMPtr<DataTransfer> dataTransfer =
         new DataTransfer(nullptr, eDragStart, false, -1);
       for (uint32_t i = 0; i < aTransfers.Length(); ++i) {
@@ -3234,9 +3288,10 @@ ContentChild::RecvInvokeDragSession(nsTArray<IPCDataTransfer>&& aTransfers,
           if (item.data().type() == IPCDataTransferData::TnsString) {
             const nsString& data = item.data().get_nsString();
             variant->SetAsAString(data);
-          } else if (item.data().type() == IPCDataTransferData::TnsCString) {
-            const nsCString& data = item.data().get_nsCString();
-            variant->SetAsACString(data);
+          } else if (item.data().type() == IPCDataTransferData::TShmem) {
+            Shmem data = item.data().get_Shmem();
+            variant->SetAsACString(nsDependentCString(data.get<char>(), data.Size<char>()));
+            Unused << DeallocShmem(data);
           } else if (item.data().type() == IPCDataTransferData::TPBlobChild) {
             BlobChild* blob = static_cast<BlobChild*>(item.data().get_PBlobChild());
             RefPtr<BlobImpl> blobImpl = blob->GetBlobImpl();
@@ -3244,9 +3299,11 @@ ContentChild::RecvInvokeDragSession(nsTArray<IPCDataTransfer>&& aTransfers,
           } else {
             continue;
           }
+          // We should hide this data from content if we have a file, and we aren't a file.
+          bool hidden = hasFiles && item.data().type() != IPCDataTransferData::TPBlobChild;
           dataTransfer->SetDataWithPrincipalFromOtherProcess(
             NS_ConvertUTF8toUTF16(item.flavor()), variant, i,
-            nsContentUtils::GetSystemPrincipal());
+            nsContentUtils::GetSystemPrincipal(), hidden);
         }
       }
       session->SetDataTransfer(dataTransfer);
@@ -3281,19 +3338,8 @@ ContentChild::RecvPush(const nsCString& aScope,
                        const nsString& aMessageId)
 {
 #ifndef MOZ_SIMPLEPUSH
-  nsCOMPtr<nsIPushNotifier> pushNotifier =
-      do_GetService("@mozilla.org/push/Notifier;1");
-  if (NS_WARN_IF(!pushNotifier)) {
-      return true;
-  }
-
-  nsresult rv = pushNotifier->NotifyPushObservers(aScope, aPrincipal,
-                                                  Nothing());
-  Unused << NS_WARN_IF(NS_FAILED(rv));
-
-  rv = pushNotifier->NotifyPushWorkers(aScope, aPrincipal,
-                                       aMessageId, Nothing());
-  Unused << NS_WARN_IF(NS_FAILED(rv));
+  PushMessageDispatcher dispatcher(aScope, aPrincipal, aMessageId, Nothing());
+  Unused << NS_WARN_IF(NS_FAILED(dispatcher.NotifyObserversAndWorkers()));
 #endif
   return true;
 }
@@ -3305,19 +3351,8 @@ ContentChild::RecvPushWithData(const nsCString& aScope,
                                InfallibleTArray<uint8_t>&& aData)
 {
 #ifndef MOZ_SIMPLEPUSH
-  nsCOMPtr<nsIPushNotifier> pushNotifier =
-      do_GetService("@mozilla.org/push/Notifier;1");
-  if (NS_WARN_IF(!pushNotifier)) {
-      return true;
-  }
-
-  nsresult rv = pushNotifier->NotifyPushObservers(aScope, aPrincipal,
-                                                  Some(aData));
-  Unused << NS_WARN_IF(NS_FAILED(rv));
-
-  rv = pushNotifier->NotifyPushWorkers(aScope, aPrincipal,
-                                       aMessageId, Some(aData));
-  Unused << NS_WARN_IF(NS_FAILED(rv));
+  PushMessageDispatcher dispatcher(aScope, aPrincipal, aMessageId, Some(aData));
+  Unused << NS_WARN_IF(NS_FAILED(dispatcher.NotifyObserversAndWorkers()));
 #endif
   return true;
 }
@@ -3327,34 +3362,106 @@ ContentChild::RecvPushSubscriptionChange(const nsCString& aScope,
                                          const IPC::Principal& aPrincipal)
 {
 #ifndef MOZ_SIMPLEPUSH
-  nsCOMPtr<nsIPushNotifier> pushNotifier =
-      do_GetService("@mozilla.org/push/Notifier;1");
-  if (NS_WARN_IF(!pushNotifier)) {
-      return true;
-  }
-
-  nsresult rv = pushNotifier->NotifySubscriptionChangeObservers(aScope,
-                                                                aPrincipal);
-  Unused << NS_WARN_IF(NS_FAILED(rv));
-
-  rv = pushNotifier->NotifySubscriptionChangeWorkers(aScope, aPrincipal);
-  Unused << NS_WARN_IF(NS_FAILED(rv));
+  PushSubscriptionChangeDispatcher dispatcher(aScope, aPrincipal);
+  Unused << NS_WARN_IF(NS_FAILED(dispatcher.NotifyObserversAndWorkers()));
 #endif
   return true;
 }
 
 bool
-ContentChild::RecvPushError(const nsCString& aScope, const nsString& aMessage,
-                            const uint32_t& aFlags)
+ContentChild::RecvPushError(const nsCString& aScope, const IPC::Principal& aPrincipal,
+                            const nsString& aMessage, const uint32_t& aFlags)
 {
 #ifndef MOZ_SIMPLEPUSH
-  nsCOMPtr<nsIPushNotifier> pushNotifier =
-      do_GetService("@mozilla.org/push/Notifier;1");
-  if (NS_WARN_IF(!pushNotifier)) {
-      return true;
-  }
-  pushNotifier->NotifyErrorWorkers(aScope, aMessage, aFlags);
+  PushErrorDispatcher dispatcher(aScope, aPrincipal, aMessage, aFlags);
+  Unused << NS_WARN_IF(NS_FAILED(dispatcher.NotifyObserversAndWorkers()));
 #endif
+  return true;
+}
+
+bool
+ContentChild::RecvNotifyPushSubscriptionModifiedObservers(const nsCString& aScope,
+                                                          const IPC::Principal& aPrincipal)
+{
+#ifndef MOZ_SIMPLEPUSH
+  PushSubscriptionModifiedDispatcher dispatcher(aScope, aPrincipal);
+  Unused << NS_WARN_IF(NS_FAILED(dispatcher.NotifyObservers()));
+#endif
+  return true;
+}
+
+bool
+ContentChild::RecvBlobURLRegistration(const nsCString& aURI, PBlobChild* aBlobChild,
+                                      const IPC::Principal& aPrincipal)
+{
+  RefPtr<BlobImpl> blobImpl = static_cast<BlobChild*>(aBlobChild)->GetBlobImpl();
+  MOZ_ASSERT(blobImpl);
+
+  nsHostObjectProtocolHandler::AddDataEntry(aURI, blobImpl, aPrincipal);
+  return true;
+}
+
+bool
+ContentChild::RecvBlobURLUnregistration(const nsCString& aURI)
+{
+  nsHostObjectProtocolHandler::RemoveDataEntry(aURI);
+  return true;
+}
+
+
+void
+ContentChild::CreateGetFilesRequest(const nsAString& aDirectoryPath,
+                                    bool aRecursiveFlag,
+                                    nsID& aUUID,
+                                    GetFilesHelperChild* aChild)
+{
+  MOZ_ASSERT(aChild);
+  MOZ_ASSERT(!mGetFilesPendingRequests.GetWeak(aUUID));
+
+  Unused << SendGetFilesRequest(aUUID, nsString(aDirectoryPath),
+                                aRecursiveFlag);
+  mGetFilesPendingRequests.Put(aUUID, aChild);
+}
+
+void
+ContentChild::DeleteGetFilesRequest(nsID& aUUID, GetFilesHelperChild* aChild)
+{
+  MOZ_ASSERT(aChild);
+  MOZ_ASSERT(mGetFilesPendingRequests.GetWeak(aUUID));
+
+  Unused << SendDeleteGetFilesRequest(aUUID);
+  mGetFilesPendingRequests.Remove(aUUID);
+}
+
+bool
+ContentChild::RecvGetFilesResponse(const nsID& aUUID,
+                                   const GetFilesResponseResult& aResult)
+{
+  GetFilesHelperChild* child = mGetFilesPendingRequests.GetWeak(aUUID);
+  // This object can already been deleted in case DeleteGetFilesRequest has
+  // been called when the response was sending by the parent.
+  if (!child) {
+    return true;
+  }
+
+  if (aResult.type() == GetFilesResponseResult::TGetFilesResponseFailure) {
+    child->Finished(aResult.get_GetFilesResponseFailure().errorCode());
+  } else {
+    MOZ_ASSERT(aResult.type() == GetFilesResponseResult::TGetFilesResponseSuccess);
+
+    const nsTArray<PBlobChild*>& blobs =
+      aResult.get_GetFilesResponseSuccess().blobsChild();
+
+    bool succeeded = true;
+    for (uint32_t i = 0; succeeded && i < blobs.Length(); ++i) {
+      RefPtr<BlobImpl> impl = static_cast<BlobChild*>(blobs[i])->GetBlobImpl();
+      succeeded = child->AppendBlobImpl(impl);
+    }
+
+    child->Finished(succeeded ? NS_OK : NS_ERROR_OUT_OF_MEMORY);
+  }
+
+  mGetFilesPendingRequests.Remove(aUUID);
   return true;
 }
 

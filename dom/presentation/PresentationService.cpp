@@ -4,9 +4,12 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "PresentationService.h"
+
 #include "ipc/PresentationIPCService.h"
 #include "mozilla/Services.h"
 #include "mozIApplication.h"
+#include "nsGlobalWindow.h"
 #include "nsIAppsService.h"
 #include "nsIObserverService.h"
 #include "nsIPresentationControlChannel.h"
@@ -15,18 +18,43 @@
 #include "nsIPresentationListener.h"
 #include "nsIPresentationRequestUIGlue.h"
 #include "nsIPresentationSessionRequest.h"
+#include "nsIPresentationTerminateRequest.h"
 #include "nsNetUtil.h"
 #include "nsServiceManagerUtils.h"
 #include "nsThreadUtils.h"
 #include "nsXULAppAPI.h"
 #include "PresentationLog.h"
-#include "PresentationService.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
 
 namespace mozilla {
 namespace dom {
+
+static bool
+IsSameDevice(nsIPresentationDevice* aDevice, nsIPresentationDevice* aDeviceAnother) {
+  if (!aDevice || !aDeviceAnother) {
+    return false;
+  }
+
+  nsAutoCString deviceId;
+  aDevice->GetId(deviceId);
+  nsAutoCString anotherId;
+  aDeviceAnother->GetId(anotherId);
+  if (!deviceId.Equals(anotherId)) {
+    return false;
+  }
+
+  nsAutoCString deviceType;
+  aDevice->GetType(deviceType);
+  nsAutoCString anotherType;
+  aDeviceAnother->GetType(anotherType);
+  if (!deviceType.Equals(anotherType)) {
+    return false;
+  }
+
+  return true;
+}
 
 /*
  * Implementation of PresentationDeviceRequest
@@ -40,14 +68,19 @@ public:
 
   PresentationDeviceRequest(const nsAString& aRequestUrl,
                             const nsAString& aId,
-                            const nsAString& aOrigin);
+                            const nsAString& aOrigin,
+                            uint64_t aWindowId,
+                            nsIPresentationServiceCallback* aCallback);
 
 private:
-  virtual ~PresentationDeviceRequest();
+  virtual ~PresentationDeviceRequest() = default;
+  nsresult CreateSessionInfo(nsIPresentationDevice* aDevice);
 
   nsString mRequestUrl;
   nsString mId;
   nsString mOrigin;
+  uint64_t mWindowId;
+  nsCOMPtr<nsIPresentationServiceCallback> mCallback;
 };
 
 LazyLogModule gPresentationLog("Presentation");
@@ -57,20 +90,22 @@ LazyLogModule gPresentationLog("Presentation");
 
 NS_IMPL_ISUPPORTS(PresentationDeviceRequest, nsIPresentationDeviceRequest)
 
-PresentationDeviceRequest::PresentationDeviceRequest(const nsAString& aRequestUrl,
-                                                     const nsAString& aId,
-                                                     const nsAString& aOrigin)
+PresentationDeviceRequest::PresentationDeviceRequest(
+                                      const nsAString& aRequestUrl,
+                                      const nsAString& aId,
+                                      const nsAString& aOrigin,
+                                      uint64_t aWindowId,
+                                      nsIPresentationServiceCallback* aCallback)
   : mRequestUrl(aRequestUrl)
   , mId(aId)
   , mOrigin(aOrigin)
+  , mWindowId(aWindowId)
+  , mCallback(aCallback)
 {
   MOZ_ASSERT(!mRequestUrl.IsEmpty());
   MOZ_ASSERT(!mId.IsEmpty());
   MOZ_ASSERT(!mOrigin.IsEmpty());
-}
-
-PresentationDeviceRequest::~PresentationDeviceRequest()
-{
+  MOZ_ASSERT(mCallback);
 }
 
 NS_IMETHODIMP
@@ -93,16 +128,28 @@ PresentationDeviceRequest::Select(nsIPresentationDevice* aDevice)
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(aDevice);
 
+  nsresult rv = CreateSessionInfo(aDevice);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    mCallback->NotifyError(rv);
+    return rv;
+  }
+
+  return mCallback->NotifySuccess();
+}
+
+nsresult
+PresentationDeviceRequest::CreateSessionInfo(nsIPresentationDevice* aDevice)
+{
   nsCOMPtr<nsIPresentationService> service =
     do_GetService(PRESENTATION_SERVICE_CONTRACTID);
   if (NS_WARN_IF(!service)) {
     return NS_ERROR_NOT_AVAILABLE;
   }
 
-  // Update device in the session info.
+  // Create the controlling session info
   RefPtr<PresentationSessionInfo> info =
     static_cast<PresentationService*>(service.get())->
-      GetSessionInfo(mId, nsIPresentationService::ROLE_CONTROLLER);
+      CreateControllingSessionInfo(mRequestUrl, mId, mWindowId);
   if (NS_WARN_IF(!info)) {
     return NS_ERROR_NOT_AVAILABLE;
   }
@@ -111,7 +158,7 @@ PresentationDeviceRequest::Select(nsIPresentationDevice* aDevice)
   // Establish a control channel. If we failed to do so, the callback is called
   // with an error message.
   nsCOMPtr<nsIPresentationControlChannel> ctrlChannel;
-  nsresult rv = aDevice->EstablishControlChannel(mRequestUrl, mId, getter_AddRefs(ctrlChannel));
+  nsresult rv = aDevice->EstablishControlChannel(getter_AddRefs(ctrlChannel));
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return info->ReplyError(NS_ERROR_DOM_OPERATION_ERR);
   }
@@ -128,27 +175,17 @@ PresentationDeviceRequest::Select(nsIPresentationDevice* aDevice)
 NS_IMETHODIMP
 PresentationDeviceRequest::Cancel()
 {
-  nsCOMPtr<nsIPresentationService> service =
-    do_GetService(PRESENTATION_SERVICE_CONTRACTID);
-  if (NS_WARN_IF(!service)) {
-    return NS_ERROR_NOT_AVAILABLE;
-  }
-
-  RefPtr<PresentationSessionInfo> info =
-    static_cast<PresentationService*>(service.get())->
-      GetSessionInfo(mId, nsIPresentationService::ROLE_CONTROLLER);
-  if (NS_WARN_IF(!info)) {
-    return NS_ERROR_NOT_AVAILABLE;
-  }
-
-  return info->ReplyError(NS_ERROR_DOM_ABORT_ERR);
+  return mCallback->NotifyError(NS_ERROR_DOM_ABORT_ERR);
 }
 
 /*
  * Implementation of PresentationService
  */
 
-NS_IMPL_ISUPPORTS(PresentationService, nsIPresentationService, nsIObserver)
+NS_IMPL_ISUPPORTS_INHERITED(PresentationService,
+                            PresentationServiceBase,
+                            nsIPresentationService,
+                            nsIObserver)
 
 PresentationService::PresentationService()
   : mIsAvailable(false)
@@ -182,6 +219,10 @@ PresentationService::Init()
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return false;
   }
+  rv = obs->AddObserver(this, PRESENTATION_TERMINATE_REQUEST_TOPIC, false);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return false;
+  }
 
   nsCOMPtr<nsIPresentationDeviceManager> deviceManager =
     do_GetService(PRESENTATION_DEVICE_MANAGER_CONTRACTID);
@@ -210,6 +251,13 @@ PresentationService::Observe(nsISupports* aSubject,
     }
 
     return HandleSessionRequest(request);
+  } else if (!strcmp(aTopic, PRESENTATION_TERMINATE_REQUEST_TOPIC)) {
+    nsCOMPtr<nsIPresentationTerminateRequest> request(do_QueryInterface(aSubject));
+    if (NS_WARN_IF(!request)) {
+      return NS_ERROR_FAILURE;
+    }
+
+    return HandleTerminateRequest(request);
   } else if (!strcmp(aTopic, "profile-after-change")) {
     // It's expected since we add and entry to |kLayoutCategories| in
     // |nsLayoutModule.cpp| to launch this service earlier.
@@ -225,17 +273,18 @@ PresentationService::HandleShutdown()
 {
   MOZ_ASSERT(NS_IsMainThread());
 
+  Shutdown();
+
   mAvailabilityListeners.Clear();
-  mRespondingListeners.Clear();
   mSessionInfoAtController.Clear();
   mSessionInfoAtReceiver.Clear();
-  mRespondingSessionIds.Clear();
 
   nsCOMPtr<nsIObserverService> obs = services::GetObserverService();
   if (obs) {
     obs->RemoveObserver(this, NS_XPCOM_SHUTDOWN_OBSERVER_ID);
     obs->RemoveObserver(this, PRESENTATION_DEVICE_CHANGE_TOPIC);
     obs->RemoveObserver(this, PRESENTATION_SESSION_REQUEST_TOPIC);
+    obs->RemoveObserver(this, PRESENTATION_TERMINATE_REQUEST_TOPIC);
   }
 }
 
@@ -274,21 +323,21 @@ PresentationService::HandleSessionRequest(nsIPresentationSessionRequest* aReques
   nsAutoString url;
   rv = aRequest->GetUrl(url);
   if (NS_WARN_IF(NS_FAILED(rv))) {
-    ctrlChannel->Close(rv);
+    ctrlChannel->Disconnect(rv);
     return rv;
   }
 
   nsAutoString sessionId;
   rv = aRequest->GetPresentationId(sessionId);
   if (NS_WARN_IF(NS_FAILED(rv))) {
-    ctrlChannel->Close(rv);
+    ctrlChannel->Disconnect(rv);
     return rv;
   }
 
   nsCOMPtr<nsIPresentationDevice> device;
   rv = aRequest->GetDevice(getter_AddRefs(device));
   if (NS_WARN_IF(NS_FAILED(rv))) {
-    ctrlChannel->Close(rv);
+    ctrlChannel->Disconnect(rv);
     return rv;
   }
 
@@ -297,19 +346,19 @@ PresentationService::HandleSessionRequest(nsIPresentationSessionRequest* aReques
   nsCOMPtr<nsIURI> uri;
   rv = NS_NewURI(getter_AddRefs(uri), url);
   if (NS_WARN_IF(NS_FAILED(rv))) {
-    ctrlChannel->Close(NS_ERROR_DOM_BAD_URI);
+    ctrlChannel->Disconnect(NS_ERROR_DOM_BAD_URI);
     return rv;
   }
 
   bool isApp;
   rv = uri->SchemeIs("app", &isApp);
   if (NS_WARN_IF(NS_FAILED(rv))) {
-    ctrlChannel->Close(rv);
+    ctrlChannel->Disconnect(rv);
     return rv;
   }
 
   if (NS_WARN_IF(isApp && !IsAppInstalled(uri))) {
-    ctrlChannel->Close(NS_ERROR_DOM_NOT_FOUND_ERR);
+    ctrlChannel->Disconnect(NS_ERROR_DOM_NOT_FOUND_ERR);
     return NS_OK;
   }
 #endif
@@ -319,14 +368,14 @@ PresentationService::HandleSessionRequest(nsIPresentationSessionRequest* aReques
     GetSessionInfo(sessionId, nsIPresentationService::ROLE_RECEIVER);
   if (NS_WARN_IF(info)) {
     // TODO Bug 1195605. Update here after session join/resume becomes supported.
-    ctrlChannel->Close(NS_ERROR_DOM_OPERATION_ERR);
+    ctrlChannel->Disconnect(NS_ERROR_DOM_OPERATION_ERR);
     return NS_ERROR_DOM_ABORT_ERR;
   }
 
   info = new PresentationPresentingInfo(url, sessionId, device);
   rv = info->Init(ctrlChannel);
   if (NS_WARN_IF(NS_FAILED(rv))) {
-    ctrlChannel->Close(rv);
+    ctrlChannel->Disconnect(rv);
     return rv;
   }
 
@@ -336,19 +385,71 @@ PresentationService::HandleSessionRequest(nsIPresentationSessionRequest* aReques
   nsCOMPtr<nsIPresentationRequestUIGlue> glue =
     do_CreateInstance(PRESENTATION_REQUEST_UI_GLUE_CONTRACTID);
   if (NS_WARN_IF(!glue)) {
-    ctrlChannel->Close(NS_ERROR_DOM_OPERATION_ERR);
+    ctrlChannel->Disconnect(NS_ERROR_DOM_OPERATION_ERR);
     return info->ReplyError(NS_ERROR_DOM_OPERATION_ERR);
   }
   nsCOMPtr<nsISupports> promise;
   rv = glue->SendRequest(url, sessionId, device, getter_AddRefs(promise));
   if (NS_WARN_IF(NS_FAILED(rv))) {
-    ctrlChannel->Close(rv);
+    ctrlChannel->Disconnect(rv);
     return info->ReplyError(NS_ERROR_DOM_OPERATION_ERR);
   }
   nsCOMPtr<Promise> realPromise = do_QueryInterface(promise);
   static_cast<PresentationPresentingInfo*>(info.get())->SetPromise(realPromise);
 
   return NS_OK;
+}
+
+nsresult
+PresentationService::HandleTerminateRequest(nsIPresentationTerminateRequest* aRequest)
+{
+  nsCOMPtr<nsIPresentationControlChannel> ctrlChannel;
+  nsresult rv = aRequest->GetControlChannel(getter_AddRefs(ctrlChannel));
+  if (NS_WARN_IF(NS_FAILED(rv) || !ctrlChannel)) {
+    return rv;
+  }
+
+  nsAutoString sessionId;
+  rv = aRequest->GetPresentationId(sessionId);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    ctrlChannel->Disconnect(rv);
+    return rv;
+  }
+
+  nsCOMPtr<nsIPresentationDevice> device;
+  rv = aRequest->GetDevice(getter_AddRefs(device));
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    ctrlChannel->Disconnect(rv);
+    return rv;
+  }
+
+  bool isFromReceiver;
+  rv = aRequest->GetIsFromReceiver(&isFromReceiver);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    ctrlChannel->Disconnect(rv);
+    return rv;
+  }
+
+  RefPtr<PresentationSessionInfo> info;
+  if (!isFromReceiver) {
+    info = GetSessionInfo(sessionId, nsIPresentationService::ROLE_RECEIVER);
+  } else {
+    info = GetSessionInfo(sessionId, nsIPresentationService::ROLE_CONTROLLER);
+  }
+  if (NS_WARN_IF(!info)) {
+    // Cannot terminate non-existed session.
+    ctrlChannel->Disconnect(NS_ERROR_DOM_OPERATION_ERR);
+    return NS_ERROR_DOM_ABORT_ERR;
+  }
+
+  // Check if terminate request comes from known device.
+  RefPtr<nsIPresentationDevice> knownDevice = info->GetDevice();
+  if (NS_WARN_IF(!IsSameDevice(device, knownDevice))) {
+    ctrlChannel->Disconnect(NS_ERROR_DOM_OPERATION_ERR);
+    return NS_ERROR_DOM_ABORT_ERR;
+  }
+
+  return info->OnTerminate(ctrlChannel);
 }
 
 void
@@ -400,33 +501,24 @@ PresentationService::StartSession(const nsAString& aUrl,
   MOZ_ASSERT(aCallback);
   MOZ_ASSERT(!aSessionId.IsEmpty());
 
-  // Create session info  and set the callback. The callback is called when the
-  // request is finished.
-  RefPtr<PresentationSessionInfo> info =
-    new PresentationControllingInfo(aUrl, aSessionId, aCallback);
-  mSessionInfoAtController.Put(aSessionId, info);
-
-  // Only track the info when an actual window ID, which would never be 0, is
-  // provided (for an in-process sender page).
-  if (aWindowId != 0) {
-    mRespondingSessionIds.Put(aWindowId, new nsString(aSessionId));
-    mRespondingWindowIds.Put(aSessionId, aWindowId);
-  }
-
   nsCOMPtr<nsIPresentationDeviceRequest> request =
-    new PresentationDeviceRequest(aUrl, aSessionId, aOrigin);
+    new PresentationDeviceRequest(aUrl,
+                                  aSessionId,
+                                  aOrigin,
+                                  aWindowId,
+                                  aCallback);
 
   if (aDeviceId.IsVoid()) {
     // Pop up a prompt and ask user to select a device.
     nsCOMPtr<nsIPresentationDevicePrompt> prompt =
       do_GetService(PRESENTATION_DEVICE_PROMPT_CONTRACTID);
     if (NS_WARN_IF(!prompt)) {
-      return info->ReplyError(NS_ERROR_DOM_OPERATION_ERR);
+      return aCallback->NotifyError(NS_ERROR_DOM_OPERATION_ERR);
     }
 
     nsresult rv = prompt->PromptDeviceSelection(request);
     if (NS_WARN_IF(NS_FAILED(rv))) {
-      return info->ReplyError(NS_ERROR_DOM_OPERATION_ERR);
+      return aCallback->NotifyError(NS_ERROR_DOM_OPERATION_ERR);
     }
 
     return NS_OK;
@@ -436,24 +528,24 @@ PresentationService::StartSession(const nsAString& aUrl,
   nsCOMPtr<nsIPresentationDeviceManager> deviceManager =
     do_GetService(PRESENTATION_DEVICE_MANAGER_CONTRACTID);
   if (NS_WARN_IF(!deviceManager)) {
-    return info->ReplyError(NS_ERROR_DOM_OPERATION_ERR);
+    return aCallback->NotifyError(NS_ERROR_DOM_OPERATION_ERR);
   }
 
   nsCOMPtr<nsIArray> devices;
   nsresult rv = deviceManager->GetAvailableDevices(getter_AddRefs(devices));
   if (NS_WARN_IF(NS_FAILED(rv))) {
-    return info->ReplyError(NS_ERROR_DOM_OPERATION_ERR);
+    return aCallback->NotifyError(NS_ERROR_DOM_OPERATION_ERR);
   }
 
   nsCOMPtr<nsISimpleEnumerator> enumerator;
   rv = devices->Enumerate(getter_AddRefs(enumerator));
   if (NS_WARN_IF(NS_FAILED(rv))) {
-    return info->ReplyError(NS_ERROR_DOM_OPERATION_ERR);
+    return aCallback->NotifyError(NS_ERROR_DOM_OPERATION_ERR);
   }
 
   NS_ConvertUTF16toUTF8 utf8DeviceId(aDeviceId);
   bool hasMore;
-  while(NS_SUCCEEDED(enumerator->HasMoreElements(&hasMore)) && hasMore){
+  while (NS_SUCCEEDED(enumerator->HasMoreElements(&hasMore)) && hasMore) {
     nsCOMPtr<nsISupports> isupports;
     rv = enumerator->GetNext(getter_AddRefs(isupports));
 
@@ -468,7 +560,26 @@ PresentationService::StartSession(const nsAString& aUrl,
   }
 
   // Reject if designated device is not available.
-  return info->ReplyError(NS_ERROR_DOM_NOT_FOUND_ERR);
+  return aCallback->NotifyError(NS_ERROR_DOM_NOT_FOUND_ERR);
+}
+
+already_AddRefed<PresentationSessionInfo>
+PresentationService::CreateControllingSessionInfo(const nsAString& aUrl,
+                                                  const nsAString& aSessionId,
+                                                  uint64_t aWindowId)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+
+  if (aSessionId.IsEmpty()) {
+    return nullptr;
+  }
+
+  RefPtr<PresentationSessionInfo> info =
+    new PresentationControllingInfo(aUrl, aSessionId);
+
+  mSessionInfoAtController.Put(aSessionId, info);
+  AddRespondingSessionId(aWindowId, aSessionId);
+  return info.forget();
 }
 
 NS_IMETHODIMP
@@ -492,7 +603,8 @@ PresentationService::SendSessionMessage(const nsAString& aSessionId,
 
 NS_IMETHODIMP
 PresentationService::CloseSession(const nsAString& aSessionId,
-                                  uint8_t aRole)
+                                  uint8_t aRole,
+                                  uint8_t aClosedReason)
 {
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(!aSessionId.IsEmpty());
@@ -502,6 +614,12 @@ PresentationService::CloseSession(const nsAString& aSessionId,
   RefPtr<PresentationSessionInfo> info = GetSessionInfo(aSessionId, aRole);
   if (NS_WARN_IF(!info)) {
     return NS_ERROR_NOT_AVAILABLE;
+  }
+
+  if (aClosedReason == nsIPresentationService::CLOSED_REASON_WENTAWAY) {
+    // Remove nsIPresentationSessionListener since we don't want to dispatch
+    // PresentationConnectionClosedEvent if the page is went away.
+    info->SetListener(nullptr);
   }
 
   return info->Close(NS_OK, nsIPresentationSessionListener::STATE_CLOSED);
@@ -563,7 +681,8 @@ PresentationService::RegisterSessionListener(const nsAString& aSessionId,
     // the receiver side, since a presentation session is created at beginning
     // and here is the place to realize the underlying establishment fails.
     nsresult rv = aListener->NotifyStateChange(aSessionId,
-                                               nsIPresentationSessionListener::STATE_TERMINATED);
+                                               nsIPresentationSessionListener::STATE_TERMINATED,
+                                               NS_ERROR_NOT_AVAILABLE);
     if (NS_WARN_IF(NS_FAILED(rv))) {
       return rv;
     }
@@ -583,16 +702,37 @@ PresentationService::UnregisterSessionListener(const nsAString& aSessionId,
 
   RefPtr<PresentationSessionInfo> info = GetSessionInfo(aSessionId, aRole);
   if (info) {
-    NS_WARN_IF(NS_FAILED(info->Close(NS_OK, nsIPresentationSessionListener::STATE_TERMINATED)));
-    UntrackSessionInfo(aSessionId, aRole);
+    // When content side decide not handling this session anymore, simply
+    // close the connection. Session info is kept for reconnection.
+    NS_WARN_IF(NS_FAILED(info->Close(NS_OK, nsIPresentationSessionListener::STATE_CLOSED)));
     return info->SetListener(nullptr);
   }
   return NS_OK;
 }
 
+nsresult
+PresentationService::RegisterTransportBuilder(const nsAString& aSessionId,
+                                              uint8_t aRole,
+                                              nsIPresentationSessionTransportBuilder* aBuilder)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  MOZ_ASSERT(aBuilder);
+  MOZ_ASSERT(aRole == nsIPresentationService::ROLE_CONTROLLER ||
+             aRole == nsIPresentationService::ROLE_RECEIVER);
+
+  RefPtr<PresentationSessionInfo> info = GetSessionInfo(aSessionId, aRole);
+  if (NS_WARN_IF(!info)) {
+    return NS_ERROR_NOT_AVAILABLE;
+  }
+
+  info->SetBuilder(aBuilder);
+  return NS_OK;
+}
+
 NS_IMETHODIMP
-PresentationService::RegisterRespondingListener(uint64_t aWindowId,
-                                                nsIPresentationRespondingListener* aListener)
+PresentationService::RegisterRespondingListener(
+  uint64_t aWindowId,
+  nsIPresentationRespondingListener* aListener)
 {
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(aListener);
@@ -600,6 +740,15 @@ PresentationService::RegisterRespondingListener(uint64_t aWindowId,
   nsCOMPtr<nsIPresentationRespondingListener> listener;
   if (mRespondingListeners.Get(aWindowId, getter_AddRefs(listener))) {
     return (listener == aListener) ? NS_OK : NS_ERROR_DOM_INVALID_STATE_ERR;
+  }
+
+  nsTArray<nsString>* sessionIdArray;
+  if (!mRespondingSessionIds.Get(aWindowId, &sessionIdArray)) {
+    return NS_ERROR_INVALID_ARG;
+  }
+
+  for (const auto& id : *sessionIdArray) {
+    aListener->NotifySessionConnect(aWindowId, id);
   }
 
   mRespondingListeners.Put(aWindowId, aListener);
@@ -619,15 +768,7 @@ NS_IMETHODIMP
 PresentationService::GetExistentSessionIdAtLaunch(uint64_t aWindowId,
                                                   nsAString& aSessionId)
 {
-  MOZ_ASSERT(NS_IsMainThread());
-
-  nsString* sessionId = mRespondingSessionIds.Get(aWindowId);
-  if (sessionId) {
-    aSessionId.Assign(*sessionId);
-  } else {
-    aSessionId.Truncate();
-  }
-  return NS_OK;
+  return GetExistentSessionIdAtLaunchInternal(aWindowId, aSessionId);
 }
 
 NS_IMETHODIMP
@@ -640,14 +781,34 @@ PresentationService::NotifyReceiverReady(const nsAString& aSessionId,
     return NS_ERROR_NOT_AVAILABLE;
   }
 
-  // Only track the responding info when an actual window ID, which would never
-  // be 0, is provided (for an in-process receiver page).
-  if (aWindowId != 0) {
-    mRespondingSessionIds.Put(aWindowId, new nsString(aSessionId));
-    mRespondingWindowIds.Put(aSessionId, aWindowId);
+  AddRespondingSessionId(aWindowId, aSessionId);
+
+  nsCOMPtr<nsIPresentationRespondingListener> listener;
+  if (mRespondingListeners.Get(aWindowId, getter_AddRefs(listener))) {
+    nsresult rv = listener->NotifySessionConnect(aWindowId, aSessionId);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return rv;
+    }
   }
 
   return static_cast<PresentationPresentingInfo*>(info.get())->NotifyResponderReady();
+}
+
+nsresult
+PresentationService::NotifyTransportClosed(const nsAString& aSessionId,
+                                           uint8_t aRole,
+                                           nsresult aReason) {
+  MOZ_ASSERT(NS_IsMainThread());
+  MOZ_ASSERT(!aSessionId.IsEmpty());
+  MOZ_ASSERT(aRole == nsIPresentationService::ROLE_CONTROLLER ||
+             aRole == nsIPresentationService::ROLE_RECEIVER);
+
+  RefPtr<PresentationSessionInfo> info = GetSessionInfo(aSessionId, aRole);
+  if (NS_WARN_IF(!info)) {
+    return NS_ERROR_NOT_AVAILABLE;
+  }
+
+  return info->NotifyTransportClosed(aReason);
 }
 
 NS_IMETHODIMP
@@ -660,15 +821,22 @@ PresentationService::UntrackSessionInfo(const nsAString& aSessionId,
   if (nsIPresentationService::ROLE_CONTROLLER == aRole) {
     mSessionInfoAtController.Remove(aSessionId);
   } else {
+    // Terminate receiver page.
+    uint64_t windowId;
+    nsresult rv = GetWindowIdBySessionIdInternal(aSessionId, &windowId);
+    if (NS_SUCCEEDED(rv)) {
+      NS_DispatchToMainThread(NS_NewRunnableFunction([windowId]() -> void {
+        if (auto* window = nsGlobalWindow::GetInnerWindowWithId(windowId)) {
+          window->Close();
+        }
+      }));
+    }
+
     mSessionInfoAtReceiver.Remove(aSessionId);
   }
 
   // Remove the in-process responding info if there's still any.
-  uint64_t windowId = 0;
-  if (mRespondingWindowIds.Get(aSessionId, &windowId)) {
-    mRespondingWindowIds.Remove(aSessionId);
-    mRespondingSessionIds.Remove(windowId);
-  }
+  RemoveRespondingSessionId(aSessionId);
 
   return NS_OK;
 }
@@ -677,10 +845,7 @@ NS_IMETHODIMP
 PresentationService::GetWindowIdBySessionId(const nsAString& aSessionId,
                                             uint64_t* aWindowId)
 {
-  if (mRespondingWindowIds.Get(aSessionId, aWindowId)) {
-    return NS_OK;
-  }
-  return NS_ERROR_NOT_AVAILABLE;
+  return GetWindowIdBySessionIdInternal(aSessionId, aWindowId);
 }
 
 bool

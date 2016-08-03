@@ -21,8 +21,15 @@
 #include "nsIWidgetListener.h"
 #include "nsPIDOMWindow.h"
 #include "nsWeakReference.h"
-#include "CompositorWidgetProxy.h"
 #include <algorithm>
+
+#if defined(XP_WIN)
+// Scroll capture constants
+const uint32_t kScrollCaptureFillColor = 0xFFa0a0a0; // gray
+const mozilla::gfx::SurfaceFormat kScrollCaptureFormat =
+  mozilla::gfx::SurfaceFormat::X8R8G8B8_UINT32;
+#endif
+
 class nsIContent;
 class nsAutoRollup;
 class gfxContext;
@@ -37,6 +44,7 @@ class Accessible;
 
 namespace gfx {
 class DrawTarget;
+class SourceSurface;
 } // namespace gfx
 
 namespace layers {
@@ -47,8 +55,14 @@ class APZCTreeManager;
 class GeckoContentController;
 class APZEventState;
 class CompositorSession;
+class ImageContainer;
 struct ScrollableLayerGuid;
 } // namespace layers
+
+namespace widget {
+class CompositorWidgetDelegate;
+class InProcessCompositorWidget;
+} // namespace widget
 
 class CompositorVsyncDispatcher;
 } // namespace mozilla
@@ -95,11 +109,12 @@ class nsBaseWidget : public nsIWidget, public nsSupportsWeakReference
 {
   friend class nsAutoRollup;
   friend class DispatchWheelEventOnMainThread;
-  friend class mozilla::widget::CompositorWidgetProxyWrapper;
+  friend class mozilla::widget::InProcessCompositorWidget;
 
 protected:
   typedef base::Thread Thread;
   typedef mozilla::gfx::DrawTarget DrawTarget;
+  typedef mozilla::gfx::SourceSurface SourceSurface;
   typedef mozilla::layers::BasicLayerManager BasicLayerManager;
   typedef mozilla::layers::BufferMode BufferMode;
   typedef mozilla::layers::CompositorBridgeChild CompositorBridgeChild;
@@ -112,8 +127,9 @@ protected:
   typedef mozilla::CSSIntRect CSSIntRect;
   typedef mozilla::CSSRect CSSRect;
   typedef mozilla::ScreenRotation ScreenRotation;
-  typedef mozilla::widget::CompositorWidgetProxy CompositorWidgetProxy;
+  typedef mozilla::widget::CompositorWidgetDelegate CompositorWidgetDelegate;
   typedef mozilla::layers::CompositorSession CompositorSession;
+  typedef mozilla::layers::ImageContainer ImageContainer;
 
   virtual ~nsBaseWidget();
 
@@ -167,8 +183,7 @@ public:
 
   virtual LayerManager*   GetLayerManager(PLayerTransactionChild* aShadowManager = nullptr,
                                           LayersBackend aBackendHint = mozilla::layers::LayersBackend::LAYERS_NONE,
-                                          LayerManagerPersistence aPersistence = LAYER_MANAGER_CURRENT,
-                                          bool* aAllowRetaining = nullptr) override;
+                                          LayerManagerPersistence aPersistence = LAYER_MANAGER_CURRENT) override;
 
   mozilla::CompositorVsyncDispatcher* GetCompositorVsyncDispatcher();
   void            CreateCompositorVsyncDispatcher();
@@ -293,6 +308,10 @@ public:
   mozilla::a11y::Accessible* GetRootAccessible();
 #endif
 
+  // Return true if this is a simple widget (that is typically not worth
+  // accelerating)
+  bool IsSmallPopup() const;
+
   nsPopupLevel PopupLevel() { return mPopupLevel; }
 
   virtual LayoutDeviceIntSize
@@ -347,11 +366,12 @@ public:
 
   void Shutdown();
 
-  // Return a new CompositorWidgetProxy for this widget.
-  virtual CompositorWidgetProxy* NewCompositorWidgetProxy();
+#if defined(XP_WIN)
+  uint64_t CreateScrollCaptureContainer() override;
+#endif
 
 protected:
-  // These are methods for CompositorWidgetProxyWrapper, and should only be
+  // These are methods for CompositorWidgetWrapper, and should only be
   // accessed from that class. Derived widgets can choose which methods to
   // implement, or none if supporting out-of-process compositing.
   virtual bool PreRender(mozilla::layers::LayerManagerComposite* aManager) {
@@ -538,6 +558,29 @@ protected:
 
   bool UseAPZ();
 
+
+#if defined(XP_WIN)
+  void UpdateScrollCapture() override;
+
+  /**
+   * To be overridden by derived classes to return a snapshot that can be used
+   * during scrolling. Returning null means we won't update the container.
+   * @return an already AddRefed SourceSurface containing the snapshot
+   */
+  virtual already_AddRefed<SourceSurface> CreateScrollSnapshot()
+  {
+    return nullptr;
+  };
+
+  /**
+   * Used by derived classes to create a fallback scroll image.
+   * @param aSnapshotDrawTarget DrawTarget to fill with fallback image.
+   */
+  void DefaultFillScrollCapture(DrawTarget* aSnapshotDrawTarget);
+
+  RefPtr<ImageContainer> mScrollCaptureContainer;
+#endif
+
 protected:
   // Returns whether compositing should use an external surface size.
   virtual bool UseExternalCompositingSurface() const {
@@ -555,6 +598,7 @@ protected:
    */
   virtual void DestroyCompositor();
   void DestroyLayerManager();
+  void ReleaseContentController();
 
   void FreeShutdownObserver();
 
@@ -583,12 +627,12 @@ protected:
   nsPopupType       mPopupType;
   SizeConstraints   mSizeConstraints;
 
-  RefPtr<CompositorWidgetProxy> mCompositorWidgetProxy;
+  CompositorWidgetDelegate* mCompositorWidgetDelegate;
 
   bool              mUpdateCursor;
   bool              mUseAttachedEvents;
   bool              mIMEHasFocus;
-#if defined(XP_WIN) || defined(XP_MACOSX)
+#if defined(XP_WIN) || defined(XP_MACOSX) || defined(MOZ_WIDGET_GTK)
   bool              mAccessibilityInUseFlag;
 #endif
   static nsIRollupListener* gRollupListener;

@@ -6,6 +6,7 @@
 /* import-globals-from ../../framework/test/shared-head.js */
 /* import-globals-from ../../commandline/test/helpers.js */
 /* import-globals-from ../../shared/test/test-actor-registry.js */
+/* globals registerTestActor, getTestActor */
 "use strict";
 
 // Load the shared-head file first.
@@ -81,8 +82,7 @@ function getNode(nodeOrSelector, options = {}) {
     let node = document.querySelector(nodeOrSelector);
     if (noMatches) {
       ok(!node, "Selector " + nodeOrSelector + " didn't match any nodes.");
-    }
-    else {
+    } else {
       ok(node, "Selector " + nodeOrSelector + " matched a node.");
     }
 
@@ -140,6 +140,22 @@ var selectNode = Task.async(function* (selector, inspector, reason = "test") {
 });
 
 /**
+ * Select node for a given selector, make it focusable and set focus in its
+ * container element.
+ * @param {String|NodeFront} selector
+ * @param {InspectorPanel} inspector The current inspector-panel instance.
+ * @return {MarkupContainer}
+ */
+function* focusNode(selector, inspector) {
+  getContainerForNodeFront(inspector.walker.rootNode, inspector).elt.focus();
+  let nodeFront = yield getNodeFront(selector, inspector);
+  let container = getContainerForNodeFront(nodeFront, inspector);
+  yield selectNode(nodeFront, inspector);
+  EventUtils.sendKey("return", inspector.panelWin);
+  return container;
+}
+
+/**
  * Set the inspector's current selection to null so that no node is selected
  *
  * @param {InspectorPanel} inspector
@@ -174,13 +190,17 @@ var openInspectorForURL = Task.async(function* (url, hostType) {
 var openInspector = Task.async(function* (hostType) {
   info("Opening the inspector");
 
-  let toolbox = yield openToolboxForTab(gBrowser.selectedTab, "inspector", hostType);
+  let toolbox = yield openToolboxForTab(gBrowser.selectedTab, "inspector",
+                                        hostType);
   let inspector = toolbox.getPanel("inspector");
 
-  info("Waiting for the inspector to update");
   if (inspector._updateProgress) {
+    info("Need to wait for the inspector to update");
     yield inspector.once("inspector-updated");
   }
+
+  info("Waiting for actor features to be detected");
+  yield inspector._detectingActorFeatures;
 
   yield registerTestActor(toolbox.target.client);
   let testActor = yield getTestActor(toolbox);
@@ -201,7 +221,8 @@ function getActiveInspector() {
  */
 var clickOnInspectMenuItem = Task.async(function* (testActor, selector) {
   info("Showing the contextual menu on node " + selector);
-  let contentAreaContextMenu = document.querySelector("#contentAreaContextMenu");
+  let contentAreaContextMenu = document.querySelector(
+    "#contentAreaContextMenu");
   let contextOpened = once(contentAreaContextMenu, "popupshown");
 
   yield testActor.synthesizeMouse({
@@ -276,7 +297,7 @@ function openComputedView() {
       toolbox: data.toolbox,
       inspector: data.inspector,
       testActor: data.testActor,
-      view: data.inspector.computedview.view
+      view: data.inspector.computedview.computedView
     };
   });
 }
@@ -302,7 +323,7 @@ function selectRuleView(inspector) {
  */
 function selectComputedView(inspector) {
   inspector.sidebar.select("computedview");
-  return inspector.computedview.view;
+  return inspector.computedview.computedView;
 }
 
 /**
@@ -328,12 +349,10 @@ function getNodeFront(selector, {walker}) {
  * the node is in
  * @param {InspectorPanel} inspector The instance of InspectorPanel currently
  * loaded in the toolbox
- * @param {String} reason Defaults to "test" which instructs the inspector not
- * to highlight the node upon selection
  * @return {Promise} Resolves when the inspector is updated with the new node
  */
 var getNodeFrontInFrame = Task.async(function* (selector, frameSelector,
-                                               inspector, reason = "test") {
+                                                inspector) {
   let iframe = yield getNodeFront(frameSelector, inspector);
   let {nodes} = yield inspector.walker.children(iframe);
   return inspector.walker.querySelector(nodes[0], selector);
@@ -429,12 +448,13 @@ var clickContainer = Task.async(function* (selector, inspector) {
 
 /**
  * Simulate the mouse leaving the markup-view area
- * @param {InspectorPanel} inspector The instance of InspectorPanel currently loaded in the toolbox
+ * @param {InspectorPanel} inspector The instance of InspectorPanel currently
+ * loaded in the toolbox
  * @return a promise when done
  */
 function mouseLeaveMarkupView(inspector) {
   info("Leaving the markup-view area");
-  let def = promise.defer();
+  let def = defer();
 
   // Find another element to mouseover over in order to leave the markup-view
   let btn = inspector.toolbox.doc.querySelector("#toolbox-controls");
@@ -496,32 +516,6 @@ function redoChange(inspector) {
 }
 
 /**
- * Dispatch a command event on a node (e.g. click on a contextual menu item).
- * @param {DOMNode} node
- */
-function dispatchCommandEvent(node) {
-  info("Dispatching command event on " + node);
-  let commandEvent = document.createEvent("XULCommandEvent");
-  commandEvent.initCommandEvent("command", true, true, window, 0, false, false,
-                                false, false, null);
-  node.dispatchEvent(commandEvent);
-}
-
-/**
- * A helper that simulates a contextmenu event on the given chrome DOM element.
- */
-function contextMenuClick(element) {
-  let evt = element.ownerDocument.createEvent("MouseEvents");
-  let button = 2;  // right click
-
-  evt.initMouseEvent("contextmenu", true, true,
-       element.ownerDocument.defaultView, 1, 0, 0, 0, 0, false,
-       false, false, false, button, null);
-
-  element.dispatchEvent(evt);
-}
-
-/**
  * A helper that fetches a front for a node that matches the given selector or
  * doctype node if the selector is falsy.
  */
@@ -529,11 +523,11 @@ function* getNodeFrontForSelector(selector, inspector) {
   if (selector) {
     info("Retrieving front for selector " + selector);
     return getNodeFront(selector, inspector);
-  } else {
-    info("Retrieving front for doctype node");
-    let {nodes} = yield inspector.walker.children(inspector.walker.rootNode);
-    return nodes[0];
   }
+
+  info("Retrieving front for doctype node");
+  let {nodes} = yield inspector.walker.children(inspector.walker.rootNode);
+  return nodes[0];
 }
 
 /**
@@ -638,16 +632,17 @@ const getHighlighterHelperFor = (type) => Task.async(
 );
 
 // The expand all operation of the markup-view calls itself recursively and
-// there's not one event we can wait for to know when it's done
-// so use this helper function to wait until all recursive children updates are done.
+// there's not one event we can wait for to know when it's done so use this
+// helper function to wait until all recursive children updates are done.
 function* waitForMultipleChildrenUpdates(inspector) {
-// As long as child updates are queued up while we wait for an update already
-// wait again
+  // As long as child updates are queued up while we wait for an update already
+  // wait again
   if (inspector.markup._queuedChildUpdates &&
         inspector.markup._queuedChildUpdates.size) {
     yield waitForChildrenUpdated(inspector);
     return yield waitForMultipleChildrenUpdates(inspector);
   }
+  return null;
 }
 
 /**
@@ -660,7 +655,7 @@ function* waitForMultipleChildrenUpdates(inspector) {
  */
 function waitForChildrenUpdated({markup}) {
   info("Waiting for queued children updates to be handled");
-  let def = promise.defer();
+  let def = defer();
   markup._waitForChildren().then(() => {
     executeSoon(def.resolve);
   });
@@ -679,7 +674,7 @@ function waitForChildrenUpdated({markup}) {
  * ready
  */
 function waitForStyleEditor(toolbox, href) {
-  let def = promise.defer();
+  let def = defer();
 
   info("Waiting for the toolbox to switch to the styleeditor");
   toolbox.once("styleeditor-selected").then(() => {
@@ -730,7 +725,7 @@ function waitForStyleEditor(toolbox, href) {
  * the validator function has returned true, rejects otherwise.
  */
 function waitForClipboard(setup, expected) {
-  let def = promise.defer();
+  let def = defer();
   SimpleTest.waitForClipboard(expected, setup, def.resolve, def.reject);
   return def.promise;
 }
@@ -810,4 +805,41 @@ function assertHoverTooltipOn(tooltip, element) {
   }, () => {
     ok(false, "No tooltip is defined on hover of the given element");
   });
+}
+
+/**
+ * Open the inspector menu and return all of it's items in a flat array
+ * @param {InspectorPanel} inspector
+ * @param {Object} options to pass into openMenu
+ * @return An array of MenuItems
+ */
+function openContextMenuAndGetAllItems(inspector, options) {
+  let menu = inspector._openMenu(options);
+
+  // Flatten all menu items into a single array to make searching through it easier
+  let allItems = [].concat.apply([], menu.items.map(function addItem(item) {
+    if (item.submenu) {
+      return addItem(item.submenu.items);
+    }
+    return item;
+  }));
+
+  return allItems;
+}
+
+/**
+ * Get the rule editor from the rule-view given its index
+ *
+ * @param {CssRuleView} view
+ *        The instance of the rule-view panel
+ * @param {Number} childrenIndex
+ *        The children index of the element to get
+ * @param {Number} nodeIndex
+ *        The child node index of the element to get
+ * @return {DOMNode} The rule editor if any at this index
+ */
+function getRuleViewRuleEditor(view, childrenIndex, nodeIndex) {
+  return nodeIndex !== undefined ?
+    view.element.children[childrenIndex].childNodes[nodeIndex]._ruleEditor :
+    view.element.children[childrenIndex]._ruleEditor;
 }

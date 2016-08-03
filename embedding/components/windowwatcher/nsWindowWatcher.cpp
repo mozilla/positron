@@ -454,8 +454,7 @@ nsWindowWatcher::OpenWindow2(mozIDOMWindowProxy* aParent,
 }
 
 // This static function checks if the aDocShell uses an UserContextId equal to
-// nsIScriptSecurityManager::DEFAULT_USER_CONTEXT_ID or equal to the
-// userContextId of subjectPrincipal, if not null.
+// the userContextId of subjectPrincipal, if not null.
 static bool
 CheckUserContextCompatibility(nsIDocShell* aDocShell)
 {
@@ -464,16 +463,20 @@ CheckUserContextCompatibility(nsIDocShell* aDocShell)
   uint32_t userContextId =
     static_cast<nsDocShell*>(aDocShell)->GetOriginAttributes().mUserContextId;
 
-  if (userContextId == nsIScriptSecurityManager::DEFAULT_USER_CONTEXT_ID) {
-    return true;
-  }
-
   nsCOMPtr<nsIPrincipal> subjectPrincipal =
     nsContentUtils::GetCurrentJSContext()
       ? nsContentUtils::SubjectPrincipal() : nullptr;
 
+  // If we don't have a valid principal, probably we are in e10s mode, parent
+  // side.
   if (!subjectPrincipal) {
-    return false;
+    return true;
+  }
+
+  // DocShell can have UsercontextID set but loading a document with system
+  // principal. In this case, we consider everything ok.
+  if (nsContentUtils::IsSystemPrincipal(subjectPrincipal)) {
+    return true;
   }
 
   uint32_t principalUserContextId;
@@ -942,6 +945,18 @@ nsWindowWatcher::OpenWindowInternal(mozIDOMWindowProxy* aParent,
                                             nullptr;
 
   if (windowIsNew) {
+    auto* docShell = static_cast<nsDocShell*>(newDocShell.get());
+
+    // If this is not a chrome docShell, we apply originAttributes from the
+    // subjectPrincipal.
+    if (subjectPrincipal &&
+        docShell->ItemType() != nsIDocShellTreeItem::typeChrome) {
+      DocShellOriginAttributes attrs;
+      attrs.InheritFromDocToChildDocShell(BasePrincipal::Cast(subjectPrincipal)->OriginAttributesRef());
+
+      docShell->SetOriginAttributes(attrs);
+    }
+
     // Now set the opener principal on the new window.  Note that we need to do
     // this no matter whether we were opened from JS; if there is nothing on
     // the JS stack, just use the principal of our parent window.  In those
@@ -1024,20 +1039,6 @@ nsWindowWatcher::OpenWindowInternal(mozIDOMWindowProxy* aParent,
       loadInfo->SetReferrer(doc->GetDocumentURI());
       loadInfo->SetReferrerPolicy(doc->GetReferrerPolicy());
     }
-  }
-
-  // If this is a new window, we must set the userContextId from the
-  // subjectPrincipal.
-  if (windowIsNew && subjectPrincipal) {
-    uint32_t userContextId;
-    rv = subjectPrincipal->GetUserContextId(&userContextId);
-    NS_ENSURE_SUCCESS(rv, rv);
-
-    auto* docShell = static_cast<nsDocShell*>(newDocShell.get());
-
-    DocShellOriginAttributes attr = docShell->GetOriginAttributes();
-    attr.mUserContextId = userContextId;
-    docShell->SetOriginAttributes(attr);
   }
 
   if (isNewToplevelWindow) {
@@ -1543,7 +1544,7 @@ nsWindowWatcher::URIfromURL(const char* aURL,
 #define NS_CALCULATE_CHROME_FLAG_FOR(feature, flag)                            \
   prefBranch->GetBoolPref(feature, &forceEnable);                              \
   if (forceEnable && !(aDialog && !openedFromContentScript) &&                 \
-      !(!openedFromContentScript && aHasChromeParent) && !aChromeURL) {                  \
+      !(!openedFromContentScript && aHasChromeParent) && !aChromeURL) {        \
     chromeFlags |= flag;                                                       \
   } else {                                                                     \
     chromeFlags |=                                                             \
@@ -1658,12 +1659,15 @@ nsWindowWatcher::CalculateChromeFlags(mozIDOMWindowProxy* aParent,
                                nsIWebBrowserChrome::CHROME_STATUSBAR);
   NS_CALCULATE_CHROME_FLAG_FOR("menubar",
                                nsIWebBrowserChrome::CHROME_MENUBAR);
-  NS_CALCULATE_CHROME_FLAG_FOR("scrollbars",
-                               nsIWebBrowserChrome::CHROME_SCROLLBARS);
   NS_CALCULATE_CHROME_FLAG_FOR("resizable",
                                nsIWebBrowserChrome::CHROME_WINDOW_RESIZE);
   NS_CALCULATE_CHROME_FLAG_FOR("minimizable",
                                nsIWebBrowserChrome::CHROME_WINDOW_MIN);
+
+  // default scrollbar to "on," unless explicitly turned off
+  if (WinHasOption(aFeatures, "scrollbars", 1, &presenceFlag) || !presenceFlag) {
+    chromeFlags |= nsIWebBrowserChrome::CHROME_SCROLLBARS;
+  }
 
   chromeFlags |= WinHasOption(aFeatures, "popup", 0, &presenceFlag) ?
     nsIWebBrowserChrome::CHROME_WINDOW_POPUP : 0;
@@ -2250,13 +2254,17 @@ nsWindowWatcher::SizeOpenedDocShellItem(nsIDocShellTreeItem* aDocShellItem,
       screenMgr->ScreenForRect(left, top, 1, 1, getter_AddRefs(screen));
     }
     if (screen) {
-      screen->GetDefaultCSSScaleFactor(&scale);
+      double cssToDevPixScale, desktopToDevPixScale;
+      screen->GetDefaultCSSScaleFactor(&cssToDevPixScale);
+      screen->GetContentsScaleFactor(&desktopToDevPixScale);
+      double cssToDesktopScale = cssToDevPixScale / desktopToDevPixScale;
       int32_t screenLeft, screenTop, screenWd, screenHt;
       screen->GetRectDisplayPix(&screenLeft, &screenTop, &screenWd, &screenHt);
-      // Adjust by desktop-pixel origin of the target screen to convert from
-      // per-screen CSS-px coordinates.
-      treeOwnerAsWin->SetPosition((left - screenLeft) * scale + screenLeft,
-                                  (top - screenTop) * scale + screenTop);
+      // Adjust by desktop-pixel origin of the target screen when scaling
+      // to convert from per-screen CSS-px coords to global desktop coords.
+      treeOwnerAsWin->SetPositionDesktopPix(
+        (left - screenLeft) * cssToDesktopScale + screenLeft,
+        (top - screenTop) * cssToDesktopScale + screenTop);
     } else {
       // Couldn't find screen? This shouldn't happen.
       treeOwnerAsWin->SetPosition(left * scale, top * scale);

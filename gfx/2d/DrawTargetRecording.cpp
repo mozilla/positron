@@ -245,7 +245,7 @@ struct AdjustedPattern
         mPattern =
           new (mSurfPat) SurfacePattern(GetSourceSurface(surfPat->mSurface),
                                         surfPat->mExtendMode, surfPat->mMatrix,
-                                        surfPat->mFilter);
+                                        surfPat->mSamplingFilter);
         return mPattern;
       }
     case PatternType::LINEAR_GRADIENT:
@@ -475,6 +475,12 @@ DrawTargetRecording::Snapshot()
   mRecorder->RecordEvent(RecordedSnapshot(retSurf, this));
 
   return retSurf.forget();
+}
+
+void
+DrawTargetRecording::DetachAllSnapshots()
+{
+  mFinalDT->DetachAllSnapshots();
 }
 
 void

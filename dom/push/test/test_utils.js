@@ -106,7 +106,11 @@
     },
 
     onUnregister(request) {
-      // Do nothing.
+      this.serverSendMsg(JSON.stringify({
+        messageType: "unregister",
+        channelID: request.channelID,
+        status: 200,
+      }));
     },
 
     onAck(request) {
@@ -150,11 +154,9 @@
 
 // Remove permissions and prefs when the test finishes.
 SimpleTest.registerCleanupFunction(() => {
-  return new Promise(resolve => {
-    SpecialPowers.flushPermissions(_ => {
-      SpecialPowers.flushPrefEnv(resolve);
-    });
-  }).then(_ => {
+  return new Promise(resolve =>
+    SpecialPowers.flushPermissions(resolve)
+  ).then(_ => SpecialPowers.flushPrefEnv()).then(_ => {
     restorePushService();
     return teardownMockPushSocket();
   });
@@ -169,15 +171,14 @@ function setPushPermission(allow) {
 }
 
 function setupPrefs() {
-  return new Promise(resolve => {
-    SpecialPowers.pushPrefEnv({"set": [
-      ["dom.push.enabled", true],
-      ["dom.push.connection.enabled", true],
-      ["dom.serviceWorkers.exemptFromPerDomainMax", true],
-      ["dom.serviceWorkers.enabled", true],
-      ["dom.serviceWorkers.testing.enabled", true]
-      ]}, resolve);
-  });
+  return SpecialPowers.pushPrefEnv({"set": [
+    ["dom.push.enabled", true],
+    ["dom.push.connection.enabled", true],
+    ["dom.push.maxRecentMessageIDsPerSubscription", 0],
+    ["dom.serviceWorkers.exemptFromPerDomainMax", true],
+    ["dom.serviceWorkers.enabled", true],
+    ["dom.serviceWorkers.testing.enabled", true]
+    ]});
 }
 
 function setupPrefsAndReplaceService(mockService) {

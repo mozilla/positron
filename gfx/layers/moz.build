@@ -115,6 +115,7 @@ EXPORTS.mozilla.layers += [
     'apz/util/InputAPZContext.h',
     'apz/util/ScrollInputMethods.h',
     'apz/util/ScrollLinkedEffectDetector.h',
+    'apz/util/TouchActionHelper.h',
     'AsyncCanvasRenderer.h',
     'AtomicRefCountedWithFinalize.h',
     'AxisPhysicsModel.h',
@@ -157,7 +158,6 @@ EXPORTS.mozilla.layers += [
     'ipc/CompositableTransactionParent.h',
     'ipc/CompositorBridgeChild.h',
     'ipc/CompositorBridgeParent.h',
-    'ipc/CompositorLRU.h',
     'ipc/CompositorThread.h',
     'ipc/FenceUtils.h',
     'ipc/GonkNativeHandle.h',
@@ -177,6 +177,7 @@ EXPORTS.mozilla.layers += [
     'ipc/SharedBufferManagerParent.h',
     'ipc/SharedPlanarYCbCrImage.h',
     'ipc/SharedRGBImage.h',
+    'ipc/TextureForwarder.h',
     'LayerMetricsWrapper.h',
     'LayersTypes.h',
     'opengl/CompositingRenderTargetOGL.h',
@@ -257,7 +258,7 @@ if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'gonk':
 
 if CONFIG['MOZ_ANDROID_APZ']:
     UNIFIED_SOURCES += [
-        'apz/src/FlingOverScrollerAnimation.cpp',
+        'apz/src/AndroidAPZ.cpp',
     ]
 
 UNIFIED_SOURCES += [
@@ -284,6 +285,7 @@ UNIFIED_SOURCES += [
     'apz/util/DoubleTapToZoom.cpp',
     'apz/util/InputAPZContext.cpp',
     'apz/util/ScrollLinkedEffectDetector.cpp',
+    'apz/util/TouchActionHelper.cpp',
     'AsyncCanvasRenderer.cpp',
     'AxisPhysicsModel.cpp',
     'AxisPhysicsMSDModel.cpp',
@@ -343,7 +345,6 @@ UNIFIED_SOURCES += [
     'ipc/CompositorBench.cpp',
     'ipc/CompositorBridgeChild.cpp',
     'ipc/CompositorBridgeParent.cpp',
-    'ipc/CompositorLRU.cpp',
     'ipc/CompositorThread.cpp',
     'ipc/FenceUtils.cpp',
     'ipc/ImageBridgeChild.cpp',
@@ -361,6 +362,7 @@ UNIFIED_SOURCES += [
     'ipc/SharedBufferManagerParent.cpp',
     'ipc/SharedPlanarYCbCrImage.cpp',
     'ipc/SharedRGBImage.cpp',
+    'ipc/TextureForwarder.cpp',
     'LayerScope.cpp',
     'LayersLogging.cpp',
     'LayerSorter.cpp',
@@ -426,6 +428,7 @@ LOCAL_INCLUDES += [
     '/docshell/base',  # for nsDocShell.h
     '/layout/base',    # for TouchManager.h
     '/layout/generic', # for nsTextFrame.h
+    '/media/libyuv/include', # for libyuv.h
 ]
 
 FINAL_LIBRARY = 'xul'

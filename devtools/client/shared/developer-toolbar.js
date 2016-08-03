@@ -6,13 +6,14 @@
 
 const { Cc, Ci, Cu } = require("chrome");
 const promise = require("promise");
+const defer = require("devtools/shared/defer");
 const Services = require("Services");
 const { TargetFactory } = require("devtools/client/framework/target");
 const Telemetry = require("devtools/client/shared/telemetry");
+const {ViewHelpers} = require("devtools/client/shared/widgets/view-helpers");
 
 const NS_XHTML = "http://www.w3.org/1999/xhtml";
 const XUL_NS = "http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul";
-const Node = Ci.nsIDOMNode;
 
 loader.lazyImporter(this, "PluralForm", "resource://gre/modules/PluralForm.jsm");
 loader.lazyImporter(this, "EventEmitter", "resource://devtools/shared/event-emitter.js");
@@ -30,6 +31,7 @@ loader.lazyRequireGetter(this, "util", "gcli/util/util");
 loader.lazyRequireGetter(this, "ConsoleServiceListener", "devtools/shared/webconsole/utils", true);
 loader.lazyRequireGetter(this, "gDevTools", "devtools/client/framework/devtools", true);
 loader.lazyRequireGetter(this, "gDevToolsBrowser", "devtools/client/framework/devtools-browser", true);
+loader.lazyRequireGetter(this, "nodeConstants", "devtools/shared/dom-node-constants", true);
 
 /**
  * A collection of utilities to help working with commands
@@ -76,7 +78,7 @@ var CommandUtils = {
     return util.promiseEach(toolbarSpec, typed => {
       // Ask GCLI to parse the typed string (doesn't execute it)
       return requisition.update(typed).then(() => {
-        let button = document.createElement("toolbarbutton");
+        let button = document.createElementNS(NS_XHTML, "button");
 
         // Ignore invalid commands
         let command = requisition.commandAssignment.value;
@@ -93,17 +95,26 @@ var CommandUtils = {
         else {
           button.setAttribute("text-as-image", "true");
           button.setAttribute("label", command.name);
-          button.className = "devtools-toolbarbutton";
         }
+
+        button.classList.add("devtools-button");
+
         if (command.tooltipText != null) {
-          button.setAttribute("tooltiptext", command.tooltipText);
+          button.setAttribute("title", command.tooltipText);
         }
         else if (command.description != null) {
-          button.setAttribute("tooltiptext", command.description);
+          button.setAttribute("title", command.description);
         }
 
         button.addEventListener("click", () => {
           requisition.updateExec(typed);
+        }, false);
+
+        button.addEventListener("keypress", (event) => {
+          if (ViewHelpers.isSpaceOrReturn(event)) {
+            event.preventDefault();
+            requisition.updateExec(typed);
+          }
         }, false);
 
         // Allow the command button to be toggleable
@@ -212,15 +223,10 @@ exports.CommandUtils = CommandUtils;
  * to using panels.
  */
 loader.lazyGetter(this, "isLinux", function () {
-  return OS == "Linux";
+  return Services.appinfo.OS == "Linux";
 });
 loader.lazyGetter(this, "isMac", function () {
-  return OS == "Darwin";
-});
-
-loader.lazyGetter(this, "OS", function () {
-  let os = Cc["@mozilla.org/xre/app-info;1"].getService(Ci.nsIXULRuntime).OS;
-  return os;
+  return Services.appinfo.OS == "Darwin";
 });
 
 /**
@@ -390,7 +396,7 @@ DeveloperToolbar.prototype.focusToggle = function () {
     // inside the xul input element
     let active = this._chromeWindow.document.activeElement;
     let position = this._input.compareDocumentPosition(active);
-    if (position & Node.DOCUMENT_POSITION_CONTAINED_BY) {
+    if (position & nodeConstants.DOCUMENT_POSITION_CONTAINED_BY) {
       this.hide();
     }
     else {
@@ -531,7 +537,8 @@ DeveloperToolbar.prototype.show = function (focus) {
           if (!DeveloperToolbar.introShownThisSession) {
             let intro = require("gcli/ui/intro");
             intro.maybeShowIntro(this.requisition.commandOutputManager,
-                                 this.requisition.conversionContext);
+                                 this.requisition.conversionContext,
+                                 this.outputPanel);
             DeveloperToolbar.introShownThisSession = true;
           }
 
@@ -918,7 +925,7 @@ OutputPanel.prototype._init = function (devtoolbar) {
   this._update = this._update.bind(this);
 
   // Wire up the element from the iframe, and resolve the promise
-  let deferred = promise.defer();
+  let deferred = defer();
   let onload = () => {
     this._frame.removeEventListener("load", onload, true);
 
@@ -998,7 +1005,7 @@ OutputPanel.prototype._resize = function () {
   // We'd like to put this in CSS but we can't:
   //   body { width: calc(min(-5px, max-content)); }
   //   #_panel { max-width: -5px; }
-  switch (OS) {
+  switch (Services.appinfo.OS) {
     case "Linux":
       maxWidth -= 5;
       break;
@@ -1187,7 +1194,7 @@ TooltipPanel.create = function (devtoolbar) {
  * @private See TooltipPanel.create
  */
 TooltipPanel.prototype._init = function (devtoolbar) {
-  let deferred = promise.defer();
+  let deferred = defer();
 
   let chromeDocument = devtoolbar._doc;
   this._devtoolbar = devtoolbar;

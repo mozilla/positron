@@ -43,7 +43,8 @@ WrapperAnswer::fail(AutoJSAPI& jsapi, ReturnStatus* rs)
     if (!jsapi.HasException())
         return true;
 
-    jsapi.StealException(&exn);
+    if (!jsapi.StealException(&exn))
+        return true;
 
     if (JS_IsStopIteration(exn)) {
         *rs = ReturnStatus(ReturnStopIteration());
@@ -410,9 +411,6 @@ WrapperAnswer::RecvCallOrConstruct(const ObjectId& objId,
 
     RootedValue rval(cx);
     {
-        AutoSaveContextOptions asco(cx);
-        ContextOptionsRef(cx).setDontReportUncaught(true);
-
         HandleValueArray args = HandleValueArray::subarray(vals, 2, vals.length() - 2);
         if (construct) {
             RootedObject obj(cx);
@@ -493,7 +491,7 @@ bool
 WrapperAnswer::RecvGetBuiltinClass(const ObjectId& objId, ReturnStatus* rs,
                                    uint32_t* classValue)
 {
-    *classValue = js::ESClass_Other;
+    *classValue = uint32_t(js::ESClass::Other);
 
     AutoJSAPI jsapi;
     if (NS_WARN_IF(!jsapi.Init(scopeForTargetObjects())))
@@ -506,11 +504,11 @@ WrapperAnswer::RecvGetBuiltinClass(const ObjectId& objId, ReturnStatus* rs,
 
     LOG("%s.getBuiltinClass()", ReceiverObj(objId));
 
-    js::ESClassValue cls;
+    js::ESClass cls;
     if (!js::GetBuiltinClass(cx, obj, &cls))
         return fail(jsapi, rs);
 
-    *classValue = cls;
+    *classValue = uint32_t(cls);
     return ok(rs);
 }
 
@@ -550,7 +548,8 @@ WrapperAnswer::RecvClassName(const ObjectId& objId, nsCString* name)
     RootedObject obj(cx, findObjectById(cx, objId));
     if (!obj) {
         // This is very unfortunate, but we have no choice.
-        return "<dead CPOW>";
+        *name = "<dead CPOW>";
+        return true;
     }
 
     LOG("%s.className()", ReceiverObj(objId));

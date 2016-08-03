@@ -1,6 +1,6 @@
 "use strict";
 
-extensions.registerSchemaAPI("extension", null, (extension, context) => {
+extensions.registerSchemaAPI("extension", (extension, context) => {
   return {
     extension: {
       getURL: function(url) {
@@ -40,7 +40,7 @@ extensions.registerSchemaAPI("extension", null, (extension, context) => {
       },
 
       isAllowedFileSchemeAccess() {
-        return Promise.resolve(true);
+        return Promise.resolve(false);
       },
     },
   };

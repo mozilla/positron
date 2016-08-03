@@ -12,7 +12,7 @@
 #include "js/Date.h"
 #include "js/Value.h"
 #include "jsfriendapi.h"
-#include "mozilla/Endian.h"
+#include "mozilla/EndianUtils.h"
 #include "mozilla/FloatingPoint.h"
 #include "mozIStorageStatement.h"
 #include "mozIStorageValueArray.h"
@@ -232,12 +232,12 @@ Key::EncodeJSValInternal(JSContext* aCx, JS::Handle<JS::Value> aVal,
   if (aVal.isObject()) {
     JS::Rooted<JSObject*> obj(aCx, &aVal.toObject());
 
-    js::ESClassValue cls;
+    js::ESClass cls;
     if (!js::GetBuiltinClass(aCx, obj, &cls)) {
       IDB_REPORT_INTERNAL_ERR();
       return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
     }
-    if (cls == js::ESClass_Array) {
+    if (cls == js::ESClass::Array) {
       aTypeOffset += eMaxType;
 
       if (aTypeOffset == eMaxType * kMaxArrayCollapse) {
@@ -275,7 +275,7 @@ Key::EncodeJSValInternal(JSContext* aCx, JS::Handle<JS::Value> aVal,
       return NS_OK;
     }
 
-    if (cls == js::ESClass_Date) {
+    if (cls == js::ESClass::Date) {
       bool valid;
       if (!js::DateIsValid(aCx, obj, &valid)) {
         IDB_REPORT_INTERNAL_ERR();

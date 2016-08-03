@@ -8,9 +8,9 @@
 
 #include "jsapi.h"
 
-#include "jsobjinlines.h"
-#include "vm/NativeObject-inl.h"
+#include "vm/Interpreter.h" // For InstanceOfOperator
 
+#include "jsobjinlines.h"
 #include "vm/NativeObject-inl.h"
 
 using namespace js;
@@ -1235,20 +1235,14 @@ bool
 ScriptedProxyHandler::hasInstance(JSContext* cx, HandleObject proxy, MutableHandleValue v,
                                   bool* bp) const
 {
-    RootedObject target(cx, proxy->as<ProxyObject>().target());
-    if (!target) {
-        JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_PROXY_REVOKED);
-        return false;
-    }
-
-    return HasInstance(cx, target, v, bp);
+    return InstanceOfOperator(cx, proxy, v, bp);
 }
 
 bool
 ScriptedProxyHandler::getBuiltinClass(JSContext* cx, HandleObject proxy,
-                                      ESClassValue* classValue) const
+                                      ESClass* cls) const
 {
-    *classValue = ESClass_Other;
+    *cls = ESClass::Other;
     return true;
 }
 
@@ -1390,9 +1384,9 @@ js::proxy(JSContext* cx, unsigned argc, Value* vp)
 static bool
 RevokeProxy(JSContext* cx, unsigned argc, Value* vp)
 {
-    CallReceiver rec = CallReceiverFromVp(vp);
+    CallArgs args = CallArgsFromVp(argc, vp);
 
-    RootedFunction func(cx, &rec.callee().as<JSFunction>());
+    RootedFunction func(cx, &args.callee().as<JSFunction>());
     RootedObject p(cx, func->getExtendedSlot(ScriptedProxyHandler::REVOKE_SLOT).toObjectOrNull());
 
     if (p) {
@@ -1404,7 +1398,7 @@ RevokeProxy(JSContext* cx, unsigned argc, Value* vp)
         p->as<ProxyObject>().setExtra(ScriptedProxyHandler::HANDLER_EXTRA, NullValue());
     }
 
-    rec.rval().setUndefined();
+    args.rval().setUndefined();
     return true;
 }
 

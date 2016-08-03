@@ -38,7 +38,7 @@ registerCleanupFunction(() => {
   Services.prefs.clearUserPref("devtools.responsive.html.displayedDeviceList");
 });
 const { ResponsiveUIManager } = require("resource://devtools/client/responsivedesign/responsivedesign.jsm");
-const { loadDeviceList } = require("devtools/client/responsive.html/devices");
+const { _loadPreferredDevices } = require("devtools/client/responsive.html/actions/devices");
 const { getOwnerWindow } = require("sdk/tabs/utils");
 
 const OPEN_DEVICE_MODAL_VALUE = "OPEN_DEVICE_MODAL";
@@ -60,7 +60,7 @@ var openRDM = Task.async(function* (tab) {
 var closeRDM = Task.async(function* (tab, options) {
   info("Closing responsive design mode");
   let manager = ResponsiveUIManager;
-  yield manager.closeIfNeeded(window, tab, options);
+  yield manager.closeIfNeeded(getOwnerWindow(tab), tab, options);
   info("Responsive design mode closed");
 });
 
@@ -135,14 +135,14 @@ var setViewportSize = Task.async(function* (ui, manager, width, height) {
 function openDeviceModal(ui) {
   let { document } = ui.toolWindow;
   let select = document.querySelector(".viewport-device-selector");
-  let modal = document.querySelector(".device-modal");
+  let modal = document.querySelector("#device-modal-wrapper");
   let editDeviceOption = [...select.options].filter(o => {
     return o.value === OPEN_DEVICE_MODAL_VALUE;
   })[0];
 
   info("Checking initial device modal state");
-  ok(modal.classList.contains("hidden"),
-    "The device modal is hidden by default.");
+  ok(modal.classList.contains("closed") && !modal.classList.contains("opened"),
+    "The device modal is closed by default.");
 
   info("Opening device modal through device selector.");
   EventUtils.synthesizeMouseAtCenter(select, {type: "mousedown"},
@@ -150,6 +150,62 @@ function openDeviceModal(ui) {
   EventUtils.synthesizeMouseAtCenter(editDeviceOption, {type: "mouseup"},
     ui.toolWindow);
 
-  ok(!modal.classList.contains("hidden"),
+  ok(modal.classList.contains("opened") && !modal.classList.contains("closed"),
     "The device modal is displayed.");
+}
+
+function getSessionHistory(browser) {
+  return ContentTask.spawn(browser, {}, function* () {
+    /* eslint-disable no-undef */
+    let { interfaces: Ci } = Components;
+    let webNav = docShell.QueryInterface(Ci.nsIWebNavigation);
+    let sessionHistory = webNav.sessionHistory;
+    let result = {
+      index: sessionHistory.index,
+      entries: []
+    };
+
+    for (let i = 0; i < sessionHistory.count; i++) {
+      let entry = sessionHistory.getEntryAtIndex(i, false);
+      result.entries.push({
+        uri: entry.URI.spec,
+        title: entry.title
+      });
+    }
+
+    return result;
+    /* eslint-enable no-undef */
+  });
+}
+
+function waitForPageShow(browser) {
+  let mm = browser.messageManager;
+  return new Promise(resolve => {
+    let onShow = message => {
+      if (message.target != browser) {
+        return;
+      }
+      mm.removeMessageListener("PageVisibility:Show", onShow);
+      resolve();
+    };
+    mm.addMessageListener("PageVisibility:Show", onShow);
+  });
+}
+
+function load(browser, url) {
+  let loaded = BrowserTestUtils.browserLoaded(browser, false, url);
+  browser.loadURI(url, null, null);
+  return loaded;
+}
+
+function back(browser) {
+  let shown = waitForPageShow(browser);
+  browser.goBack();
+  return shown;
+}
+
+function forward(browser) {
+  let shown = waitForPageShow(browser);
+  browser.goForward();
+  return shown;
 }

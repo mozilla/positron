@@ -50,7 +50,6 @@
 #include "nsIConsoleService.h"
 #include "nsIObserverService.h"
 #include "nsIContent.h"
-#include "nsAutoPtr.h"
 #include "nsDOMJSUtils.h"
 #include "nsAboutProtocolUtils.h"
 #include "nsIClassInfo.h"
@@ -226,20 +225,6 @@ private:
     bool mDidGetFlags;
     bool mMustFreeName;
 };
-
-JSContext *
-nsScriptSecurityManager::GetCurrentJSContext()
-{
-    // Get JSContext from stack.
-    return nsXPConnect::XPConnect()->GetCurrentJSContext();
-}
-
-JSContext *
-nsScriptSecurityManager::GetSafeJSContext()
-{
-    // Get JSContext from stack.
-    return nsXPConnect::XPConnect()->GetSafeJSContext();
-}
 
 /* static */
 bool
@@ -672,7 +657,7 @@ EqualOrSubdomain(nsIURI* aProbeArg, nsIURI* aBase)
         }
 
         nsAutoCString host, newHost;
-        nsresult rv = probe->GetHost(host);
+        rv = probe->GetHost(host);
         NS_ENSURE_SUCCESS(rv, false);
 
         rv = tldService->GetNextSubDomain(host, newHost);
@@ -688,37 +673,32 @@ EqualOrSubdomain(nsIURI* aProbeArg, nsIURI* aBase)
 static bool
 AllSchemesMatch(nsIURI* aURI, nsIURI* aOtherURI)
 {
-    nsCOMPtr<nsINestedURI> nestedURI = do_QueryInterface(aURI);
-    nsCOMPtr<nsINestedURI> nestedOtherURI = do_QueryInterface(aOtherURI);
     auto stringComparator = nsCaseInsensitiveCStringComparator();
-    if (!nestedURI && !nestedOtherURI) {
-        // Neither of the URIs is nested, compare their schemes directly:
-        nsAutoCString scheme, otherScheme;
-        aURI->GetScheme(scheme);
-        aOtherURI->GetScheme(otherScheme);
-        return scheme.Equals(otherScheme, stringComparator);
-    }
-    while (nestedURI && nestedOtherURI) {
-        nsCOMPtr<nsIURI> currentURI = do_QueryInterface(nestedURI);
-        nsCOMPtr<nsIURI> currentOtherURI = do_QueryInterface(nestedOtherURI);
+    nsCOMPtr<nsIURI> currentURI = aURI;
+    nsCOMPtr<nsIURI> currentOtherURI = aOtherURI;
+    while (currentURI && currentOtherURI) {
         nsAutoCString scheme, otherScheme;
         currentURI->GetScheme(scheme);
         currentOtherURI->GetScheme(otherScheme);
         if (!scheme.Equals(otherScheme, stringComparator)) {
             return false;
         }
-
+        nsCOMPtr<nsINestedURI> nestedURI = do_QueryInterface(currentURI);
+        nsCOMPtr<nsINestedURI> nestedOtherURI = do_QueryInterface(currentOtherURI);
+        // If neither are nested and all schemes have matched so far
+        // (or we would have bailed already), we're the same:
+        if (!nestedURI && !nestedOtherURI) {
+            return true;
+        }
+        // If one is nested and the other not, they're not equal:
+        if (!nestedURI != !nestedOtherURI) {
+            return false;
+        }
+        // At this stage, both are still nested URIs, so let's play again:
         nestedURI->GetInnerURI(getter_AddRefs(currentURI));
         nestedOtherURI->GetInnerURI(getter_AddRefs(currentOtherURI));
-        nestedURI = do_QueryInterface(currentURI);
-        nestedOtherURI = do_QueryInterface(currentOtherURI);
     }
-    if (!!nestedURI != !!nestedOtherURI) {
-        // If only one of the scheme chains runs out at one point, clearly the chains
-        // aren't of the same length, so we bail:
-        return false;
-    }
-    return true;
+    return false;
 }
 
 NS_IMETHODIMP
@@ -802,9 +782,6 @@ nsScriptSecurityManager::CheckLoadURIWithPrincipal(nsIPrincipal* aPrincipal,
        return NS_ERROR_DOM_BAD_URI;
     }
 
-    NS_NAMED_LITERAL_STRING(errorTag, "CheckLoadURIError");
-    bool reportErrors = !(aFlags & nsIScriptSecurityManager::DONT_REPORT_ERRORS);
-
     // Check for uris that are only loadable by principals that subsume them
     bool hasFlags;
     rv = NS_URIChainHasFlags(targetBaseURI,
@@ -813,6 +790,12 @@ nsScriptSecurityManager::CheckLoadURIWithPrincipal(nsIPrincipal* aPrincipal,
     NS_ENSURE_SUCCESS(rv, rv);
 
     if (hasFlags) {
+        // check nothing else in the URI chain has flags that prevent
+        // access:
+        rv = CheckLoadURIFlags(sourceURI, aTargetURI, sourceBaseURI,
+                               targetBaseURI, aFlags);
+        NS_ENSURE_SUCCESS(rv, rv);
+        // Check the principal is allowed to load the target.
         return aPrincipal->CheckMayLoad(targetBaseURI, true, false);
     }
 
@@ -850,8 +833,6 @@ nsScriptSecurityManager::CheckLoadURIWithPrincipal(nsIPrincipal* aPrincipal,
         // as long as they don't represent null principals...
         // Or they don't require an special permission to do so
         // See bug#773886
-
-        bool hasFlags;
         rv = NS_URIChainHasFlags(targetBaseURI,
                                  nsIProtocolHandler::URI_CROSS_ORIGIN_NEEDS_WEBAPPS_PERM,
                                  &hasFlags);
@@ -886,11 +867,35 @@ nsScriptSecurityManager::CheckLoadURIWithPrincipal(nsIPrincipal* aPrincipal,
     }
 
     // If the schemes don't match, the policy is specified by the protocol
-    // flags on the target URI.  Note that the order of policy checks here is
-    // very important!  We start from most restrictive and work our way down.
-    // Note that since we're working with the innermost URI, we can just use
-    // the methods that work on chains of nested URIs and they will only look
-    // at the flags for our one URI.
+    // flags on the target URI.
+    return CheckLoadURIFlags(sourceURI, aTargetURI, sourceBaseURI,
+                             targetBaseURI, aFlags);
+}
+
+/**
+ * Helper method to check whether the target URI and its innermost ("base") URI
+ * has protocol flags that should stop it from being loaded by the source URI
+ * (and/or the source URI's innermost ("base") URI), taking into account any
+ * nsIScriptSecurityManager flags originally passed to
+ * CheckLoadURIWithPrincipal and friends.
+ *
+ * @return if success, access is allowed. Otherwise, deny access
+ */
+nsresult
+nsScriptSecurityManager::CheckLoadURIFlags(nsIURI *aSourceURI,
+                                           nsIURI *aTargetURI,
+                                           nsIURI *aSourceBaseURI,
+                                           nsIURI *aTargetBaseURI,
+                                           uint32_t aFlags)
+{
+    // Note that the order of policy checks here is very important!
+    // We start from most restrictive and work our way down.
+    bool reportErrors = !(aFlags & nsIScriptSecurityManager::DONT_REPORT_ERRORS);
+    NS_NAMED_LITERAL_STRING(errorTag, "CheckLoadURIError");
+
+    nsAutoCString targetScheme;
+    nsresult rv = aTargetBaseURI->GetScheme(targetScheme);
+    if (NS_FAILED(rv)) return rv;
 
     // Check for system target URI
     rv = DenyAccessIfURIHasFlags(aTargetURI,
@@ -898,13 +903,14 @@ nsScriptSecurityManager::CheckLoadURIWithPrincipal(nsIPrincipal* aPrincipal,
     if (NS_FAILED(rv)) {
         // Deny access, since the origin principal is not system
         if (reportErrors) {
-            ReportError(nullptr, errorTag, sourceURI, aTargetURI);
+            ReportError(nullptr, errorTag, aSourceURI, aTargetURI);
         }
         return rv;
     }
 
     // Check for chrome target URI
-    rv = NS_URIChainHasFlags(targetBaseURI,
+    bool hasFlags = false;
+    rv = NS_URIChainHasFlags(aTargetBaseURI,
                              nsIProtocolHandler::URI_IS_UI_RESOURCE,
                              &hasFlags);
     NS_ENSURE_SUCCESS(rv, rv);
@@ -926,7 +932,7 @@ nsScriptSecurityManager::CheckLoadURIWithPrincipal(nsIPrincipal* aPrincipal,
             // and moz-icon:// source URIs to load resource://, chrome://, and
             // moz-icon:// files, so long as they're not loading it as a document.
             bool sourceIsUIResource;
-            rv = NS_URIChainHasFlags(sourceBaseURI,
+            rv = NS_URIChainHasFlags(aSourceBaseURI,
                                      nsIProtocolHandler::URI_IS_UI_RESOURCE,
                                      &sourceIsUIResource);
             NS_ENSURE_SUCCESS(rv, rv);
@@ -939,7 +945,7 @@ nsScriptSecurityManager::CheckLoadURIWithPrincipal(nsIPrincipal* aPrincipal,
                                                  NS_CHROMEREGISTRY_CONTRACTID));
             if (reg) {
                 bool accessAllowed = false;
-                reg->AllowContentToAccess(targetBaseURI, &accessAllowed);
+                reg->AllowContentToAccess(aTargetBaseURI, &accessAllowed);
                 if (accessAllowed) {
                     return NS_OK;
                 }
@@ -949,13 +955,13 @@ nsScriptSecurityManager::CheckLoadURIWithPrincipal(nsIPrincipal* aPrincipal,
         // Special-case the hidden window: it's allowed to load
         // URI_IS_UI_RESOURCE no matter what.  Bug 1145470 tracks removing this.
         nsAutoCString sourceSpec;
-        if (NS_SUCCEEDED(sourceBaseURI->GetSpec(sourceSpec)) &&
+        if (NS_SUCCEEDED(aSourceBaseURI->GetSpec(sourceSpec)) &&
             sourceSpec.EqualsLiteral("resource://gre-resources/hiddenWindow.html")) {
             return NS_OK;
         }
 
         if (reportErrors) {
-            ReportError(nullptr, errorTag, sourceURI, aTargetURI);
+            ReportError(nullptr, errorTag, aSourceURI, aTargetURI);
         }
         return NS_ERROR_DOM_BAD_URI;
     }
@@ -969,19 +975,20 @@ nsScriptSecurityManager::CheckLoadURIWithPrincipal(nsIPrincipal* aPrincipal,
         // Allow domains that were whitelisted in the prefs. In 99.9% of cases,
         // this array is empty.
         for (size_t i = 0; i < mFileURIWhitelist.Length(); ++i) {
-            if (EqualOrSubdomain(sourceURI, mFileURIWhitelist[i])) {
+            if (EqualOrSubdomain(aSourceURI, mFileURIWhitelist[i])) {
                 return NS_OK;
             }
         }
 
         // Allow chrome://
-        if (sourceScheme.EqualsLiteral("chrome")) {
+        bool isChrome = false;
+        if (NS_SUCCEEDED(aSourceBaseURI->SchemeIs("chrome", &isChrome)) && isChrome) {
             return NS_OK;
         }
 
         // Nothing else.
         if (reportErrors) {
-            ReportError(nullptr, errorTag, sourceURI, aTargetURI);
+            ReportError(nullptr, errorTag, aSourceURI, aTargetURI);
         }
         return NS_ERROR_DOM_BAD_URI;
     }
@@ -990,11 +997,19 @@ nsScriptSecurityManager::CheckLoadURIWithPrincipal(nsIPrincipal* aPrincipal,
     // deprecated but treated as URI_LOADABLE_BY_ANYONE.  But check whether we
     // need to warn.  At some point we'll want to make this warning into an
     // error and treat unflagged handlers as URI_DANGEROUS_TO_LOAD.
-    rv = NS_URIChainHasFlags(targetBaseURI,
+    rv = NS_URIChainHasFlags(aTargetBaseURI,
                              nsIProtocolHandler::URI_LOADABLE_BY_ANYONE,
                              &hasFlags);
     NS_ENSURE_SUCCESS(rv, rv);
-    if (!hasFlags) {
+    // NB: we also get here if the base URI is URI_LOADABLE_BY_SUBSUMERS,
+    // and none of the rest of the nested chain of URIs for aTargetURI
+    // prohibits the load, so avoid warning in that case:
+    bool hasSubsumersFlag = false;
+    rv = NS_URIChainHasFlags(aTargetBaseURI,
+                             nsIProtocolHandler::URI_LOADABLE_BY_SUBSUMERS,
+                             &hasSubsumersFlag);
+    NS_ENSURE_SUCCESS(rv, rv);
+    if (!hasFlags && !hasSubsumersFlag) {
         nsXPIDLString message;
         NS_ConvertASCIItoUTF16 ucsTargetScheme(targetScheme);
         const char16_t* formatStrings[] = { ucsTargetScheme.get() };
@@ -1114,16 +1129,6 @@ nsScriptSecurityManager::CheckLoadURIStrWithPrincipal(nsIPrincipal* aPrincipal,
     return rv;
 }
 
-bool
-nsScriptSecurityManager::ScriptAllowed(JSObject *aGlobal)
-{
-    MOZ_ASSERT(aGlobal);
-    MOZ_ASSERT(JS_IsGlobalObject(aGlobal) || js::IsWindowProxy(aGlobal));
-
-    // Check the bits on the compartment private.
-    return xpc::Scriptability::Get(aGlobal).Allowed();
-}
-
 ///////////////// Principals ///////////////////////
 
 NS_IMETHODIMP
@@ -1132,16 +1137,6 @@ nsScriptSecurityManager::GetSystemPrincipal(nsIPrincipal **result)
     NS_ADDREF(*result = mSystemPrincipal);
 
     return NS_OK;
-}
-
-NS_IMETHODIMP
-nsScriptSecurityManager::GetSimpleCodebasePrincipal(nsIURI* aURI,
-                                                    nsIPrincipal** aPrincipal)
-{
-  PrincipalOriginAttributes attrs(UNKNOWN_APP_ID, false);
-  nsCOMPtr<nsIPrincipal> prin = BasePrincipal::CreateCodebasePrincipal(aURI, attrs);
-  prin.forget(aPrincipal);
-  return *aPrincipal ? NS_OK : NS_ERROR_FAILURE;
 }
 
 NS_IMETHODIMP
@@ -1428,11 +1423,12 @@ nsresult nsScriptSecurityManager::Init()
         JSPrincipalsSubsume,
     };
 
-    MOZ_ASSERT(!JS_GetSecurityCallbacks(sRuntime));
-    JS_SetSecurityCallbacks(sRuntime, &securityCallbacks);
-    JS_InitDestroyPrincipalsCallback(sRuntime, nsJSPrincipals::Destroy);
+    JSContext* cx = JS_GetContext(sRuntime);
+    MOZ_ASSERT(!JS_GetSecurityCallbacks(cx));
+    JS_SetSecurityCallbacks(cx, &securityCallbacks);
+    JS_InitDestroyPrincipalsCallback(cx, nsJSPrincipals::Destroy);
 
-    JS_SetTrustedPrincipals(sRuntime, system);
+    JS_SetTrustedPrincipals(cx, system);
 
     return NS_OK;
 }
@@ -1456,8 +1452,8 @@ void
 nsScriptSecurityManager::Shutdown()
 {
     if (sRuntime) {
-        JS_SetSecurityCallbacks(sRuntime, nullptr);
-        JS_SetTrustedPrincipals(sRuntime, nullptr);
+        JS_SetSecurityCallbacks(JS_GetContext(sRuntime), nullptr);
+        JS_SetTrustedPrincipals(JS_GetContext(sRuntime), nullptr);
         sRuntime = nullptr;
     }
 
@@ -1477,7 +1473,7 @@ nsScriptSecurityManager::InitStatics()
     RefPtr<nsScriptSecurityManager> ssManager = new nsScriptSecurityManager();
     nsresult rv = ssManager->Init();
     if (NS_FAILED(rv)) {
-        MOZ_CRASH();
+        MOZ_CRASH("ssManager->Init() failed");
     }
 
     ClearOnShutdown(&gScriptSecMan);

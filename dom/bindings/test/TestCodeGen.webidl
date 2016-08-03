@@ -11,7 +11,7 @@ typedef CustomEventInit TestDictionaryTypedef;
 
 interface TestExternalInterface;
 
-[AvailableIn=PrivilegedApps, Pref="xyz"]
+[Pref="xyz"]
 interface TestRenamedInterface {
 };
 
@@ -135,7 +135,6 @@ interface OnlyForUseInConstructor {
  Constructor(ArrayBuffer arrayBuf),
  Constructor(Uint8Array typedArr),
  // Constructor(long arg1, long arg2, (TestInterface or OnlyForUseInConstructor) arg3),
- AvailableIn=CertifiedApps,
  NamedConstructor=Test,
  NamedConstructor=Test(DOMString str),
  NamedConstructor=Test2(DictForConstructor dict, any any1, object obj1,
@@ -783,6 +782,9 @@ interface TestInterface {
   static void staticMethod(boolean arg);
   static void staticMethodWithContext(any arg);
 
+  // Testing static method with a reserved C++ keyword as the name
+  static void assert(boolean arg);
+
   // Deprecated static methods and attributes
   [Deprecated="GetAttributeNode"]
   static attribute byte staticDeprecatedAttribute;
@@ -884,14 +886,6 @@ interface TestInterface {
   void prefable19();
   [Pref="abc.def", Func="TestFuncControlledMember", ChromeOnly]
   void prefable20();
-  [Func="TestFuncControlledMember", AvailableIn=CertifiedApps]
-  void prefable21();
-  [Func="TestFuncControlledMember", AvailableIn=CertifiedApps]
-  void prefable22();
-  [Pref="abc.def", Func="TestFuncControlledMember", AvailableIn=CertifiedApps]
-  void prefable23();
-  [Pref="abc.def", Func="TestFuncControlledMember", AvailableIn=PrivilegedApps]
-  void prefable24();
 
   // Conditionally exposed methods/attributes involving [SecureContext]
   [SecureContext]
@@ -1126,6 +1120,15 @@ dictionary DictForConstructor {
   any any1 = null;
 };
 
+dictionary DictWithConditionalMembers {
+  [ChromeOnly]
+  long chromeOnlyMember;
+  [Func="TestFuncControlledMember"]
+  long funcControlledMember;
+  [ChromeOnly, Func="nsGenericHTMLElement::TouchEventsEnabled"]
+  long chromeOnlyFuncControlledMember;
+};
+
 interface TestIndexedGetterInterface {
   getter long item(unsigned long idx);
   readonly attribute unsigned long length;
@@ -1215,6 +1218,23 @@ interface TestDeprecatedInterface {
 
 [Constructor(Promise<void> promise)]
 interface TestInterfaceWithPromiseConstructorArg {
+};
+
+namespace TestNamespace {
+  readonly attribute boolean foo;
+  long bar();
+};
+
+partial namespace TestNamespace {
+  void baz();
+};
+
+[ClassString="RenamedNamespaceClassName"]
+namespace TestRenamedNamespace {
+};
+
+[ProtoObjectHack]
+namespace TestProtoObjectHackedNamespace {
 };
 
 [SecureContext]

@@ -65,9 +65,9 @@ public:
      * is responsible for handling this scenario as appropriate.
      */
     static already_AddRefed<gfxContext>
-        ForDrawTarget(mozilla::gfx::DrawTarget* aTarget,
-                      const mozilla::gfx::Point& aDeviceOffset = mozilla::gfx::Point());
-    
+        CreateOrNull(mozilla::gfx::DrawTarget* aTarget,
+                     const mozilla::gfx::Point& aDeviceOffset = mozilla::gfx::Point());
+
     /**
      * Create a new gfxContext wrapping aTarget and preserving aTarget's
      * transform. Note that the transform is moved from aTarget to the resulting
@@ -76,7 +76,7 @@ public:
      * is responsible for handling this scenario as appropriate.
      */
     static already_AddRefed<gfxContext>
-        ForDrawTargetWithTransform(mozilla::gfx::DrawTarget* aTarget);
+        CreatePreservingTransformOrNull(mozilla::gfx::DrawTarget* aTarget);
 
     mozilla::gfx::DrawTarget *GetDrawTarget() { return mDT; }
 
@@ -304,13 +304,6 @@ public:
      */
     void Mask(mozilla::gfx::SourceSurface *aSurface, mozilla::gfx::Float aAlpha, const mozilla::gfx::Matrix& aTransform);
     void Mask(mozilla::gfx::SourceSurface *aSurface, const mozilla::gfx::Matrix& aTransform) { Mask(aSurface, 1.0f, aTransform); }
-
-    /**
-     * Shorthand for creating a pattern and calling the pattern-taking
-     * variant of Mask.
-     */
-    void Mask(gfxASurface *surface, const gfxPoint& offset = gfxPoint(0.0, 0.0));
-
     void Mask(mozilla::gfx::SourceSurface *surface, float alpha = 1.0f, const mozilla::gfx::Point& offset = mozilla::gfx::Point());
 
     /**

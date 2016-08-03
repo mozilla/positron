@@ -1,5 +1,6 @@
 #include "nsContentSecurityManager.h"
 #include "nsIChannel.h"
+#include "nsIHttpChannelInternal.h"
 #include "nsIStreamListener.h"
 #include "nsILoadInfo.h"
 #include "nsContentUtils.h"
@@ -85,37 +86,25 @@ DoCheckLoadURIChecks(nsIURI* aURI, nsILoadInfo* aLoadInfo)
     return NS_OK;
   }
 
-  nsresult rv = NS_OK;
+  if (IsImageLoadInEditorAppType(aLoadInfo)) {
+    return NS_OK;
+  }
 
-  nsCOMPtr<nsIPrincipal> loadingPrincipal = aLoadInfo->LoadingPrincipal();
   uint32_t flags = nsIScriptSecurityManager::STANDARD;
   if (aLoadInfo->GetAllowChrome()) {
     flags |= nsIScriptSecurityManager::ALLOW_CHROME;
   }
-
-  bool isImageInEditorType = IsImageLoadInEditorAppType(aLoadInfo);
-
-  // We don't have a loadingPrincipal for TYPE_DOCUMENT
-  if (aLoadInfo->GetExternalContentPolicyType() != nsIContentPolicy::TYPE_DOCUMENT &&
-      !isImageInEditorType) {
-    rv = nsContentUtils::GetSecurityManager()->
-      CheckLoadURIWithPrincipal(loadingPrincipal,
-                                aURI,
-                                flags);
-    NS_ENSURE_SUCCESS(rv, rv);
+  if (aLoadInfo->GetDisallowScript()) {
+    flags |= nsIScriptSecurityManager::DISALLOW_SCRIPT;
   }
 
-  // If the loadingPrincipal and the triggeringPrincipal are different, then make
-  // sure the triggeringPrincipal is allowed to access that URI.
-  nsCOMPtr<nsIPrincipal> triggeringPrincipal = aLoadInfo->TriggeringPrincipal();
-  if (loadingPrincipal != triggeringPrincipal && !isImageInEditorType) {
-    rv = nsContentUtils::GetSecurityManager()->
-           CheckLoadURIWithPrincipal(triggeringPrincipal,
+  // Only call CheckLoadURIWithPrincipal() using the TriggeringPrincipal and not
+  // the LoadingPrincipal when SEC_ALLOW_CROSS_ORIGIN_* security flags are set,
+  // to allow, e.g. user stylesheets to load chrome:// URIs.
+  return nsContentUtils::GetSecurityManager()->
+           CheckLoadURIWithPrincipal(aLoadInfo->TriggeringPrincipal(),
                                      aURI,
                                      flags);
-    NS_ENSURE_SUCCESS(rv, rv);
-  }
-  return NS_OK;
 }
 
 static bool
@@ -173,14 +162,25 @@ DoCORSChecks(nsIChannel* aChannel, nsILoadInfo* aLoadInfo,
 }
 
 static nsresult
-DoContentSecurityChecks(nsIURI* aURI, nsILoadInfo* aLoadInfo)
+DoContentSecurityChecks(nsIChannel* aChannel, nsILoadInfo* aLoadInfo)
 {
+  nsCOMPtr<nsIURI> uri;
+  nsresult rv = NS_GetFinalChannelURI(aChannel, getter_AddRefs(uri));
+  NS_ENSURE_SUCCESS(rv, rv);
+  
   nsContentPolicyType contentPolicyType =
     aLoadInfo->GetExternalContentPolicyType();
   nsContentPolicyType internalContentPolicyType =
     aLoadInfo->InternalContentPolicyType();
   nsCString mimeTypeGuess;
   nsCOMPtr<nsINode> requestingContext = nullptr;
+
+#ifdef DEBUG
+  // Don't enforce TYPE_DOCUMENT assertions for loads
+  // initiated by javascript tests.
+  bool skipContentTypeCheck = false;
+  skipContentTypeCheck = Preferences::GetBool("network.loadinfo.skip_type_assertion");
+#endif
 
   switch(contentPolicyType) {
     case nsIContentPolicy::TYPE_OTHER: {
@@ -207,9 +207,14 @@ DoContentSecurityChecks(nsIURI* aURI, nsILoadInfo* aLoadInfo)
       break;
     }
 
-    case nsIContentPolicy::TYPE_OBJECT:
+    case nsIContentPolicy::TYPE_OBJECT: {
+      mimeTypeGuess = EmptyCString();
+      requestingContext = aLoadInfo->LoadingNode();
+      break;
+    }
+
     case nsIContentPolicy::TYPE_DOCUMENT: {
-      MOZ_ASSERT(false, "contentPolicyType not supported yet");
+      MOZ_ASSERT(skipContentTypeCheck || false, "contentPolicyType not supported yet");
       break;
     }
 
@@ -302,7 +307,16 @@ DoContentSecurityChecks(nsIURI* aURI, nsILoadInfo* aLoadInfo)
     }
 
     case nsIContentPolicy::TYPE_WEBSOCKET: {
-      MOZ_ASSERT(false, "contentPolicyType not supported yet");
+      // Websockets have to use the proxied URI:
+      // ws:// instead of http:// for CSP checks
+      nsCOMPtr<nsIHttpChannelInternal> httpChannelInternal
+        = do_QueryInterface(aChannel);
+      MOZ_ASSERT(httpChannelInternal);
+      if (httpChannelInternal) {
+        httpChannelInternal->GetProxyURI(getter_AddRefs(uri));
+      }
+      mimeTypeGuess = EmptyCString();
+      requestingContext = aLoadInfo->LoadingNode();
       break;
     }
 
@@ -354,15 +368,15 @@ DoContentSecurityChecks(nsIURI* aURI, nsILoadInfo* aLoadInfo)
   }
 
   int16_t shouldLoad = nsIContentPolicy::ACCEPT;
-  nsresult rv = NS_CheckContentLoadPolicy(internalContentPolicyType,
-                                          aURI,
-                                          aLoadInfo->LoadingPrincipal(),
-                                          requestingContext,
-                                          mimeTypeGuess,
-                                          nullptr,        //extra,
-                                          &shouldLoad,
-                                          nsContentUtils::GetContentPolicy(),
-                                          nsContentUtils::GetSecurityManager());
+  rv = NS_CheckContentLoadPolicy(internalContentPolicyType,
+                                 uri,
+                                 aLoadInfo->LoadingPrincipal(),
+                                 requestingContext,
+                                 mimeTypeGuess,
+                                 nullptr,        //extra,
+                                 &shouldLoad,
+                                 nsContentUtils::GetContentPolicy(),
+                                 nsContentUtils::GetSecurityManager());
   NS_ENSURE_SUCCESS(rv, rv);
   if (NS_CP_REJECTED(shouldLoad)) {
     return NS_ERROR_CONTENT_BLOCKED;
@@ -427,12 +441,8 @@ nsContentSecurityManager::doContentSecurityCheck(nsIChannel* aChannel,
   rv = CheckChannel(aChannel);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  nsCOMPtr<nsIURI> finalChannelURI;
-  rv = NS_GetFinalChannelURI(aChannel, getter_AddRefs(finalChannelURI));
-  NS_ENSURE_SUCCESS(rv, rv);
-
   // Perform all ContentPolicy checks (MixedContent, CSP, ...)
-  rv = DoContentSecurityChecks(finalChannelURI, loadInfo);
+  rv = DoContentSecurityChecks(aChannel, loadInfo);
   NS_ENSURE_SUCCESS(rv, rv);
 
   // now lets set the initalSecurityFlag for subsequent calls

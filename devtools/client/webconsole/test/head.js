@@ -41,6 +41,10 @@ const WEBCONSOLE_STRINGS_URI = "chrome://devtools/locale/" +
                                "webconsole.properties";
 var WCUL10n = new WebConsoleUtils.L10n(WEBCONSOLE_STRINGS_URI);
 
+const DOCS_GA_PARAMS = "?utm_source=mozilla" +
+                       "&utm_medium=firefox-console-errors" +
+                       "&utm_campaign=default";
+
 DevToolsUtils.testing = true;
 
 function loadTab(url) {
@@ -1032,7 +1036,7 @@ function waitForMessages(options) {
       return false;
     }
 
-    if ("line" in rule.source && location.line === rule.source.line) {
+    if ("line" in rule.source && location.line != rule.source.line) {
       return false;
     }
 
@@ -1050,7 +1054,7 @@ function waitForMessages(options) {
 
   function checkStacktrace(rule, element) {
     let stack = rule.stacktrace;
-    let frames = element.querySelectorAll(".stacktrace > li");
+    let frames = element.querySelectorAll(".stacktrace > .stack-trace > .frame-link");
     if (!frames.length) {
       return false;
     }
@@ -1064,7 +1068,7 @@ function waitForMessages(options) {
       }
 
       if (expected.file) {
-        let url = getRenderedSource(frame).url;
+        let url = frame.getAttribute("data-url");
         if (!checkText(expected.file, url)) {
           ok(false, "frame #" + i + " does not match file name: " +
                     expected.file + " != " + url);
@@ -1074,7 +1078,7 @@ function waitForMessages(options) {
       }
 
       if (expected.fn) {
-        let fn = frame.querySelector(".function").textContent;
+        let fn = frame.querySelector(".frame-link-function-display-name").textContent;
         if (!checkText(expected.fn, fn)) {
           ok(false, "frame #" + i + " does not match the function name: " +
                     expected.fn + " != " + fn);
@@ -1084,7 +1088,7 @@ function waitForMessages(options) {
       }
 
       if (expected.line) {
-        let line = getRenderedSource(frame).line;
+        let line = frame.getAttribute("data-line");
         if (!checkText(expected.line, line)) {
           ok(false, "frame #" + i + " does not match the line number: " +
                     expected.line + " != " + line);
@@ -1584,6 +1588,114 @@ function checkOutputForInputs(hud, inputTests) {
   return Task.spawn(runner);
 }
 
+/**
+ * Check the web console DOM element output for the given inputs.
+ * Each input is checked for the expected JS eval result. The JS eval result is
+ * also checked if it opens the inspector with the correct node selected on
+ * inspector icon click
+ *
+ * @param object hud
+ *        The web console instance to work with.
+ * @param array inputTests
+ *        An array of input tests. An input test element is an object. Each
+ *        object has the following properties:
+ *        - input: string, JS input value to execute.
+ *
+ *        - output: string, expected JS eval result.
+ *
+ *        - displayName: string, expected NodeFront's displayName.
+ *
+ *        - attr: Array, expected NodeFront's attributes
+ */
+function checkDomElementHighlightingForInputs(hud, inputs) {
+  function* runner() {
+    let toolbox = gDevTools.getToolbox(hud.target);
+
+    // Loading the inspector panel at first, to make it possible to listen for
+    // new node selections
+    yield toolbox.selectTool("inspector");
+    let inspector = toolbox.getCurrentPanel();
+    yield toolbox.selectTool("webconsole");
+
+    info("Iterating over the test data");
+    for (let data of inputs) {
+      let [result] = yield jsEval(data.input, {text: data.output});
+      let {msg} = yield checkWidgetAndMessage(result);
+      yield checkNodeHighlight(toolbox, inspector, msg, data);
+    }
+  }
+
+  function jsEval(input, message) {
+    info("Executing '" + input + "' in the web console");
+
+    hud.jsterm.clearOutput();
+    hud.jsterm.execute(input);
+
+    return waitForMessages({
+      webconsole: hud,
+      messages: [message]
+    });
+  }
+
+  function* checkWidgetAndMessage(result) {
+    info("Getting the output ElementNode widget");
+
+    let msg = [...result.matched][0];
+    let widget = [...msg._messageObject.widgets][0];
+    ok(widget, "ElementNode widget found in the output");
+
+    info("Waiting for the ElementNode widget to be linked to the inspector");
+    yield widget.linkToInspector();
+
+    return {widget, msg};
+  }
+
+  function* checkNodeHighlight(toolbox, inspector, msg, testData) {
+    let inspectorIcon = msg.querySelector(".open-inspector");
+    ok(inspectorIcon, "Inspector icon found in the ElementNode widget");
+
+    info("Clicking on the inspector icon and waiting for the " +
+         "inspector to be selected");
+    let onInspectorSelected = toolbox.once("inspector-selected");
+    let onInspectorUpdated = inspector.once("inspector-updated");
+    let onNewNode = toolbox.selection.once("new-node-front");
+    let onNodeHighlight = toolbox.once("node-highlight");
+
+    EventUtils.synthesizeMouseAtCenter(inspectorIcon, {},
+      inspectorIcon.ownerDocument.defaultView);
+    yield onInspectorSelected;
+    yield onInspectorUpdated;
+    yield onNodeHighlight;
+    let nodeFront = yield onNewNode;
+
+    ok(true, "Inspector selected and new node got selected");
+
+    is(nodeFront.displayName, testData.displayName,
+      "The correct node was highlighted");
+
+    if (testData.attrs) {
+      let attrs = nodeFront.attributes;
+      for (let i in testData.attrs) {
+        is(attrs[i].name, testData.attrs[i].name,
+           "Expected attribute's name is present");
+        is(attrs[i].value, testData.attrs[i].value,
+           "Expected attribute's value is present");
+      }
+    }
+
+    info("Unhighlight the node by moving away from the markup view");
+    let onNodeUnhighlight = toolbox.once("node-unhighlight");
+    let btn = inspector.toolbox.doc.querySelector(".toolbox-dock-button");
+    EventUtils.synthesizeMouseAtCenter(btn, {type: "mousemove"},
+      inspector.toolbox.win);
+    yield onNodeUnhighlight;
+
+    info("Switching back to the console");
+    yield toolbox.selectTool("webconsole");
+  }
+
+  return Task.spawn(runner);
+}
 
 /**
  * Finish the request and resolve with the request object.

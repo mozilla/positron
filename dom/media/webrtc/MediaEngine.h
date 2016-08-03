@@ -58,6 +58,10 @@ public:
 #else
   static const int DEFAULT_SAMPLE_RATE = 16000;
 #endif
+  // This allows using whatever rate the graph is using for the
+  // MediaStreamTrack. This is useful for microphone data, we know it's already
+  // at the correct rate for insertion in the MSG.
+  static const int USE_GRAPH_RATE = -1;
 
   /* Populate an array of video sources in the nsTArray. Also include devices
    * that are currently unavailable. */
@@ -110,13 +114,21 @@ public:
   virtual void Shutdown() = 0;
 
   /* Populate the human readable name of this device in the nsAString */
-  virtual void GetName(nsAString&) = 0;
+  virtual void GetName(nsAString&) const = 0;
 
   /* Populate the UUID of this device in the nsACString */
-  virtual void GetUUID(nsACString&) = 0;
+  virtual void GetUUID(nsACString&) const = 0;
+
+  class BaseAllocationHandle
+  {
+  public:
+    NS_INLINE_DECL_THREADSAFE_REFCOUNTING(BaseAllocationHandle);
+  protected:
+    virtual ~BaseAllocationHandle() {}
+  };
 
   /* Release the device back to the system. */
-  virtual nsresult Deallocate() = 0;
+  virtual nsresult Deallocate(BaseAllocationHandle* aHandle) = 0;
 
   /* Start the device and add the track to the provided SourceMediaStream, with
    * the provided TrackID. You may start appending data to the track
@@ -137,9 +149,11 @@ public:
   virtual nsresult Stop(SourceMediaStream *aSource, TrackID aID) = 0;
 
   /* Restart with new capability */
-  virtual nsresult Restart(const dom::MediaTrackConstraints& aConstraints,
+  virtual nsresult Restart(BaseAllocationHandle* aHandle,
+                           const dom::MediaTrackConstraints& aConstraints,
                            const MediaEnginePrefs &aPrefs,
-                           const nsString& aDeviceId) = 0;
+                           const nsString& aDeviceId,
+                           const char** aOutBadConstraint) = 0;
 
   /* Returns true if a source represents a fake capture device and
    * false otherwise
@@ -175,11 +189,19 @@ public:
   virtual nsresult Allocate(const dom::MediaTrackConstraints &aConstraints,
                             const MediaEnginePrefs &aPrefs,
                             const nsString& aDeviceId,
-                            const nsACString& aOrigin) = 0;
+                            const nsACString& aOrigin,
+                            BaseAllocationHandle** aOutHandle,
+                            const char** aOutBadConstraint) = 0;
 
   virtual uint32_t GetBestFitnessDistance(
-      const nsTArray<const dom::MediaTrackConstraintSet*>& aConstraintSets,
-      const nsString& aDeviceId) = 0;
+      const nsTArray<const NormalizedConstraintSet*>& aConstraintSets,
+      const nsString& aDeviceId) const = 0;
+
+  void GetSettings(dom::MediaTrackSettings& aOutSettings)
+  {
+    MOZ_ASSERT(NS_IsMainThread());
+    aOutSettings = mSettings;
+  }
 
 protected:
   // Only class' own members can be initialized in constructor initializer list.
@@ -201,6 +223,8 @@ protected:
   PRThread* mOwningThread;
 #endif
   bool mHasFakeTracks;
+  // Main-thread only:
+  dom::MediaTrackSettings mSettings;
 };
 
 /**

@@ -1,3 +1,5 @@
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -38,7 +40,8 @@ class PBackgroundChild;
 // the creation sequence and will call back via the
 // nsIIPCBackgroundChildCreateCallback interface when completed. Thereafter
 // (assuming success) GetForCurrentThread() will return the same actor every
-// time.
+// time. SynchronouslyCreateForCurrentThread() will spin the event loop until
+// the BackgroundChild until the creation sequence is complete.
 //
 // CloseForCurrentThread() will close the current PBackground actor.  Subsequent
 // calls to GetForCurrentThread will return null.  CloseForCurrentThread() may
@@ -63,6 +66,10 @@ public:
   // See above.
   static bool
   GetOrCreateForCurrentThread(nsIIPCBackgroundChildCreateCallback* aCallback);
+
+  // See above.
+  static PBackgroundChild*
+  SynchronouslyCreateForCurrentThread();
 
   static mozilla::dom::PBlobChild*
   GetOrCreateActorForBlob(PBackgroundChild* aBackgroundActor,

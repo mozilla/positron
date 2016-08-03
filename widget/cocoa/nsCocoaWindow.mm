@@ -68,6 +68,15 @@ extern NSMenu* sApplicationMenu; // Application menu shared by all menubars
 // defined in nsChildView.mm
 extern BOOL                gSomeMenuBarPainted;
 
+#if !defined(MAC_OS_X_VERSION_10_12) || \
+    MAC_OS_X_VERSION_MAX_ALLOWED < MAC_OS_X_VERSION_10_12
+
+@interface NSWindow(AutomaticWindowTabbing)
++ (void)setAllowsAutomaticWindowTabbing:(BOOL)allow;
+@end
+
+#endif
+
 extern "C" {
   // CGSPrivate.h
   typedef NSInteger CGSConnection;
@@ -121,7 +130,11 @@ nsCocoaWindow::nsCocoaWindow()
 , mInResize(false)
 , mNumModalDescendents(0)
 {
-
+  if ([NSWindow respondsToSelector:@selector(setAllowsAutomaticWindowTabbing:)]) {
+    // Disable automatic tabbing on 10.12. We need to do this before we
+    // orderFront any of our windows.
+    [NSWindow setAllowsAutomaticWindowTabbing:NO];
+  }
 }
 
 void nsCocoaWindow::DestroyNativeWindow()
@@ -1041,14 +1054,12 @@ nsCocoaWindow::ConfigureChildren(const nsTArray<Configuration>& aConfigurations)
 LayerManager*
 nsCocoaWindow::GetLayerManager(PLayerTransactionChild* aShadowManager,
                                LayersBackend aBackendHint,
-                               LayerManagerPersistence aPersistence,
-                               bool* aAllowRetaining)
+                               LayerManagerPersistence aPersistence)
 {
   if (mPopupContentView) {
     return mPopupContentView->GetLayerManager(aShadowManager,
                                               aBackendHint,
-                                              aPersistence,
-                                              aAllowRetaining);
+                                              aPersistence);
   }
   return nullptr;
 }
@@ -1817,7 +1828,7 @@ NS_IMETHODIMP nsCocoaWindow::Invalidate(const LayoutDeviceIntRect& aRect)
 // a drop, to a drag enter/leave, or a drag over event. The actual event
 // is passed in |aMessage| and is passed along to our event hanlder so Gecko
 // knows about it.
-bool nsCocoaWindow::DragEvent(unsigned int aMessage, Point aMouseGlobal, UInt16 aKeyModifiers)
+bool nsCocoaWindow::DragEvent(unsigned int aMessage, mozilla::gfx::Point aMouseGlobal, UInt16 aKeyModifiers)
 {
   return false;
 }
@@ -3263,7 +3274,7 @@ static const NSString* kStateCollectionBehavior = @"collectionBehavior";
   // We work around this problem by only returning AXChildren that are
   // mozAccessible object or are one of the titlebar's buttons (which
   // instantiate subclasses of NSButtonCell).
-  if (nsCocoaFeatures::OnLionOrLater() && [retval isKindOfClass:[NSArray class]] &&
+  if ([retval isKindOfClass:[NSArray class]] &&
       [attribute isEqualToString:@"AXChildren"]) {
     NSMutableArray *holder = [NSMutableArray arrayWithCapacity:10];
     [holder addObjectsFromArray:(NSArray *)retval];
@@ -3283,22 +3294,6 @@ static const NSString* kStateCollectionBehavior = @"collectionBehavior";
 
   return retval;
 }
-
-// If we were built on OS X 10.6 or with the 10.6 SDK and are running on Lion,
-// the OS (specifically -[NSWindow sendEvent:]) won't send NSEventTypeGesture
-// events to -[ChildView magnifyWithEvent:] as it should.  The following code
-// gets around this.  See bug 863841.
-#if !defined( MAC_OS_X_VERSION_10_7 ) || \
-    ( MAC_OS_X_VERSION_MAX_ALLOWED < MAC_OS_X_VERSION_10_7 )
-- (void)sendEvent:(NSEvent *)anEvent
-{
-  if ([ChildView isLionSmartMagnifyEvent: anEvent]) {
-    [[self mainChildView] magnifyWithEvent:anEvent];
-    return;
-  }
-  [super sendEvent:anEvent];
-}
-#endif
 
 @end
 
@@ -3361,7 +3356,7 @@ static const NSString* kStateCollectionBehavior = @"collectionBehavior";
     // setBottomCornerRounded: is a private API call, so we check to make sure
     // we respond to it just in case.
     if ([self respondsToSelector:@selector(setBottomCornerRounded:)])
-      [self setBottomCornerRounded:nsCocoaFeatures::OnLionOrLater()];
+      [self setBottomCornerRounded:YES];
 
     [self setAutorecalculatesContentBorderThickness:NO forEdge:NSMaxYEdge];
     [self setContentBorderThickness:0.0f forEdge:NSMaxYEdge];
@@ -3399,6 +3394,16 @@ static const NSString* kStateCollectionBehavior = @"collectionBehavior";
 - (NSColor*)windowBackgroundColor
 {
   return mBackgroundColor;
+}
+
+- (void)setTemporaryBackgroundColor
+{
+  [super setBackgroundColor:[NSColor whiteColor]];
+}
+
+- (void)restoreBackgroundColor
+{
+  [super setBackgroundColor:mBackgroundColor];
 }
 
 - (void)setTitlebarNeedsDisplayInRect:(NSRect)aRect
@@ -3647,14 +3652,11 @@ DrawNativeTitlebar(CGContextRef aContext, CGRect aTitlebarRect,
 {
   nsNativeThemeCocoa::DrawNativeTitlebar(aContext, aTitlebarRect, aUnifiedToolbarHeight, aIsMain, NO);
 
-  if (nsCocoaFeatures::OnLionOrLater()) {
-    // On Lion the call to CUIDraw doesn't draw the top pixel strip at some
-    // window widths. We don't want to have a flickering transparent line, so
-    // we overdraw it.
-    CGContextSetRGBFillColor(aContext, 0.95, 0.95, 0.95, 1);
-    CGContextFillRect(aContext, CGRectMake(0, CGRectGetMaxY(aTitlebarRect) - 1,
+  // The call to CUIDraw doesn't draw the top pixel strip at some window widths.
+  // We don't want to have a flickering transparent line, so we overdraw it.
+  CGContextSetRGBFillColor(aContext, 0.95, 0.95, 0.95, 1);
+  CGContextFillRect(aContext, CGRectMake(0, CGRectGetMaxY(aTitlebarRect) - 1,
                                            aTitlebarRect.size.width, 1));
-  }
 }
 
 // Pattern draw callback for standard titlebar gradients and solid titlebar colors

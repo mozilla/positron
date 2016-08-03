@@ -121,7 +121,10 @@ FFmpegDataDecoder<LIBAV_VER>::ProcessDecode(MediaRawData* aSample)
   }
   switch (DoDecode(aSample)) {
     case DecodeResult::DECODE_ERROR:
-      mCallback->Error();
+      mCallback->Error(MediaDataDecoderError::DECODE_ERROR);
+      break;
+    case DecodeResult::FATAL_ERROR:
+      mCallback->Error(MediaDataDecoderError::FATAL_ERROR);
       break;
     default:
       if (mTaskQueue->IsEmpty()) {
@@ -182,8 +185,7 @@ FFmpegDataDecoder<LIBAV_VER>::ProcessShutdown()
 #elif LIBAVCODEC_VERSION_MAJOR == 54
     mLib->avcodec_free_frame(&mFrame);
 #else
-    delete mFrame;
-    mFrame = nullptr;
+    mLib->av_freep(&mFrame);
 #endif
   }
 }
@@ -205,9 +207,8 @@ FFmpegDataDecoder<LIBAV_VER>::PrepareFrame()
     mFrame = mLib->avcodec_alloc_frame();
   }
 #else
-  delete mFrame;
-  mFrame = new AVFrame;
-  mLib->avcodec_get_frame_defaults(mFrame);
+  mLib->av_freep(&mFrame);
+  mFrame = mLib->avcodec_alloc_frame();
 #endif
   return mFrame;
 }

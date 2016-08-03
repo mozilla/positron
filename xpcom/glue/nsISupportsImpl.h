@@ -375,6 +375,7 @@ public:                                                                       \
                             void** aInstancePtr) override;                    \
   NS_IMETHOD_(MozExternalRefCountType) AddRef(void) override;                 \
   NS_IMETHOD_(MozExternalRefCountType) Release(void) override;                \
+  typedef mozilla::FalseType HasThreadSafeRefCnt;                             \
 protected:                                                                    \
   nsAutoRefCnt mRefCnt;                                                       \
   NS_DECL_OWNINGTHREAD                                                        \
@@ -386,6 +387,7 @@ public:                                                                       \
                             void** aInstancePtr) override;                    \
   NS_IMETHOD_(MozExternalRefCountType) AddRef(void) override;                 \
   NS_IMETHOD_(MozExternalRefCountType) Release(void) override;                \
+  typedef mozilla::TrueType HasThreadSafeRefCnt;                              \
 protected:                                                                    \
   ::mozilla::ThreadSafeAutoRefCnt mRefCnt;                                    \
   NS_DECL_OWNINGTHREAD                                                        \
@@ -398,6 +400,7 @@ public:                                                                       \
   NS_IMETHOD_(MozExternalRefCountType) AddRef(void) override;                 \
   NS_IMETHOD_(MozExternalRefCountType) Release(void) override;                \
   NS_IMETHOD_(void) DeleteCycleCollectable(void);                             \
+  typedef mozilla::FalseType HasThreadSafeRefCnt;                             \
 protected:                                                                    \
   nsCycleCollectingAutoRefCnt mRefCnt;                                        \
   NS_DECL_OWNINGTHREAD                                                        \
@@ -475,6 +478,7 @@ public:                                                                       \
   NS_METHOD_(MozExternalRefCountType) Release(void) {                         \
     NS_IMPL_CC_NATIVE_RELEASE_BODY(_class)                                    \
   }                                                                           \
+  typedef mozilla::FalseType HasThreadSafeRefCnt;                             \
 protected:                                                                    \
   nsCycleCollectingAutoRefCnt mRefCnt;                                        \
   NS_DECL_OWNINGTHREAD                                                        \
@@ -506,13 +510,13 @@ public:                                                                       \
     --mRefCnt;                                                                \
     NS_LOG_RELEASE(this, mRefCnt, #_class);                                   \
     if (mRefCnt == 0) {                                                       \
-      NS_ASSERT_OWNINGTHREAD(_class);                                         \
       mRefCnt = 1; /* stabilize */                                            \
       delete this;                                                            \
       return 0;                                                               \
     }                                                                         \
     return mRefCnt;                                                           \
   }                                                                           \
+  typedef mozilla::FalseType HasThreadSafeRefCnt;                             \
 protected:                                                                    \
   nsAutoRefCnt mRefCnt;                                                       \
   NS_DECL_OWNINGTHREAD                                                        \
@@ -537,6 +541,7 @@ public:                                                                       \
     }                                                                         \
     return count;                                                             \
   }                                                                           \
+  typedef mozilla::TrueType HasThreadSafeRefCnt;                              \
 protected:                                                                    \
   ::mozilla::ThreadSafeAutoRefCnt mRefCnt;                                    \
 public:
@@ -618,8 +623,6 @@ NS_IMETHODIMP_(MozExternalRefCountType) _class::Release(void)                 \
   nsrefcnt count = --mRefCnt;                                                 \
   NS_LOG_RELEASE(this, count, #_class);                                       \
   if (count == 0) {                                                           \
-    if (!mRefCnt.isThreadSafe)                                                \
-      NS_ASSERT_OWNINGTHREAD(_class);                                         \
     mRefCnt = 1; /* stabilize */                                              \
     _destroy;                                                                 \
     return 0;                                                                 \

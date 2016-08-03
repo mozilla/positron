@@ -12,7 +12,6 @@
 #include "mozilla/layers/ImageClient.h"  // for ImageClient, etc
 #include "mozilla/layers/LayersMessages.h"  // for ImageLayerAttributes, etc
 #include "mozilla/mozalloc.h"           // for operator delete, etc
-#include "nsAutoPtr.h"                  // for nsRefPtr, getter_AddRefs, etc
 #include "nsCOMPtr.h"                   // for already_AddRefed
 #include "nsDebug.h"                    // for NS_ASSERTION
 #include "nsISupportsImpl.h"            // for Layer::AddRef, etc
@@ -69,7 +68,7 @@ protected:
 
   virtual void FillSpecificAttributes(SpecificLayerAttributes& aAttrs) override
   {
-    aAttrs = ImageLayerAttributes(mFilter, mScaleToSize, mScaleMode);
+    aAttrs = ImageLayerAttributes(mSamplingFilter, mScaleToSize, mScaleMode);
   }
 
   virtual Layer* AsLayer() override { return this; }

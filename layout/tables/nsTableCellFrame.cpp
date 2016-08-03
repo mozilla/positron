@@ -113,7 +113,7 @@ nsTableCellFrame::NotifyPercentBSize(const nsHTMLReflowState& aReflowState)
   // nsHTMLReflowState ensures the mCBReflowState of blocks inside a
   // cell is the cell frame, not the inner-cell block, and that the
   // containing block of an inner table is the containing block of its
-  // outer table.
+  // table wrapper.
   // XXXldb Given the now-stricter |NeedsToObserve|, many if not all of
   // these tests are probably unnecessary.
 
@@ -133,12 +133,12 @@ nsTableCellFrame::NotifyPercentBSize(const nsHTMLReflowState& aReflowState)
 
     if (nsTableFrame::AncestorsHaveStyleBSize(*cellRS) ||
         (GetTableFrame()->GetEffectiveRowSpan(*this) == 1 &&
-         cellRS->parentReflowState->frame->
+         cellRS->mParentReflowState->frame->
            HasAnyStateBits(NS_ROW_HAS_CELL_WITH_STYLE_BSIZE))) {
 
-      for (const nsHTMLReflowState *rs = aReflowState.parentReflowState;
+      for (const nsHTMLReflowState *rs = aReflowState.mParentReflowState;
            rs != cellRS;
-           rs = rs->parentReflowState) {
+           rs = rs->mParentReflowState) {
         rs->frame->AddStateBits(NS_FRAME_CONTAINS_RELATIVE_BSIZE);
       }
 
@@ -151,7 +151,7 @@ nsTableCellFrame::NotifyPercentBSize(const nsHTMLReflowState& aReflowState)
 bool
 nsTableCellFrame::NeedsToObserve(const nsHTMLReflowState& aReflowState)
 {
-  const nsHTMLReflowState *rs = aReflowState.parentReflowState;
+  const nsHTMLReflowState *rs = aReflowState.mParentReflowState;
   if (!rs)
     return false;
   if (rs->frame == this) {
@@ -160,13 +160,13 @@ nsTableCellFrame::NeedsToObserve(const nsHTMLReflowState& aReflowState)
     // propagated to its kids.
     return true;
   }
-  rs = rs->parentReflowState;
+  rs = rs->mParentReflowState;
   if (!rs) {
     return false;
   }
 
   // We always need to let the percent bsize observer be propagated
-  // from an outer table frame to an inner table frame.
+  // from a table wrapper frame to an inner table frame.
   nsIAtom *fType = aReflowState.frame->GetType();
   if (fType == nsGkAtoms::tableFrame) {
     return true;
@@ -180,7 +180,7 @@ nsTableCellFrame::NeedsToObserve(const nsHTMLReflowState& aReflowState)
   // instead of bsizes for orthogonal children.
   return rs->frame == this &&
          (PresContext()->CompatibilityMode() == eCompatibility_NavQuirks ||
-          fType == nsGkAtoms::tableOuterFrame);
+          fType == nsGkAtoms::tableWrapperFrame);
 }
 
 nsresult
@@ -508,10 +508,10 @@ nsTableCellFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
           // The cell background was not painted by the nsTablePainter,
           // so we need to do it. We have special background processing here
           // so we need to duplicate some code from nsFrame::DisplayBorderBackgroundOutline
-          nsDisplayTableItem* item =
-            new (aBuilder) nsDisplayTableCellBackground(aBuilder, this);
-          aLists.BorderBackground()->AppendNewToTop(item);
-          item->UpdateForFrameBackground(this);
+          nsDisplayBackgroundImage::AppendBackgroundItemsToTop(aBuilder,
+              this,
+              GetRectRelativeToSelf(),
+              aLists.BorderBackground());
         } else {
           // The nsTablePainter will paint our background. Make sure it
           // knows if we're background-attachment:fixed.

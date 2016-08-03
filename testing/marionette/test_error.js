@@ -10,19 +10,6 @@ function notok(condition) {
   ok(!(condition));
 }
 
-add_test(function test_BuiltinErrors() {
-  ok("Error" in error.BuiltinErrors);
-  ok("EvalError" in error.BuiltinErrors);
-  ok("InternalError" in error.BuiltinErrors);
-  ok("RangeError" in error.BuiltinErrors);
-  ok("ReferenceError" in error.BuiltinErrors);
-  ok("SyntaxError" in error.BuiltinErrors);
-  ok("TypeError" in error.BuiltinErrors);
-  ok("URIError" in error.BuiltinErrors);
-
-  run_next_test();
-});
-
 add_test(function test_isError() {
   notok(error.isError(null));
   notok(error.isError([]));
@@ -93,8 +80,12 @@ add_test(function test_toJson() {
   Assert.throws(() => error.toJson(new Error()),
       /Unserialisable error type: [object Error]/);
 
+  let e0 = new WebDriverError();
+  deepEqual({error: e0.status, message: "", stacktrace: ""},
+      error.toJson(e0));
+
   let e1 = new WebDriverError("a");
-  deepEqual({error: e1.status, message: "a", stacktrace: null},
+  deepEqual({error: e1.status, message: "a", stacktrace: ""},
       error.toJson(e1));
 
   let e2 = new JavaScriptError("first", "second", "third", "fourth");

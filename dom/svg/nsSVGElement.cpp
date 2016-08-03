@@ -258,7 +258,7 @@ nsSVGElement::BindToTree(nsIDocument* aDocument, nsIContent* aParent,
   }
   const nsAttrValue* oldVal = mAttrsAndChildren.GetAttr(nsGkAtoms::style);
 
-  if (oldVal && oldVal->Type() == nsAttrValue::eCSSDeclaration) {
+  if (oldVal && oldVal->Type() == nsAttrValue::eGeckoCSSDeclaration) {
     // we need to force a reparse because the baseURI of the document
     // may have changed, and in particular because we may be clones of
     // XBL anonymous content now being bound to the document we should
@@ -883,7 +883,7 @@ nsSVGElement::GetAttributeChangeHint(const nsIAtom* aAttribute,
     // It would be nice to only reconstruct the frame if the value returned by
     // SVGTests::PassesConditionalProcessingTests has changed, but we don't
     // know that
-    NS_UpdateHint(retval, nsChangeHint_ReconstructFrame);
+    retval |= nsChangeHint_ReconstructFrame;
   }
   return retval;
 }

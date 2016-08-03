@@ -12,11 +12,19 @@
 // - in-content highlighters that appear when hovering over property values
 // - etc.
 
+const {getColor} = require("devtools/client/shared/theme");
+const {HTMLTooltip} = require("devtools/client/shared/widgets/HTMLTooltip");
 const {
-  Tooltip,
+  getImageDimensions,
+  setImageTooltip,
+  setBrokenImageTooltip,
+} = require("devtools/client/shared/widgets/tooltip/ImageTooltipHelper");
+const {
+  CssDocsTooltip,
+} = require("devtools/client/shared/widgets/tooltip/CssDocsTooltip");
+const {
   SwatchColorPickerTooltip,
   SwatchCubicBezierTooltip,
-  CssDocsTooltip,
   SwatchFilterTooltip
 } = require("devtools/client/shared/widgets/Tooltip");
 const EventEmitter = require("devtools/shared/event-emitter");
@@ -255,10 +263,10 @@ exports.TooltipsOverlay = TooltipsOverlay;
 
 TooltipsOverlay.prototype = {
   get isEditing() {
-    return this.colorPicker.tooltip.isShown() ||
+    return this.colorPicker.tooltip.isVisible() ||
            this.colorPicker.eyedropperOpen ||
-           this.cubicBezier.tooltip.isShown() ||
-           this.filterEditor.tooltip.isShown();
+           this.cubicBezier.tooltip.isVisible() ||
+           this.filterEditor.tooltip.isVisible();
   },
 
   /**
@@ -270,23 +278,26 @@ TooltipsOverlay.prototype = {
       return;
     }
 
-    let panelDoc = this.view.inspector.panelDoc;
+    let { toolbox } = this.view.inspector;
 
     // Image, fonts, ... preview tooltip
-    this.previewTooltip = new Tooltip(panelDoc);
+    this.previewTooltip = new HTMLTooltip(toolbox, {
+      type: "arrow",
+      useXulWrapper: true
+    });
     this.previewTooltip.startTogglingOnHover(this.view.element,
       this._onPreviewTooltipTargetHover.bind(this));
 
     // MDN CSS help tooltip
-    this.cssDocs = new CssDocsTooltip(panelDoc);
+    this.cssDocs = new CssDocsTooltip(toolbox);
 
     if (this.isRuleView) {
       // Color picker tooltip
-      this.colorPicker = new SwatchColorPickerTooltip(panelDoc);
+      this.colorPicker = new SwatchColorPickerTooltip(toolbox);
       // Cubic bezier tooltip
-      this.cubicBezier = new SwatchCubicBezierTooltip(panelDoc);
+      this.cubicBezier = new SwatchCubicBezierTooltip(toolbox);
       // Filter editor tooltip
-      this.filterEditor = new SwatchFilterTooltip(panelDoc);
+      this.filterEditor = new SwatchFilterTooltip(toolbox);
     }
 
     this._isStarted = true;
@@ -373,21 +384,21 @@ TooltipsOverlay.prototype = {
       return false;
     }
 
-    if (this.isRuleView && this.colorPicker.tooltip.isShown()) {
+    if (this.isRuleView && this.colorPicker.tooltip.isVisible()) {
       this.colorPicker.revert();
       this.colorPicker.hide();
     }
 
-    if (this.isRuleView && this.cubicBezier.tooltip.isShown()) {
+    if (this.isRuleView && this.cubicBezier.tooltip.isVisible()) {
       this.cubicBezier.revert();
       this.cubicBezier.hide();
     }
 
-    if (this.isRuleView && this.cssDocs.tooltip.isShown()) {
+    if (this.isRuleView && this.cssDocs.tooltip.isVisible()) {
       this.cssDocs.hide();
     }
 
-    if (this.isRuleView && this.filterEditor.tooltip.isShown()) {
+    if (this.isRuleView && this.filterEditor.tooltip.isVisible()) {
       this.filterEditor.revert();
       this.filterEdtior.hide();
     }
@@ -395,21 +406,83 @@ TooltipsOverlay.prototype = {
     let inspector = this.view.inspector;
 
     if (type === TOOLTIP_IMAGE_TYPE) {
-      let dim = Services.prefs.getIntPref(PREF_IMAGE_TOOLTIP_SIZE);
-      // nodeInfo contains an absolute uri
-      let uri = nodeInfo.value.url;
-      yield this.previewTooltip.setRelativeImageContent(uri,
-        inspector.inspector, dim);
+      try {
+        yield this._setImagePreviewTooltip(nodeInfo.value.url);
+      } catch (e) {
+        yield setBrokenImageTooltip(this.previewTooltip, this.view.inspector.panelDoc);
+      }
       return true;
     }
 
     if (type === TOOLTIP_FONTFAMILY_TYPE) {
-      yield this.previewTooltip.setFontFamilyContent(nodeInfo.value.value,
-        inspector.selection.nodeFront);
+      let font = nodeInfo.value.value;
+      let nodeFront = inspector.selection.nodeFront;
+      yield this._setFontPreviewTooltip(font, nodeFront);
       return true;
     }
 
     return false;
+  }),
+
+  /**
+   * Set the content of the preview tooltip to display an image preview. The image URL can
+   * be relative, a call will be made to the debuggee to retrieve the image content as an
+   * imageData URI.
+   *
+   * @param {String} imageUrl
+   *        The image url value (may be relative or absolute).
+   * @return {Promise} A promise that resolves when the preview tooltip content is ready
+   */
+  _setImagePreviewTooltip: Task.async(function* (imageUrl) {
+    let doc = this.view.inspector.panelDoc;
+    let maxDim = Services.prefs.getIntPref(PREF_IMAGE_TOOLTIP_SIZE);
+
+    let naturalWidth, naturalHeight;
+    if (imageUrl.startsWith("data:")) {
+      // If the imageUrl already is a data-url, save ourselves a round-trip
+      let size = yield getImageDimensions(doc, imageUrl);
+      naturalWidth = size.naturalWidth;
+      naturalHeight = size.naturalHeight;
+    } else {
+      let inspectorFront = this.view.inspector.inspector;
+      let {data, size} = yield inspectorFront.getImageDataFromURL(imageUrl, maxDim);
+      imageUrl = yield data.string();
+      naturalWidth = size.naturalWidth;
+      naturalHeight = size.naturalHeight;
+    }
+
+    yield setImageTooltip(this.previewTooltip, doc, imageUrl,
+      {maxDim, naturalWidth, naturalHeight});
+  }),
+
+  /**
+   * Set the content of the preview tooltip to display a font family preview.
+   *
+   * @param {String} font
+   *        The font family value.
+   * @param {object} nodeFront
+   *        The NodeActor that will used to retrieve the dataURL for the font
+   *        family tooltip contents.
+   * @return {Promise} A promise that resolves when the preview tooltip content is ready
+   */
+  _setFontPreviewTooltip: Task.async(function* (font, nodeFront) {
+    if (!font || !nodeFront || typeof nodeFront.getFontFamilyDataURL !== "function") {
+      throw new Error("Unable to create font preview tooltip content.");
+    }
+
+    font = font.replace(/"/g, "'");
+    font = font.replace("!important", "");
+    font = font.trim();
+
+    let fillStyle = getColor("body-color");
+    let {data, size: maxDim} = yield nodeFront.getFontFamilyDataURL(font, fillStyle);
+
+    let imageUrl = yield data.string();
+    let doc = this.view.inspector.panelDoc;
+    let {naturalWidth, naturalHeight} = yield getImageDimensions(doc, imageUrl);
+
+    yield setImageTooltip(this.previewTooltip, doc, imageUrl,
+      {hideDimensionLabel: true, maxDim, naturalWidth, naturalHeight});
   }),
 
   _onNewSelection: function () {

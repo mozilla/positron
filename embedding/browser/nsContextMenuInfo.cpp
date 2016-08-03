@@ -26,7 +26,6 @@
 #include "nsIPrincipal.h"
 #include "nsIContentSecurityPolicy.h"
 #include "nsIContentPolicy.h"
-#include "nsAutoPtr.h"
 #include "imgRequestProxy.h"
 
 using mozilla::dom::Element;
@@ -296,7 +295,7 @@ nsContextMenuInfo::GetBackgroundImageRequestInternal(nsIDOMNode* aDOMNode,
           NS_NewURI(getter_AddRefs(bgUri), bgStringValue);
           NS_ENSURE_TRUE(bgUri, NS_ERROR_FAILURE);
 
-          RefPtr<imgLoader> il = imgLoader::GetInstance();
+          imgLoader* il = imgLoader::NormalLoader();
           NS_ENSURE_TRUE(il, NS_ERROR_FAILURE);
 
           return il->LoadImage(bgUri, nullptr, nullptr,

@@ -28,7 +28,7 @@
 #include "mozilla/Preferences.h"
 #include "mozilla/dom/WakeLock.h"
 #include "mozilla/dom/power/PowerManagerService.h"
-#include "nsPerformance.h"
+#include "mozilla/dom/Performance.h"
 #include "mozilla/dom/VideoPlaybackQuality.h"
 
 NS_IMPL_NS_NEW_HTML_ELEMENT(Video)
@@ -60,8 +60,21 @@ nsresult HTMLVideoElement::GetVideoSize(nsIntSize* size)
     return NS_ERROR_FAILURE;
   }
 
-  size->height = mMediaInfo.mVideo.mDisplay.height;
-  size->width = mMediaInfo.mVideo.mDisplay.width;
+  switch (mMediaInfo.mVideo.mRotation) {
+    case VideoInfo::Rotation::kDegree_90:
+    case VideoInfo::Rotation::kDegree_270: {
+      size->width = mMediaInfo.mVideo.mDisplay.height;
+      size->height = mMediaInfo.mVideo.mDisplay.width;
+      break;
+    }
+    case VideoInfo::Rotation::kDegree_0:
+    case VideoInfo::Rotation::kDegree_180:
+    default: {
+      size->height = mMediaInfo.mVideo.mDisplay.height;
+      size->width = mMediaInfo.mVideo.mDisplay.width;
+      break;
+    }
+  }
   return NS_OK;
 }
 
@@ -216,13 +229,13 @@ already_AddRefed<VideoPlaybackQuality>
 HTMLVideoElement::GetVideoPlaybackQuality()
 {
   DOMHighResTimeStamp creationTime = 0;
-  uint64_t totalFrames = 0;
-  uint64_t droppedFrames = 0;
-  uint64_t corruptedFrames = 0;
+  uint32_t totalFrames = 0;
+  uint32_t droppedFrames = 0;
+  uint32_t corruptedFrames = 0;
 
   if (sVideoStatsEnabled) {
     if (nsPIDOMWindowInner* window = OwnerDoc()->GetInnerWindow()) {
-      nsPerformance* perf = window->GetPerformance();
+      Performance* perf = window->GetPerformance();
       if (perf) {
         creationTime = perf->Now();
       }
@@ -230,6 +243,8 @@ HTMLVideoElement::GetVideoPlaybackQuality()
 
     if (mDecoder) {
       FrameStatistics& stats = mDecoder->GetFrameStatistics();
+      static_assert(sizeof(uint32_t) >= sizeof (stats.GetParsedFrames()),
+                    "possible truncation from FrameStatistics to VideoPlaybackQuality");
       totalFrames = stats.GetParsedFrames();
       droppedFrames = stats.GetDroppedFrames();
       corruptedFrames = 0;

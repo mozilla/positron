@@ -84,19 +84,13 @@ ObjectElements::ConvertElementsToDoubles(JSContext* cx, uintptr_t elementsPtr)
 /* static */ bool
 ObjectElements::MakeElementsCopyOnWrite(ExclusiveContext* cx, NativeObject* obj)
 {
-    static_assert(sizeof(HeapSlot) >= sizeof(HeapPtrObject),
+    static_assert(sizeof(HeapSlot) >= sizeof(GCPtrObject),
                   "there must be enough room for the owner object pointer at "
                   "the end of the elements");
     if (!obj->ensureElements(cx, obj->getDenseInitializedLength() + 1))
         return false;
 
     ObjectElements* header = obj->getElementsHeader();
-
-    // As soon as we have (or may soon have) multiple objects referencing a
-    // single header, it isn't clear which object the "I'm already in the
-    // whole-cell store buffer" bit is describing, so just disable that
-    // optimization.
-    header->clearInWholeCellBuffer();
 
     // Note: this method doesn't update type information to indicate that the
     // elements might be copy on write. Handling this is left to the caller.
@@ -1049,7 +1043,7 @@ CallAddPropertyHookDense(ExclusiveContext* cx, HandleNativeObject obj, uint32_t 
 }
 
 static bool
-UpdateShapeTypeAndValue(ExclusiveContext* cx, NativeObject* obj, Shape* shape, const Value& value)
+UpdateShapeTypeAndValue(ExclusiveContext* cx, HandleNativeObject obj, HandleShape shape, const Value& value)
 {
     jsid id = shape->propid();
     if (shape->hasSlot()) {
@@ -1823,6 +1817,14 @@ static bool
 Detecting(JSContext* cx, JSScript* script, jsbytecode* pc)
 {
     MOZ_ASSERT(script->containsPC(pc));
+
+    // Skip jump target opcodes.
+    while (pc < script->codeEnd() && BytecodeIsJumpTarget(JSOp(*pc)))
+        pc = GetNextPc(pc);
+
+    MOZ_ASSERT(script->containsPC(pc));
+    if (pc >= script->codeEnd())
+        return false;
 
     // General case: a branch or equality op follows the access.
     JSOp op = JSOp(*pc);

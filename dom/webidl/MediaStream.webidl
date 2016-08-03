@@ -36,14 +36,14 @@ interface MediaStream : EventTarget {
     sequence<AudioStreamTrack> getAudioTracks ();
     sequence<VideoStreamTrack> getVideoTracks ();
     sequence<MediaStreamTrack> getTracks ();
-    // MediaStreamTrack?          getTrackById (DOMString trackId);
+    MediaStreamTrack?          getTrackById (DOMString trackId);
     void                       addTrack (MediaStreamTrack track);
     void                       removeTrack (MediaStreamTrack track);
     MediaStream                clone ();
     // readonly    attribute boolean      active;
     //             attribute EventHandler onactive;
     //             attribute EventHandler oninactive;
-    //             attribute EventHandler onaddtrack;
+                attribute EventHandler onaddtrack;
     //             attribute EventHandler onremovetrack;
     readonly attribute double currentTime;
 };

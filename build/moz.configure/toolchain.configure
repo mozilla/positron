@@ -15,7 +15,7 @@ def yasm_version(yasm):
         yasm, '--version',
         onerror=lambda: die('Failed to get yasm version.')
     ).splitlines()[0].split()[1]
-    return version
+    return Version(version)
 
 # Until we move all the yasm consumers out of old-configure.
 # bug 1257904
@@ -59,9 +59,9 @@ add_old_configure_assignment('YASM', have_yasm)
 # Android NDK
 # ==============================================================
 
-@depends('--disable-compile-environment', build_project, '--help')
-def android_ndk_include(compile_env, build_project, _):
-    if compile_env and build_project in ('mobile/android', 'js'):
+@depends('--disable-compile-environment', build_project, gonkdir, '--help')
+def android_ndk_include(compile_env, build_project, gonkdir, _):
+    if compile_env and (gonkdir or build_project in ('mobile/android', 'js')):
         return 'android-ndk.configure'
 
 include(android_ndk_include)
@@ -232,7 +232,7 @@ def get_compiler_info(compiler, language):
         #endif
         #elif defined(__clang__)
         %COMPILER clang
-        #  if !__cplusplus || __cpp_static_assert
+        #  if !__cplusplus || __has_feature(cxx_alignof)
         %VERSION __clang_major__.__clang_minor__.__clang_patchlevel__
         #  endif
         #elif defined(__GNUC__)
@@ -541,13 +541,12 @@ def compiler(language, host_or_target, c_compiler=None, other_compiler=None,
                 'Only clang/llvm 3.4 or newer is supported.')
 
         if info.type == 'msvc':
-            if info.version < '18.00.30723' or (
-                    '19' < info.version < '19.00.23506'):
+            if info.version < '19.00.23918':
                 raise FatalCheckError(
                     'This version (%s) of the MSVC compiler is not '
                     'supported.\n'
-                    'You must install Visual C++ 2013 Update 3, Visual '
-                    'C++ 2015 Update 1, or newer in order to build.\n'
+                    'You must install Visual C++ 2015 Update 2 or newer in '
+                    'order to build.\n'
                     'See https://developer.mozilla.org/en/'
                     'Windows_Build_Prerequisites' % info.version)
 
@@ -604,3 +603,85 @@ host_c_compiler = compiler('C', host, other_compiler=c_compiler)
 host_cxx_compiler = compiler('C++', host, c_compiler=host_c_compiler,
                              other_compiler=cxx_compiler,
                              other_c_compiler=c_compiler)
+
+@depends(c_compiler)
+def default_debug_flags(compiler_info):
+    # Debug info is ON by default.
+    if compiler_info.type == 'msvc':
+        return '-Zi'
+    return '-g'
+
+option(env='MOZ_DEBUG_FLAGS',
+       nargs=1,
+       help='Debug compiler flags')
+
+imply_option('--enable-debug-symbols',
+             depends_if('--enable-debug')(lambda v: v))
+
+js_option('--enable-debug-symbols',
+          nargs='?',
+          default=True,
+          help='Enable debug symbols using the given compiler flags')
+
+set_config('MOZ_DEBUG_SYMBOLS',
+           depends_if('--enable-debug-symbols')(lambda _: True))
+
+@depends('MOZ_DEBUG_FLAGS', '--enable-debug-symbols', default_debug_flags)
+def debug_flags(env_debug_flags, enable_debug_flags, default_debug_flags):
+    # If MOZ_DEBUG_FLAGS is set, and --enable-debug-symbols is set to a value,
+    # --enable-debug-symbols takes precedence. Note, the value of
+    # --enable-debug-symbols may be implied by --enable-debug.
+    if len(enable_debug_flags):
+        return enable_debug_flags[0]
+    if env_debug_flags:
+        return env_debug_flags[0]
+    return default_debug_flags
+
+set_config('MOZ_DEBUG_FLAGS', debug_flags)
+add_old_configure_assignment('MOZ_DEBUG_FLAGS', debug_flags)
+
+# Some standard library headers (notably bionic on Android) declare standard
+# functions (e.g. getchar()) and also #define macros for those standard
+# functions.  libc++ deals with this by doing something like the following
+# (explanatory comments added):
+#
+#   #ifdef FUNC
+#   // Capture the definition of FUNC.
+#   inline _LIBCPP_INLINE_VISIBILITY int __libcpp_FUNC(...) { return FUNC(...); }
+#   #undef FUNC
+#   // Use a real inline definition.
+#   inline _LIBCPP_INLINE_VISIBILITY int FUNC(...) { return _libcpp_FUNC(...); }
+#   #endif
+#
+# _LIBCPP_INLINE_VISIBILITY is typically defined as:
+#
+#   __attribute__((__visibility__("hidden"), __always_inline__))
+#
+# Unfortunately, this interacts badly with our system header wrappers, as the:
+#
+#   #pragma GCC visibility push(default)
+#
+# that they do prior to including the actual system header is treated by the
+# compiler as an explicit declaration of visibility on every function declared
+# in the header.  Therefore, when the libc++ code above is encountered, it is
+# as though the compiler has effectively seen:
+#
+#   int FUNC(...) __attribute__((__visibility__("default")));
+#   int FUNC(...) __attribute__((__visibility__("hidden")));
+#
+# and the compiler complains about the mismatched visibility declarations.
+#
+# However, libc++ will only define _LIBCPP_INLINE_VISIBILITY if there is no
+# existing definition.  We can therefore define it to the empty string (since
+# we are properly managing visibility ourselves) and avoid this whole mess.
+# Note that we don't need to do this with gcc, as libc++ detects gcc and
+# effectively does the same thing we are doing here.
+@depends(c_compiler, target)
+def libcxx_inline_visibility(c_compiler, target):
+    if c_compiler.type == 'clang' and target.os == 'Android':
+        return ''
+
+set_define('_LIBCPP_INLINE_VISIBILITY', libcxx_inline_visibility)
+set_define('_LIBCPP_INLINE_VISIBILITY_EXCEPT_GCC49', libcxx_inline_visibility)
+
+include('rust.configure')

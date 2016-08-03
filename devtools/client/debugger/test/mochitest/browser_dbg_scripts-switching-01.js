@@ -10,7 +10,11 @@
 const TAB_URL = EXAMPLE_URL + "doc_script-switching-01.html";
 
 function test() {
-  initDebugger(TAB_URL).then(([aTab,, aPanel]) => {
+  let options = {
+    source: EXAMPLE_URL + "code_script-switching-01.js",
+    line: 1
+  };
+  initDebugger(TAB_URL, options).then(([aTab,, aPanel]) => {
     const gTab = aTab;
     const gPanel = aPanel;
     const gDebugger = gPanel.panelWin;
@@ -52,9 +56,6 @@ function test() {
          "The first source is not displayed. (1)");
       is(gEditor.getText().search(/debugger/), 166,
          "The second source is displayed. (1)");
-
-      ok(gDebugger.document.title.endsWith(EXAMPLE_URL + gLabel2),
-         "Title with second source is correct. (1)");
 
       ok(isCaretPos(gPanel, 6),
          "Editor caret location is correct. (1)");
@@ -147,10 +148,6 @@ function test() {
     }
 
     Task.spawn(function* () {
-      yield waitForSourceShown(gPanel, "-01.js", 1);
-      ok(gDebugger.document.title.endsWith(EXAMPLE_URL + gLabel1),
-         "Title with first source is correct.");
-
       const shown = waitForSourceAndCaretAndScopes(gPanel, "-02.js", 1);
       callInTab(gTab, "firstCall");
       yield shown;

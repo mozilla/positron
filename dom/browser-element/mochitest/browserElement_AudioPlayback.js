@@ -8,7 +8,6 @@ const { Services } = SpecialPowers.Cu.import('resource://gre/modules/Services.js
 
 SimpleTest.waitForExplicitFinish();
 browserElementTestHelpers.setEnabledPref(true);
-browserElementTestHelpers.addPermission();
 
 /**
  * Content script passed to the child iframe
@@ -47,15 +46,15 @@ function runTest() {
 
   // Two events should come in, when the audio starts, and stops playing.
   // The first one should have a detail of 'active' and the second one
-  // should have a detail of 'inactive'.
+  // should have a detail of 'inactive-pause'.
   let expectedNextData = 'active';
   iframe.addEventListener('mozbrowseraudioplaybackchange', (e) => {
     is(e.detail, expectedNextData, 'Audio detail should be correct')
     is(e.target, iframe, 'event target should be the first iframe')
-    if (e.detail === 'inactive') {
+    if (e.detail === 'inactive-pause') {
       SimpleTest.finish();
     }
-    expectedNextData = 'inactive';
+    expectedNextData = 'inactive-pause';
   });
 
   // Make sure an event only goes to the first iframe.
@@ -65,11 +64,11 @@ function runTest() {
   });
 
   // Load a simple page to get the process started.
-  iframe.src = browserElementTestHelpers.emptyPage1;
+  iframe.src = browserElementTestHelpers.fileEmptyPage1;
 }
 
 addEventListener('testready', function() {
-  SpecialPowers.pushPrefEnv({'set': [["b2g.system_manifest_url", "http://mochi.test:8888/manifest.webapp"]]},
+  SpecialPowers.pushPrefEnv({'set': [["b2g.system_startup_url", window.location.href]]},
                             function() {
     SimpleTest.executeSoon(runTest);
   });

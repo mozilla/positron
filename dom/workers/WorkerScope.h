@@ -18,13 +18,16 @@ namespace mozilla {
 namespace dom {
 
 class AnyCallback;
+struct ChannelPixelLayout;
 class Console;
 class Crypto;
 class Function;
 class IDBFactory;
+enum class ImageBitmapFormat : uint32_t;
+class Performance;
 class Promise;
 class RequestOrUSVString;
-class ServiceWorkerRegistrationWorkerThread;
+class ServiceWorkerRegistration;
 class WorkerLocation;
 class WorkerNavigator;
 
@@ -33,14 +36,13 @@ namespace cache {
 class CacheStorage;
 
 } // namespace cache
-} // namespace dom
-} // namespace mozilla
 
-BEGIN_WORKERS_NAMESPACE
+namespace workers {
 
 class ServiceWorkerClients;
 class WorkerPrivate;
-class Performance;
+
+} // namespace workers
 
 class WorkerGlobalScope : public DOMEventTargetHelper,
                           public nsIGlobalObject,
@@ -59,6 +61,7 @@ class WorkerGlobalScope : public DOMEventTargetHelper,
   uint32_t mWindowInteractionsAllowed;
 
 protected:
+  typedef mozilla::dom::workers::WorkerPrivate WorkerPrivate;
   WorkerPrivate* mWorkerPrivate;
 
   explicit WorkerGlobalScope(WorkerPrivate* aWorkerPrivate);
@@ -169,6 +172,13 @@ public:
                     int32_t aSx, int32_t aSy, int32_t aSw, int32_t aSh,
                     ErrorResult& aRv);
 
+  already_AddRefed<mozilla::dom::Promise>
+  CreateImageBitmap(const ImageBitmapSource& aImage,
+                    int32_t aOffset, int32_t aLength,
+                    mozilla::dom::ImageBitmapFormat aFormat,
+                    const mozilla::dom::Sequence<mozilla::dom::ChannelPixelLayout>& aLayout,
+                    mozilla::ErrorResult& aRv);
+
   bool
   WindowInteractionAllowed() const
   {
@@ -233,8 +243,8 @@ public:
 class ServiceWorkerGlobalScope final : public WorkerGlobalScope
 {
   const nsString mScope;
-  RefPtr<ServiceWorkerClients> mClients;
-  RefPtr<ServiceWorkerRegistrationWorkerThread> mRegistration;
+  RefPtr<workers::ServiceWorkerClients> mClients;
+  RefPtr<ServiceWorkerRegistration> mRegistration;
 
   ~ServiceWorkerGlobalScope();
 
@@ -243,6 +253,7 @@ public:
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(ServiceWorkerGlobalScope,
                                            WorkerGlobalScope)
   IMPL_EVENT_HANDLER(notificationclick)
+  IMPL_EVENT_HANDLER(notificationclose)
 
   ServiceWorkerGlobalScope(WorkerPrivate* aWorkerPrivate, const nsACString& aScope);
 
@@ -259,10 +270,10 @@ public:
     aScope = mScope;
   }
 
-  ServiceWorkerClients*
+  workers::ServiceWorkerClients*
   Clients();
 
-  ServiceWorkerRegistrationWorkerThread*
+  ServiceWorkerRegistration*
   Registration();
 
   already_AddRefed<Promise>
@@ -281,6 +292,8 @@ public:
 class WorkerDebuggerGlobalScope final : public DOMEventTargetHelper,
                                         public nsIGlobalObject
 {
+  typedef mozilla::dom::workers::WorkerPrivate WorkerPrivate;
+
   WorkerPrivate* mWorkerPrivate;
   RefPtr<Console> mConsole;
 
@@ -363,10 +376,11 @@ private:
   virtual ~WorkerDebuggerGlobalScope();
 };
 
-END_WORKERS_NAMESPACE
+} // namespace dom
+} // namespace mozilla
 
 inline nsISupports*
-ToSupports(mozilla::dom::workers::WorkerGlobalScope* aScope)
+ToSupports(mozilla::dom::WorkerGlobalScope* aScope)
 {
   return static_cast<nsIDOMEventTarget*>(aScope);
 }

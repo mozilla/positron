@@ -17,7 +17,7 @@ typedef PRUint16 SSL3ProtocolVersion;
 /* The TLS 1.3 draft version. Used to avoid negotiating
  * between incompatible pre-standard TLS 1.3 drafts.
  * TODO(ekr@rtfm.com): Remove when TLS 1.3 is published. */
-#define TLS_1_3_DRAFT_VERSION 11
+#define TLS_1_3_DRAFT_VERSION 13
 
 typedef PRUint16 ssl3CipherSuite;
 /* The cipher suites are defined in sslproto.h */
@@ -81,6 +81,7 @@ typedef enum { alert_warning = 1,
 
 typedef enum {
     close_notify = 0,
+    end_of_early_data = 1, /* TLS 1.3 */
     unexpected_message = 10,
     bad_record_mac = 20,
     decryption_failed_RESERVED = 21, /* do not send; see RFC 5246 */
@@ -202,6 +203,7 @@ typedef enum {
     kea_ecdhe_rsa,
     kea_ecdh_anon,
     kea_ecdhe_psk,
+    kea_dhe_psk,
 } SSL3KeyExchangeAlgorithm;
 
 typedef struct {
@@ -238,6 +240,7 @@ typedef struct {
     union {
         PRUint8 raw[64];
         SSL3HashesIndividually s;
+        SECItem pointer_to_hash_input;
     } u;
 } SSL3Hashes;
 
@@ -289,8 +292,15 @@ typedef struct {
 typedef struct {
     PRUint32 received_timestamp;
     PRUint32 ticket_lifetime_hint;
+    PRUint32 flags;
     SECItem ticket;
 } NewSessionTicket;
+
+typedef enum {
+    ticket_allow_early_data = 1,
+    ticket_allow_dhe_resumption = 2,
+    ticket_allow_psk_resumption = 4
+} TLS13SessionTicketFlags;
 
 typedef enum {
     CLIENT_AUTH_ANONYMOUS = 0,

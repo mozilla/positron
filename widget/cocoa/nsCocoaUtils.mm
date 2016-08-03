@@ -35,7 +35,7 @@ using mozilla::gfx::BackendType;
 using mozilla::gfx::DataSourceSurface;
 using mozilla::gfx::DrawTarget;
 using mozilla::gfx::Factory;
-using mozilla::gfx::Filter;
+using mozilla::gfx::SamplingFilter;
 using mozilla::gfx::IntPoint;
 using mozilla::gfx::IntRect;
 using mozilla::gfx::IntSize;
@@ -481,20 +481,17 @@ nsresult nsCocoaUtils::CreateNSImageFromImageContainer(imgIContainer *aImage, ui
 
     RefPtr<DrawTarget> drawTarget = gfxPlatform::GetPlatform()->
       CreateOffscreenContentDrawTarget(scaledSize, SurfaceFormat::B8G8R8A8);
-    if (!drawTarget) {
-      NS_ERROR("Failed to create DrawTarget");
+    if (!drawTarget || !drawTarget->IsValid()) {
+      NS_ERROR("Failed to create valid DrawTarget");
       return NS_ERROR_FAILURE;
     }
 
-    RefPtr<gfxContext> context = gfxContext::ForDrawTarget(drawTarget);
-    if (!context) {
-      NS_ERROR("Failed to create gfxContext");
-      return NS_ERROR_FAILURE;
-    }
+    RefPtr<gfxContext> context = gfxContext::CreateOrNull(drawTarget);
+    MOZ_ASSERT(context);
 
     mozilla::image::DrawResult res =
       aImage->Draw(context, scaledSize, ImageRegion::Create(scaledSize),
-                   aWhichFrame, Filter::POINT,
+                   aWhichFrame, SamplingFilter::POINT,
                    /* no SVGImageContext */ Nothing(),
                    imgIContainer::FLAG_SYNC_DECODE);
 
@@ -980,4 +977,46 @@ nsCocoaUtils::ConvertGeckoKeyCodeToMacCharCode(uint32_t aKeyCode)
   }
 
   return 0;
+}
+
+NSMutableAttributedString*
+nsCocoaUtils::GetNSMutableAttributedString(
+                const nsAString& aText,
+                const nsTArray<mozilla::FontRange>& aFontRanges,
+                const bool aIsVertical,
+                const CGFloat aBackingScaleFactor)
+{
+  NS_OBJC_BEGIN_TRY_ABORT_BLOCK_NIL
+
+  NSString* nsstr = nsCocoaUtils::ToNSString(aText);
+  NSMutableAttributedString* attrStr =
+    [[[NSMutableAttributedString alloc] initWithString:nsstr
+                                            attributes:nil] autorelease];
+
+  int32_t lastOffset = aText.Length();
+  for (auto i = aFontRanges.Length(); i > 0; --i) {
+    const FontRange& fontRange = aFontRanges[i - 1];
+    NSString* fontName = nsCocoaUtils::ToNSString(fontRange.mFontName);
+    CGFloat fontSize = fontRange.mFontSize / aBackingScaleFactor;
+    NSFont* font = [NSFont fontWithName:fontName size:fontSize];
+    if (!font) {
+      font = [NSFont systemFontOfSize:fontSize];
+    }
+
+    NSDictionary* attrs = @{ NSFontAttributeName: font };
+    NSRange range = NSMakeRange(fontRange.mStartOffset,
+                                lastOffset - fontRange.mStartOffset);
+    [attrStr setAttributes:attrs range:range];
+    lastOffset = fontRange.mStartOffset;
+  }
+
+  if (aIsVertical) {
+    [attrStr addAttribute:NSVerticalGlyphFormAttributeName
+                    value:[NSNumber numberWithInt: 1]
+                    range:NSMakeRange(0, [attrStr length])];
+  }
+
+  return attrStr;
+
+  NS_OBJC_END_TRY_ABORT_BLOCK_NIL
 }

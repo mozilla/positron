@@ -108,6 +108,16 @@
  */
 #define XRE_SYS_SHARE_EXTENSION_PARENT_DIR "XRESysSExtPD"
 
+#if defined(XP_UNIX) || defined(XP_MACOSX)
+/**
+ * Directory service keys for the system-wide and user-specific
+ * directories where host manifests used by the WebExtensions
+ * native messaging feature are found.
+ */
+#define XRE_SYS_NATIVE_MESSAGING_MANIFESTS "XRESysNativeMessaging"
+#define XRE_USER_NATIVE_MESSAGING_MANIFESTS "XREUserNativeMessaging"
+#endif
+
 /**
  * A directory service key which specifies the user system extension
  * parent directory.
@@ -132,12 +142,32 @@
 #define XRE_ADDON_APP_DIR "XREAddonAppDir"
 
 /**
- * A directory service key which provides the update directory.
- * At present this is supported only on Windows.
- * Windows: Documents and Settings\<User>\Local Settings\Application Data\
- *          <Vendor>\<Application>\<relative path to app dir from Program Files>
- * If appDir is not under the Program Files, directory service will fail.
- * Callers should fallback to appDir.
+ * A directory service key which provides the update directory. Callers should
+ * fall back to appDir.
+ * Windows:    If vendor name exists:
+ *             Documents and Settings\<User>\Local Settings\Application Data\
+ *             <vendor name>\updates\
+ *             <hash of the path to XRE_EXECUTABLE_FILE’s parent directory>
+ *
+ *             If vendor name doesn't exist, but product name exists:
+ *             Documents and Settings\<User>\Local Settings\Application Data\
+ *             <product name>\updates\
+ *             <hash of the path to XRE_EXECUTABLE_FILE’s parent directory>
+ *
+ *             If neither vendor nor product name exists:
+ *               If app dir is under Program Files:
+ *               Documents and Settings\<User>\Local Settings\Application Data\
+ *               <relative path to app dir from Program Files>
+ *
+ *               If app dir isn’t under Program Files:
+ *               Documents and Settings\<User>\Local Settings\Application Data\
+ *               <MOZ_APP_NAME>
+ *
+ * Mac:        ~/Library/Caches/Mozilla/updates/<absolute path to app dir>
+ *
+ * Gonk:       /data/local
+ *
+ * All others: Parent directory of XRE_EXECUTABLE_FILE.
  */
 #define XRE_UPDATE_ROOT_DIR "UpdRootD"
 
@@ -371,6 +401,8 @@ enum GeckoProcessType
 
   GeckoProcessType_GMPlugin, // Gecko Media Plugin
 
+  GeckoProcessType_GPU,      // GPU and compositor process
+
   GeckoProcessType_End,
   GeckoProcessType_Invalid = GeckoProcessType_End
 };
@@ -380,7 +412,8 @@ static const char* const kGeckoProcessTypeString[] = {
   "plugin",
   "tab",
   "ipdlunittest",
-  "geckomediaplugin"
+  "geckomediaplugin",
+  "gpu"
 };
 
 static_assert(MOZ_ARRAY_LENGTH(kGeckoProcessTypeString) ==
@@ -486,6 +519,9 @@ XRE_API(void,
         XRE_ProcLoaderPreload, (const char* aProgramDir,
                                 const nsXREAppData* aAppData));
 #endif // MOZ_B2G_LOADER
+
+XRE_API(void,
+        XRE_EnableSameExecutableForContentProc, ())
 
 XRE_API(int,
         XRE_XPCShellMain, (int argc, char** argv, char** envp,

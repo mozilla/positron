@@ -28,6 +28,7 @@
 
 #include "nsString.h"
 #include "nsIDragService.h"
+#include "ViewRegion.h"
 
 #import <Carbon/Carbon.h>
 #import <Cocoa/Cocoa.h>
@@ -38,7 +39,6 @@ class nsCocoaWindow;
 
 namespace {
 class GLPresenter;
-class RectTextureImage;
 } // namespace
 
 namespace mozilla {
@@ -51,6 +51,9 @@ namespace layers {
 class GLManager;
 class APZCTreeManager;
 } // namespace layers
+namespace widget {
+class RectTextureImage;
+} // namespace widget
 } // namespace mozilla
 
 @interface NSEvent (Undocumented)
@@ -104,65 +107,6 @@ class APZCTreeManager;
 
 @end
 
-#if !defined(MAC_OS_X_VERSION_10_6) || \
-MAC_OS_X_VERSION_MAX_ALLOWED < MAC_OS_X_VERSION_10_6
-@interface NSEvent (SnowLeopardEventFeatures)
-+ (NSUInteger)pressedMouseButtons;
-+ (NSUInteger)modifierFlags;
-@end
-#endif
-
-// The following section, required to support fluid swipe tracking on OS X 10.7
-// and up, contains defines/declarations that are only available on 10.7 and up.
-// [NSEvent trackSwipeEventWithOptions:...] also requires that the compiler
-// support "blocks"
-// (http://developer.apple.com/library/mac/#documentation/Cocoa/Conceptual/Blocks/Articles/00_Introduction.html)
-// -- which it does on 10.6 and up (using the 10.6 SDK or higher).
-//
-// MAC_OS_X_VERSION_MAX_ALLOWED "controls which OS functionality, if used,
-// will result in a compiler error because that functionality is not
-// available" (quoting from AvailabilityMacros.h).  The compiler initializes
-// it to the version of the SDK being used.  Its value does *not* prevent the
-// binary from running on higher OS versions.  MAC_OS_X_VERSION_10_7 and
-// friends are defined (in AvailabilityMacros.h) as decimal numbers (not
-// hexadecimal numbers).
-#if !defined(MAC_OS_X_VERSION_10_7) || MAC_OS_X_VERSION_MAX_ALLOWED < MAC_OS_X_VERSION_10_7
-enum {
-   NSFullScreenWindowMask = 1 << 14
-};
-
-@interface NSWindow (LionWindowFeatures)
-- (NSRect)convertRectToScreen:(NSRect)aRect;
-@end
-
-#ifdef __LP64__
-enum {
-  NSEventSwipeTrackingLockDirection = 0x1 << 0,
-  NSEventSwipeTrackingClampGestureAmount = 0x1 << 1
-};
-typedef NSUInteger NSEventSwipeTrackingOptions;
-
-enum {
-  NSEventGestureAxisNone = 0,
-  NSEventGestureAxisHorizontal,
-  NSEventGestureAxisVertical
-};
-typedef NSInteger NSEventGestureAxis;
-
-@interface NSEvent (FluidSwipeTracking)
-+ (BOOL)isSwipeTrackingFromScrollEventsEnabled;
-- (BOOL)hasPreciseScrollingDeltas;
-- (CGFloat)scrollingDeltaX;
-- (CGFloat)scrollingDeltaY;
-- (NSEventPhase)phase;
-- (void)trackSwipeEventWithOptions:(NSEventSwipeTrackingOptions)options
-          dampenAmountThresholdMin:(CGFloat)minDampenThreshold
-                               max:(CGFloat)maxDampenThreshold
-                      usingHandler:(void (^)(CGFloat gestureAmount, NSEventPhase phase, BOOL isComplete, BOOL *stop))trackingHandler;
-@end
-#endif // #ifdef __LP64__
-#endif // #if !defined(MAC_OS_X_VERSION_10_7) || MAC_OS_X_VERSION_MAX_ALLOWED < MAC_OS_X_VERSION_10_7
-
 @interface ChildView : NSView<
 #ifdef ACCESSIBILITY
                               mozAccessible,
@@ -204,6 +148,10 @@ typedef NSInteger NSEventGestureAxis;
   // last received event so that, when we receive one of the events, we make sure
   // to send its pair event first, in case we didn't yet for any reason.
   BOOL mExpectingWheelStop;
+
+  // Set to YES when our GL surface has been updated and we need to call
+  // updateGLContext before we composite.
+  BOOL mNeedsGLUpdate;
 
   // Holds our drag service across multiple drag calls. The reference to the
   // service is obtained when the mouse enters the view and is released when
@@ -276,7 +224,6 @@ typedef NSInteger NSEventGestureAxis;
 - (void)updateGLContext;
 - (void)_surfaceNeedsUpdate:(NSNotification*)notification;
 
-- (void)setGLContext:(NSOpenGLContext *)aGLContext;
 - (bool)preRender:(NSOpenGLContext *)aGLContext;
 - (void)postRender:(NSOpenGLContext *)aGLContext;
 
@@ -307,9 +254,6 @@ typedef NSInteger NSEventGestureAxis;
 
 - (void)scrollWheel:(NSEvent *)anEvent;
 - (void)handleAsyncScrollEvent:(CGEventRef)cgEvent ofType:(CGEventType)type;
-
-// Helper function for Lion smart magnify events
-+ (BOOL)isLionSmartMagnifyEvent:(NSEvent*)anEvent;
 
 - (void)setUsingOMTCompositor:(BOOL)aUseOMTC;
 
@@ -483,6 +427,8 @@ public:
 
   void WillPaintWindow();
   bool PaintWindow(LayoutDeviceIntRegion aRegion);
+  bool PaintWindowInContext(CGContextRef aContext, const LayoutDeviceIntRegion& aRegion,
+                            mozilla::gfx::IntSize aSurfaceSize);
 
 #ifdef ACCESSIBILITY
   already_AddRefed<mozilla::a11y::Accessible> GetDocumentAccessible();
@@ -499,9 +445,15 @@ public:
   virtual void UpdateThemeGeometries(const nsTArray<ThemeGeometry>& aThemeGeometries) override;
 
   virtual void UpdateWindowDraggingRegion(const LayoutDeviceIntRegion& aRegion) override;
-  const LayoutDeviceIntRegion& GetDraggableRegion() { return mDraggableRegion; }
+  LayoutDeviceIntRegion GetNonDraggableRegion() { return mNonDraggableRegion.Region(); }
 
   virtual void ReportSwipeStarted(uint64_t aInputBlockId, bool aStartSwipe) override;
+
+  virtual void LookUpDictionary(
+                 const nsAString& aText,
+                 const nsTArray<mozilla::FontRange>& aFontRangeArray,
+                 const bool aIsVertical,
+                 const LayoutDeviceIntPoint& aPoint) override;
 
   void              ResetParent();
 
@@ -650,16 +602,16 @@ protected:
   CGContextRef mTitlebarCGContext;
 
   // Compositor thread only
-  mozilla::UniquePtr<RectTextureImage> mResizerImage;
-  mozilla::UniquePtr<RectTextureImage> mCornerMaskImage;
-  mozilla::UniquePtr<RectTextureImage> mTitlebarImage;
-  mozilla::UniquePtr<RectTextureImage> mBasicCompositorImage;
+  mozilla::UniquePtr<mozilla::widget::RectTextureImage> mResizerImage;
+  mozilla::UniquePtr<mozilla::widget::RectTextureImage> mCornerMaskImage;
+  mozilla::UniquePtr<mozilla::widget::RectTextureImage> mTitlebarImage;
+  mozilla::UniquePtr<mozilla::widget::RectTextureImage> mBasicCompositorImage;
 
   // The area of mTitlebarCGContext that has changed and needs to be
   // uploaded to to mTitlebarImage. Main thread only.
   nsIntRegion           mDirtyTitlebarRegion;
 
-  LayoutDeviceIntRegion mDraggableRegion;
+  mozilla::ViewRegion   mNonDraggableRegion;
 
   // Cached value of [mView backingScaleFactor], to avoid sending two obj-c
   // messages (respondsToSelector, backingScaleFactor) every time we need to
@@ -680,6 +632,9 @@ protected:
   mozilla::UniquePtr<mozilla::VibrancyManager> mVibrancyManager;
   RefPtr<mozilla::SwipeTracker> mSwipeTracker;
   mozilla::UniquePtr<mozilla::SwipeEventQueue> mSwipeEventQueue;
+
+  // Only used for drawRect-based painting in popups.
+  RefPtr<mozilla::gfx::DrawTarget> mBackingSurface;
 
   // This flag is only used when APZ is off. It indicates that the current pan
   // gesture was processed as a swipe. Sometimes the swipe animation can finish

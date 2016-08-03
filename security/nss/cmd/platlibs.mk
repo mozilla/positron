@@ -51,6 +51,7 @@ EXTRA_SHARED_LIBS += \
 	$(NULL)
 endif
 
+ifndef NSS_DISABLE_LIBPKIX
 ifndef NSS_BUILD_SOFTOKEN_ONLY
 PKIXLIB = \
 	$(DIST)/lib/$(LIB_PREFIX)pkixtop.$(LIB_SUFFIX) \
@@ -65,6 +66,7 @@ PKIXLIB = \
 	$(DIST)/lib/$(LIB_PREFIX)pkixtop.$(LIB_SUFFIX) \
 	$(DIST)/lib/$(LIB_PREFIX)pkixresults.$(LIB_SUFFIX) \
 	$(DIST)/lib/$(LIB_PREFIX)pkixcertsel.$(LIB_SUFFIX)
+endif
 endif
 
 NSS_LIBS_1=
@@ -89,7 +91,6 @@ NSS_LIBS_1 = \
 	$(DIST)/lib/$(LIB_PREFIX)smime.$(LIB_SUFFIX) \
 	$(DIST)/lib/$(LIB_PREFIX)ssl.$(LIB_SUFFIX) \
 	$(DIST)/lib/$(LIB_PREFIX)nss.$(LIB_SUFFIX) \
-	$(DIST)/lib/$(LIB_PREFIX)ssl.$(LIB_SUFFIX) \
 	$(NULL)
 NSS_LIBS_2 = \
 	$(DIST)/lib/$(LIB_PREFIX)pkcs12.$(LIB_SUFFIX) \
@@ -119,7 +120,6 @@ NSS_LIBS_1 = \
 	$(DIST)/lib/$(LIB_PREFIX)smime.$(LIB_SUFFIX) \
 	$(DIST)/lib/$(LIB_PREFIX)ssl.$(LIB_SUFFIX) \
 	$(DIST)/lib/$(LIB_PREFIX)nss.$(LIB_SUFFIX) \
-	$(DIST)/lib/$(LIB_PREFIX)ssl.$(LIB_SUFFIX) \
 	$(NULL)
 SECTOOL_LIB = \
 	$(DIST)/lib/$(LIB_PREFIX)sectool.$(LIB_SUFFIX) \

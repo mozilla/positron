@@ -153,7 +153,6 @@ nsPluginFrame::nsPluginFrame(nsStyleContext* aContext)
   : nsFrame(aContext)
   , mInstanceOwner(nullptr)
   , mReflowCallbackPosted(false)
-  , mIsHiddenDueToScroll(false)
 {
   MOZ_LOG(sPluginFrameLog, LogLevel::Debug,
          ("Created new nsPluginFrame %p\n", this));
@@ -418,7 +417,7 @@ nsPluginFrame::GetWidgetConfiguration(nsTArray<nsIWidget::Configuration>* aConfi
 #if defined(XP_WIN) || defined(MOZ_WIDGET_GTK)
   if (XRE_IsContentProcess()) {
     configuration->mWindowID = (uintptr_t)mWidget->GetNativeData(NS_NATIVE_PLUGIN_PORT);
-    configuration->mVisible = !mIsHiddenDueToScroll && mWidget->IsVisible();
+    configuration->mVisible = mWidget->IsVisible();
 
   }
 #endif // defined(XP_WIN) || defined(MOZ_WIDGET_GTK)
@@ -652,6 +651,8 @@ nsPluginFrame::CallSetWindow(bool aCheckIsHidden)
   window->width = intBounds.width / intScaleFactor;
   window->height = intBounds.height / intScaleFactor;
 
+  mInstanceOwner->ResolutionMayHaveChanged();
+
   // This will call pi->SetWindow and take care of window subclassing
   // if needed, see bug 132759. Calling SetWindow can destroy this frame
   // so check for that before doing anything else with this frame's memory.
@@ -768,24 +769,6 @@ nsPluginFrame::IsHidden(bool aCheckVisibilityStyle) const
   }
 
   return false;
-}
-
-// Clips windowed plugin frames during remote content scroll operations managed
-// by nsGfxScrollFrame.
-void
-nsPluginFrame::SetScrollVisibility(bool aState)
-{
-  // Limit this setting to windowed plugins by checking if we have a widget
-  if (mWidget) {
-    bool changed = mIsHiddenDueToScroll != aState;
-    mIsHiddenDueToScroll = aState;
-    // Force a paint so plugin window visibility gets flushed via
-    // the compositor.
-    if (changed && mInstanceOwner) {
-      mInstanceOwner->UpdateScrollState(mIsHiddenDueToScroll);
-      SchedulePaint();
-    }
-  }
 }
 
 mozilla::LayoutDeviceIntPoint
@@ -1136,19 +1119,16 @@ nsPluginFrame::DidSetWidgetGeometry()
 bool
 nsPluginFrame::IsOpaque() const
 {
-#if defined(MOZ_WIDGET_GTK)
-  // Insure underlying content gets painted when we clip windowed plugins
-  // during remote content scroll operations managed by nsGfxScrollFrame.
-  if (mIsHiddenDueToScroll) {
-    return false;
-  }
-#endif
 #if defined(XP_MACOSX)
   return false;
 #elif defined(MOZ_WIDGET_ANDROID)
   // We don't know, so just assume transparent
   return false;
 #else
+
+  if (mInstanceOwner && mInstanceOwner->UseAsyncRendering()) {
+    return false;
+  }
   return !IsTransparentMode();
 #endif
 }
@@ -1188,14 +1168,6 @@ nsPluginFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
                                 const nsRect&           aDirtyRect,
                                 const nsDisplayListSet& aLists)
 {
-#if defined(MOZ_WIDGET_GTK)
-  // Clip windowed plugin frames from the list during remote content scroll
-  // operations managed by nsGfxScrollFrame.
-  if (mIsHiddenDueToScroll) {
-    return;
-  }
-#endif
-
   // XXX why are we painting collapsed object frames?
   if (!IsVisibleOrCollapsedForPainting(aBuilder))
     return;
@@ -1513,14 +1485,14 @@ nsPluginFrame::BuildLayer(nsDisplayListBuilder* aBuilder,
 
     imglayer->SetScaleToSize(size, ScaleMode::STRETCH);
     imglayer->SetContainer(container);
-    Filter filter = nsLayoutUtils::GetGraphicsFilterForFrame(this);
+    SamplingFilter samplingFilter = nsLayoutUtils::GetSamplingFilterForFrame(this);
 #ifdef MOZ_GFX_OPTIMIZE_MOBILE
     if (!aManager->IsCompositingCheap()) {
       // Pixman just horrible with bilinear filter scaling
-      filter = Filter::POINT;
+      samplingFilter = SamplingFilter::POINT;
     }
 #endif
-    imglayer->SetFilter(filter);
+    imglayer->SetSamplingFilter(samplingFilter);
 
     layer->SetContentFlags(IsOpaque() ? Layer::CONTENT_OPAQUE : 0);
 
@@ -1531,9 +1503,9 @@ nsPluginFrame::BuildLayer(nsDisplayListBuilder* aBuilder,
     {
       RefPtr<ClientLayerManager> lm = aBuilder->GetWidgetLayerManager()->AsClientLayerManager();
       if (!mDidCompositeObserver || !mDidCompositeObserver->IsValid(lm)) {
-        mDidCompositeObserver = new PluginFrameDidCompositeObserver(mInstanceOwner, lm);
+        mDidCompositeObserver = MakeUnique<PluginFrameDidCompositeObserver>(mInstanceOwner, lm);
       }
-      lm->AddDidCompositeObserver(mDidCompositeObserver);
+      lm->AddDidCompositeObserver(mDidCompositeObserver.get());
     }
 #ifdef MOZ_WIDGET_ANDROID
   } else if (aItem->GetType() == nsDisplayItem::TYPE_PLUGIN_VIDEO) {

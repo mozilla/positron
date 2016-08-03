@@ -1359,7 +1359,7 @@ var gCSSProperties = {
     type: CSS_TYPE_LONGHAND,
     initial_values: [ "content-box" ],
     other_values: [ "border-box" ],
-    invalid_values: [ "margin-box", "content", "padding", "border", "margin" ]
+    invalid_values: [ "padding-box", "margin-box", "content", "padding", "border", "margin" ]
   },
   "-moz-box-sizing": {
     domProp: "MozBoxSizing",
@@ -2143,7 +2143,8 @@ var gCSSProperties = {
     subproperties: [ "background-attachment", "background-color", "background-image", "background-position-x", "background-position-y", "background-repeat", "background-clip", "background-origin", "background-size" ],
     initial_values: [ "transparent", "none", "repeat", "scroll", "0% 0%", "top left", "left top", "0% 0% / auto", "top left / auto", "left top / auto", "0% 0% / auto auto",
       "transparent none", "top left none", "left top none", "none left top", "none top left", "none 0% 0%", "left top / auto none", "left top / auto auto none",
-      "transparent none repeat scroll top left", "left top repeat none scroll transparent", "transparent none repeat scroll top left / auto", "left top / auto repeat none scroll transparent", "none repeat scroll 0% 0% / auto auto transparent" ],
+      "transparent none repeat scroll top left", "left top repeat none scroll transparent", "transparent none repeat scroll top left / auto", "left top / auto repeat none scroll transparent", "none repeat scroll 0% 0% / auto auto transparent",
+      "padding-box border-box" ],
     other_values: [
         /* without multiple backgrounds */
       "green",
@@ -2404,13 +2405,32 @@ var gCSSProperties = {
       "no-repeat repeat",
       "no-repeat no-repeat",
       "repeat repeat, repeat repeat",
+      "round, repeat",
+      "round repeat, repeat-x",
+      "round no-repeat, repeat-y",
+      "round round",
+      "space, repeat",
+      "space repeat, repeat-x",
+      "space no-repeat, repeat-y",
+      "space space",
+      "space round"
     ],
     invalid_values: [ "repeat repeat repeat",
                       "repeat-x repeat-y",
                       "repeat repeat-x",
                       "repeat repeat-y",
                       "repeat-x repeat",
-                      "repeat-y repeat" ]
+                      "repeat-y repeat",
+                      "round round round",
+                      "repeat-x round",
+                      "round repeat-x",
+                      "repeat-y round",
+                      "round repeat-y",
+                      "space space space",
+                      "repeat-x space",
+                      "space repeat-x",
+                      "repeat-y space",
+                      "space repeat-y" ]
   },
   "background-size": {
     domProp: "backgroundSize",
@@ -3682,8 +3702,8 @@ var gCSSProperties = {
     other_values: [ "center", "justify", "end", "match-parent" ],
     invalid_values: [ "true", "true true" ]
   },
-  "-moz-text-align-last": {
-    domProp: "MozTextAlignLast",
+  "text-align-last": {
+    domProp: "textAlignLast",
     inherited: true,
     type: CSS_TYPE_LONGHAND,
     initial_values: [ "auto" ],
@@ -3724,6 +3744,45 @@ var gCSSProperties = {
     initial_values: [ "solid" ],
     other_values: [ "double", "dotted", "dashed", "wavy", "-moz-none" ],
     invalid_values: [ "none", "groove", "ridge", "inset", "outset", "solid dashed", "wave" ]
+  },
+  "text-emphasis": {
+    domProp: "textEmphasis",
+    inherited: true,
+    type: CSS_TYPE_TRUE_SHORTHAND,
+    prerequisites: { "color": "black" },
+    subproperties: [ "text-emphasis-style", "text-emphasis-color" ],
+    initial_values: [ "none currentColor", "currentColor none", "none", "currentColor", "none black" ],
+    other_values: [ "filled dot black", "#f00 circle open", "sesame filled rgba(0,0,255,0.5)", "red", "green none", "currentColor filled", "currentColor open" ],
+    invalid_values: [ "filled black dot", "filled filled red", "open open circle #000", "circle dot #f00", "rubbish" ]
+  },
+  "text-emphasis-color": {
+    domProp: "textEmphasisColor",
+    inherited: true,
+    type: CSS_TYPE_LONGHAND,
+    prerequisites: { "color": "black" },
+    initial_values: [ "currentColor", "black", "rgb(0,0,0)" ],
+    other_values: [ "red", "rgba(255,255,255,0.5)", "transparent" ],
+    invalid_values: [ "#0", "#00", "#00000", "#0000000", "#000000000", "000000", "ff00ff", "rgb(255,xxx,255)" ]
+  },
+  "text-emphasis-position": {
+    domProp: "textEmphasisPosition",
+    inherited: true,
+    type: CSS_TYPE_LONGHAND,
+    initial_values: [ "over right", "right over" ],
+    other_values: [ "over left", "left over", "under left", "left under", "under right", "right under" ],
+    invalid_values: [ "over over", "left left", "over right left", "rubbish left", "over rubbish" ]
+  },
+  "text-emphasis-style": {
+    domProp: "textEmphasisStyle",
+    inherited: true,
+    type: CSS_TYPE_LONGHAND,
+    initial_values: [ "none" ],
+    other_values: [ "filled", "open", "dot", "circle", "double-circle", "triangle", "sesame", "'#'",
+                    "filled dot", "filled circle", "filled double-circle", "filled triangle", "filled sesame",
+                    "dot filled", "circle filled", "double-circle filled", "triangle filled", "sesame filled",
+                    "dot open", "circle open", "double-circle open", "triangle open", "sesame open" ],
+    invalid_values: [ "rubbish", "dot rubbish", "rubbish dot", "open rubbish", "rubbish open", "open filled", "dot circle",
+                      "open '#'", "'#' filled", "dot '#'", "'#' circle", "1", "1 open", "open 1" ]
   },
   "text-indent": {
     domProp: "textIndent",
@@ -3845,7 +3904,7 @@ var gCSSProperties = {
     inherited: false,
     type: CSS_TYPE_LONGHAND,
     initial_values: [ "normal" ],
-    other_values: [ "embed", "bidi-override", "-moz-isolate", "-moz-plaintext", "-moz-isolate-override" ],
+    other_values: [ "embed", "bidi-override", "isolate", "plaintext", "isolate-override", "-moz-isolate", "-moz-plaintext", "-moz-isolate-override" ],
     invalid_values: [ "auto", "none" ]
   },
   "vertical-align": {
@@ -4021,8 +4080,8 @@ var gCSSProperties = {
     invalid_values: [],
     quirks_values: { "5": "5px" },
   },
-  "word-wrap": {
-    domProp: "wordWrap",
+  "overflow-wrap": {
+    domProp: "overflowWrap",
     inherited: true,
     type: CSS_TYPE_LONGHAND,
     initial_values: [ "normal" ],
@@ -4579,6 +4638,13 @@ var gCSSProperties = {
   },
 
   // Aliases
+  "word-wrap": {
+    domProp: "wordWrap",
+    inherited: true,
+    type: CSS_TYPE_SHORTHAND_AND_LONGHAND,
+    alias_for: "overflow-wrap",
+    subproperties: [ "overflow-wrap" ],
+  },
   "-moz-transform": {
     domProp: "MozTransform",
     inherited: false,
@@ -4810,7 +4876,14 @@ var gCSSProperties = {
     type: CSS_TYPE_SHORTHAND_AND_LONGHAND,
     alias_for: "hyphens",
     subproperties: [ "hyphens" ],
-  }
+  },
+  "-moz-text-align-last": {
+    domProp: "MozTextAlignLast",
+    inherited: true,
+    type: CSS_TYPE_SHORTHAND_AND_LONGHAND,
+    alias_for: "text-align-last",
+    subproperties: [ "text-align-last" ],
+  },
 }
 
 function logical_axis_prop_get_computed(cs, property)
@@ -6058,18 +6131,19 @@ if (IsCSSPropertyPrefEnabled("layout.css.grid.enabled")) {
       "-40px",
       "-12%",
       "-2fr",
-      "(foo)",
-      "(inherit) 40px",
-      "(initial) 40px",
-      "(unset) 40px",
-      "(default) 40px",
-      "(6%) 40px",
-      "(5th) 40px",
-      "(foo() bar) 40px",
-      "(foo)) 40px",
+      "[foo]",
+      "[inherit] 40px",
+      "[initial] 40px",
+      "[unset] 40px",
+      "[default] 40px",
+      "[span] 40px",
+      "[6%] 40px",
+      "[5th] 40px",
+      "[foo[] bar] 40px",
+      "[foo]] 40px",
       "(foo) 40px",
-      "(foo) (bar) 40px",
-      "40px (foo) (bar)",
+      "[foo] [bar] 40px",
+      "40px [foo] [bar]",
       "minmax()",
       "minmax(20px)",
       "mİnmax(20px, 100px)",
@@ -6127,18 +6201,23 @@ if (IsCSSPropertyPrefEnabled("layout.css.grid.enabled")) {
       "subgrid [x] repeat(auto-fill, []) [y z]"
     );
     gCSSProperties["grid-template-columns"].invalid_values.push(
-      "subgrid (foo) 40px",
-      "subgrid (foo 40px)",
-      "(foo) subgrid",
-      "subgrid rêpeat(1, ())",
-      "subgrid repeat(0, ())",
-      "subgrid repeat(-3, ())",
-      "subgrid repeat(2.0, ())",
-      "subgrid repeat(2.5, ())",
-      "subgrid repeat(3px, ())",
+      "subgrid [inherit]",
+      "subgrid [initial]",
+      "subgrid [unset]",
+      "subgrid [default]",
+      "subgrid [span]",
+      "subgrid [foo] 40px",
+      "subgrid [foo 40px]",
+      "[foo] subgrid",
+      "subgrid rêpeat(1, [])",
+      "subgrid repeat(0, [])",
+      "subgrid repeat(-3, [])",
+      "subgrid repeat(2.0, [])",
+      "subgrid repeat(2.5, [])",
+      "subgrid repeat(3px, [])",
       "subgrid repeat(1)",
       "subgrid repeat(1, )",
-      "subgrid repeat(2, (40px))",
+      "subgrid repeat(2, [40px])",
       "subgrid repeat(2, foo)",
       "subgrid repeat(1, repeat(1, []))",
       "subgrid repeat(auto-fit,[])",
@@ -6436,16 +6515,18 @@ if (IsCSSPropertyPrefEnabled("layout.css.grid.enabled")) {
     inherited: false,
     type: CSS_TYPE_LONGHAND,
     initial_values: [ "0" ],
-    other_values: [ "2px", "1em", "calc(1px + 1em)" ],
-    invalid_values: [ "-1px", "2%", "auto", "none", "1px 1px", "calc(1%)" ],
+    other_values: [ "2px", "2%", "1em", "calc(1px + 1em)", "calc(1%)",
+                    "calc(1% + 1ch)" ],
+    invalid_values: [ "-1px", "auto", "none", "1px 1px", "-1%" ],
   };
   gCSSProperties["grid-row-gap"] = {
     domProp: "gridRowGap",
     inherited: false,
     type: CSS_TYPE_LONGHAND,
     initial_values: [ "0" ],
-    other_values: [ "2px", "1em", "calc(1px + 1em)" ],
-    invalid_values: [ "-1px", "2%", "auto", "none", "1px 1px", "calc(1%)" ],
+    other_values: [ "2px", "2%", "1em", "calc(1px + 1em)", "calc(1%)",
+                    "calc(1% + 1ch)" ],
+    invalid_values: [ "-1px", "auto", "none", "1px 1px", "-1%" ],
   };
   gCSSProperties["grid-gap"] = {
     domProp: "gridGap",
@@ -6453,9 +6534,9 @@ if (IsCSSPropertyPrefEnabled("layout.css.grid.enabled")) {
     type: CSS_TYPE_TRUE_SHORTHAND,
     subproperties: [ "grid-column-gap", "grid-row-gap" ],
     initial_values: [ "0", "0 0" ],
-    other_values: [ "1ch 0", "1em 1px", "calc(1px + 1ch)" ],
+    other_values: [ "1ch 0", "1px 1%", "1em 1px", "calc(1px) calc(1%)" ],
     invalid_values: [ "-1px", "1px -1px", "1px 1px 1px", "inherit 1px",
-                      "1px 1%", "1px auto" ]
+                      "1px auto" ]
   };
 }
 
@@ -6801,7 +6882,8 @@ if (SupportsMaskShorthand()) {
     subproperties: ["mask-clip", "mask-image", "mask-mode", "mask-origin", "mask-position-x", "mask-position-y", "mask-repeat", "mask-size" , "mask-composite"],
     initial_values: [ "match-source", "none", "repeat", "add", "0% 0%", "top left", "left top", "0% 0% / auto", "top left / auto", "left top / auto", "0% 0% / auto auto",
       "top left none", "left top none", "none left top", "none top left", "none 0% 0%", "left top / auto none", "left top / auto auto none",
-      "match-source none repeat add top left", "left top repeat none add", "none repeat add top left / auto", "left top / auto repeat none add match-source", "none repeat add 0% 0% / auto auto match-source" ],
+      "match-source none repeat add top left", "left top repeat none add", "none repeat add top left / auto", "left top / auto repeat none add match-source", "none repeat add 0% 0% / auto auto match-source",
+      "border-box", "border-box border-box" ],
     other_values: [
       "none alpha repeat add left top",
       "url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAIAAAD8GO2jAAAAKElEQVR42u3NQQ0AAAgEoNP+nTWFDzcoQE1udQQCgUAgEAgEAsGTYAGjxAE/G/Q2tQAAAABJRU5ErkJggg==)",
@@ -6810,8 +6892,8 @@ if (SupportsMaskShorthand()) {
       "repeat-y",
       "no-repeat",
       "none repeat-y alpha add 0% 0%",
-      "substract",
-      "0% top substract alpha repeat none",
+      "subtract",
+      "0% top subtract alpha repeat none",
       "top",
       "left",
       "50% 50%",
@@ -6838,9 +6920,9 @@ if (SupportsMaskShorthand()) {
       "-moz-element(#test) alpha",
       /* multiple mask-image */
       "url(404.png), url(404.png)",
-      "repeat-x, substract, none",
+      "repeat-x, subtract, none",
       "0% top url(404.png), url(404.png) 0% top",
-      "substract repeat-y top left url(404.png), repeat-x alpha",
+      "subtract repeat-y top left url(404.png), repeat-x alpha",
       "url(404.png), -moz-linear-gradient(20px 20px -45deg, blue, green), -moz-element(#a) alpha",
       "top left / contain, bottom right / cover",
       /* test cases with clip+origin in the shorthand */
@@ -6908,15 +6990,15 @@ if (SupportsMaskShorthand()) {
     inherited: false,
     type: CSS_TYPE_LONGHAND,
     initial_values: [ "add" ],
-    other_values: [ "substract", "intersect", "exclude", "add, add", "substract, intersect", "substract, substract, add"],
-    invalid_values: [ "add substract", "intersect exclude" ]
+    other_values: [ "subtract", "intersect", "exclude", "add, add", "subtract, intersect", "subtract, subtract, add"],
+    invalid_values: [ "add subtract", "intersect exclude" ]
   };
   gCSSProperties["mask-origin"] = {
     domProp: "maskOrigin",
     inherited: false,
     type: CSS_TYPE_LONGHAND,
-    initial_values: [ "padding-box" ],
-    other_values: [ "border-box", "content-box", "border-box, padding-box", "padding-box, padding-box, padding-box", "border-box, border-box" ],
+    initial_values: [ "border-box" ],
+    other_values: [ "padding-box", "content-box", "border-box, padding-box", "padding-box, padding-box, padding-box", "border-box, border-box" ],
     invalid_values: [ "margin-box", "padding-box padding-box" ]
   };
   gCSSProperties["mask-position"] = {
@@ -7376,6 +7458,90 @@ if (IsCSSPropertyPrefEnabled("layout.css.prefixes.webkit")) {
     alias_for: "-moz-box-pack",
     subproperties: [ "-moz-box-pack" ],
   };
+  gCSSProperties["-webkit-flex-direction"] = {
+    domProp: "webkitFlexDirection",
+    inherited: false,
+    type: CSS_TYPE_SHORTHAND_AND_LONGHAND,
+    alias_for: "flex-direction",
+    subproperties: [ "flex-direction" ],
+  };
+  gCSSProperties["-webkit-flex-wrap"] = {
+    domProp: "webkitFlexWrap",
+    inherited: false,
+    type: CSS_TYPE_SHORTHAND_AND_LONGHAND,
+    alias_for: "flex-wrap",
+    subproperties: [ "flex-wrap" ],
+  };
+  gCSSProperties["-webkit-flex-flow"] = {
+    domProp: "webkitFlexFlow",
+    inherited: false,
+    type: CSS_TYPE_TRUE_SHORTHAND,
+    alias_for: "flex-flow",
+    subproperties: [ "flex-direction", "flex-wrap" ],
+  };
+  gCSSProperties["-webkit-order"] = {
+    domProp: "webkitOrder",
+    inherited: false,
+    type: CSS_TYPE_SHORTHAND_AND_LONGHAND,
+    alias_for: "order",
+    subproperties: [ "order" ],
+  };
+  gCSSProperties["-webkit-flex"] = {
+    domProp: "webkitFlex",
+    inherited: false,
+    type: CSS_TYPE_TRUE_SHORTHAND,
+    alias_for: "flex",
+    subproperties: [ "flex-grow", "flex-shrink", "flex-basis" ],
+  };
+  gCSSProperties["-webkit-flex-grow"] = {
+    domProp: "webkitFlexGrow",
+    inherited: false,
+    type: CSS_TYPE_SHORTHAND_AND_LONGHAND,
+    alias_for: "flex-grow",
+    subproperties: [ "flex-grow" ],
+  };
+  gCSSProperties["-webkit-flex-shrink"] = {
+    domProp: "webkitFlexShrink",
+    inherited: false,
+    type: CSS_TYPE_SHORTHAND_AND_LONGHAND,
+    alias_for: "flex-shrink",
+    subproperties: [ "flex-shrink" ],
+  };
+  gCSSProperties["-webkit-flex-basis"] = {
+    domProp: "webkitFlexBasis",
+    inherited: false,
+    type: CSS_TYPE_SHORTHAND_AND_LONGHAND,
+    alias_for: "flex-basis",
+    subproperties: [ "flex-basis" ],
+  };
+  gCSSProperties["-webkit-justify-content"] = {
+    domProp: "webkitJustifyContent",
+    inherited: false,
+    type: CSS_TYPE_SHORTHAND_AND_LONGHAND,
+    alias_for: "justify-content",
+    subproperties: [ "justify-content" ],
+  };
+  gCSSProperties["-webkit-align-items"] = {
+    domProp: "webkitAlignItems",
+    inherited: false,
+    type: CSS_TYPE_SHORTHAND_AND_LONGHAND,
+    alias_for: "align-items",
+    subproperties: [ "align-items" ],
+  };
+  gCSSProperties["-webkit-align-self"] = {
+    domProp: "webkitAlignSelf",
+    inherited: false,
+    type: CSS_TYPE_SHORTHAND_AND_LONGHAND,
+    alias_for: "align-self",
+    subproperties: [ "align-self" ],
+  };
+  gCSSProperties["-webkit-align-content"] = {
+    domProp: "webkitAlignContent",
+    inherited: false,
+    type: CSS_TYPE_SHORTHAND_AND_LONGHAND,
+    alias_for: "align-content",
+    subproperties: [ "align-content" ],
+  };
   gCSSProperties["-webkit-user-select"] = {
     domProp: "webkitUserSelect",
     inherited: false,
@@ -7504,48 +7670,6 @@ if (IsCSSPropertyPrefEnabled("layout.css.float-logical-values.enabled")) {
   gCSSProperties["float"].invalid_values.push("inline-end");
   gCSSProperties["clear"].invalid_values.push("inline-start");
   gCSSProperties["clear"].invalid_values.push("inline-end");
-}
-
-if (IsCSSPropertyPrefEnabled("layout.css.text-emphasis.enabled")) {
-  gCSSProperties["text-emphasis"] = {
-    domProp: "textEmphasis",
-    inherited: true,
-    type: CSS_TYPE_TRUE_SHORTHAND,
-    prerequisites: { "color": "black" },
-    subproperties: [ "text-emphasis-style", "text-emphasis-color" ],
-    initial_values: [ "none currentColor", "currentColor none", "none", "currentColor", "none black" ],
-    other_values: [ "filled dot black", "#f00 circle open", "sesame filled rgba(0,0,255,0.5)", "red", "green none", "currentColor filled", "currentColor open" ],
-    invalid_values: [ "filled black dot", "filled filled red", "open open circle #000", "circle dot #f00", "rubbish" ]
-  };
-  gCSSProperties["text-emphasis-color"] = {
-    domProp: "textEmphasisColor",
-    inherited: true,
-    type: CSS_TYPE_LONGHAND,
-    prerequisites: { "color": "black" },
-    initial_values: [ "currentColor", "black", "rgb(0,0,0)" ],
-    other_values: [ "red", "rgba(255,255,255,0.5)", "transparent" ],
-    invalid_values: [ "#0", "#00", "#00000", "#0000000", "#000000000", "000000", "ff00ff", "rgb(255,xxx,255)" ]
-  };
-  gCSSProperties["text-emphasis-position"] = {
-    domProp: "textEmphasisPosition",
-    inherited: true,
-    type: CSS_TYPE_LONGHAND,
-    initial_values: [ "over right", "right over" ],
-    other_values: [ "over left", "left over", "under left", "left under", "under right", "right under" ],
-    invalid_values: [ "over over", "left left", "over right left", "rubbish left", "over rubbish" ]
-  };
-  gCSSProperties["text-emphasis-style"] = {
-    domProp: "textEmphasisStyle",
-    inherited: true,
-    type: CSS_TYPE_LONGHAND,
-    initial_values: [ "none" ],
-    other_values: [ "filled", "open", "dot", "circle", "double-circle", "triangle", "sesame", "'#'",
-                    "filled dot", "filled circle", "filled double-circle", "filled triangle", "filled sesame",
-                    "dot filled", "circle filled", "double-circle filled", "triangle filled", "sesame filled",
-                    "dot open", "circle open", "double-circle open", "triangle open", "sesame open" ],
-    invalid_values: [ "rubbish", "dot rubbish", "rubbish dot", "open rubbish", "rubbish open", "open filled", "dot circle",
-                      "open '#'", "'#' filled", "dot '#'", "'#' circle", "1", "1 open", "open 1" ]
-  };
 }
 
 if (IsCSSPropertyPrefEnabled("layout.css.background-clip-text.enabled")) {

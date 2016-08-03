@@ -11,6 +11,7 @@
 #include "mozilla/mozalloc.h" // for operator new, and new (fallible)
 #include "mozilla/RefPtr.h"
 #include "mozilla/TaskQueue.h"
+#include "nsAutoPtr.h"
 #include "nsRect.h"
 #include "PlatformDecoderModule.h"
 #include "TimeUnits.h"
@@ -25,13 +26,10 @@ class BlankMediaDataDecoder : public MediaDataDecoder {
 public:
 
   BlankMediaDataDecoder(BlankMediaDataCreator* aCreator,
-                        FlushableTaskQueue* aTaskQueue,
-                        MediaDataDecoderCallback* aCallback,
-                        TrackInfo::TrackType aType)
+                        const CreateDecoderParams& aParams)
     : mCreator(aCreator)
-    , mTaskQueue(aTaskQueue)
-    , mCallback(aCallback)
-    , mType(aType)
+    , mCallback(aParams.mCallback)
+    , mType(aParams.mConfig.GetType())
   {
   }
 
@@ -43,46 +41,21 @@ public:
     return NS_OK;
   }
 
-  class OutputEvent : public Runnable {
-  public:
-    OutputEvent(MediaRawData* aSample,
-                MediaDataDecoderCallback* aCallback,
-                BlankMediaDataCreator* aCreator)
-      : mSample(aSample)
-      , mCreator(aCreator)
-      , mCallback(aCallback)
-    {
-    }
-    NS_IMETHOD Run() override
-    {
-      RefPtr<MediaData> data =
-        mCreator->Create(media::TimeUnit::FromMicroseconds(mSample->mTime),
-                         media::TimeUnit::FromMicroseconds(mSample->mDuration),
-                         mSample->mOffset);
-      if (!data) {
-        return NS_ERROR_OUT_OF_MEMORY;
-      }
-      mCallback->Output(data);
-      return NS_OK;
-    }
-  private:
-    RefPtr<MediaRawData> mSample;
-    BlankMediaDataCreator* mCreator;
-    MediaDataDecoderCallback* mCallback;
-  };
-
   nsresult Input(MediaRawData* aSample) override
   {
-    // The MediaDataDecoder must delete the sample when we're finished
-    // with it, so the OutputEvent stores it in an nsAutoPtr and deletes
-    // it once it's run.
-    RefPtr<nsIRunnable> r(new OutputEvent(aSample, mCallback, mCreator));
-    mTaskQueue->Dispatch(r.forget());
+    RefPtr<MediaData> data =
+      mCreator->Create(media::TimeUnit::FromMicroseconds(aSample->mTime),
+                       media::TimeUnit::FromMicroseconds(aSample->mDuration),
+                       aSample->mOffset);
+    if (!data) {
+    mCallback->Error(MediaDataDecoderError::FATAL_ERROR);
+    } else {
+      mCallback->Output(data);
+    }
     return NS_OK;
   }
 
   nsresult Flush() override {
-    mTaskQueue->Flush();
     return NS_OK;
   }
 
@@ -98,7 +71,6 @@ public:
 
 private:
   nsAutoPtr<BlankMediaDataCreator> mCreator;
-  RefPtr<FlushableTaskQueue> mTaskQueue;
   MediaDataDecoderCallback* mCallback;
   TrackInfo::TrackType mType;
 };
@@ -226,36 +198,24 @@ public:
 
   // Decode thread.
   already_AddRefed<MediaDataDecoder>
-  CreateVideoDecoder(const VideoInfo& aConfig,
-                     layers::LayersBackend aLayersBackend,
-                     layers::ImageContainer* aImageContainer,
-                     FlushableTaskQueue* aVideoTaskQueue,
-                     MediaDataDecoderCallback* aCallback,
-                     DecoderDoctorDiagnostics* aDiagnostics) override {
+  CreateVideoDecoder(const CreateDecoderParams& aParams) override {
+    const VideoInfo& config = aParams.VideoConfig();
     BlankVideoDataCreator* creator = new BlankVideoDataCreator(
-      aConfig.mDisplay.width, aConfig.mDisplay.height, aImageContainer);
+      config.mDisplay.width, config.mDisplay.height, aParams.mImageContainer);
     RefPtr<MediaDataDecoder> decoder =
-      new BlankMediaDataDecoder<BlankVideoDataCreator>(creator,
-                                                       aVideoTaskQueue,
-                                                       aCallback,
-                                                       TrackInfo::kVideoTrack);
+      new BlankMediaDataDecoder<BlankVideoDataCreator>(creator, aParams);
     return decoder.forget();
   }
 
   // Decode thread.
   already_AddRefed<MediaDataDecoder>
-  CreateAudioDecoder(const AudioInfo& aConfig,
-                     FlushableTaskQueue* aAudioTaskQueue,
-                     MediaDataDecoderCallback* aCallback,
-                     DecoderDoctorDiagnostics* aDiagnostics) override {
+  CreateAudioDecoder(const CreateDecoderParams& aParams) override {
+    const AudioInfo& config = aParams.AudioConfig();
     BlankAudioDataCreator* creator = new BlankAudioDataCreator(
-      aConfig.mChannels, aConfig.mRate);
+      config.mChannels, config.mRate);
 
     RefPtr<MediaDataDecoder> decoder =
-      new BlankMediaDataDecoder<BlankAudioDataCreator>(creator,
-                                                       aAudioTaskQueue,
-                                                       aCallback,
-                                                       TrackInfo::kAudioTrack);
+      new BlankMediaDataDecoder<BlankAudioDataCreator>(creator, aParams);
     return decoder.forget();
   }
 
