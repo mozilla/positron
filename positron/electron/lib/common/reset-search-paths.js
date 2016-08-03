@@ -1,36 +1,37 @@
-const path = require('path');
-const Module = require('module');
+const path = require('path')
+const Module = require('module')
 
 // Clear Node's global search paths.
-Module.globalPaths.length = 0;
+Module.globalPaths.length = 0
 
-// Clear current and parent(init.coffee)'s search paths.
-module.paths = [];
-
-module.parent.paths = [];
+// Clear current and parent(init.js)'s search paths.
+module.paths = []
+module.parent.paths = []
 
 // Prevent Node from adding paths outside this app to search paths.
-Module._nodeModulePaths = function(from) {
-  var dir, i, part, parts, paths, skipOutsidePaths, splitRe, tip;
-  from = path.resolve(from);
-
+const resourcesPathWithTrailingSlash = process.resourcesPath + path.sep
+const originalNodeModulePaths = Module._nodeModulePaths
+Module._nodeModulePaths = function (from) {
+  const paths = originalNodeModulePaths(from)
+  const fromPath = path.resolve(from) + path.sep
   // If "from" is outside the app then we do nothing.
-  skipOutsidePaths = from.startsWith(process.resourcesPath);
-
-  // Following logoic is copied from module.js.
-  splitRe = process.platform === 'win32' ? /[\/\\]/ : /\//;
-  paths = [];
-  parts = from.split(splitRe);
-  for (tip = i = parts.length - 1; i >= 0; tip = i += -1) {
-    part = parts[tip];
-    if (part === 'node_modules') {
-      continue;
-    }
-    dir = parts.slice(0, tip + 1).join(path.sep);
-    if (skipOutsidePaths && !dir.startsWith(process.resourcesPath)) {
-      break;
-    }
-    paths.push(path.join(dir, 'node_modules'));
+  if (fromPath.startsWith(resourcesPathWithTrailingSlash)) {
+    return paths.filter(function (candidate) {
+      return candidate.startsWith(resourcesPathWithTrailingSlash)
+    })
+  } else {
+    return paths
   }
-  return paths;
-};
+}
+
+// Patch Module._resolveFilename to always require the Electron API when
+// require('electron') is done.
+const electronPath = path.join(__dirname, '..', process.type, 'api', 'exports', 'electron.js')
+const originalResolveFilename = Module._resolveFilename
+Module._resolveFilename = function (request, parent, isMain) {
+  if (request === 'electron') {
+    return electronPath
+  } else {
+    return originalResolveFilename(request, parent, isMain)
+  }
+}

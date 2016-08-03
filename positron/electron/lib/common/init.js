@@ -1,6 +1,4 @@
-const path = require('path');
 const timers = require('timers');
-const Module = require('module');
 
 if (process.type === 'browser') {
   process.positronBinding = function(name) {
@@ -17,12 +15,6 @@ if (process.type === 'browser') {
     }
   };
 }
-
-if (!process.env.ELECTRON_HIDE_INTERNAL_MODULES) {
-  // Add common/api/lib to module search paths.
-  Module.globalPaths.push(path.join(__dirname, 'api'));
-}
-
 
 // setImmediate and process.nextTick makes use of uv_check and uv_prepare to
 // run the callbacks, however since we only run uv loop on requests, the
