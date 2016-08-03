@@ -1,0 +1,16 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+include $(topsrcdir)/config/config.mk
+
+CXXFLAGS="-mmacosx-version-min=10.9"
+LDFLAGS="-mmacosx-version-min=10.9"
+
+# TODO: support both debug and release builds.
+# TODO: figure out a way to configure spidernode to build to the positron output directory
+# 			(or configure positron to look for the libraries in the spidernode output directory)
+$(STATIC_LIBS):
+	$(MAKE) -C $(topsrcdir)/positron/spidernode/out BUILDTYPE=Debug
+	mkdir -p $(topobjdir)/positron/app/spidernode
+	ln -s $(topsrcdir)/positron/spidernode/out/Debug $(topobjdir)/positron/app/spidernode/.libs
