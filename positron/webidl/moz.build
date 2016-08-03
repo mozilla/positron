@@ -7,14 +7,15 @@
 DEFINES['NODE_WANT_INTERNALS'] = 1
 
 USE_LIBS += [
-    '/positron/app/spidernode/.libs/node',
     'static:/positron/app/spidernode/.libs/cares',
     'static:/positron/app/spidernode/.libs/http_parser',
     'static:/positron/app/spidernode/.libs/icudata',
     'static:/positron/app/spidernode/.libs/icui18n',
     'static:/positron/app/spidernode/.libs/icustubdata',
     'static:/positron/app/spidernode/.libs/icuucx',
+    'static:/positron/app/spidernode/.libs/node',
     'static:/positron/app/spidernode/.libs/openssl',
+    'static:/positron/app/spidernode/.libs/spidershim',
     'static:/positron/app/spidernode/.libs/uv',
     'static:/positron/app/spidernode/.libs/zlib',
 ]
