@@ -22,6 +22,7 @@ EXTRA_JS_MODULES.browser.api += [
   'electron/lib/browser/api/dialog.js',
   'electron/lib/browser/api/global-shortcut.js',
   'electron/lib/browser/api/ipc-main.js',
+  'electron/lib/browser/api/ipc.js',
   'electron/lib/browser/api/menu-item.js',
   'electron/lib/browser/api/menu.js',
   'electron/lib/browser/api/navigation-controller.js',
@@ -30,9 +31,8 @@ EXTRA_JS_MODULES.browser.api += [
   'electron/lib/browser/api/protocol.js',
   'electron/lib/browser/api/screen.js',
   'electron/lib/browser/api/session.js',
-  'electron/lib/browser/api/system-preferences.js',
   'electron/lib/browser/api/tray.js',
-  'electron/lib/browser/api/web-contents.js'
+  'electron/lib/browser/api/web-contents.js',
 ]
 
 EXTRA_JS_MODULES.browser.api['auto-updater'] += [
@@ -76,9 +76,10 @@ EXTRA_JS_MODULES.renderer += [
 EXTRA_JS_MODULES.renderer.api += [
   'electron/lib/renderer/api/desktop-capturer.js',
   'electron/lib/renderer/api/ipc-renderer.js',
+  'electron/lib/renderer/api/ipc.js',
   'electron/lib/renderer/api/remote.js',
   'electron/lib/renderer/api/screen.js',
-  'electron/lib/renderer/api/web-frame.js'
+  'electron/lib/renderer/api/web-frame.js',
 ]
 
 EXTRA_JS_MODULES.renderer.api.exports += [
@@ -91,4 +92,3 @@ EXTRA_JS_MODULES.renderer['web-view'] += [
   'electron/lib/renderer/web-view/web-view-constants.js',
   'electron/lib/renderer/web-view/web-view.js',
 ]
-
