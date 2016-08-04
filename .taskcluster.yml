@@ -23,7 +23,7 @@ tasks:
               - "--login"
               - "-c"
               - "tc-vcs checkout repo https://github.com/mozilla/gecko-dev $GITHUB_HEAD_REPO_URL $GITHUB_HEAD_BRANCH &&
-                 cd repo/ && git update --init && SHELL=/bin/bash ./mach build"
+                 cd repo/ && git submodule update --init && SHELL=/bin/bash ./mach build"
       metadata:
           name: "checkoutandbuild"
           description: "check out and build the repository"
