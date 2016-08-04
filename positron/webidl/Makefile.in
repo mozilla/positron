@@ -1,0 +1,35 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+include $(topsrcdir)/config/config.mk
+
+CXXFLAGS="-mmacosx-version-min=10.9"
+LDFLAGS="-mmacosx-version-min=10.9"
+
+SPIDERNODE_LIBS = \
+	$(DEPTH)/positron/app/spidernode/.libs/libcares.a \
+	$(DEPTH)/positron/app/spidernode/.libs/libhttp_parser.a \
+	$(DEPTH)/positron/app/spidernode/.libs/libicudata.a \
+	$(DEPTH)/positron/app/spidernode/.libs/libicui18n.a \
+	$(DEPTH)/positron/app/spidernode/.libs/libicustubdata.a \
+	$(DEPTH)/positron/app/spidernode/.libs/libicuucx.a \
+	$(DEPTH)/positron/app/spidernode/.libs/libnode.a \
+	$(DEPTH)/positron/app/spidernode/.libs/libopenssl.a \
+	$(DEPTH)/positron/app/spidernode/.libs/libspidershim.a \
+	$(DEPTH)/positron/app/spidernode/.libs/libuv.a \
+	$(DEPTH)/positron/app/spidernode/.libs/libzlib.a \
+	$(NULL)
+
+.PHONY: spidernode
+
+# TODO: support both debug and release builds.
+# TODO: figure out a way to configure spidernode to build to the positron output directory
+# 			(or configure positron to look for the libraries in the spidernode output directory)
+
+$(SPIDERNODE_LIBS): spidernode
+
+spidernode:
+	$(MAKE) -C $(topsrcdir)/positron/spidernode/out BUILDTYPE=Debug
+	mkdir -p $(topobjdir)/positron/app/spidernode
+	ln -sf $(topsrcdir)/positron/spidernode/out/Debug $(topobjdir)/positron/app/spidernode/.libs

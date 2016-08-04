@@ -6,8 +6,6 @@
 
 DEFINES['NODE_WANT_INTERNALS'] = 1
 
-DIRS += ['/config/external/spidernode']
-
 USE_LIBS += [
     'static:/positron/app/spidernode/.libs/cares',
     'static:/positron/app/spidernode/.libs/http_parser',
