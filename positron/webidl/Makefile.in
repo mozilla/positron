@@ -4,8 +4,8 @@
 
 include $(topsrcdir)/config/config.mk
 
-CXXFLAGS="-mmacosx-version-min=10.9"
-LDFLAGS="-mmacosx-version-min=10.9"
+CXXFLAGS += -mmacosx-version-min=10.9 -frtti
+LDFLAGS += -mmacosx-version-min=10.9
 
 SPIDERNODE_LIBS = \
 	$(DEPTH)/positron/app/spidernode/.libs/libcares.a \
