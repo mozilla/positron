@@ -6,6 +6,12 @@
 
 DEFINES['NODE_WANT_INTERNALS'] = 1
 
+# Positron needs -mmacosx-version-min=10.9 in order to build SpiderNode per
+# https://github.com/mozilla/spidernode/issues/166.
+if CONFIG['OS_ARCH'] == 'Darwin':
+    CXXFLAGS += ['-mmacosx-version-min=10.9']
+    LDFLAGS += ['-mmacosx-version-min=10.9']
+
 USE_LIBS += [
     'static:/positron/app/spidernode/.libs/cares',
     'static:/positron/app/spidernode/.libs/http_parser',

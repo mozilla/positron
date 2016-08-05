@@ -4,8 +4,10 @@
 
 include $(topsrcdir)/config/config.mk
 
-CXXFLAGS += -mmacosx-version-min=10.9 -frtti
-LDFLAGS += -mmacosx-version-min=10.9
+# SpiderNode's ICU dependency uses typeid and dynamic_cast, so we need
+# to enable RTTI for it.  Erm, I guess this enables RTTI for the whole build,
+# but I'm unsure how to do so just for the submake of SpiderNode.
+CXXFLAGS += -frtti
 
 SPIDERNODE_LIBS = \
 	$(DEPTH)/positron/app/spidernode/.libs/libcares.a \
