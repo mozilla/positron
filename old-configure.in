@@ -6777,6 +6777,10 @@ fi
 unset MAKEFILES
 unset CONFIG_FILES
 
+# TODO: remove this (and uncomment the equivalent in positron/configure.in)
+# once https://bugzilla.mozilla.org/show_bug.cgi?id=1292653 has been fixed.
+AC_OUTPUT_SUBDIRS(positron/app/spidernode)
+
 # Run all configure scripts specified by a subconfigure
 if test -n "$_subconfigure_subdir"; then
   _save_srcdir="$srcdir"

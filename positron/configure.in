@@ -11,3 +11,7 @@ fi
   exec python2.7 ./configure --engine=spidermonkey --enable-static ${debug_arg} --spidermonkey-obj-dir=${_objdir} ||
   exec python    ./configure --engine=spidermonkey --enable-static ${debug_arg} --spidermonkey-obj-dir=${_objdir}
 )
+
+# TODO: uncomment this (and remove the equivalent in old-configure.in)
+# once https://bugzilla.mozilla.org/show_bug.cgi?id=1292653 has been fixed.
+# AC_OUTPUT_SUBDIRS(positron/app/spidernode)

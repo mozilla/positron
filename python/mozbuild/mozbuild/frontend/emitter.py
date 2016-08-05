@@ -139,7 +139,6 @@ class TreeMetadataEmitter(LoggingMixin):
         self._external_paths = set(mozpath.normsep(d) for d in paths)
         # Add security/nss manually, since it doesn't have a subconfigure.
         self._external_paths.add('security/nss')
-        self._external_paths.add('positron/app/spidernode')
 
         self._emitter_time = 0.0
         self._object_count = 0
