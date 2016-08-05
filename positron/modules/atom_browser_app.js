@@ -7,7 +7,7 @@
 const { classes: Cc, interfaces: Ci, results: Cr, utils: Cu } = Components;
 
 Cu.import('resource://gre/modules/Services.jsm');
-const positronUtil = process.binding('positron_util');
+const positronUtil = process.positronBinding('positron_util');
 
 exports.app = {
   quit() {
@@ -32,6 +32,14 @@ exports.hide = positronUtil.makeStub('atom_browser_app.hide');
 exports.show = positronUtil.makeStub('atom_browser_app.show');
 exports.setMenu = positronUtil.makeStub('atom_browser_app.setMenu');
 exports.setIcon = positronUtil.makeStub('atom_browser_app.setIcon');
+exports.app.setVersion = positronUtil.makeStub('atom_browser_app.setVersion');
+exports.app.setName = positronUtil.makeStub('atom_browser_app.setName');
+exports.app.getName = positronUtil.makeStub('atom_browser_app.getName', { returnValue: 'stub' });
+exports.app.setDesktopName = positronUtil.makeStub('atom_browser_app.setDesktopName');
+exports.app.exit = positronUtil.makeStub('atom_browser_app.exit');
+exports.app.setPath = positronUtil.makeStub('atom_browser_app.setPath');
+exports.app.getPath = positronUtil.makeStub('atom_browser_app.getPath', { returnValue: 'stub' });
+exports.app.setAppPath = positronUtil.makeStub('atom_browser_app.setAppPath');
 
 // There isn't currently anything we need to do before emitting app.ready,
 // but apps will expect it to happen after a tick, so emit it in a timeout.

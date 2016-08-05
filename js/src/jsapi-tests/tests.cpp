@@ -13,37 +13,43 @@
 
 JSAPITest* JSAPITest::list;
 
-bool JSAPITest::init()
+bool JSAPITest::setup()
 {
-    rt = createRuntime();
-    if (!rt)
-        return false;
     cx = JS_GetContext(rt);
-    if (!JS::InitSelfHostedCode(cx))
+    if (!cx)
         return false;
     JS_BeginRequest(cx);
     global.init(rt);
     createGlobal();
     if (!global)
         return false;
-    JS_EnterCompartment(cx, global);
+    oldCompartment = JS_EnterCompartment(cx, global);
     return true;
 }
 
-void JSAPITest::uninit()
+bool JSAPITest::init()
 {
-    if (oldCompartment) {
-        JS_LeaveCompartment(cx, oldCompartment);
-        oldCompartment = nullptr;
-    }
+    rt = createRuntime();
+    if (!rt)
+        return false;
+    return setup();
+}
+
+void JSAPITest::teardown()
+{
     if (global) {
-        JS_LeaveCompartment(cx, nullptr);
+        JS_LeaveCompartment(cx, oldCompartment);
         global = nullptr;
     }
     if (cx) {
         JS_EndRequest(cx);
         cx = nullptr;
     }
+}
+
+void JSAPITest::uninit()
+{
+    teardown();
     if (rt) {
         destroyRuntime();
         rt = nullptr;

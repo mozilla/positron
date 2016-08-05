@@ -1,3 +1,0 @@
-component {3c81d709-5fb4-4144-9612-9ecc1be4e7b1} Process.js
-contract @mozilla.org/positron/process;1 {3c81d709-5fb4-4144-9612-9ecc1be4e7b1}
-category JavaScript-global-privileged-property process @mozilla.org/positron/process;1

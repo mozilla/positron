@@ -6,7 +6,7 @@
 
 const { classes: Cc, interfaces: Ci, results: Cr, utils: Cu } = Components;
 const { Services } = Cu.import("resource://gre/modules/Services.jsm", {});
-const positronUtil = process.binding('positron_util');
+const positronUtil = process.positronBinding('positron_util');
 
 let wrapWebContents = null;
 

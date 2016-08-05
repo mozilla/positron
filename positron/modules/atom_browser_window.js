@@ -32,7 +32,7 @@ Cu.import('resource:///modules/ModuleLoader.jsm');
 
 const WebContents = require('electron').webContents;
 const app = process.atomBinding('app').app;
-const positronUtil = process.binding('positron_util');
+const positronUtil = process.positronBinding('positron_util');
 const webViewManager = process.atomBinding('web_view_manager');
 
 const DEFAULT_URL = 'chrome://positron/content/shell.html';

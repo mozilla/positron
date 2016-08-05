@@ -76,6 +76,9 @@ class JSAPITest
     virtual bool init();
     virtual void uninit();
 
+    bool setup();
+    void teardown();
+
     virtual const char * name() = 0;
     virtual bool run(JS::HandleObject global) = 0;
 

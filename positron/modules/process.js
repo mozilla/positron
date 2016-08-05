@@ -94,11 +94,11 @@ process.atomBinding = function(name) {
 // so we specify the absolute URL to the module to avoid name resolution,
 // which might find a different module.
 //
-process.binding = function(name) {
+process.positronBinding = process.binding = function(name) {
   return require(`resource:///modules/gecko/${name}.js`);
 }
 
-const positronUtil = process.binding('positron_util');
+const positronUtil = process.positronBinding('positron_util');
 
 process.execPath = exeFile.path;
 

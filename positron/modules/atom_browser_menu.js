@@ -4,7 +4,7 @@
 
 "use strict";
 
-const positronUtil = process.binding('positron_util');
+const positronUtil = process.positronBinding('positron_util');
 
 exports.Menu = positronUtil.makeStub('atom_browser_menu.Menu');
 exports.setApplicationMenu = positronUtil.makeStub('atom_browser_menu.setApplicationMenu');

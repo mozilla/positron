@@ -4,8 +4,8 @@
 
 'use strict';
 
-const util = process.binding('util');
-const positronUtil = process.binding('positron_util');
+const util = process.positronBinding('util');
+const positronUtil = process.positronBinding('positron_util');
 
 exports.getHiddenValue = util.getHiddenValue;
 exports.setHiddenValue = util.setHiddenValue;
