@@ -2,4 +2,93 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-DIRS += ['app', 'chrome', 'components', 'electron', 'modules', 'node', 'webidl']
+DIRS += ['app', 'chrome', 'components', 'modules', 'node', 'webidl']
+
+EXTRA_JS_MODULES.browser += [
+  'electron/lib/browser/chrome-extension.js',
+  'electron/lib/browser/desktop-capturer.js',
+  'electron/lib/browser/guest-view-manager.js',
+  'electron/lib/browser/guest-window-manager.js',
+  'electron/lib/browser/init.js',
+  'electron/lib/browser/objects-registry.js',
+  'electron/lib/browser/rpc-server.js',
+]
+
+EXTRA_JS_MODULES.browser.api += [
+  'electron/lib/browser/api/app.js',
+  'electron/lib/browser/api/auto-updater.js',
+  'electron/lib/browser/api/browser-window.js',
+  'electron/lib/browser/api/content-tracing.js',
+  'electron/lib/browser/api/dialog.js',
+  'electron/lib/browser/api/global-shortcut.js',
+  'electron/lib/browser/api/ipc-main.js',
+  'electron/lib/browser/api/ipc.js',
+  'electron/lib/browser/api/menu-item.js',
+  'electron/lib/browser/api/menu.js',
+  'electron/lib/browser/api/navigation-controller.js',
+  'electron/lib/browser/api/power-monitor.js',
+  'electron/lib/browser/api/power-save-blocker.js',
+  'electron/lib/browser/api/protocol.js',
+  'electron/lib/browser/api/screen.js',
+  'electron/lib/browser/api/session.js',
+  'electron/lib/browser/api/tray.js',
+  'electron/lib/browser/api/web-contents.js',
+]
+
+EXTRA_JS_MODULES.browser.api['auto-updater'] += [
+  'electron/lib/browser/api/auto-updater/auto-updater-native.js',
+  'electron/lib/browser/api/auto-updater/auto-updater-win.js',
+  'electron/lib/browser/api/auto-updater/squirrel-update-win.js',
+]
+
+EXTRA_JS_MODULES.browser.api.exports += [
+  'electron/lib/browser/api/exports/electron.js',
+]
+
+EXTRA_JS_MODULES.common += [
+  'electron/lib/common/asar.js',
+  'electron/lib/common/asar_init.js',
+  'electron/lib/common/init.js',
+  'electron/lib/common/reset-search-paths.js',
+]
+
+EXTRA_JS_MODULES.common.api += [
+  'electron/lib/common/api/callbacks-registry.js',
+  'electron/lib/common/api/clipboard.js',
+  'electron/lib/common/api/crash-reporter.js',
+  'electron/lib/common/api/deprecate.js',
+  'electron/lib/common/api/deprecations.js',
+  'electron/lib/common/api/native-image.js',
+  'electron/lib/common/api/shell.js',
+]
+
+EXTRA_JS_MODULES.common.api.exports += [
+  'electron/lib/common/api/exports/electron.js',
+]
+
+EXTRA_JS_MODULES.renderer += [
+  'electron/lib/renderer/chrome-api.js',
+  'electron/lib/renderer/init.js',
+  'electron/lib/renderer/inspector.js',
+  'electron/lib/renderer/override.js',
+]
+
+EXTRA_JS_MODULES.renderer.api += [
+  'electron/lib/renderer/api/desktop-capturer.js',
+  'electron/lib/renderer/api/ipc-renderer.js',
+  'electron/lib/renderer/api/ipc.js',
+  'electron/lib/renderer/api/remote.js',
+  'electron/lib/renderer/api/screen.js',
+  'electron/lib/renderer/api/web-frame.js',
+]
+
+EXTRA_JS_MODULES.renderer.api.exports += [
+  'electron/lib/renderer/api/exports/electron.js',
+]
+
+EXTRA_JS_MODULES.renderer['web-view'] += [
+  'electron/lib/renderer/web-view/guest-view-internal.js',
+  'electron/lib/renderer/web-view/web-view-attributes.js',
+  'electron/lib/renderer/web-view/web-view-constants.js',
+  'electron/lib/renderer/web-view/web-view.js',
+]
