@@ -12,6 +12,8 @@ if CONFIG['OS_ARCH'] == 'Darwin':
     CXXFLAGS += ['-mmacosx-version-min=10.9']
     LDFLAGS += ['-mmacosx-version-min=10.9']
 
+# The SpiderNode libraries that Positron uses.  This needs to be kept in sync
+# with the SPIDERNODE_LIBS list in positron/webidl/Makefile.in.
 USE_LIBS += [
     'static:/positron/app/spidernode/.libs/cares',
     'static:/positron/app/spidernode/.libs/http_parser',
