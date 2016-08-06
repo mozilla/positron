@@ -172,7 +172,6 @@
 /***************************************************************************/
 // default initial sizes for maps (hashtables)
 
-#define XPC_CONTEXT_MAP_LENGTH                   8
 #define XPC_JS_MAP_LENGTH                       32
 #define XPC_JS_CLASS_MAP_LENGTH                 32
 
@@ -184,7 +183,6 @@
 #define XPC_NATIVE_SET_MAP_LENGTH               32
 #define XPC_NATIVE_JSCLASS_MAP_LENGTH           16
 #define XPC_THIS_TRANSLATOR_MAP_LENGTH           4
-#define XPC_NATIVE_WRAPPER_MAP_LENGTH            8
 #define XPC_WRAPPER_MAP_LENGTH                   8
 
 /***************************************************************************/
@@ -212,8 +210,6 @@ extern const char XPC_XPCONNECT_CONTRACTID[];
 
 
 #define WRAPPER_FLAGS JSCLASS_HAS_PRIVATE
-
-#define INVALID_OBJECT ((JSObject*)1)
 
 // If IS_WN_CLASS for the JSClass of an object is true, the object is a
 // wrappednative wrapper, holding the XPCWrappedNative in its private slot.
@@ -413,7 +409,7 @@ private:
     mozilla::Maybe<StringType> mStrings[2];
 };
 
-class XPCJSRuntime : public mozilla::CycleCollectedJSRuntime
+class XPCJSRuntime final : public mozilla::CycleCollectedJSRuntime
 {
 public:
     static XPCJSRuntime* newXPCJSRuntime();
@@ -552,15 +548,15 @@ public:
     void CustomGCCallback(JSGCStatus status) override;
     void CustomOutOfMemoryCallback() override;
     void CustomLargeAllocationFailureCallback() override;
-    static void GCSliceCallback(JSRuntime* rt,
+    static void GCSliceCallback(JSContext* cx,
                                 JS::GCProgress progress,
                                 const JS::GCDescription& desc);
     static void FinalizeCallback(JSFreeOp* fop,
                                  JSFinalizeStatus status,
                                  bool isCompartmentGC,
                                  void* data);
-    static void WeakPointerZoneGroupCallback(JSRuntime* rt, void* data);
-    static void WeakPointerCompartmentCallback(JSRuntime* rt, JSCompartment* comp, void* data);
+    static void WeakPointerZoneGroupCallback(JSContext* cx, void* data);
+    static void WeakPointerCompartmentCallback(JSContext* cx, JSCompartment* comp, void* data);
 
     inline void AddVariantRoot(XPCTraceableVariant* variant);
     inline void AddWrappedJSRoot(nsXPCWrappedJS* wrappedJS);
@@ -671,7 +667,7 @@ private:
 //
 // Note that most accessors are inlined.
 
-class MOZ_STACK_CLASS XPCCallContext : public nsAXPCNativeCallContext
+class MOZ_STACK_CLASS XPCCallContext final : public nsAXPCNativeCallContext
 {
 public:
     NS_IMETHOD GetCallee(nsISupports** aResult);
@@ -748,8 +744,8 @@ public:
 private:
 
     // no copy ctor or assignment allowed
-    XPCCallContext(const XPCCallContext& r); // not implemented
-    XPCCallContext& operator= (const XPCCallContext& r); // not implemented
+    XPCCallContext(const XPCCallContext& r) = delete;
+    XPCCallContext& operator= (const XPCCallContext& r) = delete;
 
 private:
     // posible values for mState
@@ -852,7 +848,7 @@ typedef nsTArray<InterpositionWhitelistPair> InterpositionWhitelistArray;
 
 class nsIAddonInterposition;
 class nsXPCComponentsBase;
-class XPCWrappedNativeScope : public PRCList
+class XPCWrappedNativeScope final : public PRCList
 {
 public:
 
@@ -1015,6 +1011,7 @@ public:
     bool IsContentXBLScope() { return mIsContentXBLScope; }
     bool AllowContentXBLScope();
     bool UseContentXBLScope() { return mUseContentXBLScope; }
+    void ClearContentXBLScope() { mContentXBLScope = nullptr; }
 
     bool IsAddonScope() { return mIsAddonScope; }
 
@@ -1037,7 +1034,7 @@ public:
 protected:
     virtual ~XPCWrappedNativeScope();
 
-    XPCWrappedNativeScope(); // not implemented
+    XPCWrappedNativeScope() = delete;
 
 private:
     class ClearInterpositionsObserver final : public nsIObserver {
@@ -1117,7 +1114,7 @@ private:
 
 // Tight. No virtual methods. Can be bitwise copied (until any resolution done).
 
-class XPCNativeMember
+class XPCNativeMember final
 {
 public:
     static bool GetCallInfo(JSObject* funobj,
@@ -1214,7 +1211,7 @@ private:
 
 // Tight. No virtual methods.
 
-class XPCNativeInterface
+class XPCNativeInterface final
 {
   public:
     static XPCNativeInterface* GetNewOrUsed(const nsIID* iid);
@@ -1242,8 +1239,6 @@ class XPCNativeInterface
 
     void DebugDump(int16_t depth);
 
-#define XPC_NATIVE_IFACE_MARK_FLAG ((uint16_t)JS_BIT(15)) // only high bit of 16 is set
-
     void Mark() {
         mMarked = 1;
     }
@@ -1267,7 +1262,7 @@ class XPCNativeInterface
   protected:
     static XPCNativeInterface* NewInstance(nsIInterfaceInfo* aInfo);
 
-    XPCNativeInterface();   // not implemented
+    XPCNativeInterface() = delete;
     XPCNativeInterface(nsIInterfaceInfo* aInfo, jsid aName)
       : mInfo(aInfo), mName(aName), mMemberCount(0), mMarked(0)
     {
@@ -1279,8 +1274,8 @@ class XPCNativeInterface
 
     void* operator new(size_t, void* p) CPP_THROW_NEW {return p;}
 
-    XPCNativeInterface(const XPCNativeInterface& r); // not implemented
-    XPCNativeInterface& operator= (const XPCNativeInterface& r); // not implemented
+    XPCNativeInterface(const XPCNativeInterface& r) = delete;
+    XPCNativeInterface& operator= (const XPCNativeInterface& r) = delete;
 
 private:
     nsCOMPtr<nsIInterfaceInfo> mInfo;
@@ -1293,7 +1288,7 @@ private:
 /***************************************************************************/
 // XPCNativeSetKey is used to key a XPCNativeSet in a NativeSetMap.
 
-class XPCNativeSetKey
+class XPCNativeSetKey final
 {
 public:
     explicit XPCNativeSetKey(XPCNativeSet*       BaseSet  = nullptr,
@@ -1343,7 +1338,7 @@ private:
 /***************************************************************************/
 // XPCNativeSet represents an ordered collection of XPCNativeInterface pointers.
 
-class XPCNativeSet
+class XPCNativeSet final
 {
   public:
     static XPCNativeSet* GetNewOrUsed(const nsIID* iid);
@@ -1400,8 +1395,6 @@ class XPCNativeSet
 
     inline bool MatchesSetUpToInterface(const XPCNativeSet* other,
                                           XPCNativeInterface* iface) const;
-
-#define XPC_NATIVE_SET_MARK_FLAG ((uint16_t)JS_BIT(15)) // only high bit of 16 is set
 
     inline void Mark();
 
@@ -1464,7 +1457,7 @@ class XPCNativeSet
 
 #define XPC_WN_SJSFLAGS_MARK_FLAG JS_BIT(31) // only high bit of 32 is set
 
-class XPCNativeScriptableFlags
+class XPCNativeScriptableFlags final
 {
 private:
     uint32_t mFlags;
@@ -1528,7 +1521,7 @@ public:
 // was a big problem when wrappers are reparented to different scopes (and
 // thus different protos (the DOM does this).
 
-class XPCNativeScriptableShared
+class XPCNativeScriptableShared final
 {
 public:
     const XPCNativeScriptableFlags& GetFlags() const { return mFlags; }
@@ -1566,7 +1559,7 @@ private:
 // XPCNativeScriptableInfo is used to hold the nsIXPCScriptable state for a
 // given class or instance.
 
-class XPCNativeScriptableInfo
+class XPCNativeScriptableInfo final
 {
 public:
     static XPCNativeScriptableInfo*
@@ -1581,14 +1574,6 @@ public:
     const JSClass*
     GetJSClass()          {return mShared->GetJSClass();}
 
-    XPCNativeScriptableShared*
-    GetScriptableShared() {return mShared;}
-
-    void
-    SetCallback(nsIXPCScriptable* s) {mCallback = s;}
-    void
-    SetCallback(already_AddRefed<nsIXPCScriptable>&& s) {mCallback = s;}
-
     void
     SetScriptableShared(XPCNativeScriptableShared* shared) {mShared = shared;}
 
@@ -1601,17 +1586,16 @@ public:
     void AutoTrace(JSTracer* trc) {}
 
 protected:
-    explicit XPCNativeScriptableInfo(nsIXPCScriptable* scriptable = nullptr,
-                                     XPCNativeScriptableShared* shared = nullptr)
-        : mCallback(scriptable), mShared(shared)
+    explicit XPCNativeScriptableInfo(nsIXPCScriptable* scriptable)
+        : mCallback(scriptable), mShared(nullptr)
                                {MOZ_COUNT_CTOR(XPCNativeScriptableInfo);}
 public:
     ~XPCNativeScriptableInfo() {MOZ_COUNT_DTOR(XPCNativeScriptableInfo);}
 private:
 
     // disable copy ctor and assignment
-    XPCNativeScriptableInfo(const XPCNativeScriptableInfo& r); // not implemented
-    XPCNativeScriptableInfo& operator= (const XPCNativeScriptableInfo& r); // not implemented
+    XPCNativeScriptableInfo(const XPCNativeScriptableInfo& r) = delete;
+    XPCNativeScriptableInfo& operator= (const XPCNativeScriptableInfo& r) = delete;
 
 private:
     nsCOMPtr<nsIXPCScriptable>  mCallback;
@@ -1623,7 +1607,7 @@ private:
 // it abstracts out the scriptable interface pointer and the flags. After
 // creation these are factored differently using XPCNativeScriptableInfo.
 
-class MOZ_STACK_CLASS XPCNativeScriptableCreateInfo
+class MOZ_STACK_CLASS XPCNativeScriptableCreateInfo final
 {
 public:
 
@@ -1660,7 +1644,7 @@ private:
 // XPCWrappedNativeProto hold the additional shared wrapper data
 // for XPCWrappedNative whose native objects expose nsIClassInfo.
 
-class XPCWrappedNativeProto
+class XPCWrappedNativeProto final
 {
 public:
     static XPCWrappedNativeProto*
@@ -1689,23 +1673,6 @@ public:
 
     XPCNativeScriptableInfo*
     GetScriptableInfo()   {return mScriptableInfo;}
-
-    uint32_t
-    GetClassInfoFlags() const {return mClassInfoFlags;}
-
-#ifdef GET_IT
-#undef GET_IT
-#endif
-#define GET_IT(f_) const {return !!(mClassInfoFlags & nsIClassInfo:: f_ );}
-
-    bool ClassIsSingleton()           GET_IT(SINGLETON)
-    bool ClassIsDOMObject()           GET_IT(DOM_OBJECT)
-    bool ClassIsPluginObject()        GET_IT(PLUGIN_OBJECT)
-
-#undef GET_IT
-
-    void SetScriptableInfo(XPCNativeScriptableInfo* si)
-        {MOZ_ASSERT(!mScriptableInfo, "leak here!"); mScriptableInfo = si;}
 
     bool CallPostCreatePrototype();
     void JSProtoObjectFinalized(js::FreeOp* fop, JSObject* obj);
@@ -1757,13 +1724,12 @@ public:
 
 protected:
     // disable copy ctor and assignment
-    XPCWrappedNativeProto(const XPCWrappedNativeProto& r); // not implemented
-    XPCWrappedNativeProto& operator= (const XPCWrappedNativeProto& r); // not implemented
+    XPCWrappedNativeProto(const XPCWrappedNativeProto& r) = delete;
+    XPCWrappedNativeProto& operator= (const XPCWrappedNativeProto& r) = delete;
 
     // hide ctor
     XPCWrappedNativeProto(XPCWrappedNativeScope* Scope,
                           nsIClassInfo* ClassInfo,
-                          uint32_t ClassInfoFlags,
                           XPCNativeSet* Set);
 
     bool Init(const XPCNativeScriptableCreateInfo* scriptableCreateInfo,
@@ -1778,7 +1744,6 @@ private:
     XPCWrappedNativeScope*   mScope;
     JS::ObjectPtr            mJSProtoObject;
     nsCOMPtr<nsIClassInfo>   mClassInfo;
-    uint32_t                 mClassInfoFlags;
     XPCNativeSet*            mSet;
     XPCNativeScriptableInfo* mScriptableInfo;
 };
@@ -1787,7 +1752,7 @@ private:
 // XPCWrappedNativeTearOff represents the info needed to make calls to one
 // interface on the underlying native object of a XPCWrappedNative.
 
-class XPCWrappedNativeTearOff
+class XPCWrappedNativeTearOff final
 {
 public:
     bool IsAvailable() const {return mInterface == nullptr;}
@@ -2038,8 +2003,7 @@ public:
         // If this got called, we're being kept alive by someone who really
         // needs us alive and whole.  Do not let our mFlatJSObject go away.
         // This is the only time we should be tracing our mFlatJSObject,
-        // normally somebody else is doing that. Be careful not to trace the
-        // bogus INVALID_OBJECT value we can have during init, though.
+        // normally somebody else is doing that.
         JS::TraceEdge(trc, &mFlatJSObject, "XPCWrappedNative::mFlatJSObject");
     }
 
@@ -2070,7 +2034,7 @@ public:
 
     // Make ctor and dtor protected (rather than private) to placate nsCOMPtr.
 protected:
-    XPCWrappedNative(); // not implemented
+    XPCWrappedNative() = delete;
 
     // This ctor is used if this object will have a proto.
     XPCWrappedNative(already_AddRefed<nsISupports>&& aIdentity,
@@ -2200,7 +2164,7 @@ private:
                                       nsIException* aSyntheticException = nullptr);
     virtual ~nsXPCWrappedJSClass();
 
-    nsXPCWrappedJSClass();   // not implemented
+    nsXPCWrappedJSClass() = delete;
     nsXPCWrappedJSClass(JSContext* cx, REFNSIID aIID,
                         nsIInterfaceInfo* aInfo);
 
@@ -2363,8 +2327,8 @@ private:
 
 /***************************************************************************/
 
-class XPCJSObjectHolder : public nsIXPConnectJSObjectHolder,
-                          public XPCRootSetElem
+class XPCJSObjectHolder final : public nsIXPConnectJSObjectHolder,
+                                public XPCRootSetElem
 {
 public:
     // all the interface method declarations...
@@ -2381,7 +2345,7 @@ public:
 private:
     virtual ~XPCJSObjectHolder();
 
-    XPCJSObjectHolder(); // not implemented
+    XPCJSObjectHolder() = delete;
 
     JS::Heap<JSObject*> mJSObj;
 };
@@ -2526,7 +2490,7 @@ public:
                                        JS::Value* jsExceptionPtr);
 
 private:
-    XPCConvert(); // not implemented
+    XPCConvert() = delete;
 
 };
 
@@ -2633,7 +2597,7 @@ public:
     static already_AddRefed<nsJSIID> NewID(nsIInterfaceInfo* aInfo);
 
     explicit nsJSIID(nsIInterfaceInfo* aInfo);
-    nsJSIID(); // not implemented
+    nsJSIID() = delete;
 
 private:
     virtual ~nsJSIID();

@@ -35,8 +35,9 @@ define(function (require, exports, module) {
     },
 
     getTitle: function (object, context) {
-      if (this.props.objectLink) {
-        return this.props.objectLink({
+      let objectLink = this.props.objectLink || span;
+      if (this.props.mode != "tiny") {
+        return objectLink({
           object: object
         }, object.class);
       }
@@ -108,18 +109,21 @@ define(function (require, exports, module) {
       let items;
 
       if (mode == "tiny") {
-        items = span({className: "length"}, this.getLength(object));
+        let objectLength = this.getLength(object);
+        let isEmpty = objectLength === 0;
+        items = span({className: "length"}, isEmpty ? "" : objectLength);
       } else {
         let max = (mode == "short") ? 3 : 300;
         items = this.arrayIterator(object, max);
       }
 
       let objectLink = this.props.objectLink || span;
+      let title = this.getTitle(object);
 
       return (
         ObjectBox({
           className: "array"},
-          this.getTitle(object),
+          title,
           objectLink({
             className: "arrayLeftBracket",
             role: "presentation",

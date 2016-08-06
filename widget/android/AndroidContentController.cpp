@@ -8,12 +8,12 @@
 #include "AndroidBridge.h"
 #include "base/message_loop.h"
 #include "mozilla/layers/APZCCallbackHelper.h"
-#include "mozilla/layers/APZCTreeManager.h"
+#include "mozilla/layers/IAPZCTreeManager.h"
 #include "nsIObserverService.h"
 #include "nsLayoutUtils.h"
 #include "nsWindow.h"
 
-using mozilla::layers::APZCTreeManager;
+using mozilla::layers::IAPZCTreeManager;
 
 namespace mozilla {
 namespace widget {
@@ -26,7 +26,7 @@ AndroidContentController::Destroy()
 }
 
 void
-AndroidContentController::NotifyDefaultPrevented(APZCTreeManager* aManager,
+AndroidContentController::NotifyDefaultPrevented(IAPZCTreeManager* aManager,
                                                  uint64_t aInputBlockId,
                                                  bool aDefaultPrevented)
 {
@@ -35,7 +35,7 @@ AndroidContentController::NotifyDefaultPrevented(APZCTreeManager* aManager,
         // APZ "controller" thread) but we get it from the Gecko thread, so we
         // have to throw it onto the other thread.
         AndroidBridge::Bridge()->PostTaskToUiThread(NewRunnableMethod<uint64_t, bool>(
-            aManager, &APZCTreeManager::ContentReceivedInputBlock,
+            aManager, &IAPZCTreeManager::ContentReceivedInputBlock,
             aInputBlockId, aDefaultPrevented), 0);
         return;
     }
@@ -132,9 +132,9 @@ AndroidContentController::NotifyAPZStateChange(const ScrollableLayerGuid& aGuid,
       // This is used by tests to determine when the APZ is done doing whatever
       // it's doing. XXX generify this as needed when writing additional tests.
       observerService->NotifyObservers(nullptr, "APZ:TransformEnd", nullptr);
-      observerService->NotifyObservers(nullptr, "PanZoom:StateChange", MOZ_UTF16("NOTHING"));
+      observerService->NotifyObservers(nullptr, "PanZoom:StateChange", u"NOTHING");
     } else if (aChange == layers::GeckoContentController::APZStateChange::eTransformBegin) {
-      observerService->NotifyObservers(nullptr, "PanZoom:StateChange", MOZ_UTF16("PANNING"));
+      observerService->NotifyObservers(nullptr, "PanZoom:StateChange", u"PANNING");
     }
   }
 }

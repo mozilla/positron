@@ -275,7 +275,7 @@ AppendCSSShadowValue(const nsCSSShadowItem *aShadow,
     arr->Item(4).SetColorValue(aShadow->mColor);
   }
   if (aShadow->mInset) {
-    arr->Item(5).SetIntValue(NS_STYLE_BOX_SHADOW_INSET,
+    arr->Item(5).SetIntValue(uint8_t(StyleBoxShadowType::Inset),
                              eCSSUnit_Enumerated);
   }
 
@@ -1082,13 +1082,15 @@ AddCSSValueAngle(double aCoeff1, const nsCSSValue &aValue1,
 {
   if (aValue1.GetUnit() == aValue2.GetUnit()) {
     // To avoid floating point error, if the units match, maintain the unit.
-    aResult.SetFloatValue(aCoeff1 * aValue1.GetFloatValue() +
-                          aCoeff2 * aValue2.GetFloatValue(),
-                          aValue1.GetUnit());
+    aResult.SetFloatValue(
+      EnsureNotNan(aCoeff1 * aValue1.GetFloatValue() +
+                   aCoeff2 * aValue2.GetFloatValue()),
+      aValue1.GetUnit());
   } else {
-    aResult.SetFloatValue(aCoeff1 * aValue1.GetAngleValueInRadians() +
-                          aCoeff2 * aValue2.GetAngleValueInRadians(),
-                          eCSSUnit_Radian);
+    aResult.SetFloatValue(
+      EnsureNotNan(aCoeff1 * aValue1.GetAngleValueInRadians() +
+                   aCoeff2 * aValue2.GetAngleValueInRadians()),
+      eCSSUnit_Radian);
   }
 }
 
@@ -1254,7 +1256,7 @@ AddTransformScale(double aCoeff1, const nsCSSValue &aValue1,
   float v1 = aValue1.GetFloatValue() - 1.0f,
         v2 = aValue2.GetFloatValue() - 1.0f;
   float result = v1 * aCoeff1 + v2 * aCoeff2;
-  aResult.SetFloatValue(result + 1.0f, eCSSUnit_Number);
+  aResult.SetFloatValue(EnsureNotNan(result + 1.0f), eCSSUnit_Number);
 }
 
 /* static */ already_AddRefed<nsCSSValue::Array>
@@ -3949,9 +3951,9 @@ StyleAnimationValue::ExtractComputedValue(nsCSSProperty aProperty,
           const nsStyleSVGReset* svgReset =
             static_cast<const nsStyleSVGReset*>(styleStruct);
           const nsStyleClipPath& clipPath = svgReset->mClipPath;
-          const int32_t type = clipPath.GetType();
+          const StyleClipPathType type = clipPath.GetType();
 
-          if (type == NS_STYLE_CLIP_PATH_URL) {
+          if (type == StyleClipPathType::URL) {
             nsIDocument* doc = aStyleContext->PresContext()->Document();
             RefPtr<nsStringBuffer> uriAsStringBuffer =
               GetURIAsUtf16StringBuffer(clipPath.GetURL());
@@ -3963,10 +3965,10 @@ StyleAnimationValue::ExtractComputedValue(nsCSSProperty aProperty,
             auto result = MakeUnique<nsCSSValue>();
             result->SetURLValue(url);
             aComputedValue.SetAndAdoptCSSValueValue(result.release(), eUnit_URL);
-          } else if (type == NS_STYLE_CLIP_PATH_BOX) {
+          } else if (type == StyleClipPathType::Box) {
             aComputedValue.SetIntValue(uint8_t(clipPath.GetSizingBox()),
                                        eUnit_Enumerated);
-          } else if (type == NS_STYLE_CLIP_PATH_SHAPE) {
+          } else if (type == StyleClipPathType::Shape) {
             RefPtr<nsCSSValue::Array> result = nsCSSValue::Array::Create(2);
             if (!StyleClipBasicShapeToCSSArray(clipPath, result)) {
               return false;
@@ -3974,7 +3976,7 @@ StyleAnimationValue::ExtractComputedValue(nsCSSProperty aProperty,
             aComputedValue.SetCSSValueArrayValue(result, eUnit_Shape);
 
           } else {
-            MOZ_ASSERT(type == NS_STYLE_CLIP_PATH_NONE, "unknown type");
+            MOZ_ASSERT(type == StyleClipPathType::None_, "unknown type");
             aComputedValue.SetNoneValue();
           }
           break;

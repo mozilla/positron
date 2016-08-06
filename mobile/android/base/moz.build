@@ -1,4 +1,4 @@
-# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+# -*- Mode: python; indent-tabs-mode: nil; tab-width: 40 -*-
 # vim: set filetype=python:
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -268,7 +268,7 @@ gbjar.sources += ['java/org/mozilla/gecko/' + x for x in [
     'DevToolsAuthHelper.java',
     'distribution/Distribution.java',
     'distribution/DistributionStoreCallback.java',
-    'distribution/PartnerBookmarksProviderClient.java',
+    'distribution/PartnerBookmarksProviderProxy.java',
     'distribution/PartnerBrowserCustomizationsClient.java',
     'distribution/ReferrerDescriptor.java',
     'distribution/ReferrerReceiver.java',
@@ -401,6 +401,7 @@ gbjar.sources += ['java/org/mozilla/gecko/' + x for x in [
     'health/HealthRecorder.java',
     'health/SessionInformation.java',
     'health/StubbedHealthRecorder.java',
+    'home/activitystream/ActivityStream.java',
     'home/BookmarkFolderView.java',
     'home/BookmarkScreenshotRow.java',
     'home/BookmarksListAdapter.java',
@@ -426,6 +427,7 @@ gbjar.sources += ['java/org/mozilla/gecko/' + x for x in [
     'home/HomeListView.java',
     'home/HomePager.java',
     'home/HomePanelsManager.java',
+    'home/HomeScreen.java',
     'home/ImageLoader.java',
     'home/MultiTypeCursorAdapter.java',
     'home/PanelAuthCache.java',
@@ -964,7 +966,8 @@ for var in ('MOZ_ANDROID_ANR_REPORTER', 'MOZ_LINKER_EXTRACT', 'MOZ_DEBUG',
             'MOZ_ANDROID_DOWNLOADS_INTEGRATION', 'MOZ_INSTALL_TRACKING',
             'MOZ_ANDROID_GCM', 'MOZ_ANDROID_EXCLUDE_FONTS', 'MOZ_LOCALE_SWITCHER',
             'MOZ_ANDROID_BEAM', 'MOZ_ANDROID_DOWNLOAD_CONTENT_SERVICE',
-            'MOZ_SWITCHBOARD', 'MOZ_ANDROID_CUSTOM_TABS'):
+            'MOZ_SWITCHBOARD', 'MOZ_ANDROID_CUSTOM_TABS',
+            'MOZ_ANDROID_ACTIVITY_STREAM'):
     if CONFIG[var]:
         DEFINES[var] = 1
 

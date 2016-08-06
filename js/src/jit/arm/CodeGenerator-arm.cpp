@@ -2199,22 +2199,46 @@ CodeGeneratorARM::visitWasmBoundsCheck(LWasmBoundsCheck* ins)
         return;
     }
 
-    // No guarantee that heapBase + endOffset can be properly encoded in
-    // the cmp immediate in ma_BoundsCheck, so use an explicit add instead.
-    uint32_t endOffset = mir->endOffset();
+    if (!mir->isRedundant()) {
+        // No guarantee that heapBase + endOffset can be properly encoded in
+        // the cmp immediate in ma_BoundsCheck, so use an explicit add instead.
+        uint32_t endOffset = mir->endOffset();
 
-    Register ptr = ToRegister(ins->ptr());
+        Register ptr = ToRegister(ins->ptr());
 
-    ScratchRegisterScope ptrPlusOffset(masm);
-    masm.move32(Imm32(endOffset), ptrPlusOffset);
-    masm.ma_add(ptr, ptrPlusOffset, SetCC);
+        ScratchRegisterScope ptrPlusOffset(masm);
+        masm.move32(Imm32(endOffset), ptrPlusOffset);
+        masm.ma_add(ptr, ptrPlusOffset, SetCC);
 
-    // Detect unsigned overflow by checking the carry bit.
-    masm.as_b(wasm::JumpTarget::OutOfBounds, Assembler::CarrySet);
+        // Detect unsigned overflow by checking the carry bit.
+        masm.as_b(wasm::JumpTarget::OutOfBounds, Assembler::CarrySet);
 
-    uint32_t cmpOffset = masm.ma_BoundsCheck(ptrPlusOffset).getOffset();
-    masm.append(wasm::BoundsCheck(cmpOffset));
-    masm.as_b(wasm::JumpTarget::OutOfBounds, Assembler::Above);
+        uint32_t cmpOffset = masm.ma_BoundsCheck(ptrPlusOffset).getOffset();
+        masm.append(wasm::BoundsCheck(cmpOffset));
+        masm.as_b(wasm::JumpTarget::OutOfBounds, Assembler::Above);
+    } else {
+#ifdef DEBUG
+        Label ok1, ok2;
+        uint32_t endOffset = mir->endOffset();
+
+        Register ptr = ToRegister(ins->ptr());
+
+        ScratchRegisterScope ptrPlusOffset(masm);
+        masm.move32(Imm32(endOffset), ptrPlusOffset);
+        masm.ma_add(ptr, ptrPlusOffset, SetCC);
+
+        // Detect unsigned overflow by checking the carry bit.
+        masm.as_b(&ok1, Assembler::CarryClear);
+        masm.assumeUnreachable("Redundant bounds check failed!");
+        masm.bind(&ok1);
+
+        uint32_t cmpOffset = masm.ma_BoundsCheck(ptrPlusOffset).getOffset();
+        masm.append(wasm::BoundsCheck(cmpOffset));
+        masm.as_b(&ok2, Assembler::BelowOrEqual);
+        masm.assumeUnreachable("Redundant bounds check failed!");
+        masm.bind(&ok2);
+#endif
+    }
 }
 
 void
@@ -2695,9 +2719,9 @@ CodeGeneratorARM::visitEffectiveAddress(LEffectiveAddress* ins)
 }
 
 void
-CodeGeneratorARM::visitAsmJSLoadGlobalVar(LAsmJSLoadGlobalVar* ins)
+CodeGeneratorARM::visitWasmLoadGlobalVar(LWasmLoadGlobalVar* ins)
 {
-    const MAsmJSLoadGlobalVar* mir = ins->mir();
+    const MWasmLoadGlobalVar* mir = ins->mir();
     unsigned addr = mir->globalDataOffset() - AsmJSGlobalRegBias;
     if (mir->type() == MIRType::Int32) {
         masm.ma_dtr(IsLoad, GlobalReg, Imm32(addr), ToRegister(ins->output()));
@@ -2705,17 +2729,16 @@ CodeGeneratorARM::visitAsmJSLoadGlobalVar(LAsmJSLoadGlobalVar* ins)
         VFPRegister vd(ToFloatRegister(ins->output()));
         masm.ma_vldr(Address(GlobalReg, addr), vd.singleOverlay());
     } else {
+        MOZ_ASSERT(mir->type() == MIRType::Double);
         masm.ma_vldr(Address(GlobalReg, addr), ToFloatRegister(ins->output()));
     }
 }
 
 void
-CodeGeneratorARM::visitAsmJSStoreGlobalVar(LAsmJSStoreGlobalVar* ins)
+CodeGeneratorARM::visitWasmStoreGlobalVar(LWasmStoreGlobalVar* ins)
 {
-    const MAsmJSStoreGlobalVar* mir = ins->mir();
-
+    const MWasmStoreGlobalVar* mir = ins->mir();
     MIRType type = mir->value()->type();
-    MOZ_ASSERT(IsNumberType(type));
 
     unsigned addr = mir->globalDataOffset() - AsmJSGlobalRegBias;
     if (type == MIRType::Int32) {
@@ -2724,34 +2747,9 @@ CodeGeneratorARM::visitAsmJSStoreGlobalVar(LAsmJSStoreGlobalVar* ins)
         VFPRegister vd(ToFloatRegister(ins->value()));
         masm.ma_vstr(vd.singleOverlay(), Address(GlobalReg, addr));
     } else {
+        MOZ_ASSERT(type == MIRType::Double);
         masm.ma_vstr(ToFloatRegister(ins->value()), Address(GlobalReg, addr));
     }
-}
-
-void
-CodeGeneratorARM::visitAsmJSLoadFuncPtr(LAsmJSLoadFuncPtr* ins)
-{
-    const MAsmJSLoadFuncPtr* mir = ins->mir();
-
-    Register index = ToRegister(ins->index());
-    Register out = ToRegister(ins->output());
-
-    if (mir->hasLimit()) {
-        masm.branch32(Assembler::Condition::AboveOrEqual, index, Imm32(mir->limit()),
-                      wasm::JumpTarget::OutOfBounds);
-    }
-
-    masm.ma_ldr(Address(GlobalReg, mir->globalDataOffset() - AsmJSGlobalRegBias), out);
-    masm.ma_ldr(DTRAddr(out, DtrRegImmShift(index, LSL, 2)), out);
-}
-
-void
-CodeGeneratorARM::visitAsmJSLoadFFIFunc(LAsmJSLoadFFIFunc* ins)
-{
-    const MAsmJSLoadFFIFunc* mir = ins->mir();
-
-    masm.ma_ldr(Address(GlobalReg, mir->globalDataOffset() - AsmJSGlobalRegBias),
-                ToRegister(ins->output()));
 }
 
 void

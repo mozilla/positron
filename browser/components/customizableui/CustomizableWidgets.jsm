@@ -748,6 +748,13 @@ const CustomizableWidgets = [
           updateZoomResetButton();
         }.bind(this),
 
+        onWidgetUndoMove: function(aWidgetNode) {
+          if (aWidgetNode != node)
+            return;
+          updateCombinedWidgetStyle(node, this.currentArea, true);
+          updateZoomResetButton();
+        }.bind(this),
+
         onWidgetMoved: function(aWidgetId, aArea) {
           if (aWidgetId != this.id)
             return;
@@ -854,6 +861,12 @@ const CustomizableWidgets = [
         }.bind(this),
 
         onWidgetReset: function(aWidgetNode) {
+          if (aWidgetNode != node)
+            return;
+          updateCombinedWidgetStyle(node, this.currentArea);
+        }.bind(this),
+
+        onWidgetUndoMove: function(aWidgetNode) {
           if (aWidgetNode != node)
             return;
           updateCombinedWidgetStyle(node, this.currentArea);
@@ -1135,7 +1148,7 @@ const CustomizableWidgets = [
 
       ContextualIdentityService.getIdentities().forEach(identity => {
         let bundle = doc.getElementById("bundle_browser");
-        let label = bundle.getString(identity.label);
+        let label = ContextualIdentityService.getUserContextLabel(identity.userContextId);
 
         let item = doc.createElementNS(kNSXUL, "toolbarbutton");
         item.setAttribute("label", label);

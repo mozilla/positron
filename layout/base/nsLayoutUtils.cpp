@@ -496,20 +496,6 @@ nsLayoutUtils::HasCurrentTransitions(const nsIFrame* aFrame)
 }
 
 bool
-nsLayoutUtils::HasCurrentAnimationsForProperties(const nsIFrame* aFrame,
-                                                 const nsCSSProperty* aProperties,
-                                                 size_t aPropertyCount)
-{
-  return HasMatchingAnimations(aFrame,
-    [&aProperties, &aPropertyCount](KeyframeEffectReadOnly& aEffect)
-    {
-      return aEffect.IsCurrent() &&
-        aEffect.HasAnimationOfProperties(aProperties, aPropertyCount);
-    }
-  );
-}
-
-bool
 nsLayoutUtils::HasRelevantAnimationOfProperty(const nsIFrame* aFrame,
                                               nsCSSProperty aProperty)
 {
@@ -5291,7 +5277,7 @@ nsLayoutUtils::MarkDescendantsDirty(nsIFrame *aSubtreeRoot)
 
     // Mark all descendants dirty (using an nsTArray stack rather than
     // recursion).
-    // Note that nsHTMLReflowState::InitResizeFlags has some similar
+    // Note that ReflowInput::InitResizeFlags has some similar
     // code; see comments there for how and why it differs.
     AutoTArray<nsIFrame*, 32> stack;
     stack.AppendElement(subtreeRoot);
@@ -8702,7 +8688,7 @@ nsLayoutUtils::IsOutlineStyleAutoEnabled()
 
 /* static */ void
 nsLayoutUtils::SetBSizeFromFontMetrics(const nsIFrame* aFrame,
-                                       nsHTMLReflowMetrics& aMetrics,
+                                       ReflowOutput& aMetrics,
                                        const LogicalMargin& aFramePadding,
                                        WritingMode aLineWM,
                                        WritingMode aFrameWM)

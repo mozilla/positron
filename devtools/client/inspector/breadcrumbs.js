@@ -6,7 +6,9 @@
 
 "use strict";
 
+/* eslint-disable mozilla/reject-some-requires */
 const {Ci} = require("chrome");
+/* eslint-enable mozilla/reject-some-requires */
 const Services = require("Services");
 const promise = require("promise");
 const FocusManager = Services.focus;
@@ -886,6 +888,11 @@ HTMLBreadcrumbs.prototype = {
       this.scroll();
       this.inspector.emit("breadcrumbs-updated", this.selection.nodeFront);
       doneUpdating();
+    }, e => {
+      // Only log this as an error if we haven't been destroyed in the meantime.
+      if (!this.isDestroyed) {
+        console.error(e);
+      }
     });
   }
 };

@@ -41,6 +41,59 @@ using namespace js::wasm;
 using mozilla::BinarySearch;
 using mozilla::Swap;
 
+class SigIdSet
+{
+    typedef HashMap<const Sig*, uint32_t, SigHashPolicy, SystemAllocPolicy> Map;
+    Map map_;
+
+  public:
+    ~SigIdSet() {
+        MOZ_ASSERT_IF(!JSRuntime::hasLiveRuntimes(), !map_.initialized() || map_.empty());
+    }
+
+    bool ensureInitialized(JSContext* cx) {
+        if (!map_.initialized() && !map_.init()) {
+            ReportOutOfMemory(cx);
+            return false;
+        }
+
+        return true;
+    }
+
+    bool allocateSigId(JSContext* cx, const Sig& sig, const void** sigId) {
+        Map::AddPtr p = map_.lookupForAdd(sig);
+        if (p) {
+            MOZ_ASSERT(p->value() > 0);
+            p->value()++;
+            *sigId = p->key();
+            return true;
+        }
+
+        UniquePtr<Sig> clone = MakeUnique<Sig>();
+        if (!clone || !clone->clone(sig) || !map_.add(p, clone.get(), 1)) {
+            ReportOutOfMemory(cx);
+            return false;
+        }
+
+        *sigId = clone.release();
+        MOZ_ASSERT(!(uintptr_t(*sigId) & SigIdDesc::ImmediateBit));
+        return true;
+    }
+
+    void deallocateSigId(const Sig& sig, const void* sigId) {
+        Map::Ptr p = map_.lookup(sig);
+        MOZ_RELEASE_ASSERT(p && p->key() == sigId && p->value() > 0);
+
+        p->value()--;
+        if (!p->value()) {
+            js_delete(p->key());
+            map_.remove(p);
+        }
+    }
+};
+
+ExclusiveData<SigIdSet> sigIdSet;
+
 uint8_t**
 Instance::addressOfMemoryBase() const
 {
@@ -52,6 +105,13 @@ Instance::addressOfTableBase(size_t tableIndex) const
 {
     MOZ_ASSERT(metadata_->tables[tableIndex].globalDataOffset >= InitialGlobalDataBytes);
     return (void**)(codeSegment_->globalData() + metadata_->tables[tableIndex].globalDataOffset);
+}
+
+const void**
+Instance::addressOfSigId(const SigIdDesc& sigId) const
+{
+    MOZ_ASSERT(sigId.globalDataOffset() >= InitialGlobalDataBytes);
+    return (const void**)(codeSegment_->globalData() + sigId.globalDataOffset());
 }
 
 FuncImportExit&
@@ -357,7 +417,8 @@ Instance::callImport_f64(int32_t funcImportIndex, int32_t argc, uint64_t* argv)
     return ToNumber(cx, rval, (double*)argv);
 }
 
-Instance::Instance(UniqueCodeSegment codeSegment,
+Instance::Instance(JSContext* cx,
+                   UniqueCodeSegment codeSegment,
                    const Metadata& metadata,
                    const ShareableBytes* maybeBytecode,
                    HandleWasmMemoryObject memory,
@@ -386,6 +447,29 @@ Instance::Instance(UniqueCodeSegment codeSegment,
 
     for (size_t i = 0; i < tables_.length(); i++)
         *addressOfTableBase(i) = tables_[i]->array();
+
+   updateStackLimit(cx);
+}
+
+bool
+Instance::init(JSContext* cx)
+{
+    if (!metadata_->sigIds.empty()) {
+        ExclusiveData<SigIdSet>::Guard lockedSigIdSet = sigIdSet.lock();
+
+        if (!lockedSigIdSet->ensureInitialized(cx))
+            return false;
+
+        for (const SigWithId& sig : metadata_->sigIds) {
+            const void* sigId;
+            if (!lockedSigIdSet->allocateSigId(cx, sig, &sigId))
+                return false;
+
+            *addressOfSigId(sig.id) = sigId;
+        }
+    }
+
+    return true;
 }
 
 Instance::~Instance()
@@ -394,6 +478,15 @@ Instance::~Instance()
         FuncImportExit& exit = funcImportToExit(metadata_->funcImports[i]);
         if (exit.baselineScript)
             exit.baselineScript->removeDependentWasmImport(*this, i);
+    }
+
+    if (!metadata_->sigIds.empty()) {
+        ExclusiveData<SigIdSet>::Guard lockedSigIdSet = sigIdSet.lock();
+
+        for (const SigWithId& sig : metadata_->sigIds) {
+            if (const void* sigId = *addressOfSigId(sig.id))
+                lockedSigIdSet->deallocateSigId(sig, sigId);
+        }
     }
 }
 
@@ -417,6 +510,13 @@ size_t
 Instance::memoryLength() const
 {
     return memory_->buffer().byteLength();
+}
+
+void
+Instance::updateStackLimit(JSContext* cx)
+{
+    // Capture the stack limit for cx's thread.
+    tlsData_.stackLimit = *(void**)cx->stackLimitAddressForJitCode(StackForUntrustedScript);
 }
 
 bool
@@ -534,7 +634,7 @@ Instance::callExport(JSContext* cx, uint32_t funcIndex, CallArgs args)
 
         // Call the per-exported-function trampoline created by GenerateEntry.
         auto funcPtr = JS_DATA_TO_FUNC_PTR(ExportFuncPtr, codeSegment_->code() + func.entryOffset());
-        if (!CALL_GENERATED_2(funcPtr, exportArgs.begin(), codeSegment_->globalData()))
+        if (!CALL_GENERATED_3(funcPtr, exportArgs.begin(), codeSegment_->globalData(), tlsData()))
             return false;
     }
 
@@ -628,6 +728,8 @@ const char experimentalWarning[] =
     "`---'    `---` '.(_,_).'   `-...-'  '--'      '--'\n"
     "text support (Work In Progress):\n\n";
 
+const size_t experimentalWarningLinesCount = 12;
+
 const char enabledMessage[] =
     "Restart with developer tools open to view WebAssembly source";
 
@@ -639,13 +741,71 @@ Instance::createText(JSContext* cx)
         const Bytes& bytes = maybeBytecode_->bytes;
         if (!buffer.append(experimentalWarning))
             return nullptr;
-        if (!BinaryToExperimentalText(cx, bytes.begin(), bytes.length(), buffer))
+        maybeSourceMap_.reset(cx->runtime()->new_<GeneratedSourceMap>(cx));
+        if (!maybeSourceMap_)
             return nullptr;
+        if (!BinaryToExperimentalText(cx, bytes.begin(), bytes.length(), buffer,
+                                      ExperimentalTextFormatting(), maybeSourceMap_.get()))
+            return nullptr;
+#if DEBUG
+        // Checking source map invariant: expression and function locations must be sorted
+        // by line number.
+        uint32_t lastLineno = 0;
+        for (size_t i = 0; i < maybeSourceMap_->exprlocs().length(); i++) {
+            MOZ_ASSERT(lastLineno <= maybeSourceMap_->exprlocs()[i].lineno);
+            lastLineno = maybeSourceMap_->exprlocs()[i].lineno;
+        }
+        lastLineno = 0;
+        for (size_t i = 0; i < maybeSourceMap_->functionlocs().length(); i++) {
+            MOZ_ASSERT(lastLineno <= maybeSourceMap_->functionlocs()[i].startLineno &&
+                maybeSourceMap_->functionlocs()[i].startLineno <=
+                  maybeSourceMap_->functionlocs()[i].endLineno);
+            lastLineno = maybeSourceMap_->functionlocs()[i].endLineno + 1;
+        }
+#endif
     } else {
         if (!buffer.append(enabledMessage))
             return nullptr;
     }
     return buffer.finishString();
+}
+
+struct GeneratedSourceMapLinenoComparator
+{
+    int operator()(const ExprLoc& loc) const {
+        return lineno == loc.lineno ? 0 : lineno < loc.lineno ? -1 : 1;
+    }
+    explicit GeneratedSourceMapLinenoComparator(uint32_t lineno_) : lineno(lineno_) {}
+    const uint32_t lineno;
+};
+
+bool
+Instance::getLineOffsets(size_t lineno, Vector<uint32_t>& offsets)
+{
+    // TODO Ensure text was generated?
+    if (!maybeSourceMap_)
+        return false;
+
+    if (lineno < experimentalWarningLinesCount)
+        return true;
+    lineno -= experimentalWarningLinesCount;
+
+    ExprLocVector& exprlocs = maybeSourceMap_->exprlocs();
+
+    // Binary search for the expression with the specified line number and
+    // rewind to the first expression, if more than one expression on the same line.
+    size_t match;
+    if (!BinarySearchIf(exprlocs, 0, exprlocs.length(),
+                        GeneratedSourceMapLinenoComparator(lineno), &match))
+        return true;
+    while (match > 0 && exprlocs[match - 1].lineno == lineno)
+        match--;
+    // Returning all expression offsets that were printed on the specified line.
+    for (size_t i = match; i < exprlocs.length() && exprlocs[i].lineno == lineno; i++) {
+        if (!offsets.append(exprlocs[i].offset))
+            return false;
+    }
+    return true;
 }
 
 bool

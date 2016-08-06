@@ -6,6 +6,7 @@
 
 #include "builtin/TestingFunctions.h"
 
+#include "mozilla/FloatingPoint.h"
 #include "mozilla/Move.h"
 #include "mozilla/unused.h"
 
@@ -407,7 +408,7 @@ GCParameter(JSContext* cx, unsigned argc, Value* vp)
 
     // Request mode.
     if (args.length() == 1) {
-        uint32_t value = JS_GetGCParameter(cx->runtime(), param);
+        uint32_t value = JS_GetGCParameter(cx, param);
         args.rval().setNumber(value);
         return true;
     }
@@ -438,7 +439,7 @@ GCParameter(JSContext* cx, unsigned argc, Value* vp)
     }
 
     if (param == JSGC_MAX_BYTES) {
-        uint32_t gcBytes = JS_GetGCParameter(cx->runtime(), JSGC_BYTES);
+        uint32_t gcBytes = JS_GetGCParameter(cx, JSGC_BYTES);
         if (value < gcBytes) {
             JS_ReportError(cx,
                            "attempt to set maxBytes to the value less than the current "
@@ -1103,18 +1104,20 @@ SaveStack(JSContext* cx, unsigned argc, Value* vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
 
-    unsigned maxFrameCount = 0;
+    JS::StackCapture capture((JS::AllFrames()));
     if (args.length() >= 1) {
-        double d;
-        if (!ToNumber(cx, args[0], &d))
+        double maxDouble;
+        if (!ToNumber(cx, args[0], &maxDouble))
             return false;
-        if (d < 0) {
+        if (mozilla::IsNaN(maxDouble) || maxDouble < 0 || maxDouble > UINT32_MAX) {
             ReportValueErrorFlags(cx, JSREPORT_ERROR, JSMSG_UNEXPECTED_TYPE,
                                   JSDVG_SEARCH_STACK, args[0], nullptr,
                                   "not a valid maximum frame count", NULL);
             return false;
         }
-        maxFrameCount = d;
+        uint32_t max = uint32_t(maxDouble);
+        if (max > 0)
+            capture = JS::StackCapture(JS::MaxFrames(max));
     }
 
     JSCompartment* targetCompartment = cx->compartment();
@@ -1134,7 +1137,7 @@ SaveStack(JSContext* cx, unsigned argc, Value* vp)
     RootedObject stack(cx);
     {
         AutoCompartment ac(cx, targetCompartment);
-        if (!JS::CaptureCurrentStack(cx, &stack, maxFrameCount))
+        if (!JS::CaptureCurrentStack(cx, &stack, mozilla::Move(capture)))
             return false;
     }
 
@@ -1142,6 +1145,37 @@ SaveStack(JSContext* cx, unsigned argc, Value* vp)
         return false;
 
     args.rval().setObjectOrNull(stack);
+    return true;
+}
+
+static bool
+CaptureFirstSubsumedFrame(JSContext* cx, unsigned argc, JS::Value* vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+    if (!args.requireAtLeast(cx, "captureFirstSubsumedFrame", 1))
+        return false;
+
+    if (!args[0].isObject()) {
+        JS_ReportError(cx, "The argument must be an object");
+        return false;
+    }
+
+    RootedObject obj(cx, &args[0].toObject());
+    obj = CheckedUnwrap(obj);
+    if (!obj) {
+        JS_ReportError(cx, "Denied permission to object.");
+        return false;
+    }
+
+    JS::StackCapture capture(JS::FirstSubsumedFrame(cx, obj->compartment()->principals()));
+    if (args.length() > 1)
+        capture.as<JS::FirstSubsumedFrame>().ignoreSelfHosted = JS::ToBoolean(args[1]);
+
+    JS::RootedObject capturedStack(cx);
+    if (!JS::CaptureCurrentStack(cx, &capturedStack, mozilla::Move(capture)))
+        return false;
+
+    args.rval().setObjectOrNull(capturedStack);
     return true;
 }
 
@@ -2666,7 +2700,7 @@ FindPath(JSContext* cx, unsigned argc, Value* vp)
         JS::ubi::Node start(args[0]), target(args[1]);
 
         heaptools::FindPathHandler handler(cx, start, target, &nodes, edges);
-        heaptools::FindPathHandler::Traversal traversal(cx->runtime(), handler, autoCannotGC);
+        heaptools::FindPathHandler::Traversal traversal(cx, handler, autoCannotGC);
         if (!traversal.init() || !traversal.addStart(start)) {
             ReportOutOfMemory(cx);
             return false;
@@ -2795,7 +2829,7 @@ ShortestPaths(JSContext* cx, unsigned argc, Value* vp)
     Vector<Vector<Vector<JS::ubi::EdgeName>>> names(cx);
 
     {
-        JS::AutoCheckCannotGC noGC(cx->runtime());
+        JS::AutoCheckCannotGC noGC(cx);
 
         JS::ubi::NodeSet targets;
         if (!targets.init()) {
@@ -2813,7 +2847,7 @@ ShortestPaths(JSContext* cx, unsigned argc, Value* vp)
         }
 
         JS::ubi::Node root(args[0]);
-        auto maybeShortestPaths = JS::ubi::ShortestPaths::Create(cx->runtime(), noGC, maxNumPaths,
+        auto maybeShortestPaths = JS::ubi::ShortestPaths::Create(cx, noGC, maxNumPaths,
                                                                  root, mozilla::Move(targets));
         if (maybeShortestPaths.isNothing()) {
             ReportOutOfMemory(cx);
@@ -3254,7 +3288,7 @@ struct MajorGC {
 };
 
 static void
-majorGC(JSRuntime* rt, JSGCStatus status, void* data)
+majorGC(JSContext* cx, JSGCStatus status, void* data)
 {
     auto info = static_cast<MajorGC*>(data);
     if (!(info->phases & (1 << status)))
@@ -3262,8 +3296,8 @@ majorGC(JSRuntime* rt, JSGCStatus status, void* data)
 
     if (info->depth > 0) {
         info->depth--;
-        JS::PrepareForFullGC(rt->contextFromMainThread());
-        JS::GCForReason(rt->contextFromMainThread(), GC_NORMAL, JS::gcreason::API);
+        JS::PrepareForFullGC(cx);
+        JS::GCForReason(cx, GC_NORMAL, JS::gcreason::API);
         info->depth++;
     }
 }
@@ -3274,7 +3308,7 @@ struct MinorGC {
 };
 
 static void
-minorGC(JSRuntime* rt, JSGCStatus status, void* data)
+minorGC(JSContext* cx, JSGCStatus status, void* data)
 {
     auto info = static_cast<MinorGC*>(data);
     if (!(info->phases & (1 << status)))
@@ -3282,7 +3316,7 @@ minorGC(JSRuntime* rt, JSGCStatus status, void* data)
 
     if (info->active) {
         info->active = false;
-        rt->gc.evictNursery(JS::gcreason::DEBUG_GC);
+        cx->gc.evictNursery(JS::gcreason::DEBUG_GC);
         info->active = true;
     }
 }
@@ -3602,6 +3636,12 @@ static const JSFunctionSpecWithHelp TestingFunctions[] = {
 "  Capture a stack. If 'maxDepth' is given, capture at most 'maxDepth' number\n"
 "  of frames. If 'compartment' is given, allocate the js::SavedFrame instances\n"
 "  with the given object's compartment."),
+
+    JS_FN_HELP("captureFirstSubsumedFrame", CaptureFirstSubsumedFrame, 1, 0,
+"saveStack(object [, shouldIgnoreSelfHosted = true]])",
+"  Capture a stack back to the first frame whose principals are subsumed by the\n"
+"  object's compartment's principals. If 'shouldIgnoreSelfHosted' is given,\n"
+"  control whether self-hosted frames are considered when checking principals."),
 
     JS_FN_HELP("callFunctionFromNativeFrame", CallFunctionFromNativeFrame, 1, 0,
 "callFunctionFromNativeFrame(function)",

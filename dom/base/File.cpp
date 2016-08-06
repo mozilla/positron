@@ -560,7 +560,7 @@ File::Constructor(const GlobalObject& aGlobal,
                   ErrorResult& aRv)
 {
   if (!nsContentUtils::ThreadsafeIsCallerChrome()) {
-    aRv.Throw(NS_ERROR_FAILURE);
+    aRv.ThrowTypeError<MSG_NOT_SEQUENCE>(NS_LITERAL_STRING("Argument 1 of File.constructor"));
     return nullptr;
   }
 
@@ -924,7 +924,9 @@ BlobImplFile::GetType(nsAString& aType)
 
       ErrorResult rv;
       runnable->Dispatch(rv);
-      NS_WARN_IF(rv.Failed());
+      if (NS_WARN_IF(rv.Failed())) {
+        rv.SuppressException();
+      }
       return;
     }
 

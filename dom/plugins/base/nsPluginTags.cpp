@@ -236,6 +236,7 @@ nsPluginTag::nsPluginTag(nsPluginInfo* aPluginInfo,
     mIsJavaPlugin(false),
     mIsFlashPlugin(false),
     mSupportsAsyncInit(false),
+    mSupportsAsyncRender(false),
     mFullPath(aPluginInfo->fFullPath),
     mLastModifiedTime(aLastModifiedTime),
     mSandboxLevel(0),
@@ -271,6 +272,7 @@ nsPluginTag::nsPluginTag(const char* aName,
     mIsJavaPlugin(false),
     mIsFlashPlugin(false),
     mSupportsAsyncInit(false),
+    mSupportsAsyncRender(false),
     mFullPath(aFullPath),
     mLastModifiedTime(aLastModifiedTime),
     mSandboxLevel(0),
@@ -298,6 +300,7 @@ nsPluginTag::nsPluginTag(uint32_t aId,
                          bool aIsJavaPlugin,
                          bool aIsFlashPlugin,
                          bool aSupportsAsyncInit,
+                         bool aSupportsAsyncRender,
                          int64_t aLastModifiedTime,
                          bool aFromExtension,
                          int32_t aSandboxLevel)
@@ -309,6 +312,7 @@ nsPluginTag::nsPluginTag(uint32_t aId,
     mIsJavaPlugin(aIsJavaPlugin),
     mIsFlashPlugin(aIsFlashPlugin),
     mSupportsAsyncInit(aSupportsAsyncInit),
+    mSupportsAsyncRender(aSupportsAsyncRender),
     mLastModifiedTime(aLastModifiedTime),
     mSandboxLevel(aSandboxLevel),
     mNiceFileName(),
@@ -323,7 +327,7 @@ nsPluginTag::~nsPluginTag()
   NS_ASSERTION(!mNext, "Risk of exhausting the stack space, bug 486349");
 }
 
-NS_IMPL_ISUPPORTS(nsPluginTag, nsIPluginTag, nsIInternalPluginTag)
+NS_IMPL_ISUPPORTS(nsPluginTag, nsPluginTag,  nsIInternalPluginTag, nsIPluginTag)
 
 void nsPluginTag::InitMime(const char* const* aMimeTypes,
                            const char* const* aMimeDescriptions,

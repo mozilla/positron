@@ -266,7 +266,8 @@ static const size_t MAX_REPORTED_STACK_DEPTH = 1u << 7;
 static bool
 CaptureStack(JSContext* cx, MutableHandleObject stack)
 {
-    return CaptureCurrentStack(cx, stack, MAX_REPORTED_STACK_DEPTH);
+    return CaptureCurrentStack(cx, stack,
+                               JS::StackCapture(JS::MaxFrames(MAX_REPORTED_STACK_DEPTH)));
 }
 
 JSString*
@@ -639,7 +640,7 @@ ErrorReportToString(JSContext* cx, JSErrorReport* reportp)
      * reportp->ucmessage without prefixing it with anything.
      */
     if (str) {
-        RootedString separator(cx, JS_NewUCStringCopyN(cx, MOZ_UTF16(": "), 2));
+        RootedString separator(cx, JS_NewUCStringCopyN(cx, u": ", 2));
         if (!separator)
             return nullptr;
         str = ConcatStrings<CanGC>(cx, str, separator);

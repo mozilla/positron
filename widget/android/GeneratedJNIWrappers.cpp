@@ -8,7 +8,7 @@
 #include "mozilla/jni/Accessors.h"
 
 namespace mozilla {
-namespace widget {
+namespace java {
 
 const char ANRReporter::name[] =
         "org/mozilla/gecko/ANRReporter";
@@ -808,6 +808,9 @@ constexpr char GeckoEditable::OnImeAddCompositionRange_t::signature[];
 constexpr char GeckoEditable::OnImeReplaceText_t::name[];
 constexpr char GeckoEditable::OnImeReplaceText_t::signature[];
 
+constexpr char GeckoEditable::OnImeRequestCursorUpdates_t::name[];
+constexpr char GeckoEditable::OnImeRequestCursorUpdates_t::signature[];
+
 constexpr char GeckoEditable::OnImeSynchronize_t::name[];
 constexpr char GeckoEditable::OnImeSynchronize_t::signature[];
 
@@ -839,6 +842,14 @@ constexpr char GeckoEditable::OnViewChange_t::signature[];
 auto GeckoEditable::OnViewChange(mozilla::jni::Object::Param a0) const -> void
 {
     return mozilla::jni::Method<OnViewChange_t>::Call(GeckoEditable::mCtx, nullptr, a0);
+}
+
+constexpr char GeckoEditable::UpdateCompositionRects_t::name[];
+constexpr char GeckoEditable::UpdateCompositionRects_t::signature[];
+
+auto GeckoEditable::UpdateCompositionRects(mozilla::jni::ObjectArray::Param a0) const -> void
+{
+    return mozilla::jni::Method<UpdateCompositionRects_t>::Call(GeckoEditable::mCtx, nullptr, a0);
 }
 
 const char GeckoEditableListener::name[] =
@@ -905,6 +916,21 @@ auto GeckoJavaSampler::UnpauseJavaProfiling() -> void
 {
     return mozilla::jni::Method<UnpauseJavaProfiling_t>::Call(GeckoJavaSampler::Context(), nullptr);
 }
+
+const char GeckoNetworkManager::name[] =
+        "org/mozilla/gecko/GeckoNetworkManager";
+
+constexpr char GeckoNetworkManager::OnConnectionChanged_t::name[];
+constexpr char GeckoNetworkManager::OnConnectionChanged_t::signature[];
+
+constexpr char GeckoNetworkManager::OnStatusChanged_t::name[];
+constexpr char GeckoNetworkManager::OnStatusChanged_t::signature[];
+
+const char GeckoScreenOrientation::name[] =
+        "org/mozilla/gecko/GeckoScreenOrientation";
+
+constexpr char GeckoScreenOrientation::OnOrientationChange_t::name[];
+constexpr char GeckoScreenOrientation::OnOrientationChange_t::signature[];
 
 const char GeckoSmsManager::name[] =
         "org/mozilla/gecko/GeckoSmsManager";
@@ -1109,6 +1135,9 @@ constexpr char GeckoView::Window::Close_t::signature[];
 constexpr char GeckoView::Window::DisposeNative_t::name[];
 constexpr char GeckoView::Window::DisposeNative_t::signature[];
 
+constexpr char GeckoView::Window::LoadUri_t::name[];
+constexpr char GeckoView::Window::LoadUri_t::signature[];
+
 constexpr char GeckoView::Window::Open_t::name[];
 constexpr char GeckoView::Window::Open_t::signature[];
 
@@ -1160,10 +1189,13 @@ const char ThumbnailHelper::name[] =
 constexpr char ThumbnailHelper::SendThumbnail_t::name[];
 constexpr char ThumbnailHelper::SendThumbnail_t::signature[];
 
-auto ThumbnailHelper::SendThumbnail(mozilla::jni::Object::Param a0, int32_t a1, bool a2, bool a3) -> void
+auto ThumbnailHelper::SendThumbnail(mozilla::jni::ByteBuffer::Param a0, int32_t a1, bool a2, bool a3) -> void
 {
     return mozilla::jni::Method<SendThumbnail_t>::Call(ThumbnailHelper::Context(), nullptr, a0, a1, a2, a3);
 }
+
+constexpr char ThumbnailHelper::RequestThumbnail_t::name[];
+constexpr char ThumbnailHelper::RequestThumbnail_t::signature[];
 
 const char Distribution::name[] =
         "org/mozilla/gecko/distribution/Distribution";
@@ -1413,7 +1445,7 @@ const char LayerView::name[] =
 constexpr char LayerView::updateZoomedView_t::name[];
 constexpr char LayerView::updateZoomedView_t::signature[];
 
-auto LayerView::updateZoomedView(mozilla::jni::Object::Param a0) -> void
+auto LayerView::updateZoomedView(mozilla::jni::ByteBuffer::Param a0) -> void
 {
     return mozilla::jni::Method<updateZoomedView_t>::Call(LayerView::Context(), nullptr, a0);
 }

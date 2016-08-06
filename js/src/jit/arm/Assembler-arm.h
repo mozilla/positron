@@ -74,6 +74,11 @@ static constexpr Register CallTempNonArgRegs[] = { r5, r6, r7, r8 };
 static const uint32_t NumCallTempNonArgRegs =
     mozilla::ArrayLength(CallTempNonArgRegs);
 
+// TLS pointer argument register for WebAssembly functions. This must not alias
+// any other register used for passing function arguments or return values.
+// Preserved by WebAssembly functions.
+static constexpr Register WasmTlsReg = r9;
+
 class ABIArgGenerator
 {
     unsigned intRegIndex_;
@@ -1207,6 +1212,7 @@ class Assembler : public AssemblerShared
         LessThanOrEqual = LE,
         Overflow = VS,
         CarrySet = CS,
+        CarryClear = CC,
         Signed = MI,
         NotSigned = PL,
         Zero = EQ,

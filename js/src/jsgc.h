@@ -741,18 +741,22 @@ class ArenaLists
 #endif
     }
 
-    void checkEmptyArenaLists() {
+    bool checkEmptyArenaLists() {
+        bool empty = true;
 #ifdef DEBUG
-        for (auto i : AllAllocKinds())
-            checkEmptyArenaList(i);
+        for (auto i : AllAllocKinds()) {
+            if (!checkEmptyArenaList(i))
+                empty = false;
+        }
 #endif
+        return empty;
     }
 
     void checkEmptyFreeList(AllocKind kind) {
         MOZ_ASSERT(freeLists[kind]->isEmpty());
     }
 
-    void checkEmptyArenaList(AllocKind kind);
+    bool checkEmptyArenaList(AllocKind kind);
 
     bool relocateArenas(Zone* zone, Arena*& relocatedListOut, JS::gcreason::Reason reason,
                         SliceBudget& sliceBudget, gcstats::Statistics& stats);
@@ -865,8 +869,6 @@ class GCHelperState
     State state();
     void setState(State state);
 
-    bool shrinkFlag;
-
     friend class js::gc::ArenaLists;
 
     static void freeElementsAndArray(void** array, void** end) {
@@ -883,8 +885,7 @@ class GCHelperState
       : rt(rt),
         done(),
         state_(IDLE),
-        thread(nullptr),
-        shrinkFlag(false)
+        thread(nullptr)
     { }
 
     void finish();
@@ -905,11 +906,6 @@ class GCHelperState
      */
     bool isBackgroundSweeping() const {
         return state_ == SWEEPING;
-    }
-
-    bool shouldShrink() const {
-        MOZ_ASSERT(isBackgroundSweeping());
-        return shrinkFlag;
     }
 };
 
@@ -1227,13 +1223,14 @@ CheckValueAfterMovingGC(const JS::Value& value)
             D(ElementsBarrier, 12)             \
             D(CheckHashTablesOnMinorGC, 13)    \
             D(Compact, 14)                     \
-            D(CheckHeapOnMovingGC, 15)
+            D(CheckHeapOnMovingGC, 15)         \
+            D(CheckNursery, 16)
 
 enum class ZealMode {
 #define ZEAL_MODE(name, value) name = value,
     JS_FOR_EACH_ZEAL_MODE(ZEAL_MODE)
 #undef ZEAL_MODE
-    Limit = 15
+    Limit = 16
 };
 
 enum VerifierType {

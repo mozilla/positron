@@ -23,6 +23,15 @@
 #include "sandbox/linux/seccomp-bpf/linux_seccomp.h"
 #include "sandbox/linux/services/linux_syscalls.h"
 
+#ifdef MOZ_CRASHREPORTER
+#include "nsExceptionHandler.h"
+#include "nsICrashReporter.h"
+#define NS_CRASHREPORTER_CONTRACTID "@mozilla.org/toolkit/crash-reporter;1"
+#include "nsIPrefService.h"
+#include "nsIMemoryInfoDumper.h"
+#endif
+
+
 // A note about assertions: in general, the worst thing this module
 // should be able to do is disable sandboxing features, so release
 // asserts or MOZ_CRASH should be avoided, even for seeming
@@ -259,28 +268,28 @@ SandboxInfo::ThreadingCheck()
 SandboxInfo::SubmitTelemetry()
 {
   SandboxInfo sandboxInfo = Get();
-  if (sandboxInfo.Test(SandboxInfo::kHasSeccompBPF)) {
-    Telemetry::Accumulate(Telemetry::SANDBOX_CAPABILITIES_SECCOMP_BPF, true);
-  }
-  if (sandboxInfo.Test(SandboxInfo::kHasSeccompTSync)) {
-    Telemetry::Accumulate(Telemetry::SANDBOX_CAPABILITIES_SECCOMP_TSYNC, true);
-  }
-  if (sandboxInfo.Test(SandboxInfo::kHasPrivilegedUserNamespaces)) {
-    Telemetry::Accumulate(
-      Telemetry::SANDBOX_CAPABILITIES_USER_NAMESPACES_PRIVILEGED, true);
-  }
-  if (sandboxInfo.Test(SandboxInfo::kHasUserNamespaces)) {
-    Telemetry::Accumulate(
-      Telemetry::SANDBOX_CAPABILITIES_USER_NAMESPACES, true);
-  }
-  if (sandboxInfo.Test(SandboxInfo::kEnabledForContent)) {
-    Telemetry::Accumulate(
-      Telemetry::SANDBOX_CAPABILITIES_ENABLED_CONTENT, true);
-  }
-  if (sandboxInfo.Test(SandboxInfo::kEnabledForMedia)) {
-    Telemetry::Accumulate(
-      Telemetry::SANDBOX_CAPABILITIES_ENABLED_MEDIA, true);
-  }
+  Telemetry::Accumulate(Telemetry::SANDBOX_HAS_SECCOMP_BPF,
+                        sandboxInfo.Test(SandboxInfo::kHasSeccompBPF));
+  Telemetry::Accumulate(Telemetry::SANDBOX_HAS_SECCOMP_TSYNC,
+                        sandboxInfo.Test(SandboxInfo::kHasSeccompTSync));
+  Telemetry::Accumulate(Telemetry::SANDBOX_HAS_USER_NAMESPACES_PRIVILEGED,
+                        sandboxInfo.Test(SandboxInfo::kHasPrivilegedUserNamespaces));
+  Telemetry::Accumulate(Telemetry::SANDBOX_HAS_USER_NAMESPACES,
+                        sandboxInfo.Test(SandboxInfo::kHasUserNamespaces));
+  Telemetry::Accumulate(Telemetry::SANDBOX_CONTENT_ENABLED,
+                        sandboxInfo.Test(SandboxInfo::kEnabledForContent));
+  Telemetry::Accumulate(Telemetry::SANDBOX_MEDIA_ENABLED,
+                        sandboxInfo.Test(SandboxInfo::kEnabledForMedia));
+}
+
+void
+SandboxInfo::AnnotateCrashReport() const
+{
+  nsAutoCString flagsString;
+  flagsString.AppendInt(mFlags);
+
+  CrashReporter::AnnotateCrashReport(
+    NS_LITERAL_CSTRING("ContentSandboxCapabilities"), flagsString);
 }
 
 } // namespace mozilla
