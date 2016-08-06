@@ -31,7 +31,13 @@ SPIDERNODE_LIBS = \
 
 $(SPIDERNODE_LIBS): spidernode
 
+ifdef MOZ_DEBUG
+BUILDTYPE = Debug
+else
+BUILDTYPE = Release
+endif
+
 spidernode:
-	$(MAKE) -C $(topsrcdir)/positron/spidernode/out BUILDTYPE=Debug
+	$(MAKE) -C $(topsrcdir)/positron/spidernode/out BUILDTYPE=$(BUILDTYPE)
 	mkdir -p $(topobjdir)/positron/app/spidernode
-	ln -sf $(topsrcdir)/positron/spidernode/out/Debug $(topobjdir)/positron/app/spidernode/.libs
+	ln -sf $(topsrcdir)/positron/spidernode/out/$(BUILDTYPE) $(topobjdir)/positron/app/spidernode/.libs

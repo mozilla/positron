@@ -1,3 +1,7 @@
+# Determine whether or not to also generate a configuration for a debug build.
+# Regardless of the value of this arg, Node's configuration script will always
+# generate a configuration for a release build.  This only determines whether
+# or not it *also* generates a debug one.
 debug_arg=""
 if test "$MOZ_DEBUG"; then
     debug_arg="--debug"
