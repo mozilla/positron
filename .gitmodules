@@ -1,0 +1,3 @@
+[submodule "positron/electron"]
+	path = positron/electron
+	url = https://github.com/mozilla/positron-electron.git
