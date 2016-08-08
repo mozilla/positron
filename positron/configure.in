@@ -1,0 +1,21 @@
+# Determine whether or not to also generate a configuration for a debug build.
+# Regardless of the value of this arg, Node's configuration script will always
+# generate a configuration for a release build.  This only determines whether
+# or not it *also* generates a debug one.
+debug_arg=""
+if test "$MOZ_DEBUG"; then
+    debug_arg="--debug"
+fi
+
+(
+  cd ${_topsrcdir}/positron/spidernode &&
+  export CXXFLAGS="-mmacosx-version-min=10.9" &&
+  export LDFLAGS="-mmacosx-version-min=10.9" &&
+  which python2.7 > /dev/null &&
+  exec python2.7 ./configure --engine=spidermonkey --enable-static ${debug_arg} --spidermonkey-obj-dir=${_objdir} ||
+  exec python    ./configure --engine=spidermonkey --enable-static ${debug_arg} --spidermonkey-obj-dir=${_objdir}
+)
+
+# TODO: uncomment this (and remove the equivalent in old-configure.in)
+# once https://bugzilla.mozilla.org/show_bug.cgi?id=1292653 has been fixed.
+# AC_OUTPUT_SUBDIRS(positron/app/spidernode)

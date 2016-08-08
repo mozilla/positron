@@ -1,0 +1,52 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+include $(topsrcdir)/config/config.mk
+
+# SpiderNode's ICU dependency uses typeid and dynamic_cast, so we need
+# to enable RTTI for it.  Erm, I guess this enables RTTI for the whole build,
+# but I'm unsure how to do so just for the submake of SpiderNode.
+CXXFLAGS += -frtti
+
+ifdef MOZ_DEBUG
+BUILDTYPE = Debug
+else
+BUILDTYPE = Release
+endif
+
+# The SpiderNode libraries that Positron uses.  This needs to be kept in sync
+# with the USE_LIBS list in positron/webidl/moz.build.
+SPIDERNODE_LIBS = \
+	libcares.a \
+	libhttp_parser.a \
+	libicudata.a \
+	libicui18n.a \
+	libicustubdata.a \
+	libicuucx.a \
+	libnode.a \
+	libopenssl.a \
+	libspidershim.a \
+	libuv.a \
+	libzlib.a \
+	$(NULL)
+
+# The paths to the libraries in Positron's objdir.  These are our build targets.
+SPIDERNODE_TARGETS = $(foreach file,$(SPIDERNODE_LIBS),$(DEPTH)/positron/app/spidernode/.libs/$(file))
+
+# The paths to the libraries in SpiderNode's "out" dir.  This is where
+# the libraries are actually built, since we don't yet configure SpiderNode
+# to build directly to Positron's objdir.
+SPIDERNODE_LIB_PATHS = $(foreach file,$(SPIDERNODE_LIBS),$(topsrcdir)/positron/spidernode/out/$(BUILDTYPE)/$(file))
+
+.PHONY: spidernode
+
+# TODO: figure out a way to configure spidernode to build to the positron output directory
+# 			(or configure positron to look for the libraries in the spidernode output directory)
+
+$(SPIDERNODE_TARGETS): spidernode
+
+spidernode:
+	$(MAKE) -C $(topsrcdir)/positron/spidernode/out BUILDTYPE=$(BUILDTYPE)
+	mkdir -p $(topobjdir)/positron/app/spidernode/.libs
+	cp $(SPIDERNODE_LIB_PATHS) $(topobjdir)/positron/app/spidernode/.libs/
