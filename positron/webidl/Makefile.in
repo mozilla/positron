@@ -50,3 +50,11 @@ spidernode:
 	$(MAKE) -C $(topsrcdir)/positron/spidernode/out BUILDTYPE=$(BUILDTYPE)
 	mkdir -p $(topobjdir)/positron/app/spidernode/.libs
 	cp $(SPIDERNODE_LIB_PATHS) $(topobjdir)/positron/app/spidernode/.libs/
+
+clean::
+	cd $(topobjdir)/positron/app/spidernode/.libs/ && rm -f $(SPIDERNODE_LIBS)
+	$(MAKE) -C $(topsrcdir)/positron/spidernode BUILDTYPE=$(BUILDTYPE) clean
+
+distclean::
+	cd $(topobjdir)/positron/app/spidernode/.libs/ && rm -f $(SPIDERNODE_LIBS)
+	$(MAKE) -C $(topsrcdir)/positron/spidernode BUILDTYPE=$(BUILDTYPE) distclean
