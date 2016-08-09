@@ -71,6 +71,26 @@ NS_IMETHODIMP NodeLoader::Init(JSContext* aContext)
   // TODO: FIX THIS LEAK
   v8::Context::Scope* context_scope = new v8::Context::Scope(context);
 
+  // Convert the app path to an absolute app path.
+  nsCOMPtr<nsIFile> cwdDir;
+  nsDirectoryService::gService->Get(NS_OS_CURRENT_WORKING_DIR,
+                                    NS_GET_IID(nsIFile),
+                                    getter_AddRefs(cwdDir));
+  MOZ_ASSERT(cwdDir);
+
+  char* absoluteAppPath = nullptr;
+  nsDependentCString appPath(gArgv[1]);
+  // Try the path as a relative path to the current working directory.
+  nsresult rv = cwdDir->AppendRelativeNativePath(appPath);
+  if (NS_SUCCEEDED(rv)) {
+    nsString absoluteAppPathString;
+    rv = cwdDir->GetPath(absoluteAppPathString);
+    NS_ENSURE_SUCCESS(rv, rv);
+    absoluteAppPath = ToNewCString(NS_LossyConvertUTF16toASCII(absoluteAppPathString));
+  } else { // It's hopefully an absolute path.
+    absoluteAppPath = gArgv[1];
+  }
+
   nsCOMPtr<nsIFile> greDir;
   nsDirectoryService::gService->Get(NS_GRE_DIR,
                                     NS_GET_IID(nsIFile),
@@ -102,7 +122,7 @@ NS_IMETHODIMP NodeLoader::Init(JSContext* aContext)
     context,
     argc, argv, 0, nullptr);
 
-  env->process_object()->Set(v8::String::NewFromUtf8(isolate, "resourcesPath"), v8::String::NewFromUtf8(isolate, gArgv[1]));
+  env->process_object()->Set(v8::String::NewFromUtf8(isolate, "resourcesPath"), v8::String::NewFromUtf8(isolate, absoluteAppPath));
   env->process_object()->Set(v8::String::NewFromUtf8(isolate, "type"), v8::String::NewFromUtf8(isolate, "browser"));
 
   node::LoadEnvironment(env);
