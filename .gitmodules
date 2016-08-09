@@ -1,3 +1,7 @@
 [submodule "positron/electron"]
 	path = positron/electron
 	url = https://github.com/mozilla/positron-electron.git
+[submodule "positron/spidernode"]
+	path = positron/spidernode
+	url = https://github.com/mozilla/positron-spidernode.git
+	branch = existing-js-runtime
