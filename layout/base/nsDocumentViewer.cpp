@@ -60,7 +60,7 @@
 #include "nsIBaseWindow.h"
 #include "nsILayoutHistoryState.h"
 #include "nsCharsetSource.h"
-#include "nsHTMLReflowState.h"
+#include "mozilla/ReflowInput.h"
 #include "nsIImageLoadingContent.h"
 #include "nsCopySupport.h"
 #include "nsIDOMHTMLFrameSetElement.h"
@@ -2347,7 +2347,8 @@ nsDocumentViewer::CreateStyleSet(nsIDocument* aDocument)
       }
     }
   } else {
-    NS_ERROR("stylo: nsStyleSheetService doesn't handle ServoStyleSheets yet");
+    NS_WARNING("stylo: Not yet checking nsStyleSheetService for Servo-backed "
+               "documents. See bug 1290224");
   }
 
   // Caller will handle calling EndUpdate, per contract.
@@ -3727,6 +3728,9 @@ nsDocumentViewer::PrintPreview(nsIPrintSettings* aPrintSettings,
   nsAutoPtr<nsPrintEventDispatcher> beforeAndAfterPrint(
     new nsPrintEventDispatcher(doc));
   NS_ENSURE_STATE(!GetIsPrinting());
+  // beforeprint event may have caused ContentViewer to be shutdown.
+  NS_ENSURE_STATE(mContainer);
+  NS_ENSURE_STATE(mDeviceContext);
   if (!mPrintEngine) {
     mPrintEngine = new nsPrintEngine();
 

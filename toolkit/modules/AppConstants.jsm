@@ -211,6 +211,13 @@ this.AppConstants = Object.freeze({
   false,
 #endif
 
+  ASAN:
+#ifdef MOZ_ASAN
+  true,
+#else
+  false,
+#endif
+
   MOZ_B2G_RIL:
 #ifdef MOZ_B2G_RIL
   true,
@@ -311,13 +318,6 @@ this.AppConstants = Object.freeze({
 #define MOZ_SOURCE_URL
 #endif
   SOURCE_REVISION_URL: "@MOZ_SOURCE_URL@",
-
-  MOZ_NUWA_PROCESS:
-#ifdef MOZ_NUWA_PROCESS
-    true,
-#else
-    false,
-#endif
 
   HAVE_USR_LIB64_DIR:
 #ifdef HAVE_USR_LIB64_DIR

@@ -116,6 +116,8 @@ GetBackendName(mozilla::gfx::BackendType aBackend)
         return "direct2d 1.1";
       case mozilla::gfx::BackendType::NONE:
         return "none";
+      case mozilla::gfx::BackendType::BACKEND_LAST:
+        return "invalid";
   }
   MOZ_CRASH("Incomplete switch");
 }
@@ -208,9 +210,14 @@ public:
      * This function is static so that it can be accessed from
      * PluginInstanceChild (where we can't call gfxPlatform::GetPlatform()
      * because the prefs service can only be accessed from the main process).
+     *
+     * aIsPlugin is used to tell the backend that they can optimize this surface
+     * specifically because it's used for a plugin. This is mostly for Skia.
      */
     static already_AddRefed<SourceSurface>
-      GetSourceSurfaceForSurface(mozilla::gfx::DrawTarget *aTarget, gfxASurface *aSurface);
+      GetSourceSurfaceForSurface(mozilla::gfx::DrawTarget *aTarget,
+                                 gfxASurface *aSurface,
+                                 bool aIsPlugin = false);
 
     static void ClearSourceSurfaceForSurface(gfxASurface *aSurface);
 
@@ -225,6 +232,9 @@ public:
 
     already_AddRefed<DrawTarget>
       CreateOffscreenCanvasDrawTarget(const mozilla::gfx::IntSize& aSize, mozilla::gfx::SurfaceFormat aFormat);
+
+    already_AddRefed<DrawTarget>
+      CreateSimilarSoftwareDrawTarget(DrawTarget* aDT, const IntSize &aSize, mozilla::gfx::SurfaceFormat aFormat);
 
     virtual already_AddRefed<DrawTarget>
       CreateDrawTargetForData(unsigned char* aData, const mozilla::gfx::IntSize& aSize, 
@@ -275,6 +285,7 @@ public:
       aObj.DefineProperty("AzureContentBackend", GetBackendName(mContentBackend));
     }
     void GetApzSupportInfo(mozilla::widget::InfoObject& aObj);
+    void GetTilesSupportInfo(mozilla::widget::InfoObject& aObj);
 
     // Get the default content backend that will be used with the default
     // compositor. If the compositor is known when calling this function,
@@ -309,10 +320,6 @@ public:
     virtual nsresult GetFontList(nsIAtom *aLangGroup,
                                  const nsACString& aGenericFamily,
                                  nsTArray<nsString>& aListOfFonts);
-
-    int GetTileWidth();
-    int GetTileHeight();
-    void SetTileSize(int aWidth, int aHeight);
 
     /**
      * Rebuilds the any cached system font lists
@@ -802,11 +809,9 @@ private:
     // Bitmask of backend types we can use to render content
     uint32_t mContentBackendBitmask;
 
-    int mTileWidth;
-    int mTileHeight;
-
     mozilla::widget::GfxInfoCollector<gfxPlatform> mAzureCanvasBackendCollector;
     mozilla::widget::GfxInfoCollector<gfxPlatform> mApzSupportCollector;
+    mozilla::widget::GfxInfoCollector<gfxPlatform> mTilesInfoCollector;
 
     RefPtr<mozilla::gfx::DrawEventRecorder> mRecorder;
     RefPtr<mozilla::gl::SkiaGLGlue> mSkiaGlue;

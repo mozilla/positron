@@ -6,7 +6,6 @@
 
 "use strict";
 
-const {Ci} = require("chrome");
 const promise = require("promise");
 const CssLogic = require("devtools/shared/inspector/css-logic");
 const {ELEMENT_STYLE} = require("devtools/shared/specs/styles");
@@ -625,7 +624,7 @@ Rule.prototype = {
   editClosestTextProperty: function (textProperty, direction) {
     let index = this.textProps.indexOf(textProperty);
 
-    if (direction === Ci.nsIFocusManager.MOVEFOCUS_FORWARD) {
+    if (direction === Services.focus.MOVEFOCUS_FORWARD) {
       for (++index; index < this.textProps.length; ++index) {
         if (!this.textProps[index].invisible) {
           break;
@@ -636,7 +635,7 @@ Rule.prototype = {
       } else {
         this.textProps[index].editor.nameSpan.click();
       }
-    } else if (direction === Ci.nsIFocusManager.MOVEFOCUS_BACKWARD) {
+    } else if (direction === Services.focus.MOVEFOCUS_BACKWARD) {
       for (--index; index >= 0; --index) {
         if (!this.textProps[index].invisible) {
           break;

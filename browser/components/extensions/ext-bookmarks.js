@@ -4,11 +4,10 @@
 
 const {classes: Cc, interfaces: Ci, utils: Cu} = Components;
 
-Cu.import("resource://gre/modules/PlacesUtils.jsm");
-var Bookmarks = PlacesUtils.bookmarks;
-
 Cu.import("resource://gre/modules/ExtensionUtils.jsm");
 
+XPCOMUtils.defineLazyModuleGetter(this, "PlacesUtils",
+                                  "resource://gre/modules/PlacesUtils.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "Task",
                                   "resource://gre/modules/Task.jsm");
 
@@ -21,7 +20,7 @@ function getTree(rootGuid, onlyChildren) {
       dateAdded: node.dateAdded / 1000,
     };
 
-    if (parent && node.guid != Bookmarks.rootGuid) {
+    if (parent && node.guid != PlacesUtils.bookmarks.rootGuid) {
       treenode.parentId = parent.guid;
     }
 
@@ -51,10 +50,9 @@ function getTree(rootGuid, onlyChildren) {
     if (onlyChildren) {
       let children = root.children || [];
       return children.map(child => convert(child, root));
-    } else {
-      // It seems like the array always just contains the root node.
-      return [convert(root, null)];
     }
+    // It seems like the array always just contains the root node.
+    return [convert(root, null)];
   }).catch(e => Promise.reject({message: e.message}));
 }
 
@@ -66,11 +64,11 @@ function convert(result) {
     dateAdded: result.dateAdded.getTime(),
   };
 
-  if (result.guid != Bookmarks.rootGuid) {
+  if (result.guid != PlacesUtils.bookmarks.rootGuid) {
     node.parentId = result.parentGuid;
   }
 
-  if (result.type == Bookmarks.TYPE_BOOKMARK) {
+  if (result.type == PlacesUtils.bookmarks.TYPE_BOOKMARK) {
     node.url = result.url.href; // Output is always URL object.
   } else {
     node.dateGroupModified = result.lastModified.getTime();
@@ -88,7 +86,7 @@ extensions.registerSchemaAPI("bookmarks", (extension, context) => {
         return Task.spawn(function* () {
           let bookmarks = [];
           for (let id of list) {
-            let bookmark = yield Bookmarks.fetch({guid: id});
+            let bookmark = yield PlacesUtils.bookmarks.fetch({guid: id});
             if (!bookmark) {
               throw new Error("Bookmark not found");
             }
@@ -104,7 +102,7 @@ extensions.registerSchemaAPI("bookmarks", (extension, context) => {
       },
 
       getTree: function() {
-        return getTree(Bookmarks.rootGuid, false);
+        return getTree(PlacesUtils.bookmarks.rootGuid, false);
       },
 
       getSubTree: function(id) {
@@ -112,11 +110,11 @@ extensions.registerSchemaAPI("bookmarks", (extension, context) => {
       },
 
       search: function(query) {
-        return Bookmarks.search(query).then(result => result.map(convert));
+        return PlacesUtils.bookmarks.search(query).then(result => result.map(convert));
       },
 
       getRecent: function(numberOfItems) {
-        return Bookmarks.getRecent(numberOfItems).then(result => result.map(convert));
+        return PlacesUtils.bookmarks.getRecent(numberOfItems).then(result => result.map(convert));
       },
 
       create: function(bookmark) {
@@ -126,10 +124,10 @@ extensions.registerSchemaAPI("bookmarks", (extension, context) => {
 
         // If url is NULL or missing, it will be a folder.
         if (bookmark.url !== null) {
-          info.type = Bookmarks.TYPE_BOOKMARK;
+          info.type = PlacesUtils.bookmarks.TYPE_BOOKMARK;
           info.url = bookmark.url || "";
         } else {
-          info.type = Bookmarks.TYPE_FOLDER;
+          info.type = PlacesUtils.bookmarks.TYPE_FOLDER;
         }
 
         if (bookmark.index !== null) {
@@ -139,12 +137,12 @@ extensions.registerSchemaAPI("bookmarks", (extension, context) => {
         if (bookmark.parentId !== null) {
           info.parentGuid = bookmark.parentId;
         } else {
-          info.parentGuid = Bookmarks.unfiledGuid;
+          info.parentGuid = PlacesUtils.bookmarks.unfiledGuid;
         }
 
         try {
-          return Bookmarks.insert(info).then(convert)
-                          .catch(error => Promise.reject({message: error.message}));
+          return PlacesUtils.bookmarks.insert(info).then(convert)
+            .catch(error => Promise.reject({message: error.message}));
         } catch (e) {
           return Promise.reject({message: `Invalid bookmark: ${JSON.stringify(info)}`});
         }
@@ -159,11 +157,11 @@ extensions.registerSchemaAPI("bookmarks", (extension, context) => {
           info.parentGuid = destination.parentId;
         }
         info.index = (destination.index === null) ?
-          Bookmarks.DEFAULT_INDEX : destination.index;
+          PlacesUtils.bookmarks.DEFAULT_INDEX : destination.index;
 
         try {
-          return Bookmarks.update(info).then(convert)
-                          .catch(error => Promise.reject({message: error.message}));
+          return PlacesUtils.bookmarks.update(info).then(convert)
+            .catch(error => Promise.reject({message: error.message}));
         } catch (e) {
           return Promise.reject({message: `Invalid bookmark: ${JSON.stringify(info)}`});
         }
@@ -182,8 +180,8 @@ extensions.registerSchemaAPI("bookmarks", (extension, context) => {
         }
 
         try {
-          return Bookmarks.update(info).then(convert)
-                          .catch(error => Promise.reject({message: error.message}));
+          return PlacesUtils.bookmarks.update(info).then(convert)
+            .catch(error => Promise.reject({message: error.message}));
         } catch (e) {
           return Promise.reject({message: `Invalid bookmark: ${JSON.stringify(info)}`});
         }
@@ -196,8 +194,8 @@ extensions.registerSchemaAPI("bookmarks", (extension, context) => {
 
         // The API doesn't give you the old bookmark at the moment
         try {
-          return Bookmarks.remove(info, {preventRemovalOfNonEmptyFolders: true}).then(result => {})
-                          .catch(error => Promise.reject({message: error.message}));
+          return PlacesUtils.bookmarks.remove(info, {preventRemovalOfNonEmptyFolders: true}).then(result => {})
+            .catch(error => Promise.reject({message: error.message}));
         } catch (e) {
           return Promise.reject({message: `Invalid bookmark: ${JSON.stringify(info)}`});
         }
@@ -209,8 +207,8 @@ extensions.registerSchemaAPI("bookmarks", (extension, context) => {
         };
 
         try {
-          return Bookmarks.remove(info).then(result => {})
-                          .catch(error => Promise.reject({message: error.message}));
+          return PlacesUtils.bookmarks.remove(info).then(result => {})
+            .catch(error => Promise.reject({message: error.message}));
         } catch (e) {
           return Promise.reject({message: `Invalid bookmark: ${JSON.stringify(info)}`});
         }

@@ -40,9 +40,11 @@ enum LineReflowStatus {
   LINE_REFLOW_TRUNCATED
 };
 
-class nsBlockReflowState;
 class nsBlockInFlowLineIterator;
 class nsBulletFrame;
+namespace mozilla {
+class BlockReflowInput;
+} // namespace mozilla
 
 /**
  * Some invariants:
@@ -75,6 +77,8 @@ class nsBulletFrame;
  */
 class nsBlockFrame : public nsContainerFrame
 {
+  using BlockReflowInput = mozilla::BlockReflowInput;
+
 public:
   NS_DECL_QUERYFRAME_TARGET(nsBlockFrame)
   NS_DECL_FRAMEARENA_HELPERS
@@ -237,7 +241,7 @@ public:
   /**
    * Compute the final block size of this frame.
    *
-   * @param aReflowState Data structure passed from parent during reflow.
+   * @param aReflowInput Data structure passed from parent during reflow.
    * @param aReflowStatus A pointer to the reflow status for when we're finished
    *        doing reflow. this will get set appropriately if the block-size
    *        causes us to exceed the current available (page) block-size.
@@ -251,7 +255,7 @@ public:
    * @param aFinalSize Out parameter for final block-size.
    * @param aConsumed The block-size already consumed by our previous-in-flows.
    */
-  void ComputeFinalBSize(const nsHTMLReflowState&      aReflowState,
+  void ComputeFinalBSize(const ReflowInput&      aReflowInput,
                          nsReflowStatus*               aStatus,
                          nscoord                       aContentBSize,
                          const mozilla::LogicalMargin& aBorderPadding,
@@ -259,8 +263,8 @@ public:
                          nscoord                       aConsumed);
 
   virtual void Reflow(nsPresContext*           aPresContext,
-                      nsHTMLReflowMetrics&     aDesiredSize,
-                      const nsHTMLReflowState& aReflowState,
+                      ReflowOutput&     aDesiredSize,
+                      const ReflowInput& aReflowInput,
                       nsReflowStatus&          aStatus) override;
 
   virtual nsresult AttributeChanged(int32_t         aNameSpaceID,
@@ -293,7 +297,7 @@ public:
    */
   bool CheckForCollapsedBEndMarginFromClearanceLine();
 
-  static nsresult GetCurrentLine(nsBlockReflowState *aState, nsLineBox **aOutCurrentLine);
+  static nsresult GetCurrentLine(BlockReflowInput *aState, nsLineBox **aOutCurrentLine);
 
   /**
    * Determine if this block is a margin root at the top/bottom edges.
@@ -321,7 +325,7 @@ public:
     nscoord marginIStart, borderBoxISize;
   };
   static ReplacedElementISizeToClear
-    ISizeToClearPastFloats(const nsBlockReflowState& aState,
+    ISizeToClearPastFloats(const BlockReflowInput& aState,
                            const mozilla::LogicalRect& aFloatAvailableSpace,
                            nsIFrame* aFrame);
 
@@ -332,7 +336,7 @@ public:
    * aFloatStatus must be the float's true, unmodified reflow status.
    * 
    */
-  nsresult SplitFloat(nsBlockReflowState& aState,
+  nsresult SplitFloat(BlockReflowInput& aState,
                       nsIFrame*           aFloat,
                       nsReflowStatus      aFloatStatus);
 
@@ -401,7 +405,7 @@ protected:
   /** move the frames contained by aLine by aDeltaBCoord
     * if aLine is a block, its child floats are added to the state manager
     */
-  void SlideLine(nsBlockReflowState& aState,
+  void SlideLine(BlockReflowInput& aState,
                  nsLineBox* aLine, nscoord aDeltaBCoord);
 
   void UpdateLineContainerSize(nsLineBox* aLine,
@@ -410,9 +414,9 @@ protected:
   // helper for SlideLine and UpdateLineContainerSize
   void MoveChildFramesOfLine(nsLineBox* aLine, nscoord aDeltaBCoord);
 
-  void ComputeFinalSize(const nsHTMLReflowState& aReflowState,
-                        nsBlockReflowState&      aState,
-                        nsHTMLReflowMetrics&     aMetrics,
+  void ComputeFinalSize(const ReflowInput& aReflowInput,
+                        BlockReflowInput&      aState,
+                        ReflowOutput&     aMetrics,
                         nscoord*                 aBottomEdgeOfChildren);
 
   void ComputeOverflowAreas(const nsRect&         aBounds,
@@ -562,7 +566,7 @@ protected:
 
   /** Reflow pushed floats
    */
-  void ReflowPushedFloats(nsBlockReflowState& aState,
+  void ReflowPushedFloats(BlockReflowInput& aState,
                           nsOverflowAreas&    aOverflowAreas,
                           nsReflowStatus&     aStatus);
 
@@ -594,10 +598,10 @@ protected:
   /** set up the conditions necessary for an resize reflow
     * the primary task is to mark the minimumly sufficient lines dirty. 
     */
-  void PrepareResizeReflow(nsBlockReflowState& aState);
+  void PrepareResizeReflow(BlockReflowInput& aState);
 
   /** reflow all lines that have been marked dirty */
-  void ReflowDirtyLines(nsBlockReflowState& aState);
+  void ReflowDirtyLines(BlockReflowInput& aState);
 
   /** Mark a given line dirty due to reflow being interrupted on or before it */
   void MarkLineDirtyForInterrupt(nsLineBox* aLine);
@@ -611,14 +615,14 @@ protected:
    *                         or contain 1 or more inline frames.
    * @param aKeepReflowGoing [OUT] indicates whether the caller should continue to reflow more lines
    */
-  void ReflowLine(nsBlockReflowState& aState,
+  void ReflowLine(BlockReflowInput& aState,
                   line_iterator aLine,
                   bool* aKeepReflowGoing);
 
   // Return false if it needs another reflow because of reduced space
   // between floats that are next to it (but not next to its top), and
   // return true otherwise.
-  bool PlaceLine(nsBlockReflowState&           aState,
+  bool PlaceLine(BlockReflowInput&           aState,
                    nsLineLayout&               aLineLayout,
                    line_iterator               aLine,
                    nsFloatManager::SavedState* aFloatStateBeforeLine,
@@ -643,29 +647,29 @@ protected:
   void MarkLineDirty(line_iterator aLine, const nsLineList* aLineList);
 
   // XXX where to go
-  bool IsLastLine(nsBlockReflowState& aState,
+  bool IsLastLine(BlockReflowInput& aState,
                   line_iterator aLine);
 
-  void DeleteLine(nsBlockReflowState& aState,
+  void DeleteLine(BlockReflowInput& aState,
                   nsLineList::iterator aLine,
                   nsLineList::iterator aLineEnd);
 
   //----------------------------------------
   // Methods for individual frame reflow
 
-  bool ShouldApplyBStartMargin(nsBlockReflowState& aState,
+  bool ShouldApplyBStartMargin(BlockReflowInput& aState,
                                nsLineBox* aLine,
                                nsIFrame* aChildFrame);
 
-  void ReflowBlockFrame(nsBlockReflowState& aState,
+  void ReflowBlockFrame(BlockReflowInput& aState,
                         line_iterator aLine,
                         bool* aKeepGoing);
 
-  void ReflowInlineFrames(nsBlockReflowState& aState,
+  void ReflowInlineFrames(BlockReflowInput& aState,
                           line_iterator aLine,
                           bool* aKeepLineGoing);
 
-  void DoReflowInlineFrames(nsBlockReflowState& aState,
+  void DoReflowInlineFrames(BlockReflowInput& aState,
                             nsLineLayout& aLineLayout,
                             line_iterator aLine,
                             nsFlowAreaRect& aFloatAvailableSpace,
@@ -676,7 +680,7 @@ protected:
                             LineReflowStatus* aLineReflowStatus,
                             bool aAllowPullUp);
 
-  void ReflowInlineFrame(nsBlockReflowState& aState,
+  void ReflowInlineFrame(BlockReflowInput& aState,
                          nsLineLayout& aLineLayout,
                          line_iterator aLine,
                          nsIFrame* aFrame,
@@ -684,18 +688,18 @@ protected:
 
   // Compute the available inline size for a float.
   mozilla::LogicalRect AdjustFloatAvailableSpace(
-                         nsBlockReflowState&         aState,
+                         BlockReflowInput&         aState,
                          const mozilla::LogicalRect& aFloatAvailableSpace,
                          nsIFrame*                   aFloatFrame);
   // Computes the border-box inline size of the float
-  nscoord ComputeFloatISize(nsBlockReflowState&         aState,
+  nscoord ComputeFloatISize(BlockReflowInput&         aState,
                             const mozilla::LogicalRect& aFloatAvailableSpace,
                             nsIFrame*                   aFloat);
   // An incomplete aReflowStatus indicates the float should be split
   // but only if the available height is constrained.
   // aAdjustedAvailableSpace is the result of calling
   // nsBlockFrame::AdjustFloatAvailableSpace.
-  void ReflowFloat(nsBlockReflowState&         aState,
+  void ReflowFloat(BlockReflowInput&         aState,
                    const mozilla::LogicalRect& aAdjustedAvailableSpace,
                    nsIFrame*                   aFloat,
                    mozilla::LogicalMargin&     aFloatMargin,
@@ -717,7 +721,7 @@ protected:
    * @param aFrame the frame
    * @return true if a new frame was created, false if not
    */
-  bool CreateContinuationFor(nsBlockReflowState& aState,
+  bool CreateContinuationFor(BlockReflowInput& aState,
                              nsLineBox*          aLine,
                              nsIFrame*           aFrame);
 
@@ -726,11 +730,11 @@ protected:
    * page/column.  Set aKeepReflowGoing to false and set
    * flag aState.mReflowStatus as incomplete.
    */
-  void PushTruncatedLine(nsBlockReflowState& aState,
+  void PushTruncatedLine(BlockReflowInput& aState,
                          line_iterator       aLine,
                          bool*               aKeepReflowGoing);
 
-  void SplitLine(nsBlockReflowState& aState,
+  void SplitLine(BlockReflowInput& aState,
                  nsLineLayout& aLineLayout,
                  line_iterator aLine,
                  nsIFrame* aFrame,
@@ -741,7 +745,7 @@ protected:
    * one of our next-in-flows lines).
    * @return the pulled frame or nullptr
    */
-  nsIFrame* PullFrame(nsBlockReflowState& aState,
+  nsIFrame* PullFrame(BlockReflowInput& aState,
                       line_iterator       aLine);
 
   /**
@@ -765,14 +769,14 @@ protected:
    * @param aLineBefore a line in 'mLines' (or begin_lines() when
    *        pushing the first line)
    */
-  void PushLines(nsBlockReflowState& aState,
+  void PushLines(BlockReflowInput& aState,
                  nsLineList::iterator aLineBefore);
 
-  void PropagateFloatDamage(nsBlockReflowState& aState,
+  void PropagateFloatDamage(BlockReflowInput& aState,
                             nsLineBox* aLine,
                             nscoord aDeltaBCoord);
 
-  void CheckFloats(nsBlockReflowState& aState);
+  void CheckFloats(BlockReflowInput& aState);
 
   //----------------------------------------
   // List handling kludge
@@ -783,21 +787,50 @@ protected:
   // reflow.
   bool RenumberLists(nsPresContext* aPresContext);
 
+  /**
+   * Renumber lists for a single block frame
+   * @param aOrdinal Ordinal number to start counting at.
+   *        Modifies this number for each associated list
+   *        item. Changes in the numbering due to setting
+   *        the |value| attribute are included if |aForCounting|
+   *        is false. This value is both an input and output
+   *        of this function, with the output value being the
+   *        next ordinal number to be used.
+   * @param aIncrement Amount to increase by after visiting each associated
+   *        list item, unless overridden by |value|.
+   * @param aForCounting Whether we are counting the elements or actually
+   *        restyling them. When true, this simply visits all children,
+   *        ignoring |<li value="..">| changes, effectively counting them
+   *        and storing the result in |aOrdinal|. This is useful for
+   *        |<ol reversed>|, where we need to count the number of
+   *        applicable child list elements before numbering. When false,
+   *        this will restyle all applicable descendants, and the next
+   *        ordinal value will be stored in |aOrdinal|, taking into account
+   *        any changes from |<li value="..">|.
+   * @param aDepth Current depth in frame tree from root list element.
+   */
   static bool RenumberListsInBlock(nsPresContext* aPresContext,
                                    nsBlockFrame* aBlockFrame,
                                    int32_t* aOrdinal,
                                    int32_t aDepth,
-                                   int32_t aIncrement);
+                                   int32_t aIncrement,
+                                   bool aForCounting);
 
+  /**
+   * Renumber the lists for a single frame.
+   * May recurse into RenumberListsInBlock.
+   * See RenumberListsInBlock for description of parameters.
+   */
   static bool RenumberListsFor(nsPresContext* aPresContext, nsIFrame* aKid,
                                int32_t* aOrdinal, int32_t aDepth,
-                               int32_t aIncrement);
+                               int32_t aIncrement,
+                               bool aForCounting);
 
   static bool FrameStartsCounterScope(nsIFrame* aFrame);
 
   void ReflowBullet(nsIFrame* aBulletFrame,
-                    nsBlockReflowState& aState,
-                    nsHTMLReflowMetrics& aMetrics,
+                    BlockReflowInput& aState,
+                    ReflowOutput& aMetrics,
                     nscoord aLineTop);
 
   //----------------------------------------
@@ -888,7 +921,7 @@ protected:
   // XXXmats blocks rarely have floats, make it a frame property
   nsFrameList mFloats;
 
-  friend class nsBlockReflowState;
+  friend class mozilla::BlockReflowInput;
   friend class nsBlockInFlowLineIterator;
 
 #ifdef DEBUG

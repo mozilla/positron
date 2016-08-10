@@ -167,9 +167,17 @@ nsSimpleURI::Deserialize(const URIParams& aParams)
 NS_IMETHODIMP
 nsSimpleURI::GetSpec(nsACString &result)
 {
-    result = mScheme + NS_LITERAL_CSTRING(":") + mPath;
+    if (!result.Assign(mScheme, fallible) ||
+        !result.Append(NS_LITERAL_CSTRING(":"), fallible) ||
+        !result.Append(mPath, fallible)) {
+        return NS_ERROR_OUT_OF_MEMORY;
+    }
+
     if (mIsRefValid) {
-        result += NS_LITERAL_CSTRING("#") + mRef;
+        if (!result.Append(NS_LITERAL_CSTRING("#"), fallible) ||
+            !result.Append(mRef, fallible)) {
+            return NS_ERROR_OUT_OF_MEMORY;
+        }
     } else {
         MOZ_ASSERT(mRef.IsEmpty(), "mIsRefValid/mRef invariant broken");
     }
@@ -359,7 +367,9 @@ nsSimpleURI::SetPath(const nsACString &path)
     if (hashPos < 0) {
         mIsRefValid = false;
         mRef.Truncate(); // invariant: mRef should be empty when it's not valid
-        mPath = path;
+        if (!mPath.Assign(path, fallible)) {
+            return NS_ERROR_OUT_OF_MEMORY;
+        }
         return NS_OK;
     }
 
@@ -471,28 +481,51 @@ nsSimpleURI::SchemeIs(const char *i_Scheme, bool *o_Equals)
 }
 
 /* virtual */ nsSimpleURI*
-nsSimpleURI::StartClone(nsSimpleURI::RefHandlingEnum /* ignored */)
+nsSimpleURI::StartClone(nsSimpleURI::RefHandlingEnum refHandlingMode,
+                        const nsACString& newRef)
 {
-    return new nsSimpleURI();
+    nsSimpleURI* url = new nsSimpleURI();
+    SetRefOnClone(url, refHandlingMode, newRef);
+    return url;
+}
+
+/* virtual */ void
+nsSimpleURI::SetRefOnClone(nsSimpleURI* url,
+                           nsSimpleURI::RefHandlingEnum refHandlingMode,
+                           const nsACString& newRef)
+{
+    if (refHandlingMode == eHonorRef) {
+        url->mRef = mRef;
+        url->mIsRefValid = mIsRefValid;
+    } else if (refHandlingMode == eReplaceRef) {
+        url->SetRef(newRef);
+    }
 }
 
 NS_IMETHODIMP
 nsSimpleURI::Clone(nsIURI** result)
 {
-    return CloneInternal(eHonorRef, result);
+    return CloneInternal(eHonorRef, EmptyCString(), result);
 }
 
 NS_IMETHODIMP
 nsSimpleURI::CloneIgnoringRef(nsIURI** result)
 {
-    return CloneInternal(eIgnoreRef, result);
+    return CloneInternal(eIgnoreRef, EmptyCString(), result);
+}
+
+NS_IMETHODIMP
+nsSimpleURI::CloneWithNewRef(const nsACString &newRef, nsIURI** result)
+{
+    return CloneInternal(eReplaceRef, newRef, result);
 }
 
 nsresult
 nsSimpleURI::CloneInternal(nsSimpleURI::RefHandlingEnum refHandlingMode,
+                           const nsACString &newRef,
                            nsIURI** result)
 {
-    RefPtr<nsSimpleURI> url = StartClone(refHandlingMode);
+    RefPtr<nsSimpleURI> url = StartClone(refHandlingMode, newRef);
     if (!url)
         return NS_ERROR_OUT_OF_MEMORY;
 
@@ -500,10 +533,6 @@ nsSimpleURI::CloneInternal(nsSimpleURI::RefHandlingEnum refHandlingMode,
     // don't call any setter methods.
     url->mScheme = mScheme;
     url->mPath = mPath;
-    if (refHandlingMode == eHonorRef) {
-        url->mRef = mRef;
-        url->mIsRefValid = mIsRefValid;
-    }
 
     url.forget(result);
     return NS_OK;

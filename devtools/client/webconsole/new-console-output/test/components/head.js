@@ -12,13 +12,14 @@ var { require } = Cu.import("resource://devtools/shared/Loader.jsm", {});
 var { Assert } = require("resource://testing-common/Assert.jsm");
 var { BrowserLoader } = Cu.import("resource://devtools/client/shared/browser-loader.js", {});
 var DevToolsUtils = require("devtools/shared/DevToolsUtils");
+var flags = require("devtools/shared/flags");
 var { Task } = require("devtools/shared/task");
 var { DebuggerServer } = require("devtools/server/main");
 var { DebuggerClient } = require("devtools/shared/client/main");
 
 const Services = require("Services");
 
-DevToolsUtils.testing = true;
+flags.testing = true;
 var { require: browserRequire } = BrowserLoader({
   baseURI: "resource://devtools/client/webconsole/",
   window: this
@@ -28,6 +29,9 @@ let ReactDOM = browserRequire("devtools/client/shared/vendor/react-dom");
 let React = browserRequire("devtools/client/shared/vendor/react");
 var TestUtils = React.addons.TestUtils;
 
+const { stubConsoleMessages } = require("devtools/client/webconsole/new-console-output/test/stubs");
+
+// @TODO Remove this.
 let testCommands = new Map();
 testCommands.set("console.log()", {
   command: "console.log('foobar', 'test')",

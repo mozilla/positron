@@ -174,7 +174,6 @@
 #include "nsSMILAnimationController.h"
 #include "imgIContainer.h"
 #include "nsSVGUtils.h"
-#include "SVGElementFactory.h"
 
 #include "nsRefreshDriver.h"
 
@@ -192,7 +191,6 @@
 #include "nsTextNode.h"
 #include "mozilla/dom/Link.h"
 #include "mozilla/dom/HTMLElementBinding.h"
-#include "mozilla/dom/SVGElementBinding.h"
 #include "nsXULAppAPI.h"
 #include "mozilla/dom/Touch.h"
 #include "mozilla/dom/TouchEvent.h"
@@ -466,21 +464,6 @@ CustomElementCallback::CustomElementCallback(Element* aThisObject,
     mCallback(aCallback),
     mType(aCallbackType),
     mOwnerData(aOwnerData)
-{
-}
-
-CustomElementDefinition::CustomElementDefinition(JSObject* aPrototype,
-                                                 nsIAtom* aType,
-                                                 nsIAtom* aLocalName,
-                                                 LifecycleCallbacks* aCallbacks,
-                                                 uint32_t aNamespaceID,
-                                                 uint32_t aDocOrder)
-  : mPrototype(aPrototype),
-    mType(aType),
-    mLocalName(aLocalName),
-    mCallbacks(aCallbacks),
-    mNamespaceID(aNamespaceID),
-    mDocOrder(aDocOrder)
 {
 }
 
@@ -1742,10 +1725,6 @@ NS_IMPL_CYCLE_COLLECTION_CAN_SKIP_BEGIN(nsDocument)
     if (elm) {
       elm->MarkForCC();
     }
-    if (tmp->mExpandoAndGeneration.expando.isObject()) {
-      JS::ExposeObjectToActiveJS(
-        &(tmp->mExpandoAndGeneration.expando.toObject()));
-    }
     return true;
   }
 NS_IMPL_CYCLE_COLLECTION_CAN_SKIP_END
@@ -1931,13 +1910,7 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 NS_IMPL_CYCLE_COLLECTION_CLASS(nsDocument)
 
-NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN(nsDocument)
-  if (tmp->PreservingWrapper()) {
-    NS_IMPL_CYCLE_COLLECTION_TRACE_JS_MEMBER_CALLBACK(mExpandoAndGeneration.expando)
-  }
-  NS_IMPL_CYCLE_COLLECTION_TRACE_PRESERVED_WRAPPER
-NS_IMPL_CYCLE_COLLECTION_TRACE_END
-
+NS_IMPL_CYCLE_COLLECTION_TRACE_WRAPPERCACHE(nsDocument)
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsDocument)
   tmp->mInUnlinkOrDeletion = true;
@@ -2010,7 +1983,7 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsDocument)
   // else, and not unlink an awful lot here.
 
   tmp->mIdentifierMap.Clear();
-  tmp->mExpandoAndGeneration.Unlink();
+  tmp->mExpandoAndGeneration.OwnerUnlinked();
 
   if (tmp->mAnimationController) {
     tmp->mAnimationController->Unlink();
@@ -2469,7 +2442,8 @@ nsDocument::FillStyleSet(StyleSetHandle aStyleSet)
       }
     }
   } else {
-    NS_ERROR("stylo: nsStyleSheetService doesn't handle ServoStyleSheets yet");
+    NS_WARNING("stylo: Not yet checking nsStyleSheetService for Servo-backed "
+               "documents. See bug 1290224");
   }
 
   AppendSheetsToStyleSet(aStyleSet, mAdditionalSheets[eAgentSheet],
@@ -2662,33 +2636,6 @@ nsDocument::SendToConsole(nsCOMArray<nsISecurityConsoleMessage>& aMessages)
   }
 }
 
-bool
-nsDocument::IsLoopDocument(nsIChannel *aChannel)
-{
-  nsCOMPtr<nsIURI> chanURI;
-  nsresult rv = aChannel->GetOriginalURI(getter_AddRefs(chanURI));
-  NS_ENSURE_SUCCESS(rv, false);
-
-  bool isAbout = false;
-  bool isLoop = false;
-  rv = chanURI->SchemeIs("about", &isAbout);
-  NS_ENSURE_SUCCESS(rv, false);
-  if (isAbout) {
-    nsCOMPtr<nsIURI> loopURI;
-    rv = NS_NewURI(getter_AddRefs(loopURI), "about:loopconversation");
-    NS_ENSURE_SUCCESS(rv, false);
-    rv = chanURI->EqualsExceptRef(loopURI, &isLoop);
-    NS_ENSURE_SUCCESS(rv, false);
-    if (!isLoop) {
-      rv = NS_NewURI(getter_AddRefs(loopURI), "about:looppanel");
-      NS_ENSURE_SUCCESS(rv, false);
-      rv = chanURI->EqualsExceptRef(loopURI, &isLoop);
-      NS_ENSURE_SUCCESS(rv, false);
-    }
-  }
-  return isLoop;
-}
-
 void
 nsDocument::ApplySettingsFromCSP(bool aSpeculative)
 {
@@ -2813,9 +2760,6 @@ nsDocument::InitCSP(nsIChannel* aChannel)
   principal->GetAddonId(addonId);
   bool applyAddonCSP = !addonId.IsEmpty();
 
-  // Check if this is part of the Loop/Hello service
-  bool applyLoopCSP = IsLoopDocument(aChannel);
-
   // Check if this is a signed content to apply default CSP.
   bool applySignedContentCSP = false;
   nsCOMPtr<nsILoadInfo> loadInfo = aChannel->GetLoadInfo();
@@ -2827,7 +2771,6 @@ nsDocument::InitCSP(nsIChannel* aChannel)
   if (!applyAppDefaultCSP &&
       !applyAppManifestCSP &&
       !applyAddonCSP &&
-      !applyLoopCSP &&
       !applySignedContentCSP &&
       cspHeaderValue.IsEmpty() &&
       cspROHeaderValue.IsEmpty()) {
@@ -2909,17 +2852,6 @@ nsDocument::InitCSP(nsIChannel* aChannel)
     nsAdoptingString signedContentCSP =
       Preferences::GetString("security.signed_content.CSP.default");
     csp->AppendPolicy(signedContentCSP, false, false);
-  }
-
-  // ----- if the doc is part of Loop, apply the loop CSP
-  if (applyLoopCSP) {
-    nsAdoptingString loopCSP;
-    loopCSP = Preferences::GetString("loop.CSP");
-    NS_ASSERTION(loopCSP, "Missing loop.CSP preference");
-    // If the pref has been removed, we continue without setting a CSP
-    if (loopCSP) {
-      csp->AppendPolicy(loopCSP, false, false);
-    }
   }
 
   // ----- if there's a full-strength CSP header, apply it.
@@ -3043,7 +2975,7 @@ GetFormattedTimeString(PRTime aTime, nsAString& aFormattedTimeString)
   } else {
     // If we for whatever reason failed to find the last modified time
     // (or even the current time), fall back to what NS4.x returned.
-    aFormattedTimeString.AssignLiteral(MOZ_UTF16("01/01/1970 00:00:00"));
+    aFormattedTimeString.AssignLiteral(u"01/01/1970 00:00:00");
   }
 }
 
@@ -4795,7 +4727,8 @@ nsDocument::SetScriptGlobalObject(nsIScriptGlobalObject *aScriptGlobalObject)
     }
 
     MaybeRescheduleAnimationFrameNotifications();
-    if (Preferences::GetBool("dom.webcomponents.enabled")) {
+    if (Preferences::GetBool("dom.webcomponents.enabled") ||
+        Preferences::GetBool("dom.webcomponents.customelements.enabled")) {
       mRegistry = new Registry();
     }
   }
@@ -5607,7 +5540,8 @@ nsDocument::CreateElement(const nsAString& aTagName,
 {
   *aReturn = nullptr;
   ErrorResult rv;
-  nsCOMPtr<Element> element = nsIDocument::CreateElement(aTagName, rv);
+  ElementCreationOptions options;
+  nsCOMPtr<Element> element = CreateElement(aTagName, options, rv);
   NS_ENSURE_FALSE(rv.Failed(), rv.StealNSResult());
   return CallQueryInterface(element, aReturn);
 }
@@ -5624,8 +5558,32 @@ bool IsLowercaseASCII(const nsAString& aValue)
   return true;
 }
 
+CustomElementDefinition*
+nsDocument::LookupCustomElementDefinition(const nsAString& aLocalName,
+                                          uint32_t aNameSpaceID,
+                                          const nsAString* aIs)
+{
+  if (!mRegistry || aNameSpaceID != kNameSpaceID_XHTML) {
+    return nullptr;
+  }
+
+  nsCOMPtr<nsIAtom> localNameAtom = NS_Atomize(aLocalName);
+  nsCOMPtr<nsIAtom> typeAtom = aIs ? NS_Atomize(*aIs) : localNameAtom;
+
+  CustomElementDefinition* data;
+  CustomElementHashKey key(aNameSpaceID, typeAtom);
+  if (mRegistry->mCustomDefinitions.Get(&key, &data) &&
+      data->mLocalName == localNameAtom) {
+    return data;
+  }
+
+  return nullptr;
+}
+
 already_AddRefed<Element>
-nsIDocument::CreateElement(const nsAString& aTagName, ErrorResult& rv)
+nsDocument::CreateElement(const nsAString& aTagName,
+                          const ElementCreationOptions& aOptions,
+                          ErrorResult& rv)
 {
   rv = nsContentUtils::CheckQName(aTagName, false);
   if (rv.Failed()) {
@@ -5638,8 +5596,17 @@ nsIDocument::CreateElement(const nsAString& aTagName, ErrorResult& rv)
     nsContentUtils::ASCIIToLower(aTagName, lcTagName);
   }
 
-  return CreateElem(needsLowercase ? lcTagName : aTagName, nullptr,
-                    mDefaultElementType);
+  // Throw NotFoundError if 'is' is not-null and definition is null
+  nsString* is = CheckCustomElementName(
+    aOptions, needsLowercase ? lcTagName : aTagName, mDefaultElementType, rv);
+  if (rv.Failed()) {
+    return nullptr;
+  }
+
+  RefPtr<Element> elem = CreateElem(
+    needsLowercase ? lcTagName : aTagName, nullptr, mDefaultElementType, is);
+
+  return elem.forget();
 }
 
 void
@@ -5647,7 +5614,7 @@ nsDocument::SetupCustomElement(Element* aElement,
                                uint32_t aNamespaceID,
                                const nsAString* aTypeExtension)
 {
-  if (!mRegistry) {
+  if (!mRegistry || aNamespaceID != kNameSpaceID_XHTML) {
     return;
   }
 
@@ -5661,9 +5628,10 @@ nsDocument::SetupCustomElement(Element* aElement,
     aElement->SetAttr(kNameSpaceID_None, nsGkAtoms::is, *aTypeExtension, true);
   }
 
-  CustomElementDefinition* data;
-  CustomElementHashKey key(aNamespaceID, typeAtom);
-  if (!mRegistry->mCustomDefinitions.Get(&key, &data)) {
+  CustomElementDefinition* data = LookupCustomElementDefinition(
+    aElement->NodeInfo()->LocalName(), aNamespaceID, aTypeExtension);
+
+  if (!data) {
     // The type extension doesn't exist in the registry,
     // thus we don't need to enqueue callback or adjust
     // the "is" attribute, but it is possibly an upgrade candidate.
@@ -5683,43 +5651,25 @@ nsDocument::SetupCustomElement(Element* aElement,
   EnqueueLifecycleCallback(nsIDocument::eCreated, aElement, nullptr, data);
 }
 
-already_AddRefed<Element>
-nsDocument::CreateElement(const nsAString& aTagName,
-                          const nsAString& aTypeExtension,
-                          ErrorResult& rv)
-{
-  RefPtr<Element> elem = nsIDocument::CreateElement(aTagName, rv);
-  if (rv.Failed()) {
-    return nullptr;
-  }
-
-  if (!aTypeExtension.IsVoid() &&
-      !aTagName.Equals(aTypeExtension)) {
-    // do not process 'is' if it is null or the extended type is the same as
-    // the localName
-    SetupCustomElement(elem, GetDefaultNamespaceID(), &aTypeExtension);
-  }
-
-  return elem.forget();
-}
-
 NS_IMETHODIMP
 nsDocument::CreateElementNS(const nsAString& aNamespaceURI,
                             const nsAString& aQualifiedName,
                             nsIDOMElement** aReturn)
 {
   *aReturn = nullptr;
+  ElementCreationOptions options;
   ErrorResult rv;
   nsCOMPtr<Element> element =
-    nsIDocument::CreateElementNS(aNamespaceURI, aQualifiedName, rv);
+    CreateElementNS(aNamespaceURI, aQualifiedName, options, rv);
   NS_ENSURE_FALSE(rv.Failed(), rv.StealNSResult());
   return CallQueryInterface(element, aReturn);
 }
 
 already_AddRefed<Element>
-nsIDocument::CreateElementNS(const nsAString& aNamespaceURI,
-                             const nsAString& aQualifiedName,
-                             ErrorResult& rv)
+nsDocument::CreateElementNS(const nsAString& aNamespaceURI,
+                            const nsAString& aQualifiedName,
+                            const ElementCreationOptions& aOptions,
+                            ErrorResult& rv)
 {
   RefPtr<mozilla::dom::NodeInfo> nodeInfo;
   rv = nsContentUtils::GetNodeInfoFromQName(aNamespaceURI,
@@ -5731,47 +5681,21 @@ nsIDocument::CreateElementNS(const nsAString& aNamespaceURI,
     return nullptr;
   }
 
+  // Throw NotFoundError if 'is' is not-null and definition is null
+  nsString* is = CheckCustomElementName(
+    aOptions, aQualifiedName, nodeInfo->NamespaceID(), rv);
+  if (rv.Failed()) {
+    return nullptr;
+  }
+
   nsCOMPtr<Element> element;
   rv = NS_NewElement(getter_AddRefs(element), nodeInfo.forget(),
-                     NOT_FROM_PARSER);
+                     NOT_FROM_PARSER, is);
   if (rv.Failed()) {
     return nullptr;
   }
+
   return element.forget();
-}
-
-already_AddRefed<Element>
-nsDocument::CreateElementNS(const nsAString& aNamespaceURI,
-                            const nsAString& aQualifiedName,
-                            const nsAString& aTypeExtension,
-                            ErrorResult& rv)
-{
-  RefPtr<Element> elem = nsIDocument::CreateElementNS(aNamespaceURI,
-                                                        aQualifiedName,
-                                                        rv);
-  if (rv.Failed()) {
-    return nullptr;
-  }
-
-  if (aTypeExtension.IsVoid() ||
-      aQualifiedName.Equals(aTypeExtension)) {
-    // do not process 'is' if it is null or the extended type is the same as
-    // the localName
-    return elem.forget();
-  }
-
-  int32_t nameSpaceId = kNameSpaceID_Wildcard;
-  if (!aNamespaceURI.EqualsLiteral("*")) {
-    rv = nsContentUtils::NameSpaceManager()->RegisterNameSpace(aNamespaceURI,
-                                                               nameSpaceId);
-    if (rv.Failed()) {
-      return nullptr;
-    }
-  }
-
-  SetupCustomElement(elem, nameSpaceId, &aTypeExtension);
-
-  return elem.forget();
 }
 
 NS_IMETHODIMP
@@ -6307,18 +6231,11 @@ nsDocument::RegisterElement(JSContext* aCx, const nsAString& aType,
   JS::Rooted<JSObject*> protoObject(aCx);
   {
     JS::Rooted<JSObject*> htmlProto(aCx);
-    JS::Rooted<JSObject*> svgProto(aCx);
     {
       JSAutoCompartment ac(aCx, global);
 
       htmlProto = HTMLElementBinding::GetProtoObjectHandle(aCx);
       if (!htmlProto) {
-        rv.Throw(NS_ERROR_OUT_OF_MEMORY);
-        return;
-      }
-
-      svgProto = SVGElementBinding::GetProtoObjectHandle(aCx);
-      if (!svgProto) {
         rv.Throw(NS_ERROR_OUT_OF_MEMORY);
         return;
       }
@@ -6373,20 +6290,13 @@ nsDocument::RegisterElement(JSContext* aCx, const nsAString& aType,
 
       JS::Rooted<JSObject*> protoProto(aCx, protoObject);
 
-      if (!JS_WrapObject(aCx, &htmlProto) || !JS_WrapObject(aCx, &svgProto)) {
+      if (!JS_WrapObject(aCx, &htmlProto)) {
         rv.Throw(NS_ERROR_DOM_NOT_SUPPORTED_ERR);
         return;
       }
 
-      // If PROTOTYPE's interface inherits from SVGElement, set NAMESPACE to SVG
-      // Namespace.
       while (protoProto) {
         if (protoProto == htmlProto) {
-          break;
-        }
-
-        if (protoProto == svgProto) {
-          namespaceID = kNameSpaceID_SVG;
           break;
         }
 
@@ -6400,20 +6310,15 @@ nsDocument::RegisterElement(JSContext* aCx, const nsAString& aType,
     // If name was provided and not null...
     if (!lcName.IsEmpty()) {
       // Let BASE be the element interface for NAME and NAMESPACE.
-      bool known = false;
       nameAtom = NS_Atomize(lcName);
-      if (namespaceID == kNameSpaceID_XHTML) {
-        nsIParserService* ps = nsContentUtils::GetParserService();
-        if (!ps) {
-          rv.Throw(NS_ERROR_UNEXPECTED);
-          return;
-        }
-
-        known =
-          ps->HTMLCaseSensitiveAtomTagToId(nameAtom) != eHTMLTag_userdefined;
-      } else {
-        known = SVGElementFactory::Exists(nameAtom);
+      nsIParserService* ps = nsContentUtils::GetParserService();
+      if (!ps) {
+        rv.Throw(NS_ERROR_UNEXPECTED);
+        return;
       }
+
+      bool known =
+        ps->HTMLCaseSensitiveAtomTagToId(nameAtom) != eHTMLTag_userdefined;
 
       // If BASE does not exist or is an interface for a custom element, set ERROR
       // to InvalidName and stop.
@@ -6423,12 +6328,6 @@ nsDocument::RegisterElement(JSContext* aCx, const nsAString& aType,
         return;
       }
     } else {
-      // If NAMESPACE is SVG Namespace, set ERROR to InvalidName and stop.
-      if (namespaceID == kNameSpaceID_SVG) {
-        rv.Throw(NS_ERROR_UNEXPECTED);
-        return;
-      }
-
       nameAtom = typeAtom;
     }
   } // Leaving the document's compartment for the LifecycleCallbacks init
@@ -7082,8 +6981,8 @@ nsDocument::CreateNodeIterator(nsIDOMNode *aRoot,
   NS_ENSURE_TRUE(root, NS_ERROR_UNEXPECTED);
 
   ErrorResult rv;
-  NodeFilterHolder holder(aFilter);
-  *_retval = nsIDocument::CreateNodeIterator(*root, aWhatToShow, holder,
+  *_retval = nsIDocument::CreateNodeIterator(*root, aWhatToShow,
+                                             NodeFilterHolder(aFilter),
                                              rv).take();
   return rv.StealNSResult();
 }
@@ -7093,18 +6992,17 @@ nsIDocument::CreateNodeIterator(nsINode& aRoot, uint32_t aWhatToShow,
                                 NodeFilter* aFilter,
                                 ErrorResult& rv) const
 {
-  NodeFilterHolder holder(aFilter);
-  return CreateNodeIterator(aRoot, aWhatToShow, holder, rv);
+  return CreateNodeIterator(aRoot, aWhatToShow, NodeFilterHolder(aFilter), rv);
 }
 
 already_AddRefed<NodeIterator>
 nsIDocument::CreateNodeIterator(nsINode& aRoot, uint32_t aWhatToShow,
-                                const NodeFilterHolder& aFilter,
+                                NodeFilterHolder aFilter,
                                 ErrorResult& rv) const
 {
   nsINode* root = &aRoot;
   RefPtr<NodeIterator> iterator = new NodeIterator(root, aWhatToShow,
-                                                     aFilter);
+                                                   Move(aFilter));
   return iterator.forget();
 }
 
@@ -7125,8 +7023,8 @@ nsDocument::CreateTreeWalker(nsIDOMNode *aRoot,
   NS_ENSURE_TRUE(root, NS_ERROR_DOM_NOT_SUPPORTED_ERR);
 
   ErrorResult rv;
-  NodeFilterHolder holder(aFilter);
-  *_retval = nsIDocument::CreateTreeWalker(*root, aWhatToShow, holder,
+  *_retval = nsIDocument::CreateTreeWalker(*root, aWhatToShow,
+                                           NodeFilterHolder(aFilter),
                                            rv).take();
   return rv.StealNSResult();
 }
@@ -7136,17 +7034,15 @@ nsIDocument::CreateTreeWalker(nsINode& aRoot, uint32_t aWhatToShow,
                               NodeFilter* aFilter,
                               ErrorResult& rv) const
 {
-  NodeFilterHolder holder(aFilter);
-  return CreateTreeWalker(aRoot, aWhatToShow, holder, rv);
+  return CreateTreeWalker(aRoot, aWhatToShow, NodeFilterHolder(aFilter), rv);
 }
 
 already_AddRefed<TreeWalker>
 nsIDocument::CreateTreeWalker(nsINode& aRoot, uint32_t aWhatToShow,
-                              const NodeFilterHolder& aFilter,
-                              ErrorResult& rv) const
+                              NodeFilterHolder aFilter, ErrorResult& rv) const
 {
   nsINode* root = &aRoot;
-  RefPtr<TreeWalker> walker = new TreeWalker(root, aWhatToShow, aFilter);
+  RefPtr<TreeWalker> walker = new TreeWalker(root, aWhatToShow, Move(aFilter));
   return walker.forget();
 }
 
@@ -8801,7 +8697,7 @@ nsDocument::RetrieveRelevantHeaders(nsIChannel *aChannel)
 
 already_AddRefed<Element>
 nsDocument::CreateElem(const nsAString& aName, nsIAtom *aPrefix,
-                       int32_t aNamespaceID)
+                       int32_t aNamespaceID, nsAString* aIs)
 {
 #ifdef DEBUG
   nsAutoString qName;
@@ -8828,7 +8724,7 @@ nsDocument::CreateElem(const nsAString& aName, nsIAtom *aPrefix,
 
   nsCOMPtr<Element> element;
   nsresult rv = NS_NewElement(getter_AddRefs(element), nodeInfo.forget(),
-                              NOT_FROM_PARSER);
+                              NOT_FROM_PARSER, aIs);
   return NS_SUCCEEDED(rv) ? element.forget() : nullptr;
 }
 
@@ -9463,7 +9359,7 @@ nsDocument::OnPageHide(bool aPersisted,
     SetImagesNeedAnimating(false);
   }
 
-  MozExitPointerLock();
+  ExitPointerLock();
 
   // Now send out a PageHide event.
   nsCOMPtr<EventTarget> target = aDispatchStartTarget;
@@ -9769,16 +9665,16 @@ nsIDocument::GetReadyState(nsAString& aReadyState) const
 {
   switch(mReadyState) {
   case READYSTATE_LOADING :
-    aReadyState.AssignLiteral(MOZ_UTF16("loading"));
+    aReadyState.AssignLiteral(u"loading");
     break;
   case READYSTATE_INTERACTIVE :
-    aReadyState.AssignLiteral(MOZ_UTF16("interactive"));
+    aReadyState.AssignLiteral(u"interactive");
     break;
   case READYSTATE_COMPLETE :
-    aReadyState.AssignLiteral(MOZ_UTF16("complete"));
+    aReadyState.AssignLiteral(u"complete");
     break;
   default:
-    aReadyState.AssignLiteral(MOZ_UTF16("uninitialized"));
+    aReadyState.AssignLiteral(u"uninitialized");
   }
 }
 
@@ -12300,7 +12196,7 @@ DispatchPointerLockChange(nsIDocument* aTarget)
 
   RefPtr<AsyncEventDispatcher> asyncDispatcher =
     new AsyncEventDispatcher(aTarget,
-                             NS_LITERAL_STRING("mozpointerlockchange"),
+                             NS_LITERAL_STRING("pointerlockchange"),
                              true,
                              false);
   asyncDispatcher->PostDOMEvent();
@@ -12315,7 +12211,7 @@ DispatchPointerLockError(nsIDocument* aTarget, const char* aMessage)
 
   RefPtr<AsyncEventDispatcher> asyncDispatcher =
     new AsyncEventDispatcher(aTarget,
-                             NS_LITERAL_STRING("mozpointerlockerror"),
+                             NS_LITERAL_STRING("pointerlockerror"),
                              true,
                              false);
   asyncDispatcher->PostDOMEvent();
@@ -12395,6 +12291,39 @@ GetPointerLockError(Element* aElement, Element* aCurrentLock,
   return nullptr;
 }
 
+static void
+ChangePointerLockedElement(Element* aElement, nsIDocument* aDocument,
+                           Element* aPointerLockedElement)
+{
+  // aDocument here is not really necessary, as it is the uncomposed
+  // document of both aElement and aPointerLockedElement as far as one
+  // is not nullptr, and they wouldn't both be nullptr in any case.
+  // But since the caller of this function should have known what the
+  // document is, we just don't try to figure out what it should be.
+  MOZ_ASSERT(aDocument);
+  MOZ_ASSERT(aElement != aPointerLockedElement);
+  if (aPointerLockedElement) {
+    MOZ_ASSERT(aPointerLockedElement->GetUncomposedDoc() == aDocument);
+    aPointerLockedElement->ClearPointerLock();
+  }
+  if (aElement) {
+    MOZ_ASSERT(aElement->GetUncomposedDoc() == aDocument);
+    aElement->SetPointerLock();
+    EventStateManager::sPointerLockedElement = do_GetWeakReference(aElement);
+    EventStateManager::sPointerLockedDoc = do_GetWeakReference(aDocument);
+    NS_ASSERTION(EventStateManager::sPointerLockedElement &&
+                 EventStateManager::sPointerLockedDoc,
+                 "aElement and this should support weak references!");
+  } else {
+    EventStateManager::sPointerLockedElement = nullptr;
+    EventStateManager::sPointerLockedDoc = nullptr;
+  }
+  // Retarget all events to aElement via capture or
+  // stop retargeting if aElement is nullptr.
+  nsIPresShell::SetCapturingContent(aElement, CAPTURE_POINTERLOCK);
+  DispatchPointerLockChange(aDocument);
+}
+
 NS_IMETHODIMP
 PointerLockRequest::Run()
 {
@@ -12416,6 +12345,12 @@ PointerLockRequest::Run()
     }
     // Note, we must bypass focus change, so pass true as the last parameter!
     error = GetPointerLockError(e, pointerLockedElement, true);
+    // Another element in the same document is requesting pointer lock,
+    // just grant it without user input check.
+    if (!error && pointerLockedElement) {
+      ChangePointerLockedElement(e, d, pointerLockedElement);
+      return NS_OK;
+    }
   }
   // If it is neither user input initiated, nor requested in fullscreen,
   // it should be rejected.
@@ -12430,18 +12365,10 @@ PointerLockRequest::Run()
     return NS_OK;
   }
 
-  e->SetPointerLock();
-  EventStateManager::sPointerLockedElement = do_GetWeakReference(e);
-  EventStateManager::sPointerLockedDoc = do_GetWeakReference(doc);
-  NS_ASSERTION(EventStateManager::sPointerLockedElement &&
-               EventStateManager::sPointerLockedDoc,
-               "aElement and this should support weak references!");
-
+  ChangePointerLockedElement(e, d, nullptr);
   nsContentUtils::DispatchEventOnlyToChrome(
     doc, ToSupports(e), NS_LITERAL_STRING("MozDOMPointerLock:Entered"),
     /* Bubbles */ true, /* Cancelable */ false, /* DefaultAction */ nullptr);
-
-  DispatchPointerLockChange(d);
   return NS_OK;
 }
 
@@ -12533,19 +12460,12 @@ nsDocument::UnlockPointer(nsIDocument* aDoc)
 
   nsCOMPtr<Element> pointerLockedElement =
     do_QueryReferent(EventStateManager::sPointerLockedElement);
-  if (pointerLockedElement) {
-    pointerLockedElement->ClearPointerLock();
-  }
-
-  EventStateManager::sPointerLockedElement = nullptr;
-  EventStateManager::sPointerLockedDoc = nullptr;
+  ChangePointerLockedElement(nullptr, doc, pointerLockedElement);
 
   nsContentUtils::DispatchEventOnlyToChrome(
     doc, ToSupports(pointerLockedElement),
     NS_LITERAL_STRING("MozDOMPointerLock:Exited"),
     /* Bubbles */ true, /* Cancelable */ false, /* DefaultAction */ nullptr);
-
-  DispatchPointerLockChange(pointerLockedDoc);
 }
 
 void
@@ -12557,21 +12477,21 @@ nsIDocument::UnlockPointer(nsIDocument* aDoc)
 NS_IMETHODIMP
 nsDocument::MozExitPointerLock()
 {
-  nsIDocument::MozExitPointerLock();
+  nsIDocument::ExitPointerLock();
   return NS_OK;
 }
 
 NS_IMETHODIMP
 nsDocument::GetMozPointerLockElement(nsIDOMElement** aPointerLockedElement)
 {
-  Element* el = nsIDocument::GetMozPointerLockElement();
+  Element* el = nsIDocument::GetPointerLockElement();
   nsCOMPtr<nsIDOMElement> retval = do_QueryInterface(el);
   retval.forget(aPointerLockedElement);
   return NS_OK;
 }
 
 Element*
-nsIDocument::GetMozPointerLockElement()
+nsIDocument::GetPointerLockElement()
 {
   nsCOMPtr<Element> pointerLockedElement =
     do_QueryReferent(EventStateManager::sPointerLockedElement);
@@ -13406,7 +13326,8 @@ nsIDocument::FlushUserFontSet()
             return;
           }
         } else {
-          NS_ERROR("stylo: ServoStyleSets cannot handle @font-face rules yet");
+          NS_WARNING("stylo: ServoStyleSets cannot handle @font-face rules yet. "
+                     "See bug 1290237.");
         }
       }
 
@@ -13495,6 +13416,10 @@ nsIDocument::UpdateStyleBackendType()
 {
   MOZ_ASSERT(mStyleBackendType == StyleBackendType(0),
              "no need to call UpdateStyleBackendType now");
+
+  // Assume Gecko by default.
+  mStyleBackendType = StyleBackendType::Gecko;
+
 #ifdef MOZ_STYLO
   // XXX For now we use a Servo-backed style set only for (X)HTML documents
   // in content docshells.  This should let us avoid implementing XUL-specific
@@ -13503,14 +13428,33 @@ nsIDocument::UpdateStyleBackendType()
   // document before we have a pres shell (i.e. before we make the decision
   // here about whether to use a Gecko- or Servo-backed style system), so
   // we avoid Servo-backed style sets for SVG documents.
-  NS_ASSERTION(mDocumentContainer, "stylo: calling UpdateStyleBackendType "
-                                   "before we have a docshell");
-  mStyleBackendType =
-    nsLayoutUtils::SupportsServoStyleBackend(this) &&
-    mDocumentContainer ?
-      StyleBackendType::Servo :
-      StyleBackendType::Gecko;
-#else
-  mStyleBackendType = StyleBackendType::Gecko;
+  if (!mDocumentContainer) {
+    NS_WARNING("stylo: No docshell yet, assuming Gecko style system");
+  } else if (nsLayoutUtils::SupportsServoStyleBackend(this)) {
+    mStyleBackendType = StyleBackendType::Servo;
+  }
 #endif
+}
+
+nsString*
+nsDocument::CheckCustomElementName(const ElementCreationOptions& aOptions,
+                                   const nsAString& aLocalName,
+                                   uint32_t aNamespaceID,
+                                   ErrorResult& rv)
+{
+  // only check aOptions if 'is' is passed and the webcomponents preference
+  // is enabled
+  if (!aOptions.mIs.WasPassed() ||
+      !Preferences::GetBool("dom.webcomponents.enabled")) {
+      return nullptr;
+  }
+
+  nsString* is = const_cast<nsString*>(&(aOptions.mIs.Value()));
+
+  // Throw NotFoundError if 'is' is not-null and definition is null
+  if (!LookupCustomElementDefinition(aLocalName, aNamespaceID, is)) {
+      rv.Throw(NS_ERROR_DOM_NOT_FOUND_ERR);
+  }
+
+  return is;
 }

@@ -8,6 +8,7 @@
 #include "GLContext.h"
 #include "mozilla/CheckedInt.h"
 #include "mozilla/UniquePtrExtensions.h"
+#include "nsPrintfCString.h"
 #include "WebGLBuffer.h"
 #include "WebGLContextUtils.h"
 #include "WebGLFramebuffer.h"
@@ -135,7 +136,13 @@ ScopedResolveTexturesForDraw::ScopedResolveTexturesForDraw(WebGLContext* webgl,
             if (fakeBlack == FakeBlackType::None)
                 continue;
 
-            mWebGL->BindFakeBlack(texUnit, tex->Target(), fakeBlack);
+            if (!mWebGL->BindFakeBlack(texUnit, tex->Target(), fakeBlack)) {
+                mWebGL->ErrorOutOfMemory("%s: Failed to create fake black texture.",
+                                         funcName);
+                *out_error = true;
+                return;
+            }
+
             mRebindRequests.push_back({texUnit, tex});
         }
     }
@@ -158,7 +165,7 @@ ScopedResolveTexturesForDraw::~ScopedResolveTexturesForDraw()
     gl->fActiveTexture(LOCAL_GL_TEXTURE0 + mWebGL->mActiveTexture);
 }
 
-void
+bool
 WebGLContext::BindFakeBlack(uint32_t texUnit, TexTarget target, FakeBlackType fakeBlack)
 {
     MOZ_ASSERT(fakeBlack == FakeBlackType::RGBA0000 ||
@@ -197,12 +204,16 @@ WebGLContext::BindFakeBlack(uint32_t texUnit, TexTarget target, FakeBlackType fa
     UniquePtr<FakeBlackTexture>& fakeBlackTex = *slot;
 
     if (!fakeBlackTex) {
-        fakeBlackTex.reset(new FakeBlackTexture(gl, target, fakeBlack));
+        fakeBlackTex = FakeBlackTexture::Create(gl, target, fakeBlack);
+        if (!fakeBlackTex) {
+            return false;
+        }
     }
 
     gl->fActiveTexture(LOCAL_GL_TEXTURE0 + texUnit);
     gl->fBindTexture(target.get(), fakeBlackTex->mGLName);
     gl->fActiveTexture(LOCAL_GL_TEXTURE0 + mActiveTexture);
+    return true;
 }
 
 ////////////////////////////////////////
@@ -245,6 +256,16 @@ WebGLContext::DrawArrays_check(GLint first, GLsizei count, GLsizei primcount,
 
     if (!ValidateStencilParamsForDrawCall()) {
         return false;
+    }
+
+    if (IsWebGL2() && !gl->IsSupported(gl::GLFeature::prim_restart_fixed)) {
+        MOZ_ASSERT(gl->IsSupported(gl::GLFeature::prim_restart));
+        if (mPrimRestartTypeBytes != 4) {
+            mPrimRestartTypeBytes = 4;
+
+            // OSX has issues leaving this as 0.
+            gl->fPrimitiveRestartIndex(UINT32_MAX);
+        }
     }
 
     // If count is 0, there's nothing to do.
@@ -402,6 +423,20 @@ WebGLContext::DrawElements_check(GLsizei count, GLenum type,
                               info);
         return false;
     }
+
+    ////
+
+    if (IsWebGL2() && !gl->IsSupported(gl::GLFeature::prim_restart_fixed)) {
+        MOZ_ASSERT(gl->IsSupported(gl::GLFeature::prim_restart));
+        if (mPrimRestartTypeBytes != bytesPerElem) {
+            mPrimRestartTypeBytes = bytesPerElem;
+
+            const uint32_t ones = UINT32_MAX >> (4 - mPrimRestartTypeBytes);
+            gl->fPrimitiveRestartIndex(ones);
+        }
+    }
+
+    ////
 
     const GLsizei first = byteOffset / bytesPerElem;
     const CheckedUint32 checked_byteCount = bytesPerElem * CheckedUint32(count);
@@ -872,10 +907,9 @@ CreateGLTexture(gl::GLContext* gl)
     return ret;
 }
 
-WebGLContext::FakeBlackTexture::FakeBlackTexture(gl::GLContext* gl, TexTarget target,
-                                                 FakeBlackType type)
-    : mGL(gl)
-    , mGLName(CreateGLTexture(gl))
+UniquePtr<WebGLContext::FakeBlackTexture>
+WebGLContext::FakeBlackTexture::Create(gl::GLContext* gl, TexTarget target,
+                                       FakeBlackType type)
 {
     GLenum texFormat;
     switch (type) {
@@ -891,10 +925,11 @@ WebGLContext::FakeBlackTexture::FakeBlackTexture(gl::GLContext* gl, TexTarget ta
         MOZ_CRASH("GFX: bad type");
     }
 
-    gl::ScopedBindTexture scopedBind(mGL, mGLName, target.get());
+    UniquePtr<FakeBlackTexture> result(new FakeBlackTexture(gl));
+    gl::ScopedBindTexture scopedBind(gl, result->mGLName, target.get());
 
-    mGL->fTexParameteri(target.get(), LOCAL_GL_TEXTURE_MIN_FILTER, LOCAL_GL_NEAREST);
-    mGL->fTexParameteri(target.get(), LOCAL_GL_TEXTURE_MAG_FILTER, LOCAL_GL_NEAREST);
+    gl->fTexParameteri(target.get(), LOCAL_GL_TEXTURE_MIN_FILTER, LOCAL_GL_NEAREST);
+    gl->fTexParameteri(target.get(), LOCAL_GL_TEXTURE_MAG_FILTER, LOCAL_GL_NEAREST);
 
     // We allocate our zeros on the heap, and we overallocate (16 bytes instead of 4) to
     // minimize the risk of running into a driver bug in texImage2D, as it is a bit
@@ -905,54 +940,31 @@ WebGLContext::FakeBlackTexture::FakeBlackTexture(gl::GLContext* gl, TexTarget ta
     UniqueBuffer zeros = moz_xcalloc(1, 16); // Infallible allocation.
 
     MOZ_ASSERT(gl->IsCurrent());
-    auto logANGLEError = [](GLenum source, GLenum type, GLuint id, GLenum severity,
-                            GLsizei length, const GLchar* message, const GLvoid* userParam)
-    {
-        gfxCriticalNote << message;
-    };
-
-    if (gl->IsANGLE()) {
-      gl->fEnable(LOCAL_GL_DEBUG_OUTPUT);
-      gl->fDebugMessageCallback(logANGLEError, nullptr);
-      gl->fDebugMessageControl(LOCAL_GL_DONT_CARE,
-                               LOCAL_GL_DONT_CARE,
-                               LOCAL_GL_DONT_CARE,
-                               0, nullptr,
-                               true);
-    }
 
     if (target == LOCAL_GL_TEXTURE_CUBE_MAP) {
         for (int i = 0; i < 6; ++i) {
             const TexImageTarget curTarget = LOCAL_GL_TEXTURE_CUBE_MAP_POSITIVE_X + i;
-            const GLenum error = DoTexImage(mGL, curTarget.get(), 0, &dui, 1, 1, 1,
+            const GLenum error = DoTexImage(gl, curTarget.get(), 0, &dui, 1, 1, 1,
                                             zeros.get());
             if (error) {
-                const nsPrintfCString text("DoTexImage failed with `error`: 0x%04x, "
-                                           "for `curTarget`: 0x%04x, "
-                                           "`dui`: {0x%04x, 0x%04x, 0x%04x}.",
-                                           error, curTarget.get(), dui.internalFormat,
-                                           dui.unpackFormat, dui.unpackType);
-                gfxCriticalError() << text.BeginReading();
-                MOZ_CRASH("GFX: Unexpected error during cube map FakeBlack creation.");
+                return nullptr;
             }
         }
     } else {
-        const GLenum error = DoTexImage(mGL, target.get(), 0, &dui, 1, 1, 1,
+        const GLenum error = DoTexImage(gl, target.get(), 0, &dui, 1, 1, 1,
                                         zeros.get());
         if (error) {
-            const nsPrintfCString text("DoTexImage failed with `error`: 0x%04x, "
-                                       "for `target`: 0x%04x, "
-                                       "`dui`: {0x%04x, 0x%04x, 0x%04x}.",
-                                       error, target.get(), dui.internalFormat,
-                                       dui.unpackFormat, dui.unpackType);
-            gfxCriticalError() << text.BeginReading();
-            MOZ_CRASH("GFX: Unexpected error during FakeBlack creation.");
+            return nullptr;
         }
     }
 
-    if (gl->IsANGLE()) {
-      gl->fDisable(LOCAL_GL_DEBUG_OUTPUT);
-    }
+    return result;
+}
+
+WebGLContext::FakeBlackTexture::FakeBlackTexture(gl::GLContext* gl)
+    : mGL(gl)
+    , mGLName(CreateGLTexture(gl))
+{
 }
 
 WebGLContext::FakeBlackTexture::~FakeBlackTexture()

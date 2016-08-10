@@ -54,8 +54,7 @@ HttpServer::Init(int32_t aPort, bool aHttps, HttpServerListener* aListener)
   if (mHttps) {
     nsCOMPtr<nsILocalCertService> lcs =
       do_CreateInstance("@mozilla.org/security/local-cert-service;1");
-    nsresult rv = lcs->GetOrCreateCert(NS_LITERAL_CSTRING("flyweb"), this,
-                                       nsILocalCertService::KEY_TYPE_EC);
+    nsresult rv = lcs->GetOrCreateCert(NS_LITERAL_CSTRING("flyweb"), this);
     if (NS_FAILED(rv)) {
       NotifyStarted(rv);
     }
@@ -258,11 +257,12 @@ HttpServer::TransportProvider::SetListener(nsIHttpUpgradeListener* aListener)
   return NS_OK;
 }
 
-NS_IMETHODIMP_(PTransportProviderChild*)
-HttpServer::TransportProvider::GetIPCChild()
+NS_IMETHODIMP
+HttpServer::TransportProvider::GetIPCChild(PTransportProviderChild** aChild)
 {
   MOZ_CRASH("Don't call this in parent process");
-  return nullptr;
+  *aChild = nullptr;
+  return NS_OK;
 }
 
 void

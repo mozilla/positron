@@ -21,7 +21,7 @@ var gFxAccounts = {
     delete this.topics;
     return this.topics = [
       "weave:service:ready",
-      "weave:service:login:error",
+      "weave:service:login:change",
       "weave:service:setup-complete",
       "weave:ui:login:error",
       "fxa-migration:state-changed",
@@ -407,10 +407,12 @@ var gFxAccounts = {
     }
 
     // "All devices" menu item
-    const separator = document.createElement("menuseparator");
-    fragment.appendChild(separator);
-    const allDevicesLabel = this.strings.GetStringFromName("sendTabToAllDevices.menuitem");
-    addTargetDevice("", allDevicesLabel);
+    if (clients.length > 1) {
+      const separator = document.createElement("menuseparator");
+      fragment.appendChild(separator);
+      const allDevicesLabel = this.strings.GetStringFromName("sendTabToAllDevices.menuitem");
+      addTargetDevice("", allDevicesLabel);
+    }
 
     devicesPopup.appendChild(fragment);
   },

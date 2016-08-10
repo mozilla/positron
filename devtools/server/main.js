@@ -16,6 +16,7 @@ var { LocalDebuggerTransport, ChildDebuggerTransport, WorkerDebuggerTransport } 
   require("devtools/shared/transport/transport");
 var DevToolsUtils = require("devtools/shared/DevToolsUtils");
 var { dumpn, dumpv } = DevToolsUtils;
+var flags = require("devtools/shared/flags");
 var EventEmitter = require("devtools/shared/event-emitter");
 var Promise = require("promise");
 var SyncPromise = require("devtools/shared/deprecated-sync-thenables");
@@ -56,14 +57,14 @@ Object.defineProperty(this, "Components", {
 });
 
 if (isWorker) {
-  dumpn.wantLogging = true;
-  dumpv.wantVerbose = true;
+  flags.wantLogging = true;
+  flags.wantVerbose = true;
 } else {
   const LOG_PREF = "devtools.debugger.log";
   const VERBOSE_PREF = "devtools.debugger.log.verbose";
 
-  dumpn.wantLogging = Services.prefs.getBoolPref(LOG_PREF);
-  dumpv.wantVerbose =
+  flags.wantLogging = Services.prefs.getBoolPref(LOG_PREF);
+  flags.wantVerbose =
     Services.prefs.getPrefType(VERBOSE_PREF) !== Services.prefs.PREF_INVALID &&
     Services.prefs.getBoolPref(VERBOSE_PREF);
 }
@@ -862,10 +863,25 @@ var DebuggerServer = {
           transport.hooks = {
             onClosed: () => {
               if (!dbg.isClosed) {
-                dbg.postMessage(JSON.stringify({
-                  type: "disconnect",
-                  id,
-                }));
+                // If the worker happens to be shutting down while we are trying
+                // to close the connection, there is a small interval during
+                // which no more runnables can be dispatched to the worker, but
+                // the worker debugger has not yet been closed. In that case,
+                // the call to postMessage below will fail. The onClosed hook on
+                // DebuggerTransport is not supposed to throw exceptions, so we
+                // need to make sure to catch these early.
+                try {
+                  dbg.postMessage(JSON.stringify({
+                    type: "disconnect",
+                    id,
+                  }));
+                } catch (e) {
+                  // We can safely ignore these exceptions. The only time the
+                  // call to postMessage can fail is if the worker is either
+                  // shutting down, or has finished shutting down. In both
+                  // cases, there is nothing to clean up, so we don't care
+                  // whether this message arrives or not.
+                }
               }
 
               connection.cancelForwarding(id);
@@ -896,13 +912,11 @@ var DebuggerServer = {
   },
 
   /**
-   * Check if the caller is running in a content child process.
-   * (Eventually set by child.js)
-   *
-   * @return boolean
-   *         true if the caller is running in a content
+   * Check if the server is running in the child process.
    */
-  isInChildProcess: false,
+  get isInChildProcess() {
+    return Services.appinfo.processType != Ci.nsIXULRuntime.PROCESS_TYPE_DEFAULT;
+  },
 
   /**
    * In a chrome parent process, ask all content child processes
@@ -918,7 +932,7 @@ var DebuggerServer = {
    *        is evaluated
    */
   setupInChild({ module, setupChild, args, waitForEval }) {
-    if (this.isInChildProcess || this._childMessageManagers.size == 0) {
+    if (this._childMessageManagers.size == 0) {
       return Promise.resolve();
     }
     let deferred = Promise.defer();
@@ -982,7 +996,9 @@ var DebuggerServer = {
   connectToChild(connection, frame, onDestroy) {
     let deferred = SyncPromise.defer();
 
-    let mm = frame.frameLoader.messageManager;
+    // Get messageManager from XUL browser (which might be a specialized tunnel for RDM)
+    // or else fallback to asking the frameLoader itself.
+    let mm = frame.messageManager || frame.frameLoader.messageManager;
     mm.loadFrameScript("resource://devtools/server/child.js", false);
     this._childMessageManagers.add(mm);
 
@@ -1298,7 +1314,22 @@ var DebuggerServer = {
         }
       }
     }
-  }
+  },
+
+  /**
+   * ⚠ TESTING ONLY! ⚠ Searches all active connections for an actor matching an ID.
+   * This is helpful for some tests which depend on reaching into the server to check some
+   * properties of an actor.
+   */
+  _searchAllConnectionsForActor(actorID) {
+    for (let connID of Object.getOwnPropertyNames(this._connections)) {
+      let actor = this._connections[connID].getActor(actorID);
+      if (actor) {
+        return actor;
+      }
+    }
+    return null;
+  },
 };
 
 // Expose these to save callers the trouble of importing DebuggerSocket
@@ -1390,7 +1421,9 @@ DebuggerServerConnection.prototype = {
   parentMessageManager: null,
 
   close() {
-    this._transport.close();
+    if (this._transport) {
+      this._transport.close();
+    }
   },
 
   send(packet) {
@@ -1426,6 +1459,26 @@ DebuggerServerConnection.prototype = {
    *        otherwise.
    */
   removeActorPool(actorPool, noCleanup) {
+    // When a connection is closed, it removes each of its actor pools. When an
+    // actor pool is removed, it calls the disconnect method on each of its
+    // actors. Some actors, such as ThreadActor, manage their own actor pools.
+    // When the disconnect method is called on these actors, they manually
+    // remove their actor pools. Consequently, this method is reentrant.
+    //
+    // In addition, some actors, such as ThreadActor, perform asynchronous work
+    // (in the case of ThreadActor, because they need to resume), before they
+    // remove each of their actor pools. Since we don't wait for this work to
+    // be completed, we can end up in this function recursively after the
+    // connection already set this._extraPools to null.
+    //
+    // This is a bug: if the disconnect method can perform asynchronous work,
+    // then we should wait for that work to be completed before setting this.
+    // _extraPools to null. As a temporary solution, it should be acceptable
+    // to just return early (if this._extraPools has been set to null, all
+    // actors pools for this connection should already have been removed).
+    if (this._extraPools === null) {
+      return;
+    }
     let index = this._extraPools.lastIndexOf(actorPool);
     if (index > -1) {
       let pool = this._extraPools.splice(index, 1);
@@ -1594,6 +1647,13 @@ DebuggerServerConnection.prototype = {
    */
   cancelForwarding(prefix) {
     this._forwardingPrefixes.delete(prefix);
+
+    // Notify the client that forwarding in now cancelled for this prefix.
+    // There could be requests in progress that the client should abort rather leaving
+    // handing indefinitely.
+    if (this.rootActor) {
+      this.send(this.rootActor.forwardingCancelled(prefix));
+    }
   },
 
   sendActorEvent(actorID, eventName, event = {}) {

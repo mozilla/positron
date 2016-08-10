@@ -40,16 +40,6 @@ Fail(Decoder& d, const char* str)
     return false;
 }
 
-static bool
-IsI64Implemented()
-{
-#ifdef JS_CPU_X64
-    return true;
-#else
-    return false;
-#endif
-}
-
 namespace {
 
 struct ValidatingPolicy : ExprIterPolicy
@@ -77,6 +67,12 @@ class FunctionDecoder
     bool checkI64Support() {
         if (!IsI64Implemented())
             return iter().notYetImplemented("i64 NYI on this platform");
+        return true;
+    }
+
+    bool checkHasMemory() {
+        if (!mg().usesMemory())
+            return iter().fail("can't touch memory without memory");
         return true;
     }
 };
@@ -146,6 +142,9 @@ DecodeCall(FunctionDecoder& f)
 static bool
 DecodeCallIndirect(FunctionDecoder& f)
 {
+    if (!f.mg().numTables())
+        return f.iter().fail("can't call_indirect without a table");
+
     uint32_t sigIndex;
     uint32_t arity;
     if (!f.iter().readCallIndirect(&sigIndex, &arity))
@@ -227,6 +226,10 @@ DecodeExpr(FunctionDecoder& f)
         return f.iter().readGetLocal(f.locals(), nullptr);
       case Expr::SetLocal:
         return f.iter().readSetLocal(f.locals(), nullptr, nullptr);
+      case Expr::GetGlobal:
+        return f.iter().readGetGlobal(f.mg().globals(), nullptr);
+      case Expr::SetGlobal:
+        return f.iter().readSetGlobal(f.mg().globals(), nullptr, nullptr);
       case Expr::Select:
         return f.iter().readSelect(nullptr, nullptr, nullptr, nullptr);
       case Expr::Block:
@@ -398,53 +401,71 @@ DecodeExpr(FunctionDecoder& f)
         return f.iter().readConversion(ValType::F32, ValType::F64, nullptr);
       case Expr::I32Load8S:
       case Expr::I32Load8U:
-        return f.iter().readLoad(ValType::I32, 1, nullptr);
+        return f.checkHasMemory() &&
+               f.iter().readLoad(ValType::I32, 1, nullptr);
       case Expr::I32Load16S:
       case Expr::I32Load16U:
-        return f.iter().readLoad(ValType::I32, 2, nullptr);
+        return f.checkHasMemory() &&
+               f.iter().readLoad(ValType::I32, 2, nullptr);
       case Expr::I32Load:
-        return f.iter().readLoad(ValType::I32, 4, nullptr);
+        return f.checkHasMemory() &&
+               f.iter().readLoad(ValType::I32, 4, nullptr);
       case Expr::I64Load8S:
       case Expr::I64Load8U:
         return f.checkI64Support() &&
+               f.checkHasMemory() &&
                f.iter().readLoad(ValType::I64, 1, nullptr);
       case Expr::I64Load16S:
       case Expr::I64Load16U:
         return f.checkI64Support() &&
+               f.checkHasMemory() &&
                f.iter().readLoad(ValType::I64, 2, nullptr);
       case Expr::I64Load32S:
       case Expr::I64Load32U:
         return f.checkI64Support() &&
+               f.checkHasMemory() &&
                f.iter().readLoad(ValType::I64, 4, nullptr);
       case Expr::I64Load:
         return f.checkI64Support() &&
+               f.checkHasMemory() &&
                f.iter().readLoad(ValType::I64, 8, nullptr);
       case Expr::F32Load:
-        return f.iter().readLoad(ValType::F32, 4, nullptr);
+        return f.checkHasMemory() &&
+               f.iter().readLoad(ValType::F32, 4, nullptr);
       case Expr::F64Load:
-        return f.iter().readLoad(ValType::F64, 8, nullptr);
+        return f.checkHasMemory() &&
+               f.iter().readLoad(ValType::F64, 8, nullptr);
       case Expr::I32Store8:
-        return f.iter().readStore(ValType::I32, 1, nullptr, nullptr);
+        return f.checkHasMemory() &&
+               f.iter().readStore(ValType::I32, 1, nullptr, nullptr);
       case Expr::I32Store16:
-        return f.iter().readStore(ValType::I32, 2, nullptr, nullptr);
+        return f.checkHasMemory() &&
+               f.iter().readStore(ValType::I32, 2, nullptr, nullptr);
       case Expr::I32Store:
-        return f.iter().readStore(ValType::I32, 4, nullptr, nullptr);
+        return f.checkHasMemory() &&
+               f.iter().readStore(ValType::I32, 4, nullptr, nullptr);
       case Expr::I64Store8:
         return f.checkI64Support() &&
+               f.checkHasMemory() &&
                f.iter().readStore(ValType::I64, 1, nullptr, nullptr);
       case Expr::I64Store16:
         return f.checkI64Support() &&
+               f.checkHasMemory() &&
                f.iter().readStore(ValType::I64, 2, nullptr, nullptr);
       case Expr::I64Store32:
         return f.checkI64Support() &&
+               f.checkHasMemory() &&
                f.iter().readStore(ValType::I64, 4, nullptr, nullptr);
       case Expr::I64Store:
         return f.checkI64Support() &&
+               f.checkHasMemory() &&
                f.iter().readStore(ValType::I64, 8, nullptr, nullptr);
       case Expr::F32Store:
-        return f.iter().readStore(ValType::F32, 4, nullptr, nullptr);
+        return f.checkHasMemory() &&
+               f.iter().readStore(ValType::F32, 4, nullptr, nullptr);
       case Expr::F64Store:
-        return f.iter().readStore(ValType::F64, 8, nullptr, nullptr);
+        return f.checkHasMemory() &&
+               f.iter().readStore(ValType::F64, 8, nullptr, nullptr);
       case Expr::Br:
         return f.iter().readBr(nullptr, nullptr, nullptr);
       case Expr::BrIf:
@@ -550,7 +571,7 @@ DecodeTypeSection(Decoder& d, ModuleGeneratorData* init)
 }
 
 static bool
-DecodeSignatureIndex(Decoder& d, const ModuleGeneratorData& init, const DeclaredSig** sig)
+DecodeSignatureIndex(Decoder& d, const ModuleGeneratorData& init, const SigWithId** sig)
 {
     uint32_t sigIndex;
     if (!d.readVarU32(&sigIndex))
@@ -706,6 +727,13 @@ DecodeResizableMemory(Decoder& d, ModuleGeneratorData* init)
 static bool
 DecodeResizableTable(Decoder& d, ModuleGeneratorData* init)
 {
+    uint32_t elementType;
+    if (!d.readVarU32(&elementType))
+        return Fail(d, "expected table element type");
+
+    if (elementType != uint32_t(TypeConstructor::AnyFunc))
+        return Fail(d, "expected 'anyfunc' element type");
+
     Resizable resizable;
     if (!DecodeResizable(d, &resizable))
         return false;
@@ -713,17 +741,60 @@ DecodeResizableTable(Decoder& d, ModuleGeneratorData* init)
     if (!init->tables.empty())
         return Fail(d, "already have default table");
 
-    TableDesc table(TableKind::AnyFunction);
+    TableDesc table;
+    table.kind = TableKind::AnyFunction;
     table.initial = resizable.initial;
     table.maximum = resizable.maximum ? *resizable.maximum : UINT32_MAX;
     return init->tables.append(table);
 }
 
 static bool
+DecodeGlobalType(Decoder& d, ValType* type, bool* isMutable)
+{
+    if (!d.readValType(type))
+        return Fail(d, "bad global type");
+
+    if (*type == ValType::I64 && !IsI64Implemented())
+        return Fail(d, "int64 NYI");
+
+    uint32_t flags;
+    if (!d.readVarU32(&flags))
+        return Fail(d, "expected flags");
+
+    if (flags & ~uint32_t(GlobalFlags::AllowedMask))
+        return Fail(d, "unexpected bits set in flags");
+
+    *isMutable = flags & uint32_t(GlobalFlags::IsMutable);
+    return true;
+}
+
+static bool
+GlobalIsJSCompatible(Decoder& d, ValType type, bool isMutable)
+{
+    switch (type) {
+      case ValType::I32:
+      case ValType::F32:
+      case ValType::F64:
+        break;
+      case ValType::I64:
+        if (!JitOptions.wasmTestMode)
+            return Fail(d, "can't import/export an Int64 global to JS");
+        break;
+      default:
+        return Fail(d, "unexpected variable type in global import/export");
+    }
+
+    if (isMutable)
+        return Fail(d, "can't import/export mutable globals in the MVP");
+
+    return true;
+}
+
+static bool
 DecodeImport(Decoder& d, bool newFormat, ModuleGeneratorData* init, ImportVector* imports)
 {
     if (!newFormat) {
-        const DeclaredSig* sig = nullptr;
+        const SigWithId* sig = nullptr;
         if (!DecodeSignatureIndex(d, *init, &sig))
             return false;
 
@@ -764,7 +835,7 @@ DecodeImport(Decoder& d, bool newFormat, ModuleGeneratorData* init, ImportVector
 
     switch (DefinitionKind(importKind)) {
       case DefinitionKind::Function: {
-        const DeclaredSig* sig = nullptr;
+        const SigWithId* sig = nullptr;
         if (!DecodeSignatureIndex(d, *init, &sig))
             return false;
         if (!CheckTypeForJS(d, *sig))
@@ -780,6 +851,17 @@ DecodeImport(Decoder& d, bool newFormat, ModuleGeneratorData* init, ImportVector
       }
       case DefinitionKind::Memory: {
         if (!DecodeResizableMemory(d, init))
+            return false;
+        break;
+      }
+      case DefinitionKind::Global: {
+        ValType type;
+        bool isMutable;
+        if (!DecodeGlobalType(d, &type, &isMutable))
+            return false;
+        if (!GlobalIsJSCompatible(d, type, isMutable))
+            return false;
+        if (!init->globals.append(GlobalDesc(type, isMutable, init->globals.length())))
             return false;
         break;
       }
@@ -830,7 +912,8 @@ DecodeTableSection(Decoder& d, bool newFormat, ModuleGeneratorData* init, Uint32
         if (!DecodeResizableTable(d, init))
             return false;
     } else {
-        TableDesc table(TableKind::AnyFunction);
+        TableDesc table;
+        table.kind = TableKind::AnyFunction;
         table.maximum = UINT32_MAX;
 
         if (!d.readVarU32(&table.initial))
@@ -915,6 +998,105 @@ DecodeMemorySection(Decoder& d, bool newFormat, ModuleGeneratorData* init, bool*
 
     if (!d.finishSection(sectionStart, sectionSize))
         return Fail(d, "memory section byte size mismatch");
+
+    return true;
+}
+
+static bool
+DecodeInitializerExpression(Decoder& d, const GlobalDescVector& globals, ValType expected,
+                            InitExpr* init)
+{
+    Expr expr;
+    if (!d.readExpr(&expr))
+        return Fail(d, "failed to read initializer type");
+
+    switch (expr) {
+      case Expr::I32Const: {
+        int32_t i32;
+        if (!d.readVarS32(&i32))
+            return Fail(d, "failed to read initializer i32 expression");
+        *init = InitExpr(Val(uint32_t(i32)));
+        break;
+      }
+      case Expr::I64Const: {
+        int64_t i64;
+        if (!d.readVarS64(&i64))
+            return Fail(d, "failed to read initializer i64 expression");
+        *init = InitExpr(Val(uint64_t(i64)));
+        break;
+      }
+      case Expr::F32Const: {
+        float f32;
+        if (!d.readFixedF32(&f32))
+            return Fail(d, "failed to read initializer f32 expression");
+        *init = InitExpr(Val(f32));
+        break;
+      }
+      case Expr::F64Const: {
+        double f64;
+        if (!d.readFixedF64(&f64))
+            return Fail(d, "failed to read initializer f64 expression");
+        *init = InitExpr(Val(f64));
+        break;
+      }
+      case Expr::GetGlobal: {
+        uint32_t i;
+        if (!d.readVarU32(&i))
+            return Fail(d, "failed to read get_global index in initializer expression");
+        if (i >= globals.length())
+            return Fail(d, "global index out of range in initializer expression");
+        if (!globals[i].isImport() || globals[i].isMutable())
+            return Fail(d, "initializer expression must reference a global immutable import");
+        *init = InitExpr(i, globals[i].type());
+        break;
+      }
+      default: {
+        return Fail(d, "unexpected initializer expression");
+      }
+    }
+
+    if (expected != init->type())
+        return Fail(d, "type mismatch: initializer type and expected type don't match");
+
+    Expr end;
+    if (!d.readExpr(&end) || end != Expr::End)
+        return Fail(d, "failed to read end of initializer expression");
+
+    return true;
+}
+
+static bool
+DecodeGlobalSection(Decoder& d, ModuleGeneratorData* init)
+{
+    uint32_t sectionStart, sectionSize;
+    if (!d.startSection(GlobalSectionId, &sectionStart, &sectionSize))
+        return Fail(d, "failed to start section");
+    if (sectionStart == Decoder::NotStarted)
+        return true;
+
+    uint32_t numGlobals;
+    if (!d.readVarU32(&numGlobals))
+        return Fail(d, "expected number of globals");
+
+    if (numGlobals > MaxGlobals)
+        return Fail(d, "too many globals");
+
+    for (uint32_t i = 0; i < numGlobals; i++) {
+        ValType type;
+        bool isMutable;
+        if (!DecodeGlobalType(d, &type, &isMutable))
+            return false;
+
+        InitExpr initializer;
+        if (!DecodeInitializerExpression(d, init->globals, type, &initializer))
+            return false;
+
+        if (!init->globals.append(GlobalDesc(initializer, isMutable)))
+            return false;
+    }
+
+    if (!d.finishSection(sectionStart, sectionSize))
+        return Fail(d, "globals section byte size mismatch");
 
     return true;
 }
@@ -1005,6 +1187,20 @@ DecodeExport(Decoder& d, bool newFormat, ModuleGenerator& mg, CStringSet* dupSet
 
         return mg.addMemoryExport(Move(fieldName));
       }
+      case DefinitionKind::Global: {
+        uint32_t globalIndex;
+        if (!d.readVarU32(&globalIndex))
+            return Fail(d, "expected global index");
+
+        if (globalIndex >= mg.globals().length())
+            return Fail(d, "exported global index out of bounds");
+
+        const GlobalDesc& global = mg.globals()[globalIndex];
+        if (!GlobalIsJSCompatible(d, global.type(), global.isMutable()))
+            return false;
+
+        return mg.addGlobalExport(Move(fieldName), globalIndex);
+      }
       default:
         return Fail(d, "unexpected export kind");
     }
@@ -1067,7 +1263,7 @@ DecodeFunctionBody(Decoder& d, ModuleGenerator& mg, uint32_t funcIndex)
         return false;
 
     ValTypeVector locals;
-    const DeclaredSig& sig = mg.funcSig(funcIndex);
+    const Sig& sig = mg.funcSig(funcIndex);
     if (!locals.appendAll(sig.args()))
         return false;
 
@@ -1106,7 +1302,6 @@ DecodeFunctionBody(Decoder& d, ModuleGenerator& mg, uint32_t funcIndex)
 static bool
 DecodeStartSection(Decoder& d, ModuleGenerator& mg)
 {
-
     uint32_t sectionStart, sectionSize;
     if (!d.startSection(StartSectionId, &sectionStart, &sectionSize))
         return Fail(d, "failed to start section");
@@ -1120,7 +1315,7 @@ DecodeStartSection(Decoder& d, ModuleGenerator& mg)
     if (startFuncIndex >= mg.numFuncSigs())
         return Fail(d, "unknown start function");
 
-    const DeclaredSig& sig = mg.funcSig(startFuncIndex);
+    const Sig& sig = mg.funcSig(startFuncIndex);
     if (sig.ret() != ExprType::Void)
         return Fail(d, "start function must not return anything");
 
@@ -1180,7 +1375,7 @@ DecodeElemSection(Decoder& d, bool newFormat, Uint32Vector&& oldElems, ModuleGen
             return true;
         }
 
-        return mg.addElemSegment(ElemSegment(0, 0, Move(oldElems)));
+        return mg.addElemSegment(ElemSegment(0, InitExpr(Val(uint32_t(0))), Move(oldElems)));
     }
 
     uint32_t sectionStart, sectionSize;
@@ -1204,17 +1399,10 @@ DecodeElemSection(Decoder& d, bool newFormat, Uint32Vector&& oldElems, ModuleGen
         if (seg.tableIndex >= mg.tables().length())
             return Fail(d, "table index out of range");
 
-        Expr expr;
-        if (!d.readExpr(&expr))
-            return Fail(d, "failed to read initializer expression");
+        if (!DecodeInitializerExpression(d, mg.globals(), ValType::I32, &seg.offset))
+            return false;
 
-        if (expr != Expr::I32Const)
-            return Fail(d, "expected i32.const initializer expression");
-
-        if (!d.readVarU32(&seg.offset))
-            return Fail(d, "expected elem segment destination offset");
-
-        if (seg.offset < prevEnd)
+        if (seg.offset.isVal() && seg.offset.val().i32() < prevEnd)
             return Fail(d, "elem segments must be disjoint and ordered");
 
         uint32_t numElems;
@@ -1222,8 +1410,11 @@ DecodeElemSection(Decoder& d, bool newFormat, Uint32Vector&& oldElems, ModuleGen
             return Fail(d, "expected segment size");
 
         uint32_t tableLength = mg.tables()[seg.tableIndex].initial;
-        if (seg.offset > tableLength || tableLength - seg.offset < numElems)
-            return Fail(d, "element segment does not fit");
+        if (seg.offset.isVal()) {
+            uint32_t offset = seg.offset.val().i32();
+            if (offset > tableLength || tableLength - offset < numElems)
+                return Fail(d, "element segment does not fit");
+        }
 
         if (!seg.elems.resize(numElems))
             return false;
@@ -1235,7 +1426,8 @@ DecodeElemSection(Decoder& d, bool newFormat, Uint32Vector&& oldElems, ModuleGen
                 return Fail(d, "table element out of range");
         }
 
-        prevEnd = seg.offset + seg.elems.length();
+        if (seg.offset.isVal())
+            prevEnd = seg.offset.val().i32() + seg.elems.length();
 
         if (!mg.addElemSegment(Move(seg)))
             return false;
@@ -1430,6 +1622,9 @@ wasm::Compile(const ShareableBytes& bytecode, CompileArgs&& args, UniqueChars* e
 
     bool memoryExported = false;
     if (!DecodeMemorySection(d, newFormat, init.get(), &memoryExported))
+        return nullptr;
+
+    if (!DecodeGlobalSection(d, init.get()))
         return nullptr;
 
     ModuleGenerator mg(Move(imports));

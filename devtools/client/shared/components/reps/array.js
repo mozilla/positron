@@ -11,7 +11,6 @@ define(function (require, exports, module) {
   // Dependencies
   const React = require("devtools/client/shared/vendor/react");
   const { createFactories } = require("./rep-utils");
-  const { ObjectBox } = createFactories(require("./object-box"));
   const { Caption } = createFactories(require("./caption"));
 
   // Shortcuts
@@ -32,7 +31,7 @@ define(function (require, exports, module) {
       let items = [];
       let delim;
 
-      for (let i = 0; i < array.length && i <= max; i++) {
+      for (let i = 0; i < array.length && i < max; i++) {
         try {
           let value = array[i];
 
@@ -61,14 +60,12 @@ define(function (require, exports, module) {
       }
 
       if (array.length > max) {
-        items.pop();
-
         let objectLink = this.props.objectLink || DOM.span;
         items.push(Caption({
           key: "more",
           object: objectLink({
             object: this.props.object
-          }, "more…")
+          }, (array.length - max) + " more…")
         }));
       }
 
@@ -127,7 +124,8 @@ define(function (require, exports, module) {
       let items;
 
       if (mode == "tiny") {
-        items = DOM.span({className: "length"}, object.length);
+        let isEmpty = object.length === 0;
+        items = DOM.span({className: "length"}, isEmpty ? "" : object.length);
       } else {
         let max = (mode == "short") ? 3 : 300;
         items = this.arrayIterator(object, max);
@@ -136,8 +134,8 @@ define(function (require, exports, module) {
       let objectLink = this.props.objectLink || DOM.span;
 
       return (
-        ObjectBox({
-          className: "array"},
+        DOM.span({
+          className: "objectBox objectBox-array"},
           objectLink({
             className: "arrayLeftBracket",
             role: "presentation",

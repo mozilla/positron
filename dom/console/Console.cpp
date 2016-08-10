@@ -25,7 +25,7 @@
 #include "WorkerPrivate.h"
 #include "WorkerRunnable.h"
 #include "WorkerScope.h"
-#include "xpcprivate.h"
+#include "xpcpublic.h"
 #include "nsContentUtils.h"
 #include "nsDocShell.h"
 #include "nsProxyRelease.h"
@@ -1099,7 +1099,7 @@ Console::ProfileMethodInternal(JSContext* aCx, const nsAString& aAction,
     return;
   }
 
-  nsXPConnect*  xpc = nsXPConnect::XPConnect();
+  nsIXPConnect* xpc = nsContentUtils::XPConnect();
   nsCOMPtr<nsISupports> wrapper;
   const nsIID& iid = NS_GET_IID(nsISupports);
 
@@ -1251,9 +1251,10 @@ Console::MethodInternal(JSContext* aCx, MethodName aMethodName,
     callData->SetOriginAttributes(BasePrincipal::Cast(principal)->OriginAttributesRef());
   }
 
-  uint32_t maxDepth = ShouldIncludeStackTrace(aMethodName) ?
-                      DEFAULT_MAX_STACKTRACE_DEPTH : 1;
-  nsCOMPtr<nsIStackFrame> stack = CreateStack(aCx, maxDepth);
+  JS::StackCapture captureMode = ShouldIncludeStackTrace(aMethodName) ?
+    JS::StackCapture(JS::MaxFrames(DEFAULT_MAX_STACKTRACE_DEPTH)) :
+    JS::StackCapture(JS::FirstSubsumedFrame(aCx));
+  nsCOMPtr<nsIStackFrame> stack = CreateStack(aCx, mozilla::Move(captureMode));
 
   if (stack) {
     callData->mTopStackFrame.emplace();

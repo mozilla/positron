@@ -275,7 +275,7 @@ AppendCSSShadowValue(const nsCSSShadowItem *aShadow,
     arr->Item(4).SetColorValue(aShadow->mColor);
   }
   if (aShadow->mInset) {
-    arr->Item(5).SetIntValue(NS_STYLE_BOX_SHADOW_INSET,
+    arr->Item(5).SetIntValue(uint8_t(StyleBoxShadowType::Inset),
                              eCSSUnit_Enumerated);
   }
 
@@ -283,6 +283,19 @@ AppendCSSShadowValue(const nsCSSShadowItem *aShadow,
   resultItem->mValue.SetArrayValue(arr, eCSSUnit_Array);
   *aResultTail = resultItem;
   aResultTail = &resultItem->mNext;
+}
+
+static already_AddRefed<mozilla::css::URLValue>
+FragmentOrURLToURLValue(FragmentOrURL* aUrl, nsIDocument* aDoc)
+{
+  nsString path;
+  aUrl->GetSourceString(path);
+  RefPtr<nsStringBuffer> uriStringBuffer = nsCSSValue::BufferFromString(path);
+  RefPtr<mozilla::css::URLValue> result =
+    new mozilla::css::URLValue(aUrl->GetSourceURL(), uriStringBuffer,
+                               aDoc->GetDocumentURI(), aDoc->NodePrincipal());
+
+  return result.forget();
 }
 
 // Like nsStyleCoord::CalcValue, but with length in float pixels instead
@@ -396,16 +409,6 @@ SetCalcValue(const PixelCalcValue& aCalc, nsCSSValue& aValue)
   }
 
   aValue.SetArrayValue(arr, eCSSUnit_Calc);
-}
-
-static already_AddRefed<nsStringBuffer>
-GetURIAsUtf16StringBuffer(nsIURI* aUri)
-{
-  nsAutoCString utf8String;
-  nsresult rv = aUri->GetSpec(utf8String);
-  NS_ENSURE_SUCCESS(rv, nullptr);
-
-  return nsCSSValue::BufferFromString(NS_ConvertUTF8toUTF16(utf8String));
 }
 
 double
@@ -1082,13 +1085,15 @@ AddCSSValueAngle(double aCoeff1, const nsCSSValue &aValue1,
 {
   if (aValue1.GetUnit() == aValue2.GetUnit()) {
     // To avoid floating point error, if the units match, maintain the unit.
-    aResult.SetFloatValue(aCoeff1 * aValue1.GetFloatValue() +
-                          aCoeff2 * aValue2.GetFloatValue(),
-                          aValue1.GetUnit());
+    aResult.SetFloatValue(
+      EnsureNotNan(aCoeff1 * aValue1.GetFloatValue() +
+                   aCoeff2 * aValue2.GetFloatValue()),
+      aValue1.GetUnit());
   } else {
-    aResult.SetFloatValue(aCoeff1 * aValue1.GetAngleValueInRadians() +
-                          aCoeff2 * aValue2.GetAngleValueInRadians(),
-                          eCSSUnit_Radian);
+    aResult.SetFloatValue(
+      EnsureNotNan(aCoeff1 * aValue1.GetAngleValueInRadians() +
+                   aCoeff2 * aValue2.GetAngleValueInRadians()),
+      eCSSUnit_Radian);
   }
 }
 
@@ -1254,7 +1259,7 @@ AddTransformScale(double aCoeff1, const nsCSSValue &aValue1,
   float v1 = aValue1.GetFloatValue() - 1.0f,
         v2 = aValue2.GetFloatValue() - 1.0f;
   float result = v1 * aCoeff1 + v2 * aCoeff2;
-  aResult.SetFloatValue(result + 1.0f, eCSSUnit_Number);
+  aResult.SetFloatValue(EnsureNotNan(result + 1.0f), eCSSUnit_Number);
 }
 
 /* static */ already_AddRefed<nsCSSValue::Array>
@@ -3488,18 +3493,18 @@ ExtractImageLayerSizePairList(const nsStyleImageLayers& aLayer,
 }
 
 static bool
-StyleClipBasicShapeToCSSArray(const nsStyleClipPath& aClipPath,
+StyleClipBasicShapeToCSSArray(const StyleClipPath& aClipPath,
                               nsCSSValue::Array* aResult)
 {
   MOZ_ASSERT(aResult->Count() == 2,
              "Expected array to be presized for a function and the sizing-box");
 
-  const nsStyleBasicShape* shape = aClipPath.GetBasicShape();
+  const StyleBasicShape* shape = aClipPath.GetBasicShape();
   nsCSSKeyword functionName = shape->GetShapeTypeName();
   RefPtr<nsCSSValue::Array> functionArray;
   switch (shape->GetShapeType()) {
-    case nsStyleBasicShape::Type::eCircle:
-    case nsStyleBasicShape::Type::eEllipse: {
+    case StyleBasicShapeType::Circle:
+    case StyleBasicShapeType::Ellipse: {
       const nsTArray<nsStyleCoord>& coords = shape->Coordinates();
       MOZ_ASSERT(coords.Length() == ShapeArgumentCount(functionName) - 1,
                  "Unexpected radii count");
@@ -3520,7 +3525,7 @@ StyleClipBasicShapeToCSSArray(const nsStyleClipPath& aClipPath,
                        functionArray->Item(functionArray->Count() - 1));
       break;
     }
-    case nsStyleBasicShape::Type::ePolygon: {
+    case StyleBasicShapeType::Polygon: {
       functionArray =
         aResult->Item(0).InitFunction(functionName,
                                       ShapeArgumentCount(functionName));
@@ -3541,7 +3546,7 @@ StyleClipBasicShapeToCSSArray(const nsStyleClipPath& aClipPath,
       }
       break;
     }
-    case nsStyleBasicShape::Type::eInset: {
+    case StyleBasicShapeType::Inset: {
       const nsTArray<nsStyleCoord>& coords = shape->Coordinates();
       MOZ_ASSERT(coords.Length() == ShapeArgumentCount(functionName) - 1,
                  "Unexpected offset count");
@@ -3573,7 +3578,7 @@ StyleClipBasicShapeToCSSArray(const nsStyleClipPath& aClipPath,
       MOZ_ASSERT_UNREACHABLE("Unknown shape type");
       return false;
   }
-  aResult->Item(1).SetIntValue(uint8_t(aClipPath.GetSizingBox()),
+  aResult->Item(1).SetIntValue(aClipPath.GetReferenceBox(),
                                eCSSUnit_Enumerated);
   return true;
 }
@@ -3948,25 +3953,21 @@ StyleAnimationValue::ExtractComputedValue(nsCSSProperty aProperty,
         case eCSSProperty_clip_path: {
           const nsStyleSVGReset* svgReset =
             static_cast<const nsStyleSVGReset*>(styleStruct);
-          const nsStyleClipPath& clipPath = svgReset->mClipPath;
-          const int32_t type = clipPath.GetType();
+          const StyleClipPath& clipPath = svgReset->mClipPath;
+          const StyleShapeSourceType type = clipPath.GetType();
 
-          if (type == NS_STYLE_CLIP_PATH_URL) {
+          if (type == StyleShapeSourceType::URL) {
             nsIDocument* doc = aStyleContext->PresContext()->Document();
-            RefPtr<nsStringBuffer> uriAsStringBuffer =
-              GetURIAsUtf16StringBuffer(clipPath.GetURL());
             RefPtr<mozilla::css::URLValue> url =
-              new mozilla::css::URLValue(clipPath.GetURL(),
-                                         uriAsStringBuffer,
-                                         doc->GetDocumentURI(),
-                                         doc->NodePrincipal());
+              FragmentOrURLToURLValue(clipPath.GetURL(), doc);
+
             auto result = MakeUnique<nsCSSValue>();
             result->SetURLValue(url);
             aComputedValue.SetAndAdoptCSSValueValue(result.release(), eUnit_URL);
-          } else if (type == NS_STYLE_CLIP_PATH_BOX) {
-            aComputedValue.SetIntValue(uint8_t(clipPath.GetSizingBox()),
+          } else if (type == StyleShapeSourceType::Box) {
+            aComputedValue.SetIntValue(clipPath.GetReferenceBox(),
                                        eUnit_Enumerated);
-          } else if (type == NS_STYLE_CLIP_PATH_SHAPE) {
+          } else if (type == StyleShapeSourceType::Shape) {
             RefPtr<nsCSSValue::Array> result = nsCSSValue::Array::Create(2);
             if (!StyleClipBasicShapeToCSSArray(clipPath, result)) {
               return false;
@@ -3974,7 +3975,7 @@ StyleAnimationValue::ExtractComputedValue(nsCSSProperty aProperty,
             aComputedValue.SetCSSValueArrayValue(result, eUnit_Shape);
 
           } else {
-            MOZ_ASSERT(type == NS_STYLE_CLIP_PATH_NONE, "unknown type");
+            MOZ_ASSERT(type == StyleShapeSourceType::None_, "unknown type");
             aComputedValue.SetNoneValue();
           }
           break;
@@ -3994,13 +3995,9 @@ StyleAnimationValue::ExtractComputedValue(nsCSSProperty aProperty,
             int32_t type = filter.GetType();
             if (type == NS_STYLE_FILTER_URL) {
               nsIDocument* doc = aStyleContext->PresContext()->Document();
-              RefPtr<nsStringBuffer> uriAsStringBuffer =
-                GetURIAsUtf16StringBuffer(filter.GetURL());
               RefPtr<mozilla::css::URLValue> url =
-                new mozilla::css::URLValue(filter.GetURL(),
-                                           uriAsStringBuffer,
-                                           doc->GetDocumentURI(),
-                                           doc->NodePrincipal());
+                FragmentOrURLToURLValue(filter.GetURL(), doc);
+
               item->mValue.SetURLValue(url);
             } else {
               nsCSSKeyword functionName =
@@ -4169,15 +4166,11 @@ StyleAnimationValue::ExtractComputedValue(nsCSSProperty aProperty,
           return false;
         }
         nsAutoPtr<nsCSSValuePair> pair(new nsCSSValuePair);
-        RefPtr<nsStringBuffer> uriAsStringBuffer =
-          GetURIAsUtf16StringBuffer(paint.mPaint.mPaintServer);
-        NS_ENSURE_TRUE(!!uriAsStringBuffer, false);
+
         nsIDocument* doc = aStyleContext->PresContext()->Document();
         RefPtr<mozilla::css::URLValue> url =
-          new mozilla::css::URLValue(paint.mPaint.mPaintServer,
-                                     uriAsStringBuffer,
-                                     doc->GetDocumentURI(),
-                                     doc->NodePrincipal());
+          FragmentOrURLToURLValue(paint.mPaint.mPaintServer, doc);
+
         pair->mXValue.SetURLValue(url);
         pair->mYValue.SetColorValue(paint.mFallbackColor);
         aComputedValue.SetAndAdoptCSSValuePairValue(pair.forget(),

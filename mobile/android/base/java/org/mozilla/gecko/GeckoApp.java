@@ -23,6 +23,9 @@ import org.mozilla.gecko.home.HomeConfig.PanelType;
 import org.mozilla.gecko.menu.GeckoMenu;
 import org.mozilla.gecko.menu.GeckoMenuInflater;
 import org.mozilla.gecko.menu.MenuPanel;
+import org.mozilla.gecko.notifications.AppNotificationClient;
+import org.mozilla.gecko.notifications.NotificationClient;
+import org.mozilla.gecko.notifications.NotificationHelper;
 import org.mozilla.gecko.util.IntentUtils;
 import org.mozilla.gecko.mozglue.SafeIntent;
 import org.mozilla.gecko.mozglue.GeckoLoader;
@@ -184,7 +187,7 @@ public abstract class GeckoApp
     protected FormAssistPopup mFormAssistPopup;
 
 
-    protected LayerView mLayerView;
+    protected GeckoView mLayerView;
     private AbsoluteLayout mPluginContainer;
 
     private FullScreenHolder mFullScreenPluginContainer;
@@ -884,7 +887,7 @@ public abstract class GeckoApp
 
 
 
-    private void addFullScreenPluginView(View view) {
+    /* package */ void addFullScreenPluginView(View view) {
         if (mFullScreenPluginView != null) {
             Log.w(LOGTAG, "Already have a fullscreen plugin view");
             return;
@@ -939,7 +942,7 @@ public abstract class GeckoApp
         });
     }
 
-    private void removeFullScreenPluginView(View view) {
+    /* package */ void removeFullScreenPluginView(View view) {
         if (mFullScreenPluginView == null) {
             Log.w(LOGTAG, "Don't have a fullscreen plugin view");
             return;
@@ -1336,7 +1339,7 @@ public abstract class GeckoApp
         mRootLayout = (RelativeLayout) findViewById(R.id.root_layout);
         mGeckoLayout = (RelativeLayout) findViewById(R.id.gecko_layout);
         mMainLayout = (RelativeLayout) findViewById(R.id.main_layout);
-        mLayerView = (LayerView) findViewById(R.id.layer_view);
+        mLayerView = (GeckoView) findViewById(R.id.layer_view);
 
         // Use global layout state change to kick off additional initialization
         mMainLayout.getViewTreeObserver().addOnGlobalLayoutListener(this);
@@ -2061,9 +2064,9 @@ public abstract class GeckoApp
                 }
             });
         } else if (ACTION_HOMESCREEN_SHORTCUT.equals(action)) {
-            GeckoAppShell.sendEventToGecko(GeckoEvent.createBookmarkLoadEvent(uri));
+            mLayerView.loadUri(uri, GeckoView.LOAD_SWITCH_TAB);
         } else if (Intent.ACTION_SEARCH.equals(action)) {
-            GeckoAppShell.sendEventToGecko(GeckoEvent.createURILoadEvent(uri));
+            mLayerView.loadUri(uri, GeckoView.LOAD_NEW_TAB);
         } else if (ACTION_ALERT_CALLBACK.equals(action)) {
             processAlertCallback(intent);
         } else if (NotificationHelper.HELPER_BROADCAST_ACTION.equals(action)) {
@@ -2714,6 +2717,7 @@ public abstract class GeckoApp
 
         public FullScreenHolder(Context ctx) {
             super(ctx);
+            setBackgroundColor(0xff000000);
         }
 
         @Override

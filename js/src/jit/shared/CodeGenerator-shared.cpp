@@ -96,7 +96,7 @@ CodeGeneratorShared::CodeGeneratorShared(MIRGenerator* gen, LIRGraph* graph, Mac
             frameDepth_ += ComputeByteAlignment(sizeof(AsmJSFrame) + frameDepth_,
                                                 AsmJSStackAlignment);
         } else if (gen->performsCall()) {
-            // An MAsmJSCall does not align the stack pointer at calls sites but
+            // An MWasmCall does not align the stack pointer at calls sites but
             // instead relies on the a priori stack adjustment. This must be the
             // last adjustment of frameDepth_.
             frameDepth_ += ComputeByteAlignment(sizeof(AsmJSFrame) + frameDepth_,
@@ -1450,7 +1450,7 @@ CodeGeneratorShared::emitTruncateDouble(FloatRegister src, Register dest, MInstr
 {
     OutOfLineCode* ool = oolTruncateDouble(src, dest, mir);
 
-    masm.branchTruncateDouble(src, dest, ool->entry());
+    masm.branchTruncateDoubleMaybeModUint32(src, dest, ool->entry());
     masm.bind(ool->rejoin());
 }
 
@@ -1460,7 +1460,7 @@ CodeGeneratorShared::emitTruncateFloat32(FloatRegister src, Register dest, MInst
     OutOfLineTruncateSlow* ool = new(alloc()) OutOfLineTruncateSlow(src, dest, true);
     addOutOfLineCode(ool, mir);
 
-    masm.branchTruncateFloat32(src, dest, ool->entry());
+    masm.branchTruncateFloat32MaybeModUint32(src, dest, ool->entry());
     masm.bind(ool->rejoin());
 }
 
@@ -1489,9 +1489,9 @@ CodeGeneratorShared::omitOverRecursedCheck() const
 }
 
 void
-CodeGeneratorShared::emitAsmJSCall(LAsmJSCall* ins)
+CodeGeneratorShared::emitWasmCallBase(LWasmCallBase* ins)
 {
-    MAsmJSCall* mir = ins->mir();
+    MWasmCall* mir = ins->mir();
 
     if (mir->spIncrement())
         masm.freeStack(mir->spIncrement());
@@ -1508,21 +1508,33 @@ CodeGeneratorShared::emitAsmJSCall(LAsmJSCall* ins)
     masm.bind(&ok);
 #endif
 
-    MAsmJSCall::Callee callee = mir->callee();
+    // Save the caller's TLS register in a reserved stack slot (below the
+    // call's stack arguments) for retrieval after the call.
+    if (mir->saveTls())
+        masm.storePtr(WasmTlsReg, Address(masm.getStackPointer(), mir->tlsStackOffset()));
+
+    const wasm::CallSiteDesc& desc = mir->desc();
+    const wasm::CalleeDesc& callee = mir->callee();
     switch (callee.which()) {
-      case MAsmJSCall::Callee::Internal:
-        masm.call(mir->desc(), callee.internal());
+      case wasm::CalleeDesc::Internal:
+        masm.call(desc, callee.internalFuncIndex());
         break;
-      case MAsmJSCall::Callee::Dynamic: {
-        if (callee.dynamicHasSigIndex())
-            masm.move32(Imm32(callee.dynamicSigIndex()), WasmTableCallSigReg);
-        MOZ_ASSERT(WasmTableCallPtrReg == ToRegister(ins->getOperand(mir->dynamicCalleeOperandIndex())));
-        masm.call(mir->desc(), WasmTableCallPtrReg);
+      case wasm::CalleeDesc::Import:
+        masm.wasmCallImport(desc, callee);
         break;
-      }
-      case MAsmJSCall::Callee::Builtin:
+      case wasm::CalleeDesc::WasmTable:
+      case wasm::CalleeDesc::AsmJSTable:
+        masm.wasmCallIndirect(desc, callee);
+        break;
+      case wasm::CalleeDesc::Builtin:
         masm.call(callee.builtin());
         break;
+    }
+
+    // After return, restore the caller's TLS and pinned registers.
+    if (mir->saveTls()) {
+        masm.loadPtr(Address(masm.getStackPointer(), mir->tlsStackOffset()), WasmTlsReg);
+        masm.loadWasmPinnedRegsFromTls();
     }
 
     if (mir->spIncrement())
@@ -1594,6 +1606,29 @@ CodeGeneratorShared::jumpToBlock(MBasicBlock* mir)
     } else {
         masm.jump(mir->lir()->label());
     }
+}
+
+Label*
+CodeGeneratorShared::getJumpLabelForBranch(MBasicBlock* block)
+{
+    // Skip past trivial blocks.
+    block = skipTrivialBlocks(block);
+
+    if (!labelForBackedgeWithImplicitCheck(block))
+        return block->lir()->label();
+
+    // We need to use a patchable jump for this backedge, but want to treat
+    // this as a normal label target to simplify codegen. Efficiency isn't so
+    // important here as these tests are extremely unlikely to be used in loop
+    // backedges, so emit inline code for the patchable jump. Heap allocating
+    // the label allows it to be used by out of line blocks.
+    Label* res = alloc().lifoAlloc()->newInfallible<Label>();
+    Label after;
+    masm.jump(&after);
+    masm.bind(res);
+    jumpToBlock(block);
+    masm.bind(&after);
+    return res;
 }
 
 // This function is not used for MIPS/MIPS64. MIPS has branchToBlock.

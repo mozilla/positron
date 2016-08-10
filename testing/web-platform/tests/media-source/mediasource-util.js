@@ -85,8 +85,12 @@
             assert_equals(eventInfo.description, expected.description, "Descriptions match for '" +  event.type + "'.");
 
             expectations.shift(1);
-            if (t.waitCallbacks_.length > 0)
+            if (t.waitCallbacks_.length > 1)
                 setTimeout(waitHandler, 0);
+            else if (t.waitCallbacks_.length == 1) {
+                // Immediately call the callback.
+                waitHandler();
+            }
         });
         object.addEventListener(eventName, eventHandler);
     };
@@ -410,6 +414,12 @@
     window['assertBufferedEquals'] = function(obj, expected, description)
     {
         var actual = timeRangesToString(obj.buffered);
+        assert_equals(actual, expected, description);
+    };
+
+    window['assertSeekableEquals'] = function(obj, expected, description)
+    {
+        var actual = timeRangesToString(obj.seekable);
         assert_equals(actual, expected, description);
     };
 

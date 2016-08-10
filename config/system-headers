@@ -498,6 +498,7 @@ glib-object.h
 gmodule.h
 gnome.h
 gnu/libc-version.h
+gps.h
 grp.h
 gssapi_generic.h
 gssapi/gssapi_generic.h
@@ -715,6 +716,8 @@ Math64.h
 math.h
 mbstring.h
 #ifdef ANDROID
+android/native_window.h
+android/native_window_jni.h
 media/AudioEffect.h
 media/AudioSystem.h
 media/ICrypto.h

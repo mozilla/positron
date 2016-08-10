@@ -1152,13 +1152,13 @@ InitFromBailout(JSContext* cx, HandleScript caller, jsbytecode* callerPC,
                 ReportOutOfMemory(cx);
                 return false;
             }
-            JS_snprintf(buf, len, "%s %s %s on line %u of %s:%" PRIuSIZE,
-                                  BailoutKindString(bailoutKind),
-                                  resumeAfter ? "after" : "at",
-                                  CodeName[op],
-                                  PCToLineNumber(script, pc),
-                                  filename,
-                                  script->lineno());
+            snprintf(buf, len, "%s %s %s on line %u of %s:%" PRIuSIZE,
+                     BailoutKindString(bailoutKind),
+                     resumeAfter ? "after" : "at",
+                     CodeName[op],
+                     PCToLineNumber(script, pc),
+                     filename,
+                     script->lineno());
             cx->runtime()->spsProfiler.markEvent(buf);
             js_free(buf);
         }
@@ -1719,6 +1719,8 @@ CopyFromRematerializedFrame(JSContext* cx, JitActivation* act, uint8_t* fp, size
 
     for (size_t i = 0; i < frame->script()->nfixed(); i++)
         *frame->valueSlot(i) = rematFrame->locals()[i];
+
+    frame->setReturnValue(rematFrame->returnValue());
 
     if (rematFrame->hasCachedSavedFrame())
         frame->setHasCachedSavedFrame();

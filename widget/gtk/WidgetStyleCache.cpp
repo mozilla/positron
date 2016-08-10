@@ -4,11 +4,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-/* TODO:
-    - implement GtkTextDirection
-    - implement StyleFlags
-*/
-
 #include <dlfcn.h>
 #include <gtk/gtk.h>
 #include "WidgetStyleCache.h"
@@ -67,7 +62,7 @@ CreateCheckboxWidget()
 static GtkWidget*
 CreateRadiobuttonWidget()
 {
-  GtkWidget* widget = gtk_radio_button_new_with_label(NULL, "M");
+  GtkWidget* widget = gtk_radio_button_new_with_label(nullptr, "M");
   AddToWindowContainer(widget);
   return widget;
 }
@@ -158,6 +153,184 @@ CreateToolbarSeparatorWidget()
 }
 
 static GtkWidget*
+CreateInfoBarWidget()
+{
+  GtkWidget* widget = gtk_info_bar_new();
+  AddToWindowContainer(widget);
+  return widget;
+}
+
+static GtkWidget*
+CreateButtonWidget()
+{
+  GtkWidget* widget = gtk_button_new_with_label("M");
+  AddToWindowContainer(widget);
+  return widget;
+}
+
+static GtkWidget*
+CreateToggleButtonWidget()
+{
+  GtkWidget* widget = gtk_toggle_button_new();
+  AddToWindowContainer(widget);
+  return widget;
+}
+
+static GtkWidget*
+CreateButtonArrowWidget()
+{
+  GtkWidget* widget = gtk_arrow_new(GTK_ARROW_DOWN, GTK_SHADOW_OUT);
+  gtk_container_add(GTK_CONTAINER(GetWidget(MOZ_GTK_TOGGLE_BUTTON)), widget);
+  gtk_widget_realize(widget);
+  gtk_widget_show(widget);
+  return widget;
+}
+
+static GtkWidget*
+CreateSpinWidget()
+{
+  GtkWidget* widget = gtk_spin_button_new(nullptr, 1, 0);
+  AddToWindowContainer(widget);
+  return widget;
+}
+
+static GtkWidget*
+CreateEntryWidget()
+{
+  GtkWidget* widget = gtk_entry_new();
+  AddToWindowContainer(widget);
+  return widget;
+}
+
+static GtkWidget*
+CreateScrolledWindowWidget()
+{
+  GtkWidget* widget = gtk_scrolled_window_new(nullptr, nullptr);
+  AddToWindowContainer(widget);
+  return widget;
+}
+
+static GtkWidget*
+CreateTextViewWidget()
+{
+  GtkWidget* widget = gtk_text_view_new();
+  gtk_container_add(GTK_CONTAINER(GetWidget(MOZ_GTK_SCROLLED_WINDOW)),
+                    widget);
+  return widget;
+}
+
+static GtkWidget*
+CreateMenuSeparatorWidget()
+{
+  GtkWidget* widget = gtk_separator_menu_item_new();
+  gtk_menu_shell_append(GTK_MENU_SHELL(GetWidget(MOZ_GTK_MENUPOPUP)),
+                        widget);
+  gtk_widget_realize(widget);
+  return widget;
+}
+
+static GtkWidget*
+CreateTreeViewWidget()
+{
+  GtkWidget* widget = gtk_tree_view_new();
+  AddToWindowContainer(widget);
+  return widget;
+}
+
+static GtkWidget*
+CreateTreeHeaderCellWidget()
+{
+  /*
+   * Some GTK engines paint the first and last cell
+   * of a TreeView header with a highlight.
+   * Since we do not know where our widget will be relative
+   * to the other buttons in the TreeView header, we must
+   * paint it as a button that is between two others,
+   * thus ensuring it is neither the first or last button
+   * in the header.
+   * GTK doesn't give us a way to do this explicitly,
+   * so we must paint with a button that is between two
+   * others.
+   */
+  GtkTreeViewColumn* firstTreeViewColumn;
+  GtkTreeViewColumn* middleTreeViewColumn;
+  GtkTreeViewColumn* lastTreeViewColumn;
+
+  GtkWidget *treeView = GetWidget(MOZ_GTK_TREEVIEW);
+
+  /* Create and append our three columns */
+  firstTreeViewColumn = gtk_tree_view_column_new();
+  gtk_tree_view_column_set_title(firstTreeViewColumn, "M");
+  gtk_tree_view_append_column(GTK_TREE_VIEW(treeView),
+                              firstTreeViewColumn);
+
+  middleTreeViewColumn = gtk_tree_view_column_new();
+  gtk_tree_view_column_set_title(middleTreeViewColumn, "M");
+  gtk_tree_view_append_column(GTK_TREE_VIEW(treeView),
+                              middleTreeViewColumn);
+
+  lastTreeViewColumn = gtk_tree_view_column_new();
+  gtk_tree_view_column_set_title(lastTreeViewColumn, "M");
+  gtk_tree_view_append_column(GTK_TREE_VIEW(treeView),
+                              lastTreeViewColumn);
+
+  /* Use the middle column's header for our button */
+  return gtk_tree_view_column_get_button(middleTreeViewColumn);
+}
+
+static GtkWidget*
+CreateTreeHeaderSortArrowWidget()
+{
+  /* TODO, but it can't be NULL */
+  GtkWidget* widget = gtk_button_new();
+  AddToWindowContainer(widget);
+  return widget;
+}
+
+static GtkWidget*
+CreateHPanedWidget()
+{
+  GtkWidget* widget = gtk_paned_new(GTK_ORIENTATION_HORIZONTAL);
+  AddToWindowContainer(widget);
+  return widget;
+}
+
+static GtkWidget*
+CreateVPanedWidget()
+{
+  GtkWidget* widget = gtk_paned_new(GTK_ORIENTATION_VERTICAL);
+  AddToWindowContainer(widget);
+  return widget;
+}
+
+static GtkWidget*
+CreateImageMenuItemWidget()
+{
+  GtkWidget* widget = gtk_image_menu_item_new();
+  gtk_menu_shell_append(GTK_MENU_SHELL(GetWidget(MOZ_GTK_MENUPOPUP)), widget);
+  gtk_widget_realize(widget);
+  return widget;
+}
+
+static GtkWidget*
+CreateCheckMenuItemWidget()
+{
+  GtkWidget* widget = gtk_check_menu_item_new();
+  gtk_menu_shell_append(GTK_MENU_SHELL(GetWidget(MOZ_GTK_MENUPOPUP)), widget);
+  gtk_widget_realize(widget);
+  return widget;
+}
+
+static GtkWidget*
+CreateRadioMenuItemWidget()
+{
+  GtkWidget* widget = gtk_radio_menu_item_new(nullptr);
+  gtk_menu_shell_append(GTK_MENU_SHELL(GetWidget(MOZ_GTK_MENUPOPUP)), widget);
+  gtk_widget_realize(widget);
+  return widget;
+}
+
+static GtkWidget*
 CreateWidget(WidgetNodeType aWidgetType)
 {
   switch (aWidgetType) {
@@ -185,6 +358,8 @@ CreateWidget(WidgetNodeType aWidgetType)
       return CreateMenuItemWidget(MOZ_GTK_MENUBAR);
     case MOZ_GTK_MENUITEM:
       return CreateMenuItemWidget(MOZ_GTK_MENUPOPUP);
+    case MOZ_GTK_MENUSEPARATOR:
+      return CreateMenuSeparatorWidget();
     case MOZ_GTK_EXPANDER:
       return CreateExpanderWidget();
     case MOZ_GTK_FRAME:
@@ -195,6 +370,38 @@ CreateWidget(WidgetNodeType aWidgetType)
       return CreateToolbarWidget();
     case MOZ_GTK_TOOLBAR_SEPARATOR:
       return CreateToolbarSeparatorWidget();
+    case MOZ_GTK_INFO_BAR:
+      return CreateInfoBarWidget();
+    case MOZ_GTK_SPINBUTTON:
+      return CreateSpinWidget();
+    case MOZ_GTK_BUTTON:
+      return CreateButtonWidget();
+    case MOZ_GTK_TOGGLE_BUTTON:
+      return CreateToggleButtonWidget();
+    case MOZ_GTK_BUTTON_ARROW:
+      return CreateButtonArrowWidget();
+    case MOZ_GTK_ENTRY:
+      return CreateEntryWidget();
+    case MOZ_GTK_SCROLLED_WINDOW: 
+      return CreateScrolledWindowWidget();
+    case MOZ_GTK_TEXT_VIEW:
+      return CreateTextViewWidget();
+    case MOZ_GTK_TREEVIEW:
+      return CreateTreeViewWidget();
+    case MOZ_GTK_TREE_HEADER_CELL:
+      return CreateTreeHeaderCellWidget();
+    case MOZ_GTK_TREE_HEADER_SORTARROW:
+      return CreateTreeHeaderSortArrowWidget();
+    case MOZ_GTK_SPLITTER_HORIZONTAL:
+      return CreateHPanedWidget();
+    case MOZ_GTK_SPLITTER_VERTICAL:
+      return CreateVPanedWidget();
+    case MOZ_GTK_IMAGEMENUITEM:
+      return CreateImageMenuItemWidget();
+    case MOZ_GTK_CHECKMENUITEM_CONTAINER:
+      return CreateCheckMenuItemWidget();
+    case MOZ_GTK_RADIOMENUITEM_CONTAINER:
+      return CreateRadioMenuItemWidget();
     default:
       /* Not implemented */
       return nullptr;
@@ -317,6 +524,14 @@ GetCssNodeStyleInternal(WidgetNodeType aNodeType)
       style = CreateChildCSSNode(GTK_STYLE_CLASS_CHECK,
                                  MOZ_GTK_CHECKBUTTON_CONTAINER);
       break;
+    case MOZ_GTK_RADIOMENUITEM:
+      style = CreateChildCSSNode(GTK_STYLE_CLASS_RADIO,
+                                 MOZ_GTK_RADIOMENUITEM_CONTAINER);
+      break;
+    case MOZ_GTK_CHECKMENUITEM:
+      style = CreateChildCSSNode(GTK_STYLE_CLASS_CHECK,
+                                 MOZ_GTK_CHECKMENUITEM_CONTAINER);
+      break;
     case MOZ_GTK_PROGRESS_TROUGH:
       /* Progress bar background (trough) */
       style = CreateChildCSSNode(GTK_STYLE_CLASS_TROUGH,
@@ -335,6 +550,41 @@ GetCssNodeStyleInternal(WidgetNodeType aNodeType)
       // TODO - create from CSS node
       return GetWidgetStyleWithClass(MOZ_GTK_GRIPPER,
                                      GTK_STYLE_CLASS_GRIP);
+    case MOZ_GTK_INFO_BAR:
+      // TODO - create from CSS node
+      return GetWidgetStyleWithClass(MOZ_GTK_INFO_BAR,
+                                     GTK_STYLE_CLASS_INFO);
+    case MOZ_GTK_SPINBUTTON_ENTRY:
+      // TODO - create from CSS node
+      return GetWidgetStyleWithClass(MOZ_GTK_SPINBUTTON,
+                                     GTK_STYLE_CLASS_ENTRY);
+    case MOZ_GTK_SCROLLED_WINDOW:
+      // TODO - create from CSS node
+      return GetWidgetStyleWithClass(MOZ_GTK_SCROLLED_WINDOW,
+                                     GTK_STYLE_CLASS_FRAME);
+    case MOZ_GTK_TEXT_VIEW:
+      // TODO - create from CSS node
+      return GetWidgetStyleWithClass(MOZ_GTK_TEXT_VIEW,
+                                     GTK_STYLE_CLASS_VIEW);
+    case MOZ_GTK_FRAME_BORDER:
+      style = CreateChildCSSNode("border", MOZ_GTK_FRAME);
+      break;
+    case MOZ_GTK_TREEVIEW_VIEW:
+      // TODO - create from CSS node
+      return GetWidgetStyleWithClass(MOZ_GTK_TREEVIEW,
+                                     GTK_STYLE_CLASS_VIEW);
+    case MOZ_GTK_TREEVIEW_EXPANDER:
+      // TODO - create from CSS node
+      return GetWidgetStyleWithClass(MOZ_GTK_TREEVIEW,
+                                     GTK_STYLE_CLASS_EXPANDER);
+    case MOZ_GTK_SPLITTER_SEPARATOR_HORIZONTAL:
+      style = CreateChildCSSNode("separator",
+                                 MOZ_GTK_SPLITTER_HORIZONTAL);
+      break;
+    case MOZ_GTK_SPLITTER_SEPARATOR_VERTICAL:
+      style = CreateChildCSSNode("separator",
+                                 MOZ_GTK_SPLITTER_VERTICAL);
+      break;
     default:
       // TODO - create style from style path
       GtkWidget* widget = GetWidget(aNodeType);
@@ -369,6 +619,12 @@ GetWidgetStyleInternal(WidgetNodeType aNodeType)
     case MOZ_GTK_CHECKBUTTON:
       return GetWidgetStyleWithClass(MOZ_GTK_CHECKBUTTON_CONTAINER,
                                      GTK_STYLE_CLASS_CHECK);
+    case MOZ_GTK_RADIOMENUITEM:
+      return GetWidgetStyleWithClass(MOZ_GTK_RADIOMENUITEM_CONTAINER,
+                                     GTK_STYLE_CLASS_RADIO);
+    case MOZ_GTK_CHECKMENUITEM:
+      return GetWidgetStyleWithClass(MOZ_GTK_CHECKMENUITEM_CONTAINER,
+                                     GTK_STYLE_CLASS_CHECK);
     case MOZ_GTK_PROGRESS_TROUGH:
       return GetWidgetStyleWithClass(MOZ_GTK_PROGRESSBAR,
                                      GTK_STYLE_CLASS_TROUGH);
@@ -389,6 +645,32 @@ GetWidgetStyleInternal(WidgetNodeType aNodeType)
     case MOZ_GTK_GRIPPER:
       return GetWidgetStyleWithClass(MOZ_GTK_GRIPPER,
                                      GTK_STYLE_CLASS_GRIP);
+    case MOZ_GTK_INFO_BAR:
+      return GetWidgetStyleWithClass(MOZ_GTK_INFO_BAR,
+                                     GTK_STYLE_CLASS_INFO);
+    case MOZ_GTK_SPINBUTTON_ENTRY:
+      return GetWidgetStyleWithClass(MOZ_GTK_SPINBUTTON,
+                                     GTK_STYLE_CLASS_ENTRY);
+    case MOZ_GTK_SCROLLED_WINDOW:
+      return GetWidgetStyleWithClass(MOZ_GTK_SCROLLED_WINDOW,
+                                     GTK_STYLE_CLASS_FRAME);
+    case MOZ_GTK_TEXT_VIEW:
+      return GetWidgetStyleWithClass(MOZ_GTK_TEXT_VIEW,
+                                     GTK_STYLE_CLASS_VIEW);
+    case MOZ_GTK_FRAME_BORDER:
+      return GetWidgetStyleInternal(MOZ_GTK_FRAME);
+    case MOZ_GTK_TREEVIEW_VIEW:
+      return GetWidgetStyleWithClass(MOZ_GTK_TREEVIEW,
+                                     GTK_STYLE_CLASS_VIEW);
+    case MOZ_GTK_TREEVIEW_EXPANDER:
+      return GetWidgetStyleWithClass(MOZ_GTK_TREEVIEW,
+                                     GTK_STYLE_CLASS_EXPANDER);
+    case MOZ_GTK_SPLITTER_SEPARATOR_HORIZONTAL:
+      return GetWidgetStyleWithClass(MOZ_GTK_SPLITTER_HORIZONTAL,
+                                     GTK_STYLE_CLASS_PANE_SEPARATOR);
+    case MOZ_GTK_SPLITTER_SEPARATOR_VERTICAL:
+      return GetWidgetStyleWithClass(MOZ_GTK_SPLITTER_VERTICAL,
+                                     GTK_STYLE_CLASS_PANE_SEPARATOR);
     default:
       GtkWidget* widget = GetWidget(aNodeType);
       MOZ_ASSERT(widget);
@@ -468,3 +750,4 @@ ReleaseStyleContext(GtkStyleContext* aStyleContext)
   sCurrentStyleContext = nullptr;
 #endif
 }
+

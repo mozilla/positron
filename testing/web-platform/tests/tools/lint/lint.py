@@ -1,6 +1,8 @@
 from __future__ import print_function, unicode_literals
 
+import abc
 import argparse
+import ast
 import fnmatch
 import json
 import os
@@ -27,7 +29,7 @@ web-platform-tests directory to make the lint tool ignore it.
 
 For example, to make the lint tool ignore all '%s'
 errors in the %s file,
-you could add the following line to the lint.whitelist file."
+you could add the following line to the lint.whitelist file.
 
 %s:%s"""
 
@@ -37,6 +39,15 @@ def all_git_paths(repo_root):
     for item in output.split("\n"):
         yield item
 
+def all_filesystem_paths(repo_root):
+    for dirpath, dirnames, filenames in os.walk(repo_root):
+        for filename in filenames:
+            yield os.path.relpath(os.path.join(dirpath, filename), repo_root)
+
+def all_paths(repo_root, ignore_local):
+    fn = all_git_paths if ignore_local else all_filesystem_paths
+    for item in fn(repo_root):
+        yield item
 
 def check_path_length(repo_root, path):
     if len(path) + 1 > 150:
@@ -238,6 +249,42 @@ def check_parsed(repo_root, path, f):
 
     return errors
 
+class ASTCheck(object):
+    __metaclass__ = abc.ABCMeta
+    error = None
+    description = None
+
+    @abc.abstractmethod
+    def check(self, root):
+        pass
+
+class OpenModeCheck(ASTCheck):
+    error = "OPEN-NO-MODE"
+    description = "File opened without providing an explicit mode (note: binary files must be read with 'b' in the mode flags)"
+
+    def check(self, root):
+        errors = []
+        for node in ast.walk(root):
+            if isinstance(node, ast.Call):
+                if hasattr(node.func, "id") and node.func.id in ("open", "file"):
+                    if (len(node.args) < 2 and
+                        all(item.arg != "mode" for item in node.keywords)):
+                        errors.append(node.lineno)
+        return errors
+
+ast_checkers = [item() for item in [OpenModeCheck]]
+
+def check_python_ast(repo_root, path, f):
+    if not path.endswith(".py"):
+        return []
+
+    errors = []
+    root = ast.parse(f.read())
+    for checker in ast_checkers:
+        for lineno in checker.check(root):
+            errors.append((checker.error, checker.description, path, lineno))
+    return errors
+
 def output_errors_text(errors):
     for error_type, description, path, line_number in errors:
         pos_string = path
@@ -267,12 +314,14 @@ def parse_args():
                         help="List of paths to lint")
     parser.add_argument("--json", action="store_true",
                         help="Output machine-readable JSON format")
+    parser.add_argument("--ignore-local", action="store_true",
+                        help="Ignore locally added files in the working directory (requires git).")
     return parser.parse_args()
 
 def main():
     repo_root = localpaths.repo_root
     args = parse_args()
-    paths = args.paths if args.paths else all_git_paths(repo_root)
+    paths = args.paths if args.paths else all_paths(repo_root, args.ignore_local)
     return lint(repo_root, paths, args.json)
 
 def lint(repo_root, paths, output_json):
@@ -316,7 +365,7 @@ def lint(repo_root, paths, output_json):
     return sum(error_count.itervalues())
 
 path_lints = [check_path_length]
-file_lints = [check_regexp_line, check_parsed]
+file_lints = [check_regexp_line, check_parsed, check_python_ast]
 
 if __name__ == "__main__":
     error_count = main()

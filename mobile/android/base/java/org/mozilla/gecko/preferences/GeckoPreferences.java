@@ -39,6 +39,7 @@ import org.mozilla.gecko.tabqueue.TabQueueHelper;
 import org.mozilla.gecko.tabqueue.TabQueuePrompt;
 import org.mozilla.gecko.updater.UpdateService;
 import org.mozilla.gecko.updater.UpdateServiceHelper;
+import org.mozilla.gecko.util.ContextUtils;
 import org.mozilla.gecko.util.EventCallback;
 import org.mozilla.gecko.util.GeckoEventListener;
 import org.mozilla.gecko.util.HardwareUtils;
@@ -165,6 +166,8 @@ OnSharedPreferenceChangeListener
     public static final String PREFS_READ_PARTNER_CUSTOMIZATIONS_PROVIDER = NON_PREF_PREFIX + "distribution.read_partner_customizations_provider";
     public static final String PREFS_READ_PARTNER_BOOKMARKS_PROVIDER = NON_PREF_PREFIX + "distribution.read_partner_bookmarks_provider";
     public static final String PREFS_CUSTOM_TABS = NON_PREF_PREFIX + "customtabs";
+    public static final String PREFS_ACTIVITY_STREAM = NON_PREF_PREFIX + "activitystream";
+    public static final String PREFS_CATEGORY_EXPERIMENTAL_FEATURES = NON_PREF_PREFIX + "category_experimental";
 
     private static final String ACTION_STUMBLER_UPLOAD_PREF = "STUMBLER_PREF";
 
@@ -694,6 +697,12 @@ OnSharedPreferenceChangeListener
                     preferences.removePreference(pref);
                     i--;
                     continue;
+                } else if (PREFS_CATEGORY_EXPERIMENTAL_FEATURES.equals(key)
+                        && !AppConstants.MOZ_ANDROID_ACTIVITY_STREAM
+                        && !AppConstants.MOZ_ANDROID_CUSTOM_TABS) {
+                    preferences.removePreference(pref);
+                    i--;
+                    continue;
                 }
                 setupPreferences((PreferenceGroup) pref, prefs);
             } else {
@@ -708,7 +717,7 @@ OnSharedPreferenceChangeListener
 
                 pref.setOnPreferenceChangeListener(this);
                 if (PREFS_UPDATER_AUTODOWNLOAD.equals(key)) {
-                    if (!AppConstants.MOZ_UPDATER) {
+                    if (!AppConstants.MOZ_UPDATER || ContextUtils.isInstalledFromGooglePlay(this)) {
                         preferences.removePreference(pref);
                         i--;
                         continue;
@@ -887,6 +896,10 @@ OnSharedPreferenceChangeListener
                         continue;
                     }
                 } else if (PREFS_CUSTOM_TABS.equals(key) && !AppConstants.MOZ_ANDROID_CUSTOM_TABS) {
+                    preferences.removePreference(pref);
+                    i--;
+                    continue;
+                } else if (PREFS_ACTIVITY_STREAM.equals(key) && !AppConstants.MOZ_ANDROID_ACTIVITY_STREAM) {
                     preferences.removePreference(pref);
                     i--;
                     continue;
@@ -1200,6 +1213,13 @@ OnSharedPreferenceChangeListener
             }
         } else if (PREFS_NOTIFICATIONS_CONTENT.equals(prefName)) {
             FeedService.setup(this);
+        } else if (PREFS_ACTIVITY_STREAM.equals(prefName)) {
+            ThreadUtils.postDelayedToUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    GeckoAppShell.scheduleRestart();
+                }
+            }, 1000);
         } else if (HANDLERS.containsKey(prefName)) {
             PrefHandler handler = HANDLERS.get(prefName);
             handler.onChange(this, preference, newValue);

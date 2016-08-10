@@ -201,9 +201,6 @@ JSRuntime::JSRuntime(JSRuntime* parentRuntime)
     profilingScripts(false),
     suppressProfilerSampling(false),
     hadOutOfMemory(false),
-#ifdef DEBUG
-    handlingInitFailure(false),
-#endif
 #if defined(DEBUG) || defined(JS_OOM_BREAKPOINT)
     runningOOMTest(false),
 #endif
@@ -601,7 +598,7 @@ InvokeInterruptCallback(JSContext* cx)
     if (flat && stableChars.initTwoByte(cx, flat))
         chars = stableChars.twoByteRange().start().get();
     else
-        chars = MOZ_UTF16("(stack not available)");
+        chars = u"(stack not available)";
     JS_ReportErrorFlagsAndNumberUC(cx, JSREPORT_WARNING, GetErrorMessage, nullptr,
                                    JSMSG_TERMINATED, chars);
 
@@ -905,10 +902,8 @@ JSRuntime::assertCanLock(RuntimeLock which)
         MOZ_ASSERT(exclusiveAccessOwner != PR_GetCurrentThread());
         MOZ_FALLTHROUGH;
       case HelperThreadStateLock:
-        MOZ_ASSERT(!HelperThreadState().isLocked());
         MOZ_FALLTHROUGH;
       case GCLock:
-        gc.assertCanLock();
         break;
       default:
         MOZ_CRASH();

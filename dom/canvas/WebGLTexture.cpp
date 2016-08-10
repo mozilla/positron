@@ -16,6 +16,7 @@
 #include "WebGLContext.h"
 #include "WebGLContextUtils.h"
 #include "WebGLFramebuffer.h"
+#include "WebGLSampler.h"
 #include "WebGLTexelConversions.h"
 
 namespace mozilla {
@@ -337,18 +338,7 @@ WebGLTexture::IsComplete(uint32_t texUnit, const char** const out_reason) const
         auto formatUsage = baseImageInfo.mFormat;
         auto format = formatUsage->format;
 
-        // "* The effective internal format specified for the texture arrays is a sized
-        //    internal color format that is not texture-filterable, and either the
-        //    magnification filter is not NEAREST or the minification filter is neither
-        //    NEAREST nor NEAREST_MIPMAP_NEAREST."
-        // Since all (GLES3) unsized color formats are filterable just like their sized
-        // equivalents, we don't have to care whether its sized or not.
-        if (format->IsColorFormat() && !formatUsage->isFilterable) {
-            *out_reason = "Because minification or magnification filtering is not NEAREST"
-                          " or NEAREST_MIPMAP_NEAREST, and the texture's format is a"
-                          " color format, its format must be \"texture-filterable\".";
-            return false;
-        }
+        bool isFilterable = formatUsage->isFilterable;
 
         // "* The effective internal format specified for the texture arrays is a sized
         //    internal depth or depth and stencil format, the value of
@@ -359,16 +349,21 @@ WebGLTexture::IsComplete(uint32_t texUnit, const char** const out_reason) const
         //      3.0.1:
         //      "* Clarify that a texture is incomplete if it has a depth component, no
         //         shadow comparison, and linear filtering (also Bug 9481)."
-        // As of OES_packed_depth_stencil rev #3, the sample code explicitly samples from
-        // a DEPTH_STENCIL_OES texture with a min-filter of LINEAR. Therefore we relax
-        // this restriction if WEBGL_depth_texture is enabled.
-        if (!mContext->IsExtensionEnabled(WebGLExtensionID::WEBGL_depth_texture)) {
-            if (format->d && mTexCompareMode != LOCAL_GL_NONE) {
-                *out_reason = "A depth or depth-stencil format with TEXTURE_COMPARE_MODE"
-                              " of NONE must have minification or magnification filtering"
-                              " of NEAREST or NEAREST_MIPMAP_NEAREST.";
-                return false;
-            }
+        if (format->d && mTexCompareMode != LOCAL_GL_NONE) {
+            isFilterable = true;
+        }
+
+        // "* The effective internal format specified for the texture arrays is a sized
+        //    internal color format that is not texture-filterable, and either the
+        //    magnification filter is not NEAREST or the minification filter is neither
+        //    NEAREST nor NEAREST_MIPMAP_NEAREST."
+        // Since all (GLES3) unsized color formats are filterable just like their sized
+        // equivalents, we don't have to care whether its sized or not.
+        if (!isFilterable) {
+            *out_reason = "Because minification or magnification filtering is not NEAREST"
+                          " or NEAREST_MIPMAP_NEAREST, and the texture's format must be"
+                          " \"texture-filterable\".";
+            return false;
         }
     }
 
@@ -808,21 +803,36 @@ WebGLTexture::GetTexParameter(TexTarget texTarget, GLenum pname)
 
     switch (pname) {
     case LOCAL_GL_TEXTURE_MIN_FILTER:
+        return JS::NumberValue(uint32_t(mMinFilter.get()));
+
     case LOCAL_GL_TEXTURE_MAG_FILTER:
+        return JS::NumberValue(uint32_t(mMagFilter.get()));
+
     case LOCAL_GL_TEXTURE_WRAP_S:
+        return JS::NumberValue(uint32_t(mWrapS.get()));
+
     case LOCAL_GL_TEXTURE_WRAP_T:
+        return JS::NumberValue(uint32_t(mWrapT.get()));
+
     case LOCAL_GL_TEXTURE_BASE_LEVEL:
-    case LOCAL_GL_TEXTURE_COMPARE_FUNC:
+        return JS::NumberValue(mBaseMipmapLevel);
+
     case LOCAL_GL_TEXTURE_COMPARE_MODE:
-    case LOCAL_GL_TEXTURE_IMMUTABLE_LEVELS:
+        return JS::NumberValue(uint32_t(mTexCompareMode));
+
     case LOCAL_GL_TEXTURE_MAX_LEVEL:
+        return JS::NumberValue(mMaxMipmapLevel);
+
+    case LOCAL_GL_TEXTURE_IMMUTABLE_FORMAT:
+        return JS::BooleanValue(mImmutable);
+
+    case LOCAL_GL_TEXTURE_IMMUTABLE_LEVELS:
+        return JS::NumberValue(uint32_t(mImmutableLevelCount));
+
+    case LOCAL_GL_TEXTURE_COMPARE_FUNC:
     case LOCAL_GL_TEXTURE_WRAP_R:
         mContext->gl->fGetTexParameteriv(texTarget.get(), pname, &i);
         return JS::NumberValue(uint32_t(i));
-
-    case LOCAL_GL_TEXTURE_IMMUTABLE_FORMAT:
-        mContext->gl->fGetTexParameteriv(texTarget.get(), pname, &i);
-        return JS::BooleanValue(bool(i));
 
     case LOCAL_GL_TEXTURE_MAX_ANISOTROPY_EXT:
     case LOCAL_GL_TEXTURE_MAX_LOD:
@@ -1004,11 +1014,13 @@ WebGLTexture::TexParameter(TexTarget texTarget, GLenum pname, GLint* maybeIntPar
     case LOCAL_GL_TEXTURE_BASE_LEVEL:
         mBaseMipmapLevel = intParam;
         ClampLevelBaseAndMax();
+        intParam = mBaseMipmapLevel;
         break;
 
     case LOCAL_GL_TEXTURE_MAX_LEVEL:
         mMaxMipmapLevel = intParam;
         ClampLevelBaseAndMax();
+        intParam = mMaxMipmapLevel;
         break;
 
     case LOCAL_GL_TEXTURE_MIN_FILTER:
