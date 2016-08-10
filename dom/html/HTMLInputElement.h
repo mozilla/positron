@@ -229,7 +229,7 @@ public:
   NS_IMETHOD_(void) UpdatePlaceholderVisibility(bool aNotify) override;
   NS_IMETHOD_(bool) GetPlaceholderVisibility() override;
   NS_IMETHOD_(void) InitializeKeyboardEventListeners() override;
-  NS_IMETHOD_(void) OnValueChanged(bool aNotify) override;
+  NS_IMETHOD_(void) OnValueChanged(bool aNotify, bool aWasInteractiveUserChange) override;
   NS_IMETHOD_(bool) HasCachedSelection() override;
 
   void GetDisplayFileName(nsAString& aFileName) const;
@@ -708,14 +708,14 @@ public:
                     ErrorResult& aRv, int32_t aSelectionStart = -1,
                     int32_t aSelectionEnd = -1);
 
-  bool DirectoryAttr() const
+  bool Allowdirs() const
   {
-    return HasAttr(kNameSpaceID_None, nsGkAtoms::directory);
+    return HasAttr(kNameSpaceID_None, nsGkAtoms::allowdirs);
   }
 
-  void SetDirectoryAttr(bool aValue, ErrorResult& aRv)
+  void SetAllowdirs(bool aValue, ErrorResult& aRv)
   {
-    SetHTMLBoolAttr(nsGkAtoms::directory, aValue, aRv);
+    SetHTMLBoolAttr(nsGkAtoms::allowdirs, aValue, aRv);
   }
 
   bool WebkitDirectoryAttr() const
@@ -805,6 +805,8 @@ public:
    * it will return a Decimal for which Decimal::isFinite() will return false.
    */
   static Decimal StringToDecimal(const nsAString& aValue);
+
+  void UpdateEntries(const nsTArray<OwningFileOrDirectory>& aFilesOrDirectories);
 
 protected:
   virtual ~HTMLInputElement();
@@ -966,8 +968,6 @@ protected:
    */
   void UpdateFileList();
 
-  void UpdateEntries(const nsTArray<OwningFileOrDirectory>& aFilesOrDirectories);
-
   /**
    * Called after calling one of the SetFilesOrDirectories() functions.
    * This method can explore the directory recursively if needed.
@@ -1023,11 +1023,7 @@ protected:
   /**
    * Returns if the step attribute apply for the current type.
    */
-  bool DoesStepApply() const
-  {
-    // TODO: this is temporary until bug 888324 is fixed.
-    return DoesMinMaxApply() && mType != NS_FORM_INPUT_MONTH;
-  }
+  bool DoesStepApply() const { return DoesMinMaxApply(); }
 
   /**
    * Returns if stepDown and stepUp methods apply for the current type.
@@ -1428,6 +1424,7 @@ protected:
   static const Decimal kStepScaleFactorDate;
   static const Decimal kStepScaleFactorNumberRange;
   static const Decimal kStepScaleFactorTime;
+  static const Decimal kStepScaleFactorMonth;
 
   // Default step base value when a type do not have specific one.
   static const Decimal kDefaultStepBase;
@@ -1452,6 +1449,7 @@ protected:
   nsContentUtils::AutocompleteAttrState mAutocompleteAttrState;
   bool                     mDisabledChanged     : 1;
   bool                     mValueChanged        : 1;
+  bool                     mLastValueChangeWasInteractive : 1;
   bool                     mCheckedChanged      : 1;
   bool                     mChecked             : 1;
   bool                     mHandlingSelectEvent : 1;
@@ -1496,6 +1494,12 @@ private:
            aType == NS_FORM_INPUT_RANGE ||
            aType == NS_FORM_INPUT_NUMBER;
   }
+
+  /**
+   * Returns true if the key code may induce the input's value changed to fire
+   * a "change" event accordingly.
+   */
+  bool MayFireChangeOnKeyUp(uint32_t aKeyCode) const;
 
   struct nsFilePickerFilter {
     nsFilePickerFilter()

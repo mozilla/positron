@@ -55,12 +55,13 @@ var TestRunner = {
    *               iterator.
    */
   next: function (aValue) {
-    let { done, value } = TestRunner._iter.next(aValue);
-    if (done) {
+    let obj = TestRunner._iter.next(aValue);
+    if (obj.done) {
       finish();
       return;
     }
 
+    let value = obj.value || obj;
     if (value && typeof value.then == "function") {
       value.then(result => {
         next(result);
@@ -281,7 +282,7 @@ function bgAddPageThumbObserver(url) {
   return new Promise((resolve, reject) => {
     function observe(subject, topic, data) { // jshint ignore:line
       if (data === url) {
-        switch(topic) {
+        switch (topic) {
           case "page-thumbnail:create":
             resolve();
             break;

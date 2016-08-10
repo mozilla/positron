@@ -823,6 +823,7 @@ PropertySupportsVariant(nsCSSProperty aPropertyID, uint32_t aVariant)
       case eCSSProperty_content:
       case eCSSProperty_cursor:
       case eCSSProperty_clip_path:
+      case eCSSProperty_shape_outside:
         supported = VARIANT_URL;
         break;
 
@@ -844,6 +845,7 @@ PropertySupportsVariant(nsCSSProperty aPropertyID, uint32_t aVariant)
       case eCSSProperty_grid_row_start:
       case eCSSProperty_grid_row_end:
       case eCSSProperty_font_weight:
+      case eCSSProperty_initial_letter:
         supported = VARIANT_NUMBER;
         break;
 

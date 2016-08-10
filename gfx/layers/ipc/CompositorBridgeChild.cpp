@@ -11,10 +11,12 @@
 #include "ClientLayerManager.h"         // for ClientLayerManager
 #include "base/message_loop.h"          // for MessageLoop
 #include "base/task.h"                  // for NewRunnableMethod, etc
+#include "gfxPrefs.h"
 #include "mozilla/layers/LayerTransactionChild.h"
 #include "mozilla/layers/PLayerTransactionChild.h"
 #include "mozilla/layers/TextureClient.h"// for TextureClient
 #include "mozilla/layers/TextureClientPool.h"// for TextureClientPool
+#include "mozilla/gfx/gfxVars.h"
 #include "mozilla/gfx/GPUProcessManager.h"
 #include "mozilla/mozalloc.h"           // for operator new, etc
 #include "nsAutoPtr.h"
@@ -35,10 +37,12 @@
 #ifdef MOZ_WIDGET_SUPPORTS_OOP_COMPOSITING
 # include "mozilla/widget/CompositorWidgetChild.h"
 #endif
+#include "VsyncSource.h"
 
 using mozilla::layers::LayerTransactionChild;
 using mozilla::dom::TabChildBase;
 using mozilla::Unused;
+using mozilla::gfx::GPUProcessManager;
 
 namespace mozilla {
 namespace layers {
@@ -179,11 +183,6 @@ CompositorBridgeChild::InitForContent(Endpoint<PCompositorBridgeChild>&& aEndpoi
 
   // We release this ref in DeferredDestroyCompositor.
   sCompositorBridge = child;
-
-  int32_t width;
-  int32_t height;
-  sCompositorBridge->SendGetTileSize(&width, &height);
-  gfxPlatform::GetPlatform()->SetTileSize(width, height);
   return true;
 }
 
@@ -195,8 +194,11 @@ CompositorBridgeChild::InitSameProcess(widget::CompositorWidget* aWidget,
                                        bool aUseExternalSurface,
                                        const gfx::IntSize& aSurfaceSize)
 {
+  TimeDuration vsyncRate =
+    gfxPlatform::GetPlatform()->GetHardwareVsync()->GetGlobalDisplay().GetVsyncRate();
+
   mCompositorBridgeParent =
-    new CompositorBridgeParent(aScale, aUseExternalSurface, aSurfaceSize);
+    new CompositorBridgeParent(aScale, vsyncRate, aUseExternalSurface, aSurfaceSize);
 
   mCanSend = Open(mCompositorBridgeParent->GetIPCChannel(),
                   CompositorThreadHolder::Loop(),
@@ -288,6 +290,9 @@ CompositorBridgeChild::RecvCompositorUpdated(const uint64_t& aLayersId,
   } else if (aLayersId != 0) {
     if (dom::TabChild* child = dom::TabChild::GetFrom(aLayersId)) {
       child->CompositorUpdated(aNewIdentifier);
+    }
+    if (!mCanSend) {
+      return true;
     }
     SendAcknowledgeCompositorUpdate(aLayersId);
   }
@@ -414,6 +419,9 @@ CompositorBridgeChild::RecvUpdatePluginConfigurations(const LayoutDeviceIntPoint
   // Any plugins we didn't update need to be hidden, as they are
   // not associated with visible content.
   nsIWidget::UpdateRegisteredPluginWindowVisibility((uintptr_t)parent, visiblePluginIds);
+  if (!mCanSend) {
+    return true;
+  }
   SendRemotePluginsReady();
   return true;
 #endif // !defined(XP_WIN) && !defined(MOZ_WIDGET_GTK)
@@ -459,6 +467,9 @@ CompositorBridgeChild::RecvHideAllPlugins(const uintptr_t& aParentWidget)
   MOZ_ASSERT(NS_IsMainThread());
   nsTArray<uintptr_t> list;
   nsIWidget::UpdateRegisteredPluginWindowVisibility(aParentWidget, list);
+  if (!mCanSend) {
+    return true;
+  }
   SendRemotePluginsReady();
   return true;
 #endif // !defined(XP_WIN) && !defined(MOZ_WIDGET_GTK)
@@ -651,6 +662,9 @@ CompositorBridgeChild::RequestNotifyAfterRemotePaint(TabChild* aTabChild)
 {
   MOZ_ASSERT(aTabChild, "NULL TabChild not allowed in CompositorBridgeChild::RequestNotifyAfterRemotePaint");
   mWeakTabChild = do_GetWeakReference( static_cast<dom::TabChildBase*>(aTabChild) );
+  if (!mCanSend) {
+    return;
+  }
   Unused << SendRequestNotifyAfterRemotePaint();
 }
 
@@ -736,16 +750,6 @@ CompositorBridgeChild::SendFlushRendering()
     return true;
   }
   return PCompositorBridgeChild::SendFlushRendering();
-}
-
-bool
-CompositorBridgeChild::SendGetTileSize(int32_t* tileWidth, int32_t* tileHeight)
-{
-  MOZ_ASSERT(mCanSend);
-  if (!mCanSend) {
-    return true;
-  }
-  return PCompositorBridgeChild::SendGetTileSize(tileWidth, tileHeight);
 }
 
 bool
@@ -926,11 +930,10 @@ CompositorBridgeChild::GetTexturePool(LayersBackend aBackend,
 
   mTexturePools.AppendElement(
       new TextureClientPool(aBackend, aFormat,
-                            IntSize(gfxPlatform::GetPlatform()->GetTileWidth(),
-                                    gfxPlatform::GetPlatform()->GetTileHeight()),
+                            gfx::gfxVars::TileSize(),
                             aFlags,
-                            gfxPrefs::LayersTileMaxPoolSize(),
-                            gfxPrefs::LayersTileShrinkPoolTimeout(),
+                            gfxPrefs::LayersTileInitialPoolSize(),
+                            gfxPrefs::LayersTilePoolUnusedSize(),
                             this));
 
   return mTexturePools.LastElement();
@@ -940,7 +943,7 @@ void
 CompositorBridgeChild::HandleMemoryPressure()
 {
   for (size_t i = 0; i < mTexturePools.Length(); i++) {
-    mTexturePools[i]->ShrinkToMinimumSize();
+    mTexturePools[i]->Clear();
   }
 }
 

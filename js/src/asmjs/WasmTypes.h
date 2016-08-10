@@ -34,11 +34,36 @@
 #include "js/UniquePtr.h"
 #include "js/Utility.h"
 #include "js/Vector.h"
+#include "vm/MallocProvider.h"
 
 namespace js {
 
 class PropertyName;
 namespace jit { struct BaselineScript; }
+
+// This is a widespread header, so lets keep out the core wasm impl types.
+
+class WasmMemoryObject;
+typedef GCPtr<WasmMemoryObject*> GCPtrWasmMemoryObject;
+typedef Rooted<WasmMemoryObject*> RootedWasmMemoryObject;
+typedef Handle<WasmMemoryObject*> HandleWasmMemoryObject;
+typedef MutableHandle<WasmMemoryObject*> MutableHandleWasmMemoryObject;
+
+class WasmModuleObject;
+typedef Rooted<WasmModuleObject*> RootedWasmModuleObject;
+typedef Handle<WasmModuleObject*> HandleWasmModuleObject;
+typedef MutableHandle<WasmModuleObject*> MutableHandleWasmModuleObject;
+
+class WasmInstanceObject;
+typedef GCVector<WasmInstanceObject*> WasmInstanceObjectVector;
+typedef Rooted<WasmInstanceObject*> RootedWasmInstanceObject;
+typedef Handle<WasmInstanceObject*> HandleWasmInstanceObject;
+typedef MutableHandle<WasmInstanceObject*> MutableHandleWasmInstanceObject;
+
+class WasmTableObject;
+typedef Rooted<WasmTableObject*> RootedWasmTableObject;
+typedef Handle<WasmTableObject*> HandleWasmTableObject;
+typedef MutableHandle<WasmTableObject*> MutableHandleWasmTableObject;
 
 namespace wasm {
 
@@ -55,6 +80,12 @@ using mozilla::RefCounted;
 using mozilla::Some;
 
 typedef Vector<uint32_t, 0, SystemAllocPolicy> Uint32Vector;
+
+class Code;
+class Memory;
+class Module;
+class Instance;
+class Table;
 
 // To call Vector::podResizeToFit, a type must specialize mozilla::IsPod
 // which is pretty verbose to do within js::wasm, so factor that process out
@@ -341,8 +372,8 @@ class Val
 
     uint32_t i32() const { MOZ_ASSERT(type_ == ValType::I32); return u.i32_; }
     uint64_t i64() const { MOZ_ASSERT(type_ == ValType::I64); return u.i64_; }
-    float f32() const { MOZ_ASSERT(type_ == ValType::F32); return u.f32_; }
-    double f64() const { MOZ_ASSERT(type_ == ValType::F64); return u.f64_; }
+    const float& f32() const { MOZ_ASSERT(type_ == ValType::F32); return u.f32_; }
+    const double& f64() const { MOZ_ASSERT(type_ == ValType::F64); return u.f64_; }
 
     const I8x16& i8x16() const {
         MOZ_ASSERT(type_ == ValType::I8x16 || type_ == ValType::B8x16);
@@ -361,8 +392,10 @@ class Val
         return u.f32x4_;
     }
 
-    void writePayload(uint8_t* dst);
+    void writePayload(uint8_t* dst) const;
 };
+
+typedef Vector<Val, 0, SystemAllocPolicy> ValVector;
 
 // The Sig class represents a WebAssembly function signature which takes a list
 // of value types and returns an expression type. The engine uses two in-memory
@@ -402,6 +435,8 @@ class Sig
     bool operator!=(const Sig& rhs) const {
         return !(*this == rhs);
     }
+
+    WASM_DECLARE_SERIALIZABLE(Sig)
 };
 
 struct SigHashPolicy
@@ -411,36 +446,196 @@ struct SigHashPolicy
     static bool match(const Sig* lhs, Lookup rhs) { return *lhs == rhs; }
 };
 
-// A GlobalDesc describes a single global variable. Currently, globals are only
-// exposed through asm.js.
+// An InitExpr describes a deferred initializer expression, used to initialize
+// a global or a table element offset. Such expressions are created during
+// decoding and actually executed on module instantiation.
 
-struct GlobalDesc
+class InitExpr
 {
-    ValType type;
-    unsigned globalDataOffset;
-    bool isConst;
-    GlobalDesc(ValType type, unsigned offset, bool isConst)
-      : type(type), globalDataOffset(offset), isConst(isConst)
-    {}
+  public:
+    enum class Kind {
+        Constant,
+        GetGlobal
+    };
+
+  private:
+    Kind kind_;
+    union {
+        Val val_;
+        struct {
+            uint32_t index_;
+            ValType type_;
+        } global;
+    } u;
+
+  public:
+    InitExpr() = default;
+
+    explicit InitExpr(Val val) : kind_(Kind::Constant) {
+        u.val_ = val;
+    }
+
+    explicit InitExpr(uint32_t globalIndex, ValType type) : kind_(Kind::GetGlobal) {
+        u.global.index_ = globalIndex;
+        u.global.type_ = type;
+    }
+
+    Kind kind() const { return kind_; }
+
+    bool isVal() const { return kind() == Kind::Constant; }
+    Val val() const { MOZ_ASSERT(isVal()); return u.val_; }
+
+    uint32_t globalIndex() const { MOZ_ASSERT(kind() == Kind::GetGlobal); return u.global.index_; }
+
+    ValType type() const {
+        switch (kind()) {
+          case Kind::Constant: return u.val_.type();
+          case Kind::GetGlobal: return u.global.type_;
+        }
+        MOZ_CRASH("unexpected initExpr type");
+    }
+};
+
+// A GlobalDesc describes a single global variable. Currently, asm.js and wasm
+// exposes mutable and immutable private globals, but can't import nor export
+// mutable globals.
+
+enum class GlobalKind
+{
+    Import,
+    Constant,
+    Variable
+};
+
+class GlobalDesc
+{
+    union {
+        struct {
+            union {
+                InitExpr initial_;
+                struct {
+                    ValType type_;
+                    uint32_t index_;
+                } import;
+            } val;
+            unsigned offset_;
+            bool isMutable_;
+        } var;
+        Val cst_;
+    } u;
+    GlobalKind kind_;
+
+  public:
+    GlobalDesc() = default;
+
+    explicit GlobalDesc(InitExpr initial, bool isMutable)
+      : kind_((isMutable || !initial.isVal()) ? GlobalKind::Variable : GlobalKind::Constant)
+    {
+        if (isVariable()) {
+            u.var.val.initial_ = initial;
+            u.var.isMutable_ = isMutable;
+            u.var.offset_ = UINT32_MAX;
+        } else {
+            u.cst_ = initial.val();
+        }
+    }
+
+    explicit GlobalDesc(ValType type, bool isMutable, uint32_t importIndex)
+      : kind_(GlobalKind::Import)
+    {
+        u.var.val.import.type_ = type;
+        u.var.val.import.index_ = importIndex;
+        u.var.isMutable_ = isMutable;
+        u.var.offset_ = UINT32_MAX;
+    }
+
+    void setOffset(unsigned offset) {
+        MOZ_ASSERT(!isConstant());
+        MOZ_ASSERT(u.var.offset_ == UINT32_MAX);
+        u.var.offset_ = offset;
+    }
+    unsigned offset() const {
+        MOZ_ASSERT(!isConstant());
+        MOZ_ASSERT(u.var.offset_ != UINT32_MAX);
+        return u.var.offset_;
+    }
+
+    GlobalKind kind() const { return kind_; }
+    bool isVariable() const { return kind_ == GlobalKind::Variable; }
+    bool isConstant() const { return kind_ == GlobalKind::Constant; }
+    bool isImport() const { return kind_ == GlobalKind::Import; }
+
+    bool isMutable() const { return !isConstant() && u.var.isMutable_; }
+    Val constantValue() const { MOZ_ASSERT(isConstant()); return u.cst_; }
+    const InitExpr& initExpr() const { MOZ_ASSERT(isVariable()); return u.var.val.initial_; }
+    uint32_t importIndex() const { MOZ_ASSERT(isImport()); return u.var.val.import.index_; }
+
+    ValType type() const {
+        switch (kind_) {
+          case GlobalKind::Import:   return u.var.val.import.type_;
+          case GlobalKind::Variable: return u.var.val.initial_.type();
+          case GlobalKind::Constant: return u.cst_.type();
+        }
+        MOZ_CRASH("unexpected global kind");
+    }
 };
 
 typedef Vector<GlobalDesc, 0, SystemAllocPolicy> GlobalDescVector;
 
-// A "declared" signature is a Sig object that is created and owned by the
-// ModuleGenerator. These signature objects are read-only and have the same
-// lifetime as the ModuleGenerator. This type is useful since some uses of Sig
-// need this extended lifetime and want to statically distinguish from the
-// common stack-allocated Sig objects that get passed around.
+// SigIdDesc describes a signature id that can be used by call_indirect and
+// table-entry prologues to structurally compare whether the caller and callee's
+// signatures *structurally* match. To handle the general case, a Sig is
+// allocated and stored in a process-wide hash table, so that pointer equality
+// implies structural equality. As an optimization for the 99% case where the
+// Sig has a small number of parameters, the Sig is bit-packed into a uint32
+// immediate value so that integer equality implies structural equality. Both
+// cases can be handled with a single comparison by always setting the LSB for
+// the immediates (the LSB is necessarily 0 for allocated Sig pointers due to
+// alignment).
 
-struct DeclaredSig : Sig
+class SigIdDesc
 {
-    DeclaredSig() = default;
-    explicit DeclaredSig(Sig&& sig) : Sig(Move(sig)) {}
-    void operator=(Sig&& rhs) { Sig::operator=(Move(rhs)); }
+  public:
+    enum class Kind { None, Immediate, Global };
+    static const uintptr_t ImmediateBit = 0x1;
+
+  private:
+    Kind kind_;
+    size_t bits_;
+
+    SigIdDesc(Kind kind, size_t bits) : kind_(kind), bits_(bits) {}
+
+  public:
+    Kind kind() const { return kind_; }
+    static bool isGlobal(const Sig& sig);
+
+    SigIdDesc() : kind_(Kind::None), bits_(0) {}
+    static SigIdDesc global(const Sig& sig, uint32_t globalDataOffset);
+    static SigIdDesc immediate(const Sig& sig);
+
+    bool isGlobal() const { return kind_ == Kind::Global; }
+
+    size_t immediate() const { MOZ_ASSERT(kind_ == Kind::Immediate); return bits_; }
+    uint32_t globalDataOffset() const { MOZ_ASSERT(kind_ == Kind::Global); return bits_; }
 };
 
-typedef Vector<DeclaredSig, 0, SystemAllocPolicy> DeclaredSigVector;
-typedef Vector<const DeclaredSig*, 0, SystemAllocPolicy> DeclaredSigPtrVector;
+// SigWithId pairs a Sig with SigIdDesc, describing either how to compile code
+// that compares this signature's id or, at instantiation what signature ids to
+// allocate in the global hash and where to put them.
+
+struct SigWithId : Sig
+{
+    SigIdDesc id;
+
+    SigWithId() = default;
+    explicit SigWithId(Sig&& sig, SigIdDesc id) : Sig(Move(sig)), id(id) {}
+    void operator=(Sig&& rhs) { Sig::operator=(Move(rhs)); }
+
+    WASM_DECLARE_SERIALIZABLE(SigWithId)
+};
+
+typedef Vector<SigWithId, 0, SystemAllocPolicy> SigWithIdVector;
+typedef Vector<const SigWithId*, 0, SystemAllocPolicy> SigWithIdPtrVector;
 
 // The (,Profiling,Func)Offsets classes are used to record the offsets of
 // different key points in a CodeRange during compilation.
@@ -722,9 +917,8 @@ enum class SymbolicAddress
     LogD,
     PowD,
     ATan2D,
-    Runtime,
-    RuntimeInterruptUint32,
-    StackLimit,
+    Context,
+    InterruptUint32,
     ReportOverRecursed,
     HandleExecutionInterrupt,
     HandleTrap,
@@ -734,6 +928,14 @@ enum class SymbolicAddress
     CallImport_F64,
     CoerceInPlace_ToInt32,
     CoerceInPlace_ToNumber,
+    DivI64,
+    UDivI64,
+    ModI64,
+    UModI64,
+    TruncateDoubleToInt64,
+    TruncateDoubleToUint64,
+    Uint64ToFloatingPoint,
+    Int64ToFloatingPoint,
     Limit
 };
 
@@ -838,16 +1040,119 @@ enum ModuleKind
     AsmJS
 };
 
-// FuncImportExit describes the region of wasm global memory allocated for a
-// function import. This is accessed directly from JIT code and mutated by
-// Instance as exits become optimized and deoptimized.
+// TableDesc describes a table as well as the offset of the table's base pointer
+// in global memory. Currently, wasm only has "any function" and asm.js only
+// "typed function".
 
-struct FuncImportExit
+enum class TableKind
 {
-    void* code;
-    jit::BaselineScript* baselineScript;
-    GCPtrFunction fun;
-    static_assert(sizeof(GCPtrFunction) == sizeof(void*), "for JIT access");
+    AnyFunction,
+    TypedFunction
+};
+
+struct TableDesc
+{
+    TableKind kind;
+    bool external;
+    uint32_t globalDataOffset;
+    uint32_t initial;
+    uint32_t maximum;
+
+    TableDesc() { PodZero(this); }
+};
+
+WASM_DECLARE_POD_VECTOR(TableDesc, TableDescVector)
+
+// CalleeDesc describes how to compile one of the variety of asm.js/wasm calls.
+// This is hoisted into WasmTypes.h for sharing between Ion and Baseline.
+
+class CalleeDesc
+{
+  public:
+    enum Which { Internal, Import, WasmTable, AsmJSTable, Builtin };
+
+  private:
+    Which which_;
+    union U {
+        U() {}
+        uint32_t internalFuncIndex_;
+        struct {
+            uint32_t globalDataOffset_;
+        } import;
+        struct {
+            TableDesc desc_;
+            SigIdDesc sigId_;
+        } table;
+        SymbolicAddress builtin_;
+    } u;
+
+  public:
+    CalleeDesc() {}
+    static CalleeDesc internal(uint32_t callee) {
+        CalleeDesc c;
+        c.which_ = Internal;
+        c.u.internalFuncIndex_ = callee;
+        return c;
+    }
+    static CalleeDesc import(uint32_t globalDataOffset) {
+        CalleeDesc c;
+        c.which_ = Import;
+        c.u.import.globalDataOffset_ = globalDataOffset;
+        return c;
+    }
+    static CalleeDesc wasmTable(const TableDesc& desc, SigIdDesc sigId) {
+        CalleeDesc c;
+        c.which_ = WasmTable;
+        c.u.table.desc_ = desc;
+        c.u.table.sigId_ = sigId;
+        return c;
+    }
+    static CalleeDesc asmJSTable(const TableDesc& desc) {
+        CalleeDesc c;
+        c.which_ = AsmJSTable;
+        c.u.table.desc_ = desc;
+        return c;
+    }
+    static CalleeDesc builtin(SymbolicAddress callee) {
+        CalleeDesc c;
+        c.which_ = Builtin;
+        c.u.builtin_ = callee;
+        return c;
+    }
+    Which which() const {
+        return which_;
+    }
+    uint32_t internalFuncIndex() const {
+        MOZ_ASSERT(which_ == Internal);
+        return u.internalFuncIndex_;
+    }
+    uint32_t importGlobalDataOffset() const {
+        MOZ_ASSERT(which_ == Import);
+        return u.import.globalDataOffset_;
+    }
+    bool isTable() const {
+        return which_ == WasmTable || which_ == AsmJSTable;
+    }
+    uint32_t tableGlobalDataOffset() const {
+        MOZ_ASSERT(isTable());
+        return u.table.desc_.globalDataOffset;
+    }
+    uint32_t wasmTableLength() const {
+        MOZ_ASSERT(which_ == WasmTable);
+        return u.table.desc_.initial;
+    }
+    bool wasmTableIsExternal() const {
+        MOZ_ASSERT(which_ == WasmTable);
+        return u.table.desc_.external;
+    }
+    SigIdDesc wasmTableSigId() const {
+        MOZ_ASSERT(which_ == WasmTable);
+        return u.table.sigId_;
+    }
+    SymbolicAddress builtin() const {
+        MOZ_ASSERT(which_ == Builtin);
+        return u.builtin_;
+    }
 };
 
 // ExportArg holds the unboxed operands to the wasm entry trampoline which can
@@ -859,7 +1164,83 @@ struct ExportArg
     uint64_t hi;
 };
 
-typedef int32_t (*ExportFuncPtr)(ExportArg* args, uint8_t* global);
+// TLS data for a single module instance.
+//
+// Every WebAssembly function expects to be passed a hidden TLS pointer argument
+// in WasmTlsReg. The TLS pointer argument points to a TlsData struct.
+// Compiled functions expect that the TLS pointer does not change for the
+// lifetime of the thread.
+//
+// There is a TlsData per module instance per thread, so inter-module calls need
+// to pass the TLS pointer appropriate for the callee module.
+//
+// After the TlsData struct follows the module's declared TLS variables.
+
+struct TlsData
+{
+    // Pointer to the JSContext that contains this TLS data.
+    JSContext* cx;
+
+    // Pointer to the Instance that contains this TLS data.
+    Instance* instance;
+
+    // Pointer to the global data for this Instance.
+    uint8_t* globalData;
+
+    // Pointer to the base of the default memory (or null if there is none).
+    uint8_t* memoryBase;
+
+    // Stack limit for the current thread. This limit is checked against the
+    // stack pointer in the prologue of functions that allocate stack space. See
+    // `CodeGenerator::generateWasm`.
+    void* stackLimit;
+};
+
+typedef int32_t (*ExportFuncPtr)(ExportArg* args, TlsData* tls);
+
+// FuncImportTls describes the region of wasm global memory allocated in the
+// instance's thread-local storage for a function import. This is accessed
+// directly from JIT code and mutated by Instance as exits become optimized and
+// deoptimized.
+
+struct FuncImportTls
+{
+    // The code to call at an import site: a wasm callee, a thunk into C++, or a
+    // thunk into JIT code.
+    void* code;
+
+    // The callee's TlsData pointer, which must be loaded to WasmTlsReg (along
+    // with any pinned registers) before calling 'code'.
+    TlsData* tls;
+
+    // If 'code' points into a JIT code thunk, the BaselineScript of the callee,
+    // for bidirectional registration purposes.
+    jit::BaselineScript* baselineScript;
+
+    // A GC pointer which keeps the callee alive. For imported wasm functions,
+    // this points to the wasm function's WasmInstanceObject. For all other
+    // imported functions, 'obj' points to the JSFunction.
+    GCPtrObject obj;
+    static_assert(sizeof(GCPtrObject) == sizeof(void*), "for JIT access");
+};
+
+// When a table can be shared between instances (it is "external"), the internal
+// representation is an array of ExternalTableElem instead of just an array of
+// code pointers.
+
+struct ExternalTableElem
+{
+    // The code to call when calling this element. The table ABI is the system
+    // ABI with the additional ABI requirements that:
+    //  - WasmTlsReg and any pinned registers have been loaded appropriately
+    //  - if this is a heterogeneous table that requires a signature check,
+    //    WasmTableCallSigReg holds the signature id.
+    void* code;
+
+    // The pointer to the callee's instance's TlsData. This must be loaded into
+    // WasmTlsReg before calling 'code'.
+    TlsData* tls;
+};
 
 // Constants:
 
@@ -872,23 +1253,22 @@ static const uint64_t Uint32Range = uint64_t(UINT32_MAX) + 1;
 static const uint64_t MappedSize = 2 * Uint32Range + PageSize;
 #endif
 
-static const unsigned ActivationGlobalDataOffset = 0;
-static const unsigned HeapGlobalDataOffset       = ActivationGlobalDataOffset + sizeof(void*);
-static const unsigned NaN64GlobalDataOffset      = HeapGlobalDataOffset + sizeof(void*);
-static const unsigned NaN32GlobalDataOffset      = NaN64GlobalDataOffset + sizeof(double);
-static const unsigned InitialGlobalDataBytes     = NaN32GlobalDataOffset + sizeof(float);
+static const unsigned NaN64GlobalDataOffset       = 0;
+static const unsigned NaN32GlobalDataOffset       = NaN64GlobalDataOffset + sizeof(double);
+static const unsigned InitialGlobalDataBytes      = NaN32GlobalDataOffset + sizeof(float);
 
-static const unsigned MaxSigs                    =        4 * 1024;
-static const unsigned MaxFuncs                   =      512 * 1024;
-static const unsigned MaxLocals                  =       64 * 1024;
-static const unsigned MaxImports                 =       64 * 1024;
-static const unsigned MaxExports                 =       64 * 1024;
-static const unsigned MaxTables                  =        4 * 1024;
-static const unsigned MaxTableElems              =      128 * 1024;
-static const unsigned MaxDataSegments            =       64 * 1024;
-static const unsigned MaxElemSegments            =       64 * 1024;
-static const unsigned MaxArgsPerFunc             =        4 * 1024;
-static const unsigned MaxBrTableElems            = 4 * 1024 * 1024;
+static const unsigned MaxSigs                     =        4 * 1024;
+static const unsigned MaxFuncs                    =      512 * 1024;
+static const unsigned MaxGlobals                  =        4 * 1024;
+static const unsigned MaxLocals                   =       64 * 1024;
+static const unsigned MaxImports                  =       64 * 1024;
+static const unsigned MaxExports                  =       64 * 1024;
+static const unsigned MaxTables                   =        4 * 1024;
+static const unsigned MaxTableElems               =     1024 * 1024;
+static const unsigned MaxDataSegments             =       64 * 1024;
+static const unsigned MaxElemSegments             =       64 * 1024;
+static const unsigned MaxArgsPerFunc              =        4 * 1024;
+static const unsigned MaxBrTableElems             = 4 * 1024 * 1024;
 
 } // namespace wasm
 } // namespace js

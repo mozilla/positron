@@ -10,6 +10,7 @@
 #include "prsystem.h"
 #include "MediaData.h"
 #include "GMPDecoderModule.h"
+#include "VPXDecoder.h"
 
 namespace mozilla {
 
@@ -40,15 +41,16 @@ VideoCallbackAdapter::Decoded(GMPVideoi420Frame* aDecodedFrame)
   }
 
   gfx::IntRect pictureRegion(0, 0, decodedFrame->Width(), decodedFrame->Height());
-  RefPtr<VideoData> v = VideoData::Create(mVideoInfo,
-                                            mImageContainer,
-                                            mLastStreamOffset,
-                                            decodedFrame->Timestamp(),
-                                            decodedFrame->Duration(),
-                                            b,
-                                            false,
-                                            -1,
-                                            pictureRegion);
+  RefPtr<VideoData> v =
+    VideoData::CreateAndCopyData(mVideoInfo,
+                                 mImageContainer,
+                                 mLastStreamOffset,
+                                 decodedFrame->Timestamp(),
+                                 decodedFrame->Duration(),
+                                 b,
+                                 false,
+                                 -1,
+                                 pictureRegion);
   if (v) {
     mCallback->Output(v);
   } else {
@@ -100,7 +102,7 @@ void
 VideoCallbackAdapter::Terminated()
 {
   // Note that this *may* be called from the proxy thread also.
-  NS_WARNING("H.264 GMP decoder terminated.");
+  NS_WARNING("GMP decoder terminated.");
   mCallback->Error(MediaDataDecoderError::FATAL_ERROR);
 }
 
@@ -155,11 +157,17 @@ GMPVideoDecoder::GMPVideoDecoder(const GMPVideoDecoderParams& aParams)
 void
 GMPVideoDecoder::InitTags(nsTArray<nsCString>& aTags)
 {
-  aTags.AppendElement(NS_LITERAL_CSTRING("h264"));
-  const Maybe<nsCString> gmp(
-    GMPDecoderModule::PreferredGMP(NS_LITERAL_CSTRING("video/avc")));
-  if (gmp.isSome()) {
-    aTags.AppendElement(gmp.value());
+  if (MP4Decoder::IsH264(mConfig.mMimeType)) {
+    aTags.AppendElement(NS_LITERAL_CSTRING("h264"));
+    const Maybe<nsCString> gmp(
+      GMPDecoderModule::PreferredGMP(NS_LITERAL_CSTRING("video/avc")));
+    if (gmp.isSome()) {
+      aTags.AppendElement(gmp.value());
+    }
+  } else if (VPXDecoder::IsVP8(mConfig.mMimeType)) {
+    aTags.AppendElement(NS_LITERAL_CSTRING("vp8"));
+  } else if (VPXDecoder::IsVP9(mConfig.mMimeType)) {
+    aTags.AppendElement(NS_LITERAL_CSTRING("vp9"));
   }
 }
 
@@ -212,6 +220,12 @@ GMPVideoDecoder::CreateFrame(MediaRawData* aSample)
   return frame;
 }
 
+const VideoInfo&
+GMPVideoDecoder::GetConfig() const
+{
+  return mConfig;
+}
+
 void
 GMPVideoDecoder::GMPInitDone(GMPVideoDecoderProxy* aGMP, GMPVideoHost* aHost)
 {
@@ -234,15 +248,24 @@ GMPVideoDecoder::GMPInitDone(GMPVideoDecoderProxy* aGMP, GMPVideoHost* aHost)
   memset(&codec, 0, sizeof(codec));
 
   codec.mGMPApiVersion = kGMPVersion33;
-
-  codec.mCodecType = kGMPVideoCodecH264;
+  nsTArray<uint8_t> codecSpecific;
+  if (MP4Decoder::IsH264(mConfig.mMimeType)) {
+    codec.mCodecType = kGMPVideoCodecH264;
+    codecSpecific.AppendElement(0); // mPacketizationMode.
+    codecSpecific.AppendElements(mConfig.mExtraData->Elements(),
+                                 mConfig.mExtraData->Length());
+  } else if (VPXDecoder::IsVP8(mConfig.mMimeType)) {
+    codec.mCodecType = kGMPVideoCodecVP8;
+  } else if (VPXDecoder::IsVP9(mConfig.mMimeType)) {
+    codec.mCodecType = kGMPVideoCodecVP9;
+  } else {
+    // Unrecognized mime type
+    aGMP->Close();
+    mInitPromise.Reject(MediaDataDecoder::DecoderFailureReason::INIT_ERROR, __func__);
+    return;
+  }
   codec.mWidth = mConfig.mImage.width;
   codec.mHeight = mConfig.mImage.height;
-
-  nsTArray<uint8_t> codecSpecific;
-  codecSpecific.AppendElement(0); // mPacketizationMode.
-  codecSpecific.AppendElements(mConfig.mExtraData->Elements(),
-                               mConfig.mExtraData->Length());
 
   nsresult rv = aGMP->InitDecode(codec,
                                  codecSpecific,

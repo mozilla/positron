@@ -94,9 +94,6 @@ XPCOMUtils.defineLazyServiceGetter(this, "Profiler",
 XPCOMUtils.defineLazyModuleGetter(this, "SimpleServiceDiscovery",
                                   "resource://gre/modules/SimpleServiceDiscovery.jsm");
 
-XPCOMUtils.defineLazyModuleGetter(this, "ExtensionManagement",
-                                  "resource://gre/modules/ExtensionManagement.jsm");
-
 XPCOMUtils.defineLazyModuleGetter(this, "CharsetMenu",
                                   "resource://gre/modules/CharsetMenu.jsm");
 
@@ -389,12 +386,6 @@ var BrowserApp = {
     Services.obs.addObserver(this, "Fonts:Reload", false);
     Services.obs.addObserver(this, "Vibration:Request", false);
 
-    // Register extension source files.
-    ExtensionManagement.registerScript("chrome://browser/content/ext-pageAction.js");
-
-    // Register extension schemas.
-    ExtensionManagement.registerSchema("chrome://browser/content/schemas/page_action.json");
-
     Messaging.addListener(this.getHistory.bind(this), "Session:GetHistory");
 
     function showFullScreenWarning() {
@@ -407,7 +398,7 @@ var BrowserApp = {
       });
     }, false);
 
-    window.addEventListener("fullscreenchange", function(e) {
+    window.addEventListener("fullscreenchange", (e) => {
       // This event gets fired on the document and its entire ancestor chain
       // of documents. When enabling fullscreen, it is fired on the top-level
       // document first and goes down; when disabling the order is reversed
@@ -419,8 +410,14 @@ var BrowserApp = {
         rootElement: doc.fullscreenElement == doc.documentElement
       });
 
-      if (doc.fullscreenElement)
+      if (doc.fullscreenElement) {
         showFullScreenWarning();
+      } else if (this.fullscreenTransitionTab) {
+        // Tab selection has changed during a fullscreen transition, handle it now.
+        let tab = this.fullscreenTransitionTab;
+        this.fullscreenTransitionTab = null;
+        this._handleTabSelected(tab);
+      }
     }, false);
 
     // When a restricted key is pressed in DOM full-screen mode, we should display
@@ -1289,7 +1286,13 @@ var BrowserApp = {
     if (aTab == this.selectedTab)
       return;
 
-    this.selectedBrowser.contentDocument.exitFullscreen();
+    let doc = this.selectedBrowser.contentDocument;
+    if (doc.fullscreenElement) {
+      // We'll finish the tab selection once the fullscreen transition has ended,
+      // remember the new tab for this.
+      this.fullscreenTransitionTab = aTab;
+      doc.exitFullscreen();
+    }
 
     let message = {
       type: "Tab:Select",
@@ -1351,6 +1354,11 @@ var BrowserApp = {
   // This method updates the state in BrowserApp after a tab has been selected
   // in the Java UI.
   _handleTabSelected: function _handleTabSelected(aTab) {
+    if (this.fullscreenTransitionTab) {
+      // Defer updating to "fullscreenchange" if tab selection happened during
+      // a fullscreen transition.
+      return;
+    }
     this.selectedTab = aTab;
 
     let evt = document.createEvent("UIEvents");
@@ -1689,10 +1697,10 @@ var BrowserApp = {
         let flags = Ci.nsIWebNavigation.LOAD_FLAGS_ALLOW_THIRD_PARTY_FIXUP
                   | Ci.nsIWebNavigation.LOAD_FLAGS_FIXUP_SCHEME_TYPOS;
 
-        // Pass LOAD_FLAGS_DISALLOW_INHERIT_OWNER to prevent any loads from
+        // Pass LOAD_FLAGS_DISALLOW_INHERIT_PRINCIPAL to prevent any loads from
         // inheriting the currently loaded document's principal.
         if (data.userEntered) {
-          flags |= Ci.nsIWebNavigation.LOAD_FLAGS_DISALLOW_INHERIT_OWNER;
+          flags |= Ci.nsIWebNavigation.LOAD_FLAGS_DISALLOW_INHERIT_PRINCIPAL;
         }
 
         let delayLoad = ("delayLoad" in data) ? data.delayLoad : false;
@@ -3553,6 +3561,7 @@ Tab.prototype = {
 
     this.browser.addEventListener("DOMContentLoaded", this, true);
     this.browser.addEventListener("DOMFormHasPassword", this, true);
+    this.browser.addEventListener("DOMInputPasswordAdded", this, true);
     this.browser.addEventListener("DOMLinkAdded", this, true);
     this.browser.addEventListener("DOMLinkChanged", this, true);
     this.browser.addEventListener("DOMMetaAdded", this, false);
@@ -3666,6 +3675,7 @@ Tab.prototype = {
 
     this.browser.removeEventListener("DOMContentLoaded", this, true);
     this.browser.removeEventListener("DOMFormHasPassword", this, true);
+    this.browser.removeEventListener("DOMInputPasswordAdded", this, true);
     this.browser.removeEventListener("DOMLinkAdded", this, true);
     this.browser.removeEventListener("DOMLinkChanged", this, true);
     this.browser.removeEventListener("DOMMetaAdded", this, false);
@@ -4133,6 +4143,11 @@ Tab.prototype = {
           Messaging.sendRequest({ type: "Doorhanger:Logins", data: selectObj });
         }
         break;
+      }
+
+      case "DOMInputPasswordAdded": {
+        LoginManagerContent.onDOMInputPasswordAdded(aEvent,
+                                                    this.browser.contentWindow);
       }
 
       case "DOMMetaAdded":
@@ -4693,6 +4708,7 @@ var BrowserEventHandler = {
 
     BrowserApp.deck.addEventListener("DOMUpdatePageReport", PopupBlockerObserver.onUpdatePageReport, false);
     BrowserApp.deck.addEventListener("MozMouseHittest", this, true);
+    BrowserApp.deck.addEventListener("OpenMediaWithExternalApp", this, true);
 
     InitLater(() => BrowserApp.deck.addEventListener("click", InputWidgetHelper, true));
     InitLater(() => BrowserApp.deck.addEventListener("click", SelectHelper, true));
@@ -4716,6 +4732,21 @@ var BrowserEventHandler = {
       case 'MozMouseHittest':
         this._handleRetargetedTouchStart(aEvent);
         break;
+      case 'OpenMediaWithExternalApp': {
+        if (aEvent.target.moz_video_uuid) {
+          return;
+        }
+        let mediaSrc = aEvent.target.currentSrc || aEvent.target.src;
+        if (!aEvent.target.moz_video_uuid) {
+          aEvent.target.moz_video_uuid = uuidgen.generateUUID().toString();
+        }
+        Services.androidBridge.handleGeckoMessage({
+          type: "Video:Play",
+          uri: mediaSrc,
+          uuid: aEvent.target.moz_video_uuid
+        });
+        break;
+      }
     }
   },
 
@@ -6780,7 +6811,7 @@ var SearchEngines = {
       }
     };
 
-    // Return valid, pre-sorted queryParams. 
+    // Return valid, pre-sorted queryParams.
     return formData.filter(a => a.name && a.value).sort((a, b) => {
       // nsIBrowserSearchService.hasEngineWithURL() ensures sort, but this helps.
       if (a.name > b.name) {

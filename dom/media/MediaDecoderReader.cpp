@@ -25,13 +25,15 @@ namespace mozilla {
 //#define SEEK_LOGGING
 
 extern LazyLogModule gMediaDecoderLog;
-#define DECODER_LOG(x, ...) \
-  MOZ_LOG(gMediaDecoderLog, LogLevel::Debug, ("Decoder=%p " x, mDecoder, ##__VA_ARGS__))
 
-// Same workaround as MediaDecoderStateMachine.cpp.
-#define DECODER_WARN_HELPER(a, b) NS_WARNING b
-#define DECODER_WARN(x, ...) \
-  DECODER_WARN_HELPER(0, (nsPrintfCString("Decoder=%p " x, mDecoder, ##__VA_ARGS__).get()))
+// avoid redefined macro in unified build
+#undef FMT
+#undef DECODER_LOG
+#undef DECODER_WARN
+
+#define FMT(x, ...) "Decoder=%p " x, mDecoder, ##__VA_ARGS__
+#define DECODER_LOG(...) MOZ_LOG(gMediaDecoderLog, LogLevel::Debug,   (FMT(__VA_ARGS__)))
+#define DECODER_WARN(...) NS_WARNING(nsPrintfCString(FMT(__VA_ARGS__)).get())
 
 class VideoQueueMemoryFunctor : public nsDequeFunctor {
 public:
@@ -122,17 +124,16 @@ public:
   {
     MutexAutoLock lock(mMutex);
 
-    if (aReader->IsSuspended()) {
-      // Removing suspended readers has no immediate side-effects.
-      DebugOnly<bool> result = mSuspended.RemoveElement(aReader);
-      MOZ_ASSERT(result, "Suspended reader must be in mSuspended");
-    } else {
+    // Remove the reader from the queue. Note that the reader's IsSuspended
+    // state is updated on the task queue, so we cannot depend on it here to
+    // determine the factual suspension state.
+    DebugOnly<bool> suspended = mSuspended.RemoveElement(aReader);
+    bool active = mActive.RemoveElement(aReader);
+
+    MOZ_ASSERT(suspended || active, "Reader must be in the queue");
+
+    if (active && !mSuspended.IsEmpty()) {
       // For each removed active reader, we resume a suspended one.
-      DebugOnly<bool> result = mActive.RemoveElement(aReader);
-      MOZ_ASSERT(result, "Non-suspended reader must be in mActive");
-      if (mSuspended.IsEmpty()) {
-        return;
-      }
       MediaDecoderReader* resumeReader = mSuspended.LastElement();
       mActive.AppendElement(resumeReader);
       mSuspended.RemoveElementAt(mSuspended.Length() - 1);
@@ -537,7 +538,3 @@ MediaDecoderReader::Shutdown()
 }
 
 } // namespace mozilla
-
-#undef DECODER_LOG
-#undef DECODER_WARN
-#undef DECODER_WARN_HELPER

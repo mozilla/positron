@@ -716,7 +716,7 @@ js::Execute(JSContext* cx, HandleScript script, JSObject& scopeChainArg, Value* 
  * ES6 (4-25-16) 12.10.4 InstanceofOperator
  */
 extern bool
-js::InstanceOfOperator(JSContext* cx, HandleObject obj, MutableHandleValue v, bool* bp)
+js::InstanceOfOperator(JSContext* cx, HandleObject obj, HandleValue v, bool* bp)
 {
     /* Step 1. is handled by caller. */
 
@@ -745,7 +745,7 @@ js::InstanceOfOperator(JSContext* cx, HandleObject obj, MutableHandleValue v, bo
     }
 
     /* Step 5. */
-    return js::OrdinaryHasInstance(cx, obj, v, bp);
+    return OrdinaryHasInstance(cx, obj, v, bp);
 }
 
 bool
@@ -755,7 +755,7 @@ js::HasInstance(JSContext* cx, HandleObject obj, HandleValue v, bool* bp)
     RootedValue local(cx, v);
     if (JSHasInstanceOp hasInstance = clasp->getHasInstance())
         return hasInstance(cx, obj, &local, bp);
-    return js::InstanceOfOperator(cx, obj, &local, bp);
+    return js::InstanceOfOperator(cx, obj, local, bp);
 }
 
 static inline bool
@@ -4034,7 +4034,7 @@ END_CASE(JSOP_IS_CONSTRUCTING)
 DEFAULT()
 {
     char numBuf[12];
-    JS_snprintf(numBuf, sizeof numBuf, "%d", *REGS.pc);
+    snprintf(numBuf, sizeof numBuf, "%d", *REGS.pc);
     JS_ReportErrorNumber(cx, GetErrorMessage, nullptr,
                          JSMSG_BAD_BYTECODE, numBuf);
     goto error;

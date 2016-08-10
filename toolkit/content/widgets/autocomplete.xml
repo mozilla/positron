@@ -44,7 +44,6 @@
       <field name="mController">null</field>
       <field name="mSearchNames">null</field>
       <field name="mIgnoreInput">false</field>
-      <field name="mEnterEvent">null</field>
 
       <field name="_searchBeginHandler">null</field>
       <field name="_searchCompleteHandler">null</field>
@@ -232,11 +231,12 @@
       </method>
 
       <method name="onTextEntered">
+        <parameter name="event"/>
         <body><![CDATA[
           let rv = false;
-          if (this._textEnteredHandler)
-            rv = this._textEnteredHandler(this.mEnterEvent);
-          this.mEnterEvent = null;
+          if (this._textEnteredHandler) {
+            rv = this._textEnteredHandler(event);
+          }
           return rv;
         ]]></body>
       </method>
@@ -446,12 +446,10 @@
 
           var cancel = false;
 
-          let { AppConstants } =
-              Components.utils.import("resource://gre/modules/AppConstants.jsm", {});
           // Catch any keys that could potentially move the caret. Ctrl can be
           // used in combination with these keys on Windows and Linux; and Alt
           // can be used on OS X, so make sure the unused one isn't used.
-          let metaKey = AppConstants.platform == "macosx" ? aEvent.ctrlKey : aEvent.altKey;
+          let metaKey = /Mac/.test(navigator.platform) ? aEvent.ctrlKey : aEvent.altKey;
           if (!this.disableKeyNavigation && !metaKey) {
             switch (aEvent.keyCode) {
               case KeyEvent.DOM_VK_LEFT:
@@ -489,28 +487,27 @@
               cancel = this.mController.handleEscape();
               break;
             case KeyEvent.DOM_VK_RETURN:
-              if (AppConstants.platform == "macosx") {
+              if (/Mac/.test(navigator.platform)) {
                 // Prevent the default action, since it will beep on Mac
                 if (aEvent.metaKey)
                   aEvent.preventDefault();
               }
-              this.mEnterEvent = aEvent;
               if (this.mController.selection) {
                 this._selectionDetails = {
                   index: this.mController.selection.currentIndex,
                   kind: "key"
                 };
               }
-              cancel = this.handleEnter();
+              cancel = this.handleEnter(aEvent);
               break;
             case KeyEvent.DOM_VK_DELETE:
-              if (AppConstants.platform == "macosx" && !aEvent.shiftKey) {
+              if (/Mac/.test(navigator.platform) && !aEvent.shiftKey) {
                 break;
               }
               cancel = this.handleDelete();
               break;
             case KeyEvent.DOM_VK_BACK_SPACE:
-              if (AppConstants.platform == "macosx" && aEvent.shiftKey) {
+              if (/Mac/.test(navigator.platform) && aEvent.shiftKey) {
                 cancel = this.handleDelete();
               }
               break;
@@ -520,7 +517,7 @@
                 this.toggleHistoryPopup();
               break;
             case KeyEvent.DOM_VK_F4:
-              if (AppConstants.platform != "macosx") {
+              if (!/Mac/.test(navigator.platform)) {
                 this.toggleHistoryPopup();
               }
               break;
@@ -536,8 +533,9 @@
       </method>
 
       <method name="handleEnter">
+        <parameter name="event"/>
         <body><![CDATA[
-          return this.mController.handleEnter(false);
+          return this.mController.handleEnter(false, event || null);
         ]]></body>
       </method>
 
@@ -946,7 +944,7 @@ extends="chrome://global/content/bindings/popup.xml#popup">
         <parameter name="aEvent"/>
         <body><![CDATA[
           var controller = this.view.QueryInterface(Components.interfaces.nsIAutoCompleteController);
-          controller.handleEnter(true);
+          controller.handleEnter(true, aEvent);
         ]]></body>
       </method>
     </implementation>
@@ -1253,15 +1251,24 @@ extends="chrome://global/content/bindings/popup.xml#popup">
                   invalidateReason == iface.INVALIDATE_REASON_NEW_RESULT &&
                   (item.getAttribute("url") == url ||
                    this.richlistbox.mouseSelectedIndex === this._currentIndex)) {
-                item.collapsed = false;
-                // Call adjustSiteIconStart only after setting collapsed=false.
-                // The calculations it does may be wrong otherwise.
-                item.adjustSiteIconStart(this._siteIconStart);
-                // The popup may have changed size between now and the last time
-                // the item was shown, so always handle over/underflow.
-                item.handleOverUnderflow();
-                this._currentIndex++;
-                continue;
+                // Additionally, if the item is a searchengine action, then it
+                // should only be reused if the engine name is the same as the
+                // popup's override engine name, if any.
+                let action = item._parseActionUrl(url);
+                if (!action ||
+                    action.type != "searchengine" ||
+                    !this.overrideSearchEngineName ||
+                    action.params.engineName == this.overrideSearchEngineName) {
+                  item.collapsed = false;
+                  // Call adjustSiteIconStart only after setting collapsed=
+                  // false.  The calculations it does may be wrong otherwise.
+                  item.adjustSiteIconStart(this._siteIconStart);
+                  // The popup may have changed size between now and the last
+                  // time the item was shown, so always handle over/underflow.
+                  item.handleOverUnderflow();
+                  this._currentIndex++;
+                  continue;
+                }
               }
             }
             else {
@@ -1276,7 +1283,7 @@ extends="chrome://global/content/bindings/popup.xml#popup">
             item.setAttribute("image", iconURI);
             item.setAttribute("url", url);
             item.setAttribute("title", controller.getCommentAt(this._currentIndex));
-            item.setAttribute("type", controller.getStyleAt(this._currentIndex));
+            item.setAttribute("originaltype", controller.getStyleAt(this._currentIndex));
             item.setAttribute("text", trimmedSearchString);
 
             if (this._currentIndex < existingItemsCount) {
@@ -1806,7 +1813,7 @@ extends="chrome://global/content/bindings/popup.xml#popup">
               let span = aDescriptionElement.appendChild(
                 document.createElementNS("http://www.w3.org/1999/xhtml", "span"));
               span.textContent = text;
-              switch(emphasise) {
+              switch (emphasise) {
                 case "match":
                   this._setUpEmphasisSpan(span, aDescriptionElement);
                   break;
@@ -1851,7 +1858,7 @@ extends="chrome://global/content/bindings/popup.xml#popup">
           let originalUrl = this.getAttribute("url");
           let emphasiseUrl = true;
 
-          let type = this.getAttribute("type");
+          let type = this.getAttribute("originaltype");
           let types = new Set(type.split(/\s+/));
           let initialTypes = new Set(types);
           // Remove types that should ultimately not be in the `type` string.
@@ -1898,6 +1905,17 @@ extends="chrome://global/content/bindings/popup.xml#popup">
               // changed the order while it was possible, so doesn't look like
               // there's a strong need for that.
               let {engineName, searchSuggestion, searchQuery} = action.params;
+
+              // Override the engine name if the popup defines an override.
+              let override = popup.overrideSearchEngineName;
+              if (override && override != engineName) {
+                engineName = override;
+                action.params.engineName = override;
+                let newURL =
+                  PlacesUtils.mozActionURI(action.type, action.params);
+                this.setAttribute("url", newURL);
+              }
+
               let engineStr =
                 this._stringBundle.formatStringFromName("searchWithEngine",
                                                         [engineName], 1);

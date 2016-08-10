@@ -5,6 +5,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include <algorithm>
+#include <winsdkver.h>
 #include "WMFVideoMFTManager.h"
 #include "MediaDecoderReader.h"
 #include "MediaPrefs.h"
@@ -29,6 +30,8 @@
 #include "nsPrintfCString.h"
 #include "MediaTelemetryConstants.h"
 #include "GMPUtils.h" // For SplitAt. TODO: Move SplitAt to a central place.
+#include "MP4Decoder.h"
+#include "VPXDecoder.h"
 
 #define LOG(...) MOZ_LOG(sPDMLog, mozilla::LogLevel::Debug, (__VA_ARGS__))
 
@@ -37,7 +40,7 @@ using mozilla::layers::IMFYCbCrImage;
 using mozilla::layers::LayerManager;
 using mozilla::layers::LayersBackend;
 
-#if MOZ_WINSDK_MAXVER < 0x0A000000
+#if WINVER_MAXVER < 0x0A00
 // Windows 10+ SDK has VP80 and VP90 defines
 const GUID MFVideoFormat_VP80 =
 {
@@ -94,12 +97,11 @@ WMFVideoMFTManager::WMFVideoMFTManager(
   MOZ_COUNT_CTOR(WMFVideoMFTManager);
 
   // Need additional checks/params to check vp8/vp9
-  if (aConfig.mMimeType.EqualsLiteral("video/mp4") ||
-      aConfig.mMimeType.EqualsLiteral("video/avc")) {
+  if (MP4Decoder::IsH264(aConfig.mMimeType)) {
     mStreamType = H264;
-  } else if (aConfig.mMimeType.EqualsLiteral("video/webm; codecs=vp8")) {
+  } else if (VPXDecoder::IsVP8(aConfig.mMimeType)) {
     mStreamType = VP8;
-  } else if (aConfig.mMimeType.EqualsLiteral("video/webm; codecs=vp9")) {
+  } else if (VPXDecoder::IsVP9(aConfig.mMimeType)) {
     mStreamType = VP9;
   } else {
     mStreamType = Unknown;
@@ -499,6 +501,26 @@ WMFVideoMFTManager::Input(MediaRawData* aSample)
   return mDecoder->Input(mLastInput);
 }
 
+class SupportsConfigEvent : public Runnable {
+public:
+  SupportsConfigEvent(DXVA2Manager* aDXVA2Manager, IMFMediaType* aMediaType, float aFramerate)
+    : mDXVA2Manager(aDXVA2Manager)
+    , mMediaType(aMediaType)
+    , mFramerate(aFramerate)
+    , mSupportsConfig(false)
+  {}
+
+  NS_IMETHOD Run() {
+    MOZ_ASSERT(NS_IsMainThread(), "Must be on main thread.");
+    mSupportsConfig = mDXVA2Manager->SupportsConfig(mMediaType, mFramerate);
+    return NS_OK;
+  }
+  DXVA2Manager* mDXVA2Manager;
+  IMFMediaType* mMediaType;
+  float mFramerate;
+  bool mSupportsConfig;
+};
+
 // The MFTransform we use for decoding h264 video will silently fall
 // back to software decoding (even if we've negotiated DXVA) if the GPU
 // doesn't support decoding the given resolution. It will then upload
@@ -510,6 +532,10 @@ WMFVideoMFTManager::Input(MediaRawData* aSample)
 //
 // This code tests if the given resolution can be supported directly on the GPU,
 // and makes sure we only ask the MFT for DXVA if it can be supported properly.
+//
+// Ideally we'd know the framerate during initialization and would also ensure
+// that new decoders are created if the resolution changes. Then we could move
+// this check into Init and consolidate the main thread blocking code.
 bool
 WMFVideoMFTManager::CanUseDXVA(IMFMediaType* aType)
 {
@@ -523,7 +549,18 @@ WMFVideoMFTManager::CanUseDXVA(IMFMediaType* aType)
   // entire video.
   float framerate = 1000000.0 / mLastDuration;
 
-  return mDXVA2Manager->SupportsConfig(aType, framerate);
+  // The supports config check must be done on the main thread since we have
+  // a crash guard protecting it.
+  RefPtr<SupportsConfigEvent> event =
+    new SupportsConfigEvent(mDXVA2Manager, aType, framerate);
+
+  if (NS_IsMainThread()) {
+    event->Run();
+  } else {
+    NS_DispatchToMainThread(event, NS_DISPATCH_SYNC);
+  }
+
+  return event->mSupportsConfig;
 }
 
 HRESULT
@@ -674,15 +711,16 @@ WMFVideoMFTManager::CreateBasicVideoFrame(IMFSample* aSample,
 
   if (mLayersBackend != LayersBackend::LAYERS_D3D9 &&
       mLayersBackend != LayersBackend::LAYERS_D3D11) {
-    RefPtr<VideoData> v = VideoData::Create(mVideoInfo,
-                                            mImageContainer,
-                                            aStreamOffset,
-                                            pts.ToMicroseconds(),
-                                            duration.ToMicroseconds(),
-                                            b,
-                                            false,
-                                            -1,
-                                            pictureRegion);
+    RefPtr<VideoData> v =
+      VideoData::CreateAndCopyData(mVideoInfo,
+                                   mImageContainer,
+                                   aStreamOffset,
+                                   pts.ToMicroseconds(),
+                                   duration.ToMicroseconds(),
+                                   b,
+                                   false,
+                                   -1,
+                                   pictureRegion);
     if (twoDBuffer) {
       twoDBuffer->Unlock2D();
     } else {
@@ -703,7 +741,6 @@ WMFVideoMFTManager::CreateBasicVideoFrame(IMFSample* aSample,
 
   RefPtr<VideoData> v =
     VideoData::CreateFromImage(mVideoInfo,
-                               mImageContainer,
                                aStreamOffset,
                                pts.ToMicroseconds(),
                                duration.ToMicroseconds(),
@@ -734,7 +771,6 @@ WMFVideoMFTManager::CreateD3DVideoFrame(IMFSample* aSample,
   RefPtr<Image> image;
   hr = mDXVA2Manager->CopyToImage(aSample,
                                   pictureRegion,
-                                  mImageContainer,
                                   getter_AddRefs(image));
   NS_ENSURE_TRUE(SUCCEEDED(hr), hr);
   NS_ENSURE_TRUE(image, E_FAIL);
@@ -744,7 +780,6 @@ WMFVideoMFTManager::CreateD3DVideoFrame(IMFSample* aSample,
   media::TimeUnit duration = GetSampleDuration(aSample);
   NS_ENSURE_TRUE(duration.IsValid(), E_FAIL);
   RefPtr<VideoData> v = VideoData::CreateFromImage(mVideoInfo,
-                                                   mImageContainer,
                                                    aStreamOffset,
                                                    pts.ToMicroseconds(),
                                                    duration.ToMicroseconds(),

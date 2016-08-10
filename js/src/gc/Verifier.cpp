@@ -203,7 +203,7 @@ gc::GCRuntime::startVerifyPreBarriers()
     /* Create the root node. */
     trc->curnode = MakeNode(trc, nullptr, JS::TraceKind(0));
 
-    incrementalState = MARK_ROOTS;
+    incrementalState = State::MarkRoots;
 
     /* Make all the roots be edges emanating from the root node. */
     markRuntime(trc, TraceRuntime, prep.session().lock);
@@ -230,7 +230,7 @@ gc::GCRuntime::startVerifyPreBarriers()
     }
 
     verifyPreData = trc;
-    incrementalState = MARK;
+    incrementalState = State::Mark;
     marker.start();
 
     for (ZonesIter zone(rt, WithAtoms); !zone.done(); zone.next()) {
@@ -244,7 +244,7 @@ gc::GCRuntime::startVerifyPreBarriers()
     return;
 
 oom:
-    incrementalState = NO_INCREMENTAL;
+    incrementalState = State::NotActive;
     js_delete(trc);
     verifyPreData = nullptr;
 }
@@ -306,7 +306,7 @@ AssertMarkedOrAllocated(const EdgeValue& edge)
         return;
 
     char msgbuf[1024];
-    JS_snprintf(msgbuf, sizeof(msgbuf), "[barrier verifier] Unmarked edge: %s", edge.label);
+    snprintf(msgbuf, sizeof(msgbuf), "[barrier verifier] Unmarked edge: %s", edge.label);
     MOZ_ReportAssertionFailure(msgbuf, __FILE__, __LINE__);
     MOZ_CRASH();
 }
@@ -342,7 +342,7 @@ gc::GCRuntime::endVerifyPreBarriers()
     number++;
 
     verifyPreData = nullptr;
-    incrementalState = NO_INCREMENTAL;
+    incrementalState = State::NotActive;
 
     if (!compartmentCreated && IsIncrementalGCSafe(rt)) {
         CheckEdgeTracer cetrc(rt);
@@ -508,7 +508,7 @@ bool
 CheckHeapTracer::check(AutoLockForExclusiveAccess& lock)
 {
     // The analysis thinks that markRuntime might GC by calling a GC callback.
-    JS::AutoSuppressGCAnalysis nogc(rt);
+    JS::AutoSuppressGCAnalysis nogc;
     rt->gc.markRuntime(this, GCRuntime::TraceRuntime, lock);
 
     while (!stack.empty()) {

@@ -15,6 +15,8 @@
 #include <stdlib.h>
 #include <CoreFoundation/CoreFoundation.h>
 
+#include "mozilla/Assertions.h"
+
 // XXX There are currently problems with the /usr/include/sandbox.h file on
 // some/all of the Macs in Mozilla's build system.  For the time being (until
 // this problem is resolved), we refer directly to what we need from it,
@@ -456,10 +458,6 @@ static const char contentSandboxRules[] =
   "      (iokit-user-client-class \"NVDVDContextTesla\")\n"
   "      (iokit-user-client-class \"Gen6DVDContext\"))\n"
   "\n"
-  "; bug 1190032\n"
-  "  (allow file*\n"
-  "      (home-regex \"/Library/Caches/TemporaryItems/plugtmp.*\"))\n"
-  "\n"
   "; bug 1201935\n"
   "  (allow file-read*\n"
   "      (home-subpath \"/Library/Caches/TemporaryItems\"))\n"
@@ -490,6 +488,7 @@ bool StartMacSandbox(MacSandboxInfo aInfo, std::string &aErrorMessage)
     }
   }
   else if (aInfo.type == MacSandboxType_Content) {
+    MOZ_ASSERT(aInfo.level >= 1);
     if (aInfo.level >= 1) {
       asprintf(&profile, contentSandboxRules, aInfo.level,
                OSXVersion::OSXVersionMinor(),
@@ -501,7 +500,7 @@ bool StartMacSandbox(MacSandboxInfo aInfo, std::string &aErrorMessage)
     } else {
       fprintf(stderr,
         "Content sandbox disabled due to sandbox level setting\n");
-      return (true);
+      return false;
     }
   }
   else {

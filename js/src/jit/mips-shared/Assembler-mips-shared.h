@@ -116,7 +116,6 @@ static const int32_t AsmJSGlobalRegBias = 32768;
 static constexpr Register AsmJSIonExitRegCallee = t0;
 static constexpr Register AsmJSIonExitRegE0 = a0;
 static constexpr Register AsmJSIonExitRegE1 = a1;
-static constexpr Register AsmJSIonExitRegE2 = a2;
 
 // Registers used in the GenerateFFIIonExit Disable Activation block.
 // None of these may be the second scratch register (t8).
@@ -1252,6 +1251,11 @@ class AssemblerMIPSShared : public AssemblerShared
     }
 
     void flushBuffer() {
+    }
+
+    void comment(const char* msg) {
+        // This is not implemented because setPrinter() is not implemented.
+        // TODO spew("; %s", msg);
     }
 
     static uint32_t NopSize() { return 4; }

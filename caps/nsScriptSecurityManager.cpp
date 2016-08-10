@@ -8,7 +8,7 @@
 
 #include "mozilla/ArrayUtils.h"
 
-#include "xpcprivate.h"
+#include "xpcpublic.h"
 #include "XPCWrapper.h"
 #include "nsIAppsService.h"
 #include "nsIInputStreamChannel.h"
@@ -31,7 +31,6 @@
 #include "nsDocShell.h"
 #include "nsError.h"
 #include "nsDOMCID.h"
-#include "nsIXPConnect.h"
 #include "nsTextFormatter.h"
 #include "nsIStringBundle.h"
 #include "nsNetUtil.h"
@@ -41,7 +40,6 @@
 #include "nsIFile.h"
 #include "nsIFileURL.h"
 #include "nsIZipReader.h"
-#include "nsIXPConnect.h"
 #include "nsIScriptGlobalObject.h"
 #include "nsPIDOMWindow.h"
 #include "nsIDocShell.h"
@@ -367,8 +365,7 @@ nsScriptSecurityManager::GetChannelResultPrincipal(nsIChannel* aChannel,
           // Check if SEC_FORCE_INHERIT_PRINCIPAL was dropped because of
           // sandboxing:
           if (loadInfo->GetLoadingSandboxed() &&
-              (loadInfo->GetSecurityFlags() &
-               nsILoadInfo::SEC_FORCE_INHERIT_PRINCIPAL_WAS_DROPPED)) {
+              loadInfo->GetForceInheritPrincipalDropped()) {
             forceInterit = true;
           }
         }
@@ -1014,7 +1011,7 @@ nsScriptSecurityManager::CheckLoadURIFlags(nsIURI *aSourceURI,
         NS_ConvertASCIItoUTF16 ucsTargetScheme(targetScheme);
         const char16_t* formatStrings[] = { ucsTargetScheme.get() };
         rv = sStrBundle->
-            FormatStringFromName(MOZ_UTF16("ProtocolFlagError"),
+            FormatStringFromName(u"ProtocolFlagError",
                                  formatStrings,
                                  ArrayLength(formatStrings),
                                  getter_Copies(message));

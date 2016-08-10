@@ -5,6 +5,7 @@
 #ifndef nsBaseWidget_h__
 #define nsBaseWidget_h__
 
+#include "InputData.h"
 #include "mozilla/EventForwards.h"
 #include "mozilla/RefPtr.h"
 #include "mozilla/UniquePtr.h"
@@ -51,7 +52,7 @@ namespace layers {
 class BasicLayerManager;
 class CompositorBridgeChild;
 class CompositorBridgeParent;
-class APZCTreeManager;
+class IAPZCTreeManager;
 class GeckoContentController;
 class APZEventState;
 class CompositorSession;
@@ -98,9 +99,9 @@ public:
 
 /**
  * Common widget implementation used as base class for native
- * or crossplatform implementations of Widgets. 
- * All cross-platform behavior that all widgets need to implement 
- * should be placed in this class. 
+ * or crossplatform implementations of Widgets.
+ * All cross-platform behavior that all widgets need to implement
+ * should be placed in this class.
  * (Note: widget implementations are not required to use this
  * class, but it gives them a head start.)
  */
@@ -119,7 +120,7 @@ protected:
   typedef mozilla::layers::BufferMode BufferMode;
   typedef mozilla::layers::CompositorBridgeChild CompositorBridgeChild;
   typedef mozilla::layers::CompositorBridgeParent CompositorBridgeParent;
-  typedef mozilla::layers::APZCTreeManager APZCTreeManager;
+  typedef mozilla::layers::IAPZCTreeManager IAPZCTreeManager;
   typedef mozilla::layers::GeckoContentController GeckoContentController;
   typedef mozilla::layers::ScrollableLayerGuid ScrollableLayerGuid;
   typedef mozilla::layers::APZEventState APZEventState;
@@ -326,7 +327,7 @@ public:
   // return true if this is a popup widget with a native titlebar
   bool IsPopupWithTitleBar() const
   {
-    return (mWindowType == eWindowType_popup && 
+    return (mWindowType == eWindowType_popup &&
             mBorderStyle != eBorderStyle_default &&
             mBorderStyle & eBorderStyle_title);
   }
@@ -558,6 +559,30 @@ protected:
 
   bool UseAPZ();
 
+  /**
+   * For widgets that support synthesizing native touch events, this function
+   * can be used to manage the current state of synthetic pointers. Each widget
+   * must maintain its own MultiTouchInput instance and pass it in as the state,
+   * along with the desired parameters for the changes. This function returns
+   * a new MultiTouchInput object that is ready to be dispatched.
+   */
+  mozilla::MultiTouchInput
+  UpdateSynthesizedTouchState(mozilla::MultiTouchInput* aState,
+                              uint32_t aTime,
+                              mozilla::TimeStamp aTimeStamp,
+                              uint32_t aPointerId,
+                              TouchPointerState aPointerState,
+                              LayoutDeviceIntPoint aPoint,
+                              double aPointerPressure,
+                              uint32_t aPointerOrientation);
+
+  /**
+   * Dispatch the given MultiTouchInput through APZ to Gecko (if APZ is enabled)
+   * or directly to gecko (if APZ is not enabled). This function must only
+   * be called from the main thread, and if APZ is enabled, that must also be
+   * the APZ controller thread.
+   */
+  void DispatchTouchInput(mozilla::MultiTouchInput& aInput);
 
 #if defined(XP_WIN)
   void UpdateScrollCapture() override;
@@ -590,7 +615,7 @@ protected:
   /**
    * Starts the OMTC compositor destruction sequence.
    *
-   * When this function returns, the compositor should not be 
+   * When this function returns, the compositor should not be
    * able to access the opengl context anymore.
    * It is safe to call it several times if platform implementations
    * require the compositor to be destroyed before ~nsBaseWidget is
@@ -609,7 +634,7 @@ protected:
   RefPtr<CompositorSession> mCompositorSession;
   RefPtr<CompositorBridgeChild> mCompositorBridgeChild;
   RefPtr<mozilla::CompositorVsyncDispatcher> mCompositorVsyncDispatcher;
-  RefPtr<APZCTreeManager> mAPZC;
+  RefPtr<IAPZCTreeManager> mAPZC;
   RefPtr<GeckoContentController> mRootContentController;
   RefPtr<APZEventState> mAPZEventState;
   SetAllowedTouchBehaviorCallback mSetAllowedTouchBehaviorCallback;

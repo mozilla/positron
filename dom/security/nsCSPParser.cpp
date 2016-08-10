@@ -901,27 +901,30 @@ nsCSPParser::sourceList(nsTArray<nsCSPBaseSrc*>& outSrcs)
 }
 
 void
-nsCSPParser::referrerDirectiveValue()
+nsCSPParser::referrerDirectiveValue(nsCSPDirective* aDir)
 {
   // directive-value   = "none" / "none-when-downgrade" / "origin" / "origin-when-cross-origin" / "unsafe-url"
   // directive name is token 0, we need to examine the remaining tokens (and
   // there should only be one token in the value).
   CSPPARSERLOG(("nsCSPParser::referrerDirectiveValue"));
 
-  if (mCurDir.Length() > 2) {
-    CSPPARSERLOG(("Too many tokens in referrer directive, got %d expected 1",
+  if (mCurDir.Length() != 2) {
+    CSPPARSERLOG(("Incorrect number of tokens in referrer directive, got %d expected 1",
                  mCurDir.Length() - 1));
+    delete aDir;
     return;
   }
 
   if (!mozilla::net::IsValidReferrerPolicy(mCurDir[1])) {
     CSPPARSERLOG(("invalid value for referrer directive: %s",
                   NS_ConvertUTF16toUTF8(mCurDir[1]).get()));
+    delete aDir;
     return;
   }
 
   // the referrer policy is valid, so go ahead and use it.
   mPolicy->setReferrerPolicy(&mCurDir[1]);
+  mPolicy->addDirective(aDir);
 }
 
 void
@@ -1043,13 +1046,6 @@ nsCSPParser::directiveValue(nsTArray<nsCSPBaseSrc*>& outSrcs)
     return;
   }
 
-  // special case handling of the referrer directive (since it doesn't contain
-  // source lists)
-  if (CSP_IsDirective(mCurDir[0], nsIContentSecurityPolicy::REFERRER_DIRECTIVE)) {
-    referrerDirectiveValue();
-    return;
-  }
-
   // For the sandbox flag the source list is a list of flags, so we're special
   // casing this directive
   if (CSP_IsDirective(mCurDir[0], nsIContentSecurityPolicy::SANDBOX_DIRECTIVE)) {
@@ -1161,7 +1157,7 @@ nsCSPParser::directive()
   // Make sure that the directive-srcs-array contains at least
   // one directive and one src.
   if (mCurDir.Length() < 1) {
-    const char16_t* params[] = { MOZ_UTF16("directive missing") };
+    const char16_t* params[] = { u"directive missing" };
     logWarningErrorToConsole(nsIScriptError::warningFlag, "failedToParseUnrecognizedSource",
                              params, ArrayLength(params));
     return;
@@ -1178,7 +1174,7 @@ nsCSPParser::directive()
   // by a directive name but does not include any srcs.
   if (cspDir->equals(nsIContentSecurityPolicy::BLOCK_ALL_MIXED_CONTENT)) {
     if (mCurDir.Length() > 1) {
-      const char16_t* params[] = { MOZ_UTF16("block-all-mixed-content") };
+      const char16_t* params[] = { u"block-all-mixed-content" };
       logWarningErrorToConsole(nsIScriptError::warningFlag,
                                "ignoreSrcForDirective",
                                params, ArrayLength(params));
@@ -1192,7 +1188,7 @@ nsCSPParser::directive()
   // by a directive name but does not include any srcs.
   if (cspDir->equals(nsIContentSecurityPolicy::UPGRADE_IF_INSECURE_DIRECTIVE)) {
     if (mCurDir.Length() > 1) {
-      const char16_t* params[] = { MOZ_UTF16("upgrade-insecure-requests") };
+      const char16_t* params[] = { u"upgrade-insecure-requests" };
       logWarningErrorToConsole(nsIScriptError::warningFlag,
                                "ignoreSrcForDirective",
                                params, ArrayLength(params));
@@ -1206,6 +1202,13 @@ nsCSPParser::directive()
   // are well-defined tokens but are not sources
   if (cspDir->equals(nsIContentSecurityPolicy::REQUIRE_SRI_FOR)) {
     requireSRIForDirectiveValue(static_cast<nsRequireSRIForDirective*>(cspDir));
+    return;
+  }
+
+  // special case handling of the referrer directive (since it doesn't contain
+  // source lists)
+  if (cspDir->equals(nsIContentSecurityPolicy::REFERRER_DIRECTIVE)) {
+    referrerDirectiveValue(cspDir);
     return;
   }
 
@@ -1233,7 +1236,7 @@ nsCSPParser::directive()
       mHasHashOrNonce && mUnsafeInlineKeywordSrc) {
     mUnsafeInlineKeywordSrc->invalidate();
     // log to the console that unsafe-inline will be ignored
-    const char16_t* params[] = { MOZ_UTF16("'unsafe-inline'") };
+    const char16_t* params[] = { u"'unsafe-inline'" };
     logWarningErrorToConsole(nsIScriptError::warningFlag, "ignoringSrcWithinScriptStyleSrc",
                              params, ArrayLength(params));
   }

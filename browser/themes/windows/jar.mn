@@ -17,11 +17,9 @@ browser.jar:
 * skin/classic/browser/browser-lightweightTheme.css
   skin/classic/browser/caption-buttons.svg
   skin/classic/browser/click-to-play-warning-stripes.png
-  skin/classic/browser/content-contextmenu.svg
   skin/classic/browser/Info.png
   skin/classic/browser/Info-XP.png
   skin/classic/browser/keyhole-forward-mask.svg
-  skin/classic/browser/KUI-background.png
   skin/classic/browser/livemark-folder.png
   skin/classic/browser/livemark-folder-XP.png
   skin/classic/browser/menu-back.png
@@ -86,7 +84,7 @@ browser.jar:
   skin/classic/browser/customizableui/customizeMode-separatorHorizontal.png  (customizableui/customizeMode-separatorHorizontal.png)
   skin/classic/browser/customizableui/customizeMode-separatorVertical.png  (customizableui/customizeMode-separatorVertical.png)
   skin/classic/browser/customizableui/menu-arrow.svg           (customizableui/menu-arrow.svg)
-* skin/classic/browser/customizableui/panelUIOverlay.css       (customizableui/panelUIOverlay.css)
+* skin/classic/browser/customizableui/panelUI.css       (customizableui/panelUI.css)
 * skin/classic/browser/downloads/allDownloadsViewOverlay.css   (downloads/allDownloadsViewOverlay.css)
   skin/classic/browser/downloads/buttons.png                   (downloads/buttons.png)
   skin/classic/browser/downloads/buttons-XP.png                (downloads/buttons-XP.png)

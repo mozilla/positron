@@ -8,6 +8,7 @@ var Cu = Components.utils;
 var Cc = Components.classes;
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
+Cu.import("resource://gre/modules/ContextualIdentityService.jsm");
 Cu.import("resource://gre/modules/NotificationDB.jsm");
 Cu.import("resource:///modules/RecentWindow.jsm");
 
@@ -56,8 +57,6 @@ XPCOMUtils.defineLazyServiceGetter(this, "WindowsUIUtils",
                                    "@mozilla.org/windows-ui-utils;1", "nsIWindowsUIUtils");
 XPCOMUtils.defineLazyModuleGetter(this, "LightweightThemeManager",
                                   "resource://gre/modules/LightweightThemeManager.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "ContextualIdentityService",
-                                  "resource://gre/modules/ContextualIdentityService.jsm");
 XPCOMUtils.defineLazyServiceGetter(this, "gAboutNewTabService",
                                    "@mozilla.org/browser/aboutnewtab-service;1",
                                    "nsIAboutNewTabService");
@@ -914,6 +913,30 @@ function RedirectLoad({ target: browser, data }) {
   }
 }
 
+addEventListener("DOMContentLoaded", function onDCL() {
+  removeEventListener("DOMContentLoaded", onDCL);
+
+  // There are some windows, like macBrowserOverlay.xul, that
+  // load browser.js, but never load tabbrowser.xml. We can ignore
+  // those cases.
+  if (!gBrowser || !gBrowser.updateBrowserRemoteness) {
+    return;
+  }
+
+  window.QueryInterface(Ci.nsIInterfaceRequestor)
+        .getInterface(nsIWebNavigation)
+        .QueryInterface(Ci.nsIDocShellTreeItem).treeOwner
+        .QueryInterface(Ci.nsIInterfaceRequestor)
+        .getInterface(Ci.nsIXULWindow)
+        .XULBrowserWindow = window.XULBrowserWindow;
+  window.QueryInterface(Ci.nsIDOMChromeWindow).browserDOMWindow =
+    new nsBrowserAccess();
+
+  let initBrowser =
+    document.getAnonymousElementByAttribute(gBrowser, "anonid", "initialBrowser");
+  gBrowser.updateBrowserRemoteness(initBrowser, gMultiProcessBrowser);
+});
+
 var gBrowserInit = {
   delayedStartupFinished: false,
 
@@ -944,19 +967,11 @@ var gBrowserInit = {
     mm.loadFrameScript("chrome://browser/content/content-UITour.js", true);
     mm.loadFrameScript("chrome://global/content/manifestMessages.js", true);
 
-    window.messageManager.addMessageListener("Browser:LoadURI", RedirectLoad);
-
     // initialize observers and listeners
     // and give C++ access to gBrowser
     XULBrowserWindow.init();
-    window.QueryInterface(Ci.nsIInterfaceRequestor)
-          .getInterface(nsIWebNavigation)
-          .QueryInterface(Ci.nsIDocShellTreeItem).treeOwner
-          .QueryInterface(Ci.nsIInterfaceRequestor)
-          .getInterface(Ci.nsIXULWindow)
-          .XULBrowserWindow = window.XULBrowserWindow;
-    window.QueryInterface(Ci.nsIDOMChromeWindow).browserDOMWindow =
-      new nsBrowserAccess();
+
+    window.messageManager.addMessageListener("Browser:LoadURI", RedirectLoad);
 
     if (!gMultiProcessBrowser) {
       // There is a Content:Click message manually sent from content.
@@ -1103,6 +1118,13 @@ var gBrowserInit = {
         // make sure it has a docshell
         gBrowser.docShell;
 
+        // We must set usercontextid before updateBrowserRemoteness()
+        // so that the newly created remote tab child has correct usercontextid
+        if (tabToOpen.hasAttribute("usercontextid")) {
+          let usercontextid = tabToOpen.getAttribute("usercontextid");
+          gBrowser.selectedBrowser.setAttribute("usercontextid", usercontextid);
+        }
+
         // If the browser that we're swapping in was remote, then we'd better
         // be able to support remote browsers, and then make our selectedTab
         // remote.
@@ -1112,17 +1134,15 @@ var gBrowserInit = {
               throw new Error("Cannot drag a remote browser into a window " +
                               "without the remote tabs load context.");
             }
-
-            // We must set usercontextid before updateBrowserRemoteness()
-            // so that the newly created remote tab child has correct usercontextid
-            if (tabToOpen.hasAttribute("usercontextid")) {
-              let usercontextid = tabToOpen.getAttribute("usercontextid");
-              gBrowser.selectedBrowser.setAttribute("usercontextid", usercontextid);
-            }
             gBrowser.updateBrowserRemoteness(gBrowser.selectedBrowser, true);
+          } else if (gBrowser.selectedBrowser.isRemoteBrowser) {
+            // If the browser is remote, then it's implied that
+            // gMultiProcessBrowser is true. We need to flip the remoteness
+            // of this tab to false in order for the tab drag to work.
+            gBrowser.updateBrowserRemoteness(gBrowser.selectedBrowser, false);
           }
           gBrowser.swapBrowsersAndCloseOther(gBrowser.selectedTab, tabToOpen);
-        } catch(e) {
+        } catch (e) {
           Cu.reportError(e);
         }
       }
@@ -1699,7 +1719,7 @@ function gotoHistoryIndex(aEvent) {
     try {
       gBrowser.gotoIndex(index);
     }
-    catch(ex) {
+    catch (ex) {
       return false;
     }
     return true;
@@ -1718,7 +1738,7 @@ function BrowserForward(aEvent) {
     try {
       gBrowser.goForward();
     }
-    catch(ex) {
+    catch (ex) {
     }
   }
   else {
@@ -1733,7 +1753,7 @@ function BrowserBack(aEvent) {
     try {
       gBrowser.goBack();
     }
-    catch(ex) {
+    catch (ex) {
     }
   }
   else {
@@ -1940,7 +1960,7 @@ var gLastOpenDirectory = {
         if (!this._lastDir.exists())
           this._lastDir = null;
       }
-      catch(e) {}
+      catch (e) {}
     }
     return this._lastDir;
   },
@@ -1948,7 +1968,7 @@ var gLastOpenDirectory = {
     try {
       if (!val || !val.isDirectory())
         return;
-    } catch(e) {
+    } catch (e) {
       return;
     }
     this._lastDir = val.clone();
@@ -3090,7 +3110,7 @@ function getDefaultHomePage() {
     // If url is a pipe-delimited set of pages, just take the first one.
     if (url.includes("|"))
       url = url.split("|")[0];
-  } catch(e) {
+  } catch (e) {
     Components.utils.reportError("Couldn't get homepage pref: " + e);
   }
   return url;
@@ -4198,8 +4218,13 @@ var XULBrowserWindow = {
   forceInitialBrowserRemote: function() {
     let initBrowser =
       document.getAnonymousElementByAttribute(gBrowser, "anonid", "initialBrowser");
-    gBrowser.updateBrowserRemoteness(initBrowser, true);
     return initBrowser.frameLoader.tabParent;
+  },
+
+  forceInitialBrowserNonRemote: function() {
+    let initBrowser =
+      document.getAnonymousElementByAttribute(gBrowser, "anonid", "initialBrowser");
+    gBrowser.updateBrowserRemoteness(initBrowser, false);
   },
 
   setDefaultStatus: function (status) {
@@ -5435,7 +5460,7 @@ function contentAreaClick(event, isPanelClick)
       try {
         urlSecurityCheck(href, linkNode.ownerDocument.nodePrincipal);
       }
-      catch(ex) {
+      catch (ex) {
         // Prevent loading unsecure destinations.
         event.preventDefault();
         return;
@@ -5592,7 +5617,7 @@ function middleMousePaste(event) {
 
 function stripUnsafeProtocolOnPaste(pasteData) {
   // Don't allow pasting javascript URIs since we don't support
-  // LOAD_FLAGS_DISALLOW_INHERIT_OWNER for those.
+  // LOAD_FLAGS_DISALLOW_INHERIT_PRINCIPAL for those.
   return pasteData.replace(/^(?:\s*javascript:)+/i, "");
 }
 
@@ -6356,7 +6381,7 @@ function convertFromUnicode(charset, str)
     unicodeConverter.charset = charset;
     str = unicodeConverter.ConvertFromUnicode(str);
     return str + unicodeConverter.Finish();
-  } catch(ex) {
+  } catch (ex) {
     return null;
   }
 }
@@ -7263,50 +7288,39 @@ var gIdentityHandler = {
     }
   },
 
-  setPermission: function (aPermission, aState) {
-    if (aState == SitePermissions.getDefault(aPermission))
-      SitePermissions.remove(gBrowser.currentURI, aPermission);
-    else
-      SitePermissions.set(gBrowser.currentURI, aPermission, aState);
-  },
-
   _createPermissionItem: function (aPermission) {
-    let menulist = document.createElement("menulist");
-    let menupopup = document.createElement("menupopup");
-    for (let state of aPermission.availableStates) {
-      let menuitem = document.createElement("menuitem");
-      menuitem.setAttribute("value", state.id);
-      menuitem.setAttribute("label", state.label);
-      menupopup.appendChild(menuitem);
-    }
-    menulist.appendChild(menupopup);
-    menulist.setAttribute("value", aPermission.state);
-    menulist.setAttribute("oncommand", "gIdentityHandler.setPermission('" +
-                                       aPermission.id + "', this.value)");
-    menulist.setAttribute("id", "identity-popup-permission:" + aPermission.id);
-
-    let label = document.createElement("label");
-    label.setAttribute("flex", "1");
-    label.setAttribute("class", "identity-popup-permission-label");
-    label.setAttribute("control", menulist.getAttribute("id"));
-    label.textContent = aPermission.label;
+    let container = document.createElement("hbox");
+    container.setAttribute("class", "identity-popup-permission-item");
+    container.setAttribute("align", "center");
 
     let img = document.createElement("image");
     let isBlocked = (aPermission.state == SitePermissions.BLOCK) ? " blocked" : "";
     img.setAttribute("class",
       "identity-popup-permission-icon " + aPermission.id + "-icon" + isBlocked);
 
-    let container = document.createElement("hbox");
-    container.setAttribute("align", "center");
-    container.appendChild(img);
-    container.appendChild(label);
-    container.appendChild(menulist);
+    let nameLabel = document.createElement("label");
+    nameLabel.setAttribute("flex", "1");
+    nameLabel.setAttribute("class", "identity-popup-permission-label");
+    nameLabel.textContent = SitePermissions.getPermissionLabel(aPermission.id);
 
-    // The menuitem text can be long and we don't want the dropdown
-    // to expand to the width of unselected labels.
-    // Need to set this attribute after it's appended, otherwise it gets
-    // overridden with sizetopopup="pref".
-    menulist.setAttribute("sizetopopup", "none");
+    let stateLabel = document.createElement("label");
+    stateLabel.setAttribute("flex", "1");
+    stateLabel.setAttribute("class", "identity-popup-permission-state-label");
+    stateLabel.textContent = SitePermissions.getStateLabel(
+      aPermission.id, aPermission.state);
+
+    let button = document.createElement("button");
+    button.setAttribute("class", "identity-popup-permission-remove-button");
+    button.addEventListener("command", () => {
+      this._permissionList.removeChild(container);
+      this._identityPopupMultiView.setHeightToFit();
+      SitePermissions.remove(gBrowser.currentURI, aPermission.id);
+    });
+
+    container.appendChild(img);
+    container.appendChild(nameLabel);
+    container.appendChild(stateLabel);
+    container.appendChild(button);
 
     return container;
   }
@@ -7427,7 +7441,7 @@ var gRemoteTabsUI = {
  *        passed via this object.
  *        This object also allows:
  *        - 'ignoreFragment' property to be set to true to exclude fragment-portion
- *        matching when comparing URIs.
+ *        matching when comparing URIs. Fragment will be replaced.
  *        - 'ignoreQueryString' property to be set to true to exclude query string
  *        matching when comparing URIs.
  *        - 'replaceQueryString' property to be set to true to exclude query string
@@ -7463,30 +7477,40 @@ function switchToTabHavingURI(aURI, aOpenNew, aOpenParams={}) {
       return false;
     }
 
+    //Remove the query string, fragment, both, or neither from a given url.
+    function cleanURL(url, removeQuery, removeFragment) {
+      let ret = url;
+      if (removeFragment) {
+        ret = ret.split("#")[0];
+        if (removeQuery) {
+          // This removes a query, if present before the fragment.
+          ret = ret.split("?")[0];
+        }
+      } else if (removeQuery) {
+        // This is needed in case there is a fragment after the query.
+        let fragment = ret.split("#")[1];
+        ret = ret.split("?")[0].concat(
+          (fragment != undefined) ? "#".concat(fragment) : "");
+      }
+      return ret;
+    }
+
+    // Need to handle nsSimpleURIs here too (e.g. about:...), which don't
+    // work correctly with URL objects - so treat them as strings
+    let requestedCompare = cleanURL(
+        aURI.spec, ignoreQueryString || replaceQueryString, ignoreFragment);
     let browsers = aWindow.gBrowser.browsers;
     for (let i = 0; i < browsers.length; i++) {
       let browser = browsers[i];
-      if (ignoreFragment ? browser.currentURI.equalsExceptRef(aURI) :
-                           browser.currentURI.equals(aURI)) {
-        // Focus the matching window & tab
+      let browserCompare = cleanURL(
+          browser.currentURI.spec, ignoreQueryString || replaceQueryString, ignoreFragment);
+      if (requestedCompare == browserCompare) {
         aWindow.focus();
-        if (ignoreFragment) {
-          let spec = aURI.spec;
-          browser.loadURI(spec);
+        if (ignoreFragment || replaceQueryString) {
+          browser.loadURI(aURI.spec);
         }
         aWindow.gBrowser.tabContainer.selectedIndex = i;
         return true;
-      }
-      if (ignoreQueryString || replaceQueryString) {
-        if (browser.currentURI.spec.split("?")[0] == aURI.spec.split("?")[0]) {
-          // Focus the matching window & tab
-          aWindow.focus();
-          if (replaceQueryString) {
-            browser.loadURI(aURI.spec);
-          }
-          aWindow.gBrowser.tabContainer.selectedIndex = i;
-          return true;
-        }
       }
     }
     return false;
@@ -7570,8 +7594,12 @@ var TabContextMenu = {
 
     if (AppConstants.E10S_TESTING_ONLY) {
       menuItems = aPopupMenu.getElementsByAttribute("tbattr", "tabbrowser-remote");
-      for (let menuItem of menuItems)
+      for (let menuItem of menuItems) {
         menuItem.hidden = !gMultiProcessBrowser;
+        if (menuItem.id == "context_openNonRemoteWindow") {
+          menuItem.disabled = !!parseInt(this.contextTab.getAttribute("usercontextid"));
+        }
+      }
     }
 
     disabled = gBrowser.visibleTabs.length == 1;
@@ -7733,21 +7761,6 @@ XPCOMUtils.defineLazyGetter(ResponsiveUI, "ResponsiveUIManager", function() {
   let tmp = {};
   Cu.import("resource://devtools/client/responsivedesign/responsivedesign.jsm", tmp);
   return tmp.ResponsiveUIManager;
-});
-
-function openEyedropper() {
-  var eyedropper = new this.Eyedropper(this, { context: "menu",
-                                               copyOnSelect: true });
-  eyedropper.open();
-}
-
-Object.defineProperty(this, "Eyedropper", {
-  get: function() {
-    let devtools = Cu.import("resource://devtools/shared/Loader.jsm", {}).devtools;
-    return devtools.require("devtools/client/eyedropper/eyedropper").Eyedropper;
-  },
-  configurable: true,
-  enumerable: true
 });
 
 XPCOMUtils.defineLazyGetter(window, "gShowPageResizers", function () {

@@ -87,7 +87,7 @@ nsWindowBase::InjectTouchPoint(uint32_t aId, LayoutDeviceIntPoint& aPoint,
   info.touchMask = TOUCH_MASK_CONTACTAREA|TOUCH_MASK_ORIENTATION|TOUCH_MASK_PRESSURE;
   info.pressure = aPressure;
   info.orientation = aOrientation;
-  
+
   info.pointerInfo.pointerFlags = aFlags;
   info.pointerInfo.pointerType =  PT_TOUCH;
   info.pointerInfo.pointerId = aId;
@@ -98,7 +98,7 @@ nsWindowBase::InjectTouchPoint(uint32_t aId, LayoutDeviceIntPoint& aPoint,
   info.rcContact.bottom = info.pointerInfo.ptPixelLocation.y + 2;
   info.rcContact.left = info.pointerInfo.ptPixelLocation.x - 2;
   info.rcContact.right = info.pointerInfo.ptPixelLocation.x + 2;
-  
+
   if (!sInjectTouchFuncPtr(1, &info)) {
     WinUtils::Log("InjectTouchInput failure. GetLastError=%d", GetLastError());
     return false;
@@ -128,7 +128,25 @@ nsWindowBase::SynthesizeNativeTouchPoint(uint32_t aPointerId,
   AutoObserverNotifier notifier(aObserver, "touchpoint");
 
   if (!InitTouchInjection()) {
-    return NS_ERROR_NOT_IMPLEMENTED;
+    // If we don't have touch injection from the OS, we can just fake it and
+    // synthesize the events from here.
+    MOZ_ASSERT(NS_IsMainThread());
+    if (aPointerState == TOUCH_HOVER) {
+      return NS_ERROR_UNEXPECTED;
+    }
+
+    if (!mSynthesizedTouchInput) {
+      mSynthesizedTouchInput = MakeUnique<MultiTouchInput>();
+    }
+
+    WidgetEventTime time = CurrentMessageWidgetEventTime();
+    LayoutDeviceIntPoint pointInWindow = aPoint - WidgetToScreenOffset();
+    MultiTouchInput inputToDispatch = UpdateSynthesizedTouchState(
+        mSynthesizedTouchInput.get(), time.mTime, time.mTimeStamp,
+        aPointerId, aPointerState, pointInWindow, aPointerPressure,
+        aPointerOrientation);
+    DispatchTouchInput(inputToDispatch);
+    return NS_OK;
   }
 
   bool hover = aPointerState & TOUCH_HOVER;

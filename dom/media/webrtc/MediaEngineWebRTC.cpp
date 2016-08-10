@@ -108,7 +108,6 @@ MediaEngineWebRTC::MediaEngineWebRTC(MediaEnginePrefs &aPrefs)
   : mMutex("mozilla::MediaEngineWebRTC"),
     mVoiceEngine(nullptr),
     mAudioInput(nullptr),
-    mAudioEngineInit(false),
     mFullDuplex(aPrefs.mFullDuplex),
     mExtendedFilter(aPrefs.mExtendedFilter),
     mDelayAgnostic(aPrefs.mDelayAgnostic)
@@ -126,9 +125,6 @@ MediaEngineWebRTC::MediaEngineWebRTC(MediaEnginePrefs &aPrefs)
 #endif
   // XXX
   gFarendObserver = new AudioOutputObserver();
-
-  NS_NewNamedThread("AudioGUM", getter_AddRefs(mThread));
-  MOZ_ASSERT(mThread);
 }
 
 void
@@ -349,11 +345,12 @@ MediaEngineWebRTC::EnumerateAudioDevices(dom::MediaSourceEnum aMediaSource,
     return;
   }
 
-  if (!mAudioEngineInit) {
-    if (ptrVoEBase->Init() < 0) {
-      return;
-    }
-    mAudioEngineInit = true;
+  // Always re-init the voice engine, since if we close the last use we
+  // DeInitEngine() and Terminate(), which shuts down Process() - but means
+  // we have to Init() again before using it.  Init() when already inited is
+  // just a no-op, so call always.
+  if (ptrVoEBase->Init() < 0) {
+    return;
   }
 
   if (!mAudioInput) {
@@ -409,7 +406,7 @@ MediaEngineWebRTC::EnumerateAudioDevices(dom::MediaSourceEnum aMediaSource,
         // XXX Small window where the device list/index could change!
         audioinput = new mozilla::AudioInputCubeb(mVoiceEngine, i);
       }
-      aSource = new MediaEngineWebRTCMicrophoneSource(mThread, mVoiceEngine, audioinput,
+      aSource = new MediaEngineWebRTCMicrophoneSource(mVoiceEngine, audioinput,
                                                       i, deviceName, uniqueId);
       mAudioSources.Put(uuid, aSource); // Hashtable takes ownership.
       aASources->AppendElement(aSource);
@@ -450,11 +447,6 @@ MediaEngineWebRTC::Shutdown()
 
   mozilla::camera::Shutdown();
   AudioInputCubeb::CleanupGlobalData();
-
-  if (mThread) {
-    mThread->Shutdown();
-    mThread = nullptr;
-  }
 }
 
 }

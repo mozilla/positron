@@ -23,8 +23,8 @@ if test -n "$MOZ_ASAN"; then
         fi
         AC_SUBST(MOZ_CLANG_RT_ASAN_LIB_PATH)
     fi
-    CFLAGS="-fsanitize=address -Dxmalloc=myxmalloc -fPIC $CFLAGS"
-    CXXFLAGS="-fsanitize=address -Dxmalloc=myxmalloc -fPIC $CXXFLAGS"
+    CFLAGS="-fsanitize=address $CFLAGS"
+    CXXFLAGS="-fsanitize=address $CXXFLAGS"
     LDFLAGS="-fsanitize=address $LDFLAGS"
     AC_DEFINE(MOZ_ASAN)
     MOZ_PATH_PROG(LLVM_SYMBOLIZER, llvm-symbolizer)
@@ -81,5 +81,11 @@ if test -n "$MOZ_LLVM_HACKS"; then
 fi
 AC_SUBST(MOZ_NO_WLZDEFS)
 AC_SUBST(MOZ_CFLAGS_NSS)
+
+dnl ========================================================
+dnl = Test for whether the compiler is compatible with the
+dnl = given sanitize options.
+dnl ========================================================
+AC_TRY_LINK(,,,AC_MSG_ERROR([compiler is incompatible with sanitize options]))
 
 ])
