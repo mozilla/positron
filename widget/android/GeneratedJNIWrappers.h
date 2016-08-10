@@ -10,7 +10,7 @@
 #include "mozilla/jni/Refs.h"
 
 namespace mozilla {
-namespace widget {
+namespace java {
 
 class ANRReporter : public mozilla::jni::ObjectBase<ANRReporter, jobject>
 {
@@ -89,6 +89,113 @@ public:
     template<class Impl> class Natives;
 };
 
+class AndroidGamepadManager : public mozilla::jni::ObjectBase<AndroidGamepadManager, jobject>
+{
+public:
+    static const char name[];
+
+    explicit AndroidGamepadManager(const Context& ctx) : ObjectBase<AndroidGamepadManager, jobject>(ctx) {}
+
+    struct OnAxisChange_t {
+        typedef AndroidGamepadManager Owner;
+        typedef void ReturnType;
+        typedef void SetterType;
+        typedef mozilla::jni::Args<
+                int32_t,
+                mozilla::jni::BooleanArray::Param,
+                mozilla::jni::FloatArray::Param> Args;
+        static constexpr char name[] = "onAxisChange";
+        static constexpr char signature[] =
+                "(I[Z[F)V";
+        static const bool isStatic = true;
+        static const mozilla::jni::ExceptionMode exceptionMode =
+                mozilla::jni::ExceptionMode::ABORT;
+    };
+
+    struct OnButtonChange_t {
+        typedef AndroidGamepadManager Owner;
+        typedef void ReturnType;
+        typedef void SetterType;
+        typedef mozilla::jni::Args<
+                int32_t,
+                int32_t,
+                bool,
+                float> Args;
+        static constexpr char name[] = "onButtonChange";
+        static constexpr char signature[] =
+                "(IIZF)V";
+        static const bool isStatic = true;
+        static const mozilla::jni::ExceptionMode exceptionMode =
+                mozilla::jni::ExceptionMode::ABORT;
+    };
+
+    struct OnGamepadAdded_t {
+        typedef AndroidGamepadManager Owner;
+        typedef void ReturnType;
+        typedef void SetterType;
+        typedef mozilla::jni::Args<
+                int32_t,
+                int32_t> Args;
+        static constexpr char name[] = "onGamepadAdded";
+        static constexpr char signature[] =
+                "(II)V";
+        static const bool isStatic = true;
+        static const mozilla::jni::ExceptionMode exceptionMode =
+                mozilla::jni::ExceptionMode::ABORT;
+    };
+
+    static auto OnGamepadAdded(int32_t, int32_t) -> void;
+
+    struct OnGamepadChange_t {
+        typedef AndroidGamepadManager Owner;
+        typedef void ReturnType;
+        typedef void SetterType;
+        typedef mozilla::jni::Args<
+                int32_t,
+                bool> Args;
+        static constexpr char name[] = "onGamepadChange";
+        static constexpr char signature[] =
+                "(IZ)V";
+        static const bool isStatic = true;
+        static const mozilla::jni::ExceptionMode exceptionMode =
+                mozilla::jni::ExceptionMode::ABORT;
+    };
+
+    struct Start_t {
+        typedef AndroidGamepadManager Owner;
+        typedef void ReturnType;
+        typedef void SetterType;
+        typedef mozilla::jni::Args<> Args;
+        static constexpr char name[] = "start";
+        static constexpr char signature[] =
+                "()V";
+        static const bool isStatic = true;
+        static const mozilla::jni::ExceptionMode exceptionMode =
+                mozilla::jni::ExceptionMode::ABORT;
+    };
+
+    static auto Start() -> void;
+
+    struct Stop_t {
+        typedef AndroidGamepadManager Owner;
+        typedef void ReturnType;
+        typedef void SetterType;
+        typedef mozilla::jni::Args<> Args;
+        static constexpr char name[] = "stop";
+        static constexpr char signature[] =
+                "()V";
+        static const bool isStatic = true;
+        static const mozilla::jni::ExceptionMode exceptionMode =
+                mozilla::jni::ExceptionMode::ABORT;
+    };
+
+    static auto Stop() -> void;
+
+    static const bool isMultithreaded = true;
+
+    template<class Impl> class Natives;
+};
+
 class DownloadsIntegration : public mozilla::jni::ObjectBase<DownloadsIntegration, jobject>
 {
 public:
@@ -159,25 +266,6 @@ public:
     };
 
     static auto AddPluginViewWrapper(mozilla::jni::Object::Param, float, float, float, float, bool) -> void;
-
-    struct AlertsProgressListener_OnProgress_t {
-        typedef GeckoAppShell Owner;
-        typedef void ReturnType;
-        typedef void SetterType;
-        typedef mozilla::jni::Args<
-                mozilla::jni::String::Param,
-                int64_t,
-                int64_t,
-                mozilla::jni::String::Param> Args;
-        static constexpr char name[] = "alertsProgressListener_OnProgress";
-        static constexpr char signature[] =
-                "(Ljava/lang/String;JJLjava/lang/String;)V";
-        static const bool isStatic = true;
-        static const mozilla::jni::ExceptionMode exceptionMode =
-                mozilla::jni::ExceptionMode::ABORT;
-    };
-
-    static auto AlertsProgressListener_OnProgress(mozilla::jni::String::Param, int64_t, int64_t, mozilla::jni::String::Param) -> void;
 
     struct CancelVibrate_t {
         typedef GeckoAppShell Owner;
@@ -517,23 +605,6 @@ public:
     };
 
     static auto EnableSensor(int32_t) -> void;
-
-    struct GamepadAdded_t {
-        typedef GeckoAppShell Owner;
-        typedef void ReturnType;
-        typedef void SetterType;
-        typedef mozilla::jni::Args<
-                int32_t,
-                int32_t> Args;
-        static constexpr char name[] = "gamepadAdded";
-        static constexpr char signature[] =
-                "(II)V";
-        static const bool isStatic = true;
-        static const mozilla::jni::ExceptionMode exceptionMode =
-                mozilla::jni::ExceptionMode::ABORT;
-    };
-
-    static auto GamepadAdded(int32_t, int32_t) -> void;
 
     struct GetApplicationContext_t {
         typedef GeckoAppShell Owner;
@@ -1182,6 +1253,21 @@ public:
 
     static auto NetworkLinkType() -> int32_t;
 
+    struct NotifyAlertListener_t {
+        typedef GeckoAppShell Owner;
+        typedef void ReturnType;
+        typedef void SetterType;
+        typedef mozilla::jni::Args<
+                mozilla::jni::String::Param,
+                mozilla::jni::String::Param> Args;
+        static constexpr char name[] = "notifyAlertListener";
+        static constexpr char signature[] =
+                "(Ljava/lang/String;Ljava/lang/String;)V";
+        static const bool isStatic = true;
+        static const mozilla::jni::ExceptionMode exceptionMode =
+                mozilla::jni::ExceptionMode::ABORT;
+    };
+
     struct NotifyDefaultPrevented_t {
         typedef GeckoAppShell Owner;
         typedef void ReturnType;
@@ -1471,11 +1557,12 @@ public:
 
     static auto SetURITitle(mozilla::jni::String::Param, mozilla::jni::String::Param) -> void;
 
-    struct ShowAlertNotificationWrapper_t {
+    struct ShowAlertNotification_t {
         typedef GeckoAppShell Owner;
         typedef void ReturnType;
         typedef void SetterType;
         typedef mozilla::jni::Args<
+                mozilla::jni::String::Param,
                 mozilla::jni::String::Param,
                 mozilla::jni::String::Param,
                 mozilla::jni::String::Param,
@@ -1484,65 +1571,13 @@ public:
                 mozilla::jni::String::Param> Args;
         static constexpr char name[] = "showAlertNotification";
         static constexpr char signature[] =
-                "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V";
-        static const bool isStatic = true;
-        static const mozilla::jni::ExceptionMode exceptionMode =
-                mozilla::jni::ExceptionMode::ABORT;
-    };
-
-    static auto ShowAlertNotificationWrapper(mozilla::jni::String::Param, mozilla::jni::String::Param, mozilla::jni::String::Param, mozilla::jni::String::Param, mozilla::jni::String::Param, mozilla::jni::String::Param) -> void;
-
-    struct ShowPersistentAlertNotificationWrapper_t {
-        typedef GeckoAppShell Owner;
-        typedef void ReturnType;
-        typedef void SetterType;
-        typedef mozilla::jni::Args<
-                mozilla::jni::String::Param,
-                mozilla::jni::String::Param,
-                mozilla::jni::String::Param,
-                mozilla::jni::String::Param,
-                mozilla::jni::String::Param,
-                mozilla::jni::String::Param,
-                mozilla::jni::String::Param> Args;
-        static constexpr char name[] = "showPersistentAlertNotification";
-        static constexpr char signature[] =
                 "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V";
         static const bool isStatic = true;
         static const mozilla::jni::ExceptionMode exceptionMode =
                 mozilla::jni::ExceptionMode::ABORT;
     };
 
-    static auto ShowPersistentAlertNotificationWrapper(mozilla::jni::String::Param, mozilla::jni::String::Param, mozilla::jni::String::Param, mozilla::jni::String::Param, mozilla::jni::String::Param, mozilla::jni::String::Param, mozilla::jni::String::Param) -> void;
-
-    struct StartMonitoringGamepad_t {
-        typedef GeckoAppShell Owner;
-        typedef void ReturnType;
-        typedef void SetterType;
-        typedef mozilla::jni::Args<> Args;
-        static constexpr char name[] = "startMonitoringGamepad";
-        static constexpr char signature[] =
-                "()V";
-        static const bool isStatic = true;
-        static const mozilla::jni::ExceptionMode exceptionMode =
-                mozilla::jni::ExceptionMode::ABORT;
-    };
-
-    static auto StartMonitoringGamepad() -> void;
-
-    struct StopMonitoringGamepad_t {
-        typedef GeckoAppShell Owner;
-        typedef void ReturnType;
-        typedef void SetterType;
-        typedef mozilla::jni::Args<> Args;
-        static constexpr char name[] = "stopMonitoringGamepad";
-        static constexpr char signature[] =
-                "()V";
-        static const bool isStatic = true;
-        static const mozilla::jni::ExceptionMode exceptionMode =
-                mozilla::jni::ExceptionMode::ABORT;
-    };
-
-    static auto StopMonitoringGamepad() -> void;
+    static auto ShowAlertNotification(mozilla::jni::String::Param, mozilla::jni::String::Param, mozilla::jni::String::Param, mozilla::jni::String::Param, mozilla::jni::String::Param, mozilla::jni::String::Param, mozilla::jni::String::Param) -> void;
 
     struct SyncNotifyObservers_t {
         typedef GeckoAppShell Owner;
@@ -1781,6 +1816,20 @@ public:
                 mozilla::jni::ExceptionMode::ABORT;
     };
 
+    struct OnImeRequestCursorUpdates_t {
+        typedef GeckoEditable Owner;
+        typedef void ReturnType;
+        typedef void SetterType;
+        typedef mozilla::jni::Args<
+                int32_t> Args;
+        static constexpr char name[] = "onImeRequestCursorUpdates";
+        static constexpr char signature[] =
+                "(I)V";
+        static const bool isStatic = false;
+        static const mozilla::jni::ExceptionMode exceptionMode =
+                mozilla::jni::ExceptionMode::ABORT;
+    };
+
     struct OnImeSynchronize_t {
         typedef GeckoEditable Owner;
         typedef void ReturnType;
@@ -1885,6 +1934,22 @@ public:
     };
 
     auto OnViewChange(mozilla::jni::Object::Param) const -> void;
+
+    struct UpdateCompositionRects_t {
+        typedef GeckoEditable Owner;
+        typedef void ReturnType;
+        typedef void SetterType;
+        typedef mozilla::jni::Args<
+                mozilla::jni::ObjectArray::Param> Args;
+        static constexpr char name[] = "updateCompositionRects";
+        static constexpr char signature[] =
+                "([Landroid/graphics/RectF;)V";
+        static const bool isStatic = false;
+        static const mozilla::jni::ExceptionMode exceptionMode =
+                mozilla::jni::ExceptionMode::ABORT;
+    };
+
+    auto UpdateCompositionRects(mozilla::jni::ObjectArray::Param) const -> void;
 
     static const bool isMultithreaded = false;
 
@@ -2048,6 +2113,76 @@ public:
     static auto UnpauseJavaProfiling() -> void;
 
     static const bool isMultithreaded = true;
+
+    template<class Impl> class Natives;
+};
+
+class GeckoNetworkManager : public mozilla::jni::ObjectBase<GeckoNetworkManager, jobject>
+{
+public:
+    static const char name[];
+
+    explicit GeckoNetworkManager(const Context& ctx) : ObjectBase<GeckoNetworkManager, jobject>(ctx) {}
+
+    struct OnConnectionChanged_t {
+        typedef GeckoNetworkManager Owner;
+        typedef void ReturnType;
+        typedef void SetterType;
+        typedef mozilla::jni::Args<
+                int32_t,
+                mozilla::jni::String::Param,
+                bool,
+                int32_t> Args;
+        static constexpr char name[] = "onConnectionChanged";
+        static constexpr char signature[] =
+                "(ILjava/lang/String;ZI)V";
+        static const bool isStatic = true;
+        static const mozilla::jni::ExceptionMode exceptionMode =
+                mozilla::jni::ExceptionMode::ABORT;
+    };
+
+    struct OnStatusChanged_t {
+        typedef GeckoNetworkManager Owner;
+        typedef void ReturnType;
+        typedef void SetterType;
+        typedef mozilla::jni::Args<
+                mozilla::jni::String::Param> Args;
+        static constexpr char name[] = "onStatusChanged";
+        static constexpr char signature[] =
+                "(Ljava/lang/String;)V";
+        static const bool isStatic = true;
+        static const mozilla::jni::ExceptionMode exceptionMode =
+                mozilla::jni::ExceptionMode::ABORT;
+    };
+
+    static const bool isMultithreaded = false;
+
+    template<class Impl> class Natives;
+};
+
+class GeckoScreenOrientation : public mozilla::jni::ObjectBase<GeckoScreenOrientation, jobject>
+{
+public:
+    static const char name[];
+
+    explicit GeckoScreenOrientation(const Context& ctx) : ObjectBase<GeckoScreenOrientation, jobject>(ctx) {}
+
+    struct OnOrientationChange_t {
+        typedef GeckoScreenOrientation Owner;
+        typedef void ReturnType;
+        typedef void SetterType;
+        typedef mozilla::jni::Args<
+                int16_t,
+                int16_t> Args;
+        static constexpr char name[] = "onOrientationChange";
+        static constexpr char signature[] =
+                "(SS)V";
+        static const bool isStatic = true;
+        static const mozilla::jni::ExceptionMode exceptionMode =
+                mozilla::jni::ExceptionMode::ABORT;
+    };
+
+    static const bool isMultithreaded = false;
 
     template<class Impl> class Natives;
 };
@@ -2620,6 +2755,12 @@ public:
 
     class Window;
 
+    static const int32_t LOAD_DEFAULT = 0;
+
+    static const int32_t LOAD_NEW_TAB = 1;
+
+    static const int32_t LOAD_SWITCH_TAB = 2;
+
     static const bool isMultithreaded = false;
 
 };
@@ -2672,6 +2813,21 @@ public:
                 mozilla::jni::ExceptionMode::ABORT;
     };
 
+    struct LoadUri_t {
+        typedef Window Owner;
+        typedef void ReturnType;
+        typedef void SetterType;
+        typedef mozilla::jni::Args<
+                mozilla::jni::String::Param,
+                int32_t> Args;
+        static constexpr char name[] = "loadUri";
+        static constexpr char signature[] =
+                "(Ljava/lang/String;I)V";
+        static const bool isStatic = false;
+        static const mozilla::jni::ExceptionMode exceptionMode =
+                mozilla::jni::ExceptionMode::ABORT;
+    };
+
     struct Open_t {
         typedef Window Owner;
         typedef void ReturnType;
@@ -2685,7 +2841,7 @@ public:
                 int32_t> Args;
         static constexpr char name[] = "open";
         static constexpr char signature[] =
-                "(Lorg/mozilla/gecko/GeckoView$Window;Lorg/mozilla/gecko/GeckoView;Lorg/mozilla/gecko/gfx/GLController;Ljava/lang/String;II)V";
+                "(Lorg/mozilla/gecko/GeckoView$Window;Lorg/mozilla/gecko/GeckoView;Lorg/mozilla/gecko/gfx/LayerView$Compositor;Ljava/lang/String;II)V";
         static const bool isStatic = true;
         static const mozilla::jni::ExceptionMode exceptionMode =
                 mozilla::jni::ExceptionMode::ABORT;
@@ -2696,29 +2852,15 @@ public:
         typedef void ReturnType;
         typedef void SetterType;
         typedef mozilla::jni::Args<
-                GeckoView::Param> Args;
+                GeckoView::Param,
+                mozilla::jni::Object::Param> Args;
         static constexpr char name[] = "reattach";
         static constexpr char signature[] =
-                "(Lorg/mozilla/gecko/GeckoView;)V";
+                "(Lorg/mozilla/gecko/GeckoView;Lorg/mozilla/gecko/gfx/LayerView$Compositor;)V";
         static const bool isStatic = false;
         static const mozilla::jni::ExceptionMode exceptionMode =
                 mozilla::jni::ExceptionMode::ABORT;
     };
-
-    struct GlController_t {
-        typedef Window Owner;
-        typedef mozilla::jni::Object::LocalRef ReturnType;
-        typedef mozilla::jni::Object::Param SetterType;
-        typedef mozilla::jni::Args<> Args;
-        static constexpr char name[] = "glController";
-        static constexpr char signature[] =
-                "Lorg/mozilla/gecko/gfx/GLController;";
-        static const bool isStatic = false;
-        static const mozilla::jni::ExceptionMode exceptionMode =
-                mozilla::jni::ExceptionMode::ABORT;
-    };
-
-    auto GlController() const -> mozilla::jni::Object::LocalRef;
 
     static const bool isMultithreaded = true;
 
@@ -2852,6 +2994,97 @@ public:
     template<class Impl> class Natives;
 };
 
+class Telemetry : public mozilla::jni::ObjectBase<Telemetry, jobject>
+{
+public:
+    static const char name[];
+
+    explicit Telemetry(const Context& ctx) : ObjectBase<Telemetry, jobject>(ctx) {}
+
+    struct AddHistogram_t {
+        typedef Telemetry Owner;
+        typedef void ReturnType;
+        typedef void SetterType;
+        typedef mozilla::jni::Args<
+                mozilla::jni::String::Param,
+                int32_t> Args;
+        static constexpr char name[] = "nativeAddHistogram";
+        static constexpr char signature[] =
+                "(Ljava/lang/String;I)V";
+        static const bool isStatic = true;
+        static const mozilla::jni::ExceptionMode exceptionMode =
+                mozilla::jni::ExceptionMode::ABORT;
+    };
+
+    struct AddKeyedHistogram_t {
+        typedef Telemetry Owner;
+        typedef void ReturnType;
+        typedef void SetterType;
+        typedef mozilla::jni::Args<
+                mozilla::jni::String::Param,
+                mozilla::jni::String::Param,
+                int32_t> Args;
+        static constexpr char name[] = "nativeAddKeyedHistogram";
+        static constexpr char signature[] =
+                "(Ljava/lang/String;Ljava/lang/String;I)V";
+        static const bool isStatic = true;
+        static const mozilla::jni::ExceptionMode exceptionMode =
+                mozilla::jni::ExceptionMode::ABORT;
+    };
+
+    struct AddUIEvent_t {
+        typedef Telemetry Owner;
+        typedef void ReturnType;
+        typedef void SetterType;
+        typedef mozilla::jni::Args<
+                mozilla::jni::String::Param,
+                mozilla::jni::String::Param,
+                int64_t,
+                mozilla::jni::String::Param> Args;
+        static constexpr char name[] = "nativeAddUiEvent";
+        static constexpr char signature[] =
+                "(Ljava/lang/String;Ljava/lang/String;JLjava/lang/String;)V";
+        static const bool isStatic = true;
+        static const mozilla::jni::ExceptionMode exceptionMode =
+                mozilla::jni::ExceptionMode::ABORT;
+    };
+
+    struct StartUISession_t {
+        typedef Telemetry Owner;
+        typedef void ReturnType;
+        typedef void SetterType;
+        typedef mozilla::jni::Args<
+                mozilla::jni::String::Param,
+                int64_t> Args;
+        static constexpr char name[] = "nativeStartUiSession";
+        static constexpr char signature[] =
+                "(Ljava/lang/String;J)V";
+        static const bool isStatic = true;
+        static const mozilla::jni::ExceptionMode exceptionMode =
+                mozilla::jni::ExceptionMode::ABORT;
+    };
+
+    struct StopUISession_t {
+        typedef Telemetry Owner;
+        typedef void ReturnType;
+        typedef void SetterType;
+        typedef mozilla::jni::Args<
+                mozilla::jni::String::Param,
+                mozilla::jni::String::Param,
+                int64_t> Args;
+        static constexpr char name[] = "nativeStopUiSession";
+        static constexpr char signature[] =
+                "(Ljava/lang/String;Ljava/lang/String;J)V";
+        static const bool isStatic = true;
+        static const mozilla::jni::ExceptionMode exceptionMode =
+                mozilla::jni::ExceptionMode::ABORT;
+    };
+
+    static const bool isMultithreaded = false;
+
+    template<class Impl> class Natives;
+};
+
 class ThumbnailHelper : public mozilla::jni::ObjectBase<ThumbnailHelper, jobject>
 {
 public:
@@ -2864,7 +3097,7 @@ public:
         typedef void ReturnType;
         typedef void SetterType;
         typedef mozilla::jni::Args<
-                mozilla::jni::Object::Param,
+                mozilla::jni::ByteBuffer::Param,
                 int32_t,
                 bool,
                 bool> Args;
@@ -2876,10 +3109,60 @@ public:
                 mozilla::jni::ExceptionMode::ABORT;
     };
 
-    static auto SendThumbnail(mozilla::jni::Object::Param, int32_t, bool, bool) -> void;
+    static auto SendThumbnail(mozilla::jni::ByteBuffer::Param, int32_t, bool, bool) -> void;
+
+    struct RequestThumbnail_t {
+        typedef ThumbnailHelper Owner;
+        typedef void ReturnType;
+        typedef void SetterType;
+        typedef mozilla::jni::Args<
+                mozilla::jni::ByteBuffer::Param,
+                int32_t,
+                int32_t,
+                int32_t> Args;
+        static constexpr char name[] = "requestThumbnail";
+        static constexpr char signature[] =
+                "(Ljava/nio/ByteBuffer;III)V";
+        static const bool isStatic = true;
+        static const mozilla::jni::ExceptionMode exceptionMode =
+                mozilla::jni::ExceptionMode::ABORT;
+    };
 
     static const bool isMultithreaded = false;
 
+    template<class Impl> class Natives;
+};
+
+class ZoomedView : public mozilla::jni::ObjectBase<ZoomedView, jobject>
+{
+public:
+    static const char name[];
+
+    explicit ZoomedView(const Context& ctx) : ObjectBase<ZoomedView, jobject>(ctx) {}
+
+    struct RequestZoomedViewData_t {
+        typedef ZoomedView Owner;
+        typedef void ReturnType;
+        typedef void SetterType;
+        typedef mozilla::jni::Args<
+                mozilla::jni::ByteBuffer::Param,
+                int32_t,
+                int32_t,
+                int32_t,
+                int32_t,
+                int32_t,
+                float> Args;
+        static constexpr char name[] = "requestZoomedViewData";
+        static constexpr char signature[] =
+                "(Ljava/nio/ByteBuffer;IIIIIF)V";
+        static const bool isStatic = true;
+        static const mozilla::jni::ExceptionMode exceptionMode =
+                mozilla::jni::ExceptionMode::ABORT;
+    };
+
+    static const bool isMultithreaded = false;
+
+    template<class Impl> class Natives;
 };
 
 class Distribution : public mozilla::jni::ObjectBase<Distribution, jobject>
@@ -2967,149 +3250,6 @@ public:
 
     static const bool isMultithreaded = false;
 
-};
-
-class GLController : public mozilla::jni::ObjectBase<GLController, jobject>
-{
-public:
-    static const char name[];
-
-    explicit GLController(const Context& ctx) : ObjectBase<GLController, jobject>(ctx) {}
-
-    struct AttachToJava_t {
-        typedef GLController Owner;
-        typedef void ReturnType;
-        typedef void SetterType;
-        typedef mozilla::jni::Args<
-                mozilla::jni::Object::Param,
-                mozilla::jni::Object::Param> Args;
-        static constexpr char name[] = "attachToJava";
-        static constexpr char signature[] =
-                "(Lorg/mozilla/gecko/gfx/GeckoLayerClient;Lorg/mozilla/gecko/gfx/NativePanZoomController;)V";
-        static const bool isStatic = false;
-        static const mozilla::jni::ExceptionMode exceptionMode =
-                mozilla::jni::ExceptionMode::ABORT;
-    };
-
-    struct CreateCompositor_t {
-        typedef GLController Owner;
-        typedef void ReturnType;
-        typedef void SetterType;
-        typedef mozilla::jni::Args<
-                int32_t,
-                int32_t> Args;
-        static constexpr char name[] = "createCompositor";
-        static constexpr char signature[] =
-                "(II)V";
-        static const bool isStatic = false;
-        static const mozilla::jni::ExceptionMode exceptionMode =
-                mozilla::jni::ExceptionMode::ABORT;
-    };
-
-    struct Destroy_t {
-        typedef GLController Owner;
-        typedef void ReturnType;
-        typedef void SetterType;
-        typedef mozilla::jni::Args<> Args;
-        static constexpr char name[] = "destroy";
-        static constexpr char signature[] =
-                "()V";
-        static const bool isStatic = false;
-        static const mozilla::jni::ExceptionMode exceptionMode =
-                mozilla::jni::ExceptionMode::ABORT;
-    };
-
-    auto Destroy() const -> void;
-
-    struct DisposeNative_t {
-        typedef GLController Owner;
-        typedef void ReturnType;
-        typedef void SetterType;
-        typedef mozilla::jni::Args<> Args;
-        static constexpr char name[] = "disposeNative";
-        static constexpr char signature[] =
-                "()V";
-        static const bool isStatic = false;
-        static const mozilla::jni::ExceptionMode exceptionMode =
-                mozilla::jni::ExceptionMode::ABORT;
-    };
-
-    struct GetSurface_t {
-        typedef GLController Owner;
-        typedef mozilla::jni::Object::LocalRef ReturnType;
-        typedef mozilla::jni::Object::Param SetterType;
-        typedef mozilla::jni::Args<> Args;
-        static constexpr char name[] = "getSurface";
-        static constexpr char signature[] =
-                "()Ljava/lang/Object;";
-        static const bool isStatic = false;
-        static const mozilla::jni::ExceptionMode exceptionMode =
-                mozilla::jni::ExceptionMode::ABORT;
-    };
-
-    auto GetSurface() const -> mozilla::jni::Object::LocalRef;
-
-    struct OnSizeChanged_t {
-        typedef GLController Owner;
-        typedef void ReturnType;
-        typedef void SetterType;
-        typedef mozilla::jni::Args<
-                int32_t,
-                int32_t,
-                int32_t,
-                int32_t> Args;
-        static constexpr char name[] = "onSizeChanged";
-        static constexpr char signature[] =
-                "(IIII)V";
-        static const bool isStatic = false;
-        static const mozilla::jni::ExceptionMode exceptionMode =
-                mozilla::jni::ExceptionMode::ABORT;
-    };
-
-    struct PauseCompositor_t {
-        typedef GLController Owner;
-        typedef void ReturnType;
-        typedef void SetterType;
-        typedef mozilla::jni::Args<> Args;
-        static constexpr char name[] = "pauseCompositor";
-        static constexpr char signature[] =
-                "()V";
-        static const bool isStatic = false;
-        static const mozilla::jni::ExceptionMode exceptionMode =
-                mozilla::jni::ExceptionMode::ABORT;
-    };
-
-    struct SyncInvalidateAndScheduleComposite_t {
-        typedef GLController Owner;
-        typedef void ReturnType;
-        typedef void SetterType;
-        typedef mozilla::jni::Args<> Args;
-        static constexpr char name[] = "syncInvalidateAndScheduleComposite";
-        static constexpr char signature[] =
-                "()V";
-        static const bool isStatic = false;
-        static const mozilla::jni::ExceptionMode exceptionMode =
-                mozilla::jni::ExceptionMode::ABORT;
-    };
-
-    struct SyncResumeResizeCompositor_t {
-        typedef GLController Owner;
-        typedef void ReturnType;
-        typedef void SetterType;
-        typedef mozilla::jni::Args<
-                int32_t,
-                int32_t> Args;
-        static constexpr char name[] = "syncResumeResizeCompositor";
-        static constexpr char signature[] =
-                "(II)V";
-        static const bool isStatic = false;
-        static const mozilla::jni::ExceptionMode exceptionMode =
-                mozilla::jni::ExceptionMode::ABORT;
-    };
-
-    static const bool isMultithreaded = true;
-
-    template<class Impl> class Natives;
 };
 
 class GeckoLayerClient : public mozilla::jni::ObjectBase<GeckoLayerClient, jobject>
@@ -3520,12 +3660,14 @@ public:
 
     explicit LayerView(const Context& ctx) : ObjectBase<LayerView, jobject>(ctx) {}
 
-    struct updateZoomedView_t {
+    class Compositor;
+
+    struct UpdateZoomedView_t {
         typedef LayerView Owner;
         typedef void ReturnType;
         typedef void SetterType;
         typedef mozilla::jni::Args<
-                mozilla::jni::Object::Param> Args;
+                mozilla::jni::ByteBuffer::Param> Args;
         static constexpr char name[] = "updateZoomedView";
         static constexpr char signature[] =
                 "(Ljava/nio/ByteBuffer;)V";
@@ -3534,10 +3676,169 @@ public:
                 mozilla::jni::ExceptionMode::ABORT;
     };
 
-    static auto updateZoomedView(mozilla::jni::Object::Param) -> void;
+    static auto UpdateZoomedView(mozilla::jni::ByteBuffer::Param) -> void;
 
     static const bool isMultithreaded = true;
 
+};
+
+class LayerView::Compositor : public mozilla::jni::ObjectBase<Compositor, jobject>
+{
+public:
+    static const char name[];
+
+    explicit Compositor(const Context& ctx) : ObjectBase<Compositor, jobject>(ctx) {}
+
+    struct New_t {
+        typedef Compositor Owner;
+        typedef Compositor::LocalRef ReturnType;
+        typedef Compositor::Param SetterType;
+        typedef mozilla::jni::Args<
+                LayerView::Param> Args;
+        static constexpr char name[] = "<init>";
+        static constexpr char signature[] =
+                "(Lorg/mozilla/gecko/gfx/LayerView;)V";
+        static const bool isStatic = false;
+        static const mozilla::jni::ExceptionMode exceptionMode =
+                mozilla::jni::ExceptionMode::ABORT;
+    };
+
+    static auto New(LayerView::Param) -> Compositor::LocalRef;
+
+    struct AttachToJava_t {
+        typedef Compositor Owner;
+        typedef void ReturnType;
+        typedef void SetterType;
+        typedef mozilla::jni::Args<
+                mozilla::jni::Object::Param,
+                mozilla::jni::Object::Param> Args;
+        static constexpr char name[] = "attachToJava";
+        static constexpr char signature[] =
+                "(Lorg/mozilla/gecko/gfx/GeckoLayerClient;Lorg/mozilla/gecko/gfx/NativePanZoomController;)V";
+        static const bool isStatic = false;
+        static const mozilla::jni::ExceptionMode exceptionMode =
+                mozilla::jni::ExceptionMode::ABORT;
+    };
+
+    struct CreateCompositor_t {
+        typedef Compositor Owner;
+        typedef void ReturnType;
+        typedef void SetterType;
+        typedef mozilla::jni::Args<
+                int32_t,
+                int32_t> Args;
+        static constexpr char name[] = "createCompositor";
+        static constexpr char signature[] =
+                "(II)V";
+        static const bool isStatic = false;
+        static const mozilla::jni::ExceptionMode exceptionMode =
+                mozilla::jni::ExceptionMode::ABORT;
+    };
+
+    struct Destroy_t {
+        typedef Compositor Owner;
+        typedef void ReturnType;
+        typedef void SetterType;
+        typedef mozilla::jni::Args<> Args;
+        static constexpr char name[] = "destroy";
+        static constexpr char signature[] =
+                "()V";
+        static const bool isStatic = false;
+        static const mozilla::jni::ExceptionMode exceptionMode =
+                mozilla::jni::ExceptionMode::ABORT;
+    };
+
+    auto Destroy() const -> void;
+
+    struct DisposeNative_t {
+        typedef Compositor Owner;
+        typedef void ReturnType;
+        typedef void SetterType;
+        typedef mozilla::jni::Args<> Args;
+        static constexpr char name[] = "disposeNative";
+        static constexpr char signature[] =
+                "()V";
+        static const bool isStatic = false;
+        static const mozilla::jni::ExceptionMode exceptionMode =
+                mozilla::jni::ExceptionMode::ABORT;
+    };
+
+    struct GetSurface_t {
+        typedef Compositor Owner;
+        typedef mozilla::jni::Object::LocalRef ReturnType;
+        typedef mozilla::jni::Object::Param SetterType;
+        typedef mozilla::jni::Args<> Args;
+        static constexpr char name[] = "getSurface";
+        static constexpr char signature[] =
+                "()Ljava/lang/Object;";
+        static const bool isStatic = false;
+        static const mozilla::jni::ExceptionMode exceptionMode =
+                mozilla::jni::ExceptionMode::ABORT;
+    };
+
+    auto GetSurface() const -> mozilla::jni::Object::LocalRef;
+
+    struct OnSizeChanged_t {
+        typedef Compositor Owner;
+        typedef void ReturnType;
+        typedef void SetterType;
+        typedef mozilla::jni::Args<
+                int32_t,
+                int32_t,
+                int32_t,
+                int32_t> Args;
+        static constexpr char name[] = "onSizeChanged";
+        static constexpr char signature[] =
+                "(IIII)V";
+        static const bool isStatic = false;
+        static const mozilla::jni::ExceptionMode exceptionMode =
+                mozilla::jni::ExceptionMode::ABORT;
+    };
+
+    struct SyncInvalidateAndScheduleComposite_t {
+        typedef Compositor Owner;
+        typedef void ReturnType;
+        typedef void SetterType;
+        typedef mozilla::jni::Args<> Args;
+        static constexpr char name[] = "syncInvalidateAndScheduleComposite";
+        static constexpr char signature[] =
+                "()V";
+        static const bool isStatic = false;
+        static const mozilla::jni::ExceptionMode exceptionMode =
+                mozilla::jni::ExceptionMode::ABORT;
+    };
+
+    struct SyncPauseCompositor_t {
+        typedef Compositor Owner;
+        typedef void ReturnType;
+        typedef void SetterType;
+        typedef mozilla::jni::Args<> Args;
+        static constexpr char name[] = "syncPauseCompositor";
+        static constexpr char signature[] =
+                "()V";
+        static const bool isStatic = false;
+        static const mozilla::jni::ExceptionMode exceptionMode =
+                mozilla::jni::ExceptionMode::ABORT;
+    };
+
+    struct SyncResumeResizeCompositor_t {
+        typedef Compositor Owner;
+        typedef void ReturnType;
+        typedef void SetterType;
+        typedef mozilla::jni::Args<
+                int32_t,
+                int32_t> Args;
+        static constexpr char name[] = "syncResumeResizeCompositor";
+        static constexpr char signature[] =
+                "(II)V";
+        static const bool isStatic = false;
+        static const mozilla::jni::ExceptionMode exceptionMode =
+                mozilla::jni::ExceptionMode::ABORT;
+    };
+
+    static const bool isMultithreaded = true;
+
+    template<class Impl> class Natives;
 };
 
 class NativePanZoomController : public mozilla::jni::ObjectBase<NativePanZoomController, jobject>
@@ -5275,6 +5576,6 @@ public:
     template<class Impl> class Natives;
 };
 
-} /* widget */
+} /* java */
 } /* mozilla */
 #endif // GeneratedJNIWrappers_h

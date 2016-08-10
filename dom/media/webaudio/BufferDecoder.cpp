@@ -42,8 +42,7 @@ BufferDecoder::GetResource() const
 }
 
 void
-BufferDecoder::NotifyDecodedFrames(uint32_t aParsed, uint32_t aDecoded,
-                                   uint32_t aDropped)
+BufferDecoder::NotifyDecodedFrames(const FrameStatisticsData& aStats)
 {
   // ignore
 }
@@ -63,7 +62,7 @@ BufferDecoder::GetImageContainer()
 }
 
 MediaDecoderOwner*
-BufferDecoder::GetOwner()
+BufferDecoder::GetOwner() const
 {
   // unknown
   return nullptr;

@@ -10,6 +10,8 @@
 #include "ImageContainer.h"
 
 #include "MediaInfo.h"
+#include "VPXDecoder.h"
+#include "MP4Decoder.h"
 
 #include "FFmpegVideoDecoder.h"
 #include "FFmpegLog.h"
@@ -287,16 +289,17 @@ FFmpegVideoDecoder<LIBAV_VER>::DoDecode(MediaRawData* aSample,
       b.mPlanes[1].mHeight = b.mPlanes[2].mHeight = (mFrame->height + 1) >> 1;
     }
 
-    RefPtr<VideoData> v = VideoData::Create(mInfo,
-                                            mImageContainer,
-                                            aSample->mOffset,
-                                            pts,
-                                            duration,
-                                            b,
-                                            !!mFrame->key_frame,
-                                            -1,
-                                            mInfo.ScaledImageRect(mFrame->width,
-                                                                  mFrame->height));
+    RefPtr<VideoData> v =
+      VideoData::CreateAndCopyData(mInfo,
+                                   mImageContainer,
+                                   aSample->mOffset,
+                                   pts,
+                                   duration,
+                                   b,
+                                   !!mFrame->key_frame,
+                                   -1,
+                                   mInfo.ScaledImageRect(mFrame->width,
+                                                         mFrame->height));
 
     if (!v) {
       NS_WARNING("image allocation error.");
@@ -338,7 +341,7 @@ FFmpegVideoDecoder<LIBAV_VER>::~FFmpegVideoDecoder()
 AVCodecID
 FFmpegVideoDecoder<LIBAV_VER>::GetCodecId(const nsACString& aMimeType)
 {
-  if (aMimeType.EqualsLiteral("video/avc") || aMimeType.EqualsLiteral("video/mp4")) {
+  if (MP4Decoder::IsH264(aMimeType)) {
     return AV_CODEC_ID_H264;
   }
 
@@ -347,13 +350,13 @@ FFmpegVideoDecoder<LIBAV_VER>::GetCodecId(const nsACString& aMimeType)
   }
 
 #if LIBAVCODEC_VERSION_MAJOR >= 54
-  if (aMimeType.EqualsLiteral("video/webm; codecs=vp8")) {
+  if (VPXDecoder::IsVP8(aMimeType)) {
     return AV_CODEC_ID_VP8;
   }
 #endif
 
 #if LIBAVCODEC_VERSION_MAJOR >= 55
-  if (aMimeType.EqualsLiteral("video/webm; codecs=vp9")) {
+  if (VPXDecoder::IsVP9(aMimeType)) {
     return AV_CODEC_ID_VP9;
   }
 #endif

@@ -1929,7 +1929,8 @@ skip-if(B2G||Mulet) == 1150021-1.xul 1150021-1-ref.xul
 == 1153845-1.html 1153845-1-ref.html
 == 1155828-1.html 1155828-1-ref.html
 == 1156129-1.html 1156129-1-ref.html
-== 1169331-1.html 1169331-1-ref.html
+pref(dom.use_xbl_scopes_for_remote_xul,true) HTTP(..) == 1157127-1.html 1157127-1-ref.html
+fuzzy-if(Android,1,1) == 1169331-1.html 1169331-1-ref.html
 fuzzy(1,74) fuzzy-if(gtkWidget,6,79) == 1174332-1.html 1174332-1-ref.html
 == 1179078-1.html 1179078-1-ref.html
 == 1179288-1.html 1179288-1-ref.html
@@ -1961,3 +1962,9 @@ random-if(!winWidget) == 1273154-2.html 1273154-2-ref.html # depends on Windows 
 != 1276161-1b.html 1276161-1-notref.html
 != 1276161-1a.html 1276161-1b.html
 == 1275411-1.html 1275411-1-ref.html
+
+HTTP == 652991-1a.html 652991-1-ref.html
+HTTP == 652991-1b.html 652991-1-ref.html
+HTTP == 652991-2.html 652991-2-ref.html
+HTTP == 652991-3.html 652991-3-ref.html
+HTTP == 652991-4.html 652991-4-ref.html

@@ -13,9 +13,13 @@ Cu.import("resource://gre/modules/Task.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 
 XPCOMUtils.defineLazyModuleGetter(this, "Color", "resource://gre/modules/Color.jsm");
+XPCOMUtils.defineLazyGetter(this, "kDebug", () => {
+  const kDebugPref = "findbar.modalHighlight.debug";
+  return Services.prefs.getPrefType(kDebugPref) && Services.prefs.getBoolPref(kDebugPref);
+});
 
-const kHighlightIterationSizeMax = 100;
 const kModalHighlightRepaintFreqMs = 10;
+const kHighlightAllPref = "findbar.highlightAll";
 const kModalHighlightPref = "findbar.modalHighlight";
 const kFontPropsCSS = ["color", "font-family", "font-kerning", "font-size",
   "font-size-adjust", "font-stretch", "font-variant", "font-weight", "letter-spacing",
@@ -51,6 +55,10 @@ const kModalStyle = `
   z-index: 2;
 }
 
+.findbar-modalHighlight-outline.findbar-debug {
+  z-index: 2147483647;
+}
+
 .findbar-modalHighlight-outline[grow] {
   transform: scaleX(1.5) scaleY(1.5)
 }
@@ -74,6 +82,12 @@ const kModalStyle = `
   z-index: 1;
 }
 
+.findbar-modalHighlight-outlineMask.findbar-debug {
+  z-index: 2147483646;
+  top: 0;
+  left: 0;
+}
+
 .findbar-modalHighlight-outlineMask[brighttext] {
   background: #fff;
 }
@@ -87,7 +101,34 @@ const kModalStyle = `
 .findbar-modalHighlight-outlineMask[brighttext] > .findbar-modalHighlight-rect {
   background: #000;
 }`;
-const kXULNS = "http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul";
+
+function mockAnonymousContentNode(domNode) {
+  return {
+    setTextContentForElement(id, text) {
+      (domNode.querySelector("#" + id) || domNode).textContent = text;
+    },
+    getAttributeForElement(id, attrName) {
+      let node = domNode.querySelector("#" + id) || domNode;
+      if (!node.hasAttribute(attrName))
+        return undefined;
+      return node.getAttribute(attrName);
+    },
+    setAttributeForElement(id, attrName, attrValue) {
+      (domNode.querySelector("#" + id) || domNode).setAttribute(attrName, attrValue);
+    },
+    removeAttributeForElement(id, attrName) {
+      let node = domNode.querySelector("#" + id) || domNode;
+      if (!node.hasAttribute(attrName))
+        return;
+      node.removeAttribute(attrName);
+    },
+    remove() {
+      try {
+        domNode.parentNode.removeChild(domNode);
+      } catch (ex) {}
+    }
+  };
+}
 
 /**
  * FinderHighlighter class that is used by Finder.jsm to take care of the
@@ -96,11 +137,21 @@ const kXULNS = "http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul";
  * @param {Finder} finder Finder.jsm instance
  */
 function FinderHighlighter(finder) {
-  this.finder = finder;
+  this._currentFoundRange = null;
   this._modal = Services.prefs.getBoolPref(kModalHighlightPref);
+  this._highlightAll = Services.prefs.getBoolPref(kHighlightAllPref);
+  this.finder = finder;
+  this.visible = false;
 }
 
 FinderHighlighter.prototype = {
+  get iterator() {
+    if (this._iterator)
+      return this._iterator;
+    this._iterator = Cu.import("resource://gre/modules/FinderIterator.jsm", null).FinderIterator;
+    return this._iterator;
+  },
+
   get modalStyleSheet() {
     if (!this._modalStyleSheet) {
       this._modalStyleSheet = kModalStyle.replace(/(\.|#)findbar-/g,
@@ -131,59 +182,22 @@ FinderHighlighter.prototype = {
   },
 
   /**
-   * Whilst the iterator is running, it's possible to abort it. This may be useful
-   * if the word to highlight was updated in the meantime.
-   */
-  maybeAbort() {
-    this.clear();
-    if (!this._abortHighlight) {
-      return;
-    }
-    this._abortHighlight();
-  },
-
-  /**
-   * Uses the iterator in Finder.jsm to find all the words to highlight and makes
-   * sure not to block the thread whilst running.
-   *
-   * @param {String}       word    Needle to search for and highlight when found
-   * @param {nsIDOMWindow} window  Window object, whose DOM tree should be traversed
-   * @param {Function}     onFind  Callback invoked for each found occurrence
-   * @yield {Promise} that resolves once the iterator has finished
-   */
-  iterator: Task.async(function* (word, window, onFind) {
-    let count = 0;
-    for (let range of this.finder._findIterator(word, window)) {
-      onFind(range);
-      if (++count >= kHighlightIterationSizeMax) {
-        count = 0;
-        // Sleep for the rest of this cycle.
-        yield new Promise(resolve => resolve());
-      }
-    }
-  }),
-
-  /**
    * Toggle highlighting all occurrences of a word in a page. This method will
    * be called recursively for each (i)frame inside a page.
    *
-   * @param {Booolean}     highlight Whether highlighting should be turned on
-   * @param {String}       word      Needle to search for and highlight when found
-   * @param {nsIDOMWindow} window    Window object, whose DOM tree should be traversed
-   * @yield {Promise} that resolves once the operation has finished
+   * @param {Booolean} highlight Whether highlighting should be turned on
+   * @param {String}   word      Needle to search for and highlight when found
+   * @param {Boolean}  linksOnly Only consider nodes that are links for the search
+   * @yield {Promise}  that resolves once the operation has finished
    */
-  highlight: Task.async(function* (highlight, word, window) {
-    let finderWindow = this.finder._getWindow();
-    window = window || finderWindow;
-    let found = false;
-    for (let i = 0; window.frames && i < window.frames.length; i++) {
-      if (yield this.highlight(highlight, word, window.frames[i])) {
-        found = true;
-      }
-    }
-
+  highlight: Task.async(function* (highlight, word, linksOnly) {
+    let window = this.finder._getWindow();
     let controller = this.finder._getSelectionController(window);
     let doc = window.document;
+    let found = false;
+
+    this.clear();
+
     if (!controller || !doc || !doc.documentElement) {
       // Without the selection controller,
       // we are unable to (un)highlight any matches
@@ -191,13 +205,19 @@ FinderHighlighter.prototype = {
     }
 
     if (highlight) {
-      yield this.iterator(word, window, range => {
-        this.highlightRange(range, controller, finderWindow);
-        found = true;
+      yield this.iterator.start({
+        linksOnly, word,
+        finder: this.finder,
+        onRange: range => {
+          this.highlightRange(range, controller, window);
+          found = true;
+        },
+        useCache: true
       });
     } else {
       this.hide(window);
       this.clear();
+      this.iterator.reset();
 
       // Removing the highlighting always succeeds, so return true.
       found = true;
@@ -242,50 +262,53 @@ FinderHighlighter.prototype = {
    * If modal highlighting is enabled, show the dimmed background that will overlay
    * the page.
    *
-   * @param  {nsIDOMWindow} window The dimmed background will overlay this window.
-   *                               Optional, defaults to the finder window.
-   * @return {AnonymousContent}    Reference to the node inserted into the
-   *                               CanvasFrame. It'll also be stored in the
-   *                               `_modalHighlightOutline` member variable.
+   * @param {nsIDOMWindow} window The dimmed background will overlay this window.
+   *                              Optional, defaults to the finder window.
    */
   show(window = null) {
-    if (!this._modal)
-      return null;
+    if (!this._modal || this.visible)
+      return;
 
+    this.visible = true;
     window = window || this.finder._getWindow();
-    let anonNode = this._maybeCreateModalHighlightNodes(window);
+    this._maybeCreateModalHighlightNodes(window);
     this._addModalHighlightListeners(window);
-
-    return anonNode;
   },
 
   /**
    * Clear all highlighted matches. If modal highlighting is enabled and
    * the outline + dimmed background is currently visible, both will be hidden.
+   *
+   * @param {nsIDOMWindow} window    The dimmed background will overlay this window.
+   *                                 Optional, defaults to the finder window.
+   * @param {nsIDOMRange}  skipRange A range that should not be removed from the
+   *                                 find selection.
+   * @param {nsIDOMEvent}  event     When called from an event handler, this will
+   *                                 be the triggering event.
    */
-  hide(window = null) {
+  hide(window = null, skipRange = null, event = null) {
+    // Do not hide on anything but a left-click.
+    if (event && event.type == "click" && event.button !== 0)
+      return;
+
     window = window || this.finder._getWindow();
 
     let doc = window.document;
-    let controller = this.finder._getSelectionController(window);
-    let sel = controller.getSelection(Ci.nsISelectionController.SELECTION_FIND);
-    sel.removeAllRanges();
+    this._clearSelection(this.finder._getSelectionController(window), skipRange);
 
     // Next, check our editor cache, for editors belonging to this
     // document
     if (this._editors) {
       for (let x = this._editors.length - 1; x >= 0; --x) {
         if (this._editors[x].document == doc) {
-          sel = this._editors[x].selectionController
-                                .getSelection(Ci.nsISelectionController.SELECTION_FIND);
-          sel.removeAllRanges();
+          this._clearSelection(this._editors[x].selectionController, skipRange);
           // We don't need to listen to this editor any more
           this._unhookListenersAtIndex(x);
         }
       }
     }
 
-    if (!this._modal)
+    if (!this._modal || !this.visible)
       return;
 
     if (this._modalHighlightOutline)
@@ -294,6 +317,8 @@ FinderHighlighter.prototype = {
     this._removeHighlightAllMask(window);
     this._removeModalHighlightListeners(window);
     delete this._brightText;
+
+    this.visible = false;
   },
 
   /**
@@ -318,52 +343,69 @@ FinderHighlighter.prototype = {
    *                           by the consumer of the Finder.
    */
   update(data) {
-    if (!this._modal)
+    let window = this.finder._getWindow();
+    let foundRange = this.finder._fastFind.getFoundRange();
+    if (!this._modal) {
+      if (this._highlightAll) {
+        this.hide(window, foundRange);
+        let params = this.iterator.params;
+        if (params.word)
+          this.highlight(true, params.word, params.linksOnly);
+      }
       return;
+    }
 
     // Place the match placeholder on top of the current found range.
-    let foundRange = this.finder._fastFind.getFoundRange();
     if (data.result == Ci.nsITypeAheadFind.FIND_NOTFOUND || !foundRange) {
       this.hide();
       return;
     }
 
-    let window = this.finder._getWindow();
-    let textContent = this._getRangeContentArray(foundRange);
-    if (!textContent.length) {
-      this.hide(window);
-      return;
+    let outlineNode;
+    if (foundRange !== this._currentFoundRange || data.findAgain) {
+      this._currentFoundRange = foundRange;
+
+      let textContent = this._getRangeContentArray(foundRange);
+      if (!textContent.length) {
+        this.hide(window);
+        return;
+      }
+
+      let rect = foundRange.getBoundingClientRect();
+      let fontStyle = this._getRangeFontStyle(foundRange);
+      if (typeof this._brightText == "undefined") {
+        this._brightText = this._isColorBright(fontStyle.color);
+      }
+
+      // Text color in the outline is determined by our stylesheet.
+      delete fontStyle.color;
+
+      if (!this.visible)
+        this.show(window);
+      else
+        this._maybeCreateModalHighlightNodes(window);
+
+      outlineNode = this._modalHighlightOutline;
+      outlineNode.setTextContentForElement(kModalOutlineId + "-text", textContent.join(" "));
+      outlineNode.setAttributeForElement(kModalOutlineId + "-text", "style",
+        this._getHTMLFontStyle(fontStyle));
+
+      if (typeof outlineNode.getAttributeForElement(kModalOutlineId, "hidden") == "string")
+        outlineNode.removeAttributeForElement(kModalOutlineId, "hidden");
+      let { scrollX, scrollY } = this._getScrollPosition(window);
+      outlineNode.setAttributeForElement(kModalOutlineId, "style",
+        `top: ${scrollY + rect.top}px; left: ${scrollX + rect.left}px`);
     }
 
-    let rect = foundRange.getBoundingClientRect();
-    let fontStyle = this._getRangeFontStyle(foundRange);
-    if (typeof this._brightText == "undefined") {
-      this._brightText = this._isColorBright(fontStyle.color);
-    }
-
-    // Text color in the outline is determined by our stylesheet.
-    delete fontStyle.color;
-
-    let anonNode = this.show(window);
-
-    anonNode.setTextContentForElement(kModalOutlineId + "-text", textContent.join(" "));
-    anonNode.setAttributeForElement(kModalOutlineId + "-text", "style",
-      this._getHTMLFontStyle(fontStyle));
-
-    if (typeof anonNode.getAttributeForElement(kModalOutlineId, "hidden") == "string")
-      anonNode.removeAttributeForElement(kModalOutlineId, "hidden");
-    let { scrollX, scrollY } = this._getScrollPosition(window);
-    anonNode.setAttributeForElement(kModalOutlineId, "style",
-      `top: ${scrollY + rect.top}px; left: ${scrollX + rect.left}px`);
-
-    if (typeof anonNode.getAttributeForElement(kModalOutlineId, "grow") == "string")
+    outlineNode = this._modalHighlightOutline;
+    if (typeof outlineNode.getAttributeForElement(kModalOutlineId, "grow") == "string")
       return;
 
     window.requestAnimationFrame(() => {
-      anonNode.setAttributeForElement(kModalOutlineId, "grow", true);
+      outlineNode.setAttributeForElement(kModalOutlineId, "grow", true);
       this._listenForOutlineEvent(kModalOutlineId, "transitionend", () => {
         try {
-          anonNode.removeAttributeForElement(kModalOutlineId, "grow");
+          outlineNode.removeAttributeForElement(kModalOutlineId, "grow");
         } catch (ex) {}
       });
     });
@@ -392,10 +434,12 @@ FinderHighlighter.prototype = {
     if (!this._modalHighlightOutline)
       return;
 
+    if (kDebug)
+      this._modalHighlightOutline.remove();
     try {
       this.finder._getWindow().document
         .removeAnonymousContent(this._modalHighlightOutline);
-    } catch(ex) {}
+    } catch (ex) {}
 
     this._modalHighlightOutline = null;
   },
@@ -413,6 +457,40 @@ FinderHighlighter.prototype = {
       this.clear();
     }
     this._modal = useModalHighlight;
+  },
+
+  /**
+   * When 'Highlight All' is toggled during a session, this callback is invoked
+   * and when it's turned off, the found occurrences will be removed from the mask.
+   *
+   * @param {Boolean} highlightAll
+   */
+  onHighlightAllChange(highlightAll) {
+    this._highlightAll = highlightAll;
+    if (this._modal && !highlightAll) {
+      this.clear();
+      this._scheduleRepaintOfMask(this.finder._getWindow());
+    }
+  },
+
+  /**
+   * Utility; removes all ranges from the find selection that belongs to a
+   * controller. Optionally skips a specific range.
+   *
+   * @param  {nsISelectionController} controller
+   * @param  {nsIDOMRange}            skipRange
+   */
+  _clearSelection(controller, skipRange = null) {
+    let sel = controller.getSelection(Ci.nsISelectionController.SELECTION_FIND);
+    if (!skipRange) {
+      sel.removeAllRanges();
+    } else {
+      for (let i = sel.rangeCount - 1; i >= 0; --i) {
+        let range = sel.getRangeAt(i);
+        if (range !== skipRange)
+          sel.removeRange(range);
+      }
+    }
   },
 
   /**
@@ -558,7 +636,6 @@ FinderHighlighter.prototype = {
         x: dims.left + scrollX
       });
     }
-    range.collapse();
 
     if (!this._modalHighlightRectsMap)
       this._modalHighlightRectsMap = new Map();
@@ -574,14 +651,16 @@ FinderHighlighter.prototype = {
    * Lazily insert the nodes we need as anonymous content into the CanvasFrame
    * of a window.
    *
-   * @param  {nsIDOMWindow} window Window to draw in.
-   * @return {AnonymousContent} The reference to the outline node, NOT the mask.
+   * @param {nsIDOMWindow} window Window to draw in.
    */
   _maybeCreateModalHighlightNodes(window) {
     if (this._modalHighlightOutline) {
-      if (!this._modalHighlightAllMask)
-        this._repaintHighlightAllMask(window);
-      return this._modalHighlightOutline;
+      if (!this._modalHighlightAllMask) {
+        // Make sure to at least show the dimmed background.
+        this._repaintHighlightAllMask(window, false);
+        this._scheduleRepaintOfMask(window);
+      }
+      return;
     }
 
     let document = window.document;
@@ -592,7 +671,7 @@ FinderHighlighter.prototype = {
         this._maybeCreateModalHighlightNodes(window);
       };
       document.addEventListener("visibilitychange", onVisibilityChange);
-      return null;
+      return;
     }
 
     this._maybeInstallStyleSheet(window);
@@ -604,17 +683,18 @@ FinderHighlighter.prototype = {
     // Create the main (yellow) highlight outline box.
     let outlineBox = document.createElement("div");
     outlineBox.setAttribute("id", kModalOutlineId);
-    outlineBox.className = kModalOutlineId;
+    outlineBox.className = kModalOutlineId + (kDebug ? ` ${kModalIdPrefix}-findbar-debug` : "");
     let outlineBoxText = document.createElement("span");
     outlineBoxText.setAttribute("id", kModalOutlineId + "-text");
     outlineBox.appendChild(outlineBoxText);
 
     container.appendChild(outlineBox);
+    this._modalHighlightOutline = kDebug ?
+      mockAnonymousContentNode(document.body.appendChild(container.firstChild)) :
+      document.insertAnonymousContent(container);
 
-    this._repaintHighlightAllMask(window);
-
-    this._modalHighlightOutline = document.insertAnonymousContent(container);
-    return this._modalHighlightOutline;
+    // Make sure to at least show the dimmed background.
+    this._repaintHighlightAllMask(window, false);
   },
 
   /**
@@ -623,8 +703,9 @@ FinderHighlighter.prototype = {
    * the ranges that were found.
    *
    * @param {nsIDOMWindow} window Window to draw in.
+   * @param {Boolean} [paintContent]
    */
-  _repaintHighlightAllMask(window) {
+  _repaintHighlightAllMask(window, paintContent = true) {
     let document = window.document;
 
     const kMaskId = kModalIdPrefix + "-findbar-modalHighlight-outlineMask";
@@ -633,29 +714,33 @@ FinderHighlighter.prototype = {
     // Make sure the dimmed mask node takes the full width and height that's available.
     let {width, height} = this._getWindowDimensions(window);
     maskNode.setAttribute("id", kMaskId);
-    maskNode.setAttribute("class", kMaskId);
+    maskNode.setAttribute("class", kMaskId + (kDebug ? ` ${kModalIdPrefix}-findbar-debug` : ""));
     maskNode.setAttribute("style", `width: ${width}px; height: ${height}px;`);
     if (this._brightText)
       maskNode.setAttribute("brighttext", "true");
 
-    // Create a DOM node for each rectangle representing the ranges we found.
-    let maskContent = [];
-    const kRectClassName = kModalIdPrefix + "-findbar-modalHighlight-rect";
-    if (this._modalHighlightRectsMap) {
-      for (let rects of this._modalHighlightRectsMap.values()) {
-        for (let rect of rects) {
-          maskContent.push(`<div class="${kRectClassName}" style="top: ${rect.y}px;
-            left: ${rect.x}px; height: ${rect.height}px; width: ${rect.width}px;"></div>`);
+    if (paintContent) {
+      // Create a DOM node for each rectangle representing the ranges we found.
+      let maskContent = [];
+      const kRectClassName = kModalIdPrefix + "-findbar-modalHighlight-rect";
+      if (this._modalHighlightRectsMap) {
+        for (let rects of this._modalHighlightRectsMap.values()) {
+          for (let rect of rects) {
+            maskContent.push(`<div class="${kRectClassName}" style="top: ${rect.y}px;
+              left: ${rect.x}px; height: ${rect.height}px; width: ${rect.width}px;"></div>`);
+          }
         }
       }
+      maskNode.innerHTML = maskContent.join("");
     }
-    maskNode.innerHTML = maskContent.join("");
 
     // Always remove the current mask and insert it a-fresh, because we're not
     // free to alter DOM nodes inside the CanvasFrame.
     this._removeHighlightAllMask(window);
 
-    this._modalHighlightAllMask = document.insertAnonymousContent(maskNode);
+    this._modalHighlightAllMask = kDebug ?
+      mockAnonymousContentNode(document.body.appendChild(maskNode)) :
+      document.insertAnonymousContent(maskNode);
   },
 
   /**
@@ -667,9 +752,11 @@ FinderHighlighter.prototype = {
     if (this._modalHighlightAllMask) {
       // If the current window isn't the one the content was inserted into, this
       // will fail, but that's fine.
+      if (kDebug)
+        this._modalHighlightAllMask.remove();
       try {
         window.document.removeAnonymousContent(this._modalHighlightAllMask);
-      } catch(ex) {}
+      } catch (ex) {}
       this._modalHighlightAllMask = null;
     }
   },
@@ -755,12 +842,11 @@ FinderHighlighter.prototype = {
 
     this._highlightListeners = [
       this._scheduleRepaintOfMask.bind(this, window),
-      this.hide.bind(this, window)
+      this.hide.bind(this, window, null)
     ];
     window.addEventListener("DOMContentLoaded", this._highlightListeners[0]);
-    window.addEventListener("mousedown", this._highlightListeners[1]);
+    window.addEventListener("click", this._highlightListeners[1]);
     window.addEventListener("resize", this._highlightListeners[1]);
-    window.addEventListener("touchstart", this._highlightListeners[1]);
   },
 
   /**
@@ -773,9 +859,8 @@ FinderHighlighter.prototype = {
       return;
 
     window.removeEventListener("DOMContentLoaded", this._highlightListeners[0]);
-    window.removeEventListener("mousedown", this._highlightListeners[1]);
+    window.removeEventListener("click", this._highlightListeners[1]);
     window.removeEventListener("resize", this._highlightListeners[1]);
-    window.removeEventListener("touchstart", this._highlightListeners[1]);
 
     this._highlightListeners = null;
   },

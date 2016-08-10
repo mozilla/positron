@@ -1092,7 +1092,7 @@ public:
   }
 };
 
-CacheFileIOManager * CacheFileIOManager::gInstance = nullptr;
+StaticRefPtr<CacheFileIOManager> CacheFileIOManager::gInstance;
 
 NS_IMPL_ISUPPORTS(CacheFileIOManager, nsITimerCallback)
 
@@ -1130,7 +1130,7 @@ CacheFileIOManager::Init()
   nsresult rv = ioMan->InitInternal();
   NS_ENSURE_SUCCESS(rv, rv);
 
-  ioMan.swap(gInstance);
+  gInstance = ioMan.forget();
   return NS_OK;
 }
 
@@ -1154,7 +1154,7 @@ CacheFileIOManager::InitInternal()
 nsresult
 CacheFileIOManager::Shutdown()
 {
-  LOG(("CacheFileIOManager::Shutdown() [gInstance=%p]", gInstance));
+  LOG(("CacheFileIOManager::Shutdown() [gInstance=%p]", gInstance.get()));
 
   MOZ_ASSERT(NS_IsMainThread());
 
@@ -1185,8 +1185,7 @@ CacheFileIOManager::Shutdown()
     gInstance->SyncRemoveAllCacheFiles();
   }
 
-  RefPtr<CacheFileIOManager> ioMan;
-  ioMan.swap(gInstance);
+  gInstance = nullptr;
 
   return NS_OK;
 }
@@ -1259,7 +1258,7 @@ CacheFileIOManager::ShutdownInternal()
 nsresult
 CacheFileIOManager::OnProfile()
 {
-  LOG(("CacheFileIOManager::OnProfile() [gInstance=%p]", gInstance));
+  LOG(("CacheFileIOManager::OnProfile() [gInstance=%p]", gInstance.get()));
 
   RefPtr<CacheFileIOManager> ioMan = gInstance;
   if (!ioMan) {
@@ -2341,7 +2340,7 @@ void CacheFileIOManager::GetCacheDirectory(nsIFile** result)
   *result = nullptr;
 
   RefPtr<CacheFileIOManager> ioMan = gInstance;
-  if (!ioMan) {
+  if (!ioMan || !ioMan->mCacheDirectory) {
     return;
   }
 
@@ -3064,7 +3063,7 @@ CacheFileIOManager::CacheIndexStateChanged()
   // the lock in CacheIndex
   nsCOMPtr<nsIRunnable> ev;
   ev = NewRunnableMethod(
-    gInstance, &CacheFileIOManager::CacheIndexStateChangedInternal);
+    gInstance.get(), &CacheFileIOManager::CacheIndexStateChangedInternal);
 
   nsCOMPtr<nsIEventTarget> ioTarget = IOTarget();
   MOZ_ASSERT(ioTarget);
@@ -3604,11 +3603,10 @@ CacheFileIOManager::GetDoomedFile(nsIFile **_retval)
   rv = file->AppendNative(NS_LITERAL_CSTRING("dummyleaf"));
   NS_ENSURE_SUCCESS(rv, rv);
 
+  const int32_t kMaxTries = 64;
   srand(static_cast<unsigned>(PR_Now()));
   nsAutoCString leafName;
-  uint32_t iter=0;
-  while (true) {
-    iter++;
+  for (int32_t triesCount = 0; ; ++triesCount) {
     leafName.AppendInt(rand());
     rv = file->SetNativeLeafName(leafName);
     NS_ENSURE_SUCCESS(rv, rv);
@@ -3618,10 +3616,14 @@ CacheFileIOManager::GetDoomedFile(nsIFile **_retval)
       break;
     }
 
+    if (triesCount == kMaxTries) {
+      LOG(("CacheFileIOManager::GetDoomedFile() - Could not find unused file "
+           "name in %d tries.", kMaxTries));
+      return NS_ERROR_FAILURE;
+    }
+
     leafName.Truncate();
   }
-
-//  Telemetry::Accumulate(Telemetry::DISK_CACHE_GETDOOMEDFILE_ITERATIONS, iter);
 
   file.swap(*_retval);
   return NS_OK;

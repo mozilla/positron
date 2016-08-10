@@ -638,9 +638,15 @@ CodeGeneratorARM64::visitStoreTypedArrayElementStatic(LStoreTypedArrayElementSta
 }
 
 void
-CodeGeneratorARM64::visitAsmJSCall(LAsmJSCall* ins)
+CodeGeneratorARM64::visitWasmCall(LWasmCall* ins)
 {
-    MOZ_CRASH("visitAsmJSCall");
+    MOZ_CRASH("vistWasmCall");
+}
+
+void
+CodeGeneratorARM64::visitWasmCallI64(LWasmCallI64* ins)
+{
+    MOZ_CRASH("vistWasmCallI64");
 }
 
 void
@@ -692,27 +698,15 @@ CodeGeneratorARM64::visitEffectiveAddress(LEffectiveAddress* ins)
 }
 
 void
-CodeGeneratorARM64::visitAsmJSLoadGlobalVar(LAsmJSLoadGlobalVar* ins)
+CodeGeneratorARM64::visitWasmLoadGlobalVar(LWasmLoadGlobalVar* ins)
 {
-    MOZ_CRASH("visitAsmJSLoadGlobalVar");
+    MOZ_CRASH("visitWasmLoadGlobalVar");
 }
 
 void
-CodeGeneratorARM64::visitAsmJSStoreGlobalVar(LAsmJSStoreGlobalVar* ins)
+CodeGeneratorARM64::visitWasmStoreGlobalVar(LWasmStoreGlobalVar* ins)
 {
-    MOZ_CRASH("visitAsmJSStoreGlobalVar");
-}
-
-void
-CodeGeneratorARM64::visitAsmJSLoadFuncPtr(LAsmJSLoadFuncPtr* ins)
-{
-    MOZ_CRASH("visitAsmJSLoadFuncPtr");
-}
-
-void
-CodeGeneratorARM64::visitAsmJSLoadFFIFunc(LAsmJSLoadFFIFunc* ins)
-{
-    MOZ_CRASH("visitAsmJSLoadFFIFunc");
+    MOZ_CRASH("visitWasmStoreGlobalVar");
 }
 
 void

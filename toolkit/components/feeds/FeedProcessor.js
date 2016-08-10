@@ -56,7 +56,7 @@ function strToURI(link, base) {
   try {
     return gIoService.newURI(link, null, base);
   }
-  catch(e) {
+  catch (e) {
     return null;
   }
 }
@@ -79,7 +79,7 @@ function isIID(a, iid) {
     a.QueryInterface(iid);
     rv = true;
   }
-  catch(e) {
+  catch (e) {
   }
   return rv;
 }
@@ -157,7 +157,7 @@ function makePropGetter(key) {
     try {
       return value = bag.getProperty(key);
     }
-    catch(e) {
+    catch (e) {
     }
     return null;
   }
@@ -359,7 +359,7 @@ Feed.prototype = {
       var base = baseSpec ? strToURI(baseSpec, this.baseURI) : this.baseURI;
       uri = strToURI(linkSpec, base);
     }
-    catch(e) {
+    catch (e) {
       LOG(e);
     }
 
@@ -716,7 +716,7 @@ function fieldsToObj(container, fields) {
       try {
         prop = container.fields.getProperty(field);
       }
-      catch(e) {
+      catch (e) {
       }
       if (prop) {
         prop = isArray(props) ? props[1](prop) : prop;
@@ -1530,7 +1530,7 @@ FeedProcessor.prototype = {
     try {
       prop = container.getProperty(elementInfo.fieldName);
     }
-    catch(e) {
+    catch (e) {
     }
 
     if (elementInfo.isArray) {
@@ -1607,8 +1607,7 @@ FeedProcessor.prototype = {
       return prefix + ":";
     if (uri.toLowerCase().indexOf("http://backend.userland.com") == 0)
       return "";
-    else
-      return null;
+    return null;
   },
 
   _mapAttributes: function FP__mapAttributes(bag, attributes) {
@@ -1691,16 +1690,14 @@ FeedProcessor.prototype = {
             el[propName] = propValue;
           }
         }
-        catch(e) {
+        catch (e) {
           // ignore XPConnect errors
         }
         // the rest of the function deals with entry- and feed-level stuff
         return;
       }
-      else {
-        container = container.queryElementAt(container.length - 1,
-                                             Ci.nsIWritablePropertyBag2);
-      }
+      container = container.queryElementAt(container.length - 1,
+                                           Ci.nsIWritablePropertyBag2);
     }
 
     // Make the buffer our new property

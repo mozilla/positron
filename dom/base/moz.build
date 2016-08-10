@@ -1,4 +1,4 @@
-# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+# -*- Mode: python; indent-tabs-mode: nil; tab-width: 40 -*-
 # vim: set filetype=python:
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -152,10 +152,12 @@ EXPORTS.mozilla.dom += [
     'BarProps.h',
     'BlobSet.h',
     'BodyUtil.h',
+    'BorrowedAttrInfo.h',
     'ChildIterator.h',
     'ChromeNodeList.h',
     'ChromeUtils.h',
     'Comment.h',
+    'CustomElementsRegistry.h',
     'DirectionalityUtils.h',
     'DocumentFragment.h',
     'DocumentType.h',
@@ -211,11 +213,13 @@ UNIFIED_SOURCES += [
     'BarProps.cpp',
     'BlobSet.cpp',
     'BodyUtil.cpp',
+    'BorrowedAttrInfo.cpp',
     'ChildIterator.cpp',
     'ChromeNodeList.cpp',
     'ChromeUtils.cpp',
     'Comment.cpp',
     'Crypto.cpp',
+    'CustomElementsRegistry.cpp',
     'DirectionalityUtils.cpp',
     'DocumentFragment.cpp',
     'DocumentType.cpp',

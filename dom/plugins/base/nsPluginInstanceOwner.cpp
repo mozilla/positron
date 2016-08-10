@@ -181,7 +181,7 @@ AttachToContainerAsSurfaceTexture(ImageContainer* container,
 
   RefPtr<Image> img = new SurfaceTextureImage(
     surfTex,
-    gfx::IntSize(rect.width, rect.height),
+    gfx::IntSize::Truncate(rect.width, rect.height),
     instance->OriginPos());
   *out_image = img;
 }
@@ -222,7 +222,7 @@ nsPluginInstanceOwner::GetImageContainer()
   // into, set y-flip flags, etc, so we do this at the beginning.
   float resolution = mPluginFrame->PresContext()->PresShell()->GetCumulativeResolution();
   ScreenSize screenSize = (r * LayoutDeviceToScreenScale(resolution)).Size();
-  mInstance->NotifySize(nsIntSize(screenSize.width, screenSize.height));
+  mInstance->NotifySize(nsIntSize::Truncate(screenSize.width, screenSize.height));
 
   container = LayerManager::CreateImageContainer();
 
@@ -1559,7 +1559,7 @@ void nsPluginInstanceOwner::RemovePluginView()
   if (!mInstance || !mJavaView)
     return;
 
-  widget::GeckoAppShell::RemovePluginView(
+  java::GeckoAppShell::RemovePluginView(
       jni::Object::Ref::From(jobject(mJavaView)), mFullScreen);
   jni::GetGeckoThreadEnv()->DeleteGlobalRef((jobject)mJavaView);
   mJavaView = nullptr;
@@ -1584,7 +1584,7 @@ nsPluginInstanceOwner::GetImageContainerForVideo(nsNPAPIPluginInstance::VideoInf
 
   RefPtr<Image> img = new SurfaceTextureImage(
     aVideoInfo->mSurfaceTexture,
-    gfx::IntSize(aVideoInfo->mDimensions.width, aVideoInfo->mDimensions.height),
+    gfx::IntSize::Truncate(aVideoInfo->mDimensions.width, aVideoInfo->mDimensions.height),
     gl::OriginPos::BottomLeft);
   container->SetCurrentImageInTransaction(img);
 
@@ -3467,15 +3467,6 @@ void nsPluginInstanceOwner::FixUpPluginWindow(int32_t inPaintState)
   if (inPaintState == ePluginPaintDisable) {
     mPluginWindow->clipRect.bottom = mPluginWindow->clipRect.top;
     mPluginWindow->clipRect.right  = mPluginWindow->clipRect.left;
-  }
-  else if (!XRE_IsParentProcess())
-  {
-    // For e10s we only support async windowless plugin. This means that
-    // we're always going to allocate a full window for the plugin to draw
-    // for even if the plugin is mostly outside of the scroll port. Thus
-    // we never trim the window to the bounds of the widget.
-    mPluginWindow->clipRect.bottom = mPluginWindow->clipRect.top + mPluginWindow->height;
-    mPluginWindow->clipRect.right  = mPluginWindow->clipRect.left + mPluginWindow->width;
   }
   else if (inPaintState == ePluginPaintEnable)
   {

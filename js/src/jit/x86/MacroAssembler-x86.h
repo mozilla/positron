@@ -660,8 +660,12 @@ class MacroAssemblerX86 : public MacroAssemblerX86Shared
         movw(src, Operand(address));
     }
     void store64(Register64 src, Address address) {
-        movl(src.low, Operand(address));
-        movl(src.high, Operand(Address(address.base, address.offset + 4)));
+        movl(src.low, Operand(Address(address.base, address.offset + INT64LOW_OFFSET)));
+        movl(src.high, Operand(Address(address.base, address.offset + INT64HIGH_OFFSET)));
+    }
+    void store64(Imm64 imm, Address address) {
+        movl(imm.low(), Operand(Address(address.base, address.offset + INT64LOW_OFFSET)));
+        movl(imm.hi(), Operand(Address(address.base, address.offset + INT64HIGH_OFFSET)));
     }
 
     void setStackArg(Register reg, uint32_t arg) {
@@ -834,6 +838,14 @@ class MacroAssemblerX86 : public MacroAssemblerX86Shared
     }
 
     inline void ensureDouble(const ValueOperand& source, FloatRegister dest, Label* failure);
+
+    void loadWasmGlobalPtr(uint32_t globalDataOffset, Register dest) {
+        CodeOffset label = movlWithPatch(PatchedAbsoluteAddress(), dest);
+        append(wasm::GlobalAccess(label, globalDataOffset));
+    }
+    void loadWasmPinnedRegsFromTls() {
+        // x86 doesn't have any pinned registers.
+    }
 
   public:
     // Used from within an Exit frame to handle a pending exception.

@@ -12,8 +12,7 @@ importScripts("resource://gre/modules/subprocess/subprocess_shared.js",
               "resource://gre/modules/subprocess/subprocess_shared_win.js",
               "resource://gre/modules/subprocess/subprocess_worker_common.js");
 
-const POLL_INTERVAL = 50;
-const POLL_TIMEOUT = 0;
+const POLL_TIMEOUT = 5000;
 
 // The exit code that we send when we forcibly terminate a process.
 const TERMINATE_EXIT_CODE = 0x7f;
@@ -298,6 +297,25 @@ class OutputPipe extends Pipe {
   }
 }
 
+class Signal {
+  constructor(event) {
+    this.event = event;
+  }
+
+  cleanup() {
+    libc.CloseHandle(this.event);
+    this.event = null;
+  }
+
+  onError() {
+    io.shutdown();
+  }
+
+  onReady() {
+    io.messageCount += 1;
+  }
+}
+
 class Process extends BaseProcess {
   constructor(...args) {
     super(...args);
@@ -318,7 +336,7 @@ class Process extends BaseProcess {
    */
   kill() {
     this.killed = true;
-    libc.TerminateProcess(this.handle, TERMINATE_EXIT_CODE);
+    libc.TerminateJobObject(this.jobHandle, TERMINATE_EXIT_CODE);
   }
 
   /**
@@ -341,11 +359,10 @@ class Process extends BaseProcess {
         let handles = win32.createPipe(secAttr, win32.FILE_FLAG_OVERLAPPED);
         our_pipes.push(new InputPipe(this, handles[0]));
         return handles[1];
-      } else {
-        let handles = win32.createPipe(secAttr, 0, win32.FILE_FLAG_OVERLAPPED);
-        our_pipes.push(new OutputPipe(this, handles[1]));
-        return handles[0];
       }
+      let handles = win32.createPipe(secAttr, 0, win32.FILE_FLAG_OVERLAPPED);
+      our_pipes.push(new OutputPipe(this, handles[1]));
+      return handles[0];
     };
 
     their_pipes[0] = pipe(false);
@@ -430,7 +447,12 @@ class Process extends BaseProcess {
     let handles = this.initPipes(options);
 
     let processFlags = win32.CREATE_NO_WINDOW
+                     | win32.CREATE_SUSPENDED
                      | win32.CREATE_UNICODE_ENVIRONMENT;
+
+    if (io.breakAwayFromJob) {
+      processFlags |= win32.CREATE_BREAKAWAY_FROM_JOB;
+    }
 
     let startupInfoEx = new win32.STARTUPINFOEXW();
     let startupInfo = startupInfoEx.StartupInfo;
@@ -457,6 +479,7 @@ class Process extends BaseProcess {
 
     let procInfo = new win32.PROCESS_INFORMATION();
 
+    let errorMessage = "Failed to create process";
     let ok = libc.CreateProcessW(
       command, args.join(" "),
       null, /* Security attributes */
@@ -474,17 +497,24 @@ class Process extends BaseProcess {
       libc.DeleteProcThreadAttributeList(threadAttrs);
     }
 
+    if (ok) {
+      this.jobHandle = win32.Handle(libc.CreateJobObjectW(null, null));
+      ok = libc.AssignProcessToJobObject(this.jobHandle, procInfo.hProcess);
+      errorMessage = `Failed to attach process to job object: 0x${(ctypes.winLastError || 0).toString(16)}`;
+    }
+
     if (!ok) {
       for (let pipe of this.pipes) {
         pipe.close();
       }
-      throw new Error("Failed to create process");
+      throw new Error(errorMessage);
     }
-
-    libc.CloseHandle(procInfo.hThread);
 
     this.handle = win32.Handle(procInfo.hProcess);
     this.pid = procInfo.dwProcessId;
+
+    libc.ResumeThread(procInfo.hThread);
+    libc.CloseHandle(procInfo.hThread);
   }
 
   /**
@@ -524,6 +554,10 @@ class Process extends BaseProcess {
       this.handle.dispose();
       this.handle = null;
 
+      libc.TerminateJobObject(this.jobHandle, TERMINATE_EXIT_CODE);
+      this.jobHandle.dispose();
+      this.jobHandle = null;
+
       for (let pipe of this.pipes) {
         pipe.maybeClose();
       }
@@ -543,7 +577,31 @@ io = {
 
   processes: new Map(),
 
-  interval: null,
+  messageCount: 0,
+
+  running: true,
+
+  init(details) {
+    let signalEvent = ctypes.cast(ctypes.uintptr_t(details.signalEvent),
+                                  win32.HANDLE);
+    this.signal = new Signal(signalEvent);
+    this.updatePollEvents();
+
+    this.breakAwayFromJob = details.breakAwayFromJob;
+
+    setTimeout(this.loop.bind(this), 0);
+  },
+
+  shutdown() {
+    if (this.running) {
+      this.running = false;
+
+      this.signal.cleanup();
+      this.signal = null;
+
+      self.close();
+    }
+  },
 
   getPipe(pipeId) {
     let pipe = this.pipes.get(pipeId);
@@ -566,7 +624,8 @@ io = {
   },
 
   updatePollEvents() {
-    let handlers = [...this.pipes.values(),
+    let handlers = [this.signal,
+                    ...this.pipes.values(),
                     ...this.processes.values()];
 
     handlers = handlers.filter(handler => handler.event);
@@ -575,22 +634,24 @@ io = {
 
     let handles = handlers.map(handler => handler.event);
     this.events = win32.HANDLE.array()(handles);
+  },
 
-    if (handles.length && !this.interval) {
-      this.interval = setInterval(this.poll.bind(this), POLL_INTERVAL);
-    } else if (!handlers.length && this.interval) {
-      clearInterval(this.interval);
-      this.interval = null;
+  loop() {
+    this.poll();
+    if (this.running) {
+      setTimeout(this.loop.bind(this), 0);
     }
   },
 
+
   poll() {
-    for (;;) {
+    let timeout = this.messageCount > 0 ? 0 : POLL_TIMEOUT;
+    for (;; timeout = 0) {
       let events = this.events;
       let handlers = this.eventHandlers;
 
       let result = libc.WaitForMultipleObjects(events.length, events,
-                                               false, POLL_TIMEOUT);
+                                               false, timeout);
 
       if (result < handlers.length) {
         try {

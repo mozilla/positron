@@ -994,10 +994,9 @@ function shouldUseService() {
 
         if (0 !== GetVersionEx(winVer.address())) {
           return winVer.wServicePackMajor >= 3;
-        } else {
-          Cu.reportError("Unknown failure in GetVersionEX (returned 0)");
-          return false;
         }
+        Cu.reportError("Unknown failure in GetVersionEX (returned 0)");
+        return false;
       } catch (e) {
         Cu.reportError("Error getting service pack information. Exception: " + e);
         return false;
@@ -1027,7 +1026,7 @@ function isServiceInstalled() {
                wrk.ACCESS_READ | wrk.WOW64_64);
       installed = wrk.readIntValue("Installed");
       wrk.close();
-    } catch(e) {
+    } catch (e) {
     }
     installed = installed == 1;  // convert to bool
     LOG("isServiceInstalled = " + installed);
@@ -1652,7 +1651,7 @@ function Update(update) {
     } else if (attr.name == "showPrompt") {
       this.showPrompt = attr.value == "true";
     } else if (attr.name == "promptWaitTime") {
-      if(!isNaN(attr.value)) {
+      if (!isNaN(attr.value)) {
         this.promptWaitTime = parseInt(attr.value);
       }
     } else if (attr.name == "unsupported") {

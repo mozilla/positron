@@ -256,6 +256,7 @@ nsNSSComponent::nsNSSComponent()
 #endif
 {
   MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("nsNSSComponent::ctor\n"));
+  MOZ_ASSERT(NS_IsMainThread());
 
   NS_ASSERTION( (0 == mInstanceCount), "nsNSSComponent is a singleton, but instantiated multiple times!");
   ++mInstanceCount;
@@ -264,6 +265,7 @@ nsNSSComponent::nsNSSComponent()
 nsNSSComponent::~nsNSSComponent()
 {
   MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("nsNSSComponent::dtor\n"));
+  MOZ_ASSERT(NS_IsMainThread());
 
   // All cleanup code requiring services needs to happen in xpcom_shutdown
 
@@ -1249,7 +1251,7 @@ typedef struct {
   const char* pref;
   long id;
   bool enabledByDefault;
-  bool fallback;
+  bool weak;
 } CipherPref;
 
 // Update the switch statement in AccumulateCipherSuite in nsNSSCallbacks.cpp
@@ -1281,10 +1283,10 @@ static const CipherPref sCipherPrefs[] = {
    TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA, true },
 
  { "security.ssl3.dhe_rsa_aes_128_sha",
-   TLS_DHE_RSA_WITH_AES_128_CBC_SHA, true, true },
+   TLS_DHE_RSA_WITH_AES_128_CBC_SHA, true },
 
  { "security.ssl3.dhe_rsa_aes_256_sha",
-   TLS_DHE_RSA_WITH_AES_256_CBC_SHA, true, true },
+   TLS_DHE_RSA_WITH_AES_256_CBC_SHA, true },
 
  { "security.ssl3.ecdhe_psk_aes_128_gcm_sha256",
    TLS_ECDHE_PSK_WITH_AES_128_GCM_SHA256, true },
@@ -1305,26 +1307,26 @@ static const CipherPref sCipherPrefs[] = {
  { nullptr, 0 } // end marker
 };
 
-// Bit flags indicating what fallback ciphers are enabled.
+// Bit flags indicating what weak ciphers are enabled.
 // The bit index will correspond to the index in sCipherPrefs.
 // Wrtten by the main thread, read from any threads.
-static Atomic<uint32_t> sEnabledFallbackCiphers;
+static Atomic<uint32_t> sEnabledWeakCiphers;
 static_assert(MOZ_ARRAY_LENGTH(sCipherPrefs) - 1 <= sizeof(uint32_t) * CHAR_BIT,
               "too many cipher suites");
 
 /*static*/ bool
-nsNSSComponent::AreAnyFallbackCiphersEnabled()
+nsNSSComponent::AreAnyWeakCiphersEnabled()
 {
-  return !!sEnabledFallbackCiphers;
+  return !!sEnabledWeakCiphers;
 }
 
 /*static*/ void
-nsNSSComponent::UseFallbackCiphersOnSocket(PRFileDesc* fd)
+nsNSSComponent::UseWeakCiphersOnSocket(PRFileDesc* fd)
 {
-  const uint32_t enabledFallbackCiphers = sEnabledFallbackCiphers;
+  const uint32_t enabledWeakCiphers = sEnabledWeakCiphers;
   const CipherPref* const cp = sCipherPrefs;
   for (size_t i = 0; cp[i].pref; ++i) {
-    if (enabledFallbackCiphers & ((uint32_t)1 << i)) {
+    if (enabledWeakCiphers & ((uint32_t)1 << i)) {
       SSL_CipherPrefSet(fd, cp[i].id, true);
     }
   }
@@ -1437,18 +1439,18 @@ CipherSuiteChangeObserver::Observe(nsISupports* aSubject,
       if (prefName.Equals(cp[i].pref)) {
         bool cipherEnabled = Preferences::GetBool(cp[i].pref,
                                                   cp[i].enabledByDefault);
-        if (cp[i].fallback) {
-          // Fallback ciphers will not be used by default even if they
+        if (cp[i].weak) {
+          // Weak ciphers will not be used by default even if they
           // are enabled in prefs. They are only used on specific
           // sockets as a part of a fallback mechanism.
-          // Only the main thread will change sEnabledFallbackCiphers.
-          uint32_t enabledFallbackCiphers = sEnabledFallbackCiphers;
+          // Only the main thread will change sEnabledWeakCiphers.
+          uint32_t enabledWeakCiphers = sEnabledWeakCiphers;
           if (cipherEnabled) {
-            enabledFallbackCiphers |= ((uint32_t)1 << i);
+            enabledWeakCiphers |= ((uint32_t)1 << i);
           } else {
-            enabledFallbackCiphers &= ~((uint32_t)1 << i);
+            enabledWeakCiphers &= ~((uint32_t)1 << i);
           }
-          sEnabledFallbackCiphers = enabledFallbackCiphers;
+          sEnabledWeakCiphers = enabledWeakCiphers;
         } else {
           SSL_CipherPrefSetDefault(cp[i].id, cipherEnabled);
           SSL_ClearSessionCache();
@@ -1835,6 +1837,7 @@ nsNSSComponent::ShutdownNSS()
   // needs mutex protection.
 
   MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("nsNSSComponent::ShutdownNSS\n"));
+  MOZ_ASSERT(NS_IsMainThread());
 
   MutexAutoLock lock(mutex);
 
@@ -1857,18 +1860,20 @@ nsNSSComponent::ShutdownNSS()
     // TLSServerSocket may be run with the session cache enabled. This ensures
     // those resources are cleaned up.
     Unused << SSL_ShutdownServerSessionIDCache();
-    UnloadLoadableRoots();
 #ifndef MOZ_NO_EV_CERTS
     CleanupIdentityInfo();
 #endif
-    MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("evaporating psm resources\n"));
-    nsNSSShutDownList::evaporateAllNSSResources();
+    MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("evaporating psm resources"));
+    if (NS_FAILED(nsNSSShutDownList::evaporateAllNSSResources())) {
+      MOZ_LOG(gPIPNSSLog, LogLevel::Error, ("failed to evaporate resources"));
+      return;
+    }
+    UnloadLoadableRoots();
     EnsureNSSInitialized(nssShutdown);
     if (SECSuccess != ::NSS_Shutdown()) {
-      MOZ_LOG(gPIPNSSLog, LogLevel::Error, ("NSS SHUTDOWN FAILURE\n"));
-    }
-    else {
-      MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("NSS shutdown =====>> OK <<=====\n"));
+      MOZ_LOG(gPIPNSSLog, LogLevel::Error, ("NSS SHUTDOWN FAILURE"));
+    } else {
+      MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("NSS shutdown =====>> OK <<====="));
     }
   }
 }
@@ -1876,8 +1881,10 @@ nsNSSComponent::ShutdownNSS()
 nsresult
 nsNSSComponent::Init()
 {
-  // No mutex protection.
-  // Assume Init happens before any concurrency on "this" can start.
+  MOZ_ASSERT(NS_IsMainThread());
+  if (!NS_IsMainThread()) {
+    return NS_ERROR_NOT_SAME_THREAD;
+  }
 
   nsresult rv = NS_OK;
 
@@ -2292,22 +2299,22 @@ InitializeCipherSuite()
   }
 
   // Now only set SSL/TLS ciphers we knew about at compile time
-  uint32_t enabledFallbackCiphers = 0;
+  uint32_t enabledWeakCiphers = 0;
   const CipherPref* const cp = sCipherPrefs;
   for (size_t i = 0; cp[i].pref; ++i) {
     bool cipherEnabled = Preferences::GetBool(cp[i].pref,
                                               cp[i].enabledByDefault);
-    if (cp[i].fallback) {
-      // Fallback ciphers are not used by default. See the comment
+    if (cp[i].weak) {
+      // Weak ciphers are not used by default. See the comment
       // in CipherSuiteChangeObserver::Observe for details.
       if (cipherEnabled) {
-        enabledFallbackCiphers |= ((uint32_t)1 << i);
+        enabledWeakCiphers |= ((uint32_t)1 << i);
       }
     } else {
       SSL_CipherPrefSetDefault(cp[i].id, cipherEnabled);
     }
   }
-  sEnabledFallbackCiphers = enabledFallbackCiphers;
+  sEnabledWeakCiphers = enabledWeakCiphers;
 
   // Enable ciphers for PKCS#12
   SEC_PKCS12EnableCipher(PKCS12_RC4_40, 1);

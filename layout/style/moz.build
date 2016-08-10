@@ -1,4 +1,4 @@
-# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+# -*- Mode: python; indent-tabs-mode: nil; tab-width: 40 -*-
 # vim: set filetype=python:
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -93,6 +93,7 @@ EXPORTS.mozilla += [
     'RuleProcessorCache.h',
     'ServoBindingHelpers.h',
     'ServoBindings.h',
+    'ServoElementSnapshot.h',
     'ServoStyleSet.h',
     'ServoStyleSheet.h',
     'SheetType.h',
@@ -190,6 +191,7 @@ UNIFIED_SOURCES += [
     'RuleNodeCacheConditions.cpp',
     'RuleProcessorCache.cpp',
     'ServoBindings.cpp',
+    'ServoElementSnapshot.cpp',
     'ServoStyleSet.cpp',
     'ServoStyleSheet.cpp',
     'StyleAnimationValue.cpp',

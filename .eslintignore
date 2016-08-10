@@ -74,9 +74,6 @@ browser/extensions/pdfjs/**
 browser/extensions/pocket/content/panels/js/vendor/**
 browser/locales/**
 
-# Ignore all of loop since it is imported from github and checked at source.
-browser/extensions/loop/**
-
 # devtools/ exclusions
 devtools/client/canvasdebugger/**
 devtools/client/commandline/**
@@ -87,7 +84,6 @@ devtools/client/jsonview/lib/**
 devtools/client/memory/**
 devtools/client/netmonitor/test/**
 devtools/client/netmonitor/har/test/**
-devtools/client/performance/**
 devtools/client/projecteditor/**
 devtools/client/promisedebugger/**
 devtools/client/responsivedesign/**
@@ -99,8 +95,9 @@ devtools/client/shared/developer-toolbar.js
 devtools/client/shared/components/test/**
 devtools/client/shared/redux/middleware/test/**
 devtools/client/shared/test/**
+!devtools/client/shared/test/test-actor-registry.js
 devtools/client/shared/widgets/*.jsm
-devtools/client/sourceeditor/**
+devtools/client/sourceeditor/test/*.js
 devtools/client/webaudioeditor/**
 devtools/client/webconsole/**
 !devtools/client/webconsole/panel.js
@@ -108,18 +105,30 @@ devtools/client/webconsole/**
 !devtools/client/webconsole/console-commands.js
 devtools/client/webide/**
 !devtools/client/webide/components/webideCli.js
-devtools/server/**
+devtools/server/*.js
+devtools/server/*.jsm
 !devtools/server/child.js
 !devtools/server/css-logic.js
 !devtools/server/main.js
+!devtools/server/websocket-server.js
+devtools/server/actors/**
+!devtools/server/actors/inspector.js
+!devtools/server/actors/highlighters/eye-dropper.js
 !devtools/server/actors/webbrowser.js
+!devtools/server/actors/webextension.js
 !devtools/server/actors/styles.js
 !devtools/server/actors/string.js
 !devtools/server/actors/csscoverage.js
+devtools/server/performance/**
+devtools/server/tests/**
 devtools/shared/*.js
+!devtools/shared/async-storage.js
+!devtools/shared/async-utils.js
 !devtools/shared/css-lexer.js
 !devtools/shared/defer.js
 !devtools/shared/event-emitter.js
+!devtools/shared/indentation.js
+!devtools/shared/loader-plugin-raw.jsm
 !devtools/shared/task.js
 devtools/shared/*.jsm
 !devtools/shared/Loader.jsm
@@ -140,6 +149,7 @@ devtools/shared/tests/**
 devtools/shared/touch/**
 devtools/shared/transport/**
 !devtools/shared/transport/transport.js
+!devtools/shared/transport/websocket-transport.js
 devtools/shared/webconsole/test/**
 devtools/shared/worker/**
 !devtools/shared/worker/worker.js

@@ -37,18 +37,6 @@
 #include "nsIScriptError.h"
 #include "nsIXULAppInfo.h"
 #include "nsIXULRuntime.h"
-#ifdef MOZ_B2G_LOADER
-#include "mozilla/XPTInterfaceInfoManager.h"
-#endif
-
-#ifdef MOZ_B2G_LOADER
-#define XPTONLY_MANIFEST &nsComponentManagerImpl::XPTOnlyManifestManifest
-#define XPTONLY_XPT &nsComponentManagerImpl::XPTOnlyManifestXPT
-#else
-#define XPTONLY_MANIFEST nullptr
-#define XPTONLY_XPT nullptr
-#endif
-
 
 using namespace mozilla;
 
@@ -78,21 +66,14 @@ struct ManifestDirective
   void (nsChromeRegistry::*regfunc)(
     nsChromeRegistry::ManifestProcessingContext& aCx,
     int aLineNo, char* const* aArgv, int aFlags);
-#ifdef MOZ_B2G_LOADER
-  // The function to handle the directive for XPT Only parsing.
-  void (*xptonlyfunc)(
-    nsComponentManagerImpl::XPTOnlyManifestProcessingContext& aCx,
-    int aLineNo, char* const* aArgv);
-#else
   void* xptonlyfunc;
-#endif
 
   bool isContract;
 };
 static const ManifestDirective kParsingTable[] = {
   {
     "manifest",         1, false, false, true, true, false,
-    &nsComponentManagerImpl::ManifestManifest, nullptr, XPTONLY_MANIFEST
+    &nsComponentManagerImpl::ManifestManifest, nullptr, nullptr
   },
   {
     "binary-component", 1, true, true, false, false, false,
@@ -100,7 +81,7 @@ static const ManifestDirective kParsingTable[] = {
   },
   {
     "interfaces",       1, false, true, false, false, false,
-    &nsComponentManagerImpl::ManifestXPT, nullptr, XPTONLY_XPT
+    &nsComponentManagerImpl::ManifestXPT, nullptr, nullptr
   },
   {
     "component",        2, false, true, false, false, false,
@@ -484,9 +465,6 @@ ParseManifest(NSLocationType aType, FileLocation& aFile, char* aBuf,
   nsComponentManagerImpl::ManifestProcessingContext mgrcx(aType, aFile,
                                                           aChromeOnly);
   nsChromeRegistry::ManifestProcessingContext chromecx(aType, aFile);
-#ifdef MOZ_B2G_LOADER
-  nsComponentManagerImpl::XPTOnlyManifestProcessingContext xptonlycx(aFile);
-#endif
   nsresult rv;
 
   NS_NAMED_LITERAL_STRING(kPlatform, "platform");
@@ -564,7 +542,7 @@ ParseManifest(NSLocationType aType, FileLocation& aFile, char* aBuf,
 #pragma warning(disable:4996) // VC12+ deprecates GetVersionEx
   OSVERSIONINFO info = { sizeof(OSVERSIONINFO) };
   if (GetVersionEx(&info)) {
-    nsTextFormatter::ssprintf(osVersion, MOZ_UTF16("%ld.%ld"),
+    nsTextFormatter::ssprintf(osVersion, u"%ld.%ld",
                               info.dwMajorVersion,
                               info.dwMinorVersion);
   }
@@ -572,11 +550,11 @@ ParseManifest(NSLocationType aType, FileLocation& aFile, char* aBuf,
 #elif defined(MOZ_WIDGET_COCOA)
   SInt32 majorVersion = nsCocoaFeatures::OSXVersionMajor();
   SInt32 minorVersion = nsCocoaFeatures::OSXVersionMinor();
-  nsTextFormatter::ssprintf(osVersion, MOZ_UTF16("%ld.%ld"),
+  nsTextFormatter::ssprintf(osVersion, u"%ld.%ld",
                             majorVersion,
                             minorVersion);
 #elif defined(MOZ_WIDGET_GTK)
-  nsTextFormatter::ssprintf(osVersion, MOZ_UTF16("%ld.%ld"),
+  nsTextFormatter::ssprintf(osVersion, u"%ld.%ld",
                             gtk_major_version,
                             gtk_minor_version);
 #elif defined(MOZ_WIDGET_ANDROID)
@@ -585,7 +563,7 @@ ParseManifest(NSLocationType aType, FileLocation& aFile, char* aBuf,
     mozilla::AndroidBridge::Bridge()->GetStaticStringField("android/os/Build$VERSION",
                                                            "RELEASE",
                                                            osVersion);
-    isTablet = mozilla::widget::GeckoAppShell::IsTablet();
+    isTablet = java::GeckoAppShell::IsTablet();
   }
 #endif
 
@@ -775,11 +753,6 @@ ParseManifest(NSLocationType aType, FileLocation& aFile, char* aBuf,
       continue;
     }
 
-#ifdef MOZ_B2G_LOADER
-    if (aXPTOnly) {
-      directive->xptonlyfunc(xptonlycx, line, argv);
-    } else
-#endif /* MOZ_B2G_LOADER */
     if (directive->regfunc) {
       if (GeckoProcessType_Default != XRE_GetProcessType()) {
         continue;

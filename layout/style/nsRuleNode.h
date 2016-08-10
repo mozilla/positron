@@ -783,27 +783,6 @@ protected:
   inline RuleDetail CheckSpecifiedProperties(const nsStyleStructID aSID,
                                              const nsRuleData* aRuleData);
 
-  already_AddRefed<nsCSSShadowArray>
-              GetShadowData(const nsCSSValueList* aList,
-                            nsStyleContext* aContext,
-                            bool aIsBoxShadow,
-                            mozilla::RuleNodeCacheConditions& aConditions);
-  already_AddRefed<nsStyleBasicShape>
-  GetStyleBasicShapeFromCSSValue(const nsCSSValue& aValue,
-                                 nsStyleContext* aStyleContext,
-                                 nsPresContext* aPresContext,
-                                 mozilla::RuleNodeCacheConditions& aConditions);
-  bool SetStyleFilterToCSSValue(nsStyleFilter* aStyleFilter,
-                                const nsCSSValue& aValue,
-                                nsStyleContext* aStyleContext,
-                                nsPresContext* aPresContext,
-                                mozilla::RuleNodeCacheConditions& aConditions);
-  void SetStyleClipPathToCSSValue(nsStyleClipPath* aStyleClipPath,
-                                  const nsCSSValue* aValue,
-                                  nsStyleContext* aStyleContext,
-                                  nsPresContext* aPresContext,
-                                  mozilla::RuleNodeCacheConditions& aConditions);
-
 private:
   nsRuleNode(nsPresContext* aPresContext, nsRuleNode* aParent,
              nsIStyleRule* aRule, mozilla::SheetType aLevel, bool aIsImportant);
@@ -943,6 +922,14 @@ public:
     if (!(HasAnimationData() && ParentHasPseudoElementData(aContext))) {      \
       data = mStyleData.GetStyle##name_(aContext, aComputeData);              \
       if (MOZ_LIKELY(data != nullptr)) {                                      \
+        if (HasAnimationData()) {                                             \
+          /* If we have animation data, the struct should be cached on the */ \
+          /* style context so that we can peek the struct. */                 \
+          /* See comment in AnimValuesStyleRule::MapRuleInfoInto. */          \
+          StoreStyleOnContext(aContext,                                       \
+                              eStyleStruct_##name_,                           \
+                              const_cast<nsStyle##name_*>(data));             \
+        }                                                                     \
         return data;                                                          \
       }                                                                       \
     }                                                                         \
@@ -1071,6 +1058,11 @@ private:
   bool ContextHasCachedData(nsStyleContext* aContext, nsStyleStructID aSID);
 #endif
 
+  // Store style struct on the style context and tell the style context
+  // that it doesn't own the data
+  static void StoreStyleOnContext(nsStyleContext* aContext,
+                                  nsStyleStructID aSID,
+                                  void* aStruct);
 };
 
 #endif

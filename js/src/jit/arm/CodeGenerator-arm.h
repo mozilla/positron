@@ -96,6 +96,15 @@ class CodeGeneratorARM : public CodeGeneratorShared
 
     void emitTableSwitchDispatch(MTableSwitch* mir, Register index, Register base);
 
+    template <typename T>
+    void emitWasmLoad(T* ins);
+    template <typename T>
+    void emitWasmUnalignedLoad(T* ins);
+    template <typename T>
+    void emitWasmStore(T* ins);
+    template <typename T>
+    void emitWasmUnalignedStore(T* ins);
+
   public:
     // Instruction visitors.
     virtual void visitMinMaxD(LMinMaxD* ins);
@@ -120,6 +129,7 @@ class CodeGeneratorARM : public CodeGeneratorShared
     virtual void visitModMaskI(LModMaskI* ins);
     virtual void visitPowHalfD(LPowHalfD* ins);
     virtual void visitShiftI(LShiftI* ins);
+    virtual void visitShiftI64(LShiftI64* ins);
     virtual void visitUrshD(LUrshD* ins);
 
     virtual void visitClzI(LClzI* ins);
@@ -157,6 +167,29 @@ class CodeGeneratorARM : public CodeGeneratorShared
     virtual void visitTruncateDToInt32(LTruncateDToInt32* ins);
     virtual void visitTruncateFToInt32(LTruncateFToInt32* ins);
 
+    virtual void visitWrapInt64ToInt32(LWrapInt64ToInt32* lir);
+    virtual void visitExtendInt32ToInt64(LExtendInt32ToInt64* lir);
+    virtual void visitAddI64(LAddI64* lir);
+    virtual void visitSubI64(LSubI64* lir);
+    virtual void visitMulI64(LMulI64* lir);
+    virtual void visitDivOrModI64(LDivOrModI64* lir);
+    virtual void visitUDivOrModI64(LUDivOrModI64* lir);
+    virtual void visitCompareI64(LCompareI64* lir);
+    virtual void visitCompareI64AndBranch(LCompareI64AndBranch* lir);
+    virtual void visitBitOpI64(LBitOpI64* lir);
+    virtual void visitRotateI64(LRotateI64* lir);
+    virtual void visitAsmJSPassStackArgI64(LAsmJSPassStackArgI64* lir);
+    virtual void visitAsmSelectI64(LAsmSelectI64* lir);
+    virtual void visitAsmReinterpretFromI64(LAsmReinterpretFromI64* lir);
+    virtual void visitAsmReinterpretToI64(LAsmReinterpretToI64* lir);
+    virtual void visitPopcntI64(LPopcntI64* ins);
+    virtual void visitClzI64(LClzI64* ins);
+    virtual void visitCtzI64(LCtzI64* ins);
+    virtual void visitNotI64(LNotI64* ins);
+    virtual void visitWasmTruncateToInt64(LWasmTruncateToInt64* ins);
+    virtual void visitInt64ToFloatingPointCall(LInt64ToFloatingPointCall* lir);
+    virtual void visitTestI64AndBranch(LTestI64AndBranch* lir);
+
     // Out of line visitors.
     void visitOutOfLineBailout(OutOfLineBailout* ool);
     void visitOutOfLineTableSwitch(OutOfLineTableSwitch* ool);
@@ -165,6 +198,8 @@ class CodeGeneratorARM : public CodeGeneratorShared
     ValueOperand ToValue(LInstruction* ins, size_t pos);
     ValueOperand ToOutValue(LInstruction* ins);
     ValueOperand ToTempValue(LInstruction* ins, size_t pos);
+
+    Register64 ToOperandOrRegister64(const LInt64Allocation input);
 
     // Functions for LTestVAndBranch.
     Register splitTagForTest(const ValueOperand& value);
@@ -202,10 +237,22 @@ class CodeGeneratorARM : public CodeGeneratorShared
     void visitAtomicExchangeTypedArrayElement(LAtomicExchangeTypedArrayElement* lir);
     void visitAsmSelect(LAsmSelect* ins);
     void visitAsmReinterpret(LAsmReinterpret* ins);
-    void visitAsmJSCall(LAsmJSCall* ins);
+    void emitWasmCall(LWasmCallBase* ins);
+    void visitWasmCall(LWasmCall* ins);
+    void visitWasmCallI64(LWasmCallI64* ins);
     void visitWasmBoundsCheck(LWasmBoundsCheck* ins);
     void visitWasmLoad(LWasmLoad* ins);
+    void visitWasmLoadI64(LWasmLoadI64* ins);
+    void visitWasmUnalignedLoad(LWasmUnalignedLoad* ins);
+    void visitWasmUnalignedLoadI64(LWasmUnalignedLoadI64* ins);
     void visitWasmStore(LWasmStore* ins);
+    void visitWasmStoreI64(LWasmStoreI64* ins);
+    void visitWasmUnalignedStore(LWasmUnalignedStore* ins);
+    void visitWasmUnalignedStoreI64(LWasmUnalignedStoreI64* ins);
+    void visitWasmLoadGlobalVar(LWasmLoadGlobalVar* ins);
+    void visitWasmLoadGlobalVarI64(LWasmLoadGlobalVarI64* ins);
+    void visitWasmStoreGlobalVar(LWasmStoreGlobalVar* ins);
+    void visitWasmStoreGlobalVarI64(LWasmStoreGlobalVarI64* ins);
     void visitAsmJSLoadHeap(LAsmJSLoadHeap* ins);
     void visitAsmJSStoreHeap(LAsmJSStoreHeap* ins);
     void visitAsmJSCompareExchangeHeap(LAsmJSCompareExchangeHeap* ins);
@@ -215,10 +262,6 @@ class CodeGeneratorARM : public CodeGeneratorShared
     void visitAsmJSAtomicBinopHeap(LAsmJSAtomicBinopHeap* ins);
     void visitAsmJSAtomicBinopHeapForEffect(LAsmJSAtomicBinopHeapForEffect* ins);
     void visitAsmJSAtomicBinopCallout(LAsmJSAtomicBinopCallout* ins);
-    void visitAsmJSLoadGlobalVar(LAsmJSLoadGlobalVar* ins);
-    void visitAsmJSStoreGlobalVar(LAsmJSStoreGlobalVar* ins);
-    void visitAsmJSLoadFuncPtr(LAsmJSLoadFuncPtr* ins);
-    void visitAsmJSLoadFFIFunc(LAsmJSLoadFFIFunc* ins);
     void visitAsmJSPassStackArg(LAsmJSPassStackArg* ins);
     void visitWasmTruncateToInt32(LWasmTruncateToInt32* ins);
     void visitOutOfLineWasmTruncateCheck(OutOfLineWasmTruncateCheck* ool);
