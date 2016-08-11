@@ -20,10 +20,6 @@ endif
 SPIDERNODE_LIBS = \
 	libcares.a \
 	libhttp_parser.a \
-	libicudata.a \
-	libicui18n.a \
-	libicustubdata.a \
-	libicuucx.a \
 	libnode.a \
 	libopenssl.a \
 	libspidershim.a \
