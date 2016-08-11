@@ -38,11 +38,6 @@ NS_GENERIC_FACTORY_CONSTRUCTOR(NodeLoader)
 0x019618e3, 0xcdb5, 0x11d2,                     \
 { 0x8d, 0x3c, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0 } }
 
-// static const nsModuleComponentInfo components[] = {
-//   { nullptr, NS_NODELOADER_CID, "@mozilla.org/positron/nodeloader;1", NodeLoaderConstructor },
-// };
-
-
 /* Implementation file */
 NS_IMPL_ISUPPORTS(NodeLoader, nsINodeLoader)
 
@@ -116,8 +111,10 @@ NS_IMETHODIMP NodeLoader::Init(JSContext* aContext)
     context,
     argc, argv, 0, nullptr);
 
-  env->process_object()->Set(v8::String::NewFromUtf8(isolate, "resourcesPath"), v8::String::NewFromUtf8(isolate, absoluteAppPath));
-  env->process_object()->Set(v8::String::NewFromUtf8(isolate, "type"), v8::String::NewFromUtf8(isolate, "browser"));
+  env->process_object()->Set(v8::String::NewFromUtf8(isolate, "resourcesPath"),
+                             v8::String::NewFromUtf8(isolate, absoluteAppPath));
+  env->process_object()->Set(v8::String::NewFromUtf8(isolate, "type"),
+                             v8::String::NewFromUtf8(isolate, "browser"));
 
   node::LoadEnvironment(env);
 
