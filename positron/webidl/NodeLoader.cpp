@@ -99,21 +99,15 @@ NS_IMETHODIMP NodeLoader::Init(JSContext* aContext)
   greDir->AppendNative(NS_LITERAL_CSTRING("modules"));
   greDir->AppendNative(NS_LITERAL_CSTRING("browser"));
   greDir->AppendNative(NS_LITERAL_CSTRING("init.js"));
-  nsAutoString path;
-  greDir->GetPath(path);
-
-  // XXX There must be some better way to do this, but if the char array isn't
-  // copied it seems to get mangled.
-  NS_LossyConvertUTF16toASCII asciiPath(path);
-  char* copy = new char[asciiPath.Length() + 1];
-  strcpy(copy, asciiPath.get());
+  nsAutoString initalScript;
+  greDir->GetPath(initalScript);
 
   int exec_argc;
   const char** exec_argv;
   int argc = 2;
   char **argv = new char *[argc + 1];
   argv[0] = gArgv[0];
-  argv[1] = copy;
+  argv[1] = ToNewCString(NS_LossyConvertUTF16toASCII(initalScript));
   node::Init(&argc, const_cast<const char**>(argv),  &exec_argc, &exec_argv);
 
   node::IsolateData* isolateData = node::CreateIsolateData(isolate, uv_default_loop());
