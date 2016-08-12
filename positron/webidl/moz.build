@@ -24,6 +24,13 @@ USE_LIBS += [
     'static:/positron/app/spidernode/.libs/zlib',
 ]
 
+# Depend on mozglue.  This isn't needed on Mac, but it does seem to be needed
+# on Linux.  browser/app/moz.build does this unconditionally.  I wonder if we
+# should move it to positron/app/moz.build.
+USE_LIBS += [
+    'mozglue',
+]
+
 XPIDL_SOURCES += [
   'nsINodeLoader.idl',
 ]

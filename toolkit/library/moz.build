@@ -138,6 +138,20 @@ if 'gtk' in CONFIG['MOZ_WIDGET_TOOLKIT'] or \
         'freetype',
     ]
 
+# Force libxul to depend on the SpiderNode libs.  This shouldn't be here,
+# but I haven't been able to figure out how to get it to happen on Linux
+# without this hack.  Ugh.
+# TODO: figure out the right way do this.
+USE_LIBS += [
+    'static:/positron/app/spidernode/.libs/cares',
+    'static:/positron/app/spidernode/.libs/http_parser',
+    'static:/positron/app/spidernode/.libs/node',
+    'static:/positron/app/spidernode/.libs/openssl',
+    'static:/positron/app/spidernode/.libs/spidershim',
+    'static:/positron/app/spidernode/.libs/uv',
+    'static:/positron/app/spidernode/.libs/zlib',
+]
+
 if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'cocoa':
     CXXFLAGS += CONFIG['TK_CFLAGS']
 
