@@ -440,15 +440,24 @@ MenuItem.prototype = {
     }
 
     let docPattern = this.documentUrlMatchPattern;
-    if (docPattern && !docPattern.matches(contextData.pageUrl)) {
+    let pageURI = Services.io.newURI(contextData.pageUrl, null, null);
+    if (docPattern && !docPattern.matches(pageURI)) {
       return false;
     }
 
-    let isMedia = contextData.onImage || contextData.onAudio || contextData.onVideo;
     let targetPattern = this.targetUrlMatchPattern;
-    if (isMedia && targetPattern && !targetPattern.matches(contextData.srcURL)) {
-      // TODO: double check if mediaURL is always set when we need it
-      return false;
+    if (targetPattern) {
+      let targetUrls = [];
+      if (contextData.onImage || contextData.onAudio || contextData.onVideo) {
+        // TODO: double check if srcUrl is always set when we need it
+        targetUrls.push(contextData.srcUrl);
+      }
+      if (contextData.onLink) {
+        targetUrls.push(contextData.linkUrl);
+      }
+      if (!targetUrls.some(targetUrl => targetPattern.matches(NetUtil.newURI(targetUrl)))) {
+        return false;
+      }
     }
 
     return true;

@@ -294,11 +294,24 @@ ThreadedDriver::Stop()
 SystemClockDriver::SystemClockDriver(MediaStreamGraphImpl* aGraphImpl)
   : ThreadedDriver(aGraphImpl),
     mInitialTimeStamp(TimeStamp::Now()),
-    mLastTimeStamp(TimeStamp::Now())
+    mLastTimeStamp(TimeStamp::Now()),
+    mIsFallback(false)
 {}
 
 SystemClockDriver::~SystemClockDriver()
 { }
+
+void
+SystemClockDriver::MarkAsFallback()
+{
+  mIsFallback = true;
+}
+
+bool
+SystemClockDriver::IsFallback()
+{
+  return mIsFallback;
+}
 
 void
 ThreadedDriver::RunThread()
@@ -545,6 +558,7 @@ AudioCallbackDriver::AudioCallbackDriver(MediaStreamGraphImpl* aGraphImpl)
   , mAddedMixer(false)
   , mInCallback(false)
   , mMicrophoneActive(false)
+  , mFromFallback(false)
 {
   STREAM_LOG(LogLevel::Debug, ("AudioCallbackDriver ctor for graph %p", aGraphImpl));
 }
@@ -559,7 +573,7 @@ AudioCallbackDriver::Init()
 {
   cubeb_stream_params output;
   cubeb_stream_params input;
-  uint32_t latency;
+  uint32_t latency_frames;
   bool firstStream = CubebUtils::GetFirstStream();
 
   MOZ_ASSERT(!NS_IsMainThread(),
@@ -588,7 +602,7 @@ AudioCallbackDriver::Init()
     output.format = CUBEB_SAMPLE_FLOAT32NE;
   }
 
-  if (cubeb_get_min_latency(CubebUtils::GetCubebContext(), output, &latency) != CUBEB_OK) {
+  if (cubeb_get_min_latency(CubebUtils::GetCubebContext(), output, &latency_frames) != CUBEB_OK) {
     NS_WARNING("Could not get minimal latency from cubeb.");
     return;
   }
@@ -624,7 +638,7 @@ AudioCallbackDriver::Init()
                           input_id,
                           mGraphImpl->mInputWanted ? &input : nullptr,
                           output_id,
-                          mGraphImpl->mOutputWanted ? &output : nullptr, latency,
+                          mGraphImpl->mOutputWanted ? &output : nullptr, latency_frames,
                           DataCallback_s, StateCallback_s, this) == CUBEB_OK) {
       mAudioStream.own(stream);
       DebugOnly<int> rv = cubeb_stream_set_volume(mAudioStream, CubebUtils::GetVolumeScale());
@@ -636,13 +650,20 @@ AudioCallbackDriver::Init()
       StaticMutexAutoUnlock unlock(AudioInputCubeb::Mutex());
 #endif
       NS_WARNING("Could not create a cubeb stream for MediaStreamGraph, falling back to a SystemClockDriver");
-      CubebUtils::ReportCubebStreamInitFailure(firstStream);
+      // Only report failures when we're not coming from a driver that was
+      // created itself as a fallback driver because of a previous audio driver
+      // failure.
+      if (!mFromFallback) {
+        CubebUtils::ReportCubebStreamInitFailure(firstStream);
+      }
       // Fall back to a driver using a normal thread.
       MonitorAutoLock lock(GraphImpl()->GetMonitor());
-      SetNextDriver(new SystemClockDriver(GraphImpl()));
-      NextDriver()->SetGraphTime(this, mIterationStart, mIterationEnd);
-      mGraphImpl->SetCurrentDriver(NextDriver());
-      NextDriver()->Start();
+      SystemClockDriver* nextDriver = new SystemClockDriver(GraphImpl());
+      SetNextDriver(nextDriver);
+      nextDriver->MarkAsFallback();
+      nextDriver->SetGraphTime(this, mIterationStart, mIterationEnd);
+      mGraphImpl->SetCurrentDriver(nextDriver);
+      nextDriver->Start();
       return;
     }
   }
@@ -689,6 +710,8 @@ AudioCallbackDriver::Start()
       mPreviousDriver = nullptr;
     } else {
       LIFECYCLE_LOG("Dropping driver reference for SystemClockDriver.");
+      MOZ_ASSERT(mPreviousDriver->AsSystemClockDriver());
+      mFromFallback = mPreviousDriver->AsSystemClockDriver()->IsFallback();
       mPreviousDriver = nullptr;
     }
   }

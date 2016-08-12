@@ -60,10 +60,10 @@ nsresult RawReader::ReadMetadata(MediaInfo* aInfo,
   // Determine and verify frame display size.
   float pixelAspectRatio = static_cast<float>(mMetadata.aspectNumerator) /
                             mMetadata.aspectDenominator;
-  nsIntSize display(mMetadata.frameWidth, mMetadata.frameHeight);
+  nsIntSize display(uint32_t(mMetadata.frameWidth), uint32_t(mMetadata.frameHeight));
   ScaleDisplayByAspectRatio(display, pixelAspectRatio);
   mPicture = nsIntRect(0, 0, mMetadata.frameWidth, mMetadata.frameHeight);
-  nsIntSize frameSize(mMetadata.frameWidth, mMetadata.frameHeight);
+  nsIntSize frameSize(uint32_t(mMetadata.frameWidth), uint32_t(mMetadata.frameHeight));
   if (!IsValidVideoRegion(frameSize, mPicture, display)) {
     // Video track's frame sizes will overflow. Fail.
     return NS_ERROR_FAILURE;
@@ -156,7 +156,7 @@ bool RawReader::DecodeVideoFrame(bool &aKeyframeSkip,
       return false;
     }
 
-    a.mParsed++;
+    a.mStats.mParsedFrames++;
 
     if (currentFrameTime >= aTimeThreshold)
       break;
@@ -186,21 +186,22 @@ bool RawReader::DecodeVideoFrame(bool &aKeyframeSkip,
   b.mPlanes[2].mWidth = mMetadata.frameWidth / 2;
   b.mPlanes[2].mOffset = b.mPlanes[2].mSkip = 0;
 
-  RefPtr<VideoData> v = VideoData::Create(mInfo.mVideo,
-                                            mDecoder->GetImageContainer(),
-                                            -1,
-                                            currentFrameTime,
-                                            (USECS_PER_S / mFrameRate),
-                                            b,
-                                            1, // In raw video every frame is a keyframe
-                                            -1,
-                                            mPicture);
+  RefPtr<VideoData> v =
+    VideoData::CreateAndCopyData(mInfo.mVideo,
+                                 mDecoder->GetImageContainer(),
+                                 -1,
+                                 currentFrameTime,
+                                 (USECS_PER_S / mFrameRate),
+                                 b,
+                                 1, // In raw video every frame is a keyframe
+                                 -1,
+                                 mPicture);
   if (!v)
     return false;
 
   mVideoQueue.Push(v);
   mCurrentFrame++;
-  a.mDecoded++;
+  a.mStats.mDecodedFrames++;
 
   return true;
 }

@@ -20,14 +20,17 @@ task:
         task-reference: "<docker-image>"
 
     command:
+      - /home/worker/bin/run-task
+      - '--vcs-checkout=/home/worker/checkouts/gecko'
+      - '--'
       - bash
       - -cx
       - >
-          tc-vcs checkout ./gecko {{base_repository}} {{head_repository}} {{head_rev}} {{head_ref}} &&
-          cd gecko/tools/lint/eslint &&
+          cd /home/worker/checkouts/gecko/tools/lint/eslint &&
           /build/tooltool.py fetch -m manifest.tt &&
           tar xvfz eslint.tar.gz &&
           rm eslint.tar.gz &&
+          ln -s ../eslint-plugin-mozilla node_modules &&
           cd ../../.. &&
           tools/lint/eslint/node_modules/.bin/eslint --quiet --plugin html --ext [.js,.jsm,.jsx,.xml,.html] -f tools/lint/eslint-formatter .
 

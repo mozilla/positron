@@ -25,7 +25,7 @@ const {ToolSidebar} = require("devtools/client/framework/sidebar");
 const {HTMLTooltip} = require("devtools/client/shared/widgets/HTMLTooltip");
 const {setImageTooltip, getImageDimensions} =
   require("devtools/client/shared/widgets/tooltip/ImageTooltipHelper");
-const DevToolsUtils = require("devtools/shared/DevToolsUtils");
+const { testing: isTesting } = require("devtools/shared/flags");
 const {LocalizationHelper} = require("devtools/client/shared/l10n");
 const {PrefsHelper} = require("devtools/client/shared/prefs");
 const {ViewHelpers, Heritage, WidgetMethods, setNamedTimeout} =
@@ -48,7 +48,7 @@ const WDA_DEFAULT_VERIFY_INTERVAL = 50;
 // be at least equal to the general mochitest timeout of 45 seconds so that this
 // never gets hit during testing.
 // ms
-const WDA_DEFAULT_GIVE_UP_TIMEOUT = DevToolsUtils.testing ? 45000 : 2000;
+const WDA_DEFAULT_GIVE_UP_TIMEOUT = isTesting ? 45000 : 2000;
 
 /**
  * Shortcuts for accessing various network monitor preferences.
@@ -342,7 +342,7 @@ var NetMonitorView = {
         ]);
       } catch (ex) {
         // Timed out while waiting for data. Continue with what we have.
-        DevToolsUtils.reportException("showNetworkStatisticsView", ex);
+        console.error(ex);
       }
 
       statisticsView.createPrimedCacheChart(requestsView.items);
@@ -2399,13 +2399,17 @@ RequestsMenuView.prototype = Heritage.extend(WidgetMethods, {
       sourceEl.className = "stack-frame-source-name";
       frameEl.appendChild(sourceEl);
 
-      sourceEl.textContent = sourceUrl;
-      sourceEl.title = sourceUrl;
+      let sourceInnerEl = doc.createElementNS(HTML_NS, "span");
+      sourceInnerEl.className = "stack-frame-source-name-inner";
+      sourceEl.appendChild(sourceInnerEl);
+
+      sourceInnerEl.textContent = sourceUrl;
+      sourceInnerEl.title = sourceUrl;
 
       let lineEl = doc.createElementNS(HTML_NS, "span");
       lineEl.className = "stack-frame-line";
       lineEl.textContent = `:${lineNumber}:${columnNumber}`;
-      sourceEl.appendChild(lineEl);
+      sourceInnerEl.appendChild(lineEl);
 
       frameEl.addEventListener("click", () => {
         // hide the tooltip immediately, not after delay

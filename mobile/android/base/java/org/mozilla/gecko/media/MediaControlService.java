@@ -17,6 +17,7 @@ import android.os.IBinder;
 import android.support.v4.app.NotificationManagerCompat;
 import android.util.Log;
 
+import org.mozilla.gecko.AppConstants;
 import org.mozilla.gecko.BrowserApp;
 import org.mozilla.gecko.GeckoAppShell;
 import org.mozilla.gecko.PrefsHelper;
@@ -102,13 +103,27 @@ public class MediaControlService extends Service implements Tabs.OnTabsChangedLi
             return;
         }
 
-        if (tab == mTabReference.get()) {
-            return;
-        }
+        switch (msg) {
+            case AUDIO_PLAYING_CHANGE:
+                if (tab == mTabReference.get()) {
+                    return;
+                }
 
-        if (msg == Tabs.TabEvents.AUDIO_PLAYING_CHANGE && tab.isAudioPlaying()) {
-            mTabReference = new WeakReference<Tab>(tab);
-            notifyControlInterfaceChanged(ACTION_PAUSE);
+                if (!tab.isAudioPlaying()) {
+                    return;
+                }
+
+                mTabReference = new WeakReference<>(tab);
+                notifyControlInterfaceChanged(ACTION_PAUSE);
+                break;
+
+            case CLOSED:
+                final Tab playingTab = mTabReference.get();
+                if (playingTab == null || playingTab == tab) {
+                    // The playing tab disappeared or was closed. Remove the controls and stop the service.
+                    notifyControlInterfaceChanged(ACTION_REMOVE_CONTROL);
+                }
+                break;
         }
     }
 
@@ -247,6 +262,12 @@ public class MediaControlService extends Service implements Tabs.OnTabsChangedLi
             return;
         }
 
+        // TODO : remove this checking when the media control is ready to ship,
+        // see bug1290836.
+        if (!AppConstants.NIGHTLY_BUILD) {
+            return;
+        }
+
         final Tab tab = mTabReference.get();
 
         if (tab == null) {
@@ -268,6 +289,9 @@ public class MediaControlService extends Service implements Tabs.OnTabsChangedLi
         style.setShowActionsInCompactView(0);
 
         final boolean isMediaPlaying = action.equals(ACTION_PAUSE);
+        final int visibility = tab.isPrivate() ?
+            Notification.VISIBILITY_PRIVATE : Notification.VISIBILITY_PUBLIC;
+
         final Notification notification = new Notification.Builder(this)
             .setSmallIcon(R.drawable.flat_icon)
             .setLargeIcon(generateCoverArt(tab))
@@ -280,6 +304,7 @@ public class MediaControlService extends Service implements Tabs.OnTabsChangedLi
             .setOngoing(isMediaPlaying)
             .setShowWhen(false)
             .setWhen(0)
+            .setVisibility(visibility)
             .build();
 
         if (isMediaPlaying) {

@@ -3,6 +3,18 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+/* Tooltip specific theme variables */
+
+.theme-dark {
+  --bezier-diagonal-color: #eee;
+  --bezier-grid-color: rgba(0, 0, 0, 0.2);
+}
+
+.theme-light {
+  --bezier-diagonal-color: rgba(0, 0, 0, 0.2);
+  --bezier-grid-color: rgba(0, 0, 0, 0.05);
+}
+
 /* Tooltip widget (see devtools/client/shared/widgets/Tooltip.js) */
 
 .devtools-tooltip .panel-arrowcontent {
@@ -364,6 +376,7 @@
  */
 
 .stack-trace-tooltip {
+  direction: ltr;
   height: 100%;
   overflow-y: auto;
 }
@@ -406,11 +419,18 @@
 
 .stack-frame-source-name {
   flex: 1 1;
+  /* Makes the file name truncated (and ellipsis shown) on the left side */
   direction: rtl;
   text-align: right;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* Enforce LTR direction for the file name - fixes bug 1290056 */
+.stack-frame-source-name-inner {
+  direction: ltr;
+  unicode-bidi: embed;
 }
 
 .stack-frame-line {

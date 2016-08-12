@@ -8,12 +8,12 @@
 #include "AndroidBridge.h"
 #include "base/message_loop.h"
 #include "mozilla/layers/APZCCallbackHelper.h"
-#include "mozilla/layers/APZCTreeManager.h"
+#include "mozilla/layers/IAPZCTreeManager.h"
 #include "nsIObserverService.h"
 #include "nsLayoutUtils.h"
 #include "nsWindow.h"
 
-using mozilla::layers::APZCTreeManager;
+using mozilla::layers::IAPZCTreeManager;
 
 namespace mozilla {
 namespace widget {
@@ -26,7 +26,7 @@ AndroidContentController::Destroy()
 }
 
 void
-AndroidContentController::NotifyDefaultPrevented(APZCTreeManager* aManager,
+AndroidContentController::NotifyDefaultPrevented(IAPZCTreeManager* aManager,
                                                  uint64_t aInputBlockId,
                                                  bool aDefaultPrevented)
 {
@@ -35,7 +35,7 @@ AndroidContentController::NotifyDefaultPrevented(APZCTreeManager* aManager,
         // APZ "controller" thread) but we get it from the Gecko thread, so we
         // have to throw it onto the other thread.
         AndroidBridge::Bridge()->PostTaskToUiThread(NewRunnableMethod<uint64_t, bool>(
-            aManager, &APZCTreeManager::ContentReceivedInputBlock,
+            aManager, &IAPZCTreeManager::ContentReceivedInputBlock,
             aInputBlockId, aDefaultPrevented), 0);
         return;
     }
@@ -44,7 +44,46 @@ AndroidContentController::NotifyDefaultPrevented(APZCTreeManager* aManager,
 }
 
 void
-AndroidContentController::HandleTap(TapType aType, const CSSPoint& aPoint,
+AndroidContentController::DispatchSingleTapToObservers(const LayoutDevicePoint& aPoint,
+                                                       const ScrollableLayerGuid& aGuid) const
+{
+    nsIContent* content = nsLayoutUtils::FindContentFor(aGuid.mScrollId);
+    nsPresContext* context = content
+        ? mozilla::layers::APZCCallbackHelper::GetPresContextForContent(content)
+        : nullptr;
+
+    if (!context) {
+      return;
+    }
+
+    CSSPoint point = mozilla::layers::APZCCallbackHelper::ApplyCallbackTransform(
+        aPoint / context->CSSToDevPixelScale(), aGuid);
+
+    nsPresContext* rcdContext = context->GetToplevelContentDocumentPresContext();
+    if (rcdContext && rcdContext->PresShell()->ScaleToResolution()) {
+        // We need to convert from the root document to the root content document,
+        // by unapplying the resolution that's on the content document.
+        const float resolution = rcdContext->PresShell()->GetResolution();
+        point.x /= resolution;
+        point.y /= resolution;
+    }
+
+    CSSIntPoint rounded = RoundedToInt(point);
+    nsAppShell::PostEvent([rounded] {
+        nsCOMPtr<nsIObserverService> obsServ =
+            mozilla::services::GetObserverService();
+        if (!obsServ) {
+            return;
+        }
+
+        nsPrintfCString data("{\"x\":%d,\"y\":%d}", rounded.x, rounded.y);
+        obsServ->NotifyObservers(nullptr, "Gesture:SingleTap",
+                                 NS_ConvertASCIItoUTF16(data).get());
+    });
+}
+
+void
+AndroidContentController::HandleTap(TapType aType, const LayoutDevicePoint& aPoint,
                                     Modifiers aModifiers,
                                     const ScrollableLayerGuid& aGuid,
                                     uint64_t aInputBlockId)
@@ -55,33 +94,7 @@ AndroidContentController::HandleTap(TapType aType, const CSSPoint& aPoint,
     // done from either thread but we need access to the callback transform
     // so we do it from the main thread.
     if (NS_IsMainThread() && aType == TapType::eSingleTap) {
-        CSSPoint point = mozilla::layers::APZCCallbackHelper::ApplyCallbackTransform(aPoint, aGuid);
-
-        nsIContent* content = nsLayoutUtils::FindContentFor(aGuid.mScrollId);
-        nsIPresShell* shell = content
-            ? mozilla::layers::APZCCallbackHelper::GetRootContentDocumentPresShellForContent(content)
-            : nullptr;
-
-        if (shell && shell->ScaleToResolution()) {
-            // We need to convert from the root document to the root content document,
-            // by unapplying the resolution that's on the content document.
-            const float resolution = shell->GetResolution();
-            point.x /= resolution;
-            point.y /= resolution;
-        }
-
-        CSSIntPoint rounded = RoundedToInt(point);
-        nsAppShell::PostEvent([rounded] {
-            nsCOMPtr<nsIObserverService> obsServ =
-                mozilla::services::GetObserverService();
-            if (!obsServ) {
-                return;
-            }
-
-            nsPrintfCString data("{\"x\":%d,\"y\":%d}", rounded.x, rounded.y);
-            obsServ->NotifyObservers(nullptr, "Gesture:SingleTap",
-                                     NS_ConvertASCIItoUTF16(data).get());
-        });
+        DispatchSingleTapToObservers(aPoint, aGuid);
     }
 
     ChromeProcessController::HandleTap(aType, aPoint, aModifiers, aGuid, aInputBlockId);
@@ -132,9 +145,9 @@ AndroidContentController::NotifyAPZStateChange(const ScrollableLayerGuid& aGuid,
       // This is used by tests to determine when the APZ is done doing whatever
       // it's doing. XXX generify this as needed when writing additional tests.
       observerService->NotifyObservers(nullptr, "APZ:TransformEnd", nullptr);
-      observerService->NotifyObservers(nullptr, "PanZoom:StateChange", MOZ_UTF16("NOTHING"));
+      observerService->NotifyObservers(nullptr, "PanZoom:StateChange", u"NOTHING");
     } else if (aChange == layers::GeckoContentController::APZStateChange::eTransformBegin) {
-      observerService->NotifyObservers(nullptr, "PanZoom:StateChange", MOZ_UTF16("PANNING"));
+      observerService->NotifyObservers(nullptr, "PanZoom:StateChange", u"PANNING");
     }
   }
 }

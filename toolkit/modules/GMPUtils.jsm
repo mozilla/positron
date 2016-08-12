@@ -42,22 +42,21 @@ this.GMPUtils = {
    *          The plugin to check.
    */
   isPluginHidden: function(aPlugin) {
+    if (this._is32bitModeMacOS()) {
+      // GMPs are hidden on MacOS when running in 32 bit mode.
+      // See bug 1291537.
+      return true;
+    }
     if (!aPlugin.isEME) {
       return false;
     }
 
     if (!this._isPluginSupported(aPlugin) ||
         !this._isPluginVisible(aPlugin)) {
-      this.maybeReportTelemetry(aPlugin.id,
-                                "VIDEO_EME_ADOBE_HIDDEN_REASON",
-                                GMPPluginHiddenReason.UNSUPPORTED);
       return true;
     }
 
     if (!GMPPrefs.get(GMPPrefs.KEY_EME_ENABLED, true)) {
-      this.maybeReportTelemetry(aPlugin.id,
-                                "VIDEO_EME_ADOBE_HIDDEN_REASON",
-                                GMPPluginHiddenReason.EME_DISABLED);
       return true;
     }
 
@@ -74,24 +73,24 @@ this.GMPUtils = {
       return true;
     }
     if (aPlugin.id == EME_ADOBE_ID) {
-      if (Services.appinfo.OS != "WINNT") {
-        // Non-Windows OSes currently unsupported by Adobe EME
-        this.maybeReportTelemetry(aPlugin.id,
-                                  "VIDEO_EME_ADOBE_UNSUPPORTED_REASON",
-                                  GMPPluginUnsupportedReason.NOT_WINDOWS);
-        return false;
-      }
+      // Windows Vista and later only supported by Adobe EME.
+      return AppConstants.isPlatformAndVersionAtLeast("win", "6");
     } else if (aPlugin.id == WIDEVINE_ID) {
-      // The Widevine plugin is available for Windows versions Vista and later
-      // and Mac OSX 10.7 and later.
-      if (AppConstants.isPlatformAndVersionAtLeast("win", "6") ||
-          AppConstants.isPlatformAndVersionAtLeast("macosx", "10.7")) {
-        return true;
-      }
-      return false;
+      // The Widevine plugin is available for Windows versions Vista and later,
+      // Mac OSX, and Linux.
+      return AppConstants.isPlatformAndVersionAtLeast("win", "6") ||
+             AppConstants.platform == "macosx" ||
+             AppConstants.platform == "linux";
     }
 
     return true;
+  },
+
+  _is32bitModeMacOS: function() {
+    if (AppConstants.platform != "macosx") {
+      return false;
+    }
+    return Services.appinfo.XPCOMABI.split("-")[0] == "x86";
   },
 
   /**
@@ -114,31 +113,6 @@ this.GMPUtils = {
    */
   _isPluginForceSupported: function(aPlugin) {
     return GMPPrefs.get(GMPPrefs.KEY_PLUGIN_FORCE_SUPPORTED, false, aPlugin.id);
-  },
-
-  /**
-   * Report telemetry value, but only for Adobe CDM and only once per key
-   * per session.
-   */
-  maybeReportTelemetry: function(aPluginId, key, value) {
-    if (aPluginId != EME_ADOBE_ID) {
-      // Only report for Adobe CDM.
-      return;
-    }
-
-    if (!this.reportedKeys) {
-      this.reportedKeys = [];
-    }
-    if (this.reportedKeys.indexOf(key) >= 0) {
-      // Only report each key once per session.
-      return;
-    }
-    this.reportedKeys.push(key);
-
-    let hist = Services.telemetry.getHistogramById(key);
-    if (hist) {
-      hist.add(value);
-    }
   },
 };
 

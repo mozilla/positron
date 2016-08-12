@@ -592,8 +592,8 @@ protected:
 
         explicit Arr(const arrT& arr) {
             arr.ComputeLengthAndData();
-            dataCount = arr.Length();
-            data = arr.Data();
+            dataCount = arr.LengthAllowShared();
+            data = arr.DataAllowShared();
         }
 
         explicit Arr(const dom::Sequence<elemT>& arr) {
@@ -896,7 +896,7 @@ public:
     // WebGLTextureUpload.cpp
 public:
     bool ValidateUnpackPixels(const char* funcName, uint32_t fullRows,
-                              uint32_t tailPixels, const webgl::TexUnpackBlob* blob);
+                              uint32_t tailPixels, webgl::TexUnpackBlob* blob);
 
 protected:
     bool ValidateTexImageSpecification(const char* funcName, uint8_t funcDims,
@@ -914,11 +914,13 @@ protected:
                                    WebGLTexture** const out_texture,
                                    WebGLTexture::ImageInfo** const out_imageInfo);
 
-    bool ValidateUnpackInfo(const char* funcName, GLenum format, GLenum type,
-                            webgl::PackingInfo* const out);
+    bool ValidateUnpackInfo(const char* funcName, bool usePBOs, GLenum format,
+                            GLenum type, webgl::PackingInfo* const out);
 
 // -----------------------------------------------------------------------------
 // Vertices Feature (WebGLContextVertices.cpp)
+    GLenum mPrimRestartTypeBytes;
+
 public:
     void DrawArrays(GLenum mode, GLint first, GLsizei count);
     void DrawArraysInstanced(GLenum mode, GLint first, GLsizei count,
@@ -950,7 +952,7 @@ public:
 
     void VertexAttrib1fv(GLuint idx, const dom::Float32Array& arr) {
         arr.ComputeLengthAndData();
-        VertexAttrib1fv_base(idx, arr.Length(), arr.Data());
+        VertexAttrib1fv_base(idx, arr.LengthAllowShared(), arr.DataAllowShared());
     }
     void VertexAttrib1fv(GLuint idx, const dom::Sequence<GLfloat>& arr) {
         VertexAttrib1fv_base(idx, arr.Length(), arr.Elements());
@@ -958,7 +960,7 @@ public:
 
     void VertexAttrib2fv(GLuint idx, const dom::Float32Array& arr) {
         arr.ComputeLengthAndData();
-        VertexAttrib2fv_base(idx, arr.Length(), arr.Data());
+        VertexAttrib2fv_base(idx, arr.LengthAllowShared(), arr.DataAllowShared());
     }
     void VertexAttrib2fv(GLuint idx, const dom::Sequence<GLfloat>& arr) {
         VertexAttrib2fv_base(idx, arr.Length(), arr.Elements());
@@ -966,7 +968,7 @@ public:
 
     void VertexAttrib3fv(GLuint idx, const dom::Float32Array& arr) {
         arr.ComputeLengthAndData();
-        VertexAttrib3fv_base(idx, arr.Length(), arr.Data());
+        VertexAttrib3fv_base(idx, arr.LengthAllowShared(), arr.DataAllowShared());
     }
     void VertexAttrib3fv(GLuint idx, const dom::Sequence<GLfloat>& arr) {
         VertexAttrib3fv_base(idx, arr.Length(), arr.Elements());
@@ -974,7 +976,7 @@ public:
 
     void VertexAttrib4fv(GLuint idx, const dom::Float32Array& arr) {
         arr.ComputeLengthAndData();
-        VertexAttrib4fv_base(idx, arr.Length(), arr.Data());
+        VertexAttrib4fv_base(idx, arr.LengthAllowShared(), arr.DataAllowShared());
     }
     void VertexAttrib4fv(GLuint idx, const dom::Sequence<GLfloat>& arr) {
         VertexAttrib4fv_base(idx, arr.Length(), arr.Elements());
@@ -1311,7 +1313,7 @@ private:
     // Context customization points
     virtual WebGLVertexArray* CreateVertexArrayImpl();
 
-    virtual bool ValidateAttribPointerType(bool integerMode, GLenum type, GLsizei* alignment, const char* info) = 0;
+    virtual bool ValidateAttribPointerType(bool integerMode, GLenum type, uint32_t* alignment, const char* info) = 0;
     virtual bool ValidateBufferTarget(GLenum target, const char* info) = 0;
     virtual bool ValidateBufferIndexedTarget(GLenum target, const char* info) = 0;
     virtual bool ValidateBufferForTarget(GLenum target, WebGLBuffer* buffer, const char* info);
@@ -1393,11 +1395,15 @@ protected:
     ////////////////////////////////////
     class FakeBlackTexture {
     public:
+        static UniquePtr<FakeBlackTexture> Create(gl::GLContext* gl,
+                                                  TexTarget target,
+                                                  FakeBlackType type);
         gl::GLContext* const mGL;
         const GLuint mGLName;
 
-        FakeBlackTexture(gl::GLContext* gl, TexTarget target, FakeBlackType type);
         ~FakeBlackTexture();
+    protected:
+        explicit FakeBlackTexture(gl::GLContext* gl);
     };
 
     UniquePtr<FakeBlackTexture> mFakeBlack_2D_0000;
@@ -1409,7 +1415,7 @@ protected:
     UniquePtr<FakeBlackTexture> mFakeBlack_2D_Array_0000;
     UniquePtr<FakeBlackTexture> mFakeBlack_2D_Array_0001;
 
-    void BindFakeBlack(uint32_t texUnit, TexTarget target, FakeBlackType fakeBlack);
+    bool BindFakeBlack(uint32_t texUnit, TexTarget target, FakeBlackType fakeBlack);
 
     ////////////////////////////////////
 
@@ -1468,6 +1474,8 @@ protected:
     bool mNeedsFakeNoDepth;
     bool mNeedsFakeNoStencil;
     bool mNeedsEmulatedLoneDepthStencil;
+
+    bool HasTimestampBits() const;
 
     struct ScopedMaskWorkaround {
         WebGLContext& mWebGL;

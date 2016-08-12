@@ -7,11 +7,15 @@
 
 "use strict";
 
+/* eslint-disable mozilla/reject-some-requires */
 const {Cc, Ci} = require("chrome");
+/* eslint-enable mozilla/reject-some-requires */
 const promise = require("promise");
 const defer = require("devtools/shared/defer");
 const Services = require("Services");
+/* eslint-disable mozilla/reject-some-requires */
 const {XPCOMUtils} = require("resource://gre/modules/XPCOMUtils.jsm");
+/* eslint-enable mozilla/reject-some-requires */
 const {Task} = require("devtools/shared/task");
 const {Tools} = require("devtools/client/definitions");
 const {l10n} = require("devtools/shared/inspector/css-logic");
@@ -21,18 +25,14 @@ const {PrefObserver, PREF_ORIG_SOURCES} = require("devtools/client/styleeditor/u
 const {ElementStyle} = require("devtools/client/inspector/rules/models/element-style");
 const {Rule} = require("devtools/client/inspector/rules/models/rule");
 const {RuleEditor} = require("devtools/client/inspector/rules/views/rule-editor");
-const {createChild, promiseWarn} = require("devtools/client/inspector/shared/utils");
+const {createChild, promiseWarn, throttle} = require("devtools/client/inspector/shared/utils");
 const {gDevTools} = require("devtools/client/framework/devtools");
 const {getCssProperties} = require("devtools/shared/fronts/css-properties");
 
-loader.lazyRequireGetter(this, "overlays",
-  "devtools/client/inspector/shared/style-inspector-overlays");
-loader.lazyRequireGetter(this, "EventEmitter",
-  "devtools/shared/event-emitter");
-loader.lazyRequireGetter(this, "StyleInspectorMenu",
-  "devtools/client/inspector/shared/style-inspector-menu");
-loader.lazyRequireGetter(this, "KeyShortcuts",
-  "devtools/client/shared/key-shortcuts", true);
+const overlays = require("devtools/client/inspector/shared/style-inspector-overlays");
+const EventEmitter = require("devtools/shared/event-emitter");
+const StyleInspectorMenu = require("devtools/client/inspector/shared/style-inspector-menu");
+const {KeyShortcuts} = require("devtools/client/shared/key-shortcuts");
 
 XPCOMUtils.defineLazyGetter(this, "clipboardHelper", function () {
   return Cc["@mozilla.org/widget/clipboardhelper;1"]
@@ -44,9 +44,7 @@ XPCOMUtils.defineLazyGetter(this, "_strings", function () {
     "chrome://devtools-shared/locale/styleinspector.properties");
 });
 
-loader.lazyGetter(this, "AutocompletePopup", function () {
-  return require("devtools/client/shared/autocomplete-popup").AutocompletePopup;
-});
+const {AutocompletePopup} = require("devtools/client/shared/autocomplete-popup");
 
 const HTML_NS = "http://www.w3.org/1999/xhtml";
 const PREF_UA_STYLES = "devtools.inspector.showUserAgentStyles";
@@ -159,6 +157,9 @@ function CssRuleView(inspector, document, store, pageStyle) {
   this.store = store || {};
   this.pageStyle = pageStyle;
 
+  // Allow tests to override throttling behavior, as this can cause intermittents.
+  this.throttle = throttle;
+
   this.cssProperties = getCssProperties(inspector.toolbox);
 
   this._outputParser = new OutputParser(document, this.cssProperties.supportsType);
@@ -174,7 +175,7 @@ function CssRuleView(inspector, document, store, pageStyle) {
   this._onTogglePseudoClass = this._onTogglePseudoClass.bind(this);
 
   let doc = this.styleDocument;
-  this.element = doc.getElementById("ruleview-container");
+  this.element = doc.getElementById("ruleview-container-focusable");
   this.addRuleButton = doc.getElementById("ruleview-add-rule-button");
   this.searchField = doc.getElementById("ruleview-searchbox");
   this.searchClearButton = doc.getElementById("ruleview-searchinput-clear");

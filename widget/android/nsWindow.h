@@ -59,9 +59,8 @@ private:
     // nullptr for nsWindows that were not opened from GeckoView.
     mozilla::UniquePtr<GeckoViewSupport> mGeckoViewSupport;
 
-    class GLControllerSupport;
-    // Object that implements native GLController calls.
-    mozilla::UniquePtr<GLControllerSupport> mGLControllerSupport;
+    class LayerViewSupport;
+    mozilla::UniquePtr<LayerViewSupport> mLayerViewSupport;
 
     class NPZCSupport;
     // Object that implements native NativePanZoomController calls.
@@ -180,7 +179,6 @@ public:
     static void InvalidateAndScheduleComposite();
     static void SchedulePauseComposition();
     static void ScheduleResumeComposition();
-    static float ComputeRenderIntegrity();
 
     virtual bool WidgetPaintsBackground() override;
 
@@ -249,7 +247,7 @@ private:
     void CreateLayerManager(int aCompositorWidth, int aCompositorHeight);
     void RedrawAll();
 
-    mozilla::widget::LayerRenderer::Frame::GlobalRef mLayerRendererFrame;
+    mozilla::java::LayerRenderer::Frame::GlobalRef mLayerRendererFrame;
 };
 
 #endif /* NSWINDOW_H_ */

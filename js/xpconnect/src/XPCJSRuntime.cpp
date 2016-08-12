@@ -615,7 +615,7 @@ void XPCJSRuntime::TraceNativeBlackRoots(JSTracer* trc)
     for (e = mObjectHolderRoots; e; e = e->GetNextRoot())
         static_cast<XPCJSObjectHolder*>(e)->TraceJS(trc);
 
-    dom::TraceBlackJS(trc, JS_GetGCParameter(Runtime(), JSGC_NUMBER),
+    dom::TraceBlackJS(trc, JS_GetGCParameter(Context(), JSGC_NUMBER),
                       nsXPConnect::XPConnect()->IsShuttingDown());
 }
 
@@ -703,7 +703,7 @@ xpc_UnmarkSkippableJSHolders()
 }
 
 /* static */ void
-XPCJSRuntime::GCSliceCallback(JSRuntime* rt,
+XPCJSRuntime::GCSliceCallback(JSContext* cx,
                               JS::GCProgress progress,
                               const JS::GCDescription& desc)
 {
@@ -717,7 +717,7 @@ XPCJSRuntime::GCSliceCallback(JSRuntime* rt,
 #endif
 
     if (self->mPrevGCSliceCallback)
-        (*self->mPrevGCSliceCallback)(rt, progress, desc);
+        (*self->mPrevGCSliceCallback)(cx, progress, desc);
 }
 
 void
@@ -842,7 +842,7 @@ XPCJSRuntime::FinalizeCallback(JSFreeOp* fop,
                 }
             }
 
-            if (!isCompartmentGC) {
+            if (doSweep) {
                 for (auto i = self->mClassInfo2NativeSetMap->Iter(); !i.Done(); i.Next()) {
                     auto entry = static_cast<ClassInfo2NativeSetMap::Entry*>(i.Get());
                     if (!entry->value->IsMarked())
@@ -941,7 +941,7 @@ XPCJSRuntime::FinalizeCallback(JSFreeOp* fop,
 }
 
 /* static */ void
-XPCJSRuntime::WeakPointerZoneGroupCallback(JSRuntime* rt, void* data)
+XPCJSRuntime::WeakPointerZoneGroupCallback(JSContext* cx, void* data)
 {
     // Called before each sweeping slice -- after processing any final marking
     // triggered by barriers -- to clear out any references to things that are
@@ -954,7 +954,7 @@ XPCJSRuntime::WeakPointerZoneGroupCallback(JSRuntime* rt, void* data)
 }
 
 /* static */ void
-XPCJSRuntime::WeakPointerCompartmentCallback(JSRuntime* rt, JSCompartment* comp, void* data)
+XPCJSRuntime::WeakPointerCompartmentCallback(JSContext* cx, JSCompartment* comp, void* data)
 {
     // Called immediately after the ZoneGroup weak pointer callback, but only
     // once for each compartment that is being swept.
@@ -1121,10 +1121,6 @@ class Watchdog
     mozilla::Atomic<int32_t> mMinScriptRunTimeSeconds;
 };
 
-#ifdef MOZ_NUWA_PROCESS
-#include "ipc/Nuwa.h"
-#endif
-
 #define PREF_MAX_SCRIPT_RUN_TIME_CONTENT "dom.max_script_run_time"
 #define PREF_MAX_SCRIPT_RUN_TIME_CHROME "dom.max_chrome_script_run_time"
 
@@ -1282,13 +1278,6 @@ WatchdogMain(void* arg)
 {
     PR_SetCurrentThreadName("JS Watchdog");
 
-#ifdef MOZ_NUWA_PROCESS
-    if (IsNuwaProcess()) {
-        NuwaMarkCurrentThread(nullptr, nullptr);
-        NuwaFreezeCurrentThread();
-    }
-#endif
-
     Watchdog* self = static_cast<Watchdog*>(arg);
     WatchdogManager* manager = self->Manager();
 
@@ -1356,7 +1345,7 @@ WatchdogMain(void* arg)
                     if (dbg)
                         dbg->GetIsDebuggerAttached(&debuggerAttached);
                     if (!debuggerAttached)
-                        JS_RequestInterruptCallback(manager->Runtime()->Runtime());
+                        JS_RequestInterruptCallback(manager->Runtime()->Context());
                 }
             }
         }
@@ -1512,7 +1501,7 @@ XPCJSRuntime::CustomLargeAllocationFailureCallback()
 {
     nsCOMPtr<nsIObserverService> os = mozilla::services::GetObserverService();
     if (os) {
-        os->NotifyObservers(nullptr, "memory-pressure", MOZ_UTF16("heap-minimize"));
+        os->NotifyObservers(nullptr, "memory-pressure", u"heap-minimize");
     }
 }
 
@@ -1822,8 +1811,8 @@ xpc::RemoveGCCallback(xpcGCCallback cb)
 static int64_t
 JSMainRuntimeGCHeapDistinguishedAmount()
 {
-    JSRuntime* rt = nsXPConnect::GetRuntimeInstance()->Runtime();
-    return int64_t(JS_GetGCParameter(rt, JSGC_TOTAL_CHUNKS)) *
+    JSContext* cx = nsXPConnect::GetRuntimeInstance()->Context();
+    return int64_t(JS_GetGCParameter(cx, JSGC_TOTAL_CHUNKS)) *
            js::gc::ChunkSize;
 }
 
@@ -2706,7 +2695,7 @@ class JSMainRuntimeCompartmentsReporter final : public nsIMemoryReporter
         js::Vector<nsCString, 0, js::SystemAllocPolicy> paths;
     };
 
-    static void CompartmentCallback(JSRuntime* rt, void* vdata, JSCompartment* c) {
+    static void CompartmentCallback(JSContext* cx, void* vdata, JSCompartment* c) {
         // silently ignore OOM errors
         Data* data = static_cast<Data*>(vdata);
         nsCString path;
@@ -2727,7 +2716,7 @@ class JSMainRuntimeCompartmentsReporter final : public nsIMemoryReporter
 
         Data data;
         data.anonymizeID = anonymize ? 1 : 0;
-        JS_IterateCompartments(nsXPConnect::GetRuntimeInstance()->Runtime(),
+        JS_IterateCompartments(nsXPConnect::GetRuntimeInstance()->Context(),
                                &data, CompartmentCallback);
 
         for (size_t i = 0; i < data.paths.length(); i++)
@@ -3223,6 +3212,9 @@ AccumulateTelemetryCallback(int id, uint32_t sample, const char* key)
       case JS_TELEMETRY_GC_MINOR_US:
         Telemetry::Accumulate(Telemetry::GC_MINOR_US, sample);
         break;
+      case JS_TELEMETRY_GC_NURSERY_BYTES:
+        Telemetry::Accumulate(Telemetry::GC_NURSERY_BYTES, sample);
+        break;
       case JS_TELEMETRY_DEPRECATED_LANGUAGE_EXTENSIONS_IN_CONTENT:
         Telemetry::Accumulate(Telemetry::JS_DEPRECATED_LANGUAGE_EXTENSIONS_IN_CONTENT, sample);
         break;
@@ -3238,7 +3230,7 @@ AccumulateTelemetryCallback(int id, uint32_t sample, const char* key)
 }
 
 static void
-CompartmentNameCallback(JSRuntime* rt, JSCompartment* comp,
+CompartmentNameCallback(JSContext* cx, JSCompartment* comp,
                         char* buf, size_t bufsize)
 {
     nsCString name;
@@ -3686,8 +3678,7 @@ XPCJSRuntime::DescribeCustomObjects(JSObject* obj, const js::Class* clasp,
         return false;
     }
 
-    JS_snprintf(name, sizeof(name), "JS Object (%s - %s)",
-                clasp->name, si->GetJSClass()->name);
+    snprintf(name, sizeof(name), "JS Object (%s - %s)", clasp->name, si->GetJSClass()->name);
     return true;
 }
 

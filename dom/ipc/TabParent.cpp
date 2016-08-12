@@ -61,6 +61,7 @@
 #include "nsPrincipal.h"
 #include "nsIPromptFactory.h"
 #include "nsIURI.h"
+#include "nsIWindowWatcher.h"
 #include "nsIWebBrowserChrome.h"
 #include "nsIXULBrowserWindow.h"
 #include "nsIXULWindow.h"
@@ -107,6 +108,8 @@ using namespace mozilla::services;
 using namespace mozilla::widget;
 using namespace mozilla::jsipc;
 using namespace mozilla::gfx;
+
+using mozilla::Unused;
 
 // The flags passed by the webProgress notifications are 16 bits shifted
 // from the ones registered by webProgressListeners.
@@ -1298,9 +1301,9 @@ TabParent::SendRealDragEvent(WidgetDragEvent& event, uint32_t aDragAction,
   return PBrowserParent::SendRealDragEvent(event, aDragAction, aDropEffect);
 }
 
-CSSPoint TabParent::AdjustTapToChildWidget(const CSSPoint& aPoint)
+LayoutDevicePoint TabParent::AdjustTapToChildWidget(const LayoutDevicePoint& aPoint)
 {
-  return aPoint + (LayoutDevicePoint(GetChildProcessOffset()) * GetLayoutDeviceToCSSScale());
+  return aPoint + LayoutDevicePoint(GetChildProcessOffset());
 }
 
 bool TabParent::SendMouseWheelEvent(WidgetWheelEvent& event)
@@ -2118,6 +2121,9 @@ TabParent::RecvReplyKeyEvent(const WidgetKeyboardEvent& event)
   nsPresContext* presContext = presShell->GetPresContext();
   NS_ENSURE_TRUE(presContext, true);
 
+  AutoHandlingUserInputStatePusher userInpStatePusher(localEvent.IsTrusted(),
+                                                      &localEvent, doc);
+
   EventDispatcher::Dispatch(mFrameElement, presContext, &localEvent);
   return true;
 }
@@ -2671,7 +2677,7 @@ TabParent::RecvAudioChannelActivityNotification(const uint32_t& aAudioChannel,
 
     os->NotifyObservers(NS_ISUPPORTS_CAST(nsITabParent*, this),
                         topic.get(),
-                        aActive ? MOZ_UTF16("active") : MOZ_UTF16("inactive"));
+                        aActive ? u"active" : u"inactive");
   }
 
   return true;
@@ -2937,6 +2943,13 @@ NS_IMETHODIMP
 TabParent::GetTabId(uint64_t* aId)
 {
   *aId = GetTabId();
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+TabParent::GetOsPid(int32_t* aId)
+{
+  *aId = Manager()->Pid();
   return NS_OK;
 }
 

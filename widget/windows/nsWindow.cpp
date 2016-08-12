@@ -201,6 +201,7 @@
 #define WM_DPICHANGED 0x02E0
 #endif
 
+#include "mozilla/gfx/DeviceManagerD3D11.h"
 #include "mozilla/layers/APZCTreeManager.h"
 #include "mozilla/layers/InputAPZContext.h"
 #include "mozilla/layers/ScrollInputMethods.h"
@@ -1656,12 +1657,6 @@ NS_METHOD nsWindow::Resize(double aWidth, double aHeight, bool aRepaint)
     return NS_OK;
   }
 
-  if (mTransparencyMode == eTransparencyTransparent) {
-    if (mCompositorWidgetDelegate) {
-      mCompositorWidgetDelegate->ResizeTransparentWindow(gfx::IntSize(width, height));
-    }
-  }
-
   // Set cached value for lightweight and printing
   mBounds.width  = width;
   mBounds.height = height;
@@ -1713,12 +1708,6 @@ NS_METHOD nsWindow::Resize(double aX, double aY, double aWidth, double aHeight, 
       Invalidate();
     }
     return NS_OK;
-  }
-
-  if (eTransparencyTransparent == mTransparencyMode) {
-    if (mCompositorWidgetDelegate) {
-      mCompositorWidgetDelegate->ResizeTransparentWindow(gfx::IntSize(width, height));
-    }
   }
 
   // Set cached value for lightweight and printing
@@ -6313,12 +6302,6 @@ void nsWindow::OnWindowPosChanged(WINDOWPOS* wp)
     newHeight = r.bottom - r.top;
     nsIntRect rect(wp->x, wp->y, newWidth, newHeight);
 
-    if (eTransparencyTransparent == mTransparencyMode) {
-      if (mCompositorWidgetDelegate) {
-        mCompositorWidgetDelegate->ResizeTransparentWindow(gfx::IntSize(newWidth, newHeight));
-      }
-    }
-
     if (newWidth > mLastSize.width)
     {
       RECT drect;
@@ -6564,15 +6547,11 @@ bool nsWindow::OnTouch(WPARAM wParam, LPARAM lParam)
 
     // Dispatch touch start and touch move event if we have one.
     if (!touchInput.mTimeStamp.IsNull()) {
-      // Convert MultiTouchInput to WidgetTouchEvent interface.
-      WidgetTouchEvent widgetTouchEvent = touchInput.ToWidgetTouchEvent(this);
-      DispatchInputEvent(&widgetTouchEvent);
+      DispatchTouchInput(touchInput);
     }
     // Dispatch touch end event if we have one.
     if (!touchEndInput.mTimeStamp.IsNull()) {
-      // Convert MultiTouchInput to WidgetTouchEvent interface.
-      WidgetTouchEvent widgetTouchEvent = touchEndInput.ToWidgetTouchEvent(this);
-      DispatchInputEvent(&widgetTouchEvent);
+      DispatchTouchInput(touchEndInput);
     }
   }
 
@@ -7070,8 +7049,7 @@ nsWindow::GetAccessible()
   if (view) {
     nsIFrame* frame = view->GetFrame();
     if (frame && nsLayoutUtils::IsPopup(frame)) {
-      nsCOMPtr<nsIAccessibilityService> accService =
-        services::GetAccessibilityService();
+      nsAccessibilityService* accService = GetOrCreateAccService();
       if (accService) {
         a11y::DocAccessible* docAcc =
           GetAccService()->GetDocAccessible(frame->PresContext()->PresShell());
@@ -7819,7 +7797,7 @@ nsWindow::ComputeShouldAccelerate()
   // on Windows 7 where presentation fails randomly for windows with drop
   // shadows.
   if (mTransparencyMode == eTransparencyTransparent ||
-      (IsPopup() && gfxWindowsPlatform::GetPlatform()->IsWARP()))
+      (IsPopup() && DeviceManagerD3D11::Get()->IsWARP()))
   {
     return false;
   }

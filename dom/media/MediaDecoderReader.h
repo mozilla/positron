@@ -291,6 +291,16 @@ public:
   // Notified by the OggReader during playback when chained ogg is detected.
   MediaEventSource<void>& OnMediaNotSeekable() { return mOnMediaNotSeekable; }
 
+  TimedMetadataEventProducer& TimedMetadataProducer()
+  {
+    return mTimedMetadataEvent;
+  }
+
+  MediaEventProducer<void>& MediaNotSeekableProducer()
+  {
+    return mOnMediaNotSeekable;
+  }
+
   bool IsSuspended() const
   {
     MOZ_ASSERT(OnTaskQueue());
@@ -306,6 +316,11 @@ public:
   AbstractCanonical<bool>* CanonicalIsSuspended() {
     return &mIsSuspended;
   }
+
+  // Switch the video decoder to BlankDecoderModule. It might takes effective
+  // since a few samples later depends on how much demuxed samples are already
+  // queued in the original video decoder.
+  virtual void SetVideoBlankDecode(bool aIsBlankDecode) {}
 
 protected:
   virtual ~MediaDecoderReader();

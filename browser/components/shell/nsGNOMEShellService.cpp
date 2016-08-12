@@ -27,7 +27,7 @@
 #include "nsIImageLoadingContent.h"
 #include "imgIRequest.h"
 #include "imgIContainer.h"
-#include "prprf.h"
+#include "mozilla/Snprintf.h"
 #if defined(MOZ_WIDGET_GTK)
 #include "nsIImageToPixbuf.h"
 #endif
@@ -284,7 +284,7 @@ nsGNOMEShellService::SetDefaultBrowser(bool aClaimAllTypes,
     NS_ENSURE_SUCCESS(rv, rv);
 
     nsString brandShortName;
-    brandBundle->GetStringFromName(MOZ_UTF16("brandShortName"),
+    brandBundle->GetStringFromName(u"brandShortName",
                                    getter_Copies(brandShortName));
 
     // use brandShortName as the application id.
@@ -402,7 +402,7 @@ nsGNOMEShellService::SetDesktopBackground(nsIDOMElement* aElement,
     rv = bundleService->CreateBundle(BRAND_PROPERTIES,
                                      getter_AddRefs(brandBundle));
     if (NS_SUCCEEDED(rv) && brandBundle) {
-      rv = brandBundle->GetStringFromName(MOZ_UTF16("brandShortName"),
+      rv = brandBundle->GetStringFromName(u"brandShortName",
                                           getter_Copies(brandName));
       NS_ENSURE_SUCCESS(rv, rv);
     }
@@ -516,7 +516,7 @@ ColorToCString(uint32_t aColor, nsCString& aResult)
   uint16_t green = COLOR_8_TO_16_BIT((aColor >> 8) & 0xff);
   uint16_t blue = COLOR_8_TO_16_BIT(aColor & 0xff);
 
-  PR_snprintf(buf, 14, "#%04x%04x%04x", red, green, blue);
+  snprintf(buf, 14, "#%04x%04x%04x", red, green, blue);
 }
 
 NS_IMETHODIMP

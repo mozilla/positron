@@ -1,4 +1,4 @@
-# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
+# -*- Mode: python; indent-tabs-mode: nil; tab-width: 40 -*-
 # vim: set filetype=python:
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -34,9 +34,6 @@ DEFINES['MOZ_JEMALLOC_IMPL'] = True
 # See bug 419470
 if CONFIG['OS_TARGET'] == 'Linux':
     NO_PGO = True
-
-if CONFIG['MOZ_NUWA_PROCESS']:
-    DEFINES['pthread_mutex_lock'] = '__real_pthread_mutex_lock';
 
 LOCAL_INCLUDES += [
     '/memory/build',

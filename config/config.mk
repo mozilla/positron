@@ -358,6 +358,18 @@ ifdef MACOSX_DEPLOYMENT_TARGET
 export MACOSX_DEPLOYMENT_TARGET
 endif # MACOSX_DEPLOYMENT_TARGET
 
+# Export to propagate to cl and submake for third-party code.
+# Eventually, we'll want to just use -I.
+ifdef INCLUDE
+export INCLUDE
+endif
+
+# Export to propagate to link.exe and submake for third-party code.
+# Eventually, we'll want to just use -LIBPATH.
+ifdef LIB
+export LIB
+endif
+
 ifdef MOZ_USING_CCACHE
 ifdef CLANG_CXX
 export CCACHE_CPP2=1
@@ -403,21 +415,11 @@ PWD := $(CURDIR)
 endif
 
 NSINSTALL_PY := $(PYTHON) $(abspath $(MOZILLA_DIR)/config/nsinstall.py)
-# For Pymake, wherever we use nsinstall.py we're also going to try to make it
-# a native command where possible. Since native commands can't be used outside
-# of single-line commands, we continue to provide INSTALL for general use.
-# Single-line commands should be switched over to install_cmd.
-NSINSTALL_NATIVECMD := %nsinstall nsinstall
-
-ifdef NSINSTALL_BIN
-NSINSTALL = $(NSINSTALL_BIN)
-else
-ifeq ($(HOST_OS_ARCH),WINNT)
+ifneq (,$(or $(filter WINNT,$(HOST_OS_ARCH)),$(if $(COMPILE_ENVIRONMENT),,1)))
 NSINSTALL = $(NSINSTALL_PY)
 else
 NSINSTALL = $(DEPTH)/config/nsinstall$(HOST_BIN_SUFFIX)
 endif # WINNT
-endif # NSINSTALL_BIN
 
 
 ifeq (,$(CROSS_COMPILE)$(filter-out WINNT, $(OS_ARCH)))

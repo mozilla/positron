@@ -4,12 +4,15 @@
 
 #include "GLLibraryEGL.h"
 
+#include "angle/Platform.h"
 #include "gfxConfig.h"
 #include "gfxCrashReporterUtils.h"
 #include "gfxUtils.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/Assertions.h"
 #include "mozilla/Telemetry.h"
+#include "mozilla/Tokenizer.h"
+#include "mozilla/ScopeExit.h"
 #include "mozilla/unused.h"
 #include "nsDirectoryServiceDefs.h"
 #include "nsDirectoryServiceUtils.h"
@@ -151,9 +154,12 @@ IsAccelAngleSupported(const nsCOMPtr<nsIGfxInfo>& gfxInfo,
                                          nsIGfxInfo::FEATURE_WEBGL_ANGLE,
                                          failureId,
                                          &angleSupport);
-    Telemetry::Accumulate(Telemetry::CANVAS_WEBGL_ACCL_FAILURE_ID,
-                          failureId);
-    if (failureId.IsEmpty()) {
+    if (failureId.IsEmpty() && angleSupport != nsIGfxInfo::FEATURE_STATUS_OK) {
+        // This shouldn't happen, if we see this it's because we've missed
+        // some failure paths
+        failureId = NS_LITERAL_CSTRING("FEATURE_FAILURE_ACCL_ANGLE_NOT_OK");
+    }
+    if (out_failureId->IsEmpty()) {
         *out_failureId = failureId;
     }
     return (angleSupport == nsIGfxInfo::FEATURE_STATUS_OK);
@@ -172,8 +178,55 @@ GetAndInitDisplay(GLLibraryEGL& egl, void* displayType)
     return display;
 }
 
+class AngleErrorReporting: public angle::Platform {
+public:
+    AngleErrorReporting()
+    {
+      // No static constructor
+    }
+
+    void SetFailureId(nsACString* const aFailureId)
+    {
+      mFailureId = aFailureId;
+    }
+
+    void logError(const char *errorMessage) override
+    {
+        if (!mFailureId) {
+            return;
+        }
+
+        nsCString str(errorMessage);
+        Tokenizer tokenizer(str);
+
+        // Parse "ANGLE Display::initialize error " << error.getID() << ": "
+        //       << error.getMessage()
+        nsCString currWord;
+        Tokenizer::Token intToken;
+        if (tokenizer.CheckWord("ANGLE") &&
+            tokenizer.CheckWhite() &&
+            tokenizer.CheckWord("Display") &&
+            tokenizer.CheckChar(':') &&
+            tokenizer.CheckChar(':') &&
+            tokenizer.CheckWord("initialize") &&
+            tokenizer.CheckWhite() &&
+            tokenizer.CheckWord("error") &&
+            tokenizer.CheckWhite() &&
+            tokenizer.Check(Tokenizer::TOKEN_INTEGER, intToken)) {
+            *mFailureId = "FAILURE_ID_ANGLE_ID_";
+            mFailureId->AppendPrintf("%i", intToken.AsInteger());
+        } else {
+            *mFailureId = "FAILURE_ID_ANGLE_UNKNOWN";
+        }
+    }
+private:
+    nsACString* mFailureId;
+};
+
+AngleErrorReporting gAngleErrorReporter;
+
 static EGLDisplay
-GetAndInitDisplayForAccelANGLE(GLLibraryEGL& egl)
+GetAndInitDisplayForAccelANGLE(GLLibraryEGL& egl, nsACString* const out_failureId)
 {
     EGLDisplay ret = 0;
 
@@ -186,8 +239,19 @@ GetAndInitDisplayForAccelANGLE(GLLibraryEGL& egl)
     if (gfxPrefs::WebGLANGLEForceD3D11())
         d3d11ANGLE.UserForceEnable("User force-enabled D3D11 ANGLE on disabled hardware");
 
-    if (gfxConfig::IsForcedOnByUser(Feature::D3D11_HW_ANGLE))
+    gAngleErrorReporter.SetFailureId(out_failureId);
+    egl.fANGLEPlatformInitialize(&gAngleErrorReporter);
+
+    auto guardShutdown = mozilla::MakeScopeExit([&] {
+        gAngleErrorReporter.SetFailureId(nullptr);
+        // NOTE: Ideally we should be calling ANGLEPlatformShutdown after the
+        //       ANGLE display is destroyed. However gAngleErrorReporter
+        //       will live longer than the ANGLE display so we're fine.
+    });
+
+    if (gfxConfig::IsForcedOnByUser(Feature::D3D11_HW_ANGLE)) {
         return GetAndInitDisplay(egl, LOCAL_EGL_D3D11_ONLY_DISPLAY_ANGLE);
+    }
 
     if (d3d11ANGLE.IsEnabled()) {
         ret = GetAndInitDisplay(egl, LOCAL_EGL_D3D11_ELSE_D3D9_DISPLAY_ANGLE);
@@ -195,6 +259,10 @@ GetAndInitDisplayForAccelANGLE(GLLibraryEGL& egl)
 
     if (!ret) {
         ret = GetAndInitDisplay(egl, EGL_DEFAULT_DISPLAY);
+    }
+
+    if (!ret) {
+        *out_failureId = NS_LITERAL_CSTRING("FEATURE_FAILURE_ACCL_ANGLE_NO_DISP");
     }
 
     return ret;
@@ -372,7 +440,9 @@ GLLibraryEGL::EnsureInitialized(bool forceAccel, nsACString* const out_failureId
     // Client exts are ready. (But not display exts!)
     if (IsExtensionSupported(ANGLE_platform_angle_d3d)) {
         GLLibraryLoader::SymLoadStruct d3dSymbols[] = {
-            { (PRFuncPtr*)&mSymbols.fGetPlatformDisplayEXT, { "eglGetPlatformDisplayEXT", nullptr } },
+            { (PRFuncPtr*)&mSymbols.fANGLEPlatformInitialize, { "ANGLEPlatformInitialize", nullptr } },
+            { (PRFuncPtr*)&mSymbols.fANGLEPlatformShutdown,   { "ANGLEPlatformShutdown", nullptr } },
+            { (PRFuncPtr*)&mSymbols.fGetPlatformDisplayEXT,   { "eglGetPlatformDisplayEXT", nullptr } },
             { nullptr, { nullptr } }
         };
 
@@ -395,7 +465,8 @@ GLLibraryEGL::EnsureInitialized(bool forceAccel, nsACString* const out_failureId
     EGLDisplay chosenDisplay = nullptr;
 
     if (IsExtensionSupported(ANGLE_platform_angle_d3d)) {
-        bool accelAngleSupport = IsAccelAngleSupported(gfxInfo, out_failureId);
+        nsCString accelAngleFailureId;
+        bool accelAngleSupport = IsAccelAngleSupported(gfxInfo, &accelAngleFailureId);
         bool shouldTryAccel = forceAccel || accelAngleSupport;
         bool shouldTryWARP = !forceAccel; // Only if ANGLE not supported or fails
 
@@ -403,11 +474,28 @@ GLLibraryEGL::EnsureInitialized(bool forceAccel, nsACString* const out_failureId
         if (gfxPrefs::WebGLANGLEForceWARP()) {
             shouldTryWARP = true;
             shouldTryAccel = false;
+            if (accelAngleFailureId.IsEmpty()) {
+                accelAngleFailureId = NS_LITERAL_CSTRING("FEATURE_FAILURE_FORCE_WARP");
+            }
         }
 
         // Hardware accelerated ANGLE path (supported or force accel)
         if (shouldTryAccel) {
-            chosenDisplay = GetAndInitDisplayForAccelANGLE(*this);
+            chosenDisplay = GetAndInitDisplayForAccelANGLE(*this, out_failureId);
+        }
+
+        // Report the acceleration status to telemetry
+        if (!chosenDisplay) {
+            if (accelAngleFailureId.IsEmpty()) {
+                Telemetry::Accumulate(Telemetry::CANVAS_WEBGL_ACCL_FAILURE_ID,
+                                      NS_LITERAL_CSTRING("FEATURE_FAILURE_ACCL_ANGLE_UNKNOWN"));
+            } else {
+                Telemetry::Accumulate(Telemetry::CANVAS_WEBGL_ACCL_FAILURE_ID,
+                                      accelAngleFailureId);
+            }
+        } else {
+            Telemetry::Accumulate(Telemetry::CANVAS_WEBGL_ACCL_FAILURE_ID,
+                                  NS_LITERAL_CSTRING("SUCCESS"));
         }
 
         // Fallback to a WARP display if ANGLE fails, or if WARP is forced

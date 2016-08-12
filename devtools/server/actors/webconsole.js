@@ -33,9 +33,9 @@ for (let name of ["WebConsoleUtils", "ConsoleServiceListener",
         prop = "Utils";
       }
       if (isWorker) {
-        return require("devtools/shared/webconsole/worker-utils")[prop];
+        return require("devtools/server/actors/utils/webconsole-worker-utils")[prop];
       } else {
-        return require("devtools/shared/webconsole/utils")[prop];
+        return require("devtools/server/actors/utils/webconsole-utils")[prop];
       }
     }.bind(null, name),
     configurable: true,
@@ -87,8 +87,6 @@ function WebConsoleActor(aConnection, aParentActor)
     selectedObjectActor: true, // 44+
   };
 }
-
-WebConsoleActor.l10n = new WebConsoleUtils.L10n("chrome://global/locale/console.properties");
 
 WebConsoleActor.prototype =
 {
@@ -594,8 +592,11 @@ WebConsoleActor.prototype =
           break;
         case "ConsoleAPI":
           if (!this.consoleAPIListener) {
+            // Create the consoleAPIListener (and apply the filtering options defined
+            // in the parent actor).
             this.consoleAPIListener =
-              new ConsoleAPIListener(window, this);
+              new ConsoleAPIListener(window, this,
+                                     this.parentActor.consoleAPIListenerOptions);
             this.consoleAPIListener.init();
           }
           startedListeners.push(listener);
@@ -608,7 +609,9 @@ WebConsoleActor.prototype =
             this.stackTraceCollector = new StackTraceCollector({ window, appId });
             this.stackTraceCollector.init();
 
-            if (appId || messageManager) {
+            let processBoundary = Services.appinfo.processType !=
+                                  Ci.nsIXULRuntime.PROCESS_TYPE_DEFAULT;
+            if ((appId || messageManager) && processBoundary) {
               // Start a network monitor in the parent process to listen to
               // most requests than happen in parent
               this.networkMonitor =
@@ -1294,7 +1297,19 @@ WebConsoleActor.prototype =
       evalOptions = { url: aOptions.url };
     }
 
+    // If the debugger object is changed from the last evaluation,
+    // adopt this._lastConsoleInputEvaluation value in the new debugger,
+    // to prevents "Debugger.Object belongs to a different Debugger" exceptions
+    // related to the $_ bindings.
+    if (this._lastConsoleInputEvaluation &&
+        this._lastConsoleInputEvaluation.global !== dbgWindow) {
+      this._lastConsoleInputEvaluation = dbg.adoptDebuggeeValue(
+        this._lastConsoleInputEvaluation
+      );
+    }
+
     let result;
+
     if (frame) {
       result = frame.evalWithBindings(aString, bindings, evalOptions);
     }

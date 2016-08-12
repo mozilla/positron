@@ -48,12 +48,9 @@ var PKT_SIGNUP_OVERLAY = function (options)
         {
             return '';
         }
-        else
-        {
-            return String(s).replace(/[&<>"']/g, function (str) {
-                return sanitizeMap[str];
-            });
-        }
+        return String(s).replace(/[&<>"']/g, function (str) {
+            return sanitizeMap[str];
+        });
     };
     this.getTranslations = function()
     {
@@ -170,7 +167,7 @@ PKT_SIGNUP.prototype = {
 
 $(function()
 {
-    if(!window.thePKT_SIGNUP){
+    if (!window.thePKT_SIGNUP) {
         var thePKT_SIGNUP = new PKT_SIGNUP();
         window.thePKT_SIGNUP = thePKT_SIGNUP;
         thePKT_SIGNUP.init();

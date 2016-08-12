@@ -77,7 +77,7 @@ public class SDKProcessor {
                 "#include \"mozilla/jni/Refs.h\"\n" +
                 "\n" +
                 "namespace mozilla {\n" +
-                "namespace widget {\n" +
+                "namespace java {\n" +
                 "namespace sdk {\n" +
                 "\n");
 
@@ -87,7 +87,7 @@ public class SDKProcessor {
                 "#include \"mozilla/jni/Accessors.h\"\n" +
                 "\n" +
                 "namespace mozilla {\n" +
-                "namespace widget {\n" +
+                "namespace java {\n" +
                 "namespace sdk {\n" +
                 "\n");
 
@@ -111,12 +111,12 @@ public class SDKProcessor {
 
         implementationFile.append(
                 "} /* sdk */\n" +
-                "} /* widget */\n" +
+                "} /* java */\n" +
                 "} /* mozilla */\n");
 
         headerFile.append(
                 "} /* sdk */\n" +
-                "} /* widget */\n" +
+                "} /* java */\n" +
                 "} /* mozilla */\n" +
                 "#endif\n");
 

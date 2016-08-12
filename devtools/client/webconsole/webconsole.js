@@ -9,7 +9,7 @@
 const {Cc, Ci, Cu} = require("chrome");
 
 const {Utils: WebConsoleUtils, CONSOLE_WORKER_IDS} =
-  require("devtools/shared/webconsole/utils");
+  require("devtools/client/webconsole/utils");
 const { getSourceNames } = require("devtools/client/shared/source-utils");
 const BrowserLoaderModule = {};
 Cu.import("resource://devtools/client/shared/browser-loader.js", BrowserLoaderModule);
@@ -553,6 +553,9 @@ WebConsoleFrame.prototype = {
       // in JSTerm is still necessary.
       this.newConsoleOutput = new this.window.NewConsoleOutput(this.experimentalOutputNode, this.jsterm);
       console.log("Created newConsoleOutput", this.newConsoleOutput);
+
+      let filterToolbar = doc.querySelector(".hud-console-filter-toolbar");
+      filterToolbar.hidden = true;
     }
 
     this.resize();
@@ -583,6 +586,13 @@ WebConsoleFrame.prototype = {
       // Do not focus if a link was clicked
       if (event.target.nodeName.toLowerCase() === "a" ||
           event.target.parentNode.nodeName.toLowerCase() === "a") {
+        return;
+      }
+
+      // Do not focus if a search input was clicked on the new frontend
+      if (this.NEW_CONSOLE_OUTPUT_ENABLED &&
+          event.target.nodeName.toLowerCase() === "input" &&
+          event.target.getAttribute("type").toLowerCase() === "search") {
         return;
       }
 
@@ -2531,7 +2541,7 @@ WebConsoleFrame.prototype = {
 
     let fullURL = url.split(" -> ").pop();
     // Make the location clickable.
-    let onClick = () => {
+    let onClick = ({ url, line }) => {
       let category = locationNode.closest(".message").category;
       let target = null;
 
@@ -2541,9 +2551,13 @@ WebConsoleFrame.prototype = {
         target = "styleeditor";
       } else if (category === CATEGORY_JS || category === CATEGORY_WEBDEV) {
         target = "jsdebugger";
-      } else if (/\.js$/.test(fullURL)) {
+      } else if (/\.js$/.test(url)) {
         // If it ends in .js, let's attempt to open in debugger
         // anyway, as this falls back to normal view-source.
+        target = "jsdebugger";
+      } else {
+        // Point everything else to debugger, if source not available,
+        // it will fall back to view-source.
         target = "jsdebugger";
       }
 
@@ -2552,15 +2566,17 @@ WebConsoleFrame.prototype = {
           this.owner.viewSourceInScratchpad(url, line);
           return;
         case "jsdebugger":
-          this.owner.viewSourceInDebugger(fullURL, line);
+          this.owner.viewSourceInDebugger(url, line);
           return;
         case "styleeditor":
-          this.owner.viewSourceInStyleEditor(fullURL, line);
+          this.owner.viewSourceInStyleEditor(url, line);
           return;
       }
       // No matching tool found; use old school view-source
-      this.owner.viewSource(fullURL, line);
+      this.owner.viewSource(url, line);
     };
+
+    const toolbox = gDevTools.getToolbox(this.owner.target);
 
     this.ReactDOM.render(this.FrameView({
       frame: {
@@ -2570,6 +2586,7 @@ WebConsoleFrame.prototype = {
       },
       showEmptyPathAsHost: true,
       onClick,
+      sourceMapService: toolbox ? toolbox._sourceMapService : null,
     }), locationNode);
 
     return locationNode;

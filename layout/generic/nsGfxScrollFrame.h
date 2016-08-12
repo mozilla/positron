@@ -30,9 +30,9 @@ class nsIContent;
 class nsIAtom;
 class nsPresState;
 class nsIScrollPositionListener;
-struct ScrollReflowState;
 
 namespace mozilla {
+struct ScrollReflowInput;
 namespace layers {
 class Layer;
 } // namespace layers
@@ -308,7 +308,7 @@ public:
   nsRect GetScrolledRect() const;
 
   /**
-   * GetScrolledRectInternal is designed to encapsulate deciding which
+   * GetUnsnappedScrolledRectInternal is designed to encapsulate deciding which
    * directions of overflow should be reachable by scrolling and which
    * should not.  Callers should NOT depend on it having any particular
    * behavior (although nsXULScrollFrame currently does).
@@ -318,8 +318,8 @@ public:
    * nsXULScrollFrames, and allows scrolling down and to the left for
    * nsHTMLScrollFrames with RTL directionality.
    */
-  nsRect GetScrolledRectInternal(const nsRect& aScrolledOverflowArea,
-                                 const nsSize& aScrollPortSize) const;
+  nsRect GetUnsnappedScrolledRectInternal(const nsRect& aScrolledOverflowArea,
+                                          const nsSize& aScrollPortSize) const;
 
   uint32_t GetScrollbarVisibility() const {
     return (mHasVerticalScrollbar ? nsIScrollableFrame::VERTICAL : 0) |
@@ -653,6 +653,7 @@ class nsHTMLScrollFrame : public nsContainerFrame,
 public:
   typedef mozilla::ScrollFrameHelper ScrollFrameHelper;
   typedef mozilla::CSSIntPoint CSSIntPoint;
+  typedef mozilla::ScrollReflowInput ScrollReflowInput;
   friend nsHTMLScrollFrame* NS_NewHTMLScrollFrame(nsIPresShell* aPresShell,
                                                   nsStyleContext* aContext,
                                                   bool aIsRoot);
@@ -674,19 +675,19 @@ public:
     mHelper.BuildDisplayList(aBuilder, aDirtyRect, aLists);
   }
 
-  bool TryLayout(ScrollReflowState* aState,
-                   nsHTMLReflowMetrics* aKidMetrics,
+  bool TryLayout(ScrollReflowInput* aState,
+                   ReflowOutput* aKidMetrics,
                    bool aAssumeVScroll, bool aAssumeHScroll,
                    bool aForce);
-  bool ScrolledContentDependsOnHeight(ScrollReflowState* aState);
-  void ReflowScrolledFrame(ScrollReflowState* aState,
+  bool ScrolledContentDependsOnHeight(ScrollReflowInput* aState);
+  void ReflowScrolledFrame(ScrollReflowInput* aState,
                            bool aAssumeHScroll,
                            bool aAssumeVScroll,
-                           nsHTMLReflowMetrics* aMetrics,
+                           ReflowOutput* aMetrics,
                            bool aFirstPass);
-  void ReflowContents(ScrollReflowState* aState,
-                      const nsHTMLReflowMetrics& aDesiredSize);
-  void PlaceScrollArea(const ScrollReflowState& aState,
+  void ReflowContents(ScrollReflowInput* aState,
+                      const ReflowOutput& aDesiredSize);
+  void PlaceScrollArea(const ScrollReflowInput& aState,
                        const nsPoint& aScrollPosition);
   nscoord GetIntrinsicVScrollbarWidth(nsRenderingContext *aRenderingContext);
 
@@ -701,8 +702,8 @@ public:
   virtual bool IsXULCollapsed() override;
   
   virtual void Reflow(nsPresContext*           aPresContext,
-                      nsHTMLReflowMetrics&     aDesiredSize,
-                      const nsHTMLReflowState& aReflowState,
+                      ReflowOutput&     aDesiredSize,
+                      const ReflowInput& aReflowInput,
                       nsReflowStatus&          aStatus) override;
 
   virtual bool ComputeCustomOverflow(nsOverflowAreas& aOverflowAreas) override {
@@ -1023,8 +1024,8 @@ protected:
   void SetSuppressScrollbarUpdate(bool aSuppress) {
     mHelper.mSupppressScrollbarUpdate = aSuppress;
   }
-  bool GuessHScrollbarNeeded(const ScrollReflowState& aState);
-  bool GuessVScrollbarNeeded(const ScrollReflowState& aState);
+  bool GuessHScrollbarNeeded(const ScrollReflowInput& aState);
+  bool GuessVScrollbarNeeded(const ScrollReflowInput& aState);
 
   bool IsScrollbarUpdateSuppressed() const {
     return mHelper.mSupppressScrollbarUpdate;
@@ -1158,8 +1159,8 @@ public:
   void RemoveHorizontalScrollbar(nsBoxLayoutState& aState, bool aOnBottom);
   void RemoveVerticalScrollbar  (nsBoxLayoutState& aState, bool aOnRight);
 
-  static void AdjustReflowStateForPrintPreview(nsBoxLayoutState& aState, bool& aSetBack);
-  static void AdjustReflowStateBack(nsBoxLayoutState& aState, bool aSetBack);
+  static void AdjustReflowInputForPrintPreview(nsBoxLayoutState& aState, bool& aSetBack);
+  static void AdjustReflowInputBack(nsBoxLayoutState& aState, bool aSetBack);
 
   // nsIScrollableFrame
   virtual nsIFrame* GetScrolledFrame() const override {

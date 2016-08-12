@@ -77,11 +77,13 @@ CanvasClient2D::UpdateFromTexture(TextureClient* aTexture)
     }
   }
 
-  mBackBuffer = aTexture;
+  mBackBuffer = nullptr;
+  mFrontBuffer = nullptr;
+  mBufferProviderTexture = aTexture;
 
   AutoTArray<CompositableForwarder::TimedTextureClient,1> textures;
   CompositableForwarder::TimedTextureClient* t = textures.AppendElement();
-  t->mTextureClient = mBackBuffer;
+  t->mTextureClient = aTexture;
   t->mPictureRect = nsIntRect(nsIntPoint(0, 0), aTexture->GetSize());
   t->mFrameID = mFrameID;
   t->mInputFrameID = VRManagerChild::Get()->GetInputFrameID();
@@ -93,9 +95,10 @@ CanvasClient2D::UpdateFromTexture(TextureClient* aTexture)
 void
 CanvasClient2D::Update(gfx::IntSize aSize, ClientCanvasLayer* aLayer)
 {
+  mBufferProviderTexture = nullptr;
+
   AutoRemoveTexture autoRemove(this);
-  if (mBackBuffer &&
-      (mBackBuffer->IsImmutable() || mBackBuffer->GetSize() != aSize)) {
+  if (mBackBuffer && (mBackBuffer->IsReadLocked() || mBackBuffer->GetSize() != aSize)) {
     autoRemove.mTexture = mBackBuffer;
     mBackBuffer = nullptr;
   }
@@ -118,6 +121,7 @@ CanvasClient2D::Update(gfx::IntSize aSize, ClientCanvasLayer* aLayer)
       NS_WARNING("Failed to allocate the TextureClient");
       return;
     }
+    mBackBuffer->EnableReadLock();
     MOZ_ASSERT(mBackBuffer->CanExposeDrawTarget());
 
     bufferCreated = true;
@@ -133,7 +137,10 @@ CanvasClient2D::Update(gfx::IntSize aSize, ClientCanvasLayer* aLayer)
 
     RefPtr<DrawTarget> target = mBackBuffer->BorrowDrawTarget();
     if (target) {
-      aLayer->UpdateTarget(target);
+      if (!aLayer->UpdateTarget(target)) {
+        NS_WARNING("Failed to copy the canvas into a TextureClient.");
+        return;
+      }
       updated = true;
     }
   }

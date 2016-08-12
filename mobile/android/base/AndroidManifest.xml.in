@@ -241,7 +241,7 @@
         </receiver>
 
         <receiver
-            android:name="org.mozilla.gecko.NotificationReceiver"
+            android:name="org.mozilla.gecko.notifications.NotificationReceiver"
             android:exported="false">
             <!-- Notification API V2 -->
             <intent-filter>
@@ -277,6 +277,10 @@
 
         <provider android:name="org.mozilla.gecko.db.BrowserProvider"
                   android:authorities="@ANDROID_PACKAGE_NAME@.db.browser"
+                  android:exported="false"/>
+
+        <provider android:name="org.mozilla.gecko.distribution.PartnerBookmarksProviderProxy"
+                  android:authorities="@ANDROID_PACKAGE_NAME@.partnerbookmarks"
                   android:exported="false"/>
 
         <!-- Share overlay activity
@@ -353,7 +357,7 @@
 
         <service
             android:exported="false"
-            android:name="org.mozilla.gecko.NotificationService">
+            android:name="org.mozilla.gecko.notifications.NotificationService">
         </service>
 
         <service

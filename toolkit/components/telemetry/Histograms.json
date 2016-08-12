@@ -1,3 +1,4 @@
+
 {
   "A11Y_INSTANTIATED_FLAG": {
     "expires_in_version": "never",
@@ -87,6 +88,13 @@
     "expires_in_version": "never",
     "kind": "boolean",
     "description": "Application reputation query count (both local and remote)"
+  },
+  "APPLICATION_REPUTATION_REMOTE_LOOKUP_TIMEOUT": {
+    "alert_emails": ["gcp@mozilla.com", "francois@mozilla.com"],
+    "expires_in_version": "55",
+    "kind": "boolean",
+    "bug_numbers": [1172689],
+    "description": "Recorded when application reputation remote lookup is performed, `true` is recorded if the lookup times out."
   },
   "AUDIOSTREAM_FIRST_OPEN_MS": {
     "expires_in_version": "50",
@@ -547,6 +555,15 @@
     "n_buckets": 100,
     "description": "Time spent running JS minor GC (us)"
   },
+  "GC_NURSERY_BYTES": {
+    "alert_emails": ["dev-telemetry-gc-alerts@mozilla.org"],
+    "expires_in_version": "never",
+    "kind": "linear",
+    "high": 16777216,
+    "n_buckets": 16,
+    "bug_numbers": [1259347],
+    "description": "Size of the GC nursery (bytes)"
+  },
   "GEOLOCATION_ACCURACY_EXPONENTIAL": {
     "expires_in_version": "default",
     "kind": "exponential",
@@ -1005,20 +1022,6 @@
     "high": 50000000,
     "n_buckets": 50,
     "description": "PNG image decode speed (Kbytes/sec)"
-  },
-  "IMAGE_OPTIMIZE_TO_SINGLE_COLOR_USED": {
-    "expires_in_version": "54",
-    "kind": "boolean",
-    "description": "Records true each time a decoded image is optimized to a single color.",
-    "alert_emails": ["seth@mozilla.com"],
-    "bug_numbers": [1281680]
-  },
-  "IMAGE_OPTIMIZE_TO_565_USED": {
-    "expires_in_version": "54",
-    "kind": "boolean",
-    "description": "Records true each time a decoded image is optimized to R5G6B5 format.",
-    "alert_emails": ["seth@mozilla.com"],
-    "bug_numbers": [1281680]
   },
   "CANVAS_2D_USED": {
     "expires_in_version": "never",
@@ -1500,11 +1503,12 @@
     "description": "The lifetime of accepted HTTPS server certificates, in weeks, up to 2 years. Bucket 105 is all end-entity HTTPS server certificates with a lifetime > 2 years."
   },
   "KEYGEN_GENERATED_KEY_TYPE": {
-    "expires_in_version": "50",
+    "expires_in_version": "55",
     "alert_emails": ["seceng-telemetry@mozilla.com"],
     "kind": "count",
     "keyed": true,
     "releaseChannelCollection": "opt-out",
+    "bug_numbers": [1191414,1284945],
     "description": "The number of times we generate a key via keygen, keyed on algorithm and keysize. Keys include RSA with key size (512, 1024, 2048, possibly others), secp384r1, secp256r1, and 'other_ec'."
   },
   "WEBSOCKETS_HANDSHAKE_TYPE": {
@@ -3396,7 +3400,7 @@
     "description": "PLACES: Number of unique pages"
   },
   "PLACES_MOST_RECENT_EXPIRED_VISIT_DAYS": {
-    "alert_emails": ["mbonardo@mozilla.com"],
+    "alert_emails": ["firefox-dev@mozilla.org"],
     "expires_in_version": "never",
     "kind": "linear",
     "low": 30,
@@ -4533,15 +4537,15 @@
     "description": "Windows only. Counts occurrences of touch events"
   },
   "FX_URLBAR_SELECTED_RESULT_INDEX": {
-    "alert_emails": ["mbonardo@mozilla.com"],
-    "expires_in_version": "50",
+    "alert_emails": ["firefox-dev@mozilla.org"],
+    "expires_in_version": "55",
     "kind": "enumerated",
     "n_values": 17,
     "bug_numbers": [775825],
     "description": "Firefox: The index of the selected result in the URL bar popup"
   },
   "FX_URLBAR_SELECTED_RESULT_TYPE": {
-    "alert_emails": ["mbonardo@mozilla.com"],
+    "alert_emails": ["firefox-dev@mozilla.org"],
     "expires_in_version": "never",
     "kind": "enumerated",
     "n_values": 14,
@@ -5079,6 +5083,32 @@
     "expires_in_version": "never",
     "kind": "count",
     "description": "a testing histogram; not meant to be touched - initially not recording"
+  },
+  "TELEMETRY_TEST_CATEGORICAL": {
+    "alert_emails": ["telemetry-client-dev@mozilla.com"],
+    "bug_numbers": [1188888],
+    "expires_in_version": "never",
+    "kind": "categorical",
+    "labels": [
+      "CommonLabel",
+      "Label2",
+      "Label3"
+    ],
+    "description": "a testing histogram; not meant to be touched"
+  },
+  "TELEMETRY_TEST_CATEGORICAL_OPTOUT": {
+    "alert_emails": ["telemetry-client-dev@mozilla.com"],
+    "bug_numbers": [1188888],
+    "expires_in_version": "never",
+    "releaseChannelCollection": "opt-out",
+    "kind": "categorical",
+    "labels": [
+      "CommonLabel",
+      "Label4",
+      "Label5",
+      "Label6"
+    ],
+    "description": "a testing histogram; not meant to be touched"
   },
   "TELEMETRY_TEST_KEYED_COUNT_INIT_NO_RECORD": {
     "expires_in_version": "never",
@@ -5656,6 +5686,23 @@
     "releaseChannelCollection": "opt-out",
     "description": "A counter incremented every time the browser enters simplified mode on print preview."
   },
+  "PRINT_PREVIEW_SIMPLIFY_PAGE_UNAVAILABLE_COUNT": {
+     "alert_emails": ["carnold@mozilla.org"],
+     "bug_numbers": [1287587],
+     "expires_in_version": "56",
+     "kind": "count",
+     "releaseChannelCollection": "opt-out",
+     "description": "A counter incremented every time the simplified mode is unavailable on print preview."
+   },
+  "PRINT_COUNT": {
+     "alert_emails": ["carnold@mozilla.org"],
+     "bug_numbers": [1287587],
+     "expires_in_version": "56",
+     "kind": "count",
+     "keyed": true,
+     "releaseChannelCollection": "opt-out",
+     "description": "A counter incremented every time the user prints a document."
+   },
   "DEVTOOLS_DEBUGGER_DISPLAY_SOURCE_LOCAL_MS": {
     "expires_in_version": "never",
     "kind": "exponential",
@@ -5748,14 +5795,14 @@
   },
   "VIDEO_CAN_CREATE_AAC_DECODER": {
     "alert_emails": ["cpearce@mozilla.com"],
-    "expires_in_version": "50",
+    "expires_in_version": "58",
     "kind": "boolean",
     "description": "Whether at startup we report we can playback MP4 (AAC) audio. This is single value is recorded at every startup.",
     "releaseChannelCollection": "opt-out"
   },
   "VIDEO_CAN_CREATE_H264_DECODER": {
     "alert_emails": ["cpearce@mozilla.com"],
-    "expires_in_version": "50",
+    "expires_in_version": "58",
     "kind": "boolean",
     "description": "Whether at startup we report we can playback MP4 (H.264) video. This is single value is recorded at every startup.",
     "releaseChannelCollection": "opt-out"
@@ -7511,6 +7558,13 @@
     "n_values": 64,
     "description": "TLS/SSL version intolerance was falsely detected, server rejected handshake (see tlsIntoleranceTelemetryBucket() in nsNSSIOLayer.cpp)."
   },
+  "SSL_WEAK_CIPHERS_FALLBACK": {
+    "alert_emails": ["seceng-telemetry@mozilla.com"],
+    "expires_in_version": "never",
+    "kind": "enumerated",
+    "n_values": 64,
+    "description": "Fallback attempted when server did not support any strong cipher suites"
+  },
   "SSL_CIPHER_SUITE_FULL": {
     "alert_emails": ["seceng-telemetry@mozilla.com"],
     "expires_in_version": "never",
@@ -7777,6 +7831,13 @@
     "high": 1000,
     "n_buckets": 10,
     "description": "The number of times a sync successfully completed in this session"
+  },
+  "WEAVE_WIPE_SERVER_SUCCEEDED": {
+    "expires_in_version": "55",
+    "alert_emails": ["fx-team@mozilla.com"],
+    "kind": "boolean",
+    "bug_numbers": [1241699],
+    "description": "Stores 1 if a wipeServer call succeeded, and 0 if it failed."
   },
   "WEBCRYPTO_EXTRACTABLE_IMPORT": {
     "expires_in_version": "never",
@@ -8205,6 +8266,36 @@
     "n_buckets": 100,
     "bug_numbers": [1285419]
   },
+  "VIDEO_HIDDEN_PLAY_TIME_PERCENTAGE" : {
+    "alert_emails": ["ajones@mozilla.com", "gsquelart@mozilla.com"],
+    "expires_in_version": "55",
+    "description": "Percentage of total time spent playing video while element is hidden. Keyed by audio presence and by height ranges (boundaries: 240. 480, 576, 720, 1080, 2160), e.g.: 'V,0<h<=240', 'AV,h>2180'; and 'All' will accumulate all percentages. This is reported whenever an HTML Media Element is suspended or resumed, such as when the page is unloaded.",
+    "keyed": true,
+    "kind": "linear",
+    "high": 100,
+    "n_buckets": 50,
+    "bug_numbers": [1287987]
+  },
+  "VIDEO_INTER_KEYFRAME_AVERAGE_MS" : {
+    "alert_emails": ["ajones@mozilla.com", "gsquelart@mozilla.com"],
+    "expires_in_version": "55",
+    "description": "Average interval between video keyframes in played videos, in milliseconds. Keyed by audio presence and by height ranges (boundaries: 240. 480, 576, 720, 1080, 2160), e.g.: 'V,0<h<=240', 'AV,h>2180'; and 'All' will accumulate all percentages. This is reported whenever an HTML Media Element is suspended or resumed, such as when the page is unloaded.",
+    "keyed": true,
+    "kind": "exponential",
+    "high": 60000,
+    "n_buckets": 100,
+    "bug_numbers": [1289668]
+  },
+  "VIDEO_INTER_KEYFRAME_MAX_MS" : {
+    "alert_emails": ["ajones@mozilla.com", "gsquelart@mozilla.com"],
+    "expires_in_version": "55",
+    "description": "Maximum interval between video keyframes in played videos, in milliseconds. Keyed by audio presence and by height ranges (boundaries: 240. 480, 576, 720, 1080, 2160), e.g.: 'V,0<h<=240', 'AV,h>2180'; and 'All' will accumulate all percentages. This is reported whenever an HTML Media Element is suspended or resumed, such as when the page is unloaded.",
+    "keyed": true,
+    "kind": "exponential",
+    "high": 60000,
+    "n_buckets": 100,
+    "bug_numbers": [1289668]
+  },
   "VIDEO_UNLOAD_STATE": {
     "alert_emails": ["ajones@mozilla.com"],
     "expires_in_version": "55",
@@ -8212,36 +8303,6 @@
     "n_values": 5,
     "description": "HTML Media Element state when unloading. ended = 0, paused = 1, stalled = 2, seeking = 3, other = 4",
     "bug_numbers": [1261955, 1261955]
-  },
-  "VIDEO_ADOBE_GMP_DISAPPEARED": {
-    "alert_emails": ["cpearce@mozilla.com"],
-    "expires_in_version": "50",
-    "kind": "flag",
-    "description": "Whether or not the Adobe EME GMP was expected to be resident on disk but mysteriously isn't.",
-    "releaseChannelCollection": "opt-out"
-  },
-  "VIDEO_ADOBE_GMP_MISSING_FILES": {
-    "alert_emails": ["cpearce@mozilla.com"],
-    "expires_in_version": "50",
-    "kind": "enumerated",
-    "n_values" : 8,
-    "description": "Adobe EME GMP files missing (0=none, or sum of: 1=library, 2=info, 4=voucher)",
-    "releaseChannelCollection": "opt-out"
-  },
-  "VIDEO_OPENH264_GMP_DISAPPEARED": {
-    "alert_emails": ["cpearce@mozilla.com", "rjesup@mozilla.com"],
-    "expires_in_version": "50",
-    "kind": "flag",
-    "description": "Whether or not the OpenH264 GMP was expected to be resident on disk but mysteriously isn't.",
-    "releaseChannelCollection": "opt-out"
-  },
-  "VIDEO_OPENH264_GMP_MISSING_FILES": {
-    "alert_emails": ["cpearce@mozilla.com", "rjesup@mozilla.com"],
-    "expires_in_version": "50",
-    "kind": "enumerated",
-    "n_values" : 4,
-    "description": "OpenH264 GMP files missing (0=none, or sum of: 1=library, 2=info)",
-    "releaseChannelCollection": "opt-out"
   },
   "VIDEO_VP9_BENCHMARK_FPS": {
     "alert_emails": ["ajones@mozilla.com"],
@@ -8270,40 +8331,24 @@
   },
   "FX_SANITIZE_CACHE": {
     "alert_emails": ["firefox-dev@mozilla.org"],
-    "expires_in_version": "50",
+    "expires_in_version": "never",
     "kind": "exponential",
     "high": 30000,
     "n_buckets": 20,
     "description": "Sanitize: Time it takes to sanitize the cache (ms)"
   },
-  "FX_SANITIZE_COOKIES": {
-    "alert_emails": ["firefox-dev@mozilla.org"],
-    "expires_in_version": "50",
-    "kind": "exponential",
-    "high": 30000,
-    "n_buckets": 20,
-    "description": "Sanitize: Time it takes to sanitize cookies (ms)"
-  },
   "FX_SANITIZE_COOKIES_2": {
     "alert_emails": ["firefox-dev@mozilla.org"],
-    "expires_in_version": "50",
+    "expires_in_version": "never",
     "kind": "exponential",
     "high": 30000,
     "n_buckets": 20,
     "description": "Sanitize: Time it takes to sanitize firefox cookies (ms). A subset of FX_SANITIZE_COOKIES."
   },
-  "FX_SANITIZE_PLUGINS": {
-    "alert_emails": ["firefox-dev@mozilla.org"],
-    "expires_in_version": "50",
-    "kind": "exponential",
-    "high": 30000,
-    "n_buckets": 20,
-    "description": "Sanitize: Time it takes to sanitize plugin cookies (ms). A subset of FX_SANITIZE_COOKIES."
-  },
   "FX_SANITIZE_LOADED_FLASH": {
     "alert_emails": ["firefox-dev@mozilla.org"],
     "bug_numbers": [1251469],
-    "expires_in_version": "50",
+    "expires_in_version": "55",
     "kind": "exponential",
     "high": 30000,
     "n_buckets": 20,
@@ -8312,23 +8357,15 @@
   "FX_SANITIZE_UNLOADED_FLASH": {
     "alert_emails": ["firefox-dev@mozilla.org"],
     "bug_numbers": [1251469],
-    "expires_in_version": "50",
+    "expires_in_version": "55",
     "kind": "exponential",
     "high": 30000,
     "n_buckets": 20,
     "description": "Sanitize: Time it takes to sanitize Flash when it's not yet loaded (ms). A subset of FX_SANITIZE_PLUGINS."
   },
-  "FX_SANITIZE_OFFLINEAPPS": {
-    "alert_emails": ["firefox-dev@mozilla.org"],
-    "expires_in_version": "50",
-    "kind": "exponential",
-    "high": 30000,
-    "n_buckets": 20,
-    "description": "Sanitize: Time it takes to sanitize stored offline app data (ms)"
-  },
   "FX_SANITIZE_HISTORY": {
     "alert_emails": ["firefox-dev@mozilla.org"],
-    "expires_in_version": "50",
+    "expires_in_version": "never",
     "kind": "exponential",
     "high": 30000,
     "n_buckets": 20,
@@ -8336,7 +8373,7 @@
   },
   "FX_SANITIZE_FORMDATA": {
     "alert_emails": ["firefox-dev@mozilla.org"],
-    "expires_in_version": "50",
+    "expires_in_version": "never",
     "kind": "exponential",
     "high": 30000,
     "n_buckets": 20,
@@ -8344,7 +8381,7 @@
   },
   "FX_SANITIZE_DOWNLOADS": {
     "alert_emails": ["firefox-dev@mozilla.org"],
-    "expires_in_version": "50",
+    "expires_in_version": "never",
     "kind": "exponential",
     "high": 30000,
     "n_buckets": 20,
@@ -8352,7 +8389,7 @@
   },
   "FX_SANITIZE_SESSIONS": {
     "alert_emails": ["firefox-dev@mozilla.org"],
-    "expires_in_version": "50",
+    "expires_in_version": "never",
     "kind": "exponential",
     "high": 30000,
     "n_buckets": 20,
@@ -8360,7 +8397,7 @@
   },
   "FX_SANITIZE_SITESETTINGS": {
     "alert_emails": ["firefox-dev@mozilla.org"],
-    "expires_in_version": "50",
+    "expires_in_version": "never",
     "kind": "exponential",
     "high": 30000,
     "n_buckets": 20,
@@ -8368,7 +8405,7 @@
   },
   "FX_SANITIZE_OPENWINDOWS": {
     "alert_emails": ["firefox-dev@mozilla.org"],
-    "expires_in_version": "50",
+    "expires_in_version": "never",
     "kind": "exponential",
     "high": 30000,
     "n_buckets": 20,
@@ -9303,30 +9340,6 @@
     "keyed": true,
     "description": "Contiguous time spent by an add-on blocking the main loop by performing a blocking cross-process call (microseconds, keyed by add-on ID)."
   },
-  "VIDEO_EME_ADOBE_INSTALL_FAILED_REASON": {
-    "alert_emails": ["edwin@mozilla.com"],
-    "expires_in_version": "50",
-    "kind": "enumerated",
-    "n_values": 10,
-    "releaseChannelCollection": "opt-out",
-    "description": "Reason for Adobe CDM failing to update. (1 = GMP_INVALID; 2 = GMP_HIDDEN; 3 = GMP_DISABLED; 4 = GMP_UPDATE_DISABLED)"
-  },
-  "VIDEO_EME_ADOBE_HIDDEN_REASON": {
-    "alert_emails": ["edwin@mozilla.com"],
-    "expires_in_version": "50",
-    "kind": "enumerated",
-    "n_values": 10,
-    "releaseChannelCollection": "opt-out",
-    "description": "Reason for Adobe CDM being hidden. (1 = UNSUPPORTED; 2 = EME_DISABLED)"
-  },
-  "VIDEO_EME_ADOBE_UNSUPPORTED_REASON": {
-    "alert_emails": ["edwin@mozilla.com"],
-    "expires_in_version": "50",
-    "kind": "enumerated",
-    "n_values": 10,
-    "releaseChannelCollection": "opt-out",
-    "description": "Reason for reporting the Adobe CDM to be unsupported. (1 = NOT_WINDOWS; 2 = WINDOWS_VERSION)"
-  },
   "VIDEO_EME_REQUEST_SUCCESS_LATENCY_MS": {
     "alert_emails": ["cpearce@mozilla.com"],
     "expires_in_version": "55",
@@ -9819,51 +9832,51 @@
     "kind": "boolean",
     "description": "Result of call to SandboxBroker::Initialize"
   },
-  "SANDBOX_CAPABILITIES_SECCOMP_BPF": {
+  "SANDBOX_HAS_SECCOMP_BPF": {
     "alert_emails": ["gcp@mozilla.com"],
     "bug_numbers": [1098428],
     "expires_in_version": "55",
-    "kind": "flag",
+    "kind": "boolean",
     "cpp_guard": "XP_LINUX",
     "description": "Whether the system has seccomp-bpf capability"
   },
-  "SANDBOX_CAPABILITIES_SECCOMP_TSYNC": {
+  "SANDBOX_HAS_SECCOMP_TSYNC": {
     "alert_emails": ["gcp@mozilla.com"],
     "bug_numbers": [1098428],
     "expires_in_version": "55",
-    "kind": "flag",
+    "kind": "boolean",
     "cpp_guard": "XP_LINUX",
     "description": "Whether the system has seccomp-bpf thread-sync capability"
   },
-  "SANDBOX_CAPABILITIES_USER_NAMESPACES": {
+  "SANDBOX_HAS_USER_NAMESPACES": {
     "alert_emails": ["gcp@mozilla.com"],
     "bug_numbers": [1098428],
     "expires_in_version": "55",
-    "kind": "flag",
+    "kind": "boolean",
     "cpp_guard": "XP_LINUX",
     "description": "Whether our process succedeed in creating a user namespace"
   },
-  "SANDBOX_CAPABILITIES_USER_NAMESPACES_PRIVILEGED": {
+  "SANDBOX_HAS_USER_NAMESPACES_PRIVILEGED": {
     "alert_emails": ["gcp@mozilla.com"],
     "bug_numbers": [1098428],
     "expires_in_version": "55",
-    "kind": "flag",
+    "kind": "boolean",
     "cpp_guard": "XP_LINUX",
     "description": "Whether the system has the capability to create privileged user namespaces"
   },
- "SANDBOX_CAPABILITIES_ENABLED_MEDIA": {
+ "SANDBOX_MEDIA_ENABLED": {
     "alert_emails": ["gcp@mozilla.com"],
     "bug_numbers": [1098428],
     "expires_in_version": "55",
-    "kind": "flag",
+    "kind": "boolean",
     "cpp_guard": "XP_LINUX",
     "description": "Whether the sandbox is enabled for media/GMP plugins"
   },
- "SANDBOX_CAPABILITIES_ENABLED_CONTENT": {
+ "SANDBOX_CONTENT_ENABLED": {
     "alert_emails": ["gcp@mozilla.com"],
     "bug_numbers": [1098428],
     "expires_in_version": "55",
-    "kind": "flag",
+    "kind": "boolean",
     "cpp_guard": "XP_LINUX",
     "description": "Whether the sandbox is enabled for the content process"
   },
@@ -9981,6 +9994,14 @@
     "bug_numbers": [1272501],
     "releaseChannelCollection": "opt-out",
     "description": "HTMLInputElement.webkitdirectory attribute used"
+  },
+  "CONTAINER_USED": {
+    "alert_emails": ["amarchesini@mozilla.com"],
+    "expires_in_version": "55",
+    "kind": "enumerated",
+    "bug_numbers": [1276006],
+    "n_values": 5,
+    "description": "Records a value each time a builtin container is opened. 1=personal 2=work 3=banking 4=shopping. Does not record usage of user-created containers."
   },
   "UNIQUE_CONTAINERS_OPENED": {
     "alert_emails": ["amarchesini@mozilla.com"],

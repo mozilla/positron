@@ -68,6 +68,7 @@
     _(NewArrayCopyOnWrite)          \
     _(NewArrayDynamicLength)        \
     _(NewTypedArray)                \
+    _(NewTypedArrayDynamicLength)   \
     _(ArraySplice)                  \
     _(NewObject)                    \
     _(NewTypedObject)               \
@@ -126,8 +127,8 @@
     _(ObjectGroupDispatch)          \
     _(Compare)                      \
     _(CompareAndBranch)             \
-    _(Compare64)                    \
-    _(Compare64AndBranch)           \
+    _(CompareI64)                   \
+    _(CompareI64AndBranch)          \
     _(CompareD)                     \
     _(CompareDAndBranch)            \
     _(CompareF)                     \
@@ -372,7 +373,7 @@
     _(AsmReinterpretToI64)          \
     _(AsmReinterpretFromI64)        \
     _(Rotate)                       \
-    _(Rotate64)                     \
+    _(RotateI64)                    \
     _(GetDOMProperty)               \
     _(GetDOMMemberV)                \
     _(GetDOMMemberT)                \
@@ -388,18 +389,23 @@
     _(WasmLoad)                     \
     _(WasmLoadI64)                  \
     _(WasmStore)                    \
+    _(WasmStoreI64)                 \
     _(WasmBoundsCheck)              \
+    _(WasmLoadGlobalVar)            \
+    _(WasmLoadGlobalVarI64)         \
+    _(WasmStoreGlobalVar)           \
+    _(WasmStoreGlobalVarI64)        \
     _(AsmJSLoadHeap)                \
     _(AsmJSStoreHeap)               \
-    _(AsmJSLoadFuncPtr)             \
-    _(AsmJSLoadGlobalVar)           \
-    _(AsmJSStoreGlobalVar)          \
-    _(AsmJSLoadFFIFunc)             \
     _(AsmJSParameter)               \
+    _(AsmJSParameterI64)            \
     _(AsmJSReturn)                  \
+    _(AsmJSReturnI64)               \
     _(AsmJSVoidReturn)              \
     _(AsmJSPassStackArg)            \
-    _(AsmJSCall)                    \
+    _(AsmJSPassStackArgI64)         \
+    _(WasmCall)                     \
+    _(WasmCallI64)                  \
     _(AsmJSCompareExchangeHeap)     \
     _(AsmJSAtomicExchangeHeap)      \
     _(AsmJSAtomicBinopHeap)         \

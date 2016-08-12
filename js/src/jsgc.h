@@ -20,6 +20,7 @@
 #include "js/SliceBudget.h"
 #include "js/Vector.h"
 #include "threading/ConditionVariable.h"
+#include "threading/Thread.h"
 #include "vm/NativeObject.h"
 
 namespace js {
@@ -43,16 +44,18 @@ namespace gc {
 
 struct FinalizePhase;
 
-enum State {
-    NO_INCREMENTAL,
-    MARK_ROOTS,
-    MARK,
-    SWEEP,
-    FINALIZE,
-    COMPACT,
-    DECOMMIT,
-
-    NUM_STATES
+#define GCSTATES(D) \
+    D(NotActive) \
+    D(MarkRoots) \
+    D(Mark) \
+    D(Sweep) \
+    D(Finalize) \
+    D(Compact) \
+    D(Decommit)
+enum class State {
+#define MAKE_STATE(name) name,
+    GCSTATES(MAKE_STATE)
+#undef MAKE_STATE
 };
 
 /*
@@ -741,18 +744,22 @@ class ArenaLists
 #endif
     }
 
-    void checkEmptyArenaLists() {
+    bool checkEmptyArenaLists() {
+        bool empty = true;
 #ifdef DEBUG
-        for (auto i : AllAllocKinds())
-            checkEmptyArenaList(i);
+        for (auto i : AllAllocKinds()) {
+            if (!checkEmptyArenaList(i))
+                empty = false;
+        }
 #endif
+        return empty;
     }
 
     void checkEmptyFreeList(AllocKind kind) {
         MOZ_ASSERT(freeLists[kind]->isEmpty());
     }
 
-    void checkEmptyArenaList(AllocKind kind);
+    bool checkEmptyArenaList(AllocKind kind);
 
     bool relocateArenas(Zone* zone, Arena*& relocatedListOut, JS::gcreason::Reason reason,
                         SliceBudget& sliceBudget, gcstats::Statistics& stats);
@@ -856,16 +863,15 @@ class GCHelperState
     // Activity for the helper to do, protected by the GC lock.
     State state_;
 
-    // Thread which work is being performed on, or null.
-    PRThread* thread;
+    // Thread which work is being performed on, if any.
+    mozilla::Maybe<Thread::Id> thread;
 
-    void startBackgroundThread(State newState);
+    void startBackgroundThread(State newState, const AutoLockGC& lock,
+                               const AutoLockHelperThreadState& helperLock);
     void waitForBackgroundThread(js::AutoLockGC& lock);
 
-    State state();
-    void setState(State state);
-
-    bool shrinkFlag;
+    State state(const AutoLockGC&);
+    void setState(State state, const AutoLockGC&);
 
     friend class js::gc::ArenaLists;
 
@@ -882,16 +888,15 @@ class GCHelperState
     explicit GCHelperState(JSRuntime* rt)
       : rt(rt),
         done(),
-        state_(IDLE),
-        thread(nullptr),
-        shrinkFlag(false)
+        state_(IDLE)
     { }
 
     void finish();
 
     void work();
 
-    void maybeStartBackgroundSweep(const AutoLockGC& lock);
+    void maybeStartBackgroundSweep(const AutoLockGC& lock,
+                                   const AutoLockHelperThreadState& helperLock);
     void startBackgroundShrink(const AutoLockGC& lock);
 
     /* Must be called without the GC lock taken. */
@@ -905,11 +910,6 @@ class GCHelperState
      */
     bool isBackgroundSweeping() const {
         return state_ == SWEEPING;
-    }
-
-    bool shouldShrink() const {
-        MOZ_ASSERT(isBackgroundSweeping());
-        return shrinkFlag;
     }
 };
 
@@ -957,7 +957,7 @@ class GCParallelTask
 
     // If multiple tasks are to be started or joined at once, it is more
     // efficient to take the helper thread lock once and use these methods.
-    bool startWithLockHeld();
+    bool startWithLockHeld(AutoLockHelperThreadState& locked);
     void joinWithLockHeld(AutoLockHelperThreadState& locked);
 
     // Instead of dispatching to a helper, run the task on the main thread.
@@ -1227,13 +1227,14 @@ CheckValueAfterMovingGC(const JS::Value& value)
             D(ElementsBarrier, 12)             \
             D(CheckHashTablesOnMinorGC, 13)    \
             D(Compact, 14)                     \
-            D(CheckHeapOnMovingGC, 15)
+            D(CheckHeapOnMovingGC, 15)         \
+            D(CheckNursery, 16)
 
 enum class ZealMode {
 #define ZEAL_MODE(name, value) name = value,
     JS_FOR_EACH_ZEAL_MODE(ZEAL_MODE)
 #undef ZEAL_MODE
-    Limit = 15
+    Limit = 16
 };
 
 enum VerifierType {

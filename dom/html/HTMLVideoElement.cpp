@@ -17,6 +17,7 @@
 #include "prlock.h"
 #include "nsThreadUtils.h"
 #include "ImageContainer.h"
+#include "VideoFrameContainer.h"
 
 #include "nsIScriptSecurityManager.h"
 #include "nsIXPConnect.h"
@@ -30,6 +31,9 @@
 #include "mozilla/dom/power/PowerManagerService.h"
 #include "mozilla/dom/Performance.h"
 #include "mozilla/dom/VideoPlaybackQuality.h"
+
+#include <algorithm>
+#include <limits>
 
 NS_IMPL_NS_NEW_HTML_ELEMENT(Video)
 
@@ -225,6 +229,12 @@ HTMLVideoElement::NotifyOwnerDocumentActivityChangedInternal()
   return pauseElement;
 }
 
+FrameStatistics*
+HTMLVideoElement::GetFrameStatistics()
+{
+  return mDecoder ? &(mDecoder->GetFrameStatistics()) : nullptr;
+}
+
 already_AddRefed<VideoPlaybackQuality>
 HTMLVideoElement::GetVideoPlaybackQuality()
 {
@@ -242,11 +252,24 @@ HTMLVideoElement::GetVideoPlaybackQuality()
     }
 
     if (mDecoder) {
-      FrameStatistics& stats = mDecoder->GetFrameStatistics();
-      static_assert(sizeof(uint32_t) >= sizeof (stats.GetParsedFrames()),
-                    "possible truncation from FrameStatistics to VideoPlaybackQuality");
-      totalFrames = stats.GetParsedFrames();
-      droppedFrames = stats.GetDroppedFrames();
+      FrameStatisticsData stats =
+        mDecoder->GetFrameStatistics().GetFrameStatisticsData();
+      if (sizeof(totalFrames) >= sizeof(stats.mParsedFrames)) {
+        totalFrames = stats.mParsedFrames;
+        droppedFrames = stats.mDroppedFrames;
+      } else {
+        auto maxStat = std::max(stats.mParsedFrames, stats.mDroppedFrames);
+        const auto maxNumber = std::numeric_limits<uint32_t>::max();
+        if (maxStat <= maxNumber) {
+          totalFrames = static_cast<uint32_t>(stats.mParsedFrames);
+          droppedFrames = static_cast<uint32_t>(stats.mDroppedFrames);
+        } else {
+          // Too big number(s) -> Resize everything to fit in 32 bits.
+          double ratio = double(maxNumber) / double(maxStat);
+          totalFrames = double(stats.mParsedFrames) * ratio;
+          droppedFrames = double(stats.mDroppedFrames) * ratio;
+        }
+      }
       corruptedFrames = 0;
     }
   }

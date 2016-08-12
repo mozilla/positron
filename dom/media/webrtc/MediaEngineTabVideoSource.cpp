@@ -122,7 +122,7 @@ MediaEngineTabVideoSource::InitRunnable::Run()
 void
 MediaEngineTabVideoSource::GetName(nsAString_internal& aName) const
 {
-  aName.AssignLiteral(MOZ_UTF16("&getUserMedia.videoSource.tabShare;"));
+  aName.AssignLiteral(u"&getUserMedia.videoSource.tabShare;");
 }
 
 void
@@ -140,7 +140,7 @@ MediaEngineTabVideoSource::Allocate(const dom::MediaTrackConstraints& aConstrain
                                     const MediaEnginePrefs& aPrefs,
                                     const nsString& aDeviceId,
                                     const nsACString& aOrigin,
-                                    BaseAllocationHandle** aOutHandle,
+                                    AllocationHandle** aOutHandle,
                                     const char** aOutBadConstraint)
 {
   // windowId is not a proper constraint, so just read it.
@@ -148,12 +148,12 @@ MediaEngineTabVideoSource::Allocate(const dom::MediaTrackConstraints& aConstrain
 
   mWindowId = aConstraints.mBrowserWindow.WasPassed() ?
               aConstraints.mBrowserWindow.Value() : -1;
-  aOutHandle = nullptr;
+  *aOutHandle = nullptr;
   return Restart(nullptr, aConstraints, aPrefs, aDeviceId, aOutBadConstraint);
 }
 
 nsresult
-MediaEngineTabVideoSource::Restart(BaseAllocationHandle* aHandle,
+MediaEngineTabVideoSource::Restart(AllocationHandle* aHandle,
                                    const dom::MediaTrackConstraints& aConstraints,
                                    const mozilla::MediaEnginePrefs& aPrefs,
                                    const nsString& aDeviceId,
@@ -184,7 +184,7 @@ MediaEngineTabVideoSource::Restart(BaseAllocationHandle* aHandle,
 }
 
 nsresult
-MediaEngineTabVideoSource::Deallocate(BaseAllocationHandle* aHandle)
+MediaEngineTabVideoSource::Deallocate(AllocationHandle* aHandle)
 {
   MOZ_ASSERT(!aHandle);
   return NS_OK;

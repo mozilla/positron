@@ -128,9 +128,9 @@ this.GeckoDriver = function(appName, stopSignal) {
 
   this.sessionCapabilities = {
     // mandated capabilities
-    "browserName": Services.appinfo.name,
+    "browserName": Services.appinfo.name.toLowerCase(),
     "browserVersion": Services.appinfo.version,
-    "platformName": Services.sysinfo.getProperty("name"),
+    "platformName": Services.sysinfo.getProperty("name").toLowerCase(),
     "platformVersion": Services.sysinfo.getProperty("version"),
     "specificationLevel": 0,
 
@@ -307,8 +307,7 @@ GeckoDriver.prototype.addBrowser = function(win) {
  * @param {boolean=false} isNewSession
  *     True if this is the first time we're talking to this browser.
  */
-GeckoDriver.prototype.startBrowser = function(win, isNewSession=false) {
-  logger.info(`startBrowser ${this.sessionId}`)
+GeckoDriver.prototype.startBrowser = function(win, isNewSession = false) {
   this.mainFrame = win;
   this.curFrame = null;
   this.addBrowser(win);
@@ -340,7 +339,10 @@ GeckoDriver.prototype.whenBrowserStarted = function(win, isNewSession) {
     }
 
     if (!Preferences.get(CONTENT_LISTENER_PREF) || !isNewSession) {
-      mm.loadFrameScript(FRAME_SCRIPT, true, true);
+      // load listener into the remote frame
+      // and any applicable new frames
+      // opened after this call
+      mm.loadFrameScript(FRAME_SCRIPT, true);
       Preferences.set(CONTENT_LISTENER_PREF, true);
     }
   } else {

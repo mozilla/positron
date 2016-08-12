@@ -32,10 +32,6 @@
 #include "gfxPlatform.h"
 #include "mozilla/Snprintf.h"
 
-#ifdef MOZ_WIDGET_ANDROID
-#include "AndroidBridge.h"
-#endif
-
 struct JSContext;
 class JSObject;
 
@@ -85,8 +81,11 @@ IsWebMForced(DecoderDoctorDiagnostics* aDiagnostics)
   return !mp4supported || !hwsupported || VP9Benchmark::IsVP9DecodeFast();
 }
 
-static nsresult
-IsTypeSupported(const nsAString& aType, DecoderDoctorDiagnostics* aDiagnostics)
+namespace dom {
+
+/* static */
+nsresult
+MediaSource::IsTypeSupported(const nsAString& aType, DecoderDoctorDiagnostics* aDiagnostics)
 {
   if (aType.IsEmpty()) {
     return NS_ERROR_DOM_TYPE_ERR;
@@ -135,8 +134,6 @@ IsTypeSupported(const nsAString& aType, DecoderDoctorDiagnostics* aDiagnostics)
 
   return NS_ERROR_DOM_NOT_SUPPORTED_ERR;
 }
-
-namespace dom {
 
 /* static */ already_AddRefed<MediaSource>
 MediaSource::Constructor(const GlobalObject& aGlobal,
@@ -225,7 +222,7 @@ MediaSource::AddSourceBuffer(const nsAString& aType, ErrorResult& aRv)
 {
   MOZ_ASSERT(NS_IsMainThread());
   DecoderDoctorDiagnostics diagnostics;
-  nsresult rv = mozilla::IsTypeSupported(aType, &diagnostics);
+  nsresult rv = IsTypeSupported(aType, &diagnostics);
   diagnostics.StoreFormatDiagnostics(GetOwner()
                                      ? GetOwner()->GetExtantDoc()
                                      : nullptr,
@@ -345,7 +342,7 @@ MediaSource::IsTypeSupported(const GlobalObject& aOwner, const nsAString& aType)
 {
   MOZ_ASSERT(NS_IsMainThread());
   DecoderDoctorDiagnostics diagnostics;
-  nsresult rv = mozilla::IsTypeSupported(aType, &diagnostics);
+  nsresult rv = IsTypeSupported(aType, &diagnostics);
   nsCOMPtr<nsPIDOMWindowInner> window = do_QueryInterface(aOwner.GetAsSupports());
   diagnostics.StoreFormatDiagnostics(window ? window->GetExtantDoc() : nullptr,
                                      aType, NS_SUCCEEDED(rv), __func__);
