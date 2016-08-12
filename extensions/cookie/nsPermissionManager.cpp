@@ -1671,6 +1671,7 @@ nsPermissionManager::AddInternal(nsIPrincipal* aPrincipal,
         id = aID;
       }
 
+#ifdef MOZ_B2G
       // When we do the initial addition of the permissions we don't want to
       // inherit session specific permissions from other tabs or apps
       // so we ignore them and set the permission to PROMPT_ACTION if it was
@@ -1680,6 +1681,7 @@ nsPermissionManager::AddInternal(nsIPrincipal* aPrincipal,
         aPermission = nsIPermissionManager::PROMPT_ACTION;
         aExpireType = nsIPermissionManager::EXPIRE_NEVER;
       }
+#endif // MOZ_B2G
 
       entry->GetPermissions().AppendElement(PermissionEntry(id, typeIndex, aPermission,
                                                             aExpireType, aExpireTime,
@@ -1695,7 +1697,7 @@ nsPermissionManager::AddInternal(nsIPrincipal* aPrincipal,
                                       aPermission,
                                       aExpireType,
                                       aExpireTime,
-                                      MOZ_UTF16("added"));
+                                      u"added");
       }
 
       break;
@@ -1719,7 +1721,7 @@ nsPermissionManager::AddInternal(nsIPrincipal* aPrincipal,
                                       oldPermissionEntry.mPermission,
                                       oldPermissionEntry.mExpireType,
                                       oldPermissionEntry.mExpireTime,
-                                      MOZ_UTF16("deleted"));
+                                      u"deleted");
       }
 
       // If there are no more permissions stored for that entry, clear it.
@@ -1765,7 +1767,7 @@ nsPermissionManager::AddInternal(nsIPrincipal* aPrincipal,
                                       aPermission,
                                       aExpireType,
                                       aExpireTime,
-                                      MOZ_UTF16("changed"));
+                                      u"changed");
       }
 
       break;
@@ -1813,7 +1815,7 @@ nsPermissionManager::AddInternal(nsIPrincipal* aPrincipal,
                                       aPermission,
                                       aExpireType,
                                       aExpireTime,
-                                      MOZ_UTF16("changed"));
+                                      u"changed");
       }
 
     }
@@ -1924,7 +1926,7 @@ nsPermissionManager::RemoveAllInternal(bool aNotifyObservers)
   ImportDefaults();
 
   if (aNotifyObservers) {
-    NotifyObservers(nullptr, MOZ_UTF16("cleared"));
+    NotifyObservers(nullptr, u"cleared");
   }
 
   // clear the db
@@ -2453,7 +2455,7 @@ nsPermissionManager::RemoveExpiredPermissionsForApp(uint32_t aAppId)
                                       oldPermEntry.mPermission,
                                       oldPermEntry.mExpireType,
                                       oldPermEntry.mExpireTime,
-                                      MOZ_UTF16("deleted"));
+                                      u"deleted");
 
         --i;
         continue;
@@ -2468,7 +2470,7 @@ nsPermissionManager::RemoveExpiredPermissionsForApp(uint32_t aAppId)
                                     permEntry.mPermission,
                                     permEntry.mExpireType,
                                     permEntry.mExpireTime,
-                                    MOZ_UTF16("changed"));
+                                    u"changed");
     }
   }
 

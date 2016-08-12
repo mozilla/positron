@@ -4,14 +4,18 @@ MAINTAINER    Andrew Halberstadt <ahalberstadt@mozilla.com>
 RUN useradd -d /home/worker -s /bin/bash -m worker
 WORKDIR /home/worker
 
-# Install tooltool directly from github.
 RUN mkdir /build
-ADD https://raw.githubusercontent.com/mozilla/build-tooltool/master/tooltool.py /build/tooltool.py
-RUN chmod +rx /build/tooltool.py
+# %include testing/docker/recipes/tooltool.py
+ADD topsrcdir/testing/docker/recipes/tooltool.py /build/tooltool.py
 
-# Install lint packages
-ADD           system-setup.sh   /tmp/system-setup.sh
-RUN           bash /tmp/system-setup.sh
+# %include testing/docker/recipes/install-mercurial.sh
+ADD topsrcdir/testing/docker/recipes/install-mercurial.sh /build/install-mercurial.sh
+ADD system-setup.sh /tmp/system-setup.sh
+RUN bash /tmp/system-setup.sh
+
+# %include testing/docker/recipes/run-task
+ADD topsrcdir/testing/docker/recipes/run-task /home/worker/bin/run-task
+RUN chown -R worker:worker /home/worker/bin && chmod 755 /home/worker/bin/*
 
 # Set variable normally configured at login, by the shells parent process, these
 # are taken from GNU su manual

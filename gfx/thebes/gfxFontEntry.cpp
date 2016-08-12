@@ -350,7 +350,7 @@ gfxFontEntry::GetSVGGlyphExtents(DrawTarget* aDrawTarget, uint32_t aGlyphId,
 
 bool
 gfxFontEntry::RenderSVGGlyph(gfxContext *aContext, uint32_t aGlyphId,
-                             gfxTextContextPaint *aContextPaint)
+                             SVGContextPaint* aContextPaint)
 {
     NS_ASSERTION(mSVGInitialized, "SVG data has not yet been loaded. TryGetSVGData() first.");
     return mSVGGlyphs->RenderGlyph(aContext, aGlyphId, aContextPaint);
@@ -383,7 +383,7 @@ gfxFontEntry::TryGetSVGData(gfxFont* aFont)
         mSVGGlyphs = MakeUnique<gfxSVGGlyphs>(svgTable, this);
     }
 
-    if (!mFontsUsingSVGGlyphs.Contains(aFont)) {
+    if (mSVGGlyphs && !mFontsUsingSVGGlyphs.Contains(aFont)) {
         mFontsUsingSVGGlyphs.AppendElement(aFont);
     }
 

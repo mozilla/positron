@@ -652,7 +652,10 @@ class MacroAssemblerX64 : public MacroAssemblerX86Shared
         }
     }
     void store64(Register64 src, Address address) {
-        movq(src.reg, Operand(address));
+        storePtr(src.reg, address);
+    }
+    void store64(Imm64 imm, Address address) {
+        storePtr(ImmWord(imm.value), address);
     }
 
     void splitTag(Register src, Register dest) {
@@ -879,6 +882,14 @@ class MacroAssemblerX64 : public MacroAssemblerX86Shared
                                     Label* oolRejoin, FloatRegister tempDouble);
     void wasmTruncateFloat32ToUInt64(FloatRegister input, Register output, Label* oolEntry,
                                      Label* oolRejoin, FloatRegister tempDouble);
+
+    void loadWasmGlobalPtr(uint32_t globalDataOffset, Register dest) {
+        CodeOffset label = loadRipRelativeInt64(dest);
+        append(wasm::GlobalAccess(label, globalDataOffset));
+    }
+    void loadWasmPinnedRegsFromTls() {
+        loadPtr(Address(WasmTlsReg, offsetof(wasm::TlsData, memoryBase)), HeapReg);
+    }
 
   public:
     Condition testInt32Truthy(bool truthy, const ValueOperand& operand) {

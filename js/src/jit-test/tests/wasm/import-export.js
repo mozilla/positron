@@ -1,3 +1,4 @@
+// |jit-test| test-also-wasm-baseline
 load(libdir + 'wasm.js');
 load(libdir + 'asserts.js');
 
@@ -10,10 +11,10 @@ const mem1Page = new Memory({initial:1});
 const mem2Page = new Memory({initial:2});
 const mem3Page = new Memory({initial:3});
 const mem4Page = new Memory({initial:4});
-const tab1Elem = new Table({initial:1});
-const tab2Elem = new Table({initial:2});
-const tab3Elem = new Table({initial:3});
-const tab4Elem = new Table({initial:4});
+const tab1Elem = new Table({initial:1, element:"anyfunc"});
+const tab2Elem = new Table({initial:2, element:"anyfunc"});
+const tab3Elem = new Table({initial:3, element:"anyfunc"});
+const tab4Elem = new Table({initial:4, element:"anyfunc"});
 
 // Explicitly opt into the new binary format for imports and exports until it
 // is used by default everywhere.
@@ -74,6 +75,16 @@ assertErrorMessage(() => new Module(textToBinary('(module (memory 2 1))')), Type
 assertErrorMessage(() => new Module(textToBinary('(module (import "a" "b" (memory 2 1)))')), TypeError, /maximum length less than initial length/);
 assertErrorMessage(() => new Module(textToBinary('(module (table (resizable 2 1)))')), TypeError, /maximum length less than initial length/);
 assertErrorMessage(() => new Module(textToBinary('(module (import "a" "b" (table 2 1)))')), TypeError, /maximum length less than initial length/);
+
+// Import wasm-wasm type mismatch
+
+var e = new Instance(new Module(textToBinary('(module (func $i2v (param i32)) (export "i2v" $i2v) (func $f2v (param f32)) (export "f2v" $f2v))'))).exports;
+var i2vm = new Module(textToBinary('(module (import "a" "b" (param i32)))'));
+var f2vm = new Module(textToBinary('(module (import "a" "b" (param f32)))'));
+assertEq(new Instance(i2vm, {a:{b:e.i2v}}) instanceof Instance, true);
+assertErrorMessage(() => new Instance(i2vm, {a:{b:e.f2v}}), TypeError, /imported function signature mismatch/);
+assertErrorMessage(() => new Instance(f2vm, {a:{b:e.i2v}}), TypeError, /imported function signature mismatch/);
+assertEq(new Instance(f2vm, {a:{b:e.f2v}}) instanceof Instance, true);
 
 // Import order:
 
@@ -220,8 +231,8 @@ var code = textToBinary(`(module
     (func $g (result i32) (i32.const 2))
     (func $h (result i32) (i32.const 3))
     (table (resizable 4))
-    (elem 0 $f)
-    (elem 2 $g)
+    (elem (i32.const 0) $f)
+    (elem (i32.const 2) $g)
     (export "f1" $f)
     (export "tbl1" table)
     (export "f2" $f)
@@ -250,7 +261,7 @@ assertEq(e.tbl1.get(1), null);
 e.tbl1.set(3, e.f1);
 assertEq(e.tbl1.get(0), e.tbl1.get(3));
 
-// Re-exports:
+// Re-exports and Identity:
 
 var code = textToBinary('(module (import "a" "b" (memory 1 1)) (export "foo" memory) (export "bar" memory))');
 var mem = new Memory({initial:1});
@@ -259,14 +270,27 @@ assertEq(mem, e.foo);
 assertEq(mem, e.bar);
 
 var code = textToBinary('(module (import "a" "b" (table 1 1)) (export "foo" table) (export "bar" table))');
-var tbl = new Table({initial:1});
+var tbl = new Table({initial:1, element:"anyfunc"});
 var e = new Instance(new Module(code), {a:{b:tbl}}).exports;
 assertEq(tbl, e.foo);
 assertEq(tbl, e.bar);
 
+var code = textToBinary('(module (import "a" "b" (table 2 2)) (func $foo) (elem (i32.const 0) $foo) (export "foo" $foo))');
+var tbl = new Table({initial:2, element:"anyfunc"});
+var e1 = new Instance(new Module(code), {a:{b:tbl}}).exports;
+assertEq(e1.foo, tbl.get(0));
+tbl.set(1, e1.foo);
+assertEq(e1.foo, tbl.get(1));
+var e2 = new Instance(new Module(code), {a:{b:tbl}}).exports;
+assertEq(e2.foo, tbl.get(0));
+assertEq(e1.foo, tbl.get(1));
+assertEq(tbl.get(0) === e1.foo, false);
+assertEq(e1.foo === e2.foo, false);
+
 // Non-existent export errors
 
 assertErrorMessage(() => new Module(textToBinary('(module (export "a" 0))')), TypeError, /exported function index out of bounds/);
+assertErrorMessage(() => new Module(textToBinary('(module (export "a" global 0))')), TypeError, /exported global index out of bounds/);
 assertErrorMessage(() => new Module(textToBinary('(module (export "a" memory))')), TypeError, /exported memory index out of bounds/);
 assertErrorMessage(() => new Module(textToBinary('(module (export "a" table))')), TypeError, /exported table index out of bounds/);
 
@@ -309,14 +333,14 @@ assertEq(i8[102], 0x0);
 var m = new Module(textToBinary(`
     (module
         (import "a" "b" (table 10))
-        (elem 0 $one $two)
-        (elem 3 $three $four)
+        (elem (i32.const 0) $one $two)
+        (elem (i32.const 3) $three $four)
         (func $one (result i32) (i32.const 1))
         (func $two (result i32) (i32.const 2))
         (func $three (result i32) (i32.const 3))
         (func $four (result i32) (i32.const 4)))
 `));
-var tbl = new Table({initial:10});
+var tbl = new Table({initial:10, element:"anyfunc"});
 new Instance(m, {a:{b:tbl}});
 assertEq(tbl.get(0)(), 1);
 assertEq(tbl.get(1)(), 2);
@@ -325,3 +349,28 @@ assertEq(tbl.get(3)(), 3);
 assertEq(tbl.get(4)(), 4);
 for (var i = 5; i < 10; i++)
     assertEq(tbl.get(i), null);
+
+// Cross-instance calls
+
+var i1 = new Instance(new Module(textToBinary(`(module (func) (func (param i32) (result i32) (i32.add (get_local 0) (i32.const 1))) (func) (export "f" 1))`)));
+var i2 = new Instance(new Module(textToBinary(`(module (import "a" "b" (param i32) (result i32)) (func $g (result i32) (call_import 0 (i32.const 13))) (export "g" $g))`)), {a:{b:i1.exports.f}});
+assertEq(i2.exports.g(), 14);
+
+var m = new Module(textToBinary(`(module
+    (import $val "a" "val" (global i32 immutable))
+    (import $next "a" "next" (result i32))
+    (memory 1)
+    (func $start (i32.store (i32.const 0) (get_global $val)))
+    (start $start)
+    (func $call (result i32)
+        (i32.add
+            (get_global $val)
+            (i32.add
+                (i32.load (i32.const 0))
+                (call_import $next))))
+    (export "call" $call)
+)`));
+var e = {call:() => 1000};
+for (var i = 0; i < 10; i++)
+    e = new Instance(m, {a:{val:i, next:e.call}}).exports;
+assertEq(e.call(), 1090);

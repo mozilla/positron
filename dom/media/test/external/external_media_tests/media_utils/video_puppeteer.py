@@ -4,6 +4,7 @@
 
 from time import clock, sleep
 
+from marionette import Marionette
 from marionette_driver import By, expected, Wait
 
 from external_media_tests.utils import verbose_until
@@ -69,7 +70,7 @@ class VideoPuppeteer(object):
         self._start_time = 0
         self._start_wall_time = 0
         wait = Wait(self.marionette, timeout=self.timeout)
-        with self.marionette.using_context('content'):
+        with self.marionette.using_context(Marionette.CONTEXT_CONTENT):
             self.marionette.navigate(self.test_url)
             self.marionette.execute_script("""
                 log('URL: {0}');""".format(self.test_url))
@@ -88,13 +89,13 @@ class VideoPuppeteer(object):
             self.video = videos_found[0]
             self.marionette.execute_script("log('video element obtained');")
             if autostart:
-                self.start();
+                self.start()
 
     def start(self):
         # To get an accurate expected_duration, playback must have started
         wait = Wait(self, timeout=self.timeout)
-        verbose_until(wait, self, lambda v: v.current_time > 0,
-                      "Check if video current_time > 0")
+        verbose_until(wait, self, playback_started,
+                      "Check if video has played some range")
         self._start_time = self.current_time
         self._start_wall_time = clock()
         self.update_expected_duration()
@@ -173,12 +174,26 @@ class VideoPuppeteer(object):
         return self.expected_duration - self.current_time
 
     @property
+    def played(self):
+        """
+        :return: A TimeRanges objected containing the played time ranges.
+        """
+        raw_time_ranges = self.execute_video_script(
+            'var played = arguments[0].wrappedJSObject.played;'
+            'var timeRanges = [];'
+            'for (var i = 0; i < played.length; i++) {'
+            'timeRanges.push([played.start(i), played.end(i)]);'
+            '}'
+            'return [played.length, timeRanges];')
+        return TimeRanges(raw_time_ranges[0], raw_time_ranges[1])
+
+    @property
     def video_src(self):
         """
         :return: The url of the actual video file, as opposed to the url
             of the page with the video element.
         """
-        with self.marionette.using_context('content'):
+        with self.marionette.using_context(Marionette.CONTEXT_CONTENT):
             return self.video.get_attribute('src')
 
     @property
@@ -238,12 +253,12 @@ class VideoPuppeteer(object):
 
     def execute_video_script(self, script):
         """
-        Execute JS script in 'content' context with access to video element.
+        Execute JS script in content context with access  to video element.
 
         :param script: script to be executed
         :return: value returned by script
         """
-        with self.marionette.using_context('content'):
+        with self.marionette.using_context(Marionette.CONTEXT_CONTENT):
             return self.marionette.execute_script(script,
                                                   script_args=[self.video])
 
@@ -276,6 +291,26 @@ class VideoException(Exception):
     pass
 
 
+class TimeRanges:
+    """
+    Class to represent the TimeRanges data returned by played(). Exposes a
+    similar interface to the JavaScript TimeRanges object.
+    """
+    def __init__(self, length, ranges):
+        self.length = length
+        self.ranges = [(pair[0], pair[1]) for pair in ranges]
+
+    def __repr__(self):
+        return 'TimeRanges: length: {}, ranges: {}'\
+               .format(self.length, self.ranges)
+
+    def start(self, index):
+        return self.ranges[index][0]
+
+    def end(self, index):
+        return self.ranges[index][1]
+
+
 def playback_started(video):
     """
     Determine if video has started
@@ -285,9 +320,12 @@ def playback_started(video):
     :return: True if is playing; False otherwise
     """
     try:
-        return video.current_time > video._start_time
+        played_ranges = video.played
+        return played_ranges.length > 0 and \
+               played_ranges.start(0) < played_ranges.end(0) and \
+               played_ranges.end(0) > 0.0
     except Exception as e:
-        print ('Got exception %s' % e)
+        print ('Got exception {}'.format(e))
         return False
 
 

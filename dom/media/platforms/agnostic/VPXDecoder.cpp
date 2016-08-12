@@ -160,16 +160,17 @@ VPXDecoder::DoDecode(MediaRawData* aSample)
       return -1;
     }
 
-    RefPtr<VideoData> v = VideoData::Create(mInfo,
-                                            mImageContainer,
-                                            aSample->mOffset,
-                                            aSample->mTime,
-                                            aSample->mDuration,
-                                            b,
-                                            aSample->mKeyframe,
-                                            aSample->mTimecode,
-                                            mInfo.ScaledImageRect(img->d_w,
-                                                                  img->d_h));
+    RefPtr<VideoData> v =
+      VideoData::CreateAndCopyData(mInfo,
+                                   mImageContainer,
+                                   aSample->mOffset,
+                                   aSample->mTime,
+                                   aSample->mDuration,
+                                   b,
+                                   aSample->mKeyframe,
+                                   aSample->mTimecode,
+                                   mInfo.ScaledImageRect(img->d_w,
+                                                         img->d_h));
 
     if (!v) {
       LOG("Image allocation error source %ldx%ld display %ldx%ld picture %ldx%ld",
@@ -230,6 +231,20 @@ VPXDecoder::IsVPX(const nsACString& aMimeType, uint8_t aCodecMask)
           aMimeType.EqualsLiteral("video/webm; codecs=vp8")) ||
          ((aCodecMask & VPXDecoder::VP9) &&
           aMimeType.EqualsLiteral("video/webm; codecs=vp9"));
+}
+
+/* static */
+bool
+VPXDecoder::IsVP8(const nsACString& aMimeType)
+{
+  return IsVPX(aMimeType, VPXDecoder::VP8);
+}
+
+/* static */
+bool
+VPXDecoder::IsVP9(const nsACString& aMimeType)
+{
+  return IsVPX(aMimeType, VPXDecoder::VP9);
 }
 
 } // namespace mozilla

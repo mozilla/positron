@@ -5,7 +5,8 @@
 "use strict";
 
 const { DOM: dom, createClass, PropTypes } = require("devtools/client/shared/vendor/react");
-const { getSourceNames, parseURL, isScratchpadScheme } = require("devtools/client/shared/source-utils");
+const { getSourceNames, parseURL,
+        isScratchpadScheme, getSourceMappedFile } = require("devtools/client/shared/source-utils");
 const { LocalizationHelper } = require("devtools/client/shared/l10n");
 
 const l10n = new LocalizationHelper("chrome://devtools/locale/components.properties");
@@ -34,6 +35,8 @@ module.exports = createClass({
     showEmptyPathAsHost: PropTypes.bool,
     // Option to display a full source instead of just the filename.
     showFullSourceUrl: PropTypes.bool,
+    // Service to enable the source map feature for console.
+    sourceMapService: PropTypes.object,
   },
 
   getDefaultProps() {
@@ -46,16 +49,84 @@ module.exports = createClass({
     };
   },
 
+  componentWillMount() {
+    const sourceMapService = this.props.sourceMapService;
+    if (sourceMapService) {
+      const source = this.getSource();
+      sourceMapService.subscribe(source, this.onSourceUpdated);
+    }
+  },
+
+  componentWillUnmount() {
+    const sourceMapService = this.props.sourceMapService;
+    if (sourceMapService) {
+      const source = this.getSource();
+      sourceMapService.unsubscribe(source, this.onSourceUpdated);
+    }
+  },
+
+  /**
+   * Component method to update the FrameView when a resolved location is available
+   * @param event
+   * @param location
+   */
+  onSourceUpdated(event, location, resolvedLocation) {
+    const frame = this.getFrame(resolvedLocation);
+    this.setState({
+      frame,
+      isSourceMapped: true,
+    });
+  },
+
+  /**
+   * Utility method to convert the Frame object to the
+   * Source Object model required by SourceMapService
+   * @param frame
+   * @returns {{url: *, line: *, column: *}}
+   */
+  getSource(frame) {
+    frame = frame || this.props.frame;
+    const { source, line, column } = frame;
+    return {
+      url: source,
+      line,
+      column,
+    };
+  },
+
+  /**
+   * Utility method to convert the Source object model to the
+   * Frame object model required by FrameView class.
+   * @param source
+   * @returns {{source: *, line: *, column: *, functionDisplayName: *}}
+   */
+  getFrame(source) {
+    const { url, line, column } = source;
+    return {
+      source: url,
+      line,
+      column,
+      functionDisplayName: this.props.frame.functionDisplayName,
+    };
+  },
+
   render() {
+    let frame, isSourceMapped;
     let {
       onClick,
-      frame,
       showFunctionName,
       showAnonymousFunctionName,
       showHost,
       showEmptyPathAsHost,
       showFullSourceUrl
     } = this.props;
+
+    if (this.state && this.state.isSourceMapped) {
+      frame = this.state.frame;
+      isSourceMapped = this.state.isSourceMapped;
+    } else {
+      frame = this.props.frame;
+    }
 
     let source = frame.source ? String(frame.source) : "";
     let line = frame.line != void 0 ? Number(frame.line) : null;
@@ -66,17 +137,24 @@ module.exports = createClass({
     // has already cached this indirectly. We don't want to attempt to
     // link to "self-hosted" and "(unknown)". However, we do want to link
     // to Scratchpad URIs.
-    const isLinkable = !!(isScratchpadScheme(source) || parseURL(source));
+    // Source mapped sources might not necessary linkable, but they
+    // are still valid in the debugger.
+    const isLinkable = !!(isScratchpadScheme(source) || parseURL(source))
+      || isSourceMapped;
     const elements = [];
     const sourceElements = [];
     let sourceEl;
 
     let tooltip = long;
+
+    // If the source is linkable and line > 0
+    const shouldDisplayLine = isLinkable && line;
+
     // Exclude all falsy values, including `0`, as even
     // a number 0 for line doesn't make sense, and should not be displayed.
     // If source isn't linkable, don't attempt to append line and column
     // info, as this probably doesn't make sense.
-    if (isLinkable && line) {
+    if (shouldDisplayLine) {
       tooltip += `:${line}`;
       // Intentionally exclude 0
       if (column) {
@@ -104,7 +182,9 @@ module.exports = createClass({
     }
 
     let displaySource = showFullSourceUrl ? long : short;
-    if (showEmptyPathAsHost && (displaySource === "" || displaySource === "/")) {
+    if (isSourceMapped) {
+      displaySource = getSourceMappedFile(displaySource);
+    } else if (showEmptyPathAsHost && (displaySource === "" || displaySource === "/")) {
       displaySource = host;
     }
 
@@ -113,7 +193,7 @@ module.exports = createClass({
     }, displaySource));
 
     // If source is linkable, and we have a line number > 0
-    if (isLinkable && line) {
+    if (shouldDisplayLine) {
       let lineInfo = `:${line}`;
       // Add `data-line` attribute for testing
       attributes["data-line"] = line;
@@ -128,24 +208,30 @@ module.exports = createClass({
       sourceElements.push(dom.span({ className: "frame-link-line" }, lineInfo));
     }
 
+    // Inner el is useful for achieving ellipsis on the left and correct LTR/RTL
+    // ordering. See CSS styles for frame-link-source-[inner] and bug 1290056.
+    let sourceInnerEl = dom.span({
+      className: "frame-link-source-inner",
+      title: isLinkable ?
+        l10n.getFormatStr("frame.viewsourceindebugger", tooltip) : tooltip,
+    }, sourceElements);
+
     // If source is not a URL (self-hosted, eval, etc.), don't make
     // it an anchor link, as we can't link to it.
     if (isLinkable) {
       sourceEl = dom.a({
         onClick: e => {
           e.preventDefault();
-          onClick(frame);
+          onClick(this.getSource(frame));
         },
         href: source,
         className: "frame-link-source",
         draggable: false,
-        title: l10n.getFormatStr("frame.viewsourceindebugger", tooltip)
-      }, sourceElements);
+      }, sourceInnerEl);
     } else {
       sourceEl = dom.span({
         className: "frame-link-source",
-        title: tooltip,
-      }, sourceElements);
+      }, sourceInnerEl);
     }
     elements.push(sourceEl);
 

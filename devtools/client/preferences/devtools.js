@@ -30,7 +30,7 @@ pref("devtools.toolbox.sidebar.width", 500);
 pref("devtools.toolbox.host", "bottom");
 pref("devtools.toolbox.previousHost", "side");
 pref("devtools.toolbox.selectedTool", "webconsole");
-pref("devtools.toolbox.toolbarSpec", '["splitconsole", "paintflashing toggle","scratchpad","resize toggle","eyedropper","screenshot --fullpage", "rulers", "measure"]');
+pref("devtools.toolbox.toolbarSpec", '["splitconsole", "paintflashing toggle","scratchpad","resize toggle","screenshot --fullpage", "rulers", "measure"]');
 pref("devtools.toolbox.sideEnabled", true);
 pref("devtools.toolbox.zoomValue", "1");
 pref("devtools.toolbox.splitconsoleEnabled", false);
@@ -43,7 +43,6 @@ pref("devtools.command-button-splitconsole.enabled", true);
 pref("devtools.command-button-paintflashing.enabled", false);
 pref("devtools.command-button-scratchpad.enabled", false);
 pref("devtools.command-button-responsive.enabled", true);
-pref("devtools.command-button-eyedropper.enabled", false);
 pref("devtools.command-button-screenshot.enabled", false);
 pref("devtools.command-button-rulers.enabled", false);
 pref("devtools.command-button-measure.enabled", false);
@@ -82,6 +81,7 @@ pref("devtools.responsiveUI.no-reload-notification", false);
 pref("devtools.debugger.enabled", true);
 pref("devtools.debugger.chrome-debugging-host", "localhost");
 pref("devtools.debugger.chrome-debugging-port", 6080);
+pref("devtools.debugger.chrome-debugging-websocket", false);
 pref("devtools.debugger.remote-host", "localhost");
 pref("devtools.debugger.remote-timeout", 20000);
 pref("devtools.debugger.pause-on-exceptions", false);
@@ -92,6 +92,7 @@ pref("devtools.debugger.auto-pretty-print", false);
 pref("devtools.debugger.auto-black-box", true);
 pref("devtools.debugger.workers", false);
 pref("devtools.debugger.promise", false);
+pref("devtools.debugger.new-debugger-frontend", false);
 
 // The default Debugger UI settings
 pref("devtools.debugger.ui.panes-workers-and-sources-width", 200);
@@ -102,7 +103,7 @@ pref("devtools.debugger.ui.variables-only-enum-visible", false);
 pref("devtools.debugger.ui.variables-searchbox-visible", false);
 
 // Enable the Memory tools
-pref("devtools.memory.enabled", false);
+pref("devtools.memory.enabled", true);
 
 pref("devtools.memory.custom-census-displays", "{}");
 pref("devtools.memory.custom-label-displays", "{}");
@@ -295,6 +296,9 @@ pref("devtools.webconsole.autoMultiline", true);
 
 // Enable the experimental webconsole frontend (work in progress)
 pref("devtools.webconsole.new-frontend-enabled", false);
+
+// Enable the experimental support for source maps in console (work in progress)
+pref("devtools.sourcemap.locations.enabled", false);
 
 // The number of lines that are displayed in the web console.
 pref("devtools.hud.loglimit", 1000);

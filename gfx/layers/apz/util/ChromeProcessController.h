@@ -21,7 +21,7 @@ namespace mozilla {
 
 namespace layers {
 
-class APZCTreeManager;
+class IAPZCTreeManager;
 class APZEventState;
 
 // A ChromeProcessController is attached to the root of a compositor's layer
@@ -33,7 +33,7 @@ protected:
   typedef mozilla::layers::ScrollableLayerGuid ScrollableLayerGuid;
 
 public:
-  explicit ChromeProcessController(nsIWidget* aWidget, APZEventState* aAPZEventState, APZCTreeManager* aAPZCTreeManager);
+  explicit ChromeProcessController(nsIWidget* aWidget, APZEventState* aAPZEventState, IAPZCTreeManager* aAPZCTreeManager);
   ~ChromeProcessController();
   virtual void Destroy() override;
 
@@ -41,7 +41,8 @@ public:
   virtual void RequestContentRepaint(const FrameMetrics& aFrameMetrics) override;
   virtual void PostDelayedTask(already_AddRefed<Runnable> aTask, int aDelayMs) override;
   virtual void HandleTap(TapType aType,
-                         const mozilla::CSSPoint& aPoint, Modifiers aModifiers,
+                         const mozilla::LayoutDevicePoint& aPoint,
+                         Modifiers aModifiers,
                          const ScrollableLayerGuid& aGuid,
                          uint64_t aInputBlockId) override;
   virtual void NotifyAPZStateChange(const ScrollableLayerGuid& aGuid,
@@ -53,7 +54,7 @@ public:
 private:
   nsCOMPtr<nsIWidget> mWidget;
   RefPtr<APZEventState> mAPZEventState;
-  RefPtr<APZCTreeManager> mAPZCTreeManager;
+  RefPtr<IAPZCTreeManager> mAPZCTreeManager;
   MessageLoop* mUILoop;
 
   void InitializeRoot();

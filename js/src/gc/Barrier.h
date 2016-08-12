@@ -243,7 +243,7 @@ bool
 CurrentThreadIsGCSweeping();
 
 bool
-CurrentThreadIsHandlingInitFailure();
+CurrentThreadCanSkipPostBarrier(bool inNursery);
 #endif
 
 namespace gc {
@@ -270,6 +270,8 @@ struct InternalBarrierMethods<T*>
     static void postBarrier(T** vp, T* prev, T* next) { T::writeBarrierPost(vp, prev, next); }
 
     static void readBarrier(T* v) { T::readBarrier(v); }
+
+    static bool isInsideNursery(T* v) { return IsInsideNursery(v); }
 };
 
 template <typename S> struct PreBarrierFunctor : public VoidDefaultAdaptor<S> {
@@ -314,6 +316,10 @@ struct InternalBarrierMethods<Value>
     static void readBarrier(const Value& v) {
         DispatchTyped(ReadBarrierFunctor<Value>(), v);
     }
+
+    static bool isInsideNursery(const Value& v) {
+        return v.isMarkable() && IsInsideNursery(v.toGCThing());
+    }
 };
 
 template <>
@@ -324,6 +330,8 @@ struct InternalBarrierMethods<jsid>
 
     static void preBarrier(jsid id) { DispatchTyped(PreBarrierFunctor<jsid>(), id); }
     static void postBarrier(jsid* idp, jsid prev, jsid next) {}
+
+    static bool isInsideNursery(jsid id) { return false; }
 };
 
 // Barrier classes can use Mixins to add methods to a set of barrier
@@ -443,8 +451,11 @@ class GCPtr : public WriteBarrieredBase<T>
 #ifdef DEBUG
     ~GCPtr() {
         // No prebarrier necessary as this only happens when we are sweeping or
-        // before the containing object becomes part of the GC graph.
-        MOZ_ASSERT(CurrentThreadIsGCSweeping() || CurrentThreadIsHandlingInitFailure());
+        // after we have just collected the nursery.
+        bool inNursery = InternalBarrierMethods<T>::isInsideNursery(this->value);
+        MOZ_ASSERT(CurrentThreadIsGCSweeping() ||
+                   CurrentThreadCanSkipPostBarrier(inNursery));
+        Poison(this, JS_FREED_HEAP_PTR_PATTERN, sizeof(*this));
     }
 #endif
 
@@ -683,8 +694,9 @@ class HeapSlot : public WriteBarrieredBase<Value>
     }
 
 #ifdef DEBUG
-    bool preconditionForSet(NativeObject* owner, Kind kind, uint32_t slot);
-    bool preconditionForWriteBarrierPost(NativeObject* obj, Kind kind, uint32_t slot, Value target) const;
+    bool preconditionForSet(NativeObject* owner, Kind kind, uint32_t slot) const;
+    bool preconditionForWriteBarrierPost(NativeObject* obj, Kind kind, uint32_t slot,
+                                         const Value& target) const;
 #endif
 
     void set(NativeObject* owner, Kind kind, uint32_t slot, const Value& v) {
@@ -896,6 +908,8 @@ class ScriptSourceObject;
 class Shape;
 class BaseShape;
 class UnownedBaseShape;
+class WasmInstanceObject;
+class WasmTableObject;
 namespace jit {
 class JitCode;
 } // namespace jit
@@ -947,6 +961,8 @@ typedef ReadBarriered<Shape*> ReadBarrieredShape;
 typedef ReadBarriered<jit::JitCode*> ReadBarrieredJitCode;
 typedef ReadBarriered<ObjectGroup*> ReadBarrieredObjectGroup;
 typedef ReadBarriered<JS::Symbol*> ReadBarrieredSymbol;
+typedef ReadBarriered<WasmInstanceObject*> ReadBarrieredWasmInstanceObject;
+typedef ReadBarriered<WasmTableObject*> ReadBarrieredWasmTableObject;
 
 typedef ReadBarriered<Value> ReadBarrieredValue;
 

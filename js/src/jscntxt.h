@@ -212,11 +212,12 @@ class ExclusiveContext : public ContextFriendFields,
     const JS::AsmJSCacheOps& asmJSCacheOps() { return runtime_->asmJSCacheOps; }
     PropertyName* emptyString() { return runtime_->emptyString; }
     FreeOp* defaultFreeOp() { return runtime_->defaultFreeOp(); }
-    void* runtimeAddressForJit() { return runtime_; }
+    void* contextAddressForJit() { return runtime_->unsafeContextFromAnyThread(); }
     void* runtimeAddressOfInterruptUint32() { return runtime_->addressOfInterruptUint32(); }
     void* stackLimitAddress(StackKind kind) { return &runtime_->mainThread.nativeStackLimit[kind]; }
     void* stackLimitAddressForJitCode(StackKind kind);
     uintptr_t stackLimit(StackKind kind) { return runtime_->mainThread.nativeStackLimit[kind]; }
+    uintptr_t stackLimitForJitCode(StackKind kind);
     size_t gcSystemPageSize() { return gc::SystemPageSize(); }
     bool jitSupportsFloatingPoint() const { return runtime_->jitSupportsFloatingPoint; }
     bool jitSupportsUnalignedAccesses() const { return runtime_->jitSupportsUnalignedAccesses; }
@@ -339,6 +340,9 @@ struct JSContext : public js::ExclusiveContext,
 
     static size_t offsetOfActivation() {
         return offsetof(JSContext, activation_);
+    }
+    static size_t offsetOfWasmActivation() {
+        return offsetof(JSContext, wasmActivationStack_);
     }
     static size_t offsetOfProfilingActivation() {
         return offsetof(JSContext, profilingActivation_);
@@ -574,7 +578,8 @@ ReportErrorNumberUCArray(JSContext* cx, unsigned flags, JSErrorCallback callback
 extern bool
 ExpandErrorArgumentsVA(ExclusiveContext* cx, JSErrorCallback callback,
                        void* userRef, const unsigned errorNumber,
-                       char** message, ErrorArgumentsType argumentsType,
+                       char** message, const char16_t** messageArgs,
+                       ErrorArgumentsType argumentsType,
                        JSErrorReport* reportp, va_list ap);
 
 /* |callee| requires a usage string provided by JS_DefineFunctionsWithHelp. */

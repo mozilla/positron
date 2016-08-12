@@ -59,7 +59,7 @@
 #include "GLContextCGL.h"
 #include "ScopedGLHelpers.h"
 #include "HeapCopyOfStackArray.h"
-#include "mozilla/layers/APZCTreeManager.h"
+#include "mozilla/layers/IAPZCTreeManager.h"
 #include "mozilla/layers/APZThreadUtils.h"
 #include "mozilla/layers/GLManager.h"
 #include "mozilla/layers/CompositorOGL.h"
@@ -178,6 +178,8 @@ static uint32_t gNumberOfWidgetsNeedingEventThread = 0;
 - (CGFloat)cornerRadius;
 - (void)clearCorners;
 
+-(void)setFullscreen:(BOOL)aFullscreen;
+
 // Overlay drawing functions for traditional CGContext drawing
 - (void)drawTitleString;
 - (void)drawTitlebarHighlight;
@@ -198,7 +200,7 @@ static uint32_t gNumberOfWidgetsNeedingEventThread = 0;
 #endif
 
 - (LayoutDeviceIntPoint)convertWindowCoordinates:(NSPoint)aPoint;
-- (APZCTreeManager*)apzctm;
+- (IAPZCTreeManager*)apzctm;
 
 - (BOOL)inactiveWindowAcceptsMouseEvent:(NSEvent*)aEvent;
 - (void)updateWindowDraggableState;
@@ -275,12 +277,12 @@ namespace {
 class GLPresenter : public GLManager
 {
 public:
-  static GLPresenter* CreateForWindow(nsIWidget* aWindow)
+  static mozilla::UniquePtr<GLPresenter> CreateForWindow(nsIWidget* aWindow)
   {
     // Contrary to CompositorOGL, we allow unaccelerated OpenGL contexts to be
     // used. BasicCompositor only requires very basic GL functionality.
     RefPtr<GLContext> context = gl::GLContextProvider::CreateForWindow(aWindow, false);
-    return context ? new GLPresenter(context) : nullptr;
+    return context ? MakeUnique<GLPresenter>(context) : nullptr;
   }
 
   explicit GLPresenter(GLContext* aContext);
@@ -291,7 +293,7 @@ public:
   {
     MOZ_ASSERT(aTarget == LOCAL_GL_TEXTURE_RECTANGLE_ARB);
     MOZ_ASSERT(aFormat == gfx::SurfaceFormat::R8G8B8A8);
-    return mRGBARectProgram;
+    return mRGBARectProgram.get();
   }
   virtual const gfx::Matrix4x4& GetProjMatrix() const override
   {
@@ -315,7 +317,7 @@ public:
 
 protected:
   RefPtr<mozilla::gl::GLContext> mGLContext;
-  nsAutoPtr<mozilla::layers::ShaderProgramOGL> mRGBARectProgram;
+  mozilla::UniquePtr<mozilla::layers::ShaderProgramOGL> mRGBARectProgram;
   gfx::Matrix4x4 mProjMatrix;
   GLuint mQuadVBO;
 };
@@ -1184,6 +1186,37 @@ nsresult nsChildView::SynthesizeNativeMouseScrollEvent(mozilla::LayoutDeviceIntP
   NS_OBJC_END_TRY_ABORT_BLOCK_NSRESULT;
 }
 
+nsresult nsChildView::SynthesizeNativeTouchPoint(uint32_t aPointerId,
+                                                 TouchPointerState aPointerState,
+                                                 mozilla::LayoutDeviceIntPoint aPoint,
+                                                 double aPointerPressure,
+                                                 uint32_t aPointerOrientation,
+                                                 nsIObserver* aObserver)
+{
+  NS_OBJC_BEGIN_TRY_ABORT_BLOCK_NSRESULT;
+
+  AutoObserverNotifier notifier(aObserver, "touchpoint");
+
+  MOZ_ASSERT(NS_IsMainThread());
+  if (aPointerState == TOUCH_HOVER) {
+    return NS_ERROR_UNEXPECTED;
+  }
+
+  if (!mSynthesizedTouchInput) {
+    mSynthesizedTouchInput = MakeUnique<MultiTouchInput>();
+  }
+
+  LayoutDeviceIntPoint pointInWindow = aPoint - WidgetToScreenOffset();
+  MultiTouchInput inputToDispatch = UpdateSynthesizedTouchState(
+      mSynthesizedTouchInput.get(), PR_IntervalNow(), TimeStamp::Now(),
+      aPointerId, aPointerState, pointInWindow, aPointerPressure,
+      aPointerOrientation);
+  DispatchTouchInput(inputToDispatch);
+  return NS_OK;
+
+  NS_OBJC_END_TRY_ABORT_BLOCK_NSRESULT;
+}
+
 // First argument has to be an NSMenu representing the application's top-level
 // menu bar. The returned item is *not* retained.
 static NSMenuItem* NativeMenuItemWithLocation(NSMenu* menubar, NSString* locationString)
@@ -1961,17 +1994,26 @@ nsChildView::PrepareWindowEffects()
 {
   NS_OBJC_BEGIN_TRY_ABORT_BLOCK;
 
-  MutexAutoLock lock(mEffectsLock);
-  mShowsResizeIndicator = ShowsResizeIndicator(&mResizeIndicatorRect);
-  mHasRoundedBottomCorners = [(ChildView*)mView hasRoundedBottomCorners];
-  CGFloat cornerRadius = [(ChildView*)mView cornerRadius];
-  mDevPixelCornerRadius = cornerRadius * BackingScaleFactor();
-  mIsCoveringTitlebar = [(ChildView*)mView isCoveringTitlebar];
-  NSInteger styleMask = [[mView window] styleMask];
-  mIsFullscreen = (styleMask & NSFullScreenWindowMask) || !(styleMask & NSTitledWindowMask);
-  if (mIsCoveringTitlebar) {
-    mTitlebarRect = RectContainingTitlebarControls();
-    UpdateTitlebarCGContext();
+  bool isFullscreen;
+  {
+    MutexAutoLock lock(mEffectsLock);
+    mShowsResizeIndicator = ShowsResizeIndicator(&mResizeIndicatorRect);
+    mHasRoundedBottomCorners = [(ChildView*)mView hasRoundedBottomCorners];
+    CGFloat cornerRadius = [(ChildView*)mView cornerRadius];
+    mDevPixelCornerRadius = cornerRadius * BackingScaleFactor();
+    mIsCoveringTitlebar = [(ChildView*)mView isCoveringTitlebar];
+    NSInteger styleMask = [[mView window] styleMask];
+    isFullscreen = (styleMask & NSFullScreenWindowMask) || !(styleMask & NSTitledWindowMask);
+    if (mIsCoveringTitlebar) {
+      mTitlebarRect = RectContainingTitlebarControls();
+      UpdateTitlebarCGContext();
+    }
+  }
+
+  // If we've just transitioned into or out of full screen then update the opacity on our GLContext.
+  if (isFullscreen != mIsFullscreen) {
+    mIsFullscreen = isFullscreen;
+    [(ChildView*)mView setFullscreen:isFullscreen];
   }
 
   NS_OBJC_END_TRY_ABORT_BLOCK;
@@ -1988,7 +2030,7 @@ nsChildView::CleanupWindowEffects()
 bool
 nsChildView::PreRender(LayerManagerComposite* aManager)
 {
-  nsAutoPtr<GLManager> manager(GLManager::CreateGLManager(aManager));
+  UniquePtr<GLManager> manager(GLManager::CreateGLManager(aManager));
   if (!manager) {
     return true;
   }
@@ -2010,7 +2052,7 @@ nsChildView::PreRender(LayerManagerComposite* aManager)
 void
 nsChildView::PostRender(LayerManagerComposite* aManager)
 {
-  nsAutoPtr<GLManager> manager(GLManager::CreateGLManager(aManager));
+  UniquePtr<GLManager> manager(GLManager::CreateGLManager(aManager));
   if (!manager) {
     return;
   }
@@ -2023,9 +2065,9 @@ void
 nsChildView::DrawWindowOverlay(LayerManagerComposite* aManager,
                                LayoutDeviceIntRect aRect)
 {
-  nsAutoPtr<GLManager> manager(GLManager::CreateGLManager(aManager));
+  mozilla::UniquePtr<GLManager> manager(GLManager::CreateGLManager(aManager));
   if (manager) {
-    DrawWindowOverlay(manager, aRect);
+    DrawWindowOverlay(manager.get(), aRect);
   }
 }
 
@@ -2160,8 +2202,8 @@ CreateCGContext(const LayoutDeviceIntSize& aSize)
 LayoutDeviceIntSize
 TextureSizeForSize(const LayoutDeviceIntSize& aSize)
 {
-  return LayoutDeviceIntSize(gfx::NextPowerOfTwo(aSize.width),
-                             gfx::NextPowerOfTwo(aSize.height));
+  return LayoutDeviceIntSize(RoundUpPow2(aSize.width),
+                             RoundUpPow2(aSize.height));
 }
 
 // When this method is entered, mEffectsLock is already being held.
@@ -2718,11 +2760,11 @@ nsChildView::DoRemoteComposition(const LayoutDeviceIntRect& aRenderRect)
   mGLPresenter->BeginFrame(aRenderRect.Size());
 
   // Draw the result from the basic compositor.
-  mBasicCompositorImage->Draw(mGLPresenter, LayoutDeviceIntPoint(0, 0));
+  mBasicCompositorImage->Draw(mGLPresenter.get(), LayoutDeviceIntPoint(0, 0));
 
   // DrawWindowOverlay doesn't do anything for non-GL, so it didn't paint
   // anything during the basic compositor transaction. Draw the overlay now.
-  DrawWindowOverlay(mGLPresenter, aRenderRect);
+  DrawWindowOverlay(mGLPresenter.get(), aRenderRect);
 
   mGLPresenter->EndFrame();
 
@@ -3008,7 +3050,7 @@ GLPresenter::GLPresenter(GLContext* aContext)
   mGLContext->MakeCurrent();
   ShaderConfigOGL config;
   config.SetTextureTarget(LOCAL_GL_TEXTURE_RECTANGLE_ARB);
-  mRGBARectProgram = new ShaderProgramOGL(mGLContext,
+  mRGBARectProgram = MakeUnique<ShaderProgramOGL>(mGLContext,
     ProgramProfileOGL::GetProfileFor(config));
 
   // Create mQuadVBO.
@@ -3698,7 +3740,7 @@ NSEvent* gLastDragMouseDownEvent = nil;
   CGContextScaleCTM(aContext, 1.0 / scale, 1.0 / scale);
 
   NSSize viewSize = [self bounds].size;
-  nsIntSize backingSize(viewSize.width * scale, viewSize.height * scale);
+  gfx::IntSize backingSize = gfx::IntSize::Truncate(viewSize.width * scale, viewSize.height * scale);
   LayoutDeviceIntRegion region = [self nativeDirtyRegionWithBoundingRect:aRect];
 
   bool painted = mGeckoChild->PaintWindowInContext(aContext, region, backingSize);
@@ -3797,6 +3839,16 @@ NSEvent* gLastDragMouseDownEvent = nil;
   if (!frameView || ![frameView respondsToSelector:@selector(roundedCornerRadius)])
     return 4.0f;
   return [frameView roundedCornerRadius];
+}
+
+-(void)setFullscreen:(BOOL)aFullscreen
+{
+  CGLLockContext((CGLContextObj)[mGLContext CGLContextObj]);
+  // Make the context opaque for fullscreen (since it performs better), and transparent
+  // for windowed (since we need it for rounded corners).
+  GLint opaque = aFullscreen ? 1 : 0;
+  [mGLContext setValues:&opaque forParameter:NSOpenGLCPSurfaceOpacity];
+  CGLUnlockContext((CGLContextObj)[mGLContext CGLContextObj]);
 }
 
 // Accelerated windows have two NSSurfaces:
@@ -4078,7 +4130,7 @@ NSEvent* gLastDragMouseDownEvent = nil;
         if ([theEvent type] == NSLeftMouseDown) {
           NSPoint point = [NSEvent mouseLocation];
           FlipCocoaScreenCoordinate(point);
-          nsIntPoint pos(point.x, point.y);
+          gfx::IntPoint pos = gfx::IntPoint::Truncate(point.x, point.y);
           consumeEvent = (BOOL)rollupListener->Rollup(popupsToRollup, true, &pos, nullptr);
         }
         else {
@@ -4870,7 +4922,7 @@ PanGestureTypeForEvent(NSEvent* aEvent)
 
 - (void)handleAsyncScrollEvent:(CGEventRef)cgEvent ofType:(CGEventType)type
 {
-  APZCTreeManager* apzctm = [self apzctm];
+  IAPZCTreeManager* apzctm = [self apzctm];
   if (!apzctm) {
     return;
   }
@@ -5518,7 +5570,7 @@ PanGestureTypeForEvent(NSEvent* aEvent)
   return mGeckoChild->CocoaPointsToDevPixels(localPoint);
 }
 
-- (APZCTreeManager*)apzctm
+- (IAPZCTreeManager*)apzctm
 {
   return mGeckoChild ? mGeckoChild->APZCTM() : nullptr;
 }
@@ -5722,7 +5774,7 @@ PanGestureTypeForEvent(NSEvent* aEvent)
     nsDragService* dragService = static_cast<nsDragService *>(mDragService);
     NSPoint pnt = [NSEvent mouseLocation];
     FlipCocoaScreenCoordinate(pnt);
-    dragService->SetDragEndPoint(nsIntPoint(NSToIntRound(pnt.x), NSToIntRound(pnt.y)));
+    dragService->SetDragEndPoint(gfx::IntPoint::Round(pnt.x, pnt.y));
 
     // XXX: dropEffect should be updated per |operation|.
     // As things stand though, |operation| isn't well handled within "our"

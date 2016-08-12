@@ -87,6 +87,10 @@ typedef enum {
   MOZ_GTK_BUTTON,
   /* Paints a button with image and no text */
   MOZ_GTK_TOOLBAR_BUTTON,
+  /* Paints a toggle button */
+  MOZ_GTK_TOGGLE_BUTTON,
+  /* Paints a button arrow */
+  MOZ_GTK_BUTTON_ARROW,
 
   /* Paints the container part of a GtkCheckButton. */
   MOZ_GTK_CHECKBUTTON_CONTAINER,
@@ -155,6 +159,8 @@ typedef enum {
   MOZ_GTK_TOOLTIP,
   /* Paints a GtkFrame (e.g. a status bar panel). */
   MOZ_GTK_FRAME,
+  /* Paints the border of a GtkFrame */
+  MOZ_GTK_FRAME_BORDER,
   /* Paints a resize grip for a GtkWindow */
   MOZ_GTK_RESIZER,
   /* Paints a GtkProgressBar. */
@@ -173,8 +179,10 @@ typedef enum {
   MOZ_GTK_TABPANELS,
   /* Paints a GtkArrow for a GtkNotebook. flags is a GtkArrowType. */
   MOZ_GTK_TAB_SCROLLARROW,
-  /* Paints the background and border of a GtkTreeView */
+  /* Paints the expander and border of a GtkTreeView */
   MOZ_GTK_TREEVIEW,
+  /* Paints the border of a GtkTreeView */
+  MOZ_GTK_TREEVIEW_VIEW,
   /* Paints treeheader cells */
   MOZ_GTK_TREE_HEADER_CELL,
   /* Paints sort arrows in treeheader cells */
@@ -193,19 +201,28 @@ typedef enum {
   MOZ_GTK_MENUBARITEM,
   /* Paints items of popup menus. */
   MOZ_GTK_MENUITEM,
+  MOZ_GTK_IMAGEMENUITEM,
+  MOZ_GTK_CHECKMENUITEM_CONTAINER,
+  MOZ_GTK_RADIOMENUITEM_CONTAINER,
   MOZ_GTK_CHECKMENUITEM,
   MOZ_GTK_RADIOMENUITEM,
   MOZ_GTK_MENUSEPARATOR,
-  /* Paints a GtkVPaned separator */
+  /* GtkVPaned base class */
   MOZ_GTK_SPLITTER_HORIZONTAL,
-  /* Paints a GtkHPaned separator */
+  /* GtkHPaned base class */
   MOZ_GTK_SPLITTER_VERTICAL,
+  /* Paints a GtkVPaned separator */
+  MOZ_GTK_SPLITTER_SEPARATOR_HORIZONTAL,
+  /* Paints a GtkHPaned separator */
+  MOZ_GTK_SPLITTER_SEPARATOR_VERTICAL,
   /* Paints the background of a window, dialog or page. */
   MOZ_GTK_WINDOW,
   /* Window container for all widgets */
   MOZ_GTK_WINDOW_CONTAINER,
   /* Paints a GtkInfoBar, for notifications. */
   MOZ_GTK_INFO_BAR,
+  /* Used for scrolled window shell. */
+  MOZ_GTK_SCROLLED_WINDOW,
 
   MOZ_GTK_WIDGET_NODE_COUNT
 } WidgetNodeType;

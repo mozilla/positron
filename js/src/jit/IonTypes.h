@@ -14,7 +14,9 @@
 #include "jsfriendapi.h"
 #include "jstypes.h"
 
+#include "js/GCAPI.h"
 #include "js/Value.h"
+#include "vm/String.h"
 
 namespace js {
 namespace jit {
@@ -747,6 +749,15 @@ ScalarTypeToLength(Scalar::Type type)
     MOZ_CRASH("unexpected SIMD kind");
 }
 
+static inline const char*
+PropertyNameToExtraName(PropertyName* name)
+{
+    JS::AutoCheckCannotGC nogc;
+    if (!name->hasLatin1Chars())
+        return nullptr;
+    return reinterpret_cast<const char *>(name->latin1Chars(nogc));
+}
+
 #ifdef DEBUG
 
 // Track the pipeline of opcodes which has produced a snapshot.
@@ -762,10 +773,11 @@ enum {
     ArgType_General = 0x1,
     ArgType_Double  = 0x2,
     ArgType_Float32 = 0x3,
+    ArgType_Int64 = 0x4,
 
     RetType_Shift   = 0x0,
-    ArgType_Shift   = 0x2,
-    ArgType_Mask    = 0x3
+    ArgType_Shift   = 0x3,
+    ArgType_Mask    = 0x7
 };
 
 enum ABIFunctionType
@@ -782,6 +794,9 @@ enum ABIFunctionType
     Args_General7 = Args_General6 | (ArgType_General << (ArgType_Shift * 7)),
     Args_General8 = Args_General7 | (ArgType_General << (ArgType_Shift * 8)),
 
+    // int64 f(double)
+    Args_Int64_Double = (ArgType_Int64 << RetType_Shift) | (ArgType_Double << ArgType_Shift),
+
     // double f()
     Args_Double_None = ArgType_Double << RetType_Shift,
 
@@ -796,6 +811,9 @@ enum ABIFunctionType
 
     // double f(int)
     Args_Double_Int = Args_Double_None | (ArgType_General << ArgType_Shift),
+
+    // double f(int, int)
+    Args_Double_IntInt = Args_Double_Int | (ArgType_General << (ArgType_Shift * 2)),
 
     // double f(double, int)
     Args_Double_DoubleInt = Args_Double_None |

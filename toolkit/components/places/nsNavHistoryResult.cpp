@@ -3166,7 +3166,7 @@ nsNavHistoryFolderResultNode::GetQueries(uint32_t* queryCount,
                         (moz_xmalloc(sizeof(nsINavHistoryQuery*)));
   if (!*queries)
     return NS_ERROR_OUT_OF_MEMORY;
-  NS_ADDREF((*queries)[0] = query);
+  (*queries)[0] = query.forget().take();
   *queryCount = 1;
   return NS_OK;
 }
@@ -4636,7 +4636,7 @@ nsNavHistoryResult::OnVisit(nsIURI* aURI, int64_t aVisitId, PRTime aTime,
       NS_ENSURE_TRUE(history, NS_OK);
       nsAutoCString todayLabel;
       history->GetStringFromName(
-        MOZ_UTF16("finduri-AgeInDays-is-0"), todayLabel);
+        u"finduri-AgeInDays-is-0", todayLabel);
       todayIsMissing = !todayLabel.Equals(title);
     }
   }

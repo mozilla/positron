@@ -835,11 +835,11 @@ public:
     return mLangID == 0x411 &&
       (mActiveTIPKeyboardDescription.EqualsLiteral("Microsoft IME") ||
        mActiveTIPKeyboardDescription.Equals(
-         NS_LITERAL_STRING("Microsoft \xC785\xB825\xAE30")) ||
+         NS_LITERAL_STRING(u"Microsoft \xC785\xB825\xAE30")) ||
        mActiveTIPKeyboardDescription.Equals(
-         NS_LITERAL_STRING("\x5FAE\x8F6F\x8F93\x5165\x6CD5")) ||
+         NS_LITERAL_STRING(u"\x5FAE\x8F6F\x8F93\x5165\x6CD5")) ||
        mActiveTIPKeyboardDescription.Equals(
-         NS_LITERAL_STRING("\x5FAE\x8EDF\x8F38\x5165\x6CD5")));
+         NS_LITERAL_STRING(u"\x5FAE\x8EDF\x8F38\x5165\x6CD5")));
   }
 
   bool IsMSOfficeJapaneseIME2010Active() const
@@ -867,18 +867,18 @@ public:
   {
     return mActiveTIPKeyboardDescription.EqualsLiteral("Microsoft ChangJie") ||
       mActiveTIPKeyboardDescription.Equals(
-        NS_LITERAL_STRING("\x5FAE\x8F6F\x4ED3\x9889")) ||
+        NS_LITERAL_STRING(u"\x5FAE\x8F6F\x4ED3\x9889")) ||
       mActiveTIPKeyboardDescription.Equals(
-        NS_LITERAL_STRING("\x5FAE\x8EDF\x5009\x9821"));
+        NS_LITERAL_STRING(u"\x5FAE\x8EDF\x5009\x9821"));
   }
 
   bool IsMSQuickQuickActive() const
   {
     return mActiveTIPKeyboardDescription.EqualsLiteral("Microsoft Quick") ||
       mActiveTIPKeyboardDescription.Equals(
-        NS_LITERAL_STRING("\x5FAE\x8F6F\x901F\x6210")) ||
+        NS_LITERAL_STRING(u"\x5FAE\x8F6F\x901F\x6210")) ||
       mActiveTIPKeyboardDescription.Equals(
-        NS_LITERAL_STRING("\x5FAE\x8EDF\x901F\x6210"));
+        NS_LITERAL_STRING(u"\x5FAE\x8EDF\x901F\x6210"));
   }
 
   bool IsFreeChangJieActive() const
@@ -892,7 +892,7 @@ public:
     return
       mActiveTIPKeyboardDescription.Equals(
         NS_LITERAL_STRING(
-          "\x4E2D\x6587 (\x7E41\x9AD4) - \x6613\x9821\x8F38\x5165\x6CD5"));
+          u"\x4E2D\x6587 (\x7E41\x9AD4) - \x6613\x9821\x8F38\x5165\x6CD5"));
   }
 
   /****************************************************************************
@@ -903,18 +903,18 @@ public:
   {
     return mActiveTIPKeyboardDescription.EqualsLiteral("Microsoft Pinyin") ||
       mActiveTIPKeyboardDescription.Equals(
-        NS_LITERAL_STRING("\x5FAE\x8F6F\x62FC\x97F3")) ||
+        NS_LITERAL_STRING(u"\x5FAE\x8F6F\x62FC\x97F3")) ||
       mActiveTIPKeyboardDescription.Equals(
-        NS_LITERAL_STRING("\x5FAE\x8EDF\x62FC\x97F3"));
+        NS_LITERAL_STRING(u"\x5FAE\x8EDF\x62FC\x97F3"));
   }
 
   bool IsMSWubiActive() const
   {
     return mActiveTIPKeyboardDescription.EqualsLiteral("Microsoft Wubi") ||
       mActiveTIPKeyboardDescription.Equals(
-        NS_LITERAL_STRING("\x5FAE\x8F6F\x4E94\x7B14")) ||
+        NS_LITERAL_STRING(u"\x5FAE\x8F6F\x4E94\x7B14")) ||
       mActiveTIPKeyboardDescription.Equals(
-        NS_LITERAL_STRING("\x5FAE\x8EDF\x4E94\x7B46"));
+        NS_LITERAL_STRING(u"\x5FAE\x8EDF\x4E94\x7B46"));
   }
 
 public: // ITfInputProcessorProfileActivationSink
@@ -1244,7 +1244,8 @@ TSFTextStore::~TSFTextStore()
 }
 
 bool
-TSFTextStore::Init(nsWindowBase* aWidget)
+TSFTextStore::Init(nsWindowBase* aWidget,
+                   const InputContext& aContext)
 {
   MOZ_LOG(sTextStoreLog, LogLevel::Info,
     ("0x%p TSFTextStore::Init(aWidget=0x%p)",
@@ -1293,6 +1294,8 @@ TSFTextStore::Init(nsWindowBase* aWidget)
     mDocumentMgr = nullptr;
     return false;
   }
+
+  SetInputScope(aContext.mHTMLInputType, aContext.mHTMLInputInputmode);
 
   hr = mDocumentMgr->Push(mContext);
   if (FAILED(hr)) {
@@ -4596,7 +4599,7 @@ TSFTextStore::CreateAndSetFocus(nsWindowBase* aFocusedWidget,
   // So, we should set sEnabledTextStore directly.
   RefPtr<TSFTextStore> textStore = new TSFTextStore();
   sEnabledTextStore = textStore;
-  if (NS_WARN_IF(!textStore->Init(aFocusedWidget))) {
+  if (NS_WARN_IF(!textStore->Init(aFocusedWidget, aContext))) {
     MOZ_LOG(sTextStoreLog, LogLevel::Error,
       ("  TSFTextStore::CreateAndSetFocus() FAILED due to "
        "TSFTextStore::Init() failure"));
@@ -4635,8 +4638,6 @@ TSFTextStore::CreateAndSetFocus(nsWindowBase* aFocusedWidget,
        "ITfTheadMgr::AssociateFocus() failure"));
     return false;
   }
-  textStore->SetInputScope(aContext.mHTMLInputType,
-                           aContext.mHTMLInputInputmode);
 
   if (textStore->mSink) {
     MOZ_LOG(sTextStoreLog, LogLevel::Info,
@@ -6100,4 +6101,3 @@ TSFTextStore::CurrentKeyboardLayoutHasIME()
 
 } // name widget
 } // name mozilla
-

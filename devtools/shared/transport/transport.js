@@ -22,9 +22,10 @@
     factory.call(this, require, this);
   }
 }).call(this, function (require, exports) {
-  const { Cc, Ci, Cr, CC } = require("chrome");
+  const { Cc, Cr, CC } = require("chrome");
   const DevToolsUtils = require("devtools/shared/DevToolsUtils");
   const { dumpn, dumpv } = DevToolsUtils;
+  const flags = require("devtools/shared/flags");
   const StreamUtils = require("devtools/shared/transport/stream-utils");
   const { Packet, JSONPacket, BulkPacket } =
   require("devtools/shared/transport/packets");
@@ -438,12 +439,12 @@
       let amountToRead = PACKET_HEADER_MAX - this._incomingHeader.length;
       this._incomingHeader +=
       StreamUtils.delimitedRead(this._scriptableInput, ":", amountToRead);
-      if (dumpv.wantVerbose) {
+      if (flags.wantVerbose) {
         dumpv("Header read: " + this._incomingHeader);
       }
 
       if (this._incomingHeader.endsWith(":")) {
-        if (dumpv.wantVerbose) {
+        if (flags.wantVerbose) {
           dumpv("Found packet header successfully: " + this._incomingHeader);
         }
         return true;
@@ -464,7 +465,7 @@
       if (!this._incoming.done) {
         return;
       }
-      if (dumpn.wantLogging) {
+      if (flags.wantLogging) {
         dumpn("Got: " + this._incoming);
       }
       this._destroyIncoming();
@@ -548,7 +549,7 @@
       this.emit("send", packet);
 
       let serial = this._serial.count++;
-      if (dumpn.wantLogging) {
+      if (flags.wantLogging) {
         // Check 'from' first, as 'echo' packets have both.
         if (packet.from) {
           dumpn("Packet " + serial + " sent from " + uneval(packet.from));
@@ -561,7 +562,7 @@
       if (other) {
         DevToolsUtils.executeSoon(DevToolsUtils.makeInfallible(() => {
           // Avoid the cost of JSON.stringify() when logging is disabled.
-          if (dumpn.wantLogging) {
+          if (flags.wantLogging) {
             dumpn("Received packet " + serial + ": " + JSON.stringify(packet, null, 2));
           }
           if (other.hooks) {
@@ -714,7 +715,7 @@
   function ChildDebuggerTransport(sender, prefix) {
     EventEmitter.decorate(this);
 
-    this._sender = sender.QueryInterface(Ci.nsIMessageSender);
+    this._sender = sender;
     this._messageName = "debug:" + prefix + ":packet";
   }
 
@@ -733,7 +734,16 @@
     },
 
     close: function () {
-      this._sender.removeMessageListener(this._messageName, this);
+      try {
+        this._sender.removeMessageListener(this._messageName, this);
+      } catch (e) {
+        if (e.result != Cr.NS_ERROR_NULL_POINTER) {
+          throw e;
+        }
+        // In some cases, especially when using messageManagers in non-e10s mode, we reach
+        // this point with a dead messageManager which only throws errors but does not
+        // seem to indicate in any other way that it is dead.
+      }
       this.emit("onClosed");
       this.hooks.onClosed();
     },
@@ -745,7 +755,16 @@
 
     send: function (packet) {
       this.emit("send", packet);
-      this._sender.sendAsyncMessage(this._messageName, packet);
+      try {
+        this._sender.sendAsyncMessage(this._messageName, packet);
+      } catch (e) {
+        if (e.result != Cr.NS_ERROR_NULL_POINTER) {
+          throw e;
+        }
+        // In some cases, especially when using messageManagers in non-e10s mode, we reach
+        // this point with a dead messageManager which only throws errors but does not
+        // seem to indicate in any other way that it is dead.
+      }
     },
 
     startBulkSend: function () {

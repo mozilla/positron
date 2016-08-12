@@ -92,10 +92,9 @@ function sendPing() {
   if (PingServer.started) {
     TelemetrySend.setServer("http://localhost:" + PingServer.port);
     return TelemetrySession.testPing();
-  } else {
-    TelemetrySend.setServer("http://doesnotexist");
-    return TelemetrySession.testPing();
   }
+  TelemetrySend.setServer("http://doesnotexist");
+  return TelemetrySession.testPing();
 }
 
 function fakeGenerateUUID(sessionFunc, subsessionFunc) {
@@ -1862,7 +1861,7 @@ add_task(function* test_userIdleAndSchedlerTick() {
   yield TelemetryController.testShutdown();
 });
 
-add_task(function* stopServer(){
+add_task(function* stopServer() {
   yield PingServer.stop();
   do_test_finished();
 });

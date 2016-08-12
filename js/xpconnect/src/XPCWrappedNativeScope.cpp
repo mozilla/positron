@@ -195,7 +195,7 @@ XPCWrappedNativeScope::GetComponentsJSObject(JS::MutableHandleObject obj)
     RootedValue val(cx);
     xpcObjectHelper helper(mComponents);
     bool ok = XPCConvert::NativeInterface2JSObject(&val, nullptr, helper,
-                                                   nullptr, nullptr, false,
+                                                   nullptr, false,
                                                    nullptr);
     if (NS_WARN_IF(!ok))
         return false;
@@ -373,6 +373,12 @@ UseContentXBLScope(JSCompartment* c)
 {
   XPCWrappedNativeScope* scope = CompartmentPrivate::Get(c)->scope;
   return scope && scope->UseContentXBLScope();
+}
+
+void
+ClearContentXBLScope(JSObject* global)
+{
+    CompartmentPrivate::Get(global)->scope->ClearContentXBLScope();
 }
 
 } /* namespace xpc */

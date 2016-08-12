@@ -88,7 +88,6 @@ hardware (via AudioStream).
 
 #include "nsAutoPtr.h"
 #include "nsThreadUtils.h"
-#include "MediaCallbackID.h"
 #include "MediaDecoder.h"
 #include "MediaDecoderReader.h"
 #include "MediaDecoderOwner.h"
@@ -119,6 +118,7 @@ enum class MediaEventType : int8_t {
   PlaybackStarted,
   PlaybackStopped,
   PlaybackEnded,
+  SeekStarted,
   DecodeError,
   Invalidate
 };
@@ -244,9 +244,6 @@ public:
 
   MediaEventSource<MediaEventType>&
   OnPlaybackEvent() { return mOnPlaybackEvent; }
-
-  MediaEventSource<MediaDecoderEventVisibility>&
-  OnSeekingStart() { return mOnSeekingStart; }
 
   // Immutable after construction - may be called on any thread.
   bool IsRealTime() const { return mRealTime; }
@@ -509,8 +506,7 @@ protected:
   void EnqueueFirstFrameLoadedEvent();
 
   // Clears any previous seeking state and initiates a new seek on the decoder.
-  // The decoder monitor must be held.
-  void InitiateSeek(SeekJob aSeekJob);
+  RefPtr<MediaDecoder::SeekPromise> InitiateSeek(SeekJob aSeekJob);
 
   // Clears any previous seeking state and initiates a seek on the decoder to
   // resync the video and audio positions, when recovering from video decoding
@@ -951,7 +947,6 @@ private:
                         MediaDecoderEventVisibility> mFirstFrameLoadedEvent;
 
   MediaEventProducer<MediaEventType> mOnPlaybackEvent;
-  MediaEventProducer<MediaDecoderEventVisibility> mOnSeekingStart;
 
   // True if audio is offloading.
   // Playback will not start when audio is offloading.

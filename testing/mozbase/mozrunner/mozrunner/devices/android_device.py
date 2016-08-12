@@ -246,10 +246,11 @@ def run_firefox_for_android(build_obj, params):
         return 1
     return 0
 
-def grant_runtime_permissions(build_obj, app):
+def grant_runtime_permissions(build_obj):
     """
        Grant required runtime permissions to the specified app (typically org.mozilla.fennec_$USER).
     """
+    app = build_obj.substs['ANDROID_PACKAGE_NAME']
     adb_path = _find_sdk_exe(build_obj.substs, 'adb', False)
     if not adb_path:
         adb_path = 'adb'
@@ -364,8 +365,8 @@ class AndroidEmulator(object):
         if not os.path.exists(avd):
             if os.path.exists(ini_file):
                 os.remove(ini_file)
-            url = '%s/%s' % (TRY_URL, self.avd_info.tooltool_manifest)
-            _download_file(url, 'releng.manifest', EMULATOR_HOME_DIR)
+            path = self.avd_info.tooltool_manifest
+            _get_tooltool_manifest(self.substs, path, EMULATOR_HOME_DIR, 'releng.manifest')
             _tooltool_fetch()
             self._update_avd_paths()
 

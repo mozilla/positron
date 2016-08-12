@@ -35,6 +35,7 @@ this.LoginHelper = {
    * Warning: these only update if a logger was created.
    */
   debug: Services.prefs.getBoolPref("signon.debug"),
+  formlessCaptureEnabled: Services.prefs.getBoolPref("signon.formlessCapture.enabled"),
   schemeUpgrades: Services.prefs.getBoolPref("signon.schemeUpgrades"),
 
   createLogger(aLogPrefix) {
@@ -53,6 +54,7 @@ this.LoginHelper = {
     // Watch for pref changes and update this.debug and the maxLogLevel for created loggers
     Services.prefs.addObserver("signon.", () => {
       this.debug = Services.prefs.getBoolPref("signon.debug");
+      this.formlessCaptureEnabled = Services.prefs.getBoolPref("signon.formlessCapture.enabled");
       this.schemeUpgrades = Services.prefs.getBoolPref("signon.schemeUpgrades");
       logger.maxLogLevel = getMaxLogLevel();
     }, false);
@@ -145,7 +147,7 @@ this.LoginHelper = {
     let propertyBag = Cc["@mozilla.org/hash-property-bag;1"]
                       .createInstance(Ci.nsIWritablePropertyBag);
     if (aProperties) {
-      for (let [name, value] of Iterator(aProperties)) {
+      for (let [name, value] of Object.entries(aProperties)) {
         propertyBag.setProperty(name, value);
       }
     }
@@ -580,7 +582,7 @@ this.LoginHelper = {
         // Bug 1187190: Password changes should be propagated depending on timestamps.
         // this an old login or a just an update, so make sure not to add it
         foundMatchingLogin = true;
-        if(login.password != existingLogin.password &
+        if (login.password != existingLogin.password &
            login.timePasswordChanged > existingLogin.timePasswordChanged) {
           // if a login with the same username and different password already exists and it's older
           // than the current one, that login needs to be updated using the current one details

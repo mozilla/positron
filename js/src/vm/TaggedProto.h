@@ -45,6 +45,9 @@ class TaggedProto
     bool operator !=(const TaggedProto& other) const { return proto != other.proto; }
 
     HashNumber hashCode() const;
+
+    bool hasUniqueId() const;
+    bool ensureUniqueId() const;
     uint64_t uniqueId() const;
 
     void trace(JSTracer* trc) {
@@ -71,6 +74,11 @@ struct InternalBarrierMethods<TaggedProto>
 
     static bool isMarkable(TaggedProto proto) {
         return proto.isObject();
+    }
+
+    static bool isInsideNursery(TaggedProto proto) {
+        return proto.isObject() &&
+            gc::IsInsideNursery(reinterpret_cast<gc::Cell*>(proto.toObject()));
     }
 };
 

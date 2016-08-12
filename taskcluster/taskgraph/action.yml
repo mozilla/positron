@@ -27,21 +27,21 @@ routes:
 
 payload:
   env:
-    GECKO_BASE_REPOSITORY: 'https://hg.mozilla.org/mozilla-central'
+    GECKO_BASE_REPOSITORY: 'https://hg.mozilla.org/mozilla-unified'
     GECKO_HEAD_REPOSITORY: '{{{head_repository}}}'
     GECKO_HEAD_REF: '{{head_ref}}'
     GECKO_HEAD_REV: '{{head_rev}}'
 
   cache:
-    level-{{level}}-{{project}}-tc-vcs-public-sources: /home/worker/.tc-vcs/
-    level-{{level}}-{{project}}-gecko-decision: /home/worker/workspace
+    level-{{level}}-hg-shared: /home/worker/hg-shared
+    level-{{level}}-checkouts: /home/worker/checkouts
 
   features:
     taskclusterProxy: true
 
   # Note: This task is built server side without the context or tooling that
   # exist in tree so we must hard code the version
-  image: 'taskcluster/decision:0.1.0'
+  image: 'taskcluster/decision:0.1.4'
 
   # Virtually no network or other potentially risky operations happen as part
   # of the task timeout aside from the initial clone. We intentionally have
@@ -50,16 +50,17 @@ payload:
   maxRunTime: 1800
 
   command:
-    - /bin/bash
+    - /home/worker/bin/run-task
+    - '--vcs-checkout=/home/worker/checkouts/gecko'
+    - '--'
+    - bash
     - -cx
     - >
-      mkdir -p /home/worker/artifacts &&
-      checkout-gecko workspace &&
-      cd workspace/gecko &&
-      ln -s /home/worker/artifacts artifacts &&
-      ./mach taskgraph action-task
-      --decision-id='{{decision_task_id}}'
-      --task-labels='{{task_labels}}'
+        cd /home/worker/checkouts/gecko &&
+        ln -s /home/worker/artifacts artifacts &&
+        ./mach --log-no-times taskgraph action-task
+        --decision-id='{{decision_task_id}}'
+        --task-label='{{task_labels}}'
 
   artifacts:
     'public':

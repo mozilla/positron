@@ -8,12 +8,15 @@
 #include "gfxPlatform.h"
 #include "gfxPrefs.h"
 #include "GPUProcessHost.h"
-#include "VsyncBridgeParent.h"
 #include "mozilla/Assertions.h"
+#include "mozilla/gfx/gfxVars.h"
 #include "mozilla/ipc/ProcessChild.h"
 #include "mozilla/layers/CompositorBridgeParent.h"
 #include "mozilla/layers/CompositorThread.h"
 #include "mozilla/layers/ImageBridgeParent.h"
+#include "VRManager.h"
+#include "VRManagerParent.h"
+#include "VsyncBridgeParent.h"
 
 namespace mozilla {
 namespace gfx {
@@ -40,17 +43,24 @@ GPUParent::Init(base::ProcessId aParentPid,
 
   // Ensure gfxPrefs are initialized.
   gfxPrefs::GetSingleton();
+  gfxVars::Initialize();
   CompositorThreadHolder::Start();
+  VRManager::ManagerInit();
   gfxPlatform::InitNullMetadata();
   return true;
 }
 
 bool
-GPUParent::RecvInit(nsTArray<GfxPrefSetting>&& prefs)
+GPUParent::RecvInit(nsTArray<GfxPrefSetting>&& prefs,
+                    nsTArray<GfxVarUpdate>&& vars)
 {
-  for (auto setting : prefs) {
-    gfxPrefs::Pref* pref = gfxPrefs::all()[setting.index()];
+  const nsTArray<gfxPrefs::Pref*>& globalPrefs = gfxPrefs::all();
+  for (auto& setting : prefs) {
+    gfxPrefs::Pref* pref = globalPrefs[setting.index()];
     pref->SetCachedValue(setting.value());
+  }
+  for (const auto& var : vars) {
+    gfxVars::ApplyUpdate(var);
   }
   return true;
 }
@@ -70,10 +80,24 @@ GPUParent::RecvInitImageBridge(Endpoint<PImageBridgeParent>&& aEndpoint)
 }
 
 bool
+GPUParent::RecvInitVRManager(Endpoint<PVRManagerParent>&& aEndpoint)
+{
+  VRManagerParent::CreateForGPUProcess(Move(aEndpoint));
+  return true;
+}
+
+bool
 GPUParent::RecvUpdatePref(const GfxPrefSetting& setting)
 {
   gfxPrefs::Pref* pref = gfxPrefs::all()[setting.index()];
   pref->SetCachedValue(setting.value());
+  return true;
+}
+
+bool
+GPUParent::RecvUpdateVar(const GfxVarUpdate& aUpdate)
+{
+  gfxVars::ApplyUpdate(aUpdate);
   return true;
 }
 
@@ -89,11 +113,12 @@ OpenParent(RefPtr<CompositorBridgeParent> aParent,
 bool
 GPUParent::RecvNewWidgetCompositor(Endpoint<layers::PCompositorBridgeParent>&& aEndpoint,
                                    const CSSToLayoutDeviceScale& aScale,
+                                   const TimeDuration& aVsyncRate,
                                    const bool& aUseExternalSurfaceSize,
                                    const IntSize& aSurfaceSize)
 {
   RefPtr<CompositorBridgeParent> cbp =
-    new CompositorBridgeParent(aScale, aUseExternalSurfaceSize, aSurfaceSize);
+    new CompositorBridgeParent(aScale, aVsyncRate, aUseExternalSurfaceSize, aSurfaceSize);
 
   MessageLoop* loop = CompositorThreadHolder::Loop();
   loop->PostTask(NewRunnableFunction(OpenParent, cbp, Move(aEndpoint)));
@@ -110,6 +135,12 @@ bool
 GPUParent::RecvNewContentImageBridge(Endpoint<PImageBridgeParent>&& aEndpoint)
 {
   return ImageBridgeParent::CreateForContent(Move(aEndpoint));
+}
+
+bool
+GPUParent::RecvNewContentVRManager(Endpoint<PVRManagerParent>&& aEndpoint)
+{
+  return VRManagerParent::CreateForContent(Move(aEndpoint));
 }
 
 void

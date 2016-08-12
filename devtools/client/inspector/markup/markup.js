@@ -7,7 +7,9 @@
 
 "use strict";
 
+/* eslint-disable mozilla/reject-some-requires */
 const {Cc, Ci} = require("chrome");
+/* eslint-enable mozilla/reject-some-requires */
 
 // Page size for pageup/pagedown
 const PAGE_SIZE = 10;
@@ -54,12 +56,12 @@ const {KeyShortcuts} = require("devtools/client/shared/key-shortcuts");
 const {template} = require("devtools/shared/gcli/templater");
 const nodeConstants = require("devtools/shared/dom-node-constants");
 const nodeFilterConstants = require("devtools/shared/dom-node-filter-constants");
+/* eslint-disable mozilla/reject-some-requires */
 const {XPCOMUtils} = require("resource://gre/modules/XPCOMUtils.jsm");
+/* eslint-enable mozilla/reject-some-requires */
+const {getCssProperties} = require("devtools/shared/fronts/css-properties");
 
-loader.lazyRequireGetter(this, "CSS", "CSS");
-loader.lazyGetter(this, "AutocompletePopup", () => {
-  return require("devtools/client/shared/autocomplete-popup").AutocompletePopup;
-});
+const {AutocompletePopup} = require("devtools/client/shared/autocomplete-popup");
 
 XPCOMUtils.defineLazyModuleGetter(this, "PluralForm",
   "resource://gre/modules/PluralForm.jsm");
@@ -119,6 +121,7 @@ function MarkupView(inspector, frame, controllerWindow) {
   this._containers = new Map();
 
   // Binding functions that need to be called in scope.
+  this._handleRejectionIfNotDestroyed = this._handleRejectionIfNotDestroyed.bind(this);
   this._mutationObserver = this._mutationObserver.bind(this);
   this._onDisplayChange = this._onDisplayChange.bind(this);
   this._onMouseClick = this._onMouseClick.bind(this);
@@ -127,7 +130,7 @@ function MarkupView(inspector, frame, controllerWindow) {
   this._onCopy = this._onCopy.bind(this);
   this._onFocus = this._onFocus.bind(this);
   this._onMouseMove = this._onMouseMove.bind(this);
-  this._onMouseLeave = this._onMouseLeave.bind(this);
+  this._onMouseOut = this._onMouseOut.bind(this);
   this._onToolboxPickerHover = this._onToolboxPickerHover.bind(this);
   this._onCollapseAttributesPrefChange =
     this._onCollapseAttributesPrefChange.bind(this);
@@ -139,7 +142,7 @@ function MarkupView(inspector, frame, controllerWindow) {
   // Listening to various events.
   this._elt.addEventListener("click", this._onMouseClick, false);
   this._elt.addEventListener("mousemove", this._onMouseMove, false);
-  this._elt.addEventListener("mouseleave", this._onMouseLeave, false);
+  this._elt.addEventListener("mouseout", this._onMouseOut, false);
   this._elt.addEventListener("blur", this._onBlur, true);
   this.win.addEventListener("mouseup", this._onMouseUp);
   this.win.addEventListener("copy", this._onCopy);
@@ -168,6 +171,18 @@ MarkupView.prototype = {
   CONTAINER_FLASHING_DURATION: 500,
 
   _selectedContainer: null,
+
+  /**
+   * Handle promise rejections for various asynchronous actions, and only log errors if
+   * the markup view still exists.
+   * This is useful to silence useless errors that happen when the markup view is
+   * destroyed while still initializing (and making protocol requests).
+   */
+  _handleRejectionIfNotDestroyed: function (e) {
+    if (!this._destroyer) {
+      console.error(e);
+    }
+  },
 
   _initTooltips: function () {
     this.eventDetailsTooltip = new HTMLTooltip(this._inspector.toolbox,
@@ -384,7 +399,12 @@ MarkupView.prototype = {
     this._hoveredNode = nodeFront;
   },
 
-  _onMouseLeave: function () {
+  _onMouseOut: function (event) {
+    // Emulate mouseleave by skipping any relatedTarget inside the markup-view.
+    if (this._elt.contains(event.relatedTarget)) {
+      return;
+    }
+
     if (this._autoScrollAnimationFrame) {
       this.win.cancelAnimationFrame(this._autoScrollAnimationFrame);
     }
@@ -591,14 +611,7 @@ MarkupView.prototype = {
       // Make sure the new selection is navigated to.
       this.maybeNavigateToNewSelection();
       return undefined;
-    }).catch(e => {
-      if (!this._destroyer) {
-        console.error(e);
-      } else {
-        console.warn("Could not mark node as selected, the markup-view was " +
-          "destroyed while showing the node.");
-      }
-    });
+    }).catch(this._handleRejectionIfNotDestroyed);
 
     promise.all([onShowBoxModel, onShow]).then(done);
   },
@@ -884,9 +897,9 @@ MarkupView.prototype = {
           }
 
           let isNextSiblingText = nextSibling ?
-            nextSibling.nodeType === Ci.nsIDOMNode.TEXT_NODE : false;
+            nextSibling.nodeType === nodeConstants.TEXT_NODE : false;
           let isPrevSiblingText = prevSibling ?
-            prevSibling.nodeType === Ci.nsIDOMNode.TEXT_NODE : false;
+            prevSibling.nodeType === nodeConstants.TEXT_NODE : false;
 
           // If the parent had two children and the next or previous sibling
           // is a text node, then it now has only a single text node, is about
@@ -1031,8 +1044,8 @@ MarkupView.prototype = {
 
     this._waitForChildren().then(() => {
       if (this._destroyer) {
-        console.warn("Could not fully update after markup mutations, " +
-          "the markup-view was destroyed while waiting for children.");
+        // Could not fully update after markup mutations, the markup-view was destroyed
+        // while waiting for children. Bail out silently.
         return;
       }
       this._flashMutatedNodes(mutations);
@@ -1131,16 +1144,7 @@ MarkupView.prototype = {
       return this._ensureVisible(node);
     }).then(() => {
       scrollIntoViewIfNeeded(this.getContainer(node).editor.elt, centered);
-    }, e => {
-      // Only report this rejection as an error if the panel hasn't been
-      // destroyed in the meantime.
-      if (!this._destroyer) {
-        console.error(e);
-      } else {
-        console.warn("Could not show the node, the markup-view was destroyed " +
-          "while waiting for children");
-      }
-    });
+    }, this._handleRejectionIfNotDestroyed);
   },
 
   /**
@@ -1149,8 +1153,8 @@ MarkupView.prototype = {
   _expandContainer: function (container) {
     return this._updateChildren(container, {expand: true}).then(() => {
       if (this._destroyer) {
-        console.warn("Could not expand the node, the markup-view was " +
-          "destroyed");
+        // Could not expand the node, the markup-view was destroyed in the meantime. Just
+        // silently give up.
         return;
       }
       container.setExpanded(true);
@@ -1687,7 +1691,7 @@ MarkupView.prototype = {
 
         container.children.appendChild(fragment);
         return container;
-      }).then(null, console.error);
+      }).catch(this._handleRejectionIfNotDestroyed);
     this._queuedChildUpdates.set(container, updatePromise);
     return updatePromise;
   },
@@ -1740,7 +1744,7 @@ MarkupView.prototype = {
 
     this._elt.removeEventListener("click", this._onMouseClick, false);
     this._elt.removeEventListener("mousemove", this._onMouseMove, false);
-    this._elt.removeEventListener("mouseleave", this._onMouseLeave, false);
+    this._elt.removeEventListener("mouseout", this._onMouseOut, false);
     this._elt.removeEventListener("blur", this._onBlur, true);
     this.win.removeEventListener("mouseup", this._onMouseUp);
     this.win.removeEventListener("copy", this._onCopy);
@@ -2900,11 +2904,7 @@ function TextEditor(container, node, templateId) {
     stopOnReturn: true,
     trigger: "dblclick",
     multiline: true,
-    maxWidth: () => {
-      let elementRect = this.value.getBoundingClientRect();
-      let containerRect = this.container.elt.getBoundingClientRect();
-      return containerRect.right - elementRect.left - 2;
-    },
+    maxWidth: () => getAutocompleteMaxWidth(this.value, this.container.elt),
     trimOutput: false,
     done: (val, commit) => {
       if (!commit) {
@@ -2921,7 +2921,8 @@ function TextEditor(container, node, templateId) {
           });
         });
       });
-    }
+    },
+    cssProperties: getCssProperties(this.markup._inspector.toolbox)
   });
 
   this.update();
@@ -2975,6 +2976,7 @@ function ElementEditor(container, node) {
   this.markup = this.container.markup;
   this.template = this.markup.template.bind(this.markup);
   this.doc = this.markup.doc;
+  this._cssProperties = getCssProperties(this.markup._inspector.toolbox);
 
   this.attrElements = new Map();
   this.animationTimers = {};
@@ -2997,15 +2999,20 @@ function ElementEditor(container, node) {
     this.tag.setAttribute("tabindex", "-1");
     editableField({
       element: this.tag,
+      multiline: true,
+      maxWidth: () => getAutocompleteMaxWidth(this.tag, this.container.elt),
       trigger: "dblclick",
       stopOnReturn: true,
       done: this.onTagEdit.bind(this),
+      cssProperties: this._cssProperties
     });
   }
 
   // Make the new attribute space editable.
   this.newAttr.editMode = editableField({
     element: this.newAttr,
+    multiline: true,
+    maxWidth: () => getAutocompleteMaxWidth(this.newAttr, this.container.elt),
     trigger: "dblclick",
     stopOnReturn: true,
     contentType: InplaceEditor.CONTENT_TYPES.CSS_MIXED,
@@ -3023,7 +3030,8 @@ function ElementEditor(container, node) {
       }, function () {
         undoMods.apply();
       });
-    }
+    },
+    cssProperties: this._cssProperties
   });
 
   let displayName = this.node.displayName;
@@ -3225,6 +3233,8 @@ ElementEditor.prototype = {
       stopOnReturn: true,
       selectAll: false,
       initial: initial,
+      multiline: true,
+      maxWidth: () => getAutocompleteMaxWidth(inner, this.container.elt),
       contentType: InplaceEditor.CONTENT_TYPES.CSS_MIXED,
       popup: this.markup.popup,
       start: (editor, event) => {
@@ -3261,7 +3271,8 @@ ElementEditor.prototype = {
         }, () => {
           undoMods.apply();
         });
-      }
+      },
+      cssProperties: this._cssProperties
     });
 
     // Figure out where we should place the attribute.
@@ -3409,9 +3420,9 @@ ElementEditor.prototype = {
           let newAttributeIndex;
           if (isDeletedAttribute) {
             newAttributeIndex = attributeIndex;
-          } else if (direction == Ci.nsIFocusManager.MOVEFOCUS_FORWARD) {
+          } else if (direction == Services.focus.MOVEFOCUS_FORWARD) {
             newAttributeIndex = attributeIndex + 1;
-          } else if (direction == Ci.nsIFocusManager.MOVEFOCUS_BACKWARD) {
+          } else if (direction == Services.focus.MOVEFOCUS_BACKWARD) {
             newAttributeIndex = attributeIndex - 1;
           }
 
@@ -3594,6 +3605,17 @@ function map(value, oldMin, oldMax, newMin, newMax) {
     return value;
   }
   return newMin + (newMax - newMin) * ((value - oldMin) / ratio);
+}
+
+/**
+ * Retrieve the available width between a provided element left edge and a container right
+ * edge. This used can be used as a max-width for inplace-editor (autocomplete) widgets
+ * replacing Editor elements of the the markup-view;
+ */
+function getAutocompleteMaxWidth(element, container) {
+  let elementRect = element.getBoundingClientRect();
+  let containerRect = container.getBoundingClientRect();
+  return containerRect.right - elementRect.left - 2;
 }
 
 loader.lazyGetter(MarkupView.prototype, "strings", () => Services.strings.createBundle(

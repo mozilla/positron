@@ -3,7 +3,6 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 import datetime
-import errno
 import json
 import socket
 import time
@@ -29,6 +28,9 @@ class Message(object):
 
     def __eq__(self, other):
         return self.id == other.id
+
+    def __ne__(self, other):
+        return not self.__eq__(other)
 
 
 class Command(Message):
@@ -116,7 +118,6 @@ class TcpTransport(object):
     Supported protocol levels are 1 and above.
     """
     max_packet_length = 4096
-    connection_lost_msg = "Connection to Marionette server is lost. Check gecko.log for errors."
 
     def __init__(self, addr, port, socket_timeout=360.0):
         """If `socket_timeout` is `0` or `0.0`, non-blocking socket mode
@@ -130,7 +131,7 @@ class TcpTransport(object):
         self.protocol = 1
         self.application_type = None
         self.last_id = 0
-        self.expected_responses = []
+        self.expected_response = None
 
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.sock.settimeout(self.socket_timeout)
@@ -173,7 +174,7 @@ class TcpTransport(object):
                 pass
             else:
                 if not chunk:
-                    raise IOError(self.connection_lost_msg)
+                    raise socket.error("No data received over socket")
 
             sep = data.find(":")
             if sep > -1:
@@ -185,19 +186,22 @@ class TcpTransport(object):
                         msg = self._unmarshal(remaining)
                         self.last_id = msg.id
 
-                        if isinstance(msg, Response) and self.protocol >= 3:
-                            if msg not in self.expected_responses:
-                                raise Exception("Received unexpected response: %s" % msg)
-                            else:
-                                self.expected_responses.remove(msg)
+                        if self.protocol >= 3:
+                            self.last_id = msg.id
+
+                            # keep reading incoming responses until
+                            # we receive the user's expected response
+                            if isinstance(msg, Response) and msg != self.expected_response:
+                                return self.receive(unmarshal)
 
                         return msg
+
                     else:
                         return remaining
 
                 bytes_to_recv = int(length) - len(remaining)
 
-        raise socket.timeout("connection timed out after %ds" % self.socket_timeout)
+        raise socket.timeout("Connection timed out after %ds" % self.socket_timeout)
 
     def connect(self):
         """Connect to the server and process the hello message we expect
@@ -232,26 +236,20 @@ class TcpTransport(object):
 
         if isinstance(obj, Message):
             data = obj.to_msg()
-            self.expected_responses.append(obj)
+            if isinstance(obj, Command):
+                self.expected_response = obj
         else:
             data = json.dumps(obj)
         payload = "%s:%s" % (len(data), data)
 
         totalsent = 0
         while totalsent < len(payload):
-            try:
-                sent = self.sock.send(payload[totalsent:])
-                if sent == 0:
-                    raise IOError("socket error after sending %d of %d bytes" %
-                                  (totalsent, len(payload)))
-                else:
-                    totalsent += sent
-
-            except IOError as e:
-                if e.errno == errno.EPIPE:
-                    raise IOError("%s: %s" % (str(e), self.connection_lost_msg))
-                else:
-                    raise e
+            sent = self.sock.send(payload[totalsent:])
+            if sent == 0:
+                raise IOError("Socket error after sending %d of %d bytes" %
+                              (totalsent, len(payload)))
+            else:
+                totalsent += sent
 
     def respond(self, obj):
         """Send a response to a command.  This can be an arbitrary JSON

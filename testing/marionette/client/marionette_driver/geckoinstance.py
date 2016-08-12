@@ -37,7 +37,8 @@ class GeckoInstance(object):
         "extensions.autoDisableScopes": 10,
         "focusmanager.testmode": True,
         "marionette.defaultPrefs.enabled": True,
-        "startup.homepage_welcome_url": "about:blank",
+        "startup.homepage_welcome_url": "",
+        "startup.homepage_welcome_url.additional": "",
         "toolkit.telemetry.enabled": False,
         # Until Bug 1238095 is fixed, we have to enable CPOWs in order
         # for Marionette tests to work properly.
@@ -172,7 +173,7 @@ class GeckoInstance(object):
     def restart(self, prefs=None, clean=True):
         self.close(restart=True)
 
-        if clean:
+        if clean and self.profile:
             self.profile.cleanup()
             self.profile = None
 
@@ -220,11 +221,9 @@ class FennecInstance(GeckoInstance):
                 self.runner.device.connect()
             self.runner.start()
         except Exception as e:
-            message = 'Error possibly due to runner or device args.'
-            e.args += (message,)
-            if hasattr(e, 'strerror') and e.strerror:
-                e.strerror = ', '.join([e.strerror, message])
-            raise e
+            exc, val, tb = sys.exc_info()
+            message = 'Error possibly due to runner or device args: {}'
+            raise exc, message.format(e.message), tb
         # gecko_log comes from logcat when running with device/emulator
         logcat_args = {
             'filterspec': 'Gecko',
@@ -298,20 +297,22 @@ class DesktopInstance(GeckoInstance):
         'app.update.auto': False,
         'app.update.enabled': False,
         'browser.dom.window.dump.enabled': True,
+        'browser.firstrun-content.dismissed': True,
         # Bug 1145668 - Has to be reverted to about:blank once Marionette
         # can correctly handle error pages
         'browser.newtab.url': 'about:newtab',
         'browser.newtabpage.enabled': False,
         'browser.reader.detectedFirstArticle': True,
-        'browser.safebrowsing.phishing.enabled': False,
+        'browser.safebrowsing.blockedURIs.enabled': False,
         'browser.safebrowsing.forbiddenURIs.enabled': False,
         'browser.safebrowsing.malware.enabled': False,
-        'browser.safebrowsing.blockedURIs.enabled': False,
+        'browser.safebrowsing.phishing.enabled': False,
         'browser.search.update': False,
         'browser.tabs.animate': False,
         'browser.tabs.warnOnClose': False,
         'browser.tabs.warnOnOpen': False,
         'browser.uitour.enabled': False,
+        'browser.usedOnWindows10.introURL': '',
         'extensions.getAddons.cache.enabled': False,
         'extensions.installDistroAddons': False,
         'extensions.showMismatchUI': False,
