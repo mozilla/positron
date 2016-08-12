@@ -24,7 +24,8 @@
       const { utils: Cu } = Components;
       const { require } = Cu.import("resource://devtools/shared/Loader.jsm", {});
       const promise = require("promise");
-      const EventEmitter = require("devtools/shared/event-emitter");
+      const { EventEmitter } =
+        Cu.import("resource://devtools/shared/event-emitter.js", {});
       const { Task } = require("devtools/shared/task");
 
       SimpleTest.waitForExplicitFinish();

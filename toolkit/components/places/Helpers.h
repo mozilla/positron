@@ -23,20 +23,11 @@ namespace places {
 ////////////////////////////////////////////////////////////////////////////////
 //// Asynchronous Statement Callback Helper
 
-class WeakAsyncStatementCallback : public mozIStorageStatementCallback
-{
-public:
-  NS_DECL_MOZISTORAGESTATEMENTCALLBACK
-  WeakAsyncStatementCallback() {}
-
-protected:
-  virtual ~WeakAsyncStatementCallback() {}
-};
-
-class AsyncStatementCallback : public WeakAsyncStatementCallback
+class AsyncStatementCallback : public mozIStorageStatementCallback
 {
 public:
   NS_DECL_ISUPPORTS
+  NS_DECL_MOZISTORAGESTATEMENTCALLBACK
   AsyncStatementCallback() {}
 
 protected:

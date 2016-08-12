@@ -3073,8 +3073,6 @@ var SessionStoreInternal = {
 
     this._setWindowStateReady(aWindow);
 
-    this._sendWindowRestoredNotification(aWindow);
-
     Services.obs.notifyObservers(aWindow, NOTIFY_SINGLE_WINDOW_RESTORED, "");
 
     this._sendRestoreCompletedNotifications();
@@ -3216,9 +3214,6 @@ var SessionStoreInternal = {
     let tabbrowser = window.gBrowser;
     let forceOnDemand = options.forceOnDemand;
 
-    this._maybeUpdateBrowserRemoteness(Object.assign({
-      browser, tabbrowser, tabData }, options));
-
     // Increase the busy state counter before modifying the tab.
     this._setWindowStateBusy(window);
 
@@ -3257,7 +3252,7 @@ var SessionStoreInternal = {
     }
 
     if (tabData.lastAccessed) {
-      tab.updateLastAccessed(tabData.lastAccessed);
+      tab.lastAccessed = tabData.lastAccessed;
     }
 
     if ("attributes" in tabData) {
@@ -3363,9 +3358,6 @@ var SessionStoreInternal = {
     let uri = activePageData ? activePageData.url || null : null;
     if (aLoadArguments) {
       uri = aLoadArguments.uri;
-      if (aLoadArguments.userContextId) {
-        browser.setAttribute("usercontextid", aLoadArguments.userContextId);
-      }
     }
 
     // We have to mark this tab as restoring first, otherwise
@@ -3610,50 +3602,6 @@ var SessionStoreInternal = {
   },
 
   /* ........ Auxiliary Functions .............. */
-
-  /**
-   * Determines whether or not a browser for a tab that is
-   * being restored needs to have its remoteness flipped first.
-   *
-   * @param (object) with the following properties:
-   *
-   *        browser (<xul:browser>):
-   *          The browser for the tab being restored.
-   *
-   *        tabbrowser (<xul:tabbrowser>):
-   *          The tabbrowser that the browser belongs to.
-   *
-   *        tabData (object):
-   *          The tabData state that we're attempting to
-   *          restore for the tab.
-   *
-   *        restoreImmediately (bool):
-   *          true if loading of content should occur immediately
-   *          after restoration.
-   *
-   *        forceOnDemand (bool):
-   *          true if the tab is being put into the restore-on-demand
-   *          background state.
-   */
-  _maybeUpdateBrowserRemoteness({ browser, tabbrowser, tabData,
-                                  restoreImmediately, forceOnDemand }) {
-    // If the browser we're attempting to restore happens to be
-    // remote, we need to flip it back to non-remote if it's going
-    // to go into the pending background tab state. This is to make
-    // sure that the background tab can't crash if it hasn't yet
-    // been restored. Normally, when a window is restored, the tabs
-    // that SessionStore inserts are non-remote - but the initial
-    // browser is, by default, remote, so this check and flip is
-    // mostly for that case.
-    //
-    // Note that pinned tabs are exempt from this flip, since
-    // they'll be loaded immediately anyways.
-    if (browser.isRemoteBrowser &&
-        !tabData.pinned &&
-        (!restoreImmediately || forceOnDemand)) {
-      tabbrowser.updateBrowserRemoteness(browser, false);
-    }
-  },
 
   /**
    * Update the session start time and send a telemetry measurement
@@ -4097,17 +4045,6 @@ var SessionStoreInternal = {
   _sendWindowStateEvent: function ssi_sendWindowStateEvent(aWindow, aType) {
     let event = aWindow.document.createEvent("Events");
     event.initEvent("SSWindowState" + aType, true, false);
-    aWindow.dispatchEvent(event);
-  },
-
-  /**
-   * Dispatch the SSWindowRestored event for the given window.
-   * @param aWindow
-   *        The window which has been restored
-   */
-  _sendWindowRestoredNotification(aWindow) {
-    let event = aWindow.document.createEvent("Events");
-    event.initEvent("SSWindowRestored", true, false);
     aWindow.dispatchEvent(event);
   },
 

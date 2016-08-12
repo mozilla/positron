@@ -3,9 +3,6 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 "use strict";
 
-/* globals document, PerformanceView, ToolbarView, RecordingsView, DetailsView */
-
-/* exported Cc, Ci, Cu, Cr, loader */
 var { classes: Cc, interfaces: Ci, utils: Cu, results: Cr } = Components;
 var BrowserLoaderModule = {};
 Cu.import("resource://devtools/client/shared/browser-loader.js", BrowserLoaderModule);
@@ -14,7 +11,6 @@ var { loader, require } = BrowserLoaderModule.BrowserLoader({
   window: this
 });
 var { Task } = require("devtools/shared/task");
-/* exported Heritage, ViewHelpers, WidgetMethods, setNamedTimeout, clearNamedTimeout */
 var { Heritage, ViewHelpers, WidgetMethods, setNamedTimeout, clearNamedTimeout } = require("devtools/client/shared/widgets/view-helpers");
 var { gDevTools } = require("devtools/client/framework/devtools");
 
@@ -26,8 +22,6 @@ Object.defineProperty(this, "EVENTS", {
   writable: false
 });
 
-/* exported React, ReactDOM, JITOptimizationsView, Services, promise, EventEmitter,
-   DevToolsUtils, system */
 var React = require("devtools/client/shared/vendor/react");
 var ReactDOM = require("devtools/client/shared/vendor/react-dom");
 var JITOptimizationsView = React.createFactory(require("devtools/client/performance/components/jit-optimizations"));
@@ -35,13 +29,10 @@ var Services = require("Services");
 var promise = require("promise");
 var EventEmitter = require("devtools/shared/event-emitter");
 var DevToolsUtils = require("devtools/shared/DevToolsUtils");
-var flags = require("devtools/shared/flags");
 var system = require("devtools/shared/system");
 
 // Logic modules
-/* exported L10N, PerformanceTelemetry, TIMELINE_BLUEPRINT, RecordingUtils,
-   OptimizationsGraph, GraphsController, WaterfallHeader, MarkerView, MarkerDetails,
-   MarkerBlueprintUtils, WaterfallUtils, FrameUtils, CallView, ThreadNode, FrameNode */
+
 var { L10N } = require("devtools/client/performance/modules/global");
 var { PerformanceTelemetry } = require("devtools/client/performance/modules/logic/telemetry");
 var { TIMELINE_BLUEPRINT } = require("devtools/client/performance/modules/markers");
@@ -59,22 +50,18 @@ var { FrameNode } = require("devtools/client/performance/modules/logic/tree-mode
 
 // Widgets modules
 
-/* exported OptionsView, FlameGraph, FlameGraphUtils, TreeWidget, SideMenuWidget */
 var { OptionsView } = require("devtools/client/shared/options-view");
 var { FlameGraph, FlameGraphUtils } = require("devtools/client/shared/widgets/FlameGraph");
 var { TreeWidget } = require("devtools/client/shared/widgets/TreeWidget");
+
 var { SideMenuWidget } = require("resource://devtools/client/shared/widgets/SideMenuWidget.jsm");
 
-/* exported BRANCH_NAME */
 var BRANCH_NAME = "devtools.performance.ui.";
 
 /**
  * The current target, toolbox and PerformanceFront, set by this tool's host.
  */
-/* exported gToolbox, gTarget, gFront */
 var gToolbox, gTarget, gFront;
-
-/* exported startupPerformance, shutdownPerformance, PerformanceController */
 
 /**
  * Initializes the profiler controller and views.
@@ -296,9 +283,8 @@ var PerformanceController = {
   }),
 
    /**
-   * Clears all completed recordings from the list as well as the current non-console
-   * recording. Emits `EVENTS.RECORDING_DELETED` when complete so other components can
-   * clean up.
+   * Clears all completed recordings from the list as well as the current non-console recording.
+   * Emits `EVENTS.RECORDING_DELETED` when complete so other components can clean up.
    */
   clearRecordings: Task.async(function* () {
     for (let i = this._recordings.length - 1; i >= 0; i--) {
@@ -322,7 +308,8 @@ var PerformanceController = {
       if (!this._recordings.includes(this.getCurrentRecording())) {
         this.setCurrentRecording(this._recordings[0]);
       }
-    } else {
+    }
+    else {
       this.setCurrentRecording(null);
     }
   }),
@@ -471,8 +458,8 @@ var PerformanceController = {
    * recording supports that feature, based off of UI preferences and server support.
    *
    * @option {Array<string>|string} features
-   *         A string or array of strings indicating what configuration is needed on the
-   *         recording model, like `withTicks`, or `withMemory`.
+   *         A string or array of strings indicating what configuration is needed on the recording
+   *         model, like `withTicks`, or `withMemory`.
    *
    * @return boolean
    */
@@ -517,7 +504,7 @@ var PerformanceController = {
     // have realtime rendering tests in non-e10s. This function is
     // overridden wholesale in tests when we want to test multiprocess support
     // specifically.
-    if (flags.testing) {
+    if (DevToolsUtils.testing) {
       return { supported: true, enabled: true };
     }
     let supported = system.constants.E10S_TESTING_ONLY;
@@ -555,8 +542,9 @@ var PerformanceController = {
     let { enabled, supported } = this.getMultiprocessStatus();
     if (!enabled && supported) {
       $("#performance-view").setAttribute("e10s", "disabled");
-    } else if (!enabled && !supported) {
-      // Could be a chance where the directive goes away yet e10s is still on
+    }
+    // Could be a chance where the directive goes away yet e10s is still on
+    else if (!enabled && !supported) {
       $("#performance-view").setAttribute("e10s", "unsupported");
     }
   },
@@ -579,7 +567,6 @@ EventEmitter.decorate(PerformanceController);
 /**
  * DOM query helpers.
  */
-/* exported $, $$ */
 function $(selector, target = document) {
   return target.querySelector(selector);
 }

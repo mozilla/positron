@@ -4,7 +4,7 @@
 "use strict";
 
 const Telemetry = require("devtools/client/shared/telemetry");
-const flags = require("devtools/shared/flags");
+const DevToolsUtils = require("devtools/shared/DevToolsUtils");
 const EVENTS = require("devtools/client/performance/events");
 
 const EVENT_MAP_FLAGS = new Map([
@@ -32,7 +32,7 @@ function PerformanceTelemetry(emitter) {
   this._emitter.on(EVENTS.RECORDING_STATE_CHANGE, this.onRecordingStateChange);
   this._emitter.on(EVENTS.UI_DETAILS_VIEW_SELECTED, this.onViewSelected);
 
-  if (flags.testing) {
+  if (DevToolsUtils.testing) {
     this.recordLogs();
   }
 }
@@ -71,8 +71,7 @@ PerformanceTelemetry.prototype.onRecordingStateChange = function (_, status, mod
   let config = model.getConfiguration();
   for (let k in config) {
     if (RECORDING_FEATURES.indexOf(k) !== -1) {
-      this._telemetry.logKeyed("DEVTOOLS_PERFTOOLS_RECORDING_FEATURES_USED", k,
-                               config[k]);
+      this._telemetry.logKeyed("DEVTOOLS_PERFTOOLS_RECORDING_FEATURES_USED", k, config[k]);
     }
   }
 };
@@ -90,7 +89,7 @@ PerformanceTelemetry.prototype.onViewSelected = function (_, viewName) {
  * Should only be used in testing mode; throws otherwise.
  */
 PerformanceTelemetry.prototype.recordLogs = function () {
-  if (!flags.testing) {
+  if (!DevToolsUtils.testing) {
     throw new Error("Can only record telemetry logs in tests.");
   }
 
@@ -112,7 +111,7 @@ PerformanceTelemetry.prototype.recordLogs = function () {
 };
 
 PerformanceTelemetry.prototype.getLogs = function () {
-  if (!flags.testing) {
+  if (!DevToolsUtils.testing) {
     throw new Error("Can only get telemetry logs in tests.");
   }
 

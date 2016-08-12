@@ -17,7 +17,7 @@ var {LocalizationHelper} = require("devtools/client/shared/l10n");
 
 Object.defineProperty(this, "WebConsoleUtils", {
   get: function () {
-    return require("devtools/client/webconsole/utils").Utils;
+    return require("devtools/shared/webconsole/utils").Utils;
   },
   configurable: true,
   enumerable: true
@@ -330,20 +330,6 @@ VariablesViewController.prototype = {
    *        The grip to use to populate the target.
    */
   _populateFromObject: function (aTarget, aGrip) {
-    if (aGrip.class === "Proxy") {
-      this.addExpander(
-        aTarget.addItem("<target>", { value: aGrip.proxyTarget }, { internalItem: true }),
-        aGrip.proxyTarget);
-      this.addExpander(
-        aTarget.addItem("<handler>", { value: aGrip.proxyHandler }, { internalItem: true }),
-        aGrip.proxyHandler);
-
-      // Refuse to play the proxy's stupid game and return immediately
-      let deferred = defer();
-      deferred.resolve();
-      return deferred.promise;
-    }
-    
     if (aGrip.class === "Promise" && aGrip.promiseState) {
       const { state, value, reason } = aGrip.promiseState;
       aTarget.addItem("<state>", { value: state }, { internalItem: true });

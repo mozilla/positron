@@ -1,6 +1,5 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
-"use strict";
 
 /**
  * Tests if a call tree model can be correctly computed from a samples array.
@@ -67,20 +66,17 @@ add_task(function test() {
     "The 'A > B > C > D' node has a 'E' child call.");
 
   equal(getFrameNodePath(root, "A > B > C > D > E").calls.length, 1,
-    "The correct number of child calls were calculated for the 'A > B > C > D > E' " +
-    "node.");
+    "The correct number of child calls were calculated for the 'A > B > C > D > E' node.");
   ok(getFrameNodePath(root, "A > B > C > D > E > F"),
     "The 'A > B > C > D > E' node has a 'F' child call.");
 
   equal(getFrameNodePath(root, "A > B > C > D > E > F").calls.length, 1,
-    "The correct number of child calls were calculated for the 'A > B > C > D > E > F' " +
-    "node.");
+    "The correct number of child calls were calculated for the 'A > B > C > D > E > F' node.");
   ok(getFrameNodePath(root, "A > B > C > D > E > F > G"),
     "The 'A > B > C > D > E > F' node has a 'G' child call.");
 
   equal(getFrameNodePath(root, "A > B > C > D > E > F > G").calls.length, 0,
-    "The correct number of child calls were calculated for the " +
-    "'A > B > C > D > E > F > G' node.");
+    "The correct number of child calls were calculated for the 'A > B > C > D > E > F > G' node.");
   equal(getFrameNodePath(root, "A > B > D").calls.length, 0,
     "The correct number of child calls were calculated for the 'A > B > D' node.");
   equal(getFrameNodePath(root, "A > E > F").calls.length, 0,
@@ -117,8 +113,7 @@ add_task(function test() {
   equal(getFrameNodePath(root, "A > B > C > D > E > F > G").samples, 1,
     "The 'A > B > C > D > E > F > G' node has the correct number of samples.");
   equal(getFrameNodePath(root, "A > B > C > D > E > F > G").youngestFrameSamples, 1,
-    "The 'A > B > C > D > E > F > G' node has the correct number of " +
-    "youngestFrameSamples.");
+    "The 'A > B > C > D > E > F > G' node has the correct number of youngestFrameSamples.");
 });
 
 var gThread = synthesizeProfileForTest([{

@@ -1351,7 +1351,6 @@ public:
     , mScrollClip(nullptr)
     , mReferenceFrame(nullptr)
     , mAnimatedGeometryRoot(nullptr)
-    , mForceNotVisible(false)
 #ifdef MOZ_DUMP_PAINTING
     , mPainted(false)
 #endif
@@ -3165,7 +3164,6 @@ public:
   const nsRegion& NoActionRegion() { return mNoActionRegion; }
   const nsRegion& HorizontalPanRegion() { return mHorizontalPanRegion; }
   const nsRegion& VerticalPanRegion() { return mVerticalPanRegion; }
-  nsRegion CombinedTouchActionRegion();
 
   virtual void WriteDebugInfo(std::stringstream& aStream) override;
 

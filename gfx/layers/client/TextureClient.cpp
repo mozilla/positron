@@ -34,7 +34,6 @@
 #include "mozilla/layers/ShadowLayers.h"
 
 #ifdef XP_WIN
-#include "mozilla/gfx/DeviceManagerD3D11.h"
 #include "mozilla/layers/TextureD3D9.h"
 #include "mozilla/layers/TextureD3D11.h"
 #include "mozilla/layers/TextureDIB.h"
@@ -361,11 +360,10 @@ DeallocateTextureClient(TextureDeallocParams params)
 
 void TextureClient::Destroy(bool aForceSync)
 {
-  if (mActor && !mIsLocked) {
+  if (mActor) {
     mActor->Lock();
   }
 
-  mBorrowedDrawTarget = nullptr;
   mReadLock = nullptr;
 
   CancelWaitFenceHandleOnImageBridge();
@@ -521,9 +519,7 @@ TextureClient::Unlock()
     mUpdated = true;
   }
 
-  if (mData) {
-    mData->Unlock();
-  }
+  mData->Unlock();
   mIsLocked = false;
   mOpenMode = OpenMode::OPEN_NONE;
 
@@ -1040,7 +1036,7 @@ TextureClient::CreateForDrawing(TextureForwarder* aAllocator,
       (moz2DBackend == gfx::BackendType::DIRECT2D ||
        moz2DBackend == gfx::BackendType::DIRECT2D1_1 ||
        (!!(aAllocFlags & ALLOC_FOR_OUT_OF_BAND_CONTENT) &&
-        DeviceManagerD3D11::Get()->GetContentDevice())) &&
+        gfxWindowsPlatform::GetPlatform()->GetD3D11ContentDevice())) &&
       aSize.width <= maxTextureSize &&
       aSize.height <= maxTextureSize)
   {
@@ -1104,68 +1100,6 @@ TextureClient::CreateForDrawing(TextureForwarder* aAllocator,
   // Can't do any better than a buffer texture client.
   return TextureClient::CreateForRawBufferAccess(aAllocator, aFormat, aSize,
                                                  moz2DBackend, aTextureFlags, aAllocFlags);
-}
-
-// static
-already_AddRefed<TextureClient>
-TextureClient::CreateFromSurface(TextureForwarder* aAllocator,
-                                 gfx::SourceSurface* aSurface,
-                                 LayersBackend aLayersBackend,
-                                 BackendSelector aSelector,
-                                 TextureFlags aTextureFlags,
-                                 TextureAllocationFlags aAllocFlags)
-{
-  aAllocator = aAllocator->AsTextureForwarder();
-
-  // also test the validity of aAllocator
-  MOZ_ASSERT(aAllocator && aAllocator->IPCOpen());
-  if (!aAllocator || !aAllocator->IPCOpen()) {
-    return nullptr;
-  }
-
-  gfx::IntSize size = aSurface->GetSize();
-
-  if (!gfx::Factory::AllowedSurfaceSize(size)) {
-    return nullptr;
-  }
-
-  TextureData* data = nullptr;
-#if defined(XP_WIN)
-  gfx::BackendType moz2DBackend = BackendTypeForBackendSelector(aLayersBackend, aSelector);
-
-  int32_t maxTextureSize = aAllocator->GetMaxTextureSize();
-
-  if (aLayersBackend == LayersBackend::LAYERS_D3D11 &&
-    (moz2DBackend == gfx::BackendType::DIRECT2D ||
-      moz2DBackend == gfx::BackendType::DIRECT2D1_1 ||
-      (!!(aAllocFlags & ALLOC_FOR_OUT_OF_BAND_CONTENT) &&
-       DeviceManagerD3D11::Get()->GetContentDevice())) &&
-    size.width <= maxTextureSize &&
-    size.height <= maxTextureSize)
-  {
-    data = D3D11TextureData::Create(aSurface, aAllocFlags);
-  }
-#endif
-
-  if (data) {
-    return MakeAndAddRef<TextureClient>(data, aTextureFlags, aAllocator);
-  }
-
-  // Fall back to using UpdateFromSurface
-
-  RefPtr<TextureClient> client = CreateForDrawing(aAllocator, aSurface->GetFormat(), size,
-                                                  aLayersBackend, aSelector, aTextureFlags, aAllocFlags);
-  if (!client) {
-    return nullptr;
-  }
-
-  TextureClientAutoLock autoLock(client, OpenMode::OPEN_WRITE_ONLY);
-  if (!autoLock.Succeeded()) {
-    return nullptr;
-  }
-
-  client->UpdateFromSurface(aSurface);
-  return client.forget();
 }
 
 // static

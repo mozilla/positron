@@ -41,9 +41,7 @@ BeforeAfterKeyboardEvent::Constructor(
     new BeforeAfterKeyboardEvent(aOwner, nullptr, nullptr);
   ErrorResult rv;
   event->InitWithKeyboardEventInit(aOwner, aType, aParam, rv);
-  if (NS_WARN_IF(rv.Failed())) {
-    rv.SuppressException();
-  }
+  NS_WARN_IF(rv.Failed());
 
   event->mEvent->AsBeforeAfterKeyboardEvent()->mEmbeddedCancelled =
     aParam.mEmbeddedCancelled;

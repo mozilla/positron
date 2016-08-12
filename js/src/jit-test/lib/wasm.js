@@ -16,7 +16,7 @@ function mismatchError(actual, expect) {
 }
 
 function hasI64() {
-    return wasmInt64IsSupported();
+    return getBuildConfiguration().x64;
 }
 
 function jsify(wasmVal) {
@@ -36,9 +36,8 @@ function jsify(wasmVal) {
 // - if the expected value is in the int32 range, it can be just a number.
 // - otherwise, an object with the properties "high" and "low".
 function assertEqI64(observed, expect) {
-    assertEq(typeof observed, 'object', "observed must be an i64 object");
-    assertEq(typeof expect === 'object' || typeof expect === 'number', true,
-             "expect must be an i64 object or number");
+    assertEq(typeof observed, 'object');
+    assertEq(typeof expect === 'object' || typeof expect === 'number', true);
 
     let {low, high} = observed;
     if (typeof expect === 'number') {

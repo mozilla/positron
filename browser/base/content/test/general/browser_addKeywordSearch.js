@@ -10,6 +10,8 @@ var testData = [
   [ 'http://example.com/search?oe=utf-8', 'q', 'http://example.com/search?oe=utf-8&q=%s' ],
 ];
 
+var mm = gBrowser.selectedBrowser.messageManager;
+
 add_task(function*() {
   yield BrowserTestUtils.withNewTab({
     gBrowser,
@@ -20,8 +22,6 @@ add_task(function*() {
       let base = doc.createElement("base");
       doc.head.appendChild(base);
     });
-
-    var mm = browser.messageManager;
 
     for (let [baseURI, fieldName, expected] of testData) {
       let popupShownPromise = BrowserTestUtils.waitForEvent(document.getElementById("contentAreaContextMenu"),

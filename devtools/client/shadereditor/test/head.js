@@ -14,7 +14,6 @@ var { DebuggerClient } = require("devtools/shared/client/main");
 var { DebuggerServer } = require("devtools/server/main");
 var { WebGLFront } = require("devtools/shared/fronts/webgl");
 var DevToolsUtils = require("devtools/shared/DevToolsUtils");
-var flags = require("devtools/shared/flags");
 var { TargetFactory } = require("devtools/client/framework/target");
 var { Toolbox } = require("devtools/client/framework/toolbox");
 var { isWebGLSupported } = require("devtools/client/shared/webgl-utils");
@@ -37,11 +36,11 @@ waitForExplicitFinish();
 
 var gToolEnabled = Services.prefs.getBoolPref("devtools.shadereditor.enabled");
 
-flags.testing = true;
+DevToolsUtils.testing = true;
 
 registerCleanupFunction(() => {
   info("finish() was called, cleaning up...");
-  flags.testing = false;
+  DevToolsUtils.testing = false;
   Services.prefs.setBoolPref("devtools.debugger.log", gEnableLogging);
   Services.prefs.setBoolPref("devtools.shadereditor.enabled", gToolEnabled);
 

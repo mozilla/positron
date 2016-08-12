@@ -23,15 +23,12 @@ Cu.import("chrome://marionette/content/evaluate.js");
 Cu.import("chrome://marionette/content/event.js");
 Cu.import("chrome://marionette/content/interaction.js");
 Cu.import("chrome://marionette/content/logging.js");
-Cu.import("chrome://marionette/content/navigate.js");
 Cu.import("chrome://marionette/content/proxy.js");
 Cu.import("chrome://marionette/content/simpletest.js");
 
 Cu.import("resource://gre/modules/FileUtils.jsm");
 Cu.import("resource://gre/modules/Task.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
-
-Cu.importGlobalProperties(["URL"]);
 
 var contentLog = new logging.ContentLogger();
 
@@ -127,7 +124,7 @@ function registerSelf() {
   if (register[0]) {
     let {id, remotenessChange} = register[0][0];
     capabilities = register[0][2];
-    isB2G = capabilities.platformName == "b2g";
+    isB2G = capabilities.platformName == "B2G";
     listenerId = id;
     if (typeof id != "undefined") {
       // check if we're the main process
@@ -882,48 +879,43 @@ function multiAction(args, maxLen) {
  * when a remoteness update happens in the middle of a navigate request). This is most of
  * of the work of a navigate request, but doesn't assume DOMContentLoaded is yet to fire.
  */
-function pollForReadyState(msg, start = undefined, callback = undefined) {
+function pollForReadyState(msg, start, callback) {
   let {pageTimeout, url, command_id} = msg.json;
-  if (!start) {
-    start = new Date().getTime();
-  }
+  start = start ? start : new Date().getTime();
+
   if (!callback) {
     callback = () => {};
   }
 
-  let checkLoad = function() {
+  let end = null;
+  function checkLoad() {
     navTimer.cancel();
-
+    end = new Date().getTime();
+    let aboutErrorRegex = /about:.+(error)\?/;
+    let elapse = end - start;
     let doc = curContainer.frame.document;
-    let now = new Date().getTime();
-    if (pageTimeout == null || (now - start) <= pageTimeout) {
-      // document fully loaded
+    if (pageTimeout == null || elapse <= pageTimeout) {
       if (doc.readyState == "complete") {
         callback();
         sendOk(command_id);
-
-      // we have reached an error url without requesting it
       } else if (doc.readyState == "interactive" &&
-          /about:.+(error)\?/.exec(doc.baseURI) &&
-          !doc.baseURI.startsWith(url)) {
+                 aboutErrorRegex.exec(doc.baseURI) &&
+                 !doc.baseURI.startsWith(url)) {
+        // We have reached an error url without requesting it.
         callback();
-        sendError(new UnknownError("Reached error page: " + doc.baseURI), command_id);
-
-      // return early for about: urls
-      } else if (doc.readyState == "interactive" && doc.baseURI.startsWith("about:")) {
+        sendError(new UnknownError("Error loading page"), command_id);
+      } else if (doc.readyState == "interactive" &&
+                 doc.baseURI.startsWith("about:")) {
         callback();
         sendOk(command_id);
-
-      // document not fully loaded
       } else {
         navTimer.initWithCallback(checkLoad, 100, Ci.nsITimer.TYPE_ONE_SHOT);
       }
-
     } else {
       callback();
       sendError(new TimeoutError("Error loading page, timed out (checkLoad)"), command_id);
     }
-  };
+  }
   checkLoad();
 }
 
@@ -935,131 +927,41 @@ function pollForReadyState(msg, start = undefined, callback = undefined) {
  */
 function get(msg) {
   let start = new Date().getTime();
-  let command_id = msg.json.command_id;
-
-  let docShell = curContainer.frame
-      .document
-      .defaultView
-      .QueryInterface(Ci.nsIInterfaceRequestor)
-      .getInterface(Ci.nsIWebNavigation)
-      .QueryInterface(Ci.nsIDocShell);
-  let webProgress = docShell.QueryInterface(Ci.nsIInterfaceRequestor)
-      .getInterface(Ci.nsIWebProgress);
-  let sawLoad = false;
-
-  let requestedURL;
-  let loadEventExpected = false;
-  try {
-    requestedURL = new URL(msg.json.url).toString();
-    let curURL = curContainer.frame.location;
-    loadEventExpected = navigate.isLoadEventExpected(curURL, requestedURL);
-  } catch (e) {
-    sendError(new InvalidArgumentError("Malformed URL: " + e.message), command_id);
-    return;
-  }
-
-  // It's possible that a site we're being sent to will end up redirecting
-  // us before we end up on a page that fires DOMContentLoaded. We can ensure
-  // This loadListener ensures that we don't send a success signal back to
-  // the caller until we've seen the load of the requested URL attempted
-  // on this frame.
-  let loadListener = {
-    QueryInterface: XPCOMUtils.generateQI(
-        [Ci.nsIWebProgressListener, Ci.nsISupportsWeakReference]),
-
-    onStateChange(webProgress, request, state, status) {
-      if (!(request instanceof Ci.nsIChannel)) {
-        return;
-      }
-
-      let isDocument = state & Ci.nsIWebProgressListener.STATE_IS_DOCUMENT;
-      let isStart = state & Ci.nsIWebProgressListener.STATE_START;
-      let loadedURL = request.URI.spec;
-      // We have to look at the originalURL because for about: pages,
-      // the loadedURL is what the about: page resolves to, and is
-      // not the one that was requested.
-      let originalURL = request.originalURI.spec;
-      let isRequestedURL = loadedURL == requestedURL ||
-          originalURL == requestedURL;
-
-      if (isDocument && isStart && isRequestedURL) {
-        // We started loading the requested document. This document
-        // might not be the one that ends up firing DOMContentLoaded
-        // (if it, for example, redirects), but because we've started
-        // loading this URL, we know that any future DOMContentLoaded's
-        // are fair game to tell the Marionette client about.
-        sawLoad = true;
-      }
-    },
-
-    onLocationChange() {},
-    onProgressChange() {},
-    onStatusChange() {},
-    onSecurityChange() {},
-  };
-
-  webProgress.addProgressListener(
-      loadListener, Ci.nsIWebProgress.NOTIFY_STATE_DOCUMENT);
 
   // Prevent DOMContentLoaded events from frames from invoking this
   // code, unless the event is coming from the frame associated with
   // the current window (i.e. someone has used switch_to_frame).
   onDOMContentLoaded = function onDOMContentLoaded(event) {
-    let frameEl = event.originalTarget.defaultView.frameElement;
-    let correctFrame = !frameEl || frameEl == curContainer.frame.frameElement;
-
-    // If the page we're at fired DOMContentLoaded and appears
-    // to be the one we asked to load, then we definitely
-    // saw the load occur. We need this because for error
-    // pages, like about:neterror for unsupported protocols,
-    // we don't end up opening a channel that our
-    // WebProgressListener can monitor.
-    if (curContainer.frame.location == requestedURL) {
-      sawLoad = true;
-    }
-
-    // We also need to make sure that the DOMContentLoaded we saw isn't
-    // for the initial about:blank of a newly created docShell.
-    let loadedNonAboutBlank = docShell.hasLoadedNonBlankURI;
-
-    if (correctFrame && sawLoad && loadedNonAboutBlank) {
-      webProgress.removeProgressListener(loadListener);
+    if (!event.originalTarget.defaultView.frameElement ||
+        event.originalTarget.defaultView.frameElement == curContainer.frame.frameElement) {
       pollForReadyState(msg, start, () => {
         removeEventListener("DOMContentLoaded", onDOMContentLoaded, false);
       });
     }
   };
 
-  if (msg.json.pageTimeout) {
-    let onTimeout = function() {
-      if (loadEventExpected) {
-        removeEventListener("DOMContentLoaded", onDOMContentLoaded, false);
-      }
-      webProgress.removeProgressListener(loadListener);
-      sendError(new TimeoutError("Error loading page, timed out (onDOMContentLoaded)"), command_id);
-    }
-    navTimer.initWithCallback(onTimeout, msg.json.pageTimeout, Ci.nsITimer.TYPE_ONE_SHOT);
+  function timerFunc() {
+    removeEventListener("DOMContentLoaded", onDOMContentLoaded, false);
+    sendError(new TimeoutError("Error loading page, timed out (onDOMContentLoaded)"), msg.json.command_id);
   }
-
-  // in Firefox we need to move to the top frame before navigating
-  if (!isB2G) {
-    sendSyncMessage("Marionette:switchedToFrame", {frameValue: null});
+  if (msg.json.pageTimeout != null) {
+    navTimer.initWithCallback(timerFunc, msg.json.pageTimeout, Ci.nsITimer.TYPE_ONE_SHOT);
+  }
+  addEventListener("DOMContentLoaded", onDOMContentLoaded, false);
+  if (isB2G) {
+    curContainer.frame.location = msg.json.url;
+  } else {
+    // We need to move to the top frame before navigating
+    sendSyncMessage("Marionette:switchedToFrame", { frameValue: null });
     curContainer.frame = content;
-  }
-
-  if (loadEventExpected) {
-    addEventListener("DOMContentLoaded", onDOMContentLoaded, false);
-  }
-  curContainer.frame.location = requestedURL;
-  if (!loadEventExpected) {
-    sendOk(command_id);
+    curContainer.frame.location = msg.json.url;
   }
 }
 
-/**
- * Cancel the polling and remove the event listener associated with a
- * current navigation request in case we're interupted by an onbeforeunload
- * handler and navigation doesn't complete.
+ /**
+ * Cancel the polling and remove the event listener associated with a current
+ * navigation request in case we're interupted by an onbeforeunload handler
+ * and navigation doesn't complete.
  */
 function cancelRequest() {
   navTimer.cancel();

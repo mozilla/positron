@@ -29,13 +29,10 @@ class gfxContext;
 class gfxFontGroup;
 class gfxUserFontEntry;
 class gfxUserFontSet;
+class gfxTextContextPaint;
 class nsIAtom;
 class nsILanguageAtomService;
 class gfxMissingFontRecorder;
-
-namespace mozilla {
-class SVGContextPaint;
-};
 
 /**
  * Callback for Draw() to use when drawing text with mode
@@ -247,7 +244,7 @@ public:
         PropertyProvider* provider = nullptr;
         // If non-null, the advance width of the substring is set.
         gfxFloat* advanceWidth = nullptr;
-        mozilla::SVGContextPaint* contextPaint = nullptr;
+        gfxTextContextPaint* contextPaint = nullptr;
         gfxTextRunDrawCallbacks* callbacks = nullptr;
         explicit DrawParams(gfxContext* aContext) : context(aContext) {}
     };
@@ -470,9 +467,9 @@ public:
         uint32_t GetStringEnd() const { return mStringEnd; }
     private:
         const gfxTextRun *mTextRun;
-        MOZ_INIT_OUTSIDE_CTOR const GlyphRun   *mGlyphRun;
-        MOZ_INIT_OUTSIDE_CTOR uint32_t    mStringStart;
-        MOZ_INIT_OUTSIDE_CTOR uint32_t    mStringEnd;
+        const GlyphRun   *mGlyphRun;
+        uint32_t    mStringStart;
+        uint32_t    mStringEnd;
         uint32_t    mNextIndex;
         uint32_t    mStartOffset;
         uint32_t    mEndOffset;

@@ -271,7 +271,7 @@ struct FixedBuffer
     buffer[0] = '\0';
   }
 
-  char buffer[500];
+  char buffer[1000];
   uint32_t curlen;
 };
 
@@ -306,7 +306,6 @@ EXPORT_XPCOM_API(void)
 NS_DebugBreak(uint32_t aSeverity, const char* aStr, const char* aExpr,
               const char* aFile, int32_t aLine)
 {
-  FixedBuffer nonPIDBuf;
   FixedBuffer buf;
   const char* sevString = "WARNING";
 
@@ -327,31 +326,32 @@ NS_DebugBreak(uint32_t aSeverity, const char* aStr, const char* aExpr,
       aSeverity = NS_DEBUG_WARNING;
   }
 
-#define PRINT_TO_NONPID_BUFFER(...) PR_sxprintf(StuffFixedBuffer, &nonPIDBuf, __VA_ARGS__)
-  PRINT_TO_NONPID_BUFFER("%s: ", sevString);
-  if (aStr) {
-    PRINT_TO_NONPID_BUFFER("%s: ", aStr);
-  }
-  if (aExpr) {
-    PRINT_TO_NONPID_BUFFER("'%s', ", aExpr);
-  }
-  if (aFile) {
-    PRINT_TO_NONPID_BUFFER("file %s, ", aFile);
-  }
-  if (aLine != -1) {
-    PRINT_TO_NONPID_BUFFER("line %d", aLine);
-  }
-#undef PRINT_TO_NONPID_BUFFER
+#  define PrintToBuffer(...) PR_sxprintf(StuffFixedBuffer, &buf, __VA_ARGS__)
 
   // Print "[PID]" or "[Desc PID]" at the beginning of the message.
-#define PRINT_TO_BUFFER(...) PR_sxprintf(StuffFixedBuffer, &buf, __VA_ARGS__)
-  PRINT_TO_BUFFER("[");
+  PrintToBuffer("[");
   if (sMultiprocessDescription) {
-    PRINT_TO_BUFFER("%s ", sMultiprocessDescription);
+    PrintToBuffer("%s ", sMultiprocessDescription);
   }
-  PRINT_TO_BUFFER("%d] %s", base::GetCurrentProcId(), nonPIDBuf.buffer);
-#undef PRINT_TO_BUFFER
 
+  PrintToBuffer("%d] ", base::GetCurrentProcId());
+
+  PrintToBuffer("%s: ", sevString);
+
+  if (aStr) {
+    PrintToBuffer("%s: ", aStr);
+  }
+  if (aExpr) {
+    PrintToBuffer("'%s', ", aExpr);
+  }
+  if (aFile) {
+    PrintToBuffer("file %s, ", aFile);
+  }
+  if (aLine != -1) {
+    PrintToBuffer("line %d", aLine);
+  }
+
+#  undef PrintToBuffer
 
   // errors on platforms without a debugdlg ring a bell on stderr
 #if !defined(XP_WIN)
@@ -385,14 +385,12 @@ NS_DebugBreak(uint32_t aSeverity, const char* aStr, const char* aExpr,
       // really cause trouble if we're asserting from within IPC code. So we
       // have to do without the annotations in that case.
       if (XRE_IsParentProcess()) {
-        // Don't include the PID in the crash report annotation to
-        // allow faceting on crash-stats.mozilla.org.
         nsCString note("xpcom_runtime_abort(");
-        note += nonPIDBuf.buffer;
+        note += buf.buffer;
         note += ")";
         CrashReporter::AppendAppNotesToCrashReport(note);
         CrashReporter::AnnotateCrashReport(NS_LITERAL_CSTRING("AbortMessage"),
-                                           nsDependentCString(nonPIDBuf.buffer));
+                                           nsDependentCString(buf.buffer));
       }
 #endif  // MOZ_CRASHREPORTER
 

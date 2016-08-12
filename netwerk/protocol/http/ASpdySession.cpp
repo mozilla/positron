@@ -8,7 +8,7 @@
 #include "HttpLog.h"
 
 /*
-  Currently supported is h2
+  Currently supported are h2 and spdy/3.1
 */
 
 #include "nsHttp.h"
@@ -16,7 +16,9 @@
 
 #include "ASpdySession.h"
 #include "PSpdyPush.h"
+#include "SpdyPush31.h"
 #include "Http2Push.h"
+#include "SpdySession31.h"
 #include "Http2Session.h"
 
 #include "mozilla/Telemetry.h"
@@ -38,7 +40,8 @@ ASpdySession::NewSpdySession(uint32_t version,
 {
   // This is a necko only interface, so we can enforce version
   // requests as a precondition
-  MOZ_ASSERT(version == HTTP_VERSION_2,
+  MOZ_ASSERT(version == SPDY_VERSION_31 ||
+             version == HTTP_VERSION_2,
              "Unsupported spdy version");
 
   // Don't do a runtime check of IsSpdyV?Enabled() here because pref value
@@ -48,16 +51,30 @@ ASpdySession::NewSpdySession(uint32_t version,
 
   Telemetry::Accumulate(Telemetry::SPDY_VERSION2, version);
 
-  return new Http2Session(aTransport, version);
+  if (version == SPDY_VERSION_31) {
+    return new SpdySession31(aTransport);
+  } else if (version == HTTP_VERSION_2) {
+    return new Http2Session(aTransport, version);
+  }
+
+  return nullptr;
+}
+static bool SpdySessionTrue(nsISupports *securityInfo)
+{
+  return true;
 }
 
 SpdyInformation::SpdyInformation()
 {
   // highest index of enabled protocols is the
   // most preferred for ALPN negotiaton
-  Version[0] = HTTP_VERSION_2;
-  VersionString[0] = NS_LITERAL_CSTRING("h2");
-  ALPNCallbacks[0] = Http2Session::ALPNCallback;
+  Version[0] = SPDY_VERSION_31;
+  VersionString[0] = NS_LITERAL_CSTRING("spdy/3.1");
+  ALPNCallbacks[0] = SpdySessionTrue;
+
+  Version[1] = HTTP_VERSION_2;
+  VersionString[1] = NS_LITERAL_CSTRING("h2");
+  ALPNCallbacks[1] = Http2Session::ALPNCallback;
 }
 
 bool
@@ -65,7 +82,13 @@ SpdyInformation::ProtocolEnabled(uint32_t index) const
 {
   MOZ_ASSERT(index < kCount, "index out of range");
 
-  return gHttpHandler->IsHttp2Enabled();
+  switch (index) {
+  case 0:
+    return gHttpHandler->IsSpdyV31Enabled();
+  case 1:
+    return gHttpHandler->IsHttp2Enabled();
+  }
+  return false;
 }
 
 nsresult
@@ -95,7 +118,34 @@ SpdyPushCache::SpdyPushCache()
 
 SpdyPushCache::~SpdyPushCache()
 {
+  mHashSpdy31.Clear();
   mHashHttp2.Clear();
+}
+
+bool
+SpdyPushCache::RegisterPushedStreamSpdy31(nsCString key,
+                                          SpdyPushedStream31 *stream)
+{
+  LOG3(("SpdyPushCache::RegisterPushedStreamSpdy31 %s 0x%X\n",
+        key.get(), stream->StreamID()));
+  if(mHashSpdy31.Get(key)) {
+    LOG3(("SpdyPushCache::RegisterPushedStreamSpdy31 %s 0x%X duplicate key\n",
+          key.get(), stream->StreamID()));
+    return false;
+  }
+  mHashSpdy31.Put(key, stream);
+  return true;
+}
+
+SpdyPushedStream31 *
+SpdyPushCache::RemovePushedStreamSpdy31(nsCString key)
+{
+  SpdyPushedStream31 *rv = mHashSpdy31.Get(key);
+  LOG3(("SpdyPushCache::RemovePushedStream %s 0x%X\n",
+        key.get(), rv ? rv->StreamID() : 0));
+  if (rv)
+    mHashSpdy31.Remove(key);
+  return rv;
 }
 
 bool

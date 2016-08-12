@@ -2,12 +2,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/ */
 
-#layout-wrapper {
-  border-bottom-style: solid;
-  border-bottom-width: 1px;
-  border-color: var(--theme-splitter-color);
-}
-
 #layout-container {
   /* The view will grow bigger as the window gets resized, until 400px */
   max-width: 400px;
@@ -42,7 +36,7 @@
   background-color: white;
   color: var(--theme-selection-color);
   /* Make sure there is some space between the window's edges and the regions */
-  margin: 0 14px 4px 14px;
+  margin: 0 14px 10px 14px;
   width: calc(100% - 2 * 14px);
 }
 
@@ -54,14 +48,14 @@
 /* Regions are 3 nested elements with wide borders and outlines */
 
 #layout-content {
-  height: 18px;
+  height: 25px;
 }
 
 #layout-margins,
 #layout-borders,
 #layout-padding {
   border-color: hsla(210,100%,85%,0.2);
-  border-width: 18px;
+  border-width: 25px;
   border-style: solid;
   outline: dotted 1px hsl(210,100%,85%);
 }
@@ -69,6 +63,20 @@
 #layout-margins {
   /* This opacity applies to all of the regions, since they are nested */
   opacity: .8;
+}
+
+/* Respond to window size change by changing the size of the regions */
+
+@media (max-height: 250px) {
+  #layout-content {
+    height: 18px;
+  }
+
+  #layout-margins,
+  #layout-borders,
+  #layout-padding {
+    border-width: 18px;
+  }
 }
 
 /* Regions colors */
@@ -133,27 +141,27 @@
 }
 
 .layout-padding.layout-top {
-  top: 37px;
+  top: 55px;
 }
 
 .layout-padding.layout-bottom {
-  bottom: 38px;
+  bottom: 57px;
 }
 
 .layout-border.layout-top {
-  top: 19px;
+  top: 30px;
 }
 
 .layout-border.layout-bottom {
-  bottom: 20px;
+  bottom: 31px;
 }
 
 .layout-margin.layout-top {
-  top: 1px;
+  top: 5px;
 }
 
 .layout-margin.layout-bottom {
-  bottom: 2px;
+  bottom: 6px;
 }
 
 .layout-size,
@@ -164,7 +172,7 @@
 .layout-padding.layout-left,
 .layout-padding.layout-right {
   top: 22px;
-  line-height: 80px;
+  line-height: 132px;
 }
 
 .layout-size {
@@ -177,23 +185,23 @@
 .layout-border.layout-right,
 .layout-padding.layout-right,
 .layout-padding.layout-left {
-  width: 21px;
+  width: 25px;
 }
 
 .layout-padding.layout-left {
-  left: 35px;
+  left: 52px;
 }
 
 .layout-padding.layout-right {
-  right: 35px;
+  right: 51px;
 }
 
 .layout-border.layout-left {
-  left: 16px;
+  left: 26px;
 }
 
 .layout-border.layout-right {
-  right: 17px;
+  right: 26px;
 }
 
 .layout-margin.layout-right {
@@ -212,16 +220,86 @@
   transform: rotate(90deg);
 }
 
+/* Coordinates should be different when the window is small, because we make
+   the regions smaller then */
+
+@media (max-height: 250px) {
+  .layout-padding.layout-top {
+    top: 37px;
+  }
+
+  .layout-padding.layout-bottom {
+    bottom: 38px;
+  }
+
+  .layout-border.layout-top {
+    top: 19px;
+  }
+
+  .layout-border.layout-bottom {
+    bottom: 20px;
+  }
+
+  .layout-margin.layout-top {
+    top: 1px;
+  }
+
+  .layout-margin.layout-bottom {
+    bottom: 2px;
+  }
+
+  .layout-size,
+  .layout-margin.layout-left,
+  .layout-margin.layout-right,
+  .layout-border.layout-left,
+  .layout-border.layout-right,
+  .layout-padding.layout-left,
+  .layout-padding.layout-right {
+    line-height: 80px;
+  }
+
+  .layout-margin.layout-right,
+  .layout-margin.layout-left,
+  .layout-border.layout-left,
+  .layout-border.layout-right,
+  .layout-padding.layout-right,
+  .layout-padding.layout-left {
+    width: 21px;
+  }
+
+  .layout-padding.layout-left {
+    left: 35px;
+  }
+
+  .layout-padding.layout-right {
+    right: 35px;
+  }
+
+  .layout-border.layout-left {
+    left: 16px;
+  }
+
+  .layout-border.layout-right {
+    right: 17px;
+  }
+}
+
 /* Legend: displayed inside regions */
 
 .layout-legend {
   position: absolute;
-  margin: 2px 6px;
+  margin: 5px 6px;
   z-index: 1;
 }
 
 .layout-legend[data-box="margin"] {
   color: var(--theme-highlight-blue);
+}
+
+@media (max-height: 250px) {
+  .layout-legend {
+    margin: 2px 6px;
+  }
 }
 
 /* Editable fields */

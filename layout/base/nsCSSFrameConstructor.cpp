@@ -1611,7 +1611,11 @@ nsCSSFrameConstructor::NotifyDestroyingFrame(nsIFrame* aFrame)
     CountersDirty();
   }
 
-  RestyleManager()->NotifyDestroyingFrame(aFrame);
+  // stylo: ServoRestyleManager does not need to be notified of frames being
+  // destroyed.
+  if (mozilla::RestyleManager* geckoRM = RestyleManager()->GetAsGecko()) {
+    geckoRM->NotifyDestroyingFrame(aFrame);
+  }
 
   nsFrameManager::NotifyDestroyingFrame(aFrame);
 }
@@ -2687,7 +2691,7 @@ nsCSSFrameConstructor::ConstructRootFrame()
     // ServoStyleSets yet.
     styleSet->AsGecko()->SetBindingManager(mDocument->BindingManager());
   } else {
-    NS_WARNING("stylo: cannot get ServoStyleSheets from XBL bindings yet. See bug 1290276.");
+    NS_ERROR("stylo: cannot get ServoStyleSheets from XBL bindings yet");
   }
 
   // --------- BUILD VIEWPORT -----------
@@ -4258,7 +4262,7 @@ nsCSSFrameConstructor::GetAnonymousContent(nsIContent* aParent,
   if (ServoStyleSet* styleSet = mPresShell->StyleSet()->GetAsServo()) {
     // Eagerly compute styles for the anonymous content tree.
     for (auto& info : aContent) {
-      styleSet->RestyleSubtree(info.mContent);
+      styleSet->RestyleSubtree(info.mContent, /* aForce = */ true);
     }
   }
 
@@ -10539,7 +10543,7 @@ nsCSSFrameConstructor::AddFCItemsForAnonymousContent(
                  "ProcessChildren() codepath for this frame");
 #endif
     // Anything restyled by servo should already have the style data.
-    MOZ_ASSERT_IF(content->IsStyledByServo(), !!content->ServoData());
+    MOZ_ASSERT_IF(content->IsStyledByServo(), !!content->GetServoNodeData());
     // Gecko-styled nodes should have no pending restyle flags.
     MOZ_ASSERT_IF(!content->IsStyledByServo(),
                   !content->IsElement() ||

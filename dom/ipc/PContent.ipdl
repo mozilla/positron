@@ -387,6 +387,7 @@ prio(normal upto urgent) sync protocol PContent
     parent opens PProcessHangMonitor;
     parent opens PSharedBufferManager;
     parent opens PGMPService;
+    parent opens PVRManager;
     child opens PBackground;
 
     manages PAPZ;
@@ -471,7 +472,6 @@ child:
     // Give the content process its endpoints to the compositor.
     async InitCompositor(Endpoint<PCompositorBridgeChild> compositor);
     async InitImageBridge(Endpoint<PImageBridgeChild> bridge);
-    async InitVRManager(Endpoint<PVRManagerChild> endpoint);
 
     /**
      * Enable system-level sandboxing features, if available.  Can
@@ -519,7 +519,6 @@ child:
     async SystemMemoryAvailable(uint64_t getterId, uint32_t memoryAvailable);
 
     async PreferenceUpdate(PrefSetting pref);
-    async VarUpdate(GfxVarUpdate var);
 
     async DataStoragePut(nsString aFilename, DataStorageItem aItem);
     async DataStorageRemove(nsString aFilename, nsCString aKey, DataStorageType aType);
@@ -881,7 +880,6 @@ parent:
 
     // PrefService message
     sync ReadPrefsArray() returns (PrefSetting[] prefs) verify;
-    sync GetGfxVars() returns (GfxVarUpdate[] vars);
 
     sync ReadFontList() returns (FontListEntry[] retValue);
 
@@ -933,7 +931,6 @@ parent:
     // Places the items within dataTransfer on the clipboard.
     async SetClipboard(IPCDataTransfer aDataTransfer,
                        bool aIsPrivateData,
-                       Principal aRequestingPrincipal,
                        int32_t aWhichClipboard);
 
     // Given a list of supported types, returns the clipboard data for the
@@ -1145,6 +1142,7 @@ parent:
                       bool aCalledFromJS,
                       bool aPositionSpecified,
                       bool aSizeSpecified,
+                      nsString aName,
                       nsCString aFeatures,
                       nsCString aBaseURI,
                       DocShellOriginAttributes aOpenerOriginAttributes,

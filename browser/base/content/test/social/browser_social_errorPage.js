@@ -17,10 +17,12 @@ function openPanel(url, panelCallback, loadCallback) {
   // wait for both open and loaded before callback. Since the test doesn't close
   // the panel between opens, we cannot rely on events here. We need to ensure
   // popupshown happens before we finish out the tests.
-  BrowserTestUtils.waitForCondition(function() {
+  waitForCondition(function() {
                     return SocialFlyout.panel.state == "open" &&
                            SocialFlyout.iframe.contentDocument.readyState == "complete";
-                   },"flyout is open and loaded").then(() => { executeSoon(loadCallback) });
+                   },
+                   function () { executeSoon(loadCallback) },
+                   "flyout is open and loaded");
 }
 
 function openChat(url, panelCallback, loadCallback) {
@@ -136,11 +138,12 @@ var tests = {
         function() { // the "load" callback.
           todo_is(panelCallbackCount, 0, "Bug 833207 - should be no callback when error page loads.");
           let chat = getChatBar().selectedChat;
-          BrowserTestUtils.waitForCondition(() => chat.content != null && chat.contentDocument.documentURI.indexOf("about:socialerror?mode=tryAgainOnly")==0,
-                           "error page didn't appear").then(() => {
-                              chat.close();
-                              next();
-                            });
+          waitForCondition(() => chat.content != null && chat.contentDocument.documentURI.indexOf("about:socialerror?mode=tryAgainOnly")==0,
+                           function() {
+                            chat.close();
+                            next();
+                            },
+                           "error page didn't appear");
         }
       );
     });
@@ -164,23 +167,26 @@ var tests = {
         let chat = getChatBar().selectedChat;
         is(chat.contentDocument.documentURI, url, "correct url loaded");
         // toggle to a detached window.
-        chat.swapWindows().then(chat => {
-          ok(!!chat.content, "we have chat content 1");
-          BrowserTestUtils.waitForCondition(() => chat.content != null && chat.contentDocument.readyState == "complete",
-                                            "swapped window loaded").then(() => {
-            // now go offline and reload the chat - about:socialerror should be loaded.
-            goOffline().then(() => {
-              ok(!!chat.content, "we have chat content 2");
-              chat.contentDocument.location.reload();
-              info("chat reload called");
-              BrowserTestUtils.waitForCondition(() => chat.contentDocument.documentURI.indexOf("about:socialerror?mode=tryAgainOnly")==0,
-                                                "error page didn't appear").then(() => {
-                chat.close();
-                next();
+        chat.swapWindows().then(
+          chat => {
+            ok(!!chat.content, "we have chat content 1");
+            waitForCondition(() => chat.content != null && chat.contentDocument.readyState == "complete",
+                             function() {
+              // now go offline and reload the chat - about:socialerror should be loaded.
+              goOffline().then(function() {
+                ok(!!chat.content, "we have chat content 2");
+                chat.contentDocument.location.reload();
+                info("chat reload called");
+                waitForCondition(() => chat.contentDocument.documentURI.indexOf("about:socialerror?mode=tryAgainOnly")==0,
+                                 function() {
+                                  chat.close();
+                                  next();
+                                  },
+                                 "error page didn't appear");
               });
-            });
-          });
-        });
+            }, "swapped window loaded");
+          }
+        );
       }
     );
   }

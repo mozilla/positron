@@ -9,7 +9,6 @@
 
 #include "mozilla/dom/Directory.h"
 #include "mozilla/dom/FileSystemTaskBase.h"
-#include "mozilla/dom/GetFilesHelper.h"
 #include "mozilla/ErrorResult.h"
 
 namespace mozilla {
@@ -69,7 +68,6 @@ private:
 };
 
 class GetFilesTaskParent final : public FileSystemTaskParentBase
-                               , public GetFilesHelperBase
 {
 public:
   static already_AddRefed<GetFilesTaskParent>
@@ -92,8 +90,20 @@ private:
   virtual nsresult
   IOWork() override;
 
+  nsresult
+  ExploreDirectory(const nsAString& aDOMPath, nsIFile* aPath);
+
   nsString mDirectoryDOMPath;
   nsCOMPtr<nsIFile> mTargetPath;
+  bool mRecursiveFlag;
+
+  // We store the fullpath and the dom path of Files.
+  struct FileData {
+    nsString mRealPath;
+    nsString mDOMPath;
+  };
+
+  FallibleTArray<FileData> mTargetData;
 };
 
 } // namespace dom

@@ -60,8 +60,7 @@ function ObjectGetOwnPropertyDescriptors(O) {
         var desc = std_Object_getOwnPropertyDescriptor(obj, key);
 
         // Step 4.c.
-        if (typeof desc !== "undefined")
-            _DefineDataProperty(descriptors, key, desc);
+        _DefineDataProperty(descriptors, key, desc);
     }
 
     // Step 5.

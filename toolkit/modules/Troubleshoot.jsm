@@ -209,7 +209,7 @@ var dataProviders = {
 
     data.numTotalWindows = 0;
     data.numRemoteWindows = 0;
-    let winEnumer = Services.wm.getEnumerator("navigator:browser");
+    let winEnumer = Services.ww.getWindowEnumerator("navigator:browser");
     while (winEnumer.hasMoreElements()) {
       data.numTotalWindows++;
       let remote = winEnumer.getNext().
@@ -366,8 +366,6 @@ var dataProviders = {
       data.supportsHardwareH264 = v;
     });
     promises.push(promise);
-
-    data.currentAudioBackend = winUtils.currentAudioBackend;
 
     if (!data.numAcceleratedWindows && gfxInfo) {
       let win = AppConstants.platform == "win";

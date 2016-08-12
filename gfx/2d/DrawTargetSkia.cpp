@@ -31,7 +31,6 @@
 #endif
 
 #ifdef MOZ_WIDGET_COCOA
-#include "BorrowedContext.h"
 #include <ApplicationServices/ApplicationServices.h>
 #include "mozilla/Vector.h"
 #include "ScaledFontMac.h"
@@ -103,98 +102,6 @@ ReleaseTemporarySurface(void* aPixels, void* aContext)
   }
 }
 
-static void
-WriteRGBXFormat(uint8_t* aData, const IntSize &aSize,
-                const int32_t aStride, SurfaceFormat aFormat)
-{
-  if (aFormat != SurfaceFormat::B8G8R8X8 || aSize.IsEmpty()) {
-    return;
-  }
-
-  int height = aSize.height;
-  int width = aSize.width * 4;
-
-  for (int row = 0; row < height; ++row) {
-    for (int column = 0; column < width; column += 4) {
-#ifdef IS_BIG_ENDIAN
-      aData[column] = 0xFF;
-#else
-      aData[column + 3] = 0xFF;
-#endif
-    }
-    aData += aStride;
-  }
-
-  return;
-}
-
-#ifdef DEBUG
-static bool
-VerifyRGBXFormat(uint8_t* aData, const IntSize &aSize, const int32_t aStride, SurfaceFormat aFormat)
-{
-  if (aFormat != SurfaceFormat::B8G8R8X8 || aSize.IsEmpty()) {
-    return true;
-  }
-  // We should've initialized the data to be opaque already
-  // On debug builds, verify that this is actually true.
-  int height = aSize.height;
-  int width = aSize.width * 4;
-
-  for (int row = 0; row < height; ++row) {
-    for (int column = 0; column < width; column += 4) {
-#ifdef IS_BIG_ENDIAN
-      MOZ_ASSERT(aData[column] == 0xFF);
-#else
-      MOZ_ASSERT(aData[column + 3] == 0xFF);
-#endif
-    }
-    aData += aStride;
-  }
-
-  return true;
-}
-
-// Since checking every pixel is expensive, this only checks the four corners and center
-// of a surface that their alpha value is 0xFF.
-static bool
-VerifyRGBXCorners(uint8_t* aData, const IntSize &aSize, const int32_t aStride, SurfaceFormat aFormat)
-{
-  if (aFormat != SurfaceFormat::B8G8R8X8 || aSize.IsEmpty()) {
-    return true;
-  }
-
-  int height = aSize.height;
-  int width = aSize.width;
-  const int pixelSize = 4;
-  const int strideDiff = aStride - (width * pixelSize);
-  MOZ_ASSERT(width * pixelSize <= aStride);
-
-#ifdef IS_BIG_ENDIAN
-  const int alphaOffset = 0;
-#else
-  const int alphaOffset = 3;
-#endif
-
-  const int topLeft = alphaOffset;
-  const int topRight = width * pixelSize + alphaOffset - pixelSize;
-  const int bottomRight = aStride * height - strideDiff + alphaOffset - pixelSize;
-  const int bottomLeft = aStride * height - aStride + alphaOffset;
-
-  // Lastly the center pixel
-  int middleRowHeight = height / 2;
-  int middleRowWidth = (width / 2) * pixelSize;
-  const int middle = aStride * middleRowHeight + middleRowWidth + alphaOffset;
-
-  MOZ_ASSERT(aData[topLeft] == 0xFF);
-  MOZ_ASSERT(aData[topRight] == 0xFF);
-  MOZ_ASSERT(aData[bottomRight] == 0xFF);
-  MOZ_ASSERT(aData[bottomLeft] == 0xFF);
-  MOZ_ASSERT(aData[middle] == 0xFF);
-
-  return true;
-}
-#endif
-
 static SkBitmap
 GetBitmapForSurface(SourceSurface* aSurface)
 {
@@ -222,9 +129,6 @@ GetBitmapForSurface(SourceSurface* aSurface)
     gfxDebug() << "Failed installing pixels on Skia bitmap for temporary surface";
   }
 
-  // Skia doesn't support RGBX surfaces so ensure that the alpha value is opaque white.
-  MOZ_ASSERT(VerifyRGBXCorners(surf->GetData(), surf->GetSize(),
-                               surf->Stride(), surf->GetFormat()));
   return bitmap;
 }
 
@@ -298,7 +202,7 @@ DrawTargetSkia::LockBits(uint8_t** aData, IntSize* aSize,
   *aData = reinterpret_cast<uint8_t*>(pixels);
   *aSize = IntSize(info.width(), info.height());
   *aStride = int32_t(rowBytes);
-  *aFormat = SkiaColorTypeToGfxFormat(info.colorType(), info.alphaType());
+  *aFormat = SkiaColorTypeToGfxFormat(info.colorType());
   if (aOrigin) {
     *aOrigin = IntPoint(origin.x(), origin.y());
   }
@@ -322,11 +226,12 @@ SetPaintPattern(SkPaint& aPaint, const Pattern& aPattern, Float aAlpha = 1.0)
     case PatternType::LINEAR_GRADIENT: {
       const LinearGradientPattern& pat = static_cast<const LinearGradientPattern&>(aPattern);
       GradientStopsSkia *stops = static_cast<GradientStopsSkia*>(pat.mStops.get());
-      if (!stops || stops->mCount < 2 ||
+      SkShader::TileMode mode = ExtendModeToTileMode(stops->mExtendMode, Axis::BOTH);
+
+      if (stops->mCount < 2 ||
           !pat.mBegin.IsFinite() || !pat.mEnd.IsFinite()) {
         aPaint.setColor(SK_ColorTRANSPARENT);
       } else {
-        SkShader::TileMode mode = ExtendModeToTileMode(stops->mExtendMode, Axis::BOTH);
         SkPoint points[2];
         points[0] = SkPoint::Make(SkFloatToScalar(pat.mBegin.x), SkFloatToScalar(pat.mBegin.y));
         points[1] = SkPoint::Make(SkFloatToScalar(pat.mEnd.x), SkFloatToScalar(pat.mEnd.y));
@@ -345,12 +250,13 @@ SetPaintPattern(SkPaint& aPaint, const Pattern& aPattern, Float aAlpha = 1.0)
     case PatternType::RADIAL_GRADIENT: {
       const RadialGradientPattern& pat = static_cast<const RadialGradientPattern&>(aPattern);
       GradientStopsSkia *stops = static_cast<GradientStopsSkia*>(pat.mStops.get());
-      if (!stops || stops->mCount < 2 ||
+      SkShader::TileMode mode = ExtendModeToTileMode(stops->mExtendMode, Axis::BOTH);
+
+      if (stops->mCount < 2 ||
           !pat.mCenter1.IsFinite() || !IsFinite(pat.mRadius1) ||
           !pat.mCenter2.IsFinite() || !IsFinite(pat.mRadius2)) {
         aPaint.setColor(SK_ColorTRANSPARENT);
       } else {
-        SkShader::TileMode mode = ExtendModeToTileMode(stops->mExtendMode, Axis::BOTH);
         SkPoint points[2];
         points[0] = SkPoint::Make(SkFloatToScalar(pat.mCenter1.x), SkFloatToScalar(pat.mCenter1.y));
         points[1] = SkPoint::Make(SkFloatToScalar(pat.mCenter2.x), SkFloatToScalar(pat.mCenter2.y));
@@ -564,7 +470,7 @@ DrawTargetSkia::DrawSurfaceWithShadow(SourceSurface *aSurface,
   SkPaint shadowPaint;
   shadowPaint.setXfermodeMode(GfxOpToSkiaOp(aOperator));
 
-  auto shadowDest = IntPoint::Round(aDest + aOffset);
+  IntPoint shadowDest = RoundedToInt(aDest + aOffset);
 
   SkBitmap blurMask;
   if (!UsingSkiaGPU() &&
@@ -595,7 +501,7 @@ DrawTargetSkia::DrawSurfaceWithShadow(SourceSurface *aSurface,
   }
 
   // Composite the original image after the shadow
-  auto dest = IntPoint::Round(aDest);
+  IntPoint dest = RoundedToInt(aDest);
   mCanvas->drawBitmap(bitmap, dest.x, dest.y, &paint);
 
   mCanvas->restore();
@@ -707,7 +613,6 @@ DrawTargetSkia::ShouldLCDRenderText(FontType aFontType, AntialiasMode aAntialias
       case FontType::MAC:
       case FontType::GDI:
       case FontType::DWRITE:
-      case FontType::FONTCONFIG:
         return true;
       default:
         // TODO: Figure out what to do for the other platforms.
@@ -947,8 +852,7 @@ DrawTargetSkia::BorrowCGContext(const DrawOptions &aOptions)
   }
 
   if (!mColorSpace) {
-    mColorSpace = (format == SurfaceFormat::A8) ?
-                  CGColorSpaceCreateDeviceGray() : CGColorSpaceCreateDeviceRGB();
+    mColorSpace = CGColorSpaceCreateDeviceRGB();
   }
 
   if (mCG) {
@@ -959,17 +863,13 @@ DrawTargetSkia::BorrowCGContext(const DrawOptions &aOptions)
   mCanvasData = aSurfaceData;
   mCGSize = size;
 
-  uint32_t bitmapInfo = (format == SurfaceFormat::A8) ?
-                        kCGImageAlphaOnly :
-                        kCGImageAlphaPremultipliedFirst | kCGBitmapByteOrder32Host;
-
   mCG = CGBitmapContextCreateWithData(mCanvasData,
                                       mCGSize.width,
                                       mCGSize.height,
                                       8, /* bits per component */
                                       stride,
                                       mColorSpace,
-                                      bitmapInfo,
+                                      kCGBitmapByteOrder32Host | kCGImageAlphaPremultipliedFirst,
                                       NULL, /* Callback when released */
                                       NULL);
   if (!mCG) {
@@ -993,22 +893,6 @@ DrawTargetSkia::ReturnCGContext(CGContextRef aCGContext)
   MOZ_ASSERT(aCGContext == mCG);
   ReleaseBits(mCanvasData);
   CGContextRestoreGState(aCGContext);
-}
-
-CGContextRef
-BorrowedCGContext::BorrowCGContextFromDrawTarget(DrawTarget *aDT)
-{
-  MOZ_ASSERT(aDT->GetBackendType() == BackendType::SKIA);
-  DrawTargetSkia* skiaDT = static_cast<DrawTargetSkia*>(aDT);
-  return skiaDT->BorrowCGContext(DrawOptions());
-}
-
-void
-BorrowedCGContext::ReturnCGContextToDrawTarget(DrawTarget *aDT, CGContextRef cg)
-{
-  MOZ_ASSERT(aDT->GetBackendType() == BackendType::SKIA);
-  DrawTargetSkia* skiaDT = static_cast<DrawTargetSkia*>(aDT);
-  skiaDT->ReturnCGContext(cg);
 }
 
 static void
@@ -1119,15 +1003,10 @@ DrawTargetSkia::FillGlyphs(ScaledFont *aFont,
                            const DrawOptions &aOptions,
                            const GlyphRenderingOptions *aRenderingOptions)
 {
-  switch (aFont->GetType()) {
-  case FontType::SKIA:
-  case FontType::CAIRO:
-  case FontType::FONTCONFIG:
-  case FontType::MAC:
-  case FontType::GDI:
-  case FontType::DWRITE:
-    break;
-  default:
+  if (aFont->GetType() != FontType::MAC &&
+      aFont->GetType() != FontType::SKIA &&
+      aFont->GetType() != FontType::GDI &&
+      aFont->GetType() != FontType::DWRITE) {
     return;
   }
 
@@ -1155,18 +1034,26 @@ DrawTargetSkia::FillGlyphs(ScaledFont *aFont,
   bool shouldLCDRenderText = ShouldLCDRenderText(aFont->GetType(), aOptions.mAntialiasMode);
   paint.mPaint.setLCDRenderText(shouldLCDRenderText);
 
-  bool useSubpixelText = true;
+  if (aRenderingOptions && aRenderingOptions->GetType() == FontType::CAIRO) {
+    const GlyphRenderingOptionsCairo* cairoOptions =
+      static_cast<const GlyphRenderingOptionsCairo*>(aRenderingOptions);
 
-  switch (aFont->GetType()) {
-  case FontType::SKIA:
-  case FontType::CAIRO:
-  case FontType::FONTCONFIG:
+    paint.mPaint.setHinting(GfxHintingToSkiaHinting(cairoOptions->GetHinting()));
+
+    if (cairoOptions->GetAutoHinting()) {
+      paint.mPaint.setAutohinted(true);
+    }
+
+    if (cairoOptions->GetAntialiasMode() == AntialiasMode::NONE) {
+      paint.mPaint.setAntiAlias(false);
+    }
+  } else {
     // SkFontHost_cairo does not support subpixel text positioning,
     // so only enable it for other font hosts.
-    useSubpixelText = false;
-    break;
-  case FontType::MAC:
-    if (aOptions.mAntialiasMode == AntialiasMode::GRAY) {
+    paint.mPaint.setSubpixelText(true);
+
+    if (aFont->GetType() == FontType::MAC &&
+       aOptions.mAntialiasMode == AntialiasMode::GRAY) {
       // Normally, Skia enables LCD FontSmoothing which creates thicker fonts
       // and also enables subpixel AA. CoreGraphics without font smoothing
       // explicitly creates thinner fonts and grayscale AA.
@@ -1183,22 +1070,18 @@ DrawTargetSkia::FillGlyphs(ScaledFont *aFont,
       // To accomplish this we have to explicitly disable hinting,
       // and disable LCDRenderText.
       paint.mPaint.setHinting(SkPaint::kNo_Hinting);
+    } else {
+      paint.mPaint.setHinting(SkPaint::kNormal_Hinting);
     }
-    break;
-  case FontType::GDI:
-    if (!shouldLCDRenderText) {
-      // If we have non LCD GDI text, Cairo currently always uses cleartype fonts and
-      // converts them to grayscale. Force Skia to do the same, otherwise we use
-      // GDI fonts with the ANTIALIASED_QUALITY which is generally bolder than
-      // Cleartype fonts.
-      paint.mPaint.setFlags(paint.mPaint.getFlags() | SkPaint::kGenA8FromLCD_Flag);
-    }
-    break;
-  default:
-    break;
   }
 
-  paint.mPaint.setSubpixelText(useSubpixelText);
+  if (!shouldLCDRenderText && aFont->GetType() == FontType::GDI) {
+    // If we have non LCD GDI text, Cairo currently always uses cleartype fonts and
+    // converts them to grayscale. Force Skia to do the same, otherwise we use
+    // GDI fonts with the ANTIALIASED_QUALITY which is generally bolder than
+    // Cleartype fonts.
+    paint.mPaint.setFlags(paint.mPaint.getFlags() | SkPaint::kGenA8FromLCD_Flag);
+  }
 
   std::vector<uint16_t> indices;
   std::vector<SkPoint> offsets;
@@ -1402,76 +1285,43 @@ DrawTargetSkia::UsingSkiaGPU() const
 #endif
 }
 
-#ifdef USE_SKIA_GPU
-already_AddRefed<SourceSurface>
-DrawTargetSkia::OptimizeGPUSourceSurface(SourceSurface *aSurface) const
-{
-  // Check if the underlying SkBitmap already has an associated GrTexture.
-  if (aSurface->GetType() == SurfaceType::SKIA &&
-      static_cast<SourceSurfaceSkia*>(aSurface)->GetBitmap().getTexture()) {
-    RefPtr<SourceSurface> surface(aSurface);
-    return surface.forget();
-  }
-
-  SkBitmap bitmap = GetBitmapForSurface(aSurface);
-
-  // Upload the SkBitmap to a GrTexture otherwise.
-  SkAutoTUnref<GrTexture> texture(
-      GrRefCachedBitmapTexture(mGrContext.get(), bitmap, GrTextureParams::ClampBilerp()));
-
-  if (texture) {
-    // Create a new SourceSurfaceSkia whose SkBitmap contains the GrTexture.
-    RefPtr<SourceSurfaceSkia> surface = new SourceSurfaceSkia();
-    if (surface->InitFromGrTexture(texture, aSurface->GetSize(), aSurface->GetFormat())) {
-      return surface.forget();
-    }
-  }
-
-  // The data was too big to fit in a GrTexture.
-  if (aSurface->GetType() == SurfaceType::SKIA) {
-    // It is already a Skia source surface, so just reuse it as-is.
-    RefPtr<SourceSurface> surface(aSurface);
-    return surface.forget();
-  }
-
-  // Wrap it in a Skia source surface so that can do tiled uploads on-demand.
-  RefPtr<SourceSurfaceSkia> surface = new SourceSurfaceSkia();
-  surface->InitFromBitmap(bitmap);
-  return surface.forget();
-}
-#endif
-
-already_AddRefed<SourceSurface>
-DrawTargetSkia::OptimizeSourceSurfaceForUnknownAlpha(SourceSurface *aSurface) const
-{
-#ifdef USE_SKIA_GPU
-  if (UsingSkiaGPU()) {
-    return OptimizeGPUSourceSurface(aSurface);
-  }
-#endif
-
-  if (aSurface->GetType() == SurfaceType::SKIA) {
-    RefPtr<SourceSurface> surface(aSurface);
-    return surface.forget();
-  }
-
-  RefPtr<DataSourceSurface> dataSurface = aSurface->GetDataSurface();
-
-  // For plugins, GDI can sometimes just write 0 to the alpha channel
-  // even for RGBX formats. In this case, we have to manually write
-  // the alpha channel to make Skia happy with RGBX and in case GDI
-  // writes some bad data. Luckily, this only happens on plugins.
-  WriteRGBXFormat(dataSurface->GetData(), dataSurface->GetSize(),
-                  dataSurface->Stride(), dataSurface->GetFormat());
-  return dataSurface.forget();
-}
-
 already_AddRefed<SourceSurface>
 DrawTargetSkia::OptimizeSourceSurface(SourceSurface *aSurface) const
 {
 #ifdef USE_SKIA_GPU
   if (UsingSkiaGPU()) {
-    return OptimizeGPUSourceSurface(aSurface);
+    // Check if the underlying SkBitmap already has an associated GrTexture.
+    if (aSurface->GetType() == SurfaceType::SKIA &&
+        static_cast<SourceSurfaceSkia*>(aSurface)->GetBitmap().getTexture()) {
+      RefPtr<SourceSurface> surface(aSurface);
+      return surface.forget();
+    }
+
+    SkBitmap bitmap = GetBitmapForSurface(aSurface);
+
+    // Upload the SkBitmap to a GrTexture otherwise.
+    SkAutoTUnref<GrTexture> texture(
+      GrRefCachedBitmapTexture(mGrContext.get(), bitmap, GrTextureParams::ClampBilerp()));
+
+    if (texture) {
+      // Create a new SourceSurfaceSkia whose SkBitmap contains the GrTexture.
+      RefPtr<SourceSurfaceSkia> surface = new SourceSurfaceSkia();
+      if (surface->InitFromGrTexture(texture, aSurface->GetSize(), aSurface->GetFormat())) {
+        return surface.forget();
+      }
+    }
+
+    // The data was too big to fit in a GrTexture.
+    if (aSurface->GetType() == SurfaceType::SKIA) {
+      // It is already a Skia source surface, so just reuse it as-is.
+      RefPtr<SourceSurface> surface(aSurface);
+      return surface.forget();
+    }
+
+    // Wrap it in a Skia source surface so that can do tiled uploads on-demand.
+    RefPtr<SourceSurfaceSkia> surface = new SourceSurfaceSkia();
+    surface->InitFromBitmap(bitmap);
+    return surface.forget();
   }
 #endif
 
@@ -1484,10 +1334,7 @@ DrawTargetSkia::OptimizeSourceSurface(SourceSurface *aSurface) const
   // uploading, so any data surface is fine. Call GetDataSurface
   // to trigger any required readback so that it only happens
   // once.
-  RefPtr<DataSourceSurface> dataSurface = aSurface->GetDataSurface();
-  MOZ_ASSERT(VerifyRGBXFormat(dataSurface->GetData(), dataSurface->GetSize(),
-                              dataSurface->Stride(), dataSurface->GetFormat()));
-  return dataSurface.forget();
+  return aSurface->GetDataSurface();
 }
 
 already_AddRefed<SourceSurface>
@@ -1507,7 +1354,7 @@ DrawTargetSkia::CreateSourceSurfaceFromNativeSurface(const NativeSurface &aSurfa
     texInfo.fID = (GrGLuint)(uintptr_t)aSurface.mSurface;
     texDesc.fTextureHandle = reinterpret_cast<GrBackendObject>(&texInfo);
 
-    SkAutoTUnref<GrTexture> texture(mGrContext->textureProvider()->wrapBackendTexture(texDesc, kAdopt_GrWrapOwnership));
+    SkAutoTUnref<GrTexture> texture(mGrContext->textureProvider()->wrapBackendTexture(texDesc));
 
     RefPtr<SourceSurfaceSkia> newSurf = new SourceSurfaceSkia();
     if (newSurf->InitFromGrTexture(texture, aSurface.mSize, aSurface.mFormat)) {
@@ -1568,8 +1415,7 @@ DrawTargetSkia::Init(const IntSize &aSize, SurfaceFormat aFormat)
     return false;
   }
 
-  SkColor clearColor = (aFormat == SurfaceFormat::B8G8R8X8) ? SK_ColorBLACK : SK_ColorTRANSPARENT;
-  bitmap.eraseColor(clearColor);
+  bitmap.eraseColor(SK_ColorTRANSPARENT);
 
   mCanvas.adopt(new SkCanvas(bitmap));
   mSize = aSize;
@@ -1631,6 +1477,30 @@ DrawTargetSkia::InitWithGrContext(GrContext* aGrContext,
 
 #endif
 
+#ifdef DEBUG
+bool
+VerifyRGBXFormat(uint8_t* aData, const IntSize &aSize, const int32_t aStride, SurfaceFormat aFormat)
+{
+  // We should've initialized the data to be opaque already
+  // On debug builds, verify that this is actually true.
+  int height = aSize.height;
+  int width = aSize.width;
+
+  for (int row = 0; row < height; ++row) {
+    for (int column = 0; column < width; column += 4) {
+#ifdef IS_BIG_ENDIAN
+      MOZ_ASSERT(aData[column] == 0xFF);
+#else
+      MOZ_ASSERT(aData[column + 3] == 0xFF);
+#endif
+    }
+    aData += aStride;
+  }
+
+  return true;
+}
+#endif
+
 void
 DrawTargetSkia::Init(unsigned char* aData, const IntSize &aSize, int32_t aStride, SurfaceFormat aFormat, bool aUninitialized)
 {
@@ -1688,8 +1558,7 @@ DrawTargetSkia::ClearRect(const Rect &aRect)
   MarkChanged();
   mCanvas->save();
   mCanvas->clipRect(RectToSkRect(aRect), SkRegion::kIntersect_Op, true);
-  SkColor clearColor = (mFormat == SurfaceFormat::B8G8R8X8) ? SK_ColorBLACK : SK_ColorTRANSPARENT;
-  mCanvas->clear(clearColor);
+  mCanvas->clear(SK_ColorTRANSPARENT);
   mCanvas->restore();
 }
 

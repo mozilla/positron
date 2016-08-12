@@ -43,7 +43,6 @@
 
 #include "jsatominlines.h"
 
-#include "gc/Nursery-inl.h"
 #include "gc/StoreBuffer-inl.h"
 #include "vm/ArrayBufferObject-inl.h"
 #include "vm/NativeObject-inl.h"
@@ -78,19 +77,11 @@ TypedArrayObject::dataOffset()
 }
 
 void
-TypedArrayObject::notifyBufferDetached(JSContext* cx, void* newData)
+TypedArrayObject::notifyBufferDetached(void* newData)
 {
     MOZ_ASSERT(!isSharedMemory());
     setFixedSlot(TypedArrayObject::LENGTH_SLOT, Int32Value(0));
     setFixedSlot(TypedArrayObject::BYTEOFFSET_SLOT, Int32Value(0));
-
-    // Free the data slot pointer if has no inline data
-    Nursery& nursery = cx->runtime()->gc.nursery;
-    if (!hasBuffer() && !hasInlineElements() && !nursery.isInside(elements())) {
-        nursery.removeMallocedBuffer(elements());
-        js_free(elements());
-    }
-
     setPrivate(newData);
 }
 
@@ -115,14 +106,6 @@ TypedArrayObject::ensureHasBuffer(JSContext* cx, Handle<TypedArrayObject*> tarra
 
     // tarray is not shared, because if it were it would have a buffer.
     memcpy(buffer->dataPointer(), tarray->viewDataUnshared(), tarray->byteLength());
-
-    // Free the data slot pointer if has no inline data
-    Nursery& nursery = cx->runtime()->gc.nursery;
-    if (!tarray->hasInlineElements() && !nursery.isInside(tarray->elements())) {
-        nursery.removeMallocedBuffer(tarray->elements());
-        js_free(tarray->elements());
-    }
-
     tarray->setPrivate(buffer->dataPointer());
 
     tarray->setFixedSlot(TypedArrayObject::BUFFER_SLOT, ObjectValue(*buffer));
@@ -151,8 +134,8 @@ TypedArrayObject::finalize(FreeOp* fop, JSObject* obj)
         return;
 
     // Free the data slot pointer if it does not point into the old JSObject.
-    Nursery& nursery = fop->runtime()->gc.nursery;
-    if (!curObj->hasInlineElements() && !nursery.isInside(curObj->elements())) {
+    if (!curObj->hasInlineElements()) {
+        MOZ_ASSERT(!fop->runtime()->gc.nursery.isInside(curObj->elements()));
         js_free(curObj->elements());
     }
 }
@@ -179,7 +162,6 @@ TypedArrayObject::objectMovedDuringMinorGC(JSTracer* trc, JSObject* obj, const J
     TypedArrayObject* newObj = &obj->as<TypedArrayObject>();
     const TypedArrayObject* oldObj = &old->as<TypedArrayObject>();
     MOZ_ASSERT(newObj->elements() == oldObj->elements());
-    MOZ_ASSERT(obj->isTenured());
 
     // Typed arrays with a buffer object do not need an update.
     if (oldObj->hasBuffer())
@@ -212,11 +194,9 @@ JS_FOR_EACH_TYPED_ARRAY(OBJECT_MOVED_TYPED_ARRAY)
         newObj->setInlineElements();
     } else {
         AutoEnterOOMUnsafeRegion oomUnsafe;
-        nbytes = JS_ROUNDUP(nbytes, sizeof(Value));
-        void* data = newObj->zone()->pod_malloc<uint8_t>(nbytes);
+        uint8_t* data = newObj->zone()->pod_malloc<uint8_t>(nbytes);
         if (!data)
             oomUnsafe.crash("Failed to allocate typed array elements while tenuring.");
-        MOZ_ASSERT(!nursery.isInside(data));
         newObj->initPrivate(data);
     }
 
@@ -583,14 +563,14 @@ class TypedArrayObjectTemplate : public TypedArrayObject
         // won't be any elements to store. Therefore, we set the pointer to the
         // inline data and avoid allocating memory that will never be used.
         void* buf = tarray->fixedData(FIXED_DATA_START);
-        initTypedArraySlots(cx, tarray, len, buf, allocKind);
+        initTypedArraySlots(tarray, len, buf, allocKind);
 
         return tarray;
     }
 
     static void
-    initTypedArraySlots(JSContext* cx, TypedArrayObject* tarray, uint32_t len,
-                        void* buf, AllocKind allocKind)
+    initTypedArraySlots(TypedArrayObject* tarray, uint32_t len, void* buf,
+                        AllocKind allocKind)
     {
         tarray->setFixedSlot(TypedArrayObject::BUFFER_SLOT, NullValue());
         tarray->setFixedSlot(TypedArrayObject::LENGTH_SLOT, Int32Value(AssertedCast<int32_t>(len)));
@@ -600,11 +580,6 @@ class TypedArrayObjectTemplate : public TypedArrayObject
         MOZ_ASSERT(tarray->numFixedSlots() == TypedArrayObject::DATA_SLOT);
 
         if (buf) {
-#ifdef DEBUG
-            Nursery& nursery = cx->runtime()->gc.nursery;
-            MOZ_ASSERT_IF(!nursery.isInside(buf) && !tarray->hasInlineElements(),
-                          tarray->isTenured());
-#endif
             tarray->initPrivate(buf);
         } else {
             size_t nbytes = len * sizeof(NativeType);
@@ -620,6 +595,20 @@ class TypedArrayObjectTemplate : public TypedArrayObject
         }
     }
 
+    static void*
+    allocateTypedArrayElementsBuffer(JSContext* cx, uint32_t len)
+    {
+        if (len == 0)
+            return nullptr;
+
+        void* buf = cx->runtime()->pod_callocCanGC<HeapSlot>(len);
+        if (!buf) {
+            ReportOutOfMemory(cx);
+            return nullptr;
+        }
+        return buf;
+    }
+
     static TypedArrayObject*
     makeTypedArrayWithTemplate(JSContext* cx, TypedArrayObject* templateObj, uint32_t len)
     {
@@ -627,6 +616,7 @@ class TypedArrayObjectTemplate : public TypedArrayObject
         if (!js::CalculateAllocSize<NativeType>(len, &nbytes))
             return nullptr;
 
+        MOZ_ASSERT(nbytes < TypedArrayObject::SINGLETON_BYTE_LENGTH);
         bool fitsInline = nbytes <= INLINE_BUFFER_LIMIT;
 
         AutoSetNewObjectMetadata metadata(cx);
@@ -639,25 +629,21 @@ class TypedArrayObjectTemplate : public TypedArrayObject
         allocKind = GetBackgroundAllocKind(allocKind);
         RootedObjectGroup group(cx, templateObj->group());
 
-        NewObjectKind newKind = TenuredObject;
+        NewObjectKind newKind = GenericObject;
 
-        ScopedJSFreePtr<void> buf;
-        if (!fitsInline && len > 0) {
-            buf = cx->zone()->pod_malloc<uint8_t>(nbytes);
-            if (!buf) {
-                ReportOutOfMemory(cx);
+        void* buf = nullptr;
+        if (!fitsInline) {
+            buf = allocateTypedArrayElementsBuffer(cx, len);
+            if (!buf)
                 return nullptr;
-            }
-
-            memset(buf, 0, nbytes);
-         }
+        }
 
         RootedObject tmp(cx, NewObjectWithGroup<TypedArrayObject>(cx, group, allocKind, newKind));
         if (!tmp)
             return nullptr;
 
         TypedArrayObject* obj = &tmp->as<TypedArrayObject>();
-        initTypedArraySlots(cx, obj, len, buf.forget(), allocKind);
+        initTypedArraySlots(obj, len, buf, allocKind);
 
         return obj;
     }
@@ -1265,11 +1251,11 @@ TypedArrayObject::GetTemplateObjectForNative(JSContext* cx, Native native, uint3
     if (native == &TypedArrayObjectTemplate<T>::class_constructor) { \
         size_t nbytes; \
         if (!js::CalculateAllocSize<T>(len, &nbytes)) \
-            return true; \
+            return false; \
         \
         if (nbytes < TypedArrayObject::SINGLETON_BYTE_LENGTH) { \
             res.set(TypedArrayObjectTemplate<T>::makeTemplateObject(cx, len)); \
-            return true; \
+            return !!res; \
         } \
     }
 JS_FOR_EACH_TYPED_ARRAY(CHECK_TYPED_ARRAY_CONSTRUCTOR)
@@ -1754,18 +1740,15 @@ DataViewObject::class_constructor(JSContext* cx, unsigned argc, Value* vp)
 
 template <typename NativeType>
 /* static */ uint8_t*
-DataViewObject::getDataPointer(JSContext* cx, Handle<DataViewObject*> obj, double offset)
+DataViewObject::getDataPointer(JSContext* cx, Handle<DataViewObject*> obj, uint32_t offset)
 {
-    MOZ_ASSERT(offset >= 0);
-
     const size_t TypeSize = sizeof(NativeType);
     if (offset > UINT32_MAX - TypeSize || offset + TypeSize > obj->byteLength()) {
         JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_ARG_INDEX_OUT_OF_RANGE, "1");
         return nullptr;
     }
 
-    MOZ_ASSERT(offset < UINT32_MAX);
-    return static_cast<uint8_t*>(obj->dataPointer()) + uint32_t(offset);
+    return static_cast<uint8_t*>(obj->dataPointer()) + offset;
 }
 
 static inline bool
@@ -1842,60 +1825,33 @@ struct DataViewIO
     }
 };
 
-static bool
-ToIndex(JSContext* cx, HandleValue v, double* index)
-{
-    if (v.isUndefined()) {
-        *index = 0.0;
-        return true;
-    }
-
-    double integerIndex;
-    if (!ToInteger(cx, v, &integerIndex))
-        return false;
-
-    // Inlined version of ToLength.
-    // 1. Already an integer
-    // 2. Step eliminates < 0, +0 == -0 with SameValueZero
-    // 3/4. Limit to <= 2^53-1, so everything above should fail.
-    if (integerIndex < 0 || integerIndex > 9007199254740991) {
-        JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_BAD_INDEX);
-        return false;
-    }
-
-    *index = integerIndex;
-    return true;
-}
-
 template<typename NativeType>
 /* static */ bool
 DataViewObject::read(JSContext* cx, Handle<DataViewObject*> obj,
                      const CallArgs& args, NativeType* val, const char* method)
 {
-    // Steps 1-2. done by the caller
-    // Step 3. unnecessary assert
+    if (args.length() < 1) {
+        JS_ReportErrorNumber(cx, GetErrorMessage, nullptr,
+                             JSMSG_MORE_ARGS_NEEDED, method, "0", "s");
+        return false;
+    }
 
-    // Step 4.
-    double getIndex;
-    if (!ToIndex(cx, args.get(0), &getIndex))
+    uint32_t offset;
+    if (!ToUint32(cx, args[0], &offset))
         return false;
 
-    // Step 5.
-    bool isLittleEndian = args.length() >= 2 && ToBoolean(args[1]);
+    bool fromLittleEndian = args.length() >= 2 && ToBoolean(args[1]);
 
-    // Steps 6-7.
     if (obj->arrayBuffer().isDetached()) {
         JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_TYPED_ARRAY_DETACHED);
         return false;
     }
 
-    // Steps 8-12.
-    uint8_t* data = DataViewObject::getDataPointer<NativeType>(cx, obj, getIndex);
+    uint8_t* data = DataViewObject::getDataPointer<NativeType>(cx, obj, offset);
     if (!data)
         return false;
 
-    // Step 13.
-    DataViewIO<NativeType>::fromBuffer(val, data, needToSwapBytes(isLittleEndian));
+    DataViewIO<NativeType>::fromBuffer(val, data, needToSwapBytes(fromLittleEndian));
     return true;
 }
 
@@ -1936,17 +1892,18 @@ template<typename NativeType>
 DataViewObject::write(JSContext* cx, Handle<DataViewObject*> obj,
                       const CallArgs& args, const char* method)
 {
-    // Steps 1-2. done by the caller
-    // Step 3. unnecessary assert
+    if (args.length() < 2) {
+        JS_ReportErrorNumber(cx, GetErrorMessage, nullptr,
+                             JSMSG_MORE_ARGS_NEEDED, method, "1", "");
+        return false;
+    }
 
-    // Step 4.
-    double getIndex;
-    if (!ToIndex(cx, args.get(0), &getIndex))
+    uint32_t offset;
+    if (!ToUint32(cx, args[0], &offset))
         return false;
 
-    // Step 5. Should just call ToNumber (unobservable)
     NativeType value;
-    if (!WebIDLCast(cx, args.get(1), &value))
+    if (!WebIDLCast(cx, args[1], &value))
         return false;
 
 #ifdef JS_MORE_DETERMINISTIC
@@ -1955,22 +1912,18 @@ DataViewObject::write(JSContext* cx, Handle<DataViewObject*> obj,
         value = JS::CanonicalizeNaN(value);
 #endif
 
-    // Step 6.
-    bool isLittleEndian = args.length() >= 3 && ToBoolean(args[2]);
+    bool toLittleEndian = args.length() >= 3 && ToBoolean(args[2]);
 
-    // Steps 7-8.
     if (obj->arrayBuffer().isDetached()) {
         JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_TYPED_ARRAY_DETACHED);
         return false;
     }
 
-    // Steps 9-13.
-    uint8_t* data = DataViewObject::getDataPointer<NativeType>(cx, obj, getIndex);
+    uint8_t* data = DataViewObject::getDataPointer<NativeType>(cx, obj, offset);
     if (!data)
         return false;
 
-    // Step 14.
-    DataViewIO<NativeType>::toBuffer(data, &value, needToSwapBytes(isLittleEndian));
+    DataViewIO<NativeType>::toBuffer(data, &value, needToSwapBytes(toLittleEndian));
     return true;
 }
 
@@ -2639,20 +2592,20 @@ const Class DataViewObject::class_ = {
 const JSFunctionSpec DataViewObject::jsfuncs[] = {
     JS_FN("getInt8",    DataViewObject::fun_getInt8,      1,0),
     JS_FN("getUint8",   DataViewObject::fun_getUint8,     1,0),
-    JS_FN("getInt16",   DataViewObject::fun_getInt16,     1,0),
-    JS_FN("getUint16",  DataViewObject::fun_getUint16,    1,0),
-    JS_FN("getInt32",   DataViewObject::fun_getInt32,     1,0),
-    JS_FN("getUint32",  DataViewObject::fun_getUint32,    1,0),
-    JS_FN("getFloat32", DataViewObject::fun_getFloat32,   1,0),
-    JS_FN("getFloat64", DataViewObject::fun_getFloat64,   1,0),
+    JS_FN("getInt16",   DataViewObject::fun_getInt16,     2,0),
+    JS_FN("getUint16",  DataViewObject::fun_getUint16,    2,0),
+    JS_FN("getInt32",   DataViewObject::fun_getInt32,     2,0),
+    JS_FN("getUint32",  DataViewObject::fun_getUint32,    2,0),
+    JS_FN("getFloat32", DataViewObject::fun_getFloat32,   2,0),
+    JS_FN("getFloat64", DataViewObject::fun_getFloat64,   2,0),
     JS_FN("setInt8",    DataViewObject::fun_setInt8,      2,0),
     JS_FN("setUint8",   DataViewObject::fun_setUint8,     2,0),
-    JS_FN("setInt16",   DataViewObject::fun_setInt16,     2,0),
-    JS_FN("setUint16",  DataViewObject::fun_setUint16,    2,0),
-    JS_FN("setInt32",   DataViewObject::fun_setInt32,     2,0),
-    JS_FN("setUint32",  DataViewObject::fun_setUint32,    2,0),
-    JS_FN("setFloat32", DataViewObject::fun_setFloat32,   2,0),
-    JS_FN("setFloat64", DataViewObject::fun_setFloat64,   2,0),
+    JS_FN("setInt16",   DataViewObject::fun_setInt16,     3,0),
+    JS_FN("setUint16",  DataViewObject::fun_setUint16,    3,0),
+    JS_FN("setInt32",   DataViewObject::fun_setInt32,     3,0),
+    JS_FN("setUint32",  DataViewObject::fun_setUint32,    3,0),
+    JS_FN("setFloat32", DataViewObject::fun_setFloat32,   3,0),
+    JS_FN("setFloat64", DataViewObject::fun_setFloat64,   3,0),
     JS_FS_END
 };
 

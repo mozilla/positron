@@ -29,6 +29,9 @@ public:
   virtual void UpdateTransparency(nsTransparencyMode aMode) = 0;
   virtual void ClearTransparentWindow() = 0;
 
+  // Update the bounds of the transparent surface.
+  virtual void ResizeTransparentWindow(const gfx::IntSize& aSize) = 0;
+
   // If in-process and using software rendering, return the backing transparent
   // DC.
   virtual HDC GetTransparentDC() const = 0;
@@ -68,6 +71,7 @@ public:
   void OnDestroyWindow() override;
   void UpdateTransparency(nsTransparencyMode aMode) override;
   void ClearTransparentWindow() override;
+  void ResizeTransparentWindow(const gfx::IntSize& aSize) override;
 
   bool RedrawTransparentWindow();
 

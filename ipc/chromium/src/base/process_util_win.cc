@@ -86,7 +86,9 @@ bool OpenProcessHandle(ProcessId pid, ProcessHandle* handle) {
   return true;
 }
 
-bool OpenPrivilegedProcessHandle(ProcessId pid, ProcessHandle* handle) {
+bool OpenPrivilegedProcessHandle(ProcessId pid,
+                                 ProcessHandle* handle,
+                                 int64_t* error) {
   ProcessHandle result = OpenProcess(PROCESS_DUP_HANDLE |
                                          PROCESS_TERMINATE |
                                          PROCESS_QUERY_INFORMATION |
@@ -95,6 +97,9 @@ bool OpenPrivilegedProcessHandle(ProcessId pid, ProcessHandle* handle) {
                                      FALSE, pid);
 
   if (result == NULL) {
+    if (error) {
+      *error = GetLastError();
+    }
     return false;
   }
 

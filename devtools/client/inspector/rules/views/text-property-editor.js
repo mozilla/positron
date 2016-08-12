@@ -4,6 +4,7 @@
 
 "use strict";
 
+const {Ci} = require("chrome");
 const {l10n} = require("devtools/shared/inspector/css-logic");
 const {getCssProperties} = require("devtools/shared/fronts/css-properties");
 const {InplaceEditor, editableField} =
@@ -12,13 +13,13 @@ const {
   createChild,
   appendText,
   advanceValidate,
-  blurOnMultipleProperties
+  blurOnMultipleProperties,
+  throttle
 } = require("devtools/client/inspector/shared/utils");
 const {
   parseDeclarations,
   parseSingleValue,
 } = require("devtools/shared/css-parsing-utils");
-const Services = require("Services");
 
 const HTML_NS = "http://www.w3.org/1999/xhtml";
 
@@ -75,7 +76,7 @@ function TextPropertyEditor(ruleEditor, property) {
   this._onSwatchCommit = this._onSwatchCommit.bind(this);
   this._onSwatchPreview = this._onSwatchPreview.bind(this);
   this._onSwatchRevert = this._onSwatchRevert.bind(this);
-  this._onValidate = this.ruleView.throttle(this._previewValue, 10, this);
+  this._onValidate = throttle(this._previewValue, 10, this);
   this.update = this.update.bind(this);
   this.updatePropertyState = this.updatePropertyState.bind(this);
 
@@ -218,8 +219,7 @@ TextPropertyEditor.prototype = {
         destroy: this.updatePropertyState,
         advanceChars: ":",
         contentType: InplaceEditor.CONTENT_TYPES.CSS_PROPERTY,
-        popup: this.popup,
-        cssProperties: this.cssProperties
+        popup: this.popup
       });
 
       // Auto blur name field on multiple CSS rules get pasted in.
@@ -288,8 +288,7 @@ TextPropertyEditor.prototype = {
         property: this.prop,
         popup: this.popup,
         multiline: true,
-        maxWidth: () => this.container.getBoundingClientRect().width,
-        cssProperties: this.cssProperties
+        maxWidth: () => this.container.getBoundingClientRect().width
       });
     }
   },
@@ -641,7 +640,7 @@ TextPropertyEditor.prototype = {
     // Remove a property if the property value is empty and the property
     // value is not about to be focused
     if (!this.prop.value &&
-        direction !== Services.focus.MOVEFOCUS_FORWARD) {
+        direction !== Ci.nsIFocusManager.MOVEFOCUS_FORWARD) {
       this.remove(direction);
       return;
     }
@@ -740,7 +739,7 @@ TextPropertyEditor.prototype = {
     // A timeout is used here to accurately check the state, since the inplace
     // editor `done` and `destroy` events fire before the next editor
     // is focused.
-    if (!value.trim() && direction !== Services.focus.MOVEFOCUS_BACKWARD) {
+    if (!value.trim() && direction !== Ci.nsIFocusManager.MOVEFOCUS_BACKWARD) {
       setTimeout(() => {
         if (!this.editing) {
           this.remove(direction);

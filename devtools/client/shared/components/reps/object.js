@@ -10,6 +10,7 @@ define(function (require, exports, module) {
   // Dependencies
   const React = require("devtools/client/shared/vendor/react");
   const { createFactories } = require("./rep-utils");
+  const { ObjectBox } = createFactories(require("./object-box"));
   const { Caption } = createFactories(require("./caption"));
   const { PropRep } = createFactories(require("./prop-rep"));
   // Shortcuts
@@ -35,10 +36,18 @@ define(function (require, exports, module) {
       return "Object";
     },
 
-    safePropIterator: function (object, max) {
-      max = (typeof max === "undefined") ? 3 : max;
+    longPropIterator: function (object) {
       try {
-        return this.propIterator(object, max);
+        return this.propIterator(object, 100);
+      } catch (err) {
+        console.error(err);
+      }
+      return [];
+    },
+
+    shortPropIterator: function (object) {
+      try {
+        return this.propIterator(object, 3);
       } catch (err) {
         console.error(err);
       }
@@ -77,7 +86,7 @@ define(function (require, exports, module) {
           key: "more",
           object: objectLink({
             object: object
-          }, (Object.keys(object).length - max) + " more…")
+          }, "more…")
         }));
       } else if (props.length > 0) {
         // Remove the last comma.
@@ -132,19 +141,19 @@ define(function (require, exports, module) {
 
     render: function () {
       let object = this.props.object;
-      let props = this.safePropIterator(object);
+      let props = this.shortPropIterator(object);
       let objectLink = this.props.objectLink || span;
 
       if (this.props.mode == "tiny" || !props.length) {
         return (
-          span({className: "objectBox objectBox-object"},
+          ObjectBox({className: "object"},
             objectLink({className: "objectTitle"}, this.getTitle())
           )
         );
       }
 
       return (
-        span({className: "objectBox objectBox-object"},
+        ObjectBox({className: "object"},
           this.getTitle(object),
           objectLink({
             className: "objectLeftBrace",

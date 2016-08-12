@@ -27,6 +27,7 @@
 #include "nsITimer.h"
 
 #include "AbstractMediaDecoder.h"
+#include "FrameStatistics.h"
 #include "MediaDecoderOwner.h"
 #include "MediaEventSource.h"
 #include "MediaMetadataManager.h"
@@ -70,10 +71,6 @@ public:
   // Used to register with MediaResource to receive notifications which will
   // be forwarded to MediaDecoder.
   class ResourceCallback : public MediaResourceCallback {
-    // Throttle calls to MediaDecoder::NotifyDataArrived()
-    // to be at most once per 500ms.
-    static const uint32_t sDelay = 500;
-
   public:
     // Start to receive notifications from ResourceCallback.
     void Connect(MediaDecoder* aDecoder);
@@ -96,12 +93,8 @@ public:
     void NotifySuspendedStatusChanged() override;
     void NotifyBytesConsumed(int64_t aBytes, int64_t aOffset) override;
 
-    static void TimerCallback(nsITimer* aTimer, void* aClosure);
-
     // The decoder to send notifications. Main-thread only.
     MediaDecoder* mDecoder = nullptr;
-    nsCOMPtr<nsITimer> mTimer;
-    bool mTimerArmed = false;
   };
 
   typedef MozPromise<SeekResolveValue, bool /* aIgnored */, /* IsExclusive = */ true> SeekPromise;
@@ -227,7 +220,7 @@ public:
   virtual double GetDuration();
 
   // Return true if the stream is infinite (see SetInfinite).
-  bool IsInfinite() const;
+  virtual bool IsInfinite();
 
   // Called by MediaResource when some data has been received.
   // Call on the main thread only.
@@ -239,13 +232,15 @@ public:
 
   // Return true if we are currently seeking in the media resource.
   // Call on the main thread only.
-  bool IsSeeking() const;
+  virtual bool IsSeeking() const;
 
-  // Return true if the decoder has reached the end of playback.
-  bool IsEnded() const;
+  // Return true if the decoder has reached the end of playback or the decoder
+  // has shutdown.
+  // Call on the main thread only.
+  virtual bool IsEndedOrShutdown() const;
 
   // Return true if the MediaDecoderOwner's error attribute is not null.
-  // Must be called before Shutdown().
+  // If the MediaDecoder is shutting down, OwnerHasError will return true.
   bool OwnerHasError() const;
 
   already_AddRefed<GMPCrashHelper> GetCrashHelper() override;
@@ -414,14 +409,14 @@ private:
     mIgnoreProgressData = mLogicallySeeking;
   }
 
-  // Seeking has started. Inform the element on the main thread.
-  void SeekingStarted();
+  // Seeking has started. Inform the element on the main
+  // thread.
+  void SeekingStarted(MediaDecoderEventVisibility aEventVisibility = MediaDecoderEventVisibility::Observable);
 
   void UpdateLogicalPositionInternal(MediaDecoderEventVisibility aEventVisibility);
   void UpdateLogicalPosition()
   {
     MOZ_ASSERT(NS_IsMainThread());
-    MOZ_ASSERT(!IsShutdown());
     // Per spec, offical position remains stable during pause and seek.
     if (mPlayState == PLAY_STATE_PAUSED || IsSeeking()) {
       return;
@@ -439,7 +434,7 @@ private:
   // Indicate whether the media is same-origin with the element.
   void UpdateSameOriginStatus(bool aSameOrigin);
 
-  MediaDecoderOwner* GetOwner() const override;
+  MediaDecoderOwner* GetOwner() override;
 
 #ifdef MOZ_EME
   typedef MozPromise<RefPtr<CDMProxy>, bool /* aIgnored */, /* IsExclusive = */ true> CDMProxyPromise;
@@ -489,16 +484,18 @@ private:
 
   // Increments the parsed and decoded frame counters by the passed in counts.
   // Can be called on any thread.
-  virtual void NotifyDecodedFrames(const FrameStatisticsData& aStats) override
+  virtual void NotifyDecodedFrames(uint32_t aParsed, uint32_t aDecoded,
+                                   uint32_t aDropped) override
   {
-    GetFrameStatistics().NotifyDecodedFrames(aStats);
+    GetFrameStatistics().NotifyDecodedFrames(aParsed, aDecoded, aDropped);
   }
 
   void UpdateReadyState()
   {
     MOZ_ASSERT(NS_IsMainThread());
-    MOZ_ASSERT(!IsShutdown());
-    mOwner->UpdateReadyState();
+    if (!mShuttingDown) {
+      mOwner->UpdateReadyState();
+    }
   }
 
   virtual MediaDecoderOwner::NextFrameStatus NextFrameStatus() { return mNextFrameStatus; }
@@ -528,7 +525,8 @@ protected:
   // Cancel a timer for heuristic dormant.
   void CancelDormantTimer();
 
-  bool IsShutdown() const;
+  // Return true if the decoder has reached the end of playback
+  bool IsEnded() const;
 
   // Called by the state machine to notify the decoder that the duration
   // has changed.
@@ -544,7 +542,6 @@ protected:
 
   void SetExplicitDuration(double aValue)
   {
-    MOZ_ASSERT(!IsShutdown());
     mExplicitDuration.Set(Some(aValue));
 
     // We Invoke DurationChanged explicitly, rather than using a watcher, so
@@ -667,9 +664,9 @@ protected:
   void OnMetadataUpdate(TimedMetadata&& aMetadata);
 
   // This should only ever be accessed from the main thread.
-  // It is set in the constructor and cleared in Shutdown when the element goes
-  // away. The decoder does not add a reference the element.
-  MediaDecoderOwner* mOwner;
+  // It is set in Init and cleared in Shutdown when the element goes away.
+  // The decoder does not add a reference the element.
+  MediaDecoderOwner* const mOwner;
 
   // Counters related to decode and presentation of frames.
   const RefPtr<FrameStatistics> mFrameStats;
@@ -684,6 +681,12 @@ protected:
   // True when our media stream has been pinned. We pin the stream
   // while seeking.
   bool mPinnedForSeek;
+
+  // True if the decoder is being shutdown. At this point all events that
+  // are currently queued need to return immediately to prevent javascript
+  // being run that operates on the element and decoder during shutdown.
+  // Read/Write from the main thread only.
+  bool mShuttingDown;
 
   // True if the playback is paused because the playback rate member is 0.0.
   bool mPausedForPlaybackRateNull;
@@ -712,6 +715,12 @@ protected:
   // True if MediaDecoder is in dormant state.
   bool mIsDormant;
 
+  // True if MediaDecoder was PLAY_STATE_ENDED state, when entering to dormant.
+  // When MediaCodec is in dormant during PLAY_STATE_ENDED state, PlayState
+  // becomes different from PLAY_STATE_ENDED. But the MediaDecoder need to act
+  // as in PLAY_STATE_ENDED state to MediaDecoderOwner.
+  bool mWasEndedWhenEnteredDormant;
+
   // True if heuristic dormant is supported.
   const bool mIsHeuristicDormantSupported;
 
@@ -731,6 +740,7 @@ protected:
   MediaEventListener mFirstFrameLoadedListener;
 
   MediaEventListener mOnPlaybackEvent;
+  MediaEventListener mOnSeekingStart;
   MediaEventListener mOnMediaNotSeekable;
 
 protected:

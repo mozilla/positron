@@ -22,6 +22,7 @@ function createParentNode(marker) {
   return extend(marker, { submarkers: [] });
 }
 
+
 /**
  * Collapses markers into a tree-like structure.
  * @param object rootNode

@@ -14,9 +14,6 @@
 class nsIWidget;
 
 namespace mozilla {
-namespace widget {
-  class CompositorWidget;
-}
 namespace gl {
 
 #define IN_GL_CONTEXT_PROVIDER_H

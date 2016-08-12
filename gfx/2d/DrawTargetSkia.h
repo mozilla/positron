@@ -116,7 +116,6 @@ public:
                                                             int32_t aStride,
                                                             SurfaceFormat aFormat) const override;
   virtual already_AddRefed<SourceSurface> OptimizeSourceSurface(SourceSurface *aSurface) const override;
-  virtual already_AddRefed<SourceSurface> OptimizeSourceSurfaceForUnknownAlpha(SourceSurface *aSurface) const override;
   virtual already_AddRefed<SourceSurface>
     CreateSourceSurfaceFromNativeSurface(const NativeSurface &aSurface) const override;
   virtual already_AddRefed<DrawTarget>
@@ -142,8 +141,6 @@ public:
                       SurfaceFormat aFormat) override {
     return InitWithGrContext(aGrContext, aSize, aFormat, false);
   }
-
-  already_AddRefed<SourceSurface> OptimizeGPUSourceSurface(SourceSurface *aSurface) const;
 #endif
 
   // Skia assumes that texture sizes fit in 16-bit signed integers.

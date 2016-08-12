@@ -27,7 +27,6 @@
 const Services = require("Services");
 const defer = require("devtools/shared/defer");
 const {getCSSLexer} = require("devtools/shared/css-lexer");
-const EventEmitter = require("devtools/shared/event-emitter");
 const {gDevTools} = require("devtools/client/framework/devtools");
 
 const XHTML_NS = "http://www.w3.org/1999/xhtml";
@@ -239,8 +238,6 @@ exports.getCssDocs = getCssDocs;
  * A DOM element where the MdnDocs widget markup should be created.
  */
 function MdnDocsWidget(tooltipContainer) {
-  EventEmitter.decorate(this);
-
   tooltipContainer.innerHTML =
     `<header>
        <h1 class="mdn-property-name theme-fg-color5"></h1>
@@ -268,11 +265,10 @@ function MdnDocsWidget(tooltipContainer) {
 
   // listen for clicks and open in the browser window instead
   let mainWindow = Services.wm.getMostRecentWindow(gDevTools.chromeWindowType);
-  this.elements.linkToMdn.addEventListener("click", (e) => {
+  this.elements.linkToMdn.addEventListener("click", function (e) {
     e.stopPropagation();
     e.preventDefault();
-    mainWindow.openUILinkIn(e.target.href, "tab");
-    this.emit("visitlink");
+    mainWindow.openUILinkIn(e.target.href, "tab", { inBackground: true });
   });
 }
 

@@ -6,9 +6,7 @@
 
 "use strict";
 
-/* eslint-disable mozilla/reject-some-requires */
 const {Cc, Ci} = require("chrome");
-/* eslint-enable mozilla/reject-some-requires */
 const {Task} = require("devtools/shared/task");
 const {InplaceEditor, editableItem} =
       require("devtools/client/shared/inplace-editor");
@@ -199,7 +197,6 @@ function LayoutView(inspector, document) {
   this.sizeLabel = this.doc.querySelector(".layout-size > span");
   this.sizeHeadingLabel = this.doc.getElementById("layout-element-size");
   this._geometryEditorHighlighter = null;
-  this._cssProperties = getCssProperties(inspector.toolbox);
 
   this.init();
 }
@@ -221,10 +218,6 @@ LayoutView.prototype = {
     this.expander.addEventListener("click", this.onToggleExpander);
     let header = this.doc.getElementById("layout-header");
     header.addEventListener("dblclick", this.onToggleExpander);
-
-    this.onFilterComputedView = this.onFilterComputedView.bind(this);
-    this.inspector.on("computed-view-filtered",
-      this.onFilterComputedView);
 
     this.onPickerStarted = this.onPickerStarted.bind(this);
     this.onMarkupViewLeave = this.onMarkupViewLeave.bind(this);
@@ -420,8 +413,7 @@ LayoutView.prototype = {
             session.destroy();
           }, e => console.error(e));
         }
-      },
-      cssProperties: this._cssProperties
+      }
     }, event);
   },
 
@@ -477,7 +469,6 @@ LayoutView.prototype = {
     this.inspector.selection.off("new-node-front", this.onNewSelection);
     this.inspector.sidebar.off("select", this.onSidebarSelect);
     this.inspector._target.off("will-navigate", this.onWillNavigate);
-    this.inspector.off("computed-view-filtered", this.onFilterComputedView);
 
     this.inspector = null;
     this.doc = null;
@@ -573,16 +564,6 @@ LayoutView.prototype = {
   onWillNavigate: function () {
     this._geometryEditorHighlighter.release().catch(console.error);
     this._geometryEditorHighlighter = null;
-  },
-
-  /**
-   * Event handler that responds to the computed view being filtered
-   * @param {String} reason
-   * @param {Boolean} hidden
-   *        Whether or not to hide the layout wrapper
-   */
-  onFilterComputedView: function (reason, hidden) {
-    this.wrapper.hidden = hidden;
   },
 
   /**

@@ -6,9 +6,9 @@
 #include "SharedSurfaceANGLE.h"
 
 #include <d3d11.h>
+#include "gfxWindowsPlatform.h"
 #include "GLContextEGL.h"
 #include "GLLibraryEGL.h"
-#include "mozilla/gfx/DeviceManagerD3D11.h"
 #include "mozilla/layers/LayersSurfaces.h"  // for SurfaceDescriptor, etc
 
 namespace mozilla {
@@ -178,7 +178,6 @@ public:
       : mIsLocked(false)
       , mTexture(texture)
     {
-        MOZ_ASSERT(NS_IsMainThread(), "Must be on the main thread to use d3d11 immediate context");
         MOZ_ASSERT(mTexture);
         MOZ_ASSERT(succeeded);
         *succeeded = false;
@@ -197,9 +196,8 @@ public:
             }
         }
 
-        RefPtr<ID3D11Device> device =
-          gfx::DeviceManagerD3D11::Get()->GetContentDevice();
-        if (!device) {
+        RefPtr<ID3D11Device> device;
+        if (!gfxWindowsPlatform::GetPlatform()->GetD3D11DeviceForCurrentThread(&device)) {
             return;
         }
 
@@ -254,9 +252,8 @@ SharedSurface_ANGLEShareHandle::ReadbackBySharedHandle(gfx::DataSourceSurface* o
 {
     MOZ_ASSERT(out_surface);
 
-    RefPtr<ID3D11Device> device =
-      gfx::DeviceManagerD3D11::Get()->GetContentDevice();
-    if (!device) {
+    RefPtr<ID3D11Device> device;
+    if (!gfxWindowsPlatform::GetPlatform()->GetD3D11DeviceForCurrentThread(&device)) {
         return false;
     }
 

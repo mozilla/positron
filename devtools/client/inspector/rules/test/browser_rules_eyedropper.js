@@ -1,10 +1,19 @@
 /* vim: set ts=2 et sw=2 tw=80: */
 /* Any copyright is dedicated to the Public Domain.
  http://creativecommons.org/publicdomain/zero/1.0/ */
+
 "use strict";
 
-// Test opening the eyedropper from the color picker. Pressing escape to close it, and
-// clicking the page to select a color.
+// So we can test collecting telemetry on the eyedropper
+var oldCanRecord = Services.telemetry.canRecordExtended;
+Services.telemetry.canRecordExtended = true;
+registerCleanupFunction(function () {
+  Services.telemetry.canRecordExtended = oldCanRecord;
+});
+const EXPECTED_TELEMETRY = {
+  "DEVTOOLS_PICKER_EYEDROPPER_OPENED_COUNT": 2,
+  "DEVTOOLS_PICKER_EYEDROPPER_OPENED_PER_USER_FLAG": 1
+};
 
 const TEST_URI = `
   <style type="text/css">
@@ -34,61 +43,61 @@ const ORIGINAL_COLOR = "rgb(255, 0, 153)";
 // #ff5
 const EXPECTED_COLOR = "rgb(255, 255, 85)";
 
+// Test opening the eyedropper from the color picker. Pressing escape
+// to close it, and clicking the page to select a color.
+
 add_task(function* () {
-  info("Add the test tab, open the rule-view and select the test node");
+  // clear telemetry so we can get accurate counts
+  clearTelemetry();
+
   yield addTab("data:text/html;charset=utf-8," + encodeURIComponent(TEST_URI));
-  let {testActor, inspector, view} = yield openRuleView();
+  let {inspector, view} = yield openRuleView();
   yield selectNode("#div2", inspector);
 
-  info("Get the background-color property from the rule-view");
   let property = getRuleViewProperty(view, "#div2", "background-color");
   let swatch = property.valueSpan.querySelector(".ruleview-colorswatch");
   ok(swatch, "Color swatch is displayed for the bg-color property");
 
-  info("Open the eyedropper from the colorpicker tooltip");
-  yield openEyedropper(view, swatch);
+  let dropper = yield openEyedropper(view, swatch);
 
   let tooltip = view.tooltips.colorPicker.tooltip;
-  ok(!tooltip.isVisible(), "color picker tooltip is closed after opening eyedropper");
+  ok(!tooltip.isVisible(),
+     "color picker tooltip is closed after opening eyedropper");
 
-  info("Test that pressing escape dismisses the eyedropper");
-  yield testESC(swatch, inspector, testActor);
+  yield testESC(swatch, dropper);
 
-  info("Open the eyedropper again");
-  yield openEyedropper(view, swatch);
+  dropper = yield openEyedropper(view, swatch);
 
-  info("Test that a color can be selected with the eyedropper");
-  yield testSelect(view, swatch, inspector, testActor);
+  ok(dropper, "dropper opened");
+
+  yield testSelect(view, swatch, dropper);
+
+  checkTelemetry();
 });
 
-function* testESC(swatch, inspector, testActor) {
-  info("Press escape");
-  let onCanceled = new Promise(resolve => {
-    inspector.inspector.once("color-pick-canceled", resolve);
-  });
-  yield testActor.synthesizeKey({key: "VK_ESCAPE", options: {}});
-  yield onCanceled;
+function testESC(swatch, dropper) {
+  let deferred = defer();
 
-  let color = swatch.style.backgroundColor;
-  is(color, ORIGINAL_COLOR, "swatch didn't change after pressing ESC");
+  dropper.once("destroy", () => {
+    let color = swatch.style.backgroundColor;
+    is(color, ORIGINAL_COLOR, "swatch didn't change after pressing ESC");
+
+    deferred.resolve();
+  });
+
+  inspectPage(dropper, false).then(pressESC);
+
+  return deferred.promise;
 }
 
-function* testSelect(view, swatch, inspector, testActor) {
-  info("Click at x:10px y:10px");
-  let onPicked = new Promise(resolve => {
-    inspector.inspector.once("color-picked", resolve);
-  });
-  // The change to the content is done async after rule view change
+function* testSelect(view, swatch, dropper) {
+  let onDestroyed = dropper.once("destroy");
+  // the change to the content is done async after rule view change
   let onRuleViewChanged = view.once("ruleview-changed");
 
-  yield testActor.synthesizeMouse({selector: "html", x: 10, y: 10,
-                                   options: {type: "mousemove"}});
-  yield testActor.synthesizeMouse({selector: "html", x: 10, y: 10,
-                                   options: {type: "mousedown"}});
-  yield testActor.synthesizeMouse({selector: "html", x: 10, y: 10,
-                                   options: {type: "mouseup"}});
+  inspectPage(dropper);
 
-  yield onPicked;
+  yield onDestroyed;
   yield onRuleViewChanged;
 
   let color = swatch.style.backgroundColor;
@@ -99,18 +108,81 @@ function* testSelect(view, swatch, inspector, testActor) {
      "div's color set to body color after dropper");
 }
 
-function* openEyedropper(view, swatch) {
+function clearTelemetry() {
+  for (let histogramId in EXPECTED_TELEMETRY) {
+    let histogram = Services.telemetry.getHistogramById(histogramId);
+    histogram.clear();
+  }
+}
+
+function checkTelemetry() {
+  for (let histogramId in EXPECTED_TELEMETRY) {
+    let expected = EXPECTED_TELEMETRY[histogramId];
+    let histogram = Services.telemetry.getHistogramById(histogramId);
+    let snapshot = histogram.snapshot();
+
+    is(snapshot.sum, expected,
+      "eyedropper telemetry value correct for " + histogramId);
+  }
+}
+
+/* Helpers */
+
+function openEyedropper(view, swatch) {
+  let deferred = defer();
+
   let tooltip = view.tooltips.colorPicker.tooltip;
 
-  info("Click on the swatch");
-  let onShown = tooltip.once("shown");
+  tooltip.once("shown", () => {
+    let dropperButton = tooltip.doc.querySelector("#eyedropper-button");
+
+    tooltip.once("eyedropper-opened", (event, dropper) => {
+      deferred.resolve(dropper);
+    });
+    dropperButton.click();
+  });
+
   swatch.click();
-  yield onShown;
+  return deferred.promise;
+}
 
-  let dropperButton = tooltip.doc.querySelector("#eyedropper-button");
+function inspectPage(dropper, click = true) {
+  let target = document.documentElement;
+  let win = window;
 
-  info("Click on the eyedropper icon");
-  let onOpened = tooltip.once("eyedropper-opened");
-  dropperButton.click();
-  yield onOpened;
+  // get location of the content, offset from browser window
+  let box = gBrowser.selectedBrowser.getBoundingClientRect();
+  let x = box.left + 1;
+  let y = box.top + 1;
+
+  return dropperStarted(dropper).then(() => {
+    EventUtils.synthesizeMouse(target, x, y, { type: "mousemove" }, win);
+
+    return dropperLoaded(dropper).then(() => {
+      EventUtils.synthesizeMouse(target, x + 10, y + 10,
+        { type: "mousemove" }, win);
+
+      if (click) {
+        EventUtils.synthesizeMouse(target, x + 10, y + 10, {}, win);
+      }
+    });
+  });
+}
+
+function dropperStarted(dropper) {
+  if (dropper.isStarted) {
+    return promise.resolve();
+  }
+  return dropper.once("started");
+}
+
+function dropperLoaded(dropper) {
+  if (dropper.loaded) {
+    return promise.resolve();
+  }
+  return dropper.once("load");
+}
+
+function pressESC() {
+  EventUtils.synthesizeKey("VK_ESCAPE", { });
 }

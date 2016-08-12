@@ -29,14 +29,13 @@ function CssDocsTooltip(toolbox) {
     stylesheet: "chrome://devtools/content/shared/widgets/mdn-docs.css",
   });
   this.widget = this.setMdnDocsContent();
-  this._onVisitLink = this._onVisitLink.bind(this);
-  this.widget.on("visitlink", this._onVisitLink);
 
   // Initialize keyboard shortcuts
   this.shortcuts = new KeyShortcuts({ window: toolbox.doc.defaultView });
   this._onShortcut = this._onShortcut.bind(this);
 
   this.shortcuts.on("Escape", this._onShortcut);
+  this.shortcuts.on("Return", this._onShortcut);
 }
 
 module.exports.CssDocsTooltip = CssDocsTooltip;
@@ -61,13 +60,17 @@ CssDocsTooltip.prototype = {
     if (!this.tooltip.isVisible()) {
       return;
     }
-    event.stopPropagation();
-    event.preventDefault();
-    this.hide();
-  },
 
-  _onVisitLink: function () {
-    this.hide();
+    event.stopPropagation();
+    if (shortcut === "Return") {
+      // If user is pressing return, do not prevent default and delay hiding the tooltip
+      // in case the focus is on the "Visit MDN page" link.
+      this.tooltip.doc.defaultView.setTimeout(this.hide.bind(this), 0);
+    } else {
+      // For any other key, preventDefault() and hide straight away.
+      event.preventDefault();
+      this.hide();
+    }
   },
 
   /**
@@ -86,9 +89,6 @@ CssDocsTooltip.prototype = {
   },
 
   destroy: function () {
-    this.widget.off("visitlink", this._onVisitLink);
-    this.widget.destroy();
-
     this.shortcuts.destroy();
     this.tooltip.destroy();
   }

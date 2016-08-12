@@ -49,8 +49,6 @@ module.exports = createClass({
       dom.button({
         id: "global-touch-simulation-button",
         className: touchButtonClass,
-        title: (touchSimulation.enabled ?
-          getStr("responsive.disableTouch") : getStr("responsive.enableTouch")),
         onClick: () => onUpdateTouchSimulation(!touchSimulation.enabled),
       }),
       dom.button({

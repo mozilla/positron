@@ -99,8 +99,8 @@ public:
   virtual nsSize GetXULMaxSize(nsBoxLayoutState& aBoxLayoutState) override;
 
   virtual void Reflow(nsPresContext* aPresContext,
-                      ReflowOutput& aDesiredSize,
-                      const ReflowInput& aReflowInput,
+                      nsHTMLReflowMetrics& aDesiredSize,
+                      const nsHTMLReflowState& aReflowState,
                       nsReflowStatus& aStatus) override;
 
   virtual void DestroyFrom(nsIFrame* aDestructRoot) override;

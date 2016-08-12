@@ -18,10 +18,10 @@ using namespace mozilla::dom;
 
 nsTraversal::nsTraversal(nsINode *aRoot,
                          uint32_t aWhatToShow,
-                         NodeFilterHolder aFilter) :
+                         const NodeFilterHolder &aFilter) :
     mRoot(aRoot),
     mWhatToShow(aWhatToShow),
-    mFilter(Move(aFilter)),
+    mFilter(aFilter),
     mInAcceptNode(false)
 {
     NS_ASSERTION(aRoot, "invalid root in call to nsTraversal constructor");

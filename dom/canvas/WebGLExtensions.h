@@ -7,7 +7,9 @@
 #define WEBGL_EXTENSIONS_H_
 
 #include "mozilla/AlreadyAddRefed.h"
+#include "mozilla/Attributes.h"
 #include "nsWrapperCache.h"
+
 #include "WebGLObjectModel.h"
 #include "WebGLTypes.h"
 

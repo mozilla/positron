@@ -55,7 +55,6 @@ HTMLTextAreaElement::HTMLTextAreaElement(already_AddRefed<mozilla::dom::NodeInfo
                                          FromParser aFromParser)
   : nsGenericHTMLFormElementWithState(aNodeInfo),
     mValueChanged(false),
-    mLastValueChangeWasInteractive(false),
     mHandlingSelect(false),
     mDoneAddingChildren(!aFromParser),
     mInhibitStateRestoration(!!(aFromParser & FROM_PARSER_FRAGMENT)),
@@ -672,7 +671,7 @@ HTMLTextAreaElement::GetSelectionStart(ErrorResult& aError)
   nsresult rv = GetSelectionRange(&selStart, &selEnd);
 
   if (NS_FAILED(rv) && mState.IsSelectionCached()) {
-    return mState.GetSelectionProperties().GetStart();
+    return mState.GetSelectionProperties().mStart;
   }
   if (NS_FAILED(rv)) {
     aError.Throw(rv);
@@ -692,7 +691,7 @@ void
 HTMLTextAreaElement::SetSelectionStart(uint32_t aSelectionStart, ErrorResult& aError)
 {
   if (mState.IsSelectionCached()) {
-    mState.GetSelectionProperties().SetStart(aSelectionStart);
+    mState.GetSelectionProperties().mStart = aSelectionStart;
     return;
   }
 
@@ -735,7 +734,7 @@ HTMLTextAreaElement::GetSelectionEnd(ErrorResult& aError)
   nsresult rv = GetSelectionRange(&selStart, &selEnd);
 
   if (NS_FAILED(rv) && mState.IsSelectionCached()) {
-    return mState.GetSelectionProperties().GetEnd();
+    return mState.GetSelectionProperties().mEnd;
   }
   if (NS_FAILED(rv)) {
     aError.Throw(rv);
@@ -755,7 +754,7 @@ void
 HTMLTextAreaElement::SetSelectionEnd(uint32_t aSelectionEnd, ErrorResult& aError)
 {
   if (mState.IsSelectionCached()) {
-    mState.GetSelectionProperties().SetEnd(aSelectionEnd);
+    mState.GetSelectionProperties().mEnd = aSelectionEnd;
     return;
   }
 
@@ -832,7 +831,7 @@ HTMLTextAreaElement::GetSelectionDirection(nsAString& aDirection, ErrorResult& a
 
   if (NS_FAILED(rv)) {
     if (mState.IsSelectionCached()) {
-      DirectionToName(mState.GetSelectionProperties().GetDirection(), aDirection);
+      DirectionToName(mState.GetSelectionProperties().mDirection, aDirection);
       return;
     }
     aError.Throw(rv);
@@ -857,7 +856,7 @@ HTMLTextAreaElement::SetSelectionDirection(const nsAString& aDirection, ErrorRes
     } else if (aDirection.EqualsLiteral("backward")) {
       dir = nsITextControlFrame::eBackward;
     }
-    mState.GetSelectionProperties().SetDirection(dir);
+    mState.GetSelectionProperties().mDirection = dir;
     return;
   }
 
@@ -924,8 +923,8 @@ HTMLTextAreaElement::SetRangeText(const nsAString& aReplacement,
   aRv = GetSelectionRange(&start, &end);
   if (aRv.Failed()) {
     if (mState.IsSelectionCached()) {
-      start = mState.GetSelectionProperties().GetStart();
-      end = mState.GetSelectionProperties().GetEnd();
+      start = mState.GetSelectionProperties().mStart;
+      end = mState.GetSelectionProperties().mEnd;
       aRv = NS_OK;
     }
   }
@@ -962,8 +961,8 @@ HTMLTextAreaElement::SetRangeText(const nsAString& aReplacement,
     aRv = GetSelectionRange(&aSelectionStart, &aSelectionEnd);
     if (aRv.Failed()) {
       if (mState.IsSelectionCached()) {
-        aSelectionStart = mState.GetSelectionProperties().GetStart();
-        aSelectionEnd = mState.GetSelectionProperties().GetEnd();
+        aSelectionStart = mState.GetSelectionProperties().mStart;
+        aSelectionEnd = mState.GetSelectionProperties().mEnd;
         aRv = NS_OK;
       }
     }
@@ -1345,9 +1344,7 @@ HTMLTextAreaElement::SetCustomValidity(const nsAString& aError)
 bool
 HTMLTextAreaElement::IsTooLong()
 {
-  if (!mValueChanged ||
-      !mLastValueChangeWasInteractive ||
-      !HasAttr(kNameSpaceID_None, nsGkAtoms::maxlength)) {
+  if (!HasAttr(kNameSpaceID_None, nsGkAtoms::maxlength) || !mValueChanged) {
     return false;
   }
 
@@ -1378,7 +1375,10 @@ HTMLTextAreaElement::IsValueMissing() const
 void
 HTMLTextAreaElement::UpdateTooLongValidityState()
 {
+  // TODO: this code will be re-enabled with bug 613016 and bug 613019.
+#if 0
   SetValidityState(VALIDITY_STATE_TOO_LONG, IsTooLong());
+#endif
 }
 
 void
@@ -1525,10 +1525,8 @@ HTMLTextAreaElement::InitializeKeyboardEventListeners()
 }
 
 NS_IMETHODIMP_(void)
-HTMLTextAreaElement::OnValueChanged(bool aNotify, bool aWasInteractiveUserChange)
+HTMLTextAreaElement::OnValueChanged(bool aNotify)
 {
-  mLastValueChangeWasInteractive = aWasInteractiveUserChange;
-
   // Update the validity state
   bool validBefore = IsValid();
   UpdateTooLongValidityState();

@@ -64,6 +64,7 @@ var kVersion = 6;
  * version the button is removed in as the value.  e.g. "pocket-button": 5
  */
 var ObsoleteBuiltinButtons = {
+  "loop-button": 5,
   "pocket-button": 6
 };
 
@@ -237,6 +238,7 @@ var CustomizableUIInternal = {
       "bookmarks-menu-button",
       "downloads-button",
       "home-button",
+      "loop-button",
     ];
 
     if (AppConstants.MOZ_DEV_EDITION) {
@@ -273,12 +275,14 @@ var CustomizableUIInternal = {
           if (AppConstants.MENUBAR_CAN_AUTOHIDE) {
             if (AppConstants.platform == "linux") {
               return true;
+            } else {
+              // This is duplicated logic from /browser/base/jar.mn
+              // for win6BrowserOverlay.xul.
+              return AppConstants.isPlatformAndVersionAtLeast("win", 6);
             }
-            // This is duplicated logic from /browser/base/jar.mn
-            // for win6BrowserOverlay.xul.
-            return AppConstants.isPlatformAndVersionAtLeast("win", 6);
+          } else {
+            return false;
           }
-          return false;
         }
       }, true);
     }
@@ -722,12 +726,11 @@ var CustomizableUIInternal = {
           continue;
         }
 
-        let widget = null;
         // If the placements have items in them which are (now) no longer removable,
         // we shouldn't be moving them:
         if (provider == CustomizableUI.PROVIDER_API) {
-          widget = gPalette.get(id);
-          if (!widget.removable && aArea != widget.defaultArea) {
+          let widgetInfo = gPalette.get(id);
+          if (!widgetInfo.removable && aArea != widgetInfo.defaultArea) {
             placementsToRemove.add(id);
             continue;
           }
@@ -737,8 +740,11 @@ var CustomizableUIInternal = {
           continue;
         } // Special widgets are always removable, so no need to check them
 
-        if (inPrivateWindow && widget && !widget.showInPrivateBrowsing) {
-          continue;
+        if (inPrivateWindow && provider == CustomizableUI.PROVIDER_API) {
+          let widget = gPalette.get(id);
+          if (!widget.showInPrivateBrowsing && inPrivateWindow) {
+            continue;
+          }
         }
 
         this.ensureButtonContextMenu(node, aAreaNode);
@@ -750,10 +756,6 @@ var CustomizableUIInternal = {
           }
         }
 
-        // This needs updating in case we're resetting / undoing a reset.
-        if (widget) {
-          widget.currentArea = aArea;
-        }
         this.insertWidgetBefore(node, currentNode, container, aArea);
         if (gResetting) {
           this.notifyListeners("onWidgetReset", node, container);
@@ -1444,7 +1446,7 @@ var CustomizableUIInternal = {
           aFormatArgs.length) || def;
       }
       return gWidgetsBundle.GetStringFromName(name) || def;
-    } catch (ex) {
+    } catch(ex) {
       // If an empty string was explicitly passed, treat it as an actual
       // value rather than a missing property.
       if (!def && (name != "" || kReqStringProps.includes(aProp))) {
@@ -1515,7 +1517,7 @@ var CustomizableUIInternal = {
     if (aWidget.onClick) {
       try {
         aWidget.onClick.call(null, aEvent);
-      } catch (e) {
+      } catch(e) {
         Cu.reportError(e);
       }
     } else {
@@ -1949,7 +1951,7 @@ var CustomizableUIInternal = {
       if (typeof gSavedState != "object" || gSavedState === null) {
         throw "Invalid saved state";
       }
-    } catch (e) {
+    } catch(e) {
       Services.prefs.clearUserPref(kPrefCustomizationState);
       gSavedState = {};
       log.debug("Error loading saved UI customization state, falling back to defaults.");
@@ -2529,7 +2531,7 @@ var CustomizableUIInternal = {
       gUIStateBeforeReset.drawInTitlebar = Services.prefs.getBoolPref(kPrefDrawInTitlebar);
       gUIStateBeforeReset.uiCustomizationState = Services.prefs.getCharPref(kPrefCustomizationState);
       gUIStateBeforeReset.currentTheme = LightweightThemeManager.currentTheme;
-    } catch (e) { }
+    } catch(e) { }
 
     this._resetExtraToolbars();
 
@@ -2791,7 +2793,7 @@ var CustomizableUIInternal = {
       return false;
     }
 
-    if (LightweightThemeManager.currentTheme) {
+    if(LightweightThemeManager.currentTheme) {
       log.debug(LightweightThemeManager.currentTheme + " theme is non-default");
       return false;
     }
@@ -4090,7 +4092,7 @@ OverflowableToolbar.prototype = {
   },
 
   handleEvent: function(aEvent) {
-    switch (aEvent.type) {
+    switch(aEvent.type) {
       case "aftercustomization":
         this._enable();
         break;

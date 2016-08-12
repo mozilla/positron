@@ -182,10 +182,6 @@ protected:
         CheckedInt<uint32_t>(mStart) + mRects.Length();
       return endOffset.isValid();
     }
-    bool HasRects() const
-    {
-      return IsValid() && !mRects.IsEmpty();
-    }
     uint32_t StartOffset() const
     {
       NS_ASSERTION(IsValid(),

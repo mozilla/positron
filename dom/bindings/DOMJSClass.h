@@ -318,8 +318,7 @@ IsInterfacePrototype(DOMObjectType type)
   return type == eInterfacePrototype || type == eGlobalInterfacePrototype;
 }
 
-typedef JSObject* (*AssociatedGlobalGetter)(JSContext* aCx,
-                                            JS::Handle<JSObject*> aObj);
+typedef JSObject* (*ParentGetter)(JSContext* aCx, JS::Handle<JSObject*> aObj);
 
 typedef JSObject* (*ProtoGetter)(JSContext* aCx);
 
@@ -352,10 +351,7 @@ struct DOMJSClass
 
   const NativePropertyHooks* mNativeHooks;
 
-  // A callback to find the associated global for our C++ object.  Note that
-  // this is used in cases when that global is _changing_, so it will not match
-  // the global of the JSObject* passed in to this function!
-  AssociatedGlobalGetter mGetAssociatedGlobal;
+  ParentGetter mGetParent;
   ProtoHandleGetter mGetProto;
 
   // This stores the CC participant for the native, null if this class does not
@@ -386,14 +382,9 @@ struct DOMIfaceAndProtoJSClass
 
   // Either eInterface, eInterfacePrototype, eGlobalInterfacePrototype or
   // eNamedPropertiesObject.
-  DOMObjectType mType; // uint8_t
+  DOMObjectType mType;
 
-  // Boolean indicating whether this object wants a @@hasInstance property
-  // pointing to InterfaceHasInstance defined on it.  Only ever true for the
-  // eInterface case.
-  bool wantsInterfaceHasInstance;
-
-  const prototypes::ID mPrototypeID; // uint16_t
+  const prototypes::ID mPrototypeID;
   const uint32_t mDepth;
 
   const NativePropertyHooks* mNativeHooks;

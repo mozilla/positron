@@ -13,6 +13,9 @@
 #include "nsXPCOMPrivate.h"
 #include "nsIIOService.h"
 #include "nsIDirectoryService.h"
+#ifdef ACCESSIBILITY
+#include "nsIAccessibilityService.h"
+#endif
 #include "nsIChromeRegistry.h"
 #include "nsIStringBundle.h"
 #include "nsIToolkitChromeRegistry.h"

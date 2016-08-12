@@ -557,8 +557,7 @@ nsFormFillController::OnSearchComplete()
 }
 
 NS_IMETHODIMP
-nsFormFillController::OnTextEntered(nsIDOMEvent* aEvent,
-                                    bool* aPrevent)
+nsFormFillController::OnTextEntered(bool* aPrevent)
 {
   NS_ENSURE_ARG(aPrevent);
   NS_ENSURE_TRUE(mFocusedInput, NS_OK);
@@ -1009,7 +1008,7 @@ nsFormFillController::KeyPress(nsIDOMEvent* aEvent)
     cancel = false;
     break;
   case nsIDOMKeyEvent::DOM_VK_RETURN:
-    mController->HandleEnter(false, aEvent, &cancel);
+    mController->HandleEnter(false, &cancel);
     break;
   }
 

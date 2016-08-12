@@ -35,6 +35,9 @@
 #include "nsStreamUtils.h"
 #include "nsString.h"
 #include "nsThreadUtils.h"
+#ifdef MOZ_NUWA_PROCESS
+#include "ipc/Nuwa.h"
+#endif
 #include "mozilla/Logging.h"
 
 #include "mozilla/Preferences.h"
@@ -542,6 +545,23 @@ Predictor::GetInterface(const nsIID &iid, void **result)
   return QueryInterface(iid, result);
 }
 
+#ifdef MOZ_NUWA_PROCESS
+namespace {
+class NuwaMarkPredictorThreadRunner : public Runnable
+{
+  NS_IMETHODIMP Run() override
+  {
+    MOZ_ASSERT(!NS_IsMainThread());
+
+    if (IsNuwaProcess()) {
+      NuwaMarkCurrentThread(nullptr, nullptr);
+    }
+    return NS_OK;
+  }
+};
+} // namespace
+#endif
+
 // Predictor::nsICacheEntryMetaDataVisitor
 
 #define SEEN_META_DATA "predictor::seen"
@@ -749,6 +769,11 @@ Predictor::MaybeCleanupOldDBFiles()
   nsCOMPtr<nsIThread> ioThread;
   rv = NS_NewNamedThread("NetPredictClean", getter_AddRefs(ioThread));
   RETURN_IF_FAILED(rv);
+
+#ifdef MOZ_NUWA_PROCESS
+  nsCOMPtr<nsIRunnable> nuwaRunner = new NuwaMarkPredictorThreadRunner();
+  ioThread->Dispatch(nuwaRunner, NS_DISPATCH_NORMAL);
+#endif
 
   RefPtr<PredictorOldCleanupRunner> runner =
     new PredictorOldCleanupRunner(ioThread, dbFile);
@@ -2404,16 +2429,6 @@ Predictor::UpdateCacheability(nsIURI *sourceURI, nsIURI *targetURI,
 
   if (lci && lci->IsPrivate()) {
     PREDICTOR_LOG(("Predictor::UpdateCacheability in PB mode - ignoring"));
-    return;
-  }
-
-  if (!sourceURI || !targetURI) {
-    PREDICTOR_LOG(("Predictor::UpdateCacheability missing source or target uri"));
-    return;
-  }
-
-  if (!IsNullOrHttp(sourceURI) || !IsNullOrHttp(targetURI)) {
-    PREDICTOR_LOG(("Predictor::UpdateCacheability non-http(s) uri"));
     return;
   }
 

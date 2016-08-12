@@ -314,13 +314,13 @@ nsRangeFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
 
 void
 nsRangeFrame::Reflow(nsPresContext*           aPresContext,
-                     ReflowOutput&     aDesiredSize,
-                     const ReflowInput& aReflowInput,
+                     nsHTMLReflowMetrics&     aDesiredSize,
+                     const nsHTMLReflowState& aReflowState,
                      nsReflowStatus&          aStatus)
 {
   MarkInReflow();
   DO_GLOBAL_REFLOW_COUNT("nsRangeFrame");
-  DISPLAY_REFLOW(aPresContext, this, aReflowInput, aDesiredSize, aStatus);
+  DISPLAY_REFLOW(aPresContext, this, aReflowState, aDesiredSize, aStatus);
 
   NS_ASSERTION(mTrackDiv, "::-moz-range-track div must exist!");
   NS_ASSERTION(mProgressDiv, "::-moz-range-progress div must exist!");
@@ -333,20 +333,20 @@ nsRangeFrame::Reflow(nsPresContext*           aPresContext,
     nsFormControlFrame::RegUnRegAccessKey(this, true);
   }
 
-  WritingMode wm = aReflowInput.GetWritingMode();
-  nscoord computedBSize = aReflowInput.ComputedBSize();
+  WritingMode wm = aReflowState.GetWritingMode();
+  nscoord computedBSize = aReflowState.ComputedBSize();
   if (computedBSize == NS_AUTOHEIGHT) {
     computedBSize = 0;
   }
   LogicalSize
     finalSize(wm,
-              aReflowInput.ComputedISize() +
-              aReflowInput.ComputedLogicalBorderPadding().IStartEnd(wm),
+              aReflowState.ComputedISize() +
+              aReflowState.ComputedLogicalBorderPadding().IStartEnd(wm),
               computedBSize +
-              aReflowInput.ComputedLogicalBorderPadding().BStartEnd(wm));
+              aReflowState.ComputedLogicalBorderPadding().BStartEnd(wm));
   aDesiredSize.SetSize(wm, finalSize);
 
-  ReflowAnonymousContent(aPresContext, aDesiredSize, aReflowInput);
+  ReflowAnonymousContent(aPresContext, aDesiredSize, aReflowState);
 
   aDesiredSize.SetOverflowAreasToDesiredBounds();
 
@@ -369,18 +369,18 @@ nsRangeFrame::Reflow(nsPresContext*           aPresContext,
 
   aStatus = NS_FRAME_COMPLETE;
 
-  NS_FRAME_SET_TRUNCATION(aStatus, aReflowInput, aDesiredSize);
+  NS_FRAME_SET_TRUNCATION(aStatus, aReflowState, aDesiredSize);
 }
 
 void
 nsRangeFrame::ReflowAnonymousContent(nsPresContext*           aPresContext,
-                                     ReflowOutput&     aDesiredSize,
-                                     const ReflowInput& aReflowInput)
+                                     nsHTMLReflowMetrics&     aDesiredSize,
+                                     const nsHTMLReflowState& aReflowState)
 {
   // The width/height of our content box, which is the available width/height
   // for our anonymous content:
-  nscoord rangeFrameContentBoxWidth = aReflowInput.ComputedWidth();
-  nscoord rangeFrameContentBoxHeight = aReflowInput.ComputedHeight();
+  nscoord rangeFrameContentBoxWidth = aReflowState.ComputedWidth();
+  nscoord rangeFrameContentBoxHeight = aReflowState.ComputedHeight();
   if (rangeFrameContentBoxHeight == NS_AUTOHEIGHT) {
     rangeFrameContentBoxHeight = 0;
   }
@@ -397,9 +397,9 @@ nsRangeFrame::ReflowAnonymousContent(nsPresContext*           aPresContext,
     // box.
 
     WritingMode wm = trackFrame->GetWritingMode();
-    LogicalSize availSize = aReflowInput.ComputedSize(wm);
+    LogicalSize availSize = aReflowState.ComputedSize(wm);
     availSize.BSize(wm) = NS_UNCONSTRAINEDSIZE;
-    ReflowInput trackReflowInput(aPresContext, aReflowInput,
+    nsHTMLReflowState trackReflowState(aPresContext, aReflowState,
                                        trackFrame, availSize);
 
     // Find the x/y position of the track frame such that it will be positioned
@@ -409,45 +409,45 @@ nsRangeFrame::ReflowAnonymousContent(nsPresContext*           aPresContext,
     nscoord trackY = rangeFrameContentBoxHeight / 2;
 
     // Account for the track's border and padding (we ignore its margin):
-    trackX -= trackReflowInput.ComputedPhysicalBorderPadding().left +
-                trackReflowInput.ComputedWidth() / 2;
-    trackY -= trackReflowInput.ComputedPhysicalBorderPadding().top +
-                trackReflowInput.ComputedHeight() / 2;
+    trackX -= trackReflowState.ComputedPhysicalBorderPadding().left +
+                trackReflowState.ComputedWidth() / 2;
+    trackY -= trackReflowState.ComputedPhysicalBorderPadding().top +
+                trackReflowState.ComputedHeight() / 2;
 
     // Make relative to our border box instead of our content box:
-    trackX += aReflowInput.ComputedPhysicalBorderPadding().left;
-    trackY += aReflowInput.ComputedPhysicalBorderPadding().top;
+    trackX += aReflowState.ComputedPhysicalBorderPadding().left;
+    trackY += aReflowState.ComputedPhysicalBorderPadding().top;
 
     nsReflowStatus frameStatus;
-    ReflowOutput trackDesiredSize(aReflowInput);
+    nsHTMLReflowMetrics trackDesiredSize(aReflowState);
     ReflowChild(trackFrame, aPresContext, trackDesiredSize,
-                trackReflowInput, trackX, trackY, 0, frameStatus);
+                trackReflowState, trackX, trackY, 0, frameStatus);
     MOZ_ASSERT(NS_FRAME_IS_FULLY_COMPLETE(frameStatus),
                "We gave our child unconstrained height, so it should be complete");
     FinishReflowChild(trackFrame, aPresContext, trackDesiredSize,
-                      &trackReflowInput, trackX, trackY, 0);
+                      &trackReflowState, trackX, trackY, 0);
   }
 
   nsIFrame* thumbFrame = mThumbDiv->GetPrimaryFrame();
 
   if (thumbFrame) { // display:none?
     WritingMode wm = thumbFrame->GetWritingMode();
-    LogicalSize availSize = aReflowInput.ComputedSize(wm);
+    LogicalSize availSize = aReflowState.ComputedSize(wm);
     availSize.BSize(wm) = NS_UNCONSTRAINEDSIZE;
-    ReflowInput thumbReflowInput(aPresContext, aReflowInput,
+    nsHTMLReflowState thumbReflowState(aPresContext, aReflowState,
                                        thumbFrame, availSize);
 
     // Where we position the thumb depends on its size, so we first reflow
     // the thumb at {0,0} to obtain its size, then position it afterwards.
 
     nsReflowStatus frameStatus;
-    ReflowOutput thumbDesiredSize(aReflowInput);
+    nsHTMLReflowMetrics thumbDesiredSize(aReflowState);
     ReflowChild(thumbFrame, aPresContext, thumbDesiredSize,
-                thumbReflowInput, 0, 0, 0, frameStatus);
+                thumbReflowState, 0, 0, 0, frameStatus);
     MOZ_ASSERT(NS_FRAME_IS_FULLY_COMPLETE(frameStatus),
                "We gave our child unconstrained height, so it should be complete");
     FinishReflowChild(thumbFrame, aPresContext, thumbDesiredSize,
-                      &thumbReflowInput, 0, 0, 0);
+                      &thumbReflowState, 0, 0, 0);
     DoUpdateThumbPosition(thumbFrame, nsSize(aDesiredSize.Width(),
                                              aDesiredSize.Height()));
   }
@@ -456,9 +456,9 @@ nsRangeFrame::ReflowAnonymousContent(nsPresContext*           aPresContext,
 
   if (rangeProgressFrame) { // display:none?
     WritingMode wm = rangeProgressFrame->GetWritingMode();
-    LogicalSize availSize = aReflowInput.ComputedSize(wm);
+    LogicalSize availSize = aReflowState.ComputedSize(wm);
     availSize.BSize(wm) = NS_UNCONSTRAINEDSIZE;
-    ReflowInput progressReflowInput(aPresContext, aReflowInput,
+    nsHTMLReflowState progressReflowState(aPresContext, aReflowState,
                                           rangeProgressFrame, availSize);
 
     // We first reflow the range-progress frame at {0,0} to obtain its
@@ -466,14 +466,14 @@ nsRangeFrame::ReflowAnonymousContent(nsPresContext*           aPresContext,
     // ends at the thumb.
 
     nsReflowStatus frameStatus;
-    ReflowOutput progressDesiredSize(aReflowInput);
+    nsHTMLReflowMetrics progressDesiredSize(aReflowState);
     ReflowChild(rangeProgressFrame, aPresContext,
-                progressDesiredSize, progressReflowInput, 0, 0,
+                progressDesiredSize, progressReflowState, 0, 0,
                 0, frameStatus);
     MOZ_ASSERT(NS_FRAME_IS_FULLY_COMPLETE(frameStatus),
                "We gave our child unconstrained height, so it should be complete");
     FinishReflowChild(rangeProgressFrame, aPresContext,
-                      progressDesiredSize, &progressReflowInput, 0, 0, 0);
+                      progressDesiredSize, &progressReflowState, 0, 0, 0);
     DoUpdateRangeProgressFrame(rangeProgressFrame, nsSize(aDesiredSize.Width(),
                                                           aDesiredSize.Height()));
   }

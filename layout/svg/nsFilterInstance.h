@@ -238,16 +238,14 @@ private:
    * filter primitives and their connections. This populates
    * mPrimitiveDescriptions and mInputImages.
    */
-  nsresult BuildPrimitives(const nsTArray<nsStyleFilter>& aFilterChain,
-                           nsIFrame* aTargetFrame);
+  nsresult BuildPrimitives(const nsTArray<nsStyleFilter>& aFilterChain);
 
   /**
    * Add to the list of FilterPrimitiveDescriptions for a particular SVG
    * reference filter or CSS filter. This populates mPrimitiveDescrs and
    * mInputImages.
    */
-  nsresult BuildPrimitivesForFilter(const nsStyleFilter& aFilter,
-                                    nsIFrame* aTargetFrame);
+  nsresult BuildPrimitivesForFilter(const nsStyleFilter& aFilter);
 
   /**
    * Computes the filter space bounds of the areas that we actually *need* from

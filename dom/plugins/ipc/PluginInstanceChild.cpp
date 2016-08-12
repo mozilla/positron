@@ -3529,7 +3529,7 @@ PluginInstanceChild::EnsureCurrentBuffer(void)
         if (mDrawingModel == NPDrawingModelCoreGraphics) {
             if (!mCGLayer) {
                 caLayer = mozilla::plugins::PluginUtilsOSX::GetCGLayer(CallCGDraw,
-                                                                       this,
+                                                                       this, false,
                                                                        mContentsScaleFactor);
 
                 if (!caLayer) {

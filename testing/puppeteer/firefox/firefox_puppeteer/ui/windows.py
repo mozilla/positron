@@ -398,7 +398,7 @@ class BaseWindow(BaseLib):
          Defaults to `False`.
         """
 
-        platform = self.marionette.session_capabilities['platformName']
+        platform = self.marionette.session_capabilities['platformName'].lower()
 
         keymap = {
             'accel': Keys.META if platform == 'darwin' else Keys.CONTROL,

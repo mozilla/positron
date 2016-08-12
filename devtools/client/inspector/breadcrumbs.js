@@ -6,11 +6,11 @@
 
 "use strict";
 
-/* eslint-disable mozilla/reject-some-requires */
 const {Ci} = require("chrome");
-/* eslint-enable mozilla/reject-some-requires */
 const Services = require("Services");
 const promise = require("promise");
+const FocusManager = Services.focus;
+const {waitForTick} = require("devtools/shared/DevToolsUtils");
 
 const ELLIPSIS = Services.prefs.getComplexValue(
     "intl.ellipsis",
@@ -20,8 +20,10 @@ const MAX_LABEL_LENGTH = 40;
 const NS_XHTML = "http://www.w3.org/1999/xhtml";
 const SCROLL_REPEAT_MS = 100;
 
-const EventEmitter = require("devtools/shared/event-emitter");
-const {KeyShortcuts} = require("devtools/client/shared/key-shortcuts");
+loader.lazyRequireGetter(this, "EventEmitter",
+                         "devtools/shared/event-emitter");
+loader.lazyRequireGetter(this, "KeyShortcuts",
+                         "devtools/client/shared/key-shortcuts", true);
 
 /**
  * Component to replicate functionality of XUL arrowscrollbox
@@ -347,7 +349,7 @@ HTMLBreadcrumbs.prototype = {
 
     this.outer.addEventListener("click", this, true);
     this.outer.addEventListener("mouseover", this, true);
-    this.outer.addEventListener("mouseout", this, true);
+    this.outer.addEventListener("mouseleave", this, true);
     this.outer.addEventListener("focus", this, true);
 
     this.shortcuts = new KeyShortcuts({ window: this.chromeWin, target: this.outer });
@@ -355,15 +357,14 @@ HTMLBreadcrumbs.prototype = {
 
     this.shortcuts.on("Right", this.handleShortcut);
     this.shortcuts.on("Left", this.handleShortcut);
+    this.shortcuts.on("Tab", this.handleShortcut);
+    this.shortcuts.on("Shift+Tab", this.handleShortcut);
 
     // We will save a list of already displayed nodes in this array.
     this.nodeHierarchy = [];
 
     // Last selected node in nodeHierarchy.
     this.currentIndex = -1;
-
-    // Used to build a unique breadcrumb button Id.
-    this.breadcrumbsWidgetItemId = 0;
 
     this.update = this.update.bind(this);
     this.updateSelectors = this.updateSelectors.bind(this);
@@ -479,26 +480,28 @@ HTMLBreadcrumbs.prototype = {
       this.handleClick(event);
     } else if (event.type == "mouseover") {
       this.handleMouseOver(event);
-    } else if (event.type == "mouseout") {
-      this.handleMouseOut(event);
+    } else if (event.type == "mouseleave") {
+      this.handleMouseLeave(event);
     } else if (event.type == "focus") {
       this.handleFocus(event);
     }
   },
 
   /**
-   * Focus event handler. When breadcrumbs container gets focus,
-   * aria-activedescendant needs to be updated to currently selected
-   * breadcrumb. Ensures that the focus stays on the container at all times.
+   * Focus event handler. When breadcrumbs container gets focus, if there is an
+   * already selected breadcrumb, move focus to it.
    * @param {DOMEvent} event.
    */
   handleFocus: function (event) {
-    event.stopPropagation();
-
-    this.outer.setAttribute("aria-activedescendant",
-      this.nodeHierarchy[this.currentIndex].button.id);
-
-    this.outer.focus();
+    let control = this.container.querySelector(
+      ".breadcrumbs-widget-item[checked]");
+    if (!this.suspendFocus && control && control !== event.target) {
+      // If we already have a selected breadcrumb and focus target is not it,
+      // move focus to selected breadcrumb
+      event.preventDefault();
+      control.focus();
+    }
+    this.suspendFocus = false;
   },
 
   /**
@@ -506,6 +509,10 @@ HTMLBreadcrumbs.prototype = {
    * @param {DOMEvent} event.
    */
   handleClick: function (event) {
+    // When clicking a button temporarily suspend the behaviour that refocuses
+    // the currently selected button, to prevent flicking back to that button
+    // See Bug 1272011
+    this.suspendFocus = true;
     let target = event.originalTarget;
     if (target.tagName == "button") {
       target.onBreadcrumbsClick();
@@ -524,10 +531,10 @@ HTMLBreadcrumbs.prototype = {
   },
 
   /**
-   * On mouse out, make sure to unhighlight.
+   * On mouse leave, make sure to unhighlight.
    * @param {DOMEvent} event.
    */
-  handleMouseOut: function (event) {
+  handleMouseLeave: function (event) {
     this.inspector.toolbox.highlighterUtils.unhighlight();
   },
 
@@ -548,17 +555,28 @@ HTMLBreadcrumbs.prototype = {
     event.stopPropagation();
 
     this.keyPromise = (this.keyPromise || promise.resolve(null)).then(() => {
-      let currentnode;
       if (name === "Left" && this.currentIndex != 0) {
-        currentnode = this.nodeHierarchy[this.currentIndex - 1];
+        let node = this.nodeHierarchy[this.currentIndex - 1].node;
+        return this.selection.setNodeFront(node, "breadcrumbs");
       } else if (name === "Right" && this.currentIndex < this.nodeHierarchy.length - 1) {
-        currentnode = this.nodeHierarchy[this.currentIndex + 1];
-      } else {
-        return null;
+        let node = this.nodeHierarchy[this.currentIndex + 1].node;
+        return this.selection.setNodeFront(node, "breadcrumbs");
+      } else if (name === "Tab") {
+        // To move focus to next element following the breadcrumbs, relative
+        // element needs to be the last element in breadcrumbs' subtree.
+        let last = this.container.lastChild;
+        while (last && last.lastChild) {
+          last = last.lastChild;
+        }
+        FocusManager.moveFocus(this.chromeWin, last, FocusManager.MOVEFOCUS_FORWARD, 0);
+      } else if (name === "Shift+Tab") {
+        // Tabbing when breadcrumbs or its contents are focused should move focus to
+        // previous focusable element relative to breadcrumbs themselves.
+        let elt = this.container;
+        FocusManager.moveFocus(this.chromeWin, elt, FocusManager.MOVEFOCUS_BACKWARD, 0);
       }
 
-      this.outer.setAttribute("aria-activedescendant", currentnode.button.id);
-      return this.selection.setNodeFront(currentnode.node, "breadcrumbs");
+      return null;
     });
   },
 
@@ -573,7 +591,7 @@ HTMLBreadcrumbs.prototype = {
 
     this.container.removeEventListener("click", this, true);
     this.container.removeEventListener("mouseover", this, true);
-    this.container.removeEventListener("mouseout", this, true);
+    this.container.removeEventListener("mouseleave", this, true);
     this.container.removeEventListener("focus", this, true);
     this.shortcuts.destroy();
 
@@ -654,9 +672,7 @@ HTMLBreadcrumbs.prototype = {
     let button = this.chromeDoc.createElementNS(NS_XHTML, "button");
     button.appendChild(this.prettyPrintNodeAsXHTML(node));
     button.className = "breadcrumbs-widget-item";
-    button.id = "breadcrumbs-widget-item-" + this.breadcrumbsWidgetItemId++;
 
-    button.setAttribute("tabindex", "-1");
     button.setAttribute("title", this.prettyPrintNodeAsText(node));
 
     button.onclick = () => {
@@ -866,17 +882,10 @@ HTMLBreadcrumbs.prototype = {
     this.updateSelectors();
 
     // Make sure the selected node and its neighbours are visible.
-    setTimeout(() => {
-      try {
-        this.scroll();
-        this.inspector.emit("breadcrumbs-updated", this.selection.nodeFront);
-        doneUpdating();
-      } catch (e) {
-        // Only log this as an error if we haven't been destroyed in the meantime.
-        if (!this.isDestroyed) {
-          console.error(e);
-        }
-      }
-    }, 0);
+    waitForTick().then(() => {
+      this.scroll();
+      this.inspector.emit("breadcrumbs-updated", this.selection.nodeFront);
+      doneUpdating();
+    });
   }
 };

@@ -14,10 +14,10 @@
 #include "nsPrintfCString.h"
 #include "nsString.h"
 #include "nsWidgetsCID.h"
+#include "prprf.h"
 #include "nsThreadUtils.h"
 #include "nsNetCID.h"
 #include "nsQueryObject.h"
-#include "mozilla/Snprintf.h"
 
 //Interfaces needed to be included
 #include "nsIAppShell.h"
@@ -61,7 +61,6 @@
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/Event.h"
 #include "mozilla/dom/ScriptSettings.h"
-#include "mozilla/dom/TabParent.h"
 
 using namespace mozilla;
 using dom::AutoNoJSAPI;
@@ -1601,7 +1600,8 @@ NS_IMETHODIMP nsXULWindow::SavePersistentAttributes()
   // (only for size elements which are persisted)
   if ((mPersistentAttributesDirty & PAD_POSITION) && gotRestoredBounds) {
     if (persistString.Find("screenX") >= 0) {
-      snprintf_literal(sizeBuf, "%d", NSToIntRound(rect.x / posScale.scale));
+      PR_snprintf(sizeBuf, sizeof(sizeBuf), "%d",
+                  NSToIntRound(rect.x / posScale.scale));
       sizeString.AssignWithConversion(sizeBuf);
       docShellElement->SetAttribute(SCREENX_ATTRIBUTE, sizeString, rv);
       if (shouldPersist) {
@@ -1609,7 +1609,8 @@ NS_IMETHODIMP nsXULWindow::SavePersistentAttributes()
       }
     }
     if (persistString.Find("screenY") >= 0) {
-      snprintf_literal(sizeBuf, "%d", NSToIntRound(rect.y / posScale.scale));
+      PR_snprintf(sizeBuf, sizeof(sizeBuf), "%d",
+                  NSToIntRound(rect.y / posScale.scale));
       sizeString.AssignWithConversion(sizeBuf);
       docShellElement->SetAttribute(SCREENY_ATTRIBUTE, sizeString, rv);
       if (shouldPersist) {
@@ -1620,7 +1621,8 @@ NS_IMETHODIMP nsXULWindow::SavePersistentAttributes()
 
   if ((mPersistentAttributesDirty & PAD_SIZE) && gotRestoredBounds) {
     if (persistString.Find("width") >= 0) {
-      snprintf_literal(sizeBuf, "%d", NSToIntRound(rect.width / sizeScale.scale));
+      PR_snprintf(sizeBuf, sizeof(sizeBuf), "%d",
+                  NSToIntRound(rect.width / sizeScale.scale));
       sizeString.AssignWithConversion(sizeBuf);
       docShellElement->SetAttribute(WIDTH_ATTRIBUTE, sizeString, rv);
       if (shouldPersist) {
@@ -1628,7 +1630,8 @@ NS_IMETHODIMP nsXULWindow::SavePersistentAttributes()
       }
     }
     if (persistString.Find("height") >= 0) {
-      snprintf_literal(sizeBuf, "%d", NSToIntRound(rect.height / sizeScale.scale));
+      PR_snprintf(sizeBuf, sizeof(sizeBuf), "%d",
+                  NSToIntRound(rect.height / sizeScale.scale));
       sizeString.AssignWithConversion(sizeBuf);
       docShellElement->SetAttribute(HEIGHT_ATTRIBUTE, sizeString, rv);
       if (shouldPersist) {
@@ -1657,7 +1660,7 @@ NS_IMETHODIMP nsXULWindow::SavePersistentAttributes()
       nsCOMPtr<nsIWindowMediator> mediator(do_GetService(NS_WINDOWMEDIATOR_CONTRACTID));
       if (mediator) {
         mediator->GetZLevel(this, &zLevel);
-        snprintf_literal(sizeBuf, "%" PRIu32, zLevel);
+        PR_snprintf(sizeBuf, sizeof(sizeBuf), "%lu", (unsigned long)zLevel);
         sizeString.AssignWithConversion(sizeBuf);
         docShellElement->SetAttribute(ZLEVEL_ATTRIBUTE, sizeString, rv);
         if (shouldPersist) {
@@ -1798,97 +1801,6 @@ nsresult nsXULWindow::ContentShellRemoved(nsIDocShellTreeItem* aContentShell)
   return NS_OK;
 }
 
-NS_IMETHODIMP
-nsXULWindow::GetPrimaryContentSize(int32_t* aWidth,
-                                   int32_t* aHeight)
-{
-  if (mPrimaryTabParent) {
-    return GetPrimaryTabParentSize(aWidth, aHeight);
-  } else if (mPrimaryContentShell) {
-    return GetPrimaryContentShellSize(aWidth, aHeight);
-  }
-  return NS_ERROR_UNEXPECTED;
-}
-
-nsresult
-nsXULWindow::GetPrimaryTabParentSize(int32_t* aWidth,
-                                     int32_t* aHeight)
-{
-  TabParent* tabParent = TabParent::GetFrom(mPrimaryTabParent);
-  Element* element = tabParent->GetOwnerElement();
-  NS_ENSURE_STATE(element);
-
-  *aWidth = element->ClientWidth();
-  *aHeight = element->ClientHeight();
-  return NS_OK;
-}
-
-nsresult
-nsXULWindow::GetPrimaryContentShellSize(int32_t* aWidth,
-                                        int32_t* aHeight)
-{
-  NS_ENSURE_STATE(mPrimaryContentShell);
-
-  nsCOMPtr<nsIBaseWindow> shellWindow(do_QueryInterface(mPrimaryContentShell));
-  NS_ENSURE_STATE(shellWindow);
-
-  int32_t devicePixelWidth, devicePixelHeight;
-  double shellScale = 1.0;
-  // We want to return CSS pixels. First, we get device pixels
-  // from the content area...
-  shellWindow->GetSize(&devicePixelWidth, &devicePixelHeight);
-  // And then get the device pixel scaling factor. Dividing device
-  // pixels by this scaling factor gives us CSS pixels.
-  shellWindow->GetUnscaledDevicePixelsPerCSSPixel(&shellScale);
-  *aWidth = NSToIntRound(devicePixelWidth / shellScale);
-  *aHeight = NSToIntRound(devicePixelHeight / shellScale);
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-nsXULWindow::SetPrimaryContentSize(int32_t aWidth,
-                                   int32_t aHeight)
-{
-  if (mPrimaryTabParent) {
-    return SetPrimaryTabParentSize(aWidth, aHeight);
-  } else if (mPrimaryContentShell) {
-    return SizeShellTo(mPrimaryContentShell, aWidth, aHeight);
-  }
-  return NS_ERROR_UNEXPECTED;
-}
-
-nsresult
-nsXULWindow::SetPrimaryTabParentSize(int32_t aWidth,
-                                     int32_t aHeight)
-{
-  int32_t shellWidth, shellHeight;
-  GetPrimaryTabParentSize(&shellWidth, &shellHeight);
-
-  double scale = 1.0;
-  GetUnscaledDevicePixelsPerCSSPixel(&scale);
-
-  SizeShellToWithLimit(aWidth, aHeight,
-                       shellWidth * scale, shellHeight * scale);
-  return NS_OK;
-}
-
-nsresult
-nsXULWindow::GetRootShellSize(int32_t* aWidth,
-                              int32_t* aHeight)
-{
-  nsCOMPtr<nsIBaseWindow> shellAsWin = do_QueryInterface(mDocShell);
-  NS_ENSURE_TRUE(shellAsWin, NS_ERROR_FAILURE);
-  return shellAsWin->GetSize(aWidth, aHeight);
-}
-
-nsresult
-nsXULWindow::SetRootShellSize(int32_t aWidth,
-                              int32_t aHeight)
-{
-  nsCOMPtr<nsIDocShellTreeItem> docShellAsItem = do_QueryInterface(mDocShell);
-  return SizeShellTo(docShellAsItem, aWidth, aHeight);
-}
-
 NS_IMETHODIMP nsXULWindow::SizeShellTo(nsIDocShellTreeItem* aShellItem,
    int32_t aCX, int32_t aCY)
 {
@@ -2009,17 +1921,11 @@ NS_IMETHODIMP nsXULWindow::CreateNewContentWindow(int32_t aChromeFlags,
     }
   }
 
-  NS_ENSURE_STATE(xulWin->mPrimaryContentShell || xulWin->mPrimaryTabParent);
+  NS_ENSURE_STATE(xulWin->mPrimaryContentShell);
 
   *_retval = newWindow;
   NS_ADDREF(*_retval);
 
-  return NS_OK;
-}
-
-NS_IMETHODIMP nsXULWindow::GetHasPrimaryContent(bool* aResult)
-{
-  *aResult = mPrimaryTabParent || mPrimaryContentShell;
   return NS_OK;
 }
 
@@ -2276,26 +2182,24 @@ NS_IMETHODIMP nsXULWindow::SetXULBrowserWindow(nsIXULBrowserWindow * aXULBrowser
   return NS_OK;
 }
 
-void nsXULWindow::SizeShellToWithLimit(int32_t aDesiredWidth,
-                                       int32_t aDesiredHeight,
-                                       int32_t shellItemWidth,
-                                       int32_t shellItemHeight)
+void nsXULWindow::SizeShellToWithLimit(int32_t aCX, int32_t aCY,
+                                       int32_t shellItemCx, int32_t shellItemCy)
 {
-  int32_t widthDelta = aDesiredWidth - shellItemWidth;
-  int32_t heightDelta = aDesiredHeight - shellItemHeight;
+  int32_t widthDelta = aCX - shellItemCx;
+  int32_t heightDelta = aCY - shellItemCy;
 
   if (widthDelta || heightDelta) {
-    int32_t winWidth = 0;
-    int32_t winHeight = 0;
+    int32_t winCX = 0;
+    int32_t winCY = 0;
 
-    GetSize(&winWidth, &winHeight);
+    GetSize(&winCX, &winCY);
     // There's no point in trying to make the window smaller than the
-    // desired content area size --- that's not likely to work. This whole
+    // desired docshell size --- that's not likely to work. This whole
     // function assumes that the outer docshell is adding some constant
-    // "border" chrome to the content area.
-    winWidth = std::max(winWidth + widthDelta, aDesiredWidth);
-    winHeight = std::max(winHeight + heightDelta, aDesiredHeight);
-    SetSize(winWidth, winHeight, true);
+    // "border" chrome to aShellItem.
+    winCX = std::max(winCX + widthDelta, aCX);
+    winCY = std::max(winCY + heightDelta, aCY);
+    SetSize(winCX, winCY, true);
   }
 }
 

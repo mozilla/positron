@@ -14,19 +14,19 @@ function test() {
 
     info("highlighting the body node");
     yield runCommand("highlight body", options);
-    is(yield getHighlighterNumber(), 1, "The highlighter element exists for body");
+    is(getHighlighterNumber(), 1, "The highlighter element exists for body");
 
     info("highlighting the div node");
     yield runCommand("highlight div", options);
-    is(yield getHighlighterNumber(), 1, "The highlighter element exists for div");
+    is(getHighlighterNumber(), 1, "The highlighter element exists for div");
 
     info("highlighting the body node again, asking to keep the div");
     yield runCommand("highlight body --keep", options);
-    is(yield getHighlighterNumber(), 2, "2 highlighter elements have been created");
+    is(getHighlighterNumber(), 2, "2 highlighter elements have been created");
 
     info("unhighlighting all nodes");
     yield runCommand("unhighlight", options);
-    is(yield getHighlighterNumber(), 0, "All highlighters have been removed");
+    is(getHighlighterNumber(), 0, "All highlighters have been removed");
 
     yield helpers.closeToolbar(options);
     yield helpers.closeTab(options);
@@ -34,10 +34,9 @@ function test() {
 }
 
 function getHighlighterNumber() {
-  return ContentTask.spawn(gBrowser.selectedBrowser, {}, function* () {
-    const { require } = Cu.import("resource://devtools/shared/Loader.jsm", {});
-    return require("devtools/shared/gcli/commands/highlight").highlighters.length;
-  });
+  // Note that this only works as long as gcli tests aren't run with e10s on.
+  // To make this e10s ready, execute this in a content frame script instead.
+  return require("devtools/shared/gcli/commands/highlight").highlighters.length;
 }
 
 function* runCommand(cmd, options) {

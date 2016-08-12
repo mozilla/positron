@@ -18,7 +18,7 @@ class UsageInfo
 {
 public:
   UsageInfo()
-  : mCanceled(false), mDatabaseUsage(0), mFileUsage(0), mLimit(0)
+  : mCanceled(false), mDatabaseUsage(0), mFileUsage(0)
   { }
 
   virtual ~UsageInfo()
@@ -52,12 +52,6 @@ public:
     IncrementUsage(&mFileUsage, aUsage);
   }
 
-  void
-  SetLimit(uint64_t aLimit)
-  {
-    mLimit = aLimit;
-  }
-
   uint64_t
   DatabaseUsage()
   {
@@ -68,12 +62,6 @@ public:
   FileUsage()
   {
     return mFileUsage;
-  }
-
-  uint64_t
-  Limit()
-  {
-    return mLimit;
   }
 
   uint64_t
@@ -110,7 +98,6 @@ protected:
 private:
   uint64_t mDatabaseUsage;
   uint64_t mFileUsage;
-  uint64_t mLimit;
 };
 
 END_QUOTA_NAMESPACE

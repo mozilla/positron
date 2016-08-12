@@ -24,7 +24,9 @@ gfxQuartzNativeDrawing::BeginNativeDrawing()
   NS_ASSERTION(!mCGContext, "BeginNativeDrawing called when drawing already in progress");
 
   DrawTarget *dt = mDrawTarget;
-  if (dt->IsDualDrawTarget() || dt->IsTiledDrawTarget()) {
+  if (dt->GetBackendType() != BackendType::COREGRAPHICS ||
+      dt->IsDualDrawTarget() ||
+      dt->IsTiledDrawTarget()) {
     // We need a DrawTarget that we can get a CGContextRef from:
     Matrix transform = dt->GetTransform();
 
@@ -38,8 +40,8 @@ gfxQuartzNativeDrawing::BeginNativeDrawing()
     }
 
     mTempDrawTarget =
-      Factory::CreateDrawTarget(BackendType::SKIA,
-                                IntSize::Truncate(mNativeRect.width, mNativeRect.height),
+      Factory::CreateDrawTarget(BackendType::COREGRAPHICS,
+                                IntSize(mNativeRect.width, mNativeRect.height),
                                 SurfaceFormat::B8G8R8A8);
 
     if (mTempDrawTarget) {

@@ -116,9 +116,7 @@ PerformanceObserver::Notify()
 
   ErrorResult rv;
   mCallback->Call(this, *list, *this, rv);
-  if (NS_WARN_IF(rv.Failed())) {
-    rv.SuppressException();
-  }
+  NS_WARN_IF(rv.Failed());
   mQueuedEntries.Clear();
 }
 
@@ -136,11 +134,11 @@ PerformanceObserver::QueueEntry(PerformanceEntry* aEntry)
   mQueuedEntries.AppendElement(aEntry);
 }
 
-static const char16_t *const sValidTypeNames[4] = {
-  u"mark",
-  u"measure",
-  u"resource",
-  u"server"
+static const char16_t* sValidTypeNames[4] = {
+  MOZ_UTF16("mark"),
+  MOZ_UTF16("measure"),
+  MOZ_UTF16("resource"),
+  MOZ_UTF16("server")
 };
 
 void

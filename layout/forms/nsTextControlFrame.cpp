@@ -159,7 +159,7 @@ nsTextControlFrame::CalcIntrinsicSize(nsRenderingContext* aRenderingContext,
     nsLayoutUtils::GetFontMetricsForFrame(this, aFontSizeInflation);
 
   lineHeight =
-    ReflowInput::CalcLineHeight(GetContent(), StyleContext(),
+    nsHTMLReflowState::CalcLineHeight(GetContent(), StyleContext(),
                                       NS_AUTOHEIGHT, aFontSizeInflation);
   charWidth = fontMet->AveCharWidth();
   charMaxAdvance = fontMet->MaxAdvance();
@@ -303,13 +303,9 @@ nsTextControlFrame::EnsureEditorInitialized()
     // editor.
     mEditorHasBeenInitialized = true;
 
-    nsAutoString val;
-    txtCtrl->GetTextEditorValue(val, true);
-    int32_t length = val.Length();
-
-    // Set the selection to the end of the text field. (bug 1287655)
+    // Set the selection to the beginning of the text field.
     if (weakFrame.IsAlive()) {
-      SetSelectionEndPoints(length, length);
+      SetSelectionEndPoints(0, 0);
     }
   }
   NS_ENSURE_STATE(weakFrame.IsAlive());
@@ -351,20 +347,9 @@ nsTextControlFrame::CreateAnonymousContent(nsTArray<ContentInfo>& aElements)
     // Associate ::-moz-placeholder pseudo-element with the placeholder node.
     CSSPseudoElementType pseudoType = CSSPseudoElementType::mozPlaceholder;
 
-    // If this is a text input inside a number input then we want to use the
-    // main number input as the source of style for the placeholder frame.
-    nsIFrame* mainInputFrame = this;
-    if (StyleContext()->GetPseudoType() == CSSPseudoElementType::mozNumberText) {
-      do {
-        mainInputFrame = mainInputFrame->GetParent();
-      } while (mainInputFrame &&
-               mainInputFrame->GetType() != nsGkAtoms::numberControlFrame);
-      MOZ_ASSERT(mainInputFrame);
-    }
-
     RefPtr<nsStyleContext> placeholderStyleContext =
       PresContext()->StyleSet()->ResolvePseudoElementStyle(
-          mainInputFrame->GetContent()->AsElement(), pseudoType, StyleContext(),
+          mContent->AsElement(), pseudoType, StyleContext(),
           placeholderNode->AsElement());
 
     if (!aElements.AppendElement(ContentInfo(placeholderNode,
@@ -430,7 +415,7 @@ nsTextControlFrame::AppendAnonymousContentTo(nsTArray<nsIContent*>& aElements,
   nsIContent* placeholder = txtCtrl->GetPlaceholderNode();
   if (placeholder && !(aFilter & nsIContent::eSkipPlaceholderContent))
     aElements.AppendElement(placeholder);
-
+  
 }
 
 nscoord
@@ -500,13 +485,13 @@ nsTextControlFrame::ComputeAutoSize(nsRenderingContext *aRenderingContext,
 
 void
 nsTextControlFrame::Reflow(nsPresContext*   aPresContext,
-                           ReflowOutput&     aDesiredSize,
-                           const ReflowInput& aReflowInput,
+                           nsHTMLReflowMetrics&     aDesiredSize,
+                           const nsHTMLReflowState& aReflowState,
                            nsReflowStatus&          aStatus)
 {
   MarkInReflow();
   DO_GLOBAL_REFLOW_COUNT("nsTextControlFrame");
-  DISPLAY_REFLOW(aPresContext, this, aReflowInput, aDesiredSize, aStatus);
+  DISPLAY_REFLOW(aPresContext, this, aReflowState, aDesiredSize, aStatus);
 
   // make sure that the form registers itself on the initial/first reflow
   if (mState & NS_FRAME_FIRST_REFLOW) {
@@ -514,20 +499,20 @@ nsTextControlFrame::Reflow(nsPresContext*   aPresContext,
   }
 
   // set values of reflow's out parameters
-  WritingMode wm = aReflowInput.GetWritingMode();
+  WritingMode wm = aReflowState.GetWritingMode();
   LogicalSize
     finalSize(wm,
-              aReflowInput.ComputedISize() +
-              aReflowInput.ComputedLogicalBorderPadding().IStartEnd(wm),
-              aReflowInput.ComputedBSize() +
-              aReflowInput.ComputedLogicalBorderPadding().BStartEnd(wm));
+              aReflowState.ComputedISize() +
+              aReflowState.ComputedLogicalBorderPadding().IStartEnd(wm),
+              aReflowState.ComputedBSize() +
+              aReflowState.ComputedLogicalBorderPadding().BStartEnd(wm));
   aDesiredSize.SetSize(wm, finalSize);
 
   // computation of the ascent wrt the input height
-  nscoord lineHeight = aReflowInput.ComputedBSize();
+  nscoord lineHeight = aReflowState.ComputedBSize();
   float inflation = nsLayoutUtils::FontSizeInflationFor(this);
   if (!IsSingleLineTextControl()) {
-    lineHeight = ReflowInput::CalcLineHeight(GetContent(), StyleContext(),
+    lineHeight = nsHTMLReflowState::CalcLineHeight(GetContent(), StyleContext(),
                                                    NS_AUTOHEIGHT, inflation);
   }
   RefPtr<nsFontMetrics> fontMet =
@@ -536,14 +521,14 @@ nsTextControlFrame::Reflow(nsPresContext*   aPresContext,
   aDesiredSize.SetBlockStartAscent(
     nsLayoutUtils::GetCenteredFontBaseline(fontMet, lineHeight,
                                            wm.IsLineInverted()) +
-    aReflowInput.ComputedLogicalBorderPadding().BStart(wm));
+    aReflowState.ComputedLogicalBorderPadding().BStart(wm));
 
   // overflow handling
   aDesiredSize.SetOverflowAreasToDesiredBounds();
   // perform reflow on all kids
   nsIFrame* kid = mFrames.FirstChild();
   while (kid) {
-    ReflowTextControlChild(kid, aPresContext, aReflowInput, aStatus, aDesiredSize);
+    ReflowTextControlChild(kid, aPresContext, aReflowState, aStatus, aDesiredSize);
     kid = kid->GetNextSibling();
   }
 
@@ -551,45 +536,45 @@ nsTextControlFrame::Reflow(nsPresContext*   aPresContext,
   FinishAndStoreOverflow(&aDesiredSize);
 
   aStatus = NS_FRAME_COMPLETE;
-  NS_FRAME_SET_TRUNCATION(aStatus, aReflowInput, aDesiredSize);
+  NS_FRAME_SET_TRUNCATION(aStatus, aReflowState, aDesiredSize);
 }
 
 void
 nsTextControlFrame::ReflowTextControlChild(nsIFrame*                aKid,
                                            nsPresContext*           aPresContext,
-                                           const ReflowInput& aReflowInput,
+                                           const nsHTMLReflowState& aReflowState,
                                            nsReflowStatus&          aStatus,
-                                           ReflowOutput& aParentDesiredSize)
+                                           nsHTMLReflowMetrics& aParentDesiredSize)
 {
   // compute available size and frame offsets for child
   WritingMode wm = aKid->GetWritingMode();
-  LogicalSize availSize = aReflowInput.ComputedSizeWithPadding(wm);
+  LogicalSize availSize = aReflowState.ComputedSizeWithPadding(wm);
   availSize.BSize(wm) = NS_UNCONSTRAINEDSIZE;
 
-  ReflowInput kidReflowInput(aPresContext, aReflowInput, 
+  nsHTMLReflowState kidReflowState(aPresContext, aReflowState, 
                                    aKid, availSize, nullptr,
-                                   ReflowInput::CALLER_WILL_INIT);
+                                   nsHTMLReflowState::CALLER_WILL_INIT);
   // Override padding with our computed padding in case we got it from theming or percentage
-  kidReflowInput.Init(aPresContext, nullptr, nullptr, &aReflowInput.ComputedPhysicalPadding());
+  kidReflowState.Init(aPresContext, nullptr, nullptr, &aReflowState.ComputedPhysicalPadding());
 
   // Set computed width and computed height for the child
-  kidReflowInput.SetComputedWidth(aReflowInput.ComputedWidth());
-  kidReflowInput.SetComputedHeight(aReflowInput.ComputedHeight());
+  kidReflowState.SetComputedWidth(aReflowState.ComputedWidth());
+  kidReflowState.SetComputedHeight(aReflowState.ComputedHeight());
 
   // Offset the frame by the size of the parent's border
-  nscoord xOffset = aReflowInput.ComputedPhysicalBorderPadding().left -
-                    aReflowInput.ComputedPhysicalPadding().left;
-  nscoord yOffset = aReflowInput.ComputedPhysicalBorderPadding().top -
-                    aReflowInput.ComputedPhysicalPadding().top;
+  nscoord xOffset = aReflowState.ComputedPhysicalBorderPadding().left -
+                    aReflowState.ComputedPhysicalPadding().left;
+  nscoord yOffset = aReflowState.ComputedPhysicalBorderPadding().top -
+                    aReflowState.ComputedPhysicalPadding().top;
 
   // reflow the child
-  ReflowOutput desiredSize(aReflowInput);
-  ReflowChild(aKid, aPresContext, desiredSize, kidReflowInput, 
+  nsHTMLReflowMetrics desiredSize(aReflowState);
+  ReflowChild(aKid, aPresContext, desiredSize, kidReflowState, 
               xOffset, yOffset, 0, aStatus);
 
   // place the child
   FinishReflowChild(aKid, aPresContext, desiredSize,
-                    &kidReflowInput, xOffset, yOffset, 0);
+                    &kidReflowState, xOffset, yOffset, 0);
 
   // consider the overflow
   aParentDesiredSize.mOverflowAreas.UnionWith(desiredSize.mOverflowAreas);
@@ -931,18 +916,18 @@ nsTextControlFrame::SetSelectionStart(int32_t aSelectionStart)
   nsresult rv = EnsureEditorInitialized();
   NS_ENSURE_SUCCESS(rv, rv);
 
-  int32_t selStart = 0, selEnd = 0;
+  int32_t selStart = 0, selEnd = 0; 
 
   rv = GetSelectionRange(&selStart, &selEnd);
   NS_ENSURE_SUCCESS(rv, rv);
 
   if (aSelectionStart > selEnd) {
     // Collapse to the new start point.
-    selEnd = aSelectionStart;
+    selEnd = aSelectionStart; 
   }
 
   selStart = aSelectionStart;
-
+  
   return SetSelectionEndPoints(selStart, selEnd);
 }
 
@@ -952,18 +937,18 @@ nsTextControlFrame::SetSelectionEnd(int32_t aSelectionEnd)
   nsresult rv = EnsureEditorInitialized();
   NS_ENSURE_SUCCESS(rv, rv);
 
-  int32_t selStart = 0, selEnd = 0;
+  int32_t selStart = 0, selEnd = 0; 
 
   rv = GetSelectionRange(&selStart, &selEnd);
   NS_ENSURE_SUCCESS(rv, rv);
 
   if (aSelectionEnd < selStart) {
     // Collapse to the new end point.
-    selStart = aSelectionEnd;
+    selStart = aSelectionEnd; 
   }
 
   selEnd = aSelectionEnd;
-
+  
   return SetSelectionEndPoints(selStart, selEnd);
 }
 
@@ -1050,7 +1035,7 @@ nsTextControlFrame::GetSelectionRange(int32_t* aSelectionStart,
   nsISelectionController* selCon = txtCtrl->GetSelectionController();
   NS_ENSURE_TRUE(selCon, NS_ERROR_FAILURE);
   nsCOMPtr<nsISelection> selection;
-  rv = selCon->GetSelection(nsISelectionController::SELECTION_NORMAL, getter_AddRefs(selection));
+  rv = selCon->GetSelection(nsISelectionController::SELECTION_NORMAL, getter_AddRefs(selection));  
   NS_ENSURE_SUCCESS(rv, rv);
   NS_ENSURE_TRUE(selection, NS_ERROR_FAILURE);
 
@@ -1189,7 +1174,7 @@ nsTextControlFrame::GetText(nsString& aText)
 nsresult
 nsTextControlFrame::GetPhonetic(nsAString& aPhonetic)
 {
-  aPhonetic.Truncate(0);
+  aPhonetic.Truncate(0); 
 
   nsCOMPtr<nsIEditor> editor;
   nsresult rv = GetEditor(getter_AddRefs(editor));

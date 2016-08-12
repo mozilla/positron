@@ -12,8 +12,8 @@
 
 #include <stdint.h>                     // for uint16_t, uint32_t
 #include <sys/types.h>                  // for int32_t
+#include "gfxPlatform.h"                // for GetTileWidth/GetTileHeight
 #include "LayersLogging.h"              // for print_stderr
-#include "mozilla/gfx/gfxVars.h"
 #include "mozilla/gfx/Logging.h"        // for gfxCriticalError
 #include "mozilla/layers/LayersTypes.h" // for TextureDumpMode
 #include "nsDebug.h"                    // for NS_ASSERTION
@@ -142,7 +142,8 @@ public:
   TiledLayerBuffer()
     : mTiles(0, 0, 0, 0)
     , mResolution(1)
-    , mTileSize(gfxVars::TileSize())
+    , mTileSize(gfxPlatform::GetPlatform()->GetTileWidth(),
+                gfxPlatform::GetPlatform()->GetTileHeight())
   {}
 
   ~TiledLayerBuffer() {}
@@ -157,7 +158,7 @@ public:
 
   const gfx::IntSize& GetTileSize() const { return mTileSize; }
 
-  gfx::IntSize GetScaledTileSize() const { return gfx::IntSize::Round(gfx::Size(mTileSize) / mResolution); }
+  gfx::IntSize GetScaledTileSize() const { return RoundedToInt(gfx::Size(mTileSize) / mResolution); }
 
   unsigned int GetTileCount() const { return mRetainedTiles.Length(); }
 

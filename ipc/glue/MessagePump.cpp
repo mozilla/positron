@@ -25,6 +25,10 @@
 #include "nsXULAppAPI.h"
 #include "prthread.h"
 
+#ifdef MOZ_NUWA_PROCESS
+#include "ipc/Nuwa.h"
+#endif
+
 using base::TimeTicks;
 using namespace mozilla::ipc;
 
@@ -104,7 +108,11 @@ MessagePump::Run(MessagePump::Delegate* aDelegate)
 
     did_work |= aDelegate->DoDelayedWork(&delayed_work_time_);
 
-if (did_work && delayed_work_time_.is_null())
+if (did_work && delayed_work_time_.is_null()
+#ifdef MOZ_NUWA_PROCESS
+    && (!IsNuwaReady() || !IsNuwaProcess())
+#endif
+   )
       mDelayedWorkTimer->Cancel();
 
     if (!keep_running_)
@@ -124,6 +132,9 @@ if (did_work && delayed_work_time_.is_null())
     NS_ProcessNextEvent(thisThread, true);
   }
 
+#ifdef MOZ_NUWA_PROCESS
+  if (!IsNuwaReady() || !IsNuwaProcess())
+#endif
     mDelayedWorkTimer->Cancel();
 
   keep_running_ = true;
@@ -155,6 +166,11 @@ MessagePump::ScheduleWorkForNestedLoop()
 void
 MessagePump::ScheduleDelayedWork(const base::TimeTicks& aDelayedTime)
 {
+#ifdef MOZ_NUWA_PROCESS
+  if (IsNuwaReady() && IsNuwaProcess())
+    return;
+#endif
+
   // To avoid racing on mDelayedWorkTimer, we need to be on the same thread as
   // ::Run().
   MOZ_RELEASE_ASSERT(NS_GetCurrentThread() == mThread ||

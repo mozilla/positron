@@ -152,8 +152,6 @@ public:
   RecvInitCompositor(Endpoint<PCompositorBridgeChild>&& aEndpoint) override;
   bool
   RecvInitImageBridge(Endpoint<PImageBridgeChild>&& aEndpoint) override;
-  bool
-  RecvInitVRManager(Endpoint<PVRManagerChild>&& aEndpoint) override;
 
   PSharedBufferManagerChild*
   AllocPSharedBufferManagerChild(mozilla::ipc::Transport* aTransport,
@@ -162,6 +160,10 @@ public:
   PProcessHangMonitorChild*
   AllocPProcessHangMonitorChild(Transport* aTransport,
                                 ProcessId aOtherProcess) override;
+
+  PVRManagerChild*
+  AllocPVRManagerChild(Transport* aTransport,
+                       ProcessId aOtherProcess) override;
 
   virtual bool RecvSetProcessSandbox(const MaybeFileDesc& aBroker) override;
 
@@ -409,7 +411,6 @@ public:
                                          const uint32_t& aMemoryAvailable) override;
 
   virtual bool RecvPreferenceUpdate(const PrefSetting& aPref) override;
-  virtual bool RecvVarUpdate(const GfxVarUpdate& pref) override;
 
   virtual bool RecvDataStoragePut(const nsString& aFilename,
                                   const DataStorageItem& aItem) override;
@@ -689,6 +690,9 @@ private:
 
   DISALLOW_EVIL_CONSTRUCTORS(ContentChild);
 };
+
+void
+InitOnContentProcessCreated();
 
 uint64_t
 NextWindowID();

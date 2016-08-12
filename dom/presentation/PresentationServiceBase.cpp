@@ -36,8 +36,6 @@ PresentationServiceBase::GetWindowIdBySessionIdInternal(
   const nsAString& aSessionId,
   uint64_t* aWindowId)
 {
-  MOZ_ASSERT(NS_IsMainThread());
-
   if (mRespondingWindowIds.Get(aSessionId, aWindowId)) {
     return NS_OK;
   }
@@ -48,8 +46,6 @@ void
 PresentationServiceBase::AddRespondingSessionId(uint64_t aWindowId,
                                                 const nsAString& aSessionId)
 {
-  MOZ_ASSERT(NS_IsMainThread());
-
   if (NS_WARN_IF(aWindowId == 0)) {
     return;
   }
@@ -67,8 +63,6 @@ PresentationServiceBase::AddRespondingSessionId(uint64_t aWindowId,
 void
 PresentationServiceBase::RemoveRespondingSessionId(const nsAString& aSessionId)
 {
-  MOZ_ASSERT(NS_IsMainThread());
-
   uint64_t windowId = 0;
   if (mRespondingWindowIds.Get(aSessionId, &windowId)) {
     mRespondingWindowIds.Remove(aSessionId);
@@ -80,18 +74,6 @@ PresentationServiceBase::RemoveRespondingSessionId(const nsAString& aSessionId)
       }
     }
   }
-}
-
-nsresult
-PresentationServiceBase::UpdateWindowIdBySessionIdInternal(
-  const nsAString& aSessionId,
-  const uint64_t aWindowId)
-{
-  MOZ_ASSERT(NS_IsMainThread());
-
-  RemoveRespondingSessionId(aSessionId);
-  AddRespondingSessionId(aWindowId, aSessionId);
-  return NS_OK;
 }
 
 } // namespace dom

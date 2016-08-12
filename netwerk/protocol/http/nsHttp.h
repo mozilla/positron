@@ -30,7 +30,7 @@ namespace net {
     enum {
         // SPDY_VERSION_2 = 2, REMOVED
         // SPDY_VERSION_3 = 3, REMOVED
-        // SPDY_VERSION_31 = 4, REMOVED
+        SPDY_VERSION_31 = 4,
         HTTP_VERSION_2 = 5
 
         // leave room for official versions. telem goes to 48

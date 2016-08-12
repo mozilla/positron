@@ -115,7 +115,9 @@
       ]]></handler>
 
       <handler event="focus"><![CDATA[
-        if (/Mac/.test(navigator.platform)) {
+        let { AppConstants } =
+            Components.utils.import("resource://gre/modules/AppConstants.jsm", {});
+        if (AppConstants.platform == "macosx") {
           let findbar = this.findbar;
           findbar._onFindFieldFocus();
         }
@@ -540,8 +542,6 @@
           }
           this._highlightAll = aHighlight;
 
-          this.browser.finder.onHighlightAllChange(aHighlight);
-
           if (!this._dispatchFindEvent("highlightallchange")) {
             return;
           }
@@ -553,8 +553,7 @@
           if (aHighlight && !word)
             return;
 
-          this.browser.finder.highlight(aHighlight, word,
-            this._findMode == this.FIND_LINKS);
+          this.browser.finder.highlight(aHighlight, word);
 
           // Update the matches count
           this._updateMatchesCount(this.nsITypeAheadFind.FIND_FOUND);
@@ -582,23 +581,6 @@
           this._highlightAll = aHighlight;
           let checkbox = this.getElement("highlight");
           checkbox.checked = this._highlightAll;
-        ]]></body>
-      </method>
-
-      <method name="_setHighlightTimeout">
-        <body><![CDATA[
-          if (this._highlightTimeout)
-            clearTimeout(this._highlightTimeout);
-
-          let word = this._findField.value;
-          // Bug 429723. Don't attempt to highlight ""
-          if (!this._highlightAll || !word)
-            return;
-
-          this._highlightTimeout = setTimeout(() => {
-            this.browser.finder.highlight(true, word,
-              this._findMode == this.FIND_LINKS);
-          }, 500);
         ]]></body>
       </method>
 
@@ -696,7 +678,8 @@
           // Just set the pref; our observer will change the find bar behavior.
           prefsvc.setBoolPref("findbar.entireword", aEntireWord);
 
-          this._setHighlightTimeout();
+          if (this.getElement("highlight").checked)
+            this._setHighlightTimeout();
         ]]></body>
       </method>
 
@@ -779,9 +762,6 @@
             this.setAttribute("noanim", true);
           this.hidden = true;
 
-          // 'focusContent()' iterates over all listeners in the chrome
-          // process, so we need to call it from here.
-          this.browser.finder.focusContent();
           this.browser.finder.onFindbarClose();
 
           this._cancelTimers();
@@ -831,7 +811,7 @@
                       .getInterface(Components.interfaces.nsIXULWindow)
                       .XULBrowserWindow;
             }
-            catch (ex) { }
+            catch(ex) { }
             if (!this._xulBrowserWindow)
               return false;
           }
@@ -1040,7 +1020,8 @@
             }
 
             this._enableFindButtons(val);
-            this._setHighlightTimeout();
+            if (this.getElement("highlight").checked)
+              this._setHighlightTimeout();
 
             this._updateCaseSensitivity(val);
             this._updateEntireWord();
@@ -1080,6 +1061,18 @@
           this.setAttribute("flash",
                             (this._flashFindBarCount % 2 == 0) ?
                             "false" : "true");
+        ]]></body>
+      </method>
+
+      <method name="_setHighlightTimeout">
+        <body><![CDATA[
+          if (this._highlightTimeout)
+            clearTimeout(this._highlightTimeout);
+          this._highlightTimeout =
+            setTimeout(function(aSelf) {
+                         aSelf.toggleHighlight(false);
+                         aSelf.toggleHighlight(true);
+                       }, 500, this);
         ]]></body>
       </method>
 
@@ -1369,7 +1362,9 @@
           if (aIsInitialSelection && !this._startFindDeferred)
             return;
 
-          if (/Mac/.test(navigator.platform) && aIsInitialSelection && !aSelectionString) {
+          let { AppConstants } =
+              Components.utils.import("resource://gre/modules/AppConstants.jsm", {});
+          if (AppConstants.platform == "macosx" && aIsInitialSelection && !aSelectionString) {
             let clipboardSearchString = this.browser.finder.clipboardSearchString;
             if (clipboardSearchString)
               aSelectionString = clipboardSearchString;

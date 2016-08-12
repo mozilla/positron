@@ -19,9 +19,6 @@ from taskgraph.util.time import (
 
 logger = logging.getLogger(__name__)
 
-# the maximum number of parallel createTask calls to make
-CONCURRENCY = 50
-
 
 def create_tasks(taskgraph, label_to_taskid):
     # TODO: use the taskGroupId of the decision task
@@ -30,17 +27,9 @@ def create_tasks(taskgraph, label_to_taskid):
 
     session = requests.Session()
 
-    # Default HTTPAdapter uses 10 connections. Mount custom adapter to increase
-    # that limit. Connections are established as needed, so using a large value
-    # should not negatively impact performance.
-    http_adapter = requests.adapters.HTTPAdapter(pool_connections=CONCURRENCY,
-                                                 pool_maxsize=CONCURRENCY)
-    session.mount('https://', http_adapter)
-    session.mount('http://', http_adapter)
-
     decision_task_id = os.environ.get('TASK_ID')
 
-    with futures.ThreadPoolExecutor(CONCURRENCY) as e:
+    with futures.ThreadPoolExecutor(requests.adapters.DEFAULT_POOLSIZE) as e:
         fs = {}
 
         # We can't submit a task until its dependencies have been submitted.
@@ -54,7 +43,6 @@ def create_tasks(taskgraph, label_to_taskid):
         # that.
         for task_id in taskgraph.graph.visit_postorder():
             task_def = taskgraph.tasks[task_id].task
-            attributes = taskgraph.tasks[task_id].attributes
             # if this task has no dependencies, make it depend on this decision
             # task so that it does not start immediately; and so that if this loop
             # fails halfway through, none of the already-created tasks run.
@@ -72,12 +60,6 @@ def create_tasks(taskgraph, label_to_taskid):
 
             fs[task_id] = e.submit(_create_task, session, task_id,
                                    taskid_to_label[task_id], task_def)
-
-            # Schedule tasks as many times as task_duplicates indicates
-            for i in range(1, attributes.get('task_duplicates', 1)):
-                # We use slugid() since we want a distinct task id
-                fs[task_id] = e.submit(_create_task, session, slugid(),
-                                       taskid_to_label[task_id], task_def)
 
         # Wait for all futures to complete.
         for f in futures.as_completed(fs.values()):

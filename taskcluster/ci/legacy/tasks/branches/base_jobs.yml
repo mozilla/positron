@@ -20,12 +20,6 @@ builds:
     types:
       opt:
         task: tasks/builds/android_x86.yml
-  android-api-15-gradle:
-    platforms:
-      - Android
-    types:
-      opt:
-        task: tasks/builds/android_api_15_gradle.yml
   linux64-mulet:
     platforms:
       - Mulet Linux
@@ -279,23 +273,15 @@ tasks:
         - 'python/mozlint/**'
         - 'tools/lint/**'
         - 'testing/docker/lint/**'
-  wptlint-gecko:
-    task: tasks/tests/mozlint-wpt.yml
-    root: true
-    when:
-      file_patterns:
-        - 'testing/web-platform/tests/**'
-        - 'python/mozlint/**'
-        - 'tools/lint/**'
-        - 'testing/docker/lint/**'
+        - 'taskcluster/**'
   taskgraph-tests:
     task: tasks/tests/taskgraph-tests.yml
     root: true
     when:
       file_patterns:
-        - 'taskcluster/**/*.py'
+        - 'taskcluster/**.py'
         - 'config/mozunit.py'
-        - 'python/mach/**/*.py'
+        - 'python/mach/**.py'
   android-api-15-gradle-dependencies:
     task: tasks/builds/android_api_15_gradle_dependencies.yml
     root: true

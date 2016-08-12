@@ -4,7 +4,7 @@
 "use strict";
 
 const { L10N } = require("devtools/client/performance/modules/global");
-const { Formatters } = require("devtools/client/performance/modules/marker-formatters");
+const { Formatters, labelForProperty } = require("devtools/client/performance/modules/marker-formatters");
 
 /**
  * A simple schema for mapping markers to the timeline UI. The keys correspond
@@ -150,8 +150,7 @@ const TIMELINE_BLUEPRINT = {
   "ConsoleTime": {
     group: 2,
     colorName: "graphs-blue",
-    label: Formatters.labelForProperty(L10N.getStr("marker.label.consoleTime"),
-                                       "causeName"),
+    label: Formatters.labelForProperty(L10N.getStr("marker.label.consoleTime"), "causeName"),
     fields: Formatters.ConsoleTimeFields,
     nestable: false,
     collapsible: false,
@@ -159,8 +158,7 @@ const TIMELINE_BLUEPRINT = {
   "TimeStamp": {
     group: 2,
     colorName: "graphs-blue",
-    label: Formatters.labelForProperty(L10N.getStr("marker.label.timestamp"),
-                                       "causeName"),
+    label: Formatters.labelForProperty(L10N.getStr("marker.label.timestamp"), "causeName"),
     fields: Formatters.TimeStampFields,
     collapsible: false,
   },

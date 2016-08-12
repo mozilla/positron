@@ -31,7 +31,7 @@ using mozilla::Move;
 #ifdef MOZ_B2G
 #define IPC_LOG(...)
 #else
-static mozilla::LazyLogModule sLogModule("ipc");
+static LazyLogModule sLogModule("ipc");
 #define IPC_LOG(...) MOZ_LOG(sLogModule, LogLevel::Debug, (__VA_ARGS__))
 #endif
 
@@ -97,7 +97,6 @@ static mozilla::LazyLogModule sLogModule("ipc");
  */
 
 using namespace mozilla;
-using namespace mozilla::ipc;
 using namespace std;
 
 using mozilla::dom::AutoNoJSAPI;
@@ -491,9 +490,6 @@ MessageChannel::MessageChannel(MessageListener *aListener)
     mFlags(REQUIRE_DEFAULT),
     mPeerPidSet(false),
     mPeerPid(-1)
-#if defined(MOZ_CRASHREPORTER) && defined(OS_WIN)
-    , mPending(AnnotateAllocator<Message>(*this))
-#endif
 {
     MOZ_COUNT_CTOR(ipc::MessageChannel);
 

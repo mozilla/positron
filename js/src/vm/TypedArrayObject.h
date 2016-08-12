@@ -31,8 +31,6 @@ typedef struct JSProperty JSProperty;
 
 namespace js {
 
-enum class TypedArrayLength { Fixed, Dynamic };
-
 /*
  * TypedArrayObject
  *
@@ -172,7 +170,7 @@ class TypedArrayObject : public NativeObject
     Value getElement(uint32_t index);
     static void setElement(TypedArrayObject& obj, uint32_t index, double d);
 
-    void notifyBufferDetached(JSContext* cx, void* newData);
+    void notifyBufferDetached(void* newData);
 
     static bool
     GetTemplateObjectForNative(JSContext* cx, Native native, uint32_t len,
@@ -426,7 +424,7 @@ class DataViewObject : public NativeObject
 
     template <typename NativeType>
     static uint8_t*
-    getDataPointer(JSContext* cx, Handle<DataViewObject*> obj, double offset);
+    getDataPointer(JSContext* cx, Handle<DataViewObject*> obj, uint32_t offset);
 
     template<Value ValueGetter(DataViewObject* view)>
     static bool

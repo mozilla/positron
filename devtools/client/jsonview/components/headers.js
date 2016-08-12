@@ -9,7 +9,7 @@
 define(function (require, exports, module) {
   const { DOM: dom, createFactory, createClass, PropTypes } = require("devtools/client/shared/vendor/react");
 
-  const { div, span, table, tbody, tr, td, } = dom;
+  const { div, span, table, tbody, tr, td, code } = dom;
 
   /**
    * This template is responsible for rendering basic layout
@@ -87,7 +87,9 @@ define(function (require, exports, module) {
             td({className: "netInfoParamName"},
               span({title: header.name}, header.name)
             ),
-            td({className: "netInfoParamValue"}, header.value)
+            td({className: "netInfoParamValue"},
+              code({}, header.value)
+            )
           )
         );
       });

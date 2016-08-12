@@ -238,8 +238,7 @@ var gAnimationWithGeometricKeyframeTests = [
   },
 ];
 
-// Performance warning tests that set and clear a style property.
-var gPerformanceWarningTestsStyle = [
+var gPerformanceWarningTests = [
   {
     desc: 'preserve-3d transform',
     frames: {
@@ -303,25 +302,6 @@ var gPerformanceWarningTestsStyle = [
         property: 'transform',
         runningOnCompositor: false,
         warning: 'CompositorAnimationWarningTransformBackfaceVisibilityHidden'
-      }
-    ]
-  },
-];
-
-// Performance warning tests that set and clear the id property
-var gPerformanceWarningTestsId= [
-  {
-    desc: 'moz-element referencing a transform',
-    frames: {
-      transform: ['translate(0px)', 'translate(100px)']
-    },
-    id: 'transformed',
-    createelement: 'width:100px; height:100px; background: -moz-element(#transformed)',
-    expected: [
-      {
-        property: 'transform',
-        runningOnCompositor: false,
-        warning: 'CompositorAnimationWarningHasRenderingObserver'
       }
     ]
   },
@@ -657,7 +637,7 @@ function start() {
     }, 'An animation has: ' + subtest.desc);
   });
 
-  gPerformanceWarningTestsStyle.forEach(function(subtest) {
+  gPerformanceWarningTests.forEach(function(subtest) {
     promise_test(function(t) {
       var animation = addDivAndAnimate(t,
                                        { class: 'compositable' },
@@ -673,35 +653,6 @@ function start() {
           animation.effect.getProperties(),
           subtest.expected);
         animation.effect.target.style = '';
-        return waitForFrame();
-      }).then(function() {
-        assert_property_state_on_compositor(
-          animation.effect.getProperties(),
-          subtest.expected);
-      });
-    }, subtest.desc);
-  });
-
-  gPerformanceWarningTestsId.forEach(function(subtest) {
-    promise_test(function(t) {
-      if (subtest.createelement) {
-        addDiv(t, { style: subtest.createelement });
-      }
-
-      var animation = addDivAndAnimate(t,
-                                       { class: 'compositable' },
-                                       subtest.frames, 100 * MS_PER_SEC);
-      return animation.ready.then(function() {
-        assert_property_state_on_compositor(
-          animation.effect.getProperties(),
-          subtest.expected);
-        animation.effect.target.id = subtest.id;
-        return waitForFrame();
-      }).then(function() {
-        assert_animation_property_state_equals(
-          animation.effect.getProperties(),
-          subtest.expected);
-        animation.effect.target.id = '';
         return waitForFrame();
       }).then(function() {
         assert_property_state_on_compositor(

@@ -887,9 +887,7 @@ void TransportLayerDtls::Handshake() {
         }
         break;
       default:
-        const char *err_msg = PR_ErrorToName(err);
-        MOZ_MTLOG(ML_ERROR, LAYER_INFO << "DTLS handshake error " << err << " ("
-                  << err_msg << ")");
+        MOZ_MTLOG(ML_ERROR, LAYER_INFO << "SSL handshake error "<< err);
         TL_SET_STATE(TS_ERROR);
         break;
     }

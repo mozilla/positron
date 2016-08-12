@@ -25,41 +25,41 @@ nsSVGTransform::GetValueAsString(nsAString& aValue) const
       // The spec say that if Y is not provided, it is assumed to be zero.
       if (mMatrix._32 != 0)
         nsTextFormatter::snprintf(buf, sizeof(buf)/sizeof(char16_t),
-            u"translate(%g, %g)",
+            MOZ_UTF16("translate(%g, %g)"),
             mMatrix._31, mMatrix._32);
       else
         nsTextFormatter::snprintf(buf, sizeof(buf)/sizeof(char16_t),
-            u"translate(%g)",
+            MOZ_UTF16("translate(%g)"),
             mMatrix._31);
       break;
     case SVG_TRANSFORM_ROTATE:
       if (mOriginX != 0.0f || mOriginY != 0.0f)
         nsTextFormatter::snprintf(buf, sizeof(buf)/sizeof(char16_t),
-            u"rotate(%g, %g, %g)",
+            MOZ_UTF16("rotate(%g, %g, %g)"),
             mAngle, mOriginX, mOriginY);
       else
         nsTextFormatter::snprintf(buf, sizeof(buf)/sizeof(char16_t),
-            u"rotate(%g)", mAngle);
+            MOZ_UTF16("rotate(%g)"), mAngle);
       break;
     case SVG_TRANSFORM_SCALE:
       if (mMatrix._11 != mMatrix._22)
         nsTextFormatter::snprintf(buf, sizeof(buf)/sizeof(char16_t),
-            u"scale(%g, %g)", mMatrix._11, mMatrix._22);
+            MOZ_UTF16("scale(%g, %g)"), mMatrix._11, mMatrix._22);
       else
         nsTextFormatter::snprintf(buf, sizeof(buf)/sizeof(char16_t),
-            u"scale(%g)", mMatrix._11);
+            MOZ_UTF16("scale(%g)"), mMatrix._11);
       break;
     case SVG_TRANSFORM_SKEWX:
       nsTextFormatter::snprintf(buf, sizeof(buf)/sizeof(char16_t),
-                                u"skewX(%g)", mAngle);
+                                MOZ_UTF16("skewX(%g)"), mAngle);
       break;
     case SVG_TRANSFORM_SKEWY:
       nsTextFormatter::snprintf(buf, sizeof(buf)/sizeof(char16_t),
-                                u"skewY(%g)", mAngle);
+                                MOZ_UTF16("skewY(%g)"), mAngle);
       break;
     case SVG_TRANSFORM_MATRIX:
       nsTextFormatter::snprintf(buf, sizeof(buf)/sizeof(char16_t),
-          u"matrix(%g, %g, %g, %g, %g, %g)",
+          MOZ_UTF16("matrix(%g, %g, %g, %g, %g, %g)"),
                             mMatrix._11, mMatrix._12,
                             mMatrix._21, mMatrix._22,
                             mMatrix._31, mMatrix._32);

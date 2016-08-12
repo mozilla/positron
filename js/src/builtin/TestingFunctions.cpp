@@ -6,9 +6,7 @@
 
 #include "builtin/TestingFunctions.h"
 
-#include "mozilla/FloatingPoint.h"
 #include "mozilla/Move.h"
-#include "mozilla/Snprintf.h"
 #include "mozilla/unused.h"
 
 #include <cmath>
@@ -319,8 +317,8 @@ GC(JSContext* cx, unsigned argc, Value* vp)
 
     char buf[256] = { '\0' };
 #ifndef JS_MORE_DETERMINISTIC
-    snprintf_literal(buf, "before %" PRIuSIZE ", after %" PRIuSIZE "\n",
-                     preBytes, cx->runtime()->gc.usage.gcBytes());
+    JS_snprintf(buf, sizeof(buf), "before %" PRIuSIZE ", after %" PRIuSIZE "\n",
+                preBytes, cx->runtime()->gc.usage.gcBytes());
 #endif
     JSString* str = JS_NewStringCopyZ(cx, buf);
     if (!str)
@@ -409,7 +407,7 @@ GCParameter(JSContext* cx, unsigned argc, Value* vp)
 
     // Request mode.
     if (args.length() == 1) {
-        uint32_t value = JS_GetGCParameter(cx, param);
+        uint32_t value = JS_GetGCParameter(cx->runtime(), param);
         args.rval().setNumber(value);
         return true;
     }
@@ -440,7 +438,7 @@ GCParameter(JSContext* cx, unsigned argc, Value* vp)
     }
 
     if (param == JSGC_MAX_BYTES) {
-        uint32_t gcBytes = JS_GetGCParameter(cx, JSGC_BYTES);
+        uint32_t gcBytes = JS_GetGCParameter(cx->runtime(), JSGC_BYTES);
         if (value < gcBytes) {
             JS_ReportError(cx,
                            "attempt to set maxBytes to the value less than the current "
@@ -533,14 +531,6 @@ SuppressSignalHandlers(JSContext* cx, unsigned argc, Value* vp)
     wasm::SuppressSignalHandlersForTesting(ToBoolean(args[0]));
 
     args.rval().setUndefined();
-    return true;
-}
-
-static bool
-WasmInt64IsSupported(JSContext* cx, unsigned argc, Value* vp)
-{
-    CallArgs args = CallArgsFromVp(argc, vp);
-    args.rval().setBoolean(wasm::IsI64Implemented());
     return true;
 }
 
@@ -873,7 +863,23 @@ GCState(JSContext* cx, unsigned argc, Value* vp)
         return false;
     }
 
-    const char* state = StateName(cx->runtime()->gc.state());
+    const char* state;
+    gc::State globalState = cx->runtime()->gc.state();
+    if (globalState == gc::NO_INCREMENTAL)
+        state = "none";
+    else if (globalState == gc::MARK)
+        state = "mark";
+    else if (globalState == gc::SWEEP)
+        state = "sweep";
+    else if (globalState == gc::FINALIZE)
+        state = "finalize";
+    else if (globalState == gc::COMPACT)
+        state = "compact";
+    else if (globalState == gc::DECOMMIT)
+        state = "decommit";
+    else
+        MOZ_CRASH("Unobserveable global GC state");
+
     JSString* str = JS_NewStringCopyZ(cx, state);
     if (!str)
         return false;
@@ -1097,20 +1103,18 @@ SaveStack(JSContext* cx, unsigned argc, Value* vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
 
-    JS::StackCapture capture((JS::AllFrames()));
+    unsigned maxFrameCount = 0;
     if (args.length() >= 1) {
-        double maxDouble;
-        if (!ToNumber(cx, args[0], &maxDouble))
+        double d;
+        if (!ToNumber(cx, args[0], &d))
             return false;
-        if (mozilla::IsNaN(maxDouble) || maxDouble < 0 || maxDouble > UINT32_MAX) {
+        if (d < 0) {
             ReportValueErrorFlags(cx, JSREPORT_ERROR, JSMSG_UNEXPECTED_TYPE,
                                   JSDVG_SEARCH_STACK, args[0], nullptr,
                                   "not a valid maximum frame count", NULL);
             return false;
         }
-        uint32_t max = uint32_t(maxDouble);
-        if (max > 0)
-            capture = JS::StackCapture(JS::MaxFrames(max));
+        maxFrameCount = d;
     }
 
     JSCompartment* targetCompartment = cx->compartment();
@@ -1130,7 +1134,7 @@ SaveStack(JSContext* cx, unsigned argc, Value* vp)
     RootedObject stack(cx);
     {
         AutoCompartment ac(cx, targetCompartment);
-        if (!JS::CaptureCurrentStack(cx, &stack, mozilla::Move(capture)))
+        if (!JS::CaptureCurrentStack(cx, &stack, maxFrameCount))
             return false;
     }
 
@@ -1138,37 +1142,6 @@ SaveStack(JSContext* cx, unsigned argc, Value* vp)
         return false;
 
     args.rval().setObjectOrNull(stack);
-    return true;
-}
-
-static bool
-CaptureFirstSubsumedFrame(JSContext* cx, unsigned argc, JS::Value* vp)
-{
-    CallArgs args = CallArgsFromVp(argc, vp);
-    if (!args.requireAtLeast(cx, "captureFirstSubsumedFrame", 1))
-        return false;
-
-    if (!args[0].isObject()) {
-        JS_ReportError(cx, "The argument must be an object");
-        return false;
-    }
-
-    RootedObject obj(cx, &args[0].toObject());
-    obj = CheckedUnwrap(obj);
-    if (!obj) {
-        JS_ReportError(cx, "Denied permission to object.");
-        return false;
-    }
-
-    JS::StackCapture capture(JS::FirstSubsumedFrame(cx, obj->compartment()->principals()));
-    if (args.length() > 1)
-        capture.as<JS::FirstSubsumedFrame>().ignoreSelfHosted = JS::ToBoolean(args[1]);
-
-    JS::RootedObject capturedStack(cx);
-    if (!JS::CaptureCurrentStack(cx, &capturedStack, mozilla::Move(capture)))
-        return false;
-
-    args.rval().setObjectOrNull(capturedStack);
     return true;
 }
 
@@ -2402,7 +2375,7 @@ ObjectAddress(JSContext* cx, unsigned argc, Value* vp)
 #else
     void* ptr = js::UncheckedUnwrap(&args[0].toObject(), true);
     char buffer[64];
-    snprintf_literal(buffer, "%p", ptr);
+    JS_snprintf(buffer, sizeof(buffer), "%p", ptr);
 
     JSString* str = JS_NewStringCopyZ(cx, buffer);
     if (!str)
@@ -2443,8 +2416,8 @@ SharedAddress(JSContext* cx, unsigned argc, Value* vp)
     }
     char buffer[64];
     uint32_t nchar =
-        snprintf_literal(buffer, "%p",
-                         obj->as<SharedArrayBufferObject>().dataPointerShared().unwrap(/*safeish*/));
+        JS_snprintf(buffer, sizeof(buffer), "%p",
+                    obj->as<SharedArrayBufferObject>().dataPointerShared().unwrap(/*safeish*/));
 
     JSString* str = JS_NewStringCopyN(cx, buffer, nchar);
     if (!str)
@@ -2693,7 +2666,7 @@ FindPath(JSContext* cx, unsigned argc, Value* vp)
         JS::ubi::Node start(args[0]), target(args[1]);
 
         heaptools::FindPathHandler handler(cx, start, target, &nodes, edges);
-        heaptools::FindPathHandler::Traversal traversal(cx, handler, autoCannotGC);
+        heaptools::FindPathHandler::Traversal traversal(cx->runtime(), handler, autoCannotGC);
         if (!traversal.init() || !traversal.addStart(start)) {
             ReportOutOfMemory(cx);
             return false;
@@ -2822,7 +2795,7 @@ ShortestPaths(JSContext* cx, unsigned argc, Value* vp)
     Vector<Vector<Vector<JS::ubi::EdgeName>>> names(cx);
 
     {
-        JS::AutoCheckCannotGC noGC(cx);
+        JS::AutoCheckCannotGC noGC(cx->runtime());
 
         JS::ubi::NodeSet targets;
         if (!targets.init()) {
@@ -2840,7 +2813,7 @@ ShortestPaths(JSContext* cx, unsigned argc, Value* vp)
         }
 
         JS::ubi::Node root(args[0]);
-        auto maybeShortestPaths = JS::ubi::ShortestPaths::Create(cx, noGC, maxNumPaths,
+        auto maybeShortestPaths = JS::ubi::ShortestPaths::Create(cx->runtime(), noGC, maxNumPaths,
                                                                  root, mozilla::Move(targets));
         if (maybeShortestPaths.isNothing()) {
             ReportOutOfMemory(cx);
@@ -3281,7 +3254,7 @@ struct MajorGC {
 };
 
 static void
-majorGC(JSContext* cx, JSGCStatus status, void* data)
+majorGC(JSRuntime* rt, JSGCStatus status, void* data)
 {
     auto info = static_cast<MajorGC*>(data);
     if (!(info->phases & (1 << status)))
@@ -3289,8 +3262,8 @@ majorGC(JSContext* cx, JSGCStatus status, void* data)
 
     if (info->depth > 0) {
         info->depth--;
-        JS::PrepareForFullGC(cx);
-        JS::GCForReason(cx, GC_NORMAL, JS::gcreason::API);
+        JS::PrepareForFullGC(rt->contextFromMainThread());
+        JS::GCForReason(rt->contextFromMainThread(), GC_NORMAL, JS::gcreason::API);
         info->depth++;
     }
 }
@@ -3301,7 +3274,7 @@ struct MinorGC {
 };
 
 static void
-minorGC(JSContext* cx, JSGCStatus status, void* data)
+minorGC(JSRuntime* rt, JSGCStatus status, void* data)
 {
     auto info = static_cast<MinorGC*>(data);
     if (!(info->phases & (1 << status)))
@@ -3309,7 +3282,7 @@ minorGC(JSContext* cx, JSGCStatus status, void* data)
 
     if (info->active) {
         info->active = false;
-        cx->gc.evictNursery(JS::gcreason::DEBUG_GC);
+        rt->gc.evictNursery(JS::gcreason::DEBUG_GC);
         info->active = true;
     }
 }
@@ -3630,12 +3603,6 @@ static const JSFunctionSpecWithHelp TestingFunctions[] = {
 "  of frames. If 'compartment' is given, allocate the js::SavedFrame instances\n"
 "  with the given object's compartment."),
 
-    JS_FN_HELP("captureFirstSubsumedFrame", CaptureFirstSubsumedFrame, 1, 0,
-"saveStack(object [, shouldIgnoreSelfHosted = true]])",
-"  Capture a stack back to the first frame whose principals are subsumed by the\n"
-"  object's compartment's principals. If 'shouldIgnoreSelfHosted' is given,\n"
-"  control whether self-hosted frames are considered when checking principals."),
-
     JS_FN_HELP("callFunctionFromNativeFrame", CallFunctionFromNativeFrame, 1, 0,
 "callFunctionFromNativeFrame(function)",
 "  Call 'function' with a (C++-)native frame on stack.\n"
@@ -3861,10 +3828,6 @@ gc::ZealModeHelpText),
 "suppressSignalHandlers(suppress)",
 "  This function allows artificially suppressing signal handler support, even if the underlying "
 "  platform supports it."),
-
-    JS_FN_HELP("wasmInt64IsSupported", WasmInt64IsSupported, 0, 0,
-"wasmInt64IsSupported()",
-"  Returns a boolean indicating whether WebAssembly has 64bit integer support on the current device."),
 
     JS_FN_HELP("wasmTextToBinary", WasmTextToBinary, 1, 0,
 "wasmTextToBinary(str)",

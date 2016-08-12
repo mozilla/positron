@@ -79,8 +79,7 @@ function loadRecordingFromFile(file) {
       let recordingData;
 
       try {
-        let string = NetUtil.readInputStreamToString(inputStream,
-                                                     inputStream.available());
+        let string = NetUtil.readInputStreamToString(inputStream, inputStream.available());
         recordingData = JSON.parse(string);
       } catch (e) {
         reject(new Error("Could not read recording data file."));

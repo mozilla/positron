@@ -14,6 +14,7 @@
 
 "use strict";
 
+loader.lazyRequireGetter(this, "CSS", "CSS");
 const promise = require("promise");
 const {getCSSLexer} = require("devtools/shared/css-lexer");
 const {Task} = require("devtools/shared/task");
@@ -346,9 +347,7 @@ function parseDeclarationsInternal(isCssPropertyKnown, inputString,
         if (hasBang) {
           current += "!";
         }
-        // Re-escape the token to avoid dequoting problems.
-        // See bug 1287620.
-        current += CSS.escape(token.text);
+        current += token.text;
       }
     } else if (token.tokenType === "symbol" && token.text === "!") {
       hasBang = true;

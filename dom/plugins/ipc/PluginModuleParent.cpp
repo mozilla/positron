@@ -1914,9 +1914,9 @@ PluginModuleParent::RecvBackUpXResources(const FileDescriptor& aXSocketFd)
 #else
     MOZ_ASSERT(0 > mPluginXSocketFdDup.get(),
                "Already backed up X resources??");
+    mPluginXSocketFdDup.forget();
     if (aXSocketFd.IsValid()) {
-      auto rawFD = aXSocketFd.ClonePlatformHandle();
-      mPluginXSocketFdDup.reset(rawFD.release());
+      mPluginXSocketFdDup.reset(aXSocketFd.PlatformHandle());
     }
 #endif
     return true;
@@ -2714,16 +2714,11 @@ PluginModuleParent::NPP_NewInternal(NPMIMEType pluginType, NPP instance,
     if (mIsFlashPlugin) {
         parentInstance->InitMetadata(strPluginType, srcAttribute);
 #ifdef XP_WIN
-        bool supportsAsyncRender = false;
-        CallModuleSupportsAsyncRender(&supportsAsyncRender);
+        // Force windowless mode (bug 1201904) when sandbox level >= 2 or Win64
 #ifdef _WIN64
-        // For 64-bit builds force windowless if the flash library doesn't support
-        // async rendering regardless of sandbox level.
-        if (!supportsAsyncRender) {
+        {
 #else
-        // For 32-bit builds force windowless if the flash library doesn't support
-        // async rendering and the sandbox level is 2 or greater.
-        if (!supportsAsyncRender && mSandboxLevel >= 2) {
+        if (mSandboxLevel >= 2) {
 #endif
            NS_NAMED_LITERAL_CSTRING(wmodeAttributeName, "wmode");
            NS_NAMED_LITERAL_CSTRING(opaqueAttributeValue, "opaque");

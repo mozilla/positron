@@ -24,7 +24,6 @@ using namespace mozilla::dom;
 using namespace mozilla::gfx;
 
 nsSVGFilterInstance::nsSVGFilterInstance(const nsStyleFilter& aFilter,
-                                         nsIFrame* aTargetFrame,
                                          nsIContent* aTargetContent,
                                          const UserSpaceMetrics& aMetrics,
                                          const gfxRect& aTargetBBox,
@@ -40,7 +39,7 @@ nsSVGFilterInstance::nsSVGFilterInstance(const nsStyleFilter& aFilter,
   mInitialized(false) {
 
   // Get the filter frame.
-  mFilterFrame = GetFilterFrame(aTargetFrame);
+  mFilterFrame = GetFilterFrame();
   if (!mFilterFrame) {
     return;
   }
@@ -114,27 +113,22 @@ nsSVGFilterInstance::ComputeBounds()
 }
 
 nsSVGFilterFrame*
-nsSVGFilterInstance::GetFilterFrame(nsIFrame* aTargetFrame)
+nsSVGFilterInstance::GetFilterFrame()
 {
   if (mFilter.GetType() != NS_STYLE_FILTER_URL) {
     // The filter is not an SVG reference filter.
     return nullptr;
   }
 
-  // Get the target element to use as a point of reference for looking up the
-  // filter element.
-  if (!mTargetContent) {
+  nsIURI* url = mFilter.GetURL();
+  if (!url) {
+    NS_NOTREACHED("an nsStyleFilter of type URL should have a non-null URL");
     return nullptr;
   }
 
-  // aTargetFrame can be null if this filter belongs to a
-  // CanvasRenderingContext2D.
-  nsCOMPtr<nsIURI> url = aTargetFrame
-    ? nsSVGEffects::GetFilterURI(aTargetFrame, mFilter)
-    : mFilter.GetURL()->Resolve(mTargetContent);
-
-  if (!url) {
-    NS_NOTREACHED("an nsStyleFilter of type URL should have a non-null URL");
+  // Get the target element to use as a point of reference for looking up the
+  // filter element.
+  if (!mTargetContent) {
     return nullptr;
   }
 

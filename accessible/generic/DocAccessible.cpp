@@ -764,11 +764,6 @@ DocAccessible::AttributeChanged(nsIDocument* aDocument,
     accessible = this;
   }
 
-  if (!accessible->IsBoundToParent()) {
-    MOZ_ASSERT_UNREACHABLE("DOM attribute change on accessible detached from tree");
-    return;
-  }
-
   // Fire accessible events iff there's an accessible, otherwise we consider
   // the accessible state wasn't changed, i.e. its state is initial state.
   AttributeChangedImpl(accessible, aNameSpaceID, aAttribute);
@@ -1135,26 +1130,10 @@ DocAccessible::ContentInserted(nsIDocument* aDocument, nsIContent* aContainer,
 }
 
 void
-DocAccessible::ContentRemoved(nsIDocument* aDocument,
-                              nsIContent* aContainerNode,
-                              nsIContent* aChildNode, int32_t /* unused */,
-                              nsIContent* aPreviousSiblingNode)
+DocAccessible::ContentRemoved(nsIDocument* aDocument, nsIContent* aContainer,
+                              nsIContent* aChild, int32_t /* unused */,
+                              nsIContent* aPreviousSibling)
 {
-#ifdef A11Y_LOG
-  if (logging::IsEnabled(logging::eTree)) {
-    logging::MsgBegin("TREE", "DOM content removed; doc: %p", this);
-    logging::Node("container node", aContainerNode);
-    logging::Node("content node", aChildNode);
-    logging::MsgEnd();
-  }
-#endif
-  // This one and content removal notification from layout may result in
-  // double processing of same subtrees. If it pops up in profiling, then
-  // consider reusing a document node cache to reject these notifications early.
-  Accessible* container = GetAccessibleOrContainer(aContainerNode);
-  if (container) {
-    UpdateTreeOnRemoval(container, aChildNode);
-  }
 }
 
 void
@@ -1684,7 +1663,7 @@ public:
   InsertIterator(Accessible* aContext,
                  const nsTArray<nsCOMPtr<nsIContent> >* aNodes) :
     mChild(nullptr), mChildBefore(nullptr), mWalker(aContext),
-    mNodes(aNodes), mNodesIdx(0)
+    mStopNode(nullptr), mNodes(aNodes), mNodesIdx(0)
   {
     MOZ_ASSERT(aContext, "No context");
     MOZ_ASSERT(aNodes, "No nodes to search for accessible elements");
@@ -1712,6 +1691,7 @@ private:
   Accessible* mChild;
   Accessible* mChildBefore;
   TreeWalker mWalker;
+  nsIContent* mStopNode;
 
   const nsTArray<nsCOMPtr<nsIContent> >* mNodes;
   uint32_t mNodesIdx;
@@ -1721,7 +1701,7 @@ bool
 InsertIterator::Next()
 {
   if (mNodesIdx > 0) {
-    Accessible* nextChild = mWalker.Next();
+    Accessible* nextChild = mWalker.Next(mStopNode);
     if (nextChild) {
       mChildBefore = mChild;
       mChild = nextChild;
@@ -1763,21 +1743,20 @@ InsertIterator::Next()
 
     // If inserted nodes are siblings then just move the walker next.
     if (prevNode && prevNode->GetNextSibling() == node) {
-      Accessible* nextChild = mWalker.Scope(node);
+      mStopNode = node;
+      Accessible* nextChild = mWalker.Next(mStopNode);
       if (nextChild) {
         mChildBefore = mChild;
         mChild = nextChild;
         return true;
       }
     }
-    else {
-      TreeWalker finder(container);
-      if (finder.Seek(node)) {
-        mChild = mWalker.Scope(node);
-        if (mChild) {
-          mChildBefore = finder.Prev();
-          return true;
-        }
+    else if (mWalker.Seek(node)) {
+      mStopNode = node;
+      mChildBefore = mWalker.Prev();
+      mChild = mWalker.Next(mStopNode);
+      if (mChild) {
+        return true;
       }
     }
   }

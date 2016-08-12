@@ -4,7 +4,6 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-Components.utils.import("resource://gre/modules/ContextualIdentityService.jsm");
 Components.utils.import("resource://gre/modules/PrivateBrowsingUtils.jsm");
 Components.utils.import("resource://gre/modules/InlineSpellChecker.jsm");
 Components.utils.import("resource://gre/modules/LoginManagerContextMenu.jsm");
@@ -12,6 +11,8 @@ Components.utils.import("resource://gre/modules/BrowserUtils.jsm");
 Components.utils.import("resource://gre/modules/XPCOMUtils.jsm");
 Components.utils.import("resource://gre/modules/Services.jsm");
 
+XPCOMUtils.defineLazyModuleGetter(this, "ContextualIdentityService",
+                                  "resource://gre/modules/ContextualIdentityService.jsm");
 
 XPCOMUtils.defineLazyModuleGetter(this, "LoginHelper",
   "resource://gre/modules/LoginHelper.jsm");
@@ -223,9 +224,8 @@ nsContextMenu.prototype = {
     this.showItem("context-sendvideo", this.onVideo);
     this.showItem("context-castvideo", this.onVideo);
     this.showItem("context-sendaudio", this.onAudio);
-    let mediaIsBlob = this.mediaURL.startsWith("blob:");
-    this.setItemAttr("context-sendvideo", "disabled", !this.mediaURL || mediaIsBlob);
-    this.setItemAttr("context-sendaudio", "disabled", !this.mediaURL || mediaIsBlob);
+    this.setItemAttr("context-sendvideo", "disabled", !this.mediaURL);
+    this.setItemAttr("context-sendaudio", "disabled", !this.mediaURL);
     let shouldShowCast = Services.prefs.getBoolPref("browser.casting.enabled");
     // getServicesForVideo alone would be sufficient here (it depends on
     // SimpleServiceDiscovery.services), but SimpleServiceDiscovery is guaranteed
@@ -383,7 +383,7 @@ nsContextMenu.prototype = {
     this.showItem("context-sharelink", shareEnabled && (this.onLink || this.onPlainTextLink) && !this.onMailtoLink);
     this.showItem("context-shareimage", shareEnabled && this.onImage);
     this.showItem("context-sharevideo", shareEnabled && this.onVideo);
-    this.setItemAttr("context-sharevideo", "disabled", !this.mediaURL || this.mediaURL.startsWith("blob:"));
+    this.setItemAttr("context-sharevideo", "disabled", !this.mediaURL);
   },
 
   initSpellingItems: function() {
@@ -597,10 +597,14 @@ nsContextMenu.prototype = {
       // browser is remote or not.
       let onNewNode = inspector.selection.once("new-node-front");
 
-      this.browser.messageManager.sendAsyncMessage("debug:inspect", {}, {node: this.target});
-      inspector.walker.findInspectingNode().then(nodeFront => {
-        inspector.selection.setNodeFront(nodeFront, "browser-context-menu");
-      });
+      if (this.isRemote) {
+        this.browser.messageManager.sendAsyncMessage("debug:inspect", {}, {node: this.target});
+        inspector.walker.findInspectingNode().then(nodeFront => {
+          inspector.selection.setNodeFront(nodeFront, "browser-context-menu");
+        });
+      } else {
+        inspector.selection.setNode(this.target, "browser-context-menu");
+      }
 
       return onNewNode.then(() => {
         // Now that the node has been selected, wait until the inspector is
@@ -1141,16 +1145,16 @@ nsContextMenu.prototype = {
                                                  null, { target: this.target });
   },
 
-  _canvasToBlobURL: function(target) {
+  _canvasToDataURL: function(target) {
     let mm = this.browser.messageManager;
     return new Promise(function(resolve) {
-      mm.sendAsyncMessage("ContextMenu:Canvas:ToBlobURL", {}, { target });
+      mm.sendAsyncMessage("ContextMenu:Canvas:ToDataURL", {}, { target });
 
       let onMessage = (message) => {
-        mm.removeMessageListener("ContextMenu:Canvas:ToBlobURL:Result", onMessage);
-        resolve(message.data.blobURL);
+        mm.removeMessageListener("ContextMenu:Canvas:ToDataURL:Result", onMessage);
+        resolve(message.data.dataURL);
       };
-      mm.addMessageListener("ContextMenu:Canvas:ToBlobURL:Result", onMessage);
+      mm.addMessageListener("ContextMenu:Canvas:ToDataURL:Result", onMessage);
     });
   },
 
@@ -1158,8 +1162,8 @@ nsContextMenu.prototype = {
   viewMedia: function(e) {
     let referrerURI = gContextMenuContentData.documentURIObject;
     if (this.onCanvas) {
-      this._canvasToBlobURL(this.target).then(function(blobURL) {
-        openUILink(blobURL, e, { disallowInheritPrincipal: true,
+      this._canvasToDataURL(this.target).then(function(dataURL) {
+        openUILink(dataURL, e, { disallowInheritPrincipal: true,
                                  referrerURI: referrerURI });
       }, Cu.reportError);
     }
@@ -1436,8 +1440,8 @@ nsContextMenu.prototype = {
     let isPrivate = PrivateBrowsingUtils.isBrowserPrivate(this.browser);
     if (this.onCanvas) {
       // Bypass cache, since it's a data: URL.
-      this._canvasToBlobURL(this.target).then(function(blobURL) {
-        saveImageURL(blobURL, "canvas.png", "SaveImageTitle",
+      this._canvasToDataURL(this.target).then(function(dataURL) {
+        saveImageURL(dataURL, "canvas.png", "SaveImageTitle",
                      true, false, referrerURI, null, null, null,
                      isPrivate);
       }, Cu.reportError);
@@ -1642,10 +1646,7 @@ nsContextMenu.prototype = {
   },
 
   isMediaURLReusable: function(aURL) {
-    if (aURL.startsWith("blob:")) {
-      return URL.isValidURL(aURL);
-    }
-    return true;
+    return !/^(?:blob|mediasource):/.test(aURL);
   },
 
   toString: function () {

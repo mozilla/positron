@@ -63,8 +63,8 @@ public:
                                 const nsDisplayListSet& aLists) override;
 
   virtual void Reflow(nsPresContext*           aPresContext,
-                      ReflowOutput&     aDesiredSize,
-                      const ReflowInput& aReflowInput,
+                      nsHTMLReflowMetrics&     aDesiredSize,
+                      const nsHTMLReflowState& aReflowState,
                       nsReflowStatus&          aStatus) override;
 
   virtual nscoord
@@ -101,8 +101,8 @@ protected:
    * everything before that point.)
    */
   void DoFlexLayout(nsPresContext*           aPresContext,
-                    ReflowOutput&     aDesiredSize,
-                    const ReflowInput& aReflowInput,
+                    nsHTMLReflowMetrics&     aDesiredSize,
+                    const nsHTMLReflowState& aReflowState,
                     nsReflowStatus&          aStatus,
                     nscoord aContentBoxMainSize,
                     nscoord aAvailableBSizeForContent,
@@ -139,7 +139,7 @@ protected:
    */
   mozilla::UniquePtr<FlexItem> GenerateFlexItemForChild(nsPresContext* aPresContext,
                                      nsIFrame* aChildFrame,
-                                     const ReflowInput& aParentReflowInput,
+                                     const nsHTMLReflowState& aParentReflowState,
                                      const FlexboxAxisTracker& aAxisTracker);
 
   /**
@@ -151,7 +151,7 @@ protected:
   nscoord MeasureFlexItemContentHeight(nsPresContext* aPresContext,
                                        FlexItem& aFlexItem,
                                        bool aForceVerticalResizeForMeasuringReflow,
-                                       const ReflowInput& aParentReflowInput);
+                                       const nsHTMLReflowState& aParentReflowState);
 
   /**
    * This method resolves an "auto" flex-basis and/or min-main-size value
@@ -160,7 +160,7 @@ protected:
    */
   void ResolveAutoFlexBasisAndMinSize(nsPresContext* aPresContext,
                                       FlexItem& aFlexItem,
-                                      const ReflowInput& aItemReflowInput,
+                                      const nsHTMLReflowState& aItemReflowState,
                                       const FlexboxAxisTracker& aAxisTracker);
 
   // Creates FlexItems for all of our child frames, arranged in a list of
@@ -168,17 +168,17 @@ protected:
   // return value has to be |nsresult|, in case we have to reflow a child
   // to establish its flex base size and that reflow fails.
   void GenerateFlexLines(nsPresContext* aPresContext,
-                         const ReflowInput& aReflowInput,
+                         const nsHTMLReflowState& aReflowState,
                          nscoord aContentBoxMainSize,
                          nscoord aAvailableBSizeForContent,
                          const nsTArray<StrutInfo>& aStruts,
                          const FlexboxAxisTracker& aAxisTracker,
                          mozilla::LinkedList<FlexLine>& aLines);
 
-  nscoord GetMainSizeFromReflowInput(const ReflowInput& aReflowInput,
+  nscoord GetMainSizeFromReflowState(const nsHTMLReflowState& aReflowState,
                                      const FlexboxAxisTracker& aAxisTracker);
 
-  nscoord ComputeCrossSize(const ReflowInput& aReflowInput,
+  nscoord ComputeCrossSize(const nsHTMLReflowState& aReflowState,
                            const FlexboxAxisTracker& aAxisTracker,
                            nscoord aSumLineCrossSizes,
                            nscoord aAvailableBSizeForContent,
@@ -187,7 +187,7 @@ protected:
 
   void SizeItemInCrossAxis(nsPresContext* aPresContext,
                            const FlexboxAxisTracker& aAxisTracker,
-                           ReflowInput& aChildReflowInput,
+                           nsHTMLReflowState& aChildReflowState,
                            FlexItem& aItem);
 
   /**
@@ -198,14 +198,14 @@ protected:
    * for the flex item at the correct size, and hence can skip its final reflow
    * (but still need to move it to the right final position).
    *
-   * @param aReflowInput    The flex container's reflow state.
+   * @param aReflowState    The flex container's reflow state.
    * @param aItem           The flex item whose frame should be moved.
    * @param aFramePos       The position where the flex item's frame should
    *                        be placed. (pre-relative positioning)
    * @param aContainerSize  The flex container's size (required by some methods
    *                        that we call, to interpret aFramePos correctly).
    */
-  void MoveFlexItemToFinalPosition(const ReflowInput& aReflowInput,
+  void MoveFlexItemToFinalPosition(const nsHTMLReflowState& aReflowState,
                                    const FlexItem& aItem,
                                    mozilla::LogicalPoint& aFramePos,
                                    const nsSize& aContainerSize);
@@ -215,7 +215,7 @@ protected:
    *
    * @param aPresContext    The presentation context being used in reflow.
    * @param aAxisTracker    A FlexboxAxisTracker with the flex container's axes.
-   * @param aReflowInput    The flex container's reflow state.
+   * @param aReflowState    The flex container's reflow state.
    * @param aItem           The flex item to be reflowed.
    * @param aFramePos       The position where the flex item's frame should
    *                        be placed. (pre-relative positioning)
@@ -224,7 +224,7 @@ protected:
    */
   void ReflowFlexItem(nsPresContext* aPresContext,
                       const FlexboxAxisTracker& aAxisTracker,
-                      const ReflowInput& aReflowInput,
+                      const nsHTMLReflowState& aReflowState,
                       const FlexItem& aItem,
                       mozilla::LogicalPoint& aFramePos,
                       const nsSize& aContainerSize);

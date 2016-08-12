@@ -7,9 +7,8 @@
 #ifndef GECKO_TASK_TRACER_H
 #define GECKO_TASK_TRACER_H
 
-#include "mozilla/UniquePtr.h"
 #include "nsCOMPtr.h"
-#include "nsTArrayForwardDeclare.h"
+#include "mozilla/UniquePtr.h"
 
 /**
  * TaskTracer provides a way to trace the correlation between different tasks
@@ -28,6 +27,7 @@
 class Task;
 class nsIRunnable;
 class nsCString;
+template <class> class nsTArray;
 
 namespace mozilla {
 

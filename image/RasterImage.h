@@ -27,8 +27,6 @@
 #include "nsThreadUtils.h"
 #include "DecodePool.h"
 #include "DecoderFactory.h"
-#include "FrameAnimator.h"
-#include "ImageMetadata.h"
 #include "Orientation.h"
 #include "nsIObserver.h"
 #include "mozilla/Attributes.h"
@@ -135,8 +133,7 @@ class Image;
 namespace image {
 
 class Decoder;
-struct DecoderFinalStatus;
-struct DecoderTelemetry;
+class FrameAnimator;
 class ImageMetadata;
 class SourceBuffer;
 
@@ -165,6 +162,9 @@ public:
   // Methods inherited from Image
   virtual void OnSurfaceDiscarded() override;
 
+  /* The total number of frames in this image. */
+  uint32_t GetNumFrames() const { return mFrameCount; }
+
   virtual size_t SizeOfSourceWithComputedFallback(MallocSizeOf aMallocSizeOf)
     const override;
   virtual void CollectSizeOfSurfaces(nsTArray<SurfaceMemoryCounter>& aCounters,
@@ -178,6 +178,8 @@ public:
   // Decoder callbacks.
   //////////////////////////////////////////////////////////////////////////////
 
+  void OnAddedFrame(uint32_t aNewFrameCount, const nsIntRect& aNewRefreshArea);
+
   /**
    * Sends the provided progress notifications to ProgressTracker.
    *
@@ -185,47 +187,23 @@ public:
    *
    * @param aProgress    The progress notifications to send.
    * @param aInvalidRect An invalidation rect to send.
-   * @param aFrameCount  If Some(), an updated count of the number of frames of
-   *                     animation the decoder has finished decoding so far. This
-   *                     is a lower bound for the total number of animation
-   *                     frames this image has.
    * @param aFlags       The surface flags used by the decoder that generated
    *                     these notifications, or DefaultSurfaceFlags() if the
    *                     notifications don't come from a decoder.
    */
   void NotifyProgress(Progress aProgress,
-                      const gfx::IntRect& aInvalidRect = nsIntRect(),
-                      const Maybe<uint32_t>& aFrameCount = Nothing(),
+                      const nsIntRect& aInvalidRect = nsIntRect(),
                       SurfaceFlags aSurfaceFlags = DefaultSurfaceFlags());
 
   /**
-   * Records decoding results, sends out any final notifications, updates the
-   * state of this image, and records telemetry.
+   * Records telemetry and does final teardown of the provided decoder.
    *
    * Main-thread only.
-   *
-   * @param aStatus      Final status information about the decoder. (Whether it
-   *                     encountered an error, etc.)
-   * @param aMetadata    Metadata about this image that the decoder gathered.
-   * @param aTelemetry   Telemetry data about the decoder.
-   * @param aProgress    Any final progress notifications to send.
-   * @param aInvalidRect Any final invalidation rect to send.
-   * @param aFrameCount  If Some(), a final updated count of the number of frames
-   *                     of animation the decoder has finished decoding so far.
-   *                     This is a lower bound for the total number of animation
-   *                     frames this image has.
-   * @param aFlags       The surface flags used by the decoder.
    */
-  void NotifyDecodeComplete(const DecoderFinalStatus& aStatus,
-                            const ImageMetadata& aMetadata,
-                            const DecoderTelemetry& aTelemetry,
-                            Progress aProgress,
-                            const gfx::IntRect& aInvalidRect,
-                            const Maybe<uint32_t>& aFrameCount,
-                            SurfaceFlags aSurfaceFlags);
+  void FinalizeDecoder(Decoder* aDecoder);
 
-  // Helper method for NotifyDecodeComplete.
-  void ReportDecoderError();
+  // Helper method for FinalizeDecoder.
+  void ReportDecoderError(Decoder* aDecoder);
 
 
   //////////////////////////////////////////////////////////////////////////////
@@ -280,6 +258,9 @@ private:
                           gfx::SamplingFilter aSamplingFilter,
                           uint32_t aFlags);
 
+  already_AddRefed<gfx::SourceSurface> CopyFrame(uint32_t aWhichFrame,
+                                             uint32_t aFlags);
+
   Pair<DrawResult, RefPtr<gfx::SourceSurface>>
     GetFrameInternal(const gfx::IntSize& aSize,
                      uint32_t aWhichFrame,
@@ -294,6 +275,8 @@ private:
   uint32_t GetCurrentFrameIndex() const;
   uint32_t GetRequestedFrameIndex(uint32_t aWhichFrame) const;
 
+  nsIntRect GetFirstFrameRect();
+
   Pair<DrawResult, RefPtr<layers::Image>>
     GetCurrentImage(layers::ImageContainer* aContainer, uint32_t aFlags);
 
@@ -304,7 +287,7 @@ private:
   // never unlock so that animated images always have their lock count >= 1. In
   // that case we use our animation consumers count as a proxy for lock count.
   bool IsUnlocked() {
-    return (mLockCount == 0 || (mAnimationState && mAnimationConsumers == 0));
+    return (mLockCount == 0 || (mAnim && mAnimationConsumers == 0));
   }
 
 
@@ -367,10 +350,7 @@ private: // data
   nsCOMPtr<nsIProperties>   mProperties;
 
   /// If this image is animated, a FrameAnimator which manages its animation.
-  UniquePtr<FrameAnimator> mFrameAnimator;
-
-  /// Animation timeline and other state for animation images.
-  Maybe<AnimationState> mAnimationState;
+  UniquePtr<FrameAnimator> mAnim;
 
   // Image locking.
   uint32_t                   mLockCount;
@@ -402,6 +382,9 @@ private: // data
 
   // The source data for this image.
   NotNull<RefPtr<SourceBuffer>>  mSourceBuffer;
+
+  // The number of frames this image has.
+  uint32_t                   mFrameCount;
 
   // Boolean flags (clustered together to conserve space):
   bool                       mHasSize:1;       // Has SetSize() been called?

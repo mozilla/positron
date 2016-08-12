@@ -49,7 +49,7 @@ class AstName
   public:
     template <size_t Length>
     explicit AstName(const char16_t (&str)[Length]) : begin_(str), end_(str + Length - 1) {
-      MOZ_ASSERT(str[Length - 1] == u'\0');
+      MOZ_ASSERT(str[Length - 1] == MOZ_UTF16('\0'));
     }
 
     AstName(const char16_t* begin, size_t length) : begin_(begin), end_(begin + length) {}
@@ -171,18 +171,8 @@ class AstSig : public AstBase
     }
 };
 
-const uint32_t AstNodeUnknownOffset = 0;
-
 class AstNode : public AstBase
-{
-    uint32_t offset_; // if applicable, offset in the binary format file
-
-  public:
-    AstNode() : offset_(AstNodeUnknownOffset) {}
-
-    uint32_t offset() const { return offset_; }
-    void setOffset(uint32_t offset) { offset_ = offset; }
-};
+{};
 
 enum class AstExprKind
 {
@@ -195,13 +185,11 @@ enum class AstExprKind
     ComparisonOperator,
     Const,
     ConversionOperator,
-    GetGlobal,
     GetLocal,
     If,
     Load,
     Nop,
     Return,
-    SetGlobal,
     SetLocal,
     Store,
     TernaryOperator,
@@ -286,41 +274,6 @@ class AstSetLocal : public AstExpr
     {}
     AstRef& local() {
         return local_;
-    }
-    AstExpr& value() const {
-        return value_;
-    }
-};
-
-class AstGetGlobal : public AstExpr
-{
-    AstRef global_;
-
-  public:
-    static const AstExprKind Kind = AstExprKind::GetGlobal;
-    explicit AstGetGlobal(AstRef global)
-      : AstExpr(Kind),
-        global_(global)
-    {}
-    AstRef& global() {
-        return global_;
-    }
-};
-
-class AstSetGlobal : public AstExpr
-{
-    AstRef global_;
-    AstExpr& value_;
-
-  public:
-    static const AstExprKind Kind = AstExprKind::SetGlobal;
-    AstSetGlobal(AstRef global, AstExpr& value)
-      : AstExpr(Kind),
-        global_(global),
-        value_(value)
-    {}
-    AstRef& global() {
-        return global_;
     }
     AstExpr& value() const {
         return value_;
@@ -564,42 +517,14 @@ class AstResizable
     const Maybe<uint32_t>& maximum() const { return maximum_; }
 };
 
-class AstGlobal : public AstNode
-{
-    AstName name_;
-    uint32_t flags_;
-    ValType type_;
-    Maybe<AstExpr*> init_;
-
-  public:
-    AstGlobal() : flags_(0), type_(ValType::Limit)
-    {}
-
-    explicit AstGlobal(AstName name, ValType type, uint32_t flags,
-                       Maybe<AstExpr*> init = Maybe<AstExpr*>())
-      : name_(name), flags_(flags), type_(type), init_(init)
-    {}
-
-    AstName name() const { return name_; }
-    uint32_t flags() const { return flags_; }
-    ValType type() const { return type_; }
-
-    bool hasInit() const { return !!init_; }
-    AstExpr& init() const { MOZ_ASSERT(hasInit()); return **init_; }
-};
-
-typedef AstVector<AstGlobal*> AstGlobalVector;
-
 class AstImport : public AstNode
 {
     AstName name_;
     AstName module_;
     AstName field_;
     DefinitionKind kind_;
-
     AstRef funcSig_;
     AstResizable resizable_;
-    AstGlobal global_;
 
   public:
     AstImport(AstName name, AstName module, AstName field, AstRef funcSig)
@@ -608,48 +533,30 @@ class AstImport : public AstNode
     AstImport(AstName name, AstName module, AstName field, DefinitionKind kind, AstResizable resizable)
       : name_(name), module_(module), field_(field), kind_(kind), resizable_(resizable)
     {}
-    AstImport(AstName name, AstName module, AstName field, AstGlobal global)
-      : name_(name), module_(module), field_(field), kind_(DefinitionKind::Global), global_(global)
-    {}
-
     AstName name() const { return name_; }
     AstName module() const { return module_; }
     AstName field() const { return field_; }
-
     DefinitionKind kind() const { return kind_; }
-    AstRef& funcSig() {
-        MOZ_ASSERT(kind_ == DefinitionKind::Function);
-        return funcSig_;
-    }
-    AstResizable resizable() const {
-        MOZ_ASSERT(kind_ == DefinitionKind::Memory || kind_ == DefinitionKind::Table);
-        return resizable_;
-    }
-    const AstGlobal& global() const {
-        MOZ_ASSERT(kind_ == DefinitionKind::Global);
-        return global_;
-    }
+    AstRef& funcSig() { MOZ_ASSERT(kind_ == DefinitionKind::Function); return funcSig_; }
+    AstResizable resizable() const { MOZ_ASSERT(kind_ != DefinitionKind::Function); return resizable_; }
 };
 
 class AstExport : public AstNode
 {
     AstName name_;
     DefinitionKind kind_;
-    AstRef ref_;
+    AstRef func_;
 
   public:
-    AstExport(AstName name, DefinitionKind kind, AstRef ref)
-      : name_(name), kind_(kind), ref_(ref)
+    AstExport(AstName name, AstRef func)
+      : name_(name), kind_(DefinitionKind::Function), func_(func)
     {}
     explicit AstExport(AstName name, DefinitionKind kind)
       : name_(name), kind_(kind)
     {}
     AstName name() const { return name_; }
     DefinitionKind kind() const { return kind_; }
-    AstRef& ref() {
-        MOZ_ASSERT(kind_ == DefinitionKind::Function || kind_ == DefinitionKind::Global);
-        return ref_;
-    }
+    AstRef& func() { MOZ_ASSERT(kind_ == DefinitionKind::Function); return func_; }
 };
 
 class AstDataSegment : public AstNode
@@ -669,15 +576,14 @@ typedef AstVector<AstDataSegment*> AstDataSegmentVector;
 
 class AstElemSegment : public AstNode
 {
-    AstExpr* offset_;
+    uint32_t offset_;
     AstRefVector elems_;
 
   public:
-    AstElemSegment(AstExpr* offset, AstRefVector&& elems)
+    AstElemSegment(uint32_t offset, AstRefVector&& elems)
       : offset_(offset), elems_(Move(elems))
     {}
-
-    AstExpr* offset() const { return offset_; }
+    uint32_t offset() const { return offset_; }
     AstRefVector& elems() { return elems_; }
     const AstRefVector& elems() const { return elems_; }
 };
@@ -720,7 +626,6 @@ class AstModule : public AstNode
     FuncVector           funcs_;
     AstDataSegmentVector dataSegments_;
     AstElemSegmentVector elemSegments_;
-    AstGlobalVector      globals_;
 
   public:
     explicit AstModule(LifoAlloc& lifo)
@@ -731,8 +636,7 @@ class AstModule : public AstNode
         exports_(lifo),
         funcs_(lifo),
         dataSegments_(lifo),
-        elemSegments_(lifo),
-        globals_(lifo)
+        elemSegments_(lifo)
     {}
     bool init() {
         return sigMap_.init();
@@ -813,23 +717,17 @@ class AstModule : public AstNode
     const FuncVector& funcs() const {
         return funcs_;
     }
-    bool append(AstImport* imp) {
-        return imports_.append(imp);
-    }
     const ImportVector& imports() const {
         return imports_;
+    }
+    bool append(AstImport* imp) {
+        return imports_.append(imp);
     }
     bool append(AstExport* exp) {
         return exports_.append(exp);
     }
     const ExportVector& exports() const {
         return exports_;
-    }
-    bool append(AstGlobal* glob) {
-        return globals_.append(glob);
-    }
-    const AstGlobalVector& globals() const {
-        return globals_;
     }
 };
 

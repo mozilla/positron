@@ -31,8 +31,8 @@
 #include "nsIObjectInputStream.h"
 #include "nsIObjectOutputStream.h"
 #include "nsScriptSecurityManager.h"
-#include "nsIPermissionManager.h"
 #include "nsContentUtils.h"
+
 #include "jsfriendapi.h"
 
 using namespace mozilla;
@@ -437,16 +437,20 @@ InitGlobalObjectOptions(JS::CompartmentOptions& aOptions,
     if (isSystem) {
         // Make sure [SecureContext] APIs are visible:
         aOptions.creationOptions().setSecureContext(true);
+    }
 
-#if 0 // TODO: Reenable in Bug 1288653
-        // Enable the ECMA-402 experimental formatToParts in any chrome page
+    short status = aPrincipal->GetAppStatus();
+
+    // Enable the ECMA-402 experimental formatToParts in certified apps.
+    if (status == nsIPrincipal::APP_STATUS_CERTIFIED) {
         aOptions.creationOptions()
                 .setExperimentalDateTimeFormatFormatToPartsEnabled(true);
-#endif
     }
 
     if (shouldDiscardSystemSource) {
-        bool discardSource = isSystem;
+        bool discardSource = isSystem ||
+                             (status == nsIPrincipal::APP_STATUS_PRIVILEGED ||
+                              status == nsIPrincipal::APP_STATUS_CERTIFIED);
 
         aOptions.behaviors().setDiscardSource(discardSource);
     }
@@ -538,7 +542,7 @@ NativeInterface2JSObject(HandleObject aScope,
     nsresult rv;
     xpcObjectHelper helper(aCOMObj, aCache);
     if (!XPCConvert::NativeInterface2JSObject(aVal, aHolder, helper, aIID,
-                                              aAllowWrapping, &rv))
+                                              nullptr, aAllowWrapping, &rv))
         return rv;
 
     MOZ_ASSERT(aAllowWrapping || !xpc::WrapperFactory::IsXrayWrapper(&aVal.toObject()),

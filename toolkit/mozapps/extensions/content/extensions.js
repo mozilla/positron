@@ -26,8 +26,6 @@ const SIGNING_REQUIRED = CONSTANTS.REQUIRE_SIGNING ?
 
 XPCOMUtils.defineLazyModuleGetter(this, "PluralForm",
                                   "resource://gre/modules/PluralForm.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "Preferences",
-                                  "resource://gre/modules/Preferences.jsm");
 
 XPCOMUtils.defineLazyModuleGetter(this, "Experiments",
   "resource:///modules/experiments/Experiments.jsm");
@@ -281,8 +279,9 @@ function getMainWindowWithPreferencesPane() {
   let mainWindow = getMainWindow();
   if (mainWindow && "openAdvancedPreferences" in mainWindow) {
     return mainWindow;
+  } else {
+    return null;
   }
-  return null;
 }
 
 /**
@@ -545,7 +544,7 @@ var gEventManager = {
         continue;
       try {
         listener[aEvent].apply(listener, aParams);
-      } catch (e) {
+      } catch(e) {
         // this shouldn't be fatal
         Cu.reportError(e);
       }
@@ -564,7 +563,7 @@ var gEventManager = {
         continue;
       try {
         listener[aEvent].apply(listener, aParams);
-      } catch (e) {
+      } catch(e) {
         // this shouldn't be fatal
         Cu.reportError(e);
       }
@@ -664,7 +663,7 @@ var gViewController = {
       if ("shutdown" in view) {
         try {
           view.shutdown();
-        } catch (e) {
+        } catch(e) {
           // this shouldn't be fatal
           Cu.reportError(e);
         }
@@ -757,8 +756,9 @@ var gViewController = {
   get displayedView() {
     if (this.viewPort.selectedPanel == this.headeredViews) {
       return this.headeredViewsDeck.selectedPanel;
+    } else {
+      return this.viewPort.selectedPanel;
     }
-    return this.viewPort.selectedPanel;
   },
 
   set displayedView(view) {
@@ -1643,7 +1643,8 @@ function sortElements(aElements, aSortBy, aAscending) {
       if (addonType && (addonType.flags & AddonManager.TYPE_SUPPORTS_ASK_TO_ACTIVATE) &&
           addon.userDisabled == AddonManager.STATE_ASK_TO_ACTIVATE)
         return "askToActivate";
-      return "enabled";
+      else
+        return "enabled";
     }
 
     return addon[aKey];
@@ -2442,7 +2443,7 @@ var gSearchView = {
     var maxRemoteResults = 0;
     try {
       maxRemoteResults = Services.prefs.getIntPref(PREF_MAXRESULTS);
-    } catch (e) {}
+    } catch(e) {}
 
     if (maxRemoteResults <= 0) {
       finishSearch(0);
@@ -3436,7 +3437,7 @@ var gDetailView = {
         };
         xhr.send();
       }
-    } catch (e) {
+    } catch(e) {
       Cu.reportError(e);
       if (aCallback)
         aCallback();

@@ -55,18 +55,20 @@ class JSAPITest
     static JSAPITest* list;
     JSAPITest* next;
 
+    JSRuntime* rt;
     JSContext* cx;
     JS::PersistentRootedObject global;
     bool knownFail;
     JSAPITestString msgs;
     JSCompartment* oldCompartment;
 
-    JSAPITest() : cx(nullptr), knownFail(false), oldCompartment(nullptr) {
+    JSAPITest() : rt(nullptr), cx(nullptr), knownFail(false), oldCompartment(nullptr) {
         next = list;
         list = this;
     }
 
     virtual ~JSAPITest() {
+        MOZ_RELEASE_ASSERT(!rt);
         MOZ_RELEASE_ASSERT(!cx);
         MOZ_RELEASE_ASSERT(!global);
     }
@@ -283,19 +285,20 @@ class JSAPITest
         JS_SetNativeStackQuota(cx, MAX_STACK_SIZE);
     }
 
-    virtual JSContext* createContext() {
-        JSContext* cx = JS_NewContext(8L * 1024 * 1024);
-        if (!cx)
+    virtual JSRuntime * createRuntime() {
+        JSRuntime* rt = JS_NewRuntime(8L * 1024 * 1024);
+        if (!rt)
             return nullptr;
-        JS::SetWarningReporter(cx, &reportWarning);
-        setNativeStackQuota(cx);
-        return cx;
+        JS::SetWarningReporter(JS_GetContext(rt), &reportWarning);
+        setNativeStackQuota(JS_GetContext(rt));
+        return rt;
     }
 
-    virtual void destroyContext() {
-        MOZ_RELEASE_ASSERT(cx);
-        JS_DestroyContext(cx);
-        cx = nullptr;
+    virtual void destroyRuntime() {
+        MOZ_RELEASE_ASSERT(!cx);
+        MOZ_RELEASE_ASSERT(rt);
+        JS_DestroyRuntime(rt);
+        rt = nullptr;
     }
 
     static void reportWarning(JSContext* cx, const char* message, JSErrorReport* report) {

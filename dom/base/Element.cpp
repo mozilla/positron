@@ -291,55 +291,6 @@ Element::UpdateEditableState(bool aNotify)
   }
 }
 
-int32_t
-Element::TabIndex()
-{
-  const nsAttrValue* attrVal = mAttrsAndChildren.GetAttr(nsGkAtoms::tabindex);
-  if (attrVal && attrVal->Type() == nsAttrValue::eInteger) {
-    return attrVal->GetIntegerValue();
-  }
-
-  return TabIndexDefault();
-}
-
-void
-Element::Focus(mozilla::ErrorResult& aError)
-{
-  nsCOMPtr<nsIDOMElement> domElement = do_QueryInterface(this);
-  nsIFocusManager* fm = nsFocusManager::GetFocusManager();
-  if (fm && domElement) {
-    aError = fm->SetFocus(domElement, 0);
-  }
-}
-
-void
-Element::SetTabIndex(int32_t aTabIndex, mozilla::ErrorResult& aError)
-{
-  nsAutoString value;
-  value.AppendInt(aTabIndex);
-
-  SetAttr(nsGkAtoms::tabindex, value, aError);
-}
-
-void
-Element::Blur(mozilla::ErrorResult& aError)
-{
-  if (!ShouldBlur(this)) {
-    return;
-  }
-
-  nsIDocument* doc = GetComposedDoc();
-  if (!doc) {
-    return;
-  }
-
-  nsPIDOMWindowOuter* win = doc->GetWindow();
-  nsIFocusManager* fm = nsFocusManager::GetFocusManager();
-  if (win && fm) {
-    aError = fm->ClearFocus(win);
-  }
-}
-
 EventStates
 Element::StyleStateFromLocks() const
 {
@@ -750,8 +701,8 @@ void
 Element::Scroll(double aXScroll, double aYScroll)
 {
   // Convert -Inf, Inf, and NaN to 0; otherwise, convert by C-style cast.
-  auto scrollPos = CSSIntPoint::Truncate(mozilla::ToZeroIfNonfinite(aXScroll),
-                                         mozilla::ToZeroIfNonfinite(aYScroll));
+  CSSIntPoint scrollPos(mozilla::ToZeroIfNonfinite(aXScroll),
+                        mozilla::ToZeroIfNonfinite(aYScroll));
 
   Scroll(scrollPos, ScrollOptions());
 }
@@ -790,8 +741,8 @@ Element::ScrollBy(double aXScrollDif, double aYScrollDif)
   nsIScrollableFrame *sf = GetScrollFrame();
   if (sf) {
     CSSIntPoint scrollPos = sf->GetScrollPositionCSSPixels();
-    scrollPos += CSSIntPoint::Truncate(mozilla::ToZeroIfNonfinite(aXScrollDif),
-                                       mozilla::ToZeroIfNonfinite(aYScrollDif));
+    scrollPos += CSSIntPoint(mozilla::ToZeroIfNonfinite(aXScrollDif),
+                             mozilla::ToZeroIfNonfinite(aYScrollDif));
     Scroll(scrollPos, ScrollOptions());
   }
 }
@@ -1307,8 +1258,7 @@ Element::GetAttributeNS(const nsAString& aNamespaceURI,
                         nsAString& aReturn)
 {
   int32_t nsid =
-    nsContentUtils::NameSpaceManager()->GetNameSpaceID(aNamespaceURI,
-                                                       nsContentUtils::IsChromeDoc(OwnerDoc()));
+    nsContentUtils::NameSpaceManager()->GetNameSpaceID(aNamespaceURI);
 
   if (nsid == kNameSpaceID_Unknown) {
     // Unknown namespace means no attribute.
@@ -1350,8 +1300,7 @@ Element::RemoveAttributeNS(const nsAString& aNamespaceURI,
 {
   nsCOMPtr<nsIAtom> name = NS_Atomize(aLocalName);
   int32_t nsid =
-    nsContentUtils::NameSpaceManager()->GetNameSpaceID(aNamespaceURI,
-                                                       nsContentUtils::IsChromeDoc(OwnerDoc()));
+    nsContentUtils::NameSpaceManager()->GetNameSpaceID(aNamespaceURI);
 
   if (nsid == kNameSpaceID_Unknown) {
     // If the namespace ID is unknown, it means there can't possibly be an
@@ -1428,8 +1377,7 @@ Element::HasAttributeNS(const nsAString& aNamespaceURI,
                         const nsAString& aLocalName) const
 {
   int32_t nsid =
-    nsContentUtils::NameSpaceManager()->GetNameSpaceID(aNamespaceURI,
-                                                       nsContentUtils::IsChromeDoc(OwnerDoc()));
+    nsContentUtils::NameSpaceManager()->GetNameSpaceID(aNamespaceURI);
 
   if (nsid == kNameSpaceID_Unknown) {
     // Unknown namespace means no attr...
@@ -1838,12 +1786,6 @@ Element::UnbindFromTree(bool aDeep, bool aNullParent)
   }
 
   ClearInDocument();
-
-#ifdef MOZ_STYLO
-  // Drop any servo node data, since it will generally need to be recomputed on
-  // re-insertion anyway.
-  ServoData().reset();
-#endif
 
   // Editable descendant count only counts descendants that
   // are in the uncomposed document.
@@ -2263,7 +2205,7 @@ Element::MaybeCheckSameAttrVal(int32_t aNamespaceID,
   // listeners and don't plan to notify.  The check for aNotify here is an
   // optimization, the check for *aHasListeners is a correctness issue.
   if (*aHasListeners || aNotify) {
-    BorrowedAttrInfo info(GetAttrInfo(aNamespaceID, aName));
+    nsAttrInfo info(GetAttrInfo(aNamespaceID, aName));
     if (info.mValue) {
       // Check whether the old value is the same as the new one.  Note that we
       // only need to actually _get_ the old value if we have listeners or
@@ -2594,7 +2536,7 @@ Element::GetEventListenerManagerForAttr(nsIAtom* aAttrName,
   return GetOrCreateListenerManager();
 }
 
-BorrowedAttrInfo
+Element::nsAttrInfo
 Element::GetAttrInfo(int32_t aNamespaceID, nsIAtom* aName) const
 {
   NS_ASSERTION(nullptr != aName, "must have attribute name");
@@ -2602,22 +2544,14 @@ Element::GetAttrInfo(int32_t aNamespaceID, nsIAtom* aName) const
                "must have a real namespace ID!");
 
   int32_t index = mAttrsAndChildren.IndexOfAttr(aName, aNamespaceID);
-  if (index < 0) {
-    return BorrowedAttrInfo(nullptr, nullptr);
+  if (index >= 0) {
+    return nsAttrInfo(mAttrsAndChildren.AttrNameAt(index),
+                      mAttrsAndChildren.AttrAt(index));
   }
 
-  return mAttrsAndChildren.AttrInfoAt(index);
+  return nsAttrInfo(nullptr, nullptr);
 }
 
-BorrowedAttrInfo
-Element::GetAttrInfoAt(uint32_t aIndex) const
-{
-  if (aIndex >= mAttrsAndChildren.AttrCount()) {
-    return BorrowedAttrInfo(nullptr, nullptr);
-  }
-
-  return mAttrsAndChildren.AttrInfoAt(aIndex);
-}
 
 bool
 Element::GetAttr(int32_t aNameSpaceID, nsIAtom* aName,
@@ -3350,7 +3284,7 @@ Element::RequestFullscreen(JSContext* aCx, JS::Handle<JS::Value> aOptions,
 }
 
 void
-Element::RequestPointerLock()
+Element::MozRequestPointerLock()
 {
   OwnerDoc()->RequestPointerLock(this);
 }

@@ -235,7 +235,6 @@ function* runIncrementTest(propertyEditor, view, tests) {
   // requests when the test ends).
   let onRuleViewChanged = view.once("ruleview-changed");
   EventUtils.synthesizeKey("VK_ESCAPE", {}, view.styleWindow);
-  view.throttle.flush();
   yield onRuleViewChanged;
 }
 
@@ -264,12 +263,9 @@ function* testIncrement(editor, options, view) {
 
   EventUtils.synthesizeKey(key, {altKey: options.alt, shiftKey: options.shift},
     view.styleWindow);
-
   yield onKeyUp;
-
   // Only expect a change if the value actually changed!
   if (options.start !== options.end) {
-    view.throttle.flush();
     yield onRuleViewChanged;
   }
 

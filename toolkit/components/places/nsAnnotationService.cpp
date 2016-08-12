@@ -977,8 +977,15 @@ nsAnnotationService::GetPagesWithAnnotation(const nsACString& aName,
   if (results.Count() == 0)
     return NS_OK;
 
+  *_results = static_cast<nsIURI**>
+                         (moz_xmalloc(results.Count() * sizeof(nsIURI*)));
+  NS_ENSURE_TRUE(*_results, NS_ERROR_OUT_OF_MEMORY);
+
   *_resultCount = results.Count();
-  results.Forget(_results);
+  for (uint32_t i = 0; i < *_resultCount; i ++) {
+    (*_results)[i] = results[i];
+    NS_ADDREF((*_results)[i]);
+  }
 
   return NS_OK;
 }
@@ -1148,8 +1155,14 @@ nsAnnotationService::GetAnnotationsWithName(const nsACString& aName,
   if (annotations.Count() == 0)
     return NS_OK;
 
+  *_annotations = static_cast<mozIAnnotatedResult**>
+    (moz_xmalloc(annotations.Count() * sizeof(mozIAnnotatedResult*)));
+  NS_ENSURE_TRUE(*_annotations, NS_ERROR_OUT_OF_MEMORY);
+
   *_count = annotations.Count();
-  annotations.Forget(_annotations);
+  for (uint32_t i = 0; i < *_count; ++i) {
+    NS_ADDREF((*_annotations)[i] = annotations[i]);
+  }
 
   return NS_OK;
 }

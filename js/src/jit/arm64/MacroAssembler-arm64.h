@@ -2305,13 +2305,12 @@ class MacroAssemblerCompat : public vixl::MacroAssembler
 #endif
     }
 
-    void loadWasmGlobalPtr(uint32_t globalDataOffset, Register dest) {
-        loadPtr(Address(GlobalReg, globalDataOffset - AsmJSGlobalRegBias), dest);
+    void loadWasmActivation(Register dest) {
+        loadPtr(Address(GlobalReg, wasm::ActivationGlobalDataOffset - AsmJSGlobalRegBias), dest);
     }
-    void loadWasmPinnedRegsFromTls() {
-        loadPtr(Address(WasmTlsReg, offsetof(wasm::TlsData, memoryBase)), HeapReg);
-        loadPtr(Address(WasmTlsReg, offsetof(wasm::TlsData, globalData)), GlobalReg);
-        adds32(Imm32(AsmJSGlobalRegBias), GlobalReg);
+    void loadAsmJSHeapRegisterFromGlobalData() {
+        loadPtr(Address(GlobalReg, wasm::HeapGlobalDataOffset - AsmJSGlobalRegBias), HeapReg);
+        loadPtr(Address(GlobalReg, wasm::HeapGlobalDataOffset - AsmJSGlobalRegBias + 8), HeapLenReg);
     }
 
     // Overwrites the payload bits of a dest register containing a Value.

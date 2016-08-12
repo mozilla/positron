@@ -67,7 +67,8 @@ int
 main(int argc, const char** argv)
 {
     if (!JS_Init()) return 1;
-    JSContext* cx = checkPtr(JS_NewContext(1024 * 1024));
+    JSRuntime* runtime = checkPtr(JS_NewRuntime(1024 * 1024));
+    JSContext* cx = JS_GetContext(runtime);
 
     JS_SetGCParameter(cx, JSGC_MAX_BYTES, 0xffffffff);
     JS_SetNativeStackQuota(cx, 5000000);

@@ -4,15 +4,13 @@
 
 "use strict";
 
-/* eslint-disable mozilla/reject-some-requires */
 const {Ci} = require("chrome");
-/* eslint-enable mozilla/reject-some-requires */
 const promise = require("promise");
 const {Task} = require("devtools/shared/task");
 
-const system = require("devtools/shared/system");
-const EventEmitter = require("devtools/shared/event-emitter");
-const {AutocompletePopup} = require("devtools/client/shared/autocomplete-popup");
+loader.lazyGetter(this, "system", () => require("devtools/shared/system"));
+loader.lazyGetter(this, "EventEmitter", () => require("devtools/shared/event-emitter"));
+loader.lazyGetter(this, "AutocompletePopup", () => require("devtools/client/shared/autocomplete-popup").AutocompletePopup);
 
 // Maximum number of selector suggestions shown in the panel.
 const MAX_SUGGESTIONS = 15;
@@ -441,11 +439,8 @@ SelectorAutocompleter.prototype = {
 
     if (total > 0) {
       let onPopupOpened = this.searchPopup.once("popup-opened");
-      this.searchPopup.once("popup-closed", () => {
-        this.searchPopup.setItems(items);
-        this.searchPopup.openPopup(this.searchBox);
-      });
-      this.searchPopup.hidePopup();
+      this.searchPopup.setItems(items);
+      this.searchPopup.openPopup(this.searchBox);
       return onPopupOpened;
     }
 

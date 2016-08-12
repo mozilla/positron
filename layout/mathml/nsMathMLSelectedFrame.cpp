@@ -117,7 +117,7 @@ nsMathMLSelectedFrame::ComputeSize(nsRenderingContext *aRenderingContext,
     nscoord availableISize = aAvailableISize - aBorder.ISize(aWM) -
         aPadding.ISize(aWM) - aMargin.ISize(aWM);
     LogicalSize cbSize = aCBSize - aBorder - aPadding - aMargin;
-    SizeComputationInput offsetState(childFrame, aRenderingContext, aWM,
+    nsCSSOffsetState offsetState(childFrame, aRenderingContext, aWM,
                                  availableISize);
     LogicalSize size =
         childFrame->ComputeSize(aRenderingContext, aWM, cbSize,
@@ -134,8 +134,8 @@ nsMathMLSelectedFrame::ComputeSize(nsRenderingContext *aRenderingContext,
 // Only reflow the selected child ...
 void
 nsMathMLSelectedFrame::Reflow(nsPresContext*          aPresContext,
-                              ReflowOutput&     aDesiredSize,
-                              const ReflowInput& aReflowInput,
+                              nsHTMLReflowMetrics&     aDesiredSize,
+                              const nsHTMLReflowState& aReflowState,
                               nsReflowStatus&          aStatus)
 {
   MarkInReflow();
@@ -147,25 +147,25 @@ nsMathMLSelectedFrame::Reflow(nsPresContext*          aPresContext,
   nsIFrame* childFrame = GetSelectedFrame();
   if (childFrame) {
     WritingMode wm = childFrame->GetWritingMode();
-    LogicalSize availSize = aReflowInput.ComputedSize(wm);
+    LogicalSize availSize = aReflowState.ComputedSize(wm);
     availSize.BSize(wm) = NS_UNCONSTRAINEDSIZE;
-    ReflowInput childReflowInput(aPresContext, aReflowInput,
+    nsHTMLReflowState childReflowState(aPresContext, aReflowState,
                                        childFrame, availSize);
     ReflowChild(childFrame, aPresContext, aDesiredSize,
-                childReflowInput, aStatus);
+                childReflowState, aStatus);
     SaveReflowAndBoundingMetricsFor(childFrame, aDesiredSize,
                                     aDesiredSize.mBoundingMetrics);
     mBoundingMetrics = aDesiredSize.mBoundingMetrics;
   }
-  FinalizeReflow(aReflowInput.mRenderingContext->GetDrawTarget(), aDesiredSize);
-  NS_FRAME_SET_TRUNCATION(aStatus, aReflowInput, aDesiredSize);
+  FinalizeReflow(aReflowState.rendContext->GetDrawTarget(), aDesiredSize);
+  NS_FRAME_SET_TRUNCATION(aStatus, aReflowState, aDesiredSize);
 }
 
 // Only place the selected child ...
 /* virtual */ nsresult
 nsMathMLSelectedFrame::Place(DrawTarget*          aDrawTarget,
                              bool                 aPlaceOrigin,
-                             ReflowOutput& aDesiredSize)
+                             nsHTMLReflowMetrics& aDesiredSize)
 {
   nsIFrame* childFrame = GetSelectedFrame();
 

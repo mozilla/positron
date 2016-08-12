@@ -564,9 +564,7 @@ LookupCache::ConstructPrefixSet(AddPrefixArray& aAddPrefixes)
   Telemetry::AutoTimer<Telemetry::URLCLASSIFIER_PS_CONSTRUCT_TIME> timer;
 
   nsTArray<uint32_t> array;
-  if (!array.SetCapacity(aAddPrefixes.Length(), fallible)) {
-    return NS_ERROR_OUT_OF_MEMORY;
-  }
+  array.SetCapacity(aAddPrefixes.Length());
 
   for (uint32_t i = 0; i < aAddPrefixes.Length(); i++) {
     array.AppendElement(aAddPrefixes[i].PrefixHash().ToUint32());

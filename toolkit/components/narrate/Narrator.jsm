@@ -216,11 +216,7 @@ Narrator.prototype = {
       let tw = this._treeWalker;
       if (!this._isParagraphInView(tw.currentNode)) {
         tw.currentNode = tw.root;
-        while (tw.nextNode()) {
-          if (this._isParagraphInView(tw.currentNode)) {
-            break;
-          }
-        }
+        while (tw.nextNode() && !this._isParagraphInView(tw.currentNode)) {}
         // _speakInner will advance to the next node for us, so we need
         // to have it one paragraph back from the first visible one.
         tw.previousNode();
@@ -240,28 +236,25 @@ Narrator.prototype = {
   },
 
   skipPrevious: function() {
-    this._goBackParagraphs(this._timeIntoParagraph < PREV_THRESHOLD ? 2 : 1);
+    let tw = this._treeWalker;
+    tw.previousNode();
+    if (this._timeIntoParagraph < PREV_THRESHOLD) {
+      tw.previousNode();
+    }
+    this._win.speechSynthesis.cancel();
   },
 
   setRate: function(rate) {
     this._speechOptions.rate = rate;
     /* repeat current paragraph */
-    this._goBackParagraphs(1);
+    this._treeWalker.previousNode();
+    this._win.speechSynthesis.cancel();
   },
 
   setVoice: function(voice) {
     this._speechOptions.voice = this._getVoice(voice);
     /* repeat current paragraph */
-    this._goBackParagraphs(1);
-  },
-
-  _goBackParagraphs: function(count) {
-    let tw = this._treeWalker;
-    for (let i = 0; i < count; i++) {
-      if (!tw.previousNode()) {
-        tw.currentNode = tw.root;
-      }
-    }
+    this._treeWalker.previousNode();
     this._win.speechSynthesis.cancel();
   }
 };

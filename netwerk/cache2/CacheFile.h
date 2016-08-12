@@ -136,6 +136,9 @@ private:
 
   nsresult DoomLocked(CacheFileListener *aCallback);
 
+  nsresult GetChunk(uint32_t aIndex, ECallerType aCaller,
+                    CacheFileChunkListener *aCallback,
+                    CacheFileChunk **_retval);
   nsresult GetChunkLocked(uint32_t aIndex, ECallerType aCaller,
                           CacheFileChunkListener *aCallback,
                           CacheFileChunk **_retval);

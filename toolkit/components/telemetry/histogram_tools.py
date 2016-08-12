@@ -9,10 +9,6 @@ import os
 import re
 import sys
 
-# Constants.
-MAX_LABEL_LENGTH = 20
-MAX_LABEL_COUNT = 100
-
 # histogram_tools.py is used by scripts from a mozilla-central build tree
 # and also by outside consumers, such as the telemetry server.  We need
 # to ensure that importing things works in both contexts.  Therefore,
@@ -111,17 +107,13 @@ symbol that should guard C/C++ definitions associated with the histogram."""
         self._cpp_guard = definition.get('cpp_guard')
         self._keyed = definition.get('keyed', False)
         self._expiration = definition.get('expires_in_version')
-        self._labels = definition.get('labels', [])
         self.compute_bucket_parameters(definition)
-        table = {
-            'boolean': 'BOOLEAN',
-            'flag': 'FLAG',
-            'count': 'COUNT',
-            'enumerated': 'LINEAR',
-            'categorical': 'CATEGORICAL',
-            'linear': 'LINEAR',
-            'exponential': 'EXPONENTIAL',
-        }
+        table = { 'boolean': 'BOOLEAN',
+                  'flag': 'FLAG',
+                  'count': 'COUNT',
+                  'enumerated': 'LINEAR',
+                  'linear': 'LINEAR',
+                  'exponential': 'EXPONENTIAL' }
         table_dispatch(self.kind(), table,
                        lambda k: self._set_nsITelemetry_kind(k))
         datasets = { 'opt-in': 'DATASET_RELEASE_CHANNEL_OPTIN',
@@ -141,8 +133,7 @@ symbol that should guard C/C++ definitions associated with the histogram."""
 
     def kind(self):
         """Return the kind of the histogram.
-Will be one of 'boolean', 'flag', 'count', 'enumerated', 'categorical', 'linear',
-or 'exponential'."""
+Will be one of 'boolean', 'flag', 'count', 'enumerated', 'linear', or 'exponential'."""
         return self._kind
 
     def expiration(self):
@@ -182,21 +173,14 @@ associated with the histogram.  Returns None if no guarding is necessary."""
         """Returns the dataset this histogram belongs into."""
         return self._dataset
 
-    def labels(self):
-        """Returns a list of labels for a categorical histogram, [] for others."""
-        return self._labels
-
     def ranges(self):
         """Return an array of lower bounds for each bucket in the histogram."""
-        table = {
-            'boolean': linear_buckets,
-            'flag': linear_buckets,
-            'count': linear_buckets,
-            'enumerated': linear_buckets,
-            'categorical': linear_buckets,
-            'linear': linear_buckets,
-            'exponential': exponential_buckets,
-        }
+        table = { 'boolean': linear_buckets,
+                  'flag': linear_buckets,
+                  'count': linear_buckets,
+                  'enumerated': linear_buckets,
+                  'linear': linear_buckets,
+                  'exponential': exponential_buckets }
         return table_dispatch(self.kind(), table,
                               lambda p: p(self.low(), self.high(), self.n_buckets()))
 
@@ -206,10 +190,9 @@ associated with the histogram.  Returns None if no guarding is necessary."""
             'flag': Histogram.boolean_flag_bucket_parameters,
             'count': Histogram.boolean_flag_bucket_parameters,
             'enumerated': Histogram.enumerated_bucket_parameters,
-            'categorical': Histogram.categorical_bucket_parameters,
             'linear': Histogram.linear_bucket_parameters,
-            'exponential': Histogram.exponential_bucket_parameters,
-        }
+            'exponential': Histogram.exponential_bucket_parameters
+            }
         table_dispatch(self.kind(), table,
                        lambda p: self.set_bucket_parameters(*p(definition)))
 
@@ -222,10 +205,9 @@ associated with the histogram.  Returns None if no guarding is necessary."""
             'flag': always_allowed_keys,
             'count': always_allowed_keys,
             'enumerated': always_allowed_keys + ['n_values'],
-            'categorical': always_allowed_keys + ['labels'],
             'linear': general_keys,
-            'exponential': general_keys,
-        }
+            'exponential': general_keys
+            }
         # We removed extended_statistics_ok on the client, but the server-side,
         # where _strict_type_checks==False, has to deal with historical data.
         if not self._strict_type_checks:
@@ -234,29 +216,27 @@ associated with the histogram.  Returns None if no guarding is necessary."""
         table_dispatch(definition['kind'], table,
                        lambda allowed_keys: Histogram.check_keys(name, definition, allowed_keys))
 
-        self.check_name(name)
-        self.check_field_types(name, definition)
-        self.check_whitelistable_fields(name, definition)
-        self.check_expiration(name, definition)
-        self.check_label_values(name, definition)
+        # Check for the alert_emails field. Use counters don't have any mechanism
+        # to add them, so skip the check for them.
+        if not self._is_use_counter:
+            if 'alert_emails' not in definition:
+                if whitelists is not None and name not in whitelists['alert_emails']:
+                    raise KeyError, 'New histogram "%s" must have an alert_emails field.' % name
+            elif not isinstance(definition['alert_emails'], list):
+                raise KeyError, 'alert_emails must be an array (in histogram "%s")' % name
 
-    def check_name(self, name):
+        Histogram.check_name(name)
+        self.check_field_types(name, definition)
+        Histogram.check_expiration(name, definition)
+        self.check_bug_numbers(name, definition)
+
+    @staticmethod
+    def check_name(name):
         if '#' in name:
             raise ValueError, '"#" not permitted for %s' % (name)
 
-        # Avoid C++ identifier conflicts between histogram enums and label enum names.
-        if name.startswith("LABELS_"):
-            raise ValueError, "Histogram name '%s' can not start with LABELS_" % (name)
-
-        # To make it easier to generate C++ identifiers from this etc., we restrict
-        # the histogram names to a strict pattern.
-        # We skip this on the server to avoid failures with old Histogram.json revisions.
-        if self._strict_type_checks:
-            pattern = '^[a-z][a-z0-9_]+[a-z0-9]$'
-            if not re.match(pattern, name, re.IGNORECASE):
-                raise ValueError, "Histogram name '%s' doesn't confirm to '%s'" % (name, pattern)
-
-    def check_expiration(self, name, definition):
+    @staticmethod
+    def check_expiration(name, definition):
         expiration = definition.get('expires_in_version')
 
         if not expiration:
@@ -269,64 +249,37 @@ associated with the histogram.  Returns None if no guarding is necessary."""
 
         definition['expires_in_version'] = expiration
 
-    def check_label_values(self, name, definition):
-        labels = definition.get('labels')
-        if not labels:
-            return
-
-        invalid = filter(lambda l: len(l) > MAX_LABEL_LENGTH, labels)
-        if len(invalid) > 0:
-            raise ValueError, 'Label values for %s exceed length limit of %d: %s' % \
-                              (name, MAX_LABEL_LENGTH, ', '.join(invalid))
-
-        if len(labels) > MAX_LABEL_COUNT:
-            raise ValueError, 'Label count for %s exceeds limit of %d' % \
-                              (name, MAX_LABEL_COUNT)
-
-        # To make it easier to generate C++ identifiers from this etc., we restrict
-        # the label values to a strict pattern.
-        pattern = '^[a-z][a-z0-9_]+[a-z0-9]$'
-        invalid = filter(lambda l: not re.match(pattern, l, re.IGNORECASE), labels)
-        if len(invalid) > 0:
-            raise ValueError, 'Label values for %s are not matching pattern "%s": %s' % \
-                              (name, pattern, ', '.join(invalid))
-
-    # Check for the presence of fields that old histograms are whitelisted for.
-    def check_whitelistable_fields(self, name, definition):
-        # Use counters don't have any mechanism to add the fields checked here,
-        # so skip the check for them.
+    def check_bug_numbers(self, name, definition):
+        # Use counters don't have any mechanism to add the bug numbers field.
         if self._is_use_counter:
             return
+        bug_numbers = definition.get('bug_numbers')
+        if not bug_numbers:
+            if whitelists is None or name in whitelists['bug_numbers']:
+                return
+            else:
+                raise KeyError, 'New histogram "%s" must have a bug_numbers field.' % name
 
-        # In the pipeline we don't have whitelists available.
-        if whitelists is None:
-            return
+        if not isinstance(bug_numbers, list):
+            raise ValueError, 'bug_numbers field for "%s" should be an array' % (name)
 
-        for field in ['alert_emails', 'bug_numbers']:
-            if field not in definition and name not in whitelists[field]:
-                raise KeyError, 'New histogram "%s" must have a %s field.' % (name, field)
+        if not all(type(num) is int for num in bug_numbers):
+            raise ValueError, 'bug_numbers array for "%s" should only contain integers' % (name)
 
     def check_field_types(self, name, definition):
         # Define expected types for the histogram properties.
         type_checked_fields = {
-            "n_buckets": int,
-            "n_values": int,
-            "low": int,
-            "high": int,
-            "keyed": bool,
-            "expires_in_version": basestring,
-            "kind": basestring,
-            "description": basestring,
-            "cpp_guard": basestring,
-            "releaseChannelCollection": basestring,
-        }
-
-        # For list fields we check the items types.
-        type_checked_list_fields = {
-            "bug_numbers": int,
-            "alert_emails": basestring,
-            "labels": basestring,
-        }
+                "n_buckets": int,
+                "n_values": int,
+                "low": int,
+                "high": int,
+                "keyed": bool,
+                "expires_in_version": basestring,
+                "kind": basestring,
+                "description": basestring,
+                "cpp_guard": basestring,
+                "releaseChannelCollection": basestring
+            }
 
         # For the server-side, where _strict_type_checks==False, we want to
         # skip the stricter type checks for these fields for dealing with
@@ -344,24 +297,16 @@ associated with the histogram.  Returns None if no guarding is necessary."""
             if definition.get("keyed", None) == "true":
                 definition["keyed"] = True
 
-        def nice_type_name(t):
-            if t is basestring:
-                return "string"
-            return t.__name__
-
         for key, key_type in type_checked_fields.iteritems():
             if not key in definition:
                 continue
             if not isinstance(definition[key], key_type):
+                if key_type is basestring:
+                    type_name = "string"
+                else:
+                    type_name = key_type.__name__
                 raise ValueError, ('value for key "{0}" in Histogram "{1}" '
-                        'should be {2}').format(key, name, nice_type_name(key_type))
-
-        for key, key_type in type_checked_list_fields.iteritems():
-            if not key in definition:
-                continue
-            if not all(isinstance(x, key_type) for x in definition[key]):
-                raise ValueError, ('all values for list "{0}" in Histogram "{1}" '
-                        'should be {2}').format(key, name, nice_type_name(key_type))
+                        'should be {2}').format(key, name, type_name)
 
     @staticmethod
     def check_keys(name, definition, allowed_keys):
@@ -392,11 +337,6 @@ associated with the histogram.  Returns None if no guarding is necessary."""
     @staticmethod
     def enumerated_bucket_parameters(definition):
         n_values = definition['n_values']
-        return (1, n_values, n_values + 1)
-
-    @staticmethod
-    def categorical_bucket_parameters(definition):
-        n_values = len(definition['labels'])
         return (1, n_values, n_values + 1)
 
     @staticmethod

@@ -22,8 +22,8 @@ public:
 
   // nsIFrame
   virtual void Reflow(nsPresContext*      aPresContext,
-                      ReflowOutput& aDesiredSize,
-                      const ReflowInput& aMaxSize,
+                      nsHTMLReflowMetrics& aDesiredSize,
+                      const nsHTMLReflowState& aMaxSize,
                       nsReflowStatus&      aStatus) override;
 
   virtual bool IsFrameOfType(uint32_t aFlags) const override

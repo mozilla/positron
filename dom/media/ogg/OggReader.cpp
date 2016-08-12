@@ -25,7 +25,6 @@ extern "C" {
 #include "gfx2DGlue.h"
 #include "mozilla/Telemetry.h"
 #include "nsPrintfCString.h"
-#include "VideoFrameContainer.h"
 
 using namespace mozilla::gfx;
 using namespace mozilla::media;
@@ -881,16 +880,15 @@ nsresult OggReader::DecodeTheora(ogg_packet* aPacket, int64_t aTimeThreshold)
     b.mPlanes[i].mOffset = b.mPlanes[i].mSkip = 0;
   }
 
-  RefPtr<VideoData> v =
-    VideoData::CreateAndCopyData(mInfo.mVideo,
-                                 mDecoder->GetImageContainer(),
-                                 mResource.Tell(),
-                                 time,
-                                 endTime - time,
-                                 b,
-                                 isKeyframe,
-                                 aPacket->granulepos,
-                                 mPicture);
+  RefPtr<VideoData> v = VideoData::Create(mInfo.mVideo,
+                                            mDecoder->GetImageContainer(),
+                                            mResource.Tell(),
+                                            time,
+                                            endTime - time,
+                                            b,
+                                            isKeyframe,
+                                            aPacket->granulepos,
+                                            mPicture);
   if (!v) {
     // There may be other reasons for this error, but for
     // simplicity just assume the worst case: out of memory.
@@ -923,7 +921,7 @@ bool OggReader::DecodeVideoFrame(bool &aKeyframeSkip,
   }
   nsAutoRef<ogg_packet> autoRelease(packet);
 
-  a.mStats.mParsedFrames++;
+  a.mParsed++;
   NS_ASSERTION(packet && packet->granulepos != -1,
                 "Must know first packet's granulepos");
   bool eos = packet->e_o_s;
@@ -933,7 +931,7 @@ bool OggReader::DecodeVideoFrame(bool &aKeyframeSkip,
   {
     aKeyframeSkip = false;
     nsresult res = DecodeTheora(packet, aTimeThreshold);
-    a.mStats.mDecodedFrames++;
+    a.mDecoded++;
     if (NS_FAILED(res)) {
       return false;
     }
@@ -1592,7 +1590,7 @@ nsresult OggReader::SeekBisection(int64_t aTarget,
   MOZ_ASSERT(OnTaskQueue());
   nsresult res;
 
-  if (aTarget <= aRange.mTimeStart) {
+  if (aTarget == aRange.mTimeStart) {
     if (NS_FAILED(ResetDecode())) {
       return NS_ERROR_FAILURE;
     }
@@ -2023,6 +2021,29 @@ RefPtr<VideoData> OggReader::SyncDecodeToFirstVideoData()
     VideoQueue().Finish();
   }
   return VideoQueue().PeekFront();
+}
+
+OggCodecStore::OggCodecStore()
+: mMonitor("CodecStore")
+{
+}
+
+void OggCodecStore::Add(uint32_t serial, OggCodecState* codecState)
+{
+  MonitorAutoLock mon(mMonitor);
+  mCodecStates.Put(serial, codecState);
+}
+
+bool OggCodecStore::Contains(uint32_t serial)
+{
+  MonitorAutoLock mon(mMonitor);
+  return mCodecStates.Get(serial, nullptr);
+}
+
+OggCodecState* OggCodecStore::Get(uint32_t serial)
+{
+  MonitorAutoLock mon(mMonitor);
+  return mCodecStates.Get(serial);
 }
 
 } // namespace mozilla

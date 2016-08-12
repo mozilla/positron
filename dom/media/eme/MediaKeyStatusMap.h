@@ -44,10 +44,7 @@ public:
 
   JSObject* WrapObject(JSContext* aCx, JS::Handle<JSObject*> aGivenProto) override;
 
-  void Get(JSContext* aCx,
-           const ArrayBufferViewOrArrayBuffer& aKey,
-           JS::MutableHandle<JS::Value> aOutValue,
-           ErrorResult& aOutRv) const;
+  MediaKeyStatus Get(const ArrayBufferViewOrArrayBuffer& aKey) const;
   bool Has(const ArrayBufferViewOrArrayBuffer& aKey) const;
   uint32_t Size() const;
 

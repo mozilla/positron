@@ -39,8 +39,7 @@ add_task(function* mainTest() {
     // Click the Open button.  The alert blocked-download dialog should be
     // shown.
     let dialogPromise = promiseAlertDialogOpen("cancel");
-    EventUtils.synthesizeMouse(DownloadsBlockedSubview.elements.openButton,
-                               10, 10, {}, window);
+    DownloadsBlockedSubview.elements.openButton.click();
     yield dialogPromise;
 
     window.focus();
@@ -54,8 +53,7 @@ add_task(function* mainTest() {
 
     // Click the Remove button.  The panel should close and the item should be
     // removed from it.
-    EventUtils.synthesizeMouse(DownloadsBlockedSubview.elements.deleteButton,
-                               10, 10, {}, window);
+    DownloadsBlockedSubview.elements.deleteButton.click();
     yield promisePanelHidden();
     yield openPanel();
 
@@ -152,16 +150,16 @@ function makeDownload(verdict) {
 }
 
 function promiseSubviewShown(shown) {
-  // More terribleness, but I'm tired of fighting intermittent timeouts on try.
-  // Just poll for the subview and wait a second before resolving the promise.
   return new Promise(resolve => {
-    let interval = setInterval(() => {
-      if (shown == DownloadsBlockedSubview.view.showingSubView &&
-          !DownloadsBlockedSubview.view._transitioning) {
-        clearInterval(interval);
-        setTimeout(resolve, 1000);
-        return;
-      }
-    }, 0);
+    if (shown == DownloadsBlockedSubview.view.showingSubView) {
+      resolve();
+      return;
+    }
+    let event = shown ? "ViewShowing" : "ViewHiding";
+    let subview = DownloadsBlockedSubview.subview;
+    subview.addEventListener(event, function showing() {
+      subview.removeEventListener(event, showing);
+      resolve();
+    });
   });
 }

@@ -425,8 +425,8 @@ nsPluginFrame::GetWidgetConfiguration(nsTArray<nsIWidget::Configuration>* aConfi
 
 void
 nsPluginFrame::GetDesiredSize(nsPresContext* aPresContext,
-                              const ReflowInput& aReflowInput,
-                              ReflowOutput& aMetrics)
+                              const nsHTMLReflowState& aReflowState,
+                              nsHTMLReflowMetrics& aMetrics)
 {
   // By default, we have no area
   aMetrics.ClearSize();
@@ -435,21 +435,21 @@ nsPluginFrame::GetDesiredSize(nsPresContext* aPresContext,
     return;
   }
 
-  aMetrics.Width() = aReflowInput.ComputedWidth();
-  aMetrics.Height() = aReflowInput.ComputedHeight();
+  aMetrics.Width() = aReflowState.ComputedWidth();
+  aMetrics.Height() = aReflowState.ComputedHeight();
 
   // for EMBED and APPLET, default to 240x200 for compatibility
   if (mContent->IsAnyOfHTMLElements(nsGkAtoms::applet,
                                     nsGkAtoms::embed)) {
     if (aMetrics.Width() == NS_UNCONSTRAINEDSIZE) {
       aMetrics.Width() = clamped(nsPresContext::CSSPixelsToAppUnits(EMBED_DEF_WIDTH),
-                               aReflowInput.ComputedMinWidth(),
-                               aReflowInput.ComputedMaxWidth());
+                               aReflowState.ComputedMinWidth(),
+                               aReflowState.ComputedMaxWidth());
     }
     if (aMetrics.Height() == NS_UNCONSTRAINEDSIZE) {
       aMetrics.Height() = clamped(nsPresContext::CSSPixelsToAppUnits(EMBED_DEF_HEIGHT),
-                                aReflowInput.ComputedMinHeight(),
-                                aReflowInput.ComputedMaxHeight());
+                                aReflowState.ComputedMinHeight(),
+                                aReflowState.ComputedMaxHeight());
     }
 
 #if defined(MOZ_WIDGET_GTK)
@@ -467,8 +467,8 @@ nsPluginFrame::GetDesiredSize(nsPresContext* aPresContext,
   // Make up a number.
   if (aMetrics.Width() == NS_UNCONSTRAINEDSIZE) {
     aMetrics.Width() =
-      (aReflowInput.ComputedMinWidth() != NS_UNCONSTRAINEDSIZE) ?
-        aReflowInput.ComputedMinWidth() : 0;
+      (aReflowState.ComputedMinWidth() != NS_UNCONSTRAINEDSIZE) ?
+        aReflowState.ComputedMinWidth() : 0;
   }
 
   // At this point, the height has an unconstrained value only in two cases:
@@ -477,8 +477,8 @@ nsPluginFrame::GetDesiredSize(nsPresContext* aPresContext,
   // In either case, we have to make up a number.
   if (aMetrics.Height() == NS_UNCONSTRAINEDSIZE) {
     aMetrics.Height() =
-      (aReflowInput.ComputedMinHeight() != NS_UNCONSTRAINEDSIZE) ?
-        aReflowInput.ComputedMinHeight() : 0;
+      (aReflowState.ComputedMinHeight() != NS_UNCONSTRAINEDSIZE) ?
+        aReflowState.ComputedMinHeight() : 0;
   }
 
   // XXXbz don't add in the border and padding, because we screw up our
@@ -490,16 +490,16 @@ nsPluginFrame::GetDesiredSize(nsPresContext* aPresContext,
 
 void
 nsPluginFrame::Reflow(nsPresContext*           aPresContext,
-                      ReflowOutput&     aMetrics,
-                      const ReflowInput& aReflowInput,
+                      nsHTMLReflowMetrics&     aMetrics,
+                      const nsHTMLReflowState& aReflowState,
                       nsReflowStatus&          aStatus)
 {
   MarkInReflow();
   DO_GLOBAL_REFLOW_COUNT("nsPluginFrame");
-  DISPLAY_REFLOW(aPresContext, this, aReflowInput, aMetrics, aStatus);
+  DISPLAY_REFLOW(aPresContext, this, aReflowState, aMetrics, aStatus);
 
   // Get our desired size
-  GetDesiredSize(aPresContext, aReflowInput, aMetrics);
+  GetDesiredSize(aPresContext, aReflowState, aMetrics);
   aMetrics.SetOverflowAreasToDesiredBounds();
   FinishAndStoreOverflow(&aMetrics);
 
@@ -518,7 +518,7 @@ nsPluginFrame::Reflow(nsPresContext*           aPresContext,
   }
 
   nsRect r(0, 0, aMetrics.Width(), aMetrics.Height());
-  r.Deflate(aReflowInput.ComputedPhysicalBorderPadding());
+  r.Deflate(aReflowState.ComputedPhysicalBorderPadding());
 
   if (mInnerView) {
     nsViewManager* vm = mInnerView->GetViewManager();
@@ -534,7 +534,7 @@ nsPluginFrame::Reflow(nsPresContext*           aPresContext,
 
   aStatus = NS_FRAME_COMPLETE;
 
-  NS_FRAME_SET_TRUNCATION(aStatus, aReflowInput, aMetrics);
+  NS_FRAME_SET_TRUNCATION(aStatus, aReflowState, aMetrics);
 }
 
 ///////////// nsIReflowCallback ///////////////
@@ -822,7 +822,7 @@ nsPluginFrame::GetWindowOriginInPixels(bool aWindowless)
 
 void
 nsPluginFrame::DidReflow(nsPresContext*            aPresContext,
-                         const ReflowInput*  aReflowInput,
+                         const nsHTMLReflowState*  aReflowState,
                          nsDidReflowStatus         aStatus)
 {
   // Do this check before calling the superclass, as that clears
@@ -834,7 +834,7 @@ nsPluginFrame::DidReflow(nsPresContext*            aPresContext,
     objContent->HasNewFrame(this);
   }
 
-  nsFrame::DidReflow(aPresContext, aReflowInput, aStatus);
+  nsFrame::DidReflow(aPresContext, aReflowState, aStatus);
 
   // The view is created hidden; once we have reflowed it and it has been
   // positioned then we show it.

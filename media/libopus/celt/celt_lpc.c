@@ -49,7 +49,8 @@ int          p
    float *lpc = _lpc;
 #endif
 
-   OPUS_CLEAR(lpc, p);
+   for (i = 0; i < p; i++)
+      lpc[i] = 0;
    if (ac[0] != 0)
    {
       for (i = 0; i < p; i++) {

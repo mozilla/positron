@@ -14,16 +14,13 @@ class FreeBSDBootstrapper(BaseBootstrapper):
         self.packages = [
             'autoconf213',
             'gmake',
-            'gtar',
             'mercurial',
             'pkgconf',
-            'watchman',
             'zip',
         ]
 
         self.browser_packages = [
             'dbus-glib',
-            'gconf2',
             'gtk2',
             'gtk3',
             'libGL',
@@ -32,17 +29,18 @@ class FreeBSDBootstrapper(BaseBootstrapper):
             'yasm',
         ]
 
-        if not self.which('unzip'):
+        if self.flavor == 'dragonfly':
             self.packages.append('unzip')
 
-        # GCC 4.2 or Clang 3.4 in base are too old
-        if self.flavor == 'freebsd' and self.version < 11:
+        # gcc in base is too old
+        if self.flavor == 'freebsd' and self.version < 9:
             self.browser_packages.append('gcc')
 
     def pkg_install(self, *packages):
-        command = ['pkg', 'install']
-        if self.no_interactive:
-            command.append('-y')
+        if self.which('pkg'):
+            command = ['pkg', 'install']
+        else:
+            command = ['pkg_add', '-Fr']
 
         command.extend(packages)
         self.run_as_root(command)

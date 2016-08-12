@@ -11,7 +11,6 @@
 #ifndef mozilla_image_sourcebuffer_h
 #define mozilla_image_sourcebuffer_h
 
-#include <algorithm>
 #include "mozilla/Maybe.h"
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/Mutex.h"

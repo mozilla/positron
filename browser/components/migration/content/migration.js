@@ -314,14 +314,38 @@ var MigrationWizard = {
     singleStart.setAttribute("label", mainStr);
     singleStart.setAttribute("value", "DEFAULT");
 
-    var appName = MigrationUtils.getBrowserName(this._source);
+    var source = null;
+    switch (this._source) {
+      case "ie":
+        source = "sourceNameIE";
+        break;
+      case "safari":
+        source = "sourceNameSafari";
+        break;
+      case "canary":
+        source = "sourceNameCanary";
+        break;
+      case "chrome":
+        source = "sourceNameChrome";
+        break;
+      case "chromium":
+        source = "sourceNameChromium";
+        break;
+      case "firefox":
+        source = "sourceNameFirefox";
+        break;
+      case "360se":
+        source = "sourceName360se";
+        break;
+    }
 
     // semi-wallpaper for crash when multiple profiles exist, since we haven't initialized mSourceProfile in places
     this._migrator.getMigrateData(this._selectedProfile, this._autoMigrate);
 
     var oldHomePageURL = this._migrator.sourceHomePageURL;
 
-    if (oldHomePageURL && appName) {
+    if (oldHomePageURL && source) {
+      var appName = MigrationUtils.getLocalizedString(source);
       var oldHomePageLabel =
         brandBundle.getFormattedString("homePageImport", [appName]);
       var oldHomePage = document.getElementById("oldHomePage");
@@ -342,7 +366,7 @@ var MigrationWizard = {
       var radioGroup = document.getElementById("homePageRadiogroup");
 
       this._newHomePage = radioGroup.selectedItem.value;
-    } catch (ex) {}
+    } catch(ex) {}
   },
 
   // 5 - Migrating
@@ -454,7 +478,7 @@ var MigrationWizard = {
             var prefFile = dirSvc.get("ProfDS", Components.interfaces.nsIFile);
             prefFile.append("prefs.js");
             prefSvc.savePrefFile(prefFile);
-          } catch (ex) {
+          } catch(ex) {
             dump(ex);
           }
         }

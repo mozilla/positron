@@ -69,6 +69,7 @@ matchPrefEntry(const PLDHashEntryHdr* entry, const void* key)
 
 PLDHashTable*       gHashTable;
 static PLArenaPool  gPrefNameArena;
+bool                gDirty = false;
 
 static struct CallbackNode* gCallbacks = nullptr;
 static bool         gIsAnyPrefLocked = false;
@@ -111,25 +112,6 @@ static char *ArenaStrDup(const char* str, PLArenaPool* aArena)
     if (mem)
         memcpy(mem, str, len+1);
     return static_cast<char*>(mem);
-}
-
-static PrefsDirtyFunc gDirtyCallback = nullptr;
-
-inline void MakeDirtyCallback()
-{
-    // Right now the callback function is always set, so we don't need
-    // to complicate the code to cover the scenario where we set the callback
-    // after we've already tried to make it dirty.  If this assert triggers
-    // we will add that code.
-    MOZ_ASSERT(gDirtyCallback);
-    if (gDirtyCallback) {
-        gDirtyCallback();
-    }
-}
-
-void PREF_SetDirtyCallback(PrefsDirtyFunc aFunc)
-{
-    gDirtyCallback = aFunc;
 }
 
 /*---------------------------------------------------------------------------*/
@@ -330,16 +312,9 @@ pref_SetPref(const dom::PrefSetting& aPref)
 }
 
 UniquePtr<char*[]>
-pref_savePrefs(PLDHashTable* aTable, uint32_t* aPrefCount)
+pref_savePrefs(PLDHashTable* aTable)
 {
-    // This function allocates the entries in the savedPrefs array it returns.
-    // It is the callers responsibility to go through the array and free
-    // all of them.  The aPrefCount entries will be non-null.  Any end padding
-    // is an implementation detail and may change.
-    MOZ_ASSERT(aPrefCount);
     auto savedPrefs = MakeUnique<char*[]>(aTable->EntryCount());
-
-    // This is not necessary, but leaving it in for now
     memset(savedPrefs.get(), 0, aTable->EntryCount() * sizeof(char*));
 
     int32_t j = 0;
@@ -387,7 +362,6 @@ pref_savePrefs(PLDHashTable* aTable, uint32_t* aPrefCount)
                                        prefValue +
                                        NS_LITERAL_CSTRING(");"));
     }
-    *aPrefCount = j;
 
     return savedPrefs;
 }
@@ -608,7 +582,7 @@ PREF_DeleteBranch(const char *branch_name)
         }
     }
 
-    MakeDirtyCallback();
+    gDirty = true;
     return NS_OK;
 }
 
@@ -628,7 +602,7 @@ PREF_ClearUserPref(const char *pref_name)
         }
 
         pref_DoCallback(pref_name);
-        MakeDirtyCallback();
+        gDirty = true;
     }
     return NS_OK;
 }
@@ -661,7 +635,7 @@ PREF_ClearAllUserPrefs()
         pref_DoCallback(prefString.c_str());
     }
 
-    MakeDirtyCallback();
+    gDirty = true;
     return NS_OK;
 }
 
@@ -801,7 +775,7 @@ nsresult pref_HashPref(const char *key, PrefValue value, PrefType type, uint32_t
                 /* XXX should we free a user-set string value if there is one? */
                 pref->prefFlags.SetHasUserValue(false);
                 if (!pref->prefFlags.IsLocked()) {
-                    MakeDirtyCallback();
+                    gDirty = true;
                     valueChanged = true;
                 }
             }
@@ -810,7 +784,7 @@ nsresult pref_HashPref(const char *key, PrefValue value, PrefType type, uint32_t
                  pref_ValueChanged(pref->userPref, value, type) ) {
             pref->prefFlags = pref_SetValue(&pref->userPref, pref->prefFlags, value, type).SetHasUserValue(true);
             if (!pref->prefFlags.IsLocked()) {
-                MakeDirtyCallback();
+                gDirty = true;
                 valueChanged = true;
             }
         }

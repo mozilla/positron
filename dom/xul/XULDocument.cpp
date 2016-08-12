@@ -1434,7 +1434,7 @@ XULDocument::GetPopupNode(nsIDOMNode** aNode)
 
     if (node && nsContentUtils::CanCallerAccess(node)
         && GetScopeObjectOfNode(node)) {
-        node.forget(aNode);
+        node.swap(*aNode);
     }
 
     return NS_OK;
@@ -1546,7 +1546,7 @@ XULDocument::GetTooltipNode(nsIDOMNode** aNode)
     if (pm) {
         nsCOMPtr<nsIDOMNode> node = pm->GetLastTriggerTooltipNode(this);
         if (node && nsContentUtils::CanCallerAccess(node))
-            node.forget(aNode);
+            node.swap(*aNode);
     }
 
     return NS_OK;
@@ -3579,7 +3579,7 @@ XULDocument::CreateElementFromPrototype(nsXULPrototypeElement* aPrototype,
         if (NS_FAILED(rv)) return rv;
     }
 
-    result.forget(aResult);
+    result.swap(*aResult);
 
     return NS_OK;
 }

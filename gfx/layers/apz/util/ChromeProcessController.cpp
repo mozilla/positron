@@ -11,7 +11,7 @@
 #include "mozilla/layers/CompositorBridgeParent.h"
 #include "mozilla/layers/APZCCallbackHelper.h"
 #include "mozilla/layers/APZEventState.h"
-#include "mozilla/layers/IAPZCTreeManager.h"
+#include "mozilla/layers/APZCTreeManager.h"
 #include "mozilla/layers/DoubleTapToZoom.h"
 #include "nsIDocument.h"
 #include "nsIInterfaceRequestorUtils.h"
@@ -25,7 +25,7 @@ using namespace mozilla::widget;
 
 ChromeProcessController::ChromeProcessController(nsIWidget* aWidget,
                                                  APZEventState* aAPZEventState,
-                                                 IAPZCTreeManager* aAPZCTreeManager)
+                                                 APZCTreeManager* aAPZCTreeManager)
   : mWidget(aWidget)
   , mAPZEventState(aAPZEventState)
   , mAPZCTreeManager(aAPZCTreeManager)
@@ -125,13 +125,15 @@ ChromeProcessController::HandleDoubleTap(const mozilla::CSSPoint& aPoint,
     return;
   }
 
+  CSSPoint point = APZCCallbackHelper::ApplyCallbackTransform(aPoint, aGuid);
   // CalculateRectToZoomTo performs a hit test on the frame associated with the
   // Root Content Document. Unfortunately that frame does not know about the
   // resolution of the document and so we must remove it before calculating
   // the zoomToRect.
   nsIPresShell* presShell = document->GetShell();
   const float resolution = presShell->ScaleToResolution() ? presShell->GetResolution () : 1.0f;
-  CSSPoint point(aPoint.x / resolution, aPoint.y / resolution);
+  point.x = point.x / resolution;
+  point.y = point.y / resolution;
   CSSRect zoomToRect = CalculateRectToZoomTo(document, point);
 
   uint32_t presShellId;
@@ -145,38 +147,27 @@ ChromeProcessController::HandleDoubleTap(const mozilla::CSSPoint& aPoint,
 
 void
 ChromeProcessController::HandleTap(TapType aType,
-                                   const mozilla::LayoutDevicePoint& aPoint,
-                                   Modifiers aModifiers,
+                                   const mozilla::CSSPoint& aPoint, Modifiers aModifiers,
                                    const ScrollableLayerGuid& aGuid,
                                    uint64_t aInputBlockId)
 {
   if (MessageLoop::current() != mUILoop) {
-    mUILoop->PostTask(NewRunnableMethod<TapType, mozilla::LayoutDevicePoint, Modifiers,
+    mUILoop->PostTask(NewRunnableMethod<TapType, mozilla::CSSPoint, Modifiers,
                                         ScrollableLayerGuid, uint64_t>(this,
                         &ChromeProcessController::HandleTap,
                         aType, aPoint, aModifiers, aGuid, aInputBlockId));
     return;
   }
 
-  nsCOMPtr<nsIPresShell> presShell = GetPresShell();
-  if (!presShell) {
-    return;
-  }
-  if (!presShell->GetPresContext()) {
-    return;
-  }
-  CSSToLayoutDeviceScale scale(presShell->GetPresContext()->CSSToDevPixelScale());
-  CSSPoint point = APZCCallbackHelper::ApplyCallbackTransform(aPoint / scale, aGuid);
-
   switch (aType) {
   case TapType::eSingleTap:
-    mAPZEventState->ProcessSingleTap(point, scale, aModifiers, aGuid);
+    mAPZEventState->ProcessSingleTap(aPoint, aModifiers, aGuid);
     break;
   case TapType::eDoubleTap:
-    HandleDoubleTap(point, aModifiers, aGuid);
+    HandleDoubleTap(aPoint, aModifiers, aGuid);
     break;
   case TapType::eLongTap:
-    mAPZEventState->ProcessLongTap(presShell, point, scale, aModifiers, aGuid,
+    mAPZEventState->ProcessLongTap(GetPresShell(), aPoint, aModifiers, aGuid,
         aInputBlockId);
     break;
   case TapType::eLongTapUp:

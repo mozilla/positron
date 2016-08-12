@@ -6,15 +6,14 @@
 #include "ScrollbarActivity.h"
 #include "nsIScrollbarMediator.h"
 #include "nsIContent.h"
-#include "nsICSSDeclaration.h"
 #include "nsIDOMEvent.h"
+#include "nsIDOMElementCSSInlineStyle.h"
 #include "nsIDOMCSSStyleDeclaration.h"
 #include "nsIFrame.h"
 #include "nsContentUtils.h"
 #include "nsAString.h"
 #include "nsQueryFrame.h"
 #include "nsComponentManagerUtils.h"
-#include "nsStyledElement.h"
 #include "mozilla/LookAndFeel.h"
 #include "mozilla/Preferences.h"
 
@@ -353,13 +352,16 @@ ScrollbarActivity::SetIsActive(bool aNewActive)
 static void
 SetOpacityOnElement(nsIContent* aContent, double aOpacity)
 {
-  nsCOMPtr<nsStyledElement> inlineStyleContent =
+  nsCOMPtr<nsIDOMElementCSSInlineStyle> inlineStyleContent =
     do_QueryInterface(aContent);
   if (inlineStyleContent) {
-    nsICSSDeclaration* decl = inlineStyleContent->Style();
-    nsAutoString str;
-    str.AppendFloat(aOpacity);
-    decl->SetProperty(NS_LITERAL_STRING("opacity"), str, EmptyString());
+    nsCOMPtr<nsIDOMCSSStyleDeclaration> decl;
+    inlineStyleContent->GetStyle(getter_AddRefs(decl));
+    if (decl) {
+      nsAutoString str;
+      str.AppendFloat(aOpacity);
+      decl->SetProperty(NS_LITERAL_STRING("opacity"), str, EmptyString());
+    }
   }
 }
 
@@ -389,12 +391,15 @@ ScrollbarActivity::UpdateOpacity(TimeStamp aTime)
 static void
 UnsetOpacityOnElement(nsIContent* aContent)
 {
-  nsCOMPtr<nsStyledElement> inlineStyleContent =
+  nsCOMPtr<nsIDOMElementCSSInlineStyle> inlineStyleContent =
     do_QueryInterface(aContent);
   if (inlineStyleContent) {
-    nsICSSDeclaration* decl = inlineStyleContent->Style();
-    nsAutoString dummy;
-    decl->RemoveProperty(NS_LITERAL_STRING("opacity"), dummy);
+    nsCOMPtr<nsIDOMCSSStyleDeclaration> decl;
+    inlineStyleContent->GetStyle(getter_AddRefs(decl));
+    if (decl) {
+      nsAutoString dummy;
+      decl->RemoveProperty(NS_LITERAL_STRING("opacity"), dummy);
+    }
   }
 }
 

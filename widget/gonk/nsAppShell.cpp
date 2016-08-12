@@ -63,6 +63,10 @@
 #include "libui/InputReader.h"
 #include "libui/InputDispatcher.h"
 
+#ifdef MOZ_NUWA_PROCESS
+#include "ipc/Nuwa.h"
+#endif
+
 #include "mozilla/Preferences.h"
 #include "GeckoProfiler.h"
 
@@ -710,8 +714,8 @@ addMultiTouch(MultiTouchInput& aMultiTouch,
       radiusY = coords.getAxisValue(AMOTION_EVENT_AXIS_TOUCH_MINOR) / 2;
     }
 
-    ScreenIntPoint point = ScreenIntPoint::Round(coords.getX(),
-                                                 coords.getY());
+    ScreenIntPoint point(floor(coords.getX() + 0.5),
+                         floor(coords.getY() + 0.5));
 
     SingleTouchData touchData(id, point, ScreenSize(radiusX, radiusY),
                               rotationAngle, force);
@@ -904,6 +908,11 @@ nsAppShell::Init()
         obsServ->AddObserver(this, "browser-ui-startup-complete", false);
         obsServ->AddObserver(this, "network-connection-state-changed", false);
     }
+
+#ifdef MOZ_NUWA_PROCESS
+    // Make sure main thread was woken up after Nuwa fork.
+    NuwaAddConstructor((void (*)(void *))&NotifyEvent, nullptr);
+#endif
 
     // Delay initializing input devices until the screen has been
     // initialized (and we know the resolution).

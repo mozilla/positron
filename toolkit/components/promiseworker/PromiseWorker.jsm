@@ -279,8 +279,9 @@ this.BasePromiseWorker.prototype = {
               transfers.push(...arg.meta.transfers);
             }
             return arg.data;
+          } else {
+            return arg;
           }
-          return arg;
         });
       }
 

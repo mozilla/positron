@@ -63,7 +63,7 @@ PathExpr::evaluate(txIEvalContext* aContext, txAExprResult** aResult)
                                            (static_cast<txAExprResult*>
                                                        (res));
     if (nodes->isEmpty()) {
-        res.forget(aResult);
+        res.swap(*aResult);
 
         return NS_OK;
     }

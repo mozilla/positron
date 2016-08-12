@@ -12,7 +12,6 @@ import sys
 import tempfile
 import unittest
 
-from cStringIO import StringIO
 from mozfile.mozfile import NamedTemporaryFile
 
 from mozunit import main
@@ -60,8 +59,7 @@ class TestMozbuildObject(unittest.TestCase):
 
             self.assertIsNotNone(base.topobjdir)
             self.assertEqual(len(base.topobjdir.split()), 1)
-            config_guess = base.resolve_config_guess()
-            self.assertTrue(base.topobjdir.endswith(config_guess))
+            self.assertTrue(base.topobjdir.endswith(base._config_guess))
             self.assertTrue(os.path.isabs(base.topobjdir))
             self.assertTrue(base.topobjdir.startswith(base.topsrcdir))
 
@@ -274,30 +272,21 @@ class TestMozbuildObject(unittest.TestCase):
 
             os.chdir(topobjdir)
 
-            class MockMachContext(object):
-                pass
-
-            context = MockMachContext()
-            context.cwd = topobjdir
-            context.topdir = topsrcdir
-            context.settings = None
-            context.log_manager = None
-            context.detect_virtualenv_mozinfo=False
-
-            stdout = sys.stdout
-            sys.stdout = StringIO()
-            try:
-                with self.assertRaises(SystemExit):
-                    MachCommandBase(context)
-
-                self.assertTrue(sys.stdout.getvalue().startswith(
-                    'Ambiguous object directory detected.'))
-            finally:
-                sys.stdout = stdout
+            with self.assertRaises(ObjdirMismatchException):
+                MozbuildObject.from_environment(detect_virtualenv_mozinfo=False)
 
         finally:
             os.chdir(self._old_cwd)
             shutil.rmtree(d)
+
+    def test_config_guess(self):
+        # It's difficult to test for exact values from the output of
+        # config.guess because they vary depending on platform.
+        base = self.get_base()
+        result = base._config_guess
+
+        self.assertIsNotNone(result)
+        self.assertGreater(len(result), 0)
 
     def test_config_environment(self):
         base = self.get_base(topobjdir=topobjdir)

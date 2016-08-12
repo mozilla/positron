@@ -400,7 +400,7 @@ nsNodeUtils::CloneNodeImpl(nsINode *aNode, bool aDeep, nsINode **aResult)
                       getter_AddRefs(newNode));
   NS_ENSURE_SUCCESS(rv, rv);
 
-  newNode.forget(aResult);
+  newNode.swap(*aResult);
   return NS_OK;
 }
 
@@ -506,7 +506,7 @@ nsNodeUtils::CloneAndAdopt(nsINode *aNode, bool aClone, bool aDeep,
 
     aNode->mNodeInfo.swap(newNodeInfo);
     if (elem) {
-      elem->NodeInfoChanged();
+      elem->NodeInfoChanged(newNodeInfo);
     }
 
     nsIDocument* newDoc = aNode->OwnerDoc();
@@ -570,7 +570,7 @@ nsNodeUtils::CloneAndAdopt(nsINode *aNode, bool aClone, bool aDeep,
         JSAutoCompartment ac(cx, wrapper);
         rv = ReparentWrapper(cx, wrapper);
         if (NS_FAILED(rv)) {
-          aNode->mNodeInfo.swap(newNodeInfo);
+          aNode->mNodeInfo.swap(nodeInfo);
 
           return rv;
         }

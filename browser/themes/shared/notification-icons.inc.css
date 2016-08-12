@@ -41,7 +41,7 @@
   margin-inline-end: 10px;
 }
 
-#notification-popup-box > .notification-anchor-icon:not(.in-use):hover {
+#notification-popup-box > .notification-anchor-icon:hover {
   fill: #606060;
 }
 
@@ -274,7 +274,7 @@
 
 .plugin-icon.plugin-blocked {
   list-style-image: url(chrome://browser/skin/notification-icons.svg#plugin-blocked);
-  fill: #d92215 !important; /* important! to override the default hover color */
+  fill: #d92215;
 }
 
 #notification-popup-box[hidden] {

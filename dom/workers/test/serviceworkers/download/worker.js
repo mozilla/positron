@@ -21,9 +21,7 @@ addEventListener('fetch', function(evt) {
   evt.respondWith(registration.unregister().then(function() {
     return new Response('service worker generated download', {
       headers: {
-        'Content-Disposition': 'attachment; filename="fake_download.bin"',
-        // fake encoding header that should have no effect
-        'Content-Encoding': 'gzip',
+        'Content-Disposition': 'attachment; filename="fake_download.bin"'
       }
     });
   }));

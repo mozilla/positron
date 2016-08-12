@@ -282,26 +282,26 @@ public:
 
 void
 nsVideoFrame::Reflow(nsPresContext*           aPresContext,
-                     ReflowOutput&     aMetrics,
-                     const ReflowInput& aReflowInput,
+                     nsHTMLReflowMetrics&     aMetrics,
+                     const nsHTMLReflowState& aReflowState,
                      nsReflowStatus&          aStatus)
 {
   MarkInReflow();
   DO_GLOBAL_REFLOW_COUNT("nsVideoFrame");
-  DISPLAY_REFLOW(aPresContext, this, aReflowInput, aMetrics, aStatus);
+  DISPLAY_REFLOW(aPresContext, this, aReflowState, aMetrics, aStatus);
   NS_FRAME_TRACE(NS_FRAME_TRACE_CALLS,
                   ("enter nsVideoFrame::Reflow: availSize=%d,%d",
-                  aReflowInput.AvailableWidth(), aReflowInput.AvailableHeight()));
+                  aReflowState.AvailableWidth(), aReflowState.AvailableHeight()));
 
   NS_PRECONDITION(mState & NS_FRAME_IN_REFLOW, "frame is not in reflow");
 
   aStatus = NS_FRAME_COMPLETE;
 
-  aMetrics.Width() = aReflowInput.ComputedWidth();
-  aMetrics.Height() = aReflowInput.ComputedHeight();
+  aMetrics.Width() = aReflowState.ComputedWidth();
+  aMetrics.Height() = aReflowState.ComputedHeight();
 
   // stash this away so we can compute our inner area later
-  mBorderPadding   = aReflowInput.ComputedPhysicalBorderPadding();
+  mBorderPadding   = aReflowState.ComputedPhysicalBorderPadding();
 
   aMetrics.Width() += mBorderPadding.left + mBorderPadding.right;
   aMetrics.Height() += mBorderPadding.top + mBorderPadding.bottom;
@@ -312,13 +312,13 @@ nsVideoFrame::Reflow(nsPresContext*           aPresContext,
     if (child->GetContent() == mPosterImage) {
       // Reflow the poster frame.
       nsImageFrame* imageFrame = static_cast<nsImageFrame*>(child);
-      ReflowOutput kidDesiredSize(aReflowInput);
+      nsHTMLReflowMetrics kidDesiredSize(aReflowState);
       WritingMode wm = imageFrame->GetWritingMode();
-      LogicalSize availableSize = aReflowInput.AvailableSize(wm);
+      LogicalSize availableSize = aReflowState.AvailableSize(wm);
       LogicalSize cbSize = aMetrics.Size(aMetrics.GetWritingMode()).
                              ConvertTo(wm, aMetrics.GetWritingMode());
-      ReflowInput kidReflowInput(aPresContext,
-                                       aReflowInput,
+      nsHTMLReflowState kidReflowState(aPresContext,
+                                       aReflowState,
                                        imageFrame,
                                        availableSize,
                                        &cbSize);
@@ -327,53 +327,53 @@ nsVideoFrame::Reflow(nsPresContext*           aPresContext,
       if (ShouldDisplayPoster()) {
         posterRenderRect =
           nsRect(nsPoint(mBorderPadding.left, mBorderPadding.top),
-                 nsSize(aReflowInput.ComputedWidth(),
-                        aReflowInput.ComputedHeight()));
+                 nsSize(aReflowState.ComputedWidth(),
+                        aReflowState.ComputedHeight()));
       }
-      kidReflowInput.SetComputedWidth(posterRenderRect.width);
-      kidReflowInput.SetComputedHeight(posterRenderRect.height);
-      ReflowChild(imageFrame, aPresContext, kidDesiredSize, kidReflowInput,
+      kidReflowState.SetComputedWidth(posterRenderRect.width);
+      kidReflowState.SetComputedHeight(posterRenderRect.height);
+      ReflowChild(imageFrame, aPresContext, kidDesiredSize, kidReflowState,
                   posterRenderRect.x, posterRenderRect.y, 0, aStatus);
       FinishReflowChild(imageFrame, aPresContext,
-                        kidDesiredSize, &kidReflowInput,
+                        kidDesiredSize, &kidReflowState,
                         posterRenderRect.x, posterRenderRect.y, 0);
     } else if (child->GetContent() == mVideoControls) {
       // Reflow the video controls frame.
-      nsBoxLayoutState boxState(PresContext(), aReflowInput.mRenderingContext);
+      nsBoxLayoutState boxState(PresContext(), aReflowState.rendContext);
       nsSize size = child->GetSize();
       nsBoxFrame::LayoutChildAt(boxState,
                                 child,
                                 nsRect(mBorderPadding.left,
                                        mBorderPadding.top,
-                                       aReflowInput.ComputedWidth(),
-                                       aReflowInput.ComputedHeight()));
+                                       aReflowState.ComputedWidth(),
+                                       aReflowState.ComputedHeight()));
       if (child->GetSize() != size) {
         RefPtr<Runnable> event = new DispatchResizeToControls(child->GetContent());
         nsContentUtils::AddScriptRunner(event);
       }
     } else if (child->GetContent() == mCaptionDiv) {
       // Reflow to caption div
-      ReflowOutput kidDesiredSize(aReflowInput);
+      nsHTMLReflowMetrics kidDesiredSize(aReflowState);
       WritingMode wm = child->GetWritingMode();
-      LogicalSize availableSize = aReflowInput.AvailableSize(wm);
+      LogicalSize availableSize = aReflowState.AvailableSize(wm);
       LogicalSize cbSize = aMetrics.Size(aMetrics.GetWritingMode()).
                              ConvertTo(wm, aMetrics.GetWritingMode());
-      ReflowInput kidReflowInput(aPresContext,
-                                       aReflowInput,
+      nsHTMLReflowState kidReflowState(aPresContext,
+                                       aReflowState,
                                        child,
                                        availableSize,
                                        &cbSize);
-      nsSize size(aReflowInput.ComputedWidth(), aReflowInput.ComputedHeight());
-      size.width -= kidReflowInput.ComputedPhysicalBorderPadding().LeftRight();
-      size.height -= kidReflowInput.ComputedPhysicalBorderPadding().TopBottom();
+      nsSize size(aReflowState.ComputedWidth(), aReflowState.ComputedHeight());
+      size.width -= kidReflowState.ComputedPhysicalBorderPadding().LeftRight();
+      size.height -= kidReflowState.ComputedPhysicalBorderPadding().TopBottom();
 
-      kidReflowInput.SetComputedWidth(std::max(size.width, 0));
-      kidReflowInput.SetComputedHeight(std::max(size.height, 0));
+      kidReflowState.SetComputedWidth(std::max(size.width, 0));
+      kidReflowState.SetComputedHeight(std::max(size.height, 0));
 
-      ReflowChild(child, aPresContext, kidDesiredSize, kidReflowInput,
+      ReflowChild(child, aPresContext, kidDesiredSize, kidReflowState,
                   mBorderPadding.left, mBorderPadding.top, 0, aStatus);
       FinishReflowChild(child, aPresContext,
-                        kidDesiredSize, &kidReflowInput,
+                        kidDesiredSize, &kidReflowState,
                         mBorderPadding.left, mBorderPadding.top, 0);
     }
   }
@@ -384,7 +384,7 @@ nsVideoFrame::Reflow(nsPresContext*           aPresContext,
   NS_FRAME_TRACE(NS_FRAME_TRACE_CALLS,
                   ("exit nsVideoFrame::Reflow: size=%d,%d",
                   aMetrics.Width(), aMetrics.Height()));
-  NS_FRAME_SET_TRUNCATION(aStatus, aReflowInput, aMetrics);
+  NS_FRAME_SET_TRUNCATION(aStatus, aReflowState, aMetrics);
 }
 
 class nsDisplayVideo : public nsDisplayItem {

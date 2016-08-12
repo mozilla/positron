@@ -30,7 +30,7 @@
 
 class nsAString;
 class nsIDocument;
-class nsStyledElement;
+class nsStyledElementNotElementCSSInlineStyle;
 struct MiscContainer;
 struct ServoDeclarationBlock;
 
@@ -392,7 +392,7 @@ public:
    * @param aElement the element the attribute is set on.
    */
   bool ParseStyleAttribute(const nsAString& aString,
-                           nsStyledElement* aElement);
+                           nsStyledElementNotElementCSSInlineStyle* aElement);
 
   size_t SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf) const;
 
@@ -443,7 +443,7 @@ private:
   // Given an enum table and a particular entry in that table, return
   // the actual integer value we should store.
   int32_t EnumTableEntryToValue(const EnumTable* aEnumTable,
-                                const EnumTable* aTableEntry);
+                                const EnumTable* aTableEntry);  
 
   static nsTArray<const EnumTable*>* sEnumTableArray;
 

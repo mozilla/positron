@@ -109,8 +109,6 @@ const SQL_BOOKMARK_TAGS_FRAGMENT =
 
 // TODO bug 412736: in case of a frecency tie, we might break it with h.typed
 // and h.visit_count.  That is slower though, so not doing it yet...
-// NB: as a slight performance optimization, we only evaluate the "btitle"
-// and "tags" queries for bookmarked entries.
 function defaultQuery(conditions = "") {
   let query =
     `SELECT :query_type, h.url, h.title, f.url, ${SQL_BOOKMARK_TAGS_FRAGMENT},
@@ -120,12 +118,7 @@ function defaultQuery(conditions = "") {
      LEFT JOIN moz_openpages_temp t ON t.url = h.url
      WHERE h.frecency <> 0
        AND AUTOCOMPLETE_MATCH(:searchString, h.url,
-                              CASE WHEN bookmarked THEN
-                                IFNULL(btitle, h.title)
-                              ELSE h.title END,
-                              CASE WHEN bookmarked THEN
-                                tags
-                              ELSE '' END,
+                              IFNULL(btitle, h.title), tags,
                               h.visit_count, h.typed,
                               bookmarked, t.open_count,
                               :matchBehavior, :searchBehavior)
@@ -573,6 +566,24 @@ function stripHttpAndTrim(spec) {
     spec = spec.slice(0, -1);
   }
   return spec;
+}
+
+/**
+ * Make a moz-action: URL for a given action and set of parameters.
+ *
+ * @param action
+ *        Name of the action
+ * @param params
+ *        Object, whose keys are parameter names and values are the
+ *        corresponding parameter values.
+ * @return String representation of the built moz-action: URL
+ */
+function makeActionURL(action, params) {
+  let encodedParams = {};
+  for (let key in params) {
+    encodedParams[key] = encodeURIComponent(params[key]);
+  }
+  return "moz-action:" + action + "," + JSON.stringify(encodedParams);
 }
 
 /**
@@ -1114,10 +1125,8 @@ Search.prototype = {
     let escapedURL = entry.url.href.replace("%s", queryString);
 
     let style = (this._enableActions ? "action " : "") + "keyword";
-    let actionURL = PlacesUtils.mozActionURI("keyword", {
-      url: escapedURL,
-      input: this._originalSearchString,
-    });
+    let actionURL = makeActionURL("keyword", { url: escapedURL,
+                                               input: this._originalSearchString });
     let value = this._enableActions ? actionURL : escapedURL;
     // The title will end up being "host: queryString"
     let comment = entry.url.host;
@@ -1215,7 +1224,7 @@ Search.prototype = {
     if (match.engineAlias) {
       actionURLParams.alias = match.engineAlias;
     }
-    let value = PlacesUtils.mozActionURI("searchengine", actionURLParams);
+    let value = makeActionURL("searchengine", actionURLParams);
 
     this._addMatch({
       value: value,
@@ -1247,7 +1256,7 @@ Search.prototype = {
       let match = {
         // We include the deviceName in the action URL so we can render it in
         // the URLBar.
-        value: PlacesUtils.mozActionURI("remotetab", { url, deviceName }),
+        value: makeActionURL("remotetab", { url, deviceName }),
         comment: title || url,
         style: "action remotetab",
         // we want frecency > FRECENCY_DEFAULT so it doesn't get pushed out
@@ -1307,7 +1316,7 @@ Search.prototype = {
     let escapedURL = uri.spec;
     let displayURL = textURIService.unEscapeURIForUI("UTF-8", uri.spec);
 
-    let value = PlacesUtils.mozActionURI("visiturl", {
+    let value = makeActionURL("visiturl", {
       url: escapedURL,
       input: this._originalSearchString,
     });
@@ -1376,7 +1385,7 @@ Search.prototype = {
     }
 
     // Turn the match into a searchengine action with a favicon.
-    match.value = PlacesUtils.mozActionURI("searchengine", {
+    match.value = makeActionURL("searchengine", {
       engineName: parseResult.engineName,
       input: parseResult.terms,
       searchQuery: parseResult.terms,
@@ -1548,7 +1557,7 @@ Search.prototype = {
     let url = escapedURL;
     let action = null;
     if (this._enableActions && openPageCount > 0 && this.hasBehavior("openpage")) {
-      url = PlacesUtils.mozActionURI("switchtab", {url: escapedURL});
+      url = makeActionURL("switchtab", {url: escapedURL});
       action = "switchtab";
     }
 

@@ -69,12 +69,6 @@ var WebAudioEditorController = {
     } else {
       AUDIO_NODE_DEFINITION = require("devtools/server/actors/utils/audionodes.json");
     }
-
-    // Make sure the backend is prepared to handle audio contexts.
-    // Since actors are created lazily on the first request to them, we need to send an
-    // early request to ensure the CallWatcherActor is running and watching for new window
-    // globals.
-    gFront.setup({ reload: false });
   }),
 
   /**
@@ -139,6 +133,11 @@ var WebAudioEditorController = {
   _onTabNavigated: Task.async(function* (event, {isFrameSwitching}) {
     switch (event) {
       case "will-navigate": {
+        // Make sure the backend is prepared to handle audio contexts.
+        if (!isFrameSwitching) {
+          yield gFront.setup({ reload: false });
+        }
+
         // Clear out current UI.
         this.reset();
 

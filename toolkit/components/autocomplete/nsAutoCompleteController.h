@@ -55,8 +55,7 @@ protected:
   nsresult ProcessResult(int32_t aSearchIndex, nsIAutoCompleteResult *aResult);
   nsresult PostSearchCleanup();
 
-  nsresult EnterMatch(bool aIsPopupSelection,
-                      nsIDOMEvent *aEvent);
+  nsresult EnterMatch(bool aIsPopupSelection);
   nsresult RevertTextValue();
 
   nsresult CompleteDefaultIndex(int32_t aResultIndex);

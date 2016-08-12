@@ -11,15 +11,14 @@ const {ScratchpadManager} = Cu.import("resource://devtools/client/scratchpad/scr
 const {require} = Cu.import("resource://devtools/shared/Loader.jsm", {});
 const Services = require("Services");
 const DevToolsUtils = require("devtools/shared/DevToolsUtils");
-const flags = require("devtools/shared/flags");
 const promise = require("promise");
 
 
 var gScratchpadWindow; // Reference to the Scratchpad chrome window object
 
-flags.testing = true;
+DevToolsUtils.testing = true;
 SimpleTest.registerCleanupFunction(() => {
-  flags.testing = false;
+  DevToolsUtils.testing = false;
 });
 
 /**

@@ -103,9 +103,10 @@ NS_CYCLE_COLLECTION_CLASSNAME(nsXPCWrappedJS)::Traverse
     if (cb.WantDebugInfo()) {
         char name[72];
         if (tmp->GetClass())
-            snprintf(name, sizeof(name), "nsXPCWrappedJS (%s)", tmp->GetClass()->GetInterfaceName());
+            JS_snprintf(name, sizeof(name), "nsXPCWrappedJS (%s)",
+                        tmp->GetClass()->GetInterfaceName());
         else
-            snprintf(name, sizeof(name), "nsXPCWrappedJS");
+            JS_snprintf(name, sizeof(name), "nsXPCWrappedJS");
         cb.DescribeRefCountedNode(refcnt, name);
     } else {
         NS_IMPL_CYCLE_COLLECTION_DESCRIBE(nsXPCWrappedJS, refcnt)
@@ -456,7 +457,7 @@ XPCJSRuntime::RemoveWrappedJS(nsXPCWrappedJS* wrapper)
 
 #ifdef DEBUG
 static void
-NotHasWrapperAssertionCallback(JSContext* cx, void* data, JSCompartment* comp)
+NotHasWrapperAssertionCallback(JSRuntime* rt, void* data, JSCompartment* comp)
 {
     auto wrapper = static_cast<nsXPCWrappedJS*>(data);
     auto xpcComp = xpc::CompartmentPrivate::Get(comp);
@@ -471,7 +472,7 @@ XPCJSRuntime::AssertInvalidWrappedJSNotInTable(nsXPCWrappedJS* wrapper) const
     if (!wrapper->IsValid()) {
         MOZ_ASSERT(!GetMultiCompartmentWrappedJSMap()->HasWrapper(wrapper));
         if (!mGCIsRunning)
-            JS_IterateCompartments(Context(), wrapper, NotHasWrapperAssertionCallback);
+            JS_IterateCompartments(Runtime(), wrapper, NotHasWrapperAssertionCallback);
     }
 #endif
 }

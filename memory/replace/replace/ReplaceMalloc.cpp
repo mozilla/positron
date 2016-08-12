@@ -15,7 +15,9 @@
  * This is however a limited version to fulfil more immediate needs.
  */
 static const malloc_table_t* gFuncs = nullptr;
-static mozilla::Atomic<const malloc_hook_table_t*> gHookTable(nullptr);
+/* This should normally be a mozilla::Atomic<const malloc_hook_table_t*>
+ * but MSVC 2013's atomic type doesn't like it. */
+static mozilla::Atomic<malloc_hook_table_t*> gHookTable(nullptr);
 
 class GenericReplaceMallocBridge : public ReplaceMallocBridge
 {

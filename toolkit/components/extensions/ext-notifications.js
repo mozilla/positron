@@ -81,12 +81,10 @@ extensions.on("startup", (type, extension) => {
 });
 
 extensions.on("shutdown", (type, extension) => {
-  if (notificationsMap.has(extension)) {
-    for (let notification of notificationsMap.get(extension).values()) {
-      notification.clear();
-    }
-    notificationsMap.delete(extension);
+  for (let notification of notificationsMap.get(extension).values()) {
+    notification.clear();
   }
+  notificationsMap.delete(extension);
 });
 /* eslint-enable mozilla/balanced-listeners */
 

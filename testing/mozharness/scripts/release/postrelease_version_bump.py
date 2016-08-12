@@ -148,7 +148,7 @@ class PostReleaseVersionBump(MercurialScript, BuildbotMixin,
             user=self.config["ssh_user"],
             key=os.path.expanduser(self.config["ssh_key"])
         )
-        return ["-e", hg_ssh_opts, "-r", "."]
+        return ["-e", hg_ssh_opts]
 
     def pull(self):
         super(PostReleaseVersionBump, self).pull(

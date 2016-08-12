@@ -679,7 +679,3 @@ exports.RulersHighlighter = RulersHighlighter;
 const { MeasuringToolHighlighter } = require("./highlighters/measuring-tool");
 register(MeasuringToolHighlighter);
 exports.MeasuringToolHighlighter = MeasuringToolHighlighter;
-
-const { EyeDropper } = require("./highlighters/eye-dropper");
-register(EyeDropper);
-exports.EyeDropper = EyeDropper;

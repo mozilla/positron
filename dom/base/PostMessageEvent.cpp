@@ -60,9 +60,6 @@ PostMessageEvent::Run()
   MOZ_ASSERT(!mSource || mSource->IsOuterWindow(),
              "should have been passed an outer window!");
 
-  // Note: We don't init this AutoJSAPI with targetWindow, because we do not
-  // want exceptions during message deserialization to trigger error events on
-  // targetWindow.
   AutoJSAPI jsapi;
   jsapi.Init();
   JSContext* cx = jsapi.cx();
@@ -84,7 +81,7 @@ PostMessageEvent::Run()
 
   MOZ_ASSERT(targetWindow->IsInnerWindow(),
              "we ordered an inner window!");
-  JSAutoCompartment ac(cx, targetWindow->GetWrapper());
+  JSAutoCompartment ac(cx, targetWindow->GetWrapperPreserveColor());
 
   // Ensure that any origin which might have been provided is the origin of this
   // window's document.  Note that we do this *now* instead of when postMessage

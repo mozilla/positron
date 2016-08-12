@@ -26,11 +26,13 @@
 }
 
 #font-showall {
+  border-radius: 0;
+  border: 1px solid black;
+  margin: 3px;
   cursor: pointer;
-}
-
-#font-showall:hover {
-  text-decoration: underline;
+  position: absolute;
+  bottom: 0;
+  offset-inline-end: 0;
 }
 
 .dim > #font-container,

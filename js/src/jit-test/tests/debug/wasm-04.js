@@ -26,6 +26,7 @@ assertThrowsInstanceOf(() => s.global, Error);
 assertThrowsInstanceOf(() => s.getChildScripts(), Error);
 assertThrowsInstanceOf(() => s.getAllOffsets(), Error);
 assertThrowsInstanceOf(() => s.getAllColumnOffsets(), Error);
+assertThrowsInstanceOf(() => s.getLineOffsets(0), Error);
 assertThrowsInstanceOf(() => s.setBreakpoint(0, { hit: () => {} }), Error);
 assertThrowsInstanceOf(() => s.getBreakpoint(0), Error);
 assertThrowsInstanceOf(() => s.clearBreakpoint({}), Error);

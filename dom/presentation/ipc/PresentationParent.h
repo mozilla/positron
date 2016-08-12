@@ -71,8 +71,7 @@ public:
   virtual bool RecvUnregisterRespondingHandler(const uint64_t& aWindowId) override;
 
   virtual bool RecvNotifyReceiverReady(const nsString& aSessionId,
-                                       const uint64_t& aWindowId,
-                                       const bool& aIsLoading) override;
+                                       const uint64_t& aWindowId) override;
 
   virtual bool RecvNotifyTransportClosed(const nsString& aSessionId,
                                          const uint8_t& aRole,
@@ -113,10 +112,6 @@ private:
   nsresult DoRequest(const CloseSessionRequest& aRequest);
 
   nsresult DoRequest(const TerminateSessionRequest& aRequest);
-
-  nsresult DoRequest(const ReconnectSessionRequest& aRequest);
-
-  nsresult DoRequest(const BuildTransportRequest& aRequest);
 
   bool mActorDestroyed = false;
   bool mNeedRegisterBuilder = false;

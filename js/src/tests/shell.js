@@ -18,7 +18,6 @@
 
   var Error = global.Error;
   var Number = global.Number;
-  var String = global.String;
   var TypeError = global.TypeError;
 
   var ArrayIsArray = global.Array.isArray;
@@ -26,17 +25,6 @@
   var ObjectDefineProperty = global.Object.defineProperty;
   var ReflectApply = global.Reflect.apply;
   var StringPrototypeEndsWith = global.String.prototype.endsWith;
-
-  var runningInBrowser = typeof global.window !== "undefined";
-  if (runningInBrowser) {
-    // Certain cached functionality only exists (and is only needed) when
-    // running in the browser.  Segregate that caching here.
-
-    var SpecialPowersSetGCZeal =
-      global.SpecialPowers ? global.SpecialPowers.setGCZeal : undefined;
-  }
-
-  var runningInShell = typeof window === "undefined";
 
   /****************************
    * GENERAL HELPER FUNCTIONS *
@@ -154,69 +142,11 @@
    * UTILITY FUNCTION EXPORTS *
    ****************************/
 
-  var dump = global.dump;
-  if (typeof global.dump === "function") {
-    // A presumptively-functional |dump| exists, so no need to do anything.
-  } else {
-    // We don't have |dump|.  Try to simulate the desired effect another way.
-    if (runningInBrowser) {
-      // We can't actually print to the console: |global.print| invokes browser
-      // printing functionality here (it's overwritten just below), and
-      // |global.dump| isn't a function that'll dump to the console (presumably
-      // because the preference to enable |dump| wasn't set).  Just make it a
-      // no-op.
-      dump = function() {};
-    } else {
-      // |print| prints to stdout: make |dump| do likewise.
-      dump = global.print;
-    }
-    global.dump = dump;
-  }
-
-  var print;
-  if (runningInBrowser) {
-    // We're executing in a browser.  Using |global.print| would invoke browser
-    // printing functionality: not what tests want!  Instead, use a print
-    // function that syncs up with the test harness and console.
-    print = function print() {
-      var s = "TEST-INFO | ";
-      for (var i = 0; i < arguments.length; i++)
-        s += String(arguments[i]) + " ";
-
-      // Dump the string to the console for developers and the harness.
-      dump(s + "\n");
-
-      // AddPrintOutput doesn't require HTML special characters be escaped.
-      global.AddPrintOutput(s);
-    };
-
-    global.print = print;
-  } else {
-    // We're executing in a shell, and |global.print| is the desired function.
-    print = global.print;
-  }
-
-  var quit = global.quit;
-  if (typeof quit !== "function") {
-    // XXX There's something very strange about quit() in browser runs being a
-    //     function that doesn't quit at all (!).  We should get rid of quit()
-    //     as an integral part of tests in favor of something else.
-    quit = function quit() {};
-    global.quit = quit;
-  }
-
-  var gczeal = global.gczeal;
-  if (typeof gczeal !== "function") {
-    if (typeof SpecialPowersSetGCZeal === "function") {
-      gczeal = function gczeal(z) {
-        SpecialPowersSetGCZeal(z);
-      };
-    } else {
-      gczeal = function() {}; // no-op if not available
-    }
-
-    global.gczeal = gczeal;
-  }
+  // Eventually this polyfill should be defined here, not in browser.js.  For
+  // now tolerate more-resilient code depending on less-resilient code.
+  assertEq(typeof global.print, "function",
+           "print function is pre-existing, either provided by the shell or " +
+           "the already-executed top-level browser.js");
 
   /******************************************************
    * TEST METADATA EXPORTS (these are of dubious value) *
@@ -229,12 +159,6 @@
   /*************************************************************************
    * HARNESS-CENTRIC EXPORTS (we should generally work to eliminate these) *
    *************************************************************************/
-
-  var PASSED = " PASSED! ";
-  global.PASSED = PASSED;
-
-  var FAILED = " FAILED! ";
-  global.FAILED = FAILED;
 
   /** Set up test environment. */
   function startTest() {
@@ -287,20 +211,12 @@
 
   /** Peeks at the top of the call stack. */
   function currentFunc() {
-    if (callStack.length == 0)
-      return "top level script";
+    assertEq(callStack.length > 0, true,
+             "must be a current function to examine");
 
     return callStack[callStack.length - 1];
   }
   global.currentFunc = currentFunc;
-
-  // XXX This function is *only* used in harness functions and really shouldn't
-  //     be exported.
-  var writeFormattedResult =
-    function writeFormattedResult(expect, actual, string, passed) {
-      print((passed ? PASSED : FAILED) + string + ' expected: ' + expect);
-    };
-  global.writeFormattedResult = writeFormattedResult;
 
   /*****************************************************
    * RHINO-SPECIFIC EXPORTS (are these used any more?) *
@@ -326,6 +242,9 @@
 
 
 var STATUS = "STATUS: ";
+var VERBOSE = false;
+var SECT_PREFIX = 'Section ';
+var SECT_SUFFIX = ' of test - ';
 
 var gDelayTestDriverEnd = false;
 
@@ -341,6 +260,10 @@ var msg = '';
  * constant strings
  */
 var GLOBAL = this + '';
+var PASSED = " PASSED! ";
+var FAILED = " FAILED! ";
+
+var DEBUG = false;
 
 var DESCRIPTION;
 var EXPECTED;
@@ -429,7 +352,7 @@ function expectExitCode(n)
  */
 function inSection(x)
 {
-  return "Section " + x + " of test - ";
+  return SECT_PREFIX + x + SECT_SUFFIX;
 }
 
 /*
@@ -527,16 +450,34 @@ function reportCompare (expected, actual, description) {
   var output = "";
 
   if (typeof description == "undefined")
+  {
     description = '';
+  }
+  else if (VERBOSE)
+  {
+    printStatus ("Comparing '" + description + "'");
+  }
 
-  if (expected_t != actual_t) {
+  if (expected_t != actual_t)
+  {
     output += "Type mismatch, expected type " + expected_t +
       ", actual type " + actual_t + " ";
   }
+  else if (VERBOSE)
+  {
+    printStatus ("Expected type '" + expected_t + "' matched actual " +
+                 "type '" + actual_t + "'");
+  }
 
-  if (expected != actual) {
+  if (expected != actual)
+  {
     output += "Expected value '" + toPrinted(expected) +
       "', Actual value '" + toPrinted(actual) + "' ";
+  }
+  else if (VERBOSE)
+  {
+    printStatus ("Expected value '" + toPrinted(expected) +
+                 "' matched actual value '" + toPrinted(actual) + "'");
   }
 
   var testcase = new TestCase("unknown-test-name", description, expected, actual);
@@ -569,17 +510,35 @@ function reportMatch (expectedRegExp, actual, description) {
   var output = "";
 
   if (typeof description == "undefined")
+  {
     description = '';
+  }
+  else if (VERBOSE)
+  {
+    printStatus ("Comparing '" + description + "'");
+  }
 
-  if (expected_t != actual_t) {
+  if (expected_t != actual_t)
+  {
     output += "Type mismatch, expected type " + expected_t +
       ", actual type " + actual_t + " ";
   }
+  else if (VERBOSE)
+  {
+    printStatus ("Expected type '" + expected_t + "' matched actual " +
+                 "type '" + actual_t + "'");
+  }
 
   var matches = expectedRegExp.test(actual);
-  if (!matches) {
+  if (!matches)
+  {
     output += "Expected match to '" + toPrinted(expectedRegExp) +
       "', Actual value '" + toPrinted(actual) + "' ";
+  }
+  else if (VERBOSE)
+  {
+    printStatus ("Expected match to '" + toPrinted(expectedRegExp) +
+                 "' matched actual value '" + toPrinted(actual) + "'");
   }
 
   var testcase = new TestCase("unknown-test-name", description, true, matches);
@@ -790,6 +749,19 @@ function getTestCaseResult(expected, actual)
   return true;
 }
 
+if (typeof dump == 'undefined')
+{
+  if (typeof window == 'undefined' &&
+      typeof print == 'function')
+  {
+    dump = print;
+  }
+  else
+  {
+    dump = (function () {});
+  }
+}
+
 function test() {
   for ( gTc=0; gTc < gTestcases.length; gTc++ ) {
     // temporary hack to work around some unknown issue in 1.7
@@ -806,13 +778,15 @@ function test() {
       print('test(): empty testcase for gTc = ' + gTc + ' ' + e);
     }
   }
+  stopTest();
   return ( gTestcases );
 }
 
 /*
  * Begin printing functions.  These functions use the shell's
- * print function.  When running tests in the browser, browser.js
- * overrides these functions to write to the page.
+ * print function.  When running tests in the browser, these
+ * functions, override these functions with functions that use
+ * document.write.
  */
 
 function writeTestCaseResult( expect, actual, string ) {
@@ -824,12 +798,29 @@ function writeTestCaseResult( expect, actual, string ) {
   }
   return passed;
 }
+function writeFormattedResult( expect, actual, string, passed ) {
+  var s = ( passed ? PASSED : FAILED ) + string + ' expected: ' + expect;
+  print(s);
+  return passed;
+}
 
 function writeHeaderToLog( string ) {
   print( string );
 }
 /* end of print functions */
 
+
+/*
+ * When running in the shell, run the garbage collector after the
+ * test has completed.
+ */
+
+function stopTest() {
+  var gc;
+  if ( gc != undefined ) {
+    gc();
+  }
+}
 
 function jsTestDriverEnd()
 {

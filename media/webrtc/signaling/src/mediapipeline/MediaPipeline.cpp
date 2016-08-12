@@ -25,9 +25,7 @@
 #include "DOMMediaStream.h"
 #include "MediaStreamTrack.h"
 #include "MediaStreamListener.h"
-#include "MediaStreamVideoSink.h"
 #include "VideoUtils.h"
-#include "VideoStreamTrack.h"
 #ifdef WEBRTC_GONK
 #include "GrallocImages.h"
 #include "mozilla/layers/GrallocTextureClient.h"
@@ -45,7 +43,6 @@
 #include "transportlayerice.h"
 #include "runnable_utils.h"
 #include "libyuv/convert.h"
-#include "mozilla/SharedThreadPool.h"
 #if !defined(MOZILLA_EXTERNAL_LINKAGE)
 #include "mozilla/PeerIdentity.h"
 #include "mozilla/TaskQueue.h"
@@ -62,8 +59,7 @@
 
 #include "logging.h"
 
-// Max size given stereo is 480*2*2 = 1920 (10ms of 16-bits stereo audio at
-// 48KHz)
+// Max size given stereo is 480*2*2 = 1920 (48KHz)
 #define AUDIO_SAMPLE_BUFFER_MAX 480*2*2
 static_assert((WEBRTC_DEFAULT_SAMPLE_RATE/100)*sizeof(uint16_t) * 2
                <= AUDIO_SAMPLE_BUFFER_MAX,
@@ -465,128 +461,6 @@ protected:
 };
 #endif
 
-// An async inserter for audio data, to avoid running audio codec encoders
-// on the MSG/input audio thread.  Basically just bounces all the audio
-// data to a single audio processing/input queue.  We could if we wanted to
-// use multiple threads and a TaskQueue.
-class AudioProxyThread
-{
-public:
-  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(AudioProxyThread)
-
-  explicit AudioProxyThread(AudioSessionConduit *aConduit)
-    : mConduit(aConduit)
-  {
-    MOZ_ASSERT(mConduit);
-    MOZ_COUNT_CTOR(AudioProxyThread);
-
-#if !defined(MOZILLA_EXTERNAL_LINKAGE)
-    // Use only 1 thread; also forces FIFO operation
-    // We could use multiple threads, but that may be dicier with the webrtc.org
-    // code.  If so we'd need to use TaskQueues like the videoframe converter
-    RefPtr<SharedThreadPool> pool =
-      SharedThreadPool::Get(NS_LITERAL_CSTRING("AudioProxy"), 1);
-
-    mThread = pool.get();
-#else
-    nsCOMPtr<nsIThread> thread;
-    if (!NS_WARN_IF(NS_FAILED(NS_NewNamedThread("AudioProxy", getter_AddRefs(thread))))) {
-      mThread = thread;
-    }
-#endif
-  }
-
-  // called on mThread
-  void InternalProcessAudioChunk(
-    TrackRate rate,
-    AudioChunk& chunk,
-    bool enabled) {
-
-    // Convert to interleaved, 16-bits integer audio, with a maximum of two
-    // channels (since the WebRTC.org code below makes the assumption that the
-    // input audio is either mono or stereo).
-    uint32_t outputChannels = chunk.ChannelCount() == 1 ? 1 : 2;
-    const int16_t* samples = nullptr;
-    UniquePtr<int16_t[]> convertedSamples;
-
-    // We take advantage of the fact that the common case (microphone directly to
-    // PeerConnection, that is, a normal call), the samples are already 16-bits
-    // mono, so the representation in interleaved and planar is the same, and we
-    // can just use that.
-    if (enabled && outputChannels == 1 && chunk.mBufferFormat == AUDIO_FORMAT_S16) {
-      samples = chunk.ChannelData<int16_t>().Elements()[0];
-    } else {
-      convertedSamples = MakeUnique<int16_t[]>(chunk.mDuration * outputChannels);
-
-      if (!enabled || chunk.mBufferFormat == AUDIO_FORMAT_SILENCE) {
-        PodZero(convertedSamples.get(), chunk.mDuration * outputChannels);
-      } else if (chunk.mBufferFormat == AUDIO_FORMAT_FLOAT32) {
-        DownmixAndInterleave(chunk.ChannelData<float>(),
-                             chunk.mDuration, chunk.mVolume, outputChannels,
-                             convertedSamples.get());
-      } else if (chunk.mBufferFormat == AUDIO_FORMAT_S16) {
-        DownmixAndInterleave(chunk.ChannelData<int16_t>(),
-                             chunk.mDuration, chunk.mVolume, outputChannels,
-                             convertedSamples.get());
-      }
-      samples = convertedSamples.get();
-    }
-
-    MOZ_ASSERT(!(rate%100)); // rate should be a multiple of 100
-
-    // Check if the rate or the number of channels has changed since the last time
-    // we came through. I realize it may be overkill to check if the rate has
-    // changed, but I believe it is possible (e.g. if we change sources) and it
-    // costs us very little to handle this case.
-
-    uint32_t audio_10ms = rate / 100;
-
-    if (!packetizer_ ||
-        packetizer_->PacketSize() != audio_10ms ||
-        packetizer_->Channels() != outputChannels) {
-      // It's ok to drop the audio still in the packetizer here.
-      packetizer_ = new AudioPacketizer<int16_t, int16_t>(audio_10ms, outputChannels);
-    }
-
-    packetizer_->Input(samples, chunk.mDuration);
-
-    while (packetizer_->PacketsAvailable()) {
-      uint32_t samplesPerPacket = packetizer_->PacketSize() *
-                                  packetizer_->Channels();
-      // We know that webrtc.org's code going to copy the samples down the line,
-      // so we can just use a stack buffer here instead of malloc-ing.
-      int16_t packet[AUDIO_SAMPLE_BUFFER_MAX];
-
-      packetizer_->Output(packet);
-      mConduit->SendAudioFrame(packet, samplesPerPacket, rate, 0);
-    }
-  }
-
-  void QueueAudioChunk(TrackRate rate, AudioChunk& chunk, bool enabled)
-  {
-    RUN_ON_THREAD(mThread,
-                  WrapRunnable(RefPtr<AudioProxyThread>(this),
-                               &AudioProxyThread::InternalProcessAudioChunk,
-                               rate, chunk, enabled),
-                  NS_DISPATCH_NORMAL);
-  }
-
-protected:
-  virtual ~AudioProxyThread()
-  {
-    // Conduits must be released on MainThread, and we might have the last reference
-    // We don't need to worry about runnables still trying to access the conduit, since
-    // the runnables hold a ref to AudioProxyThread.
-    NS_ReleaseOnMainThread(mConduit.forget());
-    MOZ_COUNT_DTOR(AudioProxyThread);
-  }
-
-  RefPtr<AudioSessionConduit> mConduit;
-  nsCOMPtr<nsIEventTarget> mThread;
-  // Only accessed on mThread
-  nsAutoPtr<AudioPacketizer<int16_t, int16_t>> packetizer_;
-};
-
 static char kDTLSExporterLabel[] = "EXTRACTOR-dtls_srtp";
 
 MediaPipeline::MediaPipeline(const std::string& pc,
@@ -689,9 +563,6 @@ MediaPipeline::AttachTransport_s()
       return res;
     }
   }
-
-  transport_->Attach(this);
-
   return NS_OK;
 }
 
@@ -1215,7 +1086,8 @@ public:
       track_id_external_(TRACK_INVALID),
       active_(false),
       enabled_(false),
-      direct_connect_(false)
+      direct_connect_(false),
+      packetizer_(nullptr)
   {
   }
 
@@ -1247,13 +1119,6 @@ public:
 
   void SetActive(bool active) { active_ = active; }
   void SetEnabled(bool enabled) { enabled_ = enabled; }
-
-  // These are needed since nested classes don't have access to any particular
-  // instance of the parent
-  void SetAudioProxy(const RefPtr<AudioProxyThread>& proxy)
-  {
-    audio_processing_ = proxy;
-  }
 
 #if !defined(MOZILLA_EXTERNAL_LINKAGE)
   void SetVideoFrameConverter(const RefPtr<VideoFrameConverter>& converter)
@@ -1302,8 +1167,10 @@ private:
                StreamTime offset,
                const MediaSegment& media);
 
+  virtual void ProcessAudioChunk(AudioSessionConduit *conduit,
+                                 TrackRate rate, AudioChunk& chunk);
+
   RefPtr<MediaSessionConduit> conduit_;
-  RefPtr<AudioProxyThread> audio_processing_;
 #if !defined(MOZILLA_EXTERNAL_LINKAGE)
   RefPtr<VideoFrameConverter> converter_;
 #endif
@@ -1323,6 +1190,8 @@ private:
 
   // Written and read on the MediaStreamGraph thread
   bool direct_connect_;
+
+  nsAutoPtr<AudioPacketizer<int16_t, int16_t>> packetizer_;
 };
 
 #if !defined(MOZILLA_EXTERNAL_LINKAGE)
@@ -1389,34 +1258,6 @@ protected:
 };
 #endif
 
-class MediaPipelineTransmit::PipelineVideoSink :
-  public MediaStreamVideoSink
-{
-public:
-  explicit PipelineVideoSink(const RefPtr<MediaSessionConduit>& conduit,
-                             MediaPipelineTransmit::PipelineListener* listener)
-    : conduit_(conduit)
-    , pipelineListener_(listener)
-  {
-  }
-
-  virtual void SetCurrentFrames(const VideoSegment& aSegment) override;
-  virtual void ClearFrames() override {}
-
-private:
-  ~PipelineVideoSink() {
-    // release conduit on mainthread.  Must use forget()!
-    nsresult rv = NS_DispatchToMainThread(new
-      ConduitDeleteEvent(conduit_.forget()));
-    MOZ_ASSERT(!NS_FAILED(rv),"Could not dispatch conduit shutdown to main");
-    if (NS_FAILED(rv)) {
-      MOZ_CRASH();
-    }
-  }
-  RefPtr<MediaSessionConduit> conduit_;
-  MediaPipelineTransmit::PipelineListener* pipelineListener_;
-};
-
 MediaPipelineTransmit::MediaPipelineTransmit(
     const std::string& pc,
     nsCOMPtr<nsIEventTarget> main_thread,
@@ -1431,15 +1272,10 @@ MediaPipelineTransmit::MediaPipelineTransmit(
   MediaPipeline(pc, TRANSMIT, main_thread, sts_thread, track_id, level,
                 conduit, rtp_transport, rtcp_transport, filter),
   listener_(new PipelineListener(conduit)),
-  video_sink_(new PipelineVideoSink(conduit, listener_)),
   domtrack_(domtrack)
 {
-  if (!IsVideo()) {
-    audio_processing_ = MakeAndAddRef<AudioProxyThread>(static_cast<AudioSessionConduit*>(conduit.get()));
-    listener_->SetAudioProxy(audio_processing_);
-  }
 #if !defined(MOZILLA_EXTERNAL_LINKAGE)
-  else { // Video
+  if (IsVideo()) {
     // For video we send frames to an async VideoFrameConverter that calls
     // back to a VideoFrameFeeder that feeds I420 frames to VideoConduit.
 
@@ -1489,10 +1325,6 @@ void MediaPipelineTransmit::AttachToTrack(const std::string& track_id) {
   domtrack_->AddDirectListener(listener_);
   domtrack_->AddListener(listener_);
 
-#if !defined(MOZILLA_EXTERNAL_LINKAGE)
-  domtrack_->AddDirectListener(video_sink_);
-#endif
-
 #ifndef MOZILLA_INTERNAL_API
   // this enables the unit tests that can't fiddle with principals and the like
   listener_->SetEnabled(true);
@@ -1541,7 +1373,6 @@ MediaPipelineTransmit::DetachMedia()
   if (domtrack_) {
     domtrack_->RemoveDirectListener(listener_);
     domtrack_->RemoveListener(listener_);
-    domtrack_->RemoveDirectListener(video_sink_);
     domtrack_ = nullptr;
   }
   // Let the listener be destroyed with the pipeline (or later).
@@ -1808,38 +1639,92 @@ NewData(MediaStreamGraph* graph,
 #else
       rate = graph->GraphRate();
 #endif
-      audio_processing_->QueueAudioChunk(rate, *iter, enabled_);
+      ProcessAudioChunk(static_cast<AudioSessionConduit*>(conduit_.get()),
+                        rate, *iter);
       iter.Next();
     }
+  } else if (media.GetType() == MediaSegment::VIDEO) {
+#if !defined(MOZILLA_EXTERNAL_LINKAGE)
+    VideoSegment* video = const_cast<VideoSegment *>(
+        static_cast<const VideoSegment *>(&media));
+
+    VideoSegment::ChunkIterator iter(*video);
+    while(!iter.IsEnded()) {
+      converter_->QueueVideoChunk(*iter, !enabled_);
+      iter.Next();
+    }
+#endif
   } else {
     // Ignore
   }
 }
 
-void MediaPipelineTransmit::PipelineVideoSink::
-SetCurrentFrames(const VideoSegment& aSegment)
-{
-  MOZ_ASSERT(pipelineListener_);
+void MediaPipelineTransmit::PipelineListener::ProcessAudioChunk(
+    AudioSessionConduit *conduit,
+    TrackRate rate,
+    AudioChunk& chunk) {
 
-  if (!pipelineListener_->active_) {
-    MOZ_MTLOG(ML_DEBUG, "Discarding packets because transport not ready");
-    return;
-  }
+  // Convert to interleaved, 16-bits integer audio, with a maximum of two
+  // channels (since the WebRTC.org code below makes the assumption that the
+  // input audio is either mono or stereo).
+  uint32_t outputChannels = chunk.ChannelCount() == 1 ? 1 : 2;
+  const int16_t* samples = nullptr;
+  UniquePtr<int16_t[]> convertedSamples;
 
-  if (conduit_->type() != MediaSessionConduit::VIDEO) {
-    // Ignore data of wrong kind in case we have a muxed stream
-    return;
-  }
+  // We take advantage of the fact that the common case (microphone directly to
+  // PeerConnection, that is, a normal call), the samples are already 16-bits
+  // mono, so the representation in interleaved and planar is the same, and we
+  // can just use that.
+  if (enabled_ && outputChannels == 1 && chunk.mBufferFormat == AUDIO_FORMAT_S16) {
+    samples = chunk.ChannelData<int16_t>().Elements()[0];
+  } else {
+    convertedSamples = MakeUnique<int16_t[]>(chunk.mDuration * outputChannels);
 
-#if !defined(MOZILLA_EXTERNAL_LINKAGE)
-    VideoSegment* video = const_cast<VideoSegment *>(&aSegment);
-
-    VideoSegment::ChunkIterator iter(*video);
-    while(!iter.IsEnded()) {
-      pipelineListener_->converter_->QueueVideoChunk(*iter, !pipelineListener_->enabled_);
-      iter.Next();
+    if (!enabled_ || chunk.mBufferFormat == AUDIO_FORMAT_SILENCE) {
+      PodZero(convertedSamples.get(), chunk.mDuration * outputChannels);
+    } else if (chunk.mBufferFormat == AUDIO_FORMAT_FLOAT32) {
+      DownmixAndInterleave(chunk.ChannelData<float>(),
+                           chunk.mDuration, chunk.mVolume, outputChannels,
+                           convertedSamples.get());
+    } else if (chunk.mBufferFormat == AUDIO_FORMAT_S16) {
+      DownmixAndInterleave(chunk.ChannelData<int16_t>(),
+                           chunk.mDuration, chunk.mVolume, outputChannels,
+                           convertedSamples.get());
     }
-#endif
+    samples = convertedSamples.get();
+  }
+
+  MOZ_ASSERT(!(rate%100)); // rate should be a multiple of 100
+
+  // Check if the rate or the number of channels has changed since the last time
+  // we came through. I realize it may be overkill to check if the rate has
+  // changed, but I believe it is possible (e.g. if we change sources) and it
+  // costs us very little to handle this case.
+
+  uint32_t audio_10ms = rate / 100;
+
+  if (!packetizer_ ||
+      packetizer_->PacketSize() != audio_10ms ||
+      packetizer_->Channels() != outputChannels) {
+    // It's ok to drop the audio still in the packetizer here.
+    packetizer_ = new AudioPacketizer<int16_t, int16_t>(audio_10ms, outputChannels);
+   }
+
+  packetizer_->Input(samples, chunk.mDuration);
+
+  while (packetizer_->PacketsAvailable()) {
+    uint32_t samplesPerPacket = packetizer_->PacketSize() *
+                                packetizer_->Channels();
+
+    // We know that webrtc.org's code going to copy the samples down the line,
+    // so we can just use a stack buffer here instead of malloc-ing.
+    int16_t packet[AUDIO_SAMPLE_BUFFER_MAX];
+
+    packetizer_->Output(packet);
+    conduit->SendAudioFrame(packet,
+                            samplesPerPacket,
+                            rate, 0);
+  }
 }
 
 class TrackAddedCallback {

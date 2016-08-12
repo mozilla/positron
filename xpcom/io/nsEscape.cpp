@@ -580,9 +580,6 @@ NS_UnescapeURL(const char* aStr, int32_t aLen, uint32_t aFlags,
     return false;
   }
 
-  MOZ_ASSERT(aResult.IsEmpty(),
-             "Passing a non-empty string as an out parameter!");
-
   if (aLen < 0) {
     aLen = strlen(aStr);
   }
@@ -592,10 +589,6 @@ NS_UnescapeURL(const char* aStr, int32_t aLen, uint32_t aFlags,
   bool writing = !!(aFlags & esc_AlwaysCopy);
   bool skipControl = !!(aFlags & esc_SkipControl);
   bool skipInvalidHostChar = !!(aFlags & esc_Host);
-
-  if (writing) {
-    aResult.SetCapacity(aLen);
-  }
 
   const char* last = aStr;
   const char* p = aStr;
@@ -610,10 +603,7 @@ NS_UnescapeURL(const char* aStr, int32_t aLen, uint32_t aFlags,
           ((c1 < '8' && !ignoreAscii) || (c1 >= '8' && !ignoreNonAscii)) &&
           !(skipControl &&
             (c1 < '2' || (c1 == '7' && (c2 == 'f' || c2 == 'F'))))) {
-        if (!writing) {
-          writing = true;
-          aResult.SetCapacity(aLen);
-        }
+        writing = true;
         if (p > last) {
           aResult.Append(last, p - last);
           last = p;

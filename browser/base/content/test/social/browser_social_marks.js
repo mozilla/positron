@@ -33,9 +33,7 @@ function test() {
   let mm = getGroupMessageManager("social");
   mm.loadFrameScript(frameScript, true);
 
-  PopupNotifications.panel.setAttribute("animate", "false");
   registerCleanupFunction(function () {
-    PopupNotifications.panel.removeAttribute("animate");
     mm.removeDelayedFrameScript(frameScript);
   });
 
@@ -69,13 +67,13 @@ var tests = {
     // we expect the addon install dialog to appear, we need to accept the
     // install from the dialog.
     let panel = document.getElementById("servicesInstall-notification");
-    BrowserTestUtils.waitForEvent(PopupNotifications.panel, "popupshown").then(() => {
+    ensureEventFired(PopupNotifications.panel, "popupshown").then(() => {
       info("servicesInstall-notification panel opened");
       panel.button.click();
     });
 
     let activationURL = manifest3.origin + "/browser/browser/base/content/test/social/social_activate.html"
-    BrowserTestUtils.openNewForegroundTab(gBrowser, activationURL).then(tab => {
+    addTab(activationURL, function(tab) {
       let doc = tab.linkedBrowser.contentDocument;
       let data = {
         origin: doc.nodePrincipal.origin,
@@ -92,7 +90,7 @@ var tests = {
           let widget = CustomizableUI.getWidget(id);
           ok(!widget || !widget.forWindow(window).node, "no button added to widget set");
           Social.uninstallProvider(manifest3.origin, function() {
-            BrowserTestUtils.removeTab(tab).then(next);
+            ensureBrowserTabClosed(tab).then(next);
           });
         });
       });
@@ -101,14 +99,14 @@ var tests = {
 
   testButtonOnEnable: function(next) {
     let panel = document.getElementById("servicesInstall-notification");
-    BrowserTestUtils.waitForEvent(PopupNotifications.panel, "popupshown").then(() => {
+    ensureEventFired(PopupNotifications.panel, "popupshown").then(() => {
       info("servicesInstall-notification panel opened");
       panel.button.click();
     });
 
     // enable the provider now
     let activationURL = manifest2.origin + "/browser/browser/base/content/test/social/social_activate.html"
-    BrowserTestUtils.openNewForegroundTab(gBrowser, activationURL).then(tab => {
+    addTab(activationURL, function(tab) {
       let doc = tab.linkedBrowser.contentDocument;
       let data = {
         origin: doc.nodePrincipal.origin,
@@ -133,7 +131,7 @@ var tests = {
           is(button.hidden, false, "mark button is visible");
 
           checkSocialUI(window);
-          BrowserTestUtils.removeTab(tab).then(next);
+          ensureBrowserTabClosed(tab).then(next);
         });
       });
     });
@@ -149,7 +147,7 @@ var tests = {
     ok(btn, "got a mark button");
     let ourTab;
 
-    BrowserTestUtils.waitForEvent(btn.panel, "popupshown").then(() => {
+    ensureEventFired(btn.panel, "popupshown").then(() => {
       info("marks panel shown");
       let doc = btn.contentDocument;
       let unmarkBtn = doc.getElementById("unmark");
@@ -157,8 +155,8 @@ var tests = {
       EventUtils.sendMouseEvent({type: "click"}, unmarkBtn, btn.contentWindow);
     });
 
-    BrowserTestUtils.waitForEvent(btn.panel, "popuphidden").then(() => {
-      BrowserTestUtils.removeTab(ourTab).then(() => {
+    ensureEventFired(btn.panel, "popuphidden").then(() => {
+      ensureBrowserTabClosed(ourTab).then(() => {
         ok(btn.disabled, "button is disabled");
         next();
       });
@@ -167,7 +165,7 @@ var tests = {
     // verify markbutton is disabled when there is no browser url
     ok(btn.disabled, "button is disabled");
     let activationURL = manifest2.origin + "/browser/browser/base/content/test/social/social_activate.html"
-    BrowserTestUtils.openNewForegroundTab(gBrowser, activationURL).then(tab => {
+    addTab(activationURL, function(tab) {
       ourTab = tab;
       ok(!btn.disabled, "button is enabled");
       // first click marks the page, second click opens the page. We have to
@@ -175,9 +173,9 @@ var tests = {
       EventUtils.synthesizeMouseAtCenter(btn, {});
       // wait for the button to be marked, click to open panel
       is(btn.panel.state, "closed", "panel should not be visible yet");
-      BrowserTestUtils.waitForCondition(() => btn.isMarked, "button is marked").then(() => {
+      waitForCondition(() => btn.isMarked, function() {
         EventUtils.synthesizeMouseAtCenter(btn, {});
-      });
+      }, "button is marked");
     });
   },
 
@@ -192,18 +190,18 @@ var tests = {
 
     // verify markbutton is disabled when there is no browser url
     ok(btn.disabled, "button is disabled");
-    let activationURL = manifest2.origin + "/browser/browser/base/content/test/social/social_activate.html";
-    BrowserTestUtils.openNewForegroundTab(gBrowser, activationURL).then(tab => {
+    let activationURL = manifest2.origin + "/browser/browser/base/content/test/social/social_activate.html"
+    addTab(activationURL, function(tab) {
       ok(!btn.disabled, "button is enabled");
       goOffline().then(function() {
         info("testing offline error page");
         // wait for popupshown
-        BrowserTestUtils.waitForEvent(btn.panel, "popupshown").then(() => {
+        ensureEventFired(btn.panel, "popupshown").then(() => {
           info("marks panel is open");
           ensureFrameLoaded(btn.content).then(() => {
             is(btn.contentDocument.documentURI.indexOf("about:socialerror?mode=tryAgainOnly"), 0, "social error page is showing "+btn.contentDocument.documentURI);
             // cleanup after the page has been unmarked
-            BrowserTestUtils.removeTab(tab).then(() => {
+            ensureBrowserTabClosed(tab).then(() => {
               ok(btn.disabled, "button is disabled");
               goOnline().then(next);
             });
@@ -220,13 +218,14 @@ var tests = {
     ok(provider, "provider is installed");
     SocialService.disableProvider(manifest2.origin, function() {
       let id = SocialMarks._toolbarHelper.idFromOrigin(manifest2.origin);
-      BrowserTestUtils.waitForCondition(() => {
+      waitForCondition(function() {
                         // getWidget now returns null since we've destroyed the widget
                         return !CustomizableUI.getWidget(id)
-                       }, "button does not exist after disabling the provider").then(() => {
+                       },
+                       function() {
                          checkSocialUI(window);
                          Social.uninstallProvider(manifest2.origin, next);
-                       });
+                       }, "button does not exist after disabling the provider");
     });
   }
 }

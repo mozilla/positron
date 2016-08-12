@@ -219,11 +219,7 @@ class RematerializedFrame
         return UndefinedValue();
     }
 
-    void setReturnValue(const Value& value) {
-        returnValue_ = value;
-    }
-
-    Value& returnValue() {
+    Value returnValue() const {
         return returnValue_;
     }
 

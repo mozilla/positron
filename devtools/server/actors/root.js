@@ -201,14 +201,6 @@ RootActor.prototype = {
     };
   },
 
-  forwardingCancelled: function (prefix) {
-    return {
-      from: this.actorID,
-      type: "forwardingCancelled",
-      prefix,
-    };
-  },
-
   /**
    * Disconnects the actor from the browser window.
    */

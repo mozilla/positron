@@ -5,10 +5,8 @@
 from __future__ import absolute_import, print_function, unicode_literals
 
 import unittest
-import itertools
 
 from ..try_option_syntax import TryOptionSyntax
-from ..try_option_syntax import RIDEALONG_BUILDS
 from ..graph import Graph
 from ..taskgraph import TaskGraph
 from .util import TestTask
@@ -137,8 +135,19 @@ class TestTryOptionSyntax(unittest.TestCase):
     def test_p_expands_ridealongs(self):
         "-p linux,linux64 includes the RIDEALONG_BUILDS"
         tos = TryOptionSyntax('try: -p linux,linux64', empty_graph)
-        ridealongs = list(itertools.chain.from_iterable(RIDEALONG_BUILDS.itervalues()))
-        self.assertEqual(sorted(tos.platforms), sorted(['linux', 'linux64'] + ridealongs))
+        self.assertEqual(sorted(tos.platforms), [
+            'linux',
+            'linux-l10n',
+            'linux64',
+            'linux64-l10n',
+            'sm-arm-sim',
+            'sm-arm64-sim',
+            'sm-compacting',
+            'sm-nonunified',
+            'sm-package',
+            'sm-plain',
+            'sm-rootanalysis',
+        ])
 
     def test_u_none(self):
         "-u none sets unittests=[]"

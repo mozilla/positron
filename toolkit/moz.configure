@@ -1,4 +1,4 @@
-# -*- Mode: python; indent-tabs-mode: nil; tab-width: 40 -*-
+# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
 # vim: set filetype=python:
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -344,16 +344,7 @@ add_old_configure_assignment('MOZ_FMP4', fmp4)
 
 # EME Support
 # ==============================================================
-# Widevine is enabled by default in desktop browser builds.
-@depends(build_project, '--help')
-def eme_default(build_project, help):
-    if build_project == 'browser':
-        return 'widevine'
-
-option('--enable-eme',
-       nargs='*',
-       choices=('adobe','widevine',),
-       default=eme_default,
+option('--enable-eme', nargs='*', choices=('adobe','widevine',),
        help='Enable support for Encrypted Media Extensions')
 
 @depends('--enable-eme', fmp4)
@@ -443,19 +434,6 @@ project_flag('MOZ_ANDROID_HISTORY',
 def check_places_and_android_history(places, android_history):
     if places and android_history:
         die('Cannot use MOZ_ANDROID_HISTORY alongside MOZ_PLACES.')
-
-# gpsd support
-# ==============================================================
-option('--enable-gpsd', env='MOZ_GPSD',
-       help='Enable gpsd support')
-
-@depends('--enable-gpsd')
-def gpsd(value):
-    return bool(value)
-
-system_gpsd = pkg_check_modules('MOZ_GPSD', 'libgps >= 3.11', gpsd)
-
-set_config('MOZ_GPSD', system_gpsd)
 
 # Miscellaneous programs
 # ==============================================================

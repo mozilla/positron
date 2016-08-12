@@ -10,9 +10,8 @@
 define(function (require, exports, module) {
   // Dependencies
   const React = require("devtools/client/shared/vendor/react");
-
-  // Shortcuts
-  const { span } = React.DOM;
+  const { createFactories } = require("./rep-utils");
+  const { ObjectBox } = createFactories(require("./object-box"));
 
   /**
    * Renders a number
@@ -31,7 +30,7 @@ define(function (require, exports, module) {
       let value = this.props.object;
 
       return (
-        span({className: "objectBox objectBox-number"},
+        ObjectBox({className: "number"},
           this.stringify(value)
         )
       );

@@ -14,4 +14,3 @@ task:
   extra:
     treeherder:
       symbol: tsan
-      tier: 3

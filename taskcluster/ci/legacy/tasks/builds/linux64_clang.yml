@@ -8,7 +8,7 @@ task:
     name: '[TC] Clang'
     description: 'Clang'
 
-  workerType: 'gecko-{{level}}-b-linux'
+  workerType: opt-linux64
 
   routes:
     - 'index.buildbot.branches.{{project}}.clang'

@@ -44,10 +44,6 @@ public:
 void
 ServiceWorkerRegistrationInfo::Clear()
 {
-  if (mEvaluatingWorker) {
-    mEvaluatingWorker = nullptr;
-  }
-
   if (mInstallingWorker) {
     mInstallingWorker->UpdateState(ServiceWorkerState::Redundant);
     mInstallingWorker->WorkerPrivate()->NoteDeadServiceWorkerInfo();
@@ -190,12 +186,8 @@ ServiceWorkerRegistrationInfo::RemoveListener(
 already_AddRefed<ServiceWorkerInfo>
 ServiceWorkerRegistrationInfo::GetServiceWorkerInfoById(uint64_t aId)
 {
-  AssertIsOnMainThread();
-
   RefPtr<ServiceWorkerInfo> serviceWorker;
-  if (mEvaluatingWorker && mEvaluatingWorker->ID() == aId) {
-    serviceWorker = mEvaluatingWorker;
-  } else if (mInstallingWorker && mInstallingWorker->ID() == aId) {
+  if (mInstallingWorker && mInstallingWorker->ID() == aId) {
     serviceWorker = mInstallingWorker;
   } else if (mWaitingWorker && mWaitingWorker->ID() == aId) {
     serviceWorker = mWaitingWorker;
@@ -215,16 +207,14 @@ ServiceWorkerRegistrationInfo::TryToActivateAsync()
 }
 
 /*
- * TryToActivate should not be called directly, use TryToActivateAsync instead.
+ * TryToActivate should not be called directly, use TryToACtivateAsync instead.
  */
 void
 ServiceWorkerRegistrationInfo::TryToActivate()
 {
-  AssertIsOnMainThread();
-  bool controlling = IsControllingDocuments();
-  bool skipWaiting = mWaitingWorker && mWaitingWorker->SkipWaitingFlag();
-  bool idle = !mActiveWorker || mActiveWorker->WorkerPrivate()->IsIdle();
-  if (idle && (!controlling || skipWaiting)) {
+  if (!IsControllingDocuments() ||
+      // Waiting worker will be removed if the registration is removed
+      (mWaitingWorker && mWaitingWorker->SkipWaitingFlag())) {
     Activate();
   }
 }
@@ -374,13 +364,6 @@ ServiceWorkerRegistrationInfo::CheckAndClearIfUpdateNeeded()
 }
 
 ServiceWorkerInfo*
-ServiceWorkerRegistrationInfo::GetEvaluating() const
-{
-  AssertIsOnMainThread();
-  return mEvaluatingWorker;
-}
-
-ServiceWorkerInfo*
 ServiceWorkerRegistrationInfo::GetInstalling() const
 {
   AssertIsOnMainThread();
@@ -402,32 +385,6 @@ ServiceWorkerRegistrationInfo::GetActive() const
 }
 
 void
-ServiceWorkerRegistrationInfo::SetEvaluating(ServiceWorkerInfo* aServiceWorker)
-{
-  AssertIsOnMainThread();
-  MOZ_ASSERT(aServiceWorker);
-  MOZ_ASSERT(!mEvaluatingWorker);
-  MOZ_ASSERT(!mInstallingWorker);
-  MOZ_ASSERT(mWaitingWorker != aServiceWorker);
-  MOZ_ASSERT(mActiveWorker != aServiceWorker);
-
-  mEvaluatingWorker = aServiceWorker;
-}
-
-void
-ServiceWorkerRegistrationInfo::ClearEvaluating()
-{
-  AssertIsOnMainThread();
-
-  if (!mEvaluatingWorker) {
-    return;
-  }
-
-  mEvaluatingWorker->UpdateState(ServiceWorkerState::Redundant);
-  mEvaluatingWorker = nullptr;
-}
-
-void
 ServiceWorkerRegistrationInfo::ClearInstalling()
 {
   AssertIsOnMainThread();
@@ -442,13 +399,15 @@ ServiceWorkerRegistrationInfo::ClearInstalling()
 }
 
 void
-ServiceWorkerRegistrationInfo::TransitionEvaluatingToInstalling()
+ServiceWorkerRegistrationInfo::SetInstalling(ServiceWorkerInfo* aServiceWorker)
 {
   AssertIsOnMainThread();
-  MOZ_ASSERT(mEvaluatingWorker);
+  MOZ_ASSERT(aServiceWorker);
   MOZ_ASSERT(!mInstallingWorker);
+  MOZ_ASSERT(mWaitingWorker != aServiceWorker);
+  MOZ_ASSERT(mActiveWorker != aServiceWorker);
 
-  mInstallingWorker = mEvaluatingWorker.forget();
+  mInstallingWorker = aServiceWorker;
   mInstallingWorker->UpdateState(ServiceWorkerState::Installing);
   NotifyListenersOnChange(WhichServiceWorker::INSTALLING_WORKER);
 }

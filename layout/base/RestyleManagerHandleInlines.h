@@ -74,18 +74,6 @@ RestyleManagerHandle::Ptr::ProcessPendingRestyles()
   FORWARD(ProcessPendingRestyles, ());
 }
 
-nsresult
-RestyleManagerHandle::Ptr::ProcessRestyledFrames(nsStyleChangeList& aChangeList)
-{
-  FORWARD(ProcessRestyledFrames, (aChangeList));
-}
-
-void
-RestyleManagerHandle::Ptr::FlushOverflowChangedTracker()
-{
-  FORWARD(FlushOverflowChangedTracker, ());
-}
-
 void
 RestyleManagerHandle::Ptr::RestyleForInsertOrChange(dom::Element* aContainer,
                                                     nsIContent* aChild)
@@ -167,11 +155,6 @@ RestyleManagerHandle::Ptr::SetObservingRefreshDriver(bool aObserving)
   FORWARD(SetObservingRefreshDriver, (aObserving));
 }
 
-void
-RestyleManagerHandle::Ptr::NotifyDestroyingFrame(nsIFrame* aFrame)
-{
-  FORWARD(NotifyDestroyingFrame, (aFrame));
-}
 
 } // namespace mozilla
 

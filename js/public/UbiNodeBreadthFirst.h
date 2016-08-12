@@ -83,8 +83,8 @@ struct BreadthFirst {
     //
     // We do nothing with noGC, other than require it to exist, with a lifetime
     // that encloses our own.
-    BreadthFirst(JSContext* cx, Handler& handler, const JS::AutoCheckCannotGC& noGC)
-      : wantNames(true), cx(cx), visited(), handler(handler), pending(),
+    BreadthFirst(JSRuntime* rt, Handler& handler, const JS::AutoCheckCannotGC& noGC)
+      : wantNames(true), rt(rt), visited(), handler(handler), pending(),
         traversalBegun(false), stopRequested(false), abandonRequested(false)
     { }
 
@@ -126,7 +126,7 @@ struct BreadthFirst {
             pending.popFront();
 
             // Get a range containing all origin's outgoing edges.
-            auto range = origin.edges(cx, wantNames);
+            auto range = origin.edges(rt, wantNames);
             if (!range)
                 return false;
 
@@ -181,8 +181,8 @@ struct BreadthFirst {
     // Other edges *to* that referent will still be traversed.
     void abandonReferent() { abandonRequested = true; }
 
-    // The context with which we were constructed.
-    JSContext* cx;
+    // The runtime with which we were constructed.
+    JSRuntime* rt;
 
     // A map associating each node N that we have reached with a
     // Handler::NodeData, for |handler|'s use. This is public, so that

@@ -39,14 +39,14 @@
             "DOM Tree pointer should NOT be locked");
         }
 
-        document.addEventListener("pointerlockerror", function (e) {
+        document.addEventListener("mozpointerlockerror", function (e) {
           withouthDOM = true;
           runTests();
           SimpleTest.finish();
         }, false);
 
         function start() {
-          div.requestPointerLock();
+          div.mozRequestPointerLock();
         }
       </script>
     </pre>

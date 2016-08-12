@@ -885,8 +885,6 @@ nsDOMMutationObserver::HandleMutationsInternal()
     return;
   }
 
-  AutoSlowOperation aso;
-
   nsTArray<RefPtr<nsDOMMutationObserver> >* suppressedObservers = nullptr;
 
   while (sScheduledMutationObservers) {
@@ -907,7 +905,6 @@ nsDOMMutationObserver::HandleMutationsInternal()
       }
     }
     delete observers;
-    aso.CheckForInterrupt();
   }
 
   if (suppressedObservers) {

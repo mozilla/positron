@@ -10,12 +10,13 @@ add_task(function* () {
   let { panelWin } = panel;
   let { gFront, $, $$, EVENTS } = panelWin;
 
-  let events = Promise.all([
+  reload(target);
+
+  let [actors] = yield Promise.all([
     getN(gFront, "create-node", 3),
     waitForGraphRendered(panelWin, 3, 2, 0)
   ]);
-  reload(target);
-  let [actors] = yield events;
+
   let [dest, osc, gain] = actors;
 
   yield osc.disconnect();

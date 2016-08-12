@@ -549,7 +549,6 @@ nsresult TestBadPolicies() {
     { "defaut-src asdf", "" },
     { "default-src: aaa", "" },
     { "asdf http://test.com", ""},
-    { "referrer", ""},
   };
 
   uint32_t policyCount = sizeof(policies) / sizeof(PolicyTest);

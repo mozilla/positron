@@ -33,7 +33,7 @@
 #include "mozilla/Preferences.h"
 #include "nsIContentPolicy.h"
 #include "nsContentUtils.h"
-#include "nsIPrincipal.h"
+#include "nsINode.h"
 
 #include "WinUtils.h"
 #include "mozilla/LazyIdleThread.h"
@@ -65,16 +65,16 @@ nsDataObj::CStream::~CStream()
 // helper - initializes the stream
 nsresult nsDataObj::CStream::Init(nsIURI *pSourceURI,
                                   uint32_t aContentPolicyType,
-                                  nsIPrincipal* aRequestingPrincipal)
+                                  nsINode* aRequestingNode)
 {
-  // we can not create a channel without a requestingPrincipal
-  if (!aRequestingPrincipal) {
+  // we can not create a channel without a requestingNode
+  if (!aRequestingNode) {
     return NS_ERROR_FAILURE;
   }
   nsresult rv;
   rv = NS_NewChannel(getter_AddRefs(mChannel),
                      pSourceURI,
-                     aRequestingPrincipal,
+                     aRequestingNode,
                      nsILoadInfo::SEC_ALLOW_CROSS_ORIGIN_DATA_INHERITS,
                      aContentPolicyType,
                      nullptr,   // loadGroup
@@ -341,14 +341,15 @@ HRESULT nsDataObj::CreateStream(IStream **outStream)
 
   pStream->AddRef();
 
-  // query the requestingPrincipal from the transferable and add it to the new channel
-  nsCOMPtr<nsIPrincipal> requestingPrincipal;
-  mTransferable->GetRequestingPrincipal(getter_AddRefs(requestingPrincipal));
-  MOZ_ASSERT(requestingPrincipal, "can not create channel without a principal");
+  // query the requestingNode from the transferable and add it to the new channel
+  nsCOMPtr<nsIDOMNode> requestingDomNode;
+  mTransferable->GetRequestingNode(getter_AddRefs(requestingDomNode));
+  nsCOMPtr<nsINode> requestingNode = do_QueryInterface(requestingDomNode);
+  MOZ_ASSERT(requestingNode, "can not create channel without a node");
   // default transferable content policy is nsIContentPolicy::TYPE_OTHER
   uint32_t contentPolicyType = nsIContentPolicy::TYPE_OTHER;
   mTransferable->GetContentPolicyType(&contentPolicyType);
-  rv = pStream->Init(sourceURI, contentPolicyType, requestingPrincipal);
+  rv = pStream->Init(sourceURI, contentPolicyType, requestingNode);
   if (NS_FAILED(rv))
   {
     pStream->Release();
@@ -1057,7 +1058,7 @@ nsDataObj :: GetFileDescriptorInternetShortcutA ( FORMATETC& aFE, STGMEDIUM& aST
   if (!CreateFilenameFromTextA(title, ".URL", 
                                fileGroupDescA->fgd[0].cFileName, NS_MAX_FILEDESCRIPTOR)) {
     nsXPIDLString untitled;
-    if (!GetLocalizedString(u"noPageTitle", untitled) ||
+    if (!GetLocalizedString(MOZ_UTF16("noPageTitle"), untitled) ||
         !CreateFilenameFromTextA(untitled, ".URL", 
                                  fileGroupDescA->fgd[0].cFileName, NS_MAX_FILEDESCRIPTOR)) {
       strcpy(fileGroupDescA->fgd[0].cFileName, "Untitled.URL");
@@ -1098,7 +1099,7 @@ nsDataObj :: GetFileDescriptorInternetShortcutW ( FORMATETC& aFE, STGMEDIUM& aST
   if (!CreateFilenameFromTextW(title, L".URL",
                                fileGroupDescW->fgd[0].cFileName, NS_MAX_FILEDESCRIPTOR)) {
     nsXPIDLString untitled;
-    if (!GetLocalizedString(u"noPageTitle", untitled) ||
+    if (!GetLocalizedString(MOZ_UTF16("noPageTitle"), untitled) ||
         !CreateFilenameFromTextW(untitled, L".URL",
                                  fileGroupDescW->fgd[0].cFileName, NS_MAX_FILEDESCRIPTOR)) {
       wcscpy(fileGroupDescW->fgd[0].cFileName, L"Untitled.URL");

@@ -18,7 +18,9 @@ thisTestLeaksUncaughtRejectionsAndShouldBeFixed("TypeError: this.doc is undefine
 const toolId1 = "test-tool-1";
 const toolId2 = "test-tool-2";
 
-var EventEmitter = require("devtools/shared/event-emitter");
+var tempScope = {};
+Cu.import("resource://devtools/shared/event-emitter.js", tempScope);
+var EventEmitter = tempScope.EventEmitter;
 
 function test() {
   addTab("about:blank").then(runTests1);
@@ -207,6 +209,7 @@ function destroyToolbox(toolbox) {
 }
 
 function finishUp() {
+  tempScope = null;
   gBrowser.removeCurrentTab();
   finish();
 }

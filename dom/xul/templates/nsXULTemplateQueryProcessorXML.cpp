@@ -45,13 +45,7 @@ nsXULTemplateResultSetXML::HasMoreElements(bool *aResult)
     // nodes, so just return false in this case.
     ErrorResult rv;
     uint32_t length = mResults->GetSnapshotLength(rv);
-    if (NS_WARN_IF(rv.Failed())) {
-      rv.SuppressException();
-      *aResult = false;
-      return NS_OK;
-    }
-
-    *aResult = mPosition < length;
+    *aResult = !rv.Failed() && mPosition < length;
     return NS_OK;
 }
 

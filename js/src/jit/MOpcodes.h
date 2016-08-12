@@ -130,7 +130,6 @@ namespace jit {
     _(NewArrayCopyOnWrite)                                                  \
     _(NewArrayDynamicLength)                                                \
     _(NewTypedArray)                                                        \
-    _(NewTypedArrayDynamicLength)                                           \
     _(NewObject)                                                            \
     _(NewTypedObject)                                                       \
     _(NewDeclEnvObject)                                                     \
@@ -279,13 +278,15 @@ namespace jit {
     _(AsmJSUnsignedToFloat32)                                               \
     _(AsmJSLoadHeap)                                                        \
     _(AsmJSStoreHeap)                                                       \
-    _(WasmLoadGlobalVar)                                                    \
-    _(WasmStoreGlobalVar)                                                   \
+    _(AsmJSLoadGlobalVar)                                                   \
+    _(AsmJSStoreGlobalVar)                                                  \
+    _(AsmJSLoadFuncPtr)                                                     \
+    _(AsmJSLoadFFIFunc)                                                     \
     _(AsmJSReturn)                                                          \
     _(AsmJSParameter)                                                       \
     _(AsmJSVoidReturn)                                                      \
     _(AsmJSPassStackArg)                                                    \
-    _(WasmCall)                                                             \
+    _(AsmJSCall)                                                            \
     _(AsmSelect)                                                            \
     _(AsmReinterpret)                                                       \
     _(Rotate)                                                               \

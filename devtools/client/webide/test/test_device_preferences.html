@@ -19,6 +19,8 @@
         SimpleTest.waitForExplicitFinish();
 
         Task.spawn(function* () {
+          const { DebuggerServer } = require("devtools/server/main");
+
           if (!DebuggerServer.initialized) {
             DebuggerServer.init();
             DebuggerServer.addBrowserActors();

@@ -26,7 +26,7 @@ define(function (require, exports, module) {
    *      <li class='tabs-menu-item'>Tab #2</li>
    *    </ul>
    *  </nav>
-   *  <div class='panels'>
+   *  <div class='tab-panel'>
    *    The content of active panel here
    *  </div>
    * <div>
@@ -184,12 +184,11 @@ define(function (require, exports, module) {
           let ref = ("tab-menu-" + index);
           let title = tab.props.title;
           let tabClassName = tab.props.className;
-          let isTabSelected = this.state.tabActive === index;
 
           let classes = [
             "tabs-menu-item",
             tabClassName,
-            isTabSelected ? "is-active" : ""
+            this.state.tabActive === index ? "is-active" : ""
           ].join(" ");
 
           // Set tabindex to -1 (except the selected tab) so, it's focusable,
@@ -201,17 +200,11 @@ define(function (require, exports, module) {
             DOM.li({
               ref: ref,
               key: index,
-              id: "tab-" + index,
-              className: classes,
-              role: "presentation",
-            },
+              className: classes},
               DOM.a({
+                href: "#",
                 tabIndex: this.state.tabActive === index ? 0 : -1,
-                "aria-controls": "panel-" + index,
-                "aria-selected": isTabSelected,
-                role: "tab",
-                onClick: this.onClickTab.bind(this, index),
-              },
+                onClick: this.onClickTab.bind(this, index)},
                 title
               )
             )
@@ -220,7 +213,7 @@ define(function (require, exports, module) {
 
       return (
         DOM.nav({className: "tabs-navigation"},
-          DOM.ul({className: "tabs-menu", role: "tablist"},
+          DOM.ul({className: "tabs-menu"},
             tabs
           )
         )
@@ -258,12 +251,8 @@ define(function (require, exports, module) {
           return (
             DOM.div({
               key: index,
-              id: "panel-" + index,
               style: style,
-              className: "tab-panel-box",
-              role: "tabpanel",
-              "aria-labelledby": "tab-" + index,
-            },
+              className: "tab-panel-box"},
               (selected || this.state.created[index]) ? tab : null
             )
           );

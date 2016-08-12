@@ -12,7 +12,7 @@ task:
     - 'index.buildbot.branches.{{project}}.linux64-valgrind'
     - 'index.buildbot.revisions.{{head_rev}}.{{project}}.linux64-valgrind'
 
-  workerType: 'gecko-{{level}}-b-linux'
+  workerType: opt-linux64
 
   payload:
     env:
@@ -29,4 +29,3 @@ task:
       machine:
         # see https://github.com/mozilla/treeherder/blob/master/ui/js/values.js
         platform: linux64
-      tier: 1

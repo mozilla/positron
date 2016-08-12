@@ -185,7 +185,7 @@ nsGIFDecoder2::BeginImageFrame(const IntRect& aFrameRect,
                                               : SurfaceFormat::B8G8R8X8;
 
   // Make sure there's no animation if we're downscaling.
-  MOZ_ASSERT_IF(Size() != OutputSize(), !GetImageMetadata().HasAnimation());
+  MOZ_ASSERT_IF(mDownscaler, !GetImageMetadata().HasAnimation());
 
   SurfacePipeFlags pipeFlags = aIsInterlaced
                              ? SurfacePipeFlags::DEINTERLACE
@@ -193,21 +193,26 @@ nsGIFDecoder2::BeginImageFrame(const IntRect& aFrameRect,
 
   Maybe<SurfacePipe> pipe;
   if (mGIFStruct.images_decoded == 0) {
+    // This is the first frame. We may be downscaling, so compute the target
+    // size.
+    IntSize targetSize = mDownscaler ? mDownscaler->TargetSize()
+                                     : GetSize();
+
     // The first frame may be displayed progressively.
     pipeFlags |= SurfacePipeFlags::PROGRESSIVE_DISPLAY;
 
     // The first frame is always decoded into an RGB surface.
     pipe =
       SurfacePipeFactory::CreateSurfacePipe(this, mGIFStruct.images_decoded,
-                                            Size(), OutputSize(),
+                                            GetSize(), targetSize,
                                             aFrameRect, format, pipeFlags);
   } else {
     // This is an animation frame (and not the first). To minimize the memory
     // usage of animations, the image data is stored in paletted form.
-    MOZ_ASSERT(Size() == OutputSize());
+    MOZ_ASSERT(!mDownscaler);
     pipe =
       SurfacePipeFactory::CreatePalettedSurfacePipe(this, mGIFStruct.images_decoded,
-                                                    Size(), aFrameRect, format,
+                                                    GetSize(), aFrameRect, format,
                                                     aDepth, pipeFlags);
   }
 
@@ -251,7 +256,7 @@ nsGIFDecoder2::EndImageFrame()
   // Tell the superclass we finished a frame
   PostFrameStop(opacity,
                 DisposalMethod(mGIFStruct.disposal_method),
-                FrameTimeout::FromRawMilliseconds(mGIFStruct.delay_time));
+                mGIFStruct.delay_time);
 
   // Reset the transparent pixel
   if (mOldColor) {
@@ -470,6 +475,8 @@ nsGIFDecoder2::DoDecode(SourceBufferIterator& aIterator, IResumable* aOnResume)
         return FinishedGlobalColorTable();
       case State::BLOCK_HEADER:
         return ReadBlockHeader(aData);
+      case State::BLOCK_HEADER_AFTER_YIELD:
+        return Transition::To(State::BLOCK_HEADER, BLOCK_HEADER_LEN);
       case State::EXTENSION_HEADER:
         return ReadExtensionHeader(aData);
       case State::GRAPHIC_CONTROL_EXTENSION:
@@ -482,8 +489,6 @@ nsGIFDecoder2::DoDecode(SourceBufferIterator& aIterator, IResumable* aOnResume)
         return ReadNetscapeExtensionData(aData);
       case State::IMAGE_DESCRIPTOR:
         return ReadImageDescriptor(aData);
-      case State::FINISH_IMAGE_DESCRIPTOR:
-        return FinishImageDescriptor(aData);
       case State::LOCAL_COLOR_TABLE:
         return ReadLocalColorTable(aData, aLength);
       case State::FINISHED_LOCAL_COLOR_TABLE:
@@ -690,7 +695,7 @@ nsGIFDecoder2::ReadGraphicControlExtension(const char* aData)
 
   mGIFStruct.delay_time = LittleEndian::readUint16(aData + 1) * 10;
   if (mGIFStruct.delay_time > 0) {
-    PostIsAnimated(FrameTimeout::FromRawMilliseconds(mGIFStruct.delay_time));
+    PostIsAnimated(mGIFStruct.delay_time);
   }
 
   return Transition::To(State::SKIP_SUB_BLOCKS, SUB_BLOCK_HEADER_LEN);
@@ -754,36 +759,29 @@ nsGIFDecoder2::ReadNetscapeExtensionData(const char* aData)
 LexerTransition<nsGIFDecoder2::State>
 nsGIFDecoder2::ReadImageDescriptor(const char* aData)
 {
-  // On the first frame, we don't need to yield, and none of the other checks
-  // below apply, so we can just jump right into FinishImageDescriptor().
-  if (mGIFStruct.images_decoded == 0) {
-    return FinishImageDescriptor(aData);
+  if (mGIFStruct.images_decoded == 1) {
+    if (!HasAnimation()) {
+      // We should've already called PostIsAnimated(); this must be a corrupt
+      // animated image with a first frame timeout of zero. Signal that we're
+      // animated now, before the first-frame decode early exit below, so that
+      // RasterImage can detect that this happened.
+      PostIsAnimated(0);
+    }
+
+    if (IsFirstFrameDecode()) {
+      // We're about to get a second frame, but we only want the first. Stop
+      // decoding now.
+      FinishInternal();
+      return Transition::TerminateSuccess();
+    }
+
+    if (mDownscaler) {
+      MOZ_ASSERT_UNREACHABLE("Doing downscale-during-decode for an animated "
+                             "image?");
+      mDownscaler.reset();
+    }
   }
 
-  if (!HasAnimation()) {
-    // We should've already called PostIsAnimated(); this must be a corrupt
-    // animated image with a first frame timeout of zero. Signal that we're
-    // animated now, before the first-frame decode early exit below, so that
-    // RasterImage can detect that this happened.
-    PostIsAnimated(FrameTimeout::FromRawMilliseconds(0));
-  }
-
-  if (IsFirstFrameDecode()) {
-    // We're about to get a second frame, but we only want the first. Stop
-    // decoding now.
-    FinishInternal();
-    return Transition::TerminateSuccess();
-  }
-
-  MOZ_ASSERT(Size() == OutputSize(), "Downscaling an animated image?");
-
-  // Yield to allow access to the previous frame before we start a new one.
-  return Transition::ToAfterYield(State::FINISH_IMAGE_DESCRIPTOR);
-}
-
-LexerTransition<nsGIFDecoder2::State>
-nsGIFDecoder2::FinishImageDescriptor(const char* aData)
-{
   IntRect frameRect;
 
   // Get image offsets with respect to the screen origin.
@@ -979,7 +977,7 @@ nsGIFDecoder2::ReadImageDataSubBlock(const char* aData)
   if (subBlockLength == 0) {
     // We hit the block terminator.
     EndImageFrame();
-    return Transition::To(State::BLOCK_HEADER, BLOCK_HEADER_LEN);
+    return Transition::ToAfterYield(State::BLOCK_HEADER_AFTER_YIELD);
   }
 
   if (mGIFStruct.pixels_remaining == 0) {
@@ -1073,10 +1071,10 @@ nsGIFDecoder2::SkipSubBlocks(const char* aData)
                                   nextSubBlockLength);
 }
 
-Maybe<Telemetry::ID>
-nsGIFDecoder2::SpeedHistogram() const
+Telemetry::ID
+nsGIFDecoder2::SpeedHistogram()
 {
-  return Some(Telemetry::IMAGE_DECODE_SPEED_GIF);
+  return Telemetry::IMAGE_DECODE_SPEED_GIF;
 }
 
 } // namespace image

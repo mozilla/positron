@@ -73,11 +73,11 @@ public:
   virtual nscoord GetMinISize(nsRenderingContext *aRenderingContext) override;
   virtual nscoord GetPrefISize(nsRenderingContext *aRenderingContext) override;
   virtual void Reflow(nsPresContext* aPresContext,
-                      ReflowOutput& aDesiredSize,
-                      const ReflowInput& aReflowInput,
+                      nsHTMLReflowMetrics& aDesiredSize,
+                      const nsHTMLReflowState& aReflowState,
                       nsReflowStatus& aStatus) override;
   virtual void DidReflow(nsPresContext* aPresContext,
-                         const ReflowInput* aReflowInput,
+                         const nsHTMLReflowState* aReflowState,
                          nsDidReflowStatus aStatus) override;
   virtual void BuildDisplayList(nsDisplayListBuilder*   aBuilder,
                                 const nsRect&           aDirtyRect,
@@ -233,8 +233,8 @@ protected:
   // NOTE:  This frame class does not inherit from |nsLeafFrame|, so
   // this is not a virtual method implementation.
   void GetDesiredSize(nsPresContext* aPresContext,
-                      const ReflowInput& aReflowInput,
-                      ReflowOutput& aDesiredSize);
+                      const nsHTMLReflowState& aReflowState,
+                      nsHTMLReflowMetrics& aDesiredSize);
 
   bool IsFocusable(int32_t *aTabIndex = nullptr, 
                    bool aWithMouse = false) override;

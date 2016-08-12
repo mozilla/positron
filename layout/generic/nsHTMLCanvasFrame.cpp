@@ -248,28 +248,28 @@ nsHTMLCanvasFrame::ComputeSize(nsRenderingContext *aRenderingContext,
 
 void
 nsHTMLCanvasFrame::Reflow(nsPresContext*           aPresContext,
-                          ReflowOutput&     aMetrics,
-                          const ReflowInput& aReflowInput,
+                          nsHTMLReflowMetrics&     aMetrics,
+                          const nsHTMLReflowState& aReflowState,
                           nsReflowStatus&          aStatus)
 {
   MarkInReflow();
   DO_GLOBAL_REFLOW_COUNT("nsHTMLCanvasFrame");
-  DISPLAY_REFLOW(aPresContext, this, aReflowInput, aMetrics, aStatus);
+  DISPLAY_REFLOW(aPresContext, this, aReflowState, aMetrics, aStatus);
   NS_FRAME_TRACE(NS_FRAME_TRACE_CALLS,
                   ("enter nsHTMLCanvasFrame::Reflow: availSize=%d,%d",
-                  aReflowInput.AvailableWidth(), aReflowInput.AvailableHeight()));
+                  aReflowState.AvailableWidth(), aReflowState.AvailableHeight()));
 
   NS_PRECONDITION(mState & NS_FRAME_IN_REFLOW, "frame is not in reflow");
 
   aStatus = NS_FRAME_COMPLETE;
 
-  WritingMode wm = aReflowInput.GetWritingMode();
+  WritingMode wm = aReflowState.GetWritingMode();
   LogicalSize finalSize(wm,
-                        aReflowInput.ComputedISize(),
-                        aReflowInput.ComputedBSize());
+                        aReflowState.ComputedISize(),
+                        aReflowState.ComputedBSize());
 
   // stash this away so we can compute our inner area later
-  mBorderPadding   = aReflowInput.ComputedLogicalBorderPadding();
+  mBorderPadding   = aReflowState.ComputedLogicalBorderPadding();
 
   finalSize.ISize(wm) += mBorderPadding.IStartEnd(wm);
   finalSize.BSize(wm) += mBorderPadding.BStartEnd(wm);
@@ -288,21 +288,21 @@ nsHTMLCanvasFrame::Reflow(nsPresContext*           aPresContext,
   nsReflowStatus childStatus;
   nsIFrame* childFrame = mFrames.FirstChild();
   WritingMode childWM = childFrame->GetWritingMode();
-  LogicalSize availSize = aReflowInput.ComputedSize(childWM);
+  LogicalSize availSize = aReflowState.ComputedSize(childWM);
   availSize.BSize(childWM) = NS_UNCONSTRAINEDSIZE;
   NS_ASSERTION(!childFrame->GetNextSibling(), "HTML canvas should have 1 kid");
-  ReflowOutput childDesiredSize(aReflowInput.GetWritingMode(), aMetrics.mFlags);
-  ReflowInput childReflowInput(aPresContext, aReflowInput, childFrame,
+  nsHTMLReflowMetrics childDesiredSize(aReflowState.GetWritingMode(), aMetrics.mFlags);
+  nsHTMLReflowState childReflowState(aPresContext, aReflowState, childFrame,
                                      availSize);
-  ReflowChild(childFrame, aPresContext, childDesiredSize, childReflowInput,
+  ReflowChild(childFrame, aPresContext, childDesiredSize, childReflowState,
               0, 0, 0, childStatus, nullptr);
   FinishReflowChild(childFrame, aPresContext, childDesiredSize,
-                    &childReflowInput, 0, 0, 0);
+                    &childReflowState, 0, 0, 0);
 
   NS_FRAME_TRACE(NS_FRAME_TRACE_CALLS,
                   ("exit nsHTMLCanvasFrame::Reflow: size=%d,%d",
                    aMetrics.ISize(wm), aMetrics.BSize(wm)));
-  NS_FRAME_SET_TRUNCATION(aStatus, aReflowInput, aMetrics);
+  NS_FRAME_SET_TRUNCATION(aStatus, aReflowState, aMetrics);
 }
 
 // FIXME taken from nsImageFrame, but then had splittable frame stuff

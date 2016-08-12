@@ -43,50 +43,35 @@ VRManagerChild::Get()
   return sVRManagerChildSingleton;
 }
 
-/* static */ bool
-VRManagerChild::IsCreated()
-{
-  return !!sVRManagerChildSingleton;
-}
-
-/* static */ bool
-VRManagerChild::InitForContent(Endpoint<PVRManagerChild>&& aEndpoint)
+/*static*/ VRManagerChild*
+VRManagerChild::StartUpInChildProcess(Transport* aTransport, ProcessId aOtherPid)
 {
   MOZ_ASSERT(NS_IsMainThread());
+
+  // There's only one VRManager per child process.
   MOZ_ASSERT(!sVRManagerChildSingleton);
 
   RefPtr<VRManagerChild> child(new VRManagerChild());
-  if (!aEndpoint.Bind(child, nullptr)) {
+  if (!child->Open(aTransport, aOtherPid, XRE_GetIOMessageLoop(), ipc::ChildSide)) {
     NS_RUNTIMEABORT("Couldn't Open() Compositor channel.");
-    return false;
+    return nullptr;
   }
+
   sVRManagerChildSingleton = child;
-  return true;
+
+  return sVRManagerChildSingleton;
 }
 
 /*static*/ void
-VRManagerChild::InitSameProcess()
+VRManagerChild::StartUpSameProcess()
 {
-  MOZ_ASSERT(NS_IsMainThread());
-  MOZ_ASSERT(!sVRManagerChildSingleton);
-
-  sVRManagerChildSingleton = new VRManagerChild();
-  sVRManagerParentSingleton = VRManagerParent::CreateSameProcess();
-  sVRManagerChildSingleton->Open(sVRManagerParentSingleton->GetIPCChannel(),
-                                 mozilla::layers::CompositorThreadHolder::Loop(),
-                                 mozilla::ipc::ChildSide);
-}
-
-/* static */ void
-VRManagerChild::InitWithGPUProcess(Endpoint<PVRManagerChild>&& aEndpoint)
-{
-  MOZ_ASSERT(NS_IsMainThread());
-  MOZ_ASSERT(!sVRManagerChildSingleton);
-
-  sVRManagerChildSingleton = new VRManagerChild();
-  if (!aEndpoint.Bind(sVRManagerChildSingleton, nullptr)) {
-    NS_RUNTIMEABORT("Couldn't Open() Compositor channel.");
-    return;
+  NS_ASSERTION(NS_IsMainThread(), "Should be on the main Thread!");
+  if (sVRManagerChildSingleton == nullptr) {
+    sVRManagerChildSingleton = new VRManagerChild();
+    sVRManagerParentSingleton = VRManagerParent::CreateSameProcess();
+    sVRManagerChildSingleton->Open(sVRManagerParentSingleton->GetIPCChannel(),
+                                   mozilla::layers::CompositorThreadHolder::Loop(),
+                                   mozilla::ipc::ChildSide);
   }
 }
 

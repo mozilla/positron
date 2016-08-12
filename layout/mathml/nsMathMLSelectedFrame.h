@@ -32,7 +32,7 @@ public:
   virtual nsresult
   Place(DrawTarget*          aDrawTarget,
         bool                 aPlaceOrigin,
-        ReflowOutput& aDesiredSize) override;
+        nsHTMLReflowMetrics& aDesiredSize) override;
 
   virtual mozilla::LogicalSize
   ComputeSize(nsRenderingContext *aRenderingContext,
@@ -46,8 +46,8 @@ public:
 
   virtual void
   Reflow(nsPresContext*          aPresContext,
-         ReflowOutput&     aDesiredSize,
-         const ReflowInput& aReflowInput,
+         nsHTMLReflowMetrics&     aDesiredSize,
+         const nsHTMLReflowState& aReflowState,
          nsReflowStatus&          aStatus) override;
 
   virtual nsQueryFrame::FrameIID GetFrameId() override = 0;

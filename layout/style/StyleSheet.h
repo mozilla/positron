@@ -8,7 +8,6 @@
 #define mozilla_StyleSheet_h
 
 #include "mozilla/css/SheetParsingMode.h"
-#include "mozilla/dom/CSSStyleSheetBinding.h"
 #include "mozilla/StyleBackendType.h"
 #include "mozilla/StyleSheetHandle.h"
 #include "mozilla/StyleSheetInfo.h"
@@ -27,7 +26,7 @@ class ServoStyleSheet;
 class StyleSheet
 {
 protected:
-  StyleSheet(StyleBackendType aType, css::SheetParsingMode aParsingMode);
+  explicit StyleSheet(StyleBackendType aType);
   StyleSheet(const StyleSheet& aCopy,
              nsIDocument* aDocumentToUse,
              nsINode* aOwningNodeToUse);
@@ -38,8 +37,10 @@ public:
     mOwningNode = aOwningNode;
   }
 
-  css::SheetParsingMode ParsingMode() { return mParsingMode; }
-  mozilla::dom::CSSStyleSheetParsingMode ParsingModeDOM();
+  void SetParsingMode(css::SheetParsingMode aParsingMode)
+  {
+    mParsingMode = aParsingMode;
+  }
 
   nsINode* GetOwnerNode() const { return mOwningNode; }
 
@@ -76,12 +77,7 @@ public:
 protected:
   nsIDocument*          mDocument; // weak ref; parents maintain this for their children
   nsINode*              mOwningNode; // weak ref
-
-  // mParsingMode controls access to nonstandard style constructs that
-  // are not safe for use on the public Web but necessary in UA sheets
-  // and/or useful in user sheets.
   css::SheetParsingMode mParsingMode;
-
   StyleBackendType      mType;
   bool                  mDisabled;
 };

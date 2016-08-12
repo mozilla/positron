@@ -76,8 +76,7 @@ function* testRecordingFailingInWindow(index) {
 
   PerformanceController.on(EVENTS.RECORDING_STATE_CHANGE, onRecordingStarted);
 
-  let whenFailed = once(PerformanceController,
-                        EVENTS.BACKEND_FAILED_AFTER_RECORDING_START);
+  let whenFailed = once(PerformanceController, EVENTS.BACKEND_FAILED_AFTER_RECORDING_START);
   PerformanceController.startRecording();
   yield whenFailed;
   ok(true, "Recording has failed.");
@@ -93,15 +92,13 @@ function* testRecordingSucceedingInWindow(index) {
     ok(false, "Recording should start while now private windows are present.");
   };
 
-  PerformanceController.on(EVENTS.BACKEND_FAILED_AFTER_RECORDING_START,
-                           onRecordingFailed);
+  PerformanceController.on(EVENTS.BACKEND_FAILED_AFTER_RECORDING_START, onRecordingFailed);
 
   yield startRecording(panel);
   yield stopRecording(panel);
   ok(true, "Recording has succeeded.");
 
-  PerformanceController.off(EVENTS.BACKEND_FAILED_AFTER_RECORDING_START,
-                           onRecordingFailed);
+  PerformanceController.off(EVENTS.BACKEND_FAILED_AFTER_RECORDING_START, onRecordingFailed);
 }
 
 function* teardownPerfInWindow(index, options) {

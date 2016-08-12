@@ -506,8 +506,19 @@ SetCurrentProcessSandbox(UniquePtr<sandbox::bpf_dsl::Policy> aPolicy)
 }
 
 void
-SandboxEarlyInit(GeckoProcessType aType)
+SandboxEarlyInit(GeckoProcessType aType, bool aIsNuwa)
 {
+  // Bug 1168555: Nuwa isn't reliably single-threaded at this point;
+  // it starts an IPC I/O thread and then shuts it down before calling
+  // the plugin-container entry point, but that thread may not have
+  // finished exiting.  If/when any type of sandboxing is used for the
+  // Nuwa process (e.g., unsharing the network namespace there instead
+  // of for each content process, to save memory), this will need to be
+  // changed by moving the SandboxEarlyInit call to an earlier point.
+  if (aIsNuwa) {
+    return;
+  }
+
   const SandboxInfo info = SandboxInfo::Get();
   if (info.Test(SandboxInfo::kUnexpectedThreads)) {
     return;
@@ -632,14 +643,14 @@ SandboxEarlyInit(GeckoProcessType aType)
  *
  * Will normally make the process exit on failure.
 */
-bool
+void
 SetContentProcessSandbox(int aBrokerFd)
 {
   if (!SandboxInfo::Get().Test(SandboxInfo::kEnabledForContent)) {
     if (aBrokerFd >= 0) {
       close(aBrokerFd);
     }
-    return false;
+    return;
   }
 
   // This needs to live until the process exits.
@@ -649,7 +660,6 @@ SetContentProcessSandbox(int aBrokerFd)
   }
 
   SetCurrentProcessSandbox(GetContentSandboxPolicy(sBroker.ptrOr(nullptr)));
-  return true;
 }
 #endif // MOZ_CONTENT_SANDBOX
 

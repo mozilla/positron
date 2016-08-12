@@ -651,6 +651,29 @@ CodeGenerator::testValueTruthy(const ValueOperand& value,
     masm.jump(ifTruthy);
 }
 
+Label*
+CodeGenerator::getJumpLabelForBranch(MBasicBlock* block)
+{
+    // Skip past trivial blocks.
+    block = skipTrivialBlocks(block);
+
+    if (!labelForBackedgeWithImplicitCheck(block))
+        return block->lir()->label();
+
+    // We need to use a patchable jump for this backedge, but want to treat
+    // this as a normal label target to simplify codegen. Efficiency isn't so
+    // important here as these tests are extremely unlikely to be used in loop
+    // backedges, so emit inline code for the patchable jump. Heap allocating
+    // the label allows it to be used by out of line blocks.
+    Label* res = alloc().lifoAlloc()->newInfallible<Label>();
+    Label after;
+    masm.jump(&after);
+    masm.bind(res);
+    jumpToBlock(block);
+    masm.bind(&after);
+    return res;
+}
+
 void
 CodeGenerator::visitTestOAndBranch(LTestOAndBranch* lir)
 {
@@ -3057,11 +3080,9 @@ CodeGenerator::emitGetPropertyPolymorphic(LInstruction* ins, Register obj, Regis
         ReceiverGuard receiver = mir->receiver(i);
 
         Label next;
-        masm.comment("GuardReceiver");
         GuardReceiver(masm, receiver, obj, scratch, &next, /* checkNullExpando = */ false);
 
         if (receiver.shape) {
-            masm.comment("loadTypedOrValue");
             // If this is an unboxed expando access, GuardReceiver loaded the
             // expando object into scratch.
             Register target = receiver.group ? scratch : obj;
@@ -3078,7 +3099,6 @@ CodeGenerator::emitGetPropertyPolymorphic(LInstruction* ins, Register obj, Regis
                 masm.loadTypedOrValue(Address(scratch, offset), output);
             }
         } else {
-            masm.comment("loadUnboxedProperty");
             const UnboxedLayout::Property* property =
                 receiver.group->unboxedLayout().lookup(mir->name());
             Address propertyAddr(obj, UnboxedPlainObject::offsetOfData() + property->offset);
@@ -3372,7 +3392,6 @@ CodeGenerator::visitTypeBarrierO(LTypeBarrierO* lir)
     Label miss, ok;
 
     if (lir->mir()->type() == MIRType::ObjectOrNull) {
-        masm.comment("Object or Null");
         Label* nullTarget = lir->mir()->resultTypeSet()->mightBeMIRType(MIRType::Null) ? &ok : &miss;
         masm.branchTestPtr(Assembler::Zero, obj, obj, nullTarget);
     } else {
@@ -3380,10 +3399,8 @@ CodeGenerator::visitTypeBarrierO(LTypeBarrierO* lir)
         MOZ_ASSERT(lir->mir()->barrierKind() != BarrierKind::TypeTagOnly);
     }
 
-    if (lir->mir()->barrierKind() != BarrierKind::TypeTagOnly) {
-        masm.comment("Type tag only");
+    if (lir->mir()->barrierKind() != BarrierKind::TypeTagOnly)
         masm.guardObjectType(obj, lir->mir()->resultTypeSet(), scratch, &miss);
-    }
 
     bailoutFrom(&miss, lir->snapshot());
     masm.bind(&ok);
@@ -4757,8 +4774,8 @@ CodeGenerator::maybeCreateScriptCounts()
                 JSScript* innerScript = block->info().script();
                 description = (char*) js_calloc(200);
                 if (description) {
-                    snprintf(description, 200, "%s:%" PRIuSIZE,
-                             innerScript->filename(), innerScript->lineno());
+                    JS_snprintf(description, 200, "%s:%" PRIuSIZE,
+                                innerScript->filename(), innerScript->lineno());
                 }
             }
         }
@@ -5024,7 +5041,6 @@ CodeGenerator::emitDebugForceBailing(LInstruction* lir)
     if (lir->isOsiPoint())
         return;
 
-    masm.comment("emitDebugForceBailing");
     const void* bailAfterAddr = GetJitContext()->runtime->addressOfIonBailAfter();
 
     AllocatableGeneralRegisterSet regs(GeneralRegisterSet::All());
@@ -5424,34 +5440,7 @@ CodeGenerator::visitNewTypedArray(LNewTypedArray* lir)
     masm.createGCObject(objReg, tempReg, templateObject, initialHeap,
                         ool->entry(), /*initContents*/true, /*convertDoubleElements*/false);
 
-    masm.initTypedArraySlots(objReg, tempReg, lengthReg, liveRegs, ool->entry(),
-                             ttemplate, TypedArrayLength::Fixed);
-
-    masm.bind(ool->rejoin());
-}
-
-void
-CodeGenerator::visitNewTypedArrayDynamicLength(LNewTypedArrayDynamicLength* lir)
-{
-    Register lengthReg = ToRegister(lir->length());
-    Register objReg = ToRegister(lir->output());
-    Register tempReg = ToRegister(lir->temp());
-    LiveRegisterSet liveRegs = lir->safepoint()->liveRegs();
-
-    JSObject* templateObject = lir->mir()->templateObject();
-    gc::InitialHeap initialHeap = lir->mir()->initialHeap();
-
-    TypedArrayObject* ttemplate = &templateObject->as<TypedArrayObject>();
-
-    OutOfLineCode* ool = oolCallVM(TypedArrayConstructorOneArgInfo, lir,
-                                   ArgList(ImmGCPtr(templateObject), lengthReg),
-                                   StoreRegisterTo(objReg));
-
-    masm.createGCObject(objReg, tempReg, templateObject, initialHeap,
-                        ool->entry(), /*initContents*/true, /*convertDoubleElements*/false);
-
-    masm.initTypedArraySlots(objReg, tempReg, lengthReg, liveRegs, ool->entry(),
-                             ttemplate, TypedArrayLength::Dynamic);
+    masm.initTypedArraySlots(objReg, tempReg, lengthReg, liveRegs, ool->entry(), ttemplate);
 
     masm.bind(ool->rejoin());
 }
@@ -8983,21 +8972,19 @@ CodeGenerator::visitRest(LRest* lir)
 }
 
 bool
-CodeGenerator::generateWasm(wasm::SigIdDesc sigId, wasm::FuncOffsets* offsets)
+CodeGenerator::generateWasm(uint32_t sigIndex, wasm::FuncOffsets* offsets)
 {
     JitSpew(JitSpew_Codegen, "# Emitting asm.js code");
 
-    wasm::GenerateFunctionPrologue(masm, frameSize(), sigId, offsets);
+    wasm::GenerateFunctionPrologue(masm, frameSize(), sigIndex, offsets);
 
     // Overflow checks are omitted by CodeGenerator in some cases (leaf
     // functions with small framePushed). Perform overflow-checking after
     // pushing framePushed to catch cases with really large frames.
     Label onOverflow;
     if (!omitOverRecursedCheck()) {
-        // Get the per-thread stack limit from the TlsData struct pointed
-        // to by the WasmTlsReg hidden argument register.
         masm.branchPtr(Assembler::AboveOrEqual,
-                       Address(WasmTlsReg, offsetof(wasm::TlsData, stackLimit)),
+                       wasm::SymbolicAddress::StackLimit,
                        masm.getStackPointer(),
                        &onOverflow);
     }
@@ -11226,20 +11213,7 @@ CodeGenerator::visitAsmJSParameter(LAsmJSParameter* lir)
 }
 
 void
-CodeGenerator::visitAsmJSParameterI64(LAsmJSParameterI64* lir)
-{
-}
-
-void
 CodeGenerator::visitAsmJSReturn(LAsmJSReturn* lir)
-{
-    // Don't emit a jump to the return label if this is the last block.
-    if (current->mir() != *gen->graph().poBegin())
-        masm.jump(&returnLabel_);
-}
-
-void
-CodeGenerator::visitAsmJSReturnI64(LAsmJSReturnI64* lir)
 {
     // Don't emit a jump to the return label if this is the last block.
     if (current->mir() != *gen->graph().poBegin())
@@ -11473,7 +11447,10 @@ void
 CodeGenerator::visitAsmJSInterruptCheck(LAsmJSInterruptCheck* lir)
 {
     Label rejoin;
-    masm.branch32(Assembler::Equal, wasm::SymbolicAddress::InterruptUint32, Imm32(0), &rejoin);
+    masm.branch32(Assembler::Equal,
+                  wasm::SymbolicAddress::RuntimeInterruptUint32,
+                  Imm32(0),
+                  &rejoin);
 
     MOZ_ASSERT((sizeof(AsmJSFrame) + masm.framePushed()) % ABIStackAlignment == 0);
     masm.call(wasm::SymbolicAddress::HandleExecutionInterrupt);

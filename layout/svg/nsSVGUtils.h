@@ -40,14 +40,14 @@ class nsSVGLength2;
 class nsSVGOuterSVGFrame;
 class nsSVGPathGeometryFrame;
 class nsTextFrame;
+class gfxTextContextPaint;
 
 struct nsStyleSVG;
 struct nsStyleSVGPaint;
 struct nsRect;
 
 namespace mozilla {
-class SVGContextPaint;
-struct SVGContextPaintImpl;
+struct SVGTextContextPaint;
 namespace dom {
 class Element;
 class UserSpaceMetrics;
@@ -184,8 +184,7 @@ public:
   typedef mozilla::gfx::FillRule FillRule;
   typedef mozilla::gfx::GeneralPattern GeneralPattern;
   typedef mozilla::gfx::Size Size;
-  typedef mozilla::SVGContextPaint SVGContextPaint;
-  typedef mozilla::SVGContextPaintImpl SVGContextPaintImpl;
+  typedef mozilla::SVGTextContextPaint SVGTextContextPaint;
   typedef mozilla::image::DrawResult DrawResult;
 
   static void Init();
@@ -498,37 +497,44 @@ public:
   static nscolor GetFallbackOrPaintColor(nsStyleContext *aStyleContext,
                                          nsStyleSVGPaint nsStyleSVG::*aFillOrStroke);
 
+  static DrawMode
+  SetupContextPaint(const DrawTarget* aDrawTarget,
+                    const gfxMatrix& aContextMatrix,
+                    nsIFrame* aFrame,
+                    gfxTextContextPaint* aOuterContextPaint,
+                    SVGTextContextPaint* aThisContextPaint);
+
   static void
   MakeFillPatternFor(nsIFrame *aFrame,
                      gfxContext* aContext,
                      GeneralPattern* aOutPattern,
-                     SVGContextPaint* aContextPaint = nullptr);
+                     gfxTextContextPaint *aContextPaint = nullptr);
 
   static void
   MakeStrokePatternFor(nsIFrame* aFrame,
                        gfxContext* aContext,
                        GeneralPattern* aOutPattern,
-                       SVGContextPaint* aContextPaint = nullptr);
+                       gfxTextContextPaint *aContextPaint = nullptr);
 
   static float GetOpacity(nsStyleSVGOpacitySource aOpacityType,
                           const float& aOpacity,
-                          SVGContextPaint* aContextPaint);
+                          gfxTextContextPaint *aContextPaint);
 
   /*
    * @return false if there is no stroke
    */
   static bool HasStroke(nsIFrame* aFrame,
-                        SVGContextPaint* aContextPaint = nullptr);
+                        gfxTextContextPaint *aContextPaint = nullptr);
 
   static float GetStrokeWidth(nsIFrame* aFrame,
-                              SVGContextPaint* aContextPaint = nullptr);
+                              gfxTextContextPaint *aContextPaint = nullptr);
 
   /*
    * Set up a cairo context for a stroked path (including any dashing that
    * applies).
    */
   static void SetupCairoStrokeGeometry(nsIFrame* aFrame, gfxContext *aContext,
-                                       SVGContextPaint* aContextPaint = nullptr);
+                                       gfxTextContextPaint *aContextPaint = nullptr);
 
   /**
    * This function returns a set of bit flags indicating which parts of the
@@ -554,7 +560,8 @@ public:
    * @param aContext the thebes aContext to draw to
    * @return true if rendering succeeded
    */
-  static bool PaintSVGGlyph(Element* aElement, gfxContext* aContext);
+  static bool PaintSVGGlyph(Element* aElement, gfxContext* aContext,
+                            gfxTextContextPaint* aContextPaint);
   /**
    * Get the extents of a SVG glyph.
    * @param aElement the SVG glyph element

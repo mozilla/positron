@@ -443,8 +443,6 @@ public:
   // when the connection between Rtsp server and client gets lost.
   virtual void ResetConnectionState() final override;
 
-  void NotifyXPCOMShutdown() final override;
-
   // Called by media decoder when the audible state changed or when input is
   // a media stream.
   virtual void SetAudibleState(bool aAudible) final override;
@@ -605,8 +603,6 @@ public:
   void GetMozDebugReaderData(nsAString& aString);
 
   void MozDumpDebugInfo();
-
-  void SetVisible(bool aVisible);
 
   already_AddRefed<DOMMediaStream> GetSrcObject() const;
   void SetSrcObject(DOMMediaStream& aValue);
@@ -1197,9 +1193,6 @@ protected:
   bool IsAllowedToPlay();
 
   bool IsAudible() const;
-  bool HaveFailedWithSourceNotSupportedError() const;
-
-  void OpenUnsupportedMediaWithExtenalAppIfNeeded();
 
   class nsAsyncEventRunner;
   using nsGenericHTMLElement::DispatchEvent;
@@ -1582,21 +1575,19 @@ protected:
 
 public:
   // Helper class to measure times for MSE telemetry stats
-  class TimeDurationAccumulator
-  {
+  class TimeDurationAccumulator {
   public:
     TimeDurationAccumulator()
       : mCount(0)
-    {}
-    void Start()
     {
+    }
+    void Start() {
       if (IsStarted()) {
         return;
       }
       mStartTime = TimeStamp::Now();
     }
-    void Pause()
-    {
+    void Pause() {
       if (!IsStarted()) {
         return;
       }
@@ -1604,25 +1595,14 @@ public:
       mCount++;
       mStartTime = TimeStamp();
     }
-    bool IsStarted() const
-    {
+    bool IsStarted() const {
       return !mStartTime.IsNull();
     }
-    double Total() const
-    {
-      if (!IsStarted()) {
-        return mSum.ToSeconds();
-      }
-      // Add current running time until now, but keep it running.
-      return (mSum + (TimeStamp::Now() - mStartTime)).ToSeconds();
+    double Total() const {
+      return mSum.ToSeconds();
     }
-    uint32_t Count() const
-    {
-      if (!IsStarted()) {
-        return mCount;
-      }
-      // Count current run in this report, without increasing the stored count.
-      return mCount + 1;
+    uint32_t Count() const {
+      return mCount;
     }
   private:
     TimeStamp mStartTime;

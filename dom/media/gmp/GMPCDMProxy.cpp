@@ -27,13 +27,8 @@ namespace mozilla {
 
 GMPCDMProxy::GMPCDMProxy(dom::MediaKeys* aKeys,
                          const nsAString& aKeySystem,
-                         GMPCrashHelper* aCrashHelper,
-                         bool aDistinctiveIdentifierRequired,
-                         bool aPersistentStateRequired)
-  : CDMProxy(aKeys,
-             aKeySystem,
-             aDistinctiveIdentifierRequired,
-             aPersistentStateRequired)
+                         GMPCrashHelper* aCrashHelper)
+  : CDMProxy(aKeys, aKeySystem)
   , mCrashHelper(aCrashHelper)
   , mCDM(nullptr)
   , mDecryptionJobCount(0)
@@ -128,9 +123,7 @@ GMPCDMProxy::gmp_InitDone(GMPDecryptorProxy* aCDM, nsAutoPtr<InitData>&& aData)
 
   mCDM = aCDM;
   mCallback = new GMPCDMCallbackProxy(this);
-  mCDM->Init(mCallback,
-             mDistinctiveIdentifierRequired,
-             mPersistentStateRequired);
+  mCDM->Init(mCallback);
   nsCOMPtr<nsIRunnable> task(
     NewRunnableMethod<uint32_t>(this,
                                 &GMPCDMProxy::OnCDMCreated,
@@ -244,10 +237,7 @@ GMPCDMProxy::gmp_InitGetGMPDecryptor(nsresult aResult,
   RefPtr<GMPCrashHelper> crashHelper = Move(aData->mCrashHelper);
   UniquePtr<GetGMPDecryptorCallback> callback(new gmp_InitDoneCallback(this,
                                                                        Move(aData)));
-  nsresult rv = mps->GetGMPDecryptor(crashHelper,
-                                     &tags,
-                                     GetNodeId(),
-                                     Move(callback));
+  nsresult rv = mps->GetGMPDecryptor(crashHelper, &tags, GetNodeId(), Move(callback));
   if (NS_FAILED(rv)) {
     RejectPromise(promiseID, NS_ERROR_DOM_INVALID_STATE_ERR,
                   NS_LITERAL_CSTRING("Call to GetGMPDecryptor() failed early"));
@@ -273,7 +263,7 @@ GMPCDMProxy::OnCDMCreated(uint32_t aPromiseId)
 
 void
 GMPCDMProxy::CreateSession(uint32_t aCreateSessionToken,
-                           dom::MediaKeySessionType aSessionType,
+                           dom::SessionType aSessionType,
                            PromiseId aPromiseId,
                            const nsAString& aInitDataType,
                            nsTArray<uint8_t>& aInitData)
@@ -294,10 +284,10 @@ GMPCDMProxy::CreateSession(uint32_t aCreateSessionToken,
 }
 
 GMPSessionType
-ToGMPSessionType(dom::MediaKeySessionType aSessionType) {
+ToGMPSessionType(dom::SessionType aSessionType) {
   switch (aSessionType) {
-    case dom::MediaKeySessionType::Temporary: return kGMPTemporySession;
-    case dom::MediaKeySessionType::Persistent_license: return kGMPPersistentSession;
+    case dom::SessionType::Temporary: return kGMPTemporySession;
+    case dom::SessionType::Persistent: return kGMPPersistentSession;
     default: return kGMPTemporySession;
   };
 };

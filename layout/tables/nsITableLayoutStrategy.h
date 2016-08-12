@@ -16,15 +16,11 @@
 #include "nsCoord.h"
 
 class nsRenderingContext;
-namespace mozilla {
-struct ReflowInput;
-} // namespace mozilla
+struct nsHTMLReflowState;
 
 class nsITableLayoutStrategy
 {
 public:
-    using ReflowInput = mozilla::ReflowInput;
-
     virtual ~nsITableLayoutStrategy() {}
 
     /** Implement nsIFrame::GetMinISize for the table */
@@ -41,7 +37,7 @@ public:
      * Compute final column isizes based on the intrinsic isize data and
      * the available isize.
      */
-    virtual void ComputeColumnISizes(const ReflowInput& aReflowInput) = 0;
+    virtual void ComputeColumnISizes(const nsHTMLReflowState& aReflowState) = 0;
 
     /**
      * Return the type of table layout strategy, without the cost of

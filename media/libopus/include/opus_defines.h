@@ -65,7 +65,7 @@ extern "C" {
 
 #ifndef OPUS_EXPORT
 # if defined(WIN32)
-#  if defined(OPUS_BUILD) && defined(DLL_EXPORT)
+#  ifdef OPUS_BUILD
 #   define OPUS_EXPORT __declspec(dllexport)
 #  else
 #   define OPUS_EXPORT

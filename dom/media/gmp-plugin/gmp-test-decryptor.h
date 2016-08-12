@@ -11,7 +11,7 @@
 #include <string>
 #include "mozilla/Attributes.h"
 
-class FakeDecryptor : public GMPDecryptor7 {
+class FakeDecryptor : public GMPDecryptor {
 public:
 
   explicit FakeDecryptor(GMPDecryptorHost* aHost);

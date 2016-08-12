@@ -13,7 +13,6 @@
 
 #include "OggDecoder.h"
 #include "OggReader.h"
-#include "OggDemuxer.h"
 
 #include "WebMDecoder.h"
 #include "WebMDemuxer.h"
@@ -690,9 +689,7 @@ MediaDecoderReader* DecoderTraits::CreateReader(const nsACString& aType, Abstrac
   } else
 #endif
   if (IsOggType(aType)) {
-    decoderReader = Preferences::GetBool("media.format-reader.ogg", true) ?
-      static_cast<MediaDecoderReader*>(new MediaFormatReader(aDecoder, new OggDemuxer(aDecoder->GetResource()))) :
-      new OggReader(aDecoder);
+    decoderReader = new OggReader(aDecoder);
   } else
   if (IsWaveType(aType)) {
     decoderReader = new WaveReader(aDecoder);

@@ -59,18 +59,9 @@ CheckMessageParameterCounts()
 }
 #endif /* DEBUG */
 
-#define RETURN_IF_FAIL(code) do { if (!code) return #code " failed"; } while (0)
-
 JS_PUBLIC_API(const char*)
-JS::detail::InitWithFailureDiagnostic(bool isDebugBuild)
+JS_InitWithFailureDiagnostic(void)
 {
-    // Verify that our DEBUG setting matches the caller's.
-#ifdef DEBUG
-    MOZ_RELEASE_ASSERT(isDebugBuild);
-#else
-    MOZ_RELEASE_ASSERT(!isDebugBuild);
-#endif
-
     MOZ_ASSERT(libraryInitState == InitState::Uninitialized,
                "must call JS_Init once before any JSAPI operation except "
                "JS_SetICUMemoryFunctions");
@@ -84,16 +75,19 @@ JS::detail::InitWithFailureDiagnostic(bool isDebugBuild)
 #endif
 
     using js::TlsPerThreadData;
-    RETURN_IF_FAIL(TlsPerThreadData.init());
+    if (!TlsPerThreadData.init())
+        return "JS_InitWithFailureDiagnostic: TlsPerThreadData.init() failed";
 
 #if defined(DEBUG) || defined(JS_OOM_BREAKPOINT)
-    RETURN_IF_FAIL(js::oom::InitThreadType());
+    if (!js::oom::InitThreadType())
+        return "JS_InitWithFailureDiagnostic: js::oom::InitThreadType() failed";
     js::oom::SetThreadType(js::oom::THREAD_TYPE_MAIN);
 #endif
 
     js::jit::ExecutableAllocator::initStatic();
 
-    RETURN_IF_FAIL(js::jit::InitializeIon());
+    if (!js::jit::InitializeIon())
+        return "JS_InitWithFailureDiagnostic: js::jit::InitializeIon() failed";
 
     js::DateTimeInfo::init();
 
@@ -101,18 +95,28 @@ JS::detail::InitWithFailureDiagnostic(bool isDebugBuild)
     UErrorCode err = U_ZERO_ERROR;
     u_init(&err);
     if (U_FAILURE(err))
-        return "u_init() failed";
+        return "JS_InitWithFailureDiagnostic: u_init() failed";
 #endif // EXPOSE_INTL_API
 
-    RETURN_IF_FAIL(js::CreateHelperThreadsState());
-    RETURN_IF_FAIL(FutexRuntime::initialize());
-    RETURN_IF_FAIL(js::gcstats::Statistics::initialize());
+    if (!js::CreateHelperThreadsState())
+        return "JS_InitWithFailureDiagnostic: js::CreateHelperThreadState() failed";
+
+    if (!FutexRuntime::initialize())
+        return "JS_InitWithFailureDiagnostic: FutexRuntime::initialize() failed";
+
+    if (!js::gcstats::Statistics::initialize())
+        return "JS_InitWithFailureDiagnostic: js::gcstats::Statistics::initialize() failed";
 
     libraryInitState = InitState::Running;
     return nullptr;
 }
 
-#undef RETURN_IF_FAIL
+JS_PUBLIC_API(bool)
+JS_Init(void)
+{
+    const char* failure = JS_InitWithFailureDiagnostic();
+    return !failure;
+}
 
 JS_PUBLIC_API(void)
 JS_ShutDown(void)

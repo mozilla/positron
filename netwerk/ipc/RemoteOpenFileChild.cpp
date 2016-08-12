@@ -294,8 +294,7 @@ RemoteOpenFileChild::HandleFileDescriptorAndNotifyListener(
   }
 
   if (aFD.IsValid()) {
-    auto rawFD = aFD.ClonePlatformHandle();
-    mNSPRFileDesc = PR_ImportFile(rawFD.release());
+    mNSPRFileDesc = PR_ImportFile(aFD.PlatformHandle());
     if (!mNSPRFileDesc) {
       NS_WARNING("Failed to import file handle!");
     }

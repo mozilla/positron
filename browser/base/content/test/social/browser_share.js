@@ -167,7 +167,7 @@ var tests = {
     SocialUI.onCustomizeEnd(window);
 
     let testData = corpus[0];
-    BrowserTestUtils.openNewForegroundTab(gBrowser, testData.url).then(tab => {
+    addTab(testData.url, function(tab) {
       SocialService.addProvider(manifest, function(provider) {
         is(SocialUI.enabled, true, "SocialUI is enabled");
         checkSocialUI();
@@ -177,7 +177,8 @@ var tests = {
         ok(!shareButton.hasAttribute("disabled"), "share button is enabled");
         // button should be visible
         is(shareButton.hidden, false, "share button is visible");
-        BrowserTestUtils.removeTab(tab).then(next);
+        gBrowser.removeTab(tab);
+        next();
       });
     });
   },
@@ -195,23 +196,22 @@ var tests = {
 
     let mm = getGroupMessageManager("social");
     mm.addMessageListener("sharedata", function handler(msg) {
-      BrowserTestUtils.removeTab(testTab).then(() => {
-        hasoptions(testData.options, JSON.parse(msg.data));
-        testData = corpus[testIndex++];
-        BrowserTestUtils.waitForCondition(() => { return SocialShare.currentShare == null; },"share panel closed").then(() => {
-          if (testData) {
-            runOneTest();
-          } else {
-            mm.removeMessageListener("sharedata", handler);
-            SocialService.disableProvider(manifest.origin, next);
-          }
-        });
-        SocialShare.iframe.messageManager.sendAsyncMessage("closeself", {});
+      gBrowser.removeTab(testTab);
+      hasoptions(testData.options, JSON.parse(msg.data));
+      testData = corpus[testIndex++];
+      BrowserTestUtils.waitForCondition(() => { return SocialShare.currentShare == null; },"share panel closed").then(() => {
+        if (testData) {
+          runOneTest();
+        } else {
+          mm.removeMessageListener("sharedata", handler);
+          SocialService.disableProvider(manifest.origin, next);
+        }
       });
+      SocialShare.iframe.messageManager.sendAsyncMessage("closeself", {});
     });
 
     function runOneTest() {
-      BrowserTestUtils.openNewForegroundTab(gBrowser, testData.url).then(tab => {
+      addTab(testData.url, function(tab) {
         testTab = tab;
 
         let shareButton = SocialShare.shareButton;
@@ -284,16 +284,15 @@ var tests = {
         is(msg.data, expecting, "microformats data ok");
         BrowserTestUtils.waitForCondition(() => { return SocialShare.currentShare == null; },
                                           "share panel closed").then(() => {
+          gBrowser.removeTab(testTab);
           mm.removeMessageListener("sharedata", handler);
-          BrowserTestUtils.removeTab(testTab).then(() => {
-            SocialService.disableProvider(manifest.origin, next);
-          });
+          SocialService.disableProvider(manifest.origin, next);
         });
         SocialShare.iframe.messageManager.sendAsyncMessage("closeself", {});
       });
 
       let url = "https://example.com/browser/browser/base/content/test/social/microformats.html"
-      BrowserTestUtils.openNewForegroundTab(gBrowser, url).then(tab => {
+      addTab(url, function(tab) {
         testTab = tab;
 
         let shareButton = SocialShare.shareButton;
@@ -322,7 +321,7 @@ var tests = {
     // ensure correct state
     SocialUI.onCustomizeEnd(window);
 
-    ensureFrameLoaded(iframe).then(() => {
+    ensureEventFired(iframe, "load").then(() => {
       let subframe = iframe.contentDocument.getElementById("activation-frame");
       ensureFrameLoaded(subframe, activationPage).then(() => {
         is(subframe.contentDocument.location.href, activationPage, "activation page loaded");
@@ -333,7 +332,7 @@ var tests = {
 
             BrowserTestUtils.waitForCondition(() => { return SocialShare.currentShare == null; },
                                               "share panel closed").then(() => {
-              BrowserTestUtils.removeTab(testTab).then(() => {
+              ensureBrowserTabClosed(testTab).then(() => {
                 mm.removeMessageListener("sharedata", handler);
                 SocialService.uninstallProvider(manifest.origin, next);
               });
@@ -344,7 +343,7 @@ var tests = {
         sendActivationEvent(subframe);
       });
     });
-    BrowserTestUtils.openNewForegroundTab(gBrowser, activationPage).then(tab => {
+    addTab(activationPage, function(tab) {
       let shareButton = SocialShare.shareButton;
       // verify the attribute for proper css
       ok(!shareButton.hasAttribute("disabled"), "share button is enabled");
@@ -364,8 +363,8 @@ var tests = {
     SocialShare._createFrame();
 
     SocialService.addProvider(manifest, () => {
-      BrowserTestUtils.openNewForegroundTab(gBrowser, activationPage).then(tab => {
-        ensureFrameLoaded(SocialShare.iframe).then(() => {
+      addTab(activationPage, (tab) => {
+        ensureEventFired(SocialShare.iframe, "load").then(() => {
           // send keys to the input field.  An unexpected failure will happen
           // if the onbeforeunload handler is fired.
           EventUtils.sendKey("f");
@@ -378,7 +377,7 @@ var tests = {
             let topwin = Services.wm.getMostRecentWindow(null);
             is(topwin, window, "no dialog is open");
 
-            BrowserTestUtils.removeTab(testTab).then(() => {
+            ensureBrowserTabClosed(testTab).then(() => {
               SocialService.disableProvider(manifest.origin, next);
             });
           });

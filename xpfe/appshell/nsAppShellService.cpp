@@ -778,7 +778,7 @@ nsAppShellService::JustCreateTopWindow(nsIXULWindow *aParent,
     thisContext->SetRemoteTabs(isUsingRemoteTabs);
   }
 
-  window.forget(aResult);
+  window.swap(*aResult); // transfer reference
   if (parent)
     parent->AddChildWindow(*aResult);
 

@@ -19,7 +19,7 @@ class TabParent;
 
 namespace layers {
 
-class IAPZCTreeManager;
+class APZCTreeManager;
 
 /**
  * RemoteContentController uses the PAPZ protocol to implement a
@@ -44,7 +44,7 @@ public:
   virtual void RequestContentRepaint(const FrameMetrics& aFrameMetrics) override;
 
   virtual void HandleTap(TapType aTapType,
-                         const LayoutDevicePoint& aPoint,
+                         const CSSPoint& aPoint,
                          Modifiers aModifiers,
                          const ScrollableLayerGuid& aGuid,
                          uint64_t aInputBlockId) override;
@@ -98,7 +98,7 @@ private:
     MOZ_ASSERT(NS_IsMainThread());
     return !!mBrowserParent;
   }
-  already_AddRefed<IAPZCTreeManager> GetApzcTreeManager();
+  already_AddRefed<APZCTreeManager> GetApzcTreeManager();
 
   MessageLoop* mUILoop;
   uint64_t mLayersId;
@@ -107,7 +107,7 @@ private:
   // Mutex protecting members below accessed from multiple threads.
   mozilla::Mutex mMutex;
 
-  RefPtr<IAPZCTreeManager> mApzcTreeManager;
+  RefPtr<APZCTreeManager> mApzcTreeManager;
   nsRegion mTouchSensitiveRegion;
 };
 

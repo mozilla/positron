@@ -66,15 +66,15 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=633602
           return;
         }
 
-        isUnlocked = !document.pointerLockElement;
-        div.requestPointerLock();
+        isUnlocked = !document.mozPointerLockElement;
+        div.mozRequestPointerLock();
       }
 
       function moveLocked(e) {
         info("Got mousemove via moveLocked");
         div.removeEventListener("mousemove", moveLocked, false);
 
-        isLocked = !!document.pointerLockElement;
+        isLocked = !!document.mozPointerLockElement;
         lockedCoords = {
           screenX: e.screenX,
           screenY: e.screenY,
@@ -90,16 +90,16 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=633602
         document.exitFullscreen();
       }
 
-      document.addEventListener("pointerlockchange", function (e) {
-        if (document.pointerLockElement === div) {
-          info("Got pointerlockchange for entering");
+      document.addEventListener("mozpointerlockchange", function (e) {
+        if (document.mozPointerLockElement === div) {
+          info("Got mozpointerlockchange for entering");
           div.removeEventListener("mousemove", moveUnlocked, false);
           div.addEventListener("mousemove", moveLocked, false);
           divRect = div.getBoundingClientRect();
           synthesizeNativeMouseMove(div, (divRect.width / 4) * 3,
                                     (divRect.height / 4) * 3);
         } else {
-          info("Got pointerlockchange for exiting");
+          info("Got mozpointerlockchange for exiting");
         }
       }, false);
 

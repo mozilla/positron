@@ -4,7 +4,6 @@
 
 "use strict";
 
-var { Cr } = require("chrome");
 var { TabActor } = require("devtools/server/actors/webbrowser");
 
 /**
@@ -55,22 +54,10 @@ Object.defineProperty(ContentActor.prototype, "title", {
 
 ContentActor.prototype.exit = function () {
   if (this._sendForm) {
-    try {
-      this._chromeGlobal.removeMessageListener("debug:form", this._sendForm);
-    } catch (e) {
-      if (e.result != Cr.NS_ERROR_NULL_POINTER) {
-        throw e;
-      }
-      // In some cases, especially when using messageManagers in non-e10s mode, we reach
-      // this point with a dead messageManager which only throws errors but does not
-      // seem to indicate in any other way that it is dead.
-    }
+    this._chromeGlobal.removeMessageListener("debug:form", this._sendForm);
     this._sendForm = null;
   }
-
-  TabActor.prototype.exit.call(this);
-
-  this._chromeGlobal = null;
+  return TabActor.prototype.exit.call(this);
 };
 
 /**

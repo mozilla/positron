@@ -220,7 +220,6 @@ add_test(function test_local_list() {
   streamUpdater.downloadUpdates(
     "goog-downloadwhite-digest256,goog-badbinurl-shavar",
     "goog-downloadwhite-digest256,goog-badbinurl-shavar;\n",
-    true, // isPostRequest.
     "http://localhost:4444/downloads",
     updateSuccess, handleError, handleError);
 });

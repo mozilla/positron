@@ -13,7 +13,6 @@
 #include "PresentationCallbacks.h"
 #include "PresentationRequest.h"
 #include "PresentationConnection.h"
-#include "nsThreadUtils.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -29,7 +28,6 @@ PresentationRequesterCallback::PresentationRequesterCallback(PresentationRequest
                                                              const nsAString& aSessionId,
                                                              Promise* aPromise)
   : mRequest(aRequest)
-  , mUrl(aUrl)
   , mSessionId(aSessionId)
   , mPromise(aPromise)
 {
@@ -48,8 +46,10 @@ PresentationRequesterCallback::NotifySuccess()
 {
   MOZ_ASSERT(NS_IsMainThread());
 
+  // At the sender side, this function must get called after the transport
+  // channel is ready. So we simply set the connection state as connected.
   RefPtr<PresentationConnection> connection =
-    PresentationConnection::Create(mRequest->GetOwner(), mSessionId, mUrl,
+    PresentationConnection::Create(mRequest->GetOwner(), mSessionId,
                                    nsIPresentationService::ROLE_CONTROLLER);
   if (NS_WARN_IF(!connection)) {
     mPromise->MaybeReject(NS_ERROR_DOM_OPERATION_ERR);
@@ -73,74 +73,6 @@ PresentationRequesterCallback::NotifyError(nsresult aError)
 /*
  * Implementation of PresentationRequesterCallback
  */
-
-NS_IMPL_ISUPPORTS_INHERITED0(PresentationReconnectCallback,
-                             PresentationRequesterCallback)
-
-PresentationReconnectCallback::PresentationReconnectCallback(
-                                           PresentationRequest* aRequest,
-                                           const nsAString& aUrl,
-                                           const nsAString& aSessionId,
-                                           Promise* aPromise,
-                                           PresentationConnection* aConnection)
-  : PresentationRequesterCallback(aRequest, aUrl, aSessionId, aPromise)
-  , mConnection(aConnection)
-{
-}
-
-PresentationReconnectCallback::~PresentationReconnectCallback()
-{
-}
-
-NS_IMETHODIMP
-PresentationReconnectCallback::NotifySuccess()
-{
-  MOZ_ASSERT(NS_IsMainThread());
-
-  nsCOMPtr<nsIPresentationService> service =
-    do_GetService(PRESENTATION_SERVICE_CONTRACTID);
-  if (NS_WARN_IF(!service)) {
-    return NS_ERROR_NOT_AVAILABLE;
-  }
-
-  nsresult rv = NS_OK;
-  // We found a matched connection with the same window ID, URL, and
-  // the session ID. Resolve the promise with this connection and dispatch
-  // the event.
-  if (mConnection) {
-    mPromise->MaybeResolve(mConnection);
-    rv = mRequest->DispatchConnectionAvailableEvent(mConnection);
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-      return rv;
-    }
-  } else {
-    // Use |PresentationRequesterCallback::NotifySuccess| to create a new
-    // connection since we don't find one that can be reused.
-    rv = PresentationRequesterCallback::NotifySuccess();
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-      return rv;
-    }
-
-    rv = service->UpdateWindowIdBySessionId(mSessionId,
-                                            mRequest->GetOwner()->WindowID());
-    if (NS_WARN_IF(NS_FAILED(rv))) {
-      return rv;
-    }
-  }
-
-  nsString sessionId = nsString(mSessionId);
-  return NS_DispatchToMainThread(
-           NS_NewRunnableFunction([sessionId, service]() -> void {
-             service->BuildTransport(sessionId,
-                                     nsIPresentationService::ROLE_CONTROLLER);
-           }));
-}
-
-NS_IMETHODIMP
-PresentationReconnectCallback::NotifyError(nsresult aError)
-{
-  return PresentationRequesterCallback::NotifyError(aError);
-}
 
 NS_IMPL_ISUPPORTS(PresentationResponderLoadingCallback,
                   nsIWebProgressListener,
@@ -177,7 +109,7 @@ PresentationResponderLoadingCallback::Init(nsIDocShell* aDocShell)
       (busyFlags & nsIDocShell::BUSY_FLAGS_PAGE_LOADING)) {
     // The docshell has finished loading or is receiving data (|STATE_TRANSFERRING|
     // has already been fired), so the page is ready for presentation use.
-    return NotifyReceiverReady(/* isLoading = */ true);
+    return NotifyReceiverReady();
   }
 
   // Start to listen to document state change event |STATE_TRANSFERRING|.
@@ -185,7 +117,7 @@ PresentationResponderLoadingCallback::Init(nsIDocShell* aDocShell)
 }
 
 nsresult
-PresentationResponderLoadingCallback::NotifyReceiverReady(bool aIsLoading)
+PresentationResponderLoadingCallback::NotifyReceiverReady()
 {
   nsCOMPtr<nsPIDOMWindowOuter> window = do_GetInterface(mProgress);
   if (NS_WARN_IF(!window || !window->GetCurrentInnerWindow())) {
@@ -199,7 +131,7 @@ PresentationResponderLoadingCallback::NotifyReceiverReady(bool aIsLoading)
     return NS_ERROR_NOT_AVAILABLE;
   }
 
-  return service->NotifyReceiverReady(mSessionId, windowId, aIsLoading);
+  return service->NotifyReceiverReady(mSessionId, windowId);
 }
 
 // nsIWebProgressListener
@@ -211,12 +143,10 @@ PresentationResponderLoadingCallback::OnStateChange(nsIWebProgress* aWebProgress
 {
   MOZ_ASSERT(NS_IsMainThread());
 
-  if (aStateFlags & (nsIWebProgressListener::STATE_TRANSFERRING |
-                     nsIWebProgressListener::STATE_STOP)) {
+  if (aStateFlags & nsIWebProgressListener::STATE_TRANSFERRING) {
     mProgress->RemoveProgressListener(this);
 
-    bool isLoading = aStateFlags & nsIWebProgressListener::STATE_TRANSFERRING;
-    return NotifyReceiverReady(isLoading);
+    return NotifyReceiverReady();
   }
 
   return NS_OK;

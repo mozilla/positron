@@ -58,6 +58,8 @@ JS::Zone::Zone(JSRuntime* rt)
 
 Zone::~Zone()
 {
+    MOZ_ASSERT_IF(typeDescrObjects.initialized(), typeDescrObjects.empty());
+
     JSRuntime* rt = runtimeFromMainThread();
     if (this == rt->gc.systemZone)
         rt->gc.systemZone = nullptr;

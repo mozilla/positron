@@ -42,10 +42,9 @@ addAsyncTest(function() {
     "walker.parents(nodeFront) before the load completes shouldn't fail");
 
   let nodeFront = yield gWalker.querySelector(gWalker.rootNode, "h1");
-  let newRoot = waitForMutation(gWalker, isNewRoot);
   gDoc.defaultView.location.reload();
   yield gWalker.parents(nodeFront);
-  yield newRoot;
+  yield waitForMutation(gWalker, isNewRoot);
 
   ok(true, "The call to walker.parents() didn't fail");
   runNextTest();
@@ -56,10 +55,9 @@ addAsyncTest(function() {
     "walker.children(nodeFront) before the load completes shouldn't fail");
 
   let nodeFront = yield gWalker.querySelector(gWalker.rootNode, "body");
-  let newRoot = waitForMutation(gWalker, isNewRoot);
   gDoc.defaultView.location.reload();
   yield gWalker.children(nodeFront);
-  yield newRoot;
+  yield waitForMutation(gWalker, isNewRoot);
 
   ok(true, "The call to walker.children() didn't fail");
   runNextTest();
@@ -70,10 +68,9 @@ addAsyncTest(function() {
     "walker.siblings(nodeFront) before the load completes shouldn't fail");
 
   let nodeFront = yield gWalker.querySelector(gWalker.rootNode, "h1");
-  let newRoot = waitForMutation(gWalker, isNewRoot);
   gDoc.defaultView.location.reload();
   yield gWalker.siblings(nodeFront);
-  yield newRoot;
+  yield waitForMutation(gWalker, isNewRoot);
 
   ok(true, "The call to walker.siblings() didn't fail");
   runNextTest();
@@ -84,10 +81,9 @@ addAsyncTest(function() {
     "walker.nextSibling(nodeFront) before the load completes shouldn't fail");
 
   let nodeFront = yield gWalker.querySelector(gWalker.rootNode, "h1");
-  let newRoot = waitForMutation(gWalker, isNewRoot);
   gDoc.defaultView.location.reload();
   yield gWalker.nextSibling(nodeFront);
-  yield newRoot;
+  yield waitForMutation(gWalker, isNewRoot);
 
   ok(true, "The call to walker.nextSibling() didn't fail");
   runNextTest();
@@ -98,10 +94,9 @@ addAsyncTest(function() {
     "walker.previousSibling(nodeFront) before the load completes shouldn't fail");
 
   let nodeFront = yield gWalker.querySelector(gWalker.rootNode, "h1");
-  let newRoot = waitForMutation(gWalker, isNewRoot);
   gDoc.defaultView.location.reload();
   yield gWalker.previousSibling(nodeFront);
-  yield newRoot;
+  yield waitForMutation(gWalker, isNewRoot);
 
   ok(true, "The call to walker.previousSibling() didn't fail");
   runNextTest();
@@ -113,10 +108,9 @@ addAsyncTest(function() {
     "shouldn't fail");
 
   let nodeFront = yield gWalker.querySelector(gWalker.rootNode, "h1");
-  let newRoot = waitForMutation(gWalker, isNewRoot);
   gDoc.defaultView.location.reload();
   yield gWalker.addPseudoClassLock(nodeFront, ":hover");
-  yield newRoot;
+  yield waitForMutation(gWalker, isNewRoot);
 
   ok(true, "The call to walker.addPseudoClassLock() didn't fail");
   runNextTest();
@@ -128,10 +122,9 @@ addAsyncTest(function() {
     "shouldn't fail");
 
   let nodeFront = yield gWalker.querySelector(gWalker.rootNode, "h1");
-  let newRoot = waitForMutation(gWalker, isNewRoot);
   gDoc.defaultView.location.reload();
   yield gWalker.removePseudoClassLock(nodeFront, ":hover");
-  yield newRoot;
+  yield waitForMutation(gWalker, isNewRoot);
 
   ok(true, "The call to walker.removePseudoClassLock() didn't fail");
   runNextTest();
@@ -143,10 +136,9 @@ addAsyncTest(function() {
     "shouldn't fail");
 
   let nodeFront = yield gWalker.querySelector(gWalker.rootNode, "h1");
-  let newRoot = waitForMutation(gWalker, isNewRoot);
   gDoc.defaultView.location.reload();
   yield gWalker.clearPseudoClassLocks(nodeFront);
-  yield newRoot;
+  yield waitForMutation(gWalker, isNewRoot);
 
   ok(true, "The call to walker.clearPseudoClassLocks() didn't fail");
   runNextTest();
@@ -157,10 +149,9 @@ addAsyncTest(function() {
     "walker.innerHTML(nodeFront) before the load completes shouldn't fail");
 
   let nodeFront = yield gWalker.querySelector(gWalker.rootNode, "h1");
-  let newRoot = waitForMutation(gWalker, isNewRoot);
   gDoc.defaultView.location.reload();
   yield gWalker.innerHTML(nodeFront);
-  yield newRoot;
+  yield waitForMutation(gWalker, isNewRoot);
 
   ok(true, "The call to walker.innerHTML() didn't fail");
   runNextTest();
@@ -171,10 +162,9 @@ addAsyncTest(function() {
     "walker.setInnerHTML(nodeFront) before the load completes shouldn't fail");
 
   let nodeFront = yield gWalker.querySelector(gWalker.rootNode, "h1");
-  let newRoot = waitForMutation(gWalker, isNewRoot);
   gDoc.defaultView.location.reload();
   yield gWalker.setInnerHTML(nodeFront, "<span>innerHTML changed</span>");
-  yield newRoot;
+  yield waitForMutation(gWalker, isNewRoot);
 
   ok(true, "The call to walker.setInnerHTML() didn't fail");
   runNextTest();
@@ -185,10 +175,9 @@ addAsyncTest(function() {
     "walker.outerHTML(nodeFront) before the load completes shouldn't fail");
 
   let nodeFront = yield gWalker.querySelector(gWalker.rootNode, "h1");
-  let newRoot = waitForMutation(gWalker, isNewRoot);
   gDoc.defaultView.location.reload();
   yield gWalker.outerHTML(nodeFront);
-  yield newRoot;
+  yield waitForMutation(gWalker, isNewRoot);
 
   ok(true, "The call to walker.outerHTML() didn't fail");
   runNextTest();
@@ -199,10 +188,9 @@ addAsyncTest(function() {
     "walker.setOuterHTML(nodeFront) before the load completes shouldn't fail");
 
   let nodeFront = yield gWalker.querySelector(gWalker.rootNode, "h1");
-  let newRoot = waitForMutation(gWalker, isNewRoot);
   gDoc.defaultView.location.reload();
   yield gWalker.setOuterHTML(nodeFront, "<h1><span>innerHTML changed</span></h1>");
-  yield newRoot;
+  yield waitForMutation(gWalker, isNewRoot);
 
   ok(true, "The call to walker.setOuterHTML() didn't fail");
   runNextTest();
@@ -214,11 +202,10 @@ addAsyncTest(function() {
     "fail");
 
   let nodeFront = yield gWalker.querySelector(gWalker.rootNode, "h1");
-  let newRoot = waitForMutation(gWalker, isNewRoot);
   gDoc.defaultView.location.reload();
   yield gWalker.insertAdjacentHTML(nodeFront, "afterEnd",
     "<span>new adjacent HTML</span>");
-  yield newRoot;
+  yield waitForMutation(gWalker, isNewRoot);
 
   ok(true, "The call to walker.insertAdjacentHTML() didn't fail");
   runNextTest();
@@ -229,7 +216,6 @@ addAsyncTest(function() {
     "walker.removeNode(nodeFront) before the load completes should throw");
 
   let nodeFront = yield gWalker.querySelector(gWalker.rootNode, "h1");
-  let newRoot = waitForMutation(gWalker, isNewRoot);
   gDoc.defaultView.location.reload();
   let hasThrown = false;
   try {
@@ -237,7 +223,7 @@ addAsyncTest(function() {
   } catch (e) {
     hasThrown = true;
   }
-  yield newRoot;
+  yield waitForMutation(gWalker, isNewRoot);
 
   ok(hasThrown, "The call to walker.removeNode() threw");
   runNextTest();
@@ -250,7 +236,6 @@ addAsyncTest(function() {
   let nodeFront1 = yield gWalker.querySelector(gWalker.rootNode, "h1");
   let nodeFront2 = yield gWalker.querySelector(gWalker.rootNode, "#longstring");
   let nodeFront3 = yield gWalker.querySelector(gWalker.rootNode, "#shortstring");
-  let newRoot = waitForMutation(gWalker, isNewRoot);
   gDoc.defaultView.location.reload();
   let hasThrown = false;
   try {
@@ -258,7 +243,7 @@ addAsyncTest(function() {
   } catch (e) {
     hasThrown = true;
   }
-  yield newRoot;
+  yield waitForMutation(gWalker, isNewRoot);
 
   ok(hasThrown, "The call to walker.removeNodes() threw");
   runNextTest();
@@ -271,10 +256,9 @@ addAsyncTest(function() {
 
   let nodeFront = yield gWalker.querySelector(gWalker.rootNode, "h1");
   let newParentFront = yield gWalker.querySelector(gWalker.rootNode, "#longlist");
-  let newRoot = waitForMutation(gWalker, isNewRoot);
   gDoc.defaultView.location.reload();
   yield gWalker.insertBefore(nodeFront, newParentFront);
-  yield newRoot;
+  yield waitForMutation(gWalker, isNewRoot);
 
   ok(true, "The call to walker.insertBefore() didn't fail");
   runNextTest();
@@ -288,10 +272,9 @@ addAsyncTest(function() {
   let nodeFront = yield gWalker.querySelector(gWalker.rootNode, "h1");
   let newParentFront = yield gWalker.querySelector(gWalker.rootNode, "#longlist");
   let siblingFront = yield gWalker.querySelector(gWalker.rootNode, "#b");
-  let newRoot = waitForMutation(gWalker, isNewRoot);
   gDoc.defaultView.location.reload();
   yield gWalker.insertBefore(nodeFront, newParentFront, siblingFront);
-  yield newRoot;
+  yield waitForMutation(gWalker, isNewRoot);
 
   ok(true, "The call to walker.insertBefore() didn't fail");
   runNextTest();
@@ -302,10 +285,9 @@ addAsyncTest(function() {
     "walker.editTagName(nodeFront) before the load completes shouldn't fail");
 
   let nodeFront = yield gWalker.querySelector(gWalker.rootNode, "h1");
-  let newRoot = waitForMutation(gWalker, isNewRoot);
   gDoc.defaultView.location.reload();
   yield gWalker.editTagName(nodeFront, "h2");
-  yield newRoot;
+  yield waitForMutation(gWalker, isNewRoot);
 
   ok(true, "The call to walker.editTagName() didn't fail");
   runNextTest();
@@ -316,10 +298,9 @@ addAsyncTest(function() {
     "walker.hideNode(nodeFront) before the load completes shouldn't fail");
 
   let nodeFront = yield gWalker.querySelector(gWalker.rootNode, "h1");
-  let newRoot = waitForMutation(gWalker, isNewRoot);
   gDoc.defaultView.location.reload();
   yield gWalker.hideNode(nodeFront);
-  yield newRoot;
+  yield waitForMutation(gWalker, isNewRoot);
 
   ok(true, "The call to walker.hideNode() didn't fail");
   runNextTest();
@@ -330,10 +311,9 @@ addAsyncTest(function() {
     "walker.unhideNode(nodeFront) before the load completes shouldn't fail");
 
   let nodeFront = yield gWalker.querySelector(gWalker.rootNode, "h1");
-  let newRoot = waitForMutation(gWalker, isNewRoot);
   gDoc.defaultView.location.reload();
   yield gWalker.unhideNode(nodeFront);
-  yield newRoot;
+  yield waitForMutation(gWalker, isNewRoot);
 
   ok(true, "The call to walker.unhideNode() didn't fail");
   runNextTest();
@@ -344,10 +324,9 @@ addAsyncTest(function() {
     "walker.releaseNode(nodeFront) before the load completes shouldn't fail");
 
   let nodeFront = yield gWalker.querySelector(gWalker.rootNode, "h1");
-  let newRoot = waitForMutation(gWalker, isNewRoot);
   gDoc.defaultView.location.reload();
   yield gWalker.releaseNode(nodeFront);
-  yield newRoot;
+  yield waitForMutation(gWalker, isNewRoot);
 
   ok(true, "The call to walker.releaseNode() didn't fail");
   runNextTest();
@@ -358,10 +337,9 @@ addAsyncTest(function() {
     "walker.querySelector(nodeFront) before the load completes shouldn't fail");
 
   let nodeFront = yield gWalker.querySelector(gWalker.rootNode, "body");
-  let newRoot = waitForMutation(gWalker, isNewRoot);
   gDoc.defaultView.location.reload();
   yield gWalker.querySelector(nodeFront, "h1");
-  yield newRoot;
+  yield waitForMutation(gWalker, isNewRoot);
 
   ok(true, "The call to walker.querySelector() didn't fail");
   runNextTest();

@@ -46,6 +46,7 @@ static constexpr Register HeapReg = { Registers::invalid_reg };
 static constexpr Register AsmJSIonExitRegCallee = { Registers::invalid_reg };
 static constexpr Register AsmJSIonExitRegE0 = { Registers::invalid_reg };
 static constexpr Register AsmJSIonExitRegE1 = { Registers::invalid_reg };
+static constexpr Register AsmJSIonExitRegE2 = { Registers::invalid_reg };
 
 static constexpr Register AsmJSIonExitRegReturnData = { Registers::invalid_reg };
 static constexpr Register AsmJSIonExitRegReturnType = { Registers::invalid_reg };
@@ -82,10 +83,8 @@ static constexpr Register ABINonArgReg1 = { Registers::invalid_reg };
 static constexpr Register ABINonArgReturnReg0 = { Registers::invalid_reg };
 static constexpr Register ABINonArgReturnReg1 = { Registers::invalid_reg };
 
-static constexpr Register WasmTableCallScratchReg = { Registers::invalid_reg };
+static constexpr Register WasmTableCallPtrReg = { Registers::invalid_reg };
 static constexpr Register WasmTableCallSigReg = { Registers::invalid_reg };
-static constexpr Register WasmTableCallIndexReg = { Register::invalid_reg };
-static constexpr Register WasmTlsReg = { Registers::invalid_reg };
 
 static constexpr uint32_t ABIStackAlignment = 4;
 static constexpr uint32_t CodeAlignment = 4;
@@ -406,10 +405,8 @@ class MacroAssemblerNone : public Assembler
 
     void buildFakeExitFrame(Register, uint32_t*) { MOZ_CRASH(); }
     bool buildOOLFakeExitFrame(void*) { MOZ_CRASH(); }
-    void loadWasmGlobalPtr(uint32_t, Register) { MOZ_CRASH(); }
-    void loadWasmActivationFromTls(Register) { MOZ_CRASH(); }
-    void loadWasmActivationFromSymbolicAddress(Register) { MOZ_CRASH(); }
-    void loadWasmPinnedRegsFromTls() { MOZ_CRASH(); }
+    void loadWasmActivation(Register) { MOZ_CRASH(); }
+    void loadAsmJSHeapRegisterFromGlobalData() { MOZ_CRASH(); }
 
     void setPrinter(Sprinter*) { MOZ_CRASH(); }
     Operand ToPayload(Operand base) { MOZ_CRASH(); }

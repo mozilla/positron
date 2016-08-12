@@ -237,8 +237,8 @@ OnSourceGrabEventAfter(GtkWidget *widget, GdkEvent *event, gpointer user_data)
         // the eDragEnd event.
         nsDragService *dragService = static_cast<nsDragService*>(user_data);
         gint scale = nsScreenGtk::GetGtkMonitorScaleFactor();
-        auto p = LayoutDeviceIntPoint::Round(event->motion.x_root * scale,
-                                             event->motion.y_root * scale);
+        LayoutDeviceIntPoint p(floor(event->motion.x_root * scale + 0.5),
+                               floor(event->motion.y_root * scale + 0.5));
         dragService->SetDragEndPoint(p);
     } else if (sMotionEvent && (event->type == GDK_KEY_PRESS ||
                                 event->type == GDK_KEY_RELEASE)) {

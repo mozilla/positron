@@ -27,5 +27,4 @@ interface DOMTokenList {
   [SetterThrows]
   attribute DOMString value;
   stringifier DOMString ();
-  iterable<DOMString?>;
 };

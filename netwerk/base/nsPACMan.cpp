@@ -17,6 +17,9 @@
 #include "nsIAsyncVerifyRedirectCallback.h"
 #include "nsISystemProxySettings.h"
 #include "nsContentUtils.h"
+#ifdef MOZ_NUWA_PROCESS
+#include "ipc/Nuwa.h"
+#endif
 
 //-----------------------------------------------------------------------------
 
@@ -761,6 +764,11 @@ nsPACMan::NamePACThread()
 {
   MOZ_ASSERT(!NS_IsMainThread(), "wrong thread");
   PR_SetCurrentThreadName("Proxy Resolution");
+#ifdef MOZ_NUWA_PROCESS
+  if (IsNuwaProcess()) {
+    NuwaMarkCurrentThread(nullptr, nullptr);
+  }
+#endif
 }
 
 nsresult

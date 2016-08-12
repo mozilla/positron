@@ -46,8 +46,6 @@ public:
 
   void NotifyOffloadPlayerPositionChanged() { UpdateLogicalPosition(); }
 
-  void Shutdown() override;
-
 protected:
   virtual ~MediaOmxCommonDecoder();
   void PauseStateMachine();

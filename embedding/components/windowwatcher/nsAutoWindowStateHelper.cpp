@@ -59,7 +59,6 @@ nsAutoWindowStateHelper::DispatchEventToChrome(const char* aEventName)
   ErrorResult rv;
   RefPtr<Event> event = doc->CreateEvent(NS_LITERAL_STRING("Events"), rv);
   if (rv.Failed()) {
-    rv.SuppressException();
     return false;
   }
   event->InitEvent(NS_ConvertASCIItoUTF16(aEventName), true, true);

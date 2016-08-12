@@ -426,7 +426,7 @@ nsFrameLoader::ReallyStartLoadingInternal()
   // We'll use our principal, not that of the document loaded inside us.  This
   // is very important; needed to prevent XSS attacks on documents loaded in
   // subframes!
-  loadInfo->SetTriggeringPrincipal(mOwnerContent->NodePrincipal());
+  loadInfo->SetOwner(mOwnerContent->NodePrincipal());
 
   nsCOMPtr<nsIURI> referrer;
 
@@ -481,7 +481,7 @@ nsFrameLoader::ReallyStartLoadingInternal()
   // Flags for browser frame:
   if (OwnerIsMozBrowserFrame()) {
     flags = nsIWebNavigation::LOAD_FLAGS_ALLOW_THIRD_PARTY_FIXUP |
-            nsIWebNavigation::LOAD_FLAGS_DISALLOW_INHERIT_PRINCIPAL;
+            nsIWebNavigation::LOAD_FLAGS_DISALLOW_INHERIT_OWNER;
   }
 
   // Kick off the load...

@@ -5,7 +5,9 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 "use strict";
 
-const { Ci } = require("chrome");
+const DevToolsUtils = require("devtools/shared/DevToolsUtils");
+const { Cu, Ci } = require("chrome");
+let { XPCOMUtils } = Cu.import("resource://gre/modules/XPCOMUtils.jsm", {});
 
 const PANE_APPEARANCE_DELAY = 50;
 const PAGE_SIZE_ITEM_COUNT_RATIO = 5;
@@ -340,7 +342,6 @@ function Item(ownerView, element, value, attachment) {
   this.attachment = attachment;
   this._value = value + "";
   this._prebuiltNode = element;
-  this._itemsByElement = new Map();
 }
 
 Item.prototype = {
@@ -463,6 +464,11 @@ Item.prototype = {
   attachment: null
 };
 
+// Creating maps thousands of times for widgets with a large number of children
+// fills up a lot of memory. Make sure these are instantiated only if needed.
+DevToolsUtils.defineLazyPrototypeGetter(Item.prototype, "_itemsByElement",
+                                        () => new Map());
+
 /**
  * Some generic Widget methods handling Item instances.
  * Iterable via "for (let childItem of wrappedView) { }".
@@ -525,9 +531,9 @@ const WidgetMethods = exports.WidgetMethods = {
 
     // Can't use a WeakMap for _itemsByValue because keys are strings, and
     // can't use one for _itemsByElement either, since it needs to be iterable.
-    this._itemsByValue = new Map();
-    this._itemsByElement = new Map();
-    this._stagedItems = [];
+    XPCOMUtils.defineLazyGetter(this, "_itemsByValue", () => new Map());
+    XPCOMUtils.defineLazyGetter(this, "_itemsByElement", () => new Map());
+    XPCOMUtils.defineLazyGetter(this, "_stagedItems", () => []);
 
     // Handle internal events emitted by the widget if necessary.
     if (ViewHelpers.isEventEmitter(widget)) {

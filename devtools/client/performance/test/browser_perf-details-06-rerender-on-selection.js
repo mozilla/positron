@@ -19,14 +19,7 @@ add_task(function* () {
     win: window
   });
 
-  let {
-    EVENTS,
-    OverviewView,
-    DetailsView,
-    WaterfallView,
-    JsCallTreeView,
-    JsFlameGraphView
-  } = panel.panelWin;
+  let { EVENTS, OverviewView, DetailsView, WaterfallView, JsCallTreeView, JsFlameGraphView } = panel.panelWin;
 
   yield startRecording(panel);
   yield stopRecording(panel);

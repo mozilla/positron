@@ -14,7 +14,7 @@
 #include "mozilla/Variant.h"
 #include "mozilla/XorShift128PlusRNG.h"
 
-#include "asmjs/WasmCompartment.h"
+#include "asmjs/WasmJS.h"
 #include "builtin/RegExp.h"
 #include "gc/Barrier.h"
 #include "gc/Zone.h"
@@ -516,8 +516,11 @@ struct JSCompartment
     // All unboxed layouts in the compartment.
     mozilla::LinkedList<js::UnboxedLayout> unboxedLayouts;
 
-    // WebAssembly state for the compartment.
-    js::wasm::Compartment wasm;
+    // All wasm live instances in the compartment.
+    using WasmInstanceObjectSet = js::GCHashSet<js::HeapPtr<js::WasmInstanceObject*>,
+                                                js::MovableCellHasher<js::HeapPtr<js::WasmInstanceObject*>>,
+                                                js::SystemAllocPolicy>;
+    JS::WeakCache<WasmInstanceObjectSet> wasmInstances;
 
   private:
     // All non-syntactic lexical scopes in the compartment. These are kept in
@@ -563,11 +566,12 @@ struct JSCompartment
 
     MOZ_MUST_USE bool init(JSContext* maybecx);
 
-    MOZ_MUST_USE inline bool wrap(JSContext* cx, JS::MutableHandleValue vp);
+    MOZ_MUST_USE inline bool wrap(JSContext* cx, JS::MutableHandleValue vp,
+                                            JS::HandleObject existing = nullptr);
 
     MOZ_MUST_USE bool wrap(JSContext* cx, js::MutableHandleString strp);
     MOZ_MUST_USE bool wrap(JSContext* cx, JS::MutableHandleObject obj,
-                           JS::HandleObject existingArg = nullptr);
+                                     JS::HandleObject existingArg = nullptr);
     MOZ_MUST_USE bool wrap(JSContext* cx, JS::MutableHandle<js::PropertyDescriptor> desc);
     MOZ_MUST_USE bool wrap(JSContext* cx, JS::MutableHandle<JS::GCVector<JS::Value>> vec);
 

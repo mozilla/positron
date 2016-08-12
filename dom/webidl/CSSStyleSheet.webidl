@@ -20,7 +20,7 @@ interface CSSStyleSheet : StyleSheet {
   readonly attribute CSSRule? ownerRule;
   [Throws]
   readonly attribute CSSRuleList cssRules;
-  [ChromeOnly, BinaryName="parsingModeDOM"]
+  [ChromeOnly]
   readonly attribute CSSStyleSheetParsingMode parsingMode;
   [Throws]
   unsigned long insertRule(DOMString rule, unsigned long index);

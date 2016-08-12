@@ -131,7 +131,6 @@ enum {
     JS_TELEMETRY_GC_MINOR_REASON,
     JS_TELEMETRY_GC_MINOR_REASON_LONG,
     JS_TELEMETRY_GC_MINOR_US,
-    JS_TELEMETRY_GC_NURSERY_BYTES,
     JS_TELEMETRY_DEPRECATED_LANGUAGE_EXTENSIONS_IN_CONTENT,
     JS_TELEMETRY_DEPRECATED_LANGUAGE_EXTENSIONS_IN_ADDONS,
     JS_TELEMETRY_ADDON_EXCEPTIONS,
@@ -509,7 +508,7 @@ extern JS_FRIEND_API(void)
 TraceWeakMaps(WeakMapTracer* trc);
 
 extern JS_FRIEND_API(bool)
-AreGCGrayBitsValid(JSContext* cx);
+AreGCGrayBitsValid(JSRuntime* rt);
 
 extern JS_FRIEND_API(bool)
 ZoneGlobalsAreAllGray(JS::Zone* zone);
@@ -1244,9 +1243,10 @@ struct ExpandoAndGeneration {
       generation(0)
   {}
 
-  void OwnerUnlinked()
+  void Unlink()
   {
       ++generation;
+      expando.setUndefined();
   }
 
   static size_t offsetOfExpando()

@@ -125,5 +125,5 @@ var waitForResolvedPromise = Task.async(function* (promiseFn, timeoutMsg, tryCou
     } catch (ex) {}
     yield new Promise(resolve => do_timeout(SINGLE_TRY_TIMEOUT, resolve));
   } while (++tries <= tryCount);
-  throw new Error(timeoutMsg);
+  throw(timeoutMsg);
 });

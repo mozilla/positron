@@ -5,26 +5,24 @@
 const {classes: Cc, interfaces: Ci, utils: Cu} = Components;
 
 Cu.import("resource://gre/modules/ExtensionUtils.jsm");
-
+Cu.import("resource://gre/modules/PlacesUtils.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "EventEmitter",
                                   "resource://devtools/shared/event-emitter.js");
 XPCOMUtils.defineLazyModuleGetter(this, "NetUtil",
                                   "resource://gre/modules/NetUtil.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "PlacesUtils",
-                                  "resource://gre/modules/PlacesUtils.jsm");
 
 const {
   normalizeTime,
   SingletonEventManager,
 } = ExtensionUtils;
 
-let nsINavHistoryService = Ci.nsINavHistoryService;
+const History = PlacesUtils.history;
 const TRANSITION_TO_TRANSITION_TYPES_MAP = new Map([
-  ["link", nsINavHistoryService.TRANSITION_LINK],
-  ["typed", nsINavHistoryService.TRANSITION_TYPED],
-  ["auto_bookmark", nsINavHistoryService.TRANSITION_BOOKMARK],
-  ["auto_subframe", nsINavHistoryService.TRANSITION_EMBED],
-  ["manual_subframe", nsINavHistoryService.TRANSITION_FRAMED_LINK],
+  ["link", History.TRANSITION_LINK],
+  ["typed", History.TRANSITION_TYPED],
+  ["auto_bookmark", History.TRANSITION_BOOKMARK],
+  ["auto_subframe", History.TRANSITION_EMBED],
+  ["manual_subframe", History.TRANSITION_FRAMED_LINK],
 ]);
 
 let TRANSITION_TYPE_TO_TRANSITIONS_MAP = new Map();
@@ -101,15 +99,17 @@ function getObserver() {
         this.emit("visitRemoved", {allHistory: false, urls: [uri.spec]});
       },
       onVisit: function(uri, visitId, time, sessionId, referringId, transitionType, guid, hidden, visitCount, typed) {
-        let data = {
-          id: guid,
-          url: uri.spec,
-          title: "",
-          lastVisitTime: time / 1000,  // time from Places is microseconds,
-          visitCount,
-          typedCount: typed,
-        };
-        this.emit("visited", data);
+        PlacesUtils.promisePlaceInfo(guid).then(placeInfo => {
+          let data = {
+            id: guid,
+            url: uri.spec,
+            title: placeInfo.title,
+            lastVisitTime: time / 1000,  // time from Places is microseconds,
+            visitCount,
+            typedCount: typed,
+          };
+          this.emit("visited", data);
+        });
       },
       onBeginUpdateBatch: function() {},
       onEndUpdateBatch: function() {},
@@ -154,14 +154,14 @@ extensions.registerSchemaAPI("history", (extension, context) => {
           ],
         };
         try {
-          return PlacesUtils.history.insert(pageInfo).then(() => undefined);
+          return History.insert(pageInfo).then(() => undefined);
         } catch (error) {
           return Promise.reject({message: error.message});
         }
       },
 
       deleteAll: function() {
-        return PlacesUtils.history.clear();
+        return History.clear();
       },
 
       deleteRange: function(filter) {
@@ -170,13 +170,13 @@ extensions.registerSchemaAPI("history", (extension, context) => {
           endDate: normalizeTime(filter.endTime),
         };
         // History.removeVisitsByFilter returns a boolean, but our API should return nothing
-        return PlacesUtils.history.removeVisitsByFilter(newFilter).then(() => undefined);
+        return History.removeVisitsByFilter(newFilter).then(() => undefined);
       },
 
       deleteUrl: function(details) {
         let url = details.url;
         // History.remove returns a boolean, but our API should return nothing
-        return PlacesUtils.history.remove(url).then(() => undefined);
+        return History.remove(url).then(() => undefined);
       },
 
       search: function(query) {
@@ -190,15 +190,15 @@ extensions.registerSchemaAPI("history", (extension, context) => {
           return Promise.reject({message: "The startTime cannot be after the endTime"});
         }
 
-        let options = PlacesUtils.history.getNewQueryOptions();
+        let options = History.getNewQueryOptions();
         options.sortingMode = options.SORT_BY_DATE_DESCENDING;
         options.maxResults = query.maxResults || 100;
 
-        let historyQuery = PlacesUtils.history.getNewQuery();
+        let historyQuery = History.getNewQuery();
         historyQuery.searchTerms = query.text;
         historyQuery.beginTime = beginTime;
         historyQuery.endTime = endTime;
-        let queryResult = PlacesUtils.history.executeQuery(historyQuery, options).root;
+        let queryResult = History.executeQuery(historyQuery, options).root;
         let results = convertNavHistoryContainerResultNode(queryResult, convertNodeToHistoryItem);
         return Promise.resolve(results);
       },
@@ -209,13 +209,13 @@ extensions.registerSchemaAPI("history", (extension, context) => {
           return Promise.reject({message: "A URL must be provided for getVisits"});
         }
 
-        let options = PlacesUtils.history.getNewQueryOptions();
+        let options = History.getNewQueryOptions();
         options.sortingMode = options.SORT_BY_DATE_DESCENDING;
         options.resultType = options.RESULTS_AS_VISIT;
 
-        let historyQuery = PlacesUtils.history.getNewQuery();
+        let historyQuery = History.getNewQuery();
         historyQuery.uri = NetUtil.newURI(url);
-        let queryResult = PlacesUtils.history.executeQuery(historyQuery, options).root;
+        let queryResult = History.executeQuery(historyQuery, options).root;
         let results = convertNavHistoryContainerResultNode(queryResult, convertNodeToVisitItem);
         return Promise.resolve(results);
       },

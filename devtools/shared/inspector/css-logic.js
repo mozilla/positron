@@ -42,6 +42,10 @@
 
 const Services = require("Services");
 
+// This should be ok because none of the functions that use this should be used
+// on the worker thread, where Cu is not available.
+loader.lazyRequireGetter(this, "CSS", "CSS");
+
 loader.lazyRequireGetter(this, "CSSLexer", "devtools/shared/css-lexer");
 
 /**

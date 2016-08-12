@@ -60,18 +60,15 @@ function openSelectPopup(selectPopup, withMouse, selector = "select")
   return popupShownPromise;
 }
 
-function hideSelectPopup(selectPopup, mode = "enter")
+function hideSelectPopup(selectPopup, withEscape)
 {
   let popupHiddenPromise = BrowserTestUtils.waitForEvent(selectPopup, "popuphidden");
 
-  if (mode == "escape") {
+  if (withEscape) {
     EventUtils.synthesizeKey("KEY_Escape", { code: "Escape" });
   }
-  else if (mode == "enter") {
+  else {
     EventUtils.synthesizeKey("KEY_Enter", { code: "Enter" });
-  }
-  else if (mode == "click") {
-    EventUtils.synthesizeMouseAtCenter(selectPopup.lastChild, { });
   }
 
   return popupHiddenPromise;
@@ -151,7 +148,7 @@ function doSelectTests(contentType, dtd)
 
   // Opening and closing the popup without changing the value should not fire a change event.
   yield openSelectPopup(selectPopup, true);
-  yield hideSelectPopup(selectPopup, "escape");
+  yield hideSelectPopup(selectPopup, true);
   is((yield getInputEvents()), 1, "Open and close with no change - number of input events");
   is((yield getChangeEvents()), 1, "Open and close with no change - number of change events");
   EventUtils.synthesizeKey("VK_TAB", { });
@@ -161,7 +158,7 @@ function doSelectTests(contentType, dtd)
 
   yield openSelectPopup(selectPopup, true);
   EventUtils.synthesizeKey("KEY_ArrowDown", { code: "ArrowDown" });
-  yield hideSelectPopup(selectPopup, "escape");
+  yield hideSelectPopup(selectPopup, true);
   is((yield getInputEvents()), isWindows ? 2 : 1, "Open and close with change - number of input events");
   is((yield getChangeEvents()), isWindows ? 2 : 1, "Open and close with change - number of change events");
   EventUtils.synthesizeKey("VK_TAB", { });
@@ -302,86 +299,59 @@ add_task(function* test_event_order() {
     let menulist = document.getElementById("ContentSelectDropdown");
     let selectPopup = menulist.menupopup;
 
-    // According to https://html.spec.whatwg.org/#the-select-element,
-    // we want to fire input, change, and then click events on the
-    // <select> (in that order) when it has changed.
-    let expectedEnter = [
-      {
-        type: "input",
-        cancelable: false,
-        targetIsOption: false,
-      },
-      {
-        type: "change",
-        cancelable: false,
-        targetIsOption: false,
-      },
-    ];
+    yield openSelectPopup(selectPopup, true, "#one");
 
-    let expectedClick = [
-      {
-        type: "mousedown",
-        cancelable: true,
-        targetIsOption: true,
-      },
-      {
-        type: "mouseup",
-        cancelable: true,
-        targetIsOption: true,
-      },
-      {
-        type: "input",
-        cancelable: false,
-        targetIsOption: false,
-      },
-      {
-        type: "change",
-        cancelable: false,
-        targetIsOption: false,
-      },
-      {
-        type: "click",
-        cancelable: true,
-        targetIsOption: true,
-      },
-    ];
+    let eventsPromise = ContentTask.spawn(browser, null, function*() {
+      // According to https://html.spec.whatwg.org/#the-select-element,
+      // we want to fire input, change, and then click events on the
+      // <select> (in that order) when it has changed.
+      let expected = [
+        {
+          type: "input",
+          cancelable: false,
+        },
+        {
+          type: "change",
+          cancelable: false,
+        },
+        {
+          type: "mousedown",
+          cancelable: true,
+        },
+        {
+          type: "mouseup",
+          cancelable: true,
+        },
+        {
+          type: "click",
+          cancelable: true,
+        },
+      ];
 
-    for (let mode of ["enter", "click"]) {
-      let expected = mode == "enter" ? expectedEnter : expectedClick;
-      yield openSelectPopup(selectPopup, true, mode == "enter" ? "#one" : "#two");
-
-      let eventsPromise = ContentTask.spawn(browser, { mode, expected }, function*(args) {
-        let expected = args.expected;
-
-        return new Promise((resolve) => {
-          function onEvent(event) {
-            select.removeEventListener(event.type, onEvent);
-            Assert.ok(expected.length, "Unexpected event " + event.type);
-            let expectation = expected.shift();
-            Assert.equal(event.type, expectation.type,
-                         "Expected the right event order");
-            Assert.ok(event.bubbles, "All of these events should bubble");
-            Assert.equal(event.cancelable, expectation.cancelable,
-                         "Cancellation property should match");
-            Assert.equal(event.target.localName,
-                         expectation.targetIsOption ? "option" : "select",
-                         "Target matches");
-            if (!expected.length) {
-              resolve();
-            }
+      return new Promise((resolve) => {
+        function onEvent(event) {
+          select.removeEventListener(event.type, onEvent);
+          let expectation = expected.shift();
+          Assert.equal(event.type, expectation.type,
+                       "Expected the right event order");
+          Assert.ok(event.bubbles, "All of these events should bubble");
+          Assert.equal(event.cancelable, expectation.cancelable,
+                       "Cancellation property should match");
+          if (!expected.length) {
+            resolve();
           }
+        }
 
-          let select = content.document.getElementById(args.mode == "enter" ? "one" : "two");
-          for (let event of ["input", "change", "mousedown", "mouseup", "click"]) {
-            select.addEventListener(event, onEvent);
-          }
-        });
+        let select = content.document.getElementById("one");
+        for (let expectation of expected) {
+          select.addEventListener(expectation.type, onEvent);
+        }
       });
+    });
 
-      EventUtils.synthesizeKey("KEY_ArrowDown", { code: "ArrowDown" });
-      yield hideSelectPopup(selectPopup, mode);
-      yield eventsPromise;
-    }
+    EventUtils.synthesizeKey("KEY_ArrowDown", { code: "ArrowDown" });
+    yield hideSelectPopup(selectPopup, false);
+    yield eventsPromise;
   });
 });
 
@@ -398,7 +368,6 @@ add_task(function* test_large_popup() {
       select.add(new content.Option("Test" + i));
     }
 
-    select.options[60].selected = true;
     select.focus();
   });
 
@@ -419,17 +388,7 @@ add_task(function* test_large_popup() {
     ok(rect.top >= browserRect.top, "Popup top position in within browser area");
     ok(rect.bottom <= browserRect.bottom, "Popup bottom position in within browser area");
 
-    // Don't check the scroll position for the last step as the popup will be cut off.
-    if (positions.length == 1) {
-      let cs = window.getComputedStyle(selectPopup);
-      let bpBottom = parseFloat(cs.paddingBottom) + parseFloat(cs.borderBottomWidth);
-
-      is(selectPopup.childNodes[60].getBoundingClientRect().bottom,
-         selectPopup.getBoundingClientRect().bottom - bpBottom,
-         "Popup scroll at correct position " + bpBottom);
-    }
-
-    yield hideSelectPopup(selectPopup);
+    yield hideSelectPopup(selectPopup, false);
 
     position = positions.shift();
     if (!position) {
@@ -443,35 +402,6 @@ add_task(function* test_large_popup() {
     });
     yield contentPainted;
   }
-
-  yield BrowserTestUtils.removeTab(tab);
-});
-
-// This test checks that a mousemove event is fired correctly at the menu and
-// not at the browser, ensuring that any mouse capture has been cleared.
-add_task(function* test_mousemove_correcttarget() {
-  const pageUrl = "data:text/html," + escape(PAGECONTENT_SMALL);
-  let tab = yield BrowserTestUtils.openNewForegroundTab(gBrowser, pageUrl);
-
-  let selectPopup = document.getElementById("ContentSelectDropdown").menupopup;
-
-  let popupShownPromise = BrowserTestUtils.waitForEvent(selectPopup, "popupshown");
-  yield BrowserTestUtils.synthesizeMouseAtCenter("#one", { type: "mousedown" }, gBrowser.selectedBrowser);
-  yield popupShownPromise;
-
-  yield new Promise(resolve => {
-    window.addEventListener("mousemove", function checkForMouseMove(event) {
-      window.removeEventListener("mousemove", checkForMouseMove, true);
-      is(event.target.localName.indexOf("menu"), 0, "mouse over menu");
-      resolve();
-    }, true);
-
-    EventUtils.synthesizeMouseAtCenter(selectPopup.firstChild, { type: "mousemove" });
-  });
-
-  yield BrowserTestUtils.synthesizeMouseAtCenter("#one", { type: "mouseup" }, gBrowser.selectedBrowser);
-
-  yield hideSelectPopup(selectPopup);
 
   yield BrowserTestUtils.removeTab(tab);
 });

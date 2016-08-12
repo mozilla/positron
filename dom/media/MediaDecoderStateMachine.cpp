@@ -63,19 +63,28 @@ using namespace mozilla::media;
 #define NS_DispatchToMainThread(...) CompileError_UseAbstractThreadDispatchInstead
 
 // avoid redefined macro in unified build
-#undef FMT
+#undef LOG
 #undef DECODER_LOG
 #undef VERBOSE_LOG
-#undef SAMPLE_LOG
-#undef DECODER_WARN
 #undef DUMP_LOG
 
-#define FMT(x, ...) "Decoder=%p " x, mDecoderID, ##__VA_ARGS__
-#define DECODER_LOG(...) MOZ_LOG(gMediaDecoderLog, LogLevel::Debug,   (FMT(__VA_ARGS__)))
-#define VERBOSE_LOG(...) MOZ_LOG(gMediaDecoderLog, LogLevel::Verbose, (FMT(__VA_ARGS__)))
-#define SAMPLE_LOG(...)  MOZ_LOG(gMediaSampleLog,  LogLevel::Debug,   (FMT(__VA_ARGS__)))
-#define DECODER_WARN(...) NS_WARNING(nsPrintfCString(FMT(__VA_ARGS__)).get())
-#define DUMP_LOG(...) NS_DebugBreak(NS_DEBUG_WARNING, nsPrintfCString(FMT(__VA_ARGS__)).get(), nullptr, nullptr, -1)
+#define LOG(m, l, x, ...) \
+  MOZ_LOG(m, l, ("Decoder=%p " x, mDecoderID, ##__VA_ARGS__))
+#define DECODER_LOG(x, ...) \
+  LOG(gMediaDecoderLog, LogLevel::Debug, x, ##__VA_ARGS__)
+#define VERBOSE_LOG(x, ...) \
+  LOG(gMediaDecoderLog, LogLevel::Verbose, x, ##__VA_ARGS__)
+#define SAMPLE_LOG(x, ...) \
+  LOG(gMediaSampleLog, LogLevel::Debug, x, ##__VA_ARGS__)
+
+// Somehow MSVC doesn't correctly delete the comma before ##__VA_ARGS__
+// when __VA_ARGS__ expands to nothing. This is a workaround for it.
+#define DECODER_WARN_HELPER(a, b) NS_WARNING b
+#define DECODER_WARN(x, ...) \
+  DECODER_WARN_HELPER(0, (nsPrintfCString("Decoder=%p " x, mDecoderID, ##__VA_ARGS__).get()))
+
+#define DUMP_LOG(x, ...) \
+  NS_DebugBreak(NS_DEBUG_WARNING, nsPrintfCString("Decoder=%p " x, mDecoderID, ##__VA_ARGS__).get(), nullptr, nullptr, -1)
 
 // Certain constants get stored as member variables and then adjusted by various
 // scale factors on a per-decoder basis. We want to make sure to avoid using these
@@ -197,11 +206,15 @@ static void InitVideoQueuePrefs() {
 
 // Delay, in milliseconds, that tabs needs to be in background before video
 // decoding is suspended.
-static TimeDuration
-SuspendBackgroundVideoDelay()
+static TimeDuration sSuspendBackgroundVideoDelay;
+
+static void
+InitSuspendBackgroundPref()
 {
-  return TimeDuration::FromMilliseconds(
-    MediaPrefs::MDSMSuspendBackgroundVideoDelay());
+  MOZ_ASSERT(NS_IsMainThread(), "Must be on main thread.");
+
+  sSuspendBackgroundVideoDelay = TimeDuration::FromMilliseconds(
+      MediaPrefs::MDSMSuspendBackgroundVideoDelay());
 }
 
 #define INIT_WATCHABLE(name, val) \
@@ -281,6 +294,7 @@ MediaDecoderStateMachine::MediaDecoderStateMachine(MediaDecoder* aDecoder,
   NS_ASSERTION(NS_IsMainThread(), "Should be on main thread.");
 
   InitVideoQueuePrefs();
+  InitSuspendBackgroundPref();
 
   mBufferingWait = IsRealTime() ? 0 : 15;
   mLowDataThresholdUsecs = IsRealTime() ? 0 : detail::LOW_DATA_THRESHOLD_USECS;
@@ -749,6 +763,7 @@ MediaDecoderStateMachine::MaybeFinishDecodeFirstFrame()
   }
 
   // We can now complete the pending seek.
+  SetState(DECODER_STATE_SEEKING);
   InitiateSeek(Move(mQueuedSeek));
   return true;
 }
@@ -1100,12 +1115,7 @@ void MediaDecoderStateMachine::RecomputeDuration()
     return;
   }
 
-  // Only adjust the duration when an explicit duration isn't set (MSE).
-  // The duration is always exactly known with MSE and there's no need to adjust
-  // it based on what may have been seen in the past; in particular as this data
-  // may no longer exist such as when the mediasource duration was reduced.
-  if (mExplicitDuration.Ref().isNothing() &&
-      duration < mObservedDuration.Ref()) {
+  if (duration < mObservedDuration.Ref()) {
     duration = mObservedDuration;
   }
 
@@ -1261,6 +1271,7 @@ void MediaDecoderStateMachine::StartDecoding()
                  "Return from dormant must have queued seek");
     }
     if (mQueuedSeek.Exists()) {
+      SetState(DECODER_STATE_SEEKING);
       InitiateSeek(Move(mQueuedSeek));
       return;
     }
@@ -1342,7 +1353,7 @@ void MediaDecoderStateMachine::VisibilityChanged()
 
   // Start timer to trigger suspended decoding state when going invisible.
   if (!mIsVisible) {
-    TimeStamp target = TimeStamp::Now() + SuspendBackgroundVideoDelay();
+    TimeStamp target = TimeStamp::Now() + sSuspendBackgroundVideoDelay;
 
     RefPtr<MediaDecoderStateMachine> self = this;
     mVideoDecodeSuspendTimer.Ensure(target,
@@ -1358,7 +1369,6 @@ void MediaDecoderStateMachine::VisibilityChanged()
 
   if (mVideoDecodeSuspended) {
     mVideoDecodeSuspended = false;
-    mReader->SetVideoBlankDecode(false);
 
     if (mIsReaderSuspended) {
       return;
@@ -1414,6 +1424,8 @@ void MediaDecoderStateMachine::InitiateDecodeRecoverySeek(TrackSet aTracks)
   mSeekTask = new AccurateSeekTask(mDecoderID, OwnerThread(),
                                    mReader.get(), mCurrentSeek.mTarget,
                                    mInfo, Duration(), GetMediaTime());
+
+  mOnSeekingStart.Notify(MediaDecoderEventVisibility::Suppressed);
 
   // Reset our state machine and decoding pipeline before seeking.
   if (mSeekTask->NeedToResetMDSM()) {
@@ -1512,10 +1524,12 @@ MediaDecoderStateMachine::Seek(SeekTarget aTarget)
   mQueuedSeek.RejectIfExists(__func__);
 
   DECODER_LOG("Changed state to SEEKING (to %lld)", aTarget.GetTime().ToMicroseconds());
+  SetState(DECODER_STATE_SEEKING);
 
   SeekJob seekJob;
   seekJob.mTarget = aTarget;
-  return InitiateSeek(Move(seekJob));
+  InitiateSeek(Move(seekJob));
+  return mCurrentSeek.mPromise.Ensure(__func__);
 }
 
 RefPtr<MediaDecoder::SeekPromise>
@@ -1595,12 +1609,10 @@ MediaDecoderStateMachine::DispatchDecodeTasksIfNeeded()
   }
 }
 
-RefPtr<MediaDecoder::SeekPromise>
+void
 MediaDecoderStateMachine::InitiateSeek(SeekJob aSeekJob)
 {
   MOZ_ASSERT(OnTaskQueue());
-
-  SetState(DECODER_STATE_SEEKING);
 
   // Discard the existing seek task.
   DiscardSeekTaskIfExist();
@@ -1611,13 +1623,15 @@ MediaDecoderStateMachine::InitiateSeek(SeekJob aSeekJob)
   CancelMediaDecoderReaderWrapperCallback();
 
   // Create a new SeekTask instance for the incoming seek task.
-  if (aSeekJob.mTarget.IsAccurate() || aSeekJob.mTarget.IsFast()) {
+  MOZ_ASSERT(!mCurrentSeek.Exists());
+  mCurrentSeek = Move(aSeekJob);
+  if (mCurrentSeek.mTarget.IsAccurate() || mCurrentSeek.mTarget.IsFast()) {
     mSeekTask = new AccurateSeekTask(mDecoderID, OwnerThread(),
-                                     mReader.get(), aSeekJob.mTarget,
+                                     mReader.get(), mCurrentSeek.mTarget,
                                      mInfo, Duration(), GetMediaTime());
-  } else if (aSeekJob.mTarget.IsNextFrame()) {
+  } else if (mCurrentSeek.mTarget.IsNextFrame()) {
     mSeekTask = new NextFrameSeekTask(mDecoderID, OwnerThread(), mReader.get(),
-                                      aSeekJob.mTarget, mInfo, Duration(),
+                                      mCurrentSeek.mTarget, mInfo, Duration(),
                                       GetMediaTime(), AudioQueue(), VideoQueue());
   } else {
     MOZ_DIAGNOSTIC_ASSERT(false, "Cannot handle this seek task.");
@@ -1628,15 +1642,13 @@ MediaDecoderStateMachine::InitiateSeek(SeekJob aSeekJob)
   // mCurrentPosition that we've setting to seekTime here.
   StopPlayback();
 
-  // aSeekJob.mTarget.mTime might be different from
+  // mCurrentSeek.mTarget.mTime might be different from
   // mSeekTask->GetSeekTarget().mTime because the seek task might clamp the seek
   // target to [0, duration]. We want to update the playback position to the
   // clamped value.
   UpdatePlaybackPositionInternal(mSeekTask->GetSeekTarget().GetTime().ToMicroseconds());
 
-  if (aSeekJob.mTarget.mEventVisibility == MediaDecoderEventVisibility::Observable) {
-    mOnPlaybackEvent.Notify(MediaEventType::SeekStarted);
-  }
+  mOnSeekingStart.Notify(mCurrentSeek.mTarget.mEventVisibility);
 
   // Reset our state machine and decoding pipeline before seeking.
   if (mSeekTask->NeedToResetMDSM()) { Reset(); }
@@ -1646,10 +1658,6 @@ MediaDecoderStateMachine::InitiateSeek(SeekJob aSeekJob)
     ->Then(OwnerThread(), __func__, this,
            &MediaDecoderStateMachine::OnSeekTaskResolved,
            &MediaDecoderStateMachine::OnSeekTaskRejected));
-
-  MOZ_ASSERT(!mCurrentSeek.Exists());
-  mCurrentSeek = Move(aSeekJob);
-  return mCurrentSeek.mPromise.Ensure(__func__);
 }
 
 void
@@ -2637,7 +2645,7 @@ bool MediaDecoderStateMachine::IsStateMachineScheduled() const
 bool MediaDecoderStateMachine::IsVideoDecodeSuspended() const
 {
   MOZ_ASSERT(OnTaskQueue());
-  return mIsReaderSuspended;
+  return mVideoDecodeSuspended || mIsReaderSuspended;
 }
 
 void
@@ -2929,7 +2937,6 @@ MediaDecoderStateMachine::OnSuspendTimerResolved()
   DECODER_LOG("OnSuspendTimerResolved");
   mVideoDecodeSuspendTimer.CompleteRequest();
   mVideoDecodeSuspended = true;
-  mReader->SetVideoBlankDecode(true);
 }
 
 void
@@ -2942,5 +2949,12 @@ MediaDecoderStateMachine::OnSuspendTimerRejected()
 }
 
 } // namespace mozilla
+
+// avoid redefined macro in unified build
+#undef LOG
+#undef DECODER_LOG
+#undef VERBOSE_LOG
+#undef DECODER_WARN
+#undef DECODER_WARN_HELPER
 
 #undef NS_DispatchToMainThread

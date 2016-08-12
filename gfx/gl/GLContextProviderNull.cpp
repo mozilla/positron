@@ -8,16 +8,8 @@
 namespace mozilla {
 namespace gl {
 
-using namespace mozilla::widget;
-
 already_AddRefed<GLContext>
-GLContextProviderNull::CreateForCompositorWidget(CompositorWidget* aCompositorWidget, bool aForceAccelerated)
-{
-    return nullptr;
-}
-
-already_AddRefed<GLContext>
-GLContextProviderNull::CreateForWindow(nsIWidget* aWidget, bool aForceAccelerated)
+GLContextProviderNull::CreateForWindow(nsIWidget*, bool aForceAccelerated)
 {
     return nullptr;
 }

@@ -101,8 +101,6 @@ public:
   // Used for debugging purposes.
   void GetMozDebugReaderData(nsAString& aString);
 
-  void SetVideoBlankDecode(bool aIsBlankDecode) override;
-
 private:
 
   bool HasVideo() { return mVideo.mTrackDemuxer; }
@@ -255,7 +253,6 @@ private:
       , mSizeOfQueue(0)
       , mIsHardwareAccelerated(false)
       , mLastStreamSourceID(UINT32_MAX)
-      , mIsBlankDecode(false)
     {}
 
     MediaFormatReader* mOwner;
@@ -430,9 +427,6 @@ private:
     Maybe<media::TimeUnit> mLastTimeRangesEnd;
     RefPtr<SharedTrackInfo> mInfo;
     Maybe<media::TimeUnit> mFirstDemuxedSampleTime;
-    // Use BlankDecoderModule or not.
-    bool mIsBlankDecode;
-
   };
 
   class DecoderDataWithPromise : public DecoderData {
@@ -521,11 +515,6 @@ private:
   // delta there.
   uint64_t mLastReportedNumDecodedFrames;
 
-  // Timestamp of the previous decoded keyframe, in microseconds.
-  int64_t mPreviousDecodedKeyframeTime_us;
-  // Default mLastDecodedKeyframeTime_us value, must be bigger than anything.
-  static const int64_t sNoPreviousDecodedKeyframe = INT64_MAX;
-
   layers::LayersBackend mLayersBackendType;
 
   // Metadata objects
@@ -557,12 +546,18 @@ private:
   void OnSeekFailed(TrackType aTrack, DemuxerFailureReason aFailure);
   void DoVideoSeek();
   void OnVideoSeekCompleted(media::TimeUnit aTime);
-  void OnVideoSeekFailed(DemuxerFailureReason aFailure);
+  void OnVideoSeekFailed(DemuxerFailureReason aFailure)
+  {
+    OnSeekFailed(TrackType::kVideoTrack, aFailure);
+  }
   bool mSeekScheduled;
 
   void DoAudioSeek();
   void OnAudioSeekCompleted(media::TimeUnit aTime);
-  void OnAudioSeekFailed(DemuxerFailureReason aFailure);
+  void OnAudioSeekFailed(DemuxerFailureReason aFailure)
+  {
+    OnSeekFailed(TrackType::kAudioTrack, aFailure);
+  }
   // The SeekTarget that was last given to Seek()
   SeekTarget mOriginalSeekTarget;
   // Temporary seek information while we wait for the data
@@ -577,8 +572,6 @@ private:
   RefPtr<CDMProxy> mCDMProxy;
 #endif
   RefPtr<GMPCrashHelper> mCrashHelper;
-
-  void SetBlankDecode(TrackType aTrack, bool aIsBlankDecode);
 };
 
 } // namespace mozilla

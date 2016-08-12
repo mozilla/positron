@@ -23,6 +23,10 @@
 #include "nsExceptionHandler.h"
 #endif
 
+#ifdef MOZ_NUWA_PROCESS
+#include "ipc/Nuwa.h"
+#endif
+
 #ifdef XP_WIN
 #include <windows.h>
 #endif
@@ -179,6 +183,12 @@ void
 ThreadMain(void*)
 {
   PR_SetCurrentThreadName("Hang Monitor");
+
+#ifdef MOZ_NUWA_PROCESS
+  if (IsNuwaProcess()) {
+    NuwaMarkCurrentThread(nullptr, nullptr);
+  }
+#endif
 
   MonitorAutoLock lock(*gMonitor);
 

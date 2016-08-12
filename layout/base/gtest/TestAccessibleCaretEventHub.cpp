@@ -550,7 +550,7 @@ AccessibleCaretEventHubTester::TestLongTapWithSelectWordSuccessful(
 
   HandleEventAndCheckState(CreateLongTapEvent(0, 0),
                            MockAccessibleCaretEventHub::LongTapState(),
-                           nsEventStatus_eIgnore);
+                           nsEventStatus_eConsumeNoDefault);
 
   HandleEventAndCheckState(aReleaseEventCreator(0, 0),
                            MockAccessibleCaretEventHub::NoActionState(),
@@ -567,7 +567,7 @@ AccessibleCaretEventHubTester::TestLongTapWithSelectWordSuccessful(
 
   HandleEventAndCheckState(CreateLongTapEvent(1, 1),
                            MockAccessibleCaretEventHub::LongTapState(),
-                           nsEventStatus_eIgnore);
+                           nsEventStatus_eConsumeNoDefault);
 
   mHub->AsyncPanZoomStarted();
   EXPECT_EQ(mHub->GetState(), MockAccessibleCaretEventHub::ScrollState());

@@ -127,8 +127,7 @@
              &downloadsPanelEmpty.label;
           </description>
           <spacer flex="1"/>
-          <vbox id="downloadsFooter"
-                class="downloadsPanelFooter">
+          <vbox id="downloadsFooter">
             <hbox id="downloadsSummary"
                   align="center"
                   orient="horizontal"
@@ -149,7 +148,7 @@
               </vbox>
             </hbox>
             <button id="downloadsHistory"
-                    class="plain downloadsPanelFooterButton"
+                    class="plain"
                     label="&downloadsHistory.label;"
                     accesskey="&downloadsHistory.accesskey;"
                     oncommand="DownloadsPanel.showDownloadsHistory();"/>
@@ -164,15 +163,13 @@
           <description id="downloadsPanel-blockedSubview-details2"/>
           <spacer flex="1"/>
           <hbox id="downloadsPanel-blockedSubview-buttons"
-                class="downloadsPanelFooter"
                 align="stretch">
             <button id="downloadsPanel-blockedSubview-openButton"
-                    class="plain downloadsPanelFooterButton"
+                    class="plain"
                     command="downloadsCmd_chooseOpen"
                     flex="1"/>
-            <toolbarseparator/>
             <button id="downloadsPanel-blockedSubview-deleteButton"
-                    class="plain downloadsPanelFooterButton"
+                    class="plain"
                     oncommand="DownloadsBlockedSubview.confirmBlock();"
                     default="true"
                     flex="1"/>

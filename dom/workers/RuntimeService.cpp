@@ -59,6 +59,10 @@
 #include "OSFileConstants.h"
 #include "xpcpublic.h"
 
+#ifdef MOZ_NUWA_PROCESS
+#include "ipc/Nuwa.h"
+#endif
+
 #include "Principal.h"
 #include "SharedWorker.h"
 #include "WorkerDebuggerManager.h"
@@ -871,17 +875,20 @@ public:
     mWorkerPrivate = nullptr;
   }
 
-  nsresult Initialize(JSContext* aParentContext)
+  nsresult Initialize(JSRuntime* aParentRuntime)
   {
     nsresult rv =
-      CycleCollectedJSRuntime::Initialize(aParentContext,
+      CycleCollectedJSRuntime::Initialize(aParentRuntime,
                                           WORKER_DEFAULT_RUNTIME_HEAPSIZE,
                                           WORKER_DEFAULT_NURSERY_SIZE);
      if (NS_WARN_IF(NS_FAILED(rv))) {
        return rv;
      }
 
-    JSContext* cx = Context();
+    JSRuntime* rt = Runtime();
+    MOZ_ASSERT(rt);
+
+    JSContext* cx = JS_GetContext(rt);
 
     JS_SetContextPrivate(cx, new WorkerThreadContextPrivate(mWorkerPrivate));
 
@@ -980,7 +987,7 @@ class WorkerThreadPrimaryRunnable final : public Runnable
 {
   WorkerPrivate* mWorkerPrivate;
   RefPtr<WorkerThread> mThread;
-  JSContext* mParentContext;
+  JSRuntime* mParentRuntime;
 
   class FinishedRunnable final : public Runnable
   {
@@ -1005,8 +1012,8 @@ class WorkerThreadPrimaryRunnable final : public Runnable
 public:
   WorkerThreadPrimaryRunnable(WorkerPrivate* aWorkerPrivate,
                               WorkerThread* aThread,
-                              JSContext* aParentContext)
-  : mWorkerPrivate(aWorkerPrivate), mThread(aThread), mParentContext(aParentContext)
+                              JSRuntime* aParentRuntime)
+  : mWorkerPrivate(aWorkerPrivate), mThread(aThread), mParentRuntime(aParentRuntime)
   {
     MOZ_ASSERT(aWorkerPrivate);
     MOZ_ASSERT(aThread);
@@ -1616,10 +1623,10 @@ RuntimeService::ScheduleWorker(WorkerPrivate* aWorkerPrivate)
     NS_WARNING("Could not set the thread's priority!");
   }
 
-  JSContext* cx = CycleCollectedJSRuntime::Get()->Context();
+  JSRuntime* rt = CycleCollectedJSRuntime::Get()->Runtime();
   nsCOMPtr<nsIRunnable> runnable =
     new WorkerThreadPrimaryRunnable(aWorkerPrivate, thread,
-                                    JS_GetParentContext(cx));
+                                    JS_GetParentRuntime(rt));
   if (NS_FAILED(thread->DispatchPrimaryRunnable(friendKey, runnable.forget()))) {
     UnregisterWorker(aWorkerPrivate);
     return false;
@@ -2490,6 +2497,13 @@ WorkerThreadPrimaryRunnable::Run()
 {
   using mozilla::ipc::BackgroundChild;
 
+#ifdef MOZ_NUWA_PROCESS
+  if (IsNuwaProcess()) {
+    NuwaMarkCurrentThread(nullptr, nullptr);
+    NuwaFreezeCurrentThread();
+  }
+#endif
+
   char stackBaseGuess;
 
   PR_SetCurrentThreadName("DOM Worker");
@@ -2547,7 +2561,7 @@ WorkerThreadPrimaryRunnable::Run()
     nsCycleCollector_startup();
 
     WorkerJSRuntime runtime(mWorkerPrivate);
-    nsresult rv = runtime.Initialize(mParentContext);
+    nsresult rv = runtime.Initialize(mParentRuntime);
     if (NS_WARN_IF(NS_FAILED(rv))) {
       return rv;
     }

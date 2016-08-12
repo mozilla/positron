@@ -60,8 +60,8 @@ public:
   virtual nscoord GetPrefISize(nsRenderingContext* aRenderingContext) override;
 
   virtual void Reflow(nsPresContext*           aPresContext,
-                      ReflowOutput&     aDesiredSize,
-                      const ReflowInput& aReflowInput,
+                      nsHTMLReflowMetrics&     aDesiredSize,
+                      const nsHTMLReflowState& aReflowState,
                       nsReflowStatus&          aStatus) override;
 
   virtual nsresult AttributeChanged(int32_t  aNameSpaceID,

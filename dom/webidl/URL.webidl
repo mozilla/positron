@@ -56,8 +56,6 @@ partial interface URL {
   static DOMString? createObjectURL(MediaStream stream, optional objectURLOptions options);
   [Throws]
   static void revokeObjectURL(DOMString url);
-  [ChromeOnly, Throws]
-  static boolean isValidURL(DOMString url);
 };
 
 dictionary objectURLOptions

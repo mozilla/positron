@@ -89,7 +89,7 @@ GetValueString(nsAString &aValueAsString, float aValue, uint16_t aUnitType)
 {
   char16_t buf[24];
   nsTextFormatter::snprintf(buf, sizeof(buf)/sizeof(char16_t),
-                            u"%g",
+                            MOZ_UTF16("%g"),
                             (double)aValue);
   aValueAsString.Assign(buf);
 
@@ -162,10 +162,6 @@ SVGElementMetrics::EnsureCtx() const
 {
   if (!mCtx && mSVGElement) {
     mCtx = mSVGElement->GetCtx();
-    if (!mCtx && mSVGElement->IsSVGElement(nsGkAtoms::svg)) {
-      // mSVGElement must be the outer svg element
-      mCtx = static_cast<SVGSVGElement*>(mSVGElement);
-    }
   }
   return mCtx != nullptr;
 }

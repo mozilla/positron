@@ -432,7 +432,6 @@ private:
                                 aNode->BufferSize(), context->SampleRate(),
                                 mInputBuffer.forget(), rv);
           if (rv.Failed()) {
-            rv.SuppressException();
             return nullptr;
           }
         }

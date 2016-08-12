@@ -5,10 +5,6 @@
 XPCOMUtils.defineLazyModuleGetter(this, "CustomizableUI",
                                   "resource:///modules/CustomizableUI.jsm");
 
-XPCOMUtils.defineLazyGetter(this, "colorUtils", () => {
-  return require("devtools/shared/css-color").colorUtils;
-});
-
 Cu.import("resource://devtools/shared/event-emitter.js");
 
 Cu.import("resource://gre/modules/ExtensionUtils.jsm");
@@ -146,8 +142,8 @@ BrowserAction.prototype = {
                                         "class", "toolbarbutton-badge");
     if (badgeNode) {
       let color = tabData.badgeBackgroundColor;
-      if (color) {
-        color = `rgba(${color[0]}, ${color[1]}, ${color[2]}, ${color[3] / 255})`;
+      if (Array.isArray(color)) {
+        color = `rgb(${color[0]}, ${color[1]}, ${color[2]})`;
       }
       badgeNode.style.backgroundColor = color || "";
     }
@@ -228,8 +224,9 @@ BrowserAction.prototype = {
   getProperty(tab, prop) {
     if (tab == null) {
       return this.defaults[prop];
+    } else {
+      return this.tabContext.get(tab)[prop];
     }
-    return this.tabContext.get(tab)[prop];
   },
 
   shutdown() {
@@ -337,18 +334,13 @@ extensions.registerSchemaAPI("browserAction", (extension, context) => {
 
       setBadgeBackgroundColor: function(details) {
         let tab = details.tabId !== null ? TabManager.getTab(details.tabId) : null;
-        let color = details.color;
-        if (!Array.isArray(color)) {
-          let col = colorUtils.colorToRGBA(color);
-          color = col && [col.r, col.g, col.b, Math.round(col.a * 255)];
-        }
-        BrowserAction.for(extension).setProperty(tab, "badgeBackgroundColor", color);
+        BrowserAction.for(extension).setProperty(tab, "badgeBackgroundColor", details.color);
       },
 
       getBadgeBackgroundColor: function(details, callback) {
         let tab = details.tabId !== null ? TabManager.getTab(details.tabId) : null;
         let color = BrowserAction.for(extension).getProperty(tab, "badgeBackgroundColor");
-        return Promise.resolve(color || [0xd9, 0, 0, 255]);
+        return Promise.resolve(color);
       },
     },
   };

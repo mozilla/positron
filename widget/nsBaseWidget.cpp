@@ -50,7 +50,7 @@
 #include "mozilla/unused.h"
 #include "mozilla/IMEStateManager.h"
 #include "mozilla/VsyncDispatcher.h"
-#include "mozilla/layers/IAPZCTreeManager.h"
+#include "mozilla/layers/APZCTreeManager.h"
 #include "mozilla/layers/APZEventState.h"
 #include "mozilla/layers/APZThreadUtils.h"
 #include "mozilla/layers/ChromeProcessController.h"
@@ -994,7 +994,7 @@ void nsBaseWidget::ConfigureAPZCTreeManager()
 
   mAPZC->SetDPI(GetDPI());
 
-  RefPtr<IAPZCTreeManager> treeManager = mAPZC;  // for capture by the lambdas
+  RefPtr<APZCTreeManager> treeManager = mAPZC;  // for capture by the lambdas
 
   ContentReceivedInputBlockCallback callback(
       [treeManager](const ScrollableLayerGuid& aGuid,
@@ -1004,7 +1004,7 @@ void nsBaseWidget::ConfigureAPZCTreeManager()
         MOZ_ASSERT(NS_IsMainThread());
         APZThreadUtils::RunOnControllerThread(NewRunnableMethod
                                               <uint64_t, bool>(treeManager,
-                                                               &IAPZCTreeManager::ContentReceivedInputBlock,
+                                                               &APZCTreeManager::ContentReceivedInputBlock,
                                                                aInputBlockId,
                                                                aPreventDefault));
       });
@@ -1017,7 +1017,7 @@ void nsBaseWidget::ConfigureAPZCTreeManager()
     APZThreadUtils::RunOnControllerThread(NewRunnableMethod
       <uint64_t,
        StoreCopyPassByLRef<nsTArray<TouchBehaviorFlags>>>(treeManager,
-                                                          &IAPZCTreeManager::SetAllowedTouchBehavior,
+                                                          &APZCTreeManager::SetAllowedTouchBehavior,
                                                           aInputBlockId, aFlags));
   };
 
@@ -1046,8 +1046,8 @@ nsBaseWidget::SetConfirmedTargetAPZC(uint64_t aInputBlockId,
                                      const nsTArray<ScrollableLayerGuid>& aTargets) const
 {
   // Need to specifically bind this since it's overloaded.
-  void (IAPZCTreeManager::*setTargetApzcFunc)(uint64_t, const nsTArray<ScrollableLayerGuid>&)
-          = &IAPZCTreeManager::SetTargetAPZC;
+  void (APZCTreeManager::*setTargetApzcFunc)(uint64_t, const nsTArray<ScrollableLayerGuid>&)
+          = &APZCTreeManager::SetTargetAPZC;
   APZThreadUtils::RunOnControllerThread(NewRunnableMethod
     <uint64_t, StoreCopyPassByRRef<nsTArray<ScrollableLayerGuid>>>(mAPZC,
                                                                    setTargetApzcFunc,
@@ -1121,7 +1121,7 @@ nsBaseWidget::ProcessUntransformedAPZEvent(WidgetInputEvent* aEvent,
       if (touchEvent->mMessage == eTouchStart) {
         if (gfxPrefs::TouchActionEnabled()) {
           APZCCallbackHelper::SendSetAllowedTouchBehaviorNotification(this,
-              GetDocument(), *(original->AsTouchEvent()), aInputBlockId,
+              *(original->AsTouchEvent()), aInputBlockId,
               mSetAllowedTouchBehaviorCallback);
         }
         APZCCallbackHelper::SendSetTargetAPZCNotification(this, GetDocument(),
@@ -1183,7 +1183,7 @@ class DispatchWheelInputOnControllerThread : public Runnable
 {
 public:
   DispatchWheelInputOnControllerThread(const WidgetWheelEvent& aWheelEvent,
-                                       IAPZCTreeManager* aAPZC,
+                                       APZCTreeManager* aAPZC,
                                        nsBaseWidget* aWidget)
     : mMainMessageLoop(MessageLoop::current())
     , mWheelInput(aWheelEvent)
@@ -1195,11 +1195,11 @@ public:
 
   NS_IMETHOD Run() override
   {
-    nsEventStatus result = mAPZC->ReceiveInputEvent(mWheelInput, &mGuid, &mInputBlockId);
-    if (result == nsEventStatus_eConsumeNoDefault) {
+    mAPZResult = mAPZC->ReceiveInputEvent(mWheelInput, &mGuid, &mInputBlockId);
+    if (mAPZResult == nsEventStatus_eConsumeNoDefault) {
       return NS_OK;
     }
-    RefPtr<Runnable> r = new DispatchWheelEventOnMainThread(mWheelInput, mWidget, result, mInputBlockId, mGuid);
+    RefPtr<Runnable> r = new DispatchWheelEventOnMainThread(mWheelInput, mWidget, mAPZResult, mInputBlockId, mGuid);
     mMainMessageLoop->PostTask(r.forget());
     return NS_OK;
   }
@@ -1207,35 +1207,12 @@ public:
 private:
   MessageLoop* mMainMessageLoop;
   ScrollWheelInput mWheelInput;
-  RefPtr<IAPZCTreeManager> mAPZC;
+  RefPtr<APZCTreeManager> mAPZC;
   nsBaseWidget* mWidget;
+  nsEventStatus mAPZResult;
   uint64_t mInputBlockId;
   ScrollableLayerGuid mGuid;
 };
-
-void
-nsBaseWidget::DispatchTouchInput(MultiTouchInput& aInput)
-{
-  MOZ_ASSERT(NS_IsMainThread());
-  if (mAPZC) {
-    MOZ_ASSERT(APZThreadUtils::IsControllerThread());
-    uint64_t inputBlockId = 0;
-    ScrollableLayerGuid guid;
-
-    nsEventStatus result = mAPZC->ReceiveInputEvent(aInput, &guid, &inputBlockId);
-    if (result == nsEventStatus_eConsumeNoDefault) {
-      return;
-    }
-
-    WidgetTouchEvent event = aInput.ToWidgetTouchEvent(this);
-    ProcessUntransformedAPZEvent(&event, guid, inputBlockId, result);
-  } else {
-    WidgetTouchEvent event = aInput.ToWidgetTouchEvent(this);
-
-    nsEventStatus status;
-    DispatchEvent(&event, status);
-  }
-}
 
 nsEventStatus
 nsBaseWidget::DispatchInputEvent(WidgetInputEvent* aEvent)
@@ -1334,24 +1311,20 @@ void nsBaseWidget::CreateCompositor(int aWidth, int aHeight)
 
   RefPtr<ClientLayerManager> lm = new ClientLayerManager(this);
 
-  bool useAPZ = UseAPZ();
-
   gfx::GPUProcessManager* gpu = gfx::GPUProcessManager::Get();
   mCompositorSession = gpu->CreateTopLevelCompositor(
     this,
     lm,
     GetDefaultScale(),
-    useAPZ,
+    UseAPZ(),
     UseExternalCompositingSurface(),
     gfx::IntSize(aWidth, aHeight));
   mCompositorBridgeChild = mCompositorSession->GetCompositorBridgeChild();
   mCompositorWidgetDelegate = mCompositorSession->GetCompositorWidgetDelegate();
 
-  if (useAPZ) {
-    mAPZC = mCompositorSession->GetAPZCTreeManager();
+  mAPZC = mCompositorSession->GetAPZCTreeManager();
+  if (mAPZC) {
     ConfigureAPZCTreeManager();
-  } else {
-    mAPZC = nullptr;
   }
 
   if (mInitialZoomConstraints) {
@@ -1934,7 +1907,8 @@ nsBaseWidget::GetRootAccessible()
 
   // Accessible creation might be not safe so use IsSafeToRunScript to
   // make sure it's not created at unsafe times.
-  nsAccessibilityService* accService = GetOrCreateAccService();
+  nsCOMPtr<nsIAccessibilityService> accService =
+    services::GetAccessibilityService();
   if (accService) {
 #if defined(XP_WIN) || defined(XP_MACOSX) || defined(MOZ_WIDGET_GTK)
     if (!mAccessibilityInUseFlag) {
@@ -1965,7 +1939,7 @@ nsBaseWidget::StartAsyncScrollbarDrag(const AsyncDragMetrics& aDragMetrics)
 
   APZThreadUtils::RunOnControllerThread(NewRunnableMethod
     <ScrollableLayerGuid, AsyncDragMetrics>(mAPZC,
-                                            &IAPZCTreeManager::StartScrollbarDrag,
+                                            &APZCTreeManager::StartScrollbarDrag,
                                             guid, aDragMetrics));
 }
 
@@ -2092,69 +2066,6 @@ nsIWidget::ClearNativeTouchSequence(nsIObserver* aObserver)
                              mLongTapTouchPoint->mPosition, 0, 0, nullptr);
   mLongTapTouchPoint = nullptr;
   return NS_OK;
-}
-
-MultiTouchInput
-nsBaseWidget::UpdateSynthesizedTouchState(MultiTouchInput* aState,
-                                          uint32_t aTime,
-                                          mozilla::TimeStamp aTimeStamp,
-                                          uint32_t aPointerId,
-                                          TouchPointerState aPointerState,
-                                          LayoutDeviceIntPoint aPoint,
-                                          double aPointerPressure,
-                                          uint32_t aPointerOrientation)
-{
-  ScreenIntPoint pointerScreenPoint = ViewAs<ScreenPixel>(aPoint,
-      PixelCastJustification::LayoutDeviceIsScreenForBounds);
-
-  // We can't dispatch *aState directly because (a) dispatching
-  // it might inadvertently modify it and (b) in the case of touchend or
-  // touchcancel events aState will hold the touches that are
-  // still down whereas the input dispatched needs to hold the removed
-  // touch(es). We use |inputToDispatch| for this purpose.
-  MultiTouchInput inputToDispatch;
-  inputToDispatch.mInputType = MULTITOUCH_INPUT;
-  inputToDispatch.mTime = aTime;
-  inputToDispatch.mTimeStamp = aTimeStamp;
-
-  int32_t index = aState->IndexOfTouch((int32_t)aPointerId);
-  if (aPointerState == TOUCH_CONTACT) {
-    if (index >= 0) {
-      // found an existing touch point, update it
-      SingleTouchData& point = aState->mTouches[index];
-      point.mScreenPoint = pointerScreenPoint;
-      point.mRotationAngle = (float)aPointerOrientation;
-      point.mForce = (float)aPointerPressure;
-      inputToDispatch.mType = MultiTouchInput::MULTITOUCH_MOVE;
-    } else {
-      // new touch point, add it
-      aState->mTouches.AppendElement(SingleTouchData(
-          (int32_t)aPointerId,
-          pointerScreenPoint,
-          ScreenSize(0, 0),
-          (float)aPointerOrientation,
-          (float)aPointerPressure));
-      inputToDispatch.mType = MultiTouchInput::MULTITOUCH_START;
-    }
-    inputToDispatch.mTouches = aState->mTouches;
-  } else {
-    MOZ_ASSERT(aPointerState == TOUCH_REMOVE || aPointerState == TOUCH_CANCEL);
-    // a touch point is being lifted, so remove it from the stored list
-    if (index >= 0) {
-      aState->mTouches.RemoveElementAt(index);
-    }
-    inputToDispatch.mType = (aPointerState == TOUCH_REMOVE
-        ? MultiTouchInput::MULTITOUCH_END
-        : MultiTouchInput::MULTITOUCH_CANCEL);
-    inputToDispatch.mTouches.AppendElement(SingleTouchData(
-        (int32_t)aPointerId,
-        pointerScreenPoint,
-        ScreenSize(0, 0),
-        (float)aPointerOrientation,
-        (float)aPointerPressure));
-  }
-
-  return inputToDispatch;
 }
 
 void

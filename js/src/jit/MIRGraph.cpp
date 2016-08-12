@@ -1283,7 +1283,7 @@ MBasicBlock::assertUsesAreNotWithin(MUseIterator use, MUseIterator end)
 }
 
 AbortReason
-MBasicBlock::setBackedge(TempAllocator& alloc, MBasicBlock* pred)
+MBasicBlock::setBackedge(MBasicBlock* pred)
 {
     // Predecessors must be finished, and at the correct stack depth.
     MOZ_ASSERT(hasLastIns());
@@ -1296,7 +1296,7 @@ MBasicBlock::setBackedge(TempAllocator& alloc, MBasicBlock* pred)
     bool hadTypeChange = false;
 
     // Add exit definitions to each corresponding phi at the entry.
-    if (!inheritPhisFromBackedge(alloc, pred, &hadTypeChange))
+    if (!inheritPhisFromBackedge(pred, &hadTypeChange))
         return AbortReason_Alloc;
 
     if (hadTypeChange) {
@@ -1552,7 +1552,7 @@ MBasicBlock::inheritPhis(MBasicBlock* header)
 }
 
 bool
-MBasicBlock::inheritPhisFromBackedge(TempAllocator& alloc, MBasicBlock* backedge, bool* hadTypeChange)
+MBasicBlock::inheritPhisFromBackedge(MBasicBlock* backedge, bool* hadTypeChange)
 {
     // We must be a pending loop header
     MOZ_ASSERT(kind_ == PENDING_LOOP_HEADER);
@@ -1593,7 +1593,7 @@ MBasicBlock::inheritPhisFromBackedge(TempAllocator& alloc, MBasicBlock* backedge
 
         if (!entryDef->addInputSlow(exitDef))
             return false;
-        if (!entryDef->checkForTypeChange(alloc, exitDef, &typeChange))
+        if (!entryDef->checkForTypeChange(exitDef, &typeChange))
             return false;
         *hadTypeChange |= typeChange;
         setSlot(slot, entryDef);
@@ -1603,11 +1603,11 @@ MBasicBlock::inheritPhisFromBackedge(TempAllocator& alloc, MBasicBlock* backedge
 }
 
 bool
-MBasicBlock::specializePhis(TempAllocator& alloc)
+MBasicBlock::specializePhis()
 {
     for (MPhiIterator iter = phisBegin(); iter != phisEnd(); iter++) {
         MPhi* phi = *iter;
-        if (!phi->specializeType(alloc))
+        if (!phi->specializeType())
             return false;
     }
     return true;

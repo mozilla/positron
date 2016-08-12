@@ -1,7 +1,6 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
-"use strict";
-/* eslint-disable */
+
 /**
  * Test that when importing and no graphs rendered yet, we do not get a
  * `getMappedSelection` error.
@@ -40,4 +39,3 @@ var test = Task.async(function* () {
   yield teardown(panel);
   finish();
 });
-/* eslint-enable */

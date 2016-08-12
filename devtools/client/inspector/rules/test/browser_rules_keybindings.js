@@ -22,10 +22,11 @@ add_task(function* () {
 
   info("Typing ENTER to focus the next field: property value");
   let onFocus = once(brace.parentNode, "focus", true);
-  let onRuleViewChanged = view.once("ruleview-changed");
-
+  // The rule view changes twice, once for the first field to loose focus
+  // and a second time for the second field to gain focus
+  let onRuleViewChanged = view.once("ruleview-changed").then(
+    () => view.once("ruleview-changed"));
   EventUtils.sendKey("return");
-
   yield onFocus;
   yield onRuleViewChanged;
   ok(true, "The value field was focused");

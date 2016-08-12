@@ -14,12 +14,11 @@ const EventEmitter = require("devtools/shared/event-emitter");
 const { CallWatcherFront } = require("devtools/shared/fronts/call-watcher");
 const { CanvasFront } = require("devtools/shared/fronts/canvas");
 const DevToolsUtils = require("devtools/shared/DevToolsUtils");
-const flags = require("devtools/shared/flags");
 const { LocalizationHelper } = require("devtools/client/shared/l10n");
 const { Heritage, WidgetMethods, setNamedTimeout, clearNamedTimeout,
         setConditionalTimeout } = require("devtools/client/shared/widgets/view-helpers");
 
-const CANVAS_ACTOR_RECORDING_ATTEMPT = flags.testing ? 500 : 5000;
+const CANVAS_ACTOR_RECORDING_ATTEMPT = DevToolsUtils.testing ? 500 : 5000;
 
 const { Task } = require("devtools/shared/task");
 
@@ -129,12 +128,6 @@ var EventsHandler = {
    * Listen for events emitted by the current tab target.
    */
   initialize: function () {
-    // Make sure the backend is prepared to handle <canvas> contexts.
-    // Since actors are created lazily on the first request to them, we need to send an
-    // early request to ensure the CallWatcherActor is running and watching for new window
-    // globals.
-    gFront.setup({ reload: false });
-
     this._onTabNavigated = this._onTabNavigated.bind(this);
     gTarget.on("will-navigate", this._onTabNavigated);
     gTarget.on("navigate", this._onTabNavigated);
@@ -155,6 +148,8 @@ var EventsHandler = {
     if (event != "will-navigate") {
       return;
     }
+    // Make sure the backend is prepared to handle <canvas> contexts.
+    gFront.setup({ reload: false });
 
     // Reset UI.
     SnapshotsListView.empty();

@@ -38,7 +38,7 @@ XPCOMUtils.defineLazyServiceGetter(this, "clipboardHelper",
 
 Object.defineProperty(this, "WebConsoleUtils", {
   get: function () {
-    return require("devtools/client/webconsole/utils").Utils;
+    return require("devtools/shared/webconsole/utils").Utils;
   },
   configurable: true,
   enumerable: true

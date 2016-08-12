@@ -635,8 +635,7 @@ nsFileInputStream::Deserialize(const InputStreamParams& aParams,
     }
 
     if (fd.IsValid()) {
-        auto rawFD = fd.ClonePlatformHandle();
-        PRFileDesc* fileDesc = PR_ImportFile(PROsfd(rawFD.release()));
+        PRFileDesc* fileDesc = PR_ImportFile(PROsfd(fd.PlatformHandle()));
         if (!fileDesc) {
             NS_WARNING("Failed to import file handle!");
             return false;

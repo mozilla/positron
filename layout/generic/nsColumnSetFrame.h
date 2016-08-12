@@ -25,8 +25,8 @@ public:
   explicit nsColumnSetFrame(nsStyleContext* aContext);
 
   virtual void Reflow(nsPresContext* aPresContext,
-                      ReflowOutput& aDesiredSize,
-                      const ReflowInput& aReflowInput,
+                      nsHTMLReflowMetrics& aDesiredSize,
+                      const nsHTMLReflowState& aReflowState,
                       nsReflowStatus& aStatus) override;
 
 #ifdef DEBUG
@@ -48,7 +48,7 @@ public:
    * Retrieve the available height for content of this frame. The available content
    * height is the available height for the frame, minus borders and padding.
    */
-  virtual nscoord GetAvailableContentBSize(const ReflowInput& aReflowInput);
+  virtual nscoord GetAvailableContentBSize(const nsHTMLReflowState& aReflowState);
 
   virtual nsContainerFrame* GetContentInsertionFrame() override {
     nsIFrame* frame = PrincipalChildList().FirstChild();
@@ -161,8 +161,8 @@ protected:
     }
   };
 
-  bool ReflowColumns(ReflowOutput& aDesiredSize,
-                     const ReflowInput& aReflowInput,
+  bool ReflowColumns(nsHTMLReflowMetrics& aDesiredSize,
+                     const nsHTMLReflowState& aReflowState,
                      nsReflowStatus& aReflowStatus,
                      ReflowConfig& aConfig,
                      bool aLastColumnUnbounded,
@@ -176,14 +176,14 @@ protected:
    * style. This function will also be responsible for implementing
    * the state machine that controls column balancing.
    */
-  ReflowConfig ChooseColumnStrategy(const ReflowInput& aReflowInput,
+  ReflowConfig ChooseColumnStrategy(const nsHTMLReflowState& aReflowState,
                                     bool aForceAuto, nscoord aFeasibleBSize,
                                     nscoord aInfeasibleBSize);
 
   /**
    * Perform the binary search for the best balance height for this column set.
    *
-   * @param aReflowInput The input parameters for the current reflow iteration.
+   * @param aReflowState The input parameters for the current reflow iteration.
    * @param aPresContext The presentation context in which the current reflow
    *        iteration is occurring.
    * @param aConfig The ReflowConfig object associated with this column set
@@ -204,11 +204,11 @@ protected:
    * @param aStatus A final reflow status of the column set frame, passed in as
    *        an output parameter.
    */
-  void FindBestBalanceBSize(const ReflowInput& aReflowInput,
+  void FindBestBalanceBSize(const nsHTMLReflowState& aReflowState,
                             nsPresContext* aPresContext,
                             ReflowConfig& aConfig,
                             ColumnBalanceData& aColData,
-                            ReflowOutput& aDesiredSize,
+                            nsHTMLReflowMetrics& aDesiredSize,
                             nsCollapsingMargin& aOutMargin,
                             bool& aUnboundedLastColumn,
                             bool& aRunWasFeasible,
@@ -217,8 +217,8 @@ protected:
    * Reflow column children. Returns true iff the content that was reflowed
    * fit into the mColMaxBSize.
    */
-  bool ReflowChildren(ReflowOutput& aDesiredSize,
-                        const ReflowInput& aReflowInput,
+  bool ReflowChildren(nsHTMLReflowMetrics& aDesiredSize,
+                        const nsHTMLReflowState& aReflowState,
                         nsReflowStatus& aStatus,
                         const ReflowConfig& aConfig,
                         bool aLastColumnUnbounded,

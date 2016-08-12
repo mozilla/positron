@@ -13,7 +13,6 @@
 #include "mozilla/Attributes.h"
 #include "mozilla/BinarySearch.h"
 #include "mozilla/fallible.h"
-#include "mozilla/Function.h"
 #include "mozilla/InitializerList.h"
 #include "mozilla/MathAlgorithms.h"
 #include "mozilla/MemoryReporting.h"
@@ -159,6 +158,9 @@ struct nsTArrayInfallibleAllocatorBase
   }
 };
 
+#if defined(MOZALLOC_HAVE_XMALLOC)
+#include "mozilla/mozalloc_abort.h"
+
 struct nsTArrayFallibleAllocator : nsTArrayFallibleAllocatorBase
 {
   static void* Malloc(size_t aSize) { return malloc(aSize); }
@@ -170,9 +172,6 @@ struct nsTArrayFallibleAllocator : nsTArrayFallibleAllocatorBase
   static void Free(void* aPtr) { free(aPtr); }
   static void SizeTooBig(size_t) {}
 };
-
-#if defined(MOZALLOC_HAVE_XMALLOC)
-#include "mozilla/mozalloc_abort.h"
 
 struct nsTArrayInfallibleAllocator : nsTArrayInfallibleAllocatorBase
 {
@@ -188,6 +187,15 @@ struct nsTArrayInfallibleAllocator : nsTArrayInfallibleAllocatorBase
 
 #else
 #include <stdlib.h>
+
+struct nsTArrayFallibleAllocator : nsTArrayFallibleAllocatorBase
+{
+  static void* Malloc(size_t aSize) { return malloc(aSize); }
+  static void* Realloc(void* aPtr, size_t aSize) { return realloc(aPtr, aSize); }
+
+  static void Free(void* aPtr) { free(aPtr); }
+  static void SizeTooBig(size_t) {}
+};
 
 struct nsTArrayInfallibleAllocator : nsTArrayInfallibleAllocatorBase
 {
@@ -526,6 +534,9 @@ public:
   bool Equals(const A& aA, const B& aB) const { return aA == aB; }
   bool LessThan(const A& aA, const B& aB) const { return aA < aB; }
 };
+
+template<class E> class InfallibleTArray;
+template<class E> class FallibleTArray;
 
 template<bool IsPod, bool IsSameType>
 struct AssignRangeAlgorithm
@@ -1590,13 +1601,6 @@ public:
   // A variation on the RemoveElementsAt method defined above.
   void Clear() { RemoveElementsAt(0, Length()); }
 
-  // This method removes elements based on the return value of the
-  // callback function aPredicate. If the function returns true for
-  // an element, the element is removed. aPredicate will be called
-  // for each element in order. It is not safe to access the array
-  // inside aPredicate.
-  void RemoveElementsBy(mozilla::function<bool(const elem_type&)> aPredicate);
-
   // This helper function combines IndexOf with RemoveElementAt to "search
   // and destroy" the first element that is equal to the given element.
   // @param aItem The item to search for.
@@ -1872,7 +1876,7 @@ template<typename E, class Alloc>
 template<class Item, typename ActualAlloc>
 auto
 nsTArray_Impl<E, Alloc>::ReplaceElementsAt(index_type aStart, size_type aCount,
-                                           const Item* aArray, size_type aArrayLen) -> elem_type*
+                                           const Item* aArray, size_type aArrayLen) -> elem_type* 
 {
   // Adjust memory allocation up-front to catch errors.
   if (!ActualAlloc::Successful(this->template EnsureCapacity<ActualAlloc>(
@@ -1899,30 +1903,6 @@ nsTArray_Impl<E, Alloc>::RemoveElementsAt(index_type aStart, size_type aCount)
   this->template ShiftData<InfallibleAlloc>(aStart, aCount, 0,
                                             sizeof(elem_type),
                                             MOZ_ALIGNOF(elem_type));
-}
-
-template<typename E, class Alloc>
-void
-nsTArray_Impl<E, Alloc>::RemoveElementsBy(mozilla::function<bool(const elem_type&)> aPredicate)
-{
-  if (base_type::mHdr == EmptyHdr()) {
-    return;
-  }
-
-  index_type j = 0;
-  index_type len = Length();
-  for (index_type i = 0; i < len; ++i) {
-    if (aPredicate(Elements()[i])) {
-      elem_traits::Destruct(Elements() + i);
-    } else {
-      if (j < i) {
-        copy_type::MoveNonOverlappingRegion(Elements() + j, Elements() + i,
-                                            1, sizeof(elem_type));
-      }
-      ++j;
-    }
-  }
-  base_type::mHdr->mLength = j;
 }
 
 template<typename E, class Alloc>

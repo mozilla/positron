@@ -6,7 +6,6 @@ Cu.import("resource://gre/modules/Promise.jsm", this);
 Cu.import("resource://gre/modules/Task.jsm", this);
 Cu.import("resource://gre/modules/AppConstants.jsm");
 
-const kHighlightAllPref = "findbar.highlightAll";
 const kPrefModalHighlight = "findbar.modalHighlight";
 const kFixtureBaseURL = "https://example.com/browser/toolkit/modules/tests/browser/";
 
@@ -130,8 +129,8 @@ function promiseTestHighlighterOutput(browser, word, expectedResult, extraTest =
 
 add_task(function* setup() {
   yield SpecialPowers.pushPrefEnv({ set: [
-    [kHighlightAllPref, true],
-    [kPrefModalHighlight, true]
+    ["findbar.highlightAll", true],
+    ["findbar.modalHighlight", true]
   ]});
 });
 
@@ -269,45 +268,5 @@ add_task(function* testDarkPageDetection() {
     yield promise;
 
     findbar.close(true);
-  });
-});
-
-add_task(function* testHighlightAllToggle() {
-  let url = kFixtureBaseURL + "file_FinderSample.html";
-  yield BrowserTestUtils.withNewTab(url, function* (browser) {
-    let findbar = gBrowser.getFindBar();
-
-    yield promiseOpenFindbar(findbar);
-
-    let word = "Roland";
-    let expectedResult = {
-      rectCount: 2,
-      insertCalls: [2, 4],
-      removeCalls: [1, 2]
-    };
-    let promise = promiseTestHighlighterOutput(browser, word, expectedResult);
-    yield promiseEnterStringIntoFindField(findbar, word);
-    yield promise;
-
-    // We now know we have multiple rectangles highlighted, so it's a good time
-    // to flip the pref.
-    expectedResult = {
-      rectCount: 0,
-      insertCalls: [1, 1],
-      removeCalls: [1, 1]
-    };
-    promise = promiseTestHighlighterOutput(browser, word, expectedResult);
-    yield SpecialPowers.pushPrefEnv({ "set": [[ kHighlightAllPref, false ]] });
-    yield promise;
-
-    // For posterity, let's switch back.
-    expectedResult = {
-      rectCount: 2,
-      insertCalls: [2, 4],
-      removeCalls: [1, 2]
-    };
-    promise = promiseTestHighlighterOutput(browser, word, expectedResult);
-    yield SpecialPowers.pushPrefEnv({ "set": [[ kHighlightAllPref, true ]] });
-    yield promise;
   });
 });

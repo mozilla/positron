@@ -32,7 +32,8 @@ MediaEngineRemoteVideoSource::MediaEngineRemoteVideoSource(
   dom::MediaSourceEnum aMediaSource, const char* aMonitorName)
   : MediaEngineCameraVideoSource(aIndex, aMonitorName),
     mMediaSource(aMediaSource),
-    mCapEngine(aCapEngine)
+    mCapEngine(aCapEngine),
+    mInShutdown(false)
 {
   MOZ_ASSERT(aMediaSource != dom::MediaSourceEnum::Other);
   mSettings.mWidth.Construct(0);
@@ -71,7 +72,7 @@ MediaEngineRemoteVideoSource::Shutdown()
   if (!mInitDone) {
     return;
   }
-  Super::Shutdown();
+  mInShutdown = true;
   if (mState == kStarted) {
     SourceMediaStream *source;
     bool empty;
@@ -107,7 +108,7 @@ MediaEngineRemoteVideoSource::Allocate(
     const MediaEnginePrefs& aPrefs,
     const nsString& aDeviceId,
     const nsACString& aOrigin,
-    AllocationHandle** aOutHandle,
+    BaseAllocationHandle** aOutHandle,
     const char** aOutBadConstraint)
 {
   LOG((__PRETTY_FUNCTION__));
@@ -118,8 +119,10 @@ MediaEngineRemoteVideoSource::Allocate(
     return NS_ERROR_FAILURE;
   }
 
-  nsresult rv = Super::Allocate(aConstraints, aPrefs, aDeviceId, aOrigin,
-                                aOutHandle, aOutBadConstraint);
+  RefPtr<AllocationHandle> handle = new AllocationHandle(aConstraints, aOrigin,
+                                                         aPrefs, aDeviceId);
+
+  nsresult rv = UpdateNew(handle, aPrefs, aDeviceId, aOutBadConstraint);
   if (NS_FAILED(rv)) {
     return rv;
   }
@@ -133,18 +136,35 @@ MediaEngineRemoteVideoSource::Allocate(
       LOG(("Video device %d allocated shared", mCaptureIndex));
     }
   }
+  mRegisteredHandles.AppendElement(handle);
+  ++mNrAllocations;
+  handle.forget(aOutHandle);
   return NS_OK;
 }
 
 nsresult
-MediaEngineRemoteVideoSource::Deallocate(AllocationHandle* aHandle)
+MediaEngineRemoteVideoSource::Deallocate(BaseAllocationHandle* aHandle)
 {
   LOG((__PRETTY_FUNCTION__));
   AssertIsOnOwningThread();
+  MOZ_ASSERT(aHandle);
+  RefPtr<AllocationHandle> handle = static_cast<AllocationHandle*>(aHandle);
 
-  Super::Deallocate(aHandle);
+  class Comparator {
+  public:
+    static bool Equals(const RefPtr<AllocationHandle>& a,
+                       const RefPtr<AllocationHandle>& b) {
+      return a.get() == b.get();
+    }
+  };
+  MOZ_ASSERT(mRegisteredHandles.Contains(handle, Comparator()));
+  mRegisteredHandles.RemoveElementAt(mRegisteredHandles.IndexOf(handle, 0,
+                                                                Comparator()));
+  --mNrAllocations;
+  MOZ_ASSERT(mNrAllocations >= 0, "Double-deallocations are prohibited");
 
-  if (!mRegisteredHandles.Length()) {
+  if (mNrAllocations == 0) {
+    MOZ_ASSERT(!mRegisteredHandles.Length());
     if (mState != kStopped && mState != kAllocated) {
       return NS_ERROR_FAILURE;
     }
@@ -155,6 +175,13 @@ MediaEngineRemoteVideoSource::Deallocate(AllocationHandle* aHandle)
     LOG(("Video device %d deallocated", mCaptureIndex));
   } else {
     LOG(("Video device %d deallocated but still in use", mCaptureIndex));
+    MOZ_ASSERT(mRegisteredHandles.Length());
+    if (!mInShutdown) {
+      // Whenever constraints are removed, other parties may get closer to ideal.
+      auto& first = mRegisteredHandles[0];
+      const char* badConstraint = nullptr;
+      return UpdateRemove(first->mPrefs, first->mDeviceId, &badConstraint);
+    }
   }
   return NS_OK;
 }
@@ -240,7 +267,7 @@ MediaEngineRemoteVideoSource::Stop(mozilla::SourceMediaStream* aSource,
 }
 
 nsresult
-MediaEngineRemoteVideoSource::Restart(AllocationHandle* aHandle,
+MediaEngineRemoteVideoSource::Restart(BaseAllocationHandle* aHandle,
                                       const dom::MediaTrackConstraints& aConstraints,
                                       const MediaEnginePrefs& aPrefs,
                                       const nsString& aDeviceId,
@@ -253,26 +280,49 @@ MediaEngineRemoteVideoSource::Restart(AllocationHandle* aHandle,
   }
   MOZ_ASSERT(aHandle);
   NormalizedConstraints constraints(aConstraints);
-  return ReevaluateAllocation(aHandle, &constraints, aPrefs, aDeviceId,
-                              aOutBadConstraint);
+  return UpdateExisting(static_cast<AllocationHandle*>(aHandle), &constraints,
+                        aPrefs, aDeviceId, aOutBadConstraint);
 }
 
 nsresult
-MediaEngineRemoteVideoSource::UpdateSingleSource(
-    const AllocationHandle* aHandle,
-    const NormalizedConstraints& aNetConstraints,
-    const MediaEnginePrefs& aPrefs,
-    const nsString& aDeviceId,
-    const char** aOutBadConstraint)
+MediaEngineRemoteVideoSource::UpdateExisting(AllocationHandle* aHandle,
+                                             NormalizedConstraints* aNewConstraints,
+                                             const MediaEnginePrefs& aPrefs,
+                                             const nsString& aDeviceId,
+                                             const char** aOutBadConstraint)
 {
-  if (!ChooseCapability(aNetConstraints, aPrefs, aDeviceId)) {
-    *aOutBadConstraint = FindBadConstraint(aNetConstraints, *this, aDeviceId);
+  // aHandle and/or aNewConstraints may be nullptr
+
+  AutoTArray<const NormalizedConstraints*, 10> allConstraints;
+  for (auto& registered : mRegisteredHandles) {
+    if (aNewConstraints && registered.get() == aHandle) {
+      continue; // Don't count old constraints
+    }
+    allConstraints.AppendElement(&registered->mConstraints);
+  }
+  if (aNewConstraints) {
+    allConstraints.AppendElement(aNewConstraints);
+  } else if (aHandle) {
+    // In the case of UpdateNew, the handle isn't registered yet.
+    allConstraints.AppendElement(&aHandle->mConstraints);
+  }
+
+  NormalizedConstraints netConstraints(allConstraints);
+  if (netConstraints.mBadConstraint) {
+    *aOutBadConstraint = netConstraints.mBadConstraint;
+    return NS_ERROR_FAILURE;
+  }
+
+  if (!ChooseCapability(netConstraints, aPrefs, aDeviceId)) {
+    *aOutBadConstraint = FindBadConstraint(netConstraints, *this, aDeviceId);
     return NS_ERROR_FAILURE;
   }
 
   switch (mState) {
     case kReleased:
       MOZ_ASSERT(aHandle);
+      MOZ_ASSERT(!aNewConstraints);
+      MOZ_ASSERT(!mRegisteredHandles.Length());
       if (camera::GetChildAndCall(&camera::CamerasChild::AllocateCaptureDevice,
                                   mCapEngine, GetUUID().get(),
                                   kMaxUniqueIdLength, mCaptureIndex,
@@ -303,6 +353,9 @@ MediaEngineRemoteVideoSource::UpdateSingleSource(
       LOG(("Video device %d %s in ignored state %d", mCaptureIndex,
              (aHandle? aHandle->mOrigin.get() : ""), mState));
       break;
+  }
+  if (aHandle && aNewConstraints) {
+    aHandle->mConstraints = *aNewConstraints;
   }
   return NS_OK;
 }

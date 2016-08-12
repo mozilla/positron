@@ -657,7 +657,7 @@ protected:
   /**
    * Disposes an old target and prepares to lazily create a new target.
    */
-  void ClearTarget(bool aRetainBuffer = false);
+  void ClearTarget();
 
   /*
    * Returns the target to the buffer provider. i.e. this will queue a frame for
@@ -722,6 +722,10 @@ protected:
   static void RemoveDemotableContext(CanvasRenderingContext2D* aContext);
 
   RenderingMode mRenderingMode;
+
+  // Texture informations for fast video rendering
+  unsigned int mVideoTexture;
+  nsIntSize mCurrentVideoSize;
 
   // Member vars
   int32_t mWidth, mHeight;
@@ -932,7 +936,7 @@ protected:
                      fillRule(mozilla::gfx::FillRule::FILL_WINDING),
                      lineCap(mozilla::gfx::CapStyle::BUTT),
                      lineJoin(mozilla::gfx::JoinStyle::MITER_OR_BEVEL),
-                     filterString(u"none"),
+                     filterString(MOZ_UTF16("none")),
                      updateFilterOnWriteOnly(false),
                      imageSmoothingEnabled(true),
                      fontExplicitLanguage(false)

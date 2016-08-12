@@ -267,7 +267,7 @@ HitTestingTreeNode::HitTest(const ParentLayerPoint& aPoint) const
   if (!pointInLayerPixels) {
     return HitTestResult::HitNothing;
   }
-  auto point = LayerIntPoint::Round(pointInLayerPixels.ref());
+  LayerIntPoint point = RoundedToInt(pointInLayerPixels.ref());
 
   // test against event regions in Layer coordinate space
   if (!mEventRegions.mHitRegion.Contains(point.x, point.y)) {
@@ -282,13 +282,10 @@ HitTestingTreeNode::HitTest(const ParentLayerPoint& aPoint) const
     if (mEventRegions.mNoActionRegion.Contains(point.x, point.y)) {
       return HitTestResult::HitLayerTouchActionNone;
     }
-    bool panX = mEventRegions.mHorizontalPanRegion.Contains(point.x, point.y);
-    bool panY = mEventRegions.mVerticalPanRegion.Contains(point.x, point.y);
-    if (panX && panY) {
-      return HitTestResult::HitLayerTouchActionPanXY;
-    } else if (panX) {
+    if (mEventRegions.mHorizontalPanRegion.Contains(point.x, point.y)) {
       return HitTestResult::HitLayerTouchActionPanX;
-    } else if (panY) {
+    }
+    if (mEventRegions.mVerticalPanRegion.Contains(point.x, point.y)) {
       return HitTestResult::HitLayerTouchActionPanY;
     }
   }

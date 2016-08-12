@@ -29,7 +29,6 @@ namespace image {
 class Image;
 class ISurfaceProvider;
 class LookupResult;
-class SurfaceCacheImpl;
 struct SurfaceMemoryCounter;
 
 /*
@@ -119,36 +118,6 @@ VectorSurfaceKey(const gfx::IntSize& aSize,
   return SurfaceKey(aSize, aSVGContext, aAnimationTime, DefaultSurfaceFlags());
 }
 
-
-/**
- * AvailabilityState is used to track whether an ISurfaceProvider has a surface
- * available or is just a placeholder.
- *
- * To ensure that availability changes are atomic (and especially that internal
- * SurfaceCache code doesn't have to deal with asynchronous availability
- * changes), an ISurfaceProvider which starts as a placeholder can only reveal
- * the fact that it now has a surface available via a call to
- * SurfaceCache::SurfaceAvailable().
- */
-class AvailabilityState
-{
-public:
-  static AvailabilityState StartAvailable() { return AvailabilityState(true); }
-  static AvailabilityState StartAsPlaceholder() { return AvailabilityState(false); }
-
-  bool IsAvailable() const { return mIsAvailable; }
-  bool IsPlaceholder() const { return !mIsAvailable; }
-
-private:
-  friend class SurfaceCacheImpl;
-
-  explicit AvailabilityState(bool aIsAvailable) : mIsAvailable(aIsAvailable) { }
-
-  void SetAvailable() { mIsAvailable = true; }
-
-  bool mIsAvailable;
-};
-
 enum class InsertOutcome : uint8_t {
   SUCCESS,                 // Success (but see Insert documentation).
   FAILURE,                 // Couldn't insert (e.g., for capacity reasons).
@@ -194,33 +163,34 @@ struct SurfaceCache
   static void Shutdown();
 
   /**
-   * Looks up and returns the requested cache entry.
+   * Looks up the requested cache entry and returns a drawable reference to its
+   * associated surface.
    *
    * If the image associated with the cache entry is locked, then the entry will
    * be locked before it is returned.
    *
-   * This function returns an ISurfaceProvider, but it does not guarantee that
-   * the ISurfaceProvider can give the caller a drawable surface. Lookup()
-   * callers should check that ISurfaceProvider::DrawableRef() returns a
-   * non-empty value; if not, some sort of serious failure has occurred, and the
-   * best bet is to remove all existing surfaces for the image from the cache
-   * using RemoveImage() and try to recover. The most likely cause for this kind
-   * of failure is the surface's volatile buffer being freed by the operating
-   * system due to extreme memory pressure.
+   * If a matching ISurfaceProvider was found in the cache, but SurfaceCache
+   * couldn't obtain a surface from it (e.g. because it had stored its surface
+   * in a volatile buffer which was discarded by the OS) then it is
+   * automatically removed from the cache and an empty LookupResult is returned.
+   * Note that this will never happen to ISurfaceProviders associated with a
+   * locked image; SurfaceCache tells such ISurfaceProviders to keep a strong
+   * references to their data internally.
    *
    * @param aImageKey       Key data identifying which image the cache entry
    *                        belongs to.
    * @param aSurfaceKey     Key data which uniquely identifies the requested
    *                        cache entry.
-   * @return                a LookupResult which will contain an ISurfaceProvider
-   *                        for the requested surface if a matching cache entry
-   *                        was found.
+   * @return                a LookupResult, which will either contain a
+   *                        DrawableFrameRef to a surface, or an empty
+   *                        DrawableFrameRef if the cache entry was not found.
    */
   static LookupResult Lookup(const ImageKey    aImageKey,
                              const SurfaceKey& aSurfaceKey);
 
   /**
-   * Looks up and returns the best matching cache entry.
+   * Looks up the best matching cache entry and returns a drawable reference to
+   * its associated surface.
    *
    * The result may vary from the requested cache entry only in terms of size.
    *
@@ -228,12 +198,12 @@ struct SurfaceCache
    *                        belongs to.
    * @param aSurfaceKey     Key data which uniquely identifies the requested
    *                        cache entry.
-   * @return                a LookupResult which will contain either an
-   *                        ISurfaceProvider for a surface similar to the one
-   *                        the caller requested, or no ISurfaceProvider if no
-   *                        acceptable match was found. Callers can use
-   *                        LookupResult::IsExactMatch() to check whether the
-   *                        returned ISurfaceProvider exactly matches
+   * @return                a LookupResult, which will either contain a
+   *                        DrawableFrameRef to a surface similar to the
+   *                        the one the caller requested, or an empty
+   *                        DrawableFrameRef if no acceptable match was found.
+   *                        Callers can use LookupResult::IsExactMatch() to check
+   *                        whether the returned surface exactly matches
    *                        @aSurfaceKey.
    */
   static LookupResult LookupBestMatch(const ImageKey    aImageKey,
@@ -313,37 +283,6 @@ struct SurfaceCache
    */
   static InsertOutcome InsertPlaceholder(const ImageKey    aImageKey,
                                          const SurfaceKey& aSurfaceKey);
-
-  /**
-   * Mark the cache entry @aProvider as having an available surface. This turns
-   * a placeholder cache entry into a normal cache entry. The cache entry
-   * becomes locked if the associated image is locked; otherwise, it starts in
-   * the unlocked state.
-   *
-   * If the cache entry containing @aProvider has already been evicted from the
-   * surface cache, this function has no effect.
-   *
-   * It's illegal to call this function if @aProvider is not a placeholder; by
-   * definition, non-placeholder ISurfaceProviders should have a surface
-   * available already.
-   *
-   * XXX(seth): We're currently in a transitional state where two notions of
-   * placeholder exist: the old one (placeholders are an "empty" cache entry
-   * inserted via InsertPlaceholder(), which then gets replaced by inserting a
-   * real cache entry with the same keys via Insert()) and the new one (where
-   * the same cache entry, inserted via Insert(), starts in a placeholder state
-   * and then transitions to being a normal cache entry via this function). The
-   * old mechanism will be removed in bug 1292392.
-   *
-   * @param aProvider       The cache entry that now has a surface available.
-   * @param aImageKey       Key data identifying which image the cache entry
-   *                        belongs to.
-   * @param aSurfaceKey     Key data which uniquely identifies the requested
-   *                        cache entry.
-   */
-  static void SurfaceAvailable(NotNull<ISurfaceProvider*> aProvider,
-                               const ImageKey    aImageKey,
-                               const SurfaceKey& aSurfaceKey);
 
   /**
    * Checks if a surface of a given size could possibly be stored in the cache.

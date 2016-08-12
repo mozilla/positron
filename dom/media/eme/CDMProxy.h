@@ -41,7 +41,7 @@ struct DecryptResult {
 class CDMProxy {
 protected:
   typedef dom::PromiseId PromiseId;
-  typedef dom::MediaKeySessionType MediaKeySessionType;
+  typedef dom::SessionType SessionType;
 public:
 
   NS_IMETHOD_(MozExternalRefCountType) AddRef(void) = 0;
@@ -50,14 +50,8 @@ public:
   typedef MozPromise<DecryptResult, DecryptResult, /* IsExclusive = */ true> DecryptPromise;
 
   // Main thread only.
-  CDMProxy(dom::MediaKeys* aKeys,
-           const nsAString& aKeySystem,
-           bool aDistinctiveIdentifierRequired,
-           bool aPersistentStateRequired)
-    : mKeys(aKeys)
-    , mKeySystem(aKeySystem)
-    , mDistinctiveIdentifierRequired(aDistinctiveIdentifierRequired)
-    , mPersistentStateRequired(aPersistentStateRequired)
+  CDMProxy(dom::MediaKeys* aKeys, const nsAString& aKeySystem)
+  : mKeys(aKeys), mKeySystem(aKeySystem)
   {}
 
   // Main thread only.
@@ -74,7 +68,7 @@ public:
   // Calls MediaKeys::OnSessionActivated() when session is created.
   // Assumes ownership of (Move()s) aInitData's contents.
   virtual void CreateSession(uint32_t aCreateSessionToken,
-                             MediaKeySessionType aSessionType,
+                             dom::SessionType aSessionType,
                              PromiseId aPromiseId,
                              const nsAString& aInitDataType,
                              nsTArray<uint8_t>& aInitData) = 0;
@@ -235,9 +229,6 @@ protected:
   nsCString mNodeId;
 
   CDMCaps mCapabilites;
-
-  const bool mDistinctiveIdentifierRequired;
-  const bool mPersistentStateRequired;
 };
 
 

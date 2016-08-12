@@ -12,6 +12,10 @@ nsQueryInterface::operator()(const nsIID& aIID, void** aAnswer) const
   nsresult status;
   if (mRawPtr) {
     status = mRawPtr->QueryInterface(aIID, aAnswer);
+#ifdef NSCAP_FEATURE_TEST_NONNULL_QUERY_SUCCEEDS
+    NS_ASSERTION(NS_SUCCEEDED(status),
+                 "interface not found---were you expecting that?");
+#endif
   } else {
     status = NS_ERROR_NULL_POINTER;
   }
@@ -25,6 +29,10 @@ nsQueryInterfaceWithError::operator()(const nsIID& aIID, void** aAnswer) const
   nsresult status;
   if (mRawPtr) {
     status = mRawPtr->QueryInterface(aIID, aAnswer);
+#ifdef NSCAP_FEATURE_TEST_NONNULL_QUERY_SUCCEEDS
+    NS_ASSERTION(NS_SUCCEEDED(status),
+                 "interface not found---were you expecting that?");
+#endif
   } else {
     status = NS_ERROR_NULL_POINTER;
   }

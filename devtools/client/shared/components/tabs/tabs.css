@@ -17,7 +17,7 @@
 }
 
 .tabs .tabs-menu-item {
-  display: inline-block;
+  float: left;
 }
 
 .tabs .tabs-menu-item a {
@@ -44,13 +44,17 @@
 
 .theme-dark .tabs,
 .theme-light .tabs {
-  background: var(--theme-body-background);
+  background: var(--theme-tab-toolbar-background);
 }
 
 .theme-dark .tabs .tabs-navigation,
 .theme-light .tabs .tabs-navigation {
   border-bottom: 1px solid var(--theme-splitter-color);
-  background: var(--theme-tab-toolbar-background);
+  font-size: 12px;
+}
+
+.theme-firebug .tabs .tabs-navigation {
+  font-size: 11px;
 }
 
 .theme-dark .tabs .tabs-menu-item,
@@ -63,63 +67,59 @@
   border-color: var(--theme-splitter-color);
 }
 
-.theme-dark .tabs .tabs-menu-item:last-child,
-.theme-light:not(.theme-firebug) .tabs .tabs-menu-item:last-child {
-  border-inline-end-width: 1px;
-}
-
 .theme-dark .tabs .tabs-menu-item a,
 .theme-light .tabs .tabs-menu-item a {
   color: var(--theme-content-color1);
+}
+
+.theme-dark .tabs .tabs-menu-item a:hover,
+.theme-dark .tabs .tabs-menu-item a,
+.theme-light .tabs .tabs-menu-item a:hover,
+.theme-light .tabs .tabs-menu-item a {
   padding: 3px 15px;
 }
 
-.theme-dark .tabs .tabs-menu-item:hover:not(.is-active),
-.theme-light .tabs .tabs-menu-item:hover:not(.is-active) {
+.theme-dark .tabs .tabs-menu-item:hover,
+.theme-light .tabs .tabs-menu-item:hover {
   background-color: var(--toolbar-tab-hover);
 }
 
-.theme-dark .tabs .tabs-menu-item:hover:active:not(.is-active),
-.theme-light .tabs .tabs-menu-item:hover:active:not(.is-active) {
-  background-color: var(--toolbar-tab-hover-active);
-}
-
 .theme-dark .tabs .tabs-menu-item.is-active,
-.theme-light .tabs .tabs-menu-item.is-active {
+.theme-dark .tabs .tabs-menu-item.is-active:hover,
+.theme-light .tabs .tabs-menu-item.is-active,
+.theme-light .tabs .tabs-menu-item.is-active:hover {
   background-color: var(--theme-selection-background);
 }
 
 .theme-dark .tabs .tabs-menu-item.is-active a,
-.theme-light .tabs .tabs-menu-item.is-active a {
+.theme-dark .tabs .tabs-menu-item.is-active:hover a,
+.theme-light .tabs .tabs-menu-item.is-active a,
+.theme-light .tabs .tabs-menu-item.is-active:hover a {
   color: var(--theme-selection-color);
 }
 
 /* Dark Theme */
 
 .theme-dark .tabs .tabs-menu-item a {
-  color: var(--theme-body-color-alt);
-}
-
-.theme-dark .tabs .tabs-menu-item:hover:not(.is-active) a {
   color: #CED3D9;
 }
 
-.theme-dark .tabs .tabs-menu-item:hover:active a {
-  color: var(--theme-selection-color);
+.theme-dark .tabs .tabs-menu-item:active:hover {
+  background-color: hsla(206, 37%, 4%, .4); /* --toolbar-tab-hover-active */
 }
 
 /* Firebug Theme */
 
-.theme-firebug .tabs .tabs-navigation {
+.theme-firebug .tabs {
   background-color: rgb(219, 234, 249);
   background-image: linear-gradient(rgba(253, 253, 253, 0.2), rgba(253, 253, 253, 0));
-  padding-top: 3px;
-  padding-left: 3px;
-  border-bottom: 1px solid rgb(170, 188, 207);
 }
 
-.theme-firebug .tabs .tabs-menu {
-  margin-bottom: -1px;
+.theme-firebug .tabs .tabs-navigation {
+  padding-top: 3px;
+  padding-left: 3px;
+  height: 27px;
+  border-bottom: 1px solid rgb(170, 188, 207);
 }
 
 .theme-firebug .tabs .tabs-menu-item.is-active,
@@ -139,29 +139,26 @@
   border-radius: 4px 4px 0 0;
 }
 
-.theme-firebug .tabs .tabs-menu-item:hover:not(.is-active) a {
+.theme-firebug .tabs .tabs-menu-item:hover a {
   border: 1px solid #C8C8C8;
   border-bottom: 1px solid transparent;
   background-color: transparent;
 }
 
-.theme-firebug .tabs .tabs-menu-item.is-active a {
+.theme-firebug .tabs .tabs-menu-item.is-active a,
+.theme-firebug .tabs .tabs-menu-item.is-active:hover a {
   background-color: rgb(247, 251, 254);
   border: 1px solid rgb(170, 188, 207);
   border-bottom-color: transparent;
   color: var(--theme-body-color);
 }
 
-.theme-firebug .tabs .tabs-menu-item:hover:active a {
-  background-color: var(--toolbar-tab-hover-active);
-}
-
-.theme-firebug .tabs .tabs-menu-item.is-active:hover:active a {
-  background-color: var(--theme-selection-background);
-  color: var(--theme-selection-color);
-}
-
+.theme-firebug .tabs .tabs-menu-item a:hover,
 .theme-firebug .tabs .tabs-menu-item a {
   border: 1px solid transparent;
-  padding: 4px 8px;
+}
+
+.theme-firebug .tabs .tabs-menu-item a:hover,
+.theme-firebug .tabs .tabs-menu-item a {
+  padding: 4px 8px 4px 8px;
 }

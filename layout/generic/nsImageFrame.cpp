@@ -116,14 +116,14 @@ static bool HaveSpecifiedSize(const nsStylePosition* aStylePosition)
 
 // Decide whether we can optimize away reflows that result from the
 // image's intrinsic size changing.
-inline bool HaveFixedSize(const ReflowInput& aReflowInput)
+inline bool HaveFixedSize(const nsHTMLReflowState& aReflowState)
 {
-  NS_ASSERTION(aReflowInput.mStylePosition, "crappy reflowInput - null stylePosition");
+  NS_ASSERTION(aReflowState.mStylePosition, "crappy reflowState - null stylePosition");
   // Don't try to make this optimization when an image has percentages
   // in its 'width' or 'height'.  The percentages might be treated like
   // auto (especially for intrinsic width calculations and for heights).
-  return aReflowInput.mStylePosition->mHeight.ConvertsToLength() &&
-         aReflowInput.mStylePosition->mWidth.ConvertsToLength();
+  return aReflowState.mStylePosition->mHeight.ConvertsToLength() &&
+         aReflowState.mStylePosition->mWidth.ConvertsToLength();
 }
 
 nsIFrame*
@@ -948,23 +948,23 @@ nsImageFrame::GetIntrinsicRatio()
 
 void
 nsImageFrame::Reflow(nsPresContext*          aPresContext,
-                     ReflowOutput&     aMetrics,
-                     const ReflowInput& aReflowInput,
+                     nsHTMLReflowMetrics&     aMetrics,
+                     const nsHTMLReflowState& aReflowState,
                      nsReflowStatus&          aStatus)
 {
   MarkInReflow();
   DO_GLOBAL_REFLOW_COUNT("nsImageFrame");
-  DISPLAY_REFLOW(aPresContext, this, aReflowInput, aMetrics, aStatus);
+  DISPLAY_REFLOW(aPresContext, this, aReflowState, aMetrics, aStatus);
   NS_FRAME_TRACE(NS_FRAME_TRACE_CALLS,
                   ("enter nsImageFrame::Reflow: availSize=%d,%d",
-                  aReflowInput.AvailableWidth(), aReflowInput.AvailableHeight()));
+                  aReflowState.AvailableWidth(), aReflowState.AvailableHeight()));
 
   NS_PRECONDITION(mState & NS_FRAME_IN_REFLOW, "frame is not in reflow");
 
   aStatus = NS_FRAME_COMPLETE;
 
   // see if we have a frozen size (i.e. a fixed width and height)
-  if (HaveFixedSize(aReflowInput)) {
+  if (HaveFixedSize(aReflowState)) {
     mState |= IMAGE_SIZECONSTRAINED;
   } else {
     mState &= ~IMAGE_SIZECONSTRAINED;
@@ -977,19 +977,19 @@ nsImageFrame::Reflow(nsPresContext*          aPresContext,
   }
 
   mComputedSize = 
-    nsSize(aReflowInput.ComputedWidth(), aReflowInput.ComputedHeight());
+    nsSize(aReflowState.ComputedWidth(), aReflowState.ComputedHeight());
 
   aMetrics.Width() = mComputedSize.width;
   aMetrics.Height() = mComputedSize.height;
 
   // add borders and padding
-  aMetrics.Width()  += aReflowInput.ComputedPhysicalBorderPadding().LeftRight();
-  aMetrics.Height() += aReflowInput.ComputedPhysicalBorderPadding().TopBottom();
+  aMetrics.Width()  += aReflowState.ComputedPhysicalBorderPadding().LeftRight();
+  aMetrics.Height() += aReflowState.ComputedPhysicalBorderPadding().TopBottom();
   
   if (GetPrevInFlow()) {
     aMetrics.Width() = GetPrevInFlow()->GetSize().width;
     nscoord y = GetContinuationOffset();
-    aMetrics.Height() -= y + aReflowInput.ComputedPhysicalBorderPadding().top;
+    aMetrics.Height() -= y + aReflowState.ComputedPhysicalBorderPadding().top;
     aMetrics.Height() = std::max(0, aMetrics.Height());
   }
 
@@ -1009,11 +1009,11 @@ nsImageFrame::Reflow(nsPresContext*          aPresContext,
   }
   if (aPresContext->IsPaginated() &&
       ((loadStatus & imgIRequest::STATUS_SIZE_AVAILABLE) || (mState & IMAGE_SIZECONSTRAINED)) &&
-      NS_UNCONSTRAINEDSIZE != aReflowInput.AvailableHeight() && 
-      aMetrics.Height() > aReflowInput.AvailableHeight()) { 
+      NS_UNCONSTRAINEDSIZE != aReflowState.AvailableHeight() && 
+      aMetrics.Height() > aReflowState.AvailableHeight()) { 
     // our desired height was greater than 0, so to avoid infinite
     // splitting, use 1 pixel as the min
-    aMetrics.Height() = std::max(nsPresContext::CSSPixelsToAppUnits(1), aReflowInput.AvailableHeight());
+    aMetrics.Height() = std::max(nsPresContext::CSSPixelsToAppUnits(1), aReflowState.AvailableHeight());
     aStatus = NS_FRAME_NOT_COMPLETE;
   }
 
@@ -1053,7 +1053,7 @@ nsImageFrame::Reflow(nsPresContext*          aPresContext,
   NS_FRAME_TRACE(NS_FRAME_TRACE_CALLS,
                   ("exit nsImageFrame::Reflow: size=%d,%d",
                   aMetrics.Width(), aMetrics.Height()));
-  NS_FRAME_SET_TRUNCATION(aStatus, aReflowInput, aMetrics);
+  NS_FRAME_SET_TRUNCATION(aStatus, aReflowState, aMetrics);
 }
 
 bool
@@ -2152,7 +2152,7 @@ nsImageFrame::List(FILE* out, const char* aPrefix, uint32_t aFlags) const
 #endif
 
 nsIFrame::LogicalSides
-nsImageFrame::GetLogicalSkipSides(const ReflowInput* aReflowInput) const
+nsImageFrame::GetLogicalSkipSides(const nsHTMLReflowState* aReflowState) const
 {
   if (MOZ_UNLIKELY(StyleBorder()->mBoxDecorationBreak ==
                      NS_STYLE_BOX_DECORATION_BREAK_CLONE)) {

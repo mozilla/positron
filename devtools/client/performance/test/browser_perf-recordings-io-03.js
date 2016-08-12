@@ -1,7 +1,6 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
-"use strict";
-/* eslint-disable */
+
 /**
  * Tests if the performance tool gracefully handles loading files that are JSON,
  * but don't contain the appropriate recording data.
@@ -53,4 +52,3 @@ function asyncCopy(data, file) {
 
   return deferred.promise;
 }
-/* eslint-enable */

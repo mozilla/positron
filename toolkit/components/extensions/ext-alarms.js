@@ -83,13 +83,11 @@ extensions.on("startup", (type, extension) => {
 });
 
 extensions.on("shutdown", (type, extension) => {
-  if (alarmsMap.has(extension)) {
-    for (let alarm of alarmsMap.get(extension).values()) {
-      alarm.clear();
-    }
-    alarmsMap.delete(extension);
-    alarmCallbacksMap.delete(extension);
+  for (let alarm of alarmsMap.get(extension).values()) {
+    alarm.clear();
   }
+  alarmsMap.delete(extension);
+  alarmCallbacksMap.delete(extension);
 });
 /* eslint-enable mozilla/balanced-listeners */
 

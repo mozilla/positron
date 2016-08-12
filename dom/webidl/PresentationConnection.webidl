@@ -30,11 +30,6 @@ interface PresentationConnection : EventTarget {
   readonly attribute DOMString id;
 
   /*
-   * Specifies the connection's presentation URL.
-   */
-  readonly attribute DOMString url;
-
-  /*
    * @value "connected", "closed", or "terminated".
    */
   readonly attribute PresentationConnectionState state;

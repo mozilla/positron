@@ -24,6 +24,7 @@
 #endif
 #endif
 
+#include "nscore.h"
 #include "nsXULAppAPI.h"
 
 // This directory service key is a lot like NS_APP_LOCALSTORE_50_FILE,

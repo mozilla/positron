@@ -36,8 +36,8 @@ public:
                                 const nsDisplayListSet& aLists) override;
 
   virtual void Reflow(nsPresContext*           aCX,
-                      ReflowOutput&     aDesiredSize,
-                      const ReflowInput& aReflowInput,
+                      nsHTMLReflowMetrics&     aDesiredSize,
+                      const nsHTMLReflowState& aReflowState,
                       nsReflowStatus&          aStatus) override;
 
   virtual nsIAtom* GetType() const override;
@@ -89,7 +89,7 @@ protected:
   // Helper function which reflow the anonymous div frame.
   void ReflowBarFrame(nsIFrame*                aBarFrame,
                       nsPresContext*           aPresContext,
-                      const ReflowInput& aReflowInput,
+                      const nsHTMLReflowState& aReflowState,
                       nsReflowStatus&          aStatus);
 
   /**

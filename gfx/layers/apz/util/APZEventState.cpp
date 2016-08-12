@@ -166,7 +166,6 @@ NS_IMPL_ISUPPORTS(DelayedFireSingleTapEvent, nsITimerCallback)
 
 void
 APZEventState::ProcessSingleTap(const CSSPoint& aPoint,
-                                const CSSToLayoutDeviceScale& aScale,
                                 Modifiers aModifiers,
                                 const ScrollableLayerGuid& aGuid)
 {
@@ -182,19 +181,21 @@ APZEventState::ProcessSingleTap(const CSSPoint& aPoint,
     return;
   }
 
-  LayoutDevicePoint ldPoint = aPoint * aScale;
+  LayoutDevicePoint currentPoint =
+      APZCCallbackHelper::ApplyCallbackTransform(aPoint, aGuid)
+    * widget->GetDefaultScale();
   if (!mActiveElementManager->ActiveElementUsesStyle()) {
     // If the active element isn't visually affected by the :active style, we
     // have no need to wait the extra sActiveDurationMs to make the activation
     // visually obvious to the user.
-    APZCCallbackHelper::FireSingleTapEvent(ldPoint, aModifiers, widget);
+    APZCCallbackHelper::FireSingleTapEvent(currentPoint, aModifiers, widget);
     return;
   }
 
   APZES_LOG("Active element uses style, scheduling timer for click event\n");
   nsCOMPtr<nsITimer> timer = do_CreateInstance(NS_TIMER_CONTRACTID);
   RefPtr<DelayedFireSingleTapEvent> callback =
-    new DelayedFireSingleTapEvent(mWidget, ldPoint, aModifiers, timer);
+    new DelayedFireSingleTapEvent(mWidget, currentPoint, aModifiers, timer);
   nsresult rv = timer->InitWithCallback(callback,
                                         sActiveDurationMs,
                                         nsITimer::TYPE_ONE_SHOT);
@@ -208,7 +209,6 @@ APZEventState::ProcessSingleTap(const CSSPoint& aPoint,
 void
 APZEventState::ProcessLongTap(const nsCOMPtr<nsIPresShell>& aPresShell,
                               const CSSPoint& aPoint,
-                              const CSSToLayoutDeviceScale& aScale,
                               Modifiers aModifiers,
                               const ScrollableLayerGuid& aGuid,
                               uint64_t aInputBlockId)
@@ -226,9 +226,10 @@ APZEventState::ProcessLongTap(const nsCOMPtr<nsIPresShell>& aPresShell,
   // is the most useless thing ever because nsDOMWindowUtils::SendMouseEvent
   // just converts them back to widget format, but that API has many callers,
   // including in JS code, so it's not trivial to change.
+  CSSPoint point = APZCCallbackHelper::ApplyCallbackTransform(aPoint, aGuid);
   bool eventHandled =
       APZCCallbackHelper::DispatchMouseEvent(aPresShell, NS_LITERAL_STRING("contextmenu"),
-                         aPoint, 2, 1, WidgetModifiersToDOMModifiers(aModifiers), true,
+                         point, 2, 1, WidgetModifiersToDOMModifiers(aModifiers), true,
                          nsIDOMMouseEvent::MOZ_SOURCE_TOUCH);
 
   APZES_LOG("Contextmenu event handled: %d\n", eventHandled);
@@ -238,11 +239,11 @@ APZEventState::ProcessLongTap(const nsCOMPtr<nsIPresShell>& aPresShell,
     mActiveElementManager->ClearActivation();
   } else {
     // If no one handle context menu, fire MOZLONGTAP event
-    LayoutDevicePoint ldPoint = aPoint * aScale;
+    LayoutDevicePoint currentPoint = point * widget->GetDefaultScale();
     int time = 0;
     nsEventStatus status =
         APZCCallbackHelper::DispatchSynthesizedMouseEvent(eMouseLongTap, time,
-                                                          ldPoint,
+                                                          currentPoint,
                                                           aModifiers, widget);
     eventHandled = (status == nsEventStatus_eConsumeNoDefault);
     APZES_LOG("MOZLONGTAP event handled: %d\n", eventHandled);
@@ -255,7 +256,7 @@ APZEventState::ProcessLongTap(const nsCOMPtr<nsIPresShell>& aPresShell,
     // waiting for a touchend don't trigger.
     WidgetTouchEvent cancelTouchEvent(true, eTouchCancel, widget.get());
     cancelTouchEvent.mModifiers = WidgetModifiersToDOMModifiers(aModifiers);
-    auto ldPoint = LayoutDeviceIntPoint::Round(aPoint * aScale);
+    LayoutDeviceIntPoint ldPoint = RoundedToInt(point * widget->GetDefaultScale());
     cancelTouchEvent.mTouches.AppendElement(new mozilla::dom::Touch(mLastTouchIdentifier,
         ldPoint, LayoutDeviceIntPoint(), 0, 0));
     APZCCallbackHelper::DispatchWidgetEvent(cancelTouchEvent);

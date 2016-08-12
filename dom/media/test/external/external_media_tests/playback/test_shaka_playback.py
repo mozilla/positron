@@ -3,7 +3,6 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 
-from marionette import Marionette
 from external_media_harness.testcase import MediaTestCase
 from external_media_tests.media_utils.video_puppeteer import VideoPuppeteer
 
@@ -21,7 +20,7 @@ class TestShakaPlayback(MediaTestCase):
         shakaUrl = "http://shaka-player-demo.appspot.com"
         self.prefs.set_pref('media.mediasource.webm.enabled', True)
 
-        with self.marionette.using_context(Marionette.CONTEXT_CONTENT):
+        with self.marionette.using_context('content'):
             for manifestUrl in self.video_urls:
                 vp = VideoPuppeteer(self.marionette,
                                     shakaUrl,
@@ -29,7 +28,6 @@ class TestShakaPlayback(MediaTestCase):
                                     set_duration=60,
                                     video_selector="video#video",
                                     autostart=False)
-
 
                 manifestInput = self.marionette.find_element("id",
                                                              "manifestUrlInput")

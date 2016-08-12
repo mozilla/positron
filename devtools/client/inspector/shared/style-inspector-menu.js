@@ -14,7 +14,8 @@ const {Task} = require("devtools/shared/task");
 const Menu = require("devtools/client/framework/menu");
 const MenuItem = require("devtools/client/framework/menu-item");
 
-const overlays = require("devtools/client/inspector/shared/style-inspector-overlays");
+loader.lazyRequireGetter(this, "overlays",
+  "devtools/client/inspector/shared/style-inspector-overlays");
 loader.lazyServiceGetter(this, "clipboardHelper",
   "@mozilla.org/widget/clipboardhelper;1", "nsIClipboardHelper");
 loader.lazyGetter(this, "_strings", () => {

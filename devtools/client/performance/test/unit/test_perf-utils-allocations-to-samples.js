@@ -1,6 +1,5 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
-"use strict";
 
 /**
  * Tests if allocations data received from the performance actor is properly
@@ -45,7 +44,6 @@ var TEST_DATA = {
   ]
 };
 
-/* eslint-disable no-inline-comments */
 var EXPECTED_OUTPUT = {
   name: "allocations",
   samples: {
@@ -93,4 +91,3 @@ var EXPECTED_OUTPUT = {
     "C:5:6"
   ],
 };
-/* eslint-enable no-inline-comments */

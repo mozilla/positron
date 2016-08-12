@@ -148,7 +148,6 @@ nsSVGDisplayContainerFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
       !static_cast<const nsSVGElement*>(mContent)->HasValidDimensions()) {
     return;
   }
-  DisplayOutline(aBuilder, aLists);
   return BuildDisplayListForNonBlockChildren(aBuilder, aDirtyRect, aLists);
 }
 

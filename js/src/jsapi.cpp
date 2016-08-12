@@ -122,7 +122,7 @@ JS::CallArgs::requireAtLeast(JSContext* cx, const char* fnname, unsigned require
 {
     if (length() < required) {
         char numArgsStr[40];
-        snprintf(numArgsStr, sizeof(numArgsStr), "%u", required - 1);
+        JS_snprintf(numArgsStr, sizeof numArgsStr, "%u", required - 1);
         JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_MORE_ARGS_NEEDED,
                              fnname, numArgsStr, required == 2 ? "" : "s");
         return false;
@@ -457,26 +457,23 @@ JS::isGCEnabled()
 JS_FRIEND_API(bool) JS::isGCEnabled() { return true; }
 #endif
 
-JS_PUBLIC_API(JSContext*)
-JS_NewContext(uint32_t maxbytes, uint32_t maxNurseryBytes, JSContext* parentContext)
+JS_PUBLIC_API(JSRuntime*)
+JS_NewRuntime(uint32_t maxbytes, uint32_t maxNurseryBytes, JSRuntime* parentRuntime)
 {
     MOZ_ASSERT(JS::detail::libraryInitState == JS::detail::InitState::Running,
-               "must call JS_Init prior to creating any JSContexts");
+               "must call JS_Init prior to creating any JSRuntimes");
 
     // Make sure that all parent runtimes are the topmost parent.
-    JSRuntime* parentRuntime = nullptr;
-    if (parentContext) {
-        parentRuntime = parentContext->runtime();
-        while (parentRuntime && parentRuntime->parentRuntime)
-            parentRuntime = parentRuntime->parentRuntime;
-    }
+    while (parentRuntime && parentRuntime->parentRuntime)
+        parentRuntime = parentRuntime->parentRuntime;
 
     return NewContext(maxbytes, maxNurseryBytes, parentRuntime);
 }
 
 JS_PUBLIC_API(void)
-JS_DestroyContext(JSContext* cx)
+JS_DestroyRuntime(JSRuntime* rt)
 {
+    JSContext* cx = rt->contextFromMainThread();
     DestroyContext(cx);
 }
 
@@ -571,10 +568,10 @@ JS_GetContext(JSRuntime* rt)
     return rt->contextFromMainThread();
 }
 
-JS_PUBLIC_API(JSContext*)
-JS_GetParentContext(JSContext* cx)
+JS_PUBLIC_API(JSRuntime*)
+JS_GetParentRuntime(JSRuntime* rt)
 {
-    return cx->parentRuntime ? cx->parentRuntime->unsafeContextFromAnyThread() : cx;
+    return rt->parentRuntime ? rt->parentRuntime : rt;
 }
 
 JS_PUBLIC_API(JSVersion)
@@ -708,7 +705,6 @@ JS_EnterCompartment(JSContext* cx, JSObject* target)
 {
     AssertHeapIsIdle(cx);
     CHECK_REQUEST(cx);
-    MOZ_ASSERT(!JS::ObjectIsMarkedGray(target));
 
     JSCompartment* oldCompartment = cx->compartment();
     cx->enterCompartment(target->compartment());
@@ -730,7 +726,6 @@ JSAutoCompartment::JSAutoCompartment(JSContext* cx, JSObject* target
 {
     AssertHeapIsIdleOrIterating(cx_);
     MOZ_GUARD_OBJECT_NOTIFIER_INIT;
-    MOZ_ASSERT(!JS::ObjectIsMarkedGray(target));
     cx_->enterCompartment(target->compartment());
 }
 
@@ -741,9 +736,9 @@ JSAutoCompartment::JSAutoCompartment(JSContext* cx, JSScript* target
 {
     AssertHeapIsIdleOrIterating(cx_);
     MOZ_GUARD_OBJECT_NOTIFIER_INIT;
-    MOZ_ASSERT(!JS::ScriptIsMarkedGray(target));
     cx_->enterCompartment(target->compartment());
 }
+
 
 JSAutoCompartment::~JSAutoCompartment()
 {
@@ -759,7 +754,6 @@ JSAutoNullableCompartment::JSAutoNullableCompartment(JSContext* cx,
     AssertHeapIsIdleOrIterating(cx_);
     MOZ_GUARD_OBJECT_NOTIFIER_INIT;
     if (targetOrNull) {
-        MOZ_ASSERT(!JS::ObjectIsMarkedGray(targetOrNull));
         cx_->enterCompartment(targetOrNull->compartment());
     } else {
         cx_->enterNullCompartment();
@@ -1301,6 +1295,12 @@ JS_freeop(JSFreeOp* fop, void* p)
     return FreeOp::get(fop)->free_(p);
 }
 
+JS_PUBLIC_API(JSFreeOp*)
+JS_GetDefaultFreeOp(JSRuntime* rt)
+{
+    return rt->defaultFreeOp();
+}
+
 JS_PUBLIC_API(void)
 JS_updateMallocCounter(JSContext* cx, size_t nbytes)
 {
@@ -1433,10 +1433,10 @@ JS_SetGCParameter(JSContext* cx, JSGCParamKey key, uint32_t value)
 }
 
 JS_PUBLIC_API(uint32_t)
-JS_GetGCParameter(JSContext* cx, JSGCParamKey key)
+JS_GetGCParameter(JSRuntime* rt, JSGCParamKey key)
 {
-    AutoLockGC lock(cx);
-    return cx->gc.getParameter(key, lock);
+    AutoLockGC lock(rt);
+    return rt->gc.getParameter(key, lock);
 }
 
 static const size_t NumGCConfigs = 14;
@@ -4907,9 +4907,9 @@ JS::GetWaitForAllPromise(JSContext* cx, const JS::AutoObjectVector& promises)
 }
 
 JS_PUBLIC_API(void)
-JS_RequestInterruptCallback(JSContext* cx)
+JS_RequestInterruptCallback(JSRuntime* rt)
 {
-    cx->requestInterrupt(JSRuntime::RequestInterruptUrgent);
+    rt->requestInterrupt(JSRuntime::RequestInterruptUrgent);
 }
 
 JS_PUBLIC_API(bool)
@@ -6147,9 +6147,6 @@ JS_SetGlobalJitCompilerOption(JSContext* cx, JSJitCompilerOption opt, uint32_t v
       case JSJITCOMPILER_WASM_TEST_MODE:
         jit::JitOptions.wasmTestMode = !!value;
         break;
-      case JSJITCOMPILER_WASM_EXPLICIT_BOUNDS_CHECKS:
-        jit::JitOptions.wasmExplicitBoundsChecks = !!value;
-        break;
       default:
         break;
     }
@@ -6177,8 +6174,6 @@ JS_GetGlobalJitCompilerOption(JSContext* cx, JSJitCompilerOption opt)
         return rt->canUseOffthreadIonCompilation();
       case JSJITCOMPILER_WASM_TEST_MODE:
         return jit::JitOptions.wasmTestMode ? 1 : 0;
-      case JSJITCOMPILER_WASM_EXPLICIT_BOUNDS_CHECKS:
-        return jit::JitOptions.wasmExplicitBoundsChecks ? 1 : 0;
       default:
         break;
     }
@@ -6536,14 +6531,8 @@ JS::SetOutOfMemoryCallback(JSContext* cx, OutOfMemoryCallback cb, void* data)
     cx->oomCallbackData = data;
 }
 
-JS::FirstSubsumedFrame::FirstSubsumedFrame(JSContext* cx,
-                                           bool ignoreSelfHostedFrames /* = true */)
-  : JS::FirstSubsumedFrame(cx, cx->compartment()->principals(), ignoreSelfHostedFrames)
-{ }
-
 JS_PUBLIC_API(bool)
-JS::CaptureCurrentStack(JSContext* cx, JS::MutableHandleObject stackp,
-                        JS::StackCapture&& capture /* = JS::StackCapture(JS::AllFrames()) */)
+JS::CaptureCurrentStack(JSContext* cx, JS::MutableHandleObject stackp, unsigned maxFrameCount)
 {
     AssertHeapIsIdle(cx);
     CHECK_REQUEST(cx);
@@ -6551,7 +6540,7 @@ JS::CaptureCurrentStack(JSContext* cx, JS::MutableHandleObject stackp,
 
     JSCompartment* compartment = cx->compartment();
     Rooted<SavedFrame*> frame(cx);
-    if (!compartment->savedStacks().saveCurrentStack(cx, &frame, mozilla::Move(capture)))
+    if (!compartment->savedStacks().saveCurrentStack(cx, &frame, maxFrameCount))
         return false;
     stackp.set(frame.get());
     return true;

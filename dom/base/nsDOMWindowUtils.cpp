@@ -30,7 +30,6 @@
 #ifdef MOZ_FMP4
 #include "MP4Decoder.h"
 #endif
-#include "CubebUtils.h"
 
 #include "nsIScrollableFrame.h"
 
@@ -648,18 +647,14 @@ nsDOMWindowUtils::SendMouseEvent(const nsAString& aType,
                                  bool aIgnoreRootScrollFrame,
                                  float aPressure,
                                  unsigned short aInputSourceArg,
-                                 bool aIsDOMEventSynthesized,
-                                 bool aIsWidgetEventSynthesized,
+                                 bool aIsSynthesized,
                                  uint8_t aOptionalArgCount,
                                  bool *aPreventDefault)
 {
   return SendMouseEventCommon(aType, aX, aY, aButton, aClickCount, aModifiers,
                               aIgnoreRootScrollFrame, aPressure,
                               aInputSourceArg, false, aPreventDefault,
-                              aOptionalArgCount >= 4 ?
-                                aIsDOMEventSynthesized : true,
-                              aOptionalArgCount >= 5 ?
-                                aIsWidgetEventSynthesized : false);
+                              aOptionalArgCount >= 4 ? aIsSynthesized : true);
 }
 
 NS_IMETHODIMP
@@ -672,8 +667,7 @@ nsDOMWindowUtils::SendMouseEventToWindow(const nsAString& aType,
                                          bool aIgnoreRootScrollFrame,
                                          float aPressure,
                                          unsigned short aInputSourceArg,
-                                         bool aIsDOMEventSynthesized,
-                                         bool aIsWidgetEventSynthesized,
+                                         bool aIsSynthesized,
                                          uint8_t aOptionalArgCount)
 {
   PROFILER_LABEL("nsDOMWindowUtils", "SendMouseEventToWindow",
@@ -682,10 +676,7 @@ nsDOMWindowUtils::SendMouseEventToWindow(const nsAString& aType,
   return SendMouseEventCommon(aType, aX, aY, aButton, aClickCount, aModifiers,
                               aIgnoreRootScrollFrame, aPressure,
                               aInputSourceArg, true, nullptr,
-                              aOptionalArgCount >= 4 ?
-                                aIsDOMEventSynthesized : true,
-                              aOptionalArgCount >= 5 ?
-                                aIsWidgetEventSynthesized : false);
+                              aOptionalArgCount >= 4 ? aIsSynthesized : true);
 }
 
 NS_IMETHODIMP
@@ -700,14 +691,12 @@ nsDOMWindowUtils::SendMouseEventCommon(const nsAString& aType,
                                        unsigned short aInputSourceArg,
                                        bool aToWindow,
                                        bool *aPreventDefault,
-                                       bool aIsDOMEventSynthesized,
-                                       bool aIsWidgetEventSynthesized)
+                                       bool aIsSynthesized)
 {
   nsCOMPtr<nsIPresShell> presShell = GetPresShell();
   return nsContentUtils::SendMouseEvent(presShell, aType, aX, aY, aButton,
       aClickCount, aModifiers, aIgnoreRootScrollFrame, aPressure,
-      aInputSourceArg, aToWindow, aPreventDefault, aIsDOMEventSynthesized,
-      aIsWidgetEventSynthesized);
+      aInputSourceArg, aToWindow, aPreventDefault, aIsSynthesized);
 }
 
 NS_IMETHODIMP
@@ -764,12 +753,11 @@ nsDOMWindowUtils::SendPointerEventCommon(const nsAString& aType,
   event.pressure = aPressure;
   event.inputSource = aInputSourceArg;
   event.pointerId = aPointerId;
-  event.mWidth = aWidth;
-  event.mHeight = aHeight;
+  event.width = aWidth;
+  event.height = aHeight;
   event.tiltX = aTiltX;
   event.tiltY = aTiltY;
-  event.mIsPrimary =
-    (nsIDOMMouseEvent::MOZ_SOURCE_MOUSE == aInputSourceArg) ? true : aIsPrimary;
+  event.isPrimary = (nsIDOMMouseEvent::MOZ_SOURCE_MOUSE == aInputSourceArg) ? true : aIsPrimary;
   event.mClickCount = aClickCount;
   event.mTime = PR_IntervalNow();
   event.mFlags.mIsSynthesizedForTests = aOptionalArgCount >= 10 ? aIsSynthesized : true;
@@ -2339,13 +2327,6 @@ nsDOMWindowUtils::GetSupportsHardwareH264Decoding(JS::MutableHandle<JS::Value> a
 }
 
 NS_IMETHODIMP
-nsDOMWindowUtils::GetCurrentAudioBackend(nsAString& aBackend)
-{
-  CubebUtils::GetCurrentBackend(aBackend);
-  return NS_OK;
-}
-
-NS_IMETHODIMP
 nsDOMWindowUtils::StartFrameTimeRecording(uint32_t *startIndex)
 {
   NS_ENSURE_ARG_POINTER(startIndex);
@@ -2819,7 +2800,7 @@ CheckLeafLayers(Layer* aLayer, const nsIntPoint& aOffset, nsIntRegion* aCoveredR
       transform.HasNonIntegerTranslation())
     return false;
   transform.NudgeToIntegers();
-  IntPoint offset = aOffset + IntPoint::Truncate(transform._31, transform._32);
+  nsIntPoint offset = aOffset + nsIntPoint(transform._31, transform._32);
 
   Layer* child = aLayer->GetFirstChild();
   if (child) {

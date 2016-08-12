@@ -2973,11 +2973,7 @@ HttpBaseChannel::SetupReplacementChannel(nsIURI       *newURI,
   httpChannel->SetAllowPipelining(mAllowPipelining);
   httpChannel->SetAllowSTS(mAllowSTS);
   // convey the new redirection limit
-  // make sure we don't underflow
-  uint32_t redirectionLimit = mRedirectionLimit
-    ? mRedirectionLimit - 1
-    : 0;
-  httpChannel->SetRedirectionLimit(redirectionLimit);
+  httpChannel->SetRedirectionLimit(mRedirectionLimit - 1);
 
   // convey the Accept header value
   {

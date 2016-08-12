@@ -49,9 +49,7 @@ function test() {
   let mm = getGroupMessageManager("social");
   mm.loadFrameScript(frameScript, true);
 
-  PopupNotifications.panel.setAttribute("animate", "false");
   registerCleanupFunction(function () {
-    PopupNotifications.panel.removeAttribute("animate");
     mm.removeDelayedFrameScript(frameScript);
   });
 
@@ -71,13 +69,13 @@ var tests = {
     // we expect the addon install dialog to appear, we need to accept the
     // install from the dialog.
     let panel = document.getElementById("servicesInstall-notification");
-    BrowserTestUtils.waitForEvent(PopupNotifications.panel, "popupshown").then(() => {
+    ensureEventFired(PopupNotifications.panel, "popupshown").then(() => {
       info("servicesInstall-notification panel opened");
       panel.button.click();
     })
 
     let activationURL = manifest3.origin + "/browser/browser/base/content/test/social/social_activate.html"
-    BrowserTestUtils.openNewForegroundTab(gBrowser, activationURL).then(tab => {
+    addTab(activationURL, function(tab) {
       let doc = tab.linkedBrowser.contentDocument;
       let data = {
         origin: doc.nodePrincipal.origin,
@@ -93,7 +91,8 @@ var tests = {
           let widget = CustomizableUI.getWidget(id);
           ok(!widget || !widget.forWindow(window).node, "no button added to widget set");
           Social.uninstallProvider(manifest3.origin, function() {
-            BrowserTestUtils.removeTab(tab).then(next);
+            gBrowser.removeTab(tab);
+            next();
           });
         });
       });
@@ -101,14 +100,14 @@ var tests = {
   },
   testButtonOnEnable: function(next) {
     let panel = document.getElementById("servicesInstall-notification");
-    BrowserTestUtils.waitForEvent(PopupNotifications.panel, "popupshown").then(() => {
+    ensureEventFired(PopupNotifications.panel, "popupshown").then(() => {
       info("servicesInstall-notification panel opened");
       panel.button.click();
     });
 
     // enable the provider now
     let activationURL = manifest2.origin + "/browser/browser/base/content/test/social/social_activate.html"
-    BrowserTestUtils.openNewForegroundTab(gBrowser, activationURL).then(tab => {
+    addTab(activationURL, function(tab) {
       let doc = tab.linkedBrowser.contentDocument;
       let data = {
         origin: doc.nodePrincipal.origin,
@@ -124,7 +123,8 @@ var tests = {
           let widget = CustomizableUI.getWidget(id).forWindow(window);
           ok(widget.node, "button added to widget set");
           checkSocialUI(window);
-          BrowserTestUtils.removeTab(tab).then(next);
+          gBrowser.removeTab(tab);
+          next();
         });
       });
     });
@@ -145,18 +145,18 @@ var tests = {
     // Disable the transition
     let panel = document.getElementById("social-notification-panel");
     panel.setAttribute("animate", "false");
-    BrowserTestUtils.waitForEvent(panel, "popupshown").then(() => {
+    ensureEventFired(panel, "popupshown").then(() => {
       ensureFrameLoaded(panel.firstChild).then(() => {
         let mm = panel.firstChild.messageManager;
         mm.sendAsyncMessage("socialTest-sendEvent", { name: "Social:Notification", data: icon });
-        BrowserTestUtils.waitForCondition(
-          () => { return btn.getAttribute("badge"); }, "button updated by notification").then(() => {
-            is(btn.style.listStyleImage, "url(\"" + icon.iconURL + "\")", "notification icon updated");
-            panel.hidePopup();
-          });
+        waitForCondition(function() { return btn.getAttribute("badge"); },
+                   function() {
+                     is(btn.style.listStyleImage, "url(\"" + icon.iconURL + "\")", "notification icon updated");
+                     panel.hidePopup();
+                   }, "button updated by notification");
         });
     });
-    BrowserTestUtils.waitForEvent(panel, "popuphidden").then(() => {
+    ensureEventFired(panel, "popuphidden").then(() => {
       panel.removeAttribute("animate");
       next();
     });
@@ -178,13 +178,13 @@ var tests = {
       info("testing offline error page");
       // wait for popupshown
       let panel = document.getElementById("social-notification-panel");
-      BrowserTestUtils.waitForEvent(panel, "popupshown").then(() => {
+      ensureEventFired(panel, "popupshown").then(() => {
         ensureFrameLoaded(frame).then(() => {
           is(frame.contentDocument.documentURI.indexOf("about:socialerror?mode=tryAgainOnly"), 0, "social error page is showing "+frame.contentDocument.documentURI);
           // We got our error page, reset to avoid test leak.
-          BrowserTestUtils.waitForEvent(frame, "load", true).then(() => {
+          ensureEventFired(frame, "load").then(() => {
             is(frame.contentDocument.documentURI, "about:blank", "closing error panel");
-            BrowserTestUtils.waitForEvent(panel, "popuphidden").then(next);
+            ensureEventFired(panel, "popuphidden").then(next);
             panel.hidePopup();
           });
           goOnline().then(() => {
@@ -194,7 +194,7 @@ var tests = {
         });
       });
       // reload after going offline, wait for unload to open panel
-      BrowserTestUtils.waitForEvent(frame, "unload", true).then(() => {
+      ensureEventFired(frame, "unload").then(() => {
         btn.click();
       });
       frame.contentDocument.location.reload();
@@ -207,10 +207,10 @@ var tests = {
     ok(provider, "provider is installed");
     SocialService.disableProvider(manifest2.origin, function() {
       let id = SocialStatus._toolbarHelper.idFromOrigin(manifest2.origin);
-      BrowserTestUtils.waitForCondition(() => { return !document.getElementById(id) },
-                                        "button does not exist after disabling the provider").then(() => {
-        Social.uninstallProvider(manifest2.origin, next);
-       });
+      waitForCondition(function() { return !document.getElementById(id) },
+                       function() {
+                        Social.uninstallProvider(manifest2.origin, next);
+                       }, "button does not exist after disabling the provider");
     });
   }
 }

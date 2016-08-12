@@ -7,7 +7,6 @@
 
 #include "GLContext.h"
 #include "mozilla/gfx/2D.h"
-#include "gfxUtils.h"
 #include "mozilla/gfx/Tools.h"  // For BytesPerPixel
 #include "nsRegion.h"
 #include "GfxTexturesReporter.h"
@@ -18,6 +17,39 @@ namespace mozilla {
 using namespace gfx;
 
 namespace gl {
+
+/* These two techniques are suggested by "Bit Twiddling Hacks"
+ */
+
+/**
+ * Returns true if |aNumber| is a power of two
+ * 0 is incorreclty considered a power of two
+ */
+static bool
+IsPowerOfTwo(int aNumber)
+{
+    return (aNumber & (aNumber - 1)) == 0;
+}
+
+/**
+ * Returns the first integer greater than |aNumber| which is a power of two
+ * Undefined for |aNumber| < 0
+ */
+static int
+NextPowerOfTwo(int aNumber)
+{
+#if defined(__arm__)
+    return 1 << (32 - __builtin_clz(aNumber - 1));
+#else
+    --aNumber;
+    aNumber |= aNumber >> 1;
+    aNumber |= aNumber >> 2;
+    aNumber |= aNumber >> 4;
+    aNumber |= aNumber >> 8;
+    aNumber |= aNumber >> 16;
+    return ++aNumber;
+#endif
+}
 
 static unsigned int
 DataOffset(const IntPoint& aPoint, int32_t aStride, SurfaceFormat aFormat)
@@ -253,16 +285,15 @@ TexImage2DHelper(GLContext* gl,
         NS_ASSERTION(format == (GLenum)internalformat,
                     "format and internalformat not the same for glTexImage2D on GLES2");
 
-        MOZ_ASSERT(width >= 0 && height >= 0);
         if (!CanUploadNonPowerOfTwo(gl)
             && (stride != width * pixelsize
-            || !IsPowerOfTwo((uint32_t)width)
-            || !IsPowerOfTwo((uint32_t)height))) {
+            || !IsPowerOfTwo(width)
+            || !IsPowerOfTwo(height))) {
 
             // Pad out texture width and height to the next power of two
             // as we don't support/want non power of two texture uploads
-            GLsizei paddedWidth = RoundUpPow2((uint32_t)width);
-            GLsizei paddedHeight = RoundUpPow2((uint32_t)height);
+            GLsizei paddedWidth = NextPowerOfTwo(width);
+            GLsizei paddedHeight = NextPowerOfTwo(height);
 
             GLvoid* paddedPixels = new unsigned char[paddedWidth * paddedHeight * pixelsize];
 
@@ -348,6 +379,51 @@ TexImage2DHelper(GLContext* gl,
         gl->fPixelStorei(LOCAL_GL_UNPACK_ROW_LENGTH, 0);
         gl->fPixelStorei(LOCAL_GL_UNPACK_ALIGNMENT, 4);
     }
+}
+
+static uint32_t
+GetBytesPerTexel(GLenum format, GLenum type)
+{
+    // If there is no defined format or type, we're not taking up any memory
+    if (!format || !type) {
+        return 0;
+    }
+
+    if (format == LOCAL_GL_DEPTH_COMPONENT) {
+        if (type == LOCAL_GL_UNSIGNED_SHORT)
+            return 2;
+        else if (type == LOCAL_GL_UNSIGNED_INT)
+            return 4;
+    } else if (format == LOCAL_GL_DEPTH_STENCIL) {
+        if (type == LOCAL_GL_UNSIGNED_INT_24_8_EXT)
+            return 4;
+    }
+
+    if (type == LOCAL_GL_UNSIGNED_BYTE || type == LOCAL_GL_FLOAT || type == LOCAL_GL_UNSIGNED_INT_8_8_8_8_REV) {
+        uint32_t multiplier = type == LOCAL_GL_UNSIGNED_BYTE ? 1 : 4;
+        switch (format) {
+            case LOCAL_GL_ALPHA:
+            case LOCAL_GL_LUMINANCE:
+                return 1 * multiplier;
+            case LOCAL_GL_LUMINANCE_ALPHA:
+                return 2 * multiplier;
+            case LOCAL_GL_RGB:
+                return 3 * multiplier;
+            case LOCAL_GL_RGBA:
+                return 4 * multiplier;
+            default:
+                break;
+        }
+    } else if (type == LOCAL_GL_UNSIGNED_SHORT_4_4_4_4 ||
+               type == LOCAL_GL_UNSIGNED_SHORT_5_5_5_1 ||
+               type == LOCAL_GL_UNSIGNED_SHORT_5_6_5)
+    {
+        return 2;
+    }
+
+    gfxCriticalError() << "Unknown texture type " << type << " or format " << format;
+    MOZ_CRASH();
+    return 0;
 }
 
 SurfaceFormat

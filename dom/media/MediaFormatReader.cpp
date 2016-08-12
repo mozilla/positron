@@ -17,7 +17,6 @@
 #include "MediaResource.h"
 #include "mozilla/SharedThreadPool.h"
 #include "VideoUtils.h"
-#include "VideoFrameContainer.h"
 
 #include <algorithm>
 
@@ -32,7 +31,6 @@ using mozilla::layers::LayerManager;
 using mozilla::layers::LayersBackend;
 
 static mozilla::LazyLogModule sFormatDecoderLog("MediaFormatReader");
-mozilla::LazyLogModule gMediaDemuxerLog("MediaDemuxer");
 
 #define LOG(arg, ...) MOZ_LOG(sFormatDecoderLog, mozilla::LogLevel::Debug, ("MediaFormatReader(%p)::%s: " arg, this, __func__, ##__VA_ARGS__))
 #define LOGV(arg, ...) MOZ_LOG(sFormatDecoderLog, mozilla::LogLevel::Verbose, ("MediaFormatReader(%p)::%s: " arg, this, __func__, ##__VA_ARGS__))
@@ -69,7 +67,6 @@ MediaFormatReader::MediaFormatReader(AbstractMediaDecoder* aDecoder,
   , mDemuxer(aDemuxer)
   , mDemuxerInitDone(false)
   , mLastReportedNumDecodedFrames(0)
-  , mPreviousDecodedKeyframeTime_us(sNoPreviousDecodedKeyframe)
   , mLayersBackendType(aLayersBackend)
   , mInitDone(false)
   , mIsEncrypted(false)
@@ -419,8 +416,7 @@ MediaFormatReader::EnsureDecoderCreated(TrackType aTrack)
         decoder.mInfo ? *decoder.mInfo->GetAsAudioInfo() : mInfo.mAudio,
         decoder.mTaskQueue,
         decoder.mCallback.get(),
-        mCrashHelper,
-        decoder.mIsBlankDecode
+        mCrashHelper
       });
       break;
     }
@@ -434,8 +430,7 @@ MediaFormatReader::EnsureDecoderCreated(TrackType aTrack)
         decoder.mCallback.get(),
         mLayersBackendType,
         GetImageContainer(),
-        mCrashHelper,
-        decoder.mIsBlankDecode
+        mCrashHelper
       });
       break;
     }
@@ -463,10 +458,6 @@ MediaFormatReader::EnsureDecoderInitialized(TrackType aTrack)
   if (decoder.mDecoderInitialized) {
     return true;
   }
-  if (IsSuspended()) {
-    return false;
-  }
-
   RefPtr<MediaFormatReader> self = this;
   decoder.mInitPromise.Begin(decoder.mDecoder->Init()
        ->Then(OwnerThread(), __func__,
@@ -1024,7 +1015,7 @@ MediaFormatReader::HandleDemuxedSamples(TrackType aTrack,
     decoder.mNumSamplesInput++;
     decoder.mSizeOfQueue++;
     if (aTrack == TrackInfo::kVideoTrack) {
-      aA.mStats.mParsedFrames++;
+      aA.mParsed++;
     }
 
     if (mDemuxOnly) {
@@ -1168,8 +1159,6 @@ MediaFormatReader::Update(TrackType aTrack)
     if (time >= target.Time()) {
       // We have reached our internal seek target.
       decoder.mTimeThreshold.reset();
-      // We might have dropped some keyframes.
-      mPreviousDecodedKeyframeTime_us = sNoPreviousDecodedKeyframe;
     }
     if (time < target.Time() || (target.mDropTarget && target.Contains(time))) {
       LOGV("Internal Seeking: Dropping %s frame time:%f wanted:%f (kf:%d)",
@@ -1203,20 +1192,8 @@ MediaFormatReader::Update(TrackType aTrack)
       if (aTrack == TrackType::kVideoTrack) {
         uint64_t delta =
           decoder.mNumSamplesOutputTotal - mLastReportedNumDecodedFrames;
-        a.mStats.mDecodedFrames = static_cast<uint32_t>(delta);
+        a.mDecoded = static_cast<uint32_t>(delta);
         mLastReportedNumDecodedFrames = decoder.mNumSamplesOutputTotal;
-        if (output->mKeyframe) {
-          if (mPreviousDecodedKeyframeTime_us < output->mTime) {
-            // There is a previous keyframe -> Record inter-keyframe stats.
-            uint64_t segment_us = output->mTime - mPreviousDecodedKeyframeTime_us;
-            a.mStats.mInterKeyframeSum_us += segment_us;
-            a.mStats.mInterKeyframeCount += 1;
-            if (a.mStats.mInterKeyFrameMax_us < segment_us) {
-              a.mStats.mInterKeyFrameMax_us = segment_us;
-            }
-          }
-          mPreviousDecodedKeyframeTime_us = output->mTime;
-        }
         nsCString error;
         mVideo.mIsHardwareAccelerated =
           mVideo.mDecoder && mVideo.mDecoder->IsHardwareAccelerated(error);
@@ -1514,7 +1491,7 @@ MediaFormatReader::DropDecodedSamples(TrackType aTrack)
   decoder.mOutput.Clear();
   decoder.mSizeOfQueue -= lengthDecodedQueue;
   if (aTrack == TrackInfo::kVideoTrack && mDecoder) {
-    mDecoder->NotifyDecodedFrames({ 0, 0, lengthDecodedQueue });
+    mDecoder->NotifyDecodedFrames(0, 0, lengthDecodedQueue);
   }
 }
 
@@ -1550,7 +1527,7 @@ MediaFormatReader::VideoSkipReset(uint32_t aSkipped)
   DropDecodedSamples(TrackInfo::kVideoTrack);
   // Report the pending frames as dropped.
   if (mDecoder) {
-    mDecoder->NotifyDecodedFrames({ 0, 0, SizeOfVideoQueueInFrames() });
+    mDecoder->NotifyDecodedFrames(0, 0, SizeOfVideoQueueInFrames());
   }
 
   // Cancel any pending demux request and pending demuxed samples.
@@ -1558,7 +1535,7 @@ MediaFormatReader::VideoSkipReset(uint32_t aSkipped)
   Reset(TrackType::kVideoTrack);
 
   if (mDecoder) {
-    mDecoder->NotifyDecodedFrames({ aSkipped, 0, aSkipped });
+    mDecoder->NotifyDecodedFrames(aSkipped, 0, aSkipped);
   }
 
   mVideo.mNumSamplesSkippedTotal += aSkipped;
@@ -1659,13 +1636,15 @@ MediaFormatReader::DemuxStartTime()
 {
   MOZ_ASSERT(OnTaskQueue());
   MOZ_ASSERT(!ForceZeroStartTime());
-  MOZ_ASSERT(HasAudio() || HasVideo());
+  MOZ_ASSERT((!HasAudio() || mAudio.mFirstDemuxedSampleTime.isSome()) &&
+             (!HasVideo() || mVideo.mFirstDemuxedSampleTime.isSome()));
 
-  const TimeUnit startTime =
-    std::min(mAudio.mFirstDemuxedSampleTime.refOr(TimeUnit::FromInfinity()),
-             mVideo.mFirstDemuxedSampleTime.refOr(TimeUnit::FromInfinity()));
-
-  return startTime.IsInfinite() ? TimeUnit::FromMicroseconds(0) : startTime;
+  return std::min(HasAudio()
+                  ? mAudio.mFirstDemuxedSampleTime.ref()
+                  : TimeUnit::FromInfinity(),
+                  HasVideo()
+                  ? mVideo.mFirstDemuxedSampleTime.ref()
+                  : TimeUnit::FromInfinity());
 }
 
 void
@@ -1778,8 +1757,6 @@ MediaFormatReader::OnVideoSeekCompleted(media::TimeUnit aTime)
   LOGV("Video seeked to %lld", aTime.ToMicroseconds());
   mVideo.mSeekRequest.Complete();
 
-  mPreviousDecodedKeyframeTime_us = sNoPreviousDecodedKeyframe;
-
   SetVideoDecodeThreshold();
 
   if (HasAudio() && !mOriginalSeekTarget.IsVideoOnly()) {
@@ -1794,13 +1771,6 @@ MediaFormatReader::OnVideoSeekCompleted(media::TimeUnit aTime)
     mPendingSeekTime.reset();
     mSeekPromise.Resolve(aTime, __func__);
   }
-}
-
-void
-MediaFormatReader::OnVideoSeekFailed(DemuxerFailureReason aFailure)
-{
-  mPreviousDecodedKeyframeTime_us = sNoPreviousDecodedKeyframe;
-  OnSeekFailed(TrackType::kVideoTrack, aFailure);
 }
 
 void
@@ -1861,12 +1831,6 @@ MediaFormatReader::OnAudioSeekCompleted(media::TimeUnit aTime)
   mAudio.mSeekRequest.Complete();
   mPendingSeekTime.reset();
   mSeekPromise.Resolve(aTime, __func__);
-}
-
-void
-MediaFormatReader::OnAudioSeekFailed(DemuxerFailureReason aFailure)
-{
-  OnSeekFailed(TrackType::kAudioTrack, aFailure);
 }
 
 media::TimeIntervals
@@ -2059,34 +2023,6 @@ MediaFormatReader::GetMozDebugReaderData(nsAString& aString)
                               mVideo.mWaitingForData, mVideo.mLastStreamSourceID);
   }
   aString += NS_ConvertUTF8toUTF16(result);
-}
-
-void
-MediaFormatReader::SetVideoBlankDecode(bool aIsBlankDecode)
-{
-  MOZ_ASSERT(OnTaskQueue());
-  return SetBlankDecode(TrackType::kVideoTrack, aIsBlankDecode);
-}
-
-void
-MediaFormatReader::SetBlankDecode(TrackType aTrack, bool aIsBlankDecode)
-{
-  MOZ_ASSERT(OnTaskQueue());
-  auto& decoder = GetDecoderData(aTrack);
-
-  LOG("%s, decoder.mIsBlankDecode = %d => aIsBlankDecode = %d",
-      TrackTypeToStr(aTrack), decoder.mIsBlankDecode, aIsBlankDecode);
-
-  if (decoder.mIsBlankDecode == aIsBlankDecode) {
-    return;
-  }
-
-  decoder.mIsBlankDecode = aIsBlankDecode;
-  decoder.Flush();
-  decoder.ShutdownDecoder();
-  NotifyDecodingRequested(TrackInfo::kVideoTrack); // Calls ScheduleUpdate().
-
-  return;
 }
 
 } // namespace mozilla

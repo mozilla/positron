@@ -482,10 +482,6 @@ struct Zone : public JS::shadow::Zone,
         source->uniqueIds_.clear();
     }
 
-    JSContext* contextFromMainThread() {
-        return runtime_->contextFromMainThread();
-    }
-
 #ifdef JSGC_HASH_TABLE_CHECKS
     // Assert that the UniqueId table has been redirected successfully.
     void checkUniqueIdTableAfterMovingGC();

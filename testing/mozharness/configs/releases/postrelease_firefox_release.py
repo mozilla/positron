@@ -11,7 +11,6 @@ config = {
         "dest": "mozilla-release",
         "vcs": "hg",
     },
-    "vcs_share_base": "/builds/hg-shared",
     "push_dest": "ssh://hg.mozilla.org/releases/mozilla-release",
     "ignore_no_changes": True,
     "ssh_user": "ffxbld",

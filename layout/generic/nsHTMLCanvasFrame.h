@@ -72,8 +72,8 @@ public:
               ComputeSizeFlags aFlags) override;
 
   virtual void Reflow(nsPresContext*           aPresContext,
-                      ReflowOutput&     aDesiredSize,
-                      const ReflowInput& aReflowInput,
+                      nsHTMLReflowMetrics&     aDesiredSize,
+                      const nsHTMLReflowState& aReflowState,
                       nsReflowStatus&          aStatus) override;
 
   nsRect GetInnerArea() const;

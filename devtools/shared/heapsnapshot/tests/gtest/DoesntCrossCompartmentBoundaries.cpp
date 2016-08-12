@@ -53,7 +53,7 @@ DEF_TEST(DoesntCrossCompartmentBoundaries, {
 
     // But we shouldn't ever serialize nodeC.
 
-    JS::AutoCheckCannotGC noGC(cx);
+    JS::AutoCheckCannotGC noGC(rt);
 
     ASSERT_TRUE(WriteHeapGraph(cx,
                                JS::ubi::Node(&nodeA),

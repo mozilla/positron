@@ -78,6 +78,7 @@ public:
 
   static void AppendStepsTimingFunction(nsTimingFunction::Type aType,
                                         uint32_t aSteps,
+                                        nsTimingFunction::StepSyntax aSyntax,
                                         nsAString& aResult);
   static void AppendCubicBezierTimingFunction(float aX1, float aY1,
                                               float aX2, float aY2,

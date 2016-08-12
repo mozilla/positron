@@ -118,6 +118,7 @@ ConvertYCbCrToRGB(const layers::PlanarYCbCrData& aData,
                         aData.mCbCrStride,
                         aStride,
                         yuvtype,
+                        ROTATE_0,
                         FILTER_BILINEAR);
   } else { // no prescale
 #if defined(HAVE_YCBCR_TO_RGB565)

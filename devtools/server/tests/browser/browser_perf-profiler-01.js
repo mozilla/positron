@@ -8,7 +8,7 @@
  */
 
 const { PerformanceFront } = require("devtools/shared/fronts/performance");
-const { pmmIsProfilerActive, pmmStopProfiler, pmmLoadFrameScripts } = require("devtools/client/performance/test/helpers/profiler-mm-utils");
+const { PMM_isProfilerActive, PMM_stopProfiler, PMM_loadFrameScripts } = require("devtools/client/performance/test/helpers/profiler-mm-utils");
 
 add_task(function* () {
   let browser = yield addTab(MAIN_DOMAIN + "doc_perf.html");
@@ -20,25 +20,25 @@ add_task(function* () {
   let front = PerformanceFront(client, form);
   yield front.connect();
 
-  pmmLoadFrameScripts(gBrowser);
+  PMM_loadFrameScripts(gBrowser);
 
-  ok(!(yield pmmIsProfilerActive()),
+  ok(!(yield PMM_isProfilerActive()),
     "The built-in profiler module should not have been automatically started.");
 
   let rec = yield front.startRecording();
   yield front.stopRecording(rec);
-  ok((yield pmmIsProfilerActive()),
+  ok((yield PMM_isProfilerActive()),
     "The built-in profiler module should still be active (1).");
 
   rec = yield front.startRecording();
   yield front.stopRecording(rec);
-  ok((yield pmmIsProfilerActive()),
+  ok((yield PMM_isProfilerActive()),
     "The built-in profiler module should still be active (2).");
 
   yield front.destroy();
   yield closeDebuggerClient(client);
 
-  ok(!(yield pmmIsProfilerActive()),
+  ok(!(yield PMM_isProfilerActive()),
     "The built-in profiler module should no longer be active.");
 
   gBrowser.removeCurrentTab();

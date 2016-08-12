@@ -1174,9 +1174,9 @@ RenderExport(WasmRenderContext& c, AstExport& export_, const AstModule::FuncVect
         if (!c.buffer.append("memory"))
           return false;
     } else {
-        const AstFunc* func = funcs[export_.ref().index()];
+        const AstFunc* func = funcs[export_.func().index()];
         if (func->name().empty()) {
-            if (!RenderInt32(c, export_.ref().index()))
+            if (!RenderInt32(c, export_.func().index()))
                 return false;
         } else {
             if (!RenderName(c, func->name()))

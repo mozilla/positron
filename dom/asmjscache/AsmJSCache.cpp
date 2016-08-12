@@ -1310,8 +1310,7 @@ private:
 
     mFileSize = aFileSize;
 
-    auto rawFD = aFileDesc.ClonePlatformHandle();
-    mFileDesc = PR_ImportFile(PROsfd(rawFD.release()));
+    mFileDesc = PR_ImportFile(PROsfd(aFileDesc.PlatformHandle()));
     if (!mFileDesc) {
       return false;
     }

@@ -149,6 +149,12 @@ nsINode::~nsINode()
 {
   MOZ_ASSERT(!HasSlots(), "nsNodeUtils::LastRelease was not called?");
   MOZ_ASSERT(mSubtreeRoot == this, "Didn't restore state properly?");
+
+#ifdef MOZ_STYLO
+  if (mServoNodeData) {
+    Servo_DropNodeData(mServoNodeData);
+  }
+#endif
 }
 
 void*

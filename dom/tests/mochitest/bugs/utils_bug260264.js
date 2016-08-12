@@ -31,22 +31,14 @@ function send(element, event, handler) {
     while (n --> 0) {
       var win = wins.pop();
       if (win) {
-        let openedWindowID =
-          SpecialPowers.getDOMWindowUtils(win).outerWindowID;
         promises.push((function(openedWindow) {
           return new Promise(function(resolve) {
-            let observer = {
-              observe(subject) {
-                let wrapped = SpecialPowers.wrap(subject);
-                let winID = wrapped.QueryInterface(SpecialPowers.Ci.nsISupportsPRUint64).data;
-                if (winID == openedWindowID) {
-                  SpecialPowers.removeObserver(observer, "outer-window-destroyed");
-                  SimpleTest.executeSoon(resolve);
-                }
+            SpecialPowers.addObserver(function observer(subject, topic, data) {
+              if (subject == openedWindow) {
+                SpecialPowers.removeObserver(observer, "dom-window-destroyed");
+                SimpleTest.executeSoon(resolve);
               }
-            };
-
-            SpecialPowers.addObserver(observer, "outer-window-destroyed", false);
+            }, "dom-window-destroyed", false);
           });
         })(win));
         win.close();

@@ -32,10 +32,6 @@
 #include "gfxPlatformGtk.h"
 #endif
 
-#ifdef MOZ_X11
-#include "mozilla/X11Util.h"
-#endif
-
 using namespace mozilla;
 using namespace mozilla::unicode;
 
@@ -721,29 +717,6 @@ gfxFontconfigFontEntry::CreateScaledFont(FcPattern* aRenderPattern,
 static void ApplyGdkScreenFontOptions(FcPattern *aPattern);
 #endif
 
-#ifdef MOZ_X11
-static bool
-GetXftInt(Display* aDisplay, const char* aName, int* aResult)
-{
-    if (!aDisplay) {
-        return false;
-    }
-    char* value = XGetDefault(aDisplay, "Xft", aName);
-    if (!value) {
-        return false;
-    }
-    if (FcNameConstant(const_cast<FcChar8*>(ToFcChar8Ptr(value)), aResult)) {
-        return true;
-    }
-    char* end;
-    *aResult = strtol(value, &end, 0);
-    if (end != value) {
-        return true;
-    }
-    return false;
-}
-#endif
-
 static void
 PreparePattern(FcPattern* aPattern, bool aIsPrinterFont)
 {
@@ -772,16 +745,6 @@ PreparePattern(FcPattern* aPattern, bool aIsPrinterFont)
 #ifdef MOZ_WIDGET_GTK
        ApplyGdkScreenFontOptions(aPattern);
 #endif
-
-#ifdef MOZ_X11
-        FcValue value;
-        int lcdfilter;
-        if (FcPatternGet(aPattern, FC_LCD_FILTER, 0, &value)
-                == FcResultNoMatch &&
-            GetXftInt(DefaultXDisplay(), "lcdfilter", &lcdfilter)) {
-            FcPatternAddInteger(aPattern, FC_LCD_FILTER, lcdfilter);
-        }
-#endif
     }
 
     FcDefaultSubstitute(aPattern);
@@ -798,10 +761,16 @@ gfxFontconfigFontEntry::CreateFontInstance(const gfxFontStyle *aFontStyle,
     nsAutoRef<FcPattern> renderPattern
         (FcFontRenderPrepare(nullptr, pattern, mFontPattern));
 
+    FcBool autohint;
+    if (FcPatternGetBool(renderPattern, FC_AUTOHINT, 0, &autohint) != FcResultMatch) {
+      autohint = FcFalse;
+    }
+
     cairo_scaled_font_t* scaledFont =
         CreateScaledFont(renderPattern, aFontStyle, aNeedsBold);
     gfxFont* newFont =
-        new gfxFontconfigFont(scaledFont, renderPattern, this, aFontStyle, aNeedsBold);
+        new gfxFontconfigFont(scaledFont, this, aFontStyle, aNeedsBold,
+                              bool(autohint));
     cairo_scaled_font_destroy(scaledFont);
 
     return newFont;
@@ -913,17 +882,42 @@ gfxFontconfigFontFamily::AddFontPattern(FcPattern* aFontPattern)
 }
 
 gfxFontconfigFont::gfxFontconfigFont(cairo_scaled_font_t *aScaledFont,
-                                     FcPattern *aPattern,
                                      gfxFontEntry *aFontEntry,
                                      const gfxFontStyle *aFontStyle,
-                                     bool aNeedsBold) :
-    gfxFontconfigFontBase(aScaledFont, aPattern, aFontEntry, aFontStyle)
+                                     bool aNeedsBold,
+                                     bool aAutoHinting) :
+    gfxFT2FontBase(aScaledFont, aFontEntry, aFontStyle),
+    mAutoHinting(aAutoHinting)
 {
 }
 
 gfxFontconfigFont::~gfxFontconfigFont()
 {
 }
+
+#ifdef USE_SKIA
+already_AddRefed<mozilla::gfx::GlyphRenderingOptions>
+gfxFontconfigFont::GetGlyphRenderingOptions(const TextRunDrawParams* aRunParams)
+{
+  cairo_scaled_font_t *scaled_font = CairoScaledFont();
+  cairo_font_options_t *options = cairo_font_options_create();
+  cairo_scaled_font_get_font_options(scaled_font, options);
+  cairo_hint_style_t hint_style = cairo_font_options_get_hint_style(options);
+  cairo_antialias_t antialias = cairo_font_options_get_antialias(options);
+  cairo_font_options_destroy(options);
+
+  mozilla::gfx::FontHinting hinting =
+    mozilla::gfx::CairoHintingToGfxHinting(hint_style);
+
+  mozilla::gfx::AntialiasMode aaMode =
+    mozilla::gfx::CairoAntialiasToGfxAntialias(antialias);
+
+  bool autohint = GetAutoHinting();
+
+  // The fontconfig AA mode must be passed along because it may override the hinting style.
+  return mozilla::gfx::Factory::CreateCairoGlyphRenderingOptions(hinting, autohint, aaMode);
+}
+#endif
 
 gfxFcPlatformFontList::gfxFcPlatformFontList()
     : mLocalNames(64)

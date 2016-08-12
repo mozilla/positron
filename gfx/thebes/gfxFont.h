@@ -46,6 +46,7 @@ class gfxGlyphExtents;
 class gfxShapedText;
 class gfxShapedWord;
 class gfxSkipChars;
+class gfxTextContextPaint;
 
 #define FONT_MAX_SIZE                  2000.0
 
@@ -66,7 +67,6 @@ class gfxSkipChars;
 struct gfxTextRunDrawCallbacks;
 
 namespace mozilla {
-class SVGContextPaint;
 namespace gfx {
 class GlyphRenderingOptions;
 } // namespace gfx
@@ -568,6 +568,8 @@ public:
 
         // Set if the textrun should use the OpenType 'math' script.
         TEXT_USE_MATH_SCRIPT = 0x80000000,
+
+        TEXT_UNUSED_FLAGS = 0x10000000
     };
 
     /**
@@ -1335,7 +1337,6 @@ class gfxFont {
 protected:
     typedef mozilla::gfx::DrawTarget DrawTarget;
     typedef mozilla::unicode::Script Script;
-    typedef mozilla::SVGContextPaint SVGContextPaint;
 
 public:
     nsrefcnt AddRef(void) {
@@ -1793,8 +1794,7 @@ public:
         FONT_TYPE_FT2,
         FONT_TYPE_MAC,
         FONT_TYPE_OS2,
-        FONT_TYPE_CAIRO,
-        FONT_TYPE_FONTCONFIG
+        FONT_TYPE_CAIRO
     } FontType;
 
     virtual FontType GetType() const = 0;
@@ -2149,9 +2149,9 @@ protected:
     void SanitizeMetrics(Metrics *aMetrics, bool aIsBadUnderlineFont);
 
     bool RenderSVGGlyph(gfxContext *aContext, gfxPoint aPoint,
-                        uint32_t aGlyphId, SVGContextPaint* aContextPaint) const;
+                        uint32_t aGlyphId, gfxTextContextPaint *aContextPaint) const;
     bool RenderSVGGlyph(gfxContext *aContext, gfxPoint aPoint,
-                        uint32_t aGlyphId, SVGContextPaint* aContextPaint,
+                        uint32_t aGlyphId, gfxTextContextPaint *aContextPaint,
                         gfxTextRunDrawCallbacks *aCallbacks,
                         bool& aEmittedGlyphs) const;
 
@@ -2185,7 +2185,7 @@ struct TextRunDrawParams {
     gfxContext              *context;
     gfxFont::Spacing        *spacing;
     gfxTextRunDrawCallbacks *callbacks;
-    mozilla::SVGContextPaint *runContextPaint;
+    gfxTextContextPaint     *runContextPaint;
     mozilla::gfx::Color      fontSmoothingBGColor;
     gfxFloat                 direction;
     double                   devPerApp;
@@ -2202,7 +2202,7 @@ struct TextRunDrawParams {
 struct FontDrawParams {
     RefPtr<mozilla::gfx::ScaledFont>            scaledFont;
     RefPtr<mozilla::gfx::GlyphRenderingOptions> renderingOptions;
-    mozilla::SVGContextPaint *contextPaint;
+    gfxTextContextPaint      *contextPaint;
     mozilla::gfx::Matrix     *passedInvMatrix;
     mozilla::gfx::Matrix      matInv;
     double                    synBoldOnePixelOffset;

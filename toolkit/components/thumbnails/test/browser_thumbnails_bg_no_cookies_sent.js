@@ -4,25 +4,23 @@
 function* runTests() {
   // Visit the test page in the browser and tell it to set a cookie.
   let url = bgTestPageURL({ setGreenCookie: true });
-  let tab = yield BrowserTestUtils.openNewForegroundTab(gBrowser, url);
+  let tab = gBrowser.loadOneTab(url, { inBackground: false });
   let browser = tab.linkedBrowser;
+  yield whenLoaded(browser);
 
   // The root element of the page shouldn't be green yet.
-  yield ContentTask.spawn(browser, null, function () {
-    Assert.notEqual(content.document.documentElement.style.backgroundColor,
-                    "rgb(0, 255, 0)",
-                    "The page shouldn't be green yet.");
-  });
+  let greenStr = "rgb(0, 255, 0)";
+  isnot(browser.contentDocument.documentElement.style.backgroundColor,
+        greenStr,
+        "The page shouldn't be green yet.");
 
   // Cookie should be set now.  Reload the page to verify.  Its root element
   // will be green if the cookie's set.
   browser.reload();
-  yield BrowserTestUtils.browserLoaded(browser);
-  yield ContentTask.spawn(browser, null, function () {
-    Assert.equal(content.document.documentElement.style.backgroundColor,
-                 "rgb(0, 255, 0)",
-                 "The page should be green now.");
-  });
+  yield whenLoaded(browser);
+  is(browser.contentDocument.documentElement.style.backgroundColor,
+     greenStr,
+     "The page should be green now.");
 
   // Capture the page.  Get the image data of the capture and verify it's not
   // green.  (Checking only the first pixel suffices.)

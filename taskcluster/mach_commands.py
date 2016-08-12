@@ -4,7 +4,6 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-
 from __future__ import absolute_import, print_function, unicode_literals
 
 import json
@@ -185,15 +184,12 @@ class MachCommands(MachCommandBase):
         mach timestamp.
         """
         # remove the old terminal handler
-        old = self.log_manager.replace_terminal_handler(None)
+        self.log_manager.replace_terminal_handler(None)
 
         # re-add it, with level and fh set appropriately
         if not quiet:
             level = logging.DEBUG if verbose else logging.INFO
-            self.log_manager.add_terminal_logging(
-                fh=sys.stderr, level=level,
-                write_interval=old.formatter.write_interval,
-                write_times=old.formatter.write_times)
+            self.log_manager.add_terminal_logging(fh=sys.stderr, level=level)
 
         # all of the taskgraph logging is unstructured logging
         self.log_manager.enable_unstructured()
@@ -232,7 +228,7 @@ class MachCommands(MachCommandBase):
 
 
 @CommandProvider
-class TaskClusterImagesProvider(object):
+class LoadImage(object):
     @Command('taskcluster-load-image', category="ci",
              description="Load a pre-built Docker image")
     @CommandArgument('--task-id',
@@ -254,19 +250,6 @@ class TaskClusterImagesProvider(object):
                 ok = load_image_by_name(image_name)
             if not ok:
                 sys.exit(1)
-        except Exception:
-            traceback.print_exc()
-            sys.exit(1)
-
-    @Command('taskcluster-build-image', category='ci',
-             description='Build a Docker image')
-    @CommandArgument('image_name',
-                     help='Name of the image to build')
-    def build_image(self, image_name):
-        from taskgraph.docker import build_image
-
-        try:
-            build_image(image_name)
         except Exception:
             traceback.print_exc()
             sys.exit(1)

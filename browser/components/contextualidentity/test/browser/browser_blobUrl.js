@@ -41,13 +41,16 @@ add_task(function* test() {
   yield ContentTask.spawn(browser2, blobURL, function(url) {
     return new Promise(resolve => {
       var xhr = new content.window.XMLHttpRequest();
-      xhr.onerror = function() { resolve("SendErrored"); }
-      xhr.onload = function() { resolve("SendLoaded"); }
       xhr.open("GET", url);
-      xhr.send();
+      try {
+        xhr.send();
+        resolve("SendSucceeded");
+      } catch(e) {
+        resolve("SendThrew");
+      }
     });
   }).then(status => {
-    is(status, "SendErrored", "Using a blob URI from one user context id in another should not work");
+    is(status, "SendThrew", "Using a blob URI from one user context id in another should not work");
   });
 
   info("Creating a tab with UCI = 1...");
@@ -64,7 +67,7 @@ add_task(function* test() {
       try {
         xhr.send();
         resolve("SendSucceeded");
-      } catch (e) {
+      } catch(e) {
         resolve("SendThrew");
       }
     });

@@ -28,13 +28,13 @@ public:
   virtual nsresult
   Place(DrawTarget*          aDrawTarget,
         bool                 aPlaceOrigin,
-        ReflowOutput& aDesiredSize) override;
+        nsHTMLReflowMetrics& aDesiredSize) override;
 
   static nsresult
   PlaceMultiScript(nsPresContext*          aPresContext,
                    DrawTarget*             aDrawTarget,
                    bool                    aPlaceOrigin,
-                   ReflowOutput&    aDesiredSize,
+                   nsHTMLReflowMetrics&    aDesiredSize,
                    nsMathMLContainerFrame* aForFrame,
                    nscoord                 aUserSubScriptShift,
                    nscoord                 aUserSupScriptShift,

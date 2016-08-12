@@ -864,17 +864,11 @@ struct RoleComparator
 const nsRoleMapEntry*
 aria::GetRoleMap(dom::Element* aEl)
 {
-  return GetRoleMapFromIndex(GetRoleMapIndex(aEl));
-}
-
-uint8_t
-aria::GetRoleMapIndex(dom::Element* aEl)
-{
   nsAutoString roles;
   if (!aEl || !aEl->GetAttr(kNameSpaceID_None, nsGkAtoms::role, roles) ||
       roles.IsEmpty()) {
     // We treat role="" as if the role attribute is absent (per aria spec:8.1.1)
-    return NO_ROLE_MAP_ENTRY_INDEX;
+    return nullptr;
   }
 
   nsWhitespaceTokenizer tokenizer(roles);
@@ -884,43 +878,13 @@ aria::GetRoleMapIndex(dom::Element* aEl)
     size_t idx;
     if (BinarySearchIf(sWAIRoleMaps, 0, ArrayLength(sWAIRoleMaps),
                        RoleComparator(role), &idx)) {
-      return idx;
+      return sWAIRoleMaps + idx;
     }
   }
 
-  // Always use some entry index if there is a non-empty role string
+  // Always use some entry if there is a non-empty role string
   // To ensure an accessible object is created
-  return LANDMARK_ROLE_MAP_ENTRY_INDEX;
-}
-
-
-const nsRoleMapEntry*
-aria::GetRoleMapFromIndex(uint8_t aRoleMapIndex)
-{
-  switch (aRoleMapIndex) {
-    case NO_ROLE_MAP_ENTRY_INDEX:
-      return nullptr;
-    case EMPTY_ROLE_MAP_ENTRY_INDEX:
-      return &gEmptyRoleMap;
-    case LANDMARK_ROLE_MAP_ENTRY_INDEX:
-      return &sLandmarkRoleMap;
-    default:
-      return sWAIRoleMaps + aRoleMapIndex;
-  }
-}
-
-uint8_t
-aria::GetIndexFromRoleMap(const nsRoleMapEntry* aRoleMapEntry)
-{
-  if (aRoleMapEntry == nullptr) {
-    return NO_ROLE_MAP_ENTRY_INDEX;
-  } else if (aRoleMapEntry == &gEmptyRoleMap) {
-    return EMPTY_ROLE_MAP_ENTRY_INDEX;
-  } else if (aRoleMapEntry == &sLandmarkRoleMap) {
-      return LANDMARK_ROLE_MAP_ENTRY_INDEX;
-  } else {
-    return aRoleMapEntry - sWAIRoleMaps;
-  }
+  return &sLandmarkRoleMap;
 }
 
 uint64_t

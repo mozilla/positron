@@ -30,7 +30,7 @@ MediaSourceDecoder::MediaSourceDecoder(dom::HTMLMediaElement* aElement)
   , mMediaSource(nullptr)
   , mEnded(false)
 {
-  mExplicitDuration.Set(Some(UnspecifiedNaN<double>()));
+  SetExplicitDuration(UnspecifiedNaN<double>());
 }
 
 MediaDecoder*
@@ -192,12 +192,7 @@ MediaSourceDecoder::Ended(bool aEnded)
 {
   MOZ_ASSERT(NS_IsMainThread());
   static_cast<MediaSourceResource*>(GetResource())->SetEnded(aEnded);
-  if (aEnded) {
-    // We want the MediaSourceReader to refresh its buffered range as it may
-    // have been modified (end lined up).
-    NotifyDataArrived();
-  }
-  mEnded = aEnded;
+  mEnded = true;
 }
 
 void
@@ -230,7 +225,6 @@ void
 MediaSourceDecoder::SetMediaSourceDuration(double aDuration)
 {
   MOZ_ASSERT(NS_IsMainThread());
-  MOZ_ASSERT(!IsShutdown());
   if (aDuration >= 0) {
     int64_t checkedDuration;
     if (NS_FAILED(SecondsToUsecs(aDuration, checkedDuration))) {
@@ -315,8 +309,6 @@ MediaSourceDecoder::CanPlayThrough()
 TimeInterval
 MediaSourceDecoder::ClampIntervalToEnd(const TimeInterval& aInterval)
 {
-  MOZ_ASSERT(NS_IsMainThread());
-
   if (!mEnded) {
     return aInterval;
   }

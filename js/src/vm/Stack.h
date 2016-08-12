@@ -1663,16 +1663,19 @@ class InterpreterFrameIterator
 // all kinds of jit code.
 class WasmActivation : public Activation
 {
+    wasm::Instance& instance_;
     WasmActivation* prevWasm_;
+    WasmActivation* prevWasmForInstance_;
     void* entrySP_;
     void* resumePC_;
     uint8_t* fp_;
     wasm::ExitReason exitReason_;
 
   public:
-    explicit WasmActivation(JSContext* cx);
+    WasmActivation(JSContext* cx, wasm::Instance& instance);
     ~WasmActivation();
 
+    wasm::Instance& instance() const { return instance_; }
     WasmActivation* prevWasm() const { return prevWasm_; }
 
     bool isProfiling() const {

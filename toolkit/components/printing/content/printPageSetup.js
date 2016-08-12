@@ -69,7 +69,7 @@ function isListOfPrinterFeaturesAvailable()
 
   try {
     has_printerfeatures = gPrefs.getBoolPref("print.tmp.printerfeatures." + gPrintSettings.printerName + ".has_special_printerfeatures");
-  } catch (ex) {
+  } catch(ex) {
   }
 
   return has_printerfeatures;
@@ -198,8 +198,9 @@ function hfValueToId(val)
   }
   if ( val.length ) {
       return 6; // Custom...
+  } else {
+      return 0; // --blank--
   }
-  return 0; // --blank--
 }
 
 function hfIdToValue(node)
@@ -266,7 +267,7 @@ function loadDialog()
         gPrintService = gPrintService.QueryInterface(Components.interfaces.nsIPrintSettingsService);
       }
     }
-  } catch (ex) {
+  } catch(ex) {
     dump("loadDialog: ex="+ex+"\n");
   }
 
@@ -374,16 +375,18 @@ function convertUnitsMarginToInches(aVal, aIsMetric)
 {
   if (aIsMetric) {
     return aVal / 25.4;
+  } else {
+    return aVal;
   }
-  return aVal;
 }
 
 function convertMarginInchesToUnits(aVal, aIsMetric)
 {
   if (aIsMetric) {
     return aVal * 25.4;
+  } else {
+    return aVal;
   }
-  return aVal;
 }
 
 //---------------------------------------------------

@@ -10,10 +10,9 @@ var { require } = Cu.import("resource://devtools/shared/Loader.jsm", {});
 const Services = require("Services");
 
 var DevToolsUtils = require("devtools/shared/DevToolsUtils");
-var flags = require("devtools/shared/flags");
-flags.testing = true;
-flags.wantLogging = true;
-flags.wantVerbose = false;
+DevToolsUtils.testing = true;
+DevToolsUtils.dumpn.wantLogging = true;
+DevToolsUtils.dumpv.wantVerbose = false;
 
 const { storeFactory } = require("devtools/client/webconsole/new-console-output/store");
 

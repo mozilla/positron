@@ -569,10 +569,7 @@ BacktrackingAllocator::buildLivenessInfo()
                             break;
                         }
                     }
-                    // If this register doesn't have an explicit def above, mark
-                    // it as clobbered by the call unless it is actually
-                    // call-preserved.
-                    if (!found && !ins->isCallPreserved(*iter)) {
+                    if (!found) {
                         if (!addInitialFixedRange(*iter, outputOf(*ins), outputOf(*ins).next()))
                             return false;
                     }

@@ -599,9 +599,6 @@ struct NamedConstructor
  *                underlying global.
  * unscopableNames if not null it points to a null-terminated list of const
  *                 char* names of the unscopable properties for this interface.
- * isGlobal if true, we're creating interface objects for a [Global] or
- *        [PrimaryGlobal] interface, and hence shouldn't define properties on
- *        the prototype object.
  *
  * At least one of protoClass, constructorClass or constructor should be
  * non-null. If constructorClass or constructor are non-null, the resulting
@@ -613,14 +610,13 @@ CreateInterfaceObjects(JSContext* cx, JS::Handle<JSObject*> global,
                        JS::Handle<JSObject*> protoProto,
                        const js::Class* protoClass, JS::Heap<JSObject*>* protoCache,
                        JS::Handle<JSObject*> interfaceProto,
-                       const js::Class* constructorClass,
+                       const js::Class* constructorClass, const JSNativeHolder* constructor,
                        unsigned ctorNargs, const NamedConstructor* namedConstructors,
                        JS::Heap<JSObject*>* constructorCache,
                        const NativeProperties* regularProperties,
                        const NativeProperties* chromeOnlyProperties,
                        const char* name, bool defineOnGlobal,
-                       const char* const* unscopableNames,
-                       bool isGlobal);
+                       const char* const* unscopableNames);
 
 /**
  * Define the properties (regular and chrome-only) on obj.
@@ -1528,7 +1524,7 @@ WrapObject(JSContext* cx, JSObject& p, JS::MutableHandle<JS::Value> rval)
 // don't want those for our parent object.
 template<typename T>
 static inline JSObject*
-WrapNativeISupports(JSContext* cx, T* p, nsWrapperCache* cache)
+WrapNativeISupportsParent(JSContext* cx, T* p, nsWrapperCache* cache)
 {
   qsObjectHelper helper(ToSupports(p), cache);
   JS::Rooted<JSObject*> scope(cx, JS::CurrentGlobalOrNull(cx));
@@ -1541,7 +1537,7 @@ WrapNativeISupports(JSContext* cx, T* p, nsWrapperCache* cache)
 
 // Fallback for when our parent is not a WebIDL binding object.
 template<typename T, bool isISupports=IsBaseOf<nsISupports, T>::value>
-struct WrapNativeFallback
+struct WrapNativeParentFallback
 {
   static inline JSObject* Wrap(JSContext* cx, T* parent, nsWrapperCache* cache)
   {
@@ -1552,18 +1548,18 @@ struct WrapNativeFallback
 // Fallback for when our parent is not a WebIDL binding object but _is_ an
 // nsISupports object.
 template<typename T >
-struct WrapNativeFallback<T, true >
+struct WrapNativeParentFallback<T, true >
 {
   static inline JSObject* Wrap(JSContext* cx, T* parent, nsWrapperCache* cache)
   {
-    return WrapNativeISupports(cx, parent, cache);
+    return WrapNativeISupportsParent(cx, parent, cache);
   }
 };
 
 // Wrapping of our native parent, for cases when it's a WebIDL object (though
 // possibly preffed off).
 template<typename T, bool hasWrapObject=NativeHasMember<T>::WrapObject>
-struct WrapNativeHelper
+struct WrapNativeParentHelper
 {
   static inline JSObject* Wrap(JSContext* cx, T* parent, nsWrapperCache* cache)
   {
@@ -1571,20 +1567,14 @@ struct WrapNativeHelper
 
     JSObject* obj;
     if ((obj = cache->GetWrapper())) {
-      // GetWrapper always unmarks gray.
-      MOZ_ASSERT(!JS::ObjectIsMarkedGray(obj));
       return obj;
     }
 
     // Inline this here while we have non-dom objects in wrapper caches.
     if (!CouldBeDOMBinding(parent)) {
-      // WrapNativeFallback never returns a gray thing.
-      obj = WrapNativeFallback<T>::Wrap(cx, parent, cache);
-      MOZ_ASSERT_IF(obj, !JS::ObjectIsMarkedGray(obj));
+      obj = WrapNativeParentFallback<T>::Wrap(cx, parent, cache);
     } else {
-      // WrapObject never returns a gray thing.
       obj = parent->WrapObject(cx, nullptr);
-      MOZ_ASSERT_IF(obj, !JS::ObjectIsMarkedGray(obj));
     }
 
     return obj;
@@ -1594,7 +1584,7 @@ struct WrapNativeHelper
 // Wrapping of our native parent, for cases when it's not a WebIDL object.  In
 // this case it must be nsISupports.
 template<typename T>
-struct WrapNativeHelper<T, false>
+struct WrapNativeParentHelper<T, false>
 {
   static inline JSObject* Wrap(JSContext* cx, T* parent, nsWrapperCache* cache)
   {
@@ -1602,100 +1592,81 @@ struct WrapNativeHelper<T, false>
     if (cache && (obj = cache->GetWrapper())) {
 #ifdef DEBUG
       JS::Rooted<JSObject*> rootedObj(cx, obj);
-      NS_ASSERTION(WrapNativeISupports(cx, parent, cache) == rootedObj,
+      NS_ASSERTION(WrapNativeISupportsParent(cx, parent, cache) == rootedObj,
                    "Unexpected object in nsWrapperCache");
       obj = rootedObj;
 #endif
-      MOZ_ASSERT(!JS::ObjectIsMarkedGray(obj));
       return obj;
     }
 
-    obj = WrapNativeISupports(cx, parent, cache);
-    MOZ_ASSERT_IF(obj, !JS::ObjectIsMarkedGray(obj));
-    return obj;
+    return WrapNativeISupportsParent(cx, parent, cache);
   }
 };
 
-// Finding the associated global for an object.
+// Wrapping of our native parent.
 template<typename T>
 static inline JSObject*
-FindAssociatedGlobal(JSContext* cx, T* p, nsWrapperCache* cache,
-                     bool useXBLScope = false)
+WrapNativeParent(JSContext* cx, T* p, nsWrapperCache* cache,
+                 bool useXBLScope = false)
 {
   if (!p) {
     return JS::CurrentGlobalOrNull(cx);
   }
 
-  JSObject* obj = WrapNativeHelper<T>::Wrap(cx, p, cache);
-  if (!obj) {
-    return nullptr;
-  }
-  MOZ_ASSERT(!JS::ObjectIsMarkedGray(obj));
-
-  obj = js::GetGlobalForObjectCrossCompartment(obj);
-
-  if (!useXBLScope) {
-    return obj;
+  JSObject* parent = WrapNativeParentHelper<T>::Wrap(cx, p, cache);
+  if (!parent || !useXBLScope) {
+    return parent;
   }
 
   // If useXBLScope is true, it means that the canonical reflector for this
   // native object should live in the content XBL scope. Note that we never put
   // anonymous content inside an add-on scope.
-  if (xpc::IsInContentXBLScope(obj)) {
-    return obj;
+  if (xpc::IsInContentXBLScope(parent)) {
+    return parent;
   }
-  JS::Rooted<JSObject*> rootedObj(cx, obj);
-  JSObject* xblScope = xpc::GetXBLScope(cx, rootedObj);
-  MOZ_ASSERT_IF(xblScope, JS_IsGlobalObject(xblScope));
-  MOZ_ASSERT_IF(xblScope, !JS::ObjectIsMarkedGray(xblScope));
-  return xblScope;
+  JS::Rooted<JSObject*> rootedParent(cx, parent);
+  JS::Rooted<JSObject*> xblScope(cx, xpc::GetXBLScope(cx, rootedParent));
+  NS_ENSURE_TRUE(xblScope, nullptr);
+  JSAutoCompartment ac(cx, xblScope);
+  if (NS_WARN_IF(!JS_WrapObject(cx, &rootedParent))) {
+    return nullptr;
+  }
+
+  return rootedParent;
 }
 
-// Finding of the associated global for an object, when we don't want to
-// explicitly pass in things like the nsWrapperCache for it.
+// Wrapping of our native parent, when we don't want to explicitly pass in
+// things like the nsWrapperCache for it.
 template<typename T>
 static inline JSObject*
-FindAssociatedGlobal(JSContext* cx, const T& p)
+WrapNativeParent(JSContext* cx, const T& p)
 {
-  return FindAssociatedGlobal(cx, GetParentPointer(p), GetWrapperCache(p), GetUseXBLScope(p));
+  return WrapNativeParent(cx, GetParentPointer(p), GetWrapperCache(p), GetUseXBLScope(p));
 }
 
 // Specialization for the case of nsIGlobalObject, since in that case
 // we can just get the JSObject* directly.
 template<>
 inline JSObject*
-FindAssociatedGlobal(JSContext* cx, nsIGlobalObject* const& p)
+WrapNativeParent(JSContext* cx, nsIGlobalObject* const& p)
 {
-  if (!p) {
-    return JS::CurrentGlobalOrNull(cx);
-  }
-
-  JSObject* global = p->GetGlobalJSObject();
-  if (!global) {
-    return nullptr;
-  }
-
-  MOZ_ASSERT(JS_IsGlobalObject(global));
-  // This object could be gray if the nsIGlobalObject is the only thing keeping
-  // it alive.
-  JS::ExposeObjectToActiveJS(global);
-  return global;
+  return p ? p->GetGlobalJSObject() : JS::CurrentGlobalOrNull(cx);
 }
 
-template<typename T,
-         bool hasAssociatedGlobal=NativeHasMember<T>::GetParentObject>
-struct FindAssociatedGlobalForNative
+template<typename T, bool WrapperCached=NativeHasMember<T>::GetParentObject>
+struct GetParentObject
 {
   static JSObject* Get(JSContext* cx, JS::Handle<JSObject*> obj)
   {
     MOZ_ASSERT(js::IsObjectInContextCompartment(obj, cx));
     T* native = UnwrapDOMObject<T>(obj);
-    return FindAssociatedGlobal(cx, native->GetParentObject());
+    JSObject* wrappedParent = WrapNativeParent(cx, native->GetParentObject());
+    return wrappedParent ? js::GetGlobalForObjectCrossCompartment(wrappedParent) : nullptr;
   }
 };
 
 template<typename T>
-struct FindAssociatedGlobalForNative<T, false>
+struct GetParentObject<T, false>
 {
   static JSObject* Get(JSContext* cx, JS::Handle<JSObject*> obj)
   {
@@ -2677,11 +2648,17 @@ nsresult
 ReparentWrapper(JSContext* aCx, JS::Handle<JSObject*> aObj);
 
 /**
- * Used to implement the Symbol.hasInstance property of an interface object.
+ * Used to implement the hasInstance hook of an interface object.
+ *
+ * instance should not be a security wrapper.
  */
 bool
-InterfaceHasInstance(JSContext* cx, unsigned argc, JS::Value* vp);
-
+InterfaceHasInstance(JSContext* cx, JS::Handle<JSObject*> obj,
+                     JS::Handle<JSObject*> instance,
+                     bool* bp);
+bool
+InterfaceHasInstance(JSContext* cx, JS::Handle<JSObject*> obj, JS::MutableHandle<JS::Value> vp,
+                     bool* bp);
 bool
 InterfaceHasInstance(JSContext* cx, int prototypeID, int depth,
                      JS::Handle<JSObject*> instance,

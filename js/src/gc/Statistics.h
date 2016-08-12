@@ -219,8 +219,22 @@ struct Statistics
         counts[s]++;
     }
 
-    void beginNurseryCollection(JS::gcreason::Reason reason);
-    void endNurseryCollection(JS::gcreason::Reason reason);
+    void beginNurseryCollection(JS::gcreason::Reason reason) {
+        count(STAT_MINOR_GC);
+        if (nurseryCollectionCallback) {
+            (*nurseryCollectionCallback)(runtime,
+                                         JS::GCNurseryProgress::GC_NURSERY_COLLECTION_START,
+                                         reason);
+        }
+    }
+
+    void endNurseryCollection(JS::gcreason::Reason reason) {
+        if (nurseryCollectionCallback) {
+            (*nurseryCollectionCallback)(runtime,
+                                         JS::GCNurseryProgress::GC_NURSERY_COLLECTION_END,
+                                         reason);
+        }
+    }
 
     int64_t beginSCC();
     void endSCC(unsigned scc, int64_t start);
@@ -253,7 +267,7 @@ struct Statistics
                   double startTimestamp, size_t startFaults, gc::State initialState)
           : budget(budget), reason(reason),
             initialState(initialState),
-            finalState(gc::State::NotActive),
+            finalState(gc::NO_INCREMENTAL),
             resetReason(nullptr),
             start(start), startTimestamp(startTimestamp),
             startFaults(startFaults)

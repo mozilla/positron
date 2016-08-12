@@ -94,8 +94,8 @@ var tests = {
     SocialService.addProvider(manifest, function() {
       SocialService.addProvider(manifest2, function (provider) {
         SocialSidebar.show();
-        BrowserTestUtils.waitForCondition(
-          () => SocialSidebar.opened, "sidebar did not open").then(() => {
+        waitForCondition(() => SocialSidebar.opened,
+                     function() {
           ok(SocialSidebar.opened, "first window sidebar is open");
           openWindowAndWaitForInit(window, function(w1) {
             ok(w1.SocialSidebar.opened, "new window sidebar is open");
@@ -123,7 +123,7 @@ var tests = {
               });
             });
           });
-        });
+        }, "sidebar did not open");
       }, cbnext);
     }, cbnext);
   },
@@ -138,7 +138,8 @@ var tests = {
     SocialService.addProvider(manifest, function() {
       openWindowAndWaitForInit(window, function(w1) {
         w1.SocialSidebar.show();
-        BrowserTestUtils.waitForCondition(() => w1.SocialSidebar.opened, "sidebar opened").then(() => {
+        waitForCondition(() => w1.SocialSidebar.opened,
+                     function() {
           ok(Services.prefs.prefHasUserValue("social.sidebar.provider"), "global state set");
           ok(!SocialSidebar.opened, "1. main sidebar is still closed");
           ok(w1.SocialSidebar.opened, "1. window sidebar is open");

@@ -10,7 +10,7 @@ namespace net {
 union NetAddr;
 }
 }
-#include "nsTArrayForwardDeclare.h"
+template<class T> class nsTArray;
 %}
 native NetAddr(mozilla::net::NetAddr);
 [ref] native nsNetAddrTArrayRef(nsTArray<mozilla::net::NetAddr>);

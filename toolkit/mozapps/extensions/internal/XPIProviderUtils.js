@@ -56,7 +56,6 @@ const PREF_EM_ENABLED_ADDONS          = "extensions.enabledAddons";
 const PREF_EM_DSS_ENABLED             = "extensions.dss.enabled";
 const PREF_EM_AUTO_DISABLED_SCOPES    = "extensions.autoDisableScopes";
 const PREF_E10S_BLOCKED_BY_ADDONS     = "extensions.e10sBlockedByAddons";
-const PREF_E10S_HAS_NONEXEMPT_ADDON   = "extensions.e10s.rollout.hasAddon";
 
 const KEY_APP_PROFILE                 = "app-profile";
 const KEY_APP_SYSTEM_ADDONS           = "app-system-addons";
@@ -87,7 +86,7 @@ const PROP_JSON_FIELDS = ["id", "syncGUID", "location", "version", "type",
                           "softDisabled", "foreignInstall", "hasBinaryComponents",
                           "strictCompatibility", "locales", "targetApplications",
                           "targetPlatforms", "multiprocessCompatible", "signedState",
-                          "seen", "dependencies"];
+                          "seen"];
 
 // Properties that should be migrated where possible from an old database. These
 // shouldn't include properties that can be read directly from install.rdf files
@@ -168,7 +167,7 @@ function makeSafe(aCallback) {
     try {
       aCallback(...aArgs);
     }
-    catch (ex) {
+    catch(ex) {
       logger.warn("XPI Database callback failed", ex);
     }
   }
@@ -330,10 +329,6 @@ function DBAddonInternal(aLoaded) {
   AddonInternal.call(this);
 
   copyProperties(aLoaded, PROP_JSON_FIELDS, this);
-
-  if (!this.dependencies)
-    this.dependencies = [];
-  Object.freeze(this.dependencies);
 
   if (aLoaded._installLocation) {
     this._installLocation = aLoaded._installLocation;
@@ -596,7 +591,7 @@ this.XPIDatabase = {
         readTimer.done();
         this.parseDB(data, aRebuildOnError);
       }
-      catch (e) {
+      catch(e) {
         logger.error("Failed to load XPI JSON data from profile", e);
         let rebuildTimer = AddonManagerPrivate.simpleTimer("XPIDB_rebuildReadFailed_MS");
         this.rebuildDatabase(aRebuildOnError);
@@ -684,7 +679,7 @@ this.XPIDatabase = {
       logger.debug("Successfully read XPI database");
       this.initialized = true;
     }
-    catch (e) {
+    catch(e) {
       // If we catch and log a SyntaxError from the JSON
       // parser, the xpcshell test harness fails the test for us: bug 870828
       parseTimer.done();
@@ -720,7 +715,7 @@ this.XPIDatabase = {
         AddonManagerPrivate.recordSimpleMeasure("XPIDB_startupError", "dbMissing");
       }
     }
-    catch (e) {
+    catch(e) {
       // No schema version pref means either a really old upgrade (RDF) or
       // a new profile
       this.migrateData = this.getMigrateDataFromRDF();
@@ -1413,8 +1408,6 @@ this.XPIDatabase = {
 
   updateAddonsBlockingE10s: function() {
     let blockE10s = false;
-
-    Preferences.set(PREF_E10S_HAS_NONEXEMPT_ADDON, false);
     for (let [, addon] of this.addonDB) {
       let active = (addon.visible && !addon.disabled && !addon.pendingUninstall);
 
@@ -2159,7 +2152,6 @@ this.XPIDatabaseReconcile = {
           descriptor: currentAddon._sourceBundle.persistentDescriptor,
           multiprocessCompatible: currentAddon.multiprocessCompatible,
           runInSafeMode: canRunInSafeMode(currentAddon),
-          dependencies: currentAddon.dependencies,
         };
       }
 

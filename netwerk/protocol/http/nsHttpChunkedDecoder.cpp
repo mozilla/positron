@@ -113,7 +113,7 @@ nsHttpChunkedDecoder::ParseChunkRemaining(char *buf,
                 if (!mTrailers) {
                     mTrailers = new nsHttpHeaderArray();
                 }
-                mTrailers->ParseHeaderLine(nsDependentCSubstring(buf, count));
+                mTrailers->ParseHeaderLine(buf);
             }
             else {
                 mWaitEOF = false;

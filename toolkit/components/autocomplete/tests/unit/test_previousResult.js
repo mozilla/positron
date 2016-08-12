@@ -262,8 +262,10 @@ function run_test() {
       controller.startSearch("test");
       return;
     }
-    do_check_neq(search1._previousResult, null);
-    do_check_neq(search2._previousResult, null);
+    else {
+      do_check_neq(search1._previousResult, null);
+      do_check_neq(search2._previousResult, null);
+    }
 
     // Unregister searches
     unregisterAutoCompleteSearch(search1);

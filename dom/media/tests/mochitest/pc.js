@@ -1460,10 +1460,10 @@ PeerConnectionWrapper.prototype = {
 
     info("Checking RTP packet flow for track " + track.id);
 
-    var retry = (delay) => this._pc.getStats(track)
+    var retry = () => this._pc.getStats(track)
       .then(stats => hasFlow(stats)? ok(true, "RTP flowing for track " + track.id) :
-            wait(delay).then(retry(1000)));
-    return retry(200);
+                                     wait(200).then(retry));
+    return retry();
   },
 
   /**

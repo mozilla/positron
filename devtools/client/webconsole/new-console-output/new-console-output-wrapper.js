@@ -12,19 +12,11 @@ const actions = require("devtools/client/webconsole/new-console-output/actions/m
 const { store } = require("devtools/client/webconsole/new-console-output/store");
 
 const ConsoleOutput = React.createFactory(require("devtools/client/webconsole/new-console-output/components/console-output"));
-const FilterBar = React.createFactory(require("devtools/client/webconsole/new-console-output/components/filter-bar"));
 
 function NewConsoleOutputWrapper(parentNode, jsterm) {
   let childComponent = ConsoleOutput({ jsterm });
-  let filterBar = FilterBar({});
   let provider = React.createElement(
-    Provider,
-    { store: store },
-    React.DOM.div(
-      {className: "webconsole-output-wrapper"},
-      filterBar,
-      childComponent
-  ));
+    Provider, { store: store }, childComponent);
   this.body = ReactDOM.render(provider, parentNode);
 }
 

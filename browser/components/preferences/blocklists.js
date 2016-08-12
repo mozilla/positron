@@ -3,8 +3,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 Components.utils.import("resource://gre/modules/Services.jsm");
-const BASE_LIST_ID = "base";
-const CONTENT_LIST_ID = "content";
+const TEST_LIST = "test-track-simple";
 const TRACK_SUFFIX = "-track-digest256";
 const TRACKING_TABLE_PREF = "urlclassifier.trackingTable";
 const LISTS_PREF_BRANCH = "browser.safebrowsing.provider.mozilla.lists.";
@@ -133,12 +132,7 @@ var gBlocklistManager = {
         shouldProceed = !cancelQuit.data;
 
         if (shouldProceed) {
-          let trackingTable = Services.prefs.getCharPref(TRACKING_TABLE_PREF);
-          if (selected.id != CONTENT_LIST_ID) {
-            trackingTable = trackingTable.replace("," + CONTENT_LIST_ID + TRACK_SUFFIX, "");
-          } else {
-            trackingTable += "," + CONTENT_LIST_ID + TRACK_SUFFIX;
-          }
+          let trackingTable = TEST_LIST + "," + selected.id + TRACK_SUFFIX;
           Services.prefs.setCharPref(TRACKING_TABLE_PREF, trackingTable);
           Services.prefs.setCharPref(UPDATE_TIME_PREF, 42);
 
@@ -199,8 +193,11 @@ var gBlocklistManager = {
   },
 
   _getActiveList: function () {
-    let trackingTable = Services.prefs.getCharPref(TRACKING_TABLE_PREF);
-    return trackingTable.includes(CONTENT_LIST_ID) ? CONTENT_LIST_ID : BASE_LIST_ID;
+    let activeList = Services.prefs.getCharPref(TRACKING_TABLE_PREF);
+    activeList = activeList.replace(TEST_LIST, "");
+    activeList = activeList.replace(",", "");
+    activeList = activeList.replace(TRACK_SUFFIX, "");
+    return activeList.trim();
   }
 };
 

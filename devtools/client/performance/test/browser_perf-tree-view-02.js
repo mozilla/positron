@@ -33,10 +33,8 @@ add_task(function () {
   treeRoot.attachTo(container);
 
   let $$ = node => container.querySelectorAll(node);
-  let $fun = (node, ancestor) => (ancestor || container).querySelector(
-    ".call-tree-cell[type=function] > " + node);
-  let $$fun = (node, ancestor) => (ancestor || container).querySelectorAll(
-    ".call-tree-cell[type=function] > " + node);
+  let $fun = (node, ancestor) => (ancestor || container).querySelector(".call-tree-cell[type=function] > " + node);
+  let $$fun = (node, ancestor) => (ancestor || container).querySelectorAll(".call-tree-cell[type=function] > " + node);
   let $$dur = i => container.querySelectorAll(".call-tree-cell[type=duration]")[i];
   let $$per = i => container.querySelectorAll(".call-tree-cell[type=percentage]")[i];
   let $$sam = i => container.querySelectorAll(".call-tree-cell[type=samples]")[i];

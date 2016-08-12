@@ -12,12 +12,12 @@ add_task(function* () {
   let { panelWin } = panel;
   let { gFront, $, $$, EVENTS } = panelWin;
 
-  let events = Promise.all([
+  reload(target);
+
+  let [actors] = yield Promise.all([
     getN(gFront, "create-node", 3),
     waitForGraphRendered(panelWin, 3, 1, 0)
   ]);
-  reload(target);
-  yield events;
 
   ok(true, "Graph correctly shows gain node as disconnected");
 

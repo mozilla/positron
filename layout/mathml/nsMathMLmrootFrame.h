@@ -36,8 +36,8 @@ public:
 
   virtual void
   Reflow(nsPresContext*          aPresContext,
-         ReflowOutput&     aDesiredSize,
-         const ReflowInput& aReflowInput,
+         nsHTMLReflowMetrics&     aDesiredSize,
+         const nsHTMLReflowState& aReflowState,
          nsReflowStatus&          aStatus) override;
 
   void
@@ -48,7 +48,7 @@ public:
 
   virtual void
   GetIntrinsicISizeMetrics(nsRenderingContext* aRenderingContext,
-                           ReflowOutput& aDesiredSize) override;
+                           nsHTMLReflowMetrics& aDesiredSize) override;
 
   virtual void BuildDisplayList(nsDisplayListBuilder*   aBuilder,
                                 const nsRect&           aDirtyRect,

@@ -147,6 +147,8 @@ public:
     bool GetThreadNameJavaProfiling(uint32_t aThreadId, nsCString & aResult);
     bool GetFrameNameJavaProfiling(uint32_t aThreadId, uint32_t aSampleId, uint32_t aFrameId, nsCString & aResult);
 
+    nsresult CaptureZoomedView(mozIDOMWindowProxy *window, nsIntRect zoomedViewRect, jni::Object::Param buffer, float zoomFactor);
+    nsresult CaptureThumbnail(mozIDOMWindowProxy *window, int32_t bufW, int32_t bufH, int32_t tabId, jni::Object::Param buffer, bool &shouldStore);
     void GetDisplayPort(bool aPageSizeUpdate, bool aIsBrowserContentDisplayed, int32_t tabId, nsIAndroidViewport* metrics, nsIAndroidDisplayport** displayPort);
     void ContentDocumentChanged();
     bool IsContentDocumentDisplayed();
@@ -154,8 +156,8 @@ public:
     bool ProgressiveUpdateCallback(bool aHasPendingNewThebesContent, const LayerRect& aDisplayPort, float aDisplayResolution, bool aDrawingCritical,
                                    mozilla::ParentLayerPoint& aScrollOffset, mozilla::CSSToParentLayerScale& aZoom);
 
-    void SetLayerClient(java::GeckoLayerClient::Param jobj);
-    const java::GeckoLayerClient::Ref& GetLayerClient() { return mLayerClient; }
+    void SetLayerClient(widget::GeckoLayerClient::Param jobj);
+    const widget::GeckoLayerClient::Ref& GetLayerClient() { return mLayerClient; }
 
     bool GetHandlersForURL(const nsAString& aURL,
                            nsIMutableArray* handlersArray = nullptr,
@@ -175,6 +177,22 @@ public:
 
     bool GetClipboardText(nsAString& aText);
 
+    void ShowPersistentAlertNotification(const nsAString& aPersistentData,
+                                         const nsAString& aImageUrl,
+                                         const nsAString& aAlertTitle,
+                                         const nsAString& aAlertText,
+                                         const nsAString& aAlertCookie,
+                                         const nsAString& aAlertName,
+                                         nsIPrincipal* aPrincipal);
+
+    void ShowAlertNotification(const nsAString& aImageUrl,
+                               const nsAString& aAlertTitle,
+                               const nsAString& aAlertText,
+                               const nsAString& aAlertCookie,
+                               nsIObserver *aAlertListener,
+                               const nsAString& aAlertName,
+                               nsIPrincipal* aPrincipal);
+
     int GetDPI();
     int GetScreenDepth();
 
@@ -188,14 +206,35 @@ public:
 
     bool GetStaticIntField(const char *className, const char *fieldName, int32_t* aInt, JNIEnv* env = nullptr);
 
+    // These next four functions are for native Bitmap access in Android 2.2+
+    bool HasNativeBitmapAccess();
+
+    bool ValidateBitmap(jobject bitmap, int width, int height);
+
+    void *LockBitmap(jobject bitmap);
+
     // Returns a global reference to the Context for Fennec's Activity. The
     // caller is responsible for ensuring this doesn't leak by calling
     // DeleteGlobalRef() when the context is no longer needed.
     jobject GetGlobalContextRef(void);
 
+    void UnlockBitmap(jobject bitmap);
+
+    /* Copied from Android's native_window.h in newer (platform 9) NDK */
+    enum {
+        WINDOW_FORMAT_RGBA_8888          = 1,
+        WINDOW_FORMAT_RGBX_8888          = 2,
+        WINDOW_FORMAT_RGB_565            = 4
+    };
+
+    bool HasNativeWindowAccess();
+
     void *AcquireNativeWindow(JNIEnv* aEnv, jobject aSurface);
     void ReleaseNativeWindow(void *window);
     mozilla::gfx::IntSize GetNativeWindowSize(void* window);
+
+    void *AcquireNativeWindowFromSurfaceTexture(JNIEnv* aEnv, jobject aSurface);
+    void ReleaseNativeWindowForSurfaceTexture(void *window);
 
     void HandleGeckoMessage(JSContext* cx, JS::HandleObject message);
 
@@ -303,7 +342,7 @@ protected:
     nsTArray<nsCOMPtr<nsIMobileMessageCallback>> mSmsRequests;
     nsTArray<nsCOMPtr<nsIMobileMessageCursorCallback>> mSmsCursorRequests;
 
-    java::GeckoLayerClient::GlobalRef mLayerClient;
+    widget::GeckoLayerClient::GlobalRef mLayerClient;
 
     // the android.telephony.SmsMessage class
     jclass mAndroidSmsMessageClass;
@@ -358,6 +397,24 @@ protected:
     jni::Object::GlobalRef mMessageQueue;
     jfieldID mMessageQueueMessages;
     jmethodID mMessageQueueNext;
+
+    // calls we've dlopened from libjnigraphics.so
+    int (* AndroidBitmap_getInfo)(JNIEnv *env, jobject bitmap, void *info);
+    int (* AndroidBitmap_lockPixels)(JNIEnv *env, jobject bitmap, void **buffer);
+    int (* AndroidBitmap_unlockPixels)(JNIEnv *env, jobject bitmap);
+
+    void* (*ANativeWindow_fromSurface)(JNIEnv *env, jobject surface);
+    void* (*ANativeWindow_fromSurfaceTexture)(JNIEnv *env, jobject surfaceTexture);
+    void (*ANativeWindow_release)(void *window);
+    int (*ANativeWindow_setBuffersGeometry)(void *window, int width, int height, int format);
+
+    int (* ANativeWindow_getWidth)(void * window);
+    int (* ANativeWindow_getHeight)(void * window);
+
+    int (* Surface_lock)(void* surface, void* surfaceInfo, void* region, bool block);
+    int (* Surface_unlockAndPost)(void* surface);
+    void (* Region_constructor)(void* region);
+    void (* Region_set)(void* region, void* rect);
 
 private:
     class DelayedTask;

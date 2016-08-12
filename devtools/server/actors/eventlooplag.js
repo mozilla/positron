@@ -13,38 +13,51 @@
 const {Ci} = require("chrome");
 const Services = require("Services");
 const {XPCOMUtils} = require("resource://gre/modules/XPCOMUtils.jsm");
-const {Actor, ActorClassWithSpec} = require("devtools/shared/protocol");
+const protocol = require("devtools/shared/protocol");
+const {method, Arg, RetVal} = protocol;
 const events = require("sdk/event/core");
-const {eventLoopLagSpec} = require("devtools/shared/specs/eventlooplag");
 
-var EventLoopLagActor = exports.EventLoopLagActor = ActorClassWithSpec(eventLoopLagSpec, {
+var EventLoopLagActor = exports.EventLoopLagActor = protocol.ActorClass({
+
+  typeName: "eventLoopLag",
+
   _observerAdded: false,
+
+  events: {
+    "event-loop-lag" : {
+      type: "event-loop-lag",
+      time: Arg(0, "number") // duration of the lag in milliseconds.
+    }
+  },
 
   /**
    * Start tracking the event loop lags.
    */
-  start: function () {
+  start: method(function () {
     if (!this._observerAdded) {
       Services.obs.addObserver(this, "event-loop-lag", false);
       this._observerAdded = true;
     }
     return Services.appShell.startEventLoopLagTracking();
-  },
+  }, {
+    request: {},
+    response: {success: RetVal("number")}
+  }),
 
   /**
    * Stop tracking the event loop lags.
    */
-  stop: function () {
+  stop: method(function () {
     if (this._observerAdded) {
       Services.obs.removeObserver(this, "event-loop-lag");
       this._observerAdded = false;
     }
     Services.appShell.stopEventLoopLagTracking();
-  },
+  }, {request: {}, response: {}}),
 
   destroy: function () {
     this.stop();
-    Actor.prototype.destroy.call(this);
+    protocol.Actor.prototype.destroy.call(this);
   },
 
   // nsIObserver
@@ -57,4 +70,12 @@ var EventLoopLagActor = exports.EventLoopLagActor = ActorClassWithSpec(eventLoop
   },
 
   QueryInterface: XPCOMUtils.generateQI([Ci.nsIObserver]),
+});
+
+exports.EventLoopLagFront = protocol.FrontClass(EventLoopLagActor, {
+  initialize: function (client, form) {
+    protocol.Front.prototype.initialize.call(this, client);
+    this.actorID = form.eventLoopLagActor;
+    this.manage(this);
+  },
 });

@@ -96,18 +96,20 @@ var security = {
       }
 
       return retval;
+    } else {
+      return {
+        hostName : hostName,
+        cAName : "",
+        encryptionAlgorithm : "",
+        encryptionStrength : 0,
+        version: "",
+        isBroken : isBroken,
+        isMixed : isMixed,
+        isEV : isEV,
+        cert : null
+
+      };
     }
-    return {
-      hostName : hostName,
-      cAName : "",
-      encryptionAlgorithm : "",
-      encryptionStrength : 0,
-      version: "",
-      isBroken : isBroken,
-      isMixed : isMixed,
-      isEV : isEV,
-      cert : null
-    };
   },
 
   // Find the secureBrowserUI object (if present)
@@ -176,7 +178,9 @@ function securityOnLoad(uri, windowInfo) {
     document.getElementById("securityTab").hidden = true;
     return;
   }
-  document.getElementById("securityTab").hidden = false;
+  else {
+    document.getElementById("securityTab").hidden = false;
+  }
 
   const pageInfoBundle = document.getElementById("pageinfobundle");
 
@@ -232,7 +236,7 @@ function securityOnLoad(uri, windowInfo) {
           realmHasPasswords(uri) ? yesStr : noStr);
 
   var visitCount = previousVisitCount(info.hostName);
-  if (visitCount > 1) {
+  if(visitCount > 1) {
     setText("security-privacy-history-value",
             pageInfoBundle.getFormattedString("securityNVisits", [visitCount.toLocaleString()]));
   }

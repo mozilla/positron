@@ -20,11 +20,12 @@ add_task(function* () {
   gBrowser.removeCurrentTab();
 });
 
-function* typeAndSubmitAndStop(url) {
-  yield promiseAutocompleteResultPopup(url, window, true);
+function typeAndSubmitAndStop(url) {
+  gBrowser.userTypedValue = url;
+  URLBarSetURI();
   is(gURLBar.textValue, gURLBar.trimValue(url), "location bar reflects loading page");
 
   let promise = waitForDocLoadAndStopIt(url, gBrowser.selectedBrowser, false);
   gURLBar.handleCommand();
-  yield promise;
+  return promise;
 }

@@ -19,7 +19,6 @@
 
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/FloatingPoint.h"
-#include "mozilla/Snprintf.h"
 
 #include <ctype.h>
 #include <math.h>
@@ -2422,42 +2421,42 @@ static void
 print_gmt_string(char* buf, size_t size, double utctime)
 {
     MOZ_ASSERT(NumbersAreIdentical(TimeClip(utctime).toDouble(), utctime));
-    snprintf(buf, size, "%s, %.2d %s %.4d %.2d:%.2d:%.2d GMT",
-             days[int(WeekDay(utctime))],
-             int(DateFromTime(utctime)),
-             months[int(MonthFromTime(utctime))],
-             int(YearFromTime(utctime)),
-             int(HourFromTime(utctime)),
-             int(MinFromTime(utctime)),
-             int(SecFromTime(utctime)));
+    JS_snprintf(buf, size, "%s, %.2d %s %.4d %.2d:%.2d:%.2d GMT",
+                days[int(WeekDay(utctime))],
+                int(DateFromTime(utctime)),
+                months[int(MonthFromTime(utctime))],
+                int(YearFromTime(utctime)),
+                int(HourFromTime(utctime)),
+                int(MinFromTime(utctime)),
+                int(SecFromTime(utctime)));
 }
 
 static void
 print_iso_string(char* buf, size_t size, double utctime)
 {
     MOZ_ASSERT(NumbersAreIdentical(TimeClip(utctime).toDouble(), utctime));
-    snprintf(buf, size, "%.4d-%.2d-%.2dT%.2d:%.2d:%.2d.%.3dZ",
-             int(YearFromTime(utctime)),
-             int(MonthFromTime(utctime)) + 1,
-             int(DateFromTime(utctime)),
-             int(HourFromTime(utctime)),
-             int(MinFromTime(utctime)),
-             int(SecFromTime(utctime)),
-             int(msFromTime(utctime)));
+    JS_snprintf(buf, size, "%.4d-%.2d-%.2dT%.2d:%.2d:%.2d.%.3dZ",
+                int(YearFromTime(utctime)),
+                int(MonthFromTime(utctime)) + 1,
+                int(DateFromTime(utctime)),
+                int(HourFromTime(utctime)),
+                int(MinFromTime(utctime)),
+                int(SecFromTime(utctime)),
+                int(msFromTime(utctime)));
 }
 
 static void
 print_iso_extended_string(char* buf, size_t size, double utctime)
 {
     MOZ_ASSERT(NumbersAreIdentical(TimeClip(utctime).toDouble(), utctime));
-    snprintf(buf, size, "%+.6d-%.2d-%.2dT%.2d:%.2d:%.2d.%.3dZ",
-             int(YearFromTime(utctime)),
-             int(MonthFromTime(utctime)) + 1,
-             int(DateFromTime(utctime)),
-             int(HourFromTime(utctime)),
-             int(MinFromTime(utctime)),
-             int(SecFromTime(utctime)),
-             int(msFromTime(utctime)));
+    JS_snprintf(buf, size, "%+.6d-%.2d-%.2dT%.2d:%.2d:%.2d.%.3dZ",
+                int(YearFromTime(utctime)),
+                int(MonthFromTime(utctime)) + 1,
+                int(DateFromTime(utctime)),
+                int(HourFromTime(utctime)),
+                int(MinFromTime(utctime)),
+                int(SecFromTime(utctime)),
+                int(msFromTime(utctime)));
 }
 
 /* ES5 B.2.6. */
@@ -2468,7 +2467,7 @@ date_toGMTString_impl(JSContext* cx, const CallArgs& args)
 
     char buf[100];
     if (!IsFinite(utctime))
-        snprintf_literal(buf, js_NaN_date_str);
+        JS_snprintf(buf, sizeof buf, js_NaN_date_str);
     else
         print_gmt_string(buf, sizeof buf, utctime);
 
@@ -2593,7 +2592,7 @@ date_format(JSContext* cx, double date, formatspec format, MutableHandleValue rv
     PRMJTime split;
 
     if (!IsFinite(date)) {
-        snprintf_literal(buf, js_NaN_date_str);
+        JS_snprintf(buf, sizeof buf, js_NaN_date_str);
     } else {
         MOZ_ASSERT(NumbersAreIdentical(TimeClip(date).toDouble(), date));
 
@@ -2654,35 +2653,38 @@ date_format(JSContext* cx, double date, formatspec format, MutableHandleValue rv
              * requires a PRMJTime... which only has 16-bit years.  Sub-ECMA.
              */
             /* Tue Oct 31 2000 09:41:40 GMT-0800 (PST) */
-            snprintf_literal(buf, "%s %s %.2d %.4d %.2d:%.2d:%.2d GMT%+.4d%s%s",
-                             days[int(WeekDay(local))],
-                             months[int(MonthFromTime(local))],
-                             int(DateFromTime(local)),
-                             int(YearFromTime(local)),
-                             int(HourFromTime(local)),
-                             int(MinFromTime(local)),
-                             int(SecFromTime(local)),
-                             offset,
-                             usetz ? " " : "",
-                             usetz ? tzbuf : "");
+            JS_snprintf(buf, sizeof buf,
+                        "%s %s %.2d %.4d %.2d:%.2d:%.2d GMT%+.4d%s%s",
+                        days[int(WeekDay(local))],
+                        months[int(MonthFromTime(local))],
+                        int(DateFromTime(local)),
+                        int(YearFromTime(local)),
+                        int(HourFromTime(local)),
+                        int(MinFromTime(local)),
+                        int(SecFromTime(local)),
+                        offset,
+                        usetz ? " " : "",
+                        usetz ? tzbuf : "");
             break;
           case FORMATSPEC_DATE:
             /* Tue Oct 31 2000 */
-            snprintf_literal(buf, "%s %s %.2d %.4d",
-                             days[int(WeekDay(local))],
-                             months[int(MonthFromTime(local))],
-                             int(DateFromTime(local)),
-                             int(YearFromTime(local)));
+            JS_snprintf(buf, sizeof buf,
+                        "%s %s %.2d %.4d",
+                        days[int(WeekDay(local))],
+                        months[int(MonthFromTime(local))],
+                        int(DateFromTime(local)),
+                        int(YearFromTime(local)));
             break;
           case FORMATSPEC_TIME:
             /* 09:41:40 GMT-0800 (PST) */
-            snprintf_literal(buf, "%.2d:%.2d:%.2d GMT%+.4d%s%s",
-                             int(HourFromTime(local)),
-                             int(MinFromTime(local)),
-                             int(SecFromTime(local)),
-                             offset,
-                             usetz ? " " : "",
-                             usetz ? tzbuf : "");
+            JS_snprintf(buf, sizeof buf,
+                        "%.2d:%.2d:%.2d GMT%+.4d%s%s",
+                        int(HourFromTime(local)),
+                        int(MinFromTime(local)),
+                        int(SecFromTime(local)),
+                        offset,
+                        usetz ? " " : "",
+                        usetz ? tzbuf : "");
             break;
         }
     }
@@ -2701,7 +2703,7 @@ ToLocaleFormatHelper(JSContext* cx, HandleObject obj, const char* format, Mutabl
 
     char buf[100];
     if (!IsFinite(utctime)) {
-        snprintf_literal(buf, js_NaN_date_str);
+        JS_snprintf(buf, sizeof buf, js_NaN_date_str);
     } else {
         int result_len;
         double local = LocalTime(utctime);
@@ -2726,8 +2728,8 @@ ToLocaleFormatHelper(JSContext* cx, HandleObject obj, const char* format, Mutabl
               isdigit(buf[2]) && isdigit(buf[3]))) {
             double localtime = obj->as<DateObject>().cachedLocalTime();
             int year = IsNaN(localtime) ? 0 : (int) YearFromTime(localtime);
-            snprintf(buf + (result_len - 2), (sizeof buf) - (result_len - 2),
-                     "%d", year);
+            JS_snprintf(buf + (result_len - 2), (sizeof buf) - (result_len - 2),
+                        "%d", year);
         }
 
     }

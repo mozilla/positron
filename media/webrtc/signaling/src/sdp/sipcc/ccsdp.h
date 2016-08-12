@@ -40,8 +40,6 @@ typedef enum rtp_ptype_
     RTP_OPUS         = 109,
     RTP_VP8          = 120,
     RTP_VP9          = 121,
-    RTP_RED          = 122,
-    RTP_ULPFEC       = 123,
     RTP_I420         = 124,
     RTP_ISAC         = 124
 } rtp_ptype;

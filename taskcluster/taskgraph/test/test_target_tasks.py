@@ -17,7 +17,7 @@ from mozunit import main
 class FakeTryOptionSyntax(object):
 
     def __init__(self, message, task_graph):
-        self.trigger_tests = 0
+        pass
 
     def task_matches(self, attributes):
         return 'at-at' in attributes

@@ -7,16 +7,16 @@ const TEST_BASE_HTTPS = "https://example.com/browser/devtools/client/commandline
 
 var { require } = Cu.import("resource://devtools/shared/Loader.jsm", {});
 var { console } = require("resource://gre/modules/Console.jsm");
-var flags = require("devtools/shared/flags");
+var DevToolsUtils = require("devtools/shared/DevToolsUtils");
 
 // Import the GCLI test helper
 var testDir = gTestPath.substr(0, gTestPath.lastIndexOf("/"));
 Services.scriptloader.loadSubScript(testDir + "/helpers.js", this);
 Services.scriptloader.loadSubScript(testDir + "/mockCommands.js", this);
 
-flags.testing = true;
+DevToolsUtils.testing = true;
 SimpleTest.registerCleanupFunction(() => {
-  flags.testing = false;
+  DevToolsUtils.testing = false;
 });
 
 function whenDelayedStartupFinished(aWindow, aCallback) {

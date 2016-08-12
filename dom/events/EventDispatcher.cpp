@@ -879,10 +879,7 @@ EventDispatcher::CreateEvent(EventTarget* aOwner,
     return NS_NewDOMMutationEvent(aOwner, aPresContext, nullptr);
   if (aEventType.LowerCaseEqualsLiteral("deviceorientationevent")) {
     DeviceOrientationEventInit init;
-    RefPtr<Event> event =
-      DeviceOrientationEvent::Constructor(aOwner, EmptyString(), init);
-    event->MarkUninitialized();
-    return event.forget();
+    return DeviceOrientationEvent::Constructor(aOwner, EmptyString(), init);
   }
   if (aEventType.LowerCaseEqualsLiteral("devicemotionevent"))
     return NS_NewDOMDeviceMotionEvent(aOwner, aPresContext, nullptr);
@@ -921,10 +918,7 @@ EventDispatcher::CreateEvent(EventTarget* aOwner,
   // XXXkhuey this is broken
   if (aEventType.LowerCaseEqualsLiteral("pagetransition")) {
     PageTransitionEventInit init;
-    RefPtr<Event> event =
-      PageTransitionEvent::Constructor(aOwner, EmptyString(), init);
-    event->MarkUninitialized();
-    return event.forget();
+    return PageTransitionEvent::Constructor(aOwner, EmptyString(), init);
   }
   if (aEventType.LowerCaseEqualsLiteral("scrollareaevent"))
     return NS_NewDOMScrollAreaEvent(aOwner, aPresContext, nullptr);
@@ -934,20 +928,14 @@ EventDispatcher::CreateEvent(EventTarget* aOwner,
   if (aEventType.LowerCaseEqualsLiteral("popstateevent")) {
     AutoJSContext cx;
     RootedDictionary<PopStateEventInit> init(cx);
-    RefPtr<Event> event =
-      PopStateEvent::Constructor(aOwner, EmptyString(), init);
-    event->MarkUninitialized();
-    return event.forget();
+    return PopStateEvent::Constructor(aOwner, EmptyString(), init);
   }
   if (aEventType.LowerCaseEqualsLiteral("touchevent") &&
       TouchEvent::PrefEnabled(nsContentUtils::GetDocShellForEventTarget(aOwner)))
     return NS_NewDOMTouchEvent(aOwner, aPresContext, nullptr);
   if (aEventType.LowerCaseEqualsLiteral("hashchangeevent")) {
     HashChangeEventInit init;
-    RefPtr<Event> event =
-      HashChangeEvent::Constructor(aOwner, EmptyString(), init);
-    event->MarkUninitialized();
-    return event.forget();
+    return HashChangeEvent::Constructor(aOwner, EmptyString(), init);
   }
   if (aEventType.LowerCaseEqualsLiteral("customevent"))
     return NS_NewDOMCustomEvent(aOwner, aPresContext, nullptr);

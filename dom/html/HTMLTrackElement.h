@@ -24,7 +24,6 @@ namespace mozilla {
 namespace dom {
 
 class WebVTTListener;
-class WindowDestroyObserver;
 
 class HTMLTrackElement final : public nsGenericHTMLElement
 {
@@ -47,8 +46,10 @@ public:
   {
     GetHTMLURIAttr(nsGkAtoms::src, aSrc);
   }
-
-  void SetSrc(const nsAString& aSrc, ErrorResult& aError);
+  void SetSrc(const nsAString& aSrc, ErrorResult& aError)
+  {
+    SetHTMLAttr(nsGkAtoms::src, aSrc, aError);
+  }
 
   void GetSrclang(DOMString& aSrclang) const
   {
@@ -114,8 +115,6 @@ public:
 
   void DropChannel();
 
-  void NotifyShutdown();
-
 protected:
   virtual ~HTMLTrackElement();
 
@@ -135,12 +134,6 @@ protected:
   RefPtr<WebVTTListener> mListener;
 
   void CreateTextTrack();
-
-private:
-  void DispatchLoadResource();
-  bool mLoadResourceDispatched;
-
-  RefPtr<WindowDestroyObserver> mWindowDestroyObserver;
 };
 
 } // namespace dom

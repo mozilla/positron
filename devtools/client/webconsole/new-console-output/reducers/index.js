@@ -5,14 +5,10 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 "use strict";
 
-const { filters } = require("./filters");
 const { messages } = require("./messages");
 const { prefs } = require("./prefs");
-const { ui } = require("./ui");
 
 exports.reducers = {
-  filters,
   messages,
   prefs,
-  ui,
 };

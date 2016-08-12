@@ -2,15 +2,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-function CallModuleResolveHook(module, specifier, expectedMinimumState)
-{
-    let requestedModule = HostResolveImportedModule(module, specifier);
-    if (requestedModule.state < expectedMinimumState)
-        ThrowInternalError(JSMSG_BAD_MODULE_STATE);
-
-    return requestedModule;
-}
-
 // 15.2.1.16.2 GetExportedNames(exportStarSet)
 function ModuleGetExportedNames(exportStarSet = [])
 {
@@ -51,8 +42,7 @@ function ModuleGetExportedNames(exportStarSet = [])
     let starExportEntries = module.starExportEntries;
     for (let i = 0; i < starExportEntries.length; i++) {
         let e = starExportEntries[i];
-        let requestedModule = CallModuleResolveHook(module, e.moduleRequest,
-                                                    MODULE_STATE_INSTANTIATED);
+        let requestedModule = HostResolveImportedModule(module, e.moduleRequest);
         let starNames = callFunction(requestedModule.getExportedNames, requestedModule,
                                      exportStarSet);
         for (let j = 0; j < starNames.length; j++) {
@@ -99,8 +89,7 @@ function ModuleResolveExport(exportName, resolveSet = [], exportStarSet = [])
     for (let i = 0; i < indirectExportEntries.length; i++) {
         let e = indirectExportEntries[i];
         if (exportName === e.exportName) {
-            let importedModule = CallModuleResolveHook(module, e.moduleRequest,
-                                                       MODULE_STATE_INSTANTIATED);
+            let importedModule = HostResolveImportedModule(module, e.moduleRequest);
             let indirectResolution = callFunction(importedModule.resolveExport, importedModule,
                                                   e.importName, resolveSet, exportStarSet);
             if (indirectResolution !== null)
@@ -128,8 +117,7 @@ function ModuleResolveExport(exportName, resolveSet = [], exportStarSet = [])
     let starExportEntries = module.starExportEntries;
     for (let i = 0; i < starExportEntries.length; i++) {
         let e = starExportEntries[i];
-        let importedModule = CallModuleResolveHook(module, e.moduleRequest,
-                                                   MODULE_STATE_INSTANTIATED);
+        let importedModule = HostResolveImportedModule(module, e.moduleRequest);
         let resolution = callFunction(importedModule.resolveExport, importedModule,
                                       exportName, resolveSet, exportStarSet);
         if (resolution === "ambiguous")
@@ -199,14 +187,14 @@ function GetModuleEnvironment(module)
 {
     assert(IsModule(module), "Non-module passed to GetModuleEnvironment");
 
+    let env = UnsafeGetReservedSlot(module, MODULE_OBJECT_ENVIRONMENT_SLOT);
+    assert(env === undefined || env === null || IsModuleEnvironment(env),
+          "Module environment slot contains unexpected value");
+
     // Check for a previous failed attempt to instantiate this module. This can
     // only happen due to a bug in the module loader.
-    if (module.state == MODULE_STATE_FAILED)
+    if (env === null)
         ThrowInternalError(JSMSG_MODULE_INSTANTIATE_FAILED);
-
-    let env = UnsafeGetReservedSlot(module, MODULE_OBJECT_ENVIRONMENT_SLOT);
-    assert(env === undefined || IsModuleEnvironment(env),
-           "Module environment slot contains unexpected value");
 
     return env;
 }
@@ -216,8 +204,7 @@ function RecordInstantationFailure(module)
     // Set the module's environment slot to 'null' to indicate a failed module
     // instantiation.
     assert(IsModule(module), "Non-module passed to RecordInstantationFailure");
-    SetModuleState(module, MODULE_STATE_FAILED);
-    UnsafeSetReservedSlot(module, MODULE_OBJECT_ENVIRONMENT_SLOT, undefined);
+    UnsafeSetReservedSlot(module, MODULE_OBJECT_ENVIRONMENT_SLOT, null);
 }
 
 // 15.2.1.16.4 ModuleDeclarationInstantiation()
@@ -237,14 +224,12 @@ function ModuleDeclarationInstantiation()
     CreateModuleEnvironment(module);
     let env = GetModuleEnvironment(module);
 
-    SetModuleState(this, MODULE_STATE_INSTANTIATED);
-
     try {
         // Step 8
         let requestedModules = module.requestedModules;
         for (let i = 0; i < requestedModules.length; i++) {
             let required = requestedModules[i];
-            let requiredModule = CallModuleResolveHook(module, required, MODULE_STATE_PARSED);
+            let requiredModule = HostResolveImportedModule(module, required);
             callFunction(requiredModule.declarationInstantiation, requiredModule);
         }
 
@@ -263,8 +248,7 @@ function ModuleDeclarationInstantiation()
         let importEntries = module.importEntries;
         for (let i = 0; i < importEntries.length; i++) {
             let imp = importEntries[i];
-            let importedModule = CallModuleResolveHook(module, imp.moduleRequest,
-                                                       MODULE_STATE_INSTANTIATED);
+            let importedModule = HostResolveImportedModule(module, imp.moduleRequest);
             if (imp.importName === "*") {
                 let namespace = GetModuleNamespace(importedModule);
                 CreateNamespaceBinding(env, imp.localName, namespace);
@@ -297,21 +281,18 @@ function ModuleEvaluation()
     // Step 1
     let module = this;
 
-    if (module.state < MODULE_STATE_INSTANTIATED)
-        ThrowInternalError(JSMSG_BAD_MODULE_STATE);
-
     // Step 4
-    if (module.state == MODULE_STATE_EVALUATED)
+    if (module.evaluated)
         return undefined;
 
     // Step 5
-    SetModuleState(this, MODULE_STATE_EVALUATED);
+    SetModuleEvaluated(this);
 
     // Step 6
     let requestedModules = module.requestedModules;
     for (let i = 0; i < requestedModules.length; i++) {
         let required = requestedModules[i];
-        let requiredModule = CallModuleResolveHook(module, required, MODULE_STATE_INSTANTIATED);
+        let requiredModule = HostResolveImportedModule(module, required);
         callFunction(requiredModule.evaluation, requiredModule);
     }
 

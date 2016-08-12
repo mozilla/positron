@@ -143,7 +143,7 @@ protected:
   CycleCollectedJSRuntime();
   virtual ~CycleCollectedJSRuntime();
 
-  nsresult Initialize(JSContext* aParentContext,
+  nsresult Initialize(JSRuntime* aParentRuntime,
                       uint32_t aMaxBytes,
                       uint32_t aMaxNurseryBytes);
 
@@ -207,10 +207,10 @@ private:
 
   static void TraceBlackJS(JSTracer* aTracer, void* aData);
   static void TraceGrayJS(JSTracer* aTracer, void* aData);
-  static void GCCallback(JSContext* aContext, JSGCStatus aStatus, void* aData);
-  static void GCSliceCallback(JSContext* aContext, JS::GCProgress aProgress,
+  static void GCCallback(JSRuntime* aRuntime, JSGCStatus aStatus, void* aData);
+  static void GCSliceCallback(JSRuntime* aRuntime, JS::GCProgress aProgress,
                               const JS::GCDescription& aDesc);
-  static void GCNurseryCollectionCallback(JSContext* aContext,
+  static void GCNurseryCollectionCallback(JSRuntime* aRuntime,
                                           JS::GCNurseryProgress aProgress,
                                           JS::gcreason::Reason aReason);
   static void OutOfMemoryCallback(JSContext* aContext, void* aData);

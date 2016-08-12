@@ -10,14 +10,11 @@ add_task(function* () {
   yield waitForInitialAddonList(document);
 
   // Install this add-on, and verify that it appears in the about:debugging UI
-  yield installAddon({
-    document,
-    path: "addons/unpacked/install.rdf",
-    name: ADDON_NAME,
-  });
+  yield installAddon(document, "addons/unpacked/install.rdf", ADDON_NAME,
+                     "test-devtools");
 
   // Install the add-on, and verify that it disappears in the about:debugging UI
-  yield uninstallAddon({document, id: ADDON_ID, name: ADDON_NAME});
+  yield uninstallAddon(document, ADDON_ID, ADDON_NAME);
 
   yield closeAboutDebugging(tab);
 });

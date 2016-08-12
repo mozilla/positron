@@ -29,9 +29,10 @@ function ellipseString(aStr, doFront)
     if (doFront) {
       var endStr = aStr.substr(aStr.length-fixedLen, fixedLen);
       return "..." + endStr;
+    } else {
+      var frontStr = aStr.substr(0, fixedLen);
+      return frontStr + "...";
     }
-    var frontStr = aStr.substr(0, fixedLen);
-    return frontStr + "...";
   }
   return aStr;
 }
@@ -266,7 +267,7 @@ function onUnload()
      printProgress = null;
    }
 
-   catch ( exception ) {}
+   catch( exception ) {}
   }
 }
 
@@ -278,7 +279,7 @@ function onCancel ()
    {
      printProgress.processCanceledByUser = true;
    }
-   catch ( exception ) {return true;}
+   catch( exception ) {return true;}
 
   // don't Close up dialog by returning false, the backend will close the dialog when everything will be aborted.
   return false;

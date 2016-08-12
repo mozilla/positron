@@ -1653,7 +1653,7 @@ PlacesSQLQueryBuilder::SelectAsDay()
        case 0:
         // Today
          history->GetStringFromName(
-          u"finduri-AgeInDays-is-0", dateName);
+          MOZ_UTF16("finduri-AgeInDays-is-0"), dateName);
         // From start of today
         sqlFragmentContainerBeginTime = NS_LITERAL_CSTRING(
           "(strftime('%s','now','localtime','start of day','utc')*1000000)");
@@ -1667,7 +1667,7 @@ PlacesSQLQueryBuilder::SelectAsDay()
        case 1:
         // Yesterday
          history->GetStringFromName(
-          u"finduri-AgeInDays-is-1", dateName);
+          MOZ_UTF16("finduri-AgeInDays-is-1"), dateName);
         // From start of yesterday
         sqlFragmentContainerBeginTime = NS_LITERAL_CSTRING(
           "(strftime('%s','now','localtime','start of day','-1 day','utc')*1000000)");
@@ -1681,7 +1681,7 @@ PlacesSQLQueryBuilder::SelectAsDay()
       case 2:
         // Last 7 days
         history->GetAgeInDaysString(7,
-          u"finduri-AgeInDays-last-is", dateName);
+          MOZ_UTF16("finduri-AgeInDays-last-is"), dateName);
         // From start of 7 days ago
         sqlFragmentContainerBeginTime = NS_LITERAL_CSTRING(
           "(strftime('%s','now','localtime','start of day','-7 days','utc')*1000000)");
@@ -1697,7 +1697,7 @@ PlacesSQLQueryBuilder::SelectAsDay()
       case 3:
         // This month
         history->GetStringFromName(
-          u"finduri-AgeInMonths-is-0", dateName);
+          MOZ_UTF16("finduri-AgeInMonths-is-0"), dateName);
         // From start of this month
         sqlFragmentContainerBeginTime = NS_LITERAL_CSTRING(
           "(strftime('%s','now','localtime','start of month','utc')*1000000)");
@@ -1714,7 +1714,7 @@ PlacesSQLQueryBuilder::SelectAsDay()
         if (i == HISTORY_ADDITIONAL_DATE_CONT_NUM + 6) {
           // Older than 6 months
           history->GetAgeInDaysString(6,
-            u"finduri-AgeInMonths-isgreater", dateName);
+            MOZ_UTF16("finduri-AgeInMonths-isgreater"), dateName);
           // From start of epoch
           sqlFragmentContainerBeginTime = NS_LITERAL_CSTRING(
             "(datetime(0, 'unixepoch')*1000000)");
@@ -1814,7 +1814,7 @@ PlacesSQLQueryBuilder::SelectAsSite()
   nsNavHistory *history = nsNavHistory::GetHistoryService();
   NS_ENSURE_STATE(history);
 
-  history->GetStringFromName(u"localhost", localFiles);
+  history->GetStringFromName(MOZ_UTF16("localhost"), localFiles);
   mAddParams.Put(NS_LITERAL_CSTRING("localhost"), localFiles);
 
   // If there are additional conditions the query has to join on visits too.
@@ -2313,8 +2313,14 @@ nsNavHistory::GetObservers(uint32_t* _count,
   if (observers.Count() == 0)
     return NS_OK;
 
+  *_observers = static_cast<nsINavHistoryObserver**>
+    (moz_xmalloc(observers.Count() * sizeof(nsINavHistoryObserver*)));
+  NS_ENSURE_TRUE(*_observers, NS_ERROR_OUT_OF_MEMORY);
+
   *_count = observers.Count();
-  observers.Forget(_observers);
+  for (uint32_t i = 0; i < *_count; ++i) {
+    NS_ADDREF((*_observers)[i] = observers[i]);
+  }
 
   return NS_OK;
 }
@@ -4252,7 +4258,7 @@ nsNavHistory::TitleForDomain(const nsCString& domain, nsACString& aTitle)
   }
 
   // use the localized one instead
-  GetStringFromName(u"localhost", aTitle);
+  GetStringFromName(MOZ_UTF16("localhost"), aTitle);
 }
 
 void
@@ -4322,7 +4328,7 @@ nsNavHistory::GetMonthYear(int32_t aMonth, int32_t aYear, nsACString& aResult)
     };
     nsXPIDLString value;
     if (NS_SUCCEEDED(bundle->FormatStringFromName(
-          u"finduri-MonthYear", strings, 2,
+          MOZ_UTF16("finduri-MonthYear"), strings, 2,
           getter_Copies(value)
         ))) {
       CopyUTF16toUTF8(value, aResult);

@@ -470,7 +470,7 @@ var ctrlTab = {
 
   handleEvent: function ctrlTab_handleEvent(event) {
     switch (event.type) {
-      case "SSWindowRestored":
+      case "SSWindowStateReady":
         this._initRecentlyUsedTabs();
         break;
       case "TabAttrModified":
@@ -531,7 +531,7 @@ var ctrlTab = {
   _init: function ctrlTab__init(enable) {
     var toggleEventListener = enable ? "addEventListener" : "removeEventListener";
 
-    window[toggleEventListener]("SSWindowRestored", this, false);
+    window[toggleEventListener]("SSWindowStateReady", this, false);
 
     var tabContainer = gBrowser.tabContainer;
     tabContainer[toggleEventListener]("TabOpen", this, false);

@@ -1,6 +1,5 @@
 import functools
 import os
-import random
 import shutil
 import subprocess
 import tempfile
@@ -252,10 +251,7 @@ class OpenSSLEnvironment(object):
         with open(path("index.txt"), "w"):
             pass
         with open(path("serial"), "w") as f:
-            serial = "%x" % random.randint(0, 1000000)
-            if len(serial) % 2:
-                serial = "0" + serial
-            f.write(serial)
+            f.write("01")
 
         self.path = path
 

@@ -89,12 +89,6 @@ PresentationParent::RecvPPresentationRequestConstructor(
     case PresentationIPCRequest::TTerminateSessionRequest:
       rv = actor->DoRequest(aRequest.get_TerminateSessionRequest());
       break;
-    case PresentationIPCRequest::TReconnectSessionRequest:
-      rv = actor->DoRequest(aRequest.get_ReconnectSessionRequest());
-      break;
-    case PresentationIPCRequest::TBuildTransportRequest:
-      rv = actor->DoRequest(aRequest.get_BuildTransportRequest());
-      break;
     default:
       MOZ_CRASH("Unknown PresentationIPCRequest type");
   }
@@ -249,14 +243,6 @@ PresentationParent::NotifyStateChange(const nsAString& aSessionId,
 }
 
 NS_IMETHODIMP
-PresentationParent::NotifyReplaced()
-{
-  // Do nothing here, since |PresentationIPCService::RegisterSessionListener|
-  // already dealt with this in content process.
-  return NS_OK;
-}
-
-NS_IMETHODIMP
 PresentationParent::NotifyMessage(const nsAString& aSessionId,
                                   const nsACString& aData)
 {
@@ -280,15 +266,12 @@ PresentationParent::NotifySessionConnect(uint64_t aWindowId,
 
 bool
 PresentationParent::RecvNotifyReceiverReady(const nsString& aSessionId,
-                                            const uint64_t& aWindowId,
-                                            const bool& aIsLoading)
+                                            const uint64_t& aWindowId)
 {
   MOZ_ASSERT(mService);
 
   RegisterTransportBuilder(aSessionId, nsIPresentationService::ROLE_RECEIVER);
-  NS_WARN_IF(NS_FAILED(mService->NotifyReceiverReady(aSessionId,
-                                                     aWindowId,
-                                                     aIsLoading)));
+  NS_WARN_IF(NS_FAILED(mService->NotifyReceiverReady(aSessionId, aWindowId)));
   return true;
 }
 
@@ -393,48 +376,6 @@ PresentationRequestParent::DoRequest(const TerminateSessionRequest& aRequest)
   }
 
   nsresult rv = mService->TerminateSession(aRequest.sessionId(), aRequest.role());
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return NotifyError(rv);
-  }
-  return NotifySuccess();
-}
-
-nsresult
-PresentationRequestParent::DoRequest(const ReconnectSessionRequest& aRequest)
-{
-  MOZ_ASSERT(mService);
-
-  // Validate the accessibility (primarily for receiver side) so that a
-  // compromised child process can't fake the ID.
-  if (NS_WARN_IF(!static_cast<PresentationService*>(mService.get())->
-    IsSessionAccessible(aRequest.sessionId(), aRequest.role(), OtherPid()))) {
-
-    // NOTE: Return NS_ERROR_DOM_NOT_FOUND_ERR here to match the spec.
-    // https://w3c.github.io/presentation-api/#reconnecting-to-a-presentation
-    return NotifyError(NS_ERROR_DOM_NOT_FOUND_ERR);
-  }
-
-  mNeedRegisterBuilder = true;
-  mSessionId = aRequest.sessionId();
-  return mService->ReconnectSession(aRequest.url(),
-                                    aRequest.sessionId(),
-                                    aRequest.role(),
-                                    this);
-}
-
-nsresult
-PresentationRequestParent::DoRequest(const BuildTransportRequest& aRequest)
-{
-  MOZ_ASSERT(mService);
-
-  // Validate the accessibility (primarily for receiver side) so that a
-  // compromised child process can't fake the ID.
-  if (NS_WARN_IF(!static_cast<PresentationService*>(mService.get())->
-                  IsSessionAccessible(aRequest.sessionId(), aRequest.role(), OtherPid()))) {
-    return NotifyError(NS_ERROR_DOM_SECURITY_ERR);
-  }
-
-  nsresult rv = mService->BuildTransport(aRequest.sessionId(), aRequest.role());
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return NotifyError(rv);
   }

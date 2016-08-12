@@ -49,14 +49,14 @@ public:
 
   virtual void
   Reflow(nsPresContext*          aPresContext,
-         ReflowOutput&     aDesiredSize,
-         const ReflowInput& aReflowInput,
+         nsHTMLReflowMetrics&     aDesiredSize,
+         const nsHTMLReflowState& aReflowState,
          nsReflowStatus&          aStatus) override;
 
   virtual nsresult
   Place(DrawTarget*          aDrawTarget,
         bool                 aPlaceOrigin,
-        ReflowOutput& aDesiredSize) override;
+        nsHTMLReflowMetrics& aDesiredSize) override;
 
 protected:
   explicit nsMathMLTokenFrame(nsStyleContext* aContext) : nsMathMLContainerFrame(aContext) {}

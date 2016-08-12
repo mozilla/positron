@@ -15,7 +15,6 @@
 #include "mozilla/Preferences.h"
 #include "mozilla/Services.h"
 #include "nsIObserverService.h"
-#include "nsPrintfCString.h"
 #include "WebGLActiveInfo.h"
 #include "WebGLBuffer.h"
 #include "WebGLContextUtils.h"
@@ -572,7 +571,7 @@ WebGLContext::ValidateAttribPointer(bool integerMode, GLuint index, GLint size, 
         return false;
     }
 
-    uint32_t requiredAlignment = 0;
+    GLsizei requiredAlignment = 0;
     if (!ValidateAttribPointerType(integerMode, type, &requiredAlignment, info))
         return false;
 
@@ -1000,8 +999,6 @@ WebGLContext::InitAndValidateGL(FailureReason* const out_failReason)
     mPixelStore_PackSkipRows = 0;
     mPixelStore_PackSkipPixels = 0;
     mPixelStore_PackAlignment = 4;
-
-    mPrimRestartTypeBytes = 0;
 
     return true;
 }

@@ -468,15 +468,15 @@ class GlobalObject : public NativeObject
     }
 
     JSObject* getOrCreateCollatorPrototype(JSContext* cx) {
-        return getOrCreateObject(cx, COLLATOR_PROTO, initIntlObject);
+        return getOrCreateObject(cx, COLLATOR_PROTO, initCollatorProto);
     }
 
     JSObject* getOrCreateNumberFormatPrototype(JSContext* cx) {
-        return getOrCreateObject(cx, NUMBER_FORMAT_PROTO, initIntlObject);
+        return getOrCreateObject(cx, NUMBER_FORMAT_PROTO, initNumberFormatProto);
     }
 
     JSObject* getOrCreateDateTimeFormatPrototype(JSContext* cx) {
-        return getOrCreateObject(cx, DATE_TIME_FORMAT_PROTO, initIntlObject);
+        return getOrCreateObject(cx, DATE_TIME_FORMAT_PROTO, initDateTimeFormatProto);
     }
 
     static bool ensureModulePrototypesCreated(JSContext *cx, Handle<GlobalObject*> global);
@@ -738,6 +738,9 @@ class GlobalObject : public NativeObject
 
     // Implemented in Intl.cpp.
     static bool initIntlObject(JSContext* cx, Handle<GlobalObject*> global);
+    static bool initCollatorProto(JSContext* cx, Handle<GlobalObject*> global);
+    static bool initNumberFormatProto(JSContext* cx, Handle<GlobalObject*> global);
+    static bool initDateTimeFormatProto(JSContext* cx, Handle<GlobalObject*> global);
 
     // Implemented in builtin/ModuleObject.cpp
     static bool initModuleProto(JSContext* cx, Handle<GlobalObject*> global);

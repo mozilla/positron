@@ -199,9 +199,6 @@ struct FunctionDeclaration
 
 using FunctionDeclarationVector = GCVector<FunctionDeclaration, 0, ZoneAllocPolicy>;
 
-// Possible values for ModuleState are defined in SelfHostingDefines.h.
-using ModuleState = int32_t;
-
 class ModuleObject : public NativeObject
 {
   public:
@@ -212,7 +209,7 @@ class ModuleObject : public NativeObject
         InitialEnvironmentSlot,
         EnvironmentSlot,
         NamespaceSlot,
-        StateSlot,
+        EvaluatedSlot,
         HostDefinedSlot,
         RequestedModulesSlot,
         ImportEntriesSlot,
@@ -252,7 +249,7 @@ class ModuleObject : public NativeObject
     ModuleEnvironmentObject& initialEnvironment() const;
     ModuleEnvironmentObject* environment() const;
     ModuleNamespaceObject* namespace_();
-    ModuleState state() const;
+    bool evaluated() const;
     Value hostDefinedField() const;
     ArrayObject& requestedModules() const;
     ArrayObject& importEntries() const;
@@ -277,7 +274,8 @@ class ModuleObject : public NativeObject
     // For intrinsic_InstantiateModuleFunctionDeclarations.
     static bool instantiateFunctionDeclarations(JSContext* cx, HandleModuleObject self);
 
-    void setState(ModuleState newState);
+    // For intrinsic_SetModuleEvaluated.
+    void setEvaluated();
 
     // For intrinsic_EvaluateModule.
     static bool evaluate(JSContext* cx, HandleModuleObject self, MutableHandleValue rval);

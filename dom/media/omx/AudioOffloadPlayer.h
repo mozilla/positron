@@ -29,7 +29,7 @@
 #include "AudioOutput.h"
 #include "AudioOffloadPlayerBase.h"
 #include "MediaDecoderOwner.h"
-#include "MediaEventSource.h"
+#include "MediaOmxCommonDecoder.h"
 
 namespace mozilla {
 
@@ -58,8 +58,6 @@ class WakeLock;
  * offload playback
  */
 
-class MediaOmxCommonDecoder;
-
 class AudioOffloadPlayer : public AudioOffloadPlayerBase
 {
   typedef android::Mutex Mutex;
@@ -75,7 +73,7 @@ public:
     SEEK_COMPLETE
   };
 
-  AudioOffloadPlayer(MediaOmxCommonDecoder* aDecoder);
+  AudioOffloadPlayer(MediaOmxCommonDecoder* aDecoder = nullptr);
 
   ~AudioOffloadPlayer();
 
@@ -177,6 +175,9 @@ private:
   // Buffer used to get date from audio source. Used in offload callback thread
   MediaBuffer* mInputBuffer;
 
+  // MediaOmxCommonDecoder object used mainly to notify the audio sink status
+  MediaOmxCommonDecoder* mObserver;
+
   TimeStamp mLastFireUpdateTime;
 
   // Timer to trigger position changed events
@@ -190,15 +191,6 @@ private:
   // To avoid device suspend when mResetTimer is going to be triggered.
   // Used only from main thread so no lock is needed.
   RefPtr<mozilla::dom::WakeLock> mWakeLock;
-
-  MediaEventProducer<void> mOnPositionChanged;
-  MediaEventProducer<void> mOnPlaybackEnded;
-  MediaEventProducer<void> mOnPlayerTearDown;
-  MediaEventProducer<void> mOnSeekingStarted;
-  MediaEventListener mPositionChanged;
-  MediaEventListener mPlaybackEnded;
-  MediaEventListener mPlayerTearDown;
-  MediaEventListener mSeekingStarted;
 
   // Provide the playback position in microseconds from total number of
   // frames played by audio track

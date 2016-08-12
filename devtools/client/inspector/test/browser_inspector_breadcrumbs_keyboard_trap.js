@@ -61,9 +61,7 @@ add_task(function* () {
   yield onHighlight;
 
   // Ensure a breadcrumb is focused.
-  is(doc.activeElement, container, "Focus is on selected breadcrumb");
-  is(container.getAttribute("aria-activedescendant"), button.id,
-    "aria-activedescendant is set correctly");
+  is(doc.activeElement, button, "Focus is on selected breadcrumb");
 
   for (let { desc, focused, key, options } of TEST_DATA) {
     info(desc);
@@ -73,11 +71,9 @@ add_task(function* () {
     yield breadcrumbs.keyPromise;
 
     if (focused) {
-      is(doc.activeElement, container, "Focus is on selected breadcrumb");
+      is(doc.activeElement, button, "Focus is on selected breadcrumb");
     } else {
       ok(!containsFocus(doc, container), "Focus is outside of breadcrumbs");
     }
-    is(container.getAttribute("aria-activedescendant"), button.id,
-      "aria-activedescendant is set correctly");
   }
 });

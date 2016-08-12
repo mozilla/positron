@@ -1,7 +1,8 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
-"use strict";
+
+const { Cu } = require("chrome");
 
 const { LocalizationHelper } = require("devtools/client/shared/l10n");
 const STRINGS_URI = "chrome://devtools/locale/jit-optimizations.properties";
@@ -12,20 +13,13 @@ const { DOM: dom, createClass, createFactory, PropTypes } = require("devtools/cl
 const Tree = createFactory(require("../../shared/components/tree"));
 const OptimizationsItem = createFactory(require("./jit-optimizations-item"));
 const FrameView = createFactory(require("../../shared/components/frame"));
+
+const onClickTooltipString = frame =>
+  L10N.getFormatStr("viewsourceindebugger", `${frame.source}:${frame.line}:${frame.column}`);
 const JIT_TITLE = L10N.getStr("jit.title");
 // If TREE_ROW_HEIGHT changes, be sure to change `var(--jit-tree-row-height)`
 // in `devtools/client/themes/jit-optimizations.css`
 const TREE_ROW_HEIGHT = 14;
-
-/* eslint-disable no-unused-vars */
-/**
- * TODO - Re-enable this eslint rule. The JIT tool is a work in progress, and isn't fully
- *        integrated as of yet, and this may represent intended functionality.
- */
-const onClickTooltipString = frame =>
-  L10N.getFormatStr("viewsourceindebugger",
-                    `${frame.source}:${frame.line}:${frame.column}`);
-/* eslint-enable no-unused-vars */
 
 const optimizationAttemptModel = {
   id: PropTypes.number.isRequired,
@@ -58,7 +52,7 @@ const optimizationSiteModel = {
   }).isRequired,
 };
 
-const JITOptimizations = createClass({
+const JITOptimizations = module.exports = createClass({
   displayName: "JITOptimizations",
 
   propTypes: {
@@ -68,16 +62,23 @@ const JITOptimizations = createClass({
     autoExpandDepth: PropTypes.number,
   },
 
+  getInitialState() {
+    return {
+      expanded: new Set()
+    };
+  },
+
   getDefaultProps() {
     return {
       autoExpandDepth: 0
     };
   },
 
-  getInitialState() {
-    return {
-      expanded: new Set()
-    };
+  render() {
+    let header = this._createHeader(this.props);
+    let tree = this._createTree(this.props);
+
+    return dom.div({}, header, tree);
   },
 
   /**
@@ -117,19 +118,11 @@ const JITOptimizations = createClass({
   },
 
   _createTree(props) {
-    let {
-      autoExpandDepth,
-      frameData,
-      onViewSourceInDebugger,
-      optimizationSites: sites
-    } = this.props;
+    let { autoExpandDepth, frameData, onViewSourceInDebugger, optimizationSites: sites } = this.props;
 
     let getSite = id => sites.find(site => site.id === id);
-    let getIonTypeForObserved = type => {
-      return getSite(type.id).data.types
-        .find(iontype => (iontype.typeset || [])
-        .indexOf(type) !== -1);
-    };
+    let getIonTypeForObserved = type =>
+      getSite(type.id).data.types.find(iontype => (iontype.typeset || []).indexOf(type) !== -1);
     let isSite = site => getSite(site.id) === site;
     let isAttempts = attempts => getSite(attempts.id).data.attempts === attempts;
     let isAttempt = attempt => getSite(attempt.id).data.attempts.indexOf(attempt) !== -1;
@@ -138,25 +131,12 @@ const JITOptimizations = createClass({
     let isObservedType = type => getIonTypeForObserved(type);
 
     let getRowType = node => {
-      if (isSite(node)) {
-        return "site";
-      }
-      if (isAttempts(node)) {
-        return "attempts";
-      }
-      if (isTypes(node)) {
-        return "types";
-      }
-      if (isAttempt(node)) {
-        return "attempt";
-      }
-      if (isType(node)) {
-        return "type";
-      }
-      if (isObservedType(node)) {
-        return "observedtype";
-      }
-      return null;
+      return isSite(node) ? "site" :
+             isAttempts(node) ? "attempts" :
+             isTypes(node) ? "types" :
+             isAttempt(node) ? "attempt" :
+             isType(node) ? "type" :
+             isObservedType(node) ? "observedtype" : null;
     };
 
     // Creates a unique key for each node in the
@@ -177,7 +157,6 @@ const JITOptimizations = createClass({
         let iontype = getIonTypeForObserved(node);
         return `${getKey(iontype)}-O-${iontype.typeset.indexOf(node)}`;
       }
-      return "";
     };
 
     return Tree({
@@ -205,8 +184,9 @@ const JITOptimizations = createClass({
           return node;
         } else if (isType(node)) {
           return node.typeset || [];
+        } else {
+          return [];
         }
-        return [];
       },
       isExpanded: node => this.state.expanded.has(node),
       onExpand: node => this.setState(state => {
@@ -235,14 +215,5 @@ const JITOptimizations = createClass({
           frameData,
         }),
     });
-  },
-
-  render() {
-    let header = this._createHeader(this.props);
-    let tree = this._createTree(this.props);
-
-    return dom.div({}, header, tree);
   }
 });
-
-module.exports = JITOptimizations;

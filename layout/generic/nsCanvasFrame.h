@@ -71,8 +71,8 @@ public:
   virtual nscoord GetMinISize(nsRenderingContext *aRenderingContext) override;
   virtual nscoord GetPrefISize(nsRenderingContext *aRenderingContext) override;
   virtual void Reflow(nsPresContext*           aPresContext,
-                      ReflowOutput&     aDesiredSize,
-                      const ReflowInput& aReflowInput,
+                      nsHTMLReflowMetrics&     aDesiredSize,
+                      const nsHTMLReflowState& aReflowState,
                       nsReflowStatus&          aStatus) override;
   virtual bool IsFrameOfType(uint32_t aFlags) const override
   {

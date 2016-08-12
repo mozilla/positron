@@ -20,7 +20,7 @@
 #include "gfxTypes.h"
 #include "JustificationUtils.h"
 #include "mozilla/WritingModes.h"
-#include "BlockReflowInput.h"
+#include "nsBlockReflowState.h"
 #include "nsLineBox.h"
 #include "plarena.h"
 
@@ -28,10 +28,6 @@ class nsFloatManager;
 struct nsStyleText;
 
 class nsLineLayout {
-  using BlockReflowInput = mozilla::BlockReflowInput;
-  using ReflowInput = mozilla::ReflowInput;
-  using ReflowOutput = mozilla::ReflowOutput;
-  
 public:
   /**
    * @param aBaseLineLayout the nsLineLayout for ruby base,
@@ -39,14 +35,14 @@ public:
    */
   nsLineLayout(nsPresContext* aPresContext,
                nsFloatManager* aFloatManager,
-               const ReflowInput* aOuterReflowInput,
+               const nsHTMLReflowState* aOuterReflowState,
                const nsLineList::iterator* aLine,
                nsLineLayout* aBaseLineLayout);
   ~nsLineLayout();
 
-  void Init(BlockReflowInput* aState, nscoord aMinLineBSize,
+  void Init(nsBlockReflowState* aState, nscoord aMinLineBSize,
             int32_t aLineNumber) {
-    mBlockRI = aState;
+    mBlockRS = aState;
     mMinLineBSize = aMinLineBSize;
     mLineNumber = aLineNumber;
   }
@@ -76,7 +72,7 @@ public:
                   const mozilla::LogicalRect& aNewAvailableSpace,
                   nsIFrame* aFloatFrame);
 
-  void BeginSpan(nsIFrame* aFrame, const ReflowInput* aSpanReflowInput,
+  void BeginSpan(nsIFrame* aFrame, const nsHTMLReflowState* aSpanReflowState,
                  nscoord aLeftEdge, nscoord aRightEdge, nscoord* aBaseline);
 
   // Returns the width of the span
@@ -106,10 +102,10 @@ public:
   // if the frame is pushed to the next line because it doesn't fit.
   void ReflowFrame(nsIFrame* aFrame,
                    nsReflowStatus& aReflowStatus,
-                   ReflowOutput* aMetrics,
+                   nsHTMLReflowMetrics* aMetrics,
                    bool& aPushedFrame);
 
-  void AddBulletFrame(nsIFrame* aFrame, const ReflowOutput& aMetrics);
+  void AddBulletFrame(nsIFrame* aFrame, const nsHTMLReflowMetrics& aMetrics);
 
   void RemoveBulletFrame(nsIFrame* aFrame) {
     PushFrame(aFrame);
@@ -184,10 +180,10 @@ public:
     // provided to the line layout. However, floats should never be
     // associated with ruby text containers, hence this method should
     // not be called in that case.
-    MOZ_ASSERT(mBlockRI,
+    MOZ_ASSERT(mBlockRS,
                "Should not call this method if there is no block reflow state "
                "available");
-    return mBlockRI->AddFloat(this, aFloat, aAvailableISize);
+    return mBlockRS->AddFloat(this, aFloat, aAvailableISize);
   }
 
   void SetTrimmableISize(nscoord aTrimmableISize) {
@@ -342,8 +338,8 @@ public:
    * some other kind of frame when inline frames are reflowed in a non-block
    * context (e.g. MathML or floating first-letter).
    */
-  nsIFrame* LineContainerFrame() const { return mBlockReflowInput->mFrame; }
-  const ReflowInput* LineContainerRI() const { return mBlockReflowInput; }
+  nsIFrame* LineContainerFrame() const { return mBlockReflowState->frame; }
+  const nsHTMLReflowState* LineContainerRS() const { return mBlockReflowState; }
   const nsLineList::iterator* GetLine() const {
     return mGotLineBox ? &mLineBox : nullptr;
   }
@@ -383,7 +379,7 @@ protected:
   // This state is constant for a given block frame doing line layout
   nsFloatManager* mFloatManager;
   const nsStyleText* mStyleText; // for the block
-  const ReflowInput* mBlockReflowInput;
+  const nsHTMLReflowState* mBlockReflowState;
 
   // The line layout for the base text.  It is usually nullptr.
   // It becomes not null when the current line layout is for ruby
@@ -412,7 +408,7 @@ protected:
   //     member. It should not be a problem currently, since the only
   //     code use it is handling float, which does not affect ruby.
   //     See comment in nsLineLayout::AddFloat
-  BlockReflowInput* mBlockRI;/* XXX hack! */
+  nsBlockReflowState* mBlockRS;/* XXX hack! */
 
   nsLineList::iterator mLineBox;
 
@@ -534,7 +530,7 @@ protected:
     // the next.
     PerFrameData* mLastFrame;
 
-    const ReflowInput* mReflowInput;
+    const nsHTMLReflowState* mReflowState;
     bool mNoWrap;
     mozilla::WritingMode mWritingMode;
     bool mContainsFloat;
@@ -667,7 +663,7 @@ protected:
   void PushFrame(nsIFrame* aFrame);
 
   void AllowForStartMargin(PerFrameData* pfd,
-                           ReflowInput& aReflowInput);
+                           nsHTMLReflowState& aReflowState);
 
   void SyncAnnotationBounds(PerFrameData* aRubyFrame);
 
@@ -675,12 +671,12 @@ protected:
                        bool aNotSafeToBreak,
                        bool aFrameCanContinueTextRun,
                        bool aCanRollBackBeforeFrame,
-                       ReflowOutput& aMetrics,
+                       nsHTMLReflowMetrics& aMetrics,
                        nsReflowStatus& aStatus,
                        bool* aOptionalBreakAfterFits);
 
   void PlaceFrame(PerFrameData* pfd,
-                  ReflowOutput& aMetrics);
+                  nsHTMLReflowMetrics& aMetrics);
 
   void AdjustLeadings(nsIFrame* spanFrame, PerSpanData* psd,
                       const nsStyleText* aStyleText, float aInflation,

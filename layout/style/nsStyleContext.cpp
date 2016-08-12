@@ -82,19 +82,11 @@ nsStyleContext::nsStyleContext(nsStyleContext* aParent,
   , mCachedResetData(nullptr)
   , mBits(((uint64_t)aPseudoType) << NS_STYLE_CONTEXT_TYPE_SHIFT)
   , mRefCnt(0)
-#ifdef MOZ_STYLO
-  , mStoredChangeHint(nsChangeHint(0))
-#ifdef DEBUG
-  , mConsumedChangeHint(false)
-#endif
-#endif
 #ifdef DEBUG
   , mFrameRefCnt(0)
   , mComputingStruct(nsStyleStructID_None)
 #endif
-{
-  MOZ_COUNT_CTOR(nsStyleContext);
-}
+{}
 
 nsStyleContext::nsStyleContext(nsStyleContext* aParent,
                                nsIAtom* aPseudoTag,
@@ -177,7 +169,6 @@ nsStyleContext::FinishConstruction(bool aSkipParentDisplayBasedStyleFixup)
 
 nsStyleContext::~nsStyleContext()
 {
-  MOZ_COUNT_DTOR(nsStyleContext);
   NS_ASSERTION((nullptr == mChild) && (nullptr == mEmptyChild), "destructing context with children");
 
 #ifdef DEBUG
@@ -900,12 +891,11 @@ nsStyleContext::ApplyStyleFixups(bool aSkipParentDisplayBasedStyleFixup)
 #undef GET_UNIQUE_STYLE_DATA
 }
 
-template<class StyleContextLike>
 nsChangeHint
-nsStyleContext::CalcStyleDifferenceInternal(StyleContextLike* aNewContext,
-                                            nsChangeHint aParentHintsNotHandledForDescendants,
-                                            uint32_t* aEqualStructs,
-                                            uint32_t* aSamePointerStructs)
+nsStyleContext::CalcStyleDifference(nsStyleContext* aNewContext,
+                                    nsChangeHint aParentHintsNotHandledForDescendants,
+                                    uint32_t* aEqualStructs,
+                                    uint32_t* aSamePointerStructs)
 {
   PROFILER_LABEL("nsStyleContext", "CalcStyleDifference",
     js::ProfileEntry::Category::CSS);
@@ -943,7 +933,7 @@ nsStyleContext::CalcStyleDifferenceInternal(StyleContextLike* aNewContext,
   // (Things like 'em' units are handled by the change hint produced
   // by font-size changing, so we don't need to worry about them like
   // we worry about 'inherit' values.)
-  bool compare = StyleSource() != aNewContext->StyleSource();
+  bool compare = mSource != aNewContext->mSource;
 
   DebugOnly<uint32_t> structsFound = 0;
 
@@ -1221,54 +1211,6 @@ nsStyleContext::CalcStyleDifferenceInternal(StyleContextLike* aNewContext,
   }
 
   return hint & ~nsChangeHint_NeutralChange;
-}
-
-nsChangeHint
-nsStyleContext::CalcStyleDifference(nsStyleContext* aNewContext,
-                                    nsChangeHint aParentHintsNotHandledForDescendants,
-                                    uint32_t* aEqualStructs,
-                                    uint32_t* aSamePointerStructs)
-{
-  return CalcStyleDifferenceInternal(aNewContext, aParentHintsNotHandledForDescendants,
-                                     aEqualStructs, aSamePointerStructs);
-}
-
-class MOZ_STACK_CLASS FakeStyleContext
-{
-public:
-  explicit FakeStyleContext(ServoComputedValues* aComputedValues)
-    : mComputedValues(aComputedValues) {}
-
-  mozilla::NonOwningStyleContextSource StyleSource() const {
-    return mozilla::NonOwningStyleContextSource(mComputedValues);
-  }
-
-  nsStyleContext* GetStyleIfVisited() {
-    // XXXbholley: This is wrong. Need to implement to get visited handling
-    // corrrect!
-    return nullptr;
-  }
-
-  #define STYLE_STRUCT(name_, checkdata_cb_)                                  \
-  const nsStyle##name_ * Style##name_() {                                     \
-    return Servo_GetStyle##name_(mComputedValues);                            \
-  }
-  #include "nsStyleStructList.h"
-  #undef STYLE_STRUCT
-
-private:
-  ServoComputedValues* MOZ_NON_OWNING_REF mComputedValues;
-};
-
-nsChangeHint
-nsStyleContext::CalcStyleDifference(ServoComputedValues* aNewComputedValues,
-                                    nsChangeHint aParentHintsNotHandledForDescendants,
-                                    uint32_t* aEqualStructs,
-                                    uint32_t* aSamePointerStructs)
-{
-  FakeStyleContext newContext(aNewComputedValues);
-  return CalcStyleDifferenceInternal(&newContext, aParentHintsNotHandledForDescendants,
-                                     aEqualStructs, aSamePointerStructs);
 }
 
 #ifdef DEBUG

@@ -7,7 +7,6 @@
 #ifdef MOZ_WIDGET_ANDROID
 
 #include <map>
-#include <android/native_window_jni.h>
 #include <android/log.h>
 #include "AndroidSurfaceTexture.h"
 #include "gfxImageSurface.h"
@@ -21,8 +20,8 @@
 
 using namespace mozilla;
 using namespace mozilla::jni;
-using namespace mozilla::java;
-using namespace mozilla::java::sdk;
+using namespace mozilla::widget;
+using namespace mozilla::widget::sdk;
 
 namespace mozilla {
 namespace gl {
@@ -200,8 +199,8 @@ AndroidSurfaceTexture::Init(GLContext* aContext, GLuint aTexture)
     return false;
   }
 
-  mNativeWindow = ANativeWindow_fromSurface(jni::GetEnvForThread(),
-                                            mSurface.Get());
+  mNativeWindow = AndroidNativeWindow::CreateFromSurface(jni::GetEnvForThread(),
+                                                         mSurface.Get());
   MOZ_ASSERT(mNativeWindow, "Failed to create native window from surface");
 
   mID = sInstances.Add(this);
@@ -227,11 +226,6 @@ AndroidSurfaceTexture::~AndroidSurfaceTexture()
   if (mSurfaceTexture) {
     GeckoAppShell::UnregisterSurfaceTextureFrameListener(mSurfaceTexture);
     mSurfaceTexture = nullptr;
-  }
-
-  if (mNativeWindow) {
-    ANativeWindow_release(mNativeWindow);
-    mNativeWindow = nullptr;
   }
 }
 

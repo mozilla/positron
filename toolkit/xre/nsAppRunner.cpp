@@ -15,7 +15,6 @@
 #include "mozilla/Poison.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/Services.h"
-#include "mozilla/ServoBindings.h"
 #include "mozilla/Telemetry.h"
 #include "mozilla/MemoryChecking.h"
 
@@ -98,7 +97,6 @@
 #include <math.h>
 #include "cairo/cairo-features.h"
 #include "mozilla/WindowsVersion.h"
-#include "mozilla/mscom/MainThreadRuntime.h"
 #include "mozilla/widget/AudioSession.h"
 
 #ifndef PROCESS_DEP_ENABLE
@@ -196,14 +194,17 @@
 #include "base/command_line.h"
 #include "GTestRunner.h"
 
+#ifdef MOZ_B2G_LOADER
+#include "ProcessUtils.h"
+#endif
+
 #ifdef MOZ_WIDGET_ANDROID
-#include "GeneratedJNIWrappers.h"
+#include "AndroidBridge.h"
 #endif
 
 #if defined(MOZ_SANDBOX)
 #if defined(XP_LINUX) && !defined(ANDROID)
 #include "mozilla/SandboxInfo.h"
-#include "mozilla/widget/LSBUtils.h"
 #elif defined(XP_WIN)
 #include "SandboxBroker.h"
 #endif
@@ -1257,7 +1258,6 @@ nsXULAppInfo::SetTelemetrySessionId(const nsACString& id)
   return NS_OK;
 }
 
-// This method is from nsIFInishDumpingCallback.
 NS_IMETHODIMP
 nsXULAppInfo::Callback(nsISupports* aData)
 {
@@ -1720,7 +1720,7 @@ static nsresult LaunchChild(nsINativeAppSupport* aNative,
   SaveToEnv("MOZ_LAUNCHED_CHILD=1");
 
 #if defined(MOZ_WIDGET_ANDROID)
-  java::GeckoAppShell::ScheduleRestart();
+  mozilla::widget::GeckoAppShell::ScheduleRestart();
 #else
 #if defined(XP_MACOSX)
   CommandLineServiceMac::SetupMacCommandLine(gRestartArgc, gRestartArgv, true);
@@ -1835,17 +1835,17 @@ ProfileLockedDialog(nsIFile* aProfileDir, nsIFile* aProfileLocalDir,
 
     nsXPIDLString killMessage;
 #ifndef XP_MACOSX
-    sb->FormatStringFromName(aUnlocker ? u"restartMessageUnlocker"
-                                       : u"restartMessageNoUnlocker",
+    sb->FormatStringFromName(aUnlocker ? MOZ_UTF16("restartMessageUnlocker")
+                                       : MOZ_UTF16("restartMessageNoUnlocker"),
                              params, 2, getter_Copies(killMessage));
 #else
-    sb->FormatStringFromName(aUnlocker ? u"restartMessageUnlockerMac"
-                                       : u"restartMessageNoUnlockerMac",
+    sb->FormatStringFromName(aUnlocker ? MOZ_UTF16("restartMessageUnlockerMac")
+                                       : MOZ_UTF16("restartMessageNoUnlockerMac"),
                              params, 2, getter_Copies(killMessage));
 #endif
 
     nsXPIDLString killTitle;
-    sb->FormatStringFromName(u"restartTitle",
+    sb->FormatStringFromName(MOZ_UTF16("restartTitle"),
                              params, 1, getter_Copies(killTitle));
 
     if (!killMessage || !killTitle)
@@ -1858,7 +1858,7 @@ ProfileLockedDialog(nsIFile* aProfileDir, nsIFile* aProfileLocalDir,
     if (aUnlocker) {
       int32_t button;
 #ifdef MOZ_WIDGET_ANDROID
-      java::GeckoAppShell::KillAnyZombies();
+      mozilla::widget::GeckoAppShell::KillAnyZombies();
       button = 0;
 #else
       const uint32_t flags =
@@ -1887,7 +1887,7 @@ ProfileLockedDialog(nsIFile* aProfileDir, nsIFile* aProfileLocalDir,
       }
     } else {
 #ifdef MOZ_WIDGET_ANDROID
-      if (java::GeckoAppShell::UnlockProfile()) {
+      if (mozilla::widget::GeckoAppShell::UnlockProfile()) {
         return NS_LockProfilePath(aProfileDir, aProfileLocalDir,
                                   nullptr, aResult);
       }
@@ -1928,10 +1928,10 @@ ProfileMissingDialog(nsINativeAppSupport* aNative)
     nsXPIDLString missingMessage;
 
     // profileMissing
-    sb->FormatStringFromName(u"profileMissing", params, 2, getter_Copies(missingMessage));
+    sb->FormatStringFromName(MOZ_UTF16("profileMissing"), params, 2, getter_Copies(missingMessage));
 
     nsXPIDLString missingTitle;
-    sb->FormatStringFromName(u"profileMissingTitle",
+    sb->FormatStringFromName(MOZ_UTF16("profileMissingTitle"),
                              params, 1, getter_Copies(missingTitle));
 
     if (missingMessage && missingTitle) {
@@ -3486,21 +3486,7 @@ static void PR_CALLBACK AnnotateSystemManufacturer_ThreadStart(void*)
 
   CoUninitialize();
 }
-#endif // XP_WIN
-
-#if defined(XP_LINUX) && !defined(ANDROID)
-
-static void
-AnnotateLSBRelease(void*)
-{
-  nsCString dist, desc, release, codename;
-  if (widget::lsb::GetLSBRelease(dist, desc, release, codename)) {
-    CrashReporter::AppendAppNotesToCrashReport(desc);
-  }
-}
-
-#endif // defined(XP_LINUX) && !defined(ANDROID)
-
+#endif
 #endif
 
 namespace mozilla {
@@ -3923,39 +3909,6 @@ XREMain::XRE_mainStartup(bool* aExitFlag)
   return 0;
 }
 
-#if defined(MOZ_CRASHREPORTER)
-#if defined(MOZ_CONTENT_SANDBOX) && !defined(MOZ_WIDGET_GONK)
-void AddSandboxAnnotations()
-{
-  // Include the sandbox content level, regardless of platform
-  int level = Preferences::GetInt("security.sandbox.content.level");
-
-  nsAutoCString levelString;
-  levelString.AppendInt(level);
-
-  CrashReporter::AnnotateCrashReport(
-    NS_LITERAL_CSTRING("ContentSandboxLevel"), levelString);
-
-  // Include whether or not this instance is capable of content sandboxing
-  bool sandboxCapable = false;
-
-#if defined(XP_WIN)
-  // All supported Windows versions support some level of content sandboxing
-  sandboxCapable = true;
-#elif defined(XP_MACOSX)
-  // All supported OS X versions are capable
-  sandboxCapable = true;
-#elif defined(XP_LINUX)
-  sandboxCapable = SandboxInfo::Get().CanSandboxContent();
-#endif
-
-  CrashReporter::AnnotateCrashReport(
-    NS_LITERAL_CSTRING("ContentSandboxCapable"),
-    sandboxCapable ? NS_LITERAL_CSTRING("1") : NS_LITERAL_CSTRING("0"));
-}
-#endif /* MOZ_CONTENT_SANDBOX && !MOZ_WIDGET_GONK */
-#endif /* MOZ_CRASHREPORTER */
-
 /*
  * XRE_mainRun - Command line startup, profile migration, and
  * the calling of appStartup->Run().
@@ -3965,6 +3918,10 @@ XREMain::XRE_mainRun()
 {
   nsresult rv = NS_OK;
   NS_ASSERTION(mScopedXPCOM, "Scoped xpcom not initialized.");
+
+#ifdef MOZ_B2G_LOADER
+  mozilla::ipc::ProcLoaderClientGeckoInit();
+#endif
 
 #ifdef NS_FUNCTION_TIMER
   // initialize some common services, so we don't pay the cost for these at odd times later on;
@@ -4014,11 +3971,6 @@ XREMain::XRE_mainRun()
 #ifdef XP_WIN
   PR_CreateThread(PR_USER_THREAD, AnnotateSystemManufacturer_ThreadStart, 0,
                   PR_PRIORITY_LOW, PR_GLOBAL_THREAD, PR_UNJOINABLE_THREAD, 0);
-#endif
-
-#if defined(XP_LINUX) && !defined(ANDROID)
-  PR_CreateThread(PR_USER_THREAD, AnnotateLSBRelease, 0, PR_PRIORITY_LOW,
-                  PR_GLOBAL_THREAD, PR_UNJOINABLE_THREAD, 0);
 #endif
 
 #endif
@@ -4192,15 +4144,6 @@ XREMain::XRE_mainRun()
     rv = appStartup->CreateHiddenWindow();
     NS_ENSURE_SUCCESS(rv, NS_ERROR_FAILURE);
 
-#ifdef MOZ_STYLO
-    // We initialize Servo here so that the hidden DOM window is available,
-    // since initializing Servo calls style struct constructors, and the
-    // HackilyFindDeviceContext stuff we have right now depends on the hidden
-    // DOM window. When we fix that, this should move back to
-    // nsLayoutStatics.cpp
-    Servo_Initialize();
-#endif
-
 #if defined(HAVE_DESKTOP_STARTUP_ID) && defined(MOZ_WIDGET_GTK)
     nsGTKToolkit* toolkit = nsGTKToolkit::GetToolkit();
     if (toolkit && !mDesktopStartupID.IsEmpty()) {
@@ -4260,20 +4203,11 @@ XREMain::XRE_mainRun()
   }
 #endif /* MOZ_INSTRUMENT_EVENT_LOOP */
 
-#if defined(MOZ_SANDBOX) && defined(XP_LINUX) && !defined(MOZ_WIDGET_GONK)
+#if defined(MOZ_SANDBOX) && defined(XP_LINUX) && !defined(ANDROID)
   // If we're on Linux, we now have information about the OS capabilities
   // available to us.
   SandboxInfo::SubmitTelemetry();
-#if defined(MOZ_CRASHREPORTER)
-  SandboxInfo::Get().AnnotateCrashReport();
-#endif /* MOZ_CRASHREPORTER */
-#endif /* MOZ_SANDBOX && XP_LINUX && !MOZ_WIDGET_GONK */
-
-#if defined(MOZ_CRASHREPORTER)
-#if defined(MOZ_CONTENT_SANDBOX) && !defined(MOZ_WIDGET_GONK)
-  AddSandboxAnnotations();
-#endif /* MOZ_CONTENT_SANDBOX && !MOZ_WIDGET_GONK */
-#endif /* MOZ_CRASHREPORTER */
+#endif
 
   {
     rv = appStartup->Run();
@@ -4368,14 +4302,6 @@ XREMain::XRE_main(int argc, char* argv[], const nsXREAppData* aAppData)
   NS_ENSURE_SUCCESS(rv, 1);
 
   mozilla::IOInterposerInit ioInterposerGuard;
-
-#if defined(XP_WIN)
-  // Some COM settings are global to the process and must be set before any non-
-  // trivial COM is run in the application. Since these settings may affect
-  // stability, we should instantiate COM ASAP so that we can ensure that these
-  // global settings are configured before anything can interfere.
-  mozilla::mscom::MainThreadRuntime msCOMRuntime;
-#endif
 
 #if MOZ_WIDGET_GTK == 2
   XRE_GlibInit();

@@ -843,7 +843,7 @@ nsFrame::DidSetStyleContext(nsStyleContext* aOldStyleContext)
     if (anonBlock && !(anonBlock->GetStateBits() & NS_FRAME_FIRST_REFLOW) &&
         (svgTextFrame->GetStateBits() & NS_FRAME_IS_NONDISPLAY) &&
         !(svgTextFrame->GetStateBits() & NS_STATE_SVG_TEXT_IN_REFLOW)) {
-      svgTextFrame->ScheduleReflowSVGNonDisplayText(nsIPresShell::eStyleChange);
+      svgTextFrame->ScheduleReflowSVGNonDisplayText();
     }
   }
 
@@ -1055,7 +1055,7 @@ nsIFrame::GetUsedPadding() const
 }
 
 nsIFrame::Sides
-nsIFrame::GetSkipSides(const ReflowInput* aReflowInput) const
+nsIFrame::GetSkipSides(const nsHTMLReflowState* aReflowState) const
 {
   if (MOZ_UNLIKELY(StyleBorder()->mBoxDecorationBreak ==
                      NS_STYLE_BOX_DECORATION_BREAK_CLONE) &&
@@ -1066,7 +1066,7 @@ nsIFrame::GetSkipSides(const ReflowInput* aReflowInput) const
   // Convert the logical skip sides to physical sides using the frame's
   // writing mode
   WritingMode writingMode = GetWritingMode();
-  LogicalSides logicalSkip = GetLogicalSkipSides(aReflowInput);
+  LogicalSides logicalSkip = GetLogicalSkipSides(aReflowState);
   Sides skip;
 
   if (logicalSkip.BStart()) {
@@ -2445,11 +2445,10 @@ nsIFrame::BuildDisplayListForStackingContext(nsDisplayListBuilder* aBuilder,
     aBuilder->ExitSVGEffectsContents();
     resultList.AppendToTop(&hoistedScrollInfoItemsStorage);
   }
-
-  /* If the list is non-empty and there is CSS group opacity without SVG
+  /* Else, if the list is non-empty and there is CSS group opacity without SVG
    * effects, wrap it up in an opacity item.
    */
-  if (useOpacity && !resultList.IsEmpty()) {
+  else if (useOpacity && !resultList.IsEmpty()) {
     // Don't clip nsDisplayOpacity items. We clip their descendants instead.
     // The clip we would set on an element with opacity would clip
     // all descendant content, but some should not be clipped.
@@ -2867,11 +2866,11 @@ nsIFrame::BuildDisplayListForChild(nsDisplayListBuilder*   aBuilder,
         eventRegions->AddFrame(aBuilder, child);
         aBuilder->SetLayerEventRegions(eventRegions);
         aLists.BorderBackground()->AppendNewToTop(eventRegions);
-      } else {
-        nsDisplayLayerEventRegions* eventRegions = aBuilder->GetLayerEventRegions();
-        if (eventRegions) {
-          eventRegions->AddFrame(aBuilder, child);
-        }
+      }
+
+      nsDisplayLayerEventRegions* eventRegions = aBuilder->GetLayerEventRegions();
+      if (eventRegions) {
+        eventRegions->AddFrame(aBuilder, child);
       }
     }
 
@@ -4934,7 +4933,7 @@ nsFrame::ShrinkWidthToFit(nsRenderingContext *aRenderingContext,
 
 void
 nsFrame::DidReflow(nsPresContext*           aPresContext,
-                   const ReflowInput*  aReflowInput,
+                   const nsHTMLReflowState*  aReflowState,
                    nsDidReflowStatus         aStatus)
 {
   NS_FRAME_TRACE_MSG(NS_FRAME_TRACE_CALLS,
@@ -4951,12 +4950,12 @@ nsFrame::DidReflow(nsPresContext*           aPresContext,
   // The observer may be able to initiate another reflow with a computed
   // bsize. This happens in the case where a table cell has no computed
   // bsize but can fabricate one when the cell bsize is known.
-  if (aReflowInput && aReflowInput->mPercentBSizeObserver &&
+  if (aReflowState && aReflowState->mPercentBSizeObserver &&
       !GetPrevInFlow()) {
     const nsStyleCoord &bsize =
-      aReflowInput->mStylePosition->BSize(aReflowInput->GetWritingMode());
+      aReflowState->mStylePosition->BSize(aReflowState->GetWritingMode());
     if (bsize.HasPercent()) {
-      aReflowInput->mPercentBSizeObserver->NotifyPercentBSize(*aReflowInput);
+      aReflowState->mPercentBSizeObserver->NotifyPercentBSize(*aReflowState);
     }
   }
 
@@ -4965,20 +4964,20 @@ nsFrame::DidReflow(nsPresContext*           aPresContext,
 
 void
 nsFrame::FinishReflowWithAbsoluteFrames(nsPresContext*           aPresContext,
-                                        ReflowOutput&     aDesiredSize,
-                                        const ReflowInput& aReflowInput,
+                                        nsHTMLReflowMetrics&     aDesiredSize,
+                                        const nsHTMLReflowState& aReflowState,
                                         nsReflowStatus&          aStatus,
                                         bool                     aConstrainBSize)
 {
-  ReflowAbsoluteFrames(aPresContext, aDesiredSize, aReflowInput, aStatus, aConstrainBSize);
+  ReflowAbsoluteFrames(aPresContext, aDesiredSize, aReflowState, aStatus, aConstrainBSize);
 
   FinishAndStoreOverflow(&aDesiredSize);
 }
 
 void
 nsFrame::ReflowAbsoluteFrames(nsPresContext*           aPresContext,
-                              ReflowOutput&     aDesiredSize,
-                              const ReflowInput& aReflowInput,
+                              nsHTMLReflowMetrics&     aDesiredSize,
+                              const nsHTMLReflowState& aReflowState,
                               nsReflowStatus&          aStatus,
                               bool                     aConstrainBSize)
 {
@@ -5003,7 +5002,7 @@ nsFrame::ReflowAbsoluteFrames(nsPresContext*           aPresContext,
     if (aConstrainBSize) {
       flags |= AbsPosReflowFlags::eConstrainHeight;
     }
-    absoluteContainer->Reflow(container, aPresContext, aReflowInput, aStatus,
+    absoluteContainer->Reflow(container, aPresContext, aReflowState, aStatus,
                               containingBlock, flags,
                               &aDesiredSize.mOverflowAreas);
   }
@@ -5031,15 +5030,15 @@ nsFrame::CanContinueTextRun() const
 
 void
 nsFrame::Reflow(nsPresContext*          aPresContext,
-                ReflowOutput&     aDesiredSize,
-                const ReflowInput& aReflowInput,
+                nsHTMLReflowMetrics&     aDesiredSize,
+                const nsHTMLReflowState& aReflowState,
                 nsReflowStatus&          aStatus)
 {
   MarkInReflow();
   DO_GLOBAL_REFLOW_COUNT("nsFrame");
   aDesiredSize.ClearSize();
   aStatus = NS_FRAME_COMPLETE;
-  NS_FRAME_SET_TRUNCATION(aStatus, aReflowInput, aDesiredSize);
+  NS_FRAME_SET_TRUNCATION(aStatus, aReflowState, aDesiredSize);
 }
 
 nsresult
@@ -5468,51 +5467,6 @@ nsIFrame::GetTransformMatrix(const nsIFrame* aStopAtAncestor,
                                 0.0f);
 }
 
-static void InvalidateRenderingObservers(nsIFrame* aFrame)
-{
-  nsSVGEffects::InvalidateDirectRenderingObservers(aFrame);
-  nsIFrame* displayRoot = nsLayoutUtils::GetDisplayRootFrame(aFrame);
-  nsIFrame* parent = aFrame;
-  while (parent != displayRoot &&
-         (parent = nsLayoutUtils::GetCrossDocParentFrame(parent)) &&
-         !parent->HasAnyStateBits(NS_FRAME_DESCENDANT_NEEDS_PAINT)) {
-    nsSVGEffects::InvalidateDirectRenderingObservers(parent);
-  }
-}
-
-void
-SchedulePaintInternal(nsIFrame* aFrame, nsIFrame::PaintType aType = nsIFrame::PAINT_DEFAULT)
-{
-  nsIFrame* displayRoot = nsLayoutUtils::GetDisplayRootFrame(aFrame);
-  nsPresContext* pres = displayRoot->PresContext()->GetRootPresContext();
-
-  // No need to schedule a paint for an external document since they aren't
-  // painted directly.
-  if (!pres || (pres->Document() && pres->Document()->IsResourceDoc())) {
-    return;
-  }
-  if (!pres->GetContainerWeak()) {
-    NS_WARNING("Shouldn't call SchedulePaint in a detached pres context");
-    return;
-  }
-
-  pres->PresShell()->ScheduleViewManagerFlush(aType == nsIFrame::PAINT_DELAYED_COMPRESS ?
-                                              nsIPresShell::PAINT_DELAYED_COMPRESS :
-                                              nsIPresShell::PAINT_DEFAULT);
-
-  if (aType == nsIFrame::PAINT_DELAYED_COMPRESS) {
-    return;
-  }
-
-  if (aType == nsIFrame::PAINT_DEFAULT) {
-    displayRoot->AddStateBits(NS_FRAME_UPDATE_LAYER_TREE);
-  }
-  nsIPresShell* shell = aFrame->PresContext()->PresShell();
-  if (shell) {
-    shell->AddInvalidateHiddenPresShellObserver(pres->RefreshDriver());
-  }
-}
-
 static void InvalidateFrameInternal(nsIFrame *aFrame, bool aHasDisplayItem = true)
 {
   if (aHasDisplayItem) {
@@ -5547,7 +5501,7 @@ static void InvalidateFrameInternal(nsIFrame *aFrame, bool aHasDisplayItem = tru
     return;
   }
   if (needsSchedulePaint) {
-    SchedulePaintInternal(aFrame);
+    aFrame->SchedulePaint();
   }
   if (aFrame->HasAnyStateBits(NS_FRAME_HAS_INVALID_RECT)) {
     aFrame->Properties().Delete(nsIFrame::InvalidationRect());
@@ -5744,8 +5698,34 @@ nsIFrame::IsInvalid(nsRect& aRect)
 void
 nsIFrame::SchedulePaint(PaintType aType)
 {
-  InvalidateRenderingObservers(this);
-  SchedulePaintInternal(this, aType);
+  nsIFrame* displayRoot = nsLayoutUtils::GetDisplayRootFrame(this);
+  nsPresContext* pres = displayRoot->PresContext()->GetRootPresContext();
+
+  // No need to schedule a paint for an external document since they aren't
+  // painted directly.
+  if (!pres || (pres->Document() && pres->Document()->IsResourceDoc())) {
+    return;
+  }
+  if (!pres->GetContainerWeak()) {
+    NS_WARNING("Shouldn't call SchedulePaint in a detached pres context");
+    return;
+  }
+
+  pres->PresShell()->ScheduleViewManagerFlush(aType == PAINT_DELAYED_COMPRESS ?
+                                              nsIPresShell::PAINT_DELAYED_COMPRESS :
+                                              nsIPresShell::PAINT_DEFAULT);
+
+  if (aType == PAINT_DELAYED_COMPRESS) {
+    return;
+  }
+
+  if (aType == PAINT_DEFAULT) {
+    displayRoot->AddStateBits(NS_FRAME_UPDATE_LAYER_TREE);
+  }
+  nsIPresShell* shell = PresContext()->PresShell();
+  if (shell) {
+    shell->AddInvalidateHiddenPresShellObserver(pres->RefreshDriver());
+  }
 }
 
 Layer*
@@ -5757,8 +5737,6 @@ nsIFrame::InvalidateLayer(uint32_t aDisplayItemKey,
   NS_ASSERTION(aDisplayItemKey > 0, "Need a key");
 
   Layer* layer = FrameLayerBuilder::GetDedicatedLayer(this, aDisplayItemKey);
-
-  InvalidateRenderingObservers(this);
 
   // If the layer is being updated asynchronously, and it's being forwarded
   // to a compositor, then we don't need to invalidate.
@@ -5805,7 +5783,7 @@ nsIFrame::InvalidateLayer(uint32_t aDisplayItemKey,
     layer->SetInvalidRectToVisibleRegion();
   }
 
-  SchedulePaintInternal(this, PAINT_COMPOSITE_ONLY);
+  SchedulePaint(PAINT_COMPOSITE_ONLY);
   return layer;
 }
 
@@ -5876,7 +5854,7 @@ nsIFrame::MovePositionBy(const nsPoint& aTranslation)
   if (IsRelativelyPositioned()) {
     computedOffsets = Properties().Get(nsIFrame::ComputedOffsetProperty());
   }
-  ReflowInput::ApplyRelativePositioning(this, computedOffsets ?
+  nsHTMLReflowState::ApplyRelativePositioning(this, computedOffsets ?
                                               *computedOffsets : nsMargin(),
                                               &position);
   SetPosition(position);
@@ -6066,11 +6044,11 @@ nsFrame::UnionChildOverflow(nsOverflowAreas& aOverflowAreas)
 #define MAX_FRAME_DEPTH (MAX_REFLOW_DEPTH+4)
 
 bool
-nsFrame::IsFrameTreeTooDeep(const ReflowInput& aReflowInput,
-                            ReflowOutput& aMetrics,
+nsFrame::IsFrameTreeTooDeep(const nsHTMLReflowState& aReflowState,
+                            nsHTMLReflowMetrics& aMetrics,
                             nsReflowStatus& aStatus)
 {
-  if (aReflowInput.mReflowDepth >  MAX_FRAME_DEPTH) {
+  if (aReflowState.mReflowDepth >  MAX_FRAME_DEPTH) {
     NS_WARNING("frame tree too deep; setting zero size and returning");
     mState |= NS_FRAME_TOO_DEEP_IN_FRAME_TREE;
     ClearOverflowRects();
@@ -7867,19 +7845,11 @@ IsInlineFrame(nsIFrame *aFrame)
  */
 static nsRect
 UnionBorderBoxes(nsIFrame* aFrame, bool aApplyTransform,
-                 bool& aOutValid,
                  const nsSize* aSizeOverride = nullptr,
                  const nsOverflowAreas* aOverflowOverride = nullptr)
 {
   const nsRect bounds(nsPoint(0, 0),
                       aSizeOverride ? *aSizeOverride : aFrame->GetSize());
-
-  // The SVG container frames do not maintain an accurate mRect.
-  // It will make the outline be larger than we expect, we need
-  // to make them narrow to their children's outline.
-  // aOutValid is set to false if the returned nsRect is not valid
-  // and should not be included in the outline rectangle.
-  aOutValid = !aFrame->IsFrameOfType(nsIFrame::eSVGContainer);
 
   // Start from our border-box, transformed.  See comment below about
   // transform of children.
@@ -7943,13 +7913,8 @@ UnionBorderBoxes(nsIFrame* aFrame, bool aApplyTransform,
       // an intermediate point within the scene.  We choose to
       // over-transform rather than under-transform because this is
       // consistent with other overflow areas.
-      bool validRect = true;
-      nsRect childRect = UnionBorderBoxes(child, true, validRect) +
+      nsRect childRect = UnionBorderBoxes(child, true) +
                          child->GetPosition();
-
-      if (!validRect) {
-        continue;
-      }
 
       if (hasClipPropClip) {
         // Intersect with the clip before transforming.
@@ -7965,15 +7930,7 @@ UnionBorderBoxes(nsIFrame* aFrame, bool aApplyTransform,
       if (doTransform && !child->Combines3DTransformWithAncestors()) {
         childRect = nsDisplayTransform::TransformRect(childRect, aFrame, &bounds);
       }
-
-      // If a SVGContainer has a non-SVGContainer child, we assign
-      // its child's outline to this SVGContainer directly.
-      if (!aOutValid && validRect) {
-        u = childRect;
-        aOutValid = true;
-      } else {
-        u.UnionRectEdges(u, childRect);
-      }
+      u.UnionRectEdges(u, childRect);
     }
   }
 
@@ -8020,12 +7977,11 @@ ComputeAndIncludeOutlineArea(nsIFrame* aFrame, nsOverflowAreas& aOverflowAreas,
   // calling FinishAndStoreOverflow again, which in turn calls this
   // function again.  We still need to deal with preserve-3d a bit.
   nsRect innerRect;
-  bool validRect;
   if (frameForArea == aFrame) {
-    innerRect = UnionBorderBoxes(aFrame, false, validRect, &aNewSize, &aOverflowAreas);
+    innerRect = UnionBorderBoxes(aFrame, false, &aNewSize, &aOverflowAreas);
   } else {
     for (; frameForArea; frameForArea = frameForArea->GetNextSibling()) {
-      nsRect r(UnionBorderBoxes(frameForArea, true, validRect));
+      nsRect r(UnionBorderBoxes(frameForArea, true));
 
       // Adjust for offsets transforms up to aFrame's pre-transform
       // (i.e., normal) coordinate space; see comments in
@@ -8587,8 +8543,8 @@ nsIFrame::IsFocusable(int32_t *aTabIndex, bool aWithMouse)
       StyleContext()->GetPseudo() != nsCSSAnonBoxes::anonymousFlexItem &&
       StyleContext()->GetPseudo() != nsCSSAnonBoxes::anonymousGridItem) {
     const nsStyleUserInterface* ui = StyleUserInterface();
-    if (ui->mUserFocus != StyleUserFocus::Ignore &&
-        ui->mUserFocus != StyleUserFocus::None_) {
+    if (ui->mUserFocus != NS_STYLE_USER_FOCUS_IGNORE &&
+        ui->mUserFocus != NS_STYLE_USER_FOCUS_NONE) {
       // Pass in default tabindex of -1 for nonfocusable and 0 for focusable
       tabIndex = 0;
     }
@@ -8762,9 +8718,9 @@ nsFrame::RefreshSizeCache(nsBoxLayoutState& aState)
     }
 
     // do the nasty.
-    const WritingMode wm = aState.OuterReflowInput() ?
-      aState.OuterReflowInput()->GetWritingMode() : GetWritingMode();
-    ReflowOutput desiredSize(wm);
+    const WritingMode wm = aState.OuterReflowState() ?
+      aState.OuterReflowState()->GetWritingMode() : GetWritingMode();
+    nsHTMLReflowMetrics desiredSize(wm);
     BoxReflow(aState, presContext, desiredSize, rendContext,
               rect.x, rect.y,
               metrics->mBlockPrefSize.width, NS_UNCONSTRAINEDSIZE);
@@ -8796,7 +8752,7 @@ nsFrame::RefreshSizeCache(nsBoxLayoutState& aState)
     metrics->mBlockPrefSize.height = metrics->mBlockMinSize.height;
 
     if (desiredSize.BlockStartAscent() ==
-        ReflowOutput::ASK_FOR_BASELINE) {
+        nsHTMLReflowMetrics::ASK_FOR_BASELINE) {
       if (!nsLayoutUtils::GetFirstLineBaseline(wm, this,
                                                &metrics->mBlockAscent))
         metrics->mBlockAscent = GetLogicalBaseline(wm);
@@ -8863,7 +8819,7 @@ nsFrame::GetXULMinSize(nsBoxLayoutState& aState)
 {
   nsSize size(0,0);
   DISPLAY_MIN_SIZE(this, size);
-  // Don't use the cache if we have HTMLReflowInput constraints --- they might have changed
+  // Don't use the cache if we have HTMLReflowState constraints --- they might have changed
   nsBoxLayoutMetrics *metrics = BoxMetrics();
   if (!DoesNeedRecalc(metrics->mMinSize)) {
     size = metrics->mMinSize;
@@ -8898,7 +8854,7 @@ nsFrame::GetXULMaxSize(nsBoxLayoutState& aState)
 {
   nsSize size(NS_INTRINSICSIZE, NS_INTRINSICSIZE);
   DISPLAY_MAX_SIZE(this, size);
-  // Don't use the cache if we have HTMLReflowInput constraints --- they might have changed
+  // Don't use the cache if we have HTMLReflowState constraints --- they might have changed
   nsBoxLayoutMetrics *metrics = BoxMetrics();
   if (!DoesNeedRecalc(metrics->mMaxSize)) {
     size = metrics->mMaxSize;
@@ -8952,9 +8908,9 @@ nsFrame::DoXULLayout(nsBoxLayoutState& aState)
   nsRenderingContext* rendContext = aState.GetRenderingContext();
   nsPresContext* presContext = aState.PresContext();
   WritingMode ourWM = GetWritingMode();
-  const WritingMode outerWM = aState.OuterReflowInput() ?
-    aState.OuterReflowInput()->GetWritingMode() : ourWM;
-  ReflowOutput desiredSize(outerWM);
+  const WritingMode outerWM = aState.OuterReflowState() ?
+    aState.OuterReflowState()->GetWritingMode() : ourWM;
+  nsHTMLReflowMetrics desiredSize(outerWM);
   LogicalSize ourSize = GetLogicalSize(outerWM);
 
   if (rendContext) {
@@ -9001,19 +8957,19 @@ nsFrame::DoXULLayout(nsBoxLayoutState& aState)
   desiredSize.UnionOverflowAreasWithDesiredBounds();
 
   if (HasAbsolutelyPositionedChildren()) {
-    // Set up a |reflowInput| to pass into ReflowAbsoluteFrames
-    ReflowInput reflowInput(aState.PresContext(), this,
+    // Set up a |reflowState| to pass into ReflowAbsoluteFrames
+    nsHTMLReflowState reflowState(aState.PresContext(), this,
                                   aState.GetRenderingContext(),
                                   LogicalSize(ourWM, ISize(),
                                               NS_UNCONSTRAINEDSIZE),
-                                  ReflowInput::DUMMY_PARENT_REFLOW_STATE);
+                                  nsHTMLReflowState::DUMMY_PARENT_REFLOW_STATE);
 
     AddStateBits(NS_FRAME_IN_REFLOW);
     // Set up a |reflowStatus| to pass into ReflowAbsoluteFrames
     // (just a dummy value; hopefully that's OK)
     nsReflowStatus reflowStatus = NS_FRAME_COMPLETE;
     ReflowAbsoluteFrames(aState.PresContext(), desiredSize,
-                         reflowInput, reflowStatus);
+                         reflowState, reflowStatus);
     RemoveStateBits(NS_FRAME_IN_REFLOW);
   }
 
@@ -9029,7 +8985,7 @@ nsFrame::DoXULLayout(nsBoxLayoutState& aState)
 void
 nsFrame::BoxReflow(nsBoxLayoutState&        aState,
                    nsPresContext*           aPresContext,
-                   ReflowOutput&     aDesiredSize,
+                   nsHTMLReflowMetrics&     aDesiredSize,
                    nsRenderingContext*     aRenderingContext,
                    nscoord                  aX,
                    nscoord                  aY,
@@ -9105,40 +9061,40 @@ nsFrame::BoxReflow(nsBoxLayoutState&        aState,
     nsIFrame *parentFrame = GetParent();
     nsFrameState savedState = parentFrame->GetStateBits();
     WritingMode parentWM = parentFrame->GetWritingMode();
-    ReflowInput
-      parentReflowInput(aPresContext, parentFrame, aRenderingContext,
+    nsHTMLReflowState
+      parentReflowState(aPresContext, parentFrame, aRenderingContext,
                         LogicalSize(parentWM, parentSize),
-                        ReflowInput::DUMMY_PARENT_REFLOW_STATE);
+                        nsHTMLReflowState::DUMMY_PARENT_REFLOW_STATE);
     parentFrame->RemoveStateBits(~nsFrameState(0));
     parentFrame->AddStateBits(savedState);
 
     // This may not do very much useful, but it's probably worth trying.
     if (parentSize.width != NS_INTRINSICSIZE)
-      parentReflowInput.SetComputedWidth(std::max(parentSize.width, 0));
+      parentReflowState.SetComputedWidth(std::max(parentSize.width, 0));
     if (parentSize.height != NS_INTRINSICSIZE)
-      parentReflowInput.SetComputedHeight(std::max(parentSize.height, 0));
-    parentReflowInput.ComputedPhysicalMargin().SizeTo(0, 0, 0, 0);
+      parentReflowState.SetComputedHeight(std::max(parentSize.height, 0));
+    parentReflowState.ComputedPhysicalMargin().SizeTo(0, 0, 0, 0);
     // XXX use box methods
-    parentFrame->GetXULPadding(parentReflowInput.ComputedPhysicalPadding());
-    parentFrame->GetXULBorder(parentReflowInput.ComputedPhysicalBorderPadding());
-    parentReflowInput.ComputedPhysicalBorderPadding() +=
-      parentReflowInput.ComputedPhysicalPadding();
+    parentFrame->GetXULPadding(parentReflowState.ComputedPhysicalPadding());
+    parentFrame->GetXULBorder(parentReflowState.ComputedPhysicalBorderPadding());
+    parentReflowState.ComputedPhysicalBorderPadding() +=
+      parentReflowState.ComputedPhysicalPadding();
 
     // Construct the parent chain manually since constructing it normally
     // messes up dimensions.
-    const ReflowInput *outerReflowInput = aState.OuterReflowInput();
-    NS_ASSERTION(!outerReflowInput || outerReflowInput->mFrame != this,
+    const nsHTMLReflowState *outerReflowState = aState.OuterReflowState();
+    NS_ASSERTION(!outerReflowState || outerReflowState->frame != this,
                  "in and out of XUL on a single frame?");
-    const ReflowInput* parentRI;
-    if (outerReflowInput && outerReflowInput->mFrame == parentFrame) {
+    const nsHTMLReflowState* parentRS;
+    if (outerReflowState && outerReflowState->frame == parentFrame) {
       // We're a frame (such as a text control frame) that jumps into
       // box reflow and then straight out of it on the child frame.
       // This means we actually have a real parent reflow state.
       // nsLayoutUtils::InflationMinFontSizeFor used to need this to be
       // linked up correctly for text control frames, so do so here).
-      parentRI = outerReflowInput;
+      parentRS = outerReflowState;
     } else {
-      parentRI = &parentReflowInput;
+      parentRS = &parentReflowState;
     }
 
     // XXX Is it OK that this reflow state has only one ancestor?
@@ -9146,24 +9102,24 @@ nsFrame::BoxReflow(nsBoxLayoutState&        aState,
     WritingMode wm = GetWritingMode();
     LogicalSize logicalSize(wm, nsSize(aWidth, aHeight));
     logicalSize.BSize(wm) = NS_INTRINSICSIZE;
-    ReflowInput reflowInput(aPresContext, *parentRI, this,
+    nsHTMLReflowState reflowState(aPresContext, *parentRS, this,
                                   logicalSize, nullptr,
-                                  ReflowInput::DUMMY_PARENT_REFLOW_STATE);
+                                  nsHTMLReflowState::DUMMY_PARENT_REFLOW_STATE);
 
     // XXX_jwir3: This is somewhat fishy. If this is actually changing the value
     //            here (which it might be), then we should make sure that it's
     //            correct the first time around, rather than changing it later.
-    reflowInput.mCBReflowInput = parentRI;
+    reflowState.mCBReflowState = parentRS;
 
-    reflowInput.mReflowDepth = aState.GetReflowDepth();
+    reflowState.mReflowDepth = aState.GetReflowDepth();
 
     // mComputedWidth and mComputedHeight are content-box, not
     // border-box
     if (aWidth != NS_INTRINSICSIZE) {
       nscoord computedWidth =
-        aWidth - reflowInput.ComputedPhysicalBorderPadding().LeftRight();
+        aWidth - reflowState.ComputedPhysicalBorderPadding().LeftRight();
       computedWidth = std::max(computedWidth, 0);
-      reflowInput.SetComputedWidth(computedWidth);
+      reflowState.SetComputedWidth(computedWidth);
     }
 
     // Most child frames of box frames (e.g. subdocument or scroll frames)
@@ -9174,18 +9130,18 @@ nsFrame::BoxReflow(nsBoxLayoutState&        aState,
     if (!IsFrameOfType(eBlockFrame)) {
       if (aHeight != NS_INTRINSICSIZE) {
         nscoord computedHeight =
-          aHeight - reflowInput.ComputedPhysicalBorderPadding().TopBottom();
+          aHeight - reflowState.ComputedPhysicalBorderPadding().TopBottom();
         computedHeight = std::max(computedHeight, 0);
-        reflowInput.SetComputedHeight(computedHeight);
+        reflowState.SetComputedHeight(computedHeight);
       } else {
-        reflowInput.SetComputedHeight(
+        reflowState.SetComputedHeight(
           ComputeSize(aRenderingContext, wm,
                       logicalSize,
                       logicalSize.ISize(wm),
-                      reflowInput.ComputedLogicalMargin().Size(wm),
-                      reflowInput.ComputedLogicalBorderPadding().Size(wm) -
-                        reflowInput.ComputedLogicalPadding().Size(wm),
-                      reflowInput.ComputedLogicalPadding().Size(wm),
+                      reflowState.ComputedLogicalMargin().Size(wm),
+                      reflowState.ComputedLogicalBorderPadding().Size(wm) -
+                        reflowState.ComputedLogicalPadding().Size(wm),
+                      reflowState.ComputedLogicalPadding().Size(wm),
                       ComputeSizeFlags::eDefault).Height(wm));
       }
     }
@@ -9197,44 +9153,44 @@ nsFrame::BoxReflow(nsBoxLayoutState&        aState,
     // However, mLastSize can also be the size passed to BoxReflow by
     // RefreshSizeCache, so that doesn't really make sense.
     if (metrics->mLastSize.width != aWidth) {
-      reflowInput.SetHResize(true);
+      reflowState.SetHResize(true);
 
       // When font size inflation is enabled, a horizontal resize
-      // requires a full reflow.  See ReflowInput::InitResizeFlags
+      // requires a full reflow.  See nsHTMLReflowState::InitResizeFlags
       // for more details.
       if (nsLayoutUtils::FontSizeInflationEnabled(aPresContext)) {
         AddStateBits(NS_FRAME_IS_DIRTY);
       }
     }
     if (metrics->mLastSize.height != aHeight) {
-      reflowInput.SetVResize(true);
+      reflowState.SetVResize(true);
     }
 
     #ifdef DEBUG_REFLOW
       nsAdaptorAddIndents();
-      printf("Size=(%d,%d)\n",reflowInput.ComputedWidth(),
-             reflowInput.ComputedHeight());
+      printf("Size=(%d,%d)\n",reflowState.ComputedWidth(),
+             reflowState.ComputedHeight());
       nsAdaptorAddIndents();
-      nsAdaptorPrintReason(reflowInput);
+      nsAdaptorPrintReason(reflowState);
       printf("\n");
     #endif
 
        // place the child and reflow
 
-    Reflow(aPresContext, aDesiredSize, reflowInput, status);
+    Reflow(aPresContext, aDesiredSize, reflowState, status);
 
     NS_ASSERTION(NS_FRAME_IS_COMPLETE(status), "bad status");
 
     uint32_t layoutFlags = aState.LayoutFlags();
     nsContainerFrame::FinishReflowChild(this, aPresContext, aDesiredSize,
-                                        &reflowInput, aX, aY, layoutFlags | NS_FRAME_NO_MOVE_FRAME);
+                                        &reflowState, aX, aY, layoutFlags | NS_FRAME_NO_MOVE_FRAME);
 
     // Save the ascent.  (bug 103925)
     if (IsXULCollapsed()) {
       metrics->mAscent = 0;
     } else {
       if (aDesiredSize.BlockStartAscent() ==
-          ReflowOutput::ASK_FOR_BASELINE) {
+          nsHTMLReflowMetrics::ASK_FOR_BASELINE) {
         if (!nsLayoutUtils::GetFirstLineBaseline(wm, this, &metrics->mAscent))
           metrics->mAscent = GetLogicalBaseline(wm);
       } else
@@ -9535,11 +9491,11 @@ nsAdaptorAddIndents()
 }
 
 void
-nsAdaptorPrintReason(ReflowInput& aReflowInput)
+nsAdaptorPrintReason(nsHTMLReflowState& aReflowState)
 {
     char* reflowReasonString;
 
-    switch(aReflowInput.reason) 
+    switch(aReflowState.reason) 
     {
         case eReflowReason_Initial:
           reflowReasonString = "initial";
@@ -9556,7 +9512,7 @@ nsAdaptorPrintReason(ReflowInput& aReflowInput)
           break;
         case eReflowReason_Incremental: 
         {
-            switch (aReflowInput.reflowCommand->Type()) {
+            switch (aReflowState.reflowCommand->Type()) {
               case eReflowType_StyleChanged:
                  reflowReasonString = "incremental (StyleChanged)";
               break;
@@ -9653,13 +9609,13 @@ nsFrame::VerifyDirtyBitSet(const nsFrameList& aFrameList)
 
 DR_cookie::DR_cookie(nsPresContext*          aPresContext,
                      nsIFrame*                aFrame, 
-                     const ReflowInput& aReflowInput,
-                     ReflowOutput&     aMetrics,
+                     const nsHTMLReflowState& aReflowState,
+                     nsHTMLReflowMetrics&     aMetrics,
                      nsReflowStatus&          aStatus)
-  :mPresContext(aPresContext), mFrame(aFrame), mReflowInput(aReflowInput), mMetrics(aMetrics), mStatus(aStatus)
+  :mPresContext(aPresContext), mFrame(aFrame), mReflowState(aReflowState), mMetrics(aMetrics), mStatus(aStatus)
 {
   MOZ_COUNT_CTOR(DR_cookie);
-  mValue = nsFrame::DisplayReflowEnter(aPresContext, mFrame, mReflowInput);
+  mValue = nsFrame::DisplayReflowEnter(aPresContext, mFrame, mReflowState);
 }
 
 DR_cookie::~DR_cookie()
@@ -9719,7 +9675,7 @@ DR_intrinsic_size_cookie::~DR_intrinsic_size_cookie()
 
 DR_init_constraints_cookie::DR_init_constraints_cookie(
                      nsIFrame*                aFrame,
-                     ReflowInput*       aState,
+                     nsHTMLReflowState*       aState,
                      nscoord                  aCBWidth,
                      nscoord                  aCBHeight,
                      const nsMargin*          aMargin,
@@ -9728,7 +9684,7 @@ DR_init_constraints_cookie::DR_init_constraints_cookie(
   , mState(aState)
 {
   MOZ_COUNT_CTOR(DR_init_constraints_cookie);
-  mValue = ReflowInput::DisplayInitConstraintsEnter(mFrame, mState,
+  mValue = nsHTMLReflowState::DisplayInitConstraintsEnter(mFrame, mState,
                                                           aCBWidth, aCBHeight,
                                                           aMargin, aPadding);
 }
@@ -9736,12 +9692,12 @@ DR_init_constraints_cookie::DR_init_constraints_cookie(
 DR_init_constraints_cookie::~DR_init_constraints_cookie()
 {
   MOZ_COUNT_DTOR(DR_init_constraints_cookie);
-  ReflowInput::DisplayInitConstraintsExit(mFrame, mState, mValue);
+  nsHTMLReflowState::DisplayInitConstraintsExit(mFrame, mState, mValue);
 }
 
 DR_init_offsets_cookie::DR_init_offsets_cookie(
                      nsIFrame*                aFrame,
-                     SizeComputationInput*        aState,
+                     nsCSSOffsetState*        aState,
                      const LogicalSize&       aPercentBasis,
                      const nsMargin*          aMargin,
                      const nsMargin*          aPadding)
@@ -9749,7 +9705,7 @@ DR_init_offsets_cookie::DR_init_offsets_cookie(
   , mState(aState)
 {
   MOZ_COUNT_CTOR(DR_init_offsets_cookie);
-  mValue = SizeComputationInput::DisplayInitOffsetsEnter(mFrame, mState,
+  mValue = nsCSSOffsetState::DisplayInitOffsetsEnter(mFrame, mState,
                                                      aPercentBasis,
                                                      aMargin, aPadding);
 }
@@ -9757,23 +9713,23 @@ DR_init_offsets_cookie::DR_init_offsets_cookie(
 DR_init_offsets_cookie::~DR_init_offsets_cookie()
 {
   MOZ_COUNT_DTOR(DR_init_offsets_cookie);
-  SizeComputationInput::DisplayInitOffsetsExit(mFrame, mState, mValue);
+  nsCSSOffsetState::DisplayInitOffsetsExit(mFrame, mState, mValue);
 }
 
 DR_init_type_cookie::DR_init_type_cookie(
                      nsIFrame*                aFrame,
-                     ReflowInput*       aState)
+                     nsHTMLReflowState*       aState)
   : mFrame(aFrame)
   , mState(aState)
 {
   MOZ_COUNT_CTOR(DR_init_type_cookie);
-  mValue = ReflowInput::DisplayInitFrameTypeEnter(mFrame, mState);
+  mValue = nsHTMLReflowState::DisplayInitFrameTypeEnter(mFrame, mState);
 }
 
 DR_init_type_cookie::~DR_init_type_cookie()
 {
   MOZ_COUNT_DTOR(DR_init_type_cookie);
-  ReflowInput::DisplayInitFrameTypeExit(mFrame, mState, mValue);
+  nsHTMLReflowState::DisplayInitFrameTypeExit(mFrame, mState, mValue);
 }
 
 struct DR_FrameTypeInfo;
@@ -9792,7 +9748,7 @@ struct DR_State
   DR_FrameTypeInfo* GetFrameTypeInfo(char* aFrameName);
   void InitFrameTypeTable();
   DR_FrameTreeNode* CreateTreeNode(nsIFrame*                aFrame,
-                                   const ReflowInput* aReflowInput);
+                                   const nsHTMLReflowState* aReflowState);
   void FindMatchingRule(DR_FrameTreeNode& aNode);
   bool RuleMatches(DR_Rule&          aRule,
                      DR_FrameTreeNode& aNode);
@@ -10262,13 +10218,13 @@ void DR_State::FindMatchingRule(DR_FrameTreeNode& aNode)
 }
     
 DR_FrameTreeNode* DR_State::CreateTreeNode(nsIFrame*                aFrame,
-                                           const ReflowInput* aReflowInput)
+                                           const nsHTMLReflowState* aReflowState)
 {
   // find the frame of the parent reflow state (usually just the parent of aFrame)
   nsIFrame* parentFrame;
-  if (aReflowInput) {
-    const ReflowInput* parentRI = aReflowInput->mParentReflowInput;
-    parentFrame = (parentRI) ? parentRI->mFrame : nullptr;
+  if (aReflowState) {
+    const nsHTMLReflowState* parentRS = aReflowState->mParentReflowState;
+    parentFrame = (parentRS) ? parentRS->frame : nullptr;
   } else {
     parentFrame = aFrame->GetParent();
   }
@@ -10361,7 +10317,7 @@ CheckPixelError(nscoord aSize,
 
 static void DisplayReflowEnterPrint(nsPresContext*          aPresContext,
                                     nsIFrame*                aFrame,
-                                    const ReflowInput& aReflowInput,
+                                    const nsHTMLReflowState& aReflowState,
                                     DR_FrameTreeNode&        aTreeNode,
                                     bool                     aChanged)
 {
@@ -10371,12 +10327,12 @@ static void DisplayReflowEnterPrint(nsPresContext*          aPresContext,
     char width[16];
     char height[16];
 
-    DR_state->PrettyUC(aReflowInput.AvailableWidth(), width, 16);
-    DR_state->PrettyUC(aReflowInput.AvailableHeight(), height, 16);
+    DR_state->PrettyUC(aReflowState.AvailableWidth(), width, 16);
+    DR_state->PrettyUC(aReflowState.AvailableHeight(), height, 16);
     printf("Reflow a=%s,%s ", width, height);
 
-    DR_state->PrettyUC(aReflowInput.ComputedWidth(), width, 16);
-    DR_state->PrettyUC(aReflowInput.ComputedHeight(), height, 16);
+    DR_state->PrettyUC(aReflowState.ComputedWidth(), width, 16);
+    DR_state->PrettyUC(aReflowState.ComputedHeight(), height, 16);
     printf("c=%s,%s ", width, height);
 
     if (aFrame->GetStateBits() & NS_FRAME_IS_DIRTY)
@@ -10385,13 +10341,13 @@ static void DisplayReflowEnterPrint(nsPresContext*          aPresContext,
     if (aFrame->GetStateBits() & NS_FRAME_HAS_DIRTY_CHILDREN)
       printf("dirty-children ");
 
-    if (aReflowInput.mFlags.mSpecialBSizeReflow)
+    if (aReflowState.mFlags.mSpecialBSizeReflow)
       printf("special-bsize ");
 
-    if (aReflowInput.IsHResize())
+    if (aReflowState.IsHResize())
       printf("h-resize ");
 
-    if (aReflowInput.IsVResize())
+    if (aReflowState.IsVResize())
       printf("v-resize ");
 
     nsIFrame* inFlow = aFrame->GetPrevInFlow();
@@ -10408,26 +10364,26 @@ static void DisplayReflowEnterPrint(nsPresContext*          aPresContext,
       printf("cnt=%d \n", DR_state->mCount);
     if (DR_state->mDisplayPixelErrors) {
       int32_t p2t = aPresContext->AppUnitsPerDevPixel();
-      CheckPixelError(aReflowInput.AvailableWidth(), p2t);
-      CheckPixelError(aReflowInput.AvailableHeight(), p2t);
-      CheckPixelError(aReflowInput.ComputedWidth(), p2t);
-      CheckPixelError(aReflowInput.ComputedHeight(), p2t);
+      CheckPixelError(aReflowState.AvailableWidth(), p2t);
+      CheckPixelError(aReflowState.AvailableHeight(), p2t);
+      CheckPixelError(aReflowState.ComputedWidth(), p2t);
+      CheckPixelError(aReflowState.ComputedHeight(), p2t);
     }
   }
 }
 
 void* nsFrame::DisplayReflowEnter(nsPresContext*          aPresContext,
                                   nsIFrame*                aFrame,
-                                  const ReflowInput& aReflowInput)
+                                  const nsHTMLReflowState& aReflowState)
 {
   if (!DR_state->mInited) DR_state->Init();
   if (!DR_state->mActive) return nullptr;
 
   NS_ASSERTION(aFrame, "invalid call");
 
-  DR_FrameTreeNode* treeNode = DR_state->CreateTreeNode(aFrame, &aReflowInput);
+  DR_FrameTreeNode* treeNode = DR_state->CreateTreeNode(aFrame, &aReflowState);
   if (treeNode) {
-    DisplayReflowEnterPrint(aPresContext, aFrame, aReflowInput, *treeNode, false);
+    DisplayReflowEnterPrint(aPresContext, aFrame, aReflowState, *treeNode, false);
   }
   return treeNode;
 }
@@ -10481,7 +10437,7 @@ void* nsFrame::DisplayIntrinsicSizeEnter(nsIFrame* aFrame,
 
 void nsFrame::DisplayReflowExit(nsPresContext*      aPresContext,
                                 nsIFrame*            aFrame,
-                                ReflowOutput& aMetrics,
+                                nsHTMLReflowMetrics& aMetrics,
                                 nsReflowStatus       aStatus,
                                 void*                aFrameTreeNode)
 {
@@ -10619,13 +10575,13 @@ void DR_cookie::Change() const
 {
   DR_FrameTreeNode* treeNode = (DR_FrameTreeNode*)mValue;
   if (treeNode && treeNode->mDisplay) {
-    DisplayReflowEnterPrint(mPresContext, mFrame, mReflowInput, *treeNode, true);
+    DisplayReflowEnterPrint(mPresContext, mFrame, mReflowState, *treeNode, true);
   }
 }
 
 /* static */ void*
-ReflowInput::DisplayInitConstraintsEnter(nsIFrame* aFrame,
-                                               ReflowInput* aState,
+nsHTMLReflowState::DisplayInitConstraintsEnter(nsIFrame* aFrame,
+                                               nsHTMLReflowState* aState,
                                                nscoord aContainingBlockWidth,
                                                nscoord aContainingBlockHeight,
                                                const nsMargin* aBorder,
@@ -10642,7 +10598,7 @@ ReflowInput::DisplayInitConstraintsEnter(nsIFrame* aFrame,
     DR_state->DisplayFrameTypeInfo(aFrame, treeNode->mIndent);
 
     printf("InitConstraints parent=%p",
-           (void*)aState->mParentReflowInput);
+           (void*)aState->mParentReflowState);
 
     char width[16];
     char height[16];
@@ -10663,8 +10619,8 @@ ReflowInput::DisplayInitConstraintsEnter(nsIFrame* aFrame,
 }
 
 /* static */ void
-ReflowInput::DisplayInitConstraintsExit(nsIFrame* aFrame,
-                                              ReflowInput* aState,
+nsHTMLReflowState::DisplayInitConstraintsExit(nsIFrame* aFrame,
+                                              nsHTMLReflowState* aState,
                                               void* aValue)
 {
   NS_PRECONDITION(aFrame, "non-null frame required");
@@ -10693,8 +10649,8 @@ ReflowInput::DisplayInitConstraintsExit(nsIFrame* aFrame,
 
 
 /* static */ void*
-SizeComputationInput::DisplayInitOffsetsEnter(nsIFrame* aFrame,
-                                          SizeComputationInput* aState,
+nsCSSOffsetState::DisplayInitOffsetsEnter(nsIFrame* aFrame,
+                                          nsCSSOffsetState* aState,
                                           const LogicalSize& aPercentBasis,
                                           const nsMargin* aBorder,
                                           const nsMargin* aPadding)
@@ -10705,7 +10661,7 @@ SizeComputationInput::DisplayInitOffsetsEnter(nsIFrame* aFrame,
   if (!DR_state->mInited) DR_state->Init();
   if (!DR_state->mActive) return nullptr;
 
-  // aState is not necessarily a ReflowInput
+  // aState is not necessarily a nsHTMLReflowState
   DR_FrameTreeNode* treeNode = DR_state->CreateTreeNode(aFrame, nullptr);
   if (treeNode && treeNode->mDisplay) {
     DR_state->DisplayFrameTypeInfo(aFrame, treeNode->mIndent);
@@ -10725,8 +10681,8 @@ SizeComputationInput::DisplayInitOffsetsEnter(nsIFrame* aFrame,
 }
 
 /* static */ void
-SizeComputationInput::DisplayInitOffsetsExit(nsIFrame* aFrame,
-                                         SizeComputationInput* aState,
+nsCSSOffsetState::DisplayInitOffsetsExit(nsIFrame* aFrame,
+                                         nsCSSOffsetState* aState,
                                          void* aValue)
 {
   NS_PRECONDITION(aFrame, "non-null frame required");
@@ -10748,8 +10704,8 @@ SizeComputationInput::DisplayInitOffsetsExit(nsIFrame* aFrame,
 }
 
 /* static */ void*
-ReflowInput::DisplayInitFrameTypeEnter(nsIFrame* aFrame,
-                                             ReflowInput* aState)
+nsHTMLReflowState::DisplayInitFrameTypeEnter(nsIFrame* aFrame,
+                                             nsHTMLReflowState* aState)
 {
   NS_PRECONDITION(aFrame, "non-null frame required");
   NS_PRECONDITION(aState, "non-null state required");
@@ -10762,8 +10718,8 @@ ReflowInput::DisplayInitFrameTypeEnter(nsIFrame* aFrame,
 }
 
 /* static */ void
-ReflowInput::DisplayInitFrameTypeExit(nsIFrame* aFrame,
-                                            ReflowInput* aState,
+nsHTMLReflowState::DisplayInitFrameTypeExit(nsIFrame* aFrame,
+                                            nsHTMLReflowState* aState,
                                             void* aValue)
 {
   NS_PRECONDITION(aFrame, "non-null frame required");

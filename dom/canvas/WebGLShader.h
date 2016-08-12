@@ -6,7 +6,6 @@
 #ifndef WEBGL_SHADER_H_
 #define WEBGL_SHADER_H_
 
-#include <map>
 #include <string>
 #include <vector>
 

@@ -77,8 +77,8 @@ public:
 #endif
 
   virtual void Reflow(nsPresContext* aPresContext,
-                      ReflowOutput& aMetrics,
-                      const ReflowInput& aReflowInput,
+                      nsHTMLReflowMetrics& aMetrics,
+                      const nsHTMLReflowState& aReflowState,
                       nsReflowStatus& aStatus) override;
   virtual nscoord GetMinISize(nsRenderingContext *aRenderingContext) override;
   virtual nscoord GetPrefISize(nsRenderingContext *aRenderingContext) override;
@@ -121,7 +121,7 @@ protected:
                               mozilla::LogicalMargin* aPadding);
   void GetDesiredSize(nsPresContext* aPresContext,
                       nsRenderingContext *aRenderingContext,
-                      ReflowOutput& aMetrics,
+                      nsHTMLReflowMetrics& aMetrics,
                       float aFontSizeInflation,
                       mozilla::LogicalMargin* aPadding);
 

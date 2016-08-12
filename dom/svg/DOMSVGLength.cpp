@@ -33,8 +33,10 @@ static nsSVGAttrTearoffTable<nsSVGLength2, DOMSVGLength>
 NS_IMPL_CYCLE_COLLECTION_CLASS(DOMSVGLength)
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(DOMSVGLength)
-  tmp->CleanupWeakRefs();
-  tmp->mVal = nullptr; // (owned by mSVGElement, which we drop our ref to here)
+  // We may not belong to a list, so we must null check tmp->mList.
+  if (tmp->mList) {
+    tmp->mList->mItems[tmp->mListIndex] = nullptr;
+  }
 NS_IMPL_CYCLE_COLLECTION_UNLINK(mList)
 NS_IMPL_CYCLE_COLLECTION_UNLINK(mSVGElement)
 NS_IMPL_CYCLE_COLLECTION_UNLINK_PRESERVED_WRAPPER
@@ -138,30 +140,19 @@ DOMSVGLength::DOMSVGLength(nsSVGLength2* aVal, nsSVGElement* aSVGElement,
 {
 }
 
-void
-DOMSVGLength::CleanupWeakRefs()
+DOMSVGLength::~DOMSVGLength()
 {
-  // Our mList's weak ref to us must be nulled out when we die (or when we're
-  // cycle collected), so we that don't leave behind a pointer to
-  // free / soon-to-be-free memory.
+  // Our mList's weak ref to us must be nulled out when we die. If GC has
+  // unlinked us using the cycle collector code, then that has already
+  // happened, and mList is null.
   if (mList) {
-    MOZ_ASSERT(mList->mItems[mListIndex] == this,
-               "Clearing out the wrong list index...?");
     mList->mItems[mListIndex] = nullptr;
   }
 
-  // Similarly, we must update the tearoff table to remove its (non-owning)
-  // pointer to mVal.
   if (mVal) {
-    auto& table = mIsAnimValItem ?
-      sAnimSVGLengthTearOffTable : sBaseSVGLengthTearOffTable;
+    auto& table = mIsAnimValItem ? sAnimSVGLengthTearOffTable : sBaseSVGLengthTearOffTable;
     table.RemoveTearoff(mVal);
   }
-}
-
-DOMSVGLength::~DOMSVGLength()
-{
-  CleanupWeakRefs();
 }
 
 already_AddRefed<DOMSVGLength>

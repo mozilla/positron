@@ -67,8 +67,7 @@ protected:
     mServer = SandboxBroker::Create(GetPolicy(), getpid(), fd);
     ASSERT_NE(mServer, nullptr);
     ASSERT_TRUE(fd.IsValid());
-    auto rawFD = fd.ClonePlatformHandle();
-    mClient.reset(new SandboxBrokerClient(rawFD.release()));
+    mClient.reset(new SandboxBrokerClient(dup(fd.PlatformHandle())));
   }
 
   template<class C, void (C::* Main)()>

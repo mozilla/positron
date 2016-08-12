@@ -1023,8 +1023,6 @@ public:
     kiLBC,
     kiSAC,
     kH264,
-    kRed,
-    kUlpfec,
     kOtherCodec
   };
 
@@ -1104,12 +1102,6 @@ inline std::ostream& operator<<(std::ostream& os,
     case SdpRtpmapAttributeList::kH264:
       os << "H264";
       break;
-    case SdpRtpmapAttributeList::kRed:
-      os << "red";
-      break;
-    case SdpRtpmapAttributeList::kUlpfec:
-      os << "ulpfec";
-      break;
     default:
       MOZ_ASSERT(false);
       os << "?";
@@ -1141,32 +1133,6 @@ public:
     virtual void Serialize(std::ostream& os) const = 0;
 
     SdpRtpmapAttributeList::CodecType codec_type;
-  };
-
-  class RedParameters : public Parameters
-  {
-  public:
-    RedParameters()
-        : Parameters(SdpRtpmapAttributeList::kRed)
-    {
-    }
-
-    virtual Parameters*
-    Clone() const override
-    {
-      return new RedParameters(*this);
-    }
-
-    virtual void
-    Serialize(std::ostream& os) const override
-    {
-      for(size_t i = 0; i < encodings.size(); ++i) {
-        os << (i != 0 ? "/" : "")
-           << std::to_string(encodings[i]);
-      }
-    }
-
-    std::vector<uint8_t> encodings;
   };
 
   class H264Parameters : public Parameters

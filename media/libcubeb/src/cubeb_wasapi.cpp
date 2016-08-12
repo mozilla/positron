@@ -62,6 +62,23 @@ DEFINE_PROPERTYKEY(PKEY_Device_InstanceId,      0x78c34fc8, 0x104a, 0x4aca, 0x9e
   (sizeof(array_) / sizeof(array_[0]))
 
 namespace {
+uint32_t
+ms_to_hns(uint32_t ms)
+{
+  return ms * 10000;
+}
+
+uint32_t
+hns_to_ms(REFERENCE_TIME hns)
+{
+  return static_cast<uint32_t>(hns / 10000);
+}
+
+double
+hns_to_s(REFERENCE_TIME hns)
+{
+  return static_cast<double>(hns) / 10000000;
+}
 
 void
 SafeRelease(HANDLE handle)
@@ -78,6 +95,73 @@ void SafeRelease(T * ptr)
     ptr->Release();
   }
 }
+
+/* This wraps a critical section to track the owner in debug mode, adapted from
+   NSPR and http://blogs.msdn.com/b/oldnewthing/archive/2013/07/12/10433554.aspx */
+class owned_critical_section
+{
+public:
+  owned_critical_section()
+#ifdef DEBUG
+    : owner(0)
+#endif
+  {
+    InitializeCriticalSection(&critical_section);
+  }
+
+  ~owned_critical_section()
+  {
+    DeleteCriticalSection(&critical_section);
+  }
+
+  void enter()
+  {
+    EnterCriticalSection(&critical_section);
+#ifdef DEBUG
+    XASSERT(owner != GetCurrentThreadId() && "recursive locking");
+    owner = GetCurrentThreadId();
+#endif
+  }
+  
+  void leave()
+  {
+#ifdef DEBUG
+    /* GetCurrentThreadId cannot return 0: it is not a the valid thread id */
+    owner = 0;
+#endif
+    LeaveCriticalSection(&critical_section);
+  }
+
+  /* This is guaranteed to have the good behaviour if it succeeds. The behaviour
+     is undefined otherwise. */
+  void assert_current_thread_owns()
+  {
+#ifdef DEBUG
+    /* This implies owner != 0, because GetCurrentThreadId cannot return 0. */
+    XASSERT(owner == GetCurrentThreadId());
+#endif
+  }
+
+private:
+  CRITICAL_SECTION critical_section;
+#ifdef DEBUG
+  DWORD owner;
+#endif
+};
+
+struct auto_lock {
+  auto_lock(owned_critical_section * lock)
+    : lock(lock)
+  {
+    lock->enter();
+  }
+  ~auto_lock()
+  {
+    lock->leave();
+  }
+private:
+  owned_critical_section * lock;
+};
 
 struct auto_com {
   auto_com() {
@@ -156,7 +240,7 @@ struct cubeb_stream
   /* The input and output device, or NULL for default. */
   cubeb_devid input_device;
   cubeb_devid output_device;
-  /* The latency initially requested for this stream, in frames. */
+  /* The latency initially requested for this stream. */
   unsigned latency;
   cubeb_state_callback state_callback;
   cubeb_data_callback data_callback;
@@ -213,7 +297,7 @@ struct cubeb_stream
   /* The lock protects all members that are touched by the render thread or
      change during a device reset, including: audio_clock, audio_stream_volume,
      client, frames_written, mix_params, total_frames_written, prev_position. */
-  owned_critical_section stream_reset_lock;
+  owned_critical_section * stream_reset_lock;
   /* Maximum number of frames that can be passed down in a callback. */
   uint32_t input_buffer_frame_count;
   /* Maximum number of frames that can be requested in a callback. */
@@ -352,50 +436,6 @@ bool should_downmix(cubeb_stream_params & stream, cubeb_stream_params & mixer)
 double stream_to_mix_samplerate_ratio(cubeb_stream_params & stream, cubeb_stream_params & mixer)
 {
   return double(stream.rate) / mixer.rate;
-}
-
-
-uint32_t
-get_rate(cubeb_stream * stm)
-{
-  return has_input(stm) ? stm->input_stream_params.rate
-                        : stm->output_stream_params.rate;
-}
-
-uint32_t
-ms_to_hns(uint32_t ms)
-{
-  return ms * 10000;
-}
-
-uint32_t
-hns_to_ms(REFERENCE_TIME hns)
-{
-  return static_cast<uint32_t>(hns / 10000);
-}
-
-double
-hns_to_s(REFERENCE_TIME hns)
-{
-  return static_cast<double>(hns) / 10000000;
-}
-
-uint32_t
-hns_to_frames(cubeb_stream * stm, REFERENCE_TIME hns)
-{
-  return hns_to_ms(hns * get_rate(stm)) / 1000;
-}
-
-uint32_t
-hns_to_frames(uint32_t rate, REFERENCE_TIME hns)
-{
-  return hns_to_ms(hns * rate) / 1000;
-}
-
-REFERENCE_TIME
-frames_to_hns(cubeb_stream * stm, uint32_t frames)
-{
-   return frames * 1000 / get_rate(stm);
 }
 
 /* Upmix function, copies a mono channel into L and R */
@@ -996,7 +1036,7 @@ HRESULT get_default_endpoint(IMMDevice ** device, EDataFlow direction)
 double
 current_stream_delay(cubeb_stream * stm)
 {
-  stm->stream_reset_lock.assert_current_thread_owns();
+  stm->stream_reset_lock->assert_current_thread_owns();
 
   /* If the default audio endpoint went away during playback and we weren't
      able to configure a new one, it's possible the caller may call this
@@ -1030,7 +1070,7 @@ current_stream_delay(cubeb_stream * stm)
 int
 stream_set_volume(cubeb_stream * stm, float volume)
 {
-  stm->stream_reset_lock.assert_current_thread_owns();
+  stm->stream_reset_lock->assert_current_thread_owns();
 
   if (!stm->audio_stream_volume) {
     return CUBEB_ERROR;
@@ -1204,7 +1244,7 @@ wasapi_get_max_channel_count(cubeb * ctx, uint32_t * max_channels)
 }
 
 int
-wasapi_get_min_latency(cubeb * ctx, cubeb_stream_params params, uint32_t * latency_frames)
+wasapi_get_min_latency(cubeb * ctx, cubeb_stream_params params, uint32_t * latency_ms)
 {
   HRESULT hr;
   IAudioClient * client;
@@ -1247,8 +1287,7 @@ wasapi_get_min_latency(cubeb * ctx, cubeb_stream_params params, uint32_t * laten
   /* According to the docs, the best latency we can achieve is by synchronizing
      the stream and the engine.
      http://msdn.microsoft.com/en-us/library/windows/desktop/dd370871%28v=vs.85%29.aspx */
-
-  *latency_frames = hns_to_frames(params.rate, default_period);
+  *latency_ms = hns_to_ms(default_period);
 
   SafeRelease(client);
 
@@ -1384,7 +1423,7 @@ int setup_wasapi_stream_one_side(cubeb_stream * stm,
   WAVEFORMATEX * mix_format;
   HRESULT hr;
 
-  stm->stream_reset_lock.assert_current_thread_owns();
+  stm->stream_reset_lock->assert_current_thread_owns();
 
   if (devid) {
     std::unique_ptr<const wchar_t> id;
@@ -1437,7 +1476,7 @@ int setup_wasapi_stream_one_side(cubeb_stream * stm,
   hr = (*audio_client)->Initialize(AUDCLNT_SHAREMODE_SHARED,
                                    AUDCLNT_STREAMFLAGS_EVENTCALLBACK |
                                    AUDCLNT_STREAMFLAGS_NOPERSIST,
-                                   frames_to_hns(stm, stm->latency),
+                                   ms_to_hns(stm->latency),
                                    0,
                                    mix_format,
                                    NULL);
@@ -1485,7 +1524,7 @@ int setup_wasapi_stream(cubeb_stream * stm)
   HRESULT hr;
   int rv;
 
-  stm->stream_reset_lock.assert_current_thread_owns();
+  stm->stream_reset_lock->assert_current_thread_owns();
 
   auto_com com;
   if (!com.ok()) {
@@ -1603,7 +1642,7 @@ wasapi_stream_init(cubeb * context, cubeb_stream ** stream,
                    cubeb_stream_params * input_stream_params,
                    cubeb_devid output_device,
                    cubeb_stream_params * output_stream_params,
-                   unsigned int latency_frames, cubeb_data_callback data_callback,
+                   unsigned int latency, cubeb_data_callback data_callback,
                    cubeb_state_callback state_callback, void * user_ptr)
 {
   HRESULT hr;
@@ -1613,7 +1652,7 @@ wasapi_stream_init(cubeb * context, cubeb_stream ** stream,
     return CUBEB_ERROR;
   }
 
-  XASSERT(context && stream && (input_stream_params || output_stream_params));
+  XASSERT(context && stream);
 
   if (output_stream_params && output_stream_params->format != CUBEB_SAMPLE_FLOAT32NE ||
       input_stream_params && input_stream_params->format != CUBEB_SAMPLE_FLOAT32NE) {
@@ -1637,11 +1676,10 @@ wasapi_stream_init(cubeb * context, cubeb_stream ** stream,
     stm->output_stream_params = *output_stream_params;
     stm->output_device = output_device;
   }
-
-  stm->latency = latency_frames;
+  stm->latency = latency;
   stm->volume = 1.0;
 
-  stm->stream_reset_lock = owned_critical_section();
+  stm->stream_reset_lock = new owned_critical_section();
 
   stm->reconfigure_event = CreateEvent(NULL, 0, 0, NULL);
   if (!stm->reconfigure_event) {
@@ -1694,7 +1732,9 @@ void close_wasapi_stream(cubeb_stream * stm)
 {
   XASSERT(stm);
 
-  stm->stream_reset_lock.assert_current_thread_owns();
+  stm->stream_reset_lock->assert_current_thread_owns();
+
+  XASSERT(stm->output_client || stm->input_client);
 
   SafeRelease(stm->output_client);
   stm->output_client = NULL;
@@ -1737,6 +1777,8 @@ void wasapi_stream_destroy(cubeb_stream * stm)
     auto_lock lock(stm->stream_reset_lock);
     close_wasapi_stream(stm);
   }
+
+  delete stm->stream_reset_lock;
 
   free(stm);
 }
@@ -1905,7 +1947,8 @@ int wasapi_stream_get_latency(cubeb_stream * stm, uint32_t * latency)
   if (FAILED(hr)) {
     return CUBEB_ERROR;
   }
-  *latency = hns_to_frames(stm, latency_hns);
+  double latency_s = hns_to_s(latency_hns);
+  *latency = static_cast<uint32_t>(latency_s * stm->output_stream_params.rate);
 
   return CUBEB_OK;
 }
@@ -2098,11 +2141,11 @@ wasapi_create_device(IMMDeviceEnumerator * enumerator, IMMDevice * dev)
 
   if (SUCCEEDED(dev->Activate(__uuidof(IAudioClient), CLSCTX_INPROC_SERVER, NULL, (void**)&client)) &&
       SUCCEEDED(client->GetDevicePeriod(&def_period, &min_period))) {
-    ret->latency_lo = hns_to_frames(ret->default_rate, min_period);
-    ret->latency_hi = hns_to_frames(ret->default_rate, def_period);
+    ret->latency_lo_ms = hns_to_ms(min_period);
+    ret->latency_hi_ms = hns_to_ms(def_period);
   } else {
-    ret->latency_lo = 0;
-    ret->latency_hi = 0;
+    ret->latency_lo_ms = 0;
+    ret->latency_hi_ms = 0;
   }
   SafeRelease(client);
 

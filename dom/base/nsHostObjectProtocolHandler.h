@@ -15,13 +15,14 @@
 #include "nsTArray.h"
 
 #define BLOBURI_SCHEME "blob"
+#define MEDIASTREAMURI_SCHEME "mediastream"
+#define MEDIASOURCEURI_SCHEME "mediasource"
 #define FONTTABLEURI_SCHEME "moz-fonttable"
 #define RTSPURI_SCHEME "rtsp"
 
 class nsIPrincipal;
 
 namespace mozilla {
-class BlobURLsReporter;
 class DOMMediaStream;
 namespace dom {
 class BlobImpl;
@@ -50,36 +51,26 @@ public:
   static nsresult GenerateURIString(const nsACString &aScheme,
                                     nsIPrincipal* aPrincipal,
                                     nsACString &aUri);
-  static nsresult GenerateURIStringForBlobURL(nsIPrincipal* aPrincipal,
-                                              nsACString &aUri);
 
   // Methods for managing uri->object mapping
   // AddDataEntry creates the URI with the given scheme and returns it in aUri
-  static nsresult AddDataEntry(mozilla::dom::BlobImpl* aBlobImpl,
+  static nsresult AddDataEntry(const nsACString& aScheme,
+                               nsISupports* aObject,
                                nsIPrincipal* aPrincipal,
                                nsACString& aUri);
-  static nsresult AddDataEntry(mozilla::DOMMediaStream* aMediaStream,
-                               nsIPrincipal* aPrincipal,
-                               nsACString& aUri);
-  static nsresult AddDataEntry(mozilla::dom::MediaSource* aMediaSource,
-                               nsIPrincipal* aPrincipal,
-                               nsACString& aUri);
-  // IPC only
-  static nsresult AddDataEntry(const nsACString& aURI,
-                               nsIPrincipal* aPrincipal,
-                               mozilla::dom::BlobImpl* aBlobImpl);
-
   static void RemoveDataEntry(const nsACString& aUri,
                               bool aBroadcastToOTherProcesses = true);
 
   // This is for IPC only.
   static void RemoveDataEntries();
 
-  static bool HasDataEntry(const nsACString& aUri);
-
   static nsIPrincipal* GetDataEntryPrincipal(const nsACString& aUri);
   static void Traverse(const nsACString& aUri, nsCycleCollectionTraversalCallback& aCallback);
 
+  // IPC or internal use only
+  static nsresult AddDataEntry(const nsACString& aURI,
+                               nsISupports* aObject,
+                               nsIPrincipal* aPrincipal);
   static bool
   GetAllBlobURLEntries(nsTArray<mozilla::dom::BlobURLRegistrationData>& aRegistrations,
                        mozilla::dom::ContentParent* aCP);
@@ -92,6 +83,12 @@ private:
 };
 
 class nsBlobProtocolHandler : public nsHostObjectProtocolHandler
+{
+public:
+  NS_IMETHOD GetScheme(nsACString &result) override;
+};
+
+class nsMediaStreamProtocolHandler : public nsHostObjectProtocolHandler
 {
 public:
   NS_IMETHOD GetScheme(nsACString &result) override;
@@ -110,14 +107,28 @@ public:
   NS_IMETHOD NewURI(const nsACString & aSpec, const char * aOriginCharset, nsIURI *aBaseURI, nsIURI * *_retval);
 };
 
-bool IsBlobURI(nsIURI* aUri);
-bool IsMediaStreamURI(nsIURI* aUri);
-bool IsMediaSourceURI(nsIURI* aUri);
+inline bool IsBlobURI(nsIURI* aUri)
+{
+  bool isBlob;
+  return NS_SUCCEEDED(aUri->SchemeIs(BLOBURI_SCHEME, &isBlob)) && isBlob;
+}
 
 inline bool IsRtspURI(nsIURI* aUri)
 {
   bool isRtsp;
   return NS_SUCCEEDED(aUri->SchemeIs(RTSPURI_SCHEME, &isRtsp)) && isRtsp;
+}
+
+inline bool IsMediaStreamURI(nsIURI* aUri)
+{
+  bool isStream;
+  return NS_SUCCEEDED(aUri->SchemeIs(MEDIASTREAMURI_SCHEME, &isStream)) && isStream;
+}
+
+inline bool IsMediaSourceURI(nsIURI* aUri)
+{
+  bool isMediaSource;
+  return NS_SUCCEEDED(aUri->SchemeIs(MEDIASOURCEURI_SCHEME, &isMediaSource)) && isMediaSource;
 }
 
 inline bool IsFontTableURI(nsIURI* aUri)

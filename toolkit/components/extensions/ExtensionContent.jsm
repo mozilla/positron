@@ -384,7 +384,6 @@ class ExtensionContext extends BaseContext {
         sandboxPrototype: contentWindow,
         wantXrays: true,
         isWebExtensionContentScript: true,
-        wantExportHelpers: true,
         wantGlobalProperties: ["XMLHttpRequest", "fetch"],
       });
 
@@ -531,11 +530,11 @@ DocumentManager = {
     let readyState = contentWindow.document.readyState;
     if (readyState == "complete") {
       return "document_idle";
-    }
-    if (readyState == "interactive") {
+    } else if (readyState == "interactive") {
       return "document_end";
+    } else {
+      return "document_start";
     }
-    return "document_start";
   },
 
   observe: function(subject, topic, data) {
@@ -631,14 +630,7 @@ DocumentManager = {
                         .filter(promise => promise);
 
     if (!promises.length) {
-      let details = {};
-      for (let key of ["all_frames", "frame_id", "matches_about_blank", "matchesHost"]) {
-        if (key in options) {
-          details[key] = options[key];
-        }
-      }
-
-      return Promise.reject({message: `No window matching ${JSON.stringify(details)}`});
+      return Promise.reject({message: `No matching window`});
     }
     if (options.all_frames) {
       return Promise.all(promises);

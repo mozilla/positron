@@ -61,7 +61,8 @@ function promisePocketReset() {
   if (enabledOnStartup) {
     info("reset is enabling pocket addon");
     return promisePocketEnabled();
+  } else {
+    info("reset is disabling pocket addon");
+    return promisePocketDisabled();
   }
-  info("reset is disabling pocket addon");
-  return promisePocketDisabled();
 }

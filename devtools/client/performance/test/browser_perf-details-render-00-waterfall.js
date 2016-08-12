@@ -9,6 +9,7 @@
 const { SIMPLE_URL } = require("devtools/client/performance/test/helpers/urls");
 const { initPerformanceInNewTab, teardownToolboxAndRemoveTab } = require("devtools/client/performance/test/helpers/panel-utils");
 const { startRecording, stopRecording } = require("devtools/client/performance/test/helpers/actions");
+const { once } = require("devtools/client/performance/test/helpers/event-utils");
 
 add_task(function* () {
   let { panel } = yield initPerformanceInNewTab({
@@ -16,11 +17,10 @@ add_task(function* () {
     win: window
   });
 
-  let { DetailsView, WaterfallView } = panel.panelWin;
+  let { EVENTS, DetailsView, WaterfallView } = panel.panelWin;
 
   yield startRecording(panel);
-  // Already waits for EVENTS.UI_WATERFALL_RENDERED.
-  yield stopRecording(panel);
+  yield stopRecording(panel); // Already waits for EVENTS.UI_WATERFALL_RENDERED.
 
   ok(DetailsView.isViewSelected(WaterfallView),
     "The waterfall view is selected by default in the details view.");
@@ -28,8 +28,7 @@ add_task(function* () {
   ok(true, "WaterfallView rendered after recording is stopped.");
 
   yield startRecording(panel);
-  // Already waits for EVENTS.UI_WATERFALL_RENDERED.
-  yield stopRecording(panel);
+  yield stopRecording(panel); // Already waits for EVENTS.UI_WATERFALL_RENDERED.
 
   ok(DetailsView.isViewSelected(WaterfallView),
     "The waterfall view is still selected in the details view.");

@@ -6,17 +6,14 @@
 #ifndef WEBGL_FRAMEBUFFER_H_
 #define WEBGL_FRAMEBUFFER_H_
 
-#include <vector>
-
 #include "mozilla/LinkedList.h"
 #include "mozilla/WeakPtr.h"
 #include "nsWrapperCache.h"
 
 #include "WebGLObjectModel.h"
-#include "WebGLRenderbuffer.h"
 #include "WebGLStrongTypes.h"
+#include "WebGLRenderbuffer.h"
 #include "WebGLTexture.h"
-#include "WebGLTypes.h"
 
 namespace mozilla {
 
@@ -26,6 +23,10 @@ class WebGLTexture;
 
 template<typename T>
 class PlacementArray;
+
+namespace gl {
+    class GLContext;
+} // namespace gl
 
 class WebGLFBAttachPoint
 {

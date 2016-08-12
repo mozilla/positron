@@ -154,12 +154,12 @@ var _fromToTestLists = {
   ],
   URIsAndNone: [
     new AnimTestcaseFromTo("url(#idA)", "url(#idB)",
-                           { fromComp: "url(\"#idA\")",
-                             toComp: "url(\"#idB\")"}),
+                           { fromComp: "url(\"" + document.URL + "#idA\")",
+                             toComp: "url(\"" + document.URL + "#idB\")"}),
     new AnimTestcaseFromTo("none", "url(#idB)",
-                           { toComp: "url(\"#idB\")"}),
+                           { toComp: "url(\"" + document.URL + "#idB\")"}),
     new AnimTestcaseFromTo("url(#idB)", "inherit",
-                           { fromComp: "url(\"#idB\")",
+                           { fromComp: "url(\"" + document.URL + "#idB\")",
                              toComp: "none"}),
   ],
 };

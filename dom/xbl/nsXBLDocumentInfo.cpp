@@ -195,9 +195,7 @@ nsXBLDocumentInfo::ReadPrototypeBindings(nsIURI* aURI, nsXBLDocumentInfo** aDocI
   NS_ENSURE_SUCCESS(rv, rv);
 
   StartupCache* startupCache = StartupCache::GetSingleton();
-  if (!startupCache) {
-    return NS_ERROR_FAILURE;
-  }
+  NS_ENSURE_TRUE(startupCache, NS_ERROR_FAILURE);
 
   UniquePtr<char[]> buf;
   uint32_t len;
@@ -248,7 +246,7 @@ nsXBLDocumentInfo::ReadPrototypeBindings(nsIURI* aURI, nsXBLDocumentInfo** aDocI
     }
   }
 
-  docInfo.forget(aDocInfo);
+  docInfo.swap(*aDocInfo);
   return NS_OK;
 }
 
@@ -264,9 +262,7 @@ nsXBLDocumentInfo::WritePrototypeBindings()
   NS_ENSURE_SUCCESS(rv, rv);
 
   StartupCache* startupCache = StartupCache::GetSingleton();
-  if (!startupCache) {
-    return rv;
-  }
+  NS_ENSURE_TRUE(startupCache, rv);
 
   nsCOMPtr<nsIObjectOutputStream> stream;
   nsCOMPtr<nsIStorageStream> storageStream;

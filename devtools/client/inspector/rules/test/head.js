@@ -530,7 +530,6 @@ var addProperty = Task.async(function* (view, ruleIndex, name, value,
   // triggers a ruleview-changed event (see bug 1209295).
   let onPreview = view.once("ruleview-changed");
   editor.input.value = value;
-  view.throttle.flush();
   yield onPreview;
 
   let onValueAdded = view.once("ruleview-changed");
@@ -569,7 +568,6 @@ var setProperty = Task.async(function* (view, textProp, value,
   } else {
     EventUtils.sendString(value, view.styleWindow);
   }
-  view.throttle.flush();
   yield onPreview;
 
   let onValueDone = view.once("ruleview-changed");
@@ -791,24 +789,4 @@ function openStyleContextMenuAndGetAllItems(view, target) {
   }));
 
   return allItems;
-}
-
-/**
- * Wait for a markupmutation event on the inspector that is for a style modification.
- * @param {InspectorPanel} inspector
- * @return {Promise}
- */
-function waitForStyleModification(inspector) {
-  return new Promise(function (resolve) {
-    function checkForStyleModification(name, mutations) {
-      for (let mutation of mutations) {
-        if (mutation.type === "attributes" && mutation.attributeName === "style") {
-          inspector.off("markupmutation", checkForStyleModification);
-          resolve();
-          return;
-        }
-      }
-    }
-    inspector.on("markupmutation", checkForStyleModification);
-  });
 }

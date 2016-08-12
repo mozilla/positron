@@ -10,6 +10,7 @@
 
 #include "jscntxt.h"
 
+#include "asmjs/WasmInstance.h"
 #include "gc/Marking.h"
 #include "jit/BaselineFrame.h"
 #include "jit/JitcodeMap.h"
@@ -862,7 +863,7 @@ FrameIter::filename() const
       case JIT:
         return script()->filename();
       case WASM:
-        return data_.wasmFrames_.filename();
+        return data_.activations_->asWasm()->instance().metadata().filename.get();
     }
 
     MOZ_CRASH("Unexpected state");
@@ -880,7 +881,7 @@ FrameIter::displayURL() const
         return ss->hasDisplayURL() ? ss->displayURL() : nullptr;
       }
       case WASM:
-        return data_.wasmFrames_.displayURL();
+        return data_.activations_->asWasm()->instance().metadata().displayURL();
     }
     MOZ_CRASH("Unexpected state");
 }
@@ -913,7 +914,7 @@ FrameIter::mutedErrors() const
       case JIT:
         return script()->mutedErrors();
       case WASM:
-        return data_.wasmFrames_.mutedErrors();
+        return data_.activations_->asWasm()->instance().metadata().mutedErrors();
     }
     MOZ_CRASH("Unexpected state");
 }
@@ -1385,8 +1386,6 @@ ActivationEntryMonitor::ActivationEntryMonitor(JSContext* cx, jit::CalleeToken e
 
 jit::JitActivation::JitActivation(JSContext* cx, bool active)
   : Activation(cx, Jit),
-    prevJitTop_(cx->runtime()->jitTop),
-    prevJitActivation_(cx->runtime()->jitActivation),
     active_(active),
     rematerializedFrames_(nullptr),
     ionRecovery_(cx),
@@ -1395,8 +1394,14 @@ jit::JitActivation::JitActivation(JSContext* cx, bool active)
     lastProfilingCallSite_(nullptr)
 {
     if (active) {
+        prevJitTop_ = cx->runtime()->jitTop;
+        prevJitActivation_ = cx->runtime()->jitActivation;
         cx->runtime()->jitActivation = this;
+
         registerProfiling();
+    } else {
+        prevJitTop_ = nullptr;
+        prevJitActivation_ = nullptr;
     }
 }
 
@@ -1408,9 +1413,6 @@ jit::JitActivation::~JitActivation()
 
         cx_->runtime()->jitTop = prevJitTop_;
         cx_->runtime()->jitActivation = prevJitActivation_;
-    } else {
-        MOZ_ASSERT(cx_->runtime()->jitTop == prevJitTop_);
-        MOZ_ASSERT(cx_->runtime()->jitActivation == prevJitActivation_);
     }
 
     // All reocvered value are taken from activation during the bailout.
@@ -1445,8 +1447,8 @@ jit::JitActivation::cleanBailoutData()
     bailoutData_ = nullptr;
 }
 
-// setActive() is inlined in GenerateJitExit() with explicit masm instructions so
-// changes to the logic here need to be reflected in GenerateJitExit() in the enable
+// setActive() is inlined in GenerateFFIIonExit() with explicit masm instructions so
+// changes to the logic here need to be reflected in GenerateFFIIonExit() in the enable
 // and disable activation instruction sequences.
 void
 jit::JitActivation::setActive(JSContext* cx, bool active)
@@ -1458,8 +1460,8 @@ jit::JitActivation::setActive(JSContext* cx, bool active)
 
     if (active) {
         *((volatile bool*) active_) = true;
-        MOZ_ASSERT(prevJitTop_ == cx->runtime()->jitTop);
-        MOZ_ASSERT(prevJitActivation_ == cx->runtime()->jitActivation);
+        prevJitTop_ = cx->runtime()->jitTop;
+        prevJitActivation_ = cx->runtime()->jitActivation;
         cx->runtime()->jitActivation = this;
 
         registerProfiling();
@@ -1622,19 +1624,21 @@ jit::JitActivation::markIonRecovery(JSTracer* trc)
         it->trace(trc);
 }
 
-WasmActivation::WasmActivation(JSContext* cx)
+WasmActivation::WasmActivation(JSContext* cx, wasm::Instance& instance)
   : Activation(cx, Wasm),
+    instance_(instance),
     entrySP_(nullptr),
     resumePC_(nullptr),
     fp_(nullptr),
     exitReason_(wasm::ExitReason::None)
 {
-    (void) entrySP_;  // silence "unused private member" warning
+    (void) entrySP_;  // squelch GCC warning
+
+    prevWasmForInstance_ = instance.activation();
+    instance.activation() = this;
 
     prevWasm_ = cx->runtime()->wasmActivationStack_;
     cx->runtime()->wasmActivationStack_ = this;
-
-    cx->compartment()->wasm.activationCount_++;
 
     // Now that the WasmActivation is fully initialized, make it visible to
     // asynchronous profiling.
@@ -1648,11 +1652,12 @@ WasmActivation::~WasmActivation()
 
     MOZ_ASSERT(fp_ == nullptr);
 
-    MOZ_ASSERT(cx_->runtime()->wasmActivationStack_ == this);
-    cx_->runtime()->wasmActivationStack_ = prevWasm_;
+    MOZ_ASSERT(instance_.activation() == this);
+    instance_.activation() = prevWasmForInstance_;
 
-    MOZ_ASSERT(cx_->compartment()->wasm.activationCount_ > 0);
-    cx_->compartment()->wasm.activationCount_--;
+    MOZ_ASSERT(cx_->runtime()->wasmActivationStack_ == this);
+
+    cx_->runtime()->wasmActivationStack_ = prevWasm_;
 }
 
 InterpreterFrameIterator&

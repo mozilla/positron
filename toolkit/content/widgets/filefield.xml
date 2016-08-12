@@ -51,7 +51,9 @@
         <parameter name="aFile"/>
         <body>
         <![CDATA[
-          if (/Win/.test(navigator.platform)) {
+          let { AppConstants } =
+              Components.utils.import("resource://gre/modules/AppConstants.jsm", {});
+          if (AppConstants.platform == "win") {
             var lfw = aFile.QueryInterface(Components.interfaces.nsILocalFileWin);
             try {
               return lfw.getVersionInfoField("FileDescription");
@@ -59,7 +61,7 @@
             catch (e) {
               // fall through to the filename
             }
-          } else if (/Mac/.test(navigator.platform)) {
+          } else if (AppConstants.platform == "macosx") {
             var lfm = aFile.QueryInterface(Components.interfaces.nsILocalFileMac);
             try {
               return lfm.bundleDisplayName;

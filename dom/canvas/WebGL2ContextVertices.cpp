@@ -16,7 +16,7 @@ namespace mozilla {
 
 bool
 WebGL2Context::ValidateAttribPointerType(bool integerMode, GLenum type,
-                                         uint32_t* out_alignment, const char* info)
+                                         GLsizei* out_alignment, const char* info)
 {
   MOZ_ASSERT(out_alignment);
 

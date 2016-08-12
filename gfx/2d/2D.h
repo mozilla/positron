@@ -36,9 +36,6 @@ typedef _cairo_surface cairo_surface_t;
 struct _cairo_scaled_font;
 typedef _cairo_scaled_font cairo_scaled_font_t;
 
-struct _FcPattern;
-typedef _FcPattern FcPattern;
-
 struct ID3D11Texture2D;
 struct ID3D11Device;
 struct ID2D1Device;
@@ -1037,14 +1034,11 @@ public:
    * aSourceSurface or some other existing surface.
    */
   virtual already_AddRefed<SourceSurface> OptimizeSourceSurface(SourceSurface *aSurface) const = 0;
-  virtual already_AddRefed<SourceSurface> OptimizeSourceSurfaceForUnknownAlpha(SourceSurface *aSurface) const {
-    return OptimizeSourceSurface(aSurface);
-  }
 
   /**
    * Create a SourceSurface for a type of NativeSurface. This may fail if the
    * draw target does not know how to deal with the type of NativeSurface passed
-   * in. If this succeeds, the SourceSurface takes the ownersip of the NativeSurface.
+   * in.
    */
   virtual already_AddRefed<SourceSurface>
     CreateSourceSurfaceFromNativeSurface(const NativeSurface &aSurface) const = 0;
@@ -1302,11 +1296,6 @@ public:
   static already_AddRefed<ScaledFont>
     CreateScaledFontForNativeFont(const NativeFont &aNativeFont, Float aSize);
 
-#ifdef MOZ_WIDGET_GTK
-  static already_AddRefed<ScaledFont>
-    CreateScaledFontForFontconfigFont(cairo_scaled_font_t* aScaledFont, FcPattern* aPattern, Float aSize);
-#endif
-
   /**
    * This creates a NativeFontResource from TrueType data.
    *
@@ -1398,6 +1387,10 @@ public:
 
   static void PurgeAllCaches();
 
+#if defined(USE_SKIA) && defined(MOZ_ENABLE_FREETYPE)
+  static already_AddRefed<GlyphRenderingOptions>
+    CreateCairoGlyphRenderingOptions(FontHinting aHinting, bool aAutoHinting, AntialiasMode aAntialiasMode = AntialiasMode::DEFAULT);
+#endif
   static already_AddRefed<DrawTarget>
     CreateDualDrawTarget(DrawTarget *targetA, DrawTarget *targetB);
 

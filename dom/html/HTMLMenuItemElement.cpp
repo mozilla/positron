@@ -416,7 +416,7 @@ HTMLMenuItemElement::WalkRadioGroup(Visitor* aVisitor)
     return;
   }
 
-  BorrowedAttrInfo info1(GetAttrInfo(kNameSpaceID_None,
+  nsAttrInfo info1(GetAttrInfo(kNameSpaceID_None,
                                nsGkAtoms::radiogroup));
   bool info1Empty = !info1.mValue || info1.mValue->IsEmptyString();
 
@@ -429,7 +429,7 @@ HTMLMenuItemElement::WalkRadioGroup(Visitor* aVisitor)
       continue;
     }
 
-    BorrowedAttrInfo info2(menuitem->GetAttrInfo(kNameSpaceID_None,
+    nsAttrInfo info2(menuitem->GetAttrInfo(kNameSpaceID_None,
                                            nsGkAtoms::radiogroup));
     bool info2Empty = !info2.mValue || info2.mValue->IsEmptyString();
 

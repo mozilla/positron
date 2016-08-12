@@ -1506,6 +1506,8 @@ nsNavHistoryQueryOptions::Clone(nsNavHistoryQueryOptions **aResult)
 {
   *aResult = nullptr;
   nsNavHistoryQueryOptions *result = new nsNavHistoryQueryOptions();
+  if (! result)
+    return NS_ERROR_OUT_OF_MEMORY;
 
   RefPtr<nsNavHistoryQueryOptions> resultHolder(result);
   result->mSort = mSort;
@@ -1518,7 +1520,7 @@ nsNavHistoryQueryOptions::Clone(nsNavHistoryQueryOptions **aResult)
   result->mParentAnnotationToExclude = mParentAnnotationToExclude;
   result->mAsyncEnabled = mAsyncEnabled;
 
-  resultHolder.forget(aResult);
+  resultHolder.swap(*aResult);
   return NS_OK;
 }
 

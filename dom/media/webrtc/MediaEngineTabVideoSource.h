@@ -19,20 +19,21 @@ class MediaEngineTabVideoSource : public MediaEngineVideoSource, nsIDOMEventList
     NS_DECL_NSITIMERCALLBACK
     MediaEngineTabVideoSource();
 
+    void Shutdown() override {};
     void GetName(nsAString_internal&) const override;
     void GetUUID(nsACString_internal&) const override;
     nsresult Allocate(const dom::MediaTrackConstraints &,
                       const mozilla::MediaEnginePrefs&,
                       const nsString& aDeviceId,
                       const nsACString& aOrigin,
-                      AllocationHandle** aOutHandle,
+                      BaseAllocationHandle** aOutHandle,
                       const char** aOutBadConstraint) override;
-    nsresult Deallocate(AllocationHandle* aHandle) override;
+    nsresult Deallocate(BaseAllocationHandle* aHandle) override;
     nsresult Start(mozilla::SourceMediaStream*, mozilla::TrackID, const mozilla::PrincipalHandle&) override;
     void SetDirectListeners(bool aHasDirectListeners) override {};
     void NotifyPull(mozilla::MediaStreamGraph*, mozilla::SourceMediaStream*, mozilla::TrackID, mozilla::StreamTime, const mozilla::PrincipalHandle& aPrincipalHandle) override;
     nsresult Stop(mozilla::SourceMediaStream*, mozilla::TrackID) override;
-    nsresult Restart(AllocationHandle* aHandle,
+    nsresult Restart(BaseAllocationHandle* aHandle,
                      const dom::MediaTrackConstraints& aConstraints,
                      const mozilla::MediaEnginePrefs& aPrefs,
                      const nsString& aDeviceId,

@@ -37,8 +37,8 @@ public:
                               PeekWordState* aState) override;
 
   virtual void Reflow(nsPresContext* aPresContext,
-                          ReflowOutput& aDesiredSize,
-                          const ReflowInput& aReflowInput,
+                          nsHTMLReflowMetrics& aDesiredSize,
+                          const nsHTMLReflowState& aReflowState,
                           nsReflowStatus& aStatus) override;
   virtual void AddInlineMinISize(nsRenderingContext *aRenderingContext,
                                  InlineMinISizeData *aData) override;
@@ -80,14 +80,14 @@ BRFrame::~BRFrame()
 
 void
 BRFrame::Reflow(nsPresContext* aPresContext,
-                ReflowOutput& aMetrics,
-                const ReflowInput& aReflowInput,
+                nsHTMLReflowMetrics& aMetrics,
+                const nsHTMLReflowState& aReflowState,
                 nsReflowStatus& aStatus)
 {
   MarkInReflow();
   DO_GLOBAL_REFLOW_COUNT("BRFrame");
-  DISPLAY_REFLOW(aPresContext, this, aReflowInput, aMetrics, aStatus);
-  WritingMode wm = aReflowInput.GetWritingMode();
+  DISPLAY_REFLOW(aPresContext, this, aReflowState, aMetrics, aStatus);
+  WritingMode wm = aReflowState.GetWritingMode();
   LogicalSize finalSize(wm);
   finalSize.BSize(wm) = 0; // BR frames with block size 0 are ignored in quirks
                            // mode by nsLineLayout::VerticalAlignFrames .
@@ -101,7 +101,7 @@ BRFrame::Reflow(nsPresContext* aPresContext,
   // on the *parent's* ShouldSuppressLineBreak() method, instead of our
   // own, because we may have custom "display" value that makes our
   // ShouldSuppressLineBreak() return false.
-  nsLineLayout* ll = aReflowInput.mLineLayout;
+  nsLineLayout* ll = aReflowState.mLineLayout;
   if (ll && !GetParent()->StyleContext()->ShouldSuppressLineBreak()) {
     // Note that the compatibility mode check excludes AlmostStandards
     // mode, since this is the inline box model.  See bug 161691.
@@ -124,7 +124,7 @@ BRFrame::Reflow(nsPresContext* aPresContext,
       RefPtr<nsFontMetrics> fm =
         nsLayoutUtils::GetInflatedFontMetricsForFrame(this);
       if (fm) {
-        nscoord logicalHeight = aReflowInput.CalcLineHeight();
+        nscoord logicalHeight = aReflowState.CalcLineHeight();
         finalSize.BSize(wm) = logicalHeight;
         aMetrics.SetBlockStartAscent(nsLayoutUtils::GetCenteredFontBaseline(
                                        fm, logicalHeight, wm.IsLineInverted()));
@@ -144,7 +144,7 @@ BRFrame::Reflow(nsPresContext* aPresContext,
     }
 
     // Return our reflow status
-    uint32_t breakType = aReflowInput.mStyleDisplay->PhysicalBreakType(wm);
+    uint32_t breakType = aReflowState.mStyleDisplay->PhysicalBreakType(wm);
     if (NS_STYLE_CLEAR_NONE == breakType) {
       breakType = NS_STYLE_CLEAR_LINE;
     }
@@ -162,7 +162,7 @@ BRFrame::Reflow(nsPresContext* aPresContext,
 
   mAscent = aMetrics.BlockStartAscent();
 
-  NS_FRAME_SET_TRUNCATION(aStatus, aReflowInput, aMetrics);
+  NS_FRAME_SET_TRUNCATION(aStatus, aReflowState, aMetrics);
 }
 
 /* virtual */ void

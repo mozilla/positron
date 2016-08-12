@@ -44,9 +44,10 @@ function onDefaultButton() {
     restartApp();
     // Return false to prevent starting into safe mode while restarting.
     return false;
+  } else {
+    // Continue in safe mode. No restart needed.
+    return true;
   }
-  // Continue in safe mode. No restart needed.
-  return true;
 }
 
 function onCancel() {
@@ -58,9 +59,10 @@ function onExtra1() {
     // Continue in safe mode
     window.close();
     return true;
+  } else {
+    // The reset dialog will handle starting the reset process if the user confirms.
+    showResetDialog();
   }
-  // The reset dialog will handle starting the reset process if the user confirms.
-  showResetDialog();
   return false;
 }
 

@@ -267,7 +267,7 @@ this.MigratorPrototype = {
           try {
             resource.migrate(resourceDone);
           }
-          catch (ex) {
+          catch(ex) {
             Cu.reportError(ex);
             resourceDone(false);
           }
@@ -337,7 +337,7 @@ this.MigratorPrototype = {
         exists = profiles.length > 0;
       }
     }
-    catch (ex) {
+    catch(ex) {
       Cu.reportError(ex);
     }
     return exists;
@@ -411,7 +411,7 @@ this.MigrationUtils = Object.freeze({
         aFunction.apply(null, arguments);
         success = true;
       }
-      catch (ex) {
+      catch(ex) {
         Cu.reportError(ex);
       }
       // Do not change this to call aCallback directly in try try & catch
@@ -450,36 +450,6 @@ this.MigrationUtils = Object.freeze({
       return getMigrationBundle().GetStringFromName(aKey);
     return getMigrationBundle().formatStringFromName(
       aKey, aReplacements, aReplacements.length);
-  },
-
-  _getLocalePropertyForBrowser(browserId) {
-    switch (browserId) {
-      case "edge":
-        return "sourceNameEdge";
-      case "ie":
-        return "sourceNameIE";
-      case "safari":
-        return "sourceNameSafari";
-      case "canary":
-        return "sourceNameCanary";
-      case "chrome":
-        return "sourceNameChrome";
-      case "chromium":
-        return "sourceNameChromium";
-      case "firefox":
-        return "sourceNameFirefox";
-      case "360se":
-        return "sourceName360se";
-    }
-    return null;
-  },
-
-  getBrowserName(browserId) {
-    let prop = this._getLocalePropertyForBrowser(browserId);
-    if (prop) {
-      return this.getLocalizedString(prop);
-    }
-    return null;
   },
 
   /**
@@ -539,7 +509,7 @@ this.MigrationUtils = Object.freeze({
         migrator = Cc["@mozilla.org/profile/migrator;1?app=browser&type=" +
                       aKey].createInstance(Ci.nsIBrowserProfileMigrator);
       }
-      catch (ex) { Cu.reportError(ex) }
+      catch(ex) { Cu.reportError(ex) }
       this._migrators.set(aKey, migrator);
     }
 
@@ -577,7 +547,7 @@ this.MigrationUtils = Object.freeze({
         getApplicationDescription("http");
       return APP_DESC_TO_KEY[browserDesc] || "";
     }
-    catch (ex) {
+    catch(ex) {
       Cu.reportError("Could not detect default browser: " + ex);
     }
     return "";
@@ -746,7 +716,8 @@ this.MigrationUtils = Object.freeze({
     let isRefresh = migrator && skipSourcePage &&
                     migratorKey == AppConstants.MOZ_APP_NAME;
 
-    if (!isRefresh && AutoMigrate.enabled) {
+    if (!isRefresh &&
+        Services.prefs.getBoolPref("browser.migration.automigrate")) {
       try {
         AutoMigrate.migrate(aProfileStartup, aMigratorKey, aProfileToMigrate);
         return;

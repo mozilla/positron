@@ -21,7 +21,6 @@
 #include "nsISupportsImpl.h"            // for Layer::AddRef, etc
 #include "nsRect.h"                     // for IntRect
 #include "nsTArray.h"                   // for AutoTArray, nsTArray_Impl
-#include "mozilla/Poison.h"
 #include "mozilla/layers/ImageHost.h"
 #include "mozilla/layers/LayerManagerComposite.h"
 #include "TreeTraversal.h"              // for ForEachNode
@@ -171,7 +170,6 @@ struct LayerPropertiesBase : public LayerProperties
   nsIntRegion ComputeChange(NotifySubDocInvalidationFunc aCallback,
                             bool& aGeometryChanged)
   {
-    mCanary.Check();
     bool transformChanged = !mTransform.FuzzyEqual(GetTransformForInvalidation(mLayer)) ||
                              mLayer->GetPostXScale() != mPostXScale ||
                              mLayer->GetPostYScale() != mPostYScale;
@@ -259,7 +257,6 @@ struct LayerPropertiesBase : public LayerProperties
   float mOpacity;
   ParentLayerIntRect mClipRect;
   bool mUseClipRect;
-  mozilla::CorruptionCanary mCanary;
 };
 
 struct ContainerLayerProperties : public LayerPropertiesBase
@@ -270,7 +267,6 @@ struct ContainerLayerProperties : public LayerPropertiesBase
     , mPreYScale(aLayer->GetPreYScale())
   {
     for (Layer* child = aLayer->GetFirstChild(); child; child = child->GetNextSibling()) {
-      child->CheckCanary();
       mChildren.AppendElement(Move(CloneLayerTreePropertiesInternal(child)));
     }
   }
@@ -281,8 +277,6 @@ struct ContainerLayerProperties : public LayerPropertiesBase
     ContainerLayer* container = mLayer->AsContainerLayer();
     nsIntRegion invalidOfLayer; // Invalid regions of this layer.
     nsIntRegion result;         // Invliad regions for children only.
-
-    container->CheckCanary();
 
     bool childrenChanged = false;
 
@@ -307,7 +301,6 @@ struct ContainerLayerProperties : public LayerPropertiesBase
 
     nsDataHashtable<nsPtrHashKey<Layer>, uint32_t> oldIndexMap(mChildren.Length());
     for (uint32_t i = 0; i < mChildren.Length(); ++i) {
-      mChildren[i]->mLayer->CheckCanary();
       oldIndexMap.Put(mChildren[i]->mLayer, i);
     }
 
@@ -565,8 +558,6 @@ CloneLayerTreePropertiesInternal(Layer* aRoot, bool aIsMask /* = false */)
   }
 
   MOZ_ASSERT(!aIsMask || aRoot->GetType() == Layer::TYPE_IMAGE);
-
-  aRoot->CheckCanary();
 
   switch (aRoot->GetType()) {
     case Layer::TYPE_CONTAINER:

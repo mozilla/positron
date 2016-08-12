@@ -1,4 +1,4 @@
-# -*- Mode: python; indent-tabs-mode: nil; tab-width: 40 -*-
+# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
 # vim: set filetype=python:
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -39,7 +39,7 @@ project_flag('MOZ_ANDROID_DOWNLOAD_CONTENT_SERVICE',
 
 project_flag('MOZ_ANDROID_CUSTOM_TABS',
              help='Enable support for Android custom tabs',
-             default=delayed_getattr(milestone, 'is_nightly'))
+             default=False)
 
 # Enable the Switchboard A/B framework code.
 # Note: The framework is always included in the app. This flag controls
@@ -47,13 +47,6 @@ project_flag('MOZ_ANDROID_CUSTOM_TABS',
 project_flag('MOZ_SWITCHBOARD',
              help='Include Switchboard A/B framework on Android',
              default=True)
-
-option(env='MOZ_ANDROID_ACTIVITY_STREAM',
-       help='Enable Activity Stream on Android (replacing the default HomePager)',
-       default=False)
-
-set_config('MOZ_ANDROID_ACTIVITY_STREAM',
-           depends_if('MOZ_ANDROID_ACTIVITY_STREAM')(lambda _: True))
 
 option('--disable-android-apz', env='MOZ_ANDROID_APZ',
        help='Disable the C++ async pan/zoom code and use the Java version instead')

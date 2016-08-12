@@ -25,18 +25,14 @@
 using namespace mozilla;
 using namespace mozilla::dom;
 
-NS_IMPL_QUERY_INTERFACE_INHERITED(nsStyledElement,
-                                  nsStyledElementBase,
-                                  nsStyledElement)
-
 //----------------------------------------------------------------------
 // nsIContent methods
 
 bool
-nsStyledElement::ParseAttribute(int32_t aNamespaceID,
-                                nsIAtom* aAttribute,
-                                const nsAString& aValue,
-                                nsAttrValue& aResult)
+nsStyledElementNotElementCSSInlineStyle::ParseAttribute(int32_t aNamespaceID,
+                                                        nsIAtom* aAttribute,
+                                                        const nsAString& aValue,
+                                                        nsAttrValue& aResult)
 {
   if (aAttribute == nsGkAtoms::style && aNamespaceID == kNameSpaceID_None) {
     SetMayHaveStyle();
@@ -49,9 +45,9 @@ nsStyledElement::ParseAttribute(int32_t aNamespaceID,
 }
 
 nsresult
-nsStyledElement::SetInlineStyleDeclaration(css::Declaration* aDeclaration,
-                                           const nsAString* aSerialized,
-                                           bool aNotify)
+nsStyledElementNotElementCSSInlineStyle::SetInlineStyleDeclaration(css::Declaration* aDeclaration,
+                                                                   const nsAString* aSerialized,
+                                                                   bool aNotify)
 {
   SetMayHaveStyle();
   bool modification = false;
@@ -94,7 +90,7 @@ nsStyledElement::SetInlineStyleDeclaration(css::Declaration* aDeclaration,
 }
 
 css::Declaration*
-nsStyledElement::GetInlineStyleDeclaration()
+nsStyledElementNotElementCSSInlineStyle::GetInlineStyleDeclaration()
 {
   if (!MayHaveStyle()) {
     return nullptr;
@@ -112,7 +108,7 @@ nsStyledElement::GetInlineStyleDeclaration()
 // Others and helpers
 
 nsICSSDeclaration*
-nsStyledElement::Style()
+nsStyledElementNotElementCSSInlineStyle::Style()
 {
   Element::nsDOMSlots *slots = DOMSlots();
 
@@ -128,7 +124,7 @@ nsStyledElement::Style()
 }
 
 nsresult
-nsStyledElement::ReparseStyleAttribute(bool aForceInDataDoc)
+nsStyledElementNotElementCSSInlineStyle::ReparseStyleAttribute(bool aForceInDataDoc)
 {
   if (!MayHaveStyle()) {
     return NS_OK;
@@ -155,9 +151,9 @@ nsStyledElement::ReparseStyleAttribute(bool aForceInDataDoc)
 }
 
 void
-nsStyledElement::ParseStyleAttribute(const nsAString& aValue,
-                                     nsAttrValue& aResult,
-                                     bool aForceInDataDoc)
+nsStyledElementNotElementCSSInlineStyle::ParseStyleAttribute(const nsAString& aValue,
+                                                             nsAttrValue& aResult,
+                                                             bool aForceInDataDoc)
 {
   nsIDocument* doc = OwnerDoc();
   bool isNativeAnon = IsInNativeAnonymousSubtree();

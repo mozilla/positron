@@ -17,7 +17,6 @@
 #include "MPAPI.h"
 #include "gfx2DGlue.h"
 #include "MediaStreamSource.h"
-#include "VideoFrameContainer.h"
 
 #define MAX_DROPPED_FRAMES 25
 // Try not to spend more than this much time in a single call to DecodeVideoFrame.
@@ -358,7 +357,7 @@ bool MediaOmxReader::DecodeVideoFrame(bool &aKeyframeSkip,
       continue;
     }
 
-    a.mStats.mParsedFrames++;
+    a.mParsed++;
     if (frame.mShouldSkip && mSkipCount < MAX_DROPPED_FRAMES) {
       mSkipCount++;
       continue;
@@ -409,25 +408,25 @@ bool MediaOmxReader::DecodeVideoFrame(bool &aKeyframeSkip,
       b.mPlanes[2].mOffset = frame.Cr.mOffset;
       b.mPlanes[2].mSkip = frame.Cr.mSkip;
 
-      v = VideoData::CreateAndCopyData(mInfo.mVideo,
-                                       mDecoder->GetImageContainer(),
-                                       pos,
-                                       frame.mTimeUs,
-                                       1, // We don't know the duration.
-                                       b,
-                                       frame.mKeyFrame,
-                                       -1,
-                                       picture);
+      v = VideoData::Create(mInfo.mVideo,
+                            mDecoder->GetImageContainer(),
+                            pos,
+                            frame.mTimeUs,
+                            1, // We don't know the duration.
+                            b,
+                            frame.mKeyFrame,
+                            -1,
+                            picture);
     } else {
-      v = VideoData::CreateAndCopyIntoTextureClient(
-                                       mInfo.mVideo,
-                                       pos,
-                                       frame.mTimeUs,
-                                       1, // We don't know the duration.
-                                       frame.mGraphicBuffer,
-                                       frame.mKeyFrame,
-                                       -1,
-                                       picture);
+      v = VideoData::Create(mInfo.mVideo,
+                            mDecoder->GetImageContainer(),
+                            pos,
+                            frame.mTimeUs,
+                            1, // We don't know the duration.
+                            frame.mGraphicBuffer,
+                            frame.mKeyFrame,
+                            -1,
+                            picture);
     }
 
     if (!v) {
@@ -435,8 +434,8 @@ bool MediaOmxReader::DecodeVideoFrame(bool &aKeyframeSkip,
       return false;
     }
 
-    a.mStats.mDecodedFrames++;
-    NS_ASSERTION(a.mStats.mDecodedFrames <= a.mStats.mParsedFrames, "Expect to decode fewer frames than parsed in OMX decoder...");
+    a.mDecoded++;
+    NS_ASSERTION(a.mDecoded <= a.mParsed, "Expect to decode fewer frames than parsed in OMX decoder...");
 
     mVideoQueue.Push(v);
 

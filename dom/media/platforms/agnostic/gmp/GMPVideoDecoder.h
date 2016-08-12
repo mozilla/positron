@@ -83,7 +83,6 @@ protected:
   virtual void InitTags(nsTArray<nsCString>& aTags);
   virtual nsCString GetNodeId();
   virtual GMPUniquePtr<GMPVideoEncodedFrame> CreateFrame(MediaRawData* aSample);
-  virtual const VideoInfo& GetConfig() const;
 
 private:
 

@@ -18,11 +18,6 @@
 using namespace js;
 using namespace js::frontend;
 
-static_assert(MODULE_STATE_FAILED < MODULE_STATE_PARSED &&
-              MODULE_STATE_PARSED < MODULE_STATE_INSTANTIATED &&
-              MODULE_STATE_INSTANTIATED < MODULE_STATE_EVALUATED,
-              "Module states are ordered incorrectly");
-
 template<typename T, Value ValueGetter(const T* obj)>
 static bool
 ModuleValueGetterImpl(JSContext* cx, const CallArgs& args)
@@ -634,6 +629,8 @@ ModuleEnvironmentObject*
 ModuleObject::environment() const
 {
     Value value = getReservedSlot(EnvironmentSlot);
+    MOZ_ASSERT(!value.isNull());
+
     if (value.isUndefined())
         return nullptr;
 
@@ -696,7 +693,7 @@ void
 ModuleObject::init(HandleScript script)
 {
     initReservedSlot(ScriptSlot, PrivateValue(script));
-    initReservedSlot(StateSlot, Int32Value(MODULE_STATE_FAILED));
+    initReservedSlot(EvaluatedSlot, BooleanValue(false));
 }
 
 void
@@ -717,7 +714,6 @@ ModuleObject::initImportExportData(HandleArrayObject requestedModules,
     initReservedSlot(LocalExportEntriesSlot, ObjectValue(*localExportEntries));
     initReservedSlot(IndirectExportEntriesSlot, ObjectValue(*indirectExportEntries));
     initReservedSlot(StarExportEntriesSlot, ObjectValue(*starExportEntries));
-    setReservedSlot(StateSlot, Int32Value(MODULE_STATE_PARSED));
 }
 
 static bool
@@ -800,18 +796,10 @@ ModuleObject::script() const
     return static_cast<JSScript*>(getReservedSlot(ScriptSlot).toPrivate());
 }
 
-static inline void
-AssertValidModuleState(ModuleState state)
+bool
+ModuleObject::evaluated() const
 {
-    MOZ_ASSERT(state >= MODULE_STATE_FAILED && state <= MODULE_STATE_EVALUATED);
-}
-
-ModuleState
-ModuleObject::state() const
-{
-    ModuleState state = getReservedSlot(StateSlot).toInt32();
-    AssertValidModuleState(state);
-    return state;
+    return getReservedSlot(EvaluatedSlot).toBoolean();
 }
 
 Value
@@ -911,12 +899,10 @@ ModuleObject::instantiateFunctionDeclarations(JSContext* cx, HandleModuleObject 
 }
 
 void
-ModuleObject::setState(int32_t newState)
+ModuleObject::setEvaluated()
 {
-    AssertValidModuleState(newState);
-    MOZ_ASSERT(state() != MODULE_STATE_FAILED);
-    MOZ_ASSERT(newState == MODULE_STATE_FAILED || newState > state());
-    setReservedSlot(StateSlot, Int32Value(newState));
+    MOZ_ASSERT(!evaluated());
+    setReservedSlot(EvaluatedSlot, TrueHandleValue);
 }
 
 /* static */ bool
@@ -982,7 +968,7 @@ ModuleObject::Evaluation(JSContext* cx, HandleModuleObject self)
 }
 
 DEFINE_GETTER_FUNCTIONS(ModuleObject, namespace_, NamespaceSlot)
-DEFINE_GETTER_FUNCTIONS(ModuleObject, state, StateSlot)
+DEFINE_GETTER_FUNCTIONS(ModuleObject, evaluated, EvaluatedSlot)
 DEFINE_GETTER_FUNCTIONS(ModuleObject, requestedModules, RequestedModulesSlot)
 DEFINE_GETTER_FUNCTIONS(ModuleObject, importEntries, ImportEntriesSlot)
 DEFINE_GETTER_FUNCTIONS(ModuleObject, localExportEntries, LocalExportEntriesSlot)
@@ -994,7 +980,7 @@ GlobalObject::initModuleProto(JSContext* cx, Handle<GlobalObject*> global)
 {
     static const JSPropertySpec protoAccessors[] = {
         JS_PSG("namespace", ModuleObject_namespace_Getter, 0),
-        JS_PSG("state", ModuleObject_stateGetter, 0),
+        JS_PSG("evaluated", ModuleObject_evaluatedGetter, 0),
         JS_PSG("requestedModules", ModuleObject_requestedModulesGetter, 0),
         JS_PSG("importEntries", ModuleObject_importEntriesGetter, 0),
         JS_PSG("localExportEntries", ModuleObject_localExportEntriesGetter, 0),
@@ -1167,6 +1153,15 @@ ModuleBuilder::processExport(frontend::ParseNode* pn)
         }
         break;
 
+      case PNK_FUNCTION: {
+          RootedFunction func(cx_, kid->pn_funbox->function());
+          RootedAtom localName(cx_, func->name());
+          RootedAtom exportName(cx_, isDefault ? cx_->names().default_ : localName.get());
+          if (!appendExportEntry(exportName, localName))
+              return false;
+          break;
+      }
+
       case PNK_CLASS: {
           const ClassNode& cls = kid->as<ClassNode>();
           MOZ_ASSERT(cls.names());
@@ -1192,20 +1187,6 @@ ModuleBuilder::processExport(frontend::ParseNode* pn)
           }
           break;
       }
-
-      case PNK_FUNCTION: {
-          RootedFunction func(cx_, kid->pn_funbox->function());
-          if (!func->isArrow()) {
-              RootedAtom localName(cx_, func->name());
-              RootedAtom exportName(cx_, isDefault ? cx_->names().default_ : localName.get());
-              MOZ_ASSERT_IF(isDefault, localName);
-              if (!appendExportEntry(exportName, localName))
-                  return false;
-              break;
-          }
-      }
-
-      MOZ_FALLTHROUGH; // Arrow functions are handled below.
 
       default:
         MOZ_ASSERT(isDefault);

@@ -35,11 +35,11 @@
         var elem,
           elemWasLocked = false;
 
-        document.addEventListener("pointerlockchange", function (e) {
+        document.addEventListener("mozpointerlockchange", function (e) {
           if (document.fullscreenElement &&
-              document.pointerLockElement === elem) {
+              document.mozPointerLockElement === elem) {
             elemWasLocked = true;
-            document.exitPointerLock();
+            document.mozExitPointerLock();
           } else {
             addFullscreenChangeContinuation("exit", function() {
               ok(elemWasLocked, "Expected SVG elem to become locked.");
@@ -52,7 +52,7 @@
         function start() {
           elem = document.getElementById("svg-elem");
           addFullscreenChangeContinuation("enter", function() {
-            elem.requestPointerLock();
+            elem.mozRequestPointerLock();
           });
           elem.requestFullscreen();
         }

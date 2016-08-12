@@ -99,10 +99,6 @@ struct ReturnStopIteration
 {
 };
 
-struct ReturnDeadCPOW
-{
-};
-
 struct ReturnException
 {
     JSVariant exn;
@@ -117,7 +113,6 @@ union ReturnStatus
 {
     ReturnSuccess;
     ReturnStopIteration;
-    ReturnDeadCPOW;
     ReturnException;
     ReturnObjectOpResult;
 };

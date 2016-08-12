@@ -1926,6 +1926,12 @@ nsMemoryReporterManager::HandleChildReport(
 nsMemoryReporterManager::StartChildReport(mozilla::dom::ContentParent* aChild,
                                           const PendingProcessesState* aState)
 {
+#ifdef MOZ_NUWA_PROCESS
+  if (aChild->IsNuwaProcess()) {
+    return false;
+  }
+#endif
+
   if (!aChild->IsAlive()) {
     MEMORY_REPORTING_LOG("StartChildReports (gen=%u): child exited before"
                          " its report was started\n",
@@ -1978,7 +1984,7 @@ nsMemoryReporterManager::EndProcessReport(uint32_t aGeneration, bool aSuccess)
     RefPtr<ContentParent> nextChild;
     nextChild.swap(s->mChildrenPending.LastElement());
     s->mChildrenPending.TruncateLength(s->mChildrenPending.Length() - 1);
-    // Start report (if the child is still alive).
+    // Start report (if the child is still alive and not Nuwa).
     if (StartChildReport(nextChild, s)) {
       ++s->mNumProcessesRunning;
       MEMORY_REPORTING_LOG("HandleChildReports (aGen=%u): started child report"
@@ -2533,14 +2539,15 @@ public:
 
     if (mRemainingIters == 0) {
       os->NotifyObservers(nullptr, "after-minimize-memory-usage",
-                          u"MinimizeMemoryUsageRunnable");
+                          MOZ_UTF16("MinimizeMemoryUsageRunnable"));
       if (mCallback) {
         mCallback->Run();
       }
       return NS_OK;
     }
 
-    os->NotifyObservers(nullptr, "memory-pressure", u"heap-minimize");
+    os->NotifyObservers(nullptr, "memory-pressure",
+                        MOZ_UTF16("heap-minimize"));
     mRemainingIters--;
     NS_DispatchToMainThread(this);
 

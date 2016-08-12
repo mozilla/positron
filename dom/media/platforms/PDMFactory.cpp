@@ -29,7 +29,6 @@
 #include "mozilla/ClearOnShutdown.h"
 #include "mozilla/SharedThreadPool.h"
 #include "mozilla/StaticPtr.h"
-#include "mozilla/SyncRunnable.h"
 #include "mozilla/TaskQueue.h"
 
 #include "MediaInfo.h"
@@ -45,8 +44,6 @@
 #endif
 
 #include "DecoderDoctorDiagnostics.h"
-
-#include "MP4Decoder.h"
 
 
 namespace mozilla {
@@ -81,7 +78,6 @@ PDMFactory::PDMFactory()
 {
   EnsureInit();
   CreatePDMs();
-  CreateBlankPDM();
 }
 
 PDMFactory::~PDMFactory()
@@ -91,41 +87,22 @@ PDMFactory::~PDMFactory()
 void
 PDMFactory::EnsureInit() const
 {
-  {
-    StaticMutexAutoLock mon(sMonitor);
-    if (sInstance) {
-      // Quick exit if we already have an instance.
-      return;
-    }
+  StaticMutexAutoLock mon(sMonitor);
+  if (!sInstance) {
+    sInstance = new PDMFactoryImpl();
     if (NS_IsMainThread()) {
-      // On the main thread and holding the lock -> Create instance.
-      sInstance = new PDMFactoryImpl();
       ClearOnShutdown(&sInstance);
-      return;
+    } else {
+      nsCOMPtr<nsIRunnable> runnable =
+        NS_NewRunnableFunction([]() { ClearOnShutdown(&sInstance); });
+      NS_DispatchToMainThread(runnable);
     }
   }
-
-  // Not on the main thread -> Sync-dispatch creation to main thread.
-  nsCOMPtr<nsIThread> mainThread = do_GetMainThread();
-  nsCOMPtr<nsIRunnable> runnable =
-    NS_NewRunnableFunction([]() {
-      StaticMutexAutoLock mon(sMonitor);
-      if (!sInstance) {
-        sInstance = new PDMFactoryImpl();
-        ClearOnShutdown(&sInstance);
-      }
-    });
-  SyncRunnable::DispatchToThread(mainThread, runnable);
 }
 
 already_AddRefed<MediaDataDecoder>
 PDMFactory::CreateDecoder(const CreateDecoderParams& aParams)
 {
-  if (aParams.mUseBlankDecoder) {
-    MOZ_ASSERT(mBlankPDM);
-    return CreateDecoderWithPDM(mBlankPDM, aParams);
-  }
-
   const TrackInfo& config = aParams.mConfig;
   bool isEncrypted = mEMEPDM && config.mCrypto.mValid;
 
@@ -191,7 +168,7 @@ PDMFactory::CreateDecoderWithPDM(PlatformDecoderModule* aPDM,
   CreateDecoderParams params = aParams;
   params.mCallback = callback;
 
-  if (MP4Decoder::IsH264(config.mMimeType)) {
+  if (H264Converter::IsH264(config)) {
     RefPtr<H264Converter> h = new H264Converter(aPDM, params);
     const nsresult rv = h->GetLastError();
     if (NS_SUCCEEDED(rv) || rv == NS_ERROR_NOT_INITIALIZED) {
@@ -291,13 +268,6 @@ PDMFactory::CreatePDMs()
   } else {
     mGMPPDMFailedToStartup = false;
   }
-}
-
-void
-PDMFactory::CreateBlankPDM()
-{
-  mBlankPDM = CreateBlankDecoderModule();
-  MOZ_ASSERT(mBlankPDM && NS_SUCCEEDED(mBlankPDM->Startup()));
 }
 
 bool

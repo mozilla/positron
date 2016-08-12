@@ -236,7 +236,7 @@ function clearDB() {
     file.append("places.sqlite");
     if (file.exists())
       file.remove(false);
-  } catch (ex) { dump("Exception: " + ex); }
+  } catch(ex) { dump("Exception: " + ex); }
 }
 
 
@@ -738,8 +738,10 @@ function do_compare_arrays(a1, a2, sorted)
   if (sorted) {
     return a1.every((e, i) => e == a2[i]);
   }
-  return a1.filter(e => !a2.includes(e)).length == 0 &&
-         a2.filter(e => !a1.includes(e)).length == 0;
+  else {
+    return a1.filter(e => !a2.includes(e)).length == 0 &&
+           a2.filter(e => !a1.includes(e)).length == 0;
+  }
 }
 
 /**

@@ -208,7 +208,6 @@ static const nsAttrValue::EnumTable* kInputDefaultInputmode = &kInputInputmodeTa
 const Decimal HTMLInputElement::kStepScaleFactorDate = Decimal(86400000);
 const Decimal HTMLInputElement::kStepScaleFactorNumberRange = Decimal(1);
 const Decimal HTMLInputElement::kStepScaleFactorTime = Decimal(1000);
-const Decimal HTMLInputElement::kStepScaleFactorMonth = Decimal(1);
 const Decimal HTMLInputElement::kDefaultStepBase = Decimal(0);
 const Decimal HTMLInputElement::kDefaultStep = Decimal(1);
 const Decimal HTMLInputElement::kDefaultStepTime = Decimal(60);
@@ -509,9 +508,7 @@ GetDOMFileOrDirectoryName(const OwningFileOrDirectory& aData,
     MOZ_ASSERT(aData.IsDirectory());
     ErrorResult rv;
     aData.GetAsDirectory()->GetName(aName, rv);
-    if (NS_WARN_IF(rv.Failed())) {
-      rv.SuppressException();
-    }
+    NS_WARN_IF(rv.Failed());
   }
 }
 
@@ -1145,7 +1142,6 @@ HTMLInputElement::HTMLInputElement(already_AddRefed<mozilla::dom::NodeInfo>& aNo
   , mAutocompleteAttrState(nsContentUtils::eAutocompleteAttrState_Unknown)
   , mDisabledChanged(false)
   , mValueChanged(false)
-  , mLastValueChangeWasInteractive(false)
   , mCheckedChanged(false)
   , mChecked(false)
   , mHandlingSelectEvent(false)
@@ -1327,7 +1323,6 @@ HTMLInputElement::Clone(mozilla::dom::NodeInfo* aNodeInfo, nsINode** aResult) co
       break;
   }
 
-  it->mLastValueChangeWasInteractive = mLastValueChangeWasInteractive;
   it.forget(aResult);
   return NS_OK;
 }
@@ -2287,7 +2282,6 @@ HTMLInputElement::GetStepBase() const
   MOZ_ASSERT(mType == NS_FORM_INPUT_NUMBER ||
              mType == NS_FORM_INPUT_DATE ||
              mType == NS_FORM_INPUT_TIME ||
-             mType == NS_FORM_INPUT_MONTH ||
              mType == NS_FORM_INPUT_RANGE,
              "Check that kDefaultStepBase is correct for this new type");
 
@@ -2367,6 +2361,22 @@ HTMLInputElement::GetValueIfStepped(int32_t aStep,
     }
   } else {
     value += step * Decimal(aStep);
+  }
+
+  // For date inputs, the value can hold a string that is not a day. We do not
+  // want to round it, as it might result in a step mismatch. Instead we want to
+  // clamp to the next valid value.
+  if (mType == NS_FORM_INPUT_DATE &&
+      NS_floorModulo(Decimal(value - GetStepBase()), GetStepScaleFactor()) != Decimal(0)) {
+    MOZ_ASSERT(GetStep() > Decimal(0));
+    Decimal validStep = EuclidLCM<Decimal>(GetStep().floor(),
+                                           GetStepScaleFactor().floor());
+    if (aStep > 0) {
+      value -= NS_floorModulo(value - GetStepBase(), validStep);
+      value += validStep;
+    } else if (aStep < 0) {
+      value -= NS_floorModulo(value - GetStepBase(), validStep);
+    }
   }
 
   if (value < minimum) {
@@ -2813,7 +2823,8 @@ HTMLInputElement::GetDisplayFileName(nsAString& aValue) const
   nsXPIDLString value;
 
   if (mFilesOrDirectories.IsEmpty()) {
-    if ((Preferences::GetBool("dom.input.dirpicker", false) && Allowdirs()) ||
+    if ((Preferences::GetBool("dom.input.dirpicker", false) &&
+         HasAttr(kNameSpaceID_None, nsGkAtoms::directory)) ||
         (Preferences::GetBool("dom.webkitBlink.dirPicker.enabled", false) &&
          HasAttr(kNameSpaceID_None, nsGkAtoms::webkitdirectory))) {
       nsContentUtils::GetLocalizedString(nsContentUtils::eFORMS_PROPERTIES,
@@ -2843,11 +2854,6 @@ HTMLInputElement::SetFilesOrDirectories(const nsTArray<OwningFileOrDirectory>& a
 {
   ClearGetFilesHelpers();
 
-  if (Preferences::GetBool("dom.webkitBlink.filesystem.enabled", false)) {
-    HTMLInputElementBinding::ClearCachedWebkitEntriesValue(this);
-    mEntries.Clear();
-  }
-
   mFilesOrDirectories.Clear();
   mFilesOrDirectories.AppendElements(aFilesOrDirectories);
 
@@ -2861,11 +2867,6 @@ HTMLInputElement::SetFiles(nsIDOMFileList* aFiles,
   RefPtr<FileList> files = static_cast<FileList*>(aFiles);
   mFilesOrDirectories.Clear();
   ClearGetFilesHelpers();
-
-  if (Preferences::GetBool("dom.webkitBlink.filesystem.enabled", false)) {
-    HTMLInputElementBinding::ClearCachedWebkitEntriesValue(this);
-    mEntries.Clear();
-  }
 
   if (aFiles) {
     uint32_t listLength;
@@ -2883,11 +2884,11 @@ HTMLInputElement::SetFiles(nsIDOMFileList* aFiles,
 void
 HTMLInputElement::MozSetDndFilesAndDirectories(const nsTArray<OwningFileOrDirectory>& aFilesOrDirectories)
 {
-  SetFilesOrDirectories(aFilesOrDirectories, true);
-
   if (Preferences::GetBool("dom.webkitBlink.filesystem.enabled", false)) {
     UpdateEntries(aFilesOrDirectories);
   }
+
+  SetFilesOrDirectories(aFilesOrDirectories, true);
 
   RefPtr<DispatchChangeEventCallback> dispatchChangeEventCallback =
     new DispatchChangeEventCallback(this);
@@ -2970,7 +2971,8 @@ HTMLInputElement::GetFiles()
     return nullptr;
   }
 
-  if (Preferences::GetBool("dom.input.dirpicker", false) && Allowdirs() &&
+  if (Preferences::GetBool("dom.input.dirpicker", false) &&
+      HasAttr(kNameSpaceID_None, nsGkAtoms::directory) &&
       (!Preferences::GetBool("dom.webkitBlink.dirPicker.enabled", false) ||
        !HasAttr(kNameSpaceID_None, nsGkAtoms::webkitdirectory))) {
     return nullptr;
@@ -3073,8 +3075,7 @@ HTMLInputElement::SetValueInternal(const nsAString& aValue, uint32_t aFlags)
           }
         }
         if (!mParserCreating) {
-          OnValueChanged(/* aNotify = */ true,
-                         /* aWasInteractiveUserChange = */ false);
+          OnValueChanged(true);
         }
         // else DoneCreatingElement calls us again once mParserCreating is false
       }
@@ -3306,7 +3307,8 @@ HTMLInputElement::MaybeSubmitForm(nsPresContext* aPresContext)
     nsEventStatus status = nsEventStatus_eIgnore;
     shell->HandleDOMEventWithTarget(submitContent, &event, &status);
   } else if (!mForm->ImplicitSubmissionIsDisabled() &&
-             mForm->SubmissionCanProceed(nullptr)) {
+             (mForm->HasAttr(kNameSpaceID_None, nsGkAtoms::novalidate) ||
+              mForm->CheckValidFormSubmission())) {
     // TODO: removing this code and have the submit event sent by the form,
     // bug 592124.
     // If there's only one text control, just submit the form
@@ -3765,19 +3767,19 @@ HTMLInputElement::PreHandleEvent(EventChainPreVisitor& aVisitor)
         // that).
         frame->InvalidateFrame();
       }
-    }
-  }
-
-  if (aVisitor.mEvent->mMessage == eKeyUp && aVisitor.mEvent->IsTrusted()) {
-    WidgetKeyboardEvent* keyEvent = aVisitor.mEvent->AsKeyboardEvent();
-    if (MayFireChangeOnKeyUp(keyEvent->mKeyCode) &&
-        !(keyEvent->IsShift() || keyEvent->IsControl() || keyEvent->IsAlt() ||
-          keyEvent->IsMeta() || keyEvent->IsAltGraph() || keyEvent->IsFn() ||
-          keyEvent->IsOS())) {
-      // The up/down arrow key events fire 'change' events when released
-      // so that at the end of a series of up/down arrow key repeat events
-      // the value is considered to be "commited" by the user.
-      FireChangeEventIfNeeded();
+    } else if (aVisitor.mEvent->mMessage == eKeyUp) {
+      WidgetKeyboardEvent* keyEvent = aVisitor.mEvent->AsKeyboardEvent();
+      if ((keyEvent->mKeyCode == NS_VK_UP ||
+           keyEvent->mKeyCode == NS_VK_DOWN) &&
+          !(keyEvent->IsShift() || keyEvent->IsControl() ||
+            keyEvent->IsAlt() || keyEvent->IsMeta() ||
+            keyEvent->IsAltGraph() || keyEvent->IsFn() ||
+            keyEvent->IsOS())) {
+        // The up/down arrow key events fire 'change' events when released
+        // so that at the end of a series of up/down arrow key repeat events
+        // the value is considered to be "commited" by the user.
+        FireChangeEventIfNeeded();
+      }
     }
   }
 
@@ -3900,8 +3902,6 @@ HTMLInputElement::SetValueOfRangeForUserEvent(Decimal aValue)
 {
   MOZ_ASSERT(aValue.isFinite());
 
-  Decimal oldValue = GetValueAsDecimal();
-
   nsAutoString val;
   ConvertNumberToString(aValue, val);
   // TODO: What should we do if SetValueInternal fails?  (The allocation
@@ -3912,13 +3912,10 @@ HTMLInputElement::SetValueOfRangeForUserEvent(Decimal aValue)
   if (frame) {
     frame->UpdateForValueChange();
   }
-
-  if (GetValueAsDecimal() != oldValue) {
-    nsContentUtils::DispatchTrustedEvent(OwnerDoc(),
-                                         static_cast<nsIDOMHTMLInputElement*>(this),
-                                         NS_LITERAL_STRING("input"), true,
-                                         false);
-  }
+  nsContentUtils::DispatchTrustedEvent(OwnerDoc(),
+                                       static_cast<nsIDOMHTMLInputElement*>(this),
+                                       NS_LITERAL_STRING("input"), true,
+                                       false);
 }
 
 void
@@ -4087,7 +4084,8 @@ HTMLInputElement::MaybeInitPickers(EventChainPostVisitor& aVisitor)
     if (target &&
         target->GetParent() == this &&
         target->IsRootOfNativeAnonymousSubtree() &&
-        ((Preferences::GetBool("dom.input.dirpicker", false) && Allowdirs()) ||
+        ((Preferences::GetBool("dom.input.dirpicker", false) &&
+          HasAttr(kNameSpaceID_None, nsGkAtoms::directory)) ||
          (Preferences::GetBool("dom.webkitBlink.dirPicker.enabled", false) &&
           HasAttr(kNameSpaceID_None, nsGkAtoms::webkitdirectory)))) {
       type = FILE_PICKER_DIRECTORY;
@@ -4561,7 +4559,7 @@ HTMLInputElement::PostHandleEvent(EventChainPostVisitor& aVisitor)
           if (mForm) {
             InternalFormEvent event(true,
               (mType == NS_FORM_INPUT_RESET) ? eFormReset : eFormSubmit);
-            event.mOriginator = this;
+            event.originator      = this;
             nsEventStatus status  = nsEventStatus_eIgnore;
 
             nsCOMPtr<nsIPresShell> presShell =
@@ -4573,7 +4571,11 @@ HTMLInputElement::PostHandleEvent(EventChainPostVisitor& aVisitor)
             // TODO: removing this code and have the submit event sent by the
             // form, see bug 592124.
             if (presShell && (event.mMessage != eFormSubmit ||
-                              mForm->SubmissionCanProceed(this))) {
+                              mForm->HasAttr(kNameSpaceID_None, nsGkAtoms::novalidate) ||
+                              // We know the element is a submit control, if this check is moved,
+                              // make sure formnovalidate is used only if it's a submit control.
+                              HasAttr(kNameSpaceID_None, nsGkAtoms::formnovalidate) ||
+                              mForm->CheckValidFormSubmission())) {
               // Hold a strong ref while dispatching
               RefPtr<mozilla::dom::HTMLFormElement> form(mForm);
               presShell->HandleDOMEventWithTarget(mForm, &event, &status);
@@ -5379,7 +5381,7 @@ HTMLInputElement::GetAttributeChangeHint(const nsIAtom* aAttribute,
   if (aAttribute == nsGkAtoms::type ||
       // The presence or absence of the 'directory' attribute determines what
       // buttons we show for type=file.
-      aAttribute == nsGkAtoms::allowdirs ||
+      aAttribute == nsGkAtoms::directory ||
       aAttribute == nsGkAtoms::webkitdirectory) {
     retval |= nsChangeHint_ReconstructFrame;
   } else if (mType == NS_FORM_INPUT_IMAGE &&
@@ -5660,8 +5662,8 @@ HTMLInputElement::SetRangeText(const nsAString& aReplacement, ErrorResult& aRv)
   if (aRv.Failed()) {
     nsTextEditorState* state = GetEditorState();
     if (state && state->IsSelectionCached()) {
-      start = state->GetSelectionProperties().GetStart();
-      end = state->GetSelectionProperties().GetEnd();
+      start = state->GetSelectionProperties().mStart;
+      end = state->GetSelectionProperties().mEnd;
       aRv = NS_OK;
     }
   }
@@ -5703,8 +5705,8 @@ HTMLInputElement::SetRangeText(const nsAString& aReplacement, uint32_t aStart,
     if (aRv.Failed()) {
       nsTextEditorState* state = GetEditorState();
       if (state && state->IsSelectionCached()) {
-        aSelectionStart = state->GetSelectionProperties().GetStart();
-        aSelectionEnd = state->GetSelectionProperties().GetEnd();
+        aSelectionStart = state->GetSelectionProperties().mStart;
+        aSelectionEnd = state->GetSelectionProperties().mEnd;
         aRv = NS_OK;
       }
     }
@@ -5773,7 +5775,7 @@ HTMLInputElement::GetSelectionStart(ErrorResult& aRv)
     nsTextEditorState* state = GetEditorState();
     if (state && state->IsSelectionCached()) {
       aRv = NS_OK;
-      return state->GetSelectionProperties().GetStart();
+      return state->GetSelectionProperties().mStart;
     }
   }
 
@@ -5795,7 +5797,7 @@ HTMLInputElement::SetSelectionStart(int32_t aSelectionStart, ErrorResult& aRv)
 {
   nsTextEditorState* state = GetEditorState();
   if (state && state->IsSelectionCached()) {
-    state->GetSelectionProperties().SetStart(aSelectionStart);
+    state->GetSelectionProperties().mStart = aSelectionStart;
     return;
   }
 
@@ -5837,7 +5839,7 @@ HTMLInputElement::GetSelectionEnd(ErrorResult& aRv)
     nsTextEditorState* state = GetEditorState();
     if (state && state->IsSelectionCached()) {
       aRv = NS_OK;
-      return state->GetSelectionProperties().GetEnd();
+      return state->GetSelectionProperties().mEnd;
     }
   }
 
@@ -5859,7 +5861,7 @@ HTMLInputElement::SetSelectionEnd(int32_t aSelectionEnd, ErrorResult& aRv)
 {
   nsTextEditorState* state = GetEditorState();
   if (state && state->IsSelectionCached()) {
-    state->GetSelectionProperties().SetEnd(aSelectionEnd);
+    state->GetSelectionProperties().mEnd = aSelectionEnd;
     return;
   }
 
@@ -5943,7 +5945,7 @@ HTMLInputElement::GetSelectionDirection(nsAString& aDirection, ErrorResult& aRv)
   if (NS_FAILED(rv)) {
     nsTextEditorState* state = GetEditorState();
     if (state && state->IsSelectionCached()) {
-      DirectionToName(state->GetSelectionProperties().GetDirection(), aDirection);
+      DirectionToName(state->GetSelectionProperties().mDirection, aDirection);
       return;
     }
   }
@@ -5972,7 +5974,7 @@ HTMLInputElement::SetSelectionDirection(const nsAString& aDirection, ErrorResult
     } else if (aDirection.EqualsLiteral("backward")) {
       dir = nsITextControlFrame::eBackward;
     }
-    state->GetSelectionProperties().SetDirection(dir);
+    state->GetSelectionProperties().mDirection = dir;
     return;
   }
 
@@ -6068,7 +6070,6 @@ HTMLInputElement::Reset()
   // We should be able to reset all dirty flags regardless of the type.
   SetCheckedChanged(false);
   SetValueChanged(false);
-  mLastValueChangeWasInteractive = false;
 
   switch (GetValueMode()) {
     case VALUE_MODE_VALUE:
@@ -6898,11 +6899,6 @@ HTMLInputElement::GetStep() const
     step = GetDefaultStep();
   }
 
-  // For input type=date, we round the step value to have a rounded day.
-  if (mType == NS_FORM_INPUT_DATE || mType == NS_FORM_INPUT_MONTH) {
-    step = std::max(step.round(), Decimal(1));
-  }
-
   return step * GetStepScaleFactor();
 }
 
@@ -6921,10 +6917,9 @@ HTMLInputElement::SetCustomValidity(const nsAString& aError)
 bool
 HTMLInputElement::IsTooLong()
 {
-  if (!mValueChanged ||
-      !mLastValueChangeWasInteractive ||
-      !MaxLengthApplies() ||
-      !HasAttr(kNameSpaceID_None, nsGkAtoms::maxlength)) {
+  if (!MaxLengthApplies() ||
+      !HasAttr(kNameSpaceID_None, nsGkAtoms::maxlength) ||
+      !mValueChanged) {
     return false;
   }
 
@@ -7197,7 +7192,10 @@ HTMLInputElement::HasBadInput() const
 void
 HTMLInputElement::UpdateTooLongValidityState()
 {
+  // TODO: this code will be re-enabled with bug 613016 and bug 613019.
+#if 0
   SetValidityState(VALIDITY_STATE_TOO_LONG, IsTooLong());
+#endif
 }
 
 void
@@ -7504,6 +7502,16 @@ HTMLInputElement::GetValidationMessage(nsAString& aValidationMessage,
       Decimal step = GetStep();
       MOZ_ASSERT(step != kStepAny && step > Decimal(0));
 
+      // In case this is a date and the step is not an integer, we don't want to
+      // display the dates corresponding to the truncated timestamps of valueLow
+      // and valueHigh because they might suffer from a step mismatch as well.
+      // Instead we want the timestamps to correspond to a rounded day. That is,
+      // we want a multiple of the step scale factor (1 day) as well as of step.
+      if (mType == NS_FORM_INPUT_DATE) {
+        step = EuclidLCM<Decimal>(step.floor(),
+                                  GetStepScaleFactor().floor());
+      }
+
       Decimal stepBase = GetStepBase();
 
       Decimal valueLow = value - NS_floorModulo(value - stepBase, step);
@@ -7737,10 +7745,8 @@ HTMLInputElement::InitializeKeyboardEventListeners()
 }
 
 NS_IMETHODIMP_(void)
-HTMLInputElement::OnValueChanged(bool aNotify, bool aWasInteractiveUserChange)
+HTMLInputElement::OnValueChanged(bool aNotify)
 {
-  mLastValueChangeWasInteractive = aWasInteractiveUserChange;
-
   UpdateAllValidityStates(aNotify);
 
   if (HasDirAuto()) {
@@ -7827,15 +7833,15 @@ HTMLInputElement::SetFilePickerFiltersFromAccept(nsIFilePicker* filePicker)
     // First, check for image/audio/video filters...
     if (token.EqualsLiteral("image/*")) {
       filterMask = nsIFilePicker::filterImages;
-      filterBundle->GetStringFromName(u"imageFilter",
+      filterBundle->GetStringFromName(MOZ_UTF16("imageFilter"),
                                       getter_Copies(extensionListStr));
     } else if (token.EqualsLiteral("audio/*")) {
       filterMask = nsIFilePicker::filterAudio;
-      filterBundle->GetStringFromName(u"audioFilter",
+      filterBundle->GetStringFromName(MOZ_UTF16("audioFilter"),
                                       getter_Copies(extensionListStr));
     } else if (token.EqualsLiteral("video/*")) {
       filterMask = nsIFilePicker::filterVideo;
-      filterBundle->GetStringFromName(u"videoFilter",
+      filterBundle->GetStringFromName(MOZ_UTF16("videoFilter"),
                                       getter_Copies(extensionListStr));
     } else if (token.First() == '.') {
       if (token.Contains(';') || token.Contains('*')) {
@@ -7976,8 +7982,6 @@ HTMLInputElement::GetStepScaleFactor() const
       return kStepScaleFactorNumberRange;
     case NS_FORM_INPUT_TIME:
       return kStepScaleFactorTime;
-    case NS_FORM_INPUT_MONTH:
-      return kStepScaleFactorMonth;
     default:
       MOZ_ASSERT(false, "Unrecognized input type");
       return Decimal::nan();
@@ -7991,7 +7995,6 @@ HTMLInputElement::GetDefaultStep() const
 
   switch (mType) {
     case NS_FORM_INPUT_DATE:
-    case NS_FORM_INPUT_MONTH:
     case NS_FORM_INPUT_NUMBER:
     case NS_FORM_INPUT_RANGE:
       return kDefaultStep;
@@ -8114,7 +8117,7 @@ HTMLInputElement::GetOrCreateGetFilesHelper(bool aRecursiveFlag,
 void
 HTMLInputElement::UpdateEntries(const nsTArray<OwningFileOrDirectory>& aFilesOrDirectories)
 {
-  MOZ_ASSERT(mEntries.IsEmpty());
+  mEntries.Clear();
 
   nsCOMPtr<nsIGlobalObject> global = OwnerDoc()->GetScopeObject();
   MOZ_ASSERT(global);
@@ -8146,18 +8149,6 @@ HTMLInputElement::GetWebkitEntries(nsTArray<RefPtr<Entry>>& aSequence)
 {
   Telemetry::Accumulate(Telemetry::BLINK_FILESYSTEM_USED, true);
   aSequence.AppendElements(mEntries);
-}
-
-bool HTMLInputElement::MayFireChangeOnKeyUp(uint32_t aKeyCode) const
-{
-  switch (mType) {
-    case NS_FORM_INPUT_NUMBER:
-      return aKeyCode == NS_VK_UP || aKeyCode == NS_VK_DOWN;
-    case NS_FORM_INPUT_RANGE:
-      return aKeyCode == NS_VK_UP || aKeyCode == NS_VK_DOWN ||
-             aKeyCode == NS_VK_LEFT || aKeyCode == NS_VK_RIGHT;
-  }
-  return false;
 }
 
 } // namespace dom

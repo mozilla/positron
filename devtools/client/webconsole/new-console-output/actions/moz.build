@@ -5,5 +5,4 @@
 
 DevToolsModules(
     'messages.js',
-    'ui.js',
 )

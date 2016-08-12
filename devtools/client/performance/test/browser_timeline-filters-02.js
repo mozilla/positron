@@ -1,7 +1,6 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
-"use strict";
-/* eslint-disable */
+
 /**
  * Tests markers filtering mechanism.
  */
@@ -45,4 +44,3 @@ function* spawnTest() {
   yield teardown(panel);
   finish();
 }
-/* eslint-enable */

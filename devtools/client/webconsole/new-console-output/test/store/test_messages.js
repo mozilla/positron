@@ -25,14 +25,9 @@ add_task(function* () {
 
   const expectedMessage = prepareMessage(packet);
 
-  const messages = getAllMessages(getState());
-  equal(messages.size, 1, "We added exactly one message.")
-
-  const message = messages.first();
-  notEqual(message.id, expectedMessage.id, "ID should be unique.");
-  // Remove ID for deepEqual comparison.
-  deepEqual(message.remove('id'), expectedMessage.remove('id'),
-      "MESSAGE_ADD action adds a message");
+  let messages = getAllMessages(getState());
+  deepEqual(messages.toArray(), [expectedMessage],
+    "MESSAGE_ADD action adds a message");
 });
 
 /**
@@ -59,6 +54,20 @@ add_task(function* () {
 });
 
 /**
+ * Test getRepeatId().
+ */
+add_task(function* () {
+  const message1 = prepareMessage(packet);
+  const message2 = prepareMessage(packet);
+  equal(getRepeatId(message1), getRepeatId(message2),
+    "getRepeatId() returns same repeat id for objects with the same values");
+
+  message2.data.arguments = ["new args"];
+  notEqual(getRepeatId(message1), getRepeatId(message2),
+    "getRepeatId() returns different repeat ids for different values");
+});
+
+/**
  * Test adding a console.clear message to the store.
  */
 add_task(function*() {
@@ -66,14 +75,16 @@ add_task(function*() {
 
   dispatch(actions.messageAdd(packet));
 
+  const expectedMessage = prepareMessage(packet);
+
   let messages = getAllMessages(getState());
-  equal(messages.size, 1,
+  deepEqual(messages.toArray(), [expectedMessage],
     "MESSAGE_ADD action adds a message");
 
   dispatch(actions.messageAdd(clearPacket));
 
   messages = getAllMessages(getState());
-  deepEqual(messages.first().remove('id'), prepareMessage(clearPacket).remove('id'),
+  deepEqual(messages.toArray(), [prepareMessage(clearPacket)],
     "console.clear clears existing messages and add a new one");
 });
 
@@ -93,7 +104,7 @@ add_task(function* () {
 
   let messages = getAllMessages(getState());
   equal(messages.count(), logLimit, "Messages are pruned up to the log limit");
-  deepEqual(messages.last().parameters, [messageNumber],
+  deepEqual(messages.last().data.arguments, [messageNumber],
     "The last message is the expected one");
 });
 

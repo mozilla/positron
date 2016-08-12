@@ -26,7 +26,6 @@
 
 #include "nsString.h"
 #include "nsEscape.h"
-#include "nsIScreenManager.h"
 #include "nsISupportsPrimitives.h"
 #include "nsIURL.h"
 #include "nsCWebBrowserPersist.h"
@@ -74,7 +73,7 @@ nsDragService::CreateDragImage(nsIDOMNode *aDOMNode,
     return false;
 
   memset(psdi, 0, sizeof(SHDRAGIMAGE));
-  if (!aDOMNode)
+  if (!aDOMNode) 
     return false;
 
   // Prepare the drag image
@@ -138,7 +137,7 @@ nsDragService::CreateDragImage(nsIDOMNode *aDOMNode,
   HDC hdcSrc = CreateCompatibleDC(nullptr);
   void *lpBits = nullptr;
   if (hdcSrc) {
-    psdi->hbmpDragImage =
+    psdi->hbmpDragImage = 
     ::CreateDIBSection(hdcSrc, (BITMAPINFO*)&bmih, DIB_RGB_COLORS,
                        (void**)&lpBits, nullptr, 0);
     if (psdi->hbmpDragImage && lpBits) {
@@ -206,9 +205,8 @@ nsDragService::InvokeDragSessionImpl(nsISupportsArray* anArrayTransferables,
       anArrayTransferables->GetElementAt(i, getter_AddRefs(supports));
       nsCOMPtr<nsITransferable> trans(do_QueryInterface(supports));
       if (trans) {
-        // set the requestingPrincipal on the transferable
-        nsCOMPtr<nsINode> node = do_QueryInterface(mSourceNode);
-        trans->SetRequestingPrincipal(node->NodePrincipal());
+        // set the requestingNode on the transferable
+        trans->SetRequestingNode(mSourceNode);
         trans->SetContentPolicyType(mContentPolicyType);
         RefPtr<IDataObject> dataObj;
         rv = nsClipboard::CreateNativeDataObject(trans,
@@ -227,9 +225,8 @@ nsDragService::InvokeDragSessionImpl(nsISupportsArray* anArrayTransferables,
     anArrayTransferables->GetElementAt(0, getter_AddRefs(supports));
     nsCOMPtr<nsITransferable> trans(do_QueryInterface(supports));
     if (trans) {
-      // set the requestingPrincipal on the transferable
-      nsCOMPtr<nsINode> node = do_QueryInterface(mSourceNode);
-      trans->SetRequestingPrincipal(node->NodePrincipal());
+      // set the requestingNode on the transferable
+      trans->SetRequestingNode(mSourceNode);
       trans->SetContentPolicyType(mContentPolicyType);
       rv = nsClipboard::CreateNativeDataObject(trans,
                                                getter_AddRefs(itemToDrag),
@@ -253,40 +250,6 @@ nsDragService::InvokeDragSessionImpl(nsISupportsArray* anArrayTransferables,
 
   // Kick off the native drag session
   return StartInvokingDragSession(itemToDrag, aActionType);
-}
-
-static bool
-LayoutDevicePointToCSSPoint(const LayoutDevicePoint& aDevPos,
-                            CSSPoint& aCSSPos)
-{
-  nsCOMPtr<nsIScreenManager> screenMgr =
-    do_GetService("@mozilla.org/gfx/screenmanager;1");
-  if (!screenMgr) {
-    return false;
-  }
-
-  nsCOMPtr<nsIScreen> screen;
-  screenMgr->ScreenForRect(NSToIntRound(aDevPos.x), NSToIntRound(aDevPos.y),
-                           1, 1, getter_AddRefs(screen));
-  if (!screen) {
-    return false;
-  }
-
-  int32_t w,h; // unused
-  LayoutDeviceIntPoint screenOriginDev;
-  screen->GetRect(&screenOriginDev.x, &screenOriginDev.y, &w, &h);
-
-  double scale;
-  screen->GetDefaultCSSScaleFactor(&scale);
-  LayoutDeviceToCSSScale devToCSSScale =
-    CSSToLayoutDeviceScale(scale).Inverse();
-
-  // Desktop pixels and CSS pixels share the same screen origin.
-  CSSIntPoint screenOriginCSS;
-  screen->GetRectDisplayPix(&screenOriginCSS.x, &screenOriginCSS.y, &w, &h);
-
-  aCSSPos = (aDevPos - screenOriginDev) * devToCSSScale + screenOriginCSS;
-  return true;
 }
 
 //-------------------------------------------------------------------------
@@ -334,7 +297,7 @@ nsDragService::StartInvokingDragSession(IDataObject * aDataObj,
   HRESULT res = ::DoDragDrop(aDataObj, nativeDragSrc, effects, &winDropRes);
 
   // In  cases where the drop operation completed outside the application, update
-  // the source node's nsIDOMDataTransfer dropEffect value so it is up to date.
+  // the source node's nsIDOMDataTransfer dropEffect value so it is up to date.  
   if (!mSentLocalDropEvent) {
     uint32_t dropResult;
     // Order is important, since multiple flags can be returned.
@@ -346,9 +309,9 @@ nsDragService::StartInvokingDragSession(IDataObject * aDataObj,
         dropResult = DRAGDROP_ACTION_MOVE;
     else
         dropResult = DRAGDROP_ACTION_NONE;
-
+    
     if (mDataTransfer) {
-      if (res == DRAGDROP_S_DROP) // Success
+      if (res == DRAGDROP_S_DROP) // Success 
         mDataTransfer->SetDropEffectInt(dropResult);
       else
         mDataTransfer->SetDropEffectInt(DRAGDROP_ACTION_NONE);
@@ -363,22 +326,12 @@ nsDragService::StartInvokingDragSession(IDataObject * aDataObj,
   // Note that we must convert this from device pixels back to Windows logical
   // pixels (bug 818927).
   DWORD pos = ::GetMessagePos();
-  CSSPoint cssPos;
-  if (!LayoutDevicePointToCSSPoint(LayoutDevicePoint(GET_X_LPARAM(pos),
-                                                     GET_Y_LPARAM(pos)),
-                                   cssPos)) {
-    // fallback to the simple scaling
-    POINT pt = { GET_X_LPARAM(pos), GET_Y_LPARAM(pos) };
-    HMONITOR monitor = ::MonitorFromPoint(pt, MONITOR_DEFAULTTOPRIMARY);
-    double dpiScale = widget::WinUtils::LogToPhysFactor(monitor);
-    cssPos.x = GET_X_LPARAM(pos) / dpiScale;
-    cssPos.y = GET_Y_LPARAM(pos) / dpiScale;
-  }
-  // We have to abuse SetDragEndPoint to pass CSS pixels because
-  // Event::GetScreenCoords will not convert pixels for dragend events
-  // until bug 1224754 is fixed.
-  SetDragEndPoint(LayoutDeviceIntPoint(NSToIntRound(cssPos.x),
-                                       NSToIntRound(cssPos.y)));
+  POINT pt = { GET_X_LPARAM(pos), GET_Y_LPARAM(pos) };
+  HMONITOR monitor = ::MonitorFromPoint(pt, MONITOR_DEFAULTTOPRIMARY);
+  double dpiScale = widget::WinUtils::LogToPhysFactor(monitor);
+  nsIntPoint logPos(NSToIntRound(GET_X_LPARAM(pos) / dpiScale),
+                    NSToIntRound(GET_Y_LPARAM(pos) / dpiScale));
+  SetDragEndPoint(logPos);
   EndDragSession(true);
 
   mDoingDrag = false;
@@ -420,7 +373,7 @@ nsDragService::GetNumDropItems(uint32_t * aNumItems)
     }
     else {
       // If the count cannot be determined just return 0.
-      // This can happen if we have collection data of type
+      // This can happen if we have collection data of type 
       // MULTI_MIME ("Mozilla/IDataObjectCollectionFormat") on the clipboard
       // from another process but we can't obtain an IID_IDataObjCollection
       // from this process.

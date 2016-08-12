@@ -126,8 +126,8 @@ NS_OpenAnonymousTemporaryFile(PRFileDesc** aOutFileDesc)
       MOZ_ASSERT(NS_FAILED(rv));
       return rv;
     }
-    auto rawFD = fd.get_FileDescriptor().ClonePlatformHandle();
-    *aOutFileDesc = PR_ImportFile(PROsfd(rawFD.release()));
+    *aOutFileDesc =
+      PR_ImportFile(PROsfd(fd.get_FileDescriptor().PlatformHandle()));
     return NS_OK;
   }
 

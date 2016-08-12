@@ -249,22 +249,21 @@ nsHttpRequestHead::EqualsMethod(ParsedMethodType aType)
 }
 
 void
-nsHttpRequestHead::ParseHeaderSet(const char *buffer)
+nsHttpRequestHead::ParseHeaderSet(char *buffer)
 {
     ReentrantMonitorAutoEnter mon(mReentrantMonitor);
     nsHttpAtom hdr;
-    nsAutoCString val;
+    char *val;
     while (buffer) {
-        const char *eof = strchr(buffer, '\r');
+        char *eof = strchr(buffer, '\r');
         if (!eof) {
             break;
         }
-        if (NS_SUCCEEDED(nsHttpHeaderArray::ParseHeaderLine(
-            nsDependentCSubstring(buffer, eof - buffer),
-            &hdr,
-            &val))) {
-
-            mHeaders.SetHeaderFromNet(hdr, val, false);
+        *eof = '\0';
+        if (NS_SUCCEEDED(nsHttpHeaderArray::ParseHeaderLine(buffer,
+                                                            &hdr,
+                                                            &val))) {
+            mHeaders.SetHeaderFromNet(hdr, nsDependentCString(val), false);
         }
         buffer = eof + 1;
         if (*buffer == '\n') {

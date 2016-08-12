@@ -48,15 +48,11 @@ NS_INTERFACE_MAP_END
 
 MediaKeys::MediaKeys(nsPIDOMWindowInner* aParent,
                      const nsAString& aKeySystem,
-                     const nsAString& aCDMVersion,
-                     bool aDistinctiveIdentifierRequired,
-                     bool aPersistentStateRequired)
+                     const nsAString& aCDMVersion)
   : mParent(aParent)
   , mKeySystem(aKeySystem)
   , mCDMVersion(aCDMVersion)
   , mCreatePromiseId(0)
-  , mDistinctiveIdentifierRequired(aDistinctiveIdentifierRequired)
-  , mPersistentStateRequired(aPersistentStateRequired)
 {
   EME_LOG("MediaKeys[%p] constructed keySystem=%s",
           this, NS_ConvertUTF16toUTF8(mKeySystem).get());
@@ -317,11 +313,7 @@ MediaKeys::Init(ErrorResult& aRv)
     return nullptr;
   }
 
-  mProxy = new GMPCDMProxy(this,
-                           mKeySystem,
-                           new MediaKeysGMPCrashHelper(this),
-                           mDistinctiveIdentifierRequired,
-                           mPersistentStateRequired);
+  mProxy = new GMPCDMProxy(this, mKeySystem, new MediaKeysGMPCrashHelper(this));
 
   // Determine principal (at creation time) of the MediaKeys object.
   nsCOMPtr<nsIScriptObjectPrincipal> sop = do_QueryInterface(GetParentObject());
@@ -356,15 +348,15 @@ MediaKeys::Init(ErrorResult& aRv)
     return promise.forget();
   }
 
-  nsAutoCString origin;
-  nsresult rv = mPrincipal->GetOrigin(origin);
+  nsAutoString origin;
+  nsresult rv = nsContentUtils::GetUTFOrigin(mPrincipal, origin);
   if (NS_FAILED(rv)) {
     promise->MaybeReject(NS_ERROR_DOM_INVALID_STATE_ERR,
                          NS_LITERAL_CSTRING("Couldn't get principal origin string in MediaKeys::Init"));
     return promise.forget();
   }
-  nsAutoCString topLevelOrigin;
-  rv = mTopLevelPrincipal->GetOrigin(topLevelOrigin);
+  nsAutoString topLevelOrigin;
+  rv = nsContentUtils::GetUTFOrigin(mTopLevelPrincipal, topLevelOrigin);
   if (NS_FAILED(rv)) {
     promise->MaybeReject(NS_ERROR_DOM_INVALID_STATE_ERR,
                          NS_LITERAL_CSTRING("Couldn't get top-level principal origin string in MediaKeys::Init"));
@@ -376,8 +368,8 @@ MediaKeys::Init(ErrorResult& aRv)
 
   EME_LOG("MediaKeys[%p]::Create() (%s, %s), %s",
           this,
-          origin.get(),
-          topLevelOrigin.get(),
+          NS_ConvertUTF16toUTF8(origin).get(),
+          NS_ConvertUTF16toUTF8(topLevelOrigin).get(),
           (inPrivateBrowsing ? "PrivateBrowsing" : "NonPrivateBrowsing"));
 
   // The CDMProxy's initialization is asynchronous. The MediaKeys is
@@ -392,8 +384,8 @@ MediaKeys::Init(ErrorResult& aRv)
   mCreatePromiseId = StorePromise(promise);
   AddRef();
   mProxy->Init(mCreatePromiseId,
-               NS_ConvertUTF8toUTF16(origin),
-               NS_ConvertUTF8toUTF16(topLevelOrigin),
+               origin,
+               topLevelOrigin,
                KeySystemToGMPName(mKeySystem),
                inPrivateBrowsing);
 
@@ -422,7 +414,7 @@ MediaKeys::OnCDMCreated(PromiseId aId, const nsACString& aNodeId, const uint32_t
 
 already_AddRefed<MediaKeySession>
 MediaKeys::CreateSession(JSContext* aCx,
-                         MediaKeySessionType aSessionType,
+                         SessionType aSessionType,
                          ErrorResult& aRv)
 {
   if (!mProxy) {

@@ -8,15 +8,11 @@
 #define mozilla_dom_CompositionEvent_h_
 
 #include "mozilla/dom/CompositionEventBinding.h"
-#include "mozilla/dom/TextClause.h"
-#include "mozilla/dom/TypedArray.h"
 #include "mozilla/dom/UIEvent.h"
 #include "mozilla/EventForwards.h"
 
 namespace mozilla {
 namespace dom {
-
-typedef nsTArray<RefPtr<TextClause>> TextClauseArray;
 
 class CompositionEvent : public UIEvent
 {
@@ -41,14 +37,12 @@ public:
                             const nsAString& aLocale);
   void GetData(nsAString&) const;
   void GetLocale(nsAString&) const;
-  void GetRanges(TextClauseArray& aRanges);
 
 protected:
   ~CompositionEvent() {}
 
   nsString mData;
   nsString mLocale;
-  TextClauseArray mRanges;
 };
 
 } // namespace dom

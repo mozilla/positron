@@ -1958,7 +1958,6 @@ public:
     nsCOMPtr<nsIInputStream> stream;
     mBlob->GetInternalStream(getter_AddRefs(stream), rv);
     if (NS_WARN_IF(rv.Failed())) {
-      rv.SuppressException();
       return Reject(POST_ERROR_EVENT_UNKNOWN);
     }
 
@@ -2071,7 +2070,6 @@ public:
     nsCOMPtr<nsIInputStream> stream;
     mBlob->GetInternalStream(getter_AddRefs(stream), rv);
     if (NS_WARN_IF(rv.Failed())) {
-      rv.SuppressException();
       return Reject(POST_ERROR_EVENT_UNKNOWN);
     }
 

@@ -158,6 +158,9 @@ XPCOMUtils.defineLazyModuleGetter(this, "AddonWatcher",
 XPCOMUtils.defineLazyModuleGetter(this, "LightweightThemeManager",
                                   "resource://gre/modules/LightweightThemeManager.jsm");
 
+XPCOMUtils.defineLazyModuleGetter(this, "ExtensionManagement",
+                                  "resource://gre/modules/ExtensionManagement.jsm");
+
 XPCOMUtils.defineLazyModuleGetter(this, "ShellService",
                                   "resource:///modules/ShellService.jsm");
 
@@ -557,15 +560,29 @@ BrowserGlue.prototype = {
       os.addObserver(this, AddonWatcher.TOPIC_SLOW_ADDON_DETECTED, false);
     }
 
+    ExtensionManagement.registerScript("chrome://browser/content/ext-bookmarks.js");
+    ExtensionManagement.registerScript("chrome://browser/content/ext-browserAction.js");
+    ExtensionManagement.registerScript("chrome://browser/content/ext-commands.js");
+    ExtensionManagement.registerScript("chrome://browser/content/ext-contextMenus.js");
+    ExtensionManagement.registerScript("chrome://browser/content/ext-desktop-runtime.js");
+    ExtensionManagement.registerScript("chrome://browser/content/ext-history.js");
+    ExtensionManagement.registerScript("chrome://browser/content/ext-pageAction.js");
+    ExtensionManagement.registerScript("chrome://browser/content/ext-tabs.js");
+    ExtensionManagement.registerScript("chrome://browser/content/ext-utils.js");
+    ExtensionManagement.registerScript("chrome://browser/content/ext-windows.js");
+
+    ExtensionManagement.registerSchema("chrome://browser/content/schemas/bookmarks.json");
+    ExtensionManagement.registerSchema("chrome://browser/content/schemas/browser_action.json");
+    ExtensionManagement.registerSchema("chrome://browser/content/schemas/commands.json");
+    ExtensionManagement.registerSchema("chrome://browser/content/schemas/context_menus.json");
+    ExtensionManagement.registerSchema("chrome://browser/content/schemas/context_menus_internal.json");
+    ExtensionManagement.registerSchema("chrome://browser/content/schemas/history.json");
+    ExtensionManagement.registerSchema("chrome://browser/content/schemas/page_action.json");
+    ExtensionManagement.registerSchema("chrome://browser/content/schemas/tabs.json");
+    ExtensionManagement.registerSchema("chrome://browser/content/schemas/windows.json");
+
     this._flashHangCount = 0;
     this._firstWindowReady = new Promise(resolve => this._firstWindowLoaded = resolve);
-
-    if (AppConstants.platform == "win" ||
-        AppConstants.platform == "macosx") {
-      // Handles prompting to inform about incompatibilites when accessibility
-      // and e10s are active together.
-      E10SAccessibilityCheck.init();
-    }
   },
 
   // cleanup (called on application shutdown)
@@ -736,7 +753,7 @@ BrowserGlue.prototype = {
       let currentUIVersion = 0;
       try {
         currentUIVersion = Services.prefs.getIntPref("browser.migration.version");
-      } catch (ex) {}
+      } catch(ex) {}
       if (currentUIVersion < 35) {
         this._maybeMigrateTabGroups();
       }
@@ -780,9 +797,6 @@ BrowserGlue.prototype = {
     ReaderParent.init();
 
     SelfSupportBackend.init();
-
-    // Ensure we keep track of places/pw-mananager undo by init'ing this early.
-    Cu.import("resource:///modules/AutoMigrate.jsm");
 
     if (!AppConstants.RELEASE_BUILD) {
       let themeName = gBrowserBundle.GetStringFromName("deveditionTheme.name");
@@ -1107,7 +1121,7 @@ BrowserGlue.prototype = {
     let disableResetPrompt = false;
     try {
       disableResetPrompt = Services.prefs.getBoolPref("browser.disableResetPrompt");
-    } catch (e) {}
+    } catch(e) {}
 
     if (!disableResetPrompt && lastUse &&
         Date.now() - lastUse >= OFFER_PROFILE_RESET_INTERVAL_MS) {
@@ -1135,7 +1149,7 @@ BrowserGlue.prototype = {
 
     this._checkForOldBuildUpdates();
 
-    if (!AppConstants.RELEASE_BUILD) {
+    if ("release" != AppConstants.MOZ_UPDATE_CHANNEL) {
       this.checkForPendingCrashReports();
     }
 
@@ -1339,7 +1353,12 @@ BrowserGlue.prototype = {
       }
     }
 
-    E10SAccessibilityCheck.onWindowsRestored();
+    if (AppConstants.platform == "win" ||
+        AppConstants.platform == "macosx") {
+      // Handles prompting to inform about incompatibilites when accessibility
+      // and e10s are active together.
+      E10SAccessibilityCheck.init();
+    }
   },
 
   _createExtraDefaultProfile: function () {
@@ -1653,7 +1672,7 @@ BrowserGlue.prototype = {
         Services.prefs.getBoolPref("browser.places.importBookmarksHTML");
       if (importBookmarksHTML)
         importBookmarks = true;
-    } catch (ex) {}
+    } catch(ex) {}
 
     // Support legacy bookmarks.html format for apps that depend on that format.
     let autoExportHTML = false;
@@ -1680,7 +1699,7 @@ BrowserGlue.prototype = {
           yield this._backupBookmarks();
           importBookmarks = true;
         }
-      } catch (ex) {}
+      } catch(ex) {}
 
       // This may be reused later, check for "=== undefined" to see if it has
       // been populated already.
@@ -1728,7 +1747,7 @@ BrowserGlue.prototype = {
         let smartBookmarksVersion = 0;
         try {
           smartBookmarksVersion = Services.prefs.getIntPref("browser.places.smartBookmarksVersion");
-        } catch (ex) {}
+        } catch(ex) {}
         if (!autoExportHTML && smartBookmarksVersion != -1)
           Services.prefs.setIntPref("browser.places.smartBookmarksVersion", 0);
 
@@ -2149,12 +2168,12 @@ BrowserGlue.prototype = {
       try {
         lightweightThemeSelected = Services.prefs.prefHasUserValue("lightweightThemes.selectedThemeID");
         selectedThemeID = Services.prefs.getCharPref("lightweightThemes.selectedThemeID");
-      } catch (e) {}
+      } catch(e) {}
 
       let defaultThemeSelected = false;
       try {
          defaultThemeSelected = Services.prefs.getCharPref("general.skins.selectedSkin") == "classic/1.0";
-      } catch (e) {}
+      } catch(e) {}
 
       // If we are on the devedition channel, the devedition theme is on by
       // default.  But we need to handle the case where they didn't want it
@@ -2294,7 +2313,7 @@ BrowserGlue.prototype = {
     let smartBookmarksCurrentVersion = 0;
     try {
       smartBookmarksCurrentVersion = Services.prefs.getIntPref(SMART_BOOKMARKS_PREF);
-    } catch (ex) {}
+    } catch(ex) {}
 
     // If version is current, or smart bookmarks are disabled, bail out.
     if (smartBookmarksCurrentVersion == -1 ||
@@ -2399,7 +2418,7 @@ BrowserGlue.prototype = {
                                                index: menuIndex });
         }
       }
-    } catch (ex) {
+    } catch(ex) {
       Cu.reportError(ex);
     } finally {
       Services.prefs.setIntPref(SMART_BOOKMARKS_PREF, SMART_BOOKMARKS_VERSION);
@@ -2772,6 +2791,7 @@ ContentPermissionPrompt.prototype = {
     if (!(requestingURI instanceof Ci.nsIStandardURL))
       return;
 
+    var autoAllow = false;
     var permissionKey = kFeatureKeys[perm.type];
     var result = Services.perms.testExactPermissionFromPrincipal(requestingPrincipal, permissionKey);
 
@@ -2781,8 +2801,7 @@ ContentPermissionPrompt.prototype = {
     }
 
     if (result == Ci.nsIPermissionManager.ALLOW_ACTION) {
-      request.allow();
-      return;
+      autoAllow = true;
     }
 
     var browser = this._getBrowserForRequest(request);
@@ -3002,10 +3021,6 @@ var DefaultBrowserCheck = {
 };
 
 var E10SAccessibilityCheck = {
-  // tracks when an a11y init observer fires prior to the
-  // first window being opening.
-  _wantsPrompt: false,
-
   init: function() {
     Services.obs.addObserver(this, "a11y-init-or-shutdown", true);
     Services.obs.addObserver(this, "quit-application-granted", true);
@@ -3038,13 +3053,6 @@ var E10SAccessibilityCheck = {
     }
   },
 
-  onWindowsRestored: function() {
-    if (this._wantsPrompt) {
-      this._wantsPrompt = false;
-      this._showE10sAccessibilityWarning();
-    }
-  },
-
   _warnedAboutAccessibility: false,
 
   _showE10sAccessibilityWarning: function() {
@@ -3066,14 +3074,11 @@ var E10SAccessibilityCheck = {
     this._warnedAboutAccessibility = true;
 
     let win = RecentWindow.getMostRecentBrowserWindow();
-    if (!win || !win.gBrowser || !win.gBrowser.selectedBrowser) {
-      Services.console.logStringMessage(
-          "Accessibility support is partially disabled due to compatibility issues with new features.");
-      this._wantsPrompt = true;
-      this._warnedAboutAccessibility = false;
+    let browser = win.gBrowser.selectedBrowser;
+    if (!win) {
+      Services.console.logStringMessage("Accessibility support is partially disabled due to compatibility issues with new features.");
       return;
     }
-    let browser = win.gBrowser.selectedBrowser;
 
     // We disable a11y for content and prompt on the chrome side letting
     // a11y users know they need to disable e10s and restart.
