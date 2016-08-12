@@ -680,16 +680,9 @@ public:
         , mEnv(env)
     {}
 
-    StringParam(StringParam&& other)
-        : Ref(other.Get())
-        , mEnv(other.mEnv)
-    {
-        other.mInstance = nullptr;
-    }
-
     ~StringParam()
     {
-        if (mEnv && Get()) {
+        if (mEnv) {
             mEnv->DeleteLocalRef(Get());
         }
     }
@@ -727,31 +720,25 @@ public:
 
     ElementType GetElement(size_t index) const
     {
-        using JNIElemType = typename detail::TypeAdapter<ElementType>::JNIType;
-        static_assert(sizeof(ElementType) == sizeof(JNIElemType),
-                      "Size of native type must match size of JNI type");
-
         ElementType ret;
         (Base::Env()->*detail::TypeAdapter<ElementType>::GetArray)(
-                Base::Instance(), jsize(index), 1,
-                reinterpret_cast<JNIElemType*>(&ret));
+                Base::Instance(), jsize(index), 1, &ret);
         MOZ_CATCH_JNI_EXCEPTION(Base::Env());
         return ret;
     }
 
     nsTArray<ElementType> GetElements() const
     {
-        using JNIElemType = typename detail::TypeAdapter<ElementType>::JNIType;
-        static_assert(sizeof(ElementType) == sizeof(JNIElemType),
-                      "Size of native type must match size of JNI type");
+        static_assert(sizeof(ElementType) ==
+                sizeof(typename detail::TypeAdapter<ElementType>::JNIType),
+                "Size of native type must match size of JNI type");
 
         const jsize len = size_t(Base::Env()->GetArrayLength(Base::Instance()));
 
         nsTArray<ElementType> array((size_t(len)));
         array.SetLength(size_t(len));
         (Base::Env()->*detail::TypeAdapter<ElementType>::GetArray)(
-                Base::Instance(), 0, len,
-                reinterpret_cast<JNIElemType*>(array.Elements()));
+                Base::Instance(), 0, len, array.Elements());
         return array;
     }
 
@@ -786,38 +773,6 @@ DEFINE_PRIMITIVE_ARRAY_REF(jfloatArray,   float);
 DEFINE_PRIMITIVE_ARRAY_REF(jdoubleArray,  double);
 
 #undef DEFINE_PRIMITIVE_ARRAY_REF
-
-
-class ByteBuffer : public ObjectBase<ByteBuffer, jobject>
-{
-public:
-    explicit ByteBuffer(const Context& ctx)
-        : ObjectBase<ByteBuffer, jobject>(ctx)
-    {}
-
-    static LocalRef New(void* data, size_t capacity)
-    {
-        JNIEnv* const env = GetEnvForThread();
-        const auto ret = LocalRef::Adopt(
-                env, env->NewDirectByteBuffer(data, jlong(capacity)));
-        MOZ_CATCH_JNI_EXCEPTION(env);
-        return ret;
-    }
-
-    void* Address()
-    {
-        void* const ret = Env()->GetDirectBufferAddress(Instance());
-        MOZ_CATCH_JNI_EXCEPTION(Env());
-        return ret;
-    }
-
-    size_t Capacity()
-    {
-        const size_t ret = size_t(Env()->GetDirectBufferCapacity(Instance()));
-        MOZ_CATCH_JNI_EXCEPTION(Env());
-        return ret;
-    }
-};
 
 
 template<>

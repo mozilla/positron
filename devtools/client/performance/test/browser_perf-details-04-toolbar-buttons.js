@@ -18,13 +18,7 @@ add_task(function* () {
     win: window
   });
 
-  let {
-    EVENTS,
-    $,
-    PerformanceController,
-    RecordingsView,
-    WaterfallView
-  } = panel.panelWin;
+  let { EVENTS, $, PerformanceController, RecordingsView, WaterfallView } = panel.panelWin;
 
   let waterfallBtn = $("toolbarbutton[data-view='waterfall']");
   let jsFlameBtn = $("toolbarbutton[data-view='js-flamegraph']");

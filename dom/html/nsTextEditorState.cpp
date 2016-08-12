@@ -103,13 +103,11 @@ public:
       // SetSelectionRange leads to Selection::AddRange which flushes Layout -
       // need to block script to avoid nested PrepareEditor calls (bug 642800).
       nsAutoScriptBlocker scriptBlocker;
-      nsTextEditorState::SelectionProperties& properties =
-        mTextEditorState->GetSelectionProperties();
-      if (properties.IsDirty()) {
-        mFrame->SetSelectionRange(properties.GetStart(),
-                                  properties.GetEnd(),
-                                  properties.GetDirection());
-      }
+       nsTextEditorState::SelectionProperties& properties =
+         mTextEditorState->GetSelectionProperties();
+       mFrame->SetSelectionRange(properties.mStart,
+                                 properties.mEnd,
+                                 properties.mDirection);
       if (!mTextEditorState->mSelectionRestoreEagerInit) {
         mTextEditorState->HideSelectionIfBlurred();
       }
@@ -978,8 +976,7 @@ nsTextInputListener::EditAction()
   }
 
   if (!mSettingValue) {
-    mTxtCtrlElement->OnValueChanged(/* aNotify = */ true,
-                                    /* aWasInteractiveUserChange = */ true);
+    mTxtCtrlElement->OnValueChanged(true);
   }
 
   return NS_OK;
@@ -1612,9 +1609,6 @@ nsTextEditorState::UnbindFromFrame(nsTextControlFrame* aFrame)
   // side effect for unbinding from a text control frame, we need to call
   // GetSelectionRange before calling DestroyEditor, and only if
   // mEditorInitialized indicates that we actually have an editor available.
-  int32_t start = 0, end = 0;
-  nsITextControlFrame::SelectionDirection direction =
-    nsITextControlFrame::eForward;
   if (mEditorInitialized) {
     HTMLInputElement* number = GetParentNumberControl(aFrame);
     if (number) {
@@ -1622,16 +1616,13 @@ nsTextEditorState::UnbindFromFrame(nsTextControlFrame* aFrame)
       // parent control, because this text editor state will be destroyed
       // together with the native anonymous text control.
       SelectionProperties props;
-      mBoundFrame->GetSelectionRange(&start, &end, &direction);
-      props.SetStart(start);
-      props.SetEnd(end);
-      props.SetDirection(direction);
+      mBoundFrame->GetSelectionRange(&props.mStart, &props.mEnd,
+                                     &props.mDirection);
       number->SetSelectionProperties(props);
     } else {
-      mBoundFrame->GetSelectionRange(&start, &end, &direction);
-      mSelectionProperties.SetStart(start);
-      mSelectionProperties.SetEnd(end);
-      mSelectionProperties.SetDirection(direction);
+      mBoundFrame->GetSelectionRange(&mSelectionProperties.mStart,
+                                     &mSelectionProperties.mEnd,
+                                     &mSelectionProperties.mDirection);
       mSelectionCached = true;
     }
   }
@@ -2183,8 +2174,7 @@ nsTextEditorState::SetValue(const nsAString& aValue, uint32_t aFlags)
   // can assume that it's safe to notify.
   ValueWasChanged(!!mRootNode);
 
-  mTextCtrlElement->OnValueChanged(/* aNotify = */ !!mRootNode,
-                                   /* aWasInteractiveUserChange = */ false);
+  mTextCtrlElement->OnValueChanged(!!mRootNode);
 
   return true;
 }

@@ -689,8 +689,8 @@ class GCRuntime
   public:
     // Internal public interface
     State state() const { return incrementalState; }
-    bool isHeapCompacting() const { return state() == State::Compact; }
-    bool isForegroundSweeping() const { return state() == State::Sweep; }
+    bool isHeapCompacting() const { return state() == COMPACT; }
+    bool isForegroundSweeping() const { return state() == SWEEP; }
     bool isBackgroundSweeping() { return helperState.isBackgroundSweeping(); }
     void waitBackgroundSweepEnd() { helperState.waitBackgroundSweepEnd(); }
     void waitBackgroundSweepOrAllocEnd() {
@@ -701,14 +701,32 @@ class GCRuntime
     void requestMinorGC(JS::gcreason::Reason reason);
 
 #ifdef DEBUG
+
     bool onBackgroundThread() { return helperState.onBackgroundThread(); }
+
+    bool currentThreadOwnsGCLock() {
+        return lockOwner == PR_GetCurrentThread();
+    }
+
 #endif // DEBUG
+
+    void assertCanLock() {
+        MOZ_ASSERT(!currentThreadOwnsGCLock());
+    }
 
     void lockGC() {
         lock.lock();
+#ifdef DEBUG
+        MOZ_ASSERT(!lockOwner);
+        lockOwner = PR_GetCurrentThread();
+#endif
     }
 
     void unlockGC() {
+#ifdef DEBUG
+        MOZ_ASSERT(lockOwner == PR_GetCurrentThread());
+        lockOwner = nullptr;
+#endif
         lock.unlock();
     }
 
@@ -748,7 +766,7 @@ class GCRuntime
     void disallowIncrementalGC() { incrementalAllowed = false; }
 
     bool isIncrementalGCEnabled() const { return mode == JSGC_MODE_INCREMENTAL && incrementalAllowed; }
-    bool isIncrementalGCInProgress() const { return state() != State::NotActive; }
+    bool isIncrementalGCInProgress() const { return state() != NO_INCREMENTAL; }
 
     bool isGenerationalGCEnabled() const { return generationalDisabled == 0; }
     void disableGenerationalGC();
@@ -859,11 +877,6 @@ class GCRuntime
     void freeAllLifoBlocksAfterSweeping(LifoAlloc* lifo);
     void freeAllLifoBlocksAfterMinorGC(LifoAlloc* lifo);
 
-    // Queue a thunk to run after the next minor GC.
-    void callAfterMinorGC(void (*thunk)(void* data), void* data) {
-        nursery.queueSweepAction(thunk, data);
-    }
-
     // Public here for ReleaseArenaLists and FinalizeTypedArenas.
     void releaseArena(Arena* arena, const AutoLockGC& lock);
 
@@ -913,8 +926,7 @@ class GCRuntime
      * Return the list of chunks that can be released outside the GC lock.
      * Must be called either during the GC or with the GC lock taken.
      */
-    friend class BackgroundDecommitTask;
-    ChunkPool expireEmptyChunkPool(const AutoLockGC& lock);
+    ChunkPool expireEmptyChunkPool(bool shrinkBuffers, const AutoLockGC& lock);
     void freeEmptyChunks(JSRuntime* rt, const AutoLockGC& lock);
     void prepareToFreeChunk(ChunkInfo& info);
 
@@ -972,6 +984,7 @@ class GCRuntime
     void sweepZones(FreeOp* fop, bool lastGC);
     void decommitAllWithoutUnlocking(const AutoLockGC& lock);
     void startDecommit();
+    void expireChunksAndArenas(bool shouldShrink, AutoLockGC& lock);
     void queueZonesForBackgroundSweep(ZoneList& zones);
     void sweepBackgroundThings(ZoneList& zones, LifoAlloc& freeBlocks, ThreadType threadType);
     void assertBackgroundSweepingFinished();
@@ -1357,6 +1370,9 @@ class GCRuntime
     /* Synchronize GC heap access between main thread and GCHelperState. */
     friend class js::AutoLockGC;
     js::Mutex lock;
+#ifdef DEBUG
+    mozilla::Atomic<PRThread*> lockOwner;
+#endif
 
     BackgroundAllocTask allocTask;
     BackgroundDecommitTask decommitTask;
@@ -1435,7 +1451,6 @@ inline bool GCRuntime::needZealousGC() { return false; }
 #endif
 
 } /* namespace gc */
-
 } /* namespace js */
 
 #endif

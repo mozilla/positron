@@ -12,9 +12,9 @@ Services.scriptloader.loadSubScript(sharedHeadURI, this);
 let gcliHelpersURI = testDir + "../../../commandline/test/helpers.js";
 Services.scriptloader.loadSubScript(gcliHelpersURI, this);
 
-flags.testing = true;
+DevToolsUtils.testing = true;
 registerCleanupFunction(() => {
-  flags.testing = false;
+  DevToolsUtils.testing = false;
   Services.prefs.clearUserPref("devtools.responsiveUI.currentPreset");
   Services.prefs.clearUserPref("devtools.responsiveUI.customHeight");
   Services.prefs.clearUserPref("devtools.responsiveUI.customWidth");

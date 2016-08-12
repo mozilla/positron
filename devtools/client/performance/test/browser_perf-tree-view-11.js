@@ -1,7 +1,6 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
-"use strict";
-/* eslint-disable */
+
 /**
  * Tests that if `show-jit-optimizations` is true, then an
  * icon is next to the frame with optimizations
@@ -151,4 +150,3 @@ gThread.frameTable.data.forEach((frame) => {
       break;
   }
 });
-/* eslint-enable */

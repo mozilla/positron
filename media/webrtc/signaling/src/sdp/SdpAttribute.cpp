@@ -1102,8 +1102,6 @@ ShouldSerializeChannels(SdpRtpmapAttributeList::CodecType type)
     case SdpRtpmapAttributeList::kiLBC:
     case SdpRtpmapAttributeList::kiSAC:
     case SdpRtpmapAttributeList::kH264:
-    case SdpRtpmapAttributeList::kRed:
-    case SdpRtpmapAttributeList::kUlpfec:
       return false;
     case SdpRtpmapAttributeList::kOtherCodec:
       return true;

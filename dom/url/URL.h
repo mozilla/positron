@@ -81,10 +81,6 @@ public:
   RevokeObjectURL(const GlobalObject& aGlobal, const nsAString& aURL,
                   ErrorResult& aRv);
 
-  static bool
-  IsValidURL(const GlobalObject& aGlobal, const nsAString& aURL,
-             ErrorResult& aRv);
-
   virtual void
   GetHref(nsAString& aHref, ErrorResult& aRv) const = 0;
 

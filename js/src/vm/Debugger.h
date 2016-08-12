@@ -246,7 +246,6 @@ typedef mozilla::Variant<JSScript*, WasmInstanceObject*> DebuggerScriptReferent;
 typedef mozilla::Variant<ScriptSourceObject*, WasmInstanceObject*> DebuggerSourceReferent;
 
 class DebuggerEnvironment;
-class DebuggerFrame;
 class DebuggerObject;
 
 class Debugger : private mozilla::LinkedListElement<Debugger>
@@ -766,9 +765,6 @@ class Debugger : private mozilla::LinkedListElement<Debugger>
     MOZ_MUST_USE bool getScriptFrameWithIter(JSContext* cx, AbstractFramePtr frame,
                                              const ScriptFrameIter* maybeIter,
                                              MutableHandleValue vp);
-    MOZ_MUST_USE bool getScriptFrameWithIter(JSContext* cx, AbstractFramePtr frame,
-                                             const ScriptFrameIter* maybeIter,
-                                             MutableHandle<DebuggerFrame*> result);
 
     inline Breakpoint* firstBreakpoint() const;
 
@@ -983,7 +979,7 @@ class Debugger : private mozilla::LinkedListElement<Debugger>
     }
 
     /*
-     * Store the Debugger.Frame object for iter in *vp/result. Eagerly copies a
+     * Store the Debugger.Frame object for iter in *vp. Eagerly copies a
      * ScriptFrameIter::Data.
      *
      * Use this if you had to make a ScriptFrameIter to get the required
@@ -994,9 +990,6 @@ class Debugger : private mozilla::LinkedListElement<Debugger>
                                      MutableHandleValue vp) {
         return getScriptFrameWithIter(cx, iter.abstractFramePtr(), &iter, vp);
     }
-    MOZ_MUST_USE bool getScriptFrame(JSContext* cx, const ScriptFrameIter& iter,
-                                     MutableHandle<DebuggerFrame*> result);
-
 
     /*
      * Set |*status| and |*value| to a (JSTrapStatus, Value) pair reflecting a
@@ -1137,19 +1130,6 @@ class DebuggerEnvironment : public NativeObject
     static MOZ_MUST_USE bool setVariableMethod(JSContext* cx, unsigned argc, Value* vp);
 };
 
-enum class DebuggerFrameType {
-    Eval,
-    Global,
-    Call,
-    Module
-};
-
-enum class DebuggerFrameImplementation {
-    Interpreter,
-    Baseline,
-    Ion
-};
-
 class DebuggerFrame : public NativeObject
 {
   public:
@@ -1173,17 +1153,8 @@ class DebuggerFrame : public NativeObject
                                                bool& result);
     static MOZ_MUST_USE bool getEnvironment(JSContext* cx, Handle<DebuggerFrame*> frame,
                                             MutableHandle<DebuggerEnvironment*> result);
-    static bool getIsGenerator(Handle<DebuggerFrame*> frame);
-    static MOZ_MUST_USE bool getOffset(JSContext* cx, Handle<DebuggerFrame*> frame,
-                                       size_t& offset);
-    static MOZ_MUST_USE bool getOlder(JSContext* cx, Handle<DebuggerFrame*> frame,
-                                      MutableHandle<DebuggerFrame*> result);
-    static MOZ_MUST_USE bool getThis(JSContext* cx, Handle<DebuggerFrame*> frame,
-                                     MutableHandleValue result);
-    static DebuggerFrameType getType(Handle<DebuggerFrame*> frame);
-    static DebuggerFrameImplementation getImplementation(Handle<DebuggerFrame*> frame);
 
-    bool isLive() const;
+    bool isGenerator() const;
 
   private:
     static const ClassOps classOps_;
@@ -1191,8 +1162,6 @@ class DebuggerFrame : public NativeObject
     static const JSPropertySpec properties_[];
     static const JSFunctionSpec methods_[];
 
-    static MOZ_MUST_USE bool requireLive(JSContext* cx, Handle<DebuggerFrame*> frame);
-    static AbstractFramePtr getReferent(Handle<DebuggerFrame*> frame);
     static MOZ_MUST_USE bool getScriptFrameIter(JSContext* cx, Handle<DebuggerFrame*> frame,
                                                 mozilla::Maybe<ScriptFrameIter>& result);
 
@@ -1202,13 +1171,8 @@ class DebuggerFrame : public NativeObject
     static MOZ_MUST_USE bool constructingGetter(JSContext* cx, unsigned argc, Value* vp);
     static MOZ_MUST_USE bool environmentGetter(JSContext* cx, unsigned argc, Value* vp);
     static MOZ_MUST_USE bool generatorGetter(JSContext* cx, unsigned argc, Value* vp);
-    static MOZ_MUST_USE bool liveGetter(JSContext* cx, unsigned argc, Value* vp);
-    static MOZ_MUST_USE bool offsetGetter(JSContext* cx, unsigned argc, Value* vp);
-    static MOZ_MUST_USE bool olderGetter(JSContext* cx, unsigned argc, Value* vp);
-    static MOZ_MUST_USE bool thisGetter(JSContext* cx, unsigned argc, Value* vp);
-    static MOZ_MUST_USE bool typeGetter(JSContext* cx, unsigned argc, Value* vp);
-    static MOZ_MUST_USE bool implementationGetter(JSContext* cx, unsigned argc, Value* vp);
 
+    AbstractFramePtr referent() const;
     Debugger* owner() const;
 };
 
@@ -1238,10 +1202,6 @@ class DebuggerObject : public NativeObject
                                             MutableHandleObject result);
     static MOZ_MUST_USE bool getErrorMessageName(JSContext* cx, Handle<DebuggerObject*> object,
                                                  MutableHandleString result);
-    static MOZ_MUST_USE bool scriptedProxyTarget(JSContext* cx, Handle<DebuggerObject*> object,
-                                                 MutableHandle<DebuggerObject*> result);
-    static MOZ_MUST_USE bool scriptedProxyHandler(JSContext* cx, Handle<DebuggerObject*> object,
-                                                  MutableHandle<DebuggerObject*> result);
 
     // Methods
     static MOZ_MUST_USE bool isExtensible(JSContext* cx, Handle<DebuggerObject*> object,
@@ -1282,8 +1242,6 @@ class DebuggerObject : public NativeObject
                                                MutableHandleObject result);
     static MOZ_MUST_USE bool unwrap(JSContext* cx, Handle<DebuggerObject*> object,
                                     MutableHandle<DebuggerObject*> result);
-    static MOZ_MUST_USE bool isPromise(JSContext* cx, Handle<DebuggerObject*> object,
-                                       bool& result);
 
     // Infallible properties
     bool isCallable() const;
@@ -1292,7 +1250,7 @@ class DebuggerObject : public NativeObject
     bool isBoundFunction() const;
     bool isArrowFunction() const;
     bool isGlobal() const;
-    bool isScriptedProxy() const;
+    bool isPromise() const;
     JSAtom* name() const;
     JSAtom* displayName() const;
 
@@ -1341,9 +1299,6 @@ class DebuggerObject : public NativeObject
     static MOZ_MUST_USE bool globalGetter(JSContext* cx, unsigned argc, Value* vp);
     static MOZ_MUST_USE bool allocationSiteGetter(JSContext* cx, unsigned argc, Value* vp);
     static MOZ_MUST_USE bool errorMessageNameGetter(JSContext* cx, unsigned argc, Value* vp);
-    static MOZ_MUST_USE bool isProxyGetter(JSContext* cx, unsigned argc, Value* vp);
-    static MOZ_MUST_USE bool proxyTargetGetter(JSContext* cx, unsigned argc, Value* vp);
-    static MOZ_MUST_USE bool proxyHandlerGetter(JSContext* cx, unsigned argc, Value* vp);
 #ifdef SPIDERMONKEY_PROMISE
     static MOZ_MUST_USE bool isPromiseGetter(JSContext* cx, unsigned argc, Value* vp);
     static MOZ_MUST_USE bool promiseStateGetter(JSContext* cx, unsigned argc, Value* vp);
@@ -1537,12 +1492,5 @@ MOZ_MUST_USE bool ReportObjectRequired(JSContext* cx);
 
 } /* namespace js */
 
-namespace JS {
-
-template <>
-struct DeletePolicy<js::Debugger> : public js::GCManagedDeletePolicy<js::Debugger>
-{};
-
-} /* namespace JS */
 
 #endif /* vm_Debugger_h */

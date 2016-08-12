@@ -32,7 +32,7 @@ public:
         OtherData
     };
 
-    WebGLBuffer(WebGLContext* webgl, GLuint buf);
+    explicit WebGLBuffer(WebGLContext* webgl, GLuint buf);
 
     void BindTo(GLenum target);
     Kind Content() const { return mContent; }

@@ -99,21 +99,6 @@ interface nsIPresentationService : nsISupports
                         in uint8_t role);
 
   /*
-   * Reconnect the session.
-   *
-   * @param url: The url of presenting page.
-   * @param sessionId: An ID to identify presentation session.
-   * @param role: Identify the function called by controller or receiver.
-   * @param callback: NotifySuccess() is called when a control channel
-   *                  is opened successfully.
-   *                  Otherwise, NotifyError() is called with a error message.
-   */
-  void reconnectSession(in DOMString url,
-                        in DOMString sessionId,
-                        in uint8_t role,
-                        in nsIPresentationServiceCallback callback);
-
-  /*
    * Register an availability listener. Must be called from the main thread.
    *
    * @param listener: The listener to register.
@@ -174,14 +159,14 @@ interface nsIPresentationService : nsISupports
   /*
    * Notify the receiver page is ready for presentation use.
    *
-   * @param sessionId An ID to identify presentation session.
-   * @param windowId  The inner window ID associated with the presentation
-   *                  session.
-   * @param isLoading true if receiver page is loading successfully.
+   * @param sessionId: An ID to identify presentation session.
+   * @param windowId: The inner window ID associated with the presentation
+   *                  session. (0 implies no window ID since no actual window
+   *                  uses 0 as its ID. Generally it's the case the window is
+   *                  located in different process from this service)
    */
   void notifyReceiverReady(in DOMString sessionId,
-                           in unsigned long long windowId,
-                           in boolean isLoading);
+                           [optional] in unsigned long long windowId);
 
   /*
    * Notify the transport is closed
@@ -206,23 +191,4 @@ interface nsIPresentationService : nsISupports
    * The windowId for building RTCDataChannel session transport
    */
   unsigned long long getWindowIdBySessionId(in DOMString sessionId);
-
-  /*
-   * Update the mapping of the session ID and window ID.
-   *
-   * @param sessionId: An ID to identify presentation session.
-   * @param windowId: The inner window ID associated with the presentation
-   *                  session.
-   */
-  void updateWindowIdBySessionId(in DOMString sessionId,
-                                 in unsigned long long windowId);
-
-  /*
-   * To build the session transport.
-   * NOTE: This function should be only called at controller side.
-   *
-   * @param sessionId: An ID to identify presentation session.
-   * @param role: Identify the function called by controller or receiver.
-   */
-  void buildTransport(in DOMString sessionId, in uint8_t role);
 };

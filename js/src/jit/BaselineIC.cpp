@@ -3185,7 +3185,7 @@ StoreToTypedArray(JSContext* cx, MacroAssembler& masm, Scalar::Type type, Addres
         if (cx->runtime()->jitSupportsFloatingPoint) {
             masm.branchTestDouble(Assembler::NotEqual, value, failure);
             masm.unboxDouble(value, FloatReg0);
-            masm.branchTruncateDoubleMaybeModUint32(FloatReg0, scratch, failureModifiedScratch);
+            masm.branchTruncateDouble(FloatReg0, scratch, failureModifiedScratch);
             masm.jump(&isInt32);
         } else {
             masm.jump(failure);
@@ -5502,12 +5502,8 @@ GetTemplateObjectForNative(JSContext* cx, HandleFunction target, const CallArgs&
         }
     }
 
-    if (args.length() == 1) {
-        size_t len = 0;
-
-        if (args[0].isInt32() && args[0].toInt32() >= 0)
-            len = args[0].toInt32();
-
+    if (args.length() == 1 && args[0].isInt32() && args[0].toInt32() >= 0) {
+        uint32_t len = args[0].toInt32();
         if (TypedArrayObject::GetTemplateObjectForNative(cx, native, len, res))
             return !!res;
     }
@@ -6195,6 +6191,11 @@ ICCallStubCompiler::pushSpreadCallArguments(MacroAssembler& masm,
     masm.pushValue(Address(BaselineFrameReg, STUB_FRAME_SIZE + (2 + isConstructing) * sizeof(Value)));
 }
 
+// (see Bug 1149377 comment 31) MSVC 2013 PGO miss-compiles branchTestObjClass
+// calls from this function.
+#if defined(_MSC_VER) && _MSC_VER == 1800
+# pragma optimize("g", off)
+#endif
 Register
 ICCallStubCompiler::guardFunApply(MacroAssembler& masm, AllocatableGeneralRegisterSet regs,
                                   Register argcReg, bool checkNative, FunApplyThing applyThing,
@@ -6309,6 +6310,9 @@ ICCallStubCompiler::guardFunApply(MacroAssembler& masm, AllocatableGeneralRegist
     }
     return target;
 }
+#if defined(_MSC_VER) && _MSC_VER == 1800
+# pragma optimize("", on)
+#endif
 
 void
 ICCallStubCompiler::pushCallerArguments(MacroAssembler& masm, AllocatableGeneralRegisterSet regs)

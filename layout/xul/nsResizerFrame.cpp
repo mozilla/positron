@@ -12,6 +12,7 @@
 #include "nsIDOMNodeList.h"
 #include "nsGkAtoms.h"
 #include "nsNameSpaceManager.h"
+#include "nsIDOMElementCSSInlineStyle.h"
 #include "nsIDOMCSSStyleDeclaration.h"
 
 #include "nsPresContext.h"
@@ -26,8 +27,6 @@
 #include "nsIScreenManager.h"
 #include "mozilla/dom/Element.h"
 #include "nsError.h"
-#include "nsICSSDeclaration.h"
-#include "nsStyledElement.h"
 #include <algorithm>
 
 using namespace mozilla;
@@ -422,10 +421,11 @@ nsResizerFrame::ResizeContent(nsIContent* aContent, const Direction& aDirection,
     }
   }
   else {
-    nsCOMPtr<nsStyledElement> inlineStyleContent =
+    nsCOMPtr<nsIDOMElementCSSInlineStyle> inlineStyleContent =
       do_QueryInterface(aContent);
     if (inlineStyleContent) {
-      nsICSSDeclaration* decl = inlineStyleContent->Style();
+      nsCOMPtr<nsIDOMCSSStyleDeclaration> decl;
+      inlineStyleContent->GetStyle(getter_AddRefs(decl));
 
       if (aOriginalSizeInfo) {
         decl->GetPropertyValue(NS_LITERAL_STRING("width"),

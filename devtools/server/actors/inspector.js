@@ -53,19 +53,20 @@
 const {Cc, Ci, Cu} = require("chrome");
 const Services = require("Services");
 const protocol = require("devtools/shared/protocol");
+const {Arg, Option, method, RetVal, types} = protocol;
 const {LongStringActor} = require("devtools/server/actors/string");
 const promise = require("promise");
 const {Task} = require("devtools/shared/task");
+const object = require("sdk/util/object");
 const events = require("sdk/event/core");
+const {Class} = require("sdk/core/heritage");
 const {WalkerSearch} = require("devtools/server/actors/utils/walker-search");
 const {PageStyleActor, getFontPreviewData} = require("devtools/server/actors/styles");
 const {
   HighlighterActor,
   CustomHighlighterActor,
   isTypeRegistered,
-  HighlighterEnvironment
 } = require("devtools/server/actors/highlighters");
-const {EyeDropper} = require("devtools/server/actors/highlighters/eye-dropper");
 const {
   isAnonymous,
   isNativeAnonymous,
@@ -73,10 +74,13 @@ const {
   isShadowAnonymous,
   getFrameElement
 } = require("devtools/shared/layout/utils");
-const {getLayoutChangesObserver, releaseLayoutChangesObserver} = require("devtools/server/actors/layout");
+const {getLayoutChangesObserver, releaseLayoutChangesObserver} =
+  require("devtools/server/actors/layout");
 const nodeFilterConstants = require("devtools/shared/dom-node-filter-constants");
 
-const {EventParsers} = require("devtools/server/event-parsers");
+loader.lazyRequireGetter(this, "CSS", "CSS");
+
+const {EventParsers} = require("devtools/shared/event-parsers");
 const {nodeSpec, nodeListSpec, walkerSpec, inspectorSpec} = require("devtools/shared/specs/inspector");
 
 const FONT_FAMILY_PREVIEW_TEXT = "The quick brown fox jumps over the lazy dog";
@@ -131,8 +135,6 @@ var HELPER_SHEET = `
     outline-offset: -2px !important;
   }
 `;
-
-const flags = require("devtools/shared/flags");
 
 loader.lazyRequireGetter(this, "DevToolsUtils",
                          "devtools/shared/DevToolsUtils");
@@ -440,7 +442,7 @@ var NodeActor = exports.NodeActor = protocol.ActorClassWithSpec(nodeSpec, {
   getEventListeners: function (node) {
     let parsers = this._eventParsers;
     let dbg = this.parent().tabActor.makeDebugger();
-    let listeners = [];
+    let events = [];
 
     for (let [, {getListeners, normalizeHandler}] of parsers) {
       try {
@@ -455,7 +457,7 @@ var NodeActor = exports.NodeActor = protocol.ActorClassWithSpec(nodeSpec, {
             eventInfo.normalizeHandler = normalizeHandler;
           }
 
-          this.processHandlerForEvent(node, listeners, dbg, eventInfo);
+          this.processHandlerForEvent(node, events, dbg, eventInfo);
         }
       } catch (e) {
         // An object attached to the node looked like a listener but wasn't...
@@ -463,11 +465,11 @@ var NodeActor = exports.NodeActor = protocol.ActorClassWithSpec(nodeSpec, {
       }
     }
 
-    listeners.sort((a, b) => {
+    events.sort((a, b) => {
       return a.type.localeCompare(b.type);
     });
 
-    return listeners;
+    return events;
   },
 
   /**
@@ -499,7 +501,7 @@ var NodeActor = exports.NodeActor = protocol.ActorClassWithSpec(nodeSpec, {
    *             }
    *           }
    */
-  processHandlerForEvent: function (node, listeners, dbg, eventInfo) {
+  processHandlerForEvent: function (node, events, dbg, eventInfo) {
     let type = eventInfo.type || "";
     let handler = eventInfo.handler;
     let tags = eventInfo.tags || "";
@@ -590,7 +592,7 @@ var NodeActor = exports.NodeActor = protocol.ActorClassWithSpec(nodeSpec, {
       hide: hide
     };
 
-    listeners.push(eventObj);
+    events.push(eventObj);
 
     dbg.removeDebuggee(globalDO);
   },
@@ -1296,8 +1298,8 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
 
     // We're going to create a few document walkers with the same filter,
     // make it easier.
-    let getFilteredWalker = documentWalkerNode => {
-      return this.getDocumentWalker(documentWalkerNode, options.whatToShow);
+    let getFilteredWalker = node => {
+      return this.getDocumentWalker(node, options.whatToShow);
     };
 
     // Need to know the first and last child.
@@ -2105,7 +2107,7 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
     if (isNodeDead(node) ||
         isNodeDead(parent) ||
         (sibling && isNodeDead(sibling))) {
-      return;
+      return null;
     }
 
     let rawNode = node.rawNode;
@@ -2120,7 +2122,7 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
                                                 null;
 
       if (rawNode === rawSibling || currentNextSibling === rawSibling) {
-        return;
+        return null;
       }
     }
 
@@ -2148,7 +2150,8 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
     } catch (x) {
       // Failed to create a new element with that tag name, ignore the change,
       // and signal the error to the front.
-      return Promise.reject(new Error("Could not change node's tagName to " + tagName));
+      return Promise.reject(new Error("Could not change node's tagName to " +
+        tagName));
     }
 
     let attrs = oldNode.attributes;
@@ -2163,7 +2166,6 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
     }
 
     oldNode.remove();
-    return null;
   },
 
   /**
@@ -2578,20 +2580,14 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
  * Server side of the inspector actor, which is used to create
  * inspector-related actors, including the walker.
  */
-exports.InspectorActor = protocol.ActorClassWithSpec(inspectorSpec, {
+var InspectorActor = exports.InspectorActor = protocol.ActorClassWithSpec(inspectorSpec, {
   initialize: function (conn, tabActor) {
     protocol.Actor.prototype.initialize.call(this, conn);
     this.tabActor = tabActor;
-
-    this._onColorPicked = this._onColorPicked.bind(this);
-    this._onColorPickCanceled = this._onColorPickCanceled.bind(this);
-    this.destroyEyeDropper = this.destroyEyeDropper.bind(this);
   },
 
   destroy: function () {
     protocol.Actor.prototype.destroy.call(this);
-
-    this.destroyEyeDropper();
 
     this._highlighterPromise = null;
     this._pageStylePromise = null;
@@ -2740,66 +2736,6 @@ exports.InspectorActor = protocol.ActorClassWithSpec(inspectorSpec, {
 
     let baseURI = Services.io.newURI(document.location.href, null, null);
     return Services.io.newURI(url, null, baseURI).spec;
-  },
-
-  /**
-   * Create an instance of the eye-dropper highlighter and store it on this._eyeDropper.
-   * Note that for now, a new instance is created every time to deal with page navigation.
-   */
-  createEyeDropper: function () {
-    this.destroyEyeDropper();
-    this._highlighterEnv = new HighlighterEnvironment();
-    this._highlighterEnv.initFromTabActor(this.tabActor);
-    this._eyeDropper = new EyeDropper(this._highlighterEnv);
-  },
-
-  /**
-   * Destroy the current eye-dropper highlighter instance.
-   */
-  destroyEyeDropper: function () {
-    if (this._eyeDropper) {
-      this.cancelPickColorFromPage();
-      this._eyeDropper.destroy();
-      this._eyeDropper = null;
-      this._highlighterEnv.destroy();
-      this._highlighterEnv = null;
-    }
-  },
-
-  /**
-   * Pick a color from the page using the eye-dropper. This method doesn't return anything
-   * but will cause events to be sent to the front when a color is picked or when the user
-   * cancels the picker.
-   * @param {Object} options
-   */
-  pickColorFromPage: function (options) {
-    this.createEyeDropper();
-    this._eyeDropper.show(this.window.document.documentElement, options);
-    this._eyeDropper.once("selected", this._onColorPicked);
-    this._eyeDropper.once("canceled", this._onColorPickCanceled);
-    events.once(this.tabActor, "will-navigate", this.destroyEyeDropper);
-  },
-
-  /**
-   * After the pickColorFromPage method is called, the only way to dismiss the eye-dropper
-   * highlighter is for the user to click in the page and select a color. If you need to
-   * dismiss the eye-dropper programatically instead, use this method.
-   */
-  cancelPickColorFromPage: function () {
-    if (this._eyeDropper) {
-      this._eyeDropper.hide();
-      this._eyeDropper.off("selected", this._onColorPicked);
-      this._eyeDropper.off("canceled", this._onColorPickCanceled);
-      events.off(this.tabActor, "will-navigate", this.destroyEyeDropper);
-    }
-  },
-
-  _onColorPicked: function (e, color) {
-    events.emit(this, "color-picked", color);
-  },
-
-  _onColorPickCanceled: function () {
-    events.emit(this, "color-pick-canceled");
   }
 });
 
@@ -2821,7 +2757,6 @@ function nodeDocshell(node) {
     return win.QueryInterface(Ci.nsIInterfaceRequestor)
               .getInterface(Ci.nsIDocShell);
   }
-  return null;
 }
 
 function isNodeDead(node) {
@@ -3002,7 +2937,7 @@ function allAnonymousContentTreeWalkerFilter(node) {
  *
  * @param {HTMLImageElement} image - The image element.
  * @param {Number} timeout - Maximum amount of time the image is allowed to load
- * before the waiting is aborted. Ignored if flags.testing is set.
+ * before the waiting is aborted. Ignored if DevToolsUtils.testing is set.
  *
  * @return {Promise} that is fulfilled once the image has loaded. If the image
  * fails to load or the load takes too long, the promise is rejected.
@@ -3027,9 +2962,9 @@ function ensureImageLoaded(image, timeout) {
   });
 
   // Don't timeout when testing. This is never settled.
-  let onAbort = new Promise(() => {});
+  let onAbort = new promise(() => {});
 
-  if (!flags.testing) {
+  if (!DevToolsUtils.testing) {
     // Tests are not running. Reject the promise after given timeout.
     onAbort = DevToolsUtils.waitForTime(timeout).then(() => {
       return promise.reject("Image '" + image.src + "' took too long to load.");

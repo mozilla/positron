@@ -12,8 +12,11 @@ const {CubicBezierWidget} =
 const {CSSFilterEditorWidget} = require("devtools/client/shared/widgets/FilterWidget");
 const {TooltipToggle} = require("devtools/client/shared/widgets/tooltip/TooltipToggle");
 const EventEmitter = require("devtools/shared/event-emitter");
-const {colorUtils} = require("devtools/shared/css-color");
+const {colorUtils} = require("devtools/client/shared/css-color");
 const Heritage = require("sdk/core/heritage");
+const {Eyedropper} = require("devtools/client/eyedropper/eyedropper");
+const {gDevTools} = require("devtools/client/framework/devtools");
+const Services = require("Services");
 const {XPCOMUtils} = require("resource://gre/modules/XPCOMUtils.jsm");
 const {HTMLTooltip} = require("devtools/client/shared/widgets/HTMLTooltip");
 const {KeyShortcuts} = require("devtools/client/shared/key-shortcuts");
@@ -743,14 +746,10 @@ SwatchBasedEditorTooltip.prototype = {
  *
  * @param {Toolbox} toolbox
  *        The devtools toolbox, needed to get the devtools main window.
- * @param {InspectorPanel} inspector
- *        The inspector panel, needed for the eyedropper.
  */
-function SwatchColorPickerTooltip(toolbox, inspector) {
+function SwatchColorPickerTooltip(toolbox) {
   let stylesheet = "chrome://devtools/content/shared/widgets/spectrum.css";
   SwatchBasedEditorTooltip.call(this, toolbox, stylesheet);
-
-  this.inspector = inspector;
 
   // Creating a spectrum instance. this.spectrum will always be a promise that
   // resolves to the spectrum instance
@@ -780,7 +779,7 @@ Heritage.extend(SwatchBasedEditorTooltip.prototype, {
     eyedropper.className = "devtools-button";
     container.appendChild(eyedropper);
 
-    this.tooltip.setContent(container, { width: 218, height: 224 });
+    this.tooltip.setContent(container, { width: 210, height: 216 });
 
     let spectrum = new Spectrum(spectrumNode, color);
 
@@ -811,16 +810,8 @@ Heritage.extend(SwatchBasedEditorTooltip.prototype, {
       this.spectrum.updateUI();
     }
 
-    let {target} = this.inspector.toolbox;
-    target.actorHasMethod("inspector", "pickColorFromPage").then(value => {
-      let tooltipDoc = this.tooltip.doc;
-      let eyeButton = tooltipDoc.querySelector("#eyedropper-button");
-      if (value) {
-        eyeButton.addEventListener("click", this._openEyeDropper);
-      } else {
-        eyeButton.style.display = "none";
-      }
-    }, e => console.error(e));
+    let eyeButton = this.tooltip.doc.querySelector("#eyedropper-button");
+    eyeButton.addEventListener("click", this._openEyeDropper);
   },
 
   _onSpectrumColorChange: function (event, rgba, cssColor) {
@@ -843,31 +834,39 @@ Heritage.extend(SwatchBasedEditorTooltip.prototype, {
   },
 
   _openEyeDropper: function () {
-    let {inspector, toolbox, telemetry} = this.inspector;
-    telemetry.toolOpened("pickereyedropper");
-    inspector.pickColorFromPage({copyOnSelect: false}).catch(e => console.error(e));
+    let chromeWindow = this.tooltip.doc.defaultView.top;
+    let windowType = chromeWindow.document.documentElement
+                     .getAttribute("windowtype");
+    let toolboxWindow;
+    if (windowType != gDevTools.chromeWindowType) {
+      // this means the toolbox is in a seperate window. We need to make
+      // sure we'll be inspecting the browser window instead
+      toolboxWindow = chromeWindow;
+      chromeWindow = Services.wm.getMostRecentWindow(gDevTools.chromeWindowType);
+      chromeWindow.focus();
+    }
+    let dropper = new Eyedropper(chromeWindow, { copyOnSelect: false,
+                                                 context: "picker" });
 
-    inspector.once("color-picked", color => {
-      toolbox.win.focus();
+    dropper.once("select", (event, color) => {
+      if (toolboxWindow) {
+        toolboxWindow.focus();
+      }
       this._selectColor(color);
-      this._onEyeDropperDone();
     });
 
-    inspector.once("color-pick-canceled", () => {
-      this._onEyeDropperDone();
+    dropper.once("destroy", () => {
+      this.eyedropperOpen = false;
+      this.activeSwatch = null;
     });
 
+    dropper.open();
     this.eyedropperOpen = true;
 
     // close the colorpicker tooltip so that only the eyedropper is open.
     this.hide();
 
-    this.tooltip.emit("eyedropper-opened");
-  },
-
-  _onEyeDropperDone: function () {
-    this.eyedropperOpen = false;
-    this.activeSwatch = null;
+    this.tooltip.emit("eyedropper-opened", dropper);
   },
 
   _colorToRgba: function (color) {
@@ -884,7 +883,6 @@ Heritage.extend(SwatchBasedEditorTooltip.prototype, {
 
   destroy: function () {
     SwatchBasedEditorTooltip.prototype.destroy.call(this);
-    this.inspector = null;
     this.currentSwatchColor = null;
     this.spectrum.off("changed", this._onSpectrumColorChange);
     this.spectrum.destroy();

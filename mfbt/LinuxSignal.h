@@ -25,10 +25,13 @@ SignalTrampoline(int aSignal, siginfo_t* aInfo, void* aContext)
     "nop; nop; nop; nop"
     : : : "memory");
 
+  // Because the assembler may generate additional insturctions below, we
+  // need to ensure NOPs are inserted first by separating them out above.
+
   asm volatile (
-    "b %0"
+    "bx %0"
     :
-    : "X"(H)
+    : "r"(H), "l"(aSignal), "l"(aInfo), "l"(aContext)
     : "memory");
 }
 

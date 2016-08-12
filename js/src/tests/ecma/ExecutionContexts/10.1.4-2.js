@@ -70,6 +70,7 @@ function test() {
 
     gTestcases[gTc].reason += ( gTestcases[gTc].passed ) ? "" : "wrong value ";
   }
+  stopTest();
   return ( gTestcases );
 }
 

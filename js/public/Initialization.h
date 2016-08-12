@@ -25,9 +25,6 @@ enum class InitState { Uninitialized = 0, Running, ShutDown };
 extern JS_PUBLIC_DATA(InitState)
 libraryInitState;
 
-extern JS_PUBLIC_API(const char*)
-InitWithFailureDiagnostic(bool isDebugBuild);
-
 } // namespace detail
 } // namespace JS
 
@@ -61,30 +58,16 @@ JS_SetICUMemoryFunctions(JS_ICUAllocFn allocFn,
  * is, calling JS_Init/JSAPI methods/JS_ShutDown in that order, then doing so
  * again).  This restriction may eventually be lifted.
  */
-inline bool
-JS_Init(void)
-{
-#ifdef DEBUG
-    return !JS::detail::InitWithFailureDiagnostic(true);
-#else
-    return !JS::detail::InitWithFailureDiagnostic(false);
-#endif
-}
+extern JS_PUBLIC_API(bool)
+JS_Init(void);
 
 /**
  * A variant of JS_Init. On success it returns nullptr. On failure it returns a
  * pointer to a string literal that describes how initialization failed, which
  * can be useful for debugging purposes.
  */
-inline const char*
-JS_InitWithFailureDiagnostic(void)
-{
-#ifdef DEBUG
-    return JS::detail::InitWithFailureDiagnostic(true);
-#else
-    return JS::detail::InitWithFailureDiagnostic(false);
-#endif
-}
+extern JS_PUBLIC_API(const char*)
+JS_InitWithFailureDiagnostic(void);
 
 /**
  * Destroy free-standing resources allocated by SpiderMonkey, not associated

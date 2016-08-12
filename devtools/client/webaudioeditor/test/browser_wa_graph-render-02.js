@@ -12,12 +12,13 @@ add_task(function* () {
 
   let started = once(gFront, "start-context");
 
-  let events = Promise.all([
+  reload(target);
+
+  let [actors] = yield Promise.all([
     getN(gFront, "create-node", 8),
     waitForGraphRendered(panelWin, 8, 8)
   ]);
-  reload(target);
-  let [actors] = yield events;
+
   let nodeIDs = actors.map(actor => actor.actorID);
 
   let types = ["AudioDestinationNode", "OscillatorNode", "GainNode", "ScriptProcessorNode",

@@ -8,9 +8,7 @@
 
 "use strict";
 
-/* eslint-disable mozilla/reject-some-requires */
 const {Cc, Ci} = require("chrome");
-/* eslint-enable mozilla/reject-some-requires */
 
 const ToolDefinitions = require("devtools/client/definitions").Tools;
 const CssLogic = require("devtools/shared/inspector/css-logic");
@@ -22,15 +20,17 @@ const {OutputParser} = require("devtools/client/shared/output-parser");
 const {PrefObserver, PREF_ORIG_SOURCES} = require("devtools/client/styleeditor/utils");
 const {createChild} = require("devtools/client/inspector/shared/utils");
 const {gDevTools} = require("devtools/client/framework/devtools");
-/* eslint-disable mozilla/reject-some-requires */
 const {XPCOMUtils} = require("resource://gre/modules/XPCOMUtils.jsm");
-/* eslint-enable mozilla/reject-some-requires */
 const {getCssProperties} = require("devtools/shared/fronts/css-properties");
 
-const overlays = require("devtools/client/inspector/shared/style-inspector-overlays");
-const StyleInspectorMenu = require("devtools/client/inspector/shared/style-inspector-menu");
-const {KeyShortcuts} = require("devtools/client/shared/key-shortcuts");
-const {LayoutView} = require("devtools/client/inspector/layout/layout");
+loader.lazyRequireGetter(this, "overlays",
+  "devtools/client/inspector/shared/style-inspector-overlays");
+loader.lazyRequireGetter(this, "StyleInspectorMenu",
+  "devtools/client/inspector/shared/style-inspector-menu");
+loader.lazyRequireGetter(this, "KeyShortcuts",
+  "devtools/client/shared/key-shortcuts", true);
+loader.lazyRequireGetter(this, "LayoutView",
+  "devtools/client/inspector/layout/layout", true);
 
 XPCOMUtils.defineLazyModuleGetter(this, "PluralForm",
                                   "resource://gre/modules/PluralForm.jsm");
@@ -551,10 +551,8 @@ CssComputedView.prototype = {
     this._filterChangedTimeout = setTimeout(() => {
       if (this.searchField.value.length > 0) {
         this.searchField.setAttribute("filled", true);
-        this.inspector.emit("computed-view-filtered", true);
       } else {
         this.searchField.removeAttribute("filled");
-        this.inspector.emit("computed-view-filtered", false);
       }
 
       this.refreshPanel();

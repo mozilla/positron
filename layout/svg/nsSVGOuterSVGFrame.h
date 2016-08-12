@@ -55,12 +55,12 @@ public:
               ComputeSizeFlags aFlags) override;
 
   virtual void Reflow(nsPresContext*           aPresContext,
-                      ReflowOutput&     aDesiredSize,
-                      const ReflowInput& aReflowInput,
+                      nsHTMLReflowMetrics&     aDesiredSize,
+                      const nsHTMLReflowState& aReflowState,
                       nsReflowStatus&          aStatus) override;
 
   virtual void DidReflow(nsPresContext*   aPresContext,
-                         const ReflowInput*  aReflowInput,
+                         const nsHTMLReflowState*  aReflowState,
                          nsDidReflowStatus aStatus) override;
 
   virtual void UnionChildOverflow(nsOverflowAreas& aOverflowAreas) override;

@@ -16,7 +16,6 @@
 #include "WidevineDecryptor.h"
 #include "WidevineVideoFrame.h"
 #include <map>
-#include <deque>
 
 namespace mozilla {
 
@@ -53,7 +52,6 @@ private:
   }
 
   bool ReturnOutput(WidevineVideoFrame& aFrame);
-  void CompleteReset();
 
   GMPVideoHost* mVideoHost;
   RefPtr<CDMWrapper> mCDMWrapper;
@@ -62,17 +60,6 @@ private:
   GMPVideoDecoderCallback* mCallback;
   std::map<uint64_t, uint64_t> mFrameDurations;
   bool mSentInput;
-  GMPVideoCodecType mCodecType;
-  // Frames waiting on allocation
-  std::deque<WidevineVideoFrame> mFrameAllocationQueue;
-  // Number of calls of ReturnOutput currently in progress.
-  int32_t mReturnOutputCallDepth;
-  // If we're waiting to drain. Used to prevent drain completing while
-  // ReturnOutput calls are still on the stack.
-  bool mDrainPending;
-  // If a reset is being performed. Used to track if ReturnOutput should
-  // dump current frame.
-  bool mResetInProgress;
 };
 
 } // namespace mozilla

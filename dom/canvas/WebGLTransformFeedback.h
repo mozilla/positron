@@ -22,7 +22,7 @@ class WebGLTransformFeedback final
     friend class WebGL2Context;
 
 public:
-    WebGLTransformFeedback(WebGLContext* webgl, GLuint tf);
+    explicit WebGLTransformFeedback(WebGLContext* webgl, GLuint tf);
 
     void Delete();
     WebGLContext* GetParentObject() const;

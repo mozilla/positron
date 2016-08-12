@@ -10,7 +10,6 @@
 #include "VorbisDecoder.h"
 #include "VPXDecoder.h"
 #include "WAVDecoder.h"
-#include "TheoraDecoder.h"
 
 namespace mozilla {
 
@@ -22,8 +21,7 @@ AgnosticDecoderModule::SupportsMimeType(const nsACString& aMimeType,
     VPXDecoder::IsVPX(aMimeType) ||
     OpusDataDecoder::IsOpus(aMimeType) ||
     VorbisDataDecoder::IsVorbis(aMimeType) ||
-    WaveDataDecoder::IsWave(aMimeType) ||
-    TheoraDecoder::IsTheora(aMimeType);
+    WaveDataDecoder::IsWave(aMimeType);
   MOZ_LOG(sPDMLog, LogLevel::Debug, ("Agnostic decoder %s requested type",
         supports ? "supports" : "rejects"));
   return supports;
@@ -36,8 +34,6 @@ AgnosticDecoderModule::CreateVideoDecoder(const CreateDecoderParams& aParams)
 
   if (VPXDecoder::IsVPX(aParams.mConfig.mMimeType)) {
     m = new VPXDecoder(aParams);
-  } else if (TheoraDecoder::IsTheora(aParams.mConfig.mMimeType)) {
-    m = new TheoraDecoder(aParams);
   }
 
   return m.forget();

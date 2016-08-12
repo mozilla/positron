@@ -3276,20 +3276,20 @@ GetObjectSlotNameFunctor::operator()(JS::CallbackTracer* trc, char* buf, size_t 
             }
 
             if (slotname)
-                snprintf(buf, bufsize, pattern, slotname);
+                JS_snprintf(buf, bufsize, pattern, slotname);
             else
-                snprintf(buf, bufsize, "**UNKNOWN SLOT %" PRIu32 "**", slot);
+                JS_snprintf(buf, bufsize, "**UNKNOWN SLOT %" PRIu32 "**", slot);
         } while (false);
     } else {
         jsid propid = shape->propid();
         if (JSID_IS_INT(propid)) {
-            snprintf(buf, bufsize, "%" PRId32, JSID_TO_INT(propid));
+            JS_snprintf(buf, bufsize, "%" PRId32 "", JSID_TO_INT(propid));
         } else if (JSID_IS_ATOM(propid)) {
             PutEscapedString(buf, bufsize, JSID_TO_ATOM(propid), 0);
         } else if (JSID_IS_SYMBOL(propid)) {
-            snprintf(buf, bufsize, "**SYMBOL KEY**");
+            JS_snprintf(buf, bufsize, "**SYMBOL KEY**");
         } else {
-            snprintf(buf, bufsize, "**FINALIZED ATOM KEY**");
+            JS_snprintf(buf, bufsize, "**FINALIZED ATOM KEY**");
         }
     }
 }
@@ -3833,7 +3833,7 @@ JS::ubi::Concrete<JSObject>::size(mozilla::MallocSizeOf mallocSizeOf) const
     return obj.tenuredSizeOfThis() + info.sizeOfAllThings();
 }
 
-const char16_t JS::ubi::Concrete<JSObject>::concreteTypeName[] = u"JSObject";
+const char16_t JS::ubi::Concrete<JSObject>::concreteTypeName[] = MOZ_UTF16("JSObject");
 
 void
 JSObject::traceChildren(JSTracer* trc)

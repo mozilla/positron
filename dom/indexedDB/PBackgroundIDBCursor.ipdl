@@ -26,12 +26,6 @@ struct ContinueParams
   Key key;
 };
 
-struct ContinuePrimaryKeyParams
-{
-  Key key;
-  Key primaryKey;
-};
-
 struct AdvanceParams
 {
   uint32_t count;
@@ -40,7 +34,6 @@ struct AdvanceParams
 union CursorRequestParams
 {
   ContinueParams;
-  ContinuePrimaryKeyParams;
   AdvanceParams;
 };
 
@@ -87,7 +80,7 @@ protocol PBackgroundIDBCursor
 parent:
   async DeleteMe();
 
-  async Continue(CursorRequestParams params);
+  async Continue(CursorRequestParams params, Key key);
 
 child:
   async __delete__();

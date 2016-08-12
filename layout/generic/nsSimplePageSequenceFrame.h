@@ -66,8 +66,8 @@ public:
 
   // nsIFrame
   virtual void Reflow(nsPresContext*      aPresContext,
-                      ReflowOutput& aDesiredSize,
-                      const ReflowInput& aMaxSize,
+                      nsHTMLReflowMetrics& aDesiredSize,
+                      const nsHTMLReflowState& aMaxSize,
                       nsReflowStatus&      aStatus) override;
 
   virtual void BuildDisplayList(nsDisplayListBuilder*   aBuilder,
@@ -125,8 +125,8 @@ protected:
 
   // Sets the frame desired size to the size of the viewport, or the given
   // nscoords, whichever is larger. Print scaling is applied in this function.
-  void SetDesiredSize(ReflowOutput& aDesiredSize,
-                      const ReflowInput& aReflowInput,
+  void SetDesiredSize(nsHTMLReflowMetrics& aDesiredSize,
+                      const nsHTMLReflowState& aReflowState,
                       nscoord aWidth, nscoord aHeight);
 
   // Helper function to compute the offset needed to center a child

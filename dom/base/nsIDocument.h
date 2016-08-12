@@ -118,7 +118,6 @@ class DocumentType;
 class DOMImplementation;
 class DOMStringList;
 class Element;
-struct ElementCreationOptions;
 struct ElementRegistrationOptions;
 class Event;
 class EventTarget;
@@ -1509,8 +1508,7 @@ public:
    */
   virtual already_AddRefed<Element> CreateElem(const nsAString& aName,
                                                nsIAtom* aPrefix,
-                                               int32_t aNamespaceID,
-                                               nsAString* aIs = nullptr) = 0;
+                                               int32_t aNamespaceID) = 0;
 
   /**
    * Get the security info (i.e. SSL state etc) that the document got
@@ -2520,15 +2518,18 @@ public:
   already_AddRefed<nsContentList>
     GetElementsByClassName(const nsAString& aClasses);
   // GetElementById defined above
-  virtual already_AddRefed<Element>
-    CreateElement(const nsAString& aTagName,
-                  const mozilla::dom::ElementCreationOptions& aOptions,
-                  mozilla::ErrorResult& rv) = 0;
-  virtual already_AddRefed<Element>
-    CreateElementNS(const nsAString& aNamespaceURI,
-                    const nsAString& aQualifiedName,
-                    const mozilla::dom::ElementCreationOptions& aOptions,
-                    mozilla::ErrorResult& rv) = 0;
+  already_AddRefed<Element> CreateElement(const nsAString& aTagName,
+                                          mozilla::ErrorResult& rv);
+  already_AddRefed<Element> CreateElementNS(const nsAString& aNamespaceURI,
+                                            const nsAString& aQualifiedName,
+                                            mozilla::ErrorResult& rv);
+  virtual already_AddRefed<Element> CreateElement(const nsAString& aTagName,
+                                                  const nsAString& aTypeExtension,
+                                                  mozilla::ErrorResult& rv) = 0;
+  virtual already_AddRefed<Element> CreateElementNS(const nsAString& aNamespaceURI,
+                                                    const nsAString& aQualifiedName,
+                                                    const nsAString& aTypeExtension,
+                                                    mozilla::ErrorResult& rv) = 0;
   already_AddRefed<mozilla::dom::DocumentFragment>
     CreateDocumentFragment() const;
   already_AddRefed<nsTextNode> CreateTextNode(const nsAString& aData) const;
@@ -2549,14 +2550,14 @@ public:
                        mozilla::ErrorResult& rv) const;
   already_AddRefed<mozilla::dom::NodeIterator>
     CreateNodeIterator(nsINode& aRoot, uint32_t aWhatToShow,
-                       mozilla::dom::NodeFilterHolder aFilter,
+                       const mozilla::dom::NodeFilterHolder& aFilter,
                        mozilla::ErrorResult& rv) const;
   already_AddRefed<mozilla::dom::TreeWalker>
     CreateTreeWalker(nsINode& aRoot, uint32_t aWhatToShow,
                      mozilla::dom::NodeFilter* aFilter, mozilla::ErrorResult& rv) const;
   already_AddRefed<mozilla::dom::TreeWalker>
     CreateTreeWalker(nsINode& aRoot, uint32_t aWhatToShow,
-                     mozilla::dom::NodeFilterHolder aFilter,
+                     const mozilla::dom::NodeFilterHolder& aFilter,
                      mozilla::ErrorResult& rv) const;
 
   // Deprecated WebIDL bits
@@ -2604,8 +2605,8 @@ public:
     return !!GetFullscreenElement();
   }
   void ExitFullscreen();
-  Element* GetPointerLockElement();
-  void ExitPointerLock()
+  Element* GetMozPointerLockElement();
+  void MozExitPointerLock()
   {
     UnlockPointer(this);
   }

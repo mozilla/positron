@@ -47,12 +47,10 @@ public:
   NS_INLINE_DECL_REFCOUNTING(APZEventState);
 
   void ProcessSingleTap(const CSSPoint& aPoint,
-                        const CSSToLayoutDeviceScale& aScale,
                         Modifiers aModifiers,
                         const ScrollableLayerGuid& aGuid);
   void ProcessLongTap(const nsCOMPtr<nsIPresShell>& aUtils,
                       const CSSPoint& aPoint,
-                      const CSSToLayoutDeviceScale& aScale,
                       Modifiers aModifiers,
                       const ScrollableLayerGuid& aGuid,
                       uint64_t aInputBlockId);

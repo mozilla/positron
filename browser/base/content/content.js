@@ -46,8 +46,6 @@ XPCOMUtils.defineLazyGetter(this, "PageMenuChild", function() {
 XPCOMUtils.defineLazyModuleGetter(this, "Feeds",
   "resource:///modules/Feeds.jsm");
 
-Cu.importGlobalProperties(["URL"]);
-
 // TabChildGlobal
 var global = this;
 
@@ -182,12 +180,12 @@ var showContentContextMenu = function (event) {
         imageCache.findEntryProperties(event.target.currentURI, doc);
       try {
         contentType = props.get("type", Ci.nsISupportsCString).data;
-      } catch (e) {}
+      } catch(e) {}
       try {
         contentDisposition =
           props.get("content-disposition", Ci.nsISupportsCString).data;
-      } catch (e) {}
-    } catch (e) {}
+      } catch(e) {}
+    } catch(e) {}
   }
 
   let selectionInfo = BrowserUtils.getSelectionDetails(content);
@@ -693,7 +691,7 @@ var PageMetadataMessenger = {
     addMessageListener("PageMetadata:GetMicroformats", this);
   },
   receiveMessage(message) {
-    switch (message.name) {
+    switch(message.name) {
       case "PageMetadata:GetPageData": {
         let target = message.objects.target;
         let result = PageMetadata.getData(content.document, target);
@@ -730,7 +728,7 @@ addEventListener("ActivateSocialFeature", function (aEvent) {
   if (data) {
     try {
       data = JSON.parse(data);
-    } catch (e) {
+    } catch(e) {
       Cu.reportError("Social Service manifest parse error: " + e);
       return;
     }
@@ -794,11 +792,9 @@ addMessageListener("ContextMenu:MediaCommand", (message) => {
   }
 });
 
-addMessageListener("ContextMenu:Canvas:ToBlobURL", (message) => {
-  message.objects.target.toBlob((blob) => {
-    let blobURL = URL.createObjectURL(blob);
-    sendAsyncMessage("ContextMenu:Canvas:ToBlobURL:Result", { blobURL });
-  });
+addMessageListener("ContextMenu:Canvas:ToDataURL", (message) => {
+  let dataURL = message.objects.target.toDataURL();
+  sendAsyncMessage("ContextMenu:Canvas:ToDataURL:Result", { dataURL });
 });
 
 addMessageListener("ContextMenu:ReloadFrame", (message) => {
@@ -843,10 +839,10 @@ addMessageListener("ContextMenu:SearchFieldBookmarkData", (message) => {
   let formData = [];
 
   function escapeNameValuePair(aName, aValue, aIsFormUrlEncoded) {
-    if (aIsFormUrlEncoded) {
+    if (aIsFormUrlEncoded)
       return escape(aName + "=" + aValue);
-    }
-    return escape(aName) + "=" + escape(aValue);
+    else
+      return escape(aName) + "=" + escape(aValue);
   }
 
   for (let el of node.form.elements) {
@@ -1461,7 +1457,7 @@ let OfflineApps = {
         // all pages can use offline capabilities, no need to ask the user
         return;
       }
-    } catch (e) {
+    } catch(e) {
       // this pref isn't set by default, ignore failures
     }
     let docId = ++this._docId;

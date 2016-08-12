@@ -348,15 +348,8 @@ TabTarget.prototype = {
   },
 
   get isAddon() {
-    return !!(this._form && this._form.actor && (
-      this._form.actor.match(/conn\d+\.addon\d+/) ||
-      this._form.actor.match(/conn\d+\.webExtension\d+/)
-    ));
-  },
-
-  get isWebExtension() {
     return !!(this._form && this._form.actor &&
-              this._form.actor.match(/conn\d+\.webExtension\d+/));
+              this._form.actor.match(/conn\d+\.addon\d+/));
   },
 
   get isLocalTab() {
@@ -767,9 +760,7 @@ WorkerTarget.prototype = {
     return this._workerClient.client;
   },
 
-  destroy: function () {
-    this._workerClient.detach();
-  },
+  destroy: function () {},
 
   hasActor: function (name) {
     // console is the only one actor implemented by WorkerActor

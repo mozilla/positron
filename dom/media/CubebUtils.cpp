@@ -147,7 +147,7 @@ void InitBrandName()
     nsresult rv = stringBundleService->CreateBundle(kBrandBundleURL,
                                            getter_AddRefs(brandBundle));
     if (NS_SUCCEEDED(rv)) {
-      rv = brandBundle->GetStringFromName(u"brandShortName",
+      rv = brandBundle->GetStringFromName(MOZ_UTF16("brandShortName"),
                                           getter_Copies(brandName));
       NS_WARN_IF_FALSE(NS_SUCCEEDED(rv),
           "Could not get the program name for a cubeb stream.");
@@ -295,16 +295,6 @@ cubeb_stream_type ConvertChannelToCubebType(dom::AudioChannel aChannel)
   }
 }
 #endif
-
-void GetCurrentBackend(nsAString& aBackend)
-{
-  const char* backend = cubeb_get_backend_id(GetCubebContext());
-  if (!backend) {
-    aBackend.AssignLiteral("unknown");
-    return;
-  }
-  aBackend.AssignASCII(backend);
-}
 
 } // namespace CubebUtils
 } // namespace mozilla

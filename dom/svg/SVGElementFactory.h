@@ -16,6 +16,8 @@ class SVGElementFactory {
 public:
   static void Init();
   static void Shutdown();
+
+  static bool Exists(nsIAtom *aTag);
 };
 
 } // namespace dom

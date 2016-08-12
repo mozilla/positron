@@ -39,10 +39,10 @@ struct CreateDecoderParams {
   {}
 
   template <typename T1, typename... Ts>
-  CreateDecoderParams(const TrackInfo& aConfig, T1&& a1, Ts&&... args)
+  CreateDecoderParams(const TrackInfo& aConfig, T1 a1, Ts... as)
     : mConfig(aConfig)
   {
-    Set(mozilla::Forward<T1>(a1), mozilla::Forward<Ts>(args)...);
+    Set(a1, as...);
   }
 
   const VideoInfo& VideoConfig() const
@@ -64,7 +64,6 @@ struct CreateDecoderParams {
   layers::ImageContainer* mImageContainer = nullptr;
   layers::LayersBackend mLayersBackend = layers::LayersBackend::LAYERS_NONE;
   RefPtr<GMPCrashHelper> mCrashHelper;
-  bool mUseBlankDecoder = false;
 
 private:
   void Set(TaskQueue* aTaskQueue) { mTaskQueue = aTaskQueue; }
@@ -73,12 +72,14 @@ private:
   void Set(layers::ImageContainer* aImageContainer) { mImageContainer = aImageContainer; }
   void Set(layers::LayersBackend aLayersBackend) { mLayersBackend = aLayersBackend; }
   void Set(GMPCrashHelper* aCrashHelper) { mCrashHelper = aCrashHelper; }
-  void Set(bool aUseBlankDecoder) { mUseBlankDecoder = aUseBlankDecoder; }
   template <typename T1, typename T2, typename... Ts>
-  void Set(T1&& a1, T2&& a2, Ts&&... args)
+  void Set(T1 a1, T2 a2, Ts... as)
   {
-    Set(mozilla::Forward<T1>(a1));
-    Set(mozilla::Forward<T2>(a2), mozilla::Forward<Ts>(args)...);
+    // Parameter pack expansion trick, to call Set() on each argument.
+    using expander = int[];
+    (void)expander {
+      (Set(a1), 0), (Set(a2), 0), (Set(as), 0)...
+    };
   }
 };
 

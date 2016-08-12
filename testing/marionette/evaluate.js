@@ -102,7 +102,6 @@ evaluate.sandbox = function(sb, script, args = [], opts = {}) {
   let timeoutId, timeoutHandler, unloadHandler;
 
   let promise = new Promise((resolve, reject) => {
-    let src = "";
     sb[COMPLETE] = resolve;
     timeoutHandler = () => reject(new ScriptTimeoutError("Timed out"));
     unloadHandler = () => reject(
@@ -110,20 +109,11 @@ evaluate.sandbox = function(sb, script, args = [], opts = {}) {
 
     // wrap in function
     if (!opts.directInject) {
-      if (opts.async) {
-        sb[CALLBACK] = sb[COMPLETE];
-      }
+      sb[CALLBACK] = sb[COMPLETE];
       sb[ARGUMENTS] = Cu.cloneInto(args, sb, {wrapReflectors: true});
 
-      // callback function made private
-      // so that introspection is possible
-      // on the arguments object
-      if (opts.async) {
-        sb[CALLBACK] = sb[COMPLETE];
-        src += `${ARGUMENTS}.push(rv => ${CALLBACK}(rv));`;
-      }
-
-      src += `(function() { ${script} }).apply(null, ${ARGUMENTS})`;
+      script = `${ARGUMENTS}.push(${CALLBACK});` +
+          `(function() { ${script} }).apply(null, ${ARGUMENTS})`;
 
       // marionetteScriptFinished is not WebDriver conformant,
       // hence it is only exposed to immutable sandboxes
@@ -151,7 +141,7 @@ evaluate.sandbox = function(sb, script, args = [], opts = {}) {
     let res;
     try {
       res = Cu.evalInSandbox(
-          src, sb, "1.8", opts.filename || "dummy file", 0);
+          script, sb, "1.8", opts.filename || "dummy file", 0);
     } catch (e) {
       let err = new JavaScriptError(
           e,

@@ -257,7 +257,6 @@ public:
 
   explicit AudioNodeEngine(dom::AudioNode* aNode)
     : mNode(aNode)
-    , mNodeType(aNode ? aNode->NodeType() : nullptr)
     , mInputCount(aNode ? aNode->NumberOfInputs() : 1)
     , mOutputCount(aNode ? aNode->NumberOfOutputs() : 0)
   {
@@ -395,12 +394,14 @@ public:
                            AudioNodeSizes& aUsage) const
   {
     aUsage.mEngine = SizeOfIncludingThis(aMallocSizeOf);
-    aUsage.mNodeType = mNodeType;
+    if (mNode) {
+      aUsage.mDomNode = mNode->SizeOfIncludingThis(aMallocSizeOf);
+      aUsage.mNodeType = mNode->NodeType();
+    }
   }
 
 private:
-  dom::AudioNode* mNode; // main thread only
-  const char* const mNodeType;
+  dom::AudioNode* mNode;
   const uint16_t mInputCount;
   const uint16_t mOutputCount;
 };

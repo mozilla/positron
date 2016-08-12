@@ -18,7 +18,7 @@
 #include "nsGridLayout2.h"
 #include "nsGridRow.h"
 #include "nsGridCell.h"
-#include "mozilla/ReflowInput.h"
+#include "nsHTMLReflowState.h"
 
 /*
 The grid control expands the idea of boxes from 1 dimension to 2 dimensions. 

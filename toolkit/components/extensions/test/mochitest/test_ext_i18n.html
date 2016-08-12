@@ -149,6 +149,8 @@ add_task(function* test_i18n() {
       });
 
       runTests(browser.test.assertEq.bind(browser.test));
+
+      browser.test.notifyPass("l10n");
     } + `(${runTests})`,
   });
 
@@ -158,6 +160,7 @@ add_task(function* test_i18n() {
   yield extension.awaitMessage("content-script-finished");
   win.close();
 
+  yield extension.awaitFinish("l10n");
   yield extension.unload();
 });
 

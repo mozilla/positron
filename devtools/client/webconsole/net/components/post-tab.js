@@ -180,7 +180,7 @@ var PostTab = React.createClass({
         key: "raw-longstring",
         name: Locale.$STR("netRequest.rawData"),
         content: DOM.div({className: "netInfoResponseContent"},
-          sanitize(text.initial),
+          text.initial,
           SizeLimit({
             actions: this.props.actions,
             data: file.request.postData,

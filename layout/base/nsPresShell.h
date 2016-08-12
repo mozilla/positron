@@ -40,7 +40,6 @@
 #include "MobileViewportManager.h"
 #include "ZoomConstraintsClient.h"
 
-class nsIDocShell;
 class nsRange;
 
 struct RangePaintInfo;
@@ -95,7 +94,7 @@ public:
   // nsISupports
   NS_DECL_ISUPPORTS
 
-  static bool AccessibleCaretEnabled(nsIDocShell* aDocShell);
+  static bool AccessibleCaretEnabled();
 
   // BeforeAfterKeyboardEvent preference
   static bool BeforeAfterKeyboardEventEnabled();

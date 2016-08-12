@@ -355,7 +355,9 @@ txStylesheetSink::GetInterface(const nsIID& aIID, void** aResult)
         rv = wwatcher->GetNewAuthPrompter(nullptr, getter_AddRefs(prompt));
         NS_ENSURE_SUCCESS(rv, rv);
 
-        prompt.forget(aResult);
+        nsIAuthPrompt* rawPtr = nullptr;
+        prompt.swap(rawPtr);
+        *aResult = rawPtr;
 
         return NS_OK;
     }

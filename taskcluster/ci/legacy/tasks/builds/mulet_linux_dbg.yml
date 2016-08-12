@@ -48,7 +48,6 @@ task:
     treeherder:
       # Disable "TC" prefix...
       groupSymbol: "?"
-      tier: 3
       machine:
         platform: mulet-linux64
       collection:

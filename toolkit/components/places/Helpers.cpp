@@ -26,20 +26,20 @@ NS_IMPL_ISUPPORTS(
 )
 
 NS_IMETHODIMP
-WeakAsyncStatementCallback::HandleResult(mozIStorageResultSet *aResultSet)
+AsyncStatementCallback::HandleResult(mozIStorageResultSet *aResultSet)
 {
   MOZ_ASSERT(false, "Was not expecting a resultset, but got it.");
   return NS_OK;
 }
 
 NS_IMETHODIMP
-WeakAsyncStatementCallback::HandleCompletion(uint16_t aReason)
+AsyncStatementCallback::HandleCompletion(uint16_t aReason)
 {
   return NS_OK;
 }
 
 NS_IMETHODIMP
-WeakAsyncStatementCallback::HandleError(mozIStorageError *aError)
+AsyncStatementCallback::HandleError(mozIStorageError *aError)
 {
 #ifdef DEBUG
   int32_t result;

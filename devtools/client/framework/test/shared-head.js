@@ -26,7 +26,6 @@ const {loader, require} = scopedCuImport("resource://devtools/shared/Loader.jsm"
 const {gDevTools} = require("devtools/client/framework/devtools");
 const {TargetFactory} = require("devtools/client/framework/target");
 const DevToolsUtils = require("devtools/shared/DevToolsUtils");
-const flags = require("devtools/shared/flags");
 let promise = require("promise");
 let defer = require("devtools/shared/defer");
 const Services = require("Services");
@@ -90,9 +89,9 @@ function getFrameScript() {
   return mm;
 }
 
-flags.testing = true;
+DevToolsUtils.testing = true;
 registerCleanupFunction(() => {
-  flags.testing = false;
+  DevToolsUtils.testing = false;
   Services.prefs.clearUserPref("devtools.dump.emit");
   Services.prefs.clearUserPref("devtools.toolbox.host");
   Services.prefs.clearUserPref("devtools.toolbox.previousHost");
@@ -490,8 +489,3 @@ function lookupPath(obj, path) {
   let segments = path.split(".");
   return segments.reduce((prev, current) => prev[current], obj);
 }
-
-var closeToolbox = Task.async(function* () {
-  let target = TargetFactory.forTab(gBrowser.selectedTab);
-  yield gDevTools.closeToolbox(target);
-});

@@ -1401,7 +1401,8 @@ FullBox::FullBox(const nsACString& aType, uint8_t aVersion, uint32_t aFlags,
                  ISOControl* aControl)
   : Box(aType, aControl)
 {
-  std::bitset<24> tmp_flags(aFlags);
+  // Cast to uint64_t due to VC2010  bug.
+  std::bitset<24> tmp_flags((uint64_t)aFlags);
   version = aVersion;
   flags = tmp_flags;
   size += sizeof(version) + flags.size() / CHAR_BIT;

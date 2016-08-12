@@ -32,11 +32,12 @@ public:
   {
     return static_cast<HTMLTableCaptionElement*>(GetChild(nsGkAtoms::caption));
   }
-  void SetCaption(HTMLTableCaptionElement* aCaption, ErrorResult& aError)
+  void SetCaption(HTMLTableCaptionElement* aCaption)
   {
     DeleteCaption();
     if (aCaption) {
-      nsINode::AppendChild(*aCaption, aError);
+      mozilla::ErrorResult rv;
+      nsINode::AppendChild(*aCaption, rv);
     }
   }
 

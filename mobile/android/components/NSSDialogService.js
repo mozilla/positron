@@ -212,14 +212,13 @@ NSSDialogs.prototype = {
     this.showPrompt(p);
   },
 
-  chooseCertificate: function(ctx, hostname, port, organization, issuerOrg,
-                              certList, selectedIndex) {
+  chooseCertificate: function(ctx, cnAndPort, organization, issuerOrg, certList,
+                              selectedIndex) {
     let rememberSetting =
       Services.prefs.getBoolPref("security.remember_cert_checkbox_default_setting");
 
     let serverRequestedDetails = [
-      this.formatString("clientAuthAsk.hostnameAndPort",
-                        [hostname, port.toString()]),
+      this.escapeHTML(cnAndPort),
       this.formatString("clientAuthAsk.organization", [organization]),
       this.formatString("clientAuthAsk.issuer", [issuerOrg]),
     ].join("<br/>");

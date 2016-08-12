@@ -541,14 +541,12 @@ MacroAssembler::maxDouble(FloatRegister other, FloatRegister srcDest, bool handl
 void
 MacroAssembler::lshiftPtr(Imm32 imm, Register dest)
 {
-    MOZ_ASSERT(0 <= imm.value && imm.value < 64);
     Lsl(ARMRegister(dest, 64), ARMRegister(dest, 64), imm.value);
 }
 
 void
 MacroAssembler::lshift64(Imm32 imm, Register64 dest)
 {
-    MOZ_ASSERT(0 <= imm.value && imm.value < 64);
     lshiftPtr(imm, dest.reg);
 }
 
@@ -561,21 +559,18 @@ MacroAssembler::lshift32(Register shift, Register dest)
 void
 MacroAssembler::lshift32(Imm32 imm, Register dest)
 {
-    MOZ_ASSERT(0 <= imm.value && imm.value < 32);
     Lsl(ARMRegister(dest, 32), ARMRegister(dest, 32), imm.value);
 }
 
 void
 MacroAssembler::rshiftPtr(Imm32 imm, Register dest)
 {
-    MOZ_ASSERT(0 <= imm.value && imm.value < 64);
     Lsr(ARMRegister(dest, 64), ARMRegister(dest, 64), imm.value);
 }
 
 void
 MacroAssembler::rshiftPtr(Imm32 imm, Register src, Register dest)
 {
-    MOZ_ASSERT(0 <= imm.value && imm.value < 64);
     Lsr(ARMRegister(dest, 64), ARMRegister(src, 64), imm.value);
 }
 
@@ -588,14 +583,12 @@ MacroAssembler::rshift32(Register shift, Register dest)
 void
 MacroAssembler::rshift32(Imm32 imm, Register dest)
 {
-    MOZ_ASSERT(0 <= imm.value && imm.value < 32);
     Lsr(ARMRegister(dest, 32), ARMRegister(dest, 32), imm.value);
 }
 
 void
 MacroAssembler::rshiftPtrArithmetic(Imm32 imm, Register dest)
 {
-    MOZ_ASSERT(0 <= imm.value && imm.value < 64);
     Asr(ARMRegister(dest, 64), ARMRegister(dest, 64), imm.value);
 }
 
@@ -608,14 +601,12 @@ MacroAssembler::rshift32Arithmetic(Register shift, Register dest)
 void
 MacroAssembler::rshift32Arithmetic(Imm32 imm, Register dest)
 {
-    MOZ_ASSERT(0 <= imm.value && imm.value < 32);
     Asr(ARMRegister(dest, 32), ARMRegister(dest, 32), imm.value);
 }
 
 void
 MacroAssembler::rshift64(Imm32 imm, Register64 dest)
 {
-    MOZ_ASSERT(0 <= imm.value && imm.value < 64);
     rshiftPtr(imm, dest.reg);
 }
 
@@ -660,9 +651,8 @@ MacroAssembler::ctz32(Register src, Register dest, bool knownNotZero)
 // ===============================================================
 // Branch functions
 
-template <class L>
 void
-MacroAssembler::branch32(Condition cond, Register lhs, Register rhs, L label)
+MacroAssembler::branch32(Condition cond, Register lhs, Register rhs, Label* label)
 {
     cmp32(lhs, rhs);
     B(label, cond);
@@ -927,7 +917,7 @@ MacroAssembler::branchFloat(DoubleCondition cond, FloatRegister lhs, FloatRegist
 }
 
 void
-MacroAssembler::branchTruncateFloat32MaybeModUint32(FloatRegister src, Register dest, Label* fail)
+MacroAssembler::branchTruncateFloat32(FloatRegister src, Register dest, Label* fail)
 {
     vixl::UseScratchRegisterScope temps(this);
     const ARMRegister scratch64 = temps.AcquireX();
@@ -942,12 +932,6 @@ MacroAssembler::branchTruncateFloat32MaybeModUint32(FloatRegister src, Register 
     Cmn(scratch64, 3);
     B(fail, Assembler::Above);
     And(dest64, dest64, Operand(0xffffffff));
-}
-
-void
-MacroAssembler::branchTruncateFloat32ToInt32(FloatRegister src, Register dest, Label* fail)
-{
-    convertFloat32ToInt32(src, dest, fail);
 }
 
 void
@@ -974,7 +958,7 @@ MacroAssembler::branchDouble(DoubleCondition cond, FloatRegister lhs, FloatRegis
 }
 
 void
-MacroAssembler::branchTruncateDoubleMaybeModUint32(FloatRegister src, Register dest, Label* fail)
+MacroAssembler::branchTruncateDouble(FloatRegister src, Register dest, Label* fail)
 {
     vixl::UseScratchRegisterScope temps(this);
     const ARMRegister scratch64 = temps.AcquireX();
@@ -990,12 +974,6 @@ MacroAssembler::branchTruncateDoubleMaybeModUint32(FloatRegister src, Register d
     Cmn(scratch64, 3);
     B(fail, Assembler::Above);
     And(dest64, dest64, Operand(0xffffffff));
-}
-
-void
-MacroAssembler::branchTruncateDoubleToInt32(FloatRegister src, Register dest, Label* fail)
-{
-    convertDoubleToInt32(src, dest, fail);
 }
 
 template <typename T>
@@ -1063,9 +1041,8 @@ MacroAssembler::branchTest32(Condition cond, const AbsoluteAddress& lhs, Imm32 r
     branchTest32(cond, scratch, rhs, label);
 }
 
-template <class L>
 void
-MacroAssembler::branchTestPtr(Condition cond, Register lhs, Register rhs, L label)
+MacroAssembler::branchTestPtr(Condition cond, Register lhs, Register rhs, Label* label)
 {
     Tst(ARMRegister(lhs, 64), Operand(ARMRegister(rhs, 64)));
     B(label, cond);
@@ -1088,10 +1065,9 @@ MacroAssembler::branchTestPtr(Condition cond, const Address& lhs, Imm32 rhs, Lab
     branchTestPtr(cond, scratch, rhs, label);
 }
 
-template <class L>
 void
 MacroAssembler::branchTest64(Condition cond, Register64 lhs, Register64 rhs, Register temp,
-                             L label)
+                             Label* label)
 {
     branchTestPtr(cond, lhs.reg, rhs.reg, label);
 }

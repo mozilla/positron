@@ -81,24 +81,15 @@ ObjectActor.prototype = {
 
     let g = {
       "type": "object",
-      "actor": this.actorID
+      "class": this.obj.class,
+      "actor": this.actorID,
+      "extensible": this.obj.isExtensible(),
+      "frozen": this.obj.isFrozen(),
+      "sealed": this.obj.isSealed()
     };
 
-    // If it's a proxy, lie and tell that it belongs to an invented
-    // "Proxy" class, and avoid calling the [[IsExtensible]] trap
-    if(this.obj.isProxy) {
-      g.class = "Proxy";
-      g.proxyTarget = this.hooks.createValueGrip(this.obj.proxyTarget);
-      g.proxyHandler = this.hooks.createValueGrip(this.obj.proxyHandler);
-    } else {
-      g.class = this.obj.class;
-      g.extensible = this.obj.isExtensible();
-      g.frozen = this.obj.isFrozen();
-      g.sealed = this.obj.isSealed();
-    }
-
-    if (g.class != "DeadObject") {
-      if (g.class == "Promise") {
+    if (this.obj.class != "DeadObject") {
+      if (this.obj.class == "Promise") {
         g.promiseState = this._createPromiseState();
       }
 
@@ -107,7 +98,7 @@ ObjectActor.prototype = {
       // Throws on some MouseEvent object in tests.
       try {
         // Bug 1163520: Assert on internal functions
-        if (!["Function", "Proxy"].includes(g.class)) {
+        if (this.obj.class != "Function") {
           g.ownPropertyLength = this.obj.getOwnPropertyNames().length;
         }
       } catch (e) {}
@@ -124,7 +115,7 @@ ObjectActor.prototype = {
         raw = null;
       }
 
-      let previewers = DebuggerServer.ObjectActorPreviewers[g.class] ||
+      let previewers = DebuggerServer.ObjectActorPreviewers[this.obj.class] ||
                        DebuggerServer.ObjectActorPreviewers.Object;
       for (let fn of previewers) {
         try {
@@ -1342,23 +1333,6 @@ DebuggerServer.ObjectActorPreviewers = {
         break;
       }
     }
-
-    return true;
-  }],
-
-  Proxy: [function ({obj, hooks}, grip, rawObj) {
-    grip.preview = {
-      kind: "Object",
-      ownProperties: Object.create(null),
-      ownPropertiesLength: 2
-    };
-
-    if (hooks.getGripDepth() > 1) {
-      return true;
-    }
-
-    grip.preview.ownProperties['<target>'] = {value: grip.proxyTarget};
-    grip.preview.ownProperties['<handler>'] = {value: grip.proxyHandler};
 
     return true;
   }],

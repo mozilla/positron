@@ -190,10 +190,6 @@ class FakeCompiler(dict):
             pp.out = StringIO()
             pp.do_include(file)
             return 0, pp.out.getvalue(), ''
-        elif '-c' in flags:
-            if '-funknown-flag' in flags:
-                return 1, '', ''
-            return 0, '', ''
 
         return 1, '', ''
 
@@ -348,7 +344,7 @@ class CompilerResult(ReadOnlyNamespace):
     '''
 
     def __init__(self, wrapper=None, compiler='', version='', type='',
-                 language='', flags=None):
+                 flags=None):
         if flags is None:
             flags = []
         if wrapper is None:
@@ -359,7 +355,6 @@ class CompilerResult(ReadOnlyNamespace):
             type=type,
             compiler=mozpath.abspath(compiler),
             wrapper=wrapper,
-            language=language,
         )
 
     def __add__(self, other):
@@ -381,7 +376,6 @@ class TestCompilerResult(unittest.TestCase):
             'compiler': mozpath.abspath(''),
             'version': '',
             'type': '',
-            'language': '',
             'flags': [],
         })
 
@@ -389,7 +383,6 @@ class TestCompilerResult(unittest.TestCase):
             compiler='/usr/bin/gcc',
             version='4.2.1',
             type='gcc',
-            language='C',
             flags=['-std=gnu99'],
         )
         self.assertEquals(result.__dict__, {
@@ -397,7 +390,6 @@ class TestCompilerResult(unittest.TestCase):
             'compiler': mozpath.abspath('/usr/bin/gcc'),
             'version': '4.2.1',
             'type': 'gcc',
-            'language': 'C',
             'flags': ['-std=gnu99'],
         })
 
@@ -407,7 +399,6 @@ class TestCompilerResult(unittest.TestCase):
             'compiler': mozpath.abspath('/usr/bin/gcc'),
             'version': '4.2.1',
             'type': 'gcc',
-            'language': 'C',
             'flags': ['-std=gnu99', '-m32'],
         })
         # Original flags are untouched.
@@ -423,7 +414,6 @@ class TestCompilerResult(unittest.TestCase):
             'compiler': mozpath.abspath('/usr/bin/gcc-4.7'),
             'version': '4.7.3',
             'type': 'gcc',
-            'language': 'C',
             'flags': ['-std=gnu99', '-m32'],
         })
 

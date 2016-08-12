@@ -181,7 +181,7 @@ PresentationDeviceManager::AddDevice(nsIPresentationDevice* aDevice)
 
   mDevices.AppendElement(aDevice);
 
-  NotifyDeviceChange(aDevice, u"add");
+  NotifyDeviceChange(aDevice, MOZ_UTF16("add"));
 
   return NS_OK;
 }
@@ -199,7 +199,7 @@ PresentationDeviceManager::RemoveDevice(nsIPresentationDevice* aDevice)
 
   mDevices.RemoveElementAt(index);
 
-  NotifyDeviceChange(aDevice, u"remove");
+  NotifyDeviceChange(aDevice, MOZ_UTF16("remove"));
 
   return NS_OK;
 }
@@ -214,7 +214,7 @@ PresentationDeviceManager::UpdateDevice(nsIPresentationDevice* aDevice)
     return NS_ERROR_FAILURE;
   }
 
-  NotifyDeviceChange(aDevice, u"update");
+  NotifyDeviceChange(aDevice, MOZ_UTF16("update"));
 
   return NS_OK;
 }
@@ -257,27 +257,6 @@ PresentationDeviceManager::OnTerminateRequest(nsIPresentationDevice* aDevice,
                                      aControlChannel, aIsFromReceiver);
   obs->NotifyObservers(request,
                        PRESENTATION_TERMINATE_REQUEST_TOPIC,
-                       nullptr);
-
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-PresentationDeviceManager::OnReconnectRequest(nsIPresentationDevice* aDevice,
-                                              const nsAString& aUrl,
-                                              const nsAString& aPresentationId,
-                                              nsIPresentationControlChannel* aControlChannel)
-{
-  NS_ENSURE_ARG(aDevice);
-  NS_ENSURE_ARG(aControlChannel);
-
-  nsCOMPtr<nsIObserverService> obs = services::GetObserverService();
-  NS_ENSURE_TRUE(obs, NS_ERROR_FAILURE);
-
-  RefPtr<PresentationSessionRequest> request =
-    new PresentationSessionRequest(aDevice, aUrl, aPresentationId, aControlChannel);
-  obs->NotifyObservers(request,
-                       PRESENTATION_RECONNECT_REQUEST_TOPIC,
                        nullptr);
 
   return NS_OK;

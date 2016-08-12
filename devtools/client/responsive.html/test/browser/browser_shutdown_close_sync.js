@@ -3,17 +3,16 @@
 
 "use strict";
 
-// Verify RDM closes synchronously when tabs are closed.
+// Verify RDM closes synchronously in the case of the "beforeunload" event.
 
 const TEST_URL = "http://example.com/";
-
 add_task(function* () {
   let tab = yield addTab(TEST_URL);
 
   let { ui } = yield openRDM(tab);
 
   closeRDM(tab, {
-    reason: "TabClose",
+    reason: "beforeunload",
   });
 
   // This flag is set at the end of `ResponsiveUI.destroy`.  If it is true
@@ -22,17 +21,4 @@ add_task(function* () {
   is(ui.destroyed, true, "RDM closed synchronously");
 
   yield removeTab(tab);
-});
-
-add_task(function* () {
-  let tab = yield addTab(TEST_URL);
-
-  let { ui } = yield openRDM(tab);
-
-  yield removeTab(tab);
-
-  // This flag is set at the end of `ResponsiveUI.destroy`.  If it is true without
-  // yielding on `closeRDM` itself and only removing the tab, then we must have closed
-  // synchronously in response to tab closing.
-  is(ui.destroyed, true, "RDM closed synchronously");
 });

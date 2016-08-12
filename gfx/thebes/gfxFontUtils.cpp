@@ -886,7 +886,7 @@ nsresult gfxFontUtils::MakeUniqueUserFontName(nsAString& aName)
             *p = '-';
     }
 
-    aName.AssignLiteral(u"uf");
+    aName.AssignLiteral(MOZ_UTF16("uf"));
     aName.AppendASCII(guidB64);
     return NS_OK;
 }
@@ -1778,8 +1778,3 @@ gfxFontUtils::IsCffFont(const uint8_t* aFontData)
 
 #endif
 
-#undef acceptablePlatform
-#undef isSymbol
-#undef isUVSEncoding
-#undef LOG
-#undef LOG_ENABLED

@@ -12,7 +12,7 @@
 #include "domstubs.idl"
 
 %{C++
-#include "nsTArrayForwardDeclare.h"
+template<class T> class InfallibleTArray;
 %}
 [ref] native nsUint8TArrayRef(InfallibleTArray<uint8_t>);
 [ptr] native JSContextPtr(JSContext);

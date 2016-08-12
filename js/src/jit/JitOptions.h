@@ -69,7 +69,6 @@ struct DefaultJitOptions
     bool limitScriptSize;
     bool osr;
     bool wasmTestMode;
-    bool wasmExplicitBoundsChecks;
     uint32_t baselineWarmUpThreshold;
     uint32_t exceptionBailoutThreshold;
     uint32_t frequentBailoutThreshold;

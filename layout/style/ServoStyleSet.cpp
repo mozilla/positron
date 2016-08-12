@@ -10,7 +10,6 @@
 #include "nsCSSAnonBoxes.h"
 #include "nsCSSPseudoElements.h"
 #include "nsIDocumentInlines.h"
-#include "nsPrintfCString.h"
 #include "nsStyleContext.h"
 #include "nsStyleSet.h"
 
@@ -21,7 +20,6 @@ ServoStyleSet::ServoStyleSet()
   : mPresContext(nullptr)
   , mRawSet(Servo_InitStyleSet())
   , mBatching(0)
-  , mStylingStarted(false)
 {
 }
 
@@ -70,16 +68,6 @@ ServoStyleSet::EndUpdate()
 
   // ... do something ...
   return NS_OK;
-}
-
-void
-ServoStyleSet::StartStyling(nsPresContext* aPresContext)
-{
-  Element* root = aPresContext->Document()->GetRootElement();
-  if (root) {
-    RestyleSubtree(root);
-  }
-  mStylingStarted = true;
 }
 
 already_AddRefed<nsStyleContext>
@@ -141,11 +129,9 @@ ServoStyleSet::ResolveStyleForText(nsIContent* aTextNode,
 already_AddRefed<nsStyleContext>
 ServoStyleSet::ResolveStyleForOtherNonElement(nsStyleContext* aParentContext)
 {
-  // The parent context can be null if the non-element share a style context
-  // with the root of an anonymous subtree.
-  ServoComputedValues* parent =
-    aParentContext ? aParentContext->StyleSource().AsServoComputedValues() : nullptr;
-  RefPtr<ServoComputedValues> computedValues = dont_AddRef(Servo_InheritComputedValues(parent));
+  RefPtr<ServoComputedValues> computedValues =
+    Servo_InheritComputedValues(
+      aParentContext->StyleSource().AsServoComputedValues());
   MOZ_ASSERT(computedValues);
 
   return GetContext(computedValues.forget(), aParentContext,
@@ -167,9 +153,9 @@ ServoStyleSet::ResolvePseudoElementStyle(Element* aParentElement,
   nsIAtom* pseudoTag = nsCSSPseudoElements::GetPseudoAtom(aType);
 
   RefPtr<ServoComputedValues> computedValues =
-    dont_AddRef(Servo_GetComputedValuesForPseudoElement(
+    Servo_GetComputedValuesForPseudoElement(
       aParentContext->StyleSource().AsServoComputedValues(),
-      aParentElement, pseudoTag, mRawSet.get(), /* is_probe = */ false));
+      aParentElement, pseudoTag, mRawSet.get(), /* is_probe = */ false);
   MOZ_ASSERT(computedValues);
 
   return GetContext(computedValues.forget(), aParentContext, pseudoTag, aType);
@@ -193,15 +179,7 @@ ServoStyleSet::ResolveAnonymousBoxStyle(nsIAtom* aPseudoTag,
   RefPtr<ServoComputedValues> computedValues =
     dont_AddRef(Servo_GetComputedValuesForAnonymousBox(parentStyle, aPseudoTag,
                                                        mRawSet.get()));
-#ifdef DEBUG
-  if (!computedValues) {
-    nsString pseudo;
-    aPseudoTag->ToString(pseudo);
-    NS_ERROR(nsPrintfCString("stylo: could not get anon-box: %s",
-             NS_ConvertUTF16toUTF8(pseudo).get()).get());
-    MOZ_CRASH();
-  }
-#endif
+  MOZ_ASSERT(computedValues);
 
   return NS_NewStyleContext(aParentContext, mPresContext, aPseudoTag,
                             CSSPseudoElementType::AnonBox,
@@ -263,23 +241,7 @@ nsresult
 ServoStyleSet::ReplaceSheets(SheetType aType,
                              const nsTArray<RefPtr<ServoStyleSheet>>& aNewSheets)
 {
-  // Gecko uses a two-dimensional array keyed by sheet type, whereas Servo
-  // stores a flattened list. This makes ReplaceSheets a pretty clunky thing
-  // to express. If the need ever arises, we can easily make this more efficent,
-  // probably by aligning the representations better between engines.
-
-  for (ServoStyleSheet* sheet : mSheets[aType]) {
-    Servo_RemoveStyleSheet(sheet->RawSheet(), mRawSet.get());
-  }
-
-  mSheets[aType].Clear();
-  mSheets[aType].AppendElements(aNewSheets);
-
-  for (ServoStyleSheet* sheet : mSheets[aType]) {
-    Servo_AppendStyleSheet(sheet->RawSheet(), mRawSet.get());
-  }
-
-  return NS_OK;
+  MOZ_CRASH("stylo: not implemented");
 }
 
 nsresult
@@ -362,9 +324,9 @@ ServoStyleSet::ProbePseudoElementStyle(Element* aParentElement,
   nsIAtom* pseudoTag = nsCSSPseudoElements::GetPseudoAtom(aType);
 
   RefPtr<ServoComputedValues> computedValues =
-    dont_AddRef(Servo_GetComputedValuesForPseudoElement(
+    Servo_GetComputedValuesForPseudoElement(
       aParentContext->StyleSource().AsServoComputedValues(),
-      aParentElement, pseudoTag, mRawSet.get(), /* is_probe = */ true));
+      aParentElement, pseudoTag, mRawSet.get(), /* is_probe = */ true);
 
   if (!computedValues) {
     return nullptr;
@@ -405,7 +367,7 @@ nsRestyleHint
 ServoStyleSet::HasStateDependentStyle(dom::Element* aElement,
                                       EventStates aStateMask)
 {
-  NS_WARNING("stylo: HasStateDependentStyle always returns zero!");
+  NS_ERROR("stylo: HasStateDependentStyle not implemented");
   return nsRestyleHint(0);
 }
 
@@ -415,20 +377,17 @@ ServoStyleSet::HasStateDependentStyle(dom::Element* aElement,
                                      dom::Element* aPseudoElement,
                                      EventStates aStateMask)
 {
-  NS_WARNING("stylo: HasStateDependentStyle always returns zero!");
+  NS_ERROR("stylo: HasStateDependentStyle not implemented");
   return nsRestyleHint(0);
 }
 
-nsRestyleHint
-ServoStyleSet::ComputeRestyleHint(dom::Element* aElement,
-                                  ServoElementSnapshot* aSnapshot)
-{
-  return Servo_ComputeRestyleHint(aElement, aSnapshot, mRawSet.get());
-}
-
 void
-ServoStyleSet::RestyleSubtree(nsINode* aNode)
+ServoStyleSet::RestyleSubtree(nsINode* aNode, bool aForce)
 {
-  MOZ_ASSERT(aNode->IsDirtyForServo() || aNode->HasDirtyDescendantsForServo());
+  if (aForce) {
+    MOZ_ASSERT(aNode->IsContent());
+    ServoRestyleManager::DirtyTree(aNode->AsContent());
+  }
+
   Servo_RestyleSubtree(aNode, mRawSet.get());
 }

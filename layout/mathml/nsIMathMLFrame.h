@@ -11,11 +11,9 @@
 
 struct nsPresentationData;
 struct nsEmbellishData;
+class nsHTMLReflowMetrics;
 class nsRenderingContext;
 class nsIFrame;
-namespace mozilla {
-class ReflowOutput;
-} // namespace mozilla
 
 // For MathML, this 'type' will be used to determine the spacing between frames
 // Subclasses can return a 'type' that will give them a particular spacing
@@ -86,7 +84,7 @@ public:
   Stretch(mozilla::gfx::DrawTarget* aDrawTarget,
           nsStretchDirection   aStretchDirection,
           nsBoundingMetrics&   aContainerSize,
-          mozilla::ReflowOutput& aDesiredStretchSize) = 0;
+          nsHTMLReflowMetrics& aDesiredStretchSize) = 0;
 
  /* Get the mEmbellishData member variable. */
  

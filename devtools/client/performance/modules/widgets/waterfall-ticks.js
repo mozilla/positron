@@ -15,23 +15,16 @@ const HTML_NS = "http://www.w3.org/1999/xhtml";
 
 const FIND_OPTIMAL_TICK_INTERVAL_MAX_ITERS = 100;
 
-// ms
-const WATERFALL_HEADER_TICKS_MULTIPLE = 5;
-// px
-const WATERFALL_HEADER_TICKS_SPACING_MIN = 50;
-// px
-const WATERFALL_HEADER_TEXT_PADDING = 3;
+const WATERFALL_HEADER_TICKS_MULTIPLE = 5; // ms
+const WATERFALL_HEADER_TICKS_SPACING_MIN = 50; // px
+const WATERFALL_HEADER_TEXT_PADDING = 3; // px
 
-// ms
-const WATERFALL_BACKGROUND_TICKS_MULTIPLE = 5;
+const WATERFALL_BACKGROUND_TICKS_MULTIPLE = 5; // ms
 const WATERFALL_BACKGROUND_TICKS_SCALES = 3;
-// px
-const WATERFALL_BACKGROUND_TICKS_SPACING_MIN = 10;
+const WATERFALL_BACKGROUND_TICKS_SPACING_MIN = 10; // px
 const WATERFALL_BACKGROUND_TICKS_COLOR_RGB = [128, 136, 144];
-// byte
-const WATERFALL_BACKGROUND_TICKS_OPACITY_MIN = 32;
-// byte
-const WATERFALL_BACKGROUND_TICKS_OPACITY_ADD = 32;
+const WATERFALL_BACKGROUND_TICKS_OPACITY_MIN = 32; // byte
+const WATERFALL_BACKGROUND_TICKS_OPACITY_ADD = 32; // byte
 
 /**
  * A header for a markers waterfall.
@@ -122,8 +115,7 @@ WaterfallHeader.prototype = {
 
     // Nuke the context.
     let canvasWidth = canvas.width = waterfallWidth;
-    // Awww yeah, 1px, repeats on Y axis.
-    let canvasHeight = canvas.height = 1;
+    let canvasHeight = canvas.height = 1; // Awww yeah, 1px, repeats on Y axis.
 
     // Start over.
     let imageData = ctx.createImageData(canvasWidth, canvasHeight);

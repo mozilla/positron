@@ -1,4 +1,4 @@
-# -*- Mode: python; indent-tabs-mode: nil; tab-width: 40 -*-
+# -*- Mode: python; c-basic-offset: 4; indent-tabs-mode: nil; tab-width: 40 -*-
 # vim: set filetype=python:
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -72,6 +72,8 @@ EXPORTS += [
     'nsFrameState.h',
     'nsFrameStateBits.h',
     'nsHTMLParts.h',
+    'nsHTMLReflowMetrics.h',
+    'nsHTMLReflowState.h',
     'nsIAnonymousContentCreator.h',
     'nsIFrame.h',
     'nsIFrameInlines.h',
@@ -100,8 +102,6 @@ EXPORTS += [
 ]
 
 EXPORTS.mozilla += [
-    'ReflowInput.h',
-    'ReflowOutput.h',
     'WritingModes.h',
 ]
 
@@ -115,7 +115,6 @@ EXPORTS.mozilla.layout += [
 
 UNIFIED_SOURCES += [
     'AsyncScrollBase.cpp',
-    'BlockReflowInput.cpp',
     'DetailsFrame.cpp',
     'FrameChildList.cpp',
     'MathMLTextRunFactory.cpp',
@@ -123,6 +122,7 @@ UNIFIED_SOURCES += [
     'nsBackdropFrame.cpp',
     'nsBlockFrame.cpp',
     'nsBlockReflowContext.cpp',
+    'nsBlockReflowState.cpp',
     'nsBRFrame.cpp',
     'nsBulletFrame.cpp',
     'nsCanvasFrame.cpp',
@@ -140,6 +140,8 @@ UNIFIED_SOURCES += [
     'nsGfxScrollFrame.cpp',
     'nsGridContainerFrame.cpp',
     'nsHTMLCanvasFrame.cpp',
+    'nsHTMLReflowMetrics.cpp',
+    'nsHTMLReflowState.cpp',
     'nsImageFrame.cpp',
     'nsImageMap.cpp',
     'nsInlineFrame.cpp',
@@ -164,8 +166,6 @@ UNIFIED_SOURCES += [
     'nsTextRunTransformations.cpp',
     'nsVideoFrame.cpp',
     'nsViewportFrame.cpp',
-    'ReflowInput.cpp',
-    'ReflowOutput.cpp',
     'RubyUtils.cpp',
     'ScrollbarActivity.cpp',
     'ScrollSnap.cpp',

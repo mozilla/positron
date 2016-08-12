@@ -48,11 +48,11 @@ class ScreenCaptureTestCase(MarionetteTestCase):
 class Chrome(ScreenCaptureTestCase):
     @property
     def primary_window_dimensions(self):
-        current_window = self.marionette.current_chrome_window_handle
+        current_window = self.marionette.current_window_handle
         self.marionette.switch_to_window(self.original_window)
         with self.marionette.using_context("chrome"):
             rv = tuple(self.marionette.execute_script("""
-                let el = document.documentElement;
+                let el = document.getElementsByTagName("window")[0];
                 let rect = el.getBoundingClientRect();
                 return [rect.width, rect.height];
                 """))
@@ -62,7 +62,7 @@ class Chrome(ScreenCaptureTestCase):
     def setUp(self):
         ScreenCaptureTestCase.setUp(self)
         self.marionette.set_context("chrome")
-        self.original_window = self.marionette.current_chrome_window_handle
+        self.original_window = self.marionette.current_window_handle
 
     def tearDown(self):
         self.marionette.switch_to_window(self.original_window)
@@ -84,29 +84,23 @@ class Chrome(ScreenCaptureTestCase):
 
     # This tests that GeckoDriver#takeScreenshot uses
     # currentContext.document.documentElement instead of looking for a
-    # <window> element, which does not exist for all windows.
+    # <window> element, which does not exist for secondary windows.
     def test_secondary_windows(self):
-        self.assertEqual(len(self.marionette.chrome_window_handles), 1)
         ss = self.marionette.screenshot()
         self.marionette.execute_script("""
-            window.open('chrome://marionette/content/test_dialog.xul', 'foo',
-                        'dialog,height=200,width=300');
+            window.open('chrome://marionette/content/doesnotexist.xul',
+            'foo',
+            'chrome');
             """)
-        self.assertEqual(len(self.marionette.chrome_window_handles), 2)
-        # TODO: Bug 1288769 prevents us from switching to the dialog via its name
-        # self.marionette.switch_to_window('foo')
-        new_win = None
-        for win in self.marionette.chrome_window_handles:
-            if win != self.original_window:
-                new_win = win
-                break
-        self.marionette.switch_to_window(new_win)
+        self.marionette.switch_to_window("foo")
+        # there can be a race between opening and registering the window
+        # and switching to it. Waiting a tiny amount of time is enough not to
+        # break anything.
+        time.sleep(0.002)
         ss = self.marionette.screenshot()
         size = self.get_image_dimensions(ss)
         self.assert_png(ss)
         self.assertNotEqual(self.primary_window_dimensions, size)
-
-        self.marionette.close_chrome_window()
 
 
 class Content(ScreenCaptureTestCase):

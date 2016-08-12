@@ -121,7 +121,8 @@ function serverOwnershipSubtree(walker, node) {
 }
 
 function serverOwnershipTree(walker) {
-  let serverWalker = DebuggerServer._searchAllConnectionsForActor(walker.actorID);
+  let serverConnection = walker.conn._transport._serverConnection;
+  let serverWalker = serverConnection.getActor(walker.actorID);
 
   return {
     root: serverOwnershipSubtree(serverWalker, serverWalker.rootDoc),

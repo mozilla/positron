@@ -3,7 +3,6 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 
-from marionette import Marionette
 from external_media_harness.testcase import MediaTestCase
 from external_media_tests.media_utils.video_puppeteer import VideoPuppeteer
 
@@ -18,7 +17,7 @@ class TestFullPlayback(MediaTestCase):
     """
 
     def test_video_playback_full(self):
-        with self.marionette.using_context(Marionette.CONTEXT_CONTENT):
+        with self.marionette.using_context('content'):
             for url in self.video_urls:
                 video = VideoPuppeteer(self.marionette, url,
                                        stall_wait_time=10)

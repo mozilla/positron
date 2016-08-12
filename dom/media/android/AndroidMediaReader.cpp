@@ -14,7 +14,6 @@
 #include "ImageContainer.h"
 #include "AbstractMediaDecoder.h"
 #include "gfx2DGlue.h"
-#include "VideoFrameContainer.h"
 
 namespace mozilla {
 
@@ -156,8 +155,8 @@ bool AndroidMediaReader::DecodeVideoFrame(bool &aKeyframeSkip,
       // when a frame is a keyframe.
 #if 0
       if (!frame.mKeyFrame) {
-        ++a.mStats.mParsedFrames;
-        ++a.mStats.mDroppedFrames;
+        ++a.mParsed;
+        ++a.mDropped;
         continue;
       }
 #endif
@@ -186,6 +185,7 @@ bool AndroidMediaReader::DecodeVideoFrame(bool &aKeyframeSkip,
       }
 
       v = VideoData::CreateFromImage(mInfo.mVideo,
+                                     mDecoder->GetImageContainer(),
                                      pos,
                                      frame.mTimeUs,
                                      1, // We don't know the duration yet.
@@ -230,23 +230,23 @@ bool AndroidMediaReader::DecodeVideoFrame(bool &aKeyframeSkip,
       }
 
       // This is the approximate byte position in the stream.
-      v = VideoData::CreateAndCopyData(mInfo.mVideo,
-                                       mDecoder->GetImageContainer(),
-                                       pos,
-                                       frame.mTimeUs,
-                                       1, // We don't know the duration yet.
-                                       b,
-                                       frame.mKeyFrame,
-                                       -1,
-                                       picture);
+      v = VideoData::Create(mInfo.mVideo,
+                            mDecoder->GetImageContainer(),
+                            pos,
+                            frame.mTimeUs,
+                            1, // We don't know the duration yet.
+                            b,
+                            frame.mKeyFrame,
+                            -1,
+                            picture);
     }
 
     if (!v) {
       return false;
     }
-    a.mStats.mParsedFrames++;
-    a.mStats.mDecodedFrames++;
-    NS_ASSERTION(a.mStats.mDecodedFrames <= a.mStats.mParsedFrames, "Expect to decode fewer frames than parsed in AndroidMedia...");
+    a.mParsed++;
+    a.mDecoded++;
+    NS_ASSERTION(a.mDecoded <= a.mParsed, "Expect to decode fewer frames than parsed in AndroidMedia...");
 
     // Since MPAPI doesn't give us the end time of frames, we keep one frame
     // buffered in AndroidMediaReader and push it into the queue as soon

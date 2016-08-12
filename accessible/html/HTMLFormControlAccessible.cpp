@@ -308,7 +308,7 @@ HTMLTextFieldAccessible::NativeAttributes()
   nsAutoString type;
   if (mContent->GetAttr(kNameSpaceID_None, nsGkAtoms::type, type)) {
     nsAccUtils::SetAccAttr(attributes, nsGkAtoms::textInputType, type);
-    if (!ARIARoleMap() && type.EqualsLiteral("search")) {
+    if (!mRoleMapEntry && type.EqualsLiteral("search")) {
       nsAccUtils::SetAccAttr(attributes, nsGkAtoms::xmlroles,
                              NS_LITERAL_STRING("searchbox"));
     }

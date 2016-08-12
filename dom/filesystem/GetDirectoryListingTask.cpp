@@ -365,9 +365,10 @@ GetDirectoryListingTaskParent::IOWork()
     nsCOMPtr<nsIFile> currFile = do_QueryInterface(supp);
     MOZ_ASSERT(currFile);
 
-    bool isSpecial, isFile;
-    if (NS_WARN_IF(NS_FAILED(currFile->IsSpecial(&isSpecial))) ||
-        isSpecial) {
+    bool isLink, isSpecial, isFile;
+    if (NS_WARN_IF(NS_FAILED(currFile->IsSymlink(&isLink)) ||
+                   NS_FAILED(currFile->IsSpecial(&isSpecial))) ||
+        isLink || isSpecial) {
       continue;
     }
     if (NS_WARN_IF(NS_FAILED(currFile->IsFile(&isFile)) ||

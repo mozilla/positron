@@ -21,14 +21,9 @@ interface SVGElement : Element {
   readonly attribute SVGSVGElement? ownerSVGElement;
   readonly attribute SVGElement? viewportElement;
 
-  attribute EventHandler oncopy;
-  attribute EventHandler oncut;
-  attribute EventHandler onpaste;
-
-  [SetterThrows, Pure]
-        attribute long tabIndex;
-  [Throws] void focus();
-  [Throws] void blur();
+           attribute EventHandler oncopy;
+           attribute EventHandler oncut;
+           attribute EventHandler onpaste;
 };
 
 SVGElement implements GlobalEventHandlers;

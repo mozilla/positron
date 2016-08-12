@@ -45,7 +45,6 @@
 #include "mozilla/layers/ImageBridgeChild.h"
 #if defined(XP_WIN)
 # include "mozilla/layers/D3D11ShareHandleImage.h"
-# include "mozilla/gfx/DeviceManagerD3D11.h"
 # include "mozilla/layers/TextureD3D11.h"
 #endif
 
@@ -401,7 +400,7 @@ PluginInstanceParent::AnswerNPN_GetValue_PreferredDXGIAdapter(DxgiAdapterDesc* a
         return false;
     }
 
-    RefPtr<ID3D11Device> device = DeviceManagerD3D11::Get()->GetContentDevice();
+    ID3D11Device* device = gfxWindowsPlatform::GetPlatform()->GetD3D11ContentDevice();
     if (!device) {
         return false;
     }
@@ -682,7 +681,7 @@ PluginInstanceParent::RecvInitDXGISurface(const gfx::SurfaceFormat& format,
         return true;
     }
 
-    RefPtr<ID3D11Device> d3d11 = DeviceManagerD3D11::Get()->GetContentDevice();
+    RefPtr<ID3D11Device> d3d11 = gfxWindowsPlatform::GetPlatform()->GetD3D11ContentDevice();
     if (!d3d11) {
         return true;
     }
@@ -954,9 +953,8 @@ PluginInstanceParent::RecvShow(const NPRect& updatedRect,
                    updatedRect.bottom - updatedRect.top);
         surface->MarkDirty(ur);
 
-        bool isPlugin = true;
         RefPtr<gfx::SourceSurface> sourceSurface =
-            gfxPlatform::GetPlatform()->GetSourceSurfaceForSurface(nullptr, surface, isPlugin);
+            gfxPlatform::GetPlatform()->GetSourceSurfaceForSurface(nullptr, surface);
         RefPtr<SourceSurfaceImage> image = new SourceSurfaceImage(surface->GetSize(), sourceSurface);
 
         AutoTArray<ImageContainer::NonOwningImage,1> imageList;

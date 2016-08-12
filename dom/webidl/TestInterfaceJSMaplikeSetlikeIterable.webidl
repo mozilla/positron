@@ -60,9 +60,3 @@ interface TestInterfaceIterableDouble {
   iterable<DOMString, DOMString>;
 };
 
-[Constructor(),
- Pref="dom.expose_test_interfaces"]
-interface TestInterfaceIterableDoubleUnion {
-  iterable<DOMString, (DOMString or long)>;
-};
-

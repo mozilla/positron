@@ -104,7 +104,7 @@ MediaEngineGonkVideoSource::NotifyPull(MediaStreamGraph* aGraph,
 }
 
 size_t
-MediaEngineGonkVideoSource::NumCapabilities() const
+MediaEngineGonkVideoSource::NumCapabilities()
 {
   // TODO: Stop hardcoding. Use GetRecorderProfiles+GetProfileInfo (Bug 1128550)
   //
@@ -150,16 +150,13 @@ nsresult
 MediaEngineGonkVideoSource::Allocate(const dom::MediaTrackConstraints& aConstraints,
                                      const MediaEnginePrefs& aPrefs,
                                      const nsString& aDeviceId,
-                                     const nsACString& aOrigin,
-                                     AllocationHandle** aOutHandle,
-                                     const char** aOutBadConstraint)
+                                     const nsACString& aOrigin)
 {
   LOG((__FUNCTION__));
 
   ReentrantMonitorAutoEnter sync(mCallbackMonitor);
   if (mState == kReleased && mInitDone) {
-    NormalizedConstraints constraints(aConstraints);
-    ChooseCapability(constraints, aPrefs, aDeviceId);
+    ChooseCapability(aConstraints, aPrefs, aDeviceId);
     NS_DispatchToMainThread(WrapRunnable(RefPtr<MediaEngineGonkVideoSource>(this),
                                          &MediaEngineGonkVideoSource::AllocImpl));
     mCallbackMonitor.Wait();
@@ -168,17 +165,13 @@ MediaEngineGonkVideoSource::Allocate(const dom::MediaTrackConstraints& aConstrai
     }
   }
 
-  *aOutHandle = nullptr;
   return NS_OK;
 }
 
 nsresult
-MediaEngineGonkVideoSource::Deallocate(AllocationHandle* aHandle)
+MediaEngineGonkVideoSource::Deallocate()
 {
   LOG((__FUNCTION__));
-  AssertIsOnOwningThread();
-  MOZ_ASSERT(!aHandle);
-
   bool empty;
   {
     MonitorAutoLock lock(mMonitor);
@@ -339,11 +332,9 @@ MediaEngineGonkVideoSource::Stop(SourceMediaStream* aSource, TrackID aID)
 }
 
 nsresult
-MediaEngineGonkVideoSource::Restart(AllocationHandle* aHandle,
-                                    const dom::MediaTrackConstraints& aConstraints,
+MediaEngineGonkVideoSource::Restart(const dom::MediaTrackConstraints& aConstraints,
                                     const MediaEnginePrefs& aPrefs,
-                                    const nsString& aDeviceId,
-                                    const char** aOutBadConstraint)
+                                    const nsString& aDeviceId)
 {
   return NS_OK;
 }
@@ -393,7 +384,7 @@ MediaEngineGonkVideoSource::Shutdown()
   }
 
   if (mState == kAllocated || mState == kStopped) {
-    Deallocate(nullptr);
+    Deallocate();
   }
 
   mState = kReleased;

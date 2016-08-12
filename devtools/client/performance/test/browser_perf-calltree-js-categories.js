@@ -26,8 +26,7 @@ add_task(function* () {
   Services.prefs.setBoolPref(UI_SHOW_PLATFORM_DATA_PREF, true);
 
   yield startRecording(panel);
-  // To show the `Gecko` category in the tree.
-  yield busyWait(100);
+  yield busyWait(100); // To show the `Gecko` category in the tree.
   yield stopRecording(panel);
 
   let rendered = once(JsCallTreeView, EVENTS.UI_JS_CALL_TREE_RENDERED);

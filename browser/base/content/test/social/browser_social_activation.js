@@ -14,39 +14,49 @@ var SocialService = Cu.import("resource://gre/modules/SocialService.jsm", {}).So
 
 var tabsToRemove = [];
 
-function removeProvider(provider) {
-  return new Promise(resolve => {
+
+function removeAllProviders(callback) {
+  // all the providers may have been added.
+  function removeProviders() {
+    if (Social.providers.length < 1) {
+      executeSoon(function() {
+        is(Social.providers.length, 0, "all providers removed");
+        executeSoon(callback);
+      });
+      return;
+    }
+
     // a full install sets the manifest into a pref, addProvider alone doesn't,
     // make sure we uninstall if the manifest was added.
-    if (provider.manifest) {
-      SocialService.uninstallProvider(provider.origin, resolve);
+    if (Social.providers[0].manifest) {
+      SocialService.uninstallProvider(Social.providers[0].origin, removeProviders);
     } else {
-      SocialService.disableProvider(provider.origin, resolve);
+      SocialService.disableProvider(Social.providers[0].origin, removeProviders);
     }
-  });
+  }
+  removeProviders();
 }
 
 function postTestCleanup(callback) {
-  Task.spawn(function () {
-    // any tabs opened by the test.
-    for (let tab of tabsToRemove) {
-      yield BrowserTestUtils.removeTab(tab);
-    }
-    tabsToRemove = [];
-    // all the providers may have been added.
-    while (Social.providers.length > 0) {
-      yield removeProvider(Social.providers[0]);
-    }
-  }).then(callback);
+  // any tabs opened by the test.
+  for (let tab of tabsToRemove)
+    gBrowser.removeTab(tab);
+  tabsToRemove = [];
+  // theses tests use the notification panel but don't bother waiting for it
+  // to fully open - the end result is that the panel might stay open
+  //SocialUI.activationPanel.hidePopup();
+
+  // all the providers may have been added.
+  removeAllProviders(callback);
 }
 
-function newTab(url) {
-  return new Promise(resolve => {
-    BrowserTestUtils.openNewForegroundTab(gBrowser, url).then(tab => {
-      tabsToRemove.push(tab);
-      resolve(tab);
-    });
-  });
+function addTab(url, callback) {
+  let tab = gBrowser.selectedTab = gBrowser.addTab(url, {skipAnimation: true});
+  tab.linkedBrowser.addEventListener("load", function tabLoad(event) {
+    tab.linkedBrowser.removeEventListener("load", tabLoad, true);
+    tabsToRemove.push(tab);
+    executeSoon(function() {callback(tab)});
+  }, true);
 }
 
 function sendActivationEvent(tab, callback, nullManifest) {
@@ -58,24 +68,33 @@ function sendActivationEvent(tab, callback, nullManifest) {
 
 function activateProvider(domain, callback, nullManifest) {
   let activationURL = domain+"/browser/browser/base/content/test/social/social_activate_basic.html"
-  newTab(activationURL).then(tab => {
+  addTab(activationURL, function(tab) {
     sendActivationEvent(tab, callback, nullManifest);
   });
 }
 
 function activateIFrameProvider(domain, callback) {
   let activationURL = domain+"/browser/browser/base/content/test/social/social_activate_iframe.html"
-  newTab(activationURL).then(tab => {
+  addTab(activationURL, function(tab) {
     sendActivationEvent(tab, callback, false);
   });
 }
 
-function waitForProviderLoad(origin) {
-  return Promise.all([
-    ensureFrameLoaded(gBrowser, origin + "/browser/browser/base/content/test/social/social_postActivation.html"),
-    ensureFrameLoaded(SocialSidebar.browser)
-  ]);
+function waitForProviderLoad(cb) {
+    waitForCondition(function() {
+      let sbrowser = document.getElementById("social-sidebar-browser");
+      let provider = SocialSidebar.provider;
+      let postActivation = provider && gBrowser.currentURI &&
+                            gBrowser.currentURI.spec == provider.origin + "/browser/browser/base/content/test/social/social_postActivation.html";
+
+      return postActivation && sbrowser.docShellIsActive;
+    }, function() {
+      // executeSoon to let the browser UI observers run first
+      executeSoon(cb);
+    },
+    "waitForProviderLoad: provider was not loaded");
 }
+
 
 function getAddonItemInList(aId, aList) {
   var item = aList.firstChild;
@@ -114,20 +133,22 @@ function clickAddonRemoveButton(tab, aCallback) {
 
 function activateOneProvider(manifest, finishActivation, aCallback) {
   let panel = document.getElementById("servicesInstall-notification");
-  BrowserTestUtils.waitForEvent(PopupNotifications.panel, "popupshown").then(() => {
+  PopupNotifications.panel.addEventListener("popupshown", function onpopupshown() {
+    PopupNotifications.panel.removeEventListener("popupshown", onpopupshown);
     ok(!panel.hidden, "servicesInstall-notification panel opened");
     if (finishActivation)
       panel.button.click();
     else
       panel.closebutton.click();
   });
-  BrowserTestUtils.waitForEvent(PopupNotifications.panel, "popuphidden").then(() => {
+  PopupNotifications.panel.addEventListener("popuphidden", function _hidden() {
+    PopupNotifications.panel.removeEventListener("popuphidden", _hidden);
     ok(panel.hidden, "servicesInstall-notification panel hidden");
     if (!finishActivation) {
       ok(panel.hidden, "activation panel is not showing");
       executeSoon(aCallback);
     } else {
-      waitForProviderLoad(manifest.origin).then(() => {
+      waitForProviderLoad(function() {
         is(SocialSidebar.provider.origin, manifest.origin, "new provider is active");
         ok(SocialSidebar.opened, "sidebar is open");
         checkSocialUI();
@@ -166,10 +187,6 @@ var gProviders = [
 
 
 function test() {
-  PopupNotifications.panel.setAttribute("animate", "false");
-  registerCleanupFunction(function () {
-    PopupNotifications.panel.removeAttribute("animate");
-  });
   waitForExplicitFinish();
   runSocialTests(tests, undefined, postTestCleanup);
 }
@@ -184,7 +201,7 @@ var tests = {
       ok(panel.hidden, "activation panel still hidden");
       checkSocialUI();
       Services.prefs.clearUserPref("social.remote-install.enabled");
-      next();
+      removeAllProviders(next);
     });
   },
   
@@ -195,7 +212,7 @@ var tests = {
       let panel = document.getElementById("servicesInstall-notification");
       ok(panel.hidden, "activation panel still hidden");
       checkSocialUI();
-      next();
+      removeAllProviders(next);
     });
   },
   
@@ -205,7 +222,7 @@ var tests = {
       // we deactivated leaving no providers left, so Social is disabled.
       ok(!SocialSidebar.provider, "should be no provider left after disabling");
       checkSocialUI();
-      next();
+      removeAllProviders(next);
     });
   },
   
@@ -223,7 +240,7 @@ var tests = {
           // we deactivated - the first provider should be enabled.
           is(SocialSidebar.provider.origin, Social.providers[1].origin, "original provider should have been reactivated");
           checkSocialUI();
-          next();
+          removeAllProviders(next);
         });
       });
     });
@@ -231,41 +248,52 @@ var tests = {
 
   testAddonManagerDoubleInstall: function(next) {
     // Create a new tab and load about:addons
-    let addonsTab = gBrowser.addTab();
-    gBrowser.selectedTab = addonsTab;
+    let blanktab = gBrowser.addTab();
+    gBrowser.selectedTab = blanktab;
     BrowserOpenAddonsMgr('addons://list/service');
+
+    is(blanktab, gBrowser.selectedTab, "Current tab should be blank tab");
+
     gBrowser.selectedBrowser.addEventListener("load", function tabLoad() {
       gBrowser.selectedBrowser.removeEventListener("load", tabLoad, true);
-      is(addonsTab.linkedBrowser.currentURI.spec, "about:addons", "about:addons should load into blank tab.");
+      let browser = blanktab.linkedBrowser;
+      is(browser.currentURI.spec, "about:addons", "about:addons should load into blank tab.");
 
       activateOneProvider(gProviders[0], true, function() {
         info("first activation completed");
         is(gBrowser.contentDocument.location.href, gProviders[0].origin + "/browser/browser/base/content/test/social/social_postActivation.html", "postActivationURL loaded");
-        BrowserTestUtils.removeTab(gBrowser.selectedTab).then(() => {
-          is(gBrowser.contentDocument.location.href, gProviders[0].origin + "/browser/browser/base/content/test/social/social_activate_basic.html", "activation page selected");
-          BrowserTestUtils.removeTab(gBrowser.selectedTab).then(() => {
-            tabsToRemove.pop();
-            // uninstall the provider
-            clickAddonRemoveButton(addonsTab, function(addon) {
-              checkSocialUI();
-              activateOneProvider(gProviders[0], true, function() {
-                info("second activation completed");
-                is(gBrowser.contentDocument.location.href, gProviders[0].origin + "/browser/browser/base/content/test/social/social_postActivation.html", "postActivationURL loaded");
-                BrowserTestUtils.removeTab(gBrowser.selectedTab).then(() => {
+        gBrowser.removeTab(gBrowser.selectedTab);
+        is(gBrowser.contentDocument.location.href, gProviders[0].origin + "/browser/browser/base/content/test/social/social_activate_basic.html", "activation page selected");
+        gBrowser.removeTab(gBrowser.selectedTab);
+        tabsToRemove.pop();
+        // uninstall the provider
+        clickAddonRemoveButton(blanktab, function(addon) {
+          checkSocialUI();
+          activateOneProvider(gProviders[0], true, function() {
+            info("second activation completed");
+            is(gBrowser.contentDocument.location.href, gProviders[0].origin + "/browser/browser/base/content/test/social/social_postActivation.html", "postActivationURL loaded");
+            gBrowser.removeTab(gBrowser.selectedTab);
 
-                  // after closing the addons tab, verify provider is still installed
-                  AddonManager.getAddonsByTypes(["service"], function(aAddons) {
-                    is(aAddons.length, 1, "there can be only one");
-
-                    let doc = addonsTab.linkedBrowser.contentDocument;
-                    let list = doc.getElementById("addon-list");
-                    is(list.childNodes.length, 1, "only one addon is displayed");
-
-                    BrowserTestUtils.removeTab(addonsTab).then(next);
-                  });
-                });
+            // after closing the addons tab, verify provider is still installed
+            gBrowser.tabContainer.addEventListener("TabClose", function onTabClose() {
+              gBrowser.tabContainer.removeEventListener("TabClose", onTabClose);
+              AddonManager.getAddonsByTypes(["service"], function(aAddons) {
+                is(aAddons.length, 1, "there can be only one");
+                removeAllProviders(next);
               });
             });
+
+            // verify only one provider in list
+            AddonManager.getAddonsByTypes(["service"], function(aAddons) {
+              is(aAddons.length, 1, "there can be only one");
+
+              let doc = blanktab.linkedBrowser.contentDocument;
+              let list = doc.getElementById("addon-list");
+              is(list.childNodes.length, 1, "only one addon is displayed");
+
+              gBrowser.removeTab(blanktab);
+            });
+
           });
         });
       });

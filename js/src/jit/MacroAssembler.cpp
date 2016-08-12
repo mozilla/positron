@@ -176,17 +176,14 @@ MacroAssembler::guardObjectType(Register obj, const TypeSet* types,
             continue;
         }
 
-        if (lastBranch.isInitialized()) {
-            comment("emit GC pointer checks");
+        if (lastBranch.isInitialized())
             lastBranch.emit(*this);
-        }
 
         JSObject* object = types->getSingletonNoBarrier(i);
         lastBranch = BranchGCPtr(Equal, obj, ImmGCPtr(object), &matched);
     }
 
     if (hasObjectGroups) {
-        comment("has object groups");
         // We are possibly going to overwrite the obj register. So already
         // emit the branch, since branch depends on previous value of obj
         // register and there is definitely a branch following. So no need
@@ -784,7 +781,6 @@ MacroAssembler::nurseryAllocate(Register result, Register temp, gc::AllocKind al
     const Nursery& nursery = GetJitContext()->runtime->gcNursery();
     int thingSize = int(gc::Arena::thingSize(allocKind));
     int totalSize = thingSize + nDynamicSlots * sizeof(HeapSlot);
-    MOZ_ASSERT(totalSize % gc::CellSize == 0);
     loadPtr(AbsoluteAddress(nursery.addressOfPosition()), result);
     computeEffectiveAddress(Address(result, totalSize), temp);
     branchPtr(Assembler::Below, AbsoluteAddress(nursery.addressOfCurrentEnd()), temp, fail);
@@ -1053,36 +1049,17 @@ JS_FOR_EACH_TYPED_ARRAY(CREATE_TYPED_ARRAY)
         MOZ_CRASH("Unsupported TypedArray type");
     }
 
-    nbytes = JS_ROUNDUP(nbytes, sizeof(Value));
-
-    // Elements can only be stored in the nursery since typed arrays have a
-    // finalizer that frees the memory, but the finalizer is only called for
-    // tenured objects. Allocating the memory in the nursery is done to avoid
-    // memory leaks.
-    if (nbytes > Nursery::MaxNurseryBufferSize)
-        return;
-
-    Nursery& nursery = cx->runtime()->gc.nursery;
-    void* buf = nursery.allocateBuffer(obj->zone(), nbytes);
+    void* buf = AllocateObjectBuffer<char>(cx, obj, nbytes);
     if (buf) {
-        if (nursery.isInside(buf) || obj->isTenured()) {
-            obj->initPrivate(buf);
-            memset(buf, 0, nbytes);
-        } else {
-            // If the nursery is full, |allocateBuffer| will try to allocate
-            // the memory in the tenured heap. This will leak memory when the
-            // object is not tenured since the finalizer will not be called for
-            // non-tenured objects.
-            nursery.removeMallocedBuffer(buf);
-            js_free(buf);
-        }
+        obj->initPrivate(buf);
+        memset(buf, 0, nbytes);
     }
 }
 
 void
 MacroAssembler::initTypedArraySlots(Register obj, Register temp, Register lengthReg,
                                     LiveRegisterSet liveRegs, Label* fail,
-                                    TypedArrayObject* templateObj, TypedArrayLength lengthKind)
+                                    TypedArrayObject* templateObj)
 {
     MOZ_ASSERT(templateObj->hasPrivate());
     MOZ_ASSERT(!templateObj->hasBuffer());
@@ -1097,7 +1074,7 @@ MacroAssembler::initTypedArraySlots(Register obj, Register temp, Register length
     int32_t length = templateObj->length();
     size_t nbytes = length * templateObj->bytesPerElement();
 
-    if (lengthKind == TypedArrayLength::Fixed && dataOffset + nbytes <= JSObject::MAX_BYTE_SIZE) {
+    if (dataOffset + nbytes <= JSObject::MAX_BYTE_SIZE) {
         MOZ_ASSERT(dataOffset + nbytes <= templateObj->tenuredSizeOfThis());
 
         // Store data elements inside the remaining JSObject slots.
@@ -1116,8 +1093,7 @@ MacroAssembler::initTypedArraySlots(Register obj, Register temp, Register length
         for (size_t i = 0; i < numZeroPointers; i++)
             storePtr(ImmWord(0), Address(obj, dataOffset + i * sizeof(char *)));
     } else {
-        if (lengthKind == TypedArrayLength::Fixed)
-            move32(Imm32(length), lengthReg);
+        move32(Imm32(length), lengthReg);
 
         // Allocate a buffer on the heap to store the data elements.
         liveRegs.addUnchecked(temp);
@@ -1996,7 +1972,7 @@ MacroAssembler::convertDoubleToInt(FloatRegister src, Register output, FloatRegi
         convertDoubleToInt32(src, output, fail, behavior == IntConversion_NegativeZeroCheck);
         break;
       case IntConversion_Truncate:
-        branchTruncateDoubleMaybeModUint32(src, output, truncateFail ? truncateFail : fail);
+        branchTruncateDouble(src, output, truncateFail ? truncateFail : fail);
         break;
       case IntConversion_ClampToUint8:
         // Clamping clobbers the input register, so use a temp.
@@ -2731,82 +2707,6 @@ MacroAssembler::maybeBranchTestType(MIRType type, MDefinition* maybeDef, Registe
             MOZ_CRASH("Unsupported type");
         }
     }
-}
-
-void
-MacroAssembler::wasmCallImport(const wasm::CallSiteDesc& desc, const wasm::CalleeDesc& callee)
-{
-    // Load the callee, before the caller's registers are clobbered.
-    uint32_t globalDataOffset = callee.importGlobalDataOffset();
-    loadWasmGlobalPtr(globalDataOffset + offsetof(wasm::FuncImportTls, code), ABINonArgReg0);
-
-    MOZ_ASSERT(ABINonArgReg0 != WasmTlsReg, "by constraint");
-
-    // Switch to the callee's TLS and pinned registers and make the call.
-    loadWasmGlobalPtr(globalDataOffset + offsetof(wasm::FuncImportTls, tls), WasmTlsReg);
-    loadWasmPinnedRegsFromTls();
-
-    call(desc, ABINonArgReg0);
-}
-
-void
-MacroAssembler::wasmCallIndirect(const wasm::CallSiteDesc& desc, const wasm::CalleeDesc& callee)
-{
-    Register scratch = WasmTableCallScratchReg;
-    Register index = WasmTableCallIndexReg;
-
-    if (callee.which() == wasm::CalleeDesc::AsmJSTable) {
-        // asm.js tables require no signature check, have had their index masked
-        // into range and thus need no bounds check and cannot be external.
-        loadWasmGlobalPtr(callee.tableGlobalDataOffset(), scratch);
-        loadPtr(BaseIndex(scratch, index, ScalePointer), scratch);
-        call(desc, scratch);
-        return;
-    }
-
-    MOZ_ASSERT(callee.which() == wasm::CalleeDesc::WasmTable);
-
-    // Write the sig-id into the ABI sig-id register.
-    wasm::SigIdDesc sigId = callee.wasmTableSigId();
-    switch (sigId.kind()) {
-      case wasm::SigIdDesc::Kind::Global:
-        loadWasmGlobalPtr(sigId.globalDataOffset(), WasmTableCallSigReg);
-        break;
-      case wasm::SigIdDesc::Kind::Immediate:
-        move32(Imm32(sigId.immediate()), WasmTableCallSigReg);
-        break;
-      case wasm::SigIdDesc::Kind::None:
-        break;
-    }
-
-    // WebAssembly throws if the index is out-of-bounds.
-    branch32(Assembler::Condition::AboveOrEqual,
-             index, Imm32(callee.wasmTableLength()),
-             wasm::JumpTarget::OutOfBounds);
-
-    // Load the base pointer of the table.
-    loadWasmGlobalPtr(callee.tableGlobalDataOffset(), scratch);
-
-    // Load the callee from the table.
-    if (callee.wasmTableIsExternal()) {
-        static_assert(sizeof(wasm::ExternalTableElem) == 8 || sizeof(wasm::ExternalTableElem) == 16,
-                      "elements of external tables are two words");
-        if (sizeof(wasm::ExternalTableElem) == 8) {
-            computeEffectiveAddress(BaseIndex(scratch, index, TimesEight), scratch);
-        } else {
-            lshift32(Imm32(4), index);
-            addPtr(index, scratch);
-        }
-
-        loadPtr(Address(scratch, offsetof(wasm::ExternalTableElem, tls)), WasmTlsReg);
-        loadWasmPinnedRegsFromTls();
-
-        loadPtr(Address(scratch, offsetof(wasm::ExternalTableElem, code)), scratch);
-    } else {
-        loadPtr(BaseIndex(scratch, index, ScalePointer), scratch);
-    }
-
-    call(desc, scratch);
 }
 
 //}}} check_macroassembler_style

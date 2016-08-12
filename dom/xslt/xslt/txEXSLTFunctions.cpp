@@ -258,7 +258,7 @@ txEXSLTFunctionCall::evaluate(txIEvalContext *aContext,
             NS_ENSURE_SUCCESS(rv, rv);
 
             if (exprResult->getResultType() == txAExprResult::NODESET) {
-                exprResult.forget(aResult);
+                exprResult.swap(*aResult);
             }
             else {
                 RefPtr<txNodeSet> resultSet;

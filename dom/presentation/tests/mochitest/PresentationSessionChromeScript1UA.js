@@ -23,7 +23,6 @@ const address = Cc["@mozilla.org/supports-cstring;1"]
 address.data = "127.0.0.1";
 const addresses = Cc["@mozilla.org/array;1"].createInstance(Ci.nsIMutableArray);
 addresses.appendElement(address, false);
-var triggerControlChannelError = false; // For simulating error during control channel establishment.
 
 function mockChannelDescription(role) {
   this.QueryInterface = XPCOMUtils.generateQI([Ci.nsIPresentationChannelDescription]);
@@ -176,12 +175,6 @@ const mockControlChannelOfSender = {
         .QueryInterface(Ci.nsIPresentationControlChannelListener)
         .notifyConnected();
   },
-  notifyReconnected: function() {
-    // send offer after notifyOpened immediately
-    this._listener
-        .QueryInterface(Ci.nsIPresentationControlChannelListener)
-        .notifyReconnected();
-  },
   sendOffer: function(offer) {
     sendAsyncMessage('offer-sent');
   },
@@ -205,9 +198,6 @@ const mockControlChannelOfSender = {
   },
   terminate: function(presentationId) {
     sendAsyncMessage('sender-terminate');
-  },
-  reconnect: function(presentationId, url) {
-    sendAsyncMessage('start-reconnect', url);
   },
 };
 
@@ -272,9 +262,6 @@ const mockDevice = {
   name: 'name',
   type: 'type',
   establishControlChannel: function(url, presentationId) {
-    if (triggerControlChannelError) {
-      throw Cr.NS_ERROR_FAILURE;
-    }
     sendAsyncMessage('control-channel-established');
     return mockControlChannelOfSender;
   },
@@ -408,23 +395,6 @@ function initMockAndListener() {
     debug('Got message: trigger-control-channel-open');
     mockControlChannelOfSender.notifyConnected();
     mockControlChannelOfReceiver.notifyConnected();
-  });
-
-  addMessageListener('trigger-control-channel-error', function(reason) {
-    debug('Got message: trigger-control-channel-open');
-    triggerControlChannelError = true;
-  });
-
-  addMessageListener('trigger-reconnected-acked', function(url) {
-    debug('Got message: trigger-reconnected-acked');
-    mockControlChannelOfSender.notifyReconnected();
-    var deviceManager = Cc['@mozilla.org/presentation-device/manager;1']
-                          .getService(Ci.nsIPresentationDeviceManager);
-    deviceManager.QueryInterface(Ci.nsIPresentationDeviceListener)
-                 .onReconnectRequest(mockDevice,
-                                     url,
-                                     sessionId,
-                                     mockControlChannelOfReceiver);
   });
 
   addMessageListener('trigger-on-offer', function() {

@@ -28,22 +28,6 @@
 
 using namespace mozilla;
 
-static bool
-IsLocalRefURL(nsStringBuffer* aString)
-{
-  // Find the first non-"C0 controls + space" character.
-  char16_t* current = static_cast<char16_t*>(aString->Data());
-  for (; *current != '\0'; current++) {
-    if (*current > 0x20) {
-      // if the first non-"C0 controls + space" character is '#', this is a
-      // local-ref URL.
-      return *current == '#';
-    }
-  }
-
-  return false;
-}
-
 nsCSSValue::nsCSSValue(int32_t aValue, nsCSSUnit aUnit)
   : mUnit(aUnit)
 {
@@ -429,9 +413,9 @@ void nsCSSValue::SetPercentValue(float aValue)
 
 void nsCSSValue::SetFloatValue(float aValue, nsCSSUnit aUnit)
 {
-  MOZ_ASSERT(IsFloatUnit(aUnit), "not a float value");
+  MOZ_ASSERT(eCSSUnit_Number <= aUnit, "not a float value");
   Reset();
-  if (IsFloatUnit(aUnit)) {
+  if (eCSSUnit_Number <= aUnit) {
     mUnit = aUnit;
     mValue.mFloat = aValue;
     MOZ_ASSERT(!mozilla::IsNaN(mValue.mFloat));
@@ -941,87 +925,28 @@ nsCSSValue::AppendCircleOrEllipseToString(nsCSSKeyword aFunctionId,
 
   bool hasRadii = array->Item(1).GetUnit() != eCSSUnit_Null;
 
-  // closest-side is the default, so we don't need to
-  // output it if all values are closest-side.
-  if (array->Item(1).GetUnit() == eCSSUnit_Enumerated &&
-      array->Item(1).GetIntValue() == NS_RADIUS_CLOSEST_SIDE &&
-      (aFunctionId == eCSSKeyword_circle ||
-       (array->Item(2).GetUnit() == eCSSUnit_Enumerated &&
-        array->Item(2).GetIntValue() == NS_RADIUS_CLOSEST_SIDE))) {
-    hasRadii = false;
-  } else {
-    AppendPositionCoordinateToString(array->Item(1), aProperty,
+  AppendPositionCoordinateToString(array->Item(1), aProperty,
                                      aResult, aSerialization);
 
-    if (hasRadii && aFunctionId == eCSSKeyword_ellipse) {
-      aResult.Append(' ');
-      AppendPositionCoordinateToString(array->Item(2), aProperty,
-                                       aResult, aSerialization);
-    }
-  }
-
-  if (hasRadii) {
+  if (hasRadii && aFunctionId == eCSSKeyword_ellipse) {
     aResult.Append(' ');
+    AppendPositionCoordinateToString(array->Item(2), aProperty,
+                                     aResult, aSerialization);
   }
 
   // Any position specified?
   if (array->Item(count).GetUnit() != eCSSUnit_Array) {
     MOZ_ASSERT(array->Item(count).GetUnit() == eCSSUnit_Null,
                "unexpected value");
-    // We only serialize to the 2 or 4 value form
-    // |circle()| is valid, but should be expanded
-    // to |circle(at 50% 50%)|
-    aResult.AppendLiteral("at 50% 50%");
     return;
   }
 
-  aResult.AppendLiteral("at ");
-  array->Item(count).AppendBasicShapePositionToString(aResult, aSerialization);
-}
-
-// https://drafts.csswg.org/css-shapes/#basic-shape-serialization
-// basic-shape asks us to omit a lot of redundant things whilst serializing
-// position values. Other specs are not clear about this
-// (https://github.com/w3c/csswg-drafts/issues/368), so for now we special-case
-// basic shapes only
-void
-nsCSSValue::AppendBasicShapePositionToString(nsAString& aResult,
-                                             Serialization aSerialization) const
-{
-  const nsCSSValue::Array* array = GetArrayValue();
-  // We always parse these into an array of four elements
-  MOZ_ASSERT(array->Count() == 4,
-             "basic-shape position value doesn't have enough elements");
-
-  const nsCSSValue &xEdge   = array->Item(0);
-  const nsCSSValue &xOffset = array->Item(1);
-  const nsCSSValue &yEdge   = array->Item(2);
-  const nsCSSValue &yOffset = array->Item(3);
-
-  MOZ_ASSERT(xEdge.GetUnit() == eCSSUnit_Enumerated &&
-             yEdge.GetUnit() == eCSSUnit_Enumerated &&
-             xOffset.IsLengthPercentCalcUnit() &&
-             yOffset.IsLengthPercentCalcUnit() &&
-             xEdge.GetIntValue() != NS_STYLE_IMAGELAYER_POSITION_CENTER &&
-             yEdge.GetIntValue() != NS_STYLE_IMAGELAYER_POSITION_CENTER,
-             "Ensure invariants from ParsePositionValueBasicShape "
-             "haven't been modified");
-  if (xEdge.GetIntValue() == NS_STYLE_IMAGELAYER_POSITION_LEFT &&
-      yEdge.GetIntValue() == NS_STYLE_IMAGELAYER_POSITION_TOP) {
-    // We can omit these defaults
-    xOffset.AppendToString(eCSSProperty_UNKNOWN, aResult, aSerialization);
+  if (hasRadii) {
     aResult.Append(' ');
-    yOffset.AppendToString(eCSSProperty_UNKNOWN, aResult, aSerialization);
-  } else {
-    // We only serialize to the two or four valued form
-    xEdge.AppendToString(eCSSProperty_object_position, aResult, aSerialization);
-    aResult.Append(' ');
-    xOffset.AppendToString(eCSSProperty_UNKNOWN, aResult, aSerialization);
-    aResult.Append(' ');
-    yEdge.AppendToString(eCSSProperty_object_position, aResult, aSerialization);
-    aResult.Append(' ');
-    yOffset.AppendToString(eCSSProperty_UNKNOWN, aResult, aSerialization);
   }
+  aResult.AppendLiteral("at ");
+  array->Item(count).AppendToString(eCSSProperty_object_position,
+                                    aResult, aSerialization);
 }
 
 // Helper to append |aString| with the shorthand sides notation used in e.g.
@@ -1424,13 +1349,7 @@ nsCSSValue::AppendToString(nsCSSProperty aProperty, nsAString& aResult,
 
     case eCSSProperty_clip_path:
       AppendASCIItoUTF16(nsCSSProps::ValueToKeyword(intValue,
-                            nsCSSProps::kClipPathGeometryBoxKTable),
-                         aResult);
-      break;
-
-    case eCSSProperty_shape_outside:
-      AppendASCIItoUTF16(nsCSSProps::ValueToKeyword(intValue,
-                            nsCSSProps::kShapeOutsideShapeBoxKTable),
+                            nsCSSProps::kClipShapeSizingKTable),
                          aResult);
       break;
 
@@ -2528,8 +2447,7 @@ nsCSSValuePairList::AppendToString(nsCSSProperty aProperty,
 
     if (nsCSSProps::PropHasFlags(aProperty,
                                  CSS_PROPERTY_VALUE_LIST_USES_COMMAS) ||
-        aProperty == eCSSProperty_clip_path ||
-        aProperty == eCSSProperty_shape_outside)
+        aProperty == eCSSProperty_clip_path)
       aResult.Append(char16_t(','));
     aResult.Append(char16_t(' '));
   }
@@ -2600,7 +2518,6 @@ css::URLValueData::URLValueData(already_AddRefed<PtrHolder<nsIURI>> aURI,
   , mReferrer(Move(aReferrer))
   , mOriginPrincipal(Move(aOriginPrincipal))
   , mURIResolved(true)
-  , mLocalURLFlag(IsLocalRefURL(aString))
 {
   MOZ_ASSERT(mOriginPrincipal, "Must have an origin principal");
 }
@@ -2615,7 +2532,6 @@ css::URLValueData::URLValueData(nsStringBuffer* aString,
   , mReferrer(Move(aReferrer))
   , mOriginPrincipal(Move(aOriginPrincipal))
   , mURIResolved(false)
-  , mLocalURLFlag(IsLocalRefURL(aString))
 {
   MOZ_ASSERT(mOriginPrincipal, "Must have an origin principal");
 }

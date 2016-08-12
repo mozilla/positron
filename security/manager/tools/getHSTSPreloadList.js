@@ -182,17 +182,15 @@ function getHSTSStatus(host, resultList) {
   req.open("GET", uri, true);
   req.timeout = REQUEST_TIMEOUT;
   req.channel.notificationCallbacks = new RedirectAndAuthStopper();
-  req.onload = function(event) {
-    if (!inResultList) {
+  req.onreadystatechange = function(event) {
+    if (!inResultList && req.readyState == 4) {
       inResultList = true;
       var header = req.getResponseHeader("strict-transport-security");
       resultList.push(processStsHeader(host, header, req.status,
                                        req.channel.securityInfo));
     }
   };
-  req.onerror = function(e) {
-    dump("ERROR: network error making request to " + host.name + ": " + e + "\n");
-  };
+
   try {
     req.send();
   }

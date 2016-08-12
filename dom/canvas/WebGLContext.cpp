@@ -30,7 +30,6 @@
 #include "mozilla/EnumeratedArrayCycleCollection.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/ProcessPriorityManager.h"
-#include "mozilla/ScopeExit.h"
 #include "mozilla/Services.h"
 #include "mozilla/Telemetry.h"
 #include "nsContentUtils.h"
@@ -286,10 +285,8 @@ WebGLContext::DestroyResourcesAndContext()
     mFakeBlack_2D_Array_0000 = nullptr;
     mFakeBlack_2D_Array_0001 = nullptr;
 
-    if (mFakeVertexAttrib0BufferObject) {
+    if (mFakeVertexAttrib0BufferObject)
         gl->fDeleteBuffers(1, &mFakeVertexAttrib0BufferObject);
-        mFakeVertexAttrib0BufferObject = 0;
-    }
 
     // disable all extensions except "WEBGL_lose_context". see bug #927969
     // spec: http://www.khronos.org/registry/webgl/specs/latest/1.0/#5.15.2
@@ -309,9 +306,7 @@ WebGLContext::DestroyResourcesAndContext()
         printf_stderr("--- WebGL context destroyed: %p\n", gl.get());
     }
 
-    MOZ_ASSERT(gl);
-    mGL_OnlyClearInDestroyResourcesAndContext = nullptr;
-    MOZ_ASSERT(!gl);
+    gl = nullptr;
 }
 
 void
@@ -674,27 +669,22 @@ WebGLContext::CreateAndInitGLWith(FnCreateGL_T fnCreateGL,
     PopulateCapFallbackQueue(baseCaps, &fallbackCaps);
 
     MOZ_RELEASE_ASSERT(!gl, "GFX: Already have a context.");
-    RefPtr<gl::GLContext> potentialGL;
+    gl = nullptr;
     while (!fallbackCaps.empty()) {
         const gl::SurfaceCaps& caps = fallbackCaps.front();
-        potentialGL = fnCreateGL(caps, flags, this, out_failReasons);
-        if (potentialGL)
+        gl = fnCreateGL(caps, flags, this, out_failReasons);
+        if (gl)
             break;
 
         fallbackCaps.pop();
     }
-    if (!potentialGL)
+    if (!gl)
         return false;
 
     FailureReason reason;
-
-    mGL_OnlyClearInDestroyResourcesAndContext = potentialGL;
-    MOZ_RELEASE_ASSERT(gl);
     if (!InitAndValidateGL(&reason)) {
-        DestroyResourcesAndContext();
-        MOZ_RELEASE_ASSERT(!gl);
-
         // The fail reason here should be specific enough for now.
+        gl = nullptr;
         out_failReasons->push_back(reason);
         return false;
     }
@@ -854,10 +844,6 @@ NS_IMETHODIMP
 WebGLContext::SetDimensions(int32_t signedWidth, int32_t signedHeight)
 {
     if (signedWidth < 0 || signedHeight < 0) {
-        if (!gl) {
-            Telemetry::Accumulate(Telemetry::CANVAS_WEBGL_FAILURE_ID,
-                                  NS_LITERAL_CSTRING("FEATURE_FAILURE_WEBGL_SIZE"));
-        }
         GenerateWarning("Canvas size is too large (seems like a negative value wrapped)");
         return NS_ERROR_OUT_OF_MEMORY;
     }
@@ -913,12 +899,6 @@ WebGLContext::SetDimensions(int32_t signedWidth, int32_t signedHeight)
         return NS_OK;
     }
 
-    nsCString failureId = NS_LITERAL_CSTRING("FEATURE_FAILURE_WEBGL_UNKOWN");
-    auto autoTelemetry = mozilla::MakeScopeExit([&] {
-        Telemetry::Accumulate(Telemetry::CANVAS_WEBGL_FAILURE_ID,
-                              failureId);
-    });
-
     // End of early return cases.
     // At this point we know that we're not just resizing an existing context,
     // we are initializing a new context.
@@ -940,7 +920,8 @@ WebGLContext::SetDimensions(int32_t signedWidth, int32_t signedHeight)
     // resource handles created from older context generations.
     if (!(mGeneration + 1).isValid()) {
         // exit without changing the value of mGeneration
-        failureId = NS_LITERAL_CSTRING("FEATURE_FAILURE_WEBGL_TOO_MANY");
+        Telemetry::Accumulate(Telemetry::CANVAS_WEBGL_FAILURE_ID,
+                              NS_LITERAL_CSTRING("FEATURE_FAILURE_WEBGL_TOO_MANY"));
         const nsLiteralCString text("Too many WebGL contexts created this run.");
         ThrowEvent_WebGLContextCreationError(text);
         return NS_ERROR_FAILURE;
@@ -957,11 +938,8 @@ WebGLContext::SetDimensions(int32_t signedWidth, int32_t signedHeight)
     disabled |= gfxPlatform::InSafeMode();
 
     if (disabled) {
-        if (gfxPlatform::InSafeMode()) {
-            failureId = NS_LITERAL_CSTRING("FEATURE_FAILURE_WEBGL_SAFEMODE");
-        } else {
-            failureId = NS_LITERAL_CSTRING("FEATURE_FAILURE_WEBGL_DISABLED");
-        }
+        Telemetry::Accumulate(Telemetry::CANVAS_WEBGL_FAILURE_ID,
+                              NS_LITERAL_CSTRING("FEATURE_FAILURE_WEBGL_DISABLED"));
         const nsLiteralCString text("WebGL is currently disabled.");
         ThrowEvent_WebGLContextCreationError(text);
         return NS_ERROR_FAILURE;
@@ -974,7 +952,8 @@ WebGLContext::SetDimensions(int32_t signedWidth, int32_t signedHeight)
     if (mOptions.failIfMajorPerformanceCaveat) {
         nsCOMPtr<nsIGfxInfo> gfxInfo = services::GetGfxInfo();
         if (!HasAcceleratedLayers(gfxInfo)) {
-            failureId = NS_LITERAL_CSTRING("FEATURE_FAILURE_WEBGL_PERF_CAVEAT");
+            Telemetry::Accumulate(Telemetry::CANVAS_WEBGL_FAILURE_ID,
+                                  NS_LITERAL_CSTRING("FEATURE_FAILURE_WEBGL_PERF_CAVEAT"));
             const nsLiteralCString text("failIfMajorPerformanceCaveat: Compositor is not"
                                         " hardware-accelerated.");
             ThrowEvent_WebGLContextCreationError(text);
@@ -996,7 +975,6 @@ WebGLContext::SetDimensions(int32_t signedWidth, int32_t signedHeight)
             text.AppendASCII("\n* ");
             text.Append(cur.info);
         }
-        failureId = NS_LITERAL_CSTRING("FEATURE_FAILURE_REASON");
         ThrowEvent_WebGLContextCreationError(text);
         return NS_ERROR_FAILURE;
     }
@@ -1005,10 +983,10 @@ WebGLContext::SetDimensions(int32_t signedWidth, int32_t signedHeight)
 
     if (mOptions.failIfMajorPerformanceCaveat) {
         if (gl->IsWARP()) {
-            DestroyResourcesAndContext();
-            MOZ_ASSERT(!gl);
+            gl = nullptr;
 
-            failureId = NS_LITERAL_CSTRING("FEATURE_FAILURE_WEBGL_PERF_WARP");
+            Telemetry::Accumulate(Telemetry::CANVAS_WEBGL_FAILURE_ID,
+                                  NS_LITERAL_CSTRING("FEATURE_FAILURE_PERF_WARP"));
             const nsLiteralCString text("failIfMajorPerformanceCaveat: Driver is not"
                                         " hardware-accelerated.");
             ThrowEvent_WebGLContextCreationError(text);
@@ -1019,10 +997,8 @@ WebGLContext::SetDimensions(int32_t signedWidth, int32_t signedHeight)
         if (gl->GetContextType() == gl::GLContextType::WGL &&
             !gl::sWGLLib.HasDXInterop2())
         {
-            DestroyResourcesAndContext();
-            MOZ_ASSERT(!gl);
+            gl = nullptr;
 
-            failureId = NS_LITERAL_CSTRING("FEATURE_FAILURE_WEBGL_DXGL_INTEROP2");
             const nsLiteralCString text("Caveat: WGL without DXGLInterop2.");
             ThrowEvent_WebGLContextCreationError(text);
             return NS_ERROR_FAILURE;
@@ -1031,7 +1007,8 @@ WebGLContext::SetDimensions(int32_t signedWidth, int32_t signedHeight)
     }
 
     if (!ResizeBackbuffer(width, height)) {
-        failureId = NS_LITERAL_CSTRING("FEATURE_FAILURE_WEBGL_BACKBUFFER");
+        Telemetry::Accumulate(Telemetry::CANVAS_WEBGL_FAILURE_ID,
+                              NS_LITERAL_CSTRING("FEATURE_FAILURE_WEBGL_RESIZE"));
         const nsLiteralCString text("Initializing WebGL backbuffer failed.");
         ThrowEvent_WebGLContextCreationError(text);
         return NS_ERROR_FAILURE;
@@ -1116,7 +1093,8 @@ WebGLContext::SetDimensions(int32_t signedWidth, int32_t signedHeight)
 
     reporter.SetSuccessful();
 
-    failureId = NS_LITERAL_CSTRING("SUCCESS");
+    Telemetry::Accumulate(Telemetry::CANVAS_WEBGL_FAILURE_ID,
+                          NS_LITERAL_CSTRING("SUCCESS"));
     return NS_OK;
 }
 
@@ -1628,13 +1606,6 @@ WebGLContext::DummyReadFramebufferOperation(const char* funcName)
 
         ErrorInvalidFramebufferOperation("%s: %s.", funcName, errorText.BeginReading());
     }
-}
-
-bool
-WebGLContext::HasTimestampBits() const
-{
-    // 'sync' provides glGetInteger64v either by supporting ARB_sync, GL3+, or GLES3+.
-    return gl->IsSupported(GLFeature::sync);
 }
 
 static bool

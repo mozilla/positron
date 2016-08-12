@@ -8,7 +8,7 @@ task:
       name: '[TC] Linux64 L10n'
       description: 'Linux64 L10n'
 
-  workerType: 'gecko-{{level}}-b-linux'
+  workerType: opt-linux64
 
   extra:
     treeherder:

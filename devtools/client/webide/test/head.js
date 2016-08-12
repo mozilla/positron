@@ -5,17 +5,15 @@
 
 var {utils: Cu, classes: Cc, interfaces: Ci} = Components;
 
-const { require } = Cu.import("resource://devtools/shared/Loader.jsm", {});
-const { FileUtils } = require("resource://gre/modules/FileUtils.jsm");
-const { gDevTools } = require("devtools/client/framework/devtools");
+const {require} = Cu.import("resource://devtools/shared/Loader.jsm", {});
+const {FileUtils} = require("resource://gre/modules/FileUtils.jsm");
+const {gDevTools} = require("devtools/client/framework/devtools");
 const promise = require("promise");
 const Services = require("Services");
-const { Task } = require("devtools/shared/task");
-const { AppProjects } = require("devtools/client/webide/modules/app-projects");
+const {Task} = require("devtools/shared/task");
+const {AppProjects} = require("devtools/client/webide/modules/app-projects");
 const DevToolsUtils = require("devtools/shared/DevToolsUtils");
-const { DebuggerServer } = require("devtools/server/main");
-const flags = require("devtools/shared/flags");
-flags.testing = true;
+DevToolsUtils.testing = true;
 
 var TEST_BASE;
 if (window.location === "chrome://browser/content/browser.xul") {
@@ -37,7 +35,7 @@ Services.prefs.setCharPref("devtools.devices.url", TEST_BASE + "browser_devices.
 var registerCleanupFunction = registerCleanupFunction ||
                               SimpleTest.registerCleanupFunction;
 registerCleanupFunction(() => {
-  flags.testing = false;
+  DevToolsUtils.testing = false;
   Services.prefs.clearUserPref("devtools.webide.enabled");
   Services.prefs.clearUserPref("devtools.webide.enableLocalRuntime");
   Services.prefs.clearUserPref("devtools.webide.autoinstallADBHelper");
@@ -47,27 +45,28 @@ registerCleanupFunction(() => {
   Services.prefs.clearUserPref("devtools.webide.lastConnectedRuntime");
 });
 
-var openWebIDE = Task.async(function* (autoInstallAddons) {
+function openWebIDE(autoInstallAddons) {
   info("opening WebIDE");
 
   Services.prefs.setBoolPref("devtools.webide.autoinstallADBHelper", !!autoInstallAddons);
   Services.prefs.setBoolPref("devtools.webide.autoinstallFxdtAdapters", !!autoInstallAddons);
 
+  let deferred = promise.defer();
+
   let ww = Cc["@mozilla.org/embedcomp/window-watcher;1"].getService(Ci.nsIWindowWatcher);
   let win = ww.openWindow(null, "chrome://webide/content/", "webide", "chrome,centerscreen,resizable", null);
 
-  yield new Promise(resolve => {
-    win.addEventListener("load", function onLoad() {
-      win.removeEventListener("load", onLoad);
-      SimpleTest.requestCompleteLog();
-      SimpleTest.executeSoon(resolve);
+  win.addEventListener("load", function onLoad() {
+    win.removeEventListener("load", onLoad);
+    info("WebIDE open");
+    SimpleTest.requestCompleteLog();
+    SimpleTest.executeSoon(() => {
+      deferred.resolve(win);
     });
   });
 
-  info("WebIDE open");
-
-  return win;
-});
+  return deferred.promise;
+}
 
 function closeWebIDE(win) {
   info("Closing WebIDE");
@@ -230,20 +229,4 @@ function connectToLocalRuntime(win) {
 function handleError(aError) {
   ok(false, "Got an error: " + aError.message + "\n" + aError.stack);
   finish();
-}
-
-function waitForConnectionChange(expectedState, count = 1) {
-  return new Promise(resolve => {
-    let onConnectionChange = (_, state) => {
-      if (state != expectedState) {
-        return;
-      }
-      if (--count != 0) {
-        return;
-      }
-      DebuggerServer.off("connectionchange", onConnectionChange);
-      resolve();
-    };
-    DebuggerServer.on("connectionchange", onConnectionChange);
-  });
 }

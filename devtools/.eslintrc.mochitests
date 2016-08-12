@@ -11,10 +11,5 @@
     "synthesizeKeyFromKeyTag": true,
     "TargetFactory": true,
     "waitForTick": true,
-  },
-
-  "rules": {
-    // Tests can always import anything.
-    "mozilla/reject-some-requires": 0,
-  },
+  }
 }

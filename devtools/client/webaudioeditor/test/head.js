@@ -16,7 +16,6 @@ var Promise = require("promise");
 var Services = require("Services");
 var { WebAudioFront } = require("devtools/shared/fronts/webaudio");
 var DevToolsUtils = require("devtools/shared/DevToolsUtils");
-var flags = require("devtools/shared/flags");
 var audioNodes = require("devtools/server/actors/utils/audionodes.json");
 var mm = null;
 
@@ -43,10 +42,10 @@ waitForExplicitFinish();
 
 var gToolEnabled = Services.prefs.getBoolPref("devtools.webaudioeditor.enabled");
 
-flags.testing = true;
+DevToolsUtils.testing = true;
 
 registerCleanupFunction(() => {
-  flags.testing = false;
+  DevToolsUtils.testing = false;
   info("finish() was called, cleaning up...");
   Services.prefs.setBoolPref("devtools.debugger.log", gEnableLogging);
   Services.prefs.setBoolPref("devtools.webaudioeditor.enabled", gToolEnabled);
@@ -209,13 +208,11 @@ function teardown(aTarget) {
 function getN(front, eventName, count, spread) {
   let actors = [];
   let deferred = Promise.defer();
-  info(`Waiting for ${count} ${eventName} events`);
   front.on(eventName, function onEvent(...args) {
     let actor = args[0];
     if (actors.length !== count) {
       actors.push(spread ? args : actor);
     }
-    info(`Got ${actors.length} / ${count} ${eventName} events`);
     if (actors.length === count) {
       front.off(eventName, onEvent);
       deferred.resolve(actors);
@@ -240,11 +237,8 @@ function getNSpread(front, eventName, count) { return getN(front, eventName, cou
 function waitForGraphRendered(front, nodeCount, edgeCount, paramEdgeCount) {
   let deferred = Promise.defer();
   let eventName = front.EVENTS.UI_GRAPH_RENDERED;
-  info(`Wait for graph rendered with ${nodeCount} nodes, ${edgeCount} edges`);
   front.on(eventName, function onGraphRendered(_, nodes, edges, pEdges) {
     let paramEdgesDone = paramEdgeCount != null ? paramEdgeCount === pEdges : true;
-    info(`Got graph rendered with ${nodes} / ${nodeCount} nodes, ` +
-         `${edges} / ${edgeCount} edges`);
     if (nodes === nodeCount && edges === edgeCount && paramEdgesDone) {
       front.off(eventName, onGraphRendered);
       deferred.resolve();

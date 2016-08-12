@@ -13,9 +13,6 @@ const {
 const {
   MESSAGE_ADD,
   MESSAGES_CLEAR,
-  SEVERITY_FILTER,
-  MESSAGES_SEARCH,
-  FILTERS_CLEAR,
 } = require("../constants");
 
 function messageAdd(packet) {
@@ -32,29 +29,5 @@ function messagesClear() {
   };
 }
 
-function severityFilter(filter, toggled) {
-  return {
-    type: SEVERITY_FILTER,
-    filter,
-    toggled
-  };
-}
-
-function filtersClear() {
-  return {
-    type: FILTERS_CLEAR
-  };
-}
-
-function messagesSearch(searchText) {
-  return {
-    type: MESSAGES_SEARCH,
-    searchText
-  };
-}
-
 exports.messageAdd = messageAdd;
 exports.messagesClear = messagesClear;
-exports.severityFilter = severityFilter;
-exports.filtersClear = filtersClear;
-exports.messagesSearch = messagesSearch;

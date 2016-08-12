@@ -193,15 +193,6 @@ public:
    * Called before the thread runs.
    */
   void Init();
-
-  /**
-   * Respond to CollectReports with sizes collected on the graph thread.
-   */
-  static void
-  FinishCollectReports(nsIHandleReportCallback* aHandleReport,
-                       nsISupports* aData,
-                       const nsTArray<AudioNodeSizes>& aAudioStreamSizes);
-
   // The following methods run on the graph thread (or possibly the main thread if
   // mLifecycleState > LIFECYCLE_RUNNING)
   void AssertOnGraphThreadOrNotRunning() const
@@ -220,9 +211,7 @@ public:
 #endif
   }
 
-  void CollectSizesForMemoryReport(
-         already_AddRefed<nsIHandleReportCallback> aHandleReport,
-         already_AddRefed<nsISupports> aHandlerData);
+  void MaybeProduceMemoryReport();
 
   /**
    * Returns true if this MediaStreamGraph should keep running
@@ -411,6 +400,10 @@ public:
    * to the audio output stream. Returns the number of frames played.
    */
   StreamTime PlayAudio(MediaStream* aStream);
+  /**
+   * Set the correct current video frame for stream aStream.
+   */
+  void PlayVideo(MediaStream* aStream);
   /**
    * No more data will be forthcoming for aStream. The stream will end
    * at the current buffer end point. The StreamTracks's tracks must be
@@ -751,9 +744,6 @@ public:
     // realtime graph when it has no streams.
     LIFECYCLE_WAITING_FOR_STREAM_DESTRUCTION
   };
-  /**
-   * Modified only on the main thread in mMonitor.
-   */
   LifecycleState mLifecycleState;
   /**
    * The graph should stop processing at or after this time.
@@ -828,6 +818,10 @@ private:
   MOZ_DEFINE_MALLOC_SIZE_OF(MallocSizeOf)
 
   /**
+   * Used to signal that a memory report has been requested.
+   */
+  Monitor mMemoryReportMonitor;
+  /**
    * This class uses manual memory management, and all pointers to it are raw
    * pointers. However, in order for it to implement nsIMemoryReporter, it needs
    * to implement nsISupports and so be ref-counted. So it maintains a single
@@ -835,6 +829,10 @@ private:
    * and Destroy() nulls this self-reference in order to trigger self-deletion.
    */
   RefPtr<MediaStreamGraphImpl> mSelfRef;
+  /**
+   * Used to pass memory report information across threads.
+   */
+  nsTArray<AudioNodeSizes> mAudioStreamSizes;
 
   struct WindowAndStream
   {
@@ -845,6 +843,10 @@ private:
    * Stream for window audio capture.
    */
   nsTArray<WindowAndStream> mWindowCaptureStreams;
+  /**
+   * Indicates that the MSG thread should gather data for a memory report.
+   */
+  bool mNeedsMemoryReport;
 
 #ifdef DEBUG
   /**

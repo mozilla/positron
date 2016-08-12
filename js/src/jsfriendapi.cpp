@@ -590,9 +590,9 @@ js::TraceWeakMaps(WeakMapTracer* trc)
 }
 
 extern JS_FRIEND_API(bool)
-js::AreGCGrayBitsValid(JSContext* cx)
+js::AreGCGrayBitsValid(JSRuntime* rt)
 {
-    return cx->gc.areGrayBitsValid();
+    return rt->gc.areGrayBitsValid();
 }
 
 JS_FRIEND_API(bool)
@@ -1064,11 +1064,11 @@ DumpHeapVisitZone(JSRuntime* rt, void* data, Zone* zone)
 }
 
 static void
-DumpHeapVisitCompartment(JSContext* cx, void* data, JSCompartment* comp)
+DumpHeapVisitCompartment(JSRuntime* rt, void* data, JSCompartment* comp)
 {
     char name[1024];
-    if (cx->compartmentNameCallback)
-        (*cx->compartmentNameCallback)(cx, comp, name, sizeof(name));
+    if (rt->compartmentNameCallback)
+        (*rt->compartmentNameCallback)(rt, comp, name, sizeof(name));
     else
         strcpy(name, "<unknown>");
 

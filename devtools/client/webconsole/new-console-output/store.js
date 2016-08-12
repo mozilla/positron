@@ -3,24 +3,17 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 "use strict";
 
-const Services = require("Services");
-const {FilterState} = require("devtools/client/webconsole/new-console-output/reducers/filters");
-const {PrefState} = require("devtools/client/webconsole/new-console-output/reducers/prefs");
 const { combineReducers, createStore } = require("devtools/client/shared/vendor/redux");
+const Immutable = require("devtools/client/shared/vendor/immutable");
 const { reducers } = require("./reducers/index");
+const Services = require("Services");
 
 function storeFactory() {
   const initialState = {
-    prefs: new PrefState({
-      logLimit: Math.max(Services.prefs.getIntPref("devtools.hud.loglimit"), 1),
-    }),
-    filters: new FilterState({
-      error: Services.prefs.getBoolPref("devtools.webconsole.filter.error"),
-      warn: Services.prefs.getBoolPref("devtools.webconsole.filter.warn"),
-      info: Services.prefs.getBoolPref("devtools.webconsole.filter.info"),
-      log: Services.prefs.getBoolPref("devtools.webconsole.filter.log"),
-      searchText: ""
-    })
+    messages: Immutable.List(),
+    prefs: {
+      logLimit: Math.max(Services.prefs.getIntPref("devtools.hud.loglimit"), 1)
+    }
   };
 
   return createStore(combineReducers(reducers), initialState);

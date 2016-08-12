@@ -10,7 +10,7 @@
 #include "nsTextControlFrame.h"
 #include "nsListControlFrame.h"
 #include "nsComboboxControlFrame.h"
-#include "mozilla/ReflowInput.h"
+#include "nsHTMLReflowState.h"
 #include "nsTextFrameUtils.h"
 
 using namespace mozilla;
@@ -31,9 +31,9 @@ nsFontInflationData::FindFontInflationDataFor(const nsIFrame *aFrame)
 }
 
 /* static */ bool
-nsFontInflationData::UpdateFontInflationDataISizeFor(const ReflowInput& aReflowInput)
+nsFontInflationData::UpdateFontInflationDataISizeFor(const nsHTMLReflowState& aReflowState)
 {
-  nsIFrame *bfc = aReflowInput.mFrame;
+  nsIFrame *bfc = aReflowState.frame;
   NS_ASSERTION(bfc->GetStateBits() & NS_FRAME_FONT_INFLATION_FLOW_ROOT,
                "should have been given a flow root");
   FrameProperties bfcProps(bfc->Properties());
@@ -50,7 +50,7 @@ nsFontInflationData::UpdateFontInflationDataISizeFor(const ReflowInput& aReflowI
     oldInflationEnabled = true; /* not relevant */
   }
 
-  data->UpdateISize(aReflowInput);
+  data->UpdateISize(aReflowState);
 
   if (oldInflationEnabled != data->mInflationEnabled)
     return true;
@@ -121,12 +121,12 @@ NearestCommonAncestorFirstInFlow(nsIFrame *aFrame1, nsIFrame *aFrame2,
 }
 
 static nscoord
-ComputeDescendantISize(const ReflowInput& aAncestorReflowInput,
+ComputeDescendantISize(const nsHTMLReflowState& aAncestorReflowState,
                        nsIFrame *aDescendantFrame)
 {
-  nsIFrame *ancestorFrame = aAncestorReflowInput.mFrame->FirstInFlow();
+  nsIFrame *ancestorFrame = aAncestorReflowState.frame->FirstInFlow();
   if (aDescendantFrame == ancestorFrame) {
-    return aAncestorReflowInput.ComputedISize();
+    return aAncestorReflowState.ComputedISize();
   }
 
   AutoTArray<nsIFrame*, 16> frames;
@@ -141,39 +141,39 @@ ComputeDescendantISize(const ReflowInput& aAncestorReflowInput,
   // occasionally cause problems when writing tests on desktop.
 
   uint32_t len = frames.Length();
-  ReflowInput *reflowInputs = static_cast<ReflowInput*>
-                                (moz_xmalloc(sizeof(ReflowInput) * len));
+  nsHTMLReflowState *reflowStates = static_cast<nsHTMLReflowState*>
+                                (moz_xmalloc(sizeof(nsHTMLReflowState) * len));
   nsPresContext *presContext = aDescendantFrame->PresContext();
   for (uint32_t i = 0; i < len; ++i) {
-    const ReflowInput &parentReflowInput =
-      (i == 0) ? aAncestorReflowInput : reflowInputs[i - 1];
+    const nsHTMLReflowState &parentReflowState =
+      (i == 0) ? aAncestorReflowState : reflowStates[i - 1];
     nsIFrame *frame = frames[len - i - 1];
     WritingMode wm = frame->GetWritingMode();
-    LogicalSize availSize = parentReflowInput.ComputedSize(wm);
+    LogicalSize availSize = parentReflowState.ComputedSize(wm);
     availSize.BSize(wm) = NS_UNCONSTRAINEDSIZE;
     MOZ_ASSERT(frame->GetParent()->FirstInFlow() ==
-                 parentReflowInput.mFrame->FirstInFlow(),
+                 parentReflowState.frame->FirstInFlow(),
                "bad logic in this function");
-    new (reflowInputs + i) ReflowInput(presContext, parentReflowInput,
+    new (reflowStates + i) nsHTMLReflowState(presContext, parentReflowState,
                                              frame, availSize);
   }
 
-  MOZ_ASSERT(reflowInputs[len - 1].mFrame == aDescendantFrame,
+  MOZ_ASSERT(reflowStates[len - 1].frame == aDescendantFrame,
              "bad logic in this function");
-  nscoord result = reflowInputs[len - 1].ComputedISize();
+  nscoord result = reflowStates[len - 1].ComputedISize();
 
   for (uint32_t i = len; i-- != 0; ) {
-    reflowInputs[i].~ReflowInput();
+    reflowStates[i].~nsHTMLReflowState();
   }
-  free(reflowInputs);
+  free(reflowStates);
 
   return result;
 }
 
 void
-nsFontInflationData::UpdateISize(const ReflowInput &aReflowInput)
+nsFontInflationData::UpdateISize(const nsHTMLReflowState &aReflowState)
 {
-  nsIFrame *bfc = aReflowInput.mFrame;
+  nsIFrame *bfc = aReflowState.frame;
   NS_ASSERTION(bfc->GetStateBits() & NS_FRAME_FONT_INFLATION_FLOW_ROOT,
                "must be block formatting context");
 
@@ -201,7 +201,7 @@ nsFontInflationData::UpdateISize(const ReflowInput &aReflowInput)
     nca = nca->GetParent()->FirstInFlow();
   }
 
-  nscoord newNCAISize = ComputeDescendantISize(aReflowInput, nca);
+  nscoord newNCAISize = ComputeDescendantISize(aReflowState, nca);
 
   // See comment above "font.size.inflation.lineThreshold" in
   // modules/libpref/src/init/all.js .

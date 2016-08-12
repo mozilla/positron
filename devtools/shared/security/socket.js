@@ -16,12 +16,8 @@ var promise = require("promise");
 var defer = require("devtools/shared/defer");
 var DevToolsUtils = require("devtools/shared/DevToolsUtils");
 var { dumpn, dumpv } = DevToolsUtils;
-loader.lazyRequireGetter(this, "WebSocketServer",
-  "devtools/server/websocket-server");
 loader.lazyRequireGetter(this, "DebuggerTransport",
   "devtools/shared/transport/transport", true);
-loader.lazyRequireGetter(this, "WebSocketDebuggerTransport",
-  "devtools/shared/transport/websocket-transport");
 loader.lazyRequireGetter(this, "DebuggerServer",
   "devtools/server/main", true);
 loader.lazyRequireGetter(this, "discovery",
@@ -65,8 +61,6 @@ var DebuggerSocket = {};
  *        The port number of the debugger server.
  * @param encryption boolean (optional)
  *        Whether the server requires encryption.  Defaults to false.
- * @param webSocket boolean (optional)
- *        Whether to use WebSocket protocol to connect. Defaults to false.
  * @param authenticator Authenticator (optional)
  *        |Authenticator| instance matching the mode in use by the server.
  *        Defaults to a PROMPT instance if not supplied.
@@ -80,7 +74,6 @@ DebuggerSocket.connect = Task.async(function* (settings) {
   if (!settings.authenticator) {
     settings.authenticator = new (Authenticators.get().Client)();
   }
-  _validateSettings(settings);
   let { host, port, encryption, authenticator, cert } = settings;
   let transport = yield _getTransport(settings);
   yield authenticator.authenticate({
@@ -94,18 +87,6 @@ DebuggerSocket.connect = Task.async(function* (settings) {
 });
 
 /**
- * Validate that the connection settings have been set to a supported configuration.
- */
-function _validateSettings(settings) {
-  let { encryption, webSocket, authenticator } = settings;
-
-  if (webSocket && encryption) {
-    throw new Error("Encryption not supported on WebSocket transport");
-  }
-  authenticator.validateSettings(settings);
-}
-
-/**
  * Try very hard to create a DevTools transport, potentially making several
  * connect attempts in the process.
  *
@@ -115,8 +96,6 @@ function _validateSettings(settings) {
  *        The port number of the debugger server.
  * @param encryption boolean (optional)
  *        Whether the server requires encryption.  Defaults to false.
- * @param webSocket boolean (optional)
- *        Whether to use WebSocket protocol to connect to the server. Defaults to false.
  * @param authenticator Authenticator
  *        |Authenticator| instance matching the mode in use by the server.
  *        Defaults to a PROMPT instance if not supplied.
@@ -125,21 +104,13 @@ function _validateSettings(settings) {
  * @return transport DebuggerTransport
  *         A possible DevTools transport (if connection succeeded and streams
  *         are actually alive and working)
+ * @return certError boolean
+ *         Flag noting if cert trouble caused the streams to fail
+ * @return s nsISocketTransport
+ *         Underlying socket transport, in case more details are needed.
  */
 var _getTransport = Task.async(function* (settings) {
-  let { host, port, encryption, webSocket } = settings;
-
-  if (webSocket) {
-    // Establish a connection and wait until the WebSocket is ready to send and receive
-    let socket = yield new Promise((resolve, reject) => {
-      let s = new WebSocket(`ws://${host}:${port}`);
-      s.onopen = () => resolve(s);
-      s.onerror = err => reject(err);
-    });
-
-    return new WebSocketDebuggerTransport(socket);
-  }
-
+  let { host, port, encryption } = settings;
   let attempt = yield _attemptTransport(settings);
   if (attempt.transport) {
     return attempt.transport; // Success
@@ -407,9 +378,6 @@ SocketListener.prototype = {
     if (this.discoverable && !Number(this.portOrPath)) {
       throw new Error("Discovery only supported for TCP sockets.");
     }
-    if (this.encryption && this.webSocket) {
-      throw new Error("Encryption not supported on WebSocket transport");
-    }
     this.authenticator.validateOptions(this);
   },
 
@@ -628,7 +596,7 @@ ServerSocketConnection.prototype = {
     let self = this;
     Task.spawn(function* () {
       self._listenForTLSHandshake();
-      yield self._createTransport();
+      self._createTransport();
       yield self._awaitTLSHandshake();
       yield self._authenticate();
     }).then(() => this.allow()).catch(e => this.deny(e));
@@ -638,17 +606,10 @@ ServerSocketConnection.prototype = {
    * We need to open the streams early on, as that is required in the case of
    * TLS sockets to keep the handshake moving.
    */
-  _createTransport: Task.async(function* () {
+  _createTransport() {
     let input = this._socketTransport.openInputStream(0, 0, 0);
     let output = this._socketTransport.openOutputStream(0, 0, 0);
-
-    if (this._listener.webSocket) {
-      let socket = yield WebSocketServer.accept(this._socketTransport, input, output);
-      this._transport = new WebSocketDebuggerTransport(socket);
-    } else {
-      this._transport = new DebuggerTransport(input, output);
-    }
-
+    this._transport = new DebuggerTransport(input, output);
     // Start up the transport to observe the streams in case they are closed
     // early.  This allows us to clean up our state as well.
     this._transport.hooks = {
@@ -657,7 +618,7 @@ ServerSocketConnection.prototype = {
       }
     };
     this._transport.ready();
-  }),
+  },
 
   /**
    * Set the socket's security observer, which receives an event via the
@@ -756,10 +717,8 @@ ServerSocketConnection.prototype = {
     }
     dumpn("Debugging connection denied on " + this.address +
           " (" + errorName + ")");
-    if (this._transport) {
-      this._transport.hooks = null;
-      this._transport.close(result);
-    }
+    this._transport.hooks = null;
+    this._transport.close(result);
     this._socketTransport.close(result);
     this.destroy();
   },

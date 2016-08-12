@@ -37,9 +37,6 @@ interface IDBObjectStore {
     IDBRequest get (any key);
 
     [Throws]
-    IDBRequest getKey (any key);
-
-    [Throws]
     IDBRequest clear ();
 
     [Throws]

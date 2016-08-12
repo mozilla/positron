@@ -42,7 +42,7 @@ function test() {
     runSocialTestWithProvider(manifest, function (finishcb) {
       SocialSidebar.show();
       runSocialTests(tests, preSubTest, postSubTest, function () {
-        BrowserTestUtils.removeTab(tab).then(finishcb);
+        ensureBrowserTabClosed(tab).then(finishcb);
       });
     });
   }, true);
@@ -56,11 +56,10 @@ var tests = {
       let chatbar = getChatBar();
       openChatViaUser();
       ok(chatbar.firstElementChild, "chat opened");
-      BrowserTestUtils.waitForCondition(() => isChatFocused(chatbar.selectedChat),
-                                        "chat should be focused").then(() => {
+      waitForCondition(() => isChatFocused(chatbar.selectedChat), function() {
         is(chatbar.selectedChat, chatbar.firstElementChild, "chat is selected");
         next();
-      });
+      }, "chat should be focused");
     });
   },
 };

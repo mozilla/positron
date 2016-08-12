@@ -29,7 +29,6 @@ class ArchlinuxBootstrapper(BaseBootstrapper):
         'alsa-lib',
         'dbus-glib',
         'desktop-file-utils',
-        'gconf',
         'gtk2',
         'gtk3',
         'hicolor-icon-theme',

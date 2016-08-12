@@ -580,7 +580,7 @@ GMPParent::SupportsAPI(const nsCString& aAPI, const nsCString& aTag)
         // file, but uses Windows Media Foundation to decode. That's not present
         // on Windows XP, and on some Vista, Windows N, and KN variants without
         // certain services packs.
-        if (tags[j].Equals(kEMEKeySystemClearkey)) {
+        if (tags[j].EqualsLiteral("org.w3.clearkey")) {
           if (mCapabilities[i].mAPIName.EqualsLiteral(GMP_API_VIDEO_DECODER)) {
             if (!WMFDecoderModule::HasH264()) {
               continue;
@@ -898,7 +898,7 @@ GMPParent::ReadGMPInfoFile(nsIFile* aFile)
       // Adobe GMP doesn't work without SSE2. Check the tags to see if
       // the decryptor is for the Adobe GMP, and refuse to load it if
       // SSE2 isn't supported.
-      if (cap.mAPITags.Contains(nsCString(kEMEKeySystemPrimetime)) &&
+      if (cap.mAPITags.Contains(NS_LITERAL_CSTRING("com.adobe.primetime")) &&
           !mozilla::supports_sse2()) {
         return GenericPromise::CreateAndReject(NS_ERROR_FAILURE, __func__);
       }
@@ -953,13 +953,11 @@ GMPParent::ParseChromiumManifest(nsString aJSON)
 
   GMPCapability video(NS_LITERAL_CSTRING(GMP_API_VIDEO_DECODER));
   video.mAPITags.AppendElement(NS_LITERAL_CSTRING("h264"));
-  video.mAPITags.AppendElement(NS_LITERAL_CSTRING("vp8"));
-  video.mAPITags.AppendElement(NS_LITERAL_CSTRING("vp9"));
-  video.mAPITags.AppendElement(nsCString(kEMEKeySystemWidevine));
+  video.mAPITags.AppendElement(NS_LITERAL_CSTRING("com.widevine.alpha"));
   mCapabilities.AppendElement(Move(video));
 
   GMPCapability decrypt(NS_LITERAL_CSTRING(GMP_API_DECRYPTOR));
-  decrypt.mAPITags.AppendElement(nsCString(kEMEKeySystemWidevine));
+  decrypt.mAPITags.AppendElement(NS_LITERAL_CSTRING("com.widevine.alpha"));
   mCapabilities.AppendElement(Move(decrypt));
 
   MOZ_ASSERT(mName.EqualsLiteral("widevinecdm"));

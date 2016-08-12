@@ -101,7 +101,7 @@ APZChild::RecvUpdateFrame(const FrameMetrics& aFrameMetrics)
 
 bool
 APZChild::RecvHandleTap(const TapType& aType,
-                        const LayoutDevicePoint& aPoint,
+                        const CSSPoint& aPoint,
                         const Modifiers& aModifiers,
                         const ScrollableLayerGuid& aGuid,
                         const uint64_t& aInputBlockId,

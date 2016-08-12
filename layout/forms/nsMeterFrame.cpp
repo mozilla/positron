@@ -104,13 +104,13 @@ NS_QUERYFRAME_TAIL_INHERITING(nsContainerFrame)
 
 void
 nsMeterFrame::Reflow(nsPresContext*           aPresContext,
-                     ReflowOutput&     aDesiredSize,
-                     const ReflowInput& aReflowInput,
+                     nsHTMLReflowMetrics&     aDesiredSize,
+                     const nsHTMLReflowState& aReflowState,
                      nsReflowStatus&          aStatus)
 {
   MarkInReflow();
   DO_GLOBAL_REFLOW_COUNT("nsMeterFrame");
-  DISPLAY_REFLOW(aPresContext, this, aReflowInput, aDesiredSize, aStatus);
+  DISPLAY_REFLOW(aPresContext, this, aReflowState, aDesiredSize, aStatus);
 
   NS_ASSERTION(mBarDiv, "Meter bar div must exist!");
   NS_ASSERTION(!GetPrevContinuation(),
@@ -124,10 +124,10 @@ nsMeterFrame::Reflow(nsPresContext*           aPresContext,
   nsIFrame* barFrame = mBarDiv->GetPrimaryFrame();
   NS_ASSERTION(barFrame, "The meter frame should have a child with a frame!");
 
-  ReflowBarFrame(barFrame, aPresContext, aReflowInput, aStatus);
+  ReflowBarFrame(barFrame, aPresContext, aReflowState, aStatus);
 
-  aDesiredSize.SetSize(aReflowInput.GetWritingMode(),
-                       aReflowInput.ComputedSizeWithBorderPadding());
+  aDesiredSize.SetSize(aReflowState.GetWritingMode(),
+                       aReflowState.ComputedSizeWithBorderPadding());
 
   aDesiredSize.SetOverflowAreasToDesiredBounds();
   ConsiderChildOverflow(aDesiredSize.mOverflowAreas, barFrame);
@@ -135,25 +135,25 @@ nsMeterFrame::Reflow(nsPresContext*           aPresContext,
 
   aStatus = NS_FRAME_COMPLETE;
 
-  NS_FRAME_SET_TRUNCATION(aStatus, aReflowInput, aDesiredSize);
+  NS_FRAME_SET_TRUNCATION(aStatus, aReflowState, aDesiredSize);
 }
 
 void
 nsMeterFrame::ReflowBarFrame(nsIFrame*                aBarFrame,
                              nsPresContext*           aPresContext,
-                             const ReflowInput& aReflowInput,
+                             const nsHTMLReflowState& aReflowState,
                              nsReflowStatus&          aStatus)
 {
   bool vertical = ResolvedOrientationIsVertical();
   WritingMode wm = aBarFrame->GetWritingMode();
-  LogicalSize availSize = aReflowInput.ComputedSize(wm);
+  LogicalSize availSize = aReflowState.ComputedSize(wm);
   availSize.BSize(wm) = NS_UNCONSTRAINEDSIZE;
-  ReflowInput reflowInput(aPresContext, aReflowInput,
+  nsHTMLReflowState reflowState(aPresContext, aReflowState,
                                 aBarFrame, availSize);
-  nscoord size = vertical ? aReflowInput.ComputedHeight()
-                          : aReflowInput.ComputedWidth();
-  nscoord xoffset = aReflowInput.ComputedPhysicalBorderPadding().left;
-  nscoord yoffset = aReflowInput.ComputedPhysicalBorderPadding().top;
+  nscoord size = vertical ? aReflowState.ComputedHeight()
+                          : aReflowState.ComputedWidth();
+  nscoord xoffset = aReflowState.ComputedPhysicalBorderPadding().left;
+  nscoord yoffset = aReflowState.ComputedPhysicalBorderPadding().top;
 
   // NOTE: Introduce a new function getPosition in the content part ?
   HTMLMeterElement* meterElement = static_cast<HTMLMeterElement*>(mContent);
@@ -168,32 +168,32 @@ nsMeterFrame::ReflowBarFrame(nsIFrame*                aBarFrame,
   size = NSToCoordRound(size * position);
 
   if (!vertical && (wm.IsVertical() ? wm.IsVerticalRL() : !wm.IsBidiLTR())) {
-    xoffset += aReflowInput.ComputedWidth() - size;
+    xoffset += aReflowState.ComputedWidth() - size;
   }
 
   // The bar position is *always* constrained.
   if (vertical) {
     // We want the bar to begin at the bottom.
-    yoffset += aReflowInput.ComputedHeight() - size;
+    yoffset += aReflowState.ComputedHeight() - size;
 
-    size -= reflowInput.ComputedPhysicalMargin().TopBottom() +
-            reflowInput.ComputedPhysicalBorderPadding().TopBottom();
+    size -= reflowState.ComputedPhysicalMargin().TopBottom() +
+            reflowState.ComputedPhysicalBorderPadding().TopBottom();
     size = std::max(size, 0);
-    reflowInput.SetComputedHeight(size);
+    reflowState.SetComputedHeight(size);
   } else {
-    size -= reflowInput.ComputedPhysicalMargin().LeftRight() +
-            reflowInput.ComputedPhysicalBorderPadding().LeftRight();
+    size -= reflowState.ComputedPhysicalMargin().LeftRight() +
+            reflowState.ComputedPhysicalBorderPadding().LeftRight();
     size = std::max(size, 0);
-    reflowInput.SetComputedWidth(size);
+    reflowState.SetComputedWidth(size);
   }
 
-  xoffset += reflowInput.ComputedPhysicalMargin().left;
-  yoffset += reflowInput.ComputedPhysicalMargin().top;
+  xoffset += reflowState.ComputedPhysicalMargin().left;
+  yoffset += reflowState.ComputedPhysicalMargin().top;
 
-  ReflowOutput barDesiredSize(reflowInput);
-  ReflowChild(aBarFrame, aPresContext, barDesiredSize, reflowInput, xoffset,
+  nsHTMLReflowMetrics barDesiredSize(reflowState);
+  ReflowChild(aBarFrame, aPresContext, barDesiredSize, reflowState, xoffset,
               yoffset, 0, aStatus);
-  FinishReflowChild(aBarFrame, aPresContext, barDesiredSize, &reflowInput,
+  FinishReflowChild(aBarFrame, aPresContext, barDesiredSize, &reflowState,
                     xoffset, yoffset, 0);
 }
 

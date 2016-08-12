@@ -602,6 +602,10 @@ class Descriptor(DescriptorProvider):
     def hasNonOrdinaryGetPrototypeOf(self):
         return self.interface.getExtendedAttribute("NonOrdinaryGetPrototypeOf")
 
+    def needsConstructHookHolder(self):
+        assert self.interface.hasInterfaceObject()
+        return False
+
     def needsHeaderInclude(self):
         """
         An interface doesn't need a header file if it is not concrete, not
@@ -707,13 +711,6 @@ def getTypesFromDescriptor(descriptor):
         types.extend(a.type for a in arguments)
 
     types.extend(a.type for a in members if a.isAttr())
-
-    if descriptor.interface.maplikeOrSetlikeOrIterable:
-        maplikeOrSetlikeOrIterable = descriptor.interface.maplikeOrSetlikeOrIterable
-        if maplikeOrSetlikeOrIterable.hasKeyType():
-            types.append(maplikeOrSetlikeOrIterable.keyType)
-        if maplikeOrSetlikeOrIterable.hasValueType():
-            types.append(maplikeOrSetlikeOrIterable.valueType)
     return types
 
 

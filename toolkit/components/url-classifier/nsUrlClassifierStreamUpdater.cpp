@@ -103,8 +103,7 @@ nsUrlClassifierStreamUpdater::DownloadDone()
 
 nsresult
 nsUrlClassifierStreamUpdater::FetchUpdate(nsIURI *aUpdateUrl,
-                                          const nsACString & aRequestPayload,
-                                          bool aIsPostRequest,
+                                          const nsACString & aRequestBody,
                                           const nsACString & aStreamTable)
 {
 
@@ -112,7 +111,7 @@ nsUrlClassifierStreamUpdater::FetchUpdate(nsIURI *aUpdateUrl,
   {
     nsCString spec;
     aUpdateUrl->GetSpec(spec);
-    LOG(("Fetching update %s from %s", aRequestPayload.Data(), spec.get()));
+    LOG(("Fetching update %s from %s", aRequestBody.Data(), spec.get()));
   }
 #endif
 
@@ -135,26 +134,9 @@ nsUrlClassifierStreamUpdater::FetchUpdate(nsIURI *aUpdateUrl,
 
   mBeganStream = false;
 
-  if (!aIsPostRequest) {
-    // We use POST method to send our request in v2. In v4, the request
-    // needs to be embedded to the URL and use GET method to send.
-    // However, from the Chromium source code, a extended HTTP header has
-    // to be sent along with the request to make the request succeed.
-    // The following description is from Chromium source code:
-    //
-    // "The following header informs the envelope server (which sits in
-    // front of Google's stubby server) that the received GET request should be
-    // interpreted as a POST."
-    //
-    nsCOMPtr<nsIHttpChannel> httpChannel = do_QueryInterface(mChannel, &rv);
-    NS_ENSURE_SUCCESS(rv, rv);
-
-    rv = httpChannel->SetRequestHeader(NS_LITERAL_CSTRING("X-HTTP-Method-Override"),
-                                       NS_LITERAL_CSTRING("POST"),
-                                       false);
-    NS_ENSURE_SUCCESS(rv, rv);
-  } else if (!aRequestPayload.IsEmpty()) {
-    rv = AddRequestBody(aRequestPayload);
+  // If aRequestBody is empty, construct it for the test.
+  if (!aRequestBody.IsEmpty()) {
+    rv = AddRequestBody(aRequestBody);
     NS_ENSURE_SUCCESS(rv, rv);
   }
 
@@ -194,19 +176,13 @@ nsUrlClassifierStreamUpdater::FetchUpdate(nsIURI *aUpdateUrl,
 
 nsresult
 nsUrlClassifierStreamUpdater::FetchUpdate(const nsACString & aUpdateUrl,
-                                          const nsACString & aRequestPayload,
-                                          bool aIsPostRequest,
+                                          const nsACString & aRequestBody,
                                           const nsACString & aStreamTable)
 {
   LOG(("(pre) Fetching update from %s\n", PromiseFlatCString(aUpdateUrl).get()));
 
-  nsCString updateUrl(aUpdateUrl);
-  if (!aIsPostRequest) {
-    updateUrl.AppendPrintf("&$req=%s", nsCString(aRequestPayload).get());
-  }
-
   nsCOMPtr<nsIURI> uri;
-  nsresult rv = NS_NewURI(getter_AddRefs(uri), updateUrl);
+  nsresult rv = NS_NewURI(getter_AddRefs(uri), aUpdateUrl);
   NS_ENSURE_SUCCESS(rv, rv);
 
   nsAutoCString urlSpec;
@@ -214,14 +190,13 @@ nsUrlClassifierStreamUpdater::FetchUpdate(const nsACString & aUpdateUrl,
 
   LOG(("(post) Fetching update from %s\n", urlSpec.get()));
 
-  return FetchUpdate(uri, aRequestPayload, aIsPostRequest, aStreamTable);
+  return FetchUpdate(uri, aRequestBody, aStreamTable);
 }
 
 NS_IMETHODIMP
 nsUrlClassifierStreamUpdater::DownloadUpdates(
   const nsACString &aRequestTables,
-  const nsACString &aRequestPayload,
-  bool aIsPostRequest,
+  const nsACString &aRequestBody,
   const nsACString &aUpdateUrl,
   nsIUrlClassifierCallback *aSuccessCallback,
   nsIUrlClassifierCallback *aUpdateErrorCallback,
@@ -233,13 +208,12 @@ nsUrlClassifierStreamUpdater::DownloadUpdates(
   NS_ENSURE_ARG(aDownloadErrorCallback);
 
   if (mIsUpdating) {
-    LOG(("Already updating, queueing update %s from %s", aRequestPayload.Data(),
+    LOG(("Already updating, queueing update %s from %s", aRequestBody.Data(),
          aUpdateUrl.Data()));
     *_retval = false;
     PendingRequest *request = mPendingRequests.AppendElement();
     request->mTables = aRequestTables;
-    request->mRequestPayload = aRequestPayload;
-    request->mIsPostRequest = aIsPostRequest;
+    request->mRequest = aRequestBody;
     request->mUrl = aUpdateUrl;
     request->mSuccessCallback = aSuccessCallback;
     request->mUpdateErrorCallback = aUpdateErrorCallback;
@@ -274,12 +248,11 @@ nsUrlClassifierStreamUpdater::DownloadUpdates(
   rv = mDBService->BeginUpdate(this, aRequestTables);
   if (rv == NS_ERROR_NOT_AVAILABLE) {
     LOG(("Service busy, already updating, queuing update %s from %s",
-         aRequestPayload.Data(), aUpdateUrl.Data()));
+         aRequestBody.Data(), aUpdateUrl.Data()));
     *_retval = false;
     PendingRequest *request = mPendingRequests.AppendElement();
     request->mTables = aRequestTables;
-    request->mRequestPayload = aRequestPayload;
-    request->mIsPostRequest = aIsPostRequest;
+    request->mRequest = aRequestBody;
     request->mUrl = aUpdateUrl;
     request->mSuccessCallback = aSuccessCallback;
     request->mUpdateErrorCallback = aUpdateErrorCallback;
@@ -299,8 +272,9 @@ nsUrlClassifierStreamUpdater::DownloadUpdates(
   *_retval = true;
 
   LOG(("FetchUpdate: %s", aUpdateUrl.Data()));
+  //LOG(("requestBody: %s", aRequestBody.Data()));
 
-  return FetchUpdate(aUpdateUrl, aRequestPayload, aIsPostRequest, EmptyCString());
+  return FetchUpdate(aUpdateUrl, aRequestBody, EmptyCString());
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -344,9 +318,7 @@ nsUrlClassifierStreamUpdater::FetchNext()
 
   PendingUpdate &update = mPendingUpdates[0];
   LOG(("Fetching update url: %s\n", update.mUrl.get()));
-  nsresult rv = FetchUpdate(update.mUrl,
-                            EmptyCString(),
-                            true, // This method is for v2 and v2 is always a POST.
+  nsresult rv = FetchUpdate(update.mUrl, EmptyCString(),
                             update.mTable);
   if (NS_FAILED(rv)) {
     LOG(("Error fetching update url: %s\n", update.mUrl.get()));
@@ -377,8 +349,7 @@ nsUrlClassifierStreamUpdater::FetchNextRequest()
   bool dummy;
   DownloadUpdates(
     request.mTables,
-    request.mRequestPayload,
-    request.mIsPostRequest,
+    request.mRequest,
     request.mUrl,
     request.mSuccessCallback,
     request.mUpdateErrorCallback,

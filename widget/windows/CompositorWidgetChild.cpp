@@ -53,6 +53,12 @@ CompositorWidgetChild::ClearTransparentWindow()
   Unused << SendClearTransparentWindow();
 }
 
+void
+CompositorWidgetChild::ResizeTransparentWindow(const gfx::IntSize& aSize)
+{
+  Unused << SendResizeTransparentWindow(aSize);
+}
+
 HDC
 CompositorWidgetChild::GetTransparentDC() const
 {

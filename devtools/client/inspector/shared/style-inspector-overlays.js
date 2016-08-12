@@ -65,7 +65,7 @@ function HighlightersOverlay(view) {
   this.highlighterUtils = this.view.inspector.toolbox.highlighterUtils;
 
   this._onMouseMove = this._onMouseMove.bind(this);
-  this._onMouseOut = this._onMouseOut.bind(this);
+  this._onMouseLeave = this._onMouseLeave.bind(this);
 
   this.highlighters = {};
 
@@ -91,8 +91,7 @@ HighlightersOverlay.prototype = {
 
     let el = this.view.element;
     el.addEventListener("mousemove", this._onMouseMove, false);
-    el.addEventListener("mouseout", this._onMouseOut, false);
-    el.ownerDocument.defaultView.addEventListener("mouseout", this._onMouseOut, false);
+    el.addEventListener("mouseleave", this._onMouseLeave, false);
 
     this._isStarted = true;
   },
@@ -110,7 +109,7 @@ HighlightersOverlay.prototype = {
 
     let el = this.view.element;
     el.removeEventListener("mousemove", this._onMouseMove, false);
-    el.removeEventListener("mouseout", this._onMouseOut, false);
+    el.removeEventListener("mouseleave", this._onMouseLeave, false);
 
     this._isStarted = false;
   },
@@ -151,14 +150,7 @@ HighlightersOverlay.prototype = {
     }
   },
 
-  _onMouseOut: function (event) {
-    // Only hide the highlighter if the mouse leaves the currently hovered node.
-    if (!this._lastHovered ||
-        (event && this._lastHovered.contains(event.relatedTarget))) {
-      return;
-    }
-
-    // Otherwise, hide the highlighter.
+  _onMouseLeave: function () {
     this._lastHovered = null;
     this._hideCurrent();
   },
@@ -301,7 +293,7 @@ TooltipsOverlay.prototype = {
 
     if (this.isRuleView) {
       // Color picker tooltip
-      this.colorPicker = new SwatchColorPickerTooltip(toolbox, this.view.inspector);
+      this.colorPicker = new SwatchColorPickerTooltip(toolbox);
       // Cubic bezier tooltip
       this.cubicBezier = new SwatchCubicBezierTooltip(toolbox);
       // Filter editor tooltip

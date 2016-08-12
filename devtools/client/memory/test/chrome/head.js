@@ -23,9 +23,8 @@ SimpleTest.registerCleanupFunction(function () {
 });
 
 var DevToolsUtils = require("devtools/shared/DevToolsUtils");
+DevToolsUtils.testing = true;
 var { immutableUpdate } = DevToolsUtils;
-var flags = require("devtools/shared/flags");
-flags.testing = true;
 
 var constants = require("devtools/client/memory/constants");
 var {

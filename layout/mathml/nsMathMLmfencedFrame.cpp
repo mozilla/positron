@@ -210,8 +210,8 @@ ApplyUnstretchedMetrics(nsPresContext*      aPresContext,
 
 void
 nsMathMLmfencedFrame::Reflow(nsPresContext*          aPresContext,
-                             ReflowOutput&     aDesiredSize,
-                             const ReflowInput& aReflowInput,
+                             nsHTMLReflowMetrics&     aDesiredSize,
+                             const nsHTMLReflowState& aReflowState,
                              nsReflowStatus&          aStatus)
 {
   MarkInReflow();
@@ -226,7 +226,7 @@ nsMathMLmfencedFrame::Reflow(nsPresContext*          aPresContext,
   RefPtr<nsFontMetrics> fm =
     nsLayoutUtils::GetFontMetricsForFrame(this, fontSizeInflation);
   nscoord axisHeight, em;
-  GetAxisHeight(aReflowInput.mRenderingContext->GetDrawTarget(), fm, axisHeight);
+  GetAxisHeight(aReflowState.rendContext->GetDrawTarget(), fm, axisHeight);
   GetEmHeight(fm, em);
   // leading to be left at the top and the bottom of stretched chars
   nscoord leading = NSToCoordRound(0.2f * em); 
@@ -255,21 +255,21 @@ nsMathMLmfencedFrame::Reflow(nsPresContext*          aPresContext,
     descent = fm->MaxDescent();
   }
   while (childFrame) {
-    ReflowOutput childDesiredSize(aReflowInput,
+    nsHTMLReflowMetrics childDesiredSize(aReflowState,
                                          aDesiredSize.mFlags
                                          | NS_REFLOW_CALC_BOUNDING_METRICS);
     WritingMode wm = childFrame->GetWritingMode();
-    LogicalSize availSize = aReflowInput.ComputedSize(wm);
+    LogicalSize availSize = aReflowState.ComputedSize(wm);
     availSize.BSize(wm) = NS_UNCONSTRAINEDSIZE;
-    ReflowInput childReflowInput(aPresContext, aReflowInput,
+    nsHTMLReflowState childReflowState(aPresContext, aReflowState,
                                        childFrame, availSize);
     ReflowChild(childFrame, aPresContext, childDesiredSize,
-                childReflowInput, childStatus);
+                childReflowState, childStatus);
     //NS_ASSERTION(NS_FRAME_IS_COMPLETE(childStatus), "bad status");
     SaveReflowAndBoundingMetricsFor(childFrame, childDesiredSize,
                                     childDesiredSize.mBoundingMetrics);
 
-    mozilla::WritingMode outerWM = aReflowInput.GetWritingMode();
+    mozilla::WritingMode outerWM = aReflowState.GetWritingMode();
     nscoord childDescent = childDesiredSize.BSize(outerWM) -
                            childDesiredSize.BlockStartAscent();
     if (descent < childDescent)
@@ -286,7 +286,7 @@ nsMathMLmfencedFrame::Reflow(nsPresContext*          aPresContext,
   nsBoundingMetrics containerSize;
   nsStretchDirection stretchDir = NS_STRETCH_DIRECTION_VERTICAL;
 
-  DrawTarget* drawTarget = aReflowInput.mRenderingContext->GetDrawTarget();
+  DrawTarget* drawTarget = aReflowState.rendContext->GetDrawTarget();
 
   GetPreferredStretchSize(drawTarget,
                           0, /* i.e., without embellishments */
@@ -295,7 +295,7 @@ nsMathMLmfencedFrame::Reflow(nsPresContext*          aPresContext,
   while (childFrame) {
     nsIMathMLFrame* mathmlChild = do_QueryFrame(childFrame);
     if (mathmlChild) {
-      ReflowOutput childDesiredSize(aReflowInput);
+      nsHTMLReflowMetrics childDesiredSize(aReflowState);
       // retrieve the metrics that was stored at the previous pass
       GetReflowAndBoundingMetricsFor(childFrame, childDesiredSize,
                                      childDesiredSize.mBoundingMetrics);
@@ -395,7 +395,7 @@ nsMathMLmfencedFrame::Reflow(nsPresContext*          aPresContext,
     childFrame = firstChild;
   }
   while (childFrame) {
-    ReflowOutput childSize(aReflowInput);
+    nsHTMLReflowMetrics childSize(aReflowState);
     GetReflowAndBoundingMetricsFor(childFrame, childSize, bm);
     if (firstTime) {
       firstTime = false;
@@ -447,7 +447,7 @@ nsMathMLmfencedFrame::Reflow(nsPresContext*          aPresContext,
   GatherAndStoreOverflow(&aDesiredSize);
 
   aStatus = NS_FRAME_COMPLETE;
-  NS_FRAME_SET_TRUNCATION(aStatus, aReflowInput, aDesiredSize);
+  NS_FRAME_SET_TRUNCATION(aStatus, aReflowState, aDesiredSize);
 }
 
 static void
@@ -604,7 +604,7 @@ GetMaxCharWidth(nsPresContext*       aPresContext,
 }
 
 /* virtual */ void
-nsMathMLmfencedFrame::GetIntrinsicISizeMetrics(nsRenderingContext* aRenderingContext, ReflowOutput& aDesiredSize)
+nsMathMLmfencedFrame::GetIntrinsicISizeMetrics(nsRenderingContext* aRenderingContext, nsHTMLReflowMetrics& aDesiredSize)
 {
   nscoord width = 0;
 
@@ -654,7 +654,7 @@ nsMathMLmfencedFrame::GetIntrinsicISizeMetrics(nsRenderingContext* aRenderingCon
 }
 
 nscoord
-nsMathMLmfencedFrame::FixInterFrameSpacing(ReflowOutput& aDesiredSize)
+nsMathMLmfencedFrame::FixInterFrameSpacing(nsHTMLReflowMetrics& aDesiredSize)
 {
   nscoord gap = nsMathMLContainerFrame::FixInterFrameSpacing(aDesiredSize);
   if (!gap) return 0;

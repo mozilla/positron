@@ -345,13 +345,9 @@ class RemoteAutomation(Automation):
             lines = [l for l in lines if l]
 
             if lines:
-                if self.logBuffer.endswith('\n'):
-                    # all lines are complete; no need to buffer
-                    self.logBuffer = ""
-                else:
-                    # keep the last (unfinished) line in the buffer
-                    self.logBuffer = lines[-1]
-                    del lines[-1]
+                # We only keep the last (unfinished) line in the buffer
+                self.logBuffer = lines[-1]
+                del lines[-1]
 
             if not lines:
                 return False

@@ -184,15 +184,15 @@ nsHTMLButtonControlFrame::GetPrefISize(nsRenderingContext* aRenderingContext)
 
 void
 nsHTMLButtonControlFrame::Reflow(nsPresContext* aPresContext,
-                                 ReflowOutput& aDesiredSize,
-                                 const ReflowInput& aReflowInput,
+                                 nsHTMLReflowMetrics& aDesiredSize,
+                                 const nsHTMLReflowState& aReflowState,
                                  nsReflowStatus& aStatus)
 {
   MarkInReflow();
   DO_GLOBAL_REFLOW_COUNT("nsHTMLButtonControlFrame");
-  DISPLAY_REFLOW(aPresContext, this, aReflowInput, aDesiredSize, aStatus);
+  DISPLAY_REFLOW(aPresContext, this, aReflowState, aDesiredSize, aStatus);
 
-  NS_PRECONDITION(aReflowInput.ComputedISize() != NS_INTRINSICSIZE,
+  NS_PRECONDITION(aReflowState.ComputedISize() != NS_INTRINSICSIZE,
                   "Should have real computed inline-size by now");
 
   if (mState & NS_FRAME_FIRST_REFLOW) {
@@ -210,14 +210,14 @@ nsHTMLButtonControlFrame::Reflow(nsPresContext* aPresContext,
              "Button's child frame has unexpected pseudo type!");
 
   // XXXbz Eventually we may want to check-and-bail if
-  // !aReflowInput.ShouldReflowAllKids() &&
+  // !aReflowState.ShouldReflowAllKids() &&
   // !NS_SUBTREE_DIRTY(firstKid).
   // We'd need to cache our ascent for that, of course.
 
   // Reflow the contents of the button.
   // (This populates our aDesiredSize, too.)
   ReflowButtonContents(aPresContext, aDesiredSize,
-                       aReflowInput, firstKid);
+                       aReflowState, firstKid);
 
   if (!ShouldClipPaintingToBorderBox()) {
     ConsiderChildOverflow(aDesiredSize.mOverflowAreas, firstKid);
@@ -227,14 +227,14 @@ nsHTMLButtonControlFrame::Reflow(nsPresContext* aPresContext,
 
   aStatus = NS_FRAME_COMPLETE;
   FinishReflowWithAbsoluteFrames(aPresContext, aDesiredSize,
-                                 aReflowInput, aStatus);
+                                 aReflowState, aStatus);
 
   // We're always complete and we don't support overflow containers
   // so we shouldn't have a next-in-flow ever.
   aStatus = NS_FRAME_COMPLETE;
   MOZ_ASSERT(!GetNextInFlow());
 
-  NS_FRAME_SET_TRUNCATION(aStatus, aReflowInput, aDesiredSize);
+  NS_FRAME_SET_TRUNCATION(aStatus, aReflowState, aDesiredSize);
 }
 
 // Helper-function that lets us clone the button's reflow state, but with its
@@ -242,23 +242,23 @@ nsHTMLButtonControlFrame::Reflow(nsPresContext* aPresContext,
 // focus border and padding that we're using. (This lets us provide a more
 // appropriate content-box size for descendents' percent sizes to resolve
 // against.)
-static ReflowInput
-CloneReflowInputWithReducedContentBox(
-  const ReflowInput& aButtonReflowInput,
+static nsHTMLReflowState
+CloneReflowStateWithReducedContentBox(
+  const nsHTMLReflowState& aButtonReflowState,
   const nsMargin& aFocusPadding)
 {
   nscoord adjustedWidth =
-    aButtonReflowInput.ComputedWidth() - aFocusPadding.LeftRight();
+    aButtonReflowState.ComputedWidth() - aFocusPadding.LeftRight();
   adjustedWidth = std::max(0, adjustedWidth);
 
   // (Only adjust height if it's an actual length.)
-  nscoord adjustedHeight = aButtonReflowInput.ComputedHeight();
+  nscoord adjustedHeight = aButtonReflowState.ComputedHeight();
   if (adjustedHeight != NS_INTRINSICSIZE) {
     adjustedHeight -= aFocusPadding.TopBottom();
     adjustedHeight = std::max(0, adjustedHeight);
   }
 
-  ReflowInput clone(aButtonReflowInput);
+  nsHTMLReflowState clone(aButtonReflowState);
   clone.SetComputedWidth(adjustedWidth);
   clone.SetComputedHeight(adjustedHeight);
 
@@ -267,12 +267,12 @@ CloneReflowInputWithReducedContentBox(
 
 void
 nsHTMLButtonControlFrame::ReflowButtonContents(nsPresContext* aPresContext,
-                                               ReflowOutput& aButtonDesiredSize,
-                                               const ReflowInput& aButtonReflowInput,
+                                               nsHTMLReflowMetrics& aButtonDesiredSize,
+                                               const nsHTMLReflowState& aButtonReflowState,
                                                nsIFrame* aFirstKid)
 {
   WritingMode wm = GetWritingMode();
-  LogicalSize availSize = aButtonReflowInput.ComputedSize(wm);
+  LogicalSize availSize = aButtonReflowState.ComputedSize(wm);
   availSize.BSize(wm) = NS_INTRINSICSIZE;
 
   // Buttons have some bonus renderer-determined border/padding,
@@ -286,8 +286,8 @@ nsHTMLButtonControlFrame::ReflowButtonContents(nsPresContext* aPresContext,
   // focuspadding (which other browsers don't have) so that there's a
   // little more space for it.
   // Note that GetMinISize includes the focusPadding.
-  nscoord IOverflow = GetMinISize(aButtonReflowInput.mRenderingContext) -
-                      aButtonReflowInput.ComputedISize();
+  nscoord IOverflow = GetMinISize(aButtonReflowState.rendContext) -
+                      aButtonReflowState.ComputedISize();
   nscoord IFocusPadding = focusPadding.IStartEnd(wm);
   nscoord focusPaddingReduction = std::min(IFocusPadding,
                                            std::max(IOverflow, 0));
@@ -303,7 +303,7 @@ nsHTMLButtonControlFrame::ReflowButtonContents(nsPresContext* aPresContext,
   }
 
   // shorthand for a value we need to use in a bunch of places
-  const LogicalMargin& clbp = aButtonReflowInput.ComputedLogicalBorderPadding();
+  const LogicalMargin& clbp = aButtonReflowState.ComputedLogicalBorderPadding();
 
   // Indent the child inside us by the focus border. We must do this separate
   // from the regular border.
@@ -315,16 +315,16 @@ nsHTMLButtonControlFrame::ReflowButtonContents(nsPresContext* aPresContext,
 
   // Give child a clone of the button's reflow state, with height/width reduced
   // by focusPadding, so that descendants with height:100% don't protrude.
-  ReflowInput adjustedButtonReflowInput =
-    CloneReflowInputWithReducedContentBox(aButtonReflowInput,
+  nsHTMLReflowState adjustedButtonReflowState =
+    CloneReflowStateWithReducedContentBox(aButtonReflowState,
                                           focusPadding.GetPhysicalMargin(wm));
 
-  ReflowInput contentsReflowInput(aPresContext,
-                                        adjustedButtonReflowInput,
+  nsHTMLReflowState contentsReflowState(aPresContext,
+                                        adjustedButtonReflowState,
                                         aFirstKid, availSize);
 
   nsReflowStatus contentsReflowStatus;
-  ReflowOutput contentsDesiredSize(aButtonReflowInput);
+  nsHTMLReflowMetrics contentsDesiredSize(aButtonReflowState);
   childPos.B(wm) = 0; // This will be set properly later, after reflowing the
                       // child to determine its size.
 
@@ -332,7 +332,7 @@ nsHTMLButtonControlFrame::ReflowButtonContents(nsPresContext* aPresContext,
   // repositioned later by FinishReflowChild.
   nsSize dummyContainerSize;
   ReflowChild(aFirstKid, aPresContext,
-              contentsDesiredSize, contentsReflowInput,
+              contentsDesiredSize, contentsReflowState,
               wm, childPos, dummyContainerSize, 0, contentsReflowStatus);
   MOZ_ASSERT(NS_FRAME_IS_COMPLETE(contentsReflowStatus),
              "We gave button-contents frame unconstrained available height, "
@@ -340,9 +340,9 @@ nsHTMLButtonControlFrame::ReflowButtonContents(nsPresContext* aPresContext,
 
   // Compute the button's content-box size:
   LogicalSize buttonContentBox(wm);
-  if (aButtonReflowInput.ComputedBSize() != NS_INTRINSICSIZE) {
+  if (aButtonReflowState.ComputedBSize() != NS_INTRINSICSIZE) {
     // Button has a fixed block-size -- that's its content-box bSize.
-    buttonContentBox.BSize(wm) = aButtonReflowInput.ComputedBSize();
+    buttonContentBox.BSize(wm) = aButtonReflowState.ComputedBSize();
   } else {
     // Button is intrinsically sized -- it should shrinkwrap the
     // button-contents' bSize, plus any focus-padding space:
@@ -351,23 +351,23 @@ nsHTMLButtonControlFrame::ReflowButtonContents(nsPresContext* aPresContext,
 
     // Make sure we obey min/max-bSize in the case when we're doing intrinsic
     // sizing (we get it for free when we have a non-intrinsic
-    // aButtonReflowInput.ComputedBSize()).  Note that we do this before
+    // aButtonReflowState.ComputedBSize()).  Note that we do this before
     // adjusting for borderpadding, since mComputedMaxBSize and
     // mComputedMinBSize are content bSizes.
     buttonContentBox.BSize(wm) =
       NS_CSS_MINMAX(buttonContentBox.BSize(wm),
-                    aButtonReflowInput.ComputedMinBSize(),
-                    aButtonReflowInput.ComputedMaxBSize());
+                    aButtonReflowState.ComputedMinBSize(),
+                    aButtonReflowState.ComputedMaxBSize());
   }
-  if (aButtonReflowInput.ComputedISize() != NS_INTRINSICSIZE) {
-    buttonContentBox.ISize(wm) = aButtonReflowInput.ComputedISize();
+  if (aButtonReflowState.ComputedISize() != NS_INTRINSICSIZE) {
+    buttonContentBox.ISize(wm) = aButtonReflowState.ComputedISize();
   } else {
     buttonContentBox.ISize(wm) =
       contentsDesiredSize.ISize(wm) + focusPadding.IStartEnd(wm);
     buttonContentBox.ISize(wm) =
       NS_CSS_MINMAX(buttonContentBox.ISize(wm),
-                    aButtonReflowInput.ComputedMinISize(),
-                    aButtonReflowInput.ComputedMaxISize());
+                    aButtonReflowState.ComputedMinISize(),
+                    aButtonReflowState.ComputedMaxISize());
   }
 
   // Center child in the block-direction in the button
@@ -387,13 +387,13 @@ nsHTMLButtonControlFrame::ReflowButtonContents(nsPresContext* aPresContext,
 
   // Place the child
   FinishReflowChild(aFirstKid, aPresContext,
-                    contentsDesiredSize, &contentsReflowInput,
+                    contentsDesiredSize, &contentsReflowState,
                     wm, childPos, containerSize, 0);
 
   // Make sure we have a useful 'ascent' value for the child
   if (contentsDesiredSize.BlockStartAscent() ==
-      ReflowOutput::ASK_FOR_BASELINE) {
-    WritingMode wm = aButtonReflowInput.GetWritingMode();
+      nsHTMLReflowMetrics::ASK_FOR_BASELINE) {
+    WritingMode wm = aButtonReflowState.GetWritingMode();
     contentsDesiredSize.SetBlockStartAscent(aFirstKid->GetLogicalBaseline(wm));
   }
 
@@ -401,7 +401,7 @@ nsHTMLButtonControlFrame::ReflowButtonContents(nsPresContext* aPresContext,
   // Use what we learned to populate the button frame's reflow metrics.
   //  * Button's height & width are content-box size + border-box contribution:
   aButtonDesiredSize.SetSize(wm,
-    LogicalSize(wm, aButtonReflowInput.ComputedISize() + clbp.IStartEnd(wm),
+    LogicalSize(wm, aButtonReflowState.ComputedISize() + clbp.IStartEnd(wm),
                     buttonContentBox.BSize(wm) + clbp.BStartEnd(wm)));
 
   //  * Button's ascent is its child's ascent, plus the child's block-offset

@@ -345,7 +345,7 @@ function gc()
 
 function scheduleGC()
 {
-  SpecialPowers.exactGC(continueToNextStep);
+  SpecialPowers.exactGC(window, continueToNextStep);
 }
 
 function workerScript() {

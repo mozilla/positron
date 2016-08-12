@@ -144,8 +144,6 @@ protected:
     virtual bool RecvStopProfiler() override;
     virtual bool RecvGatherProfile() override;
 
-    virtual bool
-    AnswerModuleSupportsAsyncRender(bool* aResult) override;
 public:
     explicit PluginModuleChild(bool aIsChrome);
     virtual ~PluginModuleChild();
@@ -364,8 +362,6 @@ private:
     void ResetEventHooks();
     HHOOK mNestedEventHook;
     HHOOK mGlobalCallWndProcHook;
-public:
-    bool mAsyncRenderSupport;
 #endif
 };
 

@@ -2901,23 +2901,23 @@ nsCSSCounterStyleRule::GetType(uint16_t* aType)
 NS_IMETHODIMP
 nsCSSCounterStyleRule::GetCssText(nsAString& aCssText)
 {
-  aCssText.AssignLiteral(u"@counter-style ");
+  aCssText.AssignLiteral(MOZ_UTF16("@counter-style "));
   nsStyleUtil::AppendEscapedCSSIdent(mName, aCssText);
-  aCssText.AppendLiteral(u" {\n");
+  aCssText.AppendLiteral(MOZ_UTF16(" {\n"));
   for (nsCSSCounterDesc id = nsCSSCounterDesc(0);
        id < eCSSCounterDesc_COUNT;
        id = nsCSSCounterDesc(id + 1)) {
     if (mValues[id].GetUnit() != eCSSUnit_Null) {
       nsAutoString tmp;
       (this->*kGetters[id])(tmp);
-      aCssText.AppendLiteral(u"  ");
+      aCssText.AppendLiteral(MOZ_UTF16("  "));
       AppendASCIItoUTF16(nsCSSProps::GetStringValue(id), aCssText);
-      aCssText.AppendLiteral(u": ");
+      aCssText.AppendLiteral(MOZ_UTF16(": "));
       aCssText.Append(tmp);
-      aCssText.AppendLiteral(u";\n");
+      aCssText.AppendLiteral(MOZ_UTF16(";\n"));
     }
   }
-  aCssText.AppendLiteral(u"}");
+  aCssText.AppendLiteral(MOZ_UTF16("}"));
   return NS_OK;
 }
 
@@ -3089,7 +3089,7 @@ nsCSSCounterStyleRule::GetRange(nsAString& aRange)
 
   switch (value.GetUnit()) {
     case eCSSUnit_Auto:
-      aRange.AssignLiteral(u"auto");
+      aRange.AssignLiteral(MOZ_UTF16("auto"));
       break;
 
     case eCSSUnit_PairList:
@@ -3136,16 +3136,16 @@ nsCSSCounterStyleRule::GetSpeakAs(nsAString& aSpeakAs)
     case eCSSUnit_Enumerated:
       switch (value.GetIntValue()) {
         case NS_STYLE_COUNTER_SPEAKAS_BULLETS:
-          aSpeakAs.AssignLiteral(u"bullets");
+          aSpeakAs.AssignLiteral(MOZ_UTF16("bullets"));
           break;
         case NS_STYLE_COUNTER_SPEAKAS_NUMBERS:
-          aSpeakAs.AssignLiteral(u"numbers");
+          aSpeakAs.AssignLiteral(MOZ_UTF16("numbers"));
           break;
         case NS_STYLE_COUNTER_SPEAKAS_WORDS:
-          aSpeakAs.AssignLiteral(u"words");
+          aSpeakAs.AssignLiteral(MOZ_UTF16("words"));
           break;
         case NS_STYLE_COUNTER_SPEAKAS_SPELL_OUT:
-          aSpeakAs.AssignLiteral(u"spell-out");
+          aSpeakAs.AssignLiteral(MOZ_UTF16("spell-out"));
           break;
         default:
           NS_NOTREACHED("Unknown speech synthesis");

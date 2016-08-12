@@ -213,7 +213,6 @@ class CompositorBridgeParent final : public PCompositorBridgeParent,
 
 public:
   explicit CompositorBridgeParent(CSSToLayoutDeviceScale aScale,
-                                  const TimeDuration& aVsyncRate,
                                   bool aUseExternalSurfaceSize,
                                   const gfx::IntSize& aSurfaceSize);
 
@@ -246,6 +245,8 @@ public:
     MOZ_ASSERT_UNREACHABLE("This message is only sent cross-process");
     return true;
   }
+
+  virtual bool RecvGetTileSize(int32_t* aWidth, int32_t* aHeight) override;
 
   virtual bool RecvNotifyRegionInvalidated(const nsIntRegion& aRegion) override;
   virtual bool RecvStartFrameTimeRecording(const int32_t& aBufferSize, uint32_t* aOutStartIndex) override;
@@ -480,6 +481,8 @@ public:
    */
   static void PostInsertVsyncProfilerMarker(mozilla::TimeStamp aVsyncTimestamp);
 
+  float ComputeRenderIntegrity();
+
   widget::CompositorWidget* GetWidget() { return mWidget; }
 
   void ForceComposeToTarget(gfx::DrawTarget* aTarget, const gfx::IntRect* aRect = nullptr);
@@ -601,7 +604,6 @@ protected:
   widget::CompositorWidget* mWidget;
   TimeStamp mTestTime;
   CSSToLayoutDeviceScale mScale;
-  TimeDuration mVsyncRate;
   bool mIsTesting;
 
   uint64_t mPendingTransaction;

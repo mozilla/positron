@@ -160,8 +160,8 @@ nsMathMLmrootFrame::GetRadicalXOffsets(nscoord aIndexWidth, nscoord aSqrWidth,
 
 void
 nsMathMLmrootFrame::Reflow(nsPresContext*          aPresContext,
-                           ReflowOutput&     aDesiredSize,
-                           const ReflowInput& aReflowInput,
+                           nsHTMLReflowMetrics&     aDesiredSize,
+                           const nsHTMLReflowState& aReflowState,
                            nsReflowStatus&          aStatus)
 {
   MarkInReflow();
@@ -172,7 +172,7 @@ nsMathMLmrootFrame::Reflow(nsPresContext*          aPresContext,
   aDesiredSize.SetBlockStartAscent(0);
 
   nsBoundingMetrics bmSqr, bmBase, bmIndex;
-  DrawTarget* drawTarget = aReflowInput.mRenderingContext->GetDrawTarget();
+  DrawTarget* drawTarget = aReflowState.rendContext->GetDrawTarget();
 
   //////////////////
   // Reflow Children
@@ -180,21 +180,21 @@ nsMathMLmrootFrame::Reflow(nsPresContext*          aPresContext,
   int32_t count = 0;
   nsIFrame* baseFrame = nullptr;
   nsIFrame* indexFrame = nullptr;
-  ReflowOutput baseSize(aReflowInput);
-  ReflowOutput indexSize(aReflowInput);
+  nsHTMLReflowMetrics baseSize(aReflowState);
+  nsHTMLReflowMetrics indexSize(aReflowState);
   nsIFrame* childFrame = mFrames.FirstChild();
   while (childFrame) {
     // ask our children to compute their bounding metrics 
-    ReflowOutput childDesiredSize(aReflowInput,
+    nsHTMLReflowMetrics childDesiredSize(aReflowState,
                                          aDesiredSize.mFlags
                                          | NS_REFLOW_CALC_BOUNDING_METRICS);
     WritingMode wm = childFrame->GetWritingMode();
-    LogicalSize availSize = aReflowInput.ComputedSize(wm);
+    LogicalSize availSize = aReflowState.ComputedSize(wm);
     availSize.BSize(wm) = NS_UNCONSTRAINEDSIZE;
-    ReflowInput childReflowInput(aPresContext, aReflowInput,
+    nsHTMLReflowState childReflowState(aPresContext, aReflowState,
                                        childFrame, availSize);
     ReflowChild(childFrame, aPresContext,
-                     childDesiredSize, childReflowInput, childStatus);
+                     childDesiredSize, childReflowState, childStatus);
     //NS_ASSERTION(NS_FRAME_IS_COMPLETE(childStatus), "bad status");
     if (0 == count) {
       // base 
@@ -216,7 +216,7 @@ nsMathMLmrootFrame::Reflow(nsPresContext*          aPresContext,
     ReportChildCountError();
     ReflowError(drawTarget, aDesiredSize);
     aStatus = NS_FRAME_COMPLETE;
-    NS_FRAME_SET_TRUNCATION(aStatus, aReflowInput, aDesiredSize);
+    NS_FRAME_SET_TRUNCATION(aStatus, aReflowState, aDesiredSize);
     // Call DidReflow() for the child frames we successfully did reflow.
     DidReflowChildren(mFrames.FirstChild(), childFrame);
     return;
@@ -354,11 +354,11 @@ nsMathMLmrootFrame::Reflow(nsPresContext*          aPresContext,
   mReference.y = aDesiredSize.BlockStartAscent();
 
   aStatus = NS_FRAME_COMPLETE;
-  NS_FRAME_SET_TRUNCATION(aStatus, aReflowInput, aDesiredSize);
+  NS_FRAME_SET_TRUNCATION(aStatus, aReflowState, aDesiredSize);
 }
 
 /* virtual */ void
-nsMathMLmrootFrame::GetIntrinsicISizeMetrics(nsRenderingContext* aRenderingContext, ReflowOutput& aDesiredSize)
+nsMathMLmrootFrame::GetIntrinsicISizeMetrics(nsRenderingContext* aRenderingContext, nsHTMLReflowMetrics& aDesiredSize)
 {
   nsIFrame* baseFrame = mFrames.FirstChild();
   nsIFrame* indexFrame = nullptr;

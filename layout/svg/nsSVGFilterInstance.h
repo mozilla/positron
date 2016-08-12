@@ -81,7 +81,6 @@ public:
    *   the caller. The caller may decide to override the actual SVG bbox.
    */
   nsSVGFilterInstance(const nsStyleFilter& aFilter,
-                      nsIFrame* aTargetFrame,
                       nsIContent* aTargetContent,
                       const UserSpaceMetrics& aMetrics,
                       const gfxRect& aTargetBBox,
@@ -141,7 +140,7 @@ private:
   /**
    * Finds the filter frame associated with this SVG filter.
    */
-  nsSVGFilterFrame* GetFilterFrame(nsIFrame* aTargetFrame);
+  nsSVGFilterFrame* GetFilterFrame();
 
   /**
    * Computes the filter primitive subregion for the given primitive.

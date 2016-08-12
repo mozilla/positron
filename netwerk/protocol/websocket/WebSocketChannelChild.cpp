@@ -472,11 +472,7 @@ WebSocketChannelChild::AsyncOpen(nsIURI *aURI,
     loadInfoArgs = void_t();
 
     MOZ_ASSERT(mServerTransportProvider);
-    PTransportProviderChild *ipcChild;
-    nsresult rv = mServerTransportProvider->GetIPCChild(&ipcChild);
-    NS_ENSURE_SUCCESS(rv, rv);
-
-    transportProvider = ipcChild;
+    transportProvider = mServerTransportProvider->GetIPCChild();
   }
 
   gNeckoChild->SendPWebSocketConstructor(this, tabChild,

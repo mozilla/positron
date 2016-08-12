@@ -2268,17 +2268,6 @@ CSS_PROP_TEXT(
     kHyphensKTable,
     CSS_PROP_NO_OFFSET,
     eStyleAnimType_None)
-CSS_PROP_TEXTRESET(
-    initial-letter,
-    initial_letter,
-    InitialLetter,
-    CSS_PROPERTY_PARSE_FUNCTION |
-        CSS_PROPERTY_APPLIES_TO_FIRST_LETTER,
-    "layout.css.initial-letter.enabled",
-    0,
-    nullptr,
-    CSS_PROP_NO_OFFSET,
-    eStyleAnimType_None)
 CSS_PROP_VISIBILITY(
     image-orientation,
     image_orientation,
@@ -3708,18 +3697,6 @@ CSS_PROP_DISPLAY(
     kScrollSnapTypeKTable,
     CSS_PROP_NO_OFFSET,
     eStyleAnimType_None)
-CSS_PROP_DISPLAY(
-    shape-outside,
-    shape_outside,
-    ShapeOutside,
-    CSS_PROPERTY_PARSE_VALUE |
-        CSS_PROPERTY_VALUE_PARSER_FUNCTION |
-        CSS_PROPERTY_APPLIES_TO_FIRST_LETTER,
-    "layout.css.shape-outside.enabled",
-    0,
-    nullptr,
-    CSS_PROP_NO_OFFSET,
-    eStyleAnimType_None) // FIXME: Bug 1289049 for adding animation support
 CSS_PROP_SVG(
     shape-rendering,
     shape_rendering,

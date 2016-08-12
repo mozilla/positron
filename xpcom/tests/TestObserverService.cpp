@@ -99,13 +99,13 @@ int main(int argc, char *argv[])
         printf("Testing Notify(observer-A, topic-A)...\n");
         rv = anObserverService->NotifyObservers( aObserver,
                                    topicA.get(),
-                                   u"Testing Notify(observer-A, topic-A)" );
+                                   MOZ_UTF16("Testing Notify(observer-A, topic-A)") );
         testResult(rv);
 
         printf("Testing Notify(observer-B, topic-B)...\n");
         rv = anObserverService->NotifyObservers( bObserver,
                                    topicB.get(),
-                                   u"Testing Notify(observer-B, topic-B)" );
+                                   MOZ_UTF16("Testing Notify(observer-B, topic-B)") );
         testResult(rv);
  
         printf("Testing EnumerateObserverList (for topic-A)...\n");
@@ -129,7 +129,7 @@ int main(int argc, char *argv[])
               printf("...\n");
               rv = observer->Observe( observer, 
                                       topicA.get(), 
-                                      u"during enumeration" );
+                                      MOZ_UTF16("during enumeration") );
               testResult(rv);
           }
         }

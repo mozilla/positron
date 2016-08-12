@@ -464,20 +464,14 @@ toolbarbutton.bookmark-item:not(.subviewbutton),
 #personal-bookmarks[cui-areatype="toolbar"]:not([overflowedItem=true]) > #bookmarks-toolbar-placeholder {
   margin: 0;
   padding: 2px 3px;
-  -moz-appearance: none;
-  border: 1px solid transparent;
 }
 
-toolbarbutton.bookmark-item:not(.subviewbutton):hover:not([disabled="true"]):not([open]) {
-  border-color: var(--toolbarbutton-hover-bordercolor);
-  background: var(--toolbarbutton-hover-background);
-}
-
-toolbarbutton.bookmark-item:not(.subviewbutton):hover:active:not([disabled="true"]),
+toolbarbutton.bookmark-item:not([disabled="true"]):not(.subviewbutton):hover:active,
 toolbarbutton.bookmark-item[open="true"] {
-  border-color: var(--toolbarbutton-active-bordercolor);
-  box-shadow: var(--toolbarbutton-active-boxshadow);
-  background: var(--toolbarbutton-active-background);
+  padding-top: 3px;
+  padding-bottom: 1px;
+  padding-inline-start: 4px;
+  padding-inline-end: 2px;
 }
 
 .bookmark-item > .toolbarbutton-icon,
@@ -2349,16 +2343,26 @@ notification[value="translation"] {
   -moz-image-region: auto;
 }
 
+/* ::::: Keyboard UI Panel ::::: */
+
+.KUI-panel {
+  -moz-appearance: none;
+  background: rgba(27%,27%,27%,.9) url(KUI-background.png) repeat-x;
+  color: white;
+  border-style: none;
+  border-radius: 20px;
+}
+
+.KUI-panel[level="top"] {
+  background-color: rgba(27%,27%,27%,.65);
+}
+
 /* Ctrl-Tab */
 
 #ctrlTab-panel {
-  -moz-appearance: none;
-  background: hsla(0,0%,33%,.85);
-  color: white;
-  border-style: none;
   padding: 20px 10px 10px;
   font-weight: bold;
-  text-shadow: 0 0 1px hsl(0,0%,12%), 0 0 2px hsl(0,0%,12%);
+  text-shadow: 0 0 1px rgb(27%,27%,27%), 0 0 2px rgb(27%,27%,27%);
 }
 
 .ctrlTab-favicon[src] {
@@ -2408,19 +2412,11 @@ notification[value="translation"] {
 .statuspanel-label {
   margin: 0;
   padding: 2px 4px;
-  background: -moz-dialog;
-  border: 1px none ThreeDShadow;
+  background: linear-gradient(#fff, #ddd);
+  border: 1px none #ccc;
   border-top-style: solid;
-  color: -moz-dialogText;
+  color: #333;
   text-shadow: none;
-}
-
-@media (-moz-windows-default-theme) {
-  .statuspanel-label {
-    background: linear-gradient(#fff, #ddd);
-    border-color: #ccc;
-    color: #333;
-  }
 }
 
 .statuspanel-label:-moz-locale-dir(ltr):not([mirror]),

@@ -9,7 +9,6 @@ import copy
 import datetime
 import glob
 import os
-import re
 import sys
 import signal
 import socket
@@ -37,28 +36,14 @@ class AndroidEmulatorTest(BlobUploadMixin, TestingMixin, EmulatorMixin, VCSMixin
         ["--test-suite"],
         {"action": "store",
          "dest": "test_suite",
-        }
+         }
     ], [
         ["--adb-path"],
         {"action": "store",
          "dest": "adb_path",
          "default": None,
          "help": "Path to adb",
-        }
-    ], [
-        ["--total-chunk"],
-        {"action": "store",
-         "dest": "total_chunks",
-         "default": None,
-         "help": "Number of total chunks",
-        }
-    ], [
-        ["--this-chunk"],
-        {"action": "store",
-         "dest": "this_chunk",
-         "default": None,
-         "help": "Number of this chunk",
-        }
+         }
     ]] + copy.deepcopy(testing_config_options) + \
         copy.deepcopy(blobupload_config_options)
 
@@ -116,25 +101,19 @@ class AndroidEmulatorTest(BlobUploadMixin, TestingMixin, EmulatorMixin, VCSMixin
         self.robocop_path = os.path.join(abs_dirs['abs_work_dir'], "robocop.apk")
         self.minidump_stackwalk_path = c.get("minidump_stackwalk_path")
         self.emulator = c.get('emulator')
+        self.test_suite_definitions = c['test_suite_definitions']
         self.test_suite = c.get('test_suite')
-        self.this_chunk = c.get('this_chunk')
-        self.total_chunks = c.get('total_chunks')
-        if self.test_suite not in self.config["suite_definitions"]:
-            # accept old-style test suite name like "mochitest-3"
-            m = re.match("(.*)-(\d*)", self.test_suite)
-            if m:
-                self.test_suite = m.group(1)
-                if self.this_chunk is None:
-                    self.this_chunk = m.group(2)
         self.sdk_level = None
         self.xre_path = None
+        assert self.test_suite in self.test_suite_definitions
 
     def _query_tests_dir(self):
         dirs = self.query_abs_dirs()
+        suite_category = self.test_suite_definitions[self.test_suite]["category"]
         try:
-            test_dir = self.config["suite_definitions"][self.test_suite]["testsdir"]
+            test_dir = self.config["suite_definitions"][suite_category]["testsdir"]
         except:
-            test_dir = self.test_suite
+            test_dir = suite_category
         return os.path.join(dirs['abs_test_install_dir'], test_dir)
 
     def query_abs_dirs(self):
@@ -183,15 +162,8 @@ class AndroidEmulatorTest(BlobUploadMixin, TestingMixin, EmulatorMixin, VCSMixin
         # constructed in start_emulator.
         env['LD_LIBRARY_PATH'] = self.abs_dirs['abs_work_dir']
 
-        # Set environment variables to help emulator find the AVD.
-        # In newer versions of the emulator, ANDROID_AVD_HOME should
-        # point to the 'avd' directory.
-        # For older versions of the emulator, ANDROID_SDK_HOME should
-        # point to the directory containing the '.android' directory
-        # containing the 'avd' directory.
         avd_home_dir = self.abs_dirs['abs_avds_dir']
         env['ANDROID_AVD_HOME'] = os.path.join(avd_home_dir, 'avd')
-        env['ANDROID_SDK_HOME'] = os.path.abspath(os.path.join(avd_home_dir, '..'))
 
         command = [
             "emulator", "-avd", self.emulator["name"],
@@ -463,16 +435,17 @@ class AndroidEmulatorTest(BlobUploadMixin, TestingMixin, EmulatorMixin, VCSMixin
     def _build_command(self):
         c = self.config
         dirs = self.query_abs_dirs()
+        suite_category = self.test_suite_definitions[self.test_suite]["category"]
 
-        if self.test_suite not in self.config["suite_definitions"]:
-            self.fatal("Key '%s' not defined in the config!" % self.test_suite)
+        if suite_category not in self.config["suite_definitions"]:
+            self.fatal("Key '%s' not defined in the config!" % suite_category)
 
         cmd = [
             self.query_python_path('python'),
             '-u',
             os.path.join(
                 self._query_tests_dir(),
-                self.config["suite_definitions"][self.test_suite]["run_filename"]
+                self.config["suite_definitions"][suite_category]["run_filename"]
             ),
         ]
 
@@ -503,55 +476,24 @@ class AndroidEmulatorTest(BlobUploadMixin, TestingMixin, EmulatorMixin, VCSMixin
                 'device_ip': c['device_ip'],
                 'device_port': str(self.emulator['sut_port1']),
             })
-        for option in self.config["suite_definitions"][self.test_suite]["options"]:
-            opt = option.split('=')[0]
-            # override configured chunk options with script args, if specified
-            if opt == '--this-chunk' and self.this_chunk is not None:
-                continue
-            if opt == '--total-chunks' and self.total_chunks is not None:
-                continue
+        for option in self.config["suite_definitions"][suite_category]["options"]:
             cmd.extend([option % str_format_values])
 
-        if self.this_chunk is not None:
-            cmd.extend(['--this-chunk', self.this_chunk])
-        if self.total_chunks is not None:
-            cmd.extend(['--total-chunks', self.total_chunks])
+        for arg in self.test_suite_definitions[self.test_suite]["extra_args"]:
+            argname = arg.split('=')[0]
+            # only add the extra arg if it wasn't already defined by in-tree configs
+            if any(a.split('=')[0] == argname for a in cmd):
+                continue
+            cmd.append(arg)
 
-        try_options, try_tests = self.try_args(self.test_suite)
+        try_options, try_tests = self.try_args(suite_category)
         cmd.extend(try_options)
         cmd.extend(self.query_tests_args(
-            self.config["suite_definitions"][self.test_suite].get("tests"),
-            None,
+            self.config["suite_definitions"][suite_category].get("tests"),
+            self.test_suite_definitions[self.test_suite].get("tests"),
             try_tests))
 
         return cmd
-
-    def _get_repo_url(self, path):
-        """
-           Return a url for a file (typically a tooltool manifest) in this hg repo
-           and using this revision (or mozilla-central/default if repo/rev cannot
-           be determined).
-
-           :param path specifies the directory path to the file of interest.
-        """
-        if 'GECKO_HEAD_REPOSITORY' in os.environ and 'GECKO_HEAD_REV' in os.environ:
-            # probably taskcluster
-            repo = os.environ['GECKO_HEAD_REPOSITORY']
-            revision = os.environ['GECKO_HEAD_REV']
-        elif self.buildbot_config and 'properties' in self.buildbot_config:
-            # probably buildbot
-            repo = 'https://hg.mozilla.org/%s' % self.buildbot_config['properties']['repo_path']
-            revision = self.buildbot_config['properties']['revision']
-        else:
-            # something unexpected!
-            repo = 'https://hg.mozilla.org/mozilla-central'
-            revision = 'default'
-            self.warning('Unable to find repo/revision for manifest; using mozilla-central/default')
-        url = '%s/raw-file/%s/%s' % (
-            repo,
-            revision,
-            path)
-        return url
 
     def _tooltool_fetch(self, url, dir):
         c = self.config
@@ -588,8 +530,20 @@ class AndroidEmulatorTest(BlobUploadMixin, TestingMixin, EmulatorMixin, VCSMixin
         # contents of the tar ball
         self.rmtree(dirs['abs_avds_dir'])
         self.mkdir_p(dirs['abs_avds_dir'])
-        url = self._get_repo_url(c["tooltool_manifest_path"])
-        self._tooltool_fetch(url, dirs['abs_avds_dir'])
+        if not self.buildbot_config:
+            # XXX until we figure out how to determine the repo_path, revision
+            url = 'https://hg.mozilla.org/%s/raw-file/%s/%s' % (
+                "try", "default", c["tooltool_manifest_path"])
+            self._tooltool_fetch(url, dirs['abs_avds_dir'])
+        elif self.buildbot_config and 'properties' in self.buildbot_config:
+            url = 'https://hg.mozilla.org/%s/raw-file/%s/%s' % (
+                self.buildbot_config['properties']['repo_path'],
+                self.buildbot_config['properties']['revision'],
+                c["tooltool_manifest_path"])
+            self._tooltool_fetch(url, dirs['abs_avds_dir'])
+        else:
+            self.fatal("properties in self.buildbot_config are required to "
+                       "retrieve tooltool manifest to be used for avds setup")
 
         avd_home_dir = self.abs_dirs['abs_avds_dir']
         if avd_home_dir != "/home/cltbld/.android":
@@ -667,7 +621,8 @@ class AndroidEmulatorTest(BlobUploadMixin, TestingMixin, EmulatorMixin, VCSMixin
         """
         Download and extract fennec APK, tests.zip, host utils, and robocop (if required).
         """
-        super(AndroidEmulatorTest, self).download_and_extract(suite_categories=[self.test_suite])
+        suite_category = self.test_suite_definitions[self.test_suite]['category']
+        super(AndroidEmulatorTest, self).download_and_extract(suite_categories=[suite_category])
         dirs = self.query_abs_dirs()
         if self.test_suite.startswith('robocop'):
             robocop_url = self.installer_url[:self.installer_url.rfind('/')] + '/robocop.apk'
@@ -676,7 +631,8 @@ class AndroidEmulatorTest(BlobUploadMixin, TestingMixin, EmulatorMixin, VCSMixin
         self.rmtree(dirs['abs_xre_dir'])
         self.mkdir_p(dirs['abs_xre_dir'])
         if self.config["hostutils_manifest_path"]:
-            url = self._get_repo_url(self.config["hostutils_manifest_path"])
+            url = 'https://hg.mozilla.org/%s/raw-file/%s/%s' % (
+                "try", "default", self.config["hostutils_manifest_path"])
             self._tooltool_fetch(url, dirs['abs_xre_dir'])
             for p in glob.glob(os.path.join(dirs['abs_xre_dir'], 'host-utils-*')):
                 if os.path.isdir(p) and os.path.isfile(os.path.join(p, 'xpcshell')):
@@ -692,10 +648,6 @@ class AndroidEmulatorTest(BlobUploadMixin, TestingMixin, EmulatorMixin, VCSMixin
         """
         assert self.installer_path is not None, \
             "Either add installer_path to the config or use --installer-path."
-        install_needed = self.config["suite_definitions"][self.test_suite].get("install")
-        if install_needed == False:
-            self.info("Skipping apk installation for %s" % self.test_suite)
-            return
 
         self.sdk_level = self._run_with_timeout(30, [self.adb_path, '-s', self.emulator['device_id'],
             'shell', 'getprop', 'ro.build.version.sdk'])
@@ -738,7 +690,8 @@ class AndroidEmulatorTest(BlobUploadMixin, TestingMixin, EmulatorMixin, VCSMixin
             'jsreftest-debug': 'jsreftest',
             'crashtest-debug': 'crashtest',
         }
-        suite_category = aliases.get(self.test_suite, self.test_suite)
+        suite_category = self.test_suite_definitions[self.test_suite]["category"]
+        suite_category = aliases.get(suite_category, suite_category)
         parser = self.get_test_output_parser(
             suite_category,
             config=self.config,

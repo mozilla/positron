@@ -130,7 +130,7 @@ function hasBreakpoint(ctx, line) {
  * emit a breakpointAdded event.
  */
 function addBreakpoint(ctx, line, cond) {
-  function _addBreakpoint() {
+  function _addBreakpoint(ctx, line, cond) {
     let { ed, cm } = ctx;
     let meta = dbginfo.get(ed);
     let info = cm.lineInfo(line);
@@ -166,9 +166,9 @@ function addBreakpoint(ctx, line, cond) {
   // If lineInfo() returns null, wait a tick to give the editor a chance to
   // initialize properly.
   if (ctx.cm.lineInfo(line) === null) {
-    DevToolsUtils.executeSoon(() => _addBreakpoint());
+    DevToolsUtils.executeSoon(() => _addBreakpoint(ctx, line, cond));
   } else {
-    _addBreakpoint();
+    _addBreakpoint(ctx, line, cond);
   }
   return deferred.promise;
 }
@@ -190,15 +190,7 @@ function removeBreakpoints(ctx) {
     meta.breakpoints = {};
   }
 
-  cm.doc.iter((line) => {
-    // The hasBreakpoint is a slow operation: checks the line type, whether cm
-    // is initialized and creates several new objects. Inlining the line's
-    // wrapClass property check directly.
-    if (line.wrapClass == null || !line.wrapClass.includes("breakpoint")) {
-      return;
-    }
-    removeBreakpoint(ctx, line);
-  });
+  cm.doc.iter((line) => { removeBreakpoint(ctx, line); });
 }
 
 /**
@@ -221,7 +213,10 @@ function removeBreakpoint(ctx, line) {
 }
 
 function moveBreakpoint(ctx, fromLine, toLine) {
-  let { ed } = ctx;
+  let { ed, cm } = ctx;
+
+  let fromTop = cm.cursorCoords({ line: fromLine }).top;
+  let toTop = cm.cursorCoords({ line: toLine }).top;
 
   ed.removeBreakpoint(fromLine);
   ed.addBreakpoint(toLine);
@@ -242,7 +237,7 @@ function setBreakpointCondition(ctx, line) {
 }
 
 function removeBreakpointCondition(ctx, line) {
-  let { ed } = ctx;
+  let { ed, cm } = ctx;
 
   ed.removeLineClass(line, "conditional");
 }
@@ -331,6 +326,4 @@ function findPrev(ctx, query) {
   setBreakpointCondition, removeBreakpointCondition, getBreakpoints, removeBreakpoints,
   setDebugLocation, getDebugLocation, clearDebugLocation, find, findNext,
   findPrev
-].forEach(func => {
-  module.exports[func.name] = func;
-});
+].forEach(func => module.exports[func.name] = func);

@@ -166,13 +166,11 @@ private:
    * @param aMatchBehavior
    *        The matching behavior to use defined by one of the
    *        mozIPlacesAutoComplete::MATCH_* values.
-   * @param aSpecBuf
-   *        A string buffer that the returned slice can point into, if needed.
-   * @return the fixed up string.
+   * @param _fixedSpec
+   *        An out parameter that is the fixed up string.
    */
-  static nsDependentCSubstring fixupURISpec(const nsACString &aURISpec,
-                                            int32_t aMatchBehavior,
-                                            nsACString &aSpecBuf);
+  static void fixupURISpec(const nsCString &aURISpec, int32_t aMatchBehavior,
+                           nsCString &_fixedSpec);
 };
 
 

@@ -1569,13 +1569,9 @@ WebSocketChannel::ProcessInput(uint8_t *buffer, uint32_t count)
     LOG(("WebSocketChannel::ProcessInput: payload %lld avail %lu\n",
          payloadLength64, avail));
 
-    CheckedInt<int64_t> payloadLengthChecked(payloadLength64);
-    payloadLengthChecked += mFragmentAccumulator;
-    if (!payloadLengthChecked.isValid() || payloadLengthChecked.value() >
-        mMaxMessageSize) {
+    if (payloadLength64 + mFragmentAccumulator > mMaxMessageSize) {
       return NS_ERROR_FILE_TOO_BIG;
     }
-
     uint32_t payloadLength = static_cast<uint32_t>(payloadLength64);
 
     if (avail < payloadLength)
@@ -2183,16 +2179,14 @@ WebSocketChannel::PrimeNewOutgoingMessage()
     // Perform the sending mask. Never use a zero mask
     do {
       uint8_t *buffer;
-      PR_STATIC_ASSERT(4 == sizeof(mask));
-      nsresult rv = mRandomGenerator->GenerateRandomBytes(sizeof(mask),
-                                                          &buffer);
+      nsresult rv = mRandomGenerator->GenerateRandomBytes(4, &buffer);
       if (NS_FAILED(rv)) {
         LOG(("WebSocketChannel::PrimeNewOutgoingMessage(): "
              "GenerateRandomBytes failure %x\n", rv));
         StopSession(rv);
         return;
       }
-      memcpy(&mask, buffer, sizeof(mask));
+      mask = * reinterpret_cast<uint32_t *>(buffer);
       free(buffer);
     } while (!mask);
     NetworkEndian::writeUint32(payload - sizeof(uint32_t), mask);

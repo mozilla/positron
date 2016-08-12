@@ -57,16 +57,16 @@ public:
    * and descent will be set to 0.
    */
   virtual void Reflow(nsPresContext*      aPresContext,
-                      ReflowOutput& aDesiredSize,
-                      const ReflowInput& aReflowInput,
+                      nsHTMLReflowMetrics& aDesiredSize,
+                      const nsHTMLReflowState& aReflowState,
                       nsReflowStatus&      aStatus) override;
   
   /**
    * This method does most of the work that Reflow() above need done.
    */
   virtual void DoReflow(nsPresContext*      aPresContext,
-                        ReflowOutput& aDesiredSize,
-                        const ReflowInput& aReflowInput,
+                        nsHTMLReflowMetrics& aDesiredSize,
+                        const nsHTMLReflowState& aReflowState,
                         nsReflowStatus&      aStatus);
 
   virtual bool IsFrameOfType(uint32_t aFlags) const override
@@ -99,8 +99,8 @@ protected:
   /**
    * Set aDesiredSize to be the available size
    */
-  void SizeToAvailSize(const ReflowInput& aReflowInput,
-                       ReflowOutput& aDesiredSize);
+  void SizeToAvailSize(const nsHTMLReflowState& aReflowState,
+                       nsHTMLReflowMetrics& aDesiredSize);
 };
 
 #endif /* nsLeafFrame_h___ */

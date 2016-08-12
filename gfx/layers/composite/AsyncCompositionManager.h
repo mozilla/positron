@@ -85,8 +85,7 @@ public:
   // another animation frame.
   enum class TransformsToSkip : uint8_t { NoneOfThem = 0, APZ = 1 };
   bool TransformShadowTree(TimeStamp aCurrentFrame,
-                           TimeDuration aVsyncRate,
-                           TransformsToSkip aSkip = TransformsToSkip::NoneOfThem);
+    TransformsToSkip aSkip = TransformsToSkip::NoneOfThem);
 
   // Calculates the correct rotation and applies the transform to
   // our layer manager

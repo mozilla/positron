@@ -1327,7 +1327,7 @@ add_task(function* test_preventive_maintenance()
   stmt.finalize();
   do_check_true(defaultBookmarksMaxId > 0);
 
-  for (let test of tests) {
+  for (let [, test] in Iterator(tests)) {
     dump("\nExecuting test: " + test.name + "\n" + "*** " + test.desc + "\n");
     yield test.setup();
 

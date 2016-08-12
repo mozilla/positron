@@ -300,7 +300,7 @@ nsMathMLmencloseFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
 
 /* virtual */ nsresult
 nsMathMLmencloseFrame::MeasureForWidth(DrawTarget* aDrawTarget,
-                                       ReflowOutput& aDesiredSize)
+                                       nsHTMLReflowMetrics& aDesiredSize)
 {
   return PlaceInternal(aDrawTarget, false, aDesiredSize, true);
 }
@@ -308,7 +308,7 @@ nsMathMLmencloseFrame::MeasureForWidth(DrawTarget* aDrawTarget,
 /* virtual */ nsresult
 nsMathMLmencloseFrame::Place(DrawTarget*          aDrawTarget,
                              bool                 aPlaceOrigin,
-                             ReflowOutput& aDesiredSize)
+                             nsHTMLReflowMetrics& aDesiredSize)
 {
   return PlaceInternal(aDrawTarget, aPlaceOrigin, aDesiredSize, false);
 }
@@ -316,13 +316,13 @@ nsMathMLmencloseFrame::Place(DrawTarget*          aDrawTarget,
 /* virtual */ nsresult
 nsMathMLmencloseFrame::PlaceInternal(DrawTarget*          aDrawTarget,
                                      bool                 aPlaceOrigin,
-                                     ReflowOutput& aDesiredSize,
+                                     nsHTMLReflowMetrics& aDesiredSize,
                                      bool                 aWidthOnly)
 {
   ///////////////
   // Measure the size of our content using the base class to format like an
   // inferred mrow.
-  ReflowOutput baseSize(aDesiredSize.GetWritingMode());
+  nsHTMLReflowMetrics baseSize(aDesiredSize.GetWritingMode());
   nsresult rv =
     nsMathMLContainerFrame::Place(aDrawTarget, false, baseSize);
 
@@ -689,7 +689,7 @@ nsMathMLmencloseFrame::PlaceInternal(DrawTarget*          aDrawTarget,
 }
 
 nscoord
-nsMathMLmencloseFrame::FixInterFrameSpacing(ReflowOutput& aDesiredSize)
+nsMathMLmencloseFrame::FixInterFrameSpacing(nsHTMLReflowMetrics& aDesiredSize)
 {
   nscoord gap = nsMathMLContainerFrame::FixInterFrameSpacing(aDesiredSize);
   if (!gap)

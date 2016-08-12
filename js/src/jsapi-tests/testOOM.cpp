@@ -17,14 +17,14 @@ BEGIN_TEST(testOOM)
     return true;
 }
 
-virtual JSContext* createContext() override
+virtual JSRuntime * createRuntime() override
 {
-    JSContext* cx = JS_NewContext(0);
-    if (!cx)
+    JSRuntime* rt = JS_NewRuntime(0);
+    if (!rt)
         return nullptr;
-    JS_SetGCParameter(cx, JSGC_MAX_BYTES, (uint32_t)-1);
-    setNativeStackQuota(cx);
-    return cx;
+    JS_SetGCParameter(JS_GetContext(rt), JSGC_MAX_BYTES, (uint32_t)-1);
+    setNativeStackQuota(JS_GetContext(rt));
+    return rt;
 }
 END_TEST(testOOM)
 
@@ -50,22 +50,22 @@ const uint32_t maxAllocsPerTest = 100;
     js::oom::ResetSimulatedOOM();                                             \
     CHECK(oomAfter != maxAllocsPerTest)
 
-BEGIN_TEST(testNewContext)
+BEGIN_TEST(testNewRuntime)
 {
-    uninit(); // Get rid of test harness' original JSContext.
+    uninit(); // Get rid of test harness' original JSRuntime.
 
-    JSContext* cx;
-    START_OOM_TEST("new context");
-    cx = JS_NewContext(8L * 1024 * 1024);
-    if (cx)
+    JSRuntime* rt;
+    START_OOM_TEST("new runtime");
+    rt = JS_NewRuntime(8L * 1024 * 1024);
+    if (rt)
         OOM_TEST_FINISHED;
     END_OOM_TEST;
-    JS_DestroyContext(cx);
+    JS_DestroyRuntime(rt);
     return true;
 }
 
 const char* testName;
 uint64_t oomAfter;
-END_TEST(testNewContext)
+END_TEST(testNewRuntime)
 
 #endif

@@ -16,7 +16,6 @@
 #include "prprf.h"
 #include "GfxDriverInfo.h"
 #include "mozilla/Preferences.h"
-#include "mozilla/gfx/DeviceManagerD3D11.h"
 #include "mozilla/gfx/Logging.h"
 #include "nsPrintfCString.h"
 #include "jsapi.h"
@@ -100,7 +99,7 @@ GfxInfo::GetCleartypeParameters(nsAString & aCleartypeParams)
       {
         outStr.AppendPrintf("Pixel Structure: %S ",
                             (params.pixelStructure == PIXEL_STRUCT_RGB
-                            ? u"RGB" : u"BGR"));
+                            ? MOZ_UTF16("RGB") : MOZ_UTF16("BGR")));
       } else {
         outStr.AppendPrintf("Pixel Structure: %d ", params.pixelStructure);
       }
@@ -117,7 +116,7 @@ GfxInfo::GetCleartypeParameters(nsAString & aCleartypeParams)
     }
 
     if (displayNames) {
-      outStr.Append(u"] ");
+      outStr.Append(MOZ_UTF16("] "));
     }
   }
 
@@ -525,11 +524,11 @@ GfxInfo::Init()
     // by the registry was not the version of the DLL.
     bool is64bitApp = sizeof(void*) == 8;
     const char16_t *dllFileName = is64bitApp
-                                 ? u"igd10umd64.dll"
-                                 : u"igd10umd32.dll",
+                                 ? MOZ_UTF16("igd10umd64.dll")
+                                 : MOZ_UTF16("igd10umd32.dll"),
                     *dllFileName2 = is64bitApp
-                                 ? u"igd10iumd64.dll"
-                                 : u"igd10iumd32.dll";
+                                 ? MOZ_UTF16("igd10iumd64.dll")
+                                 : MOZ_UTF16("igd10iumd32.dll");
     nsString dllVersion, dllVersion2;
     gfxWindowsPlatform::GetDLLVersion((char16_t*)dllFileName, dllVersion);
     gfxWindowsPlatform::GetDLLVersion((char16_t*)dllFileName2, dllVersion2);
@@ -909,6 +908,12 @@ GfxInfo::GetGfxDriverInfo()
       GfxDriverInfo::allFeatures, nsIGfxInfo::FEATURE_BLOCKED_DRIVER_VERSION,
       DRIVER_LESS_THAN, V(8,56,1,15), "FEATURE_FAILURE_AMD2", "8.56.1.15" );
 
+    // Bug 1277526
+    APPEND_TO_DRIVER_BLOCKLIST2(OperatingSystem::Windows7,
+      (nsAString&) GfxDriverInfo::GetDeviceVendor(VendorATI), GfxDriverInfo::allDevices,
+      GfxDriverInfo::allFeatures, nsIGfxInfo::FEATURE_BLOCKED_DRIVER_VERSION,
+      DRIVER_EQUAL, V(8,850,0,0), "FEATURE_FAILURE_BUG_1277526");
+
     // Bug 1099252
     APPEND_TO_DRIVER_BLOCKLIST2(OperatingSystem::Windows7,
       (nsAString&) GfxDriverInfo::GetDeviceVendor(VendorATI), GfxDriverInfo::allDevices,
@@ -920,13 +925,6 @@ GfxInfo::GetGfxDriverInfo()
       (nsAString&) GfxDriverInfo::GetDeviceVendor(VendorATI), GfxDriverInfo::allDevices,
       GfxDriverInfo::allFeatures, nsIGfxInfo::FEATURE_BLOCKED_DRIVER_VERSION,
       DRIVER_EQUAL, V(8,783,2,2000), "FEATURE_FAILURE_BUG_1118695");
-
-    // Bug 1198815
-    APPEND_TO_DRIVER_BLOCKLIST_RANGE(OperatingSystem::Windows,
-      (nsAString&) GfxDriverInfo::GetDeviceVendor(VendorATI), GfxDriverInfo::allDevices,
-      GfxDriverInfo::allFeatures, nsIGfxInfo::FEATURE_BLOCKED_DRIVER_VERSION,
-      DRIVER_BETWEEN_INCLUSIVE, V(15,200,0,0), V(15,200,1062,1004),
-      "FEATURE_FAILURE_BUG_1198815", "15.200.0.0-15.200.1062.1004");
 
     /*
      * Bug 783517 - crashes in AMD driver on Windows 8
@@ -1240,7 +1238,7 @@ GfxInfo::GetFeatureStatusImpl(int32_t aFeature,
         !adapterVendorID.LowerCaseEqualsLiteral("0xabab") &&
         !adapterVendorID.LowerCaseEqualsLiteral("0xdcdc"))
     {
-      aFailureId = "FEATURE_FAILURE_UNKNOWN_DEVICE_VENDOR";
+      aFailureId = "FEATURE_FAILURE_TEST";
       *aStatus = FEATURE_BLOCKED_DEVICE;
       return NS_OK;
     }
@@ -1329,20 +1327,21 @@ GfxInfo::DescribeFeatures(JSContext* aCx, JS::Handle<JSObject*> aObj)
 
   JS::Rooted<JSObject*> obj(aCx);
 
+  gfxWindowsPlatform* platform = gfxWindowsPlatform::GetPlatform();
+
   gfx::FeatureStatus d3d11 = gfxConfig::GetValue(Feature::D3D11_COMPOSITING);
   if (!InitFeatureObject(aCx, aObj, "d3d11", FEATURE_DIRECT3D_11_ANGLE,
                          Some(d3d11), &obj)) {
     return;
   }
   if (d3d11 == gfx::FeatureStatus::Available) {
-    DeviceManagerD3D11* dm = DeviceManagerD3D11::Get();
-    JS::Rooted<JS::Value> val(aCx, JS::Int32Value(dm->GetD3D11Version()));
+    JS::Rooted<JS::Value> val(aCx, JS::Int32Value(platform->GetD3D11Version()));
     JS_SetProperty(aCx, obj, "version", val);
 
-    val = JS::BooleanValue(dm->IsWARP());
+    val = JS::BooleanValue(platform->IsWARP());
     JS_SetProperty(aCx, obj, "warp", val);
 
-    val = JS::BooleanValue(dm->TextureSharingWorks());
+    val = JS::BooleanValue(platform->CompositorD3D11TextureSharingWorks());
     JS_SetProperty(aCx, obj, "textureSharing", val);
 
     bool blacklisted = false;

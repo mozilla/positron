@@ -464,6 +464,18 @@ else
 endif
 endif
 
+cleansrcdir:
+	@cd $(TOPSRCDIR); \
+	if [ -f Makefile ]; then \
+	  $(MAKE) distclean ; \
+	else \
+	  echo 'Removing object files from srcdir...'; \
+	  rm -fr `find . -type d \( -name .deps -print -o -name CVS \
+	          -o -exec test ! -d {}/CVS \; \) -prune \
+	          -o \( -name '*.[ao]' -o -name '*.so' \) -type f -print`; \
+	   build/autoconf/clean-config.sh; \
+	fi;
+
 echo-variable-%:
 	@echo $($*)
 
@@ -477,6 +489,7 @@ echo-variable-%:
     realbuild \
     build \
     profiledbuild \
+    cleansrcdir \
     pull_all \
     build_all \
     clobber \

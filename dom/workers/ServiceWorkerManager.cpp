@@ -1292,23 +1292,6 @@ ServiceWorkerManager::NotifyUnregister(nsIPrincipal* aPrincipal,
   return NS_OK;
 }
 
-void
-ServiceWorkerManager::WorkerIsIdle(ServiceWorkerInfo* aWorker)
-{
-  AssertIsOnMainThread();
-  MOZ_ASSERT(aWorker);
-
-  RefPtr<ServiceWorkerRegistrationInfo> reg =
-    GetRegistration(aWorker->GetPrincipal(), aWorker->Scope());
-  if (!reg) {
-    return;
-  }
-
-  if (reg->GetActive() == aWorker) {
-    reg->TryToActivateAsync();
-  }
-}
-
 already_AddRefed<ServiceWorkerJobQueue>
 ServiceWorkerManager::GetOrCreateJobQueue(const nsACString& aKey,
                                           const nsACString& aScope)
@@ -2853,7 +2836,7 @@ ServiceWorkerManager::ClaimClients(nsIPrincipal* aPrincipal,
   return NS_OK;
 }
 
-void
+nsresult
 ServiceWorkerManager::SetSkipWaitingFlag(nsIPrincipal* aPrincipal,
                                          const nsCString& aScope,
                                          uint64_t aServiceWorkerID)
@@ -2861,21 +2844,24 @@ ServiceWorkerManager::SetSkipWaitingFlag(nsIPrincipal* aPrincipal,
   RefPtr<ServiceWorkerRegistrationInfo> registration =
     GetRegistration(aPrincipal, aScope);
   if (NS_WARN_IF(!registration)) {
-    return;
+    return NS_ERROR_FAILURE;
   }
 
-  RefPtr<ServiceWorkerInfo> worker =
-    registration->GetServiceWorkerInfoById(aServiceWorkerID);
-
-  if (NS_WARN_IF(!worker)) {
-    return;
+  if (registration->GetInstalling() &&
+      (registration->GetInstalling()->ID() == aServiceWorkerID)) {
+    registration->GetInstalling()->SetSkipWaitingFlag();
+  } else if (registration->GetWaiting() &&
+             (registration->GetWaiting()->ID() == aServiceWorkerID)) {
+    registration->GetWaiting()->SetSkipWaitingFlag();
+    if (registration->GetWaiting()->State() == ServiceWorkerState::Installed) {
+      registration->TryToActivateAsync();
+    }
+  } else {
+    NS_WARNING("Failed to set skipWaiting flag, no matching worker.");
+    return NS_ERROR_FAILURE;
   }
 
-  worker->SetSkipWaitingFlag();
-
-  if (worker->State() == ServiceWorkerState::Installed) {
-    registration->TryToActivateAsync();
-  }
+  return NS_OK;
 }
 
 void

@@ -37,7 +37,6 @@
 #include "jit/arm/disasm/Disasm-arm.h"
 #include "jit/IonTypes.h"
 #include "threading/Mutex.h"
-#include "threading/Thread.h"
 
 namespace js {
 namespace jit {
@@ -144,22 +143,20 @@ class Simulator
     void set_d_register_from_double(int dreg, const double& dbl) {
         setVFPRegister<double, 2>(dreg, dbl);
     }
-    void get_double_from_d_register(int dreg, double* out) {
-        getFromVFPRegister<double, 2>(dreg, out);
+    double get_double_from_d_register(int dreg) {
+        return getFromVFPRegister<double, 2>(dreg);
     }
     void set_s_register_from_float(int sreg, const float flt) {
         setVFPRegister<float, 1>(sreg, flt);
     }
-    void get_float_from_s_register(int sreg, float* out) {
-        getFromVFPRegister<float, 1>(sreg, out);
+    float get_float_from_s_register(int sreg) {
+        return getFromVFPRegister<float, 1>(sreg);
     }
     void set_s_register_from_sinteger(int sreg, const int sint) {
         setVFPRegister<int, 1>(sreg, sint);
     }
     int get_sinteger_from_s_register(int sreg) {
-        int ret;
-        getFromVFPRegister<int, 1>(sreg, &ret);
-        return ret;
+        return getFromVFPRegister<int, 1>(sreg);
     }
 
     // Special case of set_register and get_register to access the raw PC value.
@@ -207,20 +204,6 @@ class Simulator
         end_sim_pc = -2
     };
 
-    // ForbidUnaligned means "always fault on unaligned access".
-    //
-    // AllowUnaligned means "allow the unaligned access if other conditions are
-    // met".  The "other conditions" vary with the instruction: For all
-    // instructions the base condition is !HasAlignmentFault(), ie, the chip is
-    // configured to allow unaligned accesses.  For instructions like VLD1
-    // there is an additional constraint that the alignment attribute in the
-    // instruction must be set to "default alignment".
-
-    enum UnalignedPolicy {
-        ForbidUnaligned,
-        AllowUnaligned
-    };
-
     bool init();
 
     // Checks if the current instruction should be executed based on its
@@ -240,8 +223,7 @@ class Simulator
     // Support for VFP.
     void compute_FPSCR_Flags(double val1, double val2);
     void copy_FPSCR_to_APSR();
-    inline void canonicalizeNaN(double* value);
-    inline void canonicalizeNaN(float* value);
+    inline double canonicalizeNaN(double value);
 
     // Helper functions to decode common "addressing" modes
     int32_t getShiftRm(SimInstruction* instr, bool* carry_out);
@@ -279,8 +261,8 @@ class Simulator
     inline uint16_t readExHU(int32_t addr, SimInstruction* instr);
     inline int32_t writeExH(int32_t addr, uint16_t value, SimInstruction* instr);
 
-    inline int readW(int32_t addr, SimInstruction* instr, UnalignedPolicy f = ForbidUnaligned);
-    inline void writeW(int32_t addr, int value, SimInstruction* instr, UnalignedPolicy f = ForbidUnaligned);
+    inline int readW(int32_t addr, SimInstruction* instr);
+    inline void writeW(int32_t addr, int value, SimInstruction* instr);
 
     inline int readExW(int32_t addr, SimInstruction* instr);
     inline int writeExW(int32_t addr, int value, SimInstruction* instr);
@@ -344,7 +326,7 @@ class Simulator
     void scratchVolatileRegisters(bool scratchFloat = true);
 
     template<class ReturnType, int register_size>
-    void getFromVFPRegister(int reg_index, ReturnType* out);
+    ReturnType getFromVFPRegister(int reg_index);
 
     template<class InputType, int register_size>
     void setVFPRegister(int reg_index, const InputType& value);
@@ -439,7 +421,7 @@ class Simulator
     // and by the off-thread compiler (see Redirection::Get in the cpp file).
     Mutex cacheLock_;
 #ifdef DEBUG
-    mozilla::Maybe<Thread::Id> cacheLockHolder_;
+    PRThread* cacheLockHolder_;
 #endif
 
     Redirection* redirection_;
@@ -450,17 +432,17 @@ class Simulator
         // Technically we need the lock to access the innards of the
         // icache, not to take its address, but the latter condition
         // serves as a useful complement to the former.
-        MOZ_ASSERT(cacheLockHolder_.isSome());
+        MOZ_ASSERT(cacheLockHolder_);
         return icache_;
     }
 
     Redirection* redirection() const {
-        MOZ_ASSERT(cacheLockHolder_.isSome());
+        MOZ_ASSERT(cacheLockHolder_);
         return redirection_;
     }
 
     void setRedirection(js::jit::Redirection* redirection) {
-        MOZ_ASSERT(cacheLockHolder_.isSome());
+        MOZ_ASSERT(cacheLockHolder_);
         redirection_ = redirection;
     }
 

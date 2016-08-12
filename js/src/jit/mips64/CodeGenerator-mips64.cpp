@@ -304,51 +304,22 @@ CodeGeneratorMIPS64::visitCompareBitwiseAndBranch(LCompareBitwiseAndBranch* lir)
 }
 
 void
-CodeGeneratorMIPS64::visitWasmLoadI64(LWasmLoadI64* lir)
-{
-    const MWasmLoad* mir = lir->mir();
-
-    MOZ_ASSERT(lir->mir()->type() == MIRType::Int64);
-    MOZ_ASSERT(!mir->barrierBefore() && !mir->barrierAfter(), "atomics NYI");
-
-    uint32_t offset = mir->offset();
-    if (offset > INT32_MAX) {
-        // This is unreachable because of bounds checks.
-        masm.breakpoint();
-        return;
-    }
-
-    Register ptr = ToRegister(lir->ptr());
-
-    // Maybe add the offset.
-    if (offset) {
-        Register ptrPlusOffset = ToRegister(lir->ptrCopy());
-        masm.addPtr(Imm32(offset), ptrPlusOffset);
-        ptr = ptrPlusOffset;
-    } else {
-        MOZ_ASSERT(lir->ptrCopy()->isBogusTemp());
-    }
-
-    masm.ma_load(ToRegister(lir->output()), BaseIndex(HeapReg, ptr, TimesOne), SizeDouble);
-}
-
-void
 CodeGeneratorMIPS64::visitAsmSelectI64(LAsmSelectI64* lir)
 {
     MOZ_ASSERT(lir->mir()->type() == MIRType::Int64);
 
     Register cond = ToRegister(lir->condExpr());
-    const LInt64Allocation falseExpr = lir->falseExpr();
+    const LAllocation* falseExpr = lir->falseExpr();
 
-    Register64 out = ToOutRegister64(lir);
-    MOZ_ASSERT(ToRegister64(lir->trueExpr()) == out, "true expr is reused for input");
+    Register out = ToRegister(lir->output());
+    MOZ_ASSERT(ToRegister(lir->trueExpr()) == out, "true expr is reused for input");
 
-    if (falseExpr.value().isRegister()) {
-        masm.as_movz(out.reg, ToRegister(falseExpr.value()), cond);
+    if (falseExpr->isRegister()) {
+        masm.as_movz(out, ToRegister(falseExpr), cond);
     } else {
         Label done;
         masm.ma_b(cond, cond, &done, Assembler::NonZero, ShortJump);
-        masm.loadPtr(ToAddress(falseExpr.value()), out.reg);
+        masm.loadPtr(ToAddress(falseExpr), out);
         masm.bind(&done);
     }
 }

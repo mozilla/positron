@@ -11,10 +11,8 @@ define(function (require, exports, module) {
   const React = require("devtools/client/shared/vendor/react");
 
   // Reps
-  const { isGrip } = require("./rep-utils");
-
-  // Shortcuts
-  const { span } = React.DOM;
+  const { createFactories, isGrip } = require("./rep-utils");
+  const { ObjectBox } = createFactories(require("./object-box"));
 
   /**
    * Renders DOM event objects.
@@ -55,7 +53,7 @@ define(function (require, exports, module) {
     render: function () {
       let grip = this.props.object;
       return (
-        span({className: "objectBox objectBox-event"},
+        ObjectBox({className: "event"},
           this.getTitle(grip),
           this.summarizeEvent(grip)
         )

@@ -1,7 +1,6 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
-"use strict";
-/* eslint-disable */
+
 // Bug 1235788, increase time out of this test
 requestLongerTimeout(2);
 
@@ -257,4 +256,3 @@ gThread.frameTable.data.forEach((frame) => {
       break;
   }
 });
-/* eslint-enable */

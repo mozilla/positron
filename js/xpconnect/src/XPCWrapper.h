@@ -7,7 +7,8 @@
 #ifndef XPC_WRAPPER_H
 #define XPC_WRAPPER_H 1
 
-#include "js/TypeDecls.h"
+#include "xpcprivate.h"
+#include "jswrapper.h"
 
 namespace XPCNativeWrapper {
 

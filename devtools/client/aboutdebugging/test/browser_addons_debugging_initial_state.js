@@ -50,11 +50,8 @@ function* testCheckboxState(testData) {
   yield waitForInitialAddonList(document);
 
   info("Install a test addon.");
-  yield installAddon({
-    document,
-    path: "addons/unpacked/install.rdf",
-    name: ADDON_NAME,
-  });
+  yield installAddon(document, "addons/unpacked/install.rdf", ADDON_NAME,
+                     "test-devtools");
 
   info("Test checkbox checked state.");
   let addonDebugCheckbox = document.querySelector("#enable-addon-debugging");
@@ -67,7 +64,7 @@ function* testCheckboxState(testData) {
     "Debug buttons should be in the expected state");
 
   info("Uninstall test addon installed earlier.");
-  yield uninstallAddon({document, id: ADDON_ID, name: ADDON_NAME});
+  yield uninstallAddon(document, ADDON_ID, ADDON_NAME);
 
   yield closeAboutDebugging(tab);
 }

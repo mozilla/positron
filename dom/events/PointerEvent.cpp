@@ -87,13 +87,13 @@ PointerEvent::Constructor(EventTarget* aOwner,
 
   WidgetPointerEvent* widgetEvent = e->mEvent->AsPointerEvent();
   widgetEvent->pointerId = aParam.mPointerId;
-  widgetEvent->mWidth = aParam.mWidth;
-  widgetEvent->mHeight = aParam.mHeight;
+  widgetEvent->width = aParam.mWidth;
+  widgetEvent->height = aParam.mHeight;
   widgetEvent->pressure = aParam.mPressure;
   widgetEvent->tiltX = aParam.mTiltX;
   widgetEvent->tiltY = aParam.mTiltY;
   widgetEvent->inputSource = ConvertStringToPointerType(aParam.mPointerType);
-  widgetEvent->mIsPrimary = aParam.mIsPrimary;
+  widgetEvent->isPrimary = aParam.mIsPrimary;
   widgetEvent->buttons = aParam.mButtons;
 
   e->SetTrusted(trusted);
@@ -126,13 +126,13 @@ PointerEvent::PointerId()
 int32_t
 PointerEvent::Width()
 {
-  return mEvent->AsPointerEvent()->mWidth;
+  return mEvent->AsPointerEvent()->width;
 }
 
 int32_t
 PointerEvent::Height()
 {
-  return mEvent->AsPointerEvent()->mHeight;
+  return mEvent->AsPointerEvent()->height;
 }
 
 float
@@ -156,7 +156,7 @@ PointerEvent::TiltY()
 bool
 PointerEvent::IsPrimary()
 {
-  return mEvent->AsPointerEvent()->mIsPrimary;
+  return mEvent->AsPointerEvent()->isPrimary;
 }
 
 } // namespace dom

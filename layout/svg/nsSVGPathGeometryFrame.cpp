@@ -10,11 +10,11 @@
 #include "gfx2DGlue.h"
 #include "gfxContext.h"
 #include "gfxPlatform.h"
+#include "gfxSVGGlyphs.h"
 #include "gfxUtils.h"
 #include "mozilla/gfx/2D.h"
 #include "mozilla/gfx/Helpers.h"
 #include "mozilla/RefPtr.h"
-#include "mozilla/SVGContextPaint.h"
 #include "nsDisplayList.h"
 #include "nsGkAtoms.h"
 #include "nsLayoutUtils.h"
@@ -266,7 +266,6 @@ nsSVGPathGeometryFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
       (!IsVisibleForPainting(aBuilder) && aBuilder->IsForPainting())) {
     return;
   }
-  DisplayOutline(aBuilder, aLists);
   aLists.Content()->AppendNewToTop(
     new (aBuilder) nsDisplaySVGPathGeometry(aBuilder, this));
 }
@@ -715,20 +714,15 @@ nsSVGPathGeometryFrame::GetMarkerProperties(nsSVGPathGeometryFrame *aFrame)
   NS_ASSERTION(!aFrame->GetPrevContinuation(), "aFrame should be first continuation");
 
   MarkerProperties result;
-  nsCOMPtr<nsIURI> markerURL =
-    nsSVGEffects::GetMarkerURI(aFrame, &nsStyleSVG::mMarkerStart);
+  const nsStyleSVG *style = aFrame->StyleSVG();
   result.mMarkerStart =
-    nsSVGEffects::GetMarkerProperty(markerURL, aFrame,
+    nsSVGEffects::GetMarkerProperty(style->mMarkerStart, aFrame,
                                     nsSVGEffects::MarkerBeginProperty());
-
-  markerURL = nsSVGEffects::GetMarkerURI(aFrame, &nsStyleSVG::mMarkerMid);
   result.mMarkerMid =
-    nsSVGEffects::GetMarkerProperty(markerURL, aFrame,
+    nsSVGEffects::GetMarkerProperty(style->mMarkerMid, aFrame,
                                     nsSVGEffects::MarkerMiddleProperty());
-
-  markerURL = nsSVGEffects::GetMarkerURI(aFrame, &nsStyleSVG::mMarkerEnd);
   result.mMarkerEnd =
-    nsSVGEffects::GetMarkerProperty(markerURL, aFrame,
+    nsSVGEffects::GetMarkerProperty(style->mMarkerEnd, aFrame,
                                     nsSVGEffects::MarkerEndProperty());
   return result;
 }
@@ -810,7 +804,9 @@ nsSVGPathGeometryFrame::Render(gfxContext* aContext,
     }
   }
 
-  SVGContextPaint* contextPaint = SVGContextPaint::GetContextPaint(mContent);
+  gfxTextContextPaint *contextPaint =
+    (gfxTextContextPaint*)drawTarget->
+      GetUserData(&gfxTextContextPaint::sUserDataKey);
 
   if (aRenderComponents & eRenderFill) {
     GeneralPattern fillPattern;
@@ -878,7 +874,8 @@ void
 nsSVGPathGeometryFrame::PaintMarkers(gfxContext& aContext,
                                      const gfxMatrix& aTransform)
 {
-  SVGContextPaint* contextPaint = SVGContextPaint::GetContextPaint(mContent);
+  gfxTextContextPaint *contextPaint =
+    (gfxTextContextPaint*)aContext.GetDrawTarget()->GetUserData(&gfxTextContextPaint::sUserDataKey);
 
   if (static_cast<nsSVGPathGeometryElement*>(mContent)->IsMarkable()) {
     MarkerProperties properties = GetMarkerProperties(this);

@@ -15,8 +15,7 @@ FileDescriptorOutputStream::Create(const ipc::FileDescriptor& fileDescriptor)
   if (NS_WARN_IF(!fileDescriptor.IsValid()))
     return nullptr;
 
-  auto rawFD = fileDescriptor.ClonePlatformHandle();
-  PRFileDesc* prfd = PR_ImportFile(PROsfd(rawFD.release()));
+  PRFileDesc* prfd = PR_ImportFile(PROsfd(fileDescriptor.PlatformHandle()));
   if (NS_WARN_IF(!prfd))
     return nullptr;
 

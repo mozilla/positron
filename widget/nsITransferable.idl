@@ -9,7 +9,7 @@
 #include "nsIFormatConverter.idl"
 #include "nsIContentPolicyBase.idl"
 
-interface nsIPrincipal;
+interface nsIDOMNode;
 
 %{ C++
 
@@ -200,12 +200,13 @@ interface nsITransferable : nsISupports
   [noscript] attribute boolean isPrivateData;
 
   /**
-   * The principal of the source dom node this transferable was
-   * created from and the contentPolicyType for the transferable.
+   * The source dom node this transferable was created from and
+   * the contentPolicyType for the transferable.
    * Note, currently only used on Windows for network principal and
-   * contentPolicyType information in clipboard and drag operations.
+   * contentPolicyType information in drag operations.
    */
-  [noscript] attribute nsIPrincipal requestingPrincipal;
+  [noscript] attribute nsIDOMNode requestingNode;
   [noscript] attribute nsContentPolicyType contentPolicyType;
 
 };
+

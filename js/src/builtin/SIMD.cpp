@@ -129,11 +129,11 @@ ErrorBadArgs(JSContext* cx)
 }
 
 static inline bool
-ErrorWrongTypeArg(JSContext* cx, unsigned argIndex, Handle<TypeDescr*> typeDescr)
+ErrorWrongTypeArg(JSContext* cx, size_t argIndex, Handle<TypeDescr*> typeDescr)
 {
     MOZ_ASSERT(argIndex < 10);
     char charArgIndex[2];
-    snprintf(charArgIndex, sizeof charArgIndex, "%u", argIndex);
+    JS_snprintf(charArgIndex, sizeof charArgIndex, "%d", argIndex);
 
     HeapSlot& typeNameSlot = typeDescr->getReservedSlotRef(JS_DESCR_SLOT_STRING_REPR);
     char* typeNameStr = JS_EncodeString(cx, typeNameSlot.toString());

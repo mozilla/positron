@@ -792,7 +792,6 @@ nsFrameMessageManager::SendMessage(const nsAString& aMessageName,
     retval[i].Read(aCx, &ret, rv);
     if (rv.Failed()) {
       MOZ_ASSERT(false, "Unable to read structured clone in SendMessage");
-      rv.SuppressException();
       return NS_ERROR_UNEXPECTED;
     }
 
@@ -1664,7 +1663,7 @@ NS_NewGlobalMessageManager(nsIMessageBroadcaster** aResult)
 
 nsDataHashtable<nsStringHashKey, nsMessageManagerScriptHolder*>*
   nsMessageManagerScriptExecutor::sCachedScripts = nullptr;
-StaticRefPtr<nsScriptCacheCleaner> nsMessageManagerScriptExecutor::sScriptCacheCleaner;
+nsScriptCacheCleaner* nsMessageManagerScriptExecutor::sScriptCacheCleaner = nullptr;
 
 void
 nsMessageManagerScriptExecutor::DidCreateGlobal()
@@ -1673,7 +1672,10 @@ nsMessageManagerScriptExecutor::DidCreateGlobal()
   if (!sCachedScripts) {
     sCachedScripts =
       new nsDataHashtable<nsStringHashKey, nsMessageManagerScriptHolder*>;
-    sScriptCacheCleaner = new nsScriptCacheCleaner();
+
+    RefPtr<nsScriptCacheCleaner> scriptCacheCleaner =
+      new nsScriptCacheCleaner();
+    scriptCacheCleaner.forget(&sScriptCacheCleaner);
   }
 }
 
@@ -1699,7 +1701,9 @@ nsMessageManagerScriptExecutor::Shutdown()
 
     delete sCachedScripts;
     sCachedScripts = nullptr;
-    sScriptCacheCleaner = nullptr;
+
+    RefPtr<nsScriptCacheCleaner> scriptCacheCleaner;
+    scriptCacheCleaner.swap(sScriptCacheCleaner);
   }
 }
 

@@ -277,7 +277,7 @@ Submitter.prototype = {
     let formData = Cc["@mozilla.org/files/formdata;1"]
                    .createInstance(Ci.nsIDOMFormData);
     // add the data
-    for (let [name, value] of Object.entries(this.extraKeyVals)) {
+    for (let [name, value] in Iterator(this.extraKeyVals)) {
       if (name != "ServerURL") {
         formData.append(name, value);
       }
@@ -549,7 +549,7 @@ this.CrashSubmit = {
             return null;
           }
         );
-      } catch (ex) {
+      } catch(ex) {
         Cu.reportError(ex);
       } finally {
         iterator.close();

@@ -120,8 +120,8 @@ nsMathMLTokenFrame::InsertFrames(ChildListID aListID,
 
 void
 nsMathMLTokenFrame::Reflow(nsPresContext*          aPresContext,
-                           ReflowOutput&     aDesiredSize,
-                           const ReflowInput& aReflowInput,
+                           nsHTMLReflowMetrics&     aDesiredSize,
+                           const nsHTMLReflowState& aReflowState,
                            nsReflowStatus&          aStatus)
 {
   MarkInReflow();
@@ -134,26 +134,26 @@ nsMathMLTokenFrame::Reflow(nsPresContext*          aPresContext,
 
   for (nsIFrame* childFrame : PrincipalChildList()) {
     // ask our children to compute their bounding metrics
-    ReflowOutput childDesiredSize(aReflowInput.GetWritingMode(),
+    nsHTMLReflowMetrics childDesiredSize(aReflowState.GetWritingMode(),
                                          aDesiredSize.mFlags
                                          | NS_REFLOW_CALC_BOUNDING_METRICS);
     WritingMode wm = childFrame->GetWritingMode();
-    LogicalSize availSize = aReflowInput.ComputedSize(wm);
+    LogicalSize availSize = aReflowState.ComputedSize(wm);
     availSize.BSize(wm) = NS_UNCONSTRAINEDSIZE;
-    ReflowInput childReflowInput(aPresContext, aReflowInput,
+    nsHTMLReflowState childReflowState(aPresContext, aReflowState,
                                        childFrame, availSize);
     ReflowChild(childFrame, aPresContext, childDesiredSize,
-                childReflowInput, aStatus);
+                childReflowState, aStatus);
     //NS_ASSERTION(NS_FRAME_IS_COMPLETE(aStatus), "bad status");
     SaveReflowAndBoundingMetricsFor(childFrame, childDesiredSize,
                                     childDesiredSize.mBoundingMetrics);
   }
 
   // place and size children
-  FinalizeReflow(aReflowInput.mRenderingContext->GetDrawTarget(), aDesiredSize);
+  FinalizeReflow(aReflowState.rendContext->GetDrawTarget(), aDesiredSize);
 
   aStatus = NS_FRAME_COMPLETE;
-  NS_FRAME_SET_TRUNCATION(aStatus, aReflowInput, aDesiredSize);
+  NS_FRAME_SET_TRUNCATION(aStatus, aReflowState, aDesiredSize);
 }
 
 // For token elements, mBoundingMetrics is computed at the ReflowToken
@@ -162,11 +162,11 @@ nsMathMLTokenFrame::Reflow(nsPresContext*          aPresContext,
 /* virtual */ nsresult
 nsMathMLTokenFrame::Place(DrawTarget*          aDrawTarget,
                           bool                 aPlaceOrigin,
-                          ReflowOutput& aDesiredSize)
+                          nsHTMLReflowMetrics& aDesiredSize)
 {
   mBoundingMetrics = nsBoundingMetrics();
   for (nsIFrame* childFrame :PrincipalChildList()) {
-    ReflowOutput childSize(aDesiredSize.GetWritingMode());
+    nsHTMLReflowMetrics childSize(aDesiredSize.GetWritingMode());
     GetReflowAndBoundingMetricsFor(childFrame, childSize,
                                    childSize.mBoundingMetrics, nullptr);
     // compute and cache the bounding metrics
@@ -187,7 +187,7 @@ nsMathMLTokenFrame::Place(DrawTarget*          aDrawTarget,
   if (aPlaceOrigin) {
     nscoord dy, dx = 0;
     for (nsIFrame* childFrame : PrincipalChildList()) {
-      ReflowOutput childSize(aDesiredSize.GetWritingMode());
+      nsHTMLReflowMetrics childSize(aDesiredSize.GetWritingMode());
       GetReflowAndBoundingMetricsFor(childFrame, childSize,
                                      childSize.mBoundingMetrics);
 

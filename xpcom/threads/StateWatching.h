@@ -271,9 +271,7 @@ private:
       MOZ_ASSERT(mOwnerThread->IsCurrentThreadIn());
       MOZ_ASSERT(mStrongRef);
       RefPtr<OwnerType> ref = mStrongRef.forget();
-      if (!mDestroyed) {
-        ((*ref).*mCallbackMethod)();
-      }
+      ((*ref).*mCallbackMethod)();
     }
 
     OwnerType* mOwner; // Never null.

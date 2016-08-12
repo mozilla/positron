@@ -90,9 +90,6 @@ public:
   const TextureFlags& Flags() const { return mFlags; }
 
 protected:
-
-  bool UpdateTarget(gfx::DrawTarget* aDestTarget = nullptr);
-
   ClientLayerManager* ClientManager()
   {
     return static_cast<ClientLayerManager*>(mManager);

@@ -1,14 +1,10 @@
 "use strict";
 
-Cu.import("resource://gre/modules/AppConstants.jsm");
 Cu.import("resource://gre/modules/Task.jsm");
 Cu.import("resource://gre/modules/Timer.jsm");
 
 
 const env = Cc["@mozilla.org/process/environment;1"].getService(Ci.nsIEnvironment);
-
-const MAX_ROUND_TRIP_TIME_MS = AppConstants.DEBUG || AppConstants.ASAN ? 18 : 9;
-const MAX_RETRIES = 5;
 
 let PYTHON;
 let PYTHON_BIN;
@@ -182,46 +178,6 @@ add_task(function* test_subprocess_huge() {
 });
 
 
-add_task(function* test_subprocess_round_trip_perf() {
-  let roundTripTime = Infinity;
-  for (let i = 0; i < MAX_RETRIES && roundTripTime > MAX_ROUND_TRIP_TIME_MS; i++) {
-    let proc = yield Subprocess.call({
-      command: PYTHON,
-      arguments: ["-u", TEST_SCRIPT, "echo"],
-    });
-
-
-    const LINE = "I'm a leaf on the wind.\n";
-
-    let now = Date.now();
-    const COUNT = 1000;
-    for (let i = 0; i < COUNT; i++) {
-      let [output] = yield Promise.all([
-        read(proc.stdout),
-        proc.stdin.write(LINE),
-      ]);
-
-      // We don't want to log this for every iteration, but we still need
-      // to fail if it goes wrong.
-      if (output !== LINE) {
-        equal(output, LINE, "Got expected output");
-      }
-    }
-
-    roundTripTime = (Date.now() - now) / COUNT;
-
-    yield proc.stdin.close();
-
-    let {exitCode} = yield proc.wait();
-
-    equal(exitCode, 0, "Got expected exit code");
-  }
-
-  ok(roundTripTime <= MAX_ROUND_TRIP_TIME_MS,
-     `Expected round trip time (${roundTripTime}ms) to be less than ${MAX_ROUND_TRIP_TIME_MS}ms`);
-});
-
-
 add_task(function* test_subprocess_stderr_default() {
   const LINE1 = "I'm a leaf on the wind.\n";
   const LINE2 = "Watch how I soar.\n";
@@ -369,10 +325,9 @@ add_task(function* test_subprocess_lazy_close_input() {
   yield closedPromise;
 
 
-  // Don't test for a successful exit here. The process may exit with a
-  // write error if we close the pipe after it's written the message
-  // size but before it's written the message.
-  yield proc.wait();
+  let {exitCode} = yield proc.wait();
+
+  equal(exitCode, 0, "Got expected exit code");
 });
 
 

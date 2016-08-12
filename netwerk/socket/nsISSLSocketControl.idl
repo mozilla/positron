@@ -10,7 +10,7 @@ interface nsIInterfaceRequestor;
 interface nsIX509Cert;
 
 %{C++
-#include "nsTArrayForwardDeclare.h"
+template<class T> class nsTArray;
 class nsCString;
 %}
 [ref] native nsCStringTArrayRef(nsTArray<nsCString>);

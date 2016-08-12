@@ -375,58 +375,30 @@ struct ObjectGroupCompartment::NewEntry
 
     struct Lookup {
         const Class* clasp;
-        TaggedProto proto;
-        JSObject* associated;
+        uint64_t protoUID;
+        uint64_t assocUID;
 
         Lookup(const Class* clasp, TaggedProto proto, JSObject* associated)
-          : clasp(clasp), proto(proto), associated(associated)
+          : clasp(clasp),
+            protoUID(proto.uniqueId()),
+            assocUID(associated ? associated->zone()->getUniqueIdInfallible(associated) : 0)
         {}
-
-        bool hasAssocId() const {
-            return !associated || associated->zone()->hasUniqueId(associated);
-        }
-
-        bool ensureAssocId() const {
-            uint64_t unusedId;
-            return !associated ||
-                   associated->zoneFromAnyThread()->getUniqueId(associated, &unusedId);
-        }
-
-        uint64_t getAssocId() const {
-            return associated ? associated->zone()->getUniqueIdInfallible(associated) : 0;
-        }
     };
 
-    static bool hasHash(const Lookup& l) {
-        return l.proto.hasUniqueId() && l.hasAssocId();
-    }
-
-    static bool ensureHash(const Lookup& l) {
-        return l.proto.ensureUniqueId() && l.ensureAssocId();
-    }
-
     static inline HashNumber hash(const Lookup& lookup) {
-        MOZ_ASSERT(lookup.proto.hasUniqueId());
-        MOZ_ASSERT(lookup.hasAssocId());
         HashNumber hash = uintptr_t(lookup.clasp);
-        hash = mozilla::RotateLeft(hash, 4) ^ Zone::UniqueIdToHash(lookup.proto.uniqueId());
-        hash = mozilla::RotateLeft(hash, 4) ^ Zone::UniqueIdToHash(lookup.getAssocId());
+        hash = mozilla::RotateLeft(hash, 4) ^ Zone::UniqueIdToHash(lookup.protoUID);
+        hash = mozilla::RotateLeft(hash, 4) ^ Zone::UniqueIdToHash(lookup.assocUID);
         return hash;
     }
 
-    static inline bool match(const ObjectGroupCompartment::NewEntry& key, const Lookup& lookup) {
-        TaggedProto proto = key.group.unbarrieredGet()->proto().unbarrieredGet();
-        JSObject* assoc = key.associated;
-        MOZ_ASSERT(proto.hasUniqueId());
-        MOZ_ASSERT_IF(assoc, assoc->zone()->hasUniqueId(assoc));
-        MOZ_ASSERT(lookup.proto.hasUniqueId());
-        MOZ_ASSERT(lookup.hasAssocId());
-
+    static inline bool match(const NewEntry& key, const Lookup& lookup) {
         if (lookup.clasp && key.group.unbarrieredGet()->clasp() != lookup.clasp)
             return false;
-        if (proto.uniqueId() != lookup.proto.uniqueId())
+        if (key.group.unbarrieredGet()->proto().unbarrieredGet().uniqueId() != lookup.protoUID)
             return false;
-        return !assoc || assoc->zone()->getUniqueIdInfallible(assoc) == lookup.getAssocId();
+        return !key.associated ||
+               key.associated->zone()->getUniqueIdInfallible(key.associated) == lookup.assocUID;
     }
 
     static void rekey(NewEntry& k, const NewEntry& newKey) { k = newKey; }
@@ -436,19 +408,6 @@ struct ObjectGroupCompartment::NewEntry
                 (associated && IsAboutToBeFinalizedUnbarriered(&associated)));
     }
 };
-
-namespace js {
-template <>
-struct FallibleHashMethods<ObjectGroupCompartment::NewEntry>
-{
-    template <typename Lookup> static bool hasHash(Lookup&& l) {
-        return ObjectGroupCompartment::NewEntry::hasHash(mozilla::Forward<Lookup>(l));
-    }
-    template <typename Lookup> static bool ensureHash(Lookup&& l) {
-        return ObjectGroupCompartment::NewEntry::ensureHash(mozilla::Forward<Lookup>(l));
-    }
-};
-} // namespace js
 
 class ObjectGroupCompartment::NewTable : public JS::WeakCache<js::GCHashSet<NewEntry, NewEntry,
                                                                             SystemAllocPolicy>>

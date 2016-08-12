@@ -21,15 +21,7 @@ add_task(function* () {
     win: window
   });
 
-  let {
-    EVENTS,
-    $,
-    RecordingsView,
-    DetailsView,
-    WaterfallView,
-    MemoryCallTreeView,
-    MemoryFlameGraphView
-  } = panel.panelWin;
+  let { EVENTS, $, RecordingsView, DetailsView, WaterfallView, MemoryCallTreeView, MemoryFlameGraphView } = panel.panelWin;
 
   let flameBtn = $("toolbarbutton[data-view='memory-flamegraph']");
   let callBtn = $("toolbarbutton[data-view='memory-calltree']");
@@ -84,8 +76,8 @@ add_task(function* () {
   yield selected;
   yield rendered;
 
-  ok(DetailsView.isViewSelected(WaterfallView), "The waterfall view is now selected " +
-    "when switching back to a recording that does not have memory data.");
+  ok(DetailsView.isViewSelected(WaterfallView),
+    "The waterfall view is now selected when switching back to a recording that does not have memory data.");
 
   is(callBtn.hidden, true,
     "The `memory-calltree` button is hidden when recording has no memory data.");
@@ -111,8 +103,8 @@ add_task(function* () {
   yield selected;
   yield rendered;
 
-  ok(DetailsView.isViewSelected(MemoryCallTreeView), "The memory call tree view can be " +
-    "selected again after going back to the view with memory data.");
+  ok(DetailsView.isViewSelected(MemoryCallTreeView),
+    "The memory call tree view can be selected again after going back to the view with memory data.");
 
   selected = once(DetailsView, EVENTS.UI_DETAILS_VIEW_SELECTED);
   rendered = once(MemoryFlameGraphView, EVENTS.UI_MEMORY_FLAMEGRAPH_RENDERED);
@@ -120,8 +112,8 @@ add_task(function* () {
   yield selected;
   yield rendered;
 
-  ok(DetailsView.isViewSelected(MemoryFlameGraphView), "The memory flamegraph view can " +
-    "be selected again after going back to the view with memory data.");
+  ok(DetailsView.isViewSelected(MemoryFlameGraphView),
+    "The memory flamegraph view can be selected again after going back to the view with memory data.");
 
   yield teardownToolboxAndRemoveTab(panel);
 });

@@ -27,7 +27,7 @@
 #include "mozilla/gfx/2D.h"
 #include "Units.h"
 #include "mozilla/ToString.h"
-#include "mozilla/ReflowOutput.h"
+#include "nsHTMLReflowMetrics.h"
 #include "ImageContainer.h"
 #include "gfx2DGlue.h"
 
@@ -2246,6 +2246,14 @@ public:
   static bool HasCurrentTransitions(const nsIFrame* aFrame);
 
   /**
+   * Returns true if the frame has any current animations or transitions
+   * for any of the specified properties.
+   */
+  static bool HasCurrentAnimationsForProperties(const nsIFrame* aFrame,
+                                                const nsCSSProperty* aProperties,
+                                                size_t aPropertyCount);
+
+  /**
    * Returns true if the frame has current or in-effect (i.e. in before phase,
    * running or filling) animations or transitions for the
    * property.
@@ -2419,17 +2427,6 @@ public:
 
   static bool TextCombineUprightDigitsEnabled() {
     return sTextCombineUprightDigitsEnabled;
-  }
-
-  // Stylo (the Servo backend for Gecko's style system) is generally enabled
-  // or disabled at compile-time. However, we provide the additional capability
-  // to disable it dynamically in stylo-enabled builds via a pref.
-  static bool StyloEnabled() {
-#ifdef MOZ_STYLO
-    return sStyloEnabled;
-#else
-    return false;
-#endif
   }
 
   /**
@@ -2735,7 +2732,7 @@ public:
   static bool IsOutlineStyleAutoEnabled();
 
   static void SetBSizeFromFontMetrics(const nsIFrame* aFrame,
-                                      mozilla::ReflowOutput& aMetrics,
+                                      nsHTMLReflowMetrics& aMetrics,
                                       const mozilla::LogicalMargin& aFramePadding,
                                       mozilla::WritingMode aLineWM,
                                       mozilla::WritingMode aFrameWM);
@@ -2872,9 +2869,6 @@ private:
   static bool sInterruptibleReflowEnabled;
   static bool sSVGTransformBoxEnabled;
   static bool sTextCombineUprightDigitsEnabled;
-#ifdef MOZ_STYLO
-  static bool sStyloEnabled;
-#endif
 
   /**
    * Helper function for LogTestDataForPaint().

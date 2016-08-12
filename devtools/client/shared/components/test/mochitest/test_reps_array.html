@@ -14,9 +14,6 @@ Test ArrayRep rep
 <pre id="test">
 <script src="head.js" type="application/javascript;version=1.8"></script>
 <script type="application/javascript;version=1.8">
-"use strict";
-/* import-globals-from head.js */
-
 window.onload = Task.async(function* () {
   let { Rep } = browserRequire("devtools/client/shared/components/reps/rep");
   let { ArrayRep } = browserRequire("devtools/client/shared/components/reps/array");
@@ -38,9 +35,7 @@ window.onload = Task.async(function* () {
 
     // Test that properties are rendered as expected by ItemRep
     yield testNested();
-
-    yield testArray();
-  } catch (e) {
+  } catch(e) {
     ok(false, "Got an error: " + DevToolsUtils.safeErrorString(e));
   } finally {
     SimpleTest.finish();
@@ -50,9 +45,7 @@ window.onload = Task.async(function* () {
     // Test that correct rep is chosen
     const stub = [];
     const renderedRep = shallowRenderComponent(Rep, { object: stub });
-    is(renderedRep.type, ArrayRep.rep,
-       `Rep correctly selects ${ArrayRep.rep.displayName}`);
-
+    is(renderedRep.type, ArrayRep.rep, `Rep correctly selects ${ArrayRep.rep.displayName}`);
 
     // Test rendering
     const defaultOutput = `[]`;
@@ -64,7 +57,7 @@ window.onload = Task.async(function* () {
       },
       {
         mode: "tiny",
-        expectedOutput: `[]`,
+        expectedOutput: `[0]`,
       },
       {
         mode: "short",
@@ -107,7 +100,7 @@ window.onload = Task.async(function* () {
 
   function testMoreThanShortMaxProps() {
     const stub = Array(maxLength.short + 1).fill("foo");
-    const defaultShortOutput = `[${Array(maxLength.short).fill("\"foo\"").join(", ")}, 1 more…]`;
+    const defaultShortOutput = `[${Array(maxLength.short).fill("\"foo\"").join(", ")}, more…]`;
 
     const modeTests = [
       {
@@ -133,8 +126,8 @@ window.onload = Task.async(function* () {
 
   function testMoreThanLongMaxProps() {
     const stub = Array(maxLength.long + 1).fill("foo");
-    const defaultShortOutput = `[${Array(maxLength.short).fill("\"foo\"").join(", ")}, ${maxLength.long + 1 - maxLength.short} more…]`;
-    const defaultLongOutput = `[${Array(maxLength.long).fill("\"foo\"").join(", ")}, 1 more…]`;
+    const defaultShortOutput = `[${Array(maxLength.short).fill("\"foo\"").join(", ")}, more…]`;
+    const defaultLongOutput = `[${Array(maxLength.long).fill("\"foo\"").join(", ")}, more…]`;
 
     const modeTests = [
       {
@@ -194,7 +187,7 @@ window.onload = Task.async(function* () {
         p4: "s4"
       }
     ];
-    const defaultOutput = `[Object{p1: "s1", p3: "s3", p4: "s4", 1 more…}]`;
+    const defaultOutput = `[Object{p1: "s1", p3: "s3", p4: "s4", more…}]`;
 
     const modeTests = [
       {
@@ -208,39 +201,6 @@ window.onload = Task.async(function* () {
       {
         mode: "short",
         expectedOutput: defaultOutput,
-      },
-      {
-        mode: "long",
-        expectedOutput: defaultOutput,
-      }
-    ];
-
-    testRepRenderModes(modeTests, "testNested", componentUnderTest, stub);
-  }
-
-  function testArray() {
-    let stub = [
-      "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m",
-      "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z"
-    ];
-
-    const defaultOutput = `["a", "b", "c", "d", "e", "f", "g", "h", "i", "j",` +
-                          ` "k", "l", "m", "n", "o", "p", "q", "r", "s", "t",` +
-                          ` "u", "v", "w", "x", "y", "z"]`;
-    const shortOutput = `["a", "b", "c", 23 more…]`;
-
-    const modeTests = [
-      {
-        mode: undefined,
-        expectedOutput: shortOutput,
-      },
-      {
-        mode: "tiny",
-        expectedOutput: `[26]`,
-      },
-      {
-        mode: "short",
-        expectedOutput: shortOutput,
       },
       {
         mode: "long",

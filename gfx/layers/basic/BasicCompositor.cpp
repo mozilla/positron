@@ -10,7 +10,6 @@
 #include "nsIWidget.h"
 #include "gfx2DGlue.h"
 #include "mozilla/gfx/2D.h"
-#include "mozilla/gfx/gfxVars.h"
 #include "mozilla/gfx/Helpers.h"
 #include "mozilla/gfx/Tools.h"
 #include "mozilla/gfx/ssse3-scaler.h"
@@ -185,7 +184,8 @@ BasicCompositor::BasicCompositor(CompositorBridgeParent* aParent, widget::Compos
 {
   MOZ_COUNT_CTOR(BasicCompositor);
 
-  mMaxTextureSize = Factory::GetMaxSurfaceSize(gfxVars::ContentBackend());
+  mMaxTextureSize =
+    Factory::GetMaxSurfaceSize(gfxPlatform::GetPlatform()->GetContentBackendFor(LayersBackend::LAYERS_BASIC));
 }
 
 BasicCompositor::~BasicCompositor()
@@ -360,9 +360,9 @@ DrawSurfaceWithTextureCoords(DrawTarget *aDest,
   // Compute a transform that maps sourceRect to aDestRect.
   Matrix matrix =
     gfxUtils::TransformRectToRect(sourceRect,
-                                  gfx::IntPoint::Truncate(aDestRect.x, aDestRect.y),
-                                  gfx::IntPoint::Truncate(aDestRect.XMost(), aDestRect.y),
-                                  gfx::IntPoint::Truncate(aDestRect.XMost(), aDestRect.YMost()));
+                                  gfx::IntPoint(aDestRect.x, aDestRect.y),
+                                  gfx::IntPoint(aDestRect.XMost(), aDestRect.y),
+                                  gfx::IntPoint(aDestRect.XMost(), aDestRect.YMost()));
 
   // Only use REPEAT if aTextureCoords is outside (0, 0, 1, 1).
   gfx::Rect unitRect(0, 0, 1, 1);
@@ -626,7 +626,7 @@ BasicCompositor::DrawQuad(const gfx::Rect& aRect,
 
     if (sourceMask) {
       RefPtr<DrawTarget> transformDT =
-        dest->CreateSimilarDrawTarget(IntSize::Truncate(transformBounds.width, transformBounds.height),
+        dest->CreateSimilarDrawTarget(IntSize(transformBounds.width, transformBounds.height),
                                       SurfaceFormat::B8G8R8A8);
       new3DTransform.PostTranslate(-transformBounds.x, -transformBounds.y, 0);
       if (transformDT &&
@@ -706,7 +706,6 @@ BasicCompositor::BeginFrame(const nsIntRegion& aInvalidRegion,
     // placeholder so that CreateRenderTarget() works. This is only used to create a new buffered
     // draw target that we composite into, then copy the results the destination.
     mDrawTarget = mTarget;
-    bufferMode = BufferMode::BUFFER_NONE;
   } else {
     // StartRemoteDrawingInRegion can mutate mInvalidRegion.
     mDrawTarget = mWidget->StartRemoteDrawingInRegion(mInvalidRegion, &bufferMode);
@@ -796,7 +795,7 @@ BasicCompositor::EndFrame()
   // Pop aInvalidregion
   mRenderTarget->mDrawTarget->PopClip();
 
-  if (mRenderTarget->mDrawTarget != mDrawTarget) {
+  if (mTarget || mRenderTarget->mDrawTarget != mDrawTarget) {
     // Note: Most platforms require us to buffer drawing to the widget surface.
     // That's why we don't draw to mDrawTarget directly.
     RefPtr<SourceSurface> source;

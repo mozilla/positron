@@ -1271,7 +1271,7 @@ function run_test()
 
 add_task(function* test_sorting()
 {
-  for (let test of tests) {
+  for (let [, test] in Iterator(tests)) {
     yield test.setup();
     yield PlacesTestUtils.promiseAsyncUpdates();
     test.check();

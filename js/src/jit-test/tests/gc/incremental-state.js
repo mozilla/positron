@@ -6,26 +6,26 @@ gczeal(0);
 
 // Non-incremental GC.
 gc();
-assertEq(gcstate(), "NotActive");
+assertEq(gcstate(), "none");
 
 // Incremental GC in minimal slice. Note that finalization always uses zero-
 // sized slices while background finalization is on-going, so we need to loop.
 gcslice(1000000);
-while (gcstate() == "Finalize") { gcslice(1); }
-while (gcstate() == "Decommit") { gcslice(1); }
-assertEq(gcstate(), "NotActive");
+while (gcstate() == "finalize") { gcslice(1); }
+while (gcstate() == "decommit") { gcslice(1); }
+assertEq(gcstate(), "none");
 
 // Incremental GC in multiple slices: if marking takes more than one slice,
 // we yield before we start sweeping.
 gczeal(0);
 gcslice(1);
-assertEq(gcstate(), "Mark");
+assertEq(gcstate(), "mark");
 gcslice(1000000);
-assertEq(gcstate(), "Mark");
+assertEq(gcstate(), "mark");
 gcslice(1000000);
-while (gcstate() == "Finalize") { gcslice(1); }
-while (gcstate() == "Decommit") { gcslice(1); }
-assertEq(gcstate(), "NotActive");
+while (gcstate() == "finalize") { gcslice(1); }
+while (gcstate() == "decommit") { gcslice(1); }
+assertEq(gcstate(), "none");
 
 // Zeal mode 8: Incremental GC in two main slices:
 //   1) mark roots
@@ -33,11 +33,11 @@ assertEq(gcstate(), "NotActive");
 //   *) finalize.
 gczeal(8, 0);
 gcslice(1);
-assertEq(gcstate(), "Mark");
+assertEq(gcstate(), "mark");
 gcslice(1);
-while (gcstate() == "Finalize") { gcslice(1); }
-while (gcstate() == "Decommit") { gcslice(1); }
-assertEq(gcstate(), "NotActive");
+while (gcstate() == "finalize") { gcslice(1); }
+while (gcstate() == "decommit") { gcslice(1); }
+assertEq(gcstate(), "none");
 
 // Zeal mode 9: Incremental GC in two main slices:
 //   1) mark roots and marking
@@ -45,19 +45,19 @@ assertEq(gcstate(), "NotActive");
 //   *) finalize.
 gczeal(9, 0);
 gcslice(1);
-assertEq(gcstate(), "Mark");
+assertEq(gcstate(), "mark");
 gcslice(1);
-while (gcstate() == "Finalize") { gcslice(1); }
-while (gcstate() == "Decommit") { gcslice(1); }
-assertEq(gcstate(), "NotActive");
+while (gcstate() == "finalize") { gcslice(1); }
+while (gcstate() == "decommit") { gcslice(1); }
+assertEq(gcstate(), "none");
 
 // Zeal mode 10: Incremental GC in multiple slices (always yeilds before
 // sweeping). This test uses long slices to prove that this zeal mode yields
 // in sweeping, where normal IGC (above) does not.
 gczeal(10, 0);
 gcslice(1000000);
-assertEq(gcstate(), "Sweep");
+assertEq(gcstate(), "sweep");
 gcslice(1000000);
-while (gcstate() == "Finalize") { gcslice(1); }
-while (gcstate() == "Decommit") { gcslice(1); }
-assertEq(gcstate(), "NotActive");
+while (gcstate() == "finalize") { gcslice(1); }
+while (gcstate() == "decommit") { gcslice(1); }
+assertEq(gcstate(), "none");

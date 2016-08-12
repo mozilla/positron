@@ -38,12 +38,11 @@ TransportProviderParent::SetListener(nsIHttpUpgradeListener* aListener)
   return NS_OK;
 }
 
-NS_IMETHODIMP
-TransportProviderParent::GetIPCChild(mozilla::net::PTransportProviderChild** aChild)
+NS_IMETHODIMP_(mozilla::net::PTransportProviderChild*)
+TransportProviderParent::GetIPCChild()
 {
   MOZ_CRASH("Don't call this in parent process");
-  *aChild = nullptr;
-  return NS_OK;
+  return nullptr;
 }
 
 NS_IMETHODIMP
@@ -93,11 +92,10 @@ TransportProviderChild::SetListener(nsIHttpUpgradeListener* aListener)
   return NS_OK;
 }
 
-NS_IMETHODIMP
-TransportProviderChild::GetIPCChild(mozilla::net::PTransportProviderChild** aChild)
+NS_IMETHODIMP_(mozilla::net::PTransportProviderChild*)
+TransportProviderChild::GetIPCChild()
 {
-  *aChild = this;
-  return NS_OK;
+  return this;
 }
 
 } // net

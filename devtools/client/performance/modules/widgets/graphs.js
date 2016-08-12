@@ -7,16 +7,18 @@
  * This file contains the base line graph that all Performance line graphs use.
  */
 
+const { Cc, Ci, Cu, Cr } = require("chrome");
 const { Task } = require("devtools/shared/task");
 const { Heritage } = require("devtools/client/shared/widgets/view-helpers");
 const LineGraphWidget = require("devtools/client/shared/widgets/LineGraphWidget");
+const BarGraphWidget = require("devtools/client/shared/widgets/BarGraphWidget");
 const MountainGraphWidget = require("devtools/client/shared/widgets/MountainGraphWidget");
 const { CanvasGraphUtils } = require("devtools/client/shared/widgets/Graphs");
 
 const promise = require("promise");
 const EventEmitter = require("devtools/shared/event-emitter");
 
-const { colorUtils } = require("devtools/shared/css-color");
+const { colorUtils } = require("devtools/client/shared/css-color");
 const { getColor } = require("devtools/client/shared/theme");
 const ProfilerGlobal = require("devtools/client/performance/modules/global");
 const { MarkersOverview } = require("devtools/client/performance/modules/widgets/markers-overview");
@@ -25,10 +27,8 @@ const { createTierGraphDataFromFrameNode } = require("devtools/client/performanc
 /**
  * For line graphs
  */
-// px
-const HEIGHT = 35;
-// px
-const STROKE_WIDTH = 1;
+const HEIGHT = 35; // px
+const STROKE_WIDTH = 1; // px
 const DAMPEN_VALUES = 0.95;
 const CLIPHEAD_LINE_COLOR = "#666";
 const SELECTION_LINE_COLOR = "#555";
@@ -39,12 +39,9 @@ const MEMORY_GRAPH_COLOR_NAME = "graphs-blue";
 /**
  * For timeline overview
  */
-// px
-const MARKERS_GRAPH_HEADER_HEIGHT = 14;
-// px
-const MARKERS_GRAPH_ROW_HEIGHT = 10;
-// px
-const MARKERS_GROUP_VERTICAL_PADDING = 4;
+const MARKERS_GRAPH_HEADER_HEIGHT = 14; // px
+const MARKERS_GRAPH_ROW_HEIGHT = 10; // px
+const MARKERS_GROUP_VERTICAL_PADDING = 4; // px
 
 /**
  * For optimization graph
@@ -94,8 +91,7 @@ PerformanceGraph.prototype = Heritage.extend(LineGraphWidget.prototype, {
     this.strokeColor = mainColor;
     this.backgroundGradientStart = colorUtils.setAlpha(mainColor, 0.2);
     this.backgroundGradientEnd = colorUtils.setAlpha(mainColor, 0.2);
-    this.selectionBackgroundColor = colorUtils.setAlpha(
-      getColor(SELECTION_BACKGROUND_COLOR_NAME, theme), 0.25);
+    this.selectionBackgroundColor = colorUtils.setAlpha(getColor(SELECTION_BACKGROUND_COLOR_NAME, theme), 0.25);
     this.selectionStripesColor = "rgba(255, 255, 255, 0.1)";
     this.maximumLineColor = colorUtils.setAlpha(mainColor, 0.4);
     this.averageLineColor = colorUtils.setAlpha(mainColor, 0.7);
@@ -187,8 +183,7 @@ function GraphsController({ definition, root, getFilter, getTheme }) {
   this._root = root;
   this._getFilter = getFilter;
   this._getTheme = getTheme;
-  this._primaryLink = Object.keys(this._definition)
-                            .filter(name => this._definition[name].primaryLink)[0];
+  this._primaryLink = Object.keys(this._definition).filter(name => this._definition[name].primaryLink)[0];
   this.$ = root.ownerDocument.querySelector.bind(root.ownerDocument);
 
   EventEmitter.decorate(this);
@@ -336,8 +331,9 @@ GraphsController.prototype = {
     let primary = this._getPrimaryLink();
     if (primary && primary.hasData()) {
       return primary.getMappedSelection({ mapStart, mapEnd });
+    } else {
+      return null;
     }
-    return null;
   },
 
   /**
@@ -355,7 +351,6 @@ GraphsController.prototype = {
     if (this._getPrimaryLink()) {
       return this._getPrimaryLink().dropSelection();
     }
-    return null;
   },
 
   /**
@@ -421,13 +416,12 @@ GraphsController.prototype = {
     }
     let enabled = [];
     for (let graphName of this._enabled) {
-      let graph = yield this.isAvailable(graphName);
-      if (graph) {
+      let graph;
+      if (graph = yield this.isAvailable(graphName)) {
         enabled.push(graph);
       }
     }
-    this._enabledGraphs = enabled;
-    return this._enabledGraphs;
+    return this._enabledGraphs = enabled;
   }),
 };
 
@@ -476,8 +470,7 @@ OptimizationsGraph.prototype = Heritage.extend(MountainGraphWidget.prototype, {
     // have optimizations, but it shouldn't be at this point if it doesn't),
     // log an error.
     if (!data) {
-      console.error(
-        `FrameNode#${frameNode.location} does not have optimizations data to render.`);
+      console.error(`FrameNode#${frameNode.location} does not have optimizations data to render.`);
       return;
     }
 

@@ -12,7 +12,7 @@
 #include "nsCOMPtr.h"
 #include "nsString.h"
 #include "nsTArray.h"
-#include "nsIPrincipal.h"
+#include "nsWeakPtr.h"
 
 class nsString;
 
@@ -74,7 +74,7 @@ protected:
   nsTArray<DataStruct> mDataArray;
   nsCOMPtr<nsIFormatConverter> mFormatConv;
   bool mPrivateData;
-  nsCOMPtr<nsIPrincipal> mRequestingPrincipal;
+  nsWeakPtr mRequestingNode;
   nsContentPolicyType mContentPolicyType;
 #if DEBUG
   bool mInitialized;

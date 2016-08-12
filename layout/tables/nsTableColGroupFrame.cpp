@@ -330,7 +330,7 @@ nsTableColGroupFrame::RemoveFrame(ChildListID     aListID,
 }
 
 nsIFrame::LogicalSides
-nsTableColGroupFrame::GetLogicalSkipSides(const ReflowInput* aReflowInput) const
+nsTableColGroupFrame::GetLogicalSkipSides(const nsHTMLReflowState* aReflowState) const
 {
   if (MOZ_UNLIKELY(StyleBorder()->mBoxDecorationBreak ==
                      NS_STYLE_BOX_DECORATION_BREAK_CLONE)) {
@@ -349,13 +349,13 @@ nsTableColGroupFrame::GetLogicalSkipSides(const ReflowInput* aReflowInput) const
 
 void
 nsTableColGroupFrame::Reflow(nsPresContext*          aPresContext,
-                             ReflowOutput&     aDesiredSize,
-                             const ReflowInput& aReflowInput,
+                             nsHTMLReflowMetrics&     aDesiredSize,
+                             const nsHTMLReflowState& aReflowState,
                              nsReflowStatus&          aStatus)
 {
   MarkInReflow();
   DO_GLOBAL_REFLOW_COUNT("nsTableColGroupFrame");
-  DISPLAY_REFLOW(aPresContext, this, aReflowInput, aDesiredSize, aStatus);
+  DISPLAY_REFLOW(aPresContext, this, aReflowState, aDesiredSize, aStatus);
   NS_ASSERTION(nullptr!=mContent, "bad state -- null content for frame");
   
   const nsStyleVisibility* groupVis = StyleVisibility();
@@ -369,18 +369,18 @@ nsTableColGroupFrame::Reflow(nsPresContext*          aPresContext,
   for (nsIFrame *kidFrame = mFrames.FirstChild(); kidFrame;
        kidFrame = kidFrame->GetNextSibling()) {
     // Give the child frame a chance to reflow, even though we know it'll have 0 size
-    ReflowOutput kidSize(aReflowInput);
-    ReflowInput kidReflowInput(aPresContext, aReflowInput, kidFrame,
+    nsHTMLReflowMetrics kidSize(aReflowState);
+    nsHTMLReflowState kidReflowState(aPresContext, aReflowState, kidFrame,
                                      LogicalSize(kidFrame->GetWritingMode()));
 
     nsReflowStatus status;
-    ReflowChild(kidFrame, aPresContext, kidSize, kidReflowInput, 0, 0, 0, status);
+    ReflowChild(kidFrame, aPresContext, kidSize, kidReflowState, 0, 0, 0, status);
     FinishReflowChild(kidFrame, aPresContext, kidSize, nullptr, 0, 0, 0);
   }
 
   aDesiredSize.ClearSize();
   aStatus = NS_FRAME_COMPLETE;
-  NS_FRAME_SET_TRUNCATION(aStatus, aReflowInput, aDesiredSize);
+  NS_FRAME_SET_TRUNCATION(aStatus, aReflowState, aDesiredSize);
 }
 
 nsTableColFrame * nsTableColGroupFrame::GetFirstColumn()

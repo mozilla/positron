@@ -108,6 +108,10 @@
         "addStream() on closed PC raised expected exception");
 
       SimpleTest.doesThrow(function() {
+        pc.removeStream("Invalid Media Stream")},
+        "removeStream() on closed PC raised expected exception");
+
+      SimpleTest.doesThrow(function() {
         pc.createDataChannel({})},
         "createDataChannel() on closed PC raised expected exception");
 

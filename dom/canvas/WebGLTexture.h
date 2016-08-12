@@ -8,8 +8,6 @@
 
 #include <algorithm>
 #include <map>
-#include <set>
-#include <vector>
 
 #include "mozilla/Assertions.h"
 #include "mozilla/CheckedInt.h"
@@ -20,7 +18,6 @@
 #include "WebGLFramebufferAttachable.h"
 #include "WebGLObjectModel.h"
 #include "WebGLStrongTypes.h"
-#include "WebGLTypes.h"
 
 namespace mozilla {
 class ErrorResult;
@@ -28,19 +25,11 @@ class WebGLContext;
 
 namespace dom {
 class Element;
-class HTMLVideoElement;
 class ImageData;
 class ArrayBufferViewOrSharedArrayBufferView;
 } // namespace dom
 
-namespace layers {
-class Image;
-} // namespace layers
-
 namespace webgl {
-struct DriverUnpackInfo;
-struct FormatUsageInfo;
-struct PackingInfo;
 class TexUnpackBlob;
 } // namespace webgl
 
@@ -201,7 +190,7 @@ public:
     NS_INLINE_DECL_CYCLE_COLLECTING_NATIVE_REFCOUNTING(WebGLTexture)
     NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_NATIVE_CLASS(WebGLTexture)
 
-    WebGLTexture(WebGLContext* webgl, GLuint tex);
+    explicit WebGLTexture(WebGLContext* webgl, GLuint tex);
 
     void Delete();
 
@@ -247,12 +236,6 @@ public:
                        GLint level, GLenum internalFormat, GLint xOffset, GLint yOffset,
                        GLint zOffset, GLenum unpackFormat, GLenum unpackType,
                        dom::Element* elem, ErrorResult* const out_error);
-
-    void TexOrSubImage(bool isSubImage, const char* funcName, TexImageTarget target,
-                       GLint level, GLenum internalFormat, GLint xOffset, GLint yOffset,
-                       GLint zOffset, GLsizei width, GLsizei height, GLsizei depth,
-                       GLint border, GLenum unpackFormat, GLenum unpackType,
-                       WebGLsizeiptr offset);
 
 protected:
     void TexOrSubImageBlob(bool isSubImage, const char* funcName, TexImageTarget target,

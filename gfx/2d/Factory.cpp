@@ -29,9 +29,6 @@
 #include "ScaledFontMac.h"
 #endif
 
-#ifdef MOZ_WIDGET_GTK
-#include "ScaledFontFontconfig.h"
-#endif
 
 #ifdef XP_DARWIN
 #include "DrawTargetCG.h"
@@ -461,7 +458,6 @@ Factory::DoesBackendSupportDataDrawtarget(BackendType aType)
   case BackendType::RECORDING:
   case BackendType::NONE:
   case BackendType::COREGRAPHICS_ACCELERATED:
-  case BackendType::BACKEND_LAST:
     return false;
   case BackendType::CAIRO:
   case BackendType::COREGRAPHICS:
@@ -578,14 +574,6 @@ Factory::CreateScaledFontWithCairo(const NativeFont& aNativeFont, Float aSize, c
   return nullptr;
 #endif
 }
-
-#ifdef MOZ_WIDGET_GTK
-already_AddRefed<ScaledFont>
-Factory::CreateScaledFontForFontconfigFont(cairo_scaled_font_t* aScaledFont, FcPattern* aPattern, Float aSize)
-{
-  return MakeAndAddRef<ScaledFontFontconfig>(aScaledFont, aPattern, aSize);
-}
-#endif
 
 already_AddRefed<DrawTarget>
 Factory::CreateDualDrawTarget(DrawTarget *targetA, DrawTarget *targetB)
@@ -736,6 +724,20 @@ Factory::PurgeAllCaches()
 {
 }
 
+#ifdef USE_SKIA_FREETYPE
+already_AddRefed<GlyphRenderingOptions>
+Factory::CreateCairoGlyphRenderingOptions(FontHinting aHinting, bool aAutoHinting, AntialiasMode aAntialiasMode)
+{
+  RefPtr<GlyphRenderingOptionsCairo> options =
+    new GlyphRenderingOptionsCairo();
+
+  options->SetHinting(aHinting);
+  options->SetAutoHinting(aAutoHinting);
+  options->SetAntialiasMode(aAntialiasMode);
+  return options.forget();
+}
+#endif
+
 already_AddRefed<DrawTarget>
 Factory::CreateDrawTargetForCairoSurface(cairo_surface_t* aSurface, const IntSize& aSize, SurfaceFormat* aFormat)
 {
@@ -828,12 +830,8 @@ Factory::CreateDataSourceSurface(const IntSize &aSize,
     return nullptr;
   }
 
-  // Skia doesn't support RGBX, so memset RGBX to 0xFF
-  bool clearSurface = aZero || aFormat == SurfaceFormat::B8G8R8X8;
-  uint8_t clearValue = aFormat == SurfaceFormat::B8G8R8X8 ? 0xFF : 0;
-
   RefPtr<SourceSurfaceAlignedRawData> newSurf = new SourceSurfaceAlignedRawData();
-  if (newSurf->Init(aSize, aFormat, clearSurface, clearValue)) {
+  if (newSurf->Init(aSize, aFormat, aZero)) {
     return newSurf.forget();
   }
 
@@ -852,12 +850,8 @@ Factory::CreateDataSourceSurfaceWithStride(const IntSize &aSize,
     return nullptr;
   }
 
-  // Skia doesn't support RGBX, so memset RGBX to 0xFF
-  bool clearSurface = aZero || aFormat == SurfaceFormat::B8G8R8X8;
-  uint8_t clearValue = aFormat == SurfaceFormat::B8G8R8X8 ? 0xFF : 0;
-
   RefPtr<SourceSurfaceAlignedRawData> newSurf = new SourceSurfaceAlignedRawData();
-  if (newSurf->Init(aSize, aFormat, clearSurface, clearValue, aStride)) {
+  if (newSurf->InitWithStride(aSize, aFormat, aStride, aZero)) {
     return newSurf.forget();
   }
 

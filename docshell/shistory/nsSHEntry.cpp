@@ -412,7 +412,7 @@ nsSHEntry::Create(nsIURI* aURI, const nsAString& aTitle,
                   nsIInputStream* aInputStream,
                   nsILayoutHistoryState* aLayoutHistoryState,
                   nsISupports* aCacheKey, const nsACString& aContentType,
-                  nsIPrincipal* aTriggeringPrincipal, uint64_t aDocShellID,
+                  nsISupports* aOwner, uint64_t aDocShellID,
                   bool aDynamicCreation)
 {
   mURI = aURI;
@@ -424,7 +424,7 @@ nsSHEntry::Create(nsIURI* aURI, const nsAString& aTitle,
 
   mShared->mCacheKey = aCacheKey;
   mShared->mContentType = aContentType;
-  mShared->mTriggeringPrincipal = aTriggeringPrincipal;
+  mShared->mOwner = aOwner;
   mShared->mDocShellID = aDocShellID;
   mShared->mDynamicallyCreated = aDynamicCreation;
 
@@ -504,16 +504,16 @@ nsSHEntry::GetViewerBounds(nsIntRect& aBounds)
 }
 
 NS_IMETHODIMP
-nsSHEntry::GetTriggeringPrincipal(nsIPrincipal** aTriggeringPrincipal)
+nsSHEntry::GetOwner(nsISupports** aOwner)
 {
-  NS_IF_ADDREF(*aTriggeringPrincipal = mShared->mTriggeringPrincipal);
+  NS_IF_ADDREF(*aOwner = mShared->mOwner);
   return NS_OK;
 }
 
 NS_IMETHODIMP
-nsSHEntry::SetTriggeringPrincipal(nsIPrincipal* aTriggeringPrincipal)
+nsSHEntry::SetOwner(nsISupports* aOwner)
 {
-  mShared->mTriggeringPrincipal = aTriggeringPrincipal;
+  mShared->mOwner = aOwner;
   return NS_OK;
 }
 
@@ -715,7 +715,11 @@ nsSHEntry::AddChild(nsISHEntry* aChild, int32_t aOffset)
       }
     }
 
-    mChildren.ReplaceObjectAt(aChild, aOffset);
+    if (!mChildren.ReplaceObjectAt(aChild, aOffset)) {
+      NS_WARNING("Adding a child failed!");
+      aChild->SetParent(nullptr);
+      return NS_ERROR_FAILURE;
+    }
   }
 
   return NS_OK;
@@ -733,8 +737,7 @@ nsSHEntry::RemoveChild(nsISHEntry* aChild)
   } else {
     int32_t index = mChildren.IndexOfObject(aChild);
     if (index >= 0) {
-      mChildren.ReplaceObjectAt(nullptr, index);
-      childRemoved = true;
+      childRemoved = mChildren.ReplaceObjectAt(nullptr, index);
     }
   }
   if (childRemoved) {
@@ -777,8 +780,9 @@ nsSHEntry::ReplaceChild(nsISHEntry* aNewEntry)
     if (mChildren[i] && NS_SUCCEEDED(mChildren[i]->GetDocshellID(&otherID)) &&
         docshellID == otherID) {
       mChildren[i]->SetParent(nullptr);
-      mChildren.ReplaceObjectAt(aNewEntry, i);
-      return aNewEntry->SetParent(this);
+      if (mChildren.ReplaceObjectAt(aNewEntry, i)) {
+        return aNewEntry->SetParent(this);
+      }
     }
   }
   return NS_ERROR_FAILURE;

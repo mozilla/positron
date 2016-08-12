@@ -9,6 +9,7 @@
 
 const { appendAndWaitForPaint } = require("devtools/client/performance/test/helpers/dom-utils");
 const { synthesizeCustomTreeClass } = require("devtools/client/performance/test/helpers/synth-utils");
+const { once } = require("devtools/client/performance/test/helpers/event-utils");
 
 add_task(function* () {
   let { MyCustomTreeItem, myDataSrc } = synthesizeCustomTreeClass();

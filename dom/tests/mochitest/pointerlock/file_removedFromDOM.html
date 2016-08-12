@@ -43,10 +43,10 @@ function listenOneDocEvent(type, handler) {
 
 function checkPointerLockElement(elem) {
   if (elem) {
-    is(document.pointerLockElement, elem,
+    is(document.mozPointerLockElement, elem,
        `#${elem.id} should have locked the pointer`);
   } else {
-    ok(!document.pointerLockElement, "Pointer should have been unlocked");
+    ok(!document.mozPointerLockElement, "Pointer should have been unlocked");
   }
 }
 
@@ -58,25 +58,25 @@ function start() {
 function enteredFullscreen() {
   is(document.fullscreenElement, document.documentElement,
      "Root element should have entered fullscreen");
-  listenOneDocEvent("pointerlockchange", lockedPointerOnDiv);
-  div.requestPointerLock();
+  listenOneDocEvent("mozpointerlockchange", lockedPointerOnDiv);
+  div.mozRequestPointerLock();
 }
 
 function lockedPointerOnDiv() {
   checkPointerLockElement(div);
-  listenOneDocEvent("pointerlockchange", unlockedPointerFromDiv);
+  listenOneDocEvent("mozpointerlockchange", unlockedPointerFromDiv);
   document.body.removeChild(div);
 }
 
 function unlockedPointerFromDiv() {
   checkPointerLockElement(null);
-  listenOneDocEvent("pointerlockchange", lockedPointerOnInner);
-  inner.requestPointerLock();
+  listenOneDocEvent("mozpointerlockchange", lockedPointerOnInner);
+  inner.mozRequestPointerLock();
 }
 
 function lockedPointerOnInner() {
   checkPointerLockElement(inner);
-  listenOneDocEvent("pointerlockchange", unlockedPointerFromInner);
+  listenOneDocEvent("mozpointerlockchange", unlockedPointerFromInner);
   document.body.removeChild(outer);
 }
 

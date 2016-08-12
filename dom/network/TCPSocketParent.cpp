@@ -274,10 +274,7 @@ TCPSocketParent::RecvStartTLS()
   NS_ENSURE_TRUE(mSocket, true);
   ErrorResult rv;
   mSocket->UpgradeToSecure(rv);
-  if (NS_WARN_IF(rv.Failed())) {
-    rv.SuppressException();
-  }
-
+  NS_ENSURE_FALSE(rv.Failed(), true);
   return true;
 }
 
@@ -295,10 +292,7 @@ TCPSocketParent::RecvResume()
   NS_ENSURE_TRUE(mSocket, true);
   ErrorResult rv;
   mSocket->Resume(rv);
-  if (NS_WARN_IF(rv.Failed())) {
-    rv.SuppressException();
-  }
-
+  NS_ENSURE_FALSE(rv.Failed(), true);
   return true;
 }
 

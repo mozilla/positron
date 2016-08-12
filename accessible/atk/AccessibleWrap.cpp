@@ -19,6 +19,7 @@
 #include "nsMai.h"
 #include "nsMaiHyperlink.h"
 #include "nsString.h"
+#include "prprf.h"
 #include "nsStateMap.h"
 #include "mozilla/a11y/Platform.h"
 #include "Relation.h"
@@ -27,7 +28,6 @@
 #include "nsISimpleEnumerator.h"
 
 #include "mozilla/ArrayUtils.h"
-#include "mozilla/Snprintf.h"
 #include "nsXPCOMStrings.h"
 #include "nsComponentManagerUtils.h"
 #include "nsIPersistentProperties2.h"
@@ -436,7 +436,8 @@ GetUniqueMaiAtkTypeName(uint16_t interfacesBits)
     static gchar namePrefix[] = "MaiAtkType";   /* size = 10 */
     static gchar name[MAI_ATK_TYPE_NAME_LEN + 1];
 
-    snprintf_literal(name, "%s%x", namePrefix, interfacesBits);
+    PR_snprintf(name, MAI_ATK_TYPE_NAME_LEN, "%s%x", namePrefix,
+                interfacesBits);
     name[MAI_ATK_TYPE_NAME_LEN] = '\0';
 
     return name;

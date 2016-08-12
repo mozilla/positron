@@ -551,8 +551,9 @@
       }
 
       for (let test of tests) {
-        gFindBar._findField.select();
-        gFindBar._findField.focus();
+        promise = promiseMatchesCountResult();
+        gFindBar.clear();
+        yield promise;
 
         promise = promiseMatchesCountResult();
         yield enterStringIntoFindField(test.text, false);

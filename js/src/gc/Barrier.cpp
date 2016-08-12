@@ -23,22 +23,8 @@ namespace js {
 
 #ifdef DEBUG
 
-static bool
-IsMarkedBlack(NativeObject* obj)
-{
-    // Note: we assume conservatively that Nursery things will be live.
-    if (!obj->isTenured())
-        return true;
-
-    gc::TenuredCell& tenured = obj->asTenured();
-    if (tenured.isMarked(gc::BLACK) || tenured.arena()->allocatedDuringIncremental)
-        return true;
-
-    return false;
-}
-
 bool
-HeapSlot::preconditionForSet(NativeObject* owner, Kind kind, uint32_t slot) const
+HeapSlot::preconditionForSet(NativeObject* owner, Kind kind, uint32_t slot)
 {
     return kind == Slot
          ? &owner->getSlotRef(slot) == this
@@ -47,14 +33,11 @@ HeapSlot::preconditionForSet(NativeObject* owner, Kind kind, uint32_t slot) cons
 
 bool
 HeapSlot::preconditionForWriteBarrierPost(NativeObject* obj, Kind kind, uint32_t slot,
-                                          const Value& target) const
+                                              Value target) const
 {
-    bool isCorrectSlot = kind == Slot
-                         ? obj->getSlotAddressUnchecked(slot)->get() == target
-                         : static_cast<HeapSlot*>(obj->getDenseElements() + slot)->get() == target;
-    bool isBlackToGray = target.isMarkable() &&
-                         IsMarkedBlack(obj) && JS::GCThingIsMarkedGray(JS::GCCellPtr(target));
-    return isCorrectSlot && !isBlackToGray;
+    return kind == Slot
+         ? obj->getSlotAddressUnchecked(slot)->get() == target
+         : static_cast<HeapSlot*>(obj->getDenseElements() + slot)->get() == target;
 }
 
 bool
@@ -82,10 +65,10 @@ CurrentThreadIsGCSweeping()
 }
 
 bool
-CurrentThreadCanSkipPostBarrier(bool inNursery)
+CurrentThreadIsHandlingInitFailure()
 {
-    bool onMainThread = TlsPerThreadData.get()->runtimeIfOnOwnerThread() != nullptr;
-    return !onMainThread && !inNursery;
+    JSRuntime* rt = TlsPerThreadData.get()->runtimeIfOnOwnerThread();
+    return rt && rt->handlingInitFailure;
 }
 
 #endif // DEBUG

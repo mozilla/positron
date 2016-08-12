@@ -15,7 +15,7 @@ var {console} = Cu.import("resource://gre/modules/Console.jsm", {});
 
 var {require} = Cu.import("resource://devtools/shared/Loader.jsm", {});
 var Services = require("Services");
-var WebConsoleUtils = require("devtools/client/webconsole/utils").Utils;
+var WebConsoleUtils = require("devtools/shared/webconsole/utils").Utils;
 var {Task} = require("devtools/shared/task");
 
 var ConsoleAPIStorage = Cc["@mozilla.org/consoleAPI-storage;1"]
@@ -24,7 +24,7 @@ var {DebuggerServer} = require("devtools/server/main");
 var {DebuggerClient, ObjectClient} = require("devtools/shared/client/main");
 
 var {ConsoleServiceListener, ConsoleAPIListener} =
-  require("devtools/server/actors/utils/webconsole-utils");
+  require("devtools/shared/webconsole/utils");
 
 function initCommon()
 {
@@ -97,9 +97,6 @@ function _attachConsole(aListeners, aCallback, aAttachToTab, aAttachToWorker)
           if (aAttachToWorker) {
             let workerName = "console-test-worker.js#" + new Date().getTime();
             var worker = new Worker(workerName);
-            // Keep a strong reference to the Worker to avoid it being
-            // GCd during the test (bug 1237492).
-            aState._worker_ref = worker;
             worker.addEventListener("message", function listener() {
               worker.removeEventListener("message", listener);
               tabClient.listWorkers(function (response) {

@@ -9,10 +9,9 @@ var { require } = Cu.import("resource://devtools/shared/Loader.jsm", {});
 
 var Services = require("Services");
 var DevToolsUtils = require("devtools/shared/DevToolsUtils");
-var flags = require("devtools/shared/flags");
-flags.testing = true;
-flags.wantLogging = true;
-flags.wantVerbose = false;
+DevToolsUtils.testing = true;
+DevToolsUtils.dumpn.wantLogging = true;
+DevToolsUtils.dumpv.wantVerbose = false;
 
 var { OS } = require("resource://gre/modules/osfile.jsm");
 var { FileUtils } = require("resource://gre/modules/FileUtils.jsm");

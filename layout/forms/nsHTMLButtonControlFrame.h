@@ -35,8 +35,8 @@ public:
   virtual nscoord GetPrefISize(nsRenderingContext *aRenderingContext) override;
 
   virtual void Reflow(nsPresContext*           aPresContext,
-                      ReflowOutput&     aDesiredSize,
-                      const ReflowInput& aReflowInput,
+                      nsHTMLReflowMetrics&     aDesiredSize,
+                      const nsHTMLReflowState& aReflowState,
                       nsReflowStatus&          aStatus) override;
 
   virtual nsresult HandleEvent(nsPresContext* aPresContext, 
@@ -101,8 +101,8 @@ protected:
   // Reflows the button's sole child frame, and computes the desired size
   // of the button itself from the results.
   void ReflowButtonContents(nsPresContext* aPresContext,
-                            ReflowOutput& aButtonDesiredSize,
-                            const ReflowInput& aButtonReflowInput,
+                            nsHTMLReflowMetrics& aButtonDesiredSize,
+                            const nsHTMLReflowState& aButtonReflowState,
                             nsIFrame* aFirstKid);
 
   nsButtonFrameRenderer mRenderer;

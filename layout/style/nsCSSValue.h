@@ -8,8 +8,6 @@
 #ifndef nsCSSValue_h___
 #define nsCSSValue_h___
 
-#include <type_traits>
-
 #include "mozilla/Attributes.h"
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/SheetType.h"
@@ -20,7 +18,6 @@
 #include "nsCOMPtr.h"
 #include "nsCSSKeywords.h"
 #include "nsCSSProperty.h"
-#include "nsCSSProps.h"
 #include "nsColor.h"
 #include "nsCoord.h"
 #include "nsProxyRelease.h"
@@ -121,8 +118,6 @@ struct URLValueData
 
   size_t SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf) const;
 
-  bool GetLocalURLFlag() const { return mLocalURLFlag; }
-
 private:
   // If mURIResolved is false, mURI stores the base URI.
   // If mURIResolved is true, mURI stores the URI we resolve to; this may be
@@ -134,9 +129,6 @@ public:
   PtrHandle<nsIPrincipal> mOriginPrincipal;
 private:
   mutable bool mURIResolved;
-  // mLocalURLFlag is set when url starts with a U+0023 number
-  // sign(#) character.
-  bool mLocalURLFlag;
 
   URLValueData(const URLValueData& aOther) = delete;
   URLValueData& operator=(const URLValueData& aOther) = delete;
@@ -524,8 +516,6 @@ public:
     { return eCSSUnit_Point <= aUnit && aUnit <= eCSSUnit_Pixel; }
   bool      IsPixelLengthUnit() const
     { return IsPixelLengthUnit(mUnit); }
-  static bool IsFloatUnit(nsCSSUnit aUnit)
-    { return eCSSUnit_Number <= aUnit; }
   bool      IsAngularUnit() const  
     { return eCSSUnit_Degree <= mUnit && mUnit <= eCSSUnit_Turn; }
   bool      IsFrequencyUnit() const  
@@ -733,14 +723,6 @@ private:
 
 public:
   void SetIntValue(int32_t aValue, nsCSSUnit aUnit);
-  template<typename T,
-           typename = typename std::enable_if<std::is_enum<T>::value>::type>
-  void SetIntValue(T aValue, nsCSSUnit aUnit)
-  {
-    static_assert(mozilla::IsEnumFittingWithin<T, int32_t>::value,
-                  "aValue must be an enum that fits within mValue.mInt");
-    SetIntValue(static_cast<int32_t>(aValue), aUnit);
-  }
   void SetPercentValue(float aValue);
   void SetFloatValue(float aValue, nsCSSUnit aUnit);
   void SetStringValue(const nsString& aValue, nsCSSUnit aUnit);
@@ -826,9 +808,6 @@ private:
   void AppendCircleOrEllipseToString(
            nsCSSKeyword aFunctionId,
            nsCSSProperty aProperty, nsAString& aResult,
-           Serialization aValueSerialization) const;
-  void AppendBasicShapePositionToString(
-           nsAString& aResult,
            Serialization aValueSerialization) const;
   void AppendInsetToString(nsCSSProperty aProperty, nsAString& aResult,
                            Serialization aValueSerialization) const;

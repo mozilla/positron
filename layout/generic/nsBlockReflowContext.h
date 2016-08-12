@@ -10,25 +10,20 @@
 #define nsBlockReflowContext_h___
 
 #include "nsIFrame.h"
-#include "mozilla/ReflowOutput.h"
+#include "nsHTMLReflowMetrics.h"
 
+class nsBlockReflowState;
+struct nsHTMLReflowState;
 class nsLineBox;
 class nsPresContext;
-namespace mozilla {
-class BlockReflowInput;
-} // namespace mozilla
 
 /**
  * An encapsulation of the state and algorithm for reflowing block frames.
  */
 class nsBlockReflowContext {
-  using BlockReflowInput = mozilla::BlockReflowInput;
-  using ReflowInput = mozilla::ReflowInput;
-  using ReflowOutput = mozilla::ReflowOutput;
-
 public:
   nsBlockReflowContext(nsPresContext* aPresContext,
-                       const ReflowInput& aParentRS);
+                       const nsHTMLReflowState& aParentRS);
   ~nsBlockReflowContext() { }
 
   void ReflowBlock(const mozilla::LogicalRect& aSpace,
@@ -37,11 +32,11 @@ public:
                    nscoord                     aClearance,
                    bool                        aIsAdjacentWithBStart,
                    nsLineBox*                  aLine,
-                   ReflowInput&          aReflowInput,
+                   nsHTMLReflowState&          aReflowState,
                    nsReflowStatus&             aReflowStatus,
-                   BlockReflowInput&         aState);
+                   nsBlockReflowState&         aState);
 
-  bool PlaceBlock(const ReflowInput& aReflowInput,
+  bool PlaceBlock(const nsHTMLReflowState& aReflowState,
                   bool                     aForceFit,
                   nsLineBox*               aLine,
                   nsCollapsingMargin&      aBEndMarginResult /* out */,
@@ -52,16 +47,16 @@ public:
     return mMetrics.mCarriedOutBEndMargin;
   }
 
-  const ReflowOutput& GetMetrics() const {
+  const nsHTMLReflowMetrics& GetMetrics() const {
     return mMetrics;
   }
 
   /**
    * Computes the collapsed block-start margin (in the context's parent's
-   * writing mode) for a block whose reflow state is in aRI.
+   * writing mode) for a block whose reflow state is in aRS.
    * The computed margin is added into aMargin, whose writing mode is the
    * parent's mode as found in mMetrics.GetWritingMode(); note this may not be
-   * the block's own writing mode as found in aRI.
+   * the block's own writing mode as found in aRS.
    * If aClearanceFrame is null then this is the first optimistic pass which
    * shall assume that no frames have clearance, and we clear the HasClearance
    * on all frames encountered.
@@ -75,7 +70,7 @@ public:
    * We return true if we changed the clearance state of any line and marked it
    * dirty.
    */
-  bool ComputeCollapsedBStartMargin(const ReflowInput& aRI,
+  bool ComputeCollapsedBStartMargin(const nsHTMLReflowState& aRS,
                                     nsCollapsingMargin* aMargin,
                                     nsIFrame* aClearanceFrame,
                                     bool* aMayNeedRetry,
@@ -83,7 +78,7 @@ public:
 
 protected:
   nsPresContext* mPresContext;
-  const ReflowInput& mOuterReflowInput;
+  const nsHTMLReflowState& mOuterReflowState;
 
   nsIFrame* mFrame;
   mozilla::LogicalRect mSpace;
@@ -91,7 +86,7 @@ protected:
   nscoord mICoord, mBCoord;
   nsSize mContainerSize;
   mozilla::WritingMode mWritingMode;
-  ReflowOutput mMetrics;
+  nsHTMLReflowMetrics mMetrics;
   nsCollapsingMargin mBStartMargin;
 };
 

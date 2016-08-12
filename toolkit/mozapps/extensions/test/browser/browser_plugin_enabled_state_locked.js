@@ -17,10 +17,11 @@ var gPluginElement;
 function getTestPluginPref() {
   let prefix = "plugin.state.";
   if (gIsWindows)
-    return `${prefix}nptest`;
-  if (gIsLinux)
-    return `${prefix}libnptest`;
-  return `${prefix}test`;
+    return prefix + "nptest";
+  else if (gIsLinux)
+    return prefix + "libnptest";
+  else
+    return prefix + "test";
 }
 
 registerCleanupFunction(() => {

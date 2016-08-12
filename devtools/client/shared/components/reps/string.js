@@ -10,10 +10,8 @@
 define(function (require, exports, module) {
   // Dependencies
   const React = require("devtools/client/shared/vendor/react");
-  const { cropMultipleLines } = require("./rep-utils");
-
-  // Shortcuts
-  const { span } = React.DOM;
+  const { createFactories, cropMultipleLines } = require("./rep-utils");
+  const { ObjectBox } = createFactories(require("./object-box"));
 
   /**
    * Renders a string. String value is enclosed within quotes.
@@ -26,7 +24,7 @@ define(function (require, exports, module) {
       let member = this.props.member;
       if (member && member.open) {
         return (
-          span({className: "objectBox objectBox-string"},
+          ObjectBox({className: "string"},
             "\"" + text + "\""
           )
         );
@@ -36,7 +34,7 @@ define(function (require, exports, module) {
         cropMultipleLines(text, this.props.cropLimit) : cropMultipleLines(text);
 
       return (
-        span({className: "objectBox objectBox-string"}, "\"" + croppedString + "\""
+        ObjectBox({className: "string"}, "\"" + croppedString + "\""
         )
       );
     },

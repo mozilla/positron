@@ -1,7 +1,6 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
-"use strict";
-/* eslint-disable */
+
 /**
  * Tests that the marker details on GC markers displays allocation
  * buttons and snaps to the correct range
@@ -143,4 +142,3 @@ var GC_MARKERS = [
   marker.end = marker.start + 9;
   return marker;
 });
-/* eslint-enable */

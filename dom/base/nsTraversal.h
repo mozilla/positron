@@ -25,7 +25,7 @@ class nsTraversal
 public:
     nsTraversal(nsINode *aRoot,
                 uint32_t aWhatToShow,
-                mozilla::dom::NodeFilterHolder aFilter);
+                const mozilla::dom::NodeFilterHolder &aFilter);
     virtual ~nsTraversal();
 
 protected:

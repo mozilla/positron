@@ -8,6 +8,7 @@
 #define ACCURATE_SEEK_TASK_H
 
 #include "SeekTask.h"
+#include "MediaCallbackID.h"
 #include "MediaDecoderReader.h"
 #include "SeekJob.h"
 

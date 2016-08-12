@@ -11,7 +11,7 @@
 <?xml-stylesheet href="chrome://browser/content/usercontext/usercontext.css" type="text/css"?>
 <?xml-stylesheet href="chrome://devtools/skin/devtools-browser.css" type="text/css"?>
 <?xml-stylesheet href="chrome://browser/skin/controlcenter/panel.css" type="text/css"?>
-<?xml-stylesheet href="chrome://browser/skin/customizableui/panelUI.css" type="text/css"?>
+<?xml-stylesheet href="chrome://browser/skin/customizableui/panelUIOverlay.css" type="text/css"?>
 <?xml-stylesheet href="chrome://browser/skin/" type="text/css"?>
 <?xml-stylesheet href="chrome://browser/skin/browser-lightweightTheme.css" type="text/css"?>
 
@@ -152,7 +152,14 @@
            noautofocus="true"
            hidden="true"
            flip="none"
-           level="parent"/>
+           level="parent">
+#ifdef NIGHTLY_BUILD
+      <hbox id="urlbar-search-footer" flex="1" align="stretch" pack="end">
+        <button id="urlbar-search-settings" label="&changeSearchSettings.button;"
+                oncommand="BrowserUITelemetry.countSearchSettingsEvent('urlbar'); openPreferences('paneSearch')"/>
+      </hbox>
+#endif
+    </panel>
 
     <!-- for select dropdowns. The menupopup is what shows the list of options,
          and the popuponly menulist makes things like the menuactive attributes
@@ -288,6 +295,18 @@
            noautofocus="true"
            position="topcenter topright"/>
 
+    <panel id="loop-notification-panel"
+           class="loop-panel social-panel"
+           type="arrow"
+           hidden="true"
+           noautofocus="true"/>
+
+    <panel id="loop-panel"
+           class="loop-panel social-panel"
+           type="arrow"
+           orient="horizontal"
+           hidden="true"/>
+
     <menupopup id="toolbar-context-menu"
                onpopupshowing="onViewToolbarsPopupShowing(event, document.getElementById('viewToolbarsMenuSeparator'));">
       <menuitem oncommand="gCustomizeMode.addToPanel(document.popupNode)"
@@ -391,7 +410,7 @@
                 hidden="true"/>
     </menupopup>
 
-    <panel id="ctrlTab-panel" hidden="true" norestorefocus="true" level="top">
+    <panel id="ctrlTab-panel" class="KUI-panel" hidden="true" norestorefocus="true" level="top">
       <hbox>
         <button class="ctrlTab-preview" flex="1"/>
         <button class="ctrlTab-preview" flex="1"/>
@@ -646,6 +665,12 @@
 #endif
     </toolbar>
 
+    <!--
+           CAVEAT EMPTOR
+           Should you need to add items to the toolbar here, make sure to also add them
+           to the default placements of buttons in CustomizableUI.jsm, so the
+           customization code doesn't get confused.
+      -->
     <toolbar id="nav-bar"
              aria-label="&navbarCmd.label;"
              fullscreentoolbar="true" mode="icons" customizable="true"
@@ -706,7 +731,7 @@
                 <image id="identity-icon"
                        consumeanchor="identity-box"
                        onclick="PageProxyClickHandler(event);"/>
-                <box id="blocked-permissions-container" align="center" tooltiptext="">
+                <box id="blocked-permissions-container" align="center">
                   <image data-permission-id="geo" class="notification-anchor-icon geo-icon blocked" role="button"
                          aria-label="&urlbar.geolocationNotificationAnchor.label;"/>
                   <image data-permission-id="desktop-notification" class="notification-anchor-icon desktop-notification-icon blocked" role="button"

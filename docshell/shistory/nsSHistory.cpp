@@ -797,7 +797,7 @@ nsSHistory::EvictAllContentViewers()
   while (trans) {
     EvictContentViewerForTransaction(trans);
 
-    nsCOMPtr<nsISHTransaction> temp = trans;
+    nsISHTransaction* temp = trans;
     temp->GetNext(getter_AddRefs(trans));
   }
 
@@ -974,7 +974,7 @@ nsSHistory::EvictOutOfRangeWindowContentViewers(int32_t aIndex)
   for (int32_t i = startSafeIndex; trans && i <= endSafeIndex; i++) {
     nsCOMPtr<nsIContentViewer> viewer = GetContentViewerForTransaction(trans);
     safeViewers.AppendObject(viewer);
-    nsCOMPtr<nsISHTransaction> temp = trans;
+    nsISHTransaction* temp = trans;
     temp->GetNext(getter_AddRefs(trans));
   }
 
@@ -986,7 +986,7 @@ nsSHistory::EvictOutOfRangeWindowContentViewers(int32_t aIndex)
       EvictContentViewerForTransaction(trans);
     }
 
-    nsCOMPtr<nsISHTransaction> temp = trans;
+    nsISHTransaction* temp = trans;
     temp->GetNext(getter_AddRefs(trans));
   }
 }
@@ -1108,7 +1108,7 @@ nsSHistory::GloballyEvictContentViewers()
         }
       }
 
-      nsCOMPtr<nsISHTransaction> temp = trans;
+      nsISHTransaction* temp = trans;
       temp->GetNext(getter_AddRefs(trans));
     }
 
@@ -1154,7 +1154,7 @@ nsSHistory::EvictExpiredContentViewerForEntry(nsIBFCacheEntry* aEntry)
       break;
     }
 
-    nsCOMPtr<nsISHTransaction> temp = trans;
+    nsISHTransaction* temp = trans;
     temp->GetNext(getter_AddRefs(trans));
   }
   if (i > endIndex) {

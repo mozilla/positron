@@ -1085,7 +1085,6 @@ struct ssl3StateStr {
     PRUint16 dtlsSRTPCipherSuite; /* 0 if not selected */
     PRBool fatalAlertSent;
     PRBool dheWeakGroupEnabled; /* used by server */
-    const namedGroupDef *dhePreferredGroup;
 
     /* TLS 1.2 introduces separate signature algorithm negotiation.
      * This is our preference order. */

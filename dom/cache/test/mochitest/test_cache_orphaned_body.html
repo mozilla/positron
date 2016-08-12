@@ -54,7 +54,7 @@ function resetStorage() {
 
 function gc() {
   return new Promise(function(resolve, reject) {
-    SpecialPowers.exactGC(resolve);
+    SpecialPowers.exactGC(window, resolve);
   });
 }
 

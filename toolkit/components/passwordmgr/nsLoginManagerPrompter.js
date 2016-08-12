@@ -259,13 +259,14 @@ LoginManagerPrompter.prototype = {
   get _inPrivateBrowsing() {
     if (this._window) {
       return PrivateBrowsingUtils.isContentWindowPrivate(this._window);
+    } else {
+      // If we don't that we're in private browsing mode if the caller did
+      // not provide a window.  The callers which really care about this
+      // will indeed pass down a window to us, and for those who don't,
+      // we can just assume that we don't want to save the entered login
+      // information.
+      return true;
     }
-    // If we don't that we're in private browsing mode if the caller did
-    // not provide a window.  The callers which really care about this
-    // will indeed pass down a window to us, and for those who don't,
-    // we can just assume that we don't want to save the entered login
-    // information.
-    return true;
   },
 
 
@@ -901,7 +902,7 @@ LoginManagerPrompter.prototype = {
       accessKey: this._getLocalizedString(initialMsgNames.buttonAccessKey),
       callback: () => {
         histogram.add(PROMPT_ADD_OR_UPDATE);
-        if (histogramName == "PWMGR_PROMPT_REMEMBER_ACTION")
+        if(histogramName == "PWMGR_PROMPT_REMEMBER_ACTION")
         {
           Services.obs.notifyObservers(null, 'LoginStats:NewSavedPassword', null);
         }
@@ -1483,7 +1484,8 @@ LoginManagerPrompter.prototype = {
     if (formatArgs)
       return this._strBundle.formatStringFromName(
                                   key, formatArgs, formatArgs.length);
-    return this._strBundle.GetStringFromName(key);
+    else
+      return this._strBundle.GetStringFromName(key);
   },
 
 

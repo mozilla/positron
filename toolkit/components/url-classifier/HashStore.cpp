@@ -787,9 +787,7 @@ HashStore::WriteAddPrefixes(nsIOutputStream* aOut)
 {
   nsTArray<uint32_t> chunks;
   uint32_t count = mAddPrefixes.Length();
-  if (!chunks.SetCapacity(count, fallible)) {
-    return NS_ERROR_OUT_OF_MEMORY;
-  }
+  chunks.SetCapacity(count);
 
   for (uint32_t i = 0; i < count; i++) {
     chunks.AppendElement(mAddPrefixes[i].Chunk());

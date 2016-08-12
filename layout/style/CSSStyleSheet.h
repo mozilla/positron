@@ -16,6 +16,7 @@
 #include "mozilla/StyleSheetInfo.h"
 #include "mozilla/css/SheetParsingMode.h"
 #include "mozilla/dom/Element.h"
+#include "mozilla/dom/CSSStyleSheetBinding.h"
 
 #include "nscore.h"
 #include "nsCOMPtr.h"
@@ -113,10 +114,8 @@ class CSSStyleSheet final : public nsIDOMCSSStyleSheet,
 {
 public:
   typedef net::ReferrerPolicy ReferrerPolicy;
-  CSSStyleSheet(css::SheetParsingMode aParsingMode,
-                CORSMode aCORSMode, ReferrerPolicy aReferrerPolicy);
-  CSSStyleSheet(css::SheetParsingMode aParsingMode,
-                CORSMode aCORSMode, ReferrerPolicy aReferrerPolicy,
+  CSSStyleSheet(CORSMode aCORSMode, ReferrerPolicy aReferrerPolicy);
+  CSSStyleSheet(CORSMode aCORSMode, ReferrerPolicy aReferrerPolicy,
                 const dom::SRIMetadata& aIntegrity);
 
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
@@ -321,6 +320,8 @@ public:
   // WillDirty and then make no change and skip the DidDirty call.
   void WillDirty();
   void DidDirty();
+
+  mozilla::dom::CSSStyleSheetParsingMode ParsingMode();
 
 private:
   CSSStyleSheet(const CSSStyleSheet& aCopy,

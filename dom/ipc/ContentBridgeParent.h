@@ -62,11 +62,6 @@ public:
   {
     return mIsForBrowser;
   }
-  virtual int32_t Pid() const override
-  {
-    // XXX: do we need this for ContentBridgeParent?
-    return -1;
-  }
 
 protected:
   virtual ~ContentBridgeParent();

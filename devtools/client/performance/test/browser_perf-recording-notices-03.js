@@ -10,7 +10,7 @@
 
 const { SIMPLE_URL } = require("devtools/client/performance/test/helpers/urls");
 const { PROFILER_BUFFER_SIZE_PREF } = require("devtools/client/performance/test/helpers/prefs");
-const { pmmLoadFrameScripts, pmmStopProfiler, pmmClearFrameScripts } = require("devtools/client/performance/test/helpers/profiler-mm-utils");
+const { PMM_loadFrameScripts, PMM_stopProfiler, PMM_clearFrameScripts } = require("devtools/client/performance/test/helpers/profiler-mm-utils");
 const { initPerformanceInTab, initConsoleInNewTab, teardownToolboxAndRemoveTab } = require("devtools/client/performance/test/helpers/panel-utils");
 const { startRecording, stopRecording } = require("devtools/client/performance/test/helpers/actions");
 const { waitUntil } = require("devtools/client/performance/test/helpers/wait-utils");
@@ -18,8 +18,8 @@ const { once } = require("devtools/client/performance/test/helpers/event-utils")
 
 add_task(function* () {
   // Make sure the profiler module is stopped so we can set a new buffer limit.
-  pmmLoadFrameScripts(gBrowser);
-  yield pmmStopProfiler();
+  PMM_loadFrameScripts(gBrowser);
+  yield PMM_stopProfiler();
 
   // Keep the profiler's buffer large, but still get to 1% relatively quick.
   Services.prefs.setIntPref(PROFILER_BUFFER_SIZE_PREF, 1000000);
@@ -30,38 +30,27 @@ add_task(function* () {
   });
 
   let { panel } = yield initPerformanceInTab({ tab: target.tab });
-  let {
-    gFront,
-    EVENTS,
-    $,
-    PerformanceController,
-    PerformanceView,
-    RecordingsView
-  } = panel.panelWin;
+  let { gFront, EVENTS, $, PerformanceController, PerformanceView, RecordingsView } = panel.panelWin;
 
   // Set a fast profiler-status update interval.
   yield gFront.setProfilerStatusInterval(10);
 
   let DETAILS_CONTAINER = $("#details-pane-container");
   let NORMAL_BUFFER_STATUS_MESSAGE = $("#recording-notice .buffer-status-message");
-  let CONSOLE_BUFFER_STATUS_MESSAGE =
-    $("#console-recording-notice .buffer-status-message");
+  let CONSOLE_BUFFER_STATUS_MESSAGE = $("#console-recording-notice .buffer-status-message");
   let gPercent;
 
   // Start a manual recording.
   yield startRecording(panel);
 
   yield waitUntil(function* () {
-    [, gPercent] = yield once(PerformanceView,
-                              EVENTS.UI_RECORDING_PROFILER_STATUS_RENDERED,
-                              { spreadArgs: true });
+    [, gPercent] = yield once(PerformanceView, EVENTS.UI_RECORDING_PROFILER_STATUS_RENDERED, { spreadArgs: true });
     return gPercent > 0;
   });
 
   ok(true, "Buffer percentage increased in display (1).");
 
-  let bufferUsage = PerformanceController.getBufferUsageForRecording(
-    PerformanceController.getCurrentRecording());
+  let bufferUsage = PerformanceController.getBufferUsageForRecording(PerformanceController.getCurrentRecording());
   either(DETAILS_CONTAINER.getAttribute("buffer-status"), "in-progress", "full",
     "Container has [buffer-status=in-progress] or [buffer-status=full].");
   ok(NORMAL_BUFFER_STATUS_MESSAGE.value.indexOf(gPercent + "%") !== -1,
@@ -71,16 +60,13 @@ add_task(function* () {
   yield console.profile("rust");
 
   yield waitUntil(function* () {
-    [, gPercent] = yield once(PerformanceView,
-                              EVENTS.UI_RECORDING_PROFILER_STATUS_RENDERED,
-                              { spreadArgs: true });
+    [, gPercent] = yield once(PerformanceView, EVENTS.UI_RECORDING_PROFILER_STATUS_RENDERED, { spreadArgs: true });
     return gPercent > Math.floor(bufferUsage * 100);
   });
 
   ok(true, "Buffer percentage increased in display (2).");
 
-  bufferUsage = PerformanceController.getBufferUsageForRecording(
-    PerformanceController.getCurrentRecording());
+  bufferUsage = PerformanceController.getBufferUsageForRecording(PerformanceController.getCurrentRecording());
   either(DETAILS_CONTAINER.getAttribute("buffer-status"), "in-progress", "full",
     "Container has [buffer-status=in-progress] or [buffer-status=full].");
   ok(NORMAL_BUFFER_STATUS_MESSAGE.value.indexOf(gPercent + "%") !== -1,
@@ -92,9 +78,7 @@ add_task(function* () {
   yield selected;
 
   yield waitUntil(function* () {
-    [, gPercent] = yield once(PerformanceView,
-                              EVENTS.UI_RECORDING_PROFILER_STATUS_RENDERED,
-                              { spreadArgs: true });
+    [, gPercent] = yield once(PerformanceView, EVENTS.UI_RECORDING_PROFILER_STATUS_RENDERED, { spreadArgs: true });
     return gPercent > 0;
   });
 
@@ -113,9 +97,7 @@ add_task(function* () {
   yield selected;
 
   yield waitUntil(function* () {
-    [, gPercent] = yield once(PerformanceView,
-                              EVENTS.UI_RECORDING_PROFILER_STATUS_RENDERED,
-                              { spreadArgs: true });
+    [, gPercent] = yield once(PerformanceView, EVENTS.UI_RECORDING_PROFILER_STATUS_RENDERED, { spreadArgs: true });
     return gPercent > Math.floor(bufferUsage * 100);
   });
 
@@ -131,5 +113,5 @@ add_task(function* () {
 
   yield teardownToolboxAndRemoveTab(panel);
 
-  pmmClearFrameScripts();
+  PMM_clearFrameScripts();
 });

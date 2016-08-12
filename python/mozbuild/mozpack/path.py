@@ -22,8 +22,6 @@ def normsep(path):
     '''
     if os.sep != '/':
         path = path.replace(os.sep, '/')
-    if os.altsep and os.altsep != '/':
-        path = path.replace(os.altsep, '/')
     return path
 
 

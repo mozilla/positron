@@ -517,6 +517,9 @@ public class Prompt implements OnClickListener, OnCancelListener, OnItemClickLis
             Tabs.unregisterOnTabsChangedListener(this);
         }
 
+        // poke the Gecko thread in case it's waiting for new events
+        GeckoAppShell.sendEventToGecko(GeckoEvent.createNoOpEvent());
+
         if (mCallback != null) {
             mCallback.onPromptFinished(aReturn.toString());
         }

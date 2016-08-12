@@ -362,8 +362,7 @@ add_task(function* webnav_ordering() {
     }
   });
 
-  yield extension.startup();
-  yield extension.awaitMessage("ready");
+  yield Promise.all([extension.startup(), extension.awaitMessage("ready")]);
   info("webnavigation extension loaded");
 
   let win = window.open();

@@ -361,7 +361,7 @@ var PrintUtils = {
       let ppMsgName = msgName + "_PP";
       try {
         msg = this.bundle.GetStringFromName(ppMsgName);
-      } catch (e) {
+      } catch(e) {
         // We allow localizers to not have the print preview error string,
         // and just fall back to the printing error string.
       }
@@ -588,12 +588,10 @@ var PrintUtils = {
       printPreviewTB.initialize(ppBrowser);
 
       // Enable simplify page checkbox when the page is an article
-      if (this._sourceBrowser.isArticle) {
+      if (this._sourceBrowser.isArticle)
         printPreviewTB.enableSimplifyPage();
-      } else {
-        this.logTelemetry("PRINT_PREVIEW_SIMPLIFY_PAGE_UNAVAILABLE_COUNT");
+      else
         printPreviewTB.disableSimplifyPage();
-      }
 
       // copy the window close handler
       if (document.documentElement.hasAttribute("onclose"))

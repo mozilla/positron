@@ -30,8 +30,7 @@ NS_INTERFACE_MAP_END
 
 NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(nsMimeTypeArray,
                                       mWindow,
-                                      mMimeTypes,
-                                      mCTPMimeTypes)
+                                      mMimeTypes)
 
 nsMimeTypeArray::nsMimeTypeArray(nsPIDOMWindowInner* aWindow)
   : mWindow(aWindow)
@@ -58,7 +57,6 @@ void
 nsMimeTypeArray::Refresh()
 {
   mMimeTypes.Clear();
-  mCTPMimeTypes.Clear();
 }
 
 nsPIDOMWindowInner*
@@ -135,10 +133,6 @@ nsMimeTypeArray::NamedGetter(const nsAString& aName, bool &aFound)
     aFound = true;
     return mimeType;
   }
-  nsMimeType* hiddenType = FindMimeType(mCTPMimeTypes, lowerName);
-  if (hiddenType) {
-    nsPluginArray::NotifyHiddenPluginTouched(hiddenType->GetEnabledPlugin());
-  }
 
   return nullptr;
 }
@@ -186,7 +180,6 @@ nsMimeTypeArray::EnsurePluginMimeTypes()
   }
 
   pluginArray->GetMimeTypes(mMimeTypes);
-  pluginArray->GetCTPMimeTypes(mCTPMimeTypes);
 }
 
 NS_IMPL_CYCLE_COLLECTION_ROOT_NATIVE(nsMimeType, AddRef)

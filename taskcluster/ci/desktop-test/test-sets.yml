@@ -51,6 +51,4 @@ asan-tests:
     - mochitest-jetpack
     - mochitest-media
     - mochitest-webgl
-    - reftest
-    - reftest-no-accel
     - xpcshell

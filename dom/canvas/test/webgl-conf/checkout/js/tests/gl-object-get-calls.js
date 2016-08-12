@@ -107,7 +107,6 @@ for (var run = 0; run < testCases.length; ++run) {
   }
 
   var texture = gl.createTexture();
-  var anotherTexture = gl.createTexture();
   gl.bindTexture(gl.TEXTURE_2D, texture);
   gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 2, 2, 0, gl.RGBA, gl.UNSIGNED_BYTE,
                 new Uint8Array([
@@ -123,18 +122,8 @@ for (var run = 0; run < testCases.length; ++run) {
   gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
   var colorAttachmentsNum = 1;
   if (contextVersion > 1) {
-    gl.bindTexture(gl.TEXTURE_2D, anotherTexture);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 2, 2, 0, gl.RGBA, gl.UNSIGNED_BYTE,
-                  new Uint8Array([
-                      0, 0, 0, 255,
-                      255, 255, 255, 255,
-                      255, 255, 255, 255,
-                      0, 0, 0, 255]));
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-    gl.bindTexture(gl.TEXTURE_2D, null);
     colorAttachmentsNum = gl.getParameter(gl.MAX_COLOR_ATTACHMENTS);
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0 + colorAttachmentsNum - 1, gl.TEXTURE_2D, anotherTexture, 0);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0 + colorAttachmentsNum - 1, gl.TEXTURE_2D, texture, 0);
   }
   var renderbuffer = gl.createRenderbuffer();
   wtu.glErrorShouldBe(gl, gl.NO_ERROR);
@@ -148,15 +137,17 @@ for (var run = 0; run < testCases.length; ++run) {
   gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, renderbuffer);
   if (contextVersion > 1)
     gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.STENCIL_ATTACHMENT, gl.RENDERBUFFER, renderbuffer);
+  // FIXME: on some machines (in particular the WebKit commit bots) the
+  // framebuffer status is FRAMEBUFFER_UNSUPPORTED; more investigation
+  // is needed why this is the case, because the FBO allocated
+  // internally by the WebKit implementation has almost identical
+  // parameters to this one. See https://bugs.webkit.org/show_bug.cgi?id=31843.
   shouldBe('gl.checkFramebufferStatus(gl.FRAMEBUFFER)', 'gl.FRAMEBUFFER_COMPLETE');
   // The for loop tests two color attachments for WebGL 2: the first one (gl.COLOR_ATTACHMENT0)
   // and the last one (gl.COLOR_ATTACHMENT0 + gl.MAX_COLOR_ATTACHMENTS - 1).
   for (var ii = 0; ii < colorAttachmentsNum; ii += (colorAttachmentsNum > 1 ? colorAttachmentsNum - 1 : 1)) {
     shouldBe('gl.getFramebufferAttachmentParameter(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0 + ' + ii + ', gl.FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE)', 'gl.TEXTURE');
-    if (ii == 0)
-      shouldBe('gl.getFramebufferAttachmentParameter(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0 + ' + ii + ', gl.FRAMEBUFFER_ATTACHMENT_OBJECT_NAME)', 'texture');
-    else
-      shouldBe('gl.getFramebufferAttachmentParameter(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0 + ' + ii + ', gl.FRAMEBUFFER_ATTACHMENT_OBJECT_NAME)', 'anotherTexture');
+    shouldBe('gl.getFramebufferAttachmentParameter(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0 + ' + ii + ', gl.FRAMEBUFFER_ATTACHMENT_OBJECT_NAME)', 'texture');
     shouldBe('gl.getFramebufferAttachmentParameter(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0 + ' + ii + ', gl.FRAMEBUFFER_ATTACHMENT_TEXTURE_LEVEL)', '0');
     shouldBe('gl.getFramebufferAttachmentParameter(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0 + ' + ii + ', gl.FRAMEBUFFER_ATTACHMENT_TEXTURE_CUBE_MAP_FACE)', '0');
     if (contextVersion > 1) {
@@ -772,7 +763,7 @@ if (contextVersion > 1) {
         gl.RG32UI, gl.RGB8I, gl.RGB8UI, gl.RGB16I,
         gl.RGB16UI, gl.RGB32I, gl.RGB32UI, gl.RGBA8I,
         gl.RGBA8UI, gl.RGBA16I, gl.RGBA16UI, gl.RGBA32I,
-        gl.RGBA32UI, gl.RGB, gl.RGBA, gl.DEPTH_STENCIL, gl.DEPTH_COMPONENT16,
+        gl.RGBA32UI, gl.RGB, gl.RGBA, gl.DEPTH_COMPONENT16,
         gl.DEPTH_COMPONENT24, gl.DEPTH_COMPONENT32F, gl.DEPTH24_STENCIL8,
         gl.DEPTH32F_STENCIL8, gl.STENCIL_INDEX8
     );
@@ -866,19 +857,7 @@ if (contextVersion > 1) {
     debug("Test getSyncParameter");
     var sync = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
     shouldBe('gl.getSyncParameter(sync, gl.OBJECT_TYPE)', 'gl.SYNC_FENCE');
-    var sync_status = gl.getSyncParameter(sync, gl.SYNC_STATUS);
-    switch (sync_status) {
-      case gl.UNSIGNALED:
-        testPassed('gl.getSyncParameter(sync, gl.SYNC_CONDITION) is gl.UNSIGNALED');
-        break;
-      case gl.SIGNALED:
-        testPassed('gl.getSyncParameter(sync, gl.SYNC_CONDITION) is gl.SIGNALED');
-        break;
-      default:
-        testFailed('gl.getSyncParameter(sync, gl.SYNC_CONDITION) was ' + sync_status +
-                   ', expected gl.UNSIGNALED or gl.SIGNALED');
-        break;
-    }
+    shouldBe('gl.getSyncParameter(sync, gl.SYNC_STATUS)', 'gl.UNSIGNALED');
     shouldBe('gl.getSyncParameter(sync, gl.SYNC_CONDITION)', 'gl.SYNC_GPU_COMMANDS_COMPLETE');
     shouldBe('gl.getSyncParameter(sync, gl.SYNC_FLAGS)', '0');
     var validArrayForSyncParameter = new Array(

@@ -550,11 +550,11 @@ WebSocketImpl::ConsoleError()
 
   if (mWebSocket->ReadyState() < WebSocket::OPEN) {
     PrintErrorOnConsole("chrome://global/locale/appstrings.properties",
-                        u"connectionFailure",
+                        MOZ_UTF16("connectionFailure"),
                         formatStrings, ArrayLength(formatStrings));
   } else {
     PrintErrorOnConsole("chrome://global/locale/appstrings.properties",
-                        u"netInterrupt",
+                        MOZ_UTF16("netInterrupt"),
                         formatStrings, ArrayLength(formatStrings));
   }
   /// todo some specific errors - like for message too large
@@ -988,18 +988,6 @@ WebSocket::Constructor(const GlobalObject& aGlobal,
 {
   return WebSocket::ConstructorCommon(aGlobal, aUrl, aProtocols, nullptr,
                                       EmptyCString(), aRv);
-}
-
-already_AddRefed<WebSocket>
-WebSocket::CreateServerWebSocket(const GlobalObject& aGlobal,
-                                 const nsAString& aUrl,
-                                 const Sequence<nsString>& aProtocols,
-                                 nsITransportProvider* aTransportProvider,
-                                 const nsAString& aNegotiatedExtensions,
-                                 ErrorResult& aRv)
-{
-  return WebSocket::ConstructorCommon(aGlobal, aUrl, aProtocols, aTransportProvider,
-                                      NS_ConvertUTF16toUTF8(aNegotiatedExtensions), aRv);
 }
 
 namespace {
@@ -1611,8 +1599,8 @@ WebSocketImpl::Init(JSContext* aCx,
     }
     mSecure = true;
 
-    const char16_t* params[] = { reportSpec.get(), u"wss" };
-    CSP_LogLocalizedStr(u"upgradeInsecureRequest",
+    const char16_t* params[] = { reportSpec.get(), MOZ_UTF16("wss") };
+    CSP_LogLocalizedStr(MOZ_UTF16("upgradeInsecureRequest"),
                         params, ArrayLength(params),
                         EmptyString(), // aSourceFile
                         EmptyString(), // aScriptSample
@@ -2645,7 +2633,14 @@ public:
   bool WorkerRun(JSContext* aCx, WorkerPrivate* aWorkerPrivate) override
   {
     aWorkerPrivate->AssertIsOnWorkerThread();
+    aWorkerPrivate->ModifyBusyCountFromWorker(true);
     return !NS_FAILED(mImpl->CancelInternal());
+  }
+
+  void PostRun(JSContext* aCx, WorkerPrivate* aWorkerPrivate,
+               bool aRunResult) override
+  {
+    aWorkerPrivate->ModifyBusyCountFromWorker(false);
   }
 
 private:
@@ -2787,6 +2782,7 @@ public:
   bool WorkerRun(JSContext* aCx, WorkerPrivate* aWorkerPrivate) override
   {
     aWorkerPrivate->AssertIsOnWorkerThread();
+    aWorkerPrivate->ModifyBusyCountFromWorker(true);
 
     // No messages when disconnected.
     if (mWebSocketImpl->mDisconnectingOrDisconnected) {
@@ -2800,6 +2796,7 @@ public:
   void PostRun(JSContext* aCx, WorkerPrivate* aWorkerPrivate,
                bool aRunResult) override
   {
+    aWorkerPrivate->ModifyBusyCountFromWorker(false);
   }
 
   bool

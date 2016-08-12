@@ -11,7 +11,8 @@ define(function (require, exports, module) {
   const React = require("devtools/client/shared/vendor/react");
 
   // Reps
-  const { isGrip } = require("./rep-utils");
+  const { createFactories, isGrip } = require("./rep-utils");
+  const { ObjectBox } = createFactories(require("./object-box"));
 
   // Shortcuts
   const { span } = React.DOM;
@@ -35,7 +36,7 @@ define(function (require, exports, module) {
       let objectLink = this.props.objectLink || span;
 
       return (
-        span({className: "objectBox objectBox-regexp"},
+        ObjectBox({className: "regexp"},
           objectLink({
             object: grip,
             className: "regexpSource"

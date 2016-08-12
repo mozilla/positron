@@ -16,7 +16,6 @@ var { CallWatcherFront } = require("devtools/shared/fronts/call-watcher");
 var { CanvasFront } = require("devtools/shared/fronts/canvas");
 var { setTimeout } = require("sdk/timers");
 var DevToolsUtils = require("devtools/shared/DevToolsUtils");
-var flags = require("devtools/shared/flags");
 var { TargetFactory } = require("devtools/client/framework/target");
 var { Toolbox } = require("devtools/client/framework/toolbox");
 var { isWebGLSupported } = require("devtools/client/shared/webgl-utils");
@@ -47,11 +46,11 @@ waitForExplicitFinish();
 
 var gToolEnabled = Services.prefs.getBoolPref("devtools.canvasdebugger.enabled");
 
-flags.testing = true;
+DevToolsUtils.testing = true;
 
 registerCleanupFunction(() => {
   info("finish() was called, cleaning up...");
-  flags.testing = false;
+  DevToolsUtils.testing = false;
   Services.prefs.setBoolPref("devtools.debugger.log", gEnableLogging);
   Services.prefs.setBoolPref("devtools.canvasdebugger.enabled", gToolEnabled);
 
@@ -159,7 +158,6 @@ function once(aTarget, aEventName, aUseCapture = false) {
   ]) {
     if ((add in aTarget) && (remove in aTarget)) {
       aTarget[add](aEventName, function onEvent(...aArgs) {
-        info("Got event: '" + aEventName + "' on " + aTarget + ".");
         aTarget[remove](aEventName, onEvent, aUseCapture);
         deferred.resolve(...aArgs);
       }, aUseCapture);

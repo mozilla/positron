@@ -63,18 +63,14 @@ public:
   nsresult Allocate(const dom::MediaTrackConstraints &aConstraints,
                     const MediaEnginePrefs &aPrefs,
                     const nsString& aDeviceId,
-                    const nsACString& aOrigin,
-                    AllocationHandle** aOutHandle,
-                    const char** aOutBadConstraint) override;
-  nsresult Deallocate(AllocationHandle* aHandle) override;
+                    const nsACString& aOrigin) override;
+  nsresult Deallocate() override;
   nsresult Start(SourceMediaStream* aStream, TrackID aID,
                  const PrincipalHandle& aPrincipalHandle) override;
   nsresult Stop(SourceMediaStream* aSource, TrackID aID) override;
-  nsresult Restart(AllocationHandle* aHandle,
-                   const dom::MediaTrackConstraints& aConstraints,
+  nsresult Restart(const dom::MediaTrackConstraints& aConstraints,
                    const MediaEnginePrefs &aPrefs,
-                   const nsString& aDeviceId,
-                   const char** aOutBadConstraint) override;
+                   const nsString& aDeviceId) override;
   void NotifyPull(MediaStreamGraph* aGraph,
                   SourceMediaStream* aSource,
                   TrackID aId,
@@ -118,7 +114,7 @@ protected:
   // Initialize the needed Video engine interfaces.
   void Init();
   void Shutdown();
-  size_t NumCapabilities() const override;
+  size_t NumCapabilities() override;
   // Initialize the recording frame (MediaBuffer) callback and Gonk camera.
   // MediaBuffer will transfers to MediaStreamGraph via AppendToTrack.
   nsresult InitDirectMediaBuffer();

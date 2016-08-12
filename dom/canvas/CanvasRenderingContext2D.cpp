@@ -905,7 +905,7 @@ public:
     if (!context || !context->mTarget)
       return;
 
-    context->OnStableState();
+    context->ReturnTarget();
   }
 
   static void DidTransactionCallback(void* aData)
@@ -1055,6 +1055,9 @@ DrawTarget* CanvasRenderingContext2D::sErrorTarget = nullptr;
 
 CanvasRenderingContext2D::CanvasRenderingContext2D()
   : mRenderingMode(RenderingMode::OpenGLBackendMode)
+#ifdef USE_SKIA_GPU
+  , mVideoTexture(0)
+#endif
   // these are the default values from the Canvas spec
   , mWidth(0), mHeight(0)
   , mZero(false), mOpaque(false)
@@ -1096,6 +1099,15 @@ CanvasRenderingContext2D::~CanvasRenderingContext2D()
   if (!sNumLivingContexts) {
     NS_IF_RELEASE(sErrorTarget);
   }
+#ifdef USE_SKIA_GPU
+  if (mVideoTexture) {
+    SkiaGLGlue* glue = gfxPlatform::GetPlatform()->GetSkiaGLGlue();
+    MOZ_ASSERT(glue);
+    glue->GetGLContext()->MakeCurrent();
+    glue->GetGLContext()->fDeleteTextures(1, &mVideoTexture);
+  }
+#endif
+
   RemoveDemotableContext(this);
 }
 
@@ -1332,13 +1344,20 @@ bool CanvasRenderingContext2D::SwitchRenderingMode(RenderingMode aRenderingMode)
       !gfxPlatform::GetPlatform()->UseAcceleratedCanvas()) {
       return false;
   }
+
+  if (mRenderingMode == RenderingMode::OpenGLBackendMode) {
+    if (mVideoTexture) {
+      gfxPlatform::GetPlatform()->GetSkiaGLGlue()->GetGLContext()->MakeCurrent();
+      gfxPlatform::GetPlatform()->GetSkiaGLGlue()->GetGLContext()->fDeleteTextures(1, &mVideoTexture);
+    }
+    mCurrentVideoSize.width = 0;
+    mCurrentVideoSize.height = 0;
+  }
 #endif
 
   RefPtr<SourceSurface> snapshot;
   Matrix transform;
   RefPtr<PersistentBufferProvider> oldBufferProvider = mBufferProvider;
-  RefPtr<DrawTarget> oldTarget = mTarget;
-
   AutoReturnSnapshot autoReturn(nullptr);
 
   if (mTarget) {
@@ -1353,19 +1372,14 @@ bool CanvasRenderingContext2D::SwitchRenderingMode(RenderingMode aRenderingMode)
     autoReturn.mBufferProvider = mBufferProvider;
     autoReturn.mSnapshot = &snapshot;
   }
-
   mTarget = nullptr;
   mBufferProvider = nullptr;
   mResetLayer = true;
 
   // Recreate target using the new rendering mode
   RenderingMode attemptedMode = EnsureTarget(nullptr, aRenderingMode);
-  if (!IsTargetValid()) {
-    if (oldBufferProvider && oldTarget) {
-      oldBufferProvider->ReturnDrawTarget(oldTarget.forget());
-    }
+  if (!IsTargetValid())
     return false;
-  }
 
   // We succeeded, so update mRenderingMode to reflect reality
   mRenderingMode = attemptedMode;
@@ -1380,10 +1394,6 @@ bool CanvasRenderingContext2D::SwitchRenderingMode(RenderingMode aRenderingMode)
   }
 
   mTarget->SetTransform(transform);
-
-  if (oldBufferProvider && oldTarget) {
-    oldBufferProvider->ReturnDrawTarget(oldTarget.forget());
-  }
 
   return true;
 }
@@ -1515,10 +1525,6 @@ CanvasRenderingContext2D::ScheduleStableStateCallback()
 void
 CanvasRenderingContext2D::OnStableState()
 {
-  if (!mHasPendingStableStateCallback) {
-    return;
-  }
-
   ReturnTarget();
 
   mHasPendingStableStateCallback = false;
@@ -1544,8 +1550,6 @@ CanvasRenderingContext2D::EnsureTarget(const gfx::Rect* aCoveredRect,
     return mRenderingMode;
   }
 
-  ScheduleStableStateCallback();
-
   if (mBufferProvider && mode == mRenderingMode) {
     gfx::Rect rect(0, 0, mWidth, mHeight);
     if (aCoveredRect && CurrentState().transform.TransformBounds(*aCoveredRect).Contains(rect)) {
@@ -1554,10 +1558,12 @@ CanvasRenderingContext2D::EnsureTarget(const gfx::Rect* aCoveredRect,
       mTarget = mBufferProvider->BorrowDrawTarget(IntRect(0, 0, mWidth, mHeight));
     }
 
+    ScheduleStableStateCallback();
+
     if (mTarget) {
       // Restore clip and transform.
+      mTarget->SetTransform(CurrentState().transform);
       for (uint32_t i = 0; i < mStyleStack.Length(); i++) {
-        mTarget->SetTransform(mStyleStack[i].transform);
         for (uint32_t c = 0; c < mStyleStack[i].clipsPushed.Length(); c++) {
           mTarget->PushClip(mStyleStack[i].clipsPushed[c]);
         }
@@ -1685,11 +1691,7 @@ CanvasRenderingContext2D::GetHeight() const
 NS_IMETHODIMP
 CanvasRenderingContext2D::SetDimensions(int32_t aWidth, int32_t aHeight)
 {
-  bool retainBuffer = false;
-  if (aWidth == mWidth && aHeight == mHeight) {
-    retainBuffer = true;
-  }
-  ClearTarget(retainBuffer);
+  ClearTarget();
 
   // Zero sized surfaces can cause problems.
   mZero = false;
@@ -1708,22 +1710,9 @@ CanvasRenderingContext2D::SetDimensions(int32_t aWidth, int32_t aHeight)
 }
 
 void
-CanvasRenderingContext2D::ClearTarget(bool aRetainBuffer)
+CanvasRenderingContext2D::ClearTarget()
 {
-  RefPtr<PersistentBufferProvider> provider = mBufferProvider;
-  if (aRetainBuffer && provider) {
-    // We should reset the buffer data before reusing the buffer.
-    if (mTarget) {
-      mTarget->SetTransform(Matrix());
-    }
-    ClearRect(0, 0, mWidth, mHeight);
-  }
-
   Reset();
-
-  if (aRetainBuffer) {
-    mBufferProvider = provider;
-  }
 
   mResetLayer = true;
 
@@ -1763,7 +1752,7 @@ CanvasRenderingContext2D::ClearTarget(bool aRetainBuffer)
 void
 CanvasRenderingContext2D::ReturnTarget()
 {
-  if (mTarget && mBufferProvider && mTarget != sErrorTarget) {
+  if (mTarget && mBufferProvider) {
     CurrentState().transform = mTarget->GetTransform();
     for (uint32_t i = 0; i < mStyleStack.Length(); i++) {
       for (uint32_t c = 0; c < mStyleStack[i].clipsPushed.Length(); c++) {
@@ -4661,44 +4650,46 @@ CanvasRenderingContext2D::DrawImage(const CanvasImageSource& aImage,
     }
 
     gl->MakeCurrent();
-    GLuint videoTexture = 0;
-    gl->fGenTextures(1, &videoTexture);
+    if (!mVideoTexture) {
+      gl->fGenTextures(1, &mVideoTexture);
+    }
     // skiaGL expect upload on drawing, and uses texture 0 for texturing,
     // so we must active texture 0 and bind the texture for it.
     gl->fActiveTexture(LOCAL_GL_TEXTURE0);
-    gl->fBindTexture(LOCAL_GL_TEXTURE_2D, videoTexture);
+    gl->fBindTexture(LOCAL_GL_TEXTURE_2D, mVideoTexture);
 
-    gl->fTexImage2D(LOCAL_GL_TEXTURE_2D, 0, LOCAL_GL_RGB, srcImage->GetSize().width, srcImage->GetSize().height, 0, LOCAL_GL_RGB, LOCAL_GL_UNSIGNED_SHORT_5_6_5, nullptr);
-    gl->fTexParameteri(LOCAL_GL_TEXTURE_2D, LOCAL_GL_TEXTURE_WRAP_S, LOCAL_GL_CLAMP_TO_EDGE);
-    gl->fTexParameteri(LOCAL_GL_TEXTURE_2D, LOCAL_GL_TEXTURE_WRAP_T, LOCAL_GL_CLAMP_TO_EDGE);
-    gl->fTexParameteri(LOCAL_GL_TEXTURE_2D, LOCAL_GL_TEXTURE_MAG_FILTER, LOCAL_GL_LINEAR);
-    gl->fTexParameteri(LOCAL_GL_TEXTURE_2D, LOCAL_GL_TEXTURE_MIN_FILTER, LOCAL_GL_LINEAR);
-
+    bool dimensionsMatch = mCurrentVideoSize.width == srcImage->GetSize().width &&
+                           mCurrentVideoSize.height == srcImage->GetSize().height;
+    if (!dimensionsMatch) {
+      // we need to allocation
+      mCurrentVideoSize.width = srcImage->GetSize().width;
+      mCurrentVideoSize.height = srcImage->GetSize().height;
+      gl->fTexImage2D(LOCAL_GL_TEXTURE_2D, 0, LOCAL_GL_RGB, srcImage->GetSize().width, srcImage->GetSize().height, 0, LOCAL_GL_RGB, LOCAL_GL_UNSIGNED_SHORT_5_6_5, nullptr);
+      gl->fTexParameteri(LOCAL_GL_TEXTURE_2D, LOCAL_GL_TEXTURE_WRAP_S, LOCAL_GL_CLAMP_TO_EDGE);
+      gl->fTexParameteri(LOCAL_GL_TEXTURE_2D, LOCAL_GL_TEXTURE_WRAP_T, LOCAL_GL_CLAMP_TO_EDGE);
+      gl->fTexParameteri(LOCAL_GL_TEXTURE_2D, LOCAL_GL_TEXTURE_MAG_FILTER, LOCAL_GL_LINEAR);
+      gl->fTexParameteri(LOCAL_GL_TEXTURE_2D, LOCAL_GL_TEXTURE_MIN_FILTER, LOCAL_GL_LINEAR);
+    }
     const gl::OriginPos destOrigin = gl::OriginPos::TopLeft;
     bool ok = gl->BlitHelper()->BlitImageToTexture(srcImage, srcImage->GetSize(),
-                                                   videoTexture, LOCAL_GL_TEXTURE_2D,
+                                                   mVideoTexture, LOCAL_GL_TEXTURE_2D,
                                                    destOrigin);
     if (ok) {
       NativeSurface texSurf;
       texSurf.mType = NativeSurfaceType::OPENGL_TEXTURE;
       texSurf.mFormat = SurfaceFormat::R5G6B5_UINT16;
-      texSurf.mSize.width = srcImage->GetSize().width;
-      texSurf.mSize.height = srcImage->GetSize().height;
-      texSurf.mSurface = (void*)((uintptr_t)videoTexture);
+      texSurf.mSize.width = mCurrentVideoSize.width;
+      texSurf.mSize.height = mCurrentVideoSize.height;
+      texSurf.mSurface = (void*)((uintptr_t)mVideoTexture);
 
       srcSurf = mTarget->CreateSourceSurfaceFromNativeSurface(texSurf);
-      if (!srcSurf) {
-        gl->fDeleteTextures(1, &videoTexture);
-      }
-      imgSize.width = srcImage->GetSize().width;
-      imgSize.height = srcImage->GetSize().height;
+      imgSize.width = mCurrentVideoSize.width;
+      imgSize.height = mCurrentVideoSize.height;
 
       int32_t displayWidth = video->VideoWidth();
       int32_t displayHeight = video->VideoHeight();
       aSw *= (double)imgSize.width / (double)displayWidth;
       aSh *= (double)imgSize.height / (double)displayHeight;
-    } else {
-      gl->fDeleteTextures(1, &videoTexture);
     }
     srcImage = nullptr;
 
@@ -4852,8 +4843,8 @@ CanvasRenderingContext2D::DrawDirectlyToCanvas(
 
   // Scale the image size to the dest rect, and adjust the source rect to match.
   gfxSize scale(aDest.width / aSrc.width, aDest.height / aSrc.height);
-  IntSize scaledImageSize = IntSize::Ceil(aImgSize.width * scale.width,
-                                          aImgSize.height * scale.height);
+  nsIntSize scaledImageSize(std::ceil(aImgSize.width * scale.width),
+                            std::ceil(aImgSize.height * scale.height));
   aSrc.Scale(scale.width, scale.height);
 
   // We're wrapping tempTarget's (our) DrawTarget here, so we need to restore
@@ -5077,7 +5068,7 @@ CanvasRenderingContext2D::DrawWindow(nsGlobalWindow& aWindow, double aX,
                                 matrix._22, matrix._31, matrix._32));
   } else {
     drawDT =
-      gfxPlatform::GetPlatform()->CreateOffscreenContentDrawTarget(IntSize::Ceil(sw, sh),
+      gfxPlatform::GetPlatform()->CreateOffscreenContentDrawTarget(IntSize(ceil(sw), ceil(sh)),
                                                                    SurfaceFormat::B8G8R8A8);
     if (!drawDT || !drawDT->IsValid()) {
       aError.Throw(NS_ERROR_FAILURE);
@@ -5725,7 +5716,7 @@ CanvasRenderingContext2D::GetBufferProvider(LayerManager* aManager)
     return mBufferProvider;
   }
 
-  if (aManager && !mIsSkiaGL) {
+  if (aManager) {
     mBufferProvider = aManager->CreatePersistentBufferProvider(gfx::IntSize(mWidth, mHeight),
                                                                GetSurfaceFormat());
   }

@@ -123,6 +123,7 @@ static constexpr ValueOperand JSReturnOperand = ValueOperand(JSReturnReg);
 static constexpr Register AsmJSIonExitRegCallee = r8;
 static constexpr Register AsmJSIonExitRegE0 = r0;
 static constexpr Register AsmJSIonExitRegE1 = r1;
+static constexpr Register AsmJSIonExitRegE2 = r2;
 
 // Registers used in the GenerateFFIIonExit Disable Activation block.
 // None of these may be the second scratch register.
@@ -270,11 +271,6 @@ class Assembler : public vixl::Assembler
     // excess bookkeeping has been flushed to the instruction stream.
     void flush() {
         armbuffer_.flushPool();
-    }
-
-    void comment(const char* msg) {
-        // This is not implemented because setPrinter() is not implemented.
-        // TODO spew("; %s", msg);
     }
 
     int actualIndex(int curOffset) {
@@ -463,20 +459,13 @@ class ABIArgGenerator
 
 static constexpr Register ABINonArgReg0 = r8;
 static constexpr Register ABINonArgReg1 = r9;
-static constexpr Register ABINonArgReg2 = r10;
 static constexpr Register ABINonArgReturnReg0 = r8;
 static constexpr Register ABINonArgReturnReg1 = r9;
 
-// TLS pointer argument register for WebAssembly functions. This must not alias
-// any other register used for passing function arguments or return values.
-// Preserved by WebAssembly functions.
-static constexpr Register WasmTlsReg = { Registers::x17 };
-
 // Registers used for asm.js/wasm table calls. These registers must be disjoint
-// from the ABI argument registers, WasmTlsReg and each other.
-static constexpr Register WasmTableCallScratchReg = ABINonArgReg0;
+// from the ABI argument registers and from each other.
+static constexpr Register WasmTableCallPtrReg = ABINonArgReg0;
 static constexpr Register WasmTableCallSigReg = ABINonArgReg1;
-static constexpr Register WasmTableCallIndexReg = ABINonArgReg2;
 
 static inline bool
 GetIntArgReg(uint32_t usedIntArgs, uint32_t usedFloatArgs, Register* out)

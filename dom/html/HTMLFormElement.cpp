@@ -145,8 +145,15 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(HTMLFormElement,
                                                 nsGenericHTMLElement)
   tmp->Clear();
-  tmp->mExpandoAndGeneration.OwnerUnlinked();
+  tmp->mExpandoAndGeneration.Unlink();
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
+
+NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN_INHERITED(HTMLFormElement,
+                                               nsGenericHTMLElement)
+  if (tmp->PreservingWrapper()) {
+    NS_IMPL_CYCLE_COLLECTION_TRACE_JS_MEMBER_CALLBACK(mExpandoAndGeneration.expando)
+  }
+NS_IMPL_CYCLE_COLLECTION_TRACE_END
 
 NS_IMPL_ADDREF_INHERITED(HTMLFormElement, Element)
 NS_IMPL_RELEASE_INHERITED(HTMLFormElement, Element)
@@ -687,7 +694,7 @@ HTMLFormElement::BuildSubmission(HTMLFormSubmission** aFormSubmission,
   if (aEvent) {
     InternalFormEvent* formEvent = aEvent->AsFormEvent();
     if (formEvent) {
-      nsIContent* originator = formEvent->mOriginator;
+      nsIContent* originator = formEvent->originator;
       if (originator) {
         if (!originator->IsHTMLElement()) {
           return NS_ERROR_UNEXPECTED;
@@ -925,12 +932,12 @@ HTMLFormElement::DoSecureToInsecureSubmitCheck(nsIURI* aActionURL,
   nsAutoString message;
   nsAutoString cont;
   stringBundle->GetStringFromName(
-    u"formPostSecureToInsecureWarning.title", getter_Copies(title));
+    MOZ_UTF16("formPostSecureToInsecureWarning.title"), getter_Copies(title));
   stringBundle->GetStringFromName(
-    u"formPostSecureToInsecureWarning.message",
+    MOZ_UTF16("formPostSecureToInsecureWarning.message"),
     getter_Copies(message));
   stringBundle->GetStringFromName(
-    u"formPostSecureToInsecureWarning.continue",
+    MOZ_UTF16("formPostSecureToInsecureWarning.continue"),
     getter_Copies(cont));
   int32_t buttonPressed;
   bool checkState = false; // this is unused (ConfirmEx requires this parameter)
@@ -1750,7 +1757,7 @@ HTMLFormElement::GetActionURL(nsIURI** aActionURL,
     NS_ConvertUTF8toUTF16 reportScheme(scheme);
 
     const char16_t* params[] = { reportSpec.get(), reportScheme.get() };
-    CSP_LogLocalizedStr(u"upgradeInsecureRequest",
+    CSP_LogLocalizedStr(MOZ_UTF16("upgradeInsecureRequest"),
                         params, ArrayLength(params),
                         EmptyString(), // aSourceFile
                         EmptyString(), // aScriptSample
@@ -1932,6 +1939,14 @@ HTMLFormElement::CheckValidFormSubmission()
   NS_ASSERTION(!HasAttr(kNameSpaceID_None, nsGkAtoms::novalidate),
                "We shouldn't be there if novalidate is set!");
 
+  // Don't do validation for a form submit done by a sandboxed document that
+  // doesn't have 'allow-forms', the submit will have been blocked and the
+  // HTML5 spec says we shouldn't validate in this case.
+  nsIDocument* doc = GetComposedDoc();
+  if (doc && (doc->GetSandboxFlags() & SANDBOXED_FORMS)) {
+    return true;
+  }
+
   // When .submit() is called aEvent = nullptr so we can rely on that to know if
   // we have to check the validity of the form.
   nsCOMPtr<nsIObserverService> service =
@@ -2017,41 +2032,6 @@ One should be implemented!");
   }
 
   return true;
-}
-
-bool
-HTMLFormElement::SubmissionCanProceed(Element* aSubmitter)
-{
-#ifdef DEBUG
-  if (aSubmitter) {
-    nsCOMPtr<nsIFormControl> fc = do_QueryInterface(aSubmitter);
-    MOZ_ASSERT(fc);
-
-    uint32_t type = fc->GetType();
-    MOZ_ASSERT(type == NS_FORM_INPUT_SUBMIT ||
-               type == NS_FORM_INPUT_IMAGE ||
-               type == NS_FORM_BUTTON_SUBMIT,
-               "aSubmitter is not a submit control?");
-  }
-#endif
-
-  // Modified step 2 of
-  // https://html.spec.whatwg.org/multipage/forms.html#concept-form-submit --
-  // we're not checking whether the node document is disconnected yet...
-  if (OwnerDoc()->GetSandboxFlags() & SANDBOXED_FORMS) {
-    return false;
-  }
-
-  if (HasAttr(kNameSpaceID_None, nsGkAtoms::novalidate)) {
-    return true;
-  }
-
-  if (aSubmitter &&
-      aSubmitter->HasAttr(kNameSpaceID_None, nsGkAtoms::formnovalidate)) {
-    return true;
-  }
-
-  return CheckValidFormSubmission();
 }
 
 void

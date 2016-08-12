@@ -26,7 +26,7 @@ DEF_TEST(SerializesEverythingInHeapGraphOnce, {
     ExpectWriteNode(writer, nodeC);
     ExpectWriteNode(writer, nodeD);
 
-    JS::AutoCheckCannotGC noGC(cx);
+    JS::AutoCheckCannotGC noGC(rt);
 
     ASSERT_TRUE(WriteHeapGraph(cx,
                                JS::ubi::Node(&nodeA),

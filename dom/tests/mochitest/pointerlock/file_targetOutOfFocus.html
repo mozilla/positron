@@ -42,11 +42,11 @@
         }
 
         input.addEventListener("focus", function() {
-          div.requestPointerLock();
+          div.mozRequestPointerLock();
         }, false);
 
-        document.addEventListener("pointerlockchange", function (e) {
-          if (document.pointerLockElement === div) {
+        document.addEventListener("mozpointerlockchange", function (e) {
+          if (document.mozPointerLockElement === div) {
             divPointerLock = true;
             addFullscreenChangeContinuation("exit", function() {
               runTests();

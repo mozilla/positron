@@ -4,11 +4,11 @@
 
 var { classes: Cc, interfaces: Ci, utils: Cu, results: Cr } = Components;
 var { require } = Cu.import("resource://devtools/shared/Loader.jsm", {});
-var flags = require("devtools/shared/flags");
+var DevToolsUtils = require("devtools/shared/DevToolsUtils");
 var promise = require("promise");
 var defer = require("devtools/shared/defer");
 
-flags.testing = true;
+DevToolsUtils.testing = true;
 
 function waitUntilState(store, predicate) {
   let deferred = defer();

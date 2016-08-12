@@ -26,8 +26,8 @@ public:
                                 const nsDisplayListSet& aLists);
 
   virtual void Reflow(nsPresContext*           aCX,
-                      ReflowOutput&     aDesiredSize,
-                      const ReflowInput& aReflowInput,
+                      nsHTMLReflowMetrics&     aDesiredSize,
+                      const nsHTMLReflowState& aReflowState,
                       nsReflowStatus&          aStatus) override;
 
   nscoord BSizeOfARow() const { return mBSizeOfARow; }

@@ -152,6 +152,7 @@ public:
                       nsIURI*          aBaseURI,
                       nsIPrincipal*    aSheetPrincipal,
                       uint32_t         aLineNumber,
+                      css::SheetParsingMode aParsingMode,
                       css::LoaderReusableStyleSheets* aReusableSheets);
 
   already_AddRefed<css::Declaration>
@@ -1003,8 +1004,6 @@ protected:
   bool ParseGridArea();
   bool ParseGridGap();
 
-  bool ParseInitialLetter();
-
   // parsing 'align/justify-items/self' from the css-align spec
   bool ParseAlignJustifyPosition(nsCSSValue& aResult,
                                  const KTableEntry aTable[]);
@@ -1066,7 +1065,6 @@ protected:
 
   bool ParseShadowItem(nsCSSValue& aValue, bool aIsBoxShadow);
   bool ParseShadowList(nsCSSProperty aProperty);
-  bool ParseShapeOutside(nsCSSValue& aValue);
   bool ParseTransitionProperty();
   bool ParseTransitionTimingFunctionValues(nsCSSValue& aValue);
   bool ParseTransitionTimingFunctionValueComponent(float& aComponent,
@@ -1247,16 +1245,6 @@ protected:
     return ParseSingleTokenNonNegativeVariant(aValue, VARIANT_NUMBER, nullptr);
   }
 
-  // Helpers for some common ParseSingleTokenOneOrLargerVariant calls.
-  bool ParseOneOrLargerInteger(nsCSSValue& aValue)
-  {
-    return ParseSingleTokenOneOrLargerVariant(aValue, VARIANT_INTEGER, nullptr);
-  }
-  bool ParseOneOrLargerNumber(nsCSSValue& aValue)
-  {
-    return ParseSingleTokenOneOrLargerVariant(aValue, VARIANT_NUMBER, nullptr);
-  }
-
   // http://dev.w3.org/csswg/css-values/#custom-idents
   // Parse an identifier that is none of:
   // * a CSS-wide keyword
@@ -1325,16 +1313,10 @@ protected:
   }
 
   /* Functions for basic shapes */
-  bool ParseReferenceBoxAndBasicShape(nsCSSValue& aValue,
-                                      const KTableEntry aBoxKeywordTable[]);
   bool ParseBasicShape(nsCSSValue& aValue, bool* aConsumedTokens);
   bool ParsePolygonFunction(nsCSSValue& aValue);
   bool ParseCircleOrEllipseFunction(nsCSSKeyword, nsCSSValue& aValue);
   bool ParseInsetFunction(nsCSSValue& aValue);
-  // We parse position values differently for basic-shape, by expanding defaults
-  // and replacing keywords with percentages
-  bool ParsePositionValueForBasicShape(nsCSSValue& aOut);
-
 
   /* Functions for transform Parsing */
   bool ParseSingleTransform(bool aIsPrefixed, bool aDisallowRelativeValues,
@@ -1661,6 +1643,7 @@ CSSParserImpl::ParseSheet(const nsAString& aInput,
                           nsIURI*          aBaseURI,
                           nsIPrincipal*    aSheetPrincipal,
                           uint32_t         aLineNumber,
+                          css::SheetParsingMode aParsingMode,
                           css::LoaderReusableStyleSheets* aReusableSheets)
 {
   NS_PRECONDITION(aSheetPrincipal, "Must have principal here!");
@@ -1706,7 +1689,7 @@ CSSParserImpl::ParseSheet(const nsAString& aInput,
     mSection = eCSSSection_Charset; // sheet is empty, any rules are fair
   }
 
-  mParsingMode = mSheet->ParsingMode();
+  mParsingMode = aParsingMode;
   mIsChrome = dom::IsChromeURI(aSheetURI);
   mReusableSheets = aReusableSheets;
 
@@ -1734,6 +1717,8 @@ CSSParserImpl::ParseSheet(const nsAString& aInput,
   mParsingMode = css::eAuthorSheetFeatures;
   mIsChrome = false;
   mReusableSheets = nullptr;
+
+  mSheet->SetParsingMode(aParsingMode);
 
   return NS_OK;
 }
@@ -9794,33 +9779,6 @@ CSSParserImpl::ParseGridGap()
   return true;
 }
 
-// normal | [<number> <integer>?]
-bool
-CSSParserImpl::ParseInitialLetter()
-{
-  nsCSSValue value;
-  // 'inherit', 'initial', 'unset', 'none', and 'normal' must be alone
-  if (!ParseSingleTokenVariant(value, VARIANT_INHERIT | VARIANT_NORMAL,
-                               nullptr)) {
-    nsCSSValue first, second;
-    if (!ParseOneOrLargerNumber(first)) {
-      return false;
-    }
-
-    if (!ParseOneOrLargerInteger(second)) {
-      AppendValue(eCSSProperty_initial_letter, first);
-      return true;
-    } else {
-      RefPtr<nsCSSValue::Array> val = nsCSSValue::Array::Create(2);
-      val->Item(0) = first;
-      val->Item(1) = second;
-      value.SetArrayValue(val, eCSSUnit_Array);
-    }
-  }
-  AppendValue(eCSSProperty_initial_letter, value);
-  return true;
-}
-
 // [ $aTable && <overflow-position>? ] ?
 // $aTable is for <content-position> or <self-position>
 bool
@@ -11605,17 +11563,17 @@ CSSParserImpl::ParsePropertyByFunction(nsCSSProperty aPropID)
   case eCSSProperty_image_region:
     return ParseRect(eCSSProperty_image_region);
   case eCSSProperty_align_content:
-  case eCSSProperty_justify_content:
     return ParseAlignJustifyContent(aPropID);
   case eCSSProperty_align_items:
     return ParseAlignItems();
   case eCSSProperty_align_self:
-  case eCSSProperty_justify_self:
     return ParseAlignJustifySelf(aPropID);
-  case eCSSProperty_initial_letter:
-    return ParseInitialLetter();
+  case eCSSProperty_justify_content:
+    return ParseAlignJustifyContent(aPropID);
   case eCSSProperty_justify_items:
     return ParseJustifyItems();
+  case eCSSProperty_justify_self:
+    return ParseAlignJustifySelf(aPropID);
   case eCSSProperty_list_style:
     return ParseListStyle();
   case eCSSProperty_margin:
@@ -11762,8 +11720,6 @@ CSSParserImpl::ParseSingleValuePropertyByFunction(nsCSSValue& aValue,
       return ParseScrollSnapDestination(aValue);
     case eCSSProperty_scroll_snap_coordinate:
       return ParseScrollSnapCoordinate(aValue);
-    case eCSSProperty_shape_outside:
-      return ParseShapeOutside(aValue);
     case eCSSProperty_text_align:
       return ParseTextAlign(aValue);
     case eCSSProperty_text_align_last:
@@ -12083,21 +12039,17 @@ CSSParserImpl::ParseImageLayersItem(
   aState.mClip->mValue.SetIntValue(NS_STYLE_IMAGELAYER_CLIP_BORDER,
                                    eCSSUnit_Enumerated);
 
-
-
+  aState.mRepeat->mXValue.SetIntValue(NS_STYLE_IMAGELAYER_REPEAT_REPEAT,
+                                      eCSSUnit_Enumerated);
+  aState.mRepeat->mYValue.Reset();
 
   if (eCSSProperty_mask == aTable[nsStyleImageLayers::shorthand]) {
     aState.mOrigin->mValue.SetIntValue(NS_STYLE_IMAGELAYER_ORIGIN_BORDER,
                                        eCSSUnit_Enumerated);
-    aState.mRepeat->mXValue.SetIntValue(NS_STYLE_IMAGELAYER_REPEAT_NO_REPEAT,
-                                        eCSSUnit_Enumerated);
   } else {
     aState.mOrigin->mValue.SetIntValue(NS_STYLE_IMAGELAYER_ORIGIN_PADDING,
                                        eCSSUnit_Enumerated);
-    aState.mRepeat->mXValue.SetIntValue(NS_STYLE_IMAGELAYER_REPEAT_REPEAT,
-                                        eCSSUnit_Enumerated);
   }
-  aState.mRepeat->mYValue.Reset();
 
   RefPtr<nsCSSValue::Array> positionXArr = nsCSSValue::Array::Create(2);
   RefPtr<nsCSSValue::Array> positionYArr = nsCSSValue::Array::Create(2);
@@ -12581,11 +12533,6 @@ bool CSSParserImpl::ParseBoxPositionValues(nsCSSValuePair &aOut,
 
 // Parses a CSS <position> value, for e.g. the 'background-position' property.
 // Spec reference: http://www.w3.org/TR/css3-background/#ltpositiongt
-// Invariants:
-//  - Always produces a four-value array on a successful parse.
-//  - The values are: X edge, X offset, Y edge, Y offset.
-//  - Edges are always keywords or null.
-//  - A |center| edge will not have an offset.
 bool
 CSSParserImpl::ParsePositionValue(nsCSSValue& aOut)
 {
@@ -12759,78 +12706,6 @@ CSSParserImpl::ParsePositionValue(nsCSSValue& aOut)
     yOffset = swapOffset;
   }
 
-  return true;
-}
-
-static void
-AdjustEdgeOffsetPairForBasicShape(nsCSSValue& aEdge,
-                                  nsCSSValue& aOffset,
-                                  uint8_t aDefaultEdge)
-{
-  // 0 length offsets are 0%
-  if (aOffset.IsLengthUnit() && aOffset.GetFloatValue() == 0.0) {
-    aOffset.SetPercentValue(0);
-  }
-
-  // Default edge is top/left in the 4-value case
-  // In case of 1 or 0 values, the default is center,
-  // but ParsePositionValue already handles this case
-  if (eCSSUnit_Null == aEdge.GetUnit()) {
-    aEdge.SetIntValue(aDefaultEdge, eCSSUnit_Enumerated);
-  }
-  // Default offset is 0%
-  if (eCSSUnit_Null == aOffset.GetUnit()) {
-    aOffset.SetPercentValue(0.0);
-  }
-  if (eCSSUnit_Enumerated == aEdge.GetUnit() &&
-      eCSSUnit_Percent == aOffset.GetUnit()) {
-    switch (aEdge.GetIntValue()) {
-      case NS_STYLE_IMAGELAYER_POSITION_CENTER:
-        aEdge.SetIntValue(aDefaultEdge, eCSSUnit_Enumerated);
-        MOZ_ASSERT(aOffset.GetPercentValue() == 0.0,
-                   "center cannot be used with an offset");
-        aOffset.SetPercentValue(0.5);
-        break;
-      case NS_STYLE_IMAGELAYER_POSITION_BOTTOM:
-        MOZ_ASSERT(aDefaultEdge == NS_STYLE_IMAGELAYER_POSITION_TOP);
-        aEdge.SetIntValue(aDefaultEdge, eCSSUnit_Enumerated);
-        aOffset.SetPercentValue(1 - aOffset.GetPercentValue());
-        break;
-      case NS_STYLE_IMAGELAYER_POSITION_RIGHT:
-        MOZ_ASSERT(aDefaultEdge == NS_STYLE_IMAGELAYER_POSITION_LEFT);
-        aEdge.SetIntValue(aDefaultEdge, eCSSUnit_Enumerated);
-        aOffset.SetPercentValue(1 - aOffset.GetPercentValue());
-    }
-  }
-}
-
-// https://drafts.csswg.org/css-shapes/#basic-shape-serialization
-// We set values to defaults while parsing for basic shapes
-// Invariants:
-//  - Always produces a four-value array on a successful parse.
-//  - The values are: X edge, X offset, Y edge, Y offset
-//  - Edges are always keywords (not including center)
-//  - Offsets are nonnull
-//  - Percentage offsets have keywords folded into them,
-//    so "bottom 40%" or "right 20%" will not exist.
-bool
-CSSParserImpl::ParsePositionValueForBasicShape(nsCSSValue& aOut)
-{
-  if (!ParsePositionValue(aOut)) {
-    return false;
-  }
-  nsCSSValue::Array* value = aOut.GetArrayValue();
-  nsCSSValue& xEdge   = value->Item(0);
-  nsCSSValue& xOffset = value->Item(1);
-  nsCSSValue& yEdge   = value->Item(2);
-  nsCSSValue& yOffset = value->Item(3);
-  // A keyword edge + percent offset pair can be contracted
-  // into the percentage with the default value in the edge.
-  // Offset lengths which are 0 can also be rewritten as 0%
-  AdjustEdgeOffsetPairForBasicShape(xEdge, xOffset,
-                                    NS_STYLE_IMAGELAYER_POSITION_LEFT);
-  AdjustEdgeOffsetPairForBasicShape(yEdge, yOffset,
-                                    NS_STYLE_IMAGELAYER_POSITION_TOP);
   return true;
 }
 
@@ -15542,16 +15417,6 @@ CSSParserImpl::ParseFunctionInternals(const uint32_t aVariantMask[],
       break;
     }
 
-    if (nsCSSValue::IsFloatUnit(newValue.GetUnit())) {
-      // Clamp infinity or -infinity values to max float or -max float to avoid
-      // calculations with infinity.
-      newValue.SetFloatValue(
-        mozilla::clamped(newValue.GetFloatValue(),
-                         -std::numeric_limits<float>::max(),
-                          std::numeric_limits<float>::max()),
-        newValue.GetUnit());
-    }
-
     aOutput.AppendElement(newValue);
 
     if (ExpectSymbol(',', true)) {
@@ -16066,7 +15931,7 @@ CSSParserImpl::ParseCircleOrEllipseFunction(nsCSSKeyword aKeyword,
 
     if (mToken.mType != eCSSToken_Ident ||
         !mToken.mIdent.LowerCaseEqualsLiteral("at") ||
-        !ParsePositionValueForBasicShape(position)) {
+        !ParsePositionValue(position)) {
       REPORT_UNEXPECTED_TOKEN(PEExpectedPosition);
       SkipUntil(')');
       return false;
@@ -16174,48 +16039,6 @@ CSSParserImpl::ParseBasicShape(nsCSSValue& aValue, bool* aConsumedTokens)
   }
 }
 
-bool
-CSSParserImpl::ParseReferenceBoxAndBasicShape(
-  nsCSSValue& aValue,
-  const KTableEntry aBoxKeywordTable[])
-{
-  nsCSSValue referenceBox;
-  bool hasBox = ParseEnum(referenceBox, aBoxKeywordTable);
-
-  const bool boxCameFirst = hasBox;
-
-  nsCSSValue basicShape;
-  bool basicShapeConsumedTokens = false;
-  bool hasShape = ParseBasicShape(basicShape, &basicShapeConsumedTokens);
-
-  // Parsing wasn't successful if ParseBasicShape consumed tokens but failed
-  // or if the token was neither a reference box nor a basic shape.
-  if ((!hasShape && basicShapeConsumedTokens) || (!hasBox && !hasShape)) {
-    return false;
-  }
-
-  // Check if the second argument is a reference box if the first wasn't.
-  if (!hasBox) {
-    hasBox = ParseEnum(referenceBox, aBoxKeywordTable);
-  }
-
-  RefPtr<nsCSSValue::Array> fullValue =
-    nsCSSValue::Array::Create((hasBox && hasShape) ? 2 : 1);
-
-  if (hasBox && hasShape) {
-    fullValue->Item(boxCameFirst ? 0 : 1) = referenceBox;
-    fullValue->Item(boxCameFirst ? 1 : 0) = basicShape;
-  } else if (hasBox) {
-    fullValue->Item(0) = referenceBox;
-  } else {
-    MOZ_ASSERT(hasShape, "should've bailed if we got neither box nor shape");
-    fullValue->Item(0) = basicShape;
-  }
-
-  aValue.SetArrayValue(fullValue, eCSSUnit_Array);
-  return true;
-}
-
 /* Parse a clip-path url to a <clipPath> element or a basic shape. */
 bool CSSParserImpl::ParseClipPath()
 {
@@ -16228,27 +16051,44 @@ bool CSSParserImpl::ParseClipPath()
       return false;
     }
 
-    if (!ParseReferenceBoxAndBasicShape(
-          value, nsCSSProps::kClipPathGeometryBoxKTable)) {
+    nsCSSValue referenceBox;
+    bool hasBox = ParseEnum(referenceBox, nsCSSProps::kClipShapeSizingKTable);
+
+    const bool boxCameFirst = hasBox;
+
+    nsCSSValue basicShape;
+    bool basicShapeConsumedTokens = false;
+    bool hasShape = ParseBasicShape(basicShape, &basicShapeConsumedTokens);
+
+    // Parsing wasn't successful if ParseBasicShape consumed tokens but failed
+    // or if the token was neither a reference box nor a basic shape.
+    if ((!hasShape && basicShapeConsumedTokens) || (!hasBox && !hasShape)) {
       return false;
     }
+
+    // Check if the second argument is a reference box if the first wasn't.
+    if (!hasBox) {
+      hasBox = ParseEnum(referenceBox, nsCSSProps::kClipShapeSizingKTable);
+    }
+
+    RefPtr<nsCSSValue::Array> fullValue =
+      nsCSSValue::Array::Create((hasBox && hasShape) ? 2 : 1);
+
+    if (hasBox && hasShape) {
+      fullValue->Item(boxCameFirst ? 0 : 1) = referenceBox;
+      fullValue->Item(boxCameFirst ? 1 : 0) = basicShape;
+    } else if (hasBox) {
+      fullValue->Item(0) = referenceBox;
+    } else {
+      MOZ_ASSERT(hasShape, "should've bailed if we got neither box nor shape");
+      fullValue->Item(0) = basicShape;
+    }
+
+    value.SetArrayValue(fullValue, eCSSUnit_Array);
   }
 
   AppendValue(eCSSProperty_clip_path, value);
   return true;
-}
-
-// none | [ <basic-shape> || <shape-box> ] | <image>
-bool
-CSSParserImpl::ParseShapeOutside(nsCSSValue& aValue)
-{
-  if (ParseSingleTokenVariant(aValue, VARIANT_HUO, nullptr)) {
-    // 'inherit', 'initial', 'unset', 'none', and <image> url must be alone.
-    return true;
-  }
-
-  return ParseReferenceBoxAndBasicShape(
-    aValue, nsCSSProps::kShapeOutsideShapeBoxKTable);
 }
 
 bool CSSParserImpl::ParseTransformOrigin(bool aPerspective)
@@ -17702,11 +17542,12 @@ nsCSSParser::ParseSheet(const nsAString& aInput,
                         nsIURI*          aBaseURI,
                         nsIPrincipal*    aSheetPrincipal,
                         uint32_t         aLineNumber,
+                        css::SheetParsingMode aParsingMode,
                         css::LoaderReusableStyleSheets* aReusableSheets)
 {
   return static_cast<CSSParserImpl*>(mImpl)->
     ParseSheet(aInput, aSheetURI, aBaseURI, aSheetPrincipal, aLineNumber,
-               aReusableSheets);
+               aParsingMode, aReusableSheets);
 }
 
 already_AddRefed<css::Declaration>

@@ -139,14 +139,12 @@ public:
                              mozilla::UniquePtr<Event>(*eventFactory)(
                                     mozilla::UniquePtr<Event>&&) = nullptr);
 
-    static already_AddRefed<nsIURI> ResolveURI(const nsCString& aUriStr);
-
     void SetBrowserApp(nsIAndroidBrowserApp* aBrowserApp) {
         mBrowserApp = aBrowserApp;
     }
 
-    nsIAndroidBrowserApp* GetBrowserApp() {
-        return mBrowserApp;
+    void GetBrowserApp(nsIAndroidBrowserApp* *aBrowserApp) {
+        *aBrowserApp = mBrowserApp;
     }
 
 protected:

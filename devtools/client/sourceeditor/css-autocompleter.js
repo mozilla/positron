@@ -4,11 +4,7 @@
 
 "use strict";
 
-/* eslint-disable complexity */
-
-/* eslint-disable mozilla/reject-some-requires */
 const { Cc, Ci } = require("chrome");
-/* eslint-enable mozilla/reject-some-requires */
 const {cssTokenizer, cssTokenizerWithLineColumn} = require("devtools/shared/css-parsing-utils");
 
 /**
@@ -56,7 +52,6 @@ const {cssTokenizer, cssTokenizerWithLineColumn} = require("devtools/shared/css-
 
 // Autocompletion types.
 
-/* eslint-disable no-inline-comments */
 const CSS_STATES = {
   "null": "null",
   property: "property",    // foo { bar|: … }
@@ -76,7 +71,6 @@ const SELECTOR_STATES = {
   attribute: "attribute",  // foo[b|
   value: "value",          // foo[bar=b|
 };
-/* eslint-enable no-inline-comments */
 
 const { properties, propertyNames } = getCSSKeywords();
 
@@ -985,11 +979,11 @@ CSSCompleter.prototype = {
    */
   getInfoAt: function (source, caret) {
     // Limits the input source till the {line, ch} caret position
-    function limit(sourceArg, {line, ch}) {
+    function limit(source, {line, ch}) {
       line++;
-      let list = sourceArg.split("\n");
+      let list = source.split("\n");
       if (list.length < line) {
-        return sourceArg;
+        return source;
       }
       if (line == 1) {
         return list[0].slice(0, ch);
@@ -1042,11 +1036,11 @@ CSSCompleter.prototype = {
             continue;
           }
 
-          let forwState = this.resolveState(limitedSource, {
+          let state = this.resolveState(limitedSource, {
             line: line,
             ch: token.endOffset + ech
           });
-          if (check(forwState)) {
+          if (check(state)) {
             if (prevToken && prevToken.tokenType == "whitespace") {
               token = prevToken;
             }
@@ -1103,11 +1097,11 @@ CSSCompleter.prototype = {
             continue;
           }
 
-          let backState = this.resolveState(limitedSource, {
+          let state = this.resolveState(limitedSource, {
             line: line,
             ch: token.startOffset
           });
-          if (check(backState)) {
+          if (check(state)) {
             if (tokens[i + 1] && tokens[i + 1].tokenType == "whitespace") {
               token = tokens[i + 1];
             }
@@ -1132,16 +1126,16 @@ CSSCompleter.prototype = {
       // either when the state changes or the selector becomes empty and a
       // single selector can span multiple lines.
       // Backward loop to determine the beginning location of the selector.
-      let start = traverseBackwards(backState => {
-        return (backState != CSS_STATES.selector ||
+      let start = traverseBackwards(state => {
+        return (state != CSS_STATES.selector ||
                (this.selector == "" && this.selectorBeforeNot == null));
       });
 
       line = caret.line;
       limitedSource = limit(source, caret);
       // Forward loop to determine the ending location of the selector.
-      let end = traverseForward(forwState => {
-        return (forwState != CSS_STATES.selector ||
+      let end = traverseForward(state => {
+        return (state != CSS_STATES.selector ||
                (this.selector == "" && this.selectorBeforeNot == null));
       });
 
@@ -1186,11 +1180,11 @@ CSSCompleter.prototype = {
     } else if (state == CSS_STATES.value) {
       // CSS value can be multiline too, so we go forward and backwards to
       // determine the bounds of the value at caret
-      let start = traverseBackwards(backState => backState != CSS_STATES.value, true);
+      let start = traverseBackwards(state => state != CSS_STATES.value, true);
 
       line = caret.line;
       limitedSource = limit(source, caret);
-      let end = traverseForward(forwState => forwState != CSS_STATES.value);
+      let end = traverseForward(state => state != CSS_STATES.value);
 
       let value = source.split("\n").slice(start.line, end.line + 1);
       value[value.length - 1] = value[value.length - 1].substring(0, end.ch);

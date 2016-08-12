@@ -7,7 +7,7 @@
 "use strict";
 
 const { Task } = require("devtools/shared/task");
-const flags = require("devtools/shared/flags");
+const DevToolsUtils = require("devtools/shared/DevToolsUtils");
 const { getToplevelWindow } = require("sdk/window/utils");
 const { DOM: dom, createClass, addons, PropTypes } =
   require("devtools/client/shared/vendor/react");
@@ -96,7 +96,7 @@ module.exports = createClass({
     yield e10s.request(mm, "Start", {
       requiresFloatingScrollbars,
       // Tests expect events on resize to yield on various size changes
-      notifyOnResize: flags.testing,
+      notifyOnResize: DevToolsUtils.testing,
     });
   }),
 

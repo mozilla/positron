@@ -10,7 +10,7 @@ const TEST_URI = URL_ROOT + "doc_pseudoelement.html";
 const PSEUDO_PREF = "devtools.inspector.show_pseudo_elements";
 
 add_task(function* () {
-  yield pushPref(PSEUDO_PREF, true);
+  Services.prefs.setBoolPref(PSEUDO_PREF, true);
 
   yield addTab(TEST_URI);
   let {inspector, view} = yield openRuleView();
@@ -21,6 +21,8 @@ add_task(function* () {
   yield testBottomLeft(inspector, view);
   yield testParagraph(inspector, view);
   yield testBody(inspector, view);
+
+  Services.prefs.clearUserPref(PSEUDO_PREF);
 });
 
 function* testTopLeft(inspector, view) {
@@ -30,9 +32,7 @@ function* testTopLeft(inspector, view) {
       elementRulesNb: 4,
       firstLineRulesNb: 2,
       firstLetterRulesNb: 1,
-      selectionRulesNb: 0,
-      afterRulesNb: 1,
-      beforeRulesNb: 2
+      selectionRulesNb: 0
     }
   );
 
@@ -122,9 +122,7 @@ function* testTopRight(inspector, view) {
     elementRulesNb: 4,
     firstLineRulesNb: 1,
     firstLetterRulesNb: 1,
-    selectionRulesNb: 0,
-    beforeRulesNb: 2,
-    afterRulesNb: 1
+    selectionRulesNb: 0
   });
 
   let gutters = assertGutters(view);
@@ -144,9 +142,7 @@ function* testBottomRight(inspector, view) {
     elementRulesNb: 4,
     firstLineRulesNb: 1,
     firstLetterRulesNb: 1,
-    selectionRulesNb: 0,
-    beforeRulesNb: 3,
-    afterRulesNb: 1
+    selectionRulesNb: 0
   });
 }
 
@@ -155,9 +151,7 @@ function* testBottomLeft(inspector, view) {
     elementRulesNb: 4,
     firstLineRulesNb: 1,
     firstLetterRulesNb: 1,
-    selectionRulesNb: 0,
-    beforeRulesNb: 2,
-    afterRulesNb: 1
+    selectionRulesNb: 0
   });
 }
 
@@ -167,9 +161,7 @@ function* testParagraph(inspector, view) {
       elementRulesNb: 3,
       firstLineRulesNb: 1,
       firstLetterRulesNb: 1,
-      selectionRulesNb: 1,
-      beforeRulesNb: 0,
-      afterRulesNb: 0
+      selectionRulesNb: 1
     });
 
   assertGutters(view);
@@ -217,11 +209,7 @@ function* assertPseudoElementRulesNumbers(selector, inspector, view, ruleNbs) {
     firstLetterRules: elementStyle.rules.filter(rule =>
       rule.pseudoElement === ":first-letter"),
     selectionRules: elementStyle.rules.filter(rule =>
-      rule.pseudoElement === ":-moz-selection"),
-    beforeRules: elementStyle.rules.filter(rule =>
-      rule.pseudoElement === ":before"),
-    afterRules: elementStyle.rules.filter(rule =>
-      rule.pseudoElement === ":after"),
+      rule.pseudoElement === ":-moz-selection")
   };
 
   is(rules.elementRules.length, ruleNbs.elementRulesNb,
@@ -232,10 +220,6 @@ function* assertPseudoElementRulesNumbers(selector, inspector, view, ruleNbs) {
      selector + " has the correct number of :first-letter rules");
   is(rules.selectionRules.length, ruleNbs.selectionRulesNb,
      selector + " has the correct number of :selection rules");
-  is(rules.beforeRules.length, ruleNbs.beforeRulesNb,
-     selector + " has the correct number of :before rules");
-  is(rules.afterRules.length, ruleNbs.afterRulesNb,
-     selector + " has the correct number of :after rules");
 
   return rules;
 }

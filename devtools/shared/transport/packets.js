@@ -27,7 +27,6 @@
 const { Cc, Ci, Cu } = require("chrome");
 const DevToolsUtils = require("devtools/shared/DevToolsUtils");
 const { dumpn, dumpv } = DevToolsUtils;
-const flags = require("devtools/shared/flags");
 const StreamUtils = require("devtools/shared/transport/stream-utils");
 const promise = require("promise");
 const defer = require("devtools/shared/defer");
@@ -176,7 +175,7 @@ JSONPacket.prototype.read = function (stream, scriptableStream) {
 };
 
 JSONPacket.prototype._readData = function (stream, scriptableStream) {
-  if (flags.wantVerbose) {
+  if (dumpv.wantVerbose) {
     dumpv("Reading JSON data: _l: " + this.length + " dL: " +
           this._data.length + " sA: " + stream.available());
   }

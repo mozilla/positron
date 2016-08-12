@@ -54,14 +54,15 @@ this.RecentWindow = {
         }
       }
       return win;
+    } else {
+      let windowList = Services.wm.getZOrderDOMWindowEnumerator("navigator:browser", true);
+      while (windowList.hasMoreElements()) {
+        let win = windowList.getNext();
+        if (isSuitableBrowserWindow(win))
+          return win;
+      }
+      return null;
     }
-    let windowList = Services.wm.getZOrderDOMWindowEnumerator("navigator:browser", true);
-    while (windowList.hasMoreElements()) {
-      let win = windowList.getNext();
-      if (isSuitableBrowserWindow(win))
-        return win;
-    }
-    return null;
   }
 };
 

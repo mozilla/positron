@@ -243,13 +243,6 @@ public:
   static nsIContent* GetShadowRelatedTarget(nsIContent* aCurrentTarget,
                                             nsIContent* aRelatedTarget);
 
-  void MarkUninitialized()
-  {
-    mEvent->mMessage = eVoidEvent;
-    mEvent->mSpecifiedEventTypeString.Truncate();
-    mEvent->mSpecifiedEventType = nullptr;
-  }
-
 protected:
 
   // Internal helper functions

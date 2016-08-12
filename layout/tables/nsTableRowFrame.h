@@ -13,9 +13,7 @@
 #include "mozilla/WritingModes.h"
 
 class  nsTableCellFrame;
-namespace mozilla {
-struct TableCellReflowInput;
-} // namespace mozilla
+struct nsTableCellReflowState;
 
 /**
  * nsTableRowFrame is the frame that maps table rows 
@@ -29,8 +27,6 @@ struct TableCellReflowInput;
  */
 class nsTableRowFrame : public nsContainerFrame
 {
-  using TableCellReflowInput = mozilla::TableCellReflowInput;
-
 public:
   NS_DECL_QUERYFRAME_TARGET(nsTableRowFrame)
   NS_DECL_QUERYFRAME
@@ -99,8 +95,8 @@ public:
     * @see nsTableFrame::ShrinkWrapChildren
     */
   virtual void Reflow(nsPresContext*           aPresContext,
-                      ReflowOutput&     aDesiredSize,
-                      const ReflowInput& aReflowInput,
+                      nsHTMLReflowMetrics&     aDesiredSize,
+                      const nsHTMLReflowState& aReflowState,
                       nsReflowStatus&          aStatus) override;
 
   void DidResize();
@@ -129,7 +125,7 @@ public:
 
   // calculate the bsize, considering content bsize of the 
   // cells and the style bsize of the row and cells, excluding pct bsizes
-  nscoord CalcBSize(const ReflowInput& aReflowInput);
+  nscoord CalcBSize(const nsHTMLReflowState& aReflowState);
 
   // Support for cells with 'vertical-align: baseline'.
 
@@ -152,7 +148,7 @@ public:
 
   /** used by row group frame code */
   nscoord ReflowCellFrame(nsPresContext*           aPresContext,
-                          const ReflowInput& aReflowInput,
+                          const nsHTMLReflowState& aReflowState,
                           bool                     aIsTopOfPage,
                           nsTableCellFrame*        aCellFrame,
                           nscoord                  aAvailableBSize,
@@ -262,16 +258,16 @@ protected:
     */
   explicit nsTableRowFrame(nsStyleContext *aContext);
 
-  void InitChildReflowInput(nsPresContext&              aPresContext,
+  void InitChildReflowState(nsPresContext&              aPresContext,
                             const mozilla::LogicalSize& aAvailSize,
                             bool                        aBorderCollapse,
-                            TableCellReflowInput&     aReflowInput);
+                            nsTableCellReflowState&     aReflowState);
   
-  virtual LogicalSides GetLogicalSkipSides(const ReflowInput* aReflowInput = nullptr) const override;
+  virtual LogicalSides GetLogicalSkipSides(const nsHTMLReflowState* aReflowState = nullptr) const override;
 
   // row-specific methods
 
-  nscoord ComputeCellXOffset(const ReflowInput& aState,
+  nscoord ComputeCellXOffset(const nsHTMLReflowState& aState,
                              nsIFrame*                aKidFrame,
                              const nsMargin&          aKidMargin) const;
   /**
@@ -279,8 +275,8 @@ protected:
    * only reflow dirty cells.
    */
   void ReflowChildren(nsPresContext*           aPresContext,
-                      ReflowOutput&     aDesiredSize,
-                      const ReflowInput& aReflowInput,
+                      nsHTMLReflowMetrics&     aDesiredSize,
+                      const nsHTMLReflowState& aReflowState,
                       nsTableFrame&            aTableFrame,
                       nsReflowStatus&          aStatus);
 

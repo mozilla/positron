@@ -434,8 +434,7 @@ AddonsReconciler.prototype = {
         modified: now,
         type: addon.type,
         scope: addon.scope,
-        foreignInstall: addon.foreignInstall,
-        isSyncable: addon.isSyncable,
+        foreignInstall: addon.foreignInstall
       };
       this._addons[id] = record;
       this._log.debug("Adding change because add-on not present locally: " +

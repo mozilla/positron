@@ -16,9 +16,10 @@ import com.keepsafe.switchboard.SwitchBoard;
 import org.mozilla.gecko.db.BrowserDB;
 import org.mozilla.gecko.feeds.FeedAlarmReceiver;
 import org.mozilla.gecko.feeds.FeedService;
-import org.mozilla.gecko.Experiments;
+import org.mozilla.gecko.util.Experiments;
 
 import java.text.DateFormat;
+import java.text.SimpleDateFormat;
 import java.util.Calendar;
 
 /**

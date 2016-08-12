@@ -1255,7 +1255,7 @@ class ABIArg
 #ifdef JS_PUNBOX64
         return Register64(gpr());
 #else
-        return Register64(oddGpr(), evenGpr());
+        MOZ_CRASH("NYI");
 #endif
     }
     Register evenGpr() const {

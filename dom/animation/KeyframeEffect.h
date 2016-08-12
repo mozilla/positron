@@ -120,6 +120,8 @@ struct AnimationPropertySegment
   StyleAnimationValue mFromValue, mToValue;
   Maybe<ComputedTimingFunction> mTimingFunction;
 
+  nsChangeHint mChangeHint;
+
   bool operator==(const AnimationPropertySegment& aOther) const {
     return mFromKey == aOther.mFromKey &&
            mToKey == aOther.mToKey &&
@@ -294,6 +296,8 @@ public:
   bool HasAnimationOfProperty(nsCSSProperty aProperty) const {
     return GetAnimationOfProperty(aProperty) != nullptr;
   }
+  bool HasAnimationOfProperties(const nsCSSProperty* aProperties,
+                                size_t aPropertyCount) const;
   const InfallibleTArray<AnimationProperty>& Properties() const {
     return mProperties;
   }
@@ -343,7 +347,7 @@ public:
 
   // Cumulative change hint on each segment for each property.
   // This is used for deciding the animation is paint-only.
-  void CalculateCumulativeChangeHint(nsStyleContext* aStyleContext);
+  void CalculateCumulativeChangeHint();
 
   // Returns true if all of animation properties' change hints
   // can ignore painting if the animation is not visible.

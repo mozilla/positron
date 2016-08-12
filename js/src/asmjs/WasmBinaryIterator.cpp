@@ -329,10 +329,10 @@ wasm::Classify(Expr expr)
       case Expr::Select:
         return ExprKind::Select;
       case Expr::GetLocal:
-      case Expr::GetGlobal:
+      case Expr::LoadGlobal:
         return ExprKind::GetVar;
       case Expr::SetLocal:
-      case Expr::SetGlobal:
+      case Expr::StoreGlobal:
         return ExprKind::SetVar;
       case Expr::Call:
         return ExprKind::Call;

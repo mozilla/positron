@@ -144,6 +144,7 @@ public:
                 nsIURI* aURI,
                 StyleSheetHandle aSheet,
                 bool aSyncLoad,
+                SheetParsingMode aParsingMode,
                 bool aUseSystemPrincipal,
                 const nsCString& aCharset,
                 nsICSSLoaderObserver* aObserver,
@@ -220,6 +221,13 @@ public:
   // mWasAlternate is true if the sheet was an alternate when the load data was
   // created.
   bool                       mWasAlternate : 1;
+
+  // mParsingMode controls access to nonstandard style constructs that
+  // are not safe for use on the public Web but necessary in UA sheets
+  // and/or useful in user sheets.  The only values stored in this
+  // field are 0, 1, and 2; three bits are allocated to avoid issues
+  // should the enum type be signed.
+  SheetParsingMode           mParsingMode : 3;
 
   // mUseSystemPrincipal is true if the system principal should be used for
   // this sheet, no matter what the channel principal is.  Only true for sync
@@ -320,6 +328,7 @@ SheetLoadData::SheetLoadData(Loader* aLoader,
     mIsCancelled(false),
     mMustNotify(false),
     mWasAlternate(aIsAlternate),
+    mParsingMode(eAuthorSheetFeatures),
     mUseSystemPrincipal(false),
     mSheetAlreadyComplete(false),
     mOwningElement(aOwningElement),
@@ -350,6 +359,7 @@ SheetLoadData::SheetLoadData(Loader* aLoader,
     mIsCancelled(false),
     mMustNotify(false),
     mWasAlternate(false),
+    mParsingMode(eAuthorSheetFeatures),
     mUseSystemPrincipal(false),
     mSheetAlreadyComplete(false),
     mOwningElement(nullptr),
@@ -361,6 +371,7 @@ SheetLoadData::SheetLoadData(Loader* aLoader,
   if (mParentData) {
     mSyncLoad = mParentData->mSyncLoad;
     mIsNonDocumentSheet = mParentData->mIsNonDocumentSheet;
+    mParsingMode = mParentData->mParsingMode;
     mUseSystemPrincipal = mParentData->mUseSystemPrincipal;
     ++(mParentData->mPendingChildren);
   }
@@ -373,6 +384,7 @@ SheetLoadData::SheetLoadData(Loader* aLoader,
                              nsIURI* aURI,
                              StyleSheetHandle aSheet,
                              bool aSyncLoad,
+                             SheetParsingMode aParsingMode,
                              bool aUseSystemPrincipal,
                              const nsCString& aCharset,
                              nsICSSLoaderObserver* aObserver,
@@ -390,6 +402,7 @@ SheetLoadData::SheetLoadData(Loader* aLoader,
     mIsCancelled(false),
     mMustNotify(false),
     mWasAlternate(false),
+    mParsingMode(aParsingMode),
     mUseSystemPrincipal(aUseSystemPrincipal),
     mSheetAlreadyComplete(false),
     mOwningElement(nullptr),
@@ -399,6 +412,11 @@ SheetLoadData::SheetLoadData(Loader* aLoader,
     mCharsetHint(aCharset)
 {
   NS_PRECONDITION(mLoader, "Must have a loader!");
+  NS_PRECONDITION(aParsingMode == eAuthorSheetFeatures ||
+                  aParsingMode == eUserSheetFeatures ||
+                  aParsingMode == eAgentSheetFeatures,
+                  "Unrecognized sheet parsing mode");
+
   NS_POSTCONDITION(!mUseSystemPrincipal || mSyncLoad,
                    "Shouldn't use system principal for async loads");
 }
@@ -1071,7 +1089,6 @@ nsresult
 Loader::CreateSheet(nsIURI* aURI,
                     nsIContent* aLinkingContent,
                     nsIPrincipal* aLoaderPrincipal,
-                    css::SheetParsingMode aParsingMode,
                     CORSMode aCORSMode,
                     ReferrerPolicy aReferrerPolicy,
                     const nsAString& aIntegrity,
@@ -1246,9 +1263,9 @@ Loader::CreateSheet(nsIURI* aURI,
     }
 
     if (GetStyleBackendType() == StyleBackendType::Gecko) {
-      *aSheet = new CSSStyleSheet(aParsingMode, aCORSMode, aReferrerPolicy, sriMetadata);
+      *aSheet = new CSSStyleSheet(aCORSMode, aReferrerPolicy, sriMetadata);
     } else {
-      *aSheet = new ServoStyleSheet(aParsingMode, aCORSMode, aReferrerPolicy, sriMetadata);
+      *aSheet = new ServoStyleSheet(aCORSMode, aReferrerPolicy, sriMetadata);
     }
     (*aSheet)->SetURIs(sheetURI, originalURI, baseURI);
   }
@@ -1277,7 +1294,7 @@ Loader::PrepareSheet(StyleSheetHandle aSheet,
 
   // XXXheycam Need to set media, title, etc. on ServoStyleSheets.
   if (aSheet->IsServo()) {
-    NS_WARNING("stylo: should set metadata on ServoStyleSheets. See bug 1290209.");
+    NS_ERROR("stylo: should set metadata on ServoStyleSheets");
     return;
   }
 
@@ -1761,11 +1778,13 @@ Loader::ParseSheet(const nsAString& aInput,
     nsCSSParser parser(this, aLoadData->mSheet->AsGecko());
     rv = parser.ParseSheet(aInput, sheetURI, baseURI,
                            aLoadData->mSheet->Principal(),
-                           aLoadData->mLineNumber);
+                           aLoadData->mLineNumber,
+                           aLoadData->mParsingMode);
   } else {
     aLoadData->mSheet->AsServo()->ParseSheet(aInput, sheetURI, baseURI,
                                              aLoadData->mSheet->Principal(),
-                                             aLoadData->mLineNumber);
+                                             aLoadData->mLineNumber,
+                                             aLoadData->mParsingMode);
     rv = NS_OK;
   }
 
@@ -1957,7 +1976,7 @@ Loader::DoSheetComplete(SheetLoadData* aLoadData, nsresult aStatus,
       }
 #endif
     } else {
-      NS_WARNING("stylo: Stylesheet caching not yet supported - see bug 1290218.");
+      NS_ERROR("stylo: not caching ServoStyleSheet");
     }
   }
 
@@ -1995,8 +2014,8 @@ Loader::LoadInlineStyle(nsIContent* aElement,
   // mode and mDocument's ReferrerPolicy.
   StyleSheetState state;
   StyleSheetHandle::RefPtr sheet;
-  nsresult rv = CreateSheet(nullptr, aElement, nullptr, eAuthorSheetFeatures,
-                            CORS_NONE, mDocument->GetReferrerPolicy(),
+  nsresult rv = CreateSheet(nullptr, aElement, nullptr, CORS_NONE,
+                            mDocument->GetReferrerPolicy(),
                             EmptyString(), // no inline integrity checks
                             false, false, aTitle, state, aIsAlternate,
                             &sheet);
@@ -2093,8 +2112,8 @@ Loader::LoadStyleLink(nsIContent* aElement,
 
   StyleSheetState state;
   StyleSheetHandle::RefPtr sheet;
-  rv = CreateSheet(aURL, aElement, principal, eAuthorSheetFeatures,
-                   aCORSMode, aReferrerPolicy, aIntegrity, false,
+  rv = CreateSheet(aURL, aElement, principal, aCORSMode,
+                   aReferrerPolicy, aIntegrity, false,
                    aHasAlternateRel, aTitle, state, aIsAlternate,
                    &sheet);
   NS_ENSURE_SUCCESS(rv, rv);
@@ -2257,9 +2276,8 @@ Loader::LoadChildSheet(StyleSheetHandle aParentSheet,
     bool isAlternate;
     const nsSubstring& empty = EmptyString();
     // For now, use CORS_NONE for child sheets
-    rv = CreateSheet(aURL, nullptr, principal,
-                     aParentSheet->AsStyleSheet()->ParsingMode(),
-                     CORS_NONE, aParentSheet->GetReferrerPolicy(),
+    rv = CreateSheet(aURL, nullptr, principal, CORS_NONE,
+                     aParentSheet->GetReferrerPolicy(),
                      EmptyString(), // integrity is only checked on main sheet
                      parentData ? parentData->mSyncLoad : false,
                      false, empty, state, &isAlternate, &sheet);
@@ -2382,9 +2400,9 @@ Loader::InternalLoadNonDocumentSheet(nsIURI* aURL,
   bool syncLoad = (aObserver == nullptr);
   const nsSubstring& empty = EmptyString();
 
-  rv = CreateSheet(aURL, nullptr, aOriginPrincipal, aParsingMode,
-                   aCORSMode, aReferrerPolicy, aIntegrity, syncLoad,
-                   false, empty, state, &isAlternate, &sheet);
+  rv = CreateSheet(aURL, nullptr, aOriginPrincipal, aCORSMode,
+                   aReferrerPolicy, aIntegrity, syncLoad, false,
+                   empty, state, &isAlternate, &sheet);
   NS_ENSURE_SUCCESS(rv, rv);
 
   PrepareSheet(sheet, empty, empty, nullptr, nullptr, isAlternate);
@@ -2401,7 +2419,7 @@ Loader::InternalLoadNonDocumentSheet(nsIURI* aURL,
   }
 
   SheetLoadData* data =
-    new SheetLoadData(this, aURL, sheet, syncLoad,
+    new SheetLoadData(this, aURL, sheet, syncLoad, aParsingMode,
                       aUseSystemPrincipal, aCharset, aObserver,
                       aOriginPrincipal, mDocument);
 

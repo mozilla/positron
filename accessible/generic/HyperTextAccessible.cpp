@@ -2217,13 +2217,12 @@ HyperTextAccessible::GetSpellTextAttr(nsINode* aNode,
 bool
 HyperTextAccessible::IsTextRole()
 {
-  const nsRoleMapEntry* roleMapEntry = ARIARoleMap();
-  if (roleMapEntry &&
-      (roleMapEntry->role == roles::GRAPHIC ||
-       roleMapEntry->role == roles::IMAGE_MAP ||
-       roleMapEntry->role == roles::SLIDER ||
-       roleMapEntry->role == roles::PROGRESSBAR ||
-       roleMapEntry->role == roles::SEPARATOR))
+  if (mRoleMapEntry &&
+      (mRoleMapEntry->role == roles::GRAPHIC ||
+       mRoleMapEntry->role == roles::IMAGE_MAP ||
+       mRoleMapEntry->role == roles::SLIDER ||
+       mRoleMapEntry->role == roles::PROGRESSBAR ||
+       mRoleMapEntry->role == roles::SEPARATOR))
     return false;
 
   return true;

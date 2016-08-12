@@ -61,7 +61,7 @@ DEF_TEST(DoesCrossCompartmentBoundaries, {
     // However, should not serialize nodeD because nodeB doesn't belong to one
     // of our target compartments and so its edges are excluded from serialization.
 
-    JS::AutoCheckCannotGC noGC(cx);
+    JS::AutoCheckCannotGC noGC(rt);
 
     ASSERT_TRUE(WriteHeapGraph(cx,
                                JS::ubi::Node(&nodeA),

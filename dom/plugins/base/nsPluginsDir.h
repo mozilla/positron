@@ -34,7 +34,6 @@ struct nsPluginInfo {
 	char* fFileName;
 	char* fFullPath;
 	char* fVersion;
-	bool fSupportsAsyncRender;
 };
 
 /**

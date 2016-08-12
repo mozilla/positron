@@ -12,7 +12,6 @@
 #include "gfxWindowsPlatform.h"
 #include "nsIWidget.h"
 #include "nsIGfxInfo.h"
-#include "mozilla/gfx/DeviceManagerD3D11.h"
 #include "mozilla/layers/ImageHost.h"
 #include "mozilla/layers/ContentHost.h"
 #include "mozilla/layers/Effects.h"
@@ -204,8 +203,7 @@ CompositorD3D11::Initialize(nsCString* const out_failureReason)
 
   HRESULT hr;
 
-  mDevice = DeviceManagerD3D11::Get()->GetCompositorDevice();
-  if (!mDevice) {
+  if (!gfxWindowsPlatform::GetPlatform()->GetD3D11Device(&mDevice)) {
     *out_failureReason = "FEATURE_FAILURE_D3D11_NO_DEVICE";
     return false;
   }
@@ -1238,15 +1236,15 @@ CompositorD3D11::BeginFrame(const nsIntRegion& aInvalidRegion,
 void
 CompositorD3D11::EndFrame()
 {
+  Compositor::EndFrame();
+
   if (!mDefaultRT) {
-    Compositor::EndFrame();
     return;
   }
 
   LayoutDeviceIntSize oldSize = mSize;
   EnsureSize();
   if (mSize.width <= 0 || mSize.height <= 0) {
-    Compositor::EndFrame();
     return;
   }
 
@@ -1259,8 +1257,7 @@ CompositorD3D11::EndFrame()
 
   UINT presentInterval = 0;
 
-  bool isWARP = DeviceManagerD3D11::Get()->IsWARP();
-  if (isWARP) {
+  if (gfxWindowsPlatform::GetPlatform()->IsWARP()) {
     // When we're using WARP we cannot present immediately as it causes us
     // to tear when rendering. When not using WARP it appears the DWM takes
     // care of tearing for us.
@@ -1283,7 +1280,8 @@ CompositorD3D11::EndFrame()
       nsString vendorID;
       nsCOMPtr<nsIGfxInfo> gfxInfo = services::GetGfxInfo();
       gfxInfo->GetAdapterVendorID(vendorID);
-      allowPartialPresent = !vendorID.EqualsLiteral("0x10de") || isWARP;
+      allowPartialPresent = !vendorID.EqualsLiteral("0x10de") ||
+                            gfxWindowsPlatform::GetPlatform()->IsWARP();
     }
 
     if (SUCCEEDED(hr) && chain && allowPartialPresent) {
@@ -1333,8 +1331,6 @@ CompositorD3D11::EndFrame()
   }
   // Store the query for this frame so we can flush it next time.
   mQuery = query;
-
-  Compositor::EndFrame();
 
   mCurrentRT = nullptr;
 }
@@ -1509,7 +1505,7 @@ bool
 DeviceAttachmentsD3D11::InitSyncObject()
 {
   // Sync object is not supported on WARP.
-  if (DeviceManagerD3D11::Get()->IsWARP()) {
+  if (gfxWindowsPlatform::GetPlatform()->IsWARP()) {
     return true;
   }
 
@@ -1711,7 +1707,8 @@ CompositorD3D11::HandleError(HRESULT hr, Severity aSeverity)
     MOZ_CRASH("GFX: Unrecoverable D3D11 error");
   }
 
-  if (mDevice && DeviceManagerD3D11::Get()->GetCompositorDevice() != mDevice) {
+  RefPtr<ID3D11Device> device;
+  if (!gfxWindowsPlatform::GetPlatform()->GetD3D11Device(&device) || device != mDevice) {
     gfxCriticalError() << "Out of sync D3D11 devices in HandleError, " << (int)mVerifyBuffersFailed;
   }
 

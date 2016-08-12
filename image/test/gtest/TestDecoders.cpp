@@ -55,7 +55,7 @@ CheckDecoderState(const ImageTestCase& aTestCase, Decoder* aDecoder)
             bool(progress & FLAG_IS_ANIMATED));
 
   // The decoder should get the correct size.
-  IntSize size = aDecoder->Size();
+  IntSize size = aDecoder->GetSize();
   EXPECT_EQ(aTestCase.mSize.width, size.width);
   EXPECT_EQ(aTestCase.mSize.height, size.height);
 

@@ -4,7 +4,6 @@
 
 #include "gfxSVGGlyphs.h"
 
-#include "mozilla/SVGContextPaint.h"
 #include "nsError.h"
 #include "nsIDOMDocument.h"
 #include "nsString.h"
@@ -38,6 +37,8 @@
 using namespace mozilla;
 
 typedef mozilla::dom::Element Element;
+
+mozilla::gfx::UserDataKey gfxTextContextPaint::sUserDataKey;
 
 /* static */ const Color SimpleTextContextPaint::sZero = Color();
 
@@ -213,16 +214,14 @@ gfxSVGGlyphsDocument::FindGlyphElements(Element *aElem)
  */
 bool
 gfxSVGGlyphs::RenderGlyph(gfxContext *aContext, uint32_t aGlyphId,
-                          SVGContextPaint* aContextPaint)
+                          gfxTextContextPaint *aContextPaint)
 {
     gfxContextAutoSaveRestore aContextRestorer(aContext);
 
     Element *glyph = mGlyphIdMap.Get(aGlyphId);
     NS_ASSERTION(glyph, "No glyph element. Should check with HasSVGGlyph() first!");
 
-    AutoSetRestoreSVGContextPaint autoSetRestore(aContextPaint, glyph->OwnerDoc());
-
-    return nsSVGUtils::PaintSVGGlyph(glyph, aContext);
+    return nsSVGUtils::PaintSVGGlyph(glyph, aContext, aContextPaint);
 }
 
 bool
@@ -459,4 +458,16 @@ gfxSVGGlyphsDocument::SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) c
            + mGlyphIdMap.ShallowSizeOfExcludingThis(aMallocSizeOf)
            + mSVGGlyphsDocumentURI.SizeOfExcludingThisIfUnshared(aMallocSizeOf);
 
+}
+
+void
+gfxTextContextPaint::InitStrokeGeometry(gfxContext *aContext,
+                                        float devUnitsPerSVGUnit)
+{
+    mStrokeWidth = aContext->CurrentLineWidth() / devUnitsPerSVGUnit;
+    aContext->CurrentDash(mDashes, &mDashOffset);
+    for (uint32_t i = 0; i < mDashes.Length(); i++) {
+        mDashes[i] /= devUnitsPerSVGUnit;
+    }
+    mDashOffset /= devUnitsPerSVGUnit;
 }

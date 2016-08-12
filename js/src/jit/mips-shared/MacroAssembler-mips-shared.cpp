@@ -824,40 +824,38 @@ MacroAssemblerMIPSShared::minMaxDouble(FloatRegister srcDest, FloatRegister seco
     Assembler::DoubleCondition cond = isMax
                                       ? Assembler::DoubleLessThanOrEqual
                                       : Assembler::DoubleGreaterThanOrEqual;
-    Label nan, equal, done;
-    FloatTestKind moveCondition;
+    Label nan, equal, returnSecond, done;
 
     // First or second is NaN, result is NaN.
     ma_bc1d(first, second, &nan, Assembler::DoubleUnordered, ShortJump);
     // Make sure we handle -0 and 0 right.
     ma_bc1d(first, second, &equal, Assembler::DoubleEqual, ShortJump);
-    compareFloatingPoint(DoubleFloat, first, second, cond, &moveCondition);
-    MOZ_ASSERT(TestForTrue == moveCondition);
-    as_movt(DoubleFloat, first, second);
+    ma_bc1d(first, second, &returnSecond, cond, ShortJump);
     ma_b(&done, ShortJump);
 
     // Check for zero.
     bind(&equal);
     asMasm().loadConstantDouble(0.0, ScratchDoubleReg);
-    compareFloatingPoint(DoubleFloat, first, ScratchDoubleReg,
-                         Assembler::DoubleEqual, &moveCondition);
+    // First wasn't 0 or -0, so just return it.
+    ma_bc1d(first, ScratchDoubleReg, &done, Assembler::DoubleNotEqualOrUnordered, ShortJump);
 
     // So now both operands are either -0 or 0.
     if (isMax) {
         // -0 + -0 = -0 and -0 + 0 = 0.
-        as_addd(ScratchDoubleReg, first, second);
+        as_addd(first, first, second);
     } else {
-        as_negd(ScratchDoubleReg, first);
-        as_subd(ScratchDoubleReg, ScratchDoubleReg, second);
-        as_negd(ScratchDoubleReg, ScratchDoubleReg);
+        as_negd(first, first);
+        as_subd(first, first, second);
+        as_negd(first, first);
     }
-    MOZ_ASSERT(TestForTrue == moveCondition);
-    // First is 0 or -0, move max/min to it, else just return it.
-    as_movt(DoubleFloat, first, ScratchDoubleReg);
     ma_b(&done, ShortJump);
 
     bind(&nan);
     asMasm().loadConstantDouble(JS::GenericNaN(), srcDest);
+    ma_b(&done, ShortJump);
+
+    bind(&returnSecond);
+    as_movd(srcDest, second);
 
     bind(&done);
 }
@@ -871,40 +869,38 @@ MacroAssemblerMIPSShared::minMaxFloat32(FloatRegister srcDest, FloatRegister sec
     Assembler::DoubleCondition cond = isMax
                                       ? Assembler::DoubleLessThanOrEqual
                                       : Assembler::DoubleGreaterThanOrEqual;
-    Label nan, equal, done;
-    FloatTestKind moveCondition;
+    Label nan, equal, returnSecond, done;
 
     // First or second is NaN, result is NaN.
     ma_bc1s(first, second, &nan, Assembler::DoubleUnordered, ShortJump);
     // Make sure we handle -0 and 0 right.
     ma_bc1s(first, second, &equal, Assembler::DoubleEqual, ShortJump);
-    compareFloatingPoint(SingleFloat, first, second, cond, &moveCondition);
-    MOZ_ASSERT(TestForTrue == moveCondition);
-    as_movt(SingleFloat, first, second);
+    ma_bc1s(first, second, &returnSecond, cond, ShortJump);
     ma_b(&done, ShortJump);
 
     // Check for zero.
     bind(&equal);
     asMasm().loadConstantFloat32(0.0f, ScratchFloat32Reg);
-    compareFloatingPoint(SingleFloat, first, ScratchFloat32Reg,
-                         Assembler::DoubleEqual, &moveCondition);
+    // First wasn't 0 or -0, so just return it.
+    ma_bc1s(first, ScratchFloat32Reg, &done, Assembler::DoubleNotEqualOrUnordered, ShortJump);
 
     // So now both operands are either -0 or 0.
     if (isMax) {
         // -0 + -0 = -0 and -0 + 0 = 0.
-        as_adds(ScratchFloat32Reg, first, second);
+        as_adds(first, first, second);
     } else {
-        as_negs(ScratchFloat32Reg, first);
-        as_subs(ScratchFloat32Reg, ScratchFloat32Reg, second);
-        as_negs(ScratchFloat32Reg, ScratchFloat32Reg);
+        as_negs(first, first);
+        as_subs(first, first, second);
+        as_negs(first, first);
     }
-    MOZ_ASSERT(TestForTrue == moveCondition);
-    // First is 0 or -0, move max/min to it, else just return it.
-    as_movt(SingleFloat, first, ScratchFloat32Reg);
     ma_b(&done, ShortJump);
 
     bind(&nan);
     asMasm().loadConstantFloat32(JS::GenericNaN(), srcDest);
+    ma_b(&done, ShortJump);
+
+    bind(&returnSecond);
+    as_movs(srcDest, second);
 
     bind(&done);
 }
@@ -1449,12 +1445,6 @@ MacroAssembler::branchPtrInNurseryRange(Condition cond, Register ptr, Register t
     addPtr(ptr, SecondScratchReg);
     branchPtr(cond == Assembler::Equal ? Assembler::Below : Assembler::AboveOrEqual,
               SecondScratchReg, Imm32(nursery.nurserySize()), label);
-}
-
-void
-MacroAssembler::comment(const char* msg)
-{
-    Assembler::comment(msg);
 }
 
 //}}} check_macroassembler_style

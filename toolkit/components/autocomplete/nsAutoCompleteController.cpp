@@ -289,9 +289,7 @@ nsAutoCompleteController::HandleText()
 }
 
 NS_IMETHODIMP
-nsAutoCompleteController::HandleEnter(bool aIsPopupSelection,
-                                      nsIDOMEvent *aEvent,
-                                      bool *_retval)
+nsAutoCompleteController::HandleEnter(bool aIsPopupSelection, bool *_retval)
 {
   *_retval = false;
   if (!mInput)
@@ -314,7 +312,7 @@ nsAutoCompleteController::HandleEnter(bool aIsPopupSelection,
 
   // Stop the search, and handle the enter.
   StopSearch();
-  EnterMatch(aIsPopupSelection, aEvent);
+  EnterMatch(aIsPopupSelection);
 
   return NS_OK;
 }
@@ -390,7 +388,7 @@ NS_IMETHODIMP
 nsAutoCompleteController::HandleTab()
 {
   bool cancel;
-  return HandleEnter(false, nullptr, &cancel);
+  return HandleEnter(false, &cancel);
 }
 
 NS_IMETHODIMP
@@ -1358,8 +1356,7 @@ nsAutoCompleteController::ClearSearchTimer()
 }
 
 nsresult
-nsAutoCompleteController::EnterMatch(bool aIsPopupSelection,
-                                     nsIDOMEvent *aEvent)
+nsAutoCompleteController::EnterMatch(bool aIsPopupSelection)
 {
   nsCOMPtr<nsIAutoCompleteInput> input(mInput);
   nsCOMPtr<nsIAutoCompletePopup> popup;
@@ -1495,7 +1492,7 @@ nsAutoCompleteController::EnterMatch(bool aIsPopupSelection,
   ClosePopup();
 
   bool cancel;
-  input->OnTextEntered(aEvent, &cancel);
+  input->OnTextEntered(&cancel);
 
   return NS_OK;
 }

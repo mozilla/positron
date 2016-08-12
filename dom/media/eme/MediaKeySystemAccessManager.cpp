@@ -81,21 +81,6 @@ MediaKeySystemAccessManager::Request(DetailedPromise* aPromise,
 {
   EME_LOG("MediaKeySystemAccessManager::Request %s", NS_ConvertUTF16toUTF8(aKeySystem).get());
 
-  if (aKeySystem.IsEmpty()) {
-    aPromise->MaybeReject(NS_ERROR_DOM_TYPE_ERR,
-                          NS_LITERAL_CSTRING("Key system string is empty"));
-    // Don't notify DecoderDoctor, as there's nothing we or the user can
-    // do to fix this situation; the site is using the API wrong.
-    return;
-  }
-  if (aConfigs.IsEmpty()) {
-    aPromise->MaybeReject(NS_ERROR_DOM_TYPE_ERR,
-                          NS_LITERAL_CSTRING("Candidate MediaKeySystemConfigs is empty"));
-    // Don't notify DecoderDoctor, as there's nothing we or the user can
-    // do to fix this situation; the site is using the API wrong.
-    return;
-  }
-
   DecoderDoctorDiagnostics diagnostics;
 
   // Parse keysystem, split it out into keySystem prefix, and version suffix.
@@ -112,10 +97,8 @@ MediaKeySystemAccessManager::Request(DetailedPromise* aPromise,
     return;
   }
 
-  if (!MediaPrefs::EMEEnabled() && !IsClearkeyKeySystem(aKeySystem)) {
+  if (!MediaPrefs::EMEEnabled()) {
     // EME disabled by user, send notification to chrome so UI can inform user.
-    // Clearkey is allowed even when EME is disabled because we want the pref
-    // "media.eme.enabled" only taking effect on proprietary DRMs.
     MediaKeySystemAccess::NotifyObservers(mWindow,
                                           aKeySystem,
                                           MediaKeySystemStatus::Api_disabled);
@@ -142,8 +125,8 @@ MediaKeySystemAccessManager::Request(DetailedPromise* aPromise,
 
   if ((status == MediaKeySystemStatus::Cdm_not_installed ||
        status == MediaKeySystemStatus::Cdm_insufficient_version) &&
-      (keySystem.EqualsASCII(kEMEKeySystemPrimetime) ||
-       keySystem.EqualsASCII(kEMEKeySystemWidevine))) {
+      (keySystem.EqualsLiteral("com.adobe.primetime") ||
+       keySystem.EqualsLiteral("com.widevine.alpha"))) {
     // These are cases which could be resolved by downloading a new(er) CDM.
     // When we send the status to chrome, chrome's GMPProvider will attempt to
     // download or update the CDM. In AwaitInstall() we add listeners to wait
@@ -280,31 +263,8 @@ MediaKeySystemAccessManager::Observe(nsISupports* aSubject,
 {
   EME_LOG("MediaKeySystemAccessManager::Observe %s", aTopic);
 
-  if (!strcmp(aTopic, "gmp-changed")) {
-    // Filter out the requests where the CDM's install-status is no longer
-    // "unavailable". This will be the CDMs which have downloaded since the
-    // initial request.
-    // Note: We don't have a way to communicate from chrome that the CDM has
-    // failed to download, so we'll just let the timeout fail us in that case.
-    nsTArray<PendingRequest> requests;
-    for (size_t i = mRequests.Length(); i > 0; i--) {
-      const size_t index = i - i;
-      PendingRequest& request = mRequests[index];
-      nsAutoCString message;
-      nsAutoCString cdmVersion;
-      MediaKeySystemStatus status =
-        MediaKeySystemAccess::GetKeySystemStatus(request.mKeySystem,
-                                                 NO_CDM_VERSION,
-                                                 message,
-                                                 cdmVersion);
-      if (status == MediaKeySystemStatus::Cdm_not_installed) {
-        // Not yet installed, don't retry. Keep waiting until timeout.
-        continue;
-      }
-      // Status has changed, retry request.
-      requests.AppendElement(Move(request));
-      mRequests.RemoveElementAt(index);
-    }
+  if (!strcmp(aTopic, "gmp-path-added")) {
+    nsTArray<PendingRequest> requests(Move(mRequests));
     // Retry all pending requests, but this time fail if the CDM is not installed.
     for (PendingRequest& request : requests) {
       RetryRequest(request);
@@ -336,7 +296,7 @@ MediaKeySystemAccessManager::EnsureObserversAdded()
   if (NS_WARN_IF(!obsService)) {
     return false;
   }
-  mAddedObservers = NS_SUCCEEDED(obsService->AddObserver(this, "gmp-changed", false));
+  mAddedObservers = NS_SUCCEEDED(obsService->AddObserver(this, "gmp-path-added", false));
   return mAddedObservers;
 }
 
@@ -353,7 +313,7 @@ MediaKeySystemAccessManager::Shutdown()
   if (mAddedObservers) {
     nsCOMPtr<nsIObserverService> obsService = mozilla::services::GetObserverService();
     if (obsService) {
-      obsService->RemoveObserver(this, "gmp-changed");
+      obsService->RemoveObserver(this, "gmp-path-added");
       mAddedObservers = false;
     }
   }

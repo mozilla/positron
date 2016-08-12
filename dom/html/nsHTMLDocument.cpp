@@ -792,7 +792,7 @@ nsHTMLDocument::StartDocumentLoad(const char* aCommand,
     NS_ASSERTION(NS_SUCCEEDED(rv) && bundle, "chrome://global/locale/browser.properties could not be loaded");
     nsXPIDLString title;
     if (bundle) {
-      bundle->GetStringFromName(u"plainText.wordWrap", getter_Copies(title));
+      bundle->GetStringFromName(MOZ_UTF16("plainText.wordWrap"), getter_Copies(title));
     }
     SetSelectedStyleSheetSet(title);
   }
@@ -2235,6 +2235,8 @@ nsHTMLDocument::NamedGetter(JSContext* cx, const nsAString& aName, bool& aFound,
   }
 
   JS::Rooted<JS::Value> val(cx);
+  // XXXbz Should we call the (slightly misnamed, really) WrapNativeParent
+  // here?
   if (!dom::WrapObject(cx, supp, cache, nullptr, &val)) {
     rv.Throw(NS_ERROR_OUT_OF_MEMORY);
     return;

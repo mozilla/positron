@@ -67,8 +67,8 @@ public:
   virtual nscoord GetMinISize(nsRenderingContext *aRenderingContext) override;
 
   virtual void Reflow(nsPresContext*           aCX,
-                      ReflowOutput&     aDesiredSize,
-                      const ReflowInput& aReflowInput,
+                      nsHTMLReflowMetrics&     aDesiredSize,
+                      const nsHTMLReflowState& aReflowState,
                       nsReflowStatus&          aStatus) override;
 
   virtual void Init(nsIContent*       aContent,
@@ -76,7 +76,7 @@ public:
                     nsIFrame*         aPrevInFlow) override;
 
   virtual void DidReflow(nsPresContext*            aPresContext,
-                         const ReflowInput*  aReflowInput,
+                         const nsHTMLReflowState*  aReflowState,
                          nsDidReflowStatus         aStatus) override;
   virtual void DestroyFrom(nsIFrame* aDestructRoot) override;
 
@@ -345,8 +345,8 @@ protected:
    * pass are different.  This will be called from Reflow() as needed.
    */
   void ReflowAsDropdown(nsPresContext*           aPresContext,
-                        ReflowOutput&     aDesiredSize,
-                        const ReflowInput& aReflowInput,
+                        nsHTMLReflowMetrics&     aDesiredSize,
+                        const nsHTMLReflowState& aReflowState,
                         nsReflowStatus&          aStatus);
 
   // Selection

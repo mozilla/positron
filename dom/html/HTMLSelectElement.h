@@ -432,9 +432,6 @@ public:
     return !Multiple() && Size() <= 1;
   }
 
-  bool OpenInParentProcess();
-  void SetOpenInParentProcess(bool aVal);
-
 protected:
   virtual ~HTMLSelectElement();
 

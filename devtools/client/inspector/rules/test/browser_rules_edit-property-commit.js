@@ -72,7 +72,6 @@ function* runTestData(view, {value, commitKey, modifiers, expected}) {
   info("Entering test data " + value);
   let onRuleViewChanged = view.once("ruleview-changed");
   EventUtils.sendString(value, view.styleWindow);
-  view.throttle.flush();
   yield onRuleViewChanged;
 
   info("Entering the commit key " + commitKey + " " + modifiers);

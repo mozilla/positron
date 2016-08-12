@@ -460,10 +460,7 @@ var StyleSheetActor = protocol.ActorClassWithSpec(styleSheetSpec, {
     // require system principal to load. At meanwhile, we strip the loadGroup
     // for preventing the assertion of the userContextId mismatching.
     // The default internal stylesheets load from the 'resource:' URL.
-    // Bug 1287607 - The 'chrome:' URL will be also loaded from here, so we do
-    // the same thing for such URLs as well.
-    if (!/^resource:\/\//.test(this.href) &&
-        !/^chrome:\/\//.test(this.href)) {
+    if (!/^resource:\/\//.test(this.href)) {
       options.window = this.window;
       options.principal = this.document.nodePrincipal;
     }

@@ -31,13 +31,13 @@ class FuncExport;
 class FuncImport;
 
 extern Offsets
-GenerateEntry(jit::MacroAssembler& masm, const FuncExport& fe);
+GenerateEntry(jit::MacroAssembler& masm, const FuncExport& fe, bool usesHeap);
 
 extern ProfilingOffsets
 GenerateInterpExit(jit::MacroAssembler& masm, const FuncImport& fi, uint32_t funcImportIndex);
 
 extern ProfilingOffsets
-GenerateJitExit(jit::MacroAssembler& masm, const FuncImport& fi);
+GenerateJitExit(jit::MacroAssembler& masm, const FuncImport& fi, bool usesHeap);
 
 extern Offsets
 GenerateJumpTarget(jit::MacroAssembler& masm, JumpTarget target);

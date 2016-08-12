@@ -160,8 +160,8 @@ nsSelectsAreaFrame::BuildDisplayListInternal(nsDisplayListBuilder*   aBuilder,
 
 void
 nsSelectsAreaFrame::Reflow(nsPresContext*           aPresContext, 
-                           ReflowOutput&     aDesiredSize,
-                           const ReflowInput& aReflowInput, 
+                           nsHTMLReflowMetrics&     aDesiredSize,
+                           const nsHTMLReflowState& aReflowState, 
                            nsReflowStatus&          aStatus)
 {
   nsListControlFrame* list = GetEnclosingListFrame(this);
@@ -173,7 +173,7 @@ nsSelectsAreaFrame::Reflow(nsPresContext*           aPresContext,
 
   // See similar logic in nsListControlFrame::Reflow and
   // nsListControlFrame::ReflowAsDropdown.  We need to match it here.
-  WritingMode wm = aReflowInput.GetWritingMode();
+  WritingMode wm = aReflowState.GetWritingMode();
   nscoord oldBSize;
   if (isInDropdownMode) {
     // Store the block size now in case it changes during
@@ -185,7 +185,7 @@ nsSelectsAreaFrame::Reflow(nsPresContext*           aPresContext,
     }
   }
 
-  nsBlockFrame::Reflow(aPresContext, aDesiredSize, aReflowInput, aStatus);
+  nsBlockFrame::Reflow(aPresContext, aDesiredSize, aReflowState, aStatus);
 
   // Check whether we need to suppress scrollbar updates.  We want to do
   // that if we're in a possible first pass and our block size of a row

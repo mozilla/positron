@@ -227,9 +227,6 @@ class RobocopTestRunner(MochitestDesktop):
         self.options.extraPrefs.append('browser.casting.enabled=true')
         self.options.extraPrefs.append('extensions.autoupdate.enabled=false')
 
-        # Override the telemetry init delay for integration testing.
-        self.options.extraPrefs.append('toolkit.telemetry.initDelay=1')
-
         self.options.extensionsToExclude.extend([
             'mochikit@mozilla.org',
             'worker-test@mozilla.org.xpi',
@@ -535,9 +532,7 @@ class RobocopTestRunner(MochitestDesktop):
         return worstTestResult
 
 
-def run_test_harness(parser, options):
-    parser.validate(options)
-
+def run_test_harness(options):
     if options is None:
         raise ValueError(
             "Invalid options specified, use --help for a list of valid options")
@@ -582,7 +577,7 @@ def run_test_harness(parser, options):
 def main(args=sys.argv[1:]):
     parser = MochitestArgumentParser(app='android')
     options = parser.parse_args(args)
-    return run_test_harness(parser, options)
+    return run_test_harness(options)
 
 if __name__ == "__main__":
     sys.exit(main())

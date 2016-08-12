@@ -12,10 +12,12 @@ const baseURL = "http://mochi.test:8888/browser/" +
 
 function forEachWindow(f)
 {
-  let wins = Services.wm.getEnumerator("navigator:browser");
+  let wins = Services.ww.getWindowEnumerator("navigator:browser");
   while (wins.hasMoreElements()) {
     let win = wins.getNext();
-    f(win);
+    if (win.gBrowser) {
+      f(win);
+    }
   }
 }
 

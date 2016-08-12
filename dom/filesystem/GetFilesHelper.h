@@ -11,7 +11,6 @@
 #include "mozilla/RefPtr.h"
 #include "nsCycleCollectionTraversalCallback.h"
 #include "nsTArray.h"
-#include "nsTHashtable.h"
 
 class nsIGlobalObject;
 
@@ -37,46 +36,9 @@ protected:
   virtual ~GetFilesCallback() {}
 };
 
-class GetFilesHelperBase
-{
-protected:
-  explicit GetFilesHelperBase(bool aRecursiveFlag)
-    : mRecursiveFlag(aRecursiveFlag)
-  {}
-
-  virtual ~GetFilesHelperBase() {}
-
-  virtual bool
-  IsCanceled()
-  {
-    return false;
-  }
-
-  nsresult
-  ExploreDirectory(const nsAString& aDOMPath, nsIFile* aFile);
-
-  nsresult
-  AddExploredDirectory(nsIFile* aDirectory);
-
-  bool
-  ShouldFollowSymLink(nsIFile* aDirectory);
-
-  bool mRecursiveFlag;
-
-  // We populate this array in the I/O thread with the paths of the Files that
-  // we want to send as result to the promise objects.
-  struct FileData {
-    nsString mDomPath;
-    nsString mRealPath;
-  };
-  FallibleTArray<FileData> mTargetPathArray;
-  nsTHashtable<nsCStringHashKey> mExploredDirectories;
-};
-
 // Retrieving the list of files can be very time/IO consuming. We use this
 // helper class to do it just once.
 class GetFilesHelper : public Runnable
-                     , public GetFilesHelperBase
 {
   friend class GetFilesHelperParent;
 
@@ -107,8 +69,8 @@ protected:
     mDirectoryPath = aDirectoryPath;
   }
 
-  virtual bool
-  IsCanceled() override
+  bool
+  IsCanceled()
   {
     MutexAutoLock lock(mMutex);
     return mCanceled;
@@ -132,6 +94,8 @@ protected:
   void
   OperationCompleted();
 
+  nsresult
+  ExploreDirectory(const nsAString& aDOMPath, nsIFile* aFile);
   void
   ResolveOrRejectPromise(Promise* aPromise);
 
@@ -140,8 +104,17 @@ protected:
 
   nsCOMPtr<nsIGlobalObject> mGlobal;
 
+  bool mRecursiveFlag;
   bool mListingCompleted;
   nsString mDirectoryPath;
+
+  // We populate this array in the I/O thread with the paths of the Files that
+  // we want to send as result to the promise objects.
+  struct FileData {
+    nsString mDomPath;
+    nsString mRealPath;
+  };
+  FallibleTArray<FileData> mTargetPathArray;
 
   // This is the real File sequence that we expose via Promises.
   Sequence<RefPtr<File>> mFiles;

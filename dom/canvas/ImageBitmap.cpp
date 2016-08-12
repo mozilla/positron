@@ -91,7 +91,6 @@ CropAndCopyDataSourceSurface(DataSourceSurface* aSurface, const IntRect& aCropRe
   ErrorResult error;
   const IntRect positiveCropRect = FixUpNegativeDimension(aCropRect, error);
   if (NS_WARN_IF(error.Failed())) {
-    error.SuppressException();
     return nullptr;
   }
 
@@ -1107,7 +1106,6 @@ DecodeBlob(Blob& aBlob)
   ErrorResult error;
   aBlob.Impl()->GetInternalStream(getter_AddRefs(stream), error);
   if (NS_WARN_IF(error.Failed())) {
-    error.SuppressException();
     return nullptr;
   }
 

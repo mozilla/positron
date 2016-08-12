@@ -30,8 +30,7 @@ class NodeInfo;
 nsresult
 NS_NewElement(mozilla::dom::Element** aResult,
               already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo,
-              mozilla::dom::FromParser aFromParser,
-              nsAString* aIs = nullptr);
+              mozilla::dom::FromParser aFromParser);
 
 nsresult
 NS_NewXMLElement(mozilla::dom::Element** aResult,
@@ -40,8 +39,7 @@ NS_NewXMLElement(mozilla::dom::Element** aResult,
 nsresult
 NS_NewHTMLElement(mozilla::dom::Element** aResult,
                   already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo,
-                  mozilla::dom::FromParser aFromParser,
-                  nsAString* aIs = nullptr);
+                  mozilla::dom::FromParser aFromParser);
 
 // First argument should be nsHTMLTag, but that adds dependency to parser
 // for a bunch of files.

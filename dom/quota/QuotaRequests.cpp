@@ -92,12 +92,11 @@ RequestBase::GetResultCode(nsresult* aResultCode)
 }
 
 UsageRequest::UsageRequest(nsIPrincipal* aPrincipal,
-                           nsIQuotaUsageCallback* aCallback)
+	                         nsIQuotaUsageCallback* aCallback)
   : RequestBase(aPrincipal)
   , mCallback(aCallback)
   , mUsage(0)
   , mFileUsage(0)
-  , mLimit(0)
   , mBackgroundActor(nullptr)
   , mCanceled(false)
 {
@@ -126,14 +125,13 @@ UsageRequest::SetBackgroundActor(QuotaUsageRequestChild* aBackgroundActor)
 }
 
 void
-UsageRequest::SetResult(uint64_t aUsage, uint64_t aFileUsage, uint64_t aLimit)
+UsageRequest::SetResult(uint64_t aUsage, uint64_t aFileUsage)
 {
   AssertIsOnOwningThread();
   MOZ_ASSERT(!mHaveResultOrErrorCode);
 
   mUsage = aUsage;
   mFileUsage = aFileUsage;
-  mLimit = aLimit;
   mHaveResultOrErrorCode = true;
 
   FireCallback();
@@ -172,20 +170,6 @@ UsageRequest::GetFileUsage(uint64_t* aFileUsage)
   }
 
   *aFileUsage = mFileUsage;
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-UsageRequest::GetLimit(uint64_t* aLimit)
-{
-  AssertIsOnOwningThread();
-  MOZ_ASSERT(aLimit);
-
-  if (!mHaveResultOrErrorCode) {
-    return NS_ERROR_FAILURE;
-  }
-
-  *aLimit = mLimit;
   return NS_OK;
 }
 

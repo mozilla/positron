@@ -13,9 +13,7 @@ const { Task } = require("devtools/shared/task");
 const Store = require("devtools/client/responsive.html/store");
 
 const DevToolsUtils = require("devtools/shared/DevToolsUtils");
-
-const flags = require("devtools/shared/flags");
-flags.testing = true;
+DevToolsUtils.testing = true;
 do_register_cleanup(() => {
-  flags.testing = false;
+  DevToolsUtils.testing = false;
 });

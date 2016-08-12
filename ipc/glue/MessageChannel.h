@@ -20,10 +20,6 @@
 #include "mozilla/ipc/Neutering.h"
 #endif // defined(OS_WIN)
 #include "mozilla/ipc/Transport.h"
-#if defined(MOZ_CRASHREPORTER) && defined(OS_WIN)
-#include "mozilla/mozalloc_oom.h"
-#include "nsExceptionHandler.h"
-#endif
 #include "MessageLink.h"
 
 #include <deque>
@@ -127,12 +123,7 @@ class MessageChannel : HasResultCodes
       // handling to prevent deadlocks. Should only be used for protocols
       // that manage child processes which might create native UI, like
       // plugins.
-      REQUIRE_DEFERRED_MESSAGE_PROTECTION     = 1 << 0,
-      // Windows: When this flag is specified, any wait that occurs during
-      // synchronous IPC will be alertable, thus allowing a11y code in the
-      // chrome process to reenter content while content is waiting on a
-      // synchronous call.
-      REQUIRE_A11Y_REENTRY                    = 1 << 1,
+      REQUIRE_DEFERRED_MESSAGE_PROTECTION     = 1 << 0
     };
     void SetChannelFlags(ChannelFlags aFlags) { mFlags = aFlags; }
     ChannelFlags GetChannelFlags() { return mFlags; }
@@ -206,6 +197,18 @@ class MessageChannel : HasResultCodes
         sIsPumpingMessages = aIsPumping;
     }
 
+#ifdef MOZ_NUWA_PROCESS
+    void Block() {
+        MOZ_ASSERT(mLink);
+        mLink->Block();
+    }
+
+    void Unblock() {
+        MOZ_ASSERT(mLink);
+        mLink->Unblock();
+    }
+#endif
+
 #ifdef OS_WIN
     struct MOZ_STACK_CLASS SyncStackFrame
     {
@@ -248,10 +251,7 @@ class MessageChannel : HasResultCodes
 
   private:
     void SpinInternalEventLoop();
-#if defined(ACCESSIBILITY)
-    bool WaitForSyncNotifyWithA11yReentry();
-#endif // defined(ACCESSIBILITY)
-#endif // defined(OS_WIN)
+#endif
 
   private:
     void CommonThreadOpenInit(MessageChannel *aTargetChan, Side aSide);
@@ -457,79 +457,9 @@ class MessageChannel : HasResultCodes
     }
 
   private:
-#if defined(MOZ_CRASHREPORTER) && defined(OS_WIN)
-    // TODO: Remove the condition OS_WIN above once we move to GCC 5 or higher,
-    // the code will be able to get compiled as std::deque will meet C++11
-    // allocator requirements.
-    template<class T>
-    struct AnnotateAllocator
-    {
-      typedef T value_type;
-      AnnotateAllocator(MessageChannel& channel) : mChannel(channel) {}
-      template<class U> AnnotateAllocator(const AnnotateAllocator<U>& other) :
-        mChannel(other.mChannel) {}
-      template<class U> bool operator==(const AnnotateAllocator<U>&) { return true; }
-      template<class U> bool operator!=(const AnnotateAllocator<U>&) { return false; }
-      T* allocate(size_t n) {
-        void* p = ::operator new(n * sizeof(T), std::nothrow);
-        if (!p && n) {
-          // Sort the pending messages by its type, note the sorting algorithm
-          // has to be in-place to avoid memory allocation.
-          MessageQueue& q = mChannel.mPending;
-          std::sort(q.begin(), q.end(), [](const Message& a, const Message& b) {
-            return a.type() < b.type();
-          });
-
-          // Iterate over the sorted queue to find the message that has the
-          // highest number of count.
-          char* topName = nullptr;
-          char* curName = nullptr;
-          msgid_t topType = 0, curType = 0;
-          uint32_t topCount = 0, curCount = 0;
-          for (MessageQueue::iterator it = q.begin(); it != q.end(); ++it) {
-            Message &msg = *it;
-            if (msg.type() == curType) {
-              ++curCount;
-            } else {
-              if (curCount > topCount) {
-                topName = curName;
-                topType = curType;
-                topCount = curCount;
-              }
-              curName = const_cast<char*>(msg.name());
-              curType = msg.type();
-              curCount = 1;
-            }
-          }
-          // In case the last type is the top one.
-          if (curCount > topCount) {
-            topName = curName;
-            topType = curType;
-            topCount = curCount;
-          }
-
-          CrashReporter::AnnotateCrashReport(NS_LITERAL_CSTRING("NumberOfPendingIPC"),
-                                             nsPrintfCString("%zu", q.size()));
-          CrashReporter::AnnotateCrashReport(NS_LITERAL_CSTRING("TopPendingIPCCount"),
-                                             nsPrintfCString("%u", topCount));
-          CrashReporter::AnnotateCrashReport(NS_LITERAL_CSTRING("TopPendingIPCName"),
-                                             nsPrintfCString("%s(0x%x)", topName, topType));
-
-          mozalloc_handle_oom(n * sizeof(T));
-        }
-        return static_cast<T*>(p);
-      }
-      void deallocate(T* p, size_t n) {
-        ::operator delete(p);
-      }
-      MessageChannel& mChannel;
-    };
-    typedef std::deque<Message, AnnotateAllocator<Message>> MessageQueue;
-#else
-    typedef std::deque<Message> MessageQueue;
-#endif
-    typedef std::map<size_t, Message> MessageMap;
     typedef IPC::Message::msgid_t msgid_t;
+    typedef std::deque<Message> MessageQueue;
+    typedef std::map<size_t, Message> MessageMap;
 
     // XXXkhuey this can almost certainly die.
     // All dequeuing tasks require a single point of cancellation,

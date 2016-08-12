@@ -568,7 +568,7 @@ public:
   }
 
   LayoutDeviceIntPoint GetChildProcessOffset();
-  LayoutDevicePoint AdjustTapToChildWidget(const LayoutDevicePoint& aPoint);
+  CSSPoint AdjustTapToChildWidget(const CSSPoint& aPoint);
 
   /**
    * Native widget remoting protocol for use with windowed plugins with e10s.

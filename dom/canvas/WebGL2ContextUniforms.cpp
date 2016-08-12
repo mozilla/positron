@@ -277,7 +277,6 @@ void
 WebGL2Context::GetActiveUniformBlockName(WebGLProgram* program, GLuint uniformBlockIndex,
                                          nsAString& retval)
 {
-    retval.SetIsVoid(true);
     if (IsContextLost())
         return;
 

@@ -9,7 +9,6 @@
 #ifdef MOZ_WIDGET_ANDROID
 
 #include <jni.h>
-#include <android/native_window.h>
 #include "nsIRunnable.h"
 #include "gfxPlatform.h"
 #include "GLDefs.h"
@@ -18,6 +17,7 @@
 #include "mozilla/Monitor.h"
 
 #include "SurfaceTexture.h"
+#include "AndroidNativeWindow.h"
 
 namespace mozilla {
 namespace gl {
@@ -62,7 +62,7 @@ public:
 
   GLContext* AttachedContext() const { return mAttachedContext; }
 
-  ANativeWindow* NativeWindow() const {
+  AndroidNativeWindow* NativeWindow() const {
     return mNativeWindow;
   }
 
@@ -83,7 +83,7 @@ public:
   void NotifyFrameAvailable();
 
   GLuint Texture() const { return mTexture; }
-  const java::sdk::Surface::Ref& JavaSurface() const { return mSurface; }
+  const widget::sdk::Surface::Ref& JavaSurface() const { return mSurface; }
 
 private:
   AndroidSurfaceTexture();
@@ -92,12 +92,12 @@ private:
   bool Init(GLContext* aContext, GLuint aTexture);
 
   GLuint mTexture;
-  java::sdk::SurfaceTexture::GlobalRef mSurfaceTexture;
-  java::sdk::Surface::GlobalRef mSurface;
+  widget::sdk::SurfaceTexture::GlobalRef mSurfaceTexture;
+  widget::sdk::Surface::GlobalRef mSurface;
 
   GLContext* mAttachedContext;
 
-  ANativeWindow* mNativeWindow;
+  RefPtr<AndroidNativeWindow> mNativeWindow;
   int mID;
   nsCOMPtr<nsIRunnable> mFrameAvailableCallback;
 

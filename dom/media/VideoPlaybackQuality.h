@@ -36,17 +36,17 @@ public:
     return mCreationTime;
   }
 
-  uint32_t TotalVideoFrames() const
+  uint32_t TotalVideoFrames()
   {
     return mTotalFrames;
   }
 
-  uint32_t DroppedVideoFrames() const
+  uint32_t DroppedVideoFrames()
   {
     return mDroppedFrames;
   }
 
-  uint32_t CorruptedVideoFrames() const
+  uint32_t CorruptedVideoFrames()
   {
     return mCorruptedFrames;
   }
@@ -64,4 +64,4 @@ private:
 } // namespace dom
 } // namespace mozilla
 
-#endif // mozilla_dom_VideoPlaybackQuality_h_
+#endif /* mozilla_dom_VideoPlaybackQuality_h_ */

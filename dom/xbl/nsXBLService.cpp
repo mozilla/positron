@@ -498,7 +498,7 @@ nsXBLService::LoadBindings(nsIContent* aContent, nsIURI* aURL,
     // Figure out if we have any scoped sheets.  If so, we do a second resolve.
     *aResolveStyle = newBinding->HasStyleSheets();
 
-    newBinding.forget(aBinding);
+    newBinding.swap(*aBinding);
   }
 
   return NS_OK;

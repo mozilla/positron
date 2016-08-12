@@ -542,6 +542,7 @@ class ObjectGroupCompartment
 {
     friend class ObjectGroup;
 
+    struct NewEntry;
     class NewTable;
 
     // Set of default 'new' or lazy groups in the compartment.
@@ -584,8 +585,6 @@ class ObjectGroupCompartment
     AllocationSiteTable* allocationSiteTable;
 
   public:
-    struct NewEntry;
-
     ObjectGroupCompartment();
     ~ObjectGroupCompartment();
 

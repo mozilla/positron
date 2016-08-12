@@ -74,9 +74,6 @@ class UsageRequest final
   uint64_t mUsage;
   uint64_t mFileUsage;
 
-  // Group Limit.
-  uint64_t mLimit;
-
   QuotaUsageRequestChild* mBackgroundActor;
 
   bool mCanceled;
@@ -97,7 +94,7 @@ public:
   }
 
   void
-  SetResult(uint64_t aUsage, uint64_t aFileUsage, uint64_t aLimit);
+  SetResult(uint64_t aUsage, uint64_t aFileUsage);
 
   NS_DECL_ISUPPORTS_INHERITED
   NS_FORWARD_NSIQUOTAREQUESTBASE(RequestBase::)

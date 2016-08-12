@@ -16,7 +16,6 @@
 #include "MediaInfo.h"
 #include "nsClassHashtable.h"
 #include "GMPDecoderModule.h"
-#include "MP4Decoder.h"
 
 namespace mozilla {
 
@@ -293,7 +292,7 @@ EMEDecoderModule::CreateAudioDecoder(const CreateDecoderParams& aParams)
 PlatformDecoderModule::ConversionRequired
 EMEDecoderModule::DecoderNeedsConversion(const TrackInfo& aConfig) const
 {
-  if (aConfig.IsVideo() && MP4Decoder::IsH264(aConfig.mMimeType)) {
+  if (aConfig.IsVideo()) {
     return kNeedAVCC;
   } else {
     return kNeedNone;

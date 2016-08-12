@@ -96,7 +96,7 @@ protected:
   nsString mID;
   dom::MediaSourceEnum mMediaSource;
   RefPtr<MediaEngineSource> mSource;
-  RefPtr<MediaEngineSource::AllocationHandle> mAllocationHandle;
+  RefPtr<MediaEngineSource::BaseAllocationHandle> mAllocationHandle;
 public:
   dom::MediaSourceEnum GetMediaSource() {
     return mMediaSource;
@@ -273,12 +273,12 @@ private:
   EnumerateRawDevices(uint64_t aWindowId,
                       dom::MediaSourceEnum aVideoType,
                       dom::MediaSourceEnum aAudioType,
-                      bool aFake);
+                      bool aFake, bool aFakeTracks);
   already_AddRefed<PledgeSourceSet>
   EnumerateDevicesImpl(uint64_t aWindowId,
                        dom::MediaSourceEnum aVideoSrcType,
                        dom::MediaSourceEnum aAudioSrcType,
-                       bool aFake = false);
+                       bool aFake = false, bool aFakeTracks = false);
   already_AddRefed<PledgeChar>
   SelectSettings(
       dom::MediaStreamConstraints& aConstraints,

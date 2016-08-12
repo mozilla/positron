@@ -489,7 +489,7 @@ HeapSnapshot::TakeCensus(JSContext* cx, JS::HandleObject options,
   {
     JS::AutoCheckCannotGC nogc;
 
-    JS::ubi::CensusTraversal traversal(cx, handler, nogc);
+    JS::ubi::CensusTraversal traversal(JS_GetRuntime(cx), handler, nogc);
     if (NS_WARN_IF(!traversal.init())) {
       rv.Throw(NS_ERROR_OUT_OF_MEMORY);
       return;
@@ -556,10 +556,10 @@ HeapSnapshot::ComputeDominatorTree(ErrorResult& rv)
   {
     auto ccrt = CycleCollectedJSRuntime::Get();
     MOZ_ASSERT(ccrt);
-    auto cx = ccrt->Context();
-    MOZ_ASSERT(cx);
-    JS::AutoCheckCannotGC nogc(cx);
-    maybeTree = JS::ubi::DominatorTree::Create(cx, nogc, getRoot());
+    auto rt = ccrt->Runtime();
+    MOZ_ASSERT(rt);
+    JS::AutoCheckCannotGC nogc(rt);
+    maybeTree = JS::ubi::DominatorTree::Create(rt, nogc, getRoot());
   }
 
   if (NS_WARN_IF(maybeTree.isNothing())) {
@@ -621,8 +621,12 @@ HeapSnapshot::ComputeShortestPaths(JSContext*cx, uint64_t start,
 
   Maybe<ShortestPaths> maybeShortestPaths;
   {
-    JS::AutoCheckCannotGC nogc(cx);
-    maybeShortestPaths = ShortestPaths::Create(cx, nogc, maxNumPaths, *startNode,
+    auto ccrt = CycleCollectedJSRuntime::Get();
+    MOZ_ASSERT(ccrt);
+    auto rt = ccrt->Runtime();
+    MOZ_ASSERT(rt);
+    JS::AutoCheckCannotGC nogc(rt);
+    maybeShortestPaths = ShortestPaths::Create(rt, nogc, maxNumPaths, *startNode,
                                                Move(targetsSet));
   }
 
@@ -731,7 +735,7 @@ AddGlobalsAsRoots(AutoObjectVector& globals, ubi::RootList& roots)
   unsigned length = globals.length();
   for (unsigned i = 0; i < length; i++) {
     if (!roots.addRoot(ubi::Node(globals[i].get()),
-                       u"heap snapshot global"))
+                       MOZ_UTF16("heap snapshot global")))
     {
       return false;
     }
@@ -1234,7 +1238,7 @@ public:
     protobufNode.set_size(ubiNode.size(mallocSizeOf));
 
     if (includeEdges) {
-      auto edges = ubiNode.edges(cx, wantNames);
+      auto edges = ubiNode.edges(JS_GetRuntime(cx), wantNames);
       if (NS_WARN_IF(!edges))
         return false;
 
@@ -1376,7 +1380,7 @@ WriteHeapGraph(JSContext* cx,
   // core dump.
 
   HeapSnapshotHandler handler(writer, compartments);
-  HeapSnapshotHandler::Traversal traversal(cx, handler, noGC);
+  HeapSnapshotHandler::Traversal traversal(JS_GetRuntime(cx), handler, noGC);
   if (!traversal.init())
     return false;
   traversal.wantNames = wantNames;
@@ -1541,7 +1545,7 @@ ThreadSafeChromeUtils::SaveHeapSnapshot(GlobalObject& global,
 
   {
     Maybe<AutoCheckCannotGC> maybeNoGC;
-    ubi::RootList rootList(cx, maybeNoGC, wantNames);
+    ubi::RootList rootList(JS_GetRuntime(cx), maybeNoGC, wantNames);
     if (!EstablishBoundaries(cx, rv, boundaries, rootList, compartments))
       return;
 

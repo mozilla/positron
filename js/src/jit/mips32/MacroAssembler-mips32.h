@@ -997,13 +997,13 @@ class MacroAssemblerMIPSCompat : public MacroAssemblerMIPS
     void moveFloat32(FloatRegister src, FloatRegister dest) {
         as_movs(dest, src);
     }
-    void loadWasmGlobalPtr(uint32_t globalDataOffset, Register dest) {
-        loadPtr(Address(GlobalReg, globalDataOffset - AsmJSGlobalRegBias), dest);
+
+    void loadWasmActivation(Register dest) {
+        loadPtr(Address(GlobalReg, wasm::ActivationGlobalDataOffset - AsmJSGlobalRegBias), dest);
     }
-    void loadWasmPinnedRegsFromTls() {
-        loadPtr(Address(WasmTlsReg, offsetof(wasm::TlsData, memoryBase)), HeapReg);
-        loadPtr(Address(WasmTlsReg, offsetof(wasm::TlsData, globalData)), GlobalReg);
-        ma_addu(GlobalReg, Imm32(AsmJSGlobalRegBias));
+    void loadAsmJSHeapRegisterFromGlobalData() {
+        MOZ_ASSERT(Imm16::IsInSignedRange(wasm::HeapGlobalDataOffset - AsmJSGlobalRegBias));
+        loadPtr(Address(GlobalReg, wasm::HeapGlobalDataOffset - AsmJSGlobalRegBias), HeapReg);
     }
 
     // Instrumentation for entering and leaving the profiler.

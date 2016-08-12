@@ -106,10 +106,6 @@ function* testCompletion([key, modifiers, completion, open, selected, change],
 
   info("Synthesizing key " + key + ", modifiers: " + Object.keys(modifiers));
   EventUtils.synthesizeKey(key, modifiers, view.styleWindow);
-
-  // Flush the throttle for the preview text.
-  view.throttle.flush();
-
   yield onDone;
   yield onPopupEvent;
 

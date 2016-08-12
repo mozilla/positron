@@ -35,7 +35,7 @@
 #include "LayerMetricsWrapper.h"
 #endif
 #ifdef XP_WIN
-#include "mozilla/gfx/DeviceManagerD3D11.h"
+#include "gfxWindowsPlatform.h"
 #endif
 
 namespace mozilla {
@@ -772,7 +772,7 @@ ClientLayerManager::GetBackendName(nsAString& aName)
     case LayersBackend::LAYERS_D3D9: aName.AssignLiteral("Direct3D 9"); return;
     case LayersBackend::LAYERS_D3D11: {
 #ifdef XP_WIN
-      if (DeviceManagerD3D11::Get()->IsWARP()) {
+      if (gfxWindowsPlatform::GetPlatform()->IsWARP()) {
         aName.AssignLiteral("Direct3D 11 WARP");
       } else {
         aName.AssignLiteral("Direct3D 11");
@@ -849,12 +849,7 @@ already_AddRefed<PersistentBufferProvider>
 ClientLayerManager::CreatePersistentBufferProvider(const gfx::IntSize& aSize,
                                                    gfx::SurfaceFormat aFormat)
 {
-  // Don't use a shared buffer provider if compositing is considered "not cheap"
-  // because the canvas will most likely be flattened into a thebes layer instead
-  // of being sent to the compositor, in which case rendering into shared memory
-  // is wasteful.
-  if (IsCompositingCheap() &&
-      gfxPrefs::PersistentBufferProviderSharedEnabled()) {
+  if (gfxPrefs::PersistentBufferProviderSharedEnabled()) {
     RefPtr<PersistentBufferProvider> provider
       = PersistentBufferProviderShared::Create(aSize, aFormat, AsShadowForwarder());
     if (provider) {

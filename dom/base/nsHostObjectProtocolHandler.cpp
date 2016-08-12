@@ -25,9 +25,7 @@
 #include "nsIUUIDGenerator.h"
 #include "nsNetUtil.h"
 
-using mozilla::DOMMediaStream;
 using mozilla::dom::BlobImpl;
-using mozilla::dom::MediaSource;
 using mozilla::ErrorResult;
 using mozilla::net::LoadInfo;
 
@@ -35,36 +33,8 @@ using mozilla::net::LoadInfo;
 // Hash table
 struct DataInfo
 {
-  enum ObjectType {
-    eBlobImpl,
-    eMediaStream,
-    eMediaSource
-  };
-
-  DataInfo(BlobImpl* aBlobImpl, nsIPrincipal* aPrincipal)
-    : mObjectType(eBlobImpl)
-    , mBlobImpl(aBlobImpl)
-    , mPrincipal(aPrincipal)
-  {}
-
-  DataInfo(DOMMediaStream* aMediaStream, nsIPrincipal* aPrincipal)
-    : mObjectType(eMediaStream)
-    , mMediaStream(aMediaStream)
-    , mPrincipal(aPrincipal)
-  {}
-
-  DataInfo(MediaSource* aMediaSource, nsIPrincipal* aPrincipal)
-    : mObjectType(eMediaSource)
-    , mMediaSource(aMediaSource)
-    , mPrincipal(aPrincipal)
-  {}
-
-  ObjectType mObjectType;
-
-  RefPtr<BlobImpl> mBlobImpl;
-  RefPtr<DOMMediaStream> mMediaStream;
-  RefPtr<MediaSource> mMediaSource;
-
+  // mObject is expected to be an BlobImpl, DOMMediaStream, or MediaSource
+  nsCOMPtr<nsISupports> mObject;
   nsCOMPtr<nsIPrincipal> mPrincipal;
   nsCString mStack;
 };
@@ -100,21 +70,6 @@ GetDataInfo(const nsACString& aUri)
   }
 
   return res;
-}
-static DataInfo*
-GetDataInfoFromURI(nsIURI* aURI)
-{
-  if (!aURI) {
-    return nullptr;
-  }
-
-  nsCString spec;
-  nsresult rv = aURI->GetSpec(spec);
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return nullptr;
-  }
-
-  return GetDataInfo(spec);
 }
 
 // Memory reporting for the hash table.
@@ -195,24 +150,18 @@ class BlobURLsReporter final : public nsIMemoryReporter
 
     // Determine number of URLs per BlobImpl, to handle the case where it's > 1.
     for (auto iter = gDataTable->Iter(); !iter.Done(); iter.Next()) {
-      if (iter.UserData()->mObjectType != DataInfo::eBlobImpl) {
-        continue;
+      nsCOMPtr<BlobImpl> blobImpl = do_QueryInterface(iter.UserData()->mObject);
+      if (blobImpl) {
+        refCounts.Put(blobImpl, refCounts.Get(blobImpl) + 1);
       }
-
-      BlobImpl* blobImpl = iter.UserData()->mBlobImpl;
-      MOZ_ASSERT(blobImpl);
-
-      refCounts.Put(blobImpl, refCounts.Get(blobImpl) + 1);
     }
 
     for (auto iter = gDataTable->Iter(); !iter.Done(); iter.Next()) {
       nsCStringHashKey::KeyType key = iter.Key();
       DataInfo* info = iter.UserData();
 
-      if (iter.UserData()->mObjectType == DataInfo::eBlobImpl) {
-        BlobImpl* blobImpl = iter.UserData()->mBlobImpl;
-        MOZ_ASSERT(blobImpl);
-
+      nsCOMPtr<BlobImpl> blobImpl = do_QueryInterface(iter.UserData()->mObject);
+      if (blobImpl) {
         NS_NAMED_LITERAL_CSTRING(desc,
           "A blob URL allocated with URL.createObjectURL; the referenced "
           "blob cannot be freed until all URLs for it have been explicitly "
@@ -285,22 +234,27 @@ class BlobURLsReporter final : public nsIMemoryReporter
               descString,
               aData);
         }
-        continue;
+      } else {
+        // Just report the path for the DOMMediaStream or MediaSource.
+        nsCOMPtr<mozilla::dom::MediaSource>
+          ms(do_QueryInterface(info->mObject));
+        nsAutoCString path;
+        path = ms ? "media-source-urls/" : "dom-media-stream-urls/";
+        BuildPath(path, key, info, aAnonymize);
+
+        NS_NAMED_LITERAL_CSTRING(desc,
+          "An object URL allocated with URL.createObjectURL; the referenced "
+          "data cannot be freed until all URLs for it have been explicitly "
+          "invalidated with URL.revokeObjectURL.");
+
+        aCallback->Callback(EmptyCString(),
+            path,
+            KIND_OTHER,
+            UNITS_COUNT,
+            1,
+            desc,
+            aData);
       }
-
-      // Just report the path for the DOMMediaStream or MediaSource.
-      nsAutoCString path;
-      path = iter.UserData()->mObjectType == DataInfo::eMediaSource
-               ? "media-source-urls/" : "dom-media-stream-urls/";
-      BuildPath(path, key, info, aAnonymize);
-
-      NS_NAMED_LITERAL_CSTRING(desc,
-        "An object URL allocated with URL.createObjectURL; the referenced "
-        "data cannot be freed until all URLs for it have been explicitly "
-        "invalidated with URL.revokeObjectURL.");
-
-      aCallback->Callback(EmptyCString(), path, KIND_OTHER, UNITS_COUNT, 1,
-                          desc, aData);
     }
 
     return NS_OK;
@@ -416,22 +370,6 @@ NS_IMPL_ISUPPORTS(BlobURLsReporter, nsIMemoryReporter)
 
 } // namespace mozilla
 
-template<typename T>
-static nsresult
-AddDataEntryInternal(const nsACString& aURI, T aObject,
-                     nsIPrincipal* aPrincipal)
-{
-  if (!gDataTable) {
-    gDataTable = new nsClassHashtable<nsCStringHashKey, DataInfo>;
-  }
-
-  DataInfo* info = new DataInfo(aObject, aPrincipal);
-  mozilla::BlobURLsReporter::GetJSStackForBlob(info);
-
-  gDataTable->Put(aURI, info);
-  return NS_OK;
-}
-
 void
 nsHostObjectProtocolHandler::Init(void)
 {
@@ -449,61 +387,56 @@ nsHostObjectProtocolHandler::nsHostObjectProtocolHandler()
   Init();
 }
 
-/* static */ nsresult
-nsHostObjectProtocolHandler::AddDataEntry(BlobImpl* aBlobImpl,
+nsresult
+nsHostObjectProtocolHandler::AddDataEntry(const nsACString& aScheme,
+                                          nsISupports* aObject,
                                           nsIPrincipal* aPrincipal,
                                           nsACString& aUri)
 {
+#ifdef DEBUG
+  {
+    nsCOMPtr<BlobImpl> blobImpl(do_QueryInterface(aObject));
+    nsCOMPtr<MediaSource> mediaSource(do_QueryInterface(aObject));
+    nsCOMPtr<DOMMediaStream> mediaStream(do_QueryInterface(aObject));
+
+    // We support only these types.
+    MOZ_ASSERT(blobImpl || mediaSource || mediaStream);
+  }
+#endif
+
   Init();
 
-  nsresult rv = GenerateURIStringForBlobURL(aPrincipal, aUri);
+  nsresult rv = GenerateURIString(aScheme, aPrincipal, aUri);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  rv = AddDataEntryInternal(aUri, aBlobImpl, aPrincipal);
+  rv = AddDataEntry(aUri, aObject, aPrincipal);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  BroadcastBlobURLRegistration(aUri, aBlobImpl, aPrincipal);
-  return NS_OK;
-}
-
-/* static */ nsresult
-nsHostObjectProtocolHandler::AddDataEntry(DOMMediaStream* aMediaStream,
-                                          nsIPrincipal* aPrincipal,
-                                          nsACString& aUri)
-{
-  Init();
-
-  nsresult rv = GenerateURIStringForBlobURL(aPrincipal, aUri);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  rv = AddDataEntryInternal(aUri, aMediaStream, aPrincipal);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  return NS_OK;
-}
-
-/* static */ nsresult
-nsHostObjectProtocolHandler::AddDataEntry(MediaSource* aMediaSource,
-                                          nsIPrincipal* aPrincipal,
-                                          nsACString& aUri)
-{
-  Init();
-
-  nsresult rv = GenerateURIStringForBlobURL(aPrincipal, aUri);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  rv = AddDataEntryInternal(aUri, aMediaSource, aPrincipal);
-  NS_ENSURE_SUCCESS(rv, rv);
+  nsCOMPtr<BlobImpl> blobImpl = do_QueryInterface(aObject);
+  if (blobImpl) {
+    BroadcastBlobURLRegistration(aUri, blobImpl, aPrincipal);
+  }
 
   return NS_OK;
 }
 
 /* static */ nsresult
 nsHostObjectProtocolHandler::AddDataEntry(const nsACString& aURI,
-                                          nsIPrincipal* aPrincipal,
-                                          mozilla::dom::BlobImpl* aBlobImpl)
+                                          nsISupports* aObject,
+                                          nsIPrincipal* aPrincipal)
 {
-  return AddDataEntryInternal(aURI, aBlobImpl, aPrincipal);
+  if (!gDataTable) {
+    gDataTable = new nsClassHashtable<nsCStringHashKey, DataInfo>;
+  }
+
+  DataInfo* info = new DataInfo;
+
+  info->mObject = aObject;
+  info->mPrincipal = aPrincipal;
+  mozilla::BlobURLsReporter::GetJSStackForBlob(info);
+
+  gDataTable->Put(aURI, info);
+  return NS_OK;
 }
 
 /* static */ bool
@@ -520,12 +453,12 @@ nsHostObjectProtocolHandler::GetAllBlobURLEntries(nsTArray<BlobURLRegistrationDa
     DataInfo* info = iter.UserData();
     MOZ_ASSERT(info);
 
-    if (info->mObjectType != DataInfo::eBlobImpl) {
+    nsCOMPtr<BlobImpl> blobImpl = do_QueryInterface(info->mObject);
+    if (!blobImpl) {
       continue;
     }
 
-    MOZ_ASSERT(info->mBlobImpl);
-    PBlobParent* blobParent = aCP->GetOrCreateActorForBlobImpl(info->mBlobImpl);
+    PBlobParent* blobParent = aCP->GetOrCreateActorForBlobImpl(blobImpl);
     if (!blobParent) {
       return false;
     }
@@ -551,8 +484,11 @@ nsHostObjectProtocolHandler::RemoveDataEntry(const nsACString& aUri,
     return;
   }
 
-  if (aBroadcastToOtherProcesses && info->mObjectType == DataInfo::eBlobImpl) {
-    BroadcastBlobURLUnregistration(aUri, info);
+  if (aBroadcastToOtherProcesses) {
+    nsCOMPtr<BlobImpl> blobImpl = do_QueryInterface(info->mObject);
+    if (blobImpl) {
+      BroadcastBlobURLUnregistration(aUri, info);
+    }
   }
 
   gDataTable->Remove(aUri);
@@ -574,12 +510,6 @@ nsHostObjectProtocolHandler::RemoveDataEntries()
   gDataTable->Clear();
   delete gDataTable;
   gDataTable = nullptr;
-}
-
-/* static */ bool
-nsHostObjectProtocolHandler::HasDataEntry(const nsACString& aUri)
-{
-  return !!GetDataInfo(aUri);
 }
 
 nsresult
@@ -618,14 +548,6 @@ nsHostObjectProtocolHandler::GenerateURIString(const nsACString &aScheme,
   return NS_OK;
 }
 
-nsresult
-nsHostObjectProtocolHandler::GenerateURIStringForBlobURL(nsIPrincipal* aPrincipal,
-                                                         nsACString& aUri)
-{
-  return
-    GenerateURIString(NS_LITERAL_CSTRING(BLOBURI_SCHEME), aPrincipal, aUri);
-}
-
 nsIPrincipal*
 nsHostObjectProtocolHandler::GetDataEntryPrincipal(const nsACString& aUri)
 {
@@ -656,14 +578,23 @@ nsHostObjectProtocolHandler::Traverse(const nsACString& aUri,
     return;
   }
 
-  NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(aCallback, "HostObjectProtocolHandler DataInfo.mBlobImpl");
-  aCallback.NoteXPCOMChild(res->mBlobImpl);
+  NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(aCallback, "HostObjectProtocolHandler DataInfo.mObject");
+  aCallback.NoteXPCOMChild(res->mObject);
+}
 
-  NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(aCallback, "HostObjectProtocolHandler DataInfo.mMediaSource");
-  aCallback.NoteXPCOMChild(res->mMediaSource);
+static nsISupports*
+GetDataObjectForSpec(const nsACString& aSpec)
+{
+  DataInfo* info = GetDataInfo(aSpec);
+  return info ? info->mObject : nullptr;
+}
 
-  NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(aCallback, "HostObjectProtocolHandler DataInfo.mMediaStream");
-  aCallback.NoteXPCOMChild(res->mMediaStream);
+static nsISupports*
+GetDataObject(nsIURI* aURI)
+{
+  nsCString spec;
+  aURI->GetSpec(spec);
+  return GetDataObjectForSpec(spec);
 }
 
 // -----------------------------------------------------------------------
@@ -698,9 +629,9 @@ nsHostObjectProtocolHandler::NewURI(const nsACString& aSpec,
   DataInfo* info = GetDataInfo(aSpec);
 
   RefPtr<nsHostObjectURI> uri;
-  if (info && info->mObjectType == DataInfo::eBlobImpl) {
-    MOZ_ASSERT(info->mBlobImpl);
-    uri = new nsHostObjectURI(info->mPrincipal, info->mBlobImpl);
+  if (info) {
+    nsCOMPtr<BlobImpl> blob = do_QueryInterface(info->mObject);
+    uri = new nsHostObjectURI(info->mPrincipal, blob);
   } else {
     uri = new nsHostObjectURI(nullptr, nullptr);
   }
@@ -734,7 +665,10 @@ nsHostObjectProtocolHandler::NewChannel2(nsIURI* uri,
   }
 
 #ifdef DEBUG
-  DataInfo* info = GetDataInfoFromURI(uri);
+  nsCString spec;
+  uri->GetSpec(spec);
+
+  DataInfo* info = GetDataInfo(spec);
 
   // Info can be null, in case this blob URL has been revoked already.
   if (info) {
@@ -809,6 +743,20 @@ nsBlobProtocolHandler::GetScheme(nsACString &result)
 }
 
 NS_IMETHODIMP
+nsMediaStreamProtocolHandler::GetScheme(nsACString &result)
+{
+  result.AssignLiteral(MEDIASTREAMURI_SCHEME);
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsMediaSourceProtocolHandler::GetScheme(nsACString &result)
+{
+  result.AssignLiteral(MEDIASOURCEURI_SCHEME);
+  return NS_OK;
+}
+
+NS_IMETHODIMP
 nsFontTableProtocolHandler::GetScheme(nsACString &result)
 {
   result.AssignLiteral(FONTTABLEURI_SCHEME);
@@ -822,12 +770,11 @@ NS_GetBlobForBlobURI(nsIURI* aURI, BlobImpl** aBlob)
 
   *aBlob = nullptr;
 
-  DataInfo* info = GetDataInfoFromURI(aURI);
-  if (!info || info->mObjectType != DataInfo::eBlobImpl) {
+  nsCOMPtr<BlobImpl> blob = do_QueryInterface(GetDataObject(aURI));
+  if (!blob) {
     return NS_ERROR_DOM_BAD_URI;
   }
 
-  RefPtr<BlobImpl> blob = info->mBlobImpl;
   blob.forget(aBlob);
   return NS_OK;
 }
@@ -837,12 +784,11 @@ NS_GetBlobForBlobURISpec(const nsACString& aSpec, BlobImpl** aBlob)
 {
   *aBlob = nullptr;
 
-  DataInfo* info = GetDataInfo(aSpec);
-  if (!info || info->mObjectType != DataInfo::eBlobImpl) {
+  nsCOMPtr<BlobImpl> blob = do_QueryInterface(GetDataObjectForSpec(aSpec));
+  if (!blob) {
     return NS_ERROR_DOM_BAD_URI;
   }
 
-  RefPtr<BlobImpl> blob = info->mBlobImpl;
   blob.forget(aBlob);
   return NS_OK;
 }
@@ -870,14 +816,13 @@ NS_GetStreamForMediaStreamURI(nsIURI* aURI, mozilla::DOMMediaStream** aStream)
 {
   NS_ASSERTION(IsMediaStreamURI(aURI), "Only call this with mediastream URIs");
 
-  DataInfo* info = GetDataInfoFromURI(aURI);
-  if (!info || info->mObjectType != DataInfo::eMediaStream) {
+  nsISupports* dataObject = GetDataObject(aURI);
+  if (!dataObject) {
     return NS_ERROR_DOM_BAD_URI;
   }
 
-  RefPtr<DOMMediaStream> mediaStream = info->mMediaStream;
-  mediaStream.forget(aStream);
-  return NS_OK;
+  *aStream = nullptr;
+  return CallQueryInterface(dataObject, aStream);
 }
 
 NS_IMETHODIMP
@@ -920,13 +865,12 @@ NS_GetSourceForMediaSourceURI(nsIURI* aURI, mozilla::dom::MediaSource** aSource)
 
   *aSource = nullptr;
 
-  DataInfo* info = GetDataInfoFromURI(aURI);
-  if (!info || info->mObjectType != DataInfo::eMediaSource) {
+  nsCOMPtr<mozilla::dom::MediaSource> source = do_QueryInterface(GetDataObject(aURI));
+  if (!source) {
     return NS_ERROR_DOM_BAD_URI;
   }
 
-  RefPtr<MediaSource> mediaSource = info->mMediaSource;
-  mediaSource.forget(aSource);
+  source.forget(aSource);
   return NS_OK;
 }
 
@@ -934,24 +878,40 @@ NS_GetSourceForMediaSourceURI(nsIURI* aURI, mozilla::dom::MediaSource** aSource)
 { 0xb43964aa, 0xa078, 0x44b2, \
   { 0xb0, 0x6b, 0xfd, 0x4d, 0x1b, 0x17, 0x2e, 0x66 } }
 
+#define NS_MEDIASTREAMPROTOCOLHANDLER_CID \
+{ 0x27d1fa24, 0x2b73, 0x4db3, \
+  { 0xab, 0x48, 0xb9, 0x83, 0x83, 0x40, 0xe0, 0x81 } }
+
+#define NS_MEDIASOURCEPROTOCOLHANDLER_CID \
+{ 0x12ef31fc, 0xa8fb, 0x4661, \
+  { 0x9a, 0x63, 0xfb, 0x61, 0x04,0x5d, 0xb8, 0x61 } }
+
 #define NS_FONTTABLEPROTOCOLHANDLER_CID \
 { 0x3fc8f04e, 0xd719, 0x43ca, \
   { 0x9a, 0xd0, 0x18, 0xee, 0x32, 0x02, 0x11, 0xf2 } }
 
 NS_GENERIC_FACTORY_CONSTRUCTOR(nsBlobProtocolHandler)
+NS_GENERIC_FACTORY_CONSTRUCTOR(nsMediaStreamProtocolHandler)
+NS_GENERIC_FACTORY_CONSTRUCTOR(nsMediaSourceProtocolHandler)
 NS_GENERIC_FACTORY_CONSTRUCTOR(nsFontTableProtocolHandler)
 
 NS_DEFINE_NAMED_CID(NS_BLOBPROTOCOLHANDLER_CID);
+NS_DEFINE_NAMED_CID(NS_MEDIASTREAMPROTOCOLHANDLER_CID);
+NS_DEFINE_NAMED_CID(NS_MEDIASOURCEPROTOCOLHANDLER_CID);
 NS_DEFINE_NAMED_CID(NS_FONTTABLEPROTOCOLHANDLER_CID);
 
 static const mozilla::Module::CIDEntry kHostObjectProtocolHandlerCIDs[] = {
   { &kNS_BLOBPROTOCOLHANDLER_CID, false, nullptr, nsBlobProtocolHandlerConstructor },
+  { &kNS_MEDIASTREAMPROTOCOLHANDLER_CID, false, nullptr, nsMediaStreamProtocolHandlerConstructor },
+  { &kNS_MEDIASOURCEPROTOCOLHANDLER_CID, false, nullptr, nsMediaSourceProtocolHandlerConstructor },
   { &kNS_FONTTABLEPROTOCOLHANDLER_CID, false, nullptr, nsFontTableProtocolHandlerConstructor },
   { nullptr }
 };
 
 static const mozilla::Module::ContractIDEntry kHostObjectProtocolHandlerContracts[] = {
   { NS_NETWORK_PROTOCOL_CONTRACTID_PREFIX BLOBURI_SCHEME, &kNS_BLOBPROTOCOLHANDLER_CID },
+  { NS_NETWORK_PROTOCOL_CONTRACTID_PREFIX MEDIASTREAMURI_SCHEME, &kNS_MEDIASTREAMPROTOCOLHANDLER_CID },
+  { NS_NETWORK_PROTOCOL_CONTRACTID_PREFIX MEDIASOURCEURI_SCHEME, &kNS_MEDIASOURCEPROTOCOLHANDLER_CID },
   { NS_NETWORK_PROTOCOL_CONTRACTID_PREFIX FONTTABLEURI_SCHEME, &kNS_FONTTABLEPROTOCOLHANDLER_CID },
   { nullptr }
 };
@@ -964,27 +924,3 @@ static const mozilla::Module kHostObjectProtocolHandlerModule = {
 
 NSMODULE_DEFN(HostObjectProtocolHandler) = &kHostObjectProtocolHandlerModule;
 
-bool IsType(nsIURI* aUri, DataInfo::ObjectType aType)
-{
-  DataInfo* info = GetDataInfoFromURI(aUri);
-  if (!info) {
-    return false;
-  }
-
-  return info->mObjectType == aType;
-}
-
-bool IsBlobURI(nsIURI* aUri)
-{
-  return IsType(aUri, DataInfo::eBlobImpl);
-}
-
-bool IsMediaStreamURI(nsIURI* aUri)
-{
-  return IsType(aUri, DataInfo::eMediaStream);
-}
-
-bool IsMediaSourceURI(nsIURI* aUri)
-{
-  return IsType(aUri, DataInfo::eMediaSource);
-}

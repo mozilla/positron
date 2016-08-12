@@ -160,6 +160,7 @@ public:
         int32_t nfds;
         bool stdoutOpen = true, stderrOpen = true;
         char buf[4096];
+        int32_t len;
 
         PRIntervalTime now = PR_IntervalNow();
         PRIntervalTime deadline = now + PR_MillisecondsToInterval(aWaitMs);
@@ -193,13 +194,15 @@ public:
                     continue;
 
                 bool isStdout = mStdoutfd == pollfds[i].fd;
-                int32_t len = 0;
-
+                
                 if (PR_POLL_READ & pollfds[i].out_flags) {
                     len = PR_Read(pollfds[i].fd, buf, sizeof(buf) - 1);
                     NS_ASSERTION(0 <= len, PR_ErrorToName(PR_GetError()));
                 }
-                else if (!(PR_POLL_HUP & pollfds[i].out_flags)) {
+                else if (PR_POLL_HUP & pollfds[i].out_flags) {
+                    len = 0;
+                }
+                else {
                     NS_ERROR(PR_ErrorToName(PR_GetError()));
                 }
 

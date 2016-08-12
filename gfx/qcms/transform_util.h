@@ -25,7 +25,6 @@
 #define _QCMS_TRANSFORM_UTIL_H
 
 #include <stdlib.h>
-#include <math.h>
 
 #define CLU(table,x,y,z) table[(x*len + y*x_len + z*xy_len)*3]
 

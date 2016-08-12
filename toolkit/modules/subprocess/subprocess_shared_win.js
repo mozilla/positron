@@ -22,7 +22,6 @@ var win32 = {
   BYTE: ctypes.uint8_t,
   WORD: ctypes.uint16_t,
   DWORD: ctypes.uint32_t,
-  LONG: ctypes.long,
 
   UINT: ctypes.unsigned_int,
   UCHAR: ctypes.unsigned_char,
@@ -64,12 +63,10 @@ Object.assign(win32, {
 });
 
 Object.assign(win32, {
-  CREATE_SUSPENDED: 0x00000004,
   CREATE_NEW_CONSOLE: 0x00000010,
   CREATE_UNICODE_ENVIRONMENT: 0x00000400,
-  CREATE_NO_WINDOW: 0x08000000,
-  CREATE_BREAKAWAY_FROM_JOB: 0x01000000,
   EXTENDED_STARTUPINFO_PRESENT: 0x00080000,
+  CREATE_NO_WINDOW: 0x08000000,
 
   STARTF_USESTDHANDLES: 0x0100,
 
@@ -158,13 +155,6 @@ Object.assign(win32, {
 
 
 var libc = new Library("libc", LIBC_CHOICES, {
-  AssignProcessToJobObject: [
-    win32.WINAPI,
-    win32.BOOL,
-    win32.HANDLE, /* hJob */
-    win32.HANDLE, /* hProcess */
-  ],
-
   CloseHandle: [
     win32.WINAPI,
     win32.BOOL,
@@ -190,13 +180,6 @@ var libc = new Library("libc", LIBC_CHOICES, {
     win32.DWORD, /* dwCreationDisposition */
     win32.DWORD, /* dwFlagsAndAttributes */
     win32.HANDLE, /* opt hTemplateFile */
-  ],
-
-  CreateJobObjectW: [
-    win32.WINAPI,
-    win32.HANDLE,
-    win32.SECURITY_ATTRIBUTES.ptr, /* opt lpJobAttributes */
-    win32.LPWSTR, /* lpName */
   ],
 
   CreateNamedPipeW: [
@@ -234,15 +217,6 @@ var libc = new Library("libc", LIBC_CHOICES, {
     win32.LPCWSTR, /* opt lpCurrentDirectory */
     win32.STARTUPINFOW.ptr, /* lpStartupInfo */
     win32.PROCESS_INFORMATION.ptr, /* out lpProcessInformation */
-  ],
-
-  CreateSemaphoreW: [
-    win32.WINAPI,
-    win32.HANDLE,
-    win32.SECURITY_ATTRIBUTES.ptr, /* opt lpSemaphoreAttributes */
-    win32.LONG, /* lInitialCount */
-    win32.LONG, /* lMaximumCount */
-    win32.LPCWSTR, /* opt lpName */
   ],
 
   DeleteProcThreadAttributeList: [
@@ -323,27 +297,6 @@ var libc = new Library("libc", LIBC_CHOICES, {
     win32.DWORD, /* nNumberOfBytesToRead */
     win32.LPDWORD, /* opt out lpNumberOfBytesRead */
     win32.OVERLAPPED.ptr, /* opt in/out lpOverlapped */
-  ],
-
-  ReleaseSemaphore: [
-    win32.WINAPI,
-    win32.BOOL,
-    win32.HANDLE, /* hSemaphore */
-    win32.LONG, /* lReleaseCount */
-    win32.LONG.ptr, /* opt out lpPreviousCount */
-  ],
-
-  ResumeThread: [
-    win32.WINAPI,
-    win32.DWORD,
-    win32.HANDLE, /* hThread */
-  ],
-
-  TerminateJobObject: [
-    win32.WINAPI,
-    win32.BOOL,
-    win32.HANDLE, /* hJob */
-    win32.UINT, /* uExitCode */
   ],
 
   TerminateProcess: [

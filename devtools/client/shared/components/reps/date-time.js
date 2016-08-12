@@ -11,7 +11,8 @@ define(function (require, exports, module) {
   const React = require("devtools/client/shared/vendor/react");
 
   // Reps
-  const { isGrip } = require("./rep-utils");
+  const { createFactories, isGrip } = require("./rep-utils");
+  const { ObjectBox } = createFactories(require("./object-box"));
 
   // Shortcuts
   const { span } = React.DOM;
@@ -38,7 +39,7 @@ define(function (require, exports, module) {
     render: function () {
       let grip = this.props.object;
       return (
-        span({className: "objectBox"},
+        ObjectBox({},
           this.getTitle(grip),
           span({className: "Date"},
             new Date(grip.preview.timestamp).toISOString()

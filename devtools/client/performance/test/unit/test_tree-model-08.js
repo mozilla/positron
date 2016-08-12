@@ -1,6 +1,5 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
-"use strict";
 
 /**
  * Verifies if FrameNodes retain and parse their data appropriately.
@@ -66,11 +65,9 @@ add_task(function test() {
     }), false),
   ];
 
-  let fields = ["nodeType", "functionName", "fileName", "host", "url", "line", "column",
-                "categoryData.abbrev", "isContent", "port"];
+  let fields = ["nodeType", "functionName", "fileName", "host", "url", "line", "column", "categoryData.abbrev", "isContent", "port"];
   let expected = [
-    // nodeType, functionName, fileName, host, url, line, column, categoryData.abbrev,
-    // isContent, port
+    // nodeType, functionName, fileName, host, url, line, column, categoryData.abbrev, isContent, port
     ["Frame", "hello/<.world", "bar.js", "foo", "http://foo/bar.js", 123, 987, void 0, true],
     ["Frame", "hello/<.world", "bar.js", "foo", "http://foo/bar.js#baz", 123, 987, void 0, true],
     ["Frame", "hello/<.world", "/", "foo", "http://foo/#bar", 123, 987, void 0, true],
@@ -90,9 +87,7 @@ add_task(function test() {
 
     for (let j = 0; j < fields.length; j++) {
       let field = fields[j];
-      let value = field === "categoryData.abbrev"
-        ? info.categoryData.abbrev
-        : info[field];
+      let value = field === "categoryData.abbrev" ? info.categoryData.abbrev : info[field];
       equal(value, expect[j], `${field} for frame #${i} is correct: ${expect[j]}`);
     }
   }

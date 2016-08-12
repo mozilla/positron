@@ -3,28 +3,25 @@
    http://creativecommons.org/publicdomain/zero/1.0/ */
 "use strict";
 
-/* global document, SimpleTest, requestAnimationFrame, is, ok */
-/* exported Cc, Ci, Cu, Cr, Assert, Task, TargetFactory, Toolbox, browserRequire,
-   forceRender, setProps, dumpn, checkOptimizationHeader, checkOptimizationTree */
-let { classes: Cc, interfaces: Ci, utils: Cu, results: Cr } = Components;
+var { classes: Cc, interfaces: Ci, utils: Cu, results: Cr } = Components;
 
-let { require } = Cu.import("resource://gre/modules/devtools/shared/Loader.jsm", {});
-let { Assert } = require("resource://testing-common/Assert.jsm");
-let { BrowserLoader } = Cu.import("resource://devtools/client/shared/browser-loader.js", {});
-let defer = require("devtools/shared/defer");
-let flags = require("devtools/shared/flags");
-let { Task } = require("devtools/shared/task");
-let { TargetFactory } = require("devtools/client/framework/target");
-let { Toolbox } = require("devtools/client/framework/toolbox");
+var { require } = Cu.import("resource://gre/modules/devtools/shared/Loader.jsm", {});
+var { Assert } = require("resource://testing-common/Assert.jsm");
+var { BrowserLoader } = Cu.import("resource://devtools/client/shared/browser-loader.js", {});
+var defer = require("devtools/shared/defer");
+var DevToolsUtils = require("devtools/shared/DevToolsUtils");
+var { Task } = require("devtools/shared/task");
+var { TargetFactory } = require("devtools/client/framework/target");
+var { Toolbox } = require("devtools/client/framework/toolbox");
 
-flags.testing = true;
-let { require: browserRequire } = BrowserLoader({
+DevToolsUtils.testing = true;
+var { require: browserRequire } = BrowserLoader({
   baseURI: "resource://devtools/client/performance/",
   window: this
 });
 
-let $ = (selector, scope = document) => scope.querySelector(selector);
-let $$ = (selector, scope = document) => scope.querySelectorAll(selector);
+var $ = (selector, scope = document) => scope.querySelector(selector);
+var $$ = (selector, scope = document) => scope.querySelectorAll(selector);
 
 function forceRender(comp) {
   return setState(comp, {})
@@ -41,13 +38,13 @@ function onNextAnimationFrame(fn) {
 }
 
 function setState(component, newState) {
-  let deferred = defer();
+  var deferred = defer();
   component.setState(newState, onNextAnimationFrame(deferred.resolve));
   return deferred.promise;
 }
 
 function setProps(component, newState) {
-  let deferred = defer();
+  var deferred = defer();
   component.setProps(newState, onNextAnimationFrame(deferred.resolve));
   return deferred.promise;
 }
@@ -115,7 +112,6 @@ let OPTS_DATA_GENERAL = [{
     }]
   }
 }];
-
 OPTS_DATA_GENERAL.forEach(site => {
   site.data.types.forEach(type => {
     if (type.typeset) {
@@ -125,6 +121,7 @@ OPTS_DATA_GENERAL.forEach(site => {
   site.data.attempts.id = site.id;
   site.data.types.id = site.id;
 });
+
 
 function checkOptimizationHeader(name, file, line) {
   is($(".optimization-header .header-function-name").textContent, name,
@@ -178,8 +175,7 @@ function checkOptimizationTree(rowData) {
           `row ${i}th: correct attempt row, attempt item`);
         is($(".optimization-outcome", row).textContent, expected.outcome,
           `row ${i}th: correct attempt row, outcome item`);
-        ok($(".optimization-outcome", row)
-          .classList.contains(expected.success ? "success" : "failure"),
+        ok($(".optimization-outcome", row).classList.contains(expected.success ? "success" : "failure"),
           `row ${i}th: correct attempt row, failure/success status`);
         break;
     }

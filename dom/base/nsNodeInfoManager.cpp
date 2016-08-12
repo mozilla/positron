@@ -274,8 +274,9 @@ nsNodeInfoManager::GetNodeInfo(const nsAString& aName, nsIAtom *aPrefix,
   void *node = PL_HashTableLookup(mNodeInfoHash, &tmpKey);
 
   if (node) {
-    RefPtr<NodeInfo> nodeInfo = static_cast<NodeInfo*>(node);
-    nodeInfo.forget(aNodeInfo);
+    NodeInfo* nodeInfo = static_cast<NodeInfo *>(node);
+
+    NS_ADDREF(*aNodeInfo = nodeInfo);
 
     return NS_OK;
   }

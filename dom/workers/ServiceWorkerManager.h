@@ -255,7 +255,7 @@ public:
   nsresult
   ClaimClients(nsIPrincipal* aPrincipal, const nsCString& aScope, uint64_t aId);
 
-  void
+  nsresult
   SetSkipWaitingFlag(nsIPrincipal* aPrincipal, const nsCString& aScope,
                      uint64_t aServiceWorkerID);
 
@@ -293,9 +293,6 @@ public:
 
   nsresult
   NotifyUnregister(nsIPrincipal* aPrincipal, const nsAString& aScope);
-
-  void
-  WorkerIsIdle(ServiceWorkerInfo* aWorker);
 
 private:
   ServiceWorkerManager();

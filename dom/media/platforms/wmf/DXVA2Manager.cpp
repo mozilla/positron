@@ -10,7 +10,6 @@
 #include "ImageContainer.h"
 #include "gfxWindowsPlatform.h"
 #include "D3D9SurfaceImage.h"
-#include "mozilla/gfx/DeviceManagerD3D11.h"
 #include "mozilla/layers/D3D11ShareHandleImage.h"
 #include "mozilla/layers/ImageBridgeChild.h"
 #include "mozilla/Telemetry.h"
@@ -98,6 +97,7 @@ public:
   // into an image which is returned by aOutImage.
   HRESULT CopyToImage(IMFSample* aVideoSample,
                       const nsIntRect& aRegion,
+                      ImageContainer* aContainer,
                       Image** aOutImage) override;
 
   bool SupportsConfig(IMFMediaType* aType, float aFramerate) override;
@@ -191,13 +191,6 @@ static const GUID DXVA2_Intel_ModeH264_E = {
 bool
 D3D9DXVA2Manager::SupportsConfig(IMFMediaType* aType, float aFramerate)
 {
-  MOZ_ASSERT(NS_IsMainThread());
-  gfx::D3D9VideoCrashGuard crashGuard;
-  if (crashGuard.Crashed()) {
-    NS_WARNING("DXVA2D3D9 crash detected");
-    return false;
-  }
-
   DXVA2_VideoDesc desc;
   HRESULT hr = ConvertMFTypeToDXVAType(aType, &desc);
   NS_ENSURE_TRUE(SUCCEEDED(hr), false);
@@ -304,7 +297,7 @@ D3D9DXVA2Manager::Init(nsACString& aFailureReason)
   D3DPRESENT_PARAMETERS params = {0};
   params.BackBufferWidth = 1;
   params.BackBufferHeight = 1;
-  params.BackBufferFormat = D3DFMT_A8R8G8B8;
+  params.BackBufferFormat = D3DFMT_UNKNOWN;
   params.BackBufferCount = 1;
   params.SwapEffect = D3DSWAPEFFECT_DISCARD;
   params.hDeviceWindow = nullptr;
@@ -438,6 +431,7 @@ D3D9DXVA2Manager::Init(nsACString& aFailureReason)
 HRESULT
 D3D9DXVA2Manager::CopyToImage(IMFSample* aSample,
                               const nsIntRect& aRegion,
+                              ImageContainer* aImageContainer,
                               Image** aOutImage)
 {
   RefPtr<IMFMediaBuffer> buffer;
@@ -517,6 +511,7 @@ public:
   // into an image which is returned by aOutImage.
   HRESULT CopyToImage(IMFSample* aVideoSample,
                       const nsIntRect& aRegion,
+                      ImageContainer* aContainer,
                       Image** aOutImage) override;
 
   HRESULT ConfigureForSize(uint32_t aWidth, uint32_t aHeight) override;
@@ -547,13 +542,6 @@ private:
 bool
 D3D11DXVA2Manager::SupportsConfig(IMFMediaType* aType, float aFramerate)
 {
-  MOZ_ASSERT(NS_IsMainThread());
-  gfx::D3D11VideoCrashGuard crashGuard;
-  if (crashGuard.Crashed()) {
-    NS_WARNING("DXVA2D3D9 crash detected");
-    return false;
-  }
-
   RefPtr<ID3D11VideoDevice> videoDevice;
   HRESULT hr = mDevice->QueryInterface(static_cast<ID3D11VideoDevice**>(getter_AddRefs(videoDevice)));
   NS_ENSURE_TRUE(SUCCEEDED(hr), false);
@@ -630,7 +618,7 @@ D3D11DXVA2Manager::Init(nsACString& aFailureReason)
     return E_FAIL;
   }
 
-  mDevice = gfx::DeviceManagerD3D11::Get()->CreateDecoderDevice();
+  mDevice = gfxWindowsPlatform::GetPlatform()->CreateD3D11DecoderDevice();
   if (!mDevice) {
     aFailureReason.AssignLiteral("Failed to create D3D11 device for decoder");
     return E_FAIL;
@@ -779,9 +767,11 @@ D3D11DXVA2Manager::CreateOutputSample(RefPtr<IMFSample>& aSample, ID3D11Texture2
 HRESULT
 D3D11DXVA2Manager::CopyToImage(IMFSample* aVideoSample,
                                const nsIntRect& aRegion,
+                               ImageContainer* aContainer,
                                Image** aOutImage)
 {
   NS_ENSURE_TRUE(aVideoSample, E_POINTER);
+  NS_ENSURE_TRUE(aContainer, E_POINTER);
   NS_ENSURE_TRUE(aOutImage, E_POINTER);
 
   // Our video frame is stored in a non-sharable ID3D11Texture2D. We need

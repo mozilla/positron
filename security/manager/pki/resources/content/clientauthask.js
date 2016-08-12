@@ -42,17 +42,13 @@ function onLoad() {
   rememberBox.label = bundle.getString("clientAuthRemember");
   rememberBox.checked = rememberSetting;
 
-  let hostname = dialogParams.GetString(0);
+  let cnAndPort = dialogParams.GetString(0);
   let org = dialogParams.GetString(1);
   let issuerOrg = dialogParams.GetString(2);
-  let port = dialogParams.GetInt(0);
   let formattedOrg = bundle.getFormattedString("clientAuthMessage1", [org]);
   let formattedIssuerOrg = bundle.getFormattedString("clientAuthMessage2",
                                                      [issuerOrg]);
-  let formattedHostnameAndPort =
-    bundle.getFormattedString("clientAuthHostnameAndPort",
-                              [hostname, port.toString()]);
-  setText("hostname", formattedHostnameAndPort);
+  setText("hostname", cnAndPort);
   setText("organization", formattedOrg);
   setText("issuer", formattedIssuerOrg);
 

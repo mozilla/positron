@@ -400,9 +400,8 @@ MacroAssembler::ctz32(Register src, Register dest, bool knownNotZero)
 // ===============================================================
 // Branch functions
 
-template <class L>
 void
-MacroAssembler::branch32(Condition cond, Register lhs, Register rhs, L label)
+MacroAssembler::branch32(Condition cond, Register lhs, Register rhs, Label* label)
 {
     ma_b(lhs, rhs, label, cond);
 }
@@ -568,19 +567,13 @@ MacroAssembler::branchFloat(DoubleCondition cond, FloatRegister lhs, FloatRegist
 }
 
 void
-MacroAssembler::branchTruncateFloat32MaybeModUint32(FloatRegister src, Register dest, Label* fail)
+MacroAssembler::branchTruncateFloat32(FloatRegister src, Register dest, Label* fail)
 {
     Label test, success;
     as_truncws(ScratchFloat32Reg, src);
     as_mfc1(dest, ScratchFloat32Reg);
 
     ma_b(dest, Imm32(INT32_MAX), fail, Assembler::Equal);
-}
-
-void
-MacroAssembler::branchTruncateFloat32ToInt32(FloatRegister src, Register dest, Label* fail)
-{
-    convertFloat32ToInt32(src, dest, fail);
 }
 
 void
@@ -595,7 +588,7 @@ MacroAssembler::branchDouble(DoubleCondition cond, FloatRegister lhs, FloatRegis
 // NOTE: if the value really was supposed to be INT32_MAX / INT32_MIN then it
 // will be wrong.
 void
-MacroAssembler::branchTruncateDoubleMaybeModUint32(FloatRegister src, Register dest, Label* fail)
+MacroAssembler::branchTruncateDouble(FloatRegister src, Register dest, Label* fail)
 {
     Label test, success;
     as_truncwd(ScratchDoubleReg, src);
@@ -603,12 +596,6 @@ MacroAssembler::branchTruncateDoubleMaybeModUint32(FloatRegister src, Register d
 
     ma_b(dest, Imm32(INT32_MAX), fail, Assembler::Equal);
     ma_b(dest, Imm32(INT32_MIN), fail, Assembler::Equal);
-}
-
-void
-MacroAssembler::branchTruncateDoubleToInt32(FloatRegister src, Register dest, Label* fail)
-{
-    convertDoubleToInt32(src, dest, fail);
 }
 
 template <typename T>
@@ -685,9 +672,8 @@ MacroAssembler::branchTest32(Condition cond, const AbsoluteAddress& lhs, Imm32 r
     branchTest32(cond, SecondScratchReg, rhs, label);
 }
 
-template <class L>
 void
-MacroAssembler::branchTestPtr(Condition cond, Register lhs, Register rhs, L label)
+MacroAssembler::branchTestPtr(Condition cond, Register lhs, Register rhs, Label* label)
 {
     MOZ_ASSERT(cond == Zero || cond == NonZero || cond == Signed || cond == NotSigned);
     if (lhs == rhs) {

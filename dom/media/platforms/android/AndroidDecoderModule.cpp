@@ -35,7 +35,7 @@ static PRLogModuleInfo* AndroidDecoderModuleLog()
 
 using namespace mozilla;
 using namespace mozilla::gl;
-using namespace mozilla::java::sdk;
+using namespace mozilla::widget::sdk;
 using media::TimeUnit;
 
 namespace mozilla {
@@ -144,6 +144,7 @@ public:
 
     RefPtr<VideoData> v =
       VideoData::CreateFromImage(mConfig,
+                                 mImageContainer,
                                  offset,
                                  presentationTimeUs,
                                  aDuration.ToMicroseconds(),
@@ -173,14 +174,14 @@ public:
   {
     JNIEnv* const env = jni::GetEnvForThread();
 
-    jni::ByteBuffer::LocalRef buffer(env);
+    jni::Object::LocalRef buffer(env);
     NS_ENSURE_SUCCESS_VOID(aFormat->GetByteBuffer(NS_LITERAL_STRING("csd-0"),
                                                   &buffer));
 
     if (!buffer && aConfig.mCodecSpecificConfig->Length() >= 2) {
-      buffer = jni::ByteBuffer::New(
-          aConfig.mCodecSpecificConfig->Elements(),
-          aConfig.mCodecSpecificConfig->Length());
+      buffer = jni::Object::LocalRef::Adopt(
+          env, env->NewDirectByteBuffer(aConfig.mCodecSpecificConfig->Elements(),
+          aConfig.mCodecSpecificConfig->Length()));
       NS_ENSURE_SUCCESS_VOID(aFormat->SetByteBuffer(NS_LITERAL_STRING("csd-0"),
                                                     buffer));
     }
@@ -192,7 +193,7 @@ public:
   }
 
   nsresult Output(BufferInfo::Param aInfo, void* aBuffer,
-                  MediaFormat::Param aFormat, const TimeUnit& aDuration) override
+                  MediaFormat::Param aFormat, const TimeUnit& aDuration)
   {
     // The output on Android is always 16-bit signed
     nsresult rv;
@@ -276,7 +277,7 @@ AndroidDecoderModule::SupportsMimeType(const nsACString& aMimeType,
     return false;
   }
 
-  return java::HardwareCodecCapabilityUtils::FindDecoderCodecInfoForMimeType(
+  return widget::HardwareCodecCapabilityUtils::FindDecoderCodecInfoForMimeType(
       nsCString(TranslateMimeType(aMimeType)));
 }
 

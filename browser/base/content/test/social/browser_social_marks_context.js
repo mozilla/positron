@@ -14,10 +14,6 @@ function makeMarkProvider(origin) {
 
 function test() {
   waitForExplicitFinish();
-  PopupNotifications.panel.setAttribute("animate", "false");
-  registerCleanupFunction(function () {
-    PopupNotifications.panel.removeAttribute("animate");
-  });
 
   runSocialTests(tests, undefined, undefined, finish);
 }
@@ -44,7 +40,7 @@ var tests = {
       }
       info("INSTALLING " + manifest.origin);
       let panel = document.getElementById("servicesInstall-notification");
-      BrowserTestUtils.waitForEvent(PopupNotifications.panel, "popupshown").then(() => {
+      ensureEventFired(PopupNotifications.panel, "popupshown").then(() => {
         info("servicesInstall-notification panel opened");
         panel.button.click();
       });
@@ -52,7 +48,7 @@ var tests = {
       let activationURL = manifest.origin + "/browser/browser/base/content/test/social/social_activate.html"
       let id = SocialMarks._toolbarHelper.idFromOrigin(manifest.origin);
       let toolbar = document.getElementById("nav-bar");
-      BrowserTestUtils.openNewForegroundTab(gBrowser, activationURL).then(tab => {
+      addTab(activationURL, function(tab) {
         let doc = tab.linkedBrowser.contentDocument;
         let data = {
           origin: doc.nodePrincipal.origin,
@@ -64,17 +60,16 @@ var tests = {
         Social.installProvider(data, function(addonManifest) {
           // enable the provider so we know the button would have appeared
           SocialService.enableProvider(manifest.origin, function(provider) {
-            BrowserTestUtils.waitForCondition(() => { return CustomizableUI.getWidget(id) },
-                             "button exists after enabling social").then(() => {
-              BrowserTestUtils.removeTab(tab).then(() => {
-                installed.push(manifest.origin);
-                // checkSocialUI will properly check where the menus are located
-                checkSocialUI(window);
-                executeSoon(function() {
-                  addProviders(callback);
-                });
+            waitForCondition(function() { return CustomizableUI.getWidget(id) },
+                             function() {
+              gBrowser.removeTab(tab);
+              installed.push(manifest.origin);
+              // checkSocialUI will properly check where the menus are located
+              checkSocialUI(window);
+              executeSoon(function() {
+                addProviders(callback);
               });
-            });
+            }, "button exists after enabling social");
           });
         });
       });

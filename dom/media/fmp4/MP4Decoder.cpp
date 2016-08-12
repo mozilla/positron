@@ -22,6 +22,7 @@
 #endif
 #ifdef MOZ_WIDGET_ANDROID
 #include "nsIGfxInfo.h"
+#include "AndroidBridge.h"
 #endif
 #include "mozilla/layers/LayersTypes.h"
 
@@ -169,14 +170,6 @@ MP4Decoder::CanHandleMediaType(const nsAString& aContentType,
   return CanHandleMediaType(NS_ConvertUTF16toUTF8(mimeType),
                             codecs,
                             aDiagnostics);
-}
-
-/* static */
-bool
-MP4Decoder::IsH264(const nsACString& aMimeType)
-{
-  return aMimeType.EqualsLiteral("video/mp4") ||
-         aMimeType.EqualsLiteral("video/avc");
 }
 
 /* static */

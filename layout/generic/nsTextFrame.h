@@ -31,10 +31,6 @@ class nsTextFragment;
 class nsDisplayTextGeometry;
 class nsDisplayText;
 
-namespace mozilla {
-class SVGContextPaint;
-};
-
 class nsTextFrame : public nsFrame {
   typedef mozilla::LayoutDeviceRect LayoutDeviceRect;
   typedef mozilla::RawSelectionType RawSelectionType;
@@ -251,8 +247,8 @@ public:
                                            nscoord* aX,
                                            nscoord* aXMost) override;
   virtual void Reflow(nsPresContext* aPresContext,
-                      ReflowOutput& aMetrics,
-                      const ReflowInput& aReflowInput,
+                      nsHTMLReflowMetrics& aMetrics,
+                      const nsHTMLReflowState& aReflowState,
                       nsReflowStatus& aStatus) override;
   virtual bool CanContinueTextRun() const override;
   // Method that is called for a text frame that is logically
@@ -397,7 +393,7 @@ public:
     gfxContext* context;
     gfxPoint framePt;
     LayoutDeviceRect dirtyRect;
-    mozilla::SVGContextPaint* contextPaint = nullptr;
+    gfxTextContextPaint* contextPaint = nullptr;
     DrawPathCallbacks* callbacks = nullptr;
     enum {
       PaintText,           // Normal text painting.
@@ -431,7 +427,7 @@ public:
     gfxContext* context;
     PropertyProvider* provider = nullptr;
     gfxFloat* advanceWidth = nullptr;
-    mozilla::SVGContextPaint* contextPaint = nullptr;
+    gfxTextContextPaint* contextPaint = nullptr;
     DrawPathCallbacks* callbacks = nullptr;
     nscolor textColor = NS_RGBA(0, 0, 0, 0);
     nscolor textStrokeColor = NS_RGBA(0, 0, 0, 0);
@@ -583,7 +579,7 @@ public:
   // Similar to Reflow(), but for use from nsLineLayout
   void ReflowText(nsLineLayout& aLineLayout, nscoord aAvailableWidth,
                   DrawTarget* aDrawTarget,
-                  ReflowOutput& aMetrics, nsReflowStatus& aStatus);
+                  nsHTMLReflowMetrics& aMetrics, nsReflowStatus& aStatus);
 
   bool IsFloatingFirstLetterChild() const;
 
@@ -810,7 +806,7 @@ protected:
 
   virtual bool HasAnyNoncollapsedCharacters() override;
 
-  void ClearMetrics(ReflowOutput& aMetrics);
+  void ClearMetrics(nsHTMLReflowMetrics& aMetrics);
 
   /**
    * UpdateIteratorFromOffset() updates the iterator from a given offset.

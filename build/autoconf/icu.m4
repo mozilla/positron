@@ -82,10 +82,7 @@ if test -n "$USE_ICU"; then
 
     dnl We won't build ICU data as a separate file when building
     dnl JS standalone so that embedders don't have to deal with it.
-    dnl We also don't do it on Windows because sometimes the file goes
-    dnl missing -- possibly due to overzealous antivirus software? --
-    dnl which prevents the browser from starting up :(
-    if test -z "$JS_STANDALONE" -a -z "$MOZ_SYSTEM_ICU" -a "$OS_TARGET" != WINNT -a "$MOZ_WIDGET_TOOLKIT" != "android"; then
+    if test -z "$JS_STANDALONE" -a -z "$MOZ_SYSTEM_ICU"; then
         MOZ_ICU_DATA_ARCHIVE=1
     else
         MOZ_ICU_DATA_ARCHIVE=

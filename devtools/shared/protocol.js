@@ -5,6 +5,7 @@
 "use strict";
 
 var { Cu, components } = require("chrome");
+var DevToolsUtils = require("devtools/shared/DevToolsUtils");
 var Services = require("Services");
 var promise = require("promise");
 var defer = require("devtools/shared/defer");
@@ -1202,7 +1203,7 @@ var Front = Class({
       this.actor().then(actorID => {
         packet.to = actorID;
         this.conn._transport.send(packet);
-      }).then(null, e => console.error(e));
+      }).then(null, e => DevToolsUtils.reportException("Front.prototype.send", e));
     }
   },
 

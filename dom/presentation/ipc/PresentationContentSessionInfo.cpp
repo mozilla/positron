@@ -28,20 +28,12 @@ PresentationContentSessionInfo::Init() {
 nsresult
 PresentationContentSessionInfo::Send(const nsAString& aData)
 {
-  if (!mTransport) {
-    return NS_ERROR_NOT_AVAILABLE;
-  }
-
   return mTransport->Send(aData);
 }
 
 nsresult
 PresentationContentSessionInfo::Close(nsresult aReason)
 {
-  if (!mTransport) {
-    return NS_ERROR_NOT_AVAILABLE;
-  }
-
   return mTransport->Close(aReason);
 }
 

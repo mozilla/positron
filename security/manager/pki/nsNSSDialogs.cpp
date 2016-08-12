@@ -158,10 +158,9 @@ nsNSSDialogs::ConfirmDownloadCACert(nsIInterfaceRequestor *ctx,
 
 NS_IMETHODIMP
 nsNSSDialogs::ChooseCertificate(nsIInterfaceRequestor* ctx,
-                                const nsACString& hostname,
-                                int32_t port,
-                                const nsACString& organization,
-                                const nsACString& issuerOrg,
+                                const nsAString& cnAndPort,
+                                const nsAString& organization,
+                                const nsAString& issuerOrg,
                                 nsIArray* certList,
                         /*out*/ uint32_t* selectedIndex,
                         /*out*/ bool* certificateChosen)
@@ -197,20 +196,15 @@ nsNSSDialogs::ChooseCertificate(nsIInterfaceRequestor* ctx,
     return rv;
   }
 
-  rv = block->SetString(0, NS_ConvertUTF8toUTF16(hostname).get());
+  rv = block->SetString(0, PromiseFlatString(cnAndPort).get());
   if (NS_FAILED(rv)) {
     return rv;
   }
-  rv = block->SetString(1, NS_ConvertUTF8toUTF16(organization).get());
+  rv = block->SetString(1, PromiseFlatString(organization).get());
   if (NS_FAILED(rv)) {
     return rv;
   }
-  rv = block->SetString(2, NS_ConvertUTF8toUTF16(issuerOrg).get());
-  if (NS_FAILED(rv)) {
-    return rv;
-  }
-
-  rv = block->SetInt(0, port);
+  rv = block->SetString(2, PromiseFlatString(issuerOrg).get());
   if (NS_FAILED(rv)) {
     return rv;
   }
@@ -362,7 +356,7 @@ nsNSSDialogs::GetPKCS12FilePassword(nsIInterfaceRequestor* ctx,
 
   nsAutoString msg;
   nsresult rv = mPIPStringBundle->GetStringFromName(
-    u"getPKCS12FilePasswordMessage", getter_Copies(msg));
+    MOZ_UTF16("getPKCS12FilePasswordMessage"), getter_Copies(msg));
   if (NS_FAILED(rv)) {
     return rv;
   }

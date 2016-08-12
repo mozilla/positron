@@ -11,7 +11,6 @@
 #include "mozilla/layers/LayersTypes.h"
 #include "mozilla/layers/CompositableForwarder.h"
 #include "mozilla/gfx/Types.h"
-#include "mozilla/Vector.h"
 
 namespace mozilla {
 
@@ -118,7 +117,9 @@ public:
 
   virtual void ReturnSnapshot(already_AddRefed<gfx::SourceSurface> aSnapshot) override;
 
-  virtual TextureClient* GetTextureClient() override;
+  TextureClient* GetTextureClient() override {
+    return mFront;
+  }
 
   virtual void NotifyInactive() override;
 
@@ -131,20 +132,17 @@ protected:
 
   ~PersistentBufferProviderShared();
 
-  TextureClient* GetTexture(Maybe<uint32_t> aIndex);
-  bool CheckIndex(uint32_t aIndex) { return aIndex < mTextures.length(); }
-
   void Destroy();
 
   gfx::IntSize mSize;
   gfx::SurfaceFormat mFormat;
   RefPtr<CompositableForwarder> mFwd;
-  Vector<RefPtr<TextureClient>, 4> mTextures;
-  // Offset of the texture in mTextures that the canvas uses.
-  Maybe<uint32_t> mBack;
-  // Offset of the texture in mTextures that is presented to the compositor.
-  Maybe<uint32_t> mFront;
-
+  // The texture presented to the compositor.
+  RefPtr<TextureClient> mFront;
+  // The texture that the canvas uses.
+  RefPtr<TextureClient> mBack;
+  // An extra texture we keep around temporarily to avoid allocating.
+  RefPtr<TextureClient> mBuffer;
   RefPtr<gfx::DrawTarget> mDrawTarget;
   RefPtr<gfx::SourceSurface > mSnapshot;
 };

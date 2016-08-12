@@ -1741,7 +1741,7 @@ public:
     NS_DECL_NSICLASSINFO
 
 public:
-    nsXPCConstructor() = delete;
+    nsXPCConstructor(); // not implemented
     nsXPCConstructor(nsIJSCID* aClassID,
                      nsIJSIID* aInterfaceID,
                      const char* aInitializer);

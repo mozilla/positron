@@ -1075,9 +1075,8 @@ CSSStyleSheetInner::SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const
 // CSS Style Sheet
 //
 
-CSSStyleSheet::CSSStyleSheet(css::SheetParsingMode aParsingMode,
-                             CORSMode aCORSMode, ReferrerPolicy aReferrerPolicy)
-  : StyleSheet(StyleBackendType::Gecko, aParsingMode),
+CSSStyleSheet::CSSStyleSheet(CORSMode aCORSMode, ReferrerPolicy aReferrerPolicy)
+  : StyleSheet(StyleBackendType::Gecko),
     mTitle(),
     mParent(nullptr),
     mOwnerRule(nullptr),
@@ -1090,11 +1089,10 @@ CSSStyleSheet::CSSStyleSheet(css::SheetParsingMode aParsingMode,
                                   SRIMetadata());
 }
 
-CSSStyleSheet::CSSStyleSheet(css::SheetParsingMode aParsingMode,
-                             CORSMode aCORSMode,
+CSSStyleSheet::CSSStyleSheet(CORSMode aCORSMode,
                              ReferrerPolicy aReferrerPolicy,
                              const SRIMetadata& aIntegrity)
-  : StyleSheet(StyleBackendType::Gecko, aParsingMode),
+  : StyleSheet(StyleBackendType::Gecko),
     mTitle(),
     mParent(nullptr),
     mOwnerRule(nullptr),
@@ -1163,6 +1161,22 @@ CSSStyleSheet::~CSSStyleSheet()
   if (mInRuleProcessorCache) {
     RuleProcessorCache::RemoveSheet(this);
   }
+}
+
+mozilla::dom::CSSStyleSheetParsingMode
+CSSStyleSheet::ParsingMode()
+{
+#define CHECK(X, Y) \
+  static_assert(static_cast<int>(X) == static_cast<int>(Y),             \
+                "mozilla::dom::CSSStyleSheetParsingMode and mozilla::css::SheetParsingMode should have identical values");
+
+  CHECK(mozilla::dom::CSSStyleSheetParsingMode::Agent, css::eAgentSheetFeatures);
+  CHECK(mozilla::dom::CSSStyleSheetParsingMode::User, css::eUserSheetFeatures);
+  CHECK(mozilla::dom::CSSStyleSheetParsingMode::Author, css::eAuthorSheetFeatures);
+
+#undef CHECK
+
+  return static_cast<mozilla::dom::CSSStyleSheetParsingMode>(mParsingMode);
 }
 
 void
@@ -2214,7 +2228,8 @@ CSSStyleSheet::ReparseSheet(const nsAString& aInput)
 
   nsCSSParser parser(loader, this);
   nsresult rv = parser.ParseSheet(aInput, mInner->mSheetURI, mInner->mBaseURI,
-                                  mInner->mPrincipal, lineNumber, &reusableSheets);
+                                  mInner->mPrincipal, lineNumber,
+                                  mParsingMode, &reusableSheets);
   DidDirty(); // we are always 'dirty' here since we always remove rules first
   NS_ENSURE_SUCCESS(rv, rv);
 

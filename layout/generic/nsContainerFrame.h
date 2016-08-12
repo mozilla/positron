@@ -254,8 +254,8 @@ public:
    */
   void ReflowChild(nsIFrame*                      aChildFrame,
                    nsPresContext*                 aPresContext,
-                   ReflowOutput&           aDesiredSize,
-                   const ReflowInput&       aReflowInput,
+                   nsHTMLReflowMetrics&           aDesiredSize,
+                   const nsHTMLReflowState&       aReflowState,
                    const mozilla::WritingMode&    aWM,
                    const mozilla::LogicalPoint&   aPos,
                    const nsSize&                  aContainerSize,
@@ -284,8 +284,8 @@ public:
    */
   static void FinishReflowChild(nsIFrame*                    aKidFrame,
                                 nsPresContext*               aPresContext,
-                                const ReflowOutput&   aDesiredSize,
-                                const ReflowInput*     aReflowInput,
+                                const nsHTMLReflowMetrics&   aDesiredSize,
+                                const nsHTMLReflowState*     aReflowState,
                                 const mozilla::WritingMode&  aWM,
                                 const mozilla::LogicalPoint& aPos,
                                 const nsSize&                aContainerSize,
@@ -296,8 +296,8 @@ public:
   //    incrementally.
   void ReflowChild(nsIFrame*                      aKidFrame,
                    nsPresContext*                 aPresContext,
-                   ReflowOutput&           aDesiredSize,
-                   const ReflowInput&       aReflowInput,
+                   nsHTMLReflowMetrics&           aDesiredSize,
+                   const nsHTMLReflowState&       aReflowState,
                    nscoord                        aX,
                    nscoord                        aY,
                    uint32_t                       aFlags,
@@ -306,8 +306,8 @@ public:
 
   static void FinishReflowChild(nsIFrame*                  aKidFrame,
                                 nsPresContext*             aPresContext,
-                                const ReflowOutput& aDesiredSize,
-                                const ReflowInput*   aReflowInput,
+                                const nsHTMLReflowMetrics& aDesiredSize,
+                                const nsHTMLReflowState*   aReflowState,
                                 nscoord                    aX,
                                 nscoord                    aY,
                                 uint32_t                   aFlags);
@@ -388,7 +388,7 @@ public:
    * @param aMergeFunc is passed to DrainExcessOverflowContainersList
    */
   void ReflowOverflowContainerChildren(nsPresContext*           aPresContext,
-                                       const ReflowInput& aReflowInput,
+                                       const nsHTMLReflowState& aReflowState,
                                        nsOverflowAreas&         aOverflowRects,
                                        uint32_t                 aFlags,
                                        nsReflowStatus&          aStatus,

@@ -43,7 +43,6 @@
 #include "mozilla/RestyleManagerHandle.h"
 #include "prenv.h"
 #include "mozilla/StaticPresData.h"
-#include "mozilla/StyleBackendType.h"
 
 class nsAString;
 class nsIPrintSettings;
@@ -161,11 +160,10 @@ public:
   nsresult Init(nsDeviceContext* aDeviceContext);
 
   /**
-   * Set and detach presentation shell that this context is bound to.
+   * Set the presentation shell that this context is bound to.
    * A presentation context may only be bound to a single shell.
    */
-  void AttachShell(nsIPresShell* aShell, mozilla::StyleBackendType aBackendType);
-  void DetachShell();
+  void SetShell(nsIPresShell* aShell);
 
 
   nsPresContextType Type() const { return mType; }
@@ -241,10 +239,7 @@ public:
 
   nsRefreshDriver* RefreshDriver() { return mRefreshDriver; }
 
-  mozilla::RestyleManagerHandle RestyleManager() {
-    MOZ_ASSERT(mRestyleManager);
-    return mRestyleManager;
-  }
+  mozilla::RestyleManagerHandle RestyleManager() { return mRestyleManager; }
 
   mozilla::CounterStyleManager* CounterStyleManager() {
     return mCounterStyleManager;
@@ -1104,6 +1099,20 @@ public:
 
   void SetHasWarnedAboutTooLargeDashedOrDottedRadius() {
     mHasWarnedAboutTooLargeDashedOrDottedRadius = true;
+  }
+
+  static bool StyloEnabled()
+  {
+    // Stylo (the Servo backend for Gecko's style system) is generally enabled
+    // or disabled at compile-time. However, we provide the additional capability
+    // to disable it dynamically in stylo-enabled builds via an environmental
+    // variable.
+#ifdef MOZ_STYLO
+    static bool disabled = PR_GetEnv("MOZ_DISABLE_STYLO");
+    return !disabled;
+#else
+    return false;
+#endif
   }
 
 protected:

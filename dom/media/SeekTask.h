@@ -8,6 +8,7 @@
 #define SEEK_TASK_H
 
 #include "mozilla/MozPromise.h"
+#include "MediaCallbackID.h"
 #include "SeekTarget.h"
 
 namespace mozilla {

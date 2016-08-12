@@ -113,7 +113,7 @@ public:
  * mozilla::InternalFormEvent
  *
  * We hold the originating form control for form submit and reset events.
- * mOriginator is a weak pointer (does not hold a strong reference).
+ * originator is a weak pointer (does not hold a strong reference).
  ******************************************************************************/
 
 class InternalFormEvent : public WidgetEvent
@@ -123,7 +123,7 @@ public:
 
   InternalFormEvent(bool aIsTrusted, EventMessage aMessage)
     : WidgetEvent(aIsTrusted, aMessage, eFormEventClass)
-    , mOriginator(nullptr)
+    , originator(nullptr)
   {
   }
 
@@ -137,13 +137,13 @@ public:
     return result;
   }
 
-  nsIContent* mOriginator;
+  nsIContent *originator;
 
   void AssignFormEventData(const InternalFormEvent& aEvent, bool aCopyTargets)
   {
     AssignEventData(aEvent, aCopyTargets);
 
-    // Don't copy mOriginator due to a weak pointer.
+    // Don't copy originator due to a weak pointer.
   }
 };
 

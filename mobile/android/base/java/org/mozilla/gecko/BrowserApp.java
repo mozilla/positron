@@ -11,11 +11,7 @@ import android.os.Environment;
 import android.support.annotation.CheckResult;
 import android.support.annotation.NonNull;
 
-import android.widget.VideoView;
-import android.graphics.Rect;
-
 import org.json.JSONArray;
-import org.mozilla.gecko.activitystream.ActivityStream;
 import org.mozilla.gecko.adjust.AdjustHelperInterface;
 import org.mozilla.gecko.annotation.RobocopTarget;
 import org.mozilla.gecko.AppConstants.Versions;
@@ -50,18 +46,16 @@ import org.mozilla.gecko.home.HomeConfig;
 import org.mozilla.gecko.home.HomeConfig.PanelType;
 import org.mozilla.gecko.home.HomeConfigPrefsBackend;
 import org.mozilla.gecko.home.HomeFragment;
+import org.mozilla.gecko.home.HomePager;
 import org.mozilla.gecko.home.HomePager.OnUrlOpenInBackgroundListener;
 import org.mozilla.gecko.home.HomePager.OnUrlOpenListener;
 import org.mozilla.gecko.home.HomePanelsManager;
-import org.mozilla.gecko.home.HomeScreen;
 import org.mozilla.gecko.home.SearchEngine;
 import org.mozilla.gecko.javaaddons.JavaAddonManager;
 import org.mozilla.gecko.media.AudioFocusAgent;
 import org.mozilla.gecko.menu.GeckoMenu;
 import org.mozilla.gecko.menu.GeckoMenuItem;
 import org.mozilla.gecko.mozglue.SafeIntent;
-import org.mozilla.gecko.notifications.NotificationClient;
-import org.mozilla.gecko.notifications.ServiceNotificationClient;
 import org.mozilla.gecko.overlays.ui.ShareDialog;
 import org.mozilla.gecko.permissions.Permissions;
 import org.mozilla.gecko.preferences.ClearOnShutdownPref;
@@ -98,6 +92,7 @@ import org.mozilla.gecko.updater.UpdateServiceHelper;
 import org.mozilla.gecko.util.ActivityUtils;
 import org.mozilla.gecko.util.Clipboard;
 import org.mozilla.gecko.util.EventCallback;
+import org.mozilla.gecko.util.Experiments;
 import org.mozilla.gecko.util.FloatUtils;
 import org.mozilla.gecko.util.GamepadUtils;
 import org.mozilla.gecko.util.GeckoEventListener;
@@ -127,6 +122,7 @@ import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.content.res.Resources;
 import android.graphics.Bitmap;
+import android.graphics.Rect;
 import android.graphics.drawable.BitmapDrawable;
 import android.net.Uri;
 import android.nfc.NdefMessage;
@@ -176,6 +172,8 @@ import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.lang.reflect.Method;
+import java.net.MalformedURLException;
+import java.net.URL;
 import java.net.URLEncoder;
 import java.util.Arrays;
 import java.util.Collections;
@@ -241,14 +239,9 @@ public class BrowserApp extends GeckoApp
     private TabStripInterface mTabStrip;
     private ToolbarProgressView mProgressView;
     private FirstrunAnimationContainer mFirstrunAnimationContainer;
-    private HomeScreen mHomeScreen;
+    private HomePager mHomePager;
     private TabsPanel mTabsPanel;
-    /**
-     * Container for the home screen implementation. This will be populated with any valid
-     * home screen implementation (currently that is just the HomePager, but that will be extended
-     * to permit further experimental replacement panels such as the activity-stream panel).
-     */
-    private ViewGroup mHomeScreenContainer;
+    private ViewGroup mHomePagerContainer;
     private ActionModeCompat mActionMode;
     private TabHistoryController tabHistoryController;
     private ZoomedView mZoomedView;
@@ -643,21 +636,21 @@ public class BrowserApp extends GeckoApp
                 // If we get a gamepad panning MotionEvent while the focus is not on the layerview,
                 // put the focus on the layerview and carry on
                 if (mLayerView != null && !mLayerView.hasFocus() && GamepadUtils.isPanningControl(event)) {
-                    if (mHomeScreen == null) {
+                    if (mHomePager == null) {
                         return false;
                     }
 
                     if (isHomePagerVisible()) {
                         mLayerView.requestFocus();
                     } else {
-                        mHomeScreen.requestFocus();
+                        mHomePager.requestFocus();
                     }
                 }
                 return false;
             }
         });
 
-        mHomeScreenContainer = (ViewGroup) findViewById(R.id.home_screen_container);
+        mHomePagerContainer = (ViewGroup) findViewById(R.id.home_pager_container);
 
         mBrowserSearchContainer = findViewById(R.id.search_container);
         mBrowserSearch = (BrowserSearch) getSupportFragmentManager().findFragmentByTag(BROWSER_SEARCH_TAG);
@@ -677,8 +670,7 @@ public class BrowserApp extends GeckoApp
             "Menu:Update",
             "LightweightTheme:Update",
             "Search:Keyword",
-            "Prompt:ShowTop",
-            "Video:Play");
+            "Prompt:ShowTop");
 
         EventDispatcher.getInstance().registerGeckoThreadListener((NativeEventListener)this,
             "CharEncoding:Data",
@@ -736,7 +728,7 @@ public class BrowserApp extends GeckoApp
 
         if (savedInstanceState != null) {
             mDynamicToolbar.onRestoreInstanceState(savedInstanceState);
-            mHomeScreenContainer.setPadding(0, savedInstanceState.getInt(STATE_ABOUT_HOME_TOP_PADDING), 0, 0);
+            mHomePagerContainer.setPadding(0, savedInstanceState.getInt(STATE_ABOUT_HOME_TOP_PADDING), 0, 0);
         }
 
         mDynamicToolbar.setEnabledChangedListener(new DynamicToolbar.OnEnabledChangedListener() {
@@ -752,7 +744,7 @@ public class BrowserApp extends GeckoApp
         // The update service is enabled for RELEASE_BUILD, which includes the release and beta channels.
         // However, no updates are served.  Therefore, we don't trust the update service directly, and
         // try to avoid prompting unnecessarily. See Bug 1232798.
-        if (!AppConstants.RELEASE_BUILD && UpdateServiceHelper.isUpdaterEnabled(this)) {
+        if (!AppConstants.RELEASE_BUILD && UpdateServiceHelper.isUpdaterEnabled()) {
             Permissions.from(this)
                        .withPermissions(Manifest.permission.WRITE_EXTERNAL_STORAGE)
                        .doNotPrompt()
@@ -770,10 +762,6 @@ public class BrowserApp extends GeckoApp
         for (final BrowserAppDelegate delegate : delegates) {
             delegate.onCreate(this, savedInstanceState);
         }
-
-        // We want to get an understanding of how our user base is spread (bug 1221646).
-        final String installerPackageName = getPackageManager().getInstallerPackageName(getPackageName());
-        Telemetry.sendUIEvent(TelemetryContract.Event.LAUNCH, TelemetryContract.Method.SYSTEM, "installer_" + installerPackageName);
     }
 
     /**
@@ -1166,7 +1154,7 @@ public class BrowserApp extends GeckoApp
             @Override
             public void onFocusChange(View v, boolean hasFocus) {
                 if (isHomePagerVisible()) {
-                    mHomeScreen.onToolbarFocusChange(hasFocus);
+                    mHomePager.onToolbarFocusChange(hasFocus);
                 }
             }
         });
@@ -1223,14 +1211,14 @@ public class BrowserApp extends GeckoApp
                 mLayerView.getDynamicToolbarAnimator().addTranslationListener(this);
             }
             setToolbarMargin(0);
-            mHomeScreenContainer.setPadding(0, mBrowserChrome.getHeight(), 0, 0);
+            mHomePagerContainer.setPadding(0, mBrowserChrome.getHeight(), 0, 0);
         } else {
             // Immediately show the toolbar when disabling the dynamic
             // toolbar.
             if (mLayerView != null) {
                 mLayerView.getDynamicToolbarAnimator().removeTranslationListener(this);
             }
-            mHomeScreenContainer.setPadding(0, 0, 0, 0);
+            mHomePagerContainer.setPadding(0, 0, 0, 0);
             if (mBrowserChrome != null) {
                 ViewHelper.setTranslationY(mBrowserChrome, 0);
             }
@@ -1575,7 +1563,7 @@ public class BrowserApp extends GeckoApp
                 // When the dynamic toolbar is enabled, set the padding on the
                 // about:home widget directly - this is to avoid resizing the
                 // LayerView, which can cause visible artifacts.
-                mHomeScreenContainer.setPadding(0, height, 0, 0);
+                mHomePagerContainer.setPadding(0, height, 0, 0);
             } else {
                 setToolbarMargin(height);
                 height = 0;
@@ -1977,22 +1965,6 @@ public class BrowserApp extends GeckoApp
                         mDynamicToolbar.setVisible(true, VisibilityTransition.ANIMATE);
                     }
                 });
-            } else if (event.equals("Video:Play")) {
-                final String uri = message.getString("uri");
-                final String uuid = message.getString("uuid");
-                ThreadUtils.postToUiThread(new Runnable() {
-                    @Override
-                    public void run() {
-                        VideoView view = new VideoView(BrowserApp.this);
-                        android.widget.MediaController mediaController = new android.widget.MediaController(BrowserApp.this);
-                        view.setMediaController(mediaController);
-                        view.setVideoURI(Uri.parse(uri));
-                        BrowserApp.this.addFullScreenPluginView(view);
-                        view.start();
-
-                        Telemetry.sendUIEvent(TelemetryContract.Event.SHOW, TelemetryContract.Method.CONTENT, "playhls");
-                    }
-                });
             } else if (event.equals("Prompt:ShowTop")) {
                 // Bring this activity to front so the prompt is visible..
                 Intent bringToFrontIntent = new Intent();
@@ -2227,7 +2199,7 @@ public class BrowserApp extends GeckoApp
     public void onSaveInstanceState(Bundle outState) {
         super.onSaveInstanceState(outState);
         mDynamicToolbar.onSaveInstanceState(outState);
-        outState.putInt(STATE_ABOUT_HOME_TOP_PADDING, mHomeScreenContainer.getPaddingTop());
+        outState.putInt(STATE_ABOUT_HOME_TOP_PADDING, mHomePagerContainer.getPaddingTop());
     }
 
     /**
@@ -2321,13 +2293,13 @@ public class BrowserApp extends GeckoApp
     }
 
     private boolean isHomePagerVisible() {
-        return (mHomeScreen != null && mHomeScreen.isVisible()
-                && mHomeScreenContainer != null && mHomeScreenContainer.getVisibility() == View.VISIBLE);
+        return (mHomePager != null && mHomePager.isVisible()
+            && mHomePagerContainer != null && mHomePagerContainer.getVisibility() == View.VISIBLE);
     }
 
     private boolean isFirstrunVisible() {
         return (mFirstrunAnimationContainer != null && mFirstrunAnimationContainer.isVisible()
-                && mHomeScreenContainer != null && mHomeScreenContainer.getVisibility() == View.VISIBLE);
+            && mHomePagerContainer != null && mHomePagerContainer.getVisibility() == View.VISIBLE);
     }
 
     /**
@@ -2681,7 +2653,7 @@ public class BrowserApp extends GeckoApp
             });
         }
 
-        mHomeScreenContainer.setVisibility(View.VISIBLE);
+        mHomePagerContainer.setVisibility(View.VISIBLE);
     }
 
     private void showHomePager(String panelId, Bundle panelRestoreData) {
@@ -2691,7 +2663,7 @@ public class BrowserApp extends GeckoApp
     private void showHomePagerWithAnimator(String panelId, Bundle panelRestoreData, PropertyAnimator animator) {
         if (isHomePagerVisible()) {
             // Home pager already visible, make sure it shows the correct panel.
-            mHomeScreen.showPanel(panelId, panelRestoreData);
+            mHomePager.showPanel(panelId, panelRestoreData);
             return;
         }
 
@@ -2710,58 +2682,50 @@ public class BrowserApp extends GeckoApp
             mDynamicToolbar.setVisible(true, VisibilityTransition.IMMEDIATE);
         }
 
-        if (mHomeScreen == null) {
-            if (ActivityStream.isEnabled(this)) {
-                final ViewStub asStub = (ViewStub) findViewById(R.id.activity_stream_stub);
-                mHomeScreen = (HomeScreen) asStub.inflate();
-            } else {
-                final ViewStub homePagerStub = (ViewStub) findViewById(R.id.home_pager_stub);
-                mHomeScreen = (HomeScreen) homePagerStub.inflate();
+        if (mHomePager == null) {
+            final ViewStub homePagerStub = (ViewStub) findViewById(R.id.home_pager_stub);
+            mHomePager = (HomePager) homePagerStub.inflate();
 
-                // For now these listeners are HomePager specific. In future we might want
-                // to have a more abstracted data storage, with one Bundle containing all
-                // relevant restore data.
-                mHomeScreen.setOnPanelChangeListener(new HomeScreen.OnPanelChangeListener() {
-                    @Override
-                    public void onPanelSelected(String panelId) {
-                        final Tab currentTab = Tabs.getInstance().getSelectedTab();
-                        if (currentTab != null) {
-                            currentTab.setMostRecentHomePanel(panelId);
-                        }
+            mHomePager.setOnPanelChangeListener(new HomePager.OnPanelChangeListener() {
+                @Override
+                public void onPanelSelected(String panelId) {
+                    final Tab currentTab = Tabs.getInstance().getSelectedTab();
+                    if (currentTab != null) {
+                        currentTab.setMostRecentHomePanel(panelId);
                     }
-                });
+                }
+            });
 
-                // Set this listener to persist restore data (via the Tab) every time panel state changes.
-                mHomeScreen.setPanelStateChangeListener(new HomeFragment.PanelStateChangeListener() {
-                    @Override
-                    public void onStateChanged(Bundle bundle) {
-                        final Tab currentTab = Tabs.getInstance().getSelectedTab();
-                        if (currentTab != null) {
-                            currentTab.setMostRecentHomePanelData(bundle);
-                        }
+            // Set this listener to persist restore data (via the Tab) every time panel state changes.
+            mHomePager.setPanelStateChangeListener(new HomeFragment.PanelStateChangeListener() {
+                @Override
+                public void onStateChanged(Bundle bundle) {
+                    final Tab currentTab = Tabs.getInstance().getSelectedTab();
+                    if (currentTab != null) {
+                        currentTab.setMostRecentHomePanelData(bundle);
                     }
-                });
-            }
+                }
+            });
 
             // Don't show the banner in guest mode.
             if (!Restrictions.isUserRestricted()) {
                 final ViewStub homeBannerStub = (ViewStub) findViewById(R.id.home_banner_stub);
                 final HomeBanner homeBanner = (HomeBanner) homeBannerStub.inflate();
-                mHomeScreen.setBanner(homeBanner);
+                mHomePager.setBanner(homeBanner);
 
                 // Remove the banner from the view hierarchy if it is dismissed.
                 homeBanner.setOnDismissListener(new HomeBanner.OnDismissListener() {
                     @Override
                     public void onDismiss() {
-                        mHomeScreen.setBanner(null);
-                        mHomeScreenContainer.removeView(homeBanner);
+                        mHomePager.setBanner(null);
+                        mHomePagerContainer.removeView(homeBanner);
                     }
                 });
             }
         }
 
-        mHomeScreenContainer.setVisibility(View.VISIBLE);
-        mHomeScreen.load(getSupportLoaderManager(),
+        mHomePagerContainer.setVisibility(View.VISIBLE);
+        mHomePager.load(getSupportLoaderManager(),
                         getSupportFragmentManager(),
                         panelId,
                         panelRestoreData,
@@ -2841,10 +2805,10 @@ public class BrowserApp extends GeckoApp
 
         // Display the previously hidden web content (which prevented screen reader access).
         mLayerView.setVisibility(View.VISIBLE);
-        mHomeScreenContainer.setVisibility(View.GONE);
+        mHomePagerContainer.setVisibility(View.GONE);
 
-        if (mHomeScreen != null) {
-            mHomeScreen.unload();
+        if (mHomePager != null) {
+            mHomePager.unload();
         }
 
         mBrowserToolbar.setNextFocusDownId(R.id.layer_view);
@@ -2880,7 +2844,7 @@ public class BrowserApp extends GeckoApp
 
         // Prevent overdraw by hiding the underlying web content and HomePager View
         hideWebContent();
-        mHomeScreenContainer.setVisibility(View.INVISIBLE);
+        mHomePagerContainer.setVisibility(View.INVISIBLE);
 
         final FragmentManager fm = getSupportFragmentManager();
 
@@ -3799,7 +3763,7 @@ public class BrowserApp extends GeckoApp
 
         if (AppConstants.MOZ_ANDROID_BEAM && NfcAdapter.ACTION_NDEF_DISCOVERED.equals(action)) {
             String uri = intent.getDataString();
-            mLayerView.loadUri(uri, GeckoView.LOAD_NEW_TAB);
+            GeckoAppShell.sendEventToGecko(GeckoEvent.createURILoadEvent(uri));
         }
 
         // Only solicit feedback when the app has been launched from the icon shortcut.

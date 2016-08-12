@@ -17,6 +17,7 @@
 #include "nsStringFwd.h"
 #include "gfx2DGlue.h"
 
+class gfxTextContextPaint;
 class nsIContent;
 class nsIDocument;
 class nsIFrame;
@@ -27,7 +28,6 @@ class nsSVGElement;
 namespace mozilla {
 class nsSVGAnimatedTransformList;
 class SVGAnimatedPreserveAspectRatio;
-class SVGContextPaint;
 class SVGPreserveAspectRatio;
 namespace dom {
 class Element;
@@ -172,7 +172,7 @@ public:
   static void GetStrokeOptions(AutoStrokeOptions* aStrokeOptions,
                                nsSVGElement* aElement,
                                nsStyleContext* aStyleContext,
-                               mozilla::SVGContextPaint* aContextPaint,
+                               gfxTextContextPaint *aContextPaint,
                                StrokeOptionFlags aFlags = eAllStrokeOptions);
 
   /**
@@ -186,7 +186,7 @@ public:
    */
   static Float GetStrokeWidth(nsSVGElement* aElement,
                               nsStyleContext* aStyleContext,
-                              mozilla::SVGContextPaint* aContextPaint);
+                              gfxTextContextPaint *aContextPaint);
 
   /*
    * Get the number of CSS px (user units) per em (i.e. the em-height in user

@@ -104,8 +104,8 @@ public:
                                 const nsDisplayListSet& aLists) override;
 
   virtual void Reflow(nsPresContext*           aPresContext,
-                          ReflowOutput&     aDesiredSize,
-                          const ReflowInput& aReflowInput,
+                          nsHTMLReflowMetrics&     aDesiredSize,
+                          const nsHTMLReflowState& aReflowState,
                           nsReflowStatus&          aStatus) override;
 
   bool GetVisibility() { return mVisibility; }
@@ -153,8 +153,8 @@ public:
                                 const nsDisplayListSet& aLists) override;
 
   virtual void Reflow(nsPresContext*           aPresContext,
-                          ReflowOutput&     aDesiredSize,
-                          const ReflowInput& aReflowInput,
+                          nsHTMLReflowMetrics&     aDesiredSize,
+                          const nsHTMLReflowState& aReflowState,
                           nsReflowStatus&          aStatus) override;
 
 protected:
@@ -563,17 +563,17 @@ int32_t nsHTMLFramesetFrame::GetBorderWidth(nsPresContext* aPresContext,
 
 void
 nsHTMLFramesetFrame::GetDesiredSize(nsPresContext*           aPresContext,
-                                    const ReflowInput& aReflowInput,
-                                    ReflowOutput&     aDesiredSize)
+                                    const nsHTMLReflowState& aReflowState,
+                                    nsHTMLReflowMetrics&     aDesiredSize)
 {
-  WritingMode wm = aReflowInput.GetWritingMode();
+  WritingMode wm = aReflowState.GetWritingMode();
   LogicalSize desiredSize(wm);
   nsHTMLFramesetFrame* framesetParent = do_QueryFrame(GetParent());
   if (nullptr == framesetParent) {
     if (aPresContext->IsPaginated()) {
       // XXX This needs to be changed when framesets paginate properly
-      desiredSize.ISize(wm) = aReflowInput.AvailableISize();
-      desiredSize.BSize(wm) = aReflowInput.AvailableBSize();
+      desiredSize.ISize(wm) = aReflowState.AvailableISize();
+      desiredSize.BSize(wm) = aReflowState.AvailableBSize();
     } else {
       LogicalSize area(wm, aPresContext->GetVisibleArea().Size());
 
@@ -682,29 +682,29 @@ nsHTMLFramesetFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
 void
 nsHTMLFramesetFrame::ReflowPlaceChild(nsIFrame*                aChild,
                                       nsPresContext*           aPresContext,
-                                      const ReflowInput& aReflowInput,
+                                      const nsHTMLReflowState& aReflowState,
                                       nsPoint&                 aOffset,
                                       nsSize&                  aSize,
                                       nsIntPoint*              aCellIndex)
 {
   // reflow the child
-  ReflowInput reflowInput(aPresContext, aReflowInput, aChild,
+  nsHTMLReflowState reflowState(aPresContext, aReflowState, aChild,
                                 LogicalSize(aChild->GetWritingMode(), aSize));
-  reflowInput.SetComputedWidth(std::max(0, aSize.width - reflowInput.ComputedPhysicalBorderPadding().LeftRight()));
-  reflowInput.SetComputedHeight(std::max(0, aSize.height - reflowInput.ComputedPhysicalBorderPadding().TopBottom()));
-  ReflowOutput reflowOutput(aReflowInput);
-  reflowOutput.Width() = aSize.width;
-  reflowOutput.Height() = aSize.height;
+  reflowState.SetComputedWidth(std::max(0, aSize.width - reflowState.ComputedPhysicalBorderPadding().LeftRight()));
+  reflowState.SetComputedHeight(std::max(0, aSize.height - reflowState.ComputedPhysicalBorderPadding().TopBottom()));
+  nsHTMLReflowMetrics metrics(aReflowState);
+  metrics.Width() = aSize.width;
+  metrics.Height() = aSize.height;
   nsReflowStatus status;
 
-  ReflowChild(aChild, aPresContext, reflowOutput, reflowInput, aOffset.x,
+  ReflowChild(aChild, aPresContext, metrics, reflowState, aOffset.x,
               aOffset.y, 0, status);
   NS_ASSERTION(NS_FRAME_IS_COMPLETE(status), "bad status");
 
   // Place and size the child
-  reflowOutput.Width() = aSize.width;
-  reflowOutput.Height() = aSize.height;
-  FinishReflowChild(aChild, aPresContext, reflowOutput, nullptr, aOffset.x, aOffset.y, 0);
+  metrics.Width() = aSize.width;
+  metrics.Height() = aSize.height;
+  FinishReflowChild(aChild, aPresContext, metrics, nullptr, aOffset.x, aOffset.y, 0);
 }
 
 static
@@ -792,26 +792,26 @@ nscolor nsHTMLFramesetFrame::GetBorderColor(nsIContent* aContent)
 
 void
 nsHTMLFramesetFrame::Reflow(nsPresContext*           aPresContext,
-                            ReflowOutput&     aDesiredSize,
-                            const ReflowInput& aReflowInput,
+                            nsHTMLReflowMetrics&     aDesiredSize,
+                            const nsHTMLReflowState& aReflowState,
                             nsReflowStatus&          aStatus)
 {
   MarkInReflow();
   DO_GLOBAL_REFLOW_COUNT("nsHTMLFramesetFrame");
-  DISPLAY_REFLOW(aPresContext, this, aReflowInput, aDesiredSize, aStatus);
+  DISPLAY_REFLOW(aPresContext, this, aReflowState, aDesiredSize, aStatus);
   nsIPresShell *shell = aPresContext->PresShell();
   StyleSetHandle styleSet = shell->StyleSet();
 
   GetParent()->AddStateBits(NS_FRAME_CONTAINS_RELATIVE_BSIZE);
 
-  //printf("FramesetFrame2::Reflow %X (%d,%d) \n", this, aReflowInput.AvailableWidth(), aReflowInput.AvailableHeight());
+  //printf("FramesetFrame2::Reflow %X (%d,%d) \n", this, aReflowState.AvailableWidth(), aReflowState.AvailableHeight());
   // Always get the size so that the caller knows how big we are
-  GetDesiredSize(aPresContext, aReflowInput, aDesiredSize);
+  GetDesiredSize(aPresContext, aReflowState, aDesiredSize);
 
-  nscoord width  = (aDesiredSize.Width() <= aReflowInput.AvailableWidth())
-    ? aDesiredSize.Width() : aReflowInput.AvailableWidth();
-  nscoord height = (aDesiredSize.Height() <= aReflowInput.AvailableHeight())
-    ? aDesiredSize.Height() : aReflowInput.AvailableHeight();
+  nscoord width  = (aDesiredSize.Width() <= aReflowState.AvailableWidth())
+    ? aDesiredSize.Width() : aReflowState.AvailableWidth();
+  nscoord height = (aDesiredSize.Height() <= aReflowState.AvailableHeight())
+    ? aDesiredSize.Height() : aReflowState.AvailableHeight();
 
   // We might be reflowed more than once with NS_FRAME_FIRST_REFLOW;
   // that's allowed.  (Though it will only happen for misuse of frameset
@@ -845,7 +845,7 @@ nsHTMLFramesetFrame::Reflow(nsPresContext*           aPresContext,
   if (mNumRows != rows || mNumCols != cols) {
     aStatus = NS_FRAME_COMPLETE;
     mDrag.UnSet();
-    NS_FRAME_SET_TRUNCATION(aStatus, aReflowInput, aDesiredSize);
+    NS_FRAME_SET_TRUNCATION(aStatus, aReflowState, aDesiredSize);
     return;
   }
 
@@ -923,7 +923,7 @@ nsHTMLFramesetFrame::Reflow(nsPresContext*           aPresContext,
         borderChildX++;
       }
       nsSize borderSize(aDesiredSize.Width(), borderWidth);
-      ReflowPlaceChild(borderFrame, aPresContext, aReflowInput, offset, borderSize);
+      ReflowPlaceChild(borderFrame, aPresContext, aReflowState, offset, borderSize);
       borderFrame = nullptr;
       offset.y += borderWidth;
     } else {
@@ -953,14 +953,14 @@ nsHTMLFramesetFrame::Reflow(nsPresContext*           aPresContext,
             borderChildX++;
           }
           nsSize borderSize(borderWidth, aDesiredSize.Height());
-          ReflowPlaceChild(borderFrame, aPresContext, aReflowInput, offset, borderSize);
+          ReflowPlaceChild(borderFrame, aPresContext, aReflowState, offset, borderSize);
           borderFrame = nullptr;
         }
         offset.x += borderWidth;
       }
     }
 
-    ReflowPlaceChild(child, aPresContext, aReflowInput, offset, size, &cellIndex);
+    ReflowPlaceChild(child, aPresContext, aReflowState, offset, size, &cellIndex);
 
     if (firstTime) {
       int32_t childVis;
@@ -1082,7 +1082,7 @@ nsHTMLFramesetFrame::Reflow(nsPresContext*           aPresContext,
   aDesiredSize.SetOverflowAreasToDesiredBounds();
   FinishAndStoreOverflow(&aDesiredSize);
 
-  NS_FRAME_SET_TRUNCATION(aStatus, aReflowInput, aDesiredSize);
+  NS_FRAME_SET_TRUNCATION(aStatus, aReflowState, aDesiredSize);
 }
 
 nsIAtom*
@@ -1372,16 +1372,16 @@ void nsHTMLFramesetBorderFrame::SetColor(nscolor aColor)
 
 void
 nsHTMLFramesetBorderFrame::Reflow(nsPresContext*           aPresContext,
-                                  ReflowOutput&     aDesiredSize,
-                                  const ReflowInput& aReflowInput,
+                                  nsHTMLReflowMetrics&     aDesiredSize,
+                                  const nsHTMLReflowState& aReflowState,
                                   nsReflowStatus&          aStatus)
 {
   DO_GLOBAL_REFLOW_COUNT("nsHTMLFramesetBorderFrame");
-  DISPLAY_REFLOW(aPresContext, this, aReflowInput, aDesiredSize, aStatus);
+  DISPLAY_REFLOW(aPresContext, this, aReflowState, aDesiredSize, aStatus);
 
   // Override Reflow(), since we don't want to deal with what our
   // computed values are.
-  SizeToAvailSize(aReflowInput, aDesiredSize);
+  SizeToAvailSize(aReflowState, aDesiredSize);
 
   aDesiredSize.SetOverflowAreasToDesiredBounds();
   aStatus = NS_FRAME_COMPLETE;
@@ -1587,15 +1587,15 @@ nscoord nsHTMLFramesetBlankFrame::GetIntrinsicBSize()
 
 void
 nsHTMLFramesetBlankFrame::Reflow(nsPresContext*           aPresContext,
-                                 ReflowOutput&     aDesiredSize,
-                                 const ReflowInput& aReflowInput,
+                                 nsHTMLReflowMetrics&     aDesiredSize,
+                                 const nsHTMLReflowState& aReflowState,
                                  nsReflowStatus&          aStatus)
 {
   DO_GLOBAL_REFLOW_COUNT("nsHTMLFramesetBlankFrame");
 
   // Override Reflow(), since we don't want to deal with what our
   // computed values are.
-  SizeToAvailSize(aReflowInput, aDesiredSize);
+  SizeToAvailSize(aReflowState, aDesiredSize);
 
   aDesiredSize.SetOverflowAreasToDesiredBounds();
   aStatus = NS_FRAME_COMPLETE;

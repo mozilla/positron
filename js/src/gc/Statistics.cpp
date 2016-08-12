@@ -10,7 +10,6 @@
 #include "mozilla/DebugOnly.h"
 #include "mozilla/IntegerRange.h"
 #include "mozilla/PodOperations.h"
-#include "mozilla/Snprintf.h"
 
 #include <ctype.h>
 #include <stdarg.h>
@@ -341,11 +340,12 @@ Statistics::formatCompactSliceMessage() const
     const char* format =
         "GC Slice %u - Pause: %.3fms of %s budget (@ %.3fms); Reason: %s; Reset: %s%s; Times: ";
     char buffer[1024];
-    snprintf_literal(buffer, format, index,
-                     t(slice.duration()), budgetDescription, t(slice.start - slices[0].start),
-                     ExplainReason(slice.reason),
-                     slice.resetReason ? "yes - " : "no",
-                     slice.resetReason ? slice.resetReason : "");
+    memset(buffer, 0, sizeof(buffer));
+    JS_snprintf(buffer, sizeof(buffer), format, index,
+                t(slice.duration()), budgetDescription, t(slice.start - slices[0].start),
+                ExplainReason(slice.reason),
+                slice.resetReason ? "yes - " : "no",
+                slice.resetReason ? slice.resetReason : "");
 
     FragmentVector fragments;
     if (!fragments.append(DuplicateString(buffer)) ||
@@ -373,34 +373,34 @@ Statistics::formatCompactSummaryMessage() const
 
     char buffer[1024];
     if (!nonincrementalReason_) {
-        snprintf_literal(buffer,
-                         "Max Pause: %.3fms; MMU 20ms: %.1f%%; MMU 50ms: %.1f%%; Total: %.3fms; ",
-                         t(longest), mmu20 * 100., mmu50 * 100., t(total));
+        JS_snprintf(buffer, sizeof(buffer),
+                    "Max Pause: %.3fms; MMU 20ms: %.1f%%; MMU 50ms: %.1f%%; Total: %.3fms; ",
+                    t(longest), mmu20 * 100., mmu50 * 100., t(total));
     } else {
-        snprintf_literal(buffer, "Non-Incremental: %.3fms (%s); ",
-                         t(total), nonincrementalReason_);
+        JS_snprintf(buffer, sizeof(buffer), "Non-Incremental: %.3fms (%s); ",
+                    t(total), nonincrementalReason_);
     }
     if (!fragments.append(DuplicateString(buffer)))
         return UniqueChars(nullptr);
 
-    snprintf_literal(buffer,
-                     "Zones: %d of %d (-%d); Compartments: %d of %d (-%d); HeapSize: %.3f MiB; "\
-                     "HeapChange (abs): %+d (%d); ",
-                     zoneStats.collectedZoneCount, zoneStats.zoneCount, zoneStats.sweptZoneCount,
-                     zoneStats.collectedCompartmentCount, zoneStats.compartmentCount,
-                     zoneStats.sweptCompartmentCount,
-                     double(preBytes) / bytesPerMiB,
-                     counts[STAT_NEW_CHUNK] - counts[STAT_DESTROY_CHUNK],
-                     counts[STAT_NEW_CHUNK] + counts[STAT_DESTROY_CHUNK]);
+    JS_snprintf(buffer, sizeof(buffer),
+                "Zones: %d of %d (-%d); Compartments: %d of %d (-%d); HeapSize: %.3f MiB; "\
+                "HeapChange (abs): %+d (%d); ",
+                zoneStats.collectedZoneCount, zoneStats.zoneCount, zoneStats.sweptZoneCount,
+                zoneStats.collectedCompartmentCount, zoneStats.compartmentCount,
+                zoneStats.sweptCompartmentCount,
+                double(preBytes) / bytesPerMiB,
+                counts[STAT_NEW_CHUNK] - counts[STAT_DESTROY_CHUNK],
+                counts[STAT_NEW_CHUNK] + counts[STAT_DESTROY_CHUNK]);
     if (!fragments.append(DuplicateString(buffer)))
         return UniqueChars(nullptr);
 
     MOZ_ASSERT_IF(counts[STAT_ARENA_RELOCATED], gckind == GC_SHRINK);
     if (gckind == GC_SHRINK) {
-        snprintf_literal(buffer,
-                         "Kind: %s; Relocated: %.3f MiB; ",
-                         ExplainInvocationKind(gckind),
-                         double(ArenaSize * counts[STAT_ARENA_RELOCATED]) / bytesPerMiB);
+        JS_snprintf(buffer, sizeof(buffer),
+                    "Kind: %s; Relocated: %.3f MiB; ",
+                    ExplainInvocationKind(gckind),
+                    double(ArenaSize * counts[STAT_ARENA_RELOCATED]) / bytesPerMiB);
         if (!fragments.append(DuplicateString(buffer)))
             return UniqueChars(nullptr);
     }
@@ -425,13 +425,13 @@ Statistics::formatCompactSlicePhaseTimes(const PhaseTimeTable phaseTimes) const
         int64_t ownTime = phaseTimes[dagSlot][phase];
         int64_t childTime = SumChildTimes(dagSlot, phase, phaseTimes);
         if (ownTime > MaxUnaccountedTimeUS) {
-            snprintf_literal(buffer, "%s: %.3fms", phases[phase].name, t(ownTime));
+            JS_snprintf(buffer, sizeof(buffer), "%s: %.3fms", phases[phase].name, t(ownTime));
             if (!fragments.append(DuplicateString(buffer)))
                 return UniqueChars(nullptr);
 
             if (childTime && (ownTime - childTime) > MaxUnaccountedTimeUS) {
                 MOZ_ASSERT(level < 3);
-                snprintf_literal(buffer, "%s: %.3fms", "Other", t(ownTime - childTime));
+                JS_snprintf(buffer, sizeof(buffer), "%s: %.3fms", "Other", t(ownTime - childTime));
                 if (!fragments.append(DuplicateString(buffer)))
                     return UniqueChars(nullptr);
             }
@@ -491,22 +491,23 @@ Statistics::formatDetailedDescription()
   Arenas Relocated: %.3f MiB\n\
 ";
     char buffer[1024];
-    snprintf_literal(buffer, format,
-                     ExplainInvocationKind(gckind),
-                     ExplainReason(slices[0].reason),
-                     nonincrementalReason_ ? "no - " : "yes",
-                     nonincrementalReason_ ? nonincrementalReason_ : "",
-                     zoneStats.collectedZoneCount, zoneStats.zoneCount, zoneStats.sweptZoneCount,
-                     zoneStats.collectedCompartmentCount, zoneStats.compartmentCount,
-                        zoneStats.sweptCompartmentCount,
-                     counts[STAT_MINOR_GC],
-                     counts[STAT_STOREBUFFER_OVERFLOW],
-                     mmu20 * 100., mmu50 * 100.,
-                     t(sccTotal), t(sccLongest),
-                     double(preBytes) / bytesPerMiB,
-                     counts[STAT_NEW_CHUNK] - counts[STAT_DESTROY_CHUNK], counts[STAT_NEW_CHUNK] +
-                        counts[STAT_DESTROY_CHUNK],
-                     double(ArenaSize * counts[STAT_ARENA_RELOCATED]) / bytesPerMiB);
+    memset(buffer, 0, sizeof(buffer));
+    JS_snprintf(buffer, sizeof(buffer), format,
+                ExplainInvocationKind(gckind),
+                ExplainReason(slices[0].reason),
+                nonincrementalReason_ ? "no - " : "yes",
+                                                  nonincrementalReason_ ? nonincrementalReason_ : "",
+                zoneStats.collectedZoneCount, zoneStats.zoneCount, zoneStats.sweptZoneCount,
+                zoneStats.collectedCompartmentCount, zoneStats.compartmentCount,
+                zoneStats.sweptCompartmentCount,
+                counts[STAT_MINOR_GC],
+                counts[STAT_STOREBUFFER_OVERFLOW],
+                mmu20 * 100., mmu50 * 100.,
+                t(sccTotal), t(sccLongest),
+                double(preBytes) / bytesPerMiB,
+                counts[STAT_NEW_CHUNK] - counts[STAT_DESTROY_CHUNK], counts[STAT_NEW_CHUNK] +
+                                                                     counts[STAT_DESTROY_CHUNK],
+                double(ArenaSize * counts[STAT_ARENA_RELOCATED]) / bytesPerMiB);
     return DuplicateString(buffer);
 }
 
@@ -526,12 +527,13 @@ Statistics::formatDetailedSliceDescription(unsigned i, const SliceData& slice)
     Pause: %.3fms of %s budget (@ %.3fms)\n\
 ";
     char buffer[1024];
-    snprintf_literal(buffer, format, i, ExplainReason(slice.reason),
-                     slice.resetReason ? "yes - " : "no",
-                     slice.resetReason ? slice.resetReason : "",
-                     gc::StateName(slice.initialState), gc::StateName(slice.finalState),
-                     uint64_t(slice.endFaults - slice.startFaults),
-                     t(slice.duration()), budgetDescription, t(slice.start - slices[0].start));
+    memset(buffer, 0, sizeof(buffer));
+    JS_snprintf(buffer, sizeof(buffer), format, i,
+                ExplainReason(slice.reason),
+                slice.resetReason ? "yes - " : "no", slice.resetReason ? slice.resetReason : "",
+                gc::StateName(slice.initialState), gc::StateName(slice.finalState),
+                uint64_t(slice.endFaults - slice.startFaults),
+                t(slice.duration()), budgetDescription, t(slice.start - slices[0].start));
     return DuplicateString(buffer);
 }
 
@@ -553,15 +555,15 @@ Statistics::formatDetailedPhaseTimes(const PhaseTimeTable phaseTimes)
         int64_t ownTime = phaseTimes[dagSlot][phase];
         int64_t childTime = SumChildTimes(dagSlot, phase, phaseTimes);
         if (ownTime > 0) {
-            snprintf_literal(buffer, "      %s%s: %.3fms\n",
-                             LevelToIndent[level], phases[phase].name, t(ownTime));
+            JS_snprintf(buffer, sizeof(buffer), "      %s%s: %.3fms\n",
+                        LevelToIndent[level], phases[phase].name, t(ownTime));
             if (!fragments.append(DuplicateString(buffer)))
                 return UniqueChars(nullptr);
 
             if (childTime && (ownTime - childTime) > MaxUnaccountedChildTimeUS) {
                 MOZ_ASSERT(level < 3);
-                snprintf_literal(buffer, "      %s%s: %.3fms\n",
-                                 LevelToIndent[level + 1], "Other", t(ownTime - childTime));
+                JS_snprintf(buffer, sizeof(buffer), "      %s%s: %.3fms\n",
+                            LevelToIndent[level + 1], "Other", t(ownTime - childTime));
                 if (!fragments.append(DuplicateString(buffer)))
                     return UniqueChars(nullptr);
             }
@@ -583,7 +585,8 @@ Statistics::formatDetailedTotals()
     Max Pause: %.3fms\n\
 ";
     char buffer[1024];
-    snprintf_literal(buffer, format, t(total), t(longest));
+    memset(buffer, 0, sizeof(buffer));
+    JS_snprintf(buffer, sizeof(buffer), format, t(total), t(longest));
     return DuplicateString(buffer);
 }
 
@@ -653,23 +656,24 @@ Statistics::formatJsonDescription(uint64_t timestamp)
         "\"added_chunks\":%d,"
         "\"removed_chunks\":%d,";
     char buffer[1024];
-    snprintf_literal(buffer, format,
-                     (unsigned long long)timestamp,
-                     longest / 1000, longest % 1000,
-                     total / 1000, total % 1000,
-                     zoneStats.collectedZoneCount,
-                     zoneStats.zoneCount,
-                     zoneStats.compartmentCount,
-                     counts[STAT_MINOR_GC],
-                     counts[STAT_STOREBUFFER_OVERFLOW],
-                     int(mmu20 * 100),
-                     int(mmu50 * 100),
-                     sccTotal / 1000, sccTotal % 1000,
-                     sccLongest / 1000, sccLongest % 1000,
-                     nonincrementalReason_ ? nonincrementalReason_ : "none",
-                     unsigned(preBytes / 1024 / 1024),
-                     counts[STAT_NEW_CHUNK],
-                     counts[STAT_DESTROY_CHUNK]);
+    memset(buffer, 0, sizeof(buffer));
+    JS_snprintf(buffer, sizeof(buffer), format,
+                (unsigned long long)timestamp,
+                longest / 1000, longest % 1000,
+                total / 1000, total % 1000,
+                zoneStats.collectedZoneCount,
+                zoneStats.zoneCount,
+                zoneStats.compartmentCount,
+                counts[STAT_MINOR_GC],
+                counts[STAT_STOREBUFFER_OVERFLOW],
+                int(mmu20 * 100),
+                int(mmu50 * 100),
+                sccTotal / 1000, sccTotal % 1000,
+                sccLongest / 1000, sccLongest % 1000,
+                nonincrementalReason_ ? nonincrementalReason_ : "none",
+                unsigned(preBytes / 1024 / 1024),
+                counts[STAT_NEW_CHUNK],
+                counts[STAT_DESTROY_CHUNK]);
     return DuplicateString(buffer);
 }
 
@@ -694,17 +698,18 @@ Statistics::formatJsonSliceDescription(unsigned i, const SliceData& slice)
         "\"start_timestamp\":%llu,"
         "\"end_timestamp\":%llu,";
     char buffer[1024];
-    snprintf_literal(buffer, format,
-                     i,
-                     duration / 1000, duration % 1000,
-                     when / 1000, when % 1000,
-                     ExplainReason(slice.reason),
-                     gc::StateName(slice.initialState),
-                     gc::StateName(slice.finalState),
-                     budgetDescription,
-                     pageFaults,
-                     slice.start,
-                     slice.end);
+    memset(buffer, 0, sizeof(buffer));
+    JS_snprintf(buffer, sizeof(buffer), format,
+                i,
+                duration / 1000, duration % 1000,
+                when / 1000, when % 1000,
+                ExplainReason(slice.reason),
+                gc::StateName(slice.initialState),
+                gc::StateName(slice.finalState),
+                budgetDescription,
+                pageFaults,
+                slice.start,
+                slice.end);
     return DuplicateString(buffer);
 }
 
@@ -735,8 +740,8 @@ Statistics::formatJsonPhaseTimes(const PhaseTimeTable phaseTimes)
 
         UniqueChars name = FilterJsonKey(phases[phase].name);
         int64_t ownTime = phaseTimes[dagSlot][phase];
-        snprintf_literal(buffer, "\"%s\":%" PRId64 ".%03" PRId64,
-                         name.get(), ownTime / 1000, ownTime % 1000);
+        JS_snprintf(buffer, sizeof(buffer), "\"%s\":%llu.%03llu",
+                    name.get(), ownTime / 1000, ownTime % 1000);
 
         if (!fragments.append(DuplicateString(buffer)))
             return UniqueChars(nullptr);
@@ -970,27 +975,6 @@ Statistics::endGC()
 }
 
 void
-Statistics::beginNurseryCollection(JS::gcreason::Reason reason)
-{
-    count(STAT_MINOR_GC);
-    if (nurseryCollectionCallback) {
-        (*nurseryCollectionCallback)(runtime->contextFromMainThread(),
-                                     JS::GCNurseryProgress::GC_NURSERY_COLLECTION_START,
-                                     reason);
-    }
-}
-
-void
-Statistics::endNurseryCollection(JS::gcreason::Reason reason)
-{
-    if (nurseryCollectionCallback) {
-        (*nurseryCollectionCallback)(runtime->contextFromMainThread(),
-                                     JS::GCNurseryProgress::GC_NURSERY_COLLECTION_END,
-                                     reason);
-    }
-}
-
-void
 Statistics::beginSlice(const ZoneGCStats& zoneStats, JSGCInvocationKind gckind,
                        SliceBudget budget, JS::gcreason::Reason reason)
 {
@@ -1015,8 +999,7 @@ Statistics::beginSlice(const ZoneGCStats& zoneStats, JSGCInvocationKind gckind,
     if (gcDepth == 1) {
         bool wasFullGC = zoneStats.isCollectingAllZones();
         if (sliceCallback)
-            (*sliceCallback)(runtime->contextFromMainThread(),
-                             first ? JS::GC_CYCLE_BEGIN : JS::GC_SLICE_BEGIN,
+            (*sliceCallback)(runtime, first ? JS::GC_CYCLE_BEGIN : JS::GC_SLICE_BEGIN,
                              JS::GCDescription(!wasFullGC, gckind, reason));
     }
 }
@@ -1056,8 +1039,7 @@ Statistics::endSlice()
     if (gcDepth == 1 && !aborted) {
         bool wasFullGC = zoneStats.isCollectingAllZones();
         if (sliceCallback)
-            (*sliceCallback)(runtime->contextFromMainThread(),
-                             last ? JS::GC_CYCLE_END : JS::GC_SLICE_END,
+            (*sliceCallback)(runtime, last ? JS::GC_CYCLE_END : JS::GC_SLICE_END,
                              JS::GCDescription(!wasFullGC, gckind, slices.back().reason));
     }
 

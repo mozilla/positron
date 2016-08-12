@@ -33,7 +33,7 @@ crashtest:
     chunks:
         by-test-platform:
             android-4.3-arm7-api-15/debug: 10
-            default: 4
+            android-4.3-arm7-api-15/opt: 4
     loopback-video: true
     e10s: false
     mozharness:
@@ -54,7 +54,7 @@ jsreftest:
     chunks:
         by-test-platform:
             android-4.3-arm7-api-15/debug: 20
-            default: 6
+            android-4.3-arm7-api-15/opt: 6
     loopback-video: true
     max-run-time: 7200
     e10s: false
@@ -79,7 +79,7 @@ mochitest:
     max-run-time:
         by-test-platform:
             android-4.3-arm7-api-15/debug: 10800
-            default: 3600
+            android-4.3-arm7-api-15/opt: 3600
     mozharness:
         script: mozharness/scripts/android_emulator_unittest.py
         no-read-buildbot-config: true
@@ -95,10 +95,6 @@ mochitest-chrome:
     suite: mochitest/chrome
     treeherder-symbol: tc-M(c)
     instance-size: xlarge
-    chunks:
-        by-test-platform:
-            android-4.3-arm7-api-15/debug: 2
-            default: 1
     loopback-video: true
     e10s: false
     max-run-time: 5400
@@ -156,7 +152,7 @@ mochitest-media:
     max-run-time:
         by-test-platform:
             android-4.3-arm7-api-15/debug: 5400
-            default: 3600
+            android-4.3-arm7-api-15/opt: 3600
     mozharness:
         script: mozharness/scripts/android_emulator_unittest.py
         no-read-buildbot-config: true
@@ -175,7 +171,10 @@ mochitest-webgl:
     loopback-video: true
     e10s: false
     max-run-time: 7200
-    instance-size: xlarge
+    instance-size:
+        by-test-platform:
+            android-4.3-arm7-api-15/opt: default
+            android-4.3-arm7-api-15/debug: xlarge
     mozharness:
         script: mozharness/scripts/android_emulator_unittest.py
         no-read-buildbot-config: true
@@ -193,7 +192,7 @@ reftest:
     chunks:
         by-test-platform:
             android-4.3-arm7-api-15/debug: 48
-            default: 16
+            android-4.3-arm7-api-15/opt: 16
     instance-size: xlarge
     max-run-time: 10800
     loopback-video: true
@@ -217,7 +216,6 @@ robocop:
         by-test-platform:
             # android-4.3-arm7-api-15/debug -- not run
             android-4.3-arm7-api-15/opt: 4
-            android-4.3-arm7-api-15-gradle/opt: 4
     loopback-video: true
     e10s: false
     mozharness:
@@ -234,27 +232,17 @@ xpcshell:
     description: "xpcshell test run"
     suite: xpcshell
     treeherder-symbol: tc-X()
-    chunks:
-        by-test-platform:
-            default: 3
-            android-4.2-x86/opt: 4
+    chunks: 3
     instance-size: xlarge
-    max-run-time:
-        by-test-platform:
-            default: 7200
-            android-4.2-x86/opt: 3600
+    max-run-time: 7200
     loopback-video: true
     e10s: false
     mozharness:
         script: mozharness/scripts/android_emulator_unittest.py
         no-read-buildbot-config: true
+        config:
+            - mozharness/configs/android/androidarm_4_3.py
+            - mozharness/configs/remove_executables.py
+            - mozharness/configs/android/androidarm_4_3-tc.py
         extra-options:
             - --test-suite=xpcshell
-        config:
-            by-test-platform:
-                default:
-                    - mozharness/configs/android/androidarm_4_3.py
-                    - mozharness/configs/remove_executables.py
-                    - mozharness/configs/android/androidarm_4_3-tc.py
-                android-4.2-x86/opt:
-                    - mozharness/configs/android/androidx86-tc.py

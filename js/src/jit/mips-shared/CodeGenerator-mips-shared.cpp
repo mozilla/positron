@@ -1649,145 +1649,9 @@ CodeGeneratorMIPSShared::visitStoreTypedArrayElementStatic(LStoreTypedArrayEleme
 }
 
 void
-CodeGeneratorMIPSShared::visitWasmCall(LWasmCall* ins)
+CodeGeneratorMIPSShared::visitAsmJSCall(LAsmJSCall* ins)
 {
-    emitWasmCallBase(ins);
-}
-
-void
-CodeGeneratorMIPSShared::visitWasmCallI64(LWasmCallI64* ins)
-{
-    emitWasmCallBase(ins);
-}
-
-void
-CodeGeneratorMIPSShared::visitWasmBoundsCheck(LWasmBoundsCheck* ins)
-{
-    MWasmBoundsCheck* mir = ins->mir();
-
-    uint32_t offset = mir->offset();
-    if (offset > INT32_MAX) {
-        masm.jump(wasm::JumpTarget::OutOfBounds);
-        return;
-    }
-
-    uint32_t endOffset = mir->endOffset();
-    Register ptr = ToRegister(ins->ptr());
-
-    masm.move32(Imm32(endOffset), SecondScratchReg);
-    masm.addPtr(ptr, SecondScratchReg);
-
-    // Detect unsigned overflow.
-    masm.ma_b(SecondScratchReg, ptr, wasm::JumpTarget::OutOfBounds, Assembler::LessThan);
-
-    BufferOffset bo = masm.ma_BoundsCheck(ScratchRegister);
-    masm.ma_b(SecondScratchReg, ScratchRegister, wasm::JumpTarget::OutOfBounds, Assembler::Above);
-    masm.append(wasm::BoundsCheck(bo.getOffset()));
-}
-
-void
-CodeGeneratorMIPSShared::visitWasmLoad(LWasmLoad* lir)
-{
-    const MWasmLoad* mir = lir->mir();
-
-    MOZ_ASSERT(!mir->barrierBefore() && !mir->barrierAfter(), "atomics NYI");
-
-    uint32_t offset = mir->offset();
-    if (offset > INT32_MAX) {
-        // This is unreachable because of bounds checks.
-        masm.breakpoint();
-        return;
-    }
-
-    Register ptr = ToRegister(lir->ptr());
-
-    // Maybe add the offset.
-    if (offset) {
-        Register ptrPlusOffset = ToRegister(lir->ptrCopy());
-        masm.addPtr(Imm32(offset), ptrPlusOffset);
-        ptr = ptrPlusOffset;
-    } else {
-        MOZ_ASSERT(lir->ptrCopy()->isBogusTemp());
-    }
-
-    unsigned byteSize = mir->byteSize();
-    bool isSigned;
-    bool isFloat = false;
-
-    switch (mir->accessType()) {
-      case Scalar::Int8:    isSigned = true;  break;
-      case Scalar::Uint8:   isSigned = false; break;
-      case Scalar::Int16:   isSigned = true;  break;
-      case Scalar::Uint16:  isSigned = false; break;
-      case Scalar::Int32:   isSigned = true;  break;
-      case Scalar::Uint32:  isSigned = false; break;
-      case Scalar::Float64: isFloat  = true;  break;
-      case Scalar::Float32: isFloat  = true;  break;
-      default: MOZ_CRASH("unexpected array type");
-    }
-
-    if (isFloat) {
-        if (byteSize == 4) {
-            masm.loadFloat32(BaseIndex(HeapReg, ptr, TimesOne), ToFloatRegister(lir->output()));
-        } else
-            masm.loadDouble(BaseIndex(HeapReg, ptr, TimesOne), ToFloatRegister(lir->output()));
-    } else {
-        masm.ma_load(ToRegister(lir->output()), BaseIndex(HeapReg, ptr, TimesOne),
-                      static_cast<LoadStoreSize>(8 * byteSize), isSigned ? SignExtend : ZeroExtend);
-    }
-}
-
-void
-CodeGeneratorMIPSShared::visitWasmStore(LWasmStore* lir)
-{
-    const MWasmStore* mir = lir->mir();
-
-    MOZ_ASSERT(!mir->barrierBefore() && !mir->barrierAfter(), "atomics NYI");
-
-    uint32_t offset = mir->offset();
-    if (offset > INT32_MAX) {
-        // This is unreachable because of bounds checks.
-        masm.breakpoint();
-        return;
-    }
-
-    Register ptr = ToRegister(lir->ptr());
-
-    // Maybe add the offset.
-    if (offset) {
-        Register ptrPlusOffset = ToRegister(lir->ptrCopy());
-        masm.addPtr(Imm32(offset), ptrPlusOffset);
-        ptr = ptrPlusOffset;
-    } else {
-        MOZ_ASSERT(lir->ptrCopy()->isBogusTemp());
-    }
-
-    unsigned byteSize = mir->byteSize();
-    bool isSigned;
-    bool isFloat = false;
-
-    switch (mir->accessType()) {
-      case Scalar::Int8:    isSigned = true;  break;
-      case Scalar::Uint8:   isSigned = false; break;
-      case Scalar::Int16:   isSigned = true;  break;
-      case Scalar::Uint16:  isSigned = false; break;
-      case Scalar::Int32:   isSigned = true;  break;
-      case Scalar::Uint32:  isSigned = false; break;
-      case Scalar::Int64:   isSigned = true;  break;
-      case Scalar::Float64: isFloat  = true;  break;
-      case Scalar::Float32: isFloat  = true;  break;
-      default: MOZ_CRASH("unexpected array type");
-    }
-
-    if (isFloat) {
-        if (byteSize == 4) {
-            masm.storeFloat32(ToFloatRegister(lir->value()), BaseIndex(HeapReg, ptr, TimesOne));
-        } else
-            masm.storeDouble(ToFloatRegister(lir->value()), BaseIndex(HeapReg, ptr, TimesOne));
-    } else {
-        masm.ma_store(ToRegister(lir->value()), BaseIndex(HeapReg, ptr, TimesOne),
-                      static_cast<LoadStoreSize>(8 * byteSize), isSigned ? SignExtend : ZeroExtend);
-    }
+    emitAsmJSCall(ins);
 }
 
 void
@@ -2241,9 +2105,9 @@ CodeGeneratorMIPSShared::visitEffectiveAddress(LEffectiveAddress* ins)
 }
 
 void
-CodeGeneratorMIPSShared::visitWasmLoadGlobalVar(LWasmLoadGlobalVar* ins)
+CodeGeneratorMIPSShared::visitAsmJSLoadGlobalVar(LAsmJSLoadGlobalVar* ins)
 {
-    const MWasmLoadGlobalVar* mir = ins->mir();
+    const MAsmJSLoadGlobalVar* mir = ins->mir();
     unsigned addr = mir->globalDataOffset() - AsmJSGlobalRegBias;
     if (mir->type() == MIRType::Int32)
         masm.load32(Address(GlobalReg, addr), ToRegister(ins->output()));
@@ -2254,9 +2118,9 @@ CodeGeneratorMIPSShared::visitWasmLoadGlobalVar(LWasmLoadGlobalVar* ins)
 }
 
 void
-CodeGeneratorMIPSShared::visitWasmStoreGlobalVar(LWasmStoreGlobalVar* ins)
+CodeGeneratorMIPSShared::visitAsmJSStoreGlobalVar(LAsmJSStoreGlobalVar* ins)
 {
-    const MWasmStoreGlobalVar* mir = ins->mir();
+    const MAsmJSStoreGlobalVar* mir = ins->mir();
 
     MOZ_ASSERT(IsNumberType(mir->value()->type()));
     unsigned addr = mir->globalDataOffset() - AsmJSGlobalRegBias;
@@ -2266,6 +2130,32 @@ CodeGeneratorMIPSShared::visitWasmStoreGlobalVar(LWasmStoreGlobalVar* ins)
         masm.storeFloat32(ToFloatRegister(ins->value()), Address(GlobalReg, addr));
     else
         masm.storeDouble(ToFloatRegister(ins->value()), Address(GlobalReg, addr));
+}
+
+void
+CodeGeneratorMIPSShared::visitAsmJSLoadFuncPtr(LAsmJSLoadFuncPtr* ins)
+{
+    const MAsmJSLoadFuncPtr* mir = ins->mir();
+
+    Register index = ToRegister(ins->index());
+    Register out = ToRegister(ins->output());
+    unsigned addr = mir->globalDataOffset() - AsmJSGlobalRegBias;
+
+    if (mir->hasLimit()) {
+        masm.branch32(Assembler::Condition::AboveOrEqual, index, Imm32(mir->limit()),
+                      wasm::JumpTarget::OutOfBounds);
+    }
+
+    BaseIndex source(GlobalReg, index, ScalePointer, addr);
+    masm.loadPtr(source, out);
+}
+
+void
+CodeGeneratorMIPSShared::visitAsmJSLoadFFIFunc(LAsmJSLoadFFIFunc* ins)
+{
+    const MAsmJSLoadFFIFunc* mir = ins->mir();
+    masm.loadPtr(Address(GlobalReg, mir->globalDataOffset() - AsmJSGlobalRegBias),
+                 ToRegister(ins->output()));
 }
 
 void

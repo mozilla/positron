@@ -10,10 +10,9 @@
 
   <body>
     <script type="text/javascript">
-      "use strict";
-      const allocs = [];
+      var allocs = [];
       function test() {
-        for (let i = 0; i < 10; i++) {
+        for (var i = 0; i < 10; i++) {
           allocs.push({});
         }
       }

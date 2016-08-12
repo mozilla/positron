@@ -9,16 +9,13 @@
 #include "mozilla/RefPtr.h"
 #include "mozilla/UniquePtr.h"
 #include "mozilla/gfx/PGPUChild.h"
-#include "mozilla/gfx/gfxVarReceiver.h"
 
 namespace mozilla {
 namespace gfx {
 
 class GPUProcessHost;
 
-class GPUChild final
-  : public PGPUChild,
-    public gfxVarReceiver
+class GPUChild final : public PGPUChild
 {
 public:
   explicit GPUChild(GPUProcessHost* aHost);
@@ -26,13 +23,9 @@ public:
 
   void Init();
 
-  // gfxVarReceiver overrides.
-  void OnVarChanged(const GfxVarUpdate& aVar) override;
-
-  // PGPUChild overrides.
-  void ActorDestroy(ActorDestroyReason aWhy) override;
-
   static void Destroy(UniquePtr<GPUChild>&& aChild);
+
+  void ActorDestroy(ActorDestroyReason aWhy) override;
 
 private:
   GPUProcessHost* mHost;

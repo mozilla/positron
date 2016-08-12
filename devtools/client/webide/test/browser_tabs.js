@@ -9,6 +9,8 @@ function test() {
   requestCompleteLog();
 
   Task.spawn(function* () {
+    const { DebuggerServer } = require("devtools/server/main");
+
     // Since we test the connections set below, destroy the server in case it
     // was left open.
     DebuggerServer.destroy();

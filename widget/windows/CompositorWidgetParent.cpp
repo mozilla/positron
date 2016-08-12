@@ -46,6 +46,13 @@ CompositorWidgetParent::RecvClearTransparentWindow()
   return true;
 }
 
+bool
+CompositorWidgetParent::RecvResizeTransparentWindow(const IntSize& aSize)
+{
+  ResizeTransparentWindow(aSize);
+  return true;
+}
+
 nsIWidget*
 CompositorWidgetParent::RealWidget()
 {

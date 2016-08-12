@@ -261,10 +261,12 @@ var get_tooltip_info = Task.async(function*(addon) {
       version: undefined
     };
   }
-  return {
-    name: tiptext.substring(0, expectedName.length),
-    version: tiptext.substring(expectedName.length + 1)
-  };
+  else {
+    return {
+      name: tiptext.substring(0, expectedName.length),
+      version: tiptext.substring(expectedName.length + 1)
+    };
+  }
 });
 
 function get_addon_file_url(aFilename) {
@@ -273,7 +275,7 @@ function get_addon_file_url(aFilename) {
              getService(Ci.nsIChromeRegistry);
     var fileurl = cr.convertChromeURL(makeURI(CHROMEROOT + "addons/" + aFilename));
     return fileurl.QueryInterface(Ci.nsIFileURL);
-  } catch (ex) {
+  } catch(ex) {
     var jar = getJar(CHROMEROOT + "addons/" + aFilename);
     var tmpDir = extractJarToTmp(jar);
     tmpDir.append(aFilename);
@@ -451,7 +453,7 @@ function close_manager(aManagerWindow, aCallback, aLongerTimeout) {
         dump("Manager window unload handler\n");
         this.removeEventListener("unload", arguments.callee, false);
         resolve();
-      } catch (e) {
+      } catch(e) {
         reject(e);
       }
     }, false);
@@ -909,7 +911,7 @@ MockProvider.prototype = {
         info("Notifying timer set at " + (setAt || "unknown location"));
         timer.callback.notify(timer);
         timer.cancel();
-      } catch (e) {
+      } catch(e) {
         info("Timer notify failed: " + e);
       }
     }

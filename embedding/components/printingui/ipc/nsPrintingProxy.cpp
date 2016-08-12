@@ -226,9 +226,11 @@ nsPrintingProxy::AllocPPrintProgressDialogChild()
 bool
 nsPrintingProxy::DeallocPPrintProgressDialogChild(PPrintProgressDialogChild* aActor)
 {
-  // The PrintProgressDialogChild implements refcounting, and
-  // will take itself out.
-  return true;
+  // The parent process will never initiate the PPrintProgressDialog
+  // protocol connection, so no need to provide an deallocator here.
+  NS_NOTREACHED("Deallocator for PPrintProgressDialogChild should not be "
+                "called on nsPrintingProxy.");
+  return false;
 }
 
 PPrintSettingsDialogChild*

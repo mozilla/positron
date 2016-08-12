@@ -124,11 +124,9 @@ interface nsIAutoCompleteInput : nsISupports
   /*
    * Notification that the user selected and entered a result item
    *
-   * @param aEvent
-   *        The event that triggered the enter.
    * @return True if the user wishes to prevent the enter
    */
-  boolean onTextEntered([optional] in nsIDOMEvent aEvent);
+  boolean onTextEntered();
 
   /*
    * Notification that the user cancelled the autocomplete session

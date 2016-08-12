@@ -7,9 +7,7 @@
 #include "nsSVGForeignObjectFrame.h"
 
 // Keep others in (case-insensitive) order:
-#include "DrawResult.h"
 #include "gfxContext.h"
-#include "nsDisplayList.h"
 #include "nsGkAtoms.h"
 #include "nsNameSpaceManager.h"
 #include "nsLayoutUtils.h"
@@ -25,7 +23,6 @@
 
 using namespace mozilla;
 using namespace mozilla::dom;
-using namespace mozilla::image;
 
 //----------------------------------------------------------------------
 // Implementation
@@ -127,8 +124,8 @@ nsSVGForeignObjectFrame::AttributeChanged(int32_t  aNameSpaceID,
 
 void
 nsSVGForeignObjectFrame::Reflow(nsPresContext*           aPresContext,
-                                ReflowOutput&     aDesiredSize,
-                                const ReflowInput& aReflowInput,
+                                nsHTMLReflowMetrics&     aDesiredSize,
+                                const nsHTMLReflowState& aReflowState,
                                 nsReflowStatus&          aStatus)
 {
   MOZ_ASSERT(!(GetStateBits() & NS_FRAME_IS_NONDISPLAY),
@@ -144,18 +141,18 @@ nsSVGForeignObjectFrame::Reflow(nsPresContext*           aPresContext,
 
   // ReflowSVG makes sure mRect is up to date before we're called.
 
-  NS_ASSERTION(!aReflowInput.mParentReflowInput,
+  NS_ASSERTION(!aReflowState.mParentReflowState,
                "should only get reflow from being reflow root");
-  NS_ASSERTION(aReflowInput.ComputedWidth() == GetSize().width &&
-               aReflowInput.ComputedHeight() == GetSize().height,
+  NS_ASSERTION(aReflowState.ComputedWidth() == GetSize().width &&
+               aReflowState.ComputedHeight() == GetSize().height,
                "reflow roots should be reflowed at existing size and "
                "svg.css should ensure we have no padding/border/margin");
 
   DoReflow();
 
-  WritingMode wm = aReflowInput.GetWritingMode();
-  LogicalSize finalSize(wm, aReflowInput.ComputedISize(),
-                        aReflowInput.ComputedBSize());
+  WritingMode wm = aReflowState.GetWritingMode();
+  LogicalSize finalSize(wm, aReflowState.ComputedISize(),
+                        aReflowState.ComputedBSize());
   aDesiredSize.SetSize(wm, finalSize);
   aDesiredSize.SetOverflowAreasToDesiredBounds();
   aStatus = NS_FRAME_COMPLETE;
@@ -169,7 +166,6 @@ nsSVGForeignObjectFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
   if (!static_cast<const nsSVGElement*>(mContent)->HasValidDimensions()) {
     return;
   }
-  DisplayOutline(aBuilder, aLists);
   BuildDisplayListForNonBlockChildren(aBuilder, aDirtyRect, aLists);
 }
 
@@ -545,28 +541,28 @@ nsSVGForeignObjectFrame::DoReflow()
   mInReflow = true;
 
   WritingMode wm = kid->GetWritingMode();
-  ReflowInput reflowInput(presContext, kid,
+  nsHTMLReflowState reflowState(presContext, kid,
                                 &renderingContext,
                                 LogicalSize(wm, ISize(wm),
                                             NS_UNCONSTRAINEDSIZE));
-  ReflowOutput desiredSize(reflowInput);
+  nsHTMLReflowMetrics desiredSize(reflowState);
   nsReflowStatus status;
 
   // We don't use mRect.height above because that tells the child to do
   // page/column breaking at that height.
-  NS_ASSERTION(reflowInput.ComputedPhysicalBorderPadding() == nsMargin(0, 0, 0, 0) &&
-               reflowInput.ComputedPhysicalMargin() == nsMargin(0, 0, 0, 0),
+  NS_ASSERTION(reflowState.ComputedPhysicalBorderPadding() == nsMargin(0, 0, 0, 0) &&
+               reflowState.ComputedPhysicalMargin() == nsMargin(0, 0, 0, 0),
                "style system should ensure that :-moz-svg-foreign-content "
                "does not get styled");
-  NS_ASSERTION(reflowInput.ComputedISize() == ISize(wm),
+  NS_ASSERTION(reflowState.ComputedISize() == ISize(wm),
                "reflow state made child wrong size");
-  reflowInput.SetComputedBSize(BSize(wm));
+  reflowState.SetComputedBSize(BSize(wm));
 
-  ReflowChild(kid, presContext, desiredSize, reflowInput, 0, 0,
+  ReflowChild(kid, presContext, desiredSize, reflowState, 0, 0,
               NS_FRAME_NO_MOVE_FRAME, status);
   NS_ASSERTION(mRect.width == desiredSize.Width() &&
                mRect.height == desiredSize.Height(), "unexpected size");
-  FinishReflowChild(kid, presContext, desiredSize, &reflowInput, 0, 0,
+  FinishReflowChild(kid, presContext, desiredSize, &reflowState, 0, 0,
                     NS_FRAME_NO_MOVE_FRAME);
   
   mInReflow = false;

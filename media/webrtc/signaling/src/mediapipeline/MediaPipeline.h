@@ -34,7 +34,6 @@ class nsIPrincipal;
 namespace mozilla {
 class MediaPipelineFilter;
 class PeerIdentity;
-class AudioProxyThread;
 #if !defined(MOZILLA_EXTERNAL_LINKAGE)
 class VideoFrameConverter;
 #endif
@@ -167,7 +166,6 @@ class MediaPipeline : public sigslot::has_slots<> {
         : pipeline_(pipeline),
           sts_thread_(pipeline->sts_thread_) {}
 
-    void Attach(MediaPipeline *pipeline) { pipeline_ = pipeline; }
     void Detach() { pipeline_ = nullptr; }
     MediaPipeline *pipeline() const { return pipeline_; }
 
@@ -344,19 +342,16 @@ public:
   // Separate classes to allow ref counting
   class PipelineListener;
   class VideoFrameFeeder;
-  class PipelineVideoSink;
 
  protected:
   ~MediaPipelineTransmit();
 
  private:
   RefPtr<PipelineListener> listener_;
-  RefPtr<AudioProxyThread> audio_processing_;
 #if !defined(MOZILLA_EXTERNAL_LINKAGE)
   RefPtr<VideoFrameFeeder> feeder_;
   RefPtr<VideoFrameConverter> converter_;
 #endif
-  RefPtr<PipelineVideoSink> video_sink_;
   dom::MediaStreamTrack* domtrack_;
 };
 

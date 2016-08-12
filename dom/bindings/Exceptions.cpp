@@ -203,16 +203,7 @@ GetCurrentJSStack(int32_t aMaxDepth)
     return nullptr;
   }
 
-  static const unsigned MAX_FRAMES = 100;
-  if (aMaxDepth < 0) {
-    aMaxDepth = MAX_FRAMES;
-  }
-
-  JS::StackCapture captureMode = aMaxDepth == 0
-    ? JS::StackCapture(JS::AllFrames())
-    : JS::StackCapture(JS::MaxFrames(aMaxDepth));
-
-  return dom::exceptions::CreateStack(cx, mozilla::Move(captureMode));
+  return dom::exceptions::CreateStack(cx, aMaxDepth);
 }
 
 namespace exceptions {
@@ -639,7 +630,6 @@ NS_IMETHODIMP JSStackFrame::GetFormattedStack(JSContext* aCx, nsAString& aStack)
 
 NS_IMETHODIMP JSStackFrame::GetNativeSavedFrame(JS::MutableHandle<JS::Value> aSavedFrame)
 {
-  JS::ExposeObjectToActiveJS(mStack);
   aSavedFrame.setObjectOrNull(mStack);
   return NS_OK;
 }
@@ -675,10 +665,15 @@ NS_IMETHODIMP JSStackFrame::ToString(JSContext* aCx, nsACString& _retval)
 }
 
 already_AddRefed<nsIStackFrame>
-CreateStack(JSContext* aCx, JS::StackCapture&& aCaptureMode)
+CreateStack(JSContext* aCx, int32_t aMaxDepth)
 {
+  static const unsigned MAX_FRAMES = 100;
+  if (aMaxDepth < 0) {
+    aMaxDepth = MAX_FRAMES;
+  }
+
   JS::Rooted<JSObject*> stack(aCx);
-  if (!JS::CaptureCurrentStack(aCx, &stack, mozilla::Move(aCaptureMode))) {
+  if (!JS::CaptureCurrentStack(aCx, &stack, aMaxDepth)) {
     return nullptr;
   }
 

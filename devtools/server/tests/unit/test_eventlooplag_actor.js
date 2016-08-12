@@ -9,7 +9,7 @@
 
 function run_test()
 {
-  let {EventLoopLagFront} = require("devtools/shared/fronts/eventlooplag");
+  let {EventLoopLagFront} = require("devtools/server/actors/eventlooplag");
 
   DebuggerServer.init();
   DebuggerServer.addBrowserActors();

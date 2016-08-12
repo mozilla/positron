@@ -27,6 +27,7 @@ define(function (require, exports, module) {
   const { Document } = require("./document");
   const { Event } = require("./event");
   const { Func } = require("./function");
+  const { NamedNodeMap } = require("./named-node-map");
   const { RegExp } = require("./regexp");
   const { StyleSheet } = require("./stylesheet");
   const { TextNode } = require("./text-node");
@@ -45,6 +46,7 @@ define(function (require, exports, module) {
     Event,
     DateTime,
     TextNode,
+    NamedNodeMap,
     Attribute,
     Func,
     ArrayRep,

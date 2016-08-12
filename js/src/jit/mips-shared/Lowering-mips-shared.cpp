@@ -62,25 +62,11 @@ LIRGeneratorMIPSShared::lowerForALUInt64(LInstructionHelper<INT64_PIECES, 2 * IN
 }
 
 void
-LIRGeneratorMIPSShared::lowerForMulInt64(LMulI64* ins, MMul* mir, MDefinition* lhs, MDefinition* rhs)
-{
-    MOZ_CRASH("NYI");
-}
-
-template<size_t Temps>
-void
-LIRGeneratorMIPSShared::lowerForShiftInt64(LInstructionHelper<INT64_PIECES, INT64_PIECES + 1, Temps>* ins,
+LIRGeneratorMIPSShared::lowerForShiftInt64(LInstructionHelper<INT64_PIECES, INT64_PIECES + 1, 0>* ins,
                                            MDefinition* mir, MDefinition* lhs, MDefinition* rhs)
 {
     MOZ_CRASH("NYI");
 }
-
-template void LIRGeneratorMIPSShared::lowerForShiftInt64(
-    LInstructionHelper<INT64_PIECES, INT64_PIECES+1, 0>* ins, MDefinition* mir,
-    MDefinition* lhs, MDefinition* rhs);
-template void LIRGeneratorMIPSShared::lowerForShiftInt64(
-    LInstructionHelper<INT64_PIECES, INT64_PIECES+1, 1>* ins, MDefinition* mir,
-    MDefinition* lhs, MDefinition* rhs);
 
 void
 LIRGeneratorMIPSShared::lowerForFPU(LInstructionHelper<1, 1, 0>* ins, MDefinition* mir,
@@ -304,21 +290,13 @@ LIRGeneratorMIPSShared::visitWasmLoad(MWasmLoad* ins)
     MDefinition* base = ins->base();
     MOZ_ASSERT(base->type() == MIRType::Int32);
 
-#ifdef JS_CODEGEN_MIPS64
     if (ins->type() == MIRType::Int64) {
-        auto* lir = new(alloc()) LWasmLoadI64(useRegisterAtStart(base));
-        if (ins->offset())
-            lir->setTemp(0, tempCopy(base, 0));
-
+        auto* lir = new(alloc()) LWasmLoadI64(useRegisterOrZeroAtStart(base));
         defineInt64(lir, ins);
         return;
     }
-#endif
 
-    auto* lir = new(alloc()) LWasmLoad(useRegisterAtStart(base));
-    if (ins->offset())
-        lir->setTemp(0, tempCopy(base, 0));
-
+    auto* lir = new(alloc()) LWasmLoad(useRegisterOrZeroAtStart(base));
     define(lir, ins);
 }
 
@@ -329,13 +307,38 @@ LIRGeneratorMIPSShared::visitWasmStore(MWasmStore* ins)
     MOZ_ASSERT(base->type() == MIRType::Int32);
 
     MDefinition* value = ins->value();
-    LAllocation valueAlloc = useRegisterAtStart(value);
-    LAllocation baseAlloc = useRegisterAtStart(base);
+    LAllocation valueAlloc;
+    switch (ins->accessType()) {
+      case Scalar::Int8:
+      case Scalar::Uint8:
+      case Scalar::Int16:
+      case Scalar::Uint16:
+      case Scalar::Int32:
+      case Scalar::Uint32:
+        valueAlloc = useRegisterOrConstantAtStart(value);
+        break;
+      case Scalar::Int64:
+        // No way to encode an int64-to-memory move on x64.
+        if (value->isConstant() && value->type() != MIRType::Int64)
+            valueAlloc = useOrConstantAtStart(value);
+        else
+            valueAlloc = useRegisterAtStart(value);
+        break;
+      case Scalar::Float32:
+      case Scalar::Float64:
+      case Scalar::Float32x4:
+      case Scalar::Int8x16:
+      case Scalar::Int16x8:
+      case Scalar::Int32x4:
+        valueAlloc = useRegisterAtStart(value);
+        break;
+      case Scalar::Uint8Clamped:
+      case Scalar::MaxTypedArrayViewType:
+        MOZ_CRASH("unexpected array type");
+    }
+
+    LAllocation baseAlloc = useRegisterOrZeroAtStart(base);
     auto* lir = new(alloc()) LWasmStore(baseAlloc, valueAlloc);
-
-    if (ins->offset())
-        lir->setTemp(0, tempCopy(base, 0));
-
     add(lir, ins);
 }
 
@@ -673,10 +676,4 @@ LIRGeneratorMIPSShared::visitCopySign(MCopySign* ins)
     lir->setOperand(0, useRegister(lhs));
     lir->setOperand(1, useRegister(rhs));
     defineReuseInput(lir, ins, 0);
-}
-
-void
-LIRGeneratorMIPSShared::visitExtendInt32ToInt64(MExtendInt32ToInt64* ins)
-{
-    MOZ_CRASH("NYI");
 }

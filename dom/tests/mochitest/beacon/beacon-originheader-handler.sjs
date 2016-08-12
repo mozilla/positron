@@ -1,6 +1,6 @@
 /*
  * TestSever customized specifically for the needs of:
- * Bug 1280692 - navigator.sendBeacon() should not send origin header
+ * Bug 1080987 - navigator.sendBeacon() needs to sent origin header
  */
 
 function handleRequest(request, response)
@@ -26,15 +26,8 @@ function handleRequest(request, response)
 
   // case BEACON-REQUEST: get the beacon header and
   // store the header on the server.
-  var header = "reset";
-  try {
-    header = request.getHeader("origin");
-  }
-  catch(e) {
-    header = "no-header";
-  }
+  var header = request.getHeader("origin");
   setState("originHeader", header);
-
 
   // if there is an xhr-request waiting, return the header now.
   getObjectState("xhr-response", function(xhrResponse) {

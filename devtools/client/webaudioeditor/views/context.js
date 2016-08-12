@@ -6,7 +6,6 @@
 /* import-globals-from ../includes.js */
 
 const { debounce } = require("sdk/lang/functional");
-const flags = require("devtools/shared/flags");
 
 // Globals for d3 stuff
 // Default properties of the graph on rerender
@@ -230,7 +229,7 @@ var ContextView = {
       // Fire an event upon completed rendering, with extra information
       // if in testing mode only.
       let info = {};
-      if (flags.testing) {
+      if (DevToolsUtils.testing) {
         info = gAudioNodes.getInfo();
       }
       window.emit(EVENTS.UI_GRAPH_RENDERED, info.nodes, info.edges, info.paramEdges);

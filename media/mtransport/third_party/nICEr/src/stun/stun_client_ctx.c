@@ -35,7 +35,6 @@ static char *RCSSTRING __UNUSED__="$Id: stun_client_ctx.c,v 1.2 2008/04/28 18:21
 
 #include <assert.h>
 #include <string.h>
-#include <math.h>
 
 #include <nr_api.h>
 #include "stun.h"

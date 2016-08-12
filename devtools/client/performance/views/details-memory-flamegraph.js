@@ -3,7 +3,6 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 /* import-globals-from ../performance-controller.js */
 /* import-globals-from ../performance-view.js */
-/* globals DetailsSubview */
 "use strict";
 
 /**
@@ -65,8 +64,7 @@ var MemoryFlameGraphView = Heritage.extend(DetailsSubview, {
     let data = FlameGraphUtils.createFlameGraphDataFromThread(thread, {
       invertStack: PerformanceController.getOption("invert-flame-graph"),
       flattenRecursion: PerformanceController.getOption("flatten-tree-recursion"),
-      showIdleBlocks: PerformanceController.getOption("show-idle-blocks")
-                      && L10N.getStr("table.idle")
+      showIdleBlocks: PerformanceController.getOption("show-idle-blocks") && L10N.getStr("table.idle")
     });
 
     this.graph.setData({ data,

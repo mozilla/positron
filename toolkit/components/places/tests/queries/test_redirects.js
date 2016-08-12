@@ -50,10 +50,10 @@ function check_results_callback(aSequence) {
   // Remove duplicates, since queries are RESULTS_AS_URI (unique pages).
   let seen = [];
   expectedData = expectedData.filter(function (aData) {
-    if (seen.includes(aData.uri)) {
+    if (seen.includes(aData.uri))
       return false;
-    }
-    seen.push(aData.uri);
+    else
+      seen.push(aData.uri);
     return true;
   });
 
@@ -66,13 +66,12 @@ function check_results_callback(aSequence) {
     return undefined;
   }
   function comparator(a, b) {
-    if (sortingMode == Ci.nsINavHistoryQueryOptions.SORT_BY_DATE_DESCENDING) {
+    if (sortingMode == Ci.nsINavHistoryQueryOptions.SORT_BY_DATE_DESCENDING)
       return b.lastVisit - a.lastVisit;
-    }
-    if (sortingMode == Ci.nsINavHistoryQueryOptions.SORT_BY_VISITCOUNT_DESCENDING) {
+    else if (sortingMode == Ci.nsINavHistoryQueryOptions.SORT_BY_VISITCOUNT_DESCENDING)
       return b.visitCount - a.visitCount;
-    }
-    return getFirstIndexFor(a) - getFirstIndexFor(b);
+    else
+      return getFirstIndexFor(a) - getFirstIndexFor(b);
   }
   expectedData.sort(comparator);
 

@@ -112,18 +112,10 @@ a {
 
 .stack-trace .frame-link-source,
 .message-location .frame-link-source {
-  /* Makes the file name truncated (and ellipsis shown) on the left side */
   direction: rtl;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-.stack-trace .frame-link-source-inner,
-.message-location .frame-link-source-inner {
-  /* Enforce LTR direction for the file name - fixes bug 1290056 */
-  direction: ltr;
-  unicode-bidi: embed;
 }
 
 .stack-trace .frame-link-function-display-name {
@@ -151,7 +143,6 @@ a {
   direction: ltr;
   overflow: auto;
   -moz-user-select: text;
-  position: relative;
 }
 
 /* The width on #output-container is set to a hardcoded px in webconsole.js
@@ -507,16 +498,6 @@ a {
   margin: 5px 0 0 0;
 }
 
-/* Force cells to only show one row of contents.  Getting normal ellipses
-   behavior has proven impossible so far, so this is better than letting
-   rows get out of vertical alignment when one cell has a lot of content. */
-.consoletable .table-widget-cell > span {
-  overflow: hidden;
-  display: flex;
-  height: 1.25em;
-  line-height: 1.25em;
-}
-
 .theme-light .message[severity=error] .stacktrace {
   background-color: rgba(255, 255, 255, 0.5);
 }
@@ -624,42 +605,4 @@ a.learn-more-link.webconsole-learn-more-link {
   border-bottom: 2px solid #D7D7D7;
   border-left: 1px solid #D7D7D7;
   border-right: 1px solid #D7D7D7;
-}
-
-
-/* NEW CONSOLE STYLES */
-
-#output-wrapper > div {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: 0;
-  right: 0;
-}
-
-#output-container {
-  height: 100%;
-}
-
-.webconsole-output-wrapper {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-}
-
-.webconsole-filterbar-wrapper {
-  flex-grow: 0;
-}
-
-.webconsole-output {
-  flex: 1;
-  overflow: auto;
-}
-
-.webconsole-filterbar-primary {
-  display: flex;
-}
-
-.webconsole-filterbar-primary .devtools-plaininput {
-  flex: 1 1 100%;
 }

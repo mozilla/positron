@@ -255,7 +255,7 @@ void
 nsMathMLmpaddedFrame::UpdateValue(int32_t                  aSign,
                                   int32_t                  aPseudoUnit,
                                   const nsCSSValue&        aCSSValue,
-                                  const ReflowOutput& aDesiredSize,
+                                  const nsHTMLReflowMetrics& aDesiredSize,
                                   nscoord&                 aValueToUpdate,
                                   float                aFontSizeInflation) const
 {
@@ -304,8 +304,8 @@ nsMathMLmpaddedFrame::UpdateValue(int32_t                  aSign,
 
 void
 nsMathMLmpaddedFrame::Reflow(nsPresContext*          aPresContext,
-                             ReflowOutput&     aDesiredSize,
-                             const ReflowInput& aReflowInput,
+                             nsHTMLReflowMetrics&     aDesiredSize,
+                             const nsHTMLReflowState& aReflowState,
                              nsReflowStatus&          aStatus)
 {
   mPresentationData.flags &= ~NS_MATHML_ERROR;
@@ -314,14 +314,14 @@ nsMathMLmpaddedFrame::Reflow(nsPresContext*          aPresContext,
   ///////////////
   // Let the base class format our content like an inferred mrow
   nsMathMLContainerFrame::Reflow(aPresContext, aDesiredSize,
-                                 aReflowInput, aStatus);
+                                 aReflowState, aStatus);
   //NS_ASSERTION(NS_FRAME_IS_COMPLETE(aStatus), "bad status");
 }
 
 /* virtual */ nsresult
 nsMathMLmpaddedFrame::Place(DrawTarget*          aDrawTarget,
                             bool                 aPlaceOrigin,
-                            ReflowOutput& aDesiredSize)
+                            nsHTMLReflowMetrics& aDesiredSize)
 {
   nsresult rv =
     nsMathMLContainerFrame::Place(aDrawTarget, false, aDesiredSize);
@@ -442,7 +442,7 @@ nsMathMLmpaddedFrame::Place(DrawTarget*          aDrawTarget,
 
 /* virtual */ nsresult
 nsMathMLmpaddedFrame::MeasureForWidth(DrawTarget* aDrawTarget,
-                                      ReflowOutput& aDesiredSize)
+                                      nsHTMLReflowMetrics& aDesiredSize)
 {
   ProcessAttributes();
   return Place(aDrawTarget, false, aDesiredSize);
