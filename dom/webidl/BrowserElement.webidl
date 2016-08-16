@@ -30,32 +30,32 @@ BrowserElement implements BrowserElementPrivileged;
 interface BrowserElementCommon {
   [Throws,
    Pref="dom.mozBrowserFramesEnabled",
-   ChromeOnly]
+   Func="nsDocument::IsBrowserElementEnabled"]
   void setVisible(boolean visible);
 
   [Throws,
    Pref="dom.mozBrowserFramesEnabled",
-   ChromeOnly]
+   Func="nsDocument::IsBrowserElementEnabled"]
   DOMRequest getVisible();
 
   [Throws,
    Pref="dom.mozBrowserFramesEnabled",
-   ChromeOnly]
+   Func="nsDocument::IsBrowserElementEnabled"]
   void setActive(boolean active);
 
   [Throws,
    Pref="dom.mozBrowserFramesEnabled",
-   ChromeOnly]
+   Func="nsDocument::IsBrowserElementEnabled"]
   boolean getActive();
 
   [Throws,
    Pref="dom.mozBrowserFramesEnabled",
-   ChromeOnly]
+   Func="nsDocument::IsBrowserElementEnabled"]
   void addNextPaintListener(BrowserElementNextPaintEventCallback listener);
 
   [Throws,
    Pref="dom.mozBrowserFramesEnabled",
-   ChromeOnly]
+   Func="nsDocument::IsBrowserElementEnabled"]
   void removeNextPaintListener(BrowserElementNextPaintEventCallback listener);
 };
 
@@ -63,7 +63,7 @@ interface BrowserElementCommon {
 interface BrowserElementPrivileged {
   [Throws,
    Pref="dom.mozBrowserFramesEnabled",
-   ChromeOnly]
+   Func="nsDocument::IsBrowserElementEnabled"]
   void sendMouseEvent(DOMString type,
                       unsigned long x,
                       unsigned long y,
@@ -74,7 +74,7 @@ interface BrowserElementPrivileged {
   [Throws,
    Pref="dom.mozBrowserFramesEnabled",
    Func="TouchEvent::PrefEnabled",
-   ChromeOnly]
+   Func="nsDocument::IsBrowserElementEnabled"]
   void sendTouchEvent(DOMString type,
                       sequence<unsigned long> identifiers,
                       sequence<long> x,
@@ -88,96 +88,96 @@ interface BrowserElementPrivileged {
 
   [Throws,
    Pref="dom.mozBrowserFramesEnabled",
-   ChromeOnly]
+   Func="nsDocument::IsBrowserElementEnabled"]
   void goBack();
 
   [Throws,
    Pref="dom.mozBrowserFramesEnabled",
-   ChromeOnly]
+   Func="nsDocument::IsBrowserElementEnabled"]
   void goForward();
 
   [Throws,
    Pref="dom.mozBrowserFramesEnabled",
-   ChromeOnly]
+   Func="nsDocument::IsBrowserElementEnabled"]
   void reload(optional boolean hardReload = false);
 
   [Throws,
    Pref="dom.mozBrowserFramesEnabled",
-   ChromeOnly]
+   Func="nsDocument::IsBrowserElementEnabled"]
   void stop();
 
   [Throws,
    Pref="dom.mozBrowserFramesEnabled",
-   ChromeOnly]
+   Func="nsDocument::IsBrowserElementEnabled"]
   DOMRequest download(DOMString url,
                       optional BrowserElementDownloadOptions options);
 
   [Throws,
    Pref="dom.mozBrowserFramesEnabled",
-   ChromeOnly]
+   Func="nsDocument::IsBrowserElementEnabled"]
   DOMRequest purgeHistory();
 
   [Throws,
    Pref="dom.mozBrowserFramesEnabled",
-   ChromeOnly]
+   Func="nsDocument::IsBrowserElementEnabled"]
   DOMRequest getScreenshot([EnforceRange] unsigned long width,
                            [EnforceRange] unsigned long height,
                            optional DOMString mimeType="");
 
   [Throws,
    Pref="dom.mozBrowserFramesEnabled",
-   ChromeOnly]
+   Func="nsDocument::IsBrowserElementEnabled"]
   void zoom(float zoom);
 
   [Throws,
    Pref="dom.mozBrowserFramesEnabled",
-   ChromeOnly]
+   Func="nsDocument::IsBrowserElementEnabled"]
   DOMRequest getCanGoBack();
 
   [Throws,
    Pref="dom.mozBrowserFramesEnabled",
-   ChromeOnly]
+   Func="nsDocument::IsBrowserElementEnabled"]
   DOMRequest getCanGoForward();
 
   [Throws,
    Pref="dom.mozBrowserFramesEnabled",
-   ChromeOnly]
+   Func="nsDocument::IsBrowserElementEnabled"]
   DOMRequest getContentDimensions();
 
   [Throws,
    Pref="dom.mozBrowserFramesEnabled",
-   ChromeOnly]
+   Func="nsDocument::IsBrowserElementEnabled"]
   DOMRequest setInputMethodActive(boolean isActive);
 
   [Throws,
    Pref="dom.mozBrowserFramesEnabled",
-   ChromeOnly]
+   Func="nsDocument::IsBrowserElementEnabled"]
   void setNFCFocus(boolean isFocus);
 
   [Throws,
    Pref="dom.mozBrowserFramesEnabled",
-   ChromeOnly]
+   Func="nsDocument::IsBrowserElementEnabled"]
   void findAll(DOMString searchString, BrowserFindCaseSensitivity caseSensitivity);
 
   [Throws,
    Pref="dom.mozBrowserFramesEnabled",
-   ChromeOnly]
+   Func="nsDocument::IsBrowserElementEnabled"]
   void findNext(BrowserFindDirection direction);
 
   [Throws,
    Pref="dom.mozBrowserFramesEnabled",
-   ChromeOnly]
+   Func="nsDocument::IsBrowserElementEnabled"]
   void clearMatch();
 
   [Throws,
    Pref="dom.mozBrowserFramesEnabled",
-   ChromeOnly]
+   Func="nsDocument::IsBrowserElementEnabled"]
   DOMRequest executeScript(DOMString script,
                            optional BrowserElementExecuteScriptOptions options);
 
   [Throws,
    Pref="dom.mozBrowserFramesEnabled",
-   ChromeOnly]
+   Func="nsDocument::IsBrowserElementEnabled"]
   DOMRequest getWebManifest();
 
 };

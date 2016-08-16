@@ -1540,6 +1540,7 @@ public:
                                   const nsAString* aTypeExtension) override;
 
   static bool IsWebComponentsEnabled(JSContext* aCx, JSObject* aObject);
+  static bool IsBrowserElementEnabled(JSContext* aCx, JSObject* aObject);
 
   // The "registry" from the web components spec.
   RefPtr<mozilla::dom::Registry> mRegistry;

@@ -54,7 +54,7 @@ partial interface HTMLIFrameElement {
 
 partial interface HTMLIFrameElement {
   // nsIDOMMozBrowserFrame
-  [ChromeOnly,SetterThrows]
+  [Func="nsDocument::IsBrowserElementEnabled",SetterThrows]
            attribute boolean mozbrowser;
 };
 

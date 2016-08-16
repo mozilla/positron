@@ -78,6 +78,21 @@ BrowserWindow.prototype = {
     ppmm.broadcastAsyncMessage('ipc-message', [channel].concat(args), { window: this._domWindow });
   },
 
+  _enableBrowserElement: function(url) {
+    let uri = Services.io.newURI(url, null, null);
+    if (uri.scheme !== 'https' && uri.scheme !== 'file') {
+      console.warn(`not enabling mozbrowser for ${url}`);
+      return;
+    }
+
+    console.log(`enabling mozbrowser for ${url}`);
+    Services.perms.add(uri, "browser", Services.perms.ALLOW_ACTION);
+
+    // TODO: remove URL once BrowserWindow is closed?  Otherwise, if the app
+    // gets updated to a version that no longer opens a BrowserWindow
+    // to that URL, the permission will persist unnecessarily.
+  },
+
   _loadURL: function(url) {
     // Observe document-element-inserted and eagerly create the module loader,
     // so <webview> is available by the time the document loads.
@@ -100,6 +115,8 @@ BrowserWindow.prototype = {
       },
     };
     Services.obs.addObserver(observer, 'document-element-inserted', false);
+
+    this._enableBrowserElement(url);
 
     this._domWindow.location = url;
   },
