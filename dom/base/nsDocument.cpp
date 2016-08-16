@@ -2116,25 +2116,8 @@ nsDocument::Reset(nsIChannel* aChannel, nsILoadGroup* aLoadGroup)
     nsIScriptSecurityManager *securityManager =
       nsContentUtils::GetSecurityManager();
     if (securityManager) {
-      // Give loads in top-level docshells the system principal so Positron
-      // can give chrome privileges to application documents that it loads
-      // into chrome windows from file: URLs.
-      //
-      // TODO: figure out a better way to give those documents this principal.
-      // https://github.com/mozilla/positron/issues/67
-      //
-      nsCOMPtr<nsIDocShell> docShell(mDocumentContainer);
-      nsCOMPtr<nsIDocShellTreeItem> parentDocShellTreeItem;
-      if (docShell &&
-          docShell->ItemType() == nsIDocShellTreeItem::typeChrome &&
-          NS_SUCCEEDED(docShell->GetParent(getter_AddRefs(parentDocShellTreeItem))) &&
-          !parentDocShellTreeItem)
-      {
-        securityManager->GetSystemPrincipal(getter_AddRefs(principal));
-      } else {
-        securityManager->GetChannelResultPrincipal(aChannel,
-                                                   getter_AddRefs(principal));
-      }
+      securityManager->GetChannelResultPrincipal(aChannel,
+                                                 getter_AddRefs(principal));
     }
   }
 
