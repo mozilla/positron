@@ -5982,7 +5982,11 @@ nsDocument::IsBrowserElementEnabled(JSContext* aCx, JSObject* aObject)
     return true;
   }
 
-  // Check for the webcomponents permission. See Bug 1181555.
+  if (!Preferences::GetBool("dom.mozBrowserFramesEnabledForContent")) {
+    return false;
+  }
+
+  // Check for the browser permission.
   JSAutoCompartment ac(aCx, obj);
   JS::Rooted<JSObject*> global(aCx, JS_GetGlobalForObject(aCx, obj));
   nsCOMPtr<nsPIDOMWindowInner> window =

@@ -4,6 +4,7 @@
 
 pref("browser.dom.window.dump.enabled", true);
 pref("dom.mozBrowserFramesEnabled", true);
+pref("dom.mozBrowserFramesEnabledForContent", true);
 pref("dom.webcomponents.enabled", true);
 pref("javascript.options.showInConsole", true);
 pref("devtools.selfxss.count", 5);
