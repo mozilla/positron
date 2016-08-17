@@ -29,7 +29,7 @@ interface EventEmitter {
 
 // This currently specifies only a subset of the attributes and operations
 // of the process global as specified by Node.
-[ChromeOnly,
+[Func="nsDocument::IsBrowserElementEnabled",
  JSImplementation="@mozilla.org/positron/process;1"]
 interface processImpl : EventEmitter {
   [Cached, Pure] readonly attribute sequence<DOMString> argv;
