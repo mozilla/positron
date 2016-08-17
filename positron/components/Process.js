@@ -38,6 +38,19 @@ Process.prototype = {
    * for an explanation of the behavior of this method.
    */
   init: function(window) {
+    // This isn't quite right, since we actually want window.process to remain
+    // uninitialized if !window.processImpl, which indicates that the window
+    // doesn't have access to the window.process global.  I wish we could return
+    // the undefined value, but that triggers a "permission denied" error
+    // when the page tries to access the global property, which seems weirder
+    // than the behavior when the property is set to null.
+    //
+    // TODO: prevent initialization of window.process when !window.processImpl.
+    //
+    if (!window.processImpl) {
+      return null;
+    }
+
     this._contentWindow = window;
 
     // The WebIDL binding applies to the hidden window too, but we don't want

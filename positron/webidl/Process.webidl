@@ -19,8 +19,7 @@ dictionary VersionDictionary {
 
 // EventEmitter isn't instantiated, its methods are just accessed
 // on processImpl.  So it doesn't need a real contract ID.
-[ChromeOnly,
- JSImplementation="dummy"]
+[JSImplementation="dummy"]
 interface EventEmitter {
   [Throws]
   EventEmitter once(DOMString name, Function listener);
@@ -29,6 +28,14 @@ interface EventEmitter {
 
 // This currently specifies only a subset of the attributes and operations
 // of the process global as specified by Node.
+//
+// Currently we reuse nsDocument::IsBrowserElementEnabled to determine
+// whether or not to enable this global, since the only consumer is Positron,
+// which always wants this global when it wants the mozbrowser API.
+// But ideally we'd give this global its own function, so Positron apps
+// can specify whether or not they want Node integration in BrowserWindows,
+// and we can disable it even when the mozbrowser API is enabled.
+//
 [Func="nsDocument::IsBrowserElementEnabled",
  JSImplementation="@mozilla.org/positron/process;1"]
 interface processImpl : EventEmitter {
