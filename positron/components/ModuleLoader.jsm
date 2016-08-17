@@ -212,11 +212,10 @@ function ModuleLoader(processType, window) {
   //
   this.process = this.require({}, 'resource:///modules/gecko/process.js');
 
-  // In the browser process, assign global.process to this.process directly.
-  // In a renderer process, the WebIDL binding sets global.process.
-  if (processType === 'browser') {
-    this.global.process = this.process;
-  }
+  // Define 'process' in the sandbox so that modules loaded in the sandbox
+  // have access to it.  This doesn't enable a page in a renderer process
+  // to access the value.  For that, we still need to expose it via WebIDL.
+  sandbox.process = this.process;
 
   this.global.Buffer = this.require({}, 'resource:///modules/node/buffer.js').Buffer;
 
