@@ -78,7 +78,7 @@ BrowserWindow.prototype = {
     ppmm.broadcastAsyncMessage('ipc-message', [channel].concat(args), { window: this._domWindow });
   },
 
-  _enableBrowserElement: function(url) {
+  _enableBrowserElementForURL: function(url) {
     let uri = Services.io.newURI(url, null, null);
     if (uri.scheme !== 'https' && uri.scheme !== 'file') {
       console.warn(`not enabling mozbrowser for ${url}`);
@@ -116,7 +116,7 @@ BrowserWindow.prototype = {
     };
     Services.obs.addObserver(observer, 'document-element-inserted', false);
 
-    this._enableBrowserElement(url);
+    this._enableBrowserElementForURL(url);
 
     this._domWindow.location = url;
   },
