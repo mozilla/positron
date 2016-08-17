@@ -213,7 +213,7 @@ function ModuleLoader(processType, window) {
   this.process = this.require({}, 'resource:///modules/gecko/process.js');
 
   // Define 'process' in the sandbox so that modules loaded in the sandbox
-  // have access to it.  This doesn't enable a page in a renderer process
+  // have direct access to it.  This doesn't enable a page in a renderer process
   // to access the value.  For that, we still need to expose it via WebIDL.
   sandbox.process = this.process;
 
