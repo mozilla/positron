@@ -1158,12 +1158,16 @@ class BuildReader(object):
                         context)
                 non_unified_sources.add(source)
             time_start = time.time()
+            incs = set()
+            for s in getattr(gyp_dir, 'includes', ()):
+                incs.add(s)
             for gyp_context in read_from_gyp(context.config,
                                              mozpath.join(curdir, gyp_dir.input),
                                              mozpath.join(context.objdir,
                                                           target_dir),
                                              gyp_dir.variables,
-                                             non_unified_sources = non_unified_sources):
+                                             non_unified_sources = non_unified_sources,
+                                             incs = incs):
                 gyp_context.update(gyp_dir.sandbox_vars)
                 gyp_contexts.append(gyp_context)
                 self._file_count += len(gyp_context.all_paths)

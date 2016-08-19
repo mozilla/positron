@@ -1618,6 +1618,7 @@ VARIABLES = {
 
     'GYP_DIRS': (StrictOrderingOnAppendListWithFlagsFactory({
             'variables': dict,
+            'includes': StrictOrderingOnAppendList,
             'input': unicode,
             'sandbox_vars': dict,
             'non_unified_sources': StrictOrderingOnAppendList,
@@ -1632,6 +1633,7 @@ VARIABLES = {
               object directory.
             - variables, a dictionary containing variables and values to pass
               to the gyp processor.
+            - includes, a list of GYP include files (usually .gypi) to include.
             - sandbox_vars, a dictionary containing variables and values to
               pass to the mozbuild processor on top of those derived from gyp
               configuration.

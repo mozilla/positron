@@ -74,7 +74,8 @@ def encode(value):
     return value
 
 
-def read_from_gyp(config, path, output, vars, non_unified_sources = set()):
+def read_from_gyp(config, path, output, vars, non_unified_sources = set(),
+                  incs = set()):
     """Read a gyp configuration and emits GypContexts for the backend to
     process.
 
@@ -100,6 +101,7 @@ def read_from_gyp(config, path, output, vars, non_unified_sources = set()):
     finder = FileFinder(chrome_src, find_executables=False)
     includes.extend(encode(mozpath.join(chrome_src, name))
         for name, _ in finder.find('*/supplement.gypi'))
+    includes.extend(encode(mozpath.join(script_dir, inc)) for inc in incs)
 
     # Read the given gyp file and its dependencies.
     generator, flat_list, targets, data = \
