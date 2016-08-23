@@ -7,7 +7,6 @@ include $(topsrcdir)/config/config.mk
 # SpiderNode's ICU dependency uses typeid and dynamic_cast, so we need
 # to enable RTTI for it.  Erm, I guess this enables RTTI for the whole build,
 # but I'm unsure how to do so just for the submake of SpiderNode.
-CXXFLAGS += -frtti
 
 ifdef MOZ_DEBUG
 BUILDTYPE = Debug
@@ -41,7 +40,7 @@ SPIDERNODE_LIB_PATHS = $(foreach file,$(SPIDERNODE_LIBS),$(topsrcdir)/positron/s
 # 			(or configure positron to look for the libraries in the spidernode output directory)
 
 spidernode:
-	$(MAKE) -C $(topsrcdir)/positron/spidernode BUILDTYPE=$(BUILDTYPE)
+	$(MAKE) -C $(topsrcdir)/positron/spidernode/out BUILDTYPE=$(BUILDTYPE)
 
 $(SPIDERNODE_LIB_PATHS): spidernode
 

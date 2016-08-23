@@ -9,17 +9,19 @@
 
 #include "nsINodeLoader.h"
 #include "nsISupports.h"
+#include "NodeBindings.h"
 
 class NodeLoader final : public nsINodeLoader
 {
 public:
-  NS_DECL_ISUPPORTS
+  NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSINODELOADER
 
   NodeLoader();
 
 private:
   ~NodeLoader();
+  RefPtr<mozilla::NodeBindings> nodeBindings;
 
 protected:
   /* additional members */
