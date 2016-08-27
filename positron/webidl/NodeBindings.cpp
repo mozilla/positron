@@ -16,6 +16,8 @@
 #include "jsapi.h"
 #include "nsString.h"
 #include "nsAppRunner.h"
+#include "nsContentUtils.h"
+#include "nsJSPrincipals.h"
 
 namespace mozilla {
 
@@ -38,23 +40,29 @@ NodeBindings::~NodeBindings() {
 
   // Clear uv.
   uv_sem_destroy(&embed_sem_);
+  delete uv_env_;
+  // delete context_scope;
+  delete isolate_scope;
 }
 
-void NodeBindings::Initialize(JSContext* aContext) {
+void NodeBindings::Initialize(JSContext* aContext, JSObject* aGlobal) {
   v8::V8::Initialize();
   uv_async_init(uv_default_loop(), &call_next_tick_async_, OnCallNextTick);
   call_next_tick_async_.data = this;
 
-  v8::Isolate* isolate = v8::Isolate::New(aContext);
+  v8::Isolate* isolate = v8::Isolate::New(aContext, aGlobal);
   // v8::Isolate::Scope isolate_scope(isolate);
   // TODO: FIX THIS LEAK
-  v8::Isolate::Scope* isolate_scope = new v8::Isolate::Scope(isolate);
+  isolate_scope = new v8::Isolate::Scope(isolate);
   v8::HandleScope handle_scope(isolate);
-
-  v8::Local<v8::Context> context = v8::Context::New(isolate);
-  // v8::Context::Scope context_scope(context);
+  // JSPrincipals* principals
+  nsCOMPtr<nsIPrincipal> principal = nsContentUtils::GetSystemPrincipal();
+  v8::Local<v8::Context> context = v8::Context::New(isolate, aGlobal, nsJSPrincipals::get(principal));
+  v8::Context::Scope context_scope(context);
   // TODO: FIX THIS LEAK
-  v8::Context::Scope* context_scope = new v8::Context::Scope(context);
+  // v8::Context::Scope* context_scope = new v8::Context::Scope(context);
+
+  dom::AutoEntryScript aes(aGlobal, "NodeBindings Initialize");
 
   node::Environment* env = CreateEnvironment(context);
   set_uv_env(env);
@@ -145,6 +153,7 @@ void NodeBindings::PreMainMessageLoopRun() {
 
 // In electron, this function is in atom bindings.
 void NodeBindings::ActivateUVLoop(v8::Isolate* isolate) {
+  // printf(">>> NodeBindings::ActivateUVLoop\n");
   node::Environment* env = node::Environment::GetCurrent(isolate);
   if (std::find(pending_next_ticks_.begin(), pending_next_ticks_.end(), env) !=
       pending_next_ticks_.end())
@@ -206,6 +215,7 @@ void NodeBindings::RunMessageLoop() {
 }
 
 void NodeBindings::UvRunOnce() {
+  printf(">>> NodeBindings::UvRunOnce\n");
   MOZ_ASSERT(!is_browser_ || NS_IsMainThread());
   node::Environment* env = uv_env();
 

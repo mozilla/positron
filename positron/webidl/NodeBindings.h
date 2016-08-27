@@ -26,7 +26,7 @@ class NodeBindings {
   static NodeBindings* Create(bool is_browser);
 
   // Setup V8, libuv.
-  void Initialize(JSContext* aContext);
+  void Initialize(JSContext* aContext, JSObject* aGlobal);
 
   // Create the environment and load node.js.
   node::Environment* CreateEnvironment(v8::Handle<v8::Context> context);
@@ -95,6 +95,8 @@ class NodeBindings {
   uv_async_t call_next_tick_async_;
   std::list<node::Environment*> pending_next_ticks_;
   void PreMainMessageLoopRun();
+  v8::Isolate::Scope* isolate_scope;
+  // v8::Context::Scope* context_scope;
 };
 
 }  // namespace mozilla

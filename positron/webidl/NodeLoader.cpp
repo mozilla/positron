@@ -10,6 +10,9 @@
 #include "NodeLoader.h"
 #include "NodeBindings.h"
 #include "nsString.h"
+#include "nsITimer.h"
+#include "nsComponentManagerUtils.h"
+#include "mozilla/dom/ScriptSettings.h" // for AutoJSAPI
 
 using namespace mozilla;
 
@@ -36,6 +39,37 @@ NS_GENERIC_FACTORY_CONSTRUCTOR(NodeLoader)
 /* Implementation file */
 NS_IMPL_ISUPPORTS(NodeLoader, nsINodeLoader)
 
+class InitTimerCallback final : public nsITimerCallback
+{
+  ~InitTimerCallback() {
+    printf(">>> Destryoing InitTimerCallback\n");
+  }
+
+public:
+  InitTimerCallback(NodeLoader* aNodeLoader, JSObject* aGlobal, bool isBrowser, JSContext* aContext)
+    : mNodeLoader(aNodeLoader), mGlobal(aGlobal), mIsBrowser(isBrowser), mContext(aContext)
+  { }
+
+  NS_DECL_ISUPPORTS
+
+  NS_IMETHODIMP Notify(nsITimer* aTimer) final
+  {
+    printf(">>> InitTimerCallback::Notify\n");
+    mNodeLoader->timer = nullptr;
+    mNodeLoader->nodeBindings = NodeBindings::Create(mIsBrowser);
+    mNodeLoader->nodeBindings->Initialize(mContext, mGlobal);
+    return NS_OK;
+  }
+
+protected:
+  NodeLoader* mNodeLoader;
+  JSObject* mGlobal;
+  bool mIsBrowser;
+  JSContext* mContext;
+};
+
+NS_IMPL_ISUPPORTS(InitTimerCallback, nsITimerCallback)
+
 NodeLoader::NodeLoader()
 {
   /* member initializers and constructor code */
@@ -49,8 +83,13 @@ NodeLoader::~NodeLoader()
 NS_IMETHODIMP NodeLoader::Init(const nsACString& type, JSContext* aContext)
 {
   MOZ_ASSERT(type.EqualsLiteral("browser") || type.EqualsLiteral("renderer"));
-  nodeBindings = NodeBindings::Create(type.EqualsLiteral("browser"));
-  nodeBindings->Initialize(aContext);
+  JSObject* globalObject = JS::CurrentGlobalOrNull(aContext);
+  MOZ_ASSERT(globalObject);
+  RefPtr<nsITimerCallback> timerCb = new InitTimerCallback(this, globalObject, type.EqualsLiteral("browser"), aContext);
+  timer = do_CreateInstance("@mozilla.org/timer;1");
+  nsresult rv = timer->InitWithCallback(timerCb, 0, nsITimer::TYPE_ONE_SHOT);
+  NS_ENSURE_SUCCESS(rv, rv);
+  printf(">>> HI\n");
   return NS_OK;
 }
 
