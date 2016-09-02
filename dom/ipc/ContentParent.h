@@ -703,11 +703,6 @@ private:
   AllocPGMPServiceParent(mozilla::ipc::Transport* aTransport,
                          base::ProcessId aOtherProcess) override;
 
-  PAPZParent*
-  AllocPAPZParent(const TabId& aTabId) override;
-  bool
-  DeallocPAPZParent(PAPZParent* aActor) override;
-
   PSharedBufferManagerParent*
   AllocPSharedBufferManagerParent(mozilla::ipc::Transport* aTranport,
                                    base::ProcessId aOtherProcess) override;
@@ -1104,7 +1099,7 @@ private:
 
   virtual bool RecvProfile(const nsCString& aProfile) override;
 
-  virtual bool RecvGetGraphicsDeviceInitData(DeviceInitData* aOut) override;
+  virtual bool RecvGetGraphicsDeviceInitData(ContentDeviceData* aOut) override;
 
   void StartProfiler(nsIProfilerStartParams* aParams);
 

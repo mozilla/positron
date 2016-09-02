@@ -297,12 +297,13 @@ public:
   nsChildView();
 
   // nsIWidget interface
-  NS_IMETHOD              Create(nsIWidget* aParent,
-                                 nsNativeWidget aNativeParent,
-                                 const LayoutDeviceIntRect& aRect,
-                                 nsWidgetInitData* aInitData = nullptr) override;
+  virtual MOZ_MUST_USE nsresult Create(nsIWidget* aParent,
+                                       nsNativeWidget aNativeParent,
+                                       const LayoutDeviceIntRect& aRect,
+                                       nsWidgetInitData* aInitData = nullptr)
+                                       override;
 
-  NS_IMETHOD              Destroy() override;
+  virtual void            Destroy() override;
 
   NS_IMETHOD              Show(bool aState) override;
   virtual bool            IsVisible() const override;
@@ -321,9 +322,9 @@ public:
   NS_IMETHOD              Enable(bool aState) override;
   virtual bool            IsEnabled() const override;
   NS_IMETHOD              SetFocus(bool aRaise) override;
-  NS_IMETHOD              GetBounds(LayoutDeviceIntRect& aRect) override;
-  NS_IMETHOD              GetClientBounds(LayoutDeviceIntRect& aRect) override;
-  NS_IMETHOD              GetScreenBounds(LayoutDeviceIntRect& aRect) override;
+  virtual LayoutDeviceIntRect GetBounds() override;
+  virtual LayoutDeviceIntRect GetClientBounds() override;
+  virtual LayoutDeviceIntRect GetScreenBounds() override;
 
   // Returns the "backing scale factor" of the view's window, which is the
   // ratio of pixels in the window's backing store to Cocoa points. Prior to
@@ -372,6 +373,7 @@ public:
 
   NS_IMETHOD        ActivateNativeMenuItemAt(const nsAString& indexString) override;
   NS_IMETHOD        ForceUpdateNativeMenuAt(const nsAString& indexString) override;
+  NS_IMETHOD        GetSelectionAsPlaintext(nsAString& aResult) override;
 
   NS_IMETHOD_(void) SetInputContext(const InputContext& aContext,
                                     const InputContextAction& aAction) override;

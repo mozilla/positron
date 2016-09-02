@@ -39,7 +39,7 @@ public:
     NS_DECL_NSISEEKABLESTREAM
     NS_DECL_NSIIPCSERIALIZABLEINPUTSTREAM
 
-    NS_METHOD Init();
+    nsresult Init();
 
 private:
 
@@ -50,9 +50,9 @@ private:
         nsWriteSegmentFun mWriter;
         void* mClosure;
     };
-    static NS_METHOD ReadSegCb(nsIInputStream* aIn, void* aClosure,
-                               const char* aFromRawSegment, uint32_t aToOffset,
-                               uint32_t aCount, uint32_t *aWriteCount);
+    static nsresult ReadSegCb(nsIInputStream* aIn, void* aClosure,
+                              const char* aFromRawSegment, uint32_t aToOffset,
+                              uint32_t aCount, uint32_t *aWriteCount);
 
     nsCString mHeaders;
     nsCOMPtr<nsIStringInputStream> mHeaderStream;
@@ -91,7 +91,7 @@ nsMIMEInputStream::~nsMIMEInputStream()
 {
 }
 
-NS_METHOD nsMIMEInputStream::Init()
+nsresult nsMIMEInputStream::Init()
 {
     nsresult rv = NS_OK;
     mStream = do_CreateInstance("@mozilla.org/io/multiplex-input-stream;1",
@@ -232,7 +232,7 @@ NS_IMETHODIMP nsMIMEInputStream::ReadSegments(nsWriteSegmentFun aWriter,
     return mStream->ReadSegments(ReadSegCb, &state, aCount, _retval);
 }
 
-NS_METHOD
+nsresult
 nsMIMEInputStream::ReadSegCb(nsIInputStream* aIn, void* aClosure,
                              const char* aFromRawSegment,
                              uint32_t aToOffset, uint32_t aCount,

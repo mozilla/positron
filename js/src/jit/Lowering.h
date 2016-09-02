@@ -78,7 +78,7 @@ class LIRGenerator : public LIRGeneratorSpecific
     void visitNewTypedArrayDynamicLength(MNewTypedArrayDynamicLength* ins);
     void visitNewObject(MNewObject* ins);
     void visitNewTypedObject(MNewTypedObject* ins);
-    void visitNewDeclEnvObject(MNewDeclEnvObject* ins);
+    void visitNewNamedLambdaObject(MNewNamedLambdaObject* ins);
     void visitNewCallObject(MNewCallObject* ins);
     void visitNewSingletonCallObject(MNewSingletonCallObject* ins);
     void visitNewStringObject(MNewStringObject* ins);
@@ -125,6 +125,7 @@ class LIRGenerator : public LIRGeneratorSpecific
     void visitLsh(MLsh* ins);
     void visitRsh(MRsh* ins);
     void visitUrsh(MUrsh* ins);
+    void visitSignExtend(MSignExtend* ins);
     void visitRotate(MRotate* ins);
     void visitFloor(MFloor* ins);
     void visitCeil(MCeil* ins);
@@ -154,7 +155,7 @@ class LIRGenerator : public LIRGeneratorSpecific
     void visitNop(MNop* nop);
     void visitLimitedTruncate(MLimitedTruncate* nop);
     void visitOsrValue(MOsrValue* value);
-    void visitOsrScopeChain(MOsrScopeChain* object);
+    void visitOsrEnvironmentChain(MOsrEnvironmentChain* object);
     void visitOsrReturnValue(MOsrReturnValue* value);
     void visitOsrArgumentsObject(MOsrArgumentsObject* object);
     void visitToDouble(MToDouble* convert);
@@ -317,6 +318,7 @@ class LIRGenerator : public LIRGeneratorSpecific
     void visitAtomicIsLockFree(MAtomicIsLockFree* ins);
     void visitGuardSharedTypedArray(MGuardSharedTypedArray* ins);
     void visitCheckReturn(MCheckReturn* ins);
+    void visitCheckIsObj(MCheckIsObj* ins);
     void visitCheckObjCoercible(MCheckObjCoercible* ins);
     void visitDebugCheckSelfHosted(MDebugCheckSelfHosted* ins);
 };

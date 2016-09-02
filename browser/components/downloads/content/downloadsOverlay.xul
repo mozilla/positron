@@ -25,8 +25,8 @@
              oncommand="goDoCommand('downloadsCmd_unblock')"/>
     <command id="downloadsCmd_chooseUnblock"
              oncommand="goDoCommand('downloadsCmd_chooseUnblock')"/>
-    <command id="downloadsCmd_chooseOpen"
-             oncommand="goDoCommand('downloadsCmd_chooseOpen')"/>
+    <command id="downloadsCmd_unblockAndOpen"
+             oncommand="goDoCommand('downloadsCmd_unblockAndOpen')"/>
     <command id="downloadsCmd_confirmBlock"
              oncommand="goDoCommand('downloadsCmd_confirmBlock')"/>
     <command id="downloadsCmd_open"
@@ -104,8 +104,8 @@
         <menuseparator/>
 
         <menuitem command="downloadsCmd_clearList"
-                  label="&cmd.clearList.label;"
-                  accesskey="&cmd.clearList.accesskey;"/>
+                  label="&cmd.clearList2.label;"
+                  accesskey="&cmd.clearList2.accesskey;"/>
       </menupopup>
 
       <panelmultiview id="downloadsPanel-multiView"
@@ -135,7 +135,9 @@
                   onkeydown="DownloadsSummary.onKeyDown(event);"
                   onclick="DownloadsSummary.onClick(event);">
               <image class="downloadTypeIcon" />
-              <vbox id="downloadsSummaryChildBox">
+              <vbox pack="center"
+                    class="downloadContainer"
+                    style="width: &downloadDetails.width;">
                 <description id="downloadsSummaryDescription"
                              style="min-width: &downloadsSummary.minWidth2;"/>
                 <progressmeter id="downloadsSummaryProgress"
@@ -144,15 +146,34 @@
                                max="100"
                                mode="normal" />
                 <description id="downloadsSummaryDetails"
-                             style="width: &downloadDetails.width;"
                              crop="end"/>
               </vbox>
             </hbox>
-            <button id="downloadsHistory"
-                    class="plain downloadsPanelFooterButton"
-                    label="&downloadsHistory.label;"
-                    accesskey="&downloadsHistory.accesskey;"
-                    oncommand="DownloadsPanel.showDownloadsHistory();"/>
+            <hbox id="downloadsFooterButtons">
+              <button id="downloadsHistory"
+                      class="plain downloadsPanelFooterButton"
+                      label="&downloadsHistory.label;"
+                      accesskey="&downloadsHistory.accesskey;"
+                      flex="1"
+                      oncommand="DownloadsPanel.showDownloadsHistory();"/>
+              <toolbarseparator id="downloadsFooterButtonsSplitter"
+                      class="downloadsDropmarkerSplitter"/>
+              <button id="downloadsFooterDropmarker"
+                      class="plain downloadsPanelFooterButton downloadsDropmarker"
+                      type="menu">
+                <menupopup id="downloadSubPanel"
+                           onpopupshowing="DownloadsPanel.onFooterPopupShowing(event);"
+                           onpopuphidden="DownloadsPanel.onFooterPopupHidden(event);"
+                           position="after_end">
+                  <menuitem id="downloadsDropdownItemClearList"
+                            command="downloadsCmd_clearList"
+                            label="&cmd.clearList2.label;"/>
+                  <menuitem id="downloadsDropdownItemOpenDownloadsFolder"
+                            oncommand="DownloadsPanel.openDownloadsFolder();"
+                            label="&openDownloadsFolder.label;"/>
+                </menupopup>
+              </button>
+            </hbox>
           </vbox>
         </panelview>
 
@@ -168,7 +189,7 @@
                 align="stretch">
             <button id="downloadsPanel-blockedSubview-openButton"
                     class="plain downloadsPanelFooterButton"
-                    command="downloadsCmd_chooseOpen"
+                    command="downloadsCmd_unblockAndOpen"
                     flex="1"/>
             <toolbarseparator/>
             <button id="downloadsPanel-blockedSubview-deleteButton"

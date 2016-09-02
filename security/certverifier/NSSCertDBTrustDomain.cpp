@@ -17,7 +17,7 @@
 #include "certdb.h"
 #include "mozilla/Casting.h"
 #include "mozilla/UniquePtr.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 #include "nsNSSCertificate.h"
 #include "nsServiceManagerUtils.h"
 #include "nss.h"
@@ -246,7 +246,7 @@ NSSCertDBTrustDomain::GetCertTrust(EndEntityOrCA endEntityOrCA,
         return Success;
       }
 #ifndef MOZ_NO_EV_CERTS
-      if (CertIsAuthoritativeForEVPolicy(candidateCert.get(), policy)) {
+      if (CertIsAuthoritativeForEVPolicy(candidateCert, policy)) {
         trustLevel = TrustLevel::TrustAnchor;
         return Success;
       }

@@ -71,7 +71,7 @@ public:
   {
   }
 
-  NS_IMETHODIMP Run()
+  NS_IMETHOD Run() override
   {
     return mSaver->NotifyTargetChange(mTarget);
   }
@@ -121,7 +121,7 @@ BackgroundFileSaver::~BackgroundFileSaver()
     return;
   }
   destructorSafeDestroyNSSReference();
-  shutdown(calledFromObject);
+  shutdown(ShutdownCalledFrom::Object);
 }
 
 void
@@ -1209,7 +1209,7 @@ DigestOutputStream::~DigestOutputStream()
   if (isAlreadyShutDown()) {
     return;
   }
-  shutdown(calledFromObject);
+  shutdown(ShutdownCalledFrom::Object);
 }
 
 NS_IMETHODIMP

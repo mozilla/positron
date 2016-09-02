@@ -47,7 +47,7 @@ PluginWidgetProxy::~PluginWidgetProxy()
   PWLOG("PluginWidgetProxy::~PluginWidgetProxy()\n");
 }
 
-NS_IMETHODIMP
+nsresult
 PluginWidgetProxy::Create(nsIWidget* aParent,
                           nsNativeWidget aNativeParent,
                           const LayoutDeviceIntRect& aRect,
@@ -94,7 +94,7 @@ PluginWidgetProxy::GetParent(void)
   return mParent.get();
 }
 
-NS_IMETHODIMP
+void
 PluginWidgetProxy::Destroy()
 {
   PWLOG("PluginWidgetProxy::Destroy()\n");
@@ -106,7 +106,7 @@ PluginWidgetProxy::Destroy()
     mActor = nullptr;
   }
 
-  return PuppetWidget::Destroy();
+  PuppetWidget::Destroy();
 }
 
 void

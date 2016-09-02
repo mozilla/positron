@@ -245,21 +245,20 @@ MergeSortedFrameLists(nsFrameList& aDest, nsFrameList& aSrc,
       aDest.AppendFrames(nullptr, aSrc);
       break;
     }
-    int32_t result = nsLayoutUtils::CompareTreePosition(src->GetContent(),
-                                                        dest->GetContent(),
+    nsIContent* srcContent = src->GetContent();
+    nsIContent* destContent = dest->GetContent();
+    int32_t result = nsLayoutUtils::CompareTreePosition(srcContent,
+                                                        destContent,
                                                         aCommonAncestor);
     if (MOZ_UNLIKELY(result == 0)) {
       // NOTE: we get here when comparing ::before/::after for the same element.
-      auto srcPseudo = src->GetContent()->NodeInfo()->NameAtom();
-      if (MOZ_UNLIKELY(srcPseudo == nsGkAtoms::mozgeneratedcontentbefore)) {
-        auto destPseudo = dest->GetContent()->NodeInfo()->NameAtom();
-        if (MOZ_LIKELY(destPseudo != nsGkAtoms::mozgeneratedcontentbefore) ||
+      if (MOZ_UNLIKELY(srcContent->IsGeneratedContentContainerForBefore())) {
+        if (MOZ_LIKELY(!destContent->IsGeneratedContentContainerForBefore()) ||
             ::IsPrevContinuationOf(src, dest)) {
           result = -1;
         }
-      } else if (MOZ_UNLIKELY(srcPseudo == nsGkAtoms::mozgeneratedcontentafter)) {
-        auto destPseudo = dest->GetContent()->NodeInfo()->NameAtom();
-        if (MOZ_UNLIKELY(destPseudo == nsGkAtoms::mozgeneratedcontentafter) &&
+      } else if (MOZ_UNLIKELY(srcContent->IsGeneratedContentContainerForAfter())) {
+        if (MOZ_UNLIKELY(destContent->IsGeneratedContentContainerForAfter()) &&
             ::IsPrevContinuationOf(src, dest)) {
           result = -1;
         }
@@ -4566,18 +4565,21 @@ Maybe<nsGridContainerFrame::Fragmentainer>
 nsGridContainerFrame::GetNearestFragmentainer(const GridReflowInput& aState) const
 {
   Maybe<nsGridContainerFrame::Fragmentainer> data;
-  WritingMode wm = aState.mWM;
   const ReflowInput* gridRI = aState.mReflowInput;
-  const ReflowInput* cbRS = gridRI->mCBReflowInput;
-  for ( ; cbRS; cbRS = cbRS->mCBReflowInput) {
-    nsIScrollableFrame* sf = do_QueryFrame(cbRS->mFrame);
+  if (gridRI->AvailableBSize() == NS_UNCONSTRAINEDSIZE) {
+    return data;
+  }
+  WritingMode wm = aState.mWM;
+  const ReflowInput* cbRI = gridRI->mCBReflowInput;
+  for ( ; cbRI; cbRI = cbRI->mCBReflowInput) {
+    nsIScrollableFrame* sf = do_QueryFrame(cbRI->mFrame);
     if (sf) {
       break;
     }
-    if (wm.IsOrthogonalTo(cbRS->GetWritingMode())) {
+    if (wm.IsOrthogonalTo(cbRI->GetWritingMode())) {
       break;
     }
-    nsIAtom* frameType = cbRS->mFrame->GetType();
+    nsIAtom* frameType = cbRI->mFrame->GetType();
     if ((frameType == nsGkAtoms::canvasFrame &&
          PresContext()->IsPaginated()) ||
         frameType == nsGkAtoms::columnSetFrame) {
@@ -5765,6 +5767,16 @@ nsGridContainerFrame::Reflow(nsPresContext*           aPresContext,
     ComputedGridLineInfo* rowLineInfo = new ComputedGridLineInfo(
       Move(rowLineNames));
     Properties().Set(GridRowLineInfo(), rowLineInfo);
+
+    // Generate area info for explicit areas. Implicit areas are handled
+    // elsewhere.
+    if (gridReflowInput.mGridStyle->mGridTemplateAreas) {
+      nsTArray<css::GridNamedArea>* areas = new nsTArray<css::GridNamedArea>(
+          gridReflowInput.mGridStyle->mGridTemplateAreas->mNamedAreas);
+      Properties().Set(ExplicitNamedAreasProperty(), areas);
+    } else {
+      Properties().Delete(ExplicitNamedAreasProperty());
+    }
   }
 
   if (!prevInFlow) {

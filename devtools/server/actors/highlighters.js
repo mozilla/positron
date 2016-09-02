@@ -580,6 +580,10 @@ HighlighterEnvironment.prototype = {
     return this._win || this._tabActor;
   },
 
+  get isXUL() {
+    return isXUL(this.window);
+  },
+
   get window() {
     if (!this.isInitialized) {
       throw new Error("Initialize HighlighterEnvironment with a tabActor " +
@@ -655,6 +659,10 @@ HighlighterEnvironment.prototype = {
 const { BoxModelHighlighter } = require("./highlighters/box-model");
 register(BoxModelHighlighter);
 exports.BoxModelHighlighter = BoxModelHighlighter;
+
+const { CssGridHighlighter } = require("./highlighters/css-grid");
+register(CssGridHighlighter);
+exports.CssGridHighlighter = CssGridHighlighter;
 
 const { CssTransformHighlighter } = require("./highlighters/css-transform");
 register(CssTransformHighlighter);

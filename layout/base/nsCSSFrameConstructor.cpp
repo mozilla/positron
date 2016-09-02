@@ -1073,7 +1073,7 @@ nsFrameConstructorState::PushAbsoluteContainingBlock(nsContainerFrame* aNewAbsol
    * we're a transformed element.
    */
   mFixedPosIsAbsPos = aPositionedFrame &&
-      aPositionedFrame->StyleDisplay()->IsFixedPosContainingBlock(aPositionedFrame);
+      aPositionedFrame->IsFixedPosContainingBlock();
 
   if (aNewAbsoluteContainingBlock) {
     aNewAbsoluteContainingBlock->MarkAsAbsoluteContainingBlock();
@@ -1535,7 +1535,9 @@ nsCSSFrameConstructor::nsCSSFrameConstructor(nsIDocument* aDocument,
   , mGfxScrollFrame(nullptr)
   , mPageSequenceFrame(nullptr)
   , mCurrentDepth(0)
+#ifdef DEBUG
   , mUpdateCount(0)
+#endif
   , mQuotesDirty(false)
   , mCountersDirty(false)
   , mIsDestroyingFrameTree(false)
@@ -3105,7 +3107,7 @@ nsCSSFrameConstructor::ConstructSelectFrame(nsFrameConstructorState& aState,
     // Notify combobox that it should use the listbox as it's popup
     comboBox->SetDropDown(listFrame);
 
-    NS_ASSERTION(!listFrame->IsAbsPosContaininingBlock(),
+    NS_ASSERTION(!listFrame->IsAbsPosContainingBlock(),
                  "Ended up with positioned dropdown list somehow.");
     NS_ASSERTION(!listFrame->IsFloating(),
                  "Ended up with floating dropdown list somehow.");
@@ -3249,7 +3251,7 @@ nsCSSFrameConstructor::ConstructFieldSetFrame(nsFrameConstructorState& aState,
   }
 
   nsContainerFrame* absPosContainer = nullptr;
-  if (fieldsetFrame->IsAbsPosContaininingBlock()) {
+  if (fieldsetFrame->IsAbsPosContainingBlock()) {
     absPosContainer = fieldsetFrame;
   }
 
@@ -3698,6 +3700,8 @@ nsCSSFrameConstructor::FindInputData(Element* aElement,
     SIMPLE_INT_CREATE(NS_FORM_INPUT_TIME, NS_NewTextControlFrame),
     // TODO: this is temporary until a frame is written: bug 888320
     SIMPLE_INT_CREATE(NS_FORM_INPUT_MONTH, NS_NewTextControlFrame),
+    // TODO: this is temporary until a frame is written: bug 888320
+    SIMPLE_INT_CREATE(NS_FORM_INPUT_WEEK, NS_NewTextControlFrame),
     { NS_FORM_INPUT_SUBMIT,
       FCDATA_WITH_WRAPPING_BLOCK(0, NS_NewGfxButtonControlFrame,
                                  nsCSSAnonBoxes::buttonContent) },
@@ -4256,9 +4260,13 @@ nsCSSFrameConstructor::GetAnonymousContent(nsIContent* aParent,
   }
 
   if (ServoStyleSet* styleSet = mPresShell->StyleSet()->GetAsServo()) {
-    // Eagerly compute styles for the anonymous content tree.
+    // Eagerly compute styles for the anonymous content tree, but only do so
+    // if the content doesn't have an explicit style context (if it does, we
+    // don't need the normal computed values).
     for (auto& info : aContent) {
-      styleSet->RestyleSubtree(info.mContent);
+      if (!info.mStyleContext) {
+        styleSet->StyleNewSubtree(info.mContent);
+      }
     }
   }
 
@@ -4637,7 +4645,8 @@ nsCSSFrameConstructor::FindDisplayData(const nsStyleDisplay* aDisplay,
                                        Element* aElement,
                                        nsStyleContext* aStyleContext)
 {
-  PR_STATIC_ASSERT(eParentTypeCount < (1 << (32 - FCDATA_PARENT_TYPE_OFFSET)));
+  static_assert(eParentTypeCount < (1 << (32 - FCDATA_PARENT_TYPE_OFFSET)),
+                "Check eParentTypeCount should not overflow");
 
   // The style system ensures that floated and positioned frames are
   // block-level.
@@ -5708,9 +5717,15 @@ nsCSSFrameConstructor::AddFrameConstructionItemsInternal(nsFrameConstructorState
   }
 
   // When constructing a child of a non-open <details>, create only the frame
-  // for the main <summary> element, and skip other elements.
+  // for the main <summary> element, and skip other elements.  This only applies
+  // to things that are not roots of native anonymous subtrees (except for
+  // ::before and ::after); we always want to create "internal" anonymous
+  // content.
   auto* details = HTMLDetailsElement::FromContentOrNull(parent);
-  if (details && details->IsDetailsEnabled() && !details->Open()) {
+  if (details && details->IsDetailsEnabled() && !details->Open() &&
+      (!aContent->IsRootOfNativeAnonymousSubtree() ||
+       aContent->IsGeneratedContentContainerForBefore() ||
+       aContent->IsGeneratedContentContainerForAfter())) {
     auto* summary = HTMLSummaryElement::FromContentOrNull(aContent);
     if (!summary || !summary->IsMainSummary()) {
       SetAsUndisplayedContent(aState, aItems, aContent, styleContext,
@@ -6151,9 +6166,9 @@ nsCSSFrameConstructor::GetAbsoluteContainingBlock(nsIFrame* aFrame,
     // the correct containing block (the scrolledframe) in that case.
     // If we're looking for a fixed-pos containing block and the frame is
     // not transformed, skip it.
-    if (!frame->IsAbsPosContaininingBlock() ||
+    if (!frame->IsAbsPosContainingBlock() ||
         (aType == FIXED_POS &&
-         !frame->StyleDisplay()->IsFixedPosContainingBlock(frame))) {
+         !frame->IsFixedPosContainingBlock())) {
       continue;
     }
     nsIFrame* absPosCBCandidate = frame;
@@ -6758,7 +6773,11 @@ nsCSSFrameConstructor::GetInsertionPrevSibling(InsertionPoint* aInsertion,
         InsertionPoint fakeInsertion(aInsertion->mParentFrame, parent);
         nsIFrame* result = GetInsertionPrevSibling(&fakeInsertion, child, aIsAppend,
                                                    aIsRangeInsertSafe, nullptr, nullptr);
-        MOZ_ASSERT(aInsertion->mParentFrame == fakeInsertion.mParentFrame);
+        MOZ_ASSERT(aInsertion->mParentFrame->GetContent() ==
+                   fakeInsertion.mParentFrame->GetContent());
+        // fakeInsertion.mParentFrame may now be a continuation of the frame
+        // we started with in the ctor above.
+        aInsertion->mParentFrame = fakeInsertion.mParentFrame;
         return result;
       }
 
@@ -8606,21 +8625,18 @@ nsCSSFrameConstructor::BeginUpdate() {
   }
 
   ++sGlobalGenerationNumber;
+#ifdef DEBUG
   ++mUpdateCount;
+#endif
 }
 
 void
 nsCSSFrameConstructor::EndUpdate()
 {
-  if (mUpdateCount == 1) {
-    // This is the end of our last update.  Before we decrement
-    // mUpdateCount, recalc quotes and counters as needed.
-
-    RecalcQuotesAndCounters();
-    NS_ASSERTION(mUpdateCount == 1, "Odd update count");
-  }
+#ifdef DEBUG
   NS_ASSERTION(mUpdateCount, "Negative mUpdateCount!");
   --mUpdateCount;
+#endif
 }
 
 void
@@ -10538,8 +10554,6 @@ nsCSSFrameConstructor::AddFCItemsForAnonymousContent(
                  "CreateAnonymousFrames manually and not follow the standard "
                  "ProcessChildren() codepath for this frame");
 #endif
-    // Anything restyled by servo should already have the style data.
-    MOZ_ASSERT_IF(content->IsStyledByServo(), !!content->ServoData());
     // Gecko-styled nodes should have no pending restyle flags.
     MOZ_ASSERT_IF(!content->IsStyledByServo(),
                   !content->IsElement() ||
@@ -10558,8 +10572,19 @@ nsCSSFrameConstructor::AddFCItemsForAnonymousContent(
     TreeMatchContext::AutoParentDisplayBasedStyleFixupSkipper
       parentDisplayBasedStyleFixupSkipper(aState.mTreeMatchContext);
     if (aAnonymousItems[i].mStyleContext) {
+      // If we have an explicit style context, that means that the anonymous
+      // content creator had its own plan for the style, and doesn't need the
+      // computed style obtained by cascading this content as a normal node.
+      // This happens when a native anonymous node is used to implement a
+      // pseudo-element. Allowing Servo to traverse these nodes would be wasted
+      // work, so assert that we didn't do that.
+      MOZ_ASSERT_IF(content->IsStyledByServo(), !content->ServoData());
       styleContext = aAnonymousItems[i].mStyleContext.forget();
     } else {
+      // If we don't have an explicit style context, that means we need the
+      // ordinary computed values. Make sure we eagerly cascaded them when the
+      // anonymous nodes were created.
+      MOZ_ASSERT_IF(content->IsStyledByServo(), !!content->ServoData());
       styleContext = ResolveStyleContext(aFrame, content, &aState);
     }
 

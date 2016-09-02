@@ -73,7 +73,7 @@ public:
     }
   }
 
-  NS_METHOD
+  NS_IMETHOD
   CollectReports(nsIHandleReportCallback* aHandleReport,
                  nsISupports* aData, bool aAnonymize) override
   {
@@ -83,17 +83,9 @@ public:
       amount += recorders[i]->SizeOfExcludingThis(MallocSizeOf);
     }
 
-  #define MEMREPORT(_path, _amount, _desc)                                    \
-    do {                                                                      \
-      nsresult rv;                                                            \
-      rv = aHandleReport->Callback(EmptyCString(), NS_LITERAL_CSTRING(_path), \
-                                   KIND_HEAP, UNITS_BYTES, _amount,           \
-                                   NS_LITERAL_CSTRING(_desc), aData);         \
-      NS_ENSURE_SUCCESS(rv, rv);                                              \
-    } while (0)
-
-    MEMREPORT("explicit/media/recorder", amount,
-              "Memory used by media recorder.");
+    MOZ_COLLECT_REPORT(
+      "explicit/media/recorder", KIND_HEAP, UNITS_BYTES, amount,
+      "Memory used by media recorder.");
 
     return NS_OK;
   }
@@ -174,7 +166,7 @@ class MediaRecorder::Session: public nsIObserver,
       : mSession(aSession)
     { }
 
-    NS_IMETHODIMP Run()
+    NS_IMETHOD Run() override
     {
       LOG(LogLevel::Debug, ("Session.PushBlobRunnable s=(%p)", mSession.get()));
       MOZ_ASSERT(NS_IsMainThread());
@@ -204,7 +196,7 @@ class MediaRecorder::Session: public nsIObserver,
       : mSession(aSession)
     { }
 
-    NS_IMETHODIMP Run()
+    NS_IMETHOD Run() override
     {
       LOG(LogLevel::Debug, ("Session.ErrorNotifyRunnable s=(%p)", mSession.get()));
       MOZ_ASSERT(NS_IsMainThread());
@@ -233,7 +225,7 @@ class MediaRecorder::Session: public nsIObserver,
       , mEventName(aEventName)
     { }
 
-    NS_IMETHODIMP Run()
+    NS_IMETHOD Run() override
     {
       LOG(LogLevel::Debug, ("Session.DispatchStartEventRunnable s=(%p)", mSession.get()));
       MOZ_ASSERT(NS_IsMainThread());
@@ -263,7 +255,7 @@ class MediaRecorder::Session: public nsIObserver,
     ~ExtractRunnable()
     {}
 
-    NS_IMETHODIMP Run()
+    NS_IMETHOD Run() override
     {
       MOZ_ASSERT(NS_GetCurrentThread() == mSession->mReadThread);
 
@@ -363,7 +355,7 @@ class MediaRecorder::Session: public nsIObserver,
     explicit DestroyRunnable(Session* aSession)
       : mSession(aSession) {}
 
-    NS_IMETHODIMP Run()
+    NS_IMETHOD Run() override
     {
       LOG(LogLevel::Debug, ("Session.DestroyRunnable session refcnt = (%d) stopIssued %d s=(%p)",
                          (int)mSession->mRefCnt, mSession->mStopIssued, mSession.get()));
@@ -719,11 +711,9 @@ private:
       return false;
     }
 
-    uint16_t appStatus = nsIPrincipal::APP_STATUS_NOT_INSTALLED;
-    doc->NodePrincipal()->GetAppStatus(&appStatus);
-
     // Certified applications can always assign AUDIO_3GPP
-    if (appStatus == nsIPrincipal::APP_STATUS_CERTIFIED) {
+    if (doc->NodePrincipal()->GetAppStatus() ==
+        nsIPrincipal::APP_STATUS_CERTIFIED) {
       return true;
     }
 
@@ -898,7 +888,7 @@ private:
     mMediaStreamTracks.Clear();
   }
 
-  NS_IMETHODIMP Observe(nsISupports *aSubject, const char *aTopic, const char16_t *aData) override
+  NS_IMETHOD Observe(nsISupports *aSubject, const char *aTopic, const char16_t *aData) override
   {
     MOZ_ASSERT(NS_IsMainThread());
     LOG(LogLevel::Debug, ("Session.Observe XPCOM_SHUTDOWN %p", this));

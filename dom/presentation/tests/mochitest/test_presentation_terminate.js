@@ -78,18 +78,6 @@ function setup() {
     gScript.sendAsyncMessage('trigger-on-session-request', receiverUrl);
   });
 
-  gScript.addMessageListener('offer-sent', function offerSentHandler() {
-    debug('Got message: offer-sent');
-    gScript.removeMessageListener('offer-sent', offerSentHandler);
-    gScript.sendAsyncMessage('trigger-on-offer');
-  });
-
-  gScript.addMessageListener('answer-sent', function answerSentHandler() {
-    debug('Got message: answer-sent');
-    gScript.removeMessageListener('answer-sent', answerSentHandler);
-    gScript.sendAsyncMessage('trigger-on-answer');
-  });
-
   return Promise.resolve();
 }
 
@@ -229,10 +217,11 @@ function runTests() {
 
 SpecialPowers.pushPermissions([
   {type: 'presentation-device-manage', allow: false, context: document},
-  {type: 'presentation', allow: true, context: document},
   {type: 'browser', allow: true, context: document},
 ], () => {
   SpecialPowers.pushPrefEnv({ 'set': [['dom.presentation.enabled', true],
+                                      ["dom.presentation.controller.enabled", true],
+                                      ["dom.presentation.receiver.enabled", true],
                                       ['dom.presentation.test.enabled', true],
                                       ['dom.mozBrowserFramesEnabled', true],
                                       ['dom.ipc.tabs.disabled', false],

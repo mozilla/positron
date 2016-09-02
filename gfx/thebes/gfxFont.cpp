@@ -96,24 +96,22 @@ NS_IMPL_ISUPPORTS(gfxFontCache::MemoryReporter, nsIMemoryReporter)
 
 NS_IMETHODIMP
 gfxFontCache::MemoryReporter::CollectReports(
-    nsIMemoryReporterCallback* aCb, nsISupports* aClosure, bool aAnonymize)
+    nsIHandleReportCallback* aHandleReport, nsISupports* aData, bool aAnonymize)
 {
     FontCacheSizes sizes;
 
     gfxFontCache::GetCache()->AddSizeOfIncludingThis(&FontCacheMallocSizeOf,
                                                      &sizes);
 
-    aCb->Callback(EmptyCString(),
-                  NS_LITERAL_CSTRING("explicit/gfx/font-cache"),
-                  KIND_HEAP, UNITS_BYTES, sizes.mFontInstances,
-                  NS_LITERAL_CSTRING("Memory used for active font instances."),
-                  aClosure);
+    MOZ_COLLECT_REPORT(
+        "explicit/gfx/font-cache", KIND_HEAP, UNITS_BYTES,
+        sizes.mFontInstances,
+        "Memory used for active font instances.");
 
-    aCb->Callback(EmptyCString(),
-                  NS_LITERAL_CSTRING("explicit/gfx/font-shaped-words"),
-                  KIND_HEAP, UNITS_BYTES, sizes.mShapedWords,
-                  NS_LITERAL_CSTRING("Memory used to cache shaped glyph data."),
-                  aClosure);
+    MOZ_COLLECT_REPORT(
+        "explicit/gfx/font-shaped-words", KIND_HEAP, UNITS_BYTES,
+        sizes.mShapedWords,
+        "Memory used to cache shaped glyph data.");
 
     return NS_OK;
 }
@@ -3207,7 +3205,7 @@ gfxFont::InitFakeSmallCapsRun(DrawTarget     *aDrawTarget,
                         aDrawTarget, nullptr, nullptr, nullptr, 0,
                         aTextRun->GetAppUnitsPerDevUnit()
                     };
-                    UniquePtr<gfxTextRun> tempRun(
+                    RefPtr<gfxTextRun> tempRun(
                         gfxTextRun::Create(&params, convertedString.Length(),
                                            aTextRun->GetFontGroup(), 0));
                     tempRun->AddGlyphRun(f, aMatchType, 0, true, aOrientation);
@@ -3217,7 +3215,7 @@ gfxFont::InitFakeSmallCapsRun(DrawTarget     *aDrawTarget,
                                                 aScript, vertical)) {
                         ok = false;
                     } else {
-                        UniquePtr<gfxTextRun> mergedRun(
+                        RefPtr<gfxTextRun> mergedRun(
                             gfxTextRun::Create(&params, runLength,
                                                aTextRun->GetFontGroup(), 0));
                         MergeCharactersInTextRun(mergedRun.get(), tempRun.get(),
@@ -3459,12 +3457,18 @@ gfxFont::InitMetricsFromSfntTables(Metrics& aMetrics)
     if (os2Table) {
         const OS2Table *os2 =
             reinterpret_cast<const OS2Table*>(hb_blob_get_data(os2Table, &len));
-        // although sxHeight is a signed field, we consider negative values to
-        // be erroneous and just ignore them
-        if (len >= offsetof(OS2Table, sxHeight) + sizeof(int16_t) &&
-            uint16_t(os2->version) >= 2 && int16_t(os2->sxHeight) > 0) {
-            // version 2 and later includes the x-height field
-            SET_SIGNED(xHeight, os2->sxHeight);
+        // although sxHeight and sCapHeight are signed fields, we consider
+        // negative values to be erroneous and just ignore them
+        if (uint16_t(os2->version) >= 2) {
+            // version 2 and later includes the x-height and cap-height fields
+            if (len >= offsetof(OS2Table, sxHeight) + sizeof(int16_t) &&
+                int16_t(os2->sxHeight) > 0) {
+                SET_SIGNED(xHeight, os2->sxHeight);
+            }
+            if (len >= offsetof(OS2Table, sCapHeight) + sizeof(int16_t) &&
+                int16_t(os2->sCapHeight) > 0) {
+                SET_SIGNED(capHeight, os2->sCapHeight);
+            }
         }
         // this should always be present in any valid OS/2 of any version
         if (len >= offsetof(OS2Table, sTypoLineGap) + sizeof(int16_t)) {
@@ -3510,6 +3514,12 @@ void gfxFont::CalculateDerivedMetrics(Metrics& aMetrics)
         // or a char to measure;
         // pick an arbitrary value that's better than zero
         aMetrics.xHeight = aMetrics.maxAscent * DEFAULT_XHEIGHT_FACTOR;
+    }
+
+    // If we have a font that doesn't provide a capHeight value, use maxAscent
+    // as a reasonable fallback.
+    if (aMetrics.capHeight <= 0) {
+        aMetrics.capHeight = aMetrics.maxAscent;
     }
 
     aMetrics.maxHeight = aMetrics.maxAscent + aMetrics.maxDescent;
@@ -3774,6 +3784,7 @@ gfxFont::CreateVerticalMetrics()
     metrics->zeroOrAveCharWidth = metrics->aveCharWidth;
     metrics->maxHeight = metrics->maxAscent + metrics->maxDescent;
     metrics->xHeight = metrics->emHeight / 2;
+    metrics->capHeight = metrics->maxAscent;
 
     return metrics;
 }

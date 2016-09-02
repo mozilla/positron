@@ -617,7 +617,7 @@ public:
   #undef STYLE_STRUCT
 
   /** Also forward GetVisitedDependentColor to the style context */
-  nscolor GetVisitedDependentColor(nsCSSProperty aProperty)
+  nscolor GetVisitedDependentColor(nsCSSPropertyID aProperty)
     { return mStyleContext->GetVisitedDependentColor(aProperty); }
 
   /**
@@ -1533,6 +1533,7 @@ public:
     nsCOMPtr<imgIContainer> mContainer;
     int32_t                 mCursor;
     bool                    mHaveHotspot;
+    bool                    mLoading;
     float                   mHotspotX, mHotspotY;
   };
   /**
@@ -2689,7 +2690,8 @@ public:
    *  @param aSelectStyle  out param. Returns the type of selection style found
    *                        (using values defined in nsStyleConsts.h).
    */
-  virtual nsresult  IsSelectable(bool* aIsSelectable, uint8_t* aSelectStyle) const = 0;
+  virtual nsresult IsSelectable(bool* aIsSelectable,
+                            mozilla::StyleUserSelect* aSelectStyle) const = 0;
 
   /** 
    *  Called to retrieve the SelectionController associated with the frame.
@@ -3174,7 +3176,8 @@ public:
   inline bool IsInlineOutside() const;
   inline uint8_t GetDisplay() const;
   inline bool IsFloating() const;
-  inline bool IsAbsPosContaininingBlock() const;
+  inline bool IsAbsPosContainingBlock() const;
+  inline bool IsFixedPosContainingBlock() const;
   inline bool IsRelativelyPositioned() const;
   inline bool IsAbsolutelyPositioned() const;
 

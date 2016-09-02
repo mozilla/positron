@@ -8,7 +8,7 @@
     <style>
       path {
         fill-rule: evenodd;
-        fill: #999999;
+        fill: -moz-fieldtext;
       }
     </style>
   </defs>

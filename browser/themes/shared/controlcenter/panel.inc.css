@@ -285,7 +285,7 @@
   -moz-appearance: none;
   margin: 0;
   border: none;
-  border-top: 1px solid #ccc;
+  border-top: 1px solid var(--panel-separator-color);
   padding: 8px 20px;
   color: ButtonText;
   background-color: transparent;
@@ -372,13 +372,18 @@ description#identity-popup-content-verifier,
   margin-top: 5px;
 }
 
-#identity-popup-permission-list:not(:empty) + description {
-  display: none;
-}
-
 .identity-popup-permission-icon {
   width: 16px;
   height: 16px;
+}
+
+.identity-popup-permission-icon.in-use {
+  fill: rgb(224, 41, 29);
+  animation: 1.5s ease in-use-blink infinite;
+}
+
+@keyframes in-use-blink {
+  50% { opacity: 0; }
 }
 
 .identity-popup-permission-label {
@@ -388,7 +393,7 @@ description#identity-popup-content-verifier,
 .identity-popup-permission-state-label {
   margin-inline-end: 5px;
   text-align: end;
-  opacity: 0.6;
+  color: graytext;
 }
 
 .identity-popup-permission-remove-button {
@@ -412,21 +417,22 @@ description#identity-popup-content-verifier,
   height: 16px;
   list-style-image: url(chrome://browser/skin/panel-icons.svg#cancel);
   filter: url(chrome://browser/skin/filters.svg#fill);
-  fill: #999;
+  fill: graytext;
 }
 
 .identity-popup-permission-remove-button > .button-box > .button-text {
   display: none;
 }
 
+/* swap foreground / background colors on hover */
 .identity-popup-permission-remove-button:hover {
-  background-color: #999;
+  background-color: graytext;
 }
 
 .identity-popup-permission-remove-button:hover > .button-box > .button-icon {
-  fill: #fff;
+  fill: -moz-field;
 }
 
 .identity-popup-permission-remove-button:hover:active {
-  background-color: #808080;
+  background-color: -moz-fieldtext;
 }

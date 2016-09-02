@@ -9,16 +9,24 @@ this.EXPORTED_SYMBOLS = ["AutoMigrate"];
 const { classes: Cc, interfaces: Ci, results: Cr, utils: Cu } = Components;
 
 const kAutoMigrateEnabledPref = "browser.migrate.automigrate.enabled";
+const kUndoUIEnabledPref = "browser.migrate.automigrate.ui.enabled";
 
 const kAutoMigrateStartedPref = "browser.migrate.automigrate.started";
 const kAutoMigrateFinishedPref = "browser.migrate.automigrate.finished";
 const kAutoMigrateBrowserPref = "browser.migrate.automigrate.browser";
+
+const kAutoMigrateLastUndoPromptDateMsPref = "browser.migrate.automigrate.lastUndoPromptDateMs";
+const kAutoMigrateDaysToOfferUndoPref = "browser.migrate.automigrate.daysToOfferUndo";
 
 const kPasswordManagerTopic = "passwordmgr-storage-changed";
 const kPasswordManagerTopicTypes = new Set([
   "addLogin",
   "modifyLogin",
 ]);
+
+const kSyncTopic = "fxaccounts:onlogin";
+
+const kNotificationId = "abouthome-automigration-undo";
 
 Cu.import("resource:///modules/MigrationUtils.jsm");
 Cu.import("resource://gre/modules/Preferences.jsm");
@@ -41,24 +49,28 @@ const AutoMigrate = {
   },
 
   maybeInitUndoObserver() {
-    // Check synchronously (NB: canUndo is async) if we really need
-    // to do this:
-    if (!this.getUndoRange()) {
+    if (!this.canUndo()) {
       return;
     }
-    // Now register places and password observers:
+    // Now register places, password and sync observers:
     this.onItemAdded = this.onItemMoved = this.onItemChanged =
-      this.removeUndoOption;
+      this.removeUndoOption.bind(this, this.UNDO_REMOVED_REASON_BOOKMARK_CHANGE);
     PlacesUtils.addLazyBookmarkObserver(this, true);
-    Services.obs.addObserver(this, kPasswordManagerTopic, true);
+    for (let topic of [kSyncTopic, kPasswordManagerTopic]) {
+      Services.obs.addObserver(this, topic, true);
+    }
   },
 
   observe(subject, topic, data) {
-    // As soon as any login gets added or modified, disable undo:
-    // (Note that this ignores logins being removed as that doesn't
-    //  impair the 'undo' functionality of the import.)
-    if (kPasswordManagerTopicTypes.has(data)) {
-      this.removeUndoOption();
+    if (topic == kPasswordManagerTopic) {
+      // As soon as any login gets added or modified, disable undo:
+      // (Note that this ignores logins being removed as that doesn't
+      //  impair the 'undo' functionality of the import.)
+      if (kPasswordManagerTopicTypes.has(data)) {
+        this.removeUndoOption(this.UNDO_REMOVED_REASON_PASSWORD_CHANGE);
+      }
+    } else if (topic == kSyncTopic) {
+      this.removeUndoOption(this.UNDO_REMOVED_REASON_SYNC_SIGNIN);
     }
   },
 
@@ -185,24 +197,13 @@ const AutoMigrate = {
   },
 
   canUndo() {
-    if (!this.getUndoRange()) {
-      return Promise.resolve(false);
-    }
-    // Return a promise resolving to false if we're signed into sync, resolve
-    // to true otherwise.
-    let {fxAccounts} = Cu.import("resource://gre/modules/FxAccounts.jsm", {});
-    return fxAccounts.getSignedInUser().then(user => {
-      if (user) {
-        Services.telemetry.getHistogramById("FX_STARTUP_MIGRATION_CANT_UNDO_BECAUSE_SYNC").add(true);
-      }
-      return !user;
-    }, () => Promise.resolve(true));
+    return !!this.getUndoRange();
   },
 
   undo: Task.async(function* () {
     let histogram = Services.telemetry.getHistogramById("FX_STARTUP_MIGRATION_AUTOMATED_IMPORT_UNDO");
     histogram.add(0);
-    if (!(yield this.canUndo())) {
+    if (!this.canUndo()) {
       histogram.add(5);
       throw new Error("Can't undo!");
     }
@@ -233,23 +234,135 @@ const AutoMigrate = {
       // ignore failure.
     }
     histogram.add(25);
-    this.removeUndoOption();
+    this.removeUndoOption(this.UNDO_REMOVED_REASON_UNDO_USED);
     histogram.add(30);
   }),
 
-  removeUndoOption() {
+  removeUndoOption(reason) {
     // Remove observers, and ensure that exceptions doing so don't break
     // removing the pref.
-    try {
-      Services.obs.removeObserver(this, kPasswordManagerTopic);
-    } catch (ex) {}
+    for (let topic of [kSyncTopic, kPasswordManagerTopic]) {
+      try {
+        Services.obs.removeObserver(this, topic);
+      } catch (ex) {
+        Cu.reportError("Error removing observer for " + topic + ": " + ex);
+      }
+    }
     try {
       PlacesUtils.removeLazyBookmarkObserver(this);
-    } catch (ex) {}
+    } catch (ex) {
+      Cu.reportError("Error removing lazy bookmark observer: " + ex);
+    }
+
+    let migrationBrowser = Preferences.get(kAutoMigrateBrowserPref, "unknown");
     Services.prefs.clearUserPref(kAutoMigrateStartedPref);
     Services.prefs.clearUserPref(kAutoMigrateFinishedPref);
     Services.prefs.clearUserPref(kAutoMigrateBrowserPref);
+
+    let browserWindows = Services.wm.getEnumerator("navigator:browser");
+    while (browserWindows.hasMoreElements()) {
+      let win = browserWindows.getNext();
+      if (!win.closed) {
+        for (let browser of win.gBrowser.browsers) {
+          let nb = win.gBrowser.getNotificationBox(browser);
+          let notification = nb.getNotificationWithValue(kNotificationId);
+          if (notification) {
+            nb.removeNotification(notification);
+          }
+        }
+      }
+    }
+    let histogram =
+      Services.telemetry.getKeyedHistogramById("FX_STARTUP_MIGRATION_UNDO_REASON");
+    histogram.add(migrationBrowser, reason);
   },
+
+  getBrowserUsedForMigration() {
+    let browserId = Services.prefs.getCharPref(kAutoMigrateBrowserPref);
+    if (browserId) {
+      return MigrationUtils.getBrowserName(browserId);
+    }
+    return null;
+  },
+
+  maybeShowUndoNotification(target) {
+    // The tab might have navigated since we requested the undo state:
+    if (!this.canUndo() || target.currentURI.spec != "about:home" ||
+        !Preferences.get(kUndoUIEnabledPref, false)) {
+      return;
+    }
+
+    let win = target.ownerGlobal;
+    let notificationBox = win.gBrowser.getNotificationBox(target);
+    if (!notificationBox || notificationBox.getNotificationWithValue("abouthome-automigration-undo")) {
+      return;
+    }
+
+    // At this stage we're committed to show the prompt - unless we shouldn't,
+    // in which case we remove the undo prefs (which will cause canUndo() to
+    // return false from now on.):
+    if (!this.shouldStillShowUndoPrompt()) {
+      this.removeUndoOption(this.UNDO_REMOVED_REASON_OFFER_EXPIRED);
+      return;
+    }
+
+    let browserName = this.getBrowserUsedForMigration();
+    let message;
+    if (browserName) {
+      message = MigrationUtils.getLocalizedString("automigration.undo.message",
+                                                  [browserName]);
+    } else {
+      message = MigrationUtils.getLocalizedString("automigration.undo.unknownBrowserMessage");
+    }
+
+    let buttons = [
+      {
+        label: MigrationUtils.getLocalizedString("automigration.undo.keep.label"),
+        accessKey: MigrationUtils.getLocalizedString("automigration.undo.keep.accesskey"),
+        callback: () => {
+          this.removeUndoOption(this.UNDO_REMOVED_REASON_OFFER_REJECTED);
+        },
+      },
+      {
+        label: MigrationUtils.getLocalizedString("automigration.undo.dontkeep.label"),
+        accessKey: MigrationUtils.getLocalizedString("automigration.undo.dontkeep.accesskey"),
+        callback: () => {
+          this.undo();
+        },
+      },
+    ];
+    notificationBox.appendNotification(
+      message, kNotificationId, null, notificationBox.PRIORITY_INFO_HIGH, buttons
+    );
+  },
+
+  shouldStillShowUndoPrompt() {
+    let today = new Date();
+    // Round down to midnight:
+    today = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    // We store the unix timestamp corresponding to midnight on the last day
+    // on which we prompted. Fetch that and compare it to today's date.
+    // (NB: stored as a string because int prefs are too small for unix
+    // timestamps.)
+    let previousPromptDateMsStr = Preferences.get(kAutoMigrateLastUndoPromptDateMsPref, "0");
+    let previousPromptDate = new Date(parseInt(previousPromptDateMsStr, 10));
+    if (previousPromptDate < today) {
+      let remainingDays = Preferences.get(kAutoMigrateDaysToOfferUndoPref, 4) - 1;
+      Preferences.set(kAutoMigrateDaysToOfferUndoPref, remainingDays);
+      Preferences.set(kAutoMigrateLastUndoPromptDateMsPref, today.valueOf().toString());
+      if (remainingDays <= 0) {
+        return false;
+      }
+    }
+    return true;
+  },
+
+  UNDO_REMOVED_REASON_UNDO_USED: 0,
+  UNDO_REMOVED_REASON_SYNC_SIGNIN: 1,
+  UNDO_REMOVED_REASON_PASSWORD_CHANGE: 2,
+  UNDO_REMOVED_REASON_BOOKMARK_CHANGE: 3,
+  UNDO_REMOVED_REASON_OFFER_EXPIRED: 4,
+  UNDO_REMOVED_REASON_OFFER_REJECTED: 5,
 
   QueryInterface: XPCOMUtils.generateQI(
     [Ci.nsIObserver, Ci.nsINavBookmarkObserver, Ci.nsISupportsWeakReference]

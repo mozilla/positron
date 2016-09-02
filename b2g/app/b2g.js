@@ -467,9 +467,6 @@ pref("media.realtime_decoder.enabled", true);
 // TCPSocket
 pref("dom.mozTCPSocket.enabled", true);
 
-// WebPayment
-pref("dom.mozPay.enabled", true);
-
 // "Preview" landing of bug 710563, which is bogged down in analysis
 // of talos regression.  This is a needed change for higher-framerate
 // CSS animations, and incidentally works around an apparent bug in
@@ -621,7 +618,6 @@ pref("javascript.options.mem.gc_high_frequency_low_limit_mb", 0);
 pref("javascript.options.mem.gc_low_frequency_heap_growth", 120);
 pref("javascript.options.mem.high_water_mark", 6);
 pref("javascript.options.mem.gc_allocation_threshold_mb", 1);
-pref("javascript.options.mem.gc_decommit_threshold_mb", 1);
 pref("javascript.options.mem.gc_min_empty_chunk_count", 1);
 pref("javascript.options.mem.gc_max_empty_chunk_count", 2);
 
@@ -1011,9 +1007,6 @@ pref("layout.accessiblecaret.always_show_when_scrolling", false);
 pref("services.sync.fxaccounts.enabled", true);
 pref("identity.fxaccounts.enabled", true);
 
-// Mobile Identity API.
-pref("services.mobileid.server.uri", "https://msisdn.services.mozilla.com");
-
 pref("identity.fxaccounts.remote.oauth.uri", "https://oauth.accounts.firefox.com/v1");
 pref("identity.fxaccounts.remote.profile.uri", "https://profile.accounts.firefox.com/v1");
 
@@ -1069,9 +1062,6 @@ pref("dom.webnotifications.serviceworker.enabled", true);
 
 // Retain at most 10 processes' layers buffers
 pref("layers.compositor-lru-size", 10);
-
-// Enable Cardboard VR on mobile, assuming VR at all is enabled
-pref("dom.vr.cardboard.enabled", true);
 
 // In B2G by deafult any AudioChannelAgent is muted when created.
 pref("dom.audiochannel.mutedByDefault", true);

@@ -93,12 +93,12 @@ class ServiceWorkerClientPostMessageRunnable final
 public:
   explicit ServiceWorkerClientPostMessageRunnable(uint64_t aWindowId)
     : StructuredCloneHolder(CloningSupported, TransferringSupported,
-                            SameProcessDifferentThread)
+                            StructuredCloneScope::SameProcessDifferentThread)
     , mWindowId(aWindowId)
   {}
 
   NS_IMETHOD
-  Run()
+  Run() override
   {
     AssertIsOnMainThread();
     nsGlobalWindow* window = nsGlobalWindow::GetInnerWindowWithId(mWindowId);
@@ -147,9 +147,9 @@ private:
     bool isNullPrincipal = false;
     bool isSystemPrincipal = false;
     if (principal) {
-      principal->GetIsNullPrincipal(&isNullPrincipal);
+      isNullPrincipal = principal->GetIsNullPrincipal();
       MOZ_ASSERT(!isNullPrincipal);
-      principal->GetIsSystemPrincipal(&isSystemPrincipal);
+      isSystemPrincipal = principal->GetIsSystemPrincipal();
       MOZ_ASSERT(!isSystemPrincipal);
     }
 

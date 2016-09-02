@@ -10,7 +10,7 @@
 
 #include "nsHttp.h"
 #include "nsICacheEntry.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 #include "mozilla/dom/ContentChild.h"
 #include "mozilla/dom/TabChild.h"
 #include "mozilla/ipc/FileDescriptorSetChild.h"
@@ -368,8 +368,7 @@ HttpChannelChild::RecvOnStartRequest(const nsresult& channelStatus,
                                      const NetAddr& selfAddr,
                                      const NetAddr& peerAddr,
                                      const int16_t& redirectCount,
-                                     const uint32_t& cacheKey,
-                                     const bool& contentDecodingWillBeCalledOnParent)
+                                     const uint32_t& cacheKey)
 {
   LOG(("HttpChannelChild::RecvOnStartRequest [this=%p]\n", this));
   // mFlushedForDiversion and mDivertingToParent should NEVER be set at this
@@ -381,10 +380,6 @@ HttpChannelChild::RecvOnStartRequest(const nsresult& channelStatus,
 
 
   mRedirectCount = redirectCount;
-
-  if (contentDecodingWillBeCalledOnParent) {
-    SetApplyConversion(false);
-  }
 
   mEventQ->RunOrEnqueue(new StartRequestEvent(this, channelStatus, responseHead,
                                               useResponseHead, requestHeaders,
@@ -864,7 +859,10 @@ HttpChannelChild::OnStopRequest(const nsresult& channelStatus,
   LOG(("HttpChannelChild::OnStopRequest [this=%p status=%x]\n",
        this, channelStatus));
 
-  mUploadStream = nullptr;
+  if (mUploadStream) {
+    mUploadStream->Close();
+    mUploadStream = nullptr;
+  }
 
   if (mDivertingToParent) {
     MOZ_RELEASE_ASSERT(!mFlushedForDiversion,
@@ -1556,7 +1554,7 @@ public:
   {
   }
 
-  NS_IMETHOD Run() {
+  NS_IMETHOD Run() override {
     mChannel->Redirect3Complete();
     mNewChannel->OverrideWithSynthesizedResponse(mHead, mInput, mListener);
     return NS_OK;
@@ -1758,6 +1756,13 @@ HttpChannelChild::AsyncOpen(nsIStreamListener *listener, nsISupports *aContext)
              "security flags in loadInfo but asyncOpen2() not called");
 
   LOG(("HttpChannelChild::AsyncOpen [this=%p uri=%s]\n", this, mSpec.get()));
+
+  MOZ_ASSERT(mLoadInfo->GetUsePrivateBrowsing() == (mLoadInfo->GetOriginAttributes().mPrivateBrowsingId != 0),
+             "PrivateBrowsing mismatch on LoadInfo.");
+
+#ifdef DEBUG
+  CheckPrivateBrowsing();
+#endif
 
   if (mCanceled)
     return mStatus;

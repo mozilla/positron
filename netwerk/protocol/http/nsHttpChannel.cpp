@@ -7,7 +7,11 @@
 // HttpLog.h should generally be included first
 #include "HttpLog.h"
 
+#include <inttypes.h>
+
 #include "mozilla/dom/nsCSPContext.h"
+#include "mozilla/Sprintf.h"
+
 #include "nsHttp.h"
 #include "nsHttpChannel.h"
 #include "nsHttpHandler.h"
@@ -32,7 +36,6 @@
 #include "nsNetUtil.h"
 #include "nsIURL.h"
 #include "nsIStreamTransportService.h"
-#include "prprf.h"
 #include "prnetdb.h"
 #include "nsEscape.h"
 #include "nsStreamUtils.h"
@@ -84,7 +87,6 @@
 #include "mozilla/Telemetry.h"
 #include "AlternateServices.h"
 #include "InterceptedChannel.h"
-#include "imgLoader.h"
 #include "nsIHttpPushListener.h"
 #include "nsIX509Cert.h"
 #include "ScopedNSSTypes.h"
@@ -837,7 +839,7 @@ nsHttpChannel::SetupTransaction()
 
     if (mResuming) {
         char byteRange[32];
-        PR_snprintf(byteRange, sizeof(byteRange), "bytes=%llu-", mStartPos);
+        SprintfLiteral(byteRange, "bytes=%" PRIu64 "-", mStartPos);
         mRequestHead.SetHeader(nsHttp::Range, nsDependentCString(byteRange));
 
         if (!mEntityID.IsEmpty()) {
@@ -936,12 +938,39 @@ CallTypeSniffers(void *aClosure, const uint8_t *aData, uint32_t aCount)
   }
 }
 
+// Helper Function to report messages to the console when loading
+// a resource was blocked due to a MIME type mismatch.
+void
+ReportTypeBlocking(nsIURI* aURI,
+                   nsILoadInfo* aLoadInfo,
+                   const char* aMessageName)
+{
+    nsAutoCString spec;
+    aURI->GetSpec(spec);
+    NS_ConvertUTF8toUTF16 specUTF16(spec);
+    const char16_t* params[] = { specUTF16.get() };
+    nsCOMPtr<nsIDocument> doc;
+    if (aLoadInfo) {
+        nsCOMPtr<nsIDOMDocument> domDoc;
+        aLoadInfo->GetLoadingDocument(getter_AddRefs(domDoc));
+        if (domDoc) {
+            doc = do_QueryInterface(domDoc);
+        }
+    }
+    nsContentUtils::ReportToConsole(nsIScriptError::errorFlag,
+                                    NS_LITERAL_CSTRING("MIMEMISMATCH"),
+                                    doc,
+                                    nsContentUtils::eSECURITY_PROPERTIES,
+                                    aMessageName,
+                                    params, ArrayLength(params));
+}
+
 // Check and potentially enforce X-Content-Type-Options: nosniff
 nsresult
-ProcessXCTO(nsHttpResponseHead* aResponseHead, nsILoadInfo* aLoadInfo)
+ProcessXCTO(nsIURI* aURI, nsHttpResponseHead* aResponseHead, nsILoadInfo* aLoadInfo)
 {
-    if (!aResponseHead || !aLoadInfo) {
-        // if there is no response head or no loadInfo, then there is nothing to do
+    if (!aURI || !aResponseHead || !aLoadInfo) {
+        // if there is no uri, no response head or no loadInfo, then there is nothing to do
         return NS_OK;
     }
 
@@ -995,14 +1024,15 @@ ProcessXCTO(nsHttpResponseHead* aResponseHead, nsILoadInfo* aLoadInfo)
         if (contentType.EqualsLiteral(TEXT_CSS)) {
             return NS_OK;
         }
+        ReportTypeBlocking(aURI, aLoadInfo, "MimeTypeMismatch");
         return NS_ERROR_CORRUPTED_CONTENT;
     }
 
     if (aLoadInfo->GetExternalContentPolicyType() == nsIContentPolicy::TYPE_IMAGE) {
-        if (imgLoader::SupportImageWithMimeType(contentType.get(),
-                                                AcceptedMimeTypes::IMAGES_AND_DOCUMENTS)) {
+        if (StringBeginsWith(contentType, NS_LITERAL_CSTRING("image/"))) {
             return NS_OK;
         }
+        ReportTypeBlocking(aURI, aLoadInfo, "MimeTypeMismatch");
         return NS_ERROR_CORRUPTED_CONTENT;
     }
 
@@ -1010,10 +1040,107 @@ ProcessXCTO(nsHttpResponseHead* aResponseHead, nsILoadInfo* aLoadInfo)
         if (nsContentUtils::IsScriptType(contentType)) {
             return NS_OK;
         }
+        ReportTypeBlocking(aURI, aLoadInfo, "MimeTypeMismatch");
         return NS_ERROR_CORRUPTED_CONTENT;
     }
     return NS_OK;
 }
+
+// Ensure that a load of type script has correct MIME type
+nsresult
+EnsureMIMEOfScript(nsIURI* aURI, nsHttpResponseHead* aResponseHead, nsILoadInfo* aLoadInfo)
+{
+    if (!aURI || !aResponseHead || !aLoadInfo) {
+        // if there is no uri, no response head or no loadInfo, then there is nothing to do
+        return NS_OK;
+    }
+
+    if (aLoadInfo->GetExternalContentPolicyType() != nsIContentPolicy::TYPE_SCRIPT) {
+        // if this is not a script load, then there is nothing to do
+        return NS_OK;
+    }
+
+    nsAutoCString contentType;
+    aResponseHead->ContentType(contentType);
+    NS_ConvertUTF8toUTF16 typeString(contentType);
+
+    if (nsContentUtils::IsJavascriptMIMEType(typeString)) {
+        // script load has type script
+        Telemetry::Accumulate(Telemetry::SCRIPT_BLOCK_WRONG_MIME, 1);
+        return NS_OK;
+    }
+
+    if (StringBeginsWith(contentType, NS_LITERAL_CSTRING("image/"))) {
+        // script load has type image
+        Telemetry::Accumulate(Telemetry::SCRIPT_BLOCK_WRONG_MIME, 2);
+
+        // Instead of consulting Preferences::GetBool() all the time we
+        // can cache the result to speed things up.
+        static bool sCachedBlockScriptWithMimeImage = false;
+        static bool sIsInited = false;
+        if (!sIsInited) {
+            sIsInited = true;
+            Preferences::AddBoolVarCache(&sCachedBlockScriptWithMimeImage,
+                                         "security.block_script_with_mime_image");
+        }
+
+        // do not block the load if the feature is not enabled
+        if (!sCachedBlockScriptWithMimeImage) {
+            return NS_OK;
+        }
+        // log a warning to the console that loading script was
+        // blocked due to having a wrong MIME type
+        ReportTypeBlocking(aURI, aLoadInfo, "BlockScriptWithWrongMimeType");
+        return NS_ERROR_CORRUPTED_CONTENT;
+    }
+
+    if (StringBeginsWith(contentType, NS_LITERAL_CSTRING("audio/"))) {
+        // script load has type audio
+        Telemetry::Accumulate(Telemetry::SCRIPT_BLOCK_WRONG_MIME, 3); 
+        return NS_OK;
+    }
+
+    if (StringBeginsWith(contentType, NS_LITERAL_CSTRING("video/"))) {
+        // script load has type video
+        Telemetry::Accumulate(Telemetry::SCRIPT_BLOCK_WRONG_MIME, 4); 
+        return NS_OK;
+    }
+
+    if (StringBeginsWith(contentType, NS_LITERAL_CSTRING("text/plain"))) {
+        // script load has type text/plain
+        Telemetry::Accumulate(Telemetry::SCRIPT_BLOCK_WRONG_MIME, 5); 
+        return NS_OK;
+    }
+
+    if (StringBeginsWith(contentType, NS_LITERAL_CSTRING("text/csv"))) {
+        // script load has type text/csv
+        Telemetry::Accumulate(Telemetry::SCRIPT_BLOCK_WRONG_MIME, 6); 
+        return NS_OK;
+    }
+
+    if (StringBeginsWith(contentType, NS_LITERAL_CSTRING("text/xml"))) {
+        // script load has type text/xml
+        Telemetry::Accumulate(Telemetry::SCRIPT_BLOCK_WRONG_MIME, 7); 
+        return NS_OK;
+    }
+
+    if (StringBeginsWith(contentType, NS_LITERAL_CSTRING("application/octet-stream"))) {
+        // script load has type application/octet-stream
+        Telemetry::Accumulate(Telemetry::SCRIPT_BLOCK_WRONG_MIME, 8); 
+        return NS_OK;
+    }
+
+    if (StringBeginsWith(contentType, NS_LITERAL_CSTRING("application/xml"))) {
+        // script load has type application/xml
+        Telemetry::Accumulate(Telemetry::SCRIPT_BLOCK_WRONG_MIME, 9); 
+        return NS_OK;
+    }
+
+    // script load has unknown type
+    Telemetry::Accumulate(Telemetry::SCRIPT_BLOCK_WRONG_MIME, 0); 
+    return NS_OK;
+}
+
 
 nsresult
 nsHttpChannel::CallOnStartRequest()
@@ -1024,31 +1151,11 @@ nsHttpChannel::CallOnStartRequest()
                        "CORS preflight must have been finished by the time we "
                        "call OnStartRequest");
 
-    nsresult rv = ProcessXCTO(mResponseHead, mLoadInfo);
-    if (NS_FAILED(rv)) {
-        LOG(("XCTO: nosniff verification failed.\n"));
-        // log a warning to the console that loading the resrouce was
-        // blocked due to MIME type mismatch.
-        nsAutoCString spec;
-        mURI->GetSpec(spec);
-        NS_ConvertUTF8toUTF16 specUTF16(spec);
-        const char16_t* params[] = { specUTF16.get() };
-        nsCOMPtr<nsIDocument> doc;
-        if (mLoadInfo) {
-            nsCOMPtr<nsIDOMDocument> domDoc;
-            mLoadInfo->GetLoadingDocument(getter_AddRefs(domDoc));
-            if (domDoc) {
-                doc = do_QueryInterface(domDoc);
-            }
-        }
-        nsContentUtils::ReportToConsole(nsIScriptError::errorFlag,
-                                        NS_LITERAL_CSTRING("XCTO"),
-                                        doc,
-                                        nsContentUtils::eSECURITY_PROPERTIES,
-                                        "MimeTypeMismatch",
-                                        params, ArrayLength(params));
-        return rv;
-    }
+    nsresult rv = EnsureMIMEOfScript(mURI, mResponseHead, mLoadInfo);
+    NS_ENSURE_SUCCESS(rv, rv);
+
+    rv = ProcessXCTO(mURI, mResponseHead, mLoadInfo);
+    NS_ENSURE_SUCCESS(rv, rv);
 
     if (mOnStartRequestCalled) {
         // This can only happen when a range request loading rest of the data
@@ -1708,9 +1815,13 @@ nsHttpChannel::ProcessAltService()
         proxyInfo = do_QueryInterface(mProxyInfo);
     }
 
+    NeckoOriginAttributes originAttributes;
+    NS_GetOriginAttributes(this, originAttributes);
+
     AltSvcMapping::ProcessHeader(altSvc, scheme, originHost, originPort,
                                  mUsername, mPrivateBrowsing, callbacks, proxyInfo,
-                                 mCaps & NS_HTTP_DISALLOW_SPDY);
+                                 mCaps & NS_HTTP_DISALLOW_SPDY,
+                                 originAttributes);
 }
 
 nsresult
@@ -2800,7 +2911,7 @@ nsHttpChannel::SetupByteRangeRequest(int64_t partialLen)
     }
 
     char buf[64];
-    PR_snprintf(buf, sizeof(buf), "bytes=%lld-", partialLen);
+    SprintfLiteral(buf, "bytes=%" PRId64 "-", partialLen);
 
     mRequestHead.SetHeader(nsHttp::Range, nsDependentCString(buf));
     mRequestHead.SetHeader(nsHttp::If_Range, val);
@@ -4171,7 +4282,7 @@ nsHttpChannel::AssembleCacheKey(const char *spec, uint32_t postID,
 
     if (postID) {
         char buf[32];
-        PR_snprintf(buf, sizeof(buf), "id=%x&", postID);
+        SprintfLiteral(buf, "id=%x&", postID);
         cacheKey.Append(buf);
     }
 
@@ -5462,6 +5573,10 @@ nsHttpChannel::AsyncOpen(nsIStreamListener *listener, nsISupports *context)
 
     NS_CompareLoadInfoAndLoadContext(this);
 
+#ifdef DEBUG
+    CheckPrivateBrowsing();
+#endif
+
     NS_ENSURE_ARG_POINTER(listener);
     NS_ENSURE_TRUE(!mIsPending, NS_ERROR_IN_PROGRESS);
     NS_ENSURE_TRUE(!mWasOpened, NS_ERROR_ALREADY_OPENED);
@@ -5608,6 +5723,9 @@ nsHttpChannel::BeginConnect()
 
     SetDoNotTrack();
 
+    NeckoOriginAttributes originAttributes;
+    NS_GetOriginAttributes(this, originAttributes);
+
     RefPtr<AltSvcMapping> mapping;
     if (mAllowAltSvc && // per channel
         (scheme.Equals(NS_LITERAL_CSTRING("http")) ||
@@ -5650,12 +5768,14 @@ nsHttpChannel::BeginConnect()
         }
 
         LOG(("nsHttpChannel %p Using connection info from altsvc mapping", this));
-        mapping->GetConnectionInfo(getter_AddRefs(mConnectionInfo), proxyInfo);
+        mapping->GetConnectionInfo(getter_AddRefs(mConnectionInfo), proxyInfo, originAttributes);
         Telemetry::Accumulate(Telemetry::HTTP_TRANSACTION_USE_ALTSVC, true);
         Telemetry::Accumulate(Telemetry::HTTP_TRANSACTION_USE_ALTSVC_OE, !isHttps);
     } else {
         LOG(("nsHttpChannel %p Using default connection info", this));
-        mConnectionInfo = new nsHttpConnectionInfo(host, port, EmptyCString(), mUsername, proxyInfo, isHttps);
+
+        mConnectionInfo = new nsHttpConnectionInfo(host, port, EmptyCString(), mUsername, proxyInfo,
+                                                   originAttributes, isHttps);
         Telemetry::Accumulate(Telemetry::HTTP_TRANSACTION_USE_ALTSVC, false);
     }
 
@@ -6341,7 +6461,14 @@ nsHttpChannel::OnStopRequest(nsIRequest *request, nsISupports *ctxt, nsresult st
     MOZ_ASSERT(NS_IsMainThread(),
                "OnStopRequest should only be called from the main thread");
 
-    mUploadStream = nullptr;
+    if (!mAuthRetryPending) {
+        // We must not release the upload stream (that may contain POST data)
+        // before we finish any authentication loops happing during lifetime
+        // of this very channel.  Otherwise, we may loose the upload data when
+        // authenticating to e.g. an NTLM authenticated site.
+        LOG(("  dropping upload stream"));
+        mUploadStream = nullptr;
+    }
 
     if (NS_FAILED(status)) {
         ProcessSecurityReport(status);
@@ -6584,7 +6711,7 @@ public:
         MOZ_ASSERT(!NS_IsMainThread(), "Shouldn't be created on main thread");
     }
 
-    NS_IMETHOD Run()
+    NS_IMETHOD Run() override
     {
         MOZ_ASSERT(NS_IsMainThread(), "Should run on main thread");
         if (mEventSink) {

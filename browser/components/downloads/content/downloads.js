@@ -226,6 +226,14 @@ const DownloadsPanel = {
     }
 
     this.initialize(() => {
+      let downloadsFooterButtons =
+        document.getElementById("downloadsFooterButtons");
+      if (DownloadsCommon.showPanelDropmarker) {
+        downloadsFooterButtons.classList.remove("downloadsHideDropmarker");
+      } else {
+        downloadsFooterButtons.classList.add("downloadsHideDropmarker");
+      }
+
       // Delay displaying the panel because this function will sometimes be
       // called while another window is closing (like the window for selecting
       // whether to save or open the file), and that would cause the panel to
@@ -367,6 +375,23 @@ const DownloadsPanel = {
     this._state = this.kStateHidden;
   },
 
+  onFooterPopupShowing(aEvent) {
+    let itemClearList = document.getElementById("downloadsDropdownItemClearList");
+    if (DownloadsCommon.getData(window).canRemoveFinished) {
+      itemClearList.removeAttribute("hidden");
+    } else {
+      itemClearList.setAttribute("hidden", "true");
+    }
+
+    document.getElementById("downloadsFooterButtonsSplitter").classList
+      .add("downloadsDropmarkerSplitterExtend");
+  },
+
+  onFooterPopupHidden(aEvent) {
+    document.getElementById("downloadsFooterButtonsSplitter").classList
+      .remove("downloadsDropmarkerSplitterExtend");
+  },
+
   //////////////////////////////////////////////////////////////////////////////
   //// Related operations
 
@@ -380,6 +405,13 @@ const DownloadsPanel = {
     this.hidePanel();
 
     BrowserDownloadsUI();
+  },
+
+  openDownloadsFolder() {
+    Downloads.getPreferredDownloadsDirectory().then(downloadsPath => {
+      DownloadsCommon.showDirectory(new FileUtils.File(downloadsPath));
+    }).catch(Cu.reportError);
+    this.hidePanel();
   },
 
   //////////////////////////////////////////////////////////////////////////////
@@ -1113,9 +1145,9 @@ DownloadsViewItem.prototype = {
     this.confirmUnblock(window, "chooseUnblock");
   },
 
-  downloadsCmd_chooseOpen() {
+  downloadsCmd_unblockAndOpen() {
     DownloadsPanel.hidePanel();
-    this.confirmUnblock(window, "chooseOpen");
+    this.unblockAndOpenDownload().catch(Cu.reportError);
   },
 
   downloadsCmd_open() {
@@ -1188,6 +1220,9 @@ const DownloadsViewController = {
   //// nsIController
 
   supportsCommand(aCommand) {
+    if (aCommand === "downloadsCmd_clearList") {
+      return true;
+    }
     // Firstly, determine if this is a command that we can handle.
     if (!DownloadsViewUI.isCommandName(aCommand)) {
       return false;
@@ -1200,7 +1235,7 @@ const DownloadsViewController = {
     // showing.  If it is, then take the following path.
     if (DownloadsBlockedSubview.view.showingSubView) {
       let blockedSubviewCmds = [
-        "downloadsCmd_chooseOpen",
+        "downloadsCmd_unblockAndOpen",
         "cmd_delete",
       ];
       return blockedSubviewCmds.indexOf(aCommand) >= 0;

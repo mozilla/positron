@@ -145,18 +145,18 @@ add_task(function* testModalResults() {
     }],
     ["ro", {
       rectCount: 41,
-      insertCalls: [1, 2],
-      removeCalls: [1, 2]
+      insertCalls: [1, 4],
+      removeCalls: [1, 3]
     }],
     ["new", {
       rectCount: 2,
-      insertCalls: [1, 2],
-      removeCalls: [1, 2]
+      insertCalls: [1, 4],
+      removeCalls: [1, 3]
     }],
     ["o", {
       rectCount: 492,
-      insertCalls: [1, 2],
-      removeCalls: [1, 2]
+      insertCalls: [1, 4],
+      removeCalls: [1, 3]
     }]
   ]);
   let url = kFixtureBaseURL + "file_FinderSample.html";
@@ -293,8 +293,8 @@ add_task(function* testHighlightAllToggle() {
     // to flip the pref.
     expectedResult = {
       rectCount: 0,
-      insertCalls: [1, 1],
-      removeCalls: [1, 1]
+      insertCalls: [0, 1],
+      removeCalls: [0, 1]
     };
     promise = promiseTestHighlighterOutput(browser, word, expectedResult);
     yield SpecialPowers.pushPrefEnv({ "set": [[ kHighlightAllPref, false ]] });

@@ -31,12 +31,13 @@ const {PrefsHelper} = require("devtools/client/shared/prefs");
 const {ViewHelpers, Heritage, WidgetMethods, setNamedTimeout} =
   require("devtools/client/shared/widgets/view-helpers");
 const {gDevTools} = require("devtools/client/framework/devtools");
+const {Curl, CurlUtils} = require("devtools/client/shared/curl");
 
 /**
  * Localization convenience methods.
  */
-const NET_STRINGS_URI = "chrome://devtools/locale/netmonitor.properties";
-const WEBCONSOLE_STRINGS_URI = "chrome://devtools/locale/webconsole.properties";
+const NET_STRINGS_URI = "devtools/locale/netmonitor.properties";
+const WEBCONSOLE_STRINGS_URI = "devtools/locale/webconsole.properties";
 var L10N = new LocalizationHelper(NET_STRINGS_URI);
 const WEBCONSOLE_L10N = new LocalizationHelper(WEBCONSOLE_STRINGS_URI);
 
@@ -466,7 +467,8 @@ RequestsMenuView.prototype = Heritage.extend(WidgetMethods, {
   initialize: function () {
     dumpn("Initializing the RequestsMenuView");
 
-    this.widget = new SideMenuWidget($("#requests-menu-contents"));
+    let widgetParentEl = $("#requests-menu-contents");
+    this.widget = new SideMenuWidget(widgetParentEl);
     this._splitter = $("#network-inspector-view-splitter");
     this._summary = $("#requests-menu-network-summary-button");
     this._summary.setAttribute("label", L10N.getStr("networkMenu.empty"));
@@ -475,7 +477,7 @@ RequestsMenuView.prototype = Heritage.extend(WidgetMethods, {
 
     // Create a tooltip for the newly appended network request item.
     this.tooltip = new HTMLTooltip(NetMonitorController._toolbox, { type: "arrow" });
-    this.tooltip.startTogglingOnHover(this.widget, this._onHover, {
+    this.tooltip.startTogglingOnHover(widgetParentEl, this._onHover, {
       toggleDelay: REQUESTS_TOOLTIP_TOGGLE_DELAY,
       interactive: true
     });
@@ -2060,7 +2062,7 @@ RequestsMenuView.prototype = Heritage.extend(WidgetMethods, {
    */
   _createWaterfallView: function (item, timings, fromCache) {
     let { target } = item;
-    let sections = ["dns", "connect", "send", "wait", "receive"];
+    let sections = ["blocked", "dns", "connect", "send", "wait", "receive"];
     // Skipping "blocked" because it doesn't work yet.
 
     let timingsNode = $(".requests-menu-timings", target);

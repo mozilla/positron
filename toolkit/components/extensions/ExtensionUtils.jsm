@@ -13,13 +13,15 @@ const Cr = Components.results;
 
 const INTEGER = /^[1-9]\d*$/;
 
-Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
+Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 
 XPCOMUtils.defineLazyModuleGetter(this, "AddonManager",
                                   "resource://gre/modules/AddonManager.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "AppConstants",
                                   "resource://gre/modules/AppConstants.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "ConsoleAPI",
+                                  "resource://gre/modules/Console.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "LanguageDetector",
                                   "resource:///modules/translation/LanguageDetector.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "Locale",
@@ -30,6 +32,15 @@ XPCOMUtils.defineLazyModuleGetter(this, "Preferences",
                                   "resource://gre/modules/Preferences.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "PromiseUtils",
                                   "resource://gre/modules/PromiseUtils.jsm");
+
+function getConsole() {
+  return new ConsoleAPI({
+    maxLogLevelPref: "extensions.webextensions.log.level",
+    prefix: "WebExtensions",
+  });
+}
+
+XPCOMUtils.defineLazyGetter(this, "console", getConsole);
 
 function filterStack(error) {
   return String(error.stack).replace(/(^.*(Task\.jsm|Promise-backend\.js).*\n)+/gm, "<Promise Chain>\n");
@@ -90,6 +101,12 @@ function runSafe(context, f, ...args) {
   return runSafeWithoutClone(f, ...args);
 }
 
+function getInnerWindowID(window) {
+  return window.QueryInterface(Ci.nsIInterfaceRequestor)
+    .getInterface(Ci.nsIDOMWindowUtils)
+    .currentInnerWindowID;
+}
+
 // Return true if the given value is an instance of the given
 // native type.
 function instanceOf(value, type) {
@@ -145,15 +162,59 @@ class SpreadArgs extends Array {
 let gContextId = 0;
 
 class BaseContext {
-  constructor(extensionId) {
+  constructor(envType, extension) {
+    this.envType = envType;
     this.onClose = new Set();
     this.checkedLastError = false;
     this._lastError = null;
-    this.contextId = ++gContextId;
+    this.contextId = `${++gContextId}-${Services.appinfo.uniqueProcessID}`;
     this.unloaded = false;
-    this.extensionId = extensionId;
+    this.extension = extension;
     this.jsonSandbox = null;
     this.active = true;
+
+    this.docShell = null;
+    this.contentWindow = null;
+    this.innerWindowID = 0;
+  }
+
+  setContentWindow(contentWindow) {
+    let {document} = contentWindow;
+    let docShell = contentWindow.QueryInterface(Ci.nsIInterfaceRequestor)
+                                .getInterface(Ci.nsIDocShell);
+
+    this.innerWindowID = getInnerWindowID(contentWindow);
+
+    let onPageShow = event => {
+      if (!event || event.target === document) {
+        this.docShell = docShell;
+        this.contentWindow = contentWindow;
+        this.active = true;
+      }
+    };
+    let onPageHide = event => {
+      if (!event || event.target === document) {
+        // Put this off until the next tick.
+        Promise.resolve().then(() => {
+          this.docShell = null;
+          this.contentWindow = null;
+          this.active = false;
+        });
+      }
+    };
+
+    onPageShow();
+    contentWindow.addEventListener("pagehide", onPageHide, true);
+    contentWindow.addEventListener("pageshow", onPageShow, true);
+    this.callOnClose({
+      close: () => {
+        onPageHide();
+        if (this.active) {
+          contentWindow.removeEventListener("pagehide", onPageHide, true);
+          contentWindow.removeEventListener("pageshow", onPageShow, true);
+        }
+      },
+    });
   }
 
   get cloneScope() {
@@ -167,6 +228,8 @@ class BaseContext {
   runSafe(...args) {
     if (this.unloaded) {
       Cu.reportError("context.runSafe called after context unloaded");
+    } else if (!this.active) {
+      Cu.reportError("context.runSafe called while context is inactive");
     } else {
       return runSafeSync(this, ...args);
     }
@@ -175,6 +238,8 @@ class BaseContext {
   runSafeWithoutClone(...args) {
     if (this.unloaded) {
       Cu.reportError("context.runSafeWithoutClone called after context unloaded");
+    } else if (!this.active) {
+      Cu.reportError("context.runSafeWithoutClone called while context is inactive");
     } else {
       return runSafeSyncWithoutClone(...args);
     }
@@ -344,6 +409,8 @@ class BaseContext {
         args => {
           if (this.unloaded) {
             dump(`Promise resolved after context unloaded\n`);
+          } else if (!this.active) {
+            dump(`Promise resolved while context is inactive\n`);
           } else if (args instanceof SpreadArgs) {
             runSafe(callback, ...args);
           } else {
@@ -354,6 +421,8 @@ class BaseContext {
           this.withLastError(error, () => {
             if (this.unloaded) {
               dump(`Promise rejected after context unloaded\n`);
+            } else if (!this.active) {
+              dump(`Promise rejected while context is inactive\n`);
             } else {
               this.runSafeWithoutClone(callback);
             }
@@ -365,13 +434,17 @@ class BaseContext {
           value => {
             if (this.unloaded) {
               dump(`Promise resolved after context unloaded\n`);
+            } else if (!this.active) {
+              dump(`Promise resolved while context is inactive\n`);
             } else {
               runSafe(resolve, value);
             }
           },
           value => {
             if (this.unloaded) {
-              dump(`Promise rejected after context unloaded\n`);
+              dump(`Promise rejected after context unloaded: ${value && value.message}\n`);
+            } else if (!this.active) {
+              dump(`Promise rejected while context is inactive: ${value && value.message}\n`);
             } else {
               this.runSafeWithoutClone(reject, this.normalizeError(value));
             }
@@ -384,7 +457,7 @@ class BaseContext {
     this.unloaded = true;
 
     MessageChannel.abortResponses({
-      extensionId: this.extensionId,
+      extensionId: this.extension.id,
       contextId: this.contextId,
     });
 
@@ -816,7 +889,7 @@ LocaleData.prototype = {
 // hasListener methods. |context| is an add-on scope (either an
 // ExtensionContext in the chrome process or ExtensionContext in a
 // content process). |name| is for debugging. |register| is a function
-// to register the listener. |register| is only called once, event if
+// to register the listener. |register| is only called once, even if
 // multiple listeners are registered. |register| should return an
 // unregister function that will unregister the listener.
 function EventManager(context, name, register) {
@@ -1274,8 +1347,7 @@ Messenger.prototype = {
   },
 
   connect(messageManager, name, recipient) {
-    // TODO(robwu): Use a process ID instead of the process type. bugzil.la/1287626
-    let portId = `${gNextPortId++}-${Services.appinfo.processType}`;
+    let portId = `${gNextPortId++}-${Services.appinfo.uniqueProcessID}`;
     let port = new Port(this.context, messageManager, name, portId, null);
     let msg = {name, portId};
     this._sendMessage(messageManager, "Extension:Connect", msg, recipient)
@@ -1344,7 +1416,242 @@ function detectLanguage(text) {
   }));
 }
 
+/**
+ * An object that runs the implementation of a schema API. Instantiations of
+ * this interfaces are used by Schemas.jsm.
+ *
+ * @interface
+ */
+class SchemaAPIInterface {
+  /**
+   * Calls this as a function that returns its return value.
+   *
+   * @abstract
+   * @param {Array} args The parameters for the function.
+   * @returns {*} The return value of the invoked function.
+   */
+  callFunction(args) {
+    throw new Error("Not implemented");
+  }
+
+  /**
+   * Calls this as a function and ignores its return value.
+   *
+   * @abstract
+   * @param {Array} args The parameters for the function.
+   */
+  callFunctionNoReturn(args) {
+    throw new Error("Not implemented");
+  }
+
+  /**
+   * Calls this as a function that completes asynchronously.
+   *
+   * @abstract
+   * @param {Array} args The parameters for the function.
+   * @param {function(*)} [callback] The callback to be called when the function
+   *     completes.
+   * @returns {Promise|undefined} Must be void if `callback` is set, and a
+   *     promise otherwise. The promise is resolved when the function completes.
+   */
+  callAsyncFunction(args, callback) {
+    throw new Error("Not implemented");
+  }
+
+  /**
+   * Retrieves the value of this as a property.
+   *
+   * @abstract
+   * @returns {*} The value of the property.
+   */
+  getProperty() {
+    throw new Error("Not implemented");
+  }
+
+  /**
+   * Assigns the value to this as property.
+   *
+   * @abstract
+   * @param {string} value The new value of the property.
+   */
+  setProperty(value) {
+    throw new Error("Not implemented");
+  }
+
+  /**
+   * Registers a `listener` to this as an event.
+   *
+   * @abstract
+   * @param {function} listener The callback to be called when the event fires.
+   * @param {Array} args Extra parameters for EventManager.addListener.
+   * @see EventManager.addListener
+   */
+  addListener(listener, args) {
+    throw new Error("Not implemented");
+  }
+
+  /**
+   * Checks whether `listener` is listening to this as an event.
+   *
+   * @abstract
+   * @param {function} listener The event listener.
+   * @returns {boolean} Whether `listener` is registered with this as an event.
+   * @see EventManager.hasListener
+   */
+  hasListener(listener) {
+    throw new Error("Not implemented");
+  }
+
+  /**
+   * Unregisters `listener` from this as an event.
+   *
+   * @abstract
+   * @param {function} listener The event listener.
+   * @see EventManager.removeListener
+   */
+  removeListener(listener) {
+    throw new Error("Not implemented");
+  }
+}
+
+/**
+ * An object that runs a locally implemented API.
+ */
+class LocalAPIImplementation extends SchemaAPIInterface {
+  /**
+   * Constructs an implementation of the `name` method or property of `pathObj`.
+   *
+   * @param {object} pathObj The object containing the member with name `name`.
+   * @param {string} name The name of the implemented member.
+   * @param {BaseContext} context The context in which the schema is injected.
+   */
+  constructor(pathObj, name, context) {
+    super();
+    this.pathObj = pathObj;
+    this.name = name;
+    this.context = context;
+  }
+
+  callFunction(args) {
+    return this.pathObj[this.name](...args);
+  }
+
+  callFunctionNoReturn(args) {
+    this.pathObj[this.name](...args);
+  }
+
+  callAsyncFunction(args, callback) {
+    let promise;
+    try {
+      promise = this.pathObj[this.name](...args) || Promise.resolve();
+    } catch (e) {
+      promise = Promise.reject(e);
+    }
+    return this.context.wrapPromise(promise, callback);
+  }
+
+  getProperty() {
+    return this.pathObj[this.name];
+  }
+
+  setProperty(value) {
+    this.pathObj[this.name] = value;
+  }
+
+  addListener(listener, args) {
+    this.pathObj[this.name].addListener.call(null, listener, ...args);
+  }
+
+  hasListener(listener) {
+    return this.pathObj[this.name].hasListener.call(null, listener);
+  }
+
+  removeListener(listener) {
+    this.pathObj[this.name].removeListener.call(null, listener);
+  }
+}
+
 let nextId = 1;
+
+/**
+ * An object that runs an remote implementation of an API.
+ */
+class ProxyAPIImplementation extends SchemaAPIInterface {
+  /**
+   * @param {string} namespace The full path to the namespace that contains the
+   *     `name` member. This may contain dots, e.g. "storage.local".
+   * @param {string} name The name of the method or property.
+   * @param {ChildAPIManager} childApiManager The owner of this implementation.
+   */
+  constructor(namespace, name, childApiManager) {
+    super();
+    this.path = `${namespace}.${name}`;
+    this.childApiManager = childApiManager;
+  }
+
+  callFunctionNoReturn(args) {
+    this.childApiManager.messageManager.sendAsyncMessage("API:Call", {
+      childId: this.childApiManager.id,
+      path: this.path,
+      args,
+    });
+  }
+
+  callAsyncFunction(args, callback) {
+    let callId = nextId++;
+    let deferred = PromiseUtils.defer();
+    this.childApiManager.callPromises.set(callId, deferred);
+
+    this.childApiManager.messageManager.sendAsyncMessage("API:Call", {
+      childId: this.childApiManager.id,
+      callId,
+      path: this.path,
+      args,
+    });
+
+    return this.childApiManager.context.wrapPromise(deferred.promise, callback);
+  }
+
+  addListener(listener, args) {
+    let set = this.childApiManager.listeners.get(this.path);
+    if (!set) {
+      set = new Set();
+      this.childApiManager.listeners.set(this.path, set);
+    }
+
+    set.add(listener);
+
+    if (set.size == 1) {
+      args = args.slice(1);
+
+      this.childApiManager.messageManager.sendAsyncMessage("API:AddListener", {
+        childId: this.childApiManager.id,
+        path: this.path,
+        args,
+      });
+    }
+  }
+
+  removeListener(listener) {
+    let set = this.childApiManager.listeners.get(this.path);
+    if (!set) {
+      return;
+    }
+    set.remove(listener);
+
+    if (set.size == 0) {
+      this.childApiManager.messageManager.sendAsyncMessage("API:RemoveListener", {
+        childId: this.childApiManager.id,
+        path: this.path,
+      });
+    }
+  }
+
+  hasListener(listener) {
+    let set = this.childApiManager.listeners.get(this.path);
+    return set ? set.has(listener) : false;
+  }
+}
 
 // We create one instance of this class for every extension context
 // that needs to use remote APIs. It uses the message manager to
@@ -1352,10 +1659,14 @@ let nextId = 1;
 // Extension.jsm. It handles asynchronous function calls as well as
 // event listeners.
 class ChildAPIManager {
-  constructor(context, messageManager, namespaces, contextData) {
+  constructor(context, messageManager, localApis, contextData) {
     this.context = context;
     this.messageManager = messageManager;
-    this.namespaces = namespaces;
+
+    // The root namespace of all locally implemented APIs. If an extension calls
+    // an API that does not exist in this object, then the implementation is
+    // delegated to the ParentAPIManager.
+    this.localApis = localApis;
 
     let id = String(context.extension.id) + "." + String(context.contextId);
     this.id = id;
@@ -1382,8 +1693,7 @@ class ChildAPIManager {
 
     switch (name) {
       case "API:RunListener":
-        let ref = data.path.concat(data.name).join(".");
-        let listeners = this.listeners.get(ref);
+        let listeners = this.listeners.get(data.path);
         for (let callback of listeners) {
           runSafe(this.context, callback, ...data.args);
         }
@@ -1402,93 +1712,184 @@ class ChildAPIManager {
   }
 
   close() {
-    this.messageManager.sendAsyncMessage("Extension:CloseProxyContext", {childId: this.id});
+    this.messageManager.sendAsyncMessage("API:CloseProxyContext", {childId: this.id});
   }
 
   get cloneScope() {
     return this.context.cloneScope;
   }
 
-  callFunction(path, name, args) {
-    throw new Error("Not implemented");
+  shouldInject(namespace, name, restrictions) {
+    // Do not generate content script APIs, unless explicitly allowed.
+    if (this.context.envType === "content_child" &&
+        (!restrictions || !restrictions.includes("content"))) {
+      return false;
+    }
+    return true;
   }
 
-  callFunctionNoReturn(path, name, args) {
-    this.messageManager.sendAsyncMessage("API:Call", {
-      childId: this.id,
-      path, name, args,
-    });
-  }
+  getImplementation(namespace, name) {
+    let pathObj = this.localApis;
+    if (pathObj) {
+      for (let part of namespace.split(".")) {
+        pathObj = pathObj[part];
+        if (!pathObj) {
+          break;
+        }
+      }
+      if (pathObj && name in pathObj) {
+        return new LocalAPIImplementation(pathObj, name, this.context);
+      }
+    }
 
-  callAsyncFunction(path, name, args, callback) {
-    let callId = nextId++;
-    let deferred = PromiseUtils.defer();
-    this.callPromises.set(callId, deferred);
-
-    this.messageManager.sendAsyncMessage("API:Call", {
-      childId: this.id,
-      callId,
-      path, name, args,
-    });
-
-    return this.context.wrapPromise(deferred.promise, callback);
-  }
-
-  shouldInject(namespace, name) {
-    return this.namespaces.includes(namespace);
+    // No local API found, defer implementation to the parent.
+    return new ProxyAPIImplementation(namespace, name, this);
   }
 
   hasPermission(permission) {
     return this.context.extension.permissions.has(permission);
   }
+}
 
-  getProperty(path, name) {
-    throw new Error("Not implemented");
+/**
+ * This object loads the ext-*.js scripts that define the extension API.
+ *
+ * This class instance is shared with the scripts that it loads, so that the
+ * ext-*.js scripts and the instantiator can communicate with each other.
+ */
+class SchemaAPIManager extends EventEmitter {
+  /**
+   * @param {string} processType
+   *     "main" - The main, one and only chrome browser process.
+   *     "addon" - An addon process.
+   *     "content" - A content process.
+   */
+  constructor(processType) {
+    super();
+    this.processType = processType;
+    this.global = this._createExtGlobal();
+    this._scriptScopes = [];
+    this._schemaApis = {
+      addon_parent: [],
+      addon_child: [],
+      content_parent: [],
+      content_child: [],
+    };
   }
 
-  setProperty(path, name, value) {
-    throw new Error("Not implemented");
+  /**
+   * Create a global object that is used as the shared global for all ext-*.js
+   * scripts that are loaded via `loadScript`.
+   *
+   * @returns {object} A sandbox that is used as the global by `loadScript`.
+   */
+  _createExtGlobal() {
+    let global = Cu.Sandbox(Services.scriptSecurityManager.getSystemPrincipal(), {
+      wantXrays: false,
+      sandboxName: `Namespace of ext-*.js scripts for ${this.processType}`,
+    });
+    Object.defineProperty(global, "console", {get() { return console; }});
+    global.extensions = this;
+    global.global = global;
+    global.Cc = Cc;
+    global.Ci = Ci;
+    global.Cu = Cu;
+    global.Cr = Cr;
+    XPCOMUtils.defineLazyModuleGetter(global, "require",
+                                      "resource://devtools/shared/Loader.jsm");
+    global.XPCOMUtils = XPCOMUtils;
+    return global;
   }
 
-  addListener(path, name, listener, args) {
-    let ref = path.concat(name).join(".");
-    let set;
-    if (this.listeners.has(ref)) {
-      set = this.listeners.get(ref);
-    } else {
-      set = new Set();
-      this.listeners.set(ref, set);
+  /**
+   * Load an ext-*.js script. The script runs in its own scope, if it wishes to
+   * share state with another script it can assign to the `global` variable. If
+   * it wishes to communicate with this API manager, use `extensions`.
+   *
+   * @param {string} scriptUrl The URL of the ext-*.js script.
+   */
+  loadScript(scriptUrl) {
+    // Create the object in the context of the sandbox so that the script runs
+    // in the sandbox's context instead of here.
+    let scope = Cu.createObjectIn(this.global);
+
+    Services.scriptloader.loadSubScript(scriptUrl, scope, "UTF-8");
+
+    // Save the scope to avoid it being garbage collected.
+    this._scriptScopes.push(scope);
+  }
+
+  /**
+   * Called by an ext-*.js script to register an API.
+   *
+   * @param {string} namespace The API namespace.
+   *     Intended to match the namespace of the generated API, but not used at
+   *     the moment - see bugzil.la/1295774.
+   * @param {string} envType Restricts the API to contexts that run in the
+   *    given environment. Must be one of the following:
+   *     - "addon_parent" - addon APIs that runs in the main process.
+   *     - "addon_child" - addon APIs that runs in an addon process.
+   *     - "content_parent" - content script APIs that runs in the main process.
+   *     - "content_child" - content script APIs that runs in a content process.
+   * @param {function(BaseContext)} getAPI A function that returns an object
+   *     that will be merged with |chrome| and |browser|. The next example adds
+   *     the create, update and remove methods to the tabs API.
+   *
+   *     registerSchemaAPI("tabs", "addon_parent", (context) => ({
+   *       tabs: { create, update },
+   *     }));
+   *     registerSchemaAPI("tabs", "addon_parent", (context) => ({
+   *       tabs: { remove },
+   *     }));
+   */
+  registerSchemaAPI(namespace, envType, getAPI) {
+    this._schemaApis[envType].push({namespace, getAPI});
+  }
+
+  /**
+   * Exports all registered scripts to `obj`.
+   *
+   * @param {BaseContext} context The context for which the API bindings are
+   *     generated.
+   * @param {object} obj The destination of the API.
+   */
+  generateAPIs(context, obj) {
+    let apis = this._schemaApis[context.envType];
+    if (!apis) {
+      Cu.reportError(`No APIs have been registered for ${context.envType}`);
+      return;
+    }
+    SchemaAPIManager.generateAPIs(context, apis, obj);
+  }
+
+  /**
+   * Mash together all the APIs from `apis` into `obj`.
+   *
+   * @param {BaseContext} context The context for which the API bindings are
+   *     generated.
+   * @param {Array} apis A list of objects, see `registerSchemaAPI`.
+   * @param {object} obj The destination of the API.
+   */
+  static generateAPIs(context, apis, obj) {
+    // Recursively copy properties from source to dest.
+    function copy(dest, source) {
+      for (let prop in source) {
+        let desc = Object.getOwnPropertyDescriptor(source, prop);
+        if (typeof(desc.value) == "object") {
+          if (!(prop in dest)) {
+            dest[prop] = {};
+          }
+          copy(dest[prop], source[prop]);
+        } else {
+          Object.defineProperty(dest, prop, desc);
+        }
+      }
     }
 
-    set.add(listener);
-
-    if (set.size == 1) {
-      args = args.slice(1);
-
-      this.messageManager.sendAsyncMessage("API:AddListener", {
-        childId: this.id,
-        path, name, args,
-      });
+    for (let api of apis) {
+      api = api.getAPI(context);
+      copy(obj, api);
     }
-  }
-
-  removeListener(path, name, listener) {
-    let ref = path.concat(name).join(".");
-    let set = this.listeners.get(ref) || new Set();
-    set.remove(listener);
-
-    if (set.size == 0) {
-      this.messageManager.sendAsyncMessage("Extension:RemoveListener", {
-        childId: this.id,
-        path, name,
-      });
-    }
-  }
-
-  hasListener(path, name, listener) {
-    let ref = path.concat(name).join(".");
-    let set = this.listeners.get(ref) || new Set();
-    return set.has(listener);
   }
 }
 
@@ -1514,6 +1915,8 @@ this.ExtensionUtils = {
   detectLanguage,
   extend,
   flushJarCache,
+  getConsole,
+  getInnerWindowID,
   ignoreEvent,
   injectAPI,
   instanceOf,
@@ -1530,10 +1933,13 @@ this.ExtensionUtils = {
   EventEmitter,
   EventManager,
   IconDetails,
+  LocalAPIImplementation,
   LocaleData,
   Messenger,
   PlatformInfo,
+  SchemaAPIInterface,
   SingletonEventManager,
   SpreadArgs,
   ChildAPIManager,
+  SchemaAPIManager,
 };

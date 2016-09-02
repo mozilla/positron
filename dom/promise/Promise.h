@@ -140,6 +140,8 @@ public:
     MaybeSomething(aArg, &Promise::MaybeResolve);
   }
 
+  void MaybeResolveWithUndefined();
+
   inline void MaybeReject(nsresult aArg) {
     MOZ_ASSERT(NS_FAILED(aArg));
     MaybeSomething(aArg, &Promise::MaybeReject);
@@ -151,8 +153,6 @@ public:
   }
 
   void MaybeReject(const RefPtr<MediaStreamError>& aArg);
-
-  void MaybeRejectWithNull();
 
   void MaybeRejectWithUndefined();
 

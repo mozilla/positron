@@ -64,10 +64,8 @@ browser/base/content/test/**
 browser/base/content/newtab/**
 browser/components/downloads/**
 browser/components/feeds/**
-browser/components/preferences/**
 browser/components/privatebrowsing/**
 browser/components/sessionstore/**
-browser/components/shell/**
 browser/components/tabview/**
 browser/components/translation/**
 browser/extensions/pdfjs/**
@@ -80,6 +78,7 @@ devtools/client/commandline/**
 devtools/client/debugger/**
 devtools/client/eyedropper/**
 devtools/client/framework/**
+!devtools/client/framework/selection.js
 devtools/client/jsonview/lib/**
 devtools/client/memory/**
 devtools/client/netmonitor/test/**
@@ -113,6 +112,7 @@ devtools/server/*.jsm
 !devtools/server/websocket-server.js
 devtools/server/actors/**
 !devtools/server/actors/inspector.js
+!devtools/server/actors/highlighters/css-grid.js
 !devtools/server/actors/highlighters/eye-dropper.js
 !devtools/server/actors/webbrowser.js
 !devtools/server/actors/webextension.js
@@ -141,6 +141,7 @@ devtools/shared/heapsnapshot/**
 devtools/shared/layout/**
 devtools/shared/locales/**
 devtools/shared/performance/**
+!devtools/shared/platform/**
 devtools/shared/qrcode/**
 devtools/shared/security/**
 devtools/shared/shims/**
@@ -203,9 +204,6 @@ mobile/android/chrome/content/about.js
 mobile/android/installer/
 mobile/android/locales/
 
-# Pretty sure we're disabling this one anyway
-mobile/android/modules/ContactService.jsm
-
 # Non-standard `(catch ex if ...)`
 mobile/android/components/Snippets.js
 
@@ -237,7 +235,6 @@ toolkit/components/reader/Readability.js
 toolkit/components/reader/JSDOMParser.js
 
 # Uses preprocessing
-toolkit/content/widgets/videocontrols.xml
 toolkit/content/widgets/wizard.xml
 toolkit/components/jsdownloads/src/DownloadIntegration.jsm
 toolkit/components/search/nsSearchService.js

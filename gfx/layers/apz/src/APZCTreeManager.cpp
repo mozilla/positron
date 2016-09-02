@@ -499,6 +499,9 @@ APZCTreeManager::PrepareNodeForLayer(const LayerMetricsWrapper& aLayer,
         aState.mPaintLogger.LogTestData(aMetrics.GetScrollId(),
             "isRootContent", true);
       }
+      // Note that the async scroll offset is in ParentLayer pixels
+      aState.mPaintLogger.LogTestData(aMetrics.GetScrollId(), "asyncScrollOffset",
+          apzc->GetCurrentAsyncScrollOffset(AsyncPanZoomController::NORMAL));
     }
 
     if (newApzc) {
@@ -627,8 +630,8 @@ APZCTreeManager::FlushApzRepaints(uint64_t aLayersId)
   const CompositorBridgeParent::LayerTreeState* state =
     CompositorBridgeParent::GetIndirectShadowTree(aLayersId);
   MOZ_ASSERT(state && state->mController);
-  NS_DispatchToMainThread(NewRunnableMethod(
-    state->mController, &GeckoContentController::NotifyFlushComplete));
+  state->mController->DispatchToRepaintThread(NewRunnableMethod(
+     state->mController, &GeckoContentController::NotifyFlushComplete));
 }
 
 nsEventStatus
@@ -1768,7 +1771,7 @@ APZCTreeManager::FindRootContentOrRootApzc() const
 
   // Note: this is intended to find the same "root" that would be found
   // by AsyncCompositionManager::ApplyAsyncContentTransformToTree inside
-  // the MOZ_ANDROID_APZ block. That is, it should find the RCD node if there
+  // the MOZ_WIDGET_ANDROID block. That is, it should find the RCD node if there
   // is one, or the root APZC if there is not.
   // Since BreadthFirstSearch is a pre-order search, we first do a search for
   // the RCD, and then if we don't find one, we do a search for the root APZC.

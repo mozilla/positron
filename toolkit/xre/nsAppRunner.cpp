@@ -89,7 +89,7 @@
 #include "mozilla/scache/StartupCache.h"
 #include "gfxPrefs.h"
 
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 
 #ifdef XP_WIN
 #include "nsIWinAppHelper.h"
@@ -191,6 +191,9 @@
 #define NS_CRASHREPORTER_CONTRACTID "@mozilla.org/toolkit/crash-reporter;1"
 #include "nsIPrefService.h"
 #include "nsIMemoryInfoDumper.h"
+#if defined(XP_LINUX) && !defined(ANDROID)
+#include "mozilla/widget/LSBUtils.h"
+#endif
 #endif
 
 #include "base/command_line.h"
@@ -203,7 +206,6 @@
 #if defined(MOZ_SANDBOX)
 #if defined(XP_LINUX) && !defined(ANDROID)
 #include "mozilla/SandboxInfo.h"
-#include "mozilla/widget/LSBUtils.h"
 #elif defined(XP_WIN)
 #include "SandboxBroker.h"
 #endif
@@ -837,6 +839,18 @@ nsXULAppInfo::GetProcessID(uint32_t* aResult)
   return NS_OK;
 }
 
+NS_IMETHODIMP
+nsXULAppInfo::GetUniqueProcessID(uint64_t* aResult)
+{
+  if (XRE_IsContentProcess()) {
+    ContentChild* cc = ContentChild::GetSingleton();
+    *aResult = cc->GetID();
+  } else {
+    *aResult = 0;
+  }
+  return NS_OK;
+}
+
 static bool gBrowserTabsRemoteAutostart = false;
 static uint64_t gBrowserTabsRemoteStatus = 0;
 static bool gBrowserTabsRemoteAutostartInitialized = false;
@@ -929,9 +943,9 @@ nsXULAppInfo::InvalidateCachesOnRestart()
   rv = parser.GetString("Compatibility", "InvalidateCaches", buf);
 
   if (NS_FAILED(rv)) {
-    PRFileDesc *fd = nullptr;
-    file->OpenNSPRFileDesc(PR_RDWR | PR_APPEND, 0600, &fd);
-    if (!fd) {
+    PRFileDesc *fd;
+    rv = file->OpenNSPRFileDesc(PR_RDWR | PR_APPEND, 0600, &fd);
+    if (NS_FAILED(rv)) {
       NS_ERROR("could not create output stream");
       return NS_ERROR_NOT_AVAILABLE;
     }
@@ -1003,6 +1017,17 @@ nsXULAppInfo::GetIsOfficial(bool* aResult)
 {
 #ifdef MOZILLA_OFFICIAL
   *aResult = true;
+#else
+  *aResult = false;
+#endif
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsXULAppInfo::GetWindowsDLLBlocklistStatus(bool* aResult)
+{
+#if defined(XP_WIN)
+  *aResult = gAppData->flags & NS_XRE_DLL_BLOCKLIST_ENABLED;
 #else
   *aResult = false;
 #endif
@@ -2287,8 +2312,10 @@ SelectProfile(nsIProfileLock* *aResult, nsIToolkitProfileService* aProfileSvc, n
     PR_fprintf(PR_STDERR, "Success: created profile '%s' at '%s'\n", arg, pathStr.get());
     bool exists;
     prefsJSFile->Exists(&exists);
-    if (!exists)
-      prefsJSFile->Create(nsIFile::NORMAL_FILE_TYPE, 0644);
+    if (!exists) {
+      // Ignore any errors; we're about to return NS_ERROR_ABORT anyway.
+      Unused << prefsJSFile->Create(nsIFile::NORMAL_FILE_TYPE, 0644);
+    }
     // XXXdarin perhaps 0600 would be better?
 
     return rv;
@@ -2595,9 +2622,10 @@ WriteVersion(nsIFile* aProfileDir, const nsCString& aVersion,
   if (aAppDir)
     aAppDir->GetNativePath(appDir);
 
-  PRFileDesc *fd = nullptr;
-  file->OpenNSPRFileDesc(PR_WRONLY | PR_CREATE_FILE | PR_TRUNCATE, 0600, &fd);
-  if (!fd) {
+  PRFileDesc *fd;
+  nsresult rv =
+    file->OpenNSPRFileDesc(PR_WRONLY | PR_CREATE_FILE | PR_TRUNCATE, 0600, &fd);
+  if (NS_FAILED(rv)) {
     NS_ERROR("could not create output stream");
     return;
   }
@@ -2712,17 +2740,18 @@ static void MakeOrSetMinidumpPath(nsIFile* profD)
   nsCOMPtr<nsIFile> dumpD;
   profD->Clone(getter_AddRefs(dumpD));
 
-  if(dumpD) {
+  if (dumpD) {
     bool fileExists;
     //XXX: do some more error checking here
     dumpD->Append(NS_LITERAL_STRING("minidumps"));
     dumpD->Exists(&fileExists);
-    if(!fileExists) {
-      dumpD->Create(nsIFile::DIRECTORY_TYPE, 0700);
+    if (!fileExists) {
+      nsresult rv = dumpD->Create(nsIFile::DIRECTORY_TYPE, 0700);
+      NS_ENSURE_SUCCESS_VOID(rv);
     }
 
     nsAutoString pathStr;
-    if(NS_SUCCEEDED(dumpD->GetPath(pathStr)))
+    if (NS_SUCCEEDED(dumpD->GetPath(pathStr)))
       CrashReporter::SetMinidumpPath(pathStr);
   }
 }
@@ -3167,6 +3196,10 @@ XREMain::XRE_mainInit(bool* aExitFlag)
     }
     if (mAppData->crashReporterURL)
       CrashReporter::SetServerURL(nsDependentCString(mAppData->crashReporterURL));
+
+    // We overwrite this once we finish starting up.
+    CrashReporter::AnnotateCrashReport(NS_LITERAL_CSTRING("StartupCrash"),
+                                       NS_LITERAL_CSTRING("1"));
 
     // pass some basic info from the app data
     if (mAppData->vendor)
@@ -4230,6 +4263,12 @@ XREMain::XRE_mainRun()
       obsService->NotifyObservers(nullptr, "final-ui-startup", nullptr);
 
     (void)appStartup->DoneStartingUp();
+
+#ifdef MOZ_CRASHREPORTER
+    CrashReporter::AnnotateCrashReport(NS_LITERAL_CSTRING("StartupCrash"),
+                                       NS_LITERAL_CSTRING("0"));
+#endif
+
     appStartup->GetShuttingDown(&mShuttingDown);
   }
 

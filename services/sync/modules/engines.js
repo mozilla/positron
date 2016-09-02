@@ -21,6 +21,9 @@ Cu.import("resource://services-sync/record.js");
 Cu.import("resource://services-sync/resource.js");
 Cu.import("resource://services-sync/util.js");
 
+XPCOMUtils.defineLazyModuleGetter(this, "fxAccounts",
+  "resource://gre/modules/FxAccounts.jsm");
+
 /*
  * Trackers are associated with a single engine and deal with
  * listening for changes to their particular data type.
@@ -487,7 +490,7 @@ EngineManager.prototype = {
 
   getAll: function () {
     let engines = [];
-    for (let [name, engine] in Iterator(this._engines)) {
+    for (let [, engine] of Object.entries(this._engines)) {
       engines.push(engine);
     }
     return engines;
@@ -1091,6 +1094,9 @@ SyncEngine.prototype = {
           }
         }
       } catch (ex) {
+        if (Async.isShutdownException(ex)) {
+          throw ex;
+        }
         self._log.warn("Error decrypting record", ex);
         self._noteApplyFailure();
         failed.push(item.id);
@@ -1477,10 +1483,12 @@ SyncEngine.prototype = {
                           + failed_ids.join(", "));
 
         // Clear successfully uploaded objects.
-        for (let key in resp.obj.success) {
-          let id = resp.obj.success[key];
+        const succeeded_ids = Object.values(resp.obj.success);
+        for (let id of succeeded_ids) {
           delete this._modified[id];
         }
+
+        this._onRecordsWritten(succeeded_ids, failed_ids);
       }
 
       let postQueue = up.newPostQueue(this._log, handleResponse);
@@ -1511,6 +1519,11 @@ SyncEngine.prototype = {
     }
   },
 
+  _onRecordsWritten(succeeded, failed) {
+    // Implement this method to take specific actions against successfully
+    // uploaded records and failed records.
+  },
+
   // Any cleanup necessary.
   // Save the current snapshot so as to calculate changes at next sync
   _syncFinish: function () {
@@ -1523,7 +1536,7 @@ SyncEngine.prototype = {
       coll.delete();
     });
 
-    for (let [key, val] in Iterator(this._delete)) {
+    for (let [key, val] of Object.entries(this._delete)) {
       // Remove the key for future uses
       delete this._delete[key];
 
@@ -1546,7 +1559,7 @@ SyncEngine.prototype = {
     }
 
     // Mark failed WBOs as changed again so they are reuploaded next time.
-    for (let [id, when] in Iterator(this._modified)) {
+    for (let [id, when] of Object.entries(this._modified)) {
       this._tracker.addChangedID(id, when);
     }
     this._modified = {};

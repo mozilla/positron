@@ -72,7 +72,7 @@
     _(ArraySplice)                  \
     _(NewObject)                    \
     _(NewTypedObject)               \
-    _(NewDeclEnvObject)             \
+    _(NewNamedLambdaObject)         \
     _(NewCallObject)                \
     _(NewSingletonCallObject)       \
     _(NewStringObject)              \
@@ -113,6 +113,7 @@
     _(BitOpV)                       \
     _(ShiftI)                       \
     _(ShiftI64)                     \
+    _(SignExtend)                   \
     _(UrshD)                        \
     _(Return)                       \
     _(Throw)                        \
@@ -222,7 +223,7 @@
     _(Start)                        \
     _(OsrEntry)                     \
     _(OsrValue)                     \
-    _(OsrScopeChain)                \
+    _(OsrEnvironmentChain)          \
     _(OsrReturnValue)               \
     _(OsrArgumentsObject)           \
     _(RegExp)                       \
@@ -427,6 +428,7 @@
     _(NewTarget)                    \
     _(ArrowNewTarget)               \
     _(CheckReturn)                  \
+    _(CheckIsObj)                   \
     _(CheckObjCoercible)            \
     _(DebugCheckSelfHosted)
 

@@ -20,13 +20,14 @@ DecodedSurfaceProvider::DecodedSurfaceProvider(NotNull<RasterImage*> aImage,
                                                const SurfaceKey& aSurfaceKey)
   : ISurfaceProvider(AvailabilityState::StartAsPlaceholder())
   , mImage(aImage.get())
+  , mMutex("mozilla::image::DecodedSurfaceProvider")
   , mDecoder(aDecoder.get())
   , mSurfaceKey(aSurfaceKey)
 {
   MOZ_ASSERT(!mDecoder->IsMetadataDecode(),
              "Use MetadataDecodingTask for metadata decodes");
   MOZ_ASSERT(mDecoder->IsFirstFrameDecode(),
-             "Use AnimationDecodingTask for animation decodes");
+             "Use AnimationSurfaceProvider for animation decodes");
 }
 
 DecodedSurfaceProvider::~DecodedSurfaceProvider()
@@ -52,8 +53,11 @@ DecodedSurfaceProvider::DropImageReference()
 }
 
 DrawableFrameRef
-DecodedSurfaceProvider::DrawableRef()
+DecodedSurfaceProvider::DrawableRef(size_t aFrame)
 {
+  MOZ_ASSERT(aFrame == 0,
+             "Requesting an animation frame from a DecodedSurfaceProvider?");
+
   // We depend on SurfaceCache::SurfaceAvailable() to provide synchronization
   // for methods that touch |mSurface|; after SurfaceAvailable() is called,
   // |mSurface| should be non-null and shouldn't be mutated further until we get
@@ -124,6 +128,8 @@ DecodedSurfaceProvider::LogicalSizeInBytes() const
 void
 DecodedSurfaceProvider::Run()
 {
+  MutexAutoLock lock(mMutex);
+
   if (!mDecoder || !mImage) {
     MOZ_ASSERT_UNREACHABLE("Running after decoding finished?");
     return;
@@ -162,6 +168,9 @@ DecodedSurfaceProvider::Run()
 void
 DecodedSurfaceProvider::CheckForNewSurface()
 {
+  mMutex.AssertCurrentThreadOwns();
+  MOZ_ASSERT(mDecoder);
+
   if (mSurface) {
     // Single-frame images should produce no more than one surface, so if we
     // have one, it should be the same one the decoder is working on.
@@ -186,6 +195,7 @@ DecodedSurfaceProvider::CheckForNewSurface()
 void
 DecodedSurfaceProvider::FinishDecoding()
 {
+  mMutex.AssertCurrentThreadOwns();
   MOZ_ASSERT(mImage);
   MOZ_ASSERT(mDecoder);
 

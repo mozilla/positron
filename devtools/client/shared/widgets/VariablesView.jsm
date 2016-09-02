@@ -28,6 +28,8 @@ const { Heritage, ViewHelpers, setNamedTimeout } =
   require("devtools/client/shared/widgets/view-helpers");
 const { Task } = require("devtools/shared/task");
 const nodeConstants = require("devtools/shared/dom-node-constants");
+const {KeyCodes} = require("devtools/client/shared/keycodes");
+const {ELLIPSIS} = require("devtools/client/shared/l10n");
 
 XPCOMUtils.defineLazyModuleGetter(this, "PluralForm",
   "resource://gre/modules/PluralForm.jsm");
@@ -116,7 +118,7 @@ VariablesView.prototype = {
   set rawObject(aObject) {
     this.empty();
     this.addScope()
-        .addItem("", { enumerable: true })
+        .addItem(undefined, { enumerable: true })
         .populate(aObject, { sorted: true });
   },
 
@@ -513,10 +515,10 @@ VariablesView.prototype = {
    */
   _onSearchboxKeyPress: function (e) {
     switch (e.keyCode) {
-      case e.DOM_VK_RETURN:
+      case KeyCodes.DOM_VK_RETURN:
         this._onSearchboxInput();
         return;
-      case e.DOM_VK_ESCAPE:
+      case KeyCodes.DOM_VK_ESCAPE:
         this._searchboxNode.value = "";
         this._onSearchboxInput();
         return;
@@ -560,7 +562,7 @@ VariablesView.prototype = {
   _doSearch: function (aToken) {
     if (this.controller && this.controller.supportsSearch()) {
       // Retrieve the main Scope in which we add attributes
-      let scope = this._store[0]._store.get("");
+      let scope = this._store[0]._store.get(undefined);
       if (!aToken) {
         // Prune the view from old previous content
         // so that we delete the intermediate search results
@@ -826,17 +828,17 @@ VariablesView.prototype = {
     ViewHelpers.preventScrolling(e);
 
     switch (e.keyCode) {
-      case e.DOM_VK_UP:
+      case KeyCodes.DOM_VK_UP:
         // Always rewind focus.
         this.focusPrevItem(true);
         return;
 
-      case e.DOM_VK_DOWN:
+      case KeyCodes.DOM_VK_DOWN:
         // Always advance focus.
         this.focusNextItem(true);
         return;
 
-      case e.DOM_VK_LEFT:
+      case KeyCodes.DOM_VK_LEFT:
         // Collapse scopes, variables and properties before rewinding focus.
         if (item._isExpanded && item._isArrowVisible) {
           item.collapse();
@@ -845,7 +847,7 @@ VariablesView.prototype = {
         }
         return;
 
-      case e.DOM_VK_RIGHT:
+      case KeyCodes.DOM_VK_RIGHT:
         // Nothing to do here if this item never expands.
         if (!item._isArrowVisible) {
           return;
@@ -858,29 +860,29 @@ VariablesView.prototype = {
         }
         return;
 
-      case e.DOM_VK_PAGE_UP:
+      case KeyCodes.DOM_VK_PAGE_UP:
         // Rewind a certain number of elements based on the container height.
         this.focusItemAtDelta(-(this.scrollPageSize || Math.min(Math.floor(this._list.scrollHeight /
           PAGE_SIZE_SCROLL_HEIGHT_RATIO),
           PAGE_SIZE_MAX_JUMPS)));
         return;
 
-      case e.DOM_VK_PAGE_DOWN:
+      case KeyCodes.DOM_VK_PAGE_DOWN:
         // Advance a certain number of elements based on the container height.
         this.focusItemAtDelta(+(this.scrollPageSize || Math.min(Math.floor(this._list.scrollHeight /
           PAGE_SIZE_SCROLL_HEIGHT_RATIO),
           PAGE_SIZE_MAX_JUMPS)));
         return;
 
-      case e.DOM_VK_HOME:
+      case KeyCodes.DOM_VK_HOME:
         this.focusFirstVisibleItem();
         return;
 
-      case e.DOM_VK_END:
+      case KeyCodes.DOM_VK_END:
         this.focusLastVisibleItem();
         return;
 
-      case e.DOM_VK_RETURN:
+      case KeyCodes.DOM_VK_RETURN:
         // Start editing the value or name of the Variable or Property.
         if (item instanceof Variable) {
           if (e.metaKey || e.altKey || e.shiftKey) {
@@ -891,15 +893,15 @@ VariablesView.prototype = {
         }
         return;
 
-      case e.DOM_VK_DELETE:
-      case e.DOM_VK_BACK_SPACE:
+      case KeyCodes.DOM_VK_DELETE:
+      case KeyCodes.DOM_VK_BACK_SPACE:
         // Delete the Variable or Property if allowed.
         if (item instanceof Variable) {
           item._onDelete(e);
         }
         return;
 
-      case e.DOM_VK_INSERT:
+      case KeyCodes.DOM_VK_INSERT:
         item._onAddProperty(e);
         return;
     }
@@ -909,7 +911,7 @@ VariablesView.prototype = {
    * Listener handling a key down event on the view.
    */
   _onViewKeyDown: function (e) {
-    if (e.keyCode == e.DOM_VK_C) {
+    if (e.keyCode == KeyCodes.DOM_VK_C) {
       // Copy current selection to clipboard.
       if (e.ctrlKey || e.metaKey) {
         let item = this.getFocusedItem();
@@ -1112,7 +1114,7 @@ VariablesView.simpleValueEvalMacro = function (aItem, aCurrentString, aPrefix = 
  *         The string to be evaluated.
  */
 VariablesView.overrideValueEvalMacro = function (aItem, aCurrentString, aPrefix = "") {
-  let property = "\"" + aItem._nameString + "\"";
+  let property = escapeString(aItem._nameString);
   let parent = aPrefix + aItem.ownerView.symbolicName || "this";
 
   return "Object.defineProperty(" + parent + "," + property + "," +
@@ -1139,7 +1141,7 @@ VariablesView.getterOrSetterEvalMacro = function (aItem, aCurrentString, aPrefix
   let type = aItem._nameString;
   let propertyObject = aItem.ownerView;
   let parentObject = propertyObject.ownerView;
-  let property = "\"" + propertyObject._nameString + "\"";
+  let property = escapeString(propertyObject._nameString);
   let parent = aPrefix + parentObject.symbolicName || "this";
 
   switch (aCurrentString) {
@@ -1257,7 +1259,7 @@ function Scope(aView, aName, aFlags = {}) {
   this.contextMenuId = aView.contextMenuId;
   this.separatorStr = aView.separatorStr;
 
-  this._init(aName.trim(), aFlags);
+  this._init(aName, aFlags);
 }
 
 Scope.prototype = {
@@ -1324,7 +1326,7 @@ Scope.prototype = {
    * @return Variable
    *         The newly created Variable instance, null if it already exists.
    */
-  addItem: function (aName = "", aDescriptor = {}, aOptions = {}) {
+  addItem: function (aName, aDescriptor = {}, aOptions = {}) {
     let {relaxed} = aOptions;
     if (this._store.has(aName) && !relaxed) {
       return this._store.get(aName);
@@ -1334,7 +1336,7 @@ Scope.prototype = {
     this._store.set(aName, child);
     this._variablesView._itemsByElement.set(child._target, child);
     this._variablesView._currHierarchy.set(child.absoluteName, child);
-    child.header = !!aName;
+    child.header = aName !== undefined;
 
     return child;
   },
@@ -1810,7 +1812,7 @@ Scope.prototype = {
    * @param string aTitleClassName [optional]
    *        A custom class name for this scope's title element.
    */
-  _displayScope: function (aName, aTargetClassName, aTitleClassName = "") {
+  _displayScope: function (aName = "", aTargetClassName, aTitleClassName = "") {
     let document = this.document;
 
     let element = this._target = document.createElement("vbox");
@@ -1822,7 +1824,7 @@ Scope.prototype = {
 
     let name = this._name = document.createElement("label");
     name.className = "plain name";
-    name.setAttribute("value", aName);
+    name.setAttribute("value", aName.trim());
     name.setAttribute("crop", "end");
 
     let title = this._title = document.createElement("hbox");
@@ -2150,10 +2152,6 @@ DevToolsUtils.defineLazyPrototypeGetter(Scope.prototype, "_store", () => new Map
 DevToolsUtils.defineLazyPrototypeGetter(Scope.prototype, "_enumItems", Array);
 DevToolsUtils.defineLazyPrototypeGetter(Scope.prototype, "_nonEnumItems", Array);
 
-// An ellipsis symbol (usually "…") used for localization.
-XPCOMUtils.defineLazyGetter(Scope, "ellipsis", () =>
-  Services.prefs.getComplexValue("intl.ellipsis", Ci.nsIPrefLocalizedString).data);
-
 /**
  * A Variable is a Scope holding Property instances.
  * Iterable via "for (let [name, property] of instance) { }".
@@ -2359,7 +2357,7 @@ Variable.prototype = Heritage.extend(Scope.prototype, {
    * @return string
    */
   get symbolicName() {
-    return this._nameString;
+    return this._nameString || "";
   },
 
   /**
@@ -2371,7 +2369,7 @@ Variable.prototype = Heritage.extend(Scope.prototype, {
       return this._absoluteName;
     }
 
-    this._absoluteName = this.ownerView._nameString + "[\"" + this._nameString + "\"]";
+    this._absoluteName = this.ownerView._nameString + "[" + escapeString(this._nameString) + "]";
     return this._absoluteName;
   },
 
@@ -2448,7 +2446,7 @@ Variable.prototype = Heritage.extend(Scope.prototype, {
   setGrip: function (aGrip) {
     // Don't allow displaying grip information if there's no name available
     // or the grip is malformed.
-    if (!this._nameString || aGrip === undefined || aGrip === null) {
+    if (this._nameString === undefined || aGrip === undefined || aGrip === null) {
       return;
     }
     // Getters and setters should display grip information in sub-properties.
@@ -3095,7 +3093,7 @@ Property.prototype = Heritage.extend(Variable.prototype, {
       return this._symbolicName;
     }
 
-    this._symbolicName = this.ownerView.symbolicName + "[\"" + this._nameString + "\"]";
+    this._symbolicName = this.ownerView.symbolicName + "[" + escapeString(this._nameString) + "]";
     return this._symbolicName;
   },
 
@@ -3108,7 +3106,7 @@ Property.prototype = Heritage.extend(Variable.prototype, {
       return this._absoluteName;
     }
 
-    this._absoluteName = this.ownerView.absoluteName + "[\"" + this._nameString + "\"]";
+    this._absoluteName = this.ownerView.absoluteName + "[" + escapeString(this._nameString) + "]";
     return this._absoluteName;
   }
 });
@@ -3462,7 +3460,7 @@ VariablesView.stringifiers.byType = {
   },
 
   longString: function ({initial}, {noStringQuotes, noEllipsis}) {
-    let ellipsis = noEllipsis ? "" : Scope.ellipsis;
+    let ellipsis = noEllipsis ? "" : ELLIPSIS;
     if (noStringQuotes) {
       return initial + ellipsis;
     }
@@ -3813,7 +3811,7 @@ VariablesView.stringifiers.byObjectKind = {
             n++;
           }
           if (preview.attributesLength > n) {
-            result += " " + Scope.ellipsis;
+            result += " " + ELLIPSIS;
           }
           return result + ">";
         }
@@ -3907,6 +3905,17 @@ var generateId = (function () {
     return aName.toLowerCase().trim().replace(/\s+/g, "-") + (++count);
   };
 })();
+
+/**
+ * Serialize a string to JSON. The result can be inserted in a string evaluated by `eval`.
+ *
+ * @param string aString
+ *       The string to be escaped. If undefined, the function returns the empty string.
+ * @return string
+ */
+function escapeString(aString) {
+  return JSON.stringify(aString) || "";
+}
 
 /**
  * Escape some HTML special characters. We do not need full HTML serialization
@@ -4082,13 +4091,13 @@ Editable.prototype = {
     e.stopPropagation();
 
     switch (e.keyCode) {
-      case e.DOM_VK_TAB:
+      case KeyCodes.DOM_VK_TAB:
         this._next();
         break;
-      case e.DOM_VK_RETURN:
+      case KeyCodes.DOM_VK_RETURN:
         this._save();
         break;
-      case e.DOM_VK_ESCAPE:
+      case KeyCodes.DOM_VK_ESCAPE:
         this._reset();
         break;
     }

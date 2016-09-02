@@ -163,7 +163,7 @@ private:
     }
     aReader->SetIsSuspended(true);
 
-    aReader->ReleaseMediaResources();
+    aReader->ReleaseResources();
   }
 
   static void DispatchResume(MediaDecoderReader* aReader)
@@ -395,7 +395,7 @@ public:
   {
   }
 
-  NS_METHOD Run()
+  NS_IMETHOD Run() override
   {
     MOZ_ASSERT(mReader->OnTaskQueue());
 
@@ -420,7 +420,7 @@ public:
   {
   }
 
-  NS_METHOD Run()
+  NS_IMETHOD Run() override
   {
     MOZ_ASSERT(mReader->OnTaskQueue());
 
@@ -520,7 +520,7 @@ MediaDecoderReader::Shutdown()
 
   mDataArrivedListener.DisconnectIfExists();
 
-  ReleaseMediaResources();
+  ReleaseResources();
   mDuration.DisconnectIfConnected();
   mBuffered.DisconnectAll();
   mIsSuspended.DisconnectAll();

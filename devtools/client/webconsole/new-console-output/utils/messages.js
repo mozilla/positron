@@ -6,29 +6,18 @@
 
 "use strict";
 
+const WebConsoleUtils = require("devtools/client/webconsole/utils").Utils;
+const STRINGS_URI = "devtools/locale/webconsole.properties";
+const l10n = new WebConsoleUtils.L10n(STRINGS_URI);
+
 const {
   MESSAGE_SOURCE,
   MESSAGE_TYPE,
   MESSAGE_LEVEL,
-  // Legacy
-  CATEGORY_JS,
-  CATEGORY_OUTPUT,
-  CATEGORY_WEBDEV,
-  LEVELS,
-  SEVERITY_LOG,
 } = require("../constants");
-const WebConsoleUtils = require("devtools/client/webconsole/utils").Utils;
-const STRINGS_URI = "chrome://devtools/locale/webconsole.properties";
-const l10n = new WebConsoleUtils.L10n(STRINGS_URI);
 const { ConsoleMessage } = require("../types");
 
-let messageId = 0;
-function getNextMessageId() {
-  // Return the next message id, as a string.
-  return "" + messageId++;
-}
-
-function prepareMessage(packet) {
+function prepareMessage(packet, idGenerator) {
   // This packet is already in the expected packet structure. Simply return.
   if (!packet.source) {
     packet = transformPacket(packet);
@@ -37,7 +26,7 @@ function prepareMessage(packet) {
   if (packet.allowRepeating) {
     packet = packet.set("repeatId", getRepeatId(packet));
   }
-  return packet.set("id", getNextMessageId());
+  return packet.set("id", idGenerator.getNextId());
 }
 
 /**
@@ -54,8 +43,9 @@ function transformPacket(packet) {
 
       let parameters = message.arguments;
       let type = message.level;
-      let level = LEVELS[type] || MESSAGE_TYPE.LOG;
+      let level = getLevelFromType(type);
       let messageText = null;
+      const timer = message.timer;
 
       // Special per-type conversion.
       switch (type) {
@@ -66,13 +56,35 @@ function transformPacket(packet) {
         case "count":
           // Chrome RDP doesn't have a special type for count.
           type = MESSAGE_TYPE.LOG;
-          level = MESSAGE_LEVEL.DEBUG;
           let {counter} = message;
           let label = counter.label ? counter.label : l10n.getStr("noCounterLabel");
           messageText = `${label}: ${counter.count}`;
           parameters = null;
           break;
+        case "time":
+          // We don't show anything for console.time calls to match Chrome's behaviour.
+          parameters = null;
+          type = MESSAGE_TYPE.NULL_MESSAGE;
+          break;
+        case "timeEnd":
+          parameters = null;
+          if (timer) {
+            // We show the duration to users when calls console.timeEnd() is called,
+            // if corresponding console.time() was called before.
+            let duration = Math.round(timer.duration * 100) / 100;
+            messageText = l10n.getFormatStr("timeEnd", [timer.name, duration]);
+          } else {
+            // If the `timer` property does not exists, we don't output anything.
+            type = MESSAGE_TYPE.NULL_MESSAGE;
+          }
+          break;
       }
+
+      const frame = {
+        source: message.filename || null,
+        line: message.lineNumber || null,
+        column: message.columnNumber || null
+      };
 
       return new ConsoleMessage({
         source: MESSAGE_SOURCE.CONSOLE_API,
@@ -80,8 +92,18 @@ function transformPacket(packet) {
         level,
         parameters,
         messageText,
-        category: CATEGORY_WEBDEV,
-        severity: level,
+        stacktrace: message.stacktrace ? message.stacktrace : null,
+        frame
+      });
+    }
+
+    case "navigationMessage": {
+      let { message } = packet;
+      return new ConsoleMessage({
+        source: MESSAGE_SOURCE.CONSOLE_API,
+        type: MESSAGE_TYPE.LOG,
+        level: MESSAGE_LEVEL.LOG,
+        messageText: "Navigated to " + message.url,
       });
     }
 
@@ -97,9 +119,8 @@ function transformPacket(packet) {
       return new ConsoleMessage({
         source: MESSAGE_SOURCE.JAVASCRIPT,
         type: MESSAGE_TYPE.LOG,
+        level,
         messageText: pageError.errorMessage,
-        category: CATEGORY_JS,
-        severity: level,
       });
     }
 
@@ -112,8 +133,6 @@ function transformPacket(packet) {
         type: MESSAGE_TYPE.RESULT,
         level: MESSAGE_LEVEL.LOG,
         parameters: result,
-        category: CATEGORY_OUTPUT,
-        severity: SEVERITY_LOG,
       });
     }
   }
@@ -127,8 +146,8 @@ function getRepeatId(message) {
 }
 
 function convertCachedPacket(packet) {
-  // The devtools server provides cached message packets in a different shape
-  // from those of consoleApiCalls, so we prepare them for preparation here.
+  // The devtools server provides cached message packets in a different shape, so we
+  // transform them here.
   let convertPacket = {};
   if (packet._type === "ConsoleAPI") {
     convertPacket.message = packet;
@@ -136,10 +155,50 @@ function convertCachedPacket(packet) {
   } else if (packet._type === "PageError") {
     convertPacket.pageError = packet;
     convertPacket.type = "pageError";
+  } else if ("_navPayload" in packet) {
+    convertPacket.type = "navigationMessage";
+    convertPacket.message = packet;
   } else {
     throw new Error("Unexpected packet type");
   }
   return convertPacket;
+}
+
+/**
+ * Maps a Firefox RDP type to its corresponding level.
+ */
+function getLevelFromType(type) {
+  const levels = {
+    LEVEL_ERROR: "error",
+    LEVEL_WARNING: "warn",
+    LEVEL_INFO: "info",
+    LEVEL_LOG: "log",
+    LEVEL_DEBUG: "debug",
+  };
+
+  // A mapping from the console API log event levels to the Web Console levels.
+  const levelMap = {
+    error: levels.LEVEL_ERROR,
+    exception: levels.LEVEL_ERROR,
+    assert: levels.LEVEL_ERROR,
+    warn: levels.LEVEL_WARNING,
+    info: levels.LEVEL_INFO,
+    log: levels.LEVEL_LOG,
+    clear: levels.LEVEL_LOG,
+    trace: levels.LEVEL_LOG,
+    table: levels.LEVEL_LOG,
+    debug: levels.LEVEL_LOG,
+    dir: levels.LEVEL_LOG,
+    dirxml: levels.LEVEL_LOG,
+    group: levels.LEVEL_LOG,
+    groupCollapsed: levels.LEVEL_LOG,
+    groupEnd: levels.LEVEL_LOG,
+    time: levels.LEVEL_LOG,
+    timeEnd: levels.LEVEL_LOG,
+    count: levels.LEVEL_DEBUG,
+  };
+
+  return levelMap[type] || MESSAGE_TYPE.LOG;
 }
 
 exports.prepareMessage = prepareMessage;

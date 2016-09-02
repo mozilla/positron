@@ -201,7 +201,7 @@
 #define WM_DPICHANGED 0x02E0
 #endif
 
-#include "mozilla/gfx/DeviceManagerD3D11.h"
+#include "mozilla/gfx/DeviceManagerDx.h"
 #include "mozilla/layers/APZCTreeManager.h"
 #include "mozilla/layers/InputAPZContext.h"
 #include "mozilla/layers/ScrollInputMethods.h"
@@ -737,17 +737,17 @@ nsWindow::Create(nsIWidget* aParent,
 }
 
 // Close this nsWindow
-NS_METHOD nsWindow::Destroy()
+void nsWindow::Destroy()
 {
   // WM_DESTROY has already fired, avoid calling it twice
   if (mOnDestroyCalled)
-    return NS_OK;
+    return;
 
   // Don't destroy windows that have file pickers open, we'll tear these down
   // later once the picker is closed.
   mDestroyCalled = true;
   if (mPickerDisplayCount)
-    return NS_OK;
+    return;
 
   // During the destruction of all of our children, make sure we don't get deleted.
   nsCOMPtr<nsIWidget> kungFuDeathGrip(this);
@@ -781,8 +781,6 @@ NS_METHOD nsWindow::Destroy()
     mWindowHook.Notify(mWnd, WM_DESTROY, 0, 0, msgResult);
     OnDestroy();
   }
-
-  return NS_OK;
 }
 
 /**************************************************************
@@ -1296,7 +1294,7 @@ nsWindow::GetFallbackScrollSnapshot(const RECT& aRequiredClip)
  *
  **************************************************************/
 
-NS_METHOD nsWindow::Show(bool bState)
+NS_IMETHODIMP nsWindow::Show(bool bState)
 {
   if (mWindowType == eWindowType_popup) {
     // See bug 603793. When we try to draw D3D9/10 windows with a drop shadow
@@ -1558,7 +1556,7 @@ nsWindow::GetSizeConstraints()
 }
 
 // Move this component
-NS_METHOD nsWindow::Move(double aX, double aY)
+NS_IMETHODIMP nsWindow::Move(double aX, double aY)
 {
   if (mWindowType == eWindowType_toplevel ||
       mWindowType == eWindowType_dialog) {
@@ -1636,7 +1634,7 @@ NS_METHOD nsWindow::Move(double aX, double aY)
 }
 
 // Resize this component
-NS_METHOD nsWindow::Resize(double aWidth, double aHeight, bool aRepaint)
+NS_IMETHODIMP nsWindow::Resize(double aWidth, double aHeight, bool aRepaint)
 {
   // for top-level windows only, convert coordinates from desktop pixels
   // (the "parent" coordinate space) to the window's device pixel space
@@ -1686,7 +1684,8 @@ NS_METHOD nsWindow::Resize(double aWidth, double aHeight, bool aRepaint)
 }
 
 // Resize this component
-NS_METHOD nsWindow::Resize(double aX, double aY, double aWidth, double aHeight, bool aRepaint)
+NS_IMETHODIMP nsWindow::Resize(double aX, double aY, double aWidth,
+                               double aHeight, bool aRepaint)
 {
   // for top-level windows only, convert coordinates from desktop pixels
   // (the "parent" coordinate space) to the window's device pixel space
@@ -1818,8 +1817,8 @@ nsWindow::BeginResizeDrag(WidgetGUIEvent* aEvent,
  **************************************************************/
 
 // Position the window behind the given window
-NS_METHOD nsWindow::PlaceBehind(nsTopLevelWidgetZPlacement aPlacement,
-                                nsIWidget *aWidget, bool aActivate)
+NS_IMETHODIMP nsWindow::PlaceBehind(nsTopLevelWidgetZPlacement aPlacement,
+                                    nsIWidget *aWidget, bool aActivate)
 {
   HWND behind = HWND_TOP;
   if (aPlacement == eZPlacementBottom)
@@ -1856,21 +1855,19 @@ GetCurrentShowCmd(HWND aWnd)
 }
 
 // Maximize, minimize or restore the window.
-NS_IMETHODIMP
-nsWindow::SetSizeMode(nsSizeMode aMode) {
-
-  nsresult rv;
-
+void
+nsWindow::SetSizeMode(nsSizeMode aMode)
+{
   // Let's not try and do anything if we're already in that state.
   // (This is needed to prevent problems when calling window.minimize(), which
   // calls us directly, and then the OS triggers another call to us.)
   if (aMode == mSizeMode)
-    return NS_OK;
+    return;
 
   // save the requested state
   mLastSizeMode = mSizeMode;
-  rv = nsBaseWidget::SetSizeMode(aMode);
-  if (NS_SUCCEEDED(rv) && mIsVisible) {
+  nsBaseWidget::SetSizeMode(aMode);
+  if (mIsVisible) {
     int mode;
 
     switch (aMode) {
@@ -1907,14 +1904,13 @@ nsWindow::SetSizeMode(nsSizeMode aMode) {
     if (mode == SW_MAXIMIZE || mode == SW_SHOW)
       DispatchFocusToTopLevelWindow(true);
   }
-  return rv;
 }
 
 // Constrain a potential move to fit onscreen
 // Position (aX, aY) is specified in Windows screen (logical) pixels,
 // except when using per-monitor DPI, in which case it's device pixels.
-NS_METHOD nsWindow::ConstrainPosition(bool aAllowSlop,
-                                      int32_t *aX, int32_t *aY)
+NS_IMETHODIMP nsWindow::ConstrainPosition(bool aAllowSlop,
+                                          int32_t *aX, int32_t *aY)
 {
   if (!mIsTopWidgetWindow) // only a problem for top-level windows
     return NS_OK;
@@ -1993,7 +1989,7 @@ NS_METHOD nsWindow::ConstrainPosition(bool aAllowSlop,
  **************************************************************/
 
 // Enable/disable this component
-NS_METHOD nsWindow::Enable(bool bState)
+NS_IMETHODIMP nsWindow::Enable(bool bState)
 {
   if (mWnd) {
     ::EnableWindow(mWnd, bState);
@@ -2018,7 +2014,7 @@ bool nsWindow::IsEnabled() const
  *
  **************************************************************/
 
-NS_METHOD nsWindow::SetFocus(bool aRaise)
+NS_IMETHODIMP nsWindow::SetFocus(bool aRaise)
 {
   if (mWnd) {
 #ifdef WINSTATE_DEBUG_OUTPUT
@@ -2047,7 +2043,7 @@ NS_METHOD nsWindow::SetFocus(bool aRaise)
  *
  * GetBounds, GetClientBounds, GetScreenBounds,
  * GetRestoredBounds, GetClientOffset
- * SetDrawsInTitlebar, GetNonClientMargins, SetNonClientMargins
+ * SetDrawsInTitlebar, SetNonClientMargins
  *
  * Bound calculations.
  *
@@ -2056,113 +2052,120 @@ NS_METHOD nsWindow::SetFocus(bool aRaise)
 // Return the window's full dimensions in screen coordinates.
 // If the window has a parent, converts the origin to an offset
 // of the parent's screen origin.
-NS_METHOD nsWindow::GetBounds(LayoutDeviceIntRect& aRect)
+LayoutDeviceIntRect
+nsWindow::GetBounds()
 {
-  if (mWnd) {
-    RECT r;
-    VERIFY(::GetWindowRect(mWnd, &r));
-
-    // assign size
-    aRect.width  = r.right - r.left;
-    aRect.height = r.bottom - r.top;
-
-    // popup window bounds' are in screen coordinates, not relative to parent
-    // window
-    if (mWindowType == eWindowType_popup) {
-      aRect.x = r.left;
-      aRect.y = r.top;
-      return NS_OK;
-    }
-
-    // chrome on parent:
-    //  ___      5,5   (chrome start)
-    // |  ____   10,10 (client start)
-    // | |  ____ 20,20 (child start)
-    // | | |
-    // 20,20 - 5,5 = 15,15 (??)
-    // minus GetClientOffset:
-    // 15,15 - 5,5 = 10,10
-    //
-    // no chrome on parent:
-    //  ______   10,10 (win start)
-    // |  ____   20,20 (child start)
-    // | |
-    // 20,20 - 10,10 = 10,10
-    //
-    // walking the chain:
-    //  ___      5,5   (chrome start)
-    // |  ___    10,10 (client start)
-    // | |  ___  20,20 (child start)
-    // | | |  __ 30,30 (child start)
-    // | | | |
-    // 30,30 - 20,20 = 10,10 (offset from second child to first)
-    // 20,20 - 5,5 = 15,15 + 10,10 = 25,25 (??)
-    // minus GetClientOffset:
-    // 25,25 - 5,5 = 20,20 (offset from second child to parent client)
-
-    // convert coordinates if parent exists
-    HWND parent = ::GetParent(mWnd);
-    if (parent) {
-      RECT pr;
-      VERIFY(::GetWindowRect(parent, &pr));
-      r.left -= pr.left;
-      r.top  -= pr.top;
-      // adjust for chrome
-      nsWindow* pWidget = static_cast<nsWindow*>(GetParent());
-      if (pWidget && pWidget->IsTopLevelWidget()) {
-        LayoutDeviceIntPoint clientOffset = pWidget->GetClientOffset();
-        r.left -= clientOffset.x;
-        r.top  -= clientOffset.y;
-      }
-    }
-    aRect.x = r.left;
-    aRect.y = r.top;
-  } else {
-    aRect = mBounds;
+  if (!mWnd) {
+    return mBounds;
   }
-  return NS_OK;
+
+  RECT r;
+  VERIFY(::GetWindowRect(mWnd, &r));
+
+  LayoutDeviceIntRect rect;
+
+  // assign size
+  rect.width  = r.right - r.left;
+  rect.height = r.bottom - r.top;
+
+  // popup window bounds' are in screen coordinates, not relative to parent
+  // window
+  if (mWindowType == eWindowType_popup) {
+    rect.x = r.left;
+    rect.y = r.top;
+    return rect;
+  }
+
+  // chrome on parent:
+  //  ___      5,5   (chrome start)
+  // |  ____   10,10 (client start)
+  // | |  ____ 20,20 (child start)
+  // | | |
+  // 20,20 - 5,5 = 15,15 (??)
+  // minus GetClientOffset:
+  // 15,15 - 5,5 = 10,10
+  //
+  // no chrome on parent:
+  //  ______   10,10 (win start)
+  // |  ____   20,20 (child start)
+  // | |
+  // 20,20 - 10,10 = 10,10
+  //
+  // walking the chain:
+  //  ___      5,5   (chrome start)
+  // |  ___    10,10 (client start)
+  // | |  ___  20,20 (child start)
+  // | | |  __ 30,30 (child start)
+  // | | | |
+  // 30,30 - 20,20 = 10,10 (offset from second child to first)
+  // 20,20 - 5,5 = 15,15 + 10,10 = 25,25 (??)
+  // minus GetClientOffset:
+  // 25,25 - 5,5 = 20,20 (offset from second child to parent client)
+
+  // convert coordinates if parent exists
+  HWND parent = ::GetParent(mWnd);
+  if (parent) {
+    RECT pr;
+    VERIFY(::GetWindowRect(parent, &pr));
+    r.left -= pr.left;
+    r.top  -= pr.top;
+    // adjust for chrome
+    nsWindow* pWidget = static_cast<nsWindow*>(GetParent());
+    if (pWidget && pWidget->IsTopLevelWidget()) {
+      LayoutDeviceIntPoint clientOffset = pWidget->GetClientOffset();
+      r.left -= clientOffset.x;
+      r.top  -= clientOffset.y;
+    }
+  }
+  rect.x = r.left;
+  rect.y = r.top;
+  return rect;
 }
 
 // Get this component dimension
-NS_METHOD nsWindow::GetClientBounds(LayoutDeviceIntRect& aRect)
+LayoutDeviceIntRect
+nsWindow::GetClientBounds()
 {
-  if (mWnd) {
-    RECT r;
-    VERIFY(::GetClientRect(mWnd, &r));
-
-    LayoutDeviceIntRect bounds;
-    GetBounds(bounds);
-    aRect.MoveTo(bounds.TopLeft() + GetClientOffset());
-    aRect.width  = r.right - r.left;
-    aRect.height = r.bottom - r.top;
-
-  } else {
-    aRect.SetRect(0,0,0,0);
+  if (!mWnd) {
+    return LayoutDeviceIntRect(0, 0, 0, 0);
   }
-  return NS_OK;
+
+  RECT r;
+  VERIFY(::GetClientRect(mWnd, &r));
+
+  LayoutDeviceIntRect bounds = GetBounds();
+  LayoutDeviceIntRect rect;
+  rect.MoveTo(bounds.TopLeft() + GetClientOffset());
+  rect.width  = r.right - r.left;
+  rect.height = r.bottom - r.top;
+  return rect;
 }
 
 // Like GetBounds, but don't offset by the parent
-NS_METHOD nsWindow::GetScreenBounds(LayoutDeviceIntRect& aRect)
+LayoutDeviceIntRect
+nsWindow::GetScreenBounds()
 {
-  if (mWnd) {
-    RECT r;
-    VERIFY(::GetWindowRect(mWnd, &r));
-
-    aRect.width  = r.right - r.left;
-    aRect.height = r.bottom - r.top;
-    aRect.x = r.left;
-    aRect.y = r.top;
-  } else {
-    aRect = mBounds;
+  if (!mWnd) {
+    return mBounds;
   }
-  return NS_OK;
+
+  RECT r;
+  VERIFY(::GetWindowRect(mWnd, &r));
+
+  LayoutDeviceIntRect rect;
+  rect.x = r.left;
+  rect.y = r.top;
+  rect.width  = r.right - r.left;
+  rect.height = r.bottom - r.top;
+  return rect;
 }
 
-NS_METHOD nsWindow::GetRestoredBounds(LayoutDeviceIntRect &aRect)
+nsresult
+nsWindow::GetRestoredBounds(LayoutDeviceIntRect &aRect)
 {
   if (SizeMode() == nsSizeMode_Normal) {
-    return GetScreenBounds(aRect);
+    aRect = GetScreenBounds();
+    return NS_OK;
   }
   if (!mWnd) {
     return NS_ERROR_FAILURE;
@@ -2217,27 +2220,6 @@ nsWindow::SetDrawsInTitlebar(bool aState)
     LayoutDeviceIntMargin margins(-1, -1, -1, -1);
     SetNonClientMargins(margins);
   }
-}
-
-NS_IMETHODIMP
-nsWindow::GetNonClientMargins(LayoutDeviceIntMargin &margins)
-{
-  nsWindow * window = GetTopLevelWindow(true);
-  if (window && window != this) {
-    return window->GetNonClientMargins(margins);
-  }
-
-  if (mCustomNonClient) {
-    margins = mNonClientMargins;
-    return NS_OK;
-  }
-
-  margins.top = GetSystemMetrics(SM_CYCAPTION);
-  margins.bottom = GetSystemMetrics(SM_CYFRAME);
-  margins.top += margins.bottom;
-  margins.left = margins.right = GetSystemMetrics(SM_CXFRAME);
-
-  return NS_OK;
 }
 
 void
@@ -2625,7 +2607,7 @@ void nsWindow::SetBackgroundColor(const nscolor &aColor)
  **************************************************************/
 
 // Set this component cursor
-NS_METHOD nsWindow::SetCursor(nsCursor aCursor)
+NS_IMETHODIMP nsWindow::SetCursor(nsCursor aCursor)
 {
   // Only change cursor if it's changing
 
@@ -2859,14 +2841,12 @@ void nsWindow::UpdateOpaqueRegion(const LayoutDeviceIntRegion& aOpaqueRegion)
     for (nsIWidget* child = GetFirstChild(); child; child = child->GetNextSibling()) {
       if (child->IsPlugin()) {
         // Collect the bounds of all plugins for GetLargestRectangle.
-        LayoutDeviceIntRect childBounds;
-        child->GetBounds(childBounds);
+        LayoutDeviceIntRect childBounds = child->GetBounds();
         pluginBounds.UnionRect(pluginBounds, childBounds);
       }
     }
 
-    LayoutDeviceIntRect clientBounds;
-    GetClientBounds(clientBounds);
+    LayoutDeviceIntRect clientBounds = GetClientBounds();
 
     // Find the largest rectangle and use that to calculate the inset. Our top
     // priority is to include the bounds of all plugins.
@@ -3009,9 +2989,9 @@ NS_IMETHODIMP nsWindow::HideWindowChrome(bool aShouldHide)
  **************************************************************/
 
 // Invalidate this component visible area
-NS_METHOD nsWindow::Invalidate(bool aEraseBackground, 
-                               bool aUpdateNCArea,
-                               bool aIncludeChildren)
+NS_IMETHODIMP nsWindow::Invalidate(bool aEraseBackground,
+                                   bool aUpdateNCArea,
+                                   bool aIncludeChildren)
 {
   if (!mWnd) {
     return NS_OK;
@@ -3041,7 +3021,7 @@ NS_METHOD nsWindow::Invalidate(bool aEraseBackground,
 }
 
 // Invalidate this component visible area
-NS_METHOD nsWindow::Invalidate(const LayoutDeviceIntRect& aRect)
+NS_IMETHODIMP nsWindow::Invalidate(const LayoutDeviceIntRect& aRect)
 {
   if (mWnd) {
 #ifdef WIDGET_DEBUG_OUTPUT
@@ -3245,7 +3225,7 @@ nsWindow::PerformFullscreenTransition(FullscreenTransitionStage aStage,
   ::PostMessage(data->mWnd, msg, wparam, (LPARAM)aDuration);
 }
 
-NS_IMETHODIMP
+nsresult
 nsWindow::MakeFullScreen(bool aFullScreen, nsIScreen* aTargetScreen)
 {
   // taskbarInfo will be nullptr pre Windows 7 until Bug 680227 is resolved.
@@ -3272,11 +3252,11 @@ nsWindow::MakeFullScreen(bool aFullScreen, nsIScreen* aTargetScreen)
   // If we are going fullscreen, the window size continues to change
   // and the window will be reflow again then.
   UpdateNonClientMargins(mSizeMode, /* Reflow */ !aFullScreen);
-  
+
   // Will call hide chrome, reposition window. Note this will
   // also cache dimensions for restoration, so it should only
   // be called once per fullscreen request.
-  nsresult rv = nsBaseWidget::MakeFullScreen(aFullScreen, aTargetScreen);
+  nsBaseWidget::InfallibleMakeFullScreen(aFullScreen, aTargetScreen);
 
   if (mIsVisible && !aFullScreen && mOldSizeMode == nsSizeMode_Normal) {
     // Ensure the window exiting fullscreen get activated. Window
@@ -3294,7 +3274,7 @@ nsWindow::MakeFullScreen(bool aFullScreen, nsIScreen* aTargetScreen)
     mWidgetListener->FullscreenChanged(aFullScreen);
   }
 
-  return rv;
+  return NS_OK;
 }
 
 /**************************************************************
@@ -3407,7 +3387,7 @@ void nsWindow::FreeNativeData(void * data, uint32_t aDataType)
  *
  **************************************************************/
 
-NS_METHOD nsWindow::SetTitle(const nsAString& aTitle)
+NS_IMETHODIMP nsWindow::SetTitle(const nsAString& aTitle)
 {
   const nsString& strTitle = PromiseFlatString(aTitle);
   AutoRestore<bool> sendingText(mSendingSetText);
@@ -3424,7 +3404,7 @@ NS_METHOD nsWindow::SetTitle(const nsAString& aTitle)
  *
  **************************************************************/
 
-NS_METHOD nsWindow::SetIcon(const nsAString& aIconSpec) 
+NS_IMETHODIMP nsWindow::SetIcon(const nsAString& aIconSpec) 
 {
   // Assume the given string is a local identifier for an icon file.
 
@@ -3527,34 +3507,29 @@ nsWindow::ClientToWindowSize(const LayoutDeviceIntSize& aClientSize)
  *
  **************************************************************/
 
-NS_METHOD nsWindow::EnableDragDrop(bool aEnable)
+void
+nsWindow::EnableDragDrop(bool aEnable)
 {
   NS_ASSERTION(mWnd, "nsWindow::EnableDragDrop() called after Destroy()");
 
   nsresult rv = NS_ERROR_FAILURE;
   if (aEnable) {
-    if (nullptr == mNativeDragTarget) {
-       mNativeDragTarget = new nsNativeDragTarget(this);
-       if (nullptr != mNativeDragTarget) {
-         mNativeDragTarget->AddRef();
-         if (S_OK == ::CoLockObjectExternal((LPUNKNOWN)mNativeDragTarget,TRUE,FALSE)) {
-           if (S_OK == ::RegisterDragDrop(mWnd, (LPDROPTARGET)mNativeDragTarget)) {
-             rv = NS_OK;
-           }
-         }
-       }
+    if (!mNativeDragTarget) {
+      mNativeDragTarget = new nsNativeDragTarget(this);
+      mNativeDragTarget->AddRef();
+      if (SUCCEEDED(::CoLockObjectExternal((LPUNKNOWN)mNativeDragTarget,
+                                           TRUE, FALSE))) {
+        ::RegisterDragDrop(mWnd, (LPDROPTARGET)mNativeDragTarget);
+      }
     }
   } else {
-    if (nullptr != mWnd && nullptr != mNativeDragTarget) {
+    if (mWnd && mNativeDragTarget) {
       ::RevokeDragDrop(mWnd);
-      if (S_OK == ::CoLockObjectExternal((LPUNKNOWN)mNativeDragTarget, FALSE, TRUE)) {
-        rv = NS_OK;
-      }
+      ::CoLockObjectExternal((LPUNKNOWN)mNativeDragTarget, FALSE, TRUE);
       mNativeDragTarget->DragCancel();
       NS_RELEASE(mNativeDragTarget);
     }
   }
-  return rv;
 }
 
 /**************************************************************
@@ -3565,7 +3540,7 @@ NS_METHOD nsWindow::EnableDragDrop(bool aEnable)
  *
  **************************************************************/
 
-NS_METHOD nsWindow::CaptureMouse(bool aCapture)
+NS_IMETHODIMP nsWindow::CaptureMouse(bool aCapture)
 {
   TRACKMOUSEEVENT mTrack;
   mTrack.cbSize = sizeof(TRACKMOUSEEVENT);
@@ -3763,9 +3738,7 @@ nsWindow::OnDefaultButtonLoaded(const LayoutDeviceIntRect& aButtonRect)
       return NS_OK;
   }
 
-  LayoutDeviceIntRect widgetRect;
-  nsresult rv = GetScreenBounds(widgetRect);
-  NS_ENSURE_SUCCESS(rv, rv);
+  LayoutDeviceIntRect widgetRect = GetScreenBounds();
   LayoutDeviceIntRect buttonRect(aButtonRect + widgetRect.TopLeft());
 
   LayoutDeviceIntPoint centerOfButton(buttonRect.x + buttonRect.width / 2,
@@ -4254,8 +4227,7 @@ nsWindow::DispatchMouseEvent(EventMessage aEventMessage, WPARAM wParam,
   // call the event callback
   if (mWidgetListener) {
     if (aEventMessage == eMouseMove) {
-      LayoutDeviceIntRect rect;
-      GetBounds(rect);
+      LayoutDeviceIntRect rect = GetBounds();
       rect.x = 0;
       rect.y = 0;
 
@@ -6651,8 +6623,7 @@ nsWindow::ConfigureChildren(const nsTArray<Configuration>& aConfigurations)
                  "Configured widget is not a child");
     nsresult rv = w->SetWindowClipRegion(configuration.mClipRegion, true);
     NS_ENSURE_SUCCESS(rv, rv);
-    LayoutDeviceIntRect bounds;
-    w->GetBounds(bounds);
+    LayoutDeviceIntRect bounds = w->GetBounds();
     if (bounds.Size() != configuration.mBounds.Size()) {
       w->Resize(configuration.mBounds.x, configuration.mBounds.y,
                 configuration.mBounds.width, configuration.mBounds.height,
@@ -7797,7 +7768,7 @@ nsWindow::ComputeShouldAccelerate()
   // on Windows 7 where presentation fails randomly for windows with drop
   // shadows.
   if (mTransparencyMode == eTransparencyTransparent ||
-      (IsPopup() && DeviceManagerD3D11::Get()->IsWARP()))
+      (IsPopup() && DeviceManagerDx::Get()->IsWARP()))
   {
     return false;
   }

@@ -114,6 +114,10 @@ MediaSourceDecoder::GetBuffered()
 {
   MOZ_ASSERT(NS_IsMainThread());
 
+  if (!mMediaSource) {
+    NS_WARNING("MediaSource element isn't attached");
+    return media::TimeIntervals::Invalid();
+  }
   dom::SourceBufferList* sourceBuffers = mMediaSource->ActiveSourceBuffers();
   if (!sourceBuffers) {
     // Media source object is shutting down.
@@ -310,6 +314,18 @@ MediaSourceDecoder::CanPlayThrough()
                         timeAhead,
                         MediaSourceDemuxer::EOS_FUZZ);
   return GetBuffered().Contains(ClampIntervalToEnd(interval));
+}
+
+void
+MediaSourceDecoder::NotifyWaitingForKey()
+{
+  mWaitingForKeyEvent.Notify();
+}
+
+MediaEventSource<void>*
+MediaSourceDecoder::WaitingForKeyEvent()
+{
+  return &mWaitingForKeyEvent;
 }
 
 TimeInterval

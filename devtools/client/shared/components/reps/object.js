@@ -96,7 +96,8 @@ define(function (require, exports, module) {
         return props;
       }
 
-      let mode = this.props.mode;
+      // Hardcode tiny mode to avoid recursive handling.
+      let mode = "tiny";
 
       try {
         for (let name in object) {
@@ -150,13 +151,13 @@ define(function (require, exports, module) {
             className: "objectLeftBrace",
             role: "presentation",
             object: object
-          }, "{"),
+          }, " { "),
           props,
           objectLink({
             className: "objectRightBrace",
             role: "presentation",
             object: object
-          }, "}")
+          }, " }")
         )
       );
     },

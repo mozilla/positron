@@ -2535,6 +2535,11 @@ nsRange::InsertNode(nsINode& aNode, ErrorResult& aRv)
     return;
   }
 
+  if (&aNode == tStartContainer) {
+    aRv.Throw(NS_ERROR_DOM_HIERARCHY_REQUEST_ERR);
+    return;
+  }
+
   // This is the node we'll be inserting before, and its parent
   nsCOMPtr<nsINode> referenceNode;
   nsCOMPtr<nsINode> referenceParentNode = tStartContainer;
@@ -3315,7 +3320,8 @@ IsVisibleAndNotInReplacedElement(nsIFrame* aFrame)
   }
   for (nsIFrame* f = aFrame->GetParent(); f; f = f->GetParent()) {
     if (f->IsFrameOfType(nsIFrame::eReplaced) &&
-        !f->GetContent()->IsHTMLElement(nsGkAtoms::button)) {
+        !f->GetContent()->IsHTMLElement(nsGkAtoms::button) &&
+        !f->GetContent()->IsHTMLElement(nsGkAtoms::select)) {
       return false;
     }
   }

@@ -7,27 +7,37 @@
 
 const { getAllFilters } = require("devtools/client/webconsole/new-console-output/selectors/filters");
 const { getLogLimit } = require("devtools/client/webconsole/new-console-output/selectors/prefs");
+const {
+  MESSAGE_TYPE
+} = require("devtools/client/webconsole/new-console-output/constants");
 
 function getAllMessages(state) {
-  let messages = state.messages;
+  let messages = state.messages.messagesById;
   let logLimit = getLogLimit(state);
   let filters = getAllFilters(state);
 
   return prune(
     search(
-      filterSeverity(messages, filters),
-      filters.searchText
+      filterLevel(messages, filters),
+      filters.text
     ),
     logLimit
   );
 }
 
-function filterSeverity(messages, filters) {
-  return messages.filter((message) => filters[message.severity] === true);
+function getAllMessagesUiById(state) {
+  return state.messages.messagesUiById;
 }
 
-function search(messages, searchText = "") {
-  if (searchText === "") {
+function filterLevel(messages, filters) {
+  return messages.filter((message) => {
+    return filters[message.level] === true
+      || [MESSAGE_TYPE.COMMAND, MESSAGE_TYPE.RESULT].includes(message.type);
+  });
+}
+
+function search(messages, text = "") {
+  if (text === "") {
     return messages;
   }
 
@@ -39,7 +49,7 @@ function search(messages, searchText = "") {
     return message
       .parameters.join("")
       .toLocaleLowerCase()
-      .includes(searchText.toLocaleLowerCase());
+      .includes(text.toLocaleLowerCase());
   });
 }
 
@@ -53,3 +63,4 @@ function prune(messages, logLimit) {
 }
 
 exports.getAllMessages = getAllMessages;
+exports.getAllMessagesUiById = getAllMessagesUiById;

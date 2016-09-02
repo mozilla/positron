@@ -53,6 +53,7 @@ class nsGlobalWindow;
 class nsICSSDeclaration;
 class nsISMILAttr;
 class nsDocument;
+class nsDOMStringMap;
 
 namespace mozilla {
 namespace dom {
@@ -756,6 +757,21 @@ public:
       }
     }
   }
+  bool HasPointerCapture(long aPointerId)
+  {
+    bool activeState = false;
+    if (!nsIPresShell::GetPointerInfo(aPointerId, activeState)) {
+      return false;
+    }
+    nsIPresShell::PointerCaptureInfo* pointerCaptureInfo = nullptr;
+    if (nsIPresShell::gPointerCaptureList->Get(aPointerId, &pointerCaptureInfo) &&
+        pointerCaptureInfo && !pointerCaptureInfo->mReleaseContent &&
+        (pointerCaptureInfo->mOverrideContent == this ||
+         pointerCaptureInfo->mPendingContent == this)) {
+      return true;
+    }
+    return false;
+  }
   void SetCapture(bool aRetargetToElement)
   {
     // If there is already an active capture, ignore this request. This would
@@ -773,9 +789,7 @@ public:
     }
   }
 
-  // aCx == nullptr is allowed only if aOptions.isNullOrUndefined()
-  void RequestFullscreen(JSContext* aCx, JS::Handle<JS::Value> aOptions,
-                         ErrorResult& aError);
+  void RequestFullscreen(ErrorResult& aError);
   void RequestPointerLock();
   Attr* GetAttributeNode(const nsAString& aName);
   already_AddRefed<Attr> SetAttributeNode(Attr& aNewAttr,
@@ -792,6 +806,12 @@ public:
 
   already_AddRefed<ShadowRoot> CreateShadowRoot(ErrorResult& aError);
   already_AddRefed<DestinationInsertionPointList> GetDestinationInsertionPoints();
+
+  ShadowRoot *FastGetShadowRoot() const
+  {
+    nsDOMSlots* slots = GetExistingDOMSlots();
+    return slots ? slots->mShadowRoot.get() : nullptr;
+  }
 
   void ScrollIntoView();
   void ScrollIntoView(bool aTop);
@@ -1141,6 +1161,16 @@ public:
   float FontSizeInflation();
 
   net::ReferrerPolicy GetReferrerPolicyAsEnum();
+
+  /*
+   * Helpers for .dataset.  This is implemented on Element, though only some
+   * sorts of elements expose it to JS as a .dataset property
+   */
+  // Getter, to be called from bindings.
+  already_AddRefed<nsDOMStringMap> Dataset();
+  // Callback for destructor of dataset to ensure to null out our weak pointer
+  // to it.
+  void ClearDataset();
 
 protected:
   /*
@@ -1868,7 +1898,7 @@ NS_IMETHOD ReleaseCapture(void) final override                                \
 NS_IMETHOD MozRequestFullScreen(void) final override                          \
 {                                                                             \
   mozilla::ErrorResult rv;                                                    \
-  Element::RequestFullscreen(nullptr, JS::UndefinedHandleValue, rv);          \
+  Element::RequestFullscreen(rv);                                    \
   return rv.StealNSResult();                                                  \
 }                                                                             \
 NS_IMETHOD MozRequestPointerLock(void) final override                         \

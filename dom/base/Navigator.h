@@ -39,7 +39,6 @@ class MediaDevices;
 struct MediaStreamConstraints;
 class WakeLock;
 class ArrayBufferViewOrBlobOrStringOrFormData;
-struct MobileIdOptions;
 class ServiceWorkerContainer;
 class DOMRequest;
 struct FlyWebPublishOptions;
@@ -101,6 +100,7 @@ class InputPortManager;
 class DeviceStorageAreaListener;
 class Presentation;
 class LegacyMozTCPSocket;
+class VRDisplay;
 
 namespace time {
 class TimeManager;
@@ -249,10 +249,6 @@ public:
   nsDOMCameraManager* GetMozCameras(ErrorResult& aRv);
   MediaDevices* GetMediaDevices(ErrorResult& aRv);
 
-#ifdef MOZ_B2G
-  already_AddRefed<Promise> GetMobileIdAssertion(const MobileIdOptions& options,
-                                                 ErrorResult& aRv);
-#endif
 #ifdef MOZ_B2G_RIL
   MobileConnectionArray* GetMozMobileConnections(ErrorResult& aRv);
 #endif // MOZ_B2G_RIL
@@ -260,8 +256,8 @@ public:
   void GetGamepads(nsTArray<RefPtr<Gamepad> >& aGamepads, ErrorResult& aRv);
   GamepadServiceTest* RequestGamepadServiceTest();
 #endif // MOZ_GAMEPAD
-  already_AddRefed<Promise> GetVRDevices(ErrorResult& aRv);
-  void NotifyVRDevicesUpdated();
+  already_AddRefed<Promise> GetVRDisplays(ErrorResult& aRv);
+  void GetActiveVRDisplays(nsTArray<RefPtr<VRDisplay>>& aDisplays) const;
 #ifdef MOZ_B2G_FM
   FMRadio* GetMozFMRadio(ErrorResult& aRv);
 #endif
@@ -298,12 +294,6 @@ public:
 
   bool MozE10sEnabled();
 
-#ifdef MOZ_PAY
-  already_AddRefed<DOMRequest> MozPay(JSContext* aCx,
-                                      JS::Handle<JS::Value> aJwts,
-                                      ErrorResult& aRv);
-#endif // MOZ_PAY
-
   static void GetAcceptLanguages(nsTArray<nsString>& aLanguages);
 
   // WebIDL helper methods
@@ -317,12 +307,6 @@ public:
 #endif // MOZ_NFC
   static bool HasUserMediaSupport(JSContext* /* unused */,
                                   JSObject* /* unused */);
-
-#ifdef MOZ_B2G
-  static bool HasMobileIdSupport(JSContext* aCx, JSObject* aGlobal);
-#endif
-
-  static bool HasPresentationSupport(JSContext* aCx, JSObject* aGlobal);
 
   static bool IsE10sEnabled(JSContext* aCx, JSObject* aGlobal);
 
@@ -345,6 +329,10 @@ public:
 private:
   RefPtr<MediaKeySystemAccessManager> mMediaKeySystemAccessManager;
 #endif
+
+public:
+  void NotifyVRDisplaysUpdated();
+  void NotifyActiveVRDisplaysChanged();
 
 private:
   virtual ~Navigator();
@@ -394,7 +382,7 @@ private:
 #ifdef MOZ_GAMEPAD
   RefPtr<GamepadServiceTest> mGamepadServiceTest;
 #endif
-  nsTArray<RefPtr<Promise> > mVRGetDevicesPromises;
+  nsTArray<RefPtr<Promise> > mVRGetDisplaysPromises;
   nsTArray<uint32_t> mRequestedVibrationPattern;
 };
 

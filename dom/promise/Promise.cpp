@@ -926,18 +926,18 @@ Promise::MaybeReject(JSContext* aCx,
 #endif // SPIDERMONKEY_PROMISE
 
 void
+Promise::MaybeResolveWithUndefined()
+{
+  NS_ASSERT_OWNINGTHREAD(Promise);
+
+  MaybeResolve(JS::UndefinedHandleValue);
+}
+
+void
 Promise::MaybeReject(const RefPtr<MediaStreamError>& aArg) {
   NS_ASSERT_OWNINGTHREAD(Promise);
 
   MaybeSomething(aArg, &Promise::MaybeReject);
-}
-
-void
-Promise::MaybeRejectWithNull()
-{
-  NS_ASSERT_OWNINGTHREAD(Promise);
-
-  MaybeSomething(JS::NullHandleValue, &Promise::MaybeReject);
 }
 
 void
@@ -947,7 +947,6 @@ Promise::MaybeRejectWithUndefined()
 
   MaybeSomething(JS::UndefinedHandleValue, &Promise::MaybeReject);
 }
-
 
 #ifdef SPIDERMONKEY_PROMISE
 void
@@ -2769,7 +2768,7 @@ Promise::Settle(JS::Handle<JS::Value> aValue, PromiseState aState)
     worker->AssertIsOnWorkerThread();
 
     mWorkerHolder = new PromiseReportRejectWorkerHolder(this);
-    if (NS_WARN_IF(!mWorkerHolder->HoldWorker(worker))) {
+    if (NS_WARN_IF(!mWorkerHolder->HoldWorker(worker, Closing))) {
       mWorkerHolder = nullptr;
       // Worker is shutting down, report rejection immediately since it is
       // unlikely that reject callbacks will be added after this point.
@@ -3026,7 +3025,7 @@ PromiseWorkerProxy::AddRefObject()
 
   MOZ_ASSERT(!mWorkerHolder);
   mWorkerHolder.reset(new PromiseWorkerHolder(this));
-  if (NS_WARN_IF(!mWorkerHolder->HoldWorker(mWorkerPrivate))) {
+  if (NS_WARN_IF(!mWorkerHolder->HoldWorker(mWorkerPrivate, Canceling))) {
     mWorkerHolder = nullptr;
     return false;
   }

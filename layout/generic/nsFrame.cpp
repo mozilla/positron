@@ -17,12 +17,13 @@
 #include "mozilla/DebugOnly.h"
 #include "mozilla/gfx/2D.h"
 #include "mozilla/gfx/PathHelpers.h"
-#include "mozilla/Snprintf.h"
+#include "mozilla/Sprintf.h"
 
 #include "nsCOMPtr.h"
 #include "nsFrameList.h"
 #include "nsPlaceholderFrame.h"
 #include "nsIContent.h"
+#include "nsIContentInlines.h"
 #include "nsContentUtils.h"
 #include "nsCSSPseudoElements.h"
 #include "nsIAtom.h"
@@ -37,7 +38,7 @@
 #include "nsStyleConsts.h"
 #include "nsIPresShell.h"
 #include "mozilla/Logging.h"
-#include "mozilla/Snprintf.h"
+#include "mozilla/Sprintf.h"
 #include "nsFrameManager.h"
 #include "nsLayoutUtils.h"
 #include "mozilla/RestyleManager.h"
@@ -113,12 +114,6 @@ using namespace mozilla::gfx;
 using namespace mozilla::layers;
 using namespace mozilla::layout;
 typedef nsAbsoluteContainingBlock::AbsPosReflowFlags AbsPosReflowFlags;
-
-namespace mozilla {
-namespace gfx {
-class VRDeviceProxy;
-} // namespace gfx
-} // namespace mozilla
 
 // Struct containing cached metrics for box-wrapped frames.
 struct nsBoxLayoutMetrics
@@ -601,10 +596,6 @@ nsFrame::Init(nsIContent*       aContent,
     NS_ASSERTION(GetParent() ||
                  (GetStateBits() & NS_FRAME_FONT_INFLATION_CONTAINER),
                  "root frame should always be a container");
-  }
-
-  if (aContent && aContent->GetProperty(nsGkAtoms::vr_state) != nullptr) {
-    AddStateBits(NS_FRAME_HAS_VR_CONTENT);
   }
 
   if (PresContext()->PresShell()->AssumeAllFramesVisible() &&
@@ -2183,14 +2174,14 @@ nsIFrame::BuildDisplayListForStackingContext(nsDisplayListBuilder* aBuilder,
     aBuilder->IsBuildingLayerEventRegions() &&
     StyleUserInterface()->GetEffectivePointerEvents(this) !=
       NS_STYLE_POINTER_EVENTS_NONE;
-  bool opacityItemForEventsOnly = false;
+  bool opacityItemForEventsAndPluginsOnly = false;
   if (effects->mOpacity == 0.0 && aBuilder->IsForPainting() &&
-      !aBuilder->WillComputePluginGeometry() &&
       !(disp->mWillChangeBitField & NS_STYLE_WILL_CHANGE_OPACITY) &&
       !nsLayoutUtils::HasCurrentAnimationOfProperty(this,
                                                     eCSSProperty_opacity)) {
-    if (needEventRegions) {
-      opacityItemForEventsOnly = true;
+    if (needEventRegions ||
+        aBuilder->WillComputePluginGeometry()) {
+      opacityItemForEventsAndPluginsOnly = true;
     } else {
       return;
     }
@@ -2277,11 +2268,6 @@ nsIFrame::BuildDisplayListForStackingContext(nsDisplayListBuilder* aBuilder,
 
   nsDisplayListBuilder::AutoBuildingDisplayList
     buildingDisplayList(aBuilder, this, dirtyRect, true);
-
-  mozilla::gfx::VRDeviceProxy* vrHMDInfo = nullptr;
-  if ((GetStateBits() & NS_FRAME_HAS_VR_CONTENT)) {
-    vrHMDInfo = static_cast<mozilla::gfx::VRDeviceProxy*>(mContent->GetProperty(nsGkAtoms::vr_state));
-  }
 
   DisplayListClipState::AutoSaveRestore clipState(aBuilder);
 
@@ -2457,7 +2443,7 @@ nsIFrame::BuildDisplayListForStackingContext(nsDisplayListBuilder* aBuilder,
     opacityClipState.Clear();
     resultList.AppendNewToTop(
         new (aBuilder) nsDisplayOpacity(aBuilder, this, &resultList,
-                                        containerItemScrollClip, opacityItemForEventsOnly));
+                                        containerItemScrollClip, opacityItemForEventsAndPluginsOnly));
   }
 
   /* If we're going to apply a transformation and don't have preserve-3d set, wrap
@@ -2570,13 +2556,6 @@ nsIFrame::BuildDisplayListForStackingContext(nsDisplayListBuilder* aBuilder,
   } else if (useStickyPosition) {
     resultList.AppendNewToTop(
         new (aBuilder) nsDisplayStickyPosition(aBuilder, this, &resultList));
-  }
-
-  /* If we're doing VR rendering, then we need to wrap everything in a nsDisplayVR
-   */
-  if (vrHMDInfo && !resultList.IsEmpty()) {
-    resultList.AppendNewToTop(
-      new (aBuilder) nsDisplayVR(aBuilder, this, &resultList, vrHMDInfo));
   }
 
   /* If there's blending, wrap up the list in a blend-mode item. Note
@@ -2772,8 +2751,7 @@ nsIFrame::BuildDisplayListForChild(nsDisplayListBuilder*   aBuilder,
     // but the spec says it acts like the rest of these
     || disp->mChildPerspective.GetUnit() == eStyleUnit_Coord
     || effects->mMixBlendMode != NS_STYLE_BLEND_NORMAL
-    || nsSVGIntegrationUtils::UsingEffectsForFrame(child)
-    || (child->GetStateBits() & NS_FRAME_HAS_VR_CONTENT);
+    || nsSVGIntegrationUtils::UsingEffectsForFrame(child);
 
   bool isPositioned = disp->IsAbsPosContainingBlock(child);
   bool isStackingContext =
@@ -3128,7 +3106,7 @@ nsFrame::GetDataForTableSelection(const nsFrameSelection* aFrameSelection,
 }
 
 nsresult
-nsFrame::IsSelectable(bool* aSelectable, uint8_t* aSelectStyle) const
+nsFrame::IsSelectable(bool* aSelectable, StyleUserSelect* aSelectStyle) const
 {
   if (!aSelectable) //it's ok if aSelectStyle is null
     return NS_ERROR_NULL_POINTER;
@@ -3154,18 +3132,18 @@ nsFrame::IsSelectable(bool* aSelectable, uint8_t* aSelectStyle) const
   //    _MOZ_ALL -> _MOZ_TEXT -> AUTO -> AUTO,      the returned value is TEXT.
   //    AUTO     -> CELL      -> TEXT -> AUTO,      the returned value is TEXT
   //
-  uint8_t selectStyle  = NS_STYLE_USER_SELECT_AUTO;
-  nsIFrame* frame      = const_cast<nsFrame*>(this);
-  bool containsEditable = false;
+  StyleUserSelect selectStyle  = StyleUserSelect::Auto;
+  nsIFrame* frame              = const_cast<nsFrame*>(this);
+  bool containsEditable        = false;
 
   while (frame) {
     const nsStyleUIReset* userinterface = frame->StyleUIReset();
     switch (userinterface->mUserSelect) {
-      case NS_STYLE_USER_SELECT_ALL:
-      case NS_STYLE_USER_SELECT_MOZ_ALL:
+      case StyleUserSelect::All:
+      case StyleUserSelect::MozAll:
       {
         // override the previous values
-        if (selectStyle != NS_STYLE_USER_SELECT_MOZ_TEXT) {
+        if (selectStyle != StyleUserSelect::MozText) {
           selectStyle = userinterface->mUserSelect;
         }
         nsIContent* frameContent = frame->GetContent();
@@ -3175,7 +3153,7 @@ nsFrame::IsSelectable(bool* aSelectable, uint8_t* aSelectStyle) const
       }
       default:
         // otherwise return the first value which is not 'auto'
-        if (selectStyle == NS_STYLE_USER_SELECT_AUTO) {
+        if (selectStyle == StyleUserSelect::Auto) {
           selectStyle = userinterface->mUserSelect;
         }
         break;
@@ -3184,28 +3162,31 @@ nsFrame::IsSelectable(bool* aSelectable, uint8_t* aSelectStyle) const
   }
 
   // convert internal values to standard values
-  if (selectStyle == NS_STYLE_USER_SELECT_AUTO ||
-      selectStyle == NS_STYLE_USER_SELECT_MOZ_TEXT)
-    selectStyle = NS_STYLE_USER_SELECT_TEXT;
-  else
-  if (selectStyle == NS_STYLE_USER_SELECT_MOZ_ALL)
-    selectStyle = NS_STYLE_USER_SELECT_ALL;
+  if (selectStyle == StyleUserSelect::Auto ||
+      selectStyle == StyleUserSelect::MozText) {
+    selectStyle = StyleUserSelect::Text;
+  } else if (selectStyle == StyleUserSelect::MozAll) {
+    selectStyle = StyleUserSelect::All;
+  }
 
   // If user tries to select all of a non-editable content,
   // prevent selection if it contains editable content.
   bool allowSelection = true;
-  if (selectStyle == NS_STYLE_USER_SELECT_ALL) {
+  if (selectStyle == StyleUserSelect::All) {
     allowSelection = !containsEditable;
   }
 
   // return stuff
-  if (aSelectStyle)
+  if (aSelectStyle) {
     *aSelectStyle = selectStyle;
-  if (mState & NS_FRAME_GENERATED_CONTENT)
+  }
+
+  if (mState & NS_FRAME_GENERATED_CONTENT) {
     *aSelectable = false;
-  else
-    *aSelectable = allowSelection &&
-      (selectStyle != NS_STYLE_USER_SELECT_NONE);
+  } else {
+    *aSelectable = allowSelection && (selectStyle != StyleUserSelect::None_);
+  }
+
   return NS_OK;
 }
 
@@ -3264,7 +3245,7 @@ nsFrame::HandlePress(nsPresContext* aPresContext,
   // check whether style allows selection
   // if not, don't tell selection the mouse event even occurred.  
   bool    selectable;
-  uint8_t selectStyle;
+  StyleUserSelect selectStyle;
   rv = IsSelectable(&selectable, &selectStyle);
   if (NS_FAILED(rv)) return rv;
   
@@ -3272,9 +3253,9 @@ nsFrame::HandlePress(nsPresContext* aPresContext,
   if (!selectable)
     return NS_OK;
 
-  // When implementing NS_STYLE_USER_SELECT_ELEMENT, NS_STYLE_USER_SELECT_ELEMENTS and
-  // NS_STYLE_USER_SELECT_TOGGLE, need to change this logic
-  bool useFrameSelection = (selectStyle == NS_STYLE_USER_SELECT_TEXT);
+  // When implementing StyleUserSelect::Element, StyleUserSelect::Elements and
+  // StyleUserSelect::Toggle, need to change this logic
+  bool useFrameSelection = (selectStyle == StyleUserSelect::Text);
 
   // If the mouse is dragged outside the nearest enclosing scrollable area
   // while making a selection, the area will be scrolled. To do this, capture
@@ -3919,11 +3900,11 @@ static bool SelfIsSelectable(nsIFrame* aFrame, uint32_t aFlags)
     return false;
   }
   return !aFrame->IsGeneratedContentFrame() &&
-    aFrame->StyleUIReset()->mUserSelect != NS_STYLE_USER_SELECT_NONE;
+    aFrame->StyleUIReset()->mUserSelect != StyleUserSelect::None_;
 }
 
 static bool SelectionDescendToKids(nsIFrame* aFrame) {
-  uint8_t style = aFrame->StyleUIReset()->mUserSelect;
+  StyleUserSelect style = aFrame->StyleUIReset()->mUserSelect;
   nsIFrame* parent = aFrame->GetParent();
   // If we are only near (not directly over) then don't traverse
   // frames with independent selection (e.g. text and list controls)
@@ -3934,8 +3915,8 @@ static bool SelectionDescendToKids(nsIFrame* aFrame) {
   // if the left and right arrows could enter textboxes (which I don't believe
   // they can at the moment)
   return !aFrame->IsGeneratedContentFrame() &&
-         style != NS_STYLE_USER_SELECT_ALL  &&
-         style != NS_STYLE_USER_SELECT_NONE &&
+         style != StyleUserSelect::All  &&
+         style != StyleUserSelect::None_ &&
          ((parent->GetStateBits() & NS_FRAME_INDEPENDENT_SELECTION) ||
           !(aFrame->GetStateBits() & NS_FRAME_INDEPENDENT_SELECTION));
 }
@@ -4209,13 +4190,13 @@ static nsIFrame* AdjustFrameForSelectionStyles(nsIFrame* aFrame) {
   {
     // These are the conditions that make all children not able to handle
     // a cursor.
-    uint8_t userSelect = frame->StyleUIReset()->mUserSelect;
-    if (userSelect == NS_STYLE_USER_SELECT_MOZ_TEXT) {
+    StyleUserSelect userSelect = frame->StyleUIReset()->mUserSelect;
+    if (userSelect == StyleUserSelect::MozText) {
       // If we see a -moz-text element, we shouldn't look further up the parent
       // chain!
       break;
     }
-    if (userSelect == NS_STYLE_USER_SELECT_ALL ||
+    if (userSelect == StyleUserSelect::All ||
         frame->IsGeneratedContentFrame()) {
       adjustedFrame = frame;
     }
@@ -4242,7 +4223,7 @@ nsIFrame::ContentOffsets nsIFrame::GetContentOffsetsFromPoint(nsPoint aPoint,
     // -moz-user-select: all needs special handling, because clicking on it
     // should lead to the whole frame being selected
     if (adjustedFrame && adjustedFrame->StyleUIReset()->mUserSelect ==
-        NS_STYLE_USER_SELECT_ALL) {
+        StyleUserSelect::All) {
       nsPoint adjustedPoint = aPoint + this->GetOffsetTo(adjustedFrame);
       return OffsetsForSingleFrame(adjustedFrame, adjustedPoint);
     }
@@ -4496,9 +4477,9 @@ nsIFrame::InlinePrefISizeData::ForceBreak()
         }
       }
 
-      uint8_t floatStyle = floatDisp->PhysicalFloats(mLineContainerWM);
-      nscoord& floats_cur = floatStyle == NS_STYLE_FLOAT_LEFT
-                              ? floats_cur_left : floats_cur_right;
+      StyleFloat floatStyle = floatDisp->PhysicalFloats(mLineContainerWM);
+      nscoord& floats_cur =
+        floatStyle == StyleFloat::Left ? floats_cur_left : floats_cur_right;
       nscoord floatWidth = floatInfo.Width();
       // Negative-width floats don't change the available space so they
       // shouldn't change our intrinsic line width either.
@@ -5407,10 +5388,8 @@ nsIFrame::GetTransformMatrix(const nsIFrame* aStopAtAncestor,
     if (widget && rootPresContext) {
       nsIWidget* toplevel = rootPresContext->GetNearestWidget();
       if (toplevel) {
-        LayoutDeviceIntRect screenBounds;
-        widget->GetClientBounds(screenBounds);
-        LayoutDeviceIntRect toplevelScreenBounds;
-        toplevel->GetClientBounds(toplevelScreenBounds);
+        LayoutDeviceIntRect screenBounds = widget->GetClientBounds();
+        LayoutDeviceIntRect toplevelScreenBounds = toplevel->GetClientBounds();
         LayoutDeviceIntPoint translation =
           screenBounds.TopLeft() - toplevelScreenBounds.TopLeft();
 
@@ -6323,7 +6302,7 @@ nsFrame::MakeFrameName(const nsAString& aType, nsAString& aResult) const
     aResult.Append(')');
   }
   char buf[40];
-  snprintf_literal(buf, "(%d)", ContentIndexInContainer(this));
+  SprintfLiteral(buf, "(%d)", ContentIndexInContainer(this));
   AppendASCIItoUTF16(buf, aResult);
   return NS_OK;
 }
@@ -8693,6 +8672,7 @@ void nsFrame::FillCursorInformationFromStyle(const nsStyleUserInterface* ui,
 {
   aCursor.mCursor = ui->mCursor;
   aCursor.mHaveHotspot = false;
+  aCursor.mLoading = false;
   aCursor.mHotspotX = aCursor.mHotspotY = 0.0f;
 
   for (nsCursorImage *item = ui->mCursorArray,
@@ -8700,15 +8680,19 @@ void nsFrame::FillCursorInformationFromStyle(const nsStyleUserInterface* ui,
        item < item_end; ++item) {
     uint32_t status;
     nsresult rv = item->GetImage()->GetImageStatus(&status);
-    if (NS_SUCCEEDED(rv) &&
-        (status & imgIRequest::STATUS_LOAD_COMPLETE) &&
-        !(status & imgIRequest::STATUS_ERROR)) {
-      // This is the one we want
-      item->GetImage()->GetImage(getter_AddRefs(aCursor.mContainer));
-      aCursor.mHaveHotspot = item->mHaveHotspot;
-      aCursor.mHotspotX = item->mHotspotX;
-      aCursor.mHotspotY = item->mHotspotY;
-      break;
+    if (NS_SUCCEEDED(rv)) {
+      if (!(status & imgIRequest::STATUS_LOAD_COMPLETE)) {
+        // If we are falling back because any cursor before is loading,
+        // let the consumer know.
+        aCursor.mLoading = true;
+      } else if (!(status & imgIRequest::STATUS_ERROR)) {
+        // This is the one we want
+        item->GetImage()->GetImage(getter_AddRefs(aCursor.mContainer));
+        aCursor.mHaveHotspot = item->mHaveHotspot;
+        aCursor.mHotspotX = item->mHotspotX;
+        aCursor.mHotspotY = item->mHotspotY;
+        break;
+      }
     }
   }
 }

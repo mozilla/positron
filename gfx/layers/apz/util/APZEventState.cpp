@@ -138,7 +138,7 @@ public:
   {
   }
 
-  NS_IMETHODIMP Notify(nsITimer*) override
+  NS_IMETHOD Notify(nsITimer*) override
   {
     if (nsCOMPtr<nsIWidget> widget = do_QueryReferent(mWidget)) {
       APZCCallbackHelper::FireSingleTapEvent(mPoint, mModifiers, widget);
@@ -254,7 +254,7 @@ APZEventState::ProcessLongTap(const nsCOMPtr<nsIPresShell>& aPresShell,
     // Also send a touchcancel to content, so that listeners that might be
     // waiting for a touchend don't trigger.
     WidgetTouchEvent cancelTouchEvent(true, eTouchCancel, widget.get());
-    cancelTouchEvent.mModifiers = WidgetModifiersToDOMModifiers(aModifiers);
+    cancelTouchEvent.mModifiers = aModifiers;
     auto ldPoint = LayoutDeviceIntPoint::Round(aPoint * aScale);
     cancelTouchEvent.mTouches.AppendElement(new mozilla::dom::Touch(mLastTouchIdentifier,
         ldPoint, LayoutDeviceIntPoint(), 0, 0));
@@ -454,7 +454,7 @@ APZEventState::ProcessClusterHit()
 {
   // If we hit a cluster of links then we shouldn't activate any of them,
   // as we will be showing the zoomed view. (This is only called on Fennec).
-#ifndef MOZ_ANDROID_APZ
+#ifndef MOZ_WIDGET_ANDROID
   MOZ_ASSERT(false);
 #endif
   mActiveElementManager->ClearActivation();

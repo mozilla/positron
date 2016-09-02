@@ -24,7 +24,7 @@ public:
     AssertIsOnMainThread();
   }
 
-  NS_IMETHODIMP
+  NS_IMETHOD
   OnUnsubscribe(nsresult aStatus, bool) override
   {
     // Warn if unsubscribing fails, but don't prevent the worker from
@@ -139,7 +139,7 @@ ServiceWorkerUnregisterJob::Unregister()
   InvokeResultCallbacks(NS_OK);
 
   // "If no service worker client is using registration..."
-  if (!registration->IsControllingDocuments()) {
+  if (!registration->IsControllingDocuments() && registration->IsIdle()) {
     // "Invoke [[Clear Registration]]..."
     swm->RemoveRegistration(registration);
   }

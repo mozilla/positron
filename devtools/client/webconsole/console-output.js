@@ -8,8 +8,6 @@
 
 const {Ci, Cu} = require("chrome");
 
-const Services = require("Services");
-
 loader.lazyImporter(this, "VariablesView", "resource://devtools/client/shared/widgets/VariablesView.jsm");
 loader.lazyImporter(this, "escapeHTML", "resource://devtools/client/shared/widgets/VariablesView.jsm");
 loader.lazyImporter(this, "PluralForm", "resource://gre/modules/PluralForm.jsm");
@@ -22,7 +20,7 @@ loader.lazyRequireGetter(this, "ObjectClient", "devtools/shared/client/main", tr
 const { extend } = require("sdk/core/heritage");
 const XHTML_NS = "http://www.w3.org/1999/xhtml";
 const XUL_NS = "http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul";
-const STRINGS_URI = "chrome://devtools/locale/webconsole.properties";
+const STRINGS_URI = "devtools/locale/webconsole.properties";
 
 const WebConsoleUtils = require("devtools/client/webconsole/utils").Utils;
 const { getSourceNames } = require("devtools/client/shared/source-utils");
@@ -31,7 +29,7 @@ const l10n = new WebConsoleUtils.L10n(STRINGS_URI);
 const nodeConstants = require("devtools/shared/dom-node-constants");
 
 const MAX_STRING_GRIP_LENGTH = 36;
-const ELLIPSIS = Services.prefs.getComplexValue("intl.ellipsis", Ci.nsIPrefLocalizedString).data;
+const {ELLIPSIS} = require("devtools/client/shared/l10n");
 
 const validProtocols = /^(http|https|ftp|data|javascript|resource|chrome):/i;
 
@@ -3551,13 +3549,6 @@ Widgets.Stacktrace.prototype = extend(Widgets.BaseWidget.prototype, {
    */
   stacktrace: null,
 
-  onViewSourceInDebugger(frame) {
-    this.output.openLocationInDebugger({
-      url: frame.source,
-      line: frame.line
-    });
-  },
-
   render() {
     if (this.element) {
       return this;
@@ -3569,7 +3560,7 @@ Widgets.Stacktrace.prototype = extend(Widgets.BaseWidget.prototype, {
     if (this.stacktrace) {
       this.output.owner.ReactDOM.render(this.output.owner.StackTraceView({
         stacktrace: this.stacktrace,
-        onViewSourceInDebugger: frame => this.onViewSourceInDebugger(frame)
+        onViewSourceInDebugger: frame => this.output.openLocationInDebugger(frame)
       }), result);
     }
 

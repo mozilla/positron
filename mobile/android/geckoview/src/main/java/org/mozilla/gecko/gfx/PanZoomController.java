@@ -14,20 +14,12 @@ import android.view.MotionEvent;
 import android.view.View;
 
 public interface PanZoomController {
-    // The distance the user has to pan before we recognize it as such (e.g. to avoid 1-pixel pans
-    // between the touch-down and touch-up of a click). In units of density-independent pixels.
-    public static final float PAN_THRESHOLD = 1 / 16f * GeckoAppShell.getDpi();
-
     // Threshold for sending touch move events to content
     public static final float CLICK_THRESHOLD = 1 / 50f * GeckoAppShell.getDpi();
 
     static class Factory {
         static PanZoomController create(PanZoomTarget target, View view, EventDispatcher dispatcher) {
-            if (org.mozilla.gecko.AppConstants.MOZ_ANDROID_APZ) {
-                return new NativePanZoomController(target, view);
-            } else {
-                return new JavaPanZoomController(target, view, dispatcher);
-            }
+            return new NativePanZoomController(target, view);
         }
     }
 
@@ -35,19 +27,7 @@ public interface PanZoomController {
 
     public boolean onTouchEvent(MotionEvent event);
     public boolean onMotionEvent(MotionEvent event);
-    public boolean onKeyEvent(KeyEvent event);
     public void onMotionEventVelocity(final long aEventTime, final float aSpeedY);
-    public void notifyDefaultActionPrevented(boolean prevented);
-
-    public boolean getRedrawHint();
-    public PointF getVelocityVector();
-
-    public void pageRectUpdated();
-    public void abortPanning();
-    public void abortAnimation();
-
-    public void setOverScrollMode(int overscrollMode);
-    public int getOverScrollMode();
 
     public void setOverscrollHandler(final Overscroll controller);
 

@@ -120,7 +120,9 @@ enum class MediaEventType : int8_t {
   PlaybackEnded,
   SeekStarted,
   DecodeError,
-  Invalidate
+  Invalidate,
+  EnterVideoSuspend,
+  ExitVideoSuspend
 };
 
 /*
@@ -144,8 +146,7 @@ public:
   typedef MediaDecoderOwner::NextFrameStatus NextFrameStatus;
   typedef mozilla::layers::ImageContainer::FrameID FrameID;
   MediaDecoderStateMachine(MediaDecoder* aDecoder,
-                           MediaDecoderReader* aReader,
-                           bool aRealTime = false);
+                           MediaDecoderReader* aReader);
 
   nsresult Init(MediaDecoder* aDecoder);
 
@@ -245,14 +246,14 @@ public:
   MediaEventSource<MediaEventType>&
   OnPlaybackEvent() { return mOnPlaybackEvent; }
 
-  // Immutable after construction - may be called on any thread.
-  bool IsRealTime() const { return mRealTime; }
-
   size_t SizeOfVideoQueue() const;
 
   size_t SizeOfAudioQueue() const;
 
 private:
+  static const char* ToStateStr(State aState);
+  const char* ToStateStr();
+
   // Functions used by assertions to ensure we're calling things
   // on the appropriate threads.
   bool OnTaskQueue() const;
@@ -367,6 +368,8 @@ protected:
   virtual ~MediaDecoderStateMachine();
 
   void SetState(State aState);
+  void ExitState(State aState);
+  void EnterState(State aState);
 
   void BufferedRangeUpdated();
 
@@ -508,12 +511,6 @@ protected:
   // Clears any previous seeking state and initiates a new seek on the decoder.
   RefPtr<MediaDecoder::SeekPromise> InitiateSeek(SeekJob aSeekJob);
 
-  // Clears any previous seeking state and initiates a seek on the decoder to
-  // resync the video and audio positions, when recovering from video decoding
-  // being suspended in background or from audio and video decoding being
-  // suspended due to the decoder limit.
-  void InitiateDecodeRecoverySeek(TrackSet aTracks);
-
   nsresult DispatchAudioDecodeTaskIfNeeded();
 
   // Ensures a task to decode audio has been dispatched to the decode task queue.
@@ -591,15 +588,6 @@ protected:
 
   bool IsStateMachineScheduled() const;
 
-  // Returns true if we're not playing and the decode thread has filled its
-  // decode buffers and is waiting. We can shut the decode thread down in this
-  // case as it may not be needed again.
-  bool IsPausedAndDecoderWaiting();
-
-  // Returns true if the video decoding is suspended because the element is not
-  // visible
-  bool IsVideoDecodeSuspended() const;
-
   // These return true if the respective stream's decode has not yet reached
   // the end of stream.
   bool IsAudioDecoding();
@@ -629,9 +617,6 @@ private:
 
   // State-watching manager.
   WatchManager<MediaDecoderStateMachine> mWatchManager;
-
-  // True is we are decoding a realtime stream, like a camera stream.
-  const bool mRealTime;
 
   // True if we've dispatched a task to run the state machine but the task has
   // yet to run.
@@ -768,13 +753,13 @@ private:
   uint32_t AudioPrerollUsecs() const
   {
     MOZ_ASSERT(OnTaskQueue());
-    return IsRealTime() ? 0 : mAmpleAudioThresholdUsecs / 2;
+    return mAmpleAudioThresholdUsecs / 2;
   }
 
   uint32_t VideoPrerollFrames() const
   {
     MOZ_ASSERT(OnTaskQueue());
-    return IsRealTime() ? 0 : GetAmpleVideoFrames() / 2;
+    return GetAmpleVideoFrames() / 2;
   }
 
   bool DonePrerollingAudio()

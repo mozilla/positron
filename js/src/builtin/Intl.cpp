@@ -658,7 +658,8 @@ static const ClassOps CollatorClassOps = {
 
 static const Class CollatorClass = {
     js_Object_str,
-    JSCLASS_HAS_RESERVED_SLOTS(COLLATOR_SLOTS_COUNT),
+    JSCLASS_HAS_RESERVED_SLOTS(COLLATOR_SLOTS_COUNT) |
+    JSCLASS_FOREGROUND_FINALIZE,
     &CollatorClassOps
 };
 
@@ -762,6 +763,8 @@ js::intl_Collator(JSContext* cx, unsigned argc, Value* vp)
 static void
 collator_finalize(FreeOp* fop, JSObject* obj)
 {
+    MOZ_ASSERT(fop->onMainThread());
+
     // This is-undefined check shouldn't be necessary, but for internal
     // brokenness in object allocation code.  For the moment, hack around it by
     // explicitly guarding against the possibility of the reserved slot not
@@ -1147,7 +1150,8 @@ static const ClassOps NumberFormatClassOps = {
 
 static const Class NumberFormatClass = {
     js_Object_str,
-    JSCLASS_HAS_RESERVED_SLOTS(NUMBER_FORMAT_SLOTS_COUNT),
+    JSCLASS_HAS_RESERVED_SLOTS(NUMBER_FORMAT_SLOTS_COUNT) |
+    JSCLASS_FOREGROUND_FINALIZE,
     &NumberFormatClassOps
 };
 
@@ -1252,6 +1256,8 @@ js::intl_NumberFormat(JSContext* cx, unsigned argc, Value* vp)
 static void
 numberFormat_finalize(FreeOp* fop, JSObject* obj)
 {
+    MOZ_ASSERT(fop->onMainThread());
+
     // This is-undefined check shouldn't be necessary, but for internal
     // brokenness in object allocation code.  For the moment, hack around it by
     // explicitly guarding against the possibility of the reserved slot not
@@ -1611,7 +1617,8 @@ static const ClassOps DateTimeFormatClassOps = {
 
 static const Class DateTimeFormatClass = {
     js_Object_str,
-    JSCLASS_HAS_RESERVED_SLOTS(DATE_TIME_FORMAT_SLOTS_COUNT),
+    JSCLASS_HAS_RESERVED_SLOTS(DATE_TIME_FORMAT_SLOTS_COUNT) |
+    JSCLASS_FOREGROUND_FINALIZE,
     &DateTimeFormatClassOps
 };
 
@@ -1716,6 +1723,8 @@ js::intl_DateTimeFormat(JSContext* cx, unsigned argc, Value* vp)
 static void
 dateTimeFormat_finalize(FreeOp* fop, JSObject* obj)
 {
+    MOZ_ASSERT(fop->onMainThread());
+
     // This is-undefined check shouldn't be necessary, but for internal
     // brokenness in object allocation code.  For the moment, hack around it by
     // explicitly guarding against the possibility of the reserved slot not

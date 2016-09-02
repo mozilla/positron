@@ -23,16 +23,21 @@ EvaluationResult.propTypes = {
 
 function EvaluationResult(props) {
   const { message } = props;
-  const icon = MessageIcon({severity: message.severity});
+  const {source, level} = message;
+  const icon = MessageIcon({level});
 
-  // @TODO Use of "is" is a temporary hack to get the category and severity
-  // attributes to be applied. There are targeted in webconsole's CSS rules,
-  // so if we remove this hack, we have to modify the CSS rules accordingly.
+  const classes = ["message", "cm-s-mozilla"];
+
+  if (source) {
+    classes.push(source);
+  }
+
+  if (level) {
+    classes.push(level);
+  }
+
   return dom.div({
-    class: "message cm-s-mozilla",
-    is: "fdt-message",
-    category: message.category,
-    severity: message.severity
+    className: classes.join(" ")
   },
     // @TODO add timestamp
     // @TODO add indent if needed with console.group

@@ -85,8 +85,6 @@ public:
     MediaDecoderOwner* GetMediaOwner() const override;
     void SetInfinite(bool aInfinite) override;
     void SetMediaSeekable(bool aMediaSeekable) override;
-    void ResetConnectionState() override;
-    nsresult FinishDecoderSetup(MediaResource* aResource) override;
     void NotifyNetworkError() override;
     void NotifyDecodeError() override;
     void NotifyDataArrived() override;
@@ -380,6 +378,10 @@ private:
   // Called from HTMLMediaElement when owner document activity changes
   virtual void SetElementVisibility(bool aIsVisible);
 
+  // Force override the visible state to hidden.
+  // Called from HTMLMediaElement when testing of video decode suspend from mochitests.
+  void SetForcedHidden(bool aForcedHidden);
+
   /******
    * The following methods must only be called on the main
    * thread.
@@ -461,10 +463,6 @@ private:
   static bool IsOpusEnabled();
   static bool IsWaveEnabled();
   static bool IsWebMEnabled();
-
-#ifdef NECKO_PROTOCOL_rtsp
-  static bool IsRtspEnabled();
-#endif
 
 #ifdef MOZ_OMX_DECODER
   static bool IsOmxEnabled();
@@ -709,6 +707,12 @@ protected:
   // only be accessed from main thread.
   nsAutoPtr<MediaInfo> mInfo;
 
+  // Tracks the visiblity status from HTMLMediaElement
+  bool mElementVisible;
+
+  // If true, forces the decoder to be considered hidden.
+  bool mForcedHidden;
+
   // True if MediaDecoder is in dormant state.
   bool mIsDormant;
 
@@ -822,6 +826,9 @@ protected:
 
 public:
   AbstractCanonical<media::NullableTimeUnit>* CanonicalDurationOrNull() override;
+  AbstractCanonical<Maybe<double>>* CanonicalExplicitDuration() override {
+    return &mExplicitDuration;
+  }
   AbstractCanonical<double>* CanonicalVolume() {
     return &mVolume;
   }
@@ -833,9 +840,6 @@ public:
   }
   AbstractCanonical<media::NullableTimeUnit>* CanonicalEstimatedDuration() {
     return &mEstimatedDuration;
-  }
-  AbstractCanonical<Maybe<double>>* CanonicalExplicitDuration() {
-    return &mExplicitDuration;
   }
   AbstractCanonical<PlayState>* CanonicalPlayState() {
     return &mPlayState;
@@ -886,12 +890,6 @@ private:
   // When the media stream ends, we can know the duration, thus the stream is
   // no longer considered to be infinite.
   void SetInfinite(bool aInfinite);
-
-  // Reset the decoder and notify the media element that
-  // server connection is closed.
-  void ResetConnectionState();
-
-  nsresult FinishDecoderSetup(MediaResource* aResource);
 
   // Called by MediaResource when the principal of the resource has
   // changed. Called on main thread only.

@@ -43,6 +43,7 @@
 #include "nsISecurityConsoleMessage.h"
 #include "nsCOMArray.h"
 #include "mozilla/net/ChannelEventQueue.h"
+#include "nsIThrottledInputChannel.h"
 
 class nsISecurityConsoleMessage;
 class nsIPrincipal;
@@ -79,6 +80,7 @@ class HttpBaseChannel : public nsHashPropertyBag
                       , public nsITimedChannel
                       , public nsIForcePendingChannel
                       , public nsIConsoleReportCollector
+                      , public nsIThrottledInputChannel
 {
 protected:
   virtual ~HttpBaseChannel();
@@ -90,6 +92,7 @@ public:
   NS_DECL_NSIUPLOADCHANNEL2
   NS_DECL_NSITRACEABLECHANNEL
   NS_DECL_NSITIMEDCHANNEL
+  NS_DECL_NSITHROTTLEDINPUTCHANNEL
 
   HttpBaseChannel();
 
@@ -230,6 +233,7 @@ public:
   NS_IMETHOD GetTopWindowURI(nsIURI **aTopWindowURI) override;
   NS_IMETHOD GetProxyURI(nsIURI **proxyURI) override;
   virtual void SetCorsPreflightParameters(const nsTArray<nsCString>& unsafeHeaders) override;
+  NS_IMETHOD GetConnectionInfoHashKey(nsACString& aConnectionInfoHashKey) override;
 
   inline void CleanRedirectCacheChainIfNecessary()
   {
@@ -314,8 +318,6 @@ public: /* Necko internal use only... */
     // the new mUploadStream.
     void EnsureUploadStreamIsCloneableComplete(nsresult aStatus);
 
-    bool HaveListenerForTraceableChannel() { return mHaveListenerForTraceableChannel; }
-
 protected:
   nsCOMArray<nsISecurityConsoleMessage> mSecurityConsoleMessages;
 
@@ -364,6 +366,9 @@ protected:
   // for a possible synthesized response instead.
   bool ShouldIntercept(nsIURI* aURI = nullptr);
 
+  // Check if mPrivateBrowsingId matches between LoadInfo and LoadContext.
+  void CheckPrivateBrowsing();
+
   friend class PrivateBrowsingChannel<HttpBaseChannel>;
   friend class InterceptFailedOnStop;
 
@@ -384,6 +389,8 @@ protected:
   nsCOMPtr<nsIStreamListener>       mCompressListener;
 
   nsHttpRequestHead                 mRequestHead;
+  // Upload throttling.
+  nsCOMPtr<nsIInputChannelThrottleQueue> mThrottleQueue;
   nsCOMPtr<nsIInputStream>          mUploadStream;
   nsCOMPtr<nsIRunnable>             mUploadCloneableCallback;
   nsAutoPtr<nsHttpResponseHead>     mResponseHead;
@@ -414,30 +421,29 @@ protected:
   int16_t                           mPriority;
   uint8_t                           mRedirectionLimit;
 
-  uint32_t                          mApplyConversion                 : 1;
-  uint32_t                          mHaveListenerForTraceableChannel : 1;
-  uint32_t                          mCanceled                        : 1;
-  uint32_t                          mIsPending                       : 1;
-  uint32_t                          mWasOpened                       : 1;
+  uint32_t                          mApplyConversion            : 1;
+  uint32_t                          mCanceled                   : 1;
+  uint32_t                          mIsPending                  : 1;
+  uint32_t                          mWasOpened                  : 1;
   // if 1 all "http-on-{opening|modify|etc}-request" observers have been called
-  uint32_t                          mRequestObserversCalled          : 1;
-  uint32_t                          mResponseHeadersModified         : 1;
-  uint32_t                          mAllowPipelining                 : 1;
-  uint32_t                          mAllowSTS                        : 1;
-  uint32_t                          mThirdPartyFlags                 : 3;
-  uint32_t                          mUploadStreamHasHeaders          : 1;
-  uint32_t                          mInheritApplicationCache         : 1;
-  uint32_t                          mChooseApplicationCache          : 1;
-  uint32_t                          mLoadedFromApplicationCache      : 1;
-  uint32_t                          mChannelIsForDownload            : 1;
-  uint32_t                          mTracingEnabled                  : 1;
+  uint32_t                          mRequestObserversCalled     : 1;
+  uint32_t                          mResponseHeadersModified    : 1;
+  uint32_t                          mAllowPipelining            : 1;
+  uint32_t                          mAllowSTS                   : 1;
+  uint32_t                          mThirdPartyFlags            : 3;
+  uint32_t                          mUploadStreamHasHeaders     : 1;
+  uint32_t                          mInheritApplicationCache    : 1;
+  uint32_t                          mChooseApplicationCache     : 1;
+  uint32_t                          mLoadedFromApplicationCache : 1;
+  uint32_t                          mChannelIsForDownload       : 1;
+  uint32_t                          mTracingEnabled             : 1;
   // True if timing collection is enabled
-  uint32_t                          mTimingEnabled                   : 1;
-  uint32_t                          mAllowSpdy                       : 1;
-  uint32_t                          mAllowAltSvc                     : 1;
-  uint32_t                          mResponseTimeoutEnabled          : 1;
+  uint32_t                          mTimingEnabled              : 1;
+  uint32_t                          mAllowSpdy                  : 1;
+  uint32_t                          mAllowAltSvc                : 1;
+  uint32_t                          mResponseTimeoutEnabled     : 1;
   // A flag that should be false only if a cross-domain redirect occurred
-  uint32_t                          mAllRedirectsSameOrigin          : 1;
+  uint32_t                          mAllRedirectsSameOrigin     : 1;
 
   // Is 1 if no redirects have occured or if all redirects
   // pass the Resource Timing timing-allow-check

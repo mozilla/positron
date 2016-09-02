@@ -10,7 +10,7 @@
 #include "MediaDataDecoderProxy.h"
 #include "mozIGeckoMediaPluginService.h"
 #include "mozilla/CDMProxy.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 #include "nsAutoPtr.h"
 #include "nsServiceManagerUtils.h"
 #include "MediaInfo.h"
@@ -34,7 +34,8 @@ public:
     , mCallback(aCallback)
     , mTaskQueue(aDecodeTaskQueue)
     , mProxy(aProxy)
-    , mSamplesWaitingForKey(new SamplesWaitingForKey(this, mTaskQueue, mProxy))
+    , mSamplesWaitingForKey(new SamplesWaitingForKey(this, this->mCallback,
+                                                     mTaskQueue, mProxy))
     , mIsShutdown(false)
   {
   }
@@ -171,7 +172,8 @@ public:
                            CDMProxy* aProxy,
                            TaskQueue* aTaskQueue)
    : MediaDataDecoderProxy(Move(aProxyThread), aCallback)
-   , mSamplesWaitingForKey(new SamplesWaitingForKey(this, aTaskQueue, aProxy))
+   , mSamplesWaitingForKey(new SamplesWaitingForKey(this, aCallback,
+                                                    aTaskQueue, aProxy))
    , mProxy(aProxy)
   {
   }
@@ -294,9 +296,9 @@ PlatformDecoderModule::ConversionRequired
 EMEDecoderModule::DecoderNeedsConversion(const TrackInfo& aConfig) const
 {
   if (aConfig.IsVideo() && MP4Decoder::IsH264(aConfig.mMimeType)) {
-    return kNeedAVCC;
+    return ConversionRequired::kNeedAVCC;
   } else {
-    return kNeedNone;
+    return ConversionRequired::kNeedNone;
   }
 }
 

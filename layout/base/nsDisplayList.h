@@ -56,9 +56,6 @@ class Layer;
 class ImageLayer;
 class ImageContainer;
 } // namespace layers
-namespace gfx {
-class VRDeviceProxy;
-} // namespace gfx
 } // namespace mozilla
 
 // A set of blend modes, that never includes OP_OVER (since it's
@@ -147,7 +144,7 @@ struct AnimatedGeometryRoot
   nsIFrame* operator ->() const { return mFrame; }
 
   void* operator new(size_t aSize,
-                     nsDisplayListBuilder* aBuilder) CPP_THROW_NEW;
+                     nsDisplayListBuilder* aBuilder);
 
   nsIFrame* mFrame;
   AnimatedGeometryRoot* mParentAGR;
@@ -696,7 +693,7 @@ public:
                                                  nsDisplayListBuilder* aBuilder,
                                                  nsDisplayItem* aItem,
                                                  nsIFrame* aFrame,
-                                                 nsCSSProperty aProperty);
+                                                 nsCSSPropertyID aProperty);
 
   /**
    * A helper class to temporarily set the value of
@@ -1360,7 +1357,7 @@ public:
   virtual ~nsDisplayItem() {}
 
   void* operator new(size_t aSize,
-                     nsDisplayListBuilder* aBuilder) CPP_THROW_NEW {
+                     nsDisplayListBuilder* aBuilder) {
     return aBuilder->Allocate(aSize);
   }
 
@@ -3378,7 +3375,7 @@ public:
   nsDisplayOpacity(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame,
                    nsDisplayList* aList,
                    const DisplayItemScrollClip* aScrollClip,
-                   bool aForEventsOnly);
+                   bool aForEventsAndPluginsOnly);
 #ifdef NS_BUILD_REFCNT_LOGGING
   virtual ~nsDisplayOpacity();
 #endif
@@ -3400,6 +3397,13 @@ public:
   {
     // We don't need to compute an invalidation region since we have LayerTreeInvalidation
   }
+  virtual bool IsInvalid(nsRect& aRect) override
+  {
+    if (mForEventsAndPluginsOnly) {
+      return false;
+    }
+    return nsDisplayWrapList::IsInvalid(aRect);
+  }
   virtual void ApplyOpacity(nsDisplayListBuilder* aBuilder,
                             float aOpacity,
                             const DisplayItemClip* aClip) override;
@@ -3413,7 +3417,7 @@ public:
 
 private:
   float mOpacity;
-  bool mForEventsOnly;
+  bool mForEventsAndPluginsOnly;
 };
 
 class nsDisplayBlendMode : public nsDisplayWrapList {
@@ -4376,31 +4380,6 @@ public:
   nscoord mVisIEndEdge;
   // Cached result of mFrame->IsSelected().  Only initialized when needed.
   mutable mozilla::Maybe<bool> mIsFrameSelected;
-};
-
-/**
- * A wrapper layer that wraps its children in a container, then renders
- * everything with an appropriate VR effect based on the HMDInfo.
- */
-
-class nsDisplayVR : public nsDisplayOwnLayer {
-public:
-  nsDisplayVR(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame,
-              nsDisplayList* aList, mozilla::gfx::VRDeviceProxy* aHMD);
-
-  virtual LayerState GetLayerState(nsDisplayListBuilder* aBuilder,
-                                   LayerManager* aManager,
-                                   const ContainerLayerParameters& aParameters) override
-  {
-    return mozilla::LAYER_ACTIVE;
-  }
-
-  virtual already_AddRefed<Layer> BuildLayer(nsDisplayListBuilder* aBuilder,
-                                             LayerManager* aManager,
-                                             const ContainerLayerParameters& aContainerParameters) override;
-
-protected:
-  RefPtr<mozilla::gfx::VRDeviceProxy> mHMD;
 };
 
 #endif /*NSDISPLAYLIST_H_*/

@@ -63,6 +63,7 @@ BackgroundPage.prototype = {
                                        .getInterface(Ci.nsIDocShell)
                                        .QueryInterface(Ci.nsIWebNavigation);
 
+    chromeShell.useGlobalHistory = false;
     chromeShell.createAboutBlankContentViewer(system);
     chromeShell.loadURI(XUL_URL, 0, null, null, null);
 
@@ -143,7 +144,8 @@ extensions.on("shutdown", (type, extension) => {
 });
 /* eslint-enable mozilla/balanced-listeners */
 
-extensions.registerSchemaAPI("extension", (extension, context) => {
+extensions.registerSchemaAPI("extension", "addon_parent", context => {
+  let {extension} = context;
   return {
     extension: {
       getBackgroundPage: function() {

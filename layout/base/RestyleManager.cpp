@@ -86,7 +86,6 @@ RestyleManager::RestyleManager(nsPresContext* aPresContext)
   : RestyleManagerBase(aPresContext)
   , mDoRebuildAllStyleData(false)
   , mInRebuildAllStyleData(false)
-  , mInStyleRefresh(false)
   , mSkipAnimationRules(false)
   , mHavePendingNonAnimationRestyles(false)
   , mRebuildAllExtraHint(nsChangeHint(0))
@@ -402,10 +401,15 @@ RestyleManager::RestyleForEmptyChange(Element* aContainer)
 }
 
 void
-RestyleManager::RestyleForAppend(Element* aContainer,
+RestyleManager::RestyleForAppend(nsIContent* aContainer,
                                  nsIContent* aFirstNewContent)
 {
-  NS_ASSERTION(aContainer, "must have container for append");
+  // The container cannot be a document, but might be a ShadowRoot.
+  if (!aContainer->IsElement()) {
+    return;
+  }
+  Element* container = aContainer->AsElement();
+
 #ifdef DEBUG
   {
     for (nsIContent* cur = aFirstNewContent; cur; cur = cur->GetNextSibling()) {
@@ -415,15 +419,15 @@ RestyleManager::RestyleForAppend(Element* aContainer,
   }
 #endif
   uint32_t selectorFlags =
-    aContainer->GetFlags() & (NODE_ALL_SELECTOR_FLAGS &
-                              ~NODE_HAS_SLOW_SELECTOR_LATER_SIBLINGS);
+    container->GetFlags() & (NODE_ALL_SELECTOR_FLAGS &
+                             ~NODE_HAS_SLOW_SELECTOR_LATER_SIBLINGS);
   if (selectorFlags == 0)
     return;
 
   if (selectorFlags & NODE_HAS_EMPTY_SELECTOR) {
     // see whether we need to restyle the container
     bool wasEmpty = true; // :empty or :-moz-only-whitespace
-    for (nsIContent* cur = aContainer->GetFirstChild();
+    for (nsIContent* cur = container->GetFirstChild();
          cur != aFirstNewContent;
          cur = cur->GetNextSibling()) {
       // We don't know whether we're testing :empty or :-moz-only-whitespace,
@@ -436,13 +440,13 @@ RestyleManager::RestyleForAppend(Element* aContainer,
       }
     }
     if (wasEmpty) {
-      RestyleForEmptyChange(aContainer);
+      RestyleForEmptyChange(container);
       return;
     }
   }
 
   if (selectorFlags & NODE_HAS_SLOW_SELECTOR) {
-    PostRestyleEvent(aContainer, eRestyle_Subtree, nsChangeHint(0));
+    PostRestyleEvent(container, eRestyle_Subtree, nsChangeHint(0));
     // Restyling the container is the most we can do here, so we're done.
     return;
   }
@@ -486,20 +490,26 @@ RestyleSiblingsStartingWith(RestyleManager* aRestyleManager,
 // The comments are written and variables are named in terms of it being
 // a ContentInserted notification.
 void
-RestyleManager::RestyleForInsertOrChange(Element* aContainer,
+RestyleManager::RestyleForInsertOrChange(nsINode* aContainer,
                                          nsIContent* aChild)
 {
+  // The container might be a document or a ShadowRoot.
+  if (!aContainer->IsElement()) {
+    return;
+  }
+  Element* container = aContainer->AsElement();
+
   NS_ASSERTION(!aChild->IsRootOfAnonymousSubtree(),
                "anonymous nodes should not be in child lists");
   uint32_t selectorFlags =
-    aContainer ? (aContainer->GetFlags() & NODE_ALL_SELECTOR_FLAGS) : 0;
+    container ? (container->GetFlags() & NODE_ALL_SELECTOR_FLAGS) : 0;
   if (selectorFlags == 0)
     return;
 
   if (selectorFlags & NODE_HAS_EMPTY_SELECTOR) {
     // see whether we need to restyle the container
     bool wasEmpty = true; // :empty or :-moz-only-whitespace
-    for (nsIContent* child = aContainer->GetFirstChild();
+    for (nsIContent* child = container->GetFirstChild();
          child;
          child = child->GetNextSibling()) {
       if (child == aChild)
@@ -514,13 +524,13 @@ RestyleManager::RestyleForInsertOrChange(Element* aContainer,
       }
     }
     if (wasEmpty) {
-      RestyleForEmptyChange(aContainer);
+      RestyleForEmptyChange(container);
       return;
     }
   }
 
   if (selectorFlags & NODE_HAS_SLOW_SELECTOR) {
-    PostRestyleEvent(aContainer, eRestyle_Subtree, nsChangeHint(0));
+    PostRestyleEvent(container, eRestyle_Subtree, nsChangeHint(0));
     // Restyling the container is the most we can do here, so we're done.
     return;
   }
@@ -533,7 +543,7 @@ RestyleManager::RestyleForInsertOrChange(Element* aContainer,
   if (selectorFlags & NODE_HAS_EDGE_CHILD_SELECTOR) {
     // restyle the previously-first element child if it is after this node
     bool passedChild = false;
-    for (nsIContent* content = aContainer->GetFirstChild();
+    for (nsIContent* content = container->GetFirstChild();
          content;
          content = content->GetNextSibling()) {
       if (content == aChild) {
@@ -550,7 +560,7 @@ RestyleManager::RestyleForInsertOrChange(Element* aContainer,
     }
     // restyle the previously-last element child if it is before this node
     passedChild = false;
-    for (nsIContent* content = aContainer->GetLastChild();
+    for (nsIContent* content = container->GetLastChild();
          content;
          content = content->GetPreviousSibling()) {
       if (content == aChild) {
@@ -569,10 +579,16 @@ RestyleManager::RestyleForInsertOrChange(Element* aContainer,
 }
 
 void
-RestyleManager::RestyleForRemove(Element* aContainer,
-                                 nsIContent* aOldChild,
-                                 nsIContent* aFollowingSibling)
+RestyleManager::ContentRemoved(nsINode* aContainer,
+                               nsIContent* aOldChild,
+                               nsIContent* aFollowingSibling)
 {
+  // The container might be a document or a ShadowRoot.
+  if (!aContainer->IsElement()) {
+    return;
+  }
+  Element* container = aContainer->AsElement();
+
   if (aOldChild->IsRootOfAnonymousSubtree()) {
     // This should be an assert, but this is called incorrectly in
     // HTMLEditor::DeleteRefToAnonymousNode and the assertions were clogging
@@ -581,14 +597,14 @@ RestyleManager::RestyleForRemove(Element* aContainer,
                "anonymous nodes should not be in child lists (bug 439258)");
   }
   uint32_t selectorFlags =
-    aContainer ? (aContainer->GetFlags() & NODE_ALL_SELECTOR_FLAGS) : 0;
+    container ? (container->GetFlags() & NODE_ALL_SELECTOR_FLAGS) : 0;
   if (selectorFlags == 0)
     return;
 
   if (selectorFlags & NODE_HAS_EMPTY_SELECTOR) {
     // see whether we need to restyle the container
     bool isEmpty = true; // :empty or :-moz-only-whitespace
-    for (nsIContent* child = aContainer->GetFirstChild();
+    for (nsIContent* child = container->GetFirstChild();
          child;
          child = child->GetNextSibling()) {
       // We don't know whether we're testing :empty or :-moz-only-whitespace,
@@ -601,13 +617,13 @@ RestyleManager::RestyleForRemove(Element* aContainer,
       }
     }
     if (isEmpty) {
-      RestyleForEmptyChange(aContainer);
+      RestyleForEmptyChange(container);
       return;
     }
   }
 
   if (selectorFlags & NODE_HAS_SLOW_SELECTOR) {
-    PostRestyleEvent(aContainer, eRestyle_Subtree, nsChangeHint(0));
+    PostRestyleEvent(container, eRestyle_Subtree, nsChangeHint(0));
     // Restyling the container is the most we can do here, so we're done.
     return;
   }
@@ -620,7 +636,7 @@ RestyleManager::RestyleForRemove(Element* aContainer,
   if (selectorFlags & NODE_HAS_EDGE_CHILD_SELECTOR) {
     // restyle the now-first element child if it was after aOldChild
     bool reachedFollowingSibling = false;
-    for (nsIContent* content = aContainer->GetFirstChild();
+    for (nsIContent* content = container->GetFirstChild();
          content;
          content = content->GetNextSibling()) {
       if (content == aFollowingSibling) {
@@ -637,7 +653,7 @@ RestyleManager::RestyleForRemove(Element* aContainer,
     }
     // restyle the now-last element child if it was before aOldChild
     reachedFollowingSibling = (aFollowingSibling == nullptr);
-    for (nsIContent* content = aContainer->GetLastChild();
+    for (nsIContent* content = container->GetLastChild();
          content;
          content = content->GetPreviousSibling()) {
       if (content->IsElement()) {
@@ -948,25 +964,6 @@ RestyleManager::PostRestyleEvent(Element* aElement,
   }
 
   PostRestyleEventInternal(false);
-}
-
-void
-RestyleManager::PostRestyleEventInternal(bool aForLazyConstruction)
-{
-  // Make sure we're not in a style refresh; if we are, we still have
-  // a call to ProcessPendingRestyles coming and there's no need to
-  // add ourselves as a refresh observer until then.
-  bool inRefresh = !aForLazyConstruction && mInStyleRefresh;
-  nsIPresShell* presShell = PresContext()->PresShell();
-  if (!ObservingRefreshDriver() && !inRefresh) {
-    SetObservingRefreshDriver(PresContext()->RefreshDriver()->
-        AddStyleFlushObserver(presShell));
-  }
-
-  // Unconditionally flag our document as needing a flush.  The other
-  // option here would be a dedicated boolean to track whether we need
-  // to do so (set here and unset in ProcessPendingRestyles).
-  presShell->GetDocument()->SetNeedStyleFlush();
 }
 
 void
@@ -3930,67 +3927,6 @@ RestyleManager::StructsToLog()
 #endif
 
 #ifdef DEBUG
-/* static */ nsCString
-RestyleManager::ChangeHintToString(nsChangeHint aHint)
-{
-  nsCString result;
-  bool any = false;
-  const char* names[] = {
-    "RepaintFrame", "NeedReflow", "ClearAncestorIntrinsics",
-    "ClearDescendantIntrinsics", "NeedDirtyReflow", "SyncFrameView",
-    "UpdateCursor", "UpdateEffects", "UpdateOpacityLayer",
-    "UpdateTransformLayer", "ReconstructFrame", "UpdateOverflow",
-    "UpdateSubtreeOverflow", "UpdatePostTransformOverflow",
-    "UpdateParentOverflow",
-    "ChildrenOnlyTransform", "RecomputePosition", "AddOrRemoveTransform",
-    "BorderStyleNoneChange", "UpdateTextPath", "SchedulePaint",
-    "NeutralChange", "InvalidateRenderingObservers",
-    "ReflowChangesSizeOrPosition", "UpdateComputedBSize",
-    "UpdateUsesOpacity"
-  };
-  uint32_t hint = aHint & ((1 << ArrayLength(names)) - 1);
-  uint32_t rest = aHint & ~((1 << ArrayLength(names)) - 1);
-  if (hint == nsChangeHint_Hints_NotHandledForDescendants) {
-    result.AppendLiteral("nsChangeHint_Hints_NotHandledForDescendants");
-    hint = 0;
-    any = true;
-  } else {
-    if ((hint & NS_STYLE_HINT_REFLOW) == NS_STYLE_HINT_REFLOW) {
-      result.AppendLiteral("NS_STYLE_HINT_REFLOW");
-      hint = hint & ~NS_STYLE_HINT_REFLOW;
-      any = true;
-    } else if ((hint & nsChangeHint_AllReflowHints) == nsChangeHint_AllReflowHints) {
-      result.AppendLiteral("nsChangeHint_AllReflowHints");
-      hint = hint & ~nsChangeHint_AllReflowHints;
-      any = true;
-    } else if ((hint & NS_STYLE_HINT_VISUAL) == NS_STYLE_HINT_VISUAL) {
-      result.AppendLiteral("NS_STYLE_HINT_VISUAL");
-      hint = hint & ~NS_STYLE_HINT_VISUAL;
-      any = true;
-    }
-  }
-  for (uint32_t i = 0; i < ArrayLength(names); i++) {
-    if (hint & (1 << i)) {
-      if (any) {
-        result.AppendLiteral(" | ");
-      }
-      result.AppendPrintf("nsChangeHint_%s", names[i]);
-      any = true;
-    }
-  }
-  if (rest) {
-    if (any) {
-      result.AppendLiteral(" | ");
-    }
-    result.AppendPrintf("0x%0x", rest);
-  } else {
-    if (!any) {
-      result.AppendLiteral("nsChangeHint(0)");
-    }
-  }
-  return result;
-}
-
 /* static */ nsCString
 RestyleManager::StructNamesToString(uint32_t aSIDs)
 {

@@ -198,6 +198,307 @@
     "high": 60000,
     "n_buckets": 50
   },
+  "CREATE_EVENT_BEFOREUNLOADEVENT" : {
+    "alert_emails": ["ayg@aryeh.name"],
+    "description": "Was document.createEvent(\"beforeunloadevent\") ever called",
+    "expires_in_version": "56",
+    "kind": "count",
+    "bug_numbers": [1295588, 1251198]
+  },
+  "CREATE_EVENT_COMMANDEVENT" : {
+    "alert_emails": ["ayg@aryeh.name"],
+    "description": "Was document.createEvent(\"commandevent\") ever called",
+    "expires_in_version": "56",
+    "kind": "count",
+    "bug_numbers": [1295588, 1251198]
+  },
+  "CREATE_EVENT_COMMANDEVENTS" : {
+    "alert_emails": ["ayg@aryeh.name"],
+    "description": "Was document.createEvent(\"commandevents\") ever called",
+    "expires_in_version": "56",
+    "kind": "count",
+    "bug_numbers": [1295588, 1251198]
+  },
+  "CREATE_EVENT_COMPOSITIONEVENT" : {
+    "alert_emails": ["ayg@aryeh.name"],
+    "description": "Was document.createEvent(\"compositionevent\") ever called",
+    "expires_in_version": "56",
+    "kind": "count",
+    "bug_numbers": [1295588, 1251198]
+  },
+  "CREATE_EVENT_CUSTOMEVENT" : {
+    "alert_emails": ["ayg@aryeh.name"],
+    "description": "Was document.createEvent(\"customevent\") ever called",
+    "expires_in_version": "56",
+    "kind": "count",
+    "bug_numbers": [1295588, 1251198]
+  },
+  "CREATE_EVENT_DATACONTAINEREVENT" : {
+    "alert_emails": ["ayg@aryeh.name"],
+    "description": "Was document.createEvent(\"datacontainerevent\") ever called",
+    "expires_in_version": "56",
+    "kind": "count",
+    "bug_numbers": [1295588, 1251198]
+  },
+  "CREATE_EVENT_DATACONTAINEREVENTS" : {
+    "alert_emails": ["ayg@aryeh.name"],
+    "description": "Was document.createEvent(\"datacontainerevents\") ever called",
+    "expires_in_version": "56",
+    "kind": "count",
+    "bug_numbers": [1295588, 1251198]
+  },
+  "CREATE_EVENT_DEVICEMOTIONEVENT" : {
+    "alert_emails": ["ayg@aryeh.name"],
+    "description": "Was document.createEvent(\"devicemotionevent\") ever called",
+    "expires_in_version": "56",
+    "kind": "count",
+    "bug_numbers": [1295588, 1251198]
+  },
+  "CREATE_EVENT_DEVICEORIENTATIONEVENT" : {
+    "alert_emails": ["ayg@aryeh.name"],
+    "description": "Was document.createEvent(\"deviceorientationevent\") ever called",
+    "expires_in_version": "56",
+    "kind": "count",
+    "bug_numbers": [1295588, 1251198]
+  },
+  "CREATE_EVENT_DRAGEVENT" : {
+    "alert_emails": ["ayg@aryeh.name"],
+    "description": "Was document.createEvent(\"dragevent\") ever called",
+    "expires_in_version": "56",
+    "kind": "count",
+    "bug_numbers": [1295588, 1251198]
+  },
+  "CREATE_EVENT_DRAGEVENTS" : {
+    "alert_emails": ["ayg@aryeh.name"],
+    "description": "Was document.createEvent(\"dragevents\") ever called",
+    "expires_in_version": "56",
+    "kind": "count",
+    "bug_numbers": [1295588, 1251198]
+  },
+  "CREATE_EVENT_EVENT" : {
+    "alert_emails": ["ayg@aryeh.name"],
+    "description": "Was document.createEvent(\"event\") ever called",
+    "expires_in_version": "56",
+    "kind": "count",
+    "bug_numbers": [1295588, 1251198]
+  },
+  "CREATE_EVENT_EVENTS" : {
+    "alert_emails": ["ayg@aryeh.name"],
+    "description": "Was document.createEvent(\"events\") ever called",
+    "expires_in_version": "56",
+    "kind": "count",
+    "bug_numbers": [1295588, 1251198]
+  },
+  "CREATE_EVENT_HASHCHANGEEVENT" : {
+    "alert_emails": ["ayg@aryeh.name"],
+    "description": "Was document.createEvent(\"hashchangeevent\") ever called",
+    "expires_in_version": "56",
+    "kind": "count",
+    "bug_numbers": [1295588, 1251198]
+  },
+  "CREATE_EVENT_HTMLEVENTS" : {
+    "alert_emails": ["ayg@aryeh.name"],
+    "description": "Was document.createEvent(\"htmlevents\") ever called",
+    "expires_in_version": "56",
+    "kind": "count",
+    "bug_numbers": [1295588, 1251198]
+  },
+  "CREATE_EVENT_KEYBOARDEVENT" : {
+    "alert_emails": ["ayg@aryeh.name"],
+    "description": "Was document.createEvent(\"keyboardevent\") ever called",
+    "expires_in_version": "56",
+    "kind": "count",
+    "bug_numbers": [1295588, 1251198]
+  },
+  "CREATE_EVENT_KEYEVENTS" : {
+    "alert_emails": ["ayg@aryeh.name"],
+    "description": "Was document.createEvent(\"keyevents\") ever called",
+    "expires_in_version": "56",
+    "kind": "count",
+    "bug_numbers": [1295588, 1251198]
+  },
+  "CREATE_EVENT_MESSAGEEVENT" : {
+    "alert_emails": ["ayg@aryeh.name"],
+    "description": "Was document.createEvent(\"messageevent\") ever called",
+    "expires_in_version": "56",
+    "kind": "count",
+    "bug_numbers": [1295588, 1251198]
+  },
+  "CREATE_EVENT_MOUSEEVENT" : {
+    "alert_emails": ["ayg@aryeh.name"],
+    "description": "Was document.createEvent(\"mouseevent\") ever called",
+    "expires_in_version": "56",
+    "kind": "count",
+    "bug_numbers": [1295588, 1251198]
+  },
+  "CREATE_EVENT_MOUSEEVENTS" : {
+    "alert_emails": ["ayg@aryeh.name"],
+    "description": "Was document.createEvent(\"mouseevents\") ever called",
+    "expires_in_version": "56",
+    "kind": "count",
+    "bug_numbers": [1295588, 1251198]
+  },
+  "CREATE_EVENT_MOUSESCROLLEVENTS" : {
+    "alert_emails": ["ayg@aryeh.name"],
+    "description": "Was document.createEvent(\"mousescrollevents\") ever called",
+    "expires_in_version": "56",
+    "kind": "count",
+    "bug_numbers": [1295588, 1251198]
+  },
+  "CREATE_EVENT_MUTATIONEVENT" : {
+    "alert_emails": ["ayg@aryeh.name"],
+    "description": "Was document.createEvent(\"mutationevent\") ever called",
+    "expires_in_version": "56",
+    "kind": "count",
+    "bug_numbers": [1295588, 1251198]
+  },
+  "CREATE_EVENT_MUTATIONEVENTS" : {
+    "alert_emails": ["ayg@aryeh.name"],
+    "description": "Was document.createEvent(\"mutationevents\") ever called",
+    "expires_in_version": "56",
+    "kind": "count",
+    "bug_numbers": [1295588, 1251198]
+  },
+  "CREATE_EVENT_NOTIFYPAINTEVENT" : {
+    "alert_emails": ["ayg@aryeh.name"],
+    "description": "Was document.createEvent(\"notifypaintevent\") ever called",
+    "expires_in_version": "56",
+    "kind": "count",
+    "bug_numbers": [1295588, 1251198]
+  },
+  "CREATE_EVENT_PAGETRANSITION" : {
+    "alert_emails": ["ayg@aryeh.name"],
+    "description": "Was document.createEvent(\"pagetransition\") ever called",
+    "expires_in_version": "56",
+    "kind": "count",
+    "bug_numbers": [1295588, 1251198]
+  },
+  "CREATE_EVENT_POPSTATEEVENT" : {
+    "alert_emails": ["ayg@aryeh.name"],
+    "description": "Was document.createEvent(\"popstateevent\") ever called",
+    "expires_in_version": "56",
+    "kind": "count",
+    "bug_numbers": [1295588, 1251198]
+  },
+  "CREATE_EVENT_POPUPEVENTS" : {
+    "alert_emails": ["ayg@aryeh.name"],
+    "description": "Was document.createEvent(\"popupevents\") ever called",
+    "expires_in_version": "56",
+    "kind": "count",
+    "bug_numbers": [1295588, 1251198]
+  },
+  "CREATE_EVENT_SCROLLAREAEVENT" : {
+    "alert_emails": ["ayg@aryeh.name"],
+    "description": "Was document.createEvent(\"scrollareaevent\") ever called",
+    "expires_in_version": "56",
+    "kind": "count",
+    "bug_numbers": [1295588, 1251198]
+  },
+  "CREATE_EVENT_SIMPLEGESTUREEVENT" : {
+    "alert_emails": ["ayg@aryeh.name"],
+    "description": "Was document.createEvent(\"simplegestureevent\") ever called",
+    "expires_in_version": "56",
+    "kind": "count",
+    "bug_numbers": [1295588, 1251198]
+  },
+  "CREATE_EVENT_STORAGEEVENT" : {
+    "alert_emails": ["ayg@aryeh.name"],
+    "description": "Was document.createEvent(\"storageevent\") ever called",
+    "expires_in_version": "56",
+    "kind": "count",
+    "bug_numbers": [1295588, 1251198]
+  },
+  "CREATE_EVENT_SVGEVENT" : {
+    "alert_emails": ["ayg@aryeh.name"],
+    "description": "Was document.createEvent(\"svgevent\") ever called",
+    "expires_in_version": "56",
+    "kind": "count",
+    "bug_numbers": [1295588, 1251198]
+  },
+  "CREATE_EVENT_SVGEVENTS" : {
+    "alert_emails": ["ayg@aryeh.name"],
+    "description": "Was document.createEvent(\"svgevents\") ever called",
+    "expires_in_version": "56",
+    "kind": "count",
+    "bug_numbers": [1295588, 1251198]
+  },
+  "CREATE_EVENT_SVGZOOMEVENT" : {
+    "alert_emails": ["ayg@aryeh.name"],
+    "description": "Was document.createEvent(\"svgzoomevent\") ever called",
+    "expires_in_version": "56",
+    "kind": "count",
+    "bug_numbers": [1295588, 1251198]
+  },
+  "CREATE_EVENT_SVGZOOMEVENTS" : {
+    "alert_emails": ["ayg@aryeh.name"],
+    "description": "Was document.createEvent(\"svgzoomevents\") ever called",
+    "expires_in_version": "56",
+    "kind": "count",
+    "bug_numbers": [1295588, 1251198]
+  },
+  "CREATE_EVENT_TEXTEVENT" : {
+    "alert_emails": ["ayg@aryeh.name"],
+    "description": "Was document.createEvent(\"textevent\") ever called",
+    "expires_in_version": "56",
+    "kind": "count",
+    "bug_numbers": [1295588, 1251198]
+  },
+  "CREATE_EVENT_TEXTEVENTS" : {
+    "alert_emails": ["ayg@aryeh.name"],
+    "description": "Was document.createEvent(\"textevents\") ever called",
+    "expires_in_version": "56",
+    "kind": "count",
+    "bug_numbers": [1295588, 1251198]
+  },
+  "CREATE_EVENT_TIMEEVENT" : {
+    "alert_emails": ["ayg@aryeh.name"],
+    "description": "Was document.createEvent(\"timeevent\") ever called",
+    "expires_in_version": "56",
+    "kind": "count",
+    "bug_numbers": [1295588, 1251198]
+  },
+  "CREATE_EVENT_TIMEEVENTS" : {
+    "alert_emails": ["ayg@aryeh.name"],
+    "description": "Was document.createEvent(\"timeevents\") ever called",
+    "expires_in_version": "56",
+    "kind": "count",
+    "bug_numbers": [1295588, 1251198]
+  },
+  "CREATE_EVENT_TOUCHEVENT" : {
+    "alert_emails": ["ayg@aryeh.name"],
+    "description": "Was document.createEvent(\"touchevent\") ever called",
+    "expires_in_version": "56",
+    "kind": "count",
+    "bug_numbers": [1295588, 1251198]
+  },
+  "CREATE_EVENT_UIEVENT" : {
+    "alert_emails": ["ayg@aryeh.name"],
+    "description": "Was document.createEvent(\"uievent\") ever called",
+    "expires_in_version": "56",
+    "kind": "count",
+    "bug_numbers": [1295588, 1251198]
+  },
+  "CREATE_EVENT_UIEVENTS" : {
+    "alert_emails": ["ayg@aryeh.name"],
+    "description": "Was document.createEvent(\"uievents\") ever called",
+    "expires_in_version": "56",
+    "kind": "count",
+    "bug_numbers": [1295588, 1251198]
+  },
+  "CREATE_EVENT_XULCOMMANDEVENT" : {
+    "alert_emails": ["ayg@aryeh.name"],
+    "description": "Was document.createEvent(\"xulcommandevent\") ever called",
+    "expires_in_version": "56",
+    "kind": "count",
+    "bug_numbers": [1295588, 1251198]
+  },
+  "CREATE_EVENT_XULCOMMANDEVENTS" : {
+    "alert_emails": ["ayg@aryeh.name"],
+    "description": "Was document.createEvent(\"xulcommandevents\") ever called",
+    "expires_in_version": "56",
+    "kind": "count",
+    "bug_numbers": [1295588, 1251198]
+  },
   "CYCLE_COLLECTOR": {
     "alert_emails": ["dev-telemetry-gc-alerts@mozilla.org"],
     "expires_in_version": "never",
@@ -402,7 +703,7 @@
     "alert_emails": ["dev-telemetry-gc-alerts@mozilla.org"],
     "expires_in_version": "never",
     "kind": "boolean",
-    "description": "Is it a compartmental GC?"
+    "description": "Is it a zone GC?"
   },
   "GC_MS": {
     "alert_emails": ["dev-telemetry-gc-alerts@mozilla.org"],
@@ -563,6 +864,15 @@
     "n_buckets": 16,
     "bug_numbers": [1259347],
     "description": "Size of the GC nursery (bytes)"
+  },
+  "GC_PRETENURE_COUNT": {
+    "alert_emails": ["dev-telemetry-gc-alerts@mozilla.org"],
+    "expires_in_version": "never",
+    "kind": "linear",
+    "kind": "enumerated",
+    "n_values": 32,
+    "bug_numbers": [1293262],
+    "description": "How many objects groups were selected for pretenuring by a minor GC"
   },
   "GEOLOCATION_ACCURACY_EXPONENTIAL": {
     "expires_in_version": "default",
@@ -1384,7 +1694,9 @@
     "description": "Was the URL upgraded to HTTPS?  (0=already HTTPS, 1=no reason to upgrade, 2=STS upgrade blocked by pref, 3=upgraded with STS, 4=upgraded with CSP)"
   },
   "HTTP_RESPONSE_STATUS_CODE": {
-    "expires_in_version": "never",
+    "alert_emails": ["ckerschbaumer@mozilla.com"],
+    "bug_numbers": [1272345, 1296287],
+    "expires_in_version": "56",
     "kind": "enumerated",
     "n_values": 12,
     "description": "Whether the URL gets redirected?  (0=200, 1=301, 2=302, 3=304, 4=307, 5=308, 6=400, 7=401, 8=403, 9=404, 10=500, 11=other)"
@@ -4276,6 +4588,39 @@
     "releaseChannelCollection": "opt-out",
     "description": "Whether the homepage was imported during browser migration. Only available on release builds during firstrun."
   },
+  "FX_MIGRATION_BOOKMARKS_IMPORT_MS": {
+    "bug_numbers": [1289436],
+    "alert_emails": ["gijs@mozilla.com"],
+    "expires_in_version": "54",
+    "kind": "exponential",
+    "n_buckets": 70,
+    "high": 100000,
+    "releaseChannelCollection": "opt-out",
+    "keyed": true,
+    "description": "How long it took to import bookmarks from another browser, keyed by the name of the browser."
+  },
+  "FX_MIGRATION_HISTORY_IMPORT_MS": {
+    "bug_numbers": [1289436],
+    "alert_emails": ["gijs@mozilla.com"],
+    "expires_in_version": "54",
+    "kind": "exponential",
+    "n_buckets": 70,
+    "high": 100000,
+    "releaseChannelCollection": "opt-out",
+    "keyed": true,
+    "description": "How long it took to import history from another browser, keyed by the name of the browser."
+  },
+  "FX_MIGRATION_LOGINS_IMPORT_MS": {
+    "bug_numbers": [1289436],
+    "alert_emails": ["gijs@mozilla.com"],
+    "expires_in_version": "54",
+    "kind": "exponential",
+    "n_buckets": 70,
+    "high": 100000,
+    "releaseChannelCollection": "opt-out",
+    "keyed": true,
+    "description": "How long it took to import logins (passwords) from another browser, keyed by the name of the browser."
+  },
   "FX_STARTUP_MIGRATION_BROWSER_COUNT": {
     "bug_numbers": [1275114],
     "alert_emails": ["gijs@mozilla.com"],
@@ -4312,13 +4657,15 @@
     "releaseChannelCollection": "opt-out",
     "description": "Where undo of the automatic migration was attempted, indicates to what degree we succeeded to undo. 0 means we started to undo, 5 means we bailed out from the undo because it was not possible to complete it (there was nothing to undo or the user was signed in to sync). All higher values indicate progression through the undo sequence, with 30 indicating we finished the undo without exceptions in the middle."
   },
-  "FX_STARTUP_MIGRATION_CANT_UNDO_BECAUSE_SYNC": {
-    "bug_numbers": [1283565],
+  "FX_STARTUP_MIGRATION_UNDO_REASON": {
+    "bug_numbers": [1289906],
     "alert_emails": ["gijs@mozilla.com"],
-    "expires_in_version": "53",
-    "kind": "boolean",
+    "expires_in_version": "54",
+    "keyed": true,
+    "kind": "enumerated",
+    "n_values": 10,
     "releaseChannelCollection": "opt-out",
-    "description": "Where undo of the automatic migration was requested and denied because the user was logged into sync."
+    "description": "Why the undo functionality of an automatic migration was disabled: 0 means we used undo, 1 means the user signed in to sync, 2 means the user created/modified a password, 3 means the user created/modified a bookmark (item or folder), 4 means we showed an undo option repeatedly and the user did not use it, 5 means we showed an undo option and the user actively elected to keep the data. The whole thing is keyed to the identifiers of different browsers (so 'chrome', 'ie', 'edge', 'safari', etc.)."
   },
   "FX_STARTUP_MIGRATION_DATA_RECENCY": {
     "bug_numbers": [1276694],
@@ -5165,6 +5512,14 @@
     "n_values": 3,
     "description": "Whether the user is in safe mode (No, Yes, Forced)"
   },
+  "SCRIPT_BLOCK_WRONG_MIME": {
+    "alert_emails": ["ckerschbaumer@mozilla.com"],
+    "bug_numbers": [1288361],
+    "expires_in_version": "56",
+    "kind": "enumerated",
+    "n_values": 10,
+    "description": "Whether the script load has a MIME type of ...?  (0=unknown, 1=js, 2=image, 3=audio, 4=video, 5=text/plain, 6=text/csv, 7=text/xml, 8=application/octet-stream, 9=application/xml)"
+  },
   "NEWTAB_PAGE_ENABLED": {
     "expires_in_version": "default",
     "kind": "boolean",
@@ -5262,15 +5617,6 @@
     "n_buckets": 20,
     "description": "Time for a URL bar DB search to return (ms)",
     "cpp_guard": "ANDROID"
-  },
-  "FENNEC_RESTRICTED_PROFILE_RESTRICTIONS": {
-    "expires_in_version": "50",
-    "kind": "enumerated",
-    "n_values": 30,
-    "description": "Whether various restrictions are set, keyed by restiction name",
-    "keyed": true,
-    "bug_numbers": [1218942],
-    "alert_emails": ["mobile-frontend@mozilla.com"]
   },
   "FENNEC_STARTUP_TIME_GECKOREADY": {
     "expires_in_version": "never",
@@ -5373,7 +5719,7 @@
     "kind": "enumerated",
     "n_values": 5,
     "releaseChannelCollection": "opt-out",
-    "description": "Result of showing the search reset prompt to the user. 0=restored original default, 1=kept current engine, 2=changed engine, 3=closed the page"
+    "description": "Result of showing the search reset prompt to the user. 0=restored original default, 1=kept current engine, 2=changed engine, 3=closed the page, 4=opened search settings"
   },
   "SEARCH_SERVICE_INIT_MS": {
     "expires_in_version": "never",
@@ -6606,198 +6952,6 @@
     "description": "Number of times the tools have been reloaded by the reload addon.",
     "bug_numbers": [1248435]
   },
-  "DEVTOOLS_TOOLBOX_OPENED_PER_USER_FLAG": {
-    "expires_in_version": "never",
-    "kind": "flag",
-    "description": "Number of users that have opened the DevTools toolbox."
-  },
-  "DEVTOOLS_OPTIONS_OPENED_PER_USER_FLAG": {
-    "expires_in_version": "never",
-    "kind": "flag",
-    "description": "Number of users that have opened the DevTools Options panel."
-  },
-  "DEVTOOLS_WEBCONSOLE_OPENED_PER_USER_FLAG": {
-    "expires_in_version": "never",
-    "kind": "flag",
-    "description": "Number of users that have opened the DevTools Web Console."
-  },
-  "DEVTOOLS_BROWSERCONSOLE_OPENED_PER_USER_FLAG": {
-    "expires_in_version": "never",
-    "kind": "flag",
-    "description": "Number of users that have opened the DevTools Browser Console."
-  },
-  "DEVTOOLS_INSPECTOR_OPENED_PER_USER_FLAG": {
-    "expires_in_version": "never",
-    "kind": "flag",
-    "description": "Number of users that have opened the DevTools Inspector."
-  },
-  "DEVTOOLS_RULEVIEW_OPENED_PER_USER_FLAG": {
-    "expires_in_version": "never",
-    "kind": "flag",
-    "description": "Number of users that have opened the DevTools Rule View."
-  },
-  "DEVTOOLS_COMPUTEDVIEW_OPENED_PER_USER_FLAG": {
-    "expires_in_version": "never",
-    "kind": "flag",
-    "description": "Number of users that have opened the DevTools Computed View."
-  },
-  "DEVTOOLS_FONTINSPECTOR_OPENED_PER_USER_FLAG": {
-    "expires_in_version": "never",
-    "kind": "flag",
-    "description": "Number of users that have opened the DevTools Font Inspector."
-  },
-  "DEVTOOLS_ANIMATIONINSPECTOR_OPENED_PER_USER_FLAG": {
-    "expires_in_version": "never",
-    "kind": "flag",
-    "description": "Number of users that have opened the DevTools Animation Inspector."
-  },
-  "DEVTOOLS_JSDEBUGGER_OPENED_PER_USER_FLAG": {
-    "expires_in_version": "never",
-    "kind": "flag",
-    "description": "Number of users that have opened the DevTools Debugger."
-  },
-  "DEVTOOLS_JSBROWSERDEBUGGER_OPENED_PER_USER_FLAG": {
-    "expires_in_version": "never",
-    "kind": "flag",
-    "description": "Number of users that have opened the DevTools Browser Debugger."
-  },
-  "DEVTOOLS_STYLEEDITOR_OPENED_PER_USER_FLAG": {
-    "expires_in_version": "never",
-    "kind": "flag",
-    "description": "Number of users that have opened the DevTools Style Editor."
-  },
-  "DEVTOOLS_SHADEREDITOR_OPENED_PER_USER_FLAG": {
-    "expires_in_version": "never",
-    "kind": "flag",
-    "description": "Number of users that have opened the DevTools Shader Editor."
-  },
-  "DEVTOOLS_WEBAUDIOEDITOR_OPENED_PER_USER_FLAG": {
-    "expires_in_version": "never",
-    "kind": "flag",
-    "description": "Number of users that have opened the DevTools Web Audio Editor."
-  },
-  "DEVTOOLS_CANVASDEBUGGER_OPENED_PER_USER_FLAG": {
-    "expires_in_version": "never",
-    "kind": "flag",
-    "description": "Number of users that have opened the DevTools Canvas Debugger."
-  },
-  "DEVTOOLS_JSPROFILER_OPENED_PER_USER_FLAG": {
-    "expires_in_version": "never",
-    "kind": "flag",
-    "description": "Number of users that have opened the DevTools JS Profiler."
-  },
-  "DEVTOOLS_MEMORY_OPENED_PER_USER_FLAG": {
-    "expires_in_version": "never",
-    "kind": "flag",
-    "description": "Number of users that have opened the DevTools Memory Tool."
-  },
-  "DEVTOOLS_NETMONITOR_OPENED_PER_USER_FLAG": {
-    "expires_in_version": "never",
-    "kind": "flag",
-    "description": "Number of users that have opened the DevTools Network Monitor."
-  },
-  "DEVTOOLS_STORAGE_OPENED_PER_USER_FLAG": {
-    "expires_in_version": "never",
-    "kind": "flag",
-    "description": "Number of users that have opened the DevTools Storage Inspector."
-  },
-  "DEVTOOLS_PAINTFLASHING_OPENED_PER_USER_FLAG": {
-    "expires_in_version": "never",
-    "kind": "flag",
-    "description": "Number of users that have opened the DevTools Paint Flashing via the toolbox button."
-  },
-  "DEVTOOLS_TILT_OPENED_PER_USER_FLAG": {
-    "expires_in_version": "never",
-    "kind": "flag",
-    "description": "Number of users that have opened the DevTools Tilt via the toolbox button."
-  },
-  "DEVTOOLS_SCRATCHPAD_OPENED_PER_USER_FLAG": {
-    "expires_in_version": "never",
-    "kind": "flag",
-    "description": "Number of users that have opened the DevTools Scratchpad."
-  },
-  "DEVTOOLS_SCRATCHPAD_WINDOW_OPENED_PER_USER_FLAG": {
-    "alert_emails": ["dev-developer-tools@lists.mozilla.org"],
-    "expires_in_version": "50",
-    "kind": "flag",
-    "description": "Number of users that have opened the DevTools Scratchpad standalone window.",
-    "bug_numbers": [1214352]
-  },
-  "DEVTOOLS_RESPONSIVE_OPENED_PER_USER_FLAG": {
-    "expires_in_version": "never",
-    "kind": "flag",
-    "description": "Number of users that have opened the DevTools Responsive Design Mode."
-  },
-  "DEVTOOLS_EYEDROPPER_OPENED_PER_USER_FLAG": {
-    "expires_in_version": "never",
-    "kind": "flag",
-    "description": "Number of users that have opened the DevTools Eyedropper via the toolbox button."
-  },
-  "DEVTOOLS_MENU_EYEDROPPER_OPENED_PER_USER_FLAG": {
-    "expires_in_version": "never",
-    "kind": "flag",
-    "description": "Number of users that have opened the DevTools Eyedropper via the devtools menu."
-  },
-  "DEVTOOLS_PICKER_EYEDROPPER_OPENED_PER_USER_FLAG": {
-    "expires_in_version": "never",
-    "kind": "flag",
-    "description": "Number of users that have opened the DevTools Eyedropper via the color picker."
-  },
-  "DEVTOOLS_DEVELOPERTOOLBAR_OPENED_PER_USER_FLAG": {
-    "expires_in_version": "never",
-    "kind": "flag",
-    "description": "Number of users that have opened the DevTools Developer Toolbar been opened via the toolbox button."
-  },
-  "DEVTOOLS_ABOUTDEBUGGING_OPENED_PER_USER_FLAG": {
-    "alert_emails": ["dev-developer-tools@lists.mozilla.org", "jan@mozilla.com"],
-    "expires_in_version": "55",
-    "kind": "flag",
-    "description": "Number of users that have opened about:debugging. (bug 1204601)"
-  },
-  "DEVTOOLS_WEBIDE_OPENED_PER_USER_FLAG": {
-    "expires_in_version": "never",
-    "kind": "flag",
-    "description": "Number of users that have opened the DevTools WebIDE."
-  },
-  "DEVTOOLS_WEBIDE_PROJECT_EDITOR_OPENED_PER_USER_FLAG": {
-    "expires_in_version": "never",
-    "kind": "flag",
-    "description": "Number of users that have opened the DevTools WebIDE project editor."
-  },
-  "DEVTOOLS_WEBIDE_PROJECT_EDITOR_SAVE_PER_USER_FLAG": {
-    "expires_in_version": "never",
-    "kind": "flag",
-    "description": "Number of users that have saved a file in the DevTools WebIDE project editor."
-  },
-  "DEVTOOLS_WEBIDE_NEW_PROJECT_PER_USER_FLAG": {
-    "expires_in_version": "never",
-    "kind": "flag",
-    "description": "Number of users that have created a new project in the DevTools WebIDE."
-  },
-  "DEVTOOLS_WEBIDE_IMPORT_PROJECT_PER_USER_FLAG": {
-    "expires_in_version": "never",
-    "kind": "flag",
-    "description": "Number of users that have imported a project into the DevTools WebIDE."
-  },
-  "DEVTOOLS_CUSTOM_OPENED_PER_USER_FLAG": {
-    "expires_in_version": "never",
-    "kind": "flag",
-    "description": "Number of users that have opened a custom developer tool via the toolbox button."
-  },
-  "DEVTOOLS_RELOAD_ADDON_INSTALLED_PER_USER_FLAG": {
-    "alert_emails": ["dev-developer-tools@lists.mozilla.org"],
-    "expires_in_version": "55",
-    "kind": "flag",
-    "description": "Records once per browser version if the reload add-on is installed.",
-    "bug_numbers": [1248435]
-  },
-  "DEVTOOLS_RELOAD_ADDON_RELOAD_PER_USER_FLAG": {
-    "alert_emails": ["dev-developer-tools@lists.mozilla.org"],
-    "expires_in_version": "55",
-    "kind": "flag",
-    "description": "Records once per browser version if the tools have been reloaded via the reload add-on.",
-    "bug_numbers": [1248435]
-  },
   "DEVTOOLS_TOOLBOX_TIME_ACTIVE_SECONDS": {
     "expires_in_version": "never",
     "kind": "exponential",
@@ -7977,7 +8131,7 @@
     "bug_numbers": [1208167]
   },
   "ZOOMED_VIEW_ENABLED": {
-    "expires_in_version": "50",
+    "expires_in_version": "60",
     "kind": "boolean",
     "description": "Whether or not a user has the zoomed view (a.k.a. \"Magnify small areas\") enabled.",
     "alert_emails": ["mobile-frontend@mozilla.com"],
@@ -8269,17 +8423,27 @@
   "VIDEO_HIDDEN_PLAY_TIME_PERCENTAGE" : {
     "alert_emails": ["ajones@mozilla.com", "gsquelart@mozilla.com"],
     "expires_in_version": "55",
-    "description": "Percentage of total time spent playing video while element is hidden. Keyed by audio presence and by height ranges (boundaries: 240. 480, 576, 720, 1080, 2160), e.g.: 'V,0<h<=240', 'AV,h>2180'; and 'All' will accumulate all percentages. This is reported whenever an HTML Media Element is suspended or resumed, such as when the page is unloaded.",
+    "description": "Percentage of total time spent playing video while element is hidden. Keyed by audio presence and by height ranges (boundaries: 240. 480, 576, 720, 1080, 2160), e.g.: 'V,0<h<=240', 'AV,h>2160'; and 'All' will accumulate all percentages. This is reported whenever an HTML Media Element is suspended or resumed, such as when the page is unloaded.",
     "keyed": true,
     "kind": "linear",
     "high": 100,
     "n_buckets": 50,
     "bug_numbers": [1287987]
   },
+  "VIDEO_INFERRED_DECODE_SUSPEND_PERCENTAGE" : {
+    "alert_emails": ["ajones@mozilla.com", "gsquelart@mozilla.com"],
+    "expires_in_version": "55",
+    "description": "Percentage of total time spent *not* fully decoding video while element is hidden (simulated, even when feature is not enabled). Keyed by audio presence and by height ranges (boundaries: 240. 480, 576, 720, 1080, 2160), e.g.: 'V,0<h<=240', 'AV,h>2160'; and 'All' will accumulate all percentages. This is reported whenever an HTML Media Element is suspended or resumed, such as when the page is unloaded.",
+    "keyed": true,
+    "kind": "linear",
+    "high": 100,
+    "n_buckets": 50,
+    "bug_numbers": [1293145]
+  },
   "VIDEO_INTER_KEYFRAME_AVERAGE_MS" : {
     "alert_emails": ["ajones@mozilla.com", "gsquelart@mozilla.com"],
     "expires_in_version": "55",
-    "description": "Average interval between video keyframes in played videos, in milliseconds. Keyed by audio presence and by height ranges (boundaries: 240. 480, 576, 720, 1080, 2160), e.g.: 'V,0<h<=240', 'AV,h>2180'; and 'All' will accumulate all percentages. This is reported whenever an HTML Media Element is suspended or resumed, such as when the page is unloaded.",
+    "description": "Average interval between video keyframes in played videos, in milliseconds. Keyed by audio presence and by height ranges (boundaries: 240. 480, 576, 720, 1080, 2160), e.g.: 'V,0<h<=240', 'AV,h>2160'; and 'All' will accumulate all percentages. This is reported whenever an HTML Media Element is suspended or resumed, such as when the page is unloaded.",
     "keyed": true,
     "kind": "exponential",
     "high": 60000,
@@ -8289,12 +8453,22 @@
   "VIDEO_INTER_KEYFRAME_MAX_MS" : {
     "alert_emails": ["ajones@mozilla.com", "gsquelart@mozilla.com"],
     "expires_in_version": "55",
-    "description": "Maximum interval between video keyframes in played videos, in milliseconds. Keyed by audio presence and by height ranges (boundaries: 240. 480, 576, 720, 1080, 2160), e.g.: 'V,0<h<=240', 'AV,h>2180'; and 'All' will accumulate all percentages. This is reported whenever an HTML Media Element is suspended or resumed, such as when the page is unloaded.",
+    "description": "Maximum interval between video keyframes in played videos, in milliseconds; '0' means only 1 keyframe found. Keyed by audio presence and by height ranges (boundaries: 240. 480, 576, 720, 1080, 2160), e.g.: 'V,0<h<=240', 'AV,h>2160'; and 'All' will accumulate all percentages. This is reported whenever an HTML Media Element is suspended or resumed, such as when the page is unloaded.",
     "keyed": true,
     "kind": "exponential",
     "high": 60000,
     "n_buckets": 100,
     "bug_numbers": [1289668]
+  },
+  "VIDEO_SUSPEND_RECOVERY_TIME_MS" : {
+    "alert_emails": ["ajones@mozilla.com", "gsquelart@mozilla.com"],
+    "expires_in_version": "55",
+    "description": "Time taken for a video to resume after decoding was suspended, in milliseconds. Keyed by audio presence, hw acceleration, and by height ranges (boundaries: 240. 480, 720, 1080, 2160), e.g.: 'V,0-240', 'AV(hw),2160+'; and 'All' will accumulate all percentages.",
+    "keyed": true,
+    "kind": "exponential",
+    "high": 10000,
+    "n_buckets": 100,
+    "bug_numbers": [1294349]
   },
   "VIDEO_UNLOAD_STATE": {
     "alert_emails": ["ajones@mozilla.com"],
@@ -8639,6 +8813,27 @@
     "kind": "count",
     "description": "Count ServiceWorkers that really did get a thread created for them. File bugs in Core::DOM in case of a Telemetry regression."
   },
+  "SERVICE_WORKER_SPAWN_GETS_QUEUED": {
+    "alert_emails": ["amarchesini@mozilla.com"],
+    "bug_numbers": [1286895],
+    "expires_in_version": "never",
+    "kind": "count",
+    "description": "Tracking whether a ServiceWorker spawn gets queued due to hitting max workers per domain limit. File bugs in Core::DOM in case of a Telemetry regression."
+  },
+  "SHARED_WORKER_SPAWN_GETS_QUEUED": {
+    "alert_emails": ["amarchesini@mozilla.com"],
+    "bug_numbers": [1286895],
+    "expires_in_version": "never",
+    "kind": "count",
+    "description": "Tracking whether a SharedWorker spawn gets queued due to hitting max workers per domain limit. File bugs in Core::DOM in case of a Telemetry regression."
+  },
+  "DEDICATED_WORKER_SPAWN_GETS_QUEUED": {
+    "alert_emails": ["amarchesini@mozilla.com"],
+    "bug_numbers": [1286895],
+    "expires_in_version": "never",
+    "kind": "count",
+    "description": "Tracking whether a DedicatedWorker spawn gets queued due to hitting max workers per domain limit. File bugs in Core::DOM in case of a Telemetry regression."
+  },
   "SERVICE_WORKER_REGISTRATIONS": {
     "expires_in_version": "50",
     "kind": "count",
@@ -8684,7 +8879,7 @@
     "description": "The result of trying to download a document to show in reader view (0=Success, 1=Error XHR, 2=Error no document)"
   },
   "FENNEC_LOAD_SAVED_PAGE": {
-    "expires_in_version": "50",
+    "expires_in_version": "60",
     "alert_emails": ["mobile-frontend@mozilla.com"],
     "kind": "enumerated",
     "n_values": 10,
@@ -8709,7 +8904,7 @@
     "description": "The number of tabs queued when opened."
   },
   "FENNEC_CUSTOM_HOMEPAGE": {
-    "expires_in_version": "50",
+    "expires_in_version": "60",
     "alert_emails": ["mobile-frontend@mozilla.com"],
     "bug_numbers": [1239102],
     "kind": "boolean",
@@ -10023,6 +10218,21 @@
     "kind": "flag",
     "bug_numbers": [1284017],
     "description": "When restoring tabs on startup, reading from sessionstore.js failed, even though the file exists and is not containing an explicitly empty window.",
+    "cpp_guard": "ANDROID"
+  },
+  "SHARED_WORKER_COUNT": {
+    "alert_emails": ["amarchesini@mozilla.com"],
+    "expires_in_version": "58",
+    "kind": "count",
+    "bug_numbers": [1295980],
+    "description": "Number of the use of SharedWorkers."
+  },
+  "FENNEC_SESSIONSTORE_RESTORING_FROM_BACKUP": {
+    "alert_emails": ["jh+bugzilla@buttercookie.de"],
+    "expires_in_version": "56",
+    "kind": "flag",
+    "bug_numbers": [1190627],
+    "description": "When restoring tabs on startup, reading from sessionstore.js failed, but sessionstore.bak was read successfully.",
     "cpp_guard": "ANDROID"
   }
 }

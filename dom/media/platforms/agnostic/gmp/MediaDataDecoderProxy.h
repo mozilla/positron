@@ -23,7 +23,7 @@ public:
    , mSample(aSample)
   {}
 
-  NS_IMETHOD Run() {
+  NS_IMETHOD Run() override {
     mDecoder->Input(mSample);
     return NS_OK;
   }
@@ -93,6 +93,11 @@ public:
   bool OnReaderTaskQueue() override
   {
     return mProxyCallback->OnReaderTaskQueue();
+  }
+
+  void WaitingForKey() override
+  {
+    mProxyCallback->WaitingForKey();
   }
 
 private:

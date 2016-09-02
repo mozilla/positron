@@ -40,9 +40,9 @@ namespace dom {
 class AfterSetFilesOrDirectoriesRunnable;
 class Date;
 class DispatchChangeEventCallback;
-class Entry;
 class File;
 class FileList;
+class FileSystemEntry;
 class GetFilesHelper;
 
 /**
@@ -306,6 +306,7 @@ public:
 
   // nsIConstraintValidation
   bool     IsTooLong();
+  bool     IsTooShort();
   bool     IsValueMissing() const;
   bool     HasTypeMismatch() const;
   bool     HasPatternMismatch() const;
@@ -314,6 +315,7 @@ public:
   bool     HasStepMismatch(bool aUseZeroIfValueNaN = false) const;
   bool     HasBadInput() const;
   void     UpdateTooLongValidityState();
+  void     UpdateTooShortValidityState();
   void     UpdateValueMissingValidityState();
   void     UpdateTypeMismatchValidityState();
   void     UpdatePatternMismatchValidityState();
@@ -534,12 +536,29 @@ public:
 
   void SetMaxLength(int32_t aValue, ErrorResult& aRv)
   {
-    if (aValue < 0) {
+    int32_t minLength = MinLength();
+    if (aValue < 0 || (minLength >= 0 && aValue < minLength)) {
       aRv.Throw(NS_ERROR_DOM_INDEX_SIZE_ERR);
       return;
     }
 
     SetHTMLIntAttr(nsGkAtoms::maxlength, aValue, aRv);
+  }
+
+  int32_t MinLength() const
+  {
+    return GetIntAttr(nsGkAtoms::minlength, -1);
+  }
+
+  void SetMinLength(int32_t aValue, ErrorResult& aRv)
+  {
+    int32_t maxLength = MaxLength();
+    if (aValue < 0 || (maxLength >= 0 && aValue > maxLength)) {
+      aRv.Throw(NS_ERROR_DOM_INDEX_SIZE_ERR);
+      return;
+    }
+
+    SetHTMLIntAttr(nsGkAtoms::minlength, aValue, aRv);
   }
 
   // XPCOM GetMin() is OK
@@ -627,13 +646,6 @@ public:
   void SetType(const nsAString& aValue, ErrorResult& aRv)
   {
     SetHTMLAttr(nsGkAtoms::type, aValue, aRv);
-    if (aValue.EqualsLiteral("number")) {
-      // For NS_FORM_INPUT_NUMBER we rely on having frames to process key
-      // events. Make sure we have them in case someone changes the type of
-      // this element to "number" and then expects to be able to send key
-      // events to it (type changes are rare, so not a big perf issue):
-      FlushFrames();
-    }
   }
 
   // XPCOM GetDefaultValue() is OK
@@ -688,11 +700,11 @@ public:
 
   // XPCOM Select() is OK
 
-  int32_t GetSelectionStart(ErrorResult& aRv);
-  void SetSelectionStart(int32_t aValue, ErrorResult& aRv);
+  Nullable<int32_t> GetSelectionStart(ErrorResult& aRv);
+  void SetSelectionStart(const Nullable<int32_t>& aValue, ErrorResult& aRv);
 
-  int32_t GetSelectionEnd(ErrorResult& aRv);
-  void SetSelectionEnd(int32_t aValue, ErrorResult& aRv);
+  Nullable<int32_t> GetSelectionEnd(ErrorResult& aRv);
+  void SetSelectionEnd(const Nullable<int32_t>& aValue, ErrorResult& aRv);
 
   void GetSelectionDirection(nsAString& aValue, ErrorResult& aRv);
   void SetSelectionDirection(const nsAString& aValue, ErrorResult& aRv);
@@ -728,7 +740,7 @@ public:
     SetHTMLBoolAttr(nsGkAtoms::webkitdirectory, aValue, aRv);
   }
 
-  void GetWebkitEntries(nsTArray<RefPtr<Entry>>& aSequence);
+  void GetWebkitEntries(nsTArray<RefPtr<FileSystemEntry>>& aSequence);
 
   bool IsFilesAndDirectoriesSupported() const;
 
@@ -1023,7 +1035,11 @@ protected:
   /**
    * Returns if the step attribute apply for the current type.
    */
-  bool DoesStepApply() const { return DoesMinMaxApply(); }
+  bool DoesStepApply() const
+  {
+    // TODO: this is temporary until bug 888316 is fixed.
+    return DoesMinMaxApply() && mType != NS_FORM_INPUT_WEEK;
+  }
 
   /**
    * Returns if stepDown and stepUp methods apply for the current type.
@@ -1033,7 +1049,11 @@ protected:
   /**
    * Returns if valueAsNumber attribute applies for the current type.
    */
-  bool DoesValueAsNumberApply() const { return DoesMinMaxApply(); }
+  bool DoesValueAsNumberApply() const
+  {
+    // TODO: this is temporary until bug 888316 is fixed.
+    return DoesMinMaxApply() && mType != NS_FORM_INPUT_WEEK;
+  }
 
   /**
    * Returns if autocomplete attribute applies for the current type.
@@ -1041,9 +1061,9 @@ protected:
   bool DoesAutocompleteApply() const;
 
   /**
-   * Returns if the maxlength attribute applies for the current type.
+   * Returns if the minlength or maxlength attributes apply for the current type.
    */
-  bool MaxLengthApplies() const { return IsSingleLineTextControl(false, mType); }
+  bool MinOrMaxLengthApplies() const { return IsSingleLineTextControl(false, mType); }
 
   void FreeData();
   nsTextEditorState *GetEditorState() const;
@@ -1393,7 +1413,7 @@ protected:
   nsString mFirstFilePath;
 
   RefPtr<FileList>  mFileList;
-  Sequence<RefPtr<Entry>> mEntries;
+  Sequence<RefPtr<FileSystemEntry>> mEntries;
 
   nsString mStaticDocFileList;
 
@@ -1481,12 +1501,12 @@ private:
   }
 
   /**
-   * Returns true if setRangeText can be called on element
+   * Returns true if selection methods can be called on element
    */
-  bool SupportsSetRangeText() const {
+  bool SupportsTextSelection() const {
     return mType == NS_FORM_INPUT_TEXT || mType == NS_FORM_INPUT_SEARCH ||
            mType == NS_FORM_INPUT_URL || mType == NS_FORM_INPUT_TEL ||
-           mType == NS_FORM_INPUT_PASSWORD || mType == NS_FORM_INPUT_NUMBER;
+           mType == NS_FORM_INPUT_PASSWORD;
   }
 
   static bool MayFireChangeOnBlur(uint8_t aType) {

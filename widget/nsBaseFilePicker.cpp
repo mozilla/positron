@@ -74,7 +74,7 @@ public:
   {
   }
 
-  NS_IMETHOD Run()
+  NS_IMETHOD Run() override
   {
     NS_ASSERTION(NS_IsMainThread(),
                  "AsyncShowFilePicker should be on the main thread!");
@@ -340,6 +340,20 @@ NS_IMETHODIMP
 nsBaseFilePicker::GetMode(int16_t* aMode)
 {
   *aMode = mMode;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsBaseFilePicker::SetOkButtonLabel(const nsAString& aLabel)
+{
+  mOkButtonLabel = aLabel;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsBaseFilePicker::GetOkButtonLabel(nsAString& aLabel)
+{
+  aLabel = mOkButtonLabel;
   return NS_OK;
 }
 

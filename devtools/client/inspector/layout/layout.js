@@ -6,9 +6,6 @@
 
 "use strict";
 
-/* eslint-disable mozilla/reject-some-requires */
-const {Cc, Ci} = require("chrome");
-/* eslint-enable mozilla/reject-some-requires */
 const {Task} = require("devtools/shared/task");
 const {InplaceEditor, editableItem} =
       require("devtools/client/shared/inplace-editor");
@@ -16,8 +13,10 @@ const {ReflowFront} = require("devtools/shared/fronts/layout");
 const {LocalizationHelper} = require("devtools/client/shared/l10n");
 const {getCssProperties} = require("devtools/shared/fronts/css-properties");
 
-const STRINGS_URI = "chrome://devtools/locale/shared.properties";
+const STRINGS_URI = "devtools/locale/shared.properties";
+const STRINGS_INSPECTOR = "devtools-shared/locale/styleinspector.properties";
 const SHARED_L10N = new LocalizationHelper(STRINGS_URI);
+const INSPECTOR_L10N = new LocalizationHelper(STRINGS_INSPECTOR);
 const NUMERIC = /^-?[\d\.]+$/;
 const LONG_TEXT_ROTATE_LIMIT = 3;
 
@@ -320,13 +319,6 @@ LayoutView.prototype = {
     }
 
     this.onNewNode();
-
-    // Mark document as RTL or LTR:
-    let chromeReg = Cc["@mozilla.org/chrome/chrome-registry;1"]
-                    .getService(Ci.nsIXULChromeRegistry);
-    let dir = chromeReg.isLocaleRTL("global");
-    let container = this.doc.getElementById("layout-container");
-    container.setAttribute("dir", dir ? "rtl" : "ltr");
 
     let nodeGeometry = this.doc.getElementById("layout-geometry-editor");
     this.onGeometryButtonClick = this.onGeometryButtonClick.bind(this);
@@ -734,8 +726,14 @@ LayoutView.prototype = {
       title += "\n" + sourceRule.selectors.join(", ");
     }
     if (sourceRule && sourceRule.parentStyleSheet) {
-      title += "\n" + sourceRule.parentStyleSheet.href + ":" + sourceRule.line;
+      if (sourceRule.parentStyleSheet.href) {
+        title += "\n" + sourceRule.parentStyleSheet.href + ":" + sourceRule.line;
+      } else {
+        title += "\n" + INSPECTOR_L10N.getStr("rule.sourceInline") +
+          ":" + sourceRule.line;
+      }
     }
+
     el.setAttribute("title", title);
   },
 

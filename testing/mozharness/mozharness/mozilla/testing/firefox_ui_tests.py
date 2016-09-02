@@ -51,6 +51,12 @@ firefox_ui_tests_config_options = [
         'dest': 'tag',
         'help': 'Subset of tests to run (local, remote).',
     }],
+    [["--allow-software-gl-layers"], {
+        "action": "store_true",
+        "dest": "allow_software_gl_layers",
+        "default": False,
+        "help": "Permits a software GL implementation (such as LLVMPipe) to use the GL compositor.",
+    }],
 ] + copy.deepcopy(testing_config_options)
 
 # Command line arguments for update tests
@@ -124,8 +130,6 @@ class FirefoxUITests(TestingMixin, VCSToolsScript):
         self.test_packages_url = self.config.get('test_packages_url')
         self.test_url = self.config.get('test_url')
 
-        self.reports = {'html': 'report.html', 'xunit': 'report.xml'}
-
         if not self.test_url and not self.test_packages_url:
             self.fatal(
                 'You must use --test-url, or --test-packages-url')
@@ -138,14 +142,6 @@ class FirefoxUITests(TestingMixin, VCSToolsScript):
                                     'config', 'firefox_ui_requirements.txt')
         self.register_virtualenv_module(requirements=[requirements], two_pass=True)
 
-    def clobber(self):
-        """Delete the working directory"""
-        super(FirefoxUITests, self).clobber()
-
-        # Also ensure to delete the reports directory to get rid of old files
-        dirs = self.query_abs_dirs()
-        self.rmtree(dirs['abs_reports_dir'], error_level=FATAL)
-
     def download_and_extract(self):
         """Overriding method from TestingMixin for more specific behavior.
 
@@ -153,14 +149,14 @@ class FirefoxUITests(TestingMixin, VCSToolsScript):
         harness, puppeteer, and tests from and how to set them up.
 
         """
-        target_unzip_dirs = ['config/*',
-                             'firefox-ui/*',
-                             'marionette/*',
-                             'mozbase/*',
-                             'puppeteer/*',
-                             'tools/wptserve/*',
-                             ]
-        super(FirefoxUITests, self).download_and_extract(target_unzip_dirs=target_unzip_dirs)
+        extract_dirs = ['config/*',
+                        'firefox-ui/*',
+                        'marionette/*',
+                        'mozbase/*',
+                        'puppeteer/*',
+                        'tools/wptserve/*',
+                        ]
+        super(FirefoxUITests, self).download_and_extract(extract_dirs=extract_dirs)
 
     def query_abs_dirs(self):
         if self.abs_dirs:
@@ -171,7 +167,6 @@ class FirefoxUITests(TestingMixin, VCSToolsScript):
 
         dirs = {
             'abs_blob_upload_dir': os.path.join(abs_dirs['abs_work_dir'], 'blobber_upload_dir'),
-            'abs_reports_dir': os.path.join(abs_dirs['base_work_dir'], 'reports'),
             'abs_test_install_dir': abs_tests_install_dir,
             'abs_fxui_dir': os.path.join(abs_tests_install_dir, 'firefox-ui'),
         }
@@ -203,23 +198,6 @@ class FirefoxUITests(TestingMixin, VCSToolsScript):
 
         return args
 
-    @PostScriptRun
-    def copy_logs_to_upload_dir(self):
-        """Overwrite this method so we also upload the other (e.g. report) files"""
-        # Copy logs and report files to the upload folder
-        super(FirefoxUITests, self).copy_logs_to_upload_dir()
-
-        dirs = self.query_abs_dirs()
-        self.info("Copying reports to upload dir...")
-        for report in self.reports:
-            self.copy_to_upload_dir(os.path.join(dirs['abs_reports_dir'], self.reports[report]),
-                                    dest=os.path.join('reports', self.reports[report]),
-                                    short_desc='%s log' % self.reports[report],
-                                    long_desc='%s log' % self.reports[report],
-                                    max_backups=self.config.get("log_max_rotate", 0),
-                                    error_level=WARNING,
-                                    )
-
     def run_test(self, binary_path, env=None, marionette_port=2828):
         """All required steps for running the tests against an installer."""
         dirs = self.query_abs_dirs()
@@ -245,8 +223,8 @@ class FirefoxUITests(TestingMixin, VCSToolsScript):
             '--log-raw=-',  # structured log for output parser redirected to stdout
 
             # additional reports helpful for Jenkins and inpection via Treeherder
-            '--log-html', os.path.join(dirs["abs_reports_dir"], self.reports['html']),
-            '--log-xunit', os.path.join(dirs["abs_reports_dir"], self.reports['xunit']),
+            '--log-html', os.path.join(dirs['abs_blob_upload_dir'], 'report.html'),
+            '--log-xunit', os.path.join(dirs['abs_blob_upload_dir'], 'report.xml'),
         ]
 
         # Collect all pass-through harness options to the script
@@ -256,14 +234,8 @@ class FirefoxUITests(TestingMixin, VCSToolsScript):
         if not self.config.get('e10s'):
             cmd.append('--disable-e10s')
 
-        # Set further environment settings
-        env = env or self.query_env()
-
         if self.symbols_url:
             cmd.extend(['--symbols-path', self.symbols_url])
-
-        if self.query_minidump_stackwalk():
-            env['MINIDUMP_STACKWALK'] = self.minidump_stackwalk_path
 
         if self.config.get('tag'):
             cmd.extend(['--tag', self.config['tag']])
@@ -275,6 +247,15 @@ class FirefoxUITests(TestingMixin, VCSToolsScript):
         # Add the default tests to run
         tests = [os.path.join(dirs['abs_fxui_dir'], 'tests', test) for test in self.default_tests]
         cmd.extend(tests)
+
+        # Set further environment settings
+        env = env or self.query_env()
+        env.update({'MINIDUMP_SAVE_PATH': dirs['abs_blob_upload_dir']})
+        if self.query_minidump_stackwalk():
+            env.update({'MINIDUMP_STACKWALK': self.minidump_stackwalk_path})
+
+        if self.config['allow_software_gl_layers']:
+            env['MOZ_LAYERS_ALLOW_SOFTWARE_GL'] = '1'
 
         return_code = self.run_command(cmd,
                                        cwd=dirs['abs_work_dir'],
@@ -299,53 +280,6 @@ class FirefoxUITests(TestingMixin, VCSToolsScript):
             binary_path=self.binary_path,
             env=self.query_env(),
         )
-
-    def download_unzip(self, url, parent_dir, target_unzip_dirs=None, halt_on_failure=True):
-        """Overwritten method from BaseScript until bug 1258539 is fixed.
-
-        The downloaded file will always be saved to the working directory and is not getting
-        deleted after extracting.
-
-        Args:
-            url (str): URL where the file to be downloaded is located.
-            parent_dir (str): directory where the downloaded file will
-                              be extracted to.
-            target_unzip_dirs (list, optional): directories inside the zip file to extract.
-                                                Defaults to `None`.
-            halt_on_failure (bool, optional): whether or not to redefine the
-                                              log level as `FATAL` on errors. Defaults to True.
-
-        """
-        import fnmatch
-        import itertools
-        import functools
-        import zipfile
-
-        def _filter_entries(namelist):
-            """Filter entries of the archive based on the specified list of extract_dirs."""
-            filter_partial = functools.partial(fnmatch.filter, namelist)
-            for entry in itertools.chain(*map(filter_partial, target_unzip_dirs or ['*'])):
-                yield entry
-
-        dirs = self.query_abs_dirs()
-        zip = self.download_file(url, parent_dir=dirs['abs_work_dir'],
-                                 error_level=FATAL)
-
-        try:
-            self.info('Using ZipFile to extract {0} to {1}'.format(zip, parent_dir))
-            with zipfile.ZipFile(zip) as bundle:
-                for entry in _filter_entries(bundle.namelist()):
-                    bundle.extract(entry, path=parent_dir)
-
-                    # ZipFile doesn't preserve permissions: http://bugs.python.org/issue15795
-                    fname = os.path.realpath(os.path.join(parent_dir, entry))
-                    mode = bundle.getinfo(entry).external_attr >> 16 & 0x1FF
-                    # Only set permissions if attributes are available.
-                    if mode:
-                        os.chmod(fname, mode)
-        except zipfile.BadZipfile as e:
-            self.log('{0} ({1})'.format(e.message, zip),
-                     level=FATAL, exit_code=2)
 
 
 class FirefoxUIFunctionalTests(FirefoxUITests):

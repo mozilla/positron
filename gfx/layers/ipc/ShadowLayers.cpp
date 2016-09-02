@@ -445,7 +445,7 @@ ShadowLayerForwarder::UseTextures(CompositableClient* aCompositable,
                                         readLock,
                                         fence.IsValid() ? MaybeFence(fence) : MaybeFence(null_t()),
                                         t.mTimeStamp, t.mPictureRect,
-                                        t.mFrameID, t.mProducerID, t.mInputFrameID));
+                                        t.mFrameID, t.mProducerID));
     if ((t.mTextureClient->GetFlags() & TextureFlags::IMMEDIATE_UPLOAD)
         && t.mTextureClient->HasIntermediateBuffer()) {
 
@@ -586,6 +586,15 @@ ShadowLayerForwarder::StorePluginWidgetConfigurations(const nsTArray<nsIWidget::
                                                      configuration.mClipRegion,
                                                      configuration.mBounds,
                                                      configuration.mVisible));
+  }
+}
+
+void
+ShadowLayerForwarder::SendPaintTime(uint64_t aId, TimeDuration aPaintTime)
+{
+  if (!HasShadowManager() || !mShadowManager->IPCOpen() ||
+      !mShadowManager->SendPaintTime(aId, aPaintTime)) {
+    NS_WARNING("Could not send paint times over IPC");
   }
 }
 

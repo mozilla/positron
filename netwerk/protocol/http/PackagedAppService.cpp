@@ -264,7 +264,7 @@ PackagedAppService::CacheEntryWriter::CopyHeadersFromChannel(nsIChannel *aChanne
   return httpChan->VisitResponseHeaders(headerCopier);
 }
 
-NS_METHOD
+nsresult
 PackagedAppService::CacheEntryWriter::ConsumeData(const char *aBuf,
                                                   uint32_t aCount,
                                                   uint32_t *aWriteCount)
@@ -682,7 +682,7 @@ PackagedAppService::PackagedAppDownloader::OnStopRequest(nsIRequest *aRequest,
   return NS_OK;
 }
 
-NS_METHOD
+nsresult
 PackagedAppService::PackagedAppDownloader::ConsumeData(nsIInputStream *aStream,
                                                        void *aClosure,
                                                        const char *aFromRawSegment,

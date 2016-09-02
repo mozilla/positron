@@ -10,7 +10,7 @@
 #include "nsIUDPSocket.h"
 #include "nsINetAddr.h"
 #include "mozilla/AppProcessChecker.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 #include "mozilla/ipc/InputStreamUtils.h"
 #include "mozilla/net/DNS.h"
 #include "mozilla/net/NeckoCommon.h"
@@ -79,11 +79,8 @@ UDPSocketParent::OfflineNotification(nsISupports *aSubject)
 uint32_t
 UDPSocketParent::GetAppId()
 {
-  uint32_t appId;
-  if (!mPrincipal || NS_FAILED(mPrincipal->GetAppId(&appId))) {
-    return nsIScriptSecurityManager::UNKNOWN_APP_ID;
-  }
-  return appId;
+  return mPrincipal ? mPrincipal->GetAppId()
+                    : nsIScriptSecurityManager::UNKNOWN_APP_ID;
 }
 
 bool

@@ -14,7 +14,7 @@
 #include "mozilla/FloatingPoint.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/SizePrintfMacros.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 #include "mozilla/UseCounter.h"
 
 #include "AccessCheck.h"
@@ -33,7 +33,7 @@
 #include "xpcprivate.h"
 #include "XrayWrapper.h"
 #include "nsPrintfCString.h"
-#include "mozilla/Snprintf.h"
+#include "mozilla/Sprintf.h"
 #include "nsGlobalWindow.h"
 
 #include "mozilla/dom/ScriptSettings.h"
@@ -392,7 +392,7 @@ TErrorResult<CleanupPolicy>::ClearUnionData()
 {
   AssertInOwningThread();
   if (IsJSException()) {
-    JSContext* cx = nsContentUtils::RootingCx();
+    JSContext* cx = dom::danger::GetJSContext();
     MOZ_ASSERT(cx);
     mJSException.setUndefined();
     js::RemoveRawValueRoot(cx, &mJSException);
@@ -436,7 +436,7 @@ TErrorResult<CleanupPolicy>::operator=(TErrorResult<CleanupPolicy>&& aRHS)
     mMessage = aRHS.mMessage;
     aRHS.mMessage = nullptr;
   } else if (aRHS.IsJSException()) {
-    JSContext* cx = nsContentUtils::RootingCx();
+    JSContext* cx = dom::danger::GetJSContext();
     MOZ_ASSERT(cx);
     mJSException.setUndefined();
     if (!js::AddRawValueRoot(cx, &mJSException, "TErrorResult::mJSException")) {
@@ -495,7 +495,7 @@ TErrorResult<CleanupPolicy>::CloneTo(TErrorResult& aRv) const
 #ifdef DEBUG
     aRv.mUnionState = HasJSException;
 #endif
-    JSContext* cx = nsContentUtils::RootingCx();
+    JSContext* cx = dom::danger::GetJSContext();
     JS::Rooted<JS::Value> exception(cx, mJSException);
     aRv.ThrowJSException(cx, exception);
   }
@@ -2448,7 +2448,7 @@ ConstructJSImplementation(const char* aContractId,
       do_QueryInterface(implISupports);
     nsCOMPtr<nsPIDOMWindowInner> window = do_QueryInterface(aGlobal);
     if (gpi) {
-      JS::Rooted<JS::Value> initReturn(GetJSRuntime());
+      JS::Rooted<JS::Value> initReturn(RootingCx());
       rv = gpi->Init(window, &initReturn);
       if (NS_FAILED(rv)) {
         aRv.Throw(rv);
@@ -2574,13 +2574,13 @@ ConvertJSValueToByteString(JSContext* cx, JS::Handle<JS::Value> v,
       // 20 digits, plus one more for the null terminator.
       char index[21];
       static_assert(sizeof(size_t) <= 8, "index array too small");
-      snprintf_literal(index, "%" PRIuSIZE, badCharIndex);
+      SprintfLiteral(index, "%" PRIuSIZE, badCharIndex);
       // A char16_t is 16 bits long.  The biggest unsigned 16 bit
       // number (65,535) has 5 digits, plus one more for the null
       // terminator.
       char badCharArray[6];
       static_assert(sizeof(char16_t) <= 2, "badCharArray too small");
-      snprintf_literal(badCharArray, "%d", badChar);
+      SprintfLiteral(badCharArray, "%d", badChar);
       ThrowErrorMessage(cx, MSG_INVALID_BYTESTRING, index, badCharArray);
       return false;
     }

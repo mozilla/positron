@@ -40,7 +40,7 @@
 #include "mozilla/TextEvents.h"
 #include "mozilla/TouchEvents.h"
 #include "mozilla/UniquePtr.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 #include "BlobParent.h"
 #include "nsCOMPtr.h"
 #include "nsContentAreaDragDrop.h"
@@ -150,7 +150,7 @@ private:
 
     // This shouldn't be called directly except by the event loop. Use Dispatch
     // to start the sequence.
-    NS_IMETHOD Run()
+    NS_IMETHOD Run() override
     {
         if (NS_IsMainThread()) {
             SendResponse();
@@ -475,9 +475,7 @@ TabParent::IsVisible() const
     return false;
   }
 
-  bool visible = false;
-  frameLoader->GetVisible(&visible);
-  return visible;
+  return frameLoader->GetVisible();
 }
 
 void
@@ -1419,9 +1417,9 @@ public:
     MOZ_ASSERT(mTabParent);
   }
 
-  NS_IMETHODIMP Observe(nsISupports* aSubject,
-                        const char* aTopic,
-                        const char16_t* aData) override
+  NS_IMETHOD Observe(nsISupports* aSubject,
+                     const char* aTopic,
+                     const char16_t* aData) override
   {
     if (!mTabParent) {
       // We already sent the notification
@@ -1776,12 +1774,11 @@ TabParent::RecvSetCustomCursor(const nsCString& aCursorData,
 nsIXULBrowserWindow*
 TabParent::GetXULBrowserWindow()
 {
-  nsCOMPtr<nsIContent> frame = do_QueryInterface(mFrameElement);
-  if (!frame) {
+  if (!mFrameElement) {
     return nullptr;
   }
 
-  nsCOMPtr<nsIDocShell> docShell = frame->OwnerDoc()->GetDocShell();
+  nsCOMPtr<nsIDocShell> docShell = mFrameElement->OwnerDoc()->GetDocShell();
   if (!docShell) {
     return nullptr;
   }
@@ -2987,7 +2984,7 @@ public:
   }
 
 private:
-  NS_IMETHOD Run() {
+  NS_IMETHOD Run() override {
     MOZ_ASSERT(NS_IsMainThread());
     if (RefPtr<TabParent> tabParent = mUpdateObserver->GetTabParent()) {
       tabParent->LayerTreeUpdate(mActive);

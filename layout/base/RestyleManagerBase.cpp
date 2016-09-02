@@ -15,6 +15,7 @@ RestyleManagerBase::RestyleManagerBase(nsPresContext* aPresContext)
   , mRestyleGeneration(1)
   , mHoverGeneration(0)
   , mObservingRefreshDriver(false)
+  , mInStyleRefresh(false)
 {
   MOZ_ASSERT(mPresContext);
 }
@@ -133,6 +134,90 @@ RestyleManagerBase::RestyleHintToString(nsRestyleHint aHint)
     }
   }
   return result;
+}
+
+#ifdef DEBUG
+/* static */ nsCString
+RestyleManagerBase::ChangeHintToString(nsChangeHint aHint)
+{
+  nsCString result;
+  bool any = false;
+  const char* names[] = {
+    "RepaintFrame", "NeedReflow", "ClearAncestorIntrinsics",
+    "ClearDescendantIntrinsics", "NeedDirtyReflow", "SyncFrameView",
+    "UpdateCursor", "UpdateEffects", "UpdateOpacityLayer",
+    "UpdateTransformLayer", "ReconstructFrame", "UpdateOverflow",
+    "UpdateSubtreeOverflow", "UpdatePostTransformOverflow",
+    "UpdateParentOverflow",
+    "ChildrenOnlyTransform", "RecomputePosition", "AddOrRemoveTransform",
+    "BorderStyleNoneChange", "UpdateTextPath", "SchedulePaint",
+    "NeutralChange", "InvalidateRenderingObservers",
+    "ReflowChangesSizeOrPosition", "UpdateComputedBSize",
+    "UpdateUsesOpacity", "UpdateBackgroundPosition"
+  };
+  static_assert(nsChangeHint_AllHints == (1 << ArrayLength(names)) - 1,
+                "Name list doesn't match change hints.");
+  uint32_t hint = aHint & ((1 << ArrayLength(names)) - 1);
+  uint32_t rest = aHint & ~((1 << ArrayLength(names)) - 1);
+  if (hint == nsChangeHint_Hints_NotHandledForDescendants) {
+    result.AppendLiteral("nsChangeHint_Hints_NotHandledForDescendants");
+    hint = 0;
+    any = true;
+  } else {
+    if ((hint & NS_STYLE_HINT_REFLOW) == NS_STYLE_HINT_REFLOW) {
+      result.AppendLiteral("NS_STYLE_HINT_REFLOW");
+      hint = hint & ~NS_STYLE_HINT_REFLOW;
+      any = true;
+    } else if ((hint & nsChangeHint_AllReflowHints) == nsChangeHint_AllReflowHints) {
+      result.AppendLiteral("nsChangeHint_AllReflowHints");
+      hint = hint & ~nsChangeHint_AllReflowHints;
+      any = true;
+    } else if ((hint & NS_STYLE_HINT_VISUAL) == NS_STYLE_HINT_VISUAL) {
+      result.AppendLiteral("NS_STYLE_HINT_VISUAL");
+      hint = hint & ~NS_STYLE_HINT_VISUAL;
+      any = true;
+    }
+  }
+  for (uint32_t i = 0; i < ArrayLength(names); i++) {
+    if (hint & (1 << i)) {
+      if (any) {
+        result.AppendLiteral(" | ");
+      }
+      result.AppendPrintf("nsChangeHint_%s", names[i]);
+      any = true;
+    }
+  }
+  if (rest) {
+    if (any) {
+      result.AppendLiteral(" | ");
+    }
+    result.AppendPrintf("0x%0x", rest);
+  } else {
+    if (!any) {
+      result.AppendLiteral("nsChangeHint(0)");
+    }
+  }
+  return result;
+}
+#endif
+
+void
+RestyleManagerBase::PostRestyleEventInternal(bool aForLazyConstruction)
+{
+  // Make sure we're not in a style refresh; if we are, we still have
+  // a call to ProcessPendingRestyles coming and there's no need to
+  // add ourselves as a refresh observer until then.
+  bool inRefresh = !aForLazyConstruction && mInStyleRefresh;
+  nsIPresShell* presShell = PresContext()->PresShell();
+  if (!ObservingRefreshDriver() && !inRefresh) {
+    SetObservingRefreshDriver(PresContext()->RefreshDriver()->
+        AddStyleFlushObserver(presShell));
+  }
+
+  // Unconditionally flag our document as needing a flush.  The other
+  // option here would be a dedicated boolean to track whether we need
+  // to do so (set here and unset in ProcessPendingRestyles).
+  presShell->GetDocument()->SetNeedStyleFlush();
 }
 
 /**
@@ -433,7 +518,14 @@ RecomputePosition(nsIFrame* aFrame)
         // ReflowInput::ApplyRelativePositioning would work here, but
         // since we've already checked mPosition and aren't changing the frame's
         // normal position, go ahead and add the offsets directly.
-        cont->SetPosition(cont->GetNormalPosition() +
+        // First, we need to ensure that the normal position is stored though.
+        nsPoint normalPosition = cont->GetNormalPosition();
+        auto props = cont->Properties();
+        const auto& prop = nsIFrame::NormalPositionProperty();
+        if (!props.Get(prop)) {
+          props.Set(prop, new nsPoint(normalPosition));
+        }
+        cont->SetPosition(normalPosition +
                           nsPoint(newOffsets.left, newOffsets.top));
       }
     }
@@ -960,8 +1052,7 @@ RestyleManagerBase::ProcessRestyledFrames(nsStyleChangeList& aChangeList)
 {
   NS_ASSERTION(!nsContentUtils::IsSafeToRunScript(),
                "Someone forgot a script blocker");
-  int32_t count = aChangeList.Count();
-  if (!count)
+  if (aChangeList.IsEmpty())
     return NS_OK;
 
   PROFILER_LABEL("RestyleManager", "ProcessRestyledFrames",
@@ -978,26 +1069,19 @@ RestyleManagerBase::ProcessRestyledFrames(nsStyleChangeList& aChangeList)
   // Mark frames so that we skip frames that die along the way, bug 123049.
   // A frame can be in the list multiple times with different hints. Further
   // optmization is possible if nsStyleChangeList::AppendChange could coalesce
-  int32_t index = count;
-
-  while (0 <= --index) {
-    const nsStyleChangeData* changeData;
-    aChangeList.ChangeAt(index, &changeData);
-    if (changeData->mFrame) {
-      propTable->Set(changeData->mFrame, ChangeListProperty(), true);
+  for (const nsStyleChangeData& data : aChangeList) {
+    if (data.mFrame) {
+      propTable->Set(data.mFrame, ChangeListProperty(), true);
     }
   }
 
-  index = count;
-
   bool didUpdateCursor = false;
 
-  while (0 <= --index) {
-    nsIFrame* frame;
-    nsIContent* content;
+  for (const nsStyleChangeData& data : aChangeList) {
+    nsIFrame* frame = data.mFrame;
+    nsIContent* content = data.mContent;
+    nsChangeHint hint = data.mHint;
     bool didReflowThisFrame = false;
-    nsChangeHint hint;
-    aChangeList.ChangeAt(index, frame, content, hint);
 
     NS_ASSERTION(!(hint & nsChangeHint_AllReflowHints) ||
                  (hint & nsChangeHint_NeedReflow),
@@ -1033,7 +1117,7 @@ RestyleManagerBase::ProcessRestyledFrames(nsStyleChangeList& aChangeList)
           // It's because we need to set this state on each affected frame
           // that we can't coalesce nsChangeHint_UpdateContainingBlock hints up
           // to ancestors (i.e. it can't be an inherited change hint).
-          if (cont->IsAbsPosContaininingBlock()) {
+          if (cont->IsAbsPosContainingBlock()) {
             if (cont->StyleDisplay()->HasTransform(cont)) {
               cont->AddStateBits(NS_FRAME_MAY_BE_TRANSFORMED);
             }
@@ -1233,23 +1317,20 @@ RestyleManagerBase::ProcessRestyledFrames(nsStyleChangeList& aChangeList)
   // cleanup references and verify the style tree.  Note that the latter needs
   // to happen once we've processed the whole list, since until then the tree
   // is not in fact in a consistent state.
-  index = count;
-  while (0 <= --index) {
-    const nsStyleChangeData* changeData;
-    aChangeList.ChangeAt(index, &changeData);
-    if (changeData->mFrame) {
-      propTable->Delete(changeData->mFrame, ChangeListProperty());
+  for (const nsStyleChangeData& data : aChangeList) {
+    if (data.mFrame) {
+      propTable->Delete(data.mFrame, ChangeListProperty());
     }
 
 #ifdef DEBUG
     // reget frame from content since it may have been regenerated...
-    if (changeData->mContent) {
-      nsIFrame* frame = changeData->mContent->GetPrimaryFrame();
+    if (data.mContent) {
+      nsIFrame* frame = data.mContent->GetPrimaryFrame();
       if (frame) {
         DebugVerifyStyleTree(frame);
       }
-    } else if (!changeData->mFrame ||
-               changeData->mFrame->GetType() != nsGkAtoms::viewportFrame) {
+    } else if (!data.mFrame ||
+               data.mFrame->GetType() != nsGkAtoms::viewportFrame) {
       NS_WARNING("Unable to test style tree integrity -- no content node "
                  "(and not a viewport frame)");
     }

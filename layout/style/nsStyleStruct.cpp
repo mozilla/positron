@@ -60,10 +60,10 @@ EqualURIs(nsIURI *aURI1, nsIURI *aURI2)
 }
 
 static bool
-EqualURIs(mozilla::css::URLValue *aURI1, mozilla::css::URLValue *aURI2)
+MaybeUnresolvedURIEquals(css::URLValue *aURI1, css::URLValue *aURI2)
 {
   return aURI1 == aURI2 ||    // handle null==null, and optimize
-         (aURI1 && aURI2 && aURI1->URIEquals(*aURI2));
+         (aURI1 && aURI2 && aURI1->MaybeUnresolvedURIEquals(*aURI2));
 }
 
 static
@@ -124,11 +124,13 @@ static bool AreShadowArraysEqual(nsCSSShadowArray* lhs, nsCSSShadowArray* rhs);
 void
 FragmentOrURL::SetValue(const nsCSSValue* aValue)
 {
-  mozilla::css::URLValue *urlVal = aValue->GetURLStructValue();
-  MOZ_ASSERT_IF(urlVal->GetLocalURLFlag(), urlVal->GetURI());
-  mIsLocalRef = urlVal->GetLocalURLFlag();
+  mozilla::css::URLValueData *urlData = aValue->GetUnit() == eCSSUnit_URL
+    ? static_cast<mozilla::css::URLValueData *>(aValue->GetURLStructValue())
+    : static_cast<mozilla::css::URLValueData *>(aValue->GetImageStructValue());
+  MOZ_ASSERT_IF(urlData->GetLocalURLFlag(), urlData->GetURI());
+  mIsLocalRef = urlData->GetLocalURLFlag();
 
-  mURL = urlVal->GetURI();
+  mURL = urlData->GetURI();
 
 #ifdef DEBUG
   if (mIsLocalRef) {
@@ -955,10 +957,10 @@ nsStyleSVG::nsStyleSVG(StyleStructContext aContext)
   , mFillOpacity(1.0f)
   , mStrokeMiterlimit(4.0f)
   , mStrokeOpacity(1.0f)
-  , mClipRule(NS_STYLE_FILL_RULE_NONZERO)
+  , mClipRule(StyleFillRule::Nonzero)
   , mColorInterpolation(NS_STYLE_COLOR_INTERPOLATION_SRGB)
   , mColorInterpolationFilters(NS_STYLE_COLOR_INTERPOLATION_LINEARRGB)
-  , mFillRule(NS_STYLE_FILL_RULE_NONZERO)
+  , mFillRule(StyleFillRule::Nonzero)
   , mPaintOrder(NS_STYLE_PAINT_ORDER_NORMAL)
   , mShapeRendering(NS_STYLE_SHAPE_RENDERING_AUTO)
   , mStrokeLinecap(NS_STYLE_STROKE_LINECAP_BUTT)
@@ -2216,7 +2218,7 @@ nsStyleImage::IsOpaque() const
   MOZ_ASSERT(imageContainer, "IsComplete() said image container is ready");
 
   // Check if the crop region of the image is opaque.
-  if (imageContainer->IsOpaque()) {
+  if (imageContainer->WillDrawOpaqueNow()) {
     if (!mCropRect) {
       return true;
     }
@@ -2333,7 +2335,7 @@ nsStyleImage::PurgeCacheForViewportChange(
 // nsStyleImageLayers
 //
 
-const nsCSSProperty nsStyleImageLayers::kBackgroundLayerTable[] = {
+const nsCSSPropertyID nsStyleImageLayers::kBackgroundLayerTable[] = {
   eCSSProperty_background,                // shorthand
   eCSSProperty_background_color,          // color
   eCSSProperty_background_image,          // image
@@ -2349,7 +2351,7 @@ const nsCSSProperty nsStyleImageLayers::kBackgroundLayerTable[] = {
 };
 
 #ifdef MOZ_ENABLE_MASK_AS_SHORTHAND
-const nsCSSProperty nsStyleImageLayers::kMaskLayerTable[] = {
+const nsCSSPropertyID nsStyleImageLayers::kMaskLayerTable[] = {
   eCSSProperty_mask,                      // shorthand
   eCSSProperty_UNKNOWN,                   // color
   eCSSProperty_mask_image,                // image
@@ -2488,11 +2490,15 @@ nsStyleImageLayers::HasLayerWithImage() const
 }
 
 bool
-nsStyleImageLayers::Position::IsInitialValue() const
+nsStyleImageLayers::IsInitialPositionForLayerType(Position aPosition, LayerType aType)
 {
-  if (mXPosition.mPercent == 0.0 && mXPosition.mLength == 0 &&
-      mXPosition.mHasPercent && mYPosition.mPercent == 0.0 &&
-      mYPosition.mLength == 0 && mYPosition.mHasPercent) {
+  float intialValue = nsStyleImageLayers::GetInitialPositionForLayerType(aType);
+  if (aPosition.mXPosition.mPercent == intialValue &&
+      aPosition.mXPosition.mLength == 0 &&
+      aPosition.mXPosition.mHasPercent &&
+      aPosition.mYPosition.mPercent == intialValue &&
+      aPosition.mYPosition.mLength == 0 &&
+      aPosition.mYPosition.mHasPercent) {
     return true;
   }
 
@@ -2500,7 +2506,7 @@ nsStyleImageLayers::Position::IsInitialValue() const
 }
 
 void
-nsStyleImageLayers::Position::SetInitialPercentValues(float aPercentVal)
+Position::SetInitialPercentValues(float aPercentVal)
 {
   mXPosition.mPercent = aPercentVal;
   mXPosition.mLength = 0;
@@ -2511,7 +2517,7 @@ nsStyleImageLayers::Position::SetInitialPercentValues(float aPercentVal)
 }
 
 void
-nsStyleImageLayers::Position::SetInitialZeroValues()
+Position::SetInitialZeroValues()
 {
   mXPosition.mPercent = 0;
   mXPosition.mLength = 0;
@@ -2658,7 +2664,6 @@ nsStyleImageLayers::Layer::Layer()
   , mComposite(NS_STYLE_MASK_COMPOSITE_ADD)
   , mMaskMode(NS_STYLE_MASK_MODE_MATCH_SOURCE)
 {
-  mPosition.SetInitialPercentValues(0.0f); // Initial value is "0% 0%"
   mImage.SetNull();
   mSize.SetInitialValues();
 }
@@ -2671,6 +2676,10 @@ void
 nsStyleImageLayers::Layer::Initialize(nsStyleImageLayers::LayerType aType)
 {
   mRepeat.SetInitialValues(aType);
+
+  float initialPositionValue =
+    nsStyleImageLayers::GetInitialPositionForLayerType(aType);
+  mPosition.SetInitialPercentValues(initialPositionValue);
 
   if (aType == LayerType::Background) {
     mOrigin = NS_STYLE_IMAGELAYER_ORIGIN_PADDING;
@@ -2905,7 +2914,7 @@ StyleTransition::SetInitialValues()
 }
 
 void
-StyleTransition::SetUnknownProperty(nsCSSProperty aProperty,
+StyleTransition::SetUnknownProperty(nsCSSPropertyID aProperty,
                                              const nsAString& aPropertyString)
 {
   MOZ_ASSERT(nsCSSProps::LookupProperty(aPropertyString,
@@ -2977,8 +2986,8 @@ nsStyleDisplay::nsStyleDisplay(StyleStructContext aContext)
   , mContain(NS_STYLE_CONTAIN_NONE)
   , mAppearance(NS_THEME_NONE)
   , mPosition(NS_STYLE_POSITION_STATIC)
-  , mFloat(NS_STYLE_FLOAT_NONE)
-  , mOriginalFloat(NS_STYLE_FLOAT_NONE)
+  , mFloat(StyleFloat::None_)
+  , mOriginalFloat(StyleFloat::None_)
   , mBreakType(NS_STYLE_CLEAR_NONE)
   , mBreakInside(NS_STYLE_PAGE_BREAK_AUTO)
   , mBreakBefore(false)
@@ -3099,11 +3108,11 @@ nsStyleDisplay::CalcDifference(const nsStyleDisplay& aNewData) const
 {
   nsChangeHint hint = nsChangeHint(0);
 
-  if (!EqualURIs(mBinding, aNewData.mBinding)
+  if (!MaybeUnresolvedURIEquals(mBinding, aNewData.mBinding)
       || mPosition != aNewData.mPosition
       || mDisplay != aNewData.mDisplay
       || mContain != aNewData.mContain
-      || (mFloat == NS_STYLE_FLOAT_NONE) != (aNewData.mFloat == NS_STYLE_FLOAT_NONE)
+      || (mFloat == StyleFloat::None_) != (aNewData.mFloat == StyleFloat::None_)
       || mOverflowX != aNewData.mOverflowX
       || mOverflowY != aNewData.mOverflowY
       || mScrollBehavior != aNewData.mScrollBehavior
@@ -3383,6 +3392,7 @@ nsStyleVisibility::CalcDifference(const nsStyleVisibility& aNewData) const
 
 nsStyleContentData::~nsStyleContentData()
 {
+  MOZ_COUNT_DTOR(nsStyleContentData);
   MOZ_ASSERT(!mImageTracked,
              "nsStyleContentData being destroyed while still tracking image!");
   if (mType == eStyleContentType_Image) {
@@ -3395,16 +3405,13 @@ nsStyleContentData::~nsStyleContentData()
   }
 }
 
-nsStyleContentData&
-nsStyleContentData::operator=(const nsStyleContentData& aOther)
+nsStyleContentData::nsStyleContentData(const nsStyleContentData& aOther)
+  : mType(aOther.mType)
+#ifdef DEBUG
+  , mImageTracked(false)
+#endif
 {
-  if (this == &aOther) {
-    return *this;
-  }
-  this->~nsStyleContentData();
-  new (this) nsStyleContentData();
-
-  mType = aOther.mType;
+  MOZ_COUNT_CTOR(nsStyleContentData);
   if (mType == eStyleContentType_Image) {
     mContent.mImage = aOther.mContent.mImage;
     NS_IF_ADDREF(mContent.mImage);
@@ -3417,6 +3424,17 @@ nsStyleContentData::operator=(const nsStyleContentData& aOther)
   } else {
     mContent.mString = nullptr;
   }
+}
+
+nsStyleContentData&
+nsStyleContentData::operator=(const nsStyleContentData& aOther)
+{
+  if (this == &aOther) {
+    return *this;
+  }
+  this->~nsStyleContentData();
+  new (this) nsStyleContentData(aOther);
+
   return *this;
 }
 
@@ -3497,12 +3515,6 @@ nsStyleContentData::UntrackImage(nsPresContext* aContext)
 
 nsStyleContent::nsStyleContent(StyleStructContext aContext)
   : mMarkerOffset(eStyleUnit_Auto)
-  , mContents(nullptr)
-  , mIncrements(nullptr)
-  , mResets(nullptr)
-  , mContentCount(0)
-  , mIncrementCount(0)
-  , mResetCount(0)
 {
   MOZ_COUNT_CTOR(nsStyleContent);
 }
@@ -3510,61 +3522,29 @@ nsStyleContent::nsStyleContent(StyleStructContext aContext)
 nsStyleContent::~nsStyleContent()
 {
   MOZ_COUNT_DTOR(nsStyleContent);
-  DELETE_ARRAY_IF(mContents);
-  DELETE_ARRAY_IF(mIncrements);
-  DELETE_ARRAY_IF(mResets);
 }
 
 void
 nsStyleContent::Destroy(nsPresContext* aContext)
 {
   // Unregister any images we might have with the document.
-  for (uint32_t i = 0; i < mContentCount; ++i) {
-    if ((mContents[i].mType == eStyleContentType_Image) &&
-        mContents[i].mContent.mImage) {
-      mContents[i].UntrackImage(aContext);
+  for (auto& content : mContents) {
+    if (content.mType == eStyleContentType_Image && content.mContent.mImage) {
+      content.UntrackImage(aContext);
     }
   }
 
   this->~nsStyleContent();
-  aContext->PresShell()->
-    FreeByObjectID(eArenaObjectID_nsStyleContent, this);
+  aContext->PresShell()->FreeByObjectID(eArenaObjectID_nsStyleContent, this);
 }
 
 nsStyleContent::nsStyleContent(const nsStyleContent& aSource)
   : mMarkerOffset(aSource.mMarkerOffset)
-  , mContents(nullptr)
-  , mIncrements(nullptr)
-  , mResets(nullptr)
-  , mContentCount(0)
-  , mIncrementCount(0)
-  , mResetCount(0)
-
+  , mContents(aSource.mContents)
+  , mIncrements(aSource.mIncrements)
+  , mResets(aSource.mResets)
 {
   MOZ_COUNT_CTOR(nsStyleContent);
-
-  uint32_t index;
-  if (NS_SUCCEEDED(AllocateContents(aSource.ContentCount()))) {
-    for (index = 0; index < mContentCount; index++) {
-      ContentAt(index) = aSource.ContentAt(index);
-    }
-  }
-
-  if (NS_SUCCEEDED(AllocateCounterIncrements(aSource.CounterIncrementCount()))) {
-    for (index = 0; index < mIncrementCount; index++) {
-      const nsStyleCounterData *data = aSource.GetCounterIncrementAt(index);
-      mIncrements[index].mCounter = data->mCounter;
-      mIncrements[index].mValue = data->mValue;
-    }
-  }
-
-  if (NS_SUCCEEDED(AllocateCounterResets(aSource.CounterResetCount()))) {
-    for (index = 0; index < mResetCount; index++) {
-      const nsStyleCounterData *data = aSource.GetCounterResetAt(index);
-      mResets[index].mCounter = data->mCounter;
-      mResets[index].mValue = data->mValue;
-    }
-  }
 }
 
 nsChangeHint
@@ -3582,61 +3562,21 @@ nsStyleContent::CalcDifference(const nsStyleContent& aNewData) const
   // 'content' property, then we will need to revisit the optimization
   // in ReResolveStyleContext.
 
-  if (mContentCount != aNewData.mContentCount ||
-      mIncrementCount != aNewData.mIncrementCount ||
-      mResetCount != aNewData.mResetCount) {
+  // Unfortunately we need to reframe even if the content lengths are the same;
+  // a simple reflow will not pick up different text or different image URLs,
+  // since we set all that up in the CSSFrameConstructor
+  if (mContents != aNewData.mContents ||
+      mIncrements != aNewData.mIncrements ||
+      mResets != aNewData.mResets) {
     return nsChangeHint_ReconstructFrame;
   }
 
-  uint32_t ix = mContentCount;
-  while (0 < ix--) {
-    if (mContents[ix] != aNewData.mContents[ix]) {
-      // Unfortunately we need to reframe here; a simple reflow
-      // will not pick up different text or different image URLs,
-      // since we set all that up in the CSSFrameConstructor
-      return nsChangeHint_ReconstructFrame;
-    }
-  }
-  ix = mIncrementCount;
-  while (0 < ix--) {
-    if ((mIncrements[ix].mValue != aNewData.mIncrements[ix].mValue) ||
-        (mIncrements[ix].mCounter != aNewData.mIncrements[ix].mCounter)) {
-      return nsChangeHint_ReconstructFrame;
-    }
-  }
-  ix = mResetCount;
-  while (0 < ix--) {
-    if ((mResets[ix].mValue != aNewData.mResets[ix].mValue) ||
-        (mResets[ix].mCounter != aNewData.mResets[ix].mCounter)) {
-      return nsChangeHint_ReconstructFrame;
-    }
-  }
   if (mMarkerOffset != aNewData.mMarkerOffset) {
     return NS_STYLE_HINT_REFLOW;
   }
+
   return nsChangeHint(0);
 }
-
-nsresult
-nsStyleContent::AllocateContents(uint32_t aCount)
-{
-  // We need to run the destructors of the elements of mContents, so we
-  // delete and reallocate even if aCount == mContentCount.  (If
-  // nsStyleContentData had its members private and managed their
-  // ownership on setting, we wouldn't need this, but that seems
-  // unnecessary at this point.)
-  DELETE_ARRAY_IF(mContents);
-  if (aCount) {
-    mContents = new nsStyleContentData[aCount];
-    if (! mContents) {
-      mContentCount = 0;
-      return NS_ERROR_OUT_OF_MEMORY;
-    }
-  }
-  mContentCount = aCount;
-  return NS_OK;
-}
-
 
 // --------------------
 // nsStyleTextReset
@@ -3686,7 +3626,10 @@ nsStyleTextReset::CalcDifference(const nsStyleTextReset& aNewData) const
   }
 
   // Repaint for decoration color changes
-  nscolor decColor, otherDecColor;
+  // Dummy initialisations to keep Valgrind/Memcheck happy.
+  // See bug 1289098 comment 1.
+  nscolor decColor = NS_RGBA(0, 0, 0, 0);
+  nscolor otherDecColor = NS_RGBA(0, 0, 0, 0);
   bool isFG, otherIsFG;
   GetDecorationColor(decColor, isFG);
   aNewData.GetDecorationColor(otherDecColor, otherIsFG);
@@ -4043,7 +3986,7 @@ nsStyleUserInterface::CopyCursorArrayFrom(const nsStyleUserInterface& aSource)
 //
 
 nsStyleUIReset::nsStyleUIReset(StyleStructContext aContext)
-  : mUserSelect(NS_STYLE_USER_SELECT_AUTO)
+  : mUserSelect(StyleUserSelect::Auto)
   , mForceBrokenImageIcon(0)
   , mIMEMode(NS_STYLE_IME_MODE_AUTO)
   , mWindowDragging(NS_STYLE_WINDOW_DRAGGING_DEFAULT)

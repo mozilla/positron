@@ -11,6 +11,7 @@
 #include "nsIScriptSecurityManager.h"
 #include "nsJSPrincipals.h"
 
+#include "mozilla/Attributes.h"
 #include "mozilla/dom/ChromeUtilsBinding.h"
 
 class nsIContentSecurityPolicy;
@@ -45,11 +46,11 @@ public:
   // |!key1=value1&key2=value2|. If there are no non-default attributes, this
   // returns an empty string.
   void CreateSuffix(nsACString& aStr) const;
-  bool PopulateFromSuffix(const nsACString& aStr);
+  MOZ_MUST_USE bool PopulateFromSuffix(const nsACString& aStr);
 
   // Populates the attributes from a string like
   // |uri!key1=value1&key2=value2| and returns the uri without the suffix.
-  bool PopulateFromOrigin(const nsACString& aOrigin,
+  MOZ_MUST_USE bool PopulateFromOrigin(const nsACString& aOrigin,
                           nsACString& aOriginNoSuffix);
 
   // Helper function to match mIsPrivateBrowsing to existing private browsing
@@ -264,6 +265,9 @@ public:
   NS_IMETHOD GetIsInIsolatedMozBrowserElement(bool* aIsInIsolatedMozBrowserElement) final;
   NS_IMETHOD GetUnknownAppId(bool* aUnknownAppId) final;
   NS_IMETHOD GetUserContextId(uint32_t* aUserContextId) final;
+  NS_IMETHOD GetPrivateBrowsingId(uint32_t* aPrivateBrowsingId) final;
+
+  virtual bool AddonHasPermission(const nsAString& aPerm);
 
   virtual bool IsOnCSSUnprefixingWhitelist() override { return false; }
 
@@ -277,6 +281,7 @@ public:
   const PrincipalOriginAttributes& OriginAttributesRef() { return mOriginAttributes; }
   uint32_t AppId() const { return mOriginAttributes.mAppId; }
   uint32_t UserContextId() const { return mOriginAttributes.mUserContextId; }
+  uint32_t PrivateBrowsingId() const { return mOriginAttributes.mPrivateBrowsingId; }
   bool IsInIsolatedMozBrowserElement() const { return mOriginAttributes.mInIsolatedMozBrowser; }
 
   enum PrincipalKind {

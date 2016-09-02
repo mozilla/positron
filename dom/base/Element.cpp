@@ -143,10 +143,11 @@
 #include "mozilla/dom/KeyframeEffectBinding.h"
 #include "mozilla/dom/WindowBinding.h"
 #include "mozilla/dom/ElementBinding.h"
-#include "mozilla/dom/VRDevice.h"
+#include "mozilla/dom/VRDisplay.h"
 #include "mozilla/IntegerPrintfMacros.h"
 #include "mozilla/Preferences.h"
 #include "nsComputedDOMStyle.h"
+#include "nsDOMStringMap.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -1731,6 +1732,18 @@ Element::BindToTree(nsIDocument* aDocument, nsIContent* aParent,
     }
   }
 
+  // It would be cleanest to mark nodes as dirty when (a) they're created and
+  // (b) they're unbound from a tree. However, we can't easily do (a) right now,
+  // because IsStyledByServo() is not always easy to check at node creation time,
+  // and the bits have different meaning in the non-IsStyledByServo case.
+  //
+  // So for now, we just mark nodes as dirty when they're inserted into a
+  // document or shadow tree.
+  if (IsStyledByServo() && IsInComposedDoc()) {
+    MOZ_ASSERT(!ServoData().get());
+    SetIsDirtyForServo();
+  }
+
   // XXXbz script execution during binding can trigger some of these
   // postcondition asserts....  But we do want that, since things will
   // generally be quite broken when that happens.
@@ -1839,11 +1852,15 @@ Element::UnbindFromTree(bool aDeep, bool aNullParent)
 
   ClearInDocument();
 
+  // Computed styled data isn't useful for detached nodes, and we'll need to
+  // recomputed it anyway if we ever insert the nodes back into a document.
+  if (IsStyledByServo()) {
+    ServoData().reset();
+  } else {
 #ifdef MOZ_STYLO
-  // Drop any servo node data, since it will generally need to be recomputed on
-  // re-insertion anyway.
-  ServoData().reset();
+    MOZ_ASSERT(!ServoData());
 #endif
+  }
 
   // Editable descendant count only counts descendants that
   // are in the uncomposed document.
@@ -3304,10 +3321,8 @@ GetFullScreenError(nsIDocument* aDoc)
 }
 
 void
-Element::RequestFullscreen(JSContext* aCx, JS::Handle<JS::Value> aOptions,
-                           ErrorResult& aError)
+Element::RequestFullscreen(ErrorResult& aError)
 {
-  MOZ_ASSERT_IF(!aCx, aOptions.isNullOrUndefined());
   // Only grant full-screen requests if this is called from inside a trusted
   // event handler (i.e. inside an event handler for a user initiated event).
   // This stops the full-screen from being abused similar to the popups of old,
@@ -3322,29 +3337,6 @@ Element::RequestFullscreen(JSContext* aCx, JS::Handle<JS::Value> aOptions,
 
   auto request = MakeUnique<FullscreenRequest>(this);
   request->mIsCallerChrome = nsContentUtils::IsCallerChrome();
-
-  RequestFullscreenOptions fsOptions;
-  // We need to check if options is convertible to a dict first before
-  // trying to init fsOptions; otherwise Init() would throw, and we want to
-  // silently ignore non-dictionary values
-  if (aCx) {
-    bool convertible;
-    if (!IsConvertibleToDictionary(aCx, aOptions, &convertible)) {
-      aError.Throw(NS_ERROR_FAILURE);
-      return;
-    }
-
-    if (convertible) {
-      if (!fsOptions.Init(aCx, aOptions)) {
-        aError.Throw(NS_ERROR_FAILURE);
-        return;
-      }
-
-      if (fsOptions.mVrDisplay) {
-        request->mVRHMDDevice = fsOptions.mVrDisplay->GetHMD();
-      }
-    }
-  }
 
   OwnerDoc()->AsyncRequestFullScreen(Move(request));
 }
@@ -3460,11 +3452,10 @@ Element::GetAnimations(const AnimationFilter& filter,
   CSSPseudoElementType pseudoType = CSSPseudoElementType::NotPseudo;
   // For animations on generated-content elements, the animations are stored
   // on the parent element.
-  nsIAtom* name = NodeInfo()->NameAtom();
-  if (name == nsGkAtoms::mozgeneratedcontentbefore) {
+  if (IsGeneratedContentContainerForBefore()) {
     elem = GetParentElement();
     pseudoType = CSSPseudoElementType::before;
-  } else if (name == nsGkAtoms::mozgeneratedcontentafter) {
+  } else if (IsGeneratedContentContainerForAfter()) {
     elem = GetParentElement();
     pseudoType = CSSPseudoElementType::after;
   }
@@ -3862,3 +3853,29 @@ Element::GetReferrerPolicyAsEnum()
   }
   return net::RP_Unset;
 }
+
+already_AddRefed<nsDOMStringMap>
+Element::Dataset()
+{
+  nsDOMSlots *slots = DOMSlots();
+
+  if (!slots->mDataset) {
+    // mDataset is a weak reference so assignment will not AddRef.
+    // AddRef is called before returning the pointer.
+    slots->mDataset = new nsDOMStringMap(this);
+  }
+
+  RefPtr<nsDOMStringMap> ret = slots->mDataset;
+  return ret.forget();
+}
+
+void
+Element::ClearDataset()
+{
+  nsDOMSlots *slots = GetExistingDOMSlots();
+
+  MOZ_ASSERT(slots && slots->mDataset,
+             "Slots should exist and dataset should not be null.");
+  slots->mDataset = nullptr;
+}
+

@@ -2590,7 +2590,9 @@ UpdatePropertyType(ExclusiveContext* cx, HeapTypeSet* types, NativeObject* obj, 
          * environments or the global lexical scope.
          */
         MOZ_ASSERT_IF(TypeSet::IsUntrackedValue(value),
-                      obj->is<LexicalScopeBase>() || IsExtensibleLexicalScope(obj));
+                      obj->is<CallObject>() ||
+                      obj->is<ModuleEnvironmentObject>() ||
+                      IsExtensibleLexicalEnvironment(obj));
         if ((indexed || !value.isUndefined() || !CanHaveEmptyPropertyTypesForOwnProperty(obj)) &&
             !TypeSet::IsUntrackedValue(value))
         {
@@ -4337,7 +4339,8 @@ void
 Zone::addSizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf,
                              size_t* typePool,
                              size_t* baselineStubsOptimized,
-                             size_t* uniqueIdMap)
+                             size_t* uniqueIdMap,
+                             size_t* shapeTables)
 {
     *typePool += types.typeLifoAlloc.sizeOfExcludingThis(mallocSizeOf);
     if (jitZone()) {
@@ -4345,6 +4348,8 @@ Zone::addSizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf,
             jitZone()->optimizedStubSpace()->sizeOfExcludingThis(mallocSizeOf);
     }
     *uniqueIdMap += uniqueIds_.sizeOfExcludingThis(mallocSizeOf);
+    *shapeTables += baseShapes.sizeOfExcludingThis(mallocSizeOf)
+                  + initialShapes.sizeOfExcludingThis(mallocSizeOf);
 }
 
 TypeZone::TypeZone(Zone* zone)

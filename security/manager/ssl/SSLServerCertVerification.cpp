@@ -112,7 +112,7 @@
 #include "mozilla/Telemetry.h"
 #include "mozilla/UniquePtr.h"
 #include "mozilla/net/DNS.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 #include "nsComponentManagerUtils.h"
 #include "nsContentUtils.h"
 #include "nsIBadCertListener2.h"
@@ -314,6 +314,7 @@ MapOverridableErrorToProbeValue(PRErrorCode errorCode)
     case mozilla::pkix::MOZILLA_PKIX_ERROR_NOT_YET_VALID_ISSUER_CERTIFICATE:
       return 15;
     case SEC_ERROR_INVALID_TIME: return 16;
+    case mozilla::pkix::MOZILLA_PKIX_ERROR_EMPTY_ISSUER_NAME: return 17;
   }
   NS_WARNING("Unknown certificate error code. Does MapOverridableErrorToProbeValue "
              "handle everything in DetermineCertOverrideErrors?");
@@ -376,6 +377,7 @@ DetermineCertOverrideErrors(const UniqueCERTCertificate& cert,
     case mozilla::pkix::MOZILLA_PKIX_ERROR_INADEQUATE_KEY_SIZE:
     case mozilla::pkix::MOZILLA_PKIX_ERROR_V1_CERT_USED_AS_CA:
     case mozilla::pkix::MOZILLA_PKIX_ERROR_NOT_YET_VALID_ISSUER_CERTIFICATE:
+    case mozilla::pkix::MOZILLA_PKIX_ERROR_EMPTY_ISSUER_NAME:
     {
       collectedErrors = nsICertOverrideService::ERROR_UNTRUSTED;
       errorCodeTrust = defaultErrorCodeToReport;
@@ -713,7 +715,7 @@ public:
   {
   }
 private:
-  NS_IMETHOD Run()
+  NS_IMETHOD Run() override
   {
     nsresult rv = mCertErrorRunnable->DispatchToMainThreadAndWait();
     // The result must run on the socket transport thread, which we are already

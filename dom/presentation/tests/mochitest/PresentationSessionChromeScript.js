@@ -185,6 +185,10 @@ const mockedDevice = {
     sendAsyncMessage('control-channel-established');
     return mockedControlChannel;
   },
+  disconnect: function() {},
+  isRequestedUrlSupported: function(requestedUrl) {
+    return true;
+  },
 };
 
 const mockedDevicePrompt = {
@@ -209,8 +213,8 @@ const mockedDevicePrompt = {
   simulateSelect: function() {
     this._request.select(mockedDevice);
   },
-  simulateCancel: function() {
-    this._request.cancel();
+  simulateCancel: function(result) {
+    this._request.cancel(result);
   }
 };
 
@@ -374,7 +378,7 @@ function tearDown() {
   deviceManager.QueryInterface(Ci.nsIPresentationDeviceListener).removeDevice(mockedDevice);
 
   // Register original factories.
-  for (var data in originalFactoryData) {
+  for (var data of originalFactoryData) {
     registerOriginalFactory(data.contractId, data.mockedClassId,
                             data.mockedFactory, data.originalClassId,
                             data.originalFactory);
@@ -393,8 +397,8 @@ addMessageListener('trigger-device-prompt-select', function() {
   mockedDevicePrompt.simulateSelect();
 });
 
-addMessageListener('trigger-device-prompt-cancel', function() {
-  mockedDevicePrompt.simulateCancel();
+addMessageListener('trigger-device-prompt-cancel', function(result) {
+  mockedDevicePrompt.simulateCancel(result);
 });
 
 addMessageListener('trigger-incoming-session-request', function(url) {

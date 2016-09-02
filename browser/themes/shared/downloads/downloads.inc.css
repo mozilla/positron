@@ -30,7 +30,8 @@
 }
 
 #emptyDownloads {
-  padding: 10px 20px;
+  padding: 16px 25px;
+  margin: 0;
   /* The panel can be wider than this description after the blocked subview is
      shown, so center the text. */
   text-align: center;
@@ -38,15 +39,15 @@
 
 .downloadsPanelFooter {
   background-color: hsla(210,4%,10%,.07);
-  border-top: 1px solid hsla(210,4%,10%,.14);
+  border-top: 1px solid var(--panel-separator-color);
 }
 
-.downloadsPanelFooter > toolbarseparator {
+.downloadsPanelFooter toolbarseparator {
   margin: 0;
   border: 0;
   min-width: 0;
-  border-left: 1px solid hsla(210,4%,10%,.14);
-  -moz-appearance: none !important;
+  border-left: 1px solid var(--panel-separator-color);
+  -moz-appearance: none;
 }
 
 .downloadsPanelFooterButton {
@@ -55,6 +56,7 @@
   color: inherit;
   margin: 0;
   padding: 0;
+  min-width: 0;
   min-height: 40px;
 }
 
@@ -63,7 +65,8 @@
   background-color: hsla(210,4%,10%,.07);
 }
 
-.downloadsPanelFooterButton:hover:active {
+.downloadsPanelFooterButton:hover:active,
+.downloadsPanelFooterButton[open="true"] {
   outline: 1px solid hsla(210,4%,10%,.12);
   background-color: hsla(210,4%,10%,.12);
   box-shadow: 0 1px 0 hsla(210,4%,10%,.05) inset;
@@ -82,22 +85,51 @@
   background-color: #0568ba;
 }
 
+#downloadsPanel[hasdownloads] #downloadsHistory {
+  padding-left: 58px !important;
+}
+
+toolbarseparator.downloadsDropmarkerSplitter {
+  margin: 7px 0;
+}
+
+#downloadsFooter:hover toolbarseparator.downloadsDropmarkerSplitter,
+#downloadsFooter toolbarseparator.downloadsDropmarkerSplitterExtend {
+  margin: 0;
+}
+
+.downloadsDropmarker {
+  padding: 0 19px !important;
+}
+
+.downloadsDropmarker > .button-box > hbox {
+  display: none;
+}
+
+.downloadsDropmarker > .button-box > .button-menu-dropmarker {
+  /* This is to override the linux !important */
+  -moz-appearance: none !important;
+  display: -moz-box;
+}
+
+.downloadsDropmarker > .button-box > .button-menu-dropmarker > .dropmarker-icon {
+  width: 16px;
+  height: 16px;
+  list-style-image: url("chrome://browser/skin/downloads/menubutton-dropmarker.svg");
+  filter: url("chrome://browser/skin/filters.svg#fill");
+  fill: currentColor;
+}
+
+/* Override default icon size which is too small for this dropdown */
+.downloadsDropmarker > .button-box > .button-menu-dropmarker {
+  width: 16px;
+  height: 16px;
+}
+
 #downloadsSummary {
-  --summary-padding-end: 38px;
-  --summary-padding-start: 12px;
-  padding: 8px var(--summary-padding-end) 8px var(--summary-padding-start);
+  padding: 0 12px;
   cursor: pointer;
   -moz-user-focus: normal;
-}
-
-#downloadsSummary:-moz-locale-dir(rtl) {
-  padding-right: var(--summary-padding-start);
-  padding-left: var(--summary-padding-end);
-}
-
-#downloadsSummaryChildBox {
-  -moz-margin-start: var(--summary-padding-start);
-  -moz-margin-end: var(--summary-padding-end);
 }
 
 #downloadsSummary > .downloadTypeIcon {
@@ -142,31 +174,29 @@ richlistitem[type="download"]:last-child {
 }
 
 .downloadTypeIcon {
-  --inline-offset: 8px;
-  --block-offset: 4px;
-  --icon-size: 32px;
+  margin-top: 8px;
+  margin-inline-end: 12px;
+  margin-bottom: 8px;
+  margin-inline-start: 0;
+  width: 32px;
+  height: 32px;
 }
 
-.downloadTypeIcon {
-  margin-inline-end: 8px;
-  /* Prevent flickering when changing states. */
-  width: calc(var(--icon-size) + var(--inline-offset));
-  height: calc(var(--icon-size) + var(--block-offset));
-  padding: var(--block-offset) var(--inline-offset) 0 0;
+.downloadBlockedBadge {
+  margin: 0 4px;
+  background: url("chrome://browser/skin/downloads/download-blocked.svg") top right / 16px no-repeat;
 }
 
-.blockedIcon {
-  --overlay-image-dimensions: top right / 16px no-repeat;
-  padding: 0;
-  background: url("chrome://browser/skin/downloads/download-blocked.svg") var(--overlay-image-dimensions);
+.downloadBlockedBadge:-moz-locale-dir(rtl) {
+  background-position-x: left;
 }
 
-@item@[verdict="PotentiallyUnwanted"] .blockedIcon {
-  background: url("chrome://browser/skin/warning.svg") var(--overlay-image-dimensions);
+@item@[verdict="PotentiallyUnwanted"] .downloadBlockedBadge {
+  background-image: url("chrome://browser/skin/warning.svg");
 }
 
-@item@[verdict="Uncommon"] .blockedIcon {
-  background: url("chrome://browser/skin/info.svg") var(--overlay-image-dimensions);
+@item@[verdict="Uncommon"] .downloadBlockedBadge {
+  background-image: url("chrome://browser/skin/info.svg");
 }
 
 /* We hold .downloadTarget, .downloadProgress and .downloadDetails inside of

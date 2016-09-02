@@ -7,9 +7,10 @@
 
 const {Task} = require("devtools/shared/task");
 const EventEmitter = require("devtools/shared/event-emitter");
-const {LocalizationHelper} = require("devtools/client/shared/l10n");
+const {LocalizationHelper, ELLIPSIS} = require("devtools/client/shared/l10n");
 const {KeyShortcuts} = require("devtools/client/shared/key-shortcuts");
 const JSOL = require("devtools/client/shared/vendor/jsol");
+const {KeyCodes} = require("devtools/client/shared/keycodes");
 
 loader.lazyRequireGetter(this, "TreeWidget",
                          "devtools/client/shared/widgets/TreeWidget", true);
@@ -23,7 +24,7 @@ loader.lazyImporter(this, "VariablesView",
 /**
  * Localization convenience methods.
  */
-const STORAGE_STRINGS = "chrome://devtools/locale/storage.properties";
+const STORAGE_STRINGS = "devtools/locale/storage.properties";
 const L10N = new LocalizationHelper(STORAGE_STRINGS);
 
 const GENERIC_VARIABLES_VIEW_SETTINGS = {
@@ -55,7 +56,7 @@ const ITEM_NAME_MAX_LENGTH = 32;
 
 function addEllipsis(name) {
   if (name.length > ITEM_NAME_MAX_LENGTH) {
-    return name.substr(0, ITEM_NAME_MAX_LENGTH) + L10N.ellipsis;
+    return name.substr(0, ITEM_NAME_MAX_LENGTH) + ELLIPSIS;
   }
 
   return name;
@@ -845,7 +846,7 @@ StorageUI.prototype = {
    *        The event passed by the keypress event.
    */
   handleKeypress: function (event) {
-    if (event.keyCode == event.DOM_VK_ESCAPE && !this.sidebar.hidden) {
+    if (event.keyCode == KeyCodes.DOM_VK_ESCAPE && !this.sidebar.hidden) {
       // Stop Propagation to prevent opening up of split console
       this.hideSidebar();
       event.stopPropagation();

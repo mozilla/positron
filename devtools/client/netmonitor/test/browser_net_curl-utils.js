@@ -1,9 +1,13 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
+"use strict";
+
 /**
  * Tests Curl Utils functionality.
  */
+
+const { CurlUtils } = require("devtools/client/shared/curl");
 
 function test() {
   initNetMonitor(CURL_UTILS_URL).then(([aTab, aDebuggee, aMonitor]) => {
@@ -113,8 +117,8 @@ function test_removeBinaryDataFromMultipartText(aData) {
     "\\r\\n",
     "Content-Type: image/png",
     "\\r\\n\\r\\n",
-    generatedBoundary,
-    "--\\r\\n",
+    boundary + "--",
+    "\\r\\n",
     "'"
   ].join("");
 
@@ -131,7 +135,7 @@ function test_removeBinaryDataFromMultipartText(aData) {
     "\u000d\u000A",
     '"Content-Type: image/png"^',
     "\u000d\u000A\u000d\u000A",
-    '"' + generatedBoundary + '--"^',
+    '"' + boundary + '--"^',
     "\u000d\u000A",
     '""'
   ].join("");

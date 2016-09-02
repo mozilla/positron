@@ -23,13 +23,14 @@
 
 #include "mozilla/Logging.h"
 #include "plstr.h"
-#include "mozilla/Snprintf.h"
+#include "mozilla/Sprintf.h"
 
 #include "mozilla/Telemetry.h"
 #include "nsIInterfaceRequestor.h"
 #include "nsIInterfaceRequestorUtils.h"
 #include "nsILoadContext.h"
 #include "nsITextControlFrame.h"
+#include "nsNumberControlFrame.h"
 #include "nsUnicharUtils.h"
 #include "nsContentList.h"
 #include "nsCSSPseudoElements.h"
@@ -243,7 +244,6 @@
 #include "nsLocation.h"
 #include "mozilla/dom/FontFaceSet.h"
 #include "mozilla/dom/BoxObject.h"
-#include "gfxVR.h"
 #include "gfxPrefs.h"
 #include "nsISupportsPrimitives.h"
 #include "mozilla/StyleSetHandle.h"
@@ -267,6 +267,33 @@ typedef nsTArray<Link*> LinkArray;
 
 static LazyLogModule gDocumentLeakPRLog("DocumentLeak");
 static LazyLogModule gCspPRLog("CSP");
+
+static nsresult
+GetHttpChannelHelper(nsIChannel* aChannel, nsIHttpChannel** aHttpChannel)
+{
+  nsCOMPtr<nsIHttpChannel> httpChannel = do_QueryInterface(aChannel);
+  if (httpChannel) {
+    httpChannel.forget(aHttpChannel);
+    return NS_OK;
+  }
+
+  nsCOMPtr<nsIMultiPartChannel> multipart = do_QueryInterface(aChannel);
+  if (!multipart) {
+    *aHttpChannel = nullptr;
+    return NS_OK;
+  }
+
+  nsCOMPtr<nsIChannel> baseChannel;
+  nsresult rv = multipart->GetBaseChannel(getter_AddRefs(baseChannel));
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  httpChannel = do_QueryInterface(baseChannel);
+  httpChannel.forget(aHttpChannel);
+
+  return NS_OK;
+}
 
 #define NAME_NOT_VALID ((nsSimpleContentList*)1)
 
@@ -1360,7 +1387,7 @@ protected:
   }
 
 public:
-  NS_IMETHOD Run()
+  NS_IMETHOD Run() override
   {
     return NS_OK;
   }
@@ -1441,7 +1468,7 @@ nsIDocument::nsIDocument()
     mHasScrollLinkedEffect(false),
     mUserHasInteracted(false)
 {
-  SetIsDocument();
+  SetIsInDocument();
 
   PR_INIT_CLIST(&mDOMMediaQueryLists);
 }
@@ -1764,12 +1791,12 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INTERNAL(nsDocument)
     if (tmp->mDocumentURI)
       tmp->mDocumentURI->GetSpec(uri);
     if (nsid < ArrayLength(kNSURIs)) {
-      snprintf_literal(name, "nsDocument %s %s %s",
-                       loadedAsData.get(), kNSURIs[nsid], uri.get());
+      SprintfLiteral(name, "nsDocument %s %s %s",
+                     loadedAsData.get(), kNSURIs[nsid], uri.get());
     }
     else {
-      snprintf_literal(name, "nsDocument %s %s",
-                       loadedAsData.get(), uri.get());
+      SprintfLiteral(name, "nsDocument %s %s",
+                     loadedAsData.get(), uri.get());
     }
     cb.DescribeRefCountedNode(tmp->mRefCnt.get(), name);
   }
@@ -2581,7 +2608,9 @@ nsDocument::StartDocumentLoad(const char* aCommand, nsIChannel* aChannel,
   // immutable after being set here.
   nsCOMPtr<nsIDocShell> docShell = do_QueryInterface(aContainer);
 
-  if (docShell) {
+  // If this is an error page, don't inherit sandbox flags from docshell
+  nsCOMPtr<nsILoadInfo> loadInfo = aChannel->GetLoadInfo();
+  if (docShell && !(loadInfo && loadInfo->GetLoadErrorPage())) {
     nsresult rv = docShell->GetSandboxFlags(&mSandboxFlags);
     NS_ENSURE_SUCCESS(rv, rv);
     WarnIfSandboxIneffective(docShell, mSandboxFlags, GetChannel());
@@ -2708,15 +2737,10 @@ nsDocument::InitCSP(nsIChannel* aChannel)
 
   nsAutoCString tCspHeaderValue, tCspROHeaderValue;
 
-  nsCOMPtr<nsIHttpChannel> httpChannel = do_QueryInterface(aChannel);
-  if (!httpChannel) {
-    // check baseChannel for CSP when loading a multipart channel
-    nsCOMPtr<nsIMultiPartChannel> multipart = do_QueryInterface(aChannel);
-    if (multipart) {
-      nsCOMPtr<nsIChannel> baseChannel;
-      multipart->GetBaseChannel(getter_AddRefs(baseChannel));
-      httpChannel = do_QueryInterface(baseChannel);
-    }
+  nsCOMPtr<nsIHttpChannel> httpChannel;
+  nsresult rv = GetHttpChannelHelper(aChannel, getter_AddRefs(httpChannel));
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
   }
 
   if (httpChannel) {
@@ -2789,8 +2813,6 @@ nsDocument::InitCSP(nsIChannel* aChannel)
   }
 
   MOZ_LOG(gCspPRLog, LogLevel::Debug, ("Document is an app or CSP header specified %p", this));
-
-  nsresult rv;
 
   // If Document is an app check to see if we already set CSP and return early
   // if that is indeed the case.
@@ -2968,9 +2990,9 @@ GetFormattedTimeString(PRTime aTime, nsAString& aFormattedTimeString)
   PR_ExplodeTime(aTime, PR_LocalTimeParameters, &prtime);
   // "MM/DD/YYYY hh:mm:ss"
   char formatedTime[24];
-  if (snprintf_literal(formatedTime, "%02d/%02d/%04d %02d:%02d:%02d",
-                       prtime.tm_month + 1, prtime.tm_mday, int(prtime.tm_year),
-                       prtime.tm_hour     ,  prtime.tm_min,  prtime.tm_sec)) {
+  if (SprintfLiteral(formatedTime, "%02d/%02d/%04d %02d:%02d:%02d",
+                     prtime.tm_month + 1, prtime.tm_mday, int(prtime.tm_year),
+                     prtime.tm_hour     ,  prtime.tm_min,  prtime.tm_sec)) {
     CopyASCIItoUTF16(nsDependentCString(formatedTime), aFormattedTimeString);
   } else {
     // If we for whatever reason failed to find the last modified time
@@ -8619,9 +8641,14 @@ nsDocument::SetValueMissingState(const nsAString& aName, bool aValue)
 void
 nsDocument::RetrieveRelevantHeaders(nsIChannel *aChannel)
 {
-  nsCOMPtr<nsIHttpChannel> httpChannel = do_QueryInterface(aChannel);
   PRTime modDate = 0;
   nsresult rv;
+
+  nsCOMPtr<nsIHttpChannel> httpChannel;
+  rv = GetHttpChannelHelper(aChannel, getter_AddRefs(httpChannel));
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return;
+  }
 
   if (httpChannel) {
     nsAutoCString tmp;
@@ -8810,11 +8837,18 @@ nsDocument::EnumerateSubDocuments(nsSubDocEnumFunc aCallback, void *aData)
     return;
   }
 
+  // PLDHashTable::Iterator can't handle modifications while iterating so we
+  // copy all entries to an array first before calling any callbacks.
+  AutoTArray<nsCOMPtr<nsIDocument>, 8> subdocs;
   for (auto iter = mSubDocuments->Iter(); !iter.Done(); iter.Next()) {
     auto entry = static_cast<SubDocMapEntry*>(iter.Get());
     nsIDocument* subdoc = entry->mSubDocument;
-    bool next = subdoc ? aCallback(subdoc, aData) : true;
-    if (!next) {
+    if (subdoc) {
+      subdocs.AppendElement(subdoc);
+    }
+  }
+  for (auto subdoc : subdocs) {
+    if (!aCallback(subdoc, aData)) {
       break;
     }
   }
@@ -9122,7 +9156,7 @@ nsDocument::UnblockOnload(bool aFireSync)
 class nsUnblockOnloadEvent : public Runnable {
 public:
   explicit nsUnblockOnloadEvent(nsDocument* aDoc) : mDoc(aDoc) {}
-  NS_IMETHOD Run() {
+  NS_IMETHOD Run() override {
     mDoc->DoUnblockOnload();
     return NS_OK;
   }
@@ -10007,7 +10041,7 @@ public:
   }
   virtual ~nsDelayedEventDispatcher() {}
 
-  NS_IMETHOD Run()
+  NS_IMETHOD Run() override
   {
     FireOrClearDelayedEvents(mDocuments, true);
     return NS_OK;
@@ -10864,7 +10898,8 @@ nsIDocument::CaretPositionFromPoint(float aX, float aY)
     nsCOMPtr<nsIDOMHTMLInputElement> input = do_QueryInterface(nonanon);
     nsCOMPtr<nsIDOMHTMLTextAreaElement> textArea = do_QueryInterface(nonanon);
     nsITextControlFrame* textFrame = do_QueryFrame(nonanon->GetPrimaryFrame());
-    if (!!textFrame) {
+    nsNumberControlFrame* numberFrame = do_QueryFrame(nonanon->GetPrimaryFrame());
+    if (textFrame || numberFrame) {
       // If the anonymous content node has a child, then we need to make sure
       // that we get the appropriate child, as otherwise the offset may not be
       // correct when we construct a range for it.
@@ -11462,7 +11497,7 @@ public:
   explicit nsCallRequestFullScreen(UniquePtr<FullscreenRequest>&& aRequest)
     : mRequest(Move(aRequest)) { }
 
-  NS_IMETHOD Run()
+  NS_IMETHOD Run() override
   {
     mRequest->GetDocument()->RequestFullScreen(Move(mRequest));
     return NS_OK;
@@ -11513,8 +11548,6 @@ UpdateViewportScrollbarOverrideForFullscreen(nsIDocument* aDoc)
 static void
 ClearFullscreenStateOnElement(Element* aElement)
 {
-  // Remove any VR state properties
-  aElement->DeleteProperty(nsGkAtoms::vr_state);
   // Remove styles from existing top element.
   EventStateManager::SetFullScreenState(aElement, false);
   // Reset iframe fullscreen flag.
@@ -11684,14 +11717,6 @@ nsDocument::IsUnprefixedFullscreenEnabled(JSContext* aCx, JSObject* aObject)
   MOZ_ASSERT(NS_IsMainThread());
   return nsContentUtils::IsCallerChrome() ||
          nsContentUtils::IsUnprefixedFullscreenApiEnabled();
-}
-
-static void
-ReleaseVRDeviceProxyRef(void *, nsIAtom*, void *aPropertyValue, void *)
-{
-  if (aPropertyValue) {
-    static_cast<gfx::VRDeviceProxy*>(aPropertyValue)->Release();
-  }
 }
 
 static bool
@@ -11974,10 +11999,7 @@ nsDocument::RequestFullScreen(UniquePtr<FullscreenRequest>&& aRequest)
       /* Bubbles */ true, /* Cancelable */ false, /* DefaultAction */ nullptr);
   } else {
     // Make the window fullscreen.
-    const FullscreenRequest*
-      lastRequest = PendingFullscreenRequestList::GetLast();
-    rootWin->SetFullscreenInternal(FullscreenReason::ForFullscreenAPI, true,
-                                   lastRequest->mVRHMDDevice);
+    rootWin->SetFullscreenInternal(FullscreenReason::ForFullscreenAPI, true);
   }
 }
 
@@ -12033,13 +12055,6 @@ nsDocument::ApplyFullscreen(const FullscreenRequest& aRequest)
   // If a document is already in fullscreen, then unlock the mouse pointer
   // before setting a new document to fullscreen
   UnlockPointer();
-
-  // Process options -- in this case, just HMD
-  if (aRequest.mVRHMDDevice) {
-    RefPtr<gfx::VRDeviceProxy> hmdRef = aRequest.mVRHMDDevice;
-    elem->SetProperty(nsGkAtoms::vr_state, hmdRef.forget().take(),
-                      ReleaseVRDeviceProxyRef, true);
-  }
 
   // Set the full-screen element. This sets the full-screen style on the
   // element, and the full-screen-ancestor styles on ancestors of the element

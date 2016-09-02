@@ -54,9 +54,7 @@
     }
 
     .sidebar-splitter,
-    #appcontent ~ .sidebar-splitter,
-    .chatbar-button,
-    chatbar > chatbox {
+    #appcontent ~ .sidebar-splitter {
       border-color: #A9B7C9;
     }
 
@@ -66,7 +64,7 @@
       background-color: @customToolbarColor@;
     }
 
-    .tab-background-middle[visuallyselected=true]:not(:-moz-lwtheme) {
+    .tab-background-middle[selected=true]:not(:-moz-lwtheme) {
       background-color: @customToolbarColor@;
     }
   }

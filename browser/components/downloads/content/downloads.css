@@ -13,13 +13,18 @@ richlistitem[type="download"]:not([selected]) button {
   -moz-user-focus: none;
 }
 
+.downloadsHideDropmarker > #downloadsFooterButtonsSplitter,
+.downloadsHideDropmarker > #downloadsFooterDropmarker {
+  display: none;
+}
+
 richlistitem[type="download"].download-state[state="1"]:not([exists]) .downloadShow {
   display: none;
 }
 
 #downloadsSummary:not([inprogress]) > vbox > #downloadsSummaryProgress,
 #downloadsSummary:not([inprogress]) > vbox > #downloadsSummaryDetails,
-#downloadsFooter[showingsummary] > #downloadsHistory,
+#downloadsFooter[showingsummary] > #downloadsFooterButtons,
 #downloadsFooter:not([showingsummary]) > #downloadsSummary {
   display: none;
 }
@@ -56,7 +61,7 @@ richlistitem.download button {
 .download-state:not(:-moz-any([state="6"], /* Blocked (parental) */
                               [state="8"], /* Blocked (dirty)    */
                               [state="9"]) /* Blocked (policy)   */)
-                                           .downloadTypeIcon.blockedIcon,
+                                           .downloadBlockedBadge,
 
 .download-state:not(:-moz-any([state="-1"],/* Starting (initial) */
                               [state="5"], /* Starting (queued)  */

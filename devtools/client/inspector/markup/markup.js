@@ -7,10 +7,6 @@
 
 "use strict";
 
-/* eslint-disable mozilla/reject-some-requires */
-const {Cc, Ci} = require("chrome");
-/* eslint-enable mozilla/reject-some-requires */
-
 // Page size for pageup/pagedown
 const PAGE_SIZE = 10;
 const DEFAULT_MAX_CHILDREN = 100;
@@ -50,7 +46,7 @@ const Heritage = require("sdk/core/heritage");
 const {parseAttribute} =
       require("devtools/client/shared/node-attribute-parser");
 const {Task} = require("devtools/shared/task");
-const {scrollIntoViewIfNeeded} = require("devtools/shared/layout/utils");
+const {scrollIntoViewIfNeeded} = require("devtools/client/shared/scroll");
 const {PrefObserver} = require("devtools/client/styleeditor/utils");
 const {KeyShortcuts} = require("devtools/client/shared/key-shortcuts");
 const {template} = require("devtools/shared/gcli/templater");
@@ -60,8 +56,10 @@ const nodeFilterConstants = require("devtools/shared/dom-node-filter-constants")
 const {XPCOMUtils} = require("resource://gre/modules/XPCOMUtils.jsm");
 /* eslint-enable mozilla/reject-some-requires */
 const {getCssProperties} = require("devtools/shared/fronts/css-properties");
+const {KeyCodes} = require("devtools/client/shared/keycodes");
 
 const {AutocompletePopup} = require("devtools/client/shared/autocomplete-popup");
+const clipboardHelper = require("devtools/shared/platform/clipboard");
 
 XPCOMUtils.defineLazyModuleGetter(this, "PluralForm",
   "resource://gre/modules/PluralForm.jsm");
@@ -2273,12 +2271,12 @@ MarkupContainer.prototype = {
 
     // Ignore all keystrokes that originated in editors except for when 'Tab' is
     // pressed.
-    if (isInput && keyCode !== event.DOM_VK_TAB) {
+    if (isInput && keyCode !== KeyCodes.DOM_VK_TAB) {
       return;
     }
 
     switch (keyCode) {
-      case event.DOM_VK_TAB:
+      case KeyCodes.DOM_VK_TAB:
         // Only handle 'Tab' if tabbable element is on the edge (first or last).
         if (isInput) {
           // Corresponding tabbable element is editor's next sibling.
@@ -2299,7 +2297,7 @@ MarkupContainer.prototype = {
           }
         }
         break;
-      case event.DOM_VK_ESCAPE:
+      case KeyCodes.DOM_VK_ESCAPE:
         this.clearFocus();
         this.markup.getContainer(this.markup._rootNode).elt.focus();
         if (this.isDragging) {
@@ -3621,10 +3619,5 @@ function getAutocompleteMaxWidth(element, container) {
 loader.lazyGetter(MarkupView.prototype, "strings", () => Services.strings.createBundle(
   "chrome://devtools/locale/inspector.properties"
 ));
-
-XPCOMUtils.defineLazyGetter(this, "clipboardHelper", function () {
-  return Cc["@mozilla.org/widget/clipboardhelper;1"]
-    .getService(Ci.nsIClipboardHelper);
-});
 
 exports.MarkupView = MarkupView;

@@ -8,7 +8,7 @@
 #define mozilla_dom_KeyframeEffect_h
 
 #include "nsChangeHint.h"
-#include "nsCSSProperty.h"
+#include "nsCSSPropertyID.h"
 #include "nsCSSValue.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsTArray.h"
@@ -16,23 +16,16 @@
 #include "mozilla/AnimationPerformanceWarning.h"
 #include "mozilla/AnimationTarget.h"
 #include "mozilla/Attributes.h"
-#include "mozilla/ComputedTiming.h"
 #include "mozilla/ComputedTimingFunction.h"
 #include "mozilla/EffectCompositor.h"
 #include "mozilla/KeyframeEffectParams.h"
 #include "mozilla/LayerAnimationInfo.h" // LayerAnimations::kRecords
-#include "mozilla/Maybe.h"
-#include "mozilla/StickyTimeDuration.h"
 #include "mozilla/StyleAnimationValue.h"
-#include "mozilla/TimeStamp.h"
-#include "mozilla/TimingParams.h"
 #include "mozilla/dom/AnimationEffectReadOnly.h"
-#include "mozilla/dom/AnimationEffectTimingReadOnly.h"
 #include "mozilla/dom/Element.h"
-#include "mozilla/dom/Nullable.h"
 
 struct JSContext;
-class nsCSSPropertySet;
+class nsCSSPropertyIDSet;
 class nsIContent;
 class nsIDocument;
 class nsIFrame;
@@ -59,7 +52,7 @@ struct AnimationPropertyDetails;
  */
 struct PropertyValuePair
 {
-  nsCSSProperty mProperty;
+  nsCSSPropertyID mProperty;
   // The specified value for the property. For shorthand properties or invalid
   // property values, we store the specified property value as a token stream
   // (string).
@@ -134,7 +127,7 @@ struct AnimationPropertySegment
 
 struct AnimationProperty
 {
-  nsCSSProperty mProperty = eCSSProperty_UNKNOWN;
+  nsCSSPropertyID mProperty = eCSSProperty_UNKNOWN;
 
   // Does this property win in the CSS Cascade?
   //
@@ -205,11 +198,7 @@ public:
   virtual JSObject* WrapObject(JSContext* aCx,
                                JS::Handle<JSObject*> aGivenProto) override;
 
-  virtual ElementPropertyTransition* AsTransition() { return nullptr; }
-  virtual const ElementPropertyTransition* AsTransition() const
-  {
-    return nullptr;
-  }
+  KeyframeEffectReadOnly* AsKeyframeEffect() override { return this; }
 
   // KeyframeEffectReadOnly interface
   static already_AddRefed<KeyframeEffectReadOnly>
@@ -241,63 +230,26 @@ public:
     mEffectOptions.GetSpacingAsString(aRetVal);
   }
 
-  already_AddRefed<AnimationEffectTimingReadOnly> Timing() const override;
-
-  const TimingParams& SpecifiedTiming() const
-  {
-    return mTiming->AsTimingParams();
-  }
-  void SetSpecifiedTiming(const TimingParams& aTiming);
   void NotifyAnimationTimingUpdated();
 
-  Nullable<TimeDuration> GetLocalTime() const;
-
-  // This function takes as input the timing parameters of an animation and
-  // returns the computed timing at the specified local time.
-  //
-  // The local time may be null in which case only static parameters such as the
-  // active duration are calculated. All other members of the returned object
-  // are given a null/initial value.
-  //
-  // This function returns a null mProgress member of the return value
-  // if the animation should not be run
-  // (because it is not currently active and is not filling at this time).
-  static ComputedTiming
-  GetComputedTimingAt(const Nullable<TimeDuration>& aLocalTime,
-                      const TimingParams& aTiming);
-
-  // Shortcut for that gets the computed timing using the current local time as
-  // calculated from the timeline time.
-  ComputedTiming
-  GetComputedTiming(const TimingParams* aTiming = nullptr) const
-  {
-    return GetComputedTimingAt(GetLocalTime(),
-                               aTiming ? *aTiming : SpecifiedTiming());
-  }
-
-  void
-  GetComputedTimingAsDict(ComputedTimingProperties& aRetVal) const override;
-
-  bool IsInPlay() const;
-  bool IsCurrent() const;
-  bool IsInEffect() const;
-
-  void SetAnimation(Animation* aAnimation);
-  Animation* GetAnimation() const { return mAnimation; }
+  void SetAnimation(Animation* aAnimation) override;
 
   void SetKeyframes(JSContext* aContext, JS::Handle<JSObject*> aKeyframes,
                     ErrorResult& aRv);
   void SetKeyframes(nsTArray<Keyframe>&& aKeyframes,
                     nsStyleContext* aStyleContext);
   const AnimationProperty*
-  GetAnimationOfProperty(nsCSSProperty aProperty) const;
-  bool HasAnimationOfProperty(nsCSSProperty aProperty) const {
+  GetAnimationOfProperty(nsCSSPropertyID aProperty) const;
+  bool HasAnimationOfProperty(nsCSSPropertyID aProperty) const
+  {
     return GetAnimationOfProperty(aProperty) != nullptr;
   }
-  const InfallibleTArray<AnimationProperty>& Properties() const {
+  const InfallibleTArray<AnimationProperty>& Properties() const
+  {
     return mProperties;
   }
-  InfallibleTArray<AnimationProperty>& Properties() {
+  InfallibleTArray<AnimationProperty>& Properties()
+  {
     return mProperties;
   }
 
@@ -310,10 +262,10 @@ public:
   // contained in |aSetProperties|.
   // Any updated properties are added to |aSetProperties|.
   void ComposeStyle(RefPtr<AnimValuesStyleRule>& aStyleRule,
-                    nsCSSPropertySet& aSetProperties);
+                    nsCSSPropertyIDSet& aSetProperties);
   // Returns true if at least one property is being animated on compositor.
   bool IsRunningOnCompositor() const;
-  void SetIsRunningOnCompositor(nsCSSProperty aProperty, bool aIsRunning);
+  void SetIsRunningOnCompositor(nsCSSPropertyID aProperty, bool aIsRunning);
   void ResetIsRunningOnCompositor();
 
   // Returns true if this effect, applied to |aFrame|, contains properties
@@ -338,7 +290,7 @@ public:
   // compositor. |aParams| and |aParamsLength| are optional parameters which
   // will be used to generate a localized message for devtools.
   void SetPerformanceWarning(
-    nsCSSProperty aProperty,
+    nsCSSPropertyID aProperty,
     const AnimationPerformanceWarning& aWarning);
 
   // Cumulative change hint on each segment for each property.
@@ -357,7 +309,7 @@ protected:
                          AnimationEffectTimingReadOnly* aTiming,
                          const KeyframeEffectParams& aOptions);
 
-  virtual ~KeyframeEffectReadOnly();
+  ~KeyframeEffectReadOnly() override = default;
 
   template<class KeyframeEffectType, class OptionsType>
   static already_AddRefed<KeyframeEffectType>
@@ -400,9 +352,7 @@ protected:
   GetTargetStyleContext();
 
   Maybe<OwningAnimationTarget> mTarget;
-  RefPtr<Animation> mAnimation;
 
-  RefPtr<AnimationEffectTimingReadOnly> mTiming;
   KeyframeEffectParams mEffectOptions;
 
   // The specified keyframes.
@@ -434,7 +384,7 @@ private:
   static bool CanAnimateTransformOnCompositor(
     const nsIFrame* aFrame,
     AnimationPerformanceWarning::Type& aPerformanceWarning);
-  static bool IsGeometricProperty(const nsCSSProperty aProperty);
+  static bool IsGeometricProperty(const nsCSSPropertyID aProperty);
 
   static const TimeDuration OverflowRegionRefreshInterval();
 };
@@ -475,9 +425,6 @@ public:
   // that to update the properties rather than calling
   // GetStyleContextForElement.
   void SetTarget(const Nullable<ElementOrCSSPseudoElement>& aTarget);
-
-protected:
-  ~KeyframeEffect() override;
 };
 
 } // namespace dom

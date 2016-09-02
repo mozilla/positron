@@ -21,8 +21,9 @@
 #include "asmjs/WasmCompile.h"
 #include "asmjs/WasmInstance.h"
 #include "asmjs/WasmModule.h"
-
+#include "builtin/Promise.h"
 #include "jit/JitOptions.h"
+#include "vm/Interpreter.h"
 
 #include "jsobjinlines.h"
 
@@ -60,16 +61,6 @@ CheckCompilerSupport(JSContext* cx)
     }
 
     return true;
-}
-
-bool
-wasm::IsI64Implemented()
-{
-#if defined(JS_CPU_X64) || defined(JS_CODEGEN_X86) || defined(JS_CODEGEN_ARM)
-    return true;
-#else
-    return false;
-#endif
 }
 
 // ============================================================================
@@ -204,6 +195,23 @@ GetImports(JSContext* cx,
     return true;
 }
 
+static bool
+DescribeScriptedCaller(JSContext* cx, ScriptedCaller* scriptedCaller)
+{
+    // Note: JS::DescribeScriptedCaller returns whether a scripted caller was
+    // found, not whether an error was thrown. This wrapper function converts
+    // back to the more ordinary false-if-error form.
+
+    JS::AutoFilename af;
+    if (JS::DescribeScriptedCaller(cx, &af, &scriptedCaller->line, &scriptedCaller->column)) {
+        scriptedCaller->filename = DuplicateString(cx, af.get());
+        if (!scriptedCaller->filename)
+            return false;
+    }
+
+    return true;
+}
+
 bool
 wasm::Eval(JSContext* cx, Handle<TypedArrayObject*> code, HandleObject importObj,
            MutableHandleWasmInstanceObject instanceObj)
@@ -220,22 +228,16 @@ wasm::Eval(JSContext* cx, Handle<TypedArrayObject*> code, HandleObject importObj
         return false;
     }
 
-    UniqueChars filename;
-    {
-        JS::AutoFilename af;
-        if (DescribeScriptedCaller(cx, &af)) {
-            filename = DuplicateString(cx, af.get());
-            if (!filename)
-                return false;
-        }
-    }
+    ScriptedCaller scriptedCaller;
+    if (!DescribeScriptedCaller(cx, &scriptedCaller))
+        return false;
 
     CompileArgs compileArgs;
-    if (!compileArgs.initFromContext(cx, Move(filename)))
+    if (!compileArgs.initFromContext(cx, Move(scriptedCaller)))
         return false;
 
     UniqueChars error;
-    SharedModule module = Compile(*bytecode, Move(compileArgs), &error);
+    SharedModule module = Compile(*bytecode, compileArgs, &error);
     if (!module) {
         if (error)
             JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_WASM_FAIL, error.get());
@@ -352,7 +354,8 @@ const Class WasmModuleObject::class_ =
 {
     "WebAssembly.Module",
     JSCLASS_DELAY_METADATA_BUILDER |
-    JSCLASS_HAS_RESERVED_SLOTS(WasmModuleObject::RESERVED_SLOTS),
+    JSCLASS_HAS_RESERVED_SLOTS(WasmModuleObject::RESERVED_SLOTS) |
+    JSCLASS_FOREGROUND_FINALIZE,
     &WasmModuleObject::classOps_,
 };
 
@@ -381,6 +384,48 @@ WasmModuleObject::create(ExclusiveContext* cx, Module& module, HandleObject prot
     return obj;
 }
 
+static bool
+GetCompileArgs(JSContext* cx, CallArgs callArgs, const char* name, MutableBytes* bytecode,
+               CompileArgs* compileArgs)
+{
+    if (!callArgs.requireAtLeast(cx, name, 1))
+        return false;
+
+    if (!callArgs[0].isObject()) {
+        JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_WASM_BAD_BUF_ARG);
+        return false;
+    }
+
+    *bytecode = cx->new_<ShareableBytes>();
+    if (!*bytecode)
+        return false;
+
+    JSObject* unwrapped = CheckedUnwrap(&callArgs[0].toObject());
+    if (unwrapped && unwrapped->is<TypedArrayObject>()) {
+        TypedArrayObject& view = unwrapped->as<TypedArrayObject>();
+        if (!(*bytecode)->append((uint8_t*)view.viewDataEither().unwrap(), view.byteLength()))
+            return false;
+    } else if (unwrapped && unwrapped->is<ArrayBufferObject>()) {
+        ArrayBufferObject& buffer = unwrapped->as<ArrayBufferObject>();
+        if (!(*bytecode)->append(buffer.dataPointer(), buffer.byteLength()))
+            return false;
+    } else {
+        JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_WASM_BAD_BUF_ARG);
+        return false;
+    }
+
+    ScriptedCaller scriptedCaller;
+    if (!DescribeScriptedCaller(cx, &scriptedCaller))
+        return false;
+
+    if (!compileArgs->initFromContext(cx, Move(scriptedCaller)))
+        return false;
+
+    compileArgs->assumptions.newFormat = true;
+
+    return CheckCompilerSupport(cx);
+}
+
 /* static */ bool
 WasmModuleObject::construct(JSContext* cx, unsigned argc, Value* vp)
 {
@@ -389,56 +434,13 @@ WasmModuleObject::construct(JSContext* cx, unsigned argc, Value* vp)
     if (!ThrowIfNotConstructing(cx, callArgs, "Module"))
         return false;
 
-    if (!callArgs.requireAtLeast(cx, "WebAssembly.Module", 1))
-        return false;
-
-    if (!callArgs.get(0).isObject()) {
-        JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_WASM_BAD_BUF_ARG);
-        return false;
-    }
-
-    MutableBytes bytecode = cx->new_<ShareableBytes>();
-    if (!bytecode)
-        return false;
-
-    if (callArgs[0].toObject().is<TypedArrayObject>()) {
-        TypedArrayObject& view = callArgs[0].toObject().as<TypedArrayObject>();
-        if (!bytecode->append((uint8_t*)view.viewDataEither().unwrap(), view.byteLength())) {
-            ReportOutOfMemory(cx);
-            return false;
-        }
-    } else if (callArgs[0].toObject().is<ArrayBufferObject>()) {
-        ArrayBufferObject& buffer = callArgs[0].toObject().as<ArrayBufferObject>();
-        if (!bytecode->append(buffer.dataPointer(), buffer.byteLength())) {
-            ReportOutOfMemory(cx);
-            return false;
-        }
-    } else {
-        JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_WASM_BAD_BUF_ARG);
-        return false;
-    }
-
-    UniqueChars filename;
-    {
-        JS::AutoFilename af;
-        if (DescribeScriptedCaller(cx, &af)) {
-            filename = DuplicateString(cx, af.get());
-            if (!filename)
-                return false;
-        }
-    }
-
+    MutableBytes bytecode;
     CompileArgs compileArgs;
-    if (!compileArgs.initFromContext(cx, Move(filename)))
-        return false;
-
-    compileArgs.assumptions.newFormat = true;
-
-    if (!CheckCompilerSupport(cx))
+    if (!GetCompileArgs(cx, callArgs, "WebAssembly.Module", &bytecode, &compileArgs))
         return false;
 
     UniqueChars error;
-    SharedModule module = Compile(*bytecode, Move(compileArgs), &error);
+    SharedModule module = Compile(*bytecode, compileArgs, &error);
     if (!module) {
         if (error)
             JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_WASM_FAIL, error.get());
@@ -486,7 +488,8 @@ const Class WasmInstanceObject::class_ =
 {
     "WebAssembly.Instance",
     JSCLASS_DELAY_METADATA_BUILDER |
-    JSCLASS_HAS_RESERVED_SLOTS(WasmInstanceObject::RESERVED_SLOTS),
+    JSCLASS_HAS_RESERVED_SLOTS(WasmInstanceObject::RESERVED_SLOTS) |
+    JSCLASS_FOREGROUND_FINALIZE,
     &WasmInstanceObject::classOps_,
 };
 
@@ -832,7 +835,8 @@ const Class WasmTableObject::class_ =
 {
     "WebAssembly.Table",
     JSCLASS_DELAY_METADATA_BUILDER |
-    JSCLASS_HAS_RESERVED_SLOTS(WasmTableObject::RESERVED_SLOTS),
+    JSCLASS_HAS_RESERVED_SLOTS(WasmTableObject::RESERVED_SLOTS) |
+    JSCLASS_FOREGROUND_FINALIZE,
     &WasmTableObject::classOps_
 };
 
@@ -1127,10 +1131,140 @@ WebAssembly_toSource(JSContext* cx, unsigned argc, Value* vp)
 }
 #endif
 
+#ifdef SPIDERMONKEY_PROMISE
+static bool
+Nop(JSContext* cx, unsigned argc, Value* vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+    args.rval().setUndefined();
+    return true;
+}
+
+static bool
+Reject(JSContext* cx, const CompileArgs& args, UniqueChars error, Handle<PromiseObject*> promise)
+{
+    if (!error) {
+        ReportOutOfMemory(cx);
+
+        RootedValue rejectionValue(cx);
+        if (!cx->getPendingException(&rejectionValue))
+            return false;
+
+        return promise->reject(cx, rejectionValue);
+    }
+
+    RootedObject stack(cx, promise->allocationSite());
+    RootedString filename(cx, JS_NewStringCopyZ(cx, args.scriptedCaller.filename.get()));
+    if (!filename)
+        return false;
+
+    unsigned line = args.scriptedCaller.line;
+    unsigned column = args.scriptedCaller.column;
+
+    RootedString message(cx, NewLatin1StringZ(cx, Move(error)));
+    if (!message)
+        return false;
+
+    RootedObject errorObj(cx,
+        ErrorObject::create(cx, JSEXN_TYPEERR, stack, filename, line, column, nullptr, message));
+    if (!errorObj)
+        return false;
+
+    RootedValue rejectionValue(cx, ObjectValue(*errorObj));
+    return promise->reject(cx, rejectionValue);
+}
+
+static bool
+Resolve(JSContext* cx, Module& module, Handle<PromiseObject*> promise)
+{
+    RootedObject proto(cx, &cx->global()->getPrototype(JSProto_WasmModule).toObject());
+    RootedObject moduleObj(cx, WasmModuleObject::create(cx, module, proto));
+    if (!moduleObj)
+        return false;
+
+    RootedValue resolutionValue(cx, ObjectValue(*moduleObj));
+    return promise->resolve(cx, resolutionValue);
+}
+
+struct CompileTask : PromiseTask
+{
+    MutableBytes bytecode;
+    CompileArgs  compileArgs;
+    UniqueChars  error;
+    SharedModule module;
+
+    CompileTask(JSContext* cx, Handle<PromiseObject*> promise)
+      : PromiseTask(cx, promise)
+    {}
+
+    void execute() override {
+        module = Compile(*bytecode, compileArgs, &error);
+    }
+
+    bool finishPromise(JSContext* cx, Handle<PromiseObject*> promise) override {
+        return module
+               ? Resolve(cx, *module, promise)
+               : Reject(cx, compileArgs, Move(error), promise);
+    }
+};
+
+static bool
+WebAssembly_compile(JSContext* cx, unsigned argc, Value* vp)
+{
+    if (!cx->startAsyncTaskCallback || !cx->finishAsyncTaskCallback) {
+        JS_ReportError(cx, "WebAssembly.compile not supported in this runtime.");
+        return false;
+    }
+
+    CallArgs callArgs = CallArgsFromVp(argc, vp);
+
+    RootedFunction nopFun(cx, NewNativeFunction(cx, Nop, 0, nullptr));
+    if (!nopFun)
+        return false;
+
+    Rooted<PromiseObject*> promise(cx, PromiseObject::create(cx, nopFun));
+    if (!promise)
+        return false;
+
+    auto task = cx->make_unique<CompileTask>(cx, promise);
+    if (!task)
+        return false;
+
+    if (!GetCompileArgs(cx, callArgs, "WebAssembly.compile", &task->bytecode, &task->compileArgs)) {
+        if (!cx->isExceptionPending())
+            return false;
+
+        RootedValue rejectionValue(cx);
+        if (!GetAndClearException(cx, &rejectionValue))
+            return false;
+
+        if (!promise->reject(cx, rejectionValue))
+            return false;
+
+        callArgs.rval().setObject(*promise);
+        return true;
+    }
+
+    if (CanUseExtraThreads()) {
+        if (!StartPromiseTask(cx, Move(task)))
+            return false;
+    } else {
+        task->execute();
+        task->finishPromise(cx, promise);
+    }
+
+    callArgs.rval().setObject(*promise);
+    return true;
+}
+#endif
+
 static const JSFunctionSpec WebAssembly_static_methods[] =
 {
 #if JS_HAS_TOSOURCE
     JS_FN(js_toSource_str, WebAssembly_toSource, 0, 0),
+#endif
+#ifdef SPIDERMONKEY_PROMISE
+    JS_FN("compile", WebAssembly_compile, 1, 0),
 #endif
     JS_FS_END
 };

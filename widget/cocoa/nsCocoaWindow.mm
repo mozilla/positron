@@ -263,10 +263,11 @@ static bool UseNativePopupWindows()
 }
 
 // aRect here is specified in desktop pixels
-nsresult nsCocoaWindow::Create(nsIWidget* aParent,
-                               nsNativeWidget aNativeParent,
-                               const DesktopIntRect& aRect,
-                               nsWidgetInitData* aInitData)
+nsresult
+nsCocoaWindow::Create(nsIWidget* aParent,
+                      nsNativeWidget aNativeParent,
+                      const DesktopIntRect& aRect,
+                      nsWidgetInitData* aInitData)
 {
   NS_OBJC_BEGIN_TRY_ABORT_BLOCK_NSRESULT;
 
@@ -316,10 +317,11 @@ nsresult nsCocoaWindow::Create(nsIWidget* aParent,
   NS_OBJC_END_TRY_ABORT_BLOCK_NSRESULT;
 }
 
-nsresult nsCocoaWindow::Create(nsIWidget* aParent,
-                               nsNativeWidget aNativeParent,
-                               const LayoutDeviceIntRect& aRect,
-                               nsWidgetInitData* aInitData)
+nsresult
+nsCocoaWindow::Create(nsIWidget* aParent,
+                      nsNativeWidget aNativeParent,
+                      const LayoutDeviceIntRect& aRect,
+                      nsWidgetInitData* aInitData)
 {
   DesktopIntRect desktopRect =
     RoundedToInt(aRect / GetDesktopToDeviceScale());
@@ -514,7 +516,11 @@ nsCocoaWindow::CreatePopupContentView(const LayoutDeviceIntRect &aRect)
   NS_ADDREF(mPopupContentView);
 
   nsIWidget* thisAsWidget = static_cast<nsIWidget*>(this);
-  mPopupContentView->Create(thisAsWidget, nullptr, aRect, nullptr);
+  nsresult rv = mPopupContentView->Create(thisAsWidget, nullptr, aRect,
+                                          nullptr);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
 
   ChildView* newContentView = (ChildView*)mPopupContentView->GetNativeData(NS_NATIVE_WIDGET);
   [mWindow setContentView:newContentView];
@@ -524,10 +530,10 @@ nsCocoaWindow::CreatePopupContentView(const LayoutDeviceIntRect &aRect)
   NS_OBJC_END_TRY_ABORT_BLOCK_NSRESULT;
 }
 
-NS_IMETHODIMP nsCocoaWindow::Destroy()
+void nsCocoaWindow::Destroy()
 {
   if (mOnDestroyCalled)
-    return NS_OK;
+    return;
   mOnDestroyCalled = true;
 
   // SetFakeModal(true) is called for non-modal window opened by modal window.
@@ -571,8 +577,6 @@ NS_IMETHODIMP nsCocoaWindow::Destroy()
       nsCocoaUtils::HideOSChromeOnScreen(false);
     }
   }
-
-  return NS_OK;
 }
 
 nsIWidget* nsCocoaWindow::GetSheetWindowParent(void)
@@ -770,8 +774,9 @@ NS_IMETHODIMP nsCocoaWindow::Show(bool bState)
         [NSApp endSheet:nativeParentWindow];
       }
 
-      nsCocoaWindow* sheetShown = nullptr;
-      if (NS_SUCCEEDED(piParentWidget->GetChildSheet(true, &sheetShown)) &&
+      nsCOMPtr<nsIWidget> sheetShown;
+      if (NS_SUCCEEDED(piParentWidget->GetChildSheet(
+                           true, getter_AddRefs(sheetShown))) &&
           (!sheetShown || sheetShown == this)) {
         // If this sheet is already the sheet actually being shown, don't
         // tell it to show again. Otherwise the number of calls to
@@ -812,11 +817,11 @@ NS_IMETHODIMP nsCocoaWindow::Show(bool bState)
       // [NSWindow makeKeyAndOrderFront:] can sometimes trigger "Error (1000)
       // creating CGSWindow", which in turn triggers an internal inconsistency
       // NSException.  These errors shouldn't be fatal.  So we need to wrap
-      // calls to ...orderFront: in LOGONLY blocks.  See bmo bug 470864.
-      NS_OBJC_BEGIN_TRY_LOGONLY_BLOCK;
+      // calls to ...orderFront: in TRY blocks.  See bmo bug 470864.
+      NS_OBJC_BEGIN_TRY_ABORT_BLOCK;
       [[mWindow contentView] setNeedsDisplay:YES];
       [mWindow orderFront:nil];
-      NS_OBJC_END_TRY_LOGONLY_BLOCK;
+      NS_OBJC_END_TRY_ABORT_BLOCK;
       SendSetZLevelEvent();
       AdjustWindowShadow();
       SetWindowBackgroundBlur();
@@ -840,7 +845,7 @@ NS_IMETHODIMP nsCocoaWindow::Show(bool bState)
                             ordered:NSWindowAbove];
     }
     else {
-      NS_OBJC_BEGIN_TRY_LOGONLY_BLOCK;
+      NS_OBJC_BEGIN_TRY_ABORT_BLOCK;
       if (mWindowType == eWindowType_toplevel &&
           [mWindow respondsToSelector:@selector(setAnimationBehavior:)]) {
         NSWindowAnimationBehavior behavior;
@@ -862,7 +867,7 @@ NS_IMETHODIMP nsCocoaWindow::Show(bool bState)
         [mWindow setAnimationBehavior:behavior];
       }
       [mWindow makeKeyAndOrderFront:nil];
-      NS_OBJC_END_TRY_LOGONLY_BLOCK;
+      NS_OBJC_END_TRY_ABORT_BLOCK;
       SendSetZLevelEvent();
     }
   }
@@ -888,11 +893,12 @@ NS_IMETHODIMP nsCocoaWindow::Show(bool bState)
         
         [TopLevelWindowData deactivateInWindow:mWindow];
 
-        nsCocoaWindow* siblingSheetToShow = nullptr;
+        nsCOMPtr<nsIWidget> siblingSheetToShow;
         bool parentIsSheet = false;
 
         if (nativeParentWindow && piParentWidget &&
-            NS_SUCCEEDED(piParentWidget->GetChildSheet(false, &siblingSheetToShow)) &&
+            NS_SUCCEEDED(piParentWidget->GetChildSheet(
+                             false, getter_AddRefs(siblingSheetToShow))) &&
             siblingSheetToShow) {
           // First, give sibling sheets an opportunity to show.
           siblingSheetToShow->Show(true);
@@ -924,9 +930,9 @@ NS_IMETHODIMP nsCocoaWindow::Show(bool bState)
         else {
           // Sheet, that was hard.  No more siblings or parents, going back
           // to a real window.
-          NS_OBJC_BEGIN_TRY_LOGONLY_BLOCK;
+          NS_OBJC_BEGIN_TRY_ABORT_BLOCK;
           [sheetParent makeKeyAndOrderFront:nil];
-          NS_OBJC_END_TRY_LOGONLY_BLOCK;
+          NS_OBJC_END_TRY_ABORT_BLOCK;
         }
         SendSetZLevelEvent();
       }
@@ -1225,18 +1231,19 @@ NS_IMETHODIMP nsCocoaWindow::Move(double aX, double aY)
 }
 
 // Position the window behind the given window
-NS_METHOD nsCocoaWindow::PlaceBehind(nsTopLevelWidgetZPlacement aPlacement,
-                                     nsIWidget *aWidget, bool aActivate)
+NS_IMETHODIMP nsCocoaWindow::PlaceBehind(nsTopLevelWidgetZPlacement aPlacement,
+                                         nsIWidget *aWidget, bool aActivate)
 {
   return NS_OK;
 }
 
-NS_METHOD nsCocoaWindow::SetSizeMode(nsSizeMode aMode)
+void
+nsCocoaWindow::SetSizeMode(nsSizeMode aMode)
 {
-  NS_OBJC_BEGIN_TRY_ABORT_BLOCK_NSRESULT;
+  NS_OBJC_BEGIN_TRY_ABORT_BLOCK;
 
   if (!mWindow)
-    return NS_OK;
+    return;
 
   // mSizeMode will be updated in DispatchSizeModeEvent, which will be called
   // from a delegate method that handles the state change during one of the
@@ -1264,9 +1271,7 @@ NS_METHOD nsCocoaWindow::SetSizeMode(nsSizeMode aMode)
       MakeFullScreen(true);
   }
 
-  return NS_OK;
-
-  NS_OBJC_END_TRY_ABORT_BLOCK_NSRESULT;
+  NS_OBJC_END_TRY_ABORT_BLOCK;
 }
 
 // This has to preserve the window's frame bounds.
@@ -1470,7 +1475,7 @@ nsCocoaWindow::ShouldToggleNativeFullscreen(bool aFullScreen,
   return aFullScreen;
 }
 
-NS_IMETHODIMP
+nsresult
 nsCocoaWindow::MakeFullScreen(bool aFullScreen, nsIScreen* aTargetScreen)
 {
   return DoMakeFullScreen(aFullScreen, false);
@@ -1499,7 +1504,6 @@ nsCocoaWindow::DoMakeFullScreen(bool aFullScreen, bool aUseSystemTransition)
     return NS_OK;
   }
 
-
   mInFullScreenTransition = true;
 
   if (ShouldToggleNativeFullscreen(aFullScreen, aUseSystemTransition)) {
@@ -1523,10 +1527,8 @@ nsCocoaWindow::DoMakeFullScreen(bool aFullScreen, bool aUseSystemTransition)
     // Dock first, otherwise the newly-created window won't have its minimize
     // button enabled. See bug 526282.
     nsCocoaUtils::HideOSChromeOnScreen(aFullScreen);
-    nsresult rv = nsBaseWidget::MakeFullScreen(aFullScreen);
+    nsBaseWidget::InfallibleMakeFullScreen(aFullScreen);
     NSEnableScreenUpdates();
-    NS_ENSURE_SUCCESS(rv, rv);
-
     EnteredFullScreen(aFullScreen, /* aNativeMode */ false);
   }
 
@@ -1604,14 +1606,14 @@ NS_IMETHODIMP nsCocoaWindow::Resize(double aWidth, double aHeight, bool aRepaint
                   aWidth, aHeight, aRepaint, true);
 }
 
-NS_IMETHODIMP nsCocoaWindow::GetClientBounds(mozilla::LayoutDeviceIntRect& aRect)
+LayoutDeviceIntRect
+nsCocoaWindow::GetClientBounds()
 {
-  NS_OBJC_BEGIN_TRY_ABORT_BLOCK_NSRESULT;
+  NS_OBJC_BEGIN_TRY_ABORT_BLOCK_RETURN;
 
   CGFloat scaleFactor = BackingScaleFactor();
   if (!mWindow) {
-    aRect = nsCocoaUtils::CocoaRectToGeckoRectDevPix(NSZeroRect, scaleFactor);
-    return NS_OK;
+    return nsCocoaUtils::CocoaRectToGeckoRectDevPix(NSZeroRect, scaleFactor);
   }
 
   NSRect r;
@@ -1622,11 +1624,9 @@ NS_IMETHODIMP nsCocoaWindow::GetClientBounds(mozilla::LayoutDeviceIntRect& aRect
     r = [mWindow contentRectForFrameRect:[mWindow frame]];
   }
 
-  aRect = nsCocoaUtils::CocoaRectToGeckoRectDevPix(r, scaleFactor);
+  return nsCocoaUtils::CocoaRectToGeckoRectDevPix(r, scaleFactor);
 
-  return NS_OK;
-
-  NS_OBJC_END_TRY_ABORT_BLOCK_NSRESULT;
+  NS_OBJC_END_TRY_ABORT_BLOCK_RETURN(LayoutDeviceIntRect(0, 0, 0, 0));
 }
 
 void
@@ -1640,19 +1640,19 @@ nsCocoaWindow::UpdateBounds()
     nsCocoaUtils::CocoaRectToGeckoRectDevPix(frame, BackingScaleFactor());
 }
 
-NS_IMETHODIMP nsCocoaWindow::GetScreenBounds(LayoutDeviceIntRect &aRect)
+LayoutDeviceIntRect
+nsCocoaWindow::GetScreenBounds()
 {
-  NS_OBJC_BEGIN_TRY_ABORT_BLOCK_NSRESULT;
+  NS_OBJC_BEGIN_TRY_ABORT_BLOCK_RETURN;
 
 #ifdef DEBUG
   LayoutDeviceIntRect r = nsCocoaUtils::CocoaRectToGeckoRectDevPix([mWindow frame], BackingScaleFactor());
   NS_ASSERTION(mWindow && mBounds == r, "mBounds out of sync!");
 #endif
 
-  aRect = mBounds;
-  return NS_OK;
+  return mBounds;
 
-  NS_OBJC_END_TRY_ABORT_BLOCK_NSRESULT;
+  NS_OBJC_END_TRY_ABORT_BLOCK_RETURN(LayoutDeviceIntRect(0, 0, 0, 0));
 }
 
 double
@@ -1842,7 +1842,7 @@ NS_IMETHODIMP nsCocoaWindow::SendSetZLevelEvent()
   return NS_OK;
 }
 
-NS_IMETHODIMP nsCocoaWindow::GetChildSheet(bool aShown, nsCocoaWindow** _retval)
+NS_IMETHODIMP nsCocoaWindow::GetChildSheet(bool aShown, nsIWidget** _retval)
 {
   nsIWidget* child = GetFirstChild();
 
@@ -1853,7 +1853,8 @@ NS_IMETHODIMP nsCocoaWindow::GetChildSheet(bool aShown, nsCocoaWindow** _retval)
       if (cocoaWindow->mWindow &&
           ((aShown && [cocoaWindow->mWindow isVisible]) ||
           (!aShown && cocoaWindow->mSheetNeedsShow))) {
-        *_retval = cocoaWindow;
+        nsCOMPtr<nsIWidget> widget = cocoaWindow;
+        widget.forget(_retval);
         return NS_OK;
       }
     }
@@ -1966,8 +1967,7 @@ nsCocoaWindow::ReportSizeEvent()
   UpdateBounds();
 
   if (mWidgetListener) {
-    LayoutDeviceIntRect innerBounds;
-    GetClientBounds(innerBounds);
+    LayoutDeviceIntRect innerBounds = GetClientBounds();
     mWidgetListener->WindowResized(this, innerBounds.width, innerBounds.height);
   }
 
@@ -2034,8 +2034,7 @@ LayoutDeviceIntPoint nsCocoaWindow::GetClientOffset()
 {
   NS_OBJC_BEGIN_TRY_ABORT_BLOCK_RETURN;
 
-  LayoutDeviceIntRect clientRect;
-  GetClientBounds(clientRect);
+  LayoutDeviceIntRect clientRect = GetClientBounds();
 
   return clientRect.TopLeft() - mBounds.TopLeft();
 

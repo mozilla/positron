@@ -6,8 +6,9 @@
 #define MOZILLA_MEDIAMANAGER_H
 
 #include "MediaEngine.h"
+#include "mozilla/media/DeviceChangeCallback.h"
 #include "mozilla/Services.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 #include "nsAutoPtr.h"
 #include "nsIMediaManager.h"
 
@@ -69,6 +70,7 @@ public:
   NS_DECL_NSIMEDIADEVICE
 
   void SetId(const nsAString& aID);
+  void SetRawId(const nsAString& aID);
   virtual uint32_t GetBestFitnessDistance(
       const nsTArray<const NormalizedConstraintSet*>& aConstraintSets);
   virtual Source* GetSource() = 0;
@@ -94,6 +96,7 @@ private:
 protected:
   nsString mName;
   nsString mID;
+  nsString mRawID;
   dom::MediaSourceEnum mMediaSource;
   RefPtr<MediaEngineSource> mSource;
   RefPtr<MediaEngineSource::AllocationHandle> mAllocationHandle;
@@ -187,6 +190,7 @@ typedef void (*WindowListenerCallback)(MediaManager *aThis,
 
 class MediaManager final : public nsIMediaManagerService,
                            public nsIObserver
+                          ,public DeviceChangeCallback
 {
   friend GetUserMediaCallbackMediaStreamListener;
 public:
@@ -256,6 +260,9 @@ public:
 
   typedef nsTArray<RefPtr<MediaDevice>> SourceSet;
   static bool IsPrivateBrowsing(nsPIDOMWindowInner* window);
+
+  virtual int AddDeviceChangeCallback(DeviceChangeCallback* aCallback) override;
+  virtual void OnDeviceChange() override;
 private:
   typedef media::Pledge<SourceSet*, dom::MediaStreamError*> PledgeSourceSet;
   typedef media::Pledge<const char*, dom::MediaStreamError*> PledgeChar;
@@ -308,6 +315,7 @@ private:
                               void *aData);
 
   void StopMediaStreams();
+  void RemoveMediaDevicesCallback(uint64_t aWindowID);
 
   // ONLY access from MainThread so we don't need to lock
   WindowTable mActiveWindows;

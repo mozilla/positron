@@ -244,7 +244,7 @@ public:
                const nsAString& aStringBody)
   : WorkerThreadProxySyncRunnable(aWorkerPrivate, aProxy)
   , StructuredCloneHolder(CloningSupported, TransferringNotSupported,
-                          SameProcessDifferentThread)
+                          StructuredCloneScope::SameProcessDifferentThread)
   , mStringBody(aStringBody)
   , mHasUploadListeners(false)
   {
@@ -502,26 +502,26 @@ public:
                 JS::Handle<JSObject*> aScopeObj)
   : MainThreadProxyRunnable(aProxy->mWorkerPrivate, aProxy),
     StructuredCloneHolder(CloningSupported, TransferringNotSupported,
-                          SameProcessDifferentThread),
+                          StructuredCloneScope::SameProcessDifferentThread),
     mType(aType), mResponse(JS::UndefinedValue()), mLoaded(aLoaded),
     mTotal(aTotal), mEventStreamId(aProxy->mInnerEventStreamId), mStatus(0),
     mReadyState(0), mUploadEvent(aUploadEvent), mProgressEvent(true),
     mLengthComputable(aLengthComputable), mUseCachedArrayBufferResponse(false),
     mResponseTextResult(NS_OK), mStatusResult(NS_OK), mResponseResult(NS_OK),
-    mScopeObj(GetJSRuntime(), aScopeObj)
+    mScopeObj(RootingCx(), aScopeObj)
   { }
 
   EventRunnable(Proxy* aProxy, bool aUploadEvent, const nsString& aType,
                 JS::Handle<JSObject*> aScopeObj)
   : MainThreadProxyRunnable(aProxy->mWorkerPrivate, aProxy),
     StructuredCloneHolder(CloningSupported, TransferringNotSupported,
-                          SameProcessDifferentThread),
+                          StructuredCloneScope::SameProcessDifferentThread),
     mType(aType), mResponse(JS::UndefinedValue()), mLoaded(0), mTotal(0),
     mEventStreamId(aProxy->mInnerEventStreamId), mStatus(0), mReadyState(0),
     mUploadEvent(aUploadEvent), mProgressEvent(false), mLengthComputable(0),
     mUseCachedArrayBufferResponse(false), mResponseTextResult(NS_OK),
     mStatusResult(NS_OK), mResponseResult(NS_OK),
-    mScopeObj(GetJSRuntime(), aScopeObj)
+    mScopeObj(RootingCx(), aScopeObj)
   { }
 
 private:
@@ -1645,7 +1645,7 @@ XMLHttpRequestWorker::MaybePin(ErrorResult& aRv)
     return;
   }
 
-  if (!HoldWorker(mWorkerPrivate)) {
+  if (!HoldWorker(mWorkerPrivate, Canceling)) {
     aRv.Throw(NS_ERROR_FAILURE);
     return;
   }

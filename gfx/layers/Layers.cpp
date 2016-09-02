@@ -150,6 +150,32 @@ LayerManager::GetScrollableLayers(nsTArray<Layer*>& aArray)
   }
 }
 
+LayerMetricsWrapper
+LayerManager::GetRootContentLayer()
+{
+  if (!mRoot) {
+    return LayerMetricsWrapper();
+  }
+
+  nsTArray<Layer*> queue = { mRoot };
+  while (!queue.IsEmpty()) {
+    Layer* layer = queue[0];
+    queue.RemoveElementAt(0);
+
+    for (uint32_t i = 0; i < layer->GetScrollMetadataCount(); i++) {
+      if (layer->GetFrameMetrics(i).IsRootContent()) {
+        return LayerMetricsWrapper(layer, i);
+      }
+    }
+
+    for (Layer* child = layer->GetFirstChild(); child; child = child->GetNextSibling()) {
+      queue.AppendElement(child);
+    }
+  }
+
+  return LayerMetricsWrapper();
+}
+
 already_AddRefed<DrawTarget>
 LayerManager::CreateOptimalDrawTarget(const gfx::IntSize &aSize,
                                       SurfaceFormat aFormat)
@@ -1123,9 +1149,7 @@ ContainerLayer::ContainerLayer(LayerManager* aManager, void* aImplData)
     mSupportsComponentAlphaChildren(false),
     mMayHaveReadbackChild(false),
     mChildrenChanged(false),
-    mEventRegionsOverride(EventRegionsOverride::NoOverride),
-    mVRDeviceID(0),
-    mInputFrameID(0)
+    mEventRegionsOverride(EventRegionsOverride::NoOverride)
 {
   MOZ_COUNT_CTOR(ContainerLayer);
   mContentFlags = 0; // Clear NO_TEXT, NO_TEXT_OVER_TRANSPARENT
@@ -1286,9 +1310,7 @@ ContainerLayer::FillSpecificAttributes(SpecificLayerAttributes& aAttrs)
   aAttrs = ContainerLayerAttributes(mPreXScale, mPreYScale,
                                     mInheritedXScale, mInheritedYScale,
                                     mPresShellResolution, mScaleToResolution,
-                                    mEventRegionsOverride,
-                                    mVRDeviceID,
-                                    mInputFrameID);
+                                    mEventRegionsOverride);
 }
 
 bool
@@ -2189,9 +2211,6 @@ ContainerLayer::PrintInfo(std::stringstream& aStream, const char* aPrefix)
   }
   if (mEventRegionsOverride & EventRegionsOverride::ForceEmptyHitRegion) {
     aStream << " [force-ehr]";
-  }
-  if (mVRDeviceID) {
-    aStream << nsPrintfCString(" [hmd=%lu] [hmdframe=%l]", mVRDeviceID, mInputFrameID).get();
   }
 }
 

@@ -26,18 +26,23 @@ ConsoleCommand.propTypes = {
  */
 function ConsoleCommand(props) {
   const { message } = props;
+  const {source, level} = message;
 
-  const icon = MessageIcon({severity: message.severity});
+  const icon = MessageIcon({level});
 
-  // @TODO Use of "is" is a temporary hack to get the category and severity
-  // attributes to be applied. There are targeted in webconsole's CSS rules,
-  // so if we remove this hack, we have to modify the CSS rules accordingly.
+  const classes = ["message"];
+
+  if (source) {
+    classes.push(source);
+  }
+
+  if (level) {
+    classes.push(level);
+  }
+
   return dom.div({
-    class: "message",
+    className: classes.join(" "),
     ariaLive: "off",
-    is: "fdt-message",
-    category: message.category,
-    severity: message.severity
   },
     // @TODO add timestamp
     // @TODO add indent if necessary

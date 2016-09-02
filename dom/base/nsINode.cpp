@@ -108,6 +108,10 @@
 #include "nsIAnimationObserver.h"
 #include "nsChildContentList.h"
 
+#ifdef ACCESSIBILITY
+#include "mozilla/dom/AccessibleNode.h"
+#endif
+
 using namespace mozilla;
 using namespace mozilla::dom;
 
@@ -1531,8 +1535,7 @@ static nsresult
 CheckForOutdatedParent(nsINode* aParent, nsINode* aNode)
 {
   if (JSObject* existingObjUnrooted = aNode->GetWrapper()) {
-    JSRuntime* runtime = JS_GetObjectRuntime(existingObjUnrooted);
-    JS::Rooted<JSObject*> existingObj(runtime, existingObjUnrooted);
+    JS::Rooted<JSObject*> existingObj(RootingCx(), existingObjUnrooted);
 
     AutoJSContext cx;
     nsIGlobalObject* global = aParent->OwnerDoc()->GetScopeObject();
@@ -2578,6 +2581,17 @@ nsINode::GetBoundMutationObservers(nsTArray<RefPtr<nsDOMMutationObserver> >& aRe
       }
     }
   }
+}
+
+already_AddRefed<AccessibleNode>
+nsINode::GetAccessibleNode()
+{
+#ifdef ACCESSIBILITY
+  RefPtr<AccessibleNode> anode = new AccessibleNode(this);
+  return anode.forget();
+#endif
+
+  return nullptr;
 }
 
 size_t

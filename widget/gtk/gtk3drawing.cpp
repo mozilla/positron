@@ -19,8 +19,6 @@
 #include <math.h>
 
 static GtkWidget* gProtoLayout;
-static GtkWidget* gHScaleWidget;
-static GtkWidget* gVScaleWidget;
 static GtkWidget* gComboBoxWidget;
 static GtkWidget* gComboBoxButtonWidget;
 static GtkWidget* gComboBoxArrowWidget;
@@ -29,7 +27,6 @@ static GtkWidget* gComboBoxEntryWidget;
 static GtkWidget* gComboBoxEntryTextareaWidget;
 static GtkWidget* gComboBoxEntryButtonWidget;
 static GtkWidget* gComboBoxEntryArrowWidget;
-static GtkWidget* gTabWidget;
 
 static style_prop_t style_prop_func;
 static gboolean have_arrow_scaling;
@@ -45,6 +42,9 @@ static gboolean is_initialized;
 #if !GTK_CHECK_VERSION(3,14,0)
 #define GTK_STATE_FLAG_CHECKED (1 << 11)
 #endif
+
+static gint
+moz_gtk_get_tab_thickness(GtkStyleContext *style);
 
 static GtkStateFlags
 GetStateFlagsFromGtkWidgetState(GtkWidgetState* state)
@@ -65,6 +65,13 @@ GetStateFlagsFromGtkWidgetState(GtkWidgetState* state)
     return stateFlags;
 }
 
+static GtkStateFlags
+GetStateFlagsFromGtkTabFlags(GtkTabFlags flags)
+{
+    return ((flags & MOZ_GTK_TAB_SELECTED) == 0) ?
+            GTK_STATE_FLAG_NORMAL : GTK_STATE_FLAG_ACTIVE;
+}
+
 gint
 moz_gtk_enable_style_props(style_prop_t styleGetProp)
 {
@@ -80,20 +87,6 @@ setup_widget_prototype(GtkWidget* widget)
     }
     gtk_container_add(GTK_CONTAINER(gProtoLayout), widget);
     return MOZ_GTK_SUCCESS;
-}
-
-static gint
-ensure_scale_widget()
-{
-  if (!gHScaleWidget) {
-    gHScaleWidget = gtk_scale_new(GTK_ORIENTATION_HORIZONTAL, NULL);
-    setup_widget_prototype(gHScaleWidget);
-  }
-  if (!gVScaleWidget) {
-    gVScaleWidget = gtk_scale_new(GTK_ORIENTATION_VERTICAL, NULL);
-    setup_widget_prototype(gVScaleWidget);
-  }
-  return MOZ_GTK_SUCCESS;
 }
 
 /* We need to have pointers to the inner widgets (button, separator, arrow)
@@ -292,16 +285,6 @@ ensure_combo_box_entry_widgets()
     return MOZ_GTK_SUCCESS;
 }
 
-static gint
-ensure_tab_widget()
-{
-    if (!gTabWidget) {
-        gTabWidget = gtk_notebook_new();
-        setup_widget_prototype(gTabWidget);
-    }
-    return MOZ_GTK_SUCCESS;
-}
-
 gint
 moz_gtk_init()
 {
@@ -317,13 +300,17 @@ moz_gtk_init()
     else
         checkbox_check_state = GTK_STATE_FLAG_ACTIVE;
 
-    if(!gtk_check_version(3, 12, 0)) {
-        ensure_tab_widget();
-        gtk_style_context_get_style(gtk_widget_get_style_context(gTabWidget),
+    if (gtk_check_version(3, 12, 0) == nullptr &&
+        gtk_check_version(3, 20, 0) != nullptr)
+    {
+        // Deprecated for Gtk >= 3.20+
+        GtkStyleContext *style = ClaimStyleContext(MOZ_GTK_TAB_TOP);
+        gtk_style_context_get_style(style,
                                     "has-tab-gap", &notebook_has_tab_gap, NULL);
+        ReleaseStyleContext(style);
     }
     else {
-        notebook_has_tab_gap = TRUE;
+        notebook_has_tab_gap = true;
     }
 
     return MOZ_GTK_SUCCESS;
@@ -879,18 +866,15 @@ moz_gtk_scale_paint(cairo_t *cr, GdkRectangle* rect,
   GtkStateFlags state_flags = GetStateFlagsFromGtkWidgetState(state);
   gint x, y, width, height, min_width, min_height;
   GtkStyleContext* style;
-  GtkWidget* widget;
   GtkBorder margin;
 
-  ensure_scale_widget();
-  widget = ((flags == GTK_ORIENTATION_HORIZONTAL) ? gHScaleWidget : gVScaleWidget);
-  gtk_widget_set_direction(widget, direction);
   moz_gtk_get_scale_metrics(flags, &min_width, &min_height);
 
-  style = gtk_widget_get_style_context(widget);
-  gtk_style_context_save(style);
-  gtk_style_context_add_class(style, GTK_STYLE_CLASS_TROUGH);
-  gtk_style_context_get_margin(style, state_flags, &margin); 
+  WidgetNodeType widget = (flags == GTK_ORIENTATION_HORIZONTAL) ?
+                          MOZ_GTK_SCALE_TROUGH_HORIZONTAL :
+                          MOZ_GTK_SCALE_TROUGH_VERTICAL;
+  style = ClaimStyleContext(widget, direction, state_flags);
+  gtk_style_context_get_margin(style, state_flags, &margin);
 
   // Clamp the dimension perpendicular to the direction that the slider crosses
   // to the minimum size.
@@ -912,7 +896,8 @@ moz_gtk_scale_paint(cairo_t *cr, GdkRectangle* rect,
   if (state->focused)
     gtk_render_focus(style, cr, 
                     rect->x, rect->y, rect->width, rect->height);
-  gtk_style_context_restore(style);
+
+  ReleaseStyleContext(style);
   return MOZ_GTK_SUCCESS;
 }
 
@@ -923,17 +908,8 @@ moz_gtk_scale_thumb_paint(cairo_t *cr, GdkRectangle* rect,
 {
   GtkStateFlags state_flags = GetStateFlagsFromGtkWidgetState(state);
   GtkStyleContext* style;
-  GtkWidget* widget;
   gint thumb_width, thumb_height, x, y;
 
-  ensure_scale_widget();
-  widget = ((flags == GTK_ORIENTATION_HORIZONTAL) ? gHScaleWidget : gVScaleWidget);
-  gtk_widget_set_direction(widget, direction);
-
-  style = gtk_widget_get_style_context(widget);
-  gtk_style_context_save(style);
-  gtk_style_context_add_class(style, GTK_STYLE_CLASS_SLIDER);
-  gtk_style_context_set_state(style, state_flags);
   /* determine the thumb size, and position the thumb in the center in the opposite axis 
   */
   if (flags == GTK_ORIENTATION_HORIZONTAL) {
@@ -947,8 +923,13 @@ moz_gtk_scale_thumb_paint(cairo_t *cr, GdkRectangle* rect,
     y = rect->y;
   }
 
+  WidgetNodeType widget = (flags == GTK_ORIENTATION_HORIZONTAL) ?
+                          MOZ_GTK_SCALE_THUMB_HORIZONTAL :
+                          MOZ_GTK_SCALE_THUMB_VERTICAL;
+  style = ClaimStyleContext(widget, direction, state_flags);
   gtk_render_slider(style, cr, x, y, thumb_width, thumb_height, flags);
-  gtk_style_context_restore(style);
+  ReleaseStyleContext(style);
+
   return MOZ_GTK_SUCCESS;
 }
 
@@ -1585,46 +1566,35 @@ moz_gtk_progress_chunk_paint(cairo_t *cr, GdkRectangle* rect,
     return MOZ_GTK_SUCCESS;
 }
 
-gint
-moz_gtk_get_tab_thickness(void)
+static gint
+moz_gtk_get_tab_thickness(GtkStyleContext *style)
 {
-    GtkBorder border;
-    GtkStyleContext * style;
-
-    ensure_tab_widget();
     if (!notebook_has_tab_gap)
       return 0; /* tabs do not overdraw the tabpanel border with "no gap" style */
 
-    style = gtk_widget_get_style_context(gTabWidget);
-    gtk_style_context_add_class(style, GTK_STYLE_CLASS_NOTEBOOK);
+    GtkBorder border;
     gtk_style_context_get_border(style, GTK_STATE_FLAG_NORMAL, &border);
-
     if (border.top < 2)
         return 2; /* some themes don't set ythickness correctly */
 
     return border.top;
 }
 
-static void
-moz_gtk_tab_prepare_style_context(GtkStyleContext *style,
-                                  GtkTabFlags flags)
-{  
-  gtk_style_context_set_state(style, ((flags & MOZ_GTK_TAB_SELECTED) == 0) ? 
-                                        GTK_STATE_FLAG_NORMAL : 
-                                        GTK_STATE_FLAG_ACTIVE);
-  gtk_style_context_add_region(style, GTK_STYLE_REGION_TAB, 
-                                      (flags & MOZ_GTK_TAB_FIRST) ? 
-                                        GTK_REGION_FIRST : static_cast<GtkRegionFlags>(0));
-  gtk_style_context_add_class(style, (flags & MOZ_GTK_TAB_BOTTOM) ? 
-                                        GTK_STYLE_CLASS_BOTTOM : 
-                                        GTK_STYLE_CLASS_TOP);
+gint
+moz_gtk_get_tab_thickness(WidgetNodeType aNodeType)
+{
+    GtkStyleContext *style = ClaimStyleContext(aNodeType);
+    int thickness = moz_gtk_get_tab_thickness(style);
+    ReleaseStyleContext(style);
+    return thickness;
 }
 
 /* actual small tabs */
 static gint
 moz_gtk_tab_paint(cairo_t *cr, GdkRectangle* rect,
                   GtkWidgetState* state,
-                  GtkTabFlags flags, GtkTextDirection direction)
+                  GtkTabFlags flags, GtkTextDirection direction,
+                  WidgetNodeType widget)
 {
     /* When the tab isn't selected, we just draw a notebook extension.
      * When it is selected, we overwrite the adjacent border of the tabpanel
@@ -1636,14 +1606,10 @@ moz_gtk_tab_paint(cairo_t *cr, GdkRectangle* rect,
     GdkRectangle focusRect;
     GdkRectangle backRect;
     int initial_gap = 0;
+    bool isBottomTab = (widget == MOZ_GTK_TAB_BOTTOM);
 
-    ensure_tab_widget();
-    gtk_widget_set_direction(gTabWidget, direction);
-
-    style = gtk_widget_get_style_context(gTabWidget);
-    gtk_style_context_save(style);
-    moz_gtk_tab_prepare_style_context(style, flags);
-
+    style = ClaimStyleContext(widget, direction,
+                              GetStateFlagsFromGtkTabFlags(flags));
     tabRect = *rect;
 
     if (flags & MOZ_GTK_TAB_FIRST) {
@@ -1662,8 +1628,7 @@ moz_gtk_tab_paint(cairo_t *cr, GdkRectangle* rect,
             /* Only draw the tab */
             gtk_render_extension(style, cr,
                                  tabRect.x, tabRect.y, tabRect.width, tabRect.height,
-                                (flags & MOZ_GTK_TAB_BOTTOM) ?
-                                    GTK_POS_TOP : GTK_POS_BOTTOM );
+                                 isBottomTab ? GTK_POS_TOP : GTK_POS_BOTTOM );
         } else {
             /* Draw the tab and the gap
              * We want the gap to be positioned exactly on the tabpanel top
@@ -1704,7 +1669,7 @@ moz_gtk_tab_paint(cairo_t *cr, GdkRectangle* rect,
             gint gap_loffset, gap_roffset, gap_voffset, gap_height;
 
             /* Get height needed by the gap */
-            gap_height = moz_gtk_get_tab_thickness();
+            gap_height = moz_gtk_get_tab_thickness(style);
 
             /* Extract gap_voffset from the first bits of flags */
             gap_voffset = flags & MOZ_GTK_TAB_MARGIN_MASK;
@@ -1720,7 +1685,7 @@ moz_gtk_tab_paint(cairo_t *cr, GdkRectangle* rect,
                     gap_loffset = initial_gap;
             }
 
-            if (flags & MOZ_GTK_TAB_BOTTOM) {
+            if (isBottomTab) {
                 /* Draw the tab on bottom */
                 focusRect.y += gap_voffset;
                 focusRect.height -= gap_voffset;
@@ -1784,15 +1749,9 @@ moz_gtk_tab_paint(cairo_t *cr, GdkRectangle* rect,
         gtk_render_frame(style, cr, tabRect.x, tabRect.y, tabRect.width, tabRect.height);
     }
 
-    gtk_style_context_restore(style);
-
     if (state->focused) {
       /* Paint the focus ring */
       GtkBorder padding;
-
-      gtk_style_context_save(style);
-      moz_gtk_tab_prepare_style_context(style, flags);
-
       gtk_style_context_get_padding(style, GetStateFlagsFromGtkWidgetState(state), &padding);
 
       focusRect.x += padding.left;
@@ -1802,10 +1761,8 @@ moz_gtk_tab_paint(cairo_t *cr, GdkRectangle* rect,
 
       gtk_render_focus(style, cr,
                       focusRect.x, focusRect.y, focusRect.width, focusRect.height);
-
-      gtk_style_context_restore(style);
     }
-
+    ReleaseStyleContext(style);
 
     return MOZ_GTK_SUCCESS;
 }
@@ -1815,14 +1772,7 @@ static gint
 moz_gtk_tabpanels_paint(cairo_t *cr, GdkRectangle* rect,
                         GtkTextDirection direction)
 {
-    GtkStyleContext* style;
-
-    ensure_tab_widget();
-    gtk_widget_set_direction(gTabWidget, direction);
-
-    style = gtk_widget_get_style_context(gTabWidget);
-    gtk_style_context_save(style);
-
+    GtkStyleContext* style = ClaimStyleContext(MOZ_GTK_TABPANELS, direction);
     gtk_render_background(style, cr, rect->x, rect->y, 
                           rect->width, rect->height);
     /*
@@ -1846,7 +1796,7 @@ moz_gtk_tabpanels_paint(cairo_t *cr, GdkRectangle* rect,
                          rect->width, rect->height,
                          GTK_POS_TOP, rect->width - 1, rect->width);
     cairo_restore(cr);
-    
+
     /* right side */
     cairo_save(cr);
     cairo_rectangle(cr, rect->x + rect->width / 2, rect->y,
@@ -1859,7 +1809,7 @@ moz_gtk_tabpanels_paint(cairo_t *cr, GdkRectangle* rect,
                          GTK_POS_TOP, 0, 1);
     cairo_restore(cr);
 
-    gtk_style_context_restore(style);
+    ReleaseStyleContext(style);
     return MOZ_GTK_SUCCESS;
 }
 
@@ -1869,17 +1819,12 @@ moz_gtk_tab_scroll_arrow_paint(cairo_t *cr, GdkRectangle* rect,
                                GtkArrowType arrow_type,
                                GtkTextDirection direction)
 {
-    GtkStateFlags state_flags = GetStateFlagsFromGtkWidgetState(state);
     GtkStyleContext* style;
     gdouble arrow_angle;
     gint arrow_size = MIN(rect->width, rect->height);
     gint x = rect->x + (rect->width - arrow_size) / 2;
     gint y = rect->y + (rect->height - arrow_size) / 2;
 
-    ensure_tab_widget();
-
-    style = gtk_widget_get_style_context(gTabWidget);
-    gtk_style_context_save(style);
     if (direction == GTK_TEXT_DIR_RTL) {
         arrow_type = (arrow_type == GTK_ARROW_LEFT) ?
                          GTK_ARROW_RIGHT : GTK_ARROW_LEFT;
@@ -1899,12 +1844,12 @@ moz_gtk_tab_scroll_arrow_paint(cairo_t *cr, GdkRectangle* rect,
         break;      
     }
     if (arrow_type != GTK_ARROW_NONE)  {        
-        gtk_style_context_add_class(style, GTK_STYLE_CLASS_NOTEBOOK); /* TODO TEST */
-        gtk_style_context_set_state(style, state_flags);
+        style = ClaimStyleContext(MOZ_GTK_TAB_SCROLLARROW, direction,
+                                  GetStateFlagsFromGtkWidgetState(state));
         gtk_render_arrow(style, cr, arrow_angle,
                          x, y, arrow_size);
+        ReleaseStyleContext(style);
     }
-    gtk_style_context_restore(style);
     return MOZ_GTK_SUCCESS;
 }
 
@@ -2291,8 +2236,7 @@ moz_gtk_get_widget_border(WidgetNodeType widget, gint* left, gint* top,
             return MOZ_GTK_SUCCESS;
         }
     case MOZ_GTK_TABPANELS:
-        ensure_tab_widget();
-        w = gTabWidget;
+        w = GetWidget(MOZ_GTK_TABPANELS);
         break;
     case MOZ_GTK_PROGRESSBAR:
         w = GetWidget(MOZ_GTK_PROGRESSBAR);
@@ -2303,12 +2247,8 @@ moz_gtk_get_widget_border(WidgetNodeType widget, gint* left, gint* top,
         w = GetWidget(MOZ_GTK_SPINBUTTON);
         break;
     case MOZ_GTK_SCALE_HORIZONTAL:
-        ensure_scale_widget();
-        w = gHScaleWidget;
-        break;
     case MOZ_GTK_SCALE_VERTICAL:
-        ensure_scale_widget();
-        w = gVScaleWidget;
+        w = GetWidget(widget);
         break;
     case MOZ_GTK_FRAME:
         w = GetWidget(MOZ_GTK_FRAME);
@@ -2402,35 +2342,48 @@ moz_gtk_get_widget_border(WidgetNodeType widget, gint* left, gint* top,
 
 gint
 moz_gtk_get_tab_border(gint* left, gint* top, gint* right, gint* bottom, 
-                       GtkTextDirection direction, GtkTabFlags flags)
+                       GtkTextDirection direction, GtkTabFlags flags, 
+                       WidgetNodeType widget)
 {
-    GtkStyleContext* style;    
-    int tab_curvature;
-
-    ensure_tab_widget();
-
-    style = gtk_widget_get_style_context(gTabWidget);
-    gtk_style_context_save(style);
-    moz_gtk_tab_prepare_style_context(style, flags);
+    GtkStyleContext* style = ClaimStyleContext(widget, direction,
+                              GetStateFlagsFromGtkTabFlags(flags));
 
     *left = *top = *right = *bottom = 0;
     moz_gtk_add_style_padding(style, left, top, right, bottom);
 
-    gtk_style_context_get_style(style, "tab-curvature", &tab_curvature, NULL);
-    *left += tab_curvature;
-    *right += tab_curvature;
+    // Gtk >= 3.20 does not use those styles
+    if (gtk_check_version(3, 20, 0) != nullptr) {
+        int tab_curvature;
 
-    if (flags & MOZ_GTK_TAB_FIRST) {
-      int initial_gap;
-      gtk_style_context_get_style(style, "initial-gap", &initial_gap, NULL);
-      if (direction == GTK_TEXT_DIR_RTL)
-        *right += initial_gap;
-      else
-        *left += initial_gap;
+        gtk_style_context_get_style(style, "tab-curvature", &tab_curvature, NULL);
+        *left += tab_curvature;
+        *right += tab_curvature;
+
+        if (flags & MOZ_GTK_TAB_FIRST) {
+            int initial_gap = 0;
+            gtk_style_context_get_style(style, "initial-gap", &initial_gap, NULL);
+            if (direction == GTK_TEXT_DIR_RTL)
+                *right += initial_gap;
+            else
+                *left += initial_gap;
+        }
+    } else {
+        GtkBorder margin;
+
+        gtk_style_context_get_margin(style, GTK_STATE_FLAG_NORMAL, &margin);
+        *left += margin.left;
+        *right += margin.right;
+
+        if (flags & MOZ_GTK_TAB_FIRST) {
+            ReleaseStyleContext(style);
+            style = ClaimStyleContext(MOZ_GTK_NOTEBOOK_HEADER, direction);
+            gtk_style_context_get_margin(style, GTK_STATE_FLAG_NORMAL, &margin);
+            *left += margin.left;
+            *right += margin.right;
+        }
     }
 
-    gtk_style_context_restore(style);
-
+    ReleaseStyleContext(style);
     return MOZ_GTK_SUCCESS;
 }
 
@@ -2457,10 +2410,11 @@ moz_gtk_get_tab_scroll_arrow_size(gint* width, gint* height)
 {
     gint arrow_size;
 
-    ensure_tab_widget();
-    gtk_style_context_get_style(gtk_widget_get_style_context(gTabWidget),
+    GtkStyleContext *style = ClaimStyleContext(MOZ_GTK_TABPANELS);
+    gtk_style_context_get_style(style,
                                 "scroll-arrow-hlength", &arrow_size,
                                 NULL);
+    ReleaseStyleContext(style);
 
     *height = *width = arrow_size;
 
@@ -2586,34 +2540,60 @@ void
 moz_gtk_get_scale_metrics(GtkOrientation orient, gint* scale_width,
                           gint* scale_height)
 {
-  gint thumb_length, thumb_height, trough_border;
-  GtkWidget* widget = orient == GTK_ORIENTATION_HORIZONTAL ?
-                      gHScaleWidget : gVScaleWidget;
-  moz_gtk_get_scalethumb_metrics(orient, &thumb_length, &thumb_height);
-  gtk_style_context_get_style(gtk_widget_get_style_context(widget),
-                              "trough-border", &trough_border, NULL);
+  WidgetNodeType widget = (orient == GTK_ORIENTATION_HORIZONTAL) ?
+                           MOZ_GTK_SCALE_HORIZONTAL :
+                           MOZ_GTK_SCALE_VERTICAL;
 
-  if (orient == GTK_ORIENTATION_HORIZONTAL) {
-      *scale_width = thumb_length + trough_border * 2;
-      *scale_height = thumb_height + trough_border * 2;
+  if (gtk_check_version(3, 20, 0) != nullptr) {
+      gint thumb_length, thumb_height, trough_border;
+      moz_gtk_get_scalethumb_metrics(orient, &thumb_length, &thumb_height);
+
+      GtkStyleContext* style = ClaimStyleContext(widget);
+      gtk_style_context_get_style(style, "trough-border", &trough_border, NULL);
+
+      if (orient == GTK_ORIENTATION_HORIZONTAL) {
+          *scale_width = thumb_length + trough_border * 2;
+          *scale_height = thumb_height + trough_border * 2;
+      } else {
+          *scale_width = thumb_height + trough_border * 2;
+          *scale_height = thumb_length + trough_border * 2;
+      }
+      ReleaseStyleContext(style);
   } else {
-      *scale_width = thumb_height + trough_border * 2;
-      *scale_height = thumb_length + trough_border * 2;
+      GtkStyleContext* style = ClaimStyleContext(widget);
+      gtk_style_context_get(style, gtk_style_context_get_state(style),
+                            "min-width", scale_width,
+                            "min-height", scale_height,
+                            nullptr);
+      ReleaseStyleContext(style);
   }
 }
 
 gint
 moz_gtk_get_scalethumb_metrics(GtkOrientation orient, gint* thumb_length, gint* thumb_height)
 {
-  GtkWidget* widget;
 
-  ensure_scale_widget();
-  widget = ((orient == GTK_ORIENTATION_HORIZONTAL) ? gHScaleWidget : gVScaleWidget);
-
-  gtk_style_context_get_style(gtk_widget_get_style_context(widget),
-                              "slider_length", thumb_length,
-                              "slider_width", thumb_height,
-                              NULL);
+  if (gtk_check_version(3, 20, 0) != nullptr) {
+      WidgetNodeType widget = (orient == GTK_ORIENTATION_HORIZONTAL) ?
+                               MOZ_GTK_SCALE_HORIZONTAL:
+                               MOZ_GTK_SCALE_VERTICAL;
+      GtkStyleContext* style = ClaimStyleContext(widget);
+      gtk_style_context_get_style(style,
+                                  "slider_length", thumb_length,
+                                  "slider_width", thumb_height,
+                                  NULL);
+      ReleaseStyleContext(style);
+  } else {
+      WidgetNodeType widget = (orient == GTK_ORIENTATION_HORIZONTAL) ?
+                               MOZ_GTK_SCALE_THUMB_HORIZONTAL:
+                               MOZ_GTK_SCALE_THUMB_VERTICAL;
+      GtkStyleContext* style = ClaimStyleContext(widget);
+      gtk_style_context_get(style, gtk_style_context_get_state(style),
+                            "min-width", thumb_length,
+                            "min-height", thumb_height,
+                             nullptr);
+      ReleaseStyleContext(style);
+  }
 
   return MOZ_GTK_SUCCESS;
 }
@@ -2816,9 +2796,10 @@ moz_gtk_widget_paint(WidgetNodeType widget, cairo_t *cr,
         return moz_gtk_progress_chunk_paint(cr, rect,
                                             direction, widget);
         break;
-    case MOZ_GTK_TAB:
+    case MOZ_GTK_TAB_TOP:
+    case MOZ_GTK_TAB_BOTTOM:
         return moz_gtk_tab_paint(cr, rect, state,
-                                 (GtkTabFlags) flags, direction);
+                                 (GtkTabFlags) flags, direction, widget);
         break;
     case MOZ_GTK_TABPANELS:
         return moz_gtk_tabpanels_paint(cr, rect, direction);
@@ -2903,8 +2884,6 @@ moz_gtk_shutdown()
     ResetWidgetCache();
 
     gProtoLayout = NULL;
-    gHScaleWidget = NULL;
-    gVScaleWidget = NULL;
     gComboBoxWidget = NULL;
     gComboBoxButtonWidget = NULL;
     gComboBoxSeparatorWidget = NULL;
@@ -2913,7 +2892,6 @@ moz_gtk_shutdown()
     gComboBoxEntryButtonWidget = NULL;
     gComboBoxEntryArrowWidget = NULL;
     gComboBoxEntryTextareaWidget = NULL;
-    gTabWidget = NULL;
 
     is_initialized = FALSE;
 

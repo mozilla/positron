@@ -14,7 +14,7 @@
 #include "mozilla/ipc/GeckoChildProcessHost.h"
 #include "mozilla/SSE.h"
 #include "mozilla/SyncRunnable.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 #include "nsIObserverService.h"
 #include "GMPTimerParent.h"
 #include "runnable_utils.h"
@@ -23,6 +23,7 @@
 #endif
 #include "GMPContentParent.h"
 #include "MediaPrefs.h"
+#include "VideoUtils.h"
 
 #include "mozilla/dom/CrashReporterParent.h"
 using mozilla::dom::CrashReporterParent;
@@ -478,7 +479,7 @@ public:
     : mNodeId(aNodeId)
   {
   }
-  NS_IMETHOD Run() {
+  NS_IMETHOD Run() override {
     MOZ_ASSERT(NS_IsMainThread());
     nsCOMPtr<nsIObserverService> obsService = mozilla::services::GetObserverService();
     MOZ_ASSERT(obsService);
@@ -898,7 +899,7 @@ GMPParent::ReadGMPInfoFile(nsIFile* aFile)
       // Adobe GMP doesn't work without SSE2. Check the tags to see if
       // the decryptor is for the Adobe GMP, and refuse to load it if
       // SSE2 isn't supported.
-      if (cap.mAPITags.Contains(nsCString(kEMEKeySystemPrimetime)) &&
+      if (cap.mAPITags.Contains(kEMEKeySystemPrimetime) &&
           !mozilla::supports_sse2()) {
         return GenericPromise::CreateAndReject(NS_ERROR_FAILURE, __func__);
       }
@@ -955,11 +956,11 @@ GMPParent::ParseChromiumManifest(nsString aJSON)
   video.mAPITags.AppendElement(NS_LITERAL_CSTRING("h264"));
   video.mAPITags.AppendElement(NS_LITERAL_CSTRING("vp8"));
   video.mAPITags.AppendElement(NS_LITERAL_CSTRING("vp9"));
-  video.mAPITags.AppendElement(nsCString(kEMEKeySystemWidevine));
+  video.mAPITags.AppendElement(kEMEKeySystemWidevine);
   mCapabilities.AppendElement(Move(video));
 
   GMPCapability decrypt(NS_LITERAL_CSTRING(GMP_API_DECRYPTOR));
-  decrypt.mAPITags.AppendElement(nsCString(kEMEKeySystemWidevine));
+  decrypt.mAPITags.AppendElement(kEMEKeySystemWidevine);
   mCapabilities.AppendElement(Move(decrypt));
 
   MOZ_ASSERT(mName.EqualsLiteral("widevinecdm"));
@@ -1061,7 +1062,7 @@ public:
   }
 
   NS_IMETHOD
-  Run()
+  Run() override
   {
     for (uint32_t i = 0, length = mCallbacks.Length(); i < length; ++i) {
       mCallbacks[i]->Done(mGMPContentParent);

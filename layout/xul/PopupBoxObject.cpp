@@ -283,8 +283,7 @@ PopupBoxObject::GetOuterScreenRect()
   if (view) {
     nsIWidget* widget = view->GetWidget();
     if (widget) {
-      LayoutDeviceIntRect screenRect;
-      widget->GetScreenBounds(screenRect);
+      LayoutDeviceIntRect screenRect = widget->GetScreenBounds();
 
       int32_t pp = menuPopupFrame->PresContext()->AppUnitsPerDevPixel();
       rect->SetLayoutRect(LayoutDeviceIntRect::ToAppUnits(screenRect, pp));
@@ -334,6 +333,9 @@ PopupBoxObject::GetAlignmentPosition(nsString& positionStr)
       break;
     case POPUPPOSITION_AFTERPOINTER:
       positionStr.AssignLiteral("after_pointer");
+      break;
+    case POPUPPOSITION_SELECTION:
+      positionStr.AssignLiteral("selection");
       break;
     default:
       // Leave as an empty string.

@@ -147,8 +147,7 @@ var testTrunc = wasmEvalText(`(module (func (param f32) (result i32) (if (i32.eq
 assertEq(testTrunc(0), 0);
 assertEq(testTrunc(13.37), 1);
 
-if (hasI64()) {
-
+{
     setJitCompilerOption('wasm.test-mode', 1);
 
     testBinary64('add', 40, 2, 42);
@@ -279,6 +278,8 @@ if (hasI64()) {
     testI64Eqz(40, 0);
     testI64Eqz(0, 1);
 
+    assertEqI64(wasmEvalText(`(module (func (param i64) (result i64) (local i64) (set_local 1 (i64.shl (get_local 0) (get_local 0))) (i64.shl (get_local 1) (get_local 1))) (export "" 0))`)(createI64(2)), 2048);
+
     // Test MTest's GVN branch inversion.
     var testTrunc = wasmEvalText(`(module (func (param f32) (result i32) (if (i64.eqz (i64.trunc_s/f32 (get_local 0))) (i32.const 0) (i32.const 1))) (export "" 0))`);
     assertEq(testTrunc(0), 0);
@@ -287,14 +288,6 @@ if (hasI64()) {
     assertEqI64(wasmEvalText(`(module (func (result i64) (local i64) (set_local 0 (i64.rem_s (i64.const 1) (i64.const 0xf))) (i64.rem_s (get_local 0) (get_local 0))) (export "" 0))`)(), 0);
 
     setJitCompilerOption('wasm.test-mode', 0);
-} else {
-    // Sleeper test: once i64 works on more platforms, remove this if-else.
-    try {
-        testComparison64('eq', 40, 40, 1);
-        assertEq(0, 1);
-    } catch(e) {
-        assertEq(e.toString().indexOf("NYI on this platform") >= 0, true);
-    }
 }
 
 assertErrorMessage(() => wasmEvalText('(module (func (param f32) (result i32) (i32.clz (get_local 0))))'), TypeError, mismatchError("f32", "i32"));

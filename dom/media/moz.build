@@ -21,6 +21,7 @@ with Files('GetUserMedia*'):
 
 DIRS += [
     'encoder',
+    'flac',
     'gmp',
     'gmp-plugin',
     'gmp-plugin-openh264',
@@ -138,7 +139,6 @@ EXPORTS += [
     'nsIDocumentActivity.h',
     'PrincipalChangeObserver.h',
     'QueueObject.h',
-    'RtspMediaResource.h',
     'SeekJob.h',
     'SeekTarget.h',
     'SeekTask.h',
@@ -249,7 +249,6 @@ UNIFIED_SOURCES += [
     'MP3FrameParser.cpp',
     'NextFrameSeekTask.cpp',
     'QueueObject.cpp',
-    'RtspMediaResource.cpp',
     'SeekJob.cpp',
     'SeekTask.cpp',
     'StreamTracks.cpp',

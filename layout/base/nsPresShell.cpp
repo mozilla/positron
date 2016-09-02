@@ -31,11 +31,11 @@
 #include "mozilla/dom/TabChild.h"
 #include "mozilla/Likely.h"
 #include "mozilla/MouseEvents.h"
-#include "mozilla/Snprintf.h"
+#include "mozilla/Sprintf.h"
 #include "mozilla/TextEvents.h"
 #include "mozilla/TouchEvents.h"
 #include "mozilla/UniquePtr.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 #include "mozilla/StyleBackendType.h"
 #include <algorithm>
 
@@ -793,14 +793,7 @@ PresShell::PresShell()
   mIsActive = true;
   mIsHidden = false;
   // FIXME/bug 735029: find a better solution to this problem
-#if defined(MOZ_WIDGET_ANDROID) && !defined(MOZ_ANDROID_APZ)
-  // The java pan/zoom code uses this to mean approximately "request a
-  // reset of pan/zoom state" which doesn't necessarily correspond
-  // with the first paint of content.
-  mIsFirstPaint = false;
-#else
   mIsFirstPaint = true;
-#endif
   mPresShellId = sNextPresShellId++;
   mFrozen = false;
   mRenderFlags = 0;
@@ -1027,14 +1020,14 @@ LogTextPerfStats(gfxTextPerfMetrics* aTextPerf,
 
   switch (aLogType) {
     case eLog_reflow:
-      snprintf_literal(prefix, "(textperf-reflow) %p time-ms: %7.0f", aPresShell, aTime);
+      SprintfLiteral(prefix, "(textperf-reflow) %p time-ms: %7.0f", aPresShell, aTime);
       break;
     case eLog_loaddone:
-      snprintf_literal(prefix, "(textperf-loaddone) %p time-ms: %7.0f", aPresShell, aTime);
+      SprintfLiteral(prefix, "(textperf-loaddone) %p time-ms: %7.0f", aPresShell, aTime);
       break;
     default:
       MOZ_ASSERT(aLogType == eLog_totals, "unknown textperf log type");
-      snprintf_literal(prefix, "(textperf-totals) %p", aPresShell);
+      SprintfLiteral(prefix, "(textperf-totals) %p", aPresShell);
   }
 
   double hitRatio = 0.0;
@@ -3219,7 +3212,7 @@ AccumulateFrameBounds(nsIFrame* aContainerFrame,
     nsIFrame *f = aFrame;
 
     while (f && f->IsFrameOfType(nsIFrame::eLineParticipant) &&
-           !f->IsTransformed() && !f->IsAbsPosContaininingBlock()) {
+           !f->IsTransformed() && !f->IsAbsPosContainingBlock()) {
       prevFrame = f;
       f = prevFrame->GetParent();
     }
@@ -3644,7 +3637,7 @@ public:
 
   NS_DECL_ISUPPORTS
 
-  NS_IMETHODIMP Notify(nsITimer* aTimer) final
+  NS_IMETHOD Notify(nsITimer* aTimer) final
   {
     mShell->SetNextPaintCompressed();
     mShell->AddInvalidateHiddenPresShellObserver(mShell->GetPresContext()->RefreshDriver());
@@ -3688,6 +3681,7 @@ FlushLayoutRecursive(nsIDocument* aDocument,
                      void* aData = nullptr)
 {
   MOZ_ASSERT(!aData);
+  nsCOMPtr<nsIDocument> kungFuDeathGrip(aDocument);
   aDocument->EnumerateSubDocuments(FlushLayoutRecursive, nullptr);
   aDocument->FlushPendingNotifications(Flush_Layout);
   return true;
@@ -4309,6 +4303,26 @@ PresShell::AttributeChanged(nsIDocument* aDocument,
   }
 }
 
+// nsIMutationObserver callbacks have this terrible API where aContainer is
+// null in the case that the container is the document (since nsIDocument is
+// not an nsIContent), and callees are supposed to figure this out and use the
+// document instead. It would be nice to fix that API to just pass a single
+// nsINode* parameter in place of the nsIDocument*, nsIContent* pair, but
+// there are quite a lot of consumers. So we fix things up locally with this
+// routine for now.
+static inline nsINode*
+RealContainer(nsIDocument* aDocument, nsIContent* aContainer, nsIContent* aContent)
+{
+  MOZ_ASSERT(aDocument);
+  MOZ_ASSERT_IF(aContainer, aContainer->OwnerDoc() == aDocument);
+  MOZ_ASSERT(aContent->OwnerDoc() == aDocument);
+  MOZ_ASSERT_IF(!aContainer, aContent->GetParentNode() == aDocument);
+  if (!aContainer) {
+    return aDocument;
+  }
+  return aContainer;
+}
+
 void
 PresShell::ContentAppended(nsIDocument *aDocument,
                            nsIContent* aContainer,
@@ -4317,8 +4331,12 @@ PresShell::ContentAppended(nsIDocument *aDocument,
 {
   NS_PRECONDITION(!mIsDocumentGone, "Unexpected ContentAppended");
   NS_PRECONDITION(aDocument == mDocument, "Unexpected aDocument");
-  NS_PRECONDITION(aContainer, "must have container");
 
+  // We never call ContentAppended with a document as the container, so we can
+  // assert that we have an nsIContent container.
+  MOZ_ASSERT(aContainer);
+  MOZ_ASSERT(aContainer->IsElement() ||
+             aContainer->IsNodeOfType(nsINode::eDOCUMENT_FRAGMENT));
   if (!mDidInitialize) {
     return;
   }
@@ -4328,32 +4346,22 @@ PresShell::ContentAppended(nsIDocument *aDocument,
   // Call this here so it only happens for real content mutations and
   // not cases when the frame constructor calls its own methods to force
   // frame reconstruction.
-  if (aContainer->IsElement()) {
-    // Ensure the container is an element before trying to restyle
-    // because it can be the case that the container is a ShadowRoot
-    // which is a document fragment.
-    mPresContext->RestyleManager()->
-      RestyleForAppend(aContainer->AsElement(), aFirstNewContent);
-  }
+  mPresContext->RestyleManager()->ContentAppended(aContainer, aFirstNewContent);
 
   mFrameConstructor->ContentAppended(aContainer, aFirstNewContent, true);
-
-  if (static_cast<nsINode*>(aContainer) == static_cast<nsINode*>(aDocument) &&
-      aFirstNewContent->NodeType() == nsIDOMNode::DOCUMENT_TYPE_NODE) {
-    NotifyFontSizeInflationEnabledIsDirty();
-  }
 
   VERIFY_STYLE_TREE;
 }
 
 void
 PresShell::ContentInserted(nsIDocument* aDocument,
-                           nsIContent*  aContainer,
+                           nsIContent*  aMaybeContainer,
                            nsIContent*  aChild,
                            int32_t      aIndexInContainer)
 {
   NS_PRECONDITION(!mIsDocumentGone, "Unexpected ContentInserted");
   NS_PRECONDITION(aDocument == mDocument, "Unexpected aDocument");
+  nsINode* container = RealContainer(aDocument, aMaybeContainer, aChild);
 
   if (!mDidInitialize) {
     return;
@@ -4364,19 +4372,12 @@ PresShell::ContentInserted(nsIDocument* aDocument,
   // Call this here so it only happens for real content mutations and
   // not cases when the frame constructor calls its own methods to force
   // frame reconstruction.
-  if (aContainer && aContainer->IsElement()) {
-    // Ensure the container is an element before trying to restyle
-    // because it can be the case that the container is a ShadowRoot
-    // which is a document fragment.
-    mPresContext->RestyleManager()->
-      RestyleForInsertOrChange(aContainer->AsElement(), aChild);
-  }
+  mPresContext->RestyleManager()->ContentInserted(container, aChild);
 
-  mFrameConstructor->ContentInserted(aContainer, aChild, nullptr, true);
+  mFrameConstructor->ContentInserted(aMaybeContainer, aChild, nullptr, true);
 
-  if (((!aContainer && aDocument) ||
-      (static_cast<nsINode*>(aContainer) == static_cast<nsINode*>(aDocument))) &&
-      aChild->NodeType() == nsIDOMNode::DOCUMENT_TYPE_NODE) {
+  if (aChild->NodeType() == nsIDOMNode::DOCUMENT_TYPE_NODE) {
+    MOZ_ASSERT(container == aDocument);
     NotifyFontSizeInflationEnabledIsDirty();
   }
 
@@ -4385,13 +4386,14 @@ PresShell::ContentInserted(nsIDocument* aDocument,
 
 void
 PresShell::ContentRemoved(nsIDocument *aDocument,
-                          nsIContent* aContainer,
+                          nsIContent* aMaybeContainer,
                           nsIContent* aChild,
                           int32_t     aIndexInContainer,
                           nsIContent* aPreviousSibling)
 {
   NS_PRECONDITION(!mIsDocumentGone, "Unexpected ContentRemoved");
   NS_PRECONDITION(aDocument == mDocument, "Unexpected aDocument");
+  nsINode* container = RealContainer(aDocument, aMaybeContainer, aChild);
 
   // Notify the ESM that the content has been removed, so that
   // it can clean up any state related to the content.
@@ -4408,22 +4410,14 @@ PresShell::ContentRemoved(nsIDocument *aDocument,
   // Call this here so it only happens for real content mutations and
   // not cases when the frame constructor calls its own methods to force
   // frame reconstruction.
-  nsIContent* oldNextSibling;
-  if (aContainer) {
-    oldNextSibling = aContainer->GetChildAt(aIndexInContainer);
-  } else {
-    oldNextSibling = nullptr;
-  }
+  nsIContent* oldNextSibling = container->GetChildAt(aIndexInContainer);
 
-  if (aContainer && aContainer->IsElement()) {
-    mPresContext->RestyleManager()->
-      RestyleForRemove(aContainer->AsElement(), aChild, oldNextSibling);
-  }
+  mPresContext->RestyleManager()->ContentRemoved(container, aChild, oldNextSibling);
 
   // After removing aChild from tree we should save information about live ancestor
   if (mPointerEventTarget) {
     if (nsContentUtils::ContentIsDescendantOf(mPointerEventTarget, aChild)) {
-      mPointerEventTarget = aContainer;
+      mPointerEventTarget = aMaybeContainer;
     }
   }
 
@@ -4439,14 +4433,13 @@ PresShell::ContentRemoved(nsIDocument *aDocument,
   }
 
   bool didReconstruct;
-  mFrameConstructor->ContentRemoved(aContainer, aChild, oldNextSibling,
+  mFrameConstructor->ContentRemoved(aMaybeContainer, aChild, oldNextSibling,
                                     nsCSSFrameConstructor::REMOVE_CONTENT,
                                     &didReconstruct);
 
 
-  if (((aContainer &&
-      static_cast<nsINode*>(aContainer) == static_cast<nsINode*>(aDocument)) ||
-      aDocument) && aChild->NodeType() == nsIDOMNode::DOCUMENT_TYPE_NODE) {
+  if (aChild->NodeType() == nsIDOMNode::DOCUMENT_TYPE_NODE) {
+    MOZ_ASSERT(container == aDocument);
     NotifyFontSizeInflationEnabledIsDirty();
   }
 
@@ -6692,22 +6685,6 @@ nsIPresShell::SetCapturingContent(nsIContent* aContent, uint8_t aFlags)
   }
 }
 
-class AsyncCheckPointerCaptureStateCaller : public Runnable
-{
-public:
-  explicit AsyncCheckPointerCaptureStateCaller(int32_t aPointerId)
-    : mPointerId(aPointerId) {}
-
-  NS_IMETHOD Run()
-  {
-    nsIPresShell::CheckPointerCaptureState(mPointerId);
-    return NS_OK;
-  }
-
-private:
-  int32_t mPointerId;
-};
-
 /* static */ void
 nsIPresShell::SetPointerCapturingContent(uint32_t aPointerId, nsIContent* aContent)
 {
@@ -6722,6 +6699,7 @@ nsIPresShell::SetPointerCapturingContent(uint32_t aPointerId, nsIContent* aConte
 
   if (pointerCaptureInfo) {
     pointerCaptureInfo->mPendingContent = aContent;
+    pointerCaptureInfo->mReleaseContent = false;
   } else {
     gPointerCaptureList->Put(aPointerId,
                              new PointerCaptureInfo(aContent, GetPointerPrimaryState(aPointerId)));
@@ -6739,9 +6717,6 @@ nsIPresShell::ReleasePointerCapturingContent(uint32_t aPointerId)
   if (gPointerCaptureList->Get(aPointerId, &pointerCaptureInfo) && pointerCaptureInfo) {
     // Set flag to asyncronously release capture for given pointer.
     pointerCaptureInfo->mReleaseContent = true;
-    RefPtr<AsyncCheckPointerCaptureStateCaller> asyncCaller =
-      new AsyncCheckPointerCaptureStateCaller(aPointerId);
-    NS_DispatchToCurrentThread(asyncCaller);
   }
 }
 
@@ -6756,7 +6731,8 @@ nsIPresShell::GetPointerCapturingContent(uint32_t aPointerId)
 }
 
 /* static */ bool
-nsIPresShell::CheckPointerCaptureState(uint32_t aPointerId)
+nsIPresShell::CheckPointerCaptureState(uint32_t aPointerId,
+                                       uint16_t aPointerType, bool aIsPrimary)
 {
   bool didDispatchEvent = false;
   PointerCaptureInfo* pointerCaptureInfo = nullptr;
@@ -6765,8 +6741,6 @@ nsIPresShell::CheckPointerCaptureState(uint32_t aPointerId)
     // we should dispatch lostpointercapture event to overrideContent if it exist
     if (pointerCaptureInfo->mPendingContent || pointerCaptureInfo->mReleaseContent) {
       if (pointerCaptureInfo->mOverrideContent) {
-        uint16_t pointerType = GetPointerType(aPointerId);
-        bool isPrimary = pointerCaptureInfo->mPrimaryState;
         nsCOMPtr<nsIContent> content;
         pointerCaptureInfo->mOverrideContent.swap(content);
         if (pointerCaptureInfo->mReleaseContent) {
@@ -6775,7 +6749,8 @@ nsIPresShell::CheckPointerCaptureState(uint32_t aPointerId)
         if (pointerCaptureInfo->Empty()) {
           gPointerCaptureList->Remove(aPointerId);
         }
-        DispatchGotOrLostPointerCaptureEvent(false, aPointerId, pointerType, isPrimary, content);
+        DispatchGotOrLostPointerCaptureEvent(false, aPointerId, aPointerType,
+                                             aIsPrimary, content);
         didDispatchEvent = true;
       } else if (pointerCaptureInfo->mPendingContent && pointerCaptureInfo->mReleaseContent) {
         // If anybody calls element.releasePointerCapture
@@ -6791,9 +6766,8 @@ nsIPresShell::CheckPointerCaptureState(uint32_t aPointerId)
       pointerCaptureInfo->mOverrideContent = pointerCaptureInfo->mPendingContent;
       pointerCaptureInfo->mPendingContent = nullptr;
       pointerCaptureInfo->mReleaseContent = false;
-      DispatchGotOrLostPointerCaptureEvent(true, aPointerId,
-                                           GetPointerType(aPointerId),
-                                           pointerCaptureInfo->mPrimaryState,
+      DispatchGotOrLostPointerCaptureEvent(true, aPointerId, aPointerType,
+                                           aIsPrimary,
                                            pointerCaptureInfo->mOverrideContent);
       didDispatchEvent = true;
     }
@@ -7237,6 +7211,8 @@ class ReleasePointerCaptureCaller
 public:
   ReleasePointerCaptureCaller() :
     mPointerId(0),
+    mPointerType(nsIDOMMouseEvent::MOZ_SOURCE_UNKNOWN),
+    mIsPrimary(false),
     mIsSet(false)
   {
   }
@@ -7244,16 +7220,22 @@ public:
   {
     if (mIsSet) {
       nsIPresShell::ReleasePointerCapturingContent(mPointerId);
+      nsIPresShell::CheckPointerCaptureState(mPointerId, mPointerType,
+                                             mIsPrimary);
     }
   }
-  void SetTarget(uint32_t aPointerId)
+  void SetTarget(uint32_t aPointerId, uint16_t aPointerType, bool aIsPrimary)
   {
     mPointerId = aPointerId;
+    mPointerType = aPointerType;
+    mIsPrimary = aIsPrimary;
     mIsSet = true;
   }
 
 private:
   int32_t mPointerId;
+  uint16_t mPointerType;
+  bool mIsPrimary;
   bool mIsSet;
 };
 
@@ -7857,20 +7839,8 @@ PresShell::HandleEvent(nsIFrame* aFrame,
         // in the same document by taking the target of the events already in
         // the capture list
         nsCOMPtr<nsIContent> anyTarget;
-        if (TouchManager::gCaptureTouchList->Count() > 0 &&
-            touchEvent->mTouches.Length() > 1) {
-          for (auto iter = TouchManager::gCaptureTouchList->Iter();
-               !iter.Done();
-               iter.Next()) {
-            RefPtr<dom::Touch>& touch = iter.Data();
-            if (touch) {
-              dom::EventTarget* target = touch->GetTarget();
-              if (target) {
-                anyTarget = do_QueryInterface(target);
-                break;
-              }
-            }
-          }
+        if (touchEvent->mTouches.Length() > 1) {
+          anyTarget = TouchManager::GetAnyCapturedTouchTarget();
         }
 
         for (int32_t i = touchEvent->mTouches.Length(); i; ) {
@@ -7878,7 +7848,7 @@ PresShell::HandleEvent(nsIFrame* aFrame,
           dom::Touch* touch = touchEvent->mTouches[i];
 
           int32_t id = touch->Identifier();
-          if (!TouchManager::gCaptureTouchList->Get(id, nullptr)) {
+          if (!TouchManager::HasCapturedTouch(id)) {
             // find the target for this touch
             eventPoint = nsLayoutUtils::GetEventCoordinatesRelativeTo(aEvent,
                                                               touch->mRefPoint,
@@ -7932,7 +7902,7 @@ PresShell::HandleEvent(nsIFrame* aFrame,
             touch->mChanged = false;
             int32_t id = touch->Identifier();
 
-            RefPtr<dom::Touch> oldTouch = TouchManager::gCaptureTouchList->GetWeak(id);
+            RefPtr<dom::Touch> oldTouch = TouchManager::GetCapturedTouch(id);
             if (oldTouch) {
               touch->SetTarget(oldTouch->mTarget);
             }
@@ -7975,11 +7945,11 @@ PresShell::HandleEvent(nsIFrame* aFrame,
         // Try to keep frame for following check, because
         // frame can be damaged during CheckPointerCaptureState.
         nsWeakFrame frameKeeper(frame);
-        // Before any pointer events, we should check state of pointer capture,
-        // Thus got/lostpointercapture events emulate asynchronous behavior.
-        // Handlers of got/lostpointercapture events can change capturing state,
-        // That's why we should re-check pointer capture state until stable state.
-        while(CheckPointerCaptureState(pointerEvent->pointerId));
+        // Handle pending pointer capture before any pointer events except
+        // gotpointercapture / lostpointercapture.
+        CheckPointerCaptureState(pointerEvent->pointerId,
+                                 pointerEvent->inputSource,
+                                 pointerEvent->mIsPrimary);
         // Prevent application crashes, in case damaged frame.
         if (!frameKeeper.IsAlive()) {
           frame = nullptr;
@@ -8008,7 +7978,9 @@ PresShell::HandleEvent(nsIFrame* aFrame,
             // Implicitly releasing capture for given pointer.
             // ePointerLostCapture should be send after ePointerUp or
             // ePointerCancel.
-            releasePointerCaptureCaller.SetTarget(pointerId);
+            releasePointerCaptureCaller.SetTarget(pointerId,
+                                                  pointerEvent->inputSource,
+                                                  pointerEvent->mIsPrimary);
           }
         }
       }
@@ -8048,7 +8020,7 @@ PresShell::HandleEvent(nsIFrame* aFrame,
           }
 
           RefPtr<dom::Touch> oldTouch =
-            TouchManager::gCaptureTouchList->GetWeak(touch->Identifier());
+            TouchManager::GetCapturedTouch(touch->Identifier());
           if (!oldTouch) {
             break;
           }
@@ -10282,8 +10254,8 @@ CompareTrees(nsPresContext* aFirstPresContext, nsIFrame* aFirstFrame,
             LogVerifyMessage(k1, k2, "child widgets are not matched\n");
           }
           else if (nullptr != w1) {
-            w1->GetBounds(r1);
-            w2->GetBounds(r2);
+            r1 = w1->GetBounds();
+            r2 = w2->GetBounds();
             if (!r1.IsEqualEdges(r2)) {
               LogVerifyMessage(k1, k2, "(widget rects)",
                                r1.ToUnknownRect(), r2.ToUnknownRect());
@@ -10753,7 +10725,7 @@ void ReflowCountMgr::Add(const char * aName, nsIFrame * aFrame)
       nullptr != mIndiFrameCounts &&
       aFrame != nullptr) {
     char key[KEY_BUF_SIZE_FOR_PTR];
-    snprintf_literal(key, "%p", (void*)aFrame);
+    SprintfLiteral(key, "%p", (void*)aFrame);
     IndiReflowCounter * counter = (IndiReflowCounter *)PL_HashTableLookup(mIndiFrameCounts, key);
     if (counter == nullptr) {
       counter = new IndiReflowCounter(this);
@@ -10781,7 +10753,7 @@ void ReflowCountMgr::PaintCount(const char*     aName,
       nullptr != mIndiFrameCounts &&
       aFrame != nullptr) {
     char key[KEY_BUF_SIZE_FOR_PTR];
-    snprintf_literal(key, "%p", (void*)aFrame);
+    SprintfLiteral(key, "%p", (void*)aFrame);
     IndiReflowCounter * counter =
       (IndiReflowCounter *)PL_HashTableLookup(mIndiFrameCounts, key);
     if (counter != nullptr && counter->mName.EqualsASCII(aName)) {
@@ -10804,7 +10776,7 @@ void ReflowCountMgr::PaintCount(const char*     aName,
         aPresContext->DeviceContext()->GetMetricsFor(font, params);
 
       char buf[16];
-      int len = snprintf_literal(buf, "%d", counter->mCount);
+      int len = SprintfLiteral(buf, "%d", counter->mCount);
       nscoord x = 0, y = fm->MaxAscent();
       nscoord width, height = fm->MaxHeight();
       fm->SetTextRunRTL(false);
@@ -10925,7 +10897,7 @@ static void RecurseIndiTotals(nsPresContext* aPresContext,
   }
 
   char key[KEY_BUF_SIZE_FOR_PTR];
-  snprintf_literal(key, "%p", (void*)aParentFrame);
+  SprintfLiteral(key, "%p", (void*)aParentFrame);
   IndiReflowCounter * counter = (IndiReflowCounter *)PL_HashTableLookup(aHT, key);
   if (counter) {
     counter->mHasBeenOutput = true;

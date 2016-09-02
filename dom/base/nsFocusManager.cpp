@@ -55,7 +55,7 @@
 #include "mozilla/LookAndFeel.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/Services.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 #include <algorithm>
 
 #ifdef MOZ_XUL
@@ -1995,7 +1995,7 @@ public:
   {
   }
 
-  NS_IMETHOD Run()
+  NS_IMETHOD Run() override
   {
     InternalFocusEvent event(true, mEventMessage);
     event.mFlags.mBubbles = false;
@@ -3490,7 +3490,7 @@ public:
     }
   }
 
-  NS_IMETHOD Run()
+  NS_IMETHOD Run() override
   {
     if (PointerUnlocker::sActiveUnlocker == this) {
       PointerUnlocker::sActiveUnlocker = nullptr;

@@ -537,7 +537,6 @@ public:
     case __NR_rename:
     case __NR_symlink:
     case __NR_quotactl:
-    case __NR_utimes:
     case __NR_link:
     case __NR_unlink:
     CASES_FOR_fchown:
@@ -547,8 +546,13 @@ public:
 
     case __NR_readlink:
     case __NR_readlinkat:
+#ifdef DESKTOP
+      // Bug 1290896
+      return Allow();
+#else
       // Workaround for bug 964455:
       return Error(EINVAL);
+#endif
 
     CASES_FOR_select:
     case __NR_pselect6:
@@ -633,9 +637,7 @@ public:
     CASES_FOR_getresgid:
       return Allow();
 
-    case __NR_umask:
     case __NR_kill:
-    case __NR_wait4:
 #ifdef __NR_arch_prctl
     case __NR_arch_prctl:
 #endif

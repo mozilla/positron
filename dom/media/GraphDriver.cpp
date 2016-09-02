@@ -7,7 +7,7 @@
 #include "mozilla/dom/AudioContext.h"
 #include "mozilla/SharedThreadPool.h"
 #include "mozilla/ClearOnShutdown.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 #include "CubebUtils.h"
 
 #ifdef MOZ_WEBRTC
@@ -163,7 +163,7 @@ public:
     : mThread(aThread)
   {
   }
-  NS_IMETHOD Run()
+  NS_IMETHOD Run() override
   {
     MOZ_ASSERT(NS_IsMainThread());
     MOZ_ASSERT(mThread);
@@ -194,7 +194,7 @@ public:
     : mDriver(aDriver)
   {
   }
-  NS_IMETHOD Run()
+  NS_IMETHOD Run() override
   {
     char aLocal;
     STREAM_LOG(LogLevel::Debug, ("Starting system thread"));

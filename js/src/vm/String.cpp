@@ -11,6 +11,7 @@
 #include "mozilla/PodOperations.h"
 #include "mozilla/RangedPtr.h"
 #include "mozilla/TypeTraits.h"
+#include "mozilla/Unused.h"
 
 #include "gc/Marking.h"
 #include "js/UbiNode.h"
@@ -790,7 +791,7 @@ bool
 StaticStrings::init(JSContext* cx)
 {
     AutoLockForExclusiveAccess lock(cx);
-    AutoCompartment ac(cx, cx->runtime()->atomsCompartment(lock));
+    AutoCompartment ac(cx, cx->runtime()->atomsCompartment(lock), &lock);
 
     static_assert(UNIT_STATIC_LIMIT - 1 <= JSString::MAX_LATIN1_CHAR,
                   "Unit strings must fit in Latin1Char.");
@@ -1268,6 +1269,17 @@ NewStringCopyNDontDeflate<CanGC>(ExclusiveContext* cx, const Latin1Char* s, size
 
 template JSFlatString*
 NewStringCopyNDontDeflate<NoGC>(ExclusiveContext* cx, const Latin1Char* s, size_t n);
+
+JSFlatString*
+NewLatin1StringZ(ExclusiveContext* cx, UniqueChars chars)
+{
+    JSFlatString* str = NewString<CanGC>(cx, (Latin1Char*)chars.get(), strlen(chars.get()));
+    if (!str)
+        return nullptr;
+
+    mozilla::Unused << chars.release();
+    return str;
+}
 
 template <AllowGC allowGC, typename CharT>
 JSFlatString*

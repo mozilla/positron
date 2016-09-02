@@ -110,7 +110,8 @@ MediaEngineWebRTC::MediaEngineWebRTC(MediaEnginePrefs &aPrefs)
     mAudioInput(nullptr),
     mFullDuplex(aPrefs.mFullDuplex),
     mExtendedFilter(aPrefs.mExtendedFilter),
-    mDelayAgnostic(aPrefs.mDelayAgnostic)
+    mDelayAgnostic(aPrefs.mDelayAgnostic),
+    mHasTabVideoSource(false)
 {
 #ifndef MOZ_B2G_CAMERA
   nsCOMPtr<nsIComponentRegistrar> compMgr;
@@ -125,6 +126,17 @@ MediaEngineWebRTC::MediaEngineWebRTC(MediaEnginePrefs &aPrefs)
 #endif
   // XXX
   gFarendObserver = new AudioOutputObserver();
+
+  camera::GetChildAndCall(
+    &camera::CamerasChild::AddDeviceChangeCallback,
+    this);
+}
+
+void
+MediaEngineWebRTC::SetFakeDeviceChangeEvents()
+{
+  camera::GetChildAndCall(
+    &camera::CamerasChild::SetFakeDeviceChangeEvents);
 }
 
 void
@@ -419,6 +431,11 @@ MediaEngineWebRTC::Shutdown()
 {
   // This is likely paranoia
   MutexAutoLock lock(mMutex);
+
+  if (camera::GetCamerasChildIfExists()) {
+    camera::GetChildAndCall(
+      &camera::CamerasChild::RemoveDeviceChangeCallback, this);
+  }
 
   LOG(("%s", __FUNCTION__));
   // Shutdown all the sources, since we may have dangling references to the

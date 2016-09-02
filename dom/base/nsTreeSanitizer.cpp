@@ -12,7 +12,7 @@
 #include "mozilla/css/StyleRule.h"
 #include "mozilla/css/Rule.h"
 #include "nsCSSParser.h"
-#include "nsCSSProperty.h"
+#include "nsCSSPropertyID.h"
 #include "nsUnicharInputStream.h"
 #include "nsIDOMCSSRule.h"
 #include "nsAttrName.h"
@@ -203,6 +203,7 @@ nsIAtom** const kAttributesHTML[] = {
   &nsGkAtoms::media,
   &nsGkAtoms::method,
   &nsGkAtoms::min,
+  &nsGkAtoms::minlength,
   &nsGkAtoms::multiple,
   &nsGkAtoms::muted,
   &nsGkAtoms::name,

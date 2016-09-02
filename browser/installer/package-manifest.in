@@ -141,12 +141,26 @@
 @RESPATH@/run-mozilla.sh
 #endif
 #endif
+#ifdef XP_WIN
+#ifdef _AMD64_
+@BINPATH@/@DLL_PREFIX@qipcap64@DLL_SUFFIX@
+#else
+@BINPATH@/@DLL_PREFIX@qipcap@DLL_SUFFIX@
+#endif
+#endif
 
 ; [Components]
+#ifdef MOZ_ARTIFACT_BUILDS
+@RESPATH@/components/prebuilt-interfaces.manifest
+@RESPATH@/components/interfaces.xpt
+@RESPATH@/browser/components/prebuilt-interfaces.manifest
+@RESPATH@/browser/components/interfaces.xpt
+#endif
 @RESPATH@/browser/components/components.manifest
 @RESPATH@/components/alerts.xpt
 #ifdef ACCESSIBILITY
 #ifdef XP_WIN32
+@BINPATH@/Accessible.tlb
 @BINPATH@/AccessibleMarshal.dll
 @BINPATH@/IA2Marshal.dll
 #endif
@@ -219,7 +233,6 @@
 @RESPATH@/components/dom_xhr.xpt
 @RESPATH@/components/dom_xpath.xpt
 @RESPATH@/components/dom_xul.xpt
-@RESPATH@/components/dom_payment.xpt
 @RESPATH@/components/dom_presentation.xpt
 @RESPATH@/components/downloads.xpt
 @RESPATH@/components/editor.xpt
@@ -353,6 +366,11 @@
 @RESPATH@/components/FeedProcessor.js
 @RESPATH@/components/PackagedAppUtils.js
 @RESPATH@/components/PackagedAppUtils.manifest
+#ifndef XP_MACOSX
+; OSX uses native platform impl.  Windows, Linux, and Android uses fallback JS impl.
+@BINPATH@/components/nsDNSServiceDiscovery.manifest
+@BINPATH@/components/nsDNSServiceDiscovery.js
+#endif
 @RESPATH@/browser/components/BrowserFeeds.manifest
 @RESPATH@/browser/components/FeedConverter.js
 @RESPATH@/browser/components/FeedWriter.js
@@ -472,7 +490,6 @@
 @RESPATH@/browser/components/360seProfileMigrator.js
 @RESPATH@/browser/components/EdgeProfileMigrator.js
 @RESPATH@/browser/components/IEProfileMigrator.js
-@RESPATH@/browser/components/SafariProfileMigrator.js
 #endif
 #ifdef XP_MACOSX
 @RESPATH@/browser/components/SafariProfileMigrator.js
@@ -532,10 +549,6 @@
 
 @RESPATH@/components/TVSimulatorService.js
 @RESPATH@/components/TVSimulatorService.manifest
-
-@RESPATH@/components/Payment.js
-@RESPATH@/components/PaymentFlowInfo.js
-@RESPATH@/components/Payment.manifest
 
 #ifdef MOZ_WEBRTC
 @RESPATH@/components/PeerConnection.js
@@ -709,7 +722,7 @@
 @RESPATH@/res/fonts/*
 @RESPATH@/res/dtd/*
 @RESPATH@/res/html/*
-#if defined(XP_MACOSX) || defined(XP_WIN)
+#if defined(XP_MACOSX)
 ; For SafariProfileMigrator.js.
 @RESPATH@/res/langGroups.properties
 #endif

@@ -11,7 +11,7 @@
 #include "mozilla/MozPromise.h"
 #include "mozilla/RefPtr.h"
 #include "mozilla/TaskDispatcher.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 
 #include <queue>
 
@@ -173,7 +173,7 @@ protected:
       : mQueue(aQueue)
     {
     }
-    NS_METHOD Run() override;
+    NS_IMETHOD Run() override;
   private:
     RefPtr<TaskQueue> mQueue;
   };

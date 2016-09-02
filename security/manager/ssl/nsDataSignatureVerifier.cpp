@@ -8,7 +8,7 @@
 #include "cryptohi.h"
 #include "keyhi.h"
 #include "mozilla/Casting.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 #include "nsCOMPtr.h"
 #include "nsNSSComponent.h"
 #include "nssb64.h"
@@ -44,7 +44,7 @@ nsDataSignatureVerifier::~nsDataSignatureVerifier()
     return;
   }
 
-  shutdown(calledFromObject);
+  shutdown(ShutdownCalledFrom::Object);
 }
 
 NS_IMETHODIMP

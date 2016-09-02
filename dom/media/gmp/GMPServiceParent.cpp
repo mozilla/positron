@@ -20,7 +20,7 @@
 #include "mozilla/Services.h"
 #include "nsNativeCharsetUtils.h"
 #include "nsIConsoleService.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 #include "GMPDecryptorParent.h"
 #include "GMPAudioDecoderParent.h"
 #include "nsComponentManagerUtils.h"
@@ -1924,7 +1924,7 @@ public:
   {
   }
 
-  NS_IMETHODIMP Run()
+  NS_IMETHOD Run() override
   {
     return NS_OK;
   }
@@ -1953,7 +1953,7 @@ public:
   {
   }
 
-  NS_IMETHOD Run()
+  NS_IMETHOD Run() override
   {
     *mResult = mGMPServiceParent->Open(mTransport, mOtherPid,
                                        XRE_GetIOMessageLoop(), ipc::ParentSide);

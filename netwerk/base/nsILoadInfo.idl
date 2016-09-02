@@ -178,6 +178,12 @@ interface nsILoadInfo : nsISupports
   const unsigned long SEC_FORCE_PRIVATE_BROWSING = (1<<13);
 
   /**
+   * Load an error page, it should be one of following : about:neterror,
+   * about:certerror, about:blocked, or about:tabcrashed.
+   */
+  const unsigned long SEC_LOAD_ERROR_PAGE = (1<<14);
+
+  /**
    * The loadingPrincipal is the principal that is responsible for the load.
    * It is *NOT* the principal tied to the resource/URI that this
    * channel is loading, it's the principal of the resource's
@@ -304,6 +310,8 @@ interface nsILoadInfo : nsISupports
 
   /**
    * If usePrivateBrowsing is true, private browsing will be used.
+   * This value equals to originAttributes.privateBrowsingId in *content*
+   * side.
    */
   [infallible] readonly attribute boolean usePrivateBrowsing;
 
@@ -323,6 +331,11 @@ interface nsILoadInfo : nsISupports
    * Returns true if SEC_DONT_FOLLOW_REDIRECTS is set.
    */
   [infallible] readonly attribute boolean dontFollowRedirects;
+
+  /**
+   * Returns true if SEC_LOAD_ERROR_PAGE is set.
+   */
+  [infallible] readonly attribute boolean loadErrorPage;
 
   /**
    * The external contentPolicyType of the channel, used for security checks
@@ -417,6 +430,11 @@ interface nsILoadInfo : nsISupports
   /**
    * Customized NeckoOriginAttributes within LoadInfo to allow overwriting of the
    * default originAttributes from the loadingPrincipal.
+   *
+   * In chrome side, originAttributes.privateBrowsingId will always be 0 even if
+   * the usePrivateBrowsing is true, because chrome docshell won't set
+   * privateBrowsingId on origin attributes (See bug 1278664). This is to make
+   * sure nsILoadInfo and nsILoadContext have the same origin attributes.
    */
   [implicit_jscontext, binaryname(ScriptableOriginAttributes)]
   attribute jsval originAttributes;
@@ -590,4 +608,10 @@ interface nsILoadInfo : nsISupports
     MOZ_ALWAYS_SUCCEEDS(MaybeIncreaseTainting(tainting));
   }
 %}
+
+  /**
+   * Returns true if this load is for top level document.
+   * Note that the load for a sub-frame's document will return false here.
+   */
+  [infallible] readonly attribute boolean isTopLevelLoad;
 };

@@ -68,6 +68,26 @@ jsreftest:
         extra-options:
             - --test-suite=jsreftest
 
+marionette:
+    description: "Marionette unittest run"
+    suite: marionette
+    treeherder-symbol: tc(Mn)
+    chunks: 10
+    instance-size: xlarge
+    loopback-video: true
+    e10s: false
+    tier: 3
+    max-run-time: 3600
+    mozharness:
+        script: mozharness/scripts/android_emulator_unittest.py
+        no-read-buildbot-config: true
+        config:
+            - mozharness/configs/android/androidarm_4_3.py
+            - mozharness/configs/remove_executables.py
+            - mozharness/configs/android/androidarm_4_3-tc.py
+        extra-options:
+            - --test-suite=marionette
+
 mochitest:
     description: "Mochitest plain run"
     suite: mochitest/plain-chunked
@@ -150,13 +170,10 @@ mochitest-media:
     suite: mochitest/mochitest-media
     treeherder-symbol: tc-M(mda)
     instance-size: xlarge
-    chunks: 2
+    chunks: 3
     loopback-video: true
     e10s: false
-    max-run-time:
-        by-test-platform:
-            android-4.3-arm7-api-15/debug: 5400
-            default: 3600
+    max-run-time: 5400
     mozharness:
         script: mozharness/scripts/android_emulator_unittest.py
         no-read-buildbot-config: true
@@ -239,10 +256,7 @@ xpcshell:
             default: 3
             android-4.2-x86/opt: 4
     instance-size: xlarge
-    max-run-time:
-        by-test-platform:
-            default: 7200
-            android-4.2-x86/opt: 3600
+    max-run-time: 7200
     loopback-video: true
     e10s: false
     mozharness:

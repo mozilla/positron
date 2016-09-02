@@ -8,8 +8,8 @@
 
 #include "mozilla/FloatingPoint.h"
 #include "mozilla/Move.h"
-#include "mozilla/Snprintf.h"
-#include "mozilla/unused.h"
+#include "mozilla/Sprintf.h"
+#include "mozilla/Unused.h"
 
 #include <cmath>
 
@@ -50,8 +50,8 @@
 #include "jscntxtinlines.h"
 #include "jsobjinlines.h"
 
+#include "vm/EnvironmentObject-inl.h"
 #include "vm/NativeObject-inl.h"
-#include "vm/ScopeObject-inl.h"
 
 using namespace js;
 
@@ -279,20 +279,20 @@ GC(JSContext* cx, unsigned argc, Value* vp)
     CallArgs args = CallArgsFromVp(argc, vp);
 
     /*
-     * If the first argument is 'compartment', we collect any compartments
-     * previously scheduled for GC via schedulegc. If the first argument is an
-     * object, we collect the object's compartment (and any other compartments
-     * scheduled for GC). Otherwise, we collect all compartments.
+     * If the first argument is 'zone', we collect any zones previously
+     * scheduled for GC via schedulegc. If the first argument is an object, we
+     * collect the object's zone (and any other zones scheduled for
+     * GC). Otherwise, we collect all zones.
      */
-    bool compartment = false;
+    bool zone = false;
     if (args.length() >= 1) {
         Value arg = args[0];
         if (arg.isString()) {
-            if (!JS_StringEqualsAscii(cx, arg.toString(), "compartment", &compartment))
+            if (!JS_StringEqualsAscii(cx, arg.toString(), "zone", &zone))
                 return false;
         } else if (arg.isObject()) {
             PrepareZoneForGC(UncheckedUnwrap(&arg.toObject())->zone());
-            compartment = true;
+            zone = true;
         }
     }
 
@@ -309,7 +309,7 @@ GC(JSContext* cx, unsigned argc, Value* vp)
     size_t preBytes = cx->runtime()->gc.usage.gcBytes();
 #endif
 
-    if (compartment)
+    if (zone)
         PrepareForDebugGC(cx->runtime());
     else
         JS::PrepareForFullGC(cx);
@@ -319,8 +319,8 @@ GC(JSContext* cx, unsigned argc, Value* vp)
 
     char buf[256] = { '\0' };
 #ifndef JS_MORE_DETERMINISTIC
-    snprintf_literal(buf, "before %" PRIuSIZE ", after %" PRIuSIZE "\n",
-                     preBytes, cx->runtime()->gc.usage.gcBytes());
+    SprintfLiteral(buf, "before %" PRIuSIZE ", after %" PRIuSIZE "\n",
+                   preBytes, cx->runtime()->gc.usage.gcBytes());
 #endif
     JSString* str = JS_NewStringCopyZ(cx, buf);
     if (!str)
@@ -360,7 +360,6 @@ MinorGC(JSContext* cx, unsigned argc, Value* vp)
     _("dynamicHeapGrowth",          JSGC_DYNAMIC_HEAP_GROWTH,            true)  \
     _("dynamicMarkSlice",           JSGC_DYNAMIC_MARK_SLICE,             true)  \
     _("allocationThreshold",        JSGC_ALLOCATION_THRESHOLD,           true)  \
-    _("decommitThreshold",          JSGC_DECOMMIT_THRESHOLD,             true)  \
     _("minEmptyChunkCount",         JSGC_MIN_EMPTY_CHUNK_COUNT,          true)  \
     _("maxEmptyChunkCount",         JSGC_MAX_EMPTY_CHUNK_COUNT,          true)  \
     _("compactingEnabled",          JSGC_COMPACTING_ENABLED,             true)  \
@@ -473,7 +472,7 @@ SetAllowRelazification(JSContext* cx, bool allow)
     MOZ_ASSERT(rt->allowRelazificationForTesting != allow);
     rt->allowRelazificationForTesting = allow;
 
-    for (AllFramesIter i(cx); !i.done(); ++i)
+    for (AllScriptFramesIter i(cx); !i.done(); ++i)
         i.script()->setDoNotRelazify(allow);
 }
 
@@ -533,14 +532,6 @@ SuppressSignalHandlers(JSContext* cx, unsigned argc, Value* vp)
     wasm::SuppressSignalHandlersForTesting(ToBoolean(args[0]));
 
     args.rval().setUndefined();
-    return true;
-}
-
-static bool
-WasmInt64IsSupported(JSContext* cx, unsigned argc, Value* vp)
-{
-    CallArgs args = CallArgsFromVp(argc, vp);
-    args.rval().setBoolean(wasm::IsI64Implemented());
     return true;
 }
 
@@ -796,7 +787,7 @@ ScheduleGC(JSContext* cx, unsigned argc, Value* vp)
         Zone* zone = UncheckedUnwrap(&args[0].toObject())->zone();
         PrepareZoneForGC(zone);
     } else if (args[0].isString()) {
-        /* This allows us to schedule atomsCompartment for GC. */
+        /* This allows us to schedule the atoms zone for GC. */
         PrepareZoneForGC(args[0].toString()->zone());
     }
 
@@ -1042,8 +1033,8 @@ class HasChildTracer : public JS::CallbackTracer
     }
 
   public:
-    HasChildTracer(JSRuntime* rt, HandleValue child)
-      : JS::CallbackTracer(rt, TraceWeakMapKeysValues), child_(rt, child), found_(false)
+    HasChildTracer(JSContext* cx, HandleValue child)
+      : JS::CallbackTracer(cx, TraceWeakMapKeysValues), child_(cx, child), found_(false)
     {}
 
     bool found() const { return found_; }
@@ -1061,7 +1052,7 @@ HasChild(JSContext* cx, unsigned argc, Value* vp)
         return true;
     }
 
-    HasChildTracer trc(cx->runtime(), child);
+    HasChildTracer trc(cx, child);
     TraceChildren(&trc, parent.toGCThing(), parent.traceKind());
     args.rval().setBoolean(trc.found());
     return true;
@@ -1517,7 +1508,9 @@ static const JSClassOps FinalizeCounterClassOps = {
 };
 
 static const JSClass FinalizeCounterClass = {
-    "FinalizeCounter", JSCLASS_IS_ANONYMOUS,
+    "FinalizeCounter",
+    JSCLASS_IS_ANONYMOUS |
+    JSCLASS_FOREGROUND_FINALIZE,
     &FinalizeCounterClassOps
 };
 
@@ -1655,7 +1648,7 @@ ReadSPSProfilingStack(JSContext* cx, unsigned argc, Value* vp)
     JS::ProfilingFrameIterator::RegisterState state;
     uint32_t physicalFrameNo = 0;
     const unsigned propAttrs = JSPROP_ENUMERATE;
-    for (JS::ProfilingFrameIterator i(cx->runtime(), state); !i.done(); ++i, ++physicalFrameNo) {
+    for (JS::ProfilingFrameIterator i(cx, state); !i.done(); ++i, ++physicalFrameNo) {
         MOZ_ASSERT(i.stackAddress() != nullptr);
 
         // Array holding all inline frames in a single physical jit stack frame.
@@ -2075,36 +2068,31 @@ class CloneBufferObject : public NativeObject {
         Rooted<CloneBufferObject*> obj(cx, Create(cx));
         if (!obj)
             return nullptr;
-        uint64_t* datap;
-        size_t nbytes;
-        buffer->steal(&datap, &nbytes);
-        obj->setData(datap);
-        obj->setNBytes(nbytes);
+        auto data = js::MakeUnique<JSStructuredCloneData>();
+        if (!data) {
+            ReportOutOfMemory(cx);
+            return nullptr;
+        }
+        buffer->steal(data.get());
+        obj->setData(data.release());
         return obj;
     }
 
-    uint64_t* data() const {
-        return static_cast<uint64_t*>(getReservedSlot(DATA_SLOT).toPrivate());
+    JSStructuredCloneData* data() const {
+        return static_cast<JSStructuredCloneData*>(getReservedSlot(DATA_SLOT).toPrivate());
     }
 
-    void setData(uint64_t* aData) {
+    void setData(JSStructuredCloneData* aData) {
         MOZ_ASSERT(!data());
         setReservedSlot(DATA_SLOT, PrivateValue(aData));
     }
 
-    size_t nbytes() const {
-        return getReservedSlot(LENGTH_SLOT).toInt32();
-    }
-
-    void setNBytes(size_t nbytes) {
-        MOZ_ASSERT(nbytes <= UINT32_MAX);
-        setReservedSlot(LENGTH_SLOT, Int32Value(nbytes));
-    }
-
     // Discard an owned clone buffer.
     void discard() {
-        if (data())
-            JS_ClearStructuredClone(data(), nbytes(), nullptr, nullptr);
+        if (data()) {
+            JSAutoStructuredCloneBuffer clonebuf(JS::StructuredCloneScope::SameProcessSameThread, nullptr, nullptr);
+            clonebuf.adopt(Move(*data()));
+        }
         setReservedSlot(DATA_SLOT, PrivateValue(nullptr));
     }
 
@@ -2131,8 +2119,12 @@ class CloneBufferObject : public NativeObject {
         char* str = JS_EncodeString(cx, args[0].toString());
         if (!str)
             return false;
-        obj->setData(reinterpret_cast<uint64_t*>(str));
-        obj->setNBytes(JS_GetStringLength(args[0].toString()));
+        size_t nbytes = JS_GetStringLength(args[0].toString());
+        MOZ_ASSERT(nbytes % sizeof(uint64_t) == 0);
+        auto buf = js::MakeUnique<JSStructuredCloneData>(nbytes, nbytes, nbytes);
+        js_memcpy(buf->Start(), str, nbytes);
+        JS_free(cx, str);
+        obj->setData(buf.release());
 
         args.rval().setUndefined();
         return true;
@@ -2160,7 +2152,7 @@ class CloneBufferObject : public NativeObject {
         }
 
         bool hasTransferable;
-        if (!JS_StructuredCloneHasTransferables(obj->data(), obj->nbytes(), &hasTransferable))
+        if (!JS_StructuredCloneHasTransferables(*obj->data(), &hasTransferable))
             return false;
 
         if (hasTransferable) {
@@ -2168,7 +2160,11 @@ class CloneBufferObject : public NativeObject {
             return false;
         }
 
-        JSString* str = JS_NewStringCopyN(cx, reinterpret_cast<char*>(obj->data()), obj->nbytes());
+        size_t size = obj->data()->Size();
+        UniqueChars buffer(static_cast<char*>(js_malloc(size)));
+        auto iter = obj->data()->Iter();
+        obj->data()->ReadBytes(iter, buffer.get(), size);
+        JSString* str = JS_NewStringCopyN(cx, buffer.get(), size);
         if (!str)
             return false;
         args.rval().setString(str);
@@ -2198,7 +2194,9 @@ static const ClassOps CloneBufferObjectClassOps = {
 };
 
 const Class CloneBufferObject::class_ = {
-    "CloneBuffer", JSCLASS_HAS_RESERVED_SLOTS(CloneBufferObject::NUM_SLOTS),
+    "CloneBuffer",
+    JSCLASS_HAS_RESERVED_SLOTS(CloneBufferObject::NUM_SLOTS) |
+    JSCLASS_FOREGROUND_FINALIZE,
     &CloneBufferObjectClassOps
 };
 
@@ -2212,7 +2210,7 @@ Serialize(JSContext* cx, unsigned argc, Value* vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
 
-    JSAutoStructuredCloneBuffer clonebuf;
+    JSAutoStructuredCloneBuffer clonebuf(JS::StructuredCloneScope::SameProcessSameThread, nullptr, nullptr);
     if (!clonebuf.write(cx, args.get(0), args.get(1)))
         return false;
 
@@ -2249,12 +2247,14 @@ Deserialize(JSContext* cx, unsigned argc, Value* vp)
     }
 
     bool hasTransferable;
-    if (!JS_StructuredCloneHasTransferables(obj->data(), obj->nbytes(), &hasTransferable))
+    if (!JS_StructuredCloneHasTransferables(*obj->data(), &hasTransferable))
         return false;
 
     RootedValue deserialized(cx);
-    if (!JS_ReadStructuredClone(cx, obj->data(), obj->nbytes(),
-                                JS_STRUCTURED_CLONE_VERSION, &deserialized, nullptr, nullptr)) {
+    if (!JS_ReadStructuredClone(cx, *obj->data(),
+                                JS_STRUCTURED_CLONE_VERSION,
+                                JS::StructuredCloneScope::SameProcessSameThread,
+                                &deserialized, nullptr, nullptr)) {
         return false;
     }
     args.rval().set(deserialized);
@@ -2270,38 +2270,18 @@ DetachArrayBuffer(JSContext* cx, unsigned argc, Value* vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
 
-    if (args.length() != 2) {
-        JS_ReportError(cx, "wrong number of arguments to detachArrayBuffer()");
+    if (args.length() != 1) {
+        JS_ReportError(cx, "detachArrayBuffer() requires a single argument");
         return false;
     }
 
-    RootedObject obj(cx);
-    if (!JS_ValueToObject(cx, args[0], &obj))
-        return false;
-
-    if (!obj) {
+    if (!args[0].isObject()) {
         JS_ReportError(cx, "detachArrayBuffer must be passed an object");
         return false;
     }
 
-    RootedString str(cx, JS::ToString(cx, args[1]));
-    if (!str)
-        return false;
-    JSAutoByteString dataDisposition(cx, str);
-    if (!dataDisposition)
-        return false;
-
-    DetachDataDisposition changeData;
-    if (strcmp(dataDisposition.ptr(), "same-data") == 0) {
-        changeData = KeepData;
-    } else if (strcmp(dataDisposition.ptr(), "change-data") == 0) {
-        changeData = ChangeData;
-    } else {
-        JS_ReportError(cx, "unknown parameter 2 to detachArrayBuffer()");
-        return false;
-    }
-
-    if (!JS_DetachArrayBuffer(cx, obj, changeData))
+    RootedObject obj(cx, &args[0].toObject());
+    if (!JS_DetachArrayBuffer(cx, obj))
         return false;
 
     args.rval().setUndefined();
@@ -2402,7 +2382,7 @@ ObjectAddress(JSContext* cx, unsigned argc, Value* vp)
 #else
     void* ptr = js::UncheckedUnwrap(&args[0].toObject(), true);
     char buffer[64];
-    snprintf_literal(buffer, "%p", ptr);
+    SprintfLiteral(buffer, "%p", ptr);
 
     JSString* str = JS_NewStringCopyZ(cx, buffer);
     if (!str)
@@ -2443,8 +2423,8 @@ SharedAddress(JSContext* cx, unsigned argc, Value* vp)
     }
     char buffer[64];
     uint32_t nchar =
-        snprintf_literal(buffer, "%p",
-                         obj->as<SharedArrayBufferObject>().dataPointerShared().unwrap(/*safeish*/));
+        SprintfLiteral(buffer, "%p",
+                       obj->as<SharedArrayBufferObject>().dataPointerShared().unwrap(/*safeish*/));
 
     JSString* str = JS_NewStringCopyN(cx, buffer, nchar);
     if (!str)
@@ -3002,7 +2982,7 @@ EvalReturningScope(JSContext* cx, unsigned argc, Value* vp)
         if (!js::ExecuteInGlobalAndReturnScope(cx, global, script, &lexicalScope))
             return false;
 
-        varObj = lexicalScope->enclosingScope();
+        varObj = lexicalScope->enclosingEnvironment();
     }
 
     RootedObject rv(cx, JS_NewPlainObject(cx));
@@ -3584,9 +3564,9 @@ GetModuleEnvironmentValue(JSContext* cx, unsigned argc, Value* vp)
 
 static const JSFunctionSpecWithHelp TestingFunctions[] = {
     JS_FN_HELP("gc", ::GC, 0, 0,
-"gc([obj] | 'compartment' [, 'shrinking'])",
-"  Run the garbage collector. When obj is given, GC only its compartment.\n"
-"  If 'compartment' is given, GC any compartments that were scheduled for\n"
+"gc([obj] | 'zone' [, 'shrinking'])",
+"  Run the garbage collector. When obj is given, GC only its zone.\n"
+"  If 'zone' is given, GC any zones that were scheduled for\n"
 "  GC via schedulegc.\n"
 "  If 'shrinking' is passed as the optional second argument, perform a\n"
 "  shrinking GC rather than a normal GC."),
@@ -3739,7 +3719,7 @@ gc::ZealModeHelpText),
     JS_FN_HELP("schedulegc", ScheduleGC, 1, 0,
 "schedulegc([num | obj])",
 "  If num is given, schedule a GC after num allocations.\n"
-"  If obj is given, schedule a GC of obj's compartment.\n"
+"  If obj is given, schedule a GC of obj's zone.\n"
 "  Returns the number of allocations before the next trigger."),
 
     JS_FN_HELP("selectforgc", SelectForGC, 0, 0,
@@ -3862,10 +3842,6 @@ gc::ZealModeHelpText),
 "  This function allows artificially suppressing signal handler support, even if the underlying "
 "  platform supports it."),
 
-    JS_FN_HELP("wasmInt64IsSupported", WasmInt64IsSupported, 0, 0,
-"wasmInt64IsSupported()",
-"  Returns a boolean indicating whether WebAssembly has 64bit integer support on the current device."),
-
     JS_FN_HELP("wasmTextToBinary", WasmTextToBinary, 1, 0,
 "wasmTextToBinary(str)",
 "  Translates the given text wasm module into its binary encoding."),
@@ -3938,11 +3914,9 @@ gc::ZealModeHelpText),
 "  Deserialize data generated by serialize."),
 
     JS_FN_HELP("detachArrayBuffer", DetachArrayBuffer, 1, 0,
-"detachArrayBuffer(buffer, \"change-data\"|\"same-data\")",
+"detachArrayBuffer(buffer)",
 "  Detach the given ArrayBuffer object from its memory, i.e. as if it\n"
-"  had been transferred to a WebWorker. \"change-data\" will update\n"
-"  the internal data pointer.  \"same-data\" will leave it set to \n"
-"  its original value, mimicking, e.g.,  asm.js ArrayBuffer detaching."),
+"  had been transferred to a WebWorker."),
 
     JS_FN_HELP("helperThreadCount", HelperThreadCount, 0, 0,
 "helperThreadCount()",

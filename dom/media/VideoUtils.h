@@ -39,6 +39,11 @@ using mozilla::CheckedUint32;
 // mozilla::Monitor non-reentrant.
 namespace mozilla {
 
+// EME Key System String.
+static NS_NAMED_LITERAL_CSTRING(kEMEKeySystemClearkey, "org.w3.clearkey");
+static NS_NAMED_LITERAL_CSTRING(kEMEKeySystemWidevine, "com.widevine.alpha");
+static NS_NAMED_LITERAL_CSTRING(kEMEKeySystemPrimetime, "com.adobe.primetime");
+
 /**
  * ReentrantMonitorConditionallyEnter
  *
@@ -100,7 +105,7 @@ public:
     : mObject(aObject)
   {
   }
-  NS_IMETHOD Run() {
+  NS_IMETHOD Run() override {
     NS_ASSERTION(NS_IsMainThread(), "Must be on main thread.");
     mObject = nullptr;
     return NS_OK;

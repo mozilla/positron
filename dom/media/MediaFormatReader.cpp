@@ -77,6 +77,7 @@ MediaFormatReader::MediaFormatReader(AbstractMediaDecoder* aDecoder,
   , mDemuxOnly(false)
   , mSeekScheduled(false)
   , mVideoFrameContainer(aVideoFrameContainer)
+  , mExplicitDuration(mTaskQueue, Maybe<double>(), "MediaFormatReader::mExplicitDuration(Mirror)")
 {
   MOZ_ASSERT(aDemuxer);
   MOZ_COUNT_CTOR(MediaFormatReader);
@@ -102,7 +103,6 @@ MediaFormatReader::Shutdown()
     if (mAudio.HasPromise()) {
       mAudio.RejectPromise(CANCELED, __func__);
     }
-    mAudio.mInitPromise.DisconnectIfExists();
     mAudio.ShutdownDecoder();
   }
   if (mAudio.mTrackDemuxer) {
@@ -122,7 +122,6 @@ MediaFormatReader::Shutdown()
     if (mVideo.HasPromise()) {
       mVideo.RejectPromise(CANCELED, __func__);
     }
-    mVideo.mInitPromise.DisconnectIfExists();
     mVideo.ShutdownDecoder();
   }
   if (mVideo.mTrackDemuxer) {
@@ -140,6 +139,8 @@ MediaFormatReader::Shutdown()
   mDemuxer = nullptr;
   mPlatform = nullptr;
   mVideoFrameContainer = nullptr;
+
+  mExplicitDuration.DisconnectIfConnected();
 
   return MediaDecoderReader::Shutdown();
 }
@@ -199,7 +200,7 @@ public:
     , mInitDataType(aInitDataType)
   {
   }
-  NS_IMETHOD Run() {
+  NS_IMETHOD Run() override {
     // Note: Null check the owner, as the decoder could have been shutdown
     // since this event was dispatched.
     MediaDecoderOwner* owner = mDecoder->GetOwner();
@@ -251,6 +252,10 @@ MediaFormatReader::AsyncReadMetadata()
     metadata->mInfo = mInfo;
     metadata->mTags = nullptr;
     return MetadataPromise::CreateAndResolve(metadata, __func__);
+  }
+
+  if (mDecoder->CanonicalExplicitDuration()) {
+    mExplicitDuration.Connect(mDecoder->CanonicalExplicitDuration());
   }
 
   RefPtr<MetadataPromise> p = mMetadataPromise.Ensure(__func__);
@@ -388,6 +393,7 @@ bool
 MediaFormatReader::EnsureDecoderCreated(TrackType aTrack)
 {
   MOZ_ASSERT(OnTaskQueue());
+  MOZ_DIAGNOSTIC_ASSERT(!IsSuspended());
 
   auto& decoder = GetDecoderData(aTrack);
 
@@ -454,6 +460,8 @@ bool
 MediaFormatReader::EnsureDecoderInitialized(TrackType aTrack)
 {
   MOZ_ASSERT(OnTaskQueue());
+  MOZ_DIAGNOSTIC_ASSERT(!IsSuspended());
+
   auto& decoder = GetDecoderData(aTrack);
 
   if (!decoder.mDecoder || decoder.mInitPromise.Exists()) {
@@ -463,21 +471,15 @@ MediaFormatReader::EnsureDecoderInitialized(TrackType aTrack)
   if (decoder.mDecoderInitialized) {
     return true;
   }
-  if (IsSuspended()) {
-    return false;
-  }
 
   RefPtr<MediaFormatReader> self = this;
   decoder.mInitPromise.Begin(decoder.mDecoder->Init()
        ->Then(OwnerThread(), __func__,
               [self] (TrackType aTrack) {
+                MOZ_DIAGNOSTIC_ASSERT(!self->IsSuspended());
                 auto& decoder = self->GetDecoderData(aTrack);
+                MOZ_DIAGNOSTIC_ASSERT(decoder.mDecoder);
                 decoder.mInitPromise.Complete();
-
-                if (self->IsSuspended()) {
-                  return;
-                }
-
                 decoder.mDecoderInitialized = true;
                 MonitorAutoLock mon(decoder.mMonitor);
                 decoder.mDescription = decoder.mDecoder->GetDescriptionName();
@@ -946,6 +948,14 @@ MediaFormatReader::HandleDemuxedSamples(TrackType aTrack,
 {
   MOZ_ASSERT(OnTaskQueue());
 
+  // Don't try to create or initialize decoders
+  // (which might allocate hardware resources) when suspended.
+  if (IsSuspended()) {
+    // Should've deleted decoders when suspended.
+    MOZ_DIAGNOSTIC_ASSERT(!mAudio.mDecoder && !mVideo.mDecoder);
+    return;
+  }
+
   auto& decoder = GetDecoderData(aTrack);
 
   if (decoder.mQueuedSamples.IsEmpty()) {
@@ -1073,6 +1083,20 @@ MediaFormatReader::InternalSeek(TrackType aTrack, const InternalSeekTarget& aTar
                     [self, aTrack] (DemuxerFailureReason aResult) {
                       auto& decoder = self->GetDecoderData(aTrack);
                       decoder.mSeekRequest.Complete();
+
+                      if (aResult == DemuxerFailureReason::END_OF_STREAM) {
+                        // We want to enter EOS when performing an
+                        // internal seek only if we're attempting to seek past
+                        // the explicit duration to avoid unwanted ended
+                        // event to be fired.
+                        if (self->mExplicitDuration.Ref().isSome() &&
+                            decoder.mTimeThreshold.ref().Time() <
+                            TimeUnit::FromSeconds(
+                              self->mExplicitDuration.Ref().ref())) {
+                          aResult = DemuxerFailureReason::WAITING_FOR_DATA;
+                        }
+                      }
+
                       switch (aResult) {
                         case DemuxerFailureReason::WAITING_FOR_DATA:
                           self->NotifyWaitingForData(aTrack);
@@ -1519,6 +1543,14 @@ MediaFormatReader::DropDecodedSamples(TrackType aTrack)
 }
 
 void
+MediaFormatReader::WaitingForKey(TrackType aTrack)
+{
+  if (mDecoder) {
+    mDecoder->NotifyWaitingForKey();
+  }
+}
+
+void
 MediaFormatReader::SkipVideoDemuxToNextKeyFrame(media::TimeUnit aTimeThreshold)
 {
   MOZ_ASSERT(OnTaskQueue());
@@ -1720,6 +1752,14 @@ MediaFormatReader::OnSeekFailed(TrackType aTrack, DemuxerFailureReason aResult)
     mVideo.mSeekRequest.Complete();
   } else {
     mAudio.mSeekRequest.Complete();
+  }
+
+  // We want to enter EOS when performing a seek only if we're attempting to
+  // seek past the explicit duration to avoid unwanted ended
+  // event to be fired.
+  if (mExplicitDuration.Ref().isSome() &&
+      mPendingSeekTime.ref() < TimeUnit::FromSeconds(mExplicitDuration.Ref().ref())) {
+    aResult = DemuxerFailureReason::WAITING_FOR_DATA;
   }
 
   if (aResult == DemuxerFailureReason::WAITING_FOR_DATA) {
@@ -1930,17 +1970,9 @@ MediaFormatReader::UpdateBufferedWithPromise() {
   return BufferedUpdatePromise::CreateAndResolve(true, __func__);
 }
 
-void MediaFormatReader::ReleaseMediaResources()
+void MediaFormatReader::ReleaseResources()
 {
-  // Before freeing a video codec, all video buffers needed to be released
-  // even from graphics pipeline.
-  if (mVideoFrameContainer) {
-    mVideoFrameContainer->ClearCurrentFrame();
-  }
-  mVideo.mInitPromise.DisconnectIfExists();
   mVideo.ShutdownDecoder();
-
-  mAudio.mInitPromise.DisconnectIfExists();
   mAudio.ShutdownDecoder();
 }
 

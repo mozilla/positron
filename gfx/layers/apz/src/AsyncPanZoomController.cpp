@@ -57,7 +57,7 @@
 #include "mozilla/layers/LayerTransactionParent.h" // for LayerTransactionParent
 #include "mozilla/layers/ScrollInputMethods.h" // for ScrollInputMethod
 #include "mozilla/mozalloc.h"           // for operator new, etc
-#include "mozilla/unused.h"             // for unused
+#include "mozilla/Unused.h"             // for unused
 #include "mozilla/FloatingPoint.h"      // for FuzzyEquals*
 #include "nsAlgorithm.h"                // for clamped
 #include "nsCOMPtr.h"                   // for already_AddRefed
@@ -74,9 +74,9 @@
 #include "SharedMemoryBasic.h"          // for SharedMemoryBasic
 #include "ScrollSnap.h"                 // for ScrollSnapUtils
 #include "WheelScrollAnimation.h"
-#if defined(MOZ_ANDROID_APZ)
+#if defined(MOZ_WIDGET_ANDROID)
 #include "AndroidAPZ.h"
-#endif // defined(MOZ_ANDROID_APZ)
+#endif // defined(MOZ_WIDGET_ANDROID)
 
 #define ENABLE_APZC_LOGGING 0
 // #define ENABLE_APZC_LOGGING 1
@@ -105,7 +105,7 @@ typedef mozilla::gfx::Matrix4x4 Matrix4x4;
 using mozilla::gfx::PointTyped;
 
 // Choose between platform-specific implementations.
-#ifdef MOZ_ANDROID_APZ
+#ifdef MOZ_WIDGET_ANDROID
 typedef WidgetOverscrollEffect OverscrollEffect;
 typedef AndroidSpecificState PlatformSpecificState;
 typedef AndroidFlingAnimation FlingAnimation;
@@ -1497,14 +1497,12 @@ AsyncPanZoomController::GetScrollWheelDelta(const ScrollWheelInput& aEvent) cons
 {
   ParentLayerSize scrollAmount;
   ParentLayerSize pageScrollSize;
-  bool isRootContent = false;
 
   {
     // Grab the lock to access the frame metrics.
     ReentrantMonitorAutoEnter lock(mMonitor);
     LayoutDeviceIntSize scrollAmountLD = mScrollMetadata.GetLineScrollAmount();
     LayoutDeviceIntSize pageScrollSizeLD = mScrollMetadata.GetPageScrollAmount();
-    isRootContent = mFrameMetrics.IsRootContent();
     scrollAmount = scrollAmountLD /
       mFrameMetrics.GetDevPixelsPerCSSPixel() * mFrameMetrics.GetZoom();
     pageScrollSize = pageScrollSizeLD /
@@ -1537,9 +1535,9 @@ AsyncPanZoomController::GetScrollWheelDelta(const ScrollWheelInput& aEvent) cons
 
   // For the conditions under which we allow system scroll overrides, see
   // EventStateManager::DeltaAccumulator::ComputeScrollAmountForDefaultAction
-  // and WheelTransaction::OverrideSystemScrollSpeed.
-  if (isRootContent &&
-      gfxPrefs::MouseWheelHasRootScrollDeltaOverride() &&
+  // and WheelTransaction::OverrideSystemScrollSpeed. Note that we do *not*
+  // restrict this to the root content, see bug 1217715 for discussion on this.
+  if (gfxPrefs::MouseWheelHasRootScrollDeltaOverride() &&
       !aEvent.IsCustomizedByUserPrefs() &&
       aEvent.mDeltaType == ScrollWheelInput::SCROLLDELTA_LINE &&
       aEvent.mAllowToOverrideSystemScrollSpeed) {
@@ -2820,26 +2818,31 @@ int32_t AsyncPanZoomController::GetLastTouchIdentifier() const {
   return listener ? listener->GetLastTouchIdentifier() : -1;
 }
 
-void AsyncPanZoomController::RequestContentRepaint() {
-  // Reinvoke this method on the main thread if it's not there already. It's
+void AsyncPanZoomController::RequestContentRepaint(bool aUserAction) {
+  // Reinvoke this method on the repaint thread if it's not there already. It's
   // important to do this before the call to CalculatePendingDisplayPort, so
   // that CalculatePendingDisplayPort uses the most recent available version of
   // mFrameMetrics, just before the paint request is dispatched to content.
-  if (!NS_IsMainThread()) {
+  RefPtr<GeckoContentController> controller = GetGeckoContentController();
+  if (!controller) {
+    return;
+  }
+  if (!controller->IsRepaintThread()) {
     // use the local variable to resolve the function overload.
-    auto func = static_cast<void (AsyncPanZoomController::*)()>
+    auto func = static_cast<void (AsyncPanZoomController::*)(bool)>
         (&AsyncPanZoomController::RequestContentRepaint);
-    NS_DispatchToMainThread(NewRunnableMethod(this, func));
+    controller->DispatchToRepaintThread(NewRunnableMethod<bool>(this, func, aUserAction));
     return;
   }
 
-  MOZ_ASSERT(NS_IsMainThread());
+  MOZ_ASSERT(controller->IsRepaintThread());
 
   ReentrantMonitorAutoEnter lock(mMonitor);
   ParentLayerPoint velocity = GetVelocityVector();
   mFrameMetrics.SetDisplayPortMargins(CalculatePendingDisplayPort(mFrameMetrics, velocity));
   mFrameMetrics.SetUseDisplayPortMargins(true);
   mFrameMetrics.SetPaintRequestTime(TimeStamp::Now());
+  mFrameMetrics.SetRepaintDrivenByUserAction(aUserAction);
   RequestContentRepaint(mFrameMetrics, velocity);
 }
 
@@ -2858,7 +2861,11 @@ void
 AsyncPanZoomController::RequestContentRepaint(const FrameMetrics& aFrameMetrics,
                                               const ParentLayerPoint& aVelocity)
 {
-  MOZ_ASSERT(NS_IsMainThread());
+  RefPtr<GeckoContentController> controller = GetGeckoContentController();
+  if (!controller) {
+    return;
+  }
+  MOZ_ASSERT(controller->IsRepaintThread());
 
   // If we're trying to paint what we already think is painted, discard this
   // request since it's a pointless paint.
@@ -2882,11 +2889,6 @@ AsyncPanZoomController::RequestContentRepaint(const FrameMetrics& aFrameMetrics,
     return;
   }
 
-  RefPtr<GeckoContentController> controller = GetGeckoContentController();
-  if (!controller) {
-    return;
-  }
-
   APZC_LOG_FM(aFrameMetrics, "%p requesting content repaint", this);
   { // scope lock
     MutexAutoLock lock(mCheckerboardEventLock);
@@ -2900,6 +2902,8 @@ AsyncPanZoomController::RequestContentRepaint(const FrameMetrics& aFrameMetrics,
     }
   }
 
+  MOZ_ASSERT(aFrameMetrics.GetScrollUpdateType() == FrameMetrics::eNone ||
+             aFrameMetrics.GetScrollUpdateType() == FrameMetrics::eUserAction);
   controller->RequestContentRepaint(aFrameMetrics);
   mExpectedGeckoMetrics = aFrameMetrics;
   mLastPaintRequestMetrics = aFrameMetrics;
@@ -3225,6 +3229,20 @@ void AsyncPanZoomController::NotifyLayersUpdated(const ScrollMetadata& aScrollMe
     APZC_LOG("%p NotifyLayersUpdated short-circuit\n", this);
     return;
   }
+
+  // If the mFrameMetrics scroll offset is different from the last scroll offset
+  // that the main-thread sent us, then we know that the user has been doing
+  // something that triggers a scroll. This check is the APZ equivalent of the
+  // check on the main-thread at
+  // https://hg.mozilla.org/mozilla-central/file/97a52326b06a/layout/generic/nsGfxScrollFrame.cpp#l4050
+  // There is code below (the use site of userScrolled) that prevents a restored-
+  // scroll-position update from overwriting a user scroll, again equivalent to
+  // how the main thread code does the same thing.
+  CSSPoint lastScrollOffset = mLastContentPaintMetadata.GetMetrics().GetScrollOffset();
+  bool userScrolled =
+    !FuzzyEqualsAdditive(mFrameMetrics.GetScrollOffset().x, lastScrollOffset.x) ||
+    !FuzzyEqualsAdditive(mFrameMetrics.GetScrollOffset().y, lastScrollOffset.y);
+
   if (aLayerMetrics.GetScrollUpdateType() != FrameMetrics::ScrollOffsetUpdateType::ePending) {
     mLastContentPaintMetadata = aScrollMetadata;
   }
@@ -3289,6 +3307,12 @@ void AsyncPanZoomController::NotifyLayersUpdated(const ScrollMetadata& aScrollMe
   // update message.
   bool scrollOffsetUpdated = aLayerMetrics.GetScrollOffsetUpdated()
         && (aLayerMetrics.GetScrollGeneration() != mFrameMetrics.GetScrollGeneration());
+
+  if (scrollOffsetUpdated && userScrolled &&
+      aLayerMetrics.GetScrollUpdateType() == FrameMetrics::ScrollOffsetUpdateType::eRestore) {
+    APZC_LOG("%p dropping scroll update of type eRestore because of user scroll\n", this);
+    scrollOffsetUpdated = false;
+  }
 
   bool smoothScrollRequested = aLayerMetrics.GetDoSmoothScroll()
        && (aLayerMetrics.GetScrollGeneration() != mFrameMetrics.GetScrollGeneration());
@@ -3415,7 +3439,8 @@ void AsyncPanZoomController::NotifyLayersUpdated(const ScrollMetadata& aScrollMe
   }
 
   if (needContentRepaint) {
-    RequestContentRepaint();
+    // This repaint request is not driven by a user action on the APZ side
+    RequestContentRepaint(false);
   }
   UpdateSharedCompositorFrameMetrics();
 }
@@ -3563,13 +3588,19 @@ void AsyncPanZoomController::ZoomToRect(CSSRect aRect, const uint32_t aFlags) {
       CalculatePendingDisplayPort(endZoomToMetrics, velocity));
     endZoomToMetrics.SetUseDisplayPortMargins(true);
     endZoomToMetrics.SetPaintRequestTime(TimeStamp::Now());
-    if (NS_IsMainThread()) {
+    endZoomToMetrics.SetRepaintDrivenByUserAction(true);
+
+    RefPtr<GeckoContentController> controller = GetGeckoContentController();
+    if (!controller) {
+      return;
+    }
+    if (controller->IsRepaintThread()) {
       RequestContentRepaint(endZoomToMetrics, velocity);
     } else {
       // use a local var to resolve the function overload
       auto func = static_cast<void (AsyncPanZoomController::*)(const FrameMetrics&, const ParentLayerPoint&)>
           (&AsyncPanZoomController::RequestContentRepaint);
-      NS_DispatchToMainThread(
+      controller->DispatchToRepaintThread(
           NewRunnableMethod<FrameMetrics, ParentLayerPoint>(
               this, func, endZoomToMetrics, velocity));
     }
@@ -3751,7 +3782,7 @@ void AsyncPanZoomController::UpdateSharedCompositorFrameMetrics()
   FrameMetrics* frame = mSharedFrameMetricsBuffer ?
       static_cast<FrameMetrics*>(mSharedFrameMetricsBuffer->memory()) : nullptr;
 
-  if (frame && mSharedLock && gfxPlatform::GetPlatform()->UseProgressivePaint()) {
+  if (frame && mSharedLock && gfxPrefs::ProgressivePaint()) {
     mSharedLock->Lock();
     *frame = mFrameMetrics;
     mSharedLock->Unlock();
@@ -3765,7 +3796,7 @@ void AsyncPanZoomController::ShareCompositorFrameMetrics() {
   // Only create the shared memory buffer if it hasn't already been created,
   // we are using progressive tile painting, and we have a
   // compositor to pass the shared memory back to the content process/thread.
-  if (!mSharedFrameMetricsBuffer && compositor && gfxPlatform::GetPlatform()->UseProgressivePaint()) {
+  if (!mSharedFrameMetricsBuffer && compositor && gfxPrefs::ProgressivePaint()) {
 
     // Create shared memory and initialize it with the current FrameMetrics value
     mSharedFrameMetricsBuffer = new ipc::SharedMemoryBasic;

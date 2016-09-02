@@ -12,13 +12,13 @@ const {
 const { connect } = require("devtools/client/shared/vendor/react-redux");
 const { getAllFilters } = require("devtools/client/webconsole/new-console-output/selectors/filters");
 const { getAllUi } = require("devtools/client/webconsole/new-console-output/selectors/ui");
-const messagesActions = require("devtools/client/webconsole/new-console-output/actions/messages");
+const { filterTextSet, filtersClear } = require("devtools/client/webconsole/new-console-output/actions/filters");
+const { messagesClear } = require("devtools/client/webconsole/new-console-output/actions/messages");
 const uiActions = require("devtools/client/webconsole/new-console-output/actions/ui");
-const { store } = require("devtools/client/webconsole/new-console-output/store");
 const {
-  SEVERITY_FILTER
+  MESSAGE_LEVEL
 } = require("../constants");
-const FilterToggleButton = createFactory(require("devtools/client/webconsole/new-console-output/components/filter-toggle-button").FilterToggleButton);
+const FilterButton = createFactory(require("devtools/client/webconsole/new-console-output/components/filter-button").FilterButton);
 
 const FilterBar = createClass({
 
@@ -29,71 +29,81 @@ const FilterBar = createClass({
     ui: PropTypes.object.isRequired
   },
 
-  onClearOutputButtonClick: function () {
-    store.dispatch(messagesActions.messagesClear());
+  onClickMessagesClear: function () {
+    this.props.dispatch(messagesClear());
   },
 
-  onToggleFilterConfigBarButtonClick: function () {
-    store.dispatch(uiActions.filterBarToggle());
+  onClickFilterBarToggle: function () {
+    this.props.dispatch(uiActions.filterBarToggle());
   },
 
-  onClearFiltersButtonClick: function () {
-    store.dispatch(messagesActions.filtersClear());
+  onClickFiltersClear: function () {
+    this.props.dispatch(filtersClear());
   },
 
   onSearchInput: function (e) {
-    store.dispatch(messagesActions.messagesSearch(e.target.value));
+    this.props.dispatch(filterTextSet(e.target.value));
   },
 
   render() {
-    const {filter, ui} = this.props;
-    let configFilterBarVisible = ui.configFilterBarVisible;
+    const {dispatch, filter, ui} = this.props;
+    let filterBarVisible = ui.filterBarVisible;
     let children = [];
 
     children.push(dom.div({className: "devtools-toolbar webconsole-filterbar-primary"},
       dom.button({
         className: "devtools-button devtools-clear-icon",
         title: "Clear output",
-        onClick: this.onClearOutputButtonClick
+        onClick: this.onClickMessagesClear
       }),
       dom.button({
         className: "devtools-button devtools-filter-icon" + (
-          configFilterBarVisible ? " checked" : ""),
+          filterBarVisible ? " checked" : ""),
         title: "Toggle filter bar",
-        onClick: this.onToggleFilterConfigBarButtonClick
+        onClick: this.onClickFilterBarToggle
       }),
       dom.input({
         className: "devtools-plaininput",
         type: "search",
-        value: filter.searchText,
+        value: filter.text,
         placeholder: "Filter output",
         onInput: this.onSearchInput
       })
     ));
 
-    if (configFilterBarVisible) {
+    if (filterBarVisible) {
       children.push(
         dom.div({className: "devtools-toolbar"},
-          FilterToggleButton({
+          FilterButton({
             active: filter.error,
             label: "Errors",
-            filterType: SEVERITY_FILTER,
-            filterKey: "error"}),
-          FilterToggleButton({
+            filterKey: MESSAGE_LEVEL.ERROR,
+            dispatch
+          }),
+          FilterButton({
             active: filter.warn,
             label: "Warnings",
-            filterType: SEVERITY_FILTER,
-            filterKey: "warn"}),
-          FilterToggleButton({
+            filterKey: MESSAGE_LEVEL.WARN,
+            dispatch
+          }),
+          FilterButton({
             active: filter.log,
             label: "Logs",
-            filterType: SEVERITY_FILTER,
-            filterKey: "log"}),
-          FilterToggleButton({
+            filterKey: MESSAGE_LEVEL.LOG,
+            dispatch
+          }),
+          FilterButton({
             active: filter.info,
             label: "Info",
-            filterType: SEVERITY_FILTER,
-            filterKey: "info"})
+            filterKey: MESSAGE_LEVEL.INFO,
+            dispatch
+          }),
+          FilterButton({
+            active: filter.debug,
+            label: "Debug",
+            filterKey: MESSAGE_LEVEL.DEBUG,
+            dispatch
+          })
         )
       );
     }
@@ -109,7 +119,7 @@ const FilterBar = createClass({
             "."),
           dom.button({
             className: "menu-filter-button",
-            onClick: this.onClearFiltersButtonClick
+            onClick: this.onClickFiltersClear
           }, "Remove filters")
         )
       );
@@ -117,7 +127,7 @@ const FilterBar = createClass({
 
     return (
       dom.div({className: "webconsole-filteringbar-wrapper"},
-        children
+        ...children
       )
     );
   }

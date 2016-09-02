@@ -651,8 +651,9 @@ SampleAnimations(Layer* aLayer, TimeStamp aPoint)
               animation.easingFunction());
 
           ComputedTiming computedTiming =
-            dom::KeyframeEffectReadOnly::GetComputedTimingAt(
-              Nullable<TimeDuration>(elapsedDuration), timing);
+            dom::AnimationEffectReadOnly::GetComputedTimingAt(
+              Nullable<TimeDuration>(elapsedDuration), timing,
+              animation.playbackRate());
 
           MOZ_ASSERT(!computedTiming.mProgress.IsNull(),
                      "iteration progress should not be null");
@@ -684,6 +685,7 @@ SampleAnimations(Layer* aLayer, TimeStamp aPoint)
           case eCSSProperty_opacity:
           {
             layerComposite->SetShadowOpacity(interpolatedValue.get_float());
+            layerComposite->SetShadowOpacitySetByAnimation(true);
             break;
           }
           case eCSSProperty_transform:
@@ -793,7 +795,7 @@ ExpandRootClipRect(Layer* aLayer, const ScreenMargin& aFixedLayerMargins)
   }
 }
 
-#ifdef MOZ_ANDROID_APZ
+#ifdef MOZ_WIDGET_ANDROID
 static void
 MoveScrollbarForLayerMargin(Layer* aRoot, FrameMetrics::ViewID aRootScrollId,
                             const ScreenMargin& aFixedLayerMargins)
@@ -930,7 +932,7 @@ AsyncCompositionManager::ApplyAsyncContentTransformToTree(Layer *aLayer,
           const ScrollMetadata& scrollMetadata = layer->GetScrollMetadata(i);
           const FrameMetrics& metrics = scrollMetadata.GetMetrics();
 
-#if defined(MOZ_ANDROID_APZ)
+#if defined(MOZ_WIDGET_ANDROID)
           // If we find a metrics which is the root content doc, use that. If not, use
           // the root layer. Since this function recurses on children first we should
           // only end up using the root layer if the entire tree was devoid of a
@@ -1506,7 +1508,7 @@ AsyncCompositionManager::TransformShadowTree(TimeStamp aCurrentFrame,
     // in Gecko and partially in Java.
     bool foundRoot = false;
     if (ApplyAsyncContentTransformToTree(root, &foundRoot)) {
-#if defined(MOZ_ANDROID_APZ)
+#if defined(MOZ_WIDGET_ANDROID)
       MOZ_ASSERT(foundRoot);
       if (foundRoot && mFixedLayerMargins != ScreenMargin()) {
         MoveScrollbarForLayerMargin(root, mRootScrollableId, mFixedLayerMargins);

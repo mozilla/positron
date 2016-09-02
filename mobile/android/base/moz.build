@@ -16,6 +16,7 @@ thirdparty_source_dir = TOPSRCDIR + '/mobile/android/thirdparty/'
 constants_jar = add_java_jar('constants')
 constants_jar.sources = ['java/org/mozilla/gecko/' + x for x in [
     'adjust/AdjustHelperInterface.java',
+    'adjust/AttributionHelperListener.java',
     'annotation/JNITarget.java',
     'annotation/ReflectionTarget.java',
     'annotation/RobocopTarget.java',
@@ -212,7 +213,6 @@ geckoview_java_files = [
     'GeckoEditable.java',
     'GeckoEditableClient.java',
     'GeckoEditableListener.java',
-    'GeckoEvent.java',
     'GeckoHalDefines.java',
     'GeckoInputConnection.java',
     'GeckoJavaSampler.java',
@@ -240,8 +240,6 @@ geckoview_java_files = [
     'gfx/GeckoLayerClient.java',
     'gfx/ImmutableViewportMetrics.java',
     'gfx/IntSize.java',
-    'gfx/JavaPanZoomController.java',
-    'gfx/Layer.java',
     'gfx/LayerRenderer.java',
     'gfx/LayerView.java',
     'gfx/NativePanZoomController.java',
@@ -250,20 +248,15 @@ geckoview_java_files = [
     'gfx/PanningPerfAPI.java',
     'gfx/PanZoomController.java',
     'gfx/PanZoomTarget.java',
-    'gfx/PluginLayer.java',
     'gfx/PointUtils.java',
     'gfx/ProgressiveUpdateData.java',
     'gfx/RectUtils.java',
     'gfx/RenderTask.java',
-    'gfx/ScrollbarLayer.java',
     'gfx/SimpleScaleGestureDetector.java',
     'gfx/StackScroller.java',
     'gfx/SubdocumentScrollHelper.java',
-    'gfx/TextureGenerator.java',
-    'gfx/TextureReaper.java',
-    'gfx/TouchEventHandler.java',
+    'gfx/SurfaceTextureListener.java',
     'gfx/ViewTransform.java',
-    'gfx/VirtualLayer.java',
     'InputConnectionListener.java',
     'InputMethods.java',
     'notifications/AppNotificationClient.java',
@@ -318,7 +311,6 @@ gbjar.sources += ['java/org/mozilla/gecko/' + x for x in [
     'BrowserLocaleManager.java',
     'cleanup/FileCleanupController.java',
     'cleanup/FileCleanupService.java',
-    'ContactService.java',
     'CustomEditText.java',
     'customtabs/CustomTabsActivity.java',
     'customtabs/GeckoCustomTabsService.java',
@@ -439,6 +431,9 @@ gbjar.sources += ['java/org/mozilla/gecko/' + x for x in [
     'health/SessionInformation.java',
     'health/StubbedHealthRecorder.java',
     'home/activitystream/ActivityStream.java',
+    'home/activitystream/StreamItem.java',
+    'home/activitystream/StreamRecyclerAdapter.java',
+    'home/activitystream/TopSitesRecyclerAdapter.java',
     'home/BookmarkFolderView.java',
     'home/BookmarkScreenshotRow.java',
     'home/BookmarksListAdapter.java',
@@ -504,8 +499,16 @@ gbjar.sources += ['java/org/mozilla/gecko/' + x for x in [
     'lwt/LightweightTheme.java',
     'lwt/LightweightThemeDrawable.java',
     'mdns/MulticastDNSManager.java',
+    'media/AsyncCodec.java',
+    'media/AsyncCodecFactory.java',
     'media/AudioFocusAgent.java',
+    'media/Codec.java',
+    'media/CodecManager.java',
+    'media/CodecProxy.java',
+    'media/FormatParam.java',
+    'media/JellyBeanAsyncCodec.java',
     'media/MediaControlService.java',
+    'media/Sample.java',
     'MediaCastingBar.java',
     'MemoryMonitor.java',
     'menu/GeckoMenu.java',
@@ -604,6 +607,7 @@ gbjar.sources += ['java/org/mozilla/gecko/' + x for x in [
     'tabs/TabsPanel.java',
     'tabs/TabsPanelThumbnailView.java',
     'Telemetry.java',
+    'telemetry/measurements/CampaignIdMeasurements.java',
     'telemetry/measurements/SearchCountMeasurements.java',
     'telemetry/measurements/SessionMeasurements.java',
     'telemetry/pingbuilders/TelemetryCorePingBuilder.java',
@@ -965,9 +969,9 @@ if CONFIG['MOZ_ANDROID_DISTRIBUTION_DIRECTORY']:
             '%' + CONFIG['MOZ_ANDROID_DISTRIBUTION_DIRECTORY'] + '/assets',
         ]
 
-# We do not expose MOZ_INSTALL_TRACKING_ADJUST_SDK_APP_TOKEN here because that
-# would leak the value to build logs.  Instead we expose the token quietly where
-# appropriate in Makefile.in.
+# We do not expose MOZ_ADJUST_SDK_KEY here because that # would leak the value
+# to build logs.  Instead we expose the token quietly where appropriate in
+# Makefile.in.
 for var in ('MOZ_ANDROID_ANR_REPORTER', 'MOZ_LINKER_EXTRACT', 'MOZ_DEBUG',
             'MOZ_ANDROID_SEARCH_ACTIVITY', 'MOZ_NATIVE_DEVICES', 'MOZ_ANDROID_MLS_STUMBLER',
             'MOZ_ANDROID_DOWNLOADS_INTEGRATION', 'MOZ_INSTALL_TRACKING',
@@ -1034,3 +1038,9 @@ DEFINES['TOPOBJDIR'] = TOPOBJDIR
 OBJDIR_PP_FILES.mobile.android.base += [
     'AndroidManifest.xml.in',
 ]
+
+gbjar.sources += ['generated/org/mozilla/gecko/' + x for x in [
+    'media/ICodec.java',
+    'media/ICodecCallbacks.java',
+    'media/ICodecManager.java',
+]]

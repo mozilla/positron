@@ -947,7 +947,8 @@ nsHTMLDocument::SetDomain(const nsAString& aDomain, ErrorResult& rv)
     return;
   }
 
-  rv2 = newURI->SetHostPort(NS_ConvertUTF16toUTF8(aDomain));
+  // We use SetHostAndPort because we want to reset the port number if needed.
+  rv2 = newURI->SetHostAndPort(NS_ConvertUTF16toUTF8(aDomain));
   if (NS_FAILED(rv2)) {
     rv.Throw(rv2);
     return;
@@ -2446,7 +2447,7 @@ public:
   {
   }
 
-  NS_IMETHOD Run() {
+  NS_IMETHOD Run() override {
     if (mElement && mElement->OwnerDoc() == mDoc) {
       mDoc->DeferredContentEditableCountChange(mElement);
     }
@@ -2937,7 +2938,8 @@ static const struct MidasCommand gMidasCommandTable[] = {
   { "unlink",        "cmd_removeLinks",     "", true,  false },
   { "insertorderedlist",   "cmd_ol",        "", true,  false },
   { "insertunorderedlist", "cmd_ul",        "", true,  false },
-  { "insertparagraph", "cmd_paragraphState", "p", true,  false },
+  { "insertparagraph", "cmd_insertParagraph", "", true,  false },
+  { "insertlinebreak", "cmd_insertLineBreak", "", true,  false },
   { "formatblock",   "cmd_paragraphState",  "", false, false },
   { "heading",       "cmd_paragraphState",  "", false, false },
   { "styleWithCSS",  "cmd_setDocumentUseCSS", "", false, true },

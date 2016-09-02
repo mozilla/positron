@@ -19,7 +19,7 @@
 #include "mozilla/Services.h"
 #include "nsNativeCharsetUtils.h"
 #include "nsIConsoleService.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 #include "GMPDecryptorParent.h"
 #include "GMPAudioDecoderParent.h"
 #include "nsComponentManagerUtils.h"
@@ -127,7 +127,7 @@ private:
   }
 
   NS_IMETHOD
-  Run()
+  Run() override
   {
     MOZ_ASSERT(NS_IsMainThread());
 

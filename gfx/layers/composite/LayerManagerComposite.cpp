@@ -12,6 +12,7 @@
 #include "CompositableHost.h"           // for CompositableHost
 #include "ContainerLayerComposite.h"    // for ContainerLayerComposite, etc
 #include "FPSCounter.h"                 // for FPSState, FPSCounter
+#include "PaintCounter.h"               // For PaintCounter
 #include "FrameMetrics.h"               // for FrameMetrics
 #include "GeckoProfiler.h"              // for profiler_set_frame_number, etc
 #include "ImageLayerComposite.h"        // for ImageLayerComposite
@@ -55,7 +56,7 @@
 #include "nsRegion.h"                   // for nsIntRegion, etc
 #ifdef MOZ_WIDGET_ANDROID
 #include <android/log.h>
-#include "AndroidBridge.h"
+#include <android/native_window.h>
 #endif
 #if defined(MOZ_WIDGET_ANDROID) || defined(MOZ_WIDGET_GONK)
 #include "opengl/CompositorOGL.h"
@@ -127,6 +128,8 @@ LayerManagerComposite::LayerManagerComposite(Compositor* aCompositor)
 , mGeometryChanged(true)
 , mLastFrameMissedHWC(false)
 , mWindowOverlayChanged(false)
+, mLastPaintTime(TimeDuration::Forever())
+, mRenderStartTime(TimeStamp::Now())
 {
   mTextRenderer = new TextRenderer(aCompositor);
   MOZ_ASSERT(aCompositor);
@@ -148,6 +151,7 @@ LayerManagerComposite::Destroy()
     }
     mRoot = nullptr;
     mClonedLayerTreeProperties = nullptr;
+    mPaintCounter = nullptr;
     mDestroyed = true;
   }
 }
@@ -373,6 +377,7 @@ LayerManagerComposite::EndTransaction(const TimeStamp& aTimeStamp,
   NS_ASSERTION(!(aFlags & END_NO_COMPOSITE),
                "Shouldn't get END_NO_COMPOSITE here");
   mInTransaction = false;
+  mRenderStartTime = TimeStamp::Now();
 
   if (!mIsCompositorReady) {
     return;
@@ -559,6 +564,7 @@ LayerManagerComposite::InvalidateDebugOverlay(nsIntRegion& aInvalidRegion, const
   bool drawFps = gfxPrefs::LayersDrawFPS();
   bool drawFrameCounter = gfxPrefs::DrawFrameCounter();
   bool drawFrameColorBars = gfxPrefs::CompositorDrawColorBars();
+  bool drawPaintTimes = gfxPrefs::AlwaysPaint();
 
   if (drawFps || drawFrameCounter) {
     aInvalidRegion.Or(aInvalidRegion, nsIntRect(0, 0, 256, 256));
@@ -566,6 +572,20 @@ LayerManagerComposite::InvalidateDebugOverlay(nsIntRegion& aInvalidRegion, const
   if (drawFrameColorBars) {
     aInvalidRegion.Or(aInvalidRegion, nsIntRect(0, 0, 10, aBounds.height));
   }
+  if (drawPaintTimes) {
+    aInvalidRegion.Or(aInvalidRegion, nsIntRect(PaintCounter::GetPaintRect()));
+  }
+}
+
+void
+LayerManagerComposite::DrawPaintTimes(Compositor* aCompositor)
+{
+  if (!mPaintCounter) {
+    mPaintCounter = new PaintCounter();
+  }
+
+  TimeDuration compositeTime = TimeStamp::Now() - mRenderStartTime;
+  mPaintCounter->Draw(aCompositor, mLastPaintTime, compositeTime);
 }
 
 static uint16_t sFrameCount = 0;
@@ -575,6 +595,7 @@ LayerManagerComposite::RenderDebugOverlay(const IntRect& aBounds)
   bool drawFps = gfxPrefs::LayersDrawFPS();
   bool drawFrameCounter = gfxPrefs::DrawFrameCounter();
   bool drawFrameColorBars = gfxPrefs::CompositorDrawColorBars();
+  bool drawPaintTimes = gfxPrefs::AlwaysPaint();
 
   TimeStamp now = TimeStamp::Now();
 
@@ -713,6 +734,10 @@ LayerManagerComposite::RenderDebugOverlay(const IntRect& aBounds)
   if (drawFrameColorBars || drawFrameCounter) {
     // We intentionally overflow at 2^16.
     sFrameCount++;
+  }
+
+  if (drawPaintTimes) {
+    DrawPaintTimes(mCompositor);
   }
 }
 
@@ -904,6 +929,12 @@ LayerManagerComposite::Render(const nsIntRegion& aInvalidRegion, const nsIntRegi
   CompositorBench(mCompositor, bounds);
 
   MOZ_ASSERT(mRoot->GetOpacity() == 1);
+#if defined(MOZ_WIDGET_ANDROID)
+  LayerMetricsWrapper wrapper = GetRootContentLayer();
+  if (wrapper) {
+    mCompositor->SetBeginFrameClearColor(wrapper.Metadata().GetBackgroundColor());
+  }
+#endif
   if (mRoot->GetClipRect()) {
     clipRect = *mRoot->GetClipRect();
     IntRect rect(clipRect.x, clipRect.y, clipRect.width, clipRect.height);
@@ -971,6 +1002,13 @@ LayerManagerComposite::Render(const nsIntRegion& aInvalidRegion, const nsIntRegi
   mCompositor->GetWidget()->PostRender(this);
 
   RecordFrame();
+
+#if defined(MOZ_WIDGET_ANDROID)
+  // Reset the clear color to white so that if a page is loaded with a different background
+  // color, the page will be white while the new page is loading instead of the background
+  // color of the previous page.
+  mCompositor->SetBeginFrameClearColor(gfx::Color(1.0, 1.0, 1.0, 1.0));
+#endif
 }
 
 #if defined(MOZ_WIDGET_ANDROID) || defined(MOZ_WIDGET_GONK)
@@ -1048,17 +1086,15 @@ void
 LayerManagerComposite::RenderToPresentationSurface()
 {
 #ifdef MOZ_WIDGET_ANDROID
-  if (!AndroidBridge::Bridge()) {
-    return;
-  }
-
-  void* window = AndroidBridge::Bridge()->GetPresentationWindow();
+  nsIWidget* const widget = mCompositor->GetWidget()->RealWidget();
+  auto window = static_cast<ANativeWindow*>(
+      widget->GetNativeData(NS_PRESENTATION_WINDOW));
 
   if (!window) {
     return;
   }
 
-  EGLSurface surface = AndroidBridge::Bridge()->GetPresentationSurface();
+  EGLSurface surface = widget->GetNativeData(NS_PRESENTATION_SURFACE);
 
   if (!surface) {
     //create surface;
@@ -1067,7 +1103,8 @@ LayerManagerComposite::RenderToPresentationSurface()
       return;
     }
 
-    AndroidBridge::Bridge()->SetPresentationSurface(surface);
+    widget->SetNativeData(NS_PRESENTATION_SURFACE,
+                          reinterpret_cast<uintptr_t>(surface));
   }
 
   CompositorOGL* compositor = mCompositor->AsCompositorOGL();
@@ -1078,7 +1115,8 @@ LayerManagerComposite::RenderToPresentationSurface()
     return;
   }
 
-  const IntSize windowSize = AndroidBridge::Bridge()->GetNativeWindowSize(window);
+  const IntSize windowSize(ANativeWindow_getWidth(window),
+                           ANativeWindow_getHeight(window));
 
 #elif defined(MOZ_WIDGET_GONK)
   CompositorOGL* compositor = mCompositor->AsCompositorOGL();
@@ -1295,6 +1333,7 @@ LayerComposite::LayerComposite(LayerManagerComposite *aManager)
   , mCompositor(aManager->GetCompositor())
   , mShadowOpacity(1.0)
   , mShadowTransformSetByAnimation(false)
+  , mShadowOpacitySetByAnimation(false)
   , mDestroyed(false)
   , mLayerComposited(false)
 { }

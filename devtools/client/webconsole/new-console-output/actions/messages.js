@@ -9,17 +9,23 @@
 const {
   prepareMessage
 } = require("devtools/client/webconsole/new-console-output/utils/messages");
+const { IdGenerator } = require("devtools/client/webconsole/new-console-output/utils/id-generator");
 
 const {
   MESSAGE_ADD,
   MESSAGES_CLEAR,
-  SEVERITY_FILTER,
-  MESSAGES_SEARCH,
-  FILTERS_CLEAR,
+  MESSAGE_OPEN,
+  MESSAGE_CLOSE,
 } = require("../constants");
 
-function messageAdd(packet) {
-  let message = prepareMessage(packet);
+const defaultIdGenerator = new IdGenerator();
+
+function messageAdd(packet, idGenerator = null) {
+  if (idGenerator == null) {
+    idGenerator = defaultIdGenerator;
+  }
+  let message = prepareMessage(packet, idGenerator);
+
   return {
     type: MESSAGE_ADD,
     message
@@ -32,29 +38,21 @@ function messagesClear() {
   };
 }
 
-function severityFilter(filter, toggled) {
+function messageOpen(id) {
   return {
-    type: SEVERITY_FILTER,
-    filter,
-    toggled
+    type: MESSAGE_OPEN,
+    id
   };
 }
 
-function filtersClear() {
+function messageClose(id) {
   return {
-    type: FILTERS_CLEAR
-  };
-}
-
-function messagesSearch(searchText) {
-  return {
-    type: MESSAGES_SEARCH,
-    searchText
+    type: MESSAGE_CLOSE,
+    id
   };
 }
 
 exports.messageAdd = messageAdd;
 exports.messagesClear = messagesClear;
-exports.severityFilter = severityFilter;
-exports.filtersClear = filtersClear;
-exports.messagesSearch = messagesSearch;
+exports.messageOpen = messageOpen;
+exports.messageClose = messageClose;

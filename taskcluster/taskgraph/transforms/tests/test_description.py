@@ -77,14 +77,19 @@ test_description_schema = Schema({
 
     # The EC2 instance size to run these tests on.
     Required('instance-size', default='default'): Any(
-        Any('default', 'large', 'xlarge'),
-        {'by-test-platform': {basestring: Any('default', 'large', 'xlarge')}},
+        Any('default', 'large', 'xlarge', 'legacy'),
+        {'by-test-platform': {basestring: Any('default', 'large', 'xlarge', 'legacy')}},
     ),
 
     # Whether the task requires loopback audio or video (whatever that may mean
     # on the platform)
     Required('loopback-audio', default=False): bool,
     Required('loopback-video', default=False): bool,
+
+    # Whether the test can run using a software GL implementation on Linux
+    # using the GL compositor. May not be used with "legacy" sized instances
+    # due to poor LLVMPipe performance (bug 1296086).
+    Optional('allow-software-gl-layers', default=True): bool,
 
     # The worker implementation for this test, as dictated by policy and by the
     # test platform.
@@ -145,7 +150,7 @@ test_description_schema = Schema({
 
         # The setting for --download-symbols (if omitted, the option will not
         # be passed to mozharness)
-        Optional('download-symbols'): Any(True, False, 'ondemand'),
+        Optional('download-symbols'): Any(True, 'ondemand'),
 
         # If set, then MOZ_NODE_PATH=/usr/local/bin/node is included in the
         # environment.  This is more than just a helpful path setting -- it

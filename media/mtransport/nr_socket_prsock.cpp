@@ -135,12 +135,6 @@ nrappkit copyright:
 #endif
 #undef strlcpy
 
-// TCPSocketChild.h doesn't include TypedArray.h
-namespace mozilla {
-namespace dom {
-class ArrayBuffer;
-}
-}
 #include "mozilla/dom/network/TCPSocketChild.h"
 
 #ifdef LOG_TEMP_INFO
@@ -1658,7 +1652,7 @@ public:
   explicit TcpSocketReadyRunner(NrTcpSocketIpc *sck)
     : socket_(sck) {}
 
-  NS_IMETHODIMP Run() {
+  NS_IMETHOD Run() override {
     socket_->maybe_post_socket_ready();
     return NS_OK;
   }

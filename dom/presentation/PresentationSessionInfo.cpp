@@ -15,7 +15,7 @@
 #include "nsContentUtils.h"
 #include "nsGlobalWindow.h"
 #include "nsIDocShell.h"
-#include "nsIFrameLoader.h"
+#include "nsFrameLoader.h"
 #include "nsIMutableArray.h"
 #include "nsINetAddr.h"
 #include "nsISocketTransport.h"
@@ -222,6 +222,9 @@ PresentationSessionInfo::Init(nsIPresentationControlChannel* aControlChannel)
 /* virtual */ void
 PresentationSessionInfo::Shutdown(nsresult aReason)
 {
+  PRES_DEBUG("%s:id[%s], reason[%x], role[%d]\n", __func__,
+             NS_ConvertUTF16toUTF8(mSessionId).get(), aReason, mRole);
+
   NS_WARN_IF(NS_FAILED(aReason));
 
   // Close the control channel if any.
@@ -400,6 +403,9 @@ PresentationSessionInfo::ContinueTermination()
 NS_IMETHODIMP
 PresentationSessionInfo::NotifyTransportReady()
 {
+  PRES_DEBUG("%s:id[%s], role[%d]\n", __func__,
+             NS_ConvertUTF16toUTF8(mSessionId).get(), mRole);
+
   MOZ_ASSERT(NS_IsMainThread());
 
   mIsTransportReady = true;
@@ -423,6 +429,9 @@ PresentationSessionInfo::NotifyTransportReady()
 NS_IMETHODIMP
 PresentationSessionInfo::NotifyTransportClosed(nsresult aReason)
 {
+  PRES_DEBUG("%s:id[%s], reason[%x], role[%d]\n", __func__,
+             NS_ConvertUTF16toUTF8(mSessionId).get(), aReason, mRole);
+
   MOZ_ASSERT(NS_IsMainThread());
 
   // Nullify |mTransport| here so it won't try to re-close |mTransport| in
@@ -473,6 +482,9 @@ PresentationSessionInfo::NotifyData(const nsACString& aData)
 NS_IMETHODIMP
 PresentationSessionInfo::OnSessionTransport(nsIPresentationSessionTransport* transport)
 {
+  PRES_DEBUG("%s:id[%s], role[%d]\n", __func__,
+             NS_ConvertUTF16toUTF8(mSessionId).get(), mRole);
+
   SetBuilder(nullptr);
 
   // The session transport is managed by content process
@@ -495,10 +507,13 @@ PresentationSessionInfo::OnSessionTransport(nsIPresentationSessionTransport* tra
 }
 
 NS_IMETHODIMP
-PresentationSessionInfo::OnError(nsresult reason)
+PresentationSessionInfo::OnError(nsresult aReason)
 {
+  PRES_DEBUG("%s:id[%s], reason[%x], role[%d]\n", __func__,
+             NS_ConvertUTF16toUTF8(mSessionId).get(), aReason, mRole);
+
   SetBuilder(nullptr);
-  return ReplyError(reason);
+  return ReplyError(aReason);
 }
 
 NS_IMETHODIMP
@@ -592,6 +607,8 @@ PresentationControllingInfo::Shutdown(nsresult aReason)
     NS_WARN_IF(NS_FAILED(mServerSocket->Close()));
     mServerSocket = nullptr;
   }
+
+  mIsReconnecting = false;
 }
 
 nsresult
@@ -648,22 +665,15 @@ PresentationControllingInfo::GetAddress()
     return rv;
   }
 
-#elif defined(MOZ_MULET)
-  // In simulator,we need to use the "127.0.0.1" as target address.
-  NS_DispatchToMainThread(
-    NewRunnableMethod<nsCString>(
-      this,
-      &PresentationControllingInfo::OnGetAddress,
-      "127.0.0.1"));
-
 #else
-  // TODO Get host IP via other platforms.
+  nsCOMPtr<nsINetworkInfoService> networkInfo = do_GetService(NETWORKINFOSERVICE_CONTRACT_ID);
+  MOZ_ASSERT(networkInfo);
 
-  NS_DispatchToMainThread(
-    NewRunnableMethod<nsCString>(
-      this,
-      &PresentationControllingInfo::OnGetAddress,
-      EmptyCString()));
+  nsresult rv = networkInfo->ListNetworkAddresses(this);
+
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
 #endif
 
   return NS_OK;
@@ -673,6 +683,13 @@ nsresult
 PresentationControllingInfo::OnGetAddress(const nsACString& aAddress)
 {
   MOZ_ASSERT(NS_IsMainThread());
+
+  if (NS_WARN_IF(!mServerSocket)) {
+    return NS_ERROR_FAILURE;
+  }
+  if (NS_WARN_IF(!mControlChannel)) {
+    return NS_ERROR_FAILURE;
+  }
 
   // Prepare and send the offer.
   int32_t port;
@@ -745,10 +762,17 @@ PresentationControllingInfo::OnAnswer(nsIPresentationChannelDescription* aDescri
 NS_IMETHODIMP
 PresentationControllingInfo::NotifyConnected()
 {
+  PRES_DEBUG("%s:id[%s], role[%d]\n", __func__,
+             NS_ConvertUTF16toUTF8(mSessionId).get(), mRole);
+
   MOZ_ASSERT(NS_IsMainThread());
 
   switch (mState) {
     case nsIPresentationSessionListener::STATE_CONNECTING: {
+      if (mIsReconnecting) {
+        return ContinueReconnect();
+      }
+
       nsresult rv = mControlChannel->Launch(GetSessionId(), GetUrl());
       if (NS_WARN_IF(NS_FAILED(rv))) {
         return rv;
@@ -770,14 +794,16 @@ PresentationControllingInfo::NotifyConnected()
 NS_IMETHODIMP
 PresentationControllingInfo::NotifyReconnected()
 {
+  PRES_DEBUG("%s:id[%s], role[%d]\n", __func__,
+             NS_ConvertUTF16toUTF8(mSessionId).get(), mRole);
+
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(mReconnectCallback);
 
-  if (NS_WARN_IF(mState == nsIPresentationSessionListener::STATE_TERMINATED)) {
+  if (NS_WARN_IF(mState != nsIPresentationSessionListener::STATE_CONNECTING)) {
     return NS_ERROR_FAILURE;
   }
 
-  SetStateWithReason(nsIPresentationSessionListener::STATE_CONNECTING, NS_OK);
   return mReconnectCallback->NotifySuccess();
 }
 
@@ -842,6 +868,9 @@ PresentationControllingInfo::BuildTransport()
 NS_IMETHODIMP
 PresentationControllingInfo::NotifyDisconnected(nsresult aReason)
 {
+  PRES_DEBUG("%s:id[%s], reason[%x], role[%d]\n", __func__,
+             NS_ConvertUTF16toUTF8(mSessionId).get(), aReason, mRole);
+
   MOZ_ASSERT(NS_IsMainThread());
 
   if (mTransportType == nsIPresentationChannelDescription::TYPE_DATACHANNEL) {
@@ -898,6 +927,8 @@ NS_IMETHODIMP
 PresentationControllingInfo::OnStopListening(nsIServerSocket* aServerSocket,
                                            nsresult aStatus)
 {
+  PRES_DEBUG("controller %s:status[%x]\n",__func__, aStatus);
+
   MOZ_ASSERT(NS_IsMainThread());
 
   if (aStatus == NS_BINDING_ABORTED) { // The server socket was manually closed.
@@ -917,6 +948,24 @@ PresentationControllingInfo::OnStopListening(nsIServerSocket* aServerSocket,
   return NS_OK;
 }
 
+/**
+ * The steps to reconnect a session are summarized below:
+ * 1. Change |mState| to CONNECTING.
+ * 2. Check whether |mControlChannel| is existed or not. Usually we have to
+ *    create a new control cahnnel.
+ * 3.1 |mControlChannel| is null, which means we have to create a new one.
+ *     |EstablishControlChannel| is called to create a new control channel.
+ *     At this point, |mControlChannel| is not able to use yet. Set
+ *     |mIsReconnecting| to true and wait until |NotifyConnected|.
+ * 3.2 |mControlChannel| is not null and is avaliable.
+ *     We can just call |ContinueReconnect| to send reconnect command.
+ * 4. |NotifyReconnected| of |nsIPresentationControlChannelListener| is called
+ *    to indicate the receiver is ready for reconnecting.
+ * 5. Once both step 3 and 4 are done, the rest is to build a new data
+ *    transport channel by following the same steps as starting a
+ *    new session.
+ */
+
 nsresult
 PresentationControllingInfo::Reconnect(nsIPresentationServiceCallback* aCallback)
 {
@@ -930,6 +979,8 @@ PresentationControllingInfo::Reconnect(nsIPresentationServiceCallback* aCallback
     return mReconnectCallback->NotifyError(NS_ERROR_DOM_INVALID_STATE_ERR);
   }
 
+  SetStateWithReason(nsIPresentationSessionListener::STATE_CONNECTING, NS_OK);
+
   nsresult rv = NS_OK;
   if (!mControlChannel) {
     nsCOMPtr<nsIPresentationControlChannel> ctrlChannel;
@@ -942,12 +993,71 @@ PresentationControllingInfo::Reconnect(nsIPresentationServiceCallback* aCallback
     if (NS_WARN_IF(NS_FAILED(rv))) {
       return mReconnectCallback->NotifyError(NS_ERROR_DOM_OPERATION_ERR);
     }
+
+    mIsReconnecting = true;
+  } else {
+    return ContinueReconnect();
   }
 
-  rv = mControlChannel->Reconnect(mSessionId, GetUrl());
-  if (NS_WARN_IF(NS_FAILED(rv))) {
-    return mReconnectCallback->NotifyError(rv);
+  return NS_OK;
+}
+
+nsresult
+PresentationControllingInfo::ContinueReconnect()
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  MOZ_ASSERT(mControlChannel);
+  MOZ_ASSERT(mReconnectCallback);
+
+  mIsReconnecting = false;
+  if (NS_WARN_IF(NS_FAILED(mControlChannel->Reconnect(mSessionId, GetUrl()))) &&
+      mReconnectCallback) {
+    return mReconnectCallback->NotifyError(NS_ERROR_DOM_OPERATION_ERR);
   }
+
+  return NS_OK;
+}
+
+// nsIListNetworkAddressesListener
+NS_IMETHODIMP
+PresentationControllingInfo::OnListedNetworkAddresses(const char** aAddressArray,
+                                                      uint32_t aAddressArraySize)
+{
+  if (!aAddressArraySize) {
+    return OnListNetworkAddressesFailed();
+  }
+
+  // TODO bug 1228504 Take all IP addresses in PresentationChannelDescription
+  // into account. And at the first stage Presentation API is only exposed on
+  // Firefox OS where the first IP appears enough for most scenarios.
+
+  nsAutoCString ip;
+  ip.Assign(aAddressArray[0]);
+
+  // On Firefox desktop, the IP address is retrieved from a callback function.
+  // To make consistent code sequence, following function call is dispatched
+  // into main thread instead of calling it directly.
+  NS_DispatchToMainThread(
+    NewRunnableMethod<nsCString>(
+      this,
+      &PresentationControllingInfo::OnGetAddress,
+      ip));
+
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+PresentationControllingInfo::OnListNetworkAddressesFailed()
+{
+  PRES_ERROR("PresentationControllingInfo:OnListNetworkAddressesFailed");
+
+  // In 1-UA case, transport channel can still be established
+  // on loopback interface even if no network address available.
+  NS_DispatchToMainThread(
+    NewRunnableMethod<nsCString>(
+      this,
+      &PresentationControllingInfo::OnGetAddress,
+      "127.0.0.1"));
 
   return NS_OK;
 }
@@ -1196,6 +1306,9 @@ PresentationPresentingInfo::IsAccessible(base::ProcessId aProcessId)
 nsresult
 PresentationPresentingInfo::NotifyResponderReady()
 {
+  PRES_DEBUG("%s:id[%s], role[%d]\n", __func__,
+             NS_ConvertUTF16toUTF8(mSessionId).get(), mRole);
+
   if (mTimer) {
     mTimer->Cancel();
     mTimer = nullptr;
@@ -1218,6 +1331,9 @@ PresentationPresentingInfo::NotifyResponderReady()
 nsresult
 PresentationPresentingInfo::NotifyResponderFailure()
 {
+  PRES_DEBUG("%s:id[%s], role[%d]\n", __func__,
+             NS_ConvertUTF16toUTF8(mSessionId).get(), mRole);
+
   if (mTimer) {
     mTimer->Cancel();
     mTimer = nullptr;
@@ -1280,6 +1396,9 @@ PresentationPresentingInfo::OnIceCandidate(const nsAString& aCandidate)
 NS_IMETHODIMP
 PresentationPresentingInfo::NotifyConnected()
 {
+  PRES_DEBUG("%s:id[%s], role[%d]\n", __func__,
+             NS_ConvertUTF16toUTF8(mSessionId).get(), mRole);
+
   if (nsIPresentationSessionListener::STATE_TERMINATED == mState) {
     ContinueTermination();
   }
@@ -1297,6 +1416,9 @@ PresentationPresentingInfo::NotifyReconnected()
 NS_IMETHODIMP
 PresentationPresentingInfo::NotifyDisconnected(nsresult aReason)
 {
+  PRES_DEBUG("%s:id[%s], reason[%x], role[%d]\n", __func__,
+             NS_ConvertUTF16toUTF8(mSessionId).get(), aReason, mRole);
+
   MOZ_ASSERT(NS_IsMainThread());
 
   if (mTransportType == nsIPresentationChannelDescription::TYPE_DATACHANNEL) {
@@ -1366,9 +1488,8 @@ PresentationPresentingInfo::ResolvedCallback(JSContext* aCx,
     return;
   }
 
-  nsCOMPtr<nsIFrameLoader> frameLoader;
-  rv = owner->GetFrameLoader(getter_AddRefs(frameLoader));
-  if (NS_WARN_IF(NS_FAILED(rv))) {
+  nsCOMPtr<nsIFrameLoader> frameLoader = owner->GetFrameLoader();
+  if (NS_WARN_IF(!frameLoader)) {
     ReplyError(NS_ERROR_DOM_OPERATION_ERR);
     return;
   }

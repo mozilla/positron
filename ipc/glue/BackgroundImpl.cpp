@@ -20,7 +20,7 @@
 #include "mozilla/DebugOnly.h"
 #include "mozilla/Services.h"
 #include "mozilla/StaticPtr.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 #include "mozilla/dom/ContentChild.h"
 #include "mozilla/dom/ContentParent.h"
 #include "mozilla/dom/File.h"
@@ -1761,8 +1761,10 @@ ChildImpl::SynchronouslyCreateForCurrentThread()
 void
 ChildImpl::CloseForCurrentThread()
 {
-  MOZ_ASSERT(sThreadLocalIndex != kBadThreadLocalIndex,
-             "BackgroundChild::Startup() was never called!");
+  if (sThreadLocalIndex == kBadThreadLocalIndex) {
+    return;
+  }
+
   auto threadLocalInfo =
     static_cast<ThreadLocalInfo*>(PR_GetThreadPrivate(sThreadLocalIndex));
 

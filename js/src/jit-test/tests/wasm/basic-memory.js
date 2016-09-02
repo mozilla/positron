@@ -130,8 +130,7 @@ for (let [type, ext] of [
     ['f64', ''],
 ])
 {
-    if (type !== 'i64' || hasI64())
-        assertErrorMessage(() => badLoadModule(type, ext), TypeError, /can't touch memory/);
+    assertErrorMessage(() => badLoadModule(type, ext), TypeError, /can't touch memory/);
 }
 
 for (let [type, ext] of [
@@ -146,8 +145,7 @@ for (let [type, ext] of [
     ['f64', ''],
 ])
 {
-    if (type !== 'i64' || hasI64())
-        assertErrorMessage(() => badStoreModule(type, ext), TypeError, /can't touch memory/);
+    assertErrorMessage(() => badStoreModule(type, ext), TypeError, /can't touch memory/);
 }
 
 for (var ind = 0; ind < 2; ind++) {
@@ -254,6 +252,20 @@ for (var ind = 0; ind < 2; ind++) {
         testLoadOOB('f64', '', index, offset, align);
     }
 
+    // Ensure out of bounds when the offset is greater than the immediate range.
+    index = 0;
+    for (let offset of [0x80000000, 0xfffffffe, 0xffffffff]) {
+        testLoadOOB('i32', '8_s', index, offset, 1);
+        testLoadOOB('i32', '16_s', index, offset, 1);
+        testLoadOOB('i32', '16_s', index, offset, 2);
+        testLoadOOB('i32', '', index, offset, 1);
+        testLoadOOB('i32', '', index, offset, 4);
+        testLoadOOB('f32', '', index, offset, 1);
+        testLoadOOB('f32', '', index, offset, 4);
+        testLoadOOB('f64', '', index, offset, 1);
+        testLoadOOB('f64', '', index, offset, 8);
+    }
+
     assertErrorMessage(() => wasmEvalText('(module (memory 1) (func (f64.store offset=0 (i32.const 0) (i32.const 0))))'), TypeError, mismatchError("i32", "f64"));
     assertErrorMessage(() => wasmEvalText('(module (memory 1) (func (f64.store offset=0 (i32.const 0) (f32.const 0))))'), TypeError, mismatchError("f32", "f64"));
 
@@ -308,7 +320,7 @@ for (var ind = 0; ind < 2; ind++) {
 
     testRegisters();
 
-    if (hasI64()) {
+    {
         setJitCompilerOption('wasm.test-mode', 1);
 
         testLoad('i64', '', 0, 0, 0, '0x0706050403020100');

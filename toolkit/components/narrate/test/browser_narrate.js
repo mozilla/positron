@@ -64,12 +64,25 @@ add_task(function* testNarrate() {
 
     NarrateTestUtils.isStartedState(content, ok);
 
+    paragraph = speechinfo.paragraph;
+    $(NarrateTestUtils.STOP).click();
+    yield ContentTaskUtils.waitForCondition(
+      () => !$(NarrateTestUtils.STOP), "transitioned to stopped state");
+    NarrateTestUtils.isStoppedState(content, ok);
+
+    promiseEvent = ContentTaskUtils.waitForEvent(content, "paragraphstart");
+    $(NarrateTestUtils.START).click();
+    speechinfo = (yield promiseEvent).detail;
+    is(speechinfo.paragraph, paragraph, "read same paragraph again");
+
+    NarrateTestUtils.isStartedState(content, ok);
+
     let eventUtils = NarrateTestUtils.getEventUtils(content);
 
     promiseEvent = ContentTaskUtils.waitForEvent(content, "paragraphstart");
     prefChanged = NarrateTestUtils.waitForPrefChange("narrate.rate");
     $(NarrateTestUtils.RATE).focus();
-    eventUtils.sendKey("PAGE_UP", content);
+    eventUtils.sendKey("UP", content);
     let newspeechinfo = (yield promiseEvent).detail;
     is(newspeechinfo.paragraph, speechinfo.paragraph, "same paragraph");
     isnot(newspeechinfo.rate, speechinfo.rate, "rate changed");

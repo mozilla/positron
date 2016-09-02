@@ -24,7 +24,6 @@ import org.mozilla.gecko.favicons.LoadFaviconTask;
 import org.mozilla.gecko.favicons.OnFaviconLoadedListener;
 import org.mozilla.gecko.favicons.RemoteFavicon;
 import org.mozilla.gecko.gfx.BitmapUtils;
-import org.mozilla.gecko.gfx.Layer;
 import org.mozilla.gecko.reader.ReaderModeUtils;
 import org.mozilla.gecko.reader.ReadingListHelper;
 import org.mozilla.gecko.toolbar.BrowserToolbar.TabEditingState;
@@ -75,8 +74,6 @@ public class Tab {
     private ZoomConstraints mZoomConstraints;
     private boolean mIsRTL;
     private final ArrayList<View> mPluginViews;
-    private final HashMap<Object, Layer> mPluginLayers;
-    private int mBackgroundColor;
     private int mState;
     private Bitmap mThumbnailBitmap;
     private boolean mDesktopMode;
@@ -118,8 +115,6 @@ public class Tab {
     public static final int LOAD_PROGRESS_LOADED = 80;
     public static final int LOAD_PROGRESS_STOP = 100;
 
-    private static final int DEFAULT_BACKGROUND_COLOR = Color.WHITE;
-
     public enum ErrorType {
         CERT_ERROR,  // Pages with certificate problems
         BLOCKED,     // Pages blocked for phishing or malware warnings
@@ -142,14 +137,8 @@ public class Tab {
         mContentType = "";
         mZoomConstraints = new ZoomConstraints(false);
         mPluginViews = new ArrayList<View>();
-        mPluginLayers = new HashMap<Object, Layer>();
         mState = shouldShowProgress(url) ? STATE_LOADING : STATE_SUCCESS;
         mLoadProgress = LOAD_PROGRESS_INIT;
-
-        // At startup, the background is set to a color specified by LayerView
-        // when the LayerView is created. Shortly after, this background color
-        // will be used before the tab's content is shown.
-        mBackgroundColor = DEFAULT_BACKGROUND_COLOR;
 
         updateBookmark();
     }
@@ -701,7 +690,6 @@ public class Tab {
         setSiteLogins(null);
         setZoomConstraints(new ZoomConstraints(true));
         setHasTouchListeners(false);
-        setBackgroundColor(DEFAULT_BACKGROUND_COLOR);
         setErrorType(ErrorType.NONE);
         setLoadProgressIfLoading(LOAD_PROGRESS_LOCATION_CHANGE);
 
@@ -804,62 +792,6 @@ public class Tab {
 
     public View[] getPluginViews() {
         return mPluginViews.toArray(new View[mPluginViews.size()]);
-    }
-
-    public void addPluginLayer(Object surfaceOrView, Layer layer) {
-        synchronized (mPluginLayers) {
-            mPluginLayers.put(surfaceOrView, layer);
-        }
-    }
-
-    public Layer getPluginLayer(Object surfaceOrView) {
-        synchronized (mPluginLayers) {
-            return mPluginLayers.get(surfaceOrView);
-        }
-    }
-
-    public Collection<Layer> getPluginLayers() {
-        synchronized (mPluginLayers) {
-            return new ArrayList<Layer>(mPluginLayers.values());
-        }
-    }
-
-    public Layer removePluginLayer(Object surfaceOrView) {
-        synchronized (mPluginLayers) {
-            return mPluginLayers.remove(surfaceOrView);
-        }
-    }
-
-    public int getBackgroundColor() {
-        return mBackgroundColor;
-    }
-
-    /** Sets a new color for the background. */
-    public void setBackgroundColor(int color) {
-        mBackgroundColor = color;
-    }
-
-    /** Parses and sets a new color for the background. */
-    public void setBackgroundColor(String newColor) {
-        setBackgroundColor(parseColorFromGecko(newColor));
-    }
-
-    // Parses a color from an RGB triple of the form "rgb([0-9]+, [0-9]+, [0-9]+)". If the color
-    // cannot be parsed, returns white.
-    private static int parseColorFromGecko(String string) {
-        if (sColorPattern == null) {
-            sColorPattern = Pattern.compile("rgb\\((\\d+),\\s*(\\d+),\\s*(\\d+)\\)");
-        }
-
-        Matcher matcher = sColorPattern.matcher(string);
-        if (!matcher.matches()) {
-            return Color.WHITE;
-        }
-
-        int r = Integer.parseInt(matcher.group(1));
-        int g = Integer.parseInt(matcher.group(2));
-        int b = Integer.parseInt(matcher.group(3));
-        return Color.rgb(r, g, b);
     }
 
     public void setDesktopMode(boolean enabled) {

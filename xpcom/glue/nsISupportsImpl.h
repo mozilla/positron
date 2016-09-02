@@ -20,9 +20,7 @@
 
 #include "nsDebug.h"
 #include "nsXPCOM.h"
-#ifndef XPCOM_GLUE
 #include "mozilla/Atomics.h"
-#endif
 #include "mozilla/Attributes.h"
 #include "mozilla/Assertions.h"
 #include "mozilla/Compiler.h"
@@ -331,7 +329,6 @@ private:
   nsrefcnt mValue;
 };
 
-#ifndef XPCOM_GLUE
 namespace mozilla {
 class ThreadSafeAutoRefCnt
 {
@@ -360,7 +357,6 @@ private:
   Atomic<nsrefcnt> mValue;
 };
 } // namespace mozilla
-#endif
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -492,9 +488,11 @@ public:
  * given non-XPCOM <i>_class</i>.
  *
  * @param _class The name of the class implementing the method
+ * @param _destroy A statement that is executed when the object's
+ *   refcount drops to zero.
  * @param optional override Mark the AddRef & Release methods as overrides.
  */
-#define NS_INLINE_DECL_REFCOUNTING(_class, ...)                               \
+#define NS_INLINE_DECL_REFCOUNTING_WITH_DESTROY(_class, _destroy, ...)        \
 public:                                                                       \
   NS_METHOD_(MozExternalRefCountType) AddRef(void) __VA_ARGS__ {              \
     MOZ_ASSERT_TYPE_OK_FOR_REFCOUNTING(_class)                                \
@@ -511,7 +509,7 @@ public:                                                                       \
     NS_LOG_RELEASE(this, mRefCnt, #_class);                                   \
     if (mRefCnt == 0) {                                                       \
       mRefCnt = 1; /* stabilize */                                            \
-      delete this;                                                            \
+      _destroy;                                                               \
       return 0;                                                               \
     }                                                                         \
     return mRefCnt;                                                           \
@@ -521,6 +519,16 @@ protected:                                                                    \
   nsAutoRefCnt mRefCnt;                                                       \
   NS_DECL_OWNINGTHREAD                                                        \
 public:
+
+/**
+ * Use this macro to declare and implement the AddRef & Release methods for a
+ * given non-XPCOM <i>_class</i>.
+ *
+ * @param _class The name of the class implementing the method
+ * @param optional override Mark the AddRef & Release methods as overrides.
+ */
+#define NS_INLINE_DECL_REFCOUNTING(_class, ...)                               \
+  NS_INLINE_DECL_REFCOUNTING_WITH_DESTROY(_class, delete(this), __VA_ARGS__)
 
 #define NS_INLINE_DECL_THREADSAFE_REFCOUNTING_META(_class, _decl, ...)        \
 public:                                                                       \

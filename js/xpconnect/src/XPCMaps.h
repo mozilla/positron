@@ -417,7 +417,7 @@ public:
     {
         MOZ_ASSERT(set, "bad param");
 
-        XPCNativeSetKey key(set, nullptr, 0);
+        XPCNativeSetKey key(set);
         mTable.Remove(&key);
     }
 
@@ -497,6 +497,8 @@ class XPCNativeScriptableSharedMap
 public:
     struct Entry : public PLDHashEntryHdr
     {
+        // This is a weak reference that will be cleared
+        // in the XPCNativeScriptableShared destructor.
         XPCNativeScriptableShared* key;
 
         static PLDHashNumber
@@ -514,7 +516,7 @@ public:
 
     inline uint32_t Count() { return mTable.EntryCount(); }
 
-    PLDHashTable::Iterator Iter() { return mTable.Iter(); }
+    void Remove(XPCNativeScriptableShared* key) { mTable.Remove(key); }
 
 private:
     XPCNativeScriptableSharedMap();    // no implementation

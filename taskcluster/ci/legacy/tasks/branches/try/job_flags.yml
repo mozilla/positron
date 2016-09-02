@@ -53,8 +53,6 @@ builds:
       - sm-rootanalysis
       - sm-package
       - sm-tsan
-      - sm-asan
-      - sm-msan
     types:
       opt:
         task: tasks/builds/opt_linux64.yml
@@ -114,15 +112,31 @@ builds:
       - Linux64 ASan
     types:
       opt:
-        task: tasks/builds/opt_linux64-asan.yml
+        task: tasks/builds/opt_linux64_asan.yml
       debug:
-        task: tasks/builds/dbg_linux64-asan.yml
+        task: tasks/builds/dbg_linux64_asan.yml
   macosx64-st-an:
     platforms:
       - MacOSX64 Static Analysis
     types:
       opt:
         task: tasks/builds/opt_macosx64_st-an.yml
+  aries-eng:
+    platforms:
+      - b2g
+    types:
+      opt:
+        task: tasks/builds/b2g_aries_eng.yml
+      debug:
+        task: tasks/builds/b2g_aries_debug.yml
+  nexus-5l-eng:
+    platforms:
+      - b2g
+    types:
+      opt:
+        task: tasks/builds/b2g_nexus_5l_eng.yml
+      debug:
+        task: tasks/builds/b2g_nexus_5l_debug.yml
   sm-tsan:
     platforms:
       - Linux64
@@ -133,32 +147,11 @@ builds:
       file_patterns:
        - js/public/**
        - js/src/**
-  sm-asan:
-    platforms:
-      - Linux64
-    types:
-      opt:
-        task: tasks/builds/sm_asan.yml
-    when:
-      file_patterns:
-       - js/public/**
-       - js/src/**
-  sm-msan:
-    platforms:
-      - Linux64
-    types:
-      opt:
-        task: tasks/builds/sm_msan.yml
-    when:
-      file_patterns:
-       - js/public/**
-       - js/src/**
 
 post-build:
   upload-symbols:
     allowed_build_tasks:
       - tasks/builds/opt_linux64.yml
-      - tasks/builds/opt_linux64_st-an.yml
       - tasks/builds/dbg_linux64.yml
       - tasks/builds/android_api_15.yml
     task: tasks/post-builds/upload_symbols.yml

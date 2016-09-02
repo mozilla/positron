@@ -47,7 +47,7 @@ namespace jit {
     _(Phi)                                                                  \
     _(Beta)                                                                 \
     _(OsrValue)                                                             \
-    _(OsrScopeChain)                                                        \
+    _(OsrEnvironmentChain)                                                  \
     _(OsrReturnValue)                                                       \
     _(OsrArgumentsObject)                                                   \
     _(ReturnFromCtor)                                                       \
@@ -85,6 +85,7 @@ namespace jit {
     _(Lsh)                                                                  \
     _(Rsh)                                                                  \
     _(Ursh)                                                                 \
+    _(SignExtend)                                                           \
     _(MinMax)                                                               \
     _(Abs)                                                                  \
     _(Clz)                                                                  \
@@ -133,7 +134,7 @@ namespace jit {
     _(NewTypedArrayDynamicLength)                                           \
     _(NewObject)                                                            \
     _(NewTypedObject)                                                       \
-    _(NewDeclEnvObject)                                                     \
+    _(NewNamedLambdaObject)                                                 \
     _(NewCallObject)                                                        \
     _(NewSingletonCallObject)                                               \
     _(NewStringObject)                                                      \
@@ -302,6 +303,7 @@ namespace jit {
     _(NewTarget)                                                            \
     _(ArrowNewTarget)                                                       \
     _(CheckReturn)                                                          \
+    _(CheckIsObj)                                                             \
     _(CheckObjCoercible)                                                    \
     _(DebugCheckSelfHosted)
 

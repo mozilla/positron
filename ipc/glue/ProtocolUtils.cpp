@@ -318,7 +318,7 @@ bool DuplicateHandle(HANDLE aSourceHandle,
                                                 FALSE,
                                                 aTargetProcessId));
   if (!targetProcess) {
-#ifdef MOZ_CRASH_REPORTER
+#ifdef MOZ_CRASHREPORTER
     CrashReporter::AnnotateCrashReport(
       NS_LITERAL_CSTRING("IPCTransportFailureReason"),
       NS_LITERAL_CSTRING("Failed to open target process."));
@@ -347,6 +347,16 @@ AnnotateSystemError()
       NS_LITERAL_CSTRING("IPCSystemError"),
       nsPrintfCString("%lld", error));
   }
+}
+#endif
+
+#if defined(MOZ_CRASHREPORTER) && defined(XP_MACOSX)
+void
+AnnotateCrashReportWithErrno(const char* tag, int error)
+{
+  CrashReporter::AnnotateCrashReport(
+    nsCString(tag),
+    nsPrintfCString("%d", error));
 }
 #endif
 

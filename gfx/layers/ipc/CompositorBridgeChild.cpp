@@ -12,6 +12,10 @@
 #include "base/message_loop.h"          // for MessageLoop
 #include "base/task.h"                  // for NewRunnableMethod, etc
 #include "gfxPrefs.h"
+#include "mozilla/layers/ImageBridgeChild.h"
+#include "mozilla/layers/APZChild.h"
+#include "mozilla/layers/IAPZCTreeManager.h"
+#include "mozilla/layers/APZCTreeManagerChild.h"
 #include "mozilla/layers/LayerTransactionChild.h"
 #include "mozilla/layers/PLayerTransactionChild.h"
 #include "mozilla/layers/TextureClient.h"// for TextureClient
@@ -27,10 +31,9 @@
 #include "nsXULAppAPI.h"                // for XRE_GetIOMessageLoop, etc
 #include "FrameLayerBuilder.h"
 #include "mozilla/dom/TabChild.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 #include "mozilla/DebugOnly.h"
 #if defined(XP_WIN)
-#include "mozilla/layers/ImageBridgeChild.h"
 #include "WinUtils.h"
 #endif
 #include "mozilla/widget/CompositorWidget.h"
@@ -932,6 +935,8 @@ CompositorBridgeChild::GetTexturePool(LayersBackend aBackend,
       new TextureClientPool(aBackend, aFormat,
                             gfx::gfxVars::TileSize(),
                             aFlags,
+                            gfxPrefs::LayersTilePoolShrinkTimeout(),
+                            gfxPrefs::LayersTilePoolClearTimeout(),
                             gfxPrefs::LayersTileInitialPoolSize(),
                             gfxPrefs::LayersTilePoolUnusedSize(),
                             this));
@@ -1003,6 +1008,56 @@ CompositorBridgeChild::DeallocPCompositorWidgetChild(PCompositorWidgetChild* aAc
 #else
   return false;
 #endif
+}
+
+RefPtr<IAPZCTreeManager>
+CompositorBridgeChild::GetAPZCTreeManager(uint64_t aLayerTreeId)
+{
+  bool apzEnabled = false;
+  Unused << SendAsyncPanZoomEnabled(aLayerTreeId, &apzEnabled);
+
+  if (!apzEnabled) {
+    return nullptr;
+  }
+
+  PAPZCTreeManagerChild* child = SendPAPZCTreeManagerConstructor(aLayerTreeId);
+  if (!child) {
+    return nullptr;
+  }
+  APZCTreeManagerChild* parent = static_cast<APZCTreeManagerChild*>(child);
+
+  return RefPtr<IAPZCTreeManager>(parent);
+}
+
+PAPZCTreeManagerChild*
+CompositorBridgeChild::AllocPAPZCTreeManagerChild(const uint64_t& aLayersId)
+{
+  APZCTreeManagerChild* child = new APZCTreeManagerChild();
+  child->AddRef();
+  return child;
+}
+
+PAPZChild*
+CompositorBridgeChild::AllocPAPZChild(const uint64_t& aLayersId)
+{
+  // We send the constructor manually.
+  MOZ_CRASH("Should not be called");
+  return nullptr;
+}
+
+bool
+CompositorBridgeChild::DeallocPAPZChild(PAPZChild* aActor)
+{
+  delete aActor;
+  return true;
+}
+
+bool
+CompositorBridgeChild::DeallocPAPZCTreeManagerChild(PAPZCTreeManagerChild* aActor)
+{
+  APZCTreeManagerChild* parent = static_cast<APZCTreeManagerChild*>(aActor);
+  parent->Release();
+  return true;
 }
 
 void

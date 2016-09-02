@@ -1062,7 +1062,8 @@ static const JSClassOps ExpandoObjectClassOps = {
 
 const JSClass ExpandoObjectClass = {
     "XrayExpandoObject",
-    JSCLASS_HAS_RESERVED_SLOTS(JSSLOT_EXPANDO_COUNT),
+    JSCLASS_HAS_RESERVED_SLOTS(JSSLOT_EXPANDO_COUNT) |
+    JSCLASS_FOREGROUND_FINALIZE,
     &ExpandoObjectClassOps
 };
 
@@ -2280,6 +2281,13 @@ XrayWrapper<Base, Traits>::construct(JSContext* cx, HandleObject wrapper, const 
     assertEnteredPolicy(cx, wrapper, JSID_VOID, BaseProxyHandler::CALL);
     // Hard cast the singleton since SecurityWrapper doesn't have one.
     return Traits::construct(cx, wrapper, args, Base::singleton);
+}
+
+template <typename Base, typename Traits>
+bool
+XrayWrapper<Base, Traits>::getBuiltinClass(JSContext* cx, JS::HandleObject wrapper, js::ESClass* cls) const
+{
+    return Traits::getBuiltinClass(cx, wrapper, Base::singleton, cls);
 }
 
 template <typename Base, typename Traits>

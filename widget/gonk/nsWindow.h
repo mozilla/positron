@@ -48,11 +48,11 @@ public:
     static void DispatchTouchInput(mozilla::MultiTouchInput& aInput);
 
     using nsBaseWidget::Create; // for Create signature not overridden here
-    NS_IMETHOD Create(nsIWidget* aParent,
-                      void* aNativeParent,
-                      const LayoutDeviceIntRect& aRect,
-                      nsWidgetInitData* aInitData) override;
-    NS_IMETHOD Destroy(void);
+    virtual MOZ_MUST_USE nsresult Create(nsIWidget* aParent,
+                                         void* aNativeParent,
+                                         const LayoutDeviceIntRect& aRect,
+                                         nsWidgetInitData* aInitData) override;
+    virtual void Destroy();
 
     NS_IMETHOD Show(bool aState);
     virtual bool IsVisible() const;
@@ -102,7 +102,8 @@ public:
     }
     NS_IMETHOD ReparentNativeWidget(nsIWidget* aNewParent);
 
-    NS_IMETHOD MakeFullScreen(bool aFullScreen, nsIScreen* aTargetScreen = nullptr) /*override*/;
+    virtual nsresult MakeFullScreen(
+        bool aFullScreen, nsIScreen* aTargetScreen = nullptr) override;
 
     virtual already_AddRefed<mozilla::gfx::DrawTarget>
         StartRemoteDrawing() override;

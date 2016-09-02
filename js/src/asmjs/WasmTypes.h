@@ -25,6 +25,7 @@
 #include "mozilla/Move.h"
 #include "mozilla/RefCounted.h"
 #include "mozilla/RefPtr.h"
+#include "mozilla/Unused.h"
 
 #include "NamespaceImports.h"
 
@@ -78,6 +79,7 @@ using mozilla::PodCopy;
 using mozilla::PodEqual;
 using mozilla::RefCounted;
 using mozilla::Some;
+using mozilla::Unused;
 
 typedef Vector<uint32_t, 0, SystemAllocPolicy> Uint32Vector;
 
@@ -1025,6 +1027,8 @@ struct Assumptions
     // must be called to complete initialization.
     Assumptions();
     bool initBuildIdFromContext(ExclusiveContext* cx);
+
+    bool clone(const Assumptions& other);
 
     bool operator==(const Assumptions& rhs) const;
     bool operator!=(const Assumptions& rhs) const { return !(*this == rhs); }

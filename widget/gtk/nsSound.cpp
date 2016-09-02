@@ -23,7 +23,7 @@
 #include "nsDirectoryServiceDefs.h"
 #include "mozilla/FileUtils.h"
 #include "mozilla/Services.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 #include "nsIStringBundle.h"
 #include "nsIXULAppInfo.h"
 #include "nsContentUtils.h"
@@ -311,13 +311,13 @@ NS_IMETHODIMP nsSound::OnStreamComplete(nsIStreamLoader *aLoader,
     return NS_OK;
 }
 
-NS_METHOD nsSound::Beep()
+NS_IMETHODIMP nsSound::Beep()
 {
     ::gdk_beep();
     return NS_OK;
 }
 
-NS_METHOD nsSound::Play(nsIURL *aURL)
+NS_IMETHODIMP nsSound::Play(nsIURL *aURL)
 {
     if (!mInited)
         Init();

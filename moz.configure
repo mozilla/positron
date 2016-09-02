@@ -99,10 +99,42 @@ include_when('build/moz.configure/memory.configure',
              when='--enable-compile-environment')
 include_when('build/moz.configure/headers.configure',
              when='--enable-compile-environment')
+include_when('build/moz.configure/warnings.configure',
+             when='--enable-compile-environment')
 
-@depends('--help')
+
+@depends(building_js, '--help')
+def ctypes_default(building_js, _):
+    return not building_js
+
+js_option('--enable-ctypes', help='Enable js-ctypes',
+          default=ctypes_default)
+
+build_ctypes = depends_if('--enable-ctypes')(lambda _: True)
+
+set_config('BUILD_CTYPES', build_ctypes)
+set_define('BUILD_CTYPES', build_ctypes)
+add_old_configure_assignment('BUILD_CTYPES', build_ctypes)
+
+@depends(build_ctypes, building_js)
+def js_has_ctypes(ctypes, js):
+    if ctypes and js:
+        return True
+
+set_config('JS_HAS_CTYPES', js_has_ctypes)
+set_define('JS_HAS_CTYPES', js_has_ctypes)
+add_old_configure_assignment('JS_HAS_CTYPES', js_has_ctypes)
+
+@depends('--enable-ctypes', '--enable-compile-environment', '--help')
+def ctypes_and_compile_environment(ctypes, compile_environment, _):
+    return ctypes and compile_environment
+
+include_when('build/moz.configure/ffi.configure',
+             when=ctypes_and_compile_environment)
+
+@dependable
 @imports(_from='mozbuild.backend', _import='backends')
-def build_backends_choices(help):
+def build_backends_choices():
     return tuple(backends)
 
 
@@ -243,15 +275,32 @@ def check_for_hunspell(value, compile_env):
     return value and compile_env
 
 system_hunspell = pkg_check_modules('MOZ_HUNSPELL', 'hunspell',
-                                    check_for_hunspell)
+                                    when=check_for_hunspell)
 
 set_config('MOZ_SYSTEM_HUNSPELL', system_hunspell)
 
 
 @depends(target)
+@imports('os')
 def makensis_progs(target):
-    if target.kernel == 'WINNT':
-        return ('makensis-3.0b3.exe', 'makensis-3.0b1.exe', 'makensis.exe', 'makensis')
+    if target.kernel != 'WINNT':
+        return
+
+    candidates = [
+        'makensis-3.0b3.exe',
+        'makensis-3.0b1.exe',
+        'makensis.exe',
+        'makensis',
+    ]
+
+    # Look for nsis installed by msys environment. But only the 32-bit version.
+    # We use an absolute path and insert as the first entry so it is preferred
+    # over a 64-bit exe that may be in PATH.
+    if 'MSYSTEM_PREFIX' in os.environ:
+        prefix = os.path.dirname(os.environ['MSYSTEM_PREFIX'])
+        candidates.insert(0, os.path.join(prefix, 'mingw32', 'bin', 'makensis.exe'))
+
+    return tuple(candidates)
 
 nsis = check_prog('MAKENSISU', makensis_progs)
 
@@ -275,6 +324,16 @@ def nsis_version(nsis):
                               % nsis_min_version)
 
     return ver
+
+# And that makensis is 32-bit.
+@depends_if(nsis)
+@checking('for 32-bit NSIS')
+def nsis_binary_type(nsis):
+    bin_type = windows_binary_type(nsis)
+    if bin_type != 'win32':
+        raise FatalCheckError('%s is not a 32-bit Windows application' % nsis)
+
+    return 'yes'
 
 
 # Fallthrough to autoconf-based configure

@@ -185,7 +185,7 @@
      *                     that is copied.  See stream-utils.js.
      */
     startBulkSend: function (header) {
-      this.emit("startBulkSend", header);
+      this.emit("startbulksend", header);
 
       let packet = new BulkPacket(this);
       packet.header = header;
@@ -201,7 +201,7 @@
      *        closing the transport (likely because a stream closed or failed).
      */
     close: function (reason) {
-      this.emit("onClosed", reason);
+      this.emit("close", reason);
 
       this.active = false;
       this._input.close();
@@ -479,7 +479,7 @@
       DevToolsUtils.executeSoon(DevToolsUtils.makeInfallible(() => {
       // Ensure the transport is still alive by the time this runs.
         if (this.active) {
-          this.emit("onPacket", object);
+          this.emit("packet", object);
           this.hooks.onPacket(object);
         }
       }, "DebuggerTransport instance's this.hooks.onPacket"));
@@ -495,7 +495,7 @@
       DevToolsUtils.executeSoon(DevToolsUtils.makeInfallible(() => {
       // Ensure the transport is still alive by the time this runs.
         if (this.active) {
-          this.emit("onBulkPacket", ...args);
+          this.emit("bulkpacket", ...args);
           this.hooks.onBulkPacket(...args);
         }
       }, "DebuggerTransport instance's this.hooks.onBulkPacket"));
@@ -566,7 +566,7 @@
             dumpn("Received packet " + serial + ": " + JSON.stringify(packet, null, 2));
           }
           if (other.hooks) {
-            other.emit("onPacket", packet);
+            other.emit("packet", packet);
             other.hooks.onPacket(packet);
           }
         }, "LocalDebuggerTransport instance's this.other.hooks.onPacket"));
@@ -583,7 +583,7 @@
      * done with it.
      */
     startBulkSend: function ({actor, type, length}) {
-      this.emit("startBulkSend", {actor, type, length});
+      this.emit("startbulksend", {actor, type, length});
 
       let serial = this._serial.count++;
 
@@ -617,7 +617,7 @@
           done: deferred
         };
 
-        this.other.emit("onBulkPacket", packet);
+        this.other.emit("bulkpacket", packet);
         this.other.hooks.onBulkPacket(packet);
 
         // Await the result of reading from the stream
@@ -699,11 +699,11 @@
   exports.LocalDebuggerTransport = LocalDebuggerTransport;
 
   /**
-   * A transport for the debugging protocol that uses nsIMessageSenders to
+   * A transport for the debugging protocol that uses nsIMessageManagers to
    * exchange packets with servers running in child processes.
    *
-   * In the parent process, |sender| should be the nsIMessageSender for the
-   * child process. In a child process, |sender| should be the child process
+   * In the parent process, |mm| should be the nsIMessageSender for the
+   * child process. In a child process, |mm| should be the child process
    * message manager, which sends packets to the parent.
    *
    * |prefix| is a string included in the message names, to distinguish
@@ -712,10 +712,10 @@
    * This transport exchanges messages named 'debug:<prefix>:packet', where
    * <prefix> is |prefix|, whose data is the protocol packet.
    */
-  function ChildDebuggerTransport(sender, prefix) {
+  function ChildDebuggerTransport(mm, prefix) {
     EventEmitter.decorate(this);
 
-    this._sender = sender;
+    this._mm = mm;
     this._messageName = "debug:" + prefix + ":packet";
   }
 
@@ -729,13 +729,13 @@
 
     hooks: null,
 
-    ready: function () {
-      this._sender.addMessageListener(this._messageName, this);
+    _addListener() {
+      this._mm.addMessageListener(this._messageName, this);
     },
 
-    close: function () {
+    _removeListener() {
       try {
-        this._sender.removeMessageListener(this._messageName, this);
+        this._mm.removeMessageListener(this._messageName, this);
       } catch (e) {
         if (e.result != Cr.NS_ERROR_NULL_POINTER) {
           throw e;
@@ -744,19 +744,27 @@
         // this point with a dead messageManager which only throws errors but does not
         // seem to indicate in any other way that it is dead.
       }
-      this.emit("onClosed");
+    },
+
+    ready: function () {
+      this._addListener();
+    },
+
+    close: function () {
+      this._removeListener();
+      this.emit("close");
       this.hooks.onClosed();
     },
 
     receiveMessage: function ({data}) {
-      this.emit("onPacket", data);
+      this.emit("packet", data);
       this.hooks.onPacket(data);
     },
 
     send: function (packet) {
       this.emit("send", packet);
       try {
-        this._sender.sendAsyncMessage(this._messageName, packet);
+        this._mm.sendAsyncMessage(this._messageName, packet);
       } catch (e) {
         if (e.result != Cr.NS_ERROR_NULL_POINTER) {
           throw e;
@@ -769,7 +777,13 @@
 
     startBulkSend: function () {
       throw new Error("Can't send bulk data to child processes.");
-    }
+    },
+
+    swapBrowser(mm) {
+      this._removeListener();
+      this._mm = mm;
+      this._addListener();
+    },
   };
 
   exports.ChildDebuggerTransport = ChildDebuggerTransport;

@@ -29,6 +29,7 @@
 #include "mozilla/layers/APZCCallbackHelper.h"
 #include "mozilla/layers/APZCTreeManager.h"
 #include "mozilla/layers/APZEventState.h"
+#include "mozilla/layers/ContentProcessController.h"
 #include "mozilla/layers/CompositorBridgeChild.h"
 #include "mozilla/layers/DoubleTapToZoom.h"
 #include "mozilla/layers/ImageBridgeChild.h"
@@ -43,7 +44,7 @@
 #include "mozilla/StaticPtr.h"
 #include "mozilla/TextEvents.h"
 #include "mozilla/TouchEvents.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 #include "mozIApplication.h"
 #include "nsContentUtils.h"
 #include "nsDocShell.h"
@@ -110,6 +111,7 @@
 #include "nsDeviceContext.h"
 #include "nsSandboxFlags.h"
 #include "FrameLayerBuilder.h"
+#include "VRManagerChild.h"
 
 #ifdef NS_PRINTING
 #include "nsIPrintSession.h"
@@ -358,7 +360,7 @@ public:
     }
 
 private:
-    NS_IMETHOD Run()
+    NS_IMETHOD Run() override
     {
         MOZ_ASSERT(NS_IsMainThread());
         MOZ_ASSERT(mInfo);
@@ -389,7 +391,7 @@ private:
     }
 
     NS_IMETHOD
-    Run()
+    Run() override
     {
         MOZ_ASSERT(NS_IsMainThread());
         MOZ_ASSERT(mTabChild);
@@ -669,9 +671,8 @@ TabChild::ContentReceivedInputBlock(const ScrollableLayerGuid& aGuid,
                                     uint64_t aInputBlockId,
                                     bool aPreventDefault) const
 {
-  if (mAPZChild) {
-    mAPZChild->SendContentReceivedInputBlock(aGuid, aInputBlockId,
-                                             aPreventDefault);
+  if (mApzcTreeManager) {
+    mApzcTreeManager->ContentReceivedInputBlock(aInputBlockId, aPreventDefault);
   }
 }
 
@@ -679,8 +680,8 @@ void
 TabChild::SetTargetAPZC(uint64_t aInputBlockId,
                         const nsTArray<ScrollableLayerGuid>& aTargets) const
 {
-  if (mAPZChild) {
-    mAPZChild->SendSetTargetAPZC(aInputBlockId, aTargets);
+  if (mApzcTreeManager) {
+    mApzcTreeManager->SetTargetAPZC(aInputBlockId, aTargets);
   }
 }
 
@@ -688,8 +689,8 @@ void
 TabChild::SetAllowedTouchBehavior(uint64_t aInputBlockId,
                                   const nsTArray<TouchBehaviorFlags>& aTargets) const
 {
-  if (mAPZChild) {
-    mAPZChild->SendSetAllowedTouchBehavior(aInputBlockId, aTargets);
+  if (mApzcTreeManager) {
+    mApzcTreeManager->SetAllowedTouchBehavior(aInputBlockId, aTargets);
   }
 }
 
@@ -705,12 +706,14 @@ TabChild::DoUpdateZoomConstraints(const uint32_t& aPresShellId,
     return true;
   }
 
-  if (!mAPZChild) {
+  if (!mApzcTreeManager) {
     return false;
   }
 
-  return mAPZChild->SendUpdateZoomConstraints(aPresShellId, aViewId,
-                                              aConstraints);
+  ScrollableLayerGuid guid = ScrollableLayerGuid(mLayersId, aPresShellId, aViewId);
+
+  mApzcTreeManager->UpdateZoomConstraints(guid, aConstraints);
+  return true;
 }
 
 nsresult
@@ -741,7 +744,7 @@ TabChild::Init()
     NS_ERROR("couldn't create fake widget");
     return NS_ERROR_FAILURE;
   }
-  mPuppetWidget->Create(
+  mPuppetWidget->InfallibleCreate(
     nullptr, 0,              // no parents
     LayoutDeviceIntRect(0, 0, 0, 0),
     nullptr                  // HandleWidgetEvent
@@ -1487,9 +1490,7 @@ TabChild::ApplyShowInfo(const ShowInfo& aInfo)
       nsCOMPtr<nsILoadContext> context = do_GetInterface(docShell);
       // No need to re-set private browsing mode.
       if (!context->UsePrivateBrowsing()) {
-        bool nonBlank;
-        docShell->GetHasLoadedNonBlankURI(&nonBlank);
-        if (nonBlank) {
+        if (docShell->GetHasLoadedNonBlankURI()) {
           nsContentUtils::ReportToConsoleNonLocalized(
             NS_LITERAL_STRING("We should not switch to Private Browsing after loading a document."),
             nsIScriptError::warningFlag,
@@ -1705,10 +1706,10 @@ TabChild::HandleDoubleTap(const CSSPoint& aPoint, const Modifiers& aModifiers,
   uint32_t presShellId;
   ViewID viewId;
   if (APZCCallbackHelper::GetOrCreateScrollIdentifiers(
-      document->GetDocumentElement(), &presShellId, &viewId) &&
-      mAPZChild) {
-    mAPZChild->SendZoomToRect(presShellId, viewId, zoomToRect,
-                              DEFAULT_BEHAVIOR);
+      document->GetDocumentElement(), &presShellId, &viewId) && mApzcTreeManager) {
+    ScrollableLayerGuid guid(mLayersId, presShellId, viewId);
+
+    mApzcTreeManager->ZoomToRect(guid, zoomToRect, DEFAULT_BEHAVIOR);
   }
 }
 
@@ -1777,8 +1778,11 @@ TabChild::NotifyAPZStateChange(const ViewID& aViewId,
 void
 TabChild::StartScrollbarDrag(const layers::AsyncDragMetrics& aDragMetrics)
 {
-  if (mAPZChild) {
-    mAPZChild->SendStartScrollbarDrag(aDragMetrics);
+  ScrollableLayerGuid guid(mLayersId, aDragMetrics.mPresShellId,
+                           aDragMetrics.mViewId);
+
+  if (mApzcTreeManager) {
+    mApzcTreeManager->StartScrollbarDrag(guid, aDragMetrics);
   }
 }
 
@@ -1788,8 +1792,10 @@ TabChild::ZoomToRect(const uint32_t& aPresShellId,
                      const CSSRect& aRect,
                      const uint32_t& aFlags)
 {
-  if (mAPZChild) {
-    mAPZChild->SendZoomToRect(aPresShellId, aViewId, aRect, aFlags);
+  ScrollableLayerGuid guid(mLayersId, aPresShellId, aViewId);
+
+  if (mApzcTreeManager) {
+    mApzcTreeManager->ZoomToRect(guid, aRect, aFlags);
   }
 }
 
@@ -1930,26 +1936,6 @@ TabChild::RecvMouseWheelEvent(const WidgetWheelEvent& aEvent,
   if (aInputBlockId && aEvent.mFlags.mHandledByAPZ) {
     mAPZEventState->ProcessWheelEvent(localEvent, aGuid, aInputBlockId);
   }
-  return true;
-}
-
-bool
-TabChild::RecvMouseScrollTestEvent(const uint64_t& aLayersId,
-                                   const FrameMetrics::ViewID& aScrollId, const nsString& aEvent)
-{
-  if (aLayersId != mLayersId) {
-    RefPtr<TabParent> browser = TabParent::GetTabParentFromLayersId(aLayersId);
-    if (!browser) {
-      return false;
-    }
-    NS_DispatchToMainThread(NS_NewRunnableFunction(
-      [aLayersId, browser, aScrollId, aEvent] () -> void {
-        Unused << browser->SendMouseScrollTestEvent(aLayersId, aScrollId, aEvent);
-      }));
-    return true;
-  }
-
-  APZCCallbackHelper::NotifyMozMouseScrollEvent(aScrollId, aEvent);
   return true;
 }
 
@@ -2741,6 +2727,7 @@ TabChild::InitRenderingState(const TextureFactoryIdentifier& aTextureFactoryIden
                "PuppetWidget should have shadow manager");
     lf->IdentifyTextureHost(mTextureFactoryIdentifier);
     ImageBridgeChild::IdentifyCompositorTextureHost(mTextureFactoryIdentifier);
+    gfx::VRManagerChild::IdentifyTextureHost(mTextureFactoryIdentifier);
 
     mRemoteFrame = remoteFrame;
     if (aLayersId != 0) {
@@ -2751,6 +2738,8 @@ TabChild::InitRenderingState(const TextureFactoryIdentifier& aTextureFactoryIden
       sTabChildren->Put(aLayersId, this);
       mLayersId = aLayersId;
     }
+
+    mApzcTreeManager = CompositorBridgeChild::Get()->GetAPZCTreeManager(mLayersId);
 
     nsCOMPtr<nsIObserverService> observerService =
         mozilla::services::GetObserverService();

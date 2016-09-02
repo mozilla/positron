@@ -25,7 +25,7 @@
 #include "BasicLayers.h"
 #include "mozilla/gfx/Point.h"
 #include "nsCSSRendering.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 
 using namespace mozilla;
 using namespace mozilla::layers;
@@ -697,6 +697,8 @@ nsSVGIntegrationUtils::PaintFramesWithEffects(const PaintFramesParams& aParams)
 
   const nsStyleSVGReset *svgReset = firstFrame->StyleSVGReset();
   nsTArray<nsSVGMaskFrame *> maskFrames = effectProperties.GetMaskFrames();
+
+#ifdef MOZ_ENABLE_MASK_AS_SHORTHAND
   // For a HTML doc:
   //   According to css-masking spec, always create a mask surface when we
   //   have any item in maskFrame even if all of those items are
@@ -705,10 +707,16 @@ nsSVGIntegrationUtils::PaintFramesWithEffects(const PaintFramesParams& aParams)
   // For a SVG doc:
   //   SVG 1.1 say that  if we fail to resolve a mask, we should draw the
   //   object unmasked.
-  nsIDocument* currentDoc = frame->PresContext()->Document();
-  bool shouldGenerateMaskLayer = currentDoc->IsSVGDocument()
+  bool shouldGenerateMaskLayer = hasSVGLayout
                                  ? maskFrames.Length() == 1 && maskFrames[0]
                                  : maskFrames.Length() > 0;
+#else
+  // Since we do not support image mask so far, we should treat any
+  // unresolvable mask as no mask. Otherwise, any object with a valid image
+  // mask, e.g. url("xxx.png"), will become invisible just because we can not
+  // handle image mask correctly. (See bug 1294171)
+  bool shouldGenerateMaskLayer = maskFrames.Length() == 1 && maskFrames[0];
+#endif
 
   // These are used if we require a temporary surface for a custom blend mode.
   RefPtr<gfxContext> target = &aParams.ctx;

@@ -48,7 +48,7 @@
 #include "mozilla/ipc/BackgroundChild.h"
 #include "mozilla/ipc/PBackgroundChild.h"
 #include "mozilla/ipc/PBackgroundSharedTypes.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 #include "mozilla/EnumSet.h"
 
 #include "nsContentPolicyUtils.h"
@@ -201,7 +201,7 @@ public:
     MOZ_ASSERT(mActor);
   }
 
-  NS_IMETHODIMP Run() override
+  NS_IMETHOD Run() override
   {
     MOZ_ASSERT(mActor);
     mActor->SendShutdown();
@@ -654,8 +654,8 @@ public:
     : mWindow(aWindow), mPromise(aPromise)
   {}
 
-  NS_IMETHODIMP
-  Run()
+  NS_IMETHOD
+  Run() override
   {
     RefPtr<ServiceWorkerManager> swm = ServiceWorkerManager::GetInstance();
 
@@ -696,6 +696,12 @@ public:
     }
 
     for (uint32_t i = 0; i < data->mOrderedScopes.Length(); ++i) {
+      RefPtr<ServiceWorkerRegistrationInfo> info =
+        data->mInfos.GetWeak(data->mOrderedScopes[i]);
+      if (info->mPendingUninstall) {
+        continue;
+      }
+
       NS_ConvertUTF8toUTF16 scope(data->mOrderedScopes[i]);
 
       nsCOMPtr<nsIURI> scopeURI;
@@ -772,8 +778,8 @@ public:
     : mWindow(aWindow), mPromise(aPromise), mDocumentURL(aDocumentURL)
   {}
 
-  NS_IMETHODIMP
-  Run()
+  NS_IMETHOD
+  Run() override
   {
     RefPtr<ServiceWorkerManager> swm = ServiceWorkerManager::GetInstance();
 
@@ -813,7 +819,7 @@ public:
       swm->GetServiceWorkerRegistrationInfo(principal, uri);
 
     if (!registration) {
-      mPromise->MaybeResolve(JS::UndefinedHandleValue);
+      mPromise->MaybeResolveWithUndefined();
       return NS_OK;
     }
 
@@ -872,8 +878,8 @@ public:
     : mWindow(aWindow), mPromise(aPromise)
   {}
 
-  NS_IMETHODIMP
-  Run()
+  NS_IMETHOD
+  Run() override
   {
     RefPtr<ServiceWorkerManager> swm = ServiceWorkerManager::GetInstance();
 
@@ -1304,9 +1310,16 @@ ServiceWorkerManager::WorkerIsIdle(ServiceWorkerInfo* aWorker)
     return;
   }
 
-  if (reg->GetActive() == aWorker) {
-    reg->TryToActivateAsync();
+  if (reg->GetActive() != aWorker) {
+    return;
   }
+
+  if (!reg->IsControllingDocuments() && reg->mPendingUninstall) {
+    RemoveRegistration(reg);
+    return;
+  }
+
+  reg->TryToActivateAsync();
 }
 
 already_AddRefed<ServiceWorkerJobQueue>
@@ -2001,17 +2014,20 @@ void
 ServiceWorkerManager::StopControllingADocument(ServiceWorkerRegistrationInfo* aRegistration)
 {
   aRegistration->StopControllingADocument();
-  if (!aRegistration->IsControllingDocuments()) {
-    if (aRegistration->mPendingUninstall) {
-      RemoveRegistration(aRegistration);
-    } else {
-      // We use to aggressively terminate the worker at this point, but it
-      // caused problems.  There are more uses for a service worker than actively
-      // controlled documents.  We need to let the worker naturally terminate
-      // in case its handling push events, message events, etc.
-      aRegistration->TryToActivateAsync();
-    }
+  if (aRegistration->IsControllingDocuments() || !aRegistration->IsIdle()) {
+    return;
   }
+
+  if (aRegistration->mPendingUninstall) {
+    RemoveRegistration(aRegistration);
+    return;
+  }
+
+  // We use to aggressively terminate the worker at this point, but it
+  // caused problems.  There are more uses for a service worker than actively
+  // controlled documents.  We need to let the worker naturally terminate
+  // in case its handling push events, message events, etc.
+  aRegistration->TryToActivateAsync();
 }
 
 NS_IMETHODIMP

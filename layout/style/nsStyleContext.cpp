@@ -31,6 +31,10 @@
 #include "mozilla/StyleSetHandle.h"
 #include "mozilla/StyleSetHandleInlines.h"
 
+#include "mozilla/ReflowInput.h"
+#include "nsLayoutUtils.h"
+#include "nsCoord.h"
+
 using namespace mozilla;
 
 //----------------------------------------------------------------------
@@ -506,6 +510,7 @@ nsStyleContext::GetUniqueStyleData(const nsStyleStructID& aSID)
       * static_cast<const nsStyle##c_ *>(current));                           \
     break;
 
+  UNIQUE_CASE(Font)
   UNIQUE_CASE(Display)
   UNIQUE_CASE(Text)
   UNIQUE_CASE(TextReset)
@@ -684,7 +689,7 @@ nsStyleContext::SetStyleBits()
     }
   }
 
-  if ((mParent && mParent->HasPseudoElementData()) || mPseudoTag) {
+  if ((mParent && mParent->HasPseudoElementData()) || IsPseudoElement()) {
     mBits |= NS_STYLE_HAS_PSEUDO_ELEMENT_DATA;
   }
 
@@ -704,6 +709,42 @@ nsStyleContext::ApplyStyleFixups(bool aSkipParentDisplayBasedStyleFixup)
 
 #define GET_UNIQUE_STYLE_DATA(name_) \
   static_cast<nsStyle##name_*>(GetUniqueStyleData(eStyleStruct_##name_))
+
+  // CSS Inline Layout Level 3 - 3.5 Sizing Initial Letters:
+  // For an N-line drop initial in a Western script, the cap-height of the
+  // letter needs to be (N – 1) times the line-height, plus the cap-height
+  // of the surrounding text.
+  if (mPseudoTag == nsCSSPseudoElements::firstLetter) {
+    const nsStyleTextReset* textReset = StyleTextReset();
+    if (textReset->mInitialLetterSize != 0.0f) {
+      nsStyleContext* containerSC = mParent;
+      const nsStyleDisplay* containerDisp = containerSC->StyleDisplay();
+      while (containerDisp->mDisplay == NS_STYLE_DISPLAY_CONTENTS) {
+        if (!containerSC->GetParent()) {
+          break;
+        }
+        containerSC = containerSC->GetParent();
+        containerDisp = containerSC->StyleDisplay();
+      }
+      nscoord containerLH =
+        ReflowInput::CalcLineHeight(nullptr, containerSC, NS_AUTOHEIGHT, 1.0f);
+      RefPtr<nsFontMetrics> containerFM =
+        nsLayoutUtils::GetFontMetricsForStyleContext(containerSC);
+      MOZ_ASSERT(containerFM, "Should have fontMetrics!!");
+      nscoord containerCH = containerFM->CapHeight();
+      RefPtr<nsFontMetrics> firstLetterFM =
+        nsLayoutUtils::GetFontMetricsForStyleContext(this);
+      MOZ_ASSERT(firstLetterFM, "Should have fontMetrics!!");
+      nscoord firstLetterCH = firstLetterFM->CapHeight();
+      nsStyleFont* mutableStyleFont = GET_UNIQUE_STYLE_DATA(Font);
+      float invCapHeightRatio =
+        mutableStyleFont->mFont.size / NSCoordToFloat(firstLetterCH);
+      mutableStyleFont->mFont.size =
+        NSToCoordRound(((textReset->mInitialLetterSize - 1) * containerLH +
+                        containerCH) *
+                       invCapHeightRatio);
+    }
+  }
 
   // Change writing mode of text frame for text-combine-upright. We use
   // style structs of the parent to avoid triggering computation before
@@ -1148,7 +1189,10 @@ nsStyleContext::CalcStyleDifferenceInternal(StyleContextLike* aNewContext,
       const nsStyleOutline *thisVisOutline = thisVis->StyleOutline();
       const nsStyleOutline *otherVisOutline = otherVis->StyleOutline();
       bool haveColor;
-      nscolor thisColor, otherColor;
+      // Dummy initialisations to keep Valgrind/Memcheck happy.
+      // See bug 1289098 comment 1.
+      nscolor thisColor = NS_RGBA(0, 0, 0, 0);
+      nscolor otherColor = NS_RGBA(0, 0, 0, 0);
       if (thisVisOutline->GetOutlineInitialColor() !=
             otherVisOutline->GetOutlineInitialColor() ||
           (haveColor = thisVisOutline->GetOutlineColor(thisColor)) !=
@@ -1220,6 +1264,8 @@ nsStyleContext::CalcStyleDifferenceInternal(StyleContextLike* aNewContext,
     }
   }
 
+  MOZ_ASSERT(NS_IsHintSubset(hint, nsChangeHint_AllHints),
+             "Added a new hint without bumping AllHints?");
   return hint & ~nsChangeHint_NeutralChange;
 }
 
@@ -1333,7 +1379,7 @@ void nsStyleContext::List(FILE* out, int32_t aIndent, bool aListDescendants)
 // Overloaded new operator. Initializes the memory to 0 and relies on an arena
 // (which comes from the presShell) to perform the allocation.
 void*
-nsStyleContext::operator new(size_t sz, nsPresContext* aPresContext) CPP_THROW_NEW
+nsStyleContext::operator new(size_t sz, nsPresContext* aPresContext)
 {
   // Check the recycle list first.
   return aPresContext->PresShell()->
@@ -1394,7 +1440,7 @@ nsStyleContext::Arena()
 }
 
 static inline void
-ExtractAnimationValue(nsCSSProperty aProperty,
+ExtractAnimationValue(nsCSSPropertyID aProperty,
                       nsStyleContext* aStyleContext,
                       StyleAnimationValue& aResult)
 {
@@ -1406,7 +1452,7 @@ ExtractAnimationValue(nsCSSProperty aProperty,
 }
 
 static nscolor
-ExtractColor(nsCSSProperty aProperty,
+ExtractColor(nsCSSPropertyID aProperty,
              nsStyleContext *aStyleContext)
 {
   StyleAnimationValue val;
@@ -1416,7 +1462,7 @@ ExtractColor(nsCSSProperty aProperty,
 }
 
 static nscolor
-ExtractColorLenient(nsCSSProperty aProperty,
+ExtractColorLenient(nsCSSPropertyID aProperty,
                     nsStyleContext *aStyleContext)
 {
   StyleAnimationValue val;
@@ -1436,7 +1482,7 @@ struct ColorIndexSet {
 static const ColorIndexSet gVisitedIndices[2] = { { 0, 0 }, { 1, 0 } };
 
 nscolor
-nsStyleContext::GetVisitedDependentColor(nsCSSProperty aProperty)
+nsStyleContext::GetVisitedDependentColor(nsCSSPropertyID aProperty)
 {
   NS_ASSERTION(aProperty == eCSSProperty_color ||
                aProperty == eCSSProperty_background_color ||

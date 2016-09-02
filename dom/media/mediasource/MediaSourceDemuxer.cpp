@@ -29,9 +29,8 @@ MediaSourceDemuxer::MediaSourceDemuxer()
 }
 
 // Due to inaccuracies in determining buffer end
-// frames (Bug 1065207). This value is based on the end of frame
-// default value used in Blink, kDefaultBufferDurationInMs.
-const TimeUnit MediaSourceDemuxer::EOS_FUZZ = media::TimeUnit::FromMicroseconds(125000);
+// frames (Bug 1065207). This value is based on videos seen in the wild.
+const TimeUnit MediaSourceDemuxer::EOS_FUZZ = media::TimeUnit::FromMicroseconds(500000);
 
 RefPtr<MediaSourceDemuxer::InitPromise>
 MediaSourceDemuxer::Init()
@@ -381,14 +380,17 @@ RefPtr<MediaSourceTrackDemuxer::SeekPromise>
 MediaSourceTrackDemuxer::DoSeek(media::TimeUnit aTime)
 {
   TimeIntervals buffered = mManager->Buffered(mType);
-  buffered.SetFuzz(MediaSourceDemuxer::EOS_FUZZ);
+  // Fuzz factor represents a +/- threshold. So when seeking it allows the gap
+  // to be twice as big as the fuzz value. We only want to allow EOS_FUZZ gap.
+  buffered.SetFuzz(MediaSourceDemuxer::EOS_FUZZ / 2);
   TimeUnit seekTime = std::max(aTime - mPreRoll, TimeUnit::FromMicroseconds(0));
 
   if (!buffered.Contains(seekTime)) {
     if (!buffered.Contains(aTime)) {
       // We don't have the data to seek to.
-      return SeekPromise::CreateAndReject(DemuxerFailureReason::WAITING_FOR_DATA,
-                                          __func__);
+      return SeekPromise::CreateAndReject(
+        mManager->IsEnded() ? DemuxerFailureReason::END_OF_STREAM :
+                              DemuxerFailureReason::WAITING_FOR_DATA, __func__);
     }
     // Theorically we should reject the promise with WAITING_FOR_DATA,
     // however, to avoid unwanted regressions we assume that if at this time
@@ -399,7 +401,7 @@ MediaSourceTrackDemuxer::DoSeek(media::TimeUnit aTime)
     MOZ_ASSERT(index != TimeIntervals::NoIndex);
     seekTime = buffered[index].mStart;
   }
-  seekTime = mManager->Seek(mType, seekTime, MediaSourceDemuxer::EOS_FUZZ);
+  seekTime = mManager->Seek(mType, seekTime, MediaSourceDemuxer::EOS_FUZZ / 2);
   bool error;
   RefPtr<MediaRawData> sample =
     mManager->GetSample(mType,

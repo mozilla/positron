@@ -28,7 +28,7 @@
 #include "mozilla/Services.h"
 #include "mozilla/StaticPtr.h"
 #include "mozilla/storage.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 #include "mozilla/UniquePtrExtensions.h"
 #include "mozilla/dom/ContentParent.h"
 #include "mozilla/dom/File.h"
@@ -71,6 +71,7 @@
 #include "nsIEventTarget.h"
 #include "nsIFile.h"
 #include "nsIFileURL.h"
+#include "nsIFileProtocolHandler.h"
 #include "nsIInputStream.h"
 #include "nsIInterfaceRequestor.h"
 #include "nsInterfaceHashtable.h"
@@ -148,11 +149,11 @@ class VersionChangeTransaction;
 
 // If JS_STRUCTURED_CLONE_VERSION changes then we need to update our major
 // schema version.
-static_assert(JS_STRUCTURED_CLONE_VERSION == 6,
+static_assert(JS_STRUCTURED_CLONE_VERSION == 7,
               "Need to update the major schema version.");
 
 // Major schema version. Bump for almost everything.
-const uint32_t kMajorSchemaVersion = 23;
+const uint32_t kMajorSchemaVersion = 24;
 
 // Minor schema version. Should almost always be 0 (maybe bump on release
 // branches if we have to).
@@ -4101,6 +4102,19 @@ UpgradeSchemaFrom22_0To23_0(mozIStorageConnection* aConnection,
 }
 
 nsresult
+UpgradeSchemaFrom23_0To24_0(mozIStorageConnection* aConnection)
+{
+  // The only change between 23 and 24 was a different structured clone format,
+  // but it's backwards-compatible.
+  nsresult rv = aConnection->SetSchemaVersion(MakeSchemaVersion(24, 0));
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  return NS_OK;
+}
+
+nsresult
 GetDatabaseFileURL(nsIFile* aDatabaseFile,
                    PersistenceType aPersistenceType,
                    const nsACString& aGroup,
@@ -4111,8 +4125,22 @@ GetDatabaseFileURL(nsIFile* aDatabaseFile,
   MOZ_ASSERT(aDatabaseFile);
   MOZ_ASSERT(aResult);
 
+  nsresult rv;
+
+  nsCOMPtr<nsIProtocolHandler> protocolHandler(
+    do_GetService(NS_NETWORK_PROTOCOL_CONTRACTID_PREFIX "file", &rv));
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  nsCOMPtr<nsIFileProtocolHandler> fileHandler(
+    do_QueryInterface(protocolHandler, &rv));
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
   nsCOMPtr<nsIURI> uri;
-  nsresult rv = NS_NewFileURI(getter_AddRefs(uri), aDatabaseFile);
+  rv = fileHandler->NewFileURI(aDatabaseFile, getter_AddRefs(uri));
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }
@@ -4592,7 +4620,7 @@ CreateStorageConnection(nsIFile* aDBFile,
       }
     } else  {
       // This logic needs to change next time we change the schema!
-      static_assert(kSQLiteSchemaVersion == int32_t((23 << 4) + 0),
+      static_assert(kSQLiteSchemaVersion == int32_t((24 << 4) + 0),
                     "Upgrade function needed due to schema version increase.");
 
       while (schemaVersion != kSQLiteSchemaVersion) {
@@ -4636,6 +4664,8 @@ CreateStorageConnection(nsIFile* aDBFile,
           rv = UpgradeSchemaFrom21_0To22_0(connection);
         } else if (schemaVersion == MakeSchemaVersion(22, 0)) {
           rv = UpgradeSchemaFrom22_0To23_0(connection, aOrigin);
+        } else if (schemaVersion == MakeSchemaVersion(23, 0)) {
+          rv = UpgradeSchemaFrom23_0To24_0(connection);
         } else {
           IDB_WARNING("Unable to open IndexedDB database, no upgrade path is "
                       "available!");
@@ -12606,12 +12636,16 @@ IdleConnectionRunnable::Run()
 
   if (owningThread) {
     mDatabaseInfo->AssertIsOnConnectionThread();
-    MOZ_ASSERT(mDatabaseInfo->mConnection);
-    mDatabaseInfo->mConnection->DoIdleProcessing(mNeedsCheckpoint);
 
-    MOZ_ALWAYS_SUCCEEDS(
-      owningThread->Dispatch(this, NS_DISPATCH_NORMAL));
-    return NS_OK;
+    // The connection could be null if EnsureConnection() didn't run or was not
+    // successful in TransactionDatabaseOperationBase::RunOnConnectionThread().
+    if (mDatabaseInfo->mConnection) {
+      mDatabaseInfo->mConnection->DoIdleProcessing(mNeedsCheckpoint);
+
+      MOZ_ALWAYS_SUCCEEDS(
+        owningThread->Dispatch(this, NS_DISPATCH_NORMAL));
+      return NS_OK;
+    }
   }
 
   RefPtr<ConnectionPool> connectionPool = mDatabaseInfo->mConnectionPool;
@@ -12650,6 +12684,8 @@ CloseConnectionRunnable::Run()
     nsCOMPtr<nsIEventTarget> owningThread;
     mOwningThread.swap(owningThread);
 
+    // The connection could be null if EnsureConnection() didn't run or was not
+    // successful in TransactionDatabaseOperationBase::RunOnConnectionThread().
     if (mDatabaseInfo->mConnection) {
       mDatabaseInfo->AssertIsOnConnectionThread();
 
@@ -14804,7 +14840,7 @@ TransactionBase::VerifyRequestParams(const ObjectStoreAddPutParams& aParams)
     return false;
   }
 
-  if (NS_WARN_IF(aParams.cloneInfo().data().IsEmpty())) {
+  if (NS_WARN_IF(!aParams.cloneInfo().data().data.Size())) {
     ASSERT_UNLESS_FUZZING();
     return false;
   }
@@ -14819,13 +14855,13 @@ TransactionBase::VerifyRequestParams(const ObjectStoreAddPutParams& aParams)
       return false;
     }
 
-    if (NS_WARN_IF(cloneInfo.data().Length() < sizeof(uint64_t))) {
+    if (NS_WARN_IF(cloneInfo.data().data.Size() < sizeof(uint64_t))) {
       ASSERT_UNLESS_FUZZING();
       return false;
     }
 
     if (NS_WARN_IF(cloneInfo.offsetToKeyProp() >
-                   (cloneInfo.data().Length() - sizeof(uint64_t)))) {
+                   (cloneInfo.data().data.Size() - sizeof(uint64_t)))) {
       ASSERT_UNLESS_FUZZING();
       return false;
     }
@@ -19029,7 +19065,9 @@ DatabaseOperationBase::GetStructuredCloneReadInfoFromBlob(
     return NS_ERROR_FILE_CORRUPTED;
   }
 
-  aInfo->mData.SwapElements(uncompressed);
+  if (!aInfo->mData.WriteBytes(uncompressedBuffer, uncompressed.Length())) {
+    return NS_ERROR_OUT_OF_MEMORY;
+  }
 
   if (!aFileIds.IsVoid()) {
     AutoTArray<int64_t, 10> array;
@@ -25391,6 +25429,13 @@ ObjectStoreAddOrPutRequestOp::DoDatabaseWork(DatabaseConnection* aConnection)
   MOZ_ASSERT(!keyUnset || mMetadata->mCommonMetadata.autoIncrement(),
              "Should have key unless autoIncrement");
 
+  const JSStructuredCloneData& data = mParams.cloneInfo().data().data;
+  size_t cloneDataSize = data.Size();
+  nsCString cloneData;
+  cloneData.SetLength(cloneDataSize);
+  auto iter = data.Iter();
+  data.ReadBytes(iter, cloneData.BeginWriting(), cloneDataSize);
+
   int64_t autoIncrementNum = 0;
 
   if (mMetadata->mCommonMetadata.autoIncrement()) {
@@ -25412,16 +25457,14 @@ ObjectStoreAddOrPutRequestOp::DoDatabaseWork(DatabaseConnection* aConnection)
     if (keyUnset && keyPath.IsValid()) {
       const SerializedStructuredCloneWriteInfo& cloneInfo = mParams.cloneInfo();
       MOZ_ASSERT(cloneInfo.offsetToKeyProp());
-      MOZ_ASSERT(cloneInfo.data().Length() > sizeof(uint64_t));
+      MOZ_ASSERT(cloneDataSize > sizeof(uint64_t));
       MOZ_ASSERT(cloneInfo.offsetToKeyProp() <=
-                 (cloneInfo.data().Length() - sizeof(uint64_t)));
+                 (cloneDataSize - sizeof(uint64_t)));
 
       // Special case where someone put an object into an autoIncrement'ing
       // objectStore with no key in its keyPath set. We needed to figure out
       // which row id we would get above before we could set that properly.
-      uint8_t* keyPropPointer =
-        const_cast<uint8_t*>(cloneInfo.data().Elements() +
-                             cloneInfo.offsetToKeyProp());
+      char* keyPropPointer = cloneData.BeginWriting() + cloneInfo.offsetToKeyProp();
       uint64_t keyPropValue =
         ReinterpretDoubleAsUInt64(static_cast<double>(autoIncrementNum));
 
@@ -25432,9 +25475,8 @@ ObjectStoreAddOrPutRequestOp::DoDatabaseWork(DatabaseConnection* aConnection)
   key.BindToStatement(stmt, NS_LITERAL_CSTRING("key"));
 
   // Compress the bytes before adding into the database.
-  const char* uncompressed =
-    reinterpret_cast<const char*>(mParams.cloneInfo().data().Elements());
-  size_t uncompressedLength = mParams.cloneInfo().data().Length();
+  const char* uncompressed = cloneData.BeginReading();
+  size_t uncompressedLength = cloneDataSize;
 
   // We don't have a smart pointer class that calls free, so we need to
   // manage | compressed | manually.
@@ -25766,7 +25808,7 @@ ObjectStoreGetRequestOp::ConvertResponse(
 
   StructuredCloneReadInfo& info = mResponse[aIndex];
 
-  info.mData.SwapElements(aSerializedInfo.data());
+  aSerializedInfo.data().data = Move(info.mData);
 
   FallibleTArray<BlobOrMutableFile> blobs;
   nsresult rv = ConvertBlobsToActors(mBackgroundParent,
@@ -26489,7 +26531,7 @@ IndexGetRequestOp::GetResponse(RequestResponse& aResponse)
         SerializedStructuredCloneReadInfo& serializedInfo =
           fallibleCloneInfos[index];
 
-        info.mData.SwapElements(serializedInfo.data());
+        serializedInfo.data().data = Move(info.mData);
 
         FallibleTArray<BlobOrMutableFile> blobs;
         nsresult rv = ConvertBlobsToActors(mBackgroundParent,
@@ -26523,7 +26565,7 @@ IndexGetRequestOp::GetResponse(RequestResponse& aResponse)
     SerializedStructuredCloneReadInfo& serializedInfo =
       aResponse.get_IndexGetResponse().cloneInfo();
 
-    info.mData.SwapElements(serializedInfo.data());
+    serializedInfo.data().data = Move(info.mData);
 
     FallibleTArray<BlobOrMutableFile> blobs;
     nsresult rv =
@@ -26837,7 +26879,7 @@ CursorOpBase::PopulateResponseFromStatement(
 
       auto& responses = mResponse.get_ArrayOfObjectStoreCursorResponse();
       auto& response = *responses.AppendElement();
-      response.cloneInfo().data().SwapElements(cloneInfo.mData);
+      response.cloneInfo().data().data = Move(cloneInfo.mData);
       response.key() = mCursor->mKey;
 
       mFiles.AppendElement(Move(cloneInfo.mFiles));
@@ -26875,7 +26917,7 @@ CursorOpBase::PopulateResponseFromStatement(
       mResponse = IndexCursorResponse();
 
       auto& response = mResponse.get_IndexCursorResponse();
-      response.cloneInfo().data().SwapElements(cloneInfo.mData);
+      response.cloneInfo().data().data = Move(cloneInfo.mData);
       response.key() = mCursor->mKey;
       response.sortKey() = mCursor->mSortKey;
       response.objectKey() = mCursor->mObjectKey;

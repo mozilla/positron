@@ -550,7 +550,7 @@ nsXPCWrappedJSClass::DelegatedQueryInterface(nsXPCWrappedJS* self,
     nsXPConnect::XPConnect()->GetInfoForIID(&aIID, getter_AddRefs(info));
     if (info && NS_SUCCEEDED(info->IsFunction(&isFunc)) && isFunc) {
         RefPtr<nsXPCWrappedJS> wrapper;
-        RootedObject obj(nsContentUtils::RootingCx(), self->GetJSObject());
+        RootedObject obj(RootingCx(), self->GetJSObject());
         nsresult rv = nsXPCWrappedJS::GetNewOrUsed(obj, aIID, getter_AddRefs(wrapper));
 
         // Do the same thing we do for the "check for any existing wrapper" case above.
@@ -1387,30 +1387,10 @@ nsXPCWrappedJSClass::GetInterfaceName()
     return mName;
 }
 
-static void
-FinalizeStub(JSFreeOp* fop, JSObject* obj)
-{
-}
-
-static const JSClassOps XPCOutParamClassOps = {
-    nullptr,   /* addProperty */
-    nullptr,   /* delProperty */
-    nullptr,   /* getProperty */
-    nullptr,   /* setProperty */
-    nullptr,   /* enumerate */
-    nullptr,   /* resolve */
-    nullptr,   /* mayResolve */
-    FinalizeStub,
-    nullptr,   /* call */
-    nullptr,   /* hasInstance */
-    nullptr,   /* construct */
-    nullptr    /* trace */
-};
-
 static const JSClass XPCOutParamClass = {
     "XPCOutParam",
     0,
-    &XPCOutParamClassOps
+    JS_NULL_CLASS_OPS
 };
 
 bool

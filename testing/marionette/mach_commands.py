@@ -24,20 +24,21 @@ def is_firefox_or_android(cls):
     return conditions.is_firefox(cls) or conditions.is_android(cls)
 
 def setup_marionette_argument_parser():
-    from marionette.runner.base import BaseMarionetteArguments
-    return BaseMarionetteArguments()
+    from marionette.runtests import MarionetteArguments
+    from mozlog.structured import commandline
+    parser = MarionetteArguments()
+    commandline.add_logging_group(parser)
+    return parser
 
 def run_marionette(tests, binary=None, topsrcdir=None, **kwargs):
     from mozlog.structured import commandline
 
     from marionette.runtests import (
         MarionetteTestRunner,
-        BaseMarionetteArguments,
         MarionetteHarness
     )
 
-    parser = BaseMarionetteArguments()
-    commandline.add_logging_group(parser)
+    parser = setup_marionette_argument_parser()
 
     if not tests:
         tests = [os.path.join(topsrcdir,

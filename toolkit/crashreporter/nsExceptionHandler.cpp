@@ -13,8 +13,8 @@
 #include "mozilla/dom/CrashReporterChild.h"
 #include "mozilla/Services.h"
 #include "nsIObserverService.h"
-#include "mozilla/unused.h"
-#include "mozilla/Snprintf.h"
+#include "mozilla/Unused.h"
+#include "mozilla/Sprintf.h"
 #include "mozilla/SyncRunnable.h"
 #include "mozilla/TimeStamp.h"
 
@@ -181,13 +181,14 @@ static xpstring *defaultMemoryReportPath = nullptr;
 static char const * const kCrashEventAnnotations[] = {
   "AsyncShutdownTimeout",
   "BuildID",
-  "TelemetryEnvironment",
   "ProductID",
   "ProductName",
   "ReleaseChannel",
   "SecondsSinceLastCrash",
   "ShutdownProgress",
-  "Version"
+  "StartupCrash"
+  "TelemetryEnvironment",
+  "Version",
   // The following entries are not normal annotations but are included
   // in the crash record/FHR:
   // "ContainsMemoryReport"
@@ -329,11 +330,11 @@ private:
 };
 #endif // MOZ_CRASHREPORTER_INJECTOR
 
-// Crashreporter annotations that we don't send along in subprocess
-// reports
+// Crashreporter annotations that we don't send along in subprocess reports.
 static const char* kSubprocessBlacklist[] = {
   "FramePoisonBase",
   "FramePoisonSize",
+  "StartupCrash",
   "StartupTime",
   "URL"
 };
@@ -1798,7 +1799,7 @@ InitInstallTime(nsACString& aInstallTime)
 {
   time_t t = time(nullptr);
   char buf[16];
-  snprintf_literal(buf, "%ld", t);
+  SprintfLiteral(buf, "%ld", t);
   aInstallTime = buf;
 
   return NS_OK;
@@ -2126,7 +2127,7 @@ public:
     , mAppendAppNotes(true)
     {}
 
-  NS_METHOD Run() override;
+  NS_IMETHOD Run() override;
 
 private:
   nsCString mKey;
@@ -3291,7 +3292,7 @@ OOPInit()
   class ProxyToMainThread : public Runnable
   {
   public:
-    NS_IMETHOD Run() {
+    NS_IMETHOD Run() override {
       OOPInit();
       return NS_OK;
     }

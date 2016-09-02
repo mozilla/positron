@@ -98,11 +98,12 @@ public:
 
   // nsIWidget interface
   using nsWindowBase::Create; // for Create signature not overridden here
-  NS_IMETHOD              Create(nsIWidget* aParent,
-                                 nsNativeWidget aNativeParent,
-                                 const LayoutDeviceIntRect& aRect,
-                                 nsWidgetInitData* aInitData = nullptr) override;
-  NS_IMETHOD              Destroy() override;
+  virtual MOZ_MUST_USE nsresult Create(nsIWidget* aParent,
+                                       nsNativeWidget aNativeParent,
+                                       const LayoutDeviceIntRect& aRect,
+                                       nsWidgetInitData* aInitData = nullptr)
+                                       override;
+  virtual void            Destroy() override;
   NS_IMETHOD              SetParent(nsIWidget *aNewParent) override;
   virtual nsIWidget*      GetParent(void) override;
   virtual float           GetDPI() override;
@@ -129,14 +130,14 @@ public:
                                           int32_t aHorizontal,
                                           int32_t aVertical) override;
   NS_IMETHOD              PlaceBehind(nsTopLevelWidgetZPlacement aPlacement, nsIWidget *aWidget, bool aActivate) override;
-  NS_IMETHOD              SetSizeMode(nsSizeMode aMode) override;
+  virtual void            SetSizeMode(nsSizeMode aMode) override;
   NS_IMETHOD              Enable(bool aState) override;
   virtual bool            IsEnabled() const override;
   NS_IMETHOD              SetFocus(bool aRaise) override;
-  NS_IMETHOD              GetBounds(LayoutDeviceIntRect& aRect) override;
-  NS_IMETHOD              GetScreenBounds(LayoutDeviceIntRect& aRect) override;
-  NS_IMETHOD              GetRestoredBounds(LayoutDeviceIntRect& aRect) override;
-  NS_IMETHOD              GetClientBounds(LayoutDeviceIntRect& aRect) override;
+  virtual LayoutDeviceIntRect GetBounds() override;
+  virtual LayoutDeviceIntRect GetScreenBounds() override;
+  virtual MOZ_MUST_USE nsresult GetRestoredBounds(LayoutDeviceIntRect& aRect) override;
+  virtual LayoutDeviceIntRect GetClientBounds() override;
   virtual LayoutDeviceIntPoint GetClientOffset() override;
   void                    SetBackgroundColor(const nscolor& aColor) override;
   NS_IMETHOD              SetCursor(imgIContainer* aCursor,
@@ -148,7 +149,8 @@ public:
                                            uint16_t aDuration,
                                            nsISupports* aData,
                                            nsIRunnable* aCallback) override;
-  NS_IMETHOD              MakeFullScreen(bool aFullScreen, nsIScreen* aScreen = nullptr) override;
+  virtual nsresult        MakeFullScreen(bool aFullScreen,
+                                         nsIScreen* aScreen = nullptr) override;
   NS_IMETHOD              HideWindowChrome(bool aShouldHide) override;
   NS_IMETHOD              Invalidate(bool aEraseBackground = false,
                                      bool aUpdateNCArea = false,
@@ -163,7 +165,7 @@ public:
   virtual LayoutDeviceIntSize ClientToWindowSize(const LayoutDeviceIntSize& aClientSize) override;
   NS_IMETHOD              DispatchEvent(mozilla::WidgetGUIEvent* aEvent,
                                         nsEventStatus& aStatus) override;
-  NS_IMETHOD              EnableDragDrop(bool aEnable) override;
+  virtual void            EnableDragDrop(bool aEnable) override;
   NS_IMETHOD              CaptureMouse(bool aCapture) override;
   NS_IMETHOD              CaptureRollupEvents(nsIRollupListener * aListener,
                                               bool aDoCapture) override;
@@ -207,7 +209,6 @@ public:
   virtual void            UpdateOpaqueRegion(const LayoutDeviceIntRegion& aOpaqueRegion) override;
 #endif // MOZ_XUL
   virtual nsIMEUpdatePreference GetIMEUpdatePreference() override;
-  NS_IMETHOD              GetNonClientMargins(LayoutDeviceIntMargin& aMargins) override;
   NS_IMETHOD              SetNonClientMargins(LayoutDeviceIntMargin& aMargins) override;
   void                    SetDrawsInTitlebar(bool aState) override;
   virtual void            UpdateWindowDraggingRegion(const LayoutDeviceIntRegion& aRegion) override;

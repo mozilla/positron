@@ -434,7 +434,7 @@ var dataProviders = {
         canvas.height = 1;
 
 
-        let creationError = "(no info)";
+        let creationError = null;
 
         canvas.addEventListener(
             "webglcontextcreationerror",
@@ -446,9 +446,17 @@ var dataProviders = {
             false
         );
 
-        let gl = canvas.getContext(contextType);
+        let gl = null;
+        try {
+          gl = canvas.getContext(contextType);
+        }
+        catch (e) {
+          if (!creationError) {
+            creationError = e.toString();
+          }
+        }
         if (!gl)
-            return creationError;
+            return creationError || "(no info)";
 
 
         let infoExt = gl.getExtension("WEBGL_debug_renderer_info");
@@ -506,15 +514,9 @@ var dataProviders = {
 
   accessibility: function accessibility(done) {
     let data = {};
-    try {
-      data.isActive = Components.manager.QueryInterface(Ci.nsIServiceManager).
-                      isServiceInstantiatedByContractID(
-                        "@mozilla.org/accessibilityService;1",
-                        Ci.nsISupports);
-    }
-    catch (e) {
-      data.isActive = false;
-    }
+    data.isActive = Cc["@mozilla.org/xre/app-info;1"].
+                    getService(Ci.nsIXULRuntime).
+                    accessibilityEnabled;
     try {
       data.forceDisabled =
         Services.prefs.getIntPref("accessibility.force_disabled");
@@ -560,20 +562,28 @@ if (AppConstants.MOZ_CRASHREPORTER) {
   }
 }
 
-if (AppConstants.platform == "linux" && AppConstants.MOZ_SANDBOX) {
+if (AppConstants.MOZ_SANDBOX) {
   dataProviders.sandbox = function sandbox(done) {
-    const keys = ["hasSeccompBPF", "hasSeccompTSync",
-                  "hasPrivilegedUserNamespaces", "hasUserNamespaces",
-                  "canSandboxContent", "canSandboxMedia"];
-
-    let sysInfo = Cc["@mozilla.org/system-info;1"].
-                  getService(Ci.nsIPropertyBag2);
     let data = {};
-    for (let key of keys) {
-      if (sysInfo.hasKey(key)) {
-        data[key] = sysInfo.getPropertyAsBool(key);
+    if (AppConstants.platform == "linux") {
+      const keys = ["hasSeccompBPF", "hasSeccompTSync",
+                    "hasPrivilegedUserNamespaces", "hasUserNamespaces",
+                    "canSandboxContent", "canSandboxMedia"];
+
+      let sysInfo = Cc["@mozilla.org/system-info;1"].
+                    getService(Ci.nsIPropertyBag2);
+      for (let key of keys) {
+        if (sysInfo.hasKey(key)) {
+          data[key] = sysInfo.getPropertyAsBool(key);
+        }
       }
     }
+
+    if (AppConstants.MOZ_CONTENT_SANDBOX) {
+      data.contentSandboxLevel =
+        Services.prefs.getIntPref("security.sandbox.content.level");
+    }
+
     done(data);
   }
 }

@@ -104,13 +104,11 @@ pref("app.update.log", false);
 // the failure.
 pref("app.update.backgroundMaxErrors", 10);
 
-// The aus update xml certificate checks for application update are disabled on
-// Windows, Mac OS X, and Linux since the mar signature check are implemented on
-// these platforms and is sufficient to prevent us from applying a mar that is
-// not valid. Bug 1182352 will remove the update xml certificate checks and the
-// following two preferences.
+// When |app.update.cert.requireBuiltIn| is true or not specified the
+// final certificate and all certificates the connection is redirected to before
+// the final certificate for the url specified in the |app.update.url|
+// preference must be built-in.
 pref("app.update.cert.requireBuiltIn", false);
-pref("app.update.cert.checkAttributes", false);
 
 // Whether or not app updates are enabled
 pref("app.update.enabled", true);
@@ -329,6 +327,12 @@ pref("browser.download.useDownloadDir", true);
 pref("browser.download.folderList", 1);
 pref("browser.download.manager.addToRecentDocs", true);
 pref("browser.download.manager.resumeOnWakeDelay", 10000);
+
+#ifdef RELEASE_BUILD
+pref("browser.download.showPanelDropmarker", false);
+#else
+pref("browser.download.showPanelDropmarker", true);
+#endif
 
 // This allows disabling the animated notifications shown by
 // the Downloads Indicator when a download starts or completes.
@@ -1318,7 +1322,18 @@ pref("ui.key.menuAccessKeyFocuses", true);
 #endif
 
 // Encrypted media extensions.
+#ifdef XP_LINUX
+// On Linux EME is visible but disabled by default. This is so that the
+// "Play DRM content" checkbox in the Firefox UI is unchecked by default.
+// DRM requires downloading and installing proprietary binaries, which
+// users on an open source operating systems didn't opt into. The first
+// time a site using EME is encountered, the user will be prompted to
+// enable DRM, whereupon the EME plugin binaries will be downloaded if
+// permission is granted.
+pref("media.eme.enabled", false);
+#else
 pref("media.eme.enabled", true);
+#endif
 pref("media.eme.apiVisible", true);
 
 // Decode using Gecko Media Plugins in <video>, if a system decoder is not
@@ -1350,16 +1365,7 @@ pref("media.gmp-eme-adobe.enabled", true);
 
 #ifdef MOZ_WIDEVINE_EME
 pref("media.gmp-widevinecdm.visible", true);
-// On Linux Widevine is visible but disabled by default. This is because
-// enabling Widevine downloads a proprietary binary, which users on an open
-// source operating system didn't opt into. The first time a site using EME
-// is encountered, the user will be prompted to enable EME, whereupon the
-// EME plugin binary will be downloaded if permission is granted.
-#ifdef XP_LINUX
-pref("media.gmp-widevinecdm.enabled", false);
-#else
 pref("media.gmp-widevinecdm.enabled", true);
-#endif
 #endif
 
 // Play with different values of the decay time and get telemetry,
@@ -1479,6 +1485,10 @@ pref("browser.esedbreader.loglevel", "Error");
 pref("browser.laterrun.enabled", false);
 
 pref("browser.migrate.automigrate.enabled", false);
+// 4 here means the suggestion notification will be automatically
+// hidden the 4th day, so it will actually be shown on 3 different days.
+pref("browser.migrate.automigrate.daysToOfferUndo", 4);
+pref("browser.migrate.automigrate.ui.enabled", true);
 
 // Enable browser frames for use on desktop.  Only exposed to chrome callers.
 pref("dom.mozBrowserFramesEnabled", true);

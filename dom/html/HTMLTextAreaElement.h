@@ -10,6 +10,7 @@
 #include "mozilla/Attributes.h"
 #include "nsIDOMHTMLTextAreaElement.h"
 #include "nsITextControlElement.h"
+#include "nsIControllers.h"
 #include "nsIDOMNSEditableElement.h"
 #include "nsCOMPtr.h"
 #include "nsGenericHTMLElement.h"
@@ -155,8 +156,10 @@ public:
 
   // nsIConstraintValidation
   bool     IsTooLong();
+  bool     IsTooShort();
   bool     IsValueMissing() const;
   void     UpdateTooLongValidityState();
+  void     UpdateTooShortValidityState();
   void     UpdateValueMissingValidityState();
   void     UpdateBarredFromConstraintValidation();
   nsresult GetValidationMessage(nsAString& aValidationMessage,
@@ -177,11 +180,8 @@ public:
   }
   void SetCols(uint32_t aCols, ErrorResult& aError)
   {
-    if (aCols == 0) {
-      aError.Throw(NS_ERROR_DOM_INDEX_SIZE_ERR);
-    } else {
-      SetUnsignedIntAttr(nsGkAtoms::cols, aCols, DEFAULT_COLS, aError);
-    }
+    uint32_t cols = aCols ? aCols : DEFAULT_COLS;
+    SetUnsignedIntAttr(nsGkAtoms::cols, cols, DEFAULT_COLS, aError);
   }
   bool Disabled()
   {
@@ -199,10 +199,24 @@ public:
   }
   void SetMaxLength(int32_t aMaxLength, ErrorResult& aError)
   {
-    if (aMaxLength < 0) {
+    int32_t minLength = MinLength();
+    if (aMaxLength < 0 || (minLength >= 0 && aMaxLength < minLength)) {
       aError.Throw(NS_ERROR_DOM_INDEX_SIZE_ERR);
     } else {
       SetHTMLIntAttr(nsGkAtoms::maxlength, aMaxLength, aError);
+    }
+  }
+  int32_t MinLength()
+  {
+    return GetIntAttr(nsGkAtoms::minlength, -1);
+  }
+  void SetMinLength(int32_t aMinLength, ErrorResult& aError)
+  {
+    int32_t maxLength = MaxLength();
+    if (aMinLength < 0 || (maxLength >= 0 && aMinLength > maxLength)) {
+      aError.Throw(NS_ERROR_DOM_INDEX_SIZE_ERR);
+    } else {
+      SetHTMLIntAttr(nsGkAtoms::minlength, aMinLength, aError);
     }
   }
   // XPCOM GetName is fine
@@ -245,11 +259,8 @@ public:
   }
   void SetRows(uint32_t aRows, ErrorResult& aError)
   {
-    if (aRows == 0) {
-      aError.Throw(NS_ERROR_DOM_INDEX_SIZE_ERR);
-    } else {
-      SetUnsignedIntAttr(nsGkAtoms::rows, aRows, DEFAULT_ROWS_TEXTAREA, aError);
-    }
+    uint32_t rows = aRows ? aRows : DEFAULT_ROWS_TEXTAREA;
+    SetUnsignedIntAttr(nsGkAtoms::rows, rows, DEFAULT_ROWS_TEXTAREA, aError);
   }
   // XPCOM GetWrap is fine
   void SetWrap(const nsAString& aWrap, ErrorResult& aError)
@@ -269,10 +280,10 @@ public:
   using nsIConstraintValidation::ReportValidity;
   // nsIConstraintValidation::SetCustomValidity() is fine.
   // XPCOM Select is fine
-  uint32_t GetSelectionStart(ErrorResult& aError);
-  void SetSelectionStart(uint32_t aSelectionStart, ErrorResult& aError);
-  uint32_t GetSelectionEnd(ErrorResult& aError);
-  void SetSelectionEnd(uint32_t aSelectionEnd, ErrorResult& aError);
+  Nullable<uint32_t> GetSelectionStart(ErrorResult& aError);
+  void SetSelectionStart(const Nullable<uint32_t>& aSelectionStart, ErrorResult& aError);
+  Nullable<uint32_t> GetSelectionEnd(ErrorResult& aError);
+  void SetSelectionEnd(const Nullable<uint32_t>& aSelectionEnd, ErrorResult& aError);
   void GetSelectionDirection(nsAString& aDirection, ErrorResult& aError);
   void SetSelectionDirection(const nsAString& aDirection, ErrorResult& aError);
   void SetSelectionRange(uint32_t aSelectionStart, uint32_t aSelectionEnd, const Optional<nsAString>& aDirecton, ErrorResult& aError);

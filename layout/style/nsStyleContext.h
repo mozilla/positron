@@ -81,7 +81,7 @@ public:
                  already_AddRefed<ServoComputedValues> aComputedValues,
                  bool aSkipParentDisplayBasedStyleFixup);
 
-  void* operator new(size_t sz, nsPresContext* aPresContext) CPP_THROW_NEW;
+  void* operator new(size_t sz, nsPresContext* aPresContext);
   void Destroy();
 
   // These two methods are for use by ArenaRefPtr.
@@ -159,6 +159,12 @@ public:
              mBits >> NS_STYLE_CONTEXT_TYPE_SHIFT);
   }
 
+  bool IsAnonBox() const {
+    return GetPseudoType() == mozilla::CSSPseudoElementType::AnonBox;
+  }
+  bool IsPseudoElement() const { return mPseudoTag && !IsAnonBox(); }
+
+
   // Find, if it already exists *and is easily findable* (i.e., near the
   // start of the child list), a style context whose:
   //  * GetPseudo() matches aPseudoTag
@@ -174,7 +180,7 @@ public:
   /**
    * Get the color property that should be used to fill text.
    */
-  nsCSSProperty GetTextFillColorProp() {
+  nsCSSPropertyID GetTextFillColorProp() {
     return StyleText()->mWebkitTextFillColorForeground
            ? eCSSProperty_color : eCSSProperty__webkit_text_fill_color;
   }
@@ -227,7 +233,7 @@ public:
   // Does this style context represent the style for a pseudo-element or
   // inherit data from such a style context?  Whether this returns true
   // is equivalent to whether it or any of its ancestors returns
-  // non-null for GetPseudo.
+  // non-null for IsPseudoElement().
   bool HasPseudoElementData() const
     { return !!(mBits & NS_STYLE_HAS_PSEUDO_ELEMENT_DATA); }
 
@@ -426,7 +432,7 @@ public:
    * Note that if aProperty is eCSSProperty_border_*_color, this
    * function handles -moz-use-text-color.
    */
-  nscolor GetVisitedDependentColor(nsCSSProperty aProperty);
+  nscolor GetVisitedDependentColor(nsCSSPropertyID aProperty);
 
   /**
    * aColors should be a two element array of nscolor in which the first
@@ -534,7 +540,7 @@ public:
   void StoreChangeHint(nsChangeHint aHint)
   {
     MOZ_ASSERT(!IsShared());
-    mStoredChangeHint = aHint;
+    mStoredChangeHint |= aHint;
 #ifdef DEBUG
     mConsumedChangeHint = false;
 #endif

@@ -138,10 +138,9 @@ private:
   Maybe<int64_t> mVideoStartTime;
 };
 
-MediaDecoderReaderWrapper::MediaDecoderReaderWrapper(bool aIsRealTime,
-                                                     AbstractThread* aOwnerThread,
+MediaDecoderReaderWrapper::MediaDecoderReaderWrapper(AbstractThread* aOwnerThread,
                                                      MediaDecoderReader* aReader)
-  : mForceZeroStartTime(aIsRealTime || aReader->ForceZeroStartTime())
+  : mForceZeroStartTime(aReader->ForceZeroStartTime())
   , mOwnerThread(aOwnerThread)
   , mReader(aReader)
 {}
@@ -328,11 +327,11 @@ MediaDecoderReaderWrapper::UpdateBufferedWithPromise()
 }
 
 void
-MediaDecoderReaderWrapper::ReleaseMediaResources()
+MediaDecoderReaderWrapper::ReleaseResources()
 {
   MOZ_ASSERT(mOwnerThread->IsCurrentThreadIn());
   nsCOMPtr<nsIRunnable> r =
-    NewRunnableMethod(mReader, &MediaDecoderReader::ReleaseMediaResources);
+    NewRunnableMethod(mReader, &MediaDecoderReader::ReleaseResources);
   mReader->OwnerThread()->Dispatch(r.forget());
 }
 

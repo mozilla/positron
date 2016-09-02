@@ -62,6 +62,7 @@ class PaintedLayerComposite;
 class TextRenderer;
 class CompositingRenderTarget;
 struct FPSState;
+class PaintCounter;
 
 static const int kVisualWarningDuration = 150; // ms
 
@@ -331,6 +332,8 @@ public:
 
   void ForcePresent() { mCompositor->ForcePresent(); }
 
+  void SetPaintTime(const TimeDuration& aPaintTime) { mLastPaintTime = aPaintTime; }
+
 private:
   /** Region we're clipping our current drawing to. */
   nsIntRegion mClippingRegion;
@@ -351,6 +354,11 @@ private:
 #if defined(MOZ_WIDGET_ANDROID) || defined(MOZ_WIDGET_GONK)
   void RenderToPresentationSurface();
 #endif
+
+  /**
+   * Render paint and composite times above the frame.
+   */
+  void DrawPaintTimes(Compositor* aCompositor);
 
   /**
    * We need to know our invalid region before we're ready to render.
@@ -409,6 +417,9 @@ private:
   bool mLastFrameMissedHWC;
 
   bool mWindowOverlayChanged;
+  RefPtr<PaintCounter> mPaintCounter;
+  TimeDuration mLastPaintTime;
+  TimeStamp mRenderStartTime;
 };
 
 /**
@@ -495,6 +506,10 @@ public:
   {
     mShadowOpacity = aOpacity;
   }
+  void SetShadowOpacitySetByAnimation(bool aSetByAnimation)
+  {
+    mShadowOpacitySetByAnimation = aSetByAnimation;
+  }
 
   void SetShadowClipRect(const Maybe<ParentLayerIntRect>& aRect)
   {
@@ -527,6 +542,7 @@ public:
   const gfx::Matrix4x4& GetShadowBaseTransform() { return mShadowTransform; }
   gfx::Matrix4x4 GetShadowTransform();
   bool GetShadowTransformSetByAnimation() { return mShadowTransformSetByAnimation; }
+  bool GetShadowOpacitySetByAnimation() { return mShadowOpacitySetByAnimation; }
   bool HasLayerBeenComposited() { return mLayerComposited; }
   gfx::IntRect GetClearRect() { return mClearRect; }
 
@@ -554,6 +570,7 @@ protected:
   RefPtr<Compositor> mCompositor;
   float mShadowOpacity;
   bool mShadowTransformSetByAnimation;
+  bool mShadowOpacitySetByAnimation;
   bool mDestroyed;
   bool mLayerComposited;
   gfx::IntRect mClearRect;

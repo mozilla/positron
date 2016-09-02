@@ -65,7 +65,7 @@
 #include <mozilla/layers/AxisPhysicsMSDModel.h>
 #include "mozilla/layers/LayerTransactionChild.h"
 #include "mozilla/layers/ScrollLinkedEffectDetector.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 #include "LayersLogging.h"  // for Stringify
 #include <algorithm>
 #include <cstdlib> // for std::abs(int/long)
@@ -2124,7 +2124,7 @@ ScrollFrameHelper::ScrollToWithOrigin(nsPoint aScrollPosition,
 
   nsRect scrollRange = GetScrollRangeForClamping();
   mDestination = scrollRange.ClampPoint(aScrollPosition);
-  if (mDestination != aScrollPosition && aOrigin == nsGkAtoms::restore) {
+  if (mDestination != aScrollPosition && aOrigin == nsGkAtoms::restore && !PageIsStillLoading()) {
     // If we're doing a restore but the scroll position is clamped, promote
     // the origin from one that APZ can clobber to one that it can't clobber.
     aOrigin = nsGkAtoms::other;
@@ -2877,7 +2877,7 @@ ScrollFrameHelper::AppendScrollPartsTo(nsDisplayListBuilder*   aBuilder,
   AutoTArray<nsIFrame*, 3> scrollParts;
   for (nsIFrame* kid : mOuter->PrincipalChildList()) {
     if (kid == mScrolledFrame ||
-        (kid->IsAbsPosContaininingBlock() || overlayScrollbars) != aPositioned)
+        (kid->IsAbsPosContainingBlock() || overlayScrollbars) != aPositioned)
       continue;
 
     scrollParts.AppendElement(kid);
@@ -3578,13 +3578,6 @@ ScrollFrameHelper::ComputeScrollMetadata(Layer* aLayer,
 
   bool isRootContent = mIsRoot && mOuter->PresContext()->IsRootContentDocument();
   bool thisScrollFrameUsesAsyncScrolling = nsLayoutUtils::UsesAsyncScrolling(mOuter);
-#if defined(MOZ_WIDGET_ANDROID) && !defined(MOZ_ANDROID_APZ)
-  // Android without apzc (aka the java pan zoom code) only uses async scrolling
-  // for the root scroll frame of the root content document.
-  if (!isRootContent) {
-    thisScrollFrameUsesAsyncScrolling = false;
-  }
-#endif
   if (!thisScrollFrameUsesAsyncScrolling) {
     if (parentLayerClip) {
       // If APZ is not enabled, we still need the displayport to be clipped
@@ -5860,7 +5853,7 @@ CollectScrollSnapCoordinates(nsIFrame* aFrame, nsIFrame* aScrolledFrame,
         nsPoint offset = f->GetOffsetTo(aScrolledFrame);
         nsRect edgesRect = nsRect(offset, frameRect.Size());
         for (size_t coordNum = 0; coordNum < coordCount; coordNum++) {
-          const nsStyleImageLayers::Position &coordPosition =
+          const Position& coordPosition =
             f->StyleDisplay()->mScrollSnapCoordinate[coordNum];
           nsPoint coordPoint = edgesRect.TopLeft();
           coordPoint += nsPoint(coordPosition.mXPosition.mLength,

@@ -175,23 +175,6 @@ callback interface MozIdleObserver {
   void onactive();
 };
 
-#ifdef MOZ_B2G
-dictionary MobileIdOptions {
-  boolean forceSelection = false;
-};
-
-[NoInterfaceObject]
-interface NavigatorMobileId {
-    // Ideally we would use [CheckAnyPermissions] here, but the "mobileid"
-    // permission is set to PROMPT_ACTION and [CheckAnyPermissions] only checks
-    // for ALLOW_ACTION.
-    // XXXbz what is this promise resolved with?
-    [NewObject, Func="Navigator::HasMobileIdSupport"]
-    Promise<any> getMobileIdAssertion(optional MobileIdOptions options);
-};
-Navigator implements NavigatorMobileId;
-#endif // MOZ_B2G
-
 // nsIDOMNavigator
 partial interface Navigator {
   [Throws, Constant, Cached]
@@ -341,7 +324,10 @@ partial interface Navigator {
 
 partial interface Navigator {
   [Throws, Pref="dom.vr.enabled"]
-  Promise<sequence<VRDevice>> getVRDevices();
+  Promise<sequence<VRDisplay>> getVRDisplays();
+  // TODO: Use FrozenArray once available. (Bug 1236777)
+  [Frozen, Cached, Pure, Pref="dom.vr.enabled"]
+  readonly attribute sequence<VRDisplay> activeVRDisplays;
 };
 
 #ifdef MOZ_B2G_BT
@@ -431,7 +417,7 @@ partial interface Navigator {
 };
 
 partial interface Navigator {
-  [Throws, Pref="dom.presentation.enabled", Func="Navigator::HasPresentationSupport", SameObject]
+  [Throws, Pref="dom.presentation.enabled", SameObject]
   readonly attribute Presentation? presentation;
 };
 
@@ -453,17 +439,6 @@ partial interface Navigator {
 partial interface Navigator {
   [Func="Navigator::IsE10sEnabled"]
   readonly attribute boolean mozE10sEnabled;
-};
-#endif
-
-#ifdef MOZ_PAY
-partial interface Navigator {
-  [Throws, NewObject, Pref="dom.mozPay.enabled"]
-  // The 'jwts' parameter can be either a single DOMString or an array of
-  // DOMStrings. In both cases, it represents the base64url encoded and
-  // digitally signed payment information. Each payment provider should
-  // define its supported JWT format.
-  DOMRequest mozPay(any jwts);
 };
 #endif
 

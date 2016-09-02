@@ -13,7 +13,7 @@
 #include "mozilla/dom/ServiceWorkerRegistrationBinding.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/Services.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsNetUtil.h"
 #include "nsServiceManagerUtils.h"
@@ -376,7 +376,7 @@ public:
   void
   UpdateSucceeded(ServiceWorkerRegistrationInfo* aRegistration) override
   {
-    mPromise->MaybeResolve(JS::UndefinedHandleValue);
+    mPromise->MaybeResolveWithUndefined();
   }
 
   void
@@ -418,7 +418,7 @@ public:
     if (status.Failed()) {
       promise->MaybeReject(status);
     } else {
-      promise->MaybeResolve(JS::UndefinedHandleValue);
+      promise->MaybeResolveWithUndefined();
     }
     status.SuppressException();
     mPromiseProxy->CleanUp();
@@ -529,7 +529,7 @@ public:
     MOZ_ASSERT(mPromise);
   }
 
-  NS_IMETHODIMP
+  NS_IMETHOD
   UnregisterSucceeded(bool aState) override
   {
     AssertIsOnMainThread();
@@ -537,7 +537,7 @@ public:
     return NS_OK;
   }
 
-  NS_IMETHODIMP
+  NS_IMETHOD
   UnregisterFailed() override
   {
     AssertIsOnMainThread();
@@ -595,7 +595,7 @@ public:
     MOZ_ASSERT(aProxy);
   }
 
-  NS_IMETHODIMP
+  NS_IMETHOD
   UnregisterSucceeded(bool aState) override
   {
     AssertIsOnMainThread();
@@ -603,7 +603,7 @@ public:
     return NS_OK;
   }
 
-  NS_IMETHODIMP
+  NS_IMETHOD
   UnregisterFailed() override
   {
     AssertIsOnMainThread();
@@ -1119,7 +1119,7 @@ ServiceWorkerRegistrationWorkerThread::Update(ErrorResult& aRv)
   // level script evaluation.  See:
   // https://github.com/slightlyoff/ServiceWorker/issues/800
   if (worker->LoadScriptAsPartOfLoadingServiceWorkerScript()) {
-    promise->MaybeResolve(JS::UndefinedHandleValue);
+    promise->MaybeResolveWithUndefined();
     return promise.forget();
   }
 
@@ -1192,7 +1192,7 @@ ServiceWorkerRegistrationWorkerThread::InitListener()
   worker->AssertIsOnWorkerThread();
 
   mListener = new WorkerListener(worker, this);
-  if (!HoldWorker(worker)) {
+  if (!HoldWorker(worker, Closing)) {
     mListener = nullptr;
     NS_WARNING("Could not add feature");
     return;

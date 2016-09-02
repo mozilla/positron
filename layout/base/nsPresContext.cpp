@@ -37,7 +37,7 @@
 #include "mozilla/RestyleManager.h"
 #include "mozilla/RestyleManagerHandle.h"
 #include "mozilla/RestyleManagerHandleInlines.h"
-#include "SurfaceCache.h"
+#include "SurfaceCacheUtils.h"
 #include "nsCSSRuleProcessor.h"
 #include "nsRuleNode.h"
 #include "gfxPlatform.h"
@@ -120,7 +120,7 @@ public:
   {
   }
 
-  NS_IMETHOD Run()
+  NS_IMETHOD Run() override
   {
     mPresContext->DoChangeCharSet(mCharSet);
     return NS_OK;
@@ -1631,7 +1631,7 @@ nsPresContext::ThemeChangedInternal()
     // Vector images (SVG) may be using theme colors so we discard all cached
     // surfaces. (We could add a vector image only version of DiscardAll, but
     // in bug 940625 we decided theme changes are rare enough not to bother.)
-    mozilla::image::SurfaceCache::DiscardAll();
+    image::SurfaceCacheUtils::DiscardAll();
   }
 
   // This will force the system metrics to be generated the next time they're used
@@ -2687,6 +2687,12 @@ nsPresContext::CheckForInterrupt(nsIFrame* aFrame)
     TimeStamp::Now() - mReflowStartTime > sInterruptTimeout &&
     HavePendingInputEvent() &&
     !IsChrome();
+
+  if (mPendingInterruptFromTest) {
+    mPendingInterruptFromTest = false;
+    mHasPendingInterrupt = true;
+  }
+
   if (mHasPendingInterrupt) {
 #ifdef NOISY_INTERRUPTIBLE_REFLOW
     printf("*** DETECTED pending interrupt (time=%lld)\n", PR_Now());
@@ -2968,8 +2974,7 @@ SortConfigurations(nsTArray<nsIWidget::Configuration>* aConfigurations)
       for (uint32_t j = 0; j < pluginsToMove.Length(); ++j) {
         if (i == j)
           continue;
-        LayoutDeviceIntRect bounds;
-        pluginsToMove[j].mChild->GetBounds(bounds);
+        LayoutDeviceIntRect bounds = pluginsToMove[j].mChild->GetBounds();
         AutoTArray<LayoutDeviceIntRect,1> clipRects;
         pluginsToMove[j].mChild->GetWindowClipRegion(&clipRects);
         if (HasOverlap(bounds.TopLeft(), clipRects,

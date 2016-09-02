@@ -410,7 +410,7 @@ public:
 
   NS_DECL_ISUPPORTS
 
-  NS_IMETHODIMP Notify(nsITimer* aTimer) final
+  NS_IMETHOD Notify(nsITimer* aTimer) final
   {
     if (!mContent->IsInUncomposedDoc())
       return NS_OK;
@@ -1289,6 +1289,8 @@ nsAccessibilityService::Init()
   // Now its safe to start platform accessibility.
   if (XRE_IsParentProcess())
     PlatformInit();
+
+  statistics::A11yInitialized();
 
   return true;
 }

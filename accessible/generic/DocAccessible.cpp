@@ -129,6 +129,7 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(DocAccessible, Accessible)
   }
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mAccessibleCache)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mAnchorJumpElm)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mInvalidationList)
   for (auto it = tmp->mARIAOwnsHash.ConstIter(); !it.Done(); it.Next()) {
     nsTArray<RefPtr<Accessible> >* ar = it.UserData();
     for (uint32_t i = 0; i < ar->Length(); i++) {
@@ -147,6 +148,7 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(DocAccessible, Accessible)
   tmp->mNodeToAccessibleMap.Clear();
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mAccessibleCache)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mAnchorJumpElm)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mInvalidationList)
   tmp->mARIAOwnsHash.Clear();
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
@@ -764,10 +766,8 @@ DocAccessible::AttributeChanged(nsIDocument* aDocument,
     accessible = this;
   }
 
-  if (!accessible->IsBoundToParent()) {
-    MOZ_ASSERT_UNREACHABLE("DOM attribute change on accessible detached from tree");
-    return;
-  }
+  MOZ_ASSERT(accessible->IsBoundToParent() || accessible->IsDoc(),
+             "DOM attribute change on an accessible detached from the tree");
 
   // Fire accessible events iff there's an accessible, otherwise we consider
   // the accessible state wasn't changed, i.e. its state is initial state.
@@ -980,7 +980,7 @@ DocAccessible::ARIAAttributeChanged(Accessible* aAccessible, nsIAtom* aAttribute
   if (aAttribute == nsGkAtoms::aria_hidden) {
     bool isDefined = aria::HasDefinedARIAHidden(elm);
     if (isDefined != aAccessible->IsARIAHidden() &&
-        !aAccessible->Parent()->IsARIAHidden()) {
+        (!aAccessible->Parent() || !aAccessible->Parent()->IsARIAHidden())) {
       aAccessible->SetARIAHidden(isDefined);
 
       RefPtr<AccEvent> event =
@@ -1452,6 +1452,11 @@ DocAccessible::DoInitialUpdate()
 
   // Build initial tree.
   CacheChildrenInSubtree(this);
+#ifdef A11Y_LOG
+  if (logging::IsEnabled(logging::eVerbose)) {
+    logging::Tree("TREE", "Initial subtree", this);
+  }
+#endif
 
   // Fire reorder event after the document tree is constructed. Note, since
   // this reorder event is processed by parent document then events targeted to
@@ -1462,12 +1467,13 @@ DocAccessible::DoInitialUpdate()
     ParentDocument()->FireDelayedEvent(reorderEvent);
   }
 
+  TreeMutation mt(this);
   uint32_t childCount = ChildCount();
   for (uint32_t i = 0; i < childCount; i++) {
     Accessible* child = GetChildAt(i);
-    RefPtr<AccShowEvent> event = new AccShowEvent(child);
-  FireDelayedEvent(event);
+    mt.AfterInsertion(child);
   }
+  mt.Done();
 }
 
 void
@@ -1762,7 +1768,7 @@ InsertIterator::Next()
 #endif
 
     // If inserted nodes are siblings then just move the walker next.
-    if (prevNode && prevNode->GetNextSibling() == node) {
+    if (mChild && prevNode && prevNode->GetNextSibling() == node) {
       Accessible* nextChild = mWalker.Scope(node);
       if (nextChild) {
         mChildBefore = mChild;
@@ -2211,9 +2217,6 @@ DocAccessible::CacheChildrenInSubtree(Accessible* aRoot,
 
   Accessible* root = aRoot->IsHTMLCombobox() ? aRoot->FirstChild() : aRoot;
   if (root->KidsFromDOM()) {
-#ifdef A11Y_LOG
-  logging::TreeInfo("caching children", logging::eVerbose, aRoot);
-#endif
     TreeMutation mt(root, TreeMutation::kNoEvents);
     TreeWalker walker(root);
     while (Accessible* child = walker.Next()) {

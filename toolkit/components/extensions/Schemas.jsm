@@ -82,8 +82,32 @@ function getValueBaseType(value) {
   return t;
 }
 
+// Methods of Context that are used by Schemas.normalize. These methods can be
+// overridden at the construction of Context.
+const CONTEXT_FOR_VALIDATION = [
+  "checkLoadURL",
+  "hasPermission",
+  "logError",
+];
+
+// Methods of Context that are used by Schemas.inject.
+// Callers of Schemas.inject should implement all of these methods.
+const CONTEXT_FOR_INJECTION = [
+  ...CONTEXT_FOR_VALIDATION,
+  "shouldInject",
+  "getImplementation",
+];
+
+/**
+ * A context for schema validation and error reporting. This class is only used
+ * internally within Schemas.
+ */
 class Context {
-  constructor(params) {
+  /**
+   * @param {object} params Provides the implementation of this class.
+   * @param {Array<string>} overridableMethods
+   */
+  constructor(params, overridableMethods = CONTEXT_FOR_VALIDATION) {
     this.params = params;
 
     this.path = [];
@@ -92,23 +116,18 @@ class Context {
         return value;
       },
     };
+    this.isChromeCompat = false;
 
     this.currentChoices = new Set();
     this.choicePathIndex = 0;
 
-    let methods = ["addListener", "callFunction",
-                   "callFunctionNoReturn", "callAsyncFunction",
-                   "hasPermission",
-                   "hasListener", "removeListener",
-                   "getProperty", "setProperty",
-                   "checkLoadURL", "logError"];
-    for (let method of methods) {
+    for (let method of overridableMethods) {
       if (method in params) {
         this[method] = params[method].bind(params);
       }
     }
 
-    let props = ["preprocessors"];
+    let props = ["preprocessors", "isChromeCompat"];
     for (let prop of props) {
       if (prop in params) {
         if (prop in this && typeof this[prop] == "object") {
@@ -137,6 +156,12 @@ class Context {
     return this.params.principal || Services.scriptSecurityManager.createNullPrincipal({});
   }
 
+  /**
+   * Checks whether `url` may be loaded by the extension in this context.
+   *
+   * @param {string} url The URL that the extension wished to load.
+   * @returns {boolean} Whether the context may load `url`.
+   */
   checkLoadURL(url) {
     let ssm = Services.scriptSecurityManager;
     try {
@@ -298,6 +323,45 @@ class Context {
   }
 }
 
+/**
+ * Holds methods that run the actual implementation of the extension APIs. These
+ * methods are only called if the extension API invocation matches the signature
+ * as defined in the schema. Otherwise an error is reported to the context.
+ */
+class InjectionContext extends Context {
+  constructor(params) {
+    super(params, CONTEXT_FOR_INJECTION);
+  }
+
+  /**
+   * Check whether the API should be injected.
+   *
+   * @abstract
+   * @param {string} namespace The namespace of the API. This may contain dots,
+   *     e.g. in the case of "devtools.inspectedWindow".
+   * @param {string} [name] The name of the property in the namespace.
+   *     `null` if we are checking whether the namespace should be injected.
+   * @param {Array} restrictions An arbitrary list of restrictions as declared
+   *     by the schema for a given API node.
+   * @returns {boolean} Whether the API should be injected.
+   */
+  shouldInject(namespace, name, restrictions) {
+    throw new Error("Not implemented");
+  }
+
+  /**
+   * Generate the implementation for `namespace`.`name`.
+   *
+   * @abstract
+   * @param {string} namespace The full path to the namespace of the API, minus
+   *     the name of the method or property. E.g. "storage.local".
+   * @param {string} name The name of the method, property or event.
+   * @returns {SchemaAPIInterface} The implementation of the API.
+   */
+  getImplementation(namespace, name) {
+    throw new Error("Not implemented");
+  }
+}
 
 /**
  * The methods in this singleton represent the "format" specifier for
@@ -404,6 +468,13 @@ class Entry {
      * value prior to any normalization.
      */
     this.preprocessor = schema.preprocess || null;
+
+    /**
+     * @property {Array<string>} [restrictions]
+     * A list of restrictions to consider before generating the API.
+     * These are not parsed by the schema, but passed to `shouldInject`.
+     */
+    this.restrictions = schema.restrictions || null;
   }
 
   /**
@@ -458,12 +529,19 @@ class Entry {
     }
   }
 
-  // Injects JS values for the entry into the extension API
-  // namespace. The default implementation is to do
-  // nothing. |context| is used to call the actual implementation
-  // of a given function or event. It's an object with properties
-  // callFunction, addListener, removeListener, and hasListener.
-  inject(path, name, dest, context) {
+  /**
+   * Injects JS values for the entry into the extension API
+   * namespace. The default implementation is to do nothing.
+   * `context` is used to call the actual implementation
+   * of a given function or event.
+   *
+   * @param {SchemaAPIInterface} apiImpl The implementation of the API.
+   * @param {Array<string>} path The API path, e.g. `["storage", "local"]`.
+   * @param {string} name The method name, e.g. "get".
+   * @param {object} dest The object where `path`.`name` should be stored.
+   * @param {InjectionContext} context
+   */
+  inject(apiImpl, path, name, dest, context) {
   }
 }
 
@@ -654,7 +732,7 @@ class StringType extends Type {
     return baseType == "string";
   }
 
-  inject(path, name, dest, context) {
+  inject(apiImpl, path, name, dest, context) {
     if (this.enumeration) {
       let obj = Cu.createObjectIn(dest, {defineAs: name});
       for (let e of this.enumeration) {
@@ -971,7 +1049,7 @@ class ValueProperty extends Entry {
     this.value = value;
   }
 
-  inject(path, name, dest, context) {
+  inject(apiImpl, path, name, dest, context) {
     dest[name] = this.value;
   }
 }
@@ -991,14 +1069,14 @@ class TypeProperty extends Entry {
     throw context.makeError(`${msg} for ${this.namespaceName}.${this.name}.`);
   }
 
-  inject(path, name, dest, context) {
+  inject(apiImpl, path, name, dest, context) {
     if (this.unsupported) {
       return;
     }
 
     let getStub = () => {
       this.checkDeprecated(context);
-      return context.getProperty(path, name);
+      return apiImpl.getProperty();
     };
 
     let desc = {
@@ -1015,7 +1093,7 @@ class TypeProperty extends Entry {
           this.throwError(context, normalized.error);
         }
 
-        context.setProperty(path, name, normalized.value);
+        apiImpl.setProperty(normalized.value);
       };
 
       desc.set = Cu.exportFunction(setStub, dest);
@@ -1036,26 +1114,36 @@ class SubModuleProperty extends Entry {
   // namespaceName: Namespace in which the property lives.
   // reference: Name of the type defining the functions to add to the property.
   // properties: Additional properties to add to the module (unsupported).
-  constructor(name, namespaceName, reference, properties) {
-    super();
+  constructor(schema, name, namespaceName, reference, properties) {
+    super(schema);
     this.name = name;
     this.namespaceName = namespaceName;
     this.reference = reference;
     this.properties = properties;
   }
 
-  inject(path, name, dest, wrapperFuncs) {
+  inject(apiImpl, path, name, dest, context) {
     let obj = Cu.createObjectIn(dest, {defineAs: name});
 
     let ns = Schemas.namespaces.get(this.namespaceName);
     let type = ns.get(this.reference);
+    if (!type && this.reference.includes(".")) {
+      let [namespaceName, ref] = this.reference.split(".");
+      ns = Schemas.namespaces.get(namespaceName);
+      type = ns.get(ref);
+    }
     if (!type || !(type instanceof SubModuleType)) {
       throw new Error(`Internal error: ${this.namespaceName}.${this.reference} is not a sub-module`);
     }
 
     let functions = type.functions;
     for (let fun of functions) {
-      fun.inject(path.concat(name), fun.name, obj, wrapperFuncs);
+      let subpath = path.concat(name);
+      let namespace = subpath.join(".");
+      if (context.shouldInject(namespace, fun.name, fun.restrictions || ns.defaultRestrictions)) {
+        let apiImpl = context.getImplementation(namespace, fun.name);
+        fun.inject(apiImpl, subpath, fun.name, obj, context);
+      }
     }
 
     // TODO: Inject this.properties.
@@ -1122,6 +1210,11 @@ class CallEntry extends Entry {
     if (this.allowAmbiguousOptionalArguments) {
       // When this option is set, it's up to the implementation to
       // parse arguments.
+      // The last argument for asynchronous methods is either a function or null.
+      // This is specifically done for runtime.sendMessage.
+      if (this.hasAsyncCallback && typeof(args[args.length - 1]) != "function") {
+        args.push(null);
+      }
       return args;
     }
     let success = check(0, 0);
@@ -1158,7 +1251,7 @@ class FunctionEntry extends CallEntry {
     this.hasAsyncCallback = type.hasAsyncCallback;
   }
 
-  inject(path, name, dest, context) {
+  inject(apiImpl, path, name, dest, context) {
     if (this.unsupported) {
       return;
     }
@@ -1176,19 +1269,25 @@ class FunctionEntry extends CallEntry {
         if (this.hasAsyncCallback) {
           callback = actuals.pop();
         }
-        return context.callAsyncFunction(path, name, actuals, callback);
+        if (callback === null && context.isChromeCompat) {
+          // We pass an empty stub function as a default callback for
+          // the `chrome` API, so promise objects are not returned,
+          // and lastError values are reported immediately.
+          callback = () => {};
+        }
+        return apiImpl.callAsyncFunction(actuals, callback);
       };
     } else if (!this.returns) {
       stub = (...args) => {
         this.checkDeprecated(context);
         let actuals = this.checkParameters(args, context);
-        return context.callFunctionNoReturn(path, name, actuals);
+        return apiImpl.callFunctionNoReturn(actuals);
       };
     } else {
       stub = (...args) => {
         this.checkDeprecated(context);
         let actuals = this.checkParameters(args, context);
-        return context.callFunction(path, name, actuals);
+        return apiImpl.callFunction(actuals);
       };
     }
     Cu.exportFunction(stub, dest, {defineAs: name});
@@ -1212,7 +1311,7 @@ class Event extends CallEntry {
     return r.value;
   }
 
-  inject(path, name, dest, context) {
+  inject(apiImpl, path, name, dest, context) {
     if (this.unsupported) {
       return;
     }
@@ -1224,17 +1323,17 @@ class Event extends CallEntry {
     let addStub = (listener, ...args) => {
       listener = this.checkListener(listener, context);
       let actuals = this.checkParameters(args, context);
-      return context.addListener(this.path, name, listener, actuals);
+      apiImpl.addListener(listener, actuals);
     };
 
     let removeStub = (listener) => {
       listener = this.checkListener(listener, context);
-      return context.removeListener(this.path, name, listener);
+      apiImpl.removeListener(listener);
     };
 
     let hasStub = (listener) => {
       listener = this.checkListener(listener, context);
-      return context.hasListener(this.path, name, listener);
+      return apiImpl.hasListener(listener);
     };
 
     let obj = Cu.createObjectIn(dest, {defineAs: name});
@@ -1260,6 +1359,8 @@ this.Schemas = {
     if (!ns) {
       ns = new Map();
       ns.permissions = null;
+      ns.restrictions = null;
+      ns.defeaultRestrictions = null;
       this.namespaces.set(namespaceName, ns);
     }
     ns.set(symbol, value);
@@ -1271,7 +1372,7 @@ this.Schemas = {
 
     // Do some simple validation of our own schemas.
     function checkTypeProperties(...extra) {
-      let allowedSet = new Set([...allowedProperties, ...extra, "description", "deprecated", "preprocess"]);
+      let allowedSet = new Set([...allowedProperties, ...extra, "description", "deprecated", "preprocess", "restrictions"]);
       for (let prop of Object.keys(type)) {
         if (!allowedSet.has(prop)) {
           throw new Error(`Internal error: Namespace ${path.join(".")} has invalid type property "${prop}" in type "${type.id || JSON.stringify(type)}"`);
@@ -1339,7 +1440,13 @@ this.Schemas = {
                             pattern,
                             format);
     } else if (type.type == "object" && "functions" in type) {
-      checkTypeProperties("functions");
+      // NOTE: "events" and "properties" are currently ignored, because they are used
+      // in the DevTools schema files, but they are not currently used by anything in the
+      // initial set of supported DevTools APIs. See Bug 1290901 for rationale.
+      // Introducing a complete support of "events" and "properties" in the SubModuleType
+      // will be re-evaluated as part of Bug 1293298 and Bug 1293301.
+
+      checkTypeProperties("functions", "events", "properties");
 
       // The path we pass in here is only used for error messages.
       let functions = type.functions.map(fun => this.parseFunction(path.concat(type.id), fun));
@@ -1424,8 +1531,11 @@ this.Schemas = {
         if (parameters && parameters.length && parameters[parameters.length - 1].name == type.async) {
           hasAsyncCallback = true;
         }
-        if (type.returns || type.allowAmbiguousOptionalArguments) {
-          throw new Error(`Internal error: Async functions must not have return values or ambiguous arguments.`);
+        if (type.returns) {
+          throw new Error("Internal error: Async functions must not have return values.");
+        }
+        if (type.allowAmbiguousOptionalArguments && !hasAsyncCallback) {
+          throw new Error("Internal error: Async functions with ambiguous arguments must declare the callback as the last parameter");
         }
       }
 
@@ -1484,7 +1594,7 @@ this.Schemas = {
   loadProperty(namespaceName, name, prop) {
     if ("$ref" in prop) {
       if (!prop.unsupported) {
-        this.register(namespaceName, name, new SubModuleProperty(name, namespaceName, prop.$ref,
+        this.register(namespaceName, name, new SubModuleProperty(prop, name, namespaceName, prop.$ref,
                                                                  prop.properties || {}));
       }
     } else if ("value" in prop) {
@@ -1603,10 +1713,10 @@ this.Schemas = {
         this.loadEvent(name, event);
       }
 
-      if (namespace.permissions) {
-        let ns = this.namespaces.get(name);
-        ns.permissions = namespace.permissions;
-      }
+      let ns = this.namespaces.get(name);
+      ns.permissions = namespace.permissions || null;
+      ns.restrictions = namespace.restrictions || null;
+      ns.defaultRestrictions = namespace.defaultRestrictions || null;
     }
   },
 
@@ -1636,27 +1746,74 @@ this.Schemas = {
     this.flushSchemas();
   },
 
+  /**
+   * Inject registered extension APIs into `dest`.
+   *
+   * @param {object} dest The root namespace for the APIs.
+   *     This object is usually exposed to extensions as "chrome" or "browser".
+   * @param {object} wrapperFuncs An implementation of the InjectionContext
+   *     interface, which runs the actual functionality of the generated API.
+   */
   inject(dest, wrapperFuncs) {
-    let context = new Context(wrapperFuncs);
+    let context = new InjectionContext(wrapperFuncs);
 
     for (let [namespace, ns] of this.namespaces) {
       if (ns.permissions && !ns.permissions.some(perm => context.hasPermission(perm))) {
         continue;
       }
 
+      if (!wrapperFuncs.shouldInject(namespace, null, ns.restrictions)) {
+        continue;
+      }
+
       let obj = Cu.createObjectIn(dest, {defineAs: namespace});
       for (let [name, entry] of ns) {
-        if (wrapperFuncs.shouldInject(namespace, name)) {
-          entry.inject([namespace], name, obj, context);
+        if (context.shouldInject(namespace, name, entry.restrictions || ns.defaultRestrictions)) {
+          let apiImpl = context.getImplementation(namespace, name);
+          entry.inject(apiImpl, [namespace], name, obj, context);
         }
       }
 
+      // Remove the namespace object if it is empty
       if (!Object.keys(obj).length) {
         delete dest[namespace];
+        // process the next namespace.
+        continue;
+      }
+
+      // If the nested namespaced API object (e.g devtools.inspectedWindow) is not empty,
+      // then turn `dest["nested.namespace"]` into `dest["nested"]["namespace"]`.
+      if (namespace.includes(".")) {
+        let apiObj = dest[namespace];
+        delete dest[namespace];
+
+        let nsLevels = namespace.split(".");
+        let currentObj = dest;
+        for (let nsLevel of nsLevels.slice(0, -1)) {
+          if (!currentObj[nsLevel]) {
+            // Create the namespace level if it doesn't exist yet.
+            currentObj = Cu.createObjectIn(currentObj, {defineAs: nsLevel});
+          } else {
+            // Move currentObj to the nested object if it already exists.
+            currentObj = currentObj[nsLevel];
+          }
+        }
+
+        // Copy the apiObj as the final nested level.
+        currentObj[nsLevels.pop()] = apiObj;
       }
     }
   },
 
+  /**
+   * Normalize `obj` according to the loaded schema for `typeName`.
+   *
+   * @param {object} obj The object to normalize against the schema.
+   * @param {string} typeName The name in the format namespace.propertyname
+   * @param {object} context An implementation of Context. Any validation errors
+   *     are reported to the given context.
+   * @returns {object} The normalized object.
+   */
   normalize(obj, typeName, context) {
     let [namespaceName, prop] = typeName.split(".");
     let ns = this.namespaces.get(namespaceName);

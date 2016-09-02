@@ -141,6 +141,10 @@ pref("dom.select_events.enabled", true);
 // Whether or not Web Workers are enabled.
 pref("dom.workers.enabled", true);
 
+// The number of workers per domain allowed to run concurrently.
+// We're going for effectively infinite, while preventing abuse.
+pref("dom.workers.maxPerDomain", 512);
+
 pref("dom.serviceWorkers.enabled", false);
 
 // The amount of time (milliseconds) service workers keep running after each event.
@@ -548,6 +552,8 @@ pref("media.mediasource.webm.audio.enabled", true);
 
 // Use new MediaFormatReader architecture for plain ogg.
 pref("media.format-reader.ogg", true);
+pref("media.flac.enabled", true);
+pref("media.ogg.flac.enabled", true);
 
 pref("media.benchmark.vp9.threshold", 150);
 pref("media.benchmark.frames", 300);
@@ -747,16 +753,16 @@ pref("gfx.font_rendering.opentype_svg.enabled", true);
 // comma separated list of backends to use in order of preference
 // e.g., pref("gfx.canvas.azure.backends", "direct2d,skia,cairo");
 pref("gfx.canvas.azure.backends", "direct2d1.1,skia,cairo");
-pref("gfx.content.azure.backends", "direct2d1.1,cairo");
+pref("gfx.content.azure.backends", "direct2d1.1,skia,cairo");
 #else
 #ifdef XP_MACOSX
-pref("gfx.content.azure.backends", "skia,cg");
+pref("gfx.content.azure.backends", "skia");
 pref("gfx.canvas.azure.backends", "skia");
 // Accelerated cg canvas where available (10.7+)
 pref("gfx.canvas.azure.accelerated", true);
 #else
 pref("gfx.canvas.azure.backends", "skia");
-pref("gfx.content.azure.backends", "cairo");
+pref("gfx.content.azure.backends", "skia");
 #endif
 #endif
 
@@ -827,6 +833,8 @@ pref("accessibility.force_disabled", 0);
 
 pref("accessibility.ipc_architecture.enabled", true);
 
+pref("accessibility.AOM.enabled", false);
+
 #ifdef XP_WIN
 // Some accessibility tools poke at windows in the plugin process during setup
 // which can cause hangs.  To hack around this set accessibility.delay_plugins
@@ -863,11 +871,11 @@ pref("accessibility.typeaheadfind.prefillwithselection", false);
 #else
 pref("accessibility.typeaheadfind.prefillwithselection", true);
 #endif
-pref("accessibility.typeaheadfind.matchesCountTimeout", 100);
 pref("accessibility.typeaheadfind.matchesCountLimit", 1000);
 pref("findbar.highlightAll", false);
 pref("findbar.modalHighlight", false);
 pref("findbar.entireword", false);
+pref("findbar.iteratorTimeout", 100);
 
 // use Mac OS X Appearance panel text smoothing setting when rendering text, disabled by default
 pref("gfx.use_text_smoothing_setting", false);
@@ -1143,6 +1151,10 @@ pref("dom.forms.number", true);
 // platforms which don't have a color picker implemented yet.
 pref("dom.forms.color", true);
 
+// Support for input type=date, time, month, week and datetime-local. By
+// default, disabled.
+pref("dom.forms.datetime", false);
+
 // Support for new @autocomplete values
 pref("dom.forms.autocomplete.experimental", false);
 
@@ -1219,7 +1231,7 @@ pref("javascript.options.discardSystemSource", false);
 // Comment 32 and Bug 613551.
 pref("javascript.options.mem.high_water_mark", 128);
 pref("javascript.options.mem.max", -1);
-pref("javascript.options.mem.gc_per_compartment", true);
+pref("javascript.options.mem.gc_per_zone", true);
 pref("javascript.options.mem.gc_incremental", true);
 pref("javascript.options.mem.gc_incremental_slice_ms", 10);
 pref("javascript.options.mem.gc_compacting", true);
@@ -1243,7 +1255,6 @@ pref("javascript.options.mem.gc_dynamic_heap_growth", true);
 pref("javascript.options.mem.gc_dynamic_mark_slice", true);
 pref("javascript.options.mem.gc_refresh_frame_slices_enabled", true);
 pref("javascript.options.mem.gc_allocation_threshold_mb", 30);
-pref("javascript.options.mem.gc_decommit_threshold_mb", 32);
 pref("javascript.options.mem.gc_min_empty_chunk_count", 1);
 pref("javascript.options.mem.gc_max_empty_chunk_count", 30);
 
@@ -2110,6 +2121,9 @@ pref("security.mixed_content.block_display_content", false);
 // Sub-resource integrity
 pref("security.sri.enable", true);
 
+// Block scripts with MIME type 'image/'
+pref("security.block_script_with_mime_image", true);
+
 // OCSP must-staple
 pref("security.ssl.enable_ocsp_must_staple", true);
 
@@ -2215,10 +2229,10 @@ pref("mousewheel.acceleration.start", -1);
 // factor to be multiplied for constant acceleration
 pref("mousewheel.acceleration.factor", 10);
 
-// Prefs for override the system mouse wheel scrolling speed on the root
+// Prefs for override the system mouse wheel scrolling speed on
 // content of the web pages.  When
 // "mousewheel.system_scroll_override_on_root_content.enabled" is true and the system
-// scrolling speed isn't customized by the user, the root content scrolling
+// scrolling speed isn't customized by the user, the content scrolling
 // speed is multiplied by the following factors.  The value will be used as
 // 1/100.  E.g., 200 means 2.00.
 // NOTE: Even if "mousewheel.system_scroll_override_on_root_content.enabled" is
@@ -2732,9 +2746,10 @@ pref("plugin.sessionPermissionNow.intervalInMinutes", 60);
 // to allow it persistently.
 pref("plugin.persistentPermissionAlways.intervalInDays", 90);
 
-// Set IPC timeouts for plugins and tabs, except in leak-checking builds.
-// (NS_FREE_PERMANENT_DATA is C++ only, so approximate its definition here.)
-#if !defined(DEBUG) && !defined(MOZ_ASAN) && !defined(MOZ_VALGRIND)
+// Set IPC timeouts for plugins and tabs, except in leak-checking and
+// dynamic analysis builds.  (NS_FREE_PERMANENT_DATA is C++ only, so
+// approximate its definition here.)
+#if !defined(DEBUG) && !defined(MOZ_ASAN) && !defined(MOZ_VALGRIND) && !defined(MOZ_TSAN)
 // How long a plugin is allowed to process a synchronous IPC message
 // before we consider it "hung".
 pref("dom.ipc.plugins.timeoutSecs", 45);
@@ -3394,6 +3409,12 @@ pref("intl.tsf.support_imm", true);
 
 // Whether creates native caret for ATOK or not.
 pref("intl.tsf.hack.atok.create_native_caret", true);
+// Whether use available composition string rect for result of
+// ITfContextView::GetTextExt() even if the specified range is same as the
+// range of composition string but some character rects of them are not
+// available.  Note that this is ignored if active ATOK is or older than 2016
+// and create_native_caret is true.
+pref("intl.tsf.hack.atok.do_not_return_no_layout_error_of_composition_string", true);
 // Whether use composition start position for the result of
 // ITfContextView::GetTextExt() if the specified range is larger than
 // composition start offset.
@@ -3866,17 +3887,6 @@ pref("print.print_paper_size", 0);
 // around the content of the page for Print Preview only
 pref("print.print_extra_margin", 0); // twips
 
-// CSSOM-View scroll-behavior smooth scrolling and scroll snap requires the C++ APZC
-#ifdef MOZ_ANDROID_APZ
-pref("layout.css.scroll-behavior.enabled", true);
-pref("layout.css.scroll-behavior.property-enabled", true);
-pref("layout.css.scroll-snap.enabled", true);
-#else
-pref("layout.css.scroll-behavior.enabled", false);
-pref("layout.css.scroll-behavior.property-enabled", false);
-pref("layout.css.scroll-snap.enabled", false);
-#endif
-
 /* PostScript print module prefs */
 // pref("print.postscript.enabled",      true);
 
@@ -4290,11 +4300,7 @@ pref("font.name.monospace.x-unicode", "dt-interface user-ucs2.cjk_japan-0");
 
 // Login Manager prefs
 pref("signon.rememberSignons",              true);
-#ifdef NIGHTLY_BUILD
 pref("signon.rememberSignons.visibilityToggle", true);
-#else
-pref("signon.rememberSignons.visibilityToggle", false);
-#endif
 pref("signon.autofillForms",                true);
 pref("signon.autologin.proxy",              false);
 pref("signon.formlessCapture.enabled",      true);
@@ -4403,6 +4409,7 @@ pref("gl.require-hardware", false);
 #ifdef XP_MACOSX
 pref("gl.multithreaded", true);
 #endif
+pref("gl.ignore-dx-interop2-blacklist", false);
 
 pref("webgl.force-enabled", false);
 pref("webgl.disabled", false);
@@ -4564,6 +4571,8 @@ pref("layers.componentalpha.enabled", true);
 // Use the DT-backend implemented PushLayer
 pref("gfx.content.use-native-pushlayer", false);
 
+pref("gfx.content.always-paint", false);
+
 #ifdef ANDROID
 pref("gfx.apitrace.enabled",false);
 #endif
@@ -4588,9 +4597,6 @@ pref("gfx.direct2d.force-enabled", false);
 pref("layers.prefer-opengl", false);
 pref("layers.prefer-d3d9", false);
 pref("layers.allow-d3d9-fallback", true);
-pref("layers.d3d11.force-warp", false);
-pref("layers.d3d11.disable-warp", true);
-
 #endif
 
 // Copy-on-write canvas
@@ -4793,6 +4799,12 @@ pref("dom.w3c_pointer_events.enabled", false);
 // W3C draft ImageCapture API
 pref("dom.imagecapture.enabled", false);
 
+// W3C MediaDevices devicechange event
+pref("media.ondevicechange.enabled", false);
+
+// W3C MediaDevices devicechange fake event
+pref("media.ondevicechange.fakeDeviceChangeEvent.enabled", false);
+
 // W3C touch-action css property (related to touch and pointer events)
 // Note that we turn this on even on platforms/configurations where touch
 // events are not supported (e.g. OS X, or Windows with e10s disabled). For
@@ -4922,24 +4934,18 @@ pref("dom.vr.enabled", false);
 #else
 pref("dom.vr.enabled", true);
 #endif
-// Oculus > 0.5
 pref("dom.vr.oculus.enabled", true);
-// Oculus <= 0.5; will only trigger if > 0.5 is not used or found
-pref("dom.vr.oculus050.enabled", true);
-// Cardboard VR device is disabled by default
-pref("dom.vr.cardboard.enabled", false);
 // OSVR device
 pref("dom.vr.osvr.enabled", false);
-// 0 = never; 1 = only if real devices aren't there; 2 = always
-pref("dom.vr.add-test-devices", 0);
+// OpenVR device
+pref("dom.vr.openvr.enabled", false);
 // Pose prediction reduces latency effects by returning future predicted HMD
 // poses to callers of the WebVR API.  This currently only has an effect for
 // Oculus Rift on SDK 0.8 or greater.  It is disabled by default for now due to
 // frame uniformity issues with e10s.
 pref("dom.vr.poseprediction.enabled", false);
-// true = show the VR textures in our compositing output; false = don't.
-// true might have performance impact
-pref("gfx.vr.mirror-textures", false);
+// path to openvr DLL
+pref("gfx.vr.openvr-runtime", "");
 // path to OSVR DLLs
 pref("gfx.vr.osvr.utilLibPath", "");
 pref("gfx.vr.osvr.commonLibPath", "");
@@ -5269,11 +5275,17 @@ pref("dom.beforeAfterKeyboardEvent.enabled", false);
 
 // Presentation API
 pref("dom.presentation.enabled", false);
+pref("dom.presentation.controller.enabled", false);
+pref("dom.presentation.receiver.enabled", false);
+
+// Presentation Device
 pref("dom.presentation.tcp_server.debug", false);
 pref("dom.presentation.discovery.enabled", false);
 pref("dom.presentation.discovery.legacy.enabled", false);
 pref("dom.presentation.discovery.timeout_ms", 10000);
 pref("dom.presentation.discoverable", false);
+pref("dom.presentation.discoverable.encrypted", true);
+pref("dom.presentation.discoverable.retry_ms", 5000);
 pref("dom.presentation.session_transport.data_channel.enable", false);
 
 #ifdef XP_MACOSX
@@ -5478,6 +5490,9 @@ pref("dom.input.fallbackUploadDir", "");
 // Turn rewriting of youtube embeds on/off
 pref("plugins.rewrite_youtube_embeds", true);
 
+// Don't hide Flash from navigator.plugins when it is click-to-activate
+pref("plugins.navigator_hide_disabled_flash", false);
+
 // Disable browser frames by default
 pref("dom.mozBrowserFramesEnabled", false);
 
@@ -5504,6 +5519,9 @@ pref("media.seekToNextFrame.enabled", false);
 pref("media.seekToNextFrame.enabled", true);
 #endif
 
+// return the maximum number of cores that navigator.hardwareCurrency returns
+pref("dom.maxHardwareConcurrency", 16);
+
 // Shutdown the osfile worker if its no longer needed.
 #if !defined(RELEASE_BUILD)
 pref("osfile.reset_worker_delay", 30000);
@@ -5517,4 +5535,10 @@ pref("dom.webkitBlink.filesystem.enabled", true);
 #ifdef MOZ_STYLO
 // Is the Servo-backed style system enabled?
 pref("layout.css.servo.enabled", true);
+#endif
+
+#ifdef NIGHTLY_BUILD
+pref("dom.html_fragment_serialisation.appendLF", true);
+#else
+pref("dom.html_fragment_serialisation.appendLF", false);
 #endif

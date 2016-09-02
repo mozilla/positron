@@ -32,16 +32,6 @@
   margin-top: 6px;
 }
 
-/* In private windows, the #titlebar-content is higher because of the
- * private browsing indicator. With the margin-top the titlebar buttons
- * align to the top correctly in that case, but only if we don't stretch
- * the box they're in because the container is too high, so we override
- * the default alignment value (stretch).
- */
-#main-window[tabsintitlebar] > #titlebar > #titlebar-content > #titlebar-buttonbox-container {
-  -moz-box-align: start;
-}
-
 /* Square back and forward buttons.  Need !important on these because there
    are a lot of more specific selectors sprinkled around elsewhere for changing
    background / shadows for different states */
@@ -118,12 +108,12 @@
 :root[devtoolstheme="dark"] .findbar-closebutton:not(:hover),
 /* Tab styling - make sure to use an inverted icon for the selected tab
    (brighttext only covers the unselected tabs) */
-.tab-close-button[visuallyselected=true]:not(:hover) {
+.tab-close-button[selected=true]:not(:hover) {
   -moz-image-region: rect(0, 64px, 16px, 48px);
 }
 @media (min-resolution: 2dppx) {
   :root[devtoolstheme="dark"] .findbar-closebutton:not(:hover),
-  .tab-close-button[visuallyselected=true]:not(:hover) {
+  .tab-close-button[selected=true]:not(:hover) {
     -moz-image-region: rect(0, 128px, 32px, 96px);
   }
 }

@@ -7,9 +7,6 @@
 
 "use strict";
 
-/* eslint-disable mozilla/reject-some-requires */
-const {Cc, Ci} = require("chrome");
-/* eslint-enable mozilla/reject-some-requires */
 const promise = require("promise");
 const defer = require("devtools/shared/defer");
 const Services = require("Services");
@@ -33,11 +30,7 @@ const overlays = require("devtools/client/inspector/shared/style-inspector-overl
 const EventEmitter = require("devtools/shared/event-emitter");
 const StyleInspectorMenu = require("devtools/client/inspector/shared/style-inspector-menu");
 const {KeyShortcuts} = require("devtools/client/shared/key-shortcuts");
-
-XPCOMUtils.defineLazyGetter(this, "clipboardHelper", function () {
-  return Cc["@mozilla.org/widget/clipboardhelper;1"]
-    .getService(Ci.nsIClipboardHelper);
-});
+const clipboardHelper = require("devtools/shared/platform/clipboard");
 
 XPCOMUtils.defineLazyGetter(this, "_strings", function () {
   return Services.strings.createBundle(
@@ -1591,7 +1584,7 @@ function RuleViewTool(inspector, window) {
   this.view.on("ruleview-refreshed", this.onViewRefreshed);
   this.view.on("ruleview-linked-clicked", this.onLinkClicked);
 
-  this.inspector.selection.on("detached", this.onSelected);
+  this.inspector.selection.on("detached-front", this.onSelected);
   this.inspector.selection.on("new-node-front", this.onSelected);
   this.inspector.selection.on("pseudoclass", this.refresh);
   this.inspector.target.on("navigate", this.clearUserProperties);
@@ -1722,7 +1715,7 @@ RuleViewTool.prototype = {
   destroy: function () {
     this.inspector.walker.off("mutations", this.onMutations);
     this.inspector.walker.off("resize", this.onResized);
-    this.inspector.selection.off("detached", this.onSelected);
+    this.inspector.selection.off("detached-front", this.onSelected);
     this.inspector.selection.off("pseudoclass", this.refresh);
     this.inspector.selection.off("new-node-front", this.onSelected);
     this.inspector.target.off("navigate", this.clearUserProperties);

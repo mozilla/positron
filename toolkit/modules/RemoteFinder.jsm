@@ -31,8 +31,8 @@ RemoteFinder.prototype = {
     if (this._messageManager) {
       this._messageManager.removeMessageListener("Finder:Result", this);
       this._messageManager.removeMessageListener("Finder:MatchesResult", this);
-      this._messageManager.removeMessageListener("Finder:CurrentSelectionResult",this);
-      this._messageManager.removeMessageListener("Finder:HighlightFinished",this);
+      this._messageManager.removeMessageListener("Finder:CurrentSelectionResult", this);
+      this._messageManager.removeMessageListener("Finder:HighlightFinished", this);
     }
     this._listeners.clear();
     this._browser = this._messageManager = null;
@@ -42,8 +42,8 @@ RemoteFinder.prototype = {
     if (this._messageManager) {
       this._messageManager.removeMessageListener("Finder:Result", this);
       this._messageManager.removeMessageListener("Finder:MatchesResult", this);
-      this._messageManager.removeMessageListener("Finder:CurrentSelectionResult",this);
-      this._messageManager.removeMessageListener("Finder:HighlightFinished",this);
+      this._messageManager.removeMessageListener("Finder:CurrentSelectionResult", this);
+      this._messageManager.removeMessageListener("Finder:HighlightFinished", this);
     }
     else {
       aBrowser.messageManager.sendAsyncMessage("Finder:Initialize");
@@ -185,6 +185,10 @@ RemoteFinder.prototype = {
     this._browser.messageManager.sendAsyncMessage("Finder:FindbarClose");
   },
 
+  onFindbarOpen: function () {
+    this._browser.messageManager.sendAsyncMessage("Finder:FindbarOpen");
+  },
+
   onModalHighlightChange: function(aUseModalHighlight) {
     this._browser.messageManager.sendAsyncMessage("Finder:ModalHighlightChange", {
       useModalHighlight: aUseModalHighlight
@@ -223,6 +227,7 @@ function RemoteFinderListener(global) {
   for (let msg of this.MESSAGES) {
     global.addMessageListener(msg, this);
   }
+  global.addEventListener("unload", this.destroy.bind(this));
 }
 
 RemoteFinderListener.prototype = {
@@ -240,10 +245,18 @@ RemoteFinderListener.prototype = {
     "Finder:RemoveSelection",
     "Finder:FocusContent",
     "Finder:FindbarClose",
+    "Finder:FindbarOpen",
     "Finder:KeyPress",
     "Finder:MatchesCount",
     "Finder:ModalHighlightChange"
   ],
+
+  destroy() {
+    this._finder.destroy();
+    for (let msg of this.MESSAGES)
+      this._global.removeMessageListener(msg, this);
+    this._finder = this._global = null;
+  },
 
   onFindResult: function (aData) {
     this._global.sendAsyncMessage("Finder:Result", aData);
@@ -321,6 +334,10 @@ RemoteFinderListener.prototype = {
 
       case "Finder:FindbarClose":
         this._finder.onFindbarClose();
+        break;
+
+      case "Finder:FindbarOpen":
+        this._finder.onFindbarOpen();
         break;
 
       case "Finder:KeyPress":

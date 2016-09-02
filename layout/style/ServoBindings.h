@@ -55,6 +55,26 @@ class nsStyleCoord;
 struct nsStyleDisplay;
 struct ServoDeclarationBlock;
 
+namespace mozilla {
+namespace dom {
+class StyleChildrenIterator;
+}
+}
+
+#define DECL_REF_TYPE_FOR(type_)          \
+  typedef type_* type_##Borrowed;         \
+  struct MOZ_MUST_USE_TYPE type_##Strong  \
+  {                                       \
+    type_* mPtr;                          \
+    already_AddRefed<type_> Consume();    \
+  };
+
+DECL_REF_TYPE_FOR(ServoComputedValues)
+DECL_REF_TYPE_FOR(RawServoStyleSheet)
+DECL_REF_TYPE_FOR(ServoDeclarationBlock)
+
+#undef DECL_REF_TYPE_FOR
+
 #define NS_DECL_THREADSAFE_FFI_REFCOUNTING(class_, name_)                     \
   void Gecko_AddRef##name_##ArbitraryThread(class_* aPtr);                    \
   void Gecko_Release##name_##ArbitraryThread(class_* aPtr);
@@ -94,6 +114,16 @@ RawGeckoElement* Gecko_GetPrevSiblingElement(RawGeckoElement* element);
 RawGeckoElement* Gecko_GetNextSiblingElement(RawGeckoElement* element);
 RawGeckoElement* Gecko_GetDocumentElement(RawGeckoDocument* document);
 
+// By default, Servo walks the DOM by traversing the siblings of the DOM-view
+// first child. This generally works, but misses anonymous children, which we
+// want to traverse during styling. To support these cases, we create an
+// optional heap-allocated iterator for nodes that need it. If the creation
+// method returns null, Servo falls back to the aforementioned simpler (and
+// faster) sibling traversal.
+mozilla::dom::StyleChildrenIterator* Gecko_MaybeCreateStyleChildrenIterator(RawGeckoNode* node);
+void Gecko_DropStyleChildrenIterator(mozilla::dom::StyleChildrenIterator* it);
+RawGeckoNode* Gecko_GetNextStyleChild(mozilla::dom::StyleChildrenIterator* it);
+
 // Selector Matching.
 uint8_t Gecko_ElementState(RawGeckoElement* element);
 bool Gecko_IsHTMLElementInHTMLDocument(RawGeckoElement* element);
@@ -132,12 +162,11 @@ SERVO_DECLARE_ELEMENT_ATTR_MATCHING_FUNCTIONS(Gecko_Snapshot,
 #undef SERVO_DECLARE_ELEMENT_ATTR_MATCHING_FUNCTIONS
 
 // Style attributes.
-ServoDeclarationBlock* Gecko_GetServoDeclarationBlock(RawGeckoElement* element);
+ServoDeclarationBlockBorrowed Gecko_GetServoDeclarationBlock(RawGeckoElement* element);
 
 // Node data.
 ServoNodeData* Gecko_GetNodeData(RawGeckoNode* node);
 void Gecko_SetNodeData(RawGeckoNode* node, ServoNodeData* data);
-void Servo_DropNodeData(ServoNodeData* data);
 
 // Atoms.
 nsIAtom* Gecko_Atomize(const char* aString, uint32_t aLength);
@@ -193,9 +222,10 @@ void Gecko_UnsetNodeFlags(RawGeckoNode* node, uint32_t flags);
 //
 // Also, we might want a ComputedValues to ComputedValues API for animations?
 // Not if we do them in Gecko...
-nsStyleContext* Gecko_GetStyleContext(RawGeckoNode* node);
+nsStyleContext* Gecko_GetStyleContext(RawGeckoNode* node,
+                                      nsIAtom* aPseudoTagOrNull);
 nsChangeHint Gecko_CalcStyleDifference(nsStyleContext* oldstyle,
-                                       ServoComputedValues* newstyle);
+                                       ServoComputedValuesBorrowed newstyle);
 void Gecko_StoreStyleDifference(RawGeckoNode* node, nsChangeHint change);
 
 // `array` must be an nsTArray
@@ -203,6 +233,17 @@ void Gecko_StoreStyleDifference(RawGeckoNode* node, nsChangeHint change);
 // friend function declaration in nsTArray.h
 void Gecko_EnsureTArrayCapacity(void* array, size_t capacity, size_t elem_size);
 
+// Same here, `array` must be an nsTArray<T>, for some T.
+//
+// Important note: Only valid for POD types, since destructors won't be run
+// otherwise. This is ensured with rust traits for the relevant structs.
+void Gecko_ClearPODTArray(void* array, size_t elem_size, size_t elem_align);
+
+// Clear the mContents field in nsStyleContent. This is needed to run the
+// destructors, otherwise we'd leak the images (though we still don't support
+// those), strings, and whatnot.
+void Gecko_ClearStyleContents(nsStyleContent* content);
+void Gecko_CopyStyleContentsFrom(nsStyleContent* content, const nsStyleContent* other);
 
 void Gecko_EnsureImageLayersLength(nsStyleImageLayers* layers, size_t len);
 
@@ -215,73 +256,12 @@ void Gecko_ResetStyleCoord(nsStyleUnit* unit, nsStyleUnion* value);
 // Set an nsStyleCoord to a computed `calc()` value
 void Gecko_SetStyleCoordCalcValue(nsStyleUnit* unit, nsStyleUnion* value, nsStyleCoord::CalcValue calc);
 
+void Gecko_CopyClipPathValueFrom(mozilla::StyleClipPath* dst, const mozilla::StyleClipPath* src);
+
+void Gecko_DestroyClipPath(mozilla::StyleClipPath* clip);
+mozilla::StyleBasicShape* Gecko_NewBasicShape(mozilla::StyleBasicShapeType type);
+
 NS_DECL_THREADSAFE_FFI_REFCOUNTING(nsStyleCoord::Calc, Calc);
-
-// Styleset and Stylesheet management.
-//
-// TODO: Make these return already_AddRefed and UniquePtr when the binding
-// generator is smart enough to handle them.
-RawServoStyleSheet* Servo_StylesheetFromUTF8Bytes(
-    const uint8_t* bytes, uint32_t length,
-    mozilla::css::SheetParsingMode parsing_mode,
-    const uint8_t* base_bytes, uint32_t base_length,
-    ThreadSafeURIHolder* base,
-    ThreadSafeURIHolder* referrer,
-    ThreadSafePrincipalHolder* principal);
-void Servo_AddRefStyleSheet(RawServoStyleSheet* sheet);
-void Servo_ReleaseStyleSheet(RawServoStyleSheet* sheet);
-void Servo_AppendStyleSheet(RawServoStyleSheet* sheet, RawServoStyleSet* set);
-void Servo_PrependStyleSheet(RawServoStyleSheet* sheet, RawServoStyleSet* set);
-void Servo_RemoveStyleSheet(RawServoStyleSheet* sheet, RawServoStyleSet* set);
-void Servo_InsertStyleSheetBefore(RawServoStyleSheet* sheet,
-                                  RawServoStyleSheet* reference,
-                                  RawServoStyleSet* set);
-bool Servo_StyleSheetHasRules(RawServoStyleSheet* sheet);
-RawServoStyleSet* Servo_InitStyleSet();
-void Servo_DropStyleSet(RawServoStyleSet* set);
-
-// Style attributes.
-ServoDeclarationBlock* Servo_ParseStyleAttribute(const uint8_t* bytes,
-                                                 uint32_t length,
-                                                 nsHTMLCSSStyleSheet* cache);
-void Servo_DropDeclarationBlock(ServoDeclarationBlock* declarations);
-nsHTMLCSSStyleSheet* Servo_GetDeclarationBlockCache(
-    ServoDeclarationBlock* declarations);
-void Servo_SetDeclarationBlockImmutable(ServoDeclarationBlock* declarations);
-void Servo_ClearDeclarationBlockCachePointer(ServoDeclarationBlock* declarations);
-
-// CSS supports().
-bool Servo_CSSSupports(const uint8_t* name, uint32_t name_length,
-                       const uint8_t* value, uint32_t value_length);
-
-// Computed style data.
-ServoComputedValues* Servo_GetComputedValues(RawGeckoNode* node);
-ServoComputedValues* Servo_GetComputedValuesForAnonymousBox(ServoComputedValues* parentStyleOrNull,
-                                                            nsIAtom* pseudoTag,
-                                                            RawServoStyleSet* set);
-ServoComputedValues* Servo_GetComputedValuesForPseudoElement(ServoComputedValues* parent_style,
-                                                             RawGeckoElement* match_element,
-                                                             nsIAtom* pseudo_tag,
-                                                             RawServoStyleSet* set,
-                                                             bool is_probe);
-ServoComputedValues* Servo_InheritComputedValues(ServoComputedValues* parent_style);
-void Servo_AddRefComputedValues(ServoComputedValues*);
-void Servo_ReleaseComputedValues(ServoComputedValues*);
-
-// Initialize Servo components. Should be called exactly once at startup.
-void Servo_Initialize();
-
-// Shut down Servo components. Should be called exactly once at shutdown.
-void Servo_Shutdown();
-
-// Restyle the given document or subtree.
-void Servo_RestyleDocument(RawGeckoDocument* doc, RawServoStyleSet* set);
-void Servo_RestyleSubtree(RawGeckoNode* node, RawServoStyleSet* set);
-
-// Restyle hints.
-nsRestyleHint Servo_ComputeRestyleHint(RawGeckoElement* element,
-                                       ServoElementSnapshot* snapshot,
-                                       RawServoStyleSet* set);
 
 // Style-struct management.
 #define STYLE_STRUCT(name, checkdata_cb)                                       \
@@ -289,11 +269,13 @@ nsRestyleHint Servo_ComputeRestyleHint(RawGeckoElement* element,
   void Gecko_Construct_nsStyle##name(nsStyle##name* ptr);                      \
   void Gecko_CopyConstruct_nsStyle##name(nsStyle##name* ptr,                   \
                                          const nsStyle##name* other);          \
-  void Gecko_Destroy_nsStyle##name(nsStyle##name* ptr);                        \
-  const nsStyle##name* Servo_GetStyle##name(                                   \
-    ServoComputedValues* computedValues);
+  void Gecko_Destroy_nsStyle##name(nsStyle##name* ptr);
 #include "nsStyleStructList.h"
 #undef STYLE_STRUCT
+
+#define SERVO_BINDING_FUNC(name_, return_, ...) return_ name_(__VA_ARGS__);
+#include "mozilla/ServoBindingList.h"
+#undef SERVO_BINDING_FUNC
 
 } // extern "C"
 

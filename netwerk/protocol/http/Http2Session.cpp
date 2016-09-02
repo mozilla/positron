@@ -34,7 +34,7 @@
 #include "nsURLHelper.h"
 #include "prnetdb.h"
 #include "sslt.h"
-#include "mozilla/Snprintf.h"
+#include "mozilla/Sprintf.h"
 #include "nsSocketTransportService2.h"
 #include "nsNetUtil.h"
 
@@ -2069,7 +2069,7 @@ UpdateAltSvcEvent(const nsCString &header,
 
     AltSvcMapping::ProcessHeader(mHeader, originScheme, originHost, originPort,
                                  mCI->GetUsername(), mCI->GetPrivate(), mCallbacks,
-                                 mCI->ProxyInfo(), 0);
+                                 mCI->ProxyInfo(), 0, mCI->GetOriginAttributes());
     return NS_OK;
   }
 
@@ -3549,8 +3549,8 @@ Http2Session::ConfirmTLSProfile()
     LOG3(("Http2Session::ConfirmTLSProfile %p FAILED due to DH %d < 2048\n",
           this, keybits));
     RETURN_SESSION_ERROR(this, INADEQUATE_SECURITY);
-  } else if (kea == ssl_kea_ecdh && keybits < 256) { // 256 bits is "security level" of 128
-    LOG3(("Http2Session::ConfirmTLSProfile %p FAILED due to ECDH %d < 256\n",
+  } else if (kea == ssl_kea_ecdh && keybits < 224) { // see rfc7540 9.2.1.
+    LOG3(("Http2Session::ConfirmTLSProfile %p FAILED due to ECDH %d < 224\n",
           this, keybits));
     RETURN_SESSION_ERROR(this, INADEQUATE_SECURITY);
   }

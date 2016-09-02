@@ -731,7 +731,8 @@ DrawTargetCairo::LockBits(uint8_t** aData, IntSize* aSize,
     }
   }
 #endif
-  if (cairo_surface_get_type(surf) == CAIRO_SURFACE_TYPE_IMAGE) {
+  if (cairo_surface_get_type(surf) == CAIRO_SURFACE_TYPE_IMAGE &&
+      cairo_surface_status(surf) == CAIRO_STATUS_SUCCESS) {
     PointDouble offset;
     cairo_surface_get_device_offset(target, &offset.x, &offset.y);
     // verify the device offset can be converted to integers suitable for a bounds rect
@@ -1625,6 +1626,27 @@ already_AddRefed<FilterNode>
 DrawTargetCairo::CreateFilter(FilterType aType)
 {
   return FilterNodeSoftware::Create(aType);
+}
+
+void
+DrawTargetCairo::GetGlyphRasterizationMetrics(ScaledFont *aScaledFont, const uint16_t* aGlyphIndices,
+                                              uint32_t aNumGlyphs, GlyphMetrics* aGlyphMetrics)
+{
+  for (uint32_t i = 0; i < aNumGlyphs; i++) {
+    cairo_glyph_t glyph;
+    cairo_text_extents_t extents;
+    glyph.index = aGlyphIndices[i];
+    glyph.x = 0;
+    glyph.y = 0;
+    cairo_glyph_extents(mContext, &glyph, 1, &extents);
+
+    aGlyphMetrics[i].mXBearing = extents.x_bearing;
+    aGlyphMetrics[i].mXAdvance = extents.x_advance;
+    aGlyphMetrics[i].mYBearing = extents.y_bearing;
+    aGlyphMetrics[i].mYAdvance = extents.y_advance;
+    aGlyphMetrics[i].mWidth = extents.width;
+    aGlyphMetrics[i].mHeight = extents.height;
+  }
 }
 
 already_AddRefed<SourceSurface>

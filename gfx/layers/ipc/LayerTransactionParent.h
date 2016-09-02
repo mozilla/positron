@@ -32,7 +32,7 @@ class Layer;
 class LayerManagerComposite;
 class ShadowLayerParent;
 class CompositableParent;
-class ShadowLayersManager;
+class CompositorBridgeParentBase;
 
 class LayerTransactionParent final : public PLayerTransactionParent,
                                      public CompositableParentManager,
@@ -46,7 +46,7 @@ class LayerTransactionParent final : public PLayerTransactionParent,
 
 public:
   LayerTransactionParent(LayerManagerComposite* aManager,
-                         ShadowLayersManager* aLayersManager,
+                         CompositorBridgeParentBase* aBridge,
                          uint64_t aId);
 
 protected:
@@ -109,6 +109,9 @@ protected:
 
   virtual bool RecvShutdown() override;
 
+  virtual bool RecvPaintTime(const uint64_t& aTransactionId,
+                             const TimeDuration& aPaintTime) override;
+
   virtual bool RecvUpdate(EditArray&& cset,
                           OpDestroyArray&& aToDestroy,
                           const uint64_t& aFwdTransactionId,
@@ -140,8 +143,9 @@ protected:
   virtual bool RecvForceComposite() override;
   virtual bool RecvSetTestSampleTime(const TimeStamp& aTime) override;
   virtual bool RecvLeaveTestMode() override;
-  virtual bool RecvGetOpacity(PLayerParent* aParent,
-                              float* aOpacity) override;
+  virtual bool RecvGetAnimationOpacity(PLayerParent* aParent,
+                                       float* aOpacity,
+                                       bool* aHasAnimationOpacity) override;
   virtual bool RecvGetAnimationTransform(PLayerParent* aParent,
                                          MaybeTransform* aTransform)
                                          override;
@@ -183,7 +187,7 @@ protected:
 
 private:
   RefPtr<LayerManagerComposite> mLayerManager;
-  ShadowLayersManager* mShadowLayersManager;
+  CompositorBridgeParentBase* mCompositorBridge;
   // Hold the root because it might be grafted under various
   // containers in the "real" layer tree
   RefPtr<Layer> mRoot;

@@ -487,11 +487,7 @@ CheckUserContextCompatibility(nsIDocShell* aDocShell)
     return true;
   }
 
-  uint32_t principalUserContextId;
-  nsresult rv = subjectPrincipal->GetUserContextId(&principalUserContextId);
-  NS_ENSURE_SUCCESS(rv, false);
-
-  return principalUserContextId == userContextId;
+  return subjectPrincipal->GetUserContextId() == userContextId;
 }
 
 NS_IMETHODIMP
@@ -1244,7 +1240,6 @@ nsWindowWatcher::OpenWindowInternal(mozIDOMWindowProxy* aParent,
       nsCOMPtr<nsPIDOMWindowInner> pInnerWin = parentWindow->GetCurrentInnerWindow();
 
       parentStorageManager->GetStorage(pInnerWin, subjectPrincipal,
-                                       isPrivateBrowsingWindow,
                                        getter_AddRefs(storage));
       if (storage) {
         newStorageManager->CloneStorage(storage);

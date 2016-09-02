@@ -60,7 +60,11 @@ MediaStreamAudioSourceNode::Create(AudioContext* aContext,
 void
 MediaStreamAudioSourceNode::Init(DOMMediaStream* aMediaStream, ErrorResult& aRv)
 {
-  MOZ_ASSERT(aMediaStream);
+  if (!aMediaStream) {
+    aRv.Throw(NS_ERROR_FAILURE);
+    return;
+  }
+
   MediaStream* inputStream = aMediaStream->GetPlaybackStream();
   MediaStreamGraph* graph = Context()->Graph();
   if (NS_WARN_IF(graph != inputStream->Graph())) {
@@ -96,6 +100,8 @@ void
 MediaStreamAudioSourceNode::AttachToTrack(const RefPtr<MediaStreamTrack>& aTrack)
 {
   MOZ_ASSERT(!mInputTrack);
+  MOZ_ASSERT(aTrack->AsAudioStreamTrack());
+
   if (!mStream) {
     return;
   }
@@ -145,6 +151,10 @@ void
 MediaStreamAudioSourceNode::NotifyTrackAdded(const RefPtr<MediaStreamTrack>& aTrack)
 {
   if (mInputTrack) {
+    return;
+  }
+
+  if (!aTrack->AsAudioStreamTrack()) {
     return;
   }
 

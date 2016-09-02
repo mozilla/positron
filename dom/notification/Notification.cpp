@@ -12,7 +12,7 @@
 #include "mozilla/Preferences.h"
 #include "mozilla/Services.h"
 #include "mozilla/Telemetry.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 
 #include "mozilla/dom/AppNotificationServiceOptionsBinding.h"
 #include "mozilla/dom/BindingUtils.h"
@@ -322,7 +322,7 @@ public:
   { }
 
   NS_IMETHOD
-  Run()
+  Run() override
   {
     AssertIsOnMainThread();
     if (!mWindow->IsCurrentInnerWindow()) {
@@ -1073,7 +1073,7 @@ Notification::ConstructFromFields(
 {
   MOZ_ASSERT(aGlobal);
 
-  RootedDictionary<NotificationOptions> options(nsContentUtils::RootingCx());
+  RootedDictionary<NotificationOptions> options(RootingCx());
   options.mDir = Notification::StringToDirection(nsString(aDir));
   options.mLang = aLang;
   options.mBody = aBody;
@@ -2564,7 +2564,7 @@ Notification::RegisterWorkerHolder()
   mWorkerPrivate->AssertIsOnWorkerThread();
   MOZ_ASSERT(!mWorkerHolder);
   mWorkerHolder = MakeUnique<NotificationWorkerHolder>(this);
-  if (NS_WARN_IF(!mWorkerHolder->HoldWorker(mWorkerPrivate))) {
+  if (NS_WARN_IF(!mWorkerHolder->HoldWorker(mWorkerPrivate, Canceling))) {
     return false;
   }
 
@@ -2710,7 +2710,7 @@ Notification::ShowPersistentNotification(JSContext* aCx,
   // "Otherwise, resolve promise with undefined."
   // The Notification may still not be shown due to other errors, but the spec
   // is not concerned with those.
-  p->MaybeResolve(JS::UndefinedHandleValue);
+  p->MaybeResolveWithUndefined();
 
   RefPtr<Notification> notification =
     CreateAndShow(aCx, aGlobal, aTitle, aOptions, aScope, aRv);

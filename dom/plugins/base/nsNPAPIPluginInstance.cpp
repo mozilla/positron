@@ -37,7 +37,7 @@
 #include "nsIContent.h"
 #include "nsVersionComparator.h"
 #include "mozilla/Preferences.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 #include "nsILoadContext.h"
 #include "mozilla/dom/HTMLObjectElementBinding.h"
 #include "AudioChannelService.h"
@@ -51,7 +51,6 @@ using namespace mozilla::dom;
 #include "android_npapi.h"
 #include "mozilla/Mutex.h"
 #include "mozilla/CondVar.h"
-#include "AndroidBridge.h"
 #include "mozilla/dom/ScreenOrientation.h"
 #include "mozilla/Hal.h"
 #include "GLContextProvider.h"
@@ -901,7 +900,7 @@ already_AddRefed<AndroidSurfaceTexture> nsNPAPIPluginInstance::CreateSurfaceText
 void nsNPAPIPluginInstance::OnSurfaceTextureFrameAvailable()
 {
   if (mRunning == RUNNING && mOwner)
-    AndroidBridge::Bridge()->InvalidateAndScheduleComposite();
+    mOwner->Recomposite();
 }
 
 void* nsNPAPIPluginInstance::AcquireContentWindow()

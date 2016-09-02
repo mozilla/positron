@@ -4,14 +4,13 @@
 
 "use strict";
 
-var { Cu, components } = require("chrome");
-var Services = require("Services");
 var promise = require("promise");
 var defer = require("devtools/shared/defer");
 var {Class} = require("sdk/core/heritage");
 var {EventTarget} = require("sdk/event/target");
 var events = require("sdk/event/core");
 var object = require("sdk/util/object");
+var {getStack, callFunctionWithAsyncStack} = require("devtools/shared/platform/stack");
 
 exports.emit = events.emit;
 
@@ -1091,6 +1090,9 @@ var generateRequestHandlers = function (actorSpec, actorProto) {
 };
 
 /**
+ * THIS METHOD IS DEPRECATED, AND PRESERVED ONLY FOR ADD-ONS. IT SHOULD NOT BE
+ * USED INSIDE THE TREE.
+ *
  * Create an actor class for the given actor prototype.
  *
  * @param object actorProto
@@ -1102,6 +1104,9 @@ exports.ActorClass = function (actorProto) {
 };
 
 /**
+ * THIS METHOD IS DEPRECATED, AND PRESERVED ONLY FOR ADD-ONS. IT SHOULD NOT BE
+ * USED INSIDE THE TREE.
+ *
  * Create an actor class for the given actor specification and prototype.
  *
  * @param object actorSpec
@@ -1217,7 +1222,7 @@ var Front = Class({
       deferred,
       to: to || this.actorID,
       type,
-      stack: components.stack,
+      stack: getStack(),
     });
     this.send(packet);
     return deferred.promise;
@@ -1263,10 +1268,10 @@ var Front = Class({
     }
 
     let { deferred, stack } = this._requests.shift();
-    Cu.callFunctionWithAsyncStack(() => {
+    callFunctionWithAsyncStack(() => {
       if (packet.error) {
         // "Protocol error" is here to avoid TBPL heuristics. See also
-        // https://mxr.mozilla.org/webtools-central/source/tbpl/php/inc/GeneralErrorFilter.php
+        // https://dxr.mozilla.org/webtools-central/source/tbpl/php/inc/GeneralErrorFilter.php
         let message;
         if (packet.error && packet.message) {
           message = "Protocol error (" + packet.error + "): " + packet.message;

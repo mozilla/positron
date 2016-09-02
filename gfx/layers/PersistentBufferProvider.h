@@ -63,6 +63,16 @@ public:
   virtual TextureClient* GetTextureClient() { return nullptr; }
 
   virtual void OnShutdown() {}
+
+  virtual bool SetForwarder(CompositableForwarder* aFwd) { return true; }
+
+  /**
+   * Return true if this provider preserves the drawing state (clips, transforms,
+   * etc.) across frames. In practice this means users of the provider can skip
+   * popping all of the clips at the end of the frames and pushing them back at
+   * the beginning of the following frames, which can be costly (cf. bug 1294351).
+   */
+  virtual bool PreservesDrawingState() const = 0;
 };
 
 
@@ -86,6 +96,7 @@ public:
 
   virtual void ReturnSnapshot(already_AddRefed<gfx::SourceSurface> aSnapshot) override;
 
+  virtual bool PreservesDrawingState() const override { return true; }
 private:
   ~PersistentBufferProviderBasic();
 
@@ -124,6 +135,9 @@ public:
 
   virtual void OnShutdown() override { Destroy(); }
 
+  virtual bool SetForwarder(CompositableForwarder* aFwd) override;
+
+  virtual bool PreservesDrawingState() const override { return false; }
 protected:
   PersistentBufferProviderShared(gfx::IntSize aSize, gfx::SurfaceFormat aFormat,
                                  CompositableForwarder* aFwd,

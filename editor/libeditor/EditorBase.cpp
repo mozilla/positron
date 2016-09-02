@@ -219,7 +219,9 @@ EditorBase::Init(nsIDOMDocument* aDoc,
                  uint32_t aFlags,
                  const nsAString& aValue)
 {
-  NS_PRECONDITION(aDoc, "bad arg");
+  MOZ_ASSERT(mAction == EditAction::none,
+             "Initializing during an edit action is an error");
+  MOZ_ASSERT(aDoc);
   if (!aDoc)
     return NS_ERROR_NULL_POINTER;
 
@@ -1772,7 +1774,7 @@ public:
   {
   }
 
-  NS_IMETHOD Run()
+  NS_IMETHOD Run() override
   {
     // Note that we don't need to check mDispatchInputEvent here.  We need
     // to check it only when the editor requests to dispatch the input event.

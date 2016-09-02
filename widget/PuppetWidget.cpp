@@ -17,7 +17,7 @@
 #include "mozilla/Preferences.h"
 #include "mozilla/TextComposition.h"
 #include "mozilla/TextEvents.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 #include "PuppetWidget.h"
 #include "nsContentUtils.h"
 #include "nsIWidgetListener.h"
@@ -101,11 +101,11 @@ PuppetWidget::~PuppetWidget()
   Destroy();
 }
 
-NS_IMETHODIMP
-PuppetWidget::Create(nsIWidget* aParent,
-                     nsNativeWidget aNativeParent,
-                     const LayoutDeviceIntRect& aRect,
-                     nsWidgetInitData* aInitData)
+void
+PuppetWidget::InfallibleCreate(nsIWidget* aParent,
+                               nsNativeWidget aNativeParent,
+                               const LayoutDeviceIntRect& aRect,
+                               nsWidgetInitData* aInitData)
 {
   MOZ_ASSERT(!aNativeParent, "got a non-Puppet native parent");
 
@@ -133,7 +133,15 @@ PuppetWidget::Create(nsIWidget* aParent,
     mMemoryPressureObserver = new MemoryPressureObserver(this);
     obs->AddObserver(mMemoryPressureObserver, "memory-pressure", false);
   }
+}
 
+nsresult
+PuppetWidget::Create(nsIWidget* aParent,
+                     nsNativeWidget aNativeParent,
+                     const LayoutDeviceIntRect& aRect,
+                     nsWidgetInitData* aInitData)
+{
+  InfallibleCreate(aParent, aNativeParent, aRect, aInitData);
   return NS_OK;
 }
 
@@ -162,11 +170,11 @@ PuppetWidget::CreateChild(const LayoutDeviceIntRect& aRect,
           widget.forget() : nullptr);
 }
 
-NS_IMETHODIMP
+void
 PuppetWidget::Destroy()
 {
   if (mOnDestroyCalled) {
-    return NS_OK;
+    return;
   }
   mOnDestroyCalled = true;
 
@@ -183,7 +191,6 @@ PuppetWidget::Destroy()
   }
   mLayerManager = nullptr;
   mTabChild = nullptr;
-  return NS_OK;
 }
 
 NS_IMETHODIMP
@@ -251,8 +258,7 @@ PuppetWidget::ConfigureChildren(const nsTArray<Configuration>& aConfigurations)
     NS_ASSERTION(w->GetParent() == this,
                  "Configured widget is not a child");
     w->SetWindowClipRegion(configuration.mClipRegion, true);
-    LayoutDeviceIntRect bounds;
-    w->GetBounds(bounds);
+    LayoutDeviceIntRect bounds = w->GetBounds();
     if (bounds.Size() != configuration.mBounds.Size()) {
       w->Resize(configuration.mBounds.x, configuration.mBounds.y,
                 configuration.mBounds.width, configuration.mBounds.height,
@@ -1241,11 +1247,10 @@ PuppetWidget::GetWindowPosition()
   return nsIntPoint(winX, winY) + GetOwningTabChild()->GetClientOffset().ToUnknownPoint();
 }
 
-NS_METHOD
-PuppetWidget::GetScreenBounds(LayoutDeviceIntRect& aRect) {
-  aRect.MoveTo(WidgetToScreenOffset());
-  aRect.SizeTo(mBounds.Size());
-  return NS_OK;
+LayoutDeviceIntRect
+PuppetWidget::GetScreenBounds()
+{
+  return LayoutDeviceIntRect(WidgetToScreenOffset(), mBounds.Size());
 }
 
 uint32_t PuppetWidget::GetMaxTouchPoints() const

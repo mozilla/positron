@@ -16,7 +16,7 @@
 #include "prprf.h"
 #include "GfxDriverInfo.h"
 #include "mozilla/Preferences.h"
-#include "mozilla/gfx/DeviceManagerD3D11.h"
+#include "mozilla/gfx/DeviceManagerDx.h"
 #include "mozilla/gfx/Logging.h"
 #include "nsPrintfCString.h"
 #include "jsapi.h"
@@ -49,7 +49,17 @@ GfxInfo::GfxInfo()
 nsresult
 GfxInfo::GetD2DEnabled(bool *aEnabled)
 {
-  *aEnabled = gfxWindowsPlatform::GetPlatform()->IsDirect2DBackend();
+  // Telemetry queries this during XPCOM initialization, and there's no
+  // gfxPlatform by then. Just bail out if gfxPlatform isn't initialized.
+  if (!gfxPlatform::Initialized()) {
+    *aEnabled = false;
+    return NS_OK;
+  }
+
+  // We check gfxConfig rather than the actual render mode, since the UI
+  // process does not use Direct2D if the GPU process is enabled. However,
+  // content processes can still use Direct2D.
+  *aEnabled = gfx::gfxConfig::IsEnabled(gfx::Feature::DIRECT2D);
   return NS_OK;
 }
 
@@ -924,7 +934,7 @@ GfxInfo::GetGfxDriverInfo()
     // Bug 1198815
     APPEND_TO_DRIVER_BLOCKLIST_RANGE(OperatingSystem::Windows,
       (nsAString&) GfxDriverInfo::GetDeviceVendor(VendorATI), GfxDriverInfo::allDevices,
-      GfxDriverInfo::allFeatures, nsIGfxInfo::FEATURE_BLOCKED_DRIVER_VERSION,
+      nsIGfxInfo::FEATURE_HARDWARE_VIDEO_DECODING, nsIGfxInfo::FEATURE_BLOCKED_DRIVER_VERSION,
       DRIVER_BETWEEN_INCLUSIVE, V(15,200,0,0), V(15,200,1062,1004),
       "FEATURE_FAILURE_BUG_1198815", "15.200.0.0-15.200.1062.1004");
 
@@ -1185,8 +1195,8 @@ GfxInfo::GetGfxDriverInfo()
     // Older than 11-18-2015
     APPEND_TO_DRIVER_BLOCKLIST2(OperatingSystem::Windows,
       (nsAString&) GfxDriverInfo::GetDeviceVendor(VendorIntel), GfxDriverInfo::allDevices,
-      nsIGfxInfo::FEATURE_WEBGL_OPENGL, nsIGfxInfo::FEATURE_DISCOURAGED, DRIVER_LESS_THAN,
-      V(20,19,15,4331), "WEBGL_NATIVE_GL_OLD_INTEL");
+      nsIGfxInfo::FEATURE_WEBGL_OPENGL, nsIGfxInfo::FEATURE_DISCOURAGED, DRIVER_BUILD_ID_LESS_THAN,
+      4331, "WEBGL_NATIVE_GL_OLD_INTEL");
 
     // Older than 2-23-2016
     APPEND_TO_DRIVER_BLOCKLIST2(OperatingSystem::Windows,
@@ -1194,6 +1204,14 @@ GfxInfo::GetGfxDriverInfo()
       nsIGfxInfo::FEATURE_WEBGL_OPENGL, nsIGfxInfo::FEATURE_DISCOURAGED, DRIVER_LESS_THAN,
       V(10,18,13,6200), "WEBGL_NATIVE_GL_OLD_NVIDIA");
 
+    ////////////////////////////////////
+    // FEATURE_DX_INTEROP2
+
+    // All AMD.
+    APPEND_TO_DRIVER_BLOCKLIST2(OperatingSystem::Windows,
+      (nsAString&) GfxDriverInfo::GetDeviceVendor(VendorAMD), GfxDriverInfo::allDevices,
+      nsIGfxInfo::FEATURE_DX_INTEROP2, nsIGfxInfo::FEATURE_BLOCKED_DRIVER_VERSION,
+      DRIVER_LESS_THAN, GfxDriverInfo::allDriverVersions, "DX_INTEROP2_AMD_CRASH");
   }
   return *mDriverInfo;
 }
@@ -1335,8 +1353,8 @@ GfxInfo::DescribeFeatures(JSContext* aCx, JS::Handle<JSObject*> aObj)
     return;
   }
   if (d3d11 == gfx::FeatureStatus::Available) {
-    DeviceManagerD3D11* dm = DeviceManagerD3D11::Get();
-    JS::Rooted<JS::Value> val(aCx, JS::Int32Value(dm->GetD3D11Version()));
+    DeviceManagerDx* dm = DeviceManagerDx::Get();
+    JS::Rooted<JS::Value> val(aCx, JS::Int32Value(dm->GetCompositorFeatureLevel()));
     JS_SetProperty(aCx, obj, "version", val);
 
     val = JS::BooleanValue(dm->IsWARP());

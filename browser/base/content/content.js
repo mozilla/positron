@@ -500,7 +500,8 @@ var ClickEventHandler = {
                  ctrlKey: event.ctrlKey, metaKey: event.metaKey,
                  altKey: event.altKey, href: null, title: null,
                  bookmark: false, referrerPolicy: referrerPolicy,
-                 originAttributes: principal ? principal.originAttributes : {} };
+                 originAttributes: principal ? principal.originAttributes : {},
+                 isContentWindowPrivate: PrivateBrowsingUtils.isContentWindowPrivate(ownerDoc.defaultView)};
 
     if (href) {
       try {
@@ -713,10 +714,6 @@ PageMetadataMessenger.init();
 
 addEventListener("ActivateSocialFeature", function (aEvent) {
   let document = content.document;
-  if (PrivateBrowsingUtils.isContentWindowPrivate(content)) {
-    Cu.reportError("cannot use social providers in private windows");
-    return;
-  }
   let dwu = content.QueryInterface(Ci.nsIInterfaceRequestor)
                    .getInterface(Ci.nsIDOMWindowUtils);
   if (!dwu.isHandlingUserInput) {
@@ -1194,7 +1191,7 @@ var PageInfoListener = {
           // TODO: Reimplement once bug 714757 is fixed.
           let strVal = val.getStringValue();
           if (strVal.search(/^.*url\(\"?/) > -1) {
-            let url = strVal.replace(/^.*url\(\"?/,"").replace(/\"?\).*$/,"");
+            let url = strVal.replace(/^.*url\(\"?/, "").replace(/\"?\).*$/, "");
             addImage(url, label, strings.notSet, elem, true);
           }
         }

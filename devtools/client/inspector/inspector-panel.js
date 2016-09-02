@@ -6,15 +6,10 @@
 
 "use strict";
 
-/* eslint-disable mozilla/reject-some-requires */
-const {Cc, Ci} = require("chrome");
-/* eslint-enable mozilla/reject-some-requires */
-
 var Services = require("Services");
 var promise = require("promise");
 var defer = require("devtools/shared/defer");
 var EventEmitter = require("devtools/shared/event-emitter");
-var clipboard = require("sdk/clipboard");
 const {executeSoon} = require("devtools/shared/DevToolsUtils");
 var {KeyShortcuts} = require("devtools/client/shared/key-shortcuts");
 var {Task} = require("devtools/shared/task");
@@ -34,15 +29,13 @@ const {MarkupView} = require("devtools/client/inspector/markup/markup");
 const {RuleViewTool} = require("devtools/client/inspector/rules/rules");
 const {ToolSidebar} = require("devtools/client/inspector/toolsidebar");
 const {ViewHelpers} = require("devtools/client/shared/widgets/view-helpers");
+const clipboardHelper = require("devtools/shared/platform/clipboard");
 
 loader.lazyGetter(this, "strings", () => {
   return Services.strings.createBundle("chrome://devtools/locale/inspector.properties");
 });
 loader.lazyGetter(this, "toolboxStrings", () => {
   return Services.strings.createBundle("chrome://devtools/locale/toolbox.properties");
-});
-loader.lazyGetter(this, "clipboardHelper", () => {
-  return Cc["@mozilla.org/widget/clipboardhelper;1"].getService(Ci.nsIClipboardHelper);
 });
 
 /**
@@ -182,17 +175,21 @@ InspectorPanel.prototype = {
     this._supportsScrollIntoView = false;
     this._supportsResolveRelativeURL = false;
 
-    return promise.all([
-      this._target.actorHasMethod("domwalker", "duplicateNode").then(value => {
-        this._supportsDuplicateNode = value;
-      }).catch(e => console.error(e)),
-      this._target.actorHasMethod("domnode", "scrollIntoView").then(value => {
-        this._supportsScrollIntoView = value;
-      }).catch(e => console.error(e)),
-      this._target.actorHasMethod("inspector", "resolveRelativeURL").then(value => {
-        this._supportsResolveRelativeURL = value;
-      }).catch(e => console.error(e)),
-    ]);
+    // Use getActorDescription first so that all actorHasMethod calls use
+    // a cached response from the server.
+    return this._target.getActorDescription("domwalker").then(desc => {
+      return promise.all([
+        this._target.actorHasMethod("domwalker", "duplicateNode").then(value => {
+          this._supportsDuplicateNode = value;
+        }).catch(e => console.error(e)),
+        this._target.actorHasMethod("domnode", "scrollIntoView").then(value => {
+          this._supportsScrollIntoView = value;
+        }).catch(e => console.error(e)),
+        this._target.actorHasMethod("inspector", "resolveRelativeURL").then(value => {
+          this._supportsResolveRelativeURL = value;
+        }).catch(e => console.error(e)),
+      ]);
+    });
   },
 
   _deferredOpen: function (defaultSelection) {
@@ -213,7 +210,7 @@ InspectorPanel.prototype = {
       this.updateDebuggerPausedWarning = () => {
         let notificationBox = this._toolbox.getNotificationBox();
         let notification =
-            notificationBox.getNotificationWithValue("inspector-script-paused");
+          notificationBox.getNotificationWithValue("inspector-script-paused");
         if (!notification && this._toolbox.currentToolId == "inspector" &&
             this._toolbox.threadClient.paused) {
           let message = strings.GetStringFromName("debuggerPausedWarning.message");
@@ -243,8 +240,10 @@ InspectorPanel.prototype = {
 
       // All the components are initialized. Let's select a node.
       this.selection.setNodeFront(defaultSelection, "inspector-open");
-
       this.markup.expandNode(this.selection.nodeFront);
+
+      // And setup the toolbar only now because it may depend on the document.
+      this.setupToolbar();
 
       this.emit("ready");
       deferred.resolve(this);
@@ -252,7 +251,6 @@ InspectorPanel.prototype = {
 
     this.setupSearchBox();
     this.setupSidebar();
-    this.setupToolbar();
 
     return deferred.promise;
   },
@@ -353,9 +351,10 @@ InspectorPanel.prototype = {
    */
   setupSearchBox: function () {
     this.searchBox = this.panelDoc.getElementById("inspector-searchbox");
+    this.searchClearButton = this.panelDoc.getElementById("inspector-searchinput-clear");
     this.searchResultsLabel = this.panelDoc.getElementById("inspector-searchlabel");
 
-    this.search = new InspectorSearch(this, this.searchBox);
+    this.search = new InspectorSearch(this, this.searchBox, this.searchClearButton);
     this.search.on("search-cleared", this._updateSearchResultsLabel);
     this.search.on("search-result", this._updateSearchResultsLabel);
 
@@ -511,6 +510,8 @@ InspectorPanel.prototype = {
   },
 
   setupToolbar: function () {
+    this.teardownToolbar();
+
     // Setup the sidebar toggle button.
     let SidebarToggle = this.React.createFactory(this.browserRequire(
       "devtools/client/shared/components/sidebar-toggle"));
@@ -530,21 +531,28 @@ InspectorPanel.prototype = {
     this.addNodeButton = this.panelDoc.getElementById("inspector-element-add-button");
     this.addNodeButton.addEventListener("click", this.addNode);
 
-    // Setup the eye-dropper icon.
-    this.toolbox.target.actorHasMethod("inspector", "pickColorFromPage").then(value => {
-      if (!value) {
-        return;
-      }
+    // Setup the eye-dropper icon if we're in an HTML document and we have actor support.
+    if (this.selection.nodeFront && this.selection.nodeFront.isInHTMLDocument) {
+      this.toolbox.target.actorHasMethod("inspector", "pickColorFromPage").then(value => {
+        if (!value) {
+          return;
+        }
 
-      this.onEyeDropperDone = this.onEyeDropperDone.bind(this);
-      this.onEyeDropperButtonClicked = this.onEyeDropperButtonClicked.bind(this);
-      this.eyeDropperButton = this.panelDoc.getElementById("inspector-eyedropper-toggle");
-      this.eyeDropperButton.style.display = "initial";
-      this.eyeDropperButton.addEventListener("click", this.onEyeDropperButtonClicked);
-    }, e => console.error(e));
+        this.onEyeDropperDone = this.onEyeDropperDone.bind(this);
+        this.onEyeDropperButtonClicked = this.onEyeDropperButtonClicked.bind(this);
+        this.eyeDropperButton = this.panelDoc
+                                    .getElementById("inspector-eyedropper-toggle");
+        this.eyeDropperButton.style.display = "initial";
+        this.eyeDropperButton.addEventListener("click", this.onEyeDropperButtonClicked);
+      }, e => console.error(e));
+    } else {
+      this.panelDoc.getElementById("inspector-eyedropper-toggle").style.display = "none";
+    }
   },
 
   teardownToolbar: function () {
+    this._sidebarToggle = null;
+
     if (this.addNodeButton) {
       this.addNodeButton.removeEventListener("click", this.addNode);
       this.addNodeButton = null;
@@ -582,6 +590,9 @@ InspectorPanel.prototype = {
         this.markup.expandNode(this.selection.nodeFront);
         this.emit("new-root");
       });
+
+      // Setup the toolbar again, since its content may depend on the current document.
+      this.setupToolbar();
     };
     this._pendingSelection = onNodeSelected;
     this._getDefaultNodeForSelection()
@@ -796,7 +807,6 @@ InspectorPanel.prototype = {
     this.teardownToolbar();
     this.breadcrumbs.destroy();
     this.selection.off("new-node-front", this.onNewSelection);
-    this.selection.off("before-new-node", this.onBeforeNewSelection);
     this.selection.off("before-new-node-front", this.onBeforeNewSelection);
     this.selection.off("detached-front", this.onDetached);
     let markupDestroyer = this._destroyMarkup();
@@ -824,10 +834,10 @@ InspectorPanel.prototype = {
    * into the current node's outer HTML, otherwise returns null.
    */
   _getClipboardContentForPaste: function () {
-    let flavors = clipboard.currentFlavors;
+    let flavors = clipboardHelper.getCurrentFlavors();
     if (flavors.indexOf("text") != -1 ||
         (flavors.indexOf("html") != -1 && flavors.indexOf("image") == -1)) {
-      let content = clipboard.get();
+      let content = clipboardHelper.getData();
       if (content && content.trim().length > 0) {
         return content;
       }
@@ -1304,10 +1314,16 @@ InspectorPanel.prototype = {
    * @return {Promise} resolves when the eyedropper is visible.
    */
   showEyeDropper: function () {
+    // The eyedropper button doesn't exist, most probably because the actor doesn't
+    // support the pickColorFromPage, or because the page isn't HTML.
+    if (!this.eyeDropperButton) {
+      return null;
+    }
+
     this.telemetry.toolOpened("toolbareyedropper");
     this.eyeDropperButton.setAttribute("checked", "true");
     this.startEyeDropperListeners();
-    return this.inspector.pickColorFromPage({copyOnSelect: true})
+    return this.inspector.pickColorFromPage(this.toolbox, {copyOnSelect: true})
                          .catch(e => console.error(e));
   },
 
@@ -1316,6 +1332,12 @@ InspectorPanel.prototype = {
    * @return {Promise} resolves when the eyedropper is hidden.
    */
   hideEyeDropper: function () {
+    // The eyedropper button doesn't exist, most probably because the actor doesn't
+    // support the pickColorFromPage, or because the page isn't HTML.
+    if (!this.eyeDropperButton) {
+      return null;
+    }
+
     this.eyeDropperButton.removeAttribute("checked");
     this.stopEyeDropperListeners();
     return this.inspector.cancelPickColorFromPage()
@@ -1456,7 +1478,8 @@ InspectorPanel.prototype = {
 
   /**
    * Paste the contents of the clipboard as adjacent HTML to the selected Node.
-   * @param position The position as specified for Element.insertAdjacentHTML
+   * @param position
+   *        The position as specified for Element.insertAdjacentHTML
    *        (i.e. "beforeBegin", "afterBegin", "beforeEnd", "afterEnd").
    */
   pasteAdjacentHTML: function (position) {
@@ -1516,8 +1539,8 @@ InspectorPanel.prototype = {
   /**
    * Copy the content of a longString (via a promise resolving a
    * LongStringActor) to the clipboard
-   * @param  {Promise} longStringActorPromise promise expected to
-   *         resolve a LongStringActor instance
+   * @param  {Promise} longStringActorPromise
+   *         promise expected to resolve a LongStringActor instance
    * @return {Promise} promise resolving (with no argument) when the
    *         string is sent to the clipboard
    */
@@ -1529,8 +1552,8 @@ InspectorPanel.prototype = {
 
   /**
    * Retrieve the content of a longString (via a promise resolving a LongStringActor)
-   * @param  {Promise} longStringActorPromise promise expected to
-   *         resolve a LongStringActor instance
+   * @param  {Promise} longStringActorPromise
+   *         promise expected to resolve a LongStringActor instance
    * @return {Promise} promise resolving with the retrieved string as argument
    */
   _getLongString: function (longStringActorPromise) {

@@ -6,7 +6,7 @@
 
 #include "RemoteOpenFileChild.h"
 
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 #include "mozilla/ipc/FileDescriptor.h"
 #include "mozilla/ipc/FileDescriptorUtils.h"
 #include "mozilla/ipc/URIUtils.h"
@@ -54,7 +54,7 @@ public:
     }
 
 private:
-    NS_IMETHOD Run()
+    NS_IMETHOD Run() override
     {
         MOZ_ASSERT(NS_IsMainThread());
         MOZ_ASSERT(mListener);
@@ -371,6 +371,9 @@ RemoteOpenFileChild::OpenNSPRFileDesc(int32_t aFlags, int32_t aMode,
 
   PROsfd osfd = dup(PR_FileDesc2NativeHandle(mNSPRFileDesc));
   *aRetval = PR_ImportFile(osfd);
+  if (!*aRetval) {
+    return NS_ERROR_NOT_AVAILABLE;
+  }
 
   return NS_OK;
 #endif

@@ -180,6 +180,16 @@ function tunnelToInnerBrowser(outer, inner) {
       outer.setDocShellIsActiveAndForeground = value => {
         inner.frameLoader.tabParent.setDocShellIsActiveAndForeground(value);
       };
+
+      // Make the PopupNotifications object available on the iframe's owner
+      // This is used for permission doorhangers
+      Object.defineProperty(inner.ownerGlobal, "PopupNotifications", {
+        get() {
+          return outer.ownerGlobal.PopupNotifications;
+        },
+        configurable: true,
+        enumerable: true,
+      });
     }),
 
     stop() {
@@ -209,6 +219,9 @@ function tunnelToInnerBrowser(outer, inner) {
       delete outer.hasContentOpener;
       delete outer.docShellIsActive;
       delete outer.setDocShellIsActiveAndForeground;
+
+      // Delete the PopupNotifications getter added for permission doorhangers
+      delete inner.ownerGlobal.PopupNotifications;
 
       mmTunnel.destroy();
       mmTunnel = null;
@@ -506,14 +519,18 @@ MessageManagerTunnel.prototype = {
     this.innerParentMM.sendAsyncMessage(name, ...args);
   },
 
-  receiveMessage({ name, data, objects, principal }) {
+  receiveMessage({ name, data, objects, principal, sync }) {
     if (!this._shouldTunnelInnerToOuter(name)) {
       debug(`Received unexpected message ${name}`);
-      return;
+      return undefined;
     }
 
-    debug(`${name} inner -> outer`);
+    debug(`${name} inner -> outer, sync: ${sync}`);
+    if (sync) {
+      return this.outerChildMM.sendSyncMessage(name, data, objects, principal);
+    }
     this.outerChildMM.sendAsyncMessage(name, data, objects, principal);
+    return undefined;
   },
 
   _shouldTunnelOuterToInner(name) {

@@ -20,6 +20,7 @@
 #include "nsCOMPtr.h"                // for already_AddRefed
 #include "mozilla/gfx/Point.h"       // for mozilla::gfx::IntSize
 #include "mozilla/gfx/2D.h"          // for SourceSurface
+#include "PlaybackType.h"
 #include "SurfaceFlags.h"
 #include "SVGImageContext.h"         // for SVGImageContext
 
@@ -55,7 +56,7 @@ public:
   {
     return aOther.mSize == mSize &&
            aOther.mSVGContext == mSVGContext &&
-           aOther.mAnimationTime == mAnimationTime &&
+           aOther.mPlayback == mPlayback &&
            aOther.mFlags == mFlags;
   }
 
@@ -63,23 +64,23 @@ public:
   {
     uint32_t hash = HashGeneric(mSize.width, mSize.height);
     hash = AddToHash(hash, mSVGContext.map(HashSIC).valueOr(0));
-    hash = AddToHash(hash, mAnimationTime, uint32_t(mFlags));
+    hash = AddToHash(hash, uint8_t(mPlayback), uint32_t(mFlags));
     return hash;
   }
 
   const IntSize& Size() const { return mSize; }
   Maybe<SVGImageContext> SVGContext() const { return mSVGContext; }
-  float AnimationTime() const { return mAnimationTime; }
+  PlaybackType Playback() const { return mPlayback; }
   SurfaceFlags Flags() const { return mFlags; }
 
 private:
   SurfaceKey(const IntSize& aSize,
              const Maybe<SVGImageContext>& aSVGContext,
-             const float aAnimationTime,
-             const SurfaceFlags aFlags)
+             PlaybackType aPlayback,
+             SurfaceFlags aFlags)
     : mSize(aSize)
     , mSVGContext(aSVGContext)
-    , mAnimationTime(aAnimationTime)
+    , mPlayback(aPlayback)
     , mFlags(aFlags)
   { }
 
@@ -87,36 +88,35 @@ private:
     return aSIC.Hash();
   }
 
-  friend SurfaceKey RasterSurfaceKey(const IntSize&,
-                                     SurfaceFlags,
-                                     uint32_t);
+  friend SurfaceKey RasterSurfaceKey(const IntSize&, SurfaceFlags, PlaybackType);
   friend SurfaceKey VectorSurfaceKey(const IntSize&,
-                                     const Maybe<SVGImageContext>&,
-                                     float);
+                                     const Maybe<SVGImageContext>&);
 
   IntSize                mSize;
   Maybe<SVGImageContext> mSVGContext;
-  float                  mAnimationTime;
+  PlaybackType           mPlayback;
   SurfaceFlags           mFlags;
 };
 
 inline SurfaceKey
 RasterSurfaceKey(const gfx::IntSize& aSize,
                  SurfaceFlags aFlags,
-                 uint32_t aFrameNum)
+                 PlaybackType aPlayback)
 {
-  return SurfaceKey(aSize, Nothing(), float(aFrameNum), aFlags);
+  return SurfaceKey(aSize, Nothing(), aPlayback, aFlags);
 }
 
 inline SurfaceKey
 VectorSurfaceKey(const gfx::IntSize& aSize,
-                 const Maybe<SVGImageContext>& aSVGContext,
-                 float aAnimationTime)
+                 const Maybe<SVGImageContext>& aSVGContext)
 {
   // We don't care about aFlags for VectorImage because none of the flags we
   // have right now influence VectorImage's rendering. If we add a new flag that
   // *does* affect how a VectorImage renders, we'll have to change this.
-  return SurfaceKey(aSize, aSVGContext, aAnimationTime, DefaultSurfaceFlags());
+  // Similarly, we don't accept a PlaybackType parameter because we don't
+  // currently cache frames of animated SVG images.
+  return SurfaceKey(aSize, aSVGContext, PlaybackType::eStatic,
+                    DefaultSurfaceFlags());
 }
 
 
@@ -194,33 +194,33 @@ struct SurfaceCache
   static void Shutdown();
 
   /**
-   * Looks up and returns the requested cache entry.
+   * Looks up the requested cache entry and returns a drawable reference to its
+   * associated surface.
    *
    * If the image associated with the cache entry is locked, then the entry will
    * be locked before it is returned.
    *
-   * This function returns an ISurfaceProvider, but it does not guarantee that
-   * the ISurfaceProvider can give the caller a drawable surface. Lookup()
-   * callers should check that ISurfaceProvider::DrawableRef() returns a
-   * non-empty value; if not, some sort of serious failure has occurred, and the
-   * best bet is to remove all existing surfaces for the image from the cache
-   * using RemoveImage() and try to recover. The most likely cause for this kind
-   * of failure is the surface's volatile buffer being freed by the operating
-   * system due to extreme memory pressure.
+   * If a matching ISurfaceProvider was found in the cache, but SurfaceCache
+   * couldn't obtain a surface from it (e.g. because it had stored its surface
+   * in a volatile buffer which was discarded by the OS) then it is
+   * automatically removed from the cache and an empty LookupResult is returned.
+   * Note that this will never happen to ISurfaceProviders associated with a
+   * locked image; SurfaceCache tells such ISurfaceProviders to keep a strong
+   * references to their data internally.
    *
    * @param aImageKey       Key data identifying which image the cache entry
    *                        belongs to.
    * @param aSurfaceKey     Key data which uniquely identifies the requested
    *                        cache entry.
-   * @return                a LookupResult which will contain an ISurfaceProvider
-   *                        for the requested surface if a matching cache entry
-   *                        was found.
+   * @return                a LookupResult which will contain a DrawableSurface
+   *                        if the cache entry was found.
    */
   static LookupResult Lookup(const ImageKey    aImageKey,
                              const SurfaceKey& aSurfaceKey);
 
   /**
-   * Looks up and returns the best matching cache entry.
+   * Looks up the best matching cache entry and returns a drawable reference to
+   * its associated surface.
    *
    * The result may vary from the requested cache entry only in terms of size.
    *
@@ -228,13 +228,11 @@ struct SurfaceCache
    *                        belongs to.
    * @param aSurfaceKey     Key data which uniquely identifies the requested
    *                        cache entry.
-   * @return                a LookupResult which will contain either an
-   *                        ISurfaceProvider for a surface similar to the one
-   *                        the caller requested, or no ISurfaceProvider if no
-   *                        acceptable match was found. Callers can use
+   * @return                a LookupResult which will contain a DrawableSurface
+   *                        if a cache entry similar to the one the caller
+   *                        requested could be found. Callers can use
    *                        LookupResult::IsExactMatch() to check whether the
-   *                        returned ISurfaceProvider exactly matches
-   *                        @aSurfaceKey.
+   *                        returned surface exactly matches @aSurfaceKey.
    */
   static LookupResult LookupBestMatch(const ImageKey    aImageKey,
                                       const SurfaceKey& aSurfaceKey);
@@ -242,8 +240,8 @@ struct SurfaceCache
   /**
    * Insert an ISurfaceProvider into the cache. If an entry with the same
    * ImageKey and SurfaceKey is already in the cache, Insert returns
-   * FAILURE_ALREADY_PRESENT. If a matching placeholder is already present, the
-   * placeholder is removed.
+   * FAILURE_ALREADY_PRESENT. If a matching placeholder is already present, it
+   * is replaced.
    *
    * Cache entries will never expire as long as they remain locked, but if they
    * become unlocked, they can expire either because the SurfaceCache runs out
@@ -288,33 +286,6 @@ struct SurfaceCache
                               const SurfaceKey& aSurfaceKey);
 
   /**
-   * Insert a placeholder entry into the cache. If an entry with the same
-   * ImageKey and SurfaceKey is already in the cache, InsertPlaceholder()
-   * returns FAILURE_ALREADY_PRESENT.
-   *
-   * Placeholders exist to allow lazy allocation of surfaces. The Lookup*()
-   * methods will report whether a placeholder for an exactly matching cache
-   * entry existed by returning a MatchType of PENDING or
-   * SUBSTITUTE_BECAUSE_PENDING, but they will never return a placeholder
-   * directly. (They couldn't, since placeholders don't have an associated
-   * surface.)
-   *
-   * Placeholders are automatically removed when a real entry that matches the
-   * placeholder is inserted with Insert(), or when RemoveImage() is called.
-   *
-   * @param aImageKey       Key data identifying which image the cache entry
-   *                        belongs to.
-   * @param aSurfaceKey     Key data which uniquely identifies the requested
-   *                        cache entry.
-   * @return SUCCESS if the placeholder was inserted successfully.
-   *         FAILURE if the placeholder could not be inserted for some reason.
-   *         FAILURE_ALREADY_PRESENT if an entry with the same ImageKey and
-   *           SurfaceKey already exists in the cache.
-   */
-  static InsertOutcome InsertPlaceholder(const ImageKey    aImageKey,
-                                         const SurfaceKey& aSurfaceKey);
-
-  /**
    * Mark the cache entry @aProvider as having an available surface. This turns
    * a placeholder cache entry into a normal cache entry. The cache entry
    * becomes locked if the associated image is locked; otherwise, it starts in
@@ -326,14 +297,6 @@ struct SurfaceCache
    * It's illegal to call this function if @aProvider is not a placeholder; by
    * definition, non-placeholder ISurfaceProviders should have a surface
    * available already.
-   *
-   * XXX(seth): We're currently in a transitional state where two notions of
-   * placeholder exist: the old one (placeholders are an "empty" cache entry
-   * inserted via InsertPlaceholder(), which then gets replaced by inserting a
-   * real cache entry with the same keys via Insert()) and the new one (where
-   * the same cache entry, inserted via Insert(), starts in a placeholder state
-   * and then transitions to being a normal cache entry via this function). The
-   * old mechanism will be removed in bug 1292392.
    *
    * @param aProvider       The cache entry that now has a surface available.
    * @param aImageKey       Key data identifying which image the cache entry
@@ -425,7 +388,7 @@ struct SurfaceCache
   static void UnlockEntries(const ImageKey aImageKey);
 
   /**
-   * Removes all cache entries (both real and placeholder) associated with the
+   * Removes all cache entries (including placeholders) associated with the
    * given image from the cache.  If the image is locked, it is automatically
    * unlocked.
    *

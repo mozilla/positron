@@ -14,9 +14,16 @@
 #include "mozilla/layers/CompositorBridgeParent.h"
 #include "mozilla/layers/CompositorThread.h"
 #include "mozilla/layers/ImageBridgeParent.h"
+#include "nsDebugImpl.h"
+#include "mozilla/layers/LayerTreeOwnerTracker.h"
+#include "ProcessUtils.h"
 #include "VRManager.h"
 #include "VRManagerParent.h"
 #include "VsyncBridgeParent.h"
+#if defined(XP_WIN)
+# include "DeviceManagerD3D9.h"
+# include "mozilla/gfx/DeviceManagerDx.h"
+#endif
 
 namespace mozilla {
 namespace gfx {
@@ -41,18 +48,31 @@ GPUParent::Init(base::ProcessId aParentPid,
     return false;
   }
 
+  nsDebugImpl::SetMultiprocessMode("GPU");
+
   // Ensure gfxPrefs are initialized.
   gfxPrefs::GetSingleton();
+  gfxConfig::Init();
   gfxVars::Initialize();
+  gfxPlatform::InitNullMetadata();
+#if defined(XP_WIN)
+  DeviceManagerDx::Init();
+  DeviceManagerD3D9::Init();
+#endif
+  if (NS_FAILED(NS_InitMinimalXPCOM())) {
+    return false;
+  }
   CompositorThreadHolder::Start();
   VRManager::ManagerInit();
-  gfxPlatform::InitNullMetadata();
+  LayerTreeOwnerTracker::Initialize();
+  mozilla::ipc::SetThisProcessName("GPU Process");
   return true;
 }
 
 bool
 GPUParent::RecvInit(nsTArray<GfxPrefSetting>&& prefs,
-                    nsTArray<GfxVarUpdate>&& vars)
+                    nsTArray<GfxVarUpdate>&& vars,
+                    const DevicePrefs& devicePrefs)
 {
   const nsTArray<gfxPrefs::Pref*>& globalPrefs = gfxPrefs::all();
   for (auto& setting : prefs) {
@@ -62,6 +82,25 @@ GPUParent::RecvInit(nsTArray<GfxPrefSetting>&& prefs,
   for (const auto& var : vars) {
     gfxVars::ApplyUpdate(var);
   }
+
+  // Inherit device preferences.
+  gfxConfig::Inherit(Feature::HW_COMPOSITING, devicePrefs.hwCompositing());
+  gfxConfig::Inherit(Feature::D3D11_COMPOSITING, devicePrefs.d3d11Compositing());
+  gfxConfig::Inherit(Feature::D3D9_COMPOSITING, devicePrefs.d3d9Compositing());
+  gfxConfig::Inherit(Feature::OPENGL_COMPOSITING, devicePrefs.oglCompositing());
+  gfxConfig::Inherit(Feature::DIRECT2D, devicePrefs.useD2D1());
+
+#if defined(XP_WIN)
+  if (gfxConfig::IsEnabled(Feature::D3D11_COMPOSITING)) {
+    DeviceManagerDx::Get()->CreateCompositorDevices();
+  }
+#endif
+
+  // Send a message to the UI process that we're done.
+  GPUDeviceData data;
+  RecvGetDeviceStatus(&data);
+  Unused << SendInitComplete(data);
+
   return true;
 }
 
@@ -98,6 +137,43 @@ bool
 GPUParent::RecvUpdateVar(const GfxVarUpdate& aUpdate)
 {
   gfxVars::ApplyUpdate(aUpdate);
+  return true;
+}
+
+static void
+CopyFeatureChange(Feature aFeature, FeatureChange* aOut)
+{
+  FeatureState& feature = gfxConfig::GetFeature(aFeature);
+  if (feature.DisabledByDefault() || feature.IsEnabled()) {
+    // No change:
+    //   - Disabled-by-default means the parent process told us not to use this feature.
+    //   - Enabled means we were told to use this feature, and we didn't discover anything
+    //     that would prevent us from doing so.
+    *aOut = null_t();
+    return;
+  }
+
+  MOZ_ASSERT(!feature.IsEnabled());
+
+  nsCString message;
+  message.AssignASCII(feature.GetFailureMessage());
+
+  *aOut = FeatureFailure(feature.GetValue(), message, feature.GetFailureId());
+}
+
+bool
+GPUParent::RecvGetDeviceStatus(GPUDeviceData* aOut)
+{
+  CopyFeatureChange(Feature::D3D11_COMPOSITING, &aOut->d3d11Compositing());
+  CopyFeatureChange(Feature::D3D9_COMPOSITING, &aOut->d3d9Compositing());
+  CopyFeatureChange(Feature::OPENGL_COMPOSITING, &aOut->oglCompositing());
+
+#if defined(XP_WIN)
+  if (DeviceManagerDx* dm = DeviceManagerDx::Get()) {
+    dm->ExportDeviceInfo(&aOut->d3d11Device());
+  }
+#endif
+
   return true;
 }
 
@@ -143,6 +219,20 @@ GPUParent::RecvNewContentVRManager(Endpoint<PVRManagerParent>&& aEndpoint)
   return VRManagerParent::CreateForContent(Move(aEndpoint));
 }
 
+bool
+GPUParent::RecvDeallocateLayerTreeId(const uint64_t& aLayersId)
+{
+  CompositorBridgeParent::DeallocateLayerTreeId(aLayersId);
+  return true;
+}
+
+bool
+GPUParent::RecvAddLayerTreeIdMapping(const uint64_t& aLayersId, const ProcessId& aOwnerId)
+{
+  LayerTreeOwnerTracker::Get()->Map(aLayersId, aOwnerId);
+  return true;
+}
+
 void
 GPUParent::ActorDestroy(ActorDestroyReason aWhy)
 {
@@ -153,8 +243,7 @@ GPUParent::ActorDestroy(ActorDestroyReason aWhy)
 
 #ifndef NS_FREE_PERMANENT_DATA
   // No point in going through XPCOM shutdown because we don't keep persistent
-  // state. Currently we quick-exit in RecvBeginShutdown so this should be
-  // unreachable.
+  // state.
   ProcessChild::QuickExit();
 #endif
 
@@ -162,6 +251,15 @@ GPUParent::ActorDestroy(ActorDestroyReason aWhy)
     mVsyncBridge->Shutdown();
   }
   CompositorThreadHolder::Shutdown();
+#if defined(XP_WIN)
+  DeviceManagerDx::Shutdown();
+  DeviceManagerD3D9::Shutdown();
+#endif
+  LayerTreeOwnerTracker::Shutdown();
+  gfxVars::Shutdown();
+  gfxConfig::Shutdown();
+  gfxPrefs::DestroySingleton();
+  NS_ShutdownXPCOM(nullptr);
   XRE_ShutdownChildProcess();
 }
 

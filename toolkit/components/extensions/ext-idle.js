@@ -1,6 +1,6 @@
 "use strict";
 
-extensions.registerSchemaAPI("idle", (extension, context) => {
+extensions.registerSchemaAPI("idle", "addon_parent", context => {
   return {
     idle: {
       queryState: function(detectionIntervalInSeconds) {

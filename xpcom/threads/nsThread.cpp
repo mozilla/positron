@@ -32,7 +32,7 @@
 #include "nsXPCOMPrivate.h"
 #include "mozilla/ChaosMode.h"
 #include "mozilla/TimeStamp.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 #include "mozilla/dom/ScriptSettings.h"
 #include "nsThreadSyncDispatch.h"
 #include "LeakRefPtr.h"
@@ -212,7 +212,7 @@ public:
   virtual ~nsThreadStartupEvent() {}
 
 private:
-  NS_IMETHOD Run()
+  NS_IMETHOD Run() override
   {
     ReentrantMonitorAutoEnter mon(mMon);
     mInitialized = true;
@@ -353,7 +353,7 @@ public:
     , mShutdownContext(aCtx)
   {
   }
-  NS_IMETHOD Run()
+  NS_IMETHOD Run() override
   {
     mThread->mShutdownContext = mShutdownContext;
     MessageLoop::current()->Quit();

@@ -10,7 +10,7 @@
 #include "mozilla/dom/ContentChild.h"
 #include "mozilla/BasePrincipal.h"
 #include "mozilla/Services.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 #include "nsPermissionManager.h"
 #include "nsPermission.h"
 #include "nsCRT.h"
@@ -203,7 +203,7 @@ public:
   NS_DECL_ISUPPORTS
 
   // nsIObserver implementation.
-  NS_IMETHODIMP
+  NS_IMETHOD
   Observe(nsISupports* aSubject, const char* aTopic, const char16_t* aData) override
   {
     MOZ_ASSERT(!nsCRT::strcmp(aTopic, "clear-origin-data"));
@@ -1537,10 +1537,7 @@ nsPermissionManager::AddFromPrincipal(nsIPrincipal* aPrincipal,
 
   // Null principals can't meaningfully have persisted permissions attached to
   // them, so we don't allow adding permissions for them.
-  bool isNullPrincipal;
-  nsresult rv = aPrincipal->GetIsNullPrincipal(&isNullPrincipal);
-  NS_ENSURE_SUCCESS(rv, rv);
-  if (isNullPrincipal) {
+  if (aPrincipal->GetIsNullPrincipal()) {
     return NS_OK;
   }
 
@@ -2431,10 +2428,7 @@ nsPermissionManager::RemoveExpiredPermissionsForApp(uint32_t aAppId)
     nsCOMPtr<nsIPrincipal> principal;
     GetPrincipalFromOrigin(entry->GetKey()->mOrigin, getter_AddRefs(principal));
 
-    uint32_t appId;
-    principal->GetAppId(&appId);
-
-    if (appId != aAppId) {
+    if (principal->GetAppId() != aAppId) {
       continue;
     }
 

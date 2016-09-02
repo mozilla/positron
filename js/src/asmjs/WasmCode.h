@@ -127,7 +127,7 @@ typedef RefPtr<const ShareableBytes> SharedBytes;
 class FuncExport
 {
     Sig sig_;
-    struct CacheablePod {
+    MOZ_INIT_OUTSIDE_CTOR struct CacheablePod {
         uint32_t funcIndex_;
         uint32_t codeRangeIndex_;
         uint32_t entryOffset_;
@@ -419,9 +419,10 @@ class MetadataCacheablePod
     uint32_t              minMemoryLength;
     uint32_t              maxMemoryLength;
 
-    MetadataCacheablePod() {
+    explicit MetadataCacheablePod(ModuleKind kind) {
         mozilla::PodZero(this);
         startFuncIndex_ = NO_START_FUNCTION;
+        this->kind = kind;
     }
 
     bool hasStartFunction() const {
@@ -440,6 +441,7 @@ class MetadataCacheablePod
 
 struct Metadata : ShareableBase<Metadata>, MetadataCacheablePod
 {
+    explicit Metadata(ModuleKind kind = ModuleKind::Wasm) : MetadataCacheablePod(kind) {}
     virtual ~Metadata() {}
 
     MetadataCacheablePod& pod() { return *this; }

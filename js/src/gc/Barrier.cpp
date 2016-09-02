@@ -15,7 +15,7 @@
 #include "gc/Zone.h"
 #include "js/HashTable.h"
 #include "js/Value.h"
-#include "vm/ScopeObject.h"
+#include "vm/EnvironmentObject.h"
 #include "vm/SharedArrayObject.h"
 #include "vm/Symbol.h"
 
@@ -79,13 +79,6 @@ bool
 CurrentThreadIsGCSweeping()
 {
     return TlsPerThreadData.get()->gcSweeping;
-}
-
-bool
-CurrentThreadCanSkipPostBarrier(bool inNursery)
-{
-    bool onMainThread = TlsPerThreadData.get()->runtimeIfOnOwnerThread() != nullptr;
-    return !onMainThread && !inNursery;
 }
 
 #endif // DEBUG
@@ -189,7 +182,7 @@ MovableCellHasher<T>::match(const Key& k, const Lookup& l)
 template struct MovableCellHasher<JSObject*>;
 template struct MovableCellHasher<GlobalObject*>;
 template struct MovableCellHasher<SavedFrame*>;
-template struct MovableCellHasher<ScopeObject*>;
+template struct MovableCellHasher<EnvironmentObject*>;
 template struct MovableCellHasher<WasmInstanceObject*>;
 template struct MovableCellHasher<JSScript*>;
 

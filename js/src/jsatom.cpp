@@ -200,6 +200,10 @@ void
 js::MarkAtoms(JSTracer* trc, AutoLockForExclusiveAccess& lock)
 {
     JSRuntime* rt = trc->runtime();
+
+    if (rt->atomsAreFinished())
+        return;
+
     for (AtomSet::Enum e(rt->atoms(lock)); !e.empty(); e.popFront()) {
         const AtomStateEntry& entry = e.front();
         if (!entry.isPinned())
@@ -335,7 +339,7 @@ AtomizeAndCopyChars(ExclusiveContext* cx, const CharT* tbchars, size_t length, P
         return atom;
     }
 
-    AutoCompartment ac(cx, cx->atomsCompartment(lock));
+    AutoCompartment ac(cx, cx->atomsCompartment(lock), &lock);
 
     JSFlatString* flat = NewStringCopyN<NoGC>(cx, tbchars, length);
     if (!flat) {
@@ -606,4 +610,3 @@ js::XDRAtom(XDRState<XDR_ENCODE>* xdr, MutableHandleAtom atomp);
 
 template bool
 js::XDRAtom(XDRState<XDR_DECODE>* xdr, MutableHandleAtom atomp);
-

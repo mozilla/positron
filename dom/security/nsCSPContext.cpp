@@ -280,7 +280,7 @@ nsCSPContext::~nsCSPContext()
 }
 
 NS_IMETHODIMP
-nsCSPContext::GetPolicy(uint32_t aIndex, nsAString& outStr)
+nsCSPContext::GetPolicyString(uint32_t aIndex, nsAString& outStr)
 {
   if (aIndex >= mPolicies.Length()) {
     return NS_ERROR_ILLEGAL_VALUE;
@@ -323,7 +323,8 @@ nsCSPContext::GetBlockAllMixedContent(bool *outBlockAllMixedContent)
 {
   *outBlockAllMixedContent = false;
   for (uint32_t i = 0; i < mPolicies.Length(); i++) {
-    if (mPolicies[i]->hasDirective(nsIContentSecurityPolicy::BLOCK_ALL_MIXED_CONTENT)) {
+     if (!mPolicies[i]->getReportOnlyFlag() &&
+        mPolicies[i]->hasDirective(nsIContentSecurityPolicy::BLOCK_ALL_MIXED_CONTENT)) {
       *outBlockAllMixedContent = true;
       return NS_OK;
     }
@@ -831,7 +832,7 @@ nsCSPContext::SendReports(nsISupports* aBlockedContentSource,
 
   // original-policy
   nsAutoString originalPolicy;
-  rv = this->GetPolicy(aViolatedPolicyIndex, originalPolicy);
+  rv = this->GetPolicyString(aViolatedPolicyIndex, originalPolicy);
   NS_ENSURE_SUCCESS(rv, rv);
   report.mCsp_report.mOriginal_policy = originalPolicy;
 
@@ -1046,7 +1047,7 @@ class CSPReportSenderRunnable final : public Runnable
       }
     }
 
-    NS_IMETHOD Run()
+    NS_IMETHOD Run() override
     {
       MOZ_ASSERT(NS_IsMainThread());
 
@@ -1374,7 +1375,7 @@ CSPViolationReportListener::~CSPViolationReportListener()
 {
 }
 
-NS_METHOD
+nsresult
 AppendSegmentToString(nsIInputStream* aInputStream,
                       void* aClosure,
                       const char* aRawSegment,

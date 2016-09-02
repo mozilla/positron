@@ -126,6 +126,8 @@ const PIPE_TO_NULL = IS_WIN ? ">nul" : "> /dev/null 2>&1";
 
 const LOG_FUNCTION = do_print;
 
+const gHTTPHandlerPath = "updates.xml";
+
 // This default value will be overridden when using the http server.
 var gURLData = URL_HOST + "/";
 
@@ -162,6 +164,10 @@ var gCallbackBinFile = "callback_app" + BIN_SUFFIX;
 var gCallbackArgs = ["./", "callback.log", "Test Arg 2", "Test Arg 3"];
 var gPostUpdateBinFile = "postup_app" + BIN_SUFFIX;
 var gUseTestAppDir = true;
+// Some update staging failures can remove the update. This allows tests to
+// specify that the status file and the active update should not be checked
+// after an update is staged.
+var gStagingRemovedUpdate = false;
 
 var gTimeoutRuns = 0;
 
@@ -176,17 +182,7 @@ var gEnvLdLibraryPath;
 // Set to true to log additional information for debugging. To log additional
 // information for an individual test set DEBUG_AUS_TEST to true in the test's
 // run_test function.
-var DEBUG_AUS_TEST = false;
-// Never set DEBUG_TEST_LOG to true except when running tests locally or on the
-// try server since this will force a test that failed a parallel run to fail
-// when the same test runs non-parallel so the log from parallel test run can
-// be displayed in the log.
-var DEBUG_TEST_LOG = false;
-// Set to false to keep the log file from the failed parallel test run.
-var gDeleteLogFile = true;
-var gRealDump;
-var gTestLogText = "";
-var gPassed;
+var DEBUG_AUS_TEST = true;
 
 const DATA_URI_SPEC = Services.io.newFileURI(do_get_file("../data", false)).spec;
 Services.scriptloader.loadSubScript(DATA_URI_SPEC + "shared.js", this);
@@ -805,30 +801,6 @@ function setupTestCommon() {
 
   setDefaultPrefs();
 
-  if (DEBUG_TEST_LOG) {
-    let logFile = do_get_file(gTestID + ".log", true);
-    if (logFile.exists()) {
-      gPassed = false;
-      logTestInfo("start - dumping previous test run log");
-      logTestInfo("\n" + readFile(logFile) + "\n");
-      logTestInfo("finish - dumping previous test run log");
-      if (gDeleteLogFile) {
-        logFile.remove(false);
-      }
-      do_throw("The parallel run of this test failed. Failing non-parallel " +
-               "test so the log from the parallel run can be displayed in " +
-               "non-parallel log.");
-    } else {
-      gRealDump = dump;
-      dump = dumpOverride;
-    }
-  }
-
-  if (IS_WIN) {
-    Services.prefs.setBoolPref(PREF_APP_UPDATE_SERVICE_ENABLED,
-                               IS_SERVICE_TEST ? true : false);
-  }
-
   // Don't attempt to show a prompt when an update finishes.
   Services.prefs.setBoolPref(PREF_APP_UPDATE_SILENT, true);
 
@@ -848,7 +820,21 @@ function setupTestCommon() {
     } catch (e) {
       logTestInfo("non-fatal error removing directory. Path: " +
                   applyDir.path + ", Exception: " + e);
+      // When the application doesn't exit properly it can cause the test to
+      // fail again on the second run with an NS_ERROR_FILE_ACCESS_DENIED error
+      // along with no useful information in the test log. To prevent this use
+      // a different directory for the test when it isn't possible to remove the
+      // existing test directory (bug 1294196).
+      gTestID += "_new";
+      logTestInfo("using a new directory for the test by changing gTestID " +
+                  "since there is an existing test directory that can't be " +
+                  "removed, gTestID: " + gTestID);
     }
+  }
+
+  if (IS_WIN) {
+    Services.prefs.setBoolPref(PREF_APP_UPDATE_SERVICE_ENABLED,
+                               IS_SERVICE_TEST ? true : false);
   }
 
   // adjustGeneralPaths registers a cleanup function that calls end_test when
@@ -998,42 +984,6 @@ function cleanupTestCommon() {
   resetEnvironment();
 
   debugDump("finish - general test cleanup");
-
-  if (gRealDump) {
-    dump = gRealDump;
-    gRealDump = null;
-  }
-
-  if (DEBUG_TEST_LOG && !gPassed) {
-    let fos = Cc["@mozilla.org/network/file-output-stream;1"].
-              createInstance(Ci.nsIFileOutputStream);
-    let logFile = do_get_file(gTestID + ".log", true);
-    if (!logFile.exists()) {
-      logFile.create(Ci.nsILocalFile.NORMAL_FILE_TYPE, PERMS_FILE);
-    }
-    fos.init(logFile, MODE_WRONLY | MODE_CREATE | MODE_APPEND, PERMS_FILE, 0);
-    fos.write(gTestLogText, gTestLogText.length);
-    fos.close();
-  }
-
-  if (DEBUG_TEST_LOG) {
-    gTestLogText = null;
-  } else {
-    let logFile = do_get_file(gTestID + ".log", true);
-    if (logFile.exists()) {
-      logFile.remove(false);
-    }
-  }
-}
-
-/**
- * Helper function to store the log output of calls to dump in a variable so the
- * values can be written to a file for a parallel run of a test and printed to
- * the log file when the test runs synchronously.
- */
-function dumpOverride(aText) {
-  gTestLogText += aText;
-  gRealDump(aText);
 }
 
 /**
@@ -1042,9 +992,6 @@ function dumpOverride(aText) {
  * inspected.
  */
 function doTestFinish() {
-  if (gPassed === undefined) {
-    gPassed = true;
-  }
   if (DEBUG_AUS_TEST) {
     // This prevents do_print errors from being printed by the xpcshell test
     // harness due to nsUpdateService.js logging to the console when the
@@ -1165,20 +1112,6 @@ function standardInit() {
   createAppInfo("xpcshell@tests.mozilla.org", APP_INFO_NAME, "1.0", "2.0");
   // Initialize the update service stub component
   initUpdateServiceStub();
-}
-
-/**
- * Custom path handler for the http server
- *
- * @param   aMetadata
- *          The http metadata for the request.
- * @param   aResponse
- *          The http response for the request.
- */
-function pathHandler(aMetadata, aResponse) {
-  aResponse.setHeader("Content-Type", "text/xml", false);
-  aResponse.setStatusLine(aMetadata.httpVersion, gResponseStatusCode, "OK");
-  aResponse.bodyOutputStream.write(gResponseBody, gResponseBody.length);
 }
 
 /**
@@ -1787,14 +1720,12 @@ function runUpdateUsingUpdater(aExpectedStatus, aSwitchApp, aExpectedExitValue) 
   // nsIProcess doesn't have an API to pass a separate environment to the
   // subprocess, so we need to alter the environment of the current process
   // before launching the updater binary.
-  let env = Cc["@mozilla.org/process/environment;1"].
-            getService(Ci.nsIEnvironment);
   let asan_options = null;
-  if (env.exists("ASAN_OPTIONS")) {
-    asan_options = env.get("ASAN_OPTIONS");
-    env.set("ASAN_OPTIONS", asan_options + ":detect_leaks=0")
+  if (gEnv.exists("ASAN_OPTIONS")) {
+    asan_options = gEnv.get("ASAN_OPTIONS");
+    gEnv.set("ASAN_OPTIONS", asan_options + ":detect_leaks=0")
   } else {
-    env.set("ASAN_OPTIONS", "detect_leaks=0")
+    gEnv.set("ASAN_OPTIONS", "detect_leaks=0")
   }
 
   let process = Cc["@mozilla.org/process/util;1"].
@@ -1803,7 +1734,7 @@ function runUpdateUsingUpdater(aExpectedStatus, aSwitchApp, aExpectedExitValue) 
   process.run(true, args, args.length);
 
   // Restore previous ASAN_OPTIONS if there were any.
-  env.set("ASAN_OPTIONS", asan_options ? asan_options : "");
+  gEnv.set("ASAN_OPTIONS", asan_options ? asan_options : "");
 
   let status = readStatusFile();
   if (process.exitValue != aExpectedExitValue || status != aExpectedStatus) {
@@ -1896,8 +1827,7 @@ function setupActiveUpdate() {
   let patches = getLocalPatchString(null, null, null, null, null, "true",
                                     state);
   let updates = getLocalUpdateString(patches, null, null, null, null, null,
-                                     null, null, null, null, null, null,
-                                     "true", channel);
+                                     null, null, null, null, "true", channel);
   writeUpdatesToXMLFile(getLocalUpdatesXMLString(updates), true);
   writeVersionFile(DEFAULT_UPDATE_VERSION);
   writeStatusFile(state);
@@ -1966,11 +1896,18 @@ function checkUpdateStagedState(aUpdateState) {
   Assert.equal(aUpdateState, STATE_AFTER_STAGE,
                "the notified state" + MSG_SHOULD_EQUAL);
 
-  Assert.equal(gUpdateManager.activeUpdate.state, STATE_AFTER_STAGE,
-               "the update state" + MSG_SHOULD_EQUAL);
+  if (!gStagingRemovedUpdate) {
+    Assert.equal(readStatusState(), STATE_AFTER_STAGE,
+                 "the status file state" + MSG_SHOULD_EQUAL);
 
-  Assert.equal(readStatusState(), STATE_AFTER_STAGE,
-               "the status file state" + MSG_SHOULD_EQUAL);
+    Assert.equal(gUpdateManager.activeUpdate.state, STATE_AFTER_STAGE,
+                 "the update state" + MSG_SHOULD_EQUAL);
+  }
+
+  Assert.equal(gUpdateManager.updateCount, 1,
+               "the update manager updateCount attribute" + MSG_SHOULD_EQUAL);
+  Assert.equal(gUpdateManager.getUpdateAt(0).state, STATE_AFTER_STAGE,
+               "the update state" + MSG_SHOULD_EQUAL);
 
   let log = getUpdateLog(FILE_LAST_UPDATE_LOG);
   Assert.ok(log.exists(),
@@ -3542,15 +3479,6 @@ function checkCallbackServiceLog() {
 // then calls doTestFinish to end the test.
 function waitForFilesInUse() {
   if (IS_WIN) {
-    if (isProcessRunning(FILE_UPDATER_BIN)) {
-      do_execute_soon(waitForFilesInUse);
-      return;
-    }
-    if (isProcessRunning(FILE_MAINTENANCE_SERVICE_INSTALLER_BIN)) {
-      do_execute_soon(waitForFilesInUse);
-      return;
-    }
-
     let appBin = getApplyDirFile(FILE_APP_BIN, true);
     let maintSvcInstaller = getApplyDirFile(FILE_MAINTENANCE_SERVICE_INSTALLER_BIN, true);
     let helper = getApplyDirFile("uninstall/helper.exe", true);
@@ -3635,82 +3563,6 @@ function checkFilesInDirRecursive(aDir, aCallback) {
   }
 }
 
-/**
- * Sets up the bare bones XMLHttpRequest implementation below.
- *
- * @param   aCallback
- *          The callback function that will call the nsIDomEventListener's
- *          handleEvent method.
- *
- *          Example of the callback function
- *
- *            function callHandleEvent(aXHR) {
- *              aXHR.status = gExpectedStatus;
- *              let e = { target: aXHR };
- *              aXHR.onload.handleEvent(e);
- *            }
- */
-function overrideXHR(aCallback) {
-  Cu.import("resource://testing-common/MockRegistrar.jsm");
-  MockRegistrar.register("@mozilla.org/xmlextras/xmlhttprequest;1", xhr, [aCallback]);
-}
-
-/**
- * Bare bones XMLHttpRequest implementation for testing onprogress, onerror,
- * and onload nsIDomEventListener handleEvent.
- */
-function makeHandler(aVal) {
-  if (typeof aVal == "function") {
-    return { handleEvent: aVal };
-  }
-  return aVal;
-}
-function xhr(aCallback) {
-  this._callback = aCallback;
-}
-xhr.prototype = {
-  overrideMimeType: function(aMimetype) { },
-  setRequestHeader: function(aHeader, aValue) { },
-  status: null,
-  channel: {
-    set notificationCallbacks(aVal) { },
-    QueryInterface: XPCOMUtils.generateQI([Ci.nsIChannel])
-  },
-  _url: null,
-  _method: null,
-  open: function(aMethod, aUrl) {
-    this.channel.originalURI = Services.io.newURI(aUrl, null, null);
-    this._method = aMethod; this._url = aUrl;
-  },
-  responseXML: null,
-  responseText: null,
-  send: function(aBody) {
-    do_execute_soon(function() {
-      this._callback(this);
-    }.bind(this)); // Use a timeout so the XHR completes
-  },
-  _onprogress: null,
-  set onprogress(aValue) { this._onprogress = makeHandler(aValue); },
-  get onprogress() { return this._onprogress; },
-  _onerror: null,
-  set onerror(aValue) { this._onerror = makeHandler(aValue); },
-  get onerror() { return this._onerror; },
-  _onload: null,
-  set onload(aValue) { this._onload = makeHandler(aValue); },
-  get onload() { return this._onload; },
-  addEventListener: function(aEvent, aValue, aCapturing) {
-    eval("this._on" + aEvent + " = aValue");
-  },
-  flags: Ci.nsIClassInfo.SINGLETON,
-  getScriptableHelper: () => null,
-  getInterfaces: function(aCount) {
-    let interfaces = [Ci.nsISupports];
-    aCount.value = interfaces.length;
-    return interfaces;
-  },
-  get wrappedJSObject() { return this; },
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsIClassInfo])
-};
 
 /**
  * Helper function to override the update prompt component to verify whether it
@@ -3777,6 +3629,9 @@ const updateCheckListener = {
   onError: function UCL_onError(aRequest, aUpdate) {
     gRequestURL = aRequest.channel.originalURI.spec;
     gStatusCode = aRequest.status;
+    if (gStatusCode == 0) {
+      gStatusCode = aRequest.channel.QueryInterface(Ci.nsIRequest).status;
+    }
     gStatusText = aUpdate.statusText ? aUpdate.statusText : null;
     debugDump("url = " + gRequestURL + ", " +
               "request.status = " + gStatusCode + ", " +
@@ -3824,10 +3679,25 @@ function start_httpserver() {
   let { HttpServer } = Cu.import("resource://testing-common/httpd.js", {});
   gTestserver = new HttpServer();
   gTestserver.registerDirectory("/", dir);
+  gTestserver.registerPathHandler("/" + gHTTPHandlerPath, pathHandler);
   gTestserver.start(-1);
   let testserverPort = gTestserver.identity.primaryPort;
   gURLData = URL_HOST + ":" + testserverPort + "/";
   debugDump("http server port = " + testserverPort);
+}
+
+/**
+ * Custom path handler for the http server
+ *
+ * @param   aMetadata
+ *          The http metadata for the request.
+ * @param   aResponse
+ *          The http response for the request.
+ */
+function pathHandler(aMetadata, aResponse) {
+  aResponse.setHeader("Content-Type", "text/xml", false);
+  aResponse.setStatusLine(aMetadata.httpVersion, gResponseStatusCode, "OK");
+  aResponse.bodyOutputStream.write(gResponseBody, gResponseBody.length);
 }
 
 /**
@@ -4307,15 +4177,13 @@ function resetEnvironment() {
         debugDump("removing DYLD_LIBRARY_PATH environment variable");
         gEnv.set("DYLD_LIBRARY_PATH", "");
       }
-    } else {
-      if (gEnvLdLibraryPath) {
-        debugDump("setting LD_LIBRARY_PATH environment variable value back " +
-                  "to " + gEnvLdLibraryPath);
-        gEnv.set("LD_LIBRARY_PATH", gEnvLdLibraryPath);
-      } else if (gEnvLdLibraryPath !== null) {
-        debugDump("removing LD_LIBRARY_PATH environment variable");
-        gEnv.set("LD_LIBRARY_PATH", "");
-      }
+    } else if (gEnvLdLibraryPath) {
+      debugDump("setting LD_LIBRARY_PATH environment variable value back " +
+                "to " + gEnvLdLibraryPath);
+      gEnv.set("LD_LIBRARY_PATH", gEnvLdLibraryPath);
+    } else if (gEnvLdLibraryPath !== null) {
+      debugDump("removing LD_LIBRARY_PATH environment variable");
+      gEnv.set("LD_LIBRARY_PATH", "");
     }
   }
 

@@ -78,7 +78,7 @@ template<class Impl>
 class GeckoAppShell::Natives : public mozilla::jni::NativeImpl<GeckoAppShell, Impl>
 {
 public:
-    static const JNINativeMethod methods[6];
+    static const JNINativeMethod methods[8];
 };
 
 template<class Impl>
@@ -96,6 +96,10 @@ const JNINativeMethod GeckoAppShell::Natives<Impl>::methods[] = {
             mozilla::jni::NativeStub<GeckoAppShell::NotifyUriVisited_t, Impl>
             ::template Wrap<&Impl::NotifyUriVisited>),
 
+    mozilla::jni::MakeNativeMethod<GeckoAppShell::OnFullScreenPluginHidden_t>(
+            mozilla::jni::NativeStub<GeckoAppShell::OnFullScreenPluginHidden_t, Impl>
+            ::template Wrap<&Impl::OnFullScreenPluginHidden>),
+
     mozilla::jni::MakeNativeMethod<GeckoAppShell::OnLocationChanged_t>(
             mozilla::jni::NativeStub<GeckoAppShell::OnLocationChanged_t, Impl>
             ::template Wrap<&Impl::OnLocationChanged>),
@@ -104,9 +108,28 @@ const JNINativeMethod GeckoAppShell::Natives<Impl>::methods[] = {
             mozilla::jni::NativeStub<GeckoAppShell::OnSensorChanged_t, Impl>
             ::template Wrap<&Impl::OnSensorChanged>),
 
+    mozilla::jni::MakeNativeMethod<GeckoAppShell::ReportJavaCrash_t>(
+            mozilla::jni::NativeStub<GeckoAppShell::ReportJavaCrash_t, Impl>
+            ::template Wrap<&Impl::ReportJavaCrash>),
+
     mozilla::jni::MakeNativeMethod<GeckoAppShell::SyncNotifyObservers_t>(
             mozilla::jni::NativeStub<GeckoAppShell::SyncNotifyObservers_t, Impl>
             ::template Wrap<&Impl::SyncNotifyObservers>)
+};
+
+template<class Impl>
+class GeckoBatteryManager::Natives : public mozilla::jni::NativeImpl<GeckoBatteryManager, Impl>
+{
+public:
+    static const JNINativeMethod methods[1];
+};
+
+template<class Impl>
+const JNINativeMethod GeckoBatteryManager::Natives<Impl>::methods[] = {
+
+    mozilla::jni::MakeNativeMethod<GeckoBatteryManager::OnBatteryChange_t>(
+            mozilla::jni::NativeStub<GeckoBatteryManager::OnBatteryChange_t, Impl>
+            ::template Wrap<&Impl::OnBatteryChange>)
 };
 
 template<class Impl>
@@ -272,7 +295,7 @@ template<class Impl>
 class GeckoThread::Natives : public mozilla::jni::NativeImpl<GeckoThread, Impl>
 {
 public:
-    static const JNINativeMethod methods[5];
+    static const JNINativeMethod methods[6];
 };
 
 template<class Impl>
@@ -289,6 +312,10 @@ const JNINativeMethod GeckoThread::Natives<Impl>::methods[] = {
     mozilla::jni::MakeNativeMethod<GeckoThread::OnResume_t>(
             mozilla::jni::NativeStub<GeckoThread::OnResume_t, Impl>
             ::template Wrap<&Impl::OnResume>),
+
+    mozilla::jni::MakeNativeMethod<GeckoThread::RunUiThreadCallback_t>(
+            mozilla::jni::NativeStub<GeckoThread::RunUiThreadCallback_t, Impl>
+            ::template Wrap<&Impl::RunUiThreadCallback>),
 
     mozilla::jni::MakeNativeMethod<GeckoThread::SpeculativeConnect_t>(
             mozilla::jni::NativeStub<GeckoThread::SpeculativeConnect_t, Impl>
@@ -331,6 +358,21 @@ const JNINativeMethod GeckoView::Window::Natives<Impl>::methods[] = {
 };
 
 template<class Impl>
+class MemoryMonitor::Natives : public mozilla::jni::NativeImpl<MemoryMonitor, Impl>
+{
+public:
+    static const JNINativeMethod methods[1];
+};
+
+template<class Impl>
+const JNINativeMethod MemoryMonitor::Natives<Impl>::methods[] = {
+
+    mozilla::jni::MakeNativeMethod<MemoryMonitor::DispatchMemoryPressure_t>(
+            mozilla::jni::NativeStub<MemoryMonitor::DispatchMemoryPressure_t, Impl>
+            ::template Wrap<&Impl::DispatchMemoryPressure>)
+};
+
+template<class Impl>
 class PrefsHelper::Natives : public mozilla::jni::NativeImpl<PrefsHelper, Impl>
 {
 public:
@@ -355,6 +397,44 @@ const JNINativeMethod PrefsHelper::Natives<Impl>::methods[] = {
     mozilla::jni::MakeNativeMethod<PrefsHelper::SetPref_t>(
             mozilla::jni::NativeStub<PrefsHelper::SetPref_t, Impl>
             ::template Wrap<&Impl::SetPref>)
+};
+
+template<class Impl>
+class PresentationMediaPlayerManager::Natives : public mozilla::jni::NativeImpl<PresentationMediaPlayerManager, Impl>
+{
+public:
+    static const JNINativeMethod methods[3];
+};
+
+template<class Impl>
+const JNINativeMethod PresentationMediaPlayerManager::Natives<Impl>::methods[] = {
+
+    mozilla::jni::MakeNativeMethod<PresentationMediaPlayerManager::AddPresentationSurface_t>(
+            mozilla::jni::NativeStub<PresentationMediaPlayerManager::AddPresentationSurface_t, Impl>
+            ::template Wrap<&Impl::AddPresentationSurface>),
+
+    mozilla::jni::MakeNativeMethod<PresentationMediaPlayerManager::InvalidateAndScheduleComposite_t>(
+            mozilla::jni::NativeStub<PresentationMediaPlayerManager::InvalidateAndScheduleComposite_t, Impl>
+            ::template Wrap<&Impl::InvalidateAndScheduleComposite>),
+
+    mozilla::jni::MakeNativeMethod<PresentationMediaPlayerManager::RemovePresentationSurface_t>(
+            mozilla::jni::NativeStub<PresentationMediaPlayerManager::RemovePresentationSurface_t, Impl>
+            ::template Wrap<&Impl::RemovePresentationSurface>)
+};
+
+template<class Impl>
+class SurfaceTextureListener::Natives : public mozilla::jni::NativeImpl<SurfaceTextureListener, Impl>
+{
+public:
+    static const JNINativeMethod methods[1];
+};
+
+template<class Impl>
+const JNINativeMethod SurfaceTextureListener::Natives<Impl>::methods[] = {
+
+    mozilla::jni::MakeNativeMethod<SurfaceTextureListener::OnFrameAvailable_t>(
+            mozilla::jni::NativeStub<SurfaceTextureListener::OnFrameAvailable_t, Impl>
+            ::template Wrap<&Impl::OnFrameAvailable>)
 };
 
 template<class Impl>
@@ -461,7 +541,7 @@ template<class Impl>
 class NativePanZoomController::Natives : public mozilla::jni::NativeImpl<NativePanZoomController, Impl>
 {
 public:
-    static const JNINativeMethod methods[8];
+    static const JNINativeMethod methods[7];
 };
 
 template<class Impl>
@@ -491,13 +571,40 @@ const JNINativeMethod NativePanZoomController::Natives<Impl>::methods[] = {
             mozilla::jni::NativeStub<NativePanZoomController::HandleScrollEvent_t, Impl>
             ::template Wrap<&Impl::HandleScrollEvent>),
 
-    mozilla::jni::MakeNativeMethod<NativePanZoomController::AbortAnimation_t>(
-            mozilla::jni::NativeStub<NativePanZoomController::AbortAnimation_t, Impl>
-            ::template Wrap<&Impl::AbortAnimation>),
-
     mozilla::jni::MakeNativeMethod<NativePanZoomController::SetIsLongpressEnabled_t>(
             mozilla::jni::NativeStub<NativePanZoomController::SetIsLongpressEnabled_t, Impl>
             ::template Wrap<&Impl::SetIsLongpressEnabled>)
+};
+
+template<class Impl>
+class CodecProxy::NativeCallbacks::Natives : public mozilla::jni::NativeImpl<NativeCallbacks, Impl>
+{
+public:
+    static const JNINativeMethod methods[5];
+};
+
+template<class Impl>
+const JNINativeMethod CodecProxy::NativeCallbacks::Natives<Impl>::methods[] = {
+
+    mozilla::jni::MakeNativeMethod<CodecProxy::NativeCallbacks::DisposeNative_t>(
+            mozilla::jni::NativeStub<CodecProxy::NativeCallbacks::DisposeNative_t, Impl>
+            ::template Wrap<&Impl::DisposeNative>),
+
+    mozilla::jni::MakeNativeMethod<CodecProxy::NativeCallbacks::OnError_t>(
+            mozilla::jni::NativeStub<CodecProxy::NativeCallbacks::OnError_t, Impl>
+            ::template Wrap<&Impl::OnError>),
+
+    mozilla::jni::MakeNativeMethod<CodecProxy::NativeCallbacks::OnInputExhausted_t>(
+            mozilla::jni::NativeStub<CodecProxy::NativeCallbacks::OnInputExhausted_t, Impl>
+            ::template Wrap<&Impl::OnInputExhausted>),
+
+    mozilla::jni::MakeNativeMethod<CodecProxy::NativeCallbacks::OnOutput_t>(
+            mozilla::jni::NativeStub<CodecProxy::NativeCallbacks::OnOutput_t, Impl>
+            ::template Wrap<&Impl::OnOutput>),
+
+    mozilla::jni::MakeNativeMethod<CodecProxy::NativeCallbacks::OnOutputFormatChanged_t>(
+            mozilla::jni::NativeStub<CodecProxy::NativeCallbacks::OnOutputFormatChanged_t, Impl>
+            ::template Wrap<&Impl::OnOutputFormatChanged>)
 };
 
 template<class Impl>

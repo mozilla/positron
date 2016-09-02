@@ -82,7 +82,7 @@ private:
 #ifdef MOZ_ENABLE_PROFILER_SPS
   // This is needed to avoid a spurious leak report.  There's no other
   // use for it.  See bug 1239504 and bug 1215265.
-  PseudoStack* mPseudoStackHack;
+  MOZ_INIT_OUTSIDE_CTOR PseudoStack* mPseudoStackHack;
 #endif
 };
 }
@@ -194,7 +194,7 @@ ImageBridgeChild::UseTextures(CompositableClient* aCompositable,
                                         readLock,
                                         fence.IsValid() ? MaybeFence(fence) : MaybeFence(null_t()),
                                         t.mTimeStamp, t.mPictureRect,
-                                        t.mFrameID, t.mProducerID, t.mInputFrameID));
+                                        t.mFrameID, t.mProducerID));
 
     // Wait end of usage on host side if TextureFlags::RECYCLE is set or GrallocTextureData case
     HoldUntilCompositableRefReleasedIfNecessary(t.mTextureClient);

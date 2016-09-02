@@ -22,7 +22,7 @@
 #include <stdint.h>
 #include "mozilla/DeferredFinalize.h"
 #include "mozilla/Likely.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 #include "mozilla/dom/BindingUtils.h"
 #include <algorithm>
 
@@ -171,8 +171,8 @@ XPCWrappedNative::WrapNewGlobal(xpcObjectHelper& nativeHelper,
 
     // ...and then ScriptableInfo. We need all this stuff now because it's going
     // to tell us the JSClass of the object we're going to create.
-    AutoMarkingNativeScriptableInfoPtr si(cx, XPCNativeScriptableInfo::Construct(&sciWrapper));
-    MOZ_ASSERT(si.get());
+    XPCNativeScriptableInfo* si = XPCNativeScriptableInfo::Construct(&sciWrapper);
+    MOZ_ASSERT(si);
 
     // Finally, we get to the JSClass.
     const JSClass* clasp = si->GetJSClass();
@@ -266,7 +266,7 @@ XPCWrappedNative::WrapNewGlobal(xpcObjectHelper& nativeHelper,
     // of QI-ing mIdentity to different interfaces, and we don't need that
     // since we're dealing with nsISupports. But lots of code expects tearoffs
     // to exist for everything, so we just follow along.
-    XPCNativeInterface* iface = XPCNativeInterface::GetNewOrUsed(&NS_GET_IID(nsISupports));
+    RefPtr<XPCNativeInterface> iface = XPCNativeInterface::GetNewOrUsed(&NS_GET_IID(nsISupports));
     MOZ_ASSERT(iface);
     nsresult status;
     success = wrapper->FindTearOff(iface, false, &status);
@@ -427,12 +427,13 @@ XPCWrappedNative::GetNewOrUsed(xpcObjectHelper& helper,
 
         wrapper = new XPCWrappedNative(helper.forgetCanonical(), proto);
     } else {
-        AutoMarkingNativeInterfacePtr iface(cx, Interface);
+        RefPtr<XPCNativeInterface> iface = Interface;
         if (!iface)
             iface = XPCNativeInterface::GetISupports();
 
         AutoMarkingNativeSetPtr set(cx);
-        set = XPCNativeSet::GetNewOrUsed(nullptr, iface, 0);
+        XPCNativeSetKey key(iface);
+        set = XPCNativeSet::GetNewOrUsed(&key);
 
         if (!set)
             return NS_ERROR_FAILURE;
@@ -622,12 +623,6 @@ void
 XPCWrappedNative::UpdateScriptableInfo(XPCNativeScriptableInfo* si)
 {
     MOZ_ASSERT(mScriptableInfo, "UpdateScriptableInfo expects an existing scriptable info");
-
-    // Write barrier for incremental GC.
-    JSContext* cx = GetRuntime()->Context();
-    if (IsIncrementalBarrierNeeded(cx))
-        mScriptableInfo->Mark();
-
     mScriptableInfo = si;
 }
 
@@ -976,11 +971,9 @@ XPCWrappedNative::SystemIsBeingShutDown()
     if (HasProto())
         proto->SystemIsBeingShutDown();
 
-    if (mScriptableInfo &&
-        (!HasProto() ||
-         (proto && proto->GetScriptableInfo() != mScriptableInfo))) {
-        delete mScriptableInfo;
-    }
+    // Don't destroy mScriptableInfo here because this will release
+    // XPCNativeScriptableShared, which will destroy js::ClassOps
+    // which may still be in use by JS objects.
 
     // Cleanup the tearoffs.
     for (XPCWrappedNativeTearOff* to = &mFirstTearOff; to; to = to->GetNextTearOff()) {
@@ -1025,8 +1018,8 @@ XPCWrappedNative::ExtendSet(XPCNativeInterface* aInterface)
 
     if (!mSet->HasInterface(aInterface)) {
         AutoMarkingNativeSetPtr newSet(cx);
-        newSet = XPCNativeSet::GetNewOrUsed(mSet, aInterface,
-                                            mSet->GetInterfaceCount());
+        XPCNativeSetKey key(mSet, aInterface);
+        newSet = XPCNativeSet::GetNewOrUsed(&key);
         if (!newSet)
             return false;
 
@@ -1096,9 +1089,7 @@ XPCWrappedNative::FindTearOff(XPCNativeInterface* aInterface,
 
 XPCWrappedNativeTearOff*
 XPCWrappedNative::FindTearOff(const nsIID& iid) {
-    AutoJSContext cx;
-    AutoMarkingNativeInterfacePtr iface(cx);
-    iface = XPCNativeInterface::GetNewOrUsed(&iid);
+    RefPtr<XPCNativeInterface> iface = XPCNativeInterface::GetNewOrUsed(&iid);
     return iface ? FindTearOff(iface) : nullptr;
 }
 
@@ -2123,7 +2114,7 @@ XPCWrappedNative::GetObjectPrincipal() const
 NS_IMETHODIMP XPCWrappedNative::FindInterfaceWithMember(HandleId name,
                                                         nsIInterfaceInfo * *_retval)
 {
-    XPCNativeInterface* iface;
+    RefPtr<XPCNativeInterface> iface;
     XPCNativeMember*  member;
 
     if (GetSet()->FindMember(name, &member, &iface) && iface) {
@@ -2219,12 +2210,12 @@ XPCWrappedNative::ToString(XPCWrappedNativeTearOff* to /* = nullptr */ ) const
     } else if (!name) {
         XPCNativeSet* set = GetSet();
         XPCNativeInterface** array = set->GetInterfaceArray();
+        RefPtr<XPCNativeInterface> isupp = XPCNativeInterface::GetISupports();
         uint16_t count = set->GetInterfaceCount();
 
         if (count == 1)
             name = JS_sprintf_append(name, "%s", array[0]->GetNameString());
-        else if (count == 2 &&
-                 array[0] == XPCNativeInterface::GetISupports()) {
+        else if (count == 2 && array[0] == isupp) {
             name = JS_sprintf_append(name, "%s", array[1]->GetNameString());
         } else {
             for (uint16_t i = 0; i < count; i++) {

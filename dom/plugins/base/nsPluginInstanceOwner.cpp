@@ -90,6 +90,7 @@ static NS_DEFINE_CID(kAppShellCID, NS_APPSHELL_CID);
 #ifdef MOZ_WIDGET_ANDROID
 #include "ANPBase.h"
 #include "AndroidBridge.h"
+#include "ClientLayerManager.h"
 #include "nsWindow.h"
 
 static nsPluginInstanceOwner* sFullScreenInstance = nullptr;
@@ -137,7 +138,7 @@ public:
   {
   }
 
-  NS_IMETHOD Run()
+  NS_IMETHOD Run() override
   {
     nsContentUtils::DispatchTrustedEvent(mContent->OwnerDoc(), mContent,
         mFinished ? NS_LITERAL_STRING("MozPaintWaitFinished") : NS_LITERAL_STRING("MozPaintWait"),
@@ -1079,8 +1080,7 @@ NPBool nsPluginInstanceOwner::ConvertPointPuppet(PuppetWidget *widget,
   nsPoint windowPosition = AsNsPoint(rootWidget->GetWindowPosition()) / scaleFactor;
 
   // Window size is tab size + chrome size.
-  LayoutDeviceIntRect tabContentBounds;
-  NS_ENSURE_SUCCESS(puppetWidget->GetBounds(tabContentBounds), false);
+  LayoutDeviceIntRect tabContentBounds = puppetWidget->GetBounds();
   tabContentBounds.ScaleInverseRoundOut(scaleFactor);
   int32_t windowH = tabContentBounds.height + int(chromeSize.y);
 
@@ -1186,8 +1186,7 @@ NPBool nsPluginInstanceOwner::ConvertPointNoPuppet(nsIWidget *widget,
   screen->GetRect(&screenX, &screenY, &screenWidth, &screenHeight);
   screenHeight /= scaleFactor;
 
-  LayoutDeviceIntRect windowScreenBounds;
-  NS_ENSURE_SUCCESS(widget->GetScreenBounds(windowScreenBounds), false);
+  LayoutDeviceIntRect windowScreenBounds = widget->GetScreenBounds();
   windowScreenBounds.ScaleInverseRoundOut(scaleFactor);
   int32_t windowX = windowScreenBounds.x;
   int32_t windowY = windowScreenBounds.y;
@@ -1545,11 +1544,10 @@ bool nsPluginInstanceOwner::AddPluginView(const LayoutDeviceRect& aRect /* = Lay
     mJavaView = (void*)jni::GetGeckoThreadEnv()->NewGlobalRef((jobject)mJavaView);
   }
 
-  if (AndroidBridge::Bridge())
-    AndroidBridge::Bridge()->AddPluginView((jobject)mJavaView, aRect, mFullScreen);
-
-  if (mFullScreen)
+  if (mFullScreen) {
+    java::GeckoAppShell::AddFullScreenPluginView(jni::Object::Ref::From(jobject(mJavaView)));
     sFullScreenInstance = this;
+  }
 
   return true;
 }
@@ -1559,8 +1557,9 @@ void nsPluginInstanceOwner::RemovePluginView()
   if (!mInstance || !mJavaView)
     return;
 
-  java::GeckoAppShell::RemovePluginView(
-      jni::Object::Ref::From(jobject(mJavaView)), mFullScreen);
+  if (mFullScreen) {
+    java::GeckoAppShell::RemoveFullScreenPluginView(jni::Object::Ref::From(jobject(mJavaView)));
+  }
   jni::GetGeckoThreadEnv()->DeleteGlobalRef((jobject)mJavaView);
   mJavaView = nullptr;
 
@@ -1597,6 +1596,21 @@ void nsPluginInstanceOwner::Invalidate() {
   rect.right = mPluginWindow->width;
   rect.bottom = mPluginWindow->height;
   InvalidateRect(&rect);
+}
+
+void nsPluginInstanceOwner::Recomposite() {
+  nsIWidget* const widget = mPluginFrame->GetNearestWidget();
+  NS_ENSURE_TRUE_VOID(widget);
+
+  LayerManager* const lm = widget->GetLayerManager();
+  NS_ENSURE_TRUE_VOID(lm);
+
+  ClientLayerManager* const clm = lm->AsClientLayerManager();
+  NS_ENSURE_TRUE_VOID(clm && clm->GetRoot());
+
+  clm->SendInvalidRegion(
+      clm->GetRoot()->GetLocalVisibleRegion().ToUnknownRegion().GetBounds());
+  clm->Composite();
 }
 
 void nsPluginInstanceOwner::RequestFullScreen() {
@@ -3385,7 +3399,6 @@ NS_IMETHODIMP nsPluginInstanceOwner::CreateWidget(void)
         return rv;
       }
     }
-
 
     mWidget->EnableDragDrop(true);
     mWidget->Show(false);

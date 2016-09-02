@@ -6,7 +6,6 @@
 package org.mozilla.gecko.gfx;
 
 import org.mozilla.gecko.GeckoAppShell;
-import org.mozilla.gecko.GeckoEvent;
 import org.mozilla.gecko.GeckoThread;
 import org.mozilla.gecko.PrefsHelper;
 import org.mozilla.gecko.annotation.WrapForJNI;
@@ -34,24 +33,24 @@ class NativePanZoomController extends JNIObject implements PanZoomController {
     private long mLastDownTime;
     private static final float MAX_SCROLL = 0.075f * GeckoAppShell.getDpi();
 
-    @WrapForJNI
+    @WrapForJNI(calledFrom = "ui")
     private native boolean handleMotionEvent(
             int action, int actionIndex, long time, int metaState,
             int pointerId[], float x[], float y[], float orientation[], float pressure[],
             float toolMajor[], float toolMinor[]);
 
-    @WrapForJNI
+    @WrapForJNI(calledFrom = "ui")
     private native boolean handleScrollEvent(
             long time, int metaState,
             float x, float y,
             float hScroll, float vScroll);
 
-    @WrapForJNI
+    @WrapForJNI(calledFrom = "ui")
     private native boolean handleMouseEvent(
             int action, long time, int metaState,
             float x, float y, int buttons);
 
-    @WrapForJNI
+    @WrapForJNI(calledFrom = "ui")
     private native void handleMotionEventVelocity(long time, float ySpeed);
 
     private boolean handleMotionEvent(MotionEvent event) {
@@ -192,91 +191,28 @@ class NativePanZoomController extends JNIObject implements PanZoomController {
     }
 
     @Override
-    public boolean onKeyEvent(KeyEvent event) {
-        // FIXME implement this
-        return false;
-    }
-
-    @Override
     public void onMotionEventVelocity(final long aEventTime, final float aSpeedY) {
         handleMotionEventVelocity(aEventTime, aSpeedY);
     }
 
-    @Override
-    public PointF getVelocityVector() {
-        // FIXME implement this
-        return new PointF(0, 0);
-    }
-
-    @Override
-    public void pageRectUpdated() {
-        // no-op in APZC, I think
-    }
-
-    @Override
-    public void abortPanning() {
-        // no-op in APZC, I think
-    }
-
-    @Override
-    public void notifyDefaultActionPrevented(boolean prevented) {
-        // no-op: This could get called if accessibility is enabled and the events
-        // are sent to Gecko directly without going through APZ. In this case
-        // we just want to ignore this callback.
-    }
-
-    @WrapForJNI(stubName = "AbortAnimation")
-    private native void nativeAbortAnimation();
-
-    @Override // PanZoomController
-    public void abortAnimation()
-    {
-        if (!mDestroyed) {
-            nativeAbortAnimation();
-        }
-    }
-
-    @Override // PanZoomController
-    public boolean getRedrawHint()
-    {
-        // FIXME implement this
-        return true;
-    }
-
-    @Override @WrapForJNI(allowMultithread = true) // PanZoomController
+    @Override @WrapForJNI(calledFrom = "ui") // PanZoomController
     public void destroy() {
-        if (mDestroyed) {
+        if (mDestroyed || !mTarget.isGeckoReady()) {
             return;
         }
         mDestroyed = true;
         disposeNative();
     }
 
-    @Override @WrapForJNI // JNIObject
+    @WrapForJNI(calledFrom = "ui", dispatchTo = "gecko") @Override // JNIObject
     protected native void disposeNative();
-
-    @Override
-    public void setOverScrollMode(int overscrollMode) {
-        // FIXME implement this
-    }
-
-    @Override
-    public int getOverScrollMode() {
-        // FIXME implement this
-        return 0;
-    }
-
-    @WrapForJNI(allowMultithread = true, stubName = "RequestContentRepaintWrapper")
-    private void requestContentRepaint(float x, float y, float width, float height, float resolution) {
-        mTarget.forceRedraw(new DisplayPortMetrics(x, y, x + width, y + height, resolution));
-    }
 
     @Override
     public void setOverscrollHandler(final Overscroll handler) {
         mOverscroll = handler;
     }
 
-    @WrapForJNI(stubName = "SetIsLongpressEnabled")
+    @WrapForJNI(stubName = "SetIsLongpressEnabled") // Called from test thread.
     private native void nativeSetIsLongpressEnabled(boolean isLongpressEnabled);
 
     @Override // PanZoomController
@@ -286,7 +222,7 @@ class NativePanZoomController extends JNIObject implements PanZoomController {
         }
     }
 
-    @WrapForJNI(stubName = "AdjustScrollForSurfaceShift")
+    @WrapForJNI(calledFrom = "ui")
     private native void adjustScrollForSurfaceShift(float aX, float aY);
 
     @Override // PanZoomController
@@ -295,7 +231,7 @@ class NativePanZoomController extends JNIObject implements PanZoomController {
         return aMetrics.offsetViewportByAndClamp(aShift.x, aShift.y);
     }
 
-    @WrapForJNI(allowMultithread = true)
+    @WrapForJNI
     private void updateOverscrollVelocity(final float x, final float y) {
         if (mOverscroll != null) {
             if (ThreadUtils.isOnUiThread() == true) {
@@ -314,7 +250,7 @@ class NativePanZoomController extends JNIObject implements PanZoomController {
         }
     }
 
-    @WrapForJNI(allowMultithread = true)
+    @WrapForJNI
     private void updateOverscrollOffset(final float x, final float y) {
         if (mOverscroll != null) {
             if (ThreadUtils.isOnUiThread() == true) {
@@ -332,7 +268,7 @@ class NativePanZoomController extends JNIObject implements PanZoomController {
         }
     }
 
-    @WrapForJNI
+    @WrapForJNI(calledFrom = "ui")
     private void setScrollingRootContent(final boolean isRootContent) {
         mTarget.setScrollingRootContent(isRootContent);
     }
@@ -341,7 +277,7 @@ class NativePanZoomController extends JNIObject implements PanZoomController {
      * Active SelectionCaretDrag requires DynamicToolbarAnimator to be pinned
      * to avoid unwanted scroll interactions.
      */
-    @WrapForJNI
+    @WrapForJNI(calledFrom = "gecko")
     private void onSelectionDragState(boolean state) {
         mView.getDynamicToolbarAnimator().setPinned(state, PinReason.CARET_DRAG);
     }

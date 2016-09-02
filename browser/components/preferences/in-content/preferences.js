@@ -167,7 +167,7 @@ function helpButtonCommand() {
 function friendlyPrefCategoryNameToInternalName(aName) {
   if (aName.startsWith("pane"))
     return aName;
-  return "pane" + aName.substring(0,1).toUpperCase() + aName.substr(1);
+  return "pane" + aName.substring(0, 1).toUpperCase() + aName.substr(1);
 }
 
 // This function is duplicated inside of utilityOverlay.js's openPreferences.
@@ -221,7 +221,7 @@ function confirmRestartPrompt(aRestartToEnable, aDefaultButtonIndex,
                     Services.prompt.BUTTON_TITLE_IS_STRING);
   }
 
-  switch(aDefaultButtonIndex) {
+  switch (aDefaultButtonIndex) {
     case 0:
       buttonFlags += Services.prompt.BUTTON_POS_0_DEFAULT;
       break;

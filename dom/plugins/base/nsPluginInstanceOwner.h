@@ -256,11 +256,12 @@ public:
   already_AddRefed<mozilla::layers::ImageContainer> GetImageContainerForVideo(nsNPAPIPluginInstance::VideoInfo* aVideoInfo);
 
   void Invalidate();
+  void Recomposite();
 
   void RequestFullScreen();
   void ExitFullScreen();
 
-  // Called from AndroidJNI when we removed the fullscreen view.
+  // Called from nsAppShell when we removed the fullscreen view.
   static void ExitFullScreen(jobject view);
 #endif
 

@@ -309,10 +309,8 @@ private:
   DECL_GFX_PREF(Live, "dom.meta-viewport.enabled",             MetaViewportEnabled, bool, false);
   DECL_GFX_PREF(Once, "dom.vr.enabled",                        VREnabled, bool, false);
   DECL_GFX_PREF(Once, "dom.vr.oculus.enabled",                 VROculusEnabled, bool, true);
-  DECL_GFX_PREF(Once, "dom.vr.oculus050.enabled",              VROculus050Enabled, bool, true);
-  DECL_GFX_PREF(Once, "dom.vr.cardboard.enabled",              VRCardboardEnabled, bool, false);
+  DECL_GFX_PREF(Once, "dom.vr.openvr.enabled",                 VROpenVREnabled, bool, false);
   DECL_GFX_PREF(Once, "dom.vr.osvr.enabled",                   VROSVREnabled, bool, false);
-  DECL_GFX_PREF(Once, "dom.vr.add-test-devices",               VRAddTestDevices, int32_t, 1);
   DECL_GFX_PREF(Live, "dom.vr.poseprediction.enabled",         VRPosePredictionEnabled, bool, false);
   DECL_GFX_PREF(Live, "dom.w3c_pointer_events.enabled",        PointerEventsEnabled, bool, false);
   DECL_GFX_PREF(Live, "dom.w3c_touch_events.enabled",          TouchEventsEnabled, int32_t, 0);
@@ -369,7 +367,6 @@ private:
   DECL_GFX_PREF(Once, "gfx.direct2d.force-enabled",            Direct2DForceEnabled, bool, false);
   DECL_GFX_PREF(Live, "gfx.draw-color-bars",                   CompositorDrawColorBars, bool, false);
   DECL_GFX_PREF(Once, "gfx.e10s.hide-plugins-for-scroll",      HidePluginsForScroll, bool, true);
-  DECL_GFX_PREF(Once, "gfx.font_rendering.directwrite.force-enabled", DirectWriteFontRenderingForceEnabled, bool, false);
   DECL_GFX_PREF(Live, "gfx.gralloc.fence-with-readpixels",     GrallocFenceWithReadPixels, bool, false);
   DECL_GFX_PREF(Live, "gfx.layerscope.enabled",                LayerScopeEnabled, bool, false);
   DECL_GFX_PREF(Live, "gfx.layerscope.port",                   LayerScopePort, int32_t, 23456);
@@ -390,6 +387,7 @@ private:
   DECL_GFX_PREF(Live, "gfx.ycbcr.accurate-conversion",         YCbCrAccurateConversion, bool, false);
 
   DECL_GFX_PREF(Live, "gfx.content.use-native-pushlayer",      UseNativePushLayer, bool, false);
+  DECL_GFX_PREF(Live, "gfx.content.always-paint",              AlwaysPaint, bool, false);
 
   // Disable surface sharing due to issues with compatible FBConfigs on
   // NVIDIA drivers as described in bug 1193015.
@@ -404,8 +402,6 @@ private:
   DECL_GFX_PREF(Once, "gfx.touch.resample.old-touch-threshold",TouchResampleOldTouchThreshold, int32_t, 17);
   DECL_GFX_PREF(Once, "gfx.touch.resample.vsync-adjust",       TouchVsyncSampleAdjust, int32_t, 5);
 
-  DECL_GFX_PREF(Once, "gfx.vr.mirror-textures",                VRMirrorTextures, bool, false);
-
   DECL_GFX_PREF(Live, "gfx.vsync.collect-scroll-transforms",   CollectScrollTransforms, bool, false);
   // On b2g, in really bad cases, I've seen up to 80 ms delays between touch events and the main thread
   // processing them. So 80 ms / 16 = 5 vsync events. Double it up just to be on the safe side, so 10.
@@ -419,6 +415,7 @@ private:
   DECL_GFX_PREF(Live, "gl.multithreaded",                      GLMultithreaded, bool, false);
 #endif
   DECL_GFX_PREF(Live, "gl.require-hardware",                   RequireHardwareGL, bool, false);
+  DECL_GFX_PREF(Live, "ignore-dx-interop2-blacklist",          IgnoreDXInterop2Blacklist, bool, false);
 
   DECL_GFX_PREF(Once, "image.cache.size",                      ImageCacheSize, int32_t, 5*1024*1024);
   DECL_GFX_PREF(Once, "image.cache.timeweight",                ImageCacheTimeWeight, int32_t, 500);
@@ -456,7 +453,6 @@ private:
   DECL_GFX_PREF(Once, "layers.componentalpha.enabled",         ComponentAlphaEnabled, bool, true);
 #endif
   DECL_GFX_PREF(Live, "layers.composer2d.enabled",             Composer2DCompositionEnabled, bool, false);
-  DECL_GFX_PREF(Once, "layers.d3d11.disable-warp",             LayersD3D11DisableWARP, bool, false);
   DECL_GFX_PREF(Once, "layers.d3d11.force-warp",               LayersD3D11ForceWARP, bool, false);
   DECL_GFX_PREF(Live, "layers.deaa.enabled",                   LayersDEAAEnabled, bool, false);
   DECL_GFX_PREF(Live, "layers.draw-bigimage-borders",          DrawBigImageBorders, bool, false);
@@ -493,7 +489,7 @@ private:
   DECL_GFX_PREF(Once, "layers.overzealous-gralloc-unlocking",  OverzealousGrallocUnlocking, bool, false);
   DECL_GFX_PREF(Once, "layers.prefer-d3d9",                    LayersPreferD3D9, bool, false);
   DECL_GFX_PREF(Once, "layers.prefer-opengl",                  LayersPreferOpenGL, bool, false);
-  DECL_GFX_PREF(Live, "layers.progressive-paint",              ProgressivePaintDoNotUseDirectly, bool, false);
+  DECL_GFX_PREF(Live, "layers.progressive-paint",              ProgressivePaint, bool, false);
   DECL_GFX_PREF(Live, "layers.shared-buffer-provider.enabled", PersistentBufferProviderSharedEnabled, bool, false);
   DECL_GFX_PREF(Live, "layers.single-tile.enabled",            LayersSingleTileEnabled, bool, true);
   DECL_GFX_PREF(Once, "layers.stereo-video.enabled",           StereoVideoEnabled, bool, false);
@@ -505,6 +501,8 @@ private:
   DECL_GFX_PREF(Once, "layers.tile-height",                    LayersTileHeight, int32_t, 256);
   DECL_GFX_PREF(Once, "layers.tile-initial-pool-size",         LayersTileInitialPoolSize, uint32_t, (uint32_t)50);
   DECL_GFX_PREF(Once, "layers.tile-pool-unused-size",          LayersTilePoolUnusedSize, uint32_t, (uint32_t)10);
+  DECL_GFX_PREF(Once, "layers.tile-pool-shrink-timeout",       LayersTilePoolShrinkTimeout, uint32_t, (uint32_t)50);
+  DECL_GFX_PREF(Once, "layers.tile-pool-clear-timeout",        LayersTilePoolClearTimeout, uint32_t, (uint32_t)5000);
   DECL_GFX_PREF(Once, "layers.tiles.adjust",                   LayersTilesAdjust, bool, true);
   DECL_GFX_PREF(Once, "layers.tiles.edge-padding",             TileEdgePaddingEnabled, bool, true);
   DECL_GFX_PREF(Live, "layers.tiles.fade-in.enabled",          LayerTileFadeInEnabled, bool, false);
@@ -514,7 +512,7 @@ private:
   DECL_GFX_PREF(Once, "layers.use-image-offscreen-surfaces",   UseImageOffscreenSurfaces, bool, true);
 
   DECL_GFX_PREF(Live, "layout.css.scroll-behavior.damping-ratio", ScrollBehaviorDampingRatio, float, 1.0f);
-  DECL_GFX_PREF(Live, "layout.css.scroll-behavior.enabled",    ScrollBehaviorEnabled, bool, false);
+  DECL_GFX_PREF(Live, "layout.css.scroll-behavior.enabled",    ScrollBehaviorEnabled, bool, true);
   DECL_GFX_PREF(Live, "layout.css.scroll-behavior.spring-constant", ScrollBehaviorSpringConstant, float, 250.0f);
   DECL_GFX_PREF(Live, "layout.css.scroll-snap.prediction-max-velocity", ScrollSnapPredictionMaxVelocity, int32_t, 2000);
   DECL_GFX_PREF(Live, "layout.css.scroll-snap.prediction-sensitivity", ScrollSnapPredictionSensitivity, float, 0.750f);

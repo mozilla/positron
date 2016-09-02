@@ -1053,9 +1053,8 @@ nsCSSRendering::PaintFocus(nsPresContext* aPresContext,
  * that function, except they're for a single coordinate / a single size
  * dimension. (so, x/width vs. y/height)
  */
-typedef nsStyleImageLayers::Position::PositionCoord PositionCoord;
 static void
-ComputeObjectAnchorCoord(const PositionCoord& aCoord,
+ComputeObjectAnchorCoord(const Position::Coord& aCoord,
                          const nscoord aOriginBounds,
                          const nscoord aImageSize,
                          nscoord* aTopLeftCoord,
@@ -1077,7 +1076,7 @@ ComputeObjectAnchorCoord(const PositionCoord& aCoord,
 
 void
 nsImageRenderer::ComputeObjectAnchorPoint(
-  const nsStyleImageLayers::Position& aPos,
+  const Position& aPos,
   const nsSize& aOriginBounds,
   const nsSize& aImageSize,
   nsPoint* aTopLeft,
@@ -2727,7 +2726,7 @@ nsCSSRendering::PaintGradient(nsPresContext* aPresContext,
     aGradient->mShape == NS_STYLE_GRADIENT_SHAPE_LINEAR &&
     (lineStart.x == lineEnd.x) != (lineStart.y == lineEnd.y) &&
     aRepeatSize.width == aDest.width && aRepeatSize.height == aDest.height &&
-    !aGradient->mRepeating && !cellContainsFill;
+    !aGradient->mRepeating && !aSrc.IsEmpty() && !cellContainsFill;
 
   gfxMatrix matrix;
   if (forceRepeatToCoverTiles) {
@@ -2746,15 +2745,15 @@ nsCSSRendering::PaintGradient(nsPresContext* aPresContext,
 
     // Fit the gradient line exactly into the source rect.
     if (lineStart.x != lineEnd.x) {
-      rectLen = srcSize.width;
+      rectLen = aPresContext->CSSPixelsToDevPixels(aSrc.width);
       offset = ((double)aSrc.x - lineStart.x) / lineLength;
       lineStart.x = aSrc.x;
-      lineEnd.x = aSrc.x + srcSize.width;
+      lineEnd.x = aSrc.x + rectLen;
     } else {
-      rectLen = srcSize.height;
+      rectLen = aPresContext->CSSPixelsToDevPixels(aSrc.height);
       offset = ((double)aSrc.y - lineStart.y) / lineLength;
       lineStart.y = aSrc.y;
-      lineEnd.y = aSrc.y + srcSize.height;
+      lineEnd.y = aSrc.y + rectLen;
     }
 
     // Adjust gradient stop positions for the new gradient line.

@@ -4,6 +4,10 @@
 
 XPCOMUtils.defineLazyModuleGetter(this, "CustomizableUI",
                                   "resource:///modules/CustomizableUI.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "clearTimeout",
+                                  "resource://gre/modules/Timer.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "setTimeout",
+                                  "resource://gre/modules/Timer.jsm");
 
 XPCOMUtils.defineLazyGetter(this, "colorUtils", () => {
   return require("devtools/shared/css-color").colorUtils;
@@ -16,6 +20,8 @@ var {
   EventManager,
   IconDetails,
 } = ExtensionUtils;
+
+const POPUP_PRELOAD_TIMEOUT_MS = 200;
 
 const XUL_NS = "http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul";
 
@@ -31,6 +37,9 @@ function BrowserAction(options, extension) {
   this.id = `${widgetId}-browser-action`;
   this.viewId = `PanelUI-webext-${widgetId}-browser-action-view`;
   this.widget = null;
+
+  this.pendingPopup = null;
+  this.pendingPopupTimeout = null;
 
   this.tabManager = TabManager.for(extension);
 
@@ -86,6 +95,8 @@ BrowserAction.prototype = {
         node.classList.add("webextension-browser-action");
         node.setAttribute("constrain-size", "true");
 
+        node.onmousedown = event => this.handleEvent(event);
+
         this.updateButton(node, this.defaults);
       },
 
@@ -103,7 +114,8 @@ BrowserAction.prototype = {
         // open a popup.
         if (popupURL) {
           try {
-            new ViewPopup(this.extension, event.target, popupURL, this.browserStyle);
+            let popup = this.getPopup(document.defaultView, popupURL);
+            event.detail.addBlocker(popup.attach(event.target));
           } catch (e) {
             Cu.reportError(e);
             event.preventDefault();
@@ -121,6 +133,100 @@ BrowserAction.prototype = {
                        (evt, tab) => { this.updateWindow(tab.ownerGlobal); });
 
     this.widget = widget;
+  },
+
+  handleEvent(event) {
+    let button = event.target;
+    let window = button.ownerDocument.defaultView;
+
+    switch (event.type) {
+      case "mousedown":
+        if (event.button == 0) {
+          // Begin pre-loading the browser for the popup, so it's more likely to
+          // be ready by the time we get a complete click.
+          let tab = window.gBrowser.selectedTab;
+          let popupURL = this.getProperty(tab, "popup");
+
+          if (popupURL) {
+            this.pendingPopup = this.getPopup(window, popupURL);
+            window.addEventListener("mouseup", this, true);
+          } else {
+            this.clearPopup();
+          }
+        }
+        break;
+
+      case "mouseup":
+        if (event.button == 0) {
+          this.clearPopupTimeout();
+          // If we have a pending pre-loaded popup, cancel it after we've waited
+          // long enough that we can be relatively certain it won't be opening.
+          if (this.pendingPopup) {
+            if (event.target === this.widget.forWindow(window).node) {
+              this.pendingPopupTimeout = setTimeout(() => this.clearPopup(),
+                                                    POPUP_PRELOAD_TIMEOUT_MS);
+            } else {
+              this.clearPopup();
+            }
+          }
+        }
+        break;
+    }
+  },
+
+  /**
+   * Returns a potentially pre-loaded popup for the given URL in the given
+   * window. If a matching pre-load popup already exists, returns that.
+   * Otherwise, initializes a new one.
+   *
+   * If a pre-load popup exists which does not match, it is destroyed before a
+   * new one is created.
+   *
+   * @param {Window} window
+   *        The browser window in which to create the popup.
+   * @param {string} popupURL
+   *        The URL to load into the popup.
+   * @returns {ViewPopup}
+   */
+  getPopup(window, popupURL) {
+    this.clearPopupTimeout();
+    let {pendingPopup} = this;
+    this.pendingPopup = null;
+
+    if (pendingPopup) {
+      if (pendingPopup.window === window && pendingPopup.popupURL === popupURL) {
+        return pendingPopup;
+      }
+      pendingPopup.destroy();
+    }
+
+    let fixedWidth = this.widget.areaType == CustomizableUI.TYPE_MENU_PANEL;
+    return new ViewPopup(this.extension, window, popupURL, this.browserStyle, fixedWidth);
+  },
+
+  /**
+   * Clears any pending pre-loaded popup and related timeouts.
+   */
+  clearPopup() {
+    this.clearPopupTimeout();
+    if (this.pendingPopup) {
+      this.pendingPopup.destroy();
+      this.pendingPopup = null;
+    }
+  },
+
+  /**
+   * Clears any pending timeouts to clear stale, pre-loaded popups.
+   */
+  clearPopupTimeout() {
+    if (this.pendingPopup) {
+      this.pendingPopup.window.removeEventListener("mouseup", this, true);
+    }
+
+    if (this.pendingPopupTimeout) {
+      clearTimeout(this.pendingPopupTimeout);
+      this.pendingPopupTimeout = null;
+    }
   },
 
   // Update the toolbar button |node| with the tab context data
@@ -259,7 +365,8 @@ extensions.on("shutdown", (type, extension) => {
 });
 /* eslint-enable mozilla/balanced-listeners */
 
-extensions.registerSchemaAPI("browserAction", (extension, context) => {
+extensions.registerSchemaAPI("browserAction", "addon_parent", context => {
+  let {extension} = context;
   return {
     browserAction: {
       onClicked: new EventManager(context, "browserAction.onClicked", fire => {
@@ -274,17 +381,17 @@ extensions.registerSchemaAPI("browserAction", (extension, context) => {
       }).api(),
 
       enable: function(tabId) {
-        let tab = tabId !== null ? TabManager.getTab(tabId) : null;
+        let tab = tabId !== null ? TabManager.getTab(tabId, context) : null;
         BrowserAction.for(extension).setProperty(tab, "enabled", true);
       },
 
       disable: function(tabId) {
-        let tab = tabId !== null ? TabManager.getTab(tabId) : null;
+        let tab = tabId !== null ? TabManager.getTab(tabId, context) : null;
         BrowserAction.for(extension).setProperty(tab, "enabled", false);
       },
 
       setTitle: function(details) {
-        let tab = details.tabId !== null ? TabManager.getTab(details.tabId) : null;
+        let tab = details.tabId !== null ? TabManager.getTab(details.tabId, context) : null;
 
         let title = details.title;
         // Clear the tab-specific title when given a null string.
@@ -295,31 +402,36 @@ extensions.registerSchemaAPI("browserAction", (extension, context) => {
       },
 
       getTitle: function(details) {
-        let tab = details.tabId !== null ? TabManager.getTab(details.tabId) : null;
+        let tab = details.tabId !== null ? TabManager.getTab(details.tabId, context) : null;
+
         let title = BrowserAction.for(extension).getProperty(tab, "title");
         return Promise.resolve(title);
       },
 
       setIcon: function(details) {
-        let tab = details.tabId !== null ? TabManager.getTab(details.tabId) : null;
+        let tab = details.tabId !== null ? TabManager.getTab(details.tabId, context) : null;
+
         let icon = IconDetails.normalize(details, extension, context);
         BrowserAction.for(extension).setProperty(tab, "icon", icon);
         return Promise.resolve();
       },
 
       setBadgeText: function(details) {
-        let tab = details.tabId !== null ? TabManager.getTab(details.tabId) : null;
+        let tab = details.tabId !== null ? TabManager.getTab(details.tabId, context) : null;
+
         BrowserAction.for(extension).setProperty(tab, "badgeText", details.text);
       },
 
       getBadgeText: function(details) {
-        let tab = details.tabId !== null ? TabManager.getTab(details.tabId) : null;
+        let tab = details.tabId !== null ? TabManager.getTab(details.tabId, context) : null;
+
         let text = BrowserAction.for(extension).getProperty(tab, "badgeText");
         return Promise.resolve(text);
       },
 
       setPopup: function(details) {
-        let tab = details.tabId !== null ? TabManager.getTab(details.tabId) : null;
+        let tab = details.tabId !== null ? TabManager.getTab(details.tabId, context) : null;
+
         // Note: Chrome resolves arguments to setIcon relative to the calling
         // context, but resolves arguments to setPopup relative to the extension
         // root.
@@ -330,13 +442,14 @@ extensions.registerSchemaAPI("browserAction", (extension, context) => {
       },
 
       getPopup: function(details) {
-        let tab = details.tabId !== null ? TabManager.getTab(details.tabId) : null;
+        let tab = details.tabId !== null ? TabManager.getTab(details.tabId, context) : null;
+
         let popup = BrowserAction.for(extension).getProperty(tab, "popup");
         return Promise.resolve(popup);
       },
 
       setBadgeBackgroundColor: function(details) {
-        let tab = details.tabId !== null ? TabManager.getTab(details.tabId) : null;
+        let tab = details.tabId !== null ? TabManager.getTab(details.tabId, context) : null;
         let color = details.color;
         if (!Array.isArray(color)) {
           let col = colorUtils.colorToRGBA(color);
@@ -346,7 +459,8 @@ extensions.registerSchemaAPI("browserAction", (extension, context) => {
       },
 
       getBadgeBackgroundColor: function(details, callback) {
-        let tab = details.tabId !== null ? TabManager.getTab(details.tabId) : null;
+        let tab = details.tabId !== null ? TabManager.getTab(details.tabId, context) : null;
+
         let color = BrowserAction.for(extension).getProperty(tab, "badgeBackgroundColor");
         return Promise.resolve(color || [0xd9, 0, 0, 255]);
       },

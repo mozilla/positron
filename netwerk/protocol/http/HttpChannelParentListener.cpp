@@ -9,7 +9,7 @@
 
 #include "HttpChannelParentListener.h"
 #include "mozilla/net/HttpChannelParent.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 #include "nsIRedirectChannelRegistrar.h"
 #include "nsIHttpEventSink.h"
 #include "nsIHttpHeaderVisitor.h"
@@ -286,7 +286,7 @@ public:
   {
   }
 
-  NS_IMETHOD Run()
+  NS_IMETHOD Run() override
   {
     // The URL passed as an argument here doesn't matter, since the child will
     // receive a redirection notification as a result of this synthesized response.

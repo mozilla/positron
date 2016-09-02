@@ -6,10 +6,13 @@
 #include "GPUProcessManager.h"
 #include "GPUProcessHost.h"
 #include "mozilla/StaticPtr.h"
+#include "mozilla/dom/ContentParent.h"
+#include "mozilla/layers/APZCTreeManager.h"
 #include "mozilla/layers/CompositorBridgeParent.h"
 #include "mozilla/layers/ImageBridgeChild.h"
 #include "mozilla/layers/ImageBridgeParent.h"
 #include "mozilla/layers/InProcessCompositorSession.h"
+#include "mozilla/layers/LayerTreeOwnerTracker.h"
 #include "mozilla/layers/RemoteCompositorSession.h"
 #include "mozilla/widget/PlatformWidgetTypes.h"
 #ifdef MOZ_WIDGET_SUPPORTS_OOP_COMPOSITING
@@ -57,10 +60,14 @@ GPUProcessManager::GPUProcessManager()
 {
   mObserver = new Observer(this);
   nsContentUtils::RegisterShutdownObserver(mObserver);
+
+  LayerTreeOwnerTracker::Initialize();
 }
 
 GPUProcessManager::~GPUProcessManager()
 {
+  LayerTreeOwnerTracker::Shutdown();
+
   // The GPU process should have already been shut down.
   MOZ_ASSERT(!mProcess && !mGPUChild);
 
@@ -134,6 +141,10 @@ GPUProcessManager::EnsureGPUReady()
       return;
     }
   }
+
+  if (mGPUChild) {
+    mGPUChild->EnsureGPUReady();
+  }
 }
 
 void
@@ -142,6 +153,8 @@ GPUProcessManager::EnsureImageBridgeChild()
   if (ImageBridgeChild::IsCreated()) {
     return;
   }
+
+  EnsureGPUReady();
 
   if (!mGPUChild) {
     ImageBridgeChild::InitSameProcess();
@@ -170,6 +183,8 @@ GPUProcessManager::EnsureVRManager()
   if (VRManagerChild::IsCreated()) {
     return;
   }
+
+  EnsureGPUReady();
 
   if (!mGPUChild) {
     VRManagerChild::InitSameProcess();
@@ -288,6 +303,7 @@ GPUProcessManager::CreateTopLevelCompositor(nsBaseWidget* aWidget,
 {
   uint64_t layerTreeId = AllocateLayerTreeId();
 
+  EnsureGPUReady();
   EnsureImageBridgeChild();
   EnsureVRManager();
 
@@ -391,6 +407,8 @@ bool
 GPUProcessManager::CreateContentCompositorBridge(base::ProcessId aOtherProcess,
                                                  ipc::Endpoint<PCompositorBridgeChild>* aOutEndpoint)
 {
+  EnsureGPUReady();
+
   ipc::Endpoint<PCompositorBridgeParent> parentPipe;
   ipc::Endpoint<PCompositorBridgeChild> childPipe;
 
@@ -494,6 +512,24 @@ GPUProcessManager::GetAPZCTreeManagerForLayers(uint64_t aLayersId)
   return CompositorBridgeParent::GetAPZCTreeManager(aLayersId);
 }
 
+void
+GPUProcessManager::MapLayerTreeId(uint64_t aLayersId, base::ProcessId aOwningId)
+{
+  LayerTreeOwnerTracker::Get()->Map(aLayersId, aOwningId);
+
+  if (mGPUChild) {
+    mGPUChild->SendAddLayerTreeIdMapping(
+        aLayersId,
+        aOwningId);
+  }
+}
+
+bool
+GPUProcessManager::IsLayerTreeIdMapped(uint64_t aLayersId, base::ProcessId aRequestingId)
+{
+  return LayerTreeOwnerTracker::Get()->IsMapped(aLayersId, aRequestingId);
+}
+
 uint64_t
 GPUProcessManager::AllocateLayerTreeId()
 {
@@ -504,6 +540,10 @@ GPUProcessManager::AllocateLayerTreeId()
 void
 GPUProcessManager::DeallocateLayerTreeId(uint64_t aLayersId)
 {
+  if (mGPUChild) {
+    mGPUChild->SendDeallocateLayerTreeId(aLayersId);
+    return;
+  }
   CompositorBridgeParent::DeallocateLayerTreeId(aLayersId);
 }
 
@@ -523,19 +563,6 @@ void
 GPUProcessManager::SwapLayerTreeObservers(uint64_t aLayer, uint64_t aOtherLayer)
 {
   CompositorBridgeParent::SwapLayerTreeObservers(aLayer, aOtherLayer);
-}
-
-bool
-GPUProcessManager::UpdateRemoteContentController(uint64_t aLayersId,
-                                                 dom::ContentParent* aContentParent,
-                                                 const dom::TabId& aTabId,
-                                                 dom::TabParent* aBrowserParent)
-{
-  return CompositorBridgeParent::UpdateRemoteContentController(
-    aLayersId,
-    aContentParent,
-    aTabId,
-    aBrowserParent);
 }
 
 void

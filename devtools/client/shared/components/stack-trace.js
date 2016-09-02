@@ -9,7 +9,7 @@ const { DOM: dom, createClass, createFactory, PropTypes } = React;
 const { LocalizationHelper } = require("devtools/client/shared/l10n");
 const Frame = createFactory(require("./frame"));
 
-const l10n = new LocalizationHelper("chrome://devtools/locale/webconsole.properties");
+const l10n = new LocalizationHelper("devtools/locale/webconsole.properties");
 
 const AsyncFrame = createFactory(createClass({
   displayName: "AsyncFrame",
@@ -50,7 +50,7 @@ const StackTrace = createClass({
       frames.push(Frame({
         frame: {
           functionDisplayName: s.functionName,
-          source: s.filename,
+          source: s.filename.split(" -> ").pop(),
           line: s.lineNumber,
           column: s.columnNumber,
         },

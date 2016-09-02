@@ -160,7 +160,8 @@ GetPrefNameForFeature(int32_t aFeature)
       break;
     case nsIGfxInfo::FEATURE_VP8_HW_DECODE:
     case nsIGfxInfo::FEATURE_VP9_HW_DECODE:
-      // We don't provide prefs for this features.
+    case nsIGfxInfo::FEATURE_DX_INTEROP2:
+      // We don't provide prefs for these features.
       break;
     default:
       MOZ_ASSERT_UNREACHABLE("Unexpected nsIGfxInfo feature?!");
@@ -732,6 +733,9 @@ GfxInfoBase::FindBlocklistedDeviceInList(const nsTArray<GfxDriverInfo>& info,
     switch (info[i].mComparisonOp) {
     case DRIVER_LESS_THAN:
       match = driverVersion < info[i].mDriverVersion;
+      break;
+    case DRIVER_BUILD_ID_LESS_THAN:
+      match = (driverVersion & 0xFFFF) < info[i].mDriverVersion;
       break;
     case DRIVER_LESS_THAN_OR_EQUAL:
       match = driverVersion <= info[i].mDriverVersion;

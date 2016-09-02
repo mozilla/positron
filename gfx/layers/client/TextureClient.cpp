@@ -34,7 +34,8 @@
 #include "mozilla/layers/ShadowLayers.h"
 
 #ifdef XP_WIN
-#include "mozilla/gfx/DeviceManagerD3D11.h"
+#include "DeviceManagerD3D9.h"
+#include "mozilla/gfx/DeviceManagerDx.h"
 #include "mozilla/layers/TextureD3D9.h"
 #include "mozilla/layers/TextureD3D11.h"
 #include "mozilla/layers/TextureDIB.h"
@@ -444,6 +445,9 @@ TextureClient::Lock(OpenMode aMode)
 {
   MOZ_ASSERT(IsValid());
   MOZ_ASSERT(!mIsLocked);
+  if (!IsValid()) {
+    return false;
+  }
   if (mIsLocked) {
     return mOpenMode == aMode;
   }
@@ -493,7 +497,7 @@ TextureClient::Unlock()
 {
   MOZ_ASSERT(IsValid());
   MOZ_ASSERT(mIsLocked);
-  if (!mIsLocked) {
+  if (!IsValid() || !mIsLocked) {
     return;
   }
 
@@ -622,7 +626,7 @@ TextureClient::BorrowDrawTarget()
   // but we should have a way to get a SourceSurface directly instead.
   //MOZ_ASSERT(mOpenMode & OpenMode::OPEN_WRITE);
 
-  if (!mIsLocked) {
+  if (!IsValid() || !mIsLocked) {
     return nullptr;
   }
 
@@ -901,7 +905,13 @@ TextureClient::InitIPDLActor(CompositableForwarder* aForwarder)
                                                                 aForwarder->GetCompositorBackendType(),
                                                                 GetFlags(),
                                                                 mSerial));
-  MOZ_ASSERT(mActor);
+  if (!mActor) {
+    gfxCriticalError() << static_cast<int32_t>(desc.type()) << ", "
+                       << static_cast<int32_t>(aForwarder->GetCompositorBackendType()) << ", "
+                       << static_cast<uint32_t>(GetFlags())
+                       << ", " << mSerial;
+    MOZ_CRASH("GFX: Invalid actor");
+  }
   mActor->mCompositableForwarder = aForwarder;
   mActor->mTextureForwarder = aForwarder->AsTextureForwarder();
   mActor->mTextureClient = this;
@@ -1040,7 +1050,7 @@ TextureClient::CreateForDrawing(TextureForwarder* aAllocator,
       (moz2DBackend == gfx::BackendType::DIRECT2D ||
        moz2DBackend == gfx::BackendType::DIRECT2D1_1 ||
        (!!(aAllocFlags & ALLOC_FOR_OUT_OF_BAND_CONTENT) &&
-        DeviceManagerD3D11::Get()->GetContentDevice())) &&
+        DeviceManagerDx::Get()->GetContentDevice())) &&
       aSize.width <= maxTextureSize &&
       aSize.height <= maxTextureSize)
   {
@@ -1052,7 +1062,7 @@ TextureClient::CreateForDrawing(TextureForwarder* aAllocator,
       aSize.width <= maxTextureSize &&
       aSize.height <= maxTextureSize &&
       NS_IsMainThread() &&
-      gfxWindowsPlatform::GetPlatform()->GetD3D9Device()) {
+      DeviceManagerD3D9::GetDevice()) {
     data = D3D9TextureData::Create(aSize, aFormat, aAllocFlags);
   }
 
@@ -1101,6 +1111,11 @@ TextureClient::CreateForDrawing(TextureForwarder* aAllocator,
     return MakeAndAddRef<TextureClient>(data, aTextureFlags, aAllocator);
   }
 
+  if (moz2DBackend == BackendType::SKIA && aFormat == SurfaceFormat::B8G8R8X8) {
+    // Skia doesn't support RGBX, so ensure we clear the buffer for the proper alpha values.
+    aAllocFlags = TextureAllocationFlags(aAllocFlags | ALLOC_CLEAR_BUFFER);
+  }
+
   // Can't do any better than a buffer texture client.
   return TextureClient::CreateForRawBufferAccess(aAllocator, aFormat, aSize,
                                                  moz2DBackend, aTextureFlags, aAllocFlags);
@@ -1139,7 +1154,7 @@ TextureClient::CreateFromSurface(TextureForwarder* aAllocator,
     (moz2DBackend == gfx::BackendType::DIRECT2D ||
       moz2DBackend == gfx::BackendType::DIRECT2D1_1 ||
       (!!(aAllocFlags & ALLOC_FOR_OUT_OF_BAND_CONTENT) &&
-       DeviceManagerD3D11::Get()->GetContentDevice())) &&
+       DeviceManagerDx::Get()->GetContentDevice())) &&
     size.width <= maxTextureSize &&
     size.height <= maxTextureSize)
   {

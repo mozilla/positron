@@ -239,7 +239,7 @@ static void EnsureClassObjectsInitialized()
     }
 }
 
-NS_METHOD GetSharedScriptableHelperForJSIID(nsIXPCScriptable** helper)
+static nsresult GetSharedScriptableHelperForJSIID(nsIXPCScriptable** helper)
 {
     EnsureClassObjectsInitialized();
     nsCOMPtr<nsIXPCScriptable> temp = gSharedScriptableHelperForJSIID.get();
@@ -386,9 +386,8 @@ nsJSIID::Resolve(nsIXPConnectWrappedNative* wrapper,
     RootedId id(cx, idArg);
     XPCCallContext ccx(cx);
 
-    AutoMarkingNativeInterfacePtr iface(ccx);
-
-    iface = XPCNativeInterface::GetNewOrUsed(mInfo);
+    RefPtr<XPCNativeInterface> iface =
+        XPCNativeInterface::GetNewOrUsed(mInfo);
 
     if (!iface)
         return NS_OK;
@@ -417,9 +416,8 @@ nsJSIID::Enumerate(nsIXPConnectWrappedNative* wrapper,
     RootedObject obj(cx, objArg);
     XPCCallContext ccx(cx);
 
-    AutoMarkingNativeInterfacePtr iface(ccx);
-
-    iface = XPCNativeInterface::GetNewOrUsed(mInfo);
+    RefPtr<XPCNativeInterface> iface =
+        XPCNativeInterface::GetNewOrUsed(mInfo);
 
     if (!iface)
         return NS_OK;

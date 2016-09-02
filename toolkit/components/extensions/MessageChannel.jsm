@@ -497,7 +497,7 @@ this.MessageChannel = {
     let recipient = options.recipient || {};
     let responseType = options.responseType || this.RESPONSE_SINGLE;
 
-    let channelId = gChannelId++;
+    let channelId = `${gChannelId++}-${Services.appinfo.uniqueProcessID}`;
     let message = {messageName, channelId, sender, recipient, data, responseType};
 
     let deferred = PromiseUtils.defer();
@@ -517,7 +517,11 @@ this.MessageChannel = {
     };
     deferred.promise.then(cleanup, cleanup);
 
-    target.sendAsyncMessage(MESSAGE_MESSAGE, message);
+    try {
+      target.sendAsyncMessage(MESSAGE_MESSAGE, message);
+    } catch (e) {
+      deferred.reject(e);
+    }
     return deferred.promise;
   },
 

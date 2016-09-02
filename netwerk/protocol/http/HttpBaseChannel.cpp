@@ -69,7 +69,6 @@ HttpBaseChannel::HttpBaseChannel()
   , mPriority(PRIORITY_NORMAL)
   , mRedirectionLimit(gHttpHandler->RedirectionLimit())
   , mApplyConversion(true)
-  , mHaveListenerForTraceableChannel(false)
   , mCanceled(false)
   , mIsPending(false)
   , mWasOpened(false)
@@ -227,6 +226,7 @@ NS_INTERFACE_MAP_BEGIN(HttpBaseChannel)
   NS_INTERFACE_MAP_ENTRY(nsIPrivateBrowsingChannel)
   NS_INTERFACE_MAP_ENTRY(nsITimedChannel)
   NS_INTERFACE_MAP_ENTRY(nsIConsoleReportCollector)
+  NS_INTERFACE_MAP_ENTRY(nsIThrottledInputChannel)
 NS_INTERFACE_MAP_END_INHERITING(nsHashPropertyBag)
 
 //-----------------------------------------------------------------------------
@@ -883,12 +883,12 @@ public:
   , mChannel(chan) {}
   NS_DECL_ISUPPORTS
 
-  NS_IMETHODIMP OnStartRequest(nsIRequest *aRequest, nsISupports *aContext) override
+  NS_IMETHOD OnStartRequest(nsIRequest *aRequest, nsISupports *aContext) override
   {
     return mNext->OnStartRequest(aRequest, aContext);
   }
 
-  NS_IMETHODIMP OnStopRequest(nsIRequest *aRequest, nsISupports *aContext, nsresult aStatusCode) override
+  NS_IMETHOD OnStopRequest(nsIRequest *aRequest, nsISupports *aContext, nsresult aStatusCode) override
   {
     if (NS_FAILED(aStatusCode) && NS_SUCCEEDED(mChannel->mStatus)) {
       LOG(("HttpBaseChannel::InterceptFailedOnStop %p seting status %x", mChannel, aStatusCode));
@@ -897,7 +897,7 @@ public:
     return mNext->OnStopRequest(aRequest, aContext, aStatusCode);
   }
 
-  NS_IMETHODIMP OnDataAvailable(nsIRequest *aRequest, nsISupports *aContext,
+  NS_IMETHOD OnDataAvailable(nsIRequest *aRequest, nsISupports *aContext,
                            nsIInputStream *aInputStream, uint64_t aOffset,
                            uint32_t aCount) override
   {
@@ -2033,7 +2033,7 @@ public:
     CopyASCIItoUTF16(aCookie, mCookie);
   }
 
-  NS_IMETHOD Run()
+  NS_IMETHOD Run() override
   {
     nsCOMPtr<nsIObserverService> obs = services::GetObserverService();
     if (obs) {
@@ -2633,6 +2633,19 @@ HttpBaseChannel::ShouldIntercept(nsIURI* aURI)
   return shouldIntercept;
 }
 
+void HttpBaseChannel::CheckPrivateBrowsing()
+{
+  nsCOMPtr<nsILoadContext> loadContext;
+  NS_QueryNotificationCallbacks(this, loadContext);
+  // For addons it's possible that mLoadInfo is null.
+  if (mLoadInfo && loadContext) {
+      DocShellOriginAttributes docShellAttrs;
+      loadContext->GetOriginAttributes(docShellAttrs);
+      MOZ_ASSERT(mLoadInfo->GetOriginAttributes().mPrivateBrowsingId == docShellAttrs.mPrivateBrowsingId,
+                 "PrivateBrowsingId values are not the same between LoadInfo and LoadContext.");
+  }
+}
+
 //-----------------------------------------------------------------------------
 // nsHttpChannel::nsITraceableChannel
 //-----------------------------------------------------------------------------
@@ -2649,7 +2662,6 @@ HttpBaseChannel::SetNewListener(nsIStreamListener *aListener, nsIStreamListener 
 
   wrapper.forget(_retval);
   mListener = aListener;
-  mHaveListenerForTraceableChannel = true;
   return NS_OK;
 }
 
@@ -3445,6 +3457,28 @@ HttpBaseChannel::GetInnerDOMWindow()
     return innerWindow;
 }
 
+//-----------------------------------------------------------------------------
+// HttpBaseChannel::nsIThrottledInputChannel
+//-----------------------------------------------------------------------------
+
+NS_IMETHODIMP
+HttpBaseChannel::SetThrottleQueue(nsIInputChannelThrottleQueue* aQueue)
+{
+  if (!XRE_IsParentProcess()) {
+    return NS_ERROR_FAILURE;
+  }
+
+  mThrottleQueue = aQueue;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+HttpBaseChannel::GetThrottleQueue(nsIInputChannelThrottleQueue** aQueue)
+{
+  *aQueue = mThrottleQueue;
+  return NS_OK;
+}
+
 //------------------------------------------------------------------------------
 
 bool
@@ -3502,6 +3536,16 @@ HttpBaseChannel::SetBlockAuthPrompt(bool aValue)
   ENSURE_CALLED_BEFORE_CONNECT();
 
   mBlockAuthPrompt = aValue;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+HttpBaseChannel::GetConnectionInfoHashKey(nsACString& aConnectionInfoHashKey)
+{
+  if (!mConnectionInfo) {
+    return NS_ERROR_FAILURE;
+  }
+  aConnectionInfoHashKey.Assign(mConnectionInfo->HashKey());
   return NS_OK;
 }
 

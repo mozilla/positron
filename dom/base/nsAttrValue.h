@@ -148,7 +148,7 @@ public:
   void SetTo(int32_t aInt, const nsAString* aSerialized);
   void SetTo(double aValue, const nsAString* aSerialized);
   void SetTo(mozilla::css::Declaration* aValue, const nsAString* aSerialized);
-  void SetTo(ServoDeclarationBlock* aDeclarationBlock,
+  void SetTo(already_AddRefed<ServoDeclarationBlock> aDeclarationBlock,
              const nsAString* aSerialized);
   void SetTo(mozilla::css::URLValue* aValue, const nsAString* aSerialized);
   void SetTo(const nsIntMargin& aValue);
@@ -319,6 +319,18 @@ public:
    * @return whether the value could be parsed
    */
   bool ParseIntWithBounds(const nsAString& aString, int32_t aMin,
+                            int32_t aMax = INT32_MAX);
+
+  /**
+   * Parse a string value into an integer with a fallback for invalid values.
+   * Also allows clamping to a maximum value to support col/colgroup.span (this
+   * is not per spec right now).
+   *
+   * @param aString the string to parse
+   * @param aDefault the default value
+   * @param aMax the maximum value (if value is greater it will be clamped)
+   */
+  void ParseIntWithFallback(const nsAString& aString, int32_t aDefault,
                             int32_t aMax = INT32_MAX);
 
   /**

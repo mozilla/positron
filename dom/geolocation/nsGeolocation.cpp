@@ -26,7 +26,7 @@
 #include "mozilla/HalWakeLock.h"
 #include "mozilla/Hal.h"
 #include "mozilla/Services.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/ClearOnShutdown.h"
 #include "mozilla/dom/Event.h"
@@ -206,7 +206,7 @@ public:
   {
   }
 
-  NS_IMETHOD Run()
+  NS_IMETHOD Run() override
   {
     nsCOMPtr<nsPIDOMWindowInner> window = do_QueryReferent(mWindow);
     nsContentPermissionUtils::AskPermission(mRequest, window);
@@ -227,7 +227,7 @@ public:
   {
   }
 
-  NS_IMETHOD Run() {
+  NS_IMETHOD Run() override {
     if (mAllow) {
       mRequest->Allow(JS::UndefinedHandleValue);
     } else {
@@ -251,7 +251,7 @@ public:
   {
   }
 
-  NS_IMETHOD Run() {
+  NS_IMETHOD Run() override {
     mRequest->SendLocation(mPosition);
     return NS_OK;
   }
@@ -822,7 +822,7 @@ nsGeolocationService::HandleMozsettingChanged(nsISupports* aSubject)
     // The string that we're interested in will be a JSON string that looks like:
     //  {"key":"gelocation.enabled","value":true}
 
-    RootedDictionary<SettingChangeNotification> setting(nsContentUtils::RootingCx());
+    RootedDictionary<SettingChangeNotification> setting(RootingCx());
     if (!WrappedJSToDictionary(aSubject, setting)) {
       return;
     }

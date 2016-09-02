@@ -554,10 +554,7 @@ NS_LoadGroupMatchesPrincipal(nsILoadGroup *aLoadGroup,
     // If this is a null principal then the load group doesn't really matter.
     // The principal will not be allowed to perform any actions that actually
     // use the load group.  Unconditionally treat null principals as a match.
-    bool isNullPrincipal;
-    nsresult rv = aPrincipal->GetIsNullPrincipal(&isNullPrincipal);
-    NS_ENSURE_SUCCESS(rv, false);
-    if (isNullPrincipal) {
+    if (aPrincipal->GetIsNullPrincipal()) {
       return true;
     }
 
@@ -573,20 +570,13 @@ NS_LoadGroupMatchesPrincipal(nsILoadGroup *aLoadGroup,
     // Verify load context appId and browser flag match the principal
     uint32_t contextAppId;
     bool contextInIsolatedBrowser;
-    rv = loadContext->GetAppId(&contextAppId);
+    nsresult rv = loadContext->GetAppId(&contextAppId);
     NS_ENSURE_SUCCESS(rv, false);
     rv = loadContext->GetIsInIsolatedMozBrowserElement(&contextInIsolatedBrowser);
     NS_ENSURE_SUCCESS(rv, false);
 
-    uint32_t principalAppId;
-    bool principalInIsolatedBrowser;
-    rv = aPrincipal->GetAppId(&principalAppId);
-    NS_ENSURE_SUCCESS(rv, false);
-    rv = aPrincipal->GetIsInIsolatedMozBrowserElement(&principalInIsolatedBrowser);
-    NS_ENSURE_SUCCESS(rv, false);
-
-    return contextAppId == principalAppId &&
-           contextInIsolatedBrowser == principalInIsolatedBrowser;
+    return contextAppId == aPrincipal->GetAppId() &&
+           contextInIsolatedBrowser == aPrincipal->GetIsInIsolatedMozBrowserElement();
 }
 
 nsresult
@@ -1261,25 +1251,12 @@ bool
 NS_GetOriginAttributes(nsIChannel *aChannel,
                        mozilla::NeckoOriginAttributes &aAttributes)
 {
-    nsCOMPtr<nsILoadContext> loadContext;
     nsCOMPtr<nsILoadInfo> loadInfo = aChannel->GetLoadInfo();
-    NS_QueryNotificationCallbacks(aChannel, loadContext);
-
-    if (!loadContext && !loadInfo) {
+    if (!loadInfo) {
         return false;
     }
 
-    // Bug 1270678 - By default, we would acquire the originAttributes from
-    // the loadContext. But in some cases, say, loading the favicon, that the
-    // loadContext is not available. We would use the loadInfo to get
-    // originAttributes instead.
-    if (loadContext) {
-        DocShellOriginAttributes doa;
-        loadContext->GetOriginAttributes(doa);
-        aAttributes.InheritFromDocShellToNecko(doa);
-    } else {
-        loadInfo->GetOriginAttributes(&aAttributes);
-    }
+    loadInfo->GetOriginAttributes(&aAttributes);
     aAttributes.SyncAttributesWithPrivateBrowsing(NS_UsePrivateBrowsing(aChannel));
     return true;
 }
@@ -1289,17 +1266,14 @@ NS_GetAppInfo(nsIChannel *aChannel,
               uint32_t *aAppID,
               bool *aIsInIsolatedMozBrowserElement)
 {
-    nsCOMPtr<nsILoadContext> loadContext;
-    NS_QueryNotificationCallbacks(aChannel, loadContext);
-    if (!loadContext) {
-        return false;
+    NeckoOriginAttributes attrs;
+
+    if (!NS_GetOriginAttributes(aChannel, attrs)) {
+      return false;
     }
 
-    nsresult rv = loadContext->GetAppId(aAppID);
-    NS_ENSURE_SUCCESS(rv, false);
-
-    rv = loadContext->GetIsInIsolatedMozBrowserElement(aIsInIsolatedMozBrowserElement);
-    NS_ENSURE_SUCCESS(rv, false);
+    *aAppID = attrs.mAppId;
+    *aIsInIsolatedMozBrowserElement = attrs.mInIsolatedMozBrowser;
 
     return true;
 }
@@ -1534,8 +1508,7 @@ NS_IsAppOffline(nsIPrincipal *principal)
     if (!principal) {
         return NS_IsOffline();
     }
-    uint32_t appId = nsIScriptSecurityManager::UNKNOWN_APP_ID;
-    principal->GetAppId(&appId);
+    uint32_t appId = principal->GetAppId();
 
     return NS_IsAppOffline(appId);
 }
@@ -2455,23 +2428,21 @@ NS_CompareLoadInfoAndLoadContext(nsIChannel *aChannel)
   DocShellOriginAttributes originAttrsLoadContext;
   loadContext->GetOriginAttributes(originAttrsLoadContext);
 
-  bool loadInfoUsePB = false;
-  rv = loadInfo->GetUsePrivateBrowsing(&loadInfoUsePB);
-  if (NS_FAILED(rv)) {
-    return NS_ERROR_UNEXPECTED;
-  }
+  bool loadInfoUsePB = loadInfo->GetUsePrivateBrowsing();
   bool loadContextUsePB = false;
   rv = loadContext->GetUsePrivateBrowsing(&loadContextUsePB);
   if (NS_FAILED(rv)) {
     return NS_ERROR_UNEXPECTED;
   }
 
-  LOG(("NS_CompareLoadInfoAndLoadContext - loadInfo: %d, %d, %d, %d; "
-       "loadContext: %d %d, %d, %d. [channel=%p]",
+  LOG(("NS_CompareLoadInfoAndLoadContext - loadInfo: %d, %d, %d, %d, %d; "
+       "loadContext: %d %d, %d, %d, %d. [channel=%p]",
        originAttrsLoadInfo.mAppId, originAttrsLoadInfo.mInIsolatedMozBrowser,
-       originAttrsLoadInfo.mUserContextId, loadInfoUsePB,
+       originAttrsLoadInfo.mUserContextId, originAttrsLoadInfo.mPrivateBrowsingId,
+       loadInfoUsePB,
        loadContextAppId, loadContextIsInBE,
-       originAttrsLoadContext.mUserContextId, loadContextUsePB,
+       originAttrsLoadContext.mUserContextId, originAttrsLoadContext.mPrivateBrowsingId,
+       loadContextUsePB,
        aChannel));
 
   MOZ_ASSERT(originAttrsLoadInfo.mAppId == loadContextAppId,
@@ -2486,6 +2457,11 @@ NS_CompareLoadInfoAndLoadContext(nsIChannel *aChannel)
   MOZ_ASSERT(originAttrsLoadInfo.mUserContextId ==
              originAttrsLoadContext.mUserContextId,
              "The value of mUserContextId in the loadContext and in the "
+             "loadInfo are not the same!");
+
+  MOZ_ASSERT(originAttrsLoadInfo.mPrivateBrowsingId ==
+             originAttrsLoadContext.mPrivateBrowsingId,
+             "The value of mPrivateBrowsingId in the loadContext and in the "
              "loadInfo are not the same!");
 
   MOZ_ASSERT(loadInfoUsePB == loadContextUsePB,

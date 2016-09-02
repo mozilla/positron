@@ -47,8 +47,7 @@ private:
   MediaCallbackExc<WaitCallbackData> mVideoWaitCallback;
 
 public:
-  MediaDecoderReaderWrapper(bool aIsRealTime,
-                            AbstractThread* aOwnerThread,
+  MediaDecoderReaderWrapper(AbstractThread* aOwnerThread,
                             MediaDecoderReader* aReader);
 
   media::TimeUnit StartTime() const;
@@ -76,7 +75,7 @@ public:
   RefPtr<BufferedUpdatePromise> UpdateBufferedWithPromise();
   RefPtr<ShutdownPromise> Shutdown();
 
-  void ReleaseMediaResources();
+  void ReleaseResources();
   void SetIdle();
   void ResetDecode(TrackSet aTracks);
 

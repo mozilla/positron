@@ -11,7 +11,7 @@
 #include "plbase64.h"
 #include "nsPrintfCString.h"
 #include "safebrowsing.pb.h"
-#include "mozilla/Snprintf.h"
+#include "mozilla/Sprintf.h"
 
 #define DEFAULT_PROTOCOL_VERSION "2.2"
 
@@ -217,17 +217,19 @@ static const struct {
 };
 
 NS_IMETHODIMP
-nsUrlClassifierUtils::ConvertThreatTypeToListName(uint32_t aThreatType,
-                                                  nsACString& aListName)
+nsUrlClassifierUtils::ConvertThreatTypeToListNames(uint32_t aThreatType,
+                                                   nsACString& aListNames)
 {
   for (uint32_t i = 0; i < ArrayLength(THREAT_TYPE_CONV_TABLE); i++) {
     if (aThreatType == THREAT_TYPE_CONV_TABLE[i].mThreatType) {
-      aListName = THREAT_TYPE_CONV_TABLE[i].mListName;
-      return NS_OK;
+      if (!aListNames.IsEmpty()) {
+        aListNames.AppendLiteral(",");
+      }
+      aListNames += THREAT_TYPE_CONV_TABLE[i].mListName;
     }
   }
 
-  return NS_ERROR_FAILURE;
+  return aListNames.IsEmpty() ? NS_ERROR_FAILURE : NS_OK;
 }
 
 NS_IMETHODIMP
@@ -487,7 +489,7 @@ nsUrlClassifierUtils::CanonicalNum(const nsACString& num,
 
   while (bytes--) {
     char buf[20];
-    snprintf_literal(buf, "%u", val & 0xff);
+    SprintfLiteral(buf, "%u", val & 0xff);
     if (_retval.IsEmpty()) {
       _retval.Assign(buf);
     } else {

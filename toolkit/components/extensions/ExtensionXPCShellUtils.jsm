@@ -20,9 +20,6 @@ XPCOMUtils.defineLazyModuleGetter(this, "Schemas",
 XPCOMUtils.defineLazyModuleGetter(this, "Services",
                                   "resource://gre/modules/Services.jsm");
 
-XPCOMUtils.defineLazyServiceGetter(this, "uuidGenerator",
-                                   "@mozilla.org/uuid-generator;1", "nsIUUIDGenerator");
-
 /* exported ExtensionTestUtils */
 
 let BASE_MANIFEST = Object.freeze({
@@ -128,6 +125,23 @@ class ExtensionWrapper {
     this.state = "unloading";
 
     this.extension.shutdown();
+
+    this.state = "unloaded";
+
+    return Promise.resolve();
+  }
+
+  /*
+   * This method marks the extension unloading without actually calling
+   * shutdown, since shutting down a MockExtension causes it to be uninstalled.
+   *
+   * Normally you shouldn't need to use this unless you need to test something
+   * that requires a restart, such as updates.
+   */
+  markUnloaded() {
+    if (this.state != "running") {
+      throw new Error("Extension not running");
+    }
     this.state = "unloaded";
 
     return Promise.resolve();
@@ -277,8 +291,8 @@ var ExtensionTestUtils = {
     manager.observe(null, "addons-startup", null);
   },
 
-  loadExtension(data, id = uuidGenerator.generateUUID().number) {
-    let extension = Extension.generate(id, data);
+  loadExtension(data) {
+    let extension = Extension.generate(data);
 
     return new ExtensionWrapper(extension, this.currentScope);
   },

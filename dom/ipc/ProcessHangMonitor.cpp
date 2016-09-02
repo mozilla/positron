@@ -15,7 +15,7 @@
 #include "mozilla/Monitor.h"
 #include "mozilla/plugins/PluginBridge.h"
 #include "mozilla/Preferences.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 
 #include "nsIFrameLoader.h"
 #include "nsIHangReport.h"
@@ -557,7 +557,7 @@ public:
   {}
 
   NS_IMETHOD
-  Run()
+  Run() override
   {
     // chrome process, main thread
     MOZ_RELEASE_ASSERT(NS_IsMainThread());
@@ -664,7 +664,7 @@ public:
   {}
 
   NS_IMETHOD
-  Run()
+  Run() override
   {
     // chrome process, main thread
     MOZ_RELEASE_ASSERT(NS_IsMainThread());

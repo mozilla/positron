@@ -342,6 +342,7 @@ function check_test_pt2() {
 
     // The blocked add-on should have changed to soft disabled
     do_check_eq(check_addon_state(addons[5]), "true,true,false");
+    do_check_eq(check_addon_state(addons[6]), "true,true,true");
     do_check_eq(check_plugin_state(PLUGINS[5]), "true,false");
 
     // These should have been unchanged
@@ -349,7 +350,6 @@ function check_test_pt2() {
     do_check_eq(check_addon_state(addons[1]), "false,false,false");
     do_check_eq(check_addon_state(addons[3]), "true,true,false");
     do_check_eq(check_addon_state(addons[4]), "false,false,false");
-    do_check_eq(check_addon_state(addons[6]), "false,false,true");
     do_check_eq(check_plugin_state(PLUGINS[0]), "true,false");
     do_check_eq(check_plugin_state(PLUGINS[1]), "false,false");
     do_check_eq(check_plugin_state(PLUGINS[3]), "true,false");
@@ -437,11 +437,11 @@ function check_test_pt3() {
     do_check_eq(check_addon_state(addons[3]), "false,false,true");
 
     // Check blockIDs are correct
-    do_check_eq(blocklist.getAddonBlocklistURL(addons[0]),create_blocklistURL(addons[0].id));
-    do_check_eq(blocklist.getAddonBlocklistURL(addons[1]),create_blocklistURL(addons[1].id));
-    do_check_eq(blocklist.getAddonBlocklistURL(addons[2]),create_blocklistURL(addons[2].id));
-    do_check_eq(blocklist.getAddonBlocklistURL(addons[3]),create_blocklistURL(addons[3].id));
-    do_check_eq(blocklist.getAddonBlocklistURL(addons[4]),create_blocklistURL(addons[4].id));
+    do_check_eq(blocklist.getAddonBlocklistURL(addons[0]), create_blocklistURL(addons[0].id));
+    do_check_eq(blocklist.getAddonBlocklistURL(addons[1]), create_blocklistURL(addons[1].id));
+    do_check_eq(blocklist.getAddonBlocklistURL(addons[2]), create_blocklistURL(addons[2].id));
+    do_check_eq(blocklist.getAddonBlocklistURL(addons[3]), create_blocklistURL(addons[3].id));
+    do_check_eq(blocklist.getAddonBlocklistURL(addons[4]), create_blocklistURL(addons[4].id));
 
     // All plugins have the same blockID on the test
     do_check_eq(blocklist.getPluginBlocklistURL(PLUGINS[0]), create_blocklistURL('test_bug455906_plugin'));

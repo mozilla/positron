@@ -803,7 +803,7 @@ class XULInContentErrorReporter : public Runnable
 public:
   explicit XULInContentErrorReporter(nsIDocument* aDocument) : mDocument(aDocument) {}
 
-  NS_IMETHOD Run()
+  NS_IMETHOD Run() override
   {
     mDocument->WarnOnceAbout(nsIDocument::eImportXULIntoContent, false);
     return NS_OK;
@@ -1066,6 +1066,14 @@ nsXULElement::BeforeSetAttr(int32_t aNamespaceID, nsIAtom* aName,
       if (!attrValue.ParseIntMarginValue(aValue->String())) {
         return NS_ERROR_INVALID_ARG;
       }
+    } else if (aNamespaceID == kNameSpaceID_None &&
+               aName == nsGkAtoms::usercontextid) {
+        nsAutoString oldValue;
+        bool hasAttribute = GetAttr(kNameSpaceID_None, nsGkAtoms::usercontextid, oldValue);
+        if (hasAttribute && (!aValue || !aValue->String().Equals(oldValue))) {
+          MOZ_ASSERT(false, "Changing usercontextid is not allowed.");
+          return NS_ERROR_INVALID_ARG;
+        }
     }
 
     return nsStyledElement::BeforeSetAttr(aNamespaceID, aName,
@@ -1589,7 +1597,7 @@ nsXULElement::LoadSrc()
 }
 
 nsresult
-nsXULElement::GetFrameLoader(nsIFrameLoader **aFrameLoader)
+nsXULElement::GetFrameLoaderXPCOM(nsIFrameLoader **aFrameLoader)
 {
     *aFrameLoader = GetFrameLoader().take();
     return NS_OK;
@@ -1753,6 +1761,12 @@ nsXULElement::ClickWithInputSource(uint16_t aInputSource, bool aIsTrustedEvent)
             status = nsEventStatus_eIgnore;  // reset status
             EventDispatcher::Dispatch(static_cast<nsIContent*>(this),
                                       context, &eventClick, nullptr, &status);
+
+            // If the click has been prevented, lets skip the command call
+            // this is how a physical click works
+            if (status == nsEventStatus_eConsumeNoDefault) {
+                return NS_OK;
+            }
         }
     }
 
@@ -1936,7 +1950,7 @@ public:
     , mState(aState)
   {}
 
-  NS_IMETHOD Run() {
+  NS_IMETHOD Run() override {
     NS_ASSERTION(mWidget, "You shouldn't call this runnable with a null widget!");
 
     mWidget->SetDrawsInTitlebar(mState);
@@ -1994,7 +2008,7 @@ public:
         mWidget(aWidget), mMargin(aMargin)
     {}
 
-    NS_IMETHOD Run()
+    NS_IMETHOD Run() override
     {
         // SetNonClientMargins can dispatch native events, hence doing
         // it off a script runner.
@@ -2720,7 +2734,7 @@ NotifyOffThreadScriptCompletedRunnable::Run()
 {
     MOZ_ASSERT(NS_IsMainThread());
 
-    JS::Rooted<JSScript*> script(nsContentUtils::RootingCx());
+    JS::Rooted<JSScript*> script(RootingCx());
     {
         AutoJSAPI jsapi;
         if (!jsapi.Init(xpc::CompilationScope())) {

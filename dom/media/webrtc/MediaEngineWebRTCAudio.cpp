@@ -195,6 +195,7 @@ MediaEngineWebRTCMicrophoneSource::MediaEngineWebRTCMicrophoneSource(
   , mMonitor("WebRTCMic.Monitor")
   , mCapIndex(aIndex)
   , mChannel(-1)
+  , mTrackID(TRACK_NONE)
   , mStarted(false)
   , mSampleFrequency(MediaEngine::DEFAULT_SAMPLE_RATE)
   , mPlayoutDelay(0)
@@ -858,12 +859,8 @@ MediaEngineWebRTCMicrophoneSource::Process(int channel,
   if (mState != kStarted)
     return;
 
-  uint32_t len = mSources.Length();
-  for (uint32_t i = 0; i < len; i++) {
-    MOZ_ASSERT(!isStereo);
-    InsertInGraph<int16_t>(audio10ms, length, 1);
-  }
-
+  MOZ_ASSERT(!isStereo);
+  InsertInGraph<int16_t>(audio10ms, length, 1);
   return;
 }
 

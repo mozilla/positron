@@ -9,23 +9,25 @@ const Immutable = require("devtools/client/shared/vendor/immutable");
 const constants = require("devtools/client/webconsole/new-console-output/constants");
 
 const FilterState = Immutable.Record({
+  debug: true,
   error: true,
-  warn: true,
   info: true,
   log: true,
-  searchText: ""
+  text: "",
+  warn: true,
 });
 
 function filters(state = new FilterState(), action) {
   switch (action.type) {
-    case constants.SEVERITY_FILTER:
-      let {filter, toggled} = action;
-      return state.set(filter, toggled);
+    case constants.FILTER_TOGGLE:
+      const {filter} = action;
+      const active = !state.get(filter);
+      return state.set(filter, active);
     case constants.FILTERS_CLEAR:
       return new FilterState();
-    case constants.MESSAGES_SEARCH:
-      let {searchText} = action;
-      return state.set("searchText", searchText);
+    case constants.FILTER_TEXT_SET:
+      let {text} = action;
+      return state.set("text", text);
   }
 
   return state;

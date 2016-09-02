@@ -223,17 +223,19 @@ public:
     NS_DECL_ISUPPORTS_INHERITED
     NS_DECL_NSPIWIDGETCOCOA
 
-    NS_IMETHOD              Create(nsIWidget* aParent,
-                                   nsNativeWidget aNativeParent,
-                                   const DesktopIntRect& aRect,
-                                   nsWidgetInitData* aInitData = nullptr) override;
+    virtual MOZ_MUST_USE nsresult Create(nsIWidget* aParent,
+                                         nsNativeWidget aNativeParent,
+                                         const DesktopIntRect& aRect,
+                                         nsWidgetInitData* aInitData = nullptr)
+                                         override;
 
-    NS_IMETHOD              Create(nsIWidget* aParent,
-                                   nsNativeWidget aNativeParent,
-                                   const LayoutDeviceIntRect& aRect,
-                                   nsWidgetInitData* aInitData = nullptr) override;
+    virtual MOZ_MUST_USE nsresult Create(nsIWidget* aParent,
+                                         nsNativeWidget aNativeParent,
+                                         const LayoutDeviceIntRect& aRect,
+                                         nsWidgetInitData* aInitData = nullptr)
+                                         override;
 
-    NS_IMETHOD              Destroy() override;
+    virtual void            Destroy() override;
 
     NS_IMETHOD              Show(bool aState) override;
     virtual nsIWidget*      GetSheetWindowParent(void) override;
@@ -256,7 +258,7 @@ public:
     NS_IMETHOD              Move(double aX, double aY) override;
     NS_IMETHOD              PlaceBehind(nsTopLevelWidgetZPlacement aPlacement,
                                         nsIWidget *aWidget, bool aActivate) override;
-    NS_IMETHOD              SetSizeMode(nsSizeMode aMode) override;
+    virtual void            SetSizeMode(nsSizeMode aMode) override;
     NS_IMETHOD              HideWindowChrome(bool aShouldHide) override;
 
     void EnteredFullScreen(bool aFullScreen, bool aNativeMode = true);
@@ -265,7 +267,7 @@ public:
                                              uint16_t aDuration,
                                              nsISupports* aData,
                                              nsIRunnable* aCallback) override;
-    NS_IMETHOD MakeFullScreen(
+    virtual nsresult MakeFullScreen(
       bool aFullScreen, nsIScreen* aTargetScreen = nullptr) override final;
     NS_IMETHOD MakeFullScreenWithNativeTransition(
       bool aFullScreen, nsIScreen* aTargetScreen = nullptr) override final;
@@ -280,8 +282,8 @@ public:
 
     NS_IMETHOD              Resize(double aWidth, double aHeight, bool aRepaint) override;
     NS_IMETHOD              Resize(double aX, double aY, double aWidth, double aHeight, bool aRepaint) override;
-    NS_IMETHOD              GetClientBounds(LayoutDeviceIntRect& aRect) override;
-    NS_IMETHOD              GetScreenBounds(LayoutDeviceIntRect& aRect) override;
+    virtual LayoutDeviceIntRect GetClientBounds() override;
+    virtual LayoutDeviceIntRect GetScreenBounds() override;
     void                    ReportMoveEvent();
     void                    ReportSizeEvent();
     NS_IMETHOD              SetCursor(nsCursor aCursor) override;

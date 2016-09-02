@@ -108,7 +108,7 @@ public:
   virtual bool SupportsMimeType(const nsACString& aMimeType,
                                 DecoderDoctorDiagnostics* aDiagnostics) const = 0;
 
-  enum ConversionRequired {
+  enum class ConversionRequired : uint8_t {
     kNeedNone,
     kNeedAVCC,
     kNeedAnnexB,
@@ -154,7 +154,7 @@ protected:
   CreateAudioDecoder(const CreateDecoderParams& aParams) = 0;
 };
 
-enum MediaDataDecoderError {
+enum class MediaDataDecoderError : uint8_t{
   FATAL_ERROR,
   DECODE_ERROR
 };
@@ -179,9 +179,15 @@ public:
 
   virtual void DrainComplete() = 0;
 
-  virtual void ReleaseMediaResources() {};
+  virtual void ReleaseMediaResources() {}
 
   virtual bool OnReaderTaskQueue() = 0;
+
+  // Denotes that a pending encryption key is preventing more input being fed
+  // into the decoder. This only needs to be overridden for callbacks that
+  // handle encryption. E.g. benchmarking does not use eme, so this need
+  // not be overridden in that case.
+  virtual void WaitingForKey() {}
 };
 
 // MediaDataDecoder is the interface exposed by decoders created by the
@@ -206,7 +212,7 @@ protected:
   virtual ~MediaDataDecoder() {};
 
 public:
-  enum DecoderFailureReason {
+  enum class DecoderFailureReason : uint8_t {
     INIT_ERROR,
     CANCELED
   };

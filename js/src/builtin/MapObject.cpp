@@ -80,9 +80,9 @@ HashableValue::operator==(const HashableValue& other) const
 
 #ifdef DEBUG
     bool same;
-    PerThreadData* data = TlsPerThreadData.get();
-    RootedValue valueRoot(data, value);
-    RootedValue otherRoot(data, other.value);
+    JS::RootingContext* rcx = GetJSContextFromMainThread();
+    RootedValue valueRoot(rcx, value);
+    RootedValue otherRoot(rcx, other.value);
     MOZ_ASSERT(SameValue(nullptr, valueRoot, otherRoot, &same));
     MOZ_ASSERT(same == b);
 #endif
@@ -117,7 +117,8 @@ static const ClassOps MapIteratorObjectClassOps = {
 
 const Class MapIteratorObject::class_ = {
     "Map Iterator",
-    JSCLASS_HAS_RESERVED_SLOTS(MapIteratorObject::SlotCount),
+    JSCLASS_HAS_RESERVED_SLOTS(MapIteratorObject::SlotCount) |
+    JSCLASS_FOREGROUND_FINALIZE,
     &MapIteratorObjectClassOps
 };
 
@@ -183,6 +184,7 @@ MapIteratorObject::create(JSContext* cx, HandleObject mapobj, ValueMap* data,
 void
 MapIteratorObject::finalize(FreeOp* fop, JSObject* obj)
 {
+    MOZ_ASSERT(fop->onMainThread());
     fop->delete_(MapIteratorObjectRange(static_cast<NativeObject*>(obj)));
 }
 
@@ -269,7 +271,8 @@ const ClassOps MapObject::classOps_ = {
 const Class MapObject::class_ = {
     "Map",
     JSCLASS_HAS_PRIVATE |
-    JSCLASS_HAS_CACHED_PROTO(JSProto_Map),
+    JSCLASS_HAS_CACHED_PROTO(JSProto_Map) |
+    JSCLASS_FOREGROUND_FINALIZE,
     &MapObject::classOps_
 };
 
@@ -467,6 +470,7 @@ MapObject::create(JSContext* cx, HandleObject proto /* = nullptr */)
 void
 MapObject::finalize(FreeOp* fop, JSObject* obj)
 {
+    MOZ_ASSERT(fop->onMainThread());
     if (ValueMap* map = obj->as<MapObject>().getData())
         fop->delete_(map);
 }
@@ -856,7 +860,8 @@ static const ClassOps SetIteratorObjectClassOps = {
 
 const Class SetIteratorObject::class_ = {
     "Set Iterator",
-    JSCLASS_HAS_RESERVED_SLOTS(SetIteratorObject::SlotCount),
+    JSCLASS_HAS_RESERVED_SLOTS(SetIteratorObject::SlotCount) |
+    JSCLASS_FOREGROUND_FINALIZE,
     &SetIteratorObjectClassOps
 };
 
@@ -921,6 +926,7 @@ SetIteratorObject::create(JSContext* cx, HandleObject setobj, ValueSet* data,
 void
 SetIteratorObject::finalize(FreeOp* fop, JSObject* obj)
 {
+    MOZ_ASSERT(fop->onMainThread());
     fop->delete_(obj->as<SetIteratorObject>().range());
 }
 
@@ -1001,7 +1007,8 @@ const ClassOps SetObject::classOps_ = {
 const Class SetObject::class_ = {
     "Set",
     JSCLASS_HAS_PRIVATE |
-    JSCLASS_HAS_CACHED_PROTO(JSProto_Set),
+    JSCLASS_HAS_CACHED_PROTO(JSProto_Set) |
+    JSCLASS_FOREGROUND_FINALIZE,
     &SetObject::classOps_
 };
 
@@ -1115,6 +1122,7 @@ SetObject::mark(JSTracer* trc, JSObject* obj)
 void
 SetObject::finalize(FreeOp* fop, JSObject* obj)
 {
+    MOZ_ASSERT(fop->onMainThread());
     SetObject* setobj = static_cast<SetObject*>(obj);
     if (ValueSet* set = setobj->getData())
         fop->delete_(set);

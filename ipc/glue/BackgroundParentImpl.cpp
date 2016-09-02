@@ -376,8 +376,8 @@ public:
     AssertIsOnBackgroundThread();
   }
 
-  NS_IMETHODIMP
-  Run()
+  NS_IMETHOD
+  Run() override
   {
     AssertIsInMainProcess();
 
@@ -503,7 +503,7 @@ public:
     MOZ_ASSERT(mContentParent);
   }
 
-  NS_IMETHODIMP Run()
+  NS_IMETHOD Run() override
   {
     MOZ_ASSERT(NS_IsMainThread());
 
@@ -512,15 +512,13 @@ public:
     nsCOMPtr<nsIPrincipal> principal = PrincipalInfoToPrincipal(mPrincipalInfo);
     AssertAppPrincipal(mContentParent, principal);
 
-    bool isNullPrincipal;
-    nsresult rv = principal->GetIsNullPrincipal(&isNullPrincipal);
-    if (NS_WARN_IF(NS_FAILED(rv)) || isNullPrincipal) {
+    if (principal->GetIsNullPrincipal()) {
       mContentParent->KillHard("BroadcastChannel killed: no null principal.");
       return NS_OK;
     }
 
     nsAutoCString origin;
-    rv = principal->GetOrigin(origin);
+    nsresult rv = principal->GetOrigin(origin);
     if (NS_FAILED(rv)) {
       mContentParent->KillHard("BroadcastChannel killed: principal::GetOrigin failed.");
       return NS_OK;

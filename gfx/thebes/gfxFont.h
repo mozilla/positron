@@ -1433,7 +1433,7 @@ public:
         return nullptr;
     }
 
-    virtual gfxFloat GetAdjustedSize() const {
+    gfxFloat GetAdjustedSize() const {
         return mAdjustedSize > 0.0
                  ? mAdjustedSize
                  : (mStyle.sizeAdjust == 0.0 ? 0.0 : mStyle.size);
@@ -1512,6 +1512,7 @@ public:
 
     // Font metrics
     struct Metrics {
+        gfxFloat capHeight;
         gfxFloat xHeight;
         gfxFloat strikeoutSize;
         gfxFloat strikeoutOffset;

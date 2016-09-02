@@ -47,7 +47,7 @@
 #include "mozilla/layers/ShadowLayers.h"
 #include "mozilla/layers/TextureClient.h"
 #include "mozilla/layers/TextureWrapperImage.h"
-#include "mozilla/unused.h"
+#include "mozilla/Unused.h"
 #include "GeckoProfiler.h"
 #include "LayersLogging.h"
 #include "gfxPrefs.h"
@@ -283,7 +283,7 @@ FrameLayerBuilder::DisplayItemData::ClearAnimationCompositorState()
   }
 
   for (nsIFrame* frame : mFrameList) {
-    nsCSSProperty prop = mDisplayItemKey == nsDisplayItem::TYPE_TRANSFORM ?
+    nsCSSPropertyID prop = mDisplayItemKey == nsDisplayItem::TYPE_TRANSFORM ?
       eCSSProperty_transform : eCSSProperty_opacity;
     EffectCompositor::ClearIsRunningOnCompositor(frame, prop);
   }
@@ -2197,7 +2197,7 @@ ContainerState::GetLayerCreationHint(AnimatedGeometryRoot* aAnimatedGeometryRoot
   // Check whether there's any active scroll frame on the animated geometry
   // root chain.
   for (AnimatedGeometryRoot* agr = aAnimatedGeometryRoot;
-       agr != mContainerAnimatedGeometryRoot;
+       agr && agr != mContainerAnimatedGeometryRoot;
        agr = agr->mParentAGR) {
     nsIFrame* fParent = nsLayoutUtils::GetCrossDocParentFrame(*agr);
     if (!fParent) {
@@ -3832,8 +3832,9 @@ ContainerState::ProcessDisplayItems(nsDisplayList* aList)
       aList->SetNeedsTransparentSurface();
     }
 
-    if (mParameters.mForEventsOnly && !item->GetChildren() &&
-        itemType != nsDisplayItem::TYPE_LAYER_EVENT_REGIONS) {
+    if (mParameters.mForEventsAndPluginsOnly && !item->GetChildren() &&
+        (itemType != nsDisplayItem::TYPE_LAYER_EVENT_REGIONS &&
+         itemType != nsDisplayItem::TYPE_PLUGIN)) {
       continue;
     }
 
@@ -3846,7 +3847,7 @@ ContainerState::ProcessDisplayItems(nsDisplayList* aList)
     bool forceInactive;
     AnimatedGeometryRoot* animatedGeometryRoot;
     AnimatedGeometryRoot* animatedGeometryRootForClip = nullptr;
-    if (mFlattenToSingleLayer) {
+    if (mFlattenToSingleLayer && layerState != LAYER_ACTIVE_FORCE) {
       forceInactive = true;
       animatedGeometryRoot = lastAnimatedGeometryRoot;
     } else {
@@ -4847,12 +4848,7 @@ ContainerState::PostprocessRetainedLayers(nsIntRegion* aOpaqueRegionForContainer
       continue;
     }
 
-    // If mFlattenToSingleLayer is true, there isn't going to be any
-    // async scrolling so we can apply all our opaqueness to the same
-    // entry, the entry for mContainerAnimatedGeometryRoot.
-    AnimatedGeometryRoot* animatedGeometryRootForOpaqueness =
-        mFlattenToSingleLayer ? mContainerAnimatedGeometryRoot : e->mAnimatedGeometryRoot;
-    OpaqueRegionEntry* data = FindOpaqueRegionEntry(opaqueRegions, animatedGeometryRootForOpaqueness);
+    OpaqueRegionEntry* data = FindOpaqueRegionEntry(opaqueRegions, e->mAnimatedGeometryRoot);
 
     SetupScrollingMetadata(e);
 
@@ -4874,7 +4870,7 @@ ContainerState::PostprocessRetainedLayers(nsIntRegion* aOpaqueRegionForContainer
                                   e->mUntransformedVisibleRegion);
 
     if (!e->mOpaqueRegion.IsEmpty()) {
-      AnimatedGeometryRoot* animatedGeometryRootToCover = animatedGeometryRootForOpaqueness;
+      AnimatedGeometryRoot* animatedGeometryRootToCover = e->mAnimatedGeometryRoot;
       if (e->mOpaqueForAnimatedGeometryRootParent &&
           e->mAnimatedGeometryRoot->mParentAGR == mContainerAnimatedGeometryRoot) {
         animatedGeometryRootToCover = mContainerAnimatedGeometryRoot;
@@ -4928,7 +4924,7 @@ ContainerState::Finish(uint32_t* aTextContentFlags,
 {
   mPaintedLayerDataTree.Finish();
 
-  if (!mParameters.mForEventsOnly) {
+  if (!mParameters.mForEventsAndPluginsOnly) {
     NS_ASSERTION(mContainerBounds.IsEqualInterior(mAccumulatedChildBounds),
                  "Bounds computation mismatch");
   }
@@ -6061,9 +6057,14 @@ ContainerState::CreateMaskLayer(Layer *aLayer,
 
   uint32_t maxSize = mManager->GetMaxTextureSize();
   NS_ASSERTION(maxSize > 0, "Invalid max texture size");
+#ifdef MOZ_GFX_OPTIMIZE_MOBILE
   // Make mask image width aligned to 4. See Bug 1245552.
   gfx::Size surfaceSize(std::min<gfx::Float>(GetAlignedStride<4>(NSToIntCeil(boundingRect.Width())), maxSize),
                         std::min<gfx::Float>(boundingRect.Height(), maxSize));
+#else
+  gfx::Size surfaceSize(std::min<gfx::Float>(boundingRect.Width(), maxSize),
+                        std::min<gfx::Float>(boundingRect.Height(), maxSize));
+#endif
 
   // maskTransform is applied to the clip when it is painted into the mask (as a
   // component of imageTransform), and its inverse used when the mask is used for
