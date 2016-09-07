@@ -41,7 +41,7 @@ SPIDERNODE_LIB_PATHS = $(foreach file,$(SPIDERNODE_LIBS),$(topsrcdir)/positron/s
 # 			(or configure positron to look for the libraries in the spidernode output directory)
 
 spidernode:
-	$(MAKE) -C $(topsrcdir)/positron/spidernode BUILDTYPE=$(BUILDTYPE)
+	$(MAKE) -C $(topsrcdir)/positron/spidernode/out BUILDTYPE=$(BUILDTYPE)
 
 $(SPIDERNODE_LIB_PATHS): spidernode
 
