@@ -12,6 +12,19 @@ if CONFIG['OS_ARCH'] == 'Darwin':
     CXXFLAGS += ['-mmacosx-version-min=10.9']
     LDFLAGS += ['-mmacosx-version-min=10.9']
 
+# Declare a dependency on static libjs in an attempt to force it to get built
+# before compiling and linking SpiderNode.
+# TODO: figure out a better way to express this dependency (and SpiderNode's
+# dependency on icudata.o, for that matter).
+USE_LIBS += ['static:js']
+
+# Depend on mozglue.  This isn't needed on Mac, but it does seem to be needed
+# on Linux.  browser/app/moz.build does this unconditionally.  I wonder if we
+# should move it to positron/app/moz.build.
+USE_LIBS += [
+    'mozglue',
+]
+
 # The SpiderNode libraries that Positron uses.  This needs to be kept in sync
 # with the SPIDERNODE_LIBS list in positron/webidl/Makefile.in.
 USE_LIBS += [
@@ -22,21 +35,6 @@ USE_LIBS += [
     'static:/positron/app/spidernode/.libs/spidershim',
     'static:/positron/app/spidernode/.libs/uv',
     'static:/positron/app/spidernode/.libs/zlib',
-]
-
-# Declare a dependency on libjs in an attempt to force it to get built
-# before compiling and linking SpiderNode.
-# TODO: figure out a better way to express this dependency (and SpiderNode's
-# dependency on icudata.o, for that matter).
-USE_LIBS += [
-    'js',
-]
-
-# Depend on mozglue.  This isn't needed on Mac, but it does seem to be needed
-# on Linux.  browser/app/moz.build does this unconditionally.  I wonder if we
-# should move it to positron/app/moz.build.
-USE_LIBS += [
-    'mozglue',
 ]
 
 XPIDL_SOURCES += [
