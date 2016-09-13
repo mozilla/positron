@@ -11,6 +11,7 @@ const positronUtil = process.positronBinding('positron_util');
 module.exports = {
   protocol: {
     registerStandardSchemes: positronUtil.makeStub('atom_common_protocol.registerStandardSchemes'),
+    registerHttpProtocol: positronUtil.makeStub('atom_common_protocol.registerHttpProtocol'),
   },
 };
 positronUtil.makeStub('atom_common_protocol')();
