@@ -8,5 +8,9 @@ const { classes: Cc, interfaces: Ci, results: Cr, utils: Cu } = Components;
 
 const positronUtil = process.positronBinding('positron_util');
 
-module.exports = {};
+module.exports = {
+  protocol: {
+    registerStandardSchemes: positronUtil.makeStub('atom_common_protocol.registerStandardSchemes'),
+  },
+};
 positronUtil.makeStub('atom_common_protocol')();
