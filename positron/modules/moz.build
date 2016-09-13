@@ -11,6 +11,7 @@ EXTRA_JS_MODULES.gecko += [
   'atom_browser_web_contents.js',
   'atom_browser_web_view_manager.js',
   'atom_browser_window.js',
+  'atom_common_global_shortcut.js',
   'atom_common_id_weak_map.js',
   'atom_common_v8_util.js',
   'atom_renderer_ipc.js',
