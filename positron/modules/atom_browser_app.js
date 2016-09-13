@@ -35,6 +35,7 @@ exports.setIcon = positronUtil.makeStub('atom_browser_app.setIcon');
 exports.app.setVersion = positronUtil.makeStub('atom_browser_app.setVersion');
 exports.app.setName = positronUtil.makeStub('atom_browser_app.setName');
 exports.app.getName = positronUtil.makeStub('atom_browser_app.getName', { returnValue: 'stub' });
+exports.app.getVersion = positronUtil.makeStub('atom_browser_app.getName', { returnValue: 'stub' });
 exports.app.setDesktopName = positronUtil.makeStub('atom_browser_app.setDesktopName');
 exports.app.exit = positronUtil.makeStub('atom_browser_app.exit');
 exports.app.setPath = positronUtil.makeStub('atom_browser_app.setPath');
