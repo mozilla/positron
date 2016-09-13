@@ -42,6 +42,8 @@ exports.app.setPath = positronUtil.makeStub('atom_browser_app.setPath');
 exports.app.getPath = positronUtil.makeStub('atom_browser_app.getPath', { returnValue: 'stub' });
 exports.app.setAppPath = positronUtil.makeStub('atom_browser_app.setAppPath');
 
+exports.app.isReady = () => true;
+
 // There isn't currently anything we need to do before emitting app.ready,
 // but apps will expect it to happen after a tick, so emit it in a timeout.
 let timer = Cc["@mozilla.org/timer;1"].createInstance(Ci.nsITimer);
