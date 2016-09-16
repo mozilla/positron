@@ -47,9 +47,22 @@ EXPORTS += [
 ]
 
 SOURCES += [
+    'NodeBindings.cpp',
     'NodeLoader.cpp',
 ]
+
+if CONFIG['OS_ARCH'] == 'Darwin':
+    SOURCES += [
+        'NodeBindingsMac.cpp',
+    ]
+
+if CONFIG['OS_ARCH'] == 'Linux':
+    SOURCES += [
+        'NodeBindingsLinux.cpp',
+    ]
 
 XPIDL_MODULE = 'positron'
 
 FINAL_LIBRARY = 'xul'
+
+include('/ipc/chromium/chromium-config.mozbuild')
