@@ -32,7 +32,7 @@ Cu.import('resource:///modules/ModuleLoader.jsm');
 
 const WebContents = require('electron').webContents;
 const app = process.atomBinding('app').app;
-const positronUtil = process.binding('positron_util');
+const positronUtil = process.positronBinding('positron_util');
 const webViewManager = process.atomBinding('web_view_manager');
 
 const DEFAULT_URL = 'chrome://positron/content/shell.html';
@@ -69,6 +69,10 @@ function BrowserWindow(options) {
   this._domWindow = windowWatcher.openWindow(null, DEFAULT_URL, '_blank', features.join(','), null);
   browserWindows.set(this._domWindow, this);
 }
+
+BrowserWindow.getAllWindows = function() {
+  return browserWindows.values();
+};
 
 BrowserWindow.prototype = {
   isVisible: positronUtil.makeStub('BrowserWindow.isVisible', { returnValue: true }),

@@ -7,7 +7,7 @@
 const { classes: Cc, interfaces: Ci, results: Cr, utils: Cu } = Components;
 
 const ipcRenderer = require('electron').ipcRenderer;
-const positronUtil = process.binding('positron_util');
+const positronUtil = process.positronBinding('positron_util');
 const v8Util = process.atomBinding('v8_util');
 const cpmm = Cc['@mozilla.org/childprocessmessagemanager;1'].getService(Ci.nsISyncMessageSender);
 
