@@ -1,4 +1,4 @@
-. ./mozconfig
+. $topsrcdir/positron/config/mozconfig
 
 # Build debug.
 ac_add_options --disable-optimize
