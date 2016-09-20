@@ -14,6 +14,7 @@
 #include "nsDirectoryServiceDefs.h"
 #include "env-inl.h"
 #include "jsapi.h"
+#include "jsfriendapi.h"
 #include "nsString.h"
 #include "nsAppRunner.h"
 #include "nsContentUtils.h"
@@ -43,27 +44,30 @@ NodeBindings::~NodeBindings() {
   delete uv_env_;
   // delete context_scope;
   delete isolate_scope;
+  isolate->Dispose();
 }
 
 void NodeBindings::Initialize(JSContext* aContext, JSObject* aGlobal) {
+  dom::AutoEntryScript aes(aGlobal, "NodeBindings Initialize");
+  JS::Rooted<JS::Value> components(aContext);
+  JS::Rooted<JSObject*> globalHandle(aContext, aGlobal);
+  bool gotProp = JS_GetProperty(aContext, globalHandle, "Components", &components);
+  MOZ_ASSERT(gotProp, "Got components object.");
+  JS::Rooted<JS::Value> services(aContext);
+  gotProp = JS_GetProperty(aContext, globalHandle, "Services", &services);
+  MOZ_ASSERT(gotProp, "Got services object.");
+  nsCOMPtr<nsIPrincipal> principal = nsContentUtils::GetSystemPrincipal();
+
   v8::V8::Initialize();
   uv_async_init(uv_default_loop(), &call_next_tick_async_, OnCallNextTick);
   call_next_tick_async_.data = this;
-
-  v8::Isolate* isolate = v8::Isolate::New(aContext, aGlobal);
-  // v8::Isolate::Scope isolate_scope(isolate);
+  isolate = v8::Isolate::New(aContext, aGlobal, nsJSPrincipals::get(principal), components, services);
   // TODO: FIX THIS LEAK
   isolate_scope = new v8::Isolate::Scope(isolate);
+
+  v8::Local<v8::Context> context = v8::Context::New(isolate);
   v8::HandleScope handle_scope(isolate);
-  // JSPrincipals* principals
-  nsCOMPtr<nsIPrincipal> principal = nsContentUtils::GetSystemPrincipal();
-  v8::Local<v8::Context> context = v8::Context::New(isolate, aGlobal, nsJSPrincipals::get(principal));
   v8::Context::Scope context_scope(context);
-  // TODO: FIX THIS LEAK
-  // v8::Context::Scope* context_scope = new v8::Context::Scope(context);
-
-  dom::AutoEntryScript aes(aGlobal, "NodeBindings Initialize");
-
   node::Environment* env = CreateEnvironment(context);
   set_uv_env(env);
   uv_loop_ = uv_default_loop();
@@ -153,7 +157,6 @@ void NodeBindings::PreMainMessageLoopRun() {
 
 // In electron, this function is in atom bindings.
 void NodeBindings::ActivateUVLoop(v8::Isolate* isolate) {
-  // printf(">>> NodeBindings::ActivateUVLoop\n");
   node::Environment* env = node::Environment::GetCurrent(isolate);
   if (std::find(pending_next_ticks_.begin(), pending_next_ticks_.end(), env) !=
       pending_next_ticks_.end())
@@ -215,7 +218,6 @@ void NodeBindings::RunMessageLoop() {
 }
 
 void NodeBindings::UvRunOnce() {
-  printf(">>> NodeBindings::UvRunOnce\n");
   MOZ_ASSERT(!is_browser_ || NS_IsMainThread());
   node::Environment* env = uv_env();
 
@@ -237,7 +239,6 @@ void NodeBindings::UvRunOnce() {
   MOZ_ASSERT(cx);
   JSObject* globalObject = JS::CurrentGlobalOrNull(cx);
   MOZ_ASSERT(globalObject);
-  dom::AutoEntryScript aes(globalObject, "NodeBindings UvRunOnce");
 
   // Deal with uv events.
   int r = uv_run(uv_loop_, UV_RUN_NOWAIT);

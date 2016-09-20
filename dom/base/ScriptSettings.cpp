@@ -237,8 +237,15 @@ GetIncumbentGlobal()
   // override in place, the JS engine will lie to us and pretend that
   // there's nothing on the JS stack, which will cause us to check the
   // incumbent script stack below.
-  if (JSObject *global = JS::GetScriptedCallerGlobal(cx)) {
-    return ClampToSubject(xpc::NativeGlobal(global));
+  JSObject *global = JS::GetScriptedCallerGlobal(cx);
+  if (global && js::GetObjectClass(global)) {
+    // TODO: find a better fix. This assertion exists in xpc::NativeGlobal, but
+    // the spidernode global doesn't have these flags.
+    JSObject *obj = js::GetGlobalForObjectCrossCompartment(global);
+    if (js::GetObjectClass(obj)->flags & (JSCLASS_PRIVATE_IS_NSISUPPORTS |
+                                          JSCLASS_HAS_PRIVATE)) {
+      return ClampToSubject(xpc::NativeGlobal(global));
+    }
   }
 
   // Ok, nothing from the JS engine. Let's use whatever's on the

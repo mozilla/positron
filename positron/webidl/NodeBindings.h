@@ -96,7 +96,7 @@ class NodeBindings {
   std::list<node::Environment*> pending_next_ticks_;
   void PreMainMessageLoopRun();
   v8::Isolate::Scope* isolate_scope;
-  // v8::Context::Scope* context_scope;
+  v8::Isolate* isolate;
 };
 
 }  // namespace mozilla

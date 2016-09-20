@@ -28,7 +28,6 @@ const windowWatcher = Cc['@mozilla.org/embedcomp/window-watcher;1'].
                       getService(Ci.nsIWindowWatcher);
 
 Cu.import('resource://gre/modules/Services.jsm');
-Cu.import('resource:///modules/ModuleLoader.jsm');
 
 const WebContents = require('electron').webContents;
 const app = process.atomBinding('app').app;
@@ -93,10 +92,6 @@ BrowserWindow.prototype = {
         }
 
         Services.obs.removeObserver(observer, 'document-element-inserted');
-
-        // Ignore the return value, since we're only calling getLoaderForWindow
-        // for its side-effect of creating a new loader for the window.
-        ModuleLoader.getLoaderForWindow(subject.defaultView);
       },
     };
     Services.obs.addObserver(observer, 'document-element-inserted', false);

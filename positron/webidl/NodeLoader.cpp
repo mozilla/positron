@@ -42,7 +42,6 @@ NS_IMPL_ISUPPORTS(NodeLoader, nsINodeLoader)
 class InitTimerCallback final : public nsITimerCallback
 {
   ~InitTimerCallback() {
-    printf(">>> Destryoing InitTimerCallback\n");
   }
 
 public:
@@ -54,7 +53,6 @@ public:
 
   NS_IMETHODIMP Notify(nsITimer* aTimer) final
   {
-    printf(">>> InitTimerCallback::Notify\n");
     mNodeLoader->timer = nullptr;
     mNodeLoader->nodeBindings = NodeBindings::Create(mIsBrowser);
     mNodeLoader->nodeBindings->Initialize(mContext, mGlobal);
@@ -89,7 +87,6 @@ NS_IMETHODIMP NodeLoader::Init(const nsACString& type, JSContext* aContext)
   timer = do_CreateInstance("@mozilla.org/timer;1");
   nsresult rv = timer->InitWithCallback(timerCb, 0, nsITimer::TYPE_ONE_SHOT);
   NS_ENSURE_SUCCESS(rv, rv);
-  printf(">>> HI\n");
   return NS_OK;
 }
 
