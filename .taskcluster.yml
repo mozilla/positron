@@ -44,6 +44,7 @@ tasks:
     payload:
       env:
         MOZCONFIG: ./positron/config/mozconfig-debug
+        SHELL: /bin/bash
       maxRunTime: 7200 # seconds (i.e. two hours)
       image: "mykmelez/docker-build-positron:latest"
       command:
@@ -55,7 +56,7 @@ tasks:
           tc-vcs checkout repo https://github.com/mozilla/gecko-dev $GITHUB_HEAD_REPO_URL $GITHUB_HEAD_BRANCH &&
           cd repo/ &&
           git submodule update --init &&
-          SHELL=/bin/bash ./mach build
+          ./mach build
     metadata:
       name: "check_out_and_build_debug"
       description: "check out the repository and build debug"
