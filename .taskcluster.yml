@@ -20,7 +20,7 @@ tasks:
         GECKO_DEV_URL: https://github.com/mozilla/gecko-dev
         MOZCONFIG: ./positron/config/mozconfig
         SHELL: /bin/bash
-      maxRunTime: 7200 # seconds (i.e. two hours)
+      maxRunTime: 10800 # seconds (i.e. three hours)
       image: "mykmelez/docker-build-positron:latest"
       command:
         - /bin/bash
@@ -51,7 +51,7 @@ tasks:
         GECKO_DEV_URL: https://github.com/mozilla/gecko-dev
         MOZCONFIG: ./positron/config/mozconfig-debug
         SHELL: /bin/bash
-      maxRunTime: 7200 # seconds (i.e. two hours)
+      maxRunTime: 10800 # seconds (i.e. three hours)
       image: "mykmelez/docker-build-positron:latest"
       command:
         - /bin/bash
