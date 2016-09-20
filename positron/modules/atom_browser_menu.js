@@ -6,6 +6,19 @@
 
 const positronUtil = process.positronBinding('positron_util');
 
-exports.Menu = positronUtil.makeStub('atom_browser_menu.Menu');
+positronUtil.makeStub('atom_browser_menu.Menu')();
+exports.Menu = function() {
+  this._init();
+};
+exports.Menu.prototype = {
+  constructor: exports.Menu,
+  getItemCount: positronUtil.makeStub('atom_browser_menu.Menu.getItemCount', () => 0),
+  insertItem: positronUtil.makeStub('atom_browser_menu.Menu.insertItem'),
+  insertSeparator: positronUtil.makeStub('atom_browser_menu.Menu.insertSeparator'),
+  insertSubMenu: positronUtil.makeStub('atom_browser_menu.Menu.insertSubMenu'),
+  setSublabel: positronUtil.makeStub('atom_browser_menu.Menu.setSublabel'),
+  setRole: positronUtil.makeStub('atom_browser_menu.Menu.setRole'),
+};
+
 exports.setApplicationMenu = positronUtil.makeStub('atom_browser_menu.setApplicationMenu');
 exports.sendActionToFirstResponder = positronUtil.makeStub('atom_browser_menu.sendActionToFirstResponder');

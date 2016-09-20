@@ -69,6 +69,10 @@ function BrowserWindow(options) {
   browserWindows.set(this._domWindow, this);
 }
 
+BrowserWindow.getAllWindows = function() {
+  return browserWindows.values();
+};
+
 BrowserWindow.prototype = {
   isVisible: positronUtil.makeStub('BrowserWindow.isVisible', { returnValue: true }),
   isMinimized: positronUtil.makeStub('BrowserWindow.isMinimized', { returnValue: false }),
