@@ -5,32 +5,32 @@ metadata:
   owner: "{{ event.head.user.email }}"
   source: "{{ event.head.repo.url }}"
 tasks:
-  # - provisionerId: "{{ taskcluster.docker.provisionerId }}"
-  #   workerType: "{{ taskcluster.docker.workerType }}"
-  #   extra:
-  #     github:
-  #       env: true
-  #       events:
-  #         - pull_request.opened
-  #         - pull_request.synchronize
-  #         - pull_request.reopened
-  #         - push
-  #   payload:
-  #     env:
-  #       MOZCONFIG: ./positron/config/mozconfig
-  #     maxRunTime: 7200 # seconds (i.e. two hours)
-  #     image: "mykmelez/docker-build-positron:latest"
-  #     command:
-  #       - "/bin/bash"
-  #       - "--login"
-  #       - "-c"
-  #       - "tc-vcs checkout repo https://github.com/mozilla/gecko-dev $GITHUB_HEAD_REPO_URL $GITHUB_HEAD_BRANCH &&
-  #          cd repo/ && git submodule update --init && SHELL=/bin/bash ./mach build"
-  #   metadata:
-  #     name: "checkoutandbuild"
-  #     description: "check out and build the repository"
-  #     owner: "{{ event.head.user.email }}"
-  #     source: "{{ event.head.repo.url }}"
+  - provisionerId: "{{ taskcluster.docker.provisionerId }}"
+    workerType: "{{ taskcluster.docker.workerType }}"
+    extra:
+      github:
+        env: true
+        events:
+          - pull_request.opened
+          - pull_request.synchronize
+          - pull_request.reopened
+          - push
+    payload:
+      env:
+        MOZCONFIG: ./positron/config/mozconfig
+      maxRunTime: 7200 # seconds (i.e. two hours)
+      image: "mykmelez/docker-build-positron:latest"
+      command:
+        - "/bin/bash"
+        - "--login"
+        - "-c"
+        - "tc-vcs checkout repo https://github.com/mozilla/gecko-dev $GITHUB_HEAD_REPO_URL $GITHUB_HEAD_BRANCH &&
+           cd repo/ && git submodule update --init && SHELL=/bin/bash ./mach build"
+    metadata:
+      name: "checkoutandbuild"
+      description: "check out and build the repository"
+      owner: "{{ event.head.user.email }}"
+      source: "{{ event.head.repo.url }}"
   - provisionerId: "{{ taskcluster.docker.provisionerId }}"
     workerType: "{{ taskcluster.docker.workerType }}"
     extra:
