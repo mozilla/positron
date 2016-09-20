@@ -8,15 +8,10 @@
 
 #include "nsINodeLoader.h"
 #include "NodeLoader.h"
-#include "nsIFile.h"
-#include "nsDirectoryService.h"
-#include "nsDirectoryServiceDefs.h"
-#include "node.h"
-#include "uv.h"
-#include "env-inl.h"
-#include "jsapi.h"
+#include "NodeBindings.h"
 #include "nsString.h"
-#include "nsAppRunner.h"
+
+using namespace mozilla;
 
 ////////////////////////////////////////////////////////////////////////
 // Define the contructor function for the objects
@@ -48,76 +43,14 @@ NodeLoader::NodeLoader()
 
 NodeLoader::~NodeLoader()
 {
-  /* destructor code */
 }
 
 /* void init (); */
-NS_IMETHODIMP NodeLoader::Init(JSContext* aContext)
+NS_IMETHODIMP NodeLoader::Init(const nsACString& type, JSContext* aContext)
 {
-  v8::V8::Initialize();
-  v8::Isolate* isolate = v8::Isolate::New(aContext);
-  // v8::Isolate::Scope isolate_scope(isolate);
-  // TODO: FIX THIS LEAK
-  v8::Isolate::Scope* isolate_scope = new v8::Isolate::Scope(isolate);
-  v8::HandleScope handle_scope(isolate);
-
-  v8::Local<v8::Context> context = v8::Context::New(isolate);
-  // v8::Context::Scope context_scope(context);
-  // TODO: FIX THIS LEAK
-  v8::Context::Scope* context_scope = new v8::Context::Scope(context);
-
-  // Convert the app path to an absolute app path.
-  nsCOMPtr<nsIFile> cwdDir;
-  nsDirectoryService::gService->Get(NS_OS_CURRENT_WORKING_DIR,
-                                    NS_GET_IID(nsIFile),
-                                    getter_AddRefs(cwdDir));
-  MOZ_ASSERT(cwdDir);
-
-  char* absoluteAppPath = nullptr;
-  nsDependentCString appPath(gArgv[1]);
-  // Try the path as a relative path to the current working directory.
-  nsresult rv = cwdDir->AppendRelativeNativePath(appPath);
-  if (NS_SUCCEEDED(rv)) {
-    nsString absoluteAppPathString;
-    rv = cwdDir->GetPath(absoluteAppPathString);
-    NS_ENSURE_SUCCESS(rv, rv);
-    absoluteAppPath = ToNewCString(NS_LossyConvertUTF16toASCII(absoluteAppPathString));
-  } else { // It's hopefully an absolute path.
-    absoluteAppPath = gArgv[1];
-  }
-
-  nsCOMPtr<nsIFile> greDir;
-  nsDirectoryService::gService->Get(NS_GRE_DIR,
-                                    NS_GET_IID(nsIFile),
-                                    getter_AddRefs(greDir));
-  MOZ_ASSERT(greDir);
-  greDir->AppendNative(NS_LITERAL_CSTRING("modules"));
-  greDir->AppendNative(NS_LITERAL_CSTRING("browser"));
-  greDir->AppendNative(NS_LITERAL_CSTRING("init.js"));
-  nsAutoString initalScript;
-  greDir->GetPath(initalScript);
-
-  int exec_argc;
-  const char** exec_argv;
-  int argc = 2;
-  char **argv = new char *[argc + 1];
-  argv[0] = gArgv[0];
-  argv[1] = ToNewCString(NS_LossyConvertUTF16toASCII(initalScript));
-  node::Init(&argc, const_cast<const char**>(argv),  &exec_argc, &exec_argv);
-
-  node::IsolateData* isolateData = node::CreateIsolateData(isolate, uv_default_loop());
-  node::Environment* env = node::CreateEnvironment(
-    isolateData,
-    context,
-    argc, argv, 0, nullptr);
-
-  env->process_object()->Set(v8::String::NewFromUtf8(isolate, "resourcesPath"),
-                             v8::String::NewFromUtf8(isolate, absoluteAppPath));
-  env->process_object()->Set(v8::String::NewFromUtf8(isolate, "type"),
-                             v8::String::NewFromUtf8(isolate, "browser"));
-
-  node::LoadEnvironment(env);
-
+  MOZ_ASSERT(type.EqualsLiteral("browser") || type.EqualsLiteral("renderer"));
+  nodeBindings = NodeBindings::Create(type.EqualsLiteral("browser"));
+  nodeBindings->Initialize(aContext);
   return NS_OK;
 }
 

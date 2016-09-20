@@ -7,5 +7,5 @@
 
 [scriptable, uuid(93251ddf-5e85-4172-ac2a-31780562974a)]
 interface nsINodeLoader : nsISupports {
-  [implicit_jscontext] void init();
+  [implicit_jscontext] void init(in ACString type);
 };
