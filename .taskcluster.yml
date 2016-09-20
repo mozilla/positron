@@ -53,6 +53,7 @@ tasks:
         - >
           tc-vcs checkout repo https://github.com/mozilla/gecko-dev $GITHUB_HEAD_REPO_URL $GITHUB_HEAD_BRANCH &&
           cd repo/ &&
+          git config gc.auto 0 &&
           git submodule update --init &&
           SHELL=/bin/bash ./mach build
     metadata:
