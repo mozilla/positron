@@ -49,9 +49,8 @@ tasks:
       maxRunTime: 7200 # seconds (i.e. two hours)
       image: "mykmelez/docker-build-positron:latest"
       command:
-        - "/bin/bash"
-        - "--login"
-        - "-c"
+        - /bin/bash
+        - -c
         - >
           git config --global gc.auto 0 &&
           tc-vcs checkout repo $GECKO_DEV_URL $GITHUB_HEAD_REPO_URL $GITHUB_HEAD_BRANCH &&
