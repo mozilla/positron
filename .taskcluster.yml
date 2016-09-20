@@ -43,6 +43,7 @@ tasks:
           - push
     payload:
       env:
+        GECKO_DEV_URL: https://github.com/mozilla/gecko-dev
         MOZCONFIG: ./positron/config/mozconfig-debug
         SHELL: /bin/bash
       maxRunTime: 7200 # seconds (i.e. two hours)
@@ -53,7 +54,7 @@ tasks:
         - "-c"
         - >
           git config --global gc.auto 0 &&
-          tc-vcs checkout repo https://github.com/mozilla/gecko-dev $GITHUB_HEAD_REPO_URL $GITHUB_HEAD_BRANCH &&
+          tc-vcs checkout repo $GECKO_DEV_URL $GITHUB_HEAD_REPO_URL $GITHUB_HEAD_BRANCH &&
           cd repo/ &&
           git submodule update --init &&
           ./mach build
