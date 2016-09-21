@@ -27,8 +27,12 @@ const ppmm = Cc['@mozilla.org/parentprocessmessagemanager;1'].
 const windowWatcher = Cc['@mozilla.org/embedcomp/window-watcher;1'].
                       getService(Ci.nsIWindowWatcher);
 
-Cu.import('resource://gre/modules/Services.jsm');
-Cu.import('resource:///modules/ModuleLoader.jsm');
+// TODO: remove workaround for broken Cu.import.
+let scope = {};
+Cu.import('resource://gre/modules/Services.jsm', scope);
+const Services = scope.Services;
+Cu.import('resource:///modules/ModuleLoader.jsm', scope);
+const ModuleLoader = scope.ModuleLoader;
 
 const WebContents = require('electron').webContents;
 const app = process.atomBinding('app').app;
@@ -97,7 +101,6 @@ BrowserWindow.prototype = {
         }
 
         Services.obs.removeObserver(observer, 'document-element-inserted');
-
         // Ignore the return value, since we're only calling getLoaderForWindow
         // for its side-effect of creating a new loader for the window.
         ModuleLoader.getLoaderForWindow(subject.defaultView);
