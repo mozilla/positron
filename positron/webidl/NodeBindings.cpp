@@ -14,8 +14,11 @@
 #include "nsDirectoryServiceDefs.h"
 #include "env-inl.h"
 #include "jsapi.h"
+#include "jsfriendapi.h"
 #include "nsString.h"
 #include "nsAppRunner.h"
+#include "nsContentUtils.h"
+#include "nsJSPrincipals.h"
 
 namespace mozilla {
 
@@ -38,24 +41,30 @@ NodeBindings::~NodeBindings() {
 
   // Clear uv.
   uv_sem_destroy(&embed_sem_);
+  delete uv_env_;
+  // delete context_scope;
+  delete isolate_scope;
+  isolate->Dispose();
 }
 
-void NodeBindings::Initialize(JSContext* aContext) {
+void NodeBindings::Initialize(JSContext* aContext, JSObject* aGlobal) {
+  dom::AutoEntryScript aes(aGlobal, "NodeBindings Initialize");
+  JS::Rooted<JS::Value> components(aContext);
+  JS::Rooted<JSObject*> globalHandle(aContext, aGlobal);
+  bool gotProp = JS_GetProperty(aContext, globalHandle, "Components", &components);
+  MOZ_ASSERT(gotProp, "Got components object.");
+  nsCOMPtr<nsIPrincipal> principal = nsContentUtils::GetSystemPrincipal();
+
   v8::V8::Initialize();
   uv_async_init(uv_default_loop(), &call_next_tick_async_, OnCallNextTick);
   call_next_tick_async_.data = this;
-
-  v8::Isolate* isolate = v8::Isolate::New(aContext);
-  // v8::Isolate::Scope isolate_scope(isolate);
+  isolate = v8::Isolate::New(aContext, aGlobal, nsJSPrincipals::get(principal), components);
   // TODO: FIX THIS LEAK
-  v8::Isolate::Scope* isolate_scope = new v8::Isolate::Scope(isolate);
-  v8::HandleScope handle_scope(isolate);
+  isolate_scope = new v8::Isolate::Scope(isolate);
 
   v8::Local<v8::Context> context = v8::Context::New(isolate);
-  // v8::Context::Scope context_scope(context);
-  // TODO: FIX THIS LEAK
-  v8::Context::Scope* context_scope = new v8::Context::Scope(context);
-
+  v8::HandleScope handle_scope(isolate);
+  v8::Context::Scope context_scope(context);
   node::Environment* env = CreateEnvironment(context);
   set_uv_env(env);
   uv_loop_ = uv_default_loop();
@@ -227,7 +236,6 @@ void NodeBindings::UvRunOnce() {
   MOZ_ASSERT(cx);
   JSObject* globalObject = JS::CurrentGlobalOrNull(cx);
   MOZ_ASSERT(globalObject);
-  dom::AutoEntryScript aes(globalObject, "NodeBindings UvRunOnce");
 
   // Deal with uv events.
   int r = uv_run(uv_loop_, UV_RUN_NOWAIT);
