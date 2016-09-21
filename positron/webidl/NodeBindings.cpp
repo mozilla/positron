@@ -53,15 +53,12 @@ void NodeBindings::Initialize(JSContext* aContext, JSObject* aGlobal) {
   JS::Rooted<JSObject*> globalHandle(aContext, aGlobal);
   bool gotProp = JS_GetProperty(aContext, globalHandle, "Components", &components);
   MOZ_ASSERT(gotProp, "Got components object.");
-  JS::Rooted<JS::Value> services(aContext);
-  gotProp = JS_GetProperty(aContext, globalHandle, "Services", &services);
-  MOZ_ASSERT(gotProp, "Got services object.");
   nsCOMPtr<nsIPrincipal> principal = nsContentUtils::GetSystemPrincipal();
 
   v8::V8::Initialize();
   uv_async_init(uv_default_loop(), &call_next_tick_async_, OnCallNextTick);
   call_next_tick_async_.data = this;
-  isolate = v8::Isolate::New(aContext, aGlobal, nsJSPrincipals::get(principal), components, services);
+  isolate = v8::Isolate::New(aContext, aGlobal, nsJSPrincipals::get(principal), components);
   // TODO: FIX THIS LEAK
   isolate_scope = new v8::Isolate::Scope(isolate);
 
