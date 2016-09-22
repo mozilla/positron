@@ -279,6 +279,11 @@ D3D9DXVA2Manager::Init(nsACString& aFailureReason)
   NS_ENSURE_TRUE(d3d9lib, E_FAIL);
   decltype(Direct3DCreate9Ex)* d3d9Create =
     (decltype(Direct3DCreate9Ex)*) GetProcAddress(d3d9lib, "Direct3DCreate9Ex");
+  if (!d3d9Create) {
+    NS_WARNING("Couldn't find Direct3DCreate9Ex symbol in d3d9.dll");
+    aFailureReason.AssignLiteral("Couldn't find Direct3DCreate9Ex symbol in d3d9.dll");
+    return E_FAIL;
+  }
   RefPtr<IDirect3D9Ex> d3d9Ex;
   HRESULT hr = d3d9Create(D3D_SDK_VERSION, getter_AddRefs(d3d9Ex));
   if (!d3d9Ex) {
@@ -423,7 +428,7 @@ D3D9DXVA2Manager::Init(nsACString& aFailureReason)
   mDeviceManager = deviceManager;
   mSyncSurface = syncSurf;
 
-  mTextureClientAllocator = new D3D9RecycleAllocator(layers::ImageBridgeChild::GetSingleton(),
+  mTextureClientAllocator = new D3D9RecycleAllocator(layers::ImageBridgeChild::GetSingleton().get(),
                                                      mDevice);
   mTextureClientAllocator->SetMaxPoolSize(5);
 
@@ -747,7 +752,7 @@ D3D11DXVA2Manager::Init(nsACString& aFailureReason)
   hr = mDevice->CreateTexture2D(&desc, NULL, getter_AddRefs(mSyncSurface));
   NS_ENSURE_TRUE(SUCCEEDED(hr), hr);
 
-  mTextureClientAllocator = new D3D11RecycleAllocator(layers::ImageBridgeChild::GetSingleton(),
+  mTextureClientAllocator = new D3D11RecycleAllocator(layers::ImageBridgeChild::GetSingleton().get(),
                                                       mDevice);
   mTextureClientAllocator->SetMaxPoolSize(5);
 

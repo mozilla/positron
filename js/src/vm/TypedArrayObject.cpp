@@ -1326,8 +1326,8 @@ BufferGetterImpl(JSContext* cx, const CallArgs& args)
     return true;
 }
 
-static bool
-TypedArray_bufferGetter(JSContext* cx, unsigned argc, Value* vp)
+/*static*/ bool
+js::TypedArray_bufferGetter(JSContext* cx, unsigned argc, Value* vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
     return CallNonGenericMethod<TypedArrayObject::is, BufferGetterImpl>(cx, args);
@@ -1339,6 +1339,7 @@ TypedArrayObject::protoAccessors[] = {
     JS_PSG("buffer", TypedArray_bufferGetter, 0),
     JS_PSG("byteLength", TypedArray_byteLengthGetter, 0),
     JS_PSG("byteOffset", TypedArray_byteOffsetGetter, 0),
+    JS_SELF_HOSTED_SYM_GET(toStringTag, "TypedArrayToStringTag", 0),
     JS_PS_END
 };
 
@@ -1356,7 +1357,7 @@ TypedArrayObject::protoFunctions[] = {
 #if 0 /* disabled until perf-testing is completed */
     JS_SELF_HOSTED_FN("set", "TypedArraySet", 2, 0),
 #else
-    JS_FN("set", TypedArrayObject::set, 2, 0),
+    JS_FN("set", TypedArrayObject::set, 1, 0),
 #endif
     JS_SELF_HOSTED_FN("copyWithin", "TypedArrayCopyWithin", 3, 0),
     JS_SELF_HOSTED_FN("every", "TypedArrayEvery", 2, 0),
@@ -1380,6 +1381,8 @@ TypedArrayObject::protoFunctions[] = {
     JS_SELF_HOSTED_FN("values", "TypedArrayValues", 0, 0),
     JS_SELF_HOSTED_SYM_FN(iterator, "TypedArrayValues", 0, 0),
     JS_SELF_HOSTED_FN("includes", "TypedArrayIncludes", 2, 0),
+    JS_SELF_HOSTED_FN("toString", "ArrayToString", 0, 0),
+    JS_SELF_HOSTED_FN("toLocaleString", "TypedArrayToLocaleString", 2, 0),
     JS_FS_END
 };
 
@@ -2728,6 +2731,9 @@ DataViewObject::initClass(JSContext* cx)
         return false;
 
     if (!JS_DefineFunctions(cx, proto, DataViewObject::jsfuncs))
+        return false;
+
+    if (!DefineToStringTag(cx, proto, cx->names().DataView))
         return false;
 
     /*

@@ -29,7 +29,7 @@ class NativePanZoomController extends JNIObject implements PanZoomController {
     private Overscroll mOverscroll;
     boolean mNegateWheelScroll;
     private float mPointerScrollFactor;
-    private final PrefsHelper.PrefHandler mPrefsObserver;
+    private PrefsHelper.PrefHandler mPrefsObserver;
     private long mLastDownTime;
     private static final float MAX_SCROLL = 0.075f * GeckoAppShell.getDpi();
 
@@ -143,6 +143,7 @@ class NativePanZoomController extends JNIObject implements PanZoomController {
     NativePanZoomController(PanZoomTarget target, View view) {
         mTarget = target;
         mView = (LayerView) view;
+        mDestroyed = true;
 
         String[] prefs = { "ui.scrolling.negate_wheel_scroll" };
         mPrefsObserver = new PrefsHelper.PrefHandlerBase() {
@@ -164,11 +165,17 @@ class NativePanZoomController extends JNIObject implements PanZoomController {
 
     @Override
     public boolean onTouchEvent(MotionEvent event) {
-        if (event.getToolType(0) == MotionEvent.TOOL_TYPE_MOUSE) {
-            return handleMouseEvent(event);
-        } else {
-            return handleMotionEvent(event);
-        }
+// NOTE: This commented out block of code allows Fennec to generate
+//       mouse event instead of converting them to touch events.
+//       This gives Fennec similar behaviour to desktop when using
+//       a mouse.
+//
+//        if (event.getToolType(0) == MotionEvent.TOOL_TYPE_MOUSE) {
+//            return handleMouseEvent(event);
+//        } else {
+//            return handleMotionEvent(event);
+//        }
+        return handleMotionEvent(event);
     }
 
     @Override
@@ -197,11 +204,20 @@ class NativePanZoomController extends JNIObject implements PanZoomController {
 
     @Override @WrapForJNI(calledFrom = "ui") // PanZoomController
     public void destroy() {
+        if (mPrefsObserver != null) {
+            PrefsHelper.removeObserver(mPrefsObserver);
+            mPrefsObserver = null;
+        }
         if (mDestroyed || !mTarget.isGeckoReady()) {
             return;
         }
         mDestroyed = true;
         disposeNative();
+    }
+
+    @Override
+    public void attach() {
+        mDestroyed = false;
     }
 
     @WrapForJNI(calledFrom = "ui", dispatchTo = "gecko") @Override // JNIObject

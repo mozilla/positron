@@ -11,7 +11,7 @@
 #include "mozilla/OwningNonNull.h"
 
 #include "mozilla/dom/Animation.h"
-#include "mozilla/dom/KeyframeEffect.h"
+#include "mozilla/dom/KeyframeEffectReadOnly.h"
 
 #include "nsContentUtils.h"
 #include "nsCSSPseudoElements.h"
@@ -711,8 +711,8 @@ nsDOMMutationObserver::Observe(nsINode& aTarget,
 
 #ifdef DEBUG
   for (int32_t i = 0; i < mReceivers.Count(); ++i) {
-    NS_WARN_IF_FALSE(mReceivers[i]->Target(),
-                     "All the receivers should have a target!");
+    NS_WARNING_ASSERTION(mReceivers[i]->Target(),
+                         "All the receivers should have a target!");
   }
 #endif
 }

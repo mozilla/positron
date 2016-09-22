@@ -60,10 +60,7 @@ var gAdvancedPane = {
       setEventListener("submitHealthReportBox", "command",
                        gAdvancedPane.updateSubmitHealthReport);
     }
-    if (AppConstants.MOZ_CRASHREPORTER) {
-      setEventListener("submitCrashesBox", "command",
-                       gAdvancedPane.updateSubmitCrashes);
-    }
+
     setEventListener("connectionSettings", "command",
                      gAdvancedPane.showConnections);
     setEventListener("clearCacheButton", "command",
@@ -243,28 +240,6 @@ var gAdvancedPane = {
   {
     this._setupLearnMoreLink("toolkit.crashreporter.infoURL",
                              "crashReporterLearnMore");
-
-    var checkbox = document.getElementById("submitCrashesBox");
-    try {
-      var cr = Components.classes["@mozilla.org/toolkit/crash-reporter;1"].
-               getService(Components.interfaces.nsICrashReporter);
-      checkbox.checked = cr.submitReports;
-    } catch (e) {
-      checkbox.style.display = "none";
-    }
-  },
-
-  /**
-   *
-   */
-  updateSubmitCrashes: function ()
-  {
-    var checkbox = document.getElementById("submitCrashesBox");
-    try {
-      var cr = Components.classes["@mozilla.org/toolkit/crash-reporter;1"].
-               getService(Components.interfaces.nsICrashReporter);
-      cr.submitReports = checkbox.checked;
-    } catch (e) { }
   },
 
   /**
@@ -611,25 +586,23 @@ var gAdvancedPane = {
     var pm = Components.classes["@mozilla.org/permissionmanager;1"]
                        .getService(Components.interfaces.nsIPermissionManager);
     var perm = pm.getPermissionObject(principal, "offline-app", true);
-
-    // clear offline cache entries
-    try {
-      var cacheService = Components.classes["@mozilla.org/network/application-cache-service;1"].
-                         getService(Components.interfaces.nsIApplicationCacheService);
-      var ios = Components.classes["@mozilla.org/network/io-service;1"].
-                getService(Components.interfaces.nsIIOService);
-      var groups = cacheService.getGroups();
-      for (var i = 0; i < groups.length; i++) {
-          var uri = ios.newURI(groups[i], null, null);
+    if (perm) {
+      // clear offline cache entries
+      try {
+        var cacheService = Components.classes["@mozilla.org/network/application-cache-service;1"].
+                           getService(Components.interfaces.nsIApplicationCacheService);
+        var groups = cacheService.getGroups();
+        for (var i = 0; i < groups.length; i++) {
+          var uri = Services.io.newURI(groups[i], null, null);
           if (perm.matchesURI(uri, true)) {
-              var cache = cacheService.getActiveCache(groups[i]);
-              cache.discard();
+            var cache = cacheService.getActiveCache(groups[i]);
+            cache.discard();
           }
-      }
-    } catch (e) {}
+        }
+      } catch (e) {}
 
-    pm.removePermission(perm);
-
+      pm.removePermission(perm);
+    }
     list.removeChild(item);
     gAdvancedPane.offlineAppSelected();
     this.updateActualAppCacheSize();
@@ -764,9 +737,7 @@ var gAdvancedPane = {
    */
   showCertificates: function ()
   {
-    openDialog("chrome://pippki/content/certManager.xul",
-               "mozilla:certmanager",
-               "modal=yes", null);
+    gSubDialog.open("chrome://pippki/content/certManager.xul");
   },
 
   /**

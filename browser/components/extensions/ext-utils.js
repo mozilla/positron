@@ -18,7 +18,7 @@ XPCOMUtils.defineLazyServiceGetter(this, "styleSheetService",
                                    "nsIStyleSheetService");
 
 XPCOMUtils.defineLazyGetter(this, "colorUtils", () => {
-  return require("devtools/shared/css-color").colorUtils;
+  return require("devtools/shared/css/color").colorUtils;
 });
 
 Cu.import("resource://gre/modules/ExtensionUtils.jsm");
@@ -138,7 +138,7 @@ class BasePopup {
       this.viewNode.style.maxHeight = "";
 
       if (this.panel) {
-        this.panel.style.removeProperty("--panel-arrowcontent-background");
+        this.panel.style.removeProperty("--arrowpanel-background");
         this.panel.style.removeProperty("--panel-arrow-image-vertical");
       }
 
@@ -385,7 +385,7 @@ class BasePopup {
         }
       }
 
-      this.panel.style.setProperty("--panel-arrowcontent-background", panelBackground);
+      this.panel.style.setProperty("--arrowpanel-background", panelBackground);
       this.panel.style.setProperty("--panel-arrow-image-vertical", panelArrow);
 
 
@@ -814,6 +814,7 @@ global.TabManager = {
    *        The ID of the tab to retrieve.
    * @param {ExtensionContext} context
    *        The context of the caller.
+   *        This value may be omitted if `default_` is not `undefined`.
    * @param {*} default_
    *        The value to return if no tab exists with the given ID.
    * @returns {Element<tab>}

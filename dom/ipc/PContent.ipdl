@@ -100,6 +100,8 @@ using mozilla::DataStorageType from "ipc/DataStorageIPCUtils.h";
 using mozilla::DocShellOriginAttributes from "mozilla/ipc/BackgroundUtils.h";
 using struct mozilla::layers::TextureFactoryIdentifier from "mozilla/layers/CompositorTypes.h";
 using struct mozilla::dom::FlyWebPublishOptions from "mozilla/dom/FlyWebPublishOptionsIPCSerializer.h";
+using mozilla::Telemetry::Accumulation from "mozilla/TelemetryComms.h";
+using mozilla::Telemetry::KeyedAccumulation from "mozilla/TelemetryComms.h";
 
 union ChromeRegistryItem
 {
@@ -324,12 +326,6 @@ union FileDescOrError {
     nsresult;
 };
 
-union OptionalContentId
-{
-  ContentParentId;
-  void_t;
-};
-
 struct DomainPolicyClone
 {
     bool        active;
@@ -468,9 +464,18 @@ both:
 
 child:
     // Give the content process its endpoints to the compositor.
-    async InitCompositor(Endpoint<PCompositorBridgeChild> compositor);
-    async InitImageBridge(Endpoint<PImageBridgeChild> bridge);
-    async InitVRManager(Endpoint<PVRManagerChild> endpoint);
+    async InitRendering(
+      Endpoint<PCompositorBridgeChild> compositor,
+      Endpoint<PImageBridgeChild> imageBridge,
+      Endpoint<PVRManagerChild> vr);
+
+    // Re-create the rendering stack using the given endpoints. This is sent
+    // after the compositor process has crashed. The new endpoints may be to a
+    // newly launched GPU process, or the compositor thread of the UI process.
+    async ReinitRendering(
+      Endpoint<PCompositorBridgeChild> compositor,
+      Endpoint<PImageBridgeChild> bridge,
+      Endpoint<PVRManagerChild> vr);
 
     /**
      * Enable system-level sandboxing features, if available.  Can
@@ -518,8 +523,6 @@ child:
 
     async NotifyVisited(URIParams uri);
 
-    async SystemMemoryAvailable(uint64_t getterId, uint32_t memoryAvailable);
-
     async PreferenceUpdate(PrefSetting pref);
     async VarUpdate(GfxVarUpdate var);
 
@@ -549,6 +552,11 @@ child:
      * Start accessibility engine in content process.
      */
     async ActivateA11y();
+
+    /**
+     * Shutdown accessibility engine in content process (if not in use).
+     */
+    async ShutdownA11y();
 
     async AppInfo(nsCString version, nsCString buildID, nsCString name, nsCString UAName,
                   nsCString ID, nsCString vendor);
@@ -823,8 +831,6 @@ parent:
     sync NSSU2FTokenSign(uint8_t[] application, uint8_t[] challenge,
                          uint8_t[] keyHandle)
         returns (uint8_t[] signature);
-
-    async GetSystemMemory(uint64_t getterId);
 
     sync IsSecureURI(uint32_t type, URIParams uri, uint32_t flags)
         returns (bool isSecureURI);
@@ -1220,6 +1226,12 @@ parent:
                                                 Principal principal);
 
      async UnstoreAndBroadcastBlobURLUnregistration(nsCString url);
+
+    /**
+     * Messages for communicating child Telemetry to the parent process
+     */
+    async AccumulateChildHistogram(Accumulation[] accumulations);
+    async AccumulateChildKeyedHistogram(KeyedAccumulation[] accumulations);
 
 both:
      async AsyncMessage(nsString aMessage, CpowEntry[] aCpows,

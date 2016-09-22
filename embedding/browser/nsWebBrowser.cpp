@@ -39,6 +39,7 @@
 #include "Layers.h"
 #include "gfxContext.h"
 #include "nsILoadContext.h"
+#include "nsDocShell.h"
 
 // for painting the background window
 #include "mozilla/LookAndFeel.h"
@@ -386,6 +387,12 @@ nsWebBrowser::SetIsActive(bool aIsActive)
     return mDocShell->SetIsActive(aIsActive);
   }
   return NS_OK;
+}
+
+void
+nsWebBrowser::SetOriginAttributes(const DocShellOriginAttributes& aAttrs)
+{
+  mOriginAttributes = aAttrs;
 }
 
 //*****************************************************************************
@@ -1193,6 +1200,7 @@ nsWebBrowser::Create()
   nsCOMPtr<nsIDocShell> docShell(
     do_CreateInstance("@mozilla.org/docshell;1", &rv));
   NS_ENSURE_SUCCESS(rv, rv);
+  nsDocShell::Cast(docShell)->SetOriginAttributes(mOriginAttributes);
   rv = SetDocShell(docShell);
   NS_ENSURE_SUCCESS(rv, rv);
 
@@ -1254,7 +1262,7 @@ nsWebBrowser::Create()
   if (XRE_IsParentProcess()) {
     // Hook up global history. Do not fail if we can't - just warn.
     rv = EnableGlobalHistory(mShouldEnableHistory);
-    NS_WARN_IF_FALSE(NS_SUCCEEDED(rv), "EnableGlobalHistory() failed");
+    NS_WARNING_ASSERTION(NS_SUCCEEDED(rv), "EnableGlobalHistory() failed");
   }
 
   NS_ENSURE_SUCCESS(mDocShellAsWin->Create(), NS_ERROR_FAILURE);
@@ -1653,7 +1661,11 @@ nsWebBrowser::ScrollByPages(int32_t aNumPages)
 NS_IMETHODIMP
 nsWebBrowser::SetDocShell(nsIDocShell* aDocShell)
 {
+  // We need to keep the docshell alive while we perform the changes, but we
+  // don't need to call any methods on it.
   nsCOMPtr<nsIDocShell> kungFuDeathGrip(mDocShell);
+  mozilla::Unused << kungFuDeathGrip;
+
   if (aDocShell) {
     NS_ENSURE_TRUE(!mDocShell, NS_ERROR_FAILURE);
 

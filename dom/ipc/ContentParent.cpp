@@ -66,6 +66,7 @@
 #include "mozilla/dom/Permissions.h"
 #include "mozilla/dom/PresentationParent.h"
 #include "mozilla/dom/PPresentationParent.h"
+#include "mozilla/dom/PushNotifier.h"
 #include "mozilla/dom/FlyWebPublishedServerIPC.h"
 #include "mozilla/dom/quota/QuotaManagerService.h"
 #include "mozilla/dom/telephony/TelephonyParent.h"
@@ -263,16 +264,16 @@ using namespace mozilla::system;
 #include "nsIProfileSaveEvent.h"
 #endif
 
-#ifndef MOZ_SIMPLEPUSH
-#include "mozilla/dom/PushNotifier.h"
-#endif
-
 #ifdef XP_WIN
 #include "mozilla/widget/AudioSession.h"
 #endif
 
 #ifdef MOZ_CRASHREPORTER
 #include "nsThread.h"
+#endif
+
+#ifdef ACCESSIBILITY
+#include "nsAccessibilityService.h"
 #endif
 
 // For VP9Benchmark::sBenchmarkFpsPref
@@ -357,7 +358,7 @@ MemoryReportRequestParent::MemoryReportRequestParent(uint32_t aGeneration)
 {
   MOZ_COUNT_CTOR(MemoryReportRequestParent);
   mReporterManager = nsMemoryReporterManager::GetOrCreate();
-  NS_WARN_IF(!mReporterManager);
+  NS_WARNING_ASSERTION(mReporterManager, "GetOrCreate failed");
 }
 
 bool
@@ -849,7 +850,7 @@ ContentParent::SendAsyncUpdate(nsIWidget* aWidget)
   ContentParent* cp = reinterpret_cast<ContentParent*>(
     ::GetPropW(hwnd, kPluginWidgetContentParentProperty));
   if (cp && !cp->IsDestroyed()) {
-    cp->SendUpdateWindow((uintptr_t)hwnd);
+    Unused << cp->SendUpdateWindow((uintptr_t)hwnd);
   }
 }
 #endif // defined(XP_WIN)
@@ -1085,7 +1086,6 @@ ContentParent::CreateBrowserOrApp(const TabContext& aContext,
   }
 
   if (aContext.IsMozBrowserElement() || !aContext.HasOwnApp()) {
-    RefPtr<TabParent> tp;
     RefPtr<nsIContentParent> constructorSender;
     if (isInContentProcess) {
       MOZ_ASSERT(aContext.IsMozBrowserElement());
@@ -1702,14 +1702,15 @@ ContentParent::AllocateLayerTreeId(ContentParent* aContent,
   GPUProcessManager* gpu = GPUProcessManager::Get();
 
   *aId = gpu->AllocateLayerTreeId();
+
+  if (!aContent || !aTopLevel) {
+    return false;
+  }
+
   gpu->MapLayerTreeId(*aId, aContent->OtherPid());
 
   if (!gfxPlatform::AsyncPanZoomEnabled()) {
     return true;
-  }
-
-  if (!aContent || !aTopLevel) {
-    return false;
   }
 
   return aContent->SendNotifyLayerAllocated(aTabId, *aId);
@@ -1822,6 +1823,11 @@ ContentParent::ActorDestroy(ActorDestroyReason why)
   // remove the global remote preferences observers
   Preferences::RemoveObserver(this, "");
   gfxVars::RemoveReceiver(this);
+
+  if (GPUProcessManager* gpu = GPUProcessManager::Get()) {
+    // Note: the manager could have shutdown already.
+    gpu->RemoveListener(this);
+  }
 
   RecvRemoveGeolocationListener();
 
@@ -2223,29 +2229,23 @@ ContentParent::InitInternal(ProcessPriority aInitialPriority,
     if (useOffMainThreadCompositing) {
       GPUProcessManager* gpm = GPUProcessManager::Get();
 
-      {
-        Endpoint<PCompositorBridgeChild> endpoint;
-        DebugOnly<bool> opened =
-          gpm->CreateContentCompositorBridge(OtherPid(), &endpoint);
-        MOZ_ASSERT(opened);
-        Unused << SendInitCompositor(Move(endpoint));
-      }
+      Endpoint<PCompositorBridgeChild> compositor;
+      Endpoint<PImageBridgeChild> imageBridge;
+      Endpoint<PVRManagerChild> vrBridge;
 
-      {
-        Endpoint<PImageBridgeChild> endpoint;
-        DebugOnly<bool> opened =
-          gpm->CreateContentImageBridge(OtherPid(), &endpoint);
-        MOZ_ASSERT(opened);
-        Unused << SendInitImageBridge(Move(endpoint));
-      }
+      DebugOnly<bool> opened = gpm->CreateContentBridges(
+        OtherPid(),
+        &compositor,
+        &imageBridge,
+        &vrBridge);
+      MOZ_ASSERT(opened);
 
-      {
-        Endpoint<PVRManagerChild> endpoint;
-        DebugOnly<bool> opened =
-          gpm->CreateContentVRManager(OtherPid(), &endpoint);
-        MOZ_ASSERT(opened);
-        Unused << SendInitVRManager(Move(endpoint));
-      }
+      Unused << SendInitRendering(
+        Move(compositor),
+        Move(imageBridge),
+        Move(vrBridge));
+
+      gpm->AddListener(this);
     }
 #ifdef MOZ_WIDGET_GONK
     DebugOnly<bool> opened = PSharedBufferManager::Open(this);
@@ -2385,6 +2385,28 @@ ContentParent::RecvGetGfxVars(InfallibleTArray<GfxVarUpdate>* aVars)
 }
 
 void
+ContentParent::OnCompositorUnexpectedShutdown()
+{
+  GPUProcessManager* gpm = GPUProcessManager::Get();
+
+  Endpoint<PCompositorBridgeChild> compositor;
+  Endpoint<PImageBridgeChild> imageBridge;
+  Endpoint<PVRManagerChild> vrBridge;
+
+  DebugOnly<bool> opened = gpm->CreateContentBridges(
+    OtherPid(),
+    &compositor,
+    &imageBridge,
+    &vrBridge);
+  MOZ_ASSERT(opened);
+
+  Unused << SendReinitRendering(
+    Move(compositor),
+    Move(imageBridge),
+    Move(vrBridge));
+}
+
+void
 ContentParent::OnVarChanged(const GfxVarUpdate& aVar)
 {
   if (!mIPCOpen) {
@@ -2480,61 +2502,11 @@ ContentParent::RecvSetClipboard(const IPCDataTransfer& aDataTransfer,
   NS_ENSURE_SUCCESS(rv, true);
   trans->Init(nullptr);
 
-  const nsTArray<IPCDataTransferItem>& items = aDataTransfer.items();
-  for (const auto& item : items) {
-    trans->AddDataFlavor(item.flavor().get());
-
-    if (item.data().type() == IPCDataTransferData::TnsString) {
-      nsCOMPtr<nsISupportsString> dataWrapper =
-        do_CreateInstance(NS_SUPPORTS_STRING_CONTRACTID, &rv);
-      NS_ENSURE_SUCCESS(rv, true);
-
-      const nsString& text = item.data().get_nsString();
-      rv = dataWrapper->SetData(text);
-      NS_ENSURE_SUCCESS(rv, true);
-
-      rv = trans->SetTransferData(item.flavor().get(), dataWrapper,
-                                  text.Length() * sizeof(char16_t));
-
-      NS_ENSURE_SUCCESS(rv, true);
-    } else if (item.data().type() == IPCDataTransferData::TShmem) {
-      if (nsContentUtils::IsFlavorImage(item.flavor())) {
-        nsCOMPtr<imgIContainer> imageContainer;
-        rv = nsContentUtils::DataTransferItemToImage(item,
-                                                     getter_AddRefs(imageContainer));
-        NS_ENSURE_SUCCESS(rv, true);
-
-        nsCOMPtr<nsISupportsInterfacePointer> imgPtr =
-          do_CreateInstance(NS_SUPPORTS_INTERFACE_POINTER_CONTRACTID);
-        NS_ENSURE_TRUE(imgPtr, true);
-
-        rv = imgPtr->SetData(imageContainer);
-        NS_ENSURE_SUCCESS(rv, true);
-
-        trans->SetTransferData(item.flavor().get(), imgPtr, sizeof(nsISupports*));
-      } else {
-        nsCOMPtr<nsISupportsCString> dataWrapper =
-          do_CreateInstance(NS_SUPPORTS_CSTRING_CONTRACTID, &rv);
-        NS_ENSURE_SUCCESS(rv, true);
-
-        // The buffer contains the terminating null.
-        Shmem itemData = item.data().get_Shmem();
-        const nsDependentCString text(itemData.get<char>(),
-                                      itemData.Size<char>());
-        rv = dataWrapper->SetData(text);
-        NS_ENSURE_SUCCESS(rv, true);
-
-        rv = trans->SetTransferData(item.flavor().get(), dataWrapper, text.Length());
-
-        NS_ENSURE_SUCCESS(rv, true);
-      }
-
-      Unused << DeallocShmem(item.data().get_Shmem());
-    }
-  }
-
-  trans->SetIsPrivateData(aIsPrivateData);
-  trans->SetRequestingPrincipal(aRequestingPrincipal);
+  rv = nsContentUtils::IPCTransferableToTransferable(aDataTransfer,
+                                                     aIsPrivateData,
+                                                     aRequestingPrincipal,
+                                                     trans, this, nullptr);
+  NS_ENSURE_SUCCESS(rv, true);
 
   clipboard->SetData(trans, nullptr, aWhichClipboard);
   return true;
@@ -2843,19 +2815,24 @@ ContentParent::Observe(nsISupports* aSubject,
   }
 #endif
 #ifdef ACCESSIBILITY
-  // Make sure accessibility is running in content process when accessibility
-  // gets initiated in chrome process.
-  else if (aData && (*aData == '1') &&
-       !strcmp(aTopic, "a11y-init-or-shutdown")) {
+  else if (aData && !strcmp(aTopic, "a11y-init-or-shutdown")) {
+    if (*aData == '1') {
+      // Make sure accessibility is running in content process when
+      // accessibility gets initiated in chrome process.
 #if !defined(XP_WIN)
-    Unused << SendActivateA11y();
-#else
-    // On Windows we currently only enable a11y in the content process
-    // for testing purposes.
-    if (Preferences::GetBool(kForceEnableE10sPref, false)) {
       Unused << SendActivateA11y();
-    }
+#else
+      // On Windows we currently only enable a11y in the content process
+      // for testing purposes.
+      if (Preferences::GetBool(kForceEnableE10sPref, false)) {
+        Unused << SendActivateA11y();
+      }
 #endif
+    } else {
+      // If possible, shut down accessibility in content process when
+      // accessibility gets shutdown in chrome process.
+      Unused << SendShutdownA11y();
+    }
   }
 #endif
   else if (!strcmp(aTopic, "app-theme-changed")) {
@@ -3687,7 +3664,7 @@ ContentParent::DeallocPPresentationParent(PPresentationParent* aActor)
 bool
 ContentParent::RecvPPresentationConstructor(PPresentationParent* aActor)
 {
-  return static_cast<PresentationParent*>(aActor)->Init();
+  return static_cast<PresentationParent*>(aActor)->Init(mChildID);
 }
 
 PFlyWebPublishedServerParent*
@@ -3901,20 +3878,6 @@ ContentParent::RecvNSSU2FTokenSign(nsTArray<uint8_t>&& aApplication,
 }
 
 bool
-ContentParent::RecvGetSystemMemory(const uint64_t& aGetterId)
-{
-  uint32_t memoryTotal = 0;
-
-#if defined(XP_LINUX)
-  memoryTotal = mozilla::hal::GetTotalSystemMemoryLevel();
-#endif
-
-  Unused << SendSystemMemoryAvailable(aGetterId, memoryTotal);
-
-  return true;
-}
-
-bool
 ContentParent::RecvGetLookAndFeelCache(nsTArray<LookAndFeelInt>* aLookAndFeelIntCache)
 {
   *aLookAndFeelIntCache = LookAndFeel::GetIntCache();
@@ -4119,12 +4082,12 @@ AddGeolocationListener(nsIDOMGeoPositionCallback* watcher,
     return -1;
   }
 
-  PositionOptions* options = new PositionOptions();
+  nsAutoPtr<PositionOptions> options(new PositionOptions());
   options->mTimeout = 0;
   options->mMaximumAge = 0;
   options->mEnableHighAccuracy = highAccuracy;
   int32_t retval = 1;
-  geo->WatchPosition(watcher, errorCallBack, options, &retval);
+  geo->WatchPosition(watcher, errorCallBack, Move(options), &retval);
   return retval;
 }
 
@@ -5061,7 +5024,6 @@ ContentParent::RecvCreateWindow(PBrowserParent* aThisTab,
     return true;
   }
 
-  nsCOMPtr<mozIDOMWindowProxy> window;
   TabParent::AutoUseNewTab aunt(newTab, aWindowIsNew, aURLToLoad);
 
   nsCOMPtr<nsPIWindowWatcher> pwwatch =
@@ -5281,10 +5243,8 @@ ContentParent::RecvNotifyPushObservers(const nsCString& aScope,
                                        const IPC::Principal& aPrincipal,
                                        const nsString& aMessageId)
 {
-#ifndef MOZ_SIMPLEPUSH
   PushMessageDispatcher dispatcher(aScope, aPrincipal, aMessageId, Nothing());
   Unused << NS_WARN_IF(NS_FAILED(dispatcher.NotifyObservers()));
-#endif
   return true;
 }
 
@@ -5294,10 +5254,8 @@ ContentParent::RecvNotifyPushObserversWithData(const nsCString& aScope,
                                                const nsString& aMessageId,
                                                InfallibleTArray<uint8_t>&& aData)
 {
-#ifndef MOZ_SIMPLEPUSH
   PushMessageDispatcher dispatcher(aScope, aPrincipal, aMessageId, Some(aData));
   Unused << NS_WARN_IF(NS_FAILED(dispatcher.NotifyObservers()));
-#endif
   return true;
 }
 
@@ -5305,10 +5263,8 @@ bool
 ContentParent::RecvNotifyPushSubscriptionChangeObservers(const nsCString& aScope,
                                                          const IPC::Principal& aPrincipal)
 {
-#ifndef MOZ_SIMPLEPUSH
   PushSubscriptionChangeDispatcher dispatcher(aScope, aPrincipal);
   Unused << NS_WARN_IF(NS_FAILED(dispatcher.NotifyObservers()));
-#endif
   return true;
 }
 
@@ -5316,10 +5272,8 @@ bool
 ContentParent::RecvNotifyPushSubscriptionModifiedObservers(const nsCString& aScope,
                                                            const IPC::Principal& aPrincipal)
 {
-#ifndef MOZ_SIMPLEPUSH
   PushSubscriptionModifiedDispatcher dispatcher(aScope, aPrincipal);
   Unused << NS_WARN_IF(NS_FAILED(dispatcher.NotifyObservers()));
-#endif
   return true;
 }
 
@@ -5470,4 +5424,29 @@ ContentParent::SendGetFilesResponseAndForget(const nsID& aUUID,
     mGetFilesPendingRequests.Remove(aUUID);
     Unused << SendGetFilesResponse(aUUID, aResult);
   }
+}
+
+void
+ContentParent::ForceTabPaint(TabParent* aTabParent, uint64_t aLayerObserverEpoch)
+{
+  if (!mHangMonitorActor) {
+    return;
+  }
+  ProcessHangMonitor::ForcePaint(mHangMonitorActor, aTabParent, aLayerObserverEpoch);
+}
+
+bool
+ContentParent::RecvAccumulateChildHistogram(
+                InfallibleTArray<Accumulation>&& aAccumulations)
+{
+  Telemetry::AccumulateChild(aAccumulations);
+  return true;
+}
+
+bool
+ContentParent::RecvAccumulateChildKeyedHistogram(
+                InfallibleTArray<KeyedAccumulation>&& aAccumulations)
+{
+  Telemetry::AccumulateChildKeyed(aAccumulations);
+  return true;
 }

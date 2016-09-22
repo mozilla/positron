@@ -18,10 +18,7 @@ import org.mozilla.gecko.GeckoAccessibility;
 import org.mozilla.gecko.GeckoAppShell;
 import org.mozilla.gecko.GeckoThread;
 import org.mozilla.gecko.mozglue.JNIObject;
-import org.mozilla.gecko.Tab;
-import org.mozilla.gecko.Tabs;
 import org.mozilla.gecko.util.ThreadUtils;
-import org.mozilla.gecko.ZoomConstraints;
 
 import android.content.Context;
 import android.graphics.Canvas;
@@ -31,6 +28,7 @@ import android.graphics.Point;
 import android.graphics.PointF;
 import android.graphics.Rect;
 import android.graphics.SurfaceTexture;
+import android.os.Parcelable;
 import android.util.AttributeSet;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
@@ -40,13 +38,12 @@ import android.view.TextureView;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.InputDevice;
-import android.widget.LinearLayout;
-import android.widget.ScrollView;
+import android.widget.FrameLayout;
 
 /**
  * A view rendered by the layer compositor.
  */
-public class LayerView extends ScrollView implements Tabs.OnTabsChangedListener {
+public class LayerView extends FrameLayout {
     private static final String LOGTAG = "GeckoLayerView";
 
     private GeckoLayerClient mLayerClient;
@@ -59,17 +56,16 @@ public class LayerView extends ScrollView implements Tabs.OnTabsChangedListener 
 
     private SurfaceView mSurfaceView;
     private TextureView mTextureView;
-    private View mFillerView;
 
     private Listener mListener;
-
-    private float mSurfaceTranslation;
 
     /* This should only be modified on the Java UI thread. */
     private final Overscroll mOverscroll;
 
     private boolean mServerSurfaceValid;
     private int mWidth, mHeight;
+
+    private boolean onAttachedToWindowCalled;
 
     /* This is written by the Gecko thread and the UI thread, and read by the UI thread. */
     @WrapForJNI(stubName = "CompositorCreated", calledFrom = "ui")
@@ -79,42 +75,32 @@ public class LayerView extends ScrollView implements Tabs.OnTabsChangedListener 
         public Compositor() {
         }
 
-        @WrapForJNI(calledFrom = "ui", dispatchTo = "proxy")
+        @WrapForJNI(calledFrom = "ui", dispatchTo = "gecko")
         @Override protected native void disposeNative();
 
         // Gecko thread sets its Java instances; does not block UI thread.
-        @WrapForJNI(calledFrom = "any", dispatchTo = "proxy")
+        @WrapForJNI(calledFrom = "any", dispatchTo = "gecko")
         /* package */ native void attachToJava(GeckoLayerClient layerClient,
                                                NativePanZoomController npzc);
 
-        @WrapForJNI(calledFrom = "any", dispatchTo = "proxy")
+        @WrapForJNI(calledFrom = "any", dispatchTo = "gecko")
         /* package */ native void onSizeChanged(int windowWidth, int windowHeight,
                                                 int screenWidth, int screenHeight);
 
         // Gecko thread creates compositor; blocks UI thread.
         @WrapForJNI(calledFrom = "ui", dispatchTo = "proxy")
-        /* package */ native void createCompositor(int width, int height);
+        /* package */ native void createCompositor(int width, int height, Object surface);
 
         // Gecko thread pauses compositor; blocks UI thread.
         @WrapForJNI(calledFrom = "ui", dispatchTo = "current")
         /* package */ native void syncPauseCompositor();
 
         // UI thread resumes compositor and notifies Gecko thread; does not block UI thread.
-        @WrapForJNI(calledFrom = "ui", dispatchTo = "proxy")
-        /* package */ native void syncResumeResizeCompositor(int width, int height);
+        @WrapForJNI(calledFrom = "ui", dispatchTo = "current")
+        /* package */ native void syncResumeResizeCompositor(int width, int height, Object surface);
 
         @WrapForJNI(calledFrom = "any", dispatchTo = "current")
         /* package */ native void syncInvalidateAndScheduleComposite();
-
-        @WrapForJNI
-        private Object getSurface() {
-            synchronized (LayerView.this) {
-                if (LayerView.this.mServerSurfaceValid) {
-                    return LayerView.this.getSurface();
-                }
-            }
-            return null;
-        }
 
         @WrapForJNI(calledFrom = "gecko")
         private void reattach() {
@@ -125,6 +111,8 @@ public class LayerView extends ScrollView implements Tabs.OnTabsChangedListener 
         private void destroy() {
             // The nsWindow has been closed. First mark our compositor as destroyed.
             LayerView.this.mCompositorCreated = false;
+
+            LayerView.this.mLayerClient.setGeckoReady(false);
 
             // Then clear out any pending calls on the UI thread by disposing on the UI thread.
             ThreadUtils.postToUiThread(new Runnable() {
@@ -177,7 +165,6 @@ public class LayerView extends ScrollView implements Tabs.OnTabsChangedListener 
         } else {
             mOverscroll = null;
         }
-        Tabs.registerOnTabsChangedListener(this);
     }
 
     public LayerView(Context context) {
@@ -199,7 +186,6 @@ public class LayerView extends ScrollView implements Tabs.OnTabsChangedListener 
         setFocusableInTouchMode(true);
 
         GeckoAccessibility.setDelegate(this);
-        GeckoAccessibility.setAccessibilityManagerListeners(getContext());
     }
 
     /**
@@ -232,7 +218,6 @@ public class LayerView extends ScrollView implements Tabs.OnTabsChangedListener 
         if (mRenderer != null) {
             mRenderer.destroy();
         }
-        Tabs.unregisterOnTabsChangedListener(this);
     }
 
     @Override
@@ -250,7 +235,6 @@ public class LayerView extends ScrollView implements Tabs.OnTabsChangedListener 
         if (event.getActionMasked() == MotionEvent.ACTION_DOWN) {
             requestFocus();
         }
-        event.offsetLocation(0, -mSurfaceTranslation);
 
         if (mToolbarAnimator != null && mToolbarAnimator.onInterceptTouchEvent(event)) {
             if (mPanZoomController != null) {
@@ -278,8 +262,6 @@ public class LayerView extends ScrollView implements Tabs.OnTabsChangedListener 
             return false;
         }
 
-        event.offsetLocation(0, -mSurfaceTranslation);
-
         if (!mLayerClient.isGeckoReady()) {
             // If gecko isn't loaded yet, don't try sending events to the
             // native code because it's just going to crash
@@ -293,8 +275,6 @@ public class LayerView extends ScrollView implements Tabs.OnTabsChangedListener 
 
     @Override
     public boolean onGenericMotionEvent(MotionEvent event) {
-        event.offsetLocation(0, -mSurfaceTranslation);
-
         if (AndroidGamepadManager.handleMotionEvent(event)) {
             return true;
         }
@@ -307,6 +287,14 @@ public class LayerView extends ScrollView implements Tabs.OnTabsChangedListener 
             return true;
         }
         return false;
+    }
+
+    @Override
+    protected void onRestoreInstanceState(final Parcelable state) {
+        if (onAttachedToWindowCalled) {
+            attachCompositor();
+        }
+        super.onRestoreInstanceState(state);
     }
 
     @Override
@@ -338,31 +326,22 @@ public class LayerView extends ScrollView implements Tabs.OnTabsChangedListener 
 
             mSurfaceView = new LayerSurfaceView(getContext(), this);
             mSurfaceView.setBackgroundColor(Color.WHITE);
-
-            // The "filler" view sits behind the URL bar and should never be
-            // visible. It exists solely to make this LayerView actually
-            // scrollable so that we can shift the surface around on the screen.
-            // Once we drop support for pre-Honeycomb Android versions this
-            // should not be needed; we can just turn LayerView back into a
-            // FrameLayout that holds mSurfaceView and nothing else.
-            mFillerView = new View(getContext()) {
-                @Override protected void onMeasure(int aWidthSpec, int aHeightSpec) {
-                    setMeasuredDimension(0, Math.round(mToolbarAnimator.getMaxTranslation()));
-                }
-            };
-            mFillerView.setBackgroundColor(Color.RED);
-
-            LinearLayout container = new LinearLayout(getContext());
-            container.setOrientation(LinearLayout.VERTICAL);
-            container.addView(mFillerView);
-            container.addView(mSurfaceView, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-            addView(container, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+            addView(mSurfaceView, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
             SurfaceHolder holder = mSurfaceView.getHolder();
             holder.addCallback(new SurfaceListener());
         }
 
         attachCompositor();
+
+        onAttachedToWindowCalled = true;
+    }
+
+    @Override
+    protected void onDetachedFromWindow() {
+        super.onDetachedFromWindow();
+
+        onAttachedToWindowCalled = false;
     }
 
     // Don't expose GeckoLayerClient to things outside this package; only expose it as an Object
@@ -383,14 +362,10 @@ public class LayerView extends ScrollView implements Tabs.OnTabsChangedListener 
         return mLayerClient.getMatrixForLayerRectToViewRect();
     }
 
-    void setSurfaceBackgroundColor(int newColor) {
+    public void setSurfaceBackgroundColor(int newColor) {
         if (mSurfaceView != null) {
             mSurfaceView.setBackgroundColor(newColor);
         }
-    }
-
-    public void setIsRTL(boolean aIsRTL) {
-        mLayerClient.setIsRTL(aIsRTL);
     }
 
     public void requestRender() {
@@ -459,11 +434,9 @@ public class LayerView extends ScrollView implements Tabs.OnTabsChangedListener 
     void serverSurfaceChanged(int newWidth, int newHeight) {
         ThreadUtils.assertOnUiThread();
 
-        synchronized (this) {
-            mWidth = newWidth;
-            mHeight = newHeight;
-            mServerSurfaceValid = true;
-        }
+        mWidth = newWidth;
+        mHeight = newHeight;
+        mServerSurfaceValid = true;
 
         updateCompositor();
     }
@@ -484,7 +457,7 @@ public class LayerView extends ScrollView implements Tabs.OnTabsChangedListener 
             // the compositor resuming, so that Gecko knows that it can now draw.
             // It is important to not notify Gecko until after the compositor has
             // been resumed, otherwise Gecko may send updates that get dropped.
-            mCompositor.syncResumeResizeCompositor(mWidth, mHeight);
+            mCompositor.syncResumeResizeCompositor(mWidth, mHeight, getSurface());
             return;
         }
 
@@ -493,7 +466,7 @@ public class LayerView extends ScrollView implements Tabs.OnTabsChangedListener 
         // happen without needing to block anywhere.
         if (mServerSurfaceValid && getLayerClient().isGeckoReady()) {
             mCompositorCreated = true;
-            mCompositor.createCompositor(mWidth, mHeight);
+            mCompositor.createCompositor(mWidth, mHeight, getSurface());
         }
     }
 
@@ -522,7 +495,7 @@ public class LayerView extends ScrollView implements Tabs.OnTabsChangedListener 
         }
 
         if (mCompositorCreated) {
-            mCompositor.syncResumeResizeCompositor(width, height);
+            mCompositor.syncResumeResizeCompositor(width, height, getSurface());
         }
 
         if (mOverscroll != null) {
@@ -561,9 +534,7 @@ public class LayerView extends ScrollView implements Tabs.OnTabsChangedListener 
             mCompositor.syncPauseCompositor();
         }
 
-        synchronized (this) {
-            mServerSurfaceValid = false;
-        }
+        mServerSurfaceValid = false;
     }
 
     private void onDestroyed() {
@@ -617,43 +588,15 @@ public class LayerView extends ScrollView implements Tabs.OnTabsChangedListener 
         }
     }
 
-    @Override
-    protected void onMeasure(int aWidthSpec, int aHeightSpec) {
-        super.onMeasure(aWidthSpec, aHeightSpec);
-        if (mSurfaceView != null) {
-            // Because of the crazy setup where this LayerView is a ScrollView
-            // and the SurfaceView is inside a LinearLayout, the SurfaceView
-            // doesn't get the right information to size itself the way we want.
-            // We always want it to be the same size as this LayerView, so we
-            // use a hack to make sure it sizes itself that way.
-            ((LayerSurfaceView)mSurfaceView).overrideSize(getMeasuredWidth(), getMeasuredHeight());
-        }
-    }
-
     /* A subclass of SurfaceView to listen to layout changes, as
      * View.OnLayoutChangeListener requires API level 11.
      */
     private class LayerSurfaceView extends SurfaceView {
         private LayerView mParent;
-        private int mForcedWidth;
-        private int mForcedHeight;
 
         public LayerSurfaceView(Context aContext, LayerView aParent) {
             super(aContext);
             mParent = aParent;
-        }
-
-        void overrideSize(int aWidth, int aHeight) {
-            if (mForcedWidth != aWidth || mForcedHeight != aHeight) {
-                mForcedWidth = aWidth;
-                mForcedHeight = aHeight;
-                requestLayout();
-            }
-        }
-
-        @Override
-        protected void onMeasure(int aWidthSpec, int aHeightSpec) {
-            setMeasuredDimension(mForcedWidth, mForcedHeight);
         }
 
         @Override
@@ -722,7 +665,7 @@ public class LayerView extends ScrollView implements Tabs.OnTabsChangedListener 
     @Override
     public void onFocusChanged (boolean gainFocus, int direction, Rect previouslyFocusedRect) {
         super.onFocusChanged(gainFocus, direction, previouslyFocusedRect);
-        GeckoAccessibility.onLayerViewFocusChanged(this, gainFocus);
+        GeckoAccessibility.onLayerViewFocusChanged(gainFocus);
     }
 
     public void setFullScreenState(FullScreenState state) {
@@ -739,29 +682,14 @@ public class LayerView extends ScrollView implements Tabs.OnTabsChangedListener 
 
     public void setMaxTranslation(float aMaxTranslation) {
         mToolbarAnimator.setMaxTranslation(aMaxTranslation);
-        if (mFillerView != null) {
-            mFillerView.requestLayout();
-        }
     }
 
     public void setSurfaceTranslation(float translation) {
-        // Once we drop support for pre-Honeycomb Android versions, we can
-        // revert bug 1197811 and just use ViewHelper here.
-        if (mSurfaceTranslation != translation) {
-            mSurfaceTranslation = translation;
-            scrollTo(0, Math.round(mToolbarAnimator.getMaxTranslation() - translation));
-        }
+        setTranslationY(translation);
     }
 
     public float getSurfaceTranslation() {
-        return mSurfaceTranslation;
-    }
-
-    @Override
-    public void onTabChanged(Tab tab, Tabs.TabEvents msg, String data) {
-        if (msg == Tabs.TabEvents.VIEWPORT_CHANGE && Tabs.getInstance().isSelectedTab(tab) && mLayerClient != null) {
-            setIsRTL(tab.getIsRTL());
-        }
+        return getTranslationY();
     }
 
     // Public hooks for dynamic toolbar translation
@@ -787,4 +715,9 @@ public class LayerView extends ScrollView implements Tabs.OnTabsChangedListener 
         mRenderer.removeZoomedViewListener(listener);
     }
 
+    public void setClearColor(int color) {
+        if (mLayerClient != null) {
+            mLayerClient.setClearColor(color);
+        }
+    }
 }

@@ -16,7 +16,7 @@ var gTests = [
 
 {
   desc: "getUserMedia audio+video",
-  run: function checkAudioVideo() {
+  run: function* checkAudioVideo() {
     let promise = promisePopupNotificationShown("webRTC-shareDevices");
     yield promiseRequestDevice(true, true, "frame1");
     yield promise;
@@ -45,7 +45,7 @@ var gTests = [
 
 {
   desc: "getUserMedia audio+video: stop sharing",
-  run: function checkStopSharing() {
+  run: function* checkStopSharing() {
     let promise = promisePopupNotificationShown("webRTC-shareDevices");
     yield promiseRequestDevice(true, true, "frame1");
     yield promise;
@@ -86,7 +86,7 @@ var gTests = [
 
 {
   desc: "getUserMedia audio+video: reloading the frame removes all sharing UI",
-  run: function checkReloading() {
+  run: function* checkReloading() {
     let promise = promisePopupNotificationShown("webRTC-shareDevices");
     yield promiseRequestDevice(true, true, "frame1");
     yield promise;
@@ -121,7 +121,7 @@ var gTests = [
 
 {
   desc: "getUserMedia audio+video: reloading the frame removes prompts",
-  run: function checkReloadingRemovesPrompts() {
+  run: function* checkReloadingRemovesPrompts() {
     let promise = promisePopupNotificationShown("webRTC-shareDevices");
     yield promiseRequestDevice(true, true, "frame1");
     yield promise;
@@ -141,7 +141,7 @@ var gTests = [
 
 {
   desc: "getUserMedia audio+video: reloading a frame updates the sharing UI",
-  run: function checkUpdateWhenReloading() {
+  run: function* checkUpdateWhenReloading() {
     // We'll share only the mic in the first frame, then share both in the
     // second frame, then reload the second frame. After each step, we'll check
     // the UI is in the correct state.
@@ -197,6 +197,41 @@ var gTests = [
     yield expectNoObserverCalled();
     yield checkNotSharing();
   }
+},
+
+{
+  desc: "getUserMedia audio+video: reloading the top level page removes all sharing UI",
+  run: function* checkReloading() {
+    let promise = promisePopupNotificationShown("webRTC-shareDevices");
+    yield promiseRequestDevice(true, true, "frame1");
+    yield promise;
+    yield expectObserverCalled("getUserMedia:request");
+    checkDeviceSelectors(true, true);
+
+    let indicator = promiseIndicatorWindow();
+    yield promiseMessage("ok", () => {
+      PopupNotifications.panel.firstChild.button.click();
+    });
+    yield expectObserverCalled("getUserMedia:response:allow");
+    yield expectObserverCalled("recording-device-events");
+    is((yield getMediaCaptureState()), "CameraAndMicrophone",
+       "expected camera and microphone to be shared");
+
+    yield indicator;
+    yield checkSharingUI({video: true, audio: true});
+
+    info("reloading the web page");
+    promise = promiseObserverCalled("recording-device-events");
+    content.location.reload();
+    yield promise;
+
+    if ((yield promiseTodoObserverNotCalled("recording-device-events")) == 1) {
+      todo(false, "Got the 'recording-device-events' notification twice, likely because of bug 962719");
+    }
+    yield expectObserverCalled("recording-window-ended");
+    yield expectNoObserverCalled();
+    yield checkNotSharing();
+  }
 }
 
 ];
@@ -216,7 +251,7 @@ function test() {
     is(PopupNotifications._currentNotifications.length, 0,
        "should start the test without any prior popup notification");
 
-    Task.spawn(function () {
+    Task.spawn(function* () {
       yield SpecialPowers.pushPrefEnv({"set": [[PREF_PERMISSION_FAKE, true]]});
 
       for (let test of gTests) {
@@ -227,6 +262,7 @@ function test() {
         yield expectNoObserverCalled();
       }
     }).then(finish, ex => {
+     Cu.reportError(ex);
      ok(false, "Unexpected Exception: " + ex);
      finish();
     });

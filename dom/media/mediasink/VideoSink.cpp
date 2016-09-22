@@ -11,12 +11,14 @@
 namespace mozilla {
 
 extern LazyLogModule gMediaDecoderLog;
-#define VSINK_LOG(msg, ...) \
-  MOZ_LOG(gMediaDecoderLog, LogLevel::Debug, \
-    ("VideoSink=%p " msg, this, ##__VA_ARGS__))
-#define VSINK_LOG_V(msg, ...) \
-  MOZ_LOG(gMediaDecoderLog, LogLevel::Verbose, \
-  ("VideoSink=%p " msg, this, ##__VA_ARGS__))
+
+#undef FMT
+#undef DUMP_LOG
+
+#define FMT(x, ...) "VideoSink=%p " x, this, ##__VA_ARGS__
+#define VSINK_LOG(...)   MOZ_LOG(gMediaDecoderLog, LogLevel::Debug,   (FMT(__VA_ARGS__)))
+#define VSINK_LOG_V(...) MOZ_LOG(gMediaDecoderLog, LogLevel::Verbose, (FMT(__VA_ARGS__)))
+#define DUMP_LOG(...) NS_DebugBreak(NS_DEBUG_WARNING, nsPrintfCString(FMT(__VA_ARGS__)).get(), nullptr, nullptr, -1)
 
 using namespace mozilla::layers;
 
@@ -143,6 +145,9 @@ VideoSink::SetPlaying(bool aPlaying)
     mUpdateScheduler.Reset();
     // Since playback is paused, tell compositor to render only current frame.
     RenderVideoFrames(1);
+    if (mContainer) {
+      mContainer->ClearCachedResources();
+    }
   }
 
   mAudioSink->SetPlaying(aPlaying);
@@ -180,9 +185,14 @@ VideoSink::Start(int64_t aStartTime, const MediaInfo& aInfo)
         [self] () {
           self->mVideoSinkEndRequest.Complete();
           self->TryUpdateRenderedVideoFrames();
+          // It is possible the video queue size is 0 and we have no frames to
+          // render. However, we need to call MaybeResolveEndPromise() to ensure
+          // mEndPromiseHolder is resolved.
+          self->MaybeResolveEndPromise();
         }, [self] () {
           self->mVideoSinkEndRequest.Complete();
           self->TryUpdateRenderedVideoFrames();
+          self->MaybeResolveEndPromise();
         }));
     }
 
@@ -345,7 +355,8 @@ VideoSink::RenderVideoFrames(int32_t aMaxFrames,
 
     frame->mSentToCompositor = true;
 
-    if (!frame->mImage || !frame->mImage->IsValid()) {
+    if (!frame->mImage || !frame->mImage->IsValid() ||
+        !frame->mImage->GetSize().width || !frame->mImage->GetSize().height) {
       continue;
     }
 
@@ -397,7 +408,7 @@ VideoSink::UpdateRenderedVideoFrames()
   // Skip frames up to the playback position.
   int64_t lastDisplayedFrameEndTime = 0;
   while (VideoQueue().GetSize() > mMinVideoQueueSize &&
-         clockTime > VideoQueue().PeekFront()->GetEndTime()) {
+         clockTime >= VideoQueue().PeekFront()->GetEndTime()) {
     RefPtr<MediaData> frame = VideoQueue().PopFront();
     if (frame->As<VideoData>()->mSentToCompositor) {
       lastDisplayedFrameEndTime = frame->GetEndTime();
@@ -413,14 +424,10 @@ VideoSink::UpdateRenderedVideoFrames()
   // the end time of the current frame, or if we dropped all frames in the
   // queue, the end time of the last frame we removed from the queue.
   RefPtr<MediaData> currentFrame = VideoQueue().PeekFront();
-  mVideoFrameEndTime = currentFrame ? currentFrame->GetEndTime() : lastDisplayedFrameEndTime;
+  mVideoFrameEndTime = std::max(mVideoFrameEndTime,
+    currentFrame ? currentFrame->GetEndTime() : lastDisplayedFrameEndTime);
 
-  // All frames are rendered, Let's resolve the promise.
-  if (VideoQueue().IsFinished() &&
-      VideoQueue().GetSize() <= 1 &&
-      !mVideoSinkEndRequest.Exists()) {
-    mEndPromiseHolder.ResolveIfExists(true, __func__);
-  }
+  MaybeResolveEndPromise();
 
   RenderVideoFrames(mVideoQueueSendToCompositorSize, clockTime, nowTime);
 
@@ -443,6 +450,30 @@ VideoSink::UpdateRenderedVideoFrames()
   }, [self] () {
     self->UpdateRenderedVideoFramesByTimer();
   });
+}
+
+void
+VideoSink::MaybeResolveEndPromise()
+{
+  AssertOwnerThread();
+  // All frames are rendered, Let's resolve the promise.
+  if (VideoQueue().IsFinished() &&
+      VideoQueue().GetSize() <= 1 &&
+      !mVideoSinkEndRequest.Exists()) {
+    mEndPromiseHolder.ResolveIfExists(true, __func__);
+  }
+}
+
+void
+VideoSink::DumpDebugInfo()
+{
+  AssertOwnerThread();
+  DUMP_LOG(
+    "IsStarted=%d IsPlaying=%d, VideoQueue: finished=%d size=%d, "
+    "mVideoFrameEndTime=%lld mHasVideo=%d mVideoSinkEndRequest.Exists()=%d "
+    "mEndPromiseHolder.IsEmpty()=%d",
+    IsStarted(), IsPlaying(), VideoQueue().IsFinished(), VideoQueue().GetSize(),
+    mVideoFrameEndTime, mHasVideo, mVideoSinkEndRequest.Exists(), mEndPromiseHolder.IsEmpty());
 }
 
 } // namespace media

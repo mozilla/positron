@@ -6074,6 +6074,8 @@ CodeGenerator::visitCreateArgumentsObject(LCreateArgumentsObject* lir)
         Register objTemp = ToRegister(lir->temp1());
         Register cxTemp = ToRegister(lir->temp2());
 
+        masm.Push(callObj);
+
         // Try to allocate an arguments object. This will leave the reserved
         // slots uninitialized, so it's important we don't GC until we
         // initialize these slots in ArgumentsObject::finishForIon.
@@ -6082,7 +6084,7 @@ CodeGenerator::visitCreateArgumentsObject(LCreateArgumentsObject* lir)
                             /* initContents = */ false);
 
         masm.moveStackPtrTo(temp);
-        masm.addPtr(Imm32(frameSize()), temp);
+        masm.addPtr(Imm32(masm.framePushed()), temp);
 
         masm.setupUnalignedABICall(cxTemp);
         masm.loadJSContext(cxTemp);
@@ -6092,10 +6094,14 @@ CodeGenerator::visitCreateArgumentsObject(LCreateArgumentsObject* lir)
         masm.passABIArg(objTemp);
 
         masm.callWithABI(JS_FUNC_TO_DATA_PTR(void*, ArgumentsObject::finishForIon));
-        masm.branchTestPtr(Assembler::Zero, ReturnReg, ReturnReg, masm.exceptionLabel());
+        masm.branchTestPtr(Assembler::Zero, ReturnReg, ReturnReg, &failure);
+
+        // Discard saved callObj on the stack.
+        masm.addToStackPtr(Imm32(sizeof(uintptr_t)));
         masm.jump(&done);
 
         masm.bind(&failure);
+        masm.Pop(callObj);
     }
 
     masm.moveStackPtrTo(temp);
@@ -7975,7 +7981,8 @@ class OutOfLineStoreElementHole : public OutOfLineCodeBase<CodeGenerator>
     explicit OutOfLineStoreElementHole(LInstruction* ins)
       : ins_(ins)
     {
-        MOZ_ASSERT(ins->isStoreElementHoleV() || ins->isStoreElementHoleT());
+        MOZ_ASSERT(ins->isStoreElementHoleV() || ins->isStoreElementHoleT() ||
+                   ins->isFallibleStoreElementV() || ins->isFallibleStoreElementT());
     }
 
     void accept(CodeGenerator* codegen) {
@@ -8069,9 +8076,12 @@ CodeGenerator::visitStoreElementV(LStoreElementV* lir)
     }
 }
 
-void
-CodeGenerator::visitStoreElementHoleT(LStoreElementHoleT* lir)
+template <typename T> void
+CodeGenerator::emitStoreElementHoleT(T* lir)
 {
+    static_assert(std::is_same<T, LStoreElementHoleT>::value || std::is_same<T, LFallibleStoreElementT>::value,
+                  "emitStoreElementHoleT called with unexpected argument type");
+
     OutOfLineStoreElementHole* ool = new(alloc()) OutOfLineStoreElementHole(lir);
     addOutOfLineCode(ool, lir->mir());
 
@@ -8120,15 +8130,24 @@ CodeGenerator::visitStoreElementHoleT(LStoreElementHoleT* lir)
 }
 
 void
-CodeGenerator::visitStoreElementHoleV(LStoreElementHoleV* lir)
+CodeGenerator::visitStoreElementHoleT(LStoreElementHoleT* lir)
 {
+    emitStoreElementHoleT(lir);
+}
+
+template <typename T> void
+CodeGenerator::emitStoreElementHoleV(T* lir)
+{
+    static_assert(std::is_same<T, LStoreElementHoleV>::value || std::is_same<T, LFallibleStoreElementV>::value,
+                  "emitStoreElementHoleV called with unexpected parameter type");
+
     OutOfLineStoreElementHole* ool = new(alloc()) OutOfLineStoreElementHole(lir);
     addOutOfLineCode(ool, lir->mir());
 
     Register obj = ToRegister(lir->object());
     Register elements = ToRegister(lir->elements());
     const LAllocation* index = lir->index();
-    const ValueOperand value = ToValue(lir, LStoreElementHoleV::Value);
+    const ValueOperand value = ToValue(lir, T::Value);
     RegisterOrInt32Constant key = ToRegisterOrInt32Constant(index);
 
     JSValueType unboxedType = lir->mir()->unboxedType();
@@ -8170,6 +8189,66 @@ CodeGenerator::visitStoreElementHoleV(LStoreElementHoleV* lir)
     masm.bind(ool->rejoin());
 }
 
+void
+CodeGenerator::visitStoreElementHoleV(LStoreElementHoleV* lir)
+{
+    emitStoreElementHoleV(lir);
+}
+
+typedef bool (*ThrowReadOnlyFn)(JSContext*, HandleObject);
+static const VMFunction ThrowReadOnlyInfo =
+    FunctionInfo<ThrowReadOnlyFn>(ThrowReadOnlyError, "ThrowReadOnlyError");
+
+void
+CodeGenerator::visitFallibleStoreElementT(LFallibleStoreElementT* lir)
+{
+    Register elements = ToRegister(lir->elements());
+
+    // Handle frozen objects
+    Label isFrozen;
+    Address flags(elements, ObjectElements::offsetOfFlags());
+    if (!lir->mir()->strict()) {
+        masm.branchTest32(Assembler::NonZero, flags, Imm32(ObjectElements::FROZEN), &isFrozen);
+    } else {
+        Register object = ToRegister(lir->object());
+        OutOfLineCode* ool = oolCallVM(ThrowReadOnlyInfo, lir,
+                ArgList(object), StoreNothing());
+        masm.branchTest32(Assembler::NonZero, flags, Imm32(ObjectElements::FROZEN), ool->entry());
+        // This OOL code should have thrown an exception, so will never return.
+        // So, do not bind ool->rejoin() anywhere, so that it implicitly (and without the cost
+        // of a jump) does a masm.assumeUnreachable().
+    }
+
+    emitStoreElementHoleT(lir);
+
+    masm.bind(&isFrozen);
+}
+
+void
+CodeGenerator::visitFallibleStoreElementV(LFallibleStoreElementV* lir)
+{
+    Register elements = ToRegister(lir->elements());
+
+    // Handle frozen objects
+    Label isFrozen;
+    Address flags(elements, ObjectElements::offsetOfFlags());
+    if (!lir->mir()->strict()) {
+        masm.branchTest32(Assembler::NonZero, flags, Imm32(ObjectElements::FROZEN), &isFrozen);
+    } else {
+        Register object = ToRegister(lir->object());
+        OutOfLineCode* ool = oolCallVM(ThrowReadOnlyInfo, lir,
+                ArgList(object), StoreNothing());
+        masm.branchTest32(Assembler::NonZero, flags, Imm32(ObjectElements::FROZEN), ool->entry());
+        // This OOL code should have thrown an exception, so will never return.
+        // So, do not bind ool->rejoin() anywhere, so that it implicitly (and without the cost
+        // of a jump) does a masm.assumeUnreachable().
+    }
+
+    emitStoreElementHoleV(lir);
+
+    masm.bind(&isFrozen);
+}
+
 typedef bool (*SetDenseOrUnboxedArrayElementFn)(JSContext*, HandleObject, int32_t,
                                                 HandleValue, bool strict);
 static const VMFunction SetDenseOrUnboxedArrayElementInfo =
@@ -8196,8 +8275,29 @@ CodeGenerator::visitOutOfLineStoreElementHole(OutOfLineStoreElementHole* ool)
         value = TypedOrValueRegister(ToValue(store, LStoreElementHoleV::Value));
         unboxedType = store->mir()->unboxedType();
         temp = store->getTemp(0);
-    } else {
+    } else if (ins->isFallibleStoreElementV()) {
+        LFallibleStoreElementV* store = ins->toFallibleStoreElementV();
+        object = ToRegister(store->object());
+        elements = ToRegister(store->elements());
+        index = store->index();
+        valueType = store->mir()->value()->type();
+        value = TypedOrValueRegister(ToValue(store, LFallibleStoreElementV::Value));
+        unboxedType = store->mir()->unboxedType();
+        temp = store->getTemp(0);
+    } else if (ins->isStoreElementHoleT()) {
         LStoreElementHoleT* store = ins->toStoreElementHoleT();
+        object = ToRegister(store->object());
+        elements = ToRegister(store->elements());
+        index = store->index();
+        valueType = store->mir()->value()->type();
+        if (store->value()->isConstant())
+            value = ConstantOrRegister(store->value()->toConstant()->toJSValue());
+        else
+            value = TypedOrValueRegister(valueType, ToAnyRegister(store->value()));
+        unboxedType = store->mir()->unboxedType();
+        temp = store->getTemp(0);
+    } else { // ins->isFallibleStoreElementT()
+        LFallibleStoreElementT* store = ins->toFallibleStoreElementT();
         object = ToRegister(store->object());
         elements = ToRegister(store->elements());
         index = store->index();
@@ -8264,13 +8364,21 @@ CodeGenerator::visitOutOfLineStoreElementHole(OutOfLineStoreElementHole* ool)
         masm.bind(&dontUpdate);
     }
 
-    if (ins->isStoreElementHoleT() && unboxedType == JSVAL_TYPE_MAGIC && valueType != MIRType::Double) {
-        // The inline path for StoreElementHoleT does not always store the type tag,
-        // so we do the store on the OOL path. We use MIRType::None for the element type
-        // so that storeElementTyped will always store the type tag.
-        emitStoreElementTyped(ins->toStoreElementHoleT()->value(), valueType, MIRType::None,
-                              elements, index, 0);
-        masm.jump(ool->rejoin());
+    if ((ins->isStoreElementHoleT() || ins->isFallibleStoreElementT()) &&
+        unboxedType == JSVAL_TYPE_MAGIC && valueType != MIRType::Double)
+    {
+        // The inline path for StoreElementHoleT and FallibleStoreElementT does not always store
+        // the type tag, so we do the store on the OOL path. We use MIRType::None for the element
+        // type so that storeElementTyped will always store the type tag.
+        if (ins->isStoreElementHoleT()) {
+            emitStoreElementTyped(ins->toStoreElementHoleT()->value(), valueType, MIRType::None,
+                                  elements, index, 0);
+            masm.jump(ool->rejoin());
+        } else if (ins->isFallibleStoreElementT()) {
+            emitStoreElementTyped(ins->toFallibleStoreElementT()->value(), valueType,
+                                  MIRType::None, elements, index, 0);
+            masm.jump(ool->rejoin());
+        }
     } else {
         // Jump to the inline path where we will store the value.
         masm.jump(ool->rejoinStore());
@@ -8637,12 +8745,24 @@ CodeGenerator::visitArrayJoin(LArrayJoin* lir)
     callVM(ArrayJoinInfo, lir);
 }
 
+typedef JSObject* (*ValueToIteratorFn)(JSContext*, uint32_t, HandleValue);
+static const VMFunction ValueToIteratorInfo =
+    FunctionInfo<ValueToIteratorFn>(ValueToIterator, "ValueToIterator");
+
+void
+CodeGenerator::visitCallIteratorStartV(LCallIteratorStartV* lir)
+{
+    pushArg(ToValue(lir, LCallIteratorStartV::Value));
+    pushArg(Imm32(lir->mir()->flags()));
+    callVM(ValueToIteratorInfo, lir);
+}
+
 typedef JSObject* (*GetIteratorObjectFn)(JSContext*, HandleObject, uint32_t);
 static const VMFunction GetIteratorObjectInfo =
     FunctionInfo<GetIteratorObjectFn>(GetIteratorObject, "GetIteratorObject");
 
 void
-CodeGenerator::visitCallIteratorStart(LCallIteratorStart* lir)
+CodeGenerator::visitCallIteratorStartO(LCallIteratorStartO* lir)
 {
     pushArg(Imm32(lir->mir()->flags()));
     pushArg(ToRegister(lir->object()));
@@ -8665,7 +8785,7 @@ CodeGenerator::branchIfNotEmptyObjectElements(Register obj, Label* target)
 }
 
 void
-CodeGenerator::visitIteratorStart(LIteratorStart* lir)
+CodeGenerator::visitIteratorStartO(LIteratorStartO* lir)
 {
     const Register obj = ToRegister(lir->object());
     const Register output = ToRegister(lir->output());
@@ -8683,7 +8803,7 @@ CodeGenerator::visitIteratorStart(LIteratorStart* lir)
     MOZ_ASSERT(flags == JSITER_ENUMERATE);
 
     // Fetch the most recent iterator and ensure it's not nullptr.
-    masm.loadPtr(AbsoluteAddress(GetJitContext()->runtime->addressOfLastCachedNativeIterator()), output);
+    masm.loadPtr(AbsoluteAddress(gen->compartment->addressOfLastCachedNativeIterator()), output);
     masm.branchTestPtr(Assembler::Zero, output, output, ool->entry());
 
     // Load NativeIterator.
@@ -11442,16 +11562,12 @@ CodeGenerator::visitAssertRangeF(LAssertRangeF* ins)
 {
     FloatRegister input = ToFloatRegister(ins->input());
     FloatRegister temp = ToFloatRegister(ins->temp());
-    FloatRegister dest = input;
-    if (hasMultiAlias())
-        dest = ToFloatRegister(ins->armtemp());
+    FloatRegister temp2 = ToFloatRegister(ins->temp2());
 
     const Range* r = ins->range();
 
-    masm.convertFloat32ToDouble(input, dest);
-    emitAssertRangeD(r, dest, temp);
-    if (dest == input)
-        masm.convertDoubleToFloat32(input, input);
+    masm.convertFloat32ToDouble(input, temp);
+    emitAssertRangeD(r, temp, temp2);
 }
 
 void
@@ -11507,23 +11623,31 @@ CodeGenerator::visitInterruptCheck(LInterruptCheck* lir)
 }
 
 void
-CodeGenerator::visitAsmJSInterruptCheck(LAsmJSInterruptCheck* lir)
+CodeGenerator::visitWasmTrap(LWasmTrap* lir)
 {
-    Label rejoin;
-    masm.branch32(Assembler::Equal, wasm::SymbolicAddress::InterruptUint32, Imm32(0), &rejoin);
-
-    MOZ_ASSERT((sizeof(AsmJSFrame) + masm.framePushed()) % ABIStackAlignment == 0);
-    masm.call(wasm::SymbolicAddress::HandleExecutionInterrupt);
-    masm.branchIfFalseBool(ReturnReg, wasm::JumpTarget::Throw);
-
-    masm.bind(&rejoin);
+    MOZ_ASSERT(gen->compilingAsmJS());
+    masm.jump(wasm::JumpTarget(lir->mir()->trap()));
 }
 
 void
-CodeGenerator::visitAsmThrowUnreachable(LAsmThrowUnreachable* lir)
+CodeGenerator::visitWasmBoundsCheck(LWasmBoundsCheck* ins)
 {
-    MOZ_ASSERT(gen->compilingAsmJS());
-    masm.jump(wasm::JumpTarget::Unreachable);
+    const MWasmBoundsCheck* mir = ins->mir();
+    Register ptr = ToRegister(ins->ptr());
+
+    if (mir->isRedundant()) {
+        // For better test coverage, inject debug assertions that redundant
+        // bounds checks really are redundant.
+#ifdef DEBUG
+        Label ok;
+        masm.wasmBoundsCheck(Assembler::Below, ptr, &ok);
+        masm.assumeUnreachable("Redundant bounds check failed!");
+        masm.bind(&ok);
+#endif
+        return;
+    }
+
+    masm.wasmBoundsCheck(Assembler::AboveOrEqual, ptr, wasm::JumpTarget::OutOfBounds);
 }
 
 typedef bool (*RecompileFn)(JSContext*);

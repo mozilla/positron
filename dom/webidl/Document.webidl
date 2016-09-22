@@ -24,9 +24,9 @@ dictionary ElementCreationOptions {
 interface Document : Node {
   [Throws]
   readonly attribute DOMImplementation implementation;
-  [Pure]
+  [Pure, Throws]
   readonly attribute DOMString URL;
-  [Pure]
+  [Pure, Throws]
   readonly attribute DOMString documentURI;
   [Pure]
   readonly attribute DOMString compatMode;
@@ -53,7 +53,7 @@ interface Document : Node {
   Element? getElementById(DOMString elementId);
 
   [NewObject, Throws]
-  Element createElement(DOMString localName, optional ElementCreationOptions options);
+  Element createElement(DOMString localName, optional (ElementCreationOptions or DOMString) options);
   [NewObject, Throws]
   Element createElementNS(DOMString? namespace, DOMString qualifiedName, optional ElementCreationOptions options);
   [NewObject]
@@ -278,9 +278,7 @@ partial interface Document {
 // http://dvcs.w3.org/hg/webperf/raw-file/tip/specs/PageVisibility/Overview.html#sec-document-interface
 partial interface Document {
   readonly attribute boolean hidden;
-  readonly attribute boolean mozHidden;
   readonly attribute VisibilityState visibilityState;
-  readonly attribute VisibilityState mozVisibilityState;
 };
 
 // http://dev.w3.org/csswg/cssom/#extensions-to-the-document-interface

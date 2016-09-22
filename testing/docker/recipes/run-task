@@ -19,11 +19,17 @@ import argparse
 import datetime
 import errno
 import grp
+import json
 import os
 import pwd
 import re
+import stat
 import subprocess
 import sys
+import urllib2
+
+
+FINGERPRINT_URL = 'http://taskcluster/secrets/v1/secret/project/taskcluster/gecko/hgfingerprint'
 
 
 def print_line(prefix, m):
@@ -88,8 +94,28 @@ def vcs_checkout(args):
         print('revision is not specified for checkout')
         sys.exit(1)
 
+    # Obtain certificate fingerprints.
+    try:
+        print_line(b'vcs', 'fetching hg.mozilla.org fingerprint from %s\n' %
+                   FINGERPRINT_URL)
+        res = urllib2.urlopen(FINGERPRINT_URL, timeout=10)
+        secret = res.read()
+    except urllib2.URLError as e:
+        print('error retrieving hg fingerprint: %s' % e)
+        sys.exit(1)
+
+    try:
+        secret = json.loads(secret, encoding='utf-8')
+    except ValueError:
+        print('invalid JSON in hg fingerprint secret')
+        sys.exit(1)
+
+    hgmo_fingerprint = secret['secret']['fingerprints'].encode('ascii')
+
     res = run_and_prefix_output(b'vcs', [
-        b'/usr/bin/hg', b'robustcheckout',
+        b'/usr/bin/hg',
+        b'--config', b'hostsecurity.hg.mozilla.org:fingerprints=%s' % hgmo_fingerprint,
+        b'robustcheckout',
         b'--sharebase', b'/home/worker/hg-shared',
         b'--purge',
         b'--upstream', base_repo,
@@ -131,6 +157,13 @@ def main(args):
     parser = argparse.ArgumentParser()
     parser.add_argument('--user', default='worker', help='user to run as')
     parser.add_argument('--group', default='worker', help='group to run as')
+    # We allow paths to be chowned by the --user:--group before permissions are
+    # dropped. This is often necessary for caches/volumes, since they default
+    # to root:root ownership.
+    parser.add_argument('--chown', action='append',
+                        help='Directory to chown to --user:--group')
+    parser.add_argument('--chown-recursive', action='append',
+                        help='Directory to recursively chown to --user:--group')
     parser.add_argument('--vcs-checkout',
                         help='Directory where Gecko checkout should be created')
 
@@ -154,6 +187,36 @@ def main(args):
 
     # Find all groups to which this user is a member.
     gids = [g.gr_gid for g in grp.getgrall() if args.group in g.gr_mem]
+
+    wanted_dir_mode = stat.S_IXUSR | stat.S_IRUSR | stat.S_IWUSR
+    def set_dir_permissions(path, uid, gid):
+        st = os.lstat(path)
+
+        if st.st_uid != uid or st.st_gid != gid:
+            os.chown(path, uid, gid)
+
+        # Also make sure dirs are writable in case we need to delete
+        # them.
+        if st.st_mode & wanted_dir_mode != wanted_dir_mode:
+            os.chmod(path, st.st_mode | wanted_dir_mode)
+
+    # Change ownership of requested paths.
+    # FUTURE: parse argument values for user/group if we don't want to
+    # use --user/--group.
+    for path in args.chown or []:
+        print_line(b'chown', b'changing ownership of %s to %s:%s\n' % (
+                   path, user.pw_name, group.gr_name))
+        set_dir_permissions(path, uid, gid)
+
+    for path in args.chown_recursive or []:
+        print_line(b'chown', b'recursively changing ownership of %s to %s:%s\n' %
+                   (path, user.pw_name, group.gr_name))
+        for root, dirs, files in os.walk(path):
+            for d in dirs:
+                set_dir_permissions(os.path.join(root, d), uid, gid)
+
+            for f in files:
+                os.chown(os.path.join(root, f), uid, gid)
 
     checkout = args.vcs_checkout
     if checkout:

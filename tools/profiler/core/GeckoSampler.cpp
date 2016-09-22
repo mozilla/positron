@@ -45,7 +45,7 @@
 #endif
 
 #if defined(SPS_OS_android) && !defined(MOZ_WIDGET_GONK)
-  #include "AndroidBridge.h"
+  #include "FennecJNIWrappers.h"
 #endif
 
 #ifndef SPS_STANDALONE
@@ -469,10 +469,10 @@ void BuildJavaThreadJSObject(SpliceableJSONWriter& aWriter)
       bool firstRun = true;
       // for each frame
       for (int frameId = 0; true; frameId++) {
-        nsCString result;
-        bool hasFrame = AndroidBridge::Bridge()->GetFrameNameJavaProfiling(0, sampleId, frameId, result);
+        jni::String::LocalRef frameName =
+            java::GeckoJavaSampler::GetFrameName(0, sampleId, frameId);
         // when we run out of frames, we stop looping
-        if (!hasFrame) {
+        if (!frameName) {
           // if we found at least one frame, we have objects to close
           if (!firstRun) {
               aWriter.EndArray();
@@ -494,7 +494,8 @@ void BuildJavaThreadJSObject(SpliceableJSONWriter& aWriter)
         }
         // add a frame to the sample
         aWriter.StartObjectElement();
-          aWriter.StringProperty("location", result.BeginReading());
+          aWriter.StringProperty("location",
+                                 frameName->ToCString().BeginReading());
         aWriter.EndObject();
       }
       // if we found no frames for this sample, we are done
@@ -666,19 +667,22 @@ void addPseudoEntry(volatile StackEntry &entry, ThreadProfile &aProfile,
     addDynamicTag(aProfile, 'c', sampleLabel);
 #ifndef SPS_STANDALONE
     if (entry.isJs()) {
-      if (!entry.pc()) {
-        // The JIT only allows the top-most entry to have a nullptr pc
-        MOZ_ASSERT(&entry == &stack->mStack[stack->stackSize() - 1]);
-        // If stack-walking was disabled, then that's just unfortunate
-        if (lastpc) {
-          jsbytecode *jspc = js::ProfilingGetPC(stack->mContext, entry.script(),
-                                                lastpc);
-          if (jspc) {
-            lineno = JS_PCToLineNumber(entry.script(), jspc);
+      JSScript* script = entry.script();
+      if (script) {
+        if (!entry.pc()) {
+          // The JIT only allows the top-most entry to have a nullptr pc
+          MOZ_ASSERT(&entry == &stack->mStack[stack->stackSize() - 1]);
+          // If stack-walking was disabled, then that's just unfortunate
+          if (lastpc) {
+            jsbytecode *jspc = js::ProfilingGetPC(stack->mContext, script,
+                                                  lastpc);
+            if (jspc) {
+              lineno = JS_PCToLineNumber(script, jspc);
+            }
           }
+        } else {
+          lineno = JS_PCToLineNumber(script, entry.pc());
         }
-      } else {
-        lineno = JS_PCToLineNumber(entry.script(), entry.pc());
       }
     } else {
       lineno = entry.line();
@@ -781,7 +785,7 @@ void mergeStacksIntoProfile(ThreadProfile& aProfile, TickSample* aSample, Native
           mozilla::Maybe<JS::ProfilingFrameIterator::Frame> frame =
             jsIter.getPhysicalFrameWithoutLabel();
           if (frame.isSome())
-            jsFrames[jsCount++] = frame.value();
+            jsFrames[jsCount++] = mozilla::Move(frame.ref());
         }
       }
     }
@@ -891,7 +895,7 @@ void mergeStacksIntoProfile(ThreadProfile& aProfile, TickSample* aSample, Native
       // with stale JIT code return addresses.
       if (aSample->isSamplingCurrentThread ||
           jsFrame.kind == JS::ProfilingFrameIterator::Frame_AsmJS) {
-        addDynamicTag(aProfile, 'c', jsFrame.label);
+        addDynamicTag(aProfile, 'c', jsFrame.label.get());
       } else {
         MOZ_ASSERT(jsFrame.kind == JS::ProfilingFrameIterator::Frame_Ion ||
                    jsFrame.kind == JS::ProfilingFrameIterator::Frame_Baseline);

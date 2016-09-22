@@ -44,12 +44,6 @@
       </popupnotificationcontent>
     </popupnotification>
 
-    <popupnotification id="pointerLock-notification" hidden="true">
-      <popupnotificationcontent orient="vertical" align="start">
-        <label id="pointerLock-cancel">&pointerLock.notification.message;</label>
-      </popupnotificationcontent>
-    </popupnotification>
-
     <popupnotification id="password-notification" hidden="true">
       <popupnotificationcontent orient="vertical">
         <textbox id="password-notification-username"/>
@@ -58,22 +52,6 @@
       </popupnotificationcontent>
     </popupnotification>
 
-    <stack id="login-fill-doorhanger" hidden="true">
-      <vbox id="login-fill-mainview">
-        <description id="login-fill-testing"
-                     value="Thanks for testing the login fill doorhanger!"/>
-        <textbox id="login-fill-filter"/>
-        <richlistbox id="login-fill-list"/>
-      </vbox>
-      <vbox id="login-fill-clickcapturer"/>
-      <vbox id="login-fill-details">
-        <textbox id="login-fill-username" readonly="true"/>
-        <textbox id="login-fill-password" type="password" disabled="true"/>
-        <hbox>
-          <button id="login-fill-use" label="Use in form"/>
-        </hbox>
-      </vbox>
-    </stack>
 
     <popupnotification id="addon-progress-notification" hidden="true">
       <popupnotificationcontent orient="vertical">

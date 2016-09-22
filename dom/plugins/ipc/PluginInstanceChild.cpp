@@ -63,6 +63,7 @@ using namespace std;
 #include "mozilla/widget/WinModifierKeyState.h"
 #include "mozilla/widget/WinNativeEventData.h"
 #include "nsWindowsDllInterceptor.h"
+#include "X11UndefineNone.h"
 
 typedef BOOL (WINAPI *User32TrackPopupMenu)(HMENU hMenu,
                                             UINT uFlags,
@@ -140,7 +141,7 @@ PluginInstanceChild::PluginInstanceChild(const NPPluginFuncs* aPluginIface,
     , mMode(aMode)
     , mNames(aNames)
     , mValues(aValues)
-#if defined(XP_DARWIN)
+#if defined(XP_DARWIN) || defined (XP_WIN)
     , mContentsScaleFactor(1.0)
 #endif
     , mPostingKeyEvents(0)
@@ -222,6 +223,11 @@ PluginInstanceChild::~PluginInstanceChild()
     NS_ASSERTION(!mPluginWindowHWND, "Destroying PluginInstanceChild without NPP_Destroy?");
     if (GetQuirks() & QUIRK_UNITY_FIXUP_MOUSE_CAPTURE) {
         ClearUnityHooks();
+    }
+    // In the event that we registered for audio device changes, stop.
+    PluginModuleChild* chromeInstance = PluginModuleChild::GetChrome();
+    if (chromeInstance) {
+      NPError rv = chromeInstance->PluginRequiresAudioDeviceChanges(this, false);
     }
 #endif
 #if defined(MOZ_WIDGET_COCOA)
@@ -533,12 +539,14 @@ PluginInstanceChild::NPN_GetValue(NPNVariable aVar,
         return NPERR_NO_ERROR;
     }
 #endif /* NP_NO_QUICKDRAW */
+#endif /* XP_MACOSX */
 
+#if defined(XP_MACOSX) || defined(XP_WIN)
     case NPNVcontentsScaleFactor: {
         *static_cast<double*>(aValue) = mContentsScaleFactor;
         return NPERR_NO_ERROR;
     }
-#endif /* XP_MACOSX */
+#endif /* defined(XP_MACOSX) || defined(XP_WIN) */
 
     case NPNVCSSZoomFactor: {
         *static_cast<double*>(aValue) = mCSSZoomFactor;
@@ -680,6 +688,23 @@ PluginInstanceChild::NPN_SetValue(NPPVariable aVar, void* aValue)
         }
         return rv;
     }
+
+#ifdef XP_WIN
+    case NPPVpluginRequiresAudioDeviceChanges: {
+      // Many other NPN_SetValue variables are forwarded to our
+      // PluginInstanceParent, which runs on a content process.  We
+      // instead forward this message to the PluginModuleParent, which runs
+      // on the chrome process.  This is because our audio
+      // API calls should run the chrome proc, not content.
+      NPError rv = NPERR_GENERIC_ERROR;
+      PluginModuleChild* chromeInstance = PluginModuleChild::GetChrome();
+      if (chromeInstance) {
+        rv = chromeInstance->PluginRequiresAudioDeviceChanges(this,
+                                              (NPBool)(intptr_t)aValue);
+      }
+      return rv;
+    }
+#endif
 
     default:
         MOZ_LOG(GetPluginLog(), LogLevel::Warning,
@@ -853,6 +878,18 @@ PluginInstanceChild::AnswerNPP_SetValue_NPNVmuteAudioBool(const bool& value,
     return true;
 }
 
+#if defined(XP_WIN)
+NPError
+PluginInstanceChild::DefaultAudioDeviceChanged(NPAudioDeviceChangeDetails& details)
+{
+    if (!mPluginIface->setvalue) {
+        return NPERR_GENERIC_ERROR;
+    }
+    return mPluginIface->setvalue(GetNPP(), NPNVaudioDeviceChangeDetails, (void*)&details);
+}
+#endif
+
+
 bool
 PluginInstanceChild::AnswerNPP_HandleEvent(const NPRemoteEvent& event,
                                            int16_t* handled)
@@ -870,12 +907,6 @@ PluginInstanceChild::AnswerNPP_HandleEvent(const NPRemoteEvent& event,
 #ifdef XP_MACOSX
     // Mac OS X does not define an NPEvent structure. It defines more specific types.
     NPCocoaEvent evcopy = event.event;
-    // event.contentsScaleFactor <= 0 is a signal we shouldn't use it,
-    // for example when AnswerNPP_HandleEvent() is called from elsewhere
-    // in the child process (not via rpc code from the parent process).
-    if (event.contentsScaleFactor > 0) {
-      mContentsScaleFactor = event.contentsScaleFactor;
-    }
 
     // Make sure we reset mCurrentEvent in case of an exception
     AutoRestore<const NPCocoaEvent*> savePreviousEvent(mCurrentEvent);
@@ -885,6 +916,15 @@ PluginInstanceChild::AnswerNPP_HandleEvent(const NPRemoteEvent& event,
 #else
     // Make a copy since we may modify values.
     NPEvent evcopy = event.event;
+#endif
+
+#if defined(XP_MACOSX) || defined(XP_WIN)
+    // event.contentsScaleFactor <= 0 is a signal we shouldn't use it,
+    // for example when AnswerNPP_HandleEvent() is called from elsewhere
+    // in the child process (not via rpc code from the parent process).
+    if (event.contentsScaleFactor > 0) {
+      mContentsScaleFactor = event.contentsScaleFactor;
+    }
 #endif
 
 #ifdef OS_WIN
@@ -1132,17 +1172,19 @@ PluginInstanceChild::RecvWindowPosChanged(const NPRemoteEvent& event)
 bool
 PluginInstanceChild::RecvContentsScaleFactorChanged(const double& aContentsScaleFactor)
 {
-#ifdef XP_MACOSX
+#if defined(XP_MACOSX) || defined(XP_WIN)
     mContentsScaleFactor = aContentsScaleFactor;
+#if defined(XP_MACOSX)
     if (mShContext) {
         // Release the shared context so that it is reallocated
         // with the new size. 
         ::CGContextRelease(mShContext);
         mShContext = nullptr;
     }
+#endif
     return true;
 #else
-    NS_RUNTIMEABORT("ContentsScaleFactorChanged is an OSX-only message");
+    NS_RUNTIMEABORT("ContentsScaleFactorChanged is an Windows or OSX only message");
     return false;
 #endif
 }
@@ -1282,7 +1324,7 @@ PluginInstanceChild::AnswerNPP_SetWindow(const NPRemoteWindow& aWindow)
             }
         }
 
-        if (aWindow.visualID != None
+        if (aWindow.visualID != X11None
             && gtk_check_version(2, 12, 10) != nullptr) { // older
             // Workaround for a bug in Gtk+ (prior to 2.12.10) where deleting
             // a foreign GdkColormap will also free the XColormap.
@@ -1337,6 +1379,7 @@ PluginInstanceChild::AnswerNPP_SetWindow(const NPRemoteWindow& aWindow)
           mWindow.width = aWindow.width;
           mWindow.height = aWindow.height;
           mWindow.type = aWindow.type;
+          mContentsScaleFactor = aWindow.contentsScaleFactor;
 
           if (mPluginIface->setwindow) {
               SetProp(mPluginWindowHWND, kPluginIgnoreSubclassProperty, (HANDLE)1);
@@ -1677,7 +1720,8 @@ PluginInstanceChild::PluginWindowProcInternal(HWND hWnd,
             // If this gets focus, ensure that there is no pending key events.
             // Even if there were, we should ignore them for performance reason.
             // Although, such case shouldn't occur.
-            NS_WARN_IF(self->mPostingKeyEvents > 0);
+            NS_WARNING_ASSERTION(self->mPostingKeyEvents == 0,
+                                 "pending events");
             self->mPostingKeyEvents = 0;
             self->mLastKeyEventConsumed = false;
             break;
@@ -3327,7 +3371,7 @@ PluginInstanceChild::DoAsyncSetWindow(const gfxSurfaceType& aSurfaceType,
     mWindow.height = aWindow.height;
     mWindow.clipRect = aWindow.clipRect;
     mWindow.type = aWindow.type;
-#ifdef XP_MACOSX
+#if defined(XP_MACOSX) || defined(XP_WIN)
     mContentsScaleFactor = aWindow.contentsScaleFactor;
 #endif
 
@@ -3355,7 +3399,6 @@ PluginInstanceChild::CreateOptSurface(void)
                "Need a valid surface type here");
     NS_ASSERTION(!mCurrentSurface, "mCurrentSurfaceActor can get out of sync.");
 
-    RefPtr<gfxASurface> retsurf;
     // Use an opaque surface unless we're transparent and *don't* have
     // a background to source from.
     gfxImageFormat format =
@@ -3581,7 +3624,9 @@ PluginInstanceChild::EnsureCurrentBuffer(void)
 void
 PluginInstanceChild::UpdateWindowAttributes(bool aForceSetWindow)
 {
+#if defined(MOZ_X11) || defined(XP_WIN)
     RefPtr<gfxASurface> curSurface = mHelperSurface ? mHelperSurface : mCurrentSurface;
+#endif // Only used within MOZ_X11 or XP_WIN blocks. Unused variable otherwise
     bool needWindowUpdate = aForceSetWindow;
 #ifdef MOZ_X11
     Visual* visual = nullptr;
@@ -3785,9 +3830,13 @@ PluginInstanceChild::PaintRectToSurface(const nsIntRect& aRect,
         // Copy helper surface content to target
         dt = CreateDrawTargetForSurface(aSurface);
       }
-      RefPtr<SourceSurface> surface =
-        gfxPlatform::GetSourceSurfaceForSurface(dt, renderSurface);
-      dt->CopySurface(surface, aRect, aRect.TopLeft());
+      if (dt && dt->IsValid()) {
+          RefPtr<SourceSurface> surface =
+              gfxPlatform::GetSourceSurfaceForSurface(dt, renderSurface);
+          dt->CopySurface(surface, aRect, aRect.TopLeft());
+      } else {
+          gfxWarning() << "PluginInstanceChild::PaintRectToSurface failure";
+      }
     }
 }
 

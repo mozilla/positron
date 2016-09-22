@@ -127,7 +127,7 @@ static const size_t gStackChunkSize = 8192;
 
 /*
  * Note: This limit should match the stack limit set by the browser in
- *       js/xpconnect/src/XPCJSRuntime.cpp
+ *       js/xpconnect/src/XPCJSContext.cpp
  */
 #if defined(MOZ_ASAN) || (defined(DEBUG) && !defined(XP_WIN))
 static const size_t gMaxStackSize = 2 * 128 * sizeof(size_t) * 1024;
@@ -878,6 +878,30 @@ SetPromiseRejectionTrackerCallback(JSContext* cx, unsigned argc, Value* vp)
     return true;
 }
 
+#ifdef ENABLE_INTL_API
+static bool
+AddIntlExtras(JSContext* cx, unsigned argc, Value* vp)
+{
+    CallArgs args = CallArgsFromVp(argc, vp);
+    if (!args.get(0).isObject()) {
+        JS_ReportError(cx, "addIntlExtras must be passed an object");
+        return false;
+    }
+    JS::RootedObject intl(cx, &args[0].toObject());
+
+    static const JSFunctionSpec funcs[] = {
+        JS_SELF_HOSTED_FN("getCalendarInfo", "Intl_getCalendarInfo", 1, 0),
+        JS_FS_END
+    };
+
+    if (!JS_DefineFunctions(cx, intl, funcs))
+        return false;
+
+    args.rval().setUndefined();
+    return true;
+}
+#endif // ENABLE_INTL_API
+
 static bool
 EvalAndPrint(JSContext* cx, const char* bytes, size_t length,
              int lineno, bool compileOnly)
@@ -1056,6 +1080,12 @@ Version(JSContext* cx, unsigned argc, Value* vp)
     return true;
 }
 
+#ifdef XP_WIN
+#  define GET_FD_FROM_FILE(a) int(_get_osfhandle(fileno(a)))
+#else
+#  define GET_FD_FROM_FILE(a) fileno(a)
+#endif
+
 static bool
 CreateMappedArrayBuffer(JSContext* cx, unsigned argc, Value* vp)
 {
@@ -1123,7 +1153,7 @@ CreateMappedArrayBuffer(JSContext* cx, unsigned argc, Value* vp)
         size = st.st_size - offset;
     }
 
-    void* contents = JS_CreateMappedArrayBufferContents(fileno(file), offset, size);
+    void* contents = JS_CreateMappedArrayBufferContents(GET_FD_FROM_FILE(file), offset, size);
     if (!contents) {
         JS_ReportError(cx, "failed to allocate mapped array buffer contents (possibly due to bad alignment)");
         return false;
@@ -1136,6 +1166,8 @@ CreateMappedArrayBuffer(JSContext* cx, unsigned argc, Value* vp)
     args.rval().setObject(*obj);
     return true;
 }
+
+#undef GET_FD_FROM_FILE
 
 static bool
 AddPromiseReactions(JSContext* cx, unsigned argc, Value* vp)
@@ -4428,11 +4460,6 @@ NewGlobal(JSContext* cx, unsigned argc, Value* vp)
         if (v.isBoolean())
             creationOptions.setCloneSingletons(v.toBoolean());
 
-        if (!JS_GetProperty(cx, opts, "experimentalDateTimeFormatFormatToPartsEnabled", &v))
-            return false;
-        if (v.isBoolean())
-            creationOptions.setExperimentalDateTimeFormatFormatToPartsEnabled(v.toBoolean());
-
         if (!JS_GetProperty(cx, opts, "sameZoneAs", &v))
             return false;
         if (v.isObject())
@@ -4653,7 +4680,8 @@ SingleStepCallback(void* arg, jit::Simulator* sim, void* pc)
                 if (!stack.append(",", 1))
                     oomUnsafe.crash("stack.append");
             }
-            if (!stack.append(frames[i].label, strlen(frames[i].label)))
+            auto chars = frames[i].label.get();
+            if (!stack.append(chars, strlen(chars)))
                 oomUnsafe.crash("stack.append");
             frameNo++;
         }
@@ -5800,6 +5828,16 @@ static const JSFunctionSpecWithHelp shell_functions[] = {
 "Sets the callback to be invoked whenever a Promise rejection is unhandled\n"
 "or a previously-unhandled rejection becomes handled."),
 
+#ifdef ENABLE_INTL_API
+    JS_FN_HELP("addIntlExtras", AddIntlExtras, 1, 0,
+"addIntlExtras(obj)",
+"Adds various not-yet-standardized Intl functions as properties on the\n"
+"provided object (this should generally be Intl itself).  The added\n"
+"functions and their behavior are experimental: don't depend upon them\n"
+"unless you're willing to update your code if these experimental APIs change\n"
+"underneath you."),
+#endif // ENABLE_INTL_API
+
     JS_FS_HELP_END
 };
 
@@ -6326,8 +6364,10 @@ static const JSJitInfo doFoo_methodinfo = {
 static const JSPropertySpec dom_props[] = {
     {"x",
      JSPROP_SHARED | JSPROP_ENUMERATE,
-     { { dom_genericGetter, &dom_x_getterinfo } },
-     { { dom_genericSetter, &dom_x_setterinfo } }
+     { {
+        { { dom_genericGetter, &dom_x_getterinfo } },
+        { { dom_genericSetter, &dom_x_setterinfo } }
+     } },
     },
     JS_PS_END
 };
@@ -7583,7 +7623,7 @@ main(int argc, char** argv, char** envp)
     JS_SetSecurityCallbacks(cx, &ShellPrincipals::securityCallbacks);
     JS_InitDestroyPrincipalsCallback(cx, ShellPrincipals::destroy);
 
-    JS_SetInterruptCallback(cx, ShellInterruptCallback);
+    JS_AddInterruptCallback(cx, ShellInterruptCallback);
     JS::SetBuildIdOp(cx, ShellBuildId);
     JS::SetAsmJSCacheOps(cx, &asmJSCacheOps);
 

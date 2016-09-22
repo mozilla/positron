@@ -190,7 +190,7 @@ FrameIterator::functionDisplayAtom() const
 
     MOZ_ASSERT(codeRange_);
 
-    JSAtom* atom = code_->getFuncAtom(cx, codeRange_->funcIndex());
+    JSAtom* atom = code_->getFuncDefAtom(cx, codeRange_->funcDefIndex());
     if (!atom) {
         cx->clearPendingException();
         return cx->names().empty;
@@ -385,12 +385,12 @@ wasm::GenerateFunctionPrologue(MacroAssembler& masm, unsigned framePushed, const
         Register scratch = WasmTableCallScratchReg;
         masm.loadWasmGlobalPtr(sigId.globalDataOffset(), scratch);
         masm.branch32(Assembler::Condition::NotEqual, WasmTableCallSigReg, scratch,
-                      JumpTarget::BadIndirectCall);
+                      JumpTarget::IndirectCallBadSig);
         break;
       }
       case SigIdDesc::Kind::Immediate:
         masm.branch32(Assembler::Condition::NotEqual, WasmTableCallSigReg, Imm32(sigId.immediate()),
-                      JumpTarget::BadIndirectCall);
+                      JumpTarget::IndirectCallBadSig);
         break;
       case SigIdDesc::Kind::None:
         break;
@@ -779,7 +779,7 @@ ProfilingFrameIterator::label() const
     }
 
     switch (codeRange_->kind()) {
-      case CodeRange::Function:         return code_->profilingLabel(codeRange_->funcIndex());
+      case CodeRange::Function:         return code_->profilingLabel(codeRange_->funcDefIndex());
       case CodeRange::Entry:            return "entry trampoline (in asm.js)";
       case CodeRange::ImportJitExit:    return importJitDescription;
       case CodeRange::ImportInterpExit: return importInterpDescription;

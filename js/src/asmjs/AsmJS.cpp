@@ -66,6 +66,22 @@ using JS::AsmJSOption;
 using JS::GenericNaN;
 
 /*****************************************************************************/
+
+// The asm.js valid heap lengths are precisely the WASM valid heap lengths for ARM
+// greater or equal to MinHeapLength
+static const size_t MinHeapLength = PageSize;
+
+static uint32_t
+RoundUpToNextValidAsmJSHeapLength(uint32_t length)
+{
+    if (length <= MinHeapLength)
+        return MinHeapLength;
+
+    return wasm::RoundUpToNextValidARMImmediate(length);
+}
+
+
+/*****************************************************************************/
 // asm.js module object
 
 // The asm.js spec recognizes this set of builtin Math functions.
@@ -270,6 +286,7 @@ struct AsmJSMetadataCacheablePod
     uint32_t                numFFIs;
     uint32_t                srcLength;
     uint32_t                srcLengthWithRightBrace;
+    bool                    usesSimd;
 
     AsmJSMetadataCacheablePod() { PodZero(this); }
 };
@@ -337,8 +354,10 @@ struct js::AsmJSMetadata : Metadata, AsmJSMetadataCacheablePod
     ScriptSource* maybeScriptSource() const override {
         return scriptSource.get();
     }
-    bool getFuncName(JSContext* cx, const Bytes*, uint32_t funcIndex, TwoByteName* name) const override {
-        const char* p = asmJSFuncNames[funcIndex].get();
+    bool getFuncDefName(JSContext* cx, const Bytes*, uint32_t funcDefIndex,
+                        TwoByteName* name) const override
+    {
+        const char* p = asmJSFuncNames[funcDefIndex].get();
         UTF8Chars utf8(p, strlen(p));
 
         size_t twoByteLength;
@@ -781,7 +800,7 @@ ParseVarOrConstStatement(AsmJSParser& parser, ParseNode** var)
         return true;
     }
 
-    *var = parser.statement(YieldIsName);
+    *var = parser.statementListItem(YieldIsName);
     if (!*var)
         return false;
 
@@ -1588,6 +1607,7 @@ class MOZ_STACK_CLASS ModuleValidator
     ImportMap             importMap_;
     ArrayViewVector       arrayViews_;
     bool                  atomicsPresent_;
+    bool                  simdPresent_;
 
     // State used to build the AsmJSModule in finish():
     ModuleGenerator       mg_;
@@ -1667,6 +1687,7 @@ class MOZ_STACK_CLASS ModuleValidator
         importMap_(cx),
         arrayViews_(cx),
         atomicsPresent_(false),
+        simdPresent_(false),
         mg_(ImportVector()),
         errorString_(nullptr),
         errorOffset_(UINT32_MAX),
@@ -1772,10 +1793,10 @@ class MOZ_STACK_CLASS ModuleValidator
         if (!args.initFromContext(cx_, Move(scriptedCaller)))
             return false;
 
-        auto genData = MakeUnique<ModuleGeneratorData>(args.assumptions.usesSignal, ModuleKind::AsmJS);
+        auto genData = MakeUnique<ModuleGeneratorData>(ModuleKind::AsmJS);
         if (!genData ||
             !genData->sigs.resize(MaxSigs) ||
-            !genData->funcSigs.resize(MaxFuncs) ||
+            !genData->funcDefSigs.resize(MaxFuncs) ||
             !genData->funcImports.resize(MaxImports) ||
             !genData->tables.resize(MaxTables) ||
             !genData->asmJSSigToTableIndex.resize(MaxSigs))
@@ -1967,6 +1988,9 @@ class MOZ_STACK_CLASS ModuleValidator
     bool addAtomicsBuiltinFunction(PropertyName* var, AsmJSAtomicsBuiltinFunction func,
                                    PropertyName* field)
     {
+        if (!JitOptions.asmJSAtomicsEnable)
+            return failCurrentOffset("asm.js Atomics only enabled in wasm test mode");
+
         atomicsPresent_ = true;
 
         UniqueChars fieldChars = StringToNewUTF8CharsZ(cx_, *field);
@@ -1985,6 +2009,8 @@ class MOZ_STACK_CLASS ModuleValidator
         return asmJSMetadata_->asmJSGlobals.append(Move(g));
     }
     bool addSimdCtor(PropertyName* var, SimdType type, PropertyName* field) {
+        simdPresent_ = true;
+
         UniqueChars fieldChars = StringToNewUTF8CharsZ(cx_, *field);
         if (!fieldChars)
             return false;
@@ -2001,6 +2027,8 @@ class MOZ_STACK_CLASS ModuleValidator
         return asmJSMetadata_->asmJSGlobals.append(Move(g));
     }
     bool addSimdOperation(PropertyName* var, SimdType type, SimdOperation op, PropertyName* field) {
+        simdPresent_ = true;
+
         UniqueChars fieldChars = StringToNewUTF8CharsZ(cx_, *field);
         if (!fieldChars)
             return false;
@@ -2065,8 +2093,8 @@ class MOZ_STACK_CLASS ModuleValidator
             return false;
 
         // Declare which function is exported which gives us an index into the
-        // module FuncExportVector.
-        if (!mg_.addFuncExport(Move(fieldChars), func.index()))
+        // module FuncDefExportVector.
+        if (!mg_.addFuncDefExport(Move(fieldChars), mg_.numFuncImports() + func.index()))
             return false;
 
         // The exported function might have already been exported in which case
@@ -2082,7 +2110,7 @@ class MOZ_STACK_CLASS ModuleValidator
         uint32_t funcIndex = numFunctions();
         if (funcIndex >= MaxFuncs)
             return failCurrentOffset("too many functions");
-        mg_.initFuncSig(funcIndex, sigIndex);
+        mg_.initFuncDefSig(funcIndex, sigIndex);
         Global* global = validationLifo_.new_<Global>(Global::Function);
         if (!global)
             return false;
@@ -2278,6 +2306,8 @@ class MOZ_STACK_CLASS ModuleValidator
     SharedModule finish() {
         if (!arrayViews_.empty())
             mg_.initMemoryUsage(atomicsPresent_ ? MemoryUsage::Shared : MemoryUsage::Unshared);
+
+        asmJSMetadata_->usesSimd = simdPresent_;
 
         MOZ_ASSERT(asmJSMetadata_->asmJSFuncNames.empty());
         for (const Func* func : functions_) {
@@ -4656,7 +4686,7 @@ CheckFunctionSignature(ModuleValidator& m, ParseNode* usepn, Sig&& sig, Property
         return m.addFunction(name, usepn->pn_pos.begin, Move(sig), func);
     }
 
-    if (!CheckSignatureAgainstExisting(m, usepn, sig, m.mg().funcSig(existing->index())))
+    if (!CheckSignatureAgainstExisting(m, usepn, sig, m.mg().funcDefSig(existing->index())))
         return false;
 
     *func = existing;
@@ -5559,12 +5589,10 @@ CheckSimdOperationCall(FunctionValidator& f, ParseNode* call, const ModuleValida
       case SimdOperation::Fn_load:
       case SimdOperation::Fn_load1:
       case SimdOperation::Fn_load2:
-      case SimdOperation::Fn_load3:
         return CheckSimdLoad(f, call, opType, op, type);
       case SimdOperation::Fn_store:
       case SimdOperation::Fn_store1:
       case SimdOperation::Fn_store2:
-      case SimdOperation::Fn_store3:
         return CheckSimdStore(f, call, opType, op, type);
 
       case SimdOperation::Fn_select:
@@ -5577,6 +5605,10 @@ CheckSimdOperationCall(FunctionValidator& f, ParseNode* call, const ModuleValida
         return CheckSimdAllTrue(f, call, opType, type);
       case SimdOperation::Fn_anyTrue:
         return CheckSimdAnyTrue(f, call, opType, type);
+
+      case SimdOperation::Fn_load3:
+      case SimdOperation::Fn_store3:
+        return f.fail(call, "asm.js does not support 3-element SIMD loads or stores");
 
       case SimdOperation::Constructor:
         MOZ_CRASH("constructors are handled in CheckSimdCtorCall");
@@ -6934,20 +6966,15 @@ ParseFunction(ModuleValidator& m, ParseNode** fnOut, unsigned* line)
     tokenStream.consumeKnownToken(TOK_FUNCTION, TokenStream::Operand);
     *line = tokenStream.srcCoords.lineNum(tokenStream.currentToken().pos.end);
 
-    RootedPropertyName name(m.cx());
-
     TokenKind tk;
     if (!tokenStream.getToken(&tk, TokenStream::Operand))
         return false;
-    if (tk == TOK_NAME) {
-        name = tokenStream.currentName();
-    } else if (tk == TOK_YIELD) {
-        if (!m.parser().checkYieldNameValidity())
-            return false;
-        name = m.cx()->names().yield;
-    } else {
+    if (tk != TOK_NAME && tk != TOK_YIELD)
         return false;  // The regular parser will throw a SyntaxError, no need to m.fail.
-    }
+
+    RootedPropertyName name(m.cx(), m.parser().bindingIdentifier(YieldIsName));
+    if (!name)
+        return false;
 
     ParseNode* fn = m.parser().handler.newFunctionDefinition();
     if (!fn)
@@ -7100,7 +7127,7 @@ CheckFuncPtrTable(ModuleValidator& m, ParseNode* var)
         if (!func)
             return m.fail(elem, "function-pointer table's elements must be names of functions");
 
-        const Sig& funcSig = m.mg().funcSig(func->index());
+        const Sig& funcSig = m.mg().funcDefSig(func->index());
         if (sig) {
             if (*sig != funcSig)
                 return m.fail(elem, "all functions in table must have same signature");
@@ -7206,7 +7233,7 @@ CheckModuleReturn(ModuleValidator& m)
     }
     ts.ungetToken();
 
-    ParseNode* returnStmt = m.parser().statement(YieldIsName);
+    ParseNode* returnStmt = m.parser().statementListItem(YieldIsName);
     if (!returnStmt)
         return false;
 
@@ -7805,12 +7832,25 @@ CheckBuffer(JSContext* cx, const AsmJSMetadata& metadata, HandleValue bufferVal,
     }
 
     if (buffer->is<ArrayBufferObject>()) {
-        Rooted<ArrayBufferObject*> abheap(cx, &buffer->as<ArrayBufferObject>());
-        bool useSignalHandlers = metadata.assumptions.usesSignal.forOOB;
-        if (!ArrayBufferObject::prepareForAsmJS(cx, abheap, useSignalHandlers))
+        // On 64-bit, bounds checks are statically removed so the huge guard
+        // region is always necessary. On 32-bit, allocating a guard page
+        // requires reallocating the incoming ArrayBuffer which could trigger
+        // OOM. Thus, only ask for a guard page when SIMD is used since SIMD
+        // allows unaligned memory access (see MaxMemoryAccessSize comment);
+#ifdef WASM_HUGE_MEMORY
+        bool needGuard = true;
+#else
+        bool needGuard = metadata.usesSimd;
+#endif
+        Rooted<ArrayBufferObject*> arrayBuffer(cx, &buffer->as<ArrayBufferObject>());
+        if (!ArrayBufferObject::prepareForAsmJS(cx, arrayBuffer, needGuard))
             return LinkFail(cx, "Unable to prepare ArrayBuffer for asm.js use");
+    } else {
+        if (!buffer->as<SharedArrayBufferObject>().isPreparedForAsmJS())
+            return LinkFail(cx, "SharedArrayBuffer must be created with wasm test mode enabled");
     }
 
+    MOZ_ASSERT(buffer->isPreparedForAsmJS());
     return true;
 }
 
@@ -8505,6 +8545,9 @@ BuildConsoleMessage(ExclusiveContext* cx, unsigned time, JS::AsmJSCacheResult ca
       case JS::AsmJSCache_InternalError:
         cacheString = "unable to store in cache due to internal error (consider filing a bug)";
         break;
+      case JS::AsmJSCache_Disabled_PrivateBrowsing:
+        cacheString = "caching disabled by private browsing mode";
+        break;
       case JS::AsmJSCache_LIMIT:
         MOZ_CRASH("bad AsmJSCacheResult");
         break;
@@ -8780,7 +8823,7 @@ js::AsmJSFunctionToString(JSContext* cx, HandleFunction fun)
     MOZ_ASSERT(IsAsmJSFunction(fun));
 
     const AsmJSMetadata& metadata = ExportedFunctionToInstance(fun).metadata().asAsmJS();
-    const AsmJSExport& f = metadata.lookupAsmJSExport(ExportedFunctionToIndex(fun));
+    const AsmJSExport& f = metadata.lookupAsmJSExport(ExportedFunctionToDefinitionIndex(fun));
 
     uint32_t begin = metadata.srcStart + f.startOffsetInModule();
     uint32_t end = metadata.srcStart + f.endOffsetInModule();
@@ -8817,39 +8860,11 @@ js::AsmJSFunctionToString(JSContext* cx, HandleFunction fun)
     return out.finishString();
 }
 
-/*****************************************************************************/
-// asm.js heap
-
-static const size_t MinHeapLength = PageSize;
-
-// From the asm.js spec Linking section:
-//  the heap object's byteLength must be either
-//    2^n for n in [12, 24)
-//  or
-//    2^24 * n for n >= 1.
-
 bool
 js::IsValidAsmJSHeapLength(uint32_t length)
 {
-    bool valid = length >= MinHeapLength &&
-                 (IsPowerOfTwo(length) ||
-                  (length & 0x00ffffff) == 0);
+    if (length < MinHeapLength)
+        return false;
 
-    MOZ_ASSERT_IF(valid, length % PageSize == 0);
-    MOZ_ASSERT_IF(valid, length == RoundUpToNextValidAsmJSHeapLength(length));
-
-    return valid;
-}
-
-uint32_t
-js::RoundUpToNextValidAsmJSHeapLength(uint32_t length)
-{
-    if (length <= MinHeapLength)
-        return MinHeapLength;
-
-    if (length <= 16 * 1024 * 1024)
-        return mozilla::RoundUpPow2(length);
-
-    MOZ_ASSERT(length <= 0xff000000);
-    return (length + 0x00ffffff) & ~0x00ffffff;
+    return wasm::IsValidARMImmediate(length);
 }

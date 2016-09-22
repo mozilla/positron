@@ -171,6 +171,10 @@ ChromeProcessController::HandleTap(TapType aType,
     return;
   }
 
+  if (!mAPZEventState) {
+    return;
+  }
+
   nsCOMPtr<nsIPresShell> presShell = GetPresShell();
   if (!presShell) {
     return;
@@ -193,7 +197,7 @@ ChromeProcessController::HandleTap(TapType aType,
         aInputBlockId);
     break;
   case TapType::eLongTapUp:
-    mAPZEventState->ProcessLongTapUp();
+    mAPZEventState->ProcessLongTapUp(presShell, point, scale, aModifiers);
     break;
   case TapType::eSentinel:
     // Should never happen, but we need to handle this case branch for the
@@ -214,6 +218,10 @@ ChromeProcessController::NotifyAPZStateChange(const ScrollableLayerGuid& aGuid,
                        APZStateChange,
                        int>(this, &ChromeProcessController::NotifyAPZStateChange,
                             aGuid, aChange, aArg));
+    return;
+  }
+
+  if (!mAPZEventState) {
     return;
   }
 

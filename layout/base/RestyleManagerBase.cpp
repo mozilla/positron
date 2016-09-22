@@ -570,9 +570,9 @@ RecomputePosition(nsIFrame* aFrame)
     parentReflowInput.mCBReflowInput = cbReflowInput.ptr();
   }
 
-  NS_WARN_IF_FALSE(parentSize.ISize(parentWM) != NS_INTRINSICSIZE &&
-                   parentSize.BSize(parentWM) != NS_INTRINSICSIZE,
-                   "parentSize should be valid");
+  NS_WARNING_ASSERTION(parentSize.ISize(parentWM) != NS_INTRINSICSIZE &&
+                       parentSize.BSize(parentWM) != NS_INTRINSICSIZE,
+                       "parentSize should be valid");
   parentReflowInput.SetComputedISize(std::max(parentSize.ISize(parentWM), 0));
   parentReflowInput.SetComputedBSize(std::max(parentSize.BSize(parentWM), 0));
   parentReflowInput.ComputedPhysicalMargin().SizeTo(0, 0, 0, 0);
@@ -661,25 +661,34 @@ static bool
 FrameHasPositionedPlaceholderDescendants(nsIFrame* aFrame,
                                          uint32_t aPositionMask)
 {
-  const nsIFrame::ChildListIDs skip(nsIFrame::kAbsoluteList |
-                                    nsIFrame::kFixedList);
+  MOZ_ASSERT(aPositionMask & (1 << NS_STYLE_POSITION_FIXED));
+
   for (nsIFrame::ChildListIterator lists(aFrame); !lists.IsDone(); lists.Next()) {
-    if (!skip.Contains(lists.CurrentID())) {
-      for (nsIFrame* f : lists.CurrentList()) {
-        if (f->GetType() == nsGkAtoms::placeholderFrame) {
-          nsIFrame* outOfFlow =
-            nsPlaceholderFrame::GetRealFrameForPlaceholder(f);
-          // If SVG text frames could appear here, they could confuse us since
-          // they ignore their position style ... but they can't.
-          NS_ASSERTION(!outOfFlow->IsSVGText(),
-                       "SVG text frames can't be out of flow");
-          if (aPositionMask & (1 << outOfFlow->StyleDisplay()->mPosition)) {
-            return true;
-          }
-        }
-        if (FrameHasPositionedPlaceholderDescendants(f, aPositionMask)) {
+    for (nsIFrame* f : lists.CurrentList()) {
+      if (f->GetType() == nsGkAtoms::placeholderFrame) {
+        nsIFrame* outOfFlow =
+          nsPlaceholderFrame::GetRealFrameForPlaceholder(f);
+        // If SVG text frames could appear here, they could confuse us since
+        // they ignore their position style ... but they can't.
+        NS_ASSERTION(!outOfFlow->IsSVGText(),
+                     "SVG text frames can't be out of flow");
+        if (aPositionMask & (1 << outOfFlow->StyleDisplay()->mPosition)) {
           return true;
         }
+      }
+      uint32_t positionMask = aPositionMask;
+      // Is it faster to check aPositionMask & (1 << NS_STYLE_POSITION_ABSOLUTE)
+      // before we check IsAbsPosContainingBlock?  Not clear....
+      if (f->IsAbsPosContainingBlock()) {
+        if (f->IsFixedPosContainingBlock()) {
+          continue;
+        }
+        // We don't care about absolutely positioned things inside f, because
+        // they will still use f as their containing block.
+        positionMask = (1 << NS_STYLE_POSITION_FIXED);
+      }
+      if (FrameHasPositionedPlaceholderDescendants(f, positionMask)) {
+        return true;
       }
     }
   }

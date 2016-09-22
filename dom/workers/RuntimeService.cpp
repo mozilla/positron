@@ -28,7 +28,7 @@
 #include "jsfriendapi.h"
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/Atomics.h"
-#include "mozilla/CycleCollectedJSRuntime.h"
+#include "mozilla/CycleCollectedJSContext.h"
 #include "mozilla/Telemetry.h"
 #include "mozilla/TimeStamp.h"
 #include "mozilla/dom/asmjscache/AsmJSCache.h"
@@ -245,29 +245,24 @@ GetWorkerPref(const nsACString& aPref,
   return result;
 }
 
-// This function creates a key for a SharedWorker composed by "name|scriptSpec".
-// If the name contains a '|', this will be replaced by '||'.
+// This fn creates a key for a SharedWorker that contains the name, script
+// spec, and the serialized origin attributes:
+// "name|scriptSpec^key1=val1&key2=val2&key3=val3"
 void
-GenerateSharedWorkerKey(const nsACString& aScriptSpec, const nsACString& aName,
-                        bool aPrivateBrowsing, nsCString& aKey)
+GenerateSharedWorkerKey(const nsACString& aScriptSpec,
+                        const nsACString& aName,
+                        const PrincipalOriginAttributes& aAttrs,
+                        nsCString& aKey)
 {
+  nsAutoCString suffix;
+  aAttrs.CreateSuffix(suffix);
+
   aKey.Truncate();
-  aKey.SetCapacity(aScriptSpec.Length() + aName.Length() + 3);
-  aKey.Append(aPrivateBrowsing ? "1|" : "0|");
-
-  nsACString::const_iterator start, end;
-  aName.BeginReading(start);
-  aName.EndReading(end);
-  for (; start != end; ++start) {
-    if (*start == '|') {
-      aKey.AppendASCII("||");
-    } else {
-      aKey.Append(*start);
-    }
-  }
-
+  aKey.SetCapacity(aName.Length() + aScriptSpec.Length() + suffix.Length() + 2);
+  aKey.Append(aName);
   aKey.Append('|');
   aKey.Append(aScriptSpec);
+  aKey.Append(suffix);
 }
 
 void
@@ -892,11 +887,11 @@ FinishAsyncTaskCallback(JS::AsyncTask* aTask)
   return true;
 }
 
-class WorkerJSRuntime;
+class WorkerJSContext;
 
 class WorkerThreadContextPrivate : private PerThreadAtomCache
 {
-  friend class WorkerJSRuntime;
+  friend class WorkerJSContext;
 
   WorkerPrivate* mWorkerPrivate;
 
@@ -994,7 +989,7 @@ InitJSContextForWorker(WorkerPrivate* aWorkerPrivate, JSContext* aWorkerCx)
     return false;
   }
 
-  JS_SetInterruptCallback(aWorkerCx, InterruptCallback);
+  JS_AddInterruptCallback(aWorkerCx, InterruptCallback);
 
   js::SetCTypesActivityCallback(aWorkerCx, CTypesActivityCallback);
 
@@ -1043,18 +1038,18 @@ static const JSWrapObjectCallbacks WrapObjectCallbacks = {
   nullptr,
 };
 
-class WorkerJSRuntime : public mozilla::CycleCollectedJSRuntime
+class MOZ_STACK_CLASS WorkerJSContext final : public mozilla::CycleCollectedJSContext
 {
 public:
   // The heap size passed here doesn't matter, we will change it later in the
   // call to JS_SetGCParameter inside InitJSContextForWorker.
-  explicit WorkerJSRuntime(WorkerPrivate* aWorkerPrivate)
+  explicit WorkerJSContext(WorkerPrivate* aWorkerPrivate)
     : mWorkerPrivate(aWorkerPrivate)
   {
     MOZ_ASSERT(aWorkerPrivate);
   }
 
-  ~WorkerJSRuntime()
+  ~WorkerJSContext()
   {
     JSContext* cx = MaybeContext();
     if (!cx) {
@@ -1078,7 +1073,7 @@ public:
   nsresult Initialize(JSContext* aParentContext)
   {
     nsresult rv =
-      CycleCollectedJSRuntime::Initialize(aParentContext,
+      CycleCollectedJSContext::Initialize(aParentContext,
                                           WORKER_DEFAULT_RUNTIME_HEAPSIZE,
                                           WORKER_DEFAULT_NURSERY_SIZE);
      if (NS_WARN_IF(NS_FAILED(rv))) {
@@ -1142,7 +1137,10 @@ public:
     // Only perform the Promise microtask checkpoint on the outermost event
     // loop.  Don't run it, for example, during sync XHR or importScripts.
     if (aRecursionDepth == 2) {
-      CycleCollectedJSRuntime::AfterProcessTask(aRecursionDepth);
+      CycleCollectedJSContext::AfterProcessTask(aRecursionDepth);
+    } else if (aRecursionDepth > 2) {
+      AutoDisableMicroTaskCheckpoint disableMicroTaskCheckpoint;
+      CycleCollectedJSContext::AfterProcessTask(aRecursionDepth);
     }
   }
 
@@ -1434,7 +1432,9 @@ GetWorkerPrivateFromContext(JSContext* aCx)
   MOZ_ASSERT(aCx);
 
   void* cxPrivate = JS_GetContextPrivate(aCx);
-  MOZ_ASSERT(cxPrivate);
+  if (!cxPrivate) {
+    return nullptr;
+  }
 
   return
     static_cast<WorkerThreadContextPrivate*>(cxPrivate)->GetWorkerPrivate();
@@ -1445,16 +1445,22 @@ GetCurrentThreadWorkerPrivate()
 {
   MOZ_ASSERT(!NS_IsMainThread());
 
-  CycleCollectedJSRuntime* ccrt = CycleCollectedJSRuntime::Get();
-  if (!ccrt) {
+  CycleCollectedJSContext* ccjscx = CycleCollectedJSContext::Get();
+  if (!ccjscx) {
     return nullptr;
   }
 
-  JSContext* cx = ccrt->Context();
+  JSContext* cx = ccjscx->Context();
   MOZ_ASSERT(cx);
 
   void* cxPrivate = JS_GetContextPrivate(cx);
-  MOZ_ASSERT(cxPrivate);
+  if (!cxPrivate) {
+    // This can happen if the nsCycleCollector_shutdown() in ~WorkerJSContext()
+    // triggers any calls to GetCurrentThreadWorkerPrivate().  At this stage
+    // CycleCollectedJSContext::Get() will still return a context, but
+    // the context private has already been cleared.
+    return nullptr;
+  }
 
   return
     static_cast<WorkerThreadContextPrivate*>(cxPrivate)->GetWorkerPrivate();
@@ -1630,7 +1636,7 @@ RuntimeService::RegisterWorker(WorkerPrivate* aWorkerPrivate)
       const nsCString& sharedWorkerName = aWorkerPrivate->WorkerName();
       nsAutoCString key;
       GenerateSharedWorkerKey(sharedWorkerScriptSpec, sharedWorkerName,
-                              aWorkerPrivate->IsInPrivateBrowsing(), key);
+                              aWorkerPrivate->GetOriginAttributes(), key);
       MOZ_ASSERT(!domainInfo->mSharedWorkerInfos.Get(key));
 
       SharedWorkerInfo* sharedWorkerInfo =
@@ -1707,7 +1713,7 @@ RuntimeService::RemoveSharedWorker(WorkerDomainInfo* aDomainInfo,
 #ifdef DEBUG
       nsAutoCString key;
       GenerateSharedWorkerKey(data->mScriptSpec, data->mName,
-                              aWorkerPrivate->IsInPrivateBrowsing(), key);
+                              aWorkerPrivate->GetOriginAttributes(), key);
       MOZ_ASSERT(iter.Key() == key);
 #endif
       iter.Remove();
@@ -1872,7 +1878,7 @@ RuntimeService::ScheduleWorker(WorkerPrivate* aWorkerPrivate)
     NS_WARNING("Could not set the thread's priority!");
   }
 
-  JSContext* cx = CycleCollectedJSRuntime::Get()->Context();
+  JSContext* cx = CycleCollectedJSContext::Get()->Context();
   nsCOMPtr<nsIRunnable> runnable =
     new WorkerThreadPrimaryRunnable(aWorkerPrivate, thread,
                                     JS_GetParentContext(cx));
@@ -2092,7 +2098,7 @@ RuntimeService::Shutdown()
   mShuttingDown = true;
 
   nsCOMPtr<nsIObserverService> obs = services::GetObserverService();
-  NS_WARN_IF_FALSE(obs, "Failed to get observer service?!");
+  NS_WARNING_ASSERTION(obs, "Failed to get observer service?!");
 
   // Tell anyone that cares that they're about to lose worker support.
   if (obs && NS_FAILED(obs->NotifyObservers(nullptr, WORKERS_SHUTDOWN_TOPIC,
@@ -2129,7 +2135,7 @@ RuntimeService::Cleanup()
   AssertIsOnMainThread();
 
   nsCOMPtr<nsIObserverService> obs = services::GetObserverService();
-  NS_WARN_IF_FALSE(obs, "Failed to get observer service?!");
+  NS_WARNING_ASSERTION(obs, "Failed to get observer service?!");
 
   if (mIdleThreadTimer) {
     if (NS_FAILED(mIdleThreadTimer->Cancel())) {
@@ -2423,9 +2429,10 @@ RuntimeService::CreateSharedWorkerFromLoadInfo(JSContext* aCx,
     nsresult rv = aLoadInfo->mResolvedScriptURI->GetSpec(scriptSpec);
     NS_ENSURE_SUCCESS(rv, rv);
 
+    MOZ_ASSERT(aLoadInfo->mPrincipal);
     nsAutoCString key;
     GenerateSharedWorkerKey(scriptSpec, aName,
-                            aLoadInfo->mPrivateBrowsing, key);
+        BasePrincipal::Cast(aLoadInfo->mPrincipal)->OriginAttributesRef(), key);
 
     if (mDomainMap.Get(aLoadInfo->mDomain, &domainInfo) &&
         domainInfo->mSharedWorkerInfos.Get(key, &sharedWorkerInfo)) {
@@ -2821,17 +2828,17 @@ WorkerThreadPrimaryRunnable::Run()
   {
     nsCycleCollector_startup();
 
-    WorkerJSRuntime runtime(mWorkerPrivate);
-    nsresult rv = runtime.Initialize(mParentContext);
+    WorkerJSContext context(mWorkerPrivate);
+    nsresult rv = context.Initialize(mParentContext);
     if (NS_WARN_IF(NS_FAILED(rv))) {
       return rv;
     }
 
-    JSContext* cx = runtime.Context();
+    JSContext* cx = context.Context();
 
     if (!InitJSContextForWorker(mWorkerPrivate, cx)) {
       // XXX need to fire an error at parent.
-      NS_ERROR("Failed to create runtime and context!");
+      NS_ERROR("Failed to create context!");
       return NS_ERROR_FAILURE;
     }
 
@@ -2878,7 +2885,7 @@ WorkerThreadPrimaryRunnable::Run()
     // cleanup.
     mWorkerPrivate->ClearMainEventQueue(WorkerPrivate::WorkerRan);
 
-    // Now WorkerJSRuntime goes out of scope and its destructor will shut
+    // Now WorkerJSContext goes out of scope and its destructor will shut
     // down the cycle collector. This breaks any remaining cycles and collects
     // any remaining C++ objects.
   }

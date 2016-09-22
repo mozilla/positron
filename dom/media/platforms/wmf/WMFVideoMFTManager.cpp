@@ -91,6 +91,7 @@ WMFVideoMFTManager::WMFVideoMFTManager(
   , mNullOutputCount(0)
   , mGotValidOutputAfterNullOutput(false)
   , mGotExcessiveNullOutput(false)
+  , mIsValid(true)
   // mVideoStride, mVideoWidth, mVideoHeight, mUseHwAccel are initialized in
   // Init().
 {
@@ -371,8 +372,32 @@ WMFVideoMFTManager::InitializeDXVA(bool aForceD3D9)
 }
 
 bool
+WMFVideoMFTManager::ValidateVideoInfo()
+{
+  // The WMF H.264 decoder is documented to have a minimum resolution
+  // 48x48 pixels. We've observed the decoder working for output smaller than
+  // that, but on some output it hangs in IMFTransform::ProcessOutput(), so
+  // we just reject streams which are less than the documented minimum.
+  // https://msdn.microsoft.com/en-us/library/windows/desktop/dd797815(v=vs.85).aspx
+  static const int32_t MIN_H264_FRAME_DIMENSION = 48;
+  if (mStreamType == H264 &&
+      (mVideoInfo.mImage.width < MIN_H264_FRAME_DIMENSION ||
+       mVideoInfo.mImage.height < MIN_H264_FRAME_DIMENSION)) {
+    LogToBrowserConsole(NS_LITERAL_STRING(
+      "Can't decode H.264 stream with width or height less than 48 pixels."));
+    mIsValid = false;
+  }
+
+  return mIsValid;
+}
+
+bool
 WMFVideoMFTManager::Init()
 {
+  if (!ValidateVideoInfo()) {
+    return false;
+  }
+
   bool success = InitInternal(/* aForceD3D9 = */ false);
 
   if (success && mDXVA2Manager) {
@@ -427,7 +452,7 @@ WMFVideoMFTManager::InitInternal(bool aForceD3D9)
       if (SUCCEEDED(hr)) {
         mUseHwAccel = true;
       } else {
-        mDXVA2Manager = nullptr;
+        DeleteOnMainThread(mDXVA2Manager);
         mDXVAFailureReason = nsPrintfCString("MFT_MESSAGE_SET_D3D_MANAGER failed with code %X", hr);
       }
     }
@@ -484,6 +509,10 @@ WMFVideoMFTManager::SetDecoderMediaTypes()
 HRESULT
 WMFVideoMFTManager::Input(MediaRawData* aSample)
 {
+  if (!mIsValid) {
+    return E_FAIL;
+  }
+
   if (!mDecoder) {
     // This can happen during shutdown.
     return E_FAIL;
@@ -496,6 +525,8 @@ WMFVideoMFTManager::Input(MediaRawData* aSample)
   NS_ENSURE_TRUE(SUCCEEDED(hr) && mLastInput != nullptr, hr);
 
   mLastDuration = aSample->mDuration;
+  mLastTime = aSample->mTime;
+  mSamplesCount++;
 
   // Forward sample data to the decoder.
   return mDecoder->Input(mLastInput);
@@ -803,6 +834,15 @@ WMFVideoMFTManager::Output(int64_t aStreamOffset,
   HRESULT hr;
   aOutData = nullptr;
   int typeChangeCount = 0;
+  bool wasDraining = mDraining;
+  int64_t sampleCount = mSamplesCount;
+  if (wasDraining) {
+    mSamplesCount = 0;
+    mDraining = false;
+  }
+
+  media::TimeUnit pts;
+  media::TimeUnit duration;
 
   // Loop until we decode a sample, or an unexpected error that we can't
   // handle occurs.
@@ -844,12 +884,21 @@ WMFVideoMFTManager::Output(int64_t aStreamOffset,
         }
         continue;
       }
+      pts = GetSampleTime(sample);
+      duration = GetSampleDuration(sample);
+      if (!pts.IsValid() || !duration.IsValid()) {
+        return E_FAIL;
+      }
+      if (wasDraining && sampleCount == 1 && pts == media::TimeUnit()) {
+        // WMF is unable to calculate a duration if only a single sample
+        // was parsed. Additionally, the pts always comes out at 0 under those
+        // circumstances.
+        // Seeing that we've only fed the decoder a single frame, the pts
+        // and duration are known, it's of the last sample.
+        pts = media::TimeUnit::FromMicroseconds(mLastTime);
+        duration = media::TimeUnit::FromMicroseconds(mLastDuration);
+      }
       if (mSeekTargetThreshold.isSome()) {
-        media::TimeUnit pts = GetSampleTime(sample);
-		media::TimeUnit duration = GetSampleDuration(sample);
-        if (!pts.IsValid() || !duration.IsValid()) {
-          return E_FAIL;
-        }
         if ((pts + duration) < mSeekTargetThreshold.ref()) {
           LOG("Dropping video frame which pts is smaller than seek target.");
           // It is necessary to clear the pointer to release the previous output
@@ -878,6 +927,9 @@ WMFVideoMFTManager::Output(int64_t aStreamOffset,
   NS_ENSURE_TRUE(frame, E_FAIL);
 
   aOutData = frame;
+  // Set the potentially corrected pts and duration.
+  aOutData->mTime = pts.ToMicroseconds();
+  aOutData->mDuration = duration.ToMicroseconds();
 
   if (mNullOutputCount) {
     mGotValidOutputAfterNullOutput = true;
@@ -906,6 +958,7 @@ WMFVideoMFTManager::ConfigurationChanged(const TrackInfo& aConfig)
   MOZ_ASSERT(aConfig.GetAsVideoInfo());
   mVideoInfo = *aConfig.GetAsVideoInfo();
   mImageSize = mVideoInfo.mImage;
+  ValidateVideoInfo();
 }
 
 } // namespace mozilla

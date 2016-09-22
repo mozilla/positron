@@ -38,6 +38,7 @@
 #include "mozilla/dom/XMLHttpRequest.h"
 #include "mozilla/dom/XMLHttpRequestBinding.h"
 #include "mozilla/dom/XMLHttpRequestEventTarget.h"
+#include "mozilla/dom/XMLHttpRequestString.h"
 
 #ifdef Status
 /* Xlib headers insist on this for some reason... Nuke it because
@@ -58,6 +59,7 @@ class BlobSet;
 class FormData;
 class URLSearchParams;
 class XMLHttpRequestUpload;
+struct OriginAttributesDictionary;
 
 // A helper for building up an ArrayBuffer object's data
 // before creating the ArrayBuffer itself.  Will do doubling
@@ -247,9 +249,15 @@ public:
 
   virtual void
   Open(const nsACString& aMethod, const nsAString& aUrl, bool aAsync,
-       const Optional<nsAString>& aUser,
-       const Optional<nsAString>& aPassword,
+       const nsAString& aUsername, const nsAString& aPassword,
        ErrorResult& aRv) override;
+
+  nsresult
+  Open(const nsACString& aMethod,
+       const nsACString& aUrl,
+       bool aAsync,
+       const nsAString& aUsername,
+       const nsAString& aPassword);
 
   virtual void
   SetRequestHeader(const nsACString& aName, const nsACString& aValue,
@@ -468,6 +476,10 @@ public:
   virtual void
   GetResponseText(nsAString& aResponseText, ErrorResult& aRv) override;
 
+  void
+  GetResponseText(XMLHttpRequestStringSnapshot& aSnapshot,
+                  ErrorResult& aRv);
+
   virtual nsIDocument*
   GetResponseXML(ErrorResult& aRv) override;
 
@@ -537,6 +549,10 @@ public:
   {
     return sDontWarnAboutSyncXHR;
   }
+
+  virtual void
+  SetOriginAttributes(const mozilla::dom::OriginAttributesDictionary& aAttrs) override;
+
 protected:
   // XHR states are meant to mirror the XHR2 spec:
   //   https://xhr.spec.whatwg.org/#states
@@ -568,6 +584,8 @@ protected:
   already_AddRefed<nsIHttpChannel> GetCurrentHttpChannel();
   already_AddRefed<nsIJARChannel> GetCurrentJARChannel();
 
+  void TruncateResponseText();
+
   bool IsSystemXHR() const;
   bool InUploadPhase() const;
 
@@ -578,12 +596,6 @@ protected:
   void StopProgressEventTimer();
 
   nsresult OnRedirectVerifyCallback(nsresult result);
-
-  nsresult OpenInternal(const nsACString& aMethod,
-                        const nsACString& aUrl,
-                        const Optional<bool>& aAsync,
-                        const Optional<nsAString>& aUsername,
-                        const Optional<nsAString>& aPassword);
 
   already_AddRefed<nsXMLHttpRequestXPCOMifier> EnsureXPCOMifier();
 
@@ -623,7 +635,7 @@ protected:
   // lazily decode into this from mResponseBody only when .responseText is
   // accessed.
   // Only used for DEFAULT and TEXT responseTypes.
-  nsString mResponseText;
+  XMLHttpRequestString mResponseText;
 
   // For DEFAULT responseType we use this to keep track of how far we've
   // lazily decoded from mResponseBody to mResponseText
@@ -638,6 +650,8 @@ protected:
   nsCOMPtr<nsIUnicodeDecoder> mDecoder;
 
   nsCString mResponseCharset;
+
+  void MatchCharsetAndDecoderToResponseDocument();
 
   XMLHttpRequestResponseType mResponseType;
 
@@ -689,6 +703,14 @@ protected:
   // late, and ensure the XHR only handles one in-flight request at once.
   bool mFlagSend;
 
+  // Before ProgressEvents were a thing, multiple readystatechange events were
+  // fired during the loading state to give sites a way to monitor XHR progress.
+  // The XHR spec now has proper progress events and dictates that only one
+  // "loading" readystatechange should be fired per send. However, it's possible
+  // that some content still relies on this old behavior, so we're keeping it
+  // (behind a preference) for now. See bug 918719.
+  bool mSendExtraLoadingEvents;
+
   RefPtr<XMLHttpRequestUpload> mUpload;
   int64_t mUploadTransferred;
   int64_t mUploadTotal;
@@ -703,6 +725,7 @@ protected:
   void HandleTimeoutCallback();
 
   bool mErrorLoad;
+  bool mErrorParsingXML;
   bool mWaitingForOnStopRequest;
   bool mProgressTimerIsActive;
   bool mIsHtml;

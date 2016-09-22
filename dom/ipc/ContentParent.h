@@ -10,6 +10,7 @@
 #include "mozilla/dom/PContentParent.h"
 #include "mozilla/dom/nsIContentParent.h"
 #include "mozilla/gfx/gfxVarReceiver.h"
+#include "mozilla/gfx/GPUProcessListener.h"
 #include "mozilla/ipc/GeckoChildProcessHost.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/FileUtils.h"
@@ -92,6 +93,7 @@ class ContentParent final : public PContentParent
                           , public nsIDOMGeoPositionErrorCallback
                           , public gfx::gfxVarReceiver
                           , public mozilla::LinkedListElement<ContentParent>
+                          , public gfx::GPUProcessListener
 {
   typedef mozilla::ipc::GeckoChildProcessHost GeckoChildProcessHost;
   typedef mozilla::ipc::OptionalURIParams OptionalURIParams;
@@ -563,6 +565,9 @@ public:
 
   virtual int32_t Pid() const override;
 
+  // Use the PHangMonitor channel to ask the child to repaint a tab.
+  void ForceTabPaint(TabParent* aTabParent, uint64_t aLayerObserverEpoch);
+
 protected:
   void OnChannelConnected(int32_t pid) override;
 
@@ -571,6 +576,7 @@ protected:
   bool ShouldContinueFromReplyTimeout() override;
 
   void OnVarChanged(const GfxVarUpdate& aVar) override;
+  void OnCompositorUnexpectedShutdown() override;
 
 private:
   static nsDataHashtable<nsStringHashKey, ContentParent*> *sAppContentParents;
@@ -1013,8 +1019,6 @@ private:
                                              const bool& aContentOrNormalChannel,
                                              const bool& aAnyChannel) override;
 
-  virtual bool RecvGetSystemMemory(const uint64_t& getterId) override;
-
   virtual bool RecvGetLookAndFeelCache(nsTArray<LookAndFeelInt>* aLookAndFeelIntCache) override;
 
   virtual bool RecvSpeakerManagerGetSpeakerStatus(bool* aValue) override;
@@ -1136,6 +1140,10 @@ private:
 
   virtual bool RecvDeleteGetFilesRequest(const nsID& aID) override;
 
+  virtual bool RecvAccumulateChildHistogram(
+                  InfallibleTArray<Accumulation>&& aAccumulations) override;
+  virtual bool RecvAccumulateChildKeyedHistogram(
+                  InfallibleTArray<KeyedAccumulation>&& aAccumulations) override;
 public:
   void SendGetFilesResponseAndForget(const nsID& aID,
                                      const GetFilesResponseResult& aResult);

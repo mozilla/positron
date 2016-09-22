@@ -211,22 +211,23 @@ LIRGeneratorARM::lowerForALUInt64(LInstructionHelper<INT64_PIECES, 2 * INT64_PIE
 void
 LIRGeneratorARM::lowerForMulInt64(LMulI64* ins, MMul* mir, MDefinition* lhs, MDefinition* rhs)
 {
-    bool constantNeedTemp = true;
+    bool needsTemp = true;
+
     if (rhs->isConstant()) {
         int64_t constant = rhs->toConstant()->toInt64();
         int32_t shift = mozilla::FloorLog2(constant);
         // See special cases in CodeGeneratorARM::visitMulI64
         if (constant >= -1 && constant <= 2)
-            constantNeedTemp = false;
+            needsTemp = false;
         if (int64_t(1) << shift == constant)
-            constantNeedTemp = false;
+            needsTemp = false;
     }
 
     ins->setInt64Operand(0, useInt64RegisterAtStart(lhs));
-    ins->setInt64Operand(INT64_PIECES,
-                         lhs != rhs ? useInt64OrConstant(rhs) : useInt64OrConstantAtStart(rhs));
-    if (constantNeedTemp)
+    ins->setInt64Operand(INT64_PIECES, useInt64OrConstant(rhs));
+    if (needsTemp)
         ins->setTemp(0, temp());
+
     defineInt64ReuseInput(ins, mir, 0);
 }
 
@@ -608,17 +609,6 @@ LIRGeneratorARM::visitAsmJSUnsignedToFloat32(MAsmJSUnsignedToFloat32* ins)
 }
 
 void
-LIRGeneratorARM::visitWasmBoundsCheck(MWasmBoundsCheck* ins)
-{
-    MDefinition* input = ins->input();
-    MOZ_ASSERT(input->type() == MIRType::Int32);
-
-    LAllocation baseAlloc = useRegisterAtStart(input);
-    auto* lir = new(alloc()) LWasmBoundsCheck(baseAlloc);
-    add(lir, ins);
-}
-
-void
 LIRGeneratorARM::visitWasmLoad(MWasmLoad* ins)
 {
     MDefinition* base = ins->base();
@@ -722,9 +712,9 @@ LIRGeneratorARM::visitAsmJSLoadHeap(MAsmJSLoadHeap* ins)
 
     MDefinition* base = ins->base();
     MOZ_ASSERT(base->type() == MIRType::Int32);
-    LAllocation baseAlloc;
 
     // For the ARM it is best to keep the 'base' in a register if a bounds check is needed.
+    LAllocation baseAlloc;
     if (base->isConstant() && !ins->needsBoundsCheck()) {
         // A bounds check is only skipped for a positive index.
         MOZ_ASSERT(base->toConstant()->toInt32() >= 0);

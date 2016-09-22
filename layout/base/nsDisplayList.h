@@ -427,11 +427,6 @@ public:
    */
   bool IsIgnoringPaintSuppression() { return mIgnoreSuppression; }
   /**
-   * @return Returns if this builder had to ignore painting suppression on some
-   * document when building the display list.
-   */
-  bool GetHadToIgnorePaintSuppression() { return mHadToIgnoreSuppression; }
-  /**
    * Call this if we're doing normal painting to the window.
    */
   void SetPaintingToWindow(bool aToWindow) { mIsPaintingToWindow = aToWindow; }
@@ -1261,7 +1256,6 @@ private:
   bool                           mCurrentScrollbarWillHaveLayer;
   bool                           mBuildCaret;
   bool                           mIgnoreSuppression;
-  bool                           mHadToIgnoreSuppression;
   bool                           mIsAtRootOfPseudoStackingContext;
   bool                           mIncludeAllOutOfFlows;
   bool                           mDescendIntoSubdocuments;
@@ -2661,6 +2655,59 @@ private:
 };
 
 /**
+ * A display item that renders a solid color over a region. This is not
+ * exposed through CSS, its only purpose is efficient invalidation of
+ * the find bar highlighter dimmer.
+ */
+class nsDisplaySolidColorRegion : public nsDisplayItem {
+  typedef mozilla::gfx::Color Color;
+
+public:
+  nsDisplaySolidColorRegion(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame,
+                            const nsRegion& aRegion, nscolor aColor)
+    : nsDisplayItem(aBuilder, aFrame), mRegion(aRegion), mColor(Color::FromABGR(aColor))
+  {
+    NS_ASSERTION(NS_GET_A(aColor) > 0, "Don't create invisible nsDisplaySolidColorRegions!");
+    MOZ_COUNT_CTOR(nsDisplaySolidColorRegion);
+  }
+#ifdef NS_BUILD_REFCNT_LOGGING
+  virtual ~nsDisplaySolidColorRegion() {
+    MOZ_COUNT_DTOR(nsDisplaySolidColorRegion);
+  }
+#endif
+
+  virtual nsDisplayItemGeometry* AllocateGeometry(nsDisplayListBuilder* aBuilder) override
+  {
+    return new nsDisplaySolidColorRegionGeometry(this, aBuilder, mRegion, mColor);
+  }
+
+  virtual void ComputeInvalidationRegion(nsDisplayListBuilder* aBuilder,
+                                         const nsDisplayItemGeometry* aGeometry,
+                                         nsRegion* aInvalidRegion) override
+  {
+    const nsDisplaySolidColorRegionGeometry* geometry =
+      static_cast<const nsDisplaySolidColorRegionGeometry*>(aGeometry);
+    if (mColor == geometry->mColor) {
+      aInvalidRegion->Xor(geometry->mRegion, mRegion);
+    } else {
+      aInvalidRegion->Or(geometry->mRegion.GetBounds(), mRegion.GetBounds());
+    }
+  }
+
+protected:
+
+  virtual nsRect GetBounds(nsDisplayListBuilder* aBuilder, bool* aSnap) override;
+  virtual void Paint(nsDisplayListBuilder* aBuilder, nsRenderingContext* aCtx) override;
+  virtual void WriteDebugInfo(std::stringstream& aStream) override;
+
+  NS_DISPLAY_DECL_NAME("SolidColorRegion", TYPE_SOLID_COLOR_REGION)
+
+private:
+  nsRegion mRegion;
+  Color mColor;
+};
+
+/**
  * A display item to paint one background-image for a frame. Each background
  * image layer gets its own nsDisplayBackgroundImage.
  */
@@ -3788,18 +3835,14 @@ private:
   int32_t mAPD, mParentAPD;
 };
 
-/**
- * A display item to paint a stacking context with effects
- * set by the stacking context root frame's style.
- */
-class nsDisplaySVGEffects : public nsDisplayWrapList {
+class nsDisplaySVGEffects: public nsDisplayWrapList {
 public:
   nsDisplaySVGEffects(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame,
-                      nsDisplayList* aList, bool aOpacityItemCreated);
+                      nsDisplayList* aList, bool aHandleOpacity);
 #ifdef NS_BUILD_REFCNT_LOGGING
   virtual ~nsDisplaySVGEffects();
 #endif
-  
+
   virtual nsRegion GetOpaqueRegion(nsDisplayListBuilder* aBuilder,
                                    bool* aSnap) override;
   virtual void HitTest(nsDisplayListBuilder* aBuilder, const nsRect& aRect,
@@ -3810,22 +3853,10 @@ public:
     *aSnap = false;
     return mEffectsBounds + ToReferenceFrame();
   }
-  virtual nsRect GetComponentAlphaBounds(nsDisplayListBuilder* aBuilder) override;
-  virtual bool ComputeVisibility(nsDisplayListBuilder* aBuilder,
-                                 nsRegion* aVisibleRegion) override;
-  virtual bool TryMerge(nsDisplayItem* aItem) override;
+
   virtual bool ShouldFlattenAway(nsDisplayListBuilder* aBuilder) override {
     return false;
   }
-  NS_DISPLAY_DECL_NAME("SVGEffects", TYPE_SVG_EFFECTS)
-
-  virtual LayerState GetLayerState(nsDisplayListBuilder* aBuilder,
-                                   LayerManager* aManager,
-                                   const ContainerLayerParameters& aParameters) override;
- 
-  virtual already_AddRefed<Layer> BuildLayer(nsDisplayListBuilder* aBuilder,
-                                             LayerManager* aManager,
-                                             const ContainerLayerParameters& aContainerParameters) override;
 
   gfxRect BBoxInUserSpace() const;
   gfxPoint UserSpaceOffset() const;
@@ -3837,21 +3868,79 @@ public:
   virtual void ComputeInvalidationRegion(nsDisplayListBuilder* aBuilder,
                                          const nsDisplayItemGeometry* aGeometry,
                                          nsRegion* aInvalidRegion) override;
+protected:
+  bool ValidateSVGFrame();
 
-  void PaintAsLayer(nsDisplayListBuilder* aBuilder,
-                    nsRenderingContext* aCtx,
-                    LayerManager* aManager);
+  // relative to mFrame
+  nsRect mEffectsBounds;
+  // True if we need to handle css opacity in this display item.
+  bool mHandleOpacity;
+};
 
+/**
+ * A display item to paint a stacking context with mask and clip effects
+ * set by the stacking context root frame's style.
+ */
+class nsDisplayMask : public nsDisplaySVGEffects {
+public:
+  nsDisplayMask(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame,
+                      nsDisplayList* aList, bool aHandleOpacity);
+#ifdef NS_BUILD_REFCNT_LOGGING
+  virtual ~nsDisplayMask();
+#endif
+
+  NS_DISPLAY_DECL_NAME("Mask", TYPE_MASK)
+
+  virtual bool TryMerge(nsDisplayItem* aItem) override;
+  virtual already_AddRefed<Layer> BuildLayer(nsDisplayListBuilder* aBuilder,
+                                             LayerManager* aManager,
+                                             const ContainerLayerParameters& aContainerParameters) override;
+  virtual LayerState GetLayerState(nsDisplayListBuilder* aBuilder,
+                                   LayerManager* aManager,
+                                   const ContainerLayerParameters& aParameters) override;
+
+  virtual bool ComputeVisibility(nsDisplayListBuilder* aBuilder,
+                                 nsRegion* aVisibleRegion) override;
 #ifdef MOZ_DUMP_PAINTING
   void PrintEffects(nsACString& aTo);
 #endif
 
-private:
-  // relative to mFrame
-  nsRect mEffectsBounds;
-  // True if the caller also created an nsDisplayOpacity item, and we should tell
-  // PaintFramesWithEffects that it doesn't need to handle opacity itself.
-  bool mOpacityItemCreated;
+  void PaintAsLayer(nsDisplayListBuilder* aBuilder,
+                    nsRenderingContext* aCtx,
+                    LayerManager* aManager);
+};
+
+/**
+ * A display item to paint a stacking context with filter effects set by the
+ * stacking context root frame's style.
+ */
+class nsDisplayFilter : public nsDisplaySVGEffects {
+public:
+  nsDisplayFilter(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame,
+                  nsDisplayList* aList, bool aHandleOpacity);
+#ifdef NS_BUILD_REFCNT_LOGGING
+  virtual ~nsDisplayFilter();
+#endif
+
+  NS_DISPLAY_DECL_NAME("Filter", TYPE_FILTER)
+
+  virtual bool TryMerge(nsDisplayItem* aItem) override;
+  virtual already_AddRefed<Layer> BuildLayer(nsDisplayListBuilder* aBuilder,
+                                             LayerManager* aManager,
+                                             const ContainerLayerParameters& aContainerParameters) override;
+  virtual LayerState GetLayerState(nsDisplayListBuilder* aBuilder,
+                                   LayerManager* aManager,
+                                   const ContainerLayerParameters& aParameters) override;
+
+  virtual bool ComputeVisibility(nsDisplayListBuilder* aBuilder,
+                                 nsRegion* aVisibleRegion) override;
+#ifdef MOZ_DUMP_PAINTING
+  void PrintEffects(nsACString& aTo);
+#endif
+
+  void PaintAsLayer(nsDisplayListBuilder* aBuilder,
+                    nsRenderingContext* aCtx,
+                    LayerManager* aManager);
 };
 
 /* A display item that applies a transformation to all of its descendant

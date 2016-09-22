@@ -367,6 +367,7 @@ checkbox:-moz-focusring {
 }
 
 .devtools-button:hover:empty::before,
+.devtools-button.checked:empty::before,
 .devtools-button[checked]:empty::before,
 .devtools-button[open]:empty::before,
 .devtools-toolbarbutton:not([label]):hover > image,
@@ -378,6 +379,7 @@ checkbox:-moz-focusring {
 .devtools-button:disabled,
 .devtools-button[disabled],
 .devtools-toolbarbutton[disabled] {
+  pointer-events: none;
   opacity: 0.5 !important;
 }
 
@@ -397,29 +399,31 @@ checkbox:-moz-focusring {
 
 /* Text-only buttons */
 .theme-light .devtools-toolbarbutton[label]:not([text-as-image]):not([type=menu-button]),
-.theme-light .devtools-toolbarbutton[data-text-only] {
+.theme-light .devtools-toolbarbutton[data-text-only],
+.theme-light .devtools-button:not(:empty) {
   background-color: var(--toolbar-tab-hover);
 }
 .theme-dark .devtools-toolbarbutton[label]:not([text-as-image]):not([type=menu-button]),
-.theme-dark .devtools-toolbarbutton[data-text-only] {
+.theme-dark .devtools-toolbarbutton[data-text-only],
+.theme-dark .devtools-button:not(:empty) {
   background-color: rgba(0, 0, 0, .2); /* Splitter */
 }
 
 /* Text-only button states */
-.theme-dark .devtools-button:not(:empty):not([disabled]):hover,
+.theme-dark .devtools-button:not(:empty):not(:disabled):hover,
 .theme-dark .devtools-toolbarbutton:not(:-moz-any([checked=true],[disabled],[text-as-image]))[label]:hover {
   background: rgba(0, 0, 0, .3); /* Splitters */
 }
-.theme-light .devtools-button:not(:empty):not([disabled]):hover,
+.theme-light .devtools-button:not(:empty):not(:disabled):hover,
 .theme-light .devtools-toolbarbutton:not(:-moz-any([checked=true],[disabled],[text-as-image]))[label]:hover {
   background: rgba(170, 170, 170, .3); /* Splitters */
 }
 
-.theme-dark .devtools-button:not(:empty):not([disabled]):hover:active,
+.theme-dark .devtools-button:not(:empty):not(:disabled):hover:active,
 .theme-dark .devtools-toolbarbutton:not(:-moz-any([checked=true],[disabled],[text-as-image]))[label]:hover:active {
   background: rgba(0, 0, 0, .4); /* Splitters */
 }
-.theme-light .devtools-button:not(:empty):not([disabled]):hover:active,
+.theme-light .devtools-button:not(:empty):not(:disabled):hover:active,
 .theme-light .devtools-toolbarbutton:not(:-moz-any([checked=true],[disabled],[text-as-image]))[label]:hover:active {
   background: var(--toolbar-tab-hover-active);
 }
@@ -527,6 +531,15 @@ checkbox:-moz-focusring {
   font-size: inherit;
 }
 
+/*
+ * @TODO : has-clear-btn class was added for bug 1296187 and we should remove it
+ *  once we have a standardized search and filter input across the toolboxes.
+ */
+.has-clear-btn > .devtools-searchinput,
+.has-clear-btn > .devtools-filterinput {
+  padding-inline-end: 23px;
+}
+
 .devtools-searchinput {
   background-image: var(--magnifying-glass-image);
 }
@@ -547,8 +560,8 @@ checkbox:-moz-focusring {
   visibility: hidden;
 }
 
-.devtools-searchinput .textbox-input::-moz-placeholder,
-.devtools-filterinput .textbox-input::-moz-placeholder {
+.devtools-searchinput .textbox-input::placeholder,
+.devtools-filterinput .textbox-input::placeholder {
   font-style: normal;
 }
 
@@ -578,9 +591,9 @@ checkbox:-moz-focusring {
   margin-right: 0;
 }
 
-.devtools-searchbox > .devtools-textinput:-moz-focusring,
-.devtools-searchbox > .devtools-searchinput:-moz-focusring,
-.devtools-searchbox > .devtools-filterinput:-moz-focusring {
+.devtools-textinput:focus,
+.devtools-searchinput:focus,
+.devtools-filterinput:focus {
   border-color: var(--theme-focus-border-color-textbox);
   box-shadow: var(--theme-focus-box-shadow-textbox);
   transition: all 0.2s ease-in-out;
@@ -614,7 +627,6 @@ checkbox:-moz-focusring {
 .devtools-rule-searchbox[filled] {
   background-color: var(--searchbox-background-color);
   border-color: var(--searchbox-border-color);
-  padding-inline-end: 23px;
 }
 
 .devtools-style-searchbox-no-match {

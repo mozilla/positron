@@ -149,6 +149,8 @@ LayerTransactionParent::LayerTransactionParent(LayerManagerComposite* aManager,
   : mLayerManager(aManager)
   , mCompositorBridge(aBridge)
   , mId(aId)
+  , mChildEpoch(0)
+  , mParentEpoch(0)
   , mPendingTransaction(0)
   , mPendingCompositorUpdates(0)
   , mDestroyed(false)
@@ -270,6 +272,8 @@ LayerTransactionParent::RecvUpdate(InfallibleTArray<Edit>&& cset,
     return true;
   }
 
+  // This ensures that destroy operations are always processed. It is not safe
+  // to early-return from RecvUpdate without doing so.
   AutoLayerTransactionParentAsyncMessageSender autoAsyncMessageSender(this, &aToDestroy);
   EditReplyVector replyv;
 
@@ -708,6 +712,24 @@ LayerTransactionParent::RecvUpdate(InfallibleTArray<Edit>&& cset,
   }
 
   profiler_tracing("Paint", "LayerTransaction", TRACING_INTERVAL_END);
+  return true;
+}
+
+bool
+LayerTransactionParent::RecvSetLayerObserverEpoch(const uint64_t& aLayerObserverEpoch)
+{
+  mChildEpoch = aLayerObserverEpoch;
+  return true;
+}
+
+bool
+LayerTransactionParent::ShouldParentObserveEpoch()
+{
+  if (mParentEpoch == mChildEpoch) {
+    return false;
+  }
+
+  mParentEpoch = mChildEpoch;
   return true;
 }
 

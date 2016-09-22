@@ -53,6 +53,7 @@
 #include "nsIScriptSecurityManager.h"
 #include "nsIDOMMutationEvent.h"
 #include "mozilla/dom/AnimatableBinding.h"
+#include "mozilla/dom/KeyframeAnimationOptionsBinding.h"
 #include "mozilla/AnimationComparator.h"
 #include "mozilla/AsyncEventDispatcher.h"
 #include "mozilla/ContentEvents.h"
@@ -123,7 +124,6 @@
 #include "nsCSSParser.h"
 #include "prprf.h"
 #include "nsDOMMutationObserver.h"
-#include "nsSVGFeatures.h"
 #include "nsWrapperCacheInlines.h"
 #include "xpcpublic.h"
 #include "nsIScriptError.h"
@@ -140,6 +140,7 @@
 #include "nsISupportsImpl.h"
 #include "mozilla/dom/CSSPseudoElement.h"
 #include "mozilla/dom/DocumentFragment.h"
+#include "mozilla/dom/KeyframeEffect.h"
 #include "mozilla/dom/KeyframeEffectBinding.h"
 #include "mozilla/dom/WindowBinding.h"
 #include "mozilla/dom/ElementBinding.h"
@@ -471,8 +472,8 @@ Element::WrapObject(JSContext *aCx, JS::Handle<JSObject*> aGivenProto)
     CustomElementData* data = GetCustomElementData();
     if (data) {
       // If this is a registered custom element then fix the prototype.
-      nsDocument* document = static_cast<nsDocument*>(OwnerDoc());
-      document->GetCustomPrototype(NodeInfo()->NamespaceID(), data->mType, &customProto);
+      nsContentUtils::GetCustomPrototype(OwnerDoc(), NodeInfo()->NamespaceID(),
+                                         data->mType, &customProto);
       if (customProto &&
           NodePrincipal()->SubsumesConsideringDomain(nsContentUtils::ObjectPrincipal(customProto))) {
         // Just go ahead and create with the right proto up front.  Set
@@ -957,7 +958,7 @@ Element::GetClientAreaRect()
   }
 
   if (styledFrame &&
-      (styledFrame->StyleDisplay()->mDisplay != NS_STYLE_DISPLAY_INLINE ||
+      (styledFrame->StyleDisplay()->mDisplay != StyleDisplay::Inline ||
        styledFrame->IsFrameOfType(nsIFrame::eReplaced))) {
     // Special case code to make client area work even when there isn't
     // a scroll view, see bug 180552, bug 227567.
@@ -1609,7 +1610,8 @@ Element::BindToTree(nsIDocument* aDocument, nsIContent* aParent,
     // document and this document has a browsing context.
     if (GetCustomElementData() && composedDoc->GetDocShell()) {
       // Enqueue an attached callback for the custom element.
-      composedDoc->EnqueueLifecycleCallback(nsIDocument::eAttached, this);
+      nsContentUtils::EnqueueLifecycleCallback(
+        composedDoc, nsIDocument::eAttached, this);
     }
   }
 
@@ -1890,7 +1892,8 @@ Element::UnbindFromTree(bool aDeep, bool aNullParent)
     // the document and this document has a browsing context.
     if (GetCustomElementData() && document->GetDocShell()) {
       // Enqueue a detached callback for the custom element.
-      document->EnqueueLifecycleCallback(nsIDocument::eDetached, this);
+      nsContentUtils::EnqueueLifecycleCallback(
+        document, nsIDocument::eDetached, this);
     }
   }
 
@@ -2496,7 +2499,8 @@ Element::SetAttrAndNotify(int32_t aNamespaceID,
       nsDependentAtomString(newValueAtom)
     };
 
-    ownerDoc->EnqueueLifecycleCallback(nsIDocument::eAttributeChanged, this, &args);
+    nsContentUtils::EnqueueLifecycleCallback(
+      ownerDoc, nsIDocument::eAttributeChanged, this, &args);
   }
 
   if (aCallAfterSetAttr) {
@@ -2750,7 +2754,8 @@ Element::UnsetAttr(int32_t aNameSpaceID, nsIAtom* aName,
       NullString()
     };
 
-    ownerDoc->EnqueueLifecycleCallback(nsIDocument::eAttributeChanged, this, &args);
+    nsContentUtils::EnqueueLifecycleCallback(
+      ownerDoc, nsIDocument::eAttributeChanged, this, &args);
   }
 
   if (aNotify) {
@@ -3265,7 +3270,7 @@ static const nsAttrValue::EnumTable kCORSAttributeTable[] = {
   // See ParseCORSValue
   { "anonymous",       CORS_ANONYMOUS       },
   { "use-credentials", CORS_USE_CREDENTIALS },
-  { 0 }
+  { nullptr,           0 }
 };
 
 /* static */ void

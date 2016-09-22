@@ -24,9 +24,21 @@ richlistitem[type="download"].download-state[state="1"]:not([exists]) .downloadS
 
 #downloadsSummary:not([inprogress]) > vbox > #downloadsSummaryProgress,
 #downloadsSummary:not([inprogress]) > vbox > #downloadsSummaryDetails,
-#downloadsFooter[showingsummary] > #downloadsFooterButtons,
-#downloadsFooter:not([showingsummary]) > #downloadsSummary {
+#downloadsFooter:not([showingsummary]) #downloadsSummary {
   display: none;
+}
+
+#downloadsFooter[showingdropdown] > stack > #downloadsSummary,
+#downloadsFooter[showingsummary] > stack:hover > #downloadsSummary,
+#downloadsFooter[showingsummary]:not([showingdropdown]) > stack:not(:hover) > #downloadsFooterButtons {
+  /* If we used "visibility: hidden;" then the mouseenter event of
+     #downloadsHistory wouldn't be triggered immediately, and the hover styling
+     of the button would not apply until the mouse is moved again.
+
+     "-moz-user-focus: ignore;" prevents the elements with "opacity: 0;" from
+     being focused with the keyboard. */
+  opacity: 0;
+  -moz-user-focus: ignore;
 }
 
 /*** Downloads View ***/
@@ -234,4 +246,19 @@ richlistitem.download button {
   /* Use a margin instead of a transform like above so that the subview's width
      isn't wider than the panel. */
   -moz-margin-start: 38px !important;
+}
+
+/* Prevent keyboard interaction in the main view by preventing all elements in
+   the main view from being focused... */
+#downloadsPanel-multiView > .panel-viewcontainer > .panel-viewstack[viewtype="subview"] > .panel-mainview #downloadsListBox,
+#downloadsPanel-multiView > .panel-viewcontainer > .panel-viewstack[viewtype="subview"] > .panel-mainview richlistitem,
+#downloadsPanel-multiView > .panel-viewcontainer > .panel-viewstack[viewtype="subview"] > .panel-mainview .downloadButton,
+#downloadsPanel-multiView > .panel-viewcontainer > .panel-viewstack[viewtype="subview"] > .panel-mainview .downloadsPanelFooterButton,
+#downloadsPanel-multiView > .panel-viewcontainer > .panel-viewstack[viewtype="subview"] > .panel-mainview #downloadsSummary {
+  -moz-user-focus: ignore;
+}
+/* ... except for the downloadShowBlockedInfo button in the blocked download.
+   Selecting it with the keyboard should show the main view again. */
+#downloadsPanel-multiView > .panel-viewcontainer > .panel-viewstack[viewtype="subview"] .download-state[showingsubview] .downloadShowBlockedInfo {
+  -moz-user-focus: normal;
 }

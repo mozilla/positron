@@ -109,6 +109,12 @@ enum class GridTrackSizeFlags {
 };
 MOZ_MAKE_ENUM_CLASS_BITWISE_OPERATORS(GridTrackSizeFlags)
 
+enum class GridTrackListFlags {
+  eDefaultTrackList  = 0x0, // parse a <track-list>
+  eExplicitTrackList = 0x1, // parse an <explicit-track-list> instead
+};
+MOZ_MAKE_ENUM_CLASS_BITWISE_OPERATORS(GridTrackListFlags)
+
 namespace {
 
 // Rule processing function
@@ -981,9 +987,11 @@ protected:
   // starting with a <line-names> (which is itself a list)
   // and alternating between that and <track-size>.
   bool ParseGridTrackListWithFirstLineNames(nsCSSValue& aValue,
-                                            const nsCSSValue& aFirstLineNames);
+    const nsCSSValue& aFirstLineNames,
+    GridTrackListFlags aFlags = GridTrackListFlags::eDefaultTrackList);
 
-  bool ParseGridTrackList(nsCSSPropertyID aPropID);
+  bool ParseGridTrackList(nsCSSPropertyID aPropID,
+    GridTrackListFlags aFlags = GridTrackListFlags::eDefaultTrackList);
   bool ParseGridTemplateColumnsRows(nsCSSPropertyID aPropID);
 
   // |aAreaIndices| is a lookup table to help us parse faster,
@@ -992,10 +1000,11 @@ protected:
                                   css::GridTemplateAreasValue* aResult,
                                   nsDataHashtable<nsStringHashKey, uint32_t>& aAreaIndices);
   bool ParseGridTemplateAreas();
-  bool ParseGridTemplate();
+  bool ParseGridTemplateColumnsOrAutoFlow(bool aForGridShorthand);
+  bool ParseGridTemplate(bool aForGridShorthand = false);
   bool ParseGridTemplateAfterString(const nsCSSValue& aFirstLineNames);
   bool ParseGrid();
-  bool ParseGridShorthandAutoProps();
+  CSSParseResult ParseGridShorthandAutoProps(int32_t aAutoFlowAxis);
   bool ParseGridLine(nsCSSValue& aValue);
   bool ParseGridColumnRowStartEnd(nsCSSPropertyID aPropID);
   bool ParseGridColumnRow(nsCSSPropertyID aStartPropID,
@@ -5952,9 +5961,10 @@ CSSParserImpl::ParsePseudoSelector(int32_t&       aDataMask,
     return eSelectorParsingStatus_Error;
   }
 
-  // We currently allow :-moz-placeholder and ::-moz-placeholder. We have to
-  // be a bit stricter regarding the pseudo-element parsing rules.
-  if (pseudoElementType == CSSPseudoElementType::mozPlaceholder &&
+  // We currently allow :-moz-placeholder and ::-moz-placeholder and
+  // ::placeholder. We have to be a bit stricter regarding the
+  // pseudo-element parsing rules.
+  if (pseudoElementType == CSSPseudoElementType::placeholder &&
       pseudoClassType == CSSPseudoClassType::mozPlaceholder) {
     if (parsingPseudoElement) {
       pseudoClassType = CSSPseudoClassType::NotPseudo;
@@ -6022,6 +6032,23 @@ CSSParserImpl::ParsePseudoSelector(int32_t&       aDataMask,
     return eSelectorParsingStatus_Error;
   }
 
+  if (aSelector.IsPseudoElement()) {
+    CSSPseudoElementType type = aSelector.PseudoType();
+    if (!nsCSSPseudoElements::PseudoElementSupportsUserActionState(type)) {
+      // We only allow user action pseudo-classes on certain pseudo-elements.
+      REPORT_UNEXPECTED_TOKEN(PEPseudoSelNoUserActionPC);
+      UngetToken();
+      return eSelectorParsingStatus_Error;
+    }
+    if (!isPseudoClass || !pseudoClassIsUserAction) {
+      // CSS 4 Selectors says that pseudo-elements can only be followed by
+      // a user action pseudo-class.
+      REPORT_UNEXPECTED_TOKEN(PEPseudoClassNotUserAction);
+      UngetToken();
+      return eSelectorParsingStatus_Error;
+    }
+  }
+
   if (!parsingPseudoElement &&
       CSSPseudoClassType::negation == pseudoClassType) {
     if (aIsNegated) { // :not() can't be itself negated
@@ -6037,22 +6064,6 @@ CSSParserImpl::ParsePseudoSelector(int32_t&       aDataMask,
     }
   }
   else if (!parsingPseudoElement && isPseudoClass) {
-    if (aSelector.IsPseudoElement()) {
-      CSSPseudoElementType type = aSelector.PseudoType();
-      if (!nsCSSPseudoElements::PseudoElementSupportsUserActionState(type)) {
-        // We only allow user action pseudo-classes on certain pseudo-elements.
-        REPORT_UNEXPECTED_TOKEN(PEPseudoSelNoUserActionPC);
-        UngetToken();
-        return eSelectorParsingStatus_Error;
-      }
-      if (!pseudoClassIsUserAction) {
-        // CSS 4 Selectors says that pseudo-elements can only be followed by
-        // a user action pseudo-class.
-        REPORT_UNEXPECTED_TOKEN(PEPseudoClassNotUserAction);
-        UngetToken();
-        return eSelectorParsingStatus_Error;
-      }
-    }
     aDataMask |= SEL_MASK_PCLASS;
     if (eCSSToken_Function == mToken.mType) {
       nsSelectorParsingStatus parsingStatus;
@@ -6494,13 +6505,7 @@ CSSParserImpl::ParseSelector(nsCSSSelectorList* aList,
     ParseTypeOrUniversalSelector(dataMask, *selector, false);
 
   while (parsingStatus == eSelectorParsingStatus_Continue) {
-    if (eCSSToken_ID == mToken.mType) { // #id
-      parsingStatus = ParseIDSelector(dataMask, *selector);
-    }
-    else if (mToken.IsSymbol('.')) {    // .class
-      parsingStatus = ParseClassSelector(dataMask, *selector);
-    }
-    else if (mToken.IsSymbol(':')) {    // :pseudo
+    if (mToken.IsSymbol(':')) {    // :pseudo
       parsingStatus = ParsePseudoSelector(dataMask, *selector, false,
                                           getter_AddRefs(pseudoElement),
                                           getter_Transfers(pseudoElementArgs),
@@ -6518,6 +6523,17 @@ CSSParserImpl::ParseSelector(nsCSSSelectorList* aList,
         selector->mClassList = pseudoElementArgs.forget();
         selector->SetPseudoType(pseudoElementType);
       }
+    } else if (selector->IsPseudoElement()) {
+      // Once we parsed a pseudo-element, we can only parse
+      // pseudo-classes (and only a limited set, which
+      // ParsePseudoSelector knows how to handle).
+      parsingStatus = eSelectorParsingStatus_Done;
+      UngetToken();
+      break;
+    } else if (eCSSToken_ID == mToken.mType) { // #id
+      parsingStatus = ParseIDSelector(dataMask, *selector);
+    } else if (mToken.IsSymbol('.')) {    // .class
+      parsingStatus = ParseClassSelector(dataMask, *selector);
     }
     else if (mToken.IsSymbol('[')) {    // [attribute
       parsingStatus = ParseAttributeSelector(dataMask, *selector);
@@ -7443,9 +7459,9 @@ static const nsCSSPropertyID kBorderBlockEndIDs[] = {
   eCSSProperty_border_block_end_color
 };
 static const nsCSSPropertyID kColumnRuleIDs[] = {
-  eCSSProperty__moz_column_rule_width,
-  eCSSProperty__moz_column_rule_style,
-  eCSSProperty__moz_column_rule_color
+  eCSSProperty_column_rule_width,
+  eCSSProperty_column_rule_style,
+  eCSSProperty_column_rule_color
 };
 
 bool
@@ -8749,12 +8765,25 @@ CSSParserImpl::ParseGridTrackSize(nsCSSValue& aValue,
     return result;
   }
 
-  // Attempt to parse a minmax() function.
+  // Attempt to parse a minmax() or fit-content() function.
   if (!GetToken(true)) {
     return CSSParseResult::NotFound;
   }
-  if (!(eCSSToken_Function == mToken.mType &&
-        mToken.mIdent.LowerCaseEqualsLiteral("minmax"))) {
+  if (eCSSToken_Function != mToken.mType) {
+    UngetToken();
+    return CSSParseResult::NotFound;
+  }
+  if (mToken.mIdent.LowerCaseEqualsLiteral("fit-content")) {
+    nsCSSValue::Array* func = aValue.InitFunction(eCSSKeyword_fit_content, 1);
+    if (ParseGridTrackBreadth(func->Item(1)) == CSSParseResult::Ok &&
+        func->Item(1).IsLengthPercentCalcUnit() &&
+        ExpectSymbol(')', true)) {
+      return CSSParseResult::Ok;
+    }
+    SkipUntil(')');
+    return CSSParseResult::Error;
+  }
+  if (!mToken.mIdent.LowerCaseEqualsLiteral("minmax")) {
     UngetToken();
     return CSSParseResult::NotFound;
   }
@@ -8792,7 +8821,8 @@ CSSParserImpl::ParseGridAutoColumnsRows(nsCSSPropertyID aPropID)
 
 bool
 CSSParserImpl::ParseGridTrackListWithFirstLineNames(nsCSSValue& aValue,
-                                                    const nsCSSValue& aFirstLineNames)
+                                                    const nsCSSValue& aFirstLineNames,
+                                                    GridTrackListFlags aFlags)
 {
   nsCSSValueList* firstLineNamesItem = aValue.SetListValue();
   firstLineNamesItem->mValue = aFirstLineNames;
@@ -8800,6 +8830,7 @@ CSSParserImpl::ParseGridTrackListWithFirstLineNames(nsCSSValue& aValue,
   // This function is trying to parse <track-list>, which is
   //   [ <line-names>? [ <track-size> | <repeat()> ] ]+ <line-names>?
   // and we're already past the first "<line-names>?".
+  // If aFlags contains eExplicitTrackList then <repeat()> is disallowed.
   //
   // Each iteration of the following loop attempts to parse either a
   // repeat() or a <track-size> expression, and then an (optional)
@@ -8815,7 +8846,8 @@ CSSParserImpl::ParseGridTrackListWithFirstLineNames(nsCSSValue& aValue,
     if (!GetToken(true)) {
       break;
     }
-    if (mToken.mType == eCSSToken_Function &&
+    if (!(aFlags & GridTrackListFlags::eExplicitTrackList) &&
+        mToken.mType == eCSSToken_Function &&
         mToken.mIdent.LowerCaseEqualsLiteral("repeat")) {
       nsCSSValueList* startOfRepeat = item;
       if (!ParseGridTrackListRepeat(&item)) {
@@ -8835,11 +8867,16 @@ CSSParserImpl::ParseGridTrackListWithFirstLineNames(nsCSSValue& aValue,
              list != firstRepeat; list = list->mNext) {
           if (list->mValue.GetUnit() == eCSSUnit_Function) {
             nsCSSValue::Array* func = list->mValue.GetArrayValue();
-            NS_ASSERTION(func->Item(0).GetKeywordValue() == eCSSKeyword_minmax,
-                         "Expected minmax(), got another function name");
-            if (!func->Item(1).IsLengthPercentCalcUnit() &&
-                !func->Item(2).IsLengthPercentCalcUnit()) {
-              return false;
+            auto funcName = func->Item(0).GetKeywordValue();
+            if (funcName == eCSSKeyword_minmax) {
+              if (!func->Item(1).IsLengthPercentCalcUnit() &&
+                  !func->Item(2).IsLengthPercentCalcUnit()) {
+                return false;
+              }
+            } else {
+              MOZ_ASSERT(funcName == eCSSKeyword_fit_content,
+                         "Expected minmax() or fit-content() function");
+              return false; // fit-content() is not a <fixed-size>
             }
           } else if (!list->mValue.IsLengthPercentCalcUnit()) {
             return false;
@@ -9155,12 +9192,13 @@ CSSParserImpl::ParseGridTrackListRepeat(nsCSSValueList** aTailPtr)
 }
 
 bool
-CSSParserImpl::ParseGridTrackList(nsCSSPropertyID aPropID)
+CSSParserImpl::ParseGridTrackList(nsCSSPropertyID aPropID,
+                                  GridTrackListFlags aFlags)
 {
   nsCSSValue value;
   nsCSSValue firstLineNames;
   if (ParseGridLineNames(firstLineNames) == CSSParseResult::Error ||
-      !ParseGridTrackListWithFirstLineNames(value, firstLineNames)) {
+      !ParseGridTrackListWithFirstLineNames(value, firstLineNames, aFlags)) {
     return false;
   }
   AppendValue(aPropID, value);
@@ -9314,13 +9352,34 @@ CSSParserImpl::ParseGridTemplateAreas()
   return true;
 }
 
+// [ auto-flow && dense? ] <'grid-auto-columns'>? |
+// <'grid-template-columns'>
 bool
-CSSParserImpl::ParseGridTemplate()
+CSSParserImpl::ParseGridTemplateColumnsOrAutoFlow(bool aForGridShorthand)
+{
+  if (aForGridShorthand) {
+    auto res = ParseGridShorthandAutoProps(NS_STYLE_GRID_AUTO_FLOW_COLUMN);
+    if (res == CSSParseResult::Error) {
+      return false;
+    }
+    if (res == CSSParseResult::Ok) {
+      nsCSSValue value(eCSSUnit_None);
+      AppendValue(eCSSProperty_grid_template_columns, value);
+      return true;
+    }
+  }
+  return ParseGridTemplateColumnsRows(eCSSProperty_grid_template_columns);
+}
+
+bool
+CSSParserImpl::ParseGridTemplate(bool aForGridShorthand)
 {
   // none |
   // subgrid |
   // <'grid-template-rows'> / <'grid-template-columns'> |
-  // [ <line-names>? <string> <track-size>? <line-names>? ]+ [ / <track-list>]?
+  // [ <line-names>? <string> <track-size>? <line-names>? ]+ [ / <explicit-track-list>]?
+  // or additionally when aForGridShorthand is true:
+  // <'grid-template-rows'> / [ auto-flow && dense? ] <'grid-auto-columns'>?
   nsCSSValue value;
   if (ParseSingleTokenVariant(value, VARIANT_INHERIT, nullptr)) {
     AppendValue(eCSSProperty_grid_template_areas, value);
@@ -9335,7 +9394,7 @@ CSSParserImpl::ParseGridTemplate()
     AppendValue(eCSSProperty_grid_template_rows, value);
     AppendValue(eCSSProperty_grid_template_areas, value);
     if (ExpectSymbol('/', true)) {
-      return ParseGridTemplateColumnsRows(eCSSProperty_grid_template_columns);
+      return ParseGridTemplateColumnsOrAutoFlow(aForGridShorthand);
     }
     AppendValue(eCSSProperty_grid_template_columns, value);
     return true;
@@ -9356,7 +9415,7 @@ CSSParserImpl::ParseGridTemplate()
       AppendValue(eCSSProperty_grid_template_rows, value);
       AppendValue(eCSSProperty_grid_template_areas, nsCSSValue(eCSSUnit_None));
       if (ExpectSymbol('/', true)) {
-        return ParseGridTemplateColumnsRows(eCSSProperty_grid_template_columns);
+        return ParseGridTemplateColumnsOrAutoFlow(aForGridShorthand);
       }
       if (value.GetListValue()->mNext) {
         // Non-empty <line-name-list> after 'subgrid'.
@@ -9384,9 +9443,10 @@ CSSParserImpl::ParseGridTemplate()
     if (!ParseGridTemplateAfterString(firstLineNames)) {
       return false;
     }
-    // Parse an optional [ / <track-list> ] as the columns value.
+    // Parse an optional [ / <explicit-track-list> ] as the columns value.
     if (ExpectSymbol('/', true)) {
-      return ParseGridTrackList(eCSSProperty_grid_template_columns);
+      return ParseGridTrackList(eCSSProperty_grid_template_columns,
+                                GridTrackListFlags::eExplicitTrackList);
     }
     value.SetNoneValue(); // absent means 'none'
     AppendValue(eCSSProperty_grid_template_columns, value);
@@ -9403,7 +9463,7 @@ CSSParserImpl::ParseGridTemplate()
   AppendValue(eCSSProperty_grid_template_rows, value);
   value.SetNoneValue();
   AppendValue(eCSSProperty_grid_template_areas, value);
-  return ParseGridTemplateColumnsRows(eCSSProperty_grid_template_columns);
+  return ParseGridTemplateColumnsOrAutoFlow(aForGridShorthand);
 }
 
 // Helper for parsing the 'grid-template' shorthand:
@@ -9481,7 +9541,8 @@ CSSParserImpl::ParseGridTemplateAfterString(const nsCSSValue& aFirstLineNames)
 }
 
 // <'grid-template'> |
-// [ <'grid-auto-flow'> [ <'grid-auto-rows'> [ / <'grid-auto-columns'> ]? ]? ]
+// <'grid-template-rows'> / [ auto-flow && dense? ] <'grid-auto-columns'>? |
+// [ auto-flow && dense? ] <'grid-auto-rows'>? / <'grid-template-columns'>
 bool
 CSSParserImpl::ParseGrid()
 {
@@ -9495,11 +9556,6 @@ CSSParserImpl::ParseGrid()
     return true;
   }
 
-  // An empty value is always invalid.
-  if (!GetToken(true)) {
-    return false;
-  }
-
   // https://drafts.csswg.org/css-grid/#grid-shorthand
   // "Also, the gutter properties are reset by this shorthand,
   //  even though they can't be set by it."
@@ -9507,58 +9563,93 @@ CSSParserImpl::ParseGrid()
   AppendValue(eCSSProperty_grid_row_gap, value);
   AppendValue(eCSSProperty_grid_column_gap, value);
 
-  // The values starts with a <'grid-auto-flow'> if and only if
-  // it starts with a 'dense', 'column' or 'row' keyword.
-  if (mToken.mType == eCSSToken_Ident) {
-    nsCSSKeyword keyword = nsCSSKeywords::LookupKeyword(mToken.mIdent);
-    if (keyword == eCSSKeyword_dense ||
-        keyword == eCSSKeyword_column ||
-        keyword == eCSSKeyword_row) {
-      UngetToken();
-      return ParseGridAutoFlow() && ParseGridShorthandAutoProps();
-    }
+  // [ auto-flow && dense? ] <'grid-auto-rows'>? / <'grid-template-columns'>
+  auto res = ParseGridShorthandAutoProps(NS_STYLE_GRID_AUTO_FLOW_ROW);
+  if (res == CSSParseResult::Error) {
+    return false;
   }
-  UngetToken();
+  if (res == CSSParseResult::Ok) {
+    value.SetAutoValue();
+    AppendValue(eCSSProperty_grid_auto_columns, value);
+    nsCSSValue none(eCSSUnit_None);
+    AppendValue(eCSSProperty_grid_template_areas, none);
+    AppendValue(eCSSProperty_grid_template_rows, none);
+    if (!ExpectSymbol('/', true)) {
+      return false;
+    }
+    return ParseGridTemplateColumnsRows(eCSSProperty_grid_template_columns);
+  }
 
-  // Set other subproperties to their initial values
-  // and parse <'grid-template'>.
+  // Set remaining subproperties that might not be set by ParseGridTemplate to
+  // their initial values and then parse <'grid-template'> |
+  // <'grid-template-rows'> / [ auto-flow && dense? ] <'grid-auto-columns'>? .
   value.SetIntValue(NS_STYLE_GRID_AUTO_FLOW_ROW, eCSSUnit_Enumerated);
   AppendValue(eCSSProperty_grid_auto_flow, value);
   value.SetAutoValue();
   AppendValue(eCSSProperty_grid_auto_rows, value);
   AppendValue(eCSSProperty_grid_auto_columns, value);
-  return ParseGridTemplate();
+  return ParseGridTemplate(true);
 }
 
-// Parse [ <'grid-auto-rows'> [ / <'grid-auto-columns'> ]? ]?
-// for the 'grid' shorthand.
-// Assumes that <'grid-auto-flow'> was already parsed by the caller.
-bool
-CSSParserImpl::ParseGridShorthandAutoProps()
+// Parse [ auto-flow && dense? ] <'grid-auto-[rows|columns]'>? for the 'grid'
+// shorthand.  If aAutoFlowAxis == NS_STYLE_GRID_AUTO_FLOW_ROW then we're
+// parsing row values, otherwise column values.
+CSSParseResult
+CSSParserImpl::ParseGridShorthandAutoProps(int32_t aAutoFlowAxis)
 {
-  nsCSSValue autoColumnsValue;
-  nsCSSValue autoRowsValue;
-  CSSParseResult result = ParseGridTrackSize(autoRowsValue);
-  if (result == CSSParseResult::Error) {
-    return false;
+  MOZ_ASSERT(aAutoFlowAxis == NS_STYLE_GRID_AUTO_FLOW_ROW ||
+             aAutoFlowAxis == NS_STYLE_GRID_AUTO_FLOW_COLUMN);
+  if (!GetToken(true)) {
+    return CSSParseResult::NotFound;
   }
-  if (result == CSSParseResult::NotFound) {
-    autoRowsValue.SetAutoValue();
-    autoColumnsValue.SetAutoValue();
-  } else {
-    if (!ExpectSymbol('/', true)) {
-      autoColumnsValue.SetAutoValue();
-    } else if (ParseGridTrackSize(autoColumnsValue) != CSSParseResult::Ok) {
-      return false;
+  // [ auto-flow && dense? ]
+  int32_t autoFlowValue = 0;
+  if (mToken.mType == eCSSToken_Ident) {
+    nsCSSKeyword keyword = nsCSSKeywords::LookupKeyword(mToken.mIdent);
+    if (keyword == eCSSKeyword_auto_flow) {
+      autoFlowValue = aAutoFlowAxis;
+      if (GetToken(true)) {
+        if (mToken.mType == eCSSToken_Ident &&
+            nsCSSKeywords::LookupKeyword(mToken.mIdent) == eCSSKeyword_dense) {
+          autoFlowValue |= NS_STYLE_GRID_AUTO_FLOW_DENSE;
+        } else {
+          UngetToken();
+        }
+      }
+    } else if (keyword == eCSSKeyword_dense) {
+      if (!GetToken(true)) {
+        return CSSParseResult::Error;
+      }
+      if (mToken.mType != eCSSToken_Ident ||
+          nsCSSKeywords::LookupKeyword(mToken.mIdent) != eCSSKeyword_auto_flow) {
+        UngetToken();
+        return CSSParseResult::Error;
+      }
+      autoFlowValue = aAutoFlowAxis | NS_STYLE_GRID_AUTO_FLOW_DENSE;
     }
   }
-  AppendValue(eCSSProperty_grid_auto_rows, autoRowsValue);
-  AppendValue(eCSSProperty_grid_auto_columns, autoColumnsValue);
-  nsCSSValue templateValue(eCSSUnit_None);  // Initial values
-  AppendValue(eCSSProperty_grid_template_areas, templateValue);
-  AppendValue(eCSSProperty_grid_template_rows, templateValue);
-  AppendValue(eCSSProperty_grid_template_columns, templateValue);
-  return true;
+  if (autoFlowValue) {
+    nsCSSValue value;
+    value.SetIntValue(autoFlowValue, eCSSUnit_Enumerated);
+    AppendValue(eCSSProperty_grid_auto_flow, value);
+  } else {
+    UngetToken();
+    return CSSParseResult::NotFound;
+  }
+
+  // <'grid-auto-[rows|columns]'>?
+  nsCSSValue autoTrackValue;
+  CSSParseResult result = ParseGridTrackSize(autoTrackValue);
+  if (result == CSSParseResult::Error) {
+    return result;
+  }
+  if (result == CSSParseResult::NotFound) {
+    autoTrackValue.SetAutoValue();
+  }
+  AppendValue(aAutoFlowAxis == NS_STYLE_GRID_AUTO_FLOW_ROW ?
+                eCSSProperty_grid_auto_rows : eCSSProperty_grid_auto_columns,
+              autoTrackValue);
+  return CSSParseResult::Ok;
 }
 
 // Parse a <grid-line>.
@@ -9593,6 +9684,15 @@ CSSParserImpl::ParseGridLine(nsCSSValue& aValue)
   bool hasIdent = false;
   Maybe<int32_t> integer;
   nsCSSValue ident;
+
+#ifdef MOZ_VALGRIND
+  // Make the contained value be defined even though we really want a
+  // Nothing here.  This works around an otherwise difficult to avoid
+  // Memcheck false positive when this is compiled by gcc-5.3 -O2.
+  // See bug 1301856.
+  integer.emplace(0);
+  integer.reset();
+#endif
 
   if (!GetToken(true)) {
     return false;
@@ -11550,9 +11650,9 @@ CSSParserImpl::ParsePropertyByFunction(nsCSSPropertyID aPropID)
 
   case eCSSProperty_clip:
     return ParseRect(eCSSProperty_clip);
-  case eCSSProperty__moz_columns:
+  case eCSSProperty_columns:
     return ParseColumns();
-  case eCSSProperty__moz_column_rule:
+  case eCSSProperty_column_rule:
     return ParseBorderSide(kColumnRuleIDs, false);
   case eCSSProperty_content:
     return ParseContent();
@@ -13712,8 +13812,8 @@ CSSParserImpl::ParseColumns()
   // find.
   static const nsCSSPropertyID columnIDs[] = {
     eCSSPropertyExtra_x_auto_value,
-    eCSSProperty__moz_column_count,
-    eCSSProperty__moz_column_width
+    eCSSProperty_column_count,
+    eCSSProperty_column_width
   };
   const int32_t numProps = MOZ_ARRAY_LENGTH(columnIDs);
 

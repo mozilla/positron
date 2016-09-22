@@ -116,7 +116,7 @@ class TlsAgent : public PollTarget {
   void ResetPreliminaryInfo();
   void SetExpectedVersion(uint16_t version);
   void SetServerKeyBits(uint16_t bits);
-  void SetExpectedReadError(bool err);
+  void ExpectReadWriteError();
   void EnableFalseStart();
   void ExpectResumption();
   void SetSignatureAlgorithms(const SSLSignatureAndHashAlg* algorithms,
@@ -141,7 +141,7 @@ class TlsAgent : public PollTarget {
   void EnableCompression();
   void SetDowngradeCheckVersion(uint16_t version);
   void CheckSecretsDestroyed();
-  void ConfigNamedGroup(SSLNamedGroup group, bool en);
+  void ConfigNamedGroups(const SSLNamedGroup* groups, size_t num);
 
   const std::string& name() const { return name_; }
 
@@ -156,7 +156,7 @@ class TlsAgent : public PollTarget {
 
   const char* state_str() const { return state_str(state()); }
 
-  const char* state_str(State state) const { return states[state]; }
+  static const char* state_str(State state) { return states[state]; }
 
   PRFileDesc* ssl_fd() { return ssl_fd_; }
   DummyPrSocket* adapter() { return adapter_; }
@@ -191,7 +191,7 @@ class TlsAgent : public PollTarget {
   }
 
   size_t received_bytes() const { return recv_ctr_; }
-  int32_t error_code() const { return error_code_; }
+  PRErrorCode error_code() const { return error_code_; }
 
   bool can_falsestart_hook_called() const {
     return can_falsestart_hook_called_;
@@ -213,13 +213,7 @@ class TlsAgent : public PollTarget {
  private:
   const static char* states[];
 
-  void SetState(State state) {
-    if (state_ == state) return;
-
-    LOG("Changing state from " << state_str(state_) << " to "
-                               << state_str(state));
-    state_ = state;
-  }
+  void SetState(State state);
 
   // Dummy auth certificate hook.
   static SECStatus AuthCertificateHook(void* arg, PRFileDesc* fd,
@@ -331,14 +325,19 @@ class TlsAgent : public PollTarget {
   SSLChannelInfo info_;
   SSLCipherSuiteInfo csinfo_;
   SSLVersionRange vrange_;
-  int32_t error_code_;
+  PRErrorCode error_code_;
   size_t send_ctr_;
   size_t recv_ctr_;
-  bool expected_read_error_;
+  bool expect_readwrite_error_;
   HandshakeCallbackFunction handshake_callback_;
   AuthCertificateCallbackFunction auth_certificate_callback_;
   SniCallbackFunction sni_callback_;
 };
+
+inline std::ostream& operator<<(std::ostream& stream,
+                                const TlsAgent::State& state) {
+  return stream << TlsAgent::state_str(state);
+}
 
 class TlsAgentTestBase : public ::testing::Test {
  public:
@@ -355,16 +354,19 @@ class TlsAgentTestBase : public ::testing::Test {
   void SetUp();
   void TearDown();
 
+  static void MakeRecord(Mode mode, uint8_t type, uint16_t version,
+                         const uint8_t* buf, size_t len, DataBuffer* out,
+                         uint64_t seq_num = 0);
   void MakeRecord(uint8_t type, uint16_t version, const uint8_t* buf,
-                  size_t len, DataBuffer* out, uint32_t seq_num = 0);
+                  size_t len, DataBuffer* out, uint64_t seq_num = 0) const;
   void MakeHandshakeMessage(uint8_t hs_type, const uint8_t* data, size_t hs_len,
-                            DataBuffer* out, uint32_t seq_num = 0);
+                            DataBuffer* out, uint64_t seq_num = 0) const;
   void MakeHandshakeMessageFragment(uint8_t hs_type, const uint8_t* data,
                                     size_t hs_len, DataBuffer* out,
-                                    uint32_t seq_num, uint32_t fragment_offset,
-                                    uint32_t fragment_length);
-  void MakeTrivialHandshakeRecord(uint8_t hs_type, size_t hs_len,
-                                  DataBuffer* out);
+                                    uint64_t seq_num, uint32_t fragment_offset,
+                                    uint32_t fragment_length) const;
+  static void MakeTrivialHandshakeRecord(uint8_t hs_type, size_t hs_len,
+                                         DataBuffer* out);
   static inline TlsAgent::Role ToRole(const std::string& str) {
     return str == "CLIENT" ? TlsAgent::CLIENT : TlsAgent::SERVER;
   }

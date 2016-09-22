@@ -51,7 +51,6 @@ DIRS += [
     'contacts',
     'crypto',
     'phonenumberutils',
-    'alarm',
     'devicestorage',
     'encoding',
     'events',
@@ -75,6 +74,7 @@ DIRS += [
     'notification',
     'offline',
     'power',
+    'push',
     'quota',
     'security',
     'settings',
@@ -134,11 +134,6 @@ if CONFIG['MOZ_B2G_RIL']:
 
 if CONFIG['MOZ_NFC']:
     DIRS += ['nfc']
-
-if CONFIG['MOZ_SIMPLEPUSH']:
-    DIRS += ['simplepush']
-else:
-    DIRS += ['push']
 
 if CONFIG['MOZ_SECUREELEMENT']:
     DIRS += ['secureelement']

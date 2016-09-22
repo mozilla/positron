@@ -149,6 +149,7 @@
 #include "mozilla/dom/CustomEvent.h"
 #include "nsIJARChannel.h"
 #include "nsIScreenManager.h"
+#include "nsIEffectiveTLDService.h"
 
 #include "xpcprivate.h"
 
@@ -202,7 +203,7 @@
 #include "mozilla/BasePrincipal.h"
 #include "mozilla/Services.h"
 #include "mozilla/Telemetry.h"
-#include "nsLocation.h"
+#include "mozilla/dom/Location.h"
 #include "nsHTMLDocument.h"
 #include "nsWrapperCacheInlines.h"
 #include "mozilla/DOMEventTargetHelper.h"
@@ -449,7 +450,8 @@ nsGlobalWindow::DOMMinTimeoutValue() const {
       if (mIsClosed) {                                                        \
         return err_rval;                                                      \
       }                                                                       \
-      nsCOMPtr<nsIDocument> doc = GetDoc();                                   \
+      nsCOMPtr<nsIDocument> kungFuDeathGrip = GetDoc();                       \
+      ::mozilla::Unused << kungFuDeathGrip;                                   \
       if (!mInnerWindow) {                                                    \
         return err_rval;                                                      \
       }                                                                       \
@@ -543,7 +545,6 @@ NS_IMPL_CYCLE_COLLECTION_CLASS(nsTimeout)
 NS_IMPL_CYCLE_COLLECTION_UNLINK_0(nsTimeout)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(nsTimeout)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mWindow)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mPrincipal)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mScriptHandler)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 NS_IMPL_CYCLE_COLLECTION_ROOT_NATIVE(nsTimeout, AddRef)
@@ -618,7 +619,8 @@ nsPIDOMWindow<T>::nsPIDOMWindow(nsPIDOMWindowOuter *aOuterWindow)
   mInnerObjectsFreed(false),
   mIsModalContentWindow(false),
   mIsActive(false), mIsBackground(false),
-  mMediaSuspend(nsISuspendedTypes::NONE_SUSPENDED),
+  mMediaSuspend(Preferences::GetBool("media.block-autoplay-until-in-foreground", true) ?
+    nsISuspendedTypes::SUSPENDED_BLOCK : nsISuspendedTypes::NONE_SUSPENDED),
   mAudioMuted(false), mAudioVolume(1.0), mAudioCaptured(false),
   mDesktopModeViewport(false), mInnerWindow(nullptr),
   mOuterWindow(aOuterWindow),
@@ -1223,7 +1225,9 @@ nsGlobalWindow::nsGlobalWindow(nsGlobalWindow *aOuterWindow)
     mCleanedUp(false),
     mDialogAbuseCount(0),
     mAreDialogsEnabled(true),
-    mCanSkipCCGeneration(0)
+    mCanSkipCCGeneration(0),
+    mStaticConstellation(0),
+    mConstellation(NullCString())
 {
   AssertIsOnMainThread();
 
@@ -1258,6 +1262,11 @@ nsGlobalWindow::nsGlobalWindow(nsGlobalWindow *aOuterWindow)
     // remain frozen until they get an inner window, so freeze this
     // outer window here.
     Freeze();
+
+    // As an outer window, we may be the root of a constellation. This initial
+    // static constellation may be overridden as this window is given a parent
+    // window or an opener.
+    mStaticConstellation = WindowID();
   }
 
   // We could have failed the first time through trying
@@ -1358,7 +1367,7 @@ nsGlobalWindow::~nsGlobalWindow()
   if (!PR_GetEnv("MOZ_QUIET")) {
     nsAutoCString url;
     if (mLastOpenedURI) {
-      mLastOpenedURI->GetSpec(url);
+      url = mLastOpenedURI->GetSpecOrDefault();
 
       // Data URLs can be very long, so truncate to avoid flooding the log.
       const uint32_t maxURLLength = 1000;
@@ -1845,7 +1854,7 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INTERNAL(nsGlobalWindow)
     char name[512];
     nsAutoCString uri;
     if (tmp->mDoc && tmp->mDoc->GetDocumentURI()) {
-      tmp->mDoc->GetDocumentURI()->GetSpec(uri);
+      uri = tmp->mDoc->GetDocumentURI()->GetSpecOrDefault();
     }
     SprintfLiteral(name, "nsGlobalWindow # %" PRIu64 " %s %s", tmp->mWindowID,
                    tmp->IsInnerWindow() ? "inner" : "outer", uri.get());
@@ -2158,10 +2167,13 @@ nsGlobalWindow::SetInitialPrincipalToSubject()
   // First, grab the subject principal.
   nsCOMPtr<nsIPrincipal> newWindowPrincipal = nsContentUtils::SubjectPrincipalOrSystemIfNativeCaller();
 
-  // Now, if we're about to use the system principal or an nsExpandedPrincipal,
-  // make sure we're not using it for a content docshell.
-  if (nsContentUtils::IsSystemOrExpandedPrincipal(newWindowPrincipal) &&
-      GetDocShell()->ItemType() != nsIDocShellTreeItem::typeChrome) {
+  // We should never create windows with an expanded principal.
+  // If we have a system principal, make sure we're not using it for a content
+  // docshell.
+  // NOTE: Please keep this logic in sync with nsWebShellWindow::Initialize().
+  if (nsContentUtils::IsExpandedPrincipal(newWindowPrincipal) ||
+      (nsContentUtils::IsSystemPrincipal(newWindowPrincipal) &&
+       GetDocShell()->ItemType() != nsIDocShellTreeItem::typeChrome)) {
     newWindowPrincipal = nullptr;
   }
 
@@ -2416,7 +2428,7 @@ nsGlobalWindow::ComputeIsSecureContext(nsIDocument* aDocument)
 
   nsCOMPtr<nsIContentSecurityManager> csm =
     do_GetService(NS_CONTENTSECURITYMANAGER_CONTRACTID);
-  NS_WARN_IF(!csm);
+  NS_WARNING_ASSERTION(csm, "csm is null");
   if (csm) {
     bool isTrustworthyOrigin = false;
     csm->IsOriginPotentiallyTrustworthy(principal, &isTrustworthyOrigin);
@@ -2868,7 +2880,7 @@ nsGlobalWindow::SetNewDocument(nsIDocument* aDocument,
 
       // Initialize DOM classes etc on the inner window.
       JS::Rooted<JSObject*> obj(cx, newInnerGlobal);
-      rv = mContext->InitClasses(obj);
+      rv = kungFuDeathGrip->InitClasses(obj);
       NS_ENSURE_SUCCESS(rv, rv);
     }
 
@@ -2891,7 +2903,7 @@ nsGlobalWindow::SetNewDocument(nsIDocument* aDocument,
   }
 
   nsJSContext::PokeGC(JS::gcreason::SET_NEW_DOCUMENT);
-  mContext->DidInitializeContext();
+  kungFuDeathGrip->DidInitializeContext();
 
   // We wait to fire the debugger hook until the window is all set up and hooked
   // up with the outer. See bug 969156.
@@ -2992,10 +3004,8 @@ nsGlobalWindow::InnerSetNewDocument(JSContext* aCx, nsIDocument* aDocument)
 
   if (gDOMLeakPRLog && MOZ_LOG_TEST(gDOMLeakPRLog, LogLevel::Debug)) {
     nsIURI *uri = aDocument->GetDocumentURI();
-    nsAutoCString spec;
-    if (uri)
-      uri->GetSpec(spec);
-    PR_LogPrint("DOMWINDOW %p SetNewDocument %s", this, spec.get());
+    PR_LogPrint("DOMWINDOW %p SetNewDocument %s",
+                this, uri ? uri->GetSpecOrDefault().get() : "");
   }
 
   mDoc = aDocument;
@@ -3026,6 +3036,12 @@ nsGlobalWindow::SetDocShell(nsIDocShell* aDocShell)
   }
 
   mDocShell = aDocShell; // Weak Reference
+
+  // Copy over the static constellation from our new parent.
+  nsCOMPtr<nsPIDOMWindowOuter> parentWindow = GetParent();
+  if (parentWindow) {
+    mStaticConstellation = Cast(parentWindow)->mStaticConstellation;
+  }
 
   NS_ASSERTION(!mNavigator, "Non-null mNavigator in outer window!");
 
@@ -3137,6 +3153,11 @@ nsGlobalWindow::SetOpenerWindow(nsPIDOMWindowOuter* aOpener,
 
   mOpener = do_GetWeakReference(aOpener);
   NS_ASSERTION(mOpener || !aOpener, "Opener must support weak references!");
+
+  // Copy over the static constellation from our new opener
+  if (aOpener) {
+    mStaticConstellation = Cast(aOpener)->mStaticConstellation;
+  }
 
   if (aOriginalOpener) {
     MOZ_ASSERT(!mHadOriginalOpener,
@@ -3436,7 +3457,10 @@ nsGlobalWindow::PostHandleEvent(EventChainPostVisitor& aVisitor)
    function under some circumstances (events that destroy the window)
    without this addref. */
   nsCOMPtr<nsIDOMEventTarget> kungFuDeathGrip1(mChromeEventHandler);
+  mozilla::Unused << kungFuDeathGrip1; // These aren't referred to through the function
   nsCOMPtr<nsIScriptContext> kungFuDeathGrip2(GetContextInternal());
+  mozilla::Unused << kungFuDeathGrip2; // These aren't referred to through the function
+
 
   if (aVisitor.mEvent->mMessage == eResize) {
     mIsHandlingResizeEvent = false;
@@ -3606,6 +3630,7 @@ nsPIDOMWindow<T>::MaybeCreateDoc()
     // don't have to explicitly set the member variable because the docshell
     // has already called SetNewDocument().
     nsCOMPtr<nsIDocument> document = docShell->GetDocument();
+    Unused << document;
   }
 }
 
@@ -4469,11 +4494,11 @@ nsGlobalWindow::MayResolve(jsid aId)
     return false;
   }
 
-  if (aId == XPCJSRuntime::Get()->GetStringID(XPCJSRuntime::IDX_COMPONENTS)) {
+  if (aId == XPCJSContext::Get()->GetStringID(XPCJSContext::IDX_COMPONENTS)) {
     return true;
   }
 
-  if (aId == XPCJSRuntime::Get()->GetStringID(XPCJSRuntime::IDX_CONTROLLERS)) {
+  if (aId == XPCJSContext::Get()->GetStringID(XPCJSContext::IDX_CONTROLLERS)) {
     // We only resolve .controllers in release builds and on non-chrome windows,
     // but let's not worry about any of that stuff.
     return true;
@@ -5458,6 +5483,12 @@ nsGlobalWindow::GetDevicePixelRatioOuter()
     return 1.0;
   }
 
+  float overrideDPPX = presContext->GetOverrideDPPX();
+
+  if (overrideDPPX > 0) {
+    return overrideDPPX;
+  }
+
   return float(nsPresContext::AppUnitsPerCSSPixel())/
       presContext->AppUnitsPerDevPixel();
 }
@@ -5970,8 +6001,8 @@ nsGlobalWindow::DispatchResizeEvent(const CSSIntSize& aSize)
   CustomEvent* customEvent = static_cast<CustomEvent*>(domEvent.get());
   customEvent->InitCustomEvent(cx,
                                NS_LITERAL_STRING("DOMWindowResize"),
-                               /* bubbles = */ true,
-                               /* cancelable = */ true,
+                               /* aCanBubble = */ true,
+                               /* aCancelable = */ true,
                                detailValue,
                                res);
   if (res.Failed()) {
@@ -6529,7 +6560,7 @@ nsGlobalWindow::FinishFullscreenChange(bool aIsFullscreen)
     ErrorResult rv;
     mWakeLock = pmService->NewWakeLock(NS_LITERAL_STRING("DOM_Fullscreen"),
                                        AsOuter()->GetCurrentInnerWindow(), rv);
-    NS_WARN_IF_FALSE(!rv.Failed(), "Failed to lock the wakelock");
+    NS_WARNING_ASSERTION(!rv.Failed(), "Failed to lock the wakelock");
     rv.SuppressException();
   } else if (mWakeLock && !mFullScreen) {
     ErrorResult rv;
@@ -8478,7 +8509,9 @@ nsGlobalWindow::CloseOuter(bool aTrustedCaller)
   // Don't allow scripts from content to close non-app or non-neterror
   // windows that were not opened by script.
   nsAutoString url;
-  mDoc->GetURL(url);
+  nsresult rv = mDoc->GetURL(url);
+  NS_ENSURE_SUCCESS_VOID(rv);
+
   if (!mDocShell->GetIsApp() &&
       !StringBeginsWith(url, NS_LITERAL_STRING("about:neterror")) &&
       !mHadOriginalOpener && !aTrustedCaller) {
@@ -9723,14 +9756,14 @@ nsGlobalWindow::GetPrivateRoot()
   return top;
 }
 
-nsLocation*
+Location*
 nsGlobalWindow::GetLocation(ErrorResult& aError)
 {
   MOZ_RELEASE_ASSERT(IsInnerWindow());
 
   nsIDocShell *docShell = GetDocShell();
   if (!mLocation && docShell) {
-    mLocation = new nsLocation(AsInner(), docShell);
+    mLocation = new Location(AsInner(), docShell);
   }
   return mLocation;
 }
@@ -10161,8 +10194,10 @@ nsGlobalWindow::DispatchAsyncHashchange(nsIURI *aOldURI, nsIURI *aNewURI)
                   (oldHasHash != newHasHash || !oldHash.Equals(newHash)));
 
   nsAutoCString oldSpec, newSpec;
-  aOldURI->GetSpec(oldSpec);
-  aNewURI->GetSpec(newSpec);
+  nsresult rv = aOldURI->GetSpec(oldSpec);
+  NS_ENSURE_SUCCESS(rv, rv);
+  rv = aNewURI->GetSpec(newSpec);
+  NS_ENSURE_SUCCESS(rv, rv);
 
   NS_ConvertUTF8toUTF16 oldWideSpec(oldSpec);
   NS_ConvertUTF8toUTF16 newWideSpec(newSpec);
@@ -10448,7 +10483,10 @@ nsGlobalWindow::GetSessionStorage(ErrorResult& aError)
   if (!mSessionStorage) {
     nsString documentURI;
     if (mDoc) {
-      mDoc->GetDocumentURI(documentURI);
+      aError = mDoc->GetDocumentURI(documentURI);
+      if (NS_WARN_IF(aError.Failed())) {
+        return nullptr;
+      }
     }
 
     // If the document has the sandboxed origin flag set
@@ -10528,7 +10566,10 @@ nsGlobalWindow::GetLocalStorage(ErrorResult& aError)
 
     nsString documentURI;
     if (mDoc) {
-      mDoc->GetDocumentURI(documentURI);
+      aError = mDoc->GetDocumentURI(documentURI);
+      if (NS_WARN_IF(aError.Failed())) {
+        return nullptr;
+      }
     }
 
     nsCOMPtr<nsIDOMStorage> storage;
@@ -11121,14 +11162,14 @@ nsGlobalWindow::ShowSlowScriptDialog()
     buttonFlags += nsIPrompt::BUTTON_TITLE_IS_STRING * nsIPrompt::BUTTON_POS_2;
 
   // Null out the operation callback while we're re-entering JS here.
-  JSInterruptCallback old = JS_SetInterruptCallback(cx, nullptr);
+  bool old = JS_DisableInterruptCallback(cx);
 
   // Open the dialog.
   rv = prompt->ConfirmEx(title, msg, buttonFlags, waitButton, stopButton,
                          debugButton, neverShowDlg, &neverShowDlgChk,
                          &buttonPressed);
 
-  JS_SetInterruptCallback(cx, old);
+  JS_ResetInterruptCallback(cx, old);
 
   if (NS_SUCCEEDED(rv) && (buttonPressed == 0)) {
     return neverShowDlgChk ? AlwaysContinueSlowScript : ContinueSlowScript;
@@ -11862,6 +11903,7 @@ nsGlobalWindow::OpenInternal(const nsAString& aUrl, const nsAString& aName,
 
       // Force document creation.
       nsCOMPtr<nsIDocument> doc = (*aReturn)->GetDoc();
+      Unused << doc;
     }
   }
 
@@ -12031,23 +12073,6 @@ nsGlobalWindow::SetTimeoutOrInterval(nsIScriptTimeoutHandler *aHandler,
     realInterval = std::max(realInterval, uint32_t(DOMMinTimeoutValue()));
   }
 
-  // Get principal of currently executing code, save for execution of timeout.
-  // If our principals subsume the subject principal then use the subject
-  // principal. Otherwise, use our principal to avoid running script in
-  // elevated principals.
-  //
-  // Note the direction of this test: We don't allow setTimeouts running with
-  // chrome privileges on content windows, but we do allow setTimeouts running
-  // with content privileges on chrome windows (where they can't do very much,
-  // of course).
-  nsCOMPtr<nsIPrincipal> subjectPrincipal = nsContentUtils::SubjectPrincipal();
-  nsCOMPtr<nsIPrincipal> ourPrincipal = GetPrincipal();
-  if (ourPrincipal->Subsumes(subjectPrincipal)) {
-    timeout->mPrincipal = subjectPrincipal;
-  } else {
-    timeout->mPrincipal = ourPrincipal;
-  }
-
   TimeDuration delta = TimeDuration::FromMilliseconds(realInterval);
 
   if (!IsFrozen() && !mTimeoutsSuspendDepth) {
@@ -12213,8 +12238,7 @@ nsGlobalWindow::RunTimeoutHandler(nsTimeout* aTimeout,
   RefPtr<Function> callback = handler->GetCallback();
   if (!callback) {
     // Evaluate the timeout expression.
-    nsAutoString script;
-    handler->GetHandlerText(script);
+    const nsAString& script = handler->GetHandlerText();
 
     const char* filename = nullptr;
     uint32_t lineNo = 0, dummyColumn = 0;
@@ -14019,7 +14043,6 @@ nsGlobalModalWindow::GetReturnValue(nsIVariant **aRetVal)
 {
   FORWARD_TO_OUTER_MODAL_CONTENT_WINDOW(GetReturnValue, (aRetVal), NS_OK);
 
-  nsCOMPtr<nsIVariant> result;
   if (!mReturnValue) {
     nsCOMPtr<nsIVariant> variant = CreateVoidVariant();
     variant.forget(aRetVal);
@@ -14386,6 +14409,46 @@ nsGlobalWindow::CheckForDPIChange()
       }
     }
   }
+}
+
+void
+nsGlobalWindow::GetConstellation(nsACString& aConstellation)
+{
+  FORWARD_TO_INNER_VOID(GetConstellation, (aConstellation));
+
+#ifdef DEBUG
+  RefPtr<nsGlobalWindow> outer = GetOuterWindowInternal();
+  MOZ_ASSERT(outer, "We should have an outer window");
+  RefPtr<nsGlobalWindow> top = outer->GetTopInternal();
+  RefPtr<nsPIDOMWindowOuter> opener = outer->GetOpener();
+  MOZ_ASSERT(!top || (top->mStaticConstellation ==
+                      outer->mStaticConstellation));
+  MOZ_ASSERT(!opener || (Cast(opener)->mStaticConstellation ==
+                         outer->mStaticConstellation));
+#endif
+
+  if (mConstellation.IsVoid()) {
+    mConstellation.Truncate();
+    // The dynamic constellation part comes from the eTLD+1 for the principal's URI.
+    nsCOMPtr<nsIPrincipal> principal = GetPrincipal();
+    nsCOMPtr<nsIURI> uri;
+    nsresult rv = principal->GetURI(getter_AddRefs(uri));
+    if (NS_SUCCEEDED(rv)) {
+      nsCOMPtr<nsIEffectiveTLDService> tldService =
+        do_GetService(NS_EFFECTIVETLDSERVICE_CONTRACTID);
+      if (tldService) {
+        rv = tldService->GetBaseDomain(uri, 0, mConstellation);
+        if (NS_FAILED(rv)) {
+          mConstellation.Truncate();
+        }
+      }
+    }
+
+    // Get the static constellation from the outer window object.
+    mConstellation.AppendPrintf("^%llu", GetOuterWindowInternal()->mStaticConstellation);
+  }
+
+  aConstellation.Assign(mConstellation);
 }
 
 nsGlobalWindow::TemporarilyDisableDialogs::TemporarilyDisableDialogs(

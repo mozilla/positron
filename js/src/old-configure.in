@@ -140,9 +140,6 @@ fi
 
 MOZ_TOOL_VARIABLES
 
-AC_PROG_CPP
-AC_PROG_CXXCPP
-
 dnl Special win32 checks
 dnl ========================================================
 
@@ -657,8 +654,6 @@ case "$target" in
     if test -z "$CLANG_CC"; then
        MOZ_OPTIMIZE_FLAGS="-freorder-blocks -fno-reorder-functions $MOZ_OPTIMIZE_FLAGS"
     fi
-    # The Maemo builders don't know about this flag
-    MOZ_ARM_VFP_FLAGS="-mfpu=vfp"
     ;;
 
 *-*linux*)
@@ -794,6 +789,10 @@ case "$target" in
             # use such pragmas, so just ignore them.
             CFLAGS="$CFLAGS -Wno-unknown-pragmas"
             CXXFLAGS="$CXXFLAGS -Wno-unknown-pragmas"
+            # We get errors about various #pragma intrinsic directives from
+            # clang-cl, and we don't need to hear about those.
+            CFLAGS="$CFLAGS -Wno-ignored-pragmas"
+            CXXFLAGS="$CXXFLAGS -Wno-ignored-pragmas"
             # clang-cl's Intrin.h marks things like _ReadWriteBarrier
             # as __attribute((__deprecated__)).  This is nice to know,
             # but since we don't get the equivalent warning from MSVC,
@@ -1072,8 +1071,6 @@ if test "x$enable_dtrace" = "xyes"; then
   fi
 fi
 AC_SUBST(HAVE_DTRACE)
-
-MOZ_LINUX_PERF_EVENT
 
 dnl Checks for libraries.
 dnl ========================================================
@@ -1768,13 +1765,6 @@ elif test "$CPU_ARCH" = "x86"; then
 elif test "$CPU_ARCH" = "x86_64"; then
     AC_DEFINE(JS_CODEGEN_X64)
     JS_CODEGEN_X64=1
-
-    dnl Signal-handler OOM checking requires large mprotected guard regions, so
-    dnl currently it is only implemented on x64.
-    AC_DEFINE(ASMJS_MAY_USE_SIGNAL_HANDLERS)
-    AC_DEFINE(ASMJS_MAY_USE_SIGNAL_HANDLERS_FOR_OOB)
-    ASMJS_MAY_USE_SIGNAL_HANDLERS=1
-    ASMJS_MAY_USE_SIGNAL_HANDLERS_FOR_OOB=1
 elif test "$CPU_ARCH" = "arm"; then
     AC_DEFINE(JS_CODEGEN_ARM)
     JS_CODEGEN_ARM=1
@@ -1785,10 +1775,6 @@ elif test "$CPU_ARCH" = "arm"; then
 
     dnl ARM platforms may trap on unaligned accesses; catch the signal and
     dnl recover.
-    AC_DEFINE(ASMJS_MAY_USE_SIGNAL_HANDLERS)
-    AC_DEFINE(ASMJS_MAY_USE_SIGNAL_HANDLERS_FOR_UNALIGNED)
-    ASMJS_MAY_USE_SIGNAL_HANDLERS=1
-    ASMJS_MAY_USE_SIGNAL_HANDLERS_FOR_UNALIGNED=1
 elif test "$CPU_ARCH" = "mips32"; then
     AC_DEFINE(JS_CODEGEN_MIPS32)
     JS_CODEGEN_MIPS32=1
@@ -1810,9 +1796,6 @@ AC_SUBST(JS_CODEGEN_X86)
 AC_SUBST(JS_CODEGEN_X64)
 AC_SUBST(JS_CODEGEN_NONE)
 AC_SUBST(JS_DISASM_ARM)
-AC_SUBST(ASMJS_MAY_USE_SIGNAL_HANDLERS)
-AC_SUBST(ASMJS_MAY_USE_SIGNAL_HANDLERS_FOR_OOB)
-AC_SUBST(ASMJS_MAY_USE_SIGNAL_HANDLERS_FOR_UNALIGNED)
 
 dnl ========================================================
 dnl instruments

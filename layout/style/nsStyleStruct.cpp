@@ -60,10 +60,10 @@ EqualURIs(nsIURI *aURI1, nsIURI *aURI2)
 }
 
 static bool
-MaybeUnresolvedURIEquals(css::URLValue *aURI1, css::URLValue *aURI2)
+DefinitelyEqualURIsAndPrincipal(css::URLValue* aURI1, css::URLValue* aURI2)
 {
-  return aURI1 == aURI2 ||    // handle null==null, and optimize
-         (aURI1 && aURI2 && aURI1->MaybeUnresolvedURIEquals(*aURI2));
+  return aURI1 == aURI2 ||
+         (aURI1 && aURI2 && aURI1->DefinitelyEqualURIsAndPrincipal(*aURI2));
 }
 
 static
@@ -185,7 +185,12 @@ FragmentOrURL::GetSourceString(nsString &aRef) const
     mURL->GetRef(cref);
     cref.Insert('#', 0);
   } else {
-    mURL->GetSpec(cref);
+    // It's not entirely clear how to best handle failure here. Ensuring the
+    // string is empty seems safest.
+    nsresult rv = mURL->GetSpec(cref);
+    if (NS_FAILED(rv)) {
+      cref.Truncate();
+    }
   }
 
   aRef = NS_ConvertUTF8toUTF16(cref);
@@ -440,7 +445,7 @@ nsStyleBorder::nsStyleBorder(StyleStructContext aContext)
   , mBorderImageRepeatH(NS_STYLE_BORDER_IMAGE_REPEAT_STRETCH)
   , mBorderImageRepeatV(NS_STYLE_BORDER_IMAGE_REPEAT_STRETCH)
   , mFloatEdge(StyleFloatEdge::ContentBox)
-  , mBoxDecorationBreak(NS_STYLE_BOX_DECORATION_BREAK_SLICE)
+  , mBoxDecorationBreak(StyleBoxDecorationBreak::Slice)
   , mComputedBorder(0, 0, 0, 0)
 {
   MOZ_COUNT_CTOR(nsStyleBorder);
@@ -828,10 +833,10 @@ nsStyleList::sNoneQuotes;
 nsStyleXUL::nsStyleXUL(StyleStructContext aContext)
   : mBoxFlex(0.0f)
   , mBoxOrdinal(1)
-  , mBoxAlign(NS_STYLE_BOX_ALIGN_STRETCH)
-  , mBoxDirection(NS_STYLE_BOX_DIRECTION_NORMAL)
-  , mBoxOrient(NS_STYLE_BOX_ORIENT_HORIZONTAL)
-  , mBoxPack(NS_STYLE_BOX_PACK_START)
+  , mBoxAlign(StyleBoxAlign::Stretch)
+  , mBoxDirection(StyleBoxDirection::Normal)
+  , mBoxOrient(StyleBoxOrient::Horizontal)
+  , mBoxPack(StyleBoxPack::Start)
   , mStretchStack(true)
 {
   MOZ_COUNT_CTOR(nsStyleXUL);
@@ -2981,14 +2986,14 @@ StyleAnimation::operator==(const StyleAnimation& aOther) const
 // nsStyleDisplay
 //
 nsStyleDisplay::nsStyleDisplay(StyleStructContext aContext)
-  : mDisplay(NS_STYLE_DISPLAY_INLINE)
-  , mOriginalDisplay(NS_STYLE_DISPLAY_INLINE)
+  : mDisplay(StyleDisplay::Inline)
+  , mOriginalDisplay(StyleDisplay::Inline)
   , mContain(NS_STYLE_CONTAIN_NONE)
   , mAppearance(NS_THEME_NONE)
   , mPosition(NS_STYLE_POSITION_STATIC)
-  , mFloat(StyleFloat::None_)
-  , mOriginalFloat(StyleFloat::None_)
-  , mBreakType(NS_STYLE_CLEAR_NONE)
+  , mFloat(StyleFloat::None)
+  , mOriginalFloat(StyleFloat::None)
+  , mBreakType(StyleClear::None)
   , mBreakInside(NS_STYLE_PAGE_BREAK_AUTO)
   , mBreakBefore(false)
   , mBreakAfter(false)
@@ -3108,11 +3113,11 @@ nsStyleDisplay::CalcDifference(const nsStyleDisplay& aNewData) const
 {
   nsChangeHint hint = nsChangeHint(0);
 
-  if (!MaybeUnresolvedURIEquals(mBinding, aNewData.mBinding)
+  if (!DefinitelyEqualURIsAndPrincipal(mBinding, aNewData.mBinding)
       || mPosition != aNewData.mPosition
       || mDisplay != aNewData.mDisplay
       || mContain != aNewData.mContain
-      || (mFloat == StyleFloat::None_) != (aNewData.mFloat == StyleFloat::None_)
+      || (mFloat == StyleFloat::None) != (aNewData.mFloat == StyleFloat::None)
       || mOverflowX != aNewData.mOverflowX
       || mOverflowY != aNewData.mOverflowY
       || mScrollBehavior != aNewData.mScrollBehavior
@@ -3674,9 +3679,6 @@ nsStyleText::nsStyleText(StyleStructContext aContext)
   , mTextAlignLast(NS_STYLE_TEXT_ALIGN_AUTO)
   , mTextAlignTrue(false)
   , mTextAlignLastTrue(false)
-  , mTextEmphasisColorForeground(true)
-  , mWebkitTextFillColorForeground(true)
-  , mWebkitTextStrokeColorForeground(true)
   , mTextTransform(NS_STYLE_TEXT_TRANSFORM_NONE)
   , mWhiteSpace(NS_STYLE_WHITESPACE_NORMAL)
   , mWordBreak(NS_STYLE_WORDBREAK_NORMAL)
@@ -3690,9 +3692,9 @@ nsStyleText::nsStyleText(StyleStructContext aContext)
   , mTextEmphasisStyle(NS_STYLE_TEXT_EMPHASIS_STYLE_NONE)
   , mTextRendering(NS_STYLE_TEXT_RENDERING_AUTO)
   , mTabSize(NS_STYLE_TABSIZE_INITIAL)
-  , mTextEmphasisColor(aContext.DefaultColor())
-  , mWebkitTextFillColor(aContext.DefaultColor())
-  , mWebkitTextStrokeColor(aContext.DefaultColor())
+  , mTextEmphasisColor(StyleComplexColor::CurrentColor())
+  , mWebkitTextFillColor(StyleComplexColor::CurrentColor())
+  , mWebkitTextStrokeColor(StyleComplexColor::CurrentColor())
   , mWordSpacing(0, nsStyleCoord::CoordConstructor)
   , mLetterSpacing(eStyleUnit_Normal)
   , mLineHeight(eStyleUnit_Normal)
@@ -3713,9 +3715,6 @@ nsStyleText::nsStyleText(const nsStyleText& aSource)
   , mTextAlignLast(aSource.mTextAlignLast)
   , mTextAlignTrue(false)
   , mTextAlignLastTrue(false)
-  , mTextEmphasisColorForeground(aSource.mTextEmphasisColorForeground)
-  , mWebkitTextFillColorForeground(aSource.mWebkitTextFillColorForeground)
-  , mWebkitTextStrokeColorForeground(aSource.mWebkitTextStrokeColorForeground)
   , mTextTransform(aSource.mTextTransform)
   , mWhiteSpace(aSource.mWhiteSpace)
   , mWordBreak(aSource.mWordBreak)
@@ -3813,16 +3812,8 @@ nsStyleText::CalcDifference(const nsStyleText& aNewData) const
     return hint;
   }
 
-  MOZ_ASSERT(!mTextEmphasisColorForeground ||
-             !aNewData.mTextEmphasisColorForeground ||
-             mTextEmphasisColor == aNewData.mTextEmphasisColor,
-             "If the text-emphasis-color are both foreground color, "
-             "mTextEmphasisColor should also be identical");
-  if (mTextEmphasisColorForeground != aNewData.mTextEmphasisColorForeground ||
-      mTextEmphasisColor != aNewData.mTextEmphasisColor ||
-      mWebkitTextFillColorForeground != aNewData.mWebkitTextFillColorForeground ||
+  if (mTextEmphasisColor != aNewData.mTextEmphasisColor ||
       mWebkitTextFillColor != aNewData.mWebkitTextFillColor ||
-      mWebkitTextStrokeColorForeground != aNewData.mWebkitTextStrokeColorForeground ||
       mWebkitTextStrokeColor != aNewData.mWebkitTextStrokeColor) {
     hint |= nsChangeHint_SchedulePaint |
             nsChangeHint_RepaintFrame;
@@ -3897,7 +3888,7 @@ nsCursorImage::operator=(const nsCursorImage& aOther)
 nsStyleUserInterface::nsStyleUserInterface(StyleStructContext aContext)
   : mUserInput(NS_STYLE_USER_INPUT_AUTO)
   , mUserModify(NS_STYLE_USER_MODIFY_READ_ONLY)
-  , mUserFocus(StyleUserFocus::None_)
+  , mUserFocus(StyleUserFocus::None)
   , mPointerEvents(NS_STYLE_POINTER_EVENTS_AUTO)
   , mCursor(NS_STYLE_CURSOR_AUTO)
   , mCursorArrayLength(0)

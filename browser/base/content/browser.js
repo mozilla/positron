@@ -57,10 +57,8 @@ Cu.import("resource://gre/modules/NotificationDB.jsm");
   ["webrtcUI", "resource:///modules/webrtcUI.jsm", ]
 ].forEach(([name, resource]) => XPCOMUtils.defineLazyModuleGetter(this, name, resource));
 
-if (AppConstants.MOZ_SAFE_BROWSING) {
-  XPCOMUtils.defineLazyModuleGetter(this, "SafeBrowsing",
-    "resource://gre/modules/SafeBrowsing.jsm");
-}
+XPCOMUtils.defineLazyModuleGetter(this, "SafeBrowsing",
+  "resource://gre/modules/SafeBrowsing.jsm");
 
 if (AppConstants.MOZ_CRASHREPORTER) {
   XPCOMUtils.defineLazyModuleGetter(this, "PluginCrashReporter",
@@ -692,8 +690,26 @@ function gKeywordURIFixup({ target: browser, data: fixupInfo }) {
     asciiHost = asciiHost.slice(0, -1);
   }
 
-  // Ignore number-only things entirely (no decimal IPs for you!)
-  if (/^\d+$/.test(asciiHost))
+  let isIPv4Address = host => {
+    let parts = host.split(".");
+    if (parts.length != 4) {
+      return false;
+    }
+    return parts.every(part => {
+      let n = parseInt(part, 10);
+      return n >= 0 && n <= 255;
+    });
+  };
+  // Avoid showing fixup information if we're suggesting an IP. Note that
+  // decimal representations of IPs are normalized to a 'regular'
+  // dot-separated IP address by network code, but that only happens for
+  // numbers that don't overflow. Longer numbers do not get normalized,
+  // but still work to access IP addresses. So for instance,
+  // 1097347366913 (ff7f000001) gets resolved by using the final bytes,
+  // making it the same as 7f000001, which is 127.0.0.1 aka localhost.
+  // While 2130706433 would get normalized by network, 1097347366913
+  // does not, and we have to deal with both cases here:
+  if (isIPv4Address(asciiHost) || /^\d+$/.test(asciiHost))
     return;
 
   let onLookupComplete = (request, record, status) => {
@@ -1136,10 +1152,8 @@ var gBrowserInit = {
       }
     }
 
-    if (AppConstants.MOZ_SAFE_BROWSING) {
-      // Bug 778855 - Perf regression if we do this here. To be addressed in bug 779008.
-      setTimeout(function() { SafeBrowsing.init(); }, 2000);
-    }
+    // Bug 778855 - Perf regression if we do this here. To be addressed in bug 779008.
+    setTimeout(function() { SafeBrowsing.init(); }, 2000);
 
     Services.obs.addObserver(gIdentityHandler, "perm-changed", false);
     Services.obs.addObserver(gSessionHistoryObserver, "browser:purge-session-history", false);
@@ -3297,6 +3311,7 @@ var PrintPreviewListener = {
       this._simplifyPageTab = null;
     }
     gBrowser.removeTab(this._printPreviewTab);
+    gBrowser.deactivatePrintPreviewBrowsers();
     this._printPreviewTab = null;
   },
   _toggleAffectedChrome: function () {
@@ -3352,7 +3367,11 @@ var PrintPreviewListener = {
 
     if (this._chromeState.sidebarOpen)
       SidebarUI.show(this._sidebarCommand);
-  }
+  },
+
+  activateBrowser(browser) {
+    gBrowser.activateBrowserForPrintPreview(browser);
+  },
 }
 
 function getMarkupDocumentViewer()
@@ -3376,8 +3395,8 @@ var browserDragAndDrop = {
     }
   },
 
-  drop: function (aEvent, aName, aDisallowInherit) {
-    return Services.droppedLinkHandler.dropLink(aEvent, aName, aDisallowInherit);
+  dropLinks: function (aEvent, aDisallowInherit) {
+    return Services.droppedLinkHandler.dropLinks(aEvent, aDisallowInherit);
   }
 };
 
@@ -3385,8 +3404,10 @@ var homeButtonObserver = {
   onDrop: function (aEvent)
     {
       // disallow setting home pages that inherit the principal
-      let url = browserDragAndDrop.drop(aEvent, {}, true);
-      setTimeout(openHomeDialog, 0, url);
+      let links = browserDragAndDrop.dropLinks(aEvent, true);
+      if (links.length) {
+        setTimeout(openHomeDialog, 0, links.map(link => link.url).join("|"));
+      }
     },
 
   onDragOver: function (aEvent)
@@ -3405,18 +3426,24 @@ var homeButtonObserver = {
 function openHomeDialog(aURL)
 {
   var promptTitle = gNavigatorBundle.getString("droponhometitle");
-  var promptMsg   = gNavigatorBundle.getString("droponhomemsg");
+  var promptMsg;
+  if (aURL.includes("|")) {
+    promptMsg = gNavigatorBundle.getString("droponhomemsgMultiple");
+  } else {
+    promptMsg = gNavigatorBundle.getString("droponhomemsg");
+  }
+
   var pressedVal  = Services.prompt.confirmEx(window, promptTitle, promptMsg,
                           Services.prompt.STD_YES_NO_BUTTONS,
                           null, null, null, null, {value:0});
 
   if (pressedVal == 0) {
     try {
-      var str = Components.classes["@mozilla.org/supports-string;1"]
-                          .createInstance(Components.interfaces.nsISupportsString);
-      str.data = aURL;
+      var homepageStr = Components.classes["@mozilla.org/supports-string;1"]
+                        .createInstance(Components.interfaces.nsISupportsString);
+      homepageStr.data = aURL;
       gPrefService.setComplexValue("browser.startup.homepage",
-                                   Components.interfaces.nsISupportsString, str);
+                                   Components.interfaces.nsISupportsString, homepageStr);
     } catch (ex) {
       dump("Failed to set the home page.\n"+ex+"\n");
     }
@@ -3435,11 +3462,14 @@ var newTabButtonObserver = {
 
   onDrop: function (aEvent)
   {
-    let url = browserDragAndDrop.drop(aEvent, { });
-    getShortcutOrURIAndPostData(url).then(data => {
-      if (data.url) {
-        // allow third-party services to fixup this URL
-        openNewTabWith(data.url, null, data.postData, aEvent, true);
+    let links = browserDragAndDrop.dropLinks(aEvent);
+    Task.spawn(function*() {
+      for (let link of links) {
+        let data = yield getShortcutOrURIAndPostData(link.url);
+        if (data.url) {
+          // allow third-party services to fixup this URL
+          openNewTabWith(data.url, null, data.postData, aEvent, true);
+        }
       }
     });
   }
@@ -3455,11 +3485,14 @@ var newWindowButtonObserver = {
   },
   onDrop: function (aEvent)
   {
-    let url = browserDragAndDrop.drop(aEvent, { });
-    getShortcutOrURIAndPostData(url).then(data => {
-      if (data.url) {
-        // allow third-party services to fixup this URL
-        openNewWindowWith(data.url, null, data.postData, true);
+    let links = browserDragAndDrop.dropLinks(aEvent);
+    Task.spawn(function*() {
+      for (let link of links) {
+        let data = yield getShortcutOrURIAndPostData(link.url);
+        if (data.url) {
+          // allow third-party services to fixup this URL
+          openNewWindowWith(data.url, null, data.postData, true);
+        }
       }
     });
   }
@@ -3718,11 +3751,14 @@ const BrowserSearch = {
     return document.getElementById("searchbar");
   },
 
+  get searchEnginesURL() {
+    return formatURL("browser.search.searchEnginesURL", true);
+  },
+
   loadAddEngines: function BrowserSearch_loadAddEngines() {
     var newWindowPref = gPrefService.getIntPref("browser.link.open_newwindow");
     var where = newWindowPref == 3 ? "tab" : "window";
-    var searchEnginesURL = formatURL("browser.search.searchEnginesURL", true);
-    openUILinkIn(searchEnginesURL, where);
+    openUILinkIn(this.searchEnginesURL, where);
   },
 
   get _isExtendedTelemetryEnabled() {
@@ -4084,7 +4120,7 @@ function updateEditUIVisibility()
 function openNewUserContextTab(event)
 {
   openUILinkIn(BROWSER_NEW_TAB_URL, "tab", {
-    userContextId: parseInt(event.target.getAttribute('usercontextid')),
+    userContextId: parseInt(event.target.getAttribute('data-usercontextid')),
   });
 }
 
@@ -4838,6 +4874,12 @@ var TabsProgressListener = {
     if (!Object.getOwnPropertyDescriptor(window, "PopupNotifications").get)
       PopupNotifications.locationChange(aBrowser);
 
+    let tab = gBrowser.getTabForBrowser(aBrowser);
+    if (tab && tab._sharingState) {
+      gBrowser.setBrowserSharing(aBrowser, {});
+      webrtcUI.forgetStreamsFromBrowser(aBrowser);
+    }
+
     gBrowser.getNotificationBox(aBrowser).removeTransientNotifications();
 
     FullZoom.onLocationChange(aLocationURI, false, aBrowser);
@@ -5388,7 +5430,9 @@ function hrefAndLinkNodeForClickEvent(event)
     if (node.nodeType == Node.ELEMENT_NODE &&
         (node.localName == "a" ||
          node.namespaceURI == "http://www.w3.org/1998/Math/MathML")) {
-      href = node.getAttributeNS("http://www.w3.org/1999/xlink", "href");
+      href = node.getAttribute("href") ||
+             node.getAttributeNS("http://www.w3.org/1999/xlink", "href");
+
       if (href) {
         baseURI = node.baseURI;
         break;
@@ -5608,19 +5652,57 @@ function stripUnsafeProtocolOnPaste(pasteData) {
   return pasteData.replace(/^(?:\s*javascript:)+/i, "");
 }
 
-function handleDroppedLink(event, url, name)
+// handleDroppedLink has the following 2 overloads:
+//   handleDroppedLink(event, url, name)
+//   handleDroppedLink(event, links)
+function handleDroppedLink(event, urlOrLinks, name)
 {
+  let links;
+  if (Array.isArray(urlOrLinks)) {
+    links = urlOrLinks;
+  } else {
+    links = [{ url: urlOrLinks, name, type: "" }];
+  }
+
   let lastLocationChange = gBrowser.selectedBrowser.lastLocationChange;
 
-  getShortcutOrURIAndPostData(url).then(data => {
-    if (data.url &&
-        lastLocationChange == gBrowser.selectedBrowser.lastLocationChange)
-      loadURI(data.url, null, data.postData, false);
+  let userContextId = gBrowser.selectedBrowser.getAttribute("usercontextid");
+
+  // event is null if links are dropped in content process.
+  // inBackground should be false, as it's loading into current browser.
+  let inBackground = false;
+  if (event) {
+    let inBackground = Services.prefs.getBoolPref("browser.tabs.loadInBackground");
+    if (event.shiftKey)
+      inBackground = !inBackground;
+  }
+
+  Task.spawn(function*() {
+    let urls = [];
+    let postDatas = [];
+    for (let link of links) {
+      let data = yield getShortcutOrURIAndPostData(link.url);
+      urls.push(data.url);
+      postDatas.push(data.postData);
+    }
+    if (lastLocationChange == gBrowser.selectedBrowser.lastLocationChange) {
+      gBrowser.loadTabs(urls, {
+        inBackground,
+        replace: true,
+        allowThirdPartyFixup: false,
+        postDatas,
+        userContextId,
+      });
+    }
   });
 
-  // Keep the event from being handled by the dragDrop listeners
-  // built-in to gecko if they happen to be above us.
-  event.preventDefault();
+  // If links are dropped in content process, event.preventDefault() should be
+  // called in content process.
+  if (event) {
+    // Keep the event from being handled by the dragDrop listeners
+    // built-in to gecko if they happen to be above us.
+    event.preventDefault();
+  }
 }
 
 function BrowserSetForcedCharacterSet(aCharset)
@@ -6845,7 +6927,7 @@ var gIdentityHandler = {
     this._sharingState = tab._sharingState;
 
     if (this._identityPopup.state == "open") {
-      this.updateSitePermissions();
+      this._handleHeightChange(() => this.updateSitePermissions());
     }
   },
 
@@ -7357,6 +7439,20 @@ var gIdentityHandler = {
     this.updatePermissionHint();
   },
 
+  _handleHeightChange: function(aFunction, aWillShowReloadHint) {
+    let heightBefore = getComputedStyle(this._permissionList).height;
+    aFunction();
+    let heightAfter = getComputedStyle(this._permissionList).height;
+    // Showing the reload hint increases the height, we need to account for it.
+    if (aWillShowReloadHint) {
+      heightAfter = parseInt(heightAfter) +
+                    parseInt(getComputedStyle(this._permissionList.nextSibling).height);
+    }
+    let heightChange = parseInt(heightAfter) - parseInt(heightBefore);
+    if (heightChange)
+      this._identityPopupMultiView.setHeightToFit(heightChange);
+  },
+
   _createPermissionItem: function (aPermission) {
     let container = document.createElement("hbox");
     container.setAttribute("class", "identity-popup-permission-item");
@@ -7365,7 +7461,7 @@ var gIdentityHandler = {
     let img = document.createElement("image");
     let classes = "identity-popup-permission-icon " + aPermission.id + "-icon";
     if (aPermission.state == SitePermissions.BLOCK)
-      classes += " blocked";
+      classes += " blocked-permission-icon";
     if (aPermission.inUse)
       classes += " in-use";
     img.setAttribute("class", classes);
@@ -7383,8 +7479,11 @@ var gIdentityHandler = {
 
     let button = document.createElement("button");
     button.setAttribute("class", "identity-popup-permission-remove-button");
+    let tooltiptext = gNavigatorBundle.getString("permissions.remove.tooltip");
+    button.setAttribute("tooltiptext", tooltiptext);
     button.addEventListener("command", () => {
-      this._permissionList.removeChild(container);
+      this._handleHeightChange(() =>
+        this._permissionList.removeChild(container), !this._permissionJustRemoved);
       if (aPermission.inUse &&
           ["camera", "microphone", "screen"].includes(aPermission.id)) {
         let windowId = this._sharingState.windowId;
@@ -7411,6 +7510,23 @@ var gIdentityHandler = {
       SitePermissions.remove(gBrowser.currentURI, aPermission.id);
       this._permissionJustRemoved = true;
       this.updatePermissionHint();
+
+      // Set telemetry values for clearing a permission
+      let histogram = Services.telemetry.getKeyedHistogramById("WEB_PERMISSION_CLEARED");
+
+      let permissionType = 0;
+      if (aPermission.state == SitePermissions.ALLOW) {
+        // 1 : clear permanently allowed permission
+        permissionType = 1;
+      } else if (aPermission.state == SitePermissions.BLOCK) {
+        // 2 : clear permanently blocked permission
+        permissionType = 2;
+      }
+      // 3 : TODO clear temporary allowed permission
+      // 4 : TODO clear temporary blocked permission
+
+      histogram.add("(all)", permissionType);
+      histogram.add(aPermission.id, permissionType);
     });
 
     container.appendChild(img);
@@ -7521,7 +7637,7 @@ var gRemoteTabsUI = {
 };
 
 /**
- * Switch to a tab that has a given URI, and focusses its browser window.
+ * Switch to a tab that has a given URI, and focuses its browser window.
  * If a matching tab is in this window, it will be switched to. Otherwise, other
  * windows will be searched.
  *
@@ -7537,10 +7653,12 @@ var gRemoteTabsUI = {
  *        passed via this object.
  *        This object also allows:
  *        - 'ignoreFragment' property to be set to true to exclude fragment-portion
- *        matching when comparing URIs. Fragment will be replaced.
- *        - 'ignoreQueryString' property to be set to true to exclude query string
  *        matching when comparing URIs.
- *        - 'replaceQueryString' property to be set to true to exclude query string
+ *          If set to "whenComparing", the fragment will be unmodified.
+ *          If set to "whenComparingAndReplace", the fragment will be replaced.
+ *        - 'ignoreQueryString' boolean property to be set to true to exclude query string
+ *        matching when comparing URIs.
+ *        - 'replaceQueryString' boolean property to be set to true to exclude query string
  *        matching when comparing URIs and overwrite the initial query string with
  *        the one from the new URI.
  * @return True if an existing tab was found, false otherwise
@@ -7593,16 +7711,18 @@ function switchToTabHavingURI(aURI, aOpenNew, aOpenParams={}) {
 
     // Need to handle nsSimpleURIs here too (e.g. about:...), which don't
     // work correctly with URL objects - so treat them as strings
+    let ignoreFragmentWhenComparing = typeof ignoreFragment == "string" &&
+                                      ignoreFragment.startsWith("whenComparing");
     let requestedCompare = cleanURL(
-        aURI.spec, ignoreQueryString || replaceQueryString, ignoreFragment);
+        aURI.spec, ignoreQueryString || replaceQueryString, ignoreFragmentWhenComparing);
     let browsers = aWindow.gBrowser.browsers;
     for (let i = 0; i < browsers.length; i++) {
       let browser = browsers[i];
       let browserCompare = cleanURL(
-          browser.currentURI.spec, ignoreQueryString || replaceQueryString, ignoreFragment);
+          browser.currentURI.spec, ignoreQueryString || replaceQueryString, ignoreFragmentWhenComparing);
       if (requestedCompare == browserCompare) {
         aWindow.focus();
-        if (ignoreFragment || replaceQueryString) {
+        if (ignoreFragment == "whenComparingAndReplace" || replaceQueryString) {
           browser.loadURI(aURI.spec);
         }
         aWindow.gBrowser.tabContainer.selectedIndex = i;

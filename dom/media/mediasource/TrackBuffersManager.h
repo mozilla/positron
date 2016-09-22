@@ -15,6 +15,7 @@
 
 #include "MediaData.h"
 #include "MediaDataDemuxer.h"
+#include "MediaResult.h"
 #include "MediaSourceDecoder.h"
 #include "SourceBufferTask.h"
 #include "TimeUnits.h"
@@ -123,6 +124,7 @@ public:
   // Buffered must conform to http://w3c.github.io/media-source/index.html#widl-SourceBuffer-buffered
   media::TimeIntervals Buffered();
   media::TimeUnit HighestStartTime();
+  media::TimeUnit HighestEndTime();
 
   // Return the size of the data managed by this SourceBufferContentManager.
   int64_t GetSize() const;
@@ -139,6 +141,7 @@ public:
   MediaInfo GetMetadata();
   const TrackBuffer& GetTrackBuffer(TrackInfo::TrackType aTrack);
   const media::TimeIntervals& Buffered(TrackInfo::TrackType);
+  const media::TimeUnit& HighestStartTime(TrackInfo::TrackType);
   media::TimeIntervals SafeBuffered(TrackInfo::TrackType) const;
   bool IsEnded() const
   {
@@ -151,9 +154,10 @@ public:
                                        const media::TimeUnit& aTimeThreadshold,
                                        const media::TimeUnit& aFuzz,
                                        bool& aFound);
+
   already_AddRefed<MediaRawData> GetSample(TrackInfo::TrackType aTrack,
                                            const media::TimeUnit& aFuzz,
-                                           bool& aError);
+                                           MediaResult& aResult);
   int32_t FindCurrentPosition(TrackInfo::TrackType aTrack,
                               const media::TimeUnit& aFuzz);
   media::TimeUnit GetNextRandomAccessPoint(TrackInfo::TrackType aTrack,
@@ -162,7 +166,7 @@ public:
   void AddSizeOfResources(MediaSourceDecoder::ResourceSizes* aSizes);
 
 private:
-  typedef MozPromise<bool, nsresult, /* IsExclusive = */ true> CodedFrameProcessingPromise;
+  typedef MozPromise<bool, MediaResult, /* IsExclusive = */ true> CodedFrameProcessingPromise;
 
   // for MediaSourceDemuxer::GetMozDebugReaderData
   friend class MediaSourceDemuxer;
@@ -177,7 +181,7 @@ private:
   void CreateDemuxerforMIMEType();
   void ResetDemuxingState();
   void NeedMoreData();
-  void RejectAppend(nsresult aRejectValue, const char* aName);
+  void RejectAppend(const MediaResult& aRejectValue, const char* aName);
   // Will return a promise that will be resolved once all frames of the current
   // media segment have been processed.
   RefPtr<CodedFrameProcessingPromise> CodedFrameProcessing();
@@ -232,25 +236,25 @@ private:
   Maybe<media::TimeUnit> mLastParsedEndTime;
 
   void OnDemuxerInitDone(nsresult);
-  void OnDemuxerInitFailed(DemuxerFailureReason aFailure);
+  void OnDemuxerInitFailed(const MediaResult& aFailure);
   void OnDemuxerResetDone(nsresult);
   MozPromiseRequestHolder<MediaDataDemuxer::InitPromise> mDemuxerInitRequest;
   bool mEncrypted;
 
-  void OnDemuxFailed(TrackType aTrack, DemuxerFailureReason aFailure);
+  void OnDemuxFailed(TrackType aTrack, const MediaResult& aError);
   void DoDemuxVideo();
   void OnVideoDemuxCompleted(RefPtr<MediaTrackDemuxer::SamplesHolder> aSamples);
-  void OnVideoDemuxFailed(DemuxerFailureReason aFailure)
+  void OnVideoDemuxFailed(const MediaResult& aError)
   {
     mVideoTracks.mDemuxRequest.Complete();
-    OnDemuxFailed(TrackType::kVideoTrack, aFailure);
+    OnDemuxFailed(TrackType::kVideoTrack, aError);
   }
   void DoDemuxAudio();
   void OnAudioDemuxCompleted(RefPtr<MediaTrackDemuxer::SamplesHolder> aSamples);
-  void OnAudioDemuxFailed(DemuxerFailureReason aFailure)
+  void OnAudioDemuxFailed(const MediaResult& aError)
   {
     mAudioTracks.mDemuxRequest.Complete();
-    OnDemuxFailed(TrackType::kAudioTrack, aFailure);
+    OnDemuxFailed(TrackType::kAudioTrack, aError);
   }
 
   void DoEvictData(const media::TimeUnit& aPlaybackTime, int64_t aSizeToEvict);
@@ -368,7 +372,7 @@ private:
                                 const media::TimeUnit& aExpectedPts,
                                 const media::TimeUnit& aFuzz);
   void UpdateBufferedRanges();
-  void RejectProcessing(nsresult aRejectValue, const char* aName);
+  void RejectProcessing(const MediaResult& aRejectValue, const char* aName);
   void ResolveProcessing(bool aResolveValue, const char* aName);
   MozPromiseRequestHolder<CodedFrameProcessingPromise> mProcessingRequest;
   MozPromiseHolder<CodedFrameProcessingPromise> mProcessingPromise;
@@ -424,7 +428,13 @@ private:
   Atomic<int64_t> mSizeSourceBuffer;
   const int64_t mVideoEvictionThreshold;
   const int64_t mAudioEvictionThreshold;
-  Atomic<bool> mEvictionOccurred;
+  enum class EvictionState
+  {
+    NO_EVICTION_NEEDED,
+    EVICTION_NEEDED,
+    EVICTION_COMPLETED,
+  };
+  Atomic<EvictionState> mEvictionState;
 
   // Monitor to protect following objects accessed across multipple threads.
   mutable Monitor mMonitor;

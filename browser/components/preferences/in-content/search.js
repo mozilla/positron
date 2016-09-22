@@ -3,20 +3,12 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 Components.utils.import("resource://gre/modules/XPCOMUtils.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "AppConstants",
-                                  "resource://gre/modules/AppConstants.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "PlacesUtils",
                                   "resource://gre/modules/PlacesUtils.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "Task",
                                   "resource://gre/modules/Task.jsm");
 
 const ENGINE_FLAVOR = "text/x-moz-search-engine";
-
-document.addEventListener("Initialized", () => {
-  if (!AppConstants.isPlatformAndVersionAtLeast("win", "10")) {
-    document.getElementById("redirectSearchCheckbox").hidden = true;
-  }
-});
 
 var gEngineView = null;
 
@@ -35,6 +27,11 @@ var gSearchPane = {
     gEngineView = new EngineView(new EngineStore());
     document.getElementById("engineList").view = gEngineView;
     this.buildDefaultEngineDropDown();
+
+    let addEnginesLink = document.getElementById("addEngines");
+    let searchEnginesURL = Services.wm.getMostRecentWindow('navigator:browser')
+                                      .BrowserSearch.searchEnginesURL;
+    addEnginesLink.setAttribute("href", searchEnginesURL);
 
     window.addEventListener("click", this, false);
     window.addEventListener("command", this, false);
@@ -122,10 +119,6 @@ var gSearchPane = {
             }
             engineList.blur();
           }
-        }
-        if (aEvent.target.id == "addEngines" && aEvent.button == 0) {
-          Services.wm.getMostRecentWindow('navigator:browser')
-                     .BrowserSearch.loadAddEngines();
         }
         break;
       case "command":
@@ -222,6 +215,8 @@ var gSearchPane = {
       let newValue = !gEngineView._engineStore.engines[index].shown;
       gEngineView.setCellValue(index, tree.columns.getFirstColumn(),
                                newValue.toString());
+      // Prevent page from scrolling on the space key.
+      aEvent.preventDefault();
     }
     else {
       let isMac = Services.appinfo.OS == "Darwin";

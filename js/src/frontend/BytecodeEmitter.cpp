@@ -301,6 +301,7 @@ static bool
 ScopeKindIsInBody(ScopeKind kind)
 {
     return kind == ScopeKind::Lexical ||
+           kind == ScopeKind::SimpleCatch ||
            kind == ScopeKind::Catch ||
            kind == ScopeKind::With ||
            kind == ScopeKind::FunctionBodyVar ||
@@ -681,6 +682,7 @@ BytecodeEmitter::EmitterScope::searchInEnclosingScope(JSAtom* name, Scope* scope
           case ScopeKind::Lexical:
           case ScopeKind::NamedLambda:
           case ScopeKind::StrictNamedLambda:
+          case ScopeKind::SimpleCatch:
           case ScopeKind::Catch:
             if (hasEnv) {
                 for (BindingIter bi(si.scope()); bi; bi++) {
@@ -1168,22 +1170,15 @@ BytecodeEmitter::EmitterScope::enterFunctionExtraBodyVar(BytecodeEmitter* bce, F
 
 class DynamicBindingIter : public BindingIter
 {
-    uint32_t functionEnd_;
-
   public:
     explicit DynamicBindingIter(GlobalSharedContext* sc)
-      : BindingIter(*sc->bindings),
-        functionEnd_(sc->functionBindingEnd)
-    {
-        MOZ_ASSERT(functionEnd_ >= varStart_ && functionEnd_ <= letStart_);
-    }
+      : BindingIter(*sc->bindings)
+    { }
 
     explicit DynamicBindingIter(EvalSharedContext* sc)
-      : BindingIter(*sc->bindings, /* strict = */ false),
-        functionEnd_(sc->functionBindingEnd)
+      : BindingIter(*sc->bindings, /* strict = */ false)
     {
         MOZ_ASSERT(!sc->strict());
-        MOZ_ASSERT(functionEnd_ >= varStart_ && functionEnd_ <= letStart_);
     }
 
     JSOp bindingOp() const {
@@ -1197,10 +1192,6 @@ class DynamicBindingIter : public BindingIter
           default:
             MOZ_CRASH("Bad BindingKind");
         }
-    }
-
-    bool isBodyLevelFunction() const {
-        return index_ < functionEnd_;
     }
 };
 
@@ -1241,7 +1232,7 @@ BytecodeEmitter::EmitterScope::enterGlobal(BytecodeEmitter* bce, GlobalSharedCon
 
             // Define the name in the prologue. Do not emit DEFVAR for
             // functions that we'll emit DEFFUN for.
-            if (bi.isBodyLevelFunction())
+            if (bi.isTopLevelFunction())
                 continue;
 
             if (!bce->emitAtomOp(name, bi.bindingOp()))
@@ -1301,7 +1292,7 @@ BytecodeEmitter::EmitterScope::enterEval(BytecodeEmitter* bce, EvalSharedContext
             for (DynamicBindingIter bi(evalsc); bi; bi++) {
                 MOZ_ASSERT(bi.bindingOp() == JSOP_DEFVAR);
 
-                if (bi.isBodyLevelFunction())
+                if (bi.isTopLevelFunction())
                     continue;
 
                 if (!bce->emitAtomOp(bi.name(), JSOP_DEFVAR))
@@ -1412,6 +1403,7 @@ BytecodeEmitter::EmitterScope::leave(BytecodeEmitter* bce, bool nonLocal)
     ScopeKind kind = scope(bce)->kind();
     switch (kind) {
       case ScopeKind::Lexical:
+      case ScopeKind::SimpleCatch:
       case ScopeKind::Catch:
         if (!bce->emit1(hasEnvironment() ? JSOP_POPLEXICALENV : JSOP_DEBUGLEAVELEXICALENV))
             return false;
@@ -3433,6 +3425,8 @@ BytecodeEmitter::emitPropIncDec(ParseNode* pn)
 bool
 BytecodeEmitter::emitNameIncDec(ParseNode* pn)
 {
+    MOZ_ASSERT(pn->pn_kid->isKind(PNK_NAME));
+
     bool post;
     JSOp binop = GetIncDecInfo(pn->getKind(), &post);
 
@@ -3654,6 +3648,27 @@ BytecodeEmitter::emitElemIncDec(ParseNode* pn)
         return false;
 
     return true;
+}
+
+bool
+BytecodeEmitter::emitCallIncDec(ParseNode* incDec)
+{
+    MOZ_ASSERT(incDec->isKind(PNK_PREINCREMENT) ||
+               incDec->isKind(PNK_POSTINCREMENT) ||
+               incDec->isKind(PNK_PREDECREMENT) ||
+               incDec->isKind(PNK_POSTDECREMENT));
+
+    MOZ_ASSERT(incDec->pn_kid->isKind(PNK_CALL));
+
+    ParseNode* call = incDec->pn_kid;
+    if (!emitTree(call))                                // CALLRESULT
+        return false;
+    if (!emit1(JSOP_POS))                               // N
+        return false;
+
+    // The increment/decrement has no side effects, so proceed to throw for
+    // invalid assignment target.
+    return emitUint16Operand(JSOP_THROWMSG, JSMSG_BAD_LEFTSIDE_OF_ASS);
 }
 
 bool
@@ -4426,17 +4441,9 @@ BytecodeEmitter::emitDestructuringLHS(ParseNode* target, DestructuringFlavor fla
           }
 
           case PNK_CALL:
-            MOZ_ASSERT(target->pn_xflags & PNX_SETCALL);
-            if (!emitTree(target))
-                return false;
-
-            // Pop the call return value. Below, we pop the RHS too, balancing
-            // the stack --- presumably for the benefit of bytecode
-            // analysis. (The interpreter will never reach these instructions
-            // since we just emitted JSOP_SETCALL, which always throws. It's
-            // possible no analyses actually depend on this either.)
-            if (!emit1(JSOP_POP))
-                return false;
+            MOZ_ASSERT_UNREACHABLE("Parser::reportIfNotValidSimpleAssignmentTarget "
+                                   "rejects function calls as assignment "
+                                   "targets in destructuring assignments");
             break;
 
           default:
@@ -4952,9 +4959,15 @@ BytecodeEmitter::emitAssignment(ParseNode* lhs, JSOp op, ParseNode* rhs)
       case PNK_OBJECT:
         break;
       case PNK_CALL:
-        MOZ_ASSERT(lhs->pn_xflags & PNX_SETCALL);
         if (!emitTree(lhs))
             return false;
+
+        // Assignment to function calls is forbidden, but we have to make the
+        // call first.  Now we can throw.
+        if (!emitUint16Operand(JSOP_THROWMSG, JSMSG_BAD_LEFTSIDE_OF_ASS))
+            return false;
+
+        // Rebalance the stack to placate stack-depth assertions.
         if (!emit1(JSOP_POP))
             return false;
         break;
@@ -5001,12 +5014,9 @@ BytecodeEmitter::emitAssignment(ParseNode* lhs, JSOp op, ParseNode* rhs)
             break;
           }
           case PNK_CALL:
-            /*
-             * We just emitted a JSOP_SETCALL (which will always throw) and
-             * popped the call's return value. Push a random value to make sure
-             * the stack depth is correct.
-             */
-            MOZ_ASSERT(lhs->pn_xflags & PNX_SETCALL);
+            // We just emitted a JSOP_THROWMSG and popped the call's return
+            // value.  Push a random value to make sure the stack depth is
+            // correct.
             if (!emit1(JSOP_NULL))
                 return false;
             break;
@@ -5036,8 +5046,7 @@ BytecodeEmitter::emitAssignment(ParseNode* lhs, JSOp op, ParseNode* rhs)
         break;
       }
       case PNK_CALL:
-        /* Do nothing. The JSOP_SETCALL we emitted will always throw. */
-        MOZ_ASSERT(lhs->pn_xflags & PNX_SETCALL);
+        // We threw above, so nothing to do here.
         break;
       case PNK_ELEM: {
         JSOp setOp = lhs->as<PropertyByValue>().isSuper() ?
@@ -5664,7 +5673,7 @@ BytecodeEmitter::emitLexicalScope(ParseNode* pn)
     // For example, consider the following code.
     //
     // L1: {
-    // L2:  let x = 42;
+    // L2:   let x = 42;
     // L3: }
     //
     // If line number notes were not updated before the TDZ poison, the TDZ
@@ -5679,7 +5688,12 @@ BytecodeEmitter::emitLexicalScope(ParseNode* pn)
     }
 
     EmitterScope emitterScope(this);
-    ScopeKind kind = body->isKind(PNK_CATCH) ? ScopeKind::Catch : ScopeKind::Lexical;
+    ScopeKind kind;
+    if (body->isKind(PNK_CATCH))
+        kind = body->pn_kid1->isKind(PNK_NAME) ? ScopeKind::SimpleCatch : ScopeKind::Catch;
+    else
+        kind = ScopeKind::Lexical;
+
     if (!emitterScope.enterLexical(this, kind, pn->scopeBindings()))
         return false;
 
@@ -7530,7 +7544,6 @@ BytecodeEmitter::emitDeleteExpression(ParseNode* node)
         return false;
 
     if (useful) {
-        MOZ_ASSERT_IF(expression->isKind(PNK_CALL), !(expression->pn_xflags & PNX_SETCALL));
         if (!emitTree(expression))
             return false;
         if (!emit1(JSOP_POP))
@@ -7790,9 +7803,6 @@ BytecodeEmitter::emitCallOrNew(ParseNode* pn)
     switch (pn2->getKind()) {
       case PNK_NAME:
         if (emitterMode == BytecodeEmitter::SelfHosting && !spread) {
-            // We shouldn't see foo(bar) = x in self-hosted code.
-            MOZ_ASSERT(!(pn->pn_xflags & PNX_SETCALL));
-
             // Calls to "forceInterpreter", "callFunction",
             // "callContentFunction", or "resumeGenerator" in self-hosted
             // code generate inline bytecode.
@@ -7956,10 +7966,6 @@ BytecodeEmitter::emitCallOrNew(ParseNode* pn)
         if (!emitUint32Operand(JSOP_LINENO, lineNum))
             return false;
     }
-    if (pn->pn_xflags & PNX_SETCALL) {
-        if (!emitUint16Operand(JSOP_THROWMSG, JSMSG_BAD_LEFTSIDE_OF_ASS))
-            return false;
-    }
 
     return true;
 }
@@ -8068,18 +8074,14 @@ BytecodeEmitter::emitSequenceExpr(ParseNode* pn)
 MOZ_NEVER_INLINE bool
 BytecodeEmitter::emitIncOrDec(ParseNode* pn)
 {
-    /* Emit lvalue-specialized code for ++/-- operators. */
-    ParseNode* pn2 = pn->pn_kid;
-    switch (pn2->getKind()) {
+    switch (pn->pn_kid->getKind()) {
       case PNK_DOT:
         return emitPropIncDec(pn);
       case PNK_ELEM:
         return emitElemIncDec(pn);
       case PNK_CALL:
-        MOZ_ASSERT(pn2->pn_xflags & PNX_SETCALL);
-        return emitTree(pn2);
+        return emitCallIncDec(pn);
       default:
-        MOZ_ASSERT(pn2->isKind(PNK_NAME));
         return emitNameIncDec(pn);
     }
 

@@ -46,9 +46,9 @@ class Instance
     TlsData                              tlsData_;
 
     // Internal helpers:
-    void** addressOfTableBase(size_t tableIndex) const;
     const void** addressOfSigId(const SigIdDesc& sigId) const;
     FuncImportTls& funcImportTls(const FuncImport& fi);
+    TableTls& tableTls(const TableDesc& td) const;
 
     // Import call slow paths which are called directly from wasm code.
     friend void* AddressOf(SymbolicAddress, ExclusiveContext*);
@@ -56,7 +56,8 @@ class Instance
     static int32_t callImport_i32(Instance*, int32_t, int32_t, uint64_t*);
     static int32_t callImport_i64(Instance*, int32_t, int32_t, uint64_t*);
     static int32_t callImport_f64(Instance*, int32_t, int32_t, uint64_t*);
-
+    static uint32_t growMemory_i32(Instance* instance, uint32_t delta);
+    static uint32_t currentMemory_i32(Instance* instance);
     bool callImport(JSContext* cx, uint32_t funcImportIndex, unsigned argc, const uint64_t* argv,
                     MutableHandleValue rval);
 
@@ -87,18 +88,22 @@ class Instance
     const SharedTableVector& tables() const { return tables_; }
     SharedMem<uint8_t*> memoryBase() const;
     size_t memoryLength() const;
+    size_t memoryMappedSize() const;
+    bool memoryAccessInGuardRegion(uint8_t* addr, unsigned numBytes) const;
     TlsData& tlsData() { return tlsData_; }
 
     // This method returns a pointer to the GC object that owns this Instance.
     // Instances may be reached via weak edges (e.g., Compartment::instances_)
-    // so this perform a read-barrier on the returned object.
+    // so this perform a read-barrier on the returned object unless the barrier
+    // is explicitly waived.
 
     WasmInstanceObject* object() const;
+    WasmInstanceObject* objectUnbarriered() const;
 
     // Execute the given export given the JS call arguments, storing the return
     // value in args.rval.
 
-    MOZ_MUST_USE bool callExport(JSContext* cx, uint32_t funcIndex, CallArgs args);
+    MOZ_MUST_USE bool callExport(JSContext* cx, uint32_t funcDefIndex, CallArgs args);
 
     // Initially, calls to imports in wasm code call out through the generic
     // callImport method. If the imported callee gets JIT compiled and the types
@@ -107,6 +112,16 @@ class Instance
     // be notified so it can go back to the generic callImport.
 
     void deoptimizeImportExit(uint32_t funcImportIndex);
+
+    // Called by simulators to check whether accessing 'numBytes' starting at
+    // 'addr' would trigger a fault and be safely handled by signal handlers.
+
+    bool memoryAccessWouldFault(uint8_t* addr, unsigned numBytes);
+
+    // Called by Wasm(Memory|Table)Object when a moving resize occurs:
+
+    void onMovingGrowMemory(uint8_t* prevMemoryBase);
+    void onMovingGrowTable();
 
     // See Code::ensureProfilingState comment.
 

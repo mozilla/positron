@@ -16,6 +16,13 @@ var pairs = [
 ];
 
 add_task(function*() {
+  // Disable autoFill for this test, since it could mess up the results.
+  let autoFill = Preferences.get("browser.urlbar.autoFill");
+  Preferences.set("browser.urlbar.autoFill", false);
+  registerCleanupFunction(() => {
+    Preferences.set("browser.urlbar.autoFill", autoFill);
+  });
+
   for (let [inputValue, expectedURL] of pairs) {
     let focusEventPromise = BrowserTestUtils.waitForEvent(gURLBar, "focus");
     let messagePromise = BrowserTestUtils.waitForMessage(gBrowser.selectedBrowser.messageManager,
@@ -63,7 +70,7 @@ add_task(function*() {
     yield Promise.all([focusEventPromise, messagePromise]);
 
     gURLBar.inputField.value = inputValue.slice(0, -1);
-    EventUtils.synthesizeKey(inputValue.slice(-1) , {});
+    EventUtils.synthesizeKey(inputValue.slice(-1), {});
     EventUtils.synthesizeKey("VK_RETURN", { shiftKey: true });
     yield stoppedLoadPromise;
   }

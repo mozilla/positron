@@ -422,14 +422,12 @@ H264::DecodeSPSFromExtraData(const mozilla::MediaByteBuffer* aExtraData, SPSData
 
   if (!(reader.ReadU8() & 0x1f)) {
     // No SPS.
-    reader.DiscardRemaining();
     return false;
   }
   uint16_t length = reader.ReadU16();
 
   if ((reader.PeekU8() & 0x1f) != 7) {
     // Not a SPS NAL type.
-    reader.DiscardRemaining();
     return false;
   }
 
@@ -437,8 +435,6 @@ H264::DecodeSPSFromExtraData(const mozilla::MediaByteBuffer* aExtraData, SPSData
   if (!ptr) {
     return false;
   }
-
-  reader.DiscardRemaining();
 
   RefPtr<mozilla::MediaByteBuffer> rawNAL = new mozilla::MediaByteBuffer;
   rawNAL->AppendElements(ptr, length);
@@ -490,6 +486,43 @@ H264::ComputeMaxRefFrames(const mozilla::MediaByteBuffer* aExtraData)
       std::min(std::max(maxRefFrames, spsdata.max_num_ref_frames + 1), 16u);
   }
   return maxRefFrames;
+}
+
+/* static */ H264::FrameType
+H264::GetFrameType(const mozilla::MediaRawData* aSample)
+{
+  if (!AnnexB::IsAVCC(aSample)) {
+    // We must have a valid AVCC frame with extradata.
+    return FrameType::INVALID;
+  }
+  MOZ_ASSERT(aSample->Data());
+
+  int nalLenSize = ((*aSample->mExtraData)[4] & 3) + 1;
+
+  ByteReader reader(aSample->Data(), aSample->Size());
+
+  while (reader.Remaining() >= nalLenSize) {
+    uint32_t nalLen;
+    switch (nalLenSize) {
+      case 1: nalLen = reader.ReadU8();  break;
+      case 2: nalLen = reader.ReadU16(); break;
+      case 3: nalLen = reader.ReadU24(); break;
+      case 4: nalLen = reader.ReadU32(); break;
+    }
+    if (!nalLen) {
+      continue;
+    }
+    const uint8_t* p = reader.Read(nalLen);
+    if (!p) {
+      return FrameType::INVALID;
+    }
+    if ((p[0] & 0x1f) == 5) {
+      // IDR NAL.
+      return FrameType::I_FRAME;
+    }
+  }
+
+  return FrameType::OTHER;
 }
 
 } // namespace mp4_demuxer

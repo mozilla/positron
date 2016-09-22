@@ -54,6 +54,9 @@ extern bool
 IsExportedFunction(JSFunction* fun);
 
 extern bool
+IsExportedWasmFunction(JSFunction* fun);
+
+extern bool
 IsExportedFunction(const Value& v, MutableHandleFunction f);
 
 extern Instance&
@@ -63,7 +66,7 @@ extern WasmInstanceObject*
 ExportedFunctionToInstanceObject(JSFunction* fun);
 
 extern uint32_t
-ExportedFunctionToIndex(JSFunction* fun);
+ExportedFunctionToDefinitionIndex(JSFunction* fun);
 
 } // namespace wasm
 
@@ -117,9 +120,9 @@ class WasmInstanceObject : public NativeObject
     static void finalize(FreeOp* fop, JSObject* obj);
     static void trace(JSTracer* trc, JSObject* obj);
 
-    // ExportMap maps from function index to exported function object. This map
-    // is weak to avoid holding objects alive; the point is just to ensure a
-    // unique object identity for any given function object.
+    // ExportMap maps from function definition index to exported function
+    // object. This map is weak to avoid holding objects alive; the point is
+    // just to ensure a unique object identity for any given function object.
     using ExportMap = GCHashMap<uint32_t,
                                 ReadBarrieredFunction,
                                 DefaultHasher<uint32_t>,
@@ -147,6 +150,8 @@ class WasmInstanceObject : public NativeObject
                                     HandleWasmInstanceObject instanceObj,
                                     uint32_t funcIndex,
                                     MutableHandleFunction fun);
+
+    const wasm::CodeRange& getExportedFunctionCodeRange(HandleFunction fun);
 };
 
 // The class of WebAssembly.Memory. A WasmMemoryObject references an ArrayBuffer
@@ -155,9 +160,24 @@ class WasmInstanceObject : public NativeObject
 class WasmMemoryObject : public NativeObject
 {
     static const unsigned BUFFER_SLOT = 0;
+    static const unsigned OBSERVERS_SLOT = 1;
     static const ClassOps classOps_;
+    static void finalize(FreeOp* fop, JSObject* obj);
+    static bool bufferGetterImpl(JSContext* cx, const CallArgs& args);
+    static bool bufferGetter(JSContext* cx, unsigned argc, Value* vp);
+    static bool growImpl(JSContext* cx, const CallArgs& args);
+    static bool grow(JSContext* cx, unsigned argc, Value* vp);
+
+    using InstanceSet = GCHashSet<ReadBarrieredWasmInstanceObject,
+                                  MovableCellHasher<ReadBarrieredWasmInstanceObject>,
+                                  SystemAllocPolicy>;
+    using WeakInstanceSet = JS::WeakCache<InstanceSet>;
+    bool hasObservers() const;
+    WeakInstanceSet& observers() const;
+    WeakInstanceSet* getOrCreateObservers(JSContext* cx);
+
   public:
-    static const unsigned RESERVED_SLOTS = 1;
+    static const unsigned RESERVED_SLOTS = 2;
     static const Class class_;
     static const JSPropertySpec properties[];
     static const JSFunctionSpec methods[];
@@ -167,6 +187,10 @@ class WasmMemoryObject : public NativeObject
                                     Handle<ArrayBufferObjectMaybeShared*> buffer,
                                     HandleObject proto);
     ArrayBufferObjectMaybeShared& buffer() const;
+
+    bool movingGrowable() const;
+    bool addMovingGrowObserver(JSContext* cx, WasmInstanceObject* instance);
+    static uint32_t grow(HandleWasmMemoryObject memory, uint32_t delta, JSContext* cx);
 };
 
 // The class of WebAssembly.Table. A WasmTableObject holds a refcount on a
@@ -186,6 +210,8 @@ class WasmTableObject : public NativeObject
     static bool get(JSContext* cx, unsigned argc, Value* vp);
     static bool setImpl(JSContext* cx, const CallArgs& args);
     static bool set(JSContext* cx, unsigned argc, Value* vp);
+    static bool growImpl(JSContext* cx, const CallArgs& args);
+    static bool grow(JSContext* cx, unsigned argc, Value* vp);
 
   public:
     static const unsigned RESERVED_SLOTS = 1;
@@ -197,7 +223,7 @@ class WasmTableObject : public NativeObject
     // Note that, after creation, a WasmTableObject's table() is not initialized
     // and must be initialized before use.
 
-    static WasmTableObject* create(JSContext* cx, uint32_t length);
+    static WasmTableObject* create(JSContext* cx, wasm::ResizableLimits limits);
     wasm::Table& table() const;
 };
 

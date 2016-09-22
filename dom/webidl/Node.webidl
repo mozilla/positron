@@ -31,7 +31,7 @@ interface Node : EventTarget {
   [Pure]
   readonly attribute DOMString nodeName;
 
-  [Pure]
+  [Pure, Throws]
   readonly attribute DOMString? baseURI;
 
   [Pure, BinaryName=getComposedDoc]
@@ -108,6 +108,8 @@ interface Node : EventTarget {
   [ChromeOnly]
   sequence<MutationObserver> getBoundMutationObservers();
 
+#ifdef ACCESSIBILITY
   [Pref="accessibility.AOM.enabled"]
   readonly attribute AccessibleNode? accessibleNode;
+#endif
 };

@@ -56,7 +56,7 @@
 #include "mozilla/dom/DOMExceptionBinding.h"
 #include "mozilla/dom/ErrorEvent.h"
 #include "nsAXPCNativeCallContext.h"
-#include "mozilla/CycleCollectedJSRuntime.h"
+#include "mozilla/CycleCollectedJSContext.h"
 
 #include "nsJSPrincipals.h"
 
@@ -75,7 +75,7 @@
 #include "mozilla/Attributes.h"
 #include "mozilla/dom/asmjscache/AsmJSCache.h"
 #include "mozilla/dom/CanvasRenderingContext2DBinding.h"
-#include "mozilla/CycleCollectedJSRuntime.h"
+#include "mozilla/CycleCollectedJSContext.h"
 #include "mozilla/ContentEvents.h"
 
 #include "nsCycleCollectionNoteRootCallback.h"
@@ -531,9 +531,7 @@ PrintWinURI(nsGlobalWindow *win)
     return;
   }
 
-  nsAutoCString spec;
-  uri->GetSpec(spec);
-  printf("%s\n", spec.get());
+  printf("%s\n", uri->GetSpecOrDefault().get());
 }
 
 void
@@ -557,9 +555,7 @@ PrintWinCodebase(nsGlobalWindow *win)
     return;
   }
 
-  nsAutoCString spec;
-  uri->GetSpec(spec);
-  printf("%s\n", spec.get());
+  printf("%s\n", uri->GetSpecOrDefault().get());
 }
 
 void
@@ -1212,7 +1208,7 @@ nsJSContext::GarbageCollectNow(JS::gcreason::Reason aReason,
     sNeedsFullGC = false;
     JS::PrepareForFullGC(sContext);
   } else {
-    CycleCollectedJSRuntime::Get()->PrepareWaitingZonesForGC();
+    CycleCollectedJSContext::Get()->PrepareWaitingZonesForGC();
   }
 
   if (aIncremental == IncrementalGC) {
@@ -2190,11 +2186,15 @@ DOMGCSliceCallback(JSContext* aCx, JS::GCProgress aProgress, const JS::GCDescrip
       }
 
       if (sPostGCEventsToConsole) {
-        nsString gcstats;
+        NS_NAMED_LITERAL_STRING(kFmt, "[%s] ");
+        nsString prefix, gcstats;
         gcstats.Adopt(aDesc.formatSliceMessage(aCx));
+        prefix.Adopt(nsTextFormatter::smprintf(kFmt.get(),
+                                               ProcessNameForCollectorLog()));
+        nsString msg = prefix + gcstats;
         nsCOMPtr<nsIConsoleService> cs = do_GetService(NS_CONSOLESERVICE_CONTRACTID);
         if (cs) {
-          cs->LogStringMessage(gcstats.get());
+          cs->LogStringMessage(msg.get());
         }
       }
 
@@ -2581,6 +2581,44 @@ void
 nsJSContext::NotifyDidPaint()
 {
   sDidPaintAfterPreviousICCSlice = true;
+  if (sICCTimer) {
+    static uint32_t sCount = 0;
+    // 16 here is the common value for refresh driver tick frequency.
+    static const uint32_t kTicksPerSliceDelay = kICCIntersliceDelay / 16;
+    if (++sCount % kTicksPerSliceDelay != 0) {
+      // Don't trigger CC slice all the time after paint, but often still.
+      // The key point is to trigger it right after paint, especially when
+      // we're running RefreshDriver constantly.
+      return;
+    }
+
+    sICCTimer->Cancel();
+    ICCTimerFired(nullptr, nullptr);
+    if (sICCTimer) {
+      sICCTimer->InitWithNamedFuncCallback(ICCTimerFired, nullptr,
+                                           kICCIntersliceDelay,
+                                           nsITimer::TYPE_REPEATING_SLACK,
+                                           "ICCTimerFired");
+    }
+  } else if (sCCTimer) {
+    static uint32_t sCount = 0;
+    static const uint32_t kTicksPerForgetSkippableDelay =
+      NS_CC_SKIPPABLE_DELAY / 16;
+    if (++sCount % kTicksPerForgetSkippableDelay != 0) {
+      // The comment above about triggering CC slice applies to forget skippable
+      // too.
+      return;
+    }
+
+    sCCTimer->Cancel();
+    CCTimerFired(nullptr, nullptr);
+    if (sCCTimer) {
+      sCCTimer->InitWithNamedFuncCallback(CCTimerFired, nullptr,
+                                          NS_CC_SKIPPABLE_DELAY,
+                                          nsITimer::TYPE_REPEATING_SLACK,
+                                          "CCTimerFired");
+    }
+  }
 }
 
 nsScriptNameSpaceManager*

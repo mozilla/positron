@@ -26,7 +26,7 @@ const {HTMLTooltip} = require("devtools/client/shared/widgets/HTMLTooltip");
 const {setImageTooltip, getImageDimensions} =
   require("devtools/client/shared/widgets/tooltip/ImageTooltipHelper");
 const { testing: isTesting } = require("devtools/shared/flags");
-const {LocalizationHelper} = require("devtools/client/shared/l10n");
+const {LocalizationHelper} = require("devtools/shared/l10n");
 const {PrefsHelper} = require("devtools/client/shared/prefs");
 const {ViewHelpers, Heritage, WidgetMethods, setNamedTimeout} =
   require("devtools/client/shared/widgets/view-helpers");
@@ -40,6 +40,7 @@ const NET_STRINGS_URI = "devtools/locale/netmonitor.properties";
 const WEBCONSOLE_STRINGS_URI = "devtools/locale/webconsole.properties";
 var L10N = new LocalizationHelper(NET_STRINGS_URI);
 const WEBCONSOLE_L10N = new LocalizationHelper(WEBCONSOLE_STRINGS_URI);
+const {PluralForm} = require("devtools/shared/plural-form");
 
 // ms
 const WDA_DEFAULT_VERIFY_INTERVAL = 50;

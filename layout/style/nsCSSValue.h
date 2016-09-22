@@ -13,6 +13,7 @@
 #include "mozilla/Attributes.h"
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/SheetType.h"
+#include "mozilla/StyleComplexColor.h"
 #include "mozilla/UniquePtr.h"
 
 #include "nsIPrincipal.h"
@@ -106,20 +107,24 @@ struct URLValueData
   // Construct with the actual URI.
   URLValueData(already_AddRefed<PtrHolder<nsIURI>> aURI,
                nsStringBuffer* aString,
+               already_AddRefed<PtrHolder<nsIURI>> aBaseURI,
                already_AddRefed<PtrHolder<nsIURI>> aReferrer,
                already_AddRefed<PtrHolder<nsIPrincipal>> aOriginPrincipal);
 
   bool operator==(const URLValueData& aOther) const;
 
-  // URIEquals only compares URIs and principals (unlike operator==, which
-  // also compares the original strings).  URIEquals also assumes that the
-  // mURI member of both URL objects is non-null.  Do NOT call this method
-  // unless you're sure this is the case.
-  bool URIEquals(const URLValueData& aOther) const;
+  // Returns true iff we know for sure, by comparing the mBaseURI pointer,
+  // the specified url() value mString, and the mLocalURLFlag, that these
+  // two URLValueData objects represent the same computed url() value.
+  //
+  // Doesn't look at mReferrer or mOriginPrincipal.
+  //
+  // Safe to call from any thread.
+  bool DefinitelyEqualURIs(const URLValueData& aOther) const;
 
-  // Pretty much like URIEquals, but allows comparing unresolved URIs (returning
-  // false in that case).
-  bool MaybeUnresolvedURIEquals(const URLValueData& aOther) const;
+  // Smae as DefinitelyEqualURIs but additionally compares the nsIPrincipal
+  // pointers of the two URLValueData objects.
+  bool DefinitelyEqualURIsAndPrincipal(const URLValueData& aOther) const;
 
   nsIURI* GetURI() const;
 
@@ -128,11 +133,11 @@ struct URLValueData
   bool GetLocalURLFlag() const { return mLocalURLFlag; }
 
 private:
-  // If mURIResolved is false, mURI stores the base URI.
-  // If mURIResolved is true, mURI stores the URI we resolve to; this may be
-  // null if the URI is invalid.
+  // mURI stores the lazily resolved URI.  This may be null if the URI is
+  // invalid, even once resolved.
   mutable PtrHandle<nsIURI> mURI;
 public:
+  PtrHandle<nsIURI> mBaseURI;
   RefPtr<nsStringBuffer> mString;
   PtrHandle<nsIURI> mReferrer;
   PtrHandle<nsIPrincipal> mOriginPrincipal;
@@ -151,8 +156,8 @@ struct URLValue : public URLValueData
   // These two constructors are safe to call only on the main thread.
   URLValue(nsStringBuffer* aString, nsIURI* aBaseURI, nsIURI* aReferrer,
            nsIPrincipal* aOriginPrincipal);
-  URLValue(nsIURI* aURI, nsStringBuffer* aString, nsIURI* aReferrer,
-           nsIPrincipal* aOriginPrincipal);
+  URLValue(nsIURI* aURI, nsStringBuffer* aString, nsIURI* aBaseURI,
+           nsIURI* aReferrer, nsIPrincipal* aOriginPrincipal);
 
   // This constructor is safe to call from any thread.
   URLValue(nsStringBuffer* aString,
@@ -182,8 +187,9 @@ struct ImageValue : public URLValueData
   // aString must not be null.
   //
   // This constructor is only safe to call from the main thread.
-  ImageValue(nsIURI* aURI, nsStringBuffer* aString, nsIURI* aReferrer,
-             nsIPrincipal* aOriginPrincipal, nsIDocument* aDocument);
+  ImageValue(nsIURI* aURI, nsStringBuffer* aString, nsIURI* aBaseURI,
+             nsIURI* aReferrer, nsIPrincipal* aOriginPrincipal,
+             nsIDocument* aDocument);
 
   ImageValue(const ImageValue&) = delete;
   ImageValue& operator=(const ImageValue&) = delete;
@@ -294,6 +300,102 @@ private:
     }
 };
 
+struct RGBAColorData
+{
+  // 1.0 means 100% for all components, but the value may fall outside
+  // the range of [0.0, 1.0], so it is necessary to clamp them when
+  // converting to nscolor.
+  float mR;
+  float mG;
+  float mB;
+  float mA;
+
+  RGBAColorData() = default;
+  MOZ_IMPLICIT RGBAColorData(nscolor aColor)
+    : mR(NS_GET_R(aColor) * (1.0f / 255.0f))
+    , mG(NS_GET_G(aColor) * (1.0f / 255.0f))
+    , mB(NS_GET_B(aColor) * (1.0f / 255.0f))
+    , mA(NS_GET_A(aColor) * (1.0f / 255.0f))
+  {}
+  RGBAColorData(float aR, float aG, float aB, float aA)
+    : mR(aR), mG(aG), mB(aB), mA(aA) {}
+
+  bool operator==(const RGBAColorData& aOther) const
+  {
+    return mR == aOther.mR && mG == aOther.mG &&
+           mB == aOther.mB && mA == aOther.mA;
+  }
+  bool operator!=(const RGBAColorData& aOther) const
+  {
+    return !(*this == aOther);
+  }
+
+  nscolor ToColor() const
+  {
+    return NS_RGBA(ClampColor(mR * 255.0f),
+                   ClampColor(mG * 255.0f),
+                   ClampColor(mB * 255.0f),
+                   ClampColor(mA * 255.0f));
+  }
+
+  RGBAColorData WithAlpha(float aAlpha) const
+  {
+    RGBAColorData result = *this;
+    result.mA = aAlpha;
+    return result;
+  }
+};
+
+struct ComplexColorData
+{
+  RGBAColorData mColor;
+  float mForegroundRatio;
+
+  ComplexColorData() = default;
+  ComplexColorData(const RGBAColorData& aColor, float aForegroundRatio)
+    : mColor(aColor), mForegroundRatio(aForegroundRatio) {}
+  ComplexColorData(nscolor aColor, float aForegroundRatio)
+    : mColor(aColor), mForegroundRatio(aForegroundRatio) {}
+  explicit ComplexColorData(const StyleComplexColor& aColor)
+    : mColor(aColor.mColor)
+    , mForegroundRatio(aColor.mForegroundRatio * (1.0f / 255.0f)) {}
+
+  bool operator==(const ComplexColorData& aOther) const
+  {
+    return mForegroundRatio == aOther.mForegroundRatio &&
+           (IsCurrentColor() || mColor == aOther.mColor);
+  }
+  bool operator!=(const ComplexColorData& aOther) const
+  {
+    return !(*this == aOther);
+  }
+
+  bool IsCurrentColor() const { return mForegroundRatio >= 1.0f; }
+  bool IsNumericColor() const { return mForegroundRatio <= 0.0f; }
+
+  StyleComplexColor ToComplexColor() const
+  {
+    return StyleComplexColor(
+      mColor.ToColor(), ClampColor(mForegroundRatio * 255.0f));
+  }
+};
+
+struct ComplexColorValue final : public ComplexColorData
+{
+  // Just redirect any parameter to the data struct.
+  template<typename... Args>
+  explicit ComplexColorValue(Args&&... aArgs)
+    : ComplexColorData(Forward<Args>(aArgs)...) {}
+  ComplexColorValue(const ComplexColorValue&) = delete;
+
+  NS_INLINE_DECL_REFCOUNTING(ComplexColorValue)
+
+  size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const;
+
+private:
+  ~ComplexColorValue() {}
+};
+
 } // namespace css
 } // namespace mozilla
 
@@ -378,10 +480,17 @@ enum nsCSSUnit {
   eCSSUnit_ShortHexColor       = 84,   // (nscolor) an opaque RGBA value specified as #rgb
   eCSSUnit_HexColorAlpha       = 85,   // (nscolor) an opaque RGBA value specified as #rrggbbaa
   eCSSUnit_ShortHexColorAlpha  = 86,   // (nscolor) an opaque RGBA value specified as #rgba
-  eCSSUnit_PercentageRGBColor  = 87,   // (nsCSSValueFloatColor*)
-  eCSSUnit_PercentageRGBAColor = 88,   // (nsCSSValueFloatColor*)
+  eCSSUnit_PercentageRGBColor  = 87,   // (nsCSSValueFloatColor*) an opaque
+                                       // RGBA value specified as rgb() with
+                                       // percentage components. Values over
+                                       // 100% are allowed.
+  eCSSUnit_PercentageRGBAColor = 88,   // (nsCSSValueFloatColor*) an RGBA value
+                                       // specified as rgba() with percentage
+                                       // components. Values over 100% are
+                                       // allowed.
   eCSSUnit_HSLColor            = 89,   // (nsCSSValueFloatColor*)
   eCSSUnit_HSLAColor           = 90,   // (nsCSSValueFloatColor*)
+  eCSSUnit_ComplexColor        = 91,   // (ComplexColorValue*)
 
   eCSSUnit_Percent      = 100,     // (float) 1.0 == 100%) value is percentage of something
   eCSSUnit_Number       = 101,     // (float) value is numeric (usually multiplier, different behavior than percent)
@@ -630,6 +739,11 @@ public:
 
   nscolor GetColorValue() const;
   bool IsNonTransparentColor() const;
+  mozilla::StyleComplexColor GetStyleComplexColorValue() const
+  {
+    MOZ_ASSERT(mUnit == eCSSUnit_ComplexColor);
+    return mValue.mComplexColor->ToComplexColor();
+  }
 
   Array* GetArrayValue() const
   {
@@ -727,6 +841,12 @@ public:
   nscoord GetFixedLength(nsPresContext* aPresContext) const;
   nscoord GetPixelLength() const;
 
+  nsCSSValueFloatColor* GetFloatColorValue() const
+  {
+    MOZ_ASSERT(IsFloatColorUnit(), "not a float color value");
+    return mValue.mFloatColor;
+  }
+
   void Reset()  // sets to null
   {
     if (mUnit != eCSSUnit_Null)
@@ -741,7 +861,7 @@ public:
            typename = typename std::enable_if<std::is_enum<T>::value>::type>
   void SetIntValue(T aValue, nsCSSUnit aUnit)
   {
-    static_assert(mozilla::IsEnumFittingWithin<T, int32_t>::value,
+    static_assert(mozilla::EnumTypeFitsWithin<T, int32_t>::value,
                   "aValue must be an enum that fits within mValue.mInt");
     SetIntValue(static_cast<int32_t>(aValue), aUnit);
   }
@@ -754,6 +874,9 @@ public:
                           float aComponent2,
                           float aComponent3,
                           float aAlpha, nsCSSUnit aUnit);
+  void SetRGBAColorValue(const mozilla::css::RGBAColorData& aValue);
+  void SetComplexColorValue(
+    already_AddRefed<mozilla::css::ComplexColorValue> aValue);
   void SetArrayValue(nsCSSValue::Array* aArray, nsCSSUnit aUnit);
   void SetURLValue(mozilla::css::URLValue* aURI);
   void SetImageValue(mozilla::css::ImageValue* aImage);
@@ -861,6 +984,7 @@ protected:
     nsCSSValuePairList* mPairListDependent;
     nsCSSValueFloatColor* MOZ_OWNING_REF mFloatColor;
     mozilla::css::FontFamilyListRefCnt* MOZ_OWNING_REF mFontFamilyList;
+    mozilla::css::ComplexColorValue* MOZ_OWNING_REF mComplexColor;
   } mValue;
 };
 
@@ -1687,6 +1811,10 @@ public:
   bool operator==(nsCSSValueFloatColor& aOther) const;
 
   nscolor GetColorValue(nsCSSUnit aUnit) const;
+  float Comp1() const { return mComponent1; }
+  float Comp2() const { return mComponent2; }
+  float Comp3() const { return mComponent3; }
+  float Alpha() const { return mAlpha; }
   bool IsNonTransparentColor() const;
 
   void AppendToString(nsCSSUnit aUnit, nsAString& aResult) const;
@@ -1696,11 +1824,20 @@ public:
   NS_INLINE_DECL_REFCOUNTING(nsCSSValueFloatColor)
 
 private:
-  // FIXME: We should not be clamping specified RGB color components.
-  float mComponent1;  // 0..1 for RGB, 0..360 for HSL
-  float mComponent2;  // 0..1
-  float mComponent3;  // 0..1
-  float mAlpha;       // 0..1
+  // The range of each component is.
+  // [0, 1] for HSLColor and HSLAColor. mComponent1 for hue, mComponent2 for
+  //                                    saturation, mComponent3 for lightness.
+  //                                    [0, 1] for saturation and lightness
+  //                                    represents [0%, 100%].
+  //                                    [0, 1] for hue represents
+  //                                    [0deg, 360deg].
+  //
+  // [-float::max(), float::max()] for PercentageRGBColor, PercentageRGBAColor.
+  //                               1.0 means 100%.
+  float mComponent1;
+  float mComponent2;
+  float mComponent3;
+  float mAlpha;
 
   nsCSSValueFloatColor(const nsCSSValueFloatColor& aOther) = delete;
   nsCSSValueFloatColor& operator=(const nsCSSValueFloatColor& aOther)

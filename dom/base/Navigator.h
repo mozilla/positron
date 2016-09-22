@@ -101,6 +101,7 @@ class DeviceStorageAreaListener;
 class Presentation;
 class LegacyMozTCPSocket;
 class VRDisplay;
+class StorageManager;
 
 namespace time {
 class TimeManager;
@@ -184,13 +185,6 @@ public:
   // Clears the user agent cache by calling:
   // NavigatorBinding::ClearCachedUserAgentValue(this);
   void ClearUserAgentCache();
-
-  // Feature Detection API
-  already_AddRefed<Promise> GetFeature(const nsAString& aName,
-                                       ErrorResult& aRv);
-
-  already_AddRefed<Promise> HasFeature(const nsAString &aName,
-                                       ErrorResult& aRv);
 
   bool Vibrate(uint32_t aDuration);
   bool Vibrate(const nsTArray<uint32_t>& aDuration);
@@ -294,6 +288,8 @@ public:
 
   bool MozE10sEnabled();
 
+  StorageManager* Storage();
+
   static void GetAcceptLanguages(nsTArray<nsString>& aLanguages);
 
   // WebIDL helper methods
@@ -384,6 +380,7 @@ private:
 #endif
   nsTArray<RefPtr<Promise> > mVRGetDisplaysPromises;
   nsTArray<uint32_t> mRequestedVibrationPattern;
+  RefPtr<StorageManager> mStorageManager;
 };
 
 } // namespace dom

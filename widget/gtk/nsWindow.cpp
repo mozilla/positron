@@ -117,6 +117,7 @@ using namespace mozilla::widget;
 #include "mozilla/layers/CompositorThread.h"
 
 #ifdef MOZ_X11
+#include "X11CompositorWidget.h"
 #include "gfxXlibSurface.h"
 #include "WindowSurfaceX11Image.h"
 #include "WindowSurfaceX11SHM.h"
@@ -452,7 +453,7 @@ nsWindow::nsWindow()
     mOldFocusWindow      = 0;
 
     mXDisplay = nullptr;
-    mXWindow  = None;
+    mXWindow  = X11None;
     mXVisual  = nullptr;
     mXDepth   = 0;
 #endif /* MOZ_X11 */
@@ -870,7 +871,7 @@ nsWindow::SetParent(nsIWidget *aNewParent)
     return NS_OK;
 }
 
-NS_IMETHODIMP
+void
 nsWindow::ReparentNativeWidget(nsIWidget* aNewParent)
 {
     NS_PRECONDITION(aNewParent, "");
@@ -883,7 +884,7 @@ nsWindow::ReparentNativeWidget(nsIWidget* aNewParent)
         // reparent.
         MOZ_ASSERT(gdk_window_is_destroyed(mGdkWindow),
                    "live GdkWindow with no widget");
-        return NS_OK;
+        return;
     }
     MOZ_ASSERT(!gdk_window_is_destroyed(mGdkWindow),
                "destroyed GdkWindow with widget");
@@ -901,7 +902,6 @@ nsWindow::ReparentNativeWidget(nsIWidget* aNewParent)
 
     ReparentNativeWidgetInternal(aNewParent, newContainer, newParentWindow,
                                  oldContainer);
-    return NS_OK;
 }
 
 void
@@ -942,16 +942,15 @@ nsWindow::ReparentNativeWidgetInternal(nsIWidget* aNewParent,
     }
 }
 
-NS_IMETHODIMP
+void
 nsWindow::SetModal(bool aModal)
 {
     LOG(("nsWindow::SetModal [%p] %d\n", (void *)this, aModal));
     if (mIsDestroyed)
-        return aModal ? NS_ERROR_NOT_AVAILABLE : NS_OK;
+        return;
     if (!mIsTopLevel || !mShell)
-        return NS_ERROR_FAILURE;
+        return;
     gtk_window_set_modal(GTK_WINDOW(mShell), aModal ? TRUE : FALSE);
-    return NS_OK;
 }
 
 // nsIWidget method, which means IsShown.
@@ -970,11 +969,11 @@ nsWindow::RegisterTouchWindow()
 #endif
 }
 
-NS_IMETHODIMP
+void
 nsWindow::ConstrainPosition(bool aAllowSlop, int32_t *aX, int32_t *aY)
 {
     if (!mIsTopLevel || !mShell)
-      return NS_OK;
+      return;
 
     double dpiScale = GetDefaultScale().scale;
 
@@ -993,7 +992,7 @@ nsWindow::ConstrainPosition(bool aAllowSlop, int32_t *aX, int32_t *aY)
 
     // We don't have any screen so leave the coordinates as is
     if (!screen)
-      return NS_OK;
+      return;
 
     nsIntRect screenRect;
     if (mSizeMode != nsSizeMode_Fullscreen) {
@@ -1027,8 +1026,6 @@ nsWindow::ConstrainPosition(bool aAllowSlop, int32_t *aX, int32_t *aY)
       else if (*aY >= screenRect.YMost() - logHeight)
           *aY = screenRect.YMost() - logHeight;
     }
-
-    return NS_OK;
 }
 
 void nsWindow::SetSizeConstraints(const SizeConstraints& aConstraints)
@@ -1238,14 +1235,6 @@ nsWindow::NativeMove()
     else if (mGdkWindow) {
         gdk_window_move(mGdkWindow, point.x, point.y);
     }
-}
-
-NS_IMETHODIMP
-nsWindow::PlaceBehind(nsTopLevelWidgetZPlacement  aPlacement,
-                      nsIWidget                  *aWidget,
-                      bool                        aActivate)
-{
-    return NS_ERROR_NOT_IMPLEMENTED;
 }
 
 void
@@ -1879,16 +1868,16 @@ nsWindow::WidgetToScreenOffset()
     return GdkPointToDevicePixels({ x, y });
 }
 
-NS_IMETHODIMP
+void
 nsWindow::CaptureMouse(bool aCapture)
 {
     LOG(("CaptureMouse %p\n", (void *)this));
 
     if (!mGdkWindow)
-        return NS_OK;
+        return;
 
     if (!mContainer)
-        return NS_ERROR_FAILURE;
+        return;
 
     if (aCapture) {
         gtk_grab_add(GTK_WIDGET(mContainer));
@@ -1898,19 +1887,17 @@ nsWindow::CaptureMouse(bool aCapture)
         ReleaseGrabs();
         gtk_grab_remove(GTK_WIDGET(mContainer));
     }
-
-    return NS_OK;
 }
 
-NS_IMETHODIMP
+void
 nsWindow::CaptureRollupEvents(nsIRollupListener *aListener,
                               bool               aDoCapture)
 {
     if (!mGdkWindow)
-        return NS_OK;
+        return;
 
     if (!mContainer)
-        return NS_ERROR_FAILURE;
+        return;
 
     LOG(("CaptureRollupEvents %p %i\n", this, int(aDoCapture)));
 
@@ -1933,8 +1920,6 @@ nsWindow::CaptureRollupEvents(nsIRollupListener *aListener,
         gtk_grab_remove(GTK_WIDGET(mContainer));
         gRollupListener = nullptr;
     }
-
-    return NS_OK;
 }
 
 NS_IMETHODIMP
@@ -2100,7 +2085,7 @@ ExtractExposeRegion(LayoutDeviceIntRegion& aRegion, cairo_t* cr)
 
   for (int i = 0; i < rects->num_rectangles; i++)  {
       const cairo_rectangle_t& r = rects->rectangles[i];
-      aRegion.Or(aRegion, LayoutDeviceIntRect(r.x, r.y, r.width, r.height));
+      aRegion.Or(aRegion, LayoutDeviceIntRect::Truncate(r.x, r.y, r.width, r.height));
       LOGDRAW(("\t%d %d %d %d\n", r.x, r.y, r.width, r.height));
   }
 
@@ -2371,8 +2356,11 @@ nsWindow::UpdateAlpha(SourceSurface* aSourceSurface, nsIntRect aBoundsRect)
 {
     // We need to create our own buffer to force the stride to match the
     // expected stride.
-    int32_t stride = GetAlignedStride<4>(BytesPerPixel(SurfaceFormat::A8) *
-                                         aBoundsRect.width);
+    int32_t stride = GetAlignedStride<4>(aBoundsRect.width,
+                                         BytesPerPixel(SurfaceFormat::A8));
+    if (stride == 0) {
+        return;
+    }
     int32_t bufferSize = stride * aBoundsRect.height;
     auto imageBuffer = MakeUniqueFallible<uint8_t[]>(bufferSize);
     {
@@ -2501,6 +2489,13 @@ nsWindow::OnSizeAllocate(GtkAllocation *aAllocation)
     }
 
     mBounds.SizeTo(size);
+
+#ifdef MOZ_X11
+    // Notify the X11CompositorWidget of a ClientSizeChange
+    if (mCompositorWidgetDelegate) {
+      mCompositorWidgetDelegate->NotifyClientSizeChanged(GetClientSize());
+    }
+#endif
 
     // Gecko permits running nested event loops during processing of events,
     // GtkWindow callers of gtk_widget_size_allocate expect the signal
@@ -4003,25 +3998,27 @@ nsWindow::Create(nsIWidget* aParent,
       GdkVisual* gdkVisual = gdk_window_get_visual(mGdkWindow);
       mXVisual = gdk_x11_visual_get_xvisual(gdkVisual);
       mXDepth = gdk_visual_get_depth(gdkVisual);
+
+      mSurfaceProvider.Initialize(mXDisplay, mXWindow, mXVisual, mXDepth);
     }
 #endif
 
     return NS_OK;
 }
 
-NS_IMETHODIMP
+void
 nsWindow::SetWindowClass(const nsAString &xulWinType)
 {
   if (!mShell)
-    return NS_ERROR_FAILURE;
+    return;
 
   const char *res_class = gdk_get_program_class();
   if (!res_class)
-    return NS_ERROR_FAILURE;
+    return;
 
   char *res_name = ToNewCString(xulWinType);
   if (!res_name)
-    return NS_ERROR_OUT_OF_MEMORY;
+    return;
 
   const char *role = nullptr;
 
@@ -4047,7 +4044,7 @@ nsWindow::SetWindowClass(const nsAString &xulWinType)
       XClassHint *class_hint = XAllocClassHint();
       if (!class_hint) {
         free(res_name);
-        return NS_ERROR_OUT_OF_MEMORY;
+        return;
       }
       class_hint->res_name = res_name;
       class_hint->res_class = const_cast<char*>(res_class);
@@ -4063,8 +4060,6 @@ nsWindow::SetWindowClass(const nsAString &xulWinType)
 #endif /* MOZ_X11 */
 
   free(res_name);
-
-  return NS_OK;
 }
 
 void
@@ -4105,6 +4100,14 @@ nsWindow::NativeResize()
     else if (mGdkWindow) {
         gdk_window_resize(mGdkWindow, size.width, size.height);
     }
+
+#ifdef MOZ_X11
+    // Notify the X11CompositorWidget of a ClientSizeChange
+    // This is different than OnSizeAllocate to catch initial sizing
+    if (mCompositorWidgetDelegate) {
+      mCompositorWidgetDelegate->NotifyClientSizeChanged(GetClientSize());
+    }
+#endif
 
     // Does it need to be shown because bounds were previously insane?
     if (mNeedsShow && mIsShown) {
@@ -4153,6 +4156,14 @@ nsWindow::NativeMoveResize()
         gdk_window_move_resize(mGdkWindow,
                                topLeft.x, topLeft.y, size.width, size.height);
     }
+
+#ifdef MOZ_X11
+    // Notify the X11CompositorWidget of a ClientSizeChange
+    // This is different than OnSizeAllocate to catch initial sizing
+    if (mCompositorWidgetDelegate) {
+      mCompositorWidgetDelegate->NotifyClientSizeChanged(GetClientSize());
+    }
+#endif
 
     // Does it need to be shown because bounds were previously insane?
     if (mNeedsShow && mIsShown) {
@@ -4602,7 +4613,7 @@ nsWindow::ClearTransparencyBitmap()
     Display* xDisplay = GDK_WINDOW_XDISPLAY(mGdkWindow);
     Window xWindow = gdk_x11_window_get_xid(mGdkWindow);
 
-    XShapeCombineMask(xDisplay, xWindow, ShapeBounding, 0, 0, None, ShapeSet);
+    XShapeCombineMask(xDisplay, xWindow, ShapeBounding, 0, 0, X11None, ShapeSet);
 #endif
 }
 
@@ -6550,34 +6561,14 @@ nsWindow::GetDrawTargetForGdkDrawable(GdkDrawable* aDrawable,
 already_AddRefed<DrawTarget>
 nsWindow::StartRemoteDrawingInRegion(LayoutDeviceIntRegion& aInvalidRegion, BufferMode* aBufferMode)
 {
-  if (aInvalidRegion.IsEmpty())
-    return nullptr;
-
-  if (!mWindowSurface) {
-    mWindowSurface = CreateWindowSurface();
-    if (!mWindowSurface)
-      return nullptr;
-  }
-
-  *aBufferMode = BufferMode::BUFFER_NONE;
-  RefPtr<DrawTarget> dt = nullptr;
-  if (!(dt = mWindowSurface->Lock(aInvalidRegion))) {
-#ifdef MOZ_X11
-    if (mIsX11Display) {
-      gfxWarningOnce() << "Failed to lock WindowSurface, falling back to XPutImage backend.";
-      mWindowSurface = MakeUnique<WindowSurfaceX11Image>(mXDisplay, mXWindow, mXVisual, mXDepth);
-    }
-#endif // MOZ_X11
-  }
-  return dt.forget();
+  return mSurfaceProvider.StartRemoteDrawingInRegion(aInvalidRegion, aBufferMode);
 }
 
 void
 nsWindow::EndRemoteDrawingInRegion(DrawTarget* aDrawTarget,
                                    LayoutDeviceIntRegion& aInvalidRegion)
 {
-  if (mWindowSurface)
-    mWindowSurface->Commit(aInvalidRegion);
+  mSurfaceProvider.EndRemoteDrawingInRegion(aDrawTarget, aInvalidRegion);
 }
 
 // Code shared begin BeginMoveDrag and BeginResizeDrag
@@ -7014,45 +7005,15 @@ nsWindow::RoundsWidgetCoordinatesTo()
     return GdkScaleFactor();
 }
 
-UniquePtr<WindowSurface>
-nsWindow::CreateWindowSurface()
+void nsWindow::GetCompositorWidgetInitData(mozilla::widget::CompositorWidgetInitData* aInitData)
 {
-  if (!mGdkWindow)
-    return nullptr;
+  #ifdef MOZ_X11
+  Display* xDisplay = (Display*)GetNativeData(NS_NATIVE_COMPOSITOR_DISPLAY);
+  char* xDisplayString = XDisplayString(xDisplay);
 
-  // TODO: Add path for Wayland. We can't use gdk_cairo_create as it's not
-  //       threadsafe.
-  if (!mIsX11Display)
-    return nullptr;
-
-#ifdef MOZ_X11
-  // Blit to the window with the following priority:
-  // 1. XRender (iff XRender is enabled)
-  // 2. MIT-SHM
-  // 3. XPutImage
-
-#ifdef MOZ_WIDGET_GTK
-  if (gfxVars::UseXRender()) {
-    LOGDRAW(("Drawing to nsWindow %p using XRender\n", (void*)this));
-    return MakeUnique<WindowSurfaceXRender>(mXDisplay, mXWindow, mXVisual, mXDepth);
-  }
-#endif // MOZ_WIDGET_GTK
-
-  Display* display;
-  if (CompositorThreadHolder::IsInCompositorThread()) {
-    display = gfxPlatformGtk::GetPlatform()->GetCompositorDisplay();
-  } else {
-    display = mXDisplay;
-  }
-
-#ifdef MOZ_HAVE_SHMIMAGE
-  if (nsShmImage::UseShm()) {
-    LOGDRAW(("Drawing to nsWindow %p using MIT-SHM\n", (void*)this));
-    return MakeUnique<WindowSurfaceX11SHM>(display, mXWindow, mXVisual, mXDepth);
-  }
-#endif // MOZ_HAVE_SHMIMAGE
-
-  LOGDRAW(("Drawing to nsWindow %p using XPutImage\n", (void*)this));
-  return MakeUnique<WindowSurfaceX11Image>(display, mXWindow, mXVisual, mXDepth);
-#endif // MOZ_X11
+  *aInitData = mozilla::widget::CompositorWidgetInitData(
+                                  mXWindow,
+                                  nsCString(xDisplayString),
+                                  GetClientSize());
+  #endif
 }

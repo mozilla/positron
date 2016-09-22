@@ -85,6 +85,11 @@ public:
 
   uint64_t GetSerial() const { return mSerial; }
 
+  virtual bool RecvDestroySync() override {
+    DestroyIfNeeded();
+    return true;
+  }
+
   HostIPCAllocator* mSurfaceAllocator;
   RefPtr<TextureHost> mTextureHost;
   // mSerial is unique in TextureClient's process.
@@ -513,7 +518,7 @@ BufferTextureHost::UpdatedInternal(const nsIntRegion* aRegion)
   }
   if (GetFlags() & TextureFlags::IMMEDIATE_UPLOAD) {
     DebugOnly<bool> result = MaybeUpload(!mNeedsFullUpdate ? &mMaybeUpdatedRegion : nullptr);
-    NS_WARN_IF_FALSE(result, "Failed to upload a texture");
+    NS_WARNING_ASSERTION(result, "Failed to upload a texture");
   }
 }
 

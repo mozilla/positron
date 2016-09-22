@@ -1987,18 +1987,12 @@ var WalkerActor = protocol.ActorClassWithSpec(walkerSpec, {
     }
 
     let rawNode = node.rawNode;
-    // Don't insert anything adjacent to the document element,
-    // the head or the body.
-    if (node.isDocumentElement()) {
-      throw new Error("Can't insert adjacent element to the root.");
-    }
-
     let isInsertAsSibling = position === "beforeBegin" ||
       position === "afterEnd";
-    if ((rawNode.tagName === "BODY" || rawNode.tagName === "HEAD") &&
-      isInsertAsSibling) {
-      throw new Error("Can't insert element before or after the body " +
-        "or the head.");
+
+    // Don't insert anything adjacent to the document element.
+    if (isInsertAsSibling && node.isDocumentElement()) {
+      throw new Error("Can't insert adjacent element to the root.");
     }
 
     let rawParentNode = rawNode.parentNode;
@@ -2659,7 +2653,7 @@ exports.InspectorActor = protocol.ActorClassWithSpec(inspectorSpec, {
    * The same instance will always be returned by this method when called
    * several times.
    * The highlighter actor returned here is used to highlighter elements's
-   * box-models from the markup-view, layout-view, console, debugger, ... as
+   * box-models from the markup-view, box model, console, debugger, ... as
    * well as select elements with the pointer (pick).
    *
    * @param {Boolean} autohide Optionally autohide the highlighter after an

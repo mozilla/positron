@@ -54,7 +54,12 @@ nsresult writeoutto(const char* i_pURL, char** o_Result, int32_t urlFactory = UR
                 return NS_ERROR_FAILURE;
             }
             pURL = url;
-            pURL->SetSpec(nsDependentCString(i_pURL));
+            result = pURL->SetSpec(nsDependentCString(i_pURL));
+            if (NS_FAILED(result))
+            {
+                printf("SetSpec failed\n");
+                return NS_ERROR_FAILURE;
+            }
             break;
         }
         case URL_FACTORY_DEFAULT: {
@@ -228,10 +233,7 @@ nsresult makeAbsTest(const char* i_BaseURI, const char* relativePortion,
     status = baseURL->Resolve(nsDependentCString(relativePortion), newURL);
     if (NS_FAILED(status)) return status;
 
-    nsAutoCString temp;
-    baseURL->GetSpec(temp);
-
-    printf("Analyzing %s\n", temp.get());
+    printf("Analyzing %s\n", baseURL->GetSpecOrDefault().get());
     printf("With      %s\n", relativePortion);
 
     printf("Got       %s\n", newURL.get());

@@ -15,6 +15,7 @@
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/PodOperations.h"
 #include "mozilla/ScopeExit.h"
+#include "mozilla/Sprintf.h"
 #include "mozilla/Unused.h"
 #include "mozilla/Vector.h"
 
@@ -711,6 +712,7 @@ js::XDRScript(XDRState<mode>* xdr, HandleScope scriptEnclosingScope, HandleScrip
                     return false;
                 break;
               case ScopeKind::Lexical:
+              case ScopeKind::SimpleCatch:
               case ScopeKind::Catch:
               case ScopeKind::NamedLambda:
               case ScopeKind::StrictNamedLambda:
@@ -941,7 +943,7 @@ js::XDRLazyScript(XDRState<mode>* xdr, HandleScope enclosingScope, HandleScript 
         }
     }
 
-    // Code free variables.
+    // Code closed-over bindings.
     if (!XDRLazyClosedOverBindings(xdr, lazy))
         return false;
 
@@ -954,7 +956,7 @@ js::XDRLazyScript(XDRState<mode>* xdr, HandleScope enclosingScope, HandleScript 
             if (mode == XDR_ENCODE)
                 func = innerFunctions[i];
 
-            if (!XDRInterpretedFunction(xdr, enclosingScope, enclosingScript, &func))
+            if (!XDRInterpretedFunction(xdr, nullptr, nullptr, &func))
                 return false;
 
             if (mode == XDR_DECODE)
@@ -1973,7 +1975,7 @@ FormatIntroducedFilename(ExclusiveContext* cx, const char* filename, unsigned li
     // and wants us to use a special free function.)
     char linenoBuf[15];
     size_t filenameLen = strlen(filename);
-    size_t linenoLen = snprintf(linenoBuf, sizeof(linenoBuf), "%u", lineno);
+    size_t linenoLen = SprintfLiteral(linenoBuf, "%u", lineno);
     size_t introducerLen = strlen(introducer);
     size_t len = filenameLen                    +
                  6 /* == strlen(" line ") */    +
@@ -3964,7 +3966,7 @@ LazyScript::Create(ExclusiveContext* cx, HandleFunction fun,
 /* static */ LazyScript*
 LazyScript::Create(ExclusiveContext* cx, HandleFunction fun,
                    HandleScript script, HandleScope enclosingScope,
-                   HandleScript sourceObjectScript,
+                   HandleScript enclosingScript,
                    uint64_t packedFields, uint32_t begin, uint32_t end,
                    uint32_t lineno, uint32_t column)
 {
@@ -3990,10 +3992,15 @@ LazyScript::Create(ExclusiveContext* cx, HandleFunction fun,
     for (i = 0, num = res->numInnerFunctions(); i < num; i++)
         functions[i].init(dummyFun);
 
-    // Set the enclosing scope of the lazy function, this would later be
-    // used to define the environment when the function would be used.
+    // Set the enclosing scope and source object of the lazy function. These
+    // values should only be non-null if we have a non-lazy enclosing script.
+    // AddLazyFunctionsForCompartment relies on the source object being null
+    // if we're nested inside another lazy function.
+    MOZ_ASSERT(!!enclosingScript == !!enclosingScope);
     MOZ_ASSERT(!res->sourceObject());
-    res->setEnclosingScopeAndSource(enclosingScope, &sourceObjectScript->scriptSourceUnwrap());
+    MOZ_ASSERT(!res->enclosingScope());
+    if (enclosingScript)
+        res->setEnclosingScopeAndSource(enclosingScope, &enclosingScript->scriptSourceUnwrap());
 
     MOZ_ASSERT(!res->hasScript());
     if (script)

@@ -6,9 +6,10 @@
 
 #include "mozilla/mscom/MainThreadHandoff.h"
 
+#include "mozilla/Move.h"
 #include "mozilla/mscom/InterceptorLog.h"
 #include "mozilla/mscom/Registration.h"
-#include "mozilla/mscom/utils.h"
+#include "mozilla/mscom/Utils.h"
 #include "mozilla/Assertions.h"
 #include "mozilla/DebugOnly.h"
 #include "nsThreadUtils.h"
@@ -373,7 +374,8 @@ MainThreadHandoff::OnWalkInterface(REFIID aIid, PVOID* aInterface,
   }
 
   RefPtr<IUnknown> wrapped;
-  hr = Interceptor::Create(origInterface, handoff, aIid, getter_AddRefs(wrapped));
+  hr = Interceptor::Create(Move(origInterface), handoff, aIid,
+                           getter_AddRefs(wrapped));
   MOZ_ASSERT(SUCCEEDED(hr));
   if (FAILED(hr)) {
     return hr;

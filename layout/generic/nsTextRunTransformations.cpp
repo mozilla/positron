@@ -180,9 +180,9 @@ MergeCharactersInTextRun(gfxTextRun* aDest, gfxTextRun* aSrc,
       // that decomposed into a sequence of base+diacritics, for example),
       // just discard the entire merge run. See comment at start of this
       // function.
-      NS_WARN_IF_FALSE(!aCharsToMerge[mergeRunStart],
-                       "unable to merge across a glyph run boundary, "
-                       "glyph(s) discarded");
+      NS_WARNING_ASSERTION(
+        !aCharsToMerge[mergeRunStart],
+        "unable to merge across a glyph run boundary, glyph(s) discarded");
       if (!aCharsToMerge[mergeRunStart]) {
         if (anyMissing) {
           mergedGlyph.SetMissing(glyphs.Length());
@@ -286,8 +286,8 @@ nsCaseTransformTextRunFactory::TransformString(
     nsTArray<RefPtr<nsTransformedCharStyle>>* aStyleArray)
 {
   bool auxiliaryOutputArrays = aCanBreakBeforeArray && aStyleArray;
-  NS_PRECONDITION(!auxiliaryOutputArrays || aTextRun,
-                  "text run must be provided to use aux output arrays");
+  MOZ_ASSERT(!auxiliaryOutputArrays || aTextRun,
+      "text run must be provided to use aux output arrays");
 
   uint32_t length = aString.Length();
   const char16_t* str = aString.BeginReading();

@@ -174,14 +174,16 @@ Animation::SetEffectNoUpdate(AnimationEffectReadOnly* aEffect)
       prevAnim->SetEffect(nullptr);
     }
 
-    // Create links with the new effect.
+    // Create links with the new effect. SetAnimation(this) will also update
+    // mIsRelevant of this animation, and then notify mutation observer if
+    // needed by calling Animation::UpdateRelevance(), so we don't need to
+    // call it again.
     mEffect = newEffect;
     mEffect->SetAnimation(this);
 
-    // Update relevance and then notify possible add or change.
+    // Notify possible add or change.
     // If the target is different, the change notification will be ignored by
     // AutoMutationBatchForAnimation.
-    UpdateRelevance();
     if (wasRelevant && mIsRelevant) {
       nsNodeUtils::AnimationChanged(this);
     }
@@ -224,13 +226,13 @@ Animation::SetTimeline(AnimationTimeline* aTimeline)
 void
 Animation::SetTimelineNoUpdate(AnimationTimeline* aTimeline)
 {
-  RefPtr<AnimationTimeline> oldTimeline = mTimeline;
   if (mTimeline == aTimeline) {
     return;
   }
 
-  if (mTimeline) {
-    mTimeline->RemoveAnimation(this);
+  RefPtr<AnimationTimeline> oldTimeline = mTimeline;
+  if (oldTimeline) {
+    oldTimeline->RemoveAnimation(this);
   }
 
   mTimeline = aTimeline;
@@ -390,7 +392,7 @@ Animation::PlayState() const
   }
 
   if ((mPlaybackRate > 0.0 && currentTime.Value() >= EffectEnd()) ||
-      (mPlaybackRate < 0.0 && currentTime.Value().ToMilliseconds() <= 0.0)) {
+      (mPlaybackRate < 0.0 && currentTime.Value() <= TimeDuration()))  {
     return AnimationPlayState::Finished;
   }
 
@@ -930,13 +932,13 @@ Animation::PlayNoUpdate(ErrorResult& aRv, LimitBehavior aLimitBehavior)
   if (mPlaybackRate > 0.0 &&
       (currentTime.IsNull() ||
        (aLimitBehavior == LimitBehavior::AutoRewind &&
-        (currentTime.Value().ToMilliseconds() < 0.0 ||
+        (currentTime.Value() < TimeDuration() ||
          currentTime.Value() >= EffectEnd())))) {
     mHoldTime.SetValue(TimeDuration(0));
   } else if (mPlaybackRate < 0.0 &&
              (currentTime.IsNull() ||
               (aLimitBehavior == LimitBehavior::AutoRewind &&
-               (currentTime.Value().ToMilliseconds() <= 0.0 ||
+               (currentTime.Value() <= TimeDuration() ||
                 currentTime.Value() > EffectEnd())))) {
     if (EffectEnd() == TimeDuration::Forever()) {
       aRv.Throw(NS_ERROR_DOM_INVALID_STATE_ERR);
@@ -1136,7 +1138,7 @@ Animation::UpdateFinishedState(SeekFlag aSeekFlag,
       }
     } else if (mPlaybackRate < 0.0 &&
                !currentTime.IsNull() &&
-               currentTime.Value().ToMilliseconds() <= 0.0) {
+               currentTime.Value() <= TimeDuration()) {
       if (aSeekFlag == SeekFlag::DidSeek) {
         mHoldTime = currentTime;
       } else if (!mPreviousCurrentTime.IsNull()) {
@@ -1333,14 +1335,14 @@ Animation::GetRenderedDocument() const
 void
 Animation::DoFinishNotification(SyncNotifyFlag aSyncNotifyFlag)
 {
-  CycleCollectedJSRuntime* runtime = CycleCollectedJSRuntime::Get();
+  CycleCollectedJSContext* context = CycleCollectedJSContext::Get();
 
   if (aSyncNotifyFlag == SyncNotifyFlag::Sync) {
     DoFinishNotificationImmediately();
   } else if (!mFinishNotificationTask.IsPending()) {
     RefPtr<nsRunnableMethod<Animation>> runnable =
       NewRunnableMethod(this, &Animation::DoFinishNotificationImmediately);
-    runtime->DispatchToMicroTask(do_AddRef(runnable));
+    context->DispatchToMicroTask(do_AddRef(runnable));
     mFinishNotificationTask = runnable.forget();
   }
 }

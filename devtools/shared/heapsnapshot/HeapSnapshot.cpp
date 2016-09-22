@@ -16,7 +16,7 @@
 #include "js/UbiNodeDominatorTree.h"
 #include "js/UbiNodeShortestPaths.h"
 #include "mozilla/Attributes.h"
-#include "mozilla/CycleCollectedJSRuntime.h"
+#include "mozilla/CycleCollectedJSContext.h"
 #include "mozilla/devtools/AutoMemMap.h"
 #include "mozilla/devtools/CoreDump.pb.h"
 #include "mozilla/devtools/DeserializedNode.h"
@@ -29,6 +29,7 @@
 #include "mozilla/dom/HeapSnapshotBinding.h"
 #include "mozilla/RangedPtr.h"
 #include "mozilla/Telemetry.h"
+#include "mozilla/Unused.h"
 
 #include "jsapi.h"
 #include "jsfriendapi.h"
@@ -61,9 +62,9 @@ using JS::ubi::ShortestPaths;
 MallocSizeOf
 GetCurrentThreadDebuggerMallocSizeOf()
 {
-  auto ccrt = CycleCollectedJSRuntime::Get();
-  MOZ_ASSERT(ccrt);
-  auto cx = ccrt->Context();
+  auto ccjscx = CycleCollectedJSContext::Get();
+  MOZ_ASSERT(ccjscx);
+  auto cx = ccjscx->Context();
   MOZ_ASSERT(cx);
   auto mallocSizeOf = JS::dbg::GetDebuggerMallocSizeOf(cx);
   MOZ_ASSERT(mallocSizeOf);
@@ -554,9 +555,9 @@ HeapSnapshot::ComputeDominatorTree(ErrorResult& rv)
 {
   Maybe<JS::ubi::DominatorTree> maybeTree;
   {
-    auto ccrt = CycleCollectedJSRuntime::Get();
-    MOZ_ASSERT(ccrt);
-    auto cx = ccrt->Context();
+    auto ccjscx = CycleCollectedJSContext::Get();
+    MOZ_ASSERT(ccjscx);
+    auto cx = ccjscx->Context();
     MOZ_ASSERT(cx);
     JS::AutoCheckCannotGC nogc(cx);
     maybeTree = JS::ubi::DominatorTree::Create(cx, nogc, getRoot());
@@ -1473,7 +1474,7 @@ public:
   constexpr DeleteHeapSnapshotTempFileHelperChild() { }
 
   void operator()(PHeapSnapshotTempFileHelperChild* ptr) const {
-    NS_WARN_IF(!HeapSnapshotTempFileHelperChild::Send__delete__(ptr));
+    Unused << NS_WARN_IF(!HeapSnapshotTempFileHelperChild::Send__delete__(ptr));
   }
 };
 

@@ -1391,26 +1391,17 @@ class LCheckOverRecursed : public LInstructionHelper<0, 0, 0>
     }
 };
 
-class LAsmJSInterruptCheck : public LInstructionHelper<0, 0, 0>
+class LWasmTrap : public LInstructionHelper<0, 0, 0>
 {
   public:
-    LIR_HEADER(AsmJSInterruptCheck);
+    LIR_HEADER(WasmTrap);
 
-    LAsmJSInterruptCheck()
+    LWasmTrap()
     { }
 
-    bool isCall() const {
-        return true;
+    const MWasmTrap* mir() const {
+        return mir_->toWasmTrap();
     }
-};
-
-class LAsmThrowUnreachable : public LInstructionHelper<0, 0, 0>
-{
-  public:
-    LIR_HEADER(AsmThrowUnreachable);
-
-    LAsmThrowUnreachable()
-    { }
 };
 
 template<size_t Defs, size_t Ops>
@@ -5730,6 +5721,71 @@ class LStoreElementHoleT : public LInstructionHelper<0, 4, 1>
     }
 };
 
+// Like LStoreElementV, but can just ignore assignment (for eg. frozen objects)
+class LFallibleStoreElementV : public LInstructionHelper<0, 3 + BOX_PIECES, 1>
+{
+  public:
+    LIR_HEADER(FallibleStoreElementV)
+
+    LFallibleStoreElementV(const LAllocation& object, const LAllocation& elements,
+                           const LAllocation& index, const LBoxAllocation& value,
+                           const LDefinition& temp) {
+        setOperand(0, object);
+        setOperand(1, elements);
+        setOperand(2, index);
+        setBoxOperand(Value, value);
+        setTemp(0, temp);
+    }
+
+    static const size_t Value = 3;
+
+    const MFallibleStoreElement* mir() const {
+        return mir_->toFallibleStoreElement();
+    }
+    const LAllocation* object() {
+        return getOperand(0);
+    }
+    const LAllocation* elements() {
+        return getOperand(1);
+    }
+    const LAllocation* index() {
+        return getOperand(2);
+    }
+};
+
+// Like LStoreElementT, but can just ignore assignment (for eg. frozen objects)
+class LFallibleStoreElementT : public LInstructionHelper<0, 4, 1>
+{
+  public:
+    LIR_HEADER(FallibleStoreElementT)
+
+    LFallibleStoreElementT(const LAllocation& object, const LAllocation& elements,
+                           const LAllocation& index, const LAllocation& value,
+                           const LDefinition& temp) {
+        setOperand(0, object);
+        setOperand(1, elements);
+        setOperand(2, index);
+        setOperand(3, value);
+        setTemp(0, temp);
+    }
+
+    const MFallibleStoreElement* mir() const {
+        return mir_->toFallibleStoreElement();
+    }
+    const LAllocation* object() {
+        return getOperand(0);
+    }
+    const LAllocation* elements() {
+        return getOperand(1);
+    }
+    const LAllocation* index() {
+        return getOperand(2);
+    }
+    const LAllocation* value() {
+        return getOperand(3);
+    }
+};
+
 class LStoreUnboxedPointer : public LInstructionHelper<0, 3, 0>
 {
   public:
@@ -7039,12 +7095,27 @@ class LSetPropertyCache : public LInstructionHelper<0, 1 + 2 * BOX_PIECES, 4>
     }
 };
 
-class LCallIteratorStart : public LCallInstructionHelper<1, 1, 0>
+class LCallIteratorStartV : public LCallInstructionHelper<1, BOX_PIECES, 0>
 {
   public:
-    LIR_HEADER(CallIteratorStart)
+    LIR_HEADER(CallIteratorStartV)
 
-    explicit LCallIteratorStart(const LAllocation& object) {
+    static const size_t Value = 0;
+
+    explicit LCallIteratorStartV(const LBoxAllocation& value) {
+        setBoxOperand(Value, value);
+    }
+    MIteratorStart* mir() const {
+        return mir_->toIteratorStart();
+    }
+};
+
+class LCallIteratorStartO : public LCallInstructionHelper<1, 1, 0>
+{
+  public:
+    LIR_HEADER(CallIteratorStartO)
+
+    explicit LCallIteratorStartO(const LAllocation& object) {
         setOperand(0, object);
     }
     const LAllocation* object() {
@@ -7055,13 +7126,13 @@ class LCallIteratorStart : public LCallInstructionHelper<1, 1, 0>
     }
 };
 
-class LIteratorStart : public LInstructionHelper<1, 1, 3>
+class LIteratorStartO : public LInstructionHelper<1, 1, 3>
 {
   public:
-    LIR_HEADER(IteratorStart)
+    LIR_HEADER(IteratorStartO)
 
-    LIteratorStart(const LAllocation& object, const LDefinition& temp1,
-                   const LDefinition& temp2, const LDefinition& temp3) {
+    LIteratorStartO(const LAllocation& object, const LDefinition& temp1,
+                    const LDefinition& temp2, const LDefinition& temp3) {
         setOperand(0, object);
         setTemp(0, temp1);
         setTemp(1, temp2);
@@ -7783,6 +7854,21 @@ class LAsmSelectI64 : public LAsmSelectBase<INT64_PIECES, 2 * INT64_PIECES + 1>
     }
 };
 
+class LWasmAddOffset : public LInstructionHelper<1, 1, 0>
+{
+  public:
+    LIR_HEADER(WasmAddOffset);
+    explicit LWasmAddOffset(const LAllocation& base) {
+        setOperand(0, base);
+    }
+    MWasmAddOffset* mir() const {
+        return mir_->toWasmAddOffset();
+    }
+    const LAllocation* base() {
+        return getOperand(0);
+    }
+};
+
 class LWasmBoundsCheck : public LInstructionHelper<0, 1, 0>
 {
   public:
@@ -8460,21 +8546,20 @@ class LAssertRangeF : public LInstructionHelper<0, 1, 2>
 {
   public:
     LIR_HEADER(AssertRangeF)
-    LAssertRangeF(const LAllocation& input, const LDefinition& temp, const LDefinition& armtemp) {
+    LAssertRangeF(const LAllocation& input, const LDefinition& temp, const LDefinition& temp2) {
         setOperand(0, input);
         setTemp(0, temp);
-        setTemp(1, armtemp);
-    }
-    const LDefinition* armtemp() {
-        return getTemp(1);
+        setTemp(1, temp2);
     }
 
     const LAllocation* input() {
         return getOperand(0);
     }
-
     const LDefinition* temp() {
         return getTemp(0);
+    }
+    const LDefinition* temp2() {
+        return getTemp(1);
     }
 
     MAssertRange* mir() {

@@ -190,8 +190,7 @@ class LIRGenerator : public LIRGeneratorSpecific
     void visitLoadFixedSlotAndUnbox(MLoadFixedSlotAndUnbox* ins);
     void visitFunctionEnvironment(MFunctionEnvironment* ins);
     void visitInterruptCheck(MInterruptCheck* ins);
-    void visitAsmJSInterruptCheck(MAsmJSInterruptCheck* ins);
-    void visitAsmThrowUnreachable(MAsmThrowUnreachable* ins);
+    void visitWasmTrap(MWasmTrap* ins);
     void visitAsmReinterpret(MAsmReinterpret* ins);
     void visitStoreSlot(MStoreSlot* ins);
     void visitFilterTypeSet(MFilterTypeSet* ins);
@@ -223,6 +222,7 @@ class LIRGenerator : public LIRGeneratorSpecific
     void visitLoadUnboxedString(MLoadUnboxedString* ins);
     void visitStoreElement(MStoreElement* ins);
     void visitStoreElementHole(MStoreElementHole* ins);
+    void visitFallibleStoreElement(MFallibleStoreElement* ins);
     void visitStoreUnboxedObjectOrNull(MStoreUnboxedObjectOrNull* ins);
     void visitStoreUnboxedString(MStoreUnboxedString* ins);
     void visitConvertUnboxedObjectToNative(MConvertUnboxedObjectToNative* ins);
@@ -282,6 +282,8 @@ class LIRGenerator : public LIRGeneratorSpecific
     void visitIsConstructor(MIsConstructor* ins);
     void visitIsObject(MIsObject* ins);
     void visitHasClass(MHasClass* ins);
+    void visitWasmAddOffset(MWasmAddOffset* ins);
+    void visitWasmBoundsCheck(MWasmBoundsCheck* ins);
     void visitWasmLoadGlobalVar(MWasmLoadGlobalVar* ins);
     void visitWasmStoreGlobalVar(MWasmStoreGlobalVar* ins);
     void visitAsmJSParameter(MAsmJSParameter* ins);

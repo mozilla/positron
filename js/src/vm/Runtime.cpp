@@ -149,7 +149,7 @@ JSRuntime::JSRuntime(JSRuntime* parentRuntime)
     telemetryCallback(nullptr),
     handlingSegFault(false),
     handlingJitInterrupt_(false),
-    interruptCallback(nullptr),
+    interruptCallbackDisabled(false),
     getIncumbentGlobalCallback(nullptr),
     enqueuePromiseJobCallback(nullptr),
     enqueuePromiseJobCallbackData(nullptr),
@@ -330,7 +330,7 @@ JSRuntime::init(uint32_t maxbytes, uint32_t maxNurseryBytes)
     JS::ResetTimeZone();
 
 #ifdef JS_SIMULATOR
-    simulator_ = js::jit::Simulator::Create();
+    simulator_ = js::jit::Simulator::Create(contextFromMainThread());
     if (!simulator_)
         return false;
 #endif
@@ -530,11 +530,16 @@ InvokeInterruptCallback(JSContext* cx)
     // Important: Additional callbacks can occur inside the callback handler
     // if it re-enters the JS engine. The embedding must ensure that the
     // callback is disconnected before attempting such re-entry.
-    JSInterruptCallback cb = cx->runtime()->interruptCallback;
-    if (!cb)
+    if (cx->runtime()->interruptCallbackDisabled)
         return true;
 
-    if (cb(cx)) {
+    bool stop = false;
+    for (JSInterruptCallback cb : cx->runtime()->interruptCallbacks) {
+        if (!cb(cx))
+            stop = true;
+    }
+
+    if (!stop) {
         // Debugger treats invoking the interrupt callback as a "step", so
         // invoke the onStep handler.
         if (cx->compartment()->isDebuggee()) {

@@ -142,7 +142,7 @@ private:
     RootedDictionary<ServiceWorkerMessageEventInit> init(aCx);
 
     nsCOMPtr<nsIPrincipal> principal = aTargetContainer->GetParentObject()->PrincipalOrNull();
-    NS_WARN_IF_FALSE(principal, "Why is the principal null here?");
+    NS_WARNING_ASSERTION(principal, "Why is the principal null here?");
 
     bool isNullPrincipal = false;
     bool isSystemPrincipal = false;
@@ -231,7 +231,7 @@ ServiceWorkerClient::PostMessage(JSContext* aCx, JS::Handle<JS::Value> aMessage,
     return;
   }
 
-  aRv = NS_DispatchToMainThread(runnable);
+  aRv = workerPrivate->DispatchToMainThread(runnable.forget());
   if (NS_WARN_IF(aRv.Failed())) {
     return;
   }

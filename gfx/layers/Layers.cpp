@@ -13,6 +13,7 @@
 #include "ImageLayers.h"                // for ImageLayer
 #include "LayerSorter.h"                // for SortLayersBy3DZOrder
 #include "LayersLogging.h"              // for AppendToString
+#include "LayerUserData.h"
 #include "ReadbackLayer.h"              // for ReadbackLayer
 #include "UnitTransforms.h"             // for ViewAs
 #include "gfxEnv.h"
@@ -22,6 +23,7 @@
 #include "gfx2DGlue.h"
 #include "mozilla/DebugOnly.h"          // for DebugOnly
 #include "mozilla/Telemetry.h"          // for Accumulate
+#include "mozilla/ToString.h"
 #include "mozilla/dom/Animation.h"      // for ComputedTimingFunction
 #include "mozilla/gfx/2D.h"             // for DrawTarget
 #include "mozilla/gfx/BaseSize.h"       // for BaseSize
@@ -685,7 +687,7 @@ Layer::SnapTransformTranslation(const Matrix4x4& aTransform,
 
   // Snap for 3D Transforms
 
-  Point3D transformedOrigin = aTransform * Point3D();
+  Point3D transformedOrigin = aTransform.TransformPoint(Point3D());
 
   // Compute the transformed snap by rounding the values of
   // transformed origin.
@@ -704,7 +706,7 @@ Layer::SnapTransformTranslation(const Matrix4x4& aTransform,
   }
 
   // Compute the snap from the transformed snap.
-  Point3D snap = inverse * transformedSnap;
+  Point3D snap = inverse.TransformPoint(transformedSnap);
   if (snap.z > 0.001 || snap.z < -0.001) {
     // Allow some level of accumulated computation error.
     MOZ_ASSERT(inverse._33 == 0.0);
@@ -747,9 +749,9 @@ Layer::SnapTransform(const Matrix4x4& aTransform,
       aTransform.Is2D(&matrix2D) &&
       gfxSize(1.0, 1.0) <= aSnapRect.Size() &&
       matrix2D.PreservesAxisAlignedRectangles()) {
-    auto transformedTopLeft = IntPoint::Round(matrix2D * ToPoint(aSnapRect.TopLeft()));
-    auto transformedTopRight = IntPoint::Round(matrix2D * ToPoint(aSnapRect.TopRight()));
-    auto transformedBottomRight = IntPoint::Round(matrix2D * ToPoint(aSnapRect.BottomRight()));
+    auto transformedTopLeft = IntPoint::Round(matrix2D.TransformPoint(ToPoint(aSnapRect.TopLeft())));
+    auto transformedTopRight = IntPoint::Round(matrix2D.TransformPoint(ToPoint(aSnapRect.TopRight())));
+    auto transformedBottomRight = IntPoint::Round(matrix2D.TransformPoint(ToPoint(aSnapRect.BottomRight())));
 
     Matrix snappedMatrix = gfxUtils::TransformRectToRect(aSnapRect,
       transformedTopLeft, transformedTopRight, transformedBottomRight);
@@ -2541,9 +2543,7 @@ SetAntialiasingFlags(Layer* aLayer, DrawTarget* aTarget)
 IntRect
 ToOutsideIntRect(const gfxRect &aRect)
 {
-  gfxRect r = aRect;
-  r.RoundOut();
-  return IntRect(r.X(), r.Y(), r.Width(), r.Height());
+  return IntRect::RoundOut(aRect.x, aRect.y, aRect.width, aRect.height);
 }
 
 } // namespace layers

@@ -26,6 +26,7 @@ XPCOMUtils.defineLazyServiceGetter(this, "ClipboardHelper",
                                          "nsIClipboardHelper");
 
 const kSelectionMaxLen = 150;
+const kMatchesCountLimitPref = "accessibility.typeaheadfind.matchesCountLimit";
 
 function Finder(docShell) {
   this._fastFind = Cc["@mozilla.org/typeaheadfind;1"].createInstance(Ci.nsITypeAheadFind);
@@ -57,8 +58,11 @@ Finder.prototype = {
     if (this._iterator)
       this._iterator.reset();
     if (this._highlighter) {
-      this._highlighter.clear();
+      // if we clear all the references before we hide the highlights (in both
+      // highlighting modes), we simply can't use them to find the ranges we
+      // need to clear from the selection.
       this._highlighter.hide();
+      this._highlighter.clear();
     }
     this.listeners = [];
     this._docShell.QueryInterface(Ci.nsIInterfaceRequestor)
@@ -110,7 +114,9 @@ Finder.prototype = {
     })) {
       this.iterator.stop();
     }
+
     this.highlighter.update(options);
+    this.requestMatchesCount(options.searchString, options.linksOnly);
 
     this._outlineLink(options.drawOutline);
 
@@ -162,6 +168,14 @@ Finder.prototype = {
 
     const {FinderHighlighter} = Cu.import("resource://gre/modules/FinderHighlighter.jsm", {});
     return this._highlighter = new FinderHighlighter(this);
+  },
+
+  get matchesCountLimit() {
+    if (typeof this._matchesCountLimit == "number")
+      return this._matchesCountLimit;
+
+    this._matchesCountLimit = Services.prefs.getIntPref(kMatchesCountLimitPref) || 0;
+    return this._matchesCountLimit;
   },
 
   _lastFindResult: null,
@@ -224,8 +238,7 @@ Finder.prototype = {
   },
 
   highlight: Task.async(function* (aHighlight, aWord, aLinksOnly) {
-    let found = yield this.highlighter.highlight(aHighlight, aWord, null, aLinksOnly);
-    this.highlighter.notifyFinished({ highlight: aHighlight, found });
+    yield this.highlighter.highlight(aHighlight, aWord, null, aLinksOnly);
   }),
 
   getInitialSelection: function() {
@@ -318,6 +331,7 @@ Finder.prototype = {
   onFindbarClose: function() {
     this.enableSelection();
     this.highlighter.highlight(false);
+    this.iterator.reset();
     BrowserUtils.trackToolbarVisibility(this._docShell, "findbar", false);
   },
 
@@ -331,10 +345,10 @@ Finder.prototype = {
   },
 
   onHighlightAllChange(highlightAll) {
-    if (this._iterator)
-      this._iterator.reset();
     if (this._highlighter)
       this._highlighter.onHighlightAllChange(highlightAll);
+    if (this._iterator)
+      this._iterator.reset();
   },
 
   keyPress: function (aEvent) {
@@ -380,7 +394,7 @@ Finder.prototype = {
   _notifyMatchesCount: function(result = this._currentMatchesCountResult) {
     // The `_currentFound` property is only used for internal bookkeeping.
     delete result._currentFound;
-    if (result.total == this._currentMatchLimit)
+    if (result.total == this.matchesCountLimit)
       result.total = -1;
 
     for (let l of this._listeners) {
@@ -392,9 +406,9 @@ Finder.prototype = {
     this._currentMatchesCountResult = null;
   },
 
-  requestMatchesCount: function(aWord, aMatchLimit, aLinksOnly) {
+  requestMatchesCount: function(aWord, aLinksOnly) {
     if (this._lastFindResult == Ci.nsITypeAheadFind.FIND_NOTFOUND ||
-        this.searchString == "" || !aWord) {
+        this.searchString == "" || !aWord || !this.matchesCountLimit) {
       this._notifyMatchesCount({
         total: 0,
         current: 0
@@ -404,7 +418,6 @@ Finder.prototype = {
 
     let window = this._getWindow();
     this._currentFoundRange = this._fastFind.getFoundRange();
-    this._currentMatchLimit = aMatchLimit;
 
     let params = {
       caseSensitive: this._fastFind.caseSensitive,
@@ -417,7 +430,7 @@ Finder.prototype = {
 
     this.iterator.start(Object.assign(params, {
       finder: this,
-      limit: aMatchLimit,
+      limit: this.matchesCountLimit,
       listener: this,
       useCache: true,
     })).then(() => {
@@ -450,7 +463,7 @@ Finder.prototype = {
   onIteratorReset() {},
 
   onIteratorRestart({ word, linksOnly }) {
-    this.requestMatchesCount(word, this._currentMatchLimit, linksOnly);
+    this.requestMatchesCount(word, linksOnly);
   },
 
   onIteratorStart() {
@@ -579,9 +592,12 @@ Finder.prototype = {
   onLocationChange: function(aWebProgress, aRequest, aLocation, aFlags) {
     if (!aWebProgress.isTopLevel)
       return;
+    // Ignore events that don't change the document.
+    if (aFlags & Ci.nsIWebProgressListener.LOCATION_CHANGE_SAME_DOCUMENT)
+      return;
 
     // Avoid leaking if we change the page.
-    this._previousLink = this._currentFoundRange = null;
+    this._lastFindResult = this._previousLink = this._currentFoundRange = null;
     this.highlighter.onLocationChange();
     this.iterator.reset();
   },

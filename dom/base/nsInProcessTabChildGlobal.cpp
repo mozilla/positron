@@ -129,8 +129,8 @@ nsInProcessTabChildGlobal::Init()
   nsresult rv =
 #endif
   InitTabChildGlobal();
-  NS_WARN_IF_FALSE(NS_SUCCEEDED(rv),
-                   "Couldn't initialize nsInProcessTabChildGlobal");
+  NS_WARNING_ASSERTION(NS_SUCCEEDED(rv),
+                       "Couldn't initialize nsInProcessTabChildGlobal");
   mMessageManager = new nsFrameMessageManager(this,
                                               nullptr,
                                               dom::ipc::MM_CHILD);
@@ -291,14 +291,15 @@ nsInProcessTabChildGlobal::PreHandleEvent(EventChainPreVisitor& aVisitor)
 nsresult
 nsInProcessTabChildGlobal::InitTabChildGlobal()
 {
-  // If you change this, please change GetCompartmentName() in XPCJSRuntime.cpp
+  // If you change this, please change GetCompartmentName() in XPCJSContext.cpp
   // accordingly.
   nsAutoCString id;
   id.AssignLiteral("inProcessTabChildGlobal");
   nsIURI* uri = mOwner->OwnerDoc()->GetDocumentURI();
   if (uri) {
     nsAutoCString u;
-    uri->GetSpec(u);
+    nsresult rv = uri->GetSpec(u);
+    NS_ENSURE_SUCCESS(rv, rv);
     id.AppendLiteral("?ownedBy=");
     id.Append(u);
   }

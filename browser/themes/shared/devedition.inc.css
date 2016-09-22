@@ -58,10 +58,6 @@
   --urlbar-dropmarker-active-2x-region: rect(0px, 33px, 14px, 22px);
 }
 
-:root[devtoolstheme="dark"] #identity-box {
-  --identity-box-chrome-color: #46afe3;
-}
-
 :root[devtoolstheme="light"] {
   --url-and-searchbar-background-color: #fff;
 
@@ -150,7 +146,7 @@
 }
 
 #navigator-toolbox:-moz-lwtheme::after {
-  background: var(--chrome-navigator-toolbox-separator-color);
+  border-bottom-color: var(--chrome-navigator-toolbox-separator-color);
 }
 
 #navigator-toolbox > toolbar:not(#TabsToolbar):not(#toolbar-menubar),
@@ -193,6 +189,23 @@ toolbar[brighttext] #downloads-indicator-counter {
   color: inherit !important;
   border: 1px solid var(--chrome-nav-bar-controls-border-color) !important;
   box-shadow: none !important;
+}
+
+:root[devtoolstheme="dark"] #identity-icon:-moz-lwtheme {
+  --identity-icon-normal: url(chrome://browser/skin/identity-icon.svg#normal-white);
+  --identity-icon-hover: url(chrome://browser/skin/identity-icon.svg#hover-white);
+  --identity-icon-notice: url(chrome://browser/skin/identity-icon.svg#notice-white);
+  --identity-icon-notice-hover: url(chrome://browser/skin/identity-icon.svg#notice-hover-white);
+}
+
+:root[devtoolstheme="dark"] #tracking-protection-icon:-moz-lwtheme {
+  --tracking-protection-icon-enabled: url(chrome://browser/skin/tracking-protection-16.svg#enabled-white);
+  --tracking-protection-icon-disabled: url(chrome://browser/skin/tracking-protection-16.svg#disabled-white);
+}
+
+:root[devtoolstheme="dark"] #connection-icon:-moz-lwtheme {
+  --connection-icon-mixed-passive-loaded: url(chrome://browser/skin/connection-mixed-passive-loaded.svg#icon-white);
+  --connection-icon-mixed-active-loaded: url(chrome://browser/skin/connection-mixed-active-loaded.svg#icon-white);
 }
 
 #urlbar {

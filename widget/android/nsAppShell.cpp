@@ -63,10 +63,10 @@
 #include "GeckoBatteryManager.h"
 #include "GeckoNetworkManager.h"
 #include "GeckoScreenOrientation.h"
-#include "MemoryMonitor.h"
 #include "PrefsHelper.h"
-#include "Telemetry.h"
-#include "ThumbnailHelper.h"
+#include "fennec/MemoryMonitor.h"
+#include "fennec/Telemetry.h"
+#include "fennec/ThumbnailHelper.h"
 
 #ifdef DEBUG_ANDROID_EVENTS
 #define EVLOG(args...)  ALOG(args)
@@ -104,7 +104,9 @@ StaticRefPtr<WakeLockListener> sWakeLockListener;
 class GeckoThreadSupport final
     : public java::GeckoThread::Natives<GeckoThreadSupport>
 {
-    static uint32_t sPauseCount;
+    // When this number goes above 0, the app is paused. When less than or
+    // equal to zero, the app is resumed.
+    static int32_t sPauseCount;
 
 public:
     static void SpeculativeConnect(jni::String::Param aUriStr)
@@ -142,8 +144,10 @@ public:
     {
         MOZ_ASSERT(NS_IsMainThread());
 
-        if ((++sPauseCount) > 1) {
-            // Already paused.
+        sPauseCount++;
+        // If sPauseCount is now 1, we just crossed the threshold from "resumed"
+        // "paused". so we should notify observers and so on.
+        if (sPauseCount != 1) {
             return;
         }
 
@@ -174,8 +178,10 @@ public:
     {
         MOZ_ASSERT(NS_IsMainThread());
 
-        if (!sPauseCount || (--sPauseCount) > 0) {
-            // Still paused.
+        sPauseCount--;
+        // If sPauseCount is now 0, we just crossed the threshold from "paused"
+        // to "resumed", so we should notify observers and so on.
+        if (sPauseCount != 0) {
             return;
         }
 
@@ -216,25 +222,24 @@ public:
     }
 };
 
-uint32_t GeckoThreadSupport::sPauseCount;
+int32_t GeckoThreadSupport::sPauseCount;
 
 
 class GeckoAppShellSupport final
     : public java::GeckoAppShell::Natives<GeckoAppShellSupport>
 {
 public:
-    static void ReportJavaCrash(jni::String::Param aStackTrace)
+    static void ReportJavaCrash(const jni::Class::LocalRef& aCls,
+                                jni::Throwable::Param aException,
+                                jni::String::Param aStack)
     {
-#ifdef MOZ_CRASHREPORTER
-        if (NS_WARN_IF(NS_FAILED(CrashReporter::AnnotateCrashReport(
-                NS_LITERAL_CSTRING("JavaStackTrace"),
-                aStackTrace->ToCString())))) {
+        if (!jni::ReportException(aCls.Env(), aException.Get(), aStack.Get())) {
             // Only crash below if crash reporter is initialized and annotation
             // succeeded. Otherwise try other means of reporting the crash in
             // Java.
             return;
         }
-#endif // MOZ_CRASHREPORTER
+
         MOZ_CRASH("Uncaught Java exception");
     }
 

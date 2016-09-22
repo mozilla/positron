@@ -9,7 +9,7 @@ var gTests = [
 
 {
   desc: "device sharing animation on background tabs",
-  run: function checkAudioVideo() {
+  run: function* checkAudioVideo() {
     function* getStreamAndCheckBackgroundAnim(aAudio, aVideo, aSharing) {
       // Get a stream
       let popupPromise = promisePopupNotificationShown("webRTC-shareDevices");
@@ -85,7 +85,7 @@ function test() {
     is(PopupNotifications._currentNotifications.length, 0,
        "should start the test without any prior popup notification");
 
-    Task.spawn(function () {
+    Task.spawn(function* () {
       yield SpecialPowers.pushPrefEnv({"set": [[PREF_PERMISSION_FAKE, true]]});
 
       for (let test of gTests) {
@@ -93,6 +93,7 @@ function test() {
         yield test.run();
       }
     }).then(finish, ex => {
+     Cu.reportError(ex);
      ok(false, "Unexpected Exception: " + ex);
      finish();
     });

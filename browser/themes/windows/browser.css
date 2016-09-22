@@ -46,6 +46,9 @@
   --urlbar-dropmarker-active-2x-region: rect(0, 66px, 28px, 44px);
 
   --panel-separator-color: ThreeDLightShadow;
+  --arrowpanel-dimmed: hsla(0,0%,80%,.3);
+  --arrowpanel-dimmed-further: hsla(0,0%,80%,.45);
+  --arrowpanel-dimmed-even-further: hsla(0,0%,80%,.8);
 
   --urlbar-separator-color: ThreeDLightShadow;
 }
@@ -122,28 +125,27 @@
   content: "";
   display: -moz-box;
   -moz-box-ordinal-group: 101; /* tabs toolbar is 100 */
-  height: 1px;
-  background-color: ThreeDShadow;
+  border-bottom: 1px solid ThreeDShadow;
 }
 
 @media (-moz-windows-default-theme) {
   @media (-moz-os-version: windows-vista),
          (-moz-os-version: windows-win7) {
     #navigator-toolbox::after {
-      background-color: #aabccf;
+      border-bottom-color: #aabccf;
     }
   }
 
   @media (-moz-os-version: windows-win8),
          (-moz-os-version: windows-win10) {
     #navigator-toolbox::after {
-      background-color: #c2c2c2;
+      border-bottom-color: #c2c2c2;
     }
   }
 }
 
 #navigator-toolbox:-moz-lwtheme::after {
-  background-color: rgba(0,0,0,.3);
+  border-bottom-color: rgba(0,0,0,.3);
 }
 
 #navigator-toolbox > toolbar {
@@ -709,26 +711,6 @@ toolbar[brighttext] .toolbarbutton-1 > .toolbarbutton-menubutton-dropmarker {
 }
 
 %include ../shared/menupanel.inc.css
-
-@media (-moz-windows-default-theme) {
-  :-moz-any(@primaryToolbarButtons@)[cui-areatype="menu-panel"][panel-multiview-anchor=true] > .toolbarbutton-icon,
-  :-moz-any(@primaryToolbarButtons@)[cui-areatype="menu-panel"][panel-multiview-anchor=true] > .toolbarbutton-badge-stack > .toolbarbutton-icon,
-  :-moz-any(@primaryToolbarButtons@)[cui-areatype="menu-panel"][panel-multiview-anchor=true] > .toolbarbutton-menubutton-button > .toolbarbutton-icon {
-    filter: url(chrome://browser/skin/filters.svg#fill);
-    fill: currentColor;
-  }
-}
-
-@media not all and (-moz-windows-default-theme) {
-  :-moz-any(@primaryToolbarButtons@)[cui-areatype="menu-panel"] > .toolbarbutton-icon,
-  :-moz-any(@primaryToolbarButtons@)[cui-areatype="menu-panel"] > .toolbarbutton-badge-stack > .toolbarbutton-icon,
-  :-moz-any(@primaryToolbarButtons@)[cui-areatype="menu-panel"] > .toolbarbutton-menubutton-button > .toolbarbutton-icon,
-  toolbaritem[cui-areatype="menu-panel"] > :-moz-any(@nestedButtons@) > .toolbarbutton-icon {
-    filter: url(chrome://browser/skin/filters.svg#fill);
-    fill: currentColor;
-    opacity: 0.7 !important; /* !important overrides .toolbarbutton-1[disabled=true] rule */
-  }
-}
 
 .findbar-button,
 #nav-bar .toolbarbutton-1,
@@ -1358,8 +1340,8 @@ toolbar[brighttext] #close-button {
   -moz-box-direction: reverse;
 }
 
-html|*.urlbar-input:-moz-lwtheme::-moz-placeholder,
-.searchbar-textbox:-moz-lwtheme > .autocomplete-textbox-container > .textbox-input-box > html|*.textbox-input::-moz-placeholder {
+html|*.urlbar-input:-moz-lwtheme::placeholder,
+.searchbar-textbox:-moz-lwtheme > .autocomplete-textbox-container > .textbox-input-box > html|*.textbox-input::placeholder {
   opacity: 1.0;
   color: #777;
 }
@@ -1423,8 +1405,12 @@ html|*.urlbar-input:-moz-lwtheme::-moz-placeholder,
   animation-duration: 250ms;
 }
 
-#urlbar-zoom-button:hover:active {
+#urlbar-zoom-button:hover {
   background-color: hsla(0,0%,0%,.1);
+}
+
+#urlbar-zoom-button:hover:active {
+  background-color: hsla(0,0%,0%,.15);
 }
 
 #urlbar-zoom-button > .toolbarbutton-text {
@@ -1441,7 +1427,7 @@ html|*.urlbar-input:-moz-lwtheme::-moz-placeholder,
 
 #urlbar-search-footer {
   border-top: 1px solid var(--panel-separator-color);
-  background-color: hsla(210,4%,10%,.07);
+  background-color: var(--arrowpanel-dimmed);
 }
 
 #urlbar-search-settings {
@@ -1455,11 +1441,11 @@ html|*.urlbar-input:-moz-lwtheme::-moz-placeholder,
 }
 
 #urlbar-search-settings:hover {
-  background-color: hsla(210,4%,10%,.07);
+  background-color: var(--arrowpanel-dimmed);
 }
 
 #urlbar-search-settings:hover:active {
-  background-color: hsla(210,4%,10%,.12);
+  background-color: var(--arrowpanel-dimmed-further);
 }
 
 #urlbar-search-splitter {
@@ -1489,7 +1475,7 @@ html|*.urlbar-input:-moz-lwtheme::-moz-placeholder,
 /* identity box */
 
 #identity-box:-moz-focusring {
-  outline: 1px dotted #000;
+  outline: 1px dotted;
   outline-offset: -3px;
 }
 
@@ -2394,60 +2380,6 @@ notification[value="translation"] {
   -moz-image-region: auto;
 }
 
-/* Ctrl-Tab */
-
-#ctrlTab-panel {
-  -moz-appearance: none;
-  background: hsla(0,0%,33%,.85);
-  color: white;
-  border-style: none;
-  padding: 20px 10px 10px;
-  font-weight: bold;
-  text-shadow: 0 0 1px hsl(0,0%,12%), 0 0 2px hsl(0,0%,12%);
-}
-
-.ctrlTab-favicon[src] {
-  background-color: white;
-  width: 20px;
-  height: 20px;
-  padding: 2px;
-}
-
-.ctrlTab-preview-inner > .tabPreview-canvas {
-  box-shadow: 1px 1px 2px hsl(0,0%,12%);
-}
-
-.ctrlTab-preview:not(#ctrlTab-showAll) > * > .ctrlTab-preview-inner > .tabPreview-canvas {
-  margin-bottom: 2px;
-}
-
-.ctrlTab-preview-inner {
-  padding-bottom: 10px;
-}
-
-#ctrlTab-showAll:not(:focus) > * > .ctrlTab-preview-inner {
-  padding: 10px;
-  background-color: rgba(255,255,255,.2);
-  border-radius: .5em;
-}
-
-.ctrlTab-preview:focus > * > .ctrlTab-preview-inner {
-  color: white;
-  background-color: rgba(0,0,0,.6);
-  text-shadow: none;
-  padding: 8px;
-  border: 2px solid white;
-  border-radius: .5em;
-}
-
-.ctrlTab-preview:not(#ctrlTab-showAll):focus > * > .ctrlTab-preview-inner {
-  margin: -10px -10px 0;
-}
-
-#ctrlTab-showAll {
-  margin-top: .5em;
-}
-
 /* Status panel */
 
 .statuspanel-label {
@@ -2487,9 +2419,9 @@ notification[value="translation"] {
 }
 
 %include ../shared/fullscreen/warning.inc.css
+%include ../shared/ctrlTab.inc.css
 %include ../../../devtools/client/themes/responsivedesign.inc.css
 %include ../../../devtools/client/themes/commandline.inc.css
-
 %include ../shared/plugin-doorhanger.inc.css
 
 notification.pluginVulnerable > .notification-inner > .messageCloseButton {
@@ -2502,7 +2434,6 @@ notification.pluginVulnerable > .notification-inner > .messageCloseButton {
   }
 }
 
-%include ../shared/login-doorhanger.inc.css
 
 %include downloads/indicator.css
 
@@ -2678,7 +2609,7 @@ notification.pluginVulnerable > .notification-inner > .messageCloseButton {
 
 #UITourTooltipButtons {
   /**
-   * Override the --panel-arrowcontent-padding so the background extends
+   * Override the --arrowpanel-padding so the background extends
    * to the sides and bottom of the panel.
    */
   margin-left: -10px;

@@ -44,6 +44,9 @@
   --urlbar-dropmarker-active-2x-region: rect(0, 44px, 28px, 22px);
 
   --panel-separator-color: hsla(210,4%,10%,.14);
+  --arrowpanel-dimmed: hsla(210,4%,10%,.07);
+  --arrowpanel-dimmed-further: hsla(210,4%,10%,.12);
+  --arrowpanel-dimmed-even-further: hsla(210,4%,10%,.17);
 
   --urlbar-separator-color: hsla(0,0%,16%,.2);
 }
@@ -55,10 +58,10 @@
 
 #navigator-toolbox::after {
   -moz-box-ordinal-group: 101; /* tabs toolbar is 100 */
-  background-image: linear-gradient(to top, hsla(0,0%,0%,.15), hsla(0,0%,0%,.15) 1px, hsla(0,0%,100%,.15) 1px, hsla(0,0%,100%,.15) 2px, transparent 3px);
   content: "";
   display: -moz-box;
-  height: 2px;
+  border-top: 1px solid hsla(0,0%,100%,.15);
+  border-bottom: 1px solid hsla(0,0%,0%,.15);
   margin-top: -2px;
   position: relative;
   z-index: 2; /* navbar is at 1 */
@@ -66,7 +69,9 @@
 
 @media (-moz-mac-yosemite-theme) {
   #navigator-toolbox:-moz-window-inactive::after {
-    background-image: linear-gradient(to top, hsla(0,0%,0%,.1), hsla(0,0%,0%,.1) 1px, hsla(0,0%,100%,0) 1px, hsla(0,0%,100%,0) 2px, transparent 3px);
+    border-top-style: none;
+    border-bottom-color: hsla(0,0%,0%,.1);
+    margin-top: -1px;
   }
 }
 
@@ -118,13 +123,17 @@
 /**
  * We also vertically center the window buttons.
  */
+#titlebar-buttonbox-container {
+  -moz-box-align: start;
+}
+
 #main-window[tabsintitlebar] > #titlebar > #titlebar-content > #titlebar-buttonbox-container,
 #main-window[tabsintitlebar] > #titlebar > #titlebar-content > #titlebar-secondary-buttonbox > #titlebar-fullscreen-button {
   margin-top: @windowButtonMarginTop@;
 }
 
-#main-window:not([tabsintitlebar]) > #titlebar > #titlebar-content > #titlebar-buttonbox-container:-moz-lwtheme,
-#main-window:not([tabsintitlebar]) > #titlebar > #titlebar-content > #titlebar-secondary-buttonbox > #titlebar-fullscreen-button:-moz-lwtheme {
+#main-window:not([tabsintitlebar]) > #titlebar > #titlebar-content > #titlebar-buttonbox-container,
+#main-window:not([tabsintitlebar]) > #titlebar > #titlebar-content > #titlebar-secondary-buttonbox > #titlebar-fullscreen-button {
   margin-top: 3px;
 }
 
@@ -743,13 +752,6 @@ toolbar .toolbarbutton-1 > .toolbarbutton-menubutton-dropmarker > .dropmarker-ic
 
 %include ../shared/toolbarbuttons.inc.css
 %include ../shared/menupanel.inc.css
-
-:-moz-any(@primaryToolbarButtons@)[cui-areatype="menu-panel"][panel-multiview-anchor=true] > .toolbarbutton-icon,
-:-moz-any(@primaryToolbarButtons@)[cui-areatype="menu-panel"][panel-multiview-anchor=true] > .toolbarbutton-badge-stack > .toolbarbutton-icon,
-:-moz-any(@primaryToolbarButtons@)[cui-areatype="menu-panel"][panel-multiview-anchor=true] > .toolbarbutton-menubutton-button > .toolbarbutton-icon {
-  filter: url(chrome://browser/skin/filters.svg#fill);
-  fill: currentColor;
-}
 
 @media not all and (min-resolution: 1.1dppx) {
   #back-button:hover:active:not([disabled="true"]) {
@@ -1683,8 +1685,13 @@ toolbar .toolbarbutton-1 > .toolbarbutton-menubutton-button {
   animation-name: urlbar-zoom-reset-pulse;
   animation-duration: 250ms;
 }
-#urlbar-zoom-button:hover:active {
+
+#urlbar-zoom-button:hover {
   background-color: hsla(0,0%,0%,.1);
+}
+
+#urlbar-zoom-button:hover:active {
+  background-color: hsla(0,0%,0%,.15);
 }
 
 #urlbar-zoom-button > .toolbarbutton-text {
@@ -1697,7 +1704,7 @@ toolbar .toolbarbutton-1 > .toolbarbutton-menubutton-button {
 
 #urlbar-search-footer {
   border-top: 1px solid var(--panel-separator-color);
-  background-color: hsla(210,4%,10%,.07);
+  background-color: var(--arrowpanel-dimmed);
 }
 
 #urlbar-search-settings {
@@ -1709,11 +1716,11 @@ toolbar .toolbarbutton-1 > .toolbarbutton-menubutton-button {
 }
 
 #urlbar-search-settings:hover {
-  background-color: hsla(210,4%,10%,.07);
+  background-color: var(--arrowpanel-dimmed);
 }
 
 #urlbar-search-settings:hover:active {
-  background-color: hsla(210,4%,10%,.12);
+  background-color: var(--arrowpanel-dimmed-further);
 }
 
 #urlbar-search-splitter {
@@ -2324,7 +2331,7 @@ html|span.ac-emphasize-text-url {
   }
 }
 
-#editBMPanel_tagsField > .autocomplete-textbox-container > .textbox-input-box > html|*.textbox-input::-moz-placeholder {
+#editBMPanel_tagsField > .autocomplete-textbox-container > .textbox-input-box > html|*.textbox-input::placeholder {
   opacity: 1.0;
   color: #bbb;
 }
@@ -3117,60 +3124,6 @@ menulist.translate-infobar-element > .menulist-dropmarker {
   font-weight: bold;
 }
 
-/* Ctrl-Tab */
-
-#ctrlTab-panel {
-  -moz-appearance: none;
-  -moz-window-shadow: none;
-  background: hsla(0,0%,33%,.85);
-  color: white;
-  border-style: none;
-  padding: 20px 10px 10px;
-  text-shadow: 0 0 1px hsl(0,0%,12%), 0 0 2px hsl(0,0%,12%);
-}
-
-.ctrlTab-favicon[src] {
-  background-color: white;
-  width: 20px;
-  height: 20px;
-  padding: 2px;
-}
-
-.ctrlTab-preview-inner > .tabPreview-canvas {
-  box-shadow: 1px 1px 2px hsl(0,0%,12%);
-}
-
-.ctrlTab-preview:not(#ctrlTab-showAll) > * > .ctrlTab-preview-inner > .tabPreview-canvas {
-  margin-bottom: 2px;
-}
-
-.ctrlTab-preview-inner {
-  padding-bottom: 10px;
-}
-
-#ctrlTab-showAll:not(:focus) > * > .ctrlTab-preview-inner {
-  padding: 10px;
-  background-color: rgba(255,255,255,.2);
-  border-radius: .5em;
-}
-
-.ctrlTab-preview:focus > * > .ctrlTab-preview-inner {
-  color: white;
-  background-color: rgba(0,0,0,.6);
-  text-shadow: none;
-  padding: 8px;
-  border: 2px solid white;
-  border-radius: .5em;
-}
-
-.ctrlTab-preview:not(#ctrlTab-showAll):focus > * > .ctrlTab-preview-inner {
-  margin: -10px -10px 0;
-}
-
-#ctrlTab-showAll {
-  margin-top: .5em;
-}
-
 /* Status panel */
 
 .statuspanel-label {
@@ -3198,10 +3151,10 @@ menulist.translate-infobar-element > .menulist-dropmarker {
 }
 
 %include ../shared/fullscreen/warning.inc.css
+%include ../shared/ctrlTab.inc.css
 %include ../../../devtools/client/themes/responsivedesign.inc.css
 %include ../../../devtools/client/themes/commandline.inc.css
 %include ../shared/plugin-doorhanger.inc.css
-%include ../shared/login-doorhanger.inc.css
 
 %include downloads/indicator.css
 

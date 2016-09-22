@@ -384,6 +384,7 @@ private:
   DECL_GFX_PREF(Live, "gfx.SurfaceTexture.detach.enabled",     SurfaceTextureDetachEnabled, bool, true);
   DECL_GFX_PREF(Live, "gfx.testing.device-reset",              DeviceResetForTesting, int32_t, 0);
   DECL_GFX_PREF(Live, "gfx.testing.device-fail",               DeviceFailForTesting, bool, false);
+  DECL_GFX_PREF(Once, "gfx.text.disable-aa",                   DisableAllTextAA, bool, false);
   DECL_GFX_PREF(Live, "gfx.ycbcr.accurate-conversion",         YCbCrAccurateConversion, bool, false);
 
   DECL_GFX_PREF(Live, "gfx.content.use-native-pushlayer",      UseNativePushLayer, bool, false);
@@ -537,6 +538,10 @@ private:
   // This affects whether events will be routed through APZ or not.
   DECL_GFX_PREF(Live, "mousewheel.system_scroll_override_on_root_content.enabled",
                                                                MouseWheelHasRootScrollDeltaOverride, bool, false);
+  DECL_GFX_PREF(Live, "mousewheel.system_scroll_override_on_root_content.horizontal.factor",
+                                                               MouseWheelRootScrollHorizontalFactor, int32_t, 0);
+  DECL_GFX_PREF(Live, "mousewheel.system_scroll_override_on_root_content.vertical.factor",
+                                                               MouseWheelRootScrollVerticalFactor, int32_t, 0);
   DECL_GFX_PREF(Live, "mousewheel.transaction.ignoremovedelay",MouseWheelIgnoreMoveDelayMs, int32_t, (int32_t)100);
   DECL_GFX_PREF(Live, "mousewheel.transaction.timeout",        MouseWheelTransactionTimeoutMs, int32_t, (int32_t)1500);
 

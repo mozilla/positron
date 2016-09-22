@@ -144,10 +144,6 @@ public:
         return sBridge;
     }
 
-    /* These are all implemented in Java */
-    bool GetThreadNameJavaProfiling(uint32_t aThreadId, nsCString & aResult);
-    bool GetFrameNameJavaProfiling(uint32_t aThreadId, uint32_t aSampleId, uint32_t aFrameId, nsCString & aResult);
-
     void ContentDocumentChanged();
     bool IsContentDocumentDisplayed();
 
@@ -191,8 +187,6 @@ public:
     jobject GetGlobalContextRef(void);
 
     void HandleGeckoMessage(JSContext* cx, JS::HandleObject message);
-
-    bool InitCamera(const nsCString& contentType, uint32_t camera, uint32_t *width, uint32_t *height, uint32_t *fps);
 
     void GetCurrentBatteryInformation(hal::BatteryInformation* aBatteryInfo);
 
@@ -503,9 +497,9 @@ private:
   void AddObservers();
   void RemoveObservers();
 
-  void UpdateAudioPlayingWindows(nsPIDOMWindowOuter* aWindow, bool aPlaying);
+  void UpdateAudioPlayingWindows(uint64_t aWindowId, bool aPlaying);
 
-  nsTArray<nsPIDOMWindowOuter*> mAudioPlayingWindows;
+  nsTArray<uint64_t> mAudioPlayingWindows;
 
 protected:
 };

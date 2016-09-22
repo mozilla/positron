@@ -272,6 +272,16 @@ ClientLayerManager::EndTransactionInternal(DrawPaintedLayerCallback aCallback,
   PROFILER_LABEL("ClientLayerManager", "EndTransactionInternal",
     js::ProfileEntry::Category::GRAPHICS);
 
+  if (!mForwarder || !mForwarder->IPCOpen()) {
+    gfxCriticalError() << "LayerManager::EndTransaction while IPC is dead.";
+    // Pointless to try to render since the content cannot be sent to the
+    // compositor. We should not get here in the first place but I suspect
+    // This is happening during shutdown, tab-switch or some other scenario
+    // where we already started tearing the resources down but something
+    // triggered painting anyway.
+    return false;
+  }
+
 #ifdef MOZ_LAYERS_HAVE_LOG
   MOZ_LAYERS_LOG(("  ----- (beginning paint)"));
   Log();
@@ -649,10 +659,10 @@ ClientLayerManager::ForwardTransaction(bool aScheduleComposite)
 
         const OpContentBufferSwap& obs = reply.get_OpContentBufferSwap();
 
-        CompositableClient* compositable =
+        RefPtr<CompositableClient> compositable =
           CompositableClient::FromIPDLActor(obs.compositableChild());
         ContentClientRemote* contentClient =
-          static_cast<ContentClientRemote*>(compositable);
+          static_cast<ContentClientRemote*>(compositable.get());
         MOZ_ASSERT(contentClient);
 
         contentClient->SwapBuffers(obs.frontUpdatedRegion());
@@ -805,6 +815,12 @@ void
 ClientLayerManager::SetNextPaintSyncId(int32_t aSyncId)
 {
   mForwarder->SetPaintSyncId(aSyncId);
+}
+
+void
+ClientLayerManager::SetLayerObserverEpoch(uint64_t aLayerObserverEpoch)
+{
+  mForwarder->SetLayerObserverEpoch(aLayerObserverEpoch);
 }
 
 void

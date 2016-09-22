@@ -109,6 +109,8 @@ class Assembler : public AssemblerShared
         LessThan,
         LessThanOrEqual,
         Overflow,
+        CarrySet,
+        CarryClear,
         Signed,
         NotSigned,
         Zero,
@@ -146,8 +148,6 @@ class Assembler : public AssemblerShared
     static void ToggleToJmp(CodeLocationLabel) { MOZ_CRASH(); }
     static void ToggleToCmp(CodeLocationLabel) { MOZ_CRASH(); }
     static void ToggleCall(CodeLocationLabel, bool) { MOZ_CRASH(); }
-
-    static void UpdateBoundsCheck(uint8_t*, uint32_t) { MOZ_CRASH(); }
 
     static uintptr_t GetPointer(uint8_t*) { MOZ_CRASH(); }
 
@@ -351,8 +351,6 @@ class MacroAssemblerNone : public Assembler
     template <typename T, typename S> void atomicXor8(const T& value, const S& mem) { MOZ_CRASH(); }
     template <typename T, typename S> void atomicXor16(const T& value, const S& mem) { MOZ_CRASH(); }
     template <typename T, typename S> void atomicXor32(const T& value, const S& mem) { MOZ_CRASH(); }
-
-    void clampIntToUint8(Register) { MOZ_CRASH(); }
 
     Register splitTagForTest(ValueOperand) { MOZ_CRASH(); }
 

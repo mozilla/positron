@@ -86,7 +86,6 @@
 #include "nsRuleProcessorData.h"
 #include "nsString.h"
 #include "nsStyleConsts.h"
-#include "nsSVGFeatures.h"
 #include "nsSVGUtils.h"
 #include "nsTextNode.h"
 #include "nsUnicharUtils.h"
@@ -688,26 +687,32 @@ nsINode::Normalize()
   }
 }
 
-void
+nsresult
 nsINode::GetBaseURI(nsAString &aURI) const
 {
   nsCOMPtr<nsIURI> baseURI = GetBaseURI();
 
   nsAutoCString spec;
   if (baseURI) {
-    baseURI->GetSpec(spec);
+    nsresult rv = baseURI->GetSpec(spec);
+    NS_ENSURE_SUCCESS(rv, rv);
   }
 
   CopyUTF8toUTF16(spec, aURI);
+  return NS_OK;
 }
 
 void
-nsINode::GetBaseURIFromJS(nsAString& aURI) const
+nsINode::GetBaseURIFromJS(nsAString& aURI, ErrorResult& aRv) const
 {
   nsCOMPtr<nsIURI> baseURI = GetBaseURI(nsContentUtils::IsCallerChrome());
   nsAutoCString spec;
   if (baseURI) {
-    baseURI->GetSpec(spec);
+    nsresult res = baseURI->GetSpec(spec);
+    if (NS_FAILED(res)) {
+      aRv.Throw(res);
+      return;
+    }
   }
   CopyUTF8toUTF16(spec, aURI);
 }
@@ -2707,7 +2712,10 @@ nsINode::ParseSelectorList(const nsAString& aSelectorString,
   if (haveCachedList) {
     if (!selectorList) {
       // Invalid selector.
-      aRv.Throw(NS_ERROR_DOM_SYNTAX_ERR);
+      aRv.ThrowDOMException(NS_ERROR_DOM_SYNTAX_ERR,
+        NS_LITERAL_CSTRING("'") + NS_ConvertUTF16toUTF8(aSelectorString) +
+        NS_LITERAL_CSTRING("' is not a valid selector")
+      );
     }
     return selectorList;
   }
@@ -2724,6 +2732,13 @@ nsINode::ParseSelectorList(const nsAString& aSelectorString,
     // of selectors, but it sees if we can parse them first.)
     MOZ_ASSERT(aRv.ErrorCodeIs(NS_ERROR_DOM_SYNTAX_ERR),
                "Unexpected error, so cached version won't return it");
+
+    // Change the error message to match above.
+    aRv.ThrowDOMException(NS_ERROR_DOM_SYNTAX_ERR,
+      NS_LITERAL_CSTRING("'") + NS_ConvertUTF16toUTF8(aSelectorString) +
+      NS_LITERAL_CSTRING("' is not a valid selector")
+    );
+
     cache.CacheList(aSelectorString, nullptr);
     return nullptr;
   }

@@ -202,8 +202,8 @@ gfxFontCache::~gfxFontCache()
     // Expire everything that has a zero refcount, so we don't leak them.
     AgeAllGenerations();
     // All fonts should be gone.
-    NS_WARN_IF_FALSE(mFonts.Count() == 0,
-                     "Fonts still alive while shutting down gfxFontCache");
+    NS_WARNING_ASSERTION(mFonts.Count() == 0,
+                         "Fonts still alive while shutting down gfxFontCache");
     // Note that we have to delete everything through the expiration
     // tracker, since there might be fonts not in the hashtable but in
     // the tracker.
@@ -1575,7 +1575,7 @@ public:
         glyph->mIndex = aGlyphID;
         glyph->mPosition.x = aPt.x;
         glyph->mPosition.y = aPt.y;
-        glyph->mPosition = mFontParams.matInv * glyph->mPosition;
+        glyph->mPosition = mFontParams.matInv.TransformPoint(glyph->mPosition);
         Flush(false); // this will flush only if the buffer is full
     }
 
@@ -1766,7 +1766,7 @@ double
 gfxFont::CalcXScale(DrawTarget* aDrawTarget)
 {
     // determine magnitude of a 1px x offset in device space
-    Size t = aDrawTarget->GetTransform() * Size(1.0, 0.0);
+    Size t = aDrawTarget->GetTransform().TransformSize(Size(1.0, 0.0));
     if (t.width == 1.0 && t.height == 0.0) {
         // short-circuit the most common case to avoid sqrt() and division
         return 1.0;
@@ -1820,8 +1820,9 @@ gfxFont::DrawOneGlyph(uint32_t aGlyphID, double aAdvance, gfxPoint *aPt,
         if (!runParams.paintSVGGlyphs) {
             return;
         }
-        NS_WARN_IF_FALSE(runParams.drawMode != DrawMode::GLYPH_PATH,
-                         "Rendering SVG glyph despite request for glyph path");
+        NS_WARNING_ASSERTION(
+          runParams.drawMode != DrawMode::GLYPH_PATH,
+          "Rendering SVG glyph despite request for glyph path");
         if (RenderSVGGlyph(runParams.context, devPt,
                            aGlyphID, fontParams.contextPaint,
                            runParams.callbacks, *aEmittedGlyphs)) {
@@ -1833,7 +1834,7 @@ gfxFont::DrawOneGlyph(uint32_t aGlyphID, double aAdvance, gfxPoint *aPt,
         RenderColorGlyph(runParams.dt, runParams.context,
                          fontParams.scaledFont, fontParams.renderingOptions,
                          fontParams.drawOptions,
-                         fontParams.matInv * gfx::Point(devPt.x, devPt.y),
+                         fontParams.matInv.TransformPoint(gfx::Point(devPt.x, devPt.y)),
                          aGlyphID)) {
         return;
     }
@@ -2603,7 +2604,7 @@ gfxFont::GetShapedWord(DrawTarget *aDrawTarget,
     DebugOnly<bool> ok =
         ShapeText(aDrawTarget, aText, 0, aLength, aRunScript, aVertical, sw);
 
-    NS_WARN_IF_FALSE(ok, "failed to shape word - expect garbled text");
+    NS_WARNING_ASSERTION(ok, "failed to shape word - expect garbled text");
 
     return sw;
 }
@@ -2695,7 +2696,7 @@ gfxFont::ShapeText(DrawTarget      *aDrawTarget,
                                         aScript, aVertical, aShapedText);
     }
 
-    NS_WARN_IF_FALSE(ok, "shaper failed, expect scrambled or missing text");
+    NS_WARNING_ASSERTION(ok, "shaper failed, expect scrambled or missing text");
 
     PostShapingFixup(aDrawTarget, aText, aOffset, aLength,
                      aVertical, aShapedText);
@@ -2846,7 +2847,7 @@ gfxFont::ShapeTextWithoutWordCache(DrawTarget *aDrawTarget,
         fragStart = i + 1;
     }
 
-    NS_WARN_IF_FALSE(ok, "failed to shape text - expect garbled text");
+    NS_WARNING_ASSERTION(ok, "failed to shape text - expect garbled text");
     return ok;
 }
 

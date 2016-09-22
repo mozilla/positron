@@ -71,6 +71,8 @@ XPCOMUtils.defineLazyServiceGetter(this, "AlertsService", "@mozilla.org/alerts-s
 if (AppConstants.MOZ_CRASHREPORTER) {
   XPCOMUtils.defineLazyModuleGetter(this, "PluginCrashReporter",
                                     "resource:///modules/ContentCrashHandlers.jsm");
+  XPCOMUtils.defineLazyModuleGetter(this, "UnsubmittedCrashHandler",
+                                    "resource:///modules/ContentCrashHandlers.jsm");
   XPCOMUtils.defineLazyModuleGetter(this, "CrashSubmit",
                                     "resource://gre/modules/CrashSubmit.jsm");
 }
@@ -714,6 +716,7 @@ BrowserGlue.prototype = {
     TabCrashHandler.init();
     if (AppConstants.MOZ_CRASHREPORTER) {
       PluginCrashReporter.init();
+      UnsubmittedCrashHandler.init();
     }
 
     Services.obs.notifyObservers(null, "browser-ui-startup-complete", "");
@@ -741,61 +744,6 @@ BrowserGlue.prototype = {
       if (buildDate + acceptableAge < today) {
         Cc["@mozilla.org/updates/update-service;1"].getService(Ci.nsIApplicationUpdateService).checkForBackgroundUpdates();
       }
-    }
-  },
-
-  checkForPendingCrashReports: function() {
-    // We don't process crash reports older than 28 days, so don't bother submitting them
-    const PENDING_CRASH_REPORT_DAYS = 28;
-    if (AppConstants.MOZ_CRASHREPORTER) {
-      let dateLimit = new Date();
-      dateLimit.setDate(dateLimit.getDate() - PENDING_CRASH_REPORT_DAYS);
-      CrashSubmit.pendingIDsAsync(dateLimit).then(
-        function onSuccess(ids) {
-          let count = ids.length;
-          if (count) {
-            let win = RecentWindow.getMostRecentBrowserWindow();
-            let nb =  win.document.getElementById("global-notificationbox");
-            let notification = nb.getNotificationWithValue("pending-crash-reports");
-            if (notification) {
-              return;
-            }
-            let buttons = [
-              {
-                label: win.gNavigatorBundle.getString("pendingCrashReports.submitAll"),
-                callback: function() {
-                  ids.forEach(function(id) {
-                    CrashSubmit.submit(id, {extraExtraKeyVals: {"SubmittedFromInfobar": true}});
-                  });
-                }
-              },
-              {
-                label: win.gNavigatorBundle.getString("pendingCrashReports.ignoreAll"),
-                callback: function() {
-                  ids.forEach(function(id) {
-                    CrashSubmit.ignore(id);
-                  });
-                }
-              },
-              {
-                label: win.gNavigatorBundle.getString("pendingCrashReports.viewAll"),
-                callback: function() {
-                  win.openUILinkIn("about:crashes", "tab");
-                  return true;
-                }
-              }
-            ];
-            nb.appendNotification(PluralForm.get(count,
-                                                 win.gNavigatorBundle.getString("pendingCrashReports.label")).replace("#1", count),
-                                  "pending-crash-reports",
-                                  "chrome://browser/skin/tab-crashed.svg",
-                                  nb.PRIORITY_INFO_HIGH, buttons);
-          }
-        },
-        function onError(err) {
-          Cu.reportError(err);
-        }
-      );
     }
   },
 
@@ -845,7 +793,7 @@ BrowserGlue.prototype = {
 
     if (samples >= Services.prefs.getIntPref("browser.slowStartup.maxSamples")) {
       if (averageTime > Services.prefs.getIntPref("browser.slowStartup.timeThreshold"))
-        this._showSlowStartupNotification();
+        this._calculateProfileAgeInDays().then(this._showSlowStartupNotification, null);
       averageTime = 0;
       samples = 0;
     }
@@ -854,7 +802,25 @@ BrowserGlue.prototype = {
     Services.prefs.setIntPref("browser.slowStartup.samples", samples);
   },
 
-  _showSlowStartupNotification: function () {
+  _calculateProfileAgeInDays: Task.async(function* () {
+    let ProfileAge = Cu.import("resource://gre/modules/ProfileAge.jsm", {}).ProfileAge;
+    let profileAge = new ProfileAge(null, null);
+
+    let creationDate = yield profileAge.created;
+    let resetDate = yield profileAge.reset;
+
+    // if the profile was reset, consider the
+    // reset date for its age.
+    let profileDate = resetDate || creationDate;
+
+    const ONE_DAY = 24 * 60 * 60 * 1000;
+    return (Date.now() - profileDate) / ONE_DAY;
+  }),
+
+  _showSlowStartupNotification: function (profileAge) {
+    if (profileAge < 90) // 3 months
+      return;
+
     let win = RecentWindow.getMostRecentBrowserWindow();
     if (!win)
       return;
@@ -965,7 +931,9 @@ BrowserGlue.prototype = {
     }
     if (SCALING_PROBE_NAME) {
       let scaling = aWindow.devicePixelRatio * 100;
-      Services.telemetry.getHistogramById(SCALING_PROBE_NAME).add(scaling);
+      try {
+        Services.telemetry.getHistogramById(SCALING_PROBE_NAME).add(scaling);
+      } catch (ex) {}
     }
   },
 
@@ -1048,10 +1016,6 @@ BrowserGlue.prototype = {
     }
 
     this._checkForOldBuildUpdates();
-
-    if (!AppConstants.RELEASE_BUILD) {
-      this.checkForPendingCrashReports();
-    }
 
     CaptivePortalWatcher.init();
 
@@ -2614,6 +2578,45 @@ ContentPermissionPrompt.prototype = {
                      "geo-notification-icon", options);
   },
 
+  _promptFlyWebPublishServer : function(aRequest) {
+    var message = "Would you like to let this site start a server accessible to nearby devices and people?";
+    var actions = [
+      {
+        stringId: "flyWebPublishServer.allowPublishServer",
+        action: Ci.nsIPermissionManager.ALLOW_ACTION,
+        expireType: Ci.nsIPermissionManager.EXPIRE_SESSION
+      },
+      {
+        stringId: "flyWebPublishServer.denyPublishServer",
+        action: Ci.nsIPermissionManager.DENY_ACTION,
+        expireType: Ci.nsIPermissionManager.EXPIRE_SESSION
+      }
+    ];
+
+    let options = {
+      learnMoreURL: "https://flyweb.github.io",
+      popupIconURL: "chrome://flyweb/skin/icon-64.png"
+    };
+
+    let browser = this._getBrowserForRequest(aRequest);
+    let chromeDoc = browser.ownerDocument;
+    let iconElem = chromeDoc.getElementById("flyweb-publish-server-notification-icon");
+    if (!iconElem) {
+      let notificationPopupBox = chromeDoc.getElementById("notification-popup-box");
+      let notificationIcon = chromeDoc.createElement("image");
+      notificationIcon.setAttribute("id", "flyweb-publish-server-notification-icon");
+      notificationIcon.setAttribute("src", "chrome://flyweb/skin/icon-64.png");
+      notificationIcon.setAttribute("class", "notification-anchor-icon flyweb-publish-server-icon");
+      notificationIcon.setAttribute("style", "filter: url(chrome://browser/skin/filters.svg#fill); fill: currentColor; opacity: .4;");
+      notificationIcon.setAttribute("role", "button");
+      notificationIcon.setAttribute("aria-label", "View the publish-server request");
+      notificationPopupBox.appendChild(notificationIcon);
+    }
+
+    this._showPrompt(aRequest, message, "flyweb-publish-server", actions, "flyweb-publish-server",
+                     "flyweb-publish-server-notification-icon", options);
+  },
+
   _promptWebNotifications : function(aRequest) {
     var message = gBrowserBundle.GetStringFromName("webNotifications.receiveFromSite");
 
@@ -2678,7 +2681,8 @@ ContentPermissionPrompt.prototype = {
     let perm = types.queryElementAt(0, Ci.nsIContentPermissionType);
 
     const kFeatureKeys = { "geolocation" : "geo",
-                           "desktop-notification" : "desktop-notification"
+                           "desktop-notification" : "desktop-notification",
+                           "flyweb-publish-server": "flyweb-publish-server"
                          };
 
     // Make sure that we support the request.
@@ -2720,6 +2724,11 @@ ContentPermissionPrompt.prototype = {
       break;
     case "desktop-notification":
       this._promptWebNotifications(request);
+      break;
+    case "flyweb-publish-server":
+      if (AppConstants.NIGHTLY_BUILD) {
+        this._promptFlyWebPublishServer(request);
+      }
       break;
     }
   },

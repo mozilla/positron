@@ -1481,6 +1481,21 @@ GCRuntime::setNurseryCollectionCallback(JS::GCNurseryCollectionCallback callback
     return stats.setNurseryCollectionCallback(callback);
 }
 
+JS::DoCycleCollectionCallback
+GCRuntime::setDoCycleCollectionCallback(JS::DoCycleCollectionCallback callback)
+{
+    auto prior = gcDoCycleCollectionCallback;
+    gcDoCycleCollectionCallback = Callback<JS::DoCycleCollectionCallback>(callback, nullptr);
+    return prior.op;
+}
+
+void
+GCRuntime::callDoCycleCollectionCallback(JSContext* cx)
+{
+    if (gcDoCycleCollectionCallback.op)
+        gcDoCycleCollectionCallback.op(cx);
+}
+
 bool
 GCRuntime::addRoot(Value* vp, const char* name)
 {
@@ -2511,6 +2526,7 @@ GCRuntime::updateAllCellPointers(MovingTracer* trc, Zone* zone)
 void
 GCRuntime::updatePointersToRelocatedCells(Zone* zone, AutoLockForExclusiveAccess& lock)
 {
+    MOZ_ASSERT(!rt->isBeingDestroyed());
     MOZ_ASSERT(zone->isGCCompacting());
 
     gcstats::AutoPhase ap(stats, gcstats::PHASE_COMPACT_UPDATE);
@@ -3552,21 +3568,27 @@ FOR_EACH_ALLOCKIND(MAKE_CASE)
 bool
 ArenaLists::checkEmptyArenaList(AllocKind kind)
 {
-    bool empty = true;
+    size_t num_live = 0;
 #ifdef DEBUG
     if (!arenaLists[kind].isEmpty()) {
+        size_t max_cells = 20;
+        char *env = getenv("JS_GC_MAX_LIVE_CELLS");
+        if (env && *env)
+            max_cells = atol(env);
         for (Arena* current = arenaLists[kind].head(); current; current = current->next) {
             for (ArenaCellIterUnderFinalize i(current); !i.done(); i.next()) {
                 Cell* t = i.get<Cell>();
                 MOZ_ASSERT(t->asTenured().isMarked(), "unmarked cells should have been finalized");
-                fprintf(stderr, "ERROR: GC found live Cell %p of kind %s at shutdown\n",
-                        t, AllocKindToAscii(kind));
-                empty = false;
+                if (++num_live <= max_cells) {
+                    fprintf(stderr, "ERROR: GC found live Cell %p of kind %s at shutdown\n",
+                            t, AllocKindToAscii(kind));
+                }
             }
         }
+        fprintf(stderr, "ERROR: GC found %" PRIuSIZE " live Cells at shutdown\n", num_live);
     }
 #endif // DEBUG
-    return empty;
+    return num_live == 0;
 }
 
 void
@@ -3659,7 +3681,7 @@ InCrossCompartmentMap(JSObject* src, JS::GCCellPtr dst)
      */
     for (JSCompartment::WrapperEnum e(srccomp); !e.empty(); e.popFront()) {
         if (e.front().mutableKey().applyToWrapped(IsDestComparatorFunctor(dst)) &&
-            ToMarkable(e.front().value()) == src)
+            ToMarkable(e.front().value().unbarrieredGet()) == src)
         {
             return true;
         }
@@ -3825,11 +3847,16 @@ GCRuntime::beginMarkPhase(JS::gcreason::Reason reason, AutoLockForExclusiveAcces
      * Relazify functions after discarding JIT code (we can't relazify
      * functions with JIT code) and before the actual mark phase, so that
      * the current GC can collect the JSScripts we're unlinking here.
+     * We do this only when we're performing a shrinking GC, as too much
+     * relazification can cause performance issues when we have to reparse
+     * the same functions over and over.
      */
-    for (GCZonesIter zone(rt); !zone.done(); zone.next()) {
+    if (invocationKind == GC_SHRINK) {
         gcstats::AutoPhase ap(stats, gcstats::PHASE_RELAZIFY_FUNCTIONS);
-        RelazifyFunctions(zone, AllocKind::FUNCTION);
-        RelazifyFunctions(zone, AllocKind::FUNCTION_EXTENDED);
+        for (GCZonesIter zone(rt); !zone.done(); zone.next()) {
+            RelazifyFunctions(zone, AllocKind::FUNCTION);
+            RelazifyFunctions(zone, AllocKind::FUNCTION_EXTENDED);
+        }
     }
 
     startNumber = number;
@@ -5451,29 +5478,30 @@ GCRuntime::compactPhase(JS::gcreason::Reason reason, SliceBudget& sliceBudget,
 
     gcstats::AutoPhase ap(stats, gcstats::PHASE_COMPACT);
 
-    // TODO: JSScripts can move. If the sampler interrupts the GC in the
-    // middle of relocating an arena, invalid JSScript pointers may be
-    // accessed. Suppress all sampling until a finer-grained solution can be
-    // found. See bug 1295775.
-    AutoSuppressProfilerSampling suppressSampling(rt);
-
+    Arena* relocatedArenas = nullptr;
     while (!zonesToMaybeCompact.isEmpty()) {
+        // TODO: JSScripts can move. If the sampler interrupts the GC in the
+        // middle of relocating an arena, invalid JSScript pointers may be
+        // accessed. Suppress all sampling until a finer-grained solution can be
+        // found. See bug 1295775.
+        AutoSuppressProfilerSampling suppressSampling(rt);
+
         Zone* zone = zonesToMaybeCompact.front();
         MOZ_ASSERT(zone->isGCFinished());
-        Arena* relocatedArenas = nullptr;
         if (relocateArenas(zone, reason, relocatedArenas, sliceBudget)) {
             zone->setGCState(Zone::Compact);
             updatePointersToRelocatedCells(zone, lock);
             zone->setGCState(Zone::Finished);
         }
-        if (ShouldProtectRelocatedArenas(reason))
-            protectAndHoldArenas(relocatedArenas);
-        else
-            releaseRelocatedArenas(relocatedArenas);
         zonesToMaybeCompact.removeFront();
         if (sliceBudget.isOverBudget())
             break;
     }
+
+    if (ShouldProtectRelocatedArenas(reason))
+        protectAndHoldArenas(relocatedArenas);
+    else
+        releaseRelocatedArenas(relocatedArenas);
 
     // Clear caches that can contain cell pointers.
     JSContext* cx = rt->contextFromMainThread();
@@ -5843,15 +5871,23 @@ GCRuntime::incrementalCollectSlice(SliceBudget& budget, JS::gcreason::Reason rea
 
         MOZ_ASSERT(marker.isDrained());
 
-        if (!lastMarkSlice && isIncremental && useZeal &&
-            ((initialState == State::Mark && !hasZealMode(ZealMode::IncrementalRootsThenFinish)) ||
-             hasZealMode(ZealMode::IncrementalMarkAllThenFinish)))
+        /*
+         * In incremental GCs where we have already performed more than once
+         * slice we yield after marking with the aim of starting the sweep in
+         * the next slice, since the first slice of sweeping can be expensive.
+         *
+         * This is modified by the various zeal modes.  We don't yield in
+         * IncrementalRootsThenFinish mode and we always yield in
+         * IncrementalMarkAllThenFinish mode.
+         *
+         * We will need to mark anything new on the stack when we resume, so
+         * we stay in Mark state.
+         */
+        if (!lastMarkSlice && isIncremental &&
+            ((initialState == State::Mark &&
+              !(useZeal && hasZealMode(ZealMode::IncrementalRootsThenFinish))) ||
+             (useZeal && hasZealMode(ZealMode::IncrementalMarkAllThenFinish))))
         {
-            /*
-             * Yield with the aim of starting the sweep in the next
-             * slice.  We will need to mark anything new on the stack
-             * when we resume, so we stay in Mark state.
-             */
             lastMarkSlice = true;
             break;
         }
@@ -6171,6 +6207,31 @@ GCRuntime::scanZonesBeforeGC()
     return zoneStats;
 }
 
+// The GC can only clean up scheduledForDestruction compartments that were
+// marked live by a barrier (e.g. by RemapWrappers from a navigation event).
+// It is also common to have compartments held live because they are part of a
+// cycle in gecko, e.g. involving the HTMLDocument wrapper. In this case, we
+// need to run the CycleCollector in order to remove these edges before the
+// compartment can be freed.
+void
+GCRuntime::maybeDoCycleCollection()
+{
+    const static double ExcessiveGrayCompartments = 0.8;
+    const static size_t LimitGrayCompartments = 200;
+
+    size_t compartmentsTotal = 0;
+    size_t compartmentsGray = 0;
+    for (CompartmentsIter c(rt, SkipAtoms); !c.done(); c.next()) {
+        ++compartmentsTotal;
+        GlobalObject* global = c->unsafeUnbarrieredMaybeGlobal();
+        if (global && global->asTenured().isMarked(GRAY))
+            ++compartmentsGray;
+    }
+    double grayFraction = double(compartmentsGray) / double(compartmentsTotal);
+    if (grayFraction > ExcessiveGrayCompartments || compartmentsGray > LimitGrayCompartments)
+        callDoCycleCollectionCallback(rt->contextFromMainThread());
+}
+
 void
 GCRuntime::checkCanCallAPI()
 {
@@ -6251,6 +6312,9 @@ GCRuntime::collect(bool nonincrementalByAPI, SliceBudget budget, JS::gcreason::R
         repeat = (poked && cleanUpEverything) || wasReset || repeatForDeadZone;
     } while (repeat);
 
+    if (reason == JS::gcreason::COMPARTMENT_REVIVED)
+        maybeDoCycleCollection();
+
 #ifdef JS_GC_ZEAL
     if (shouldCompact() && rt->hasZealMode(ZealMode::CheckHeapOnMovingGC)) {
         gcstats::AutoPhase ap(rt->gc.stats, gcstats::PHASE_TRACE_HEAP);
@@ -6291,6 +6355,10 @@ void
 GCRuntime::startGC(JSGCInvocationKind gckind, JS::gcreason::Reason reason, int64_t millis)
 {
     MOZ_ASSERT(!isIncrementalGCInProgress());
+    if (!JS::IsIncrementalGCEnabled(rt->contextFromMainThread())) {
+        gc(gckind, reason);
+        return;
+    }
     invocationKind = gckind;
     collect(false, defaultBudget(reason, millis), reason);
 }
@@ -7167,6 +7235,12 @@ JS_PUBLIC_API(JS::GCSliceCallback)
 JS::SetGCSliceCallback(JSContext* cx, GCSliceCallback callback)
 {
     return cx->gc.setSliceCallback(callback);
+}
+
+JS_PUBLIC_API(JS::DoCycleCollectionCallback)
+JS::SetDoCycleCollectionCallback(JSContext* cx, JS::DoCycleCollectionCallback callback)
+{
+    return cx->gc.setDoCycleCollectionCallback(callback);
 }
 
 JS_PUBLIC_API(JS::GCNurseryCollectionCallback)

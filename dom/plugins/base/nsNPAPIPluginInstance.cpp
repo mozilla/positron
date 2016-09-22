@@ -318,10 +318,10 @@ nsNPAPIPluginInstance::GetDOMWindow()
   if (!mOwner)
     return nullptr;
 
-  RefPtr<nsPluginInstanceOwner> deathGrip(mOwner);
+  RefPtr<nsPluginInstanceOwner> kungFuDeathGrip(mOwner);
 
   nsCOMPtr<nsIDocument> doc;
-  mOwner->GetDocument(getter_AddRefs(doc));
+  kungFuDeathGrip->GetDocument(getter_AddRefs(doc));
   if (!doc)
     return nullptr;
 
@@ -1005,7 +1005,7 @@ nsresult nsNPAPIPluginInstance::IsRemoteDrawingCoreAnimation(bool* aDrawing)
 nsresult
 nsNPAPIPluginInstance::ContentsScaleFactorChanged(double aContentsScaleFactor)
 {
-#ifdef XP_MACOSX
+#if defined(XP_MACOSX) || defined(XP_WIN)
   if (!mPlugin)
       return NS_ERROR_FAILURE;
 
@@ -1807,7 +1807,7 @@ nsNPAPIPluginInstance::WindowVolumeChanged(float aVolume, bool aMuted)
 {
   // We just support mute/unmute
   nsresult rv = SetMuted(aMuted);
-  NS_WARN_IF(NS_FAILED(rv));
+  NS_WARNING_ASSERTION(NS_SUCCEEDED(rv), "SetMuted failed");
   return rv;
 }
 

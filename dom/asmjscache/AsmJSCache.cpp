@@ -12,7 +12,7 @@
 #include "jsfriendapi.h"
 #include "mozilla/Assertions.h"
 #include "mozilla/CondVar.h"
-#include "mozilla/CycleCollectedJSRuntime.h"
+#include "mozilla/CycleCollectedJSContext.h"
 #include "mozilla/dom/asmjscache/PAsmJSCacheEntryChild.h"
 #include "mozilla/dom/asmjscache/PAsmJSCacheEntryParent.h"
 #include "mozilla/dom/ContentChild.h"
@@ -1546,6 +1546,19 @@ OpenFile(nsIPrincipal* aPrincipal,
   // semantically observable.
   if (NS_IsMainThread()) {
     return JS::AsmJSCache_SynchronousScript;
+  }
+
+  // Check to see whether the principal reflects a private browsing session.
+  // Since AsmJSCache requires disk access at the moment, caching should be
+  // disabled in private browsing situations. Failing here will cause later
+  // read/write requests to also fail.
+  uint32_t pbId;
+  if (NS_WARN_IF(NS_FAILED(aPrincipal->GetPrivateBrowsingId(&pbId)))) {
+    return JS::AsmJSCache_InternalError;
+  }
+
+  if (pbId > 0) {
+    return JS::AsmJSCache_Disabled_PrivateBrowsing;
   }
 
   // We need to synchronously call into the parent to open the file and

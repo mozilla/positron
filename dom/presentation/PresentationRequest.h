@@ -7,6 +7,7 @@
 #ifndef mozilla_dom_PresentationRequest_h
 #define mozilla_dom_PresentationRequest_h
 
+#include "mozilla/dom/BindingDeclarations.h"
 #include "mozilla/DOMEventTargetHelper.h"
 
 class nsIDocument;
@@ -22,12 +23,16 @@ class PresentationRequest final : public DOMEventTargetHelper
 {
 public:
   NS_DECL_ISUPPORTS_INHERITED
-  NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(PresentationRequest,
-                                           DOMEventTargetHelper)
 
-  static already_AddRefed<PresentationRequest> Constructor(const GlobalObject& aGlobal,
-                                                           const nsAString& aUrl,
-                                                           ErrorResult& aRv);
+  static already_AddRefed<PresentationRequest> Constructor(
+    const GlobalObject& aGlobal,
+    const nsAString& aUrl,
+    ErrorResult& aRv);
+
+  static already_AddRefed<PresentationRequest> Constructor(
+    const GlobalObject& aGlobal,
+    const Sequence<nsString>& aUrls,
+    ErrorResult& aRv);
 
   virtual JSObject* WrapObject(JSContext* aCx,
                                JS::Handle<JSObject*> aGivenProto) override;
@@ -49,7 +54,7 @@ public:
 
 private:
   PresentationRequest(nsPIDOMWindowInner* aWindow,
-                      const nsAString& aUrl);
+                      nsTArray<nsString>&& aUrls);
 
   ~PresentationRequest();
 
@@ -58,14 +63,17 @@ private:
   void FindOrCreatePresentationConnection(const nsAString& aPresentationId,
                                           Promise* aPromise);
 
+  void FindOrCreatePresentationAvailability(RefPtr<Promise>& aPromise);
+
   // Implement https://w3c.github.io/webappsec-mixed-content/#categorize-settings-object
   bool IsProhibitMixedSecurityContexts(nsIDocument* aDocument);
 
   // Implement https://w3c.github.io/webappsec-mixed-content/#a-priori-authenticated-url
   bool IsPrioriAuthenticatedURL(const nsAString& aUrl);
 
-  nsString mUrl;
-  RefPtr<PresentationAvailability> mAvailability;
+  bool IsAllURLAuthenticated();
+
+  nsTArray<nsString> mUrls;
 };
 
 } // namespace dom

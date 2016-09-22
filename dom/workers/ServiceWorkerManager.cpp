@@ -45,6 +45,7 @@
 #include "mozilla/dom/PromiseNativeHandler.h"
 #include "mozilla/dom/Request.h"
 #include "mozilla/dom/RootedDictionary.h"
+#include "mozilla/dom/TypedArray.h"
 #include "mozilla/ipc/BackgroundChild.h"
 #include "mozilla/ipc/PBackgroundChild.h"
 #include "mozilla/ipc/PBackgroundSharedTypes.h"
@@ -80,10 +81,6 @@
 #include "WorkerPrivate.h"
 #include "WorkerRunnable.h"
 #include "WorkerScope.h"
-
-#ifndef MOZ_SIMPLEPUSH
-#include "mozilla/dom/TypedArray.h"
-#endif
 
 #ifdef PostMessage
 #undef PostMessage
@@ -927,9 +924,6 @@ ServiceWorkerManager::SendPushEvent(const nsACString& aOriginAttributes,
                                     const nsAString& aMessageId,
                                     const Maybe<nsTArray<uint8_t>>& aData)
 {
-#ifdef MOZ_SIMPLEPUSH
-  return NS_ERROR_NOT_AVAILABLE;
-#else
   PrincipalOriginAttributes attrs;
   if (!attrs.PopulateFromSuffix(aOriginAttributes)) {
     return NS_ERROR_INVALID_ARG;
@@ -945,16 +939,12 @@ ServiceWorkerManager::SendPushEvent(const nsACString& aOriginAttributes,
 
   return serviceWorker->WorkerPrivate()->SendPushEvent(aMessageId, aData,
                                                        registration);
-#endif // MOZ_SIMPLEPUSH
 }
 
 NS_IMETHODIMP
 ServiceWorkerManager::SendPushSubscriptionChangeEvent(const nsACString& aOriginAttributes,
                                                       const nsACString& aScope)
 {
-#ifdef MOZ_SIMPLEPUSH
-  return NS_ERROR_NOT_AVAILABLE;
-#else
   PrincipalOriginAttributes attrs;
   if (!attrs.PopulateFromSuffix(aOriginAttributes)) {
     return NS_ERROR_INVALID_ARG;
@@ -965,7 +955,6 @@ ServiceWorkerManager::SendPushSubscriptionChangeEvent(const nsACString& aOriginA
     return NS_ERROR_FAILURE;
   }
   return info->WorkerPrivate()->SendPushSubscriptionChangeEvent();
-#endif
 }
 
 nsresult
@@ -1550,6 +1539,98 @@ ServiceWorkerManager::LocalizeAndReportToAllClients(
   } else {
     NS_WARNING("Failed to format and therefore report localized error.");
   }
+}
+
+void
+ServiceWorkerManager::FlushReportsToAllClients(const nsACString& aScope,
+                                               nsIConsoleReportCollector* aReporter)
+{
+  AutoTArray<uint64_t, 16> windows;
+
+  // Report errors to every controlled document.
+  for (auto iter = mControlledDocuments.Iter(); !iter.Done(); iter.Next()) {
+    ServiceWorkerRegistrationInfo* reg = iter.UserData();
+    MOZ_ASSERT(reg);
+    if (!reg->mScope.Equals(aScope)) {
+      continue;
+    }
+
+    nsCOMPtr<nsIDocument> doc = do_QueryInterface(iter.Key());
+    if (!doc || !doc->IsCurrentActiveDocument() || !doc->GetWindow()) {
+      continue;
+    }
+
+    windows.AppendElement(doc->InnerWindowID());
+
+    aReporter->FlushConsoleReports(doc,
+                                   nsIConsoleReportCollector::ReportAction::Save);
+  }
+
+  // Report to any documents that have called .register() for this scope.  They
+  // may not be controlled, but will still want to see error reports.
+  WeakDocumentList* regList = mRegisteringDocuments.Get(aScope);
+  if (regList) {
+    for (int32_t i = regList->Length() - 1; i >= 0; --i) {
+      nsCOMPtr<nsIDocument> doc = do_QueryReferent(regList->ElementAt(i));
+      if (!doc) {
+        regList->RemoveElementAt(i);
+        continue;
+      }
+
+      if (!doc->IsCurrentActiveDocument()) {
+        continue;
+      }
+
+      uint64_t innerWindowId = doc->InnerWindowID();
+      if (windows.Contains(innerWindowId)) {
+        continue;
+      }
+
+      windows.AppendElement(innerWindowId);
+
+      aReporter->FlushConsoleReports(doc,
+                                     nsIConsoleReportCollector::ReportAction::Save);
+    }
+
+    if (regList->IsEmpty()) {
+      regList = nullptr;
+      nsAutoPtr<WeakDocumentList> doomed;
+      mRegisteringDocuments.RemoveAndForget(aScope, doomed);
+    }
+  }
+
+  nsresult rv;
+  InterceptionList* intList = mNavigationInterceptions.Get(aScope);
+  if (intList) {
+    for (uint32_t i = 0; i < intList->Length(); ++i) {
+      nsCOMPtr<nsIInterceptedChannel> channel = intList->ElementAt(i);
+
+      nsCOMPtr<nsIChannel> inner;
+      rv = channel->GetChannel(getter_AddRefs(inner));
+      if (NS_WARN_IF(NS_FAILED(rv))) {
+        continue;
+      }
+
+      uint64_t innerWindowId = nsContentUtils::GetInnerWindowID(inner);
+      if (innerWindowId == 0 || windows.Contains(innerWindowId)) {
+        continue;
+      }
+
+      windows.AppendElement(innerWindowId);
+
+      aReporter->FlushReportsByWindowId(innerWindowId,
+                                        nsIConsoleReportCollector::ReportAction::Save);
+    }
+  }
+
+  // If there are no documents to report to, at least report something to the
+  // browser console.
+  if (windows.IsEmpty()) {
+    aReporter->FlushConsoleReports((nsIDocument*)nullptr);
+    return;
+  }
+
+  aReporter->ClearConsoleReports();
 }
 
 void
@@ -2206,7 +2287,8 @@ public:
     AssertIsOnMainThread();
     NS_WARNING("Unexpected error while dispatching fetch event!");
     DebugOnly<nsresult> rv = mChannel->ResetInterception();
-    NS_WARN_IF_FALSE(NS_SUCCEEDED(rv), "Failed to resume intercepted network request");
+    NS_WARNING_ASSERTION(NS_SUCCEEDED(rv),
+                         "Failed to resume intercepted network request");
   }
 
   NS_IMETHOD

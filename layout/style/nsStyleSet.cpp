@@ -1805,7 +1805,7 @@ nsStyleSet::WalkRestrictionRule(CSSPseudoElementType aPseudoType,
     aRuleWalker->Forward(mFirstLetterRule);
   else if (aPseudoType == CSSPseudoElementType::firstLine)
     aRuleWalker->Forward(mFirstLineRule);
-  else if (aPseudoType == CSSPseudoElementType::mozPlaceholder)
+  else if (aPseudoType == CSSPseudoElementType::placeholder)
     aRuleWalker->Forward(mPlaceholderRule);
 }
 
@@ -1952,7 +1952,7 @@ nsStyleSet::ProbePseudoElementStyle(Element* aParentElement,
     const nsStyleDisplay *display = result->StyleDisplay();
     const nsStyleContent *content = result->StyleContent();
     // XXXldb What is contentCount for |content: ""|?
-    if (display->mDisplay == NS_STYLE_DISPLAY_NONE ||
+    if (display->mDisplay == StyleDisplay::None ||
         content->ContentCount() == 0) {
       result = nullptr;
     }

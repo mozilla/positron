@@ -2022,34 +2022,18 @@ HttpBaseChannel::GetResponseVersion(uint32_t *major, uint32_t *minor)
   return NS_OK;
 }
 
-namespace {
-
-class CookieNotifierRunnable : public Runnable
+void
+HttpBaseChannel::NotifySetCookie(char const *aCookie)
 {
-public:
-  CookieNotifierRunnable(HttpBaseChannel* aChannel, char const * aCookie)
-    : mChannel(aChannel)
-  {
-    CopyASCIItoUTF16(aCookie, mCookie);
+  nsCOMPtr<nsIObserverService> obs = services::GetObserverService();
+  if (obs) {
+    nsAutoString cookie;
+    CopyASCIItoUTF16(aCookie, cookie);
+    obs->NotifyObservers(static_cast<nsIChannel*>(this),
+                         "http-on-response-set-cookie",
+                         cookie.get());
   }
-
-  NS_IMETHOD Run() override
-  {
-    nsCOMPtr<nsIObserverService> obs = services::GetObserverService();
-    if (obs) {
-      obs->NotifyObservers(static_cast<nsIChannel*>(mChannel.get()),
-                           "http-on-response-set-cookie",
-                           mCookie.get());
-    }
-    return NS_OK;
-  }
-
-private:
-  RefPtr<HttpBaseChannel> mChannel;
-  nsString mCookie;
-};
-
-} // namespace
+}
 
 NS_IMETHODIMP
 HttpBaseChannel::SetCookie(const char *aCookieHeader)
@@ -2070,9 +2054,7 @@ HttpBaseChannel::SetCookie(const char *aCookieHeader)
     cs->SetCookieStringFromHttp(mURI, nullptr, nullptr, aCookieHeader,
                                 date.get(), this);
   if (NS_SUCCEEDED(rv)) {
-    RefPtr<CookieNotifierRunnable> r =
-      new CookieNotifierRunnable(this, aCookieHeader);
-    NS_DispatchToMainThread(r);
+    NotifySetCookie(aCookieHeader);
   }
   return rv;
 }
@@ -2206,7 +2188,7 @@ HttpBaseChannel::AddSecurityMessage(const nsAString &aMessageTag,
 
   nsAutoCString spec;
   if (mURI) {
-    mURI->GetSpec(spec);
+    spec = mURI->GetSpecOrDefault();
   }
 
   nsCOMPtr<nsIScriptError> error(do_CreateInstance(NS_SCRIPTERROR_CONTRACTID));
@@ -2485,6 +2467,20 @@ HttpBaseChannel::SetFetchCacheMode(uint32_t aFetchCacheMode)
   return NS_OK;
 }
 
+NS_IMETHODIMP
+HttpBaseChannel::SetIntegrityMetadata(const nsAString& aIntegrityMetadata)
+{
+  mIntegrityMetadata = aIntegrityMetadata;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+HttpBaseChannel::GetIntegrityMetadata(nsAString& aIntegrityMetadata)
+{
+  aIntegrityMetadata = mIntegrityMetadata;
+  return NS_OK;
+}
+
 //-----------------------------------------------------------------------------
 // HttpBaseChannel::nsISupportsPriority
 //-----------------------------------------------------------------------------
@@ -2567,15 +2563,29 @@ HttpBaseChannel::AddConsoleReport(uint32_t aErrorFlags,
 }
 
 void
-HttpBaseChannel::FlushConsoleReports(nsIDocument* aDocument)
+HttpBaseChannel::FlushConsoleReports(nsIDocument* aDocument,
+                                     ReportAction aAction)
 {
-  mReportCollector->FlushConsoleReports(aDocument);
+  mReportCollector->FlushConsoleReports(aDocument, aAction);
 }
 
 void
 HttpBaseChannel::FlushConsoleReports(nsIConsoleReportCollector* aCollector)
 {
   mReportCollector->FlushConsoleReports(aCollector);
+}
+
+void
+HttpBaseChannel::FlushReportsByWindowId(uint64_t aWindowId,
+                                        ReportAction aAction)
+{
+  mReportCollector->FlushReportsByWindowId(aWindowId, aAction);
+}
+
+void
+HttpBaseChannel::ClearConsoleReports()
+{
+  mReportCollector->ClearConsoleReports();
 }
 
 nsIPrincipal *
@@ -2901,6 +2911,36 @@ HttpBaseChannel::SetupReplacementChannel(nsIURI       *newURI,
   if (mLoadInfo) {
     nsCOMPtr<nsILoadInfo> newLoadInfo =
       static_cast<mozilla::LoadInfo*>(mLoadInfo.get())->Clone();
+
+    // re-compute the origin attributes of the loadInfo if it's top-level load.
+    bool isTopLevelDoc =
+      newLoadInfo->GetExternalContentPolicyType() == nsIContentPolicy::TYPE_DOCUMENT;
+
+    if (isTopLevelDoc) {
+      nsCOMPtr<nsILoadContext> loadContext;
+      NS_QueryNotificationCallbacks(this, loadContext);
+      DocShellOriginAttributes docShellAttrs;
+      if (loadContext) {
+        loadContext->GetOriginAttributes(docShellAttrs);
+      }
+      MOZ_ASSERT(docShellAttrs.mFirstPartyDomain.IsEmpty(),
+                 "top-level docshell shouldn't have firstPartyDomain attribute.");
+
+      NeckoOriginAttributes attrs = newLoadInfo->GetOriginAttributes();
+
+      MOZ_ASSERT(docShellAttrs.mAppId == attrs.mAppId,
+                "docshell and necko should have the same appId attribute.");
+      MOZ_ASSERT(docShellAttrs.mUserContextId == attrs.mUserContextId,
+                "docshell and necko should have the same userContextId attribute.");
+      MOZ_ASSERT(docShellAttrs.mInIsolatedMozBrowser == attrs.mInIsolatedMozBrowser,
+                "docshell and necko should have the same inIsolatedMozBrowser attribute.");
+      MOZ_ASSERT(docShellAttrs.mPrivateBrowsingId == attrs.mPrivateBrowsingId,
+                 "docshell and necko should have the same privateBrowsingId attribute.");
+
+      attrs.InheritFromDocShellToNecko(docShellAttrs, true, newURI);
+      newLoadInfo->SetOriginAttributes(attrs);
+    }
+
     bool isInternalRedirect =
       (redirectFlags & (nsIChannelEventSink::REDIRECT_INTERNAL |
                         nsIChannelEventSink::REDIRECT_STS_UPGRADE));
@@ -3042,6 +3082,9 @@ HttpBaseChannel::SetupReplacementChannel(nsIURI       *newURI,
 
     // Preserve Cache mode flag.
     httpInternal->SetFetchCacheMode(mFetchCacheMode);
+
+    // Preserve Integrity metadata.
+    httpInternal->SetIntegrityMetadata(mIntegrityMetadata);
   }
 
   // transfer application cache information

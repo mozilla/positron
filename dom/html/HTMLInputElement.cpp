@@ -178,7 +178,7 @@ static const nsAttrValue::EnumTable kInputTypeTable[] = {
   { "time", NS_FORM_INPUT_TIME },
   { "url", NS_FORM_INPUT_URL },
   { "week", NS_FORM_INPUT_WEEK },
-  { 0 }
+  { nullptr, 0 }
 };
 
 // Default type is 'text'.
@@ -200,7 +200,7 @@ static const nsAttrValue::EnumTable kInputInputmodeTable[] = {
   { "lowercase", NS_INPUT_INPUTMODE_LOWERCASE },
   { "titlecase", NS_INPUT_INPUTMODE_TITLECASE },
   { "autocapitalized", NS_INPUT_INPUTMODE_AUTOCAPITALIZED },
-  { 0 }
+  { nullptr, 0 }
 };
 
 // Default inputmode value is "auto".
@@ -217,6 +217,7 @@ const Decimal HTMLInputElement::kStepAny = Decimal(0);
 
 const double HTMLInputElement::kMaximumYear = 275760;
 const double HTMLInputElement::kMinimumYear = 1;
+const double HTMLInputElement::kMaximumWeekInYear = 53;
 
 #define NS_INPUT_ELEMENT_STATE_IID                 \
 { /* dc3b3d14-23e2-4479-b513-7b369343e3a0 */       \
@@ -253,7 +254,7 @@ public:
     }
 
     mInputElement->SetFilesOrDirectories(array, true);
-    NS_WARN_IF(NS_FAILED(DispatchEvents()));
+    Unused << NS_WARN_IF(NS_FAILED(DispatchEvents()));
   }
 
   nsresult
@@ -264,7 +265,7 @@ public:
                                               static_cast<nsIDOMHTMLInputElement*>(mInputElement.get()),
                                               NS_LITERAL_STRING("input"), true,
                                               false);
-    NS_WARN_IF(NS_FAILED(rv));
+    NS_WARNING_ASSERTION(NS_SUCCEEDED(rv), "DispatchTrustedEvent failed");
 
     rv = nsContentUtils::DispatchTrustedEvent(mInputElement->OwnerDoc(),
                                               static_cast<nsIDOMHTMLInputElement*>(mInputElement.get()),
@@ -3108,6 +3109,15 @@ HTMLInputElement::SetValueInternal(const nsAString& aValue, uint32_t aFlags)
         }
       }
 
+      // This call might be useless in some situations because if the element is
+      // a single line text control, nsTextEditorState::SetValue will call
+      // nsHTMLInputElement::OnValueChanged which is going to call UpdateState()
+      // if the element is focused. This bug 665547.
+      if (PlaceholderApplies() &&
+          HasAttr(kNameSpaceID_None, nsGkAtoms::placeholder)) {
+        UpdateState(true);
+      }
+
       return NS_OK;
     }
 
@@ -3289,7 +3299,7 @@ HTMLInputElement::GetRadioGroupContainer() const
 }
 
 already_AddRefed<nsIDOMHTMLInputElement>
-HTMLInputElement::GetSelectedRadioButton()
+HTMLInputElement::GetSelectedRadioButton() const
 {
   nsIRadioGroupContainer* container = GetRadioGroupContainer();
   if (!container) {
@@ -3335,7 +3345,7 @@ HTMLInputElement::MaybeSubmitForm(nsPresContext* aPresContext)
     RefPtr<mozilla::dom::HTMLFormElement> form = mForm;
     InternalFormEvent event(true, eFormSubmit);
     nsEventStatus status = nsEventStatus_eIgnore;
-    shell->HandleDOMEventWithTarget(mForm, &event, &status);
+    shell->HandleDOMEventWithTarget(form, &event, &status);
   }
 
   return NS_OK;
@@ -3360,6 +3370,13 @@ HTMLInputElement::SetCheckedInternal(bool aChecked, bool aNotify)
   // Notify the document that the CSS :checked pseudoclass for this element
   // has changed state.
   UpdateState(aNotify);
+
+  // Notify all radios in the group that value has changed, this is to let
+  // radios to have the chance to update its states, e.g., :indeterminate.
+  if (mType == NS_FORM_INPUT_RADIO) {
+    nsCOMPtr<nsIRadioVisitor> visitor = new nsRadioUpdateStateVisitor(this);
+    VisitGroup(visitor, aNotify);
+  }
 }
 
 void
@@ -3789,19 +3806,6 @@ HTMLInputElement::PreHandleEvent(EventChainPreVisitor& aVisitor)
     }
   }
 
-  if (aVisitor.mEvent->mMessage == eKeyUp && aVisitor.mEvent->IsTrusted()) {
-    WidgetKeyboardEvent* keyEvent = aVisitor.mEvent->AsKeyboardEvent();
-    if (MayFireChangeOnKeyUp(keyEvent->mKeyCode) &&
-        !(keyEvent->IsShift() || keyEvent->IsControl() || keyEvent->IsAlt() ||
-          keyEvent->IsMeta() || keyEvent->IsAltGraph() || keyEvent->IsFn() ||
-          keyEvent->IsOS())) {
-      // The up/down arrow key events fire 'change' events when released
-      // so that at the end of a series of up/down arrow key repeat events
-      // the value is considered to be "commited" by the user.
-      FireChangeEventIfNeeded();
-    }
-  }
-
   nsresult rv = nsGenericHTMLFormElementWithState::PreHandleEvent(aVisitor);
 
   // We do this after calling the base class' PreHandleEvent so that
@@ -4124,6 +4128,17 @@ HTMLInputElement::MaybeInitPickers(EventChainPostVisitor& aVisitor)
   return NS_OK;
 }
 
+/**
+ * Return true if the input event should be ignore because of it's modifiers
+ */
+static bool
+IgnoreInputEventWithModifier(WidgetInputEvent* aEvent)
+{
+  return aEvent->IsShift() || aEvent->IsControl() || aEvent->IsAlt() ||
+         aEvent->IsMeta() || aEvent->IsAltGraph() || aEvent->IsFn() ||
+         aEvent->IsOS();
+}
+
 nsresult
 HTMLInputElement::PostHandleEvent(EventChainPostVisitor& aVisitor)
 {
@@ -4270,10 +4285,7 @@ HTMLInputElement::PostHandleEvent(EventChainPostVisitor& aVisitor)
         keyEvent && keyEvent->mMessage == eKeyPress &&
         aVisitor.mEvent->IsTrusted() &&
         (keyEvent->mKeyCode == NS_VK_UP || keyEvent->mKeyCode == NS_VK_DOWN) &&
-        !(keyEvent->IsShift() || keyEvent->IsControl() ||
-          keyEvent->IsAlt() || keyEvent->IsMeta() ||
-          keyEvent->IsAltGraph() || keyEvent->IsFn() ||
-          keyEvent->IsOS())) {
+        !IgnoreInputEventWithModifier(keyEvent)) {
       // We handle the up/down arrow keys specially for <input type=number>.
       // On some platforms the editor for the nested text control will
       // process these keys to send the cursor to the start/end of the text
@@ -4287,6 +4299,7 @@ HTMLInputElement::PostHandleEvent(EventChainPostVisitor& aVisitor)
       // event to increase/decrease the value of the number control.
       if (!aVisitor.mEvent->DefaultPreventedByContent() && IsMutable()) {
         StepNumberControlForUserEvent(keyEvent->mKeyCode == NS_VK_UP ? 1 : -1);
+        FireChangeEventIfNeeded();
         aVisitor.mEventStatus = nsEventStatus_eConsumeNoDefault;
       }
     } else if (nsEventStatus_eIgnore == aVisitor.mEventStatus) {
@@ -4464,6 +4477,7 @@ HTMLInputElement::PostHandleEvent(EventChainPostVisitor& aVisitor)
                   break;
               }
               SetValueOfRangeForUserEvent(newValue);
+              FireChangeEventIfNeeded();
               aVisitor.mEventStatus = nsEventStatus_eConsumeNoDefault;
             }
           }
@@ -4490,10 +4504,7 @@ HTMLInputElement::PostHandleEvent(EventChainPostVisitor& aVisitor)
           }
           if (mType == NS_FORM_INPUT_NUMBER && aVisitor.mEvent->IsTrusted()) {
             if (mouseEvent->button == WidgetMouseEvent::eLeftButton &&
-                !(mouseEvent->IsShift() || mouseEvent->IsControl() ||
-                  mouseEvent->IsAlt() || mouseEvent->IsMeta() ||
-                  mouseEvent->IsAltGraph() || mouseEvent->IsFn() ||
-                  mouseEvent->IsOS())) {
+                !IgnoreInputEventWithModifier(mouseEvent)) {
               nsNumberControlFrame* numberControlFrame =
                 do_QueryFrame(GetPrimaryFrame());
               if (numberControlFrame) {
@@ -4541,6 +4552,7 @@ HTMLInputElement::PostHandleEvent(EventChainPostVisitor& aVisitor)
                 do_QueryFrame(GetPrimaryFrame());
               if (numberControlFrame && numberControlFrame->IsFocused()) {
                 StepNumberControlForUserEvent(wheelEvent->mDeltaY > 0 ? -1 : 1);
+                FireChangeEventIfNeeded();
                 aVisitor.mEvent->PreventDefault();
               }
             } else if (mType == NS_FORM_INPUT_RANGE &&
@@ -4554,6 +4566,7 @@ HTMLInputElement::PostHandleEvent(EventChainPostVisitor& aVisitor)
               MOZ_ASSERT(value.isFinite() && step.isFinite());
               SetValueOfRangeForUserEvent(wheelEvent->mDeltaY < 0 ?
                                           value + step : value - step);
+              FireChangeEventIfNeeded();
               aVisitor.mEvent->PreventDefault();
             }
           }
@@ -4596,7 +4609,7 @@ HTMLInputElement::PostHandleEvent(EventChainPostVisitor& aVisitor)
                               mForm->SubmissionCanProceed(this))) {
               // Hold a strong ref while dispatching
               RefPtr<mozilla::dom::HTMLFormElement> form(mForm);
-              presShell->HandleDOMEventWithTarget(mForm, &event, &status);
+              presShell->HandleDOMEventWithTarget(form, &event, &status);
               aVisitor.mEventStatus = nsEventStatus_eConsumeNoDefault;
             }
           }
@@ -4654,10 +4667,7 @@ HTMLInputElement::PostHandleEventForRangeThumb(EventChainPostVisitor& aVisitor)
         break; // don't start drag if someone else is already capturing
       }
       WidgetInputEvent* inputEvent = aVisitor.mEvent->AsInputEvent();
-      if (inputEvent->IsShift() || inputEvent->IsControl() ||
-          inputEvent->IsAlt() || inputEvent->IsMeta() ||
-          inputEvent->IsAltGraph() || inputEvent->IsFn() ||
-          inputEvent->IsOS()) {
+      if (IgnoreInputEventWithModifier(inputEvent)) {
         break; // ignore
       }
       if (aVisitor.mEvent->mMessage == eMouseDown) {
@@ -5040,6 +5050,13 @@ HTMLInputElement::SanitizeValue(nsAString& aValue)
         }
       }
       break;
+    case NS_FORM_INPUT_WEEK:
+      {
+        if (!aValue.IsEmpty() && !IsValidWeek(aValue)) {
+          aValue.Truncate();
+        }
+      }
+      break;
     case NS_FORM_INPUT_COLOR:
       {
         if (IsValidSimpleColor(aValue)) {
@@ -5067,6 +5084,43 @@ bool HTMLInputElement::IsValidSimpleColor(const nsAString& aValue) const
     }
   }
   return true;
+}
+
+bool
+HTMLInputElement::IsLeapYear(uint32_t aYear) const
+{
+  if ((aYear % 4 == 0 && aYear % 100 != 0) || ( aYear % 400 == 0)) {
+    return true;
+  }
+  return false;
+}
+
+uint32_t
+HTMLInputElement::DayOfWeek(uint32_t aYear, uint32_t aMonth, uint32_t aDay) const
+{
+  // Tomohiko Sakamoto algorithm.
+  int monthTable[] = {0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4};
+  aYear -= aMonth < 3;
+
+  return (aYear + aYear / 4 - aYear / 100 + aYear / 400 +
+          monthTable[aMonth - 1] + aDay) % 7;
+}
+
+uint32_t
+HTMLInputElement::MaximumWeekInYear(uint32_t aYear) const
+{
+  int day = DayOfWeek(aYear, 1, 1); // January 1.
+  // A year starting on Thursday or a leap year starting on Wednesday has 53
+  // weeks. All other years have 52 weeks.
+  return day == 4 || (day == 3 && IsLeapYear(aYear)) ? kMaximumWeekInYear
+                                                     : kMaximumWeekInYear - 1;
+}
+
+bool
+HTMLInputElement::IsValidWeek(const nsAString& aValue) const
+{
+  uint32_t year, week;
+  return ParseWeek(aValue, &year, &week);
 }
 
 bool
@@ -5114,6 +5168,34 @@ bool HTMLInputElement::ParseMonth(const nsAString& aValue,
 
   return DigitSubStringToNumber(aValue, endOfYearOffset + 1, 2, aMonth) &&
          *aMonth > 0 && *aMonth <= 12;
+}
+
+bool HTMLInputElement::ParseWeek(const nsAString& aValue,
+                                 uint32_t* aYear,
+                                 uint32_t* aWeek) const
+{
+  // Parse the year, month values out a string formatted as 'yyyy-Www'.
+  if (aValue.Length() < 8) {
+    return false;
+  }
+
+  uint32_t endOfYearOffset = aValue.Length() - 4;
+  if (aValue[endOfYearOffset] != '-') {
+    return false;
+  }
+
+  if (aValue[endOfYearOffset + 1] != 'W') {
+    return false;
+  }
+
+  const nsAString& yearStr = Substring(aValue, 0, endOfYearOffset);
+  if (!ParseYear(yearStr, aYear)) {
+    return false;
+  }
+
+  return DigitSubStringToNumber(aValue, endOfYearOffset + 2, 2, aWeek) &&
+         *aWeek > 0 && *aWeek <= MaximumWeekInYear(*aYear);
+
 }
 
 bool HTMLInputElement::ParseDate(const nsAString& aValue,
@@ -6420,6 +6502,15 @@ HTMLInputElement::IntrinsicState() const
       state |= NS_EVENT_STATE_INDETERMINATE;
     }
 
+    if (mType == NS_FORM_INPUT_RADIO) {
+      nsCOMPtr<nsIDOMHTMLInputElement> selected = GetSelectedRadioButton();
+      bool indeterminate = !selected && !mChecked;
+
+      if (indeterminate) {
+        state |= NS_EVENT_STATE_INDETERMINATE;
+      }
+    }
+
     // Check whether we are the default checked element (:default)
     if (DefaultChecked()) {
       state |= NS_EVENT_STATE_DEFAULT;
@@ -6470,6 +6561,12 @@ HTMLInputElement::IntrinsicState() const
                  ? NS_EVENT_STATE_OUTOFRANGE
                  : NS_EVENT_STATE_INRANGE;
     }
+  }
+
+  if (PlaceholderApplies() &&
+      HasAttr(kNameSpaceID_None, nsGkAtoms::placeholder) &&
+      IsValueEmpty()) {
+    state |= NS_EVENT_STATE_PLACEHOLDERSHOWN;
   }
 
   if (mForm && !mForm->GetValidity() && IsSubmitControl()) {
@@ -6643,6 +6740,9 @@ HTMLInputElement::WillRemoveFromRadioGroup()
   // longer a selected radio button
   if (mChecked) {
     container->SetCurrentRadioButton(name, nullptr);
+
+    nsCOMPtr<nsIRadioVisitor> visitor = new nsRadioUpdateStateVisitor(this);
+    VisitGroup(visitor, true);
   }
 
   // Remove this radio from its group in the container.
@@ -7899,6 +7999,13 @@ HTMLInputElement::OnValueChanged(bool aNotify, bool aWasInteractiveUserChange)
   if (HasDirAuto()) {
     SetDirectionIfAuto(true, aNotify);
   }
+
+  // :placeholder-shown pseudo-class may change when the value changes.
+  // However, we don't want to waste cycles if the state doesn't apply.
+  if (PlaceholderApplies() &&
+      HasAttr(kNameSpaceID_None, nsGkAtoms::placeholder)) {
+    UpdateState(aNotify);
+  }
 }
 
 NS_IMETHODIMP_(bool)
@@ -8301,18 +8408,6 @@ HTMLInputElement::GetWebkitEntries(nsTArray<RefPtr<FileSystemEntry>>& aSequence)
 {
   Telemetry::Accumulate(Telemetry::BLINK_FILESYSTEM_USED, true);
   aSequence.AppendElements(mEntries);
-}
-
-bool HTMLInputElement::MayFireChangeOnKeyUp(uint32_t aKeyCode) const
-{
-  switch (mType) {
-    case NS_FORM_INPUT_NUMBER:
-      return aKeyCode == NS_VK_UP || aKeyCode == NS_VK_DOWN;
-    case NS_FORM_INPUT_RANGE:
-      return aKeyCode == NS_VK_UP || aKeyCode == NS_VK_DOWN ||
-             aKeyCode == NS_VK_LEFT || aKeyCode == NS_VK_RIGHT;
-  }
-  return false;
 }
 
 } // namespace dom

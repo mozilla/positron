@@ -13,6 +13,10 @@
 #undef LOG_ENABLED
 #define LOG_ENABLED() LOG5_ENABLED()
 
+#define TLS_EARLY_DATA_NOT_AVAILABLE 0
+#define TLS_EARLY_DATA_AVAILABLE_BUT_NOT_USED 1
+#define TLS_EARLY_DATA_AVAILABLE_AND_USED 2
+
 #include "ASpdySession.h"
 #include "mozilla/ChaosMode.h"
 #include "mozilla/Telemetry.h"
@@ -82,6 +86,7 @@ nsHttpConnection::nsHttpConnection()
     , m0RTTChecked(false)
     , mWaitingFor0RTTResponse(false)
     , mContentBytesWritten0RTT(0)
+    , mEarlyDataNegotiated(false)
 {
     LOG(("Creating nsHttpConnection @%p\n", this));
 
@@ -341,6 +346,7 @@ nsHttpConnection::EnsureNPNComplete(nsresult &aOut0RTTWriteHandshakeValue,
         if (NS_FAILED(rvEarlyAlpn)) {
             LOG(("nsHttpConnection::EnsureNPNComplete %p - "
                  "early selected alpn not available", this));
+            mEarlyDataNegotiated = false;
         } else {
             LOG(("nsHttpConnection::EnsureNPNComplete %p -"
                  "early selected alpn: %s", this, earlyNegotiatedNPN.get()));
@@ -354,6 +360,7 @@ nsHttpConnection::EnsureNPNComplete(nsresult &aOut0RTTWriteHandshakeValue,
                          "can do 0RTT!", this));
                     mWaitingFor0RTTResponse = true;
                 }
+                mEarlyDataNegotiated = true;
             }
         }
     }
@@ -386,18 +393,38 @@ nsHttpConnection::EnsureNPNComplete(nsresult &aOut0RTTWriteHandshakeValue,
 
         bool ealyDataAccepted = false;
         if (mWaitingFor0RTTResponse) {
-            mWaitingFor0RTTResponse = false;
             // Check if early data has been accepted.
             rv = ssl->GetEarlyDataAccepted(&ealyDataAccepted);
             LOG(("nsHttpConnection::EnsureNPNComplete [this=%p] - early data "
                  "that was sent during 0RTT %s been accepted.",
                  this, ealyDataAccepted ? "has" : "has not"));
+
             if (NS_FAILED(rv) ||
                 NS_FAILED(mTransaction->Finish0RTT(!ealyDataAccepted))) {
                 mTransaction->Close(NS_ERROR_NET_RESET);
                 goto npnComplete;
             }
         }
+
+        int16_t tlsVersion;
+        ssl->GetSSLVersionUsed(&tlsVersion);
+        // Send the 0RTT telemetry only for tls1.3
+        if (tlsVersion > nsISSLSocketControl::TLS_VERSION_1_2) {
+            Telemetry::Accumulate(Telemetry::TLS_EARLY_DATA_NEGOTIATED,
+                (!mEarlyDataNegotiated) ? TLS_EARLY_DATA_NOT_AVAILABLE
+                    : ((mWaitingFor0RTTResponse) ? TLS_EARLY_DATA_AVAILABLE_AND_USED
+                                                 : TLS_EARLY_DATA_AVAILABLE_BUT_NOT_USED));
+            if (mWaitingFor0RTTResponse) {
+                Telemetry::Accumulate(Telemetry::TLS_EARLY_DATA_ACCEPTED,
+                                      ealyDataAccepted);
+            }
+            if (ealyDataAccepted) {
+                Telemetry::Accumulate(Telemetry::TLS_EARLY_DATA_BYTES_WRITTEN,
+                                      mContentBytesWritten0RTT);
+            }
+        }
+        mWaitingFor0RTTResponse = false;
+
         if (!ealyDataAccepted) {
             uint32_t infoIndex;
             const SpdyInformation *info = gHttpHandler->SpdyInfo();
@@ -542,7 +569,7 @@ void
 nsHttpConnection::SetupSSL()
 {
     LOG(("nsHttpConnection::SetupSSL %p caps=0x%X %s\n",
-         this, mTransactionCaps,mConnInfo->HashKey().get()));
+         this, mTransactionCaps, mConnInfo->HashKey().get()));
 
     if (mSetupSSLCalled) // do only once
         return;
@@ -633,14 +660,6 @@ nsHttpConnection::AddTransaction(nsAHttpTransaction *httpTransaction,
     LOG(("nsHttpConnection::AddTransaction for SPDY%s",
          needTunnel ? " over tunnel" : ""));
 
-    // do a runtime check here just for defense in depth
-    if (transCI->GetInsecureScheme() &&
-        httpTransaction->RequestHead() && httpTransaction->RequestHead()->IsHTTPS()) {
-        LOG(("This Cannot happen - https on insecure scheme tls stream\n"));
-        MOZ_ASSERT(false, "https:// on tls insecure scheme");
-        return NS_ERROR_FAILURE;
-    }
-
     if (!mSpdySession->AddStream(httpTransaction, priority,
                                  needTunnel, mCallbacks)) {
         MOZ_ASSERT(false); // this cannot happen!
@@ -679,7 +698,7 @@ nsHttpConnection::Close(nsresult reason, bool aIsShutdown)
         // in case any previously validated ones are now invalid
         if (((reason == NS_ERROR_NET_RESET) ||
              (NS_ERROR_GET_MODULE(reason) == NS_ERROR_MODULE_SECURITY))
-            && mConnInfo) {
+            && mConnInfo && !(mTransactionCaps & NS_HTTP_ERROR_SOFTLY)) {
             gHttpHandler->ConnMgr()->ClearHostMapping(mConnInfo);
         }
 
@@ -1254,8 +1273,9 @@ nsHttpConnection::ReadTimeoutTick(PRIntervalTime now)
     uint32_t nextTickAfter = UINT32_MAX;
     // Timeout if the response is taking too long to arrive.
     if (mResponseTimeoutEnabled) {
-        NS_WARN_IF_FALSE(gHttpHandler->ResponseTimeoutEnabled(),
-                         "Timing out a response, but response timeout is disabled!");
+        NS_WARNING_ASSERTION(
+            gHttpHandler->ResponseTimeoutEnabled(),
+            "Timing out a response, but response timeout is disabled!");
 
         PRIntervalTime initialResponseDelta = now - mLastWriteTime;
 

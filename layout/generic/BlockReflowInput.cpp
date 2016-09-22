@@ -44,7 +44,7 @@ BlockReflowInput::BlockReflowInput(const ReflowInput& aReflowInput,
     mBorderPadding(mReflowInput.ComputedLogicalBorderPadding()),
     mPrevBEndMargin(),
     mLineNumber(0),
-    mFloatBreakType(NS_STYLE_CLEAR_NONE),
+    mFloatBreakType(StyleClear::None),
     mConsumedBSize(aConsumedBSize)
 {
   if (!sFloatFragmentsInsideColumnPrefCached) {
@@ -207,7 +207,7 @@ GetBEndMarginClone(nsIFrame* aFrame,
                    WritingMode aWritingMode)
 {
   if (aFrame->StyleBorder()->mBoxDecorationBreak ==
-        NS_STYLE_BOX_DECORATION_BREAK_CLONE) {
+        StyleBoxDecorationBreak::Clone) {
     SizeComputationInput os(aFrame, aRenderingContext, aWritingMode,
                         aContentArea.ISize(aWritingMode));
     return os.ComputedLogicalMargin().
@@ -222,10 +222,9 @@ GetBEndMarginClone(nsIFrame* aFrame,
 // GetAvailableSpace has already been called.
 void
 BlockReflowInput::ComputeBlockAvailSpace(nsIFrame* aFrame,
-                                           const nsStyleDisplay* aDisplay,
-                                           const nsFlowAreaRect& aFloatAvailableSpace,
-                                           bool aBlockAvoidsFloats,
-                                           LogicalRect& aResult)
+                                         const nsFlowAreaRect& aFloatAvailableSpace,
+                                         bool aBlockAvoidsFloats,
+                                         LogicalRect& aResult)
 {
 #ifdef REALLY_NOISY_REFLOW
   printf("CBAS frame=%p has floats %d\n",
@@ -733,7 +732,7 @@ BlockReflowInput::FlowAndPlaceFloat(nsIFrame* aFloat)
   // See if the float should clear any preceding floats...
   // XXX We need to mark this float somehow so that it gets reflowed
   // when floats are inserted before it.
-  if (NS_STYLE_CLEAR_NONE != floatDisplay->mBreakType) {
+  if (StyleClear::None != floatDisplay->mBreakType) {
     // XXXldb Does this handle vertical margins correctly?
     mBCoord = ClearFloats(mBCoord, floatDisplay->PhysicalBreakType(wm));
   }
@@ -806,7 +805,7 @@ BlockReflowInput::FlowAndPlaceFloat(nsIFrame* aFloat)
     }
 
     // Nope. try to advance to the next band.
-    if (NS_STYLE_DISPLAY_TABLE != floatDisplay->mDisplay ||
+    if (StyleDisplay::Table != floatDisplay->mDisplay ||
           eCompatibility_NavQuirks != mPresContext->CompatibilityMode() ) {
 
       mBCoord += floatAvailableSpace.mRect.BSize(wm);
@@ -1003,17 +1002,17 @@ BlockReflowInput::FlowAndPlaceFloat(nsIFrame* aFloat)
     MOZ_ASSERT(!aFloat->GetNextInFlow());
   }
 
-#ifdef NOISY_FLOATMANAGER
-  nscoord tI, tB;
-  mFloatManager->GetTranslation(tI, tB);
-  nsIFrame::ListTag(stdout, mBlock);
-  printf(": FlowAndPlaceFloat: AddFloat: tIB=%d,%d (%d,%d) {%d,%d,%d,%d}\n",
-         tI, tB, mFloatManagerI, mFloatManagerB,
-         region.IStart(wm), region.BStart(wm),
-         region.ISize(wm), region.BSize(wm));
-#endif
-
 #ifdef DEBUG
+  if (nsBlockFrame::gNoisyFloatManager) {
+    nscoord tI, tB;
+    mFloatManager->GetTranslation(tI, tB);
+    nsIFrame::ListTag(stdout, mBlock);
+    printf(": FlowAndPlaceFloat: AddFloat: tIB=%d,%d (%d,%d) {%d,%d,%d,%d}\n",
+           tI, tB, mFloatManagerI, mFloatManagerB,
+           region.IStart(wm), region.BStart(wm),
+           region.ISize(wm), region.BSize(wm));
+  }
+
   if (nsBlockFrame::gNoisyReflow) {
     nsRect r = aFloat->GetRect();
     nsFrame::IndentBy(stdout, nsBlockFrame::gNoiseIndent);
@@ -1081,7 +1080,7 @@ BlockReflowInput::PlaceBelowCurrentLineFloats(nsFloatCacheFreeList& aList,
 }
 
 nscoord
-BlockReflowInput::ClearFloats(nscoord aBCoord, uint8_t aBreakType,
+BlockReflowInput::ClearFloats(nscoord aBCoord, StyleClear aBreakType,
                                 nsIFrame *aReplacedBlock,
                                 uint32_t aFlags)
 {
@@ -1093,8 +1092,8 @@ BlockReflowInput::ClearFloats(nscoord aBCoord, uint8_t aBreakType,
 #endif
 
 #ifdef NOISY_FLOAT_CLEARING
-  printf("BlockReflowInput::ClearFloats: aBCoord=%d breakType=%d\n",
-         aBCoord, aBreakType);
+  printf("BlockReflowInput::ClearFloats: aBCoord=%d breakType=%s\n",
+         aBCoord, nsLineBox::BreakTypeToString(aBreakType));
   mFloatManager->List(stdout);
 #endif
 
@@ -1104,7 +1103,7 @@ BlockReflowInput::ClearFloats(nscoord aBCoord, uint8_t aBreakType,
 
   nscoord newBCoord = aBCoord;
 
-  if (aBreakType != NS_STYLE_CLEAR_NONE) {
+  if (aBreakType != StyleClear::None) {
     newBCoord = mFloatManager->ClearFloats(newBCoord, aBreakType, aFlags);
   }
 

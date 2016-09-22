@@ -96,6 +96,7 @@
 #include "asmjs/WasmBaselineCompile.h"
 #include "asmjs/WasmBinaryIterator.h"
 #include "asmjs/WasmGenerator.h"
+#include "asmjs/WasmSignalHandlers.h"
 #include "jit/AtomicOp.h"
 #include "jit/IonTypes.h"
 #include "jit/JitAllocPolicy.h"
@@ -450,6 +451,8 @@ class BaseCompiler
     ValTypeVector               SigDD_;
     ValTypeVector               SigD_;
     ValTypeVector               SigF_;
+    ValTypeVector               SigI_;
+    ValTypeVector               Sig_;
     Label                       returnLabel_;
     Label                       outOfLinePrologue_;
     Label                       bodyLabel_;
@@ -1784,8 +1787,8 @@ class BaseCompiler
     void beginFunction() {
         JitSpew(JitSpew_Codegen, "# Emitting wasm baseline code");
 
-        wasm::GenerateFunctionPrologue(masm, localSize_, mg_.funcSigs[func_.index()]->id,
-                                       &compileResults_.offsets());
+        SigIdDesc sigId = mg_.funcDefSigs[func_.defIndex()]->id;
+        wasm::GenerateFunctionPrologue(masm, localSize_, sigId, &compileResults_.offsets());
 
         MOZ_ASSERT(masm.framePushed() == uint32_t(localSize_));
 
@@ -2011,6 +2014,10 @@ class BaseCompiler
         }
     }
 
+    const ABIArg reserveArgument(FunctionCall& call) {
+        return call.abi_.next(MIRType::Pointer);
+    }
+
     // TODO / OPTIMIZE: Note passArg is used only in one place.  I'm
     // not saying we should manually inline it, but we could hoist the
     // dispatch into the caller and have type-specific implementations
@@ -2115,10 +2122,10 @@ class BaseCompiler
         }
     }
 
-    void callDirect(uint32_t calleeIndex, const FunctionCall& call)
+    void callDefinition(uint32_t funcDefIndex, const FunctionCall& call)
     {
         CallSiteDesc desc(call.lineOrBytecode_, CallSiteDesc::Relative);
-        masm.call(desc, calleeIndex);
+        masm.call(desc, funcDefIndex);
     }
 
     void callSymbolic(wasm::SymbolicAddress callee, const FunctionCall& call) {
@@ -2139,8 +2146,8 @@ class BaseCompiler
             MOZ_ASSERT(sig.id.kind() == SigIdDesc::Kind::None);
             const TableDesc& table = mg_.tables[mg_.asmJSSigToTableIndex[sigIndex]];
 
-            MOZ_ASSERT(IsPowerOfTwo(table.initial));
-            masm.andPtr(Imm32((table.initial - 1)), WasmTableCallIndexReg);
+            MOZ_ASSERT(IsPowerOfTwo(table.limits.initial));
+            masm.andPtr(Imm32((table.limits.initial - 1)), WasmTableCallIndexReg);
 
             callee = CalleeDesc::asmJSTable(table);
         } else {
@@ -2180,17 +2187,21 @@ class BaseCompiler
         callSymbolic(builtin, call);
     }
 
+    void builtinInstanceMethodCall(SymbolicAddress builtin, const ABIArg& instanceArg,
+                                   const FunctionCall& call)
+    {
+        CallSiteDesc desc(call.lineOrBytecode_, CallSiteDesc::Register);
+        masm.wasmCallBuiltinInstanceMethod(instanceArg, builtin);
+    }
+
     //////////////////////////////////////////////////////////////////////
     //
     // Sundry low-level code generators.
 
     void addInterruptCheck()
     {
-        if (mg_.usesSignal.forInterrupt)
-            return;
-
-        // FIXME - implement this.
-        MOZ_CRASH("Only interrupting signal handlers supported");
+        // Always use signals for interrupts with Asm.JS/Wasm
+        MOZ_RELEASE_ASSERT(wasm::HaveSignalHandlers());
     }
 
     void jumpTable(LabelVector& labels) {
@@ -2893,138 +2904,27 @@ class BaseCompiler
     //
     // Heap access.
 
-    // TODO / CLEANUP - cloned from MIRGraph.cpp, should share.
-
-    bool needsBoundsCheckBranch(const MWasmMemoryAccess& access) const {
-        // A heap access needs a bounds-check branch if we're not relying on signal
-        // handlers to catch errors, and if it's not proven to be within bounds.
-        // We use signal-handlers on x64, but on x86 there isn't enough address
-        // space for a guard region.  Also, on x64 the atomic loads and stores
-        // can't (yet) use the signal handlers.
-
-#if defined(ASMJS_MAY_USE_SIGNAL_HANDLERS_FOR_OOB)
-        if (mg_.usesSignal.forOOB && !access.isAtomicAccess())
-            return false;
-#endif
-
-        return access.needsBoundsCheck();
+    // Return true only for real asm.js (HEAP[i>>2]|0) accesses which have the
+    // peculiar property of not throwing on out-of-bounds. Everything else
+    // (wasm, SIMD.js, Atomics) throws on out-of-bounds.
+    bool isAsmJSAccess(const MWasmMemoryAccess& access) {
+        return isCompilingAsmJS() && !access.isSimdAccess() && !access.isAtomicAccess();
     }
 
-    bool throwOnOutOfBounds(const MWasmMemoryAccess& access) {
-        return access.isAtomicAccess() || !isCompilingAsmJS();
-    }
-
-    // For asm.js code only: If we have a non-zero offset, it's possible that
-    // |ptr| itself is out of bounds, while adding the offset computes an
-    // in-bounds address. To catch this case, we need a second branch, which we
-    // emit out of line since it's unlikely to be needed in normal programs.
-    // For this, we'll generate an OffsetBoundsCheck OOL stub.
-
-    bool needsOffsetBoundsCheck(const MWasmMemoryAccess& access) const {
-        return isCompilingAsmJS() && access.offset() != 0;
-    }
-
-#if defined(JS_CODEGEN_X86) || defined(JS_CODEGEN_X64)
-
-# if defined(JS_CODEGEN_X64)
-    // TODO / CLEANUP - copied from CodeGenerator-x64.cpp, should share.
-
-    MemoryAccess
-    WasmMemoryAccess(uint32_t before)
-    {
-        if (isCompilingAsmJS())
-            return MemoryAccess(before, MemoryAccess::CarryOn, MemoryAccess::WrapOffset);
-        return MemoryAccess(before, MemoryAccess::Throw, MemoryAccess::DontWrapOffset);
-    }
-# endif
-
-    class OffsetBoundsCheck : public OutOfLineCode
-    {
-        Label* maybeOutOfBounds;
-        Register ptrReg;
-        int32_t offset;
-
-      public:
-        OffsetBoundsCheck(Label* maybeOutOfBounds, Register ptrReg, int32_t offset)
-          : maybeOutOfBounds(maybeOutOfBounds),
-            ptrReg(ptrReg),
-            offset(offset)
-        {}
-
-        void generate(MacroAssembler& masm) {
-            // asm.js code only:
-            //
-            // The access is heap[ptr + offset]. The inline code checks that
-            // ptr < heap.length - offset. We get here when that fails. We need to check
-            // for the case where ptr + offset >= 0, in which case the access is still
-            // in bounds.
-
-            MOZ_ASSERT(offset != 0,
-                       "An access without a constant offset doesn't need a separate "
-                       "OffsetBoundsCheck");
-            masm.cmp32(ptrReg, Imm32(-uint32_t(offset)));
-            if (maybeOutOfBounds)
-                masm.j(Assembler::Below, maybeOutOfBounds);
-            else
-                masm.j(Assembler::Below, wasm::JumpTarget::OutOfBounds);
-
-# ifdef JS_CODEGEN_X64
-            // In order to get the offset to wrap properly, we must sign-extend the
-            // pointer to 32-bits. We'll zero out the sign extension immediately
-            // after the access to restore asm.js invariants.
-            masm.movslq(ptrReg, ptrReg);
-# endif
-
-            masm.jmp(rejoin());
-        }
-    };
-
-    // CodeGeneratorX86Shared::emitAsmJSBoundsCheckBranch()
-
-    MOZ_MUST_USE
-    bool emitBoundsCheckBranch(const MWasmMemoryAccess& access, RegI32 ptr, Label* maybeFail) {
-        Label* pass = nullptr;
-
-        if (needsOffsetBoundsCheck(access)) {
-            auto* oolCheck = new(alloc_) OffsetBoundsCheck(maybeFail, ptr.reg, access.offset());
-            maybeFail = oolCheck->entry();
-            pass = oolCheck->rejoin();
-            if (!addOutOfLineCode(oolCheck))
-                return false;
-        }
-
-        // The bounds check is a comparison with an immediate value. The asm.js
-        // module linking process will add the length of the heap to the immediate
-        // field, so -access->endOffset() will turn into
-        // (heapLength - access->endOffset()), allowing us to test whether the end
-        // of the access is beyond the end of the heap.
-        MOZ_ASSERT(access.endOffset() >= 1,
-                   "need to subtract 1 to use JAE, see also AssemblerX86Shared::UpdateBoundsCheck");
-
-        uint32_t cmpOffset = masm.cmp32WithPatch(ptr.reg, Imm32(1 - access.endOffset())).offset();
-        if (maybeFail)
-            masm.j(Assembler::AboveOrEqual, maybeFail);
-        else
-            masm.j(Assembler::AboveOrEqual, wasm::JumpTarget::OutOfBounds);
-
-        if (pass)
-            masm.bind(pass);
-
-        masm.append(wasm::BoundsCheck(cmpOffset));
-        return true;
-    }
-
-    class OutOfLineLoadTypedArrayOOB : public OutOfLineCode
+#ifndef WASM_HUGE_MEMORY
+    class AsmJSLoadOOB : public OutOfLineCode
     {
         Scalar::Type viewType;
         AnyRegister dest;
+
       public:
-        OutOfLineLoadTypedArrayOOB(Scalar::Type viewType, AnyRegister dest)
+        AsmJSLoadOOB(Scalar::Type viewType, AnyRegister dest)
           : viewType(viewType),
             dest(dest)
         {}
 
         void generate(MacroAssembler& masm) {
+#if defined(JS_CODEGEN_X86)
             switch (viewType) {
               case Scalar::Float32x4:
               case Scalar::Int32x4:
@@ -3051,239 +2951,115 @@ class BaseCompiler
                 MOZ_CRASH("unexpected array type");
             }
             masm.jump(rejoin());
+#else
+            Unused << viewType;
+            Unused << dest;
+            MOZ_CRASH("Compiler bug: Unexpected platform.");
+#endif
         }
     };
+#endif
 
-    MOZ_MUST_USE
-    bool maybeEmitLoadBoundsCheck(const MWasmMemoryAccess& access, RegI32 ptr, AnyRegister dest,
-                                  OutOfLineCode** ool)
-    {
-        *ool = nullptr;
-        if (!needsBoundsCheckBranch(access))
-            return true;
-
-        if (throwOnOutOfBounds(access))
-            return emitBoundsCheckBranch(access, ptr, nullptr);
-
-        // TODO / MEMORY: We'll allocate *a lot* of these OOL objects,
-        // thus risking OOM on a platform that is already
-        // memory-constrained.  We could opt to allocate this path
-        // in-line instead.
-        *ool = new (alloc_) OutOfLineLoadTypedArrayOOB(access.accessType(), dest);
-        if (!addOutOfLineCode(*ool))
-            return false;
-
-        return emitBoundsCheckBranch(access, ptr, (*ool)->entry());
-    }
-
-    MOZ_MUST_USE
-    bool maybeEmitStoreBoundsCheck(const MWasmMemoryAccess& access, RegI32 ptr, Label** rejoin) {
-        *rejoin = nullptr;
-        if (!needsBoundsCheckBranch(access))
-            return true;
-
-        if (throwOnOutOfBounds(access))
-            return emitBoundsCheckBranch(access, ptr, nullptr);
-
-        *rejoin = newLabel();
-        if (!*rejoin)
-            return false;
-
-        return emitBoundsCheckBranch(access, ptr, *rejoin);
-    }
-
-    void cleanupAfterBoundsCheck(const MWasmMemoryAccess& access, RegI32 ptr) {
-# ifdef JS_CODEGEN_X64
-        if (needsOffsetBoundsCheck(access)) {
-            // Zero out the high 32 bits, in case the OffsetBoundsCheck code had to
-            // sign-extend (movslq) the pointer value to get wraparound to work.
-            masm.movl(ptr.reg, ptr.reg);
+  private:
+    void checkOffset(MWasmMemoryAccess* access, RegI32 ptr) {
+        if (access->offset() >= OffsetGuardLimit) {
+            masm.branchAdd32(Assembler::CarrySet,
+                             Imm32(access->offset()), ptr.reg,
+                             JumpTarget::OutOfBounds);
+            access->clearOffset();
         }
-# endif
     }
 
+  public:
     MOZ_MUST_USE
-    bool loadHeap(const MWasmMemoryAccess& access, RegI32 ptr, AnyReg dest) {
-        if (access.offset() > INT32_MAX) {
-            masm.jump(wasm::JumpTarget::OutOfBounds);
-            return true;
-        }
+    bool load(MWasmMemoryAccess access, RegI32 ptr, AnyReg dest) {
+        checkOffset(&access, ptr);
 
         OutOfLineCode* ool = nullptr;
-        if (!maybeEmitLoadBoundsCheck(access, ptr, dest.any(), &ool))
-            return false;
+#ifndef WASM_HUGE_MEMORY
+        if (isAsmJSAccess(access)) {
+            ool = new (alloc_) AsmJSLoadOOB(access.accessType(), dest.any());
+            if (!addOutOfLineCode(ool))
+                return false;
+
+            masm.wasmBoundsCheck(Assembler::AboveOrEqual, ptr.reg, ool->entry());
+        } else {
+            masm.wasmBoundsCheck(Assembler::AboveOrEqual, ptr.reg, JumpTarget::OutOfBounds);
+        }
+#endif
 
 # if defined(JS_CODEGEN_X64)
         Operand srcAddr(HeapReg, ptr.reg, TimesOne, access.offset());
 
         uint32_t before = masm.size();
-        if (dest.tag == AnyReg::I64) {
-            Register out = dest.i64().reg.reg;
-            switch (access.accessType()) {
-              case Scalar::Int8:      masm.movsbq(srcAddr, out); break;
-              case Scalar::Uint8:     masm.movzbq(srcAddr, out); break;
-              case Scalar::Int16:     masm.movswq(srcAddr, out); break;
-              case Scalar::Uint16:    masm.movzwq(srcAddr, out); break;
-              case Scalar::Int32:     masm.movslq(srcAddr, out); break;
-              // Int32 to int64 moves zero-extend by default.
-              case Scalar::Uint32:    masm.movl(srcAddr, out); break;
-              case Scalar::Int64:     masm.movq(srcAddr, out); break;
-              default:
-                MOZ_CRASH("Compiler bug: Unexpected array type in int64 load");
-            }
-        } else {
-            switch (access.accessType()) {
-              case Scalar::Int8:      masm.movsbl(srcAddr, dest.i32().reg); break;
-              case Scalar::Uint8:     masm.movzbl(srcAddr, dest.i32().reg); break;
-              case Scalar::Int16:     masm.movswl(srcAddr, dest.i32().reg); break;
-              case Scalar::Uint16:    masm.movzwl(srcAddr, dest.i32().reg); break;
-              case Scalar::Int32:
-              case Scalar::Uint32:    masm.movl(srcAddr, dest.i32().reg); break;
-              case Scalar::Float32:   masm.loadFloat32(srcAddr, dest.f32().reg); break;
-              case Scalar::Float64:   masm.loadDouble(srcAddr, dest.f64().reg); break;
-              default:
-                MOZ_CRASH("Compiler bug: Unexpected array type");
-            }
-        }
+        if (dest.tag == AnyReg::I64)
+            masm.wasmLoadI64(access.accessType(), srcAddr, dest.i64().reg);
+        else
+            masm.wasmLoad(access.accessType(), 0, srcAddr, dest.any());
 
-        masm.append(WasmMemoryAccess(before));
-        // TODO: call verifyHeapAccessDisassembly somehow
+        if (isAsmJSAccess(access))
+            masm.append(MemoryAccess(before));
 # elif defined(JS_CODEGEN_X86)
         Operand srcAddr(ptr.reg, access.offset());
 
-        if (dest.tag == AnyReg::I64)
-            MOZ_CRASH("Not implemented: I64 support");
+        bool byteRegConflict = access.byteSize() == 1 && !singleByteRegs_.has(dest.i32().reg);
+        AnyRegister out = byteRegConflict ? AnyRegister(ScratchRegX86) : dest.any();
 
-        bool mustMove = access.byteSize() == 1 && !singleByteRegs_.has(dest.i32().reg);
-        switch (access.accessType()) {
-          case Scalar::Int8:
-          case Scalar::Uint8: {
-            Register rd = mustMove ? ScratchRegX86 : dest.i32().reg;
-            if (access.accessType() == Scalar::Int8)
-                masm.movsblWithPatch(srcAddr, rd);
-            else
-                masm.movzblWithPatch(srcAddr, rd);
-            break;
-          }
-          case Scalar::Int16:     masm.movswlWithPatch(srcAddr, dest.i32().reg); break;
-          case Scalar::Uint16:    masm.movzwlWithPatch(srcAddr, dest.i32().reg); break;
-          case Scalar::Int32:
-          case Scalar::Uint32:    masm.movlWithPatch(srcAddr, dest.i32().reg); break;
-          case Scalar::Float32:   masm.vmovssWithPatch(srcAddr, dest.f32().reg); break;
-          case Scalar::Float64:   masm.vmovsdWithPatch(srcAddr, dest.f64().reg); break;
-          default:
-            MOZ_CRASH("Compiler bug: Unexpected array type");
-        }
-        uint32_t after = masm.size();
-        if (mustMove)
+        masm.wasmLoad(access.accessType(), 0, srcAddr, out);
+
+        if (byteRegConflict)
             masm.mov(ScratchRegX86, dest.i32().reg);
-
-        masm.append(wasm::MemoryAccess(after));
-        // TODO: call verifyHeapAccessDisassembly somehow
 # else
         MOZ_CRASH("Compiler bug: Unexpected platform.");
 # endif
 
-        if (ool) {
-            cleanupAfterBoundsCheck(access, ptr);
+        if (ool)
             masm.bind(ool->rejoin());
-        }
         return true;
     }
 
     MOZ_MUST_USE
-    bool storeHeap(const MWasmMemoryAccess& access, RegI32 ptr, AnyReg src) {
-        if (access.offset() > INT32_MAX) {
-            masm.jump(wasm::JumpTarget::OutOfBounds);
-            return true;
-        }
+    bool store(MWasmMemoryAccess access, RegI32 ptr, AnyReg src) {
+        checkOffset(&access, ptr);
 
-        Label* rejoin = nullptr;
-        if (!maybeEmitStoreBoundsCheck(access, ptr, &rejoin))
-            return false;
+        Label rejoin;
+#ifndef WASM_HUGE_MEMORY
+        if (isAsmJSAccess(access))
+            masm.wasmBoundsCheck(Assembler::AboveOrEqual, ptr.reg, &rejoin);
+        else
+            masm.wasmBoundsCheck(Assembler::AboveOrEqual, ptr.reg, JumpTarget::OutOfBounds);
+#endif
 
+        // Emit the store
 # if defined(JS_CODEGEN_X64)
         Operand dstAddr(HeapReg, ptr.reg, TimesOne, access.offset());
 
-        Register intReg = Register::Invalid();
-        if (src.tag == AnyReg::I32)
-            intReg = src.i32().reg;
-        else if (src.tag == AnyReg::I64)
-            intReg = src.i64().reg.reg;
-
         uint32_t before = masm.size();
-        switch (access.accessType()) {
-          case Scalar::Int8:
-          case Scalar::Uint8:        masm.movb(intReg, dstAddr); break;
-          case Scalar::Int16:
-          case Scalar::Uint16:       masm.movw(intReg, dstAddr); break;
-          case Scalar::Int32:
-          case Scalar::Uint32:       masm.movl(intReg, dstAddr); break;
-          case Scalar::Int64:        masm.movq(intReg, dstAddr); break;
-          case Scalar::Float32:      masm.storeFloat32(src.f32().reg, dstAddr); break;
-          case Scalar::Float64:      masm.storeDouble(src.f64().reg, dstAddr); break;
-          default:
-            MOZ_CRASH("Compiler bug: Unexpected array type");
-        }
+        masm.wasmStore(access.accessType(), 0, src.any(), dstAddr);
 
-        masm.append(WasmMemoryAccess(before));
-        // TODO: call verifyHeapAccessDisassembly somehow
+        if (isCompilingAsmJS())
+            masm.append(MemoryAccess(before));
 # elif defined(JS_CODEGEN_X86)
         Operand dstAddr(ptr.reg, access.offset());
 
-        if (src.tag == AnyReg::I64)
-            MOZ_CRASH("Not implemented: I64 support");
-
-        bool didMove = false;
+        AnyRegister value;
         if (access.byteSize() == 1 && !singleByteRegs_.has(src.i32().reg)) {
-            didMove = true;
             masm.mov(src.i32().reg, ScratchRegX86);
+            value = AnyRegister(ScratchRegX86);
+        } else {
+            value = src.any();
         }
-        switch (access.accessType()) {
-          case Scalar::Int8:
-          case Scalar::Uint8: {
-            Register rs = src.i32().reg;
-            Register rt = didMove ? ScratchRegX86 : rs;
-            masm.movbWithPatch(rt, dstAddr);
-            break;
-          }
-          case Scalar::Int16:
-          case Scalar::Uint16:       masm.movwWithPatch(src.i32().reg, dstAddr); break;
-          case Scalar::Int32:
-          case Scalar::Uint32:       masm.movlWithPatch(src.i32().reg, dstAddr); break;
-          case Scalar::Float32:      masm.vmovssWithPatch(src.f32().reg, dstAddr); break;
-          case Scalar::Float64:      masm.vmovsdWithPatch(src.f64().reg, dstAddr); break;
-          default:
-              MOZ_CRASH("Compiler bug: Unexpected array type");
-        }
-        uint32_t after = masm.size();
 
-        masm.append(wasm::MemoryAccess(after));
-        // TODO: call verifyHeapAccessDisassembly somehow
+        masm.wasmStore(access.accessType(), 0, value, dstAddr);
 # else
         MOZ_CRASH("Compiler bug: unexpected platform");
 # endif
 
-        if (rejoin) {
-            cleanupAfterBoundsCheck(access, ptr);
-            masm.bind(rejoin);
-        }
+        if (rejoin.used())
+            masm.bind(&rejoin);
+
         return true;
     }
-
-#else
-
-    MOZ_MUST_USE
-    bool loadHeap(const MWasmMemoryAccess& access, RegI32 ptr, AnyReg dest) {
-        MOZ_CRASH("BaseCompiler platform hook: loadHeap");
-    }
-
-    MOZ_MUST_USE
-    bool storeHeap(const MWasmMemoryAccess& access, RegI32 ptr, AnyReg src) {
-        MOZ_CRASH("BaseCompiler platform hook: storeHeap");
-    }
-
-#endif
 
     ////////////////////////////////////////////////////////////
 
@@ -3373,11 +3149,13 @@ class BaseCompiler
     MOZ_MUST_USE
     bool skipCall(const ValTypeVector& args, ExprType maybeReturnType = ExprType::Limit);
     MOZ_MUST_USE
+    bool emitCallImportCommon(uint32_t lineOrBytecode, uint32_t funcImportIndex);
+    MOZ_MUST_USE
     bool emitCall(uint32_t callOffset);
     MOZ_MUST_USE
-    bool emitCallIndirect(uint32_t callOffset);
-    MOZ_MUST_USE
     bool emitCallImport(uint32_t callOffset);
+    MOZ_MUST_USE
+    bool emitCallIndirect(uint32_t callOffset);
     MOZ_MUST_USE
     bool emitUnaryMathBuiltinCall(uint32_t callOffset, SymbolicAddress callee, ValType operandType);
     MOZ_MUST_USE
@@ -3497,6 +3275,8 @@ class BaseCompiler
     void emitConvertU64ToF64();
     void emitReinterpretI32AsF32();
     void emitReinterpretI64AsF64();
+    MOZ_MUST_USE bool emitGrowMemory(uint32_t callOffset);
+    MOZ_MUST_USE bool emitCurrentMemory(uint32_t callOffset);
 };
 
 void
@@ -5257,6 +5037,44 @@ BaseCompiler::pushReturned(const FunctionCall& call, ExprType type)
 // for outgoing arguments.  A sync() is just simpler.
 
 bool
+BaseCompiler::emitCallImportCommon(uint32_t lineOrBytecode, uint32_t funcImportIndex)
+{
+    const FuncImportGenDesc& funcImport = mg_.funcImports[funcImportIndex];
+    const Sig& sig = *funcImport.sig;
+
+    if (deadCode_)
+        return skipCall(sig.args(), sig.ret());
+
+    sync();
+
+    uint32_t numArgs = sig.args().length();
+    size_t stackSpace = stackConsumed(numArgs);
+
+    FunctionCall baselineCall(lineOrBytecode);
+    beginCall(baselineCall, EscapesSandbox(true), IsBuiltinCall(false));
+
+    if (!emitCallArgs(sig.args(), baselineCall))
+        return false;
+
+    if (!iter_.readCallReturn(sig.ret()))
+        return false;
+
+    callImport(funcImport.globalDataOffset, baselineCall);
+
+    endCall(baselineCall);
+
+    // TODO / OPTIMIZE: It would be better to merge this freeStack()
+    // into the one in endCall, if we can.
+
+    popValueStackBy(numArgs);
+    masm.freeStack(stackSpace);
+
+    pushReturned(baselineCall, sig.ret());
+
+    return true;
+}
+
+bool
 BaseCompiler::emitCall(uint32_t callOffset)
 {
     uint32_t lineOrBytecode = readCallSiteLineOrBytecode(callOffset);
@@ -5266,7 +5084,14 @@ BaseCompiler::emitCall(uint32_t callOffset)
     if (!iter_.readCall(&calleeIndex, &arity))
         return false;
 
-    const Sig& sig = *mg_.funcSigs[calleeIndex];
+    // For asm.js and old-format wasm code, imports are not part of the function
+    // index space so in these cases firstFuncDefIndex is fixed to 0, even if
+    // there are function imports.
+    if (calleeIndex < mg_.firstFuncDefIndex)
+        return emitCallImportCommon(lineOrBytecode, calleeIndex);
+
+    uint32_t funcDefIndex = calleeIndex - mg_.firstFuncDefIndex;
+    const Sig& sig = *mg_.funcDefSigs[funcDefIndex];
 
     if (deadCode_)
         return skipCall(sig.args(), sig.ret());
@@ -5285,7 +5110,7 @@ BaseCompiler::emitCall(uint32_t callOffset)
     if (!iter_.readCallReturn(sig.ret()))
         return false;
 
-    callDirect(calleeIndex, baselineCall);
+    callDefinition(funcDefIndex, baselineCall);
 
     endCall(baselineCall);
 
@@ -5298,6 +5123,21 @@ BaseCompiler::emitCall(uint32_t callOffset)
     pushReturned(baselineCall, sig.ret());
 
     return true;
+}
+
+bool
+BaseCompiler::emitCallImport(uint32_t callOffset)
+{
+    MOZ_ASSERT(!mg_.firstFuncDefIndex);
+
+    uint32_t lineOrBytecode = readCallSiteLineOrBytecode(callOffset);
+
+    uint32_t funcImportIndex;
+    uint32_t arity;
+    if (!iter_.readCallImport(&funcImportIndex, &arity))
+        return false;
+
+    return emitCallImportCommon(lineOrBytecode, funcImportIndex);
 }
 
 bool
@@ -5348,51 +5188,6 @@ BaseCompiler::emitCallIndirect(uint32_t callOffset)
     // into the one in endCall, if we can.
 
     popValueStackBy(numArgs+1);
-    masm.freeStack(stackSpace);
-
-    pushReturned(baselineCall, sig.ret());
-
-    return true;
-}
-
-bool
-BaseCompiler::emitCallImport(uint32_t callOffset)
-{
-    uint32_t lineOrBytecode = readCallSiteLineOrBytecode(callOffset);
-
-    uint32_t funcImportIndex;
-    uint32_t arity;
-    if (!iter_.readCallImport(&funcImportIndex, &arity))
-        return false;
-
-    const FuncImportGenDesc& funcImport = mg_.funcImports[funcImportIndex];
-    const Sig& sig = *funcImport.sig;
-
-    if (deadCode_)
-        return skipCall(sig.args(), sig.ret());
-
-    sync();
-
-    uint32_t numArgs = sig.args().length();
-    size_t stackSpace = stackConsumed(numArgs);
-
-    FunctionCall baselineCall(lineOrBytecode);
-    beginCall(baselineCall, EscapesSandbox(true), IsBuiltinCall(false));
-
-    if (!emitCallArgs(sig.args(), baselineCall))
-        return false;
-
-    if (!iter_.readCallReturn(sig.ret()))
-        return false;
-
-    callImport(funcImport.globalDataOffset, baselineCall);
-
-    endCall(baselineCall);
-
-    // TODO / OPTIMIZE: It would be better to merge this freeStack()
-    // into the one in endCall, if we can.
-
-    popValueStackBy(numArgs);
     masm.freeStack(stackSpace);
 
     pushReturned(baselineCall, sig.ret());
@@ -5714,7 +5509,7 @@ BaseCompiler::emitLoad(ValType type, Scalar::Type viewType)
     switch (type) {
       case ValType::I32: {
         RegI32 rp = popI32();
-        if (!loadHeap(access, rp, AnyReg(rp)))
+        if (!load(access, rp, AnyReg(rp)))
             return false;
         pushI32(rp);
         break;
@@ -5722,7 +5517,7 @@ BaseCompiler::emitLoad(ValType type, Scalar::Type viewType)
       case ValType::I64: {
         RegI32 rp = popI32();
         RegI64 rv = needI64();
-        if (!loadHeap(access, rp, AnyReg(rv)))
+        if (!load(access, rp, AnyReg(rv)))
             return false;
         pushI64(rv);
         freeI32(rp);
@@ -5731,7 +5526,7 @@ BaseCompiler::emitLoad(ValType type, Scalar::Type viewType)
       case ValType::F32: {
         RegI32 rp = popI32();
         RegF32 rv = needF32();
-        if (!loadHeap(access, rp, AnyReg(rv)))
+        if (!load(access, rp, AnyReg(rv)))
             return false;
         pushF32(rv);
         freeI32(rp);
@@ -5740,14 +5535,14 @@ BaseCompiler::emitLoad(ValType type, Scalar::Type viewType)
       case ValType::F64: {
         RegI32 rp = popI32();
         RegF64 rv = needF64();
-        if (!loadHeap(access, rp, AnyReg(rv)))
+        if (!load(access, rp, AnyReg(rv)))
             return false;
         pushF64(rv);
         freeI32(rp);
         break;
       }
       default:
-        MOZ_CRASH("loadHeap type");
+        MOZ_CRASH("load type");
         break;
     }
     return true;
@@ -5773,7 +5568,7 @@ BaseCompiler::emitStore(ValType resultType, Scalar::Type viewType)
       case ValType::I32: {
         RegI32 rp, rv;
         pop2xI32(&rp, &rv);
-        if (!storeHeap(access, rp, AnyReg(rv)))
+        if (!store(access, rp, AnyReg(rv)))
             return false;
         freeI32(rp);
         pushI32(rv);
@@ -5782,7 +5577,7 @@ BaseCompiler::emitStore(ValType resultType, Scalar::Type viewType)
       case ValType::I64: {
         RegI64 rv = popI64();
         RegI32 rp = popI32();
-        if (!storeHeap(access, rp, AnyReg(rv)))
+        if (!store(access, rp, AnyReg(rv)))
             return false;
         freeI32(rp);
         pushI64(rv);
@@ -5791,7 +5586,7 @@ BaseCompiler::emitStore(ValType resultType, Scalar::Type viewType)
       case ValType::F32: {
         RegF32 rv = popF32();
         RegI32 rp = popI32();
-        if (!storeHeap(access, rp, AnyReg(rv)))
+        if (!store(access, rp, AnyReg(rv)))
             return false;
         freeI32(rp);
         pushF32(rv);
@@ -5800,14 +5595,14 @@ BaseCompiler::emitStore(ValType resultType, Scalar::Type viewType)
       case ValType::F64: {
         RegF64 rv = popF64();
         RegI32 rp = popI32();
-        if (!storeHeap(access, rp, AnyReg(rv)))
+        if (!store(access, rp, AnyReg(rv)))
             return false;
         freeI32(rp);
         pushF64(rv);
         break;
       }
       default:
-        MOZ_CRASH("storeHeap type");
+        MOZ_CRASH("store type");
         break;
     }
     return true;
@@ -6062,7 +5857,7 @@ BaseCompiler::emitStoreWithCoercion(ValType resultType, Scalar::Type viewType)
         RegF64 rw = needF64();
         masm.convertFloat32ToDouble(rv.reg, rw.reg);
         RegI32 rp = popI32();
-        if (!storeHeap(access, rp, AnyReg(rw)))
+        if (!store(access, rp, AnyReg(rw)))
             return false;
         pushF32(rv);
         freeI32(rp);
@@ -6073,7 +5868,7 @@ BaseCompiler::emitStoreWithCoercion(ValType resultType, Scalar::Type viewType)
         RegF32 rw = needF32();
         masm.convertDoubleToFloat32(rv.reg, rw.reg);
         RegI32 rp = popI32();
-        if (!storeHeap(access, rp, AnyReg(rw)))
+        if (!store(access, rp, AnyReg(rw)))
             return false;
         pushF64(rv);
         freeI32(rp);
@@ -6081,6 +5876,72 @@ BaseCompiler::emitStoreWithCoercion(ValType resultType, Scalar::Type viewType)
     }
     else
         MOZ_CRASH("unexpected coerced store");
+
+    return true;
+}
+
+bool
+BaseCompiler::emitGrowMemory(uint32_t callOffset)
+{
+    if (deadCode_)
+        return skipCall(SigI_, ExprType::I32);
+
+    uint32_t lineOrBytecode = readCallSiteLineOrBytecode(callOffset);
+
+    sync();
+
+    uint32_t numArgs = 1;
+    size_t stackSpace = stackConsumed(numArgs);
+
+    FunctionCall baselineCall(lineOrBytecode);
+    beginCall(baselineCall, EscapesSandbox(true), IsBuiltinCall(true));
+
+    ABIArg instanceArg = reserveArgument(baselineCall);
+
+    if (!emitCallArgs(SigI_, baselineCall))
+        return false;
+
+    if (!iter_.readCallReturn(ExprType::I32))
+        return false;
+
+    builtinInstanceMethodCall(SymbolicAddress::GrowMemory, instanceArg, baselineCall);
+
+    endCall(baselineCall);
+
+    popValueStackBy(numArgs);
+    masm.freeStack(stackSpace);
+
+    pushReturned(baselineCall, ExprType::I32);
+
+    return true;
+}
+
+bool
+BaseCompiler::emitCurrentMemory(uint32_t callOffset)
+{
+    if (deadCode_)
+        return skipCall(Sig_, ExprType::I32);
+
+    uint32_t lineOrBytecode = readCallSiteLineOrBytecode(callOffset);
+
+    sync();
+
+    FunctionCall baselineCall(lineOrBytecode);
+    beginCall(baselineCall, EscapesSandbox(true), IsBuiltinCall(true));
+
+    ABIArg instanceArg = reserveArgument(baselineCall);
+
+    if (!emitCallArgs(Sig_, baselineCall))
+        return false;
+
+    if (!iter_.readCallReturn(ExprType::I32))
+        return false;
+
+    builtinInstanceMethodCall(SymbolicAddress::CurrentMemory, instanceArg, baselineCall);
+
+    endCall(baselineCall);
+
+    pushReturned(baselineCall, ExprType::I32);
 
     return true;
 }
@@ -6144,7 +6005,7 @@ BaseCompiler::emitBody()
         switch (expr) {
           // Control opcodes
           case Expr::Nop:
-            CHECK(iter_.readNullary());
+            CHECK(iter_.readNullary(ExprType::Void));
             if (!deadCode_)
                 pushVoid();
             NEXT();
@@ -6634,11 +6495,11 @@ BaseCompiler::emitBody()
           case Expr::I32AtomicsExchange:
             MOZ_CRASH("Unimplemented Atomics");
 
-          // Future opcodes
-          case Expr::CurrentMemory:
-            MOZ_CRASH("Unimplemented CurrentMemory");
+          // Memory Related
           case Expr::GrowMemory:
-            MOZ_CRASH("Unimplemented GrowMemory");
+            CHECK_NEXT(emitGrowMemory(exprOffset));
+          case Expr::CurrentMemory:
+            CHECK_NEXT(emitCurrentMemory(exprOffset));
 
           case Expr::Limit:;
         }
@@ -6784,6 +6645,8 @@ BaseCompiler::init()
         return false;
     if (!SigF_.append(ValType::F32))
         return false;
+    if (!SigI_.append(ValType::I32))
+        return false;
 
     const ValTypeVector& args = func_.sig().args();
 
@@ -6886,10 +6749,11 @@ LiveRegisterSet BaseCompiler::VolatileReturnGPR = volatileReturnGPR();
 bool
 js::wasm::BaselineCanCompile(const FunctionGenerator* fg)
 {
-#if defined(JS_CODEGEN_X64)
-    if (!fg->usesSignalsForInterrupts())
-        return false;
+    // On all platforms we require signals for AsmJS/Wasm.
+    // If we made it this far we must have signals.
+    MOZ_RELEASE_ASSERT(wasm::HaveSignalHandlers());
 
+#if defined(JS_CODEGEN_X64)
     if (fg->usesAtomics())
         return false;
 

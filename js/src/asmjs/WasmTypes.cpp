@@ -117,8 +117,11 @@ HandleTrap(int32_t trapIndex)
       case Trap::IntegerDivideByZero:
         errorNumber = JSMSG_WASM_INT_DIVIDE_BY_ZERO;
         break;
-      case Trap::BadIndirectCall:
-        errorNumber = JSMSG_WASM_BAD_IND_CALL;
+      case Trap::IndirectCallToNull:
+        errorNumber = JSMSG_WASM_IND_CALL_TO_NULL;
+        break;
+      case Trap::IndirectCallBadSig:
+        errorNumber = JSMSG_WASM_IND_CALL_BAD_SIG;
         break;
       case Trap::ImpreciseSimdConversion:
         errorNumber = JSMSG_SIMD_FAILED_CONVERSION;
@@ -340,9 +343,9 @@ wasm::AddressOf(SymbolicAddress imm, ExclusiveContext* cx)
       case SymbolicAddress::TruncF:
         return FuncCast<float (float)>(fdlibm::truncf, Args_Float32_Float32);
       case SymbolicAddress::NearbyIntD:
-        return FuncCast<double (double)>(nearbyint, Args_Double_Double);
+        return FuncCast<double (double)>(fdlibm::nearbyint, Args_Double_Double);
       case SymbolicAddress::NearbyIntF:
-        return FuncCast<float (float)>(nearbyintf, Args_Float32_Float32);
+        return FuncCast<float (float)>(fdlibm::nearbyintf, Args_Float32_Float32);
       case SymbolicAddress::ExpD:
         return FuncCast<double (double)>(fdlibm::exp, Args_Double_Double);
       case SymbolicAddress::LogD:
@@ -351,32 +354,15 @@ wasm::AddressOf(SymbolicAddress imm, ExclusiveContext* cx)
         return FuncCast(ecmaPow, Args_Double_DoubleDouble);
       case SymbolicAddress::ATan2D:
         return FuncCast(ecmaAtan2, Args_Double_DoubleDouble);
+      case SymbolicAddress::GrowMemory:
+        return FuncCast<uint32_t (Instance*, uint32_t)>(Instance::growMemory_i32, Args_General2);
+      case SymbolicAddress::CurrentMemory:
+        return FuncCast<uint32_t (Instance*)>(Instance::currentMemory_i32, Args_General1);
       case SymbolicAddress::Limit:
         break;
     }
 
     MOZ_CRASH("Bad SymbolicAddress");
-}
-
-SignalUsage::SignalUsage()
-  :
-#ifdef ASMJS_MAY_USE_SIGNAL_HANDLERS_FOR_OOB
-    // Signal-handling is only used to eliminate bounds checks when the OS page
-    // size is an even divisor of the WebAssembly page size.
-    forOOB(HaveSignalHandlers() &&
-           gc::SystemPageSize() <= PageSize &&
-           PageSize % gc::SystemPageSize() == 0 &&
-           !JitOptions.wasmExplicitBoundsChecks),
-#else
-    forOOB(false),
-#endif
-    forInterrupt(HaveSignalHandlers())
-{}
-
-bool
-SignalUsage::operator==(SignalUsage rhs) const
-{
-    return forOOB == rhs.forOOB && forInterrupt == rhs.forInterrupt;
 }
 
 static uint32_t
@@ -565,15 +551,13 @@ SigWithId::sizeOfExcludingThis(MallocSizeOf mallocSizeOf) const
 }
 
 Assumptions::Assumptions(JS::BuildIdCharVector&& buildId)
-  : usesSignal(),
-    cpuId(GetCPUID()),
+  : cpuId(GetCPUID()),
     buildId(Move(buildId)),
     newFormat(false)
 {}
 
 Assumptions::Assumptions()
-  : usesSignal(),
-    cpuId(GetCPUID()),
+  : cpuId(GetCPUID()),
     buildId(),
     newFormat(false)
 {}
@@ -591,7 +575,6 @@ Assumptions::initBuildIdFromContext(ExclusiveContext* cx)
 bool
 Assumptions::clone(const Assumptions& other)
 {
-    usesSignal = other.usesSignal;
     cpuId = other.cpuId;
     newFormat = other.newFormat;
     return buildId.appendAll(other.buildId);
@@ -600,8 +583,7 @@ Assumptions::clone(const Assumptions& other)
 bool
 Assumptions::operator==(const Assumptions& rhs) const
 {
-    return usesSignal == rhs.usesSignal &&
-           cpuId == rhs.cpuId &&
+    return cpuId == rhs.cpuId &&
            buildId.length() == rhs.buildId.length() &&
            PodEqual(buildId.begin(), rhs.buildId.begin(), buildId.length()) &&
            newFormat == rhs.newFormat;
@@ -610,8 +592,7 @@ Assumptions::operator==(const Assumptions& rhs) const
 size_t
 Assumptions::serializedSize() const
 {
-    return sizeof(usesSignal) +
-           sizeof(uint32_t) +
+    return sizeof(uint32_t) +
            SerializedPodVectorSize(buildId) +
            sizeof(bool);
 }
@@ -619,7 +600,6 @@ Assumptions::serializedSize() const
 uint8_t*
 Assumptions::serialize(uint8_t* cursor) const
 {
-    cursor = WriteBytes(cursor, &usesSignal, sizeof(usesSignal));
     cursor = WriteScalar<uint32_t>(cursor, cpuId);
     cursor = SerializePodVector(cursor, buildId);
     cursor = WriteScalar<bool>(cursor, newFormat);
@@ -629,7 +609,6 @@ Assumptions::serialize(uint8_t* cursor) const
 const uint8_t*
 Assumptions::deserialize(const uint8_t* cursor)
 {
-    (cursor = ReadBytes(cursor, &usesSignal, sizeof(usesSignal))) &&
     (cursor = ReadScalar<uint32_t>(cursor, &cpuId)) &&
     (cursor = DeserializePodVector(cursor, &buildId)) &&
     (cursor = ReadScalar<bool>(cursor, &newFormat));
@@ -641,3 +620,69 @@ Assumptions::sizeOfExcludingThis(MallocSizeOf mallocSizeOf) const
 {
     return buildId.sizeOfExcludingThis(mallocSizeOf);
 }
+
+//  Heap length on ARM should fit in an ARM immediate. We approximate the set
+//  of valid ARM immediates with the predicate:
+//    2^n for n in [16, 24)
+//  or
+//    2^24 * n for n >= 1.
+bool
+wasm::IsValidARMImmediate(uint32_t i)
+{
+    bool valid = (IsPowerOfTwo(i) ||
+                  (i & 0x00ffffff) == 0);
+
+    MOZ_ASSERT_IF(valid, i % PageSize == 0);
+
+    return valid;
+}
+
+uint32_t
+wasm::RoundUpToNextValidARMImmediate(uint32_t i)
+{
+    MOZ_ASSERT(i <= 0xff000000);
+
+    if (i <= 16 * 1024 * 1024)
+        i = i ? mozilla::RoundUpPow2(i) : 0;
+    else
+        i = (i + 0x00ffffff) & ~0x00ffffff;
+
+    MOZ_ASSERT(IsValidARMImmediate(i));
+
+    return i;
+}
+
+#ifndef WASM_HUGE_MEMORY
+
+bool
+wasm::IsValidBoundsCheckImmediate(uint32_t i)
+{
+#ifdef JS_CODEGEN_ARM
+    return IsValidARMImmediate(i);
+#else
+    return true;
+#endif
+}
+
+size_t
+wasm::ComputeMappedSize(uint32_t maxSize)
+{
+    MOZ_ASSERT(maxSize % PageSize == 0);
+
+    // It is the bounds-check limit, not the mapped size, that gets baked into
+    // code. Thus round up the maxSize to the next valid immediate value
+    // *before* adding in the guard page.
+
+# ifdef JS_CODEGEN_ARM
+    uint32_t boundsCheckLimit = RoundUpToNextValidARMImmediate(maxSize);
+# else
+    uint32_t boundsCheckLimit = maxSize;
+# endif
+    MOZ_ASSERT(IsValidBoundsCheckImmediate(boundsCheckLimit));
+
+    MOZ_ASSERT(boundsCheckLimit % gc::SystemPageSize() == 0);
+    MOZ_ASSERT(GuardSize % gc::SystemPageSize() == 0);
+    return boundsCheckLimit + GuardSize;
+}
+
+#endif  // WASM_HUGE_MEMORY

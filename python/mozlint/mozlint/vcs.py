@@ -23,7 +23,7 @@ class VCSFiles(object):
         )
 
         for cmd in commands:
-            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE)
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             output = proc.communicate()[0].strip()
 
             if proc.returncode == 0:
@@ -49,7 +49,7 @@ class VCSFiles(object):
 
     def by_rev(self, rev):
         if self.is_hg:
-            return self._run(['hg', 'log', '-T', '{files % "\\n{file}"}', '-r', rev])
+            return self._run(['hg', 'log', '--template', '{files % "\\n{file}"}', '-r', rev])
         elif self.is_git:
             return self._run(['git', 'diff', '--name-only', rev])
         return []

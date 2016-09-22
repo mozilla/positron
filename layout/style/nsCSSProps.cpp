@@ -1031,8 +1031,8 @@ const KTableEntry nsCSSProps::kBorderWidthKTable[] = {
 };
 
 const KTableEntry nsCSSProps::kBoxDecorationBreakKTable[] = {
-  { eCSSKeyword_slice, NS_STYLE_BOX_DECORATION_BREAK_SLICE },
-  { eCSSKeyword_clone, NS_STYLE_BOX_DECORATION_BREAK_CLONE },
+  { eCSSKeyword_slice, StyleBoxDecorationBreak::Slice },
+  { eCSSKeyword_clone, StyleBoxDecorationBreak::Clone },
   { eCSSKeyword_UNKNOWN, -1 }
 };
 
@@ -1058,13 +1058,13 @@ const KTableEntry nsCSSProps::kCaptionSideKTable[] = {
 };
 
 KTableEntry nsCSSProps::kClearKTable[] = {
-  { eCSSKeyword_none,         NS_STYLE_CLEAR_NONE },
-  { eCSSKeyword_left,         NS_STYLE_CLEAR_LEFT },
-  { eCSSKeyword_right,        NS_STYLE_CLEAR_RIGHT },
-  { eCSSKeyword_inline_start, NS_STYLE_CLEAR_INLINE_START },
-  { eCSSKeyword_inline_end,   NS_STYLE_CLEAR_INLINE_END },
-  { eCSSKeyword_both,         NS_STYLE_CLEAR_BOTH },
-  { eCSSKeyword_UNKNOWN,      -1 }
+  { eCSSKeyword_none, StyleClear::None },
+  { eCSSKeyword_left, StyleClear::Left },
+  { eCSSKeyword_right, StyleClear::Right },
+  { eCSSKeyword_inline_start, StyleClear::InlineStart },
+  { eCSSKeyword_inline_end, StyleClear::InlineEnd },
+  { eCSSKeyword_both, StyleClear::Both },
+  { eCSSKeyword_UNKNOWN, -1 }
 };
 
 // See also kContextPatternKTable for SVG paint-specific values
@@ -1244,54 +1244,54 @@ const KTableEntry nsCSSProps::kDirectionKTable[] = {
 };
 
 KTableEntry nsCSSProps::kDisplayKTable[] = {
-  { eCSSKeyword_none,                NS_STYLE_DISPLAY_NONE },
-  { eCSSKeyword_inline,              NS_STYLE_DISPLAY_INLINE },
-  { eCSSKeyword_block,               NS_STYLE_DISPLAY_BLOCK },
-  { eCSSKeyword_inline_block,        NS_STYLE_DISPLAY_INLINE_BLOCK },
-  { eCSSKeyword_list_item,           NS_STYLE_DISPLAY_LIST_ITEM },
-  { eCSSKeyword_table,               NS_STYLE_DISPLAY_TABLE },
-  { eCSSKeyword_inline_table,        NS_STYLE_DISPLAY_INLINE_TABLE },
-  { eCSSKeyword_table_row_group,     NS_STYLE_DISPLAY_TABLE_ROW_GROUP },
-  { eCSSKeyword_table_header_group,  NS_STYLE_DISPLAY_TABLE_HEADER_GROUP },
-  { eCSSKeyword_table_footer_group,  NS_STYLE_DISPLAY_TABLE_FOOTER_GROUP },
-  { eCSSKeyword_table_row,           NS_STYLE_DISPLAY_TABLE_ROW },
-  { eCSSKeyword_table_column_group,  NS_STYLE_DISPLAY_TABLE_COLUMN_GROUP },
-  { eCSSKeyword_table_column,        NS_STYLE_DISPLAY_TABLE_COLUMN },
-  { eCSSKeyword_table_cell,          NS_STYLE_DISPLAY_TABLE_CELL },
-  { eCSSKeyword_table_caption,       NS_STYLE_DISPLAY_TABLE_CAPTION },
+  { eCSSKeyword_none,                StyleDisplay::None },
+  { eCSSKeyword_inline,              StyleDisplay::Inline },
+  { eCSSKeyword_block,               StyleDisplay::Block },
+  { eCSSKeyword_inline_block,        StyleDisplay::InlineBlock },
+  { eCSSKeyword_list_item,           StyleDisplay::ListItem },
+  { eCSSKeyword_table,               StyleDisplay::Table },
+  { eCSSKeyword_inline_table,        StyleDisplay::InlineTable },
+  { eCSSKeyword_table_row_group,     StyleDisplay::TableRowGroup },
+  { eCSSKeyword_table_header_group,  StyleDisplay::TableHeaderGroup },
+  { eCSSKeyword_table_footer_group,  StyleDisplay::TableFooterGroup },
+  { eCSSKeyword_table_row,           StyleDisplay::TableRow },
+  { eCSSKeyword_table_column_group,  StyleDisplay::TableColumnGroup },
+  { eCSSKeyword_table_column,        StyleDisplay::TableColumn },
+  { eCSSKeyword_table_cell,          StyleDisplay::TableCell },
+  { eCSSKeyword_table_caption,       StyleDisplay::TableCaption },
   // Make sure this is kept in sync with the code in
   // nsCSSFrameConstructor::ConstructXULFrame
-  { eCSSKeyword__moz_box,            NS_STYLE_DISPLAY_BOX },
-  { eCSSKeyword__moz_inline_box,     NS_STYLE_DISPLAY_INLINE_BOX },
+  { eCSSKeyword__moz_box,            StyleDisplay::Box },
+  { eCSSKeyword__moz_inline_box,     StyleDisplay::InlineBox },
 #ifdef MOZ_XUL
-  { eCSSKeyword__moz_grid,           NS_STYLE_DISPLAY_XUL_GRID },
-  { eCSSKeyword__moz_inline_grid,    NS_STYLE_DISPLAY_INLINE_XUL_GRID },
-  { eCSSKeyword__moz_grid_group,     NS_STYLE_DISPLAY_XUL_GRID_GROUP },
-  { eCSSKeyword__moz_grid_line,      NS_STYLE_DISPLAY_XUL_GRID_LINE },
-  { eCSSKeyword__moz_stack,          NS_STYLE_DISPLAY_STACK },
-  { eCSSKeyword__moz_inline_stack,   NS_STYLE_DISPLAY_INLINE_STACK },
-  { eCSSKeyword__moz_deck,           NS_STYLE_DISPLAY_DECK },
-  { eCSSKeyword__moz_popup,          NS_STYLE_DISPLAY_POPUP },
-  { eCSSKeyword__moz_groupbox,       NS_STYLE_DISPLAY_GROUPBOX },
+  { eCSSKeyword__moz_grid,           StyleDisplay::XulGrid },
+  { eCSSKeyword__moz_inline_grid,    StyleDisplay::InlineXulGrid },
+  { eCSSKeyword__moz_grid_group,     StyleDisplay::XulGridGroup },
+  { eCSSKeyword__moz_grid_line,      StyleDisplay::XulGridLine },
+  { eCSSKeyword__moz_stack,          StyleDisplay::Stack },
+  { eCSSKeyword__moz_inline_stack,   StyleDisplay::InlineStack },
+  { eCSSKeyword__moz_deck,           StyleDisplay::Deck },
+  { eCSSKeyword__moz_popup,          StyleDisplay::Popup },
+  { eCSSKeyword__moz_groupbox,       StyleDisplay::Groupbox },
 #endif
-  { eCSSKeyword_flex,                NS_STYLE_DISPLAY_FLEX },
-  { eCSSKeyword_inline_flex,         NS_STYLE_DISPLAY_INLINE_FLEX },
-  { eCSSKeyword_ruby,                NS_STYLE_DISPLAY_RUBY },
-  { eCSSKeyword_ruby_base,           NS_STYLE_DISPLAY_RUBY_BASE },
-  { eCSSKeyword_ruby_base_container, NS_STYLE_DISPLAY_RUBY_BASE_CONTAINER },
-  { eCSSKeyword_ruby_text,           NS_STYLE_DISPLAY_RUBY_TEXT },
-  { eCSSKeyword_ruby_text_container, NS_STYLE_DISPLAY_RUBY_TEXT_CONTAINER },
+  { eCSSKeyword_flex,                StyleDisplay::Flex },
+  { eCSSKeyword_inline_flex,         StyleDisplay::InlineFlex },
+  { eCSSKeyword_ruby,                StyleDisplay::Ruby },
+  { eCSSKeyword_ruby_base,           StyleDisplay::RubyBase },
+  { eCSSKeyword_ruby_base_container, StyleDisplay::RubyBaseContainer },
+  { eCSSKeyword_ruby_text,           StyleDisplay::RubyText },
+  { eCSSKeyword_ruby_text_container, StyleDisplay::RubyTextContainer },
   // The next two entries are controlled by the layout.css.grid.enabled pref.
-  { eCSSKeyword_grid,                NS_STYLE_DISPLAY_GRID },
-  { eCSSKeyword_inline_grid,         NS_STYLE_DISPLAY_INLINE_GRID },
+  { eCSSKeyword_grid,                StyleDisplay::Grid },
+  { eCSSKeyword_inline_grid,         StyleDisplay::InlineGrid },
   // The next 4 entries are controlled by the layout.css.prefixes.webkit pref.
-  { eCSSKeyword__webkit_box,         NS_STYLE_DISPLAY_WEBKIT_BOX },
-  { eCSSKeyword__webkit_inline_box,  NS_STYLE_DISPLAY_WEBKIT_INLINE_BOX },
-  { eCSSKeyword__webkit_flex,        NS_STYLE_DISPLAY_FLEX },
-  { eCSSKeyword__webkit_inline_flex, NS_STYLE_DISPLAY_INLINE_FLEX },
+  { eCSSKeyword__webkit_box,         StyleDisplay::WebkitBox },
+  { eCSSKeyword__webkit_inline_box,  StyleDisplay::WebkitInlineBox },
+  { eCSSKeyword__webkit_flex,        StyleDisplay::Flex },
+  { eCSSKeyword__webkit_inline_flex, StyleDisplay::InlineFlex },
   // The next entry is controlled by the layout.css.display-contents.enabled
   // pref.
-  { eCSSKeyword_contents,            NS_STYLE_DISPLAY_CONTENTS },
+  { eCSSKeyword_contents,            StyleDisplay::Contents },
   { eCSSKeyword_UNKNOWN,             -1 }
 };
 
@@ -1479,7 +1479,7 @@ const KTableEntry nsCSSProps::kHyphensKTable[] = {
 };
 
 KTableEntry nsCSSProps::kFloatKTable[] = {
-  { eCSSKeyword_none, StyleFloat::None_ },
+  { eCSSKeyword_none, StyleFloat::None },
   { eCSSKeyword_left, StyleFloat::Left },
   { eCSSKeyword_right, StyleFloat::Right },
   { eCSSKeyword_inline_start, StyleFloat::InlineStart },
@@ -2117,7 +2117,7 @@ const KTableEntry nsCSSProps::kUnicodeBidiKTable[] = {
 };
 
 const KTableEntry nsCSSProps::kUserFocusKTable[] = {
-  { eCSSKeyword_none,           uint8_t(StyleUserFocus::None_) },
+  { eCSSKeyword_none,           uint8_t(StyleUserFocus::None) },
   { eCSSKeyword_normal,         uint8_t(StyleUserFocus::Normal) },
   { eCSSKeyword_ignore,         uint8_t(StyleUserFocus::Ignore) },
   { eCSSKeyword_select_all,     uint8_t(StyleUserFocus::SelectAll) },
@@ -2144,7 +2144,7 @@ const KTableEntry nsCSSProps::kUserModifyKTable[] = {
 };
 
 const KTableEntry nsCSSProps::kUserSelectKTable[] = {
-  { eCSSKeyword_none,       StyleUserSelect::None_ },
+  { eCSSKeyword_none,       StyleUserSelect::None },
   { eCSSKeyword_auto,       StyleUserSelect::Auto },
   { eCSSKeyword_text,       StyleUserSelect::Text },
   { eCSSKeyword_element,    StyleUserSelect::Element },
@@ -2153,7 +2153,7 @@ const KTableEntry nsCSSProps::kUserSelectKTable[] = {
   { eCSSKeyword_toggle,     StyleUserSelect::Toggle },
   { eCSSKeyword_tri_state,  StyleUserSelect::TriState },
   { eCSSKeyword__moz_all,   StyleUserSelect::MozAll },
-  { eCSSKeyword__moz_none,  StyleUserSelect::None_ },
+  { eCSSKeyword__moz_none,  StyleUserSelect::None },
   { eCSSKeyword__moz_text,  StyleUserSelect::MozText },
   { eCSSKeyword_UNKNOWN,    -1 }
 };
@@ -2242,33 +2242,33 @@ const KTableEntry nsCSSProps::kWritingModeKTable[] = {
 
 // Specific keyword tables for XUL.properties
 const KTableEntry nsCSSProps::kBoxAlignKTable[] = {
-  { eCSSKeyword_stretch, NS_STYLE_BOX_ALIGN_STRETCH },
-  { eCSSKeyword_start, NS_STYLE_BOX_ALIGN_START },
-  { eCSSKeyword_center, NS_STYLE_BOX_ALIGN_CENTER },
-  { eCSSKeyword_baseline, NS_STYLE_BOX_ALIGN_BASELINE },
-  { eCSSKeyword_end, NS_STYLE_BOX_ALIGN_END },
+  { eCSSKeyword_stretch, StyleBoxAlign::Stretch },
+  { eCSSKeyword_start, StyleBoxAlign::Start },
+  { eCSSKeyword_center, StyleBoxAlign::Center },
+  { eCSSKeyword_baseline, StyleBoxAlign::Baseline },
+  { eCSSKeyword_end, StyleBoxAlign::End },
   { eCSSKeyword_UNKNOWN, -1 }
 };
 
 const KTableEntry nsCSSProps::kBoxDirectionKTable[] = {
-  { eCSSKeyword_normal, NS_STYLE_BOX_DIRECTION_NORMAL },
-  { eCSSKeyword_reverse, NS_STYLE_BOX_DIRECTION_REVERSE },
+  { eCSSKeyword_normal, StyleBoxDirection::Normal },
+  { eCSSKeyword_reverse, StyleBoxDirection::Reverse },
   { eCSSKeyword_UNKNOWN, -1 }
 };
 
 const KTableEntry nsCSSProps::kBoxOrientKTable[] = {
-  { eCSSKeyword_horizontal, NS_STYLE_BOX_ORIENT_HORIZONTAL },
-  { eCSSKeyword_vertical, NS_STYLE_BOX_ORIENT_VERTICAL },
-  { eCSSKeyword_inline_axis, NS_STYLE_BOX_ORIENT_HORIZONTAL },
-  { eCSSKeyword_block_axis, NS_STYLE_BOX_ORIENT_VERTICAL },
+  { eCSSKeyword_horizontal, StyleBoxOrient::Horizontal },
+  { eCSSKeyword_vertical, StyleBoxOrient::Vertical },
+  { eCSSKeyword_inline_axis, StyleBoxOrient::Horizontal },
+  { eCSSKeyword_block_axis, StyleBoxOrient::Vertical },
   { eCSSKeyword_UNKNOWN, -1 }
 };
 
 const KTableEntry nsCSSProps::kBoxPackKTable[] = {
-  { eCSSKeyword_start, NS_STYLE_BOX_PACK_START },
-  { eCSSKeyword_center, NS_STYLE_BOX_PACK_CENTER },
-  { eCSSKeyword_end, NS_STYLE_BOX_PACK_END },
-  { eCSSKeyword_justify, NS_STYLE_BOX_PACK_JUSTIFY },
+  { eCSSKeyword_start, StyleBoxPack::Start },
+  { eCSSKeyword_center, StyleBoxPack::Center },
+  { eCSSKeyword_end, StyleBoxPack::End },
+  { eCSSKeyword_justify, StyleBoxPack::Justify },
   { eCSSKeyword_UNKNOWN, -1 }
 };
 
@@ -2842,17 +2842,17 @@ static const nsCSSPropertyID gOutlineSubpropTable[] = {
 };
 
 static const nsCSSPropertyID gColumnsSubpropTable[] = {
-  eCSSProperty__moz_column_count,
-  eCSSProperty__moz_column_width,
+  eCSSProperty_column_count,
+  eCSSProperty_column_width,
   eCSSProperty_UNKNOWN
 };
 
 static const nsCSSPropertyID gColumnRuleSubpropTable[] = {
   // nsCSSDeclaration.cpp outputs the subproperties in this order.
   // It also depends on the color being third.
-  eCSSProperty__moz_column_rule_width,
-  eCSSProperty__moz_column_rule_style,
-  eCSSProperty__moz_column_rule_color,
+  eCSSProperty_column_rule_width,
+  eCSSProperty_column_rule_style,
+  eCSSProperty_column_rule_color,
   eCSSProperty_UNKNOWN
 };
 

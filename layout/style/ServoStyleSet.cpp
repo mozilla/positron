@@ -22,7 +22,6 @@ ServoStyleSet::ServoStyleSet()
   : mPresContext(nullptr)
   , mRawSet(Servo_StyleSet_Init())
   , mBatching(0)
-  , mStylingStarted(false)
 {
 }
 
@@ -71,13 +70,6 @@ ServoStyleSet::EndUpdate()
 
   // ... do something ...
   return NS_OK;
-}
-
-void
-ServoStyleSet::StartStyling(nsPresContext* aPresContext)
-{
-  StyleDocument(/* aLeaveDirtyBits = */ false);
-  mStylingStarted = true;
 }
 
 already_AddRefed<nsStyleContext>
@@ -408,7 +400,7 @@ ServoStyleSet::ProbePseudoElementStyle(Element* aParentElement,
     const nsStyleDisplay *display = Servo_GetStyleDisplay(computedValues);
     const nsStyleContent *content = Servo_GetStyleContent(computedValues);
     // XXXldb What is contentCount for |content: ""|?
-    if (display->mDisplay == NS_STYLE_DISPLAY_NONE ||
+    if (display->mDisplay == StyleDisplay::None ||
         content->ContentCount() == 0) {
       return nullptr;
     }
@@ -473,21 +465,16 @@ ClearDirtyBits(nsIContent* aContent)
 void
 ServoStyleSet::StyleDocument(bool aLeaveDirtyBits)
 {
-  // Unconditionally clear the flag on the document so that HasPendingRestyles
-  // returns false.
-  nsIDocument* doc = mPresContext->Document();
-  doc->UnsetHasDirtyDescendantsForServo();
-
   // Grab the root.
-  nsIContent* root = mPresContext->Document()->GetRootElement();
-  if (!root) {
-    return;
-  }
+  nsIDocument* doc = mPresContext->Document();
+  nsIContent* root = doc->GetRootElement();
+  MOZ_ASSERT(root);
 
   // Restyle the document, clearing the dirty bits if requested.
   Servo_RestyleSubtree(root, mRawSet.get());
   if (!aLeaveDirtyBits) {
     ClearDirtyBits(root);
+    doc->UnsetHasDirtyDescendantsForServo();
   }
 }
 
@@ -495,7 +482,9 @@ void
 ServoStyleSet::StyleNewSubtree(nsIContent* aContent)
 {
   MOZ_ASSERT(aContent->IsDirtyForServo());
-  Servo_RestyleSubtree(aContent, mRawSet.get());
+  if (aContent->IsElement() || aContent->IsNodeOfType(nsINode::eTEXT)) {
+    Servo_RestyleSubtree(aContent, mRawSet.get());
+  }
   ClearDirtyBits(aContent);
 }
 

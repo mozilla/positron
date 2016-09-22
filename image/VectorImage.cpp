@@ -525,6 +525,12 @@ VectorImage::RequestRefresh(const TimeStamp& aTime)
     return;
   }
 
+  PendingAnimationTracker* tracker =
+    mSVGDocumentWrapper->GetDocument()->GetPendingAnimationTracker();
+  if (tracker && ShouldAnimate()) {
+    tracker->TriggerPendingAnimationsOnNextTick(aTime);
+  }
+
   EvaluateAnimation();
 
   mSVGDocumentWrapper->TickRefreshDriver();
@@ -868,7 +874,7 @@ VectorImage::Draw(gfxContext* aContext,
   }
 
   // We didn't get a hit in the surface cache, so we'll need to rerasterize.
-  CreateSurfaceAndShow(params);
+  CreateSurfaceAndShow(params, aContext->GetDrawTarget()->GetBackendType());
   return DrawResult::SUCCESS;
 }
 
@@ -907,7 +913,7 @@ VectorImage::LookupCachedSurface(const SVGDrawingParameters& aParams)
 }
 
 void
-VectorImage::CreateSurfaceAndShow(const SVGDrawingParameters& aParams)
+VectorImage::CreateSurfaceAndShow(const SVGDrawingParameters& aParams, BackendType aBackend)
 {
   mSVGDocumentWrapper->UpdateViewportBounds(aParams.viewportSize);
   mSVGDocumentWrapper->FlushImageTransformInvalidation();
@@ -945,7 +951,8 @@ VectorImage::CreateSurfaceAndShow(const SVGDrawingParameters& aParams)
   nsresult rv =
     frame->InitWithDrawable(svgDrawable, aParams.size,
                             SurfaceFormat::B8G8R8A8,
-                            SamplingFilter::POINT, aParams.flags);
+                            SamplingFilter::POINT, aParams.flags,
+                            aBackend);
 
   // If we couldn't create the frame, it was probably because it would end
   // up way too big. Generally it also wouldn't fit in the cache, but the prefs
@@ -962,10 +969,10 @@ VectorImage::CreateSurfaceAndShow(const SVGDrawingParameters& aParams)
   }
 
   // Attempt to cache the frame.
+  SurfaceKey surfaceKey = VectorSurfaceKey(aParams.size, aParams.svgContext);
   NotNull<RefPtr<ISurfaceProvider>> provider =
-    WrapNotNull(new SimpleSurfaceProvider(frame));
-  SurfaceCache::Insert(provider, ImageKey(this),
-                       VectorSurfaceKey(aParams.size, aParams.svgContext));
+    WrapNotNull(new SimpleSurfaceProvider(ImageKey(this), surfaceKey, frame));
+  SurfaceCache::Insert(provider);
 
   // Draw.
   RefPtr<gfxDrawable> drawable =

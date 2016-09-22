@@ -3,11 +3,11 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 "use strict";
 
-const { LocalizationHelper } = require("devtools/client/shared/l10n");
+const { LocalizationHelper } = require("devtools/shared/l10n");
 const STRINGS_URI = "devtools/locale/jit-optimizations.properties";
 const L10N = new LocalizationHelper(STRINGS_URI);
 
-const { PluralForm } = require("resource://gre/modules/PluralForm.jsm");
+const {PluralForm} = require("devtools/shared/plural-form");
 const { DOM: dom, PropTypes, createClass, createFactory } = require("devtools/client/shared/vendor/react");
 const Frame = createFactory(require("devtools/client/shared/components/frame"));
 const PROPNAME_MAX_LENGTH = 4;

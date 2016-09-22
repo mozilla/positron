@@ -31,6 +31,7 @@
 #include "mozilla/dom/SubtleCryptoBinding.h"
 #include "mozilla/dom/ToJSValue.h"
 #include "mozilla/dom/URLSearchParams.h"
+#include "mozilla/dom/URLSearchParamsBinding.h"
 #include "mozilla/dom/WebCryptoCommon.h"
 #include "mozilla/gfx/2D.h"
 #include "mozilla/ipc/BackgroundChild.h"
@@ -600,10 +601,10 @@ EnsureBlobForBackgroundManager(BlobImpl* aBlobImpl,
       nsString name;
       blobImpl->GetName(name);
 
-      blobImpl = MultipartBlobImpl::Create(newSubBlobImpls, name,
+      blobImpl = MultipartBlobImpl::Create(Move(newSubBlobImpls), name,
                                            contentType, aRv);
     } else {
-      blobImpl = MultipartBlobImpl::Create(newSubBlobImpls, contentType, aRv);
+      blobImpl = MultipartBlobImpl::Create(Move(newSubBlobImpls), contentType, aRv);
     }
 
     if (NS_WARN_IF(aRv.Failed())) {

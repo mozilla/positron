@@ -331,7 +331,7 @@ PresentationTCPSessionTransport::SetCallback(nsIPresentationSessionTransportCall
 
   if (!!mCallback && ReadyState::OPEN == mReadyState) {
     // Notify the transport channel is ready.
-    NS_WARN_IF(NS_FAILED(mCallback->NotifyTransportReady()));
+    Unused << NS_WARN_IF(NS_FAILED(mCallback->NotifyTransportReady()));
   }
 
   return NS_OK;
@@ -356,7 +356,7 @@ PresentationTCPSessionTransport::EnsureCopying()
 
   mAsyncCopierActive = true;
   RefPtr<CopierCallbacks> callbacks = new CopierCallbacks(this);
-  NS_WARN_IF(NS_FAILED(mMultiplexStreamCopier->AsyncCopy(callbacks, nullptr)));
+  Unused << NS_WARN_IF(NS_FAILED(mMultiplexStreamCopier->AsyncCopy(callbacks, nullptr)));
 }
 
 void
@@ -418,6 +418,18 @@ PresentationTCPSessionTransport::Send(const nsAString& aData)
 }
 
 NS_IMETHODIMP
+PresentationTCPSessionTransport::SendBinaryMsg(const nsACString& aData)
+{
+  return NS_ERROR_DOM_NOT_SUPPORTED_ERR;
+}
+
+NS_IMETHODIMP
+PresentationTCPSessionTransport::SendBlob(nsIDOMBlob* aBlob)
+{
+  return NS_ERROR_DOM_NOT_SUPPORTED_ERR;
+}
+
+NS_IMETHODIMP
 PresentationTCPSessionTransport::Close(nsresult aReason)
 {
   PRES_DEBUG("%s:reason[%x]\n", __func__, aReason);
@@ -458,14 +470,15 @@ PresentationTCPSessionTransport::SetReadyState(ReadyState aReadyState)
     }
 
     // Notify the transport channel is ready.
-    NS_WARN_IF(NS_FAILED(mCallback->NotifyTransportReady()));
+    Unused << NS_WARN_IF(NS_FAILED(mCallback->NotifyTransportReady()));
   } else if (mReadyState == ReadyState::CLOSED && mCallback) {
     if (NS_WARN_IF(!mCallback)) {
       return;
     }
 
     // Notify the transport channel has been shut down.
-    NS_WARN_IF(NS_FAILED(mCallback->NotifyTransportClosed(mCloseStatus)));
+    Unused <<
+      NS_WARN_IF(NS_FAILED(mCallback->NotifyTransportClosed(mCloseStatus)));
     mCallback = nullptr;
   }
 }
@@ -572,5 +585,5 @@ PresentationTCPSessionTransport::OnDataAvailable(nsIRequest* aRequest,
   }
 
   // Pass the incoming data to the listener.
-  return mCallback->NotifyData(data);
+  return mCallback->NotifyData(data, false);
 }

@@ -122,8 +122,13 @@ GetOriginFromPrincipal(nsIPrincipal* aPrincipal, nsACString& aOrigin)
   // any knowledge of private browsing. Allowing it to be true changes the suffix being hashed.
   attrs.mPrivateBrowsingId = 0;
 
+  // TODO: Bug 1302047 - Ignore userContextId and firstPartyDomain when matching permissions.
+
   // set to default to disable user context isolation for permissions
   attrs.mUserContextId = nsIScriptSecurityManager::DEFAULT_USER_CONTEXT_ID;
+
+  // set to default to disable firstParty isolation for permissions.
+  attrs.mFirstPartyDomain.Truncate();
 
   attrs.CreateSuffix(suffix);
   aOrigin.Append(suffix);
@@ -139,8 +144,13 @@ GetPrincipalFromOrigin(const nsACString& aOrigin, nsIPrincipal** aPrincipal)
     return NS_ERROR_FAILURE;
   }
 
+  // TODO: Bug 1302047 - Ignore userContextId and firstPartyDomain when matching permissions.
+
   // set to default to disable user context isolation for permissions
   attrs.mUserContextId = nsIScriptSecurityManager::DEFAULT_USER_CONTEXT_ID;
+
+  // set to default to disable firstParty isolation for permissions.
+  attrs.mFirstPartyDomain.Truncate();
 
   nsCOMPtr<nsIURI> uri;
   nsresult rv = NS_NewURI(getter_AddRefs(uri), originNoSuffix);
@@ -151,11 +161,9 @@ GetPrincipalFromOrigin(const nsACString& aOrigin, nsIPrincipal** aPrincipal)
   return NS_OK;
 }
 
-
 nsresult
 GetPrincipal(nsIURI* aURI, uint32_t aAppId, bool aIsInIsolatedMozBrowserElement, nsIPrincipal** aPrincipal)
 {
-  // TODO: Bug 1165267 - Use OriginAttributes for nsCookieService
   mozilla::PrincipalOriginAttributes attrs(aAppId, aIsInIsolatedMozBrowserElement);
   nsCOMPtr<nsIPrincipal> principal = mozilla::BasePrincipal::CreateCodebasePrincipal(aURI, attrs);
   NS_ENSURE_TRUE(principal, NS_ERROR_FAILURE);
@@ -540,7 +548,7 @@ UpgradeHostToOriginAndInsert(const nsACString& aHost, const nsAFlatCString& aTyp
       foundHistory = true;
       rv = aHelper->Insert(origin, aType, aPermission,
                            aExpireType, aExpireTime, aModificationTime);
-      NS_WARN_IF(NS_WARN_IF(NS_FAILED(rv)));
+      NS_WARNING_ASSERTION(NS_SUCCEEDED(rv), "Insert failed");
       insertedOrigins.PutEntry(origin);
     }
 
@@ -727,7 +735,7 @@ nsPermissionManager::ClearOriginDataObserverInit()
 {
   nsCOMPtr<nsIObserverService> observerService =
     mozilla::services::GetObserverService();
-  observerService->AddObserver(new ClearOriginDataObserver(), "clear-origin-data", /* holdsWeak= */ false);
+  observerService->AddObserver(new ClearOriginDataObserver(), "clear-origin-data", /* ownsWeak= */ false);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1868,6 +1876,9 @@ nsPermissionManager::RemoveFromPrincipal(nsIPrincipal* aPrincipal,
 NS_IMETHODIMP
 nsPermissionManager::RemovePermission(nsIPermission* aPerm)
 {
+  if (!aPerm) {
+    return NS_OK;
+  }
   nsCOMPtr<nsIPrincipal> principal;
   nsresult rv = aPerm->GetPrincipal(getter_AddRefs(principal));
   NS_ENSURE_SUCCESS(rv, rv);
@@ -2197,8 +2208,13 @@ nsPermissionManager::GetPermissionHashKey(nsIPrincipal* aPrincipal,
     mozilla::PrincipalOriginAttributes attrs =
       mozilla::BasePrincipal::Cast(aPrincipal)->OriginAttributesRef();
 
+    // TODO: Bug 1302047 - Ignore userContextId and firstPartyDomain when matching permissions.
+
     // ensure that the user context isolation is disabled
     attrs.mUserContextId = nsIScriptSecurityManager::DEFAULT_USER_CONTEXT_ID;
+
+    // ensure firstPartyIsolation is disabled.
+    attrs.mFirstPartyDomain.Truncate();
 
     nsCOMPtr<nsIPrincipal> principal =
       mozilla::BasePrincipal::CreateCodebasePrincipal(newURI, attrs);

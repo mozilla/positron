@@ -874,6 +874,8 @@ nsHttpChannel::SetupTransaction()
     // create the transaction object
     mTransaction = new nsHttpTransaction();
     LOG(("nsHttpChannel %p created nsHttpTransaction %p\n", this, mTransaction.get()));
+    mTransaction->SetTransactionObserver(mTransactionObserver);
+    mTransactionObserver = nullptr;
 
     // See bug #466080. Transfer LOAD_ANONYMOUS flag to socket-layer.
     if (mLoadFlags & LOAD_ANONYMOUS)
@@ -945,9 +947,7 @@ ReportTypeBlocking(nsIURI* aURI,
                    nsILoadInfo* aLoadInfo,
                    const char* aMessageName)
 {
-    nsAutoCString spec;
-    aURI->GetSpec(spec);
-    NS_ConvertUTF8toUTF16 specUTF16(spec);
+    NS_ConvertUTF8toUTF16 specUTF16(aURI->GetSpecOrDefault());
     const char16_t* params[] = { specUTF16.get() };
     nsCOMPtr<nsIDocument> doc;
     if (aLoadInfo) {
@@ -1066,78 +1066,87 @@ EnsureMIMEOfScript(nsIURI* aURI, nsHttpResponseHead* aResponseHead, nsILoadInfo*
 
     if (nsContentUtils::IsJavascriptMIMEType(typeString)) {
         // script load has type script
-        Telemetry::Accumulate(Telemetry::SCRIPT_BLOCK_WRONG_MIME, 1);
+        Telemetry::Accumulate(Telemetry::SCRIPT_BLOCK_INCORRECT_MIME, 1);
         return NS_OK;
     }
 
+    bool block = false;
     if (StringBeginsWith(contentType, NS_LITERAL_CSTRING("image/"))) {
         // script load has type image
-        Telemetry::Accumulate(Telemetry::SCRIPT_BLOCK_WRONG_MIME, 2);
+        Telemetry::Accumulate(Telemetry::SCRIPT_BLOCK_INCORRECT_MIME, 2);
+        block = true;
+    } else if (StringBeginsWith(contentType, NS_LITERAL_CSTRING("audio/"))) {
+        // script load has type audio
+        Telemetry::Accumulate(Telemetry::SCRIPT_BLOCK_INCORRECT_MIME, 3);
+        block = true;
+    } else if (StringBeginsWith(contentType, NS_LITERAL_CSTRING("video/"))) {
+        // script load has type video
+        Telemetry::Accumulate(Telemetry::SCRIPT_BLOCK_INCORRECT_MIME, 4);
+        block = true;
+    } else if (StringBeginsWith(contentType, NS_LITERAL_CSTRING("text/csv"))) {
+        // script load has type text/csv
+        Telemetry::Accumulate(Telemetry::SCRIPT_BLOCK_INCORRECT_MIME, 6);
+        block = true;
+    }
 
+    if (block) {
         // Instead of consulting Preferences::GetBool() all the time we
         // can cache the result to speed things up.
-        static bool sCachedBlockScriptWithMimeImage = false;
+        static bool sCachedBlockScriptWithWrongMime = false;
         static bool sIsInited = false;
         if (!sIsInited) {
             sIsInited = true;
-            Preferences::AddBoolVarCache(&sCachedBlockScriptWithMimeImage,
-                                         "security.block_script_with_mime_image");
+            Preferences::AddBoolVarCache(&sCachedBlockScriptWithWrongMime,
+            "security.block_script_with_wrong_mime");
         }
 
-        // do not block the load if the feature is not enabled
-        if (!sCachedBlockScriptWithMimeImage) {
+        // Do not block the load if the feature is not enabled.
+        if (!sCachedBlockScriptWithWrongMime) {
             return NS_OK;
         }
-        // log a warning to the console that loading script was
-        // blocked due to having a wrong MIME type
+
         ReportTypeBlocking(aURI, aLoadInfo, "BlockScriptWithWrongMimeType");
         return NS_ERROR_CORRUPTED_CONTENT;
     }
 
-    if (StringBeginsWith(contentType, NS_LITERAL_CSTRING("audio/"))) {
-        // script load has type audio
-        Telemetry::Accumulate(Telemetry::SCRIPT_BLOCK_WRONG_MIME, 3); 
-        return NS_OK;
-    }
-
-    if (StringBeginsWith(contentType, NS_LITERAL_CSTRING("video/"))) {
-        // script load has type video
-        Telemetry::Accumulate(Telemetry::SCRIPT_BLOCK_WRONG_MIME, 4); 
-        return NS_OK;
-    }
-
     if (StringBeginsWith(contentType, NS_LITERAL_CSTRING("text/plain"))) {
         // script load has type text/plain
-        Telemetry::Accumulate(Telemetry::SCRIPT_BLOCK_WRONG_MIME, 5); 
-        return NS_OK;
-    }
-
-    if (StringBeginsWith(contentType, NS_LITERAL_CSTRING("text/csv"))) {
-        // script load has type text/csv
-        Telemetry::Accumulate(Telemetry::SCRIPT_BLOCK_WRONG_MIME, 6); 
+        Telemetry::Accumulate(Telemetry::SCRIPT_BLOCK_INCORRECT_MIME, 5);
         return NS_OK;
     }
 
     if (StringBeginsWith(contentType, NS_LITERAL_CSTRING("text/xml"))) {
         // script load has type text/xml
-        Telemetry::Accumulate(Telemetry::SCRIPT_BLOCK_WRONG_MIME, 7); 
+        Telemetry::Accumulate(Telemetry::SCRIPT_BLOCK_INCORRECT_MIME, 7);
         return NS_OK;
     }
 
     if (StringBeginsWith(contentType, NS_LITERAL_CSTRING("application/octet-stream"))) {
         // script load has type application/octet-stream
-        Telemetry::Accumulate(Telemetry::SCRIPT_BLOCK_WRONG_MIME, 8); 
+        Telemetry::Accumulate(Telemetry::SCRIPT_BLOCK_INCORRECT_MIME, 8);
         return NS_OK;
     }
 
     if (StringBeginsWith(contentType, NS_LITERAL_CSTRING("application/xml"))) {
         // script load has type application/xml
-        Telemetry::Accumulate(Telemetry::SCRIPT_BLOCK_WRONG_MIME, 9); 
+        Telemetry::Accumulate(Telemetry::SCRIPT_BLOCK_INCORRECT_MIME, 9);
+        return NS_OK;
+    }
+
+    if (StringBeginsWith(contentType, NS_LITERAL_CSTRING("text/html"))) {
+        // script load has type text/html
+        Telemetry::Accumulate(Telemetry::SCRIPT_BLOCK_INCORRECT_MIME, 10);
+        return NS_OK;
+    }
+
+    if (contentType.IsEmpty()) {
+        // script load has no type
+        Telemetry::Accumulate(Telemetry::SCRIPT_BLOCK_INCORRECT_MIME, 11);
         return NS_OK;
     }
 
     // script load has unknown type
-    Telemetry::Accumulate(Telemetry::SCRIPT_BLOCK_WRONG_MIME, 0); 
+    Telemetry::Accumulate(Telemetry::SCRIPT_BLOCK_INCORRECT_MIME, 0);
     return NS_OK;
 }
 
@@ -5727,7 +5736,8 @@ nsHttpChannel::BeginConnect()
     NS_GetOriginAttributes(this, originAttributes);
 
     RefPtr<AltSvcMapping> mapping;
-    if (mAllowAltSvc && // per channel
+    if (!mConnectionInfo && mAllowAltSvc && // per channel
+        !(mLoadFlags & LOAD_FRESH_CONNECTION) &&
         (scheme.Equals(NS_LITERAL_CSTRING("http")) ||
          scheme.Equals(NS_LITERAL_CSTRING("https"))) &&
         (!proxyInfo || proxyInfo->IsDirect()) &&
@@ -5771,6 +5781,9 @@ nsHttpChannel::BeginConnect()
         mapping->GetConnectionInfo(getter_AddRefs(mConnectionInfo), proxyInfo, originAttributes);
         Telemetry::Accumulate(Telemetry::HTTP_TRANSACTION_USE_ALTSVC, true);
         Telemetry::Accumulate(Telemetry::HTTP_TRANSACTION_USE_ALTSVC_OE, !isHttps);
+    } else if (mConnectionInfo) {
+        LOG(("nsHttpChannel %p Using channel supplied connection info", this));
+        Telemetry::Accumulate(Telemetry::HTTP_TRANSACTION_USE_ALTSVC, false);
     } else {
         LOG(("nsHttpChannel %p Using default connection info", this));
 
@@ -7781,6 +7794,12 @@ nsHttpChannel::SetCouldBeSynthesized()
 {
   MOZ_ASSERT(!BypassServiceWorker());
   mResponseCouldBeSynthesized = true;
+}
+
+void
+nsHttpChannel::SetConnectionInfo(nsHttpConnectionInfo *aCI)
+{
+    mConnectionInfo = aCI ? aCI->Clone() : nullptr;
 }
 
 NS_IMETHODIMP

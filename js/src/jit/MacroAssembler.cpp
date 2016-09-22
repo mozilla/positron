@@ -2749,6 +2749,26 @@ MacroAssembler::wasmCallImport(const wasm::CallSiteDesc& desc, const wasm::Calle
 }
 
 void
+MacroAssembler::wasmCallBuiltinInstanceMethod(const ABIArg& instanceArg,
+                                              wasm::SymbolicAddress builtin)
+{
+    MOZ_ASSERT(instanceArg != ABIArg());
+
+    if (instanceArg.kind() == ABIArg::GPR) {
+        loadPtr(Address(WasmTlsReg, offsetof(wasm::TlsData, instance)), instanceArg.gpr());
+    } else if (instanceArg.kind() == ABIArg::Stack) {
+        // Safe to use ABINonArgReg0 since its the last thing before the call
+        Register scratch = ABINonArgReg0;
+        loadPtr(Address(WasmTlsReg, offsetof(wasm::TlsData, instance)), scratch);
+        storePtr(scratch, Address(getStackPointer(), instanceArg.offsetFromArgBase()));
+    } else {
+        MOZ_CRASH("Unknown abi passing style for pointer");
+    }
+
+    call(builtin);
+}
+
+void
 MacroAssembler::wasmCallIndirect(const wasm::CallSiteDesc& desc, const wasm::CalleeDesc& callee)
 {
     Register scratch = WasmTableCallScratchReg;
@@ -2757,7 +2777,7 @@ MacroAssembler::wasmCallIndirect(const wasm::CallSiteDesc& desc, const wasm::Cal
     if (callee.which() == wasm::CalleeDesc::AsmJSTable) {
         // asm.js tables require no signature check, have had their index masked
         // into range and thus need no bounds check and cannot be external.
-        loadWasmGlobalPtr(callee.tableGlobalDataOffset(), scratch);
+        loadWasmGlobalPtr(callee.tableBaseGlobalDataOffset(), scratch);
         loadPtr(BaseIndex(scratch, index, ScalePointer), scratch);
         call(desc, scratch);
         return;
@@ -2779,12 +2799,11 @@ MacroAssembler::wasmCallIndirect(const wasm::CallSiteDesc& desc, const wasm::Cal
     }
 
     // WebAssembly throws if the index is out-of-bounds.
-    branch32(Assembler::Condition::AboveOrEqual,
-             index, Imm32(callee.wasmTableLength()),
-             wasm::JumpTarget::OutOfBounds);
+    loadWasmGlobalPtr(callee.tableLengthGlobalDataOffset(), scratch);
+    branch32(Assembler::Condition::AboveOrEqual, index, scratch, wasm::JumpTarget::OutOfBounds);
 
     // Load the base pointer of the table.
-    loadWasmGlobalPtr(callee.tableGlobalDataOffset(), scratch);
+    loadWasmGlobalPtr(callee.tableBaseGlobalDataOffset(), scratch);
 
     // Load the callee from the table.
     if (callee.wasmTableIsExternal()) {
@@ -2798,11 +2817,14 @@ MacroAssembler::wasmCallIndirect(const wasm::CallSiteDesc& desc, const wasm::Cal
         }
 
         loadPtr(Address(scratch, offsetof(wasm::ExternalTableElem, tls)), WasmTlsReg);
+        branchTest32(Assembler::Zero, WasmTlsReg, WasmTlsReg, wasm::JumpTarget::IndirectCallToNull);
+
         loadWasmPinnedRegsFromTls();
 
         loadPtr(Address(scratch, offsetof(wasm::ExternalTableElem, code)), scratch);
     } else {
         loadPtr(BaseIndex(scratch, index, ScalePointer), scratch);
+        branchTest32(Assembler::Zero, scratch, scratch, wasm::JumpTarget::IndirectCallToNull);
     }
 
     call(desc, scratch);

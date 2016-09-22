@@ -34,6 +34,9 @@ Services.scriptloader.loadSubScript(
   "chrome://mochitests/content/browser/devtools/client/inspector/test/shared-head.js",
   this);
 
+const {LocalizationHelper} = require("devtools/shared/l10n");
+const INSPECTOR_L10N = new LocalizationHelper("devtools/locale/inspector.properties");
+
 flags.testing = true;
 registerCleanupFunction(() => {
   flags.testing = false;
@@ -62,41 +65,6 @@ var navigateTo = function (toolbox, url) {
   let activeTab = toolbox.target.activeTab;
   return activeTab.navigateTo(url);
 };
-
-/**
- * Simple DOM node accesor function that takes either a node or a string css
- * selector as argument and returns the corresponding node
- * @param {String|DOMNode} nodeOrSelector
- * @param {Object} options
- *        An object containing any of the following options:
- *        - document: HTMLDocument that should be queried for the selector.
- *                    Default: content.document.
- *        - expectNoMatch: If true and a node matches the given selector, a
- *                         failure is logged for an unexpected match.
- *                         If false and nothing matches the given selector, a
- *                         failure is logged for a missing match.
- *                         Default: false.
- * @return {DOMNode}
- */
-function getNode(nodeOrSelector, options = {}) {
-  let document = options.document || content.document;
-  let noMatches = !!options.expectNoMatch;
-
-  if (typeof nodeOrSelector === "string") {
-    info("Looking for a node that matches selector " + nodeOrSelector);
-    let node = document.querySelector(nodeOrSelector);
-    if (noMatches) {
-      ok(!node, "Selector " + nodeOrSelector + " didn't match any nodes.");
-    } else {
-      ok(node, "Selector " + nodeOrSelector + " matched a node.");
-    }
-
-    return node;
-  }
-
-  info("Looking for a node but selector was not a string.");
-  return nodeOrSelector;
-}
 
 /**
  * Start the element picker and focus the content window.
@@ -228,9 +196,8 @@ var focusSearchBoxUsingShortcut = Task.async(function* (panelWin, callback) {
   let focused = once(searchBox, "focus");
 
   panelWin.focus();
-  let strings = Services.strings.createBundle(
-    "chrome://devtools/locale/inspector.properties");
-  synthesizeKeyShortcut(strings.GetStringFromName("inspector.searchHTML.key"));
+
+  synthesizeKeyShortcut(INSPECTOR_L10N.getStr("inspector.searchHTML.key"));
 
   yield focused;
 
@@ -617,23 +584,6 @@ function waitForStyleEditor(toolbox, href) {
 }
 
 /**
- * @see SimpleTest.waitForClipboard
- *
- * @param {Function} setup
- *        Function to execute before checking for the
- *        clipboard content
- * @param {String|Function} expected
- *        An expected string or validator function
- * @return a promise that resolves when the expected string has been found or
- * the validator function has returned true, rejects otherwise.
- */
-function waitForClipboard(setup, expected) {
-  let def = defer();
-  SimpleTest.waitForClipboard(expected, setup, def.resolve, def.reject);
-  return def.promise;
-}
-
-/**
  * Checks if document's active element is within the given element.
  * @param  {HTMLDocument}  doc document with active element in question
  * @param  {DOMNode}       container element tested on focus containment
@@ -660,8 +610,7 @@ var waitForTab = Task.async(function* () {
   info("Waiting for a tab to open");
   yield once(gBrowser.tabContainer, "TabOpen");
   let tab = gBrowser.selectedTab;
-  let browser = tab.linkedBrowser;
-  yield once(browser, "load", true);
+  yield BrowserTestUtils.browserLoaded(tab.linkedBrowser);
   info("The tab load completed");
   return tab;
 });

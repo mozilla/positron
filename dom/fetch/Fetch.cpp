@@ -34,6 +34,7 @@
 #include "mozilla/dom/Response.h"
 #include "mozilla/dom/ScriptSettings.h"
 #include "mozilla/dom/URLSearchParams.h"
+#include "mozilla/dom/workers/ServiceWorkerManager.h"
 #include "mozilla/Telemetry.h"
 
 #include "InternalRequest.h"
@@ -88,12 +89,17 @@ private:
 
   ~WorkerFetchResolver()
   {}
+
+  virtual void
+  FlushConsoleReport() override;
 };
 
 class MainThreadFetchResolver final : public FetchDriverObserver
 {
   RefPtr<Promise> mPromise;
   RefPtr<Response> mResponse;
+
+  nsCOMPtr<nsIDocument> mDocument;
 
   NS_DECL_OWNINGTHREAD
 public:
@@ -102,8 +108,23 @@ public:
   void
   OnResponseAvailableInternal(InternalResponse* aResponse) override;
 
+  void SetDocument(nsIDocument* aDocument)
+  {
+    mDocument = aDocument;
+  }
+
+  virtual void OnResponseEnd() override
+  {
+    FlushConsoleReport();
+  }
+
 private:
   ~MainThreadFetchResolver();
+
+  void FlushConsoleReport() override
+  {
+    mReporter->FlushConsoleReports(mDocument);
+  }
 };
 
 class MainThreadFetchRunnable : public Runnable
@@ -140,6 +161,11 @@ public:
       nsCOMPtr<nsILoadGroup> loadGroup = proxy->GetWorkerPrivate()->GetLoadGroup();
       MOZ_ASSERT(loadGroup);
       fetch = new FetchDriver(mRequest, principal, loadGroup);
+      nsAutoCString spec;
+      if (proxy->GetWorkerPrivate()->GetBaseURI()) {
+        proxy->GetWorkerPrivate()->GetBaseURI()->GetAsciiSpec(spec);
+      }
+      fetch->SetWorkerScript(spec);
     }
 
     // ...but release it before calling Fetch, because mResolver's callback can
@@ -216,6 +242,7 @@ FetchRequest(nsIGlobalObject* aGlobal, const RequestOrUSVString& aInput,
     RefPtr<MainThreadFetchResolver> resolver = new MainThreadFetchResolver(p);
     RefPtr<FetchDriver> fetch = new FetchDriver(r, principal, loadGroup);
     fetch->SetDocument(doc);
+    resolver->SetDocument(doc);
     aRv = fetch->Fetch(resolver);
     if (NS_WARN_IF(aRv.Failed())) {
       return nullptr;
@@ -238,7 +265,7 @@ FetchRequest(nsIGlobalObject* aGlobal, const RequestOrUSVString& aInput,
     }
 
     RefPtr<MainThreadFetchRunnable> run = new MainThreadFetchRunnable(resolver, r);
-    MOZ_ALWAYS_SUCCEEDS(NS_DispatchToMainThread(run));
+    worker->DispatchToMainThread(run.forget());
   }
 
   return p.forget();
@@ -401,6 +428,8 @@ WorkerFetchResolver::OnResponseEnd()
     return;
   }
 
+  FlushConsoleReport();
+
   RefPtr<WorkerFetchResponseEndRunnable> r =
     new WorkerFetchResponseEndRunnable(mPromiseProxy);
 
@@ -414,6 +443,44 @@ WorkerFetchResolver::OnResponseEnd()
       NS_WARNING("Failed to dispatch WorkerFetchResponseEndControlRunnable");
     }
   }
+}
+
+void
+WorkerFetchResolver::FlushConsoleReport()
+{
+  AssertIsOnMainThread();
+  MOZ_ASSERT(mPromiseProxy);
+
+  if(!mReporter) {
+    return;
+  }
+
+  workers::WorkerPrivate* worker = mPromiseProxy->GetWorkerPrivate();
+  if (!worker) {
+    mReporter->FlushConsoleReports((nsIDocument*)nullptr);
+    return;
+  }
+
+  if (worker->IsServiceWorker()) {
+    // Flush to service worker
+    RefPtr<ServiceWorkerManager> swm = ServiceWorkerManager::GetInstance();
+    if (!swm) {
+      mReporter->FlushConsoleReports((nsIDocument*)nullptr);
+      return;
+    }
+
+    swm->FlushReportsToAllClients(worker->WorkerName(), mReporter);
+    return;
+  }
+
+  if (worker->IsSharedWorker()) {
+    // Flush to shared worker
+    worker->FlushReportsToSharedWorkers(mReporter);
+    return;
+  }
+
+  // Flush to dedicated worker
+  mReporter->FlushConsoleReports(worker->GetDocument());
 }
 
 namespace {
@@ -965,7 +1032,12 @@ FetchBody<Derived>::BeginConsumeBody()
   }
 
   nsCOMPtr<nsIRunnable> r = new BeginConsumeBodyRunnable<Derived>(this);
-  nsresult rv = NS_DispatchToMainThread(r);
+  nsresult rv = NS_OK;
+  if (mWorkerPrivate) {
+    rv = mWorkerPrivate->DispatchToMainThread(r.forget());
+  } else {
+    rv = NS_DispatchToMainThread(r.forget());
+  }
   if (NS_WARN_IF(NS_FAILED(rv))) {
     ReleaseObject();
     return rv;
@@ -1049,7 +1121,7 @@ FetchBody<Derived>::ContinueConsumeBody(nsresult aStatus, uint32_t aResultLength
   MOZ_ASSERT(mConsumePromise);
   RefPtr<Promise> localPromise = mConsumePromise.forget();
 
-  RefPtr<Derived> kungfuDeathGrip = DerivedClass();
+  RefPtr<Derived> derivedClass = DerivedClass();
   ReleaseObject();
 
   if (NS_WARN_IF(NS_FAILED(aStatus))) {
@@ -1098,7 +1170,7 @@ FetchBody<Derived>::ContinueConsumeBody(nsresult aStatus, uint32_t aResultLength
   MOZ_ASSERT(aResult);
 
   AutoJSAPI jsapi;
-  if (!jsapi.Init(DerivedClass()->GetParentObject())) {
+  if (!jsapi.Init(derivedClass->GetParentObject())) {
     localPromise->MaybeReject(NS_ERROR_UNEXPECTED);
     return;
   }
@@ -1124,7 +1196,7 @@ FetchBody<Derived>::ContinueConsumeBody(nsresult aStatus, uint32_t aResultLength
     }
     case CONSUME_BLOB: {
       RefPtr<dom::Blob> blob = BodyUtil::ConsumeBlob(
-        DerivedClass()->GetParentObject(), NS_ConvertUTF8toUTF16(mMimeType),
+        derivedClass->GetParentObject(), NS_ConvertUTF8toUTF16(mMimeType),
         aResultLength, aResult, error);
       if (!error.Failed()) {
         localPromise->MaybeResolve(blob);
@@ -1139,7 +1211,7 @@ FetchBody<Derived>::ContinueConsumeBody(nsresult aStatus, uint32_t aResultLength
       autoFree.Reset();
 
       RefPtr<dom::FormData> fd = BodyUtil::ConsumeFormData(
-        DerivedClass()->GetParentObject(),
+        derivedClass->GetParentObject(),
         mMimeType, data, error);
       if (!error.Failed()) {
         localPromise->MaybeResolve(fd);

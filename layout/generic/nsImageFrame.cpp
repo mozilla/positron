@@ -718,7 +718,7 @@ nsImageFrame::MaybeDecodeForPredictedSize()
     return;  // We won't draw anything, so no point in decoding.
   }
 
-  if (!IsVisibleOrMayBecomeVisibleSoon()) {
+  if (GetVisibility() != Visibility::APPROXIMATELY_VISIBLE) {
     return;  // We're not visible, so don't decode.
   }
 
@@ -2019,11 +2019,15 @@ nsImageFrame::HandleEvent(nsPresContext* aPresContext,
           // mouse is over the border.
           if (p.x < 0) p.x = 0;
           if (p.y < 0) p.y = 0;
+
           nsAutoCString spec;
-          uri->GetSpec(spec);
+          nsresult rv = uri->GetSpec(spec);
+          NS_ENSURE_SUCCESS(rv, rv);
+
           spec += nsPrintfCString("?%d,%d", p.x, p.y);
-          uri->SetSpec(spec);                
-          
+          rv = uri->SetSpec(spec);
+          NS_ENSURE_SUCCESS(rv, rv);
+
           bool clicked = false;
           if (aEvent->mMessage == eMouseClick && !aEvent->DefaultPrevented()) {
             *aEventStatus = nsEventStatus_eConsumeDoDefault;
@@ -2089,29 +2093,23 @@ nsImageFrame::AttributeChanged(int32_t aNameSpaceID,
 }
 
 void
-nsImageFrame::OnVisibilityChange(Visibility aOldVisibility,
-                                 Visibility aNewVisibility,
+nsImageFrame::OnVisibilityChange(Visibility aNewVisibility,
                                  Maybe<OnNonvisible> aNonvisibleAction)
 {
   nsCOMPtr<nsIImageLoadingContent> imageLoader = do_QueryInterface(mContent);
   if (!imageLoader) {
     MOZ_ASSERT_UNREACHABLE("Should have an nsIImageLoadingContent");
-    nsAtomicContainerFrame::OnVisibilityChange(aOldVisibility, aNewVisibility,
-                                               aNonvisibleAction);
+    nsAtomicContainerFrame::OnVisibilityChange(aNewVisibility, aNonvisibleAction);
     return;
   }
 
-  imageLoader->OnVisibilityChange(aOldVisibility, aNewVisibility,
-                                  aNonvisibleAction);
+  imageLoader->OnVisibilityChange(aNewVisibility, aNonvisibleAction);
 
-  if (aOldVisibility == Visibility::NONVISIBLE &&
-        (aNewVisibility == Visibility::MAY_BECOME_VISIBLE ||
-         aNewVisibility == Visibility::IN_DISPLAYPORT)) {
+  if (aNewVisibility == Visibility::APPROXIMATELY_VISIBLE) {
     MaybeDecodeForPredictedSize();
   }
 
-  nsAtomicContainerFrame::OnVisibilityChange(aOldVisibility, aNewVisibility,
-                                             aNonvisibleAction);
+  nsAtomicContainerFrame::OnVisibilityChange(aNewVisibility, aNonvisibleAction);
 }
 
 nsIAtom*
@@ -2155,7 +2153,7 @@ nsIFrame::LogicalSides
 nsImageFrame::GetLogicalSkipSides(const ReflowInput* aReflowInput) const
 {
   if (MOZ_UNLIKELY(StyleBorder()->mBoxDecorationBreak ==
-                     NS_STYLE_BOX_DECORATION_BREAK_CLONE)) {
+                     StyleBoxDecorationBreak::Clone)) {
     return LogicalSides();
   }
   LogicalSides skip;

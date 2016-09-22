@@ -178,7 +178,7 @@ static uint32_t gNumberOfWidgetsNeedingEventThread = 0;
 - (CGFloat)cornerRadius;
 - (void)clearCorners;
 
--(void)setFullscreen:(BOOL)aFullscreen;
+-(void)setGLOpaque:(BOOL)aOpaque;
 
 // Overlay drawing functions for traditional CGContext drawing
 - (void)drawTitleString;
@@ -351,6 +351,7 @@ nsChildView::nsChildView() : nsBaseWidget()
 , mHasRoundedBottomCorners(false)
 , mIsCoveringTitlebar(false)
 , mIsFullscreen(false)
+, mIsOpaque(false)
 , mTitlebarCGContext(nullptr)
 , mBackingScaleFactor(0.0)
 , mVisible(false)
@@ -378,7 +379,9 @@ nsChildView::~nsChildView()
     childView->ResetParent();
   }
 
-  NS_WARN_IF_FALSE(mOnDestroyCalled, "nsChildView object destroyed without calling Destroy()");
+  NS_WARNING_ASSERTION(
+    mOnDestroyCalled,
+    "nsChildView object destroyed without calling Destroy()");
 
   DestroyCompositor();
 
@@ -770,27 +773,26 @@ nsChildView::SetParent(nsIWidget* aNewParent)
   NS_OBJC_END_TRY_ABORT_BLOCK_NSRESULT;
 }
 
-NS_IMETHODIMP
+void
 nsChildView::ReparentNativeWidget(nsIWidget* aNewParent)
 {
-  NS_OBJC_BEGIN_TRY_ABORT_BLOCK_NSRESULT;
+  NS_OBJC_BEGIN_TRY_ABORT_BLOCK;
 
   NS_PRECONDITION(aNewParent, "");
 
   if (mOnDestroyCalled)
-    return NS_OK;
+    return;
 
   NSView<mozView>* newParentView =
    (NSView<mozView>*)aNewParent->GetNativeData(NS_NATIVE_WIDGET);
-  NS_ENSURE_TRUE(newParentView, NS_ERROR_FAILURE);
+  NS_ENSURE_TRUE_VOID(newParentView);
 
   // we hold a ref to mView, so this is safe
   [mView removeFromSuperview];
   mParentView = newParentView;
   [mParentView addSubview:mView];
-  return NS_OK;
 
-  NS_OBJC_END_TRY_ABORT_BLOCK_NSRESULT;
+  NS_OBJC_END_TRY_ABORT_BLOCK;
 }
 
 void nsChildView::ResetParent()
@@ -947,12 +949,6 @@ nsChildView::RoundsWidgetCoordinatesTo()
     return 2;
   }
   return 1;
-}
-
-NS_IMETHODIMP nsChildView::ConstrainPosition(bool aAllowSlop,
-                                             int32_t *aX, int32_t *aY)
-{
-  return NS_OK;
 }
 
 // Move this component, aX and aY are in the parent widget coordinate system
@@ -1410,6 +1406,8 @@ nsresult nsChildView::ConfigureChildren(const nsTArray<Configuration>& aConfigur
 NS_IMETHODIMP nsChildView::DispatchEvent(WidgetGUIEvent* event,
                                          nsEventStatus& aStatus)
 {
+  RefPtr<nsChildView> kungFuDeathGrip(this);
+
 #ifdef DEBUG
   debug_DumpEvent(stdout, event->mWidget, event, "something", 0);
 #endif
@@ -1433,16 +1431,16 @@ NS_IMETHODIMP nsChildView::DispatchEvent(WidgetGUIEvent* event,
   // If the listener is NULL, check if the parent is a popup. If it is, then
   // this child is the popup content view attached to a popup. Get the
   // listener from the parent popup instead.
-  nsCOMPtr<nsIWidget> kungFuDeathGrip = do_QueryInterface(mParentWidget ? mParentWidget : this);
-  if (!listener && mParentWidget) {
-    if (mParentWidget->WindowType() == eWindowType_popup) {
+  nsCOMPtr<nsIWidget> parentWidget = mParentWidget;
+  if (!listener && parentWidget) {
+    if (parentWidget->WindowType() == eWindowType_popup) {
       // Check just in case event->mWidget isn't this widget
       if (event->mWidget) {
         listener = event->mWidget->GetWidgetListener();
       }
       if (!listener) {
-        event->mWidget = mParentWidget;
-        listener = mParentWidget->GetWidgetListener();
+        event->mWidget = parentWidget;
+        listener = parentWidget->GetWidgetListener();
       }
     }
   }
@@ -1620,13 +1618,6 @@ LayoutDeviceIntPoint nsChildView::WidgetToScreenOffset()
   NS_OBJC_END_TRY_ABORT_BLOCK_RETURN(LayoutDeviceIntPoint(0,0));
 }
 
-NS_IMETHODIMP nsChildView::CaptureRollupEvents(nsIRollupListener * aListener,
-                                               bool aDoCapture)
-{
-  // this never gets called, only top-level windows can be rollup widgets
-  return NS_OK;
-}
-
 NS_IMETHODIMP nsChildView::SetTitle(const nsAString& title)
 {
   // child views don't have titles
@@ -1719,11 +1710,11 @@ nsChildView::StartPluginIME(const mozilla::WidgetKeyboardEvent& aKeyboardEvent,
   return NS_OK;
 }
 
-NS_IMETHODIMP
+void
 nsChildView::SetPluginFocused(bool& aFocused)
 {
   if (aFocused == mPluginFocused) {
-    return NS_OK;
+    return;
   }
   if (!aFocused) {
     ComplexTextInputPanel* ctiPanel =
@@ -1733,7 +1724,6 @@ nsChildView::SetPluginFocused(bool& aFocused)
     }
   }
   mPluginFocused = aFocused;
-  return NS_OK;
 }
 
 NS_IMETHODIMP_(void)
@@ -1995,7 +1985,7 @@ nsChildView::PrepareWindowEffects()
 {
   NS_OBJC_BEGIN_TRY_ABORT_BLOCK;
 
-  bool isFullscreen;
+  bool canBeOpaque;
   {
     MutexAutoLock lock(mEffectsLock);
     mShowsResizeIndicator = ShowsResizeIndicator(&mResizeIndicatorRect);
@@ -2004,7 +1994,13 @@ nsChildView::PrepareWindowEffects()
     mDevPixelCornerRadius = cornerRadius * BackingScaleFactor();
     mIsCoveringTitlebar = [(ChildView*)mView isCoveringTitlebar];
     NSInteger styleMask = [[mView window] styleMask];
-    isFullscreen = (styleMask & NSFullScreenWindowMask) || !(styleMask & NSTitledWindowMask);
+    bool wasFullscreen = mIsFullscreen;
+    mIsFullscreen = (styleMask & NSFullScreenWindowMask) || !(styleMask & NSTitledWindowMask);
+
+    canBeOpaque = mIsFullscreen && wasFullscreen;
+    if (canBeOpaque && VibrancyManager::SystemSupportsVibrancy()) {
+      canBeOpaque = !EnsureVibrancyManager().HasVibrantRegions();
+    }
     if (mIsCoveringTitlebar) {
       mTitlebarRect = RectContainingTitlebarControls();
       UpdateTitlebarCGContext();
@@ -2012,9 +2008,9 @@ nsChildView::PrepareWindowEffects()
   }
 
   // If we've just transitioned into or out of full screen then update the opacity on our GLContext.
-  if (isFullscreen != mIsFullscreen) {
-    mIsFullscreen = isFullscreen;
-    [(ChildView*)mView setFullscreen:isFullscreen];
+  if (canBeOpaque != mIsOpaque) {
+    mIsOpaque = canBeOpaque;
+    [(ChildView*)mView setGLOpaque:canBeOpaque];
   }
 
   NS_OBJC_END_TRY_ABORT_BLOCK;
@@ -3840,12 +3836,12 @@ NSEvent* gLastDragMouseDownEvent = nil;
   return [frameView roundedCornerRadius];
 }
 
--(void)setFullscreen:(BOOL)aFullscreen
+-(void)setGLOpaque:(BOOL)aOpaque
 {
   CGLLockContext((CGLContextObj)[mGLContext CGLContextObj]);
   // Make the context opaque for fullscreen (since it performs better), and transparent
   // for windowed (since we need it for rounded corners).
-  GLint opaque = aFullscreen ? 1 : 0;
+  GLint opaque = aOpaque ? 1 : 0;
   [mGLContext setValues:&opaque forParameter:NSOpenGLCPSurfaceOpacity];
   CGLUnlockContext((CGLContextObj)[mGLContext CGLContextObj]);
 }
@@ -6072,8 +6068,8 @@ nsChildView::GetSelectionAsPlaintext(nsAString& aResult)
   id<mozAccessible> nativeAccessible = nil;
 
   nsAutoRetainCocoaObject kungFuDeathGrip(self);
-  nsCOMPtr<nsIWidget> kungFuDeathGrip2(mGeckoChild);
-  RefPtr<a11y::Accessible> accessible = mGeckoChild->GetDocumentAccessible();
+  RefPtr<nsChildView> geckoChild(mGeckoChild);
+  RefPtr<a11y::Accessible> accessible = geckoChild->GetDocumentAccessible();
   if (!accessible)
     return nil;
 

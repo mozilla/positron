@@ -70,7 +70,7 @@
 #include "mozilla/dom/HTMLVideoElement.h"
 #include "mozilla/dom/HTMLImageElement.h"
 #include "mozilla/dom/DOMRect.h"
-#include "mozilla/dom/KeyframeEffect.h"
+#include "mozilla/dom/KeyframeEffectReadOnly.h"
 #include "mozilla/layers/APZCCallbackHelper.h"
 #include "imgIRequest.h"
 #include "nsIImageLoadingContent.h"
@@ -1404,7 +1404,7 @@ nsLayoutUtils::GetChildListNameFor(nsIFrame* aChildFrame)
         id = nsIFrame::kAbsoluteList;
       }
 #ifdef MOZ_XUL
-    } else if (NS_STYLE_DISPLAY_POPUP == disp->mDisplay) {
+    } else if (StyleDisplay::Popup == disp->mDisplay) {
       // Out-of-flows that are DISPLAY_POPUP must be kids of the root popup set
 #ifdef DEBUG
       nsIFrame* parent = aChildFrame->GetParent();
@@ -2120,14 +2120,23 @@ nsLayoutUtils::GetScrolledRect(nsIFrame* aScrolledFrame,
                                const nsSize& aScrollPortSize,
                                uint8_t aDirection)
 {
+  WritingMode wm = aScrolledFrame->GetWritingMode();
+  // Potentially override the frame's direction to use the direction found
+  // by ScrollFrameHelper::GetScrolledFrameDir()
+  wm.SetDirectionFromBidiLevel(aDirection == NS_STYLE_DIRECTION_RTL ? 1 : 0);
+
   nscoord x1 = aScrolledFrameOverflowArea.x,
           x2 = aScrolledFrameOverflowArea.XMost(),
           y1 = aScrolledFrameOverflowArea.y,
           y2 = aScrolledFrameOverflowArea.YMost();
-  if (y1 < 0) {
-    y1 = 0;
-  }
-  if (aDirection != NS_STYLE_DIRECTION_RTL) {
+
+  bool horizontal = !wm.IsVertical();
+
+  // Clamp the horizontal start-edge (x1 or x2, depending whether the logical
+  // axis that corresponds to horizontal progresses from L-R or R-L).
+  // In horizontal writing mode, we need to check IsInlineReversed() to see
+  // which side to clamp; in vertical mode, it depends on the block direction.
+  if ((horizontal && !wm.IsInlineReversed()) || wm.IsVerticalLR()) {
     if (x1 < 0) {
       x1 = 0;
     }
@@ -2135,15 +2144,34 @@ nsLayoutUtils::GetScrolledRect(nsIFrame* aScrolledFrame,
     if (x2 > aScrollPortSize.width) {
       x2 = aScrollPortSize.width;
     }
-    // When the scrolled frame chooses a size larger than its available width (because
-    // its padding alone is larger than the available width), we need to keep the
-    // start-edge of the scroll frame anchored to the start-edge of the scrollport.
+    // When the scrolled frame chooses a size larger than its available width
+    // (because its padding alone is larger than the available width), we need
+    // to keep the start-edge of the scroll frame anchored to the start-edge of
+    // the scrollport.
     // When the scrolled frame is RTL, this means moving it in our left-based
     // coordinate system, so we need to compensate for its extra width here by
     // effectively repositioning the frame.
-    nscoord extraWidth = std::max(0, aScrolledFrame->GetSize().width - aScrollPortSize.width);
+    nscoord extraWidth =
+      std::max(0, aScrolledFrame->GetSize().width - aScrollPortSize.width);
     x2 += extraWidth;
   }
+
+  // Similarly, clamp the vertical start-edge.
+  // In horizontal writing mode, the block direction is always top-to-bottom;
+  // in vertical writing mode, we need to check IsInlineReversed().
+  if (horizontal || !wm.IsInlineReversed()) {
+    if (y1 < 0) {
+      y1 = 0;
+    }
+  } else {
+    if (y2 > aScrollPortSize.height) {
+      y2 = aScrollPortSize.height;
+    }
+    nscoord extraHeight =
+      std::max(0, aScrolledFrame->GetSize().height - aScrollPortSize.height);
+    y2 += extraHeight;
+  }
+
   return nsRect(x1, y1, x2 - x1, y2 - y1);
 }
 
@@ -2688,7 +2716,7 @@ nsLayoutUtils::TransformPoints(nsIFrame* aFromFrame, nsIFrame* aToFrame,
     // What should the behaviour be if some of the points aren't invertible
     // and others are? Just assume all points are for now.
     Point toDevPixels = downToDest.ProjectPoint(
-        (upToAncestor * Point(devPixels.x, devPixels.y))).As2DPoint();
+        (upToAncestor.TransformPoint(Point(devPixels.x, devPixels.y)))).As2DPoint();
     // Divide here so that when the devPixelsPerCSSPixels are the same, we get the correct
     // answer instead of some inaccuracy multiplying a number by its reciprocal.
     aPoints[i] = LayoutDevicePoint(toDevPixels.x, toDevPixels.y) /
@@ -2717,8 +2745,8 @@ nsLayoutUtils::TransformPoint(nsIFrame* aFromFrame, nsIFrame* aToFrame,
   float devPixelsPerAppUnitToFrame =
     1.0f / aToFrame->PresContext()->AppUnitsPerDevPixel();
   Point4D toDevPixels = downToDest.ProjectPoint(
-      upToAncestor * Point(aPoint.x * devPixelsPerAppUnitFromFrame,
-                           aPoint.y * devPixelsPerAppUnitFromFrame));
+      upToAncestor.TransformPoint(Point(aPoint.x * devPixelsPerAppUnitFromFrame,
+                                        aPoint.y * devPixelsPerAppUnitFromFrame)));
   if (!toDevPixels.HasPositiveWCoord()) {
     // Not strictly true, but we failed to get a valid point in this
     // coordinate space.
@@ -2899,12 +2927,12 @@ TransformGfxRectToAncestor(nsIFrame *aFrame,
       // and put it in the cache, if provided
       *aMatrixCache = Some(ctm);
     }
-    // If we computed it, also fill out the axis-alignment flag
-    if (aPreservesAxisAlignedRectangles) {
-      Matrix matrix2d;
-      *aPreservesAxisAlignedRectangles =
-        ctm.Is2D(&matrix2d) && matrix2d.PreservesAxisAlignedRectangles();
-    }
+  }
+  // Fill out the axis-alignment flag
+  if (aPreservesAxisAlignedRectangles) {
+    Matrix matrix2d;
+    *aPreservesAxisAlignedRectangles =
+      ctm.Is2D(&matrix2d) && matrix2d.PreservesAxisAlignedRectangles();
   }
   Rect maxBounds = Rect(-std::numeric_limits<float>::max() * 0.5,
                         -std::numeric_limits<float>::max() * 0.5,
@@ -3050,31 +3078,34 @@ nsLayoutUtils::TranslateViewToWidget(nsPresContext* aPresContext,
 }
 
 // Combine aNewBreakType with aOrigBreakType, but limit the break types
-// to NS_STYLE_CLEAR_LEFT, RIGHT, BOTH.
-uint8_t
-nsLayoutUtils::CombineBreakType(uint8_t aOrigBreakType,
-                                uint8_t aNewBreakType)
+// to StyleClear::Left, Right, Both.
+StyleClear
+nsLayoutUtils::CombineBreakType(StyleClear aOrigBreakType,
+                                StyleClear aNewBreakType)
 {
-  uint8_t breakType = aOrigBreakType;
+  StyleClear breakType = aOrigBreakType;
   switch(breakType) {
-  case NS_STYLE_CLEAR_LEFT:
-    if (NS_STYLE_CLEAR_RIGHT == aNewBreakType ||
-        NS_STYLE_CLEAR_BOTH == aNewBreakType) {
-      breakType = NS_STYLE_CLEAR_BOTH;
-    }
-    break;
-  case NS_STYLE_CLEAR_RIGHT:
-    if (NS_STYLE_CLEAR_LEFT == aNewBreakType ||
-        NS_STYLE_CLEAR_BOTH == aNewBreakType) {
-      breakType = NS_STYLE_CLEAR_BOTH;
-    }
-    break;
-  case NS_STYLE_CLEAR_NONE:
-    if (NS_STYLE_CLEAR_LEFT == aNewBreakType ||
-        NS_STYLE_CLEAR_RIGHT == aNewBreakType ||
-        NS_STYLE_CLEAR_BOTH == aNewBreakType) {
-      breakType = aNewBreakType;
-    }
+    case StyleClear::Left:
+      if (StyleClear::Right == aNewBreakType ||
+          StyleClear::Both == aNewBreakType) {
+        breakType = StyleClear::Both;
+      }
+      break;
+    case StyleClear::Right:
+      if (StyleClear::Left == aNewBreakType ||
+          StyleClear::Both == aNewBreakType) {
+        breakType = StyleClear::Both;
+      }
+      break;
+    case StyleClear::None:
+      if (StyleClear::Left == aNewBreakType ||
+          StyleClear::Right == aNewBreakType ||
+          StyleClear::Both == aNewBreakType) {
+        breakType = aNewBreakType;
+      }
+      break;
+    default:
+      break;
   }
   return breakType;
 }
@@ -5160,10 +5191,10 @@ nsLayoutUtils::MinSizeContributionForAxis(PhysicalAxis        aAxis,
 nsLayoutUtils::ComputeCBDependentValue(nscoord aPercentBasis,
                                        const nsStyleCoord& aCoord)
 {
-  NS_WARN_IF_FALSE(aPercentBasis != NS_UNCONSTRAINEDSIZE,
-                   "have unconstrained width or height; this should only "
-                   "result from very large sizes, not attempts at intrinsic "
-                   "size calculation");
+  NS_WARNING_ASSERTION(
+    aPercentBasis != NS_UNCONSTRAINEDSIZE,
+    "have unconstrained width or height; this should only result from very "
+    "large sizes, not attempts at intrinsic size calculation");
 
   if (aCoord.IsCoordPercentCalcUnit()) {
     return nsRuleNode::ComputeCoordPercentCalc(aCoord, aPercentBasis);
@@ -6699,30 +6730,7 @@ DrawImageInternal(gfxContext&            aContext,
 
     RefPtr<gfxContext> destCtx = &aContext;
 
-    IntRect tmpDTRect;
-
-    if (destCtx->CurrentOp() == CompositionOp::OP_OVER) {
-      destCtx->SetMatrix(params.imageSpaceToDeviceSpace);
-    } else {
-      // We need a temporary DrawTarget to composite correctly
-      Rect imageRect = ToRect(params.imageSpaceToDeviceSpace.TransformBounds(params.region.Rect()));
-      imageRect.ToIntRect(&tmpDTRect);
-
-      RefPtr<DrawTarget> tempDT =
-        destCtx->GetDrawTarget()->CreateSimilarDrawTarget(tmpDTRect.Size(),
-                                                          SurfaceFormat::B8G8R8A8);
-      if (!tempDT || !tempDT->IsValid()) {
-        gfxDevCrash(LogReason::InvalidContext) << "NonOP_OVER context problem " << gfx::hexa(tempDT);
-        return DrawResult::TEMPORARY_ERROR;
-      }
-      tempDT->SetTransform(ToMatrix(params.imageSpaceToDeviceSpace).
-                             PostTranslate(-tmpDTRect.TopLeft()));
-      destCtx = gfxContext::CreatePreservingTransformOrNull(tempDT);
-      if (!destCtx) {
-        gfxDevCrash(LogReason::InvalidContext) << "NonOP_OVER context problem " << gfx::hexa(tempDT);
-        return result;
-      }
-    }
+    destCtx->SetMatrix(params.imageSpaceToDeviceSpace);
 
     Maybe<SVGImageContext> svgContext = ToMaybe(aSVGContext);
     if (!svgContext) {
@@ -6734,17 +6742,6 @@ DrawImageInternal(gfxContext&            aContext,
                           imgIContainer::FRAME_CURRENT, aSamplingFilter,
                           svgContext, aImageFlags);
 
-    if (!tmpDTRect.IsEmpty()) {
-      // Snapshot the temporary DrawTarget and composite the result
-      DrawTarget* dt = aContext.GetDrawTarget();
-      RefPtr<SourceSurface> surf = destCtx->GetDrawTarget()->Snapshot();
-
-      dt->SetTransform(Matrix::Translation(-aContext.GetDeviceOffset()));
-      dt->DrawSurface(surf, Rect(tmpDTRect.x, tmpDTRect.y, tmpDTRect.width, tmpDTRect.height),
-                      Rect(0, 0, tmpDTRect.width, tmpDTRect.height),
-                      DrawSurfaceOptions(SamplingFilter::POINT),
-                      DrawOptions(1.0f, aContext.CurrentOp()));
-    }
   }
 
   return result;
@@ -7337,7 +7334,19 @@ nsLayoutUtils::SurfaceFromElement(nsIImageLoadingContent* aElement,
   nsCOMPtr<imgIRequest> imgRequest;
   rv = aElement->GetRequest(nsIImageLoadingContent::CURRENT_REQUEST,
                             getter_AddRefs(imgRequest));
-  if (NS_FAILED(rv) || !imgRequest) {
+  if (NS_FAILED(rv)) {
+    return result;
+  }
+
+  if (!imgRequest) {
+    // There's no image request. This is either because a request for
+    // a non-empty URI failed, or the URI is the empty string.
+    nsCOMPtr<nsIURI> currentURI;
+    aElement->GetCurrentURI(getter_AddRefs(currentURI));
+    if (!currentURI) {
+      // Treat the empty URI as available instead of broken state.
+      result.mHasSize = true;
+    }
     return result;
   }
 
@@ -7489,7 +7498,9 @@ nsLayoutUtils::SurfaceFromElement(HTMLVideoElement* aElement,
 {
   SurfaceFromElementResult result;
 
-  NS_WARN_IF_FALSE((aSurfaceFlags & SFE_PREFER_NO_PREMULTIPLY_ALPHA) == 0, "We can't support non-premultiplied alpha for video!");
+  NS_WARNING_ASSERTION(
+    (aSurfaceFlags & SFE_PREFER_NO_PREMULTIPLY_ALPHA) == 0,
+    "We can't support non-premultiplied alpha for video!");
 
 #ifdef MOZ_EME
   if (aElement->ContainsRestrictedContent()) {
@@ -9068,8 +9079,8 @@ nsLayoutUtils::GetTouchActionFromFrame(nsIFrame* aFrame)
 
   const nsStyleDisplay* disp = aFrame->StyleDisplay();
   bool isTableElement = disp->IsInnerTableStyle() &&
-    disp->mDisplay != NS_STYLE_DISPLAY_TABLE_CELL &&
-    disp->mDisplay != NS_STYLE_DISPLAY_TABLE_CAPTION;
+    disp->mDisplay != StyleDisplay::TableCell &&
+    disp->mDisplay != StyleDisplay::TableCaption;
   if (isTableElement) {
     return NS_STYLE_TOUCH_ACTION_AUTO;
   }

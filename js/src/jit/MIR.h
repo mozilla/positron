@@ -6584,6 +6584,16 @@ class MRandom : public MNullaryInstruction
 
     void computeRange(TempAllocator& alloc) override;
 
+    MOZ_MUST_USE bool writeRecoverData(CompactBufferWriter& writer) const override;
+
+    bool canRecoverOnBailout() const override {
+#ifdef JS_MORE_DETERMINISTIC
+        return false;
+#else
+        return true;
+#endif
+    }
+
     ALLOW_CLONE(MRandom)
 };
 
@@ -7727,29 +7737,28 @@ class MInterruptCheck : public MNullaryInstruction
     }
 };
 
-// Check whether we need to fire the interrupt handler at loop headers and
-// function prologues in asm.js. Generated only if we can't use implicit
-// interrupt checks with signal handlers.
-class MAsmJSInterruptCheck
-  : public MNullaryInstruction
-{
-  public:
-    INSTRUCTION_HEADER(AsmJSInterruptCheck)
-    TRIVIAL_NEW_WRAPPERS
-};
+// Directly jumps to the indicated trap, leaving Wasm code and reporting a
+// runtime error.
 
-// Directly jumps to the unreachable trap handler.
-class MAsmThrowUnreachable
+class MWasmTrap
   : public MAryControlInstruction<0, 0>,
     public NoTypePolicy::Data
 {
+    wasm::Trap trap_;
+
+    explicit MWasmTrap(wasm::Trap trap)
+      : trap_(trap)
+    {}
+
   public:
-    INSTRUCTION_HEADER(AsmThrowUnreachable)
+    INSTRUCTION_HEADER(WasmTrap)
     TRIVIAL_NEW_WRAPPERS
 
     AliasSet getAliasSet() const override {
         return AliasSet::None();
     }
+
+    wasm::Trap trap() const { return trap_; }
 };
 
 // Checks if a value is JS_UNINITIALIZED_LEXICAL, bailout out if so, leaving
@@ -9379,6 +9388,50 @@ class MStoreElementHole
 
     ALLOW_CLONE(MStoreElementHole)
 };
+
+// Try to store a value to a dense array slots vector. May fail due to the object being frozen.
+// Cannot be used on an object that has extra indexed properties.
+class MFallibleStoreElement
+  : public MAryInstruction<4>,
+    public MStoreElementCommon,
+    public MixPolicy<SingleObjectPolicy, NoFloatPolicy<3> >::Data
+{
+    JSValueType unboxedType_;
+    bool strict_;
+
+    MFallibleStoreElement(MDefinition* object, MDefinition* elements,
+                          MDefinition* index, MDefinition* value,
+                          JSValueType unboxedType, bool strict)
+      : unboxedType_(unboxedType)
+    {
+        initOperand(0, object);
+        initOperand(1, elements);
+        initOperand(2, index);
+        initOperand(3, value);
+        strict_ = strict;
+        MOZ_ASSERT(elements->type() == MIRType::Elements);
+        MOZ_ASSERT(index->type() == MIRType::Int32);
+    }
+
+  public:
+    INSTRUCTION_HEADER(FallibleStoreElement)
+    TRIVIAL_NEW_WRAPPERS
+    NAMED_OPERANDS((0, object), (1, elements), (2, index), (3, value))
+
+    JSValueType unboxedType() const {
+        return unboxedType_;
+    }
+    AliasSet getAliasSet() const override {
+        return AliasSet::Store(AliasSet::ObjectFields |
+                               AliasSet::BoxedOrUnboxedElements(unboxedType()));
+    }
+    bool strict() const {
+        return strict_;
+    }
+
+    ALLOW_CLONE(MFallibleStoreElement)
+};
+
 
 // Store an unboxed object or null pointer to a v\ector.
 class MStoreUnboxedObjectOrNull
@@ -11913,7 +11966,7 @@ class MRound
 
 class MIteratorStart
   : public MUnaryInstruction,
-    public SingleObjectPolicy::Data
+    public BoxExceptPolicy<0, MIRType::Object>::Data
 {
     uint8_t flags_;
 
@@ -13171,81 +13224,22 @@ class MAsmJSNeg
     }
 };
 
-class MWasmMemoryAccess
-{
-    uint32_t offset_;
-    uint32_t align_;
-    Scalar::Type accessType_ : 8;
-    bool needsBoundsCheck_;
-    unsigned numSimdElems_;
-    MemoryBarrierBits barrierBefore_;
-    MemoryBarrierBits barrierAfter_;
-
-  public:
-    explicit MWasmMemoryAccess(Scalar::Type accessType, uint32_t align, uint32_t offset,
-                               unsigned numSimdElems = 0,
-                               MemoryBarrierBits barrierBefore = MembarNobits,
-                               MemoryBarrierBits barrierAfter = MembarNobits)
-      : offset_(offset),
-        align_(align),
-        accessType_(accessType),
-        needsBoundsCheck_(true),
-        numSimdElems_(numSimdElems),
-        barrierBefore_(barrierBefore),
-        barrierAfter_(barrierAfter)
-    {
-        MOZ_ASSERT(numSimdElems <= ScalarTypeToLength(accessType));
-        MOZ_ASSERT(mozilla::IsPowerOfTwo(align));
-    }
-
-    uint32_t offset() const { return offset_; }
-    uint32_t endOffset() const { return offset() + byteSize(); }
-    uint32_t align() const { return align_; }
-    Scalar::Type accessType() const { return accessType_; }
-    unsigned byteSize() const {
-        return Scalar::isSimdType(accessType())
-               ? Scalar::scalarByteSize(accessType()) * numSimdElems()
-               : TypedArrayElemSize(accessType());
-    }
-    bool needsBoundsCheck() const { return needsBoundsCheck_; }
-    unsigned numSimdElems() const { MOZ_ASSERT(Scalar::isSimdType(accessType_)); return numSimdElems_; }
-    MemoryBarrierBits barrierBefore() const { return barrierBefore_; }
-    MemoryBarrierBits barrierAfter() const { return barrierAfter_; }
-    bool isAtomicAccess() const { return (barrierBefore_ | barrierAfter_) != MembarNobits; }
-    bool isUnaligned() const { return align() && align() < byteSize(); }
-
-    void removeBoundsCheck() { needsBoundsCheck_ = false; }
-    void setOffset(uint32_t o) { offset_ = o; }
-};
-
 class MWasmBoundsCheck
   : public MUnaryInstruction,
-    public MWasmMemoryAccess,
     public NoTypePolicy::Data
 {
     bool redundant_;
 
-    explicit MWasmBoundsCheck(MDefinition* index, const MWasmMemoryAccess& access)
+    explicit MWasmBoundsCheck(MDefinition* index)
       : MUnaryInstruction(index),
-        MWasmMemoryAccess(access),
         redundant_(false)
     {
-        setMovable();
         setGuard(); // Effectful: throws for OOB.
     }
 
   public:
     INSTRUCTION_HEADER(WasmBoundsCheck)
     TRIVIAL_NEW_WRAPPERS
-
-    bool congruentTo(const MDefinition* ins) const override {
-        if (!congruentIfOperandsEqual(ins))
-            return false;
-        const MWasmBoundsCheck* other = ins->toWasmBoundsCheck();
-        return accessType() == other->accessType() &&
-               offset() == other->offset() &&
-               align() == other->align();
-    }
 
     AliasSet getAliasSet() const override {
         return AliasSet::None();
@@ -13260,21 +13254,90 @@ class MWasmBoundsCheck
     }
 };
 
+class MWasmAddOffset
+  : public MUnaryInstruction,
+    public NoTypePolicy::Data
+{
+    uint32_t offset_;
+
+    MWasmAddOffset(MDefinition* base, uint32_t offset)
+      : MUnaryInstruction(base),
+        offset_(offset)
+    {
+        setGuard();
+        setResultType(MIRType::Int32);
+    }
+
+  public:
+    INSTRUCTION_HEADER(WasmAddOffset)
+    TRIVIAL_NEW_WRAPPERS
+    NAMED_OPERANDS((0, base))
+
+    MDefinition* foldsTo(TempAllocator& alloc) override;
+
+    AliasSet getAliasSet() const override {
+        return AliasSet::None();
+    }
+
+    uint32_t offset() const {
+        return offset_;
+    }
+};
+
+class MWasmMemoryAccess
+{
+    uint32_t offset_;
+    uint32_t align_;
+    Scalar::Type accessType_ : 8;
+    unsigned numSimdElems_;
+    MemoryBarrierBits barrierBefore_;
+    MemoryBarrierBits barrierAfter_;
+
+  public:
+    explicit MWasmMemoryAccess(Scalar::Type accessType, uint32_t align, uint32_t offset,
+                               unsigned numSimdElems = 0,
+                               MemoryBarrierBits barrierBefore = MembarNobits,
+                               MemoryBarrierBits barrierAfter = MembarNobits)
+      : offset_(offset),
+        align_(align),
+        accessType_(accessType),
+        numSimdElems_(numSimdElems),
+        barrierBefore_(barrierBefore),
+        barrierAfter_(barrierAfter)
+    {
+        MOZ_ASSERT(numSimdElems <= ScalarTypeToLength(accessType));
+        MOZ_ASSERT(mozilla::IsPowerOfTwo(align));
+    }
+
+    uint32_t offset() const { return offset_; }
+    uint32_t align() const { return align_; }
+    Scalar::Type accessType() const { return accessType_; }
+    unsigned byteSize() const {
+        return Scalar::isSimdType(accessType())
+               ? Scalar::scalarByteSize(accessType()) * numSimdElems()
+               : TypedArrayElemSize(accessType());
+    }
+    unsigned numSimdElems() const { return numSimdElems_; }
+    MemoryBarrierBits barrierBefore() const { return barrierBefore_; }
+    MemoryBarrierBits barrierAfter() const { return barrierAfter_; }
+    bool isAtomicAccess() const { return (barrierBefore_ | barrierAfter_) != MembarNobits; }
+    bool isSimdAccess() const { return Scalar::isSimdType(accessType_); }
+    bool isUnaligned() const { return align() && align() < byteSize(); }
+
+    void clearOffset() { offset_ = 0; }
+};
+
 class MWasmLoad
   : public MUnaryInstruction,
     public MWasmMemoryAccess,
     public NoTypePolicy::Data
 {
-    MWasmLoad(MDefinition* base, const MWasmMemoryAccess& access, bool isInt64)
+    MWasmLoad(MDefinition* base, const MWasmMemoryAccess& access, MIRType resultType)
       : MUnaryInstruction(base),
         MWasmMemoryAccess(access)
     {
         setGuard();
-        MOZ_ASSERT(access.accessType() != Scalar::Uint8Clamped, "unexpected load heap in wasm");
-        if (isInt64)
-            setResultType(MIRType::Int64);
-        else
-            setResultType(ScalarTypeToMIRType(access.accessType()));
+        setResultType(resultType);
     }
 
   public:
@@ -13313,22 +13376,42 @@ class MWasmStore
     }
 };
 
+class MAsmJSMemoryAccess
+{
+    uint32_t offset_;
+    Scalar::Type accessType_;
+    bool needsBoundsCheck_;
+
+  public:
+    explicit MAsmJSMemoryAccess(Scalar::Type accessType)
+      : offset_(0),
+        accessType_(accessType),
+        needsBoundsCheck_(true)
+    {
+        MOZ_ASSERT(accessType != Scalar::Uint8Clamped);
+        MOZ_ASSERT(!Scalar::isSimdType(accessType));
+    }
+
+    uint32_t offset() const { return offset_; }
+    uint32_t endOffset() const { return offset() + byteSize(); }
+    Scalar::Type accessType() const { return accessType_; }
+    unsigned byteSize() const { return TypedArrayElemSize(accessType()); }
+    bool needsBoundsCheck() const { return needsBoundsCheck_; }
+
+    void removeBoundsCheck() { needsBoundsCheck_ = false; }
+    void setOffset(uint32_t o) { offset_ = o; }
+};
+
 class MAsmJSLoadHeap
   : public MUnaryInstruction,
-    public MWasmMemoryAccess,
+    public MAsmJSMemoryAccess,
     public NoTypePolicy::Data
 {
-    MAsmJSLoadHeap(MDefinition* base, const MWasmMemoryAccess& access)
+    MAsmJSLoadHeap(MDefinition* base, Scalar::Type accessType)
       : MUnaryInstruction(base),
-        MWasmMemoryAccess(access)
+        MAsmJSMemoryAccess(accessType)
     {
-        if (access.barrierBefore() | access.barrierAfter())
-            setGuard(); // Not removable
-        else
-            setMovable();
-
-        MOZ_ASSERT(access.accessType() != Scalar::Uint8Clamped, "unexpected load heap in asm.js");
-        setResultType(ScalarTypeToMIRType(access.accessType()));
+        setResultType(ScalarTypeToMIRType(accessType));
     }
 
   public:
@@ -13340,10 +13423,6 @@ class MAsmJSLoadHeap
 
     bool congruentTo(const MDefinition* ins) const override;
     AliasSet getAliasSet() const override {
-        // When a barrier is needed make the instruction effectful by
-        // giving it a "store" effect.
-        if (isAtomicAccess())
-            return AliasSet::Store(AliasSet::AsmJSHeap);
         return AliasSet::Load(AliasSet::AsmJSHeap);
     }
     AliasType mightAlias(const MDefinition* def) const override;
@@ -13351,16 +13430,13 @@ class MAsmJSLoadHeap
 
 class MAsmJSStoreHeap
   : public MBinaryInstruction,
-    public MWasmMemoryAccess,
+    public MAsmJSMemoryAccess,
     public NoTypePolicy::Data
 {
-    MAsmJSStoreHeap(MDefinition* base, const MWasmMemoryAccess& access, MDefinition* v)
+    MAsmJSStoreHeap(MDefinition* base, Scalar::Type accessType, MDefinition* v)
       : MBinaryInstruction(base, v),
-        MWasmMemoryAccess(access)
-    {
-        if (access.barrierBefore() | access.barrierAfter())
-            setGuard(); // Not removable
-    }
+        MAsmJSMemoryAccess(accessType)
+    {}
 
   public:
     INSTRUCTION_HEADER(AsmJSStoreHeap)
@@ -13590,6 +13666,7 @@ class MWasmCall final
     FixedList<AnyRegister> argRegs_;
     uint32_t spIncrement_;
     uint32_t tlsStackOffset_;
+    ABIArg instanceArg_;
 
     MWasmCall(const wasm::CallSiteDesc& desc, const wasm::CalleeDesc& callee, uint32_t spIncrement,
               uint32_t tlsStackOffset)
@@ -13611,10 +13688,23 @@ class MWasmCall final
 
     static const uint32_t DontSaveTls = UINT32_MAX;
 
-    static MWasmCall* New(TempAllocator& alloc, const wasm::CallSiteDesc& desc,
-                          const wasm::CalleeDesc& callee, const Args& args, MIRType resultType,
-                          uint32_t spIncrement, uint32_t tlsStackOffset,
+    static MWasmCall* New(TempAllocator& alloc,
+                          const wasm::CallSiteDesc& desc,
+                          const wasm::CalleeDesc& callee,
+                          const Args& args,
+                          MIRType resultType,
+                          uint32_t spIncrement,
+                          uint32_t tlsStackOffset,
                           MDefinition* tableIndex = nullptr);
+
+    static MWasmCall* NewBuiltinInstanceMethodCall(TempAllocator& alloc,
+                                                   const wasm::CallSiteDesc& desc,
+                                                   const wasm::SymbolicAddress builtin,
+                                                   const ABIArg& instanceArg,
+                                                   const Args& args,
+                                                   MIRType resultType,
+                                                   uint32_t spIncrement,
+                                                   uint32_t tlsStackOffset);
 
     size_t numArgs() const {
         return argRegs_.length();
@@ -13642,6 +13732,10 @@ class MWasmCall final
 
     bool possiblyCalls() const override {
         return true;
+    }
+
+    const ABIArg& instanceArg() const {
+        return instanceArg_;
     }
 };
 
@@ -13857,6 +13951,7 @@ bool ElementAccessIsTypedArray(CompilerConstraintList* constraints,
                                Scalar::Type* arrayType);
 bool ElementAccessIsPacked(CompilerConstraintList* constraints, MDefinition* obj);
 bool ElementAccessMightBeCopyOnWrite(CompilerConstraintList* constraints, MDefinition* obj);
+bool ElementAccessMightBeFrozen(CompilerConstraintList* constraints, MDefinition* obj);
 bool ElementAccessHasExtraIndexedProperty(IonBuilder* builder, MDefinition* obj);
 MIRType DenseNativeElementType(CompilerConstraintList* constraints, MDefinition* obj);
 BarrierKind PropertyReadNeedsTypeBarrier(JSContext* propertycx,

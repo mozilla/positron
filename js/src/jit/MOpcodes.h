@@ -212,6 +212,7 @@ namespace jit {
     _(LoadUnboxedString)                                                    \
     _(StoreElement)                                                         \
     _(StoreElementHole)                                                     \
+    _(FallibleStoreElement)                                                 \
     _(StoreUnboxedScalar)                                                   \
     _(StoreUnboxedObjectOrNull)                                             \
     _(StoreUnboxedString)                                                   \
@@ -261,8 +262,6 @@ namespace jit {
     _(InstanceOf)                                                           \
     _(CallInstanceOf)                                                       \
     _(InterruptCheck)                                                       \
-    _(AsmJSInterruptCheck)                                                  \
-    _(AsmThrowUnreachable)                                                  \
     _(GetDOMProperty)                                                       \
     _(GetDOMMember)                                                         \
     _(SetDOMProperty)                                                       \
@@ -272,8 +271,10 @@ namespace jit {
     _(HasClass)                                                             \
     _(CopySign)                                                             \
     _(WasmBoundsCheck)                                                      \
+    _(WasmAddOffset)                                                        \
     _(WasmLoad)                                                             \
     _(WasmStore)                                                            \
+    _(WasmTrap)                                                             \
     _(WasmTruncateToInt32)                                                  \
     _(AsmJSNeg)                                                             \
     _(AsmJSUnsignedToDouble)                                                \

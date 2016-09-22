@@ -487,7 +487,7 @@ class MacroAssembler : public MacroAssemblerSpecific
     void call(JitCode* c) PER_SHARED_ARCH;
 
     inline void call(const wasm::CallSiteDesc& desc, const Register reg);
-    inline void call(const wasm::CallSiteDesc& desc, uint32_t callee);
+    inline void call(const wasm::CallSiteDesc& desc, uint32_t funcDefIndex);
 
     CodeOffset callWithPatch() PER_SHARED_ARCH;
     void patchCall(uint32_t callerOffset, uint32_t calleeOffset) PER_SHARED_ARCH;
@@ -921,7 +921,8 @@ class MacroAssembler : public MacroAssemblerSpecific
 
     // On x86_shared, temp may be Invalid only if the chip has the POPCNT instruction.
     // On ARM, temp may never be Invalid.
-    inline void popcnt32(Register src, Register dest, Register temp) DEFINED_ON(arm, x86_shared);
+    inline void popcnt32(Register src, Register dest, Register temp)
+        DEFINED_ON(arm, x86_shared, mips_shared);
 
     // temp may be invalid only if the chip has the POPCNT instruction.
     inline void popcnt64(Register64 src, Register64 dest, Register temp) DEFINED_ON(x86, x64, arm);
@@ -1040,8 +1041,8 @@ class MacroAssembler : public MacroAssemblerSpecific
     inline void branchFloat32NotInInt64Range(Address src, Register temp, Label* fail);
     inline void branchFloat32NotInUInt64Range(Address src, Register temp, Label* fail);
 
-    template <typename T>
-    inline void branchAdd32(Condition cond, T src, Register dest, Label* label) PER_SHARED_ARCH;
+    template <typename T, typename L>
+    inline void branchAdd32(Condition cond, T src, Register dest, L label) PER_SHARED_ARCH;
     template <typename T>
     inline void branchSub32(Condition cond, T src, Register dest, Label* label) PER_SHARED_ARCH;
 
@@ -1314,6 +1315,27 @@ class MacroAssembler : public MacroAssemblerSpecific
         DEFINED_ON(x86, x64);
 
   public:
+    // ========================================================================
+    // wasm support
+
+    // Emit a bounds check against the (dynamically-patched) wasm bounds check
+    // limit, jumping to 'label' if 'cond' holds.
+    template <class L>
+    inline void wasmBoundsCheck(Condition cond, Register index, L label) PER_ARCH;
+
+    // Called after compilation completes to patch the given limit into the
+    // given instruction's immediate.
+    static inline void wasmPatchBoundsCheck(uint8_t* patchAt, uint32_t limit) PER_ARCH;
+
+    // On x86, each instruction adds its own wasm::MemoryAccess's to the
+    // wasm::MemoryAccessVector (there can be multiple when i64 is involved).
+    // On x64, only some asm.js accesses need a wasm::MemoryAccess so the caller
+    // is responsible for doing this instead.
+    void wasmLoad(Scalar::Type type, unsigned numSimdElems, Operand srcAddr, AnyRegister out) DEFINED_ON(x86, x64);
+    void wasmLoadI64(Scalar::Type type, Operand srcAddr, Register64 out) DEFINED_ON(x86, x64);
+    void wasmStore(Scalar::Type type, unsigned numSimdElems, AnyRegister value, Operand dstAddr) DEFINED_ON(x86, x64);
+    void wasmStoreI64(Register64 value, Operand dstAddr) DEFINED_ON(x86);
+
     // wasm specific methods, used in both the wasm baseline compiler and ion.
     void wasmTruncateDoubleToUInt32(FloatRegister input, Register output, Label* oolEntry) DEFINED_ON(x86, x64);
     void wasmTruncateDoubleToInt32(FloatRegister input, Register output, Label* oolEntry) DEFINED_ON(x86_shared);
@@ -1332,6 +1354,18 @@ class MacroAssembler : public MacroAssemblerSpecific
 
     // WasmTableCallIndexReg must contain the index of the indirect call.
     void wasmCallIndirect(const wasm::CallSiteDesc& desc, const wasm::CalleeDesc& callee);
+
+    // This function takes care of loading the pointer to the current instance
+    // as the implicit first argument. It preserves TLS and pinned registers.
+    // (TLS & pinned regs are non-volatile registers in the system ABI).
+    void wasmCallBuiltinInstanceMethod(const ABIArg& instanceArg,
+                                       wasm::SymbolicAddress builtin);
+
+  public:
+    // ========================================================================
+    // Clamping functions.
+
+    inline void clampIntToUint8(Register reg) PER_SHARED_ARCH;
 
     //}}} check_macroassembler_style
   public:

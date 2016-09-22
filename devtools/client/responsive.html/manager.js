@@ -305,8 +305,9 @@ ResponsiveUI.prototype = {
   init: Task.async(function* () {
     let ui = this;
 
-    // Watch for tab close so we can clean up RDM synchronously
+    // Watch for tab close and window close so we can clean up RDM synchronously
     this.tab.addEventListener("TabClose", this);
+    this.browserWindow.addEventListener("unload", this);
 
     // Swap page content from the current tab into a viewport within RDM
     this.swap = swapToInnerBrowser({
@@ -348,7 +349,8 @@ ResponsiveUI.prototype = {
     // If our tab is about to be closed, there's not enough time to exit
     // gracefully, but that shouldn't be a problem since the tab will go away.
     // So, skip any yielding when we're about to close the tab.
-    let isTabClosing = options && options.reason == "TabClose";
+    let isWindowClosing = options && options.reason === "unload";
+    let isTabClosing = (options && options.reason === "TabClose") || isWindowClosing;
 
     // Ensure init has finished before starting destroy
     if (!isTabClosing) {
@@ -356,6 +358,7 @@ ResponsiveUI.prototype = {
     }
 
     this.tab.removeEventListener("TabClose", this);
+    this.browserWindow.removeEventListener("unload", this);
     this.toolWindow.removeEventListener("message", this);
 
     if (!isTabClosing) {
@@ -375,16 +378,16 @@ ResponsiveUI.prototype = {
     this.swap = null;
 
     // Close the debugger client used to speak with emulation actor
-    let clientClosed = new Promise((resolve, reject) => {
-      this.client.close(resolve);
-      this.client = this.emulationFront = null;
-    });
+    let clientClosed = this.client.close();
     if (!isTabClosing) {
       yield clientClosed;
     }
+    this.client = this.emulationFront = null;
 
-    // Undo the swap and return the content back to a normal tab
-    swap.stop();
+    if (!isWindowClosing) {
+      // Undo the swap and return the content back to a normal tab
+      swap.stop();
+    }
 
     this.destroyed = true;
 
@@ -409,6 +412,7 @@ ResponsiveUI.prototype = {
       case "message":
         this.handleMessage(event);
         break;
+      case "unload":
       case "TabClose":
         ResponsiveUIManager.closeIfNeeded(browserWindow, tab, {
           reason: event.type,
@@ -425,6 +429,12 @@ ResponsiveUI.prototype = {
     }
 
     switch (event.data.type) {
+      case "change-viewport-device":
+        let { userAgent, pixelRatio, touch } = event.data.device;
+        this.updateUserAgent(userAgent);
+        this.updateDPPX(pixelRatio);
+        this.updateTouchSimulation(touch);
+        break;
       case "content-resize":
         let { width, height } = event.data;
         this.emit("content-resize", {
@@ -438,10 +448,6 @@ ResponsiveUI.prototype = {
       case "update-touch-simulation":
         let { enabled } = event.data;
         this.updateTouchSimulation(enabled);
-        break;
-      case "update-user-agent":
-        let { userAgent } = event.data;
-        this.updateUserAgent(userAgent);
         break;
     }
   },
@@ -459,11 +465,19 @@ ResponsiveUI.prototype = {
     }
   }),
 
-  updateUserAgent: function (userAgent) {
+  updateUserAgent(userAgent) {
     if (userAgent) {
       this.emulationFront.setUserAgentOverride(userAgent);
     } else {
       this.emulationFront.clearUserAgentOverride();
+    }
+  },
+
+  updateDPPX(dppx) {
+    if (dppx) {
+      this.emulationFront.setDPPXOverride(dppx);
+    } else {
+      this.emulationFront.clearDPPXOverride();
     }
   },
 

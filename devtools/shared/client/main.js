@@ -145,7 +145,8 @@ function eventSource(aProto) {
 const ThreadStateTypes = {
   "paused": "paused",
   "resumed": "attached",
-  "detached": "detached"
+  "detached": "detached",
+  "running": "attached"
 };
 
 /**
@@ -354,9 +355,17 @@ DebuggerClient.prototype = {
    *
    * @param aOnClosed function
    *        If specified, will be called when the debugging connection
-   *        has been closed.
+   *        has been closed. This parameter is deprecated - please use
+   *        the returned Promise.
+   * @return Promise
+   *         Resolves after the underlying transport is closed.
    */
   close: function (aOnClosed) {
+    let deferred = promise.defer();
+    if (aOnClosed) {
+      deferred.promise.then(aOnClosed);
+    }
+
     // Disable detach event notifications, because event handlers will be in a
     // cleared scope by the time they run.
     this._eventsEnabled = false;
@@ -371,17 +380,11 @@ DebuggerClient.prototype = {
     // as we won't be able to send any message.
     if (this._closed) {
       cleanup();
-      if (aOnClosed) {
-        aOnClosed();
-      }
-      return;
+      deferred.resolve();
+      return deferred.promise;
     }
 
-    if (aOnClosed) {
-      this.addOneTimeListener("closed", function (aEvent) {
-        aOnClosed();
-      });
-    }
+    this.addOneTimeListener("closed", deferred.resolve);
 
     // Call each client's `detach` method by calling
     // lastly registered ones first to give a chance
@@ -402,6 +405,8 @@ DebuggerClient.prototype = {
       detachClients();
     };
     detachClients();
+
+    return deferred.promise;
   },
 
   /*
@@ -1756,6 +1761,7 @@ ThreadClient.prototype = {
 
       // Put the client in a tentative "resuming" state so we can prevent
       // further requests that should only be sent in the paused state.
+      this._previousState = this._state;
       this._state = "resuming";
 
       if (this._pauseOnExceptions) {
@@ -1770,10 +1776,17 @@ ThreadClient.prototype = {
       return aPacket;
     },
     after: function (aResponse) {
-      if (aResponse.error) {
-        // There was an error resuming, back to paused state.
-        this._state = "paused";
+      if (aResponse.error && this._state == "resuming") {
+        // There was an error resuming, update the state to the new one
+        // reported by the server, if given (only on wrongState), otherwise
+        // reset back to the previous state.
+        if (aResponse.state) {
+          this._state = ThreadStateTypes[aResponse.state];
+        } else {
+          this._state = this._previousState;
+        }
       }
+      delete this._previousState;
       return aResponse;
     },
   }),

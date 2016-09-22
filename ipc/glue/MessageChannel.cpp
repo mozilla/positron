@@ -488,6 +488,7 @@ MessageChannel::MessageChannel(MessageListener *aListener)
     mSawInterruptOutMsg(false),
     mIsWaitingForIncoming(false),
     mAbortOnError(false),
+    mNotifiedChannelDone(false),
     mFlags(REQUIRE_DEFAULT),
     mPeerPidSet(false),
     mPeerPid(-1)
@@ -2081,6 +2082,13 @@ MessageChannel::NotifyMaybeChannelError()
     // Oops, error!  Let the listener know about it.
     mChannelState = ChannelError;
 
+    // IPDL assumes these notifications do not fire twice, so we do not let
+    // that happen.
+    if (mNotifiedChannelDone) {
+      return;
+    }
+    mNotifiedChannelDone = true;
+
     // After this, the channel may be deleted.  Based on the premise that
     // mListener owns this channel, any calls back to this class that may
     // work with mListener should still work on living objects.
@@ -2238,6 +2246,13 @@ MessageChannel::NotifyChannelClosed()
 
     Clear();
 
+    // IPDL assumes these notifications do not fire twice, so we do not let
+    // that happen.
+    if (mNotifiedChannelDone) {
+      return;
+    }
+    mNotifiedChannelDone = true;
+
     // OK, the IO thread just closed the channel normally.  Let the
     // listener know about it. After this point the channel may be
     // deleted.
@@ -2281,8 +2296,9 @@ MessageChannel::DebugAbort(const char* file, int line, const char* cond,
 void
 MessageChannel::DumpInterruptStack(const char* const pfx) const
 {
-    NS_WARN_IF_FALSE(MessageLoop::current() != mWorkerLoop,
-                     "The worker thread had better be paused in a debugger!");
+    NS_WARNING_ASSERTION(
+      MessageLoop::current() != mWorkerLoop,
+      "The worker thread had better be paused in a debugger!");
 
     printf_stderr("%sMessageChannel 'backtrace':\n", pfx);
 

@@ -540,7 +540,13 @@ GetExtensionFromURI(nsIURI* uri, nsCString& ext)
     url->GetFileExtension(ext);
   } else {
     nsCString spec;
-    uri->GetSpec(spec);
+    nsresult rv = uri->GetSpec(spec);
+    if (NS_FAILED(rv)) {
+      // This means we could incorrectly think a plugin is not enabled for
+      // the URI when it is, but that's not so bad.
+      ext.Truncate();
+      return;
+    }
 
     int32_t offset = spec.RFindChar('.');
     if (offset != kNotFound) {
@@ -995,12 +1001,12 @@ nsObjectLoadingContent::GetNestedParams(nsTArray<MozPluginParameter>& aParams,
   }
 }
 
-void
+nsresult
 nsObjectLoadingContent::BuildParametersArray()
 {
   if (mCachedAttributes.Length() || mCachedParameters.Length()) {
     MOZ_ASSERT(false, "Parameters array should be empty.");
-    return;
+    return NS_OK;
   }
 
   nsCOMPtr<nsIContent> content =
@@ -1027,7 +1033,8 @@ nsObjectLoadingContent::BuildParametersArray()
 
   nsCString codebase;
   if (isJava) {
-      mBaseURI->GetSpec(codebase);
+      nsresult rv = mBaseURI->GetSpec(codebase);
+      NS_ENSURE_SUCCESS(rv, rv);
   }
 
   nsAdoptingCString wmodeOverride = Preferences::GetCString("plugins.force.wmode");
@@ -1071,6 +1078,8 @@ nsObjectLoadingContent::BuildParametersArray()
   }
 
   GetNestedParams(mCachedParameters, isJava);
+
+  return NS_OK;
 }
 
 void
@@ -1139,10 +1148,8 @@ nsObjectLoadingContent::OnStartRequest(nsIRequest *aRequest,
     if (console) {
       nsCOMPtr<nsIURI> uri;
       chan->GetURI(getter_AddRefs(uri));
-      nsAutoCString spec;
-      uri->GetSpec(spec);
       nsString message = NS_LITERAL_STRING("Blocking ") +
-        NS_ConvertASCIItoUTF16(spec.get()) +
+        NS_ConvertASCIItoUTF16(uri->GetSpecOrDefault().get()) +
         NS_LITERAL_STRING(" since it was found on an internal Firefox blocklist.");
       console->LogStringMessage(message.get());
     }
@@ -1552,7 +1559,11 @@ nsObjectLoadingContent::MaybeRewriteYoutubeEmbed(nsIURI* aURI, nsIURI* aBaseURI,
 
   // See if requester is planning on using the JS API.
   nsAutoCString uri;
-  aURI->GetSpec(uri);
+  nsresult rv = aURI->GetSpec(uri);
+  if (NS_FAILED(rv)) {
+    return;
+  }
+
   if (uri.Find("enablejsapi=1", true, 0, -1) != kNotFound) {
     Telemetry::Accumulate(Telemetry::YOUTUBE_NONREWRITABLE_EMBED_SEEN, 1);
     return;
@@ -1597,10 +1608,10 @@ nsObjectLoadingContent::MaybeRewriteYoutubeEmbed(nsIURI* aURI, nsIURI* aBaseURI,
   uri.ReplaceSubstring(NS_LITERAL_CSTRING("/v/"),
                        NS_LITERAL_CSTRING("/embed/"));
   nsAutoString utf16URI = NS_ConvertUTF8toUTF16(uri);
-  nsresult rv = nsContentUtils::NewURIWithDocumentCharset(aOutURI,
-                                                          utf16URI,
-                                                          thisContent->OwnerDoc(),
-                                                          aBaseURI);
+  rv = nsContentUtils::NewURIWithDocumentCharset(aOutURI,
+                                                 utf16URI,
+                                                 thisContent->OwnerDoc(),
+                                                 aBaseURI);
   if (NS_FAILED(rv)) {
     return;
   }
@@ -1649,12 +1660,8 @@ nsObjectLoadingContent::CheckLoadPolicy(int16_t *aContentPolicy)
                                           nsContentUtils::GetSecurityManager());
   NS_ENSURE_SUCCESS(rv, false);
   if (NS_CP_REJECTED(*aContentPolicy)) {
-    nsAutoCString uri;
-    nsAutoCString baseUri;
-    mURI->GetSpec(uri);
-    mURI->GetSpec(baseUri);
-    LOG(("OBJLC [%p]: Content policy denied load of %s (base %s)",
-         this, uri.get(), baseUri.get()));
+    LOG(("OBJLC [%p]: Content policy denied load of %s",
+         this, mURI->GetSpecOrDefault().get()));
     return false;
   }
 
@@ -2403,7 +2410,8 @@ nsObjectLoadingContent::LoadObject(bool aNotify,
 
   // Cache the current attributes and parameters.
   if (mType == eType_Plugin || mType == eType_Null) {
-    BuildParametersArray();
+    rv = BuildParametersArray();
+    NS_ENSURE_SUCCESS(rv, rv);
   }
 
   // We don't set mFinalListener until OnStartRequest has been called, to
@@ -2899,9 +2907,13 @@ nsObjectLoadingContent::CreateStaticClone(nsObjectLoadingContent* aDest) const
     aDest->mPrintFrame = const_cast<nsObjectLoadingContent*>(this)->GetExistingFrame();
   }
 
+  nsCOMPtr<nsIContent> content =
+    do_QueryInterface(static_cast<nsIImageLoadingContent*>(aDest));
+  if (aDest->mPrintFrame) {
+    content->OwnerDoc()->SetMayHavePluginFramesForPrinting();
+  }
+
   if (mFrameLoader) {
-    nsCOMPtr<nsIContent> content =
-      do_QueryInterface(static_cast<nsIImageLoadingContent*>(aDest));
     nsFrameLoader* fl = nsFrameLoader::Create(content->AsElement(), false);
     if (fl) {
       aDest->mFrameLoader = fl;
@@ -3040,6 +3052,7 @@ nsObjectLoadingContent::SyncStartPluginInstance()
   }
 
   nsCOMPtr<nsIURI> kungFuURIGrip(mURI);
+  mozilla::Unused << kungFuURIGrip; // This URI is not referred to within this function
   nsCString contentType(mContentType);
   return InstantiatePluginInstance();
 }

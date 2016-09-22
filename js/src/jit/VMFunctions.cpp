@@ -770,6 +770,11 @@ FinalSuspend(JSContext* cx, HandleObject obj, BaselineFrame* frame, jsbytecode* 
     MOZ_ASSERT(*pc == JSOP_FINALYIELDRVAL);
 
     if (!GeneratorObject::finalSuspend(cx, obj)) {
+
+        TraceLoggerThread* logger = TraceLoggerForMainThread(cx->runtime());
+        TraceLogStopEvent(logger, TraceLogger_Engine);
+        TraceLogStopEvent(logger, TraceLogger_Scripts);
+
         // Leave this frame and propagate the exception to the caller.
         return DebugEpilogue(cx, frame, pc, /* ok = */ false);
     }
@@ -1295,6 +1300,15 @@ ThrowRuntimeLexicalError(JSContext* cx, unsigned errorNumber)
     ScriptFrameIter iter(cx);
     RootedScript script(cx, iter.script());
     ReportRuntimeLexicalError(cx, errorNumber, script, iter.pc());
+    return false;
+}
+
+bool
+ThrowReadOnlyError(JSContext* cx, HandleObject handle)
+{
+    HandleNativeObject obj = handle.as<NativeObject>();
+    RootedValue val(cx, ObjectValue(*obj));
+    ReportValueError(cx, JSMSG_READ_ONLY, JSDVG_IGNORE_STACK, val, nullptr);
     return false;
 }
 

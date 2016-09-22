@@ -29,7 +29,7 @@
 #include "nsIScriptSecurityManager.h"
 #include "nsIDOMClassInfo.h"
 #include "xpcpublic.h"
-#include "mozilla/CycleCollectedJSRuntime.h"
+#include "mozilla/CycleCollectedJSContext.h"
 #include "mozilla/IntentionalCrash.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/Telemetry.h"
@@ -1313,12 +1313,16 @@ nsFrameMessageManager::ReceiveMessage(nsISupports* aTarget,
       }
     }
   }
-  RefPtr<nsFrameMessageManager> kungfuDeathGrip = mParentManager;
-  return mParentManager ? mParentManager->ReceiveMessage(aTarget, aTargetFrameLoader,
-                                                         aTargetClosed, aMessage,
-                                                         aIsSync, aCloneData,
-                                                         aCpows, aPrincipal,
-                                                         aRetVal) : NS_OK;
+
+  RefPtr<nsFrameMessageManager> kungFuDeathGrip = mParentManager;
+  if (kungFuDeathGrip) {
+    return kungFuDeathGrip->ReceiveMessage(aTarget, aTargetFrameLoader,
+                                           aTargetClosed, aMessage,
+                                           aIsSync, aCloneData,
+                                           aCpows, aPrincipal,
+                                           aRetVal);
+  }
+  return NS_OK;
 }
 
 void

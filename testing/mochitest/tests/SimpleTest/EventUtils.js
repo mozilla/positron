@@ -365,21 +365,23 @@ function synthesizeMouseAtPoint(left, top, aEvent, aWindow = window)
       ("isSynthesized" in aEvent) ? aEvent.isSynthesized : true;
     var isWidgetEventSynthesized =
       ("isWidgetEventSynthesized" in aEvent) ? aEvent.isWidgetEventSynthesized : false;
-
+    var buttons = ("buttons" in aEvent) ? aEvent.buttons :
+                                          utils.MOUSE_BUTTONS_NOT_SPECIFIED;
     if (("type" in aEvent) && aEvent.type) {
       defaultPrevented = utils.sendMouseEvent(aEvent.type, left, top, button,
                                               clickCount, modifiers, false,
                                               pressure, inputSource,
                                               isDOMEventSynthesized,
-                                              isWidgetEventSynthesized);
+                                              isWidgetEventSynthesized,
+                                              buttons);
     }
     else {
       utils.sendMouseEvent("mousedown", left, top, button, clickCount, modifiers,
                            false, pressure, inputSource, isDOMEventSynthesized,
-                           isWidgetEventSynthesized);
+                           isWidgetEventSynthesized, buttons);
       utils.sendMouseEvent("mouseup", left, top, button, clickCount, modifiers,
                            false, pressure, inputSource, isDOMEventSynthesized,
-                           isWidgetEventSynthesized);
+                           isWidgetEventSynthesized, buttons);
     }
   }
 
@@ -1865,6 +1867,28 @@ function synthesizeQueryTextRect(aOffset, aLength, aWindow)
     return nullptr;
   }
   return utils.sendQueryContentEvent(utils.QUERY_TEXT_RECT,
+                                     aOffset, aLength, 0, 0,
+                                     QUERY_CONTENT_FLAG_USE_NATIVE_LINE_BREAK);
+}
+
+/**
+ * Synthesize a query text rect array event.
+ *
+ * @param aOffset  The character offset.  0 means the first character in the
+ *                 selection root.
+ * @param aLength  The length of the text.  If the length is too long,
+ *                 the extra length is ignored.
+ * @param aWindow  Optional (If null, current |window| will be used)
+ * @return         An nsIQueryContentEventResult object.  If this failed,
+ *                 the result might be null.
+ */
+function synthesizeQueryTextRectArray(aOffset, aLength, aWindow)
+{
+  var utils = _getDOMWindowUtils(aWindow);
+  if (!utils) {
+    return nullptr;
+  }
+  return utils.sendQueryContentEvent(utils.QUERY_TEXT_RECT_ARRAY,
                                      aOffset, aLength, 0, 0,
                                      QUERY_CONTENT_FLAG_USE_NATIVE_LINE_BREAK);
 }

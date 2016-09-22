@@ -100,13 +100,19 @@ APZCTreeManager::APZCTreeManager()
       mRetainedTouchIdentifier(-1),
       mApzcTreeLog("apzctree")
 {
-  MOZ_ASSERT(NS_IsMainThread());
   AsyncPanZoomController::InitializeGlobalState();
   mApzcTreeLog.ConditionOnPrefFunction(gfxPrefs::APZPrintTree);
 }
 
 APZCTreeManager::~APZCTreeManager()
 {
+}
+
+/*static*/ void
+APZCTreeManager::InitializeGlobalState()
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  AsyncPanZoomController::InitializeGlobalState();
 }
 
 AsyncPanZoomController*
@@ -1053,7 +1059,7 @@ void
 APZCTreeManager::UpdateWheelTransaction(LayoutDeviceIntPoint aRefPoint,
                                         EventMessage aEventMessage)
 {
-  WheelBlockState* txn = mInputQueue->GetCurrentWheelTransaction();
+  WheelBlockState* txn = mInputQueue->GetActiveWheelTransaction();
   if (!txn) {
     return;
   }

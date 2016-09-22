@@ -41,11 +41,12 @@ public class RecentTabsAdapter extends RecyclerView.Adapter<CombinedHistoryItem>
     private static final int NAVIGATION_BACK_BUTTON_INDEX = 0;
 
     private static final String TELEMETRY_EXTRA_LAST_TIME = "recent_tabs_last_time";
-    private static final String TELEMETRY_EXTRA_RECENTY_CLOSED = "recent_closed_tabs";
+    private static final String TELEMETRY_EXTRA_RECENTLY_CLOSED = "recent_closed_tabs";
     private static final String TELEMETRY_EXTRA_MIXED = "recent_tabs_mixed";
 
     // Recently closed tabs from Gecko.
     private ClosedTab[] recentlyClosedTabs;
+    private boolean recentlyClosedTabsReceived = false;
 
     // "Tabs from last time".
     private ClosedTab[] lastSessionTabs;
@@ -86,6 +87,7 @@ public class RecentTabsAdapter extends RecyclerView.Adapter<CombinedHistoryItem>
     public void stopListeningForClosedTabs() {
         GeckoAppShell.notifyObservers("ClosedTabs:StopNotifications", null);
         EventDispatcher.getInstance().unregisterGeckoThreadListener(this, "ClosedTabs:Data");
+        recentlyClosedTabsReceived = false;
     }
 
     public void startListeningForHistorySanitize() {
@@ -129,7 +131,9 @@ public class RecentTabsAdapter extends RecyclerView.Adapter<CombinedHistoryItem>
                 int prevSectionHeaderIndex = getSectionHeaderIndex();
 
                 recentlyClosedTabs = closedTabs;
-                recentTabsUpdateHandler.onRecentTabsCountUpdated(getClosedTabsCount());
+                recentlyClosedTabsReceived = true;
+                recentTabsUpdateHandler.onRecentTabsCountUpdated(
+                        getClosedTabsCount(), recentlyClosedTabsReceived);
                 panelStateUpdateHandler.onPanelStateUpdated();
 
                 // Handle the section header hiding/unhiding.
@@ -185,7 +189,8 @@ public class RecentTabsAdapter extends RecyclerView.Adapter<CombinedHistoryItem>
                         int prevSectionHeaderIndex = getSectionHeaderIndex();
 
                         lastSessionTabs = closedTabs;
-                        recentTabsUpdateHandler.onRecentTabsCountUpdated(getClosedTabsCount());
+                        recentTabsUpdateHandler.onRecentTabsCountUpdated(
+                                getClosedTabsCount(), recentlyClosedTabsReceived);
                         panelStateUpdateHandler.onPanelStateUpdated();
 
                         // Handle the section header hiding/unhiding.
@@ -215,7 +220,8 @@ public class RecentTabsAdapter extends RecyclerView.Adapter<CombinedHistoryItem>
                 int prevSectionHeaderIndex = getSectionHeaderIndex();
 
                 lastSessionTabs = emptyLastSessionTabs;
-                recentTabsUpdateHandler.onRecentTabsCountUpdated(getClosedTabsCount());
+                recentTabsUpdateHandler.onRecentTabsCountUpdated(
+                        getClosedTabsCount(), recentlyClosedTabsReceived);
                 panelStateUpdateHandler.onPanelStateUpdated();
 
                 // Handle the section header hiding.
@@ -265,7 +271,7 @@ public class RecentTabsAdapter extends RecyclerView.Adapter<CombinedHistoryItem>
         dataList.add(getClosedTabForPosition(position).data);
 
         final String telemetryExtra =
-                position > getLastRecentTabIndex() ? TELEMETRY_EXTRA_LAST_TIME : TELEMETRY_EXTRA_RECENTY_CLOSED;
+                position > getLastRecentTabIndex() ? TELEMETRY_EXTRA_LAST_TIME : TELEMETRY_EXTRA_RECENTLY_CLOSED;
 
         restoreSessionWithHistory(dataList);
 
@@ -282,7 +288,7 @@ public class RecentTabsAdapter extends RecyclerView.Adapter<CombinedHistoryItem>
         addTabDataToList(dataList, lastSessionTabs);
 
         final String telemetryExtra = recentlyClosedTabs.length > 0 && lastSessionTabs.length > 0 ? TELEMETRY_EXTRA_MIXED :
-                recentlyClosedTabs.length > 0 ? TELEMETRY_EXTRA_RECENTY_CLOSED : TELEMETRY_EXTRA_LAST_TIME;
+                recentlyClosedTabs.length > 0 ? TELEMETRY_EXTRA_RECENTLY_CLOSED : TELEMETRY_EXTRA_LAST_TIME;
 
         restoreSessionWithHistory(dataList);
 

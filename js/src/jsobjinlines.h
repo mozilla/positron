@@ -350,7 +350,8 @@ JSObject::create(js::ExclusiveContext* cx, js::gc::AllocKind kind, js::gc::Initi
     }
 
     MOZ_ASSERT_IF(clasp->hasFinalize(), heap == js::gc::TenuredHeap ||
-                                        (flags & JSCLASS_SKIP_NURSERY_FINALIZE));
+                                        CanNurseryAllocateFinalizedClass(clasp) ||
+                                        clasp->isProxy());
     MOZ_ASSERT_IF(group->hasUnanalyzedPreliminaryObjects(), heap == js::gc::TenuredHeap);
 #endif
 
@@ -736,7 +737,7 @@ NewObjectWithClassProto(ExclusiveContext* cx, const Class* clasp, HandleObject p
 
 template<class T>
 inline T*
-NewObjectWithClassProto(ExclusiveContext* cx, HandleObject proto,
+NewObjectWithClassProto(ExclusiveContext* cx, HandleObject proto = nullptr,
                         NewObjectKind newKind = GenericObject)
 {
     JSObject* obj = NewObjectWithClassProto(cx, &T::class_, proto, newKind);

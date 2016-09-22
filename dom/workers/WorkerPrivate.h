@@ -18,6 +18,7 @@
 #include "mozilla/Assertions.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/CondVar.h"
+#include "mozilla/ConsoleReportCollector.h"
 #include "mozilla/DOMEventTargetHelper.h"
 #include "mozilla/Move.h"
 #include "mozilla/TimeStamp.h"
@@ -40,6 +41,7 @@
 #endif
 
 class nsIChannel;
+class nsIConsoleReportCollector;
 class nsIDocument;
 class nsIEventTarget;
 class nsIPrincipal;
@@ -57,6 +59,7 @@ struct RuntimeStats;
 } // namespace JS
 
 namespace mozilla {
+class TaskQueue;
 namespace dom {
 class Function;
 class MessagePort;
@@ -780,10 +783,10 @@ public:
     return mLoadInfo.mStorageAllowed;
   }
 
-  bool
-  IsInPrivateBrowsing() const
+  const PrincipalOriginAttributes&
+  GetOriginAttributes() const
   {
-    return mLoadInfo.mPrivateBrowsing;
+    return mLoadInfo.mOriginAttributes;
   }
 
   // Determine if the SW testing per-window flag is set by devtools
@@ -810,6 +813,9 @@ public:
   {
     return mLoadInfo.mLoadFailedAsyncRunnable.forget();
   }
+
+  void
+  FlushReportsToSharedWorkers(nsIConsoleReportCollector* aReporter);
 
   IMPL_EVENT_HANDLER(message)
   IMPL_EVENT_HANDLER(error)
@@ -912,6 +918,8 @@ class WorkerPrivate : public WorkerPrivateParent<WorkerPrivate>
   nsTObserverArray<WorkerHolder*> mHolders;
   nsTArray<nsAutoPtr<TimeoutInfo>> mTimeouts;
   uint32_t mDebuggerEventLoopLevel;
+  RefPtr<TaskQueue> mMainThreadTaskQueue;
+  nsCOMPtr<nsIEventTarget> mMainThreadEventTarget;
 
   struct SyncLoopInfo
   {
@@ -950,8 +958,6 @@ class WorkerPrivate : public WorkerPrivateParent<WorkerPrivate>
   bool mFrozen;
   bool mTimerRunning;
   bool mRunningExpiredTimeouts;
-  bool mCloseHandlerStarted;
-  bool mCloseHandlerFinished;
   bool mPendingEventQueueClearing;
   bool mMemoryReporterRunning;
   bool mBlockedForMemoryReporter;
@@ -1156,20 +1162,6 @@ public:
   RescheduleTimeoutTimer(JSContext* aCx);
 
   void
-  CloseHandlerStarted()
-  {
-    AssertIsOnWorkerThread();
-    mCloseHandlerStarted = true;
-  }
-
-  void
-  CloseHandlerFinished()
-  {
-    AssertIsOnWorkerThread();
-    mCloseHandlerFinished = true;
-  }
-
-  void
   UpdateContextOptionsInternal(JSContext* aCx, const JS::ContextOptions& aContextOptions);
 
   void
@@ -1352,6 +1344,20 @@ public:
   void
   MaybeDispatchLoadFailedRunnable();
 
+  // Get the event target to use when dispatching to the main thread
+  // from this Worker thread.  This may be the main thread itself or
+  // a TaskQueue throttling runnables to the main thread.
+  nsIEventTarget*
+  MainThreadEventTarget();
+
+  nsresult
+  DispatchToMainThread(nsIRunnable* aRunnable,
+                       uint32_t aFlags = NS_DISPATCH_NORMAL);
+
+  nsresult
+  DispatchToMainThread(already_AddRefed<nsIRunnable> aRunnable,
+                       uint32_t aFlags = NS_DISPATCH_NORMAL);
+
 private:
   WorkerPrivate(WorkerPrivate* aParent,
                 const nsAString& aScriptURL, bool aIsChromeWorker,
@@ -1369,23 +1375,15 @@ private:
       status = mStatus;
     }
 
-    if (status >= Killing) {
-      return false;
+    if (status < Terminating) {
+      return true;
     }
-    if (status >= Running) {
-      return mKillTime.IsNull() || RemainingRunTimeMS() > 0;
-    }
-    return true;
-  }
 
-  uint32_t
-  RemainingRunTimeMS() const;
+    return false;
+  }
 
   void
   CancelAllTimeouts();
-
-  bool
-  ScheduleKillCloseEventRunnable();
 
   enum class ProcessAllControlRunnablesResult
   {

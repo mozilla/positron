@@ -67,7 +67,10 @@ nsPrintObject::Init(nsIDocShell* aDocShell, nsIDOMDocument* aDoc,
   }
   NS_ENSURE_TRUE(mDocShell, NS_ERROR_FAILURE);
 
+  // Keep the document related to this docshell alive
   nsCOMPtr<nsIDOMDocument> dummy = do_GetInterface(mDocShell);
+  mozilla::Unused << dummy;
+
   nsCOMPtr<nsIContentViewer> viewer;
   mDocShell->GetContentViewer(getter_AddRefs(viewer));
   NS_ENSURE_STATE(viewer);
@@ -108,3 +111,8 @@ nsPrintObject::DestroyPresentation()
   mViewManager = nullptr;
 }
 
+bool
+nsPrintObject::MayHavePluginFrames()
+{
+  return mDocument && mDocument->MayHavePluginFramesForPrinting();
+}

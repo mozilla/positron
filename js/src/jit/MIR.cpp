@@ -6,6 +6,7 @@
 
 #include "jit/MIR.h"
 
+#include "mozilla/CheckedInt.h"
 #include "mozilla/FloatingPoint.h"
 #include "mozilla/IntegerPrintfMacros.h"
 #include "mozilla/MathAlgorithms.h"
@@ -34,6 +35,7 @@ using namespace js::jit;
 
 using JS::ToInt32;
 
+using mozilla::CheckedInt;
 using mozilla::NumbersAreIdentical;
 using mozilla::IsFloat32Representable;
 using mozilla::IsNaN;
@@ -2917,6 +2919,7 @@ NeedNegativeZeroCheck(MDefinition* def)
           }
           case MDefinition::Op_StoreElement:
           case MDefinition::Op_StoreElementHole:
+          case MDefinition::Op_FallibleStoreElement:
           case MDefinition::Op_LoadElement:
           case MDefinition::Op_LoadElementHole:
           case MDefinition::Op_LoadUnboxedScalar:
@@ -4943,6 +4946,24 @@ MLoadFixedSlotAndUnbox::foldsTo(TempAllocator& alloc)
     return this;
 }
 
+MDefinition*
+MWasmAddOffset::foldsTo(TempAllocator& alloc)
+{
+    MDefinition* baseArg = base();
+    if (!baseArg->isConstant())
+        return this;
+
+    MOZ_ASSERT(baseArg->type() == MIRType::Int32);
+    CheckedInt<uint32_t> ptr = baseArg->toConstant()->toInt32();
+
+    ptr += offset();
+
+    if (!ptr.isValid())
+        return this;
+
+    return MConstant::New(alloc, Int32Value(ptr.value()));
+}
+
 MDefinition::AliasType
 MAsmJSLoadHeap::mightAlias(const MDefinition* def) const
 {
@@ -5417,6 +5438,27 @@ MWasmCall::New(TempAllocator& alloc, const wasm::CallSiteDesc& desc, const wasm:
     return call;
 }
 
+MWasmCall*
+MWasmCall::NewBuiltinInstanceMethodCall(TempAllocator& alloc,
+                                        const wasm::CallSiteDesc& desc,
+                                        const wasm::SymbolicAddress builtin,
+                                        const ABIArg& instanceArg,
+                                        const Args& args,
+                                        MIRType resultType,
+                                        uint32_t spIncrement,
+                                        uint32_t tlsStackOffset)
+{
+    auto callee = wasm::CalleeDesc::builtinInstanceMethod(builtin);
+    MWasmCall* call = MWasmCall::New(alloc, desc, callee, args, resultType, spIncrement,
+                                     tlsStackOffset, nullptr);
+    if (!call)
+        return nullptr;
+
+    MOZ_ASSERT(instanceArg != ABIArg());
+    call->instanceArg_ = instanceArg;
+    return call;
+}
+
 void
 MSqrt::trySpecializeFloat32(TempAllocator& alloc) {
     if (!input()->canProduceFloat32() || !CheckUsesAreFloat32Consumers(this)) {
@@ -5689,6 +5731,13 @@ jit::ElementAccessMightBeCopyOnWrite(CompilerConstraintList* constraints, MDefin
 {
     TemporaryTypeSet* types = obj->resultTypeSet();
     return !types || types->hasObjectFlags(constraints, OBJECT_FLAG_COPY_ON_WRITE);
+}
+
+bool
+jit::ElementAccessMightBeFrozen(CompilerConstraintList* constraints, MDefinition* obj)
+{
+    TemporaryTypeSet* types = obj->resultTypeSet();
+    return !types || types->hasObjectFlags(constraints, OBJECT_FLAG_FROZEN);
 }
 
 bool

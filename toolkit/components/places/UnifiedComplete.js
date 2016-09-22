@@ -75,6 +75,9 @@ const MINIMUM_LOCAL_MATCHES = 6;
 // don't need to be exhaustive here, so allow dashes anywhere.
 const REGEXP_SINGLEWORD_HOST = new RegExp("^[a-z0-9-]+$", "i");
 
+// Regex used to match userContextId.
+const REGEXP_USER_CONTEXT_ID = /(?:^| )user-context-id:(\d+)/;
+
 // Regex used to match one or more whitespace.
 const REGEXP_SPACES = /\s+/;
 
@@ -641,6 +644,7 @@ function looksLikeUrl(str) {
  *        * private-window: The search is taking place in a private window,
  *          possibly in permanent private-browsing mode.  The search
  *          should exclude privacy-sensitive results as appropriate.
+ *        * user-context-id: The userContextId of the selected tab.
  * @param autocompleteListener
  *        An nsIAutoCompleteObserver.
  * @param resultListener
@@ -667,6 +671,11 @@ function Search(searchString, searchParam, autocompleteListener,
   this._disablePrivateActions = params.has("disable-private-actions");
   this._inPrivateWindow = params.has("private-window");
   this._prohibitAutoFill = params.has("prohibit-autofill");
+
+  let userContextId = searchParam.match(REGEXP_USER_CONTEXT_ID);
+  this._userContextId = userContextId ?
+                          parseInt(userContextId[1], 10) :
+                          Ci.nsIScriptSecurityManager.DEFAULT_USER_CONTEXT_ID;
 
   this._searchTokens =
     this.filterTokens(getUnfilteredSearchTokens(this._searchString));
@@ -887,15 +896,21 @@ Search.prototype = {
     // to true so that when the result is added, "heuristic" can be included in
     // its style.
     this._addingHeuristicFirstMatch = true;
-    yield this._matchFirstHeuristicResult(conn);
+    let hasHeuristic = yield this._matchFirstHeuristicResult(conn);
     this._addingHeuristicFirstMatch = false;
+    if (!this.pending)
+      return;
 
     // We sleep a little between adding the heuristicFirstMatch and matching
     // any other searches so we aren't kicking off potentially expensive
     // searches on every keystroke.
-    yield this._sleep(Prefs.delay);
-    if (!this.pending)
-      return;
+    // Though, if there's no heuristic result, we start searching immediately,
+    // since autocomplete may be waiting for us.
+    if (hasHeuristic) {
+      yield this._sleep(Prefs.delay);
+      if (!this.pending)
+        return;
+    }
 
     if (this._enableActions) {
       yield this._matchSearchSuggestions();
@@ -941,7 +956,7 @@ Search.prototype = {
       // This may be a Places keyword.
       let matched = yield this._matchPlacesKeyword();
       if (matched) {
-        return;
+        return true;
       }
     }
 
@@ -950,7 +965,7 @@ Search.prototype = {
       // with an alias - which works like a keyword.
       let matched = yield this._matchSearchEngineAlias();
       if (matched) {
-        return;
+        return true;
       }
     }
 
@@ -959,7 +974,7 @@ Search.prototype = {
       // It may also look like a URL we know from the database.
       let matched = yield this._matchKnownUrl(conn);
       if (matched) {
-        return;
+        return true;
       }
     }
 
@@ -967,7 +982,7 @@ Search.prototype = {
       // Or it may look like a URL we know about from search engines.
       let matched = yield this._matchSearchEngineUrl();
       if (matched) {
-        return;
+        return true;
       }
     }
 
@@ -981,7 +996,7 @@ Search.prototype = {
       // but isn't in the whitelist.
       let matched = yield this._matchUnknownUrl();
       if (matched) {
-        return;
+        return true;
       }
     }
 
@@ -990,9 +1005,11 @@ Search.prototype = {
       // using the current search engine.
       let matched = yield this._matchCurrentSearchEngine();
       if (matched) {
-        return;
+        return true;
       }
     }
+
+    return false;
   },
 
   *_matchSearchSuggestions() {
@@ -1010,7 +1027,8 @@ Search.prototype = {
       PlacesSearchAutocompleteProvider.getSuggestionController(
         searchString,
         this._inPrivateWindow,
-        Prefs.maxRichResults
+        Prefs.maxRichResults,
+        this._userContextId
       );
     let promise = this._searchSuggestionController.fetchCompletePromise
       .then(() => {
@@ -1051,16 +1069,16 @@ Search.prototype = {
     if (searchString.length < 2)
       return true;
 
-    let tokens = searchString.split(REGEXP_SPACES);
-
     // The first token may be a whitelisted host.
-    if (REGEXP_SINGLEWORD_HOST.test(tokens[0]) &&
-        Services.uriFixup.isDomainWhitelisted(tokens[0], -1))
+    if (this._searchTokens.length == 1 &&
+        REGEXP_SINGLEWORD_HOST.test(this._searchTokens[0]) &&
+        Services.uriFixup.isDomainWhitelisted(this._searchTokens[0], -1)) {
       return true;
+    }
 
     // Disallow fetching search suggestions for strings looking like URLs, to
     // avoid disclosing information about networks or passwords.
-    return tokens.some(looksLikeUrl);
+    return this._searchTokens.some(looksLikeUrl);
   },
 
   _matchKnownUrl: function* (conn) {

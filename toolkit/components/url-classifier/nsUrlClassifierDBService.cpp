@@ -51,6 +51,39 @@
 #include "ProtocolParser.h"
 #include "nsContentUtils.h"
 
+namespace mozilla {
+namespace safebrowsing {
+
+nsresult
+TablesToResponse(const nsACString& tables)
+{
+  if (tables.IsEmpty()) {
+    return NS_OK;
+  }
+
+  // We don't check mCheckMalware and friends because BuildTables never
+  // includes a table that is not enabled.
+  if (FindInReadable(NS_LITERAL_CSTRING("-malware-"), tables)) {
+    return NS_ERROR_MALWARE_URI;
+  }
+  if (FindInReadable(NS_LITERAL_CSTRING("-phish-"), tables)) {
+    return NS_ERROR_PHISHING_URI;
+  }
+  if (FindInReadable(NS_LITERAL_CSTRING("-unwanted-"), tables)) {
+    return NS_ERROR_UNWANTED_URI;
+  }
+  if (FindInReadable(NS_LITERAL_CSTRING("-track-"), tables)) {
+    return NS_ERROR_TRACKING_URI;
+  }
+  if (FindInReadable(NS_LITERAL_CSTRING("-block-"), tables)) {
+    return NS_ERROR_BLOCKED_URI;
+  }
+  return NS_OK;
+}
+
+} // namespace safebrowsing
+} // namespace mozilla
+
 using namespace mozilla;
 using namespace mozilla::safebrowsing;
 
@@ -170,33 +203,6 @@ nsUrlClassifierDBServiceWorker::DoLocalLookup(const nsACString& spec,
   mClassifier->Check(spec, tables, gFreshnessGuarantee, *results);
 
   LOG(("Found %d results.", results->Length()));
-  return NS_OK;
-}
-
-static nsresult
-TablesToResponse(const nsACString& tables)
-{
-  if (tables.IsEmpty()) {
-    return NS_OK;
-  }
-
-  // We don't check mCheckMalware and friends because BuildTables never
-  // includes a table that is not enabled.
-  if (FindInReadable(NS_LITERAL_CSTRING("-malware-"), tables)) {
-    return NS_ERROR_MALWARE_URI;
-  }
-  if (FindInReadable(NS_LITERAL_CSTRING("-phish-"), tables)) {
-    return NS_ERROR_PHISHING_URI;
-  }
-  if (FindInReadable(NS_LITERAL_CSTRING("-track-"), tables)) {
-    return NS_ERROR_TRACKING_URI;
-  }
-  if (FindInReadable(NS_LITERAL_CSTRING("-unwanted-"), tables)) {
-    return NS_ERROR_UNWANTED_URI;
-  }
-  if (FindInReadable(NS_LITERAL_CSTRING("-block-"), tables)) {
-    return NS_ERROR_BLOCKED_URI;
-  }
   return NS_OK;
 }
 
@@ -588,6 +594,11 @@ nsUrlClassifierDBServiceWorker::FinishUpdate()
   if (NS_SUCCEEDED(mUpdateStatus)) {
     LOG(("Notifying success: %d", mUpdateWait));
     mUpdateObserver->UpdateSuccess(mUpdateWait);
+  } else if (NS_ERROR_NOT_IMPLEMENTED == mUpdateStatus) {
+    LOG(("Treating NS_ERROR_NOT_IMPLEMENTED a successful update "
+         "but still mark it spoiled."));
+    mUpdateObserver->UpdateSuccess(0);
+    mClassifier->MarkSpoiled(mUpdateTables);
   } else {
     if (LOG_ENABLED()) {
       nsAutoCString errorName;
@@ -1681,6 +1692,8 @@ nsUrlClassifierDBService::Observe(nsISupports *aSubject, const char *aTopic,
     nsresult rv;
     nsCOMPtr<nsIPrefBranch> prefs(do_QueryInterface(aSubject, &rv));
     NS_ENSURE_SUCCESS(rv, rv);
+    Unused << prefs;
+
     if (NS_LITERAL_STRING(CHECK_MALWARE_PREF).Equals(aData)) {
       mCheckMalware = Preferences::GetBool(CHECK_MALWARE_PREF,
         CHECK_MALWARE_DEFAULT);

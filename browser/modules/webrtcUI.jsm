@@ -128,6 +128,10 @@ this.webrtcUI = {
     }
   },
 
+  forgetStreamsFromBrowser: function(aBrowser) {
+    this._streams = this._streams.filter(stream => stream.browser != aBrowser);
+  },
+
   showSharingDoorhanger: function(aActiveStream, aType) {
     let browserWindow = aActiveStream.browser.ownerGlobal;
     if (aActiveStream.tab) {
@@ -347,8 +351,8 @@ function prompt(aBrowser, aRequest) {
     secondaryActions.unshift({
       label: stringBundle.getString("getUserMedia.always.label"),
       accessKey: stringBundle.getString("getUserMedia.always.accesskey"),
-      callback: function () {
-        mainAction.callback(true);
+      callback: function (aState) {
+        mainAction.callback(aState, true);
       }
     });
   }
@@ -519,7 +523,7 @@ function prompt(aBrowser, aRequest) {
       if (!sharingAudio)
         listDevices(micMenupopup, audioDevices);
 
-      this.mainAction.callback = function(aRemember) {
+      this.mainAction.callback = function(aState, aRemember) {
         let allowedDevices = [];
         let perms = Services.perms;
         if (videoDevices.length) {

@@ -638,7 +638,9 @@ struct JSRuntime : public JS::shadow::Runtime,
         return handlingJitInterrupt_;
     }
 
-    JSInterruptCallback interruptCallback;
+    using InterruptCallbackVector = js::Vector<JSInterruptCallback, 2, js::SystemAllocPolicy>;
+    InterruptCallbackVector interruptCallbacks;
+    bool interruptCallbackDisabled;
 
     JSGetIncumbentGlobalCallback getIncumbentGlobalCallback;
     JSEnqueuePromiseJobCallback enqueuePromiseJobCallback;
@@ -920,7 +922,7 @@ struct JSRuntime : public JS::shadow::Runtime,
      */
     JSCList             onNewGlobalObjectWatchers;
 
-#if defined(XP_DARWIN) && defined(ASMJS_MAY_USE_SIGNAL_HANDLERS)
+#if defined(XP_DARWIN)
     js::wasm::MachExceptionHandler wasmMachExceptionHandler;
 #endif
 
@@ -1654,7 +1656,7 @@ struct GCManagedDeletePolicy
     void operator()(const T* ptr) {
         if (ptr) {
             JSRuntime* rt = TlsPerThreadData.get()->runtimeIfOnOwnerThread();
-            if (rt) {
+            if (rt && rt->gc.nursery.isEnabled()) {
                 // The object may contain nursery pointers and must only be
                 // destroyed after a minor GC.
                 rt->gc.callAfterMinorGC(deletePtr, const_cast<T*>(ptr));

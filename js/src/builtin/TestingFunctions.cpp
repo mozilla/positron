@@ -245,14 +245,10 @@ GetBuildConfiguration(JSContext* cx, unsigned argc, Value* vp)
     if (!JS_SetProperty(cx, info, "intl-api", value))
         return false;
 
-#if defined(XP_WIN)
+#if defined(SOLARIS)
     value = BooleanValue(false);
-#elif defined(SOLARIS)
-    value = BooleanValue(false);
-#elif defined(XP_UNIX)
-    value = BooleanValue(true);
 #else
-    value = BooleanValue(false);
+    value = BooleanValue(true);
 #endif
     if (!JS_SetProperty(cx, info, "mapped-array-buffer", value))
         return false;
@@ -483,10 +479,15 @@ RelazifyFunctions(JSContext* cx, unsigned argc, Value* vp)
     // not active. To aid fuzzing, this testing function allows us to relazify
     // even if the compartment is active.
 
+    CallArgs args = CallArgsFromVp(argc, vp);
     SetAllowRelazification(cx, true);
-    bool res = GC(cx, argc, vp);
+
+    JS::PrepareForFullGC(cx);
+    JS::GCForReason(cx, GC_SHRINK, JS::gcreason::API);
+
     SetAllowRelazification(cx, false);
-    return res;
+    args.rval().setUndefined();
+    return true;
 }
 
 static bool
@@ -509,29 +510,7 @@ static bool
 WasmIsSupported(JSContext* cx, unsigned argc, Value* vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
-    args.rval().setBoolean(wasm::HasCompilerSupport(cx) && cx->options().wasm());
-    return true;
-}
-
-static bool
-WasmUsesSignalForOOB(JSContext* cx, unsigned argc, Value* vp)
-{
-    CallArgs args = CallArgsFromVp(argc, vp);
-    args.rval().setBoolean(wasm::SignalUsage().forOOB);
-    return true;
-}
-
-static bool
-SuppressSignalHandlers(JSContext* cx, unsigned argc, Value* vp)
-{
-    CallArgs args = CallArgsFromVp(argc, vp);
-
-    if (!args.requireAtLeast(cx, "suppressSignalHandlers", 1))
-        return false;
-
-    wasm::SuppressSignalHandlersForTesting(ToBoolean(args[0]));
-
-    args.rval().setUndefined();
+    args.rval().setBoolean(wasm::HasCompilerSupport(cx));
     return true;
 }
 
@@ -1444,8 +1423,10 @@ SettlePromiseNow(JSContext* cx, unsigned argc, Value* vp)
     }
 
     RootedNativeObject promise(cx, &args[0].toObject().as<NativeObject>());
-    promise->setReservedSlot(PROMISE_STATE_SLOT, Int32Value(PROMISE_STATE_FULFILLED));
-    promise->setReservedSlot(PROMISE_RESULT_SLOT, UndefinedValue());
+    int32_t flags = promise->getFixedSlot(PROMISE_FLAGS_SLOT).toInt32();
+    promise->setFixedSlot(PROMISE_FLAGS_SLOT,
+                          Int32Value(flags | PROMISE_FLAG_RESOLVED | PROMISE_FLAG_FULFILLED));
+    promise->setFixedSlot(PROMISE_REACTIONS_OR_RESULT_SLOT, UndefinedValue());
 
     JS::dbg::onPromiseSettled(cx, promise);
     return true;
@@ -1686,7 +1667,8 @@ ReadSPSProfilingStack(JSContext* cx, unsigned argc, Value* vp)
             if (!JS_DefineProperty(cx, inlineFrameInfo, "kind", frameKind, propAttrs))
                 return false;
 
-            frameLabel = NewStringCopyZ<CanGC>(cx, frames[inlineFrameNo].label);
+            auto chars = frames[inlineFrameNo].label.release();
+            frameLabel = NewString<CanGC>(cx, reinterpret_cast<Latin1Char*>(chars), strlen(chars));
             if (!frameLabel)
                 return false;
 
@@ -2162,6 +2144,10 @@ class CloneBufferObject : public NativeObject {
 
         size_t size = obj->data()->Size();
         UniqueChars buffer(static_cast<char*>(js_malloc(size)));
+        if (!buffer) {
+            ReportOutOfMemory(cx);
+            return false;
+        }
         auto iter = obj->data()->Iter();
         obj->data()->ReadBytes(iter, buffer.get(), size);
         JSString* str = JS_NewStringCopyN(cx, buffer.get(), size);
@@ -3133,15 +3119,6 @@ ByteSizeOfScript(JSContext*cx, unsigned argc, Value* vp)
 }
 
 static bool
-ImmutablePrototypesEnabled(JSContext* cx, unsigned argc, Value* vp)
-{
-    CallArgs args = CallArgsFromVp(argc, vp);
-
-    args.rval().setBoolean(JS_ImmutablePrototypesEnabled());
-    return true;
-}
-
-static bool
 SetImmutablePrototype(JSContext* cx, unsigned argc, Value* vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
@@ -3833,15 +3810,6 @@ gc::ZealModeHelpText),
 "wasmIsSupported()",
 "  Returns a boolean indicating whether WebAssembly is supported on the current device."),
 
-    JS_FN_HELP("wasmUsesSignalForOOB", WasmUsesSignalForOOB, 0, 0,
-"wasmUsesSignalForOOB()",
-"  Return whether wasm and asm.js use a signal handler for detecting out-of-bounds."),
-
-    JS_FN_HELP("suppressSignalHandlers", SuppressSignalHandlers, 1, 0,
-"suppressSignalHandlers(suppress)",
-"  This function allows artificially suppressing signal handler support, even if the underlying "
-"  platform supports it."),
-
     JS_FN_HELP("wasmTextToBinary", WasmTextToBinary, 1, 0,
 "wasmTextToBinary(str)",
 "  Translates the given text wasm module into its binary encoding."),
@@ -4019,11 +3987,6 @@ gc::ZealModeHelpText),
     JS_FN_HELP("byteSizeOfScript", ByteSizeOfScript, 1, 0,
 "byteSizeOfScript(f)",
 "  Return the size in bytes occupied by the function |f|'s JSScript.\n"),
-
-    JS_FN_HELP("immutablePrototypesEnabled", ImmutablePrototypesEnabled, 0, 0,
-"immutablePrototypesEnabled()",
-"  Returns true if immutable-prototype behavior (triggered by setImmutablePrototype)\n"
-"  is enabled, such that modifying an immutable prototype will fail."),
 
     JS_FN_HELP("setImmutablePrototype", SetImmutablePrototype, 1, 0,
 "setImmutablePrototype(obj)",

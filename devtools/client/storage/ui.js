@@ -7,7 +7,7 @@
 
 const {Task} = require("devtools/shared/task");
 const EventEmitter = require("devtools/shared/event-emitter");
-const {LocalizationHelper, ELLIPSIS} = require("devtools/client/shared/l10n");
+const {LocalizationHelper, ELLIPSIS} = require("devtools/shared/l10n");
 const {KeyShortcuts} = require("devtools/client/shared/key-shortcuts");
 const JSOL = require("devtools/client/shared/vendor/jsol");
 const {KeyCodes} = require("devtools/client/shared/keycodes");
@@ -48,6 +48,17 @@ const REASON = {
   NEXT_50_ITEMS: "next-50-items",
   POPULATE: "populate",
   UPDATE: "update"
+};
+
+const COOKIE_KEY_MAP = {
+  path: "Path",
+  host: "Domain",
+  expires: "Expires",
+  isSecure: "Secure",
+  isHttpOnly: "HttpOnly",
+  isDomain: "HostOnly",
+  creationTime: "CreationTime",
+  lastAccessed: "LastAccessed"
 };
 
 // Maximum length of item name to show in context menu label - will be
@@ -607,7 +618,9 @@ StorageUI.prototype = {
         let otherProps = itemProps.filter(
           e => !["name", "value", "valueActor"].includes(e));
         for (let prop of otherProps) {
-          rawObject[prop] = item[prop];
+          let cookieProp = COOKIE_KEY_MAP[prop] || prop;
+          // The pseduo property of HostOnly refers to converse of isDomain property
+          rawObject[cookieProp] = (prop === "isDomain") ? !item[prop] : item[prop];
         }
         itemVar.populate(rawObject, {sorted: true});
         itemVar.twisty = true;
@@ -777,11 +790,17 @@ StorageUI.prototype = {
       }
 
       columns[f.name] = f.name;
+      let columnName;
       try {
-        columns[f.name] = L10N.getStr("table.headers." + type + "." + f.name);
+        columnName = L10N.getStr("table.headers." + type + "." + f.name);
       } catch (e) {
-        console.error("Unable to localize table header type:" + type +
-                      " key:" + f.name);
+        columnName = COOKIE_KEY_MAP[f.name];
+      }
+
+      if (!columnName) {
+        console.error("Unable to localize table header type:" + type + " key:" + f.name);
+      } else {
+        columns[f.name] = columnName;
       }
     });
 

@@ -26,19 +26,15 @@ ConsoleCommand.propTypes = {
  */
 function ConsoleCommand(props) {
   const { message } = props;
-  const {source, level} = message;
+  const {source, type, level} = message;
 
   const icon = MessageIcon({level});
 
   const classes = ["message"];
 
-  if (source) {
-    classes.push(source);
-  }
-
-  if (level) {
-    classes.push(level);
-  }
+  classes.push(source);
+  classes.push(type);
+  classes.push(level);
 
   return dom.div({
     className: classes.join(" "),
@@ -47,8 +43,12 @@ function ConsoleCommand(props) {
     // @TODO add timestamp
     // @TODO add indent if necessary
     icon,
-    dom.span({className: "message-body-wrapper message-body devtools-monospace"},
-      dom.span({}, message.messageText)
+    dom.span({ className: "message-body-wrapper" },
+      dom.span({ className: "message-flex-body" },
+        dom.span({ className: "message-body devtools-monospace" },
+          message.messageText
+        )
+      )
     )
   );
 }

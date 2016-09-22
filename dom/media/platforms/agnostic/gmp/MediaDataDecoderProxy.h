@@ -74,7 +74,7 @@ public:
     mProxyCallback->Output(aData);
   }
 
-  void Error(MediaDataDecoderError aError) override;
+  void Error(const MediaResult& aError) override;
 
   void InputExhausted() override {
     mProxyCallback->InputExhausted();
@@ -140,10 +140,10 @@ public:
   // asynchronously and responded to via the MediaDataDecoderCallback.
   // Note: the nsresults returned by the proxied decoder are lost.
   RefPtr<InitPromise> Init() override;
-  nsresult Input(MediaRawData* aSample) override;
-  nsresult Flush() override;
-  nsresult Drain() override;
-  nsresult Shutdown() override;
+  void Input(MediaRawData* aSample) override;
+  void Flush() override;
+  void Drain() override;
+  void Shutdown() override;
 
   const char* GetDescriptionName() const override
   {

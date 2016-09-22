@@ -436,7 +436,7 @@ private:
   int64_t GetDownloadPosition();
 
   // Notifies the element that decoding has failed.
-  void DecodeError();
+  void DecodeError(const MediaResult& aError);
 
   // Indicate whether the media is same-origin with the element.
   void UpdateSameOriginStatus(bool aSameOrigin);
@@ -454,10 +454,6 @@ private:
 #endif
 
   void EnsureTelemetryReported();
-
-#ifdef MOZ_RAW
-  static bool IsRawEnabled();
-#endif
 
   static bool IsOggEnabled();
   static bool IsOpusEnabled();
@@ -596,6 +592,7 @@ private:
   DataArrivedEvent() override { return &mDataArrivedEvent; }
 
   void OnPlaybackEvent(MediaEventType aEvent);
+  void OnPlaybackErrorEvent(const MediaResult& aError);
 
   void OnMediaNotSeekable()
   {
@@ -735,6 +732,7 @@ protected:
   MediaEventListener mFirstFrameLoadedListener;
 
   MediaEventListener mOnPlaybackEvent;
+  MediaEventListener mOnPlaybackErrorEvent;
   MediaEventListener mOnMediaNotSeekable;
 
 protected:
@@ -826,9 +824,6 @@ protected:
 
 public:
   AbstractCanonical<media::NullableTimeUnit>* CanonicalDurationOrNull() override;
-  AbstractCanonical<Maybe<double>>* CanonicalExplicitDuration() override {
-    return &mExplicitDuration;
-  }
   AbstractCanonical<double>* CanonicalVolume() {
     return &mVolume;
   }
@@ -840,6 +835,9 @@ public:
   }
   AbstractCanonical<media::NullableTimeUnit>* CanonicalEstimatedDuration() {
     return &mEstimatedDuration;
+  }
+  AbstractCanonical<Maybe<double>>* CanonicalExplicitDuration() {
+    return &mExplicitDuration;
   }
   AbstractCanonical<PlayState>* CanonicalPlayState() {
     return &mPlayState;

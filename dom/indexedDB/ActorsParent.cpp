@@ -6222,7 +6222,7 @@ private:
   nsTHashtable<nsPtrHashKey<MutableFile>> mMutableFiles;
   RefPtr<DatabaseConnection> mConnection;
   const PrincipalInfo mPrincipalInfo;
-  const OptionalContentId mOptionalContentParentId;
+  const Maybe<ContentParentId> mOptionalContentParentId;
   const nsCString mGroup;
   const nsCString mOrigin;
   const nsCString mId;
@@ -6242,7 +6242,7 @@ public:
   // Created by OpenDatabaseOp.
   Database(Factory* aFactory,
            const PrincipalInfo& aPrincipalInfo,
-           const OptionalContentId& aOptionalContentParentId,
+           const Maybe<ContentParentId>& aOptionalContentParentId,
            const nsACString& aGroup,
            const nsACString& aOrigin,
            uint32_t aTelemetryId,
@@ -6281,11 +6281,9 @@ public:
   bool
   IsOwnedByProcess(ContentParentId aContentParentId) const
   {
-    MOZ_ASSERT(mOptionalContentParentId.type() != OptionalContentId::T__None);
-
     return
-      mOptionalContentParentId.type() == OptionalContentId::TContentParentId &&
-      mOptionalContentParentId.get_ContentParentId() == aContentParentId;
+      mOptionalContentParentId &&
+      mOptionalContentParentId.value() == aContentParentId;
   }
 
   const nsCString&
@@ -7451,7 +7449,7 @@ class OpenDatabaseOp final
 
   class VersionChangeOp;
 
-  OptionalContentId mOptionalContentParentId;
+  Maybe<ContentParentId> mOptionalContentParentId;
 
   RefPtr<FullDatabaseMetadata> mMetadata;
 
@@ -7476,10 +7474,7 @@ public:
   bool
   IsOtherProcessActor() const
   {
-    MOZ_ASSERT(mOptionalContentParentId.type() != OptionalContentId::T__None);
-
-    return mOptionalContentParentId.type() ==
-             OptionalContentId::TContentParentId;
+    return mOptionalContentParentId.isSome();
   }
 
 private:
@@ -13257,16 +13252,19 @@ Factory::Create(const LoggingInfo& aLoggingInfo)
   if (loggingInfo) {
     MOZ_ASSERT(aLoggingInfo.backgroundChildLoggingId() == loggingInfo->Id());
 #if !DISABLE_ASSERTS_FOR_FUZZING
-    NS_WARN_IF_FALSE(aLoggingInfo.nextTransactionSerialNumber() ==
-                       loggingInfo->mLoggingInfo.nextTransactionSerialNumber(),
-                     "NextTransactionSerialNumber doesn't match!");
-    NS_WARN_IF_FALSE(aLoggingInfo.nextVersionChangeTransactionSerialNumber() ==
-                       loggingInfo->mLoggingInfo.
-                         nextVersionChangeTransactionSerialNumber(),
-                     "NextVersionChangeTransactionSerialNumber doesn't match!");
-    NS_WARN_IF_FALSE(aLoggingInfo.nextRequestSerialNumber() ==
-                       loggingInfo->mLoggingInfo.nextRequestSerialNumber(),
-                     "NextRequestSerialNumber doesn't match!");
+    NS_WARNING_ASSERTION(
+      aLoggingInfo.nextTransactionSerialNumber() ==
+        loggingInfo->mLoggingInfo.nextTransactionSerialNumber(),
+      "NextTransactionSerialNumber doesn't match!");
+    NS_WARNING_ASSERTION(
+      aLoggingInfo.nextVersionChangeTransactionSerialNumber() ==
+        loggingInfo->mLoggingInfo.
+      nextVersionChangeTransactionSerialNumber(),
+      "NextVersionChangeTransactionSerialNumber doesn't match!");
+    NS_WARNING_ASSERTION(
+      aLoggingInfo.nextRequestSerialNumber() ==
+        loggingInfo->mLoggingInfo.nextRequestSerialNumber(),
+      "NextRequestSerialNumber doesn't match!");
 #endif // !DISABLE_ASSERTS_FOR_FUZZING
   } else {
     loggingInfo = new DatabaseLoggingInfo(aLoggingInfo);
@@ -13533,7 +13531,7 @@ WaitForTransactionsHelper::Run()
 
 Database::Database(Factory* aFactory,
                    const PrincipalInfo& aPrincipalInfo,
-                   const OptionalContentId& aOptionalContentParentId,
+                   const Maybe<ContentParentId>& aOptionalContentParentId,
                    const nsACString& aGroup,
                    const nsACString& aOrigin,
                    uint32_t aTelemetryId,
@@ -20758,9 +20756,7 @@ OpenDatabaseOp::OpenDatabaseOp(Factory* aFactory,
   if (mContentParent) {
     // This is a little scary but it looks safe to call this off the main thread
     // for now.
-    mOptionalContentParentId = mContentParent->ChildID();
-  } else {
-    mOptionalContentParentId = void_t();
+    mOptionalContentParentId = Some(mContentParent->ChildID());
   }
 }
 
@@ -23089,19 +23085,20 @@ CommitOp::Run()
       if (NS_SUCCEEDED(mResultCode)) {
         if (fileRefcountFunction) {
           mResultCode = fileRefcountFunction->WillCommit();
-          NS_WARN_IF_FALSE(NS_SUCCEEDED(mResultCode), "WillCommit() failed!");
+          NS_WARNING_ASSERTION(NS_SUCCEEDED(mResultCode),
+                               "WillCommit() failed!");
         }
 
         if (NS_SUCCEEDED(mResultCode)) {
           mResultCode = WriteAutoIncrementCounts();
-          NS_WARN_IF_FALSE(NS_SUCCEEDED(mResultCode),
-                           "WriteAutoIncrementCounts() failed!");
+          NS_WARNING_ASSERTION(NS_SUCCEEDED(mResultCode),
+                               "WriteAutoIncrementCounts() failed!");
 
           if (NS_SUCCEEDED(mResultCode)) {
             AssertForeignKeyConsistency(connection);
 
             mResultCode = connection->CommitWriteTransaction();
-            NS_WARN_IF_FALSE(NS_SUCCEEDED(mResultCode), "Commit failed!");
+            NS_WARNING_ASSERTION(NS_SUCCEEDED(mResultCode), "Commit failed!");
 
             if (NS_SUCCEEDED(mResultCode) &&
                 mTransaction->GetMode() == IDBTransaction::READ_WRITE_FLUSH) {
@@ -23952,8 +23949,7 @@ CreateIndexOp::InsertDataFromObjectStoreInternal(
   MOZ_ASSERT(!IndexedDatabaseManager::InLowDiskSpaceMode());
   MOZ_ASSERT(mMaybeUniqueIndexTable);
 
-  nsCOMPtr<mozIStorageConnection> storageConnection =
-    aConnection->GetStorageConnection();
+  DebugOnly<void*> storageConnection = aConnection->GetStorageConnection();
   MOZ_ASSERT(storageConnection);
 
   DatabaseConnection::CachedStatement stmt;

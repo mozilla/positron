@@ -248,7 +248,7 @@ nsThreadManagerGetSingleton(nsISupports* aOuter,
     return NS_ERROR_NO_AGGREGATION;
   }
 
-  return nsThreadManager::get()->QueryInterface(aIID, aInstancePtr);
+  return nsThreadManager::get().QueryInterface(aIID, aInstancePtr);
 }
 
 NS_GENERIC_FACTORY_CONSTRUCTOR(nsThreadPool)
@@ -542,7 +542,7 @@ NS_InitXPCOM2(nsIServiceManager** aResult,
   }
 
   // Establish the main thread here.
-  rv = nsThreadManager::get()->Init();
+  rv = nsThreadManager::get().Init();
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }
@@ -775,7 +775,7 @@ NS_InitMinimalXPCOM()
   char aLocal;
   profiler_init(&aLocal);
 
-  nsresult rv = nsThreadManager::get()->Init();
+  nsresult rv = nsThreadManager::get().Init();
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }
@@ -914,7 +914,7 @@ ShutdownXPCOM(nsIServiceManager* aServMgr)
     // Shutdown all remaining threads.  This method does not return until
     // all threads created using the thread manager (with the exception of
     // the main thread) have exited.
-    nsThreadManager::get()->Shutdown();
+    nsThreadManager::get().Shutdown();
 
     NS_ProcessPendingEvents(thread);
 
@@ -984,7 +984,13 @@ ShutdownXPCOM(nsIServiceManager* aServMgr)
     moduleLoaders = nullptr;
   }
 
-  nsCycleCollector_shutdown();
+  bool shutdownCollect;
+#ifdef NS_FREE_PERMANENT_DATA
+  shutdownCollect = true;
+#else
+  shutdownCollect = !!PR_GetEnv("MOZ_CC_RUN_DURING_SHUTDOWN");
+#endif
+  nsCycleCollector_shutdown(shutdownCollect);
 
   PROFILER_MARKER("Shutdown xpcom");
   // If we are doing any shutdown checks, poison writes.
@@ -1013,11 +1019,11 @@ ShutdownXPCOM(nsIServiceManager* aServMgr)
 #ifdef MOZ_ENABLE_PROFILER_SPS
   // In optimized builds we don't do shutdown collections by default, so
   // uncollected (garbage) objects may keep the nsXPConnect singleton alive,
-  // and its XPCJSRuntime along with it. However, we still destroy various
+  // and its XPCJSContext along with it. However, we still destroy various
   // bits of state in JS_ShutDown(), so we need to make sure the profiler
   // can't access them when it shuts down. This call nulls out the
-  // JS pseudo-stack's internal reference to the main thread JSRuntime,
-  // duplicating the call in XPCJSRuntime::~XPCJSRuntime() in case that
+  // JS pseudo-stack's internal reference to the main thread JSContext,
+  // duplicating the call in XPCJSContext::~XPCJSContext() in case that
   // never fired.
   if (PseudoStack* stack = mozilla_get_pseudo_stack()) {
     stack->sampleContext(nullptr);

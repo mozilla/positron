@@ -19,6 +19,7 @@
 #include "nsCSSKeywords.h"
 #include "mozilla/CSSEnabledState.h"
 #include "mozilla/UseCounter.h"
+#include "mozilla/EnumTypeTraits.h"
 
 // Length of the "--" prefix on custom names (such as custom property names,
 // and, in the future, custom media query names).
@@ -203,7 +204,7 @@ static_assert((CSS_PROPERTY_PARSE_PROPERTY_MASK &
 // Is this property (which must be a shorthand) really an alias?
 #define CSS_PROPERTY_IS_ALIAS                     (1<<17)
 
-// Does the property apply to ::-moz-placeholder?
+// Does the property apply to ::placeholder?
 #define CSS_PROPERTY_APPLIES_TO_PLACEHOLDER       (1<<18)
 
 // This property is allowed in an @page rule.
@@ -314,6 +315,9 @@ enum nsStyleAnimType {
   // nscolor values
   eStyleAnimType_Color,
 
+  // StyleComplexColor values
+  eStyleAnimType_ComplexColor,
+
   // nsStyleSVGPaint values
   eStyleAnimType_PaintServer,
 
@@ -326,24 +330,6 @@ enum nsStyleAnimType {
   // property not animatable
   eStyleAnimType_None
 };
-
-namespace mozilla {
-
-// Type trait that determines whether the integral or enum type Type can fit
-// within the integral type Storage without loss.
-template<typename T, typename Storage>
-struct IsEnumFittingWithin
-  : IntegralConstant<
-      bool,
-      std::is_integral<Storage>::value &&
-      std::numeric_limits<typename std::underlying_type<T>::type>::min() >=
-        std::numeric_limits<Storage>::min() &&
-      std::numeric_limits<typename std::underlying_type<T>::type>::max() <=
-        std::numeric_limits<Storage>::max()
-    >
-{};
-
-} // namespace mozilla
 
 class nsCSSProps {
 public:
@@ -366,7 +352,7 @@ public:
       : mKeyword(aKeyword)
       , mValue(static_cast<int16_t>(aValue))
     {
-      static_assert(mozilla::IsEnumFittingWithin<T, int16_t>::value,
+      static_assert(mozilla::EnumTypeFitsWithin<T, int16_t>::value,
                     "aValue must be an enum that fits within mValue");
     }
 
@@ -452,7 +438,7 @@ public:
   static nsCSSKeyword ValueToKeywordEnum(T aValue,
                                          const KTableEntry aTable[])
   {
-    static_assert(mozilla::IsEnumFittingWithin<T, int16_t>::value,
+    static_assert(mozilla::EnumTypeFitsWithin<T, int16_t>::value,
                   "aValue must be an enum that fits within KTableEntry::mValue");
     return ValueToKeywordEnum(static_cast<int16_t>(aValue), aTable);
   }
@@ -464,7 +450,7 @@ public:
   static const nsAFlatCString& ValueToKeyword(T aValue,
                                               const KTableEntry aTable[])
   {
-    static_assert(mozilla::IsEnumFittingWithin<T, int16_t>::value,
+    static_assert(mozilla::EnumTypeFitsWithin<T, int16_t>::value,
                   "aValue must be an enum that fits within KTableEntry::mValue");
     return ValueToKeyword(static_cast<int16_t>(aValue), aTable);
   }

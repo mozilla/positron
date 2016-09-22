@@ -84,6 +84,7 @@ using mozilla::Unused;
 typedef Vector<uint32_t, 0, SystemAllocPolicy> Uint32Vector;
 
 class Code;
+class CodeRange;
 class Memory;
 class Module;
 class Instance;
@@ -775,109 +776,20 @@ WASM_DECLARE_POD_VECTOR(CallSite, CallSiteVector)
 
 class CallSiteAndTarget : public CallSite
 {
-    uint32_t targetIndex_;
+    uint32_t funcDefIndex_;
 
   public:
-    CallSiteAndTarget(CallSite cs, uint32_t targetIndex)
-      : CallSite(cs), targetIndex_(targetIndex)
+    CallSiteAndTarget(CallSite cs, uint32_t funcDefIndex)
+      : CallSite(cs), funcDefIndex_(funcDefIndex)
     { }
 
-    static const uint32_t NOT_INTERNAL = UINT32_MAX;
+    static const uint32_t NOT_DEFINITION = UINT32_MAX;
 
-    bool isInternal() const { return targetIndex_ != NOT_INTERNAL; }
-    uint32_t targetIndex() const { MOZ_ASSERT(isInternal()); return targetIndex_; }
+    bool isDefinition() const { return funcDefIndex_ != NOT_DEFINITION; }
+    uint32_t funcDefIndex() const { MOZ_ASSERT(isDefinition()); return funcDefIndex_; }
 };
 
 typedef Vector<CallSiteAndTarget, 0, SystemAllocPolicy> CallSiteAndTargetVector;
-
-// Metadata for a bounds check that may need patching later.
-
-class BoundsCheck
-{
-  public:
-    BoundsCheck() = default;
-
-    explicit BoundsCheck(uint32_t cmpOffset)
-      : cmpOffset_(cmpOffset)
-    { }
-
-    uint8_t* patchAt(uint8_t* code) const { return code + cmpOffset_; }
-    void offsetBy(uint32_t offset) { cmpOffset_ += offset; }
-
-  private:
-    uint32_t cmpOffset_; // absolute offset of the comparison
-};
-
-// Summarizes a heap access made by wasm code that needs to be patched later
-// and/or looked up by the wasm signal handlers. Different architectures need
-// to know different things (x64: offset and length, ARM: where to patch in
-// heap length, x86: where to patch in heap length and base).
-
-#if defined(JS_CODEGEN_X86)
-class MemoryAccess
-{
-    uint32_t nextInsOffset_;
-
-  public:
-    MemoryAccess() = default;
-
-    explicit MemoryAccess(uint32_t nextInsOffset)
-      : nextInsOffset_(nextInsOffset)
-    { }
-
-    void* patchMemoryPtrImmAt(uint8_t* code) const { return code + nextInsOffset_; }
-    void offsetBy(uint32_t offset) { nextInsOffset_ += offset; }
-};
-#elif defined(JS_CODEGEN_X64)
-class MemoryAccess
-{
-    uint32_t insnOffset_;
-    uint8_t offsetWithinWholeSimdVector_; // if is this e.g. the Z of an XYZ
-    bool throwOnOOB_;                     // should we throw on OOB?
-    bool wrapOffset_;                     // should we wrap the offset on OOB?
-
-  public:
-    enum OutOfBoundsBehavior {
-        Throw,
-        CarryOn,
-    };
-    enum WrappingBehavior {
-        WrapOffset,
-        DontWrapOffset,
-    };
-
-    MemoryAccess() = default;
-
-    MemoryAccess(uint32_t insnOffset, OutOfBoundsBehavior onOOB, WrappingBehavior onWrap,
-                 uint32_t offsetWithinWholeSimdVector = 0)
-      : insnOffset_(insnOffset),
-        offsetWithinWholeSimdVector_(offsetWithinWholeSimdVector),
-        throwOnOOB_(onOOB == OutOfBoundsBehavior::Throw),
-        wrapOffset_(onWrap == WrappingBehavior::WrapOffset)
-    {
-        MOZ_ASSERT(offsetWithinWholeSimdVector_ == offsetWithinWholeSimdVector, "fits in uint8");
-    }
-
-    uint32_t insnOffset() const { return insnOffset_; }
-    uint32_t offsetWithinWholeSimdVector() const { return offsetWithinWholeSimdVector_; }
-    bool throwOnOOB() const { return throwOnOOB_; }
-    bool wrapOffset() const { return wrapOffset_; }
-
-    void offsetBy(uint32_t offset) { insnOffset_ += offset; }
-};
-#elif defined(JS_CODEGEN_ARM) || defined(JS_CODEGEN_ARM64) || \
-      defined(JS_CODEGEN_MIPS32) || defined(JS_CODEGEN_MIPS64) || \
-      defined(JS_CODEGEN_NONE)
-// Nothing! We just want bounds checks on these platforms.
-class MemoryAccess {
-  public:
-    void offsetBy(uint32_t) { MOZ_CRASH(); }
-    uint32_t insnOffset() const { MOZ_CRASH(); }
-};
-#endif
-
-WASM_DECLARE_POD_VECTOR(MemoryAccess, MemoryAccessVector)
-WASM_DECLARE_POD_VECTOR(BoundsCheck, BoundsCheckVector)
 
 // A wasm::SymbolicAddress represents a pointer to a well-known function or
 // object that is embedded in wasm code. Since wasm code is serialized and
@@ -938,6 +850,8 @@ enum class SymbolicAddress
     TruncateDoubleToUint64,
     Uint64ToFloatingPoint,
     Int64ToFloatingPoint,
+    GrowMemory,
+    CurrentMemory,
     Limit
 };
 
@@ -961,8 +875,10 @@ enum class Trap
     OutOfBounds,
     // Unaligned memory access.
     UnalignedAccess,
-    // Bad signature for an indirect call.
-    BadIndirectCall,
+    // call_indirect to null.
+    IndirectCallToNull,
+    // call_indirect signature mismatch.
+    IndirectCallBadSig,
 
     // (asm.js only) SIMD float to int conversion failed because the input
     // wasn't in bounds.
@@ -985,7 +901,8 @@ enum class JumpTarget
     IntegerDivideByZero = unsigned(Trap::IntegerDivideByZero),
     OutOfBounds = unsigned(Trap::OutOfBounds),
     UnalignedAccess = unsigned(Trap::UnalignedAccess),
-    BadIndirectCall = unsigned(Trap::BadIndirectCall),
+    IndirectCallToNull = unsigned(Trap::IndirectCallToNull),
+    IndirectCallBadSig = unsigned(Trap::IndirectCallBadSig),
     ImpreciseSimdConversion = unsigned(Trap::ImpreciseSimdConversion),
     // Non-traps
     StackOverflow,
@@ -995,28 +912,12 @@ enum class JumpTarget
 
 typedef EnumeratedArray<JumpTarget, JumpTarget::Limit, Uint32Vector> JumpSiteArray;
 
-// The SignalUsage struct captures global parameters that affect all wasm code
-// generation. It also currently is the single source of truth for whether or
-// not to use signal handlers for different purposes.
-
-struct SignalUsage
-{
-    // NB: these fields are serialized as a POD in Assumptions.
-    bool forOOB;
-    bool forInterrupt;
-
-    SignalUsage();
-    bool operator==(SignalUsage rhs) const;
-    bool operator!=(SignalUsage rhs) const { return !(*this == rhs); }
-};
-
 // Assumptions captures ambient state that must be the same when compiling and
 // deserializing a module for the compiled code to be valid. If it's not, then
 // the module must be recompiled from scratch.
 
 struct Assumptions
 {
-    SignalUsage           usesSignal;
     uint32_t              cpuId;
     JS::BuildIdCharVector buildId;
     bool                  newFormat;
@@ -1044,6 +945,14 @@ enum ModuleKind
     AsmJS
 };
 
+// Represents the resizable limits of memories and tables.
+
+struct ResizableLimits
+{
+    uint32_t initial;
+    Maybe<uint32_t> maximum;
+};
+
 // TableDesc describes a table as well as the offset of the table's base pointer
 // in global memory. Currently, wasm only has "any function" and asm.js only
 // "typed function".
@@ -1059,105 +968,18 @@ struct TableDesc
     TableKind kind;
     bool external;
     uint32_t globalDataOffset;
-    uint32_t initial;
-    uint32_t maximum;
+    ResizableLimits limits;
 
-    TableDesc() { PodZero(this); }
+    TableDesc() = default;
+    TableDesc(TableKind kind, ResizableLimits limits)
+     : kind(kind),
+       external(false),
+       globalDataOffset(UINT32_MAX),
+       limits(limits)
+    {}
 };
 
-WASM_DECLARE_POD_VECTOR(TableDesc, TableDescVector)
-
-// CalleeDesc describes how to compile one of the variety of asm.js/wasm calls.
-// This is hoisted into WasmTypes.h for sharing between Ion and Baseline.
-
-class CalleeDesc
-{
-  public:
-    enum Which { Internal, Import, WasmTable, AsmJSTable, Builtin };
-
-  private:
-    Which which_;
-    union U {
-        U() {}
-        uint32_t internalFuncIndex_;
-        struct {
-            uint32_t globalDataOffset_;
-        } import;
-        struct {
-            TableDesc desc_;
-            SigIdDesc sigId_;
-        } table;
-        SymbolicAddress builtin_;
-    } u;
-
-  public:
-    CalleeDesc() {}
-    static CalleeDesc internal(uint32_t callee) {
-        CalleeDesc c;
-        c.which_ = Internal;
-        c.u.internalFuncIndex_ = callee;
-        return c;
-    }
-    static CalleeDesc import(uint32_t globalDataOffset) {
-        CalleeDesc c;
-        c.which_ = Import;
-        c.u.import.globalDataOffset_ = globalDataOffset;
-        return c;
-    }
-    static CalleeDesc wasmTable(const TableDesc& desc, SigIdDesc sigId) {
-        CalleeDesc c;
-        c.which_ = WasmTable;
-        c.u.table.desc_ = desc;
-        c.u.table.sigId_ = sigId;
-        return c;
-    }
-    static CalleeDesc asmJSTable(const TableDesc& desc) {
-        CalleeDesc c;
-        c.which_ = AsmJSTable;
-        c.u.table.desc_ = desc;
-        return c;
-    }
-    static CalleeDesc builtin(SymbolicAddress callee) {
-        CalleeDesc c;
-        c.which_ = Builtin;
-        c.u.builtin_ = callee;
-        return c;
-    }
-    Which which() const {
-        return which_;
-    }
-    uint32_t internalFuncIndex() const {
-        MOZ_ASSERT(which_ == Internal);
-        return u.internalFuncIndex_;
-    }
-    uint32_t importGlobalDataOffset() const {
-        MOZ_ASSERT(which_ == Import);
-        return u.import.globalDataOffset_;
-    }
-    bool isTable() const {
-        return which_ == WasmTable || which_ == AsmJSTable;
-    }
-    uint32_t tableGlobalDataOffset() const {
-        MOZ_ASSERT(isTable());
-        return u.table.desc_.globalDataOffset;
-    }
-    uint32_t wasmTableLength() const {
-        MOZ_ASSERT(which_ == WasmTable);
-        return u.table.desc_.initial;
-    }
-    bool wasmTableIsExternal() const {
-        MOZ_ASSERT(which_ == WasmTable);
-        return u.table.desc_.external;
-    }
-    SigIdDesc wasmTableSigId() const {
-        MOZ_ASSERT(which_ == WasmTable);
-        return u.table.sigId_;
-    }
-    SymbolicAddress builtin() const {
-        MOZ_ASSERT(which_ == Builtin);
-        return u.builtin_;
-    }
-};
+typedef Vector<TableDesc, 0, SystemAllocPolicy> TableDescVector;
 
 // ExportArg holds the unboxed operands to the wasm entry trampoline which can
 // be called through an ExportFuncPtr.
@@ -1228,9 +1050,23 @@ struct FuncImportTls
     static_assert(sizeof(GCPtrObject) == sizeof(void*), "for JIT access");
 };
 
-// When a table can be shared between instances (it is "external"), the internal
-// representation is an array of ExternalTableElem instead of just an array of
-// code pointers.
+// TableTls describes the region of wasm global memory allocated in the
+// instance's thread-local storage which is accessed directly from JIT code
+// to bounds-check and index the table.
+
+struct TableTls
+{
+    // Length of the table in number of elements (not bytes).
+    uint32_t length;
+
+    // Pointer to the array of elements (of type either ExternalTableElem or
+    // void*).
+    void* base;
+};
+
+// When a table can contain functions from other instances (it is "external"),
+// the internal representation is an array of ExternalTableElem instead of just
+// an array of code pointers.
 
 struct ExternalTableElem
 {
@@ -1246,16 +1082,273 @@ struct ExternalTableElem
     TlsData* tls;
 };
 
-// Constants:
+// CalleeDesc describes how to compile one of the variety of asm.js/wasm calls.
+// This is hoisted into WasmTypes.h for sharing between Ion and Baseline.
+
+class CalleeDesc
+{
+  public:
+    enum Which {
+        // Calls a function defined in the same module by its index.
+        Definition,
+
+        // Calls the import identified by the offset of its FuncImportTls in
+        // thread-local data.
+        Import,
+
+        // Calls a WebAssembly table (heterogeneous, index must be bounds
+        // checked, callee instance depends on TableDesc).
+        WasmTable,
+
+        // Calls an asm.js table (homogeneous, masked index, same-instance).
+        AsmJSTable,
+
+        // Call a C++ function identified by SymbolicAddress.
+        Builtin,
+
+        // Like Builtin, but automatically passes Instance* as first argument.
+        BuiltinInstanceMethod
+    };
+
+  private:
+    Which which_;
+    union U {
+        U() {}
+        uint32_t funcDefIndex_;
+        struct {
+            uint32_t globalDataOffset_;
+        } import;
+        struct {
+            uint32_t globalDataOffset_;
+            bool external_;
+            SigIdDesc sigId_;
+        } table;
+        SymbolicAddress builtin_;
+    } u;
+
+  public:
+    CalleeDesc() {}
+    static CalleeDesc definition(uint32_t funcDefIndex) {
+        CalleeDesc c;
+        c.which_ = Definition;
+        c.u.funcDefIndex_ = funcDefIndex;
+        return c;
+    }
+    static CalleeDesc import(uint32_t globalDataOffset) {
+        CalleeDesc c;
+        c.which_ = Import;
+        c.u.import.globalDataOffset_ = globalDataOffset;
+        return c;
+    }
+    static CalleeDesc wasmTable(const TableDesc& desc, SigIdDesc sigId) {
+        CalleeDesc c;
+        c.which_ = WasmTable;
+        c.u.table.globalDataOffset_ = desc.globalDataOffset;
+        c.u.table.external_ = desc.external;
+        c.u.table.sigId_ = sigId;
+        return c;
+    }
+    static CalleeDesc asmJSTable(const TableDesc& desc) {
+        CalleeDesc c;
+        c.which_ = AsmJSTable;
+        c.u.table.globalDataOffset_ = desc.globalDataOffset;
+        return c;
+    }
+    static CalleeDesc builtin(SymbolicAddress callee) {
+        CalleeDesc c;
+        c.which_ = Builtin;
+        c.u.builtin_ = callee;
+        return c;
+    }
+    static CalleeDesc builtinInstanceMethod(SymbolicAddress callee) {
+        CalleeDesc c;
+        c.which_ = BuiltinInstanceMethod;
+        c.u.builtin_ = callee;
+        return c;
+    }
+    Which which() const {
+        return which_;
+    }
+    uint32_t funcDefIndex() const {
+        MOZ_ASSERT(which_ == Definition);
+        return u.funcDefIndex_;
+    }
+    uint32_t importGlobalDataOffset() const {
+        MOZ_ASSERT(which_ == Import);
+        return u.import.globalDataOffset_;
+    }
+    bool isTable() const {
+        return which_ == WasmTable || which_ == AsmJSTable;
+    }
+    uint32_t tableLengthGlobalDataOffset() const {
+        MOZ_ASSERT(isTable());
+        return u.table.globalDataOffset_ + offsetof(TableTls, length);
+    }
+    uint32_t tableBaseGlobalDataOffset() const {
+        MOZ_ASSERT(isTable());
+        return u.table.globalDataOffset_ + offsetof(TableTls, base);
+    }
+    bool wasmTableIsExternal() const {
+        MOZ_ASSERT(which_ == WasmTable);
+        return u.table.external_;
+    }
+    SigIdDesc wasmTableSigId() const {
+        MOZ_ASSERT(which_ == WasmTable);
+        return u.table.sigId_;
+    }
+    SymbolicAddress builtin() const {
+        MOZ_ASSERT(which_ == Builtin || which_ == BuiltinInstanceMethod);
+        return u.builtin_;
+    }
+};
+
+// Because ARM has a fixed-width instruction encoding, ARM can only express a
+// limited subset of immediates (in a single instruction).
+
+extern bool
+IsValidARMImmediate(uint32_t i);
+
+extern uint32_t
+RoundUpToNextValidARMImmediate(uint32_t i);
 
 // The WebAssembly spec hard-codes the virtual page size to be 64KiB and
-// requires linear memory to always be a multiple of 64KiB.
+// requires the size of linear memory to always be a multiple of 64KiB.
+
 static const unsigned PageSize = 64 * 1024;
 
-#ifdef ASMJS_MAY_USE_SIGNAL_HANDLERS_FOR_OOB
-static const uint64_t Uint32Range = uint64_t(UINT32_MAX) + 1;
-static const uint64_t MappedSize = 2 * Uint32Range + PageSize;
+// Bounds checks always compare the base of the memory access with the bounds
+// check limit. If the memory access is unaligned, this means that, even if the
+// bounds check succeeds, a few bytes of the access can extend past the end of
+// memory. To guard against this, extra space is included in the guard region to
+// catch the overflow. MaxMemoryAccessSize is a conservative approximation of
+// the maximum guard space needed to catch all unaligned overflows.
+
+static const unsigned MaxMemoryAccessSize = sizeof(Val);
+
+#ifdef JS_CODEGEN_X64
+
+// All other code should use WASM_HUGE_MEMORY instead of JS_CODEGEN_X64 so that
+// it is easy to use the huge-mapping optimization for other 64-bit platforms in
+// the future.
+# define WASM_HUGE_MEMORY
+
+// On WASM_HUGE_MEMORY platforms, every asm.js or WebAssembly memory
+// unconditionally allocates a huge region of virtual memory of size
+// wasm::HugeMappedSize. This allows all memory resizing to work without
+// reallocation and provides enough guard space for all offsets to be folded
+// into memory accesses.
+
+static const uint64_t IndexRange = uint64_t(UINT32_MAX) + 1;
+static const uint64_t OffsetGuardLimit = uint64_t(INT32_MAX) + 1;
+static const uint64_t UnalignedGuardPage = PageSize;
+static const uint64_t HugeMappedSize = IndexRange + OffsetGuardLimit + UnalignedGuardPage;
+
+static_assert(MaxMemoryAccessSize <= UnalignedGuardPage, "rounded up to static page size");
+
+#else // !WASM_HUGE_MEMORY
+
+// On !WASM_HUGE_MEMORY platforms:
+//  - To avoid OOM in ArrayBuffer::prepareForAsmJS, asm.js continues to use the
+//    original ArrayBuffer allocation which has no guard region at all.
+//  - For WebAssembly memories, an additional GuardSize is mapped after the
+//    accessible region of the memory to catch folded (base+offset) accesses
+//    where `offset < OffsetGuardLimit` as well as the overflow from unaligned
+//    accesses, as described above for MaxMemoryAccessSize.
+
+static const size_t OffsetGuardLimit = PageSize - MaxMemoryAccessSize;
+static const size_t GuardSize = PageSize;
+
+// Return whether the given immediate satisfies the constraints of the platform
+// (viz. that, on ARM, IsValidARMImmediate).
+
+extern bool
+IsValidBoundsCheckImmediate(uint32_t i);
+
+// For a given WebAssembly/asm.js max size, return the number of bytes to
+// map which will necessarily be a multiple of the system page size and greater
+// than maxSize. For a returned mappedSize:
+//   boundsCheckLimit = mappedSize - GuardSize
+//   IsValidBoundsCheckImmediate(boundsCheckLimit)
+
+extern size_t
+ComputeMappedSize(uint32_t maxSize);
+
+#endif // WASM_HUGE_MEMORY
+
+// Metadata for bounds check instructions that are patched at runtime with the
+// appropriate bounds check limit. On WASM_HUGE_MEMORY platforms for wasm (and
+// SIMD/Atomic) bounds checks, no BoundsCheck is created: the signal handler
+// catches everything. On !WASM_HUGE_MEMORY, a BoundsCheck is created for each
+// memory access (except when statically eliminated by optimizations) so that
+// the length can be patched in as an immediate. This requires that the bounds
+// check limit IsValidBoundsCheckImmediate.
+
+class BoundsCheck
+{
+  public:
+    BoundsCheck() = default;
+
+    explicit BoundsCheck(uint32_t cmpOffset)
+      : cmpOffset_(cmpOffset)
+    { }
+
+    uint8_t* patchAt(uint8_t* code) const { return code + cmpOffset_; }
+    void offsetBy(uint32_t offset) { cmpOffset_ += offset; }
+
+  private:
+    uint32_t cmpOffset_;
+};
+
+// Metadata for memory accesses. On WASM_HUGE_MEMORY platforms, only
+// (non-SIMD/Atomic) asm.js loads and stores create a MemoryAccess so that the
+// signal handler can implement the semantically-correct wraparound logic; the
+// rest simply redirect to the out-of-bounds stub in the signal handler. On x86,
+// the base address of memory is baked into each memory access instruction so
+// the MemoryAccess records the location of each for patching. On all other
+// platforms, no MemoryAccess is created.
+
+#ifdef WASM_HUGE_MEMORY
+class MemoryAccess
+{
+    uint32_t insnOffset_;
+
+  public:
+    MemoryAccess() = default;
+    explicit MemoryAccess(uint32_t insnOffset)
+      : insnOffset_(insnOffset)
+    {}
+
+    uint32_t insnOffset() const { return insnOffset_; }
+
+    void offsetBy(uint32_t offset) { insnOffset_ += offset; }
+};
+#elif defined(JS_CODEGEN_X86)
+class MemoryAccess
+{
+    uint32_t nextInsOffset_;
+
+  public:
+    MemoryAccess() = default;
+    explicit MemoryAccess(uint32_t nextInsOffset)
+      : nextInsOffset_(nextInsOffset)
+    { }
+
+    void* patchMemoryPtrImmAt(uint8_t* code) const { return code + nextInsOffset_; }
+    void offsetBy(uint32_t offset) { nextInsOffset_ += offset; }
+};
+#else
+class MemoryAccess {
+  public:
+    MemoryAccess() { MOZ_CRASH(); }
+    void offsetBy(uint32_t) { MOZ_CRASH(); }
+    uint32_t insnOffset() const { MOZ_CRASH(); }
+};
 #endif
+
+WASM_DECLARE_POD_VECTOR(MemoryAccess, MemoryAccessVector)
+WASM_DECLARE_POD_VECTOR(BoundsCheck, BoundsCheckVector)
+
+// Constants:
 
 static const unsigned NaN64GlobalDataOffset       = 0;
 static const unsigned NaN32GlobalDataOffset       = NaN64GlobalDataOffset + sizeof(double);

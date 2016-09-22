@@ -154,9 +154,10 @@ class ParseContext : public Nestable<ParseContext>
         // name from all scopes in pc's scope stack.
         static void removeVarForAnnexBLexicalFunction(ParseContext* pc, JSAtom* name);
 
-        // Remove a simple catch parameter name. Used to implement the odd
-        // semantics of Annex B.3.5.
-        void removeSimpleCatchParameter(ParseContext* pc, JSAtom* name);
+        // Add and remove catch parameter names. Used to implement the odd
+        // semantics of catch bodies.
+        bool addCatchParameters(ParseContext* pc, Scope& catchParamScope);
+        void removeCatchParameters(ParseContext* pc, Scope& catchParamScope);
 
         void useAsVarScope(ParseContext* pc) {
             MOZ_ASSERT(!pc->varScope_);
@@ -938,7 +939,8 @@ class Parser final : private JS::AutoGCRooter, public StrictModeGetter
 
   public:
     /* Public entry points for parsing. */
-    Node statement(YieldHandling yieldHandling, bool canHaveDirectives = false);
+    Node statement(YieldHandling yieldHandling);
+    Node statementListItem(YieldHandling yieldHandling, bool canHaveDirectives = false);
 
     bool maybeParseDirective(Node list, Node pn, bool* cont);
 
@@ -979,10 +981,14 @@ class Parser final : private JS::AutoGCRooter, public StrictModeGetter
     // Determine whether |yield| is a valid name in the current context, or
     // whether it's prohibited due to strictness, JS version, or occurrence
     // inside a star generator.
-    bool checkYieldNameValidity();
     bool yieldExpressionsSupported() {
         return versionNumber() >= JSVERSION_1_7 || pc->isGenerator();
     }
+
+    // Match the current token against the BindingIdentifier production with
+    // the given Yield parameter.  If there is no match, report a syntax
+    // error.
+    PropertyName* bindingIdentifier(YieldHandling yieldHandling);
 
     virtual bool strictMode() { return pc->sc()->strict(); }
     bool setLocalStrictMode(bool strict) {
@@ -1017,11 +1023,11 @@ class Parser final : private JS::AutoGCRooter, public StrictModeGetter
      */
     Node functionStmt(YieldHandling yieldHandling, DefaultHandling defaultHandling);
     Node functionExpr(InvokedPrediction invoked = PredictUninvoked);
-    Node statements(YieldHandling yieldHandling);
+
+    Node statementList(YieldHandling yieldHandling);
 
     Node blockStatement(YieldHandling yieldHandling,
                         unsigned errorNumber = JSMSG_CURLY_IN_COMPOUND);
-    Node ifStatement(YieldHandling yieldHandling);
     Node doWhileStatement(YieldHandling yieldHandling);
     Node whileStatement(YieldHandling yieldHandling);
 
@@ -1039,13 +1045,26 @@ class Parser final : private JS::AutoGCRooter, public StrictModeGetter
     Node breakStatement(YieldHandling yieldHandling);
     Node returnStatement(YieldHandling yieldHandling);
     Node withStatement(YieldHandling yieldHandling);
-    Node labeledStatement(YieldHandling yieldHandling);
     Node throwStatement(YieldHandling yieldHandling);
     Node tryStatement(YieldHandling yieldHandling);
-    Node catchBlockStatement(YieldHandling yieldHandling, HandlePropertyName simpleCatchParam);
+    Node catchBlockStatement(YieldHandling yieldHandling, ParseContext::Scope& catchParamScope);
     Node debuggerStatement();
 
+    Node variableStatement(YieldHandling yieldHandling);
+
+    Node labeledStatement(YieldHandling yieldHandling);
+    Node labeledItem(YieldHandling yieldHandling);
+
+    Node ifStatement(YieldHandling yieldHandling);
+    Node consequentOrAlternative(YieldHandling yieldHandling);
+
+    // While on a |let| TOK_NAME token, examine |next|.  Indicate whether
+    // |next|, the next token already gotten with modifier TokenStream::None,
+    // continues a LexicalDeclaration.
+    bool nextTokenContinuesLetDeclaration(TokenKind next, YieldHandling yieldHandling);
+
     Node lexicalDeclaration(YieldHandling yieldHandling, bool isConst);
+
     Node importDeclaration();
     Node exportDeclaration();
     Node expressionStatement(YieldHandling yieldHandling,
@@ -1191,7 +1210,21 @@ class Parser final : private JS::AutoGCRooter, public StrictModeGetter
     Node classDefinition(YieldHandling yieldHandling, ClassContext classContext,
                          DefaultHandling defaultHandling);
 
-    Node identifierName(YieldHandling yieldHandling);
+    PropertyName* labelOrIdentifierReference(YieldHandling yieldHandling);
+
+    PropertyName* labelIdentifier(YieldHandling yieldHandling) {
+        return labelOrIdentifierReference(yieldHandling);
+    }
+
+    PropertyName* identifierReference(YieldHandling yieldHandling) {
+        return labelOrIdentifierReference(yieldHandling);
+    }
+
+    PropertyName* importedBinding() {
+        return bindingIdentifier(YieldIsName);
+    }
+
+    Node identifierReference(Handle<PropertyName*> name);
 
     bool matchLabel(YieldHandling yieldHandling, MutableHandle<PropertyName*> label);
 
@@ -1225,7 +1258,7 @@ class Parser final : private JS::AutoGCRooter, public StrictModeGetter
     bool declareDotGeneratorName();
 
     bool checkFunctionDefinition(HandleAtom funAtom, Node pn, FunctionSyntaxKind kind,
-                                 bool *tryAnnexB);
+                                 GeneratorKind generatorKind, bool* tryAnnexB);
     bool skipLazyInnerFunction(Node pn, bool tryAnnexB);
     bool innerFunction(Node pn, ParseContext* outerpc, HandleFunction fun,
                        InHandling inHandling, FunctionSyntaxKind kind,
@@ -1238,15 +1271,6 @@ class Parser final : private JS::AutoGCRooter, public StrictModeGetter
     bool finishFunctionScopes();
     bool finishFunction();
     bool leaveInnerFunction(ParseContext* outerpc);
-
-    // Use when the current token is TOK_NAME and is known to be 'let'.
-    bool shouldParseLetDeclaration(bool* parseDeclOut);
-
-    // Use when the lookahead token is TOK_NAME and is known to be 'let'. If a
-    // let declaration should be parsed, the TOK_NAME token of 'let' is
-    // consumed. Otherwise, the current token remains the TOK_NAME token of
-    // 'let'.
-    bool peekShouldParseLetDeclaration(bool* parseDeclOut, TokenStream::Modifier modifier);
 
   public:
     enum FunctionCallBehavior {
@@ -1270,6 +1294,8 @@ class Parser final : private JS::AutoGCRooter, public StrictModeGetter
                                        bool disallowDuplicateParams = false,
                                        bool* duplicatedParam = nullptr);
     bool noteDestructuredPositionalFormalParameter(Node fn, Node destruct);
+    mozilla::Maybe<DeclarationKind> isVarRedeclaredInEval(HandlePropertyName name,
+                                                          DeclarationKind kind);
     bool tryDeclareVar(HandlePropertyName name, DeclarationKind kind,
                        mozilla::Maybe<DeclarationKind>* redeclaredKind);
     bool tryDeclareVarForAnnexBLexicalFunction(HandlePropertyName name, bool* tryAnnexB);
@@ -1282,11 +1308,9 @@ class Parser final : private JS::AutoGCRooter, public StrictModeGetter
     // Required on Scope exit.
     bool propagateFreeNamesAndMarkClosedOverBindings(ParseContext::Scope& scope);
 
-    mozilla::Maybe<GlobalScope::Data*> newGlobalScopeData(ParseContext::Scope& scope,
-                                                          uint32_t* functionBindingEnd);
+    mozilla::Maybe<GlobalScope::Data*> newGlobalScopeData(ParseContext::Scope& scope);
     mozilla::Maybe<ModuleScope::Data*> newModuleScopeData(ParseContext::Scope& scope);
-    mozilla::Maybe<EvalScope::Data*> newEvalScopeData(ParseContext::Scope& scope,
-                                                      uint32_t* functionBindingEnd);
+    mozilla::Maybe<EvalScope::Data*> newEvalScopeData(ParseContext::Scope& scope);
     mozilla::Maybe<FunctionScope::Data*> newFunctionScopeData(ParseContext::Scope& scope,
                                                               bool hasParameterExprs);
     mozilla::Maybe<VarScope::Data*> newVarScopeData(ParseContext::Scope& scope);
@@ -1313,7 +1337,7 @@ class Parser final : private JS::AutoGCRooter, public StrictModeGetter
     bool checkDestructuringObject(Node objectPattern, mozilla::Maybe<DeclarationKind> maybeDecl);
     bool checkDestructuringName(Node expr, mozilla::Maybe<DeclarationKind> maybeDecl);
 
-    bool makeSetCall(Node node, unsigned errnum);
+    bool checkAssignmentToCall(Node node, unsigned errnum);
 
     Node newNumber(const Token& tok) {
         return handler.newNumber(tok.number(), tok.decimalPoint(), tok.pos);
@@ -1332,6 +1356,7 @@ class Parser final : private JS::AutoGCRooter, public StrictModeGetter
     void addTelemetry(JSCompartment::DeprecatedLanguageExtension e);
 
     bool warnOnceAboutExprClosure();
+    bool warnOnceAboutForEach();
 };
 
 } /* namespace frontend */

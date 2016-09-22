@@ -932,7 +932,9 @@ LayerManagerComposite::Render(const nsIntRegion& aInvalidRegion, const nsIntRegi
 #if defined(MOZ_WIDGET_ANDROID)
   LayerMetricsWrapper wrapper = GetRootContentLayer();
   if (wrapper) {
-    mCompositor->SetBeginFrameClearColor(wrapper.Metadata().GetBackgroundColor());
+    mCompositor->SetClearColor(wrapper.Metadata().GetBackgroundColor());
+  } else {
+    mCompositor->SetClearColorToDefault();
   }
 #endif
   if (mRoot->GetClipRect()) {
@@ -1002,13 +1004,6 @@ LayerManagerComposite::Render(const nsIntRegion& aInvalidRegion, const nsIntRegi
   mCompositor->GetWidget()->PostRender(this);
 
   RecordFrame();
-
-#if defined(MOZ_WIDGET_ANDROID)
-  // Reset the clear color to white so that if a page is loaded with a different background
-  // color, the page will be white while the new page is loading instead of the background
-  // color of the previous page.
-  mCompositor->SetBeginFrameClearColor(gfx::Color(1.0, 1.0, 1.0, 1.0));
-#endif
 }
 
 #if defined(MOZ_WIDGET_ANDROID) || defined(MOZ_WIDGET_GONK)
@@ -1200,7 +1195,7 @@ LayerManagerComposite::RenderToPresentationSurface()
   PostProcessLayers(mRoot, opaque, visible, Nothing());
 
   nsIntRegion invalid;
-  IntRect bounds(0, 0, scale * pageWidth, actualHeight);
+  IntRect bounds = IntRect::Truncate(0, 0, scale * pageWidth, actualHeight);
   IntRect rect, actualBounds;
   MOZ_ASSERT(mRoot->GetOpacity() == 1);
   mCompositor->BeginFrame(invalid, nullptr, bounds, nsIntRegion(), &rect, &actualBounds);
@@ -1212,7 +1207,7 @@ LayerManagerComposite::RenderToPresentationSurface()
   egl->fClearColor(0.0, 0.0, 0.0, 0.0);
   egl->fClear(LOCAL_GL_COLOR_BUFFER_BIT);
 
-  const IntRect clipRect = IntRect(0, 0, actualWidth, actualHeight);
+  const IntRect clipRect = IntRect::Truncate(0, 0, actualWidth, actualHeight);
 
   RootLayer()->Prepare(RenderTargetIntRect::FromUnknownRect(clipRect));
   RootLayer()->RenderLayer(clipRect);

@@ -320,11 +320,11 @@ VRDisplayOculus::VRDisplayOculus(ovrSession aSession)
   , mTextureSet(nullptr)
   , mQuadVS(nullptr)
   , mQuadPS(nullptr)
+  , mLinearSamplerState(nullptr)
   , mVSConstantBuffer(nullptr)
   , mPSConstantBuffer(nullptr)
   , mVertexBuffer(nullptr)
   , mInputLayout(nullptr)
-  , mLinearSamplerState(nullptr)
   , mIsPresenting(false)
 {
   MOZ_COUNT_CTOR_INHERITED(VRDisplayOculus, VRDisplayHost);
@@ -351,9 +351,6 @@ VRDisplayOculus::VRDisplayOculus(ovrSession aSession)
 
   mDisplayInfo.mEyeFOV[VRDisplayInfo::Eye_Left] = FromFovPort(mFOVPort[VRDisplayInfo::Eye_Left]);
   mDisplayInfo.mEyeFOV[VRDisplayInfo::Eye_Right] = FromFovPort(mFOVPort[VRDisplayInfo::Eye_Right]);
-
-  uint32_t w = mDesc.Resolution.w;
-  uint32_t h = mDesc.Resolution.h;
 
   float pixelsPerDisplayPixel = 1.0;
   ovrSizei texSize[2];
@@ -756,6 +753,17 @@ VRDisplayOculus::SubmitFrame(TextureSourceD3D11* aSource,
   const gfx::Rect& aRightEyeRect)
 {
   if (!mIsPresenting) {
+    return;
+  }
+  if (mRenderTargets.IsEmpty()) {
+    /**
+     * XXX - We should resolve fail the promise returned by
+     *       VRDisplay.requestPresent() when the DX11 resources fail allocation
+     *       in VRDisplayOculus::StartPresentation().
+     *       Bailing out here prevents the crash but content should be aware
+     *       that frames are not being presented.
+     *       See Bug 1299309.
+     **/
     return;
   }
   MOZ_ASSERT(mDevice);

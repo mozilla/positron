@@ -5,7 +5,7 @@
 #include "AndroidDecoderModule.h"
 #include "AndroidBridge.h"
 #include "AndroidSurfaceTexture.h"
-#include "GeneratedJNINatives.h"
+#include "FennecJNINatives.h"
 #include "GLImages.h"
 
 #include "MediaData.h"
@@ -80,8 +80,8 @@ public:
   {
     if (mDecoderCallback) {
       mDecoderCallback->Error(aIsFatal ?
-        MediaDataDecoderError::FATAL_ERROR :
-        MediaDataDecoderError::DECODE_ERROR);
+        MediaResult(NS_ERROR_DOM_MEDIA_FATAL_ERR, __func__) :
+        MediaResult(NS_ERROR_DOM_MEDIA_DECODE_ERR, __func__));
     }
   }
 
@@ -149,7 +149,7 @@ public:
 
       NS_ENSURE_TRUE_VOID(ok);
 
-      if (size > 0) {
+      if (size > 0 && durationUs.value() > 0) {
         RefPtr<layers::Image> img =
           new SurfaceTextureImage(mDecoder->mSurfaceTexture.get(), mDecoder->mConfig.mDisplay,
                                   gl::OriginPos::BottomLeft);
@@ -171,7 +171,6 @@ public:
 
       if ((flags & MediaCodec::BUFFER_FLAG_END_OF_STREAM) != 0) {
         mDecoderCallback->DrainComplete();
-        return;
       }
     }
 
@@ -197,7 +196,7 @@ public:
     mSurfaceTexture = AndroidSurfaceTexture::Create();
     if (!mSurfaceTexture) {
       NS_WARNING("Failed to create SurfaceTexture for video decode\n");
-      return InitPromise::CreateAndReject(DecoderFailureReason::INIT_ERROR, __func__);
+      return InitPromise::CreateAndReject(NS_ERROR_DOM_MEDIA_FATAL_ERR, __func__);
     }
 
     // Register native methods.
@@ -209,7 +208,7 @@ public:
 
     mJavaDecoder = CodecProxy::Create(mFormat, mSurfaceTexture->JavaSurface(), mJavaCallbacks);
     if (mJavaDecoder == nullptr) {
-      return InitPromise::CreateAndReject(DecoderFailureReason::INIT_ERROR, __func__);
+      return InitPromise::CreateAndReject(NS_ERROR_DOM_MEDIA_FATAL_ERR, __func__);
     }
 
     mInputDurations.Clear();
@@ -217,19 +216,22 @@ public:
     return InitPromise::CreateAndResolve(TrackInfo::kVideoTrack, __func__);
   }
 
-  nsresult Flush() override
+  void Flush() override
   {
     mInputDurations.Clear();
-    return RemoteDataDecoder::Flush();
+    RemoteDataDecoder::Flush();
   }
 
-  nsresult Input(MediaRawData* aSample) override
+  void Drain() override
   {
-    nsresult res = RemoteDataDecoder::Input(aSample);
-    NS_ENSURE_SUCCESS(res, res);
+    RemoteDataDecoder::Drain();
+    mInputDurations.Put(0);
+  }
 
+  void Input(MediaRawData* aSample) override
+  {
+    RemoteDataDecoder::Input(aSample);
     mInputDurations.Put(aSample->mDuration);
-    return NS_OK;
   }
 
 private:
@@ -304,7 +306,7 @@ public:
 
     mJavaDecoder = CodecProxy::Create(mFormat, nullptr, mJavaCallbacks);
     if (mJavaDecoder == nullptr) {
-      return InitPromise::CreateAndReject(DecoderFailureReason::INIT_ERROR, __func__);
+      return InitPromise::CreateAndReject(NS_ERROR_DOM_MEDIA_FATAL_ERR, __func__);
     }
 
     return InitPromise::CreateAndResolve(TrackInfo::kAudioTrack, __func__);
@@ -380,7 +382,8 @@ private:
       aFormat->GetInteger(NS_LITERAL_STRING("channel-count"), &mOutputChannels);
       AudioConfig::ChannelLayout layout(mOutputChannels);
       if (!layout.IsValid()) {
-        mDecoderCallback->Error(MediaDataDecoderError::FATAL_ERROR);
+        mDecoderCallback->Error(MediaResult(NS_ERROR_DOM_MEDIA_FATAL_ERR,
+                                                 __func__));
         return;
       }
       aFormat->GetInteger(NS_LITERAL_STRING("sample-rate"), &mOutputSampleRate);
@@ -424,26 +427,24 @@ RemoteDataDecoder::RemoteDataDecoder(MediaData::Type aType,
 {
 }
 
-nsresult
+void
 RemoteDataDecoder::Flush()
 {
   mJavaDecoder->Flush();
-  return NS_OK;
 }
 
-nsresult
+void
 RemoteDataDecoder::Drain()
 {
   BufferInfo::LocalRef bufferInfo;
   nsresult rv = BufferInfo::New(&bufferInfo);
-  NS_ENSURE_SUCCESS(rv, rv);
+  NS_ENSURE_SUCCESS_VOID(rv);
   bufferInfo->Set(0, 0, -1, MediaCodec::BUFFER_FLAG_END_OF_STREAM);
 
   mJavaDecoder->Input(nullptr, bufferInfo);
-  return NS_ERROR_FAILURE;
 }
 
-nsresult
+void
 RemoteDataDecoder::Shutdown()
 {
   LOG("");
@@ -456,11 +457,9 @@ RemoteDataDecoder::Shutdown()
   mJavaCallbacks = nullptr;
 
   mFormat = nullptr;
-
-  return NS_OK;
 }
 
-nsresult
+void
 RemoteDataDecoder::Input(MediaRawData* aSample)
 {
   MOZ_ASSERT(aSample != nullptr);
@@ -477,12 +476,13 @@ RemoteDataDecoder::Input(MediaRawData* aSample)
 
   BufferInfo::LocalRef bufferInfo;
   nsresult rv = BufferInfo::New(&bufferInfo);
-  NS_ENSURE_SUCCESS(rv, rv);
+  if (NS_FAILED(rv)) {
+    mCallback->Error(MediaResult(NS_ERROR_OUT_OF_MEMORY, __func__));
+    return;
+  }
   bufferInfo->Set(0, aSample->Size(), aSample->mTime, 0);
 
   mJavaDecoder->Input(bytes, bufferInfo);
-
-  return NS_OK;
 }
 
 } // mozilla

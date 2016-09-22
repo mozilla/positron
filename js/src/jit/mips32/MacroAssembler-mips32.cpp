@@ -221,8 +221,9 @@ MacroAssemblerMIPS::ma_liPatchable(Register dest, ImmWord imm)
 // Arithmetic-based ops.
 
 // Add.
+template <typename L>
 void
-MacroAssemblerMIPS::ma_addTestOverflow(Register rd, Register rs, Register rt, Label* overflow)
+MacroAssemblerMIPS::ma_addTestOverflow(Register rd, Register rs, Register rt, L overflow)
 {
     Label goodAddition;
     as_addu(rd, rs, rt);
@@ -237,8 +238,16 @@ MacroAssemblerMIPS::ma_addTestOverflow(Register rd, Register rs, Register rt, La
     bind(&goodAddition);
 }
 
+template void
+MacroAssemblerMIPS::ma_addTestOverflow<Label*>(Register rd, Register rs,
+                                               Register rt, Label* overflow);
+template void
+MacroAssemblerMIPS::ma_addTestOverflow<wasm::JumpTarget>(Register rd, Register rs, Register rt,
+                                                         wasm::JumpTarget overflow);
+
+template <typename L>
 void
-MacroAssemblerMIPS::ma_addTestOverflow(Register rd, Register rs, Imm32 imm, Label* overflow)
+MacroAssemblerMIPS::ma_addTestOverflow(Register rd, Register rs, Imm32 imm, L overflow)
 {
     // Check for signed range because of as_addiu
     // Check for unsigned range because of as_xori
@@ -260,6 +269,13 @@ MacroAssemblerMIPS::ma_addTestOverflow(Register rd, Register rs, Imm32 imm, Labe
         ma_addTestOverflow(rd, rs, ScratchRegister, overflow);
     }
 }
+
+template void
+MacroAssemblerMIPS::ma_addTestOverflow<Label*>(Register rd, Register rs,
+                                               Imm32 imm, Label* overflow);
+template void
+MacroAssemblerMIPS::ma_addTestOverflow<wasm::JumpTarget>(Register rd, Register rs, Imm32 imm,
+                                                         wasm::JumpTarget overflow);
 
 // Subtract.
 void
@@ -1062,31 +1078,6 @@ MacroAssemblerMIPSCompat::storePtr(Register src, AbsoluteAddress dest)
 {
     movePtr(ImmPtr(dest.addr), ScratchRegister);
     storePtr(src, Address(ScratchRegister, 0));
-}
-
-void
-MacroAssemblerMIPSCompat::clampIntToUint8(Register reg)
-{
-    // look at (reg >> 8) if it is 0, then src shouldn't be clamped
-    // if it is <0, then we want to clamp to 0,
-    // otherwise, we wish to clamp to 255
-    Label done;
-    ma_move(ScratchRegister, reg);
-    asMasm().rshiftPtrArithmetic(Imm32(8), ScratchRegister);
-    ma_b(ScratchRegister, ScratchRegister, &done, Assembler::Zero, ShortJump);
-    {
-        Label negative;
-        ma_b(ScratchRegister, ScratchRegister, &negative, Assembler::Signed, ShortJump);
-        {
-            ma_li(reg, Imm32(255));
-            ma_b(&done, ShortJump);
-        }
-        bind(&negative);
-        {
-            ma_move(reg, zero);
-        }
-    }
-    bind(&done);
 }
 
 // Note: this function clobbers the input register.

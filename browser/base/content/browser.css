@@ -128,8 +128,8 @@ tabbrowser {
   max-width: 210px;
   min-width: 100px;
   width: 0;
-  transition: min-width 200ms ease-out,
-              max-width 230ms ease-out;
+  transition: min-width 100ms ease-out,
+              max-width 100ms ease-out;
 }
 
 .tabbrowser-tab:not([pinned]):not([fadein]) {
@@ -241,16 +241,6 @@ toolbar[customizing] > .overflow-button {
 .titlebar-placeholder[type="caption-buttons"]:-moz-locale-dir(ltr),
 .titlebar-placeholder[type="fullscreen-button"]:-moz-locale-dir(rtl) {
   -moz-box-ordinal-group: 0;
-}
-
-/* In private windows, the #titlebar-content is higher because of the
- * private browsing indicator. With the margin-top the titlebar buttons
- * align to the top correctly in that case, but only if we don't stretch
- * the box they're in because the container is too high, so we override
- * the default alignment value (stretch).
- */
-#main-window[tabsintitlebar] > #titlebar > #titlebar-content > #titlebar-buttonbox-container {
-  -moz-box-align: start;
 }
 
 %else
@@ -762,7 +752,7 @@ html|*#fullscreen-exit-button {
   -moz-user-focus: normal;
 }
 
-.blocked-permission-icon:not([showing]),
+#blocked-permissions-container > .blocked-permission-icon:not([showing]),
 .notification-anchor-icon:not([showing]) {
   display: none;
 }
@@ -787,13 +777,6 @@ html|*#fullscreen-exit-button {
   -moz-binding: url("chrome://browser/content/urlbarBindings.xml#click-to-play-plugins-notification");
 }
 
-#login-fill-notification {
-  -moz-binding: url("chrome://browser/content/urlbarBindings.xml#login-fill-notification");
-}
-
-.login-fill-item {
-  -moz-binding: url("chrome://passwordmgr/content/login.xml#login");
-}
 
 .plugin-popupnotification-centeritem {
   -moz-binding: url("chrome://browser/content/urlbarBindings.xml#plugin-popupnotification-center-item");
@@ -1193,10 +1176,6 @@ toolbarpaletteitem[place="palette"][hidden] {
 #context-navigation > .menuitem-iconic > .menu-iconic-text,
 #context-navigation > .menuitem-iconic > .menu-accel-container {
   display: none;
-}
-
-#login-fill-doorhanger:not([inDetailView]) > #login-fill-clickcapturer {
-  pointer-events: none;
 }
 
 .popup-notification-invalid-input {

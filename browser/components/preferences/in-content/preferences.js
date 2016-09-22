@@ -78,9 +78,13 @@ function init_all() {
   });
   document.dispatchEvent(initFinished);
 
-  let helpCmds = document.querySelectorAll(".help-button");
-  for (let helpCmd of helpCmds)
-    helpCmd.addEventListener("command", helpButtonCommand);
+  categories = categories.querySelectorAll("richlistitem.category");
+  for (let category of categories) {
+    let name = internalPrefCategoryNameToFriendlyName(category.value);
+    let helpSelector = `#header-${name} > .help-button`;
+    let helpButton = document.querySelector(helpSelector);
+    helpButton.setAttribute("href", getHelpLinkURL(category.getAttribute("helpTopic")));
+  }
 
   // Wait until initialization of all preferences are complete before
   // notifying observers that the UI is now ready.
@@ -238,5 +242,17 @@ function confirmRestartPrompt(aRestartToEnable, aDefaultButtonIndex,
   let buttonIndex = prompts.confirmEx(window, title, msg, buttonFlags,
                                       button0Text, button1Text, button2Text,
                                       null, {});
+
+  // If we have the second confirmation dialog for restart, see if the user
+  // cancels out at that point.
+  if (buttonIndex == CONFIRM_RESTART_PROMPT_RESTART_NOW) {
+    let cancelQuit = Cc["@mozilla.org/supports-PRBool;1"]
+                       .createInstance(Ci.nsISupportsPRBool);
+    Services.obs.notifyObservers(cancelQuit, "quit-application-requested",
+                                  "restart");
+    if (cancelQuit.data) {
+      buttonIndex = CONFIRM_RESTART_PROMPT_CANCEL;
+    }
+  }
   return buttonIndex;
 }

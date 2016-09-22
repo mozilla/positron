@@ -376,6 +376,8 @@ public:
 
   void SetPaintSyncId(int32_t aSyncId) { mPaintSyncId = aSyncId; }
 
+  void SetLayerObserverEpoch(uint64_t aLayerObserverEpoch);
+
   static void PlatformSyncBeforeUpdate();
 
   virtual bool AllocSurfaceDescriptor(const gfx::IntSize& aSize,
@@ -391,6 +393,10 @@ public:
 
   virtual void UpdateFwdTransactionId() override;
   virtual uint64_t GetFwdTransactionId() override;
+
+  bool InForwarderThread() override {
+    return NS_IsMainThread();
+  }
 
   // Returns true if aSurface wraps a Shmem.
   static bool IsShmem(SurfaceDescriptor* aSurface);

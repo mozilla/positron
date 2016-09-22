@@ -136,7 +136,11 @@ pref("dom.fileHandle.enabled", true);
 pref("dom.manifest.oninstall", false);
 
 // Whether or not selection events are enabled
+#ifdef NIGHTLY_BUILD
 pref("dom.select_events.enabled", true);
+#else
+pref("dom.select_events.enabled", false);
+#endif
 
 // Whether or not Web Workers are enabled.
 pref("dom.workers.enabled", true);
@@ -171,6 +175,9 @@ pref("dom.performance.enable_user_timing_logging", false);
 // Enable notification of performance timing
 pref("dom.performance.enable_notify_performance_timing", false);
 
+// Enable Permission API's .revoke() method
+pref("dom.permissions.revoke.enable", false);
+
 // Enable Performance Observer API
 #ifdef NIGHTLY_BUILD
 pref("dom.enable_performance_observer", true);
@@ -198,7 +205,7 @@ pref("dom.keyboardevent.dispatch_during_composition", false);
 // Whether the UndoManager API is enabled
 pref("dom.undo_manager.enabled", false);
 
-// Whether URL,nsLocation,Link::GetHash should be percent encoded
+// Whether URL,Location,Link::GetHash should be percent encoded
 // in setter and percent decoded in getter (old behaviour = true)
 pref("dom.url.encode_decode_hash", true);
 // Whether ::GetHash should do percent decoding (old behaviour = true)
@@ -290,6 +297,13 @@ pref("mathml.disabled",    false);
 // Enable scale transform for stretchy MathML operators. See bug 414277.
 pref("mathml.scale_stretchy_operators.enabled", true);
 
+// Disable MediaError.message.
+#ifdef RELEASE_BUILD
+pref("dom.MediaError.message.enabled", false);
+#else
+pref("dom.MediaError.message.enabled", true);
+#endif
+
 // Media cache size in kilobytes
 pref("media.cache_size", 512000);
 // When a network connection is suspended, don't resume it until the
@@ -310,15 +324,11 @@ pref("media.wakelock_timeout", 2000);
 // opened as top-level documents, as opposed to inside a media element.
 pref("media.play-stand-alone", true);
 
-// Whether we should delay actioning a "play()" JS function call and autoplay
-// attribute until the media element's owner document is visible.
-pref("media.block-play-until-visible", false);
-
 pref("media.hardware-video-decoding.enabled", true);
 pref("media.hardware-video-decoding.force-enabled", false);
 
 pref("media.decoder.heuristic.dormant.enabled", true);
-pref("media.decoder.heuristic.dormant.timeout", 60000);
+pref("media.decoder.heuristic.dormant.timeout", 10000);
 
 #ifdef MOZ_DIRECTSHOW
 pref("media.directshow.enabled", true);
@@ -442,6 +452,7 @@ pref("media.navigator.video.h264.level", 31); // 0x42E01f - level 3.1
 pref("media.navigator.video.h264.max_br", 0);
 pref("media.navigator.video.h264.max_mbps", 0);
 pref("media.peerconnection.video.h264_enabled", false);
+pref("media.peerconnection.video.vp9_enabled", true);
 pref("media.getusermedia.aec", 1);
 pref("media.getusermedia.browser.enabled", true);
 #endif
@@ -468,7 +479,9 @@ pref("media.peerconnection.identity.enabled", true);
 pref("media.peerconnection.identity.timeout", 10000);
 pref("media.peerconnection.ice.stun_client_maximum_transmits", 7);
 pref("media.peerconnection.ice.trickle_grace_period", 5000);
+pref("media.peerconnection.ice.no_host", false);
 pref("media.peerconnection.ice.default_address_only", false);
+pref("media.peerconnection.ice.proxy_only", false);
 
 // These values (aec, agc, and noice) are from media/webrtc/trunk/webrtc/common_types.h
 // kXxxUnchanged = 0, kXxxDefault = 1, and higher values are specific to each
@@ -516,23 +529,24 @@ pref("media.navigator.audio.full_duplex", false);
 #endif
 #endif
 
+pref("dom.webaudio.enabled", true);
+
 #if !defined(ANDROID)
 pref("media.getusermedia.screensharing.enabled", true);
 #endif
 
 #ifdef RELEASE_BUILD
-pref("media.getusermedia.screensharing.allowed_domains", "webex.com,*.webex.com,ciscospark.com,*.ciscospark.com,projectsquared.com,*.projectsquared.com,*.room.co,room.co,beta.talky.io,talky.io,*.clearslide.com,appear.in,*.appear.in,tokbox.com,*.tokbox.com,*.sso.francetelecom.fr,*.si.francetelecom.fr,*.sso.infra.ftgroup,*.multimedia-conference.orange-business.com,*.espacecollaboration.orange-business.com,free.gotomeeting.com,g2m.me,*.g2m.me,*.mypurecloud.com,*.mypurecloud.com.au,spreed.me,*.spreed.me,*.spreed.com,air.mozilla.org,*.circuit.com,*.yourcircuit.com,circuit.siemens.com,yourcircuit.siemens.com,circuitsandbox.net,*.unify.com,tandi.circuitsandbox.net,*.ericsson.net,*.cct.ericsson.net,*.opentok.com,*.conf.meetecho.com,meet.jit.si,*.meet.jit.si,web.stage.speakeasyapp.net,web.speakeasyapp.net,*.hipchat.me,*.beta-wspbx.com,*.wspbx.com,*.unifiedcloudit.com,*.smartboxuc.com,*.smartbox-uc.com,*.panterranetworks.com,pexipdemo.com,*.pexipdemo.com,pex.me,*.pex.me,*.rd.pexip.com,1click.io,*.1click.io,*.fuze.com,*.fuzemeeting.com,*.thinkingphones.com,gotomeeting.com,*.gotomeeting.com,gotowebinar.com,*.gotowebinar.com,gototraining.com,*.gototraining.com,citrix.com,*.citrix.com,expertcity.com,*.expertcity.com,citrixonline.com,*.citrixonline.com,g2m.me,*.g2m.me,gotomeet.me,*.gotomeet.me,gotomeet.at,*.gotomeet.at,miriadaxdes.miriadax.net,certificacion.miriadax.net,miriadax.net,*.wire.com");
+pref("media.getusermedia.screensharing.allowed_domains", "webex.com,*.webex.com,ciscospark.com,*.ciscospark.com,projectsquared.com,*.projectsquared.com,*.room.co,room.co,beta.talky.io,talky.io,*.clearslide.com,appear.in,*.appear.in,tokbox.com,*.tokbox.com,*.sso.francetelecom.fr,*.si.francetelecom.fr,*.sso.infra.ftgroup,*.multimedia-conference.orange-business.com,*.espacecollaboration.orange-business.com,free.gotomeeting.com,g2m.me,*.g2m.me,*.mypurecloud.com,*.mypurecloud.com.au,spreed.me,*.spreed.me,*.spreed.com,air.mozilla.org,*.circuit.com,*.yourcircuit.com,circuit.siemens.com,yourcircuit.siemens.com,circuitsandbox.net,*.unify.com,tandi.circuitsandbox.net,*.ericsson.net,*.cct.ericsson.net,*.opentok.com,*.conf.meetecho.com,meet.jit.si,*.meet.jit.si,web.stage.speakeasyapp.net,web.speakeasyapp.net,*.hipchat.me,*.beta-wspbx.com,*.wspbx.com,*.unifiedcloudit.com,*.smartboxuc.com,*.smartbox-uc.com,*.panterranetworks.com,pexipdemo.com,*.pexipdemo.com,pex.me,*.pex.me,*.rd.pexip.com,1click.io,*.1click.io,*.fuze.com,*.fuzemeeting.com,*.thinkingphones.com,gotomeeting.com,*.gotomeeting.com,gotowebinar.com,*.gotowebinar.com,gototraining.com,*.gototraining.com,citrix.com,*.citrix.com,expertcity.com,*.expertcity.com,citrixonline.com,*.citrixonline.com,g2m.me,*.g2m.me,gotomeet.me,*.gotomeet.me,gotomeet.at,*.gotomeet.at,miriadaxdes.miriadax.net,certificacion.miriadax.net,miriadax.net,*.wire.com,sylaps.com,*.sylaps.com");
 #else
  // includes Mozilla's test domain: mozilla.github.io (not intended for release)
-pref("media.getusermedia.screensharing.allowed_domains", "mozilla.github.io,webex.com,*.webex.com,ciscospark.com,*.ciscospark.com,projectsquared.com,*.projectsquared.com,*.room.co,room.co,beta.talky.io,talky.io,*.clearslide.com,appear.in,*.appear.in,tokbox.com,*.tokbox.com,*.sso.francetelecom.fr,*.si.francetelecom.fr,*.sso.infra.ftgroup,*.multimedia-conference.orange-business.com,*.espacecollaboration.orange-business.com,free.gotomeeting.com,g2m.me,*.g2m.me,*.mypurecloud.com,*.mypurecloud.com.au,spreed.me,*.spreed.me,*.spreed.com,air.mozilla.org,*.circuit.com,*.yourcircuit.com,circuit.siemens.com,yourcircuit.siemens.com,circuitsandbox.net,*.unify.com,tandi.circuitsandbox.net,*.ericsson.net,*.cct.ericsson.net,*.opentok.com,*.conf.meetecho.com,meet.jit.si,*.meet.jit.si,web.stage.speakeasyapp.net,web.speakeasyapp.net,*.hipchat.me,*.beta-wspbx.com,*.wspbx.com,*.unifiedcloudit.com,*.smartboxuc.com,*.smartbox-uc.com,*.panterranetworks.com,pexipdemo.com,*.pexipdemo.com,pex.me,*.pex.me,*.rd.pexip.com,1click.io,*.1click.io,*.fuze.com,*.fuzemeeting.com,*.thinkingphones.com,gotomeeting.com,*.gotomeeting.com,gotowebinar.com,*.gotowebinar.com,gototraining.com,*.gototraining.com,citrix.com,*.citrix.com,expertcity.com,*.expertcity.com,citrixonline.com,*.citrixonline.com,g2m.me,*.g2m.me,gotomeet.me,*.gotomeet.me,gotomeet.at,*.gotomeet.at,miriadaxdes.miriadax.net,certificacion.miriadax.net,miriadax.net,*.wire.com");
+pref("media.getusermedia.screensharing.allowed_domains", "mozilla.github.io,webex.com,*.webex.com,ciscospark.com,*.ciscospark.com,projectsquared.com,*.projectsquared.com,*.room.co,room.co,beta.talky.io,talky.io,*.clearslide.com,appear.in,*.appear.in,tokbox.com,*.tokbox.com,*.sso.francetelecom.fr,*.si.francetelecom.fr,*.sso.infra.ftgroup,*.multimedia-conference.orange-business.com,*.espacecollaboration.orange-business.com,free.gotomeeting.com,g2m.me,*.g2m.me,*.mypurecloud.com,*.mypurecloud.com.au,spreed.me,*.spreed.me,*.spreed.com,air.mozilla.org,*.circuit.com,*.yourcircuit.com,circuit.siemens.com,yourcircuit.siemens.com,circuitsandbox.net,*.unify.com,tandi.circuitsandbox.net,*.ericsson.net,*.cct.ericsson.net,*.opentok.com,*.conf.meetecho.com,meet.jit.si,*.meet.jit.si,web.stage.speakeasyapp.net,web.speakeasyapp.net,*.hipchat.me,*.beta-wspbx.com,*.wspbx.com,*.unifiedcloudit.com,*.smartboxuc.com,*.smartbox-uc.com,*.panterranetworks.com,pexipdemo.com,*.pexipdemo.com,pex.me,*.pex.me,*.rd.pexip.com,1click.io,*.1click.io,*.fuze.com,*.fuzemeeting.com,*.thinkingphones.com,gotomeeting.com,*.gotomeeting.com,gotowebinar.com,*.gotowebinar.com,gototraining.com,*.gototraining.com,citrix.com,*.citrix.com,expertcity.com,*.expertcity.com,citrixonline.com,*.citrixonline.com,g2m.me,*.g2m.me,gotomeet.me,*.gotomeet.me,gotomeet.at,*.gotomeet.at,miriadaxdes.miriadax.net,certificacion.miriadax.net,miriadax.net,*.wire.com,sylaps.com,*.sylaps.com");
 #endif
 // OS/X 10.6 and XP have screen/window sharing off by default due to various issues - Caveat emptor
 pref("media.getusermedia.screensharing.allow_on_old_platforms", false);
 
 pref("media.getusermedia.audiocapture.enabled", false);
 
-// TextTrack support
-pref("media.webvtt.enabled", true);
+// TextTrack WebVTT Region extension support.
 pref("media.webvtt.regions.enabled", false);
 
 // AudioTrack and VideoTrack support
@@ -753,7 +767,7 @@ pref("gfx.font_rendering.opentype_svg.enabled", true);
 // comma separated list of backends to use in order of preference
 // e.g., pref("gfx.canvas.azure.backends", "direct2d,skia,cairo");
 pref("gfx.canvas.azure.backends", "direct2d1.1,skia,cairo");
-pref("gfx.content.azure.backends", "direct2d1.1,skia,cairo");
+pref("gfx.content.azure.backends", "direct2d1.1,cairo");
 #else
 #ifdef XP_MACOSX
 pref("gfx.content.azure.backends", "skia");
@@ -765,6 +779,8 @@ pref("gfx.canvas.azure.backends", "skia");
 pref("gfx.content.azure.backends", "skia");
 #endif
 #endif
+
+pref("gfx.text.disable-aa", false);
 
 pref("gfx.work-around-driver-bugs", true);
 pref("gfx.prefer-mesa-llvmpipe", false);
@@ -1085,7 +1101,7 @@ pref("print.print_edge_right", 0);
 pref("print.print_edge_bottom", 0);
 
 // Print via the parent process. This is only used when e10s is enabled.
-#if defined(XP_WIN)
+#if defined(XP_WIN) || defined(XP_MACOSX)
 pref("print.print_via_parent", true);
 #else
 pref("print.print_via_parent", false);
@@ -1275,6 +1291,11 @@ pref("image.animation_mode",                "normal");
 
 // Same-origin policy for file URIs, "false" is traditional
 pref("security.fileuri.strict_origin_policy", true);
+
+// If this pref is true, prefs in the logging.config branch will be cleared on
+// startup. This is done so that setting a log-file and log-modules at runtime
+// doesn't persist across restarts leading to huge logfile and low disk space.
+pref("logging.config.clear_on_startup", true);
 
 // If there is ever a security firedrill that requires
 // us to block certian ports global, this is the pref
@@ -1965,6 +1986,8 @@ pref("network.cookie.lifetime.days",        90); // Ignored unless network.cooki
 
 // The PAC file to load.  Ignored unless network.proxy.type is 2.
 pref("network.proxy.autoconfig_url", "");
+// Strip off paths when sending URLs to PAC scripts
+pref("network.proxy.autoconfig_url.include_path", false);
 
 // If we cannot load the PAC file, then try again (doubling from interval_min
 // until we reach interval_max or the PAC file is successfully loaded).
@@ -2121,8 +2144,8 @@ pref("security.mixed_content.block_display_content", false);
 // Sub-resource integrity
 pref("security.sri.enable", true);
 
-// Block scripts with MIME type 'image/'
-pref("security.block_script_with_mime_image", true);
+// Block scripts with wrong MIME type such as image/ or video/.
+pref("security.block_script_with_wrong_mime", true);
 
 // OCSP must-staple
 pref("security.ssl.enable_ocsp_must_staple", true);
@@ -2538,9 +2561,6 @@ pref("layout.css.background-blend-mode.enabled", true);
 
 // Is support for background-clip:text enabled?
 pref("layout.css.background-clip-text.enabled", true);
-
-// Is support for CSS vertical text enabled?
-pref("layout.css.vertical-text.enabled", true);
 
 // Is support for CSS text-combine-upright (tate-chu-yoko) enabled?
 pref("layout.css.text-combine-upright.enabled", true);
@@ -4217,14 +4237,15 @@ pref("font.name.serif.ja", "Charis SIL Compact");
 pref("font.name.sans-serif.ja", "Clear Sans");
 pref("font.name.monospace.ja", "MotoyaLMaru");
 pref("font.name-list.serif.ja", "Noto Serif, Droid Serif");
-pref("font.name-list.sans-serif.ja", "Clear Sans, Roboto, Droid Sans, MotoyaLMaru, MotoyaLCedar, Noto Sans JP, Droid Sans Japanese");
-pref("font.name-list.monospace.ja", "MotoyaLMaru, MotoyaLCedar, Droid Sans Mono");
+pref("font.name-list.sans-serif.ja", "Clear Sans, Roboto, Droid Sans, MotoyaLMaru, MotoyaLCedar, Noto Sans JP, Noto Sans CJK JP, Droid Sans Japanese");
+pref("font.name-list.monospace.ja", "MotoyaLMaru, MotoyaLCedar, Droid Sans Mono CJK JP, Droid Sans Mono");
 
 pref("font.name.serif.ko", "Charis SIL Compact");
 pref("font.name.sans-serif.ko", "Clear Sans");
 pref("font.name.monospace.ko", "Droid Sans Mono");
 pref("font.name-list.serif.ko", "Noto Serif, Droid Serif, HYSerif");
-pref("font.name-list.sans-serif.ko", "SmartGothic, NanumGothic, Noto Sans KR, DroidSansFallback, Droid Sans Fallback");
+pref("font.name-list.sans-serif.ko", "SmartGothic, NanumGothic, Noto Sans KR, Noto Sans CJK KR, DroidSansFallback, Droid Sans Fallback");
+pref("font.name-list.monospace.ko", "Noto Sans Mono CJK KR");
 
 pref("font.name.serif.th", "Charis SIL Compact");
 pref("font.name.sans-serif.th", "Clear Sans");
@@ -4254,22 +4275,22 @@ pref("font.name.serif.zh-CN", "Charis SIL Compact");
 pref("font.name.sans-serif.zh-CN", "Clear Sans");
 pref("font.name.monospace.zh-CN", "Droid Sans Mono");
 pref("font.name-list.serif.zh-CN", "Noto Serif, Droid Serif, Droid Sans Fallback");
-pref("font.name-list.sans-serif.zh-CN", "Roboto, Droid Sans, Noto Sans SC, Droid Sans Fallback");
-pref("font.name-list.monospace.zh-CN", "Droid Sans Fallback");
+pref("font.name-list.sans-serif.zh-CN", "Roboto, Droid Sans, Noto Sans SC, Noto Sans CJK SC, Droid Sans Fallback");
+pref("font.name-list.monospace.zh-CN", "Noto Sans Mono CJK SC, Droid Sans Fallback");
 
 pref("font.name.serif.zh-HK", "Charis SIL Compact");
 pref("font.name.sans-serif.zh-HK", "Clear Sans");
 pref("font.name.monospace.zh-HK", "Droid Sans Mono");
 pref("font.name-list.serif.zh-HK", "Noto Serif, Droid Serif, Droid Sans Fallback");
-pref("font.name-list.sans-serif.zh-HK", "Roboto, Droid Sans, Noto Sans TC, Noto Sans SC, Droid Sans Fallback");
-pref("font.name-list.monospace.zh-HK", "Droid Sans Fallback");
+pref("font.name-list.sans-serif.zh-HK", "Roboto, Droid Sans, Noto Sans TC, Noto Sans SC, Noto Sans CJK TC, Droid Sans Fallback");
+pref("font.name-list.monospace.zh-HK", "Noto Sans Mono CJK TC, Droid Sans Fallback");
 
 pref("font.name.serif.zh-TW", "Charis SIL Compact");
 pref("font.name.sans-serif.zh-TW", "Clear Sans");
 pref("font.name.monospace.zh-TW", "Droid Sans Mono");
 pref("font.name-list.serif.zh-TW", "Noto Serif, Droid Serif, Droid Sans Fallback");
-pref("font.name-list.sans-serif.zh-TW", "Roboto, Droid Sans, Noto Sans TC, Noto Sans SC, Droid Sans Fallback");
-pref("font.name-list.monospace.zh-TW", "Droid Sans Fallback");
+pref("font.name-list.sans-serif.zh-TW", "Roboto, Droid Sans, Noto Sans TC, Noto Sans SC, Noto Sans CJK TC, Droid Sans Fallback");
+pref("font.name-list.monospace.zh-TW", "Noto Sans Mono CJK TC, Droid Sans Fallback");
 
 pref("font.name.serif.x-math", "Latin Modern Math");
 pref("font.name-list.serif.x-math", "Latin Modern Math, XITS Math, Cambria Math, Libertinus Math, DejaVu Math TeX Gyre, TeX Gyre Bonum Math, TeX Gyre Pagella Math, TeX Gyre Schola, TeX Gyre Termes Math, STIX Math, Asana Math, STIXGeneral, DejaVu Serif, DejaVu Sans, Charis SIL Compact");
@@ -4305,7 +4326,6 @@ pref("signon.autofillForms",                true);
 pref("signon.autologin.proxy",              false);
 pref("signon.formlessCapture.enabled",      true);
 pref("signon.storeWhenAutocompleteOff",     true);
-pref("signon.ui.experimental",              false);
 pref("signon.debug",                        false);
 pref("signon.recipes.path",                 "chrome://passwordmgr/content/recipes.json");
 pref("signon.schemeUpgrades",               false);
@@ -4730,9 +4750,6 @@ pref("dom.sms.defaultServiceId", 0);
 // negative: read ahead all IDs if possible.
 pref("dom.sms.maxReadAheadEntries", 0);
 
-// WebAlarms
-pref("dom.mozAlarms.enabled", false);
-
 // Push
 
 pref("dom.push.enabled", false);
@@ -4834,17 +4851,17 @@ pref("dom.netinfo.enabled", false);
 #ifdef XP_WIN
 // On 32-bit Windows, fire a low-memory notification if we have less than this
 // many mb of virtual address space available.
-pref("memory.low_virtual_memory_threshold_mb", 128);
+pref("memory.low_virtual_memory_threshold_mb", 256);
 
-// On Windows 32- or 64-bit, fire a low-memory notification if we have less
+// On Windows 32-bit, fire a low-memory notification if we have less
 // than this many mb of commit space (physical memory plus page file) left.
-pref("memory.low_commit_space_threshold_mb", 128);
+pref("memory.low_commit_space_threshold_mb", 256);
 
-// On Windows 32- or 64-bit, fire a low-memory notification if we have less
+// On Windows 32-bit, fire a low-memory notification if we have less
 // than this many mb of physical memory available on the whole machine.
 pref("memory.low_physical_memory_threshold_mb", 0);
 
-// On Windows 32- or 64-bit, don't fire a low-memory notification because of
+// On Windows 32-bit, don't fire a low-memory notification because of
 // low available physical memory or low commit space more than once every
 // low_memory_notification_interval_ms.
 pref("memory.low_memory_notification_interval_ms", 10000);
@@ -5070,6 +5087,10 @@ pref("dom.voicemail.defaultServiceId", 0);
 
 // Enable mapped array buffer by default.
 pref("dom.mapped_arraybuffer.enabled", true);
+
+// Whether to send more than one "loading" readystatechange during XHRs to
+// simulate progress events for sites still not using modern progress events.
+pref("dom.fire_extra_xhr_loading_readystatechanges", false);
 
 // The tables used for Safebrowsing phishing and malware checks.
 pref("urlclassifier.malwareTable", "goog-malware-shavar,goog-unwanted-shavar,test-malware-simple,test-unwanted-simple");
@@ -5532,6 +5553,7 @@ pref("dom.webkitBlink.dirPicker.enabled", true);
 pref("dom.webkitBlink.filesystem.enabled", true);
 #endif
 
+pref("media.block-autoplay-until-in-foreground", true);
 #ifdef MOZ_STYLO
 // Is the Servo-backed style system enabled?
 pref("layout.css.servo.enabled", true);

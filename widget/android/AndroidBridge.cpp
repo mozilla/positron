@@ -51,7 +51,10 @@
 #include "mozilla/UniquePtr.h"
 #include "mozilla/dom/ContentChild.h"
 #include "nsIObserverService.h"
+#include "nsISupportsPrimitives.h"
 #include "MediaPrefs.h"
+
+#include "FennecJNIWrappers.h"
 
 using namespace mozilla;
 using namespace mozilla::gfx;
@@ -682,29 +685,6 @@ namespace mozilla {
 }
 
 
-bool
-AndroidBridge::InitCamera(const nsCString& contentType, uint32_t camera, uint32_t *width, uint32_t *height, uint32_t *fps)
-{
-    auto arr = GeckoAppShell::InitCamera
-      (NS_ConvertUTF8toUTF16(contentType), (int32_t) camera, (int32_t) *width, (int32_t) *height);
-
-    if (!arr)
-        return false;
-
-    JNIEnv* const env = arr.Env();
-    jint *elements = env->GetIntArrayElements(arr.Get(), 0);
-
-    *width = elements[1];
-    *height = elements[2];
-    *fps = elements[3];
-
-    bool res = elements[0] == 1;
-
-    env->ReleaseIntArrayElements(arr.Get(), elements, 0);
-
-    return res;
-}
-
 void
 AndroidBridge::GetCurrentBatteryInformation(hal::BatteryInformation* aBatteryInfo)
 {
@@ -1210,40 +1190,41 @@ nsAndroidBridge::Observe(nsISupports* aSubject, const char* aTopic,
 {
   if (!strcmp(aTopic, "xpcom-shutdown")) {
     RemoveObservers();
-  } else if (!strcmp(aTopic, "audio-playback")) {
-    ALOG_BRIDGE("nsAndroidBridge::Observe, get audio-playback event.");
+  } else if (!strcmp(aTopic, "media-playback")) {
+    ALOG_BRIDGE("nsAndroidBridge::Observe, get media-playback event.");
 
-    nsCOMPtr<nsPIDOMWindowOuter> window = do_QueryInterface(aSubject);
-    MOZ_ASSERT(window);
-
-    nsAutoString activeStr(aData);
-    if (activeStr.EqualsLiteral("inactive-nonaudible")) {
-      // This state means the audio becomes silent, but it's still playing, so
-      // we don't need to notify the AudioFocusAgent.
+    nsCOMPtr<nsISupportsPRUint64> wrapper = do_QueryInterface(aSubject);
+    if (!wrapper) {
       return NS_OK;
     }
 
-    bool isPlaying = activeStr.EqualsLiteral("active");
+    uint64_t windowId = 0;
+    nsresult rv = wrapper->GetData(&windowId);
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return rv;
+    }
 
-    UpdateAudioPlayingWindows(window, isPlaying);
+    nsAutoString activeStr(aData);
+    bool isPlaying = activeStr.EqualsLiteral("active");
+    UpdateAudioPlayingWindows(windowId, isPlaying);
   }
   return NS_OK;
 }
 
 void
-nsAndroidBridge::UpdateAudioPlayingWindows(nsPIDOMWindowOuter* aWindow,
+nsAndroidBridge::UpdateAudioPlayingWindows(uint64_t aWindowId,
                                            bool aPlaying)
 {
   // Request audio focus for the first audio playing window and abandon focus
   // for the last audio playing window.
-  if (aPlaying && !mAudioPlayingWindows.Contains(aWindow)) {
-    mAudioPlayingWindows.AppendElement(aWindow);
+  if (aPlaying && !mAudioPlayingWindows.Contains(aWindowId)) {
+    mAudioPlayingWindows.AppendElement(aWindowId);
     if (mAudioPlayingWindows.Length() == 1) {
       ALOG_BRIDGE("nsAndroidBridge, request audio focus.");
       AudioFocusAgent::NotifyStartedPlaying();
     }
-  } else if (!aPlaying && mAudioPlayingWindows.Contains(aWindow)) {
-    mAudioPlayingWindows.RemoveElement(aWindow);
+  } else if (!aPlaying && mAudioPlayingWindows.Contains(aWindowId)) {
+    mAudioPlayingWindows.RemoveElement(aWindowId);
     if (mAudioPlayingWindows.Length() == 0) {
       ALOG_BRIDGE("nsAndroidBridge, abandon audio focus.");
       AudioFocusAgent::NotifyStoppedPlaying();
@@ -1257,7 +1238,7 @@ nsAndroidBridge::AddObservers()
   nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
   if (obs) {
     obs->AddObserver(this, "xpcom-shutdown", false);
-    obs->AddObserver(this, "audio-playback", false);
+    obs->AddObserver(this, "media-playback", false);
   }
 }
 
@@ -1267,7 +1248,7 @@ nsAndroidBridge::RemoveObservers()
   nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
   if (obs) {
     obs->RemoveObserver(this, "xpcom-shutdown");
-    obs->RemoveObserver(this, "audio-playback");
+    obs->RemoveObserver(this, "media-playback");
   }
 }
 
@@ -1357,32 +1338,6 @@ extern "C"
 __attribute__ ((visibility("default")))
 jobject JNICALL
 Java_org_mozilla_gecko_GeckoAppShell_allocateDirectBuffer(JNIEnv *env, jclass, jlong size);
-
-bool
-AndroidBridge::GetThreadNameJavaProfiling(uint32_t aThreadId, nsCString & aResult)
-{
-    auto jstrThreadName = GeckoJavaSampler::GetThreadName(aThreadId);
-
-    if (!jstrThreadName)
-        return false;
-
-    aResult = jstrThreadName->ToCString();
-    return true;
-}
-
-bool
-AndroidBridge::GetFrameNameJavaProfiling(uint32_t aThreadId, uint32_t aSampleId,
-                                          uint32_t aFrameId, nsCString & aResult)
-{
-    auto jstrSampleName = GeckoJavaSampler::GetFrameName
-            (aThreadId, aSampleId, aFrameId);
-
-    if (!jstrSampleName)
-        return false;
-
-    aResult = jstrSampleName->ToCString();
-    return true;
-}
 
 void
 AndroidBridge::ContentDocumentChanged()

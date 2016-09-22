@@ -161,12 +161,7 @@ public:
    * Call this to reevaluate whether we should start/stop due to our owner
    * document being active, inactive, visible or hidden.
    */
-  void NotifyOwnerDocumentActivityChanged();
-
-  // This method does the work necessary for the
-  // NotifyOwnerDocumentActivityChanged() notification.  It returns true if the
-  // media element was paused as a result.
-  virtual bool NotifyOwnerDocumentActivityChangedInternal();
+  virtual void NotifyOwnerDocumentActivityChanged();
 
   // Called by the video decoder object, on the main thread,
   // when it has read the metadata containing video dimensions,
@@ -184,7 +179,7 @@ public:
 
   // Called by the video decoder object, on the main thread, when the
   // resource has a decode error during metadata loading or decoding.
-  virtual void DecodeError() final override;
+  virtual void DecodeError(const MediaResult& aError) final override;
 
   // Return true if error attribute is not null.
   virtual bool HasError() const final override;
@@ -660,13 +655,11 @@ public:
   }
 
   already_AddRefed<DOMMediaStream> CaptureAudio(ErrorResult& aRv,
-                                                MediaStreamGraph* aGraph = nullptr);
+                                                MediaStreamGraph* aGraph);
 
-  already_AddRefed<DOMMediaStream> MozCaptureStream(ErrorResult& aRv,
-                                                    MediaStreamGraph* aGraph = nullptr);
+  already_AddRefed<DOMMediaStream> MozCaptureStream(ErrorResult& aRv);
 
-  already_AddRefed<DOMMediaStream> MozCaptureStreamUntilEnded(ErrorResult& aRv,
-                                                              MediaStreamGraph* aGraph = nullptr);
+  already_AddRefed<DOMMediaStream> MozCaptureStreamUntilEnded(ErrorResult& aRv);
 
   bool MozAudioCaptured() const
   {
@@ -744,6 +737,19 @@ public:
   bool ComputedMuted() const;
   nsSuspendedTypes ComputedSuspended() const;
 
+  void SetMediaInfo(const MediaInfo& aInfo);
+
+  // Telemetry: to record the usage of a {visible / invisible} video element as
+  // the source of {drawImage(), createPattern(), createImageBitmap() and
+  // captureStream()} APIs.
+  enum class CallerAPI {
+    DRAW_IMAGE,
+    CREATE_PATTERN,
+    CREATE_IMAGEBITMAP,
+    CAPTURE_STREAM,
+  };
+  void MarkAsContentSource(CallerAPI aAPI);
+
 protected:
   virtual ~HTMLMediaElement();
 
@@ -805,7 +811,7 @@ protected:
     nsTArray<Pair<nsString, RefPtr<MediaInputPort>>> mTrackPorts;
   };
 
-  nsresult PlayInternal(bool aCallerIsChrome);
+  nsresult PlayInternal();
 
   /** Use this method to change the mReadyState member, so required
    * events can be fired.
@@ -900,7 +906,7 @@ protected:
    */
   already_AddRefed<DOMMediaStream> CaptureStreamInternal(bool aFinishWhenEnded,
                                                          bool aCaptureAudio,
-                                                         MediaStreamGraph* aGraph = nullptr);
+                                                         MediaStreamGraph* aGraph);
 
   /**
    * Initialize a decoder as a clone of an existing decoder in another
@@ -955,7 +961,7 @@ protected:
    * state to NETWORK_NO_SOURCE, and sends error event with code
    * MEDIA_ERR_SRC_NOT_SUPPORTED.
    */
-  void NoSupportedMediaSourceError();
+  void NoSupportedMediaSourceError(const nsACString& aErrorDetails = nsCString());
 
   /**
    * Attempts to load resources from the <source> children. This is a
@@ -1042,7 +1048,7 @@ protected:
   /**
    * Possible values of the 'preload' attribute.
    */
-  enum PreloadAttrValue {
+  enum PreloadAttrValue : uint8_t {
     PRELOAD_ATTR_EMPTY,    // set to ""
     PRELOAD_ATTR_NONE,     // set to "none"
     PRELOAD_ATTR_METADATA, // set to "metadata"
@@ -1121,7 +1127,7 @@ protected:
    * Resets the media element for an error condition as per aErrorCode.
    * aErrorCode must be one of nsIDOMHTMLMediaError codes.
    */
-  void Error(uint16_t aErrorCode);
+  void Error(uint16_t aErrorCode, const nsACString& aErrorDetails = nsCString());
 
   /**
    * Returns the URL spec of the currentSrc.
@@ -1220,6 +1226,12 @@ protected:
   // Creates the audio channel agent if needed.  Returns true if the audio
   // channel agent is ready to be used.
   bool MaybeCreateAudioChannelAgent();
+
+  // Determine if the element should be paused because of suspend conditions.
+  bool ShouldElementBePaused();
+
+  // Create or destroy the captured stream depend on mAudioCapturedByWindow.
+  void AudioCaptureStreamChangeIfNeeded();
 
   /**
    * We have different kinds of suspended cases,
@@ -1516,10 +1528,6 @@ protected:
   // True iff event delivery is suspended (mPausedForInactiveDocumentOrChannel must also be true).
   bool mEventDeliveryPaused;
 
-  // True if we've reported a "waiting" event since the last
-  // readyState change to HAVE_CURRENT_DATA.
-  bool mWaitingFired;
-
   // True if we're running the "load()" method.
   bool mIsRunningLoadMethod;
 
@@ -1614,11 +1622,6 @@ protected:
   // enough if we ever expand the ability of supporting multi-tracks video
   // playback.
   bool mDisableVideo;
-
-  // True if we blocked either a play() call or autoplay because the
-  // media's owner doc was not visible. Only enforced when the pref
-  // media.block-play-until-visible=true.
-  bool mPlayBlockedBecauseHidden;
 
   // An agent used to join audio channel service.
   nsCOMPtr<nsIAudioChannelAgent> mAudioChannelAgent;
@@ -1723,6 +1726,8 @@ private:
 
   // True if media element is audible for users.
   bool mAudible;
+
+  Visibility mVisibilityState;
 };
 
 } // namespace dom

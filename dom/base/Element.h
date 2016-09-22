@@ -136,6 +136,7 @@ class EventStateManager;
 namespace dom {
 
 class Animation;
+class CustomElementsRegistry;
 class Link;
 class UndoManager;
 class DOMRect;
@@ -424,7 +425,9 @@ private:
   friend class mozilla::EventStateManager;
   friend class ::nsGlobalWindow;
   friend class ::nsFocusManager;
-  friend class ::nsDocument;
+
+  // Allow CusomtElementRegistry to call AddStates.
+  friend class CustomElementsRegistry;
 
   // Also need to allow Link to call UpdateLinkState.
   friend class Link;
@@ -746,28 +749,16 @@ public:
       return;
     }
     nsIPresShell::PointerCaptureInfo* pointerCaptureInfo = nullptr;
-    if (nsIPresShell::gPointerCaptureList->Get(aPointerId, &pointerCaptureInfo) && pointerCaptureInfo) {
-      // Call ReleasePointerCapture only on correct element
-      // (on element that have status pointer capture override
-      // or on element that have status pending pointer capture)
-      if (pointerCaptureInfo->mOverrideContent == this) {
-        nsIPresShell::ReleasePointerCapturingContent(aPointerId);
-      } else if (pointerCaptureInfo->mPendingContent == this) {
-        nsIPresShell::ReleasePointerCapturingContent(aPointerId);
-      }
+    if (nsIPresShell::gPointerCaptureList->Get(aPointerId, &pointerCaptureInfo) &&
+        pointerCaptureInfo && pointerCaptureInfo->mPendingContent == this) {
+      nsIPresShell::ReleasePointerCapturingContent(aPointerId);
     }
   }
   bool HasPointerCapture(long aPointerId)
   {
-    bool activeState = false;
-    if (!nsIPresShell::GetPointerInfo(aPointerId, activeState)) {
-      return false;
-    }
     nsIPresShell::PointerCaptureInfo* pointerCaptureInfo = nullptr;
     if (nsIPresShell::gPointerCaptureList->Get(aPointerId, &pointerCaptureInfo) &&
-        pointerCaptureInfo && !pointerCaptureInfo->mReleaseContent &&
-        (pointerCaptureInfo->mOverrideContent == this ||
-         pointerCaptureInfo->mPendingContent == this)) {
+        pointerCaptureInfo && pointerCaptureInfo->mPendingContent == this) {
       return true;
     }
     return false;

@@ -305,8 +305,8 @@ public:
     if (mPathBuilder) {
       mPathBuilder->MoveTo(mozilla::gfx::Point(ToFloat(aX), ToFloat(aY)));
     } else {
-      mDSPathBuilder->MoveTo(mTarget->GetTransform() *
-                             mozilla::gfx::Point(ToFloat(aX), ToFloat(aY)));
+      mDSPathBuilder->MoveTo(mTarget->GetTransform().TransformPoint(
+                             mozilla::gfx::Point(ToFloat(aX), ToFloat(aY))));
     }
   }
 
@@ -326,10 +326,10 @@ public:
                                       mozilla::gfx::Point(ToFloat(aX), ToFloat(aY)));
     } else {
       mozilla::gfx::Matrix transform = mTarget->GetTransform();
-      mDSPathBuilder->QuadraticBezierTo(transform *
-                                        mozilla::gfx::Point(ToFloat(aCpx), ToFloat(aCpy)),
-                                        transform *
-                                        mozilla::gfx::Point(ToFloat(aX), ToFloat(aY)));
+      mDSPathBuilder->QuadraticBezierTo(transform.TransformPoint(
+                                          mozilla::gfx::Point(ToFloat(aCpx), ToFloat(aCpy))),
+                                        transform.TransformPoint(
+                                          mozilla::gfx::Point(ToFloat(aX), ToFloat(aY))));
     }
   }
 
@@ -429,6 +429,7 @@ public:
 
   virtual int32_t GetWidth() const override;
   virtual int32_t GetHeight() const override;
+  gfx::IntSize GetSize() const { return gfx::IntSize(mWidth, mHeight); }
 
   // nsICanvasRenderingContextInternal
   /**
@@ -463,7 +464,6 @@ public:
   NS_IMETHOD SetIsOpaque(bool aIsOpaque) override;
   bool GetIsOpaque() override { return mOpaque; }
   NS_IMETHOD Reset() override;
-  mozilla::layers::PersistentBufferProvider* GetBufferProvider(mozilla::layers::LayerManager* aManager);
   already_AddRefed<Layer> GetCanvasLayer(nsDisplayListBuilder* aBuilder,
                                          Layer* aOldLayer,
                                          LayerManager* aManager,
@@ -517,7 +517,7 @@ public:
     if (mPathBuilder) {
       mPathBuilder->LineTo(aPoint);
     } else {
-      mDSPathBuilder->LineTo(mTarget->GetTransform() * aPoint);
+      mDSPathBuilder->LineTo(mTarget->GetTransform().TransformPoint(aPoint));
     }
   }
 
@@ -529,9 +529,9 @@ public:
       mPathBuilder->BezierTo(aCP1, aCP2, aCP3);
     } else {
       mozilla::gfx::Matrix transform = mTarget->GetTransform();
-      mDSPathBuilder->BezierTo(transform * aCP1,
-                                transform * aCP2,
-                                transform * aCP3);
+      mDSPathBuilder->BezierTo(transform.TransformPoint(aCP1),
+                               transform.TransformPoint(aCP2),
+                               transform.TransformPoint(aCP3));
     }
   }
 
@@ -642,6 +642,23 @@ protected:
    */
   RenderingMode EnsureTarget(const gfx::Rect* aCoveredRect = nullptr,
                              RenderingMode aRenderMode = RenderingMode::DefaultBackendMode);
+
+  void RestoreClipsAndTransformToTarget();
+
+  bool TrySkiaGLTarget(RefPtr<gfx::DrawTarget>& aOutDT,
+                       RefPtr<layers::PersistentBufferProvider>& aOutProvider);
+
+  bool TrySharedTarget(RefPtr<gfx::DrawTarget>& aOutDT,
+                       RefPtr<layers::PersistentBufferProvider>& aOutProvider);
+
+  bool TryBasicTarget(RefPtr<gfx::DrawTarget>& aOutDT,
+                      RefPtr<layers::PersistentBufferProvider>& aOutProvider);
+
+  void RegisterAllocation();
+
+  void SetInitialState();
+
+  void SetErrorState();
 
   /**
    * This method is run at the end of the event-loop spin where

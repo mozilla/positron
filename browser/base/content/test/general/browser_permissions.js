@@ -37,7 +37,7 @@ add_task(function* testMainViewVisible() {
   yield promiseTabLoadEvent(tab, PERMISSIONS_PAGE);
 
   let permissionsList = document.getElementById("identity-popup-permission-list");
-  let emptyLabel = permissionsList.nextSibling;
+  let emptyLabel = permissionsList.nextSibling.nextSibling;
 
   yield openIdentityPopup();
 
@@ -107,7 +107,7 @@ add_task(function* testCancelPermission() {
   yield promiseTabLoadEvent(tab, PERMISSIONS_PAGE);
 
   let permissionsList = document.getElementById("identity-popup-permission-list");
-  let emptyLabel = permissionsList.nextSibling;
+  let emptyLabel = permissionsList.nextSibling.nextSibling;
 
   SitePermissions.set(gBrowser.currentURI, "geo", SitePermissions.ALLOW);
   SitePermissions.set(gBrowser.currentURI, "camera", SitePermissions.BLOCK);
@@ -184,14 +184,17 @@ add_task(function* testPermissionIcons() {
   SitePermissions.set(gBrowser.currentURI, "geo", SitePermissions.BLOCK);
   SitePermissions.set(gBrowser.currentURI, "microphone", SitePermissions.SESSION);
 
-  let geoIcon = gIdentityHandler._identityBox.querySelector("[data-permission-id='geo']");
+  let geoIcon = gIdentityHandler._identityBox
+    .querySelector(".blocked-permission-icon[data-permission-id='geo']");
   ok(geoIcon.hasAttribute("showing"), "blocked permission icon is shown");
 
-  let cameraIcon = gIdentityHandler._identityBox.querySelector("[data-permission-id='camera']");
+  let cameraIcon = gIdentityHandler._identityBox
+    .querySelector(".blocked-permission-icon[data-permission-id='camera']");
   ok(!cameraIcon.hasAttribute("showing"),
     "allowed permission icon is not shown");
 
-  let microphoneIcon  = gIdentityHandler._identityBox.querySelector("[data-permission-id='microphone']");
+  let microphoneIcon  = gIdentityHandler._identityBox
+    .querySelector(".blocked-permission-icon[data-permission-id='microphone']");
   ok(!microphoneIcon.hasAttribute("showing"),
     "allowed permission icon is not shown");
 

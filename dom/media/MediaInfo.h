@@ -261,7 +261,8 @@ public:
   // container.
   nsIntRect ScaledImageRect(int64_t aWidth, int64_t aHeight) const
   {
-    if (aWidth == mImage.width && aHeight == mImage.height) {
+    if ((aWidth == mImage.width && aHeight == mImage.height) ||
+        !mImage.width || !mImage.height) {
       return ImageRect();
     }
     nsIntRect imageRect = ImageRect();
@@ -282,7 +283,7 @@ public:
       case 270:
         return kDegree_270;
       default:
-        NS_WARN_IF_FALSE(aDegree == 0, "Invalid rotation degree, ignored");
+        NS_WARNING_ASSERTION(aDegree == 0, "Invalid rotation degree, ignored");
         return kDegree_0;
     }
   }

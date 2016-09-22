@@ -38,6 +38,7 @@
 #include "nsINotificationStorage.h"
 #include "nsIPermissionManager.h"
 #include "nsIPermission.h"
+#include "nsIPushService.h"
 #include "nsIScriptSecurityManager.h"
 #include "nsIServiceWorkerManager.h"
 #include "nsISimpleEnumerator.h"
@@ -57,10 +58,6 @@
 
 #ifdef MOZ_B2G
 #include "nsIDOMDesktopNotification.h"
-#endif
-
-#ifndef MOZ_SIMPLEPUSH
-#include "nsIPushService.h"
 #endif
 
 namespace mozilla {
@@ -1446,9 +1443,6 @@ NotificationObserver::Observe(nsISupports* aSubject, const char* aTopic,
 nsresult
 NotificationObserver::AdjustPushQuota(const char* aTopic)
 {
-#ifdef MOZ_SIMPLEPUSH
-  return NS_ERROR_NOT_IMPLEMENTED;
-#else
   nsCOMPtr<nsIPushQuotaManager> pushQuotaManager =
     do_GetService("@mozilla.org/push/Service;1");
   if (!pushQuotaManager) {
@@ -1465,7 +1459,6 @@ NotificationObserver::AdjustPushQuota(const char* aTopic)
     return pushQuotaManager->NotificationForOriginShown(origin.get());
   }
   return pushQuotaManager->NotificationForOriginClosed(origin.get());
-#endif
 }
 
 NS_IMETHODIMP
@@ -2535,7 +2528,7 @@ NotificationWorkerHolder::Notify(Status aStatus)
 
     // Dispatched to main thread, blocks on closing the Notification.
     RefPtr<CloseNotificationRunnable> r =
-      new CloseNotificationRunnable(mNotification);
+      new CloseNotificationRunnable(kungFuDeathGrip);
     ErrorResult rv;
     r->Dispatch(rv);
     // XXXbz I'm told throwing and returning false from here is pointless (and
@@ -2547,7 +2540,7 @@ NotificationWorkerHolder::Notify(Status aStatus)
     // ownership (since CloseNotificationRunnable asked the observer to drop the
     // reference to the notification).
     if (r->HadObserver()) {
-      mNotification->ReleaseObject();
+      kungFuDeathGrip->ReleaseObject();
     }
 
     // From this point we cannot touch properties of this feature because

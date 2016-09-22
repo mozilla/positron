@@ -5,17 +5,28 @@
 package org.mozilla.gecko.home.activitystream;
 
 import android.database.Cursor;
+import android.support.v4.app.LoaderManager;
 import android.support.v7.widget.RecyclerView;
 import android.view.LayoutInflater;
 import android.view.ViewGroup;
 
+import org.mozilla.gecko.home.HomePager;
 import org.mozilla.gecko.home.activitystream.StreamItem.BottomPanel;
 import org.mozilla.gecko.home.activitystream.StreamItem.CompactItem;
 import org.mozilla.gecko.home.activitystream.StreamItem.HighlightItem;
 import org.mozilla.gecko.home.activitystream.StreamItem.TopPanel;
 
+import java.lang.ref.WeakReference;
+
 public class StreamRecyclerAdapter extends RecyclerView.Adapter<StreamItem> {
     private Cursor highlightsCursor;
+    private Cursor topSitesCursor;
+
+    private HomePager.OnUrlOpenListener onUrlOpenListener;
+
+    void setOnUrlOpenListener(HomePager.OnUrlOpenListener onUrlOpenListener) {
+        this.onUrlOpenListener = onUrlOpenListener;
+    }
 
     @Override
     public int getItemViewType(int position) {
@@ -24,11 +35,6 @@ public class StreamRecyclerAdapter extends RecyclerView.Adapter<StreamItem> {
         } else if (position == getItemCount() - 1) {
             return BottomPanel.LAYOUT_ID;
         } else {
-            // TODO: in future we'll want to create different items for some results, tbc?
-            // For now let's show a detailed view for these two positions...
-            if (position == 2 || position == 6) {
-                return HighlightItem.LAYOUT_ID;
-            }
             return CompactItem.LAYOUT_ID;
         }
     }
@@ -38,7 +44,7 @@ public class StreamRecyclerAdapter extends RecyclerView.Adapter<StreamItem> {
         final LayoutInflater inflater = LayoutInflater.from(parent.getContext());
 
         if (type == TopPanel.LAYOUT_ID) {
-            return new TopPanel(inflater.inflate(type, parent, false));
+            return new TopPanel(inflater.inflate(type, parent, false), onUrlOpenListener);
         } else if (type == BottomPanel.LAYOUT_ID) {
                 return new BottomPanel(inflater.inflate(type, parent, false));
         } else if (type == CompactItem.LAYOUT_ID) {
@@ -71,6 +77,8 @@ public class StreamRecyclerAdapter extends RecyclerView.Adapter<StreamItem> {
 
             highlightsCursor.moveToPosition(cursorPosition);
             holder.bind(highlightsCursor);
+        } else if (type == TopPanel.LAYOUT_ID) {
+            holder.bind(topSitesCursor);
         }
     }
 
@@ -86,9 +94,15 @@ public class StreamRecyclerAdapter extends RecyclerView.Adapter<StreamItem> {
         return 2 + highlightsCount;
     }
 
-    public void swapCursor(Cursor cursor) {
+    public void swapHighlightsCursor(Cursor cursor) {
         highlightsCursor = cursor;
 
         notifyDataSetChanged();
+    }
+
+    public void swapTopSitesCursor(Cursor cursor) {
+        this.topSitesCursor = cursor;
+
+        notifyItemChanged(0);
     }
 }

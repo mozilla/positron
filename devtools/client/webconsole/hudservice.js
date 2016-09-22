@@ -521,18 +521,12 @@ WebConsole.prototype = {
       return null;
     }
     let panel = toolbox.getPanel("jsdebugger");
+
     if (!panel) {
       return null;
     }
-    let framesController = panel.panelWin.DebuggerController.StackFrames;
-    let thread = framesController.activeThread;
-    if (thread && thread.paused) {
-      return {
-        frames: thread.cachedFrames,
-        selected: framesController.currentFrameDepth,
-      };
-    }
-    return null;
+
+    return panel.getFrames();
   },
 
   /**
@@ -698,7 +692,7 @@ BrowserConsole.prototype = extend(WebConsole.prototype, {
 
     let chromeWindow = this.chromeWindow;
     this.$destroy().then(() =>
-      this.target.client.close(() => {
+      this.target.client.close().then(() => {
         HUDService._browserConsoleID = null;
         chromeWindow.close();
         this._bc_destroyer.resolve(null);

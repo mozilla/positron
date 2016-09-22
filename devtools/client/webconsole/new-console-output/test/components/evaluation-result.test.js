@@ -20,11 +20,11 @@ describe("EvaluationResult component:", () => {
     const rendered = renderComponent(EvaluationResult, props);
 
     const messageBody = getMessageBody(rendered);
-    expect(messageBody.textContent).toBe("Date1970-01-01T00:00:00.000Z");
+    expect(messageBody.textContent).toBe("Date 1970-01-01T00:00:00.000Z");
   });
 });
 
 function getMessageBody(rendered) {
-  const queryPath = "div.message.cm-s-mozilla span.message-body-wrapper.message-body.devtools-monospace";
+  const queryPath = "div.message span.message-body-wrapper span.message-body";
   return rendered.querySelector(queryPath);
 }

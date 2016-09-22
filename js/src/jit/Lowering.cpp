@@ -94,7 +94,7 @@ static void
 TryToUseImplicitInterruptCheck(MIRGraph& graph, MBasicBlock* backedge)
 {
     // Implicit interrupt checks require asm.js signal handlers to be installed.
-    if (!wasm::HaveSignalHandlers())
+    if (!wasm::HaveSignalHandlers() || JitOptions.ionInterruptWithoutSignals)
         return;
 
     // To avoid triggering expensive interrupts (backedge patching) in
@@ -2523,16 +2523,9 @@ LIRGenerator::visitInterruptCheck(MInterruptCheck* ins)
 }
 
 void
-LIRGenerator::visitAsmJSInterruptCheck(MAsmJSInterruptCheck* ins)
+LIRGenerator::visitWasmTrap(MWasmTrap* ins)
 {
-    gen->setPerformsCall();
-    add(new(alloc()) LAsmJSInterruptCheck, ins);
-}
-
-void
-LIRGenerator::visitAsmThrowUnreachable(MAsmThrowUnreachable* ins)
-{
-    add(new(alloc()) LAsmThrowUnreachable, ins);
+    add(new(alloc()) LWasmTrap, ins);
 }
 
 void
@@ -3157,6 +3150,38 @@ LIRGenerator::visitStoreElementHole(MStoreElementHole* ins)
 }
 
 void
+LIRGenerator::visitFallibleStoreElement(MFallibleStoreElement* ins)
+{
+    MOZ_ASSERT(ins->elements()->type() == MIRType::Elements);
+    MOZ_ASSERT(ins->index()->type() == MIRType::Int32);
+
+    const LUse object = useRegister(ins->object());
+    const LUse elements = useRegister(ins->elements());
+    const LAllocation index = useRegisterOrConstant(ins->index());
+
+    // Use a temp register when adding new elements to unboxed arrays.
+    LDefinition tempDef = LDefinition::BogusTemp();
+    if (ins->unboxedType() != JSVAL_TYPE_MAGIC)
+        tempDef = temp();
+
+    LInstruction* lir;
+    switch (ins->value()->type()) {
+      case MIRType::Value:
+        lir = new(alloc()) LFallibleStoreElementV(object, elements, index, useBox(ins->value()),
+                                                  tempDef);
+        break;
+      default:
+        const LAllocation value = useRegisterOrNonDoubleConstant(ins->value());
+        lir = new(alloc()) LFallibleStoreElementT(object, elements, index, value, tempDef);
+        break;
+    }
+
+    add(lir, ins);
+    assignSafepoint(lir, ins);
+}
+
+
+void
 LIRGenerator::visitStoreUnboxedObjectOrNull(MStoreUnboxedObjectOrNull* ins)
 {
     MOZ_ASSERT(IsValidElementsType(ins->elements(), ins->offsetAdjustment()));
@@ -3747,11 +3772,10 @@ LIRGenerator::visitAssertRange(MAssertRange* ins)
         lir = new(alloc()) LAssertRangeD(useRegister(input), tempDouble());
         break;
 
-      case MIRType::Float32: {
-        LDefinition armtemp = hasMultiAlias() ? tempDouble() : LDefinition::BogusTemp();
-        lir = new(alloc()) LAssertRangeF(useRegister(input), tempDouble(), armtemp);
+      case MIRType::Float32:
+        lir = new(alloc()) LAssertRangeF(useRegister(input), tempDouble(), tempDouble());
         break;
-      }
+
       case MIRType::Value:
         lir = new(alloc()) LAssertRangeV(useBox(input), tempToUnbox(), tempDouble(), tempDouble());
         break;
@@ -3881,13 +3905,22 @@ LIRGenerator::visitCallInitElementArray(MCallInitElementArray* ins)
 void
 LIRGenerator::visitIteratorStart(MIteratorStart* ins)
 {
+    if (ins->object()->type() == MIRType::Value) {
+        LCallIteratorStartV* lir = new(alloc()) LCallIteratorStartV(useBoxAtStart(ins->object()));
+        defineReturn(lir, ins);
+        assignSafepoint(lir, ins);
+        return;
+    }
+
+    MOZ_ASSERT(ins->object()->type() == MIRType::Object);
+
     // Call a stub if this is not a simple for-in loop.
     if (ins->flags() != JSITER_ENUMERATE) {
-        LCallIteratorStart* lir = new(alloc()) LCallIteratorStart(useRegisterAtStart(ins->object()));
+        LCallIteratorStartO* lir = new(alloc()) LCallIteratorStartO(useRegisterAtStart(ins->object()));
         defineReturn(lir, ins);
         assignSafepoint(lir, ins);
     } else {
-        LIteratorStart* lir = new(alloc()) LIteratorStart(useRegister(ins->object()), temp(), temp(), temp());
+        LIteratorStartO* lir = new(alloc()) LIteratorStartO(useRegister(ins->object()), temp(), temp(), temp());
         define(lir, ins);
         assignSafepoint(lir, ins);
     }
@@ -4097,6 +4130,29 @@ LIRGenerator::visitHasClass(MHasClass* ins)
     MOZ_ASSERT(ins->object()->type() == MIRType::Object);
     MOZ_ASSERT(ins->type() == MIRType::Boolean);
     define(new(alloc()) LHasClass(useRegister(ins->object())), ins);
+}
+
+void
+LIRGenerator::visitWasmAddOffset(MWasmAddOffset* ins)
+{
+    MOZ_ASSERT(ins->base()->type() == MIRType::Int32);
+    MOZ_ASSERT(ins->type() == MIRType::Int32);
+    define(new(alloc()) LWasmAddOffset(useRegisterAtStart(ins->base())), ins);
+}
+
+void
+LIRGenerator::visitWasmBoundsCheck(MWasmBoundsCheck* ins)
+{
+#ifndef DEBUG
+    if (ins->isRedundant())
+        return;
+#endif
+
+    MDefinition* input = ins->input();
+    MOZ_ASSERT(input->type() == MIRType::Int32);
+
+    auto* lir = new(alloc()) LWasmBoundsCheck(useRegisterAtStart(input));
+    add(lir, ins);
 }
 
 void

@@ -6,8 +6,8 @@
 const { FrontClassWithSpec, Front } = require("devtools/shared/protocol");
 const { cssPropertiesSpec } = require("devtools/shared/specs/css-properties");
 const { Task } = require("devtools/shared/task");
-const { CSS_PROPERTIES_DB } = require("devtools/shared/css-properties-db");
-const { cssColors } = require("devtools/shared/css-color-db");
+const { CSS_PROPERTIES_DB } = require("devtools/shared/css/properties-db");
+const { cssColors } = require("devtools/shared/css/color-db");
 
 /**
  * Build up a regular expression that matches a CSS variable token. This is an
@@ -91,7 +91,7 @@ CssProperties.prototype = {
 
   /**
    * Checks if the property supports the given CSS type.
-   * CSS types should come from devtools/shared/css-properties-db.js' CSS_TYPES.
+   * CSS types should come from devtools/shared/css/properties-db.js' CSS_TYPES.
    *
    * @param {String} property The property to be checked.
    * @param {Number} type One of the type values from CSS_TYPES.
@@ -109,6 +109,15 @@ CssProperties.prototype = {
    */
   getValues(property) {
     return this.properties[property] ? this.properties[property].values : [];
+  },
+
+  /**
+   * Gets the CSS property names.
+   *
+   * @return {Array} An array of strings.
+   */
+  getNames(property) {
+    return Object.keys(this.properties);
   }
 };
 
@@ -140,7 +149,7 @@ const initCssProperties = Task.async(function* (toolbox) {
     if (!serverDB.properties && !serverDB.margin) {
       db = CSS_PROPERTIES_DB;
     } else {
-      db = normalizeCssData(serverDB);
+      db = serverDB;
     }
   } else {
     // The target does not support this actor, so require a static list of supported
@@ -148,10 +157,7 @@ const initCssProperties = Task.async(function* (toolbox) {
     db = CSS_PROPERTIES_DB;
   }
 
-  // Color values are omitted to save on space. Add them back here.
-  reattachCssColorValues(db);
-
-  const cssProperties = new CssProperties(db);
+  const cssProperties = new CssProperties(normalizeCssData(db));
   cachedCssProperties.set(client, {cssProperties, front});
   return {cssProperties, front};
 });
@@ -172,51 +178,63 @@ function getCssProperties(toolbox) {
 }
 
 /**
+ * Get a client-side CssProperties. This is useful for dependencies in tests, or parts
+ * of the codebase that don't particularly need to match every known CSS property on
+ * the target.
+ * @return {CssProperties}
+ */
+function getClientCssProperties() {
+  return new CssProperties(normalizeCssData(CSS_PROPERTIES_DB));
+}
+
+/**
  * Get the current browser version.
  * @returns {string} The browser version.
  */
 function getClientBrowserVersion(toolbox) {
-  if (!toolbox._host) {
-    return "0";
-  }
-  const regexResult = toolbox._host.frame.contentWindow.navigator
+  const regexResult = toolbox.win.navigator
                              .userAgent.match(/Firefox\/(\d+)\.\d/);
   return Array.isArray(regexResult) ? regexResult[1] : "0";
 }
 
 /**
  * Even if the target has the cssProperties actor, the returned data may not be in the
- * same shape or have all of the data we need. This normalizes this data.
+ * same shape or have all of the data we need. This normalizes the data and fills in
+ * any missing information like color values.
  *
  * @return {Object} The normalized CSS database.
  */
 function normalizeCssData(db) {
-  // Firefox 49's getCSSDatabase() just returned the properties object, but
-  // now it returns an object with multiple types of CSS information.
-  if (!db.properties) {
-    db = { properties: db };
-  }
+  if (db !== CSS_PROPERTIES_DB) {
+    // Firefox 49's getCSSDatabase() just returned the properties object, but
+    // now it returns an object with multiple types of CSS information.
+    if (!db.properties) {
+      db = { properties: db };
+    }
 
-  // Fill in any missing DB information from the static database.
-  db = Object.assign({}, CSS_PROPERTIES_DB, db);
+    // Fill in any missing DB information from the static database.
+    db = Object.assign({}, CSS_PROPERTIES_DB, db);
 
-  // Add "supports" information to the css properties if it's missing.
-  if (!db.properties.color.supports) {
-    for (let name in db.properties) {
-      if (typeof CSS_PROPERTIES_DB.properties[name] === "object") {
-        db.properties[name].supports = CSS_PROPERTIES_DB.properties[name].supports;
+    // Add "supports" information to the css properties if it's missing.
+    if (!db.properties.color.supports) {
+      for (let name in db.properties) {
+        if (typeof CSS_PROPERTIES_DB.properties[name] === "object") {
+          db.properties[name].supports = CSS_PROPERTIES_DB.properties[name].supports;
+        }
+      }
+    }
+
+    // Add "values" information to the css properties if it's missing.
+    if (!db.properties.color.values) {
+      for (let name in db.properties) {
+        if (typeof CSS_PROPERTIES_DB.properties[name] === "object") {
+          db.properties[name].values = CSS_PROPERTIES_DB.properties[name].values;
+        }
       }
     }
   }
 
-  // Add "values" information to the css properties if it's missing.
-  if (!db.properties.color.values) {
-    for (let name in db.properties) {
-      if (typeof CSS_PROPERTIES_DB.properties[name] === "object") {
-        db.properties[name].values = CSS_PROPERTIES_DB.properties[name].values;
-      }
-    }
-  }
+  reattachCssColorValues(db);
 
   return db;
 }
@@ -243,5 +261,6 @@ module.exports = {
   CssPropertiesFront,
   CssProperties,
   getCssProperties,
+  getClientCssProperties,
   initCssProperties
 };

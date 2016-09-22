@@ -16,6 +16,7 @@ namespace mozilla {
 namespace dom {
 
 class Element;
+class UnrestrictedDoubleOrAnonymousKeyframeAnimationOptions;
 
 class AnonymousContent final
 {
@@ -56,6 +57,16 @@ public:
   already_AddRefed<nsISupports> GetCanvasContext(const nsAString& aElementId,
                                                  const nsAString& aContextId,
                                                  ErrorResult& aRv);
+
+  already_AddRefed<Animation> SetAnimationForElement(JSContext* aContext,
+                                                     const nsAString& aElementId,
+                                                     JS::Handle<JSObject*> aKeyframes,
+                                                     const UnrestrictedDoubleOrKeyframeAnimationOptions& aOptions,
+                                                     ErrorResult& aError);
+
+  void SetCutoutRectsForElement(const nsAString& aElementId,
+                                const Sequence<OwningNonNull<DOMRect>>& aRects,
+                                ErrorResult& aError);
 
 private:
   ~AnonymousContent();

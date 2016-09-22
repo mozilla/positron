@@ -476,17 +476,13 @@ js::SetIntegrityLevel(JSContext* cx, HandleObject obj, IntegrityLevel level)
     assertSameCompartment(cx, obj);
 
     // Steps 3-5. (Steps 1-2 are redundant assertions.)
-    if (!PreventExtensions(cx, obj))
+    if (!PreventExtensions(cx, obj, level))
         return false;
 
     // Steps 6-7.
     AutoIdVector keys(cx);
     if (!GetPropertyKeys(cx, obj, JSITER_HIDDEN | JSITER_OWNONLY | JSITER_SYMBOLS, &keys))
         return false;
-
-    // PreventExtensions must sparsify dense objects, so we can assign to holes
-    // without checks.
-    MOZ_ASSERT_IF(obj->isNative(), obj->as<NativeObject>().getDenseCapacity() == 0);
 
     // Steps 8-9, loosely interpreted.
     if (obj->isNative() && !obj->as<NativeObject>().inDictionaryMode() &&
@@ -1673,27 +1669,6 @@ DefineStandardSlot(JSContext* cx, HandleObject obj, JSProtoKey key, JSAtom* atom
                    HandleValue v, uint32_t attrs, bool& named)
 {
     RootedId id(cx, AtomToId(atom));
-
-    if (key != JSProto_Null) {
-        /*
-         * Initializing an actual standard class on a global object. If the
-         * property is not yet present, force it into a new one bound to a
-         * reserved slot. Otherwise, go through the normal property path.
-         */
-        Rooted<GlobalObject*> global(cx, &obj->as<GlobalObject>());
-
-        if (!global->lookup(cx, id)) {
-            global->setConstructorPropertySlot(key, v);
-
-            uint32_t slot = GlobalObject::constructorPropertySlot(key);
-            if (!NativeObject::addProperty(cx, global, id, nullptr, nullptr, slot, attrs, 0))
-                return false;
-
-            named = true;
-            return true;
-        }
-    }
-
     named = DefineProperty(cx, obj, id, v, nullptr, nullptr, attrs);
     return named;
 }
@@ -2518,20 +2493,6 @@ js::GetPrototypeIfOrdinary(JSContext* cx, HandleObject obj, bool* isOrdinary,
     return true;
 }
 
-// Our immutable-prototype behavior is non-standard, and it's unclear whether
-// it's shippable.  (Or at least it's unclear whether it's shippable with any
-// provided-by-default uses exposed to script.)  If this bool is true,
-// immutable-prototype behavior is enforced; if it's false, behavior is not
-// enforced, and immutable-prototype bits stored on objects are completely
-// ignored.
-static const bool ImmutablePrototypesEnabled = true;
-
-JS_FRIEND_API(bool)
-JS_ImmutablePrototypesEnabled()
-{
-    return ImmutablePrototypesEnabled;
-}
-
 /*** ES6 standard internal methods ***************************************************************/
 
 bool
@@ -2544,8 +2505,15 @@ js::SetPrototype(JSContext* cx, HandleObject obj, HandleObject proto, JS::Object
         return Proxy::setPrototype(cx, obj, proto, result);
     }
 
+    /*
+     * ES6 9.1.2 step 3-4 if |obj.[[Prototype]]| has SameValue as |proto| return true.
+     * Since the values in question are objects, we can just compare pointers.
+     */
+    if (proto == obj->staticPrototype())
+        return result.succeed();
+
     /* Disallow mutation of immutable [[Prototype]]s. */
-    if (obj->staticPrototypeIsImmutable() && ImmutablePrototypesEnabled)
+    if (obj->staticPrototypeIsImmutable())
         return result.fail(JSMSG_CANT_SET_PROTO);
 
     /*
@@ -2567,23 +2535,6 @@ js::SetPrototype(JSContext* cx, HandleObject obj, HandleObject proto, JS::Object
                              "incompatible TypedObject");
         return false;
     }
-
-    /*
-     * Explicitly disallow mutating the [[Prototype]] of Location objects
-     * for flash-related security reasons.
-     */
-    if (!strcmp(obj->getClass()->name, "Location")) {
-        JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_CANT_SET_PROTO_OF,
-                             "incompatible Location object");
-        return false;
-    }
-
-    /*
-     * ES6 9.1.2 step 3-4 if |obj.[[Prototype]]| has SameValue as |proto| return true.
-     * Since the values in question are objects, we can just compare pointers.
-     */
-    if (proto == obj->staticPrototype())
-        return result.succeed();
 
     /* ES6 9.1.2 step 5 forbids changing [[Prototype]] if not [[Extensible]]. */
     bool extensible;
@@ -2640,7 +2591,7 @@ js::SetPrototype(JSContext* cx, HandleObject obj, HandleObject proto)
 }
 
 bool
-js::PreventExtensions(JSContext* cx, HandleObject obj, ObjectOpResult& result)
+js::PreventExtensions(JSContext* cx, HandleObject obj, ObjectOpResult& result, IntegrityLevel level)
 {
     if (obj->is<ProxyObject>())
         return js::Proxy::preventExtensions(cx, obj, result);
@@ -2656,25 +2607,38 @@ js::PreventExtensions(JSContext* cx, HandleObject obj, ObjectOpResult& result)
     if (!js::GetPropertyKeys(cx, obj, JSITER_HIDDEN | JSITER_OWNONLY, &props))
         return false;
 
-    // Convert all dense elements to sparse properties. This will shrink the
-    // initialized length and capacity of the object to zero and ensure that no
-    // new dense elements can be added without calling growElements(), which
-    // checks isExtensible().
+    // Actually prevent extension. If the object is being frozen, do it by
+    // setting the frozen flag on both the object and the object group.
+    // Otherwise, fallback to sparsifying the object, which makes sure no
+    // element can be added without a call to isExtensible, at the cost of
+    // performance.
     if (obj->isNative()) {
-        if (!NativeObject::sparsifyDenseElements(cx, obj.as<NativeObject>()))
+        if (level == IntegrityLevel::Frozen) {
+            MarkObjectGroupFlags(cx, obj, OBJECT_FLAG_FROZEN);
+            if (!ObjectElements::FreezeElements(cx, obj.as<NativeObject>()))
+                return false;
+        } else if (!NativeObject::sparsifyDenseElements(cx, obj.as<NativeObject>())) {
             return false;
+        }
     }
 
-    if (!obj->setFlags(cx, BaseShape::NOT_EXTENSIBLE, JSObject::GENERATE_SHAPE))
+    if (!obj->setFlags(cx, BaseShape::NOT_EXTENSIBLE, JSObject::GENERATE_SHAPE)) {
+        // We failed to mark the object non-extensible, so reset the frozen
+        // flag on the elements.
+        MOZ_ASSERT(obj->nonProxyIsExtensible());
+        if (obj->isNative() && obj->as<NativeObject>().getElementsHeader()->isFrozen())
+            obj->as<NativeObject>().getElementsHeader()->markNotFrozen();
         return false;
+    }
+
     return result.succeed();
 }
 
 bool
-js::PreventExtensions(JSContext* cx, HandleObject obj)
+js::PreventExtensions(JSContext* cx, HandleObject obj, IntegrityLevel level)
 {
     ObjectOpResult result;
-    return PreventExtensions(cx, obj, result) && result.checkStrict(cx, obj);
+    return PreventExtensions(cx, obj, result, level) && result.checkStrict(cx, obj);
 }
 
 bool
@@ -3734,8 +3698,9 @@ JSObject::allocKindForTenure(const js::Nursery& nursery) const
         return GetBackgroundAllocKind(TypedArrayObject::AllocKindForLazyBuffer(nbytes));
     }
 
-    // Proxies have finalizers and are not nursery allocated.
-    MOZ_ASSERT(!IsProxy(this));
+    // Proxies that are CrossCompartmentWrappers may be nursery allocated.
+    if (IsProxy(this))
+        return as<ProxyObject>().allocKindForTenure();
 
     // Unboxed plain objects are sized according to the data they store.
     if (is<UnboxedPlainObject>()) {

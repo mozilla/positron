@@ -53,11 +53,6 @@ WebVTTListener::GetInterface(const nsIID &aIID,
 nsresult
 WebVTTListener::LoadResource()
 {
-  if (!HTMLTrackElement::IsWebVTTEnabled()) {
-    NS_WARNING("WebVTT support disabled."
-               " See media.webvtt.enabled in about:config. ");
-    return NS_ERROR_FAILURE;
-  }
   nsresult rv;
   mParserWrapper = do_CreateInstance(NS_WEBVTTPARSERWRAPPER_CONTRACTID, &rv);
   NS_ENSURE_SUCCESS(rv, rv);
@@ -160,7 +155,7 @@ WebVTTListener::OnCue(JS::Handle<JS::Value> aCue, JSContext* aCx)
     return NS_ERROR_FAILURE;
   }
 
-  TextTrackCue* cue;
+  TextTrackCue* cue = nullptr;
   nsresult rv = UNWRAP_OBJECT(VTTCue, &aCue.toObject(), cue);
   NS_ENSURE_SUCCESS(rv, rv);
 

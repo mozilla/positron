@@ -388,7 +388,12 @@ PROT_ListManager.prototype.makeUpdateRequest_ = function(updateUrl, tableData) {
   }
 
   if (useProtobuf) {
-    let tableArray = streamerMap.tableList.split(',');
+    let tableArray = [];
+    Object.keys(streamerMap.tableNames).forEach(aTableName => {
+      if (streamerMap.tableNames[aTableName]) {
+        tableArray.push(aTableName);
+      }
+    });
 
     // The state is a byte stream which server told us from the
     // last table update. The state would be used to do the partial
@@ -401,7 +406,7 @@ PROT_ListManager.prototype.makeUpdateRequest_ = function(updateUrl, tableData) {
       // "saving states to HashStore".
       let statePrefName = "browser.safebrowsing.provider.google4.state." + listName;
       let stateBase64 = this.prefs_.getPref(statePrefName, "");
-      stateArray.push(stateBase64 ? atob(stateBase64) : "");
+      stateArray.push(stateBase64);
     });
 
     let urlUtils = Cc["@mozilla.org/url-classifier/utils;1"]

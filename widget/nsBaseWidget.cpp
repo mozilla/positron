@@ -37,6 +37,7 @@
 #include "nsIWidgetListener.h"
 #include "nsIGfxInfo.h"
 #include "npapi.h"
+#include "X11UndefineNone.h"
 #include "base/thread.h"
 #include "prdtoa.h"
 #include "prenv.h"
@@ -219,8 +220,8 @@ WidgetShutdownObserver::Observe(nsISupports *aSubject,
                                 const char16_t *aData)
 {
   if (mWidget && !strcmp(aTopic, NS_XPCOM_SHUTDOWN_OBSERVER_ID)) {
-    nsCOMPtr<nsIWidget> kungFuDeathGrip(mWidget);
-    mWidget->Shutdown();
+    RefPtr<nsBaseWidget> widget(mWidget);
+    widget->Shutdown();
   }
   return NS_OK;
 }
@@ -418,11 +419,6 @@ void nsBaseWidget::BaseCreate(nsIWidget* aParent,
   if (aParent) {
     aParent->AddChild(this);
   }
-}
-
-NS_IMETHODIMP nsBaseWidget::CaptureMouse(bool aCapture)
-{
-  return NS_OK;
 }
 
 //-------------------------------------------------------------------------
@@ -719,17 +715,6 @@ void nsBaseWidget::SetZIndex(int32_t aZIndex)
 
 //-------------------------------------------------------------------------
 //
-// Places widget behind the given widget (platforms must override)
-//
-//-------------------------------------------------------------------------
-NS_IMETHODIMP nsBaseWidget::PlaceBehind(nsTopLevelWidgetZPlacement aPlacement,
-                                        nsIWidget *aWidget, bool aActivate)
-{
-  return NS_OK;
-}
-
-//-------------------------------------------------------------------------
-//
 // Maximize, minimize or restore the window. The BaseWidget implementation
 // merely stores the state.
 //
@@ -850,17 +835,6 @@ nsBaseWidget::SetWindowClipRegion(const nsTArray<LayoutDeviceIntRect>& aRects,
     StoreWindowClipRegion(rects);
   }
   return NS_OK;
-}
-
-//-------------------------------------------------------------------------
-//
-// Set window shadow style
-//
-//-------------------------------------------------------------------------
-
-NS_IMETHODIMP nsBaseWidget::SetWindowShadowStyle(int32_t aMode)
-{
-  return NS_ERROR_NOT_IMPLEMENTED;
 }
 
 //-------------------------------------------------------------------------
@@ -1047,12 +1021,9 @@ void
 nsBaseWidget::SetConfirmedTargetAPZC(uint64_t aInputBlockId,
                                      const nsTArray<ScrollableLayerGuid>& aTargets) const
 {
-  // Need to specifically bind this since it's overloaded.
-  void (IAPZCTreeManager::*setTargetApzcFunc)(uint64_t, const nsTArray<ScrollableLayerGuid>&)
-          = &IAPZCTreeManager::SetTargetAPZC;
   APZThreadUtils::RunOnControllerThread(NewRunnableMethod
     <uint64_t, StoreCopyPassByRRef<nsTArray<ScrollableLayerGuid>>>(mAPZC,
-                                                                   setTargetApzcFunc,
+                                                                   &IAPZCTreeManager::SetTargetAPZC,
                                                                    aInputBlockId, aTargets));
 }
 
@@ -1399,6 +1370,12 @@ void nsBaseWidget::CreateCompositor(int aWidth, int aHeight)
   }
 }
 
+void nsBaseWidget::NotifyRemoteCompositorSessionLost(CompositorSession* aSession)
+{
+  MOZ_ASSERT(aSession == mCompositorSession);
+  DestroyLayerManager();
+}
+
 bool nsBaseWidget::ShouldUseOffMainThreadCompositing()
 {
   return gfxPlatform::UsesOffMainThreadCompositing();
@@ -1467,11 +1444,6 @@ void nsBaseWidget::OnDestroy()
   // to this widget. Callers of this function all should be holding a deathgrip
   // on this widget already.
   ReleaseContentController();
-}
-
-NS_IMETHODIMP nsBaseWidget::SetWindowClass(const nsAString& xulWinType)
-{
-  return NS_ERROR_NOT_IMPLEMENTED;
 }
 
 NS_IMETHODIMP nsBaseWidget::MoveClient(double aX, double aY)
@@ -1604,11 +1576,6 @@ uint32_t nsBaseWidget::GetMaxTouchPoints() const
   return 0;
 }
 
-NS_IMETHODIMP nsBaseWidget::SetModal(bool aModal)
-{
-  return NS_ERROR_FAILURE;
-}
-
 NS_IMETHODIMP
 nsBaseWidget::GetAttention(int32_t aCycleCount) {
     return NS_OK;
@@ -1624,12 +1591,6 @@ NS_IMETHODIMP
 nsBaseWidget::SetIcon(const nsAString&)
 {
   return NS_OK;
-}
-
-NS_IMETHODIMP
-nsBaseWidget::SetWindowTitlebarColor(nscolor aColor, bool aActive)
-{
-  return NS_ERROR_NOT_IMPLEMENTED;
 }
 
 bool

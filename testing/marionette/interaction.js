@@ -12,6 +12,8 @@ Cu.import("chrome://marionette/content/error.js");
 Cu.import("chrome://marionette/content/element.js");
 Cu.import("chrome://marionette/content/event.js");
 
+Cu.importGlobalProperties(["File"]);
+
 this.EXPORTED_SYMBOLS = ["interaction"];
 
 /**
@@ -219,6 +221,40 @@ interaction.selectOption = function(el) {
   event.change(parent);
   event.mouseup(parent);
   event.click(parent);
+};
+
+/**
+ * Appends |path| to an <input type=file>'s file list.
+ *
+ * @param {HTMLInputElement} el
+ *     An <input type=file> element.
+ * @param {string} path
+ *     Full path to file.
+ */
+interaction.uploadFile = function(el, path) {
+  let file;
+  try {
+    file = new File(path);
+  } catch (e) {
+    throw new InvalidArgumentError("File not found: " + path);
+  }
+
+  let fs = Array.prototype.slice.call(el.files);
+  fs.push(file);
+
+  // <input type=file> opens OS widget dialogue
+  // which means the mousedown/focus/mouseup/click events
+  // occur before the change event
+  event.mouseover(el);
+  event.mousemove(el);
+  event.mousedown(el);
+  event.focus(el);
+  event.mouseup(el);
+  event.click(el);
+
+  el.mozSetFileArray(fs);
+
+  event.change(el);
 };
 
 /**

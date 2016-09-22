@@ -38,7 +38,7 @@ define(function (require, exports, module) {
       if (this.props.mode != "tiny") {
         return objectLink({
           object: object
-        }, object.class);
+        }, object.class + " ");
       }
       return "";
     },
@@ -127,13 +127,11 @@ define(function (require, exports, module) {
           title,
           objectLink({
             className: "arrayLeftBracket",
-            role: "presentation",
             object: object
           }, brackets.left),
           items,
           objectLink({
             className: "arrayRightBracket",
-            role: "presentation",
             object: object
           }, brackets.right),
           span({

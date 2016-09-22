@@ -57,10 +57,8 @@ XPCOMUtils.defineLazyModuleGetter(this, "LoginManagerParent",
 XPCOMUtils.defineLazyModuleGetter(this, "Task", "resource://gre/modules/Task.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "OS", "resource://gre/modules/osfile.jsm");
 
-if (AppConstants.MOZ_SAFE_BROWSING) {
-  XPCOMUtils.defineLazyModuleGetter(this, "SafeBrowsing",
-                                    "resource://gre/modules/SafeBrowsing.jsm");
-}
+XPCOMUtils.defineLazyModuleGetter(this, "SafeBrowsing",
+                                  "resource://gre/modules/SafeBrowsing.jsm");
 
 XPCOMUtils.defineLazyModuleGetter(this, "BrowserUtils",
                                   "resource://gre/modules/BrowserUtils.jsm");
@@ -102,6 +100,9 @@ XPCOMUtils.defineLazyModuleGetter(this, "NetErrorHelper",
 
 XPCOMUtils.defineLazyModuleGetter(this, "PermissionsUtils",
                                   "resource://gre/modules/PermissionsUtils.jsm");
+
+XPCOMUtils.defineLazyModuleGetter(this, "Preferences",
+                                  "resource://gre/modules/Preferences.jsm");
 
 XPCOMUtils.defineLazyModuleGetter(this, "SharedPreferences",
                                   "resource://gre/modules/SharedPreferences.jsm");
@@ -376,7 +377,6 @@ var BrowserApp = {
     Services.obs.addObserver(this, "ScrollTo:FocusedInput", false);
     Services.obs.addObserver(this, "Sanitize:ClearData", false);
     Services.obs.addObserver(this, "FullScreen:Exit", false);
-    Services.obs.addObserver(this, "Viewport:Flush", false);
     Services.obs.addObserver(this, "Passwords:Init", false);
     Services.obs.addObserver(this, "FormHistory:Init", false);
     Services.obs.addObserver(this, "android-get-pref", false);
@@ -546,10 +546,8 @@ var BrowserApp = {
       InitLater(() => Services.search.init(), Services, "search");
       InitLater(() => DownloadNotifications.init(), window, "DownloadNotifications");
 
-      if (AppConstants.MOZ_SAFE_BROWSING) {
-        // Bug 778855 - Perf regression if we do this here. To be addressed in bug 779008.
-        InitLater(() => SafeBrowsing.init(), window, "SafeBrowsing");
-      }
+      // Bug 778855 - Perf regression if we do this here. To be addressed in bug 779008.
+      InitLater(() => SafeBrowsing.init(), window, "SafeBrowsing");
 
       InitLater(() => Cc["@mozilla.org/login-manager;1"].getService(Ci.nsILoginManager));
       InitLater(() => LoginManagerParent.init(), window, "LoginManagerParent");
@@ -1783,10 +1781,6 @@ var BrowserApp = {
         browser.contentDocument.exitFullscreen();
         break;
 
-      case "Viewport:Flush":
-        this.contentDocumentChanged();
-        break;
-
       case "Passwords:Init": {
         let storage = Cc["@mozilla.org/login-manager/storage/mozStorage;1"].
                       getService(Ci.nsILoginManagerStorage);
@@ -2995,7 +2989,8 @@ var NativeWindow = {
       if (href)
         return href;
 
-      href = aLink.getAttributeNS(kXLinkNamespace, "href");
+      href = aLink.getAttribute("href") ||
+             aLink.getAttributeNS(kXLinkNamespace, "href");
       if (!href || !href.match(/\S/)) {
         // Without this we try to save as the current doc,
         // for example, HTML case also throws if empty
@@ -3447,6 +3442,10 @@ Tab.prototype = {
     this.browser.setAttribute("type", "content-targetable");
     this.browser.setAttribute("messagemanagergroup", "browsers");
 
+    if (Preferences.get("browser.tabs.remote.force-enable", false)) {
+      this.browser.setAttribute("remote", "true");
+    }
+
     this.browser.permanentKey = {};
 
     // Make sure the previously selected panel remains selected. The selected panel of a deck is
@@ -3521,7 +3520,8 @@ Tab.prototype = {
         parentId: ("parentId" in aParams) ? aParams.parentId : -1,
         tabIndex: ("tabIndex" in aParams) ? aParams.tabIndex : -1,
         external: ("external" in aParams) ? aParams.external : false,
-        selected: ("selected" in aParams) ? aParams.selected : true,
+        selected: ("selected" in aParams || aParams.cancelEditMode === true) ? aParams.selected : true,
+        cancelEditMode: aParams.cancelEditMode === true,
         title: truncate(title, MAX_TITLE_LENGTH),
         delayLoad: aParams.delayLoad || false,
         desktopMode: this.desktopMode,
@@ -3562,6 +3562,7 @@ Tab.prototype = {
     this.browser.addEventListener("VideoBindingCast", this, true, true);
 
     Services.obs.addObserver(this, "before-first-paint", false);
+    Services.obs.addObserver(this, "media-playback", false);
 
     // Always intialise new tabs with basic session store data to avoid
     // problems with functions that always expect it to be present
@@ -3671,6 +3672,7 @@ Tab.prototype = {
     this.browser.removeEventListener("VideoBindingCast", this, true, true);
 
     Services.obs.removeObserver(this, "before-first-paint");
+    Services.obs.removeObserver(this, "media-playback", false);
 
     // Make sure the previously selected panel remains selected. The selected panel of a deck is
     // not stable when panels are removed.
@@ -3995,6 +3997,7 @@ Tab.prototype = {
         } else if (list.indexOf("[apple-touch-icon]") != -1 ||
             list.indexOf("[apple-touch-icon-precomposed]") != -1) {
           jsonMessage = this.makeFaviconMessage(target);
+          jsonMessage['type'] = 'Link:Touchicon';
           this.addMetadata("touchIconList", jsonMessage.href, jsonMessage.size);
         } else if (list.indexOf("[alternate]") != -1 && aEvent.type == "DOMLinkAdded") {
           let type = target.type.toLowerCase().replace(/^\s+|\s*(?:;.*)?$/g, "");
@@ -4445,6 +4448,21 @@ Tab.prototype = {
           if (contentDocument instanceof Ci.nsIImageDocument) {
             contentDocument.shrinkToFit();
           }
+        }
+        break;
+
+      case "media-playback":
+        if (!aSubject) {
+          return;
+        }
+
+        let winId = aSubject.QueryInterface(Ci.nsISupportsPRUint64).data;
+        if (this.browser.outerWindowID == winId) {
+          Messaging.sendRequest({
+            type: "Tab:MediaPlaybackChange",
+            tabID: this.id,
+            active: aData === "active"
+          });
         }
         break;
     }
@@ -4981,14 +4999,11 @@ var FormAssistant = {
   // Whether we're in the middle of an autocomplete
   _doingAutocomplete: false,
 
-  _isBlocklisted: false,
-
   // Keep track of whether or not an invalid form has been submitted
   _invalidSubmit: false,
 
   init: function() {
     Services.obs.addObserver(this, "FormAssist:AutoComplete", false);
-    Services.obs.addObserver(this, "FormAssist:Blocklisted", false);
     Services.obs.addObserver(this, "FormAssist:Hidden", false);
     Services.obs.addObserver(this, "FormAssist:Remove", false);
     Services.obs.addObserver(this, "invalidformsubmit", false);
@@ -5052,10 +5067,6 @@ var FormAssistant = {
 
         this._doingAutocomplete = false;
 
-        break;
-
-      case "FormAssist:Blocklisted":
-        this._isBlocklisted = (aData == "true");
         break;
 
       case "FormAssist:Hidden":
@@ -5261,12 +5272,7 @@ var FormAssistant = {
       return;
     }
 
-    // Don't display the form auto-complete popup after the user starts typing
-    // to avoid confusing somes IME. See bug 758820 and bug 632744.
-    if (this._isBlocklisted && aElement.value.length > 0) {
-      aCallback(false);
-      return;
-    }
+    let isEmpty = (aElement.value.length === 0);
 
     let resultsAvailable = autoCompleteSuggestions => {
       // On desktop, we show datalist suggestions below autocomplete suggestions,
@@ -5283,7 +5289,8 @@ var FormAssistant = {
       Messaging.sendRequest({
         type:  "FormAssist:AutoComplete",
         suggestions: suggestions,
-        rect: ElementTouchHelper.getBoundingContentRect(aElement)
+        rect: ElementTouchHelper.getBoundingContentRect(aElement),
+        isEmpty: isEmpty,
       });
 
       // Keep track of input element so we can fill it in if the user
@@ -6780,6 +6787,8 @@ var Distribution = {
   // File used to store campaign data
   _file: null,
 
+  _preferencesJSON: null,
+
   init: function dc_init() {
     Services.obs.addObserver(this, "Distribution:Changed", false);
     Services.obs.addObserver(this, "Distribution:Set", false);
@@ -6805,6 +6814,13 @@ var Distribution = {
         // Fall through.
 
       case "Distribution:Set":
+        if (aData) {
+          try {
+            this._preferencesJSON = JSON.parse(aData);
+          } catch (e) {
+            console.log("Invalid distribution JSON.");
+          }
+        }
         // Reload the default prefs so we can observe "prefservice:after-app-defaults"
         Services.prefs.QueryInterface(Ci.nsIObserver).observe(null, "reload-default-prefs", null);
         this.installDistroAddons();
@@ -6839,6 +6855,12 @@ var Distribution = {
   },
 
   getPrefs: function dc_getPrefs() {
+    if (this._preferencesJSON) {
+        this.applyPrefs(this._preferencesJSON);
+        this._preferencesJSON = null;
+        return;
+    }
+
     // Get the distribution directory, and bail if it doesn't exist.
     let file = FileUtils.getDir("XREAppDist", [], false);
     if (!file.exists())

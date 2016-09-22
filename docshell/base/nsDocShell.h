@@ -363,6 +363,7 @@ protected:
                      bool aSendReferrer,
                      uint32_t aReferrerPolicy,
                      nsIPrincipal* aTriggeringPrincipal,
+                     nsIPrincipal* aPrincipalToInherit,
                      const char* aTypeHint,
                      const nsAString& aFileName,
                      nsIInputStream* aPostData,
@@ -407,6 +408,7 @@ protected:
   // aCloneSHChildren argument as aCloneChildren.
   bool OnNewURI(nsIURI* aURI, nsIChannel* aChannel,
                 nsIPrincipal* aTriggeringPrincipal,
+                nsIPrincipal* aPrincipalToInherit,
                 uint32_t aLoadType,
                 bool aFireOnLocationChange,
                 bool aAddToGlobalHistory,
@@ -425,6 +427,7 @@ protected:
   // the new session history entry.
   nsresult AddToSessionHistory(nsIURI* aURI, nsIChannel* aChannel,
                                nsIPrincipal* aTriggeringPrincipal,
+                               nsIPrincipal* aPrincipalToInherit,
                                bool aCloneChildren,
                                nsISHEntry** aNewEntry);
   nsresult AddChildSHEntryToParent(nsISHEntry* aNewEntry, int32_t aChildOffset,
@@ -502,8 +505,6 @@ protected:
                                      nsIChannel* aNewChannel,
                                      uint32_t aRedirectFlags,
                                      uint32_t aStateFlags) override;
-
-  nsresult SetIsActiveInternal(bool aIsActive, bool aIsHidden);
 
   /**
    * Helper function that determines if channel is an HTTP POST.
@@ -951,6 +952,7 @@ protected:
   bool mDeviceSizeIsPageSize : 1;
   bool mWindowDraggingAllowed : 1;
   bool mInFrameSwap : 1;
+  bool mInheritPrivateBrowsingId : 1;
 
   // Because scriptability depends on the mAllowJavascript values of our
   // ancestors, we cache the effective scriptability and recompute it when

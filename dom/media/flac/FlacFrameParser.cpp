@@ -10,22 +10,10 @@
 #include "OggCodecState.h"
 #include "VideoUtils.h"
 
+using mp4_demuxer::ByteReader;
+
 namespace mozilla
 {
-
-class AutoByteReader : public mp4_demuxer::ByteReader
-{
-public:
-  AutoByteReader(const uint8_t* aData, size_t aSize)
-    : mp4_demuxer::ByteReader(aData, aSize)
-  {
-
-  }
-  virtual ~AutoByteReader()
-  {
-    DiscardRemaining();
-  }
-};
 
 #define OGG_FLAC_METADATA_TYPE_STREAMINFO 0x7F
 #define FLAC_STREAMINFO_SIZE   34
@@ -74,7 +62,7 @@ FlacFrameParser::DecodeHeaderBlock(const uint8_t* aPacket, size_t aLength)
     // Not a header block.
     return false;
   }
-  AutoByteReader br(aPacket, aLength);
+  ByteReader br(aPacket, aLength);
 
   mPacketCount++;
 
@@ -144,7 +132,7 @@ FlacFrameParser::DecodeHeaderBlock(const uint8_t* aPacket, size_t aLength)
       if (numChannels > FLAC_MAX_CHANNELS) {
         return false;
       }
-      uint32_t bps = ((blob >> 38) & BITMASK(5)) + 1;
+      uint32_t bps = ((blob >> 36) & BITMASK(5)) + 1;
       if (bps > 24) {
         return false;
       }
@@ -222,11 +210,11 @@ FlacFrameParser::IsHeaderBlock(const uint8_t* aPacket, size_t aLength) const
   }
   if (aPacket[0] == 0x7f) {
     // Ogg packet
-    AutoByteReader br(aPacket + 1, aLength - 1);
+    ByteReader br(aPacket + 1, aLength - 1);
     const uint8_t* signature = br.Read(4);
     return signature && !memcmp(signature, "FLAC", 4);
   }
-  AutoByteReader br(aPacket, aLength - 1);
+  ByteReader br(aPacket, aLength - 1);
   const uint8_t* signature = br.Read(4);
   if (signature && !memcmp(signature, "fLaC", 4)) {
     // Flac start header, must have STREAMINFO as first metadata block;

@@ -512,9 +512,9 @@ nsFocusManager::MoveFocus(mozIDOMWindowProxy* aWindow, nsIDOMElement* aStartElem
   if (MOZ_LOG_TEST(gFocusLog, LogLevel::Debug) && mFocusedWindow) {
     nsIDocument* doc = mFocusedWindow->GetExtantDoc();
     if (doc && doc->GetDocumentURI()) {
-      nsAutoCString spec;
-      doc->GetDocumentURI()->GetSpec(spec);
-      LOGFOCUS((" Focused Window: %p %s", mFocusedWindow.get(), spec.get()));
+      LOGFOCUS((" Focused Window: %p %s",
+                mFocusedWindow.get(),
+                doc->GetDocumentURI()->GetSpecOrDefault().get()));
     }
   }
 
@@ -664,17 +664,16 @@ nsFocusManager::WindowRaised(mozIDOMWindowProxy* aWindow)
 
   if (MOZ_LOG_TEST(gFocusLog, LogLevel::Debug)) {
     LOGFOCUS(("Window %p Raised [Currently: %p %p]", aWindow, mActiveWindow.get(), mFocusedWindow.get()));
-    nsAutoCString spec;
     nsIDocument* doc = window->GetExtantDoc();
     if (doc && doc->GetDocumentURI()) {
-      doc->GetDocumentURI()->GetSpec(spec);
-      LOGFOCUS(("  Raised Window: %p %s", aWindow, spec.get()));
+      LOGFOCUS(("  Raised Window: %p %s", aWindow,
+                doc->GetDocumentURI()->GetSpecOrDefault().get()));
     }
     if (mActiveWindow) {
       doc = mActiveWindow->GetExtantDoc();
       if (doc && doc->GetDocumentURI()) {
-        doc->GetDocumentURI()->GetSpec(spec);
-        LOGFOCUS(("  Active Window: %p %s", mActiveWindow.get(), spec.get()));
+        LOGFOCUS(("  Active Window: %p %s", mActiveWindow.get(),
+                  doc->GetDocumentURI()->GetSpecOrDefault().get()));
       }
     }
   }
@@ -750,17 +749,16 @@ nsFocusManager::WindowLowered(mozIDOMWindowProxy* aWindow)
 
   if (MOZ_LOG_TEST(gFocusLog, LogLevel::Debug)) {
     LOGFOCUS(("Window %p Lowered [Currently: %p %p]", aWindow, mActiveWindow.get(), mFocusedWindow.get()));
-    nsAutoCString spec;
     nsIDocument* doc = window->GetExtantDoc();
     if (doc && doc->GetDocumentURI()) {
-      doc->GetDocumentURI()->GetSpec(spec);
-      LOGFOCUS(("  Lowered Window: %s", spec.get()));
+      LOGFOCUS(("  Lowered Window: %s",
+                doc->GetDocumentURI()->GetSpecOrDefault().get()));
     }
     if (mActiveWindow) {
       doc = mActiveWindow->GetExtantDoc();
       if (doc && doc->GetDocumentURI()) {
-        doc->GetDocumentURI()->GetSpec(spec);
-        LOGFOCUS(("  Active Window: %s", spec.get()));
+        LOGFOCUS(("  Active Window: %s",
+                  doc->GetDocumentURI()->GetSpecOrDefault().get()));
       }
     }
   }
@@ -879,18 +877,17 @@ nsFocusManager::WindowShown(mozIDOMWindowProxy* aWindow, bool aNeedsFocus)
 
   if (MOZ_LOG_TEST(gFocusLog, LogLevel::Debug)) {
     LOGFOCUS(("Window %p Shown [Currently: %p %p]", window.get(), mActiveWindow.get(), mFocusedWindow.get()));
-    nsAutoCString spec;
     nsIDocument* doc = window->GetExtantDoc();
     if (doc && doc->GetDocumentURI()) {
-      doc->GetDocumentURI()->GetSpec(spec);
-      LOGFOCUS(("Shown Window: %s", spec.get()));
+      LOGFOCUS(("Shown Window: %s",
+                doc->GetDocumentURI()->GetSpecOrDefault().get()));
     }
 
     if (mFocusedWindow) {
       doc = mFocusedWindow->GetExtantDoc();
       if (doc && doc->GetDocumentURI()) {
-        doc->GetDocumentURI()->GetSpec(spec);
-        LOGFOCUS((" Focused Window: %s", spec.get()));
+        LOGFOCUS((" Focused Window: %s",
+                  doc->GetDocumentURI()->GetSpecOrDefault().get()));
       }
     }
   }
@@ -937,23 +934,23 @@ nsFocusManager::WindowHidden(mozIDOMWindowProxy* aWindow)
     nsAutoCString spec;
     nsIDocument* doc = window->GetExtantDoc();
     if (doc && doc->GetDocumentURI()) {
-      doc->GetDocumentURI()->GetSpec(spec);
-      LOGFOCUS(("  Hide Window: %s", spec.get()));
+      LOGFOCUS(("  Hide Window: %s",
+                doc->GetDocumentURI()->GetSpecOrDefault().get()));
     }
 
     if (mFocusedWindow) {
       doc = mFocusedWindow->GetExtantDoc();
       if (doc && doc->GetDocumentURI()) {
-        doc->GetDocumentURI()->GetSpec(spec);
-        LOGFOCUS(("  Focused Window: %s", spec.get()));
+        LOGFOCUS(("  Focused Window: %s",
+                  doc->GetDocumentURI()->GetSpecOrDefault().get()));
       }
     }
 
     if (mActiveWindow) {
       doc = mActiveWindow->GetExtantDoc();
       if (doc && doc->GetDocumentURI()) {
-        doc->GetDocumentURI()->GetSpec(spec);
-        LOGFOCUS(("  Active Window: %s", spec.get()));
+        LOGFOCUS(("  Active Window: %s",
+                  doc->GetDocumentURI()->GetSpecOrDefault().get()));
       }
     }
   }
@@ -1100,10 +1097,20 @@ nsFocusManager::NotifyFocusStateChange(nsIContent* aContent,
   if (aWindowShouldShowFocusRing) {
     eventState |= NS_EVENT_STATE_FOCUSRING;
   }
+
   if (aGettingFocus) {
     aContent->AsElement()->AddStates(eventState);
   } else {
     aContent->AsElement()->RemoveStates(eventState);
+  }
+
+  for (Element* element = aContent->AsElement(); element;
+       element = element->GetParentElementCrossingShadowRoot()) {
+    if (aGettingFocus) {
+      element->AddStates(NS_EVENT_STATE_FOCUS_WITHIN);
+    } else {
+      element->RemoveStates(NS_EVENT_STATE_FOCUS_WITHIN);
+    }
   }
 }
 
@@ -1580,7 +1587,7 @@ nsFocusManager::CheckIfFocusable(nsIContent* aContent, uint32_t aFlags)
   if (subdoc && IsWindowVisible(subdoc->GetWindow())) {
     const nsStyleUserInterface* ui = frame->StyleUserInterface();
     int32_t tabIndex = (ui->mUserFocus == StyleUserFocus::Ignore ||
-                        ui->mUserFocus == StyleUserFocus::None_) ? -1 : 0;
+                        ui->mUserFocus == StyleUserFocus::None) ? -1 : 0;
     return aContent->IsFocusable(&tabIndex, aFlags & FLAG_BYMOUSE) ? aContent : nullptr;
   }
   

@@ -50,10 +50,6 @@ nsGenericHTMLElement*
 NS_NewHTMLTrackElement(already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo,
                        mozilla::dom::FromParser aFromParser)
 {
-  if (!mozilla::dom::HTMLTrackElement::IsWebVTTEnabled()) {
-    return new mozilla::dom::HTMLUnknownElement(aNodeInfo);
-  }
-
   return new mozilla::dom::HTMLTrackElement(aNodeInfo);
 }
 
@@ -67,7 +63,7 @@ static constexpr nsAttrValue::EnumTable kKindTable[] = {
   { "descriptions", static_cast<int16_t>(TextTrackKind::Descriptions) },
   { "chapters", static_cast<int16_t>(TextTrackKind::Chapters) },
   { "metadata", static_cast<int16_t>(TextTrackKind::Metadata) },
-  { 0 }
+  { nullptr, 0 }
 };
 
 // Invalid values are treated as "metadata" in ParseAttribute, but if no value
@@ -175,13 +171,6 @@ JSObject*
 HTMLTrackElement::WrapNode(JSContext* aCx, JS::Handle<JSObject*> aGivenProto)
 {
   return HTMLTrackElementBinding::Wrap(aCx, this, aGivenProto);
-}
-
-bool
-HTMLTrackElement::IsWebVTTEnabled()
-{
-  // Our callee does not use its arguments.
-  return HTMLTrackElementBinding::ConstructorEnabled(nullptr, nullptr);
 }
 
 TextTrack*

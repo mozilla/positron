@@ -19,6 +19,7 @@
 #include <linux/net.h>
 #include <linux/prctl.h>
 #include <linux/sched.h>
+#include <string.h>
 #include <sys/mman.h>
 #include <sys/socket.h>
 #include <sys/syscall.h>
@@ -26,8 +27,8 @@
 #include <unistd.h>
 
 #include "sandbox/linux/bpf_dsl/bpf_dsl.h"
-#include "sandbox/linux/seccomp-bpf/linux_seccomp.h"
-#include "sandbox/linux/services/linux_syscalls.h"
+#include "sandbox/linux/system_headers/linux_seccomp.h"
+#include "sandbox/linux/system_headers/linux_syscalls.h"
 
 using namespace sandbox::bpf_dsl;
 #define CASES SANDBOX_BPF_DSL_CASES
@@ -437,8 +438,9 @@ public:
         return Some(Allow());
       }
       Arg<int> domain(0), type(1);
-      return Some(If(domain == AF_UNIX &&
-                     (type == SOCK_STREAM || type == SOCK_SEQPACKET), Allow())
+      return Some(If(AllOf(domain == AF_UNIX,
+                           AnyOf(type == SOCK_STREAM, type == SOCK_SEQPACKET)),
+                     Allow())
                   .Else(InvalidSyscall()));
     }
 
@@ -541,6 +543,7 @@ public:
     case __NR_unlink:
     CASES_FOR_fchown:
     case __NR_fchmod:
+    case __NR_flock:
 #endif
       return Allow();
 
@@ -637,7 +640,9 @@ public:
     CASES_FOR_getresgid:
       return Allow();
 
+    case __NR_umask:
     case __NR_kill:
+    case __NR_wait4:
 #ifdef __NR_arch_prctl
     case __NR_arch_prctl:
 #endif

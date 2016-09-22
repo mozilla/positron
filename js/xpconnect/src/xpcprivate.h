@@ -79,7 +79,7 @@
 #include "mozilla/Assertions.h"
 #include "mozilla/Atomics.h"
 #include "mozilla/Attributes.h"
-#include "mozilla/CycleCollectedJSRuntime.h"
+#include "mozilla/CycleCollectedJSContext.h"
 #include "mozilla/GuardObjects.h"
 #include "mozilla/Maybe.h"
 #include "mozilla/MemoryReporting.h"
@@ -178,7 +178,6 @@
 #define XPC_NATIVE_MAP_LENGTH                    8
 #define XPC_NATIVE_PROTO_MAP_LENGTH              8
 #define XPC_DYING_NATIVE_PROTO_MAP_LENGTH        8
-#define XPC_DETACHED_NATIVE_PROTO_MAP_LENGTH    16
 #define XPC_NATIVE_INTERFACE_MAP_LENGTH         32
 #define XPC_NATIVE_SET_MAP_LENGTH               32
 #define XPC_NATIVE_JSCLASS_MAP_LENGTH           16
@@ -257,8 +256,8 @@ public:
         return gSelf;
     }
 
-    static XPCJSRuntime* GetRuntimeInstance();
-    XPCJSRuntime* GetRuntime() {return mRuntime;}
+    static XPCJSContext* GetContextInstance();
+    XPCJSContext* GetContext() {return mContext;}
 
     static bool IsISupportsDescendant(nsIInterfaceInfo* info);
 
@@ -309,7 +308,7 @@ private:
     static nsXPConnect*             gSelf;
     static bool                     gOnceAliveNowDead;
 
-    XPCJSRuntime*                   mRuntime;
+    XPCJSContext*                   mContext;
     bool                            mShuttingDown;
 
 public:
@@ -347,14 +346,14 @@ private:
 
 /***************************************************************************/
 
-// In the current xpconnect system there can only be one XPCJSRuntime.
-// So, xpconnect can only be used on one JSRuntime within the process.
+// In the current xpconnect system there can only be one XPCJSContext.
+// So, xpconnect can only be used on one JSContext within the process.
 
 class WatchdogManager;
 
 enum WatchdogTimestampCategory
 {
-    TimestampRuntimeStateChange = 0,
+    TimestampContextStateChange = 0,
     TimestampWatchdogWakeup,
     TimestampWatchdogHibernateStart,
     TimestampWatchdogHibernateStop,
@@ -409,11 +408,11 @@ private:
     mozilla::Maybe<StringType> mStrings[2];
 };
 
-class XPCJSRuntime final : public mozilla::CycleCollectedJSRuntime
+class XPCJSContext final : public mozilla::CycleCollectedJSContext
 {
 public:
-    static XPCJSRuntime* newXPCJSRuntime();
-    static XPCJSRuntime* Get() { return nsXPConnect::XPConnect()->GetRuntime(); }
+    static XPCJSContext* newXPCJSContext();
+    static XPCJSContext* Get() { return nsXPConnect::XPConnect()->GetContext(); }
 
     void RemoveWrappedJS(nsXPCWrappedJS* wrapper);
     void AssertInvalidWrappedJSNotInTable(nsXPCWrappedJS* wrapper) const;
@@ -455,9 +454,6 @@ public:
     XPCWrappedNativeProtoMap* GetDyingWrappedNativeProtoMap() const
         {return mDyingWrappedNativeProtoMap;}
 
-    XPCWrappedNativeProtoMap* GetDetachedWrappedNativeProtoMap() const
-        {return mDetachedWrappedNativeProtoMap;}
-
     bool JSContextInitialized(JSContext* cx);
 
     virtual bool
@@ -481,8 +477,8 @@ public:
 
     // Mapping of often used strings to jsid atoms that live 'forever'.
     //
-    // To add a new string: add to this list and to XPCJSRuntime::mStrings
-    // at the top of XPCJSRuntime.cpp
+    // To add a new string: add to this list and to XPCJSContext::mStrings
+    // at the top of XPCJSContext.cpp
     enum {
         IDX_CONSTRUCTOR             = 0 ,
         IDX_TO_STRING               ,
@@ -551,6 +547,7 @@ public:
     static void GCSliceCallback(JSContext* cx,
                                 JS::GCProgress progress,
                                 const JS::GCDescription& desc);
+    static void DoCycleCollectionCallback(JSContext* cx);
     static void FinalizeCallback(JSFreeOp* fop,
                                  JSFinalizeStatus status,
                                  bool isZoneGC,
@@ -564,11 +561,9 @@ public:
 
     void DebugDump(int16_t depth);
 
-    void SystemIsBeingShutDown();
-
     bool GCIsRunning() const {return mGCIsRunning;}
 
-    ~XPCJSRuntime();
+    ~XPCJSContext();
 
     ShortLivedStringBuffer<nsString> mScratchStrings;
     ShortLivedStringBuffer<nsCString> mScratchCStrings;
@@ -596,7 +591,7 @@ public:
     void SetPendingResult(nsresult rv) { mPendingResult = rv; }
 
 private:
-    XPCJSRuntime();
+    XPCJSContext();
 
     nsresult Initialize();
 
@@ -618,7 +613,6 @@ private:
     IID2ThisTranslatorMap*   mThisTranslatorMap;
     XPCNativeScriptableSharedMap* mNativeScriptableSharedMap;
     XPCWrappedNativeProtoMap* mDyingWrappedNativeProtoMap;
-    XPCWrappedNativeProtoMap* mDetachedWrappedNativeProtoMap;
     bool mGCIsRunning;
     nsTArray<nsISupports*> mNativesToReleaseArray;
     bool mDoingFinalization;
@@ -628,14 +622,29 @@ private:
     nsTArray<xpcGCCallback> extraGCCallbacks;
     RefPtr<WatchdogManager> mWatchdogManager;
     JS::GCSliceCallback mPrevGCSliceCallback;
+    JS::DoCycleCollectionCallback mPrevDoCycleCollectionCallback;
     JS::PersistentRootedObject mUnprivilegedJunkScope;
     JS::PersistentRootedObject mPrivilegedJunkScope;
     JS::PersistentRootedObject mCompilationScope;
     RefPtr<AsyncFreeSnowWhite> mAsyncSnowWhiteFreer;
 
-    // mSlowScriptCheckpoint is set to the time when we started processing the
-    // current event.  We use it to determine whether the interrupt callback
-    // needs to do anything.
+    // If we spend too much time running JS code in an event handler, then we
+    // want to show the slow script UI. The timeout T is controlled by prefs. We
+    // invoke the interrupt callback once after T/2 seconds and set
+    // mSlowScriptSecondHalf to true. After another T/2 seconds, we invoke the
+    // interrupt callback again. Since mSlowScriptSecondHalf is now true, it
+    // shows the slow script UI. The reason we invoke the callback twice is to
+    // ensure that putting the computer to sleep while running a script doesn't
+    // cause the UI to be shown. If the laptop goes to sleep during one of the
+    // timeout periods, the script still has the other T/2 seconds to complete
+    // before the slow script UI is shown.
+    bool mSlowScriptSecondHalf;
+
+    // mSlowScriptCheckpoint is set to the time when:
+    // 1. We started processing the current event, or
+    // 2. mSlowScriptSecondHalf was set to true
+    // (whichever comes later). We use it to determine whether the interrupt
+    // callback needs to do anything.
     mozilla::TimeStamp mSlowScriptCheckpoint;
     // Accumulates total time we actually waited for telemetry
     mozilla::TimeDuration mSlowScriptActualWait;
@@ -693,7 +702,7 @@ public:
 
     inline bool                         IsValid() const ;
 
-    inline XPCJSRuntime*                GetRuntime() const ;
+    inline XPCJSContext*                GetContext() const ;
     inline JSContext*                   GetJSContext() const ;
     inline bool                         GetContextPopRequired() const ;
     inline XPCCallContext*              GetPrevCallContext() const ;
@@ -752,7 +761,7 @@ private:
     enum State {
         INIT_FAILED,
         SYSTEM_SHUTDOWN,
-        HAVE_RUNTIME,
+        HAVE_CONTEXT,
         HAVE_OBJECT,
         HAVE_NAME,
         HAVE_ARGS,
@@ -772,7 +781,7 @@ private:
 
     RefPtr<nsXPConnect>           mXPC;
 
-    XPCJSRuntime*                   mXPCJSRuntime;
+    XPCJSContext*                   mXPCJSContext;
     JSContext*                      mJSContext;
 
     // ctor does not necessarily init the following. BEWARE!
@@ -784,7 +793,7 @@ private:
 
     XPCNativeScriptableInfo*        mScriptableInfo;
 
-    XPCNativeSet*                   mSet;
+    RefPtr<XPCNativeSet>            mSet;
     RefPtr<XPCNativeInterface>      mInterface;
     XPCNativeMember*                mMember;
 
@@ -852,8 +861,8 @@ class XPCWrappedNativeScope final : public PRCList
 {
 public:
 
-    XPCJSRuntime*
-    GetRuntime() const {return XPCJSRuntime::Get();}
+    XPCJSContext*
+    GetContext() const {return XPCJSContext::Get();}
 
     Native2WrappedNativeMap*
     GetWrappedNativeMap() const {return mWrappedNativeMap;}
@@ -900,7 +909,7 @@ public:
     SystemIsBeingShutDown();
 
     static void
-    TraceWrappedNativesInAllScopes(JSTracer* trc, XPCJSRuntime* rt);
+    TraceWrappedNativesInAllScopes(JSTracer* trc, XPCJSContext* cx);
 
     void TraceSelf(JSTracer* trc) {
         MOZ_ASSERT(mGlobalJSObject);
@@ -917,21 +926,13 @@ public:
     }
 
     static void
-    SuspectAllWrappers(XPCJSRuntime* rt, nsCycleCollectionNoteRootCallback& cb);
-
-    static void
-    MarkAllWrappedNativesAndProtos();
-
-#ifdef DEBUG
-    static void
-    ASSERT_NoInterfaceSetsAreMarked();
-#endif
+    SuspectAllWrappers(XPCJSContext* cx, nsCycleCollectionNoteRootCallback& cb);
 
     static void
     SweepAllWrappedNativeTearOffs();
 
     static void
-    UpdateWeakPointersAfterGC(XPCJSRuntime* rt);
+    UpdateWeakPointersAfterGC(XPCJSContext* cx);
 
     static void
     KillDyingScopes();
@@ -961,7 +962,7 @@ public:
     AddSizeOfIncludingThis(ScopeSizeInfo* scopeSizeInfo);
 
     bool
-    IsValid() const {return mRuntime != nullptr;}
+    IsValid() const {return mContext != nullptr;}
 
     static bool
     IsDyingScope(XPCWrappedNativeScope* scope);
@@ -1054,7 +1055,7 @@ private:
 
     static InterpositionWhitelistArray* gInterpositionWhitelists;
 
-    XPCJSRuntime*                    mRuntime;
+    XPCJSContext*                    mContext;
     Native2WrappedNativeMap*         mWrappedNativeMap;
     ClassInfo2WrappedNativeProtoMap* mWrappedNativeProtoMap;
     RefPtr<nsXPCComponentsBase>    mComponents;
@@ -1272,7 +1273,7 @@ private:
 // It represents a new XPCNativeSet we are considering constructing, without
 // requiring that the set actually be built.
 
-class XPCNativeSetKey final
+class MOZ_STACK_CLASS XPCNativeSetKey final
 {
 public:
     // This represents an existing set |baseSet|.
@@ -1305,8 +1306,8 @@ public:
     // Allow shallow copy
 
 private:
-    XPCNativeSet* mBaseSet;
-    XPCNativeInterface* mAddition;
+    RefPtr<XPCNativeSet> mBaseSet;
+    RefPtr<XPCNativeInterface> mAddition;
 };
 
 /***************************************************************************/
@@ -1315,9 +1316,12 @@ private:
 class XPCNativeSet final
 {
   public:
-    static XPCNativeSet* GetNewOrUsed(const nsIID* iid);
-    static XPCNativeSet* GetNewOrUsed(nsIClassInfo* classInfo);
-    static XPCNativeSet* GetNewOrUsed(XPCNativeSetKey* key);
+    NS_INLINE_DECL_REFCOUNTING_WITH_DESTROY(XPCNativeSet,
+                                            DestroyInstance(this))
+
+    static already_AddRefed<XPCNativeSet> GetNewOrUsed(const nsIID* iid);
+    static already_AddRefed<XPCNativeSet> GetNewOrUsed(nsIClassInfo* classInfo);
+    static already_AddRefed<XPCNativeSet> GetNewOrUsed(XPCNativeSetKey* key);
 
     // This generates a union set.
     //
@@ -1326,9 +1330,9 @@ class XPCNativeSet final
     // algorithm is applied; but if we detect that |secondSet| is a superset of
     // |firstSet|, we return |secondSet| without worrying about whether the
     // ordering might differ from |firstSet|.
-    static XPCNativeSet* GetNewOrUsed(XPCNativeSet* firstSet,
-                                      XPCNativeSet* secondSet,
-                                      bool preserveFirstSetOrder);
+    static already_AddRefed<XPCNativeSet> GetNewOrUsed(XPCNativeSet* firstSet,
+                                                       XPCNativeSet* secondSet,
+                                                       bool preserveFirstSetOrder);
 
     static void ClearCacheEntryForClassInfo(nsIClassInfo* classInfo);
 
@@ -1368,50 +1372,25 @@ class XPCNativeSet final
     inline bool MatchesSetUpToInterface(const XPCNativeSet* other,
                                           XPCNativeInterface* iface) const;
 
-    inline void Mark();
-
-    // NOP. This is just here to make the AutoMarkingPtr code compile.
-    inline void TraceJS(JSTracer* trc) {}
-    inline void AutoTrace(JSTracer* trc) {}
-
-  public:
-    void Unmark() {
-        mMarked = 0;
-    }
-    bool IsMarked() const {
-        return !!mMarked;
-    }
-
-#ifdef DEBUG
-    inline void ASSERT_NotMarked();
-#endif
-
     void DebugDump(int16_t depth);
-
-    static void DestroyInstance(XPCNativeSet* inst);
 
     size_t SizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf);
 
   protected:
-    static XPCNativeSet* NewInstance(nsTArray<RefPtr<XPCNativeInterface>>&& array);
-    static XPCNativeSet* NewInstanceMutate(XPCNativeSetKey* key);
+    static already_AddRefed<XPCNativeSet> NewInstance(nsTArray<RefPtr<XPCNativeInterface>>&& array);
+    static already_AddRefed<XPCNativeSet> NewInstanceMutate(XPCNativeSetKey* key);
+
     XPCNativeSet()
-      : mMemberCount(0), mInterfaceCount(0), mMarked(0)
-    {
-        MOZ_COUNT_CTOR(XPCNativeSet);
-    }
-    ~XPCNativeSet() {
-        for (int i = 0; i < mInterfaceCount; i++) {
-            NS_RELEASE(mInterfaces[i]);
-        }
-        MOZ_COUNT_DTOR(XPCNativeSet);
-    }
+      : mMemberCount(0), mInterfaceCount(0)
+    {}
+    ~XPCNativeSet();
     void* operator new(size_t, void* p) CPP_THROW_NEW {return p;}
+
+    static void DestroyInstance(XPCNativeSet* inst);
 
   private:
     uint16_t                mMemberCount;
-    uint16_t                mInterfaceCount : 15;
-    uint16_t                mMarked : 1;
+    uint16_t                mInterfaceCount;
     // Always last - object sized for array.
     // These are strong references.
     XPCNativeInterface*     mInterfaces[1];
@@ -1480,7 +1459,7 @@ private:
 
 // XPCNativeScriptableShared is used to hold the JSClass and the
 // associated scriptable flags for XPCWrappedNatives. These are shared across
-// the runtime and are garbage collected by xpconnect. We *used* to just store
+// the context and are garbage collected by xpconnect. We *used* to just store
 // this inside the XPCNativeScriptableInfo (usually owned by instances of
 // XPCWrappedNativeProto. This had two problems... It was wasteful, and it
 // was a big problem when wrappers are reparented to different scopes (and
@@ -1612,8 +1591,8 @@ public:
     XPCWrappedNativeScope*
     GetScope()   const {return mScope;}
 
-    XPCJSRuntime*
-    GetRuntime() const {return mScope->GetRuntime();}
+    XPCJSContext*
+    GetContext() const {return mScope->GetContext();}
 
     JSObject*
     GetJSProtoObject() const {
@@ -1644,10 +1623,6 @@ public:
     }
 
     void TraceInside(JSTracer* trc) {
-        if (trc->isMarkingTracer()) {
-            mSet->Mark();
-        }
-
         GetScope()->TraceSelf(trc);
     }
 
@@ -1663,13 +1638,8 @@ public:
     }
 
     // NOP. This is just here to make the AutoMarkingPtr code compile.
+    void Mark() const {}
     inline void AutoTrace(JSTracer* trc) {}
-
-    void Mark() const {mSet->Mark();}
-
-#ifdef DEBUG
-    void ASSERT_SetNotMarked() const {mSet->ASSERT_NotMarked();}
-#endif
 
     ~XPCWrappedNativeProto();
 
@@ -1681,7 +1651,7 @@ protected:
     // hide ctor
     XPCWrappedNativeProto(XPCWrappedNativeScope* Scope,
                           nsIClassInfo* ClassInfo,
-                          XPCNativeSet* Set);
+                          already_AddRefed<XPCNativeSet>&& Set);
 
     bool Init(const XPCNativeScriptableCreateInfo* scriptableCreateInfo,
               bool callPostCreatePrototype);
@@ -1695,7 +1665,7 @@ private:
     XPCWrappedNativeScope*   mScope;
     JS::ObjectPtr            mJSProtoObject;
     nsCOMPtr<nsIClassInfo>   mClassInfo;
-    XPCNativeSet*            mSet;
+    RefPtr<XPCNativeSet>     mSet;
     XPCNativeScriptableInfo* mScriptableInfo;
 };
 
@@ -1847,7 +1817,7 @@ public:
     GetSet() const {return mSet;}
 
     void
-    SetSet(XPCNativeSet* set) {mSet = set;}
+    SetSet(already_AddRefed<XPCNativeSet> set) {mSet = set;}
 
     static XPCWrappedNative* Get(JSObject* obj) {
         MOZ_ASSERT(IS_WN_REFLECTOR(obj));
@@ -1877,9 +1847,9 @@ public:
                                   (!HasProto() ||
                                    GetSet() != GetProto()->GetSet());}
 
-    XPCJSRuntime*
-    GetRuntime() const {XPCWrappedNativeScope* scope = GetScope();
-                        return scope ? scope->GetRuntime() : nullptr;}
+    XPCJSContext*
+    GetContext() const {XPCWrappedNativeScope* scope = GetScope();
+                        return scope ? scope->GetContext() : nullptr;}
 
     static nsresult
     WrapNewGlobal(xpcObjectHelper& nativeHelper,
@@ -1922,16 +1892,9 @@ public:
                                          nsresult* pError = nullptr);
     XPCWrappedNativeTearOff* FindTearOff(const nsIID& iid);
 
-    void Mark() const
-    {
-        mSet->Mark();
-        if (HasProto()) GetProto()->Mark();
-    }
+    void Mark() const {}
 
     inline void TraceInside(JSTracer* trc) {
-        if (trc->isMarkingTracer()) {
-            mSet->Mark();
-        }
         if (HasProto())
             GetProto()->TraceSelf(trc);
         else
@@ -1960,12 +1923,6 @@ public:
         TraceSelf(trc);
     }
 
-#ifdef DEBUG
-    void ASSERT_SetsNotMarked() const
-        {mSet->ASSERT_NotMarked();
-         if (HasProto()){GetProto()->ASSERT_SetNotMarked();}}
-#endif
-
     inline void SweepTearOffs();
 
     // Returns a string that shuld be free'd using JS_smprintf_free (or null).
@@ -1990,7 +1947,7 @@ protected:
     // This ctor is used if this object will NOT have a proto.
     XPCWrappedNative(already_AddRefed<nsISupports>&& aIdentity,
                      XPCWrappedNativeScope* aScope,
-                     XPCNativeSet* aSet);
+                     already_AddRefed<XPCNativeSet>&& aSet);
 
     virtual ~XPCWrappedNative();
     void Destroy();
@@ -2026,7 +1983,7 @@ private:
         XPCWrappedNativeScope* mMaybeScope;
         XPCWrappedNativeProto* mMaybeProto;
     };
-    XPCNativeSet* mSet;
+    RefPtr<XPCNativeSet> mSet;
     JS::TenuredHeap<JSObject*> mFlatJSObject;
     XPCNativeScriptableInfo* mScriptableInfo;
     XPCWrappedNativeTearOff mFirstTearOff;
@@ -2073,7 +2030,7 @@ public:
                  bool allowNonScriptable = false);
 
     REFNSIID GetIID() const {return mIID;}
-    XPCJSRuntime* GetRuntime() const {return mRuntime;}
+    XPCJSContext* GetContext() const {return mContext;}
     nsIInterfaceInfo* GetInterfaceInfo() const {return mInfo;}
     const char* GetInterfaceName();
 
@@ -2148,7 +2105,7 @@ private:
                           nsXPTCMiniVariant* nativeParams, bool inOutOnly, uint8_t n) const;
 
 private:
-    XPCJSRuntime* mRuntime;
+    XPCJSContext* mContext;
     nsCOMPtr<nsIInterfaceInfo> mInfo;
     char* mName;
     nsIID mIID;
@@ -2205,7 +2162,7 @@ public:
 
     // Returns true if the wrapper chain contains references to multiple
     // compartments. If the wrapper chain contains references to multiple
-    // compartments, then it must be registered on the XPCJSRuntime. Otherwise,
+    // compartments, then it must be registered on the XPCJSContext. Otherwise,
     // it should be registered in the CompartmentPrivate for the compartment of
     // the root's JS object. This will only return correct results when called
     // on the root wrapper and will assert if not called on a root wrapper.
@@ -2774,7 +2731,7 @@ class MOZ_RAII AutoResolveName
 public:
     AutoResolveName(XPCCallContext& ccx, JS::HandleId name
                     MOZ_GUARD_OBJECT_NOTIFIER_PARAM) :
-          mOld(ccx, XPCJSRuntime::Get()->SetResolveName(name))
+          mOld(ccx, XPCJSContext::Get()->SetResolveName(name))
 #ifdef DEBUG
           ,mCheck(ccx, name)
 #endif
@@ -2786,7 +2743,7 @@ public:
 #ifdef DEBUG
             jsid old =
 #endif
-            XPCJSRuntime::Get()->SetResolveName(mOld);
+            XPCJSContext::Get()->SetResolveName(mOld);
             MOZ_ASSERT(old == mCheck, "Bad Nesting!");
         }
 
@@ -2809,7 +2766,7 @@ class AutoMarkingPtr
 {
   public:
     explicit AutoMarkingPtr(JSContext* cx) {
-        mRoot = XPCJSRuntime::Get()->GetAutoRootsAdr();
+        mRoot = XPCJSContext::Get()->GetAutoRootsAdr();
         mNext = *mRoot;
         *mRoot = this;
     }
@@ -2872,7 +2829,6 @@ class TypedAutoMarkingPtr : public AutoMarkingPtr
     T* mPtr;
 };
 
-typedef TypedAutoMarkingPtr<XPCNativeSet> AutoMarkingNativeSetPtr;
 typedef TypedAutoMarkingPtr<XPCWrappedNative> AutoMarkingWrappedNativePtr;
 typedef TypedAutoMarkingPtr<XPCWrappedNativeTearOff> AutoMarkingWrappedNativeTearOffPtr;
 typedef TypedAutoMarkingPtr<XPCWrappedNativeProto> AutoMarkingWrappedNativeProtoPtr;
@@ -2991,7 +2947,7 @@ public:
     XPCTraceableVariant(JSContext* cx, JS::Value aJSVal)
         : XPCVariant(cx, aJSVal)
     {
-         nsXPConnect::GetRuntimeInstance()->AddVariantRoot(this);
+         nsXPConnect::GetContextInstance()->AddVariantRoot(this);
     }
 
     virtual ~XPCTraceableVariant();
@@ -3011,7 +2967,7 @@ xpc_GetJSPrivate(JSObject* obj)
 inline JSContext*
 xpc_GetSafeJSContext()
 {
-    return XPCJSRuntime::Get()->Context();
+    return XPCJSContext::Get()->Context();
 }
 
 namespace xpc {
@@ -3322,7 +3278,7 @@ inline bool
 xpc_ForcePropertyResolve(JSContext* cx, JS::HandleObject obj, jsid id);
 
 inline jsid
-GetRTIdByIndex(JSContext* cx, unsigned index);
+GetJSIDByIndex(JSContext* cx, unsigned index);
 
 namespace xpc {
 
@@ -3466,7 +3422,7 @@ public:
     }
 
     JSObject2WrappedJSMap* GetWrappedJSMap() const { return mWrappedJSMap; }
-    void UpdateWeakPointersAfterGC(XPCJSRuntime* runtime);
+    void UpdateWeakPointersAfterGC(XPCJSContext* context);
 
     size_t SizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf);
 

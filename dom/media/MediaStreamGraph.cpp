@@ -1077,6 +1077,25 @@ MediaStreamGraph::NotifyOutputData(AudioDataValue* aBuffer, size_t aFrames,
   }
 }
 
+void
+MediaStreamGraph::AssertOnGraphThreadOrNotRunning() const
+{
+  // either we're on the right thread (and calling CurrentDriver() is safe),
+  // or we're going to assert anyways, so don't cross-check CurrentDriver
+#ifdef DEBUG
+  MediaStreamGraphImpl const * graph =
+    static_cast<MediaStreamGraphImpl const *>(this);
+  // if all the safety checks fail, assert we own the monitor
+  if (!graph->mDriver->OnThread()) {
+    if (!(graph->mDetectedNotRunning &&
+          graph->mLifecycleState > MediaStreamGraphImpl::LIFECYCLE_RUNNING &&
+          NS_IsMainThread())) {
+      graph->mMonitor.AssertCurrentThreadOwns();
+    }
+  }
+#endif
+}
+
 bool
 MediaStreamGraphImpl::ShouldUpdateMainThread()
 {
@@ -2592,7 +2611,7 @@ MediaStream::AddMainThreadListener(MainThreadMediaStreamListener* aListener)
   };
 
   nsCOMPtr<nsIRunnable> runnable = new NotifyRunnable(this);
-  NS_WARN_IF(NS_FAILED(NS_DispatchToMainThread(runnable.forget())));
+  Unused << NS_WARN_IF(NS_FAILED(NS_DispatchToMainThread(runnable.forget())));
 }
 
 SourceMediaStream::SourceMediaStream() :
@@ -2870,7 +2889,25 @@ SourceMediaStream::AddDirectTrackListenerImpl(already_AddRefed<DirectMediaStream
       MediaStreamVideoSink* videoSink = listener->AsMediaStreamVideoSink();
       // Re-send missed VideoSegment to new added MediaStreamVideoSink.
       if (streamTrack->GetType() == MediaSegment::VIDEO && videoSink) {
-        videoSink->SetCurrentFrames(*(static_cast<VideoSegment*>(streamTrack->GetSegment())));
+        VideoSegment videoSegment;
+        if (mTracks.GetForgottenDuration() < streamTrack->GetSegment()->GetDuration()) {
+          videoSegment.AppendSlice(*streamTrack->GetSegment(),
+                                   mTracks.GetForgottenDuration(),
+                                   streamTrack->GetSegment()->GetDuration());
+        } else {
+          VideoSegment* streamTrackSegment = static_cast<VideoSegment*>(streamTrack->GetSegment());
+          VideoChunk* lastChunk = streamTrackSegment->GetLastChunk();
+          if (lastChunk) {
+            StreamTime startTime = streamTrackSegment->GetDuration() - lastChunk->GetDuration();
+            videoSegment.AppendSlice(*streamTrackSegment,
+                                     startTime,
+                                     streamTrackSegment->GetDuration());
+          }
+        }
+        if (found) {
+          videoSegment.AppendSlice(*data->mData, 0, data->mData->GetDuration());
+        }
+        videoSink->SetCurrentFrames(videoSegment);
       }
     }
 
@@ -3370,8 +3407,6 @@ MediaStreamGraph::GetInstance(MediaStreamGraph::GraphDriverType aGraphDriverRequ
                      NS_LITERAL_STRING("MediaStreamGraph shutdown"));
       MOZ_RELEASE_ASSERT(NS_SUCCEEDED(rv));
     }
-
-    CubebUtils::InitPreferredSampleRate();
 
     graph = new MediaStreamGraphImpl(aGraphDriverRequested,
                                      CubebUtils::PreferredSampleRate(),

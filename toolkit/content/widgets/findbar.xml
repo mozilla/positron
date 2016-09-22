@@ -199,7 +199,7 @@
                          label="&entireWord.label;"
                          accesskey="&entireWord.accesskey;"
                          tooltiptext="&entireWord.tooltiptext;"
-                         oncommand="_setEntireWord(this.checked);"
+                         oncommand="toggleEntireWord(this.checked);"
                          type="checkbox"
                          xbl:inherits="accesskey=entirewordaccesskey"/>
       <xul:label anonid="match-case-status" class="findbar-find-fast"/>
@@ -343,7 +343,7 @@
               break;
             case "findbar.entireword":
               this._self._entireWord = prefsvc.getBoolPref(aPrefName);
-              this._self._updateEntireWord();
+              this._self.toggleEntireWord(this._self._entireWord, true);
               break;
             case "findbar.highlightAll":
               this._self.toggleHighlight(prefsvc.getBoolPref(aPrefName), true);
@@ -499,11 +499,11 @@
         -->
       <method name="_updateMatchesCount">
         <body><![CDATA[
-          if (this._matchesCountLimit == 0 || !this._dispatchFindEvent("matchescount"))
+          if (!this._dispatchFindEvent("matchescount"))
             return;
 
           this.browser.finder.requestMatchesCount(this._findField.value,
-            this._matchesCountLimit, this._findMode == this.FIND_LINKS);
+            this._findMode == this.FIND_LINKS);
         ]]></body>
       </method>
 
@@ -628,7 +628,6 @@
           this._updateCaseSensitivity();
           this._findFailedString = null;
           this._find();
-          this._maybeHighlightAll();
 
           this._dispatchFindEvent("casesensitivitychange");
         ]]></body>
@@ -637,7 +636,7 @@
       <!--
         - Updates the entire-word mode of the findbar and its UI.
         -->
-      <method name="_updateEntireWord">
+      <method name="_setEntireWord">
         <body><![CDATA[
           let entireWord = this._entireWord;
           let checkbox = this.getElement("find-entire-word");
@@ -653,9 +652,6 @@
           statusLabel.hidden = !hideCheckbox;
 
           this.browser.finder.entireWord = entireWord;
-
-          // Update the matches count
-          this._updateMatchesCount(this.nsITypeAheadFind.FIND_FOUND);
         ]]></body>
       </method>
 
@@ -664,17 +660,18 @@
         - @param aEntireWord (boolean)
         - Whether or not entire-word mode should be turned on.
         -->
-      <method name="_setEntireWord">
+      <method name="toggleEntireWord">
         <parameter name="aEntireWord"/>
+        <parameter name="aFromPrefObserver"/>
         <body><![CDATA[
-          let prefsvc =
-            Components.classes["@mozilla.org/preferences-service;1"]
-                      .getService(Components.interfaces.nsIPrefBranch);
+          if (!aFromPrefObserver) {
+            // Just set the pref; our observer will change the find bar behavior.
+            this._prefsvc.setBoolPref("findbar.entireword", aEntireWord);
+            return;
+          }
 
-          // Just set the pref; our observer will change the find bar behavior.
-          prefsvc.setBoolPref("findbar.entireword", aEntireWord);
-
-          this._maybeHighlightAll();
+          this._findFailedString = null;
+          this._find();
         ]]></body>
       </method>
 
@@ -787,7 +784,7 @@
           if (!aTarget)
             return;
 
-          let event = document.createEvent("KeyEvents");
+          let event = document.createEvent("KeyboardEvent");
           event.initKeyEvent(aEvent.type, aEvent.bubbles, aEvent.cancelable,
                              aEvent.view, aEvent.ctrlKey, aEvent.altKey,
                              aEvent.shiftKey, aEvent.metaKey, aEvent.keyCode,
@@ -973,7 +970,7 @@
             this.getElement("find-previous").hidden = showMinimalUI;
           foundMatches.hidden = showMinimalUI || !foundMatches.value;
           this._updateCaseSensitivity();
-          this._updateEntireWord();
+          this._setEntireWord();
           this._setHighlightAll();
 
           if (showMinimalUI)
@@ -1020,10 +1017,8 @@
             }
 
             this._enableFindButtons(val);
-            this._maybeHighlightAll();
-
             this._updateCaseSensitivity(val);
-            this._updateEntireWord();
+            this._setEntireWord();
 
             this.browser.finder.fastFind(val, this._findMode == this.FIND_LINKS,
                                          this._findMode != this.FIND_NORMAL);
@@ -1100,7 +1095,6 @@
               this._findField.removeAttribute("status");
               break;
           }
-          this._updateMatchesCount(res);
         ]]></body>
       </method>
 

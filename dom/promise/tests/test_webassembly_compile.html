@@ -11,6 +11,7 @@
 <body>
 <script>
 const wasmTextToBinary = SpecialPowers.unwrap(SpecialPowers.Cu.getJSTestingFunctions().wasmTextToBinary);
+const wasmIsSupported = SpecialPowers.Cu.getJSTestingFunctions().wasmIsSupported
 const fooModuleCode = wasmTextToBinary(`(module
   (func $foo (result i32) (i32.const 42))
   (export "foo" $foo)
@@ -24,9 +25,14 @@ function checkFooModule(m) {
 }
 
 function propertiesExist() {
+  if (!wasmIsSupported()) {
+    ok(!this["WebAssembly"], "If the device doesn't support, there will be no WebAssembly object");
+    SimpleTest.finish();
+    return;
+  }
+
   ok(WebAssembly, "WebAssembly object should exist");
   ok(WebAssembly.compile, "WebAssembly.compile function should exist");
-
   runTest();
 }
 

@@ -33,6 +33,9 @@
   --toolbarbutton-checkedhover-backgroundcolor: rgba(200,200,200,.5);
 
   --panel-separator-color: ThreeDShadow;
+  --arrowpanel-dimmed: hsla(0,0%,80%,.3);
+  --arrowpanel-dimmed-further: hsla(0,0%,80%,.45);
+  --arrowpanel-dimmed-even-further: hsla(0,0%,80%,.8);
 
   --urlbar-separator-color: ThreeDShadow;
 }
@@ -55,19 +58,18 @@
   content: "";
   display: -moz-box;
   -moz-box-ordinal-group: 101; /* tabs toolbar is 100 */
-  height: 1px;
-  background-color: ThreeDShadow;
+  border-bottom: 1px solid ThreeDShadow;
 }
 
 #navigator-toolbox:-moz-lwtheme::after {
-  background-color: rgba(0,0,0,.3);
+  border-bottom-color: rgba(0,0,0,.3);
 }
 
-#navigator-toolbox > toolbar:not(#toolbar-menubar):not(#TabsToolbar) {
+#navigator-toolbox > toolbar:not(#toolbar-menubar):not(#TabsToolbar):not(#addon-bar) {
   background-image: linear-gradient(@toolbarHighlight@, @toolbarHighlight@);
 }
 
-#navigator-toolbox > toolbar:not(#toolbar-menubar):not(#TabsToolbar):-moz-lwtheme {
+#navigator-toolbox > toolbar:not(#toolbar-menubar):not(#TabsToolbar):not(#addon-bar):-moz-lwtheme {
   background-image: linear-gradient(@toolbarHighlightLWT@, @toolbarHighlightLWT@);
 }
 
@@ -576,10 +578,6 @@ menuitem:not([type]):not(.menuitem-tooltip):not(.menuitem-iconic-tooltip) {
   list-style-image: url("moz-icon://stock/gtk-about?size=menu");
 }
 
-#javascriptConsole {
-  list-style-image: url("chrome://global/skin/console/console.png");
-}
-
 /* Primary toolbar buttons */
 
 :-moz-any(toolbar, .widget-overflow-list) .toolbarbutton-1 > .toolbarbutton-icon,
@@ -811,15 +809,6 @@ menuitem:not([type]):not(.menuitem-tooltip):not(.menuitem-iconic-tooltip) {
   opacity: 0.4;
 }
 
-:-moz-any(@primaryToolbarButtons@)[cui-areatype="menu-panel"] > .toolbarbutton-icon,
-:-moz-any(@primaryToolbarButtons@)[cui-areatype="menu-panel"] > .toolbarbutton-badge-stack > .toolbarbutton-icon,
-:-moz-any(@primaryToolbarButtons@)[cui-areatype="menu-panel"] > .toolbarbutton-menubutton-button > .toolbarbutton-icon,
-toolbaritem[cui-areatype="menu-panel"] > :-moz-any(@nestedButtons@) > .toolbarbutton-icon {
-  filter: url(chrome://browser/skin/filters.svg#fill);
-  fill: currentColor;
-  opacity: 0.7 !important; /* !important overrides .toolbarbutton-1[disabled=true] rule */
-}
-
 /* Fullscreen window controls */
 #window-controls {
   -moz-box-align: start;
@@ -978,8 +967,12 @@ toolbaritem[cui-areatype="menu-panel"] > :-moz-any(@nestedButtons@) > .toolbarbu
   animation-duration: 250ms;
 }
 
-#urlbar-zoom-button:hover:active {
+#urlbar-zoom-button:hover {
   background-color: hsla(0,0%,0%,.1);
+}
+
+#urlbar-zoom-button:hover:active {
+  background-color: hsla(0,0%,0%,.15);
 }
 
 #urlbar-zoom-button > .toolbarbutton-text {
@@ -992,7 +985,7 @@ toolbaritem[cui-areatype="menu-panel"] > :-moz-any(@nestedButtons@) > .toolbarbu
 
 #urlbar-search-footer {
   border-top: 1px solid var(--panel-separator-color);
-  background-color: hsla(210,4%,10%,.07);
+  background-color: var(--arrowpanel-dimmed);
 }
 
 #urlbar-search-settings {
@@ -1006,11 +999,11 @@ toolbaritem[cui-areatype="menu-panel"] > :-moz-any(@nestedButtons@) > .toolbarbu
 }
 
 #urlbar-search-settings:hover {
-  background-color: hsla(210,4%,10%,.07);
+  background-color: var(--arrowpanel-dimmed);
 }
 
 #urlbar-search-settings:hover:active {
-  background-color: hsla(210,4%,10%,.12);
+  background-color: var(--arrowpanel-dimmed-further);
 }
 
 #urlbar-search-splitter {
@@ -1054,7 +1047,7 @@ toolbaritem[cui-areatype="menu-panel"] > :-moz-any(@nestedButtons@) > .toolbarbu
 }
 
 #identity-box:-moz-focusring {
-  outline: 1px dotted #000;
+  outline: 1px dotted;
   outline-offset: -3px;
 }
 
@@ -1156,11 +1149,6 @@ notification[value="translation"] menulist > .menulist-dropmarker {
   max-width : 36px;
 }
 
-#PopupAutoCompleteRichResult {
-  /* The awesomebar popup should open just below the navbar bottom border. */
-  margin-top: 1px;
-}
-
 .autocomplete-richlistbox {
   padding: 4px;
 }
@@ -1178,11 +1166,11 @@ notification[value="translation"] menulist > .menulist-dropmarker {
 }
 
 .ac-title {
-  font-size: 14px;
+  font-size: 1.05em;
 }
 
 .ac-tags {
-  font-size: 12px;
+  font-size: 0.9em;
 }
 
 html|span.ac-tag {
@@ -1196,7 +1184,7 @@ html|span.ac-tag {
 .ac-separator,
 .ac-url,
 .ac-action {
-  font-size: 12px;
+  font-size: 0.9em;
   color: -moz-nativehyperlinktext;
 }
 
@@ -1717,60 +1705,6 @@ toolbarbutton.chevron > .toolbarbutton-icon {
   margin: 0;
 }
 
-/* Ctrl-Tab */
-
-#ctrlTab-panel {
-  -moz-appearance: none;
-  background: hsla(0,0%,33%,.85);
-  color: white;
-  border-style: none;
-  padding: 20px 10px 10px;
-  font-weight: bold;
-  text-shadow: 0 0 1px hsl(0,0%,12%), 0 0 2px hsl(0,0%,12%);
-}
-
-.ctrlTab-favicon[src] {
-  background-color: white;
-  width: 20px;
-  height: 20px;
-  padding: 2px;
-}
-
-.ctrlTab-preview-inner > .tabPreview-canvas {
-  box-shadow: 1px 1px 2px hsl(0,0%,12%);
-}
-
-.ctrlTab-preview:not(#ctrlTab-showAll) > * > .ctrlTab-preview-inner > .tabPreview-canvas {
-  margin-bottom: 2px;
-}
-
-.ctrlTab-preview-inner {
-  padding-bottom: 10px;
-}
-
-#ctrlTab-showAll:not(:focus) > * > .ctrlTab-preview-inner {
-  padding: 10px;
-  background-color: rgba(255,255,255,.2);
-  border-radius: .5em;
-}
-
-.ctrlTab-preview:focus > * > .ctrlTab-preview-inner {
-  color: white;
-  background-color: rgba(0,0,0,.6);
-  text-shadow: none;
-  padding: 8px;
-  border: 2px solid white;
-  border-radius: .5em;
-}
-
-.ctrlTab-preview:not(#ctrlTab-showAll):focus > * > .ctrlTab-preview-inner {
-  margin: -10px -10px 0;
-}
-
-#ctrlTab-showAll {
-  margin-top: .5em;
-}
-
 /* Status panel */
 
 .statuspanel-label {
@@ -1798,16 +1732,15 @@ toolbarbutton.chevron > .toolbarbutton-icon {
 }
 
 %include ../shared/fullscreen/warning.inc.css
+%include ../shared/ctrlTab.inc.css
 %include ../../../devtools/client/themes/responsivedesign.inc.css
 %include ../../../devtools/client/themes/commandline.inc.css
-
 %include ../shared/plugin-doorhanger.inc.css
 
 notification.pluginVulnerable > .notification-inner > .messageCloseButton:not(:hover) {
   background-image: -moz-image-rect(url("chrome://global/skin/icons/close.svg"), 0, 80, 16, 64);
 }
 
-%include ../shared/login-doorhanger.inc.css
 
 %include downloads/indicator.css
 
@@ -1922,7 +1855,7 @@ notification.pluginVulnerable > .notification-inner > .messageCloseButton:not(:h
 }
 
 /**
- * Override the --panel-arrowcontent-padding so the background extends
+ * Override the --arrowpanel-padding so the background extends
  * to the sides and bottom of the panel.
  */
 #UITourTooltipButtons {

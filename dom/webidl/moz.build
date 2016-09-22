@@ -11,15 +11,14 @@ GENERATED_WEBIDL_FILES = [
 PREPROCESSED_WEBIDL_FILES = [
     'HTMLMediaElement.webidl',
     'Navigator.webidl',
+    'Node.webidl',
     'Promise.webidl',
     'PromiseDebugging.webidl',
-    'ServiceWorkerRegistration.webidl',
     'Window.webidl',
 ]
 
 WEBIDL_FILES = [
     'AbstractWorker.webidl',
-    'AccessibleNode.webidl',
     'AddonManager.webidl',
     'AnalyserNode.webidl',
     'Animatable.webidl',
@@ -292,6 +291,7 @@ WEBIDL_FILES = [
     'KeyAlgorithm.webidl',
     'KeyboardEvent.webidl',
     'KeyEvent.webidl',
+    'KeyframeAnimationOptions.webidl',
     'KeyframeEffect.webidl',
     'LegacyQueryInterface.webidl',
     'LinkStyle.webidl',
@@ -351,7 +351,6 @@ WEBIDL_FILES = [
     'NetDashboard.webidl',
     'NetworkInformation.webidl',
     'NetworkOptions.webidl',
-    'Node.webidl',
     'NodeFilter.webidl',
     'NodeIterator.webidl',
     'NodeList.webidl',
@@ -396,6 +395,12 @@ WEBIDL_FILES = [
     'PresentationRequest.webidl',
     'ProcessingInstruction.webidl',
     'ProfileTimelineMarker.webidl',
+    'PushEvent.webidl',
+    'PushManager.webidl',
+    'PushManager.webidl',
+    'PushMessageData.webidl',
+    'PushSubscription.webidl',
+    'PushSubscriptionOptions.webidl',
     'RadioNodeList.webidl',
     'Range.webidl',
     'Rect.webidl',
@@ -415,6 +420,7 @@ WEBIDL_FILES = [
     'ServiceWorkerContainer.webidl',
     'ServiceWorkerGlobalScope.webidl',
     'ServiceWorkerMessageEvent.webidl',
+    'ServiceWorkerRegistration.webidl',
     'SettingChangeNotification.webidl',
     'SettingsManager.webidl',
     'ShadowRoot.webidl',
@@ -428,6 +434,7 @@ WEBIDL_FILES = [
     'StereoPannerNode.webidl',
     'Storage.webidl',
     'StorageEvent.webidl',
+    'StorageManager.webidl',
     'StorageType.webidl',
     'StyleSheet.webidl',
     'StyleSheetList.webidl',
@@ -719,20 +726,6 @@ if CONFIG['MOZ_B2G_BT']:
         'BluetoothUUID.webidl',
     ]
 
-if CONFIG['MOZ_SIMPLEPUSH']:
-    WEBIDL_FILES += [
-        'SimplePushManager.webidl'
-    ]
-else:
-    WEBIDL_FILES += [
-        'PushEvent.webidl',
-        'PushManager.webidl',
-        'PushManager.webidl',
-        'PushMessageData.webidl',
-        'PushSubscription.webidl',
-        'PushSubscriptionOptions.webidl',
-    ]
-
 if CONFIG['MOZ_NFC']:
     WEBIDL_FILES += [
          'MozIsoDepTech.webidl',
@@ -929,7 +922,7 @@ if CONFIG['MOZ_B2G']:
         'MozApplicationEvent.webidl'
     ]
 
-if CONFIG['MOZ_WIDGET_TOOLKIT'] != 'android':
+if CONFIG['ACCESSIBILITY']:
     WEBIDL_FILES += [
-        'AlarmsManager.webidl',
+        'AccessibleNode.webidl',
     ]

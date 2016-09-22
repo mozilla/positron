@@ -27,7 +27,13 @@ const ANNOS_TO_TRACK = [BookmarkAnnos.DESCRIPTION_ANNO, BookmarkAnnos.SIDEBAR_AN
 
 const SERVICE_NOT_SUPPORTED = "Service not supported on this platform";
 const FOLDER_SORTINDEX = 1000000;
-const { SOURCE_SYNC } = Ci.nsINavBookmarksService;
+const {
+  SOURCE_SYNC,
+  SOURCE_IMPORT,
+  SOURCE_IMPORT_REPLACE,
+} = Ci.nsINavBookmarksService;
+
+const SQLITE_MAX_VARIABLE_NUMBER = 999;
 
 // Maps Sync record property names to `PlacesSyncUtils` bookmark properties.
 const RECORD_PROPS_TO_BOOKMARK_PROPS = {
@@ -41,6 +47,12 @@ const RECORD_PROPS_TO_BOOKMARK_PROPS = {
   siteUri: "site",
   feedUri: "feed",
 };
+
+// The tracker ignores changes made by bookmark import and restore, and
+// changes made by Sync. We don't need to exclude `SOURCE_IMPORT`, but both
+// import and restore fire `bookmarks-restore-*` observer notifications, and
+// the tracker doesn't currently distinguish between the two.
+const IGNORED_SOURCES = [SOURCE_SYNC, SOURCE_IMPORT, SOURCE_IMPORT_REPLACE];
 
 this.PlacesItem = function PlacesItem(collection, id, type) {
   CryptoWrapper.call(this, collection, id);
@@ -377,9 +389,7 @@ BookmarksEngine.prototype = {
       SyncEngine.prototype._processIncoming.call(this, newitems);
     } finally {
       // Reorder children.
-      this._tracker.ignoreAll = true;
       this._store._orderChildren();
-      this._tracker.ignoreAll = false;
       delete this._store._childrenToOrder;
     }
   },
@@ -418,7 +428,138 @@ BookmarksEngine.prototype = {
     // We must return a string, not an object, and the entries in the GUIDMap
     // are created via "new String()" making them an object.
     return mapped ? mapped.toString() : mapped;
-  }
+  },
+
+  pullAllChanges() {
+    return new BookmarksChangeset(this._store.getAllIDs());
+  },
+
+  pullNewChanges() {
+    let modifiedGUIDs = this._getModifiedGUIDs();
+    if (!modifiedGUIDs.length) {
+      return new BookmarksChangeset(this._tracker.changedIDs);
+    }
+
+    // We don't use `PlacesUtils.promiseDBConnection` here because
+    // `getChangedIDs` might be called while we're in a batch, meaning we
+    // won't see any changes until the batch finishes and the transaction
+    // commits.
+    let db = PlacesUtils.history.QueryInterface(Ci.nsPIPlacesDatabase)
+                        .DBConnection;
+
+    // Filter out tags, organizer queries, and other descendants that we're
+    // not tracking. We chunk `modifiedGUIDs` because SQLite limits the number
+    // of bound parameters per query.
+    for (let startIndex = 0;
+         startIndex < modifiedGUIDs.length;
+         startIndex += SQLITE_MAX_VARIABLE_NUMBER) {
+
+      let chunkLength = Math.min(startIndex + SQLITE_MAX_VARIABLE_NUMBER,
+                                 modifiedGUIDs.length);
+
+      let query = `
+        WITH RECURSIVE
+        modifiedGuids(guid) AS (
+          VALUES ${new Array(chunkLength).fill("(?)").join(", ")}
+        ),
+        syncedItems(id) AS (
+          VALUES ${getChangeRootIds().map(id => `(${id})`).join(", ")}
+          UNION ALL
+          SELECT b.id
+          FROM moz_bookmarks b
+          JOIN syncedItems s ON b.parent = s.id
+        )
+        SELECT b.guid, b.id
+        FROM modifiedGuids m
+        JOIN moz_bookmarks b ON b.guid = m.guid
+        LEFT JOIN syncedItems s ON b.id = s.id
+        WHERE s.id IS NULL
+      `;
+
+      let statement = db.createAsyncStatement(query);
+      try {
+        for (let i = 0; i < chunkLength; i++) {
+          statement.bindByIndex(i, modifiedGUIDs[startIndex + i]);
+        }
+        let results = Async.querySpinningly(statement, ["id", "guid"]);
+        for (let { id, guid } of results) {
+          let syncID = BookmarkSpecialIds.specialGUIDForId(id) || guid;
+          this._tracker.removeChangedID(syncID);
+        }
+      } finally {
+        statement.finalize();
+      }
+    }
+
+    return new BookmarksChangeset(this._tracker.changedIDs);
+  },
+
+  // Returns an array of Places GUIDs for all changed items. Ignores deletions,
+  // which won't exist in the DB and shouldn't be removed from the tracker.
+  _getModifiedGUIDs() {
+    let guids = [];
+    for (let syncID in this._tracker.changedIDs) {
+      if (this._tracker.changedIDs[syncID].deleted === true) {
+        // The `===` check also filters out old persisted timestamps,
+        // which won't have a `deleted` property.
+        continue;
+      }
+      let guid = BookmarkSpecialIds.syncIDToPlacesGUID(syncID);
+      guids.push(guid);
+    }
+    return guids;
+  },
+
+  // Called when _findDupe returns a dupe item and the engine has decided to
+  // switch the existing item to the new incoming item.
+  _switchItemToDupe(localDupeGUID, incomingItem) {
+    // We unconditionally change the item's ID in case the engine knows of
+    // an item but doesn't expose it through itemExists. If the API
+    // contract were stronger, this could be changed.
+    this._log.debug("Switching local ID to incoming: " + localDupeGUID + " -> " +
+                    incomingItem.id);
+    this._store.changeItemID(localDupeGUID, incomingItem.id);
+
+    // And mark the parent as being modified. Given we de-dupe based on the
+    // parent *name* it's possible the item having its GUID changed has a
+    // different parent from the incoming record.
+    // So we need to find the GUID of the local parent.
+    let now = this._tracker._now();
+    let localID = this._store.idForGUID(incomingItem.id);
+    let localParentID = PlacesUtils.bookmarks.getFolderIdForItem(localID);
+    let localParentGUID = this._store.GUIDForId(localParentID);
+    this._modified.set(localParentGUID, { modified: now, deleted: false });
+
+    // And we also add the parent as reflected in the incoming record as the
+    // de-dupe process might have used an existing item in a different folder.
+    // But only if the parent exists, otherwise we will upload a deleted item
+    // when it might actually be valid, just unknown to us. Note that this
+    // scenario will still leave us with inconsistent client and server states;
+    // the incoming record on the server references a parent that isn't the
+    // actual parent locally - see bug 1297955.
+    if (localParentGUID != incomingItem.parentid) {
+      let remoteParentID = this._store.idForGUID(incomingItem.parentid);
+      if (remoteParentID > 0) {
+        // The parent specified in the record does exist, so we are going to
+        // attempt a move when we come to applying the record. Mark the parent
+        // as being modified so we will later upload it with the new child
+        // reference.
+        this._modified.set(incomingItem.parentid, { modified: now, deleted: false });
+      } else {
+        // We aren't going to do a move as we don't have the parent (yet?).
+        // When applying the record we will add our special PARENT_ANNO
+        // annotation, so if it arrives in the future (either this Sync or a
+        // later one) it will be reparented.
+        this._log.debug(`Incoming duplicate item ${incomingItem.id} specifies ` +
+                        `non-existing parent ${incomingItem.parentid}`);
+      }
+    }
+
+    // The local, duplicate ID is always deleted on the server - but for
+    // bookmarks it is a logical delete.
+    // Simply adding this (now non-existing) ID to the tracker is enough.
+    this._modified.set(localDupeGUID, { modified: now, deleted: true });
+  },
 };
 
 function BookmarksStore(name, engine) {
@@ -475,7 +616,7 @@ BookmarksStore.prototype = {
     if (!parentGUID) {
       throw "Record " + record.id + " has invalid parentid: " + parentGUID;
     }
-    this._log.debug("Local parent is " + parentGUID);
+    this._log.debug("Remote parent is " + parentGUID);
 
     // Do the normal processing of incoming records
     Store.prototype.applyIncoming.call(this, record);
@@ -631,13 +772,6 @@ BookmarksStore.prototype = {
     ));
   },
 
-  _getNode: function BStore__getNode(folder) {
-    let query = PlacesUtils.history.getNewQuery();
-    query.setFolders([folder], 1);
-    return PlacesUtils.history.executeQuery(
-      query, PlacesUtils.history.getNewQueryOptions()).root;
-  },
-
   _getTags: function BStore__getTags(uri) {
     try {
       if (typeof(uri) == "string")
@@ -782,7 +916,7 @@ BookmarksStore.prototype = {
       return special;
 
     return Async.promiseSpinningly(
-      PlacesSyncUtils.bookmarks.ensureGuidForId(id));
+      PlacesUtils.promiseItemGuid(id));
   },
 
   // noCreate is provided as an optional argument to prevent the creation of
@@ -820,51 +954,30 @@ BookmarksStore.prototype = {
     return index;
   },
 
-  _getChildren: function BStore_getChildren(guid, items) {
-    let node = guid; // the recursion case
-    if (typeof(node) == "string") { // callers will give us the guid as the first arg
-      let nodeID = this.idForGUID(guid, true);
-      if (!nodeID) {
-        this._log.debug("No node for GUID " + guid + "; returning no children.");
-        return items;
-      }
-      node = this._getNode(nodeID);
-    }
-
-    if (node.type == node.RESULT_TYPE_FOLDER) {
-      node.QueryInterface(Ci.nsINavHistoryQueryResultNode);
-      node.containerOpen = true;
-      try {
-        // Remember all the children GUIDs and recursively get more
-        for (let i = 0; i < node.childCount; i++) {
-          let child = node.getChild(i);
-          items[this.GUIDForId(child.itemId)] = true;
-          this._getChildren(child, items);
-        }
-      }
-      finally {
-        node.containerOpen = false;
-      }
-    }
-
-    return items;
-  },
-
   getAllIDs: function BStore_getAllIDs() {
-    let items = {"menu": true,
-                 "toolbar": true,
-                 "unfiled": true,
-                };
-    // We also want "mobile" but only if a local mobile folder already exists
-    // (otherwise we'll later end up creating it, which we want to avoid until
-    // we actually need it.)
-    if (BookmarkSpecialIds.findMobileRoot(false)) {
-      items["mobile"] = true;
+    let items = {};
+
+    let query = `
+      WITH RECURSIVE
+      changeRootContents(id) AS (
+        VALUES ${getChangeRootIds().map(id => `(${id})`).join(", ")}
+        UNION ALL
+        SELECT b.id
+        FROM moz_bookmarks b
+        JOIN changeRootContents c ON b.parent = c.id
+      )
+      SELECT id, guid
+      FROM changeRootContents
+      JOIN moz_bookmarks USING (id)
+    `;
+
+    let statement = this._getStmt(query);
+    let results = Async.querySpinningly(statement, ["id", "guid"]);
+    for (let { id, guid } of results) {
+      let syncID = BookmarkSpecialIds.specialGUIDForId(id) || guid;
+      items[syncID] = { modified: 0, deleted: false };
     }
-    for (let guid of BookmarkSpecialIds.guids) {
-      if (guid != "places" && guid != "tags")
-        this._getChildren(guid, items);
-    }
+
     return items;
   },
 
@@ -905,6 +1018,16 @@ function BookmarksTracker(name, engine) {
 BookmarksTracker.prototype = {
   __proto__: Tracker.prototype,
 
+  //`_ignore` checks the change source for each observer notification, so we
+  // don't want to let the engine ignore all changes during a sync.
+  get ignoreAll() {
+    return false;
+  },
+
+  // Define an empty setter so that the engine doesn't throw a `TypeError`
+  // setting a read-only property.
+  set ignoreAll(value) {},
+
   startTracking: function() {
     PlacesUtils.bookmarks.addObserver(this, true);
     Svc.Obs.add("bookmarks-restore-begin", this);
@@ -925,11 +1048,9 @@ BookmarksTracker.prototype = {
     switch (topic) {
       case "bookmarks-restore-begin":
         this._log.debug("Ignoring changes from importing bookmarks.");
-        this.ignoreAll = true;
         break;
       case "bookmarks-restore-success":
         this._log.debug("Tracking all items on successful import.");
-        this.ignoreAll = false;
 
         this._log.debug("Restore succeeded: wiping server and other clients.");
         this.engine.service.resetClient([this.name]);
@@ -938,7 +1059,6 @@ BookmarksTracker.prototype = {
         break;
       case "bookmarks-restore-failed":
         this._log.debug("Tracking all items on failed import.");
-        this.ignoreAll = false;
         break;
     }
   },
@@ -949,16 +1069,50 @@ BookmarksTracker.prototype = {
     Ci.nsISupportsWeakReference
   ]),
 
+  addChangedID(id, change) {
+    if (!id) {
+      this._log.warn("Attempted to add undefined ID to tracker");
+      return false;
+    }
+    if (this._ignored.includes(id)) {
+      return false;
+    }
+    let shouldSaveChange = false;
+    let currentChange = this.changedIDs[id];
+    if (currentChange) {
+      if (typeof currentChange == "number") {
+        // Allow raw timestamps for backward-compatibility with persisted
+        // changed IDs. The new format uses tuples to track deleted items.
+        shouldSaveChange = currentChange < change.modified;
+      } else {
+        shouldSaveChange = currentChange.modified < change.modified ||
+                           currentChange.deleted != change.deleted;
+      }
+    } else {
+      shouldSaveChange = true;
+    }
+    if (shouldSaveChange) {
+      this._saveChangedID(id, change);
+    }
+    return true;
+  },
+
   /**
    * Add a bookmark GUID to be uploaded and bump up the sync score.
    *
-   * @param itemGuid
-   *        GUID of the bookmark to upload.
+   * @param itemId
+   *        The Places item ID of the bookmark to upload.
+   * @param guid
+   *        The Places GUID of the bookmark to upload.
+   * @param isTombstone
+   *        Whether we're uploading a tombstone for a removed bookmark.
    */
-  _add: function BMT__add(itemId, guid) {
+  _add: function BMT__add(itemId, guid, isTombstone = false) {
     guid = BookmarkSpecialIds.specialGUIDForId(itemId) || guid;
-    if (this.addChangedID(guid))
+    let info = { modified: Date.now() / 1000, deleted: isTombstone };
+    if (this.addChangedID(guid, info)) {
       this._upScore();
+    }
   },
 
   /* Every add/remove/change will trigger a sync for MULTI_DEVICE (except in
@@ -971,56 +1125,12 @@ BookmarksTracker.prototype = {
     }
   },
 
-  /**
-   * Determine if a change should be ignored.
-   *
-   * @param itemId
-   *        Item under consideration to ignore
-   * @param folder (optional)
-   *        Folder of the item being changed
-   */
-  _ignore: function BMT__ignore(itemId, folder, guid) {
-    // Ignore unconditionally if the engine tells us to.
-    if (this.ignoreAll)
-      return true;
-
-    // Get the folder id if we weren't given one.
-    if (folder == null) {
-      try {
-        folder = PlacesUtils.bookmarks.getFolderIdForItem(itemId);
-      } catch (ex) {
-        this._log.debug("getFolderIdForItem(" + itemId +
-                        ") threw; calling _ensureMobileQuery.");
-        // I'm guessing that gFIFI can throw, and perhaps that's why
-        // _ensureMobileQuery is here at all. Try not to call it.
-        this._ensureMobileQuery();
-        folder = PlacesUtils.bookmarks.getFolderIdForItem(itemId);
-      }
-    }
-
-    // Ignore changes to tags (folders under the tags folder).
-    let tags = BookmarkSpecialIds.tags;
-    if (folder == tags)
-      return true;
-
-    // Ignore tag items (the actual instance of a tag for a bookmark).
-    if (PlacesUtils.bookmarks.getFolderIdForItem(folder) == tags)
-      return true;
-
-    // Make sure to remove items that have the exclude annotation.
-    if (PlacesUtils.annotations.itemHasAnnotation(itemId, BookmarkAnnos.EXCLUDEBACKUP_ANNO)) {
-      this.removeChangedID(guid);
-      return true;
-    }
-
-    return false;
-  },
-
   onItemAdded: function BMT_onItemAdded(itemId, folder, index,
                                         itemType, uri, title, dateAdded,
-                                        guid, parentGuid) {
-    if (this._ignore(itemId, folder, guid))
+                                        guid, parentGuid, source) {
+    if (IGNORED_SOURCES.includes(source)) {
       return;
+    }
 
     this._log.trace("onItemAdded: " + itemId);
     this._add(itemId, guid);
@@ -1028,13 +1138,51 @@ BookmarksTracker.prototype = {
   },
 
   onItemRemoved: function (itemId, parentId, index, type, uri,
-                           guid, parentGuid) {
-    if (this._ignore(itemId, parentId, guid)) {
+                           guid, parentGuid, source) {
+    if (IGNORED_SOURCES.includes(source)) {
       return;
     }
 
+    // Ignore changes to tags (folders under the tags folder).
+    if (parentId == PlacesUtils.tagsFolderId) {
+      return;
+    }
+
+    let grandParentId = -1;
+    try {
+      grandParentId = PlacesUtils.bookmarks.getFolderIdForItem(parentId);
+    } catch (ex) {
+      // `getFolderIdForItem` can throw if the item no longer exists, such as
+      // when we've removed a subtree using `removeFolderChildren`.
+      return;
+    }
+
+    // Ignore tag items (the actual instance of a tag for a bookmark).
+    if (grandParentId == PlacesUtils.tagsFolderId) {
+      return;
+    }
+
+    /**
+     * The above checks are incomplete: we can still write tombstones for
+     * items that we don't track, and upload extraneous roots.
+     *
+     * Consider the left pane root: it's a child of the Places root, and has
+     * children and grandchildren. `PlacesUIUtils` can create, delete, and
+     * recreate it as needed. We can't determine ancestors when the root or its
+     * children are deleted, because they've already been removed from the
+     * database when `onItemRemoved` is called. Likewise, we can't check their
+     * "exclude from backup" annos, because they've *also* been removed.
+     *
+     * So, we end up writing tombstones for the left pane queries and left
+     * pane root. For good measure, we'll also upload the Places root, because
+     * it's the parent of the left pane root.
+     *
+     * As a workaround, we can track the parent GUID and reconstruct the item's
+     * ancestry at sync time. This is complicated, and the previous behavior was
+     * already wrong, so we'll wait for bug 1258127 to fix this generally.
+     */
     this._log.trace("onItemRemoved: " + itemId);
-    this._add(itemId, guid);
+    this._add(itemId, guid, /* isTombstone */ true);
     this._add(parentId, parentGuid);
   },
 
@@ -1048,9 +1196,6 @@ BookmarksTracker.prototype = {
     let all = find(BookmarkAnnos.ALLBOOKMARKS_ANNO);
     if (all.length == 0)
       return;
-
-    // Disable handling of notifications while changing the mobile query
-    this.ignoreAll = true;
 
     let mobile = find(BookmarkAnnos.MOBILE_ANNO);
     let queryURI = Utils.makeURI("place:folder=" + BookmarkSpecialIds.mobile);
@@ -1073,8 +1218,6 @@ BookmarksTracker.prototype = {
     else if (PlacesUtils.bookmarks.getItemTitle(mobile[0]) != title) {
       PlacesUtils.bookmarks.setItemTitle(mobile[0], title, SOURCE_SYNC);
     }
-
-    this.ignoreAll = false;
   },
 
   // This method is oddly structured, but the idea is to return as quickly as
@@ -1082,10 +1225,10 @@ BookmarksTracker.prototype = {
   // *each change*.
   onItemChanged: function BMT_onItemChanged(itemId, property, isAnno, value,
                                             lastModified, itemType, parentId,
-                                            guid, parentGuid) {
-    // Quicker checks first.
-    if (this.ignoreAll)
+                                            guid, parentGuid, source) {
+    if (IGNORED_SOURCES.includes(source)) {
       return;
+    }
 
     if (isAnno && (ANNOS_TO_TRACK.indexOf(property) == -1))
       // Ignore annotations except for the ones that we sync.
@@ -1093,9 +1236,6 @@ BookmarksTracker.prototype = {
 
     // Ignore favicon changes to avoid unnecessary churn.
     if (property == "favicon")
-      return;
-
-    if (this._ignore(itemId, parentId, guid))
       return;
 
     this._log.trace("onItemChanged: " + itemId +
@@ -1106,9 +1246,11 @@ BookmarksTracker.prototype = {
 
   onItemMoved: function BMT_onItemMoved(itemId, oldParent, oldIndex,
                                         newParent, newIndex, itemType,
-                                        guid, oldParentGuid, newParentGuid) {
-    if (this._ignore(itemId, newParent, guid))
+                                        guid, oldParentGuid, newParentGuid,
+                                        source) {
+    if (IGNORED_SOURCES.includes(source)) {
       return;
+    }
 
     this._log.trace("onItemMoved: " + itemId);
     this._add(oldParent, oldParentGuid);
@@ -1132,3 +1274,26 @@ BookmarksTracker.prototype = {
   },
   onItemVisited: function () {}
 };
+
+// Returns an array of root IDs to recursively query for synced bookmarks.
+// Items in other roots, including tags and organizer queries, will be
+// ignored.
+function getChangeRootIds() {
+  let rootIds = [
+    PlacesUtils.bookmarksMenuFolderId,
+    PlacesUtils.toolbarFolderId,
+    PlacesUtils.unfiledBookmarksFolderId,
+  ];
+  let mobileRootId = BookmarkSpecialIds.findMobileRoot(false);
+  if (mobileRootId) {
+    rootIds.push(mobileRootId);
+  }
+  return rootIds;
+}
+
+class BookmarksChangeset extends Changeset {
+  getModifiedTimestamp(id) {
+    let change = this.changes[id];
+    return change ? change.modified : Number.NaN;
+  }
+}

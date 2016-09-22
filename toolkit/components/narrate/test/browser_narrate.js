@@ -118,9 +118,18 @@ add_task(function* testNarrate() {
     ok(!NarrateTestUtils.isVisible(popup), "popup is dismissed while speaking");
     NarrateTestUtils.isStartedState(content, ok);
 
-    promiseEvent = ContentTaskUtils.waitForEvent(content, "paragraphend");
-    $(NarrateTestUtils.STOP).click();
-    yield promiseEvent;
+    // Go forward all the way to the end of the article. We should eventually
+    // stop.
+    do {
+      promiseEvent = Promise.race([
+        ContentTaskUtils.waitForEvent(content, "paragraphstart"),
+        ContentTaskUtils.waitForEvent(content, "paragraphsdone")]);
+      $(NarrateTestUtils.FORWARD).click();
+    } while ((yield promiseEvent).type == "paragraphstart");
+
+    // This is to make sure we are not actively scrolling when the tab closes.
+    content.scroll(0, 0);
+
     yield ContentTaskUtils.waitForCondition(
       () => !$(NarrateTestUtils.STOP), "transitioned to stopped state");
     NarrateTestUtils.isStoppedState(content, ok);

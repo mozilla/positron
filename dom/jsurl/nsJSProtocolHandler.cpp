@@ -160,7 +160,7 @@ nsresult nsJSThunk::EvaluateScript(nsIChannel *aChannel,
         nsCOMPtr<nsILoadInfo> loadInfo;
         aChannel->GetLoadInfo(getter_AddRefs(loadInfo));
         if (loadInfo && loadInfo->GetForceInheritPrincipal()) {
-            principal = loadInfo->TriggeringPrincipal();
+            principal = loadInfo->PrincipalToInherit();
         } else {
             // No execution without a principal!
             NS_ASSERTION(!owner, "Non-principal owner?");
@@ -216,7 +216,7 @@ nsresult nsJSThunk::EvaluateScript(nsIChannel *aChannel,
 
     nsCOMPtr<nsIScriptGlobalObject> innerGlobal = do_QueryInterface(innerWin);
 
-    nsCOMPtr<nsIDOMWindow> domWindow(do_QueryInterface(global, &rv));
+    mozilla::DebugOnly<nsCOMPtr<nsIDOMWindow>> domWindow(do_QueryInterface(global, &rv));
     if (NS_FAILED(rv)) {
         return NS_ERROR_FAILURE;
     }
@@ -1088,7 +1088,8 @@ nsJSChannel::SetExecuteAsync(bool aIsAsync)
         mIsAsync = aIsAsync;
     }
     // else ignore this call
-    NS_WARN_IF_FALSE(!mIsActive, "Calling SetExecuteAsync on active channel?");
+    NS_WARNING_ASSERTION(!mIsActive,
+                         "Calling SetExecuteAsync on active channel?");
 
     return NS_OK;
 }

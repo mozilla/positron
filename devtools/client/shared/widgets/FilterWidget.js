@@ -13,11 +13,11 @@ const EventEmitter = require("devtools/shared/event-emitter");
 const { Cc, Ci } = require("chrome");
 const XHTML_NS = "http://www.w3.org/1999/xhtml";
 
-const { LocalizationHelper } = require("devtools/client/shared/l10n");
+const { LocalizationHelper } = require("devtools/shared/l10n");
 const STRINGS_URI = "devtools/locale/filterwidget.properties";
 const L10N = new LocalizationHelper(STRINGS_URI);
 
-const {cssTokenizer} = require("devtools/shared/css-parsing-utils");
+const {cssTokenizer} = require("devtools/shared/css/parsing-utils");
 
 const asyncStorage = require("devtools/shared/async-storage");
 
@@ -688,7 +688,7 @@ CSSFilterEditorWidget.prototype = {
         this.filtersList.querySelector(".filter:last-of-type input");
     if (lastInput) {
       lastInput.focus();
-      if (lastInput.type == "text") {
+      if (lastInput.type === "text") {
         // move cursor to end of input
         const end = lastInput.value.length;
         lastInput.setSelectionRange(end, end);

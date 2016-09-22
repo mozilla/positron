@@ -75,11 +75,11 @@ public:
     mSurfaceTexture = AndroidSurfaceTexture::Create();
     if (!mSurfaceTexture) {
       NS_WARNING("Failed to create SurfaceTexture for video decode\n");
-      return InitPromise::CreateAndReject(DecoderFailureReason::INIT_ERROR, __func__);
+      return InitPromise::CreateAndReject(NS_ERROR_DOM_MEDIA_FATAL_ERR, __func__);
     }
 
     if (NS_FAILED(InitDecoder(mSurfaceTexture->JavaSurface()))) {
-      return InitPromise::CreateAndReject(DecoderFailureReason::INIT_ERROR, __func__);
+      return InitPromise::CreateAndReject(NS_ERROR_DOM_MEDIA_FATAL_ERR, __func__);
     }
 
     return InitPromise::CreateAndResolve(TrackInfo::kVideoTrack, __func__);
@@ -87,11 +87,6 @@ public:
 
   void Cleanup() override
   {
-  }
-
-  nsresult Input(MediaRawData* aSample) override
-  {
-    return MediaCodecDataDecoder::Input(aSample);
   }
 
   nsresult PostOutput(BufferInfo::Param aInfo, MediaFormat::Param aFormat,
@@ -265,7 +260,7 @@ MediaCodecDataDecoder::Init()
   return NS_SUCCEEDED(rv) ?
            InitPromise::CreateAndResolve(type, __func__) :
            InitPromise::CreateAndReject(
-               MediaDataDecoder::DecoderFailureReason::INIT_ERROR, __func__);
+               NS_ERROR_DOM_MEDIA_FATAL_ERR, __func__);
 }
 
 nsresult
@@ -273,7 +268,8 @@ MediaCodecDataDecoder::InitDecoder(Surface::Param aSurface)
 {
   mDecoder = CreateDecoder(mMimeType);
   if (!mDecoder) {
-    INVOKE_CALLBACK(Error, MediaDataDecoderError::FATAL_ERROR);
+    INVOKE_CALLBACK(Error,
+                    MediaResult(NS_ERROR_DOM_MEDIA_FATAL_ERR, __func__));
     return NS_ERROR_FAILURE;
   }
 
@@ -300,7 +296,7 @@ static const int64_t kDecoderTimeout = 10000;
       INVOKE_CALLBACK(DrainComplete); \
       SetState(ModuleState::kDecoding); \
     } \
-    INVOKE_CALLBACK(Error, MediaDataDecoderError::FATAL_ERROR); \
+    INVOKE_CALLBACK(Error, MediaResult(NS_ERROR_DOM_MEDIA_FATAL_ERR, __func__)); \
     break; \
   }
 
@@ -540,7 +536,9 @@ MediaCodecDataDecoder::DecoderLoop()
       BREAK_ON_DECODER_ERROR();
     } else if (outputStatus < 0) {
       NS_WARNING("Unknown error from decoder!");
-      INVOKE_CALLBACK(Error, MediaDataDecoderError::DECODE_ERROR);
+      INVOKE_CALLBACK(Error,
+                      MediaResult(NS_ERROR_DOM_MEDIA_DECODE_ERR,
+                                       __func__));
       // Don't break here just in case it's recoverable. If it's not, other
       // stuff will fail later and we'll bail out.
     } else {
@@ -618,14 +616,12 @@ MediaCodecDataDecoder::ClearQueue()
   mDurations.clear();
 }
 
-nsresult
+void
 MediaCodecDataDecoder::Input(MediaRawData* aSample)
 {
   MonitorAutoLock lock(mMonitor);
   mQueue.push_back(aSample);
   lock.NotifyAll();
-
-  return NS_OK;
 }
 
 nsresult
@@ -640,39 +636,35 @@ MediaCodecDataDecoder::ResetOutputBuffers()
   return mDecoder->GetOutputBuffers(ReturnTo(&mOutputBuffers));
 }
 
-nsresult
+void
 MediaCodecDataDecoder::Flush()
 {
   MonitorAutoLock lock(mMonitor);
   if (!SetState(ModuleState::kFlushing)) {
-    return NS_OK;
+    return;
   }
   lock.Notify();
 
   while (mState == ModuleState::kFlushing) {
     lock.Wait();
   }
-
-  return NS_OK;
 }
 
-nsresult
+void
 MediaCodecDataDecoder::Drain()
 {
   MonitorAutoLock lock(mMonitor);
   if (mState == ModuleState::kDrainDecoder ||
       mState == ModuleState::kDrainQueue) {
-    return NS_OK;
+    return;
   }
 
   SetState(ModuleState::kDrainQueue);
   lock.Notify();
-
-  return NS_OK;
 }
 
 
-nsresult
+void
 MediaCodecDataDecoder::Shutdown()
 {
   MonitorAutoLock lock(mMonitor);
@@ -694,8 +686,6 @@ MediaCodecDataDecoder::Shutdown()
     mDecoder->Release();
     mDecoder = nullptr;
   }
-
-  return NS_OK;
 }
 
 } // mozilla

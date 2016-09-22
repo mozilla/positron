@@ -36,11 +36,11 @@
 #endif
 
 #if defined(SPS_OS_android) && !defined(MOZ_WIDGET_GONK)
-  #include "GeneratedJNIWrappers.h"
+  #include "FennecJNIWrappers.h"
 #endif
 
 #if defined(SPS_OS_android) && !defined(MOZ_WIDGET_GONK)
-#include "GeneratedJNINatives.h"
+#include "FennecJNINatives.h"
 #endif
 
 #ifndef SPS_STANDALONE
@@ -1077,6 +1077,17 @@ void mozilla_sampler_sleep_end() {
       return;
     }
     stack->setSleeping(0);
+}
+
+bool mozilla_sampler_is_sleeping() {
+  if (sInitCount == 0) {
+    return false;
+  }
+  PseudoStack *stack = tlsPseudoStack.get();
+  if (stack == nullptr) {
+    return false;
+  }
+  return stack->isSleeping();
 }
 
 double mozilla_sampler_time(const mozilla::TimeStamp& aTime)

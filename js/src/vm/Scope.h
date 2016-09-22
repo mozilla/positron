@@ -53,6 +53,7 @@ enum class ScopeKind : uint8_t
 
     // LexicalScope
     Lexical,
+    SimpleCatch,
     Catch,
     NamedLambda,
     StrictNamedLambda,
@@ -71,6 +72,12 @@ enum class ScopeKind : uint8_t
     // ModuleScope
     Module
 };
+
+static inline bool
+ScopeKindIsCatch(ScopeKind kind)
+{
+    return kind == ScopeKind::SimpleCatch || kind == ScopeKind::Catch;
+}
 
 const char* BindingKindString(BindingKind kind);
 const char* ScopeKindString(ScopeKind kind);
@@ -205,6 +212,10 @@ class Scope : public js::gc::TenuredCell
     static Scope* create(ExclusiveContext* cx, ScopeKind kind, HandleScope enclosing,
                          HandleShape envShape);
 
+    template <typename T, typename D>
+    static Scope* create(ExclusiveContext* cx, ScopeKind kind, HandleScope enclosing,
+                         HandleShape envShape, mozilla::UniquePtr<T, D> data);
+
     template <typename ConcreteScope, XDRMode mode>
     static bool XDRSizedBindingNames(XDRState<mode>* xdr, Handle<ConcreteScope*> scope,
                                      MutableHandle<typename ConcreteScope::Data*> data);
@@ -298,6 +309,9 @@ class Scope : public js::gc::TenuredCell
 // Lexical
 //   A plain lexical scope.
 //
+// SimpleCatch
+//   Holds the single catch parameter of a catch block.
+//
 // Catch
 //   Holds the catch parameters (and only the catch parameters) of a catch
 //   block.
@@ -376,6 +390,7 @@ inline bool
 Scope::is<LexicalScope>() const
 {
     return kind_ == ScopeKind::Lexical ||
+           kind_ == ScopeKind::SimpleCatch ||
            kind_ == ScopeKind::Catch ||
            kind_ == ScopeKind::NamedLambda ||
            kind_ == ScopeKind::StrictNamedLambda;
@@ -613,9 +628,11 @@ class GlobalScope : public Scope
     {
         // Bindings are sorted by kind.
         //
-        //   vars - [0, letStart)
-        //   lets - [letStart, constStart)
-        // consts - [constStart, length)
+        // top-level funcs - [0, varStart)
+        //            vars - [varStart, letStart)
+        //            lets - [letStart, constStart)
+        //          consts - [constStart, length)
+        uint32_t varStart;
         uint32_t letStart;
         uint32_t constStart;
         uint32_t length;
@@ -707,7 +724,12 @@ class EvalScope : public Scope
     {
         // All bindings in an eval script are 'var' bindings. The implicit
         // lexical scope around the eval is present regardless of strictness
-        // and is its own LexicalScope.
+        // and is its own LexicalScope. However, we need to track top-level
+        // functions specially for redeclaration checks.
+        //
+        // top-level funcs - [0, varStart)
+        //            vars - [varStart, length)
+        uint32_t varStart;
         uint32_t length;
 
         // Frame slots [0, nextFrameSlot) are live when this is the innermost
@@ -877,7 +899,8 @@ class BindingIter
     //
     //            imports - [0, positionalFormalStart)
     // positional formals - [positionalFormalStart, nonPositionalFormalStart)
-    //      other formals - [nonPositionalParamStart, varStart)
+    //      other formals - [nonPositionalParamStart, topLevelFunctionStart)
+    //    top-level funcs - [topLevelFunctionStart, varStart)
     //               vars - [varStart, letStart)
     //               lets - [letStart, constStart)
     //             consts - [constStart, length)
@@ -887,6 +910,7 @@ class BindingIter
     //            imports - name
     // positional formals - argument slot
     //      other formals - frame slot
+    //    top-level funcs - frame slot
     //               vars - frame slot
     //               lets - frame slot
     //             consts - frame slot
@@ -894,13 +918,15 @@ class BindingIter
     // Access method when closed over:
     //
     //            imports - name
-    // positional formals - environment slot
-    //      other formals - environment slot
-    //               vars - environment slot
-    //               lets - environment slot
-    //             consts - environment slot
+    // positional formals - environment slot or name
+    //      other formals - environment slot or name
+    //    top-level funcs - environment slot or name
+    //               vars - environment slot or name
+    //               lets - environment slot or name
+    //             consts - environment slot or name
     uint32_t positionalFormalStart_;
     uint32_t nonPositionalFormalStart_;
+    uint32_t topLevelFunctionStart_;
     uint32_t varStart_;
     uint32_t letStart_;
     uint32_t constStart_;
@@ -932,12 +958,14 @@ class BindingIter
     BindingName* names_;
 
     void init(uint32_t positionalFormalStart, uint32_t nonPositionalFormalStart,
-              uint32_t varStart, uint32_t letStart, uint32_t constStart,
+              uint32_t topLevelFunctionStart, uint32_t varStart,
+              uint32_t letStart, uint32_t constStart,
               uint8_t flags, uint32_t firstFrameSlot, uint32_t firstEnvironmentSlot,
               BindingName* names, uint32_t length)
     {
         positionalFormalStart_ = positionalFormalStart;
         nonPositionalFormalStart_ = nonPositionalFormalStart;
+        topLevelFunctionStart_ = topLevelFunctionStart;
         varStart_ = varStart;
         letStart_ = letStart;
         constStart_ = constStart;
@@ -1098,7 +1126,7 @@ class BindingIter
         MOZ_ASSERT(!done());
         if (index_ < positionalFormalStart_)
             return BindingKind::Import;
-        if (index_ < varStart_) {
+        if (index_ < topLevelFunctionStart_) {
             // When the parameter list has expressions, the parameters act
             // like lexical bindings and have TDZ.
             if (hasFormalParameterExprs())
@@ -1112,6 +1140,11 @@ class BindingIter
         if (isNamedLambda())
             return BindingKind::NamedLambdaCallee;
         return BindingKind::Const;
+    }
+
+    bool isTopLevelFunction() const {
+        MOZ_ASSERT(!done());
+        return index_ >= topLevelFunctionStart_ && index_ < varStart_;
     }
 
     bool hasArgumentSlot() const {
@@ -1252,6 +1285,7 @@ class BindingIterOperations
     bool closedOver() const { return iter().closedOver(); }
     BindingLocation location() const { return iter().location(); }
     BindingKind kind() const { return iter().kind(); }
+    bool isTopLevelFunction() const { return iter().isTopLevelFunction(); }
     bool hasArgumentSlot() const { return iter().hasArgumentSlot(); }
     uint16_t argumentSlot() const { return iter().argumentSlot(); }
     uint32_t nextFrameSlot() const { return iter().nextFrameSlot(); }

@@ -12,12 +12,13 @@
 #include "mozilla/ChaosMode.h"
 #include "mozilla/IOInterposer.h"
 #include "mozilla/Likely.h"
+#include "mozilla/MemoryChecking.h"
 #include "mozilla/Poison.h"
 #include "mozilla/Preferences.h"
+#include "mozilla/ScopeExit.h"
 #include "mozilla/Services.h"
 #include "mozilla/ServoBindings.h"
 #include "mozilla/Telemetry.h"
-#include "mozilla/MemoryChecking.h"
 
 #include "nsAppRunner.h"
 #include "mozilla/AppData.h"
@@ -167,6 +168,11 @@
 #ifdef MOZ_ENABLE_XREMOTE
 #include "XRemoteClient.h"
 #include "nsIRemoteService.h"
+#include "nsProfileLock.h"
+#include "SpecialSystemDirectory.h"
+#include <sched.h>
+// Time to wait for the remoting service to start
+#define MOZ_XREMOTE_START_TIMEOUT_SEC 5
 #endif
 
 #if defined(DEBUG) && defined(XP_WIN32)
@@ -256,6 +262,18 @@ nsString gAbsoluteArgv0Path;
 
 #ifdef MOZ_LINKER
 extern "C" MFBT_API bool IsSignalHandlingBroken();
+#endif
+
+#ifdef LIBFUZZER
+#include "LibFuzzerRunner.h"
+
+namespace mozilla {
+LibFuzzerRunner* libFuzzerRunner = 0;
+} // namespace mozilla
+
+extern "C" MOZ_EXPORT void XRE_LibFuzzerSetMain(int argc, char** argv, LibFuzzerMain main) {
+  mozilla::libFuzzerRunner->setParams(argc, argv, main);
+}
 #endif
 
 namespace mozilla {
@@ -376,6 +394,25 @@ strimatch(const char* lowerstr, const char* mixedstr)
   if (*mixedstr) return false; // lowerstr is shorter
 
   return true;
+}
+
+static bool gIsExpectedExit = false;
+
+void MozExpectedExit() {
+  gIsExpectedExit = true;
+}
+
+/**
+ * Runs atexit() to catch unexpected exit from 3rd party libraries like the
+ * Intel graphics driver calling exit in an error condition. When they
+ * call exit() to report an error we won't shutdown correctly and wont catch
+ * the issue with our crash reporter.
+ */
+static void UnexpectedExit() {
+  if (!gIsExpectedExit) {
+    gIsExpectedExit = true; // Don't risk re-entrency issues when crashing.
+    MOZ_CRASH("Exit called by third party code.");
+  }
 }
 
 /**
@@ -1428,9 +1465,11 @@ ScopedXPCOMStartup::Initialize()
     mServiceManager = nullptr;
   }
   else {
+#ifdef DEBUG
     nsCOMPtr<nsIComponentRegistrar> reg =
       do_QueryInterface(mServiceManager);
     NS_ASSERTION(reg, "Service Manager doesn't QI to Registrar.");
+#endif
   }
 
   return rv;
@@ -1645,17 +1684,13 @@ DumpVersion()
 
 #ifdef MOZ_ENABLE_XREMOTE
 static RemoteResult
-RemoteCommandLine(const char* aDesktopStartupID)
+ParseRemoteCommandLine(nsCString& program,
+                       const char** profile,
+                       const char** username)
 {
-  nsresult rv;
   ArgResult ar;
 
-  const char *profile = 0;
-  nsAutoCString program(gAppData->remotingName);
-  ToLowerCase(program);
-  const char *username = getenv("LOGNAME");
-
-  ar = CheckArg("p", false, &profile, false);
+  ar = CheckArg("p", false, profile, false);
   if (ar == ARG_BAD) {
     // Leave it to the normal command line handling to handle this situation.
     return REMOTE_NOT_FOUND;
@@ -1670,14 +1705,23 @@ RemoteCommandLine(const char* aDesktopStartupID)
     program.Assign(temp);
   }
 
-  ar = CheckArg("u", true, &username);
+  ar = CheckArg("u", true, username);
   if (ar == ARG_BAD) {
     PR_fprintf(PR_STDERR, "Error: argument -u requires a username\n");
     return REMOTE_ARG_BAD;
   }
 
+  return REMOTE_FOUND;
+}
+
+static RemoteResult
+StartRemoteClient(const char* aDesktopStartupID,
+                  nsCString& program,
+                  const char* profile,
+                  const char* username)
+{
   XRemoteClient client;
-  rv = client.Init();
+  nsresult rv = client.Init();
   if (NS_FAILED(rv))
     return REMOTE_NOT_FOUND;
 
@@ -1749,9 +1793,7 @@ static nsresult LaunchChild(nsINativeAppSupport* aNative,
 #else
 #if defined(XP_MACOSX)
   CommandLineServiceMac::SetupMacCommandLine(gRestartArgc, gRestartArgv, true);
-  uint32_t restartMode = 0;
-  restartMode = gRestartMode;
-  LaunchChildMac(gRestartArgc, gRestartArgv, restartMode);
+  LaunchChildMac(gRestartArgc, gRestartArgv);
 #else
   nsCOMPtr<nsIFile> lf;
   nsresult rv = XRE_GetBinaryPath(gArgv[0], getter_AddRefs(lf));
@@ -2986,6 +3028,8 @@ public:
   nsCOMPtr<nsIProfileLock> mProfileLock;
 #ifdef MOZ_ENABLE_XREMOTE
   nsCOMPtr<nsIRemoteService> mRemoteService;
+  nsProfileLock mRemoteLock;
+  nsCOMPtr<nsIFile> mRemoteLockDir;
 #endif
 
   UniquePtr<ScopedXPCOMStartup> mScopedXPCOM;
@@ -3017,6 +3061,11 @@ XREMain::XRE_mainInit(bool* aExitFlag)
   if (!aExitFlag)
     return 1;
   *aExitFlag = false;
+
+  atexit(UnexpectedExit);
+  auto expectedShutdown = mozilla::MakeScopeExit([&] {
+    MozExpectedExit();
+  });
 
   StartupTimeline::Record(StartupTimeline::MAIN);
 
@@ -3644,6 +3693,13 @@ XREMain::XRE_mainStartup(bool* aExitFlag)
     return 1;
 #endif /* MOZ_WIDGET_GTK */
 
+#ifdef LIBFUZZER
+  if (PR_GetEnv("LIBFUZZER")) {
+    *aExitFlag = true;
+    return mozilla::libFuzzerRunner->Run();
+  }
+#endif
+
   if (PR_GetEnv("MOZ_RUN_GTEST")) {
     int result;
 #ifdef XP_WIN
@@ -3711,17 +3767,58 @@ XREMain::XRE_mainStartup(bool* aExitFlag)
   }
 
   if (!newInstance) {
+    nsAutoCString program(gAppData->remotingName);
+    ToLowerCase(program);
+
+    const char* username = getenv("LOGNAME");
+    const char* profile  = nullptr;
+
+    RemoteResult rr = ParseRemoteCommandLine(program, &profile, &username);
+    if (rr == REMOTE_ARG_BAD) {
+      return 1;
+    }
+
+    nsCOMPtr<nsIFile> mutexDir;
+    rv = GetSpecialSystemDirectory(OS_TemporaryDirectory, getter_AddRefs(mutexDir));
+    if (NS_SUCCEEDED(rv)) {
+      nsAutoCString mutexPath =
+        program + NS_LITERAL_CSTRING("_") + nsDependentCString(username);
+      if (profile) {
+        mutexPath.Append(NS_LITERAL_CSTRING("_") + nsDependentCString(profile));
+      }
+      mutexDir->AppendNative(mutexPath);
+
+      rv = mutexDir->Create(nsIFile::DIRECTORY_TYPE, 0700);
+      if (NS_SUCCEEDED(rv) || rv == NS_ERROR_FILE_ALREADY_EXISTS) {
+        mRemoteLockDir = mutexDir;
+      }
+    }
+
+    if (mRemoteLockDir) {
+      const TimeStamp epoch = mozilla::TimeStamp::Now();
+      do {
+        rv = mRemoteLock.Lock(mRemoteLockDir, nullptr);
+        if (NS_SUCCEEDED(rv))
+          break;
+        sched_yield();
+      } while ((TimeStamp::Now() - epoch)
+               < TimeDuration::FromSeconds(MOZ_XREMOTE_START_TIMEOUT_SEC));
+      if (NS_FAILED(rv)) {
+        NS_WARNING("Cannot lock XRemote start mutex");
+      }
+    }
+
     // Try to remote the entire command line. If this fails, start up normally.
     const char* desktopStartupIDPtr =
       mDesktopStartupID.IsEmpty() ? nullptr : mDesktopStartupID.get();
 
-    RemoteResult rr = RemoteCommandLine(desktopStartupIDPtr);
+    rr = StartRemoteClient(desktopStartupIDPtr, program, profile, username);
     if (rr == REMOTE_FOUND) {
       *aExitFlag = true;
       return 0;
-    }
-    else if (rr == REMOTE_ARG_BAD)
+    } else if (rr == REMOTE_ARG_BAD) {
       return 1;
+    }
   }
 #endif
 #if defined(MOZ_WIDGET_GTK)
@@ -4287,6 +4384,10 @@ XREMain::XRE_mainRun()
       mRemoteService = do_GetService("@mozilla.org/toolkit/remote-service;1");
     if (mRemoteService)
       mRemoteService->Startup(mAppData->remotingName, mProfileName.get());
+    if (mRemoteLockDir) {
+      mRemoteLock.Unlock();
+      mRemoteLockDir->Remove(false);
+    }
 #endif /* MOZ_ENABLE_XREMOTE */
 
     mNativeApp->Enable();
@@ -4321,6 +4422,12 @@ XREMain::XRE_mainRun()
       gLogConsoleErrors = true;
     }
   }
+
+#ifdef MOZ_STYLO
+    // This, along with the call to Servo_Initialize, should eventually move back
+    // to nsLayoutStatics.cpp.
+    Servo_Shutdown();
+#endif
 
   return rv;
 }
@@ -4652,7 +4759,7 @@ enum {
   kE10sDisabledForBidi = 6,
   kE10sDisabledForAddons = 7,
   kE10sForceDisabled = 8,
-  kE10sDisabledForXPAcceleration = 9,
+  // kE10sDisabledForXPAcceleration = 9, removed in bug 1296353
   kE10sDisabledForOperatingSystem = 10,
 };
 
@@ -4742,18 +4849,6 @@ MultiprocessBlockPolicy() {
   if (Preferences::GetDefaultCString("app.update.channel").EqualsLiteral("release") &&
       !IsVistaOrLater()) {
     gMultiprocessBlockPolicy = kE10sDisabledForOperatingSystem;
-    return gMultiprocessBlockPolicy;
-  }
-
-  /**
-   * We block on Windows XP if layers acceleration is requested. This is due to
-   * bug 1237769 where D3D9 and e10s behave badly together on XP.
-   */
-  bool layersAccelerationRequested = !Preferences::GetBool("layers.acceleration.disabled") ||
-                                      Preferences::GetBool("layers.acceleration.force-enabled");
-
-  if (layersAccelerationRequested && !IsVistaOrLater()) {
-    gMultiprocessBlockPolicy = kE10sDisabledForXPAcceleration;
     return gMultiprocessBlockPolicy;
   }
 #endif // XP_WIN

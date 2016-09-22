@@ -51,32 +51,13 @@ const BookmarkSyncUtils = PlacesSyncUtils.bookmarks = Object.freeze({
 
   /**
    * Fetches a folder's children, ordered by their position within the folder.
-   * Children without a GUID will be assigned one.
    */
   fetchChildGuids: Task.async(function* (parentGuid) {
     PlacesUtils.SYNC_BOOKMARK_VALIDATORS.guid(parentGuid);
 
     let db = yield PlacesUtils.promiseDBConnection();
     let children = yield fetchAllChildren(db, parentGuid);
-    let childGuids = [];
-    let guidsToSet = new Map();
-    for (let child of children) {
-      let guid = child.guid;
-      if (!PlacesUtils.isValidGuid(guid)) {
-        // Give the child a GUID if it doesn't have one. This shouldn't happen,
-        // but the old bookmarks engine code does this, so we'll match its
-        // behavior until we're sure this can be removed.
-        guid = yield generateGuid(db);
-        BookmarkSyncLog.warn(`fetchChildGuids: Assigning ${
-          guid} to item without GUID ${child.id}`);
-        guidsToSet.set(child.id, guid);
-      }
-      childGuids.push(guid);
-    }
-    if (guidsToSet.size > 0) {
-      yield setGuids(guidsToSet);
-    }
-    return childGuids;
+    return children.map(child => child.guid);
   }),
 
   /**
@@ -101,65 +82,29 @@ const BookmarkSyncUtils = PlacesSyncUtils.bookmarks = Object.freeze({
     }
     return PlacesUtils.withConnectionWrapper("BookmarkSyncUtils: order",
       Task.async(function* (db) {
-        let children;
-
-        yield db.executeTransaction(function* () {
-          children = yield fetchAllChildren(db, parentGuid);
-          if (!children.length) {
-            return;
-          }
-          for (let child of children) {
-            // Note the current index for notifying observers. This can
-            // be removed once we switch to `reorder`.
-            child.oldIndex = child.index;
-          }
-
-          // Reorder the list, ignoring missing children.
-          let delta = 0;
-          for (let i = 0; i < childGuids.length; ++i) {
-            let guid = childGuids[i];
-            let child = findChildByGuid(children, guid);
-            if (!child) {
-              delta++;
-              BookmarkSyncLog.trace(`order: Ignoring missing child ${guid}`);
-              continue;
-            }
-            let newIndex = i - delta;
-            updateChildIndex(children, child, newIndex);
-          }
-          children.sort((a, b) => a.index - b.index);
-
-          // Update positions. We use a custom query instead of
-          // `PlacesUtils.bookmarks.reorder` because `reorder` introduces holes
-          // (bug 1293365). Once it's fixed, we can uncomment this code and
-          // remove the transaction, query, and observer notification code.
-
-          /*
-          let orderedChildrenGuids = children.map(({ guid }) => guid);
-          yield PlacesUtils.bookmarks.reorder(parentGuid, orderedChildrenGuids);
-          */
-
-          yield db.executeCached(`WITH sorting(g, p) AS (
-            VALUES ${children.map(
-              (child, i) => `("${child.guid}", ${i})`
-            ).join()}
-          ) UPDATE moz_bookmarks SET position = (
-            SELECT p FROM sorting WHERE g = guid
-          ) WHERE parent = (
-            SELECT id FROM moz_bookmarks WHERE guid = :parentGuid
-          )`,
-          { parentGuid });
-        });
-
-        // Notify observers.
-        let observers = PlacesUtils.bookmarks.getObservers();
-        for (let child of children) {
-          notify(observers, "onItemMoved", [ child.id, child.parentId,
-                                             child.oldIndex, child.parentId,
-                                             child.index, child.type,
-                                             child.guid, parentGuid,
-                                             parentGuid, SOURCE_SYNC ]);
+        let children = yield fetchAllChildren(db, parentGuid);
+        if (!children.length) {
+          return;
         }
+
+        // Reorder the list, ignoring missing children.
+        let delta = 0;
+        for (let i = 0; i < childGuids.length; ++i) {
+          let guid = childGuids[i];
+          let child = findChildByGuid(children, guid);
+          if (!child) {
+            delta++;
+            BookmarkSyncLog.trace(`order: Ignoring missing child ${guid}`);
+            continue;
+          }
+          let newIndex = i - delta;
+          updateChildIndex(children, child, newIndex);
+        }
+        children.sort((a, b) => a.index - b.index);
+
+        // Update positions.
+        let orderedChildrenGuids = children.map(({ guid }) => guid);
+        yield PlacesUtils.bookmarks.reorder(parentGuid, orderedChildrenGuids);
       })
     );
   }),
@@ -184,45 +129,6 @@ const BookmarkSyncUtils = PlacesSyncUtils.bookmarks = Object.freeze({
   }),
 
   /**
-   * Ensures an item with the |itemId| has a GUID, assigning one if necessary.
-   * We should never have a bookmark without a GUID, but the old Sync bookmarks
-   * engine code does this, so we'll match its behavior until we're sure it's
-   * not needed.
-   *
-   * This method can be removed and replaced with `PlacesUtils.promiseItemGuid`
-   * once bug 1294291 lands.
-   *
-   * @return {Promise} resolved once the GUID has been updated.
-   * @resolves to the existing or new GUID.
-   * @rejects if the item does not exist.
-   */
-  ensureGuidForId: Task.async(function* (itemId) {
-    let guid;
-    try {
-      // Use the existing GUID if it exists. `promiseItemGuid` caches the GUID
-      // as a side effect, and throws if it's invalid.
-      guid = yield PlacesUtils.promiseItemGuid(itemId);
-    } catch (ex) {
-      BookmarkSyncLog.warn(`ensureGuidForId: Error fetching GUID for ${
-        itemId}`, ex);
-      if (!isInvalidCachedGuidError(ex)) {
-        throw ex;
-      }
-      // Give the item a GUID if it doesn't have one.
-      guid = yield PlacesUtils.withConnectionWrapper(
-        "BookmarkSyncUtils: ensureGuidForId", Task.async(function* (db) {
-          let guid = yield generateGuid(db);
-          BookmarkSyncLog.warn(`ensureGuidForId: Assigning ${
-            guid} to item without GUID ${itemId}`);
-          return setGuid(db, itemId, guid);
-        })
-      );
-
-    }
-    return guid;
-  }),
-
-  /**
    * Changes the GUID of an existing item.
    *
    * @return {Promise} resolved once the GUID has been changed.
@@ -231,13 +137,20 @@ const BookmarkSyncUtils = PlacesSyncUtils.bookmarks = Object.freeze({
    */
   changeGuid: Task.async(function* (oldGuid, newGuid) {
     PlacesUtils.SYNC_BOOKMARK_VALIDATORS.guid(oldGuid);
+    PlacesUtils.SYNC_BOOKMARK_VALIDATORS.guid(newGuid);
 
     let itemId = yield PlacesUtils.promiseItemId(oldGuid);
     if (PlacesUtils.isRootItem(itemId)) {
       throw new Error(`Cannot change GUID of Places root ${oldGuid}`);
     }
     return PlacesUtils.withConnectionWrapper("BookmarkSyncUtils: changeGuid",
-      db => setGuid(db, itemId, newGuid));
+      Task.async(function* (db) {
+        yield db.executeCached(`UPDATE moz_bookmarks SET guid = :newGuid
+          WHERE id = :itemId`, { newGuid, itemId });
+        PlacesUtils.invalidateCachedGuidFor(itemId);
+        return newGuid;
+      })
+    );
   }),
 
   /**
@@ -363,28 +276,19 @@ function updateChildIndex(children, child, newIndex) {
   child.index = newIndex;
 }
 
-/**
- * Sends a bookmarks notification through the given observers.
- *
- * @param observers
- *        array of nsINavBookmarkObserver objects.
- * @param notification
- *        the notification name.
- * @param args
- *        array of arguments to pass to the notification.
- */
-function notify(observers, notification, args) {
-  for (let observer of observers) {
-    try {
-      observer[notification](...args);
-    } catch (ex) {}
+// A helper for whenever we want to know if a GUID doesn't exist in the places
+// database. Primarily used to detect orphans on incoming records.
+var GUIDMissing = Task.async(function* (guid) {
+  try {
+    yield PlacesUtils.promiseItemId(guid);
+    return false;
+  } catch (ex) {
+    if (ex.message == "no item found for the given GUID") {
+      return true;
+    }
+    throw ex;
   }
-}
-
-function isInvalidCachedGuidError(error) {
-  return error && error.message ==
-    "Trying to update the GUIDs cache with an invalid GUID";
-}
+});
 
 // Tag queries use a `place:` URL that refers to the tag folder ID. When we
 // apply a synced tag query from a remote client, we need to update the URL to
@@ -462,10 +366,10 @@ var reparentOrphans = Task.async(function* (item) {
 // Inserts a synced bookmark into the database.
 var insertSyncBookmark = Task.async(function* (insertInfo) {
   let requestedParentGuid = insertInfo.parentGuid;
-  let parent = yield PlacesUtils.bookmarks.fetch(requestedParentGuid);
+  let isOrphan = yield GUIDMissing(insertInfo.parentGuid);
 
   // Default to "unfiled" for new bookmarks if the parent doesn't exist.
-  if (parent) {
+  if (!isOrphan) {
     BookmarkSyncLog.debug(`insertSyncBookmark: Item ${
       insertInfo.guid} is not an orphan`);
   } else {
@@ -481,7 +385,7 @@ var insertSyncBookmark = Task.async(function* (insertInfo) {
 
   let newItem;
   if (insertInfo.kind == BookmarkSyncUtils.KINDS.LIVEMARK) {
-    newItem = yield insertSyncLivemark(parent, insertInfo);
+    newItem = yield insertSyncLivemark(insertInfo);
   } else {
     let item = yield PlacesUtils.bookmarks.insert(insertInfo);
     let newId = yield PlacesUtils.promiseItemId(item.guid);
@@ -493,7 +397,7 @@ var insertSyncBookmark = Task.async(function* (insertInfo) {
   }
 
   // If the item is an orphan, annotate it with its real parent ID.
-  if (!parent) {
+  if (isOrphan) {
     yield annotateOrphan(newItem, requestedParentGuid);
   }
 
@@ -504,7 +408,7 @@ var insertSyncBookmark = Task.async(function* (insertInfo) {
 });
 
 // Inserts a synced livemark.
-var insertSyncLivemark = Task.async(function* (requestedParent, insertInfo) {
+var insertSyncLivemark = Task.async(function* (insertInfo) {
   let parentId = yield PlacesUtils.promiseItemId(insertInfo.parentGuid);
   let parentIsLivemark = PlacesUtils.annotations.itemHasAnnotation(parentId,
     PlacesUtils.LMANNO_FEEDURI);
@@ -693,8 +597,8 @@ var updateSyncBookmark = Task.async(function* (updateInfo) {
       if (PlacesUtils.isRootItem(oldId)) {
         throw new Error(`Cannot move Places root ${oldId}`);
       }
-      let parent = yield PlacesUtils.bookmarks.fetch(requestedParentGuid);
-      if (parent) {
+      isOrphan = yield GUIDMissing(requestedParentGuid);
+      if (!isOrphan) {
         BookmarkSyncLog.debug(`updateSyncBookmark: Item ${
           updateInfo.guid} is not an orphan`);
       } else {
@@ -704,7 +608,6 @@ var updateSyncBookmark = Task.async(function* (updateInfo) {
         BookmarkSyncLog.trace(`updateSyncBookmark: Item ${
           updateInfo.guid} is an orphan: could not find parent ${
           requestedParentGuid}`);
-        isOrphan = true;
         delete updateInfo.parentGuid;
       }
       // If we're reparenting the item, pass the default index so that
@@ -802,23 +705,6 @@ var updateBookmarkMetadata = Task.async(function* (itemId, oldItem, newItem, upd
 
   return newItem;
 });
-
-function generateGuid(db) {
-  return db.executeCached("SELECT GENERATE_GUID() AS guid").then(rows =>
-    rows[0].getResultByName("guid"));
-}
-
-function setGuids(guids) {
-  return PlacesUtils.withConnectionWrapper("BookmarkSyncUtils: setGuids",
-    db => db.executeTransaction(function* () {
-      let promises = [];
-      for (let [itemId, newGuid] of guids) {
-        promises.push(setGuid(db, itemId, newGuid));
-      }
-      return Promise.all(promises);
-    })
-  );
-}
 
 var setGuid = Task.async(function* (db, itemId, newGuid) {
   yield db.executeCached(`UPDATE moz_bookmarks SET guid = :newGuid

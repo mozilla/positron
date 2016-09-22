@@ -367,14 +367,14 @@ AsyncScriptLoader::OnStreamComplete(nsIIncrementalStreamLoader* aLoader,
     RootedFunction function(cx);
     RootedScript script(cx);
     nsAutoCString spec;
-    uri->GetSpec(spec);
+    nsresult rv = uri->GetSpec(spec);
+    NS_ENSURE_SUCCESS(rv, rv);
 
     RootedObject target_obj(cx, mTargetObj);
 
-    nsresult rv = PrepareScript(uri, cx, target_obj, spec.get(),
-                                mCharset,
-                                reinterpret_cast<const char*>(aBuf), aLength,
-                                mReuseGlobal, &script, &function);
+    rv = PrepareScript(uri, cx, target_obj, spec.get(), mCharset,
+                       reinterpret_cast<const char*>(aBuf), aLength,
+                       mReuseGlobal, &script, &function);
     if (NS_FAILED(rv)) {
         return rv;
     }
@@ -776,7 +776,7 @@ NotifyPrecompilationCompleteRunnable::Run(void)
     AutoSendObserverNotification notifier(mPrecompiler);
 
     if (mToken) {
-        JSContext* cx = XPCJSRuntime::Get()->Context();
+        JSContext* cx = XPCJSContext::Get()->Context();
         NS_ENSURE_TRUE(cx, NS_ERROR_FAILURE);
         JS::CancelOffThreadScript(cx, mToken);
     }

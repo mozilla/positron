@@ -482,7 +482,7 @@ sandbox_addProperty(JSContext* cx, HandleObject obj, HandleId id, HandleValue v)
     // Whenever JS_EnumerateStandardClasses is called, it defines the
     // "undefined" property, even if it's already defined. We don't want to do
     // anything in that case.
-    if (id == XPCJSRuntime::Get()->GetStringID(XPCJSRuntime::IDX_UNDEFINED))
+    if (id == XPCJSContext::Get()->GetStringID(XPCJSContext::IDX_UNDEFINED))
         return true;
 
     // Avoid recursively triggering sandbox_addProperty in the
@@ -1764,7 +1764,8 @@ xpc::EvalInSandbox(JSContext* cx, HandleObject sandboxArg, const nsAString& sour
         filenameBuf.Assign(filename);
     } else {
         // Default to the spec of the principal.
-        nsJSPrincipals::get(prin)->GetScriptLocation(filenameBuf);
+        nsresult rv = nsJSPrincipals::get(prin)->GetScriptLocation(filenameBuf);
+        NS_ENSURE_SUCCESS(rv, rv);
         lineNo = 1;
     }
 

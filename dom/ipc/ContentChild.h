@@ -21,6 +21,9 @@
 #include "nsWeakPtr.h"
 #include "nsIWindowProvider.h"
 
+#if defined(XP_MACOSX) && defined(MOZ_CONTENT_SANDBOX)
+#include "nsIFile.h"
+#endif
 
 struct ChromePackage;
 class nsIObserver;
@@ -114,7 +117,22 @@ public:
 
   void GetProcessName(nsACString& aName) const;
 
+#if defined(XP_MACOSX) && defined(MOZ_CONTENT_SANDBOX)
+  void GetProfileDir(nsIFile** aProfileDir) const
+  {
+    *aProfileDir = mProfileDir;
+    NS_IF_ADDREF(*aProfileDir);
+  }
+
+  void SetProfileDir(nsIFile* aProfileDir)
+  {
+    mProfileDir = aProfileDir;
+  }
+#endif
+
   bool IsAlive() const;
+
+  bool IsShuttingDown() const;
 
   static void AppendProcessId(nsACString& aName);
 
@@ -144,11 +162,16 @@ public:
                         base::ProcessId otherProcess) override;
 
   bool
-  RecvInitCompositor(Endpoint<PCompositorBridgeChild>&& aEndpoint) override;
+  RecvInitRendering(
+    Endpoint<PCompositorBridgeChild>&& aCompositor,
+    Endpoint<PImageBridgeChild>&& aImageBridge,
+    Endpoint<PVRManagerChild>&& aVRBridge) override;
+
   bool
-  RecvInitImageBridge(Endpoint<PImageBridgeChild>&& aEndpoint) override;
-  bool
-  RecvInitVRManager(Endpoint<PVRManagerChild>&& aEndpoint) override;
+  RecvReinitRendering(
+    Endpoint<PCompositorBridgeChild>&& aCompositor,
+    Endpoint<PImageBridgeChild>&& aImageBridge,
+    Endpoint<PVRManagerChild>&& aVRBridge) override;
 
   PSharedBufferManagerChild*
   AllocPSharedBufferManagerChild(mozilla::ipc::Transport* aTransport,
@@ -404,9 +427,6 @@ public:
   // auto remove when alertfinished is received.
   nsresult AddRemoteAlertObserver(const nsString& aData, nsIObserver* aObserver);
 
-  virtual bool RecvSystemMemoryAvailable(const uint64_t& aGetterId,
-                                         const uint32_t& aMemoryAvailable) override;
-
   virtual bool RecvPreferenceUpdate(const PrefSetting& aPref) override;
   virtual bool RecvVarUpdate(const GfxVarUpdate& pref) override;
 
@@ -440,6 +460,7 @@ public:
   virtual bool RecvFlushMemory(const nsString& reason) override;
 
   virtual bool RecvActivateA11y() override;
+  virtual bool RecvShutdownA11y() override;
 
   virtual bool RecvGarbageCollect() override;
   virtual bool RecvCycleCollect() override;
@@ -681,10 +702,16 @@ private:
   nsCOMPtr<nsIDomainPolicy> mPolicy;
   nsCOMPtr<nsITimer> mForceKillTimer;
 
+#if defined(XP_MACOSX) && defined(MOZ_CONTENT_SANDBOX)
+  nsCOMPtr<nsIFile> mProfileDir;
+#endif
+
   // Hashtable to keep track of the pending GetFilesHelper objects.
   // This GetFilesHelperChild objects are removed when RecvGetFilesResponse is
   // received.
- nsRefPtrHashtable<nsIDHashKey, GetFilesHelperChild> mGetFilesPendingRequests;
+  nsRefPtrHashtable<nsIDHashKey, GetFilesHelperChild> mGetFilesPendingRequests;
+
+  bool mShuttingDown;
 
   DISALLOW_EVIL_CONSTRUCTORS(ContentChild);
 };

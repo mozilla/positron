@@ -205,12 +205,11 @@ IsVisualCharset(const nsCString& aCharset)
 
 nsPresContext::nsPresContext(nsIDocument* aDocument, nsPresContextType aType)
   : mType(aType), mDocument(aDocument), mBaseMinFontSize(0),
-    mTextZoom(1.0), mFullZoom(1.0),
+    mTextZoom(1.0), mFullZoom(1.0), mOverrideDPPX(0.0),
     mLastFontInflationScreenSize(gfxSize(-1.0, -1.0)),
     mPageSize(-1, -1), mPPScale(1.0f),
     mViewportStyleScrollbar(NS_STYLE_OVERFLOW_AUTO, NS_STYLE_OVERFLOW_AUTO),
     mImageAnimationModePref(imgIContainer::kNormalAnimMode),
-    mAllInvalidated(false),
     mPaintFlashing(false), mPaintFlashingInitialized(false)
 {
   // NOTE! nsPresContext::operator new() zeroes out all members, so don't
@@ -1162,11 +1161,11 @@ nsPresContext::CompatibilityModeChanged()
     // quirk.css needs to come after html.css; we just keep it at the end.
     DebugOnly<nsresult> rv =
       styleSet->AppendStyleSheet(SheetType::Agent, sheet);
-    NS_WARN_IF_FALSE(NS_SUCCEEDED(rv), "failed to insert quirk.css");
+    NS_WARNING_ASSERTION(NS_SUCCEEDED(rv), "failed to insert quirk.css");
   } else {
     DebugOnly<nsresult> rv =
       styleSet->RemoveStyleSheet(SheetType::Agent, sheet);
-    NS_WARN_IF_FALSE(NS_SUCCEEDED(rv), "failed to remove quirk.css");
+    NS_WARNING_ASSERTION(NS_SUCCEEDED(rv), "failed to remove quirk.css");
   }
 
   mQuirkSheetAdded = needsQuirkSheet;
@@ -1306,6 +1305,16 @@ nsPresContext::SetFullZoom(float aZoom)
   AppUnitsPerDevPixelChanged();
 
   mSuppressResizeReflow = false;
+}
+
+void
+nsPresContext::SetOverrideDPPX(float aDPPX)
+{
+  mOverrideDPPX = aDPPX;
+
+  if (HasCachedStyleData()) {
+    MediaFeatureValuesChanged(nsRestyleHint(0), nsChangeHint(0));
+  }
 }
 
 gfxSize
@@ -1489,9 +1498,6 @@ nsPresContext::Detach()
 {
   SetContainer(nullptr);
   SetLinkHandler(nullptr);
-  if (mShell) {
-    mShell->CancelInvalidatePresShellIfHidden();
-  }
 }
 
 bool
@@ -2036,16 +2042,10 @@ nsPresContext::UpdateIsChrome()
               nsIDocShellTreeItem::typeChrome == mContainer->ItemType();
 }
 
-/* virtual */ bool
+bool
 nsPresContext::HasAuthorSpecifiedRules(const nsIFrame *aFrame,
                                        uint32_t ruleTypeMask) const
 {
-#ifdef MOZ_STYLO
-  if (!mShell || mShell->StyleSet()->IsServo()) {
-    NS_ERROR("stylo: nsPresContext::HasAuthorSpecifiedRules not implemented");
-    return true;
-  }
-#endif
   return
     nsRuleNode::HasAuthorSpecifiedRules(aFrame->StyleContext(),
                                         ruleTypeMask,
@@ -2291,7 +2291,6 @@ nsPresContext::NotifyInvalidation(uint32_t aFlags)
 {
   nsIFrame* rootFrame = PresShell()->FrameManager()->GetRootFrame();
   NotifyInvalidation(rootFrame->GetVisualOverflowRect(), aFlags);
-  mAllInvalidated = true;
 }
 
 void
@@ -2325,10 +2324,6 @@ nsPresContext::NotifyInvalidation(const nsRect& aRect, uint32_t aFlags)
   // MayHavePaintEventListener is pretty cheap and we could make it
   // even cheaper by providing a more efficient
   // nsPIDOMWindow::GetListenerManager.
-
-  if (mAllInvalidated) {
-    return;
-  }
 
   nsPresContext* pc;
   for (pc = this; pc; pc = pc->GetParentPresContext()) {
@@ -2464,7 +2459,6 @@ nsPresContext::NotifyDidPaintForSubtree(uint32_t aFlags, uint64_t aTransactionId
   if (aFlags & nsIPresShell::PAINT_LAYERS) {
     mUndeliveredInvalidateRequestsBeforeLastPaint.TakeFrom(
         &mInvalidateRequestsSinceLastPaint);
-    mAllInvalidated = false;
   }
   if (aFlags & nsIPresShell::PAINT_COMPOSITE) {
     nsCOMPtr<nsIRunnable> ev =
@@ -2498,8 +2492,9 @@ nsPresContext::HasCachedStyleData()
   nsStyleSet* styleSet = mShell->StyleSet()->GetAsGecko();
   if (!styleSet) {
     // XXXheycam ServoStyleSets do not use the rule tree, so just assume for now
-    // that we need to restyle when e.g. dppx changes.
-    return true;
+    // that we need to restyle when e.g. dppx changes assuming we're sufficiently
+    // bootstrapped.
+    return mShell->DidInitialize();
   }
 
   return styleSet->HasCachedStyleData();

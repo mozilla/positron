@@ -1021,8 +1021,6 @@ nsFrameLoader::SwapWithOtherRemoteLoader(nsFrameLoader* aOther,
     return rv;
   }
 
-  mRemoteBrowser->SwapLayerTreeObservers(aOther->mRemoteBrowser);
-
   nsCOMPtr<nsIBrowserDOMWindow> otherBrowserDOMWindow =
     aOther->mRemoteBrowser->GetBrowserDOMWindow();
   nsCOMPtr<nsIBrowserDOMWindow> browserDOMWindow =
@@ -1030,6 +1028,14 @@ nsFrameLoader::SwapWithOtherRemoteLoader(nsFrameLoader* aOther,
 
   if (!!otherBrowserDOMWindow != !!browserDOMWindow) {
     return NS_ERROR_NOT_IMPLEMENTED;
+  }
+
+  // Destroy browser frame scripts for content leaving a frame with browser API
+  if (OwnerIsMozBrowserOrAppFrame() && !aOther->OwnerIsMozBrowserOrAppFrame()) {
+    DestroyBrowserFrameScripts();
+  }
+  if (!OwnerIsMozBrowserOrAppFrame() && aOther->OwnerIsMozBrowserOrAppFrame()) {
+    aOther->DestroyBrowserFrameScripts();
   }
 
   aOther->mRemoteBrowser->SetBrowserDOMWindow(browserDOMWindow);
@@ -1060,11 +1066,11 @@ nsFrameLoader::SwapWithOtherRemoteLoader(nsFrameLoader* aOther,
   RefPtr<nsFrameMessageManager> ourMessageManager = mMessageManager;
   RefPtr<nsFrameMessageManager> otherMessageManager = aOther->mMessageManager;
   // Swap and setup things in parent message managers.
-  if (mMessageManager) {
-    mMessageManager->SetCallback(aOther);
+  if (ourMessageManager) {
+    ourMessageManager->SetCallback(aOther);
   }
-  if (aOther->mMessageManager) {
-    aOther->mMessageManager->SetCallback(this);
+  if (otherMessageManager) {
+    otherMessageManager->SetCallback(this);
   }
   mMessageManager.swap(aOther->mMessageManager);
 
@@ -1404,6 +1410,14 @@ nsFrameLoader::SwapWithOtherLoader(nsFrameLoader* aOther,
   rv = ourFrameFrame->BeginSwapDocShells(otherFrame);
   if (NS_FAILED(rv)) {
     return rv;
+  }
+
+  // Destroy browser frame scripts for content leaving a frame with browser API
+  if (OwnerIsMozBrowserOrAppFrame() && !aOther->OwnerIsMozBrowserOrAppFrame()) {
+    DestroyBrowserFrameScripts();
+  }
+  if (!OwnerIsMozBrowserOrAppFrame() && aOther->OwnerIsMozBrowserOrAppFrame()) {
+    aOther->DestroyBrowserFrameScripts();
   }
 
   // Now move the docshells to the right docshell trees.  Note that this
@@ -2098,6 +2112,38 @@ nsFrameLoader::MaybeCreateDocShell()
     attrs = nsDocShell::Cast(docShell)->GetOriginAttributes();
   }
 
+  // Inherit origin attributes from parent document if
+  // 1. It's in a content docshell.
+  // 2. its nodePrincipal is not a SystemPrincipal.
+  // 3. It's not a mozbrowser nor mozapp frame.
+  //
+  // For example, firstPartyDomain is computed from top-level document, it
+  // doesn't exist in the top-level docshell.
+  if (parentType == nsIDocShellTreeItem::typeContent &&
+      !nsContentUtils::IsSystemPrincipal(doc->NodePrincipal()) &&
+      !OwnerIsMozBrowserOrAppFrame()) {
+    PrincipalOriginAttributes poa = BasePrincipal::Cast(doc->NodePrincipal())->OriginAttributesRef();
+
+    // Assert on the firstPartyDomain from top-level docshell should be empty
+    if (mIsTopLevelContent) {
+      MOZ_ASSERT(attrs.mFirstPartyDomain.IsEmpty(),
+                 "top-level docshell shouldn't have firstPartyDomain attribute.");
+    }
+
+    // So far we want to make sure InheritFromDocToChildDocShell doesn't override
+    // any other origin attribute than firstPartyDomain.
+    MOZ_ASSERT(attrs.mAppId == poa.mAppId,
+              "docshell and document should have the same appId attribute.");
+    MOZ_ASSERT(attrs.mUserContextId == poa.mUserContextId,
+              "docshell and document should have the same userContextId attribute.");
+    MOZ_ASSERT(attrs.mInIsolatedMozBrowser == poa.mInIsolatedMozBrowser,
+              "docshell and document should have the same inIsolatedMozBrowser attribute.");
+    MOZ_ASSERT(attrs.mPrivateBrowsingId == poa.mPrivateBrowsingId,
+              "docshell and document should have the same privateBrowsingId attribute.");
+
+    attrs.InheritFromDocToChildDocShell(poa);
+  }
+
   if (OwnerIsAppFrame()) {
     // You can't be both an app and a browser frame.
     MOZ_ASSERT(!OwnerIsMozBrowserFrame());
@@ -2229,8 +2275,8 @@ nsFrameLoader::CheckForRecursiveLoad(nsIURI* aURI)
   // Check that we're still in the docshell tree.
   nsCOMPtr<nsIDocShellTreeOwner> treeOwner;
   mDocShell->GetTreeOwner(getter_AddRefs(treeOwner));
-  NS_WARN_IF_FALSE(treeOwner,
-                   "Trying to load a new url to a docshell without owner!");
+  NS_WARNING_ASSERTION(treeOwner,
+                       "Trying to load a new url to a docshell without owner!");
   NS_ENSURE_STATE(treeOwner);
 
   if (mDocShell->ItemType() != nsIDocShellTreeItem::typeContent) {
@@ -2727,7 +2773,9 @@ nsFrameLoader::CreateStaticClone(nsIFrameLoader* aDest)
   dest->MaybeCreateDocShell();
   NS_ENSURE_STATE(dest->mDocShell);
 
-  nsCOMPtr<nsIDocument> dummy = dest->mDocShell->GetDocument();
+  nsCOMPtr<nsIDocument> kungFuDeathGrip = dest->mDocShell->GetDocument();
+  Unused << kungFuDeathGrip;
+
   nsCOMPtr<nsIContentViewer> viewer;
   dest->mDocShell->GetContentViewer(getter_AddRefs(viewer));
   NS_ENSURE_STATE(viewer);
@@ -3204,46 +3252,6 @@ nsFrameLoader::RequestNotifyAfterRemotePaint()
 }
 
 NS_IMETHODIMP
-nsFrameLoader::RequestNotifyLayerTreeReady()
-{
-  if (mRemoteBrowser) {
-    return mRemoteBrowser->RequestNotifyLayerTreeReady() ? NS_OK : NS_ERROR_NOT_AVAILABLE;
-  }
-
-  if (!mOwnerContent) {
-    return NS_ERROR_NOT_AVAILABLE;
-  }
-
-  RefPtr<AsyncEventDispatcher> event =
-    new AsyncEventDispatcher(mOwnerContent,
-                             NS_LITERAL_STRING("MozLayerTreeReady"),
-                             true, false);
-  event->PostDOMEvent();
-
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-nsFrameLoader::RequestNotifyLayerTreeCleared()
-{
-  if (mRemoteBrowser) {
-    return mRemoteBrowser->RequestNotifyLayerTreeCleared() ? NS_OK : NS_ERROR_NOT_AVAILABLE;
-  }
-
-  if (!mOwnerContent) {
-    return NS_ERROR_NOT_AVAILABLE;
-  }
-
-  RefPtr<AsyncEventDispatcher> event =
-    new AsyncEventDispatcher(mOwnerContent,
-                             NS_LITERAL_STRING("MozLayerTreeCleared"),
-                             true, false);
-  event->PostDOMEvent();
-
-  return NS_OK;
-}
-
-NS_IMETHODIMP
 nsFrameLoader::Print(uint64_t aOuterWindowID,
                      nsIPrintSettings* aPrintSettings,
                      nsIWebProgressListener* aProgressListener)
@@ -3330,23 +3338,36 @@ nsFrameLoader::GetLoadContext(nsILoadContext** aLoadContext)
 void
 nsFrameLoader::InitializeBrowserAPI()
 {
-  if (OwnerIsMozBrowserOrAppFrame()) {
-    if (!IsRemoteFrame()) {
-      nsresult rv = EnsureMessageManager();
-      if (NS_WARN_IF(NS_FAILED(rv))) {
-        return;
-      }
-      if (mMessageManager) {
-        mMessageManager->LoadFrameScript(
-          NS_LITERAL_STRING("chrome://global/content/BrowserElementChild.js"),
-          /* allowDelayedLoad = */ true,
-          /* aRunInGlobalScope */ true);
-      }
+  if (!OwnerIsMozBrowserOrAppFrame()) {
+    return;
+  }
+  if (!IsRemoteFrame()) {
+    nsresult rv = EnsureMessageManager();
+    if (NS_WARN_IF(NS_FAILED(rv))) {
+      return;
     }
-    nsCOMPtr<nsIMozBrowserFrame> browserFrame = do_QueryInterface(mOwnerContent);
-    if (browserFrame) {
-      browserFrame->InitializeBrowserAPI();
+    if (mMessageManager) {
+      mMessageManager->LoadFrameScript(
+        NS_LITERAL_STRING("chrome://global/content/BrowserElementChild.js"),
+        /* allowDelayedLoad = */ true,
+        /* aRunInGlobalScope */ true);
     }
+  }
+  nsCOMPtr<nsIMozBrowserFrame> browserFrame = do_QueryInterface(mOwnerContent);
+  if (browserFrame) {
+    browserFrame->InitializeBrowserAPI();
+  }
+}
+
+void
+nsFrameLoader::DestroyBrowserFrameScripts()
+{
+  if (!OwnerIsMozBrowserOrAppFrame()) {
+    return;
+  }
+  nsCOMPtr<nsIMozBrowserFrame> browserFrame = do_QueryInterface(mOwnerContent);
+  if (browserFrame) {
+    browserFrame->DestroyBrowserFrameScripts();
   }
 }
 

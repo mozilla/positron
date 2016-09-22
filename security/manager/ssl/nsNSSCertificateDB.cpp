@@ -248,8 +248,8 @@ nsNSSCertificateDB::getCertsFromPackage(const UniquePLArenaPool& arena,
   }
 
   collectArgs->arena = arena.get();
-  if (CERT_DecodeCertPackage(char_ptr_cast(data), length, collect_certs,
-                             collectArgs) != SECSuccess) {
+  if (CERT_DecodeCertPackage(BitwiseCast<char*, uint8_t*>(data), length,
+                             collect_certs, collectArgs) != SECSuccess) {
     return nullptr;
   }
 
@@ -1523,7 +1523,6 @@ VerifyCertAtTime(nsIX509Cert* aCert,
     }
     *_retval = 0;
   } else {
-    NS_ENSURE_TRUE(evOidPolicy == SEC_OID_UNKNOWN, NS_ERROR_FAILURE);
     NS_ENSURE_TRUE(error != 0, NS_ERROR_FAILURE);
     *_retval = error;
   }

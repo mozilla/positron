@@ -507,12 +507,7 @@ class MessageChannel : HasResultCodes
             topCount = curCount;
           }
 
-          CrashReporter::AnnotateCrashReport(NS_LITERAL_CSTRING("NumberOfPendingIPC"),
-                                             nsPrintfCString("%zu", q.size()));
-          CrashReporter::AnnotateCrashReport(NS_LITERAL_CSTRING("TopPendingIPCCount"),
-                                             nsPrintfCString("%u", topCount));
-          CrashReporter::AnnotateCrashReport(NS_LITERAL_CSTRING("TopPendingIPCName"),
-                                             nsPrintfCString("%s(0x%x)", topName, topType));
+          CrashReporter::AnnotatePendingIPC(q.size(), topCount, topName, topType);
 
           mozalloc_handle_oom(n * sizeof(T));
         }
@@ -782,6 +777,10 @@ class MessageChannel : HasResultCodes
     // Should the channel abort the process from the I/O thread when
     // a channel error occurs?
     bool mAbortOnError;
+
+    // True if the listener has already been notified of a channel close or
+    // error.
+    bool mNotifiedChannelDone;
 
     // See SetChannelFlags
     ChannelFlags mFlags;

@@ -80,8 +80,7 @@ public:
                                      nsIAtom*        aAttribute,
                                      int32_t         aModType) override;
 
-  void OnVisibilityChange(Visibility aOldVisibility,
-                          Visibility aNewVisibility,
+  void OnVisibilityChange(Visibility aNewVisibility,
                           Maybe<OnNonvisible> aNonvisibleAction = Nothing()) override;
 
   virtual void Init(nsIContent*       aContent,
@@ -160,7 +159,7 @@ nsSVGImageFrame::Init(nsIContent*       aContent,
   if (GetStateBits() & NS_FRAME_IS_NONDISPLAY) {
     // Non-display frames are likely to be patterns, masks or the like.
     // Treat them as always visible.
-    IncVisibilityCount(VisibilityCounter::IN_DISPLAYPORT);
+    IncApproximateVisibleCount();
   }
 
   mListener = new nsSVGImageListener(this);
@@ -180,7 +179,7 @@ nsSVGImageFrame::Init(nsIContent*       aContent,
 nsSVGImageFrame::DestroyFrom(nsIFrame* aDestructRoot)
 {
   if (GetStateBits() & NS_FRAME_IS_NONDISPLAY) {
-    DecVisibilityCount(VisibilityCounter::IN_DISPLAYPORT);
+    DecApproximateVisibleCount();
   }
 
   if (mReflowCallbackPosted) {
@@ -226,11 +225,15 @@ nsSVGImageFrame::AttributeChanged(int32_t         aNameSpaceID,
       return NS_OK;
     }
   }
-  if (aNameSpaceID == kNameSpaceID_XLink &&
+  if ((aNameSpaceID == kNameSpaceID_XLink ||
+       aNameSpaceID == kNameSpaceID_None) &&
       aAttribute == nsGkAtoms::href) {
     SVGImageElement *element = static_cast<SVGImageElement*>(mContent);
 
-    if (element->mStringAttributes[SVGImageElement::HREF].IsExplicitlySet()) {
+    bool hrefIsSet =
+      element->mStringAttributes[SVGImageElement::HREF].IsExplicitlySet() ||
+      element->mStringAttributes[SVGImageElement::XLINK_HREF].IsExplicitlySet();
+    if (hrefIsSet) {
       element->LoadSVGImage(true, true);
     } else {
       element->CancelImageRequests(true);
@@ -242,22 +245,18 @@ nsSVGImageFrame::AttributeChanged(int32_t         aNameSpaceID,
 }
 
 void
-nsSVGImageFrame::OnVisibilityChange(Visibility aOldVisibility,
-                                    Visibility aNewVisibility,
+nsSVGImageFrame::OnVisibilityChange(Visibility aNewVisibility,
                                     Maybe<OnNonvisible> aNonvisibleAction)
 {
   nsCOMPtr<nsIImageLoadingContent> imageLoader = do_QueryInterface(mContent);
   if (!imageLoader) {
-    nsSVGPathGeometryFrame::OnVisibilityChange(aOldVisibility, aNewVisibility,
-                                               aNonvisibleAction);
+    nsSVGPathGeometryFrame::OnVisibilityChange(aNewVisibility, aNonvisibleAction);
     return;
   }
 
-  imageLoader->OnVisibilityChange(aOldVisibility, aNewVisibility,
-                                  aNonvisibleAction);
+  imageLoader->OnVisibilityChange(aNewVisibility, aNonvisibleAction);
 
-  nsSVGPathGeometryFrame::OnVisibilityChange(aOldVisibility, aNewVisibility,
-                                             aNonvisibleAction);
+  nsSVGPathGeometryFrame::OnVisibilityChange(aNewVisibility, aNonvisibleAction);
 }
 
 gfx::Matrix

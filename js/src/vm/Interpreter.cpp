@@ -15,6 +15,7 @@
 #include "mozilla/FloatingPoint.h"
 #include "mozilla/Maybe.h"
 #include "mozilla/PodOperations.h"
+#include "mozilla/Sprintf.h"
 
 #include <string.h>
 
@@ -360,6 +361,9 @@ bool
 js::RunScript(JSContext* cx, RunState& state)
 {
     JS_CHECK_RECURSION(cx, return false);
+
+    // Since any script can conceivably GC, make sure it's safe to do so.
+    JS::AutoAssertOnGC::VerifyIsSafeToGC(cx->runtime());
 
     if (!Debugger::checkNoExecute(cx, state.script()))
         return false;
@@ -984,7 +988,10 @@ PopEnvironment(JSContext* cx, EnvironmentIter& ei)
 {
     switch (ei.scope().kind()) {
       case ScopeKind::Lexical:
+      case ScopeKind::SimpleCatch:
       case ScopeKind::Catch:
+      case ScopeKind::NamedLambda:
+      case ScopeKind::StrictNamedLambda:
         if (MOZ_UNLIKELY(cx->compartment()->isDebuggee()))
             DebugEnvironments::onPopLexical(cx, ei);
         if (ei.scope().hasEnvironment())
@@ -1010,8 +1017,6 @@ PopEnvironment(JSContext* cx, EnvironmentIter& ei)
             ei.initialFrame().popOffEnvironmentChain<VarEnvironmentObject>();
         break;
       case ScopeKind::Eval:
-      case ScopeKind::NamedLambda:
-      case ScopeKind::StrictNamedLambda:
       case ScopeKind::Global:
       case ScopeKind::NonSyntactic:
       case ScopeKind::Module:
@@ -1334,7 +1339,7 @@ JS_STATIC_ASSERT(JSOP_IFNE == JSOP_IFEQ + 1);
  * 1. The nominal |this|, obj, is a global object.
  *
  * 2. The nominal |this|, obj, has one of LexicalEnvironment or Call class (this
- *    is what IsCacheableNonGlobalEnvironment tests). Such objects-as-envs must be
+ *    is what IsCacheableEnvironment tests). Such objects-as-envs must be
  *    censored with undefined.
  *
  * Otherwise, we bind |this| to the result of GetThisValue(). Only names inside
@@ -1349,10 +1354,10 @@ JS_STATIC_ASSERT(JSOP_IFNE == JSOP_IFEQ + 1);
 static inline Value
 ComputeImplicitThis(JSObject* obj)
 {
-    if (IsGlobalLexicalEnvironment(obj))
+    if (obj->is<GlobalObject>())
         return UndefinedValue();
 
-    if (IsCacheableNonGlobalEnvironment(obj))
+    if (IsCacheableEnvironment(obj))
         return UndefinedValue();
 
     return GetThisValue(obj);
@@ -2123,10 +2128,12 @@ CASE(JSOP_ITER)
 {
     MOZ_ASSERT(REGS.stackDepth() >= 1);
     uint8_t flags = GET_UINT8(REGS.pc);
-    MutableHandleValue res = REGS.stackHandleAt(-1);
-    if (!ValueToIterator(cx, flags, res))
+    HandleValue val = REGS.stackHandleAt(-1);
+    ReservedRooted<JSObject*> iter(&rootObject0);
+    iter.set(ValueToIterator(cx, flags, val));
+    if (!iter)
         goto error;
-    MOZ_ASSERT(res.isObject());
+    REGS.sp[-1].setObject(*iter);
 }
 END_CASE(JSOP_ITER)
 
@@ -3896,6 +3903,12 @@ CASE(JSOP_RESUME)
         GeneratorObject::ResumeKind resumeKind = GeneratorObject::getResumeKind(REGS.pc);
         bool ok = GeneratorObject::resume(cx, activation, gen, val, resumeKind);
         SET_SCRIPT(REGS.fp()->script());
+
+        TraceLoggerThread* logger = TraceLoggerForMainThread(cx->runtime());
+        TraceLoggerEvent scriptEvent(logger, TraceLogger_Scripts, script);
+        TraceLogStartEvent(logger, scriptEvent);
+        TraceLogStartEvent(logger, TraceLogger_Interpreter);
+
         if (!ok)
             goto error;
     }
@@ -4111,7 +4124,7 @@ END_CASE(JSOP_IS_CONSTRUCTING)
 DEFAULT()
 {
     char numBuf[12];
-    snprintf(numBuf, sizeof numBuf, "%d", *REGS.pc);
+    SprintfLiteral(numBuf, "%d", *REGS.pc);
     JS_ReportErrorNumber(cx, GetErrorMessage, nullptr,
                          JSMSG_BAD_BYTECODE, numBuf);
     goto error;
@@ -4389,15 +4402,9 @@ js::DefFunOperation(JSContext* cx, HandleScript script, HandleObject envChain,
             if (!DefineProperty(cx, parent, name, rval, nullptr, nullptr, attrs))
                 return false;
         } else {
-            if (shape->isAccessorDescriptor() || !shape->writable() || !shape->enumerable()) {
-                JSAutoByteString bytes;
-                if (AtomToPrintableString(cx, name, &bytes)) {
-                    JS_ReportErrorNumber(cx, GetErrorMessage, nullptr, JSMSG_CANT_REDEFINE_PROP,
-                                         bytes.ptr());
-                }
-
-                return false;
-            }
+            MOZ_ASSERT(shape->isDataDescriptor());
+            MOZ_ASSERT(shape->writable());
+            MOZ_ASSERT(shape->enumerable());
         }
 
         // Careful: the presence of a shape, even one appearing to derive from
@@ -5044,9 +5051,17 @@ js::ThrowUninitializedThis(JSContext* cx, AbstractFramePtr frame)
     if (frame.isFunctionFrame()) {
         fun = frame.callee();
     } else {
-        MOZ_ASSERT(frame.isEvalFrame());
-        MOZ_ASSERT(frame.script()->isDirectEvalInFunction());
-        for (ScopeIter si(frame.script()->enclosingScope()); si; si++) {
+        Scope* startingScope;
+        if (frame.isDebuggerEvalFrame()) {
+            AbstractFramePtr evalInFramePrev = frame.asInterpreterFrame()->evalInFramePrev();
+            startingScope = evalInFramePrev.script()->bodyScope();
+        } else {
+            MOZ_ASSERT(frame.isEvalFrame());
+            MOZ_ASSERT(frame.script()->isDirectEvalInFunction());
+            startingScope = frame.script()->enclosingScope();
+        }
+
+        for (ScopeIter si(startingScope); si; si++) {
             if (si.scope()->is<FunctionScope>()) {
                 fun = si.scope()->as<FunctionScope>().canonicalFunction();
                 break;

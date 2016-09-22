@@ -92,6 +92,10 @@ public abstract class HomeFragment extends Fragment {
          * stage.
          */
         void onStateChanged(Bundle bundle);
+
+        void setCachedRecentTabsCount(int count);
+
+        int getCachedRecentTabsCount();
     }
 
     public void restoreData(Bundle data) {
@@ -394,7 +398,7 @@ public abstract class HomeFragment extends Fragment {
             mUrl = url;
             mType = type;
             mPosition = position;
-            mDB = GeckoProfile.get(context).getDB();
+            mDB = BrowserDB.from(context);
         }
 
         @Override

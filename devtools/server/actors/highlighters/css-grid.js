@@ -6,7 +6,12 @@
 
 const { extend } = require("sdk/core/heritage");
 const { AutoRefreshHighlighter } = require("./auto-refresh");
-const { CanvasFrameAnonymousContentHelper, createNode } = require("./utils/markup");
+const {
+  CanvasFrameAnonymousContentHelper,
+  createNode,
+  createSVGNode,
+  moveInfobar,
+} = require("./utils/markup");
 const {
   getCurrentZoom,
   setIgnoreLayoutChanges
@@ -31,6 +36,17 @@ const GRID_LINES_PROPERTIES = {
   }
 };
 
+// px
+const GRID_GAP_PATTERN_WIDTH = 14;
+const GRID_GAP_PATTERN_HEIGHT = 14;
+const GRID_GAP_PATTERN_LINE_DASH = [5, 3];
+const GRID_GAP_PATTERN_STROKE_STYLE = "#9370DB";
+
+/**
+ * Cached used by `CssGridHighlighter.getGridGapPattern`.
+ */
+const gCachedGridPattern = new Map();
+
 /**
  * The CssGridHighlighter is the class that overlays a visual grid on top of
  * display:grid elements.
@@ -42,10 +58,35 @@ const GRID_LINES_PROPERTIES = {
  * h.destroy();
  *
  * Available Options:
- * - showGridLineNumbers {Boolean}
- *   Displays the grid line numbers
- * - showInfiniteLines {Boolean}
- *   Displays an infinite line to represent the grid lines
+ * - showGridArea(areaName)
+ *     @param  {String} areaName
+ *     Shows the grid area highlight for the given area name.
+ * - showAllGridAreas
+ *     Shows all the grid area highlights for the current grid.
+ * - showGridLineNumbers(isShown)
+ *     @param  {Boolean}
+ *     Displays the grid line numbers on the grid lines if isShown is true.
+ * - showInfiniteLines(isShown)
+ *     @param  {Boolean} isShown
+ *     Displays an infinite line to represent the grid lines if isShown is true.
+ *
+ * Structure:
+ * <div class="highlighter-container">
+ *   <canvas id="css-grid-canvas" class="css-grid-canvas">
+ *   <svg class="css-grid-elements" hidden="true">
+ *     <g class="css-grid-regions">
+ *       <path class="css-grid-areas" points="..." />
+ *     </g>
+ *   </svg>
+ *   <div class="css-grid-infobar-container">
+ *     <div class="css-grid-infobar">
+ *       <div class="css-grid-infobar-text">
+ *         <span class="css-grid-infobar-areaname">Grid Area Name</span>
+ *         <span class="css-grid-infobar-dimensions"Grid Area Dimensions></span>
+ *       </div>
+ *     </div>
+ *   </div>
+ * </div>
  */
 function CssGridHighlighter(highlighterEnv) {
   AutoRefreshHighlighter.call(this, highlighterEnv);
@@ -80,12 +121,91 @@ CssGridHighlighter.prototype = extend(AutoRefreshHighlighter.prototype, {
       prefix: this.ID_CLASS_PREFIX
     });
 
+    // Build the SVG element
+    let svg = createSVGNode(this.win, {
+      nodeType: "svg",
+      parent: container,
+      attributes: {
+        "id": "elements",
+        "width": "100%",
+        "height": "100%",
+        "hidden": "true"
+      },
+      prefix: this.ID_CLASS_PREFIX
+    });
+
+    let regions = createSVGNode(this.win, {
+      nodeType: "g",
+      parent: svg,
+      attributes: {
+        "class": "regions"
+      },
+      prefix: this.ID_CLASS_PREFIX
+    });
+
+    createSVGNode(this.win, {
+      nodeType: "path",
+      parent: regions,
+      attributes: {
+        "class": "areas",
+        "id": "areas"
+      },
+      prefix: this.ID_CLASS_PREFIX
+    });
+
+    // Building the grid infobar markup
+    let infobarContainer = createNode(this.win, {
+      parent: container,
+      attributes: {
+        "class": "infobar-container",
+        "id": "infobar-container",
+        "position": "top",
+        "hidden": "true"
+      },
+      prefix: this.ID_CLASS_PREFIX
+    });
+
+    let infobar = createNode(this.win, {
+      parent: infobarContainer,
+      attributes: {
+        "class": "infobar"
+      },
+      prefix: this.ID_CLASS_PREFIX
+    });
+
+    let textbox = createNode(this.win, {
+      parent: infobar,
+      attributes: {
+        "class": "infobar-text"
+      },
+      prefix: this.ID_CLASS_PREFIX
+    });
+    createNode(this.win, {
+      nodeType: "span",
+      parent: textbox,
+      attributes: {
+        "class": "infobar-areaname",
+        "id": "infobar-areaname"
+      },
+      prefix: this.ID_CLASS_PREFIX
+    });
+    createNode(this.win, {
+      nodeType: "span",
+      parent: textbox,
+      attributes: {
+        "class": "infobar-dimensions",
+        "id": "infobar-dimensions"
+      },
+      prefix: this.ID_CLASS_PREFIX
+    });
+
     return container;
   },
 
   destroy() {
     AutoRefreshHighlighter.prototype.destroy.call(this);
     this.markup.destroy();
+    gCachedGridPattern.clear();
   },
 
   getElement(id) {
@@ -100,6 +220,44 @@ CssGridHighlighter.prototype = extend(AutoRefreshHighlighter.prototype, {
     return this.getElement("canvas");
   },
 
+  /**
+   * Gets the grid gap pattern used to render the gap regions.
+   *
+   * @param  {String} dimensionType
+   *         The grid dimension type which is either the constant COLUMNS or ROWS.
+   * @return {CanvasPattern} grid gap pattern.
+   */
+  getGridGapPattern(dimensionType) {
+    if (gCachedGridPattern.has(dimensionType)) {
+      return gCachedGridPattern.get(dimensionType);
+    }
+
+    // Create the diagonal lines pattern for the rendering the grid gaps.
+    let canvas = createNode(this.win, { nodeType: "canvas" });
+    canvas.width = GRID_GAP_PATTERN_WIDTH;
+    canvas.height = GRID_GAP_PATTERN_HEIGHT;
+
+    let ctx = canvas.getContext("2d");
+    ctx.setLineDash(GRID_GAP_PATTERN_LINE_DASH);
+    ctx.beginPath();
+    ctx.translate(.5, .5);
+
+    if (dimensionType === COLUMNS) {
+      ctx.moveTo(0, 0);
+      ctx.lineTo(GRID_GAP_PATTERN_WIDTH, GRID_GAP_PATTERN_HEIGHT);
+    } else {
+      ctx.moveTo(GRID_GAP_PATTERN_WIDTH, 0);
+      ctx.lineTo(0, GRID_GAP_PATTERN_HEIGHT);
+    }
+
+    ctx.strokeStyle = GRID_GAP_PATTERN_STROKE_STYLE;
+    ctx.stroke();
+
+    let pattern = ctx.createPattern(canvas, "repeat");
+    gCachedGridPattern.set(dimensionType, pattern);
+    return pattern;
+  },
+
   _show() {
     if (Services.prefs.getBoolPref(CSS_GRID_ENABLED_PREF) && !this.isGrid()) {
       this.hide();
@@ -107,6 +265,33 @@ CssGridHighlighter.prototype = extend(AutoRefreshHighlighter.prototype, {
     }
 
     return this._update();
+  },
+
+  /**
+   * Shows the grid area highlight for the given area name.
+   *
+   * @param  {String} areaName
+   *         Grid area name.
+   */
+  showGridArea(areaName) {
+    this.renderGridArea(areaName);
+    this._showGridArea();
+  },
+
+  /**
+   * Shows all the grid area highlights for the current grid.
+   */
+  showAllGridAreas() {
+    this.renderGridArea();
+    this._showGridArea();
+  },
+
+  /**
+   * Clear the grid area highlights.
+   */
+  clearGridAreas() {
+    let box = this.getElement("areas");
+    box.setAttribute("d", "");
   },
 
   /**
@@ -137,25 +322,88 @@ CssGridHighlighter.prototype = extend(AutoRefreshHighlighter.prototype, {
   /**
    * Update the highlighter on the current highlighted node (the one that was
    * passed as an argument to show(node)).
-   * Should be called whenever node's geometry or grid changes
+   * Should be called whenever node's geometry or grid changes.
    */
   _update() {
     setIgnoreLayoutChanges(true);
 
-    // Clear the canvas.
+    // Clear the canvas the grid area highlights.
     this.clearCanvas();
+    this.clearGridAreas();
 
-    // And start drawing the fragments.
+    // Start drawing the grid fragments.
     for (let i = 0; i < this.gridData.length; i++) {
       let fragment = this.gridData[i];
       let quad = this.currentQuads.content[i];
       this.renderFragment(fragment, quad);
     }
 
+    // Display the grid area highlights if needed.
+    if (this.options.showAllGridAreas) {
+      this.showAllGridAreas();
+    } else if (this.options.showGridArea) {
+      this.showGridArea(this.options.showGridArea);
+    }
+
     this._showGrid();
 
     setIgnoreLayoutChanges(false, this.currentNode.ownerDocument.documentElement);
     return true;
+  },
+
+  /**
+   * Update the grid information displayed in the grid info bar.
+   *
+   * @param  {GridArea} area
+   *         The grid area object.
+   * @param  {Number} x1
+   *         The first x-coordinate of the grid area rectangle.
+   * @param  {Number} x2
+   *         The second x-coordinate of the grid area rectangle.
+   * @param  {Number} y1
+   *         The first y-coordinate of the grid area rectangle.
+   * @param  {Number} y2
+   *         The second y-coordinate of the grid area rectangle.
+   */
+  _updateInfobar(area, x1, x2, y1, y2) {
+    let width = x2 - x1;
+    let height = y2 - y1;
+    let dim = parseFloat(width.toPrecision(6)) +
+              " \u00D7 " +
+              parseFloat(height.toPrecision(6));
+
+    this.getElement("infobar-areaname").setTextContent(area.name);
+    this.getElement("infobar-dimensions").setTextContent(dim);
+
+    this._moveInfobar(x1, x2, y1, y2);
+  },
+
+  /**
+   * Move the grid infobar to the right place in the highlighter.
+   *
+   * @param  {Number} x1
+   *         The first x-coordinate of the grid area rectangle.
+   * @param  {Number} x2
+   *         The second x-coordinate of the grid area rectangle.
+   * @param  {Number} y1
+   *         The first y-coordinate of the grid area rectangle.
+   * @param  {Number} y2
+   *         The second y-coordinate of the grid area rectangle.
+   */
+  _moveInfobar(x1, x2, y1, y2) {
+    let bounds = {
+      bottom: y2,
+      height: y2 - y1,
+      left: x1,
+      right: x2,
+      top: y1,
+      width: x2 - x1,
+      x: x1,
+      y: y1,
+    };
+    let container = this.getElement("infobar-container");
+
+    moveInfobar(container, bounds, this.win);
   },
 
   clearCanvas() {
@@ -269,8 +517,9 @@ CssGridHighlighter.prototype = extend(AutoRefreshHighlighter.prototype, {
 
       // Render a second line to illustrate the gutter for non-zero breadth.
       if (line.breadth > 0) {
-        linePos = linePos + line.breadth;
-        this.renderLine(linePos, lineStartPos, lineEndPos, dimensionType,
+        this.renderGridGap(linePos, lineStartPos, lineEndPos, line.breadth,
+                           dimensionType);
+        this.renderLine(linePos + line.breadth, lineStartPos, lineEndPos, dimensionType,
                         gridDimension.tracks[i].type);
       }
     }
@@ -324,17 +573,104 @@ CssGridHighlighter.prototype = extend(AutoRefreshHighlighter.prototype, {
    *         The grid dimension type which is either the constant COLUMNS or ROWS.
    */
   renderGridLineNumber(lineNumber, linePos, startPos, dimensionType) {
+    this.ctx.save();
+
     if (dimensionType === COLUMNS) {
       this.ctx.fillText(lineNumber, linePos, startPos);
     } else {
       let textWidth = this.ctx.measureText(lineNumber).width;
       this.ctx.fillText(lineNumber, startPos - textWidth, linePos);
     }
+
+    this.ctx.restore();
   },
 
+  /**
+   * Render the grid gap area on the css grid highlighter canvas.
+   *
+   * @param  {Number} linePos
+   *         The line position along the x-axis for a column grid line and
+   *         y-axis for a row grid line.
+   * @param  {Number} startPos
+   *         The start position of the cross side of the grid line.
+   * @param  {Number} endPos
+   *         The end position of the cross side of the grid line.
+   * @param  {Number} breadth
+   *         The grid line breadth value.
+   * @param  {String} dimensionType
+   *         The grid dimension type which is either the constant COLUMNS or ROWS.
+   */
+  renderGridGap(linePos, startPos, endPos, breadth, dimensionType) {
+    this.ctx.save();
+    this.ctx.fillStyle = this.getGridGapPattern(dimensionType);
+
+    if (dimensionType === COLUMNS) {
+      this.ctx.fillRect(linePos, startPos, breadth, endPos - startPos);
+    } else {
+      this.ctx.fillRect(startPos, linePos, endPos - startPos, breadth);
+    }
+
+    this.ctx.restore();
+  },
+
+  /**
+   * Render the grid area highlight for the given area name or for all the grid areas.
+   *
+   * @param  {String} areaName
+   *         Name of the grid area to be highlighted. If no area name is provided, all
+   *         the grid areas should be highlighted.
+   */
+  renderGridArea(areaName) {
+    let paths = [];
+    let currentZoom = getCurrentZoom(this.win);
+
+    for (let i = 0; i < this.gridData.length; i++) {
+      let fragment = this.gridData[i];
+      let {bounds} = this.currentQuads.content[i];
+
+      for (let area of fragment.areas) {
+        if (areaName && areaName != area.name) {
+          continue;
+        }
+
+        let rowStart = fragment.rows.lines[area.rowStart - 1];
+        let rowEnd = fragment.rows.lines[area.rowEnd - 1];
+        let columnStart = fragment.cols.lines[area.columnStart - 1];
+        let columnEnd = fragment.cols.lines[area.columnEnd - 1];
+
+        let x1 = columnStart.start + columnStart.breadth +
+          (bounds.left / currentZoom);
+        let x2 = columnEnd.start + (bounds.left / currentZoom);
+        let y1 = rowStart.start + rowStart.breadth +
+          (bounds.top / currentZoom);
+        let y2 = rowEnd.start + (bounds.top / currentZoom);
+
+        let path = "M" + x1 + "," + y1 + " " +
+                   "L" + x2 + "," + y1 + " " +
+                   "L" + x2 + "," + y2 + " " +
+                   "L" + x1 + "," + y2;
+        paths.push(path);
+
+        // Update and show the info bar when only displaying a single grid area.
+        if (areaName) {
+          this._updateInfobar(area, x1, x2, y1, y2);
+          this._showInfoBar();
+        }
+      }
+    }
+
+    let box = this.getElement("areas");
+    box.setAttribute("d", paths.join(" "));
+  },
+
+  /**
+   * Hide the highlighter, the canvas and the infobar.
+   */
   _hide() {
     setIgnoreLayoutChanges(true);
     this._hideGrid();
+    this._hideGridArea();
+    this._hideInfoBar();
     setIgnoreLayoutChanges(false, this.currentNode.ownerDocument.documentElement);
   },
 
@@ -344,7 +680,24 @@ CssGridHighlighter.prototype = extend(AutoRefreshHighlighter.prototype, {
 
   _showGrid() {
     this.getElement("canvas").removeAttribute("hidden");
-  }
+  },
+
+  _hideGridArea() {
+    this.getElement("elements").setAttribute("hidden", "true");
+  },
+
+  _showGridArea() {
+    this.getElement("elements").removeAttribute("hidden");
+  },
+
+  _hideInfoBar() {
+    this.getElement("infobar-container").setAttribute("hidden", "true");
+  },
+
+  _showInfoBar() {
+    this.getElement("infobar-container").removeAttribute("hidden");
+  },
+
 });
 exports.CssGridHighlighter = CssGridHighlighter;
 

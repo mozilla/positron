@@ -180,8 +180,7 @@ this.LoginManagerStorage_json.prototype = {
 
     // Check if the new GUID is duplicate.
     if (newLogin.guid != oldStoredLogin.guid &&
-        !this._isGuidUnique(newLogin.guid))
-    {
+        !this._isGuidUnique(newLogin.guid)) {
       throw new Error("specified GUID already exists");
     }
 
@@ -283,8 +282,6 @@ this.LoginManagerStorage_json.prototype = {
     schemeUpgrades: false,
   }) {
     this._store.ensureDataReady();
-
-    let conditions = [];
 
     function match(aLogin) {
       for (let field in matchData) {
@@ -398,7 +395,6 @@ this.LoginManagerStorage_json.prototype = {
   },
 
   countLogins(hostname, formSubmitURL, httpRealm) {
-    let count = {};
     let loginData = {
       hostname: hostname,
       formSubmitURL: formSubmitURL,

@@ -123,7 +123,6 @@ Http2Session::Http2Session(nsISocketTransport *aSocketTransport, uint32_t versio
   mInputFrameBuffer = MakeUnique<char[]>(mInputFrameBufferSize);
   mOutputQueueBuffer = MakeUnique<char[]>(mOutputQueueSize);
   mDecompressBuffer.SetCapacity(kDefaultBufferSize);
-  mDecompressor.SetCompressor(&mCompressor);
 
   mPushAllowance = gHttpHandler->SpdyPushAllowance();
   mInitialRwin = std::max(gHttpHandler->SpdyPullAllowance(), mPushAllowance);
@@ -2193,11 +2192,6 @@ Http2Session::RecvAltSvc(Http2Session *self)
     nsAutoCString specifiedOriginHost;
     if (origin.EqualsIgnoreCase("https://", 8)) {
       specifiedOriginHost.Assign(origin.get() + 8, origin.Length() - 8);
-      if (ci->GetInsecureScheme()) {
-        // technically this is ok because it will still be confirmed before being used
-        // but let's not support it.
-        okToReroute = false;
-      }
     } else if (origin.EqualsIgnoreCase("http://", 7)) {
       specifiedOriginHost.Assign(origin.get() + 7, origin.Length() - 7);
     }

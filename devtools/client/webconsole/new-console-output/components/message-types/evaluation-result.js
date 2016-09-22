@@ -23,18 +23,14 @@ EvaluationResult.propTypes = {
 
 function EvaluationResult(props) {
   const { message } = props;
-  const {source, level} = message;
+  const {source, type, level} = message;
   const icon = MessageIcon({level});
 
   const classes = ["message", "cm-s-mozilla"];
 
-  if (source) {
-    classes.push(source);
-  }
-
-  if (level) {
-    classes.push(level);
-  }
+  classes.push(source);
+  classes.push(type);
+  classes.push(level);
 
   return dom.div({
     className: classes.join(" ")
@@ -42,10 +38,11 @@ function EvaluationResult(props) {
     // @TODO add timestamp
     // @TODO add indent if needed with console.group
     icon,
-    dom.span(
-      {className: "message-body-wrapper message-body devtools-monospace"},
-      dom.span({},
-        GripMessageBody({grip: message.parameters})
+    dom.span({ className: "message-body-wrapper" },
+      dom.span({ className: "message-flex-body" },
+        dom.span({ className: "message-body devtools-monospace" },
+          GripMessageBody({grip: message.parameters})
+        )
       )
     )
   );

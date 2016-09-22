@@ -579,6 +579,14 @@ PuppetWidget::GetLayerManager(PLayerTransactionChild* aShadowManager,
   return mLayerManager;
 }
 
+LayerManager*
+PuppetWidget::RecreateLayerManager(PLayerTransactionChild* aShadowManager)
+{
+  mLayerManager = new ClientLayerManager(this);
+  mLayerManager->AsShadowForwarder()->SetShadowManager(aShadowManager);
+  return mLayerManager;
+}
+
 nsresult
 PuppetWidget::RequestIMEToCommitComposition(bool aCancel)
 {
@@ -667,13 +675,12 @@ PuppetWidget::StartPluginIME(const mozilla::WidgetKeyboardEvent& aKeyboardEvent,
   return NS_OK;
 }
 
-NS_IMETHODIMP
+void
 PuppetWidget::SetPluginFocused(bool& aFocused)
 {
-  if (!mTabChild || !mTabChild->SendSetPluginFocused(aFocused)) {
-    return NS_ERROR_FAILURE;
+  if (mTabChild) {
+    mTabChild->SendSetPluginFocused(aFocused);
   }
-  return NS_OK;
 }
 
 void
@@ -1104,6 +1111,14 @@ PuppetWidget::PaintTask::Run()
     mWidget->Paint();
   }
   return NS_OK;
+}
+
+void
+PuppetWidget::PaintNowIfNeeded()
+{
+  if (IsVisible() && mPaintTask.IsPending()) {
+    Paint();
+  }
 }
 
 NS_IMPL_ISUPPORTS(PuppetWidget::MemoryPressureObserver, nsIObserver)

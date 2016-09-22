@@ -33,7 +33,7 @@ waitForExplicitFinish();
 var addTab = Task.async(function* (url) {
   info(`Adding a new tab with URL: ${url}`);
   let tab = gBrowser.selectedTab = gBrowser.addTab(url);
-  yield once(gBrowser.selectedBrowser, "load", true);
+  yield BrowserTestUtils.browserLoaded(tab.linkedBrowser);
 
   info(`Tab added and URL ${url} loaded`);
 
@@ -80,15 +80,6 @@ function connectDebuggerClient(client) {
     .then(tabs => {
       return tabs.tabs[tabs.selected];
     });
-}
-
-/**
- * Close a debugger client's connection.
- * @param {DebuggerClient}
- * @return {Promise} Resolves when the connection is closed.
- */
-function closeDebuggerClient(client) {
-  return new Promise(resolve => client.close(resolve));
 }
 
 /**

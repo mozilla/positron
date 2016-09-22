@@ -198,12 +198,13 @@ struct Animation {
   float iterations;
   float iterationStart;
   // This uses the NS_STYLE_ANIMATION_DIRECTION_* constants.
-  int32_t direction;
+  uint8_t direction;
   nsCSSPropertyID property;
   AnimationData data;
   float playbackRate;
   // This is used in the transformed progress calculation.
   TimingFunction easingFunction;
+  uint8_t iterationComposite;
 };
 
 // Change a layer's attributes

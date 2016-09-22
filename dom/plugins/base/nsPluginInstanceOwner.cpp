@@ -212,11 +212,6 @@ nsPluginInstanceOwner::GetImageContainer()
   RefPtr<ImageContainer> container;
 
 #if MOZ_WIDGET_ANDROID
-  // Right now we only draw with Gecko layers on Honeycomb and higher. See Paint()
-  // for what we do on other versions.
-  if (AndroidBridge::Bridge()->GetAPIVersion() < 11)
-    return nullptr;
-
   LayoutDeviceRect r = GetPluginRect();
 
   // NotifySize() causes Flash to do a bunch of stuff like ask for surfaces to render
@@ -227,12 +222,14 @@ nsPluginInstanceOwner::GetImageContainer()
 
   container = LayerManager::CreateImageContainer();
 
-  // Try to get it as an EGLImage first.
-  RefPtr<Image> img;
-  AttachToContainerAsSurfaceTexture(container, mInstance, r, &img);
+  if (r.width && r.height) {
+    // Try to get it as an EGLImage first.
+    RefPtr<Image> img;
+    AttachToContainerAsSurfaceTexture(container, mInstance, r, &img);
 
-  if (img) {
-    container->SetCurrentImageInTransaction(img);
+    if (img) {
+      container->SetCurrentImageInTransaction(img);
+    }
   }
 #else
   if (NeedsScrollImageLayer()) {
@@ -990,9 +987,9 @@ nsPluginInstanceOwner::HandledWindowedPluginKeyEvent(
   if (NS_WARN_IF(!mInstance)) {
     return;
   }
-  nsresult rv =
+  DebugOnly<nsresult> rv =
     mInstance->HandledWindowedPluginKeyEvent(aKeyEventData, aIsConsumed);
-  NS_WARN_IF(NS_FAILED(rv));
+  NS_WARNING_ASSERTION(NS_SUCCEEDED(rv), "HandledWindowedPluginKeyEvent fail");
 }
 
 void
@@ -1358,14 +1355,6 @@ bool nsPluginInstanceOwner::IsRemoteDrawingCoreAnimation()
   return coreAnimation;
 }
 
-nsresult nsPluginInstanceOwner::ContentsScaleFactorChanged(double aContentsScaleFactor)
-{
-  if (!mInstance) {
-    return NS_ERROR_NULL_POINTER;
-  }
-  return mInstance->ContentsScaleFactorChanged(aContentsScaleFactor);
-}
-
 NPEventModel nsPluginInstanceOwner::GetEventModel()
 {
   return mEventModel;
@@ -1456,6 +1445,16 @@ void nsPluginInstanceOwner::SetPluginPort()
   mPluginWindow->window = pluginPort;
 }
 #endif
+#if defined(XP_MACOSX) || defined(XP_WIN)
+nsresult nsPluginInstanceOwner::ContentsScaleFactorChanged(double aContentsScaleFactor)
+{
+  if (!mInstance) {
+    return NS_ERROR_NULL_POINTER;
+  }
+  return mInstance->ContentsScaleFactorChanged(aContentsScaleFactor);
+}
+#endif
+
 
 // static
 uint32_t
@@ -1581,11 +1580,13 @@ nsPluginInstanceOwner::GetImageContainerForVideo(nsNPAPIPluginInstance::VideoInf
 {
   RefPtr<ImageContainer> container = LayerManager::CreateImageContainer();
 
-  RefPtr<Image> img = new SurfaceTextureImage(
-    aVideoInfo->mSurfaceTexture,
-    gfx::IntSize::Truncate(aVideoInfo->mDimensions.width, aVideoInfo->mDimensions.height),
-    gl::OriginPos::BottomLeft);
-  container->SetCurrentImageInTransaction(img);
+  if (aVideoInfo->mDimensions.width && aVideoInfo->mDimensions.height) {
+    RefPtr<Image> img = new SurfaceTextureImage(
+      aVideoInfo->mSurfaceTexture,
+      gfx::IntSize::Truncate(aVideoInfo->mDimensions.width, aVideoInfo->mDimensions.height),
+      gl::OriginPos::BottomLeft);
+    container->SetCurrentImageInTransaction(img);
+  }
 
   return container.forget();
 }
@@ -2615,7 +2616,7 @@ nsEventStatus nsPluginInstanceOwner::ProcessEvent(const WidgetGUIEvent& anEvent)
 #ifdef MOZ_WIDGET_GTK
         Window root = GDK_ROOT_WINDOW();
 #else
-        Window root = None; // Could XQueryTree, but this is not important.
+        Window root = X11None; // Could XQueryTree, but this is not important.
 #endif
 
         switch (anEvent.mMessage) {
@@ -2633,7 +2634,7 @@ nsEventStatus nsPluginInstanceOwner::ProcessEvent(const WidgetGUIEvent& anEvent)
               event.y_root = rootPoint.y;
               event.state = XInputEventState(mouseEvent);
               // information lost
-              event.subwindow = None;
+              event.subwindow = X11None;
               event.mode = -1;
               event.detail = NotifyDetailNone;
               event.same_screen = True;
@@ -2652,7 +2653,7 @@ nsEventStatus nsPluginInstanceOwner::ProcessEvent(const WidgetGUIEvent& anEvent)
               event.y_root = rootPoint.y;
               event.state = XInputEventState(mouseEvent);
               // information lost
-              event.subwindow = None;
+              event.subwindow = X11None;
               event.is_hint = NotifyNormal;
               event.same_screen = True;
             }
@@ -2683,7 +2684,7 @@ nsEventStatus nsPluginInstanceOwner::ProcessEvent(const WidgetGUIEvent& anEvent)
                   break;
                 }
               // information lost:
-              event.subwindow = None;
+              event.subwindow = X11None;
               event.same_screen = True;
             }
             break;
@@ -2727,7 +2728,7 @@ nsEventStatus nsPluginInstanceOwner::ProcessEvent(const WidgetGUIEvent& anEvent)
 
           // Information that could be obtained from pluginEvent but we may not
           // want to promise to provide:
-          event.subwindow = None;
+          event.subwindow = X11None;
           event.x = 0;
           event.y = 0;
           event.x_root = -1;
@@ -2769,7 +2770,7 @@ nsEventStatus nsPluginInstanceOwner::ProcessEvent(const WidgetGUIEvent& anEvent)
   XAnyEvent& event = pluginEvent.xany;
   event.display = widget ?
     static_cast<Display*>(widget->GetNativeData(NS_NATIVE_DISPLAY)) : nullptr;
-  event.window = None; // not a real window
+  event.window = X11None; // not a real window
   // information lost:
   event.serial = 0;
   event.send_event = False;
@@ -3628,7 +3629,7 @@ nsPluginInstanceOwner::UpdateWindowVisibility(bool aVisible)
 void
 nsPluginInstanceOwner::ResolutionMayHaveChanged()
 {
-#ifdef XP_MACOSX
+#if defined(XP_MACOSX) || defined(XP_WIN)
   double scaleFactor = 1.0;
   GetContentsScaleFactor(&scaleFactor);
   if (scaleFactor != mLastScaleFactor) {
@@ -3714,7 +3715,7 @@ nsPluginInstanceOwner::GetContentsScaleFactor(double *result)
   // On Mac, device pixels need to be translated to (and from) "display pixels"
   // for plugins. On other platforms, plugin coordinates are always in device
   // pixels.
-#if defined(XP_MACOSX)
+#if defined(XP_MACOSX) || defined(XP_WIN)
   nsCOMPtr<nsIContent> content = do_QueryReferent(mContent);
   nsIPresShell* presShell = nsContentUtils::FindPresShellForDocument(content->OwnerDoc());
   if (presShell) {

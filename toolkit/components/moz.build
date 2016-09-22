@@ -60,11 +60,15 @@ DIRS += [
     'tooltiptext',
     'typeaheadfind',
     'utils',
+    'url-classifier',
     'urlformatter',
     'viewconfig',
     'workerloader',
     'xulstore'
 ]
+
+if CONFIG['ENABLE_INTL_API']:
+    DIRS += ['mozintl']
 
 if CONFIG['MOZ_BUILD_APP'] != 'mobile/android':
     DIRS += ['narrate', 'viewsource'];
@@ -86,9 +90,6 @@ if CONFIG['MOZ_XUL']:
 
 if CONFIG['MOZ_TOOLKIT_SEARCH']:
     DIRS += ['search']
-
-if CONFIG['MOZ_URL_CLASSIFIER']:
-    DIRS += ['url-classifier']
 
 DIRS += ['captivedetect']
 

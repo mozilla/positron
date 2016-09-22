@@ -310,11 +310,9 @@ nsresult nsPluginStreamListenerPeer::Initialize(nsIURI *aURL,
                                                 nsNPAPIPluginStreamListener* aListener)
 {
 #ifdef PLUGIN_LOGGING
-  nsAutoCString urlSpec;
-  if (aURL != nullptr) aURL->GetSpec(urlSpec);
-
   MOZ_LOG(nsPluginLogging::gPluginLog, PLUGIN_LOG_NORMAL,
-         ("nsPluginStreamListenerPeer::Initialize instance=%p, url=%s\n", aInstance, urlSpec.get()));
+          ("nsPluginStreamListenerPeer::Initialize instance=%p, url=%s\n",
+           aInstance, aURL ? aURL->GetSpecOrDefault().get() : ""));
 
   PR_LogFlush();
 #endif
@@ -411,7 +409,6 @@ nsPluginStreamListenerPeer::SetupPluginCacheFile(nsIChannel* channel)
       return rv;
 
     // create a file output stream to write to...
-    nsCOMPtr<nsIOutputStream> outstream;
     rv = NS_NewLocalFileOutputStream(getter_AddRefs(mFileCacheOutputStream), pluginTmp, -1, 00600);
     if (NS_FAILED(rv))
       return rv;

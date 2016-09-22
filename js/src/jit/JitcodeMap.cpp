@@ -10,6 +10,7 @@
 #include "mozilla/MathAlgorithms.h"
 #include "mozilla/Maybe.h"
 #include "mozilla/SizePrintfMacros.h"
+#include "mozilla/Sprintf.h"
 
 #include <algorithm>
 
@@ -23,6 +24,8 @@
 #include "vm/SPSProfiler.h"
 
 #include "jsscriptinlines.h"
+
+#include "vm/TypeInference-inl.h"
 
 using mozilla::Maybe;
 
@@ -330,7 +333,7 @@ JitcodeGlobalEntry::createScriptString(JSContext* cx, JSScript* script, size_t* 
     size_t linenoLength = 0;
     char linenoStr[15];
     if (hasName || (script->functionNonDelazifying() || script->isForEval())) {
-        linenoLength = snprintf(linenoStr, sizeof(linenoStr), "%" PRIuSIZE, script->lineno());
+        linenoLength = SprintfLiteral(linenoStr, "%" PRIuSIZE, script->lineno());
         hasLineno = true;
     }
 
@@ -898,7 +901,7 @@ JitcodeGlobalEntry::IonEntry::mark(JSTracer* trc)
          iter != optsAllTypes_->end(); iter++)
     {
         if (ShouldMarkProvider::ShouldMark(&iter->type)) {
-            TypeSet::MarkTypeUnbarriered(trc, &iter->type, "jitcodeglobaltable-ionentry-type");
+            iter->type.trace(trc);
             markedAny = true;
         }
         if (iter->hasAllocationSite() && ShouldMarkProvider::ShouldMark(&iter->script)) {

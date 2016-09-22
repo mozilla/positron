@@ -116,10 +116,10 @@ using namespace mozilla::system;
 #include "nsPermissionManager.h"
 #include "nsCookieService.h"
 #include "nsApplicationCacheService.h"
+#include "mozilla/dom/CustomElementsRegistry.h"
 #include "mozilla/dom/time/DateCacheCleaner.h"
 #include "mozilla/EventDispatcher.h"
 #include "mozilla/IMEStateManager.h"
-#include "nsDocument.h"
 #include "mozilla/dom/HTMLVideoElement.h"
 #include "CameraPreferences.h"
 #include "TouchManager.h"
@@ -331,10 +331,6 @@ nsLayoutStatics::Shutdown()
   // Don't need to shutdown nsWindowMemoryReporter, that will be done by the
   // memory reporter manager.
 
-#ifdef MOZ_STYLO
-  Servo_Shutdown();
-#endif
-
   nsMessageManagerScriptExecutor::Shutdown();
   nsFocusManager::Shutdown();
 #ifdef MOZ_XUL
@@ -437,7 +433,7 @@ nsLayoutStatics::Shutdown()
 
   DisplayItemClip::Shutdown();
 
-  nsDocument::XPCOMShutdown();
+  CustomElementsRegistry::XPCOMShutdown();
 
   CacheObserver::Shutdown();
 

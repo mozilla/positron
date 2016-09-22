@@ -74,9 +74,6 @@ JS_ObjectCountDynamicSlots(JS::HandleObject obj);
 extern JS_FRIEND_API(size_t)
 JS_SetProtoCalled(JSContext* cx);
 
-extern JS_FRIEND_API(bool)
-JS_ImmutablePrototypesEnabled();
-
 extern JS_FRIEND_API(size_t)
 JS_GetCustomIteratorCount(JSContext* cx);
 
@@ -136,6 +133,7 @@ enum {
     JS_TELEMETRY_DEPRECATED_LANGUAGE_EXTENSIONS_IN_CONTENT,
     JS_TELEMETRY_DEPRECATED_LANGUAGE_EXTENSIONS_IN_ADDONS,
     JS_TELEMETRY_ADDON_EXCEPTIONS,
+    JS_TELEMETRY_AOT_USAGE,
     JS_TELEMETRY_END
 };
 

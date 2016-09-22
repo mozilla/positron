@@ -217,23 +217,24 @@ LIRGeneratorX86::lowerForALUInt64(LInstructionHelper<INT64_PIECES, 2 * INT64_PIE
 void
 LIRGeneratorX86::lowerForMulInt64(LMulI64* ins, MMul* mir, MDefinition* lhs, MDefinition* rhs)
 {
-    bool constantNeedTemp = true;
+    bool needsTemp = true;
+
     if (rhs->isConstant()) {
         int64_t constant = rhs->toConstant()->toInt64();
         int32_t shift = mozilla::FloorLog2(constant);
-        // See special cases in CodeGeneratorX86Shared::visitMulI64
+        // See special cases in CodeGeneratorX86Shared::visitMulI64.
         if (constant >= -1 && constant <= 2)
-            constantNeedTemp = false;
+            needsTemp = false;
         if (int64_t(1) << shift == constant)
-            constantNeedTemp = false;
+            needsTemp = false;
     }
 
     // MulI64 on x86 needs output to be in edx, eax;
     ins->setInt64Operand(0, useInt64Fixed(lhs, Register64(edx, eax), /*useAtStart = */ true));
-    ins->setInt64Operand(INT64_PIECES,
-            lhs != rhs ? useInt64OrConstant(rhs) : useInt64OrConstantAtStart(rhs));
-    if (constantNeedTemp)
+    ins->setInt64Operand(INT64_PIECES, useInt64OrConstant(rhs));
+    if (needsTemp)
         ins->setTemp(0, temp());
+
     defineInt64Fixed(ins, mir, LInt64Allocation(LAllocation(AnyRegister(edx)),
                                                 LAllocation(AnyRegister(eax))));
 }
@@ -270,6 +271,30 @@ LIRGeneratorX86::visitAsmJSUnsignedToFloat32(MAsmJSUnsignedToFloat32* ins)
     MOZ_ASSERT(ins->input()->type() == MIRType::Int32);
     LAsmJSUInt32ToFloat32* lir = new(alloc()) LAsmJSUInt32ToFloat32(useRegisterAtStart(ins->input()), temp());
     define(lir, ins);
+}
+
+void
+LIRGeneratorX86::visitWasmLoad(MWasmLoad* ins)
+{
+    if (ins->type() != MIRType::Int64) {
+        lowerWasmLoad(ins);
+        return;
+    }
+
+    MDefinition* base = ins->base();
+    MOZ_ASSERT(base->type() == MIRType::Int32);
+
+    auto* lir = new(alloc()) LWasmLoadI64(useRegisterOrZeroAtStart(base));
+
+    Scalar::Type accessType = ins->accessType();
+    if (accessType == Scalar::Int8 || accessType == Scalar::Int16 || accessType == Scalar::Int32) {
+        // We use cdq to sign-extend the result and cdq demands these registers.
+        defineInt64Fixed(lir, ins, LInt64Allocation(LAllocation(AnyRegister(edx)),
+                                                    LAllocation(AnyRegister(eax))));
+        return;
+    }
+
+    defineInt64(lir, ins);
 }
 
 void
@@ -320,7 +345,7 @@ LIRGeneratorX86::visitAsmJSLoadHeap(MAsmJSLoadHeap* ins)
 
     // For simplicity, require a register if we're going to emit a bounds-check
     // branch, so that we don't have special cases for constants.
-    LAllocation baseAlloc = gen->needsBoundsCheckBranch(ins)
+    LAllocation baseAlloc = ins->needsBoundsCheck()
                             ? useRegisterAtStart(base)
                             : useRegisterOrZeroAtStart(base);
 
@@ -335,7 +360,7 @@ LIRGeneratorX86::visitAsmJSStoreHeap(MAsmJSStoreHeap* ins)
 
     // For simplicity, require a register if we're going to emit a bounds-check
     // branch, so that we don't have special cases for constants.
-    LAllocation baseAlloc = gen->needsBoundsCheckBranch(ins)
+    LAllocation baseAlloc = ins->needsBoundsCheck()
                             ? useRegisterAtStart(base)
                             : useRegisterOrZeroAtStart(base);
 
@@ -568,30 +593,6 @@ LIRGeneratorX86::lowerUModI64(MMod* mod)
     LUDivOrModI64* lir = new(alloc()) LUDivOrModI64(useInt64RegisterAtStart(mod->lhs()),
                                                     useInt64RegisterAtStart(mod->rhs()));
     defineReturn(lir, mod);
-}
-
-void
-LIRGeneratorX86::visitWasmLoad(MWasmLoad* ins)
-{
-    if (ins->type() != MIRType::Int64) {
-        lowerWasmLoad(ins);
-        return;
-    }
-
-    MDefinition* base = ins->base();
-    MOZ_ASSERT(base->type() == MIRType::Int32);
-
-    auto* lir = new(alloc()) LWasmLoadI64(useRegisterOrZeroAtStart(base));
-
-    Scalar::Type accessType = ins->accessType();
-    if (accessType == Scalar::Int8 || accessType == Scalar::Int16 || accessType == Scalar::Int32) {
-        // We use cdq to sign-extend the result and cdq demands these registers.
-        defineInt64Fixed(lir, ins, LInt64Allocation(LAllocation(AnyRegister(edx)),
-                                                    LAllocation(AnyRegister(eax))));
-        return;
-    }
-
-    defineInt64(lir, ins);
 }
 
 void

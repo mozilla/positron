@@ -585,6 +585,10 @@ already_AddRefed<gfxASurface>
 gfxWindowsPlatform::CreateOffscreenSurface(const IntSize& aSize,
                                            gfxImageFormat aFormat)
 {
+    if (!Factory::AllowedSurfaceSize(aSize)) {
+        return nullptr;
+    }
+
     RefPtr<gfxASurface> surf = nullptr;
 
 #ifdef CAIRO_HAS_WIN32_SURFACE
@@ -976,12 +980,14 @@ gfxWindowsPlatform::SchedulePaintIfDeviceReset()
     return;
   }
 
+  gfxCriticalNote << "(gfxWindowsPlatform) Detected device reset: " << (int)resetReason;
+
   // Trigger an ::OnPaint for each window.
   ::EnumThreadWindows(GetCurrentThreadId(),
                       InvalidateWindowForDeviceReset,
                       0);
 
-  gfxCriticalNote << "Detected rendering device reset on refresh: " << (int)resetReason;
+  gfxCriticalNote << "(gfxWindowsPlatform) Finished device reset.";
 }
 
 void
@@ -2004,7 +2010,7 @@ gfxWindowsPlatform::ImportGPUDeviceData(const mozilla::gfx::GPUDeviceData& aData
 
   DeviceManagerDx* dm = DeviceManagerDx::Get();
   if (gfxConfig::IsEnabled(Feature::D3D11_COMPOSITING)) {
-    dm->ImportDeviceInfo(aData.d3d11Device());
+    dm->ImportDeviceInfo(aData.gpuDevice().get_D3D11DeviceStatus());
   } else {
     // There should be no devices, so this just takes away the device status.
     dm->ResetDevices();

@@ -99,7 +99,7 @@ js::GlobalObject::getTypedObjectModule() const {
 GlobalObject::skipDeselectedConstructor(JSContext* cx, JSProtoKey key)
 {
     if (key == JSProto_Wasm || key == JSProto_WebAssembly)
-        return !cx->options().wasm();
+        return !cx->options().wasm() || !wasm::HasCompilerSupport(cx);
 
 #ifdef ENABLE_SHARED_ARRAY_BUFFER
     // Return true if the given constructor has been disabled at run-time.
@@ -220,12 +220,12 @@ GlobalObject::resolveConstructor(JSContext* cx, Handle<GlobalObject*> global, JS
     RootedId id(cx, NameToId(ClassName(key, cx)));
     if (isObjectOrFunction) {
         if (clasp->specShouldDefineConstructor()) {
-            if (!global->addDataProperty(cx, id, constructorPropertySlot(key), 0))
+            RootedValue ctorValue(cx, ObjectValue(*ctor));
+            if (!DefineProperty(cx, global, id, ctorValue, nullptr, nullptr, JSPROP_RESOLVING))
                 return false;
         }
 
         global->setConstructor(key, ObjectValue(*ctor));
-        global->setConstructorPropertySlot(key, ObjectValue(*ctor));
     }
 
     // Define any specified functions and properties, unless we're a dependent
@@ -267,21 +267,15 @@ GlobalObject::resolveConstructor(JSContext* cx, Handle<GlobalObject*> global, JS
 
         // Fallible operation that modifies the global object.
         if (clasp->specShouldDefineConstructor()) {
-            if (!global->addDataProperty(cx, id, constructorPropertySlot(key), 0))
+            RootedValue ctorValue(cx, ObjectValue(*ctor));
+            if (!DefineProperty(cx, global, id, ctorValue, nullptr, nullptr, JSPROP_RESOLVING))
                 return false;
         }
 
         // Infallible operations that modify the global object.
         global->setConstructor(key, ObjectValue(*ctor));
-        global->setConstructorPropertySlot(key, ObjectValue(*ctor));
         if (proto)
             global->setPrototype(key, ObjectValue(*proto));
-    }
-
-    if (clasp->specShouldDefineConstructor()) {
-        // Stash type information, so that what we do here is equivalent to
-        // initBuiltinConstructor.
-        AddTypePropertyId(cx, global, id, ObjectValue(*ctor));
     }
 
     return true;
@@ -299,14 +293,12 @@ GlobalObject::initBuiltinConstructor(JSContext* cx, Handle<GlobalObject*> global
     RootedId id(cx, NameToId(ClassName(key, cx)));
     MOZ_ASSERT(!global->lookup(cx, id));
 
-    if (!global->addDataProperty(cx, id, constructorPropertySlot(key), 0))
+    RootedValue ctorValue(cx, ObjectValue(*ctor));
+    if (!DefineProperty(cx, global, id, ctorValue, nullptr, nullptr, JSPROP_RESOLVING))
         return false;
 
     global->setConstructor(key, ObjectValue(*ctor));
     global->setPrototype(key, ObjectValue(*proto));
-    global->setConstructorPropertySlot(key, ObjectValue(*ctor));
-
-    AddTypePropertyId(cx, global, id, ObjectValue(*ctor));
     return true;
 }
 
@@ -655,6 +647,14 @@ js::DefinePropertiesAndFunctions(JSContext* cx, HandleObject obj,
     if (fs && !JS_DefineFunctions(cx, obj, fs))
         return false;
     return true;
+}
+
+bool
+js::DefineToStringTag(JSContext *cx, HandleObject obj, JSAtom* tag)
+{
+    RootedId toStringTagId(cx, SYMBOL_TO_JSID(cx->wellKnownSymbols().toStringTag));
+    RootedValue tagString(cx, StringValue(tag));
+    return DefineProperty(cx, obj, toStringTagId, tagString, nullptr, nullptr, JSPROP_READONLY);
 }
 
 static void

@@ -16,10 +16,12 @@
 #include "mozilla/dom/File.h"
 #include "mozilla/dom/FetchUtil.h"
 #include "mozilla/dom/FormData.h"
+#include "mozilla/dom/XMLDocument.h"
 #include "mozilla/dom/URLSearchParams.h"
 #include "mozilla/EventDispatcher.h"
 #include "mozilla/EventListenerManager.h"
 #include "mozilla/LoadInfo.h"
+#include "mozilla/LoadContext.h"
 #include "mozilla/MemoryReporting.h"
 #include "nsIDOMDocument.h"
 #include "mozilla/dom/ProgressEvent.h"
@@ -167,10 +169,12 @@ XMLHttpRequestMainThread::XMLHttpRequestMainThread()
     mFlagSyncLooping(false), mFlagBackgroundRequest(false),
     mFlagHadUploadListenersOnSend(false), mFlagACwithCredentials(false),
     mFlagTimedOut(false), mFlagDeleted(false), mFlagSend(false),
+    mSendExtraLoadingEvents(Preferences::GetBool("dom.fire_extra_xhr_loading_readystatechanges", true)),
     mUploadTransferred(0), mUploadTotal(0), mUploadComplete(true),
     mProgressSinceLastProgressEvent(false),
     mRequestSentTime(0), mTimeoutMilliseconds(0),
-    mErrorLoad(false), mWaitingForOnStopRequest(false),
+    mErrorLoad(false), mErrorParsingXML(false),
+    mWaitingForOnStopRequest(false),
     mProgressTimerIsActive(false),
     mIsHtml(false),
     mWarnAboutSyncHtml(false),
@@ -285,7 +289,7 @@ XMLHttpRequestMainThread::ResetResponse()
 {
   mResponseXML = nullptr;
   mResponseBody.Truncate();
-  mResponseText.Truncate();
+  TruncateResponseText();
   mResponseBlob = nullptr;
   mDOMBlob = nullptr;
   mBlobSet = nullptr;
@@ -417,7 +421,7 @@ XMLHttpRequestMainThread::SizeOfEventTargetIncludingThis(
   // - Binary extensions, but they're *extremely* unlikely to do any memory
   //   reporting.
   //
-  n += mResponseText.SizeOfExcludingThisEvenIfShared(aMallocSizeOf);
+  n += mResponseText.SizeOfThis(aMallocSizeOf);
 
   return n;
 
@@ -532,18 +536,17 @@ XMLHttpRequestMainThread::AppendToResponseText(const char * aSrcBuffer,
                                        &destBufferLen);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  uint32_t size = mResponseText.Length() + destBufferLen;
-  if (size < (uint32_t)destBufferLen) {
+  CheckedInt32 size = mResponseText.Length();
+  size += destBufferLen;
+  if (!size.isValid()) {
     return NS_ERROR_OUT_OF_MEMORY;
   }
 
-  if (!mResponseText.SetCapacity(size, fallible)) {
+  XMLHttpRequestStringWriterHelper helper(mResponseText);
+
+  if (!helper.AddCapacity(destBufferLen)) {
     return NS_ERROR_OUT_OF_MEMORY;
   }
-
-  char16_t* destBuffer = mResponseText.BeginWriting() + mResponseText.Length();
-
-  CheckedInt32 totalChars = mResponseText.Length();
 
   // This code here is basically a copy of a similar thing in
   // nsScanner::Append(const char* aBuffer, uint32_t aLen).
@@ -551,16 +554,12 @@ XMLHttpRequestMainThread::AppendToResponseText(const char * aSrcBuffer,
   int32_t destlen = (int32_t)destBufferLen;
   rv = mDecoder->Convert(aSrcBuffer,
                          &srclen,
-                         destBuffer,
+                         helper.EndOfExistingData(),
                          &destlen);
   MOZ_ASSERT(NS_SUCCEEDED(rv));
+  MOZ_ASSERT(destlen <= destBufferLen);
 
-  totalChars += destlen;
-  if (!totalChars.isValid()) {
-    return NS_ERROR_OUT_OF_MEMORY;
-  }
-
-  mResponseText.SetLength(totalChars.value());
+  helper.AddLength(destlen);
   return NS_OK;
 }
 
@@ -568,9 +567,7 @@ NS_IMETHODIMP
 XMLHttpRequestMainThread::GetResponseText(nsAString& aResponseText)
 {
   ErrorResult rv;
-  nsString responseText;
-  GetResponseText(responseText, rv);
-  aResponseText = responseText;
+  GetResponseText(aResponseText, rv);
   return rv.StealNSResult();
 }
 
@@ -578,7 +575,23 @@ void
 XMLHttpRequestMainThread::GetResponseText(nsAString& aResponseText,
                                           ErrorResult& aRv)
 {
-  aResponseText.Truncate();
+  XMLHttpRequestStringSnapshot snapshot;
+  GetResponseText(snapshot, aRv);
+  if (aRv.Failed()) {
+    return;
+  }
+
+  if (!snapshot.GetAsString(aResponseText)) {
+    aRv.Throw(NS_ERROR_OUT_OF_MEMORY);
+    return;
+  }
+}
+
+void
+XMLHttpRequestMainThread::GetResponseText(XMLHttpRequestStringSnapshot& aSnapshot,
+                                          ErrorResult& aRv)
+{
+  aSnapshot.Reset();
 
   if (mResponseType != XMLHttpRequestResponseType::_empty &&
       mResponseType != XMLHttpRequestResponseType::Text &&
@@ -589,7 +602,7 @@ XMLHttpRequestMainThread::GetResponseText(nsAString& aResponseText,
 
   if (mResponseType == XMLHttpRequestResponseType::Moz_chunked_text &&
       !mInLoadProgressEvent) {
-    aResponseText.SetIsVoid(true);
+    aSnapshot.SetVoid();
     return;
   }
 
@@ -600,18 +613,13 @@ XMLHttpRequestMainThread::GetResponseText(nsAString& aResponseText,
   // We only decode text lazily if we're also parsing to a doc.
   // Also, if we've decoded all current data already, then no need to decode
   // more.
-  if (!mResponseXML ||
+  if ((!mResponseXML && !mErrorParsingXML) ||
       mResponseBodyDecodedPos == mResponseBody.Length()) {
-    aResponseText = mResponseText;
+    mResponseText.CreateSnapshot(aSnapshot);
     return;
   }
 
-  if (mResponseCharset != mResponseXML->GetDocumentCharacterSet()) {
-    mResponseCharset = mResponseXML->GetDocumentCharacterSet();
-    mResponseText.Truncate();
-    mResponseBodyDecodedPos = 0;
-    mDecoder = EncodingUtils::DecoderForEncoding(mResponseCharset);
-  }
+  MatchCharsetAndDecoderToResponseDocument();
 
   NS_ASSERTION(mResponseBodyDecodedPos < mResponseBody.Length(),
                "Unexpected mResponseBodyDecodedPos");
@@ -629,7 +637,7 @@ XMLHttpRequestMainThread::GetResponseText(nsAString& aResponseText,
     mResponseBodyDecodedPos = 0;
   }
 
-  aResponseText = mResponseText;
+  mResponseText.CreateSnapshot(aSnapshot);
 }
 
 nsresult
@@ -639,11 +647,14 @@ XMLHttpRequestMainThread::CreateResponseParsedJSON(JSContext* aCx)
     return NS_ERROR_FAILURE;
   }
 
+  nsAutoString string;
+  if (!mResponseText.GetAsString(string)) {
+    return NS_ERROR_OUT_OF_MEMORY;
+  }
+
   // The Unicode converter has already zapped the BOM if there was one
   JS::Rooted<JS::Value> value(aCx);
-  if (!JS_ParseJSON(aCx,
-                    static_cast<const char16_t*>(mResponseText.get()), mResponseText.Length(),
-                    &value)) {
+  if (!JS_ParseJSON(aCx, string.BeginReading(), string.Length(), &value)) {
     return NS_ERROR_FAILURE;
   }
 
@@ -751,7 +762,7 @@ XMLHttpRequestMainThread::GetResponse(JSContext* aCx,
   case XMLHttpRequestResponseType::Text:
   case XMLHttpRequestResponseType::Moz_chunked_text:
   {
-    nsString str;
+    nsAutoString str;
     aRv = GetResponseText(str);
     if (aRv.Failed()) {
       return;
@@ -825,7 +836,7 @@ XMLHttpRequestMainThread::GetResponse(JSContext* aCx,
 
     if (mResultJSON.isUndefined()) {
       aRv = CreateResponseParsedJSON(aCx);
-      mResponseText.Truncate();
+      TruncateResponseText();
       if (aRv.Failed()) {
         // Per spec, errors aren't propagated. null is returned instead.
         aRv = NS_OK;
@@ -1334,7 +1345,7 @@ XMLHttpRequestMainThread::DispatchProgressEvent(DOMEventTargetHelper* aTarget,
     if (mResponseType == XMLHttpRequestResponseType::Moz_chunked_text ||
         mResponseType == XMLHttpRequestResponseType::Moz_chunked_arraybuffer) {
       mResponseBody.Truncate();
-      mResponseText.Truncate();
+      TruncateResponseText();
       mResultArrayBuffer = nullptr;
       mArrayBufferBuilder.reset();
     }
@@ -1380,22 +1391,8 @@ XMLHttpRequestMainThread::Open(const nsACString& aMethod, const nsACString& aUrl
                                bool aAsync, const nsAString& aUsername,
                                const nsAString& aPassword, uint8_t optional_argc)
 {
-  Optional<bool> async;
-  if (!optional_argc) {
-    // No optional arguments were passed in. Default async to true.
-    async.Construct() = true;
-  } else {
-    async.Construct() = aAsync;
-  }
-  Optional<nsAString> username;
-  if (optional_argc > 1) {
-    username = &aUsername;
-  }
-  Optional<nsAString> password;
-  if (optional_argc > 2) {
-    password = &aPassword;
-  }
-  return OpenInternal(aMethod, aUrl, async, username, password);
+  return Open(aMethod, aUrl, optional_argc > 0 ? aAsync : true,
+              aUsername, aPassword);
 }
 
 // This case is hit when the async parameter is outright omitted, which
@@ -1404,8 +1401,7 @@ void
 XMLHttpRequestMainThread::Open(const nsACString& aMethod, const nsAString& aUrl,
                                ErrorResult& aRv)
 {
-  aRv = OpenInternal(aMethod, NS_ConvertUTF16toUTF8(aUrl), Optional<bool>(true),
-                     Optional<nsAString>(), Optional<nsAString>());
+  Open(aMethod, aUrl, true, NullString(), NullString(), aRv);
 }
 
 // This case is hit when the async parameter is specified, even if the
@@ -1415,30 +1411,29 @@ void
 XMLHttpRequestMainThread::Open(const nsACString& aMethod,
                                const nsAString& aUrl,
                                bool aAsync,
-                               const Optional<nsAString>& aUsername,
-                               const Optional<nsAString>& aPassword,
+                               const nsAString& aUsername,
+                               const nsAString& aPassword,
                                ErrorResult& aRv)
 {
-  aRv = OpenInternal(aMethod, NS_ConvertUTF16toUTF8(aUrl),
-                     Optional<bool>(aAsync), aUsername, aPassword);
+  nsresult rv = Open(aMethod, NS_ConvertUTF16toUTF8(aUrl), aAsync, aUsername, aPassword);
+  if (NS_FAILED(rv)) {
+    aRv.Throw(rv);
+  }
 }
 
 nsresult
-XMLHttpRequestMainThread::OpenInternal(const nsACString& aMethod,
-                                       const nsACString& aUrl,
-                                       const Optional<bool>& aAsync,
-                                       const Optional<nsAString>& aUsername,
-                                       const Optional<nsAString>& aPassword)
-{
-  bool async = aAsync.WasPassed() ? aAsync.Value() : true;
-
+XMLHttpRequestMainThread::Open(const nsACString& aMethod,
+                               const nsACString& aUrl,
+                               bool aAsync,
+                               const nsAString& aUsername,
+                               const nsAString& aPassword) {
   // Gecko-specific
-  if (!async && !DontWarnAboutSyncXHR() && GetOwner() &&
+  if (!aAsync && !DontWarnAboutSyncXHR() && GetOwner() &&
       GetOwner()->GetExtantDoc()) {
     GetOwner()->GetExtantDoc()->WarnOnceAbout(nsIDocument::eSyncXMLHttpRequest);
   }
 
-  Telemetry::Accumulate(Telemetry::XMLHTTPREQUEST_ASYNC_OR_SYNC, async ? 0 : 1);
+  Telemetry::Accumulate(Telemetry::XMLHTTPREQUEST_ASYNC_OR_SYNC, aAsync ? 0 : 1);
 
   // Step 1
   nsCOMPtr<nsIDocument> responsibleDocument = GetDocumentIfCurrent();
@@ -1478,29 +1473,27 @@ XMLHttpRequestMainThread::OpenInternal(const nsACString& aMethod,
     return NS_ERROR_DOM_INVALID_STATE_ERR;
   }
 
-  // Step 7 is already done above.
-  // Note that the username and password are already passed in as null by Open()
-  // if the async parameter is omitted, so there's no need check again here.
+  // Step 7
+  // This is already handled by the other Open() method, which passes
+  // username and password in as NullStrings.
 
   // Step 8
-  if (aAsync.WasPassed()) {
-    nsAutoCString host;
-    parsedURL->GetHost(host);
-    if (!host.IsEmpty()) {
-      nsAutoCString userpass;
-      if (aUsername.WasPassed()) {
-        CopyUTF16toUTF8(aUsername.Value(), userpass);
-      }
-      userpass.AppendLiteral(":");
-      if (aPassword.WasPassed()) {
-        AppendUTF16toUTF8(aPassword.Value(), userpass);
-      }
-      parsedURL->SetUserPass(userpass);
+  nsAutoCString host;
+  parsedURL->GetHost(host);
+  if (!host.IsEmpty()) {
+    nsAutoCString userpass;
+    if (!aUsername.IsVoid()) {
+      CopyUTF16toUTF8(aUsername, userpass);
     }
+    userpass.AppendLiteral(":");
+    if (!aPassword.IsVoid()) {
+      AppendUTF16toUTF8(aPassword, userpass);
+    }
+    parsedURL->SetUserPass(userpass);
   }
 
   // Step 9
-  if (!async && HasOrHasHadOwner() && (mTimeoutMilliseconds ||
+  if (!aAsync && HasOrHasHadOwner() && (mTimeoutMilliseconds ||
        mResponseType != XMLHttpRequestResponseType::_empty)) {
     if (mTimeoutMilliseconds) {
       LogMessage("TimeoutSyncXHRWarning", GetOwner());
@@ -1519,7 +1512,7 @@ XMLHttpRequestMainThread::OpenInternal(const nsACString& aMethod,
   mFlagSend = false;
   mRequestMethod.Assign(method);
   mRequestURL = parsedURL;
-  mFlagSynchronous = !async;
+  mFlagSynchronous = !aAsync;
   mAuthorRequestHeaders.Clear();
   ResetResponse();
 
@@ -1528,11 +1521,11 @@ XMLHttpRequestMainThread::OpenInternal(const nsACString& aMethod,
   mFlagAborted = false;
   mFlagTimedOut = false;
 
-  // The channel should really be created on send(), but we have a chrome-only
-  // XHR.channel API which necessitates creating the channel now, while doing
-  // the rest of the channel-setup later at send-time.
-  rv = CreateChannel();
-  NS_ENSURE_SUCCESS(rv, rv);
+  // Per spec we should only create the channel on send(), but we have internal
+  // code that relies on the channel being created now, and that code is not
+  // always IsSystemXHR(). However, we're not supposed to throw channel-creation
+  // errors during open(), so we silently ignore those here.
+  CreateChannel();
 
   // Step 12
   if (mState != State::opened) {
@@ -1541,6 +1534,20 @@ XMLHttpRequestMainThread::OpenInternal(const nsACString& aMethod,
   }
 
   return NS_OK;
+}
+
+void
+XMLHttpRequestMainThread::SetOriginAttributes(const OriginAttributesDictionary& aAttrs)
+{
+  MOZ_ASSERT((mState == State::opened) && !mFlagSend);
+
+  GenericOriginAttributes attrs(aAttrs);
+  NeckoOriginAttributes neckoAttrs;
+  neckoAttrs.SetFromGenericAttributes(attrs);
+
+  nsCOMPtr<nsILoadInfo> loadInfo = mChannel->GetLoadInfo();
+  MOZ_ASSERT(loadInfo);
+  loadInfo->SetOriginAttributes(neckoAttrs);
 }
 
 void
@@ -1679,6 +1686,7 @@ XMLHttpRequestMainThread::OnDataAvailable(nsIRequest *request,
   MOZ_ASSERT(mContext.get() == ctxt,"start context different from OnDataAvailable context");
 
   mProgressSinceLastProgressEvent = true;
+  XMLHttpRequestBinding::ClearCachedResponseTextValue(this);
 
   bool cancelable = false;
   if ((mResponseType == XMLHttpRequestResponseType::Blob ||
@@ -1707,7 +1715,9 @@ XMLHttpRequestMainThread::OnDataAvailable(nsIRequest *request,
 
   mDataAvailable += totalRead;
 
-  ChangeState(State::loading);
+  if (mState == State::headers_received || mSendExtraLoadingEvents) {
+    ChangeState(State::loading);
+  }
 
   if (!mFlagSynchronous && !mProgressTimerIsActive) {
     StartProgressEventTimer();
@@ -1944,6 +1954,12 @@ XMLHttpRequestMainThread::OnStartRequest(nsIRequest *request, nsISupports *ctxt)
     nsCOMPtr<nsILoadGroup> loadGroup;
     channel->GetLoadGroup(getter_AddRefs(loadGroup));
 
+    // suppress <parsererror> nodes on XML document parse failure, but only
+    // for non-privileged code (including Web Extensions). See bug 289714.
+    if (!IsSystemXHR()) {
+      mResponseXML->SetSuppressParserErrorElement(true);
+    }
+
     rv = mResponseXML->StartDocumentLoad(kLoadAsData, channel, loadGroup,
                                          nullptr, getter_AddRefs(listener),
                                          !isCrossSite);
@@ -2064,6 +2080,10 @@ XMLHttpRequestMainThread::OnStopRequest(nsIRequest *request, nsISupports *ctxt, 
 
   mFlagSyncLooping = false;
 
+  // update our charset and decoder to match mResponseXML,
+  // before it is possibly nulled out
+  MatchCharsetAndDecoderToResponseDocument();
+
   if (NS_FAILED(status)) {
     // This can happen if the server is unreachable. Other possible
     // reasons are that the user leaves the page or hits the ESC key.
@@ -2104,6 +2124,7 @@ XMLHttpRequestMainThread::OnStopRequest(nsIRequest *request, nsISupports *ctxt, 
   // check here is that if there is no document element it is not
   // an XML document. We might need a fancier check...
   if (!mResponseXML->GetRootElement()) {
+    mErrorParsingXML = true;
     mResponseXML = nullptr;
   }
   ChangeStateToDone();
@@ -2115,6 +2136,17 @@ XMLHttpRequestMainThread::OnBodyParseEnd()
 {
   mFlagParseBody = false;
   ChangeStateToDone();
+}
+
+void
+XMLHttpRequestMainThread::MatchCharsetAndDecoderToResponseDocument()
+{
+  if (mResponseXML && mResponseCharset != mResponseXML->GetDocumentCharacterSet()) {
+    mResponseCharset = mResponseXML->GetDocumentCharacterSet();
+    TruncateResponseText();
+    mResponseBodyDecodedPos = 0;
+    mDecoder = EncodingUtils::DecoderForEncoding(mResponseCharset);
+  }
 }
 
 void
@@ -2195,7 +2227,11 @@ XMLHttpRequestMainThread::RequestBody<nsIDocument>::GetAsStream(
     if (!nsContentUtils::SerializeNodeToMarkup(mBody, true, serialized)) {
       return NS_ERROR_OUT_OF_MEMORY;
     }
-    NS_ConvertUTF16toUTF8 utf8Serialized(serialized);
+
+    nsAutoCString utf8Serialized;
+    if (!AppendUTF16toUTF8(serialized, utf8Serialized, fallible)) {
+      return NS_ERROR_OUT_OF_MEMORY;
+    }
 
     uint32_t written;
     rv = output->Write(utf8Serialized.get(), utf8Serialized.Length(), &written);
@@ -2234,7 +2270,11 @@ XMLHttpRequestMainThread::RequestBody<const nsAString>::GetAsStream(
   aContentType.AssignLiteral("text/plain");
   aCharset.AssignLiteral("UTF-8");
 
-  nsCString converted = NS_ConvertUTF16toUTF8(*mBody);
+  nsAutoCString converted;
+  if (!AppendUTF16toUTF8(*mBody, converted, fallible)) {
+    return NS_ERROR_OUT_OF_MEMORY;
+  }
+
   *aContentLength = converted.Length();
   nsresult rv = NS_NewCStringInputStream(aResult, converted);
   NS_ENSURE_SUCCESS(rv, rv);
@@ -2598,7 +2638,7 @@ XMLHttpRequestMainThread::InitiateFetch(nsIInputStream* aUploadStream,
 
     // Per spec, we throw on sync errors, but not async.
     if (mFlagSynchronous) {
-      return rv;
+      return NS_ERROR_DOM_NETWORK_ERR;
     }
   }
 
@@ -2690,18 +2730,24 @@ XMLHttpRequestMainThread::SendInternal(const RequestBodyBase* aBody)
 {
   NS_ENSURE_TRUE(mPrincipal, NS_ERROR_NOT_INITIALIZED);
 
-  PopulateNetworkInterfaceId();
+  // Steps 1 and 2
+  if (mState != State::opened || mFlagSend) {
+    return NS_ERROR_DOM_INVALID_STATE_ERR;
+  }
 
   nsresult rv = CheckInnerWindowCorrectness();
   if (NS_FAILED(rv)) {
     return NS_ERROR_DOM_INVALID_STATE_ERR;
   }
 
-  if (mState != State::opened || // Step 1
-      mFlagSend || // Step 2
-      !mChannel) { // Gecko-specific
-    return NS_ERROR_DOM_INVALID_STATE_ERR;
+  // If open() failed to create the channel, then throw a network error
+  // as per spec. We really should create the channel here in send(), but
+  // we have internal code relying on the channel being created in open().
+  if (!mChannel) {
+    return NS_ERROR_DOM_NETWORK_ERR;
   }
+
+  PopulateNetworkInterfaceId();
 
   // XXX We should probably send a warning to the JS console
   //     if there are no event listeners set and we are doing
@@ -2859,7 +2905,7 @@ XMLHttpRequestMainThread::SendInternal(const RequestBodyBase* aBody)
   if (!mChannel) {
     // Per spec, silently fail on async request failures; throw for sync.
     if (mFlagSynchronous) {
-      return NS_ERROR_FAILURE;
+      return NS_ERROR_DOM_NETWORK_ERR;
     } else {
       // Defer the actual sending of async events just in case listeners
       // are attached after the send() method is called.
@@ -3489,6 +3535,13 @@ XMLHttpRequestMainThread::ShouldBlockAuthPrompt()
   return false;
 }
 
+void
+XMLHttpRequestMainThread::TruncateResponseText()
+{
+  mResponseText.Truncate();
+  XMLHttpRequestBinding::ClearCachedResponseTextValue(this);
+}
+
 NS_IMPL_ISUPPORTS(XMLHttpRequestMainThread::nsHeaderVisitor, nsIHttpHeaderVisitor)
 
 NS_IMETHODIMP XMLHttpRequestMainThread::
@@ -3919,4 +3972,4 @@ RequestHeaders::CharsetIterator::Next()
 }
 
 } // dom namespace
-} // mozilla namespaceo
+} // mozilla namespace

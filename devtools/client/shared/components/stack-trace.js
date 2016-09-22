@@ -6,7 +6,7 @@
 
 const React = require("devtools/client/shared/vendor/react");
 const { DOM: dom, createClass, createFactory, PropTypes } = React;
-const { LocalizationHelper } = require("devtools/client/shared/l10n");
+const { LocalizationHelper } = require("devtools/shared/l10n");
 const Frame = createFactory(require("./frame"));
 
 const l10n = new LocalizationHelper("devtools/locale/webconsole.properties");
@@ -42,12 +42,12 @@ const StackTrace = createClass({
     let frames = [];
     stacktrace.forEach(s => {
       if (s.asyncCause) {
-        frames.push(AsyncFrame({
+        frames.push("\t", AsyncFrame({
           asyncCause: s.asyncCause
-        }));
+        }), "\n");
       }
 
-      frames.push(Frame({
+      frames.push("\t", Frame({
         frame: {
           functionDisplayName: s.functionName,
           source: s.filename.split(" -> ").pop(),
@@ -58,7 +58,7 @@ const StackTrace = createClass({
         showAnonymousFunctionName: true,
         showFullSourceUrl: true,
         onClick: onViewSourceInDebugger
-      }));
+      }), "\n");
     });
 
     return dom.div({ className: "stack-trace" }, frames);

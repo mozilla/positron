@@ -46,7 +46,7 @@ _SUBDIR_CONFIG_ARGS="$ac_configure_args"
 dnl Set the version number of the libs included with mozilla
 dnl ========================================================
 MOZJPEG=62
-MOZPNG=10624
+MOZPNG=10625
 NSPR_VERSION=4
 NSPR_MINVER=4.12
 NSS_VERSION=3
@@ -240,9 +240,6 @@ if test -n "$MOZ_WINCONSOLE"; then
 fi
 
 MOZ_TOOL_VARIABLES
-
-AC_PROG_CPP
-AC_PROG_CXXCPP
 
 dnl ========================================================
 dnl Special win32 checks
@@ -1088,6 +1085,10 @@ case "$target" in
             dnl MSVC allows the use of intrinsics without any flags
             dnl and doesn't have a separate arch for SSSE3
             SSSE3_FLAGS="-arch:SSE2"
+            dnl clang-cl, however, requires the appropriate flags.
+            if test -n "$CLANG_CL"; then
+                SSSE3_FLAGS="-mssse3"
+            fi
         fi
         dnl VS2013+ requires -FS when parallel building by make -jN.
         dnl If nothing, compiler sometimes causes C1041 error.
@@ -1142,6 +1143,10 @@ case "$target" in
             # use such pragmas, so just ignore them.
             CFLAGS="$CFLAGS -Wno-unknown-pragmas"
             CXXFLAGS="$CXXFLAGS -Wno-unknown-pragmas"
+            # We get errors about various #pragma intrinsic directives from
+            # clang-cl, and we don't need to hear about those.
+            CFLAGS="$CFLAGS -Wno-ignored-pragmas"
+            CXXFLAGS="$CXXFLAGS -Wno-ignored-pragmas"
             # clang-cl's Intrin.h marks things like _ReadWriteBarrier
             # as __attribute((__deprecated__)).  This is nice to know,
             # but since we don't get the equivalent warning from MSVC,
@@ -1455,8 +1460,6 @@ if test "x$enable_dtrace" = "xyes"; then
 fi
 AC_SUBST(HAVE_DTRACE)
 
-MOZ_LINUX_PERF_EVENT
-
 dnl Checks for libraries.
 dnl ========================================================
 AC_CHECK_LIB(c_r, gethostbyname_r)
@@ -1685,6 +1688,16 @@ if test "$ac_cv_clock_monotonic" != "no"; then
     AC_DEFINE(HAVE_CLOCK_MONOTONIC)
     AC_SUBST(HAVE_CLOCK_MONOTONIC)
     AC_SUBST_LIST(REALTIME_LIBS)
+fi
+
+AC_CACHE_CHECK(for pthread_cond_timedwait_monotonic_np,
+               ac_cv_pthread_cond_timedwait_monotonic_np,
+               AC_TRY_LINK([#include <pthread.h>],
+                           [pthread_cond_timedwait_monotonic_np(0, 0, 0);],
+                           ac_cv_pthread_cond_timewait_monotonic_np=yes,
+                           ac_cv_pthread_cond_timewait_monotonic_np=no))
+if test "$ac_cv_pthread_cond_timewait_monotonic_np" != "no"; then
+    AC_DEFINE(HAVE_PTHREAD_COND_TIMEDWAIT_MONOTONIC)
 fi
 
 dnl check for wcrtomb/mbrtowc
@@ -2325,7 +2338,6 @@ LIBJPEG_TURBO_AS=
 LIBJPEG_TURBO_ASFLAGS=
 MOZ_PREF_EXTENSIONS=1
 MOZ_REFLOW_PERF=
-MOZ_SAFE_BROWSING=
 MOZ_SPELLCHECK=1
 MOZ_TOOLKIT_SEARCH=1
 MOZ_UI_LOCALE=en-US
@@ -2340,7 +2352,6 @@ MOZ_EXCLUDE_HYPHENATION_DICTIONARIES=
 MOZ_INSTALL_TRACKING=
 ACCESSIBILITY=1
 MOZ_TIME_MANAGER=
-MOZ_SIMPLEPUSH=
 MOZ_AUDIO_CHANNEL_MANAGER=
 MOZ_CONTENT_SANDBOX=
 MOZ_GMP_SANDBOX=
@@ -2481,7 +2492,7 @@ dnl ========================================================
 if test -z "$gonkdir" ; then
     case "$MOZ_BUILD_APP" in
     mobile/android)
-        MOZ_ANDROID_SDK(23, 23.0.3)
+        MOZ_ANDROID_SDK(23, 23.0.3 23.0.1)
         ;;
     esac
 fi
@@ -4291,24 +4302,8 @@ fi
 AC_SUBST(MOZ_SYSTEM_SQLITE)
 
 dnl ========================================================
-dnl = Enable safe browsing (anti-phishing)
-dnl ========================================================
-MOZ_ARG_ENABLE_BOOL(safe-browsing,
-[  --enable-safe-browsing  Enable safe browsing (anti-phishing) implementation],
-    MOZ_SAFE_BROWSING=1,
-    MOZ_SAFE_BROWSING= )
-if test -n "$MOZ_SAFE_BROWSING"; then
-    AC_DEFINE(MOZ_SAFE_BROWSING)
-fi
-AC_SUBST(MOZ_SAFE_BROWSING)
-
-dnl ========================================================
 dnl = Enable url-classifier
 dnl ========================================================
-dnl Implicitly enabled by default if building with safe-browsing
-if test -n "$MOZ_SAFE_BROWSING"; then
-    MOZ_URL_CLASSIFIER=1
-fi
 MOZ_ARG_ENABLE_BOOL(url-classifier,
 [  --enable-url-classifier Enable url classifier module],
     MOZ_URL_CLASSIFIER=1,
@@ -4895,15 +4890,6 @@ fi
 AC_SUBST(MOZ_B2G_CAMERA)
 
 dnl ========================================================
-dnl = Enable Support for SimplePush (Gonk usually)
-dnl   This will disable the Push API.
-dnl ========================================================
-if test -n "$MOZ_SIMPLEPUSH"; then
-    AC_DEFINE(MOZ_SIMPLEPUSH)
-fi
-AC_SUBST(MOZ_SIMPLEPUSH)
-
-dnl ========================================================
 dnl = Enable Support for AudioChannelManager API
 dnl ========================================================
 if test -n "$MOZ_AUDIO_CHANNEL_MANAGER"; then
@@ -5174,46 +5160,6 @@ fi
 
 AC_SUBST_LIST(GLIB_GMODULE_LIBS)
 
-dnl ========================================================
-dnl Graphics checks.
-dnl ========================================================
-
-if test "${OS_TARGET}" = "WINNT" -o \
-        "${OS_ARCH}" = "Darwin" -o \
-        "${MOZ_WIDGET_TOOLKIT}" = "android" -o \
-        "${MOZ_WIDGET_TOOLKIT}" = "gonk" -o \
-        "${MOZ_WIDGET_TOOLKIT}" = "gtk2" -o \
-        "${MOZ_WIDGET_TOOLKIT}" = "gtk3"; then
-    case "${CPU_ARCH}" in
-    x86|x86_64|arm)
-        MOZ_ENABLE_SKIA=1
-        ;;
-    *)
-        MOZ_ENABLE_SKIA=
-        ;;
-    esac
-else
-MOZ_ENABLE_SKIA=
-fi
-
-MOZ_ARG_ENABLE_BOOL(skia,
-[  --enable-skia   Enable use of Skia],
-MOZ_ENABLE_SKIA=1,
-MOZ_ENABLE_SKIA=)
-
-dnl Skia GPU support may not reliably build on certain *BSDs (see bug 1234494).
-if test "${OS_TARGET}" = "OpenBSD" -o \
-        "${OS_TARGET}" = "NetBSD"; then \
-    MOZ_DISABLE_SKIA_GPU=1
-else
-    MOZ_DISABLE_SKIA_GPU=
-fi
-
-MOZ_ARG_DISABLE_BOOL(skia-gpu,
-[  --disable-skia-gpu  Disable use of Skia-GPU],
-MOZ_DISABLE_SKIA_GPU=1,
-MOZ_DISABLE_SKIA_GPU=)
-
 if test "$USE_FC_FREETYPE"; then
     if test "$COMPILE_ENVIRONMENT"; then
         dnl ========================================================
@@ -5414,27 +5360,6 @@ AC_SUBST_LIST(MOZ_CAIRO_CFLAGS)
 AC_SUBST_LIST(MOZ_CAIRO_LIBS)
 AC_SUBST_LIST(MOZ_CAIRO_OSLIBS)
 AC_SUBST(MOZ_TREE_PIXMAN)
-
-dnl ========================================================
-dnl Skia
-dnl ========================================================
-if test "$MOZ_ENABLE_SKIA"; then
-  SKIA_INCLUDES="/gfx/skia /gfx/skia/skia/include/config /gfx/skia/skia/include/core"
-  AC_DEFINE(MOZ_ENABLE_SKIA)
-  AC_DEFINE(USE_SKIA)
-  if test "${MOZ_WIDGET_TOOLKIT}" = "android" -o x"$MOZ_WIDGET_TOOLKIT" = x"gonk"; then
-    AC_DEFINE(SK_BUILD_FOR_ANDROID_NDK)
-  fi
-
-  if test "${CPU_ARCH}" != "ppc" -a "${CPU_ARCH}" != "ppc64" -a "${CPU_ARCH}" != "sparc" -a "${CPU_ARCH}" != "sparc64" -a -z "$MOZ_DISABLE_SKIA_GPU" ; then
-    SKIA_INCLUDES="$SKIA_INCLUDES /gfx/skia/skia/include/gpu /gfx/skia/skia/include/utils"
-    MOZ_ENABLE_SKIA_GPU=1
-    AC_DEFINE(USE_SKIA_GPU)
-    AC_SUBST(MOZ_ENABLE_SKIA_GPU)
-  fi
-fi
-AC_SUBST(MOZ_ENABLE_SKIA)
-AC_SUBST_LIST(SKIA_INCLUDES)
 
 dnl ========================================================
 dnl disable xul

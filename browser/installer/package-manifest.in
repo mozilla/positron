@@ -141,13 +141,6 @@
 @RESPATH@/run-mozilla.sh
 #endif
 #endif
-#ifdef XP_WIN
-#ifdef _AMD64_
-@BINPATH@/@DLL_PREFIX@qipcap64@DLL_SUFFIX@
-#else
-@BINPATH@/@DLL_PREFIX@qipcap@DLL_SUFFIX@
-#endif
-#endif
 
 ; [Components]
 #ifdef MOZ_ARTIFACT_BUILDS
@@ -197,7 +190,6 @@
 @RESPATH@/components/dom_bluetooth.xpt
 #endif
 @RESPATH@/components/dom_canvas.xpt
-@RESPATH@/components/dom_alarm.xpt
 @RESPATH@/components/dom_core.xpt
 @RESPATH@/components/dom_css.xpt
 @RESPATH@/components/dom_events.xpt
@@ -271,6 +263,9 @@
 @RESPATH@/browser/components/migration.xpt
 @RESPATH@/components/mimetype.xpt
 @RESPATH@/components/mozfind.xpt
+#ifdef ENABLE_INTL_API
+@RESPATH@/components/mozintl.xpt
+#endif
 @RESPATH@/components/necko_about.xpt
 @RESPATH@/components/necko_cache.xpt
 @RESPATH@/components/necko_cache2.xpt
@@ -366,6 +361,8 @@
 @RESPATH@/components/FeedProcessor.js
 @RESPATH@/components/PackagedAppUtils.js
 @RESPATH@/components/PackagedAppUtils.manifest
+@RESPATH@/components/WellKnownOpportunisticUtils.js
+@RESPATH@/components/WellKnownOpportunisticUtils.manifest
 #ifndef XP_MACOSX
 ; OSX uses native platform impl.  Windows, Linux, and Android uses fallback JS impl.
 @BINPATH@/components/nsDNSServiceDiscovery.manifest
@@ -535,8 +532,6 @@
 @RESPATH@/components/PhoneNumberService.manifest
 @RESPATH@/components/NotificationStorage.js
 @RESPATH@/components/NotificationStorage.manifest
-@RESPATH@/components/AlarmsManager.js
-@RESPATH@/components/AlarmsManager.manifest
 @RESPATH@/components/Push.js
 @RESPATH@/components/Push.manifest
 @RESPATH@/components/PushComponents.js
@@ -596,13 +591,11 @@
 @RESPATH@/modules/*
 
 ; Safe Browsing
-#ifdef MOZ_URL_CLASSIFIER
 @RESPATH@/components/nsURLClassifier.manifest
 @RESPATH@/components/nsUrlClassifierHashCompleter.js
 @RESPATH@/components/nsUrlClassifierListManager.js
 @RESPATH@/components/nsUrlClassifierLib.js
 @RESPATH@/components/url-classifier.xpt
-#endif
 
 ; Private Browsing
 @RESPATH@/components/privatebrowsing.xpt

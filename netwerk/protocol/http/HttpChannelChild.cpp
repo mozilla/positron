@@ -770,8 +770,6 @@ HttpChannelChild::DoOnProgress(nsIRequest* aRequest, int64_t progress, int64_t p
     // OnProgress
     //
     if (progress > 0) {
-      MOZ_ASSERT((progressMax == -1) || (progress <= progressMax),
-                 "unexpected progress values");
       mProgressSink->OnProgress(aRequest, nullptr, progress, progressMax);
     }
   }
@@ -859,10 +857,7 @@ HttpChannelChild::OnStopRequest(const nsresult& channelStatus,
   LOG(("HttpChannelChild::OnStopRequest [this=%p status=%x]\n",
        this, channelStatus));
 
-  if (mUploadStream) {
-    mUploadStream->Close();
-    mUploadStream = nullptr;
-  }
+  mUploadStream = nullptr;
 
   if (mDivertingToParent) {
     MOZ_RELEASE_ASSERT(!mFlushedForDiversion,
@@ -1016,8 +1011,6 @@ HttpChannelChild::OnProgress(const int64_t& progress,
   if (mProgressSink && NS_SUCCEEDED(mStatus) && mIsPending)
   {
     if (progress > 0) {
-      MOZ_ASSERT((progressMax == -1) || (progress <= progressMax),
-                 "unexpected progress values");
       mProgressSink->OnProgress(this, nullptr, progress, progressMax);
     }
   }
@@ -1997,12 +1990,16 @@ HttpChannelChild::ContinueAsyncOpen()
     return NS_ERROR_FAILURE;
   }
 
+  ContentChild* cc = static_cast<ContentChild*>(gNeckoChild->Manager());
+  if (cc->IsShuttingDown()) {
+    return NS_ERROR_FAILURE;
+  }
+
   // The socket transport in the chrome process now holds a logical ref to us
   // until OnStopRequest, or we do a redirect, or we hit an IPDL error.
   AddIPDLReference();
 
-  PBrowserOrId browser = static_cast<ContentChild*>(gNeckoChild->Manager())
-                         ->GetBrowserOrId(tabChild);
+  PBrowserOrId browser = cc->GetBrowserOrId(tabChild);
   if (!gNeckoChild->SendPHttpChannelConstructor(this, browser,
                                                 IPC::SerializedLoadContext(this),
                                                 openArgs)) {

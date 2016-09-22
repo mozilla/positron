@@ -40,9 +40,6 @@ DIRS += [
     'standalone',
 ]
 
-if CONFIG['MOZ_RAW']:
-    DIRS += ['raw']
-
 if CONFIG['MOZ_DIRECTSHOW']:
     DIRS += ['directshow']
 
@@ -124,6 +121,7 @@ EXPORTS += [
     'MediaRecorder.h',
     'MediaResource.h',
     'MediaResourceCallback.h',
+    'MediaResult.h',
     'MediaSegment.h',
     'MediaStatistics.h',
     'MediaStreamGraph.h',
